@@ -164,13 +164,15 @@ export async function setPublic(id: string, isPublic: boolean): Promise<SavedMet
 export async function loadDesign(
   store: DesignStore,
   id: string,
-): Promise<{ title: string; isPublic: boolean; ownerIsMe: boolean }> {
+): Promise<{ title: string; isPublic: boolean; ownerIsMe: boolean; templateId: string; templateVersion: number }> {
   const data = (await expectOk(await fetch(`${API}/designs/${id}`, { headers: authHeaders(false) }))) as {
     title: string;
     palette: string[];
     cellsGzB64: string;
     isPublic: boolean;
     ownerId: string | null;
+    templateId: string;
+    templateVersion: number;
   };
   const cells = await gunzip(fromB64(data.cellsGzB64));
   store.setPalette(data.palette.slice(0, 8));
@@ -180,7 +182,27 @@ export async function loadDesign(
     const me = (await expectOk(await fetch(`${API}/me`, { headers: authHeaders(false) }))) as { id: string };
     ownerIsMe = me.id === data.ownerId;
   }
-  return { title: data.title, isPublic: data.isPublic, ownerIsMe };
+  return {
+    title: data.title,
+    isPublic: data.isPublic,
+    ownerIsMe,
+    templateId: data.templateId,
+    templateVersion: data.templateVersion,
+  };
+}
+
+/** Fetch a design's template id/version without loading cells (for share-link boot). */
+export async function fetchDesignTemplate(id: string): Promise<{ templateId: string; templateVersion: number }> {
+  const data = (await expectOk(await fetch(`${API}/designs/${id}`, { headers: authHeaders(false) }))) as {
+    templateId: string;
+    templateVersion: number;
+  };
+  return { templateId: data.templateId, templateVersion: data.templateVersion };
+}
+
+/** Canonical shareable link for a design: https://host/d/:id */
+export function shareUrl(id: string): string {
+  return `${location.origin}/d/${id}`;
 }
 
 export async function listGallery(): Promise<GalleryItem[]> {

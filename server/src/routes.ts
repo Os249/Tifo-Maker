@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
 import rateLimit from '@fastify/rate-limit';
 import helmet from '@fastify/helmet';
@@ -343,7 +345,56 @@ export async function buildApp(
   // relative `/api/...` calls just work in production (no proxy, no CORS). A
   // catch-all returns index.html for client-side routes; unknown /api paths 404.
   if (options.staticDir) {
-    await app.register(fastifyStatic, { root: options.staticDir, wildcard: false });
+    const staticDir = options.staticDir;
+    const indexHtml = readFileSync(join(staticDir, 'index.html'), 'utf8');
+    const origin = (req: FastifyRequest): string => {
+      const proto = (req.headers['x-forwarded-proto'] as string) || 'https';
+      const host = req.headers.host ?? 'tifomaker.org';
+      return `${proto}://${host}`;
+    };
+    const esc = (s: string): string =>
+      s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+    // Share links: /d/:id. Inject Open Graph + Twitter Card tags so a pasted
+    // link shows a rich preview (title, author, the stadium thumbnail) in
+    // WhatsApp, Twitter/X, Discord, Slack, etc. — before any JS runs. Humans
+    // get the same HTML and the SPA boots and loads the design normally.
+    app.get('/d/:id', async (req, reply) => {
+      const { id } = req.params as { id: string };
+      const rec = await repo.get(id).catch(() => null);
+      const base = origin(req);
+      let title = 'Tifo Maker';
+      let description = 'Design a 60,000-seat stadium tifo and share it.';
+      let image = `${base}/og-default.png`;
+      // Only expose metadata for PUBLIC designs (private ones stay unlisted).
+      if (rec && rec.isPublic) {
+        title = `${rec.title} — Tifo Maker`;
+        description = 'A stadium tifo on Tifo Maker. Open it to remix.';
+        const thumb = await repo.getThumbnail(rec.id).catch(() => null);
+        if (thumb) image = `${base}/api/designs/${rec.id}/thumbnail.png`;
+      }
+      const meta = [
+        `<title>${esc(title)}</title>`,
+        `<meta name="description" content="${esc(description)}" />`,
+        `<meta property="og:type" content="website" />`,
+        `<meta property="og:site_name" content="Tifo Maker" />`,
+        `<meta property="og:title" content="${esc(title)}" />`,
+        `<meta property="og:description" content="${esc(description)}" />`,
+        `<meta property="og:image" content="${esc(image)}" />`,
+        `<meta property="og:url" content="${esc(base)}/d/${esc(id)}" />`,
+        `<meta name="twitter:card" content="summary_large_image" />`,
+        `<meta name="twitter:title" content="${esc(title)}" />`,
+        `<meta name="twitter:description" content="${esc(description)}" />`,
+        `<meta name="twitter:image" content="${esc(image)}" />`,
+      ].join('\n    ');
+      // Inject after <head>, and drop the SPA's default <title> to avoid a dupe.
+      const html = indexHtml
+        .replace(/<title>.*?<\/title>/i, '')
+        .replace(/<head>/i, `<head>\n    ${meta}`);
+      return reply.type('text/html').send(html);
+    });
+
+    await app.register(fastifyStatic, { root: staticDir, wildcard: false });
     app.setNotFoundHandler((req, reply) => {
       if (req.url.startsWith('/api/')) {
         return reply.code(404).send({ error: 'not found' });

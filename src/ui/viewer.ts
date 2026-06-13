@@ -20,6 +20,8 @@ export interface ViewerContext {
   store: DesignStore;
   templateName: string;
   title: string;
+  /** When viewing a shared/published design, its id (for the share link). */
+  designId?: string;
 }
 
 
@@ -123,7 +125,7 @@ export async function mountViewer(ctx: ViewerContext): Promise<void> {
   });
 
   document.getElementById('v-share')!.addEventListener('click', async () => {
-    const url = location.href;
+    const url = ctx.designId ? `${location.origin}/d/${ctx.designId}` : location.href;
     if (navigator.share) {
       await navigator.share({ title: ctx.title, url }).catch(() => {});
     } else {

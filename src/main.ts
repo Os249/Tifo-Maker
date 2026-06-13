@@ -1,7 +1,7 @@
 import '@tabler/icons-webfont/dist/tabler-icons.min.css';
 import { installTheme } from './ui/theme';
 import { generateSeatMapAsync } from './workers/client';
-import { DEFAULT_PALETTE, DEFAULT_TEMPLATE, TEMPLATES } from './core/template';
+import { DEFAULT_PALETTE, DEFAULT_TEMPLATE, PALETTE_PRESETS, TEMPLATES } from './core/template';
 import { PATTERN_PRESETS } from './core/patterns';
 import { DesignStore } from './core/design';
 import { ObjectLayer } from './core/objects';
@@ -9,6 +9,7 @@ import { Editor } from './render/editor';
 import type { Preview3D } from './render/preview3d';
 import { mountToolbar } from './ui/toolbar';
 import { mountViewer } from './ui/viewer';
+import { hasOnboarded } from './ui/onboarding';
 
 /** Phones get the viewer; tablet/desktop get the editor. ?editor=1 forces the editor. */
 const PHONE_MAX = 768;
@@ -17,10 +18,32 @@ function isPhone(): boolean {
   return !forced && window.matchMedia(`(max-width: ${PHONE_MAX - 1}px)`).matches;
 }
 
+/** Parse a /d/:id share path. Returns the design id, or null. */
+function sharedDesignId(): string | null {
+  const m = location.pathname.match(/^\/d\/([A-Za-z0-9-]+)\/?$/);
+  return m ? m[1] : null;
+}
+
 async function main(): Promise<void> {
   installTheme();
-  const wanted = new URLSearchParams(location.search).get('template');
-  const template = TEMPLATES.find((t) => t.id === wanted) ?? DEFAULT_TEMPLATE;
+  const sharedId = sharedDesignId();
+
+  // A shared design may live on any template, so resolve its template BEFORE
+  // generating the seat map (the map must match the saved cell count).
+  let template = DEFAULT_TEMPLATE;
+  if (sharedId) {
+    try {
+      const { fetchDesignTemplate } = await import('./net/api');
+      const ref = await fetchDesignTemplate(sharedId);
+      template = TEMPLATES.find((t) => t.id === ref.templateId) ?? DEFAULT_TEMPLATE;
+    } catch {
+      // Fall back to the default template; the load below will surface errors.
+    }
+  } else {
+    const wanted = new URLSearchParams(location.search).get('template');
+    template = TEMPLATES.find((t) => t.id === wanted) ?? DEFAULT_TEMPLATE;
+  }
+
   const t0 = performance.now();
   // Off-thread generation keeps the UI responsive even for the 76k oval.
   const map = await generateSeatMapAsync(template.id);
@@ -29,9 +52,21 @@ async function main(): Promise<void> {
   // Phone branch: build the seeded store and hand off to the read-only viewer.
   if (isPhone()) {
     const vstore = new DesignStore(map, DEFAULT_PALETTE.slice());
-    const vseed = PATTERN_PRESETS.find((p) => p.id === 'border')!.cellAt(map);
-    for (let i = 0; i < map.count; i++) vstore.cells[i] = vseed(i);
-    await mountViewer({ map, store: vstore, templateName: template.name, title: 'Untitled tifo' });
+    let vtitle = 'Untitled tifo';
+    if (sharedId) {
+      try {
+        const { loadDesign } = await import('./net/api');
+        const r = await loadDesign(vstore, sharedId);
+        vtitle = r.title;
+      } catch {
+        const vseed = PATTERN_PRESETS.find((p) => p.id === 'border')!.cellAt(map);
+        for (let i = 0; i < map.count; i++) vstore.cells[i] = vseed(i);
+      }
+    } else {
+      const vseed = PATTERN_PRESETS.find((p) => p.id === 'border')!.cellAt(map);
+      for (let i = 0; i < map.count; i++) vstore.cells[i] = vseed(i);
+    }
+    await mountViewer({ map, store: vstore, templateName: template.name, title: vtitle, designId: sharedId ?? undefined });
     return;
   }
 
@@ -50,10 +85,24 @@ async function main(): Promise<void> {
 
   const store = new DesignStore(map, DEFAULT_PALETTE.slice());
 
-  // Seed a starter design so the canvas never opens blank — the border preset
-  // is template-agnostic (it derives each tier's edge rows from the map).
-  const seed = PATTERN_PRESETS.find((p) => p.id === 'border')!.cellAt(map);
-  for (let i = 0; i < map.count; i++) store.cells[i] = seed(i);
+  // Either load a shared design, or seed a starter so the canvas never opens
+  // blank (the border preset is template-agnostic — derives tier edges from the map).
+  let sharedTitle: string | null = null;
+  let sharedLoaded = false;
+  if (sharedId) {
+    try {
+      const { loadDesign } = await import('./net/api');
+      const r = await loadDesign(store, sharedId);
+      sharedTitle = r.title;
+      sharedLoaded = true;
+    } catch {
+      sharedLoaded = false;
+    }
+  }
+  if (!sharedLoaded) {
+    const seed = PATTERN_PRESETS.find((p) => p.id === 'border')!.cellAt(map);
+    for (let i = 0; i < map.count; i++) store.cells[i] = seed(i);
+  }
 
   const host = document.getElementById('canvas-host')!;
   const editor = await Editor.create(host, map, store);
@@ -114,6 +163,33 @@ async function main(): Promise<void> {
 
   const stat = document.getElementById('stat')!;
   stat.textContent = `${template.name} · ${map.count.toLocaleString()} seats · map generated in ${genMs.toFixed(0)} ms`;
+
+  // If we loaded a shared design, reflect its title and repaint the editor.
+  if (sharedLoaded && sharedTitle) {
+    const docTitle = document.getElementById('doc-title') as HTMLInputElement | null;
+    if (docTitle) docTitle.value = sharedTitle;
+    editor.rebuildPalette();
+    editor.repaintAll();
+  }
+
+  // First-run onboarding: only for a fresh visitor on a normal boot (never via
+  // a share link — those visitors already have context). The quick-start applies
+  // a palette + pattern so the first thing they see is their own tifo forming.
+  if (!sharedId && !hasOnboarded()) {
+    const { openOnboarding } = await import('./ui/onboarding');
+    const choice = await openOnboarding(PATTERN_PRESETS);
+    if (choice) {
+      const palette = PALETTE_PRESETS[choice.paletteName];
+      if (palette) store.setPalette(palette.slice());
+      const pattern = PATTERN_PRESETS.find((p) => p.id === choice.patternId);
+      if (pattern) store.transform(pattern.cellAt(map));
+      editor.rebuildPalette();
+      editor.repaintAll();
+      // Reflect the chosen palette in the dropdown so the UI stays consistent.
+      const presetSel = document.getElementById('preset') as HTMLSelectElement | null;
+      if (presetSel) presetSel.value = choice.paletteName;
+    }
+  }
 
   window.addEventListener('keydown', (e) => {
     const tag = (e.target as HTMLElement | null)?.tagName;
