@@ -8,9 +8,9 @@ import { renderTextCanvas, TIFO_FONTS, type RenderedText } from '../core/text';
 import type { ObjectLayer } from '../core/objects';
 import { MIN_LEGIBLE_RUN, findFragileSeats } from '../core/analysis';
 import { RevealPlayer, REVEAL_PRESETS, type RevealId } from '../core/reveal';
-import { isSignedIn, loadDesign, login, register, saveDesign, setPublic } from '../net/api';
+import { isSignedIn, loadDesign, saveDesign, setPublic } from '../net/api';
+import { openAuthModal } from './authModal';
 import { openGallery } from './gallery';
-import { DEFAULT_TEMPLATE } from '../core/template';
 import { EDITOR_UNITS } from '../core/seatmap';
 
 /**
@@ -25,6 +25,7 @@ export function mountToolbar(
   store: DesignStore,
   map: SeatMap,
   objects: ObjectLayer,
+  getPreview?: () => { applyReveal(v: ((seat: number) => number) | null): void } | null,
 ): void {
   const $ = <T extends HTMLElement>(sel: string): T => {
     const el = root.querySelector<T>(sel);
@@ -453,42 +454,32 @@ export function mountToolbar(
 
   // Account + persistence (run `npm run server` alongside `npm run dev`).
   let designId: string | null = null;
-  let username: string | null = null;
   const publicChk = $('#public') as unknown as HTMLInputElement;
   const signinBtn = $('#signin') as unknown as HTMLButtonElement;
 
-  signinBtn.addEventListener('click', async () => {
-    const name = window.prompt('Username (3-24 chars, letters/digits/_)');
-    if (!name) return;
-    const pass = window.prompt('Password (8+ chars)');
-    if (!pass) return;
-    try {
-      username = await login(name.trim(), pass);
-    } catch {
-      if (!window.confirm('No account with those credentials. Create it?')) return;
-      try {
-        username = await register(name.trim(), pass);
-      } catch (err) {
-        message.textContent = `sign-in failed: ${(err as Error).message}`;
-        return;
-      }
-    }
-    signinBtn.textContent = username;
+  const reflectSignedIn = (name: string): void => {
+    signinBtn.textContent = name;
     const avatar = document.getElementById('avatar');
-    if (avatar && username) avatar.textContent = username[0].toUpperCase();
-    message.textContent = `signed in as ${username} (token is in-memory; refresh signs you out)`;
+    if (avatar) avatar.textContent = name[0].toUpperCase();
+    message.textContent = `signed in as ${name}`;
+  };
+
+  signinBtn.addEventListener('click', async () => {
+    const name = await openAuthModal();
+    if (name) reflectSignedIn(name);
   });
 
   const saveBtn = $('#save') as unknown as HTMLButtonElement;
   saveBtn.addEventListener('click', async () => {
     if (!isSignedIn()) {
-      message.textContent = 'sign in first - designs belong to accounts';
-      return;
+      const name = await openAuthModal();
+      if (!name) return; // user dismissed — nothing to save to
+      reflectSignedIn(name);
     }
     saveBtn.disabled = true;
     try {
       const title = designId ? '' : (docTitle.value.trim() || 'Untitled tifo');
-      const meta = await saveDesign(store, map, DEFAULT_TEMPLATE.id, DEFAULT_TEMPLATE.version, title, designId);
+      const meta = await saveDesign(store, map, map.templateRef.id, map.templateRef.version, title, designId);
       designId = meta.id ?? designId;
       if (designId && publicChk.checked !== meta.isPublic) {
         await setPublic(designId, publicChk.checked);
@@ -800,7 +791,10 @@ export function mountToolbar(
   const durOut = $('#reveal-dur-out');
 
   const player = new RevealPlayer(map, revealSel.value as RevealId, (clock, playing) => {
-    editor.applyReveal(clock >= 1 ? null : (seat) => player.visibilityAt(seat));
+    const vis = clock >= 1 ? null : (seat: number) => player.visibilityAt(seat);
+    editor.applyReveal(vis);
+    // Drive the 3D stadium too, so the reveal plays in whichever view is open.
+    getPreview?.()?.applyReveal(vis);
     scrub.value = String(Math.round(clock * 100));
     playBtn.innerHTML = playing
       ? '<i class="ti ti-player-pause"></i> Pause'
@@ -812,6 +806,7 @@ export function mountToolbar(
   editor.onEditWhileRevealed = () => {
     player.reset();
     editor.applyReveal(null);
+    getPreview?.()?.applyReveal(null);
     scrub.value = '0';
   };
 
@@ -826,6 +821,7 @@ export function mountToolbar(
   $('#reveal-reset').addEventListener('click', () => {
     player.reset();
     editor.applyReveal(null);
+    getPreview?.()?.applyReveal(null);
   });
   scrub.addEventListener('input', () => {
     if (player.isPlaying) player.pause();

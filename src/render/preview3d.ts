@@ -110,6 +110,30 @@ export class Preview3D {
     this.seats.instanceColor!.needsUpdate = true;
   }
 
+  /**
+   * Apply per-seat reveal visibility (0 = card down/dark, 1 = up/full), lerping
+   * each card toward the dark empty color. Pass null to restore the full design.
+   * Mirrors Editor.applyReveal so a reveal plays identically in 2D and 3D.
+   */
+  applyReveal(visibility: ((seat: number) => number) | null): void {
+    if (!visibility) {
+      this.recolorAll();
+      return;
+    }
+    const tmp = new THREE.Color();
+    for (let i = 0; i < this.map.count; i++) {
+      const full = this.colorFor(i);
+      const a = visibility(i);
+      if (a >= 1) {
+        this.seats.setColorAt(i, full);
+      } else {
+        tmp.copy(EMPTY_COLOR).lerp(full, a);
+        this.seats.setColorAt(i, tmp);
+      }
+    }
+    this.seats.instanceColor!.needsUpdate = true;
+  }
+
   setNoShows(enabled: boolean): void {
     this.noShowsEnabled = enabled;
     this.recolorAll();

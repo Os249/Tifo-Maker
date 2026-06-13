@@ -61,7 +61,7 @@ async function main(): Promise<void> {
   editor.drawGrid(true);
   const objects = new ObjectLayer();
   editor.attachObjectLayer(objects);
-  mountToolbar(document.body, editor, store, map, objects);
+  mountToolbar(document.body, editor, store, map, objects, () => preview);
 
   // --- Phase 2: lazy-initialized 3D preview sharing the same store ---
   const previewHost = document.getElementById('preview-host')!;

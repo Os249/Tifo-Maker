@@ -1,58 +1,78 @@
-import { listGallery, thumbnailUrl } from '../net/api';
+import { listGallery, thumbnailUrl, type GalleryItem } from '../net/api';
 
-/** Public-gallery overlay: thumbnails + one-click load. Vanilla DOM, themed
- *  via the page's CSS custom properties. */
+/**
+ * Community feed: a full-screen overlay of published tifos. The heart of the
+ * sharing loop — browse what others made, open any design as a working copy to
+ * remix. Thumbnails are the ones we already render and store. Floodlight-themed.
+ *
+ * onPick(id) loads the chosen design into the editor (as a remixable copy).
+ */
 export async function openGallery(onPick: (id: string) => void): Promise<void> {
   const backdrop = document.createElement('div');
-  backdrop.style.cssText =
-    'position:fixed;inset:0;background:rgba(4,6,10,0.72);display:flex;align-items:center;justify-content:center;z-index:50;';
-  const panel = document.createElement('div');
-  panel.style.cssText =
-    'background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:20px;width:min(860px,92vw);max-height:84vh;overflow:auto;';
-  panel.innerHTML = '<div style="font-weight:700;font-size:16px;margin-bottom:14px;">Public gallery</div>';
-  const grid = document.createElement('div');
-  grid.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:14px;';
-  panel.appendChild(grid);
-  backdrop.appendChild(panel);
-  const close = (): void => backdrop.remove();
-  backdrop.addEventListener('click', (e) => {
-    if (e.target === backdrop) close();
-  });
+  backdrop.className = 'feed-backdrop';
+  backdrop.innerHTML = `
+    <div class="feed-panel" role="dialog" aria-modal="true" aria-label="Community feed">
+      <div class="feed-head">
+        <div class="feed-title">Community feed</div>
+        <div class="feed-sub">Open any tifo to remix it — your changes start a fresh copy.</div>
+        <button class="feed-close" aria-label="Close">&times;</button>
+      </div>
+      <div class="feed-grid" id="feed-grid">
+        <div class="feed-loading">Loading published tifos…</div>
+      </div>
+    </div>
+  `;
   document.body.appendChild(backdrop);
 
+  const close = (): void => {
+    backdrop.remove();
+    document.removeEventListener('keydown', onKey);
+  };
+  const onKey = (e: KeyboardEvent): void => {
+    if (e.key === 'Escape') close();
+  };
+  document.addEventListener('keydown', onKey);
+  backdrop.addEventListener('mousedown', (e) => {
+    if (e.target === backdrop) close();
+  });
+  backdrop.querySelector('.feed-close')!.addEventListener('click', close);
+
+  const grid = backdrop.querySelector('#feed-grid') as HTMLElement;
   try {
-    const items = await listGallery();
+    const items: GalleryItem[] = await listGallery();
+    grid.innerHTML = '';
     if (items.length === 0) {
-      grid.innerHTML = '<div style="color:var(--muted);">Nothing published yet — save a design and tick Public.</div>';
+      grid.innerHTML =
+        '<div class="feed-empty">No public tifos yet — be the first! Design something, then tick “List in public gallery” and Save.</div>';
       return;
     }
     for (const item of items) {
       const card = document.createElement('div');
-      card.style.cssText =
-        'border:1px solid var(--line);border-radius:10px;padding:10px;display:flex;flex-direction:column;gap:8px;';
-      if (item.hasThumbnail) {
-        const img = document.createElement('img');
-        img.src = thumbnailUrl(item.id);
-        img.alt = item.title;
-        img.style.cssText = 'width:100%;border-radius:6px;background:#14171f;image-rendering:pixelated;';
-        card.appendChild(img);
-      }
-      const title = document.createElement('div');
-      title.textContent = item.title;
-      title.style.cssText = 'font-weight:600;';
-      const by = document.createElement('div');
-      by.textContent = `by ${item.ownerName}`;
-      by.style.cssText = 'color:var(--muted);font-size:12px;';
-      const btn = document.createElement('button');
-      btn.textContent = 'Load';
-      btn.addEventListener('click', () => {
+      card.className = 'feed-card';
+      const thumb = item.hasThumbnail
+        ? `<img class="feed-thumb" src="${thumbnailUrl(item.id)}" alt="${escapeHtml(item.title)}" loading="lazy" />`
+        : '<div class="feed-thumb feed-thumb-empty"></div>';
+      card.innerHTML = `
+        ${thumb}
+        <div class="feed-card-body">
+          <div class="feed-card-title">${escapeHtml(item.title)}</div>
+          <div class="feed-card-by">by ${escapeHtml(item.ownerName)}</div>
+        </div>
+        <button class="feed-open primary">Open &amp; remix</button>
+      `;
+      const open = (): void => {
         close();
         onPick(item.id);
-      });
-      card.append(title, by, btn);
+      };
+      card.querySelector('.feed-open')!.addEventListener('click', open);
+      card.querySelector('.feed-thumb')!.addEventListener('click', open);
       grid.appendChild(card);
     }
   } catch (err) {
-    grid.innerHTML = `<div style="color:var(--muted);">Gallery unavailable: ${(err as Error).message} — is the API running? (npm run server)</div>`;
+    grid.innerHTML = `<div class="feed-empty">Couldn’t load the feed: ${escapeHtml((err as Error).message)}</div>`;
   }
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 }
