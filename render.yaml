@@ -1,0 +1,22 @@
+# Render blueprint: one web service (the combined app+API) + a managed Postgres.
+# Create from the Render dashboard → "New" → "Blueprint" pointed at this repo.
+services:
+  - type: web
+    name: tifo-maker
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    plan: starter
+    envVars:
+      - key: NODE_ENV
+        value: production
+      # PORT is provided by Render automatically.
+      - key: DATABASE_URL
+        fromDatabase:
+          name: tifo-maker-db
+          property: connectionString
+
+databases:
+  - name: tifo-maker-db
+    plan: basic-256mb
+    postgresMajorVersion: "16"

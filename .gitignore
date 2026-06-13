@@ -1,0 +1,21 @@
+# dependencies
+node_modules/
+
+# build output
+dist/
+out/
+
+# environment / secrets
+.env
+.env.local
+.env.*.local
+
+# editor / OS
+.DS_Store
+*.log
+.vscode/
+.idea/
+
+# temp
+*.gif
+/tmp/
