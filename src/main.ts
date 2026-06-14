@@ -99,6 +99,33 @@ async function main(): Promise<void> {
       sharedLoaded = false;
     }
   }
+
+  // A .tifo file for a different stadium reloads with ?template= and stashes the
+  // design here; pick it up now that this template's seat map matches its cells.
+  let pendingTitle: string | null = null;
+  if (!sharedLoaded) {
+    let pending: string | null = null;
+    try {
+      pending = sessionStorage.getItem('tifo_pending_import');
+      if (pending) sessionStorage.removeItem('tifo_pending_import');
+    } catch {
+      pending = null;
+    }
+    if (pending) {
+      try {
+        const data = JSON.parse(pending) as { title?: string; palette?: string[]; cells?: number[]; templateId?: string };
+        if (data.templateId === template.id && Array.isArray(data.cells) && data.cells.length === map.count) {
+          store.setPalette((data.palette ?? DEFAULT_PALETTE).slice(0, 8));
+          store.loadCells(Uint8Array.from(data.cells));
+          pendingTitle = data.title ?? 'Imported tifo';
+          sharedLoaded = true; // suppress the starter seed + onboarding
+        }
+      } catch {
+        /* fall through to seed */
+      }
+    }
+  }
+
   if (!sharedLoaded) {
     const seed = PATTERN_PRESETS.find((p) => p.id === 'border')!.cellAt(map);
     for (let i = 0; i < map.count; i++) store.cells[i] = seed(i);
@@ -187,18 +214,18 @@ async function main(): Promise<void> {
   const stat = document.getElementById('stat')!;
   stat.textContent = `${template.name} · ${map.count.toLocaleString()} seats · map generated in ${genMs.toFixed(0)} ms`;
 
-  // If we loaded a shared design, reflect its title and repaint the editor.
-  if (sharedLoaded && sharedTitle) {
+  // If we loaded a shared design or an imported file, reflect title + repaint.
+  const loadedTitle = sharedTitle ?? pendingTitle;
+  if (sharedLoaded && loadedTitle) {
     const docTitle = document.getElementById('doc-title') as HTMLInputElement | null;
-    if (docTitle) docTitle.value = sharedTitle;
+    if (docTitle) docTitle.value = loadedTitle;
     editor.rebuildPalette();
     editor.repaintAll();
   }
 
   // First-run onboarding: only for a fresh visitor on a normal boot (never via
-  // a share link — those visitors already have context). The quick-start applies
-  // a palette + pattern so the first thing they see is their own tifo forming.
-  if (!sharedId && !hasOnboarded()) {
+  // a share link or a file import — those already have content/context).
+  if (!sharedId && !sharedLoaded && !hasOnboarded()) {
     const { openOnboarding } = await import('./ui/onboarding');
     const choice = await openOnboarding(PATTERN_PRESETS);
     if (choice) {

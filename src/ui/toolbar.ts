@@ -527,6 +527,55 @@ export function mountToolbar(
     message.textContent = `downloaded "${payload.title}.tifo"`;
   };
 
+  // Load a .tifo file back in — closes the download/upload loop. Validates the
+  // payload; if the file targets a different stadium, hands it off through
+  // sessionStorage and reloads with the right template so the cell count matches.
+  const importTifoFile = async (file: File): Promise<void> => {
+    try {
+      const text = await file.text();
+      const data = JSON.parse(text) as {
+        format?: string;
+        title?: string;
+        templateId?: string;
+        templateVersion?: number;
+        palette?: unknown;
+        cells?: unknown;
+      };
+      if (data.format !== 'tifo-v1' || !Array.isArray(data.cells) || !Array.isArray(data.palette)) {
+        message.textContent = 'that doesn\u2019t look like a TifoMaker .tifo file';
+        return;
+      }
+      // Different stadium than the one loaded → reload with the right template,
+      // carrying the design across the navigation.
+      if (data.templateId && data.templateId !== map.templateRef.id) {
+        try {
+          sessionStorage.setItem('tifo_pending_import', text);
+        } catch {
+          /* ignore quota */
+        }
+        message.textContent = 'opening in the matching stadium\u2026';
+        location.search = `?template=${encodeURIComponent(data.templateId)}`;
+        return;
+      }
+      // Same stadium → load directly. Guard the cell count.
+      if (data.cells.length !== map.count) {
+        message.textContent = `this file has ${data.cells.length.toLocaleString()} seats but the current stadium has ${map.count.toLocaleString()}`;
+        return;
+      }
+      store.setPalette((data.palette as string[]).slice(0, 8));
+      store.loadCells(Uint8Array.from(data.cells as number[]));
+      if (data.title) docTitle.value = data.title;
+      designId = null; // an imported file is a fresh working copy
+      publicChk.checked = false;
+      editor.rebuildPalette();
+      editor.repaintAll();
+      renderPalette();
+      message.textContent = `opened "${data.title ?? file.name}"`;
+    } catch (err) {
+      message.textContent = `couldn\u2019t open file: ${(err as Error).message}`;
+    }
+  };
+
   saveBtn.addEventListener('click', async () => {
     const { openSaveDialog } = await import('./saveDialog');
     const choice = await openSaveDialog({
@@ -583,10 +632,18 @@ export function mountToolbar(
       message.textContent = `load failed: ${(err as Error).message}`;
     }
   };
-  $('#load').addEventListener('click', () => {
-    const id = window.prompt('Design id to load');
-    if (id) void doLoad(id.trim());
+  // Hidden input for opening .tifo files.
+  const tifoInput = document.createElement('input');
+  tifoInput.type = 'file';
+  tifoInput.accept = '.tifo,application/json';
+  tifoInput.hidden = true;
+  document.body.appendChild(tifoInput);
+  tifoInput.addEventListener('change', () => {
+    const f = tifoInput.files?.[0];
+    if (f) void importTifoFile(f);
+    tifoInput.value = ''; // allow re-selecting the same file
   });
+  $('#load').addEventListener('click', () => tifoInput.click());
   $('#gallery').addEventListener('click', () =>
     void openGallery(
       (id) => void doLoad(id),
