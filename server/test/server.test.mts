@@ -5,7 +5,7 @@ import pg from 'pg';
 import type { FastifyInstance } from 'fastify';
 import { generateSeatMap } from '../../src/core/seatmap';
 import { DEFAULT_TEMPLATE } from '../../src/core/template';
-import { MemoryAuthRepository, MemoryDesignRepository } from '../src/memoryRepo';
+import { MemoryAuthRepository, MemoryDesignRepository, MemoryEventsRepository } from '../src/memoryRepo';
 import { PgAuthRepository, PgDesignRepository } from '../src/pgRepo';
 import { buildApp, SNAPSHOT_EVERY, type TemplateInfo } from '../src/routes';
 import { toB64 } from '../src/codec';
@@ -223,6 +223,152 @@ async function runSuite(name: string, repo: DesignRepository, auth: AuthReposito
 {
   const auth = new MemoryAuthRepository();
   await runSuite('memory repos', new MemoryDesignRepository((id) => auth.usernameOf(id)), auth);
+}
+
+// ---- Before/After match-day photos ----
+{
+  const auth = new MemoryAuthRepository();
+  const app = await buildApp(new MemoryDesignRepository((id) => auth.usernameOf(id)), auth, templates);
+  const cellsGzB64 = gzipSync(sampleCells()).toString('base64');
+  const tok = await registerUser(app, 'photog');
+
+  const created = await app.inject({
+    method: 'POST',
+    url: '/api/designs',
+    headers: { authorization: `Bearer ${tok}` },
+    payload: { title: 'Has Photo', templateId: DEFAULT_TEMPLATE.id, templateVersion: 1, palette: PALETTE, cellsGzB64 },
+  });
+  const designId = (created.json() as { id: string }).id;
+  await app.inject({ method: 'PATCH', url: `/api/designs/${designId}`, headers: { authorization: `Bearer ${tok}` }, payload: { isPublic: true } });
+
+  const g0 = (await app.inject({ method: 'GET', url: '/api/gallery' })).json() as { id: string; hasPhoto: boolean }[];
+  assert.equal(g0.find((d) => d.id === designId)?.hasPhoto, false, 'hasPhoto false before upload');
+
+  const up = await app.inject({
+    method: 'POST',
+    url: `/api/designs/${designId}/photos`,
+    headers: { authorization: `Bearer ${tok}` },
+    payload: { imageB64: PNG_1PX.toString('base64'), width: 1, height: 1, caption: 'Final 2026' },
+  });
+  assert.equal(up.statusCode, 200);
+  const photoId = (up.json() as { photoId: string }).photoId;
+
+  const list = (await app.inject({ method: 'GET', url: `/api/designs/${designId}/photos` })).json() as { caption: string }[];
+  assert.equal(list.length, 1);
+  assert.equal(list[0].caption, 'Final 2026');
+  const img = await app.inject({ method: 'GET', url: `/api/photos/${photoId}` });
+  assert.equal(img.statusCode, 200);
+  assert.equal(img.headers['content-type'], 'image/png');
+  const g1 = (await app.inject({ method: 'GET', url: '/api/gallery' })).json() as { id: string; hasPhoto: boolean }[];
+  assert.equal(g1.find((d) => d.id === designId)?.hasPhoto, true, 'hasPhoto true after upload');
+
+  const other = await registerUser(app, 'intruder');
+  const denied = await app.inject({
+    method: 'POST',
+    url: `/api/designs/${designId}/photos`,
+    headers: { authorization: `Bearer ${other}` },
+    payload: { imageB64: PNG_1PX.toString('base64'), width: 1, height: 1 },
+  });
+  assert.equal(denied.statusCode, 404, 'non-owner upload rejected');
+  const delDenied = await app.inject({ method: 'DELETE', url: `/api/photos/${photoId}`, headers: { authorization: `Bearer ${other}` } });
+  assert.equal(delDenied.statusCode, 404, 'non-owner delete rejected');
+
+  const del = await app.inject({ method: 'DELETE', url: `/api/photos/${photoId}`, headers: { authorization: `Bearer ${tok}` } });
+  assert.equal(del.statusCode, 200);
+  const g2 = (await app.inject({ method: 'GET', url: '/api/gallery' })).json() as { id: string; hasPhoto: boolean }[];
+  assert.equal(g2.find((d) => d.id === designId)?.hasPhoto, false, 'hasPhoto false after delete');
+
+  console.log('photos: all assertions passed (upload, list, serve, hasPhoto flag, owner-only, delete)');
+}
+
+// ---- .tifo format validation endpoint ----
+{
+  const auth = new MemoryAuthRepository();
+  const app = await buildApp(new MemoryDesignRepository((id) => auth.usernameOf(id)), auth, templates);
+  const validate = async (doc: Record<string, unknown>) =>
+    app.inject({ method: 'POST', url: '/api/tifo/validate', payload: doc });
+
+  // A valid v2 doc passes (RLE summing to the seat count).
+  const good = await validate({
+    format: 'tifo',
+    schemaVersion: 2,
+    stadium: { templateId: DEFAULT_TEMPLATE.id, templateVersion: DEFAULT_TEMPLATE.version },
+    palette: ['#262a33', '#1c5fd9', '#f2f1ec'],
+    layers: [{ id: 'base', kind: 'cells', cellsRle: [[1, map.count]] }],
+  });
+  assert.equal(good.statusCode, 200);
+  assert.equal((good.json() as { valid: boolean }).valid, true, 'valid v2 doc passes');
+
+  // Wrong seat count → invalid with a path-targeted error.
+  const wrongCount = await validate({
+    format: 'tifo',
+    schemaVersion: 2,
+    stadium: { templateId: DEFAULT_TEMPLATE.id, templateVersion: 1 },
+    palette: ['#000000', '#ffffff'],
+    layers: [{ id: 'base', kind: 'cells', cellsRle: [[1, 50]] }],
+  });
+  const wc = wrongCount.json() as { valid: boolean; errors: { path: string }[] };
+  assert.equal(wc.valid, false);
+  assert.ok(wc.errors.some((e) => e.path.includes('cellsRle')), 'wrong count flags cellsRle path');
+
+  // Unknown stadium → invalid.
+  const unknown = await validate({
+    format: 'tifo',
+    schemaVersion: 2,
+    stadium: { templateId: 'nope', templateVersion: 1 },
+    palette: ['#000000', '#ffffff'],
+    layers: [{ id: 'b', kind: 'cells', cellsRle: [[1, 10]] }],
+  });
+  assert.equal((unknown.json() as { valid: boolean }).valid, false, 'unknown stadium rejected');
+
+  // Legacy v1 migrates and validates.
+  const v1 = await validate({
+    format: 'tifo-v1',
+    templateId: DEFAULT_TEMPLATE.id,
+    templateVersion: 1,
+    palette: ['#000000', '#ffffff'],
+    cells: Array.from(new Uint8Array(map.count).fill(1)),
+  });
+  assert.equal((v1.json() as { valid: boolean }).valid, true, 'legacy v1 migrates + validates');
+
+  console.log('tifo/validate: all assertions passed (v2 accept, precise errors, unknown stadium, v1 migration)');
+}
+
+{
+  const auth = new MemoryAuthRepository();
+  const events = new MemoryEventsRepository();
+  const app = await buildApp(new MemoryDesignRepository((id) => auth.usernameOf(id)), auth, templates, { events });
+
+  const send = (session: string, name: string, signedIn = false) =>
+    app.inject({ method: 'POST', url: '/api/events', payload: { session, name, signedIn } });
+
+  // Three sessions land; two paint; one publishes. Models real drop-off.
+  for (const s of ['s1', 's2', 's3']) await send(s, 'landed');
+  await send('s1', 'paint_first');
+  await send('s2', 'paint_first');
+  await send('s1', 'published', true);
+  // Duplicate events from the same session must not double-count.
+  await send('s1', 'landed');
+  await send('s1', 'landed');
+  // Junk + unknown names are silently ignored (204, not recorded).
+  const junk = await send('', 'landed');
+  assert.equal(junk.statusCode, 204);
+  const unknown = await send('s9', 'not_a_real_step');
+  assert.equal(unknown.statusCode, 204);
+
+  const res = await app.inject({ method: 'GET', url: '/api/funnel?days=1' });
+  assert.equal(res.statusCode, 200);
+  const body = res.json() as { steps: { name: string; sessions: number; pctOfTop: number; pctOfPrev: number }[] };
+  const by = Object.fromEntries(body.steps.map((s) => [s.name, s]));
+  assert.equal(by.landed.sessions, 3, 'landed = 3 distinct sessions (dupes ignored)');
+  assert.equal(by.paint_first.sessions, 2, 'paint_first = 2');
+  assert.equal(by.published.sessions, 1, 'published = 1');
+  // Conversion math: paint_first is 2/3 of the top step.
+  assert.equal(by.paint_first.pctOfTop, 66.7);
+  assert.equal(by.landed.pctOfTop, 100);
+  // Unknown step never created a row.
+  assert.ok(!('not_a_real_step' in by));
+  console.log('events/funnel: all assertions passed (capture, dedupe, junk-rejection, conversion math)');
 }
 
 if (process.env.DATABASE_URL) {

@@ -12,7 +12,7 @@
  */
 
 export type SaveChoice =
-  | { kind: 'account'; makePublic: boolean; asNew: boolean }
+  | { kind: 'account'; makePublic: boolean; asNew: boolean; tags: string[]; isTemplate: boolean }
   | { kind: 'download' };
 
 export function openSaveDialog(opts: {
@@ -45,6 +45,12 @@ export function openSaveDialog(opts: {
             <span class="save-opt-sub">A .tifo file on your device. No account needed.</span>
           </button>
         </div>
+        <div class="save-tags-row">
+          <label class="save-tags-label" for="save-tags">Tags <span style="color:var(--text-3);font-weight:400;">(used when publishing)</span></label>
+          <input type="text" id="save-tags" class="save-tags-input" placeholder="e.g. serie-a, derby, black-gold" />
+          <div class="save-tags-hint">Comma-separated. Helps others find your tifo in the feed.</div>
+          <label class="save-template-row"><input type="checkbox" id="save-template" /> Offer this as a remixable template</label>
+        </div>
         ${
           opts.isExisting
             ? `<label class="save-asnew"><input type="checkbox" id="save-asnew" /> Save as a new copy (don’t overwrite the original)</label>`
@@ -70,13 +76,20 @@ export function openSaveDialog(opts: {
 
     const asNew = (): boolean =>
       (backdrop.querySelector('#save-asnew') as HTMLInputElement | null)?.checked ?? false;
+    const tagsOf = (): string[] => {
+      const raw = (backdrop.querySelector('#save-tags') as HTMLInputElement | null)?.value ?? '';
+      return raw.split(',').map((t) => t.trim()).filter(Boolean);
+    };
+    const isTemplateOf = (): boolean =>
+      (backdrop.querySelector('#save-template') as HTMLInputElement | null)?.checked ?? false;
 
     backdrop.querySelectorAll('.save-option').forEach((btn) => {
       btn.addEventListener('click', () => {
         const act = (btn as HTMLElement).dataset.act;
         if (act === 'download') close({ kind: 'download' });
-        else if (act === 'public') close({ kind: 'account', makePublic: true, asNew: asNew() });
-        else close({ kind: 'account', makePublic: false, asNew: asNew() });
+        else if (act === 'public')
+          close({ kind: 'account', makePublic: true, asNew: asNew(), tags: tagsOf(), isTemplate: isTemplateOf() });
+        else close({ kind: 'account', makePublic: false, asNew: asNew(), tags: tagsOf(), isTemplate: isTemplateOf() });
       });
     });
   });

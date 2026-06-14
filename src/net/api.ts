@@ -206,16 +206,120 @@ export interface GalleryItem {
   likeScore: number;
   myVote: number;
   updatedAt: string;
+  isTemplate: boolean;
+  tags: string[];
+  hasPhoto: boolean;
 }
 
 export type GallerySort = 'recent' | 'likes';
 
-export async function listGallery(opts: { sort?: GallerySort; search?: string } = {}): Promise<GalleryItem[]> {
+export async function listGallery(
+  opts: { sort?: GallerySort; search?: string; tags?: string[]; templatesOnly?: boolean } = {},
+): Promise<GalleryItem[]> {
   const params = new URLSearchParams();
   if (opts.sort) params.set('sort', opts.sort);
   if (opts.search) params.set('search', opts.search);
+  if (opts.tags && opts.tags.length) params.set('tags', opts.tags.join(','));
+  if (opts.templatesOnly) params.set('templates', '1');
   const qs = params.toString();
   return (await expectOk(await fetch(`${API}/gallery${qs ? `?${qs}` : ''}`, { headers: authHeaders(false) }))) as GalleryItem[];
+}
+
+/** Most-used tags across public designs (for filter chips). */
+export async function listPopularTags(): Promise<{ slug: string; kind: string; count: number }[]> {
+  return (await expectOk(await fetch(`${API}/tags`))) as { slug: string; kind: string; count: number }[];
+}
+
+/** Replace a design's tags (owner only). */
+export async function setDesignTags(id: string, tags: string[]): Promise<string[]> {
+  const res = (await expectOk(
+    await fetch(`${API}/designs/${id}/tags`, { method: 'PUT', headers: authHeaders(true), body: JSON.stringify({ tags }) }),
+  )) as { tags: string[] };
+  return res.tags;
+}
+
+/** Flag/unflag a design as a community template (owner only). */
+export async function setDesignTemplate(id: string, isTemplate: boolean): Promise<boolean> {
+  const res = (await expectOk(
+    await fetch(`${API}/designs/${id}/template`, {
+      method: 'PUT',
+      headers: authHeaders(true),
+      body: JSON.stringify({ isTemplate }),
+    }),
+  )) as { isTemplate: boolean };
+  return res.isTemplate;
+}
+
+/** Report a public design for moderation. */
+/** Report a public design for moderation. */
+export async function reportDesign(id: string, reason: string): Promise<void> {
+  await expectOk(
+    await fetch(`${API}/report`, {
+      method: 'POST',
+      headers: authHeaders(false),
+      body: JSON.stringify({ targetType: 'design', targetId: id, reason }),
+    }),
+  );
+}
+
+export interface PhotoMeta {
+  id: string;
+  designId: string;
+  width: number;
+  height: number;
+  caption: string | null;
+  isVerified: boolean;
+  createdAt: string;
+}
+
+/** A design's real match-day photos (newest first). */
+export async function listPhotos(designId: string): Promise<PhotoMeta[]> {
+  return (await expectOk(await fetch(`${API}/designs/${designId}/photos`))) as PhotoMeta[];
+}
+
+export const photoUrl = (photoId: string): string => `${API}/photos/${photoId}`;
+
+/**
+ * Resize an image file to fit within maxDim (longest edge) as a JPEG, keeping
+ * uploads lean, then upload it as a match-day photo. Returns the new photo id.
+ */
+export async function uploadPhoto(
+  designId: string,
+  file: File,
+  caption: string,
+  maxDim = 1600,
+): Promise<string> {
+  const { dataUrl, width, height } = await resizeToJpeg(file, maxDim);
+  const imageB64 = dataUrl.split(',')[1];
+  const res = (await expectOk(
+    await fetch(`${API}/designs/${designId}/photos`, {
+      method: 'POST',
+      headers: authHeaders(true),
+      body: JSON.stringify({ imageB64, width, height, caption }),
+    }),
+  )) as { photoId: string };
+  return res.photoId;
+}
+
+/** Delete a photo (owner only). */
+export async function deletePhoto(photoId: string): Promise<void> {
+  await expectOk(await fetch(`${API}/photos/${photoId}`, { method: 'DELETE', headers: authHeaders(true) }));
+}
+
+/** Downscale an image to fit maxDim and re-encode as JPEG. Browser-side. */
+async function resizeToJpeg(file: File, maxDim: number): Promise<{ dataUrl: string; width: number; height: number }> {
+  const bitmap = await createImageBitmap(file);
+  let { width, height } = bitmap;
+  const scale = Math.min(1, maxDim / Math.max(width, height));
+  width = Math.round(width * scale);
+  height = Math.round(height * scale);
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d')!;
+  ctx.drawImage(bitmap, 0, 0, width, height);
+  bitmap.close();
+  return { dataUrl: canvas.toDataURL('image/jpeg', 0.85), width, height };
 }
 
 /** Like (1), dislike (-1), or clear (0) a design. Returns the new score + vote. */

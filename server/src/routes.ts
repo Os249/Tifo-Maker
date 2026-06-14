@@ -8,11 +8,12 @@ import { hashPassword, hashToken, issueToken, TOKEN_TTL_MS, verifyPassword } fro
 import { gunzipBytes, gzipBytes, u32FromB64, u8FromB64 } from './codec';
 import { generateSeatMap } from '../../src/core/seatmap';
 import { TEMPLATES } from '../../src/core/template';
+import { validateTifo, TIFO_SCHEMA_VERSION } from '../../src/core/tifoFormat';
 import { renderDistributionPdf } from '../../src/export/distributionPdf';
 
 import { tmpdir } from 'node:os';
 import { readFile, unlink } from 'node:fs/promises';
-import type { AuthRepository, DesignRepository } from './repo';
+import type { AuthRepository, DesignRepository, EventsRepository } from './repo';
 
 /**
  * HTTP surface (blueprint §2.2, completed with auth + gallery):
@@ -42,6 +43,7 @@ export const SNAPSHOT_EVERY = 20;
 const HEX = /^#[0-9a-fA-F]{6}$/;
 const USERNAME = /^[a-zA-Z0-9_]{3,24}$/;
 const MAX_THUMB_BYTES = 128 * 1024;
+const MAX_PHOTO_BYTES = 2 * 1024 * 1024; // real photos, resized client-side before upload
 // A full 60k design gzips to a few hundred bytes, but base64 of (cells + a
 // thumbnail PNG up to 128KB) can approach ~200KB. 1MB gives generous headroom
 // while still capping the request body as an abuse ceiling.
@@ -61,6 +63,8 @@ export interface AppOptions {
   rateLimit?: boolean;
   /** Fastify request logging. */
   logger?: boolean;
+  /** Optional anonymous-analytics sink. When absent, event endpoints no-op. */
+  events?: EventsRepository;
 }
 
 export async function buildApp(
@@ -116,6 +120,83 @@ export async function buildApp(
   };
 
   app.get('/health', async () => ({ ok: true }));
+
+  // ---------- .tifo format validation (the ecosystem primitive) ----------
+  // A generator (an LLM, a third-party tool) POSTs a .tifo document and gets
+  // back { valid, errors[] } WITHOUT saving anything — the tight write→validate→
+  // fix loop that lets external systems hit 100% data integrity. Seat counts are
+  // memoized so repeated validations don't regenerate maps.
+  const seatCountCache = new Map<string, number | null>();
+  const seatCountFor = (templateId: string, version: number): number | null => {
+    const key = `${templateId}@${version}`;
+    if (seatCountCache.has(key)) return seatCountCache.get(key) ?? null;
+    const tpl = TEMPLATES.find((t) => t.id === templateId && t.version === version);
+    const count = tpl ? generateSeatMap(tpl).count : null;
+    seatCountCache.set(key, count);
+    return count;
+  };
+
+  app.post('/api/tifo/validate', async (req, reply) => {
+    const result = validateTifo(req.body, seatCountFor);
+    // 200 with {valid:false, errors} is the contract — a failed *document* is a
+    // successful *validation*. (Reserve 4xx for malformed requests, not invalid docs.)
+    return reply.code(200).send({
+      schemaVersion: TIFO_SCHEMA_VERSION,
+      valid: result.valid,
+      errors: result.errors,
+    });
+  });
+
+  // ---------- anonymous funnel analytics ----------
+  // The ordered funnel steps. Capture is whitelisted to these so the table
+  // can't be polluted with arbitrary names.
+  const FUNNEL_STEPS = [
+    'landed',        // arrived in the editor
+    'paint_first',   // first brush stroke
+    'view_3d',       // opened the stadium / split view
+    'save_clicked',  // opened the save dialog
+    'signed_up',     // created an account
+    'published',     // published to the community
+    'exported',      // exported a production PDF/CSV
+  ];
+  const FUNNEL_SET = new Set(FUNNEL_STEPS);
+
+  // Record one anonymous event. No auth required; best-effort (never errors the
+  // client over analytics). Ignores unknown names and missing sink.
+  app.post('/api/events', async (req, reply) => {
+    const body = (req.body ?? {}) as { session?: unknown; name?: unknown; signedIn?: unknown };
+    const session = typeof body.session === 'string' ? body.session : '';
+    const name = typeof body.name === 'string' ? body.name : '';
+    if (!session || !FUNNEL_SET.has(name)) {
+      return reply.code(204).send(); // silently ignore junk
+    }
+    if (options.events) {
+      await options.events.record(session, name, Boolean(body.signedIn)).catch(() => {});
+    }
+    return reply.code(204).send();
+  });
+
+  // Funnel summary: distinct sessions per step over a window, plus step-to-step
+  // conversion. Read path so the instrumentation is actually usable, not just
+  // captured. Public read is fine (aggregate, no PII); gate later if desired.
+  app.get('/api/funnel', async (req) => {
+    const q = req.query as { days?: string };
+    const days = Math.min(365, Math.max(1, Number(q.days) || 30));
+    if (!options.events) return { days, steps: [], note: 'analytics not enabled' };
+    const steps = await options.events.funnel(FUNNEL_STEPS, days);
+    // Annotate each step with conversion from the top and from the previous step.
+    const top = steps[0]?.sessions || 0;
+    const annotated = steps.map((s, i) => {
+      const prev = i > 0 ? steps[i - 1].sessions : s.sessions;
+      return {
+        name: s.name,
+        sessions: s.sessions,
+        pctOfTop: top > 0 ? Math.round((s.sessions / top) * 1000) / 10 : 0,
+        pctOfPrev: prev > 0 ? Math.round((s.sessions / prev) * 1000) / 10 : 0,
+      };
+    });
+    return { days, steps: annotated };
+  });
   app.get('/api/templates', async () => templates);
 
   // ---------- auth ----------
@@ -161,10 +242,107 @@ export async function buildApp(
 
   // ---------- gallery ----------
   app.get('/api/gallery', async (req) => {
-    const q = req.query as { sort?: string; search?: string };
+    const q = req.query as { sort?: string; search?: string; tags?: string; templates?: string };
     const sort = q.sort === 'likes' ? 'likes' : 'recent';
     const viewerId = await userOf(req); // annotate the caller's votes when signed in
-    return repo.listPublic({ sort, search: q.search, viewerId });
+    const tags = q.tags ? q.tags.split(',').map((t) => t.trim()).filter(Boolean) : undefined;
+    return repo.listPublic({ sort, search: q.search, viewerId, tags, templatesOnly: q.templates === '1' });
+  });
+
+  // Most-used tags, for the filter chips.
+  app.get('/api/tags', async () => repo.popularTags(24));  // Replace a design's tags (owner only).
+  app.put('/api/designs/:id/tags', async (req, reply) => {
+    const userId = await requireUser(req, reply);
+    if (!userId) return;
+    const { id } = req.params as { id: string };
+    const tags = (req.body as { tags?: unknown } | null)?.tags;
+    if (!Array.isArray(tags)) return reply.code(400).send({ error: 'tags must be an array of strings' });
+    const result = await repo.setTags(id, userId, tags.map(String));
+    if (result === null) return reply.code(404).send({ error: 'not found or not yours' });
+    return { tags: result };
+  });
+
+  // Flag/unflag a design as a community template (owner only).
+  app.put('/api/designs/:id/template', async (req, reply) => {
+    const userId = await requireUser(req, reply);
+    if (!userId) return;
+    const { id } = req.params as { id: string };
+    const isTemplate = Boolean((req.body as { isTemplate?: unknown } | null)?.isTemplate);
+    const result = await repo.setTemplate(id, userId, isTemplate);
+    if (result === null) return reply.code(404).send({ error: 'not found or not yours' });
+    return { isTemplate: result };
+  });
+
+  // Report a public item for moderation. Signed-in optional but recorded if present.
+  app.post('/api/report', async (req, reply) => {
+    const reporterId = await userOf(req);
+    const body = (req.body ?? {}) as { targetType?: string; targetId?: string; reason?: string };
+    const type = body.targetType === 'comment' ? 'comment' : 'design';
+    if (!body.targetId || typeof body.reason !== 'string' || !body.reason.trim()) {
+      return reply.code(400).send({ error: 'targetId and reason required' });
+    }
+    const reportId = await repo.report(type, body.targetId, reporterId, body.reason.trim());
+    return { reportId, status: 'received' };
+  });
+
+  // ---------- Before/After real match-day photos ----------
+  // List a design's photos (metadata only; bytes via the image route below).
+  app.get('/api/designs/:id/photos', async (req) => {
+    const { id } = req.params as { id: string };
+    return repo.listPhotos(id);
+  });
+
+  // Upload a real photo to a design (owner only). Resized client-side; a larger
+  // per-route body limit than the global 1MB accommodates the image.
+  app.post(
+    '/api/designs/:id/photos',
+    { bodyLimit: MAX_PHOTO_BYTES + 512 * 1024 },
+    async (req, reply) => {
+      const userId = await requireUser(req, reply);
+      if (!userId) return;
+      const { id } = req.params as { id: string };
+      const body = (req.body ?? {}) as { imageB64?: string; width?: number; height?: number; caption?: string };
+      if (typeof body.imageB64 !== 'string' || !body.imageB64) {
+        return reply.code(400).send({ error: 'imageB64 required' });
+      }
+      let buf: Buffer;
+      try {
+        buf = Buffer.from(body.imageB64, 'base64');
+      } catch {
+        return reply.code(400).send({ error: 'imageB64 not valid base64' });
+      }
+      if (buf.byteLength === 0 || buf.byteLength > MAX_PHOTO_BYTES) {
+        return reply.code(400).send({ error: `image must decode to 1..${MAX_PHOTO_BYTES} bytes (resize before upload)` });
+      }
+      const w = Number(body.width) || 0;
+      const h = Number(body.height) || 0;
+      const photoId = await repo.addPhoto(id, userId, buf, w, h, body.caption ?? null);
+      if (!photoId) return reply.code(404).send({ error: 'not found or not yours' });
+      return { photoId };
+    },
+  );
+
+  // Serve a photo's bytes. Content type sniffed from magic bytes (JPEG/PNG/WebP).
+  app.get('/api/photos/:photoId', async (req, reply) => {
+    const { photoId } = req.params as { photoId: string };
+    const photo = await repo.getPhoto(photoId).catch(() => null);
+    if (!photo) return reply.code(404).send({ error: 'not found' });
+    const b = photo.image;
+    const type =
+      b[0] === 0xff && b[1] === 0xd8 ? 'image/jpeg' :
+      b[0] === 0x89 && b[1] === 0x50 ? 'image/png' :
+      b[0] === 0x52 && b[1] === 0x49 ? 'image/webp' : 'application/octet-stream';
+    return reply.header('content-type', type).header('cache-control', 'public, max-age=86400').send(b);
+  });
+
+  // Delete a photo (owner of the parent design only).
+  app.delete('/api/photos/:photoId', async (req, reply) => {
+    const userId = await requireUser(req, reply);
+    if (!userId) return;
+    const { photoId } = req.params as { photoId: string };
+    const ok = await repo.deletePhoto(photoId, userId);
+    if (!ok) return reply.code(404).send({ error: 'not found or not yours' });
+    return { deleted: true };
   });
 
   // Like / dislike / clear. value: 1, -1, or 0.
@@ -488,6 +666,13 @@ export async function buildApp(
     const landingHtml = readFileSync(join(staticDir, 'landing.html'), 'utf8');
     app.get('/', async (_req, reply) => reply.type('text/html').send(landingHtml));
     app.get('/app', async (_req, reply) => reply.type('text/html').send(indexHtml));
+    // Public developer spec for the .tifo format.
+    try {
+      const specHtml = readFileSync(join(staticDir, 'tifo-spec.html'), 'utf8');
+      app.get('/tifo-spec', async (_req, reply) => reply.type('text/html').send(specHtml));
+    } catch {
+      /* spec page optional in API-only builds */
+    }
 
     // index:false so the static plugin doesn't auto-serve index.html at '/'
     // (we serve the landing there instead); assets still resolve by path.

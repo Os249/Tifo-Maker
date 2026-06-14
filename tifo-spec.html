@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>The .tifo format — TifoMaker developer spec</title>
+  <meta name="description" content="Public specification for the .tifo stadium-choreography file format. Author tifos programmatically (including from LLMs) and validate them before import." />
+  <style>
+    :root { --ink:#0E0A1A; --paper:#FBFAFF; --purple:#5B2A86; --blue:#1C6FE0; --emerald:#0F8A4D; --code-bg:#1A1C22; }
+    * { box-sizing: border-box; }
+    body { margin:0; font-family:'Inter',system-ui,sans-serif; color:var(--ink); background:var(--paper); line-height:1.6; }
+    .wrap { max-width:780px; margin:0 auto; padding:48px 24px 96px; }
+    h1 { font-size:36px; font-weight:800; letter-spacing:-0.02em; margin:0 0 6px; }
+    h1 b { color:var(--blue); }
+    .sub { color:#5b5670; font-size:18px; margin:0 0 40px; }
+    h2 { font-size:24px; font-weight:700; margin:40px 0 12px; padding-top:16px; border-top:1px solid #e6e3ee; }
+    h3 { font-size:17px; font-weight:600; margin:24px 0 8px; color:var(--purple); }
+    p, li { font-size:15px; }
+    code { font-family:'SFMono-Regular',Consolas,monospace; background:#efedf5; padding:1px 5px; border-radius:4px; font-size:13px; }
+    pre { background:var(--code-bg); color:#e6e6e6; padding:18px 20px; border-radius:12px; overflow-x:auto; font-size:13px; line-height:1.5; }
+    pre code { background:none; padding:0; color:inherit; font-size:13px; }
+    a { color:var(--blue); }
+    .pill { display:inline-block; background:var(--emerald); color:#fff; font-size:12px; font-weight:600; padding:2px 10px; border-radius:999px; vertical-align:middle; }
+    table { border-collapse:collapse; width:100%; margin:12px 0; font-size:14px; }
+    th, td { text-align:left; padding:8px 10px; border-bottom:1px solid #e6e3ee; }
+    th { color:var(--purple); }
+    .note { background:#f4f2f8; border-left:4px solid var(--blue); padding:12px 16px; border-radius:0 8px 8px 0; margin:16px 0; font-size:14px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>The <b>.tifo</b> format <span class="pill">v2</span></h1>
+    <p class="sub">A public, JSON-based file format for stadium choreographies. Author it by hand, from code, or from an LLM — then validate before import.</p>
+
+    <h2>Why this exists</h2>
+    <p>A <code>.tifo</code> file describes a complete stadium tifo: the stadium geometry, the per-seat colors, floating text and image objects, and metadata. Because it's plain JSON with a published schema and a validation endpoint, any system — including language models like Claude or GPT — can generate a tifo from a prompt and reference image, validate it, and hand a user a file that imports into TifoMaker with full fidelity.</p>
+
+    <h2>The shape</h2>
+    <pre><code>{
+  "format": "tifo",
+  "schemaVersion": 2,
+  "meta": {
+    "title": "Messi — THE GOAT",
+    "generator": "claude-opus-4.8",
+    "description": "North-stand Messi mosaic"
+  },
+  "stadium": {
+    "templateId": "generic-bowl-60k",
+    "templateVersion": 1
+  },
+  "palette": ["#262a33", "#5b2a86", "#d9f000"],
+  "layers": [
+    {
+      "id": "base",
+      "kind": "cells",
+      "cellsRle": [[1, 30416], [2, 30416]]
+    }
+  ],
+  "objects": [
+    {
+      "id": "t1", "kind": "text", "text": "THE GOAT",
+      "fontId": "block", "colorIndex": 2,
+      "cx": 2000, "cy": 300, "width": 1400, "height": 220
+    }
+  ]
+}</code></pre>
+
+    <h2>Fields</h2>
+    <table>
+      <tr><th>Field</th><th>Required</th><th>Notes</th></tr>
+      <tr><td><code>format</code></td><td>yes</td><td>Must be <code>"tifo"</code> (legacy <code>"tifo-v1"</code> is accepted and migrated).</td></tr>
+      <tr><td><code>schemaVersion</code></td><td>yes</td><td>Must be <code>2</code>.</td></tr>
+      <tr><td><code>stadium</code></td><td>yes</td><td><code>{ templateId, templateVersion }</code> — must name a known stadium.</td></tr>
+      <tr><td><code>palette</code></td><td>yes</td><td>2–8 hex colors (<code>#rgb</code> or <code>#rrggbb</code>). <strong>Index 0 is the empty seat.</strong></td></tr>
+      <tr><td><code>layers</code></td><td>yes</td><td>≥1 <code>cells</code> layer. See cell encoding below.</td></tr>
+      <tr><td><code>objects</code></td><td>no</td><td>Floating <code>text</code> / <code>image</code> objects rendered over the cells.</td></tr>
+      <tr><td><code>meta</code></td><td>no</td><td>Title, author, generator, description — all optional.</td></tr>
+    </table>
+
+    <h3>Cell encoding (run-length)</h3>
+    <p>Each cells layer stores <code>cellsRle</code>: an array of <code>[paletteIndex, count]</code> pairs, in seat order. The counts must sum to <em>exactly</em> the stadium's seat count. RLE keeps files tiny — a mostly-uniform design compresses thousands-fold — and is easy to generate from a described pattern.</p>
+    <div class="note">Seat order is the stadium's canonical generation order. To produce art from an image, the reliable path is to build the design in the editor or compute per-seat colors against the stadium geometry, then RLE-encode. Counts that don't sum to the seat count are rejected.</div>
+
+    <h3>Stadiums</h3>
+    <table>
+      <tr><th>templateId</th><th>Seats</th></tr>
+      <tr><td><code>generic-bowl-60k</code></td><td>60,832</td></tr>
+      <tr><td><code>single-kop-40k</code></td><td>39,700</td></tr>
+      <tr><td><code>grand-oval-76k</code></td><td>75,984</td></tr>
+    </table>
+
+    <h2>Validate before you ship <span class="pill">key</span></h2>
+    <p>POST a document to the validation endpoint to check it without saving. This is the loop that gives generators 100% reliability: write → validate → fix the reported paths → repeat.</p>
+    <pre><code>POST /api/tifo/validate
+Content-Type: application/json
+
+{ ...your .tifo document... }
+
+→ 200 OK
+{
+  "schemaVersion": 2,
+  "valid": false,
+  "errors": [
+    { "path": "palette[1]", "message": "\"blue\" is not a #rrggbb hex color" },
+    { "path": "layers[0].cellsRle", "message": "runs sum to 500 seats but stadium has 60832" }
+  ]
+}</code></pre>
+    <p>Every error carries a <code>path</code> (the exact offending field) and a human-readable <code>message</code>. A <code>valid: true</code> response means the document will import cleanly. Note that a 200 response with <code>valid: false</code> is normal — an invalid <em>document</em> is still a successful <em>validation</em>.</p>
+
+    <h2>Importing</h2>
+    <p>Users open a <code>.tifo</code> file in the editor via <strong>Open file</strong>. If the file targets a different stadium than the one open, the editor switches to the matching stadium automatically. Import runs the same validation as the endpoint, so anything that validates will open.</p>
+
+    <h2>Security &amp; compatibility</h2>
+    <ul>
+      <li><strong>Forward migration:</strong> legacy <code>tifo-v1</code> files (flat cells) are accepted and migrated to v2 on import — old files never break.</li>
+      <li><strong>Strict, all-or-nothing validation:</strong> a document either fully validates or is rejected with every error listed; partial application never happens.</li>
+      <li><strong>Data, not behavior:</strong> the format carries only data. No field is ever interpreted as code. Size limits and value bounds defuse malformed or oversized payloads.</li>
+    </ul>
+
+    <p style="margin-top:48px;"><a href="/app">← Open the editor</a></p>
+  </div>
+</body>
+</html>

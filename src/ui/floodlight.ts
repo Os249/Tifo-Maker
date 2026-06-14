@@ -515,4 +515,103 @@ body.viewer { display:block; overflow-y:auto; background:var(--ink-0); }
   font-size:10px; font-weight:400; color:var(--text-3); text-transform:none; letter-spacing:0;
   margin-left:6px;
 }
+
+/* gallery: templates toggle, tag chips, card tags, report */
+.feed-sort.feed-templates { border-left:1px solid var(--line-1); margin-left:2px; padding-left:12px; }
+.feed-tag-suggest, .feed-tags { display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin-top:10px; }
+.feed-tags:not(.has-tags) { margin-top:0; }
+.feed-tag-label { font-size:11px; color:var(--text-3); margin-right:2px; }
+.feed-tag-chip {
+  font-size:11px; padding:4px 10px; border-radius:999px; cursor:pointer;
+  background:var(--ink-3); color:var(--text-2); border:1px solid var(--line-1); line-height:1.4;
+}
+.feed-tag-chip:hover { color:var(--text-1); border-color:var(--line-2); background:var(--ink-3); }
+.feed-tag-chip.active { background:rgba(139,124,255,.14); color:var(--violet); border-color:var(--violet); }
+.feed-tag-chip .x { opacity:.7; margin-left:2px; }
+.feed-card-tags { display:flex; flex-wrap:wrap; gap:4px; margin:6px 0 2px; }
+.feed-card-tag {
+  font-size:10px; padding:2px 7px; border-radius:999px; cursor:pointer;
+  background:var(--ink-3); color:var(--text-3); border:1px solid var(--line-1);
+}
+.feed-card-tag:hover { color:var(--violet); border-color:var(--violet); }
+.feed-tmpl-badge {
+  font-size:9px; font-weight:600; text-transform:uppercase; letter-spacing:.04em;
+  color:var(--flare); border:1px solid var(--flare); border-radius:4px; padding:1px 5px; margin-left:4px;
+  vertical-align:middle;
+}
+.feed-report {
+  margin-left:auto; padding:4px 8px; font-size:13px; line-height:1;
+  border:1px solid var(--line-1); background:var(--ink-1); color:var(--text-3); border-radius:var(--r-sm); cursor:pointer;
+}
+.feed-report:hover { color:var(--flare); border-color:var(--flare); background:var(--ink-1); }
+.feed-report.reported { color:var(--flare); border-color:var(--flare); cursor:default; }
+
+/* save dialog: tags + template controls */
+.save-tags-row { margin-top:16px; }
+.save-tags-label { font-size:12px; color:var(--text-2); margin-bottom:6px; display:block; }
+.save-tags-input {
+  width:100%; background:var(--ink-3); color:var(--text-1); border:1px solid var(--line-2);
+  border-radius:var(--r-md); padding:9px 12px; font:inherit; font-size:13px;
+}
+.save-tags-input:focus-visible { outline:none; box-shadow:var(--ring-focus); }
+.save-tags-hint { font-size:11px; color:var(--text-3); margin-top:5px; }
+.save-template-row { display:flex; align-items:center; gap:8px; margin-top:14px; font-size:13px; color:var(--text-2); }
+
+/* feed: Before/After badge + button */
+.feed-thumb-wrap { position:relative; }
+.feed-ba-btn {
+  position:absolute; left:8px; bottom:8px; display:inline-flex; align-items:center; gap:5px;
+  font-size:11px; font-weight:600; padding:5px 10px; border-radius:999px; cursor:pointer;
+  background:rgba(14,10,26,.82); color:#fff; border:1px solid rgba(255,255,255,.25); backdrop-filter:blur(4px);
+}
+.feed-ba-btn:hover { background:var(--violet); border-color:var(--violet); }
+.feed-photo-badge {
+  font-size:9px; font-weight:600; text-transform:uppercase; letter-spacing:.04em;
+  color:var(--violet); border:1px solid var(--violet); border-radius:4px; padding:1px 5px; margin-left:4px; vertical-align:middle;
+}
+
+/* Before/After split-slider overlay */
+.ba-backdrop {
+  position:fixed; inset:0; z-index:120; display:flex; align-items:center; justify-content:center;
+  background:rgba(8,8,12,.78); backdrop-filter:blur(6px); padding:24px;
+}
+.ba-panel {
+  position:relative; width:min(820px,94vw); background:var(--ink-1); border:1px solid var(--line-2);
+  border-radius:var(--r-md); padding:22px; box-shadow:0 24px 64px rgba(0,0,0,.5);
+}
+.ba-close {
+  position:absolute; top:12px; right:14px; background:none; border:none; color:var(--text-2);
+  font-size:24px; line-height:1; cursor:pointer; padding:2px 6px;
+}
+.ba-close:hover { color:var(--text-1); }
+.ba-title { font-size:18px; font-weight:600; color:var(--text-1); }
+.ba-sub { font-size:13px; color:var(--text-3); margin:2px 0 14px; }
+.ba-stage {
+  position:relative; width:100%; aspect-ratio:16/10; overflow:hidden; border-radius:var(--r-sm);
+  background:var(--ink-3); cursor:ew-resize; user-select:none;
+}
+.ba-img { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; }
+.ba-before-wrap { position:absolute; inset:0; width:50%; overflow:hidden; border-right:2px solid #fff; }
+.ba-before-wrap .ba-before { width:auto; height:100%; max-width:none; }
+.ba-before { object-fit:cover; }
+.ba-tag {
+  position:absolute; top:10px; font-size:11px; font-weight:600; padding:3px 9px; border-radius:999px;
+  background:rgba(14,10,26,.75); color:#fff; pointer-events:none;
+}
+.ba-tag-before { left:10px; }
+.ba-tag-after { right:10px; }
+.ba-divider {
+  position:absolute; top:0; bottom:0; left:50%; width:2px; background:#fff; transform:translateX(-1px);
+  pointer-events:auto; cursor:ew-resize;
+}
+.ba-handle {
+  position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); width:34px; height:34px;
+  border-radius:50%; background:#fff; color:var(--ink-0); display:flex; align-items:center; justify-content:center;
+  font-size:14px; box-shadow:0 2px 8px rgba(0,0,0,.4);
+}
+.ba-caption { font-size:13px; color:var(--text-2); margin-top:10px; min-height:18px; }
+.ba-thumbs { display:flex; gap:8px; margin-top:12px; flex-wrap:wrap; }
+.ba-thumb { width:64px; height:42px; border-radius:6px; overflow:hidden; border:2px solid transparent; cursor:pointer; padding:0; background:none; }
+.ba-thumb img { width:100%; height:100%; object-fit:cover; }
+.ba-thumb.active { border-color:var(--violet); }
 `;

@@ -36,6 +36,47 @@ Three tiers keyed to capability, not just width:
 
 ## Recent additions
 
+- **Before/After real photos** — the social-proof feature. Creators attach a
+  real match-day photo to a saved design ("Add match-day photo", resized
+  client-side before upload). The community feed marks those designs with a
+  Before/After badge + button that opens a draggable split-slider: the digital
+  design on one side, the real stand on the other. Backed by a `design_photos`
+  table (BYTEA; migrate to object storage if photos grow numerous) and owner-
+  checked endpoints. Photos carry an `is_verified` flag for future moderator
+  confirmation of genuine matches.
+
+
+- **.tifo v2 format + validation endpoint** — the public, LLM-authorable file
+  format. A framework-free core module (`src/core/tifoFormat.ts`) defines the v2
+  schema (layers, text/image objects, metadata, versioning), RLE cell encoding,
+  a strict validator returning path-targeted errors, and v1→v2 migration.
+  `POST /api/tifo/validate` lets any generator check a document before delivering
+  it (200 with {valid, errors[]} — a failed *document* is still a successful
+  *validation*). The editor now exports v2 (text objects serialized, RLE-encoded —
+  designs compress thousands-fold) and imports v1+v2 through the same validator.
+  Public developer spec served at `/tifo-spec`; its example is dogfooded by the
+  test suite so the docs stay accurate. 3- and 6-digit hex both accepted and
+  normalized to `#rrggbb`.
+
+
+- **Funnel analytics** — anonymous, privacy-respecting conversion tracking. A
+  per-session token (sessionStorage, no cookies/PII) ties events through the
+  funnel: landed → paint_first → view_3d → save_clicked → signed_up → published →
+  exported. `POST /api/events` captures (whitelisted step names, fails silent on
+  junk); `GET /api/funnel?days=N` returns per-step distinct-session counts plus
+  conversion-from-top and conversion-from-previous. Backed by an append-only
+  `events` table. Note: /api/funnel is a public aggregate read — gate it behind
+  your own auth before real traffic if you want the numbers private.
+
+
+- **Gallery enrichment** — published tifos can carry tags and be flagged as
+  remixable templates. The community feed gained a Templates filter, clickable
+  tag chips (from most-used tags), per-card tags + template badges, and a report
+  button feeding a moderation queue. Tag filtering is an intersection (all
+  selected tags must match). Backed by `tags` / `design_tags` / `moderation_reports`
+  tables and an `is_template` column, all applied idempotently on boot.
+
+
 - **Marketing homepage** — a colorful, World Cup-palette landing page now serves at
   `/`, with the editor at `/app`. First-time visitors get the pitch (hero, value
   trio, how-it-works, club/enterprise block, CTAs); return users bookmark `/app`.

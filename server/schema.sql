@@ -64,3 +64,64 @@ CREATE TABLE IF NOT EXISTS design_votes (
 
 ALTER TABLE designs ADD COLUMN IF NOT EXISTS like_score INT NOT NULL DEFAULT 0;
 CREATE INDEX IF NOT EXISTS designs_like_score_idx ON designs (is_public, like_score DESC, updated_at DESC);
+
+-- Templates: a published design flagged as a starting point others can clone.
+ALTER TABLE designs ADD COLUMN IF NOT EXISTS is_template BOOLEAN NOT NULL DEFAULT false;
+CREATE INDEX IF NOT EXISTS designs_template_idx ON designs (is_template, updated_at DESC)
+  WHERE is_template AND is_public;
+
+-- Tags: curated facets (club, country, competition, color, size) + the
+-- many-to-many link to designs. slug is the canonical lowercase key.
+CREATE TABLE IF NOT EXISTS tags (
+  id   SERIAL PRIMARY KEY,
+  slug TEXT UNIQUE NOT NULL,
+  kind TEXT NOT NULL DEFAULT 'topic'   -- club|country|competition|color|size|topic
+);
+CREATE TABLE IF NOT EXISTS design_tags (
+  design_id UUID NOT NULL REFERENCES designs(id) ON DELETE CASCADE,
+  tag_id    INT  NOT NULL REFERENCES tags(id)    ON DELETE CASCADE,
+  PRIMARY KEY (design_id, tag_id)
+);
+CREATE INDEX IF NOT EXISTS design_tags_tag_idx ON design_tags (tag_id);
+
+-- Moderation: a report against any public item; an internal queue to review.
+CREATE TABLE IF NOT EXISTS moderation_reports (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  target_type TEXT NOT NULL,                 -- design|comment
+  target_id   UUID NOT NULL,
+  reporter_id UUID REFERENCES users(id) ON DELETE SET NULL,
+  reason      TEXT NOT NULL,
+  status      TEXT NOT NULL DEFAULT 'open',  -- open|reviewed|actioned
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS moderation_open_idx ON moderation_reports (status, created_at)
+  WHERE status = 'open';
+
+-- Anonymous funnel analytics. One row per event. No PII: session_id is a random
+-- per-browser-session token (not tied to a user unless they sign in), used only
+-- to measure conversion THROUGH the funnel. signed_in is a coarse flag, not an id.
+CREATE TABLE IF NOT EXISTS events (
+  id         BIGSERIAL PRIMARY KEY,
+  session_id TEXT NOT NULL,
+  name       TEXT NOT NULL,         -- e.g. landed|paint_first|view_3d|save_clicked|signed_up|published|exported
+  signed_in  BOOLEAN NOT NULL DEFAULT false,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS events_name_time_idx ON events (name, created_at);
+CREATE INDEX IF NOT EXISTS events_session_idx ON events (session_id);
+
+-- Real match-day photos attached to a published design — the Before/After
+-- social proof. Stored as BYTEA (resized client-side before upload to stay
+-- lean) to keep the Postgres-only stack; migrate to object storage if photos
+-- grow large or numerous. is_verified lets a moderator confirm a genuine match.
+CREATE TABLE IF NOT EXISTS design_photos (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  design_id   UUID NOT NULL REFERENCES designs(id) ON DELETE CASCADE,
+  image       BYTEA NOT NULL,                -- resized JPEG/PNG
+  width       INT NOT NULL,
+  height      INT NOT NULL,
+  caption     TEXT,                          -- "Liverpool vs Madrid, 2026-05-01"
+  is_verified BOOLEAN NOT NULL DEFAULT false,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS design_photos_design_idx ON design_photos (design_id, created_at);

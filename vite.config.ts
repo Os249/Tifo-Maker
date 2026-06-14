@@ -10,6 +10,7 @@ export default defineConfig({
       input: {
         landing: resolve(__dirname, 'landing.html'),
         app: resolve(__dirname, 'index.html'),
+        spec: resolve(__dirname, 'tifo-spec.html'),
       },
     },
   },

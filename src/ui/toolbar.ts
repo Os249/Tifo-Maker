@@ -9,6 +9,8 @@ import type { ObjectLayer } from '../core/objects';
 import { MIN_LEGIBLE_RUN, findFragileSeats } from '../core/analysis';
 import { RevealPlayer, REVEAL_PRESETS, type RevealId } from '../core/reveal';
 import { fetchMe, isSignedIn, loadDesign, saveDesign, setPublic } from '../net/api';
+import { track, setAnalyticsSignedIn } from '../net/analytics';
+import { buildTifoV2 } from '../core/tifoFormat';
 import { extractPalette, rasterize } from '../core/importImage';
 import { openAuthModal } from './authModal';
 import { openGallery } from './gallery';
@@ -95,6 +97,9 @@ export function mountToolbar(
   };
   renderPalette();
   store.onDirty(renderPalette);
+  // First edit of the session = the activation moment. onDirty fires on any
+  // cell change (brush, fill, pattern, bake); track() dedupes to once.
+  store.onDirty(() => track('paint_first'));
 
   // A lightweight color editor: native color input + hex field in a popover,
   // anchored to the swatch. Applies live so the user sees the bowl recolor.
@@ -476,13 +481,50 @@ export function mountToolbar(
   const signinBtn = $('#signin') as unknown as HTMLButtonElement;
   let myUserId: string | null = null;
 
-  const reflectSignedIn = (name: string, userId?: string): void => {
+  // The "Add match-day photo" control only makes sense once the design is saved
+  // to the user's account (a photo attaches to a saved design id).
+  const photoRow = document.getElementById('photo-row') as HTMLElement | null;
+  const refreshPhotoRow = (): void => {
+    if (photoRow) photoRow.hidden = !(designId && isSignedIn());
+  };
+  const photoInput = document.createElement('input');
+  photoInput.type = 'file';
+  photoInput.accept = 'image/*';
+  photoInput.hidden = true;
+  document.body.appendChild(photoInput);
+  const addPhotoBtn = document.getElementById('add-photo') as HTMLButtonElement | null;
+  addPhotoBtn?.addEventListener('click', () => photoInput.click());
+  photoInput.addEventListener('change', async () => {
+    const file = photoInput.files?.[0];
+    photoInput.value = '';
+    if (!file || !designId) return;
+    const caption = window.prompt('Caption (e.g. "Liverpool vs Madrid, May 2026") — optional:') ?? '';
+    addPhotoBtn && (addPhotoBtn.disabled = true);
+    const original = addPhotoBtn?.innerHTML ?? '';
+    if (addPhotoBtn) addPhotoBtn.textContent = 'Uploading…';
+    try {
+      const { uploadPhoto } = await import('../net/api');
+      await uploadPhoto(designId, file, caption.trim());
+      message.textContent = 'match-day photo added — it shows as Before/After in the feed';
+    } catch (err) {
+      message.textContent = `photo upload failed: ${(err as Error).message}`;
+    } finally {
+      if (addPhotoBtn) {
+        addPhotoBtn.disabled = false;
+        addPhotoBtn.innerHTML = original;
+      }
+    }
+  });
+
+  const reflectSignedIn = (name: string, userId?: string, fresh = false): void => {
     signinBtn.textContent = name;
     signinBtn.classList.remove('signup-shine'); // stop pulsing once signed in
     if (userId) myUserId = userId;
     const avatar = document.getElementById('avatar');
     if (avatar) avatar.textContent = name[0].toUpperCase();
     message.textContent = `signed in as ${name}`;
+    setAnalyticsSignedIn(true);
+    if (fresh) track('signed_up'); // genuine auth this session, not a reload-restore
   };
 
   // Clicking the header button: if signed out → auth modal; if signed in → profile.
@@ -495,7 +537,7 @@ export function mountToolbar(
     const name = await openAuthModal();
     if (name) {
       const me = await fetchMe();
-      reflectSignedIn(name, me?.id);
+      reflectSignedIn(name, me?.id, true);
     }
   });
 
@@ -503,80 +545,105 @@ export function mountToolbar(
   void (async () => {
     const me = await fetchMe();
     if (me?.username) reflectSignedIn(me.username, me.id);
+    refreshPhotoRow();
   })();
 
   const saveBtn = $('#save') as unknown as HTMLButtonElement;
 
   // Download the current design as a portable .tifo file (JSON: template + palette + cells).
   const downloadLocal = (): void => {
-    const payload = {
-      format: 'tifo-v1',
-      title: docTitle.value.trim() || 'Untitled tifo',
+    const title = docTitle.value.trim() || 'Untitled tifo';
+    // Bake image objects into cells (they're pixels); text objects serialize as
+    // first-class v2 objects so they reopen editable.
+    const imageObjs = objects.list().filter((o) => o.kind === 'image');
+    if (imageObjs.length > 0) objects.bakeAll(store, map, EDITOR_UNITS.width);
+    const textObjs = objects.list().filter((o) => o.kind === 'text');
+    const v2 = buildTifoV2({
+      title,
+      generator: 'tifomaker-editor',
       templateId: map.templateRef.id,
       templateVersion: map.templateRef.version,
       palette: store.palette,
-      cells: Array.from(store.cells),
-    };
-    const blob = new Blob([JSON.stringify(payload)], { type: 'application/json' });
+      cells: store.cells,
+      objects: textObjs.map((o) => ({
+        id: o.id,
+        kind: 'text' as const,
+        text: (o as { text: string }).text,
+        fontId: (o as { fontId: string }).fontId,
+        arcDeg: (o as { arcDeg: number }).arcDeg,
+        colorIndex: o.colorIndex,
+        tier: o.tier,
+        cx: o.cx,
+        cy: o.cy,
+        width: o.width,
+        height: o.height,
+      })),
+    });
+    const blob = new Blob([JSON.stringify(v2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${payload.title.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}.tifo`;
+    a.download = `${title.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}.tifo`;
     a.click();
     URL.revokeObjectURL(url);
-    message.textContent = `downloaded "${payload.title}.tifo"`;
+    message.textContent = `downloaded "${title}.tifo"`;
   };
 
-  // Load a .tifo file back in — closes the download/upload loop. Validates the
-  // payload; if the file targets a different stadium, hands it off through
-  // sessionStorage and reloads with the right template so the cell count matches.
+  // Load a .tifo file back in — closes the download/upload loop. Validates with
+  // the shared format module (accepts v1 and v2; migrates v1). If it targets a
+  // different stadium, hands off through sessionStorage and reloads with the
+  // right template so the seat count matches.
   const importTifoFile = async (file: File): Promise<void> => {
     try {
       const text = await file.text();
-      const data = JSON.parse(text) as {
-        format?: string;
-        title?: string;
-        templateId?: string;
-        templateVersion?: number;
-        palette?: unknown;
-        cells?: unknown;
-      };
-      if (data.format !== 'tifo-v1' || !Array.isArray(data.cells) || !Array.isArray(data.palette)) {
-        message.textContent = 'that doesn\u2019t look like a TifoMaker .tifo file';
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(text);
+      } catch {
+        message.textContent = 'that file isn\u2019t valid JSON';
         return;
       }
-      // Different stadium than the one loaded → reload with the right template,
-      // carrying the design across the navigation.
-      if (data.templateId && data.templateId !== map.templateRef.id) {
+      const { validateTifo } = await import('../core/tifoFormat');
+      // Different stadium → reload with the right template first (validate there).
+      const stadiumId =
+        (parsed as { stadium?: { templateId?: string } })?.stadium?.templateId ??
+        (parsed as { templateId?: string })?.templateId;
+      if (typeof stadiumId === 'string' && stadiumId !== map.templateRef.id) {
         try {
           sessionStorage.setItem('tifo_pending_import', text);
         } catch {
           /* ignore quota */
         }
         message.textContent = 'opening in the matching stadium\u2026';
-        location.search = `?template=${encodeURIComponent(data.templateId)}`;
+        location.search = `?template=${encodeURIComponent(stadiumId)}`;
         return;
       }
-      // Same stadium → load directly. Guard the cell count.
-      if (data.cells.length !== map.count) {
-        message.textContent = `this file has ${data.cells.length.toLocaleString()} seats but the current stadium has ${map.count.toLocaleString()}`;
+      const result = validateTifo(parsed, (id, v) =>
+        id === map.templateRef.id && v === map.templateRef.version ? map.count : null,
+      );
+      if (!result.valid || !result.doc) {
+        const first = result.errors[0];
+        message.textContent = first ? `can\u2019t open: ${first.path ? first.path + ' — ' : ''}${first.message}` : 'invalid .tifo file';
         return;
       }
-      store.setPalette((data.palette as string[]).slice(0, 8));
-      store.loadCells(Uint8Array.from(data.cells as number[]));
-      if (data.title) docTitle.value = data.title;
+      const { flattenLayers } = await import('../core/tifoFormat');
+      store.setPalette(result.doc.palette.slice(0, 8));
+      store.loadCells(flattenLayers(result.doc));
+      const title = result.doc.meta?.title;
+      if (title) docTitle.value = title;
       designId = null; // an imported file is a fresh working copy
       publicChk.checked = false;
       editor.rebuildPalette();
       editor.repaintAll();
       renderPalette();
-      message.textContent = `opened "${data.title ?? file.name}"`;
+      message.textContent = `opened "${title ?? file.name}"`;
     } catch (err) {
       message.textContent = `couldn\u2019t open file: ${(err as Error).message}`;
     }
   };
 
   saveBtn.addEventListener('click', async () => {
+    track('save_clicked');
     const { openSaveDialog } = await import('./saveDialog');
     const choice = await openSaveDialog({
       isExisting: designId !== null,
@@ -595,7 +662,7 @@ export function mountToolbar(
       const name = await openAuthModal();
       if (!name) return;
       const me = await fetchMe();
-      reflectSignedIn(name, me?.id);
+      reflectSignedIn(name, me?.id, true);
     }
     saveBtn.disabled = true;
     try {
@@ -607,7 +674,15 @@ export function mountToolbar(
       if (designId) {
         await setPublic(designId, choice.makePublic);
         publicChk.checked = choice.makePublic;
+        refreshPhotoRow();
+        // Apply tags + template flag (only meaningful once it's saved to the account).
+        if (choice.tags.length > 0 || choice.isTemplate) {
+          const { setDesignTags, setDesignTemplate } = await import('../net/api');
+          if (choice.tags.length > 0) await setDesignTags(designId, choice.tags).catch(() => {});
+          if (choice.isTemplate) await setDesignTemplate(designId, true).catch(() => {});
+        }
       }
+      if (choice.makePublic) track('published');
       message.textContent = choice.makePublic
         ? `published "${meta.title || docTitle.value}" — it's now in the community feed`
         : `saved privately${choice.asNew ? ' as a new copy' : ''}`;
@@ -624,6 +699,7 @@ export function mountToolbar(
       docTitle.value = title;
       designId = ownerIsMe ? id : null; // loading someone else's design = working copy
       publicChk.checked = isPublic && ownerIsMe;
+      refreshPhotoRow();
       editor.rebuildPalette();
       editor.repaintAll();
       renderPalette();
@@ -651,7 +727,7 @@ export function mountToolbar(
         const name = await openAuthModal();
         if (name) {
           const me = await fetchMe();
-          reflectSignedIn(name, me?.id);
+          reflectSignedIn(name, me?.id, true);
         }
         return isSignedIn();
       },
@@ -1033,6 +1109,7 @@ export function mountToolbar(
       a.download = `${(docTitle.value.trim() || 'tifo').replace(/[^a-z0-9]+/gi, '-').toLowerCase()}-distribution.pdf`;
       a.click();
       URL.revokeObjectURL(url);
+      track('exported', { once: false }); // bottom of funnel; count every export
       message.textContent = isSignedIn()
         ? `distribution PDF exported (${(blob.size / 1024).toFixed(0)} KB)`
         : `distribution PDF exported — sign in for a clean, watermark-free version`;
@@ -1060,6 +1137,7 @@ export function mountToolbar(
     a.click();
     URL.revokeObjectURL(url);
     const rows = csv.split('\n').length - 1;
+    track('exported', { once: false });
     message.textContent = `seat manifest exported (${rows.toLocaleString()} seats)`;
   });
 }

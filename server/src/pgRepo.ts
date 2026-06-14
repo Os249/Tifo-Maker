@@ -10,7 +10,11 @@ import type {
   NewDesign,
   RevisionRow,
   UserRow,
+  EventsRepository,
+  FunnelStep,
+  PhotoMeta,
 } from './repo';
+import { normalizeTags } from './memoryRepo';
 
 const META_COLS =
   'id, title, template_id, template_version, palette, revision_count, is_public, owner_id, created_at, updated_at';
@@ -54,16 +58,24 @@ export class PgDesignRepository implements DesignRepository {
   async listPublic(query: GalleryQuery): Promise<GalleryItem[]> {
     const params: unknown[] = [];
     let where = 'd.is_public';
+    if (query.templatesOnly) where += ' AND d.is_template';
     if (query.search && query.search.trim()) {
       params.push(`%${query.search.trim()}%`);
       where += ` AND d.title ILIKE $${params.length}`;
     }
-    // Optionally annotate each row with the viewer's vote.
+    // Tag intersection: design must carry ALL requested slugs.
+    if (query.tags && query.tags.length > 0) {
+      params.push(query.tags.map((t) => t.toLowerCase()));
+      const p = params.length;
+      params.push(query.tags.length);
+      where +=
+        ` AND d.id IN (SELECT dt.design_id FROM design_tags dt JOIN tags t ON t.id = dt.tag_id` +
+        ` WHERE t.slug = ANY($${p}::text[]) GROUP BY dt.design_id HAVING count(DISTINCT t.id) = $${params.length})`;
+    }
     let voteSelect = '0 AS my_vote';
     if (query.viewerId) {
       params.push(query.viewerId);
       voteSelect = `coalesce(v.value, 0) AS my_vote`;
-      // join handled below via the param index
     }
     const viewerJoin = query.viewerId
       ? `LEFT JOIN design_votes v ON v.design_id = d.id AND v.user_id = $${params.length}`
@@ -71,9 +83,12 @@ export class PgDesignRepository implements DesignRepository {
     const order = query.sort === 'likes' ? 'd.like_score DESC, d.updated_at DESC' : 'd.updated_at DESC';
     const res = await this.pool.query(
       `SELECT d.id, d.title, d.template_id, d.template_version, d.palette, d.revision_count,
-              d.is_public, d.owner_id, d.created_at, d.updated_at, d.like_score,
+              d.is_public, d.owner_id, d.created_at, d.updated_at, d.like_score, d.is_template,
               coalesce(u.username, 'unknown') AS owner_name,
               (d.thumbnail IS NOT NULL) AS has_thumbnail,
+              coalesce((SELECT array_agg(t.slug ORDER BY t.slug) FROM design_tags dt
+                        JOIN tags t ON t.id = dt.tag_id WHERE dt.design_id = d.id), '{}') AS tags,
+              EXISTS (SELECT 1 FROM design_photos dp WHERE dp.design_id = d.id) AS has_photo,
               ${voteSelect}
        FROM designs d
        LEFT JOIN users u ON u.id = d.owner_id
@@ -87,6 +102,9 @@ export class PgDesignRepository implements DesignRepository {
       hasThumbnail: Boolean(r.has_thumbnail),
       likeScore: Number(r.like_score ?? 0),
       myVote: Number(r.my_vote ?? 0),
+      isTemplate: Boolean(r.is_template),
+      tags: (r.tags as string[]) ?? [],
+      hasPhoto: Boolean(r.has_photo),
     }));
   }
 
@@ -132,9 +150,12 @@ export class PgDesignRepository implements DesignRepository {
   async listLikedBy(userId: string): Promise<GalleryItem[]> {
     const res = await this.pool.query(
       `SELECT d.id, d.title, d.template_id, d.template_version, d.palette, d.revision_count,
-              d.is_public, d.owner_id, d.created_at, d.updated_at, d.like_score,
+              d.is_public, d.owner_id, d.created_at, d.updated_at, d.like_score, d.is_template,
               coalesce(u.username, 'unknown') AS owner_name,
-              (d.thumbnail IS NOT NULL) AS has_thumbnail, 1 AS my_vote
+              (d.thumbnail IS NOT NULL) AS has_thumbnail, 1 AS my_vote,
+              coalesce((SELECT array_agg(t.slug ORDER BY t.slug) FROM design_tags dt
+                        JOIN tags t ON t.id = dt.tag_id WHERE dt.design_id = d.id), '{}') AS tags,
+              EXISTS (SELECT 1 FROM design_photos dp WHERE dp.design_id = d.id) AS has_photo
        FROM design_votes vt
        JOIN designs d ON d.id = vt.design_id AND d.is_public
        LEFT JOIN users u ON u.id = d.owner_id
@@ -148,6 +169,9 @@ export class PgDesignRepository implements DesignRepository {
       hasThumbnail: Boolean(r.has_thumbnail),
       likeScore: Number(r.like_score ?? 0),
       myVote: 1,
+      isTemplate: Boolean(r.is_template),
+      tags: (r.tags as string[]) ?? [],
+      hasPhoto: Boolean(r.has_photo),
     }));
   }
 
@@ -243,6 +267,116 @@ export class PgDesignRepository implements DesignRepository {
     );
     return res.rowCount ? rowToMeta(res.rows[0]) : null;
   }
+
+  async setTags(designId: string, ownerId: string, slugs: string[]): Promise<string[] | null> {
+    const owns = await this.pool.query('SELECT 1 FROM designs WHERE id = $1 AND owner_id = $2', [designId, ownerId]);
+    if (owns.rowCount === 0) return null;
+    const clean = normalizeTags(slugs);
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query('DELETE FROM design_tags WHERE design_id = $1', [designId]);
+      for (const slug of clean) {
+        const t = await client.query(
+          `INSERT INTO tags (slug) VALUES ($1) ON CONFLICT (slug) DO UPDATE SET slug = EXCLUDED.slug RETURNING id`,
+          [slug],
+        );
+        await client.query('INSERT INTO design_tags (design_id, tag_id) VALUES ($1, $2) ON CONFLICT DO NOTHING', [
+          designId,
+          t.rows[0].id,
+        ]);
+      }
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+    return clean;
+  }
+
+  async setTemplate(designId: string, ownerId: string, isTemplate: boolean): Promise<boolean | null> {
+    const res = await this.pool.query(
+      'UPDATE designs SET is_template = $3 WHERE id = $1 AND owner_id = $2 RETURNING is_template',
+      [designId, ownerId, isTemplate],
+    );
+    return res.rowCount ? Boolean(res.rows[0].is_template) : null;
+  }
+
+  async popularTags(limit: number): Promise<{ slug: string; kind: string; count: number }[]> {
+    const res = await this.pool.query(
+      `SELECT t.slug, t.kind, count(*)::int AS count
+       FROM design_tags dt JOIN tags t ON t.id = dt.tag_id
+       JOIN designs d ON d.id = dt.design_id AND d.is_public
+       GROUP BY t.slug, t.kind ORDER BY count DESC, t.slug LIMIT $1`,
+      [limit],
+    );
+    return res.rows.map((r) => ({ slug: String(r.slug), kind: String(r.kind), count: Number(r.count) }));
+  }
+
+  async report(
+    targetType: 'design' | 'comment',
+    targetId: string,
+    reporterId: string | null,
+    reason: string,
+  ): Promise<string> {
+    const res = await this.pool.query(
+      `INSERT INTO moderation_reports (target_type, target_id, reporter_id, reason)
+       VALUES ($1, $2, $3, $4) RETURNING id`,
+      [targetType, targetId, reporterId, reason.slice(0, 500)],
+    );
+    return String(res.rows[0].id);
+  }
+
+  async addPhoto(
+    designId: string,
+    ownerId: string,
+    image: Buffer,
+    width: number,
+    height: number,
+    caption: string | null,
+  ): Promise<string | null> {
+    const owns = await this.pool.query('SELECT 1 FROM designs WHERE id = $1 AND owner_id = $2', [designId, ownerId]);
+    if (owns.rowCount === 0) return null;
+    const res = await this.pool.query(
+      `INSERT INTO design_photos (design_id, image, width, height, caption)
+       VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+      [designId, image, width, height, caption?.slice(0, 200) ?? null],
+    );
+    return String(res.rows[0].id);
+  }
+
+  async listPhotos(designId: string): Promise<PhotoMeta[]> {
+    const res = await this.pool.query(
+      `SELECT id, design_id, width, height, caption, is_verified, created_at
+       FROM design_photos WHERE design_id = $1 ORDER BY created_at DESC`,
+      [designId],
+    );
+    return res.rows.map((r) => ({
+      id: String(r.id),
+      designId: String(r.design_id),
+      width: Number(r.width),
+      height: Number(r.height),
+      caption: r.caption ?? null,
+      isVerified: Boolean(r.is_verified),
+      createdAt: new Date(r.created_at).toISOString(),
+    }));
+  }
+
+  async getPhoto(photoId: string): Promise<{ image: Buffer } | null> {
+    const res = await this.pool.query('SELECT image FROM design_photos WHERE id = $1', [photoId]);
+    return res.rowCount ? { image: res.rows[0].image as Buffer } : null;
+  }
+
+  async deletePhoto(photoId: string, ownerId: string): Promise<boolean> {
+    const res = await this.pool.query(
+      `DELETE FROM design_photos dp USING designs d
+       WHERE dp.id = $1 AND dp.design_id = d.id AND d.owner_id = $2`,
+      [photoId, ownerId],
+    );
+    return (res.rowCount ?? 0) > 0;
+  }
 }
 
 export class PgAuthRepository implements AuthRepository {
@@ -296,5 +430,30 @@ export class PgAuthRepository implements AuthRepository {
 
   async deleteToken(tokenHash: string): Promise<void> {
     await this.pool.query('DELETE FROM auth_tokens WHERE token_hash = $1', [tokenHash]);
+  }
+}
+
+/** Postgres events repo. Append-only inserts; funnel via one grouped query. */
+export class PgEventsRepository implements EventsRepository {
+  constructor(private readonly pool: pg.Pool) {}
+
+  async record(sessionId: string, name: string, signedIn: boolean): Promise<void> {
+    await this.pool.query(
+      'INSERT INTO events (session_id, name, signed_in) VALUES ($1, $2, $3)',
+      [sessionId.slice(0, 64), name.slice(0, 40), signedIn],
+    );
+  }
+
+  async funnel(steps: string[], days: number): Promise<FunnelStep[]> {
+    const res = await this.pool.query(
+      `SELECT name, count(DISTINCT session_id)::int AS sessions
+       FROM events
+       WHERE name = ANY($1::text[]) AND created_at >= now() - ($2::int * interval '1 day')
+       GROUP BY name`,
+      [steps, days],
+    );
+    const map = new Map<string, number>(res.rows.map((r) => [String(r.name), Number(r.sessions)]));
+    // Preserve the requested order so the caller can show drop-off.
+    return steps.map((name) => ({ name, sessions: map.get(name) ?? 0 }));
   }
 }

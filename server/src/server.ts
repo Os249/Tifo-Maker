@@ -4,8 +4,8 @@ import { fileURLToPath } from 'node:url';
 import pg from 'pg';
 import { generateSeatMap } from '../../src/core/seatmap';
 import { TEMPLATES } from '../../src/core/template';
-import { MemoryAuthRepository, MemoryDesignRepository } from './memoryRepo';
-import { PgAuthRepository, PgDesignRepository } from './pgRepo';
+import { MemoryAuthRepository, MemoryDesignRepository, MemoryEventsRepository } from './memoryRepo';
+import { PgAuthRepository, PgDesignRepository, PgEventsRepository } from './pgRepo';
 import { buildApp, type TemplateInfo } from './routes';
 
 /**
@@ -63,6 +63,7 @@ async function main(): Promise<void> {
       staticDir,
       rateLimit: true,
       logger: isProd,
+      events: new PgEventsRepository(pool),
     });
   } else {
     if (isProd) {
@@ -77,6 +78,7 @@ async function main(): Promise<void> {
       staticDir,
       rateLimit: false,
       logger: false,
+      events: new MemoryEventsRepository(),
     });
   }
 

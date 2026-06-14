@@ -8,6 +8,7 @@ import { ObjectLayer } from './core/objects';
 import { Editor } from './render/editor';
 import type { Preview3D } from './render/preview3d';
 import { mountToolbar } from './ui/toolbar';
+import { track } from './net/analytics';
 import { mountViewer } from './ui/viewer';
 import { hasOnboarded } from './ui/onboarding';
 
@@ -113,11 +114,15 @@ async function main(): Promise<void> {
     }
     if (pending) {
       try {
-        const data = JSON.parse(pending) as { title?: string; palette?: string[]; cells?: number[]; templateId?: string };
-        if (data.templateId === template.id && Array.isArray(data.cells) && data.cells.length === map.count) {
-          store.setPalette((data.palette ?? DEFAULT_PALETTE).slice(0, 8));
-          store.loadCells(Uint8Array.from(data.cells));
-          pendingTitle = data.title ?? 'Imported tifo';
+        const parsed = JSON.parse(pending);
+        const { validateTifo, flattenLayers } = await import('./core/tifoFormat');
+        const result = validateTifo(parsed, (id, v) =>
+          id === template.id && v === template.version ? map.count : null,
+        );
+        if (result.valid && result.doc) {
+          store.setPalette(result.doc.palette.slice(0, 8));
+          store.loadCells(flattenLayers(result.doc));
+          pendingTitle = result.doc.meta?.title ?? 'Imported tifo';
           sharedLoaded = true; // suppress the starter seed + onboarding
         }
       } catch {
@@ -175,6 +180,7 @@ async function main(): Promise<void> {
   const setView = async (next: ViewMode): Promise<void> => {
     const show2d = next === '2d' || next === 'split';
     const show3dView = next === '3d' || next === 'split';
+    if (show3dView) track('view_3d');
     host.hidden = !show2d;
     previewHost.hidden = !show3dView;
     camBar.hidden = next === '2d';
@@ -213,6 +219,7 @@ async function main(): Promise<void> {
 
   const stat = document.getElementById('stat')!;
   stat.textContent = `${template.name} · ${map.count.toLocaleString()} seats · map generated in ${genMs.toFixed(0)} ms`;
+  track('landed'); // editor is interactive — top of the funnel
 
   // If we loaded a shared design or an imported file, reflect title + repaint.
   const loadedTitle = sharedTitle ?? pendingTitle;

@@ -10,6 +10,9 @@ import type {
   NewDesign,
   RevisionRow,
   UserRow,
+  EventsRepository,
+  PhotoMeta,
+  FunnelStep,
 } from './repo';
 
 interface Row extends DesignRecord {
@@ -18,6 +21,8 @@ interface Row extends DesignRecord {
   /** userId → vote value (+1/-1). */
   votes: Map<string, number>;
   votedAt: Map<string, number>;
+  isTemplate: boolean;
+  tags: string[];
 }
 
 /** In-memory repositories: dev mode and route tests. Same contracts as Postgres. */
@@ -48,6 +53,8 @@ export class MemoryDesignRepository implements DesignRepository {
       revisions: [],
       votes: new Map(),
       votedAt: new Map(),
+      isTemplate: false,
+      tags: [],
     };
     this.rows.set(row.id, row);
     return this.meta(row);
@@ -73,14 +80,22 @@ export class MemoryDesignRepository implements DesignRepository {
       hasThumbnail: r.thumbnail !== null,
       likeScore: this.score(r),
       myVote: viewerId ? (r.votes.get(viewerId) ?? 0) : 0,
+      isTemplate: r.isTemplate,
+      tags: [...r.tags],
+      hasPhoto: this.photos.some((p) => p.designId === r.id),
     };
   }
 
   async listPublic(query: GalleryQuery): Promise<GalleryItem[]> {
     let rows = [...this.rows.values()].filter((r) => r.isPublic);
+    if (query.templatesOnly) rows = rows.filter((r) => r.isTemplate);
     if (query.search && query.search.trim()) {
       const q = query.search.trim().toLowerCase();
       rows = rows.filter((r) => r.title.toLowerCase().includes(q));
+    }
+    if (query.tags && query.tags.length > 0) {
+      const want = query.tags.map((t) => t.toLowerCase());
+      rows = rows.filter((r) => want.every((t) => r.tags.includes(t)));
     }
     rows.sort((a, b) =>
       query.sort === 'likes'
@@ -176,6 +191,81 @@ export class MemoryDesignRepository implements DesignRepository {
       thumbnailPng: r.thumbnail,
     });
   }
+
+  async setTags(designId: string, ownerId: string, slugs: string[]): Promise<string[] | null> {
+    const r = this.rows.get(designId);
+    if (!r || r.ownerId !== ownerId) return null;
+    r.tags = normalizeTags(slugs);
+    return [...r.tags];
+  }
+
+  async setTemplate(designId: string, ownerId: string, isTemplate: boolean): Promise<boolean | null> {
+    const r = this.rows.get(designId);
+    if (!r || r.ownerId !== ownerId) return null;
+    r.isTemplate = isTemplate;
+    return r.isTemplate;
+  }
+
+  async popularTags(limit: number): Promise<{ slug: string; kind: string; count: number }[]> {
+    const counts = new Map<string, number>();
+    for (const r of this.rows.values()) {
+      if (!r.isPublic) continue;
+      for (const t of r.tags) counts.set(t, (counts.get(t) ?? 0) + 1);
+    }
+    return [...counts.entries()]
+      .map(([slug, count]) => ({ slug, kind: 'topic', count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, limit);
+  }
+
+  private reports: { id: string; targetType: string; targetId: string; reporterId: string | null; reason: string }[] = [];
+  async report(targetType: 'design' | 'comment', targetId: string, reporterId: string | null, reason: string): Promise<string> {
+    const id = randomUUID();
+    this.reports.push({ id, targetType, targetId, reporterId, reason });
+    return id;
+  }
+
+  private photos: (PhotoMeta & { image: Buffer })[] = [];
+  async addPhoto(designId: string, ownerId: string, image: Buffer, width: number, height: number, caption: string | null): Promise<string | null> {
+    const r = this.rows.get(designId);
+    if (!r || r.ownerId !== ownerId) return null;
+    const id = randomUUID();
+    this.photos.push({ id, designId, image, width, height, caption, isVerified: false, createdAt: new Date().toISOString() });
+    return id;
+  }
+  async listPhotos(designId: string): Promise<PhotoMeta[]> {
+    return this.photos
+      .filter((p) => p.designId === designId)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      .map(({ image: _image, ...meta }) => meta);
+  }
+  async getPhoto(photoId: string): Promise<{ image: Buffer } | null> {
+    const p = this.photos.find((x) => x.id === photoId);
+    return p ? { image: p.image } : null;
+  }
+  async deletePhoto(photoId: string, ownerId: string): Promise<boolean> {
+    const p = this.photos.find((x) => x.id === photoId);
+    if (!p) return false;
+    const r = this.rows.get(p.designId);
+    if (!r || r.ownerId !== ownerId) return false;
+    this.photos = this.photos.filter((x) => x.id !== photoId);
+    return true;
+  }
+}
+
+/** Lowercase, hyphenate, dedupe, cap to a sane count + length. */
+export function normalizeTags(slugs: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of slugs) {
+    const slug = String(raw).toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 30);
+    if (slug && !seen.has(slug)) {
+      seen.add(slug);
+      out.push(slug);
+    }
+    if (out.length >= 8) break;
+  }
+  return out;
 }
 
 export class MemoryAuthRepository implements AuthRepository {
@@ -215,5 +305,24 @@ export class MemoryAuthRepository implements AuthRepository {
   usernameOf(id: string | null): string {
     for (const u of this.users.values()) if (u.id === id) return u.username;
     return 'unknown';
+  }
+}
+
+/** In-memory events repo (dev + tests). Holds events in an array. */
+export class MemoryEventsRepository implements EventsRepository {
+  private events: { sessionId: string; name: string; signedIn: boolean; at: number }[] = [];
+
+  async record(sessionId: string, name: string, signedIn: boolean): Promise<void> {
+    this.events.push({ sessionId, name, signedIn, at: Date.now() });
+  }
+
+  async funnel(steps: string[], days: number): Promise<FunnelStep[]> {
+    const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
+    return steps.map((name) => {
+      const sessions = new Set(
+        this.events.filter((e) => e.name === name && e.at >= cutoff).map((e) => e.sessionId),
+      );
+      return { name, sessions: sessions.size };
+    });
   }
 }
