@@ -34,6 +34,26 @@ Three tiers keyed to capability, not just width:
   (`?editor=1` forces the editor anywhere) — no dead tool buttons ship to a screen
   that cannot use them. Reuses the same seat map, store, and Preview3D as the editor.
 
+## Recent additions
+
+- **Likes & community feed** — published tifos appear in a full-screen feed with
+  search-by-name, Recent / Most-liked sorting, and like/dislike voting (one vote
+  per user per design, backed by a `design_votes` table and a denormalized
+  `like_score`). A request-token guard prevents stale search responses from
+  overwriting newer ones.
+- **Profiles** — the header "Sign up" button shines until you sign in, then shows
+  your name and opens a profile with your created and liked tifos.
+- **Guided save** — Save opens a dialog to choose: keep private, publish to the
+  community, or download a portable `.tifo` file — with a "save as new copy" option
+  when editing an existing design.
+- **Split view** — a third workspace mode showing the 2D Design canvas and the 3D
+  Stadium side by side, both live; painting on the left updates the stadium on the
+  right in real time (they share the one cell buffer).
+- **Real-colour import** — image import defaults to extracting the picture's own
+  dominant colours as the palette (dither now off by default).
+- **Design-tab clarity** — an orientation strip and section header tags make it
+  clear which controls set how you paint vs. the overall look.
+
 ## Deployment
 
 The app and API deploy as **one process from one origin** — the server serves

@@ -51,3 +51,16 @@ ALTER TABLE designs ADD COLUMN IF NOT EXISTS owner_id  UUID REFERENCES users(id)
 ALTER TABLE designs ADD COLUMN IF NOT EXISTS is_public BOOLEAN NOT NULL DEFAULT false;
 ALTER TABLE designs ADD COLUMN IF NOT EXISTS thumbnail BYTEA;  -- client-rendered PNG
 CREATE INDEX IF NOT EXISTS designs_public_idx ON designs (is_public, updated_at DESC);
+
+-- Likes / dislikes. One row per (user, design); value is +1 (like) or -1
+-- (dislike). like_score on designs is the denormalized sum for cheap sorting.
+CREATE TABLE IF NOT EXISTS design_votes (
+  design_id UUID NOT NULL REFERENCES designs(id) ON DELETE CASCADE,
+  user_id   UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  value     SMALLINT NOT NULL CHECK (value IN (-1, 1)),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (design_id, user_id)
+);
+
+ALTER TABLE designs ADD COLUMN IF NOT EXISTS like_score INT NOT NULL DEFAULT 0;
+CREATE INDEX IF NOT EXISTS designs_like_score_idx ON designs (is_public, like_score DESC, updated_at DESC);

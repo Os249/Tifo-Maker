@@ -1,0 +1,83 @@
+/**
+ * Save dialog. Guides the user between three intents instead of one ambiguous
+ * Save button:
+ *   • Save to your account — keeps it private, tied to the user.
+ *   • Publish to the community — saves and lists it in the public feed.
+ *   • Download a copy — a local .tifo file, no account needed.
+ * "Save as a new copy" is offered when editing an existing design, so the
+ * original isn't overwritten.
+ *
+ * The dialog only collects intent; the caller performs the actual save so all
+ * the store/map/network wiring stays in one place.
+ */
+
+export type SaveChoice =
+  | { kind: 'account'; makePublic: boolean; asNew: boolean }
+  | { kind: 'download' };
+
+export function openSaveDialog(opts: {
+  isExisting: boolean; // editing a saved design (enables "save as new copy")
+  isSignedIn: boolean;
+  currentlyPublic: boolean;
+}): Promise<SaveChoice | null> {
+  return new Promise((resolve) => {
+    const backdrop = document.createElement('div');
+    backdrop.className = 'save-backdrop';
+    backdrop.innerHTML = `
+      <div class="save-modal" role="dialog" aria-modal="true" aria-label="Save your tifo">
+        <button class="save-close" aria-label="Close">&times;</button>
+        <h3 class="save-h3">Save your tifo</h3>
+        <p class="save-lead">Where should this go?</p>
+        <div class="save-options">
+          <button class="save-option" data-act="private">
+            <i class="ti ti-lock"></i>
+            <span class="save-opt-title">Save to your account</span>
+            <span class="save-opt-sub">Private — only you can see it. ${opts.isSignedIn ? '' : 'Sign in required.'}</span>
+          </button>
+          <button class="save-option" data-act="public">
+            <i class="ti ti-world"></i>
+            <span class="save-opt-title">Publish to the community</span>
+            <span class="save-opt-sub">Saves and lists it in the public feed for others to see and remix.</span>
+          </button>
+          <button class="save-option" data-act="download">
+            <i class="ti ti-download"></i>
+            <span class="save-opt-title">Download a copy</span>
+            <span class="save-opt-sub">A .tifo file on your device. No account needed.</span>
+          </button>
+        </div>
+        ${
+          opts.isExisting
+            ? `<label class="save-asnew"><input type="checkbox" id="save-asnew" /> Save as a new copy (don’t overwrite the original)</label>`
+            : ''
+        }
+      </div>
+    `;
+    document.body.appendChild(backdrop);
+
+    const close = (result: SaveChoice | null): void => {
+      backdrop.remove();
+      document.removeEventListener('keydown', onKey);
+      resolve(result);
+    };
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') close(null);
+    };
+    document.addEventListener('keydown', onKey);
+    backdrop.addEventListener('mousedown', (e) => {
+      if (e.target === backdrop) close(null);
+    });
+    backdrop.querySelector('.save-close')!.addEventListener('click', () => close(null));
+
+    const asNew = (): boolean =>
+      (backdrop.querySelector('#save-asnew') as HTMLInputElement | null)?.checked ?? false;
+
+    backdrop.querySelectorAll('.save-option').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const act = (btn as HTMLElement).dataset.act;
+        if (act === 'download') close({ kind: 'download' });
+        else if (act === 'public') close({ kind: 'account', makePublic: true, asNew: asNew() });
+        else close({ kind: 'account', makePublic: false, asNew: asNew() });
+      });
+    });
+  });
+}

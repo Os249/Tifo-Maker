@@ -8,7 +8,8 @@ import { renderTextCanvas, TIFO_FONTS, type RenderedText } from '../core/text';
 import type { ObjectLayer } from '../core/objects';
 import { MIN_LEGIBLE_RUN, findFragileSeats } from '../core/analysis';
 import { RevealPlayer, REVEAL_PRESETS, type RevealId } from '../core/reveal';
-import { isSignedIn, loadDesign, saveDesign, setPublic } from '../net/api';
+import { fetchMe, isSignedIn, loadDesign, saveDesign, setPublic } from '../net/api';
+import { extractPalette, rasterize } from '../core/importImage';
 import { openAuthModal } from './authModal';
 import { openGallery } from './gallery';
 import { EDITOR_UNITS } from '../core/seatmap';
@@ -346,6 +347,7 @@ export function mountToolbar(
   const importPlace = $('#import-place') as unknown as HTMLSelectElement;
   const importApply = $('#import-apply') as unknown as HTMLButtonElement;
   const ditherChk = $('#dither') as unknown as HTMLInputElement;
+  const realColorsChk = $('#real-colors') as unknown as HTMLInputElement;
   const importAlpha = $('#import-alpha') as unknown as HTMLInputElement;
   const importAlphaOut = $('#import-alpha-out');
 
@@ -381,6 +383,22 @@ export function mountToolbar(
   const stampImageAt = (cx: number, cy: number): void => {
     if (!pendingImport) return;
     const { w, h } = importRect();
+    // "Real colours": rebuild the palette from the picture's own dominant colors
+    // so the imported art keeps its true look instead of mapping to club cards.
+    if (realColorsChk.checked) {
+      const sampleCols = Math.min(200, Math.max(32, Math.round(w / 3)));
+      const sampleRows = Math.max(2, Math.round((sampleCols * pendingImport.bitmap.height) / pendingImport.bitmap.width));
+      const px = rasterize(pendingImport.bitmap, sampleCols, sampleRows);
+      const extracted = extractPalette(px, sampleCols, sampleRows, 6, Number(importAlpha.value));
+      if (extracted.length > 0) {
+        store.setPalette(['#262a33', ...extracted]); // slot 0 stays the empty seat
+        editor.rebuildPalette();
+        editor.repaintAll();
+        renderPalette();
+        const presetSel = $('#preset') as unknown as HTMLSelectElement;
+        presetSel.value = ''; // custom palette no longer matches a named preset
+      }
+    }
     objects.addImage({
       cx,
       cy,
@@ -456,37 +474,96 @@ export function mountToolbar(
   let designId: string | null = null;
   const publicChk = $('#public') as unknown as HTMLInputElement;
   const signinBtn = $('#signin') as unknown as HTMLButtonElement;
+  let myUserId: string | null = null;
 
-  const reflectSignedIn = (name: string): void => {
+  const reflectSignedIn = (name: string, userId?: string): void => {
     signinBtn.textContent = name;
+    signinBtn.classList.remove('signup-shine'); // stop pulsing once signed in
+    if (userId) myUserId = userId;
     const avatar = document.getElementById('avatar');
     if (avatar) avatar.textContent = name[0].toUpperCase();
     message.textContent = `signed in as ${name}`;
   };
 
+  // Clicking the header button: if signed out → auth modal; if signed in → profile.
   signinBtn.addEventListener('click', async () => {
+    if (isSignedIn() && myUserId) {
+      const { openProfile } = await import('./profile');
+      await openProfile(myUserId, (id) => void doLoad(id));
+      return;
+    }
     const name = await openAuthModal();
-    if (name) reflectSignedIn(name);
+    if (name) {
+      const me = await fetchMe();
+      reflectSignedIn(name, me?.id);
+    }
   });
 
+  // Restore session on load: if a token is present, show the name (no shine).
+  void (async () => {
+    const me = await fetchMe();
+    if (me?.username) reflectSignedIn(me.username, me.id);
+  })();
+
   const saveBtn = $('#save') as unknown as HTMLButtonElement;
+
+  // Download the current design as a portable .tifo file (JSON: template + palette + cells).
+  const downloadLocal = (): void => {
+    const payload = {
+      format: 'tifo-v1',
+      title: docTitle.value.trim() || 'Untitled tifo',
+      templateId: map.templateRef.id,
+      templateVersion: map.templateRef.version,
+      palette: store.palette,
+      cells: Array.from(store.cells),
+    };
+    const blob = new Blob([JSON.stringify(payload)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${payload.title.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}.tifo`;
+    a.click();
+    URL.revokeObjectURL(url);
+    message.textContent = `downloaded "${payload.title}.tifo"`;
+  };
+
   saveBtn.addEventListener('click', async () => {
+    const { openSaveDialog } = await import('./saveDialog');
+    const choice = await openSaveDialog({
+      isExisting: designId !== null,
+      isSignedIn: isSignedIn(),
+      currentlyPublic: publicChk.checked,
+    });
+    if (!choice) return;
+
+    if (choice.kind === 'download') {
+      downloadLocal();
+      return;
+    }
+
+    // Account save (private or public) — ensure signed in first.
     if (!isSignedIn()) {
       const name = await openAuthModal();
-      if (!name) return; // user dismissed — nothing to save to
-      reflectSignedIn(name);
+      if (!name) return;
+      const me = await fetchMe();
+      reflectSignedIn(name, me?.id);
     }
     saveBtn.disabled = true;
     try {
-      const title = designId ? '' : (docTitle.value.trim() || 'Untitled tifo');
-      const meta = await saveDesign(store, map, map.templateRef.id, map.templateRef.version, title, designId);
+      const saveAsNew = choice.asNew || designId === null;
+      const targetId = saveAsNew ? null : designId;
+      const title = saveAsNew ? docTitle.value.trim() || 'Untitled tifo' : '';
+      const meta = await saveDesign(store, map, map.templateRef.id, map.templateRef.version, title, targetId);
       designId = meta.id ?? designId;
-      if (designId && publicChk.checked !== meta.isPublic) {
-        await setPublic(designId, publicChk.checked);
+      if (designId) {
+        await setPublic(designId, choice.makePublic);
+        publicChk.checked = choice.makePublic;
       }
-      message.textContent = `saved - id ${designId}${publicChk.checked ? ' (public)' : ''}`;
+      message.textContent = choice.makePublic
+        ? `published "${meta.title || docTitle.value}" — it's now in the community feed`
+        : `saved privately${choice.asNew ? ' as a new copy' : ''}`;
     } catch (err) {
-      message.textContent = `save failed: ${(err as Error).message} - is the API running? (npm run server)`;
+      message.textContent = `save failed: ${(err as Error).message}`;
     } finally {
       saveBtn.disabled = false;
     }
@@ -510,7 +587,19 @@ export function mountToolbar(
     const id = window.prompt('Design id to load');
     if (id) void doLoad(id.trim());
   });
-  $('#gallery').addEventListener('click', () => void openGallery((id) => void doLoad(id)));
+  $('#gallery').addEventListener('click', () =>
+    void openGallery(
+      (id) => void doLoad(id),
+      async () => {
+        const name = await openAuthModal();
+        if (name) {
+          const me = await fetchMe();
+          reflectSignedIn(name, me?.id);
+        }
+        return isSignedIn();
+      },
+    ),
+  );
 
   // Keyboard shortcuts
   window.addEventListener('keydown', (e) => {

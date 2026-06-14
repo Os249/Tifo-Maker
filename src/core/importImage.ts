@@ -62,6 +62,61 @@ function hexToRGB(hex: string): [number, number, number] {
   return [(v >> 16) & 0xff, (v >> 8) & 0xff, v & 0xff];
 }
 
+function rgbToHex(r: number, g: number, b: number): string {
+  return '#' + [r, g, b].map((c) => Math.max(0, Math.min(255, Math.round(c))).toString(16).padStart(2, '0')).join('');
+}
+
+/**
+ * Extract the image's own dominant colors (for "import with real colours").
+ * Buckets opaque pixels into a coarse RGB grid, takes the most populated
+ * buckets, and refines each to the mean of its members. Returns up to `count`
+ * hex colors (slot 0 is reserved for the empty seat, so this fills slots 1..N).
+ * Pure aside from rasterize; runs on the same downsampled pixel grid.
+ */
+export function extractPalette(
+  pixels: Uint8ClampedArray,
+  cols: number,
+  rows: number,
+  count = 6,
+  alphaThreshold = 128,
+): string[] {
+  const SHIFT = 4; // 16 levels per channel → 4096 buckets
+  const sums = new Map<number, { r: number; g: number; b: number; n: number }>();
+  for (let p = 0; p < cols * rows; p++) {
+    if (pixels[p * 4 + 3] < alphaThreshold) continue;
+    const r = pixels[p * 4];
+    const g = pixels[p * 4 + 1];
+    const b = pixels[p * 4 + 2];
+    const key = ((r >> SHIFT) << 8) | ((g >> SHIFT) << 4) | (b >> SHIFT);
+    const e = sums.get(key);
+    if (e) {
+      e.r += r;
+      e.g += g;
+      e.b += b;
+      e.n++;
+    } else {
+      sums.set(key, { r, g, b, n: 1 });
+    }
+  }
+  const buckets = [...sums.values()].sort((a, b) => b.n - a.n);
+  const chosen: string[] = [];
+  for (const bkt of buckets) {
+    const hex = rgbToHex(bkt.r / bkt.n, bkt.g / bkt.n, bkt.b / bkt.n);
+    // Skip near-duplicate colors so the palette stays varied.
+    if (chosen.some((c) => colorDist(hexToRGB(c), hexToRGB(hex)) < 900)) continue;
+    chosen.push(hex);
+    if (chosen.length >= count) break;
+  }
+  return chosen;
+}
+
+function colorDist(a: [number, number, number], b: [number, number, number]): number {
+  const dr = a[0] - b[0];
+  const dg = a[1] - b[1];
+  const db = a[2] - b[2];
+  return dr * dr * 0.299 + dg * dg * 0.587 + db * db * 0.114;
+}
+
 /**
  * Quantize RGBA pixels to palette indices with optional Floyd–Steinberg dithering.
  * Index 0 (empty seat) is never a quantization target — imported art always maps

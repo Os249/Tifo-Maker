@@ -121,14 +121,6 @@ export interface SavedMeta {
   updatedAt: string;
 }
 
-export interface GalleryItem {
-  id: string;
-  title: string;
-  ownerName: string;
-  hasThumbnail: boolean;
-  updatedAt: string;
-}
-
 /** Create (no id) or overwrite (with id) a design, including a fresh thumbnail. */
 export async function saveDesign(
   store: DesignStore,
@@ -205,8 +197,57 @@ export function shareUrl(id: string): string {
   return `${location.origin}/d/${id}`;
 }
 
-export async function listGallery(): Promise<GalleryItem[]> {
-  return (await expectOk(await fetch(`${API}/gallery`))) as GalleryItem[];
+export interface GalleryItem {
+  id: string;
+  title: string;
+  ownerId: string | null;
+  ownerName: string;
+  hasThumbnail: boolean;
+  likeScore: number;
+  myVote: number;
+  updatedAt: string;
+}
+
+export type GallerySort = 'recent' | 'likes';
+
+export async function listGallery(opts: { sort?: GallerySort; search?: string } = {}): Promise<GalleryItem[]> {
+  const params = new URLSearchParams();
+  if (opts.sort) params.set('sort', opts.sort);
+  if (opts.search) params.set('search', opts.search);
+  const qs = params.toString();
+  return (await expectOk(await fetch(`${API}/gallery${qs ? `?${qs}` : ''}`, { headers: authHeaders(false) }))) as GalleryItem[];
+}
+
+/** Like (1), dislike (-1), or clear (0) a design. Returns the new score + vote. */
+export async function voteDesign(id: string, value: 1 | -1 | 0): Promise<{ likeScore: number; myVote: number }> {
+  return (await expectOk(
+    await fetch(`${API}/designs/${id}/vote`, {
+      method: 'POST',
+      headers: authHeaders(true),
+      body: JSON.stringify({ value }),
+    }),
+  )) as { likeScore: number; myVote: number };
+}
+
+export interface ProfileData {
+  id: string;
+  username: string;
+  created: GalleryItem[];
+  liked: GalleryItem[];
+}
+
+export async function fetchProfile(userId: string): Promise<ProfileData> {
+  return (await expectOk(await fetch(`${API}/users/${userId}/profile`, { headers: authHeaders(false) }))) as ProfileData;
+}
+
+/** The signed-in user's id + name, or null. */
+export async function fetchMe(): Promise<{ id: string; username: string } | null> {
+  if (!token) return null;
+  try {
+    return (await expectOk(await fetch(`${API}/me`, { headers: authHeaders(false) }))) as { id: string; username: string };
+  } catch {
+    return null;
+  }
 }
 
 export const thumbnailUrl = (id: string): string => `${API}/designs/${id}/thumbnail.png`;

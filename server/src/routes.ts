@@ -149,11 +149,43 @@ export async function buildApp(
   app.get('/api/me', async (req, reply) => {
     const userId = await requireUser(req, reply);
     if (!userId) return;
-    return { id: userId };
+    const user = await auth.getUserById(userId).catch(() => null);
+    return { id: userId, username: user?.username ?? null };
   });
 
   // ---------- gallery ----------
-  app.get('/api/gallery', async () => repo.listPublic());
+  app.get('/api/gallery', async (req) => {
+    const q = req.query as { sort?: string; search?: string };
+    const sort = q.sort === 'likes' ? 'likes' : 'recent';
+    const viewerId = await userOf(req); // annotate the caller's votes when signed in
+    return repo.listPublic({ sort, search: q.search, viewerId });
+  });
+
+  // Like / dislike / clear. value: 1, -1, or 0.
+  app.post('/api/designs/:id/vote', async (req, reply) => {
+    const userId = await requireUser(req, reply);
+    if (!userId) return;
+    const { id } = req.params as { id: string };
+    const raw = (req.body as { value?: unknown } | null)?.value;
+    const value = raw === 1 || raw === -1 || raw === 0 ? raw : null;
+    if (value === null) return reply.code(400).send({ error: 'value must be 1, -1, or 0' });
+    const result = await repo.vote(id, userId, value as -1 | 0 | 1);
+    if (!result) return reply.code(404).send({ error: 'not found' });
+    return result;
+  });
+
+  // Public profile: a user's published designs + the public designs they liked.
+  app.get('/api/users/:id/profile', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const user = await auth.getUserById(id).catch(() => null);
+    if (!user) return reply.code(404).send({ error: 'not found' });
+    const viewerId = await userOf(req);
+    const [created, liked] = await Promise.all([
+      repo.listPublic({ sort: 'recent', viewerId }).then((all) => all.filter((d) => d.ownerId === id)),
+      repo.listLikedBy(id),
+    ]);
+    return { id: user.id, username: user.username, created, liked };
+  });
 
   // ---------- designs ----------
   app.get('/api/designs', async (req, reply) => {

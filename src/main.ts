@@ -114,52 +114,75 @@ async function main(): Promise<void> {
 
   // --- Phase 2: lazy-initialized 3D preview sharing the same store ---
   const previewHost = document.getElementById('preview-host')!;
+  const canvasWrap = host.parentElement as HTMLElement;
   const btn2d = document.getElementById('view-2d') as HTMLButtonElement;
   const btn3d = document.getElementById('view-3d') as HTMLButtonElement;
+  const btnSplit = document.getElementById('view-split') as HTMLButtonElement;
   const camBar = document.getElementById('cam-bar')!;
   let preview: Preview3D | null = null;
   let loading = false;
 
-  const show3d = async (on: boolean): Promise<void> => {
-    host.hidden = on;
-    previewHost.hidden = !on;
-    camBar.hidden = !on;
-    btn2d.classList.toggle('active', !on);
-    btn3d.classList.toggle('active', on);
-    if (on) {
-      if (!preview) {
-        if (loading) return;
-        loading = true;
-        // Code-split: Three.js loads only when the stadium view is first
-        // opened. The editor's initial bundle stays Pixi-only.
-        const { Preview3D, CAMERA_PRESETS } = await import('./render/preview3d');
-        preview = new Preview3D(previewHost, map, store);
-        const sel = document.getElementById('camera-preset') as HTMLSelectElement;
-        CAMERA_PRESETS.forEach((p, i) => {
-          const opt = document.createElement('option');
-          opt.value = String(i);
-          opt.textContent = p.name;
-          sel.appendChild(opt);
-        });
-        sel.addEventListener('change', () => preview!.applyPreset(CAMERA_PRESETS[Number(sel.value)]));
-        const noshow = document.getElementById('noshow') as HTMLInputElement;
-        noshow.addEventListener('change', () => preview!.setNoShows(noshow.checked));
-        loading = false;
+  // Lazily create the 3D preview (Three.js loads only when first needed).
+  const ensurePreview = async (): Promise<Preview3D | null> => {
+    if (preview) return preview;
+    if (loading) return null;
+    loading = true;
+    const { Preview3D, CAMERA_PRESETS } = await import('./render/preview3d');
+    preview = new Preview3D(previewHost, map, store);
+    const sel = document.getElementById('camera-preset') as HTMLSelectElement;
+    CAMERA_PRESETS.forEach((p, i) => {
+      const opt = document.createElement('option');
+      opt.value = String(i);
+      opt.textContent = p.name;
+      sel.appendChild(opt);
+    });
+    sel.addEventListener('change', () => preview!.applyPreset(CAMERA_PRESETS[Number(sel.value)]));
+    const noshow = document.getElementById('noshow') as HTMLInputElement;
+    noshow.addEventListener('change', () => preview!.setNoShows(noshow.checked));
+    loading = false;
+    return preview;
+  };
+
+  type ViewMode = '2d' | '3d' | 'split';
+
+  const setView = async (next: ViewMode): Promise<void> => {
+    const show2d = next === '2d' || next === 'split';
+    const show3dView = next === '3d' || next === 'split';
+    host.hidden = !show2d;
+    previewHost.hidden = !show3dView;
+    camBar.hidden = next === '2d';
+    canvasWrap.classList.toggle('split', next === 'split');
+    btn2d.classList.toggle('active', next === '2d');
+    btn3d.classList.toggle('active', next === '3d');
+    btnSplit.classList.toggle('active', next === 'split');
+
+    if (show3dView) {
+      const p = await ensurePreview();
+      if (p) {
+        p.recolorAll();
+        p.start();
       }
-      preview.recolorAll();
-      preview.start();
-      editor.app.ticker.stop();
     } else {
       preview?.stop();
+    }
+    // The 2D editor keeps rendering in 2d and split; pauses only in pure 3d.
+    if (show2d) {
       editor.app.ticker.start();
       requestAnimationFrame(() => {
         editor.app.resize();
-        editor.fitToView();
+        if (next !== 'split') editor.fitToView();
+        else editor.fitToView();
       });
+    } else {
+      editor.app.ticker.stop();
     }
+    // In split, the 3D canvas shares the row — its ResizeObserver re-fits it
+    // automatically when the layout changes to half width.
   };
-  btn2d.addEventListener('click', () => void show3d(false));
-  btn3d.addEventListener('click', () => void show3d(true));
+
+  btn2d.addEventListener('click', () => void setView('2d'));
+  btn3d.addEventListener('click', () => void setView('3d'));
+  btnSplit.addEventListener('click', () => void setView('split'));
 
   const stat = document.getElementById('stat')!;
   stat.textContent = `${template.name} · ${map.count.toLocaleString()} seats · map generated in ${genMs.toFixed(0)} ms`;

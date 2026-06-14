@@ -6,6 +6,7 @@ import type {
   DesignRepository,
   DiffBytes,
   GalleryItem,
+  GalleryQuery,
   NewDesign,
   RevisionRow,
   UserRow,
@@ -50,19 +51,103 @@ export class PgDesignRepository implements DesignRepository {
     return res.rows.map(rowToMeta);
   }
 
-  async listPublic(): Promise<GalleryItem[]> {
+  async listPublic(query: GalleryQuery): Promise<GalleryItem[]> {
+    const params: unknown[] = [];
+    let where = 'd.is_public';
+    if (query.search && query.search.trim()) {
+      params.push(`%${query.search.trim()}%`);
+      where += ` AND d.title ILIKE $${params.length}`;
+    }
+    // Optionally annotate each row with the viewer's vote.
+    let voteSelect = '0 AS my_vote';
+    if (query.viewerId) {
+      params.push(query.viewerId);
+      voteSelect = `coalesce(v.value, 0) AS my_vote`;
+      // join handled below via the param index
+    }
+    const viewerJoin = query.viewerId
+      ? `LEFT JOIN design_votes v ON v.design_id = d.id AND v.user_id = $${params.length}`
+      : '';
+    const order = query.sort === 'likes' ? 'd.like_score DESC, d.updated_at DESC' : 'd.updated_at DESC';
     const res = await this.pool.query(
       `SELECT d.id, d.title, d.template_id, d.template_version, d.palette, d.revision_count,
-              d.is_public, d.owner_id, d.created_at, d.updated_at,
+              d.is_public, d.owner_id, d.created_at, d.updated_at, d.like_score,
               coalesce(u.username, 'unknown') AS owner_name,
-              (d.thumbnail IS NOT NULL) AS has_thumbnail
-       FROM designs d LEFT JOIN users u ON u.id = d.owner_id
-       WHERE d.is_public ORDER BY d.updated_at DESC LIMIT 200`,
+              (d.thumbnail IS NOT NULL) AS has_thumbnail,
+              ${voteSelect}
+       FROM designs d
+       LEFT JOIN users u ON u.id = d.owner_id
+       ${viewerJoin}
+       WHERE ${where} ORDER BY ${order} LIMIT 200`,
+      params,
     );
     return res.rows.map((r) => ({
       ...rowToMeta(r),
       ownerName: String(r.owner_name),
       hasThumbnail: Boolean(r.has_thumbnail),
+      likeScore: Number(r.like_score ?? 0),
+      myVote: Number(r.my_vote ?? 0),
+    }));
+  }
+
+  async vote(
+    designId: string,
+    userId: string,
+    value: -1 | 0 | 1,
+  ): Promise<{ likeScore: number; myVote: number } | null> {
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+      const exists = await client.query('SELECT 1 FROM designs WHERE id = $1 AND is_public', [designId]);
+      if (exists.rowCount === 0) {
+        await client.query('ROLLBACK');
+        return null;
+      }
+      if (value === 0) {
+        await client.query('DELETE FROM design_votes WHERE design_id = $1 AND user_id = $2', [designId, userId]);
+      } else {
+        await client.query(
+          `INSERT INTO design_votes (design_id, user_id, value) VALUES ($1, $2, $3)
+           ON CONFLICT (design_id, user_id) DO UPDATE SET value = EXCLUDED.value, created_at = now()`,
+          [designId, userId, value],
+        );
+      }
+      // Recompute the denormalized score from the source of truth.
+      const sum = await client.query(
+        'SELECT coalesce(sum(value), 0)::int AS score FROM design_votes WHERE design_id = $1',
+        [designId],
+      );
+      const likeScore = Number(sum.rows[0].score);
+      await client.query('UPDATE designs SET like_score = $2 WHERE id = $1', [designId, likeScore]);
+      await client.query('COMMIT');
+      return { likeScore, myVote: value };
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+
+  async listLikedBy(userId: string): Promise<GalleryItem[]> {
+    const res = await this.pool.query(
+      `SELECT d.id, d.title, d.template_id, d.template_version, d.palette, d.revision_count,
+              d.is_public, d.owner_id, d.created_at, d.updated_at, d.like_score,
+              coalesce(u.username, 'unknown') AS owner_name,
+              (d.thumbnail IS NOT NULL) AS has_thumbnail, 1 AS my_vote
+       FROM design_votes vt
+       JOIN designs d ON d.id = vt.design_id AND d.is_public
+       LEFT JOIN users u ON u.id = d.owner_id
+       WHERE vt.user_id = $1 AND vt.value = 1
+       ORDER BY vt.created_at DESC LIMIT 200`,
+      [userId],
+    );
+    return res.rows.map((r) => ({
+      ...rowToMeta(r),
+      ownerName: String(r.owner_name),
+      hasThumbnail: Boolean(r.has_thumbnail),
+      likeScore: Number(r.like_score ?? 0),
+      myVote: 1,
     }));
   }
 
@@ -182,6 +267,13 @@ export class PgAuthRepository implements AuthRepository {
       'SELECT id, username, password_hash FROM users WHERE username = $1',
       [username],
     );
+    if (res.rowCount === 0) return null;
+    const r = res.rows[0];
+    return { id: String(r.id), username: String(r.username), passwordHash: String(r.password_hash) };
+  }
+
+  async getUserById(id: string): Promise<UserRow | null> {
+    const res = await this.pool.query('SELECT id, username, password_hash FROM users WHERE id = $1', [id]);
     if (res.rowCount === 0) return null;
     const r = res.rows[0];
     return { id: String(r.id), username: String(r.username), passwordHash: String(r.password_hash) };

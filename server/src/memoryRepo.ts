@@ -6,6 +6,7 @@ import type {
   DesignRepository,
   DiffBytes,
   GalleryItem,
+  GalleryQuery,
   NewDesign,
   RevisionRow,
   UserRow,
@@ -14,6 +15,9 @@ import type {
 interface Row extends DesignRecord {
   thumbnail: Buffer | null;
   revisions: { seq: number; diff: DiffBytes; snapshot: Buffer | null; createdAt: string }[];
+  /** userId → vote value (+1/-1). */
+  votes: Map<string, number>;
+  votedAt: Map<string, number>;
 }
 
 /** In-memory repositories: dev mode and route tests. Same contracts as Postgres. */
@@ -42,6 +46,8 @@ export class MemoryDesignRepository implements DesignRepository {
       createdAt: now,
       updatedAt: now,
       revisions: [],
+      votes: new Map(),
+      votedAt: new Map(),
     };
     this.rows.set(row.id, row);
     return this.meta(row);
@@ -54,11 +60,58 @@ export class MemoryDesignRepository implements DesignRepository {
       .map((r) => this.meta(r));
   }
 
-  async listPublic(): Promise<GalleryItem[]> {
+  private score(r: Row): number {
+    let s = 0;
+    for (const v of r.votes.values()) s += v;
+    return s;
+  }
+
+  private galleryItem(r: Row, viewerId?: string | null): GalleryItem {
+    return {
+      ...this.meta(r),
+      ownerName: this.usernames(r.ownerId),
+      hasThumbnail: r.thumbnail !== null,
+      likeScore: this.score(r),
+      myVote: viewerId ? (r.votes.get(viewerId) ?? 0) : 0,
+    };
+  }
+
+  async listPublic(query: GalleryQuery): Promise<GalleryItem[]> {
+    let rows = [...this.rows.values()].filter((r) => r.isPublic);
+    if (query.search && query.search.trim()) {
+      const q = query.search.trim().toLowerCase();
+      rows = rows.filter((r) => r.title.toLowerCase().includes(q));
+    }
+    rows.sort((a, b) =>
+      query.sort === 'likes'
+        ? this.score(b) - this.score(a) || b.updatedAt.localeCompare(a.updatedAt)
+        : b.updatedAt.localeCompare(a.updatedAt),
+    );
+    return rows.map((r) => this.galleryItem(r, query.viewerId));
+  }
+
+  async vote(
+    designId: string,
+    userId: string,
+    value: -1 | 0 | 1,
+  ): Promise<{ likeScore: number; myVote: number } | null> {
+    const r = this.rows.get(designId);
+    if (!r || !r.isPublic) return null;
+    if (value === 0) {
+      r.votes.delete(userId);
+      r.votedAt.delete(userId);
+    } else {
+      r.votes.set(userId, value);
+      r.votedAt.set(userId, Date.now());
+    }
+    return { likeScore: this.score(r), myVote: value };
+  }
+
+  async listLikedBy(userId: string): Promise<GalleryItem[]> {
     return [...this.rows.values()]
-      .filter((r) => r.isPublic)
-      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
-      .map((r) => ({ ...this.meta(r), ownerName: this.usernames(r.ownerId), hasThumbnail: r.thumbnail !== null }));
+      .filter((r) => r.isPublic && r.votes.get(userId) === 1)
+      .sort((a, b) => (b.votedAt.get(userId) ?? 0) - (a.votedAt.get(userId) ?? 0))
+      .map((r) => this.galleryItem(r, userId));
   }
 
   async get(id: string): Promise<DesignRecord | null> {
@@ -138,6 +191,11 @@ export class MemoryAuthRepository implements AuthRepository {
 
   async getUserByName(username: string): Promise<UserRow | null> {
     return this.users.get(username) ?? null;
+  }
+
+  async getUserById(id: string): Promise<UserRow | null> {
+    for (const u of this.users.values()) if (u.id === id) return u;
+    return null;
   }
 
   async createToken(userId: string, tokenHash: string, expiresAt: Date): Promise<void> {
