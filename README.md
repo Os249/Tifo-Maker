@@ -36,6 +36,13 @@ Three tiers keyed to capability, not just width:
 
 ## Recent additions
 
+- **Marketing homepage** — a colorful, World Cup-palette landing page now serves at
+  `/`, with the editor at `/app`. First-time visitors get the pitch (hero, value
+  trio, how-it-works, club/enterprise block, CTAs); return users bookmark `/app`.
+  Share links (`/d/:id`) and the SPA fallback still serve the editor. Built as a
+  second Vite entry; the landing CSS is standalone (~8KB).
+
+
 - **Likes & community feed** — published tifos appear in a full-screen feed with
   search-by-name, Recent / Most-liked sorting, and like/dislike voting (one vote
   per user per design, backed by a `design_votes` table and a denormalized

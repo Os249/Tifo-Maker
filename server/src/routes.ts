@@ -482,12 +482,22 @@ export async function buildApp(
       return reply.type('text/html').send(html);
     });
 
-    await app.register(fastifyStatic, { root: staticDir, wildcard: false });
+    // Marketing landing at the root; the editor app lives at /app. Return users
+    // bookmark /app; first-time visitors get the pitch. Share links (/d/:id)
+    // and the SPA fallback both serve the editor.
+    const landingHtml = readFileSync(join(staticDir, 'landing.html'), 'utf8');
+    app.get('/', async (_req, reply) => reply.type('text/html').send(landingHtml));
+    app.get('/app', async (_req, reply) => reply.type('text/html').send(indexHtml));
+
+    // index:false so the static plugin doesn't auto-serve index.html at '/'
+    // (we serve the landing there instead); assets still resolve by path.
+    await app.register(fastifyStatic, { root: staticDir, wildcard: false, index: false });
     app.setNotFoundHandler((req, reply) => {
       if (req.url.startsWith('/api/')) {
         return reply.code(404).send({ error: 'not found' });
       }
-      return reply.sendFile('index.html');
+      // Unknown client routes fall back to the editor SPA.
+      return reply.type('text/html').send(indexHtml);
     });
   }
 
