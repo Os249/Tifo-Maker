@@ -6,6 +6,12 @@ import helmet from '@fastify/helmet';
 import fastifyStatic from '@fastify/static';
 import { hashPassword, hashToken, issueToken, TOKEN_TTL_MS, verifyPassword } from './auth';
 import { gunzipBytes, gzipBytes, u32FromB64, u8FromB64 } from './codec';
+import { generateSeatMap } from '../../src/core/seatmap';
+import { TEMPLATES } from '../../src/core/template';
+import { renderDistributionPdf } from '../../src/export/distributionPdf';
+
+import { tmpdir } from 'node:os';
+import { readFile, unlink } from 'node:fs/promises';
 import type { AuthRepository, DesignRepository } from './repo';
 
 /**
@@ -279,6 +285,56 @@ export async function buildApp(
     const png = await repo.getThumbnail(v.rec.id);
     if (!png) return reply.code(404).send({ error: 'no thumbnail' });
     return reply.header('content-type', 'image/png').header('cache-control', 'no-cache').send(png);
+  });
+
+  // Production distribution PDF. Accepts the design inline (cells + palette +
+  // template) so it works whether or not the design is saved. Generates server-
+  // side (pdfkit is Node-only) and streams the file back. Free tier watermarks.
+  app.post('/api/export/pdf', async (req, reply) => {
+    const userId = await userOf(req); // signed-in users get clean (un-watermarked) output
+    const body = (req.body ?? {}) as {
+      title?: string;
+      templateId?: string;
+      templateVersion?: number;
+      palette?: unknown;
+      cellsGzB64?: string;
+      cardsPerBag?: number;
+      colorNames?: string[];
+    };
+    const tpl = TEMPLATES.find((t) => t.id === body.templateId && t.version === (body.templateVersion ?? t.version));
+    if (!tpl) return reply.code(400).send({ error: 'unknown templateId/version' });
+    if (!validPalette(body.palette) || !body.cellsGzB64) {
+      return reply.code(400).send({ error: 'palette and cellsGzB64 required' });
+    }
+    let cells: Buffer;
+    try {
+      cells = gunzipBytes(Buffer.from(body.cellsGzB64, 'base64'));
+    } catch {
+      return reply.code(400).send({ error: 'cells not gzip' });
+    }
+    const map = generateSeatMap(tpl);
+    if (cells.length !== map.count) {
+      return reply.code(400).send({ error: `cells must have ${map.count} bytes for this template` });
+    }
+    const outPath = join(tmpdir(), `tifo-${Date.now()}-${Math.random().toString(36).slice(2)}.pdf`);
+    await renderDistributionPdf(
+      { cells: new Uint8Array(cells), palette: body.palette as string[], seatMapRef: { id: tpl.id, version: tpl.version } },
+      map,
+      {
+        designTitle: body.title || 'Tifo',
+        stadiumName: tpl.name,
+        cardsPerBag: body.cardsPerBag ?? 100,
+        colorNames: body.colorNames,
+        watermark: !userId, // anonymous/free → watermark; signed-in → clean
+      },
+      outPath,
+    );
+    const pdf = await readFile(outPath);
+    await unlink(outPath).catch(() => {});
+    return reply
+      .header('content-type', 'application/pdf')
+      .header('content-disposition', `attachment; filename="${(body.title || 'tifo').replace(/[^a-z0-9]+/gi, '-').toLowerCase()}-distribution.pdf"`)
+      .send(pdf);
   });
 
   app.put('/api/designs/:id', async (req, reply) => {

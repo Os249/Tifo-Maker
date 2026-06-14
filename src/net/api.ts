@@ -251,3 +251,30 @@ export async function fetchMe(): Promise<{ id: string; username: string } | null
 }
 
 export const thumbnailUrl = (id: string): string => `${API}/designs/${id}/thumbnail.png`;
+
+/** Request a server-rendered distribution PDF for the current (unsaved) design. */
+export async function exportDistributionPdf(
+  store: DesignStore,
+  map: SeatMap,
+  opts: { title: string; cardsPerBag: number; colorNames?: string[] },
+): Promise<Blob> {
+  const cellsGzB64 = toB64(await gzip(store.cells));
+  const res = await fetch(`${API}/export/pdf`, {
+    method: 'POST',
+    headers: authHeaders(true),
+    body: JSON.stringify({
+      title: opts.title,
+      templateId: map.templateRef.id,
+      templateVersion: map.templateRef.version,
+      palette: store.palette,
+      cellsGzB64,
+      cardsPerBag: opts.cardsPerBag,
+      colorNames: opts.colorNames,
+    }),
+  });
+  if (!res.ok) {
+    const err = (await res.json().catch(() => ({ error: res.statusText }))) as { error?: string };
+    throw new Error(err.error ?? `export failed (${res.status})`);
+  }
+  return res.blob();
+}

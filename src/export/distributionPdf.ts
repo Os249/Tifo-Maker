@@ -1,6 +1,7 @@
 import { createWriteStream } from 'node:fs';
 import PDFDocument from 'pdfkit';
 import type { DesignState, SeatMap } from '../core/types';
+import { productionSummary, colorFamily } from '../core/production';
 
 /**
  * Phase 4 export: the per-section distribution plan.
@@ -21,6 +22,10 @@ export interface DistributionMeta {
   stadiumName: string;
   /** Display names for palette indices; index 0 is the empty seat. */
   colorNames?: string[];
+  /** Cards packed per bag for the materials estimate. */
+  cardsPerBag?: number;
+  /** Free tier stamps a watermark; paid tier omits it. */
+  watermark?: boolean;
 }
 
 const PAGE = { width: 841.89, height: 595.28 }; // A4 landscape
@@ -128,7 +133,7 @@ export async function renderDistributionPdf(
   const colorName = (idx: number): string =>
     meta.colorNames?.[idx] ?? (idx === 0 ? 'Empty seat' : `Color ${idx} (${palette[idx]})`);
 
-  const doc = new PDFDocument({ size: 'A4', layout: 'landscape', margin: MARGIN });
+  const doc = new PDFDocument({ size: 'A4', layout: 'landscape', margin: MARGIN, bufferPages: true });
   const stream = createWriteStream(outPath);
   doc.pipe(stream);
 
@@ -181,6 +186,62 @@ export async function renderDistributionPdf(
     (x, y) => [ovX + (x - map.bounds.minX) * ovScale, ovY + (y - map.bounds.minY) * ovScale],
     Math.max(0.5, 3.2 * ovScale * 0.9),
     Math.max(0.9, 8 * ovScale * 0.85),
+  );
+
+  // ---------- Materials & color metrics page ----------
+  const summary = productionSummary(cells, palette, {
+    cardsPerBag: meta.cardsPerBag ?? 100,
+    colorNames: meta.colorNames,
+  });
+  doc.addPage();
+  doc.font('Helvetica-Bold').fontSize(20).fillColor('#111111').text('Materials & color metrics', MARGIN, 44);
+  doc.font('Helvetica').fontSize(11).fillColor('#555555').text(
+    `Total cards to print: ${summary.totalCards.toLocaleString()}  ·  ` +
+      `Bags (@ ${meta.cardsPerBag ?? 100}/bag): ${summary.totalBags.toLocaleString()}  ·  ` +
+      `Unused seats: ${summary.emptySeats.toLocaleString()}`,
+    MARGIN,
+    74,
+  );
+
+  // Table header.
+  const cols = { swatch: MARGIN, name: MARGIN + 28, family: 300, cards: 470, share: 600, bags: 720 };
+  let my = 110;
+  doc.font('Helvetica-Bold').fontSize(10).fillColor('#111111');
+  doc.text('Color', cols.name, my);
+  doc.text('Family', cols.family, my);
+  doc.text('Cards', cols.cards, my, { width: 90, align: 'right' });
+  doc.text('Share', cols.share, my, { width: 90, align: 'right' });
+  doc.text('Bags', cols.bags, my, { width: 80, align: 'right' });
+  my += 6;
+  doc.moveTo(MARGIN, my + 10).lineTo(PAGE.width - MARGIN, my + 10).strokeColor('#cccccc').lineWidth(0.5).stroke();
+  my += 18;
+
+  // One row per color, largest first.
+  doc.font('Helvetica').fontSize(10);
+  for (const c of summary.colors) {
+    doc.rect(cols.swatch, my - 1, 16, 12).fill(c.hex).strokeColor('#999999').lineWidth(0.4).rect(cols.swatch, my - 1, 16, 12).stroke();
+    doc.fillColor('#111111').text(`${c.name}`, cols.name, my, { width: 260 });
+    doc.fillColor('#555555').text(`${colorFamily(c.hex)}  ·  ${c.hex}`, cols.family, my, { width: 160 });
+    doc.fillColor('#111111').text(c.cards.toLocaleString(), cols.cards, my, { width: 90, align: 'right' });
+    doc.text(`${(c.share * 100).toFixed(1)}%`, cols.share, my, { width: 90, align: 'right' });
+    doc.text(c.bags.toLocaleString(), cols.bags, my, { width: 80, align: 'right' });
+    my += 20;
+  }
+  // Totals row.
+  my += 4;
+  doc.moveTo(MARGIN, my).lineTo(PAGE.width - MARGIN, my).strokeColor('#cccccc').lineWidth(0.5).stroke();
+  my += 10;
+  doc.font('Helvetica-Bold').fillColor('#111111');
+  doc.text('Total', cols.name, my);
+  doc.text(summary.totalCards.toLocaleString(), cols.cards, my, { width: 90, align: 'right' });
+  doc.text('100%', cols.share, my, { width: 90, align: 'right' });
+  doc.text(summary.totalBags.toLocaleString(), cols.bags, my, { width: 80, align: 'right' });
+
+  doc.font('Helvetica').fontSize(9).fillColor('#888888').text(
+    'Color families and hex values are a procurement guide. Confirm physical card stock against a printed sample — screen color differs from print.',
+    MARGIN,
+    PAGE.height - MARGIN - 16,
+    { width: PAGE.width - 2 * MARGIN },
   );
 
   // ---------- One page per section ----------
@@ -259,10 +320,28 @@ export async function renderDistributionPdf(
       );
   }
 
+  // Free-tier watermark across every page (diagonal, low-opacity).
+  if (meta.watermark) {
+    const range = doc.bufferedPageRange();
+    for (let i = range.start; i < range.start + range.count; i++) {
+      doc.switchToPage(i);
+      doc.save();
+      doc.rotate(-30, { origin: [PAGE.width / 2, PAGE.height / 2] });
+      doc.font('Helvetica-Bold').fontSize(52).fillColor('#1c5fd9').opacity(0.10).text(
+        'TIFOMAKER  ·  tifomaker.org',
+        PAGE.width / 2 - 320,
+        PAGE.height / 2 - 26,
+        { width: 640, align: 'center', lineBreak: false },
+      );
+      doc.opacity(1).restore();
+    }
+  }
+
   doc.end();
   await new Promise<void>((resolve, reject) => {
     stream.on('finish', () => resolve());
     stream.on('error', reject);
   });
-  return { pages: 1 + sections.length, sections: sections.length };
+  // Cover + materials page + one per section.
+  return { pages: 2 + sections.length, sections: sections.length };
 }

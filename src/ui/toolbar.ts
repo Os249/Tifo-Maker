@@ -948,4 +948,61 @@ export function mountToolbar(
       gifBtn.innerHTML = '<i class="ti ti-gif"></i> Export GIF';
     }
   });
+
+  // ---- Production export: distribution PDF (server) + seat manifest CSV (client) ----
+  const bagSize = $('#bag-size') as unknown as HTMLInputElement;
+  const colorNamesFor = (): string[] => {
+    // Use the live palette hex as fallback names; index 0 is the empty seat.
+    return store.palette.map((hex, i) => (i === 0 ? 'Empty seat' : `Color ${i} (${hex})`));
+  };
+
+  const pdfBtn = $('#export-pdf') as unknown as HTMLButtonElement;
+  pdfBtn.addEventListener('click', async () => {
+    pdfBtn.disabled = true;
+    const original = pdfBtn.innerHTML;
+    pdfBtn.textContent = 'Generating…';
+    try {
+      // Bake any floating objects so they appear in the export.
+      if (objects.list().length > 0) objects.bakeAll(store, map, EDITOR_UNITS.width);
+      const { exportDistributionPdf } = await import('../net/api');
+      const blob = await exportDistributionPdf(store, map, {
+        title: docTitle.value.trim() || 'Tifo',
+        cardsPerBag: Math.max(10, Number(bagSize.value) || 100),
+        colorNames: colorNamesFor(),
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${(docTitle.value.trim() || 'tifo').replace(/[^a-z0-9]+/gi, '-').toLowerCase()}-distribution.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+      message.textContent = isSignedIn()
+        ? `distribution PDF exported (${(blob.size / 1024).toFixed(0)} KB)`
+        : `distribution PDF exported — sign in for a clean, watermark-free version`;
+    } catch (err) {
+      message.textContent = `PDF export failed: ${(err as Error).message}`;
+    } finally {
+      pdfBtn.disabled = false;
+      pdfBtn.innerHTML = original;
+    }
+  });
+
+  const csvBtn = $('#export-csv') as unknown as HTMLButtonElement;
+  csvBtn.addEventListener('click', async () => {
+    if (objects.list().length > 0) objects.bakeAll(store, map, EDITOR_UNITS.width);
+    const { seatManifestCsv } = await import('../core/production');
+    const csv = seatManifestCsv(store.cells, store.palette, map, {
+      colorNames: colorNamesFor(),
+      includeEmpty: false,
+    });
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${(docTitle.value.trim() || 'tifo').replace(/[^a-z0-9]+/gi, '-').toLowerCase()}-seats.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    const rows = csv.split('\n').length - 1;
+    message.textContent = `seat manifest exported (${rows.toLocaleString()} seats)`;
+  });
 }

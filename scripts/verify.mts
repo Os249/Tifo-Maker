@@ -260,3 +260,20 @@ const trailerOk = gif[gif.length-1]===0x3b;
 const f0Gray = frames[0].filter(x => x===0).length, fLastGray = frames[frames.length-1].filter(x => x===0).length;
 console.log('gif:', w+'x'+h, frames.length, 'frames,', gif.length, 'bytes | header:', headerOk, '| trailer:', trailerOk,
   '| frame0 gray', f0Gray, '> last gray', fLastGray, '=', f0Gray > fLastGray);
+
+// --- Production logistics computations ---
+import { productionSummary as prodSum, seatManifestCsv as manifestCsv, colorFamily as cFamily } from '../src/core/production';
+{
+  const pal = ['#262a33', '#1c5fd9', '#f2f1ec', '#e8b73a'];
+  const c = new Uint8Array(map.count);
+  for (let i = 0; i < map.count; i++) c[i] = i % 2 === 0 ? 1 : i % 4 === 1 ? 2 : 0;
+  const s = prodSum(c, pal, { cardsPerBag: 100 });
+  const consistent = s.totalCards + s.emptySeats === s.seatCount;
+  const bagsOk = s.colors.reduce((a, x) => a + x.bags, 0) === s.totalBags;
+  const csv = manifestCsv(c, pal, map, { includeEmpty: false });
+  const csvRows = csv.split('\n').length - 1;
+  console.log('production: cards+empty=seats', consistent, '| bag sum', bagsOk,
+    '| csv rows', csvRows, '=== totalCards', csvRows === s.totalCards,
+    '| families', cFamily('#1c5fd9'), cFamily('#f2f1ec'));
+  if (!consistent || !bagsOk || csvRows !== s.totalCards) throw new Error('production computation invariant failed');
+}
