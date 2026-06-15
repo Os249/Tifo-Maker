@@ -91,16 +91,72 @@ async function main(): Promise<void> {
   }
   stadiumSel.value = template.id;
   stadiumSel.addEventListener('change', () => {
-    location.search = `?template=${encodeURIComponent(stadiumSel.value)}`;
+    const fromId = template.id;
+    const toId = stadiumSel.value;
+    if (toId === fromId) return;
+    // Carry the current design across the size change. We stash it (with the
+    // source template) and reload on the target template; the load path remaps
+    // by relative position so the look is preserved. Also remember where we came
+    // from so the switch is reversible (switch back = remap back).
+    try {
+      sessionStorage.setItem(
+        'tifo_stadium_remap',
+        JSON.stringify({
+          fromTemplate: fromId,
+          palette: store.palette,
+          cells: Array.from(store.cells),
+          title: docTitleValue(),
+          prevTemplate: fromId,
+        }),
+      );
+    } catch {
+      /* if stash fails we simply switch without carrying — acceptable fallback */
+    }
+    location.search = `?template=${encodeURIComponent(toId)}`;
   });
 
+  // Read the current document title from the input without coupling to toolbar.
+  function docTitleValue(): string {
+    const el = document.getElementById('doc-title') as HTMLInputElement | null;
+    return el?.value ?? '';
+  }
+
+  let sharedLoadedEarly = false;
   const store = new DesignStore(map, DEFAULT_PALETTE.slice());
+
+  // Cross-stadium remap pickup: if we arrived from a stadium switch, regenerate
+  // the SOURCE map, remap the saved cells onto THIS bowl by relative position,
+  // and load the result — the design's look is preserved across the size change.
+  let remapTitle: string | null = null;
+  let remappedFrom: string | null = null;
+  try {
+    const raw = sessionStorage.getItem('tifo_stadium_remap');
+    if (raw) {
+      sessionStorage.removeItem('tifo_stadium_remap');
+      const data = JSON.parse(raw) as { fromTemplate: string; palette: string[]; cells: number[]; title?: string; prevTemplate?: string };
+      const fromTpl = TEMPLATES.find((t) => t.id === data.fromTemplate);
+      if (fromTpl && Array.isArray(data.cells)) {
+        const oldMap = await generateSeatMapAsync(fromTpl.id);
+        if (data.cells.length === oldMap.count) {
+          const { remapDesignAcrossStadiums } = await import('./core/remapStadium');
+          const remapped = remapDesignAcrossStadiums(Uint8Array.from(data.cells), oldMap, map);
+          store.setPalette((data.palette ?? DEFAULT_PALETTE).slice(0, 256));
+          store.loadCells(remapped);
+          remapTitle = data.title ?? null;
+          remappedFrom = data.prevTemplate ?? data.fromTemplate;
+          sharedLoadedEarly = true;
+        }
+      }
+    }
+  } catch {
+    /* fall through to normal seed/load */
+  }
 
   // Either load a shared design, or seed a starter so the canvas never opens
   // blank (the border preset is template-agnostic — derives tier edges from the map).
   let sharedTitle: string | null = null;
-  let sharedLoaded = false;
-  if (sharedId) {
+  let sharedLoaded = sharedLoadedEarly;
+  if (sharedId && !sharedLoaded) {
     try {
       const { loadDesign } = await import('./net/api');
       const r = await loadDesign(store, sharedId);
@@ -232,12 +288,28 @@ async function main(): Promise<void> {
   track('landed'); // editor is interactive — top of the funnel
 
   // If we loaded a shared design or an imported file, reflect title + repaint.
-  const loadedTitle = sharedTitle ?? pendingTitle;
+  const loadedTitle = sharedTitle ?? pendingTitle ?? remapTitle;
   if (sharedLoaded && loadedTitle) {
     const docTitle = document.getElementById('doc-title') as HTMLInputElement | null;
     if (docTitle) docTitle.value = loadedTitle;
     editor.rebuildPalette();
     editor.repaintAll();
+  }
+
+  // Reversible stadium switch: after a remap, offer a one-click switch back to
+  // the previous stadium (which remaps the current design back).
+  if (remappedFrom) {
+    editor.rebuildPalette();
+    editor.repaintAll();
+    const msg = document.getElementById('message');
+    const prevTpl = TEMPLATES.find((t) => t.id === remappedFrom);
+    if (msg && prevTpl) {
+      msg.innerHTML = `design fitted to ${template.name}. <button id="undo-stadium" style="all:unset;color:var(--flare);cursor:pointer;text-decoration:underline;">Switch back to ${prevTpl.name}</button>`;
+      document.getElementById('undo-stadium')?.addEventListener('click', () => {
+        stadiumSel.value = remappedFrom!;
+        stadiumSel.dispatchEvent(new Event('change'));
+      });
+    }
   }
 
   // First-run onboarding: only for a fresh visitor on a normal boot (never via

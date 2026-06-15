@@ -186,6 +186,12 @@ header {
 .panel-section h4::before {
   content:''; width:3px; height:13px; border-radius:2px; background:var(--grad-accent); flex:0 0 auto;
 }
+/* contextual panel: snappy fade-in when a section becomes relevant to the tool */
+@keyframes ctxFadeIn {
+  from { opacity:0; transform:translateY(4px); }
+  to { opacity:1; transform:translateY(0); }
+}
+.panel-section.ctx-fade-in { animation:ctxFadeIn .15s ease both; }
 
 /* swatches with live counts */
 .swatch-grid { display:grid; grid-template-columns:repeat(5,1fr); gap:8px; }

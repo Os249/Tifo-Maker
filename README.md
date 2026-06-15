@@ -36,6 +36,24 @@ Three tiers keyed to capability, not just width:
 
 ## Recent additions
 
+- **Contextual properties panel** — the right sidebar now renders only the
+  sections relevant to the active tool (Brush → brush+colors+stadium; Select →
+  object+selection+reveal; Text → colors; etc.), with History/Save/Production
+  persistent. Card-based, deep-slate, 150ms fade on swap. Sections carry
+  `data-panel="<tools>"` (`*` = always shown); a controller in toolbar.ts shows
+  the matching set on tool change.
+- **Picked-color tools** — "Fill base" (and all colour ops) now use the active
+  swatch, not a hardcoded slot.
+- **Cross-stadium design preservation** — switching stadiums no longer wipes the
+  design. `remapStadium.ts` maps every seat by relative UV position so the look
+  is preserved across 40k/60k/76k bowls (unit-tested at 100% fidelity). The
+  switch is reversible via a one-click "switch back" affordance.
+- **Magic-wand select** — the Select tool now selects contiguous same-colour
+  regions of painted OR baked seats (`collectRegion` in tools.ts), with a
+  highlight and Recolor / Delete / Deselect actions (plus Delete key). Shift adds
+  to the selection; scope follows the fill-scope setting.
+
+
 - **Moderation & trust review** — an admin-only review layer for what was
   previously database-only data. Admins are designated via the `ADMIN_USERNAMES`
   env var (never grantable through any API; default-closed if unset). A header

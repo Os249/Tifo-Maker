@@ -113,9 +113,17 @@
         </div>
         <p class="panel-orient">Paint on the <b>canvas</b> at left. These panels set <b>how</b> you paint and the look. Switch <b>Design / Stadium / Split</b> above to see it on the seats or in 3D.</p>
 
-        <div class="panel-section" id="ctx-objects" hidden>
+        <div class="panel-section" id="ctx-objects" data-panel="select">
           <h4>Object <span id="obj-kind" style="color:var(--text-3);"></span></h4>
-          <div id="obj-empty" class="hint" style="color:var(--text-3);font-size:12px;">No object selected. Use the Select tool, or add Text/Image.</div>
+          <div id="region-actions" hidden>
+            <p class="hint" style="font-size:12px;color:var(--text-2);margin:0 0 10px;"><b id="region-count">0</b> seats selected. Recolor with the active swatch, or clear them.</p>
+            <div class="group">
+              <button class="primary" id="region-recolor" style="flex:1;">Recolor</button>
+              <button class="danger" id="region-delete" title="Clear selected seats"><i class="ti ti-eraser"></i></button>
+            </div>
+            <button id="region-clear" style="width:100%;margin-top:8px;">Deselect</button>
+          </div>
+          <div id="obj-empty" class="hint" style="color:var(--text-3);font-size:12px;">No object selected. Click a painted area to select it, or use Text/Image.</div>
           <div id="obj-controls" hidden>
             <div class="group" style="margin-bottom:8px;">
               <label for="obj-height" style="white-space:nowrap;">Height</label>
@@ -144,7 +152,7 @@
           </div>
         </div>
 
-        <div class="panel-section" id="ctx-brush">
+        <div class="panel-section" id="ctx-brush" data-panel="brush eraser fill">
           <h4><span data-i18n="ed.brush">Brush</span> <span class="h4-tag">active tool</span></h4>
           <div class="group">
             <input type="range" id="brush-size" min="3" max="40" step="1" value="10" style="flex:1;" />
@@ -162,7 +170,7 @@
           </div>
         </div>
 
-        <div class="panel-section">
+        <div class="panel-section" id="ctx-colors" data-panel="brush eraser fill text">
           <h4><span data-i18n="ed.colors">Colors</span> <span class="h4-tag">your swatches</span></h4>
           <div class="color-well-row">
             <button id="fg-well" class="fg-well" title="Active paint color — click to change"></button>
@@ -187,7 +195,7 @@
           </div>
         </div>
 
-        <div class="panel-section">
+        <div class="panel-section" id="ctx-stadium" data-panel="brush fill">
           <h4><span data-i18n="ed.stadium">Stadium</span> <span class="h4-tag">shape &amp; whole-bowl fills</span></h4>
           <div class="group">
             <select id="stadium" style="flex:1;min-width:0;"></select>
@@ -205,7 +213,7 @@
           </div>
         </div>
 
-        <div class="panel-section">
+        <div class="panel-section" id="ctx-reveal" data-panel="pan select">
           <h4>Animate reveal</h4>
           <div class="group">
             <select id="reveal-preset" style="flex:1;min-width:0;"></select>
@@ -225,7 +233,7 @@
           <button id="reveal-gif" style="width:100%;margin-top:10px;"><i class="ti ti-gif"></i> Export GIF</button>
         </div>
 
-        <div class="panel-section">
+        <div class="panel-section" id="ctx-history" data-panel="*">
           <h4>History</h4>
           <div class="group">
             <button id="undo" style="flex:1;"><i class="ti ti-arrow-back-up" style="font-size:14px;vertical-align:-2px"></i> Undo</button>
@@ -233,7 +241,7 @@
           </div>
         </div>
 
-        <div class="panel-section">
+        <div class="panel-section" id="ctx-save" data-panel="*">
           <h4><span data-i18n="ed.save">Save</span> &amp; share</h4>
           <div class="group">
             <button id="save" class="primary" style="flex:1;">Save</button>
@@ -248,7 +256,7 @@
           </div>
         </div>
 
-        <div class="panel-section">
+        <div class="panel-section" id="ctx-production" data-panel="*">
           <h4>Production export <span class="h4-tag">match-day logistics</span></h4>
           <div class="group" style="margin-bottom:8px;">
             <label for="bag-size" style="white-space:nowrap;">Cards / bag</label>

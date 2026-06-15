@@ -12,7 +12,7 @@ import { ObjectOverlay } from './objectOverlay';
 import type { ObjectLayer } from '../core/objects';
 import type { DesignStore } from '../core/design';
 import { SpatialHash } from '../core/spatialHash';
-import { brushSegment, brushStamp, floodFill } from '../core/tools';
+import { brushSegment, brushStamp, floodFill, collectRegion } from '../core/tools';
 import { EMPTY_SEAT_COLOR } from '../core/template';
 
 /**
@@ -35,6 +35,11 @@ export class Editor {
 
   tool: ToolId = 'brush';
   colorIndex = 1;
+  /** Magic-wand selection: set of seat indices currently selected (for the
+   * select tool). Empty when nothing is selected. */
+  selectedRegion: Set<number> = new Set();
+  /** Called when the selection changes, so the UI can show count + actions. */
+  onSelectionChange: ((count: number) => void) | null = null;
   brushRadius = 10;
   fillScope: 'section' | 'global' = 'section';
   /** Mirror painting across the halfway line (uses SeatMap.mirrorOf). */
@@ -137,6 +142,60 @@ export class Editor {
     for (let i = 0; i < this.map.count; i++) {
       this.particles[i].tint = this.tintFor(this.store.cells[i]);
     }
+    this.applySelectionHighlight();
+  }
+
+  // ---- magic-wand region selection (select tool, on painted/baked seats) ----
+
+  /** Select the contiguous same-colour region at a world point. Additive when
+   * `add` is true (shift-click), otherwise replaces the selection. */
+  selectRegionAt(wx: number, wy: number, scope: 'section' | 'global', add = false): void {
+    const seat = this.hash.nearest(wx, wy, 24);
+    if (seat < 0) {
+      this.clearSelection();
+      return;
+    }
+    const region = collectRegion(this.store, this.map, seat, scope);
+    if (!add) this.selectedRegion.clear();
+    for (const s of region) this.selectedRegion.add(s);
+    this.repaintAll();
+    this.onSelectionChange?.(this.selectedRegion.size);
+  }
+
+  clearSelection(): void {
+    if (this.selectedRegion.size === 0) return;
+    this.selectedRegion.clear();
+    this.repaintAll();
+    this.onSelectionChange?.(0);
+  }
+
+  /** Highlight selected seats by blending their tint toward white. */
+  private applySelectionHighlight(): void {
+    if (this.selectedRegion.size === 0) return;
+    for (const i of this.selectedRegion) {
+      const base = this.tintFor(this.store.cells[i]);
+      const r = (base >> 16) & 255, g = (base >> 8) & 255, b = base & 255;
+      // 45% toward white — a clear, theme-neutral selection sheen.
+      const mix = (c: number): number => Math.round(c + (255 - c) * 0.45);
+      this.particles[i].tint = (mix(r) << 16) | (mix(g) << 8) | mix(b);
+    }
+  }
+
+  /** Recolour every selected seat with the active colour (undoable). */
+  recolorSelection(value: number): void {
+    if (this.selectedRegion.size === 0) return;
+    this.store.beginStroke();
+    const dirty: number[] = [];
+    for (const i of this.selectedRegion) if (this.store.paint(i, value)) dirty.push(i);
+    this.store.commitStroke();
+    this.store.flush(dirty);
+    this.repaintAll();
+  }
+
+  /** Erase every selected seat (undoable), then clear the selection. */
+  deleteSelection(): void {
+    this.recolorSelection(0);
+    this.clearSelection();
   }
 
   /**
@@ -380,8 +439,15 @@ export class Editor {
       }
       if (this.tool === 'select' && this.objectOverlay) {
         const hit = this.objectOverlay.hitTest(wx, wy);
-        if (hit) this.objectOverlay.beginDrag(hit.id, hit.onHandle, wx, wy);
-        else this.objectOverlay.selectAt(null);
+        if (hit) {
+          this.clearSelection();
+          this.objectOverlay.beginDrag(hit.id, hit.onHandle, wx, wy);
+        } else {
+          // No live object here → magic-wand select the painted region. Shift
+          // adds to the current selection. Scope follows the fill scope setting.
+          this.objectOverlay.selectAt(null);
+          this.selectRegionAt(wx, wy, this.fillScope, e.shiftKey);
+        }
         return;
       }
       if (this.tool === 'text' || this.tool === 'import') {

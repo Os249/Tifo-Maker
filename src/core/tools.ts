@@ -87,3 +87,38 @@ export function floodFill(
   }
   return dirty;
 }
+
+/**
+ * Collect the contiguous region of same-coloured seats starting at `start`,
+ * WITHOUT mutating anything. This powers the magic-wand select tool: click a
+ * painted area (baked text, a filled stand, anything) and get every seat that
+ * shares its colour and connects to it. `scope` limits to the section when set.
+ * Empty seats (index 0) are selectable too — handy for selecting a gap.
+ */
+export function collectRegion(
+  store: DesignStore,
+  map: SeatMap,
+  start: number,
+  scope: FillScope,
+): number[] {
+  const target = store.cells[start];
+  const section = map.sectionOf[start];
+  const stack: number[] = [start];
+  const visited = new Uint8Array(map.count);
+  visited[start] = 1;
+  const region: number[] = [start];
+  while (stack.length > 0) {
+    const i = stack.pop()!;
+    const base = i * 4;
+    for (let k = 0; k < 4; k++) {
+      const j = map.neighbors[base + k];
+      if (j < 0 || visited[j]) continue;
+      if (store.cells[j] !== target) continue;
+      if (scope === 'section' && map.sectionOf[j] !== section) continue;
+      visited[j] = 1;
+      region.push(j);
+      stack.push(j);
+    }
+  }
+  return region;
+}

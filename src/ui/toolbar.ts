@@ -44,6 +44,39 @@ export function mountToolbar(
   let pendingImport: { bitmap: ImageBitmap; name: string } | null = null;
   let onEnterMode: (tool: ToolId) => void = () => {};
   let objectPanelHook: () => void = () => {};
+
+  // ---- contextual properties panel ----
+  // Each .panel-section carries data-panel listing the tools it belongs to
+  // ("*" = always shown). On tool change we reveal only the matching sections
+  // with a quick fade, so the panel shows just what's relevant to the tool.
+  const panelSections = Array.from(root.querySelectorAll<HTMLElement>('.panel-section[data-panel]'));
+  const orientNote = root.querySelector<HTMLElement>('.panel-orient');
+  const applyContextPanel = (tool: ToolId): void => {
+    for (const sec of panelSections) {
+      const tools = (sec.dataset.panel ?? '').split(/\s+/);
+      const show = tools.includes('*') || tools.includes(tool);
+      if (show && sec.hidden && !sec.classList.contains('ctx-managed-hidden')) {
+        // becoming visible
+      }
+      if (show) {
+        if (sec.style.display === 'none' || sec.classList.contains('ctx-hidden')) {
+          sec.classList.remove('ctx-hidden');
+          sec.style.display = '';
+          // restart fade
+          sec.classList.remove('ctx-fade-in');
+          void sec.offsetWidth;
+          sec.classList.add('ctx-fade-in');
+        }
+      } else {
+        sec.classList.add('ctx-hidden');
+        sec.style.display = 'none';
+      }
+    }
+    // The orientation note only helps before the user has a tool intent; keep it
+    // for brush (the default) and hide it once they pick a specialised tool.
+    if (orientNote) orientNote.style.display = tool === 'brush' ? '' : 'none';
+  };
+
   const setTool = (tool: ToolId): void => {
     editor.tool = tool;
     for (const b of toolButtons) b.classList.toggle('active', b.dataset.tool === tool);
@@ -52,6 +85,8 @@ export function mountToolbar(
     importBar.hidden = tool !== 'import';
     if (tool !== 'text' && tool !== 'import') editor.hideStampPreview();
     if (tool === 'import' && !pendingImport) fileInput.click();
+    if (tool !== 'select') editor.clearSelection();
+    applyContextPanel(tool);
     onEnterMode(tool);
     objectPanelHook();
   };
@@ -508,7 +543,8 @@ export function mountToolbar(
   store.onDirty(refreshHistory);
   refreshHistory();
 
-  $('#fill-base').addEventListener('click', () => store.fillAll(1));
+  // Fill the whole bowl with the ACTIVE painting colour (not a fixed slot).
+  $('#fill-base').addEventListener('click', () => store.fillAll(editor.colorIndex));
   $('#fit').addEventListener('click', () => editor.fitToView());
 
   // Image import mode: load a file, configure size (in seats), tier, dither,
@@ -948,7 +984,8 @@ export function mountToolbar(
     }
     if (k === 'v') setTool('select');
     if ((k === 'delete' || k === 'backspace') && editor.tool === 'select') {
-      objects.deleteSelected();
+      if (editor.selectedRegion.size > 0) editor.deleteSelection();
+      else objects.deleteSelected();
       return;
     }
     if (k === 't') setTool('text');
@@ -1064,8 +1101,6 @@ export function mountToolbar(
 
   // ---- Object layer (floating text/image until baked) ----
   const overlay = editor.objectOverlay!;
-  const ctxObjects = $('#ctx-objects');
-  const ctxBrush = $('#ctx-brush');
   const objEmpty = $('#obj-empty');
   const objControls = $('#obj-controls');
   const objKind = $('#obj-kind');
@@ -1073,13 +1108,34 @@ export function mountToolbar(
   const objHeightOut = $('#obj-height-out');
   const objTier = $('#obj-tier') as unknown as HTMLSelectElement;
 
-  // The object panel replaces the brush context whenever the Select tool is active.
+  // Visibility of ctx-objects / ctx-brush is now driven by the contextual panel
+  // controller (data-panel). This hook is retained only as a no-op anchor so the
+  // existing call sites keep working; content refresh happens in refreshObjectPanel.
   const syncObjectPanelVisibility = (): void => {
-    const selecting = editor.tool === 'select';
-    ctxObjects.hidden = !selecting;
-    ctxBrush.hidden = selecting;
+    /* contextual panel controller manages section visibility */
   };
   objectPanelHook = syncObjectPanelVisibility;
+
+  // ---- magic-wand region selection UI (select tool) ----
+  const regionActions = document.getElementById('region-actions') as HTMLElement | null;
+  const regionCount = document.getElementById('region-count');
+  const objEmptyEl = document.getElementById('obj-empty') as HTMLElement | null;
+  editor.onSelectionChange = (count: number): void => {
+    if (regionActions) regionActions.hidden = count === 0;
+    if (regionCount) regionCount.textContent = count.toLocaleString();
+    // Hide the "no object" hint while a region is selected.
+    if (objEmptyEl && count > 0) objEmptyEl.hidden = true;
+    else if (objEmptyEl && !objects.selected) objEmptyEl.hidden = false;
+  };
+  document.getElementById('region-recolor')?.addEventListener('click', () => {
+    editor.recolorSelection(editor.colorIndex);
+  });
+  document.getElementById('region-delete')?.addEventListener('click', () => {
+    editor.deleteSelection();
+  });
+  document.getElementById('region-clear')?.addEventListener('click', () => {
+    editor.clearSelection();
+  });
 
   const refreshObjectPanel = (): void => {
     const sel = objects.selected;
