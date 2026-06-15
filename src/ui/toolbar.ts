@@ -527,6 +527,13 @@ export function mountToolbar(
     if (fresh) track('signed_up'); // genuine auth this session, not a reload-restore
   };
 
+  // Toggle the admin-only Moderation button. Defined here so all auth-success
+  // and restore paths can call it. Server enforces admin on every endpoint too.
+  const reflectAdmin = (isAdmin: boolean): void => {
+    const b = document.getElementById('moderation') as HTMLButtonElement | null;
+    if (b) b.hidden = !isAdmin;
+  };
+
   // Clicking the header button: if signed out → auth modal; if signed in → profile.
   signinBtn.addEventListener('click', async () => {
     if (isSignedIn() && myUserId) {
@@ -538,6 +545,7 @@ export function mountToolbar(
     if (name) {
       const me = await fetchMe();
       reflectSignedIn(name, me?.id, true);
+      reflectAdmin(me?.isAdmin ?? false);
     }
   });
 
@@ -545,6 +553,7 @@ export function mountToolbar(
   void (async () => {
     const me = await fetchMe();
     if (me?.username) reflectSignedIn(me.username, me.id);
+    if (me) reflectAdmin(me.isAdmin);
     refreshPhotoRow();
   })();
 
@@ -663,6 +672,7 @@ export function mountToolbar(
       if (!name) return;
       const me = await fetchMe();
       reflectSignedIn(name, me?.id, true);
+      reflectAdmin(me?.isAdmin ?? false);
     }
     saveBtn.disabled = true;
     try {
@@ -728,11 +738,23 @@ export function mountToolbar(
         if (name) {
           const me = await fetchMe();
           reflectSignedIn(name, me?.id, true);
+          reflectAdmin(me?.isAdmin ?? false);
         }
         return isSignedIn();
       },
     ),
   );
+
+  // Moderation button opens the queue (shown only to admins via reflectAdmin).
+  document.getElementById('moderation')?.addEventListener('click', async () => {
+    const { openModeration } = await import('./moderation');
+    await openModeration();
+  });
+  // Check admin status on load (once the session is known).
+  void (async () => {
+    const me = await fetchMe();
+    reflectAdmin(me?.isAdmin ?? false);
+  })();
 
   // Keyboard shortcuts
   window.addEventListener('keydown', (e) => {

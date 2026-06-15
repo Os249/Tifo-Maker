@@ -12,6 +12,8 @@ import type {
   UserRow,
   EventsRepository,
   PhotoMeta,
+  ReportItem,
+  PhotoReviewItem,
   FunnelStep,
 } from './repo';
 
@@ -218,10 +220,10 @@ export class MemoryDesignRepository implements DesignRepository {
       .slice(0, limit);
   }
 
-  private reports: { id: string; targetType: string; targetId: string; reporterId: string | null; reason: string }[] = [];
+  private reports: { id: string; targetType: string; targetId: string; reporterId: string | null; reason: string; status: string; createdAt: string }[] = [];
   async report(targetType: 'design' | 'comment', targetId: string, reporterId: string | null, reason: string): Promise<string> {
     const id = randomUUID();
-    this.reports.push({ id, targetType, targetId, reporterId, reason });
+    this.reports.push({ id, targetType, targetId, reporterId, reason, status: 'open', createdAt: new Date().toISOString() });
     return id;
   }
 
@@ -250,6 +252,72 @@ export class MemoryDesignRepository implements DesignRepository {
     if (!r || r.ownerId !== ownerId) return false;
     this.photos = this.photos.filter((x) => x.id !== photoId);
     return true;
+  }
+
+  async listReports(status: string, limit: number): Promise<ReportItem[]> {
+    return this.reports
+      .filter((r) => r.status === status)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      .slice(0, limit)
+      .map((r) => {
+        const d = r.targetType === 'design' ? this.rows.get(r.targetId) : undefined;
+        return {
+          id: r.id,
+          targetType: r.targetType,
+          targetId: r.targetId,
+          reason: r.reason,
+          status: r.status,
+          createdAt: r.createdAt,
+          targetTitle: d?.title ?? null,
+          targetOwner: d ? this.usernames(d.ownerId) : null,
+          targetIsPublic: d ? d.isPublic : null,
+          targetHasThumbnail: d?.thumbnail != null,
+        };
+      });
+  }
+
+  async setReportStatus(reportId: string, status: string): Promise<boolean> {
+    const r = this.reports.find((x) => x.id === reportId);
+    if (!r) return false;
+    r.status = status;
+    return true;
+  }
+
+  async takedownDesign(designId: string): Promise<boolean> {
+    const d = this.rows.get(designId);
+    if (!d) return false;
+    d.isPublic = false;
+    for (const r of this.reports) {
+      if (r.targetType === 'design' && r.targetId === designId && r.status === 'open') r.status = 'actioned';
+    }
+    return true;
+  }
+
+  async listUnverifiedPhotos(limit: number): Promise<PhotoReviewItem[]> {
+    return this.photos
+      .filter((p) => !p.isVerified)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      .slice(0, limit)
+      .map((p) => ({
+        id: p.id,
+        designId: p.designId,
+        designTitle: this.rows.get(p.designId)?.title ?? null,
+        caption: p.caption,
+        createdAt: p.createdAt,
+      }));
+  }
+
+  async setPhotoVerified(photoId: string, verified: boolean): Promise<boolean> {
+    const p = this.photos.find((x) => x.id === photoId);
+    if (!p) return false;
+    p.isVerified = verified;
+    return true;
+  }
+
+  async deletePhotoAsModerator(photoId: string): Promise<boolean> {
+    const before = this.photos.length;
+    this.photos = this.photos.filter((x) => x.id !== photoId);
+    return this.photos.length < before;
   }
 }
 

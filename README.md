@@ -36,6 +36,20 @@ Three tiers keyed to capability, not just width:
 
 ## Recent additions
 
+- **Moderation & trust review** — an admin-only review layer for what was
+  previously database-only data. Admins are designated via the `ADMIN_USERNAMES`
+  env var (never grantable through any API; default-closed if unset). A header
+  "Moderate" button (visible only to admins) opens a panel with two queues:
+  **Reports** (review reported designs, Dismiss or Take down — takedown hides the
+  design and actions its open reports) and **Photo verification** (confirm
+  match-day photos as genuine, or Remove them). Verified photos now show a
+  "Verified match" badge in the Before/After slider, so verification is visible
+  social proof. Every admin endpoint is gated server-side regardless of UI.
+
+  Deploy note: set `ADMIN_USERNAMES=yourname` in the environment, or the
+  moderation queue stays inaccessible to everyone.
+
+
 - **Before/After real photos** — the social-proof feature. Creators attach a
   real match-day photo to a saved design ("Add match-day photo", resized
   client-side before upload). The community feed marks those designs with a

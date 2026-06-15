@@ -281,6 +281,88 @@ async function runSuite(name: string, repo: DesignRepository, auth: AuthReposito
   console.log('photos: all assertions passed (upload, list, serve, hasPhoto flag, owner-only, delete)');
 }
 
+// ---- moderation & trust review (admin gate, takedown, verify) ----
+{
+  const auth = new MemoryAuthRepository();
+  // "chief" is the only designated admin.
+  const app = await buildApp(new MemoryDesignRepository((id) => auth.usernameOf(id)), auth, templates, {
+    adminUsernames: ['chief'],
+  });
+  const cellsGzB64 = gzipSync(sampleCells()).toString('base64');
+  const adminTok = await registerUser(app, 'chief');
+  const userTok = await registerUser(app, 'member');
+
+  // /api/me reflects admin status.
+  const meAdmin = (await app.inject({ method: 'GET', url: '/api/me', headers: { authorization: `Bearer ${adminTok}` } })).json() as { isAdmin: boolean };
+  const meUser = (await app.inject({ method: 'GET', url: '/api/me', headers: { authorization: `Bearer ${userTok}` } })).json() as { isAdmin: boolean };
+  assert.equal(meAdmin.isAdmin, true, 'designated user is admin');
+  assert.equal(meUser.isAdmin, false, 'normal user is not admin');
+
+  // The gate: non-admin and anonymous are refused the queue.
+  assert.equal((await app.inject({ method: 'GET', url: '/api/admin/reports', headers: { authorization: `Bearer ${userTok}` } })).statusCode, 403, 'non-admin 403');
+  assert.equal((await app.inject({ method: 'GET', url: '/api/admin/reports' })).statusCode, 401, 'anonymous 401');
+
+  // Publish a design and report it.
+  const created = await app.inject({
+    method: 'POST',
+    url: '/api/designs',
+    headers: { authorization: `Bearer ${userTok}` },
+    payload: { title: 'Bad Tifo', templateId: DEFAULT_TEMPLATE.id, templateVersion: 1, palette: PALETTE, cellsGzB64 },
+  });
+  const designId = (created.json() as { id: string }).id;
+  await app.inject({ method: 'PATCH', url: `/api/designs/${designId}`, headers: { authorization: `Bearer ${userTok}` }, payload: { isPublic: true } });
+  await app.inject({ method: 'POST', url: '/api/report', payload: { targetType: 'design', targetId: designId, reason: 'hateful' } });
+
+  // Admin sees it with context.
+  const reports = (await app.inject({ method: 'GET', url: '/api/admin/reports', headers: { authorization: `Bearer ${adminTok}` } })).json() as { targetId: string; targetTitle: string; reason: string }[];
+  const rep = reports.find((r) => r.targetId === designId);
+  assert.ok(rep, 'report visible to admin');
+  assert.equal(rep!.targetTitle, 'Bad Tifo');
+  assert.equal(rep!.reason, 'hateful');
+
+  // Takedown hides the design and clears the open report.
+  assert.equal((await app.inject({ method: 'POST', url: `/api/admin/designs/${designId}/takedown`, headers: { authorization: `Bearer ${adminTok}` } })).statusCode, 200);
+  const gallery = (await app.inject({ method: 'GET', url: '/api/gallery' })).json() as { id: string }[];
+  assert.ok(!gallery.find((d) => d.id === designId), 'design hidden from gallery after takedown');
+  const afterReports = (await app.inject({ method: 'GET', url: '/api/admin/reports', headers: { authorization: `Bearer ${adminTok}` } })).json() as unknown[];
+  assert.equal(afterReports.length, 0, 'open report cleared by takedown');
+
+  // Photo verification: upload, appears unverified, admin verifies, leaves queue.
+  const created2 = await app.inject({
+    method: 'POST',
+    url: '/api/designs',
+    headers: { authorization: `Bearer ${userTok}` },
+    payload: { title: 'Photo Design', templateId: DEFAULT_TEMPLATE.id, templateVersion: 1, palette: PALETTE, cellsGzB64 },
+  });
+  const did2 = (created2.json() as { id: string }).id;
+  await app.inject({ method: 'PATCH', url: `/api/designs/${did2}`, headers: { authorization: `Bearer ${userTok}` }, payload: { isPublic: true } });
+  const up = await app.inject({
+    method: 'POST',
+    url: `/api/designs/${did2}/photos`,
+    headers: { authorization: `Bearer ${userTok}` },
+    payload: { imageB64: PNG_1PX.toString('base64'), width: 1, height: 1, caption: 'Match' },
+  });
+  const photoId = (up.json() as { photoId: string }).photoId;
+  const unver = (await app.inject({ method: 'GET', url: '/api/admin/photos/unverified', headers: { authorization: `Bearer ${adminTok}` } })).json() as { id: string }[];
+  assert.ok(unver.find((p) => p.id === photoId), 'new photo is unverified');
+  // Non-admin cannot verify.
+  assert.equal((await app.inject({ method: 'POST', url: `/api/admin/photos/${photoId}/verify`, headers: { authorization: `Bearer ${userTok}` }, payload: { verified: true } })).statusCode, 403, 'non-admin verify 403');
+  // Admin verifies.
+  assert.equal((await app.inject({ method: 'POST', url: `/api/admin/photos/${photoId}/verify`, headers: { authorization: `Bearer ${adminTok}` }, payload: { verified: true } })).statusCode, 200);
+  const photoList = (await app.inject({ method: 'GET', url: `/api/designs/${did2}/photos` })).json() as { isVerified: boolean }[];
+  assert.equal(photoList[0].isVerified, true, 'photo now verified');
+  const unver2 = (await app.inject({ method: 'GET', url: '/api/admin/photos/unverified', headers: { authorization: `Bearer ${adminTok}` } })).json() as { id: string }[];
+  assert.ok(!unver2.find((p) => p.id === photoId), 'verified photo left the queue');
+
+  // With no admins configured, even the right person is denied (gate closed by default).
+  const noAdminAuth = new MemoryAuthRepository();
+  const noAdminApp = await buildApp(new MemoryDesignRepository((id) => noAdminAuth.usernameOf(id)), noAdminAuth, templates);
+  const sameNameTok = await registerUser(noAdminApp, 'chief');
+  assert.equal((await noAdminApp.inject({ method: 'GET', url: '/api/admin/reports', headers: { authorization: `Bearer ${sameNameTok}` } })).statusCode, 403, 'no ADMIN_USERNAMES → nobody is admin');
+
+  console.log('moderation: all assertions passed (admin gate, report context, takedown, photo verify, default-closed)');
+}
+
 // ---- .tifo format validation endpoint ----
 {
   const auth = new MemoryAuthRepository();

@@ -55,7 +55,10 @@ export async function openBeforeAfter(item: GalleryItem): Promise<void> {
 
   const showPhoto = (i: number): void => {
     afterImg.src = photoUrl(photos[i].id);
-    captionEl.textContent = photos[i].caption ?? '';
+    const cap = photos[i].caption ?? '';
+    captionEl.innerHTML = photos[i].isVerified
+      ? `<span class="ba-verified" title="Verified by a moderator as a genuine match"><i class="ti ti-rosette-discount-check"></i> Verified match</span>${cap ? ' · ' + escapeHtml(cap) : ''}`
+      : escapeHtml(cap);
     setSplit(50);
   };
 

@@ -13,6 +13,8 @@ import type {
   EventsRepository,
   FunnelStep,
   PhotoMeta,
+  ReportItem,
+  PhotoReviewItem,
 } from './repo';
 import { normalizeTags } from './memoryRepo';
 
@@ -375,6 +377,84 @@ export class PgDesignRepository implements DesignRepository {
        WHERE dp.id = $1 AND dp.design_id = d.id AND d.owner_id = $2`,
       [photoId, ownerId],
     );
+    return (res.rowCount ?? 0) > 0;
+  }
+
+  async listReports(status: string, limit: number): Promise<ReportItem[]> {
+    const res = await this.pool.query(
+      `SELECT m.id, m.target_type, m.target_id, m.reason, m.status, m.created_at,
+              d.title AS target_title, coalesce(u.username, NULL) AS target_owner,
+              d.is_public AS target_is_public, (d.thumbnail IS NOT NULL) AS target_has_thumbnail
+       FROM moderation_reports m
+       LEFT JOIN designs d ON d.id = m.target_id AND m.target_type = 'design'
+       LEFT JOIN users u ON u.id = d.owner_id
+       WHERE m.status = $1
+       ORDER BY m.created_at DESC LIMIT $2`,
+      [status, limit],
+    );
+    return res.rows.map((r) => ({
+      id: String(r.id),
+      targetType: String(r.target_type),
+      targetId: String(r.target_id),
+      reason: String(r.reason),
+      status: String(r.status),
+      createdAt: new Date(r.created_at).toISOString(),
+      targetTitle: r.target_title ?? null,
+      targetOwner: r.target_owner ?? null,
+      targetIsPublic: r.target_is_public ?? null,
+      targetHasThumbnail: Boolean(r.target_has_thumbnail),
+    }));
+  }
+
+  async setReportStatus(reportId: string, status: string): Promise<boolean> {
+    const res = await this.pool.query('UPDATE moderation_reports SET status = $2 WHERE id = $1', [reportId, status]);
+    return (res.rowCount ?? 0) > 0;
+  }
+
+  async takedownDesign(designId: string): Promise<boolean> {
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+      const upd = await client.query('UPDATE designs SET is_public = false WHERE id = $1', [designId]);
+      await client.query(
+        `UPDATE moderation_reports SET status = 'actioned'
+         WHERE target_type = 'design' AND target_id = $1 AND status = 'open'`,
+        [designId],
+      );
+      await client.query('COMMIT');
+      return (upd.rowCount ?? 0) > 0;
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+
+  async listUnverifiedPhotos(limit: number): Promise<PhotoReviewItem[]> {
+    const res = await this.pool.query(
+      `SELECT p.id, p.design_id, p.caption, p.created_at, d.title AS design_title
+       FROM design_photos p LEFT JOIN designs d ON d.id = p.design_id
+       WHERE p.is_verified = false
+       ORDER BY p.created_at DESC LIMIT $1`,
+      [limit],
+    );
+    return res.rows.map((r) => ({
+      id: String(r.id),
+      designId: String(r.design_id),
+      designTitle: r.design_title ?? null,
+      caption: r.caption ?? null,
+      createdAt: new Date(r.created_at).toISOString(),
+    }));
+  }
+
+  async setPhotoVerified(photoId: string, verified: boolean): Promise<boolean> {
+    const res = await this.pool.query('UPDATE design_photos SET is_verified = $2 WHERE id = $1', [photoId, verified]);
+    return (res.rowCount ?? 0) > 0;
+  }
+
+  async deletePhotoAsModerator(photoId: string): Promise<boolean> {
+    const res = await this.pool.query('DELETE FROM design_photos WHERE id = $1', [photoId]);
     return (res.rowCount ?? 0) > 0;
   }
 }

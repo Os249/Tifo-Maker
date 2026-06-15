@@ -65,6 +65,8 @@ export interface AppOptions {
   logger?: boolean;
   /** Optional anonymous-analytics sink. When absent, event endpoints no-op. */
   events?: EventsRepository;
+  /** Usernames with moderator privileges (from ADMIN_USERNAMES). Case-insensitive. */
+  adminUsernames?: string[];
 }
 
 export async function buildApp(
@@ -103,6 +105,25 @@ export async function buildApp(
     const userId = await userOf(req);
     if (!userId) {
       await reply.code(401).send({ error: 'authentication required' });
+      return null;
+    }
+    return userId;
+  };
+
+  // Admin = the user's username is in the ADMIN_USERNAMES allow-list. This is
+  // intentionally NOT grantable via any API — you bootstrap admins through the
+  // environment, so no request (forged or otherwise) can escalate privilege.
+  const adminSet = new Set((options.adminUsernames ?? []).map((u) => u.toLowerCase()));
+  const isAdminUser = async (userId: string): Promise<boolean> => {
+    if (adminSet.size === 0) return false;
+    const user = await auth.getUserById(userId).catch(() => null);
+    return user ? adminSet.has(user.username.toLowerCase()) : false;
+  };
+  const requireAdmin = async (req: FastifyRequest, reply: FastifyReply): Promise<string | null> => {
+    const userId = await requireUser(req, reply);
+    if (!userId) return null;
+    if (!(await isAdminUser(userId))) {
+      await reply.code(403).send({ error: 'moderator access required' });
       return null;
     }
     return userId;
@@ -237,7 +258,7 @@ export async function buildApp(
     const userId = await requireUser(req, reply);
     if (!userId) return;
     const user = await auth.getUserById(userId).catch(() => null);
-    return { id: userId, username: user?.username ?? null };
+    return { id: userId, username: user?.username ?? null, isAdmin: await isAdminUser(userId) };
   });
 
   // ---------- gallery ----------
@@ -342,6 +363,64 @@ export async function buildApp(
     const { photoId } = req.params as { photoId: string };
     const ok = await repo.deletePhoto(photoId, userId);
     if (!ok) return reply.code(404).send({ error: 'not found or not yours' });
+    return { deleted: true };
+  });
+
+  // ---------- moderation & trust review (admin only) ----------
+  // The review queue: open reports with target context.
+  app.get('/api/admin/reports', async (req, reply) => {
+    const adminId = await requireAdmin(req, reply);
+    if (!adminId) return;
+    const q = req.query as { status?: string };
+    const status = ['open', 'reviewed', 'actioned'].includes(q.status ?? '') ? q.status! : 'open';
+    return repo.listReports(status, 100);
+  });
+
+  // Dismiss a report (no action needed) → reviewed.
+  app.post('/api/admin/reports/:id/dismiss', async (req, reply) => {
+    const adminId = await requireAdmin(req, reply);
+    if (!adminId) return;
+    const { id } = req.params as { id: string };
+    const ok = await repo.setReportStatus(id, 'reviewed');
+    if (!ok) return reply.code(404).send({ error: 'report not found' });
+    return { status: 'reviewed' };
+  });
+
+  // Take a reported design down: make it private + mark its open reports actioned.
+  app.post('/api/admin/designs/:id/takedown', async (req, reply) => {
+    const adminId = await requireAdmin(req, reply);
+    if (!adminId) return;
+    const { id } = req.params as { id: string };
+    const ok = await repo.takedownDesign(id);
+    if (!ok) return reply.code(404).send({ error: 'design not found' });
+    return { takendown: true };
+  });
+
+  // Photo verification queue.
+  app.get('/api/admin/photos/unverified', async (req, reply) => {
+    const adminId = await requireAdmin(req, reply);
+    if (!adminId) return;
+    return repo.listUnverifiedPhotos(100);
+  });
+
+  // Confirm (or un-confirm) a photo as a genuine match.
+  app.post('/api/admin/photos/:photoId/verify', async (req, reply) => {
+    const adminId = await requireAdmin(req, reply);
+    if (!adminId) return;
+    const { photoId } = req.params as { photoId: string };
+    const verified = (req.body as { verified?: unknown } | null)?.verified !== false; // default true
+    const ok = await repo.setPhotoVerified(photoId, verified);
+    if (!ok) return reply.code(404).send({ error: 'photo not found' });
+    return { verified };
+  });
+
+  // A moderator can remove any photo outright (not just its owner).
+  app.delete('/api/admin/photos/:photoId', async (req, reply) => {
+    const adminId = await requireAdmin(req, reply);
+    if (!adminId) return;
+    const { photoId } = req.params as { photoId: string };
+    const ok = await repo.deletePhotoAsModerator(photoId);
+    if (!ok) return reply.code(404).send({ error: 'photo not found' });
     return { deleted: true };
   });
 

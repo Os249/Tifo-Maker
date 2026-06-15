@@ -345,13 +345,63 @@ export async function fetchProfile(userId: string): Promise<ProfileData> {
 }
 
 /** The signed-in user's id + name, or null. */
-export async function fetchMe(): Promise<{ id: string; username: string } | null> {
+export async function fetchMe(): Promise<{ id: string; username: string; isAdmin: boolean } | null> {
   if (!token) return null;
   try {
-    return (await expectOk(await fetch(`${API}/me`, { headers: authHeaders(false) }))) as { id: string; username: string };
+    return (await expectOk(await fetch(`${API}/me`, { headers: authHeaders(false) }))) as {
+      id: string;
+      username: string;
+      isAdmin: boolean;
+    };
   } catch {
     return null;
   }
+}
+
+// ---- moderation / trust review (admin only) ----
+export interface ReportItem {
+  id: string;
+  targetType: string;
+  targetId: string;
+  reason: string;
+  status: string;
+  createdAt: string;
+  targetTitle: string | null;
+  targetOwner: string | null;
+  targetIsPublic: boolean | null;
+  targetHasThumbnail: boolean;
+}
+export interface PhotoReviewItem {
+  id: string;
+  designId: string;
+  designTitle: string | null;
+  caption: string | null;
+  createdAt: string;
+}
+
+export async function listReports(status = 'open'): Promise<ReportItem[]> {
+  return (await expectOk(await fetch(`${API}/admin/reports?status=${status}`, { headers: authHeaders(true) }))) as ReportItem[];
+}
+export async function dismissReport(id: string): Promise<void> {
+  await expectOk(await fetch(`${API}/admin/reports/${id}/dismiss`, { method: 'POST', headers: authHeaders(true) }));
+}
+export async function takedownDesign(id: string): Promise<void> {
+  await expectOk(await fetch(`${API}/admin/designs/${id}/takedown`, { method: 'POST', headers: authHeaders(true) }));
+}
+export async function listUnverifiedPhotos(): Promise<PhotoReviewItem[]> {
+  return (await expectOk(await fetch(`${API}/admin/photos/unverified`, { headers: authHeaders(true) }))) as PhotoReviewItem[];
+}
+export async function verifyPhoto(photoId: string, verified: boolean): Promise<void> {
+  await expectOk(
+    await fetch(`${API}/admin/photos/${photoId}/verify`, {
+      method: 'POST',
+      headers: authHeaders(true),
+      body: JSON.stringify({ verified }),
+    }),
+  );
+}
+export async function adminDeletePhoto(photoId: string): Promise<void> {
+  await expectOk(await fetch(`${API}/admin/photos/${photoId}`, { method: 'DELETE', headers: authHeaders(true) }));
 }
 
 export const thumbnailUrl = (id: string): string => `${API}/designs/${id}/thumbnail.png`;

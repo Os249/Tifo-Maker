@@ -614,4 +614,33 @@ body.viewer { display:block; overflow-y:auto; background:var(--ink-0); }
 .ba-thumb { width:64px; height:42px; border-radius:6px; overflow:hidden; border:2px solid transparent; cursor:pointer; padding:0; background:none; }
 .ba-thumb img { width:100%; height:100%; object-fit:cover; }
 .ba-thumb.active { border-color:var(--violet); }
+
+/* moderation panel rows */
+.mod-body { padding:16px 0 4px; max-height:60vh; overflow-y:auto; }
+.mod-row {
+  display:flex; gap:14px; align-items:center; padding:12px; border:1px solid var(--line-1);
+  border-radius:var(--r-sm); margin-bottom:10px; background:var(--ink-2);
+}
+.mod-thumb { width:80px; height:54px; border-radius:6px; object-fit:cover; flex:0 0 auto; background:var(--ink-3); }
+.mod-thumb-empty { background:repeating-linear-gradient(45deg, var(--ink-3) 0 6px, var(--ink-2) 6px 12px); }
+.mod-thumb-photo { width:96px; height:64px; }
+.mod-info { flex:1; min-width:0; }
+.mod-title { font-size:14px; font-weight:600; color:var(--text-1); }
+.mod-meta { font-size:12px; color:var(--text-3); margin-top:2px; }
+.mod-meta strong { color:var(--text-2); }
+.mod-date { color:var(--text-3); opacity:.7; }
+.mod-flag { font-size:10px; color:var(--flare); border:1px solid var(--flare); border-radius:4px; padding:0 5px; margin-left:6px; }
+.mod-actions { display:flex; gap:8px; flex:0 0 auto; }
+.mod-btn {
+  font-size:12px; padding:7px 12px; border-radius:var(--r-sm); cursor:pointer;
+  border:1px solid var(--line-2); background:var(--ink-3); color:var(--text-2);
+}
+.mod-btn:hover { color:var(--text-1); border-color:var(--text-3); }
+.mod-ok { border-color:var(--flare); color:var(--flare); }
+.mod-ok:hover { background:var(--flare); color:#fff; }
+.mod-danger:hover { border-color:#e0484d; color:#e0484d; }
+
+/* verified-match badge in the Before/After caption */
+.ba-verified { color:var(--ok); font-weight:600; display:inline-flex; align-items:center; gap:4px; }
+.ba-verified i { font-size:15px; }
 `;

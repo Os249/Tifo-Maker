@@ -54,6 +54,11 @@ async function main(): Promise<void> {
   if (!staticDir) {
     console.warn('[tifo] no dist/ found — serving API only (run `npm run build` first to serve the app)');
   }
+  // Moderators are designated via env, never via any API — bootstrap-safe.
+  const adminUsernames = (process.env.ADMIN_USERNAMES ?? '')
+    .split(',')
+    .map((u) => u.trim())
+    .filter(Boolean);
 
   let app;
   if (process.env.DATABASE_URL) {
@@ -64,6 +69,7 @@ async function main(): Promise<void> {
       rateLimit: true,
       logger: isProd,
       events: new PgEventsRepository(pool),
+      adminUsernames: adminUsernames,
     });
   } else {
     if (isProd) {
@@ -79,6 +85,7 @@ async function main(): Promise<void> {
       rateLimit: false,
       logger: false,
       events: new MemoryEventsRepository(),
+      adminUsernames: adminUsernames,
     });
   }
 

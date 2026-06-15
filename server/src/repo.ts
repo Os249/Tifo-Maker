@@ -108,6 +108,42 @@ export interface DesignRepository {
   getPhoto(photoId: string): Promise<{ image: Buffer } | null>;
   /** Delete a photo (owner of the parent design only). */
   deletePhoto(photoId: string, ownerId: string): Promise<boolean>;
+
+  // ---- moderation / trust & safety (admin only at the route layer) ----
+  /** Open reports, newest first, enriched with target context for review. */
+  listReports(status: string, limit: number): Promise<ReportItem[]>;
+  /** Set a report's status (open|reviewed|actioned). */
+  setReportStatus(reportId: string, status: string): Promise<boolean>;
+  /** Take a design down: make it private + mark its open reports actioned. */
+  takedownDesign(designId: string): Promise<boolean>;
+  /** Photos awaiting verification, newest first, with design context. */
+  listUnverifiedPhotos(limit: number): Promise<PhotoReviewItem[]>;
+  /** Set a photo's verified flag (moderator confirmation of a genuine match). */
+  setPhotoVerified(photoId: string, verified: boolean): Promise<boolean>;
+  /** Moderator override: delete any photo regardless of owner. */
+  deletePhotoAsModerator(photoId: string): Promise<boolean>;
+}
+
+export interface ReportItem {
+  id: string;
+  targetType: string;
+  targetId: string;
+  reason: string;
+  status: string;
+  createdAt: string;
+  /** Context (present for design targets that still exist). */
+  targetTitle: string | null;
+  targetOwner: string | null;
+  targetIsPublic: boolean | null;
+  targetHasThumbnail: boolean;
+}
+
+export interface PhotoReviewItem {
+  id: string;
+  designId: string;
+  designTitle: string | null;
+  caption: string | null;
+  createdAt: string;
 }
 
 export interface PhotoMeta {
