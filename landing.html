@@ -20,37 +20,45 @@
   <header class="nav">
     <a class="brand" href="/">TIFO<b>MAKER</b></a>
     <nav class="nav-links">
-      <a href="#how">How it works</a>
-      <a href="#features">Features</a>
-      <a href="#clubs">For clubs</a>
-      <a class="nav-cta" href="/app">Open the editor</a>
+      <a href="#how" data-i18n="nav.how">How it works</a>
+      <a href="#features" data-i18n="nav.features">Features</a>
+      <a href="#clubs" data-i18n="nav.clubs">For clubs</a>
+      <button class="lang-toggle" id="lang-toggle" data-i18n="common.language">العربية</button>
+      <a class="nav-cta" href="/app" data-i18n="nav.openEditor">Open the editor</a>
     </nav>
   </header>
 
   <!-- ============ HERO ============ -->
   <section class="hero">
     <div class="hero-copy">
-      <div class="eyebrow">The global platform for stadium choreography</div>
-      <h1>Design the display<br /><span class="grad">60,000 fans</span><br />will never forget.</h1>
-      <p class="lead">
+      <div class="eyebrow" data-i18n="hero.eyebrow">The global platform for stadium choreography</div>
+      <h1><span data-i18n="hero.title1">Design the display</span><br /><span class="grad" data-i18n="hero.title2">60,000 fans</span><br /><span data-i18n="hero.title3">will never forget.</span></h1>
+      <p class="lead" data-i18n="hero.sub">
         TifoMaker is the all-in-one platform to design your stadium tifo, watch it light up
         the stands in 3D, and export the seat-by-seat instructions that make it real on match day.
       </p>
       <div class="cta-row">
-        <a class="btn btn-primary" href="/app">Start designing free</a>
-        <a class="btn btn-ghost" href="#how">See how it works</a>
+        <a class="btn btn-primary" href="/app" data-i18n="hero.ctaPrimary">Start designing free</a>
+        <a class="btn btn-ghost" href="#how" data-i18n="hero.ctaSecondary">See how it works</a>
       </div>
-      <div class="trust-line">No download. No account needed to start.</div>
+      <div class="trust-line" data-i18n="hero.noDownload">No download. No account needed to start.</div>
     </div>
     <div class="hero-visual">
       <div class="stadium-mock" aria-hidden="true">
-        <!-- Stylized tifo bowl, pure CSS, evoking the 3D preview -->
+        <!-- Oval stadium bowl in TV-gantry perspective: concentric seating
+             rings (the stands) enclosing the pitch ellipse, tilted in 3D. -->
         <div class="bowl">
-          <div class="tier tier-top"></div>
-          <div class="tier tier-mid"></div>
-          <div class="pitch"></div>
+          <div class="bowl-scene">
+            <div class="ring ring-outer"></div>
+            <div class="ring ring-mid"></div>
+            <div class="ring ring-inner"></div>
+            <div class="pitch">
+              <span class="pitch-line"></span>
+              <span class="pitch-circle"></span>
+            </div>
+          </div>
         </div>
-        <div class="mock-label">Live 3D preview · TV gantry view</div>
+        <div class="mock-label" data-i18n="hero.mockLabel">Live 3D preview · TV gantry view</div>
       </div>
     </div>
   </section>
@@ -59,44 +67,44 @@
   <section class="trio" id="features">
     <div class="trio-card c-design">
       <div class="trio-icon">✦</div>
-      <h3>Paint across the whole stadium</h3>
-      <p>A canvas built for 60,000 seats. Brushes, patterns, text in any language, logos, and full color control.</p>
+      <h3 data-i18n="value.paint.title">Paint across the whole stadium</h3>
+      <p data-i18n="value.paint.body">A canvas built for 60,000 seats. Brushes, patterns, text in any language, logos, and full color control.</p>
     </div>
     <div class="trio-card c-sim">
       <div class="trio-icon">◎</div>
-      <h3>See it in 3D before you print</h3>
-      <p>Rotate the stadium, play the card-reveal wave, and know exactly how it looks from the TV gantry.</p>
+      <h3 data-i18n="value.3d.title">See it in 3D before you print</h3>
+      <p data-i18n="value.3d.body">Rotate the stadium, play the card-reveal wave, and know exactly how it looks from the TV gantry.</p>
     </div>
     <div class="trio-card c-exec">
       <div class="trio-icon">▣</div>
-      <h3>Turn it into match-day logistics</h3>
-      <p>Export seat-by-seat sheets, volunteer guides, and exact card and bag counts. Every supporter knows their part.</p>
+      <h3 data-i18n="value.logistics.title">Turn it into match-day logistics</h3>
+      <p data-i18n="value.logistics.body">Export seat-by-seat sheets, volunteer guides, and exact card and bag counts. Every supporter knows their part.</p>
     </div>
   </section>
 
   <!-- ============ HOW IT WORKS ============ -->
   <section class="how" id="how">
-    <h2 class="section-title">Three steps from idea to 60,000-card display</h2>
+    <h2 class="section-title" data-i18n="how.title">Three steps from idea to 60,000-card display</h2>
     <div class="steps">
       <div class="step">
         <div class="step-num n1">1</div>
         <div class="step-body">
-          <h3>Build or select your stadium</h3>
-          <p>Pick your stadium — or match your real one. 40k, 60k, 76k, and custom geometries.</p>
+          <h3 data-i18n="how.step1.title">Build or select your stadium</h3>
+          <p data-i18n="how.step1.body">Pick your stadium — or match your real one. 40k, 60k, 76k, and custom geometries.</p>
         </div>
       </div>
       <div class="step">
         <div class="step-num n2">2</div>
         <div class="step-body">
-          <h3>Design the choreography</h3>
-          <p>Paint your tifo. See it light up the stadium in 3D before you print a single card.</p>
+          <h3 data-i18n="how.step2.title">Design the choreography</h3>
+          <p data-i18n="how.step2.body">Paint your tifo. See it light up the stadium in 3D before you print a single card.</p>
         </div>
       </div>
       <div class="step">
         <div class="step-num n3">3</div>
         <div class="step-body">
-          <h3>Export &amp; mobilize</h3>
-          <p>Download seat-by-seat instructions. Every volunteer knows exactly which card to hold.</p>
+          <h3 data-i18n="how.step3.title">Export &amp; mobilize</h3>
+          <p data-i18n="how.step3.body">Download seat-by-seat instructions. Every volunteer knows exactly which card to hold.</p>
         </div>
       </div>
     </div>
@@ -106,26 +114,26 @@
   <section class="clubs" id="clubs">
     <div class="clubs-inner">
       <div class="clubs-copy">
-        <div class="eyebrow light">For clubs &amp; organizers</div>
-        <h2>Coordinate professional-grade displays.</h2>
+        <div class="eyebrow light" data-i18n="clubs.eyebrow">For clubs &amp; organizers</div>
+        <h2 data-i18n="clubs.title">Coordinate professional-grade displays.</h2>
         <p>
           Production-ready exports, volunteer logistics, and reusable templates for every match.
           Turn a design into a flawless 60,000-person execution — material counts, bag estimates,
           color specs, and per-section instruction sheets, all generated automatically.
         </p>
-        <a class="btn btn-light" href="/app">Try the production export</a>
+        <a class="btn btn-light" href="/app" data-i18n="clubs.cta">Try the production export</a>
       </div>
       <div class="clubs-stats">
-        <div class="stat"><span class="stat-num">60,832</span><span class="stat-label">seats per display</span></div>
-        <div class="stat"><span class="stat-num">3D</span><span class="stat-label">simulation before print</span></div>
-        <div class="stat"><span class="stat-num">CSV + PDF</span><span class="stat-label">match-day logistics</span></div>
+        <div class="stat"><span class="stat-num">60,832</span><span class="stat-label" data-i18n="clubs.stat1">seats per display</span></div>
+        <div class="stat"><span class="stat-num">3D</span><span class="stat-label" data-i18n="clubs.stat2sub">simulation before print</span></div>
+        <div class="stat"><span class="stat-num">CSV + PDF</span><span class="stat-label" data-i18n="clubs.stat3sub">match-day logistics</span></div>
       </div>
     </div>
   </section>
 
   <!-- ============ AUDIENCE: SUPPORTERS ============ -->
   <section class="supporters">
-    <h2 class="section-title">Built by fans, for the curva.</h2>
+    <h2 class="section-title" data-i18n="clubs.tagline">Built by fans, for the curva.</h2>
     <p class="supporters-lead">
       Bring your group's vision to life. Free to design, easy to share, built for the terrace.
       Publish to the community, remix others' tifos, and rally your section around one image.
@@ -134,20 +142,21 @@
 
   <!-- ============ FINAL CTA ============ -->
   <section class="final-cta">
-    <h2>Your next tifo starts now.</h2>
-    <p>Design free in your browser — no download, no account needed to start.</p>
-    <a class="btn btn-primary btn-lg" href="/app">Start designing free</a>
+    <h2 data-i18n="final.title">Your next tifo starts now.</h2>
+    <p data-i18n="final.sub">Design free in your browser — no download, no account needed to start.</p>
+    <a class="btn btn-primary btn-lg" href="/app" data-i18n="hero.ctaPrimary">Start designing free</a>
   </section>
 
   <footer class="foot">
     <div class="foot-brand">TIFO<b>MAKER</b></div>
     <div class="foot-links">
-      <a href="/app">Editor</a>
-      <a href="#how">How it works</a>
-      <a href="#clubs">For clubs</a>
-      <a href="/tifo-spec">Developers</a>
+      <a href="/app" data-i18n="nav.openEditor">Editor</a>
+      <a href="#how" data-i18n="nav.how">How it works</a>
+      <a href="#clubs" data-i18n="nav.clubs">For clubs</a>
+      <a href="/tifo-spec" data-i18n="nav.developers">Developers</a>
     </div>
     <div class="foot-note">The global standard platform for stadium choreography.</div>
   </footer>
+  <script type="module" src="/src/landing.ts"></script>
 </body>
 </html>

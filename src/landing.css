@@ -129,55 +129,87 @@ a { color: inherit; text-decoration: none; }
 .btn-light:hover { background: #c4d900; }
 .btn-lg { font-size: 18px; padding: 17px 34px; }
 
-/* ---- hero stadium signature ---- */
+/* ---- hero stadium signature: an oval bowl in TV-gantry perspective ---- */
 .hero-visual { display: flex; justify-content: center; }
-.stadium-mock { width: 100%; max-width: 440px; }
+.stadium-mock { width: 100%; max-width: 460px; }
 .bowl {
   position: relative;
-  aspect-ratio: 4 / 3;
-  border-radius: 50% 50% 46% 46% / 62% 62% 38% 38%;
-  background: radial-gradient(ellipse at 50% 120%, var(--purple-deep), var(--ink) 70%);
-  padding: 7% 7% 0;
-  box-shadow: 0 30px 70px rgba(61, 26, 94, 0.45);
-  overflow: hidden;
+  aspect-ratio: 5 / 4;
+  perspective: 1100px;
+  perspective-origin: 50% 32%;
 }
-.tier {
-  height: 26%;
-  margin-bottom: 4%;
-  border-radius: 50% / 100% 100% 0 0;
-  background-size: 9px 9px;
-  background-image:
-    linear-gradient(90deg, var(--neon) 0 50%, transparent 0),
-    linear-gradient(var(--blue) 0 0);
+/* The whole bowl tilts back like a camera high in the stands looking down. */
+.bowl-scene {
+  position: absolute;
+  inset: 0;
+  transform: rotateX(54deg);
+  transform-style: preserve-3d;
+}
+/* Each ring is an elliptical band of seating; stacked + scaled inward they
+   form the tiered bowl. Conic stripes evoke the card mosaic of a live tifo. */
+.ring {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+}
+.ring-outer {
+  width: 100%;
+  height: 78%;
+  background:
+    repeating-conic-gradient(from 0deg,
+      var(--neon) 0deg 5deg, var(--blue) 5deg 10deg,
+      var(--emerald) 10deg 15deg, var(--purple) 15deg 20deg);
+  box-shadow: 0 24px 60px rgba(61, 26, 94, 0.5);
   animation: shimmer 5s ease-in-out infinite;
 }
-.tier-top {
-  background-image:
-    repeating-linear-gradient(90deg, var(--neon) 0 7px, var(--blue) 7px 14px, var(--emerald) 14px 21px, var(--purple) 21px 28px);
-  opacity: 0.95;
+/* The mid ring is the gangway/structure gap between upper and lower tiers. */
+.ring-mid {
+  width: 84%;
+  height: 62%;
+  background: var(--ink);
 }
-.tier-mid {
-  background-image:
-    repeating-linear-gradient(90deg, var(--blue) 0 7px, var(--purple) 7px 14px, var(--neon) 14px 21px, var(--emerald) 21px 28px);
+.ring-inner {
+  width: 74%;
+  height: 52%;
+  background:
+    repeating-conic-gradient(from 8deg,
+      var(--blue) 0deg 5deg, var(--purple) 5deg 10deg,
+      var(--neon) 10deg 15deg, var(--emerald) 15deg 20deg);
+  animation: shimmer 5s ease-in-out infinite;
   animation-delay: 0.6s;
 }
+/* The pitch: a green ellipse sitting flat at the centre of the bowl. */
 .pitch {
   position: absolute;
-  bottom: 6%;
   left: 50%;
-  transform: translateX(-50%) perspective(300px) rotateX(52deg);
-  width: 56%;
-  height: 34%;
-  background: linear-gradient(var(--emerald), #0a6e3c);
-  border: 2px solid rgba(255, 255, 255, 0.4);
-  border-radius: 4px;
+  top: 50%;
+  width: 58%;
+  height: 40%;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: radial-gradient(ellipse at 50% 40%, #15a35a, #0a6e3c 85%);
+  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.35);
 }
-.pitch::after {
-  content: '';
+.pitch-line {
   position: absolute;
-  inset: 22% 0 auto;
-  height: 1.5px;
-  background: rgba(255, 255, 255, 0.45);
+  left: 50%;
+  top: 6%;
+  bottom: 6%;
+  width: 2px;
+  transform: translateX(-50%);
+  background: rgba(255, 255, 255, 0.5);
+}
+.pitch-circle {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 26%;
+  height: 38%;
+  transform: translate(-50%, -50%);
+  border: 2px solid rgba(255, 255, 255, 0.5);
+  border-radius: 50%;
 }
 @keyframes shimmer {
   0%, 100% { filter: brightness(1); }
@@ -346,3 +378,32 @@ a { color: inherit; text-decoration: none; }
   .tier { animation: none; }
   html { scroll-behavior: auto; }
 }
+
+/* ---- language toggle ---- */
+.lang-toggle {
+  background: transparent;
+  border: 1px solid rgba(14, 10, 26, 0.18);
+  color: var(--ink);
+  font: inherit;
+  font-weight: 600;
+  font-size: 14px;
+  padding: 7px 14px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+.lang-toggle:hover { background: rgba(14, 10, 26, 0.06); border-color: rgba(14, 10, 26, 0.3); }
+
+/* ---- RTL: Arabic layout mirroring ---- */
+[dir="rtl"] body { font-family: 'Inter', 'Segoe UI', Tahoma, sans-serif; }
+[dir="rtl"] .hero { direction: rtl; }
+[dir="rtl"] .hero-copy { text-align: right; }
+[dir="rtl"] .cta-row,
+[dir="rtl"] .nav-links,
+[dir="rtl"] .foot-links,
+[dir="rtl"] .trio,
+[dir="rtl"] .steps { direction: rtl; }
+[dir="rtl"] .nav { direction: rtl; }
+[dir="rtl"] .stat-row { direction: rtl; }
+/* numerals and the stadium mock stay visually centered; the bowl is symmetric */
+[dir="rtl"] .clubs-inner { direction: rtl; }

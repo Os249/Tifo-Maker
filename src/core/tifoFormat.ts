@@ -163,7 +163,7 @@ export function validateTifo(
     err('palette', 'palette must be an array of hex colors');
   } else {
     if (palette.length < 2) err('palette', 'palette needs at least 2 colors (index 0 = empty seat)');
-    if (palette.length > 8) err('palette', 'palette may have at most 8 colors');
+    if (palette.length > 256) err('palette', 'palette may have at most 256 colors');
     palette.forEach((c, i) => {
       if (typeof c !== 'string' || !HEX.test(c)) err(`palette[${i}]`, `"${String(c)}" is not a #rrggbb hex color`);
     });

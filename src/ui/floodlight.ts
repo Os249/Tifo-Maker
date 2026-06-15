@@ -188,8 +188,27 @@ header {
 }
 
 /* swatches with live counts */
-.swatch-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:6px; }
+.swatch-grid { display:grid; grid-template-columns:repeat(5,1fr); gap:8px; }
 .swatch-cell { display:flex; flex-direction:column; align-items:center; gap:3px; }
+
+/* foreground colour well + add button (top of the Swatches card) */
+.color-well-row { display:flex; align-items:center; gap:12px; margin-bottom:14px; }
+.fg-well {
+  width:44px; height:44px; flex:0 0 auto; border-radius:var(--r-md); padding:0;
+  border:2px solid var(--line-2); box-shadow:inset 0 0 0 2px var(--ink-1), var(--shadow-card); cursor:pointer;
+  transition:transform .1s, border-color .14s;
+}
+.fg-well:hover { transform:scale(1.05); border-color:var(--blue); }
+.fg-meta { flex:1; min-width:0; display:flex; flex-direction:column; gap:1px; }
+.fg-hex { font-family:var(--font-data); font-size:13px; color:var(--text-1); text-transform:uppercase; }
+.fg-sub { font-size:11px; color:var(--text-3); }
+.add-swatch {
+  flex:0 0 auto; padding:8px 13px; font-size:12px; font-weight:600; border-radius:var(--r-pill);
+  background:var(--ink-3); color:var(--text-1); border:1px dashed var(--line-2); cursor:pointer;
+}
+.add-swatch:hover { border-style:solid; border-color:var(--blue); color:var(--blue); background:rgba(28,111,224,.1); }
+.swatch-hint { font-size:11px; color:var(--text-3); margin-top:10px; line-height:1.45; }
+.palette-tools { margin-top:14px; padding-top:14px; border-top:1px solid var(--line-1); }
 .swatch {
   width:100%; aspect-ratio:1; border-radius:var(--r-md); border:2px solid transparent;
   cursor:pointer; padding:0; min-width:0; transition:transform .1s;
@@ -722,4 +741,26 @@ body.viewer { display:block; overflow-y:auto; background:var(--ink-0); }
 /* verified-match badge in the Before/After caption */
 .ba-verified { color:var(--ok); font-weight:600; display:inline-flex; align-items:center; gap:4px; }
 .ba-verified i { font-size:15px; }
-`;
+
+/* language toggle in the editor header */
+.lang-toggle {
+  background:var(--ink-2); color:var(--text-1); border:1px solid var(--line-2);
+  border-radius:var(--r-pill); padding:7px 14px; font:inherit; font-weight:600; font-size:13px; cursor:pointer;
+  transition:background .14s, border-color .14s;
+}
+.lang-toggle:hover { background:var(--ink-3); border-color:var(--line-2); color:var(--text-1); }
+
+/* ---- RTL: mirror the editor layout for Arabic ---- */
+[dir="rtl"] .panel { border-left:none; border-right:1px solid var(--line-1); }
+[dir="rtl"] .tool-rail { border-right:none; border-left:1px solid var(--line-1); }
+[dir="rtl"] .panel-section h4 { flex-direction:row-reverse; text-align:right; }
+[dir="rtl"] .panel-section h4::before { /* accent tick moves to the right of the title */ }
+[dir="rtl"] .h4-tag { margin-left:0; margin-right:auto; }
+[dir="rtl"] .panel-head { flex-direction:row-reverse; }
+[dir="rtl"] .color-well-row { flex-direction:row-reverse; }
+[dir="rtl"] .fg-meta { text-align:right; }
+[dir="rtl"] .tool-bar { direction:rtl; }
+[dir="rtl"] label { flex-direction:row-reverse; }
+[dir="rtl"] .panel-orient { text-align:right; }
+[dir="rtl"] .feed-card-title, [dir="rtl"] .feed-card-by, [dir="rtl"] .mod-info { text-align:right; }
+[dir="rtl"] footer { direction:rtl; }`;

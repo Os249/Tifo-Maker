@@ -58,13 +58,23 @@ export function mountToolbar(
   for (const b of toolButtons) b.addEventListener('click', () => setTool(b.dataset.tool as ToolId));
   setTool('brush');
 
-  // Palette swatches
+  // ---- Swatches panel (Photoshop-style colour model) ----
+  // Seats store a palette INDEX; the palette is the design's living swatch set.
+  // You can pick ANY colour (auto-added as a swatch), edit a swatch in place
+  // (an intentional recolour of those seats), or load a preset/uploaded palette
+  // with a choice to ADD its colours or REMAP the design onto them.
   const palEl = $('#palette');
-  /** Per-color seat tallies — one pass over the cells buffer (ambient BOM). */
+  const fgWell = $('#fg-well') as unknown as HTMLButtonElement;
+  const fgHex = $('#fg-hex');
   const colorCounts = (): number[] => {
     const counts = new Array(store.palette.length).fill(0);
     for (let i = 0; i < store.cells.length; i++) counts[store.cells[i]]++;
     return counts;
+  };
+  const reflectFg = (): void => {
+    const hex = store.palette[editor.colorIndex] ?? '#000000';
+    fgWell.style.background = hex;
+    fgHex.textContent = hex.toLowerCase();
   };
   const renderPalette = (): void => {
     palEl.innerHTML = '';
@@ -76,18 +86,32 @@ export function mountToolbar(
       const b = document.createElement('button');
       b.className = 'swatch' + (idx === editor.colorIndex ? ' active' : '');
       b.style.background = hex;
-      b.title = `Color ${idx}`;
-      b.setAttribute('aria-label', `Color ${idx}, ${counts[idx].toLocaleString()} seats`);
+      b.title = `${hex} · ${counts[idx].toLocaleString()} seats · double-click to edit`;
+      b.setAttribute('aria-label', `Swatch ${hex}, ${counts[idx].toLocaleString()} seats`);
       b.addEventListener('click', () => {
         editor.colorIndex = idx;
         if (editor.tool === 'eraser') setTool('brush');
         editor.refreshStampPreviewTint();
         renderPalette();
+        reflectFg();
       });
-      // Double-click (or the native color input) edits this slot's color.
-      // Changing a slot recolors every seat using it instantly — seats store
-      // indices, not colors — and re-tints any floating objects in that color.
       b.addEventListener('dblclick', () => openColorEditor(idx, b));
+      // Right-click removes a swatch (unless it's in use or the last one).
+      b.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        if (counts[idx] > 0) {
+          message.textContent = `that colour is used by ${counts[idx].toLocaleString()} seats — recolour them before removing`;
+          return;
+        }
+        if (store.palette.length <= 2) return;
+        const next = store.palette.filter((_, i) => i !== idx);
+        store.setPalette(next);
+        if (editor.colorIndex >= next.length) editor.colorIndex = next.length - 1;
+        editor.rebuildPalette();
+        editor.repaintAll();
+        renderPalette();
+        reflectFg();
+      });
       const tally = document.createElement('span');
       tally.className = 'swatch-count';
       tally.textContent = counts[idx] >= 1000 ? `${(counts[idx] / 1000).toFixed(1)}k` : String(counts[idx]);
@@ -96,20 +120,53 @@ export function mountToolbar(
     });
   };
   renderPalette();
+  reflectFg();
   store.onDirty(renderPalette);
-  // First edit of the session = the activation moment. onDirty fires on any
-  // cell change (brush, fill, pattern, bake); track() dedupes to once.
   store.onDirty(() => track('paint_first'));
 
-  // A lightweight color editor: native color input + hex field in a popover,
-  // anchored to the swatch. Applies live so the user sees the bowl recolor.
+  // Pick ANY colour and start painting with it. Auto-adds it as a swatch so it's
+  // reusable (the confirmed behaviour). Uses a hidden native colour input.
+  const pickAnyColor = (initial: string, onChoose: (hex: string) => void): void => {
+    const input = document.createElement('input');
+    input.type = 'color';
+    input.value = /^#[0-9a-fA-F]{6}$/.test(initial) ? initial : '#1c6fe0';
+    input.style.position = 'fixed';
+    input.style.left = '-9999px';
+    document.body.appendChild(input);
+    input.addEventListener('input', () => onChoose(input.value.toLowerCase()), { once: false });
+    input.addEventListener('change', () => {
+      onChoose(input.value.toLowerCase());
+      input.remove();
+    });
+    input.click();
+  };
+
+  const addAndSelect = (hex: string): void => {
+    const idx = store.addSwatch(hex);
+    editor.colorIndex = idx;
+    if (editor.tool === 'eraser') setTool('brush');
+    editor.rebuildPalette();
+    editor.refreshStampPreviewTint();
+    renderPalette();
+    reflectFg();
+  };
+
+  // "+ Color" and the foreground well both open the any-colour picker.
+  $('#add-swatch').addEventListener('click', () => {
+    pickAnyColor(store.palette[editor.colorIndex] ?? '#1c6fe0', (hex) => addAndSelect(hex));
+  });
+  fgWell.addEventListener('click', () => {
+    pickAnyColor(store.palette[editor.colorIndex] ?? '#1c6fe0', (hex) => addAndSelect(hex));
+  });
+
+  // Edit one swatch in place — recolours the seats using it (intentional).
   let colorPopover: HTMLElement | null = null;
   const openColorEditor = (idx: number, anchor: HTMLElement): void => {
     colorPopover?.remove();
     const pop = document.createElement('div');
     pop.className = 'color-pop';
     const r = anchor.getBoundingClientRect();
-    pop.style.left = `${Math.min(r.left, window.innerWidth - 220)}px`;
+    pop.style.left = `${Math.min(r.left, window.innerWidth - 240)}px`;
     pop.style.top = `${r.bottom + 6}px`;
     const picker = document.createElement('input');
     picker.type = 'color';
@@ -120,13 +177,12 @@ export function mountToolbar(
     hex.maxLength = 7;
     const apply = (v: string): void => {
       if (!/^#[0-9a-fA-F]{6}$/.test(v)) return;
-      const next = store.palette.slice();
-      next[idx] = v.toLowerCase();
-      store.setPalette(next);
+      store.setSwatch(idx, v.toLowerCase());
       editor.rebuildPalette();
       editor.repaintAll();
       editor.objectOverlay?.sync();
       renderPalette();
+      reflectFg();
     };
     picker.addEventListener('input', () => {
       hex.value = picker.value;
@@ -139,11 +195,10 @@ export function mountToolbar(
       }
     });
     const label = document.createElement('span');
-    label.textContent = `Color ${idx}`;
+    label.textContent = 'Edit swatch';
     pop.append(label, picker, hex);
     document.body.appendChild(pop);
     colorPopover = pop;
-    // Dismiss on outside click.
     setTimeout(() => {
       const close = (e: MouseEvent): void => {
         if (!pop.contains(e.target as Node)) {
@@ -156,8 +211,33 @@ export function mountToolbar(
     }, 0);
   };
 
-  // Palette preset picker
+  // Applying a palette (preset or uploaded) offers the add-or-remap choice.
+  const applyPalette = (incoming: string[], label: string): void => {
+    if (incoming.length === 0) return;
+    const choice = window.confirm(
+      `Apply "${label}".\n\nOK = Remap your design onto these colours (recolours seats to the nearest match).\nCancel = Just add these colours to your swatches (design unchanged).`,
+    );
+    if (choice) {
+      // Remap keeps index 0 (empty) as-is; remap the rest onto incoming.
+      const withEmpty = incoming[0]?.toLowerCase() === store.palette[0]?.toLowerCase() ? incoming : [store.palette[0], ...incoming];
+      store.remapToPalette(withEmpty);
+      editor.rebuildPalette();
+      editor.repaintAll();
+    } else {
+      store.addPaletteColors(incoming);
+      editor.rebuildPalette();
+    }
+    if (editor.colorIndex >= store.palette.length) editor.colorIndex = store.palette.length - 1;
+    renderPalette();
+    reflectFg();
+  };
+
+  // Preset picker.
   const presetSel = $('#preset') as unknown as HTMLSelectElement;
+  const presetPlaceholder = document.createElement('option');
+  presetPlaceholder.value = '';
+  presetPlaceholder.textContent = 'Choose a preset…';
+  presetSel.appendChild(presetPlaceholder);
   for (const name of Object.keys(PALETTE_PRESETS)) {
     const opt = document.createElement('option');
     opt.value = name;
@@ -165,10 +245,99 @@ export function mountToolbar(
     presetSel.appendChild(opt);
   }
   presetSel.addEventListener('change', () => {
-    store.setPalette(PALETTE_PRESETS[presetSel.value].slice());
-    editor.rebuildPalette();
-    editor.repaintAll();
-    renderPalette();
+    if (!presetSel.value) return;
+    // Preset palettes include index 0 (empty); pass the colour slots (skip 0).
+    const full = PALETTE_PRESETS[presetSel.value];
+    applyPalette(full.slice(1), presetSel.value);
+    presetSel.value = '';
+  });
+
+  // ---- user-uploadable palettes ----
+  const myPalettesSel = $('#my-palettes') as unknown as HTMLSelectElement;
+  const refreshMyPalettes = async (): Promise<void> => {
+    const { listSavedPalettes } = await import('./paletteIo');
+    const saved = listSavedPalettes();
+    myPalettesSel.innerHTML = '';
+    const ph = document.createElement('option');
+    ph.value = '';
+    ph.textContent = saved.length ? 'Your saved palettes…' : 'No saved palettes yet';
+    myPalettesSel.appendChild(ph);
+    for (const p of saved) {
+      const opt = document.createElement('option');
+      opt.value = p.id;
+      opt.textContent = `${p.name} (${p.colors.length})`;
+      myPalettesSel.appendChild(opt);
+    }
+  };
+  void refreshMyPalettes();
+  myPalettesSel.addEventListener('change', async () => {
+    if (!myPalettesSel.value) return;
+    const { listSavedPalettes } = await import('./paletteIo');
+    const p = listSavedPalettes().find((x) => x.id === myPalettesSel.value);
+    if (p) applyPalette(p.colors, p.name);
+    myPalettesSel.value = '';
+  });
+
+  // Import a palette from a file (.gpl/.hex/.txt/.json) or an image.
+  const paletteFileInput = document.createElement('input');
+  paletteFileInput.type = 'file';
+  paletteFileInput.accept = '.gpl,.hex,.txt,.json,image/*';
+  paletteFileInput.style.display = 'none';
+  document.body.appendChild(paletteFileInput);
+  $('#palette-import').addEventListener('click', () => paletteFileInput.click());
+  paletteFileInput.addEventListener('change', async () => {
+    const file = paletteFileInput.files?.[0];
+    paletteFileInput.value = '';
+    if (!file) return;
+    try {
+      if (file.type.startsWith('image/')) {
+        const { extractPalette } = await import('../core/importImage');
+        const bmp = await createImageBitmap(file);
+        // Downscale to a small canvas; extractPalette wants raw pixels + size.
+        const W = Math.min(160, bmp.width);
+        const H = Math.max(1, Math.round((bmp.height / bmp.width) * W));
+        const canvas = document.createElement('canvas');
+        canvas.width = W;
+        canvas.height = H;
+        const ctx = canvas.getContext('2d')!;
+        ctx.drawImage(bmp, 0, 0, W, H);
+        bmp.close?.();
+        const colors = extractPalette(ctx.getImageData(0, 0, W, H).data, W, H, 8);
+        if (colors.length) applyPalette(colors, file.name);
+        else message.textContent = 'couldn’t pull colours from that image';
+      } else {
+        const text = await file.text();
+        const { parsePaletteText } = await import('./paletteIo');
+        const colors = parsePaletteText(text, file.name.toLowerCase());
+        if (colors.length) applyPalette(colors, file.name);
+        else message.textContent = 'no colours found in that file (.gpl/.hex/.json supported)';
+      }
+    } catch (err) {
+      message.textContent = `palette import failed: ${(err as Error).message}`;
+    }
+  });
+
+  // Save the current swatches as a reusable palette + offer a .hex download.
+  $('#palette-save').addEventListener('click', async () => {
+    const colors = store.palette.slice(1).filter((c) => /^#[0-9a-fA-F]{6}$/.test(c));
+    if (colors.length === 0) {
+      message.textContent = 'add some colours first';
+      return;
+    }
+    const name = window.prompt('Name this palette:', 'My palette') ?? '';
+    if (name === '') return;
+    const { saveUserPalette, serializePaletteHex } = await import('./paletteIo');
+    saveUserPalette(name, colors);
+    await refreshMyPalettes();
+    message.textContent = `saved "${name}" — find it under your saved palettes`;
+    // Also offer a portable file.
+    const blob = new Blob([serializePaletteHex(colors)], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${name.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}.hex`;
+    a.click();
+    URL.revokeObjectURL(url);
   });
 
   // Pattern presets: one undo step each, computed off the seat map.
@@ -636,7 +805,7 @@ export function mountToolbar(
         return;
       }
       const { flattenLayers } = await import('../core/tifoFormat');
-      store.setPalette(result.doc.palette.slice(0, 8));
+      store.setPalette(result.doc.palette.slice(0, 256));
       store.loadCells(flattenLayers(result.doc));
       const title = result.doc.meta?.title;
       if (title) docTitle.value = title;

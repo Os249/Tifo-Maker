@@ -26,9 +26,13 @@ export class DesignStore {
   /** Max undo depth; a diff is typically a few hundred bytes, so this is cheap. */
   private static readonly MAX_UNDO = 200;
 
+  /** Max distinct colors. One byte per seat, so 256 is the hard ceiling; a
+   * tifo realistically uses a handful. The palette is the design's swatch set. */
+  static readonly MAX_COLORS = 256;
+
   constructor(map: SeatMap, palette: string[]) {
     this.cells = new Uint8Array(map.count);
-    this.palette = palette.slice(0, 8);
+    this.palette = palette.slice(0, DesignStore.MAX_COLORS);
     this.seatMapRef = map.templateRef;
   }
 
@@ -47,8 +51,93 @@ export class DesignStore {
    * so the 2D editor AND 3D preview both recolor and never drift apart.
    */
   setPalette(palette: string[]): void {
-    this.palette = palette.slice(0, 8);
+    this.palette = palette.slice(0, DesignStore.MAX_COLORS);
     for (const fn of this.paletteListeners) fn();
+  }
+
+  /**
+   * Add a color to the swatch set (the design's living palette). Returns the
+   * index to paint with. Dedupes case-insensitively so picking a color that's
+   * already a swatch just selects it rather than piling up duplicates. Does NOT
+   * touch any seats — adding a swatch never repaints the design.
+   */
+  addSwatch(hex: string): number {
+    const norm = hex.toLowerCase();
+    const existing = this.palette.findIndex((c) => c.toLowerCase() === norm);
+    if (existing >= 0) return existing;
+    if (this.palette.length >= DesignStore.MAX_COLORS) return this.palette.length - 1;
+    this.palette = [...this.palette, hex];
+    for (const fn of this.paletteListeners) fn();
+    return this.palette.length - 1;
+  }
+
+  /**
+   * Edit one swatch's color in place. This DOES recolor every seat painted with
+   * that index — but that's the intended, explicit "change this color" action
+   * (double-click a swatch), not a side effect of switching palettes.
+   */
+  setSwatch(index: number, hex: string): void {
+    if (index < 0 || index >= this.palette.length || this.palette[index] === hex) return;
+    this.palette = this.palette.map((c, i) => (i === index ? hex : c));
+    for (const fn of this.paletteListeners) fn();
+  }
+
+  /**
+   * Merge another palette's colors into the swatch set WITHOUT repainting:
+   * existing colors keep their index; genuinely new colors append. Returns the
+   * mapping from the incoming palette's indices to the merged indices (useful
+   * when importing a design authored against a different palette).
+   */
+  addPaletteColors(incoming: string[]): number[] {
+    const map: number[] = [];
+    let changed = false;
+    for (const hex of incoming) {
+      const norm = hex.toLowerCase();
+      let idx = this.palette.findIndex((c) => c.toLowerCase() === norm);
+      if (idx < 0 && this.palette.length < DesignStore.MAX_COLORS) {
+        this.palette = [...this.palette, hex];
+        idx = this.palette.length - 1;
+        changed = true;
+      }
+      map.push(idx < 0 ? 0 : idx);
+    }
+    if (changed) for (const fn of this.paletteListeners) fn();
+    return map;
+  }
+
+  /**
+   * Replace the palette with a new one AND remap every seat so the design keeps
+   * its appearance as closely as possible: each old color is matched to the
+   * nearest color in the new palette. This is the "remap design onto this
+   * palette" choice — an explicit, undoable recolor.
+   */
+  remapToPalette(newPalette: string[]): void {
+    const next = newPalette.slice(0, DesignStore.MAX_COLORS);
+    if (next.length === 0) return;
+    // Build old-index → new-index by nearest color.
+    const remap = this.palette.map((oldHex) => nearestColorIndex(oldHex, next));
+    const old = new Map<number, number>();
+    for (let i = 0; i < this.cells.length; i++) {
+      const oldIdx = this.cells[i];
+      const newIdx = remap[oldIdx] ?? 0;
+      if (newIdx !== oldIdx) {
+        if (!old.has(i)) old.set(i, oldIdx);
+        this.cells[i] = newIdx;
+      }
+    }
+    this.palette = next;
+    if (old.size > 0) {
+      const entries = [...old.entries()];
+      this.undoStack.push({
+        indices: new Uint32Array(entries.map(([i]) => i)),
+        before: new Uint8Array(entries.map(([, v]) => v)),
+        after: new Uint8Array(entries.map(([i]) => this.cells[i])),
+      });
+      if (this.undoStack.length > DesignStore.MAX_UNDO) this.undoStack.shift();
+      this.redoStack = [];
+    }
+    for (const fn of this.paletteListeners) fn();
+    this.notify('all');
   }
 
   private notify(indices: number[] | 'all'): void {
@@ -148,4 +237,28 @@ export class DesignStore {
     this.redoStack.length = 0;
     this.notify('all');
   }
+}
+
+/** Parse #rgb or #rrggbb to [r,g,b]; tolerant of a missing leading #. */
+function hexToRgb(hex: string): [number, number, number] {
+  let h = hex.replace('#', '');
+  if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
+  const n = parseInt(h, 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+
+/** Index of the nearest color in `palette` to `hex`, by squared RGB distance. */
+function nearestColorIndex(hex: string, palette: string[]): number {
+  const [r, g, b] = hexToRgb(hex);
+  let best = 0;
+  let bestD = Infinity;
+  for (let i = 0; i < palette.length; i++) {
+    const [pr, pg, pb] = hexToRgb(palette[i]);
+    const d = (r - pr) ** 2 + (g - pg) ** 2 + (b - pb) ** 2;
+    if (d < bestD) {
+      bestD = d;
+      best = i;
+    }
+  }
+  return best;
 }

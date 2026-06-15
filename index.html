@@ -11,15 +11,16 @@
       <input class="doc-title" id="doc-title" value="Untitled tifo" aria-label="Design title" />
       <div class="topbar-center">
         <div class="segmented">
-          <button id="view-2d" class="active">Design</button>
-          <button id="view-3d">Stadium</button>
-          <button id="view-split" title="Paint while watching the stadium update live">Split</button>
+          <button id="view-2d" class="active" data-i18n="ed.view.design">Design</button>
+          <button id="view-3d" data-i18n="ed.view.stadium">Stadium</button>
+          <button id="view-split" title="Paint while watching the stadium update live" data-i18n="ed.view.split">Split</button>
         </div>
       </div>
       <div class="topbar-right">
         <span class="save-dot" id="save-dot" title="Saved"></span>
-        <button id="signin" class="signup-shine">Sign up</button>
-        <button id="gallery">Gallery</button>
+        <button id="lang-toggle" class="lang-toggle" data-i18n="common.language">العربية</button>
+        <button id="signin" class="signup-shine" data-i18n="ed.signup">Sign up</button>
+        <button id="gallery" data-i18n="ed.gallery">Gallery</button>
         <button id="moderation" hidden title="Moderation queue"><i class="ti ti-shield-check"></i> Moderate</button>
         <span class="avatar" id="avatar">U</span>
       </div>
@@ -107,7 +108,7 @@
 
       <aside class="panel" id="panel" aria-label="Properties">
         <div class="panel-head">
-          <span>Properties</span>
+          <span data-i18n="ed.props">Properties</span>
           <button id="panel-toggle" aria-label="Collapse panel" style="padding:2px 6px;border:none;"><i class="ti ti-layout-sidebar-right-collapse"></i></button>
         </div>
         <p class="panel-orient">Paint on the <b>canvas</b> at left. These panels set <b>how</b> you paint and the look. Switch <b>Design / Stadium / Split</b> above to see it on the seats or in 3D.</p>
@@ -144,7 +145,7 @@
         </div>
 
         <div class="panel-section" id="ctx-brush">
-          <h4>Brush <span class="h4-tag">active tool</span></h4>
+          <h4><span data-i18n="ed.brush">Brush</span> <span class="h4-tag">active tool</span></h4>
           <div class="group">
             <input type="range" id="brush-size" min="3" max="40" step="1" value="10" style="flex:1;" />
             <span id="brush-size-out" style="font-variant-numeric:tabular-nums;min-width:18px;">10</span>
@@ -153,7 +154,7 @@
             <label><input type="checkbox" id="mirror" /> Mirror</label>
           </div>
           <div style="margin-top:10px;">
-            <label for="fill-scope">Fill scope</label>
+            <label for="fill-scope" data-i18n="ed.brush.fillScope">Fill scope</label>
             <select id="fill-scope" style="margin-left:6px;">
               <option value="section">Section</option>
               <option value="global">Global</option>
@@ -162,16 +163,32 @@
         </div>
 
         <div class="panel-section">
-          <h4>Colors <span class="h4-tag">click a swatch to paint with it</span></h4>
+          <h4><span data-i18n="ed.colors">Colors</span> <span class="h4-tag">your swatches</span></h4>
+          <div class="color-well-row">
+            <button id="fg-well" class="fg-well" title="Active paint color — click to change"></button>
+            <div class="fg-meta">
+              <span id="fg-hex" class="fg-hex">#000000</span>
+              <span class="fg-sub">painting color</span>
+            </div>
+            <button id="add-swatch" class="add-swatch" title="Pick any color &amp; add it to your swatches">+ Color</button>
+          </div>
           <div class="swatch-grid" id="palette"></div>
-          <div class="group" style="margin-top:10px;">
-            <label for="preset" style="white-space:nowrap;">Palette</label>
-            <select id="preset" style="flex:1;min-width:0;"></select>
+          <div class="swatch-hint hint" id="swatch-hint">Click a swatch to paint with it · double-click to edit · drag a new color from “+ Color”.</div>
+          <div class="palette-tools">
+            <div class="group">
+              <label for="preset" style="white-space:nowrap;">Presets</label>
+              <select id="preset" style="flex:1;min-width:0;"></select>
+            </div>
+            <div class="group" style="margin-top:8px;">
+              <button id="palette-import" style="flex:1;" title="Load a .gpl / .hex / .json palette or an image">Import palette</button>
+              <button id="palette-save" style="flex:1;" title="Save your current swatches as a reusable palette">Save palette</button>
+            </div>
+            <select id="my-palettes" style="margin-top:8px;width:100%;" title="Your saved palettes"></select>
           </div>
         </div>
 
         <div class="panel-section">
-          <h4>Stadium <span class="h4-tag">shape &amp; whole-bowl fills</span></h4>
+          <h4><span data-i18n="ed.stadium">Stadium</span> <span class="h4-tag">shape &amp; whole-bowl fills</span></h4>
           <div class="group">
             <select id="stadium" style="flex:1;min-width:0;"></select>
           </div>
@@ -217,7 +234,7 @@
         </div>
 
         <div class="panel-section">
-          <h4>Save &amp; share</h4>
+          <h4><span data-i18n="ed.save">Save</span> &amp; share</h4>
           <div class="group">
             <button id="save" class="primary" style="flex:1;">Save</button>
             <button id="load" style="flex:1;" title="Open a .tifo file">Open file</button>

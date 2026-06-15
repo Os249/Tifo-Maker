@@ -167,7 +167,7 @@ export async function loadDesign(
     templateVersion: number;
   };
   const cells = await gunzip(fromB64(data.cellsGzB64));
-  store.setPalette(data.palette.slice(0, 8));
+  store.setPalette(data.palette.slice(0, 256));
   store.loadCells(cells);
   let ownerIsMe = false;
   if (token) {

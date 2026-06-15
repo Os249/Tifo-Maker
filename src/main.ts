@@ -1,5 +1,6 @@
 import '@tabler/icons-webfont/dist/tabler-icons.min.css';
 import { installTheme } from './ui/theme';
+import { initLang, applyDom, toggleLang, t } from './ui/i18n';
 import { generateSeatMapAsync } from './workers/client';
 import { DEFAULT_PALETTE, DEFAULT_TEMPLATE, PALETTE_PRESETS, TEMPLATES } from './core/template';
 import { PATTERN_PRESETS } from './core/patterns';
@@ -27,6 +28,15 @@ function sharedDesignId(): string | null {
 
 async function main(): Promise<void> {
   installTheme();
+  initLang();
+  applyDom(document);
+  // Language toggle in the editor header.
+  const langToggle = document.getElementById('lang-toggle');
+  langToggle?.addEventListener('click', () => {
+    toggleLang();
+    applyDom(document);
+    if (langToggle) langToggle.textContent = t('common.language');
+  });
   const sharedId = sharedDesignId();
 
   // A shared design may live on any template, so resolve its template BEFORE
@@ -120,7 +130,7 @@ async function main(): Promise<void> {
           id === template.id && v === template.version ? map.count : null,
         );
         if (result.valid && result.doc) {
-          store.setPalette(result.doc.palette.slice(0, 8));
+          store.setPalette(result.doc.palette.slice(0, 256));
           store.loadCells(flattenLayers(result.doc));
           pendingTitle = result.doc.meta?.title ?? 'Imported tifo';
           sharedLoaded = true; // suppress the starter seed + onboarding
