@@ -33,8 +33,8 @@ export class MemoryDesignRepository implements DesignRepository {
   constructor(private readonly usernames: (id: string | null) => string = () => 'unknown') {}
 
   private meta(r: Row): DesignMeta {
-    const { id, title, templateId, templateVersion, palette, revisionCount, isPublic, ownerId, createdAt, updatedAt } = r;
-    return { id, title, templateId, templateVersion, palette: [...palette], revisionCount, isPublic, ownerId, createdAt, updatedAt };
+    const { id, title, templateId, templateVersion, palette, revisionCount, isPublic, ownerId, createdAt, updatedAt, description, allowRemix, remixedFrom } = r;
+    return { id, title, templateId, templateVersion, palette: [...palette], revisionCount, isPublic, ownerId, createdAt, updatedAt, description: description ?? null, allowRemix: allowRemix !== false, remixedFrom: remixedFrom ?? null };
   }
 
   async create(d: NewDesign): Promise<DesignMeta> {
@@ -76,6 +76,7 @@ export class MemoryDesignRepository implements DesignRepository {
   }
 
   private galleryItem(r: Row, viewerId?: string | null): GalleryItem {
+    const source = r.remixedFrom ? this.rows.get(r.remixedFrom) : null;
     return {
       ...this.meta(r),
       ownerName: this.usernames(r.ownerId),
@@ -85,6 +86,8 @@ export class MemoryDesignRepository implements DesignRepository {
       isTemplate: r.isTemplate,
       tags: [...r.tags],
       hasPhoto: this.photos.some((p) => p.designId === r.id),
+      remixedFromName: source ? this.usernames(source.ownerId) : null,
+      remixedFromTitle: source ? source.title : null,
     };
   }
 
@@ -192,6 +195,43 @@ export class MemoryDesignRepository implements DesignRepository {
       ownerId,
       thumbnailPng: r.thumbnail,
     });
+  }
+
+  // ---- social helpers (used by MemorySocialRepository) ----
+  ownerOf(id: string): string | null {
+    return this.rows.get(id)?.ownerId ?? null;
+  }
+  publicCountOf(ownerId: string): number {
+    let n = 0;
+    for (const r of this.rows.values()) if (r.ownerId === ownerId && r.isPublic) n++;
+    return n;
+  }
+  async getMeta(id: string): Promise<DesignMeta | null> {
+    const r = this.rows.get(id);
+    return r ? this.meta(r) : null;
+  }
+  setPublishMetaMem(designId: string, ownerId: string, description: string | null, allowRemix: boolean): boolean {
+    const r = this.rows.get(designId);
+    if (!r || r.ownerId !== ownerId) return false;
+    r.description = description?.slice(0, 2000) ?? null;
+    r.allowRemix = allowRemix;
+    return true;
+  }
+  async remixMem(sourceId: string, newOwnerId: string, title: string): Promise<DesignMeta | null> {
+    const r = this.rows.get(sourceId);
+    if (!r || !r.isPublic || r.allowRemix === false) return null;
+    const meta = await this.create({
+      title,
+      templateId: r.templateId,
+      templateVersion: r.templateVersion,
+      palette: r.palette,
+      cellsGz: r.cellsGz,
+      ownerId: newOwnerId,
+      thumbnailPng: r.thumbnail,
+    });
+    const row = this.rows.get(meta.id);
+    if (row) row.remixedFrom = sourceId;
+    return { ...meta, remixedFrom: sourceId };
   }
 
   async setTags(designId: string, ownerId: string, slugs: string[]): Promise<string[] | null> {
@@ -373,6 +413,18 @@ export class MemoryAuthRepository implements AuthRepository {
   usernameOf(id: string | null): string {
     for (const u of this.users.values()) if (u.id === id) return u.username;
     return 'unknown';
+  }
+
+  // ---- social helpers ----
+  private handles = new Map<string, string>(); // userId → handle
+  handleOf(id: string): string | null {
+    return this.handles.get(id) ?? null;
+  }
+  setHandle(id: string, handle: string): void {
+    this.handles.set(id, handle);
+  }
+  allUsers(): { id: string; username: string }[] {
+    return [...this.users.values()].map((u) => ({ id: u.id, username: u.username }));
   }
 }
 

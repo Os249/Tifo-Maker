@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Community · TifoMaker</title>
+  <meta name="description" content="Discover, like, comment on, and remix stadium tifo designs from supporters around the world." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/src/community.css" />
+</head>
+<body>
+  <header class="nav">
+    <a class="brand" href="/">TIFO<b>MAKER</b></a>
+    <nav class="nav-links">
+      <a href="/community" class="active" data-i18n="nav.community">Community</a>
+      <a href="/app" data-i18n="nav.openEditor">Open the editor</a>
+      <button class="lang-toggle" id="lang-toggle" data-i18n="common.language">العربية</button>
+      <button class="icon-btn notif-btn" id="notif-btn" title="Notifications" hidden>
+        <i class="ti ti-bell"></i><span class="notif-dot" id="notif-dot" hidden></span>
+      </button>
+      <button class="nav-cta" id="auth-btn">Sign in</button>
+    </nav>
+  </header>
+
+  <main class="community">
+    <section class="hub-head">
+      <div class="hub-head-inner">
+        <h1 data-i18n="community.title">The tifo community</h1>
+        <p class="hub-sub" data-i18n="community.sub">Discover displays from supporters worldwide. Like, comment, follow creators, and remix any tifo into your own.</p>
+        <div class="hub-controls">
+          <div class="search-wrap">
+            <i class="ti ti-search"></i>
+            <input type="text" id="user-search" placeholder="Search creators by @username…" autocomplete="off" />
+            <div class="search-results" id="search-results" hidden></div>
+          </div>
+          <div class="sort-tabs" id="sort-tabs">
+            <button class="sort-tab active" data-sort="recent" data-i18n="community.recent">Recent</button>
+            <button class="sort-tab" data-sort="likes" data-i18n="community.popular">Most liked</button>
+            <button class="sort-tab" data-sort="templates" data-i18n="community.templates">Templates</button>
+          </div>
+        </div>
+        <div class="tag-row" id="tag-row"></div>
+      </div>
+    </section>
+
+    <section class="grid-wrap">
+      <div class="gallery-grid" id="gallery-grid"></div>
+      <div class="grid-empty" id="grid-empty" hidden>
+        <i class="ti ti-mood-empty"></i>
+        <p>No tifos here yet. Be the first to publish one!</p>
+        <a class="btn btn-primary" href="/app">Open the editor</a>
+      </div>
+      <div class="grid-loading" id="grid-loading">Loading the community feed…</div>
+    </section>
+  </main>
+
+  <!-- 3D preview modal mount (filled by community.ts) -->
+  <div class="modal-root" id="modal-root" hidden></div>
+  <!-- notifications panel mount -->
+  <div class="notif-panel" id="notif-panel" hidden></div>
+  <!-- auth modal mount -->
+  <div id="auth-mount"></div>
+
+  <script type="module" src="/src/community.ts"></script>
+</body>
+</html>

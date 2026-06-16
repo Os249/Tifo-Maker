@@ -19,7 +19,7 @@ import type {
 import { normalizeTags } from './memoryRepo';
 
 const META_COLS =
-  'id, title, template_id, template_version, palette, revision_count, is_public, owner_id, created_at, updated_at';
+  'id, title, template_id, template_version, palette, revision_count, is_public, owner_id, created_at, updated_at, description, allow_remix, remixed_from';
 
 function rowToMeta(r: Record<string, unknown>): DesignMeta {
   return {
@@ -33,6 +33,9 @@ function rowToMeta(r: Record<string, unknown>): DesignMeta {
     ownerId: r.owner_id ? String(r.owner_id) : null,
     createdAt: new Date(r.created_at as string).toISOString(),
     updatedAt: new Date(r.updated_at as string).toISOString(),
+    description: (r.description as string) ?? null,
+    allowRemix: r.allow_remix === undefined ? true : r.allow_remix !== false,
+    remixedFrom: r.remixed_from ? String(r.remixed_from) : null,
   };
 }
 
@@ -86,7 +89,9 @@ export class PgDesignRepository implements DesignRepository {
     const res = await this.pool.query(
       `SELECT d.id, d.title, d.template_id, d.template_version, d.palette, d.revision_count,
               d.is_public, d.owner_id, d.created_at, d.updated_at, d.like_score, d.is_template,
+              d.description, d.allow_remix, d.remixed_from,
               coalesce(u.username, 'unknown') AS owner_name,
+              ru.username AS remixed_from_name, rd.title AS remixed_from_title,
               (d.thumbnail IS NOT NULL) AS has_thumbnail,
               coalesce((SELECT array_agg(t.slug ORDER BY t.slug) FROM design_tags dt
                         JOIN tags t ON t.id = dt.tag_id WHERE dt.design_id = d.id), '{}') AS tags,
@@ -94,6 +99,8 @@ export class PgDesignRepository implements DesignRepository {
               ${voteSelect}
        FROM designs d
        LEFT JOIN users u ON u.id = d.owner_id
+       LEFT JOIN designs rd ON rd.id = d.remixed_from
+       LEFT JOIN users ru ON ru.id = rd.owner_id
        ${viewerJoin}
        WHERE ${where} ORDER BY ${order} LIMIT 200`,
       params,
@@ -107,6 +114,8 @@ export class PgDesignRepository implements DesignRepository {
       isTemplate: Boolean(r.is_template),
       tags: (r.tags as string[]) ?? [],
       hasPhoto: Boolean(r.has_photo),
+      remixedFromName: (r.remixed_from_name as string) ?? null,
+      remixedFromTitle: (r.remixed_from_title as string) ?? null,
     }));
   }
 

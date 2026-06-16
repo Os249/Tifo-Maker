@@ -125,3 +125,51 @@ CREATE TABLE IF NOT EXISTS design_photos (
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS design_photos_design_idx ON design_photos (design_id, created_at);
+
+-- ============ SOCIAL LAYER ============
+
+-- Creator's explanation/backstory shown in the 3D preview, and remix lineage.
+ALTER TABLE designs ADD COLUMN IF NOT EXISTS description  TEXT;
+ALTER TABLE designs ADD COLUMN IF NOT EXISTS allow_remix  BOOLEAN NOT NULL DEFAULT true;
+ALTER TABLE designs ADD COLUMN IF NOT EXISTS remixed_from UUID REFERENCES designs(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS designs_remixed_from_idx ON designs (remixed_from) WHERE remixed_from IS NOT NULL;
+
+-- Username handle for the social graph (the @handle). Unique, case-insensitive.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS handle TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS users_handle_idx ON users (lower(handle)) WHERE handle IS NOT NULL;
+
+-- Follow graph: follower_id follows followee_id. One row per directed edge.
+CREATE TABLE IF NOT EXISTS follows (
+  follower_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  followee_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (follower_id, followee_id),
+  CHECK (follower_id <> followee_id)
+);
+CREATE INDEX IF NOT EXISTS follows_followee_idx ON follows (followee_id);
+
+-- Threaded comments on a design. parent_id null = top-level; otherwise a reply.
+CREATE TABLE IF NOT EXISTS comments (
+  id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  design_id  UUID NOT NULL REFERENCES designs(id) ON DELETE CASCADE,
+  author_id  UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  parent_id  UUID REFERENCES comments(id) ON DELETE CASCADE,
+  body       TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS comments_design_idx ON comments (design_id, created_at);
+
+-- Notifications feed. kind = follow_post|new_follower|comment|remix|like.
+-- actor_id did the thing; user_id receives it; design_id/comment_id give context.
+CREATE TABLE IF NOT EXISTS notifications (
+  id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id    UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  actor_id   UUID REFERENCES users(id) ON DELETE CASCADE,
+  kind       TEXT NOT NULL,
+  design_id  UUID REFERENCES designs(id) ON DELETE CASCADE,
+  comment_id UUID REFERENCES comments(id) ON DELETE CASCADE,
+  read_at    TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS notifications_user_idx ON notifications (user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS notifications_unread_idx ON notifications (user_id) WHERE read_at IS NULL;

@@ -20,10 +20,12 @@ function isPhone(): boolean {
   return !forced && window.matchMedia(`(max-width: ${PHONE_MAX - 1}px)`).matches;
 }
 
-/** Parse a /d/:id share path. Returns the design id, or null. */
+/** Parse a /d/:id share path OR a ?design=:id query param. Returns the id, or null. */
 function sharedDesignId(): string | null {
   const m = location.pathname.match(/^\/d\/([A-Za-z0-9-]+)\/?$/);
-  return m ? m[1] : null;
+  if (m) return m[1];
+  const q = new URLSearchParams(location.search).get('design');
+  return q && /^[A-Za-z0-9-]+$/.test(q) ? q : null;
 }
 
 async function main(): Promise<void> {

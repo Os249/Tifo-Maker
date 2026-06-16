@@ -12,7 +12,7 @@
  */
 
 export type SaveChoice =
-  | { kind: 'account'; makePublic: boolean; asNew: boolean; tags: string[]; isTemplate: boolean }
+  | { kind: 'account'; makePublic: boolean; asNew: boolean; tags: string[]; isTemplate: boolean; description: string | null; allowRemix: boolean }
   | { kind: 'download' };
 
 export function openSaveDialog(opts: {
@@ -49,7 +49,10 @@ export function openSaveDialog(opts: {
           <label class="save-tags-label" for="save-tags">Tags <span style="color:var(--text-3);font-weight:400;">(used when publishing)</span></label>
           <input type="text" id="save-tags" class="save-tags-input" placeholder="e.g. serie-a, derby, black-gold" />
           <div class="save-tags-hint">Comma-separated. Helps others find your tifo in the feed.</div>
+          <label class="save-tags-label" for="save-desc" style="margin-top:12px;">Creator's explanation <span style="color:var(--text-3);font-weight:400;">(shown with the 3D preview)</span></label>
+          <textarea id="save-desc" class="save-tags-input" rows="3" placeholder="The backstory, the match, what the display means…" style="resize:vertical;font-family:inherit;"></textarea>
           <label class="save-template-row"><input type="checkbox" id="save-template" /> Offer this as a remixable template</label>
+          <label class="save-template-row"><input type="checkbox" id="save-allow-remix" checked /> Allow others to remix this tifo</label>
         </div>
         ${
           opts.isExisting
@@ -82,14 +85,20 @@ export function openSaveDialog(opts: {
     };
     const isTemplateOf = (): boolean =>
       (backdrop.querySelector('#save-template') as HTMLInputElement | null)?.checked ?? false;
+    const descOf = (): string | null => {
+      const raw = (backdrop.querySelector('#save-desc') as HTMLTextAreaElement | null)?.value.trim() ?? '';
+      return raw ? raw.slice(0, 2000) : null;
+    };
+    const allowRemixOf = (): boolean =>
+      (backdrop.querySelector('#save-allow-remix') as HTMLInputElement | null)?.checked ?? true;
 
     backdrop.querySelectorAll('.save-option').forEach((btn) => {
       btn.addEventListener('click', () => {
         const act = (btn as HTMLElement).dataset.act;
         if (act === 'download') close({ kind: 'download' });
         else if (act === 'public')
-          close({ kind: 'account', makePublic: true, asNew: asNew(), tags: tagsOf(), isTemplate: isTemplateOf() });
-        else close({ kind: 'account', makePublic: false, asNew: asNew(), tags: tagsOf(), isTemplate: isTemplateOf() });
+          close({ kind: 'account', makePublic: true, asNew: asNew(), tags: tagsOf(), isTemplate: isTemplateOf(), description: descOf(), allowRemix: allowRemixOf() });
+        else close({ kind: 'account', makePublic: false, asNew: asNew(), tags: tagsOf(), isTemplate: isTemplateOf(), description: descOf(), allowRemix: allowRemixOf() });
       });
     });
   });

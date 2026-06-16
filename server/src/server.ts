@@ -6,6 +6,8 @@ import { generateSeatMap } from '../../src/core/seatmap';
 import { TEMPLATES } from '../../src/core/template';
 import { MemoryAuthRepository, MemoryDesignRepository, MemoryEventsRepository } from './memoryRepo';
 import { PgAuthRepository, PgDesignRepository, PgEventsRepository } from './pgRepo';
+import { PgSocialRepository } from './pgSocial';
+import { MemorySocialRepository } from './memorySocial';
 import { buildApp, type TemplateInfo } from './routes';
 
 /**
@@ -70,6 +72,7 @@ async function main(): Promise<void> {
       logger: isProd,
       events: new PgEventsRepository(pool),
       adminUsernames: adminUsernames,
+      social: new PgSocialRepository(pool),
     });
   } else {
     if (isProd) {
@@ -80,12 +83,14 @@ async function main(): Promise<void> {
       process.exit(1);
     }
     const auth = new MemoryAuthRepository();
-    app = await buildApp(new MemoryDesignRepository((id) => auth.usernameOf(id)), auth, templates, {
+    const designs = new MemoryDesignRepository((id) => auth.usernameOf(id));
+    app = await buildApp(designs, auth, templates, {
       staticDir,
       rateLimit: false,
       logger: false,
       events: new MemoryEventsRepository(),
       adminUsernames: adminUsernames,
+      social: new MemorySocialRepository(designs, auth),
     });
   }
 

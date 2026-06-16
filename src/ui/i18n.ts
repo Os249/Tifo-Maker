@@ -18,6 +18,15 @@ const STRINGS: Record<string, { en: string; ar: string }> = {
   'nav.features': { en: 'Features', ar: 'المميزات' },
   'nav.clubs': { en: 'For clubs', ar: 'للأندية' },
   'nav.openEditor': { en: 'Open the editor', ar: 'افتح المحرر' },
+  'nav.community': { en: 'Community', ar: 'المجتمع' },
+  'community.title': { en: 'The tifo community', ar: 'مجتمع التيفو' },
+  'community.sub': {
+    en: 'Discover displays from supporters worldwide. Like, comment, follow creators, and remix any tifo into your own.',
+    ar: 'شوف استعراضات من مشجعين من كل العالم. سوِّ لايك، علّق، تابِع المصممين، وريمكس أي تيفو وخلّه لك.',
+  },
+  'community.recent': { en: 'Recent', ar: 'الأحدث' },
+  'community.popular': { en: 'Most liked', ar: 'الأكثر إعجابًا' },
+  'community.templates': { en: 'Templates', ar: 'قوالب' },
   'nav.developers': { en: 'Developers', ar: 'المطورين' },
 
   // ---- hero ----

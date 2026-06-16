@@ -6,6 +6,7 @@ import type { FastifyInstance } from 'fastify';
 import { generateSeatMap } from '../../src/core/seatmap';
 import { DEFAULT_TEMPLATE } from '../../src/core/template';
 import { MemoryAuthRepository, MemoryDesignRepository, MemoryEventsRepository } from '../src/memoryRepo';
+import { MemorySocialRepository } from '../src/memorySocial';
 import { PgAuthRepository, PgDesignRepository } from '../src/pgRepo';
 import { buildApp, SNAPSHOT_EVERY, type TemplateInfo } from '../src/routes';
 import { toB64 } from '../src/codec';
@@ -361,6 +362,89 @@ async function runSuite(name: string, repo: DesignRepository, auth: AuthReposito
   assert.equal((await noAdminApp.inject({ method: 'GET', url: '/api/admin/reports', headers: { authorization: `Bearer ${sameNameTok}` } })).statusCode, 403, 'no ADMIN_USERNAMES → nobody is admin');
 
   console.log('moderation: all assertions passed (admin gate, report context, takedown, photo verify, default-closed)');
+}
+
+// ---- social layer: remix lineage, follows, comments, notifications ----
+{
+  const auth = new MemoryAuthRepository();
+  const designs = new MemoryDesignRepository((id) => auth.usernameOf(id));
+  const social = new MemorySocialRepository(designs, auth);
+  const app = await buildApp(designs, auth, templates, { social });
+  const cellsGzB64 = gzipSync(sampleCells()).toString('base64');
+
+  const aliceTok = await registerUser(app, 'alice');
+  const bobTok = await registerUser(app, 'bob');
+  const aliceId = (await app.inject({ method: 'GET', url: '/api/me', headers: bearer(aliceTok) })).json().id as string;
+  const bobId = (await app.inject({ method: 'GET', url: '/api/me', headers: bearer(bobTok) })).json().id as string;
+
+  // Alice publishes a design with a creator explanation + remix allowed.
+  const created = await app.inject({
+    method: 'POST', url: '/api/designs', headers: bearer(aliceTok),
+    payload: { title: 'El Clasico', templateId: DEFAULT_TEMPLATE.id, templateVersion: 1, palette: PALETTE, cellsGzB64 },
+  });
+  const designId = (created.json() as { id: string }).id;
+
+  // Bob follows Alice BEFORE she publishes publicly.
+  assert.equal((await app.inject({ method: 'POST', url: `/api/users/${aliceId}/follow`, headers: bearer(bobTok) })).statusCode, 200);
+
+  // Set publish meta (description + allowRemix), then publish.
+  await app.inject({ method: 'PUT', url: `/api/designs/${designId}/publish-meta`, headers: bearer(aliceTok), payload: { description: 'For the derby — top tier gold.', allowRemix: true } });
+  await app.inject({ method: 'PATCH', url: `/api/designs/${designId}`, headers: bearer(aliceTok), payload: { isPublic: true } });
+
+  // Bob (a follower) gets a 'follow_post' notification about Alice's publish.
+  const bobNotifs = (await app.inject({ method: 'GET', url: '/api/notifications', headers: bearer(bobTok) })).json() as { unread: number; items: { kind: string; designId: string }[] };
+  assert.ok(bobNotifs.items.some((n) => n.kind === 'follow_post' && n.designId === designId), 'follower notified of new public post');
+  assert.ok(bobNotifs.unread >= 1, 'unread count reflects the notification');
+
+  // Bob remixes Alice's design → new design owned by Bob, lineage stamped.
+  const remixed = await app.inject({ method: 'POST', url: `/api/designs/${designId}/remix`, headers: bearer(bobTok), payload: { title: 'My Clasico remix' } });
+  assert.equal(remixed.statusCode, 201);
+  const remix = remixed.json() as { id: string; ownerId: string; remixedFrom: string };
+  assert.equal(remix.ownerId, bobId, 'remix owned by the remixer');
+  assert.equal(remix.remixedFrom, designId, 'remixed_from points at the original');
+  assert.notEqual(remix.id, designId, 'remix is a new design, original untouched');
+
+  // Alice gets a 'remix' notification.
+  const aliceNotifs = (await app.inject({ method: 'GET', url: '/api/notifications', headers: bearer(aliceTok) })).json() as { items: { kind: string }[] };
+  assert.ok(aliceNotifs.items.some((n) => n.kind === 'remix'), 'creator notified of remix');
+
+  // A non-remixable design refuses remixing.
+  const locked = await app.inject({ method: 'POST', url: '/api/designs', headers: bearer(aliceTok), payload: { title: 'Locked', templateId: DEFAULT_TEMPLATE.id, templateVersion: 1, palette: PALETTE, cellsGzB64 } });
+  const lockedId = (locked.json() as { id: string }).id;
+  await app.inject({ method: 'PUT', url: `/api/designs/${lockedId}/publish-meta`, headers: bearer(aliceTok), payload: { description: null, allowRemix: false } });
+  await app.inject({ method: 'PATCH', url: `/api/designs/${lockedId}`, headers: bearer(aliceTok), payload: { isPublic: true } });
+  assert.equal((await app.inject({ method: 'POST', url: `/api/designs/${lockedId}/remix`, headers: bearer(bobTok) })).statusCode, 403, 'remix blocked when not allowed');
+
+  // Comments: Bob comments on Alice's design; Alice is notified; thread lists it.
+  const c = await app.inject({ method: 'POST', url: `/api/designs/${designId}/comments`, headers: bearer(bobTok), payload: { body: 'This is class!' } });
+  assert.equal(c.statusCode, 201);
+  const commentId = (c.json() as { id: string }).id;
+  const thread = (await app.inject({ method: 'GET', url: `/api/designs/${designId}/comments` })).json() as unknown[];
+  assert.equal(thread.length, 1, 'comment appears in the thread');
+  // A reply (threaded).
+  await app.inject({ method: 'POST', url: `/api/designs/${designId}/comments`, headers: bearer(aliceTok), payload: { body: 'Thanks!', parentId: commentId } });
+  const thread2 = (await app.inject({ method: 'GET', url: `/api/designs/${designId}/comments` })).json() as { parentId: string | null }[];
+  assert.equal(thread2.length, 2);
+  assert.ok(thread2.some((x) => x.parentId === commentId), 'reply is linked to its parent');
+  // Author can delete own comment.
+  assert.equal((await app.inject({ method: 'DELETE', url: `/api/comments/${commentId}`, headers: bearer(bobTok) })).statusCode, 200);
+
+  // Follow graph in the profile.
+  const aliceProfile = (await app.inject({ method: 'GET', url: `/api/users/${aliceId}/profile`, headers: bearer(bobTok) })).json() as { followerCount: number; isFollowing: boolean; designCount: number };
+  assert.equal(aliceProfile.followerCount, 1, 'alice has one follower');
+  assert.equal(aliceProfile.isFollowing, true, 'bob follows alice');
+  assert.ok(aliceProfile.designCount >= 2, 'profile counts public designs');
+
+  // User search finds alice by prefix.
+  const found = (await app.inject({ method: 'GET', url: '/api/users/search?q=ali' })).json() as { username: string }[];
+  assert.ok(found.some((u) => u.username === 'alice'), 'user search matches by prefix');
+
+  // Unfollow drops the follower count.
+  await app.inject({ method: 'DELETE', url: `/api/users/${aliceId}/follow`, headers: bearer(bobTok) });
+  const after = (await app.inject({ method: 'GET', url: `/api/users/${aliceId}/profile` })).json() as { followerCount: number };
+  assert.equal(after.followerCount, 0, 'unfollow works');
+
+  console.log('social: all assertions passed (remix lineage, follow graph, comments+threads, notifications, search)');
 }
 
 // ---- .tifo format validation endpoint ----

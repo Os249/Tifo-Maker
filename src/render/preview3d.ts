@@ -234,4 +234,19 @@ export class Preview3D {
   stop(): void {
     this.running = false;
   }
+
+  /** Fully tear down: stop the loop, disconnect observers, free GPU resources,
+   * and remove the canvas. Call when closing the preview modal so repeated
+   * opens don't leak WebGL contexts. */
+  dispose(): void {
+    this.running = false;
+    this.resizeObserver.disconnect();
+    this.controls.dispose();
+    this.seats.geometry.dispose();
+    const mat = this.seats.material;
+    if (Array.isArray(mat)) mat.forEach((m) => m.dispose());
+    else mat.dispose();
+    this.renderer.dispose();
+    this.canvas.remove();
+  }
 }

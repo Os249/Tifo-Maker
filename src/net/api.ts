@@ -12,9 +12,33 @@ import type { SeatMap } from '../core/types';
  */
 
 const API = '/api';
-let token: string | null = null;
+const TOKEN_KEY = 'tifo_token_v1';
+// Restore a persisted session on load so auth survives navigation between the
+// editor, the community page, and share links (all separate page loads).
+let token: string | null = (() => {
+  try {
+    return localStorage.getItem(TOKEN_KEY);
+  } catch {
+    return null;
+  }
+})();
+
+function setToken(t: string | null): void {
+  token = t;
+  try {
+    if (t) localStorage.setItem(TOKEN_KEY, t);
+    else localStorage.removeItem(TOKEN_KEY);
+  } catch {
+    /* storage unavailable — session stays in-memory for this page */
+  }
+}
 
 export const isSignedIn = (): boolean => token !== null;
+
+/** Sign out: clear the persisted session. */
+export function signOut(): void {
+  setToken(null);
+}
 
 function authHeaders(json: boolean): Record<string, string> {
   const h: Record<string, string> = {};
@@ -41,7 +65,7 @@ export async function login(username: string, password: string): Promise<string>
       body: JSON.stringify({ username, password }),
     }),
   )) as { token: string; username: string };
-  token = data.token;
+  setToken(data.token);
   return data.username;
 }
 
@@ -53,7 +77,7 @@ export async function register(username: string, password: string): Promise<stri
       body: JSON.stringify({ username, password }),
     }),
   )) as { token: string; username: string };
-  token = data.token;
+  setToken(data.token);
   return data.username;
 }
 
@@ -209,6 +233,11 @@ export interface GalleryItem {
   isTemplate: boolean;
   tags: string[];
   hasPhoto: boolean;
+  description?: string | null;
+  allowRemix?: boolean;
+  remixedFrom?: string | null;
+  remixedFromName?: string | null;
+  remixedFromTitle?: string | null;
 }
 
 export type GallerySort = 'recent' | 'likes';
@@ -431,4 +460,112 @@ export async function exportDistributionPdf(
     throw new Error(err.error ?? `export failed (${res.status})`);
   }
   return res.blob();
+}
+
+// ============ social client ============
+
+export interface PublicProfile {
+  id: string;
+  username: string;
+  handle: string | null;
+  followerCount: number;
+  followingCount: number;
+  designCount: number;
+  isFollowing?: boolean;
+}
+
+export interface CommentItem {
+  id: string;
+  designId: string;
+  authorId: string;
+  authorName: string;
+  parentId: string | null;
+  body: string;
+  createdAt: string;
+}
+
+export interface NotificationItem {
+  id: string;
+  kind: string;
+  actorId: string | null;
+  actorName: string | null;
+  designId: string | null;
+  designTitle: string | null;
+  commentId: string | null;
+  readAt: string | null;
+  createdAt: string;
+}
+
+/** Set a design's creator explanation + remix permission (owner only). */
+export async function setPublishMeta(id: string, description: string | null, allowRemix: boolean): Promise<void> {
+  const res = await fetch(`${API}/designs/${id}/publish-meta`, {
+    method: 'PUT',
+    headers: authHeaders(true),
+    body: JSON.stringify({ description, allowRemix }),
+  });
+  if (!res.ok) throw new Error(`could not save publish details (${res.status})`);
+}
+
+/** Remix a public design into the caller's account; returns the new design id. */
+export async function remixDesign(id: string, title?: string): Promise<{ id: string }> {
+  const res = await fetch(`${API}/designs/${id}/remix`, {
+    method: 'POST',
+    headers: authHeaders(true),
+    body: JSON.stringify({ title }),
+  });
+  if (!res.ok) {
+    const e = (await res.json().catch(() => ({ error: res.statusText }))) as { error?: string };
+    throw new Error(e.error ?? `remix failed (${res.status})`);
+  }
+  return res.json() as Promise<{ id: string }>;
+}
+
+export async function followUser(userId: string): Promise<void> {
+  const res = await fetch(`${API}/users/${userId}/follow`, { method: 'POST', headers: authHeaders(false) });
+  if (!res.ok) throw new Error(`follow failed (${res.status})`);
+}
+export async function unfollowUser(userId: string): Promise<void> {
+  const res = await fetch(`${API}/users/${userId}/follow`, { method: 'DELETE', headers: authHeaders(false) });
+  if (!res.ok) throw new Error(`unfollow failed (${res.status})`);
+}
+
+export async function searchUsers(q: string): Promise<PublicProfile[]> {
+  const res = await fetch(`${API}/users/search?q=${encodeURIComponent(q)}`);
+  if (!res.ok) return [];
+  return res.json() as Promise<PublicProfile[]>;
+}
+
+export async function listComments(designId: string): Promise<CommentItem[]> {
+  const res = await fetch(`${API}/designs/${designId}/comments`);
+  if (!res.ok) return [];
+  return res.json() as Promise<CommentItem[]>;
+}
+export async function addComment(designId: string, body: string, parentId: string | null): Promise<CommentItem> {
+  const res = await fetch(`${API}/designs/${designId}/comments`, {
+    method: 'POST',
+    headers: authHeaders(true),
+    body: JSON.stringify({ body, parentId }),
+  });
+  if (!res.ok) {
+    const e = (await res.json().catch(() => ({ error: res.statusText }))) as { error?: string };
+    throw new Error(e.error ?? `comment failed (${res.status})`);
+  }
+  return res.json() as Promise<CommentItem>;
+}
+export async function deleteComment(commentId: string): Promise<void> {
+  const res = await fetch(`${API}/comments/${commentId}`, { method: 'DELETE', headers: authHeaders(false) });
+  if (!res.ok) throw new Error(`delete failed (${res.status})`);
+}
+
+export async function listNotifications(): Promise<{ unread: number; items: NotificationItem[] }> {
+  const res = await fetch(`${API}/notifications`, { headers: authHeaders(false) });
+  if (!res.ok) return { unread: 0, items: [] };
+  return res.json() as Promise<{ unread: number; items: NotificationItem[] }>;
+}
+export async function markNotificationsRead(id?: string): Promise<void> {
+  await fetch(`${API}/notifications/read`, {
+    method: 'POST',
+    headers: authHeaders(true),
+    body: JSON.stringify({ id }),
+  }).catch(() => {});
 }

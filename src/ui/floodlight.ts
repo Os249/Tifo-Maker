@@ -755,6 +755,11 @@ body.viewer { display:block; overflow-y:auto; background:var(--ink-0); }
   transition:background .14s, border-color .14s;
 }
 .lang-toggle:hover { background:var(--ink-3); border-color:var(--line-2); color:var(--text-1); }
+.topbar-link {
+  color:var(--text-2); font-weight:600; font-size:13px; text-decoration:none; padding:7px 12px;
+  border-radius:var(--r-pill); transition:color .14s, background .14s;
+}
+.topbar-link:hover { color:var(--text-1); background:var(--ink-3); }
 
 /* ---- RTL: mirror the editor layout for Arabic ---- */
 [dir="rtl"] .panel { border-left:none; border-right:1px solid var(--line-1); }

@@ -896,6 +896,11 @@ export function mountToolbar(
           if (choice.tags.length > 0) await setDesignTags(designId, choice.tags).catch(() => {});
           if (choice.isTemplate) await setDesignTemplate(designId, true).catch(() => {});
         }
+        // Creator's explanation + remix permission (shown in the community 3D preview).
+        if (choice.description !== null || choice.allowRemix === false) {
+          const { setPublishMeta } = await import('../net/api');
+          await setPublishMeta(designId, choice.description, choice.allowRemix).catch(() => {});
+        }
       }
       if (choice.makePublic) track('published');
       message.textContent = choice.makePublic

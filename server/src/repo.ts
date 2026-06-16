@@ -11,6 +11,12 @@ export interface DesignMeta {
   ownerId: string | null;
   createdAt: string;
   updatedAt: string;
+  /** Creator's explanation/backstory, shown in the 3D preview. */
+  description?: string | null;
+  /** Whether others may remix this design. */
+  allowRemix?: boolean;
+  /** Lineage: the design this was remixed from, if any. */
+  remixedFrom?: string | null;
 }
 
 export interface GalleryItem extends DesignMeta {
@@ -23,6 +29,9 @@ export interface GalleryItem extends DesignMeta {
   tags: string[];
   /** True when at least one real match-day photo is attached (Before/After). */
   hasPhoto: boolean;
+  /** If remixed, the original creator's handle/name for attribution. */
+  remixedFromName?: string | null;
+  remixedFromTitle?: string | null;
 }
 
 export type GallerySort = 'recent' | 'likes';
@@ -122,6 +131,76 @@ export interface DesignRepository {
   setPhotoVerified(photoId: string, verified: boolean): Promise<boolean>;
   /** Moderator override: delete any photo regardless of owner. */
   deletePhotoAsModerator(photoId: string): Promise<boolean>;
+}
+
+// ============ social layer ============
+
+export interface PublicProfile {
+  id: string;
+  username: string;
+  handle: string | null;
+  followerCount: number;
+  followingCount: number;
+  designCount: number;
+  /** Whether the viewing user follows this profile. */
+  isFollowing?: boolean;
+}
+
+export interface CommentItem {
+  id: string;
+  designId: string;
+  authorId: string;
+  authorName: string;
+  parentId: string | null;
+  body: string;
+  createdAt: string;
+}
+
+export interface NotificationItem {
+  id: string;
+  kind: string;
+  actorId: string | null;
+  actorName: string | null;
+  designId: string | null;
+  designTitle: string | null;
+  commentId: string | null;
+  readAt: string | null;
+  createdAt: string;
+}
+
+export interface SocialRepository {
+  // ---- creator explanation + remix ----
+  /** Set a design's description/explanation + remix permission (owner only). */
+  setPublishMeta(designId: string, ownerId: string, description: string | null, allowRemix: boolean): Promise<boolean>;
+  /**
+   * Remix a public, remixable design into a new owner's account: duplicates the
+   * data without mutating the original, stamping remixed_from for attribution.
+   * Returns the new design, or null if not remixable / not found.
+   */
+  remix(sourceId: string, newOwnerId: string, title: string): Promise<DesignMeta | null>;
+
+  // ---- follow graph ----
+  follow(followerId: string, followeeId: string): Promise<boolean>;
+  unfollow(followerId: string, followeeId: string): Promise<boolean>;
+  /** Public profile by user id, with counts and (optional) viewer follow state. */
+  getProfile(userId: string, viewerId?: string | null): Promise<PublicProfile | null>;
+  /** Search users by username/handle prefix. */
+  searchUsers(query: string, limit: number): Promise<PublicProfile[]>;
+
+  // ---- comments ----
+  addComment(designId: string, authorId: string, body: string, parentId: string | null): Promise<CommentItem | null>;
+  listComments(designId: string): Promise<CommentItem[]>;
+  deleteComment(commentId: string, requesterId: string): Promise<boolean>;
+
+  // ---- notifications ----
+  /** Fan out a "new public post" notification to all the author's followers. */
+  notifyFollowersOfPost(authorId: string, designId: string): Promise<void>;
+  /** Recent notifications for a user, newest first. */
+  listNotifications(userId: string, limit: number): Promise<NotificationItem[]>;
+  /** Count of unread notifications. */
+  unreadCount(userId: string): Promise<number>;
+  /** Mark all (or one) notification read. */
+  markNotificationsRead(userId: string, id?: string): Promise<void>;
 }
 
 export interface ReportItem {

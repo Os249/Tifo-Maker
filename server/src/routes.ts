@@ -13,7 +13,7 @@ import { renderDistributionPdf } from '../../src/export/distributionPdf';
 
 import { tmpdir } from 'node:os';
 import { readFile, unlink } from 'node:fs/promises';
-import type { AuthRepository, DesignRepository, EventsRepository } from './repo';
+import type { AuthRepository, DesignRepository, EventsRepository, SocialRepository } from './repo';
 
 /**
  * HTTP surface (blueprint §2.2, completed with auth + gallery):
@@ -67,6 +67,8 @@ export interface AppOptions {
   events?: EventsRepository;
   /** Usernames with moderator privileges (from ADMIN_USERNAMES). Case-insensitive. */
   adminUsernames?: string[];
+  /** Optional social layer (follows, comments, remix lineage, notifications). */
+  social?: SocialRepository;
 }
 
 export async function buildApp(
@@ -443,11 +445,23 @@ export async function buildApp(
     const user = await auth.getUserById(id).catch(() => null);
     if (!user) return reply.code(404).send({ error: 'not found' });
     const viewerId = await userOf(req);
-    const [created, liked] = await Promise.all([
+    const [created, liked, socialProfile] = await Promise.all([
       repo.listPublic({ sort: 'recent', viewerId }).then((all) => all.filter((d) => d.ownerId === id)),
       repo.listLikedBy(id),
+      options.social ? options.social.getProfile(id, viewerId) : Promise.resolve(null),
     ]);
-    return { id: user.id, username: user.username, created, liked };
+    return {
+      id: user.id,
+      username: user.username,
+      created,
+      liked,
+      // Social graph fields (present when the social layer is enabled).
+      handle: socialProfile?.handle ?? null,
+      followerCount: socialProfile?.followerCount ?? 0,
+      followingCount: socialProfile?.followingCount ?? 0,
+      designCount: socialProfile?.designCount ?? created.length,
+      isFollowing: socialProfile?.isFollowing ?? false,
+    };
   });
 
   // ---------- designs ----------
@@ -633,7 +647,13 @@ export async function buildApp(
       patch.isPublic = body.isPublic;
     }
     if (Object.keys(patch).length === 0) return reply.code(400).send({ error: 'nothing to patch' });
-    return repo.patchMeta(rec.id, patch);
+    const wasPublic = rec.isPublic;
+    const result = await repo.patchMeta(rec.id, patch);
+    // Newly published → notify the owner's followers (best-effort, non-blocking).
+    if (options.social && patch.isPublic === true && !wasPublic && rec.ownerId) {
+      options.social.notifyFollowersOfPost(rec.ownerId, rec.id).catch(() => {});
+    }
+    return result;
   });
 
   app.post('/api/designs/:id/revisions', async (req, reply) => {
@@ -685,6 +705,123 @@ export async function buildApp(
     const title = (req.body as { title?: string } | null)?.title ?? `${v.rec.title} (fork)`;
     return reply.code(201).send(await repo.fork(v.rec.id, title, v.userId));
   });
+
+  // ============ SOCIAL ENDPOINTS ============
+  const social = options.social;
+  const socialOn = (reply: FastifyReply): boolean => {
+    if (!social) {
+      void reply.code(503).send({ error: 'social features not enabled' });
+      return false;
+    }
+    return true;
+  };
+
+  // Set creator's explanation + remix permission on a design (owner only).
+  app.put('/api/designs/:id/publish-meta', async (req, reply) => {
+    if (!socialOn(reply)) return;
+    const userId = await requireUser(req, reply);
+    if (!userId) return;
+    const { id } = req.params as { id: string };
+    const body = (req.body ?? {}) as { description?: unknown; allowRemix?: unknown };
+    const description = typeof body.description === 'string' ? body.description : null;
+    const allowRemix = body.allowRemix !== false;
+    const ok = await social!.setPublishMeta(id, userId, description, allowRemix);
+    if (!ok) return reply.code(404).send({ error: 'not found or not yours' });
+    return { ok: true };
+  });
+
+  // Remix a public, remixable design into the caller's account.
+  app.post('/api/designs/:id/remix', async (req, reply) => {
+    if (!socialOn(reply)) return;
+    const userId = await requireUser(req, reply);
+    if (!userId) return;
+    const { id } = req.params as { id: string };
+    const title = (req.body as { title?: string } | null)?.title;
+    const rec = await repo.get(id).catch(() => null);
+    const remixTitle = title || `${rec?.title ?? 'Tifo'} (remix)`;
+    const created = await social!.remix(id, userId, remixTitle);
+    if (!created) return reply.code(403).send({ error: 'this design cannot be remixed' });
+    return reply.code(201).send(created);
+  });
+
+  // Follow / unfollow a user.
+  app.post('/api/users/:id/follow', async (req, reply) => {
+    if (!socialOn(reply)) return;
+    const userId = await requireUser(req, reply);
+    if (!userId) return;
+    const { id } = req.params as { id: string };
+    await social!.follow(userId, id);
+    return { following: true };
+  });
+  app.delete('/api/users/:id/follow', async (req, reply) => {
+    if (!socialOn(reply)) return;
+    const userId = await requireUser(req, reply);
+    if (!userId) return;
+    const { id } = req.params as { id: string };
+    await social!.unfollow(userId, id);
+    return { following: false };
+  });
+
+  // Public profile is served by the merged /api/users/:id/profile above
+  // (it includes the social graph fields when the social layer is enabled).
+
+  // User search (typeahead). Public.
+  app.get('/api/users/search', async (req, reply) => {
+    if (!socialOn(reply)) return;
+    const q = (req.query as { q?: string }).q ?? '';
+    return social!.searchUsers(q, 12);
+  });
+
+  // Comments: list (public), add (auth), delete (author or design owner).
+  app.get('/api/designs/:id/comments', async (req, reply) => {
+    if (!socialOn(reply)) return;
+    const { id } = req.params as { id: string };
+    return social!.listComments(id);
+  });
+  app.post('/api/designs/:id/comments', async (req, reply) => {
+    if (!socialOn(reply)) return;
+    const userId = await requireUser(req, reply);
+    if (!userId) return;
+    const { id } = req.params as { id: string };
+    const body = (req.body ?? {}) as { body?: unknown; parentId?: unknown };
+    if (typeof body.body !== 'string' || !body.body.trim()) {
+      return reply.code(400).send({ error: 'comment body required' });
+    }
+    const parentId = typeof body.parentId === 'string' ? body.parentId : null;
+    const comment = await social!.addComment(id, userId, body.body, parentId);
+    if (!comment) return reply.code(400).send({ error: 'could not add comment' });
+    return reply.code(201).send(comment);
+  });
+  app.delete('/api/comments/:commentId', async (req, reply) => {
+    if (!socialOn(reply)) return;
+    const userId = await requireUser(req, reply);
+    if (!userId) return;
+    const { commentId } = req.params as { commentId: string };
+    const ok = await social!.deleteComment(commentId, userId);
+    if (!ok) return reply.code(404).send({ error: 'not found or not allowed' });
+    return { deleted: true };
+  });
+
+  // Notifications feed.
+  app.get('/api/notifications', async (req, reply) => {
+    if (!socialOn(reply)) return;
+    const userId = await requireUser(req, reply);
+    if (!userId) return;
+    const [items, unread] = await Promise.all([
+      social!.listNotifications(userId, 50),
+      social!.unreadCount(userId),
+    ]);
+    return { unread, items };
+  });
+  app.post('/api/notifications/read', async (req, reply) => {
+    if (!socialOn(reply)) return;
+    const userId = await requireUser(req, reply);
+    if (!userId) return;
+    const id = (req.body as { id?: string } | null)?.id;
+    await social!.markNotificationsRead(userId, id);
+    return { ok: true };
+  });
+
 
   // Serve the built frontend from the same origin as the API, so the client's
   // relative `/api/...` calls just work in production (no proxy, no CORS). A
@@ -751,6 +888,14 @@ export async function buildApp(
       app.get('/tifo-spec', async (_req, reply) => reply.type('text/html').send(specHtml));
     } catch {
       /* spec page optional in API-only builds */
+    }
+
+    // The standalone community / social feed page (third pillar).
+    try {
+      const communityHtml = readFileSync(join(staticDir, 'community.html'), 'utf8');
+      app.get('/community', async (_req, reply) => reply.type('text/html').send(communityHtml));
+    } catch {
+      /* community page optional in API-only builds */
     }
 
     // index:false so the static plugin doesn't auto-serve index.html at '/'

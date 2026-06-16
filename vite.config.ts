@@ -11,6 +11,7 @@ export default defineConfig({
         landing: resolve(__dirname, 'landing.html'),
         app: resolve(__dirname, 'index.html'),
         spec: resolve(__dirname, 'tifo-spec.html'),
+        community: resolve(__dirname, 'community.html'),
       },
     },
   },
