@@ -22,10 +22,12 @@ import {
   deleteComment,
   listNotifications,
   markNotificationsRead,
+  fetchProfile,
   type GalleryItem,
   type GallerySort,
   type CommentItem,
   type NotificationItem,
+  type ProfileData,
 } from './net/api';
 
 // ---------- bootstrap ----------
@@ -123,7 +125,7 @@ async function loadGallery(): Promise<void> {
   }
 }
 
-function renderCard(item: GalleryItem): HTMLElement {
+function renderCard(item: GalleryItem, onClick?: () => void): HTMLElement {
   const card = document.createElement('article');
   card.className = 'tifo-card';
   const thumb = item.hasThumbnail
@@ -147,7 +149,18 @@ function renderCard(item: GalleryItem): HTMLElement {
         <span class="card-stat"><i class="ti ti-message-circle"></i> <span class="cmt-count" data-id="${item.id}">·</span></span>
       </div>
     </div>`;
-  card.addEventListener('click', () => openPreview(item));
+  card.addEventListener('click', () => (onClick ? onClick() : openPreview(item)));
+  // The @username opens the creator profile instead of the tifo preview.
+  if (item.ownerId) {
+    const at = card.querySelector('.card-by .at') as HTMLElement | null;
+    if (at) {
+      at.style.cursor = 'pointer';
+      at.addEventListener('click', (e) => {
+        e.stopPropagation();
+        void openProfile(item.ownerId!);
+      });
+    }
+  }
   return card;
 }
 
@@ -155,6 +168,107 @@ function escapeHtml(s: string): string {
   const d = document.createElement('div');
   d.textContent = s;
   return d.innerHTML;
+}
+
+// ---------- creator profile view ----------
+async function openProfile(userId: string): Promise<void> {
+  const root = $('#modal-root');
+  root.hidden = false;
+  root.innerHTML = `
+    <div class="modal profile-modal">
+      <button class="modal-close" id="profile-close" aria-label="Close">&times;</button>
+      <div class="profile-loading">Loading profile…</div>
+    </div>`;
+  const close = (): void => {
+    root.hidden = true;
+    root.innerHTML = '';
+    document.removeEventListener('keydown', escProfile);
+  };
+  $('#profile-close').addEventListener('click', close);
+  root.addEventListener('click', (e) => {
+    if (e.target === root) close();
+  });
+  document.addEventListener('keydown', escProfile);
+
+  let profile: ProfileData;
+  try {
+    profile = await fetchProfile(userId);
+  } catch {
+    const modal = root.querySelector('.profile-modal');
+    if (modal) modal.querySelector('.profile-loading')!.textContent = 'Could not load this profile.';
+    return;
+  }
+
+  const isSelf = me && me.id === userId;
+  const modal = root.querySelector('.profile-modal') as HTMLElement;
+  modal.innerHTML = `
+    <button class="modal-close" id="profile-close" aria-label="Close">&times;</button>
+    <div class="profile-head">
+      <div class="profile-avatar">${initials(profile.username)}</div>
+      <div class="profile-id">
+        <h2 class="profile-name">@${escapeHtml(profile.username)}</h2>
+        <div class="profile-counts">
+          <span><b>${profile.designCount ?? profile.created.length}</b> tifo${(profile.designCount ?? profile.created.length) === 1 ? '' : 's'}</span>
+          <span><b>${profile.followerCount ?? 0}</b> follower${(profile.followerCount ?? 0) === 1 ? '' : 's'}</span>
+          <span><b>${profile.followingCount ?? 0}</b> following</span>
+        </div>
+      </div>
+      ${isSelf ? '' : `<button class="follow-btn ${profile.isFollowing ? 'following' : ''}" id="profile-follow">${profile.isFollowing ? 'Following' : 'Follow'}</button>`}
+    </div>
+    <div class="profile-grid-wrap">
+      <div class="profile-section-title">Public tifos</div>
+      <div class="profile-grid" id="profile-grid"></div>
+    </div>`;
+  modal.querySelector('#profile-close')!.addEventListener('click', close);
+
+  // follow toggle
+  const followBtn = modal.querySelector('#profile-follow') as HTMLButtonElement | null;
+  if (followBtn) {
+    let following = !!profile.isFollowing;
+    followBtn.addEventListener('click', async () => {
+      if (!(await ensureAuth())) return;
+      try {
+        if (following) {
+          await unfollowUser(userId);
+          following = false;
+          followBtn.textContent = 'Follow';
+          followBtn.classList.remove('following');
+        } else {
+          await followUser(userId);
+          following = true;
+          followBtn.textContent = 'Following';
+          followBtn.classList.add('following');
+        }
+      } catch {
+        toast('Could not update follow');
+      }
+    });
+  }
+
+  // their tifos
+  const grid = modal.querySelector('#profile-grid') as HTMLElement;
+  if (profile.created.length === 0) {
+    grid.innerHTML = `<div class="profile-empty">No public tifos yet.</div>`;
+  } else {
+    for (const item of profile.created) {
+      const card = renderCard(item, () => {
+        close();
+        void openPreview(item);
+      });
+      grid.appendChild(card);
+    }
+  }
+}
+
+function escProfile(e: KeyboardEvent): void {
+  if (e.key === 'Escape') {
+    const root = document.getElementById('modal-root');
+    if (root && root.querySelector('.profile-modal')) {
+      root.hidden = true;
+      root.innerHTML = '';
+      document.removeEventListener('keydown', escProfile);
+    }
+  }
 }
 
 // ---------- 3D preview modal ----------
@@ -523,11 +637,10 @@ searchInput.addEventListener('input', () => {
     searchResults.hidden = false;
     searchResults.querySelectorAll<HTMLElement>('.search-result[data-id]').forEach((el) => {
       el.addEventListener('click', () => {
-        // Filter the gallery to this creator by opening their first design is complex;
-        // for now navigate to a creator view by filtering client-side is not available,
-        // so we just surface their public designs via the gallery search box.
-        toast(`Showing @${el.querySelector('.sr-name')!.textContent?.replace('@', '')}'s tifos coming soon`);
+        const uid = el.dataset.id!;
         searchResults.hidden = true;
+        searchInput.value = '';
+        void openProfile(uid);
       });
     });
   }, 220);

@@ -367,6 +367,11 @@ export interface ProfileData {
   username: string;
   created: GalleryItem[];
   liked: GalleryItem[];
+  handle?: string | null;
+  followerCount?: number;
+  followingCount?: number;
+  designCount?: number;
+  isFollowing?: boolean;
 }
 
 export async function fetchProfile(userId: string): Promise<ProfileData> {

@@ -300,3 +300,30 @@ a { color: inherit; text-decoration: none; }
 .auth-submit:hover { background: #1860c4; }
 .auth-error { color: #ef4444; font-size: 13px; min-height: 18px; }
 .auth-hint { font-size: 13px; color: var(--muted); text-align: center; }
+
+/* ---- creator profile modal ---- */
+.profile-modal { display: block; max-width: 860px; padding: 0; overflow-y: auto; }
+.profile-loading { padding: 60px; text-align: center; color: var(--muted); }
+.profile-head {
+  display: flex; align-items: center; gap: 18px; padding: 32px 32px 24px;
+  border-bottom: 1px solid var(--line);
+  background: linear-gradient(135deg, rgba(91, 42, 134, 0.06), rgba(28, 111, 224, 0.05));
+}
+.profile-avatar {
+  width: 72px; height: 72px; border-radius: 50%; background: var(--grad-brand); color: #fff;
+  display: grid; place-items: center; font-weight: 800; font-size: 26px; flex: 0 0 auto;
+}
+.profile-id { flex: 1; min-width: 0; }
+.profile-name { font-size: 26px; font-weight: 800; letter-spacing: -0.02em; margin: 0 0 8px; }
+.profile-counts { display: flex; gap: 20px; color: var(--muted); font-size: 14px; }
+.profile-counts b { color: var(--ink); font-weight: 700; }
+.profile-grid-wrap { padding: 24px 32px 32px; }
+.profile-section-title { font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); margin-bottom: 16px; }
+.profile-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 18px; }
+.profile-empty { color: var(--muted); font-size: 14px; padding: 20px 0; }
+
+@media (max-width: 560px) {
+  .profile-head { flex-wrap: wrap; }
+  .profile-counts { gap: 14px; }
+}
+[dir="rtl"] .profile-counts { flex-direction: row-reverse; }
