@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TifoMaker for Clubs — Professional stadium choreography</title>
+  <meta name="description" content="Team collaboration, white-labeling, and custom 3D stadium modeling for official clubs, agencies, and ultras syndicates. Coordinate professional-grade displays." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/src/clubs.css" />
+</head>
+<body>
+  <header class="nav">
+    <a class="brand" href="/">TIFO<b>MAKER</b></a>
+    <nav class="nav-links">
+      <a href="/community" data-i18n="nav.community">Community</a>
+      <a href="/app" data-i18n="nav.openEditor">Open the editor</a>
+      <button class="lang-toggle" id="lang-toggle" data-i18n="common.language">العربية</button>
+      <a class="nav-cta" href="#contact" data-i18n="clubs.navCta">Talk to us</a>
+    </nav>
+  </header>
+
+  <section class="b-hero">
+    <div class="b-hero-inner">
+      <div class="b-eyebrow" data-i18n="clubs.eyebrow2">For clubs · agencies · ultras syndicates</div>
+      <h1 data-i18n="clubs.h1">Run the whole stand like a production.</h1>
+      <p class="b-lead" data-i18n="clubs.lead">
+        TifoMaker for Clubs gives official organizers the tools to design, simulate, and execute
+        professional-grade tifo displays at scale — with your team, your branding, and your exact stadium.
+      </p>
+      <div class="b-hero-cta">
+        <a class="btn btn-primary" href="#contact" data-i18n="clubs.cta1">Book a walkthrough</a>
+        <a class="btn btn-ghost" href="/app" data-i18n="clubs.cta2">Try the editor free</a>
+      </div>
+      <div class="b-trust" data-i18n="clubs.trust">Built for 40k–100k seat venues · seat-accurate execution · RTL & multi-language</div>
+    </div>
+  </section>
+
+  <section class="b-features">
+    <div class="b-features-inner">
+      <div class="b-feature">
+        <div class="b-feature-icon grad-1">⬡</div>
+        <h3 data-i18n="clubs.f1.title">Team collaboration</h3>
+        <p data-i18n="clubs.f1.body">Bring designers, capos, and club staff into one shared workspace. Co-author displays, manage revisions, and align the whole section before a single card is printed.</p>
+      </div>
+      <div class="b-feature">
+        <div class="b-feature-icon grad-2">◐</div>
+        <h3 data-i18n="clubs.f2.title">White-labeling</h3>
+        <p data-i18n="clubs.f2.body">Put your club’s identity front and center. Branded editor, branded fan pages, and branded match-day instructions — your crest, your colors, your domain.</p>
+      </div>
+      <div class="b-feature">
+        <div class="b-feature-icon grad-3">⬢</div>
+        <h3 data-i18n="clubs.f3.title">Custom 3D stadium modeling</h3>
+        <p data-i18n="clubs.f3.body">We model your actual venue — exact tiers, sections, and seat counts — so what you design in 3D is precisely what 60,000 fans will hold up on the day.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="b-strip">
+    <div class="b-strip-inner">
+      <div class="b-stat"><span class="b-stat-num">100k</span><span class="b-stat-label" data-i18n="clubs.s1">seats per venue</span></div>
+      <div class="b-stat"><span class="b-stat-num">3D</span><span class="b-stat-label" data-i18n="clubs.s2">simulation before print</span></div>
+      <div class="b-stat"><span class="b-stat-num">QR</span><span class="b-stat-label" data-i18n="clubs.s3">per-seat fan instructions</span></div>
+      <div class="b-stat"><span class="b-stat-num">RTL</span><span class="b-stat-label" data-i18n="clubs.s4">native multi-language</span></div>
+    </div>
+  </section>
+
+  <section class="b-contact" id="contact">
+    <div class="b-contact-inner">
+      <div class="b-contact-copy">
+        <h2 data-i18n="clubs.contactTitle">Let’s plan your next display.</h2>
+        <p data-i18n="clubs.contactBody">Tell us about your club and what you’re planning. We’ll set up a walkthrough and a venue model tailored to your stadium.</p>
+        <ul class="b-checklist">
+          <li data-i18n="clubs.check1">Dedicated onboarding for your team</li>
+          <li data-i18n="clubs.check2">Your stadium modeled to seat-level accuracy</li>
+          <li data-i18n="clubs.check3">White-label fan pages & match-day exports</li>
+        </ul>
+      </div>
+      <form class="b-form" id="lead-form">
+        <div class="b-field">
+          <label for="lf-name" data-i18n="clubs.fName">Your name</label>
+          <input type="text" id="lf-name" name="name" required autocomplete="name" />
+        </div>
+        <div class="b-field">
+          <label for="lf-email" data-i18n="clubs.fEmail">Work email</label>
+          <input type="email" id="lf-email" name="email" required autocomplete="email" />
+        </div>
+        <div class="b-field">
+          <label for="lf-org" data-i18n="clubs.fOrg">Club / organization</label>
+          <input type="text" id="lf-org" name="organization" autocomplete="organization" />
+        </div>
+        <div class="b-field">
+          <label for="lf-type" data-i18n="clubs.fType">You are a…</label>
+          <select id="lf-type" name="orgType">
+            <option value="club" data-i18n="clubs.typeClub">Official club</option>
+            <option value="agency" data-i18n="clubs.typeAgency">Marketing agency</option>
+            <option value="ultras" data-i18n="clubs.typeUltras">Ultras / supporters group</option>
+            <option value="other" data-i18n="clubs.typeOther">Other</option>
+          </select>
+        </div>
+        <div class="b-field">
+          <label for="lf-msg" data-i18n="clubs.fMsg">What are you planning?</label>
+          <textarea id="lf-msg" name="message" rows="3"></textarea>
+        </div>
+        <button type="submit" class="btn btn-primary b-submit" id="lf-submit" data-i18n="clubs.submit">Request a walkthrough</button>
+        <div class="b-form-note" id="lf-note"></div>
+      </form>
+    </div>
+  </section>
+
+  <footer class="b-foot">
+    <div class="b-foot-brand">TIFO<b>MAKER</b></div>
+    <div class="b-foot-links">
+      <a href="/" data-i18n="clubs.footHome">Home</a>
+      <a href="/community" data-i18n="nav.community">Community</a>
+      <a href="/app" data-i18n="nav.openEditor">Editor</a>
+    </div>
+  </footer>
+
+  <script type="module" src="/src/clubs.ts"></script>
+</body>
+</html>

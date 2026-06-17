@@ -23,7 +23,16 @@
         <a href="/community" id="community-link" class="topbar-link" data-i18n="nav.community">Community</a>
         <button id="gallery" data-i18n="ed.gallery">Gallery</button>
         <button id="moderation" hidden title="Moderation queue"><i class="ti ti-shield-check"></i> Moderate</button>
-        <span class="avatar" id="avatar">U</span>
+        <div class="avatar-wrap">
+          <span class="avatar" id="avatar">U</span>
+          <div class="avatar-menu" id="avatar-menu" hidden>
+            <div class="avatar-menu-name" id="avatar-menu-name"></div>
+            <button class="avatar-menu-item" id="menu-profile"><i class="ti ti-user"></i> <span data-i18n="ed.viewProfile">View profile</span></button>
+            <button class="avatar-menu-item" id="menu-community"><i class="ti ti-users"></i> <span data-i18n="nav.community">Community</span></button>
+            <button class="avatar-menu-item" id="menu-tutorial"><i class="ti ti-help-circle"></i> <span data-i18n="ed.replayTour">Replay tutorial</span></button>
+            <button class="avatar-menu-item danger" id="menu-signout"><i class="ti ti-logout"></i> <span data-i18n="ed.signOut">Sign out</span></button>
+          </div>
+        </div>
       </div>
     </header>
 
@@ -264,8 +273,9 @@
             <input type="number" id="bag-size" min="10" max="1000" step="10" value="100" style="flex:1;min-width:0;" />
           </div>
           <button id="export-pdf" style="width:100%;margin-bottom:8px;"><i class="ti ti-file-text"></i> Distribution PDF</button>
-          <button id="export-csv" style="width:100%;"><i class="ti ti-table"></i> Seat manifest (CSV)</button>
-          <p id="export-note" class="hint" style="font-size:11px;color:var(--text-3);margin:8px 0 0;">Seat-by-seat instructions, material &amp; bag counts, color metrics.</p>
+          <button id="export-csv" style="width:100%;margin-bottom:8px;"><i class="ti ti-table"></i> Seat manifest (CSV)</button>
+          <button id="export-qr" style="width:100%;"><i class="ti ti-qrcode"></i> Fan QR code</button>
+          <p id="export-note" class="hint" style="font-size:11px;color:var(--text-3);margin:8px 0 0;">Seat-by-seat instructions, material &amp; bag counts, and a QR fans scan to find their card.</p>
         </div>
       </aside>
     </div>

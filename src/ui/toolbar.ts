@@ -724,9 +724,12 @@ export function mountToolbar(
   const reflectSignedIn = (name: string, userId?: string, fresh = false): void => {
     signinBtn.textContent = name;
     signinBtn.classList.remove('signup-shine'); // stop pulsing once signed in
+    signinBtn.hidden = true; // account actions move to the avatar menu
     if (userId) myUserId = userId;
     const avatar = document.getElementById('avatar');
     if (avatar) avatar.textContent = name[0].toUpperCase();
+    const menuName = document.getElementById('avatar-menu-name');
+    if (menuName) menuName.textContent = `@${name}`;
     message.textContent = `signed in as ${name}`;
     setAnalyticsSignedIn(true);
     if (fresh) track('signed_up'); // genuine auth this session, not a reload-restore
@@ -739,11 +742,11 @@ export function mountToolbar(
     if (b) b.hidden = !isAdmin;
   };
 
-  // Clicking the header button: if signed out → auth modal; if signed in → profile.
+  // Clicking the header button when signed out → auth modal.
   signinBtn.addEventListener('click', async () => {
     if (isSignedIn() && myUserId) {
-      const { openProfile } = await import('./profile');
-      await openProfile(myUserId, (id) => void doLoad(id));
+      // When signed in, the Sign up button is hidden; this path is a fallback.
+      toggleAvatarMenu();
       return;
     }
     const name = await openAuthModal();
@@ -752,6 +755,64 @@ export function mountToolbar(
       reflectSignedIn(name, me?.id, true);
       reflectAdmin(me?.isAdmin ?? false);
     }
+  });
+
+  // The avatar opens a small account menu (View profile / Community / Sign out).
+  const avatarEl = document.getElementById('avatar');
+  const avatarMenu = document.getElementById('avatar-menu');
+  function toggleAvatarMenu(force?: boolean): void {
+    if (!avatarMenu) return;
+    const show = force ?? avatarMenu.hidden;
+    avatarMenu.hidden = !show;
+  }
+  avatarEl?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    // Reflect auth state in which menu items show.
+    const signed = isSignedIn();
+    const profileItem = document.getElementById('menu-profile');
+    const signoutItem = document.getElementById('menu-signout');
+    const nameItem = document.getElementById('avatar-menu-name');
+    if (profileItem) profileItem.hidden = !signed;
+    if (signoutItem) signoutItem.hidden = !signed;
+    if (nameItem) nameItem.hidden = !signed;
+    toggleAvatarMenu();
+  });
+  // Close the menu on any outside click.
+  document.addEventListener('click', (e) => {
+    if (avatarMenu && !avatarMenu.hidden) {
+      const wrap = (e.target as HTMLElement).closest('.avatar-wrap');
+      if (!wrap) toggleAvatarMenu(false);
+    }
+  });
+  document.getElementById('menu-profile')?.addEventListener('click', async () => {
+    toggleAvatarMenu(false);
+    if (myUserId) {
+      const { openProfile } = await import('./profile');
+      await openProfile(myUserId, (id) => void doLoad(id));
+    }
+  });
+  document.getElementById('menu-community')?.addEventListener('click', () => {
+    window.location.href = '/community';
+  });
+  document.getElementById('menu-tutorial')?.addEventListener('click', async () => {
+    toggleAvatarMenu(false);
+    const { startTour } = await import('./tour');
+    void startTour();
+  });
+  document.getElementById('menu-signout')?.addEventListener('click', async () => {
+    toggleAvatarMenu(false);
+    const { signOut } = await import('../net/api');
+    signOut();
+    setAnalyticsSignedIn(false);
+    myUserId = null;
+    // Reset the header to the signed-out state.
+    if (avatarEl) avatarEl.textContent = 'U';
+    signinBtn.hidden = false;
+    signinBtn.classList.add('signup-shine');
+    reflectAdmin(false);
+    const photoRow2 = document.getElementById('photo-row');
+    if (photoRow2) photoRow2.hidden = true;
+    message.textContent = 'signed out';
   });
 
   // Restore session on load: if a token is present, show the name (no shine).
@@ -1392,4 +1453,65 @@ export function mountToolbar(
     track('exported', { once: false });
     message.textContent = `seat manifest exported (${rows.toLocaleString()} seats)`;
   });
+
+  // Fan QR code: one stadium-wide code that points at /s/:id. Fans scan it,
+  // pick their seat, and see exactly which card to hold. Needs a saved design.
+  const qrBtn = $('#export-qr') as unknown as HTMLButtonElement;
+  qrBtn.addEventListener('click', async () => {
+    if (!designId) {
+      message.textContent = 'save or publish your tifo first — the QR points fans to it';
+      return;
+    }
+    const url = `${location.origin}/s/${designId}`;
+    try {
+      const QR = (await import('qrcode')).default;
+      const dataUrl = await QR.toDataURL(url, { width: 720, margin: 2, color: { dark: '#0E0A1A', light: '#FFFFFF' } });
+      openQrDialog(dataUrl, url, docTitle.value.trim() || 'Tifo');
+    } catch {
+      message.textContent = 'could not generate the QR code';
+    }
+  });
+
+  function openQrDialog(dataUrl: string, url: string, name: string): void {
+    const backdrop = document.createElement('div');
+    backdrop.className = 'qr-backdrop';
+    backdrop.innerHTML = `
+      <div class="qr-modal" role="dialog" aria-modal="true">
+        <button class="qr-close" aria-label="Close">&times;</button>
+        <h3 class="qr-h3">Fan QR code</h3>
+        <p class="qr-lead">Print this on the cards, banners, or the big screen. Fans scan it, pick their seat, and see exactly which colour to hold up.</p>
+        <img class="qr-img" src="${dataUrl}" alt="QR code for ${escapeHtmlLocal(name)}" />
+        <div class="qr-url">${escapeHtmlLocal(url)}</div>
+        <div class="qr-actions">
+          <button class="primary" id="qr-download"><i class="ti ti-download"></i> Download PNG</button>
+          <button id="qr-copy"><i class="ti ti-link"></i> Copy link</button>
+        </div>
+      </div>`;
+    document.body.appendChild(backdrop);
+    const close = (): void => backdrop.remove();
+    backdrop.querySelector('.qr-close')!.addEventListener('click', close);
+    backdrop.addEventListener('mousedown', (e) => {
+      if (e.target === backdrop) close();
+    });
+    backdrop.querySelector('#qr-download')!.addEventListener('click', () => {
+      const a = document.createElement('a');
+      a.href = dataUrl;
+      a.download = `${name.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}-qr.png`;
+      a.click();
+    });
+    backdrop.querySelector('#qr-copy')!.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(url);
+        (backdrop.querySelector('#qr-copy') as HTMLElement).textContent = 'Copied!';
+      } catch {
+        /* clipboard blocked */
+      }
+    });
+  }
+
+  function escapeHtmlLocal(s: string): string {
+    const d = document.createElement('div');
+    d.textContent = s;
+    return d.innerHTML;
+  }
 }

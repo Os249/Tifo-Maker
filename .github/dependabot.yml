@@ -1,0 +1,25 @@
+version: 2
+updates:
+  # Application + build dependencies (root package.json).
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+    groups:
+      # Group routine minor/patch bumps into one PR to reduce noise; security
+      # updates still come through individually and promptly.
+      minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
+    labels:
+      - "dependencies"
+
+  # Keep the GitHub Actions used in CI patched too (if/when you add workflows).
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    labels:
+      - "dependencies"

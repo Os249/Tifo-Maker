@@ -5,7 +5,7 @@ import pg from 'pg';
 import type { FastifyInstance } from 'fastify';
 import { generateSeatMap } from '../../src/core/seatmap';
 import { DEFAULT_TEMPLATE } from '../../src/core/template';
-import { MemoryAuthRepository, MemoryDesignRepository, MemoryEventsRepository } from '../src/memoryRepo';
+import { MemoryAuthRepository, MemoryDesignRepository, MemoryEventsRepository, MemoryLeadsRepository } from '../src/memoryRepo';
 import { MemorySocialRepository } from '../src/memorySocial';
 import { PgAuthRepository, PgDesignRepository } from '../src/pgRepo';
 import { buildApp, SNAPSHOT_EVERY, type TemplateInfo } from '../src/routes';
@@ -445,6 +445,27 @@ async function runSuite(name: string, repo: DesignRepository, auth: AuthReposito
   assert.equal(after.followerCount, 0, 'unfollow works');
 
   console.log('social: all assertions passed (remix lineage, follow graph, comments+threads, notifications, search)');
+}
+
+// ---- B2B lead capture ----
+{
+  const auth = new MemoryAuthRepository();
+  const designs = new MemoryDesignRepository((id) => auth.usernameOf(id));
+  const leads = new MemoryLeadsRepository();
+  const app = await buildApp(designs, auth, templates, { leads });
+
+  // Valid lead is stored.
+  const ok = await app.inject({ method: 'POST', url: '/api/leads', payload: { name: 'Sara', email: 'sara@club.com', organization: 'Al Hilal', orgType: 'club', message: 'Want white-label.' } });
+  assert.equal(ok.statusCode, 201);
+  assert.equal(leads.leads.length, 1, 'lead stored');
+  assert.equal(leads.leads[0].organization, 'Al Hilal');
+
+  // Missing name / bad email are rejected.
+  assert.equal((await app.inject({ method: 'POST', url: '/api/leads', payload: { email: 'x@y.com' } })).statusCode, 400);
+  assert.equal((await app.inject({ method: 'POST', url: '/api/leads', payload: { name: 'No Email', email: 'not-an-email' } })).statusCode, 400);
+  assert.equal(leads.leads.length, 1, 'invalid leads not stored');
+
+  console.log('leads: all assertions passed (store valid, reject missing name / bad email)');
 }
 
 // ---- .tifo format validation endpoint ----

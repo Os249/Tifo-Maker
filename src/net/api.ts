@@ -574,3 +574,27 @@ export async function markNotificationsRead(id?: string): Promise<void> {
     body: JSON.stringify({ id }),
   }).catch(() => {});
 }
+
+// ============ B2B leads ============
+
+export interface LeadInput {
+  name: string;
+  email: string;
+  organization?: string;
+  orgType?: string;
+  message?: string;
+}
+
+/** Submit a B2B lead from the For Clubs page. */
+export async function submitLead(lead: LeadInput): Promise<{ ok: boolean; id?: string }> {
+  const res = await fetch(`${API}/leads`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(lead),
+  });
+  if (!res.ok) {
+    const e = (await res.json().catch(() => ({ error: res.statusText }))) as { error?: string };
+    throw new Error(e.error ?? `submission failed (${res.status})`);
+  }
+  return res.json() as Promise<{ ok: boolean; id?: string }>;
+}

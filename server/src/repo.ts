@@ -268,3 +268,18 @@ export interface EventsRepository {
    */
   funnel(steps: string[], days: number): Promise<FunnelStep[]>;
 }
+
+// ============ B2B leads ============
+
+export interface Lead {
+  name: string;
+  email: string;
+  organization?: string | null;
+  orgType?: string | null;
+  message?: string | null;
+}
+
+export interface LeadsRepository {
+  /** Store a B2B enterprise lead from the For Clubs page. */
+  createLead(lead: Lead): Promise<{ id: string }>;
+}

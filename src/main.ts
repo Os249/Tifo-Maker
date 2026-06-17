@@ -320,15 +320,36 @@ async function main(): Promise<void> {
     const { openOnboarding } = await import('./ui/onboarding');
     const choice = await openOnboarding(PATTERN_PRESETS);
     if (choice) {
+      // Set the project name the user chose.
+      const docTitleEl = document.getElementById('doc-title') as HTMLInputElement | null;
+      if (docTitleEl && choice.projectName) docTitleEl.value = choice.projectName;
       const palette = PALETTE_PRESETS[choice.paletteName];
       if (palette) store.setPalette(palette.slice());
-      const pattern = PATTERN_PRESETS.find((p) => p.id === choice.patternId);
-      if (pattern) store.transform(pattern.cellAt(map));
+      // Apply the chosen starting point.
+      if (choice.kind === 'patterns' && choice.patternId) {
+        const pattern = PATTERN_PRESETS.find((p) => p.id === choice.patternId);
+        if (pattern) store.transform(pattern.cellAt(map));
+      } else if (choice.kind === 'crest') {
+        // Fill the bowl with the base color so a centered logo reads against it,
+        // then the user drops an image via the Image tool.
+        store.fillAll(1);
+      }
       editor.rebuildPalette();
       editor.repaintAll();
       // Reflect the chosen palette in the dropdown so the UI stays consistent.
       const presetSel = document.getElementById('preset') as HTMLSelectElement | null;
       if (presetSel) presetSel.value = choice.paletteName;
+      // For text/crest starters, drop the user straight into the right tool.
+      if (choice.kind === 'text') document.querySelector<HTMLButtonElement>('[data-tool="text"]')?.click();
+      else if (choice.kind === 'crest') document.querySelector<HTMLButtonElement>('[data-tool="import"]')?.click();
+
+      // First-timer guided tour of the major controls (skippable). Only runs if
+      // the user completed onboarding (didn't skip) and hasn't seen the tour.
+      const { hasSeenTour, startTour } = await import('./ui/tour');
+      if (!hasSeenTour()) {
+        // Let the layout settle (panels/tools rendered) before spotlighting.
+        setTimeout(() => void startTour(), 400);
+      }
     }
   }
 

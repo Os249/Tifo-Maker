@@ -7,6 +7,8 @@ import type {
   DiffBytes,
   GalleryItem,
   GalleryQuery,
+  Lead,
+  LeadsRepository,
   NewDesign,
   RevisionRow,
   UserRow,
@@ -444,5 +446,15 @@ export class MemoryEventsRepository implements EventsRepository {
       );
       return { name, sessions: sessions.size };
     });
+  }
+}
+
+/** In-memory B2B leads store (dev/tests). */
+export class MemoryLeadsRepository implements LeadsRepository {
+  readonly leads: (Lead & { id: string; createdAt: string })[] = [];
+  async createLead(lead: Lead): Promise<{ id: string }> {
+    const id = randomUUID();
+    this.leads.push({ ...lead, id, createdAt: new Date().toISOString() });
+    return { id };
   }
 }

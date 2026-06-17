@@ -173,3 +173,16 @@ CREATE TABLE IF NOT EXISTS notifications (
 );
 CREATE INDEX IF NOT EXISTS notifications_user_idx ON notifications (user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS notifications_unread_idx ON notifications (user_id) WHERE read_at IS NULL;
+
+-- B2B enterprise leads from the "For Clubs" page. No auth — public form submit,
+-- rate-limited at the route. Stored for the team to follow up.
+CREATE TABLE IF NOT EXISTS leads (
+  id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name         TEXT NOT NULL,
+  email        TEXT NOT NULL,
+  organization TEXT,
+  org_type     TEXT,           -- club | agency | ultras | other
+  message      TEXT,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS leads_created_idx ON leads (created_at DESC);

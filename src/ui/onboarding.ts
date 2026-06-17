@@ -30,12 +30,26 @@ export function markOnboarded(): void {
   }
 }
 
+export type StarterKind = 'blank' | 'patterns' | 'crest' | 'text';
+
 export interface QuickStart {
+  kind: StarterKind;
   paletteName: string;
-  patternId: string;
+  patternId: string | null;
+  projectName: string;
 }
 
-// The starter looks offered — each maps to a real PATTERN_PRESET id.
+// Intent-first starter templates — framed as outcomes, not features. Each maps
+// to a concrete editor setup the caller applies. "patterns" carries a default
+// pattern id the user lands on (changeable later in the Stadium panel).
+const STARTERS: { kind: StarterKind; icon: string; title: string; blurb: string; pattern: string | null }[] = [
+  { kind: 'blank', icon: '▢', title: 'Start blank', blurb: 'An empty bowl. Paint freely from scratch.', pattern: null },
+  { kind: 'patterns', icon: '▤', title: 'Stripes & patterns', blurb: 'Begin with hoops, halves, or a sash.', pattern: 'hoops' },
+  { kind: 'crest', icon: '◆', title: 'Club crest setup', blurb: 'A centered canvas, ready for your logo.', pattern: null },
+  { kind: 'text', icon: 'A', title: 'Typography / text', blurb: 'Start with a banner of big text.', pattern: null },
+];
+
+// Default pattern offered inside the "Stripes & patterns" starter.
 const STARTER_PATTERNS: { id: string; label: string }[] = [
   { id: 'hoops', label: 'Hoops' },
   { id: 'split', label: 'Split stands' },
@@ -54,8 +68,9 @@ function paletteSwatchRow(colors: string[]): string {
 export function openOnboarding(patterns: PatternPreset[]): Promise<QuickStart | null> {
   return new Promise((resolve) => {
     const paletteNames = Object.keys(PALETTES);
+    let chosenKind: StarterKind = 'blank';
     let chosenPalette = paletteNames[0];
-    let chosenPattern = STARTER_PATTERNS[0].id;
+    let chosenPattern: string | null = null;
 
     const backdrop = document.createElement('div');
     backdrop.className = 'ob-backdrop';
@@ -63,8 +78,33 @@ export function openOnboarding(patterns: PatternPreset[]): Promise<QuickStart | 
       <div class="ob-modal" role="dialog" aria-modal="true" aria-label="Welcome to Tifo Maker">
         <div class="ob-hero">
           <div class="ob-brand">TIFO<b>MAKER</b></div>
-          <h2 class="ob-h2">Design a stadium tifo</h2>
-          <p class="ob-lead">Paint a choreography across 60,000 seats, watch it light up the stands in 3D, then share it. Let’s start with a look — you can change everything later.</p>
+          <h2 class="ob-h2">Start your tifo</h2>
+          <p class="ob-lead">A blank 60,000-seat bowl is a lot. Name your project and pick a starting point — you can change everything later.</p>
+        </div>
+        <div class="ob-section">
+          <label class="ob-label" for="ob-name">Project name</label>
+          <input type="text" id="ob-name" class="ob-name-input" maxlength="80" placeholder="e.g. Derby Day Wall" value="My first tifo" />
+        </div>
+        <div class="ob-section">
+          <div class="ob-label">Choose a starting point</div>
+          <div class="ob-starters" id="ob-starters">
+            ${STARTERS.map(
+              (s, i) => `
+              <button class="ob-starter ${i === 0 ? 'active' : ''}" data-kind="${s.kind}">
+                <span class="ob-starter-icon">${s.icon}</span>
+                <span class="ob-starter-title">${s.title}</span>
+                <span class="ob-starter-blurb">${s.blurb}</span>
+              </button>`,
+            ).join('')}
+          </div>
+        </div>
+        <div class="ob-section" id="ob-pattern-section" hidden>
+          <div class="ob-label">Which pattern?</div>
+          <div class="ob-patterns" id="ob-patterns">
+            ${STARTER_PATTERNS.map(
+              (p, i) => `<button class="ob-pattern ${i === 0 ? 'active' : ''}" data-pattern="${p.id}">${p.label}</button>`,
+            ).join('')}
+          </div>
         </div>
         <div class="ob-section">
           <div class="ob-label">Pick your colors</div>
@@ -80,17 +120,9 @@ export function openOnboarding(patterns: PatternPreset[]): Promise<QuickStart | 
               .join('')}
           </div>
         </div>
-        <div class="ob-section">
-          <div class="ob-label">Pick a starting look</div>
-          <div class="ob-patterns" id="ob-patterns">
-            ${STARTER_PATTERNS.map(
-              (p, i) => `<button class="ob-pattern ${i === 0 ? 'active' : ''}" data-pattern="${p.id}">${p.label}</button>`,
-            ).join('')}
-          </div>
-        </div>
         <div class="ob-actions">
           <button class="ob-start primary">Start designing</button>
-          <button class="ob-skip">Start from blank</button>
+          <button class="ob-skip">Skip</button>
         </div>
       </div>
     `;
@@ -107,14 +139,25 @@ export function openOnboarding(patterns: PatternPreset[]): Promise<QuickStart | 
     };
     document.addEventListener('keydown', onKey);
 
-    const palettesEl = backdrop.querySelector('#ob-palettes')!;
-    palettesEl.querySelectorAll('.ob-palette').forEach((btn) => {
+    const patternSection = backdrop.querySelector('#ob-pattern-section') as HTMLElement;
+
+    // Starter cards drive the intent; the pattern picker only appears for "patterns".
+    const startersEl = backdrop.querySelector('#ob-starters')!;
+    startersEl.querySelectorAll('.ob-starter').forEach((btn) => {
       btn.addEventListener('click', () => {
-        palettesEl.querySelectorAll('.ob-palette').forEach((b) => b.classList.remove('active'));
+        startersEl.querySelectorAll('.ob-starter').forEach((b) => b.classList.remove('active'));
         btn.classList.add('active');
-        chosenPalette = (btn as HTMLElement).dataset.palette!;
+        chosenKind = (btn as HTMLElement).dataset.kind as StarterKind;
+        if (chosenKind === 'patterns') {
+          patternSection.hidden = false;
+          chosenPattern = chosenPattern ?? STARTER_PATTERNS[0].id;
+        } else {
+          patternSection.hidden = true;
+          chosenPattern = null;
+        }
       });
     });
+
     const patternsEl = backdrop.querySelector('#ob-patterns')!;
     patternsEl.querySelectorAll('.ob-pattern').forEach((btn) => {
       btn.addEventListener('click', () => {
@@ -124,9 +167,20 @@ export function openOnboarding(patterns: PatternPreset[]): Promise<QuickStart | 
       });
     });
 
-    backdrop.querySelector('.ob-start')!.addEventListener('click', () =>
-      finish({ paletteName: chosenPalette, patternId: chosenPattern }),
-    );
+    const palettesEl = backdrop.querySelector('#ob-palettes')!;
+    palettesEl.querySelectorAll('.ob-palette').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        palettesEl.querySelectorAll('.ob-palette').forEach((b) => b.classList.remove('active'));
+        btn.classList.add('active');
+        chosenPalette = (btn as HTMLElement).dataset.palette!;
+      });
+    });
+
+    backdrop.querySelector('.ob-start')!.addEventListener('click', () => {
+      const nameInput = backdrop.querySelector('#ob-name') as HTMLInputElement | null;
+      const projectName = (nameInput?.value.trim() || 'My first tifo').slice(0, 80);
+      finish({ kind: chosenKind, paletteName: chosenPalette, patternId: chosenPattern, projectName });
+    });
     backdrop.querySelector('.ob-skip')!.addEventListener('click', () => finish(null));
 
     void patterns;

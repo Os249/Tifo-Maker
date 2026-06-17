@@ -4,8 +4,8 @@ import { fileURLToPath } from 'node:url';
 import pg from 'pg';
 import { generateSeatMap } from '../../src/core/seatmap';
 import { TEMPLATES } from '../../src/core/template';
-import { MemoryAuthRepository, MemoryDesignRepository, MemoryEventsRepository } from './memoryRepo';
-import { PgAuthRepository, PgDesignRepository, PgEventsRepository } from './pgRepo';
+import { MemoryAuthRepository, MemoryDesignRepository, MemoryEventsRepository, MemoryLeadsRepository } from './memoryRepo';
+import { PgAuthRepository, PgDesignRepository, PgEventsRepository, PgLeadsRepository } from './pgRepo';
 import { PgSocialRepository } from './pgSocial';
 import { MemorySocialRepository } from './memorySocial';
 import { buildApp, type TemplateInfo } from './routes';
@@ -73,6 +73,7 @@ async function main(): Promise<void> {
       events: new PgEventsRepository(pool),
       adminUsernames: adminUsernames,
       social: new PgSocialRepository(pool),
+      leads: new PgLeadsRepository(pool),
     });
   } else {
     if (isProd) {
@@ -91,6 +92,7 @@ async function main(): Promise<void> {
       events: new MemoryEventsRepository(),
       adminUsernames: adminUsernames,
       social: new MemorySocialRepository(designs, auth),
+      leads: new MemoryLeadsRepository(),
     });
   }
 

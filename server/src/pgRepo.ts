@@ -7,6 +7,8 @@ import type {
   DiffBytes,
   GalleryItem,
   GalleryQuery,
+  Lead,
+  LeadsRepository,
   NewDesign,
   RevisionRow,
   UserRow,
@@ -544,5 +546,24 @@ export class PgEventsRepository implements EventsRepository {
     const map = new Map<string, number>(res.rows.map((r) => [String(r.name), Number(r.sessions)]));
     // Preserve the requested order so the caller can show drop-off.
     return steps.map((name) => ({ name, sessions: map.get(name) ?? 0 }));
+  }
+}
+
+/** Postgres B2B leads store. */
+export class PgLeadsRepository implements LeadsRepository {
+  constructor(private readonly pool: pg.Pool) {}
+  async createLead(lead: Lead): Promise<{ id: string }> {
+    const res = await this.pool.query(
+      `INSERT INTO leads (name, email, organization, org_type, message)
+       VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+      [
+        lead.name.slice(0, 200),
+        lead.email.slice(0, 200),
+        lead.organization?.slice(0, 200) ?? null,
+        lead.orgType?.slice(0, 40) ?? null,
+        lead.message?.slice(0, 4000) ?? null,
+      ],
+    );
+    return { id: String(res.rows[0].id) };
   }
 }

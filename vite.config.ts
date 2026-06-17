@@ -12,6 +12,8 @@ export default defineConfig({
         app: resolve(__dirname, 'index.html'),
         spec: resolve(__dirname, 'tifo-spec.html'),
         community: resolve(__dirname, 'community.html'),
+        seat: resolve(__dirname, 'seat.html'),
+        clubs: resolve(__dirname, 'clubs.html'),
       },
     },
   },

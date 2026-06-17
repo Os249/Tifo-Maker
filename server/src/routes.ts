@@ -13,7 +13,7 @@ import { renderDistributionPdf } from '../../src/export/distributionPdf';
 
 import { tmpdir } from 'node:os';
 import { readFile, unlink } from 'node:fs/promises';
-import type { AuthRepository, DesignRepository, EventsRepository, SocialRepository } from './repo';
+import type { AuthRepository, DesignRepository, EventsRepository, LeadsRepository, SocialRepository } from './repo';
 
 /**
  * HTTP surface (blueprint §2.2, completed with auth + gallery):
@@ -69,6 +69,8 @@ export interface AppOptions {
   adminUsernames?: string[];
   /** Optional social layer (follows, comments, remix lineage, notifications). */
   social?: SocialRepository;
+  /** Optional B2B leads store (For Clubs enterprise form). */
+  leads?: LeadsRepository;
 }
 
 export async function buildApp(
@@ -79,9 +81,43 @@ export async function buildApp(
 ): Promise<FastifyInstance> {
   const app = Fastify({ logger: options.logger ?? false, bodyLimit: MAX_BODY_BYTES });
 
-  // Security headers. CSP is relaxed enough for the inline-bootstrapped SPA;
-  // tighten per-deployment if you serve from a fixed origin.
-  await app.register(helmet, { contentSecurityPolicy: false });
+  // Security headers, including a real Content-Security-Policy. The policy is a
+  // strict allow-list derived from exactly what the pages load:
+  //  - script-src 'self'           — all scripts are external ES modules; NO inline
+  //                                  <script>, so an injected <script> simply won't run.
+  //                                  This is the primary defense-in-depth against XSS.
+  //  - style-src 'self' + inline   — the app injects its theme CSS via JS and uses a
+  //                                  couple of inline style= attributes; 'unsafe-inline'
+  //                                  for *styles* is low-risk (style injection ≠ script
+  //                                  execution). Google Fonts + jsDelivr ship CSS too.
+  //  - font-src                    — Google Fonts + the Tabler icons webfont (jsDelivr).
+  //  - img-src 'self' data:        — thumbnails and the generated QR PNGs are data: URIs.
+  //  - connect-src 'self'          — the app only talks to its own origin (no CORS).
+  //  - object-src 'none', frame-ancestors 'none' — no plugins; can't be framed
+  //                                  (clickjacking protection).
+  await app.register(helmet, {
+    contentSecurityPolicy: {
+      useDefaults: true,
+      directives: {
+        defaultSrc: ["'self'"],
+        // 'unsafe-eval' is required by PixiJS 8 (the editor's WebGL renderer compiles
+        // shaders/uniforms via eval). This weakens one defense-in-depth layer, but the
+        // primary XSS defenses remain intact: no inline <script> is allowed, injected
+        // <script src> from other origins is still blocked, and script-src-attr 'none'
+        // (set below by helmet) blocks inline on*= handlers. Combined with the fact that
+        // all user input is HTML-escaped before rendering, the residual risk is low.
+        scriptSrc: ["'self'", "'unsafe-eval'"],
+        styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com', 'https://cdn.jsdelivr.net'],
+        fontSrc: ["'self'", 'https://fonts.gstatic.com', 'https://cdn.jsdelivr.net'],
+        imgSrc: ["'self'", 'data:'],
+        connectSrc: ["'self'"],
+        objectSrc: ["'none'"],
+        frameAncestors: ["'none'"],
+        baseUri: ["'self'"],
+        formAction: ["'self'"],
+      },
+    },
+  });
 
   // Rate limiting protects the auth endpoints (and everything else) from
   // brute-force and spam. Generous global ceiling; auth routes add a tighter
@@ -355,7 +391,17 @@ export async function buildApp(
       b[0] === 0xff && b[1] === 0xd8 ? 'image/jpeg' :
       b[0] === 0x89 && b[1] === 0x50 ? 'image/png' :
       b[0] === 0x52 && b[1] === 0x49 ? 'image/webp' : 'application/octet-stream';
-    return reply.header('content-type', type).header('cache-control', 'public, max-age=86400').send(b);
+    // Defense-in-depth for user-uploaded bytes served from our origin:
+    //  - nosniff: never let the browser MIME-sniff this into HTML/JS (helmet sets it
+    //    globally too, but we pin it here since this route serves untrusted content).
+    //  - Content-Disposition inline with a fixed, non-user filename: no header injection
+    //    and no surprising download names.
+    return reply
+      .header('content-type', type)
+      .header('x-content-type-options', 'nosniff')
+      .header('content-disposition', `inline; filename="photo-${photoId}.img"`)
+      .header('cache-control', 'public, max-age=86400')
+      .send(b);
   });
 
   // Delete a photo (owner of the parent design only).
@@ -822,6 +868,25 @@ export async function buildApp(
     return { ok: true };
   });
 
+  // B2B lead capture from the For Clubs page. Public + lightly validated.
+  app.post('/api/leads', async (req, reply) => {
+    if (!options.leads) return reply.code(503).send({ error: 'lead capture not enabled' });
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const name = typeof body.name === 'string' ? body.name.trim() : '';
+    const email = typeof body.email === 'string' ? body.email.trim() : '';
+    if (!name || !email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+      return reply.code(400).send({ error: 'a name and a valid email are required' });
+    }
+    const lead = await options.leads.createLead({
+      name,
+      email,
+      organization: typeof body.organization === 'string' ? body.organization.trim() : null,
+      orgType: typeof body.orgType === 'string' ? body.orgType.trim() : null,
+      message: typeof body.message === 'string' ? body.message.trim() : null,
+    });
+    return reply.code(201).send({ ok: true, id: lead.id });
+  });
+
 
   // Serve the built frontend from the same origin as the API, so the client's
   // relative `/api/...` calls just work in production (no proxy, no CORS). A
@@ -896,6 +961,22 @@ export async function buildApp(
       app.get('/community', async (_req, reply) => reply.type('text/html').send(communityHtml));
     } catch {
       /* community page optional in API-only builds */
+    }
+
+    // Match-day QR landing: fans scan one stadium-wide code → /s/:id → find seat.
+    try {
+      const seatHtml = readFileSync(join(staticDir, 'seat.html'), 'utf8');
+      app.get('/s/:id', async (_req, reply) => reply.type('text/html').send(seatHtml));
+    } catch {
+      /* seat page optional in API-only builds */
+    }
+
+    // B2B "For Clubs" enterprise page with lead capture.
+    try {
+      const clubsHtml = readFileSync(join(staticDir, 'clubs.html'), 'utf8');
+      app.get('/clubs', async (_req, reply) => reply.type('text/html').send(clubsHtml));
+    } catch {
+      /* clubs page optional in API-only builds */
     }
 
     // index:false so the static plugin doesn't auto-serve index.html at '/'
