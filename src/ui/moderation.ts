@@ -80,7 +80,14 @@ export async function openModeration(): Promise<void> {
         if (!body.querySelector('.mod-row')) renderReports([]);
       });
       row.querySelector('[data-act="takedown"]')?.addEventListener('click', async () => {
-        if (!window.confirm(`Take down "${r.targetTitle}"? It will be hidden from the public gallery.`)) return;
+        const { confirmModal } = await import('./modal');
+        const ok = await confirmModal({
+          title: 'Take down this design?',
+          message: `“${r.targetTitle}” will be hidden from the public gallery.`,
+          confirmLabel: 'Take it down',
+          danger: true,
+        });
+        if (!ok) return;
         await takedownDesign(r.targetId).catch(() => {});
         row.remove();
         if (!body.querySelector('.mod-row')) renderReports([]);
@@ -116,7 +123,14 @@ export async function openModeration(): Promise<void> {
         if (!body.querySelector('.mod-row')) renderPhotos([]);
       });
       row.querySelector('[data-act="remove"]')?.addEventListener('click', async () => {
-        if (!window.confirm('Remove this photo permanently?')) return;
+        const { confirmModal } = await import('./modal');
+        const ok = await confirmModal({
+          title: 'Remove this photo?',
+          message: 'This permanently deletes the photo. This can’t be undone.',
+          confirmLabel: 'Remove photo',
+          danger: true,
+        });
+        if (!ok) return;
         await adminDeletePhoto(p.id).catch(() => {});
         row.remove();
         if (!body.querySelector('.mod-row')) renderPhotos([]);

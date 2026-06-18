@@ -160,7 +160,15 @@ export async function openGallery(
 
       const reportBtn = card.querySelector('.feed-report') as HTMLButtonElement;
       reportBtn.addEventListener('click', async () => {
-        const reason = window.prompt('Report this tifo — what’s the problem? (e.g. hateful content, spam)');
+        const { promptModal } = await import('./modal');
+        const reason = await promptModal({
+          title: 'Report this tifo',
+          message: 'What’s the problem? This goes to the moderators.',
+          placeholder: 'e.g. hateful content, spam, stolen design',
+          confirmLabel: 'Submit report',
+          multiline: true,
+          maxLength: 300,
+        });
         if (!reason || !reason.trim()) return;
         try {
           await reportDesign(item.id, reason.trim());

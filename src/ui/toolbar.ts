@@ -246,13 +246,23 @@ export function mountToolbar(
     }, 0);
   };
 
-  // Applying a palette (preset or uploaded) offers the add-or-remap choice.
-  const applyPalette = (incoming: string[], label: string): void => {
+  // Applying a palette (preset or uploaded) offers the add-or-remap choice via a
+  // themed dialog (replaces the old native confirm). It's genuinely three-way, so
+  // a labelled choice modal reads far clearer than an OK/Cancel boolean.
+  const applyPalette = async (incoming: string[], label: string): Promise<void> => {
     if (incoming.length === 0) return;
-    const choice = window.confirm(
-      `Apply "${label}".\n\nOK = Remap your design onto these colours (recolours seats to the nearest match).\nCancel = Just add these colours to your swatches (design unchanged).`,
-    );
-    if (choice) {
+    const { choiceModal } = await import('./modal');
+    const choice = await choiceModal({
+      title: `Apply “${label}”`,
+      message: 'How should these colours be applied to your design?',
+      choices: [
+        { value: 'remap', label: 'Remap my design', hint: 'Recolour every seat to the nearest new colour.', variant: 'primary' },
+        { value: 'add', label: 'Just add the colours', hint: 'Add them to your swatches; the design stays as-is.' },
+      ],
+      cancelLabel: 'Cancel',
+    });
+    if (choice === null) return; // dismissed — do nothing
+    if (choice === 'remap') {
       // Remap keeps index 0 (empty) as-is; remap the rest onto incoming.
       const withEmpty = incoming[0]?.toLowerCase() === store.palette[0]?.toLowerCase() ? incoming : [store.palette[0], ...incoming];
       store.remapToPalette(withEmpty);
@@ -283,7 +293,7 @@ export function mountToolbar(
     if (!presetSel.value) return;
     // Preset palettes include index 0 (empty); pass the colour slots (skip 0).
     const full = PALETTE_PRESETS[presetSel.value];
-    applyPalette(full.slice(1), presetSel.value);
+    void applyPalette(full.slice(1), presetSel.value);
     presetSel.value = '';
   });
 
@@ -309,7 +319,7 @@ export function mountToolbar(
     if (!myPalettesSel.value) return;
     const { listSavedPalettes } = await import('./paletteIo');
     const p = listSavedPalettes().find((x) => x.id === myPalettesSel.value);
-    if (p) applyPalette(p.colors, p.name);
+    if (p) void applyPalette(p.colors, p.name);
     myPalettesSel.value = '';
   });
 
@@ -338,13 +348,13 @@ export function mountToolbar(
         ctx.drawImage(bmp, 0, 0, W, H);
         bmp.close?.();
         const colors = extractPalette(ctx.getImageData(0, 0, W, H).data, W, H, 8);
-        if (colors.length) applyPalette(colors, file.name);
+        if (colors.length) void applyPalette(colors, file.name);
         else message.textContent = 'couldn’t pull colours from that image';
       } else {
         const text = await file.text();
         const { parsePaletteText } = await import('./paletteIo');
         const colors = parsePaletteText(text, file.name.toLowerCase());
-        if (colors.length) applyPalette(colors, file.name);
+        if (colors.length) void applyPalette(colors, file.name);
         else message.textContent = 'no colours found in that file (.gpl/.hex/.json supported)';
       }
     } catch (err) {
@@ -359,7 +369,14 @@ export function mountToolbar(
       message.textContent = 'add some colours first';
       return;
     }
-    const name = window.prompt('Name this palette:', 'My palette') ?? '';
+    const { promptModal } = await import('./modal');
+    const name = (await promptModal({
+      title: 'Name this palette',
+      placeholder: 'e.g. Derby black & gold',
+      defaultValue: 'My palette',
+      confirmLabel: 'Save palette',
+      maxLength: 60,
+    })) ?? '';
     if (name === '') return;
     const { saveUserPalette, serializePaletteHex } = await import('./paletteIo');
     saveUserPalette(name, colors);
@@ -703,7 +720,14 @@ export function mountToolbar(
     const file = photoInput.files?.[0];
     photoInput.value = '';
     if (!file || !designId) return;
-    const caption = window.prompt('Caption (e.g. "Liverpool vs Madrid, May 2026") — optional:') ?? '';
+    const { promptModal } = await import('./modal');
+    const caption = (await promptModal({
+      title: 'Add a caption',
+      message: 'Optional — describe the match or moment.',
+      placeholder: 'e.g. Liverpool vs Madrid, May 2026',
+      confirmLabel: 'Continue',
+      maxLength: 140,
+    })) ?? '';
     addPhotoBtn && (addPhotoBtn.disabled = true);
     const original = addPhotoBtn?.innerHTML ?? '';
     if (addPhotoBtn) addPhotoBtn.textContent = 'Uploading…';
