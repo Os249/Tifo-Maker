@@ -136,14 +136,24 @@ a { color: inherit; text-decoration: none; }
 /* Real WebGL stadium host: overlays the visual area, fades in when ready. */
 .hero-3d {
   width: 100%;
-  max-width: 520px;
-  aspect-ratio: 5 / 4;
+  max-width: 560px;
+  aspect-ratio: 4 / 3;
   position: relative;
   opacity: 0;
   transition: opacity 0.6s ease;
 }
 .hero-3d.ready { opacity: 1; }
 .hero-3d canvas { width: 100% !important; height: 100% !important; display: block; border-radius: 18px; }
+/* Interactive-preview header — only revealed once the real 3D is up. */
+.hero-3d-wrap { width: 100%; max-width: 560px; display: flex; flex-direction: column; align-items: center; }
+.hero-3d-header { opacity: 0; transition: opacity 0.5s ease 0.2s; text-align: center; margin-bottom: 10px; }
+.hero-3d-wrap.ready .hero-3d-header { opacity: 1; }
+.hero-3d-badge {
+  display: inline-block; font-weight: 800; font-size: 13px; letter-spacing: 0.04em;
+  color: #fff; background: linear-gradient(135deg, var(--purple), var(--blue) 60%, var(--emerald));
+  padding: 6px 16px; border-radius: 999px; box-shadow: 0 6px 18px rgba(28,111,224,0.28);
+}
+.hero-3d-hint { display: block; font-size: 12.5px; color: var(--muted); margin-top: 8px; font-weight: 500; }
 .bowl {
   position: relative;
   aspect-ratio: 5 / 4;

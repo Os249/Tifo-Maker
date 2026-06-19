@@ -1,4 +1,5 @@
 import './seat.css';
+import { initLang, t } from './ui/i18n';
 import { generateSeatMapAsync } from './workers/client';
 import { TEMPLATES } from './core/template';
 import { DesignStore } from './core/design';
@@ -14,6 +15,8 @@ import {
 import type { SeatMap } from './core/types';
 
 const app = document.getElementById('seat-app')!;
+// Apply the saved language (also sets dir=rtl on <html> for Arabic) before render.
+initLang();
 
 /** Parse /s/:id (the QR target). */
 function designIdFromPath(): string | null {
@@ -52,7 +55,7 @@ function colorName(hex: string): string {
 async function main(): Promise<void> {
   const id = designIdFromPath();
   if (!id) {
-    app.innerHTML = errorScreen('No display code found', 'This link looks incomplete. Ask your organiser for the correct QR or link.');
+    app.innerHTML = errorScreen(t('seat.errNoCodeTitle'), t('seat.errNoCodeBody'));
     return;
   }
 
@@ -67,7 +70,7 @@ async function main(): Promise<void> {
     const loaded = await loadDesign(store, id);
     title = loaded?.title || 'the display';
   } catch {
-    app.innerHTML = errorScreen('Couldn’t load the display', 'It may be private or removed. Ask your organiser to publish it, then scan again.');
+    app.innerHTML = errorScreen(t('seat.errLoadTitle'), t('seat.errLoadBody'));
     return;
   }
 
@@ -81,27 +84,27 @@ async function main(): Promise<void> {
       <div class="seat-head">
         <div class="seat-brand">TIFO<b>MAKER</b></div>
         <div class="seat-title">${escapeHtml(title)}</div>
-        <p class="seat-intro">Find your seat to see which card to hold up.</p>
+        <p class="seat-intro">${t('seat.intro')}</p>
       </div>
       <div class="seat-form">
         <label class="seat-field">
-          <span>Section</span>
+          <span>${t('seat.section')}</span>
           <select id="sel-section">
-            <option value="">Choose your section…</option>
+            <option value="">${t('seat.sectionPick')}</option>
             ${sections.map((s) => `<option value="${s}">${sectionLabel(s, sections.length)}</option>`).join('')}
           </select>
         </label>
         <label class="seat-field" id="row-field" hidden>
-          <span>Row</span>
-          <select id="sel-row"><option value="">Choose your row…</option></select>
+          <span>${t('seat.row')}</span>
+          <select id="sel-row"><option value="">${t('seat.rowPick')}</option></select>
         </label>
         <label class="seat-field" id="seat-field" hidden>
-          <span>Seat number</span>
-          <select id="sel-seat"><option value="">Choose your seat…</option></select>
+          <span>${t('seat.seat')}</span>
+          <select id="sel-seat"><option value="">${t('seat.seatPick')}</option></select>
         </label>
-        <button class="seat-go" id="seat-go" disabled>Show my card</button>
+        <button class="seat-go" id="seat-go" disabled>${t('seat.showCard')}</button>
       </div>
-      <div class="seat-foot">Made with TifoMaker · <a href="/">tifomaker.org</a></div>`;
+      <div class="seat-foot">${t('seat.madeWith')} · <a href="/">tifomaker.org</a></div>`;
 
     const selSection = document.getElementById('sel-section') as HTMLSelectElement;
     const rowField = document.getElementById('row-field')!;
@@ -127,7 +130,7 @@ async function main(): Promise<void> {
       }
       const rows = listRows(map, choice.section);
       selRow.innerHTML =
-        `<option value="">Choose your row…</option>` +
+        `<option value="">${t('seat.rowPick')}</option>` +
         rows.map((r, i) => `<option value="${i}">${r.label}</option>`).join('');
       rowField.hidden = false;
       refreshGo();
@@ -146,8 +149,8 @@ async function main(): Promise<void> {
       choice.row = r.row;
       const n = seatCountInRow(map, choice.section, r.tier, r.row);
       selSeat.innerHTML =
-        `<option value="">Choose your seat…</option>` +
-        Array.from({ length: n }, (_, i) => `<option value="${i + 1}">Seat ${i + 1}</option>`).join('');
+        `<option value="">${t('seat.seatPick')}</option>` +
+        Array.from({ length: n }, (_, i) => `<option value="${i + 1}">${t('seat.seatN')} ${i + 1}</option>`).join('');
       seatField.hidden = false;
       choice.seatInRow = undefined;
       refreshGo();
@@ -169,25 +172,25 @@ async function main(): Promise<void> {
 
   function renderCard(hex: string, isEmpty: boolean): void {
     const ink = contrastInk(hex);
-    const where = `${sectionLabel(choice.section!, sections.length)} · Row ${(document.getElementById('sel-row') as HTMLSelectElement | null)?.selectedOptions[0]?.textContent ?? ''} · Seat ${choice.seatInRow}`;
+    const where = `${sectionLabel(choice.section!, sections.length)} · ${t('seat.rowLabel')} ${(document.getElementById('sel-row') as HTMLSelectElement | null)?.selectedOptions[0]?.textContent ?? ''} · ${t('seat.seatN')} ${choice.seatInRow}`;
     app.innerHTML = `
       <div class="card-screen" style="background:${hex};color:${ink}">
-        <button class="card-back" id="card-back" style="color:${ink};border-color:${ink}">‹ Change seat</button>
+        <button class="card-back" id="card-back" style="color:${ink};border-color:${ink}">${t('seat.changeSeat')}</button>
         <div class="card-where">${escapeHtml(where)}</div>
         <div class="card-main">
           ${
             isEmpty
               ? `<div class="card-empty-mark">✕</div>
-                 <div class="card-instruction">No card here</div>
-                 <div class="card-sub">Your seat isn’t part of this display — just enjoy the show!</div>`
-              : `<div class="card-hold">HOLD UP</div>
+                 <div class="card-instruction">${t('seat.noCardTitle')}</div>
+                 <div class="card-sub">${t('seat.noCardSub')}</div>`
+              : `<div class="card-hold">${t('seat.holdUp')}</div>
                  <div class="card-colorname">${colorName(hex)}</div>
-                 <div class="card-sub">Raise your card when your section is called.</div>`
+                 <div class="card-sub">${t('seat.raiseWhen')}</div>`
           }
         </div>
         <div class="card-foot" style="color:${ink}">
           <span class="card-foot-title">${escapeHtml(title)}</span>
-          <span class="card-foot-badge">Made with TifoMaker</span>
+          <span class="card-foot-badge">${t('seat.madeWith')}</span>
         </div>
       </div>`;
     document.getElementById('card-back')!.addEventListener('click', () => renderPicker());
@@ -213,7 +216,7 @@ function errorScreen(title: string, body: string): string {
       <div class="seat-brand">TIFO<b>MAKER</b></div>
       <div class="seat-error-title">${escapeHtml(title)}</div>
       <p class="seat-intro">${escapeHtml(body)}</p>
-      <a class="seat-go" style="display:inline-block;text-decoration:none;text-align:center;" href="/">Go to TifoMaker</a>
+      <a class="seat-go" style="display:inline-block;text-decoration:none;text-align:center;" href="/">${t('seat.goHome')}</a>
     </div>`;
 }
 

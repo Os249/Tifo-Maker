@@ -67,6 +67,7 @@ export async function mountHeroStadium(): Promise<void> {
       const mock = document.querySelector(MOCK_SELECTOR);
       if (mock) (mock as HTMLElement).style.display = 'none';
       host.classList.add('ready');
+      document.getElementById('hero-3d-wrap')?.classList.add('ready');
       preview.start();
       // Pause the spin when the hero scrolls out of view (saves battery/GPU).
       const io = new IntersectionObserver(

@@ -47,7 +47,13 @@
     <div class="hero-visual">
       <!-- Real WebGL stadium mounts here after first paint (heroStadium.ts).
            The CSS mock below is the instant-render fallback / no-WebGL state. -->
-      <div class="hero-3d" id="hero-3d"></div>
+      <div class="hero-3d-wrap" id="hero-3d-wrap">
+        <div class="hero-3d-header">
+          <span class="hero-3d-badge" data-i18n="hero.previewBadge">✦ Preview Tifos</span>
+          <span class="hero-3d-hint" data-i18n="hero.previewHint">Drag to rotate · this is a live, interactive 3D preview</span>
+        </div>
+        <div class="hero-3d" id="hero-3d"></div>
+      </div>
       <div class="stadium-mock" aria-hidden="true">
         <!-- Oval stadium bowl in TV-gantry perspective: concentric seating
              rings (the stands) enclosing the pitch ellipse, tilted in 3D. -->
@@ -132,7 +138,7 @@
       <div class="clubs-copy">
         <div class="eyebrow light" data-i18n="clubs.eyebrow">For clubs &amp; organizers</div>
         <h2 data-i18n="clubs.title">Coordinate professional-grade displays.</h2>
-        <p>
+        <p data-i18n="clubs.bodyLong">
           Production-ready exports, volunteer logistics, and reusable templates for every match.
           Turn a design into a flawless 60,000-person execution — material counts, bag estimates,
           color specs, and per-section instruction sheets, all generated automatically.
@@ -150,7 +156,7 @@
   <!-- ============ AUDIENCE: SUPPORTERS ============ -->
   <section class="supporters">
     <h2 class="section-title" data-i18n="clubs.tagline">Built by fans, for the curva.</h2>
-    <p class="supporters-lead">
+    <p class="supporters-lead" data-i18n="supporters.lead">
       Bring your group's vision to life. Free to design, easy to share, built for the terrace.
       Publish to the community, remix others' tifos, and rally your section around one image.
     </p>

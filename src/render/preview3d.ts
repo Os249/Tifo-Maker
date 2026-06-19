@@ -72,16 +72,17 @@ export class Preview3D {
     // hijacked by zoom (disable zoom/pan so the hero never traps the scroll).
     if (options.autoRotate) {
       this.controls.autoRotate = true;
-      this.controls.autoRotateSpeed = 0.6;
+      this.controls.autoRotateSpeed = 0.45;
       this.controls.enableZoom = false;
       this.controls.enablePan = false;
     }
     this.applyPreset(CAMERA_PRESETS[0]);
-    // Hero showcase wants an elevated 3/4 view that frames the whole bowl while
-    // it spins (the editor presets are tuned for inspecting detail, not display).
+    // Hero showcase: a high, pulled-back 3/4 view that always frames the WHOLE
+    // bowl as it slowly spins (not the editor's tight inspection angle). Pulled
+    // far enough back that no rotation angle crops the near stand.
     if (options.autoRotate) {
-      this.camera.position.set(0, 95, 130);
-      this.controls.target.set(0, 6, 0);
+      this.camera.position.set(115, 130, 175);
+      this.controls.target.set(0, -4, 0);
       this.controls.update();
     }
 
