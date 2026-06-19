@@ -1,8 +1,15 @@
 import { initLang, applyDom, toggleLang, t } from './ui/i18n';
+import { mountHeroStadium } from './heroStadium';
+import { mountShowcase } from './showcase';
 
 // Apply saved language on load, then translate the static page.
 initLang();
 applyDom(document);
+
+// Mount the real rotating 3D stadium in the hero (lazy, after first paint).
+void mountHeroStadium();
+// Populate the community showcase with real designs (social proof).
+void mountShowcase();
 
 // Keep the document <title> and toggle button label in sync.
 const toggle = document.getElementById('lang-toggle');

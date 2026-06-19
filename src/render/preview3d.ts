@@ -49,18 +49,41 @@ export class Preview3D {
     private readonly host: HTMLElement,
     private readonly map: SeatMap,
     private readonly store: DesignStore,
+    options: { autoRotate?: boolean; transparent?: boolean } = {},
   ) {
-    this.renderer = new THREE.WebGLRenderer({ antialias: true });
+    this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: options.transparent ?? false });
     this.renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
     this.canvas = this.renderer.domElement;
     host.appendChild(this.canvas);
 
-    this.scene.background = new THREE.Color(0x0a0c11);
+    // Transparent hero variant shows the page background through the canvas;
+    // the editor preview keeps its dark scene backdrop.
+    if (options.transparent) {
+      this.scene.background = null;
+      this.renderer.setClearColor(0x000000, 0);
+    } else {
+      this.scene.background = new THREE.Color(0x0a0c11);
+    }
     this.camera = new THREE.PerspectiveCamera(50, 1, 0.5, 1200);
     this.controls = new OrbitControls(this.camera, this.canvas);
     this.controls.enableDamping = true;
     this.controls.maxPolarAngle = Math.PI / 2 - 0.02;
+    // Hero showcase: slow auto-spin, and don't let the page-scroll gesture get
+    // hijacked by zoom (disable zoom/pan so the hero never traps the scroll).
+    if (options.autoRotate) {
+      this.controls.autoRotate = true;
+      this.controls.autoRotateSpeed = 0.6;
+      this.controls.enableZoom = false;
+      this.controls.enablePan = false;
+    }
     this.applyPreset(CAMERA_PRESETS[0]);
+    // Hero showcase wants an elevated 3/4 view that frames the whole bowl while
+    // it spins (the editor presets are tuned for inspecting detail, not display).
+    if (options.autoRotate) {
+      this.camera.position.set(0, 95, 130);
+      this.controls.target.set(0, 6, 0);
+      this.controls.update();
+    }
 
     // Deterministic-enough no-show mask; regenerated per session is fine —
     // it is a visualization aid, not design data.

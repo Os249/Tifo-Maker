@@ -45,6 +45,9 @@
       <div class="trust-line" data-i18n="hero.noDownload">No download. No account needed to start.</div>
     </div>
     <div class="hero-visual">
+      <!-- Real WebGL stadium mounts here after first paint (heroStadium.ts).
+           The CSS mock below is the instant-render fallback / no-WebGL state. -->
+      <div class="hero-3d" id="hero-3d"></div>
       <div class="stadium-mock" aria-hidden="true">
         <!-- Oval stadium bowl in TV-gantry perspective: concentric seating
              rings (the stands) enclosing the pitch ellipse, tilted in 3D. -->
@@ -80,6 +83,18 @@
       <div class="trio-icon">▣</div>
       <h3 data-i18n="value.logistics.title">Turn it into match-day logistics</h3>
       <p data-i18n="value.logistics.body">Export seat-by-seat sheets, volunteer guides, and exact card and bag counts. Every supporter knows their part.</p>
+    </div>
+  </section>
+
+  <!-- ============ COMMUNITY SHOWCASE (live, real designs) ============ -->
+  <section class="showcase" id="showcase">
+    <div class="showcase-head">
+      <h2 class="section-title" data-i18n="showcase.title">Made with TifoMaker</h2>
+      <p class="section-sub" data-i18n="showcase.sub">Real displays designed by supporters around the world. Tap any to explore it in 3D.</p>
+    </div>
+    <div class="showcase-grid" id="showcase-grid" aria-busy="true"></div>
+    <div class="showcase-cta">
+      <a class="btn btn-ghost" href="/community" data-i18n="showcase.browseAll">Browse the community →</a>
     </div>
   </section>
 

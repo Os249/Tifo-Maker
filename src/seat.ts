@@ -185,7 +185,10 @@ async function main(): Promise<void> {
                  <div class="card-sub">Raise your card when your section is called.</div>`
           }
         </div>
-        <div class="card-foot" style="color:${ink}">${escapeHtml(title)}</div>
+        <div class="card-foot" style="color:${ink}">
+          <span class="card-foot-title">${escapeHtml(title)}</span>
+          <span class="card-foot-badge">Made with TifoMaker</span>
+        </div>
       </div>`;
     document.getElementById('card-back')!.addEventListener('click', () => renderPicker());
     // Keep the screen awake while showing the card, if supported.

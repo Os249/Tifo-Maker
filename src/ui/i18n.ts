@@ -99,6 +99,9 @@ const STRINGS: Record<string, { en: string; ar: string }> = {
 
   // ---- how it works ----
   'how.title': { en: 'Three steps from idea to 60,000-card display', ar: 'ثلاث خطوات من الفكرة لاستعراض بـ٦٠٬٠٠٠ كرت' },
+  'showcase.title': { en: 'Made with TifoMaker', ar: 'صُنع بتيفو ميكر' },
+  'showcase.sub': { en: 'Real displays designed by supporters around the world. Tap any to explore it in 3D.', ar: 'استعراضات حقيقية صمّمها مشجعين من كل العالم. اضغط أي وحدة تشوفها ثلاثي الأبعاد.' },
+  'showcase.browseAll': { en: 'Browse the community →', ar: 'تصفّح المجتمع ←' },
   'how.step1.title': { en: 'Build or select your stadium', ar: 'ابنِ ملعبك أو اختره' },
   'how.step1.body': {
     en: 'Pick your stadium — or match your real one. 40k, 60k, 76k, and custom geometries.',
