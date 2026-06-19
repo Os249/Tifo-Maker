@@ -156,6 +156,49 @@ header {
 .minimap canvas { width:100%; display:block; border-radius:3px; cursor:pointer; }
 .minimap .viewport { position:absolute; border:1.5px solid var(--violet); border-radius:2px; pointer-events:none; }
 
+/* ---- non-removable on-canvas watermark (sits just above the minimap) ---- */
+#canvas-watermark {
+  position:absolute; right:14px; bottom:62px; z-index:6;
+  padding:3px 8px; pointer-events:none; user-select:none;
+  font-size:11px; font-weight:600; letter-spacing:.02em;
+  color:var(--text-2); background:var(--ink-1);
+  border:1px solid var(--line-1); border-radius:var(--r-sm);
+  opacity:.72;
+}
+
+/* ---- left-rail Save button + right-panel Animation button ---- */
+.rail-spacer { margin-top:auto; }
+.tool.rail-menu.menu-active { background:var(--grad-accent); color:#fff; box-shadow:var(--glow-soft); }
+.panel-head > span:first-child { margin-right:auto; }
+.panel-head-btn {
+  width:28px; height:28px; border-radius:var(--r-sm); border:1px solid transparent;
+  background:transparent; color:var(--text-2); cursor:pointer; font-size:15px;
+  display:flex; align-items:center; justify-content:center; transition:background .14s, color .14s;
+}
+.panel-head-btn:hover { background:var(--ink-3); color:var(--text-1); }
+.panel-head-btn.menu-active { background:var(--grad-accent); color:#fff; box-shadow:var(--glow-soft); }
+[dir="rtl"] .panel-head > span:first-child { margin-right:0; margin-left:auto; }
+
+/* ---- stadium export preview modal ---- */
+.sx-backdrop {
+  position:fixed; inset:0; z-index:60; display:flex; align-items:center; justify-content:center;
+  background:rgba(4,6,12,.62); backdrop-filter:blur(2px);
+}
+.sx-modal {
+  background:var(--ink-0); border:1px solid var(--line-1); border-radius:var(--r-lg);
+  padding:18px; width:min(640px, 92vw); box-shadow:0 24px 60px rgba(0,0,0,.5); position:relative;
+}
+.sx-modal h3 { margin:0 0 4px; font-size:15px; color:var(--text-1); }
+.sx-modal .sx-lead { margin:0 0 12px; font-size:12px; color:var(--text-3); }
+.sx-canvas {
+  width:100%; display:block; border-radius:var(--r-md); background:#070b14;
+  border:1px solid var(--line-1); aspect-ratio:16/10;
+}
+.sx-modal .sx-actions { display:flex; gap:8px; margin-top:14px; }
+.sx-modal .sx-actions button { flex:1; }
+.sx-close { position:absolute; top:10px; right:12px; background:transparent; border:none; color:var(--text-2); font-size:20px; cursor:pointer; }
+.sx-modal .sx-msg { font-size:11px; color:var(--text-3); margin:10px 0 0; min-height:14px; }
+
 /* ---- right properties panel: a scrollable rail of breathing cards ---- */
 .panel {
   width:312px; flex:0 0 312px; background:var(--ink-0); border-left:1px solid var(--line-1);

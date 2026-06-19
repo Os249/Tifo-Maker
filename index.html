@@ -48,6 +48,8 @@
         <button class="tool" data-tool="pan" title="Pan (Space)" aria-label="Pan"><i class="ti ti-arrows-move"></i></button>
         <span class="sep"></span>
         <button class="tool" data-tool="select" title="Select &amp; move objects (V)" aria-label="Select"><i class="ti ti-pointer"></i></button>
+        <span class="rail-spacer"></span>
+        <button class="tool rail-menu" id="rail-save" title="Save &amp; export" aria-label="Save and export"><i class="ti ti-device-floppy"></i></button>
       </nav>
 
       <div class="stage">
@@ -113,12 +115,15 @@
             <canvas id="minimap-canvas" width="138" height="30"></canvas>
             <div class="viewport" id="minimap-viewport"></div>
           </div>
+
+          <div id="canvas-watermark" aria-hidden="true">tifomaker.org</div>
         </div>
       </div>
 
       <aside class="panel" id="panel" aria-label="Properties">
         <div class="panel-head">
           <span data-i18n="ed.props">Properties</span>
+          <button id="anim-open" class="panel-head-btn" title="Animation preferences" aria-label="Animation preferences"><i class="ti ti-movie"></i></button>
           <button id="panel-toggle" aria-label="Collapse panel" style="padding:2px 6px;border:none;"><i class="ti ti-layout-sidebar-right-collapse"></i></button>
         </div>
         <p class="panel-orient">Paint on the <b>canvas</b> at left. These panels set <b>how</b> you paint and the look. Switch <b>Design / Stadium / Split</b> above to see it on the seats or in 3D.</p>
@@ -165,7 +170,7 @@
         <div class="panel-section" id="ctx-brush" data-panel="brush eraser fill">
           <h4><span data-i18n="ed.brush">Brush</span> <span class="h4-tag">active tool</span></h4>
           <div class="group">
-            <input type="range" id="brush-size" min="3" max="40" step="1" value="10" style="flex:1;" />
+            <input type="range" id="brush-size" min="1" max="40" step="1" value="10" style="flex:1;" />
             <span id="brush-size-out" style="font-variant-numeric:tabular-nums;min-width:18px;">10</span>
           </div>
           <div class="chips" style="margin-top:10px;">
@@ -223,7 +228,7 @@
           </div>
         </div>
 
-        <div class="panel-section" id="ctx-reveal" data-panel="pan select">
+        <div class="panel-section" id="ctx-reveal" data-panel="pan select" data-menu="animation">
           <h4>Animate reveal</h4>
           <div class="group">
             <select id="reveal-preset" style="flex:1;min-width:0;"></select>
@@ -240,7 +245,33 @@
             <input type="range" id="reveal-dur" min="2" max="10" step="1" value="4" style="flex:1;" />
             <span id="reveal-dur-out" style="font-variant-numeric:tabular-nums;">4s</span>
           </div>
-          <button id="reveal-gif" style="width:100%;margin-top:10px;"><i class="ti ti-gif"></i> Export GIF</button>
+          <button id="reveal-gif" style="width:100%;margin-top:10px;"><i class="ti ti-gif"></i> Export GIF (flat)</button>
+        </div>
+
+        <div class="panel-section" id="ctx-stadium-export" data-panel="__menu_only__" data-menu="save animation">
+          <h4>Stadium animation <span class="h4-tag">video / GIF (3D)</span></h4>
+          <p class="hint" style="font-size:11px;color:var(--text-3);margin:0 0 10px;">Renders the 3D bowl lighting up with your chosen reveal. Style &amp; length come from the Animation panel.</p>
+          <div class="group">
+            <label for="sx-format" style="white-space:nowrap;">Format</label>
+            <select id="sx-format" style="flex:1;min-width:0;">
+              <option value="video">Video (WebM)</option>
+              <option value="gif">GIF</option>
+            </select>
+          </div>
+          <div class="group" id="sx-gif-size-row" style="margin-top:10px;" hidden>
+            <label for="sx-gif-width" style="white-space:nowrap;">GIF width</label>
+            <select id="sx-gif-width" style="flex:1;min-width:0;">
+              <option value="360">360 px (small)</option>
+              <option value="480" selected>480 px</option>
+              <option value="640">640 px (large)</option>
+            </select>
+          </div>
+          <label class="chips" style="margin-top:10px;display:block;"><input type="checkbox" id="sx-noshow" /> Export with 10% no-shows</label>
+          <div class="group" style="margin-top:10px;">
+            <button id="sx-preview" style="flex:1;"><i class="ti ti-eye"></i> Preview</button>
+            <button id="sx-export" class="primary" style="flex:1;"><i class="ti ti-download"></i> Export</button>
+          </div>
+          <p id="sx-status" class="hint" style="font-size:11px;color:var(--text-3);margin:8px 0 0;min-height:14px;"></p>
         </div>
 
         <div class="panel-section" id="ctx-history" data-panel="*">
@@ -251,7 +282,7 @@
           </div>
         </div>
 
-        <div class="panel-section" id="ctx-save" data-panel="*">
+        <div class="panel-section" id="ctx-save" data-panel="*" data-menu="save">
           <h4><span data-i18n="ed.save">Save</span> &amp; share</h4>
           <div class="group">
             <button id="save" class="primary" style="flex:1;">Save</button>
@@ -266,7 +297,7 @@
           </div>
         </div>
 
-        <div class="panel-section" id="ctx-production" data-panel="*">
+        <div class="panel-section" id="ctx-production" data-panel="*" data-menu="save">
           <h4>Production export <span class="h4-tag">match-day logistics</span></h4>
           <div class="group" style="margin-bottom:8px;">
             <label for="bag-size" style="white-space:nowrap;">Cards / bag</label>

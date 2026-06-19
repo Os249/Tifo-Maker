@@ -51,7 +51,11 @@ export class Preview3D {
     private readonly store: DesignStore,
     options: { autoRotate?: boolean; transparent?: boolean } = {},
   ) {
-    this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: options.transparent ?? false });
+    this.renderer = new THREE.WebGLRenderer({
+      antialias: true,
+      alpha: options.transparent ?? false,
+      preserveDrawingBuffer: true, // keep the buffer readable for video/GIF frame capture
+    });
     this.renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
     this.canvas = this.renderer.domElement;
     host.appendChild(this.canvas);
@@ -257,6 +261,12 @@ export class Preview3D {
 
   stop(): void {
     this.running = false;
+  }
+
+  /** Render a single frame on demand (used by the video/GIF exporter, which
+   * pauses the internal loop and steps the reveal clock deterministically). */
+  renderOnce(): void {
+    this.renderer.render(this.scene, this.camera);
   }
 
   /** Fully tear down: stop the loop, disconnect observers, free GPU resources,

@@ -15,6 +15,14 @@ import { extractPalette, rasterize } from '../core/importImage';
 import { openAuthModal } from './authModal';
 import { openGallery } from './gallery';
 import { EDITOR_UNITS } from '../core/seatmap';
+import type { Preview3D } from '../render/preview3d';
+import {
+  exportStadiumVideo,
+  exportStadiumGif,
+  previewStadium,
+  videoExportSupported,
+  type StadiumExportOpts,
+} from '../export/stadiumExport';
 
 /**
  * Thin DOM layer over the editor engine. Holds UI state only — the design
@@ -28,7 +36,7 @@ export function mountToolbar(
   store: DesignStore,
   map: SeatMap,
   objects: ObjectLayer,
-  getPreview?: () => { applyReveal(v: ((seat: number) => number) | null): void } | null,
+  getPreview?: () => Preview3D | null,
 ): void {
   const $ = <T extends HTMLElement>(sel: string): T => {
     const el = root.querySelector<T>(sel);
@@ -51,34 +59,57 @@ export function mountToolbar(
   // with a quick fade, so the panel shows just what's relevant to the tool.
   const panelSections = Array.from(root.querySelectorAll<HTMLElement>('.panel-section[data-panel]'));
   const orientNote = root.querySelector<HTMLElement>('.panel-orient');
+  // Panel focus mode. 'design' = the original tool-contextual behavior (unchanged).
+  // 'save' / 'animation' focus the panel onto sections tagged with data-menu, so
+  // the left-rail Save button and the right Animation button each open just their
+  // own options. Picking any paint tool returns to 'design'.
+  let panelMode: 'design' | 'save' | 'animation' = 'design';
+  const railSaveBtn = root.querySelector<HTMLButtonElement>('#rail-save');
+  const animOpenBtn = root.querySelector<HTMLButtonElement>('#anim-open');
+
+  const showSection = (sec: HTMLElement, show: boolean): void => {
+    if (show) {
+      if (sec.style.display === 'none' || sec.classList.contains('ctx-hidden')) {
+        sec.classList.remove('ctx-hidden');
+        sec.style.display = '';
+        sec.classList.remove('ctx-fade-in');
+        void sec.offsetWidth;
+        sec.classList.add('ctx-fade-in');
+      }
+    } else {
+      sec.classList.add('ctx-hidden');
+      sec.style.display = 'none';
+    }
+  };
+
   const applyContextPanel = (tool: ToolId): void => {
     for (const sec of panelSections) {
-      const tools = (sec.dataset.panel ?? '').split(/\s+/);
-      const show = tools.includes('*') || tools.includes(tool);
-      if (show && sec.hidden && !sec.classList.contains('ctx-managed-hidden')) {
-        // becoming visible
-      }
-      if (show) {
-        if (sec.style.display === 'none' || sec.classList.contains('ctx-hidden')) {
-          sec.classList.remove('ctx-hidden');
-          sec.style.display = '';
-          // restart fade
-          sec.classList.remove('ctx-fade-in');
-          void sec.offsetWidth;
-          sec.classList.add('ctx-fade-in');
-        }
+      let show: boolean;
+      if (panelMode === 'design') {
+        const tools = (sec.dataset.panel ?? '').split(/\s+/);
+        show = tools.includes('*') || tools.includes(tool);
       } else {
-        sec.classList.add('ctx-hidden');
-        sec.style.display = 'none';
+        const menus = (sec.dataset.menu ?? '').split(/\s+/);
+        show = menus.includes(panelMode);
       }
+      showSection(sec, show);
     }
-    // The orientation note only helps before the user has a tool intent; keep it
-    // for brush (the default) and hide it once they pick a specialised tool.
-    if (orientNote) orientNote.style.display = tool === 'brush' ? '' : 'none';
+    // Orientation note only helps in design mode for the default brush tool.
+    if (orientNote) orientNote.style.display = panelMode === 'design' && tool === 'brush' ? '' : 'none';
+    if (railSaveBtn) railSaveBtn.classList.toggle('menu-active', panelMode === 'save');
+    if (animOpenBtn) animOpenBtn.classList.toggle('menu-active', panelMode === 'animation');
   };
+
+  const setPanelMode = (mode: 'design' | 'save' | 'animation'): void => {
+    panelMode = mode;
+    applyContextPanel(editor.tool);
+  };
+  railSaveBtn?.addEventListener('click', () => setPanelMode(panelMode === 'save' ? 'design' : 'save'));
+  animOpenBtn?.addEventListener('click', () => setPanelMode(panelMode === 'animation' ? 'design' : 'animation'));
 
   const setTool = (tool: ToolId): void => {
     editor.tool = tool;
+    panelMode = 'design'; // choosing a paint tool leaves any open menu
     for (const b of toolButtons) b.classList.toggle('active', b.dataset.tool === tool);
     editor.app.canvas.style.cursor = tool === 'pan' ? 'grab' : 'crosshair';
     textBar.hidden = tool !== 'text';
@@ -1344,6 +1375,8 @@ export function mountToolbar(
     opt.textContent = r.name;
     revealSel.appendChild(opt);
   }
+  // Default the reveal to right → left, the standard tifo sweep direction.
+  revealSel.value = 'sweep-rl';
   const playBtn = $('#reveal-play') as unknown as HTMLButtonElement;
   const scrub = $('#reveal-scrub') as unknown as HTMLInputElement;
   const durSlider = $('#reveal-dur') as unknown as HTMLInputElement;
@@ -1416,6 +1449,150 @@ export function mountToolbar(
     } finally {
       gifBtn.disabled = false;
       gifBtn.innerHTML = '<i class="ti ti-gif"></i> Export GIF';
+    }
+  });
+
+  // ---- Stadium animation export (3D video / GIF, with preview) ----
+  const sxFormat = $('#sx-format') as unknown as HTMLSelectElement;
+  const sxGifRow = root.querySelector<HTMLElement>('#sx-gif-size-row');
+  const sxGifWidth = $('#sx-gif-width') as unknown as HTMLSelectElement;
+  const sxNoshow = $('#sx-noshow') as unknown as HTMLInputElement;
+  const sxPreviewBtn = $('#sx-preview') as unknown as HTMLButtonElement;
+  const sxExportBtn = $('#sx-export') as unknown as HTMLButtonElement;
+  const sxStatus = root.querySelector<HTMLElement>('#sx-status');
+  const sxSay = (t: string): void => {
+    if (sxStatus) sxStatus.textContent = t;
+  };
+  const syncFormatRows = (): void => {
+    if (sxGifRow) sxGifRow.hidden = sxFormat.value !== 'gif';
+  };
+  sxFormat.addEventListener('change', syncFormatRows);
+  syncFormatRows();
+
+  const buildExportOpts = (forGif: boolean): StadiumExportOpts => ({
+    reveal: revealSel.value as RevealId,
+    durationSec: player.durationSec,
+    fps: forGif ? 15 : 30,
+    noShows: sxNoshow.checked,
+    watermark: 'tifomaker.org',
+    gifWidth: forGif ? Number(sxGifWidth.value) : undefined,
+  });
+
+  // The 3D bowl only renders inside a visible, sized host, so switch to the
+  // Stadium view and wait for the lazily-created preview before capturing.
+  const ensureStadiumPreview = async (): Promise<Preview3D | null> => {
+    (root.querySelector('#view-3d') as HTMLButtonElement | null)?.click();
+    let p = getPreview?.() ?? null;
+    for (let i = 0; i < 60 && !p; i++) {
+      await new Promise((r) => setTimeout(r, 50));
+      p = getPreview?.() ?? null;
+    }
+    if (p) await new Promise((r) => setTimeout(r, 80)); // let it size + paint once
+    return p;
+  };
+
+  const downloadBlob = (blob: Blob, filename: string): void => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const runExport = async (preview: Preview3D, say: (t: string) => void): Promise<void> => {
+    const forGif = sxFormat.value === 'gif';
+    const name = `${docTitle.value.trim() || 'tifo'}-stadium`;
+    if (forGif) {
+      say('Encoding GIF…');
+      const blob = await exportStadiumGif(preview, map, store, buildExportOpts(true));
+      downloadBlob(blob, `${name}.gif`);
+      say(`GIF exported (${(blob.size / 1024).toFixed(0)} KB)`);
+    } else {
+      if (!videoExportSupported()) {
+        say('Video capture is not supported in this browser — switch Format to GIF.');
+        return;
+      }
+      say('Recording video…');
+      const { blob } = await exportStadiumVideo(preview, map, buildExportOpts(false));
+      downloadBlob(blob, `${name}.webm`);
+      say(`Video exported (${(blob.size / 1024).toFixed(0)} KB)`);
+    }
+  };
+
+  sxPreviewBtn.addEventListener('click', async () => {
+    sxPreviewBtn.disabled = true;
+    sxSay('Preparing the stadium…');
+    try {
+      if (objects.list().length > 0) objects.bakeAll(store, map, EDITOR_UNITS.width);
+      const preview = await ensureStadiumPreview();
+      if (!preview) {
+        sxSay('Could not start the 3D stadium preview.');
+        return;
+      }
+      const opts = buildExportOpts(sxFormat.value === 'gif');
+      const backdrop = document.createElement('div');
+      backdrop.className = 'sx-backdrop';
+      backdrop.innerHTML = `
+        <div class="sx-modal" role="dialog" aria-modal="true" aria-label="Stadium animation preview">
+          <button class="sx-close" aria-label="Close">&times;</button>
+          <h3>Animation preview</h3>
+          <p class="sx-lead">Exactly what will be exported — watermark included.</p>
+          <canvas class="sx-canvas"></canvas>
+          <div class="sx-actions">
+            <button id="sx-modal-download" class="primary"><i class="ti ti-download"></i> Download ${sxFormat.value === 'gif' ? 'GIF' : 'video'}</button>
+            <button id="sx-modal-replay">Replay</button>
+          </div>
+          <p class="sx-msg" id="sx-modal-msg"></p>
+        </div>`;
+      document.body.appendChild(backdrop);
+      const close = (): void => backdrop.remove();
+      backdrop.querySelector('.sx-close')!.addEventListener('click', close);
+      backdrop.addEventListener('mousedown', (e) => {
+        if (e.target === backdrop) close();
+      });
+      const cv = backdrop.querySelector('.sx-canvas') as HTMLCanvasElement;
+      const ctx = cv.getContext('2d')!;
+      const modalMsg = backdrop.querySelector('#sx-modal-msg') as HTMLElement;
+      await previewStadium(preview, map, opts, ctx);
+      backdrop.querySelector('#sx-modal-replay')!.addEventListener('click', () => {
+        void previewStadium(preview, map, buildExportOpts(sxFormat.value === 'gif'), ctx);
+      });
+      const dlBtn = backdrop.querySelector('#sx-modal-download') as HTMLButtonElement;
+      dlBtn.addEventListener('click', async () => {
+        dlBtn.disabled = true;
+        try {
+          await runExport(preview, (t) => {
+            modalMsg.textContent = t;
+          });
+        } catch (err) {
+          modalMsg.textContent = `Export failed: ${(err as Error).message}`;
+        } finally {
+          dlBtn.disabled = false;
+        }
+      });
+      sxSay('');
+    } catch (err) {
+      sxSay(`Preview failed: ${(err as Error).message}`);
+    } finally {
+      sxPreviewBtn.disabled = false;
+    }
+  });
+
+  sxExportBtn.addEventListener('click', async () => {
+    sxExportBtn.disabled = true;
+    try {
+      if (objects.list().length > 0) objects.bakeAll(store, map, EDITOR_UNITS.width);
+      const preview = await ensureStadiumPreview();
+      if (!preview) {
+        sxSay('Could not start the 3D stadium preview.');
+        return;
+      }
+      await runExport(preview, sxSay);
+    } catch (err) {
+      sxSay(`Export failed: ${(err as Error).message}`);
+    } finally {
+      sxExportBtn.disabled = false;
     }
   });
 

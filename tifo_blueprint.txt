@@ -1,0 +1,191 @@
+TIFOMAKER — ARCHITECTURE BLUEPRINT
+==================================
+A web app where football fans design stadium tifo choreographies (each seat = one
+colored card / pixel across a ~60,000-seat bowl), preview them on a real 3D stadium,
+and export per-seat match-day instructions. Live at tifomaker.org (GitHub + Railway).
+Stack: TypeScript + Vite (frontend), Fastify v5 + Postgres (backend), PixiJS (2D
+editor), Three.js (3D preview). Builds with `npm run build:prod`; deploy = git push
+(Railway auto-builds from Dockerfile).
+
+--------------------------------------------------------------------------------
+1. CORE FILE STRUCTURE
+--------------------------------------------------------------------------------
+Multi-page Vite app. Each page = an HTML entry + a TS entry, listed in vite.config.ts
+inputs, and served by a Fastify route in server/src/routes.ts.
+
+PAGES (HTML at repo root, served by routes):
+  landing.html   → /         marketing landing (hero 3D stadium, showcase, how-it-works)
+  index.html     → /app       the editor (the main product)
+  community.html → /community standalone social feed (gallery + 3D preview modal)
+  seat.html      → /s/:id      MATCH-DAY QR page (fan picks seat → sees card color); FULLY i18n/RTL
+  clubs.html     → /clubs      B2B "For Clubs" page + lead-capture form
+  tifo-spec.html → /tifo-spec  public dev spec for the .tifo file format
+
+src/  (frontend)
+  main.ts              editor entry (bootstraps editor + 3D + toolbar; onboarding+tour on first run)
+  landing.ts           landing entry (mounts heroStadium + showcase, i18n)
+  community.ts (750L)  community page logic (gallery grid, 3D preview modal, comments, follow, profiles, notifications, search)
+  seat.ts              QR seat page (Section→Row→Seat picker → full-screen card reveal; i18n+RTL+wake-lock)
+  clubs.ts             clubs page (lead form → POST /api/leads)
+  heroStadium.ts       lazy-loaded auto-rotating real 3D bowl for the landing hero
+  showcase.ts          pulls real public designs into the landing showcase grid
+
+  core/   (FRAMEWORK-FREE, DOM-FREE — runs identically in browser, Node verify harness, AND server validation)
+    types.ts           ToolId; SeatMap; DesignState (the load-bearing data contracts)
+    template.ts        3 stadiums: DEFAULT (generic-bowl-60k=60,832), KOP (single-kop-40k), OVAL (grand-oval-76k); PALETTE_PRESETS
+    seatmap.ts (303L)  generateSeatMap(template) → SeatMap (deterministic: same template => byte-identical map)
+    design.ts (264L)   DesignStore: the Uint8Array cells buffer + undo/redo + palette ops
+    tools.ts           brush/fill/flood/magic-wand region collect
+    patterns.ts        9 pattern presets (hoops, split, sash, gradient…)
+    text.ts            tifo text rendering incl. Arabic shaping + bidi (RTL works)
+    objects.ts         floating text/image object layer
+    reveal.ts          card-reveal animation presets (editor playback only)
+    production.ts      countByColor, productionSummary, seatManifestCsv (material/card counts)
+    tifoFormat.ts      .tifo v2 file schema + validate + RLE encode/decode
+    seatLocator.ts     QR seat lookup: section/row/seat enumeration → cell index (pure)
+    remapStadium.ts    port a design across stadiums by relative UV position
+    importImage.ts     quantize an uploaded image → palette + cells
+    gif.ts             GIF89a encoder for animated previews
+
+  render/
+    editor.ts (550L)   PixiJS ParticleContainer 2D editor (60k seats), tools, palette, magic-wand select
+    preview3d.ts (276L) Three.js InstancedMesh 3D bowl; CAMERA_PRESETS; constructor opts {autoRotate, transparent}; dispose() frees WebGL
+    objectOverlay.ts   drag/resize floating objects over the canvas
+
+  ui/
+    toolbar.ts (1541L) ** the big one ** — ALL editor UI wiring: contextual properties panel,
+                       swatches/palette, save dialog, production export (PDF/CSV/QR), photo upload,
+                       avatar account menu (profile/community/replay-tour/sign-out)
+    floodlight.ts (912L) THE EDITOR THEME — exports FLOODLIGHT_CSS string (injected at runtime).
+                       Deep-slate dark theme + ALL editor component CSS (panel, tool-rail, swatches,
+                       dialogs, tour, avatar menu, onboarding, QR dialog). RTL overrides included.
+    i18n.ts            en | ar (Saudi-dialect Arabic); STRINGS table; t(key); applyDom(root) translates
+                       data-i18n attrs; sets <html dir=rtl lang>; persists 'tifo_lang_v1'
+    modal.ts           themed confirm/choice/prompt dialogs (replaced all native window.confirm/prompt)
+    onboarding.ts      first-run modal: project name + intent starter (Blank/Patterns/Crest/Text) + palette
+    tour.ts            first-run spotlight coach-marks over major buttons (skippable; replayable)
+    gallery.ts, profile.ts, saveDialog.ts, authModal.ts, moderation.ts, beforeAfter.ts, viewer.ts,
+    paletteIo.ts, theme.ts  (supporting editor/community UI)
+
+  net/
+    api.ts             browser API client (token persisted to localStorage 'tifo_token_v1';
+                       login/register/saveDesign/listGallery/vote/profile/follow/comments/
+                       notifications/remix/submitLead/QR helpers)
+    analytics.ts       anonymous funnel events (track())
+
+  workers/
+    heavy.worker.ts + client.ts   off-main-thread seat-map generation (generateSeatMapAsync)
+
+  export/distributionPdf.ts   pdfkit per-section match-day PDF
+
+server/  (backend, Fastify v5)
+  src/server.ts      bootstrap; HARD-EXITS in production if DATABASE_URL missing; wires Pg* or Memory* repos
+  src/routes.ts (995L) buildApp(repo, auth, templates, {social, leads, ...}); ~50 routes; @fastify/helmet
+                     with a real Content-Security-Policy; @fastify/rate-limit; all page routes; access-control
+                     helpers getVisible/getOwned (private→404 no existence leak, owner-locked writes)
+  src/auth.ts        scrypt password hashing + timingSafeEqual + 256-bit tokens stored as sha256 (AUDITED)
+  src/repo.ts        repository interfaces + types (Design/Social/Leads/Auth/Events)
+  src/pgRepo.ts (569L) + pgSocial.ts   Postgres implementations
+  src/memoryRepo.ts + memorySocial.ts  in-memory implementations (dev + tests)
+  schema.sql         idempotent, applied on boot (designs, users, votes, tags, comments, follows,
+                     notifications, design_photos, moderation_reports, leads, events)
+
+TESTS:  scripts/verify.mts (core invariants) + server/test/server.test.mts (8 suites incl. social, leads)
+        + server/test/security.test.mts (adversarial: auth bypass, IDOR, priv-esc — all pass)
+
+--------------------------------------------------------------------------------
+2. THE CORE DATA MODEL (most important thing to understand)
+--------------------------------------------------------------------------------
+ONE Uint8Array = the whole design. Each byte = a PALETTE INDEX (not RGB) for one seat.
+60k seats ≈ 60 KB raw, ~300 B gzipped (RLE). Index 0 = "empty / no card".
+A parametric SeatMap (generated deterministically from a template id) gives every seat:
+  xy (editor coords), uv (normalized 0–1 bowl position), pos3 (3D xyz),
+  tierOf, rowOf, sectionOf, neighbors, mirrorOf.
+BOTH the 2D editor and the 3D preview read the SAME cells buffer + SeatMap. No per-seat
+data is ever stored server-side — the QR seat page regenerates the map client-side from
+the template id and reads cells[index]. This is why everything stays tiny and consistent.
+
+--------------------------------------------------------------------------------
+3. LAYOUT APPROACH
+--------------------------------------------------------------------------------
+EDITOR (index.html): a vertical flex column.
+  <header class="topbar"> … view-mode switch (#view-2d / #view-3d / #view-split), lang toggle,
+                              Sign up / avatar account menu, Community, Gallery
+  <div class="workspace">  (display:flex, fills remaining height)
+      <nav class="tool-rail">   left vertical tool strip (brush/eraser/fill/text/image/select/pan) — flex column
+      <div class="stage">       (flex:1, flex-column) — the canvas area
+          <div class="tool-bar">   contextual top sub-bar (import-bar / text-bar appear here)
+          #canvas-host             PixiJS 2D canvas mounts here
+          #preview-host (hidden)   Three.js 3D canvas mounts here (shown in Stadium/Split view)
+          zoom controls
+      <aside class="panel">     RIGHT contextual properties panel (312px card rail). Cards are
+                                .panel-section[data-panel="..."]; toolbar.ts shows only the sections
+                                matching the active tool (data-panel="*" = always). Collapsible.
+  View modes (Design / Stadium / Split) toggle which host(s) are visible; Split shows both
+  side by side and the 3D updates live as you paint.
+  NOTE: layout is FLEXBOX (tool-rail | stage | panel), not CSS Grid. Mobile: tool-rail narrows
+  to 54px, panel reflows; landing hero reorders 3D above copy.
+
+LANDING / COMMUNITY / CLUBS: standard centered max-width sections, the shared "landing aesthetic"
+  (Inter font; brand tokens --purple #5B2A86 / --blue #1C6FE0 / --emerald #0F8A4D / --neon #D9F000;
+  pill buttons; high whitespace; deep shadows; gradient accents). Community uses a responsive
+  CSS-grid card gallery + a modal that hosts a live Preview3D.
+
+--------------------------------------------------------------------------------
+4. STATE OF THE 3D CANVAS (preview3d.ts)
+--------------------------------------------------------------------------------
+- Three.js InstancedMesh, one instance per seat (~60k), colored from the cells buffer.
+- Constructor(host, map, store, opts). opts.autoRotate = slow auto-spin + locked zoom/pan
+  (used by the landing hero, framed as an elevated full-bowl 3/4 view). opts.transparent =
+  no scene background (hero shows page bg through canvas).
+- CAMERA_PRESETS: TV gantry / Behind goal / Pitch level / Aerial (editor + community modal use these).
+- Reacts to store palette/cell changes (recolorAll). setNoShows() simulates empty seats.
+- start()/stop() control the render loop; dispose() fully frees WebGL (geometry/material/renderer +
+  removes canvas + disconnects ResizeObserver) — REQUIRED when closing the community preview modal,
+  or repeated opens leak GL contexts.
+- Used in 3 places: editor Stadium/Split view, community.ts preview modal, landing hero (heroStadium.ts).
+
+--------------------------------------------------------------------------------
+5. STATE OF THE UI SIDEBAR (the right .panel)
+--------------------------------------------------------------------------------
+- A 312px "contextual properties panel" — a card rail on the right of the editor stage.
+- Each control group is a .panel-section card carrying data-panel="<space-separated tool list>"
+  (or "*" = always shown). toolbar.ts's applyContextPanel(tool) shows only the cards relevant
+  to the active tool, with a 150ms fade. So selecting Brush shows brush size + swatches + stadium;
+  selecting Text shows the text controls; etc.
+- Always-on cards include the SWATCHES/COLORS panel (active color, "+ Color" to add any color,
+  add-or-remap when applying a palette, import/save palettes) and the STADIUM card (shape +
+  whole-bowl fills + stadium switch). Production export lives here too (PDF / CSV / Fan QR).
+- Panel is collapsible to a 32px strip. RTL flips it to the left.
+
+--------------------------------------------------------------------------------
+6. KNOWN GAPS / DELIBERATELY DEFERRED (so the next session doesn't re-discover them)
+--------------------------------------------------------------------------------
+- i18n: landing, clubs, community chrome, AND the match-day seat page are fully Arabic/RTL.
+  STILL ENGLISH (deferred, low-visibility/high-risk): editor transient status messages,
+  the first-run tour text, and the modal.ts dialog copy. The editor's core controls DO translate.
+- Region MOVE for magic-wand select is NOT built (only select / recolor / delete).
+- Liked tab on creator profiles: data is fetched but not surfaced in the profile UI.
+- Admin view for leads: leads are stored + validated but there's no in-app UI to read them (query DB).
+- Synchronized LIVE reveal (server-clock countdown lighting all phones at the same second) is NOT
+  built — the QR "when" is a written cue. This is a real-time-infra project (websockets/shared clock),
+  much bigger than the static card reveal which IS done.
+- Billing is parked (watermark seam exists: change watermark:!userId → !userIsPaid).
+- Security: code-audited + adversarial tests pass + CSP enabled. NOT done: professional pentest +
+  Railway infra check (HTTPS enforced, secrets, DB not public, backups) — these are owner tasks.
+
+--------------------------------------------------------------------------------
+7. DEV / DEPLOY QUICK REFERENCE
+--------------------------------------------------------------------------------
+- Build: npm run build:prod  (must show "✓ built"; tsc errors fail silently into a stale bundle —
+  always check). Typecheck: npx tsc --noEmit.
+- Local server (note: bg servers die between shell calls — launch + test in ONE command):
+  DATABASE_URL=postgres://tifo:tifo@localhost:5432/tifo NODE_ENV=production PORT=8787 tsx server/src/server.ts
+- Tests: npx tsx scripts/verify.mts ; npm run test:server ; npx tsx server/test/security.test.mts
+- Deploy: git add . && git commit && git push  (Railway auto-builds). MUST set ADMIN_USERNAMES env
+  for the moderation queue; DATABASE_URL required in production or the server hard-exits.
+- pip installs need --break-system-packages; this is a Node project though.
+
+CURRENT STATUS: feature-complete and production-ready. The real next step is NOT more features —
+it's getting real users (the owner has a ~3k-follower Al Ahli football account to launch from) and
+watching the funnel. Build phase is essentially done.
