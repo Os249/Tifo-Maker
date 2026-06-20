@@ -15,6 +15,7 @@ import { extractPalette, rasterize } from '../core/importImage';
 import { openAuthModal } from './authModal';
 import { openGallery } from './gallery';
 import { mountAiPanel } from './aiPanel';
+import { openShareModal } from './shareModal';
 import { EDITOR_UNITS } from '../core/seatmap';
 import { drawSymbol, SHAPE_ASPECT } from '../core/symbols';
 import type { Preview3D } from '../render/preview3d';
@@ -954,6 +955,16 @@ export function mountToolbar(
   })();
 
   const saveBtn = $('#save') as unknown as HTMLButtonElement;
+
+  // Share button: opens the multi-platform share modal for the saved design.
+  // (A design must be saved first so it has an id / public link.)
+  root.querySelector<HTMLButtonElement>('#share-design')?.addEventListener('click', () => {
+    if (!designId) {
+      message.textContent = 'save your design (and tick “List in public gallery”) first, then share';
+      return;
+    }
+    openShareModal({ id: designId, title: docTitle.value.trim() || 'Untitled tifo' });
+  });
 
   // Download the current design as a portable .tifo file (JSON: template + palette + cells).
   const downloadLocal = (): void => {

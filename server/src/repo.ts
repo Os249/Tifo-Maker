@@ -17,6 +17,8 @@ export interface DesignMeta {
   allowRemix?: boolean;
   /** Lineage: the design this was remixed from, if any. */
   remixedFrom?: string | null;
+  /** Public view count (sharing system). */
+  viewCount?: number;
 }
 
 export interface GalleryItem extends DesignMeta {
@@ -131,6 +133,25 @@ export interface DesignRepository {
   setPhotoVerified(photoId: string, verified: boolean): Promise<boolean>;
   /** Moderator override: delete any photo regardless of owner. */
   deletePhotoAsModerator(photoId: string): Promise<boolean>;
+
+  // ---- sharing system ----
+  /** Increment a design's public view counter; returns the new total. */
+  incrementView(id: string): Promise<number>;
+  /** Log a share/open event for a platform (best-effort analytics). */
+  recordShare(designId: string, platform: string, kind: 'share' | 'open'): Promise<void>;
+  /** Aggregate share analytics for a design. */
+  shareStats(id: string): Promise<ShareStats>;
+  /** Store the branded social-card image (owner only). Returns false if not owner / not found. */
+  setOgImage(id: string, ownerId: string, image: Buffer): Promise<boolean>;
+  /** Fetch the branded social-card image bytes, or null. */
+  getOgImage(id: string): Promise<Buffer | null>;
+}
+
+export interface ShareStats {
+  views: number;
+  shares: number;
+  opens: number;
+  byPlatform: Record<string, number>;
 }
 
 // ============ social layer ============

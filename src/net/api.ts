@@ -167,7 +167,15 @@ export async function saveDesign(
     headers: authHeaders(true),
     body: JSON.stringify(payload),
   });
-  return (await expectOk(res)) as SavedMeta;
+  const meta = (await expectOk(res)) as SavedMeta;
+  // Generate + store the branded 1200x630 social card so /t/:id previews richly.
+  // Best-effort: never fail a save because the OG image couldn't be stored.
+  try {
+    if (meta.id) await uploadOgImage(meta.id, makeOgImageB64(map, store, title || meta.title));
+  } catch {
+    /* ignore */
+  }
+  return meta;
 }
 
 export async function setPublic(id: string, isPublic: boolean): Promise<SavedMeta> {
@@ -219,9 +227,163 @@ export async function fetchDesignTemplate(id: string): Promise<{ templateId: str
   return { templateId: data.templateId, templateVersion: data.templateVersion };
 }
 
-/** Canonical shareable link for a design: https://host/d/:id */
+/** Canonical public share link for a design: https://host/t/:id (the dedicated
+ * view page with rich previews). The old /d/:id editor-load link still works. */
 export function shareUrl(id: string): string {
-  return `${location.origin}/d/${id}`;
+  return `${location.origin}/t/${id}`;
+}
+
+/** URL of a design's branded social card (falls back to the thumbnail server-side). */
+export function ogImageUrl(id: string): string {
+  return `${API}/designs/${id}/og.png`;
+}
+
+export interface PublicDesignMeta {
+  title: string;
+  ownerName: string | null;
+  ownerIsMe: boolean;
+  isPublic: boolean;
+  templateId: string;
+  templateVersion: number;
+  createdAt: string;
+  viewCount: number;
+}
+
+export interface ShareStats {
+  views: number;
+  shares: number;
+  opens: number;
+  byPlatform: Record<string, number>;
+}
+
+/** Load a design into the store AND return its public-page metadata. */
+export async function loadPublicDesign(store: DesignStore, id: string): Promise<PublicDesignMeta> {
+  const data = (await expectOk(await fetch(`${API}/designs/${id}`, { headers: authHeaders(false) }))) as {
+    title: string;
+    palette: string[];
+    cellsGzB64: string;
+    isPublic: boolean;
+    ownerId: string | null;
+    ownerName: string | null;
+    templateId: string;
+    templateVersion: number;
+    createdAt: string;
+    viewCount?: number;
+  };
+  const cells = await gunzip(fromB64(data.cellsGzB64));
+  store.setPalette(data.palette.slice(0, 256));
+  store.loadCells(cells);
+  let ownerIsMe = false;
+  if (token) {
+    const me = (await expectOk(await fetch(`${API}/me`, { headers: authHeaders(false) }))) as { id: string };
+    ownerIsMe = me.id === data.ownerId;
+  }
+  return {
+    title: data.title,
+    ownerName: data.ownerName ?? null,
+    ownerIsMe,
+    isPublic: data.isPublic,
+    templateId: data.templateId,
+    templateVersion: data.templateVersion,
+    createdAt: data.createdAt,
+    viewCount: data.viewCount ?? 0,
+  };
+}
+
+/** Count a public view; returns the new total (0 on failure). */
+export async function recordView(id: string): Promise<number> {
+  try {
+    const r = (await expectOk(await fetch(`${API}/designs/${id}/view`, { method: 'POST', headers: authHeaders(true), body: '{}' }))) as { views: number };
+    return r.views ?? 0;
+  } catch {
+    return 0;
+  }
+}
+
+/** Log a share button press (or a link open) for analytics. Best-effort. */
+export function recordShare(id: string, platform: string, kind: 'share' | 'open' = 'share'): void {
+  void fetch(`${API}/designs/${id}/share`, {
+    method: 'POST',
+    headers: authHeaders(true),
+    body: JSON.stringify({ platform, kind }),
+  }).catch(() => {});
+}
+
+/** Fetch share/view analytics for a design. */
+export async function fetchShareStats(id: string): Promise<ShareStats> {
+  return (await expectOk(await fetch(`${API}/designs/${id}/stats`, { headers: authHeaders(false) }))) as ShareStats;
+}
+
+/** Upload the branded OG card for a saved design (owner only). Best-effort. */
+export async function uploadOgImage(id: string, ogPngB64: string): Promise<void> {
+  await fetch(`${API}/designs/${id}/og-image`, {
+    method: 'POST',
+    headers: authHeaders(true),
+    body: JSON.stringify({ ogPngB64 }),
+  }).catch(() => {});
+}
+
+/**
+ * Compose a branded 1200x630 social card: the unrolled tifo as a banner over a
+ * dark field, with the title, creator and TifoMaker wordmark. Reuses the same
+ * seat-drawing approach as makeThumbnailB64 — no new rendering pipeline.
+ */
+export function makeOgImageB64(map: SeatMap, store: DesignStore, title: string, ownerName?: string | null): string {
+  const W = 1200;
+  const H = 630;
+  const canvas = document.createElement('canvas');
+  canvas.width = W;
+  canvas.height = H;
+  const ctx = canvas.getContext('2d')!;
+  // Background.
+  ctx.fillStyle = '#0a0c11';
+  ctx.fillRect(0, 0, W, H);
+  // Tifo banner: full unrolled bowl, fit to width with side margins, vertically
+  // centered in the upper area.
+  const margin = 64;
+  const bw = map.bounds.maxX - map.bounds.minX;
+  const bh = map.bounds.maxY - map.bounds.minY;
+  const drawW = W - margin * 2;
+  const scale = drawW / bw;
+  const drawH = bh * scale;
+  const offX = margin;
+  const offY = 150 - drawH / 2 + 120; // sit the banner in the upper-middle
+  const colors = store.palette.map((hex, i) => (i === 0 ? '#262a33' : hex));
+  for (let c = 0; c < colors.length; c++) {
+    ctx.fillStyle = colors[c];
+    for (let i = 0; i < map.count; i++) {
+      if (store.cells[i] !== c) continue;
+      const x = offX + (map.xy[i * 2] - map.bounds.minX) * scale;
+      const y = offY + (map.xy[i * 2 + 1] - map.bounds.minY) * scale;
+      ctx.fillRect(x, y, Math.max(1, 3.2 * scale), Math.max(1, 8 * scale * 0.85));
+    }
+  }
+  // Title + creator.
+  ctx.textBaseline = 'alphabetic';
+  ctx.fillStyle = '#f2f1ec';
+  ctx.font = '700 64px Inter, Arial, sans-serif';
+  ctx.fillText(clip(ctx, title || 'Untitled tifo', W - margin * 2), margin, H - 150);
+  if (ownerName) {
+    ctx.fillStyle = '#9aa3b2';
+    ctx.font = '500 34px Inter, Arial, sans-serif';
+    ctx.fillText(`by @${ownerName}`, margin, H - 100);
+  }
+  // Wordmark.
+  ctx.font = '800 34px Inter, Arial, sans-serif';
+  ctx.fillStyle = '#5b8cff';
+  ctx.fillText('TIFO', margin, H - 48);
+  const tw = ctx.measureText('TIFO').width;
+  ctx.fillStyle = '#f2f1ec';
+  ctx.fillText('MAKER', margin + tw, H - 48);
+  return canvas.toDataURL('image/png').split(',')[1];
+}
+
+/** Truncate text with an ellipsis to fit `maxW` px in the current ctx font. */
+function clip(ctx: CanvasRenderingContext2D, text: string, maxW: number): string {
+  if (ctx.measureText(text).width <= maxW) return text;
+  let t = text;
+  while (t.length > 1 && ctx.measureText(t + '…').width > maxW) t = t.slice(0, -1);
+  return t + '…';
 }
 
 export interface GalleryItem {

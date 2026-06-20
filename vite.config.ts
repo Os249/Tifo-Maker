@@ -14,6 +14,7 @@ export default defineConfig({
         community: resolve(__dirname, 'community.html'),
         seat: resolve(__dirname, 'seat.html'),
         clubs: resolve(__dirname, 'clubs.html'),
+        share: resolve(__dirname, 'share.html'),
       },
     },
   },

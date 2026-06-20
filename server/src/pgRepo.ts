@@ -13,6 +13,7 @@ import type {
   LeadsRepository,
   NewDesign,
   RevisionRow,
+  ShareStats,
   UserRow,
   EventsRepository,
   FunnelStep,
@@ -23,7 +24,7 @@ import type {
 import { normalizeTags } from './memoryRepo';
 
 const META_COLS =
-  'id, title, template_id, template_version, palette, revision_count, is_public, owner_id, created_at, updated_at, description, allow_remix, remixed_from';
+  'id, title, template_id, template_version, palette, revision_count, is_public, owner_id, created_at, updated_at, description, allow_remix, remixed_from, view_count';
 
 function rowToMeta(r: Record<string, unknown>): DesignMeta {
   return {
@@ -40,6 +41,7 @@ function rowToMeta(r: Record<string, unknown>): DesignMeta {
     description: (r.description as string) ?? null,
     allowRemix: r.allow_remix === undefined ? true : r.allow_remix !== false,
     remixedFrom: r.remixed_from ? String(r.remixed_from) : null,
+    viewCount: r.view_count == null ? 0 : Number(r.view_count),
   };
 }
 
@@ -497,6 +499,47 @@ export class PgDesignRepository implements DesignRepository {
   async deletePhotoAsModerator(photoId: string): Promise<boolean> {
     const res = await this.pool.query('DELETE FROM design_photos WHERE id = $1', [photoId]);
     return (res.rowCount ?? 0) > 0;
+  }
+
+  // ---- sharing system ----
+  async incrementView(id: string): Promise<number> {
+    const r = await this.pool.query('UPDATE designs SET view_count = view_count + 1 WHERE id = $1 RETURNING view_count', [id]);
+    return r.rows[0] ? Number(r.rows[0].view_count) : 0;
+  }
+
+  async recordShare(designId: string, platform: string, kind: 'share' | 'open'): Promise<void> {
+    await this.pool.query('INSERT INTO design_shares (design_id, platform, kind) VALUES ($1, $2, $3)', [designId, platform, kind]);
+  }
+
+  async shareStats(id: string): Promise<ShareStats> {
+    const v = await this.pool.query('SELECT view_count FROM designs WHERE id = $1', [id]);
+    const views = v.rows[0] ? Number(v.rows[0].view_count) : 0;
+    const rows = await this.pool.query(
+      'SELECT platform, kind, count(*)::int AS n FROM design_shares WHERE design_id = $1 GROUP BY platform, kind',
+      [id],
+    );
+    let shares = 0;
+    let opens = 0;
+    const byPlatform: Record<string, number> = {};
+    for (const row of rows.rows) {
+      const n = Number(row.n);
+      if (row.kind === 'open') opens += n;
+      else {
+        shares += n;
+        byPlatform[String(row.platform)] = (byPlatform[String(row.platform)] ?? 0) + n;
+      }
+    }
+    return { views, shares, opens, byPlatform };
+  }
+
+  async setOgImage(id: string, ownerId: string, image: Buffer): Promise<boolean> {
+    const res = await this.pool.query('UPDATE designs SET og_image = $1 WHERE id = $2 AND owner_id = $3', [image, id, ownerId]);
+    return (res.rowCount ?? 0) > 0;
+  }
+
+  async getOgImage(id: string): Promise<Buffer | null> {
+    const r = await this.pool.query('SELECT og_image FROM designs WHERE id = $1', [id]);
+    return (r.rows[0]?.og_image as Buffer | undefined) ?? null;
   }
 }
 

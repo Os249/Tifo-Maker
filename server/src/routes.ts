@@ -614,7 +614,9 @@ export async function buildApp(
     const v = await getVisible(req, reply);
     if (!v) return;
     const { cellsGz, ...meta } = v.rec;
-    return { ...meta, cellsGzB64: cellsGz.toString('base64') };
+    // Creator name is needed by the public share page; resolve it from the owner id.
+    const owner = meta.ownerId ? await auth.getUserById(meta.ownerId).catch(() => null) : null;
+    return { ...meta, ownerName: owner?.username ?? null, cellsGzB64: cellsGz.toString('base64') };
   });
 
   app.get('/api/designs/:id/thumbnail.png', async (req, reply) => {
@@ -623,6 +625,72 @@ export async function buildApp(
     const png = await repo.getThumbnail(v.rec.id);
     if (!png) return reply.code(404).send({ error: 'no thumbnail' });
     return reply.header('content-type', 'image/png').header('cache-control', 'no-cache').send(png);
+  });
+
+  // ---------- sharing system ----------
+  // Platforms we accept in the analytics log (whitelist keeps the table clean).
+  const SHARE_PLATFORMS = new Set([
+    'whatsapp', 'x', 'twitter', 'instagram', 'tiktok', 'facebook', 'discord',
+    'telegram', 'reddit', 'email', 'copy', 'webshare', 'qr', 'link',
+  ]);
+
+  // Branded 1200x630 social card (public OR owner via getVisible). Falls back to
+  // the existing thumbnail if no OG image has been generated yet.
+  app.get('/api/designs/:id/og.png', async (req, reply) => {
+    const v = await getVisible(req, reply);
+    if (!v) return;
+    const img = (await repo.getOgImage(v.rec.id)) ?? (await repo.getThumbnail(v.rec.id));
+    if (!img) return reply.code(404).send({ error: 'no image' });
+    return reply
+      .header('content-type', 'image/png')
+      .header('x-content-type-options', 'nosniff')
+      .header('cache-control', 'public, max-age=3600')
+      .send(img);
+  });
+
+  // Store the branded OG card (owner only). Decoupled from the save path so the
+  // core save stays lean; the client posts it right after a public save.
+  app.post('/api/designs/:id/og-image', async (req, reply) => {
+    const rec = await getOwned(req, reply);
+    if (!rec) return;
+    const b64 = (req.body as { ogPngB64?: string } | null)?.ogPngB64;
+    if (typeof b64 !== 'string' || !b64) return reply.code(400).send({ error: 'ogPngB64 required' });
+    const buf = Buffer.from(b64, 'base64');
+    if (buf.byteLength === 0 || buf.byteLength > MAX_PHOTO_BYTES) {
+      return reply.code(400).send({ error: 'image must be 1..2MB' });
+    }
+    const ok = await repo.setOgImage(rec.id, rec.ownerId!, buf);
+    return ok ? { ok: true } : reply.code(404).send({ error: 'not found' });
+  });
+
+  // Count a public view. Private designs are a 404 to non-owners via getVisible,
+  // and we refuse to count views on a private design even for the owner.
+  app.post('/api/designs/:id/view', async (req, reply) => {
+    const v = await getVisible(req, reply);
+    if (!v) return;
+    if (!v.rec.isPublic) return reply.code(403).send({ error: 'not public' });
+    const views = await repo.incrementView(v.rec.id);
+    return { views };
+  });
+
+  // Log a share (button press) or open (link visit) per platform. Public only.
+  app.post('/api/designs/:id/share', async (req, reply) => {
+    const v = await getVisible(req, reply);
+    if (!v) return;
+    if (!v.rec.isPublic) return reply.code(403).send({ error: 'not public' });
+    const body = (req.body ?? {}) as { platform?: unknown; kind?: unknown };
+    const platform = typeof body.platform === 'string' ? body.platform.toLowerCase() : '';
+    if (!SHARE_PLATFORMS.has(platform)) return reply.code(400).send({ error: 'unknown platform' });
+    const kind = body.kind === 'open' ? 'open' : 'share';
+    await repo.recordShare(v.rec.id, platform, kind).catch(() => {});
+    return reply.code(204).send();
+  });
+
+  // Aggregate share/view analytics for a (visible) design.
+  app.get('/api/designs/:id/stats', async (req, reply) => {
+    const v = await getVisible(req, reply);
+    if (!v) return;
+    return repo.shareStats(v.rec.id);
   });
 
   // Production distribution PDF. Accepts the design inline (cells + palette +
@@ -961,6 +1029,52 @@ export async function buildApp(
         .replace(/<head>/i, `<head>\n    ${meta}`);
       return reply.type('text/html').send(html);
     });
+
+    // Dedicated public VIEW page at /t/:id — the canonical share link. Serves the
+    // standalone share page with a branded OG/Twitter card so it previews richly
+    // in WhatsApp/X/Discord/Telegram/Facebook. Private/unknown designs get the
+    // generic card (no metadata leak); the page client shows "unavailable".
+    let shareHtmlRaw: string | null = null;
+    try {
+      shareHtmlRaw = readFileSync(join(staticDir, 'share.html'), 'utf8');
+    } catch {
+      shareHtmlRaw = null; // API-only build without the share page
+    }
+    if (shareHtmlRaw) {
+      const sharePage = shareHtmlRaw;
+      app.get('/t/:id', async (req, reply) => {
+        const { id } = req.params as { id: string };
+        const rec = await repo.get(id).catch(() => null);
+        const base = origin(req);
+        let title = 'TifoMaker';
+        let description = 'A stadium tifo on TifoMaker — open it to view in full.';
+        let image = `${base}/og-default.png`;
+        if (rec && rec.isPublic) {
+          const owner = rec.ownerId ? await auth.getUserById(rec.ownerId).catch(() => null) : null;
+          title = `${rec.title} — TifoMaker`;
+          description = `A stadium tifo${owner ? ` by @${owner.username}` : ''} on TifoMaker.`;
+          image = `${base}/api/designs/${rec.id}/og.png`;
+        }
+        const meta = [
+          `<title>${esc(title)}</title>`,
+          `<meta name="description" content="${esc(description)}" />`,
+          `<meta property="og:type" content="website" />`,
+          `<meta property="og:site_name" content="TifoMaker" />`,
+          `<meta property="og:title" content="${esc(title)}" />`,
+          `<meta property="og:description" content="${esc(description)}" />`,
+          `<meta property="og:image" content="${esc(image)}" />`,
+          `<meta property="og:image:width" content="1200" />`,
+          `<meta property="og:image:height" content="630" />`,
+          `<meta property="og:url" content="${esc(base)}/t/${esc(id)}" />`,
+          `<meta name="twitter:card" content="summary_large_image" />`,
+          `<meta name="twitter:title" content="${esc(title)}" />`,
+          `<meta name="twitter:description" content="${esc(description)}" />`,
+          `<meta name="twitter:image" content="${esc(image)}" />`,
+        ].join('\n    ');
+        const html = sharePage.replace(/<title>.*?<\/title>/i, '').replace(/<head>/i, `<head>\n    ${meta}`);
+        return reply.type('text/html').send(html);
+      });
+    }
 
     // Marketing landing at the root; the editor app lives at /app. Return users
     // bookmark /app; first-time visitors get the pitch. Share links (/d/:id)

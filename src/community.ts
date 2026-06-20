@@ -5,6 +5,7 @@ import { TEMPLATES } from './core/template';
 import { DesignStore } from './core/design';
 import { Preview3D, CAMERA_PRESETS } from './render/preview3d';
 import { openAuthModal } from './ui/authModal';
+import { openShareModal } from './ui/shareModal';
 import {
   isSignedIn,
   fetchMe,
@@ -147,9 +148,16 @@ function renderCard(item: GalleryItem, onClick?: () => void): HTMLElement {
       <div class="card-stats">
         <span class="card-stat like ${liked ? 'on' : ''}"><i class="ti ti-heart${liked ? '-filled' : ''}"></i> ${item.likeScore}</span>
         <span class="card-stat"><i class="ti ti-message-circle"></i> <span class="cmt-count" data-id="${item.id}">·</span></span>
+        <button class="card-stat card-share" title="Share this tifo"><i class="ti ti-share"></i></button>
       </div>
     </div>`;
   card.addEventListener('click', () => (onClick ? onClick() : openPreview(item)));
+  // Share button — opens the share modal without triggering the card's open.
+  const shareBtn = card.querySelector('.card-share') as HTMLElement | null;
+  shareBtn?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    openShareModal({ id: item.id, title: item.title });
+  });
   // The @username opens the creator profile instead of the tifo preview.
   if (item.ownerId) {
     const at = card.querySelector('.card-by .at') as HTMLElement | null;

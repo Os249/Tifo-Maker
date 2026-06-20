@@ -26,7 +26,7 @@ export interface ViewerContext {
 
 
 /** Flat 2D strip of the design into a canvas, pixelated (the look-at-the-art view). */
-function paint2D(canvas: HTMLCanvasElement, map: SeatMap, store: DesignStore): void {
+export function paint2D(canvas: HTMLCanvasElement, map: SeatMap, store: DesignStore): void {
   const bw = map.bounds.maxX - map.bounds.minX;
   const bh = map.bounds.maxY - map.bounds.minY;
   const ctx = canvas.getContext('2d')!;

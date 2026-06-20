@@ -13,6 +13,7 @@ import type {
   LeadsRepository,
   NewDesign,
   RevisionRow,
+  ShareStats,
   UserRow,
   EventsRepository,
   PhotoMeta,
@@ -29,6 +30,9 @@ interface Row extends DesignRecord {
   votedAt: Map<string, number>;
   isTemplate: boolean;
   tags: string[];
+  views: number;
+  shareLog: { platform: string; kind: string }[];
+  ogImage: Buffer | null;
 }
 
 /** In-memory AI quota store: dev mode and route tests. Same contract as Postgres. */
@@ -56,7 +60,7 @@ export class MemoryDesignRepository implements DesignRepository {
 
   private meta(r: Row): DesignMeta {
     const { id, title, templateId, templateVersion, palette, revisionCount, isPublic, ownerId, createdAt, updatedAt, description, allowRemix, remixedFrom } = r;
-    return { id, title, templateId, templateVersion, palette: [...palette], revisionCount, isPublic, ownerId, createdAt, updatedAt, description: description ?? null, allowRemix: allowRemix !== false, remixedFrom: remixedFrom ?? null };
+    return { id, title, templateId, templateVersion, palette: [...palette], revisionCount, isPublic, ownerId, createdAt, updatedAt, description: description ?? null, allowRemix: allowRemix !== false, remixedFrom: remixedFrom ?? null, viewCount: r.views };
   }
 
   async create(d: NewDesign): Promise<DesignMeta> {
@@ -79,6 +83,9 @@ export class MemoryDesignRepository implements DesignRepository {
       votedAt: new Map(),
       isTemplate: false,
       tags: [],
+      views: 0,
+      shareLog: [],
+      ogImage: null,
     };
     this.rows.set(row.id, row);
     return this.meta(row);
@@ -380,6 +387,46 @@ export class MemoryDesignRepository implements DesignRepository {
     const before = this.photos.length;
     this.photos = this.photos.filter((x) => x.id !== photoId);
     return this.photos.length < before;
+  }
+
+  // ---- sharing system ----
+  async incrementView(id: string): Promise<number> {
+    const r = this.rows.get(id);
+    if (!r) return 0;
+    r.views += 1;
+    return r.views;
+  }
+
+  async recordShare(designId: string, platform: string, kind: 'share' | 'open'): Promise<void> {
+    const r = this.rows.get(designId);
+    if (r) r.shareLog.push({ platform, kind });
+  }
+
+  async shareStats(id: string): Promise<ShareStats> {
+    const r = this.rows.get(id);
+    if (!r) return { views: 0, shares: 0, opens: 0, byPlatform: {} };
+    const byPlatform: Record<string, number> = {};
+    let shares = 0;
+    let opens = 0;
+    for (const e of r.shareLog) {
+      if (e.kind === 'open') opens += 1;
+      else {
+        shares += 1;
+        byPlatform[e.platform] = (byPlatform[e.platform] ?? 0) + 1;
+      }
+    }
+    return { views: r.views, shares, opens, byPlatform };
+  }
+
+  async setOgImage(id: string, ownerId: string, image: Buffer): Promise<boolean> {
+    const r = this.rows.get(id);
+    if (!r || r.ownerId !== ownerId) return false;
+    r.ogImage = image;
+    return true;
+  }
+
+  async getOgImage(id: string): Promise<Buffer | null> {
+    return this.rows.get(id)?.ogImage ?? null;
   }
 }
 

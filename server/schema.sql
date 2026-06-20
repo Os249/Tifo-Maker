@@ -194,3 +194,17 @@ CREATE TABLE IF NOT EXISTS ai_usage (
   used       INT NOT NULL DEFAULT 0,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Sharing system: a public view counter on each design, a branded social-card
+-- image, and a per-platform share/open log for analytics.
+ALTER TABLE designs ADD COLUMN IF NOT EXISTS view_count INT NOT NULL DEFAULT 0;
+ALTER TABLE designs ADD COLUMN IF NOT EXISTS og_image BYTEA;  -- client-rendered 1200x630 OG card
+
+CREATE TABLE IF NOT EXISTS design_shares (
+  id         BIGSERIAL PRIMARY KEY,
+  design_id  UUID NOT NULL REFERENCES designs(id) ON DELETE CASCADE,
+  platform   TEXT NOT NULL,                 -- whatsapp|x|facebook|telegram|... |copy|webshare
+  kind       TEXT NOT NULL DEFAULT 'share', -- 'share' (button pressed) | 'open' (link visited)
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS design_shares_design_idx ON design_shares (design_id, created_at);
