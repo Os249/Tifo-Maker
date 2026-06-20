@@ -121,9 +121,11 @@ a { color: inherit; text-decoration: none; }
 }
 .tifo-card:hover { transform: translateY(-4px); box-shadow: var(--shadow-lg); }
 .card-thumb {
-  aspect-ratio: 16 / 10; background: #11121a center/cover no-repeat;
-  position: relative; display: block;
+  position: relative; display: block; overflow: hidden; background: #11121a;
+  aspect-ratio: 5 / 1; /* panoramic — the tifo is the full unrolled bowl (~10:1) */
 }
+/* Show the FULL tifo (contain = never crop/zoom) at a uniform banner size. */
+.card-thumb-img { display: block; width: 100%; height: 100%; object-fit: contain; image-rendering: pixelated; }
 .card-thumb .badge {
   position: absolute; top: 10px; font-size: 11px; font-weight: 700; padding: 4px 10px; border-radius: var(--r-pill);
   backdrop-filter: blur(8px); color: #fff;

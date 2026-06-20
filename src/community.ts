@@ -129,8 +129,8 @@ function renderCard(item: GalleryItem, onClick?: () => void): HTMLElement {
   const card = document.createElement('article');
   card.className = 'tifo-card';
   const thumb = item.hasThumbnail
-    ? `<div class="card-thumb" style="background-image:url('${thumbnailUrl(item.id)}')">`
-    : `<div class="card-thumb">`;
+    ? `<div class="card-thumb"><img class="card-thumb-img" src="${thumbnailUrl(item.id)}" alt="" loading="lazy" />`
+    : `<div class="card-thumb card-thumb-empty">`;
   const badges =
     (item.isTemplate ? `<span class="badge template">Template</span>` : '') +
     (item.hasPhoto ? `<span class="badge photo">Real photo</span>` : '');

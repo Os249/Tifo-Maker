@@ -515,7 +515,7 @@ body.viewer { display:block; overflow-y:auto; background:var(--ink-0); }
 }
 .feed-card:hover { border-color:var(--line-2); transform:translateY(-2px); }
 .feed-thumb {
-  width:100%; aspect-ratio:5/1; object-fit:cover; background:var(--canvas-pit);
+  width:100%; aspect-ratio:5/1; object-fit:contain; background:var(--canvas-pit);
   image-rendering:pixelated; cursor:pointer; display:block;
 }
 .feed-thumb-empty { aspect-ratio:5/1; }

@@ -113,7 +113,9 @@ function fromB64(b64: string): Uint8Array {
 
 /** Render the design to a small PNG strip (the gallery card image). */
 export function makeThumbnailB64(map: SeatMap, store: DesignStore): string {
-  const W = 420;
+  // Wider source than it displays at, so the gallery banner stays crisp (the
+  // card shows the whole unrolled tifo at its true aspect via .card-thumb-img).
+  const W = 800;
   const bw = map.bounds.maxX - map.bounds.minX;
   const bh = map.bounds.maxY - map.bounds.minY;
   const scale = W / bw;
