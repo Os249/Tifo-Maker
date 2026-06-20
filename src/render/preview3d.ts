@@ -27,6 +27,10 @@ export const CAMERA_PRESETS: CameraPreset[] = [
   { name: 'Behind goal', position: [100, 7, 0], target: [-45, 14, 0] },
   { name: 'Pitch level', position: [40, 1.8, 26], target: [-60, 16, -48] },
   { name: 'Aerial', position: [0, 175, 95], target: [0, 0, 0] },
+  // Centred high aerial pulled far enough back to frame the ENTIRE bowl/tifo at
+  // once (same angle as Aerial, ~40% further out) — the "show me the whole
+  // thing" preset. Works for the big oval template too, which Aerial can crop.
+  { name: 'Full view', position: [0, 245, 135], target: [0, 0, 0] },
 ];
 
 const EMPTY_COLOR = new THREE.Color(0x262a33);
