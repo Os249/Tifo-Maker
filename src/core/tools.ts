@@ -17,12 +17,21 @@ export function brushStamp(
   y: number,
   radius: number,
   value: number,
+  snapDist = 0,
 ): number[] {
   scratch.length = 0;
   hash.queryDisc(x, y, radius, scratch);
   const dirty: number[] = [];
   for (const i of scratch) {
     if (store.paint(i, value)) dirty.push(i);
+  }
+  // A small brush (radius smaller than the seat spacing) only catches a seat
+  // when the cursor is almost exactly on its centre, which feels finicky. When
+  // the disc overlaps nothing, snap to the nearest seat within snapDist so that
+  // touching a seat anywhere in its footprint paints it.
+  if (scratch.length === 0 && snapDist > 0) {
+    const n = hash.nearest(x, y, snapDist);
+    if (n >= 0 && store.paint(n, value)) dirty.push(n);
   }
   return dirty;
 }
@@ -40,6 +49,7 @@ export function brushSegment(
   y1: number,
   radius: number,
   value: number,
+  snapDist = 0,
 ): number[] {
   const dist = Math.hypot(x1 - x0, y1 - y0);
   const step = Math.max(1, radius * 0.5);
@@ -47,7 +57,7 @@ export function brushSegment(
   const dirty: number[] = [];
   for (let s = 1; s <= steps; s++) {
     const f = s / steps;
-    dirty.push(...brushStamp(store, hash, x0 + (x1 - x0) * f, y0 + (y1 - y0) * f, radius, value));
+    dirty.push(...brushStamp(store, hash, x0 + (x1 - x0) * f, y0 + (y1 - y0) * f, radius, value, snapDist));
   }
   return dirty;
 }

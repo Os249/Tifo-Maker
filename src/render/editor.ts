@@ -472,7 +472,7 @@ export class Editor {
       this.store.beginStroke();
       const value = this.tool === 'eraser' ? 0 : this.colorIndex;
       const dirty = this.applyMirrorTo(
-        brushStamp(this.store, this.hash, wx, wy, this.brushRadius, value),
+        brushStamp(this.store, this.hash, wx, wy, this.brushRadius, value, Math.max(this.brushRadius, 8)),
         value,
       );
       this.store.flush(dirty);
@@ -509,7 +509,7 @@ export class Editor {
       const [wx, wy] = this.toWorld(e);
       const value = this.tool === 'eraser' ? 0 : this.colorIndex;
       const dirty = this.applyMirrorTo(
-        brushSegment(this.store, this.hash, this.lastX, this.lastY, wx, wy, this.brushRadius, value),
+        brushSegment(this.store, this.hash, this.lastX, this.lastY, wx, wy, this.brushRadius, value, Math.max(this.brushRadius, 8)),
         value,
       );
       this.store.flush(dirty);

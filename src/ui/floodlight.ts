@@ -166,18 +166,9 @@ header {
   opacity:.72;
 }
 
-/* ---- left-rail Save button + right-panel Animation button ---- */
+/* ---- left-rail Save & Animation menu buttons ---- */
 .rail-spacer { margin-top:auto; }
 .tool.rail-menu.menu-active { background:var(--grad-accent); color:#fff; box-shadow:var(--glow-soft); }
-.panel-head > span:first-child { margin-right:auto; }
-.panel-head-btn {
-  width:28px; height:28px; border-radius:var(--r-sm); border:1px solid transparent;
-  background:transparent; color:var(--text-2); cursor:pointer; font-size:15px;
-  display:flex; align-items:center; justify-content:center; transition:background .14s, color .14s;
-}
-.panel-head-btn:hover { background:var(--ink-3); color:var(--text-1); }
-.panel-head-btn.menu-active { background:var(--grad-accent); color:#fff; box-shadow:var(--glow-soft); }
-[dir="rtl"] .panel-head > span:first-child { margin-right:0; margin-left:auto; }
 
 /* ---- stadium export preview modal ---- */
 .sx-backdrop {

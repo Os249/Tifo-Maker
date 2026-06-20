@@ -65,7 +65,7 @@ export function mountToolbar(
   // own options. Picking any paint tool returns to 'design'.
   let panelMode: 'design' | 'save' | 'animation' = 'design';
   const railSaveBtn = root.querySelector<HTMLButtonElement>('#rail-save');
-  const animOpenBtn = root.querySelector<HTMLButtonElement>('#anim-open');
+  const animOpenBtn = root.querySelector<HTMLButtonElement>('#rail-anim');
 
   const showSection = (sec: HTMLElement, show: boolean): void => {
     if (show) {
@@ -641,20 +641,25 @@ export function mountToolbar(
   const stampImageAt = (cx: number, cy: number): void => {
     if (!pendingImport) return;
     const { w, h } = importRect();
-    // "Real colours": rebuild the palette from the picture's own dominant colors
-    // so the imported art keeps its true look instead of mapping to club cards.
+    // "Real colours": add the picture's own dominant colours to the palette so
+    // the imported art keeps its true look instead of only mapping to club cards.
     if (realColorsChk.checked) {
       const sampleCols = Math.min(200, Math.max(32, Math.round(w / 3)));
       const sampleRows = Math.max(2, Math.round((sampleCols * pendingImport.bitmap.height) / pendingImport.bitmap.width));
       const px = rasterize(pendingImport.bitmap, sampleCols, sampleRows);
       const extracted = extractPalette(px, sampleCols, sampleRows, 6, Number(importAlpha.value));
       if (extracted.length > 0) {
-        store.setPalette(['#262a33', ...extracted]); // slot 0 stays the empty seat
+        // Append the picture's real colours as NEW swatches without disturbing
+        // existing palette indices — every already-painted seat keeps its colour.
+        // The image quantizes onto these swatches at bake time, so it still keeps
+        // its true look. (The old setPalette() replaced the whole palette, so the
+        // index→colour map shifted under every painted seat and recoloured the
+        // entire stadium — with no undo, since a palette swap isn't a cell stroke.)
+        store.addPaletteColors(extracted);
         editor.rebuildPalette();
-        editor.repaintAll();
         renderPalette();
         const presetSel = $('#preset') as unknown as HTMLSelectElement;
-        presetSel.value = ''; // custom palette no longer matches a named preset
+        presetSel.value = ''; // palette extended — no longer a named preset
       }
     }
     objects.addImage({
