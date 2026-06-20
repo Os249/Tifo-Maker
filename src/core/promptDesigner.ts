@@ -16,11 +16,11 @@
 import {
   type TifoSpec,
   type SpecLayer,
-  type Stand,
+  type Region,
   type SymbolName,
   type RegionInput,
-  STANDS,
   SYMBOL_NAMES,
+  normalizeRegion,
   validateSpec,
 } from './tifoSpec';
 
@@ -270,19 +270,13 @@ export function designFromPrompt(prompt: string): TifoSpec {
   return res.spec ?? spec;
 }
 
-function regionObj(r: RegionInput): RegionInput {
-  return r; // validator normalizes; kept as-is so shorthands survive
+/** Normalize a region shorthand to the object form layers require. */
+function regionObj(r: RegionInput): Region {
+  return normalizeRegion(r) ?? { stand: 'all', tier: 'all' };
 }
-function rowsObj(r: RegionInput, rows: [number, number]): RegionInput {
-  if (typeof r === 'string') {
-    if (r === 'all') return { stand: 'all', tier: 'all', rows };
-    if (r === 'lower') return { stand: 'all', tier: 0, rows };
-    if (r === 'upper') return { stand: 'all', tier: 1, rows };
-    if ((STANDS as string[]).includes(r)) return { stand: r as Stand, tier: 'all', rows };
-  } else if (r && typeof r === 'object') {
-    return { ...r, rows };
-  }
-  return { stand: 'all', tier: 'all', rows };
+/** Same, but clipped to a vertical row band (front=0 … back=1). */
+function rowsObj(r: RegionInput, rows: [number, number]): Region {
+  return { ...regionObj(r), rows };
 }
 
 function cap(s: string): string {

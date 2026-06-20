@@ -1342,7 +1342,7 @@ export function mountToolbar(
       objKind.textContent = '';
       return;
     }
-    objKind.textContent = sel.kind === 'text' ? `"${sel.text}"` : sel.name;
+    objKind.textContent = sel.kind === 'text' ? `"${sel.text}"` : sel.kind === 'shape' ? sel.shape : sel.name;
     // Height shown in seats: derive from current footprint.
     const heightSeats = Math.round(sel.height / EDITOR_UNITS.rowPx);
     objHeight.value = String(Math.max(6, Math.min(60, heightSeats)));

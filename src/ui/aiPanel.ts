@@ -52,7 +52,6 @@ export function mountAiPanel(deps: AiPanelDeps): void {
   // Snapshot of the canvas before the first AI apply (for revert / clean regen).
   let baselineCells: Uint8Array | null = null;
   let baselinePalette: string[] | null = null;
-  let lastSpec: TifoSpec | null = null;
   let busy = false;
 
   const setStatus = (msg: string): void => { if (statusEl) statusEl.textContent = msg; };
@@ -81,7 +80,6 @@ export function mountAiPanel(deps: AiPanelDeps): void {
     captureBaseline();
     objects.clear(); // floating (unbaked) objects don't belong to a fresh generation
     const result = compileSpec(spec, map, store);
-    lastSpec = spec;
     refresh();
     editor.fitToView();
     if (summaryEl) {
@@ -101,7 +99,6 @@ export function mountAiPanel(deps: AiPanelDeps): void {
     store.commitStroke();
     baselineCells = null;
     baselinePalette = null;
-    lastSpec = null;
     refresh();
     if (resultEl) resultEl.style.display = 'none';
     setStatus('Reverted to your previous canvas.');
