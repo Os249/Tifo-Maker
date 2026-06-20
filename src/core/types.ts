@@ -65,7 +65,7 @@ export interface SeatMap {
 /** A complete design: one byte per seat. 60k seats = 60 KB raw, ~2–8 KB gzipped. */
 export interface DesignState {
   seatMapRef: { id: string; version: number };
-  /** Up to 8 hex colors. Index 0 is always "empty seat". */
+  /** Up to 256 hex colors (one byte per seat). Index 0 is always "empty seat". */
   palette: string[];
   cells: Uint8Array;
 }
@@ -80,5 +80,5 @@ export interface SparseDiff {
   after: Uint8Array;
 }
 
-export type ToolId = 'brush' | 'fill' | 'eraser' | 'pan' | 'text' | 'import' | 'select';
+export type ToolId = 'brush' | 'fill' | 'eraser' | 'pan' | 'text' | 'import' | 'select' | 'shape';
 export type FillScope = 'section' | 'global';

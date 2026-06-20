@@ -34,7 +34,9 @@ export class ObjectOverlay {
   private keyFor(obj: TifoObject): string {
     return obj.kind === 'text'
       ? `t:${obj.text}:${obj.fontId}:${obj.arcDeg}`
-      : `i:${obj.id}`;
+      : obj.kind === 'shape'
+        ? `s:${obj.shape}`
+        : `i:${obj.id}`;
   }
 
   /** Reconcile sprites with the layer's current objects + selection. */

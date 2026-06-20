@@ -450,7 +450,7 @@ export class Editor {
         }
         return;
       }
-      if (this.tool === 'text' || this.tool === 'import') {
+      if (this.tool === 'text' || this.tool === 'import' || this.tool === 'shape') {
         // Stamps are never mirrored — reflected glyphs/crests read backwards.
         this.onPlaceStamp?.(wx, wy);
         return;
@@ -495,7 +495,7 @@ export class Editor {
         if (r && this.onObjectResize) this.onObjectResize(r.resizedToHeight);
         return;
       }
-      if ((this.tool === 'text' || this.tool === 'import') && this.stampPreview) {
+      if ((this.tool === 'text' || this.tool === 'import' || this.tool === 'shape') && this.stampPreview) {
         const [tx, ty] = this.toWorld(e);
         this.stampPreview.position.set(tx - this.stampPreviewW / 2, ty - this.stampPreviewH / 2);
         this.stampPreview.visible = true;

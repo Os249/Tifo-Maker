@@ -4,8 +4,8 @@ import { fileURLToPath } from 'node:url';
 import pg from 'pg';
 import { generateSeatMap } from '../../src/core/seatmap';
 import { TEMPLATES } from '../../src/core/template';
-import { MemoryAuthRepository, MemoryDesignRepository, MemoryEventsRepository, MemoryLeadsRepository } from './memoryRepo';
-import { PgAuthRepository, PgDesignRepository, PgEventsRepository, PgLeadsRepository } from './pgRepo';
+import { MemoryAiUsageRepository, MemoryAuthRepository, MemoryDesignRepository, MemoryEventsRepository, MemoryLeadsRepository } from './memoryRepo';
+import { PgAiUsageRepository, PgAuthRepository, PgDesignRepository, PgEventsRepository, PgLeadsRepository } from './pgRepo';
 import { PgSocialRepository } from './pgSocial';
 import { MemorySocialRepository } from './memorySocial';
 import { buildApp, type TemplateInfo } from './routes';
@@ -74,6 +74,8 @@ async function main(): Promise<void> {
       adminUsernames: adminUsernames,
       social: new PgSocialRepository(pool),
       leads: new PgLeadsRepository(pool),
+      aiUsage: new PgAiUsageRepository(pool),
+      aiFreeLimit: Number(process.env.AI_FREE_LIMIT ?? 5),
     });
   } else {
     if (isProd) {
@@ -93,6 +95,8 @@ async function main(): Promise<void> {
       adminUsernames: adminUsernames,
       social: new MemorySocialRepository(designs, auth),
       leads: new MemoryLeadsRepository(),
+      aiUsage: new MemoryAiUsageRepository(),
+      aiFreeLimit: Number(process.env.AI_FREE_LIMIT ?? 5),
     });
   }
 

@@ -44,11 +44,13 @@
         <span class="sep"></span>
         <button class="tool" data-tool="text" title="Text (T)" aria-label="Text"><i class="ti ti-typography"></i></button>
         <button class="tool" data-tool="import" title="Import image (I)" aria-label="Import image"><i class="ti ti-photo"></i></button>
+        <button class="tool" data-tool="shape" title="Shapes (S)" aria-label="Shapes"><i class="ti ti-shape"></i></button>
         <span class="sep"></span>
         <button class="tool" data-tool="pan" title="Pan (Space)" aria-label="Pan"><i class="ti ti-arrows-move"></i></button>
         <span class="sep"></span>
         <button class="tool" data-tool="select" title="Select &amp; move objects (V)" aria-label="Select"><i class="ti ti-pointer"></i></button>
         <span class="rail-spacer"></span>
+        <button class="tool rail-menu" id="rail-ai" title="AI Designer" aria-label="AI tifo designer"><i class="ti ti-sparkles"></i></button>
         <button class="tool rail-menu" id="rail-anim" title="Animation" aria-label="Animation preferences"><i class="ti ti-movie"></i></button>
         <button class="tool rail-menu" id="rail-save" title="Save &amp; export" aria-label="Save and export"><i class="ti ti-device-floppy"></i></button>
       </nav>
@@ -95,6 +97,31 @@
           <span class="hint">pick a color, then click a stand to place</span>
         </div>
 
+        <div id="shape-bar" class="tool-bar" hidden>
+          <label for="shape-kind">Shape</label>
+          <select id="shape-kind">
+            <option value="rect">Rectangle</option>
+            <option value="ellipse">Ellipse</option>
+            <option value="circle">Circle</option>
+            <option value="triangle">Triangle</option>
+            <option value="diamond">Diamond</option>
+            <option value="line">Line / bar</option>
+            <option value="star">Star</option>
+            <option value="star6">Star (6)</option>
+            <option value="heart">Heart</option>
+            <option value="crown">Crown</option>
+            <option value="shield">Shield</option>
+            <option value="ring">Ring</option>
+            <option value="cross">Cross</option>
+            <option value="chevron">Chevron</option>
+            <option value="bolt">Bolt</option>
+            <option value="flame">Flame</option>
+          </select>
+          <label for="shape-size">Height <span id="shape-size-out">40</span> seats</label>
+          <input type="range" id="shape-size" min="6" max="160" step="1" value="40" />
+          <span class="hint">pick a colour, then click a stand to place</span>
+        </div>
+
         <div class="canvas-wrap">
           <div id="canvas-host"></div>
           <div id="preview-host" hidden></div>
@@ -127,6 +154,28 @@
           <button id="panel-toggle" aria-label="Collapse panel" style="padding:2px 6px;border:none;"><i class="ti ti-layout-sidebar-right-collapse"></i></button>
         </div>
         <p class="panel-orient">Paint on the <b>canvas</b> at left. These panels set <b>how</b> you paint and the look. Switch <b>Design / Stadium / Split</b> above to see it on the seats or in 3D.</p>
+
+        <div class="panel-section" id="ctx-ai" data-panel="__menu_only__" data-menu="ai">
+          <h4>AI Designer <span class="h4-tag">describe it, get a tifo</span></h4>
+          <p class="hint" style="font-size:11px;color:var(--text-3);margin:0 0 8px;">Describe a display in plain words — a stand, colours, text, a symbol. The AI composes a fully editable tifo on the seats.</p>
+          <textarea id="ai-prompt" rows="3" maxlength="400" placeholder="e.g. Giant eagle covering the south stand in black and gold" style="width:100%;box-sizing:border-box;resize:vertical;font:inherit;padding:8px;border:1px solid var(--line-1);border-radius:var(--r-md);background:var(--bg-1);color:var(--text-1);"></textarea>
+          <div class="chips" id="ai-examples" style="margin-top:8px;flex-wrap:wrap;">
+            <button class="chip" data-ex="Red and white CHAMPIONS card stunt across the stadium">CHAMPIONS stunt</button>
+            <button class="chip" data-ex="Giant Cristiano Ronaldo tifo in the north stand using black, white and yellow">Ronaldo · north</button>
+            <button class="chip" data-ex="Giant eagle covering the south stand in black and gold">Eagle · south</button>
+          </div>
+          <button id="ai-generate" class="primary" style="width:100%;margin-top:10px;"><i class="ti ti-sparkles"></i> Generate tifo</button>
+          <p id="ai-status" class="hint" style="font-size:11px;color:var(--text-3);margin:8px 0 0;min-height:14px;"></p>
+          <div id="ai-error" class="hint" style="display:none;font-size:11px;color:var(--flare);margin-top:8px;"></div>
+          <div id="ai-result" style="display:none;margin-top:10px;">
+            <p id="ai-summary" style="font-size:12px;color:var(--text-2);margin:0 0 8px;"></p>
+            <div class="group">
+              <button id="ai-regen" class="primary" style="flex:1;"><i class="ti ti-refresh"></i> Regenerate</button>
+              <button id="ai-revert" title="Restore the canvas from before this design">Revert</button>
+            </div>
+          </div>
+          <p id="ai-quota" class="hint" style="font-size:11px;color:var(--text-3);margin:8px 0 0;"></p>
+        </div>
 
         <div class="panel-section" id="ctx-objects" data-panel="select">
           <h4>Object <span id="obj-kind" style="color:var(--text-3);"></span></h4>

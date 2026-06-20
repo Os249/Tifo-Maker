@@ -2,6 +2,7 @@ import type { SeatMap } from './types';
 import type { DesignStore } from './design';
 import { applyGridToSeats, maskFromAlpha, quantizePixels, rasterize } from './importImage';
 import { renderTextCanvas, type TifoFont } from './text';
+import { drawSymbol } from './symbols';
 
 /**
  * Floating object layer.
@@ -47,7 +48,13 @@ export interface ImageObject extends BaseObject {
   alphaThreshold: number;
 }
 
-export type TifoObject = TextObject | ImageObject;
+export interface ShapeObject extends BaseObject {
+  kind: 'shape';
+  /** A SHAPE_NAMES entry (rect, ellipse, star, shield, …). Drawn as a 1-colour mask. */
+  shape: string;
+}
+
+export type TifoObject = TextObject | ImageObject | ShapeObject;
 
 type Listener = () => void;
 
@@ -105,6 +112,15 @@ export class ObjectLayer {
   addImage(obj: Omit<ImageObject, 'id' | 'kind'>): ImageObject {
     this.pushHistory();
     const created: ImageObject = { ...obj, id: `i${++this.seq}`, kind: 'image' };
+    this.objects.push(created);
+    this.selectedId = created.id;
+    this.notify();
+    return created;
+  }
+
+  addShape(obj: Omit<ShapeObject, 'id' | 'kind'>): ShapeObject {
+    this.pushHistory();
+    const created: ShapeObject = { ...obj, id: `s${++this.seq}`, kind: 'shape' };
     this.objects.push(created);
     this.selectedId = created.id;
     this.notify();
@@ -184,12 +200,12 @@ export class ObjectLayer {
     const rows = Math.max(2, Math.min(400, Math.round(obj.height / 8)));
     const pixels = rasterize(source, cols, rows);
     const grid =
-      obj.kind === 'text'
-        ? maskFromAlpha(pixels, cols, rows, obj.colorIndex)
-        : quantizePixels(pixels, cols, rows, store.palette, {
+      obj.kind === 'image'
+        ? quantizePixels(pixels, cols, rows, store.palette, {
             dither: obj.dither,
             alphaThreshold: obj.alphaThreshold,
-          });
+          })
+        : maskFromAlpha(pixels, cols, rows, obj.colorIndex); // text + shape: 1-colour mask
     const target = { x: obj.cx - obj.width / 2, y: obj.cy - obj.height / 2, width: obj.width, height: obj.height };
     const accept = obj.tier === null ? undefined : (i: number) => map.tierOf[i] === obj.tier;
     store.beginStroke();
@@ -212,6 +228,18 @@ export function renderObjectCanvas(obj: TifoObject): HTMLCanvasElement | ImageBi
   if (obj.kind === 'text') {
     const r = renderTextCanvas(obj.text, obj.fontCss, obj.arcDeg);
     return r?.canvas ?? null;
+  }
+  if (obj.kind === 'shape') {
+    // White-on-transparent shape at the object's aspect (resize preserves aspect,
+    // so this is stamped without distortion). Colour is applied at bake time.
+    const aspect = obj.width / obj.height || 1;
+    const canvas = document.createElement('canvas');
+    canvas.height = 220;
+    canvas.width = Math.max(8, Math.round(220 * aspect));
+    const ctx = canvas.getContext('2d')!;
+    ctx.fillStyle = '#ffffff';
+    drawSymbol(ctx, obj.shape, canvas.width, canvas.height);
+    return canvas;
   }
   return obj.bitmap;
 }

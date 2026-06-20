@@ -13,7 +13,8 @@ import { renderDistributionPdf } from '../../src/export/distributionPdf';
 
 import { tmpdir } from 'node:os';
 import { readFile, unlink } from 'node:fs/promises';
-import type { AuthRepository, DesignRepository, EventsRepository, LeadsRepository, SocialRepository } from './repo';
+import type { AiUsageRepository, AuthRepository, DesignRepository, EventsRepository, LeadsRepository, SocialRepository } from './repo';
+import { registerAiRoutes } from './aiRoutes';
 
 /**
  * HTTP surface (blueprint §2.2, completed with auth + gallery):
@@ -71,6 +72,10 @@ export interface AppOptions {
   social?: SocialRepository;
   /** Optional B2B leads store (For Clubs enterprise form). */
   leads?: LeadsRepository;
+  /** AI Tifo Designer quota store. When present, the /api/ai/* routes are enabled. */
+  aiUsage?: AiUsageRepository;
+  /** Free AI generations per account (default 5). */
+  aiFreeLimit?: number;
 }
 
 export async function buildApp(
@@ -129,8 +134,12 @@ export async function buildApp(
   const seatCount = (id: string, version: number): number | null =>
     templates.find((t) => t.id === id && t.version === version)?.seatCount ?? null;
 
+  // Palette ceiling matches the client (DesignStore.MAX_COLORS) and the .tifo
+  // format: one byte per seat ⇒ up to 256 distinct colours. (It used to cap at 8,
+  // which silently rejected any design with more swatches — e.g. after an image
+  // import or "real colours" — so saving privately AND publishing both failed.)
   const validPalette = (p: unknown): p is string[] =>
-    Array.isArray(p) && p.length >= 2 && p.length <= 8 && p.every((c) => typeof c === 'string' && HEX.test(c));
+    Array.isArray(p) && p.length >= 2 && p.length <= 256 && p.every((c) => typeof c === 'string' && HEX.test(c));
 
   /** User id from a bearer token, or null. Never writes to the reply. */
   const userOf = async (req: FastifyRequest): Promise<string | null> => {
@@ -257,6 +266,18 @@ export async function buildApp(
     return { days, steps: annotated };
   });
   app.get('/api/templates', async () => templates);
+
+  // ---------- AI Tifo Designer (offline designer + optional model) ----------
+  // Auth-gated with a per-account free quota; the spec is validated server-side
+  // with the same validator the client uses before a credit is spent.
+  if (options.aiUsage) {
+    registerAiRoutes(app, {
+      aiUsage: options.aiUsage,
+      userOf,
+      freeLimit: options.aiFreeLimit ?? 5,
+      routeConfig: options.rateLimit ? { config: { rateLimit: { max: 12, timeWindow: '1 minute' } } } : undefined,
+    });
+  }
 
   // ---------- auth ----------
   // Tighter limit on credential endpoints: 10 attempts/minute/IP. Only takes
@@ -530,7 +551,7 @@ export async function buildApp(
     };
     const count = seatCount(body.templateId ?? '', body.templateVersion ?? -1);
     if (!body.title || count === null || !validPalette(body.palette) || !body.cellsGzB64) {
-      return reply.code(400).send({ error: 'title, known templateRef, palette (2-8 hex), cellsGzB64 required' });
+      return reply.code(400).send({ error: 'title, known templateRef, palette (2-256 hex), cellsGzB64 required' });
     }
     const cellsGz = Buffer.from(body.cellsGzB64, 'base64');
     let cells: Buffer;

@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import type {
   AuthRepository,
+  AiUsage,
+  AiUsageRepository,
   DesignMeta,
   DesignRecord,
   DesignRepository,
@@ -27,6 +29,24 @@ interface Row extends DesignRecord {
   votedAt: Map<string, number>;
   isTemplate: boolean;
   tags: string[];
+}
+
+/** In-memory AI quota store: dev mode and route tests. Same contract as Postgres. */
+export class MemoryAiUsageRepository implements AiUsageRepository {
+  private used = new Map<string, number>();
+
+  async get(userId: string, limit: number): Promise<AiUsage> {
+    const u = this.used.get(userId) ?? 0;
+    return { used: u, limit, remaining: Math.max(0, limit - u) };
+  }
+
+  async consume(userId: string, limit: number): Promise<{ allowed: boolean } & AiUsage> {
+    const u = this.used.get(userId) ?? 0;
+    if (u >= limit) return { allowed: false, used: u, limit, remaining: 0 };
+    const n = u + 1;
+    this.used.set(userId, n);
+    return { allowed: true, used: n, limit, remaining: Math.max(0, limit - n) };
+  }
 }
 
 /** In-memory repositories: dev mode and route tests. Same contracts as Postgres. */

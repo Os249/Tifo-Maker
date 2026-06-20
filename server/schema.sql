@@ -186,3 +186,11 @@ CREATE TABLE IF NOT EXISTS leads (
   created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS leads_created_idx ON leads (created_at DESC);
+
+-- AI Tifo Designer: per-account free generation quota. One row per user; `used`
+-- is incremented atomically by the route under a configurable ceiling.
+CREATE TABLE IF NOT EXISTS ai_usage (
+  user_id    UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  used       INT NOT NULL DEFAULT 0,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);

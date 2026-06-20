@@ -1,6 +1,8 @@
 import pg from 'pg';
 import type {
   AuthRepository,
+  AiUsage,
+  AiUsageRepository,
   DesignMeta,
   DesignRecord,
   DesignRepository,
@@ -39,6 +41,34 @@ function rowToMeta(r: Record<string, unknown>): DesignMeta {
     allowRemix: r.allow_remix === undefined ? true : r.allow_remix !== false,
     remixedFrom: r.remixed_from ? String(r.remixed_from) : null,
   };
+}
+
+/** Postgres AI quota store. consume() is atomic via a conditional UPSERT. */
+export class PgAiUsageRepository implements AiUsageRepository {
+  constructor(private readonly pool: pg.Pool) {}
+
+  async get(userId: string, limit: number): Promise<AiUsage> {
+    const r = await this.pool.query('SELECT used FROM ai_usage WHERE user_id = $1', [userId]);
+    const used = r.rows[0] ? Number(r.rows[0].used) : 0;
+    return { used, limit, remaining: Math.max(0, limit - used) };
+  }
+
+  async consume(userId: string, limit: number): Promise<{ allowed: boolean } & AiUsage> {
+    // First generation inserts used=1; later ones increment ONLY while under the
+    // limit (the WHERE on DO UPDATE). No matching row returned ⇒ over quota.
+    const r = await this.pool.query(
+      `INSERT INTO ai_usage (user_id, used) VALUES ($1, 1)
+       ON CONFLICT (user_id) DO UPDATE SET used = ai_usage.used + 1, updated_at = now()
+         WHERE ai_usage.used < $2
+       RETURNING used`,
+      [userId, limit],
+    );
+    if (r.rows[0]) {
+      const used = Number(r.rows[0].used);
+      return { allowed: true, used, limit, remaining: Math.max(0, limit - used) };
+    }
+    return { allowed: false, ...(await this.get(userId, limit)) };
+  }
 }
 
 /** Postgres design repository. Diffs and snapshots append in one transaction. */

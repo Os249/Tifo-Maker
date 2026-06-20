@@ -1,5 +1,6 @@
 import type { DesignStore } from '../core/design';
 import type { SeatMap } from '../core/types';
+import type { TifoSpec } from '../core/tifoSpec';
 
 /**
  * Browser client for the Tifo Maker API. Cells gzip client-side with
@@ -597,4 +598,51 @@ export async function submitLead(lead: LeadInput): Promise<{ ok: boolean; id?: s
     throw new Error(e.error ?? `submission failed (${res.status})`);
   }
   return res.json() as Promise<{ ok: boolean; id?: string }>;
+}
+
+// ---------- AI Tifo Designer ----------
+
+export interface AiQuota {
+  used: number;
+  limit: number;
+  remaining: number;
+  provider?: string;
+}
+
+export interface AiGenerateResult {
+  spec: TifoSpec;
+  quota: AiQuota;
+  source: 'model' | 'offline';
+}
+
+/** Error thrown by generateAiTifo, carrying the HTTP status and (if any) quota. */
+export interface AiError extends Error {
+  status?: number;
+  quota?: AiQuota;
+}
+
+/**
+ * Ask the server to design a tifo from a prompt. Returns a validated TifoSpec
+ * (the client compiles it to seats). On failure throws an AiError whose `status`
+ * distinguishes 401 (sign in), 402 (out of free credits, with `quota`), etc.
+ */
+export async function generateAiTifo(prompt: string): Promise<AiGenerateResult> {
+  const res = await fetch(`${API}/ai/generate`, {
+    method: 'POST',
+    headers: authHeaders(true),
+    body: JSON.stringify({ prompt }),
+  });
+  const data = (await res.json().catch(() => null)) as (AiGenerateResult & { error?: string; quota?: AiQuota }) | null;
+  if (!res.ok) {
+    const err = new Error(data?.error ?? `generation failed (${res.status})`) as AiError;
+    err.status = res.status;
+    err.quota = data?.quota;
+    throw err;
+  }
+  return data as AiGenerateResult;
+}
+
+/** Read the signed-in account's remaining AI generations. */
+export async function fetchAiQuota(): Promise<AiQuota> {
+  return (await expectOk(await fetch(`${API}/ai/quota`, { headers: authHeaders(false) }))) as AiQuota;
 }

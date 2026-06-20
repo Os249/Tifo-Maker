@@ -14,7 +14,9 @@ import { buildTifoV2 } from '../core/tifoFormat';
 import { extractPalette, rasterize } from '../core/importImage';
 import { openAuthModal } from './authModal';
 import { openGallery } from './gallery';
+import { mountAiPanel } from './aiPanel';
 import { EDITOR_UNITS } from '../core/seatmap';
+import { drawSymbol, SHAPE_ASPECT } from '../core/symbols';
 import type { Preview3D } from '../render/preview3d';
 import {
   exportStadiumVideo,
@@ -49,6 +51,7 @@ export function mountToolbar(
   const docTitle = $('#doc-title') as unknown as HTMLInputElement;
   const textBar = $('#text-bar');
   const importBar = $('#import-bar');
+  const shapeBar = $('#shape-bar');
   let pendingImport: { bitmap: ImageBitmap; name: string } | null = null;
   let onEnterMode: (tool: ToolId) => void = () => {};
   let objectPanelHook: () => void = () => {};
@@ -63,9 +66,10 @@ export function mountToolbar(
   // 'save' / 'animation' focus the panel onto sections tagged with data-menu, so
   // the left-rail Save button and the right Animation button each open just their
   // own options. Picking any paint tool returns to 'design'.
-  let panelMode: 'design' | 'save' | 'animation' = 'design';
+  let panelMode: 'design' | 'save' | 'animation' | 'ai' = 'design';
   const railSaveBtn = root.querySelector<HTMLButtonElement>('#rail-save');
   const animOpenBtn = root.querySelector<HTMLButtonElement>('#rail-anim');
+  const aiOpenBtn = root.querySelector<HTMLButtonElement>('#rail-ai');
 
   const showSection = (sec: HTMLElement, show: boolean): void => {
     if (show) {
@@ -98,14 +102,16 @@ export function mountToolbar(
     if (orientNote) orientNote.style.display = panelMode === 'design' && tool === 'brush' ? '' : 'none';
     if (railSaveBtn) railSaveBtn.classList.toggle('menu-active', panelMode === 'save');
     if (animOpenBtn) animOpenBtn.classList.toggle('menu-active', panelMode === 'animation');
+    if (aiOpenBtn) aiOpenBtn.classList.toggle('menu-active', panelMode === 'ai');
   };
 
-  const setPanelMode = (mode: 'design' | 'save' | 'animation'): void => {
+  const setPanelMode = (mode: 'design' | 'save' | 'animation' | 'ai'): void => {
     panelMode = mode;
     applyContextPanel(editor.tool);
   };
   railSaveBtn?.addEventListener('click', () => setPanelMode(panelMode === 'save' ? 'design' : 'save'));
   animOpenBtn?.addEventListener('click', () => setPanelMode(panelMode === 'animation' ? 'design' : 'animation'));
+  aiOpenBtn?.addEventListener('click', () => setPanelMode(panelMode === 'ai' ? 'design' : 'ai'));
 
   const setTool = (tool: ToolId): void => {
     editor.tool = tool;
@@ -114,7 +120,8 @@ export function mountToolbar(
     editor.app.canvas.style.cursor = tool === 'pan' ? 'grab' : 'crosshair';
     textBar.hidden = tool !== 'text';
     importBar.hidden = tool !== 'import';
-    if (tool !== 'text' && tool !== 'import') editor.hideStampPreview();
+    shapeBar.hidden = tool !== 'shape';
+    if (tool !== 'text' && tool !== 'import' && tool !== 'shape') editor.hideStampPreview();
     if (tool === 'import' && !pendingImport) fileInput.click();
     if (tool !== 'select') editor.clearSelection();
     applyContextPanel(tool);
@@ -189,6 +196,23 @@ export function mountToolbar(
   reflectFg();
   store.onDirty(renderPalette);
   store.onDirty(() => track('paint_first'));
+
+  // ---- AI Tifo Designer panel (rail "sparkles" button → panelMode 'ai') ----
+  mountAiPanel({
+    root,
+    store,
+    editor,
+    map,
+    objects,
+    getPreview,
+    refresh: () => {
+      editor.rebuildPalette();
+      editor.repaintAll();
+      renderPalette();
+      reflectFg();
+      try { getPreview?.()?.recolorAll(); } catch { /* preview not yet created */ }
+    },
+  });
 
   // Pick ANY colour and start painting with it. Auto-adds it as a swatch so it's
   // reusable (the confirmed behaviour). Uses a hidden native colour input.
@@ -718,15 +742,61 @@ export function mountToolbar(
   });
   $('#import-cancel').addEventListener('click', cancelImport);
 
+  // Shapes tool: vector primitives + symbols → 1-colour mask → seat stamp, placed
+  // as a movable/resizable object (the exact pipeline the Text tool uses).
+  const shapeKind = $('#shape-kind') as unknown as HTMLSelectElement;
+  const shapeSize = $('#shape-size') as unknown as HTMLInputElement;
+  const shapeSizeOut = $('#shape-size-out');
+  const shapeAspect = (kind: string): number => SHAPE_ASPECT[kind] ?? 1;
+  const renderShapeCanvas = (kind: string): HTMLCanvasElement => {
+    const aspect = shapeAspect(kind);
+    const c = document.createElement('canvas');
+    c.height = 160;
+    c.width = Math.max(8, Math.round(160 * aspect));
+    const ctx = c.getContext('2d')!;
+    ctx.fillStyle = '#ffffff';
+    drawSymbol(ctx, kind, c.width, c.height);
+    return c;
+  };
+  const refreshShapePreview = (): void => {
+    const kind = shapeKind.value;
+    const h = Number(shapeSize.value) * EDITOR_UNITS.rowPx;
+    editor.setStampPreview(renderShapeCanvas(kind), true); // tints to the active swatch
+    editor.setStampPreviewSize(h * shapeAspect(kind), h);
+  };
+  shapeKind.addEventListener('change', refreshShapePreview);
+  shapeSize.addEventListener('input', () => {
+    shapeSizeOut.textContent = shapeSize.value;
+    refreshShapePreview();
+  });
+  const placeShapeAt = (x: number, y: number): void => {
+    const kind = shapeKind.value;
+    const h = Number(shapeSize.value) * EDITOR_UNITS.rowPx;
+    objects.addShape({
+      cx: x,
+      cy: y,
+      width: h * shapeAspect(kind),
+      height: h,
+      colorIndex: editor.colorIndex,
+      tier: null,
+      shape: kind,
+    });
+    editor.objectOverlay?.sync();
+    setTool('select');
+    message.textContent = `${kind} added — drag to position, resize from the corner, then Bake`;
+  };
+
   // One shared placement-click callback, dispatched by the active mode.
   editor.onPlaceStamp = (x, y) => {
     if (editor.tool === 'text') placeTextAt(x, y);
+    else if (editor.tool === 'shape') placeShapeAt(x, y);
     else if (editor.tool === 'import' && importPlace.value === 'click') stampImageAt(x, y);
   };
 
   // Rebuild the right ghost when (re-)entering a stamp mode.
   onEnterMode = (tool) => {
     if (tool === 'text') rebuildTextPreview();
+    else if (tool === 'shape') refreshShapePreview();
     else if (tool === 'import' && pendingImport) {
       editor.setStampPreview(pendingImport.bitmap, false);
       refreshImportUI();
@@ -1115,6 +1185,7 @@ export function mountToolbar(
       return;
     }
     if (k === 't') setTool('text');
+    if (k === 's') setTool('shape');
     if (k === 'b') setTool('brush');
     if (k === 'f') setTool('fill');
     if (k === 'e') setTool('eraser');

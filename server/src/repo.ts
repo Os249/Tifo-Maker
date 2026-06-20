@@ -283,3 +283,24 @@ export interface LeadsRepository {
   /** Store a B2B enterprise lead from the For Clubs page. */
   createLead(lead: Lead): Promise<{ id: string }>;
 }
+
+// ============ AI Tifo Designer quota ============
+
+export interface AiUsage {
+  /** Generations consumed so far by this account. */
+  used: number;
+  /** The free ceiling applied. */
+  limit: number;
+  /** Generations remaining (never negative). */
+  remaining: number;
+}
+
+export interface AiUsageRepository {
+  /** Read a user's current usage WITHOUT consuming a credit. */
+  get(userId: string, limit: number): Promise<AiUsage>;
+  /**
+   * Atomically consume one credit if the user is under `limit`. Returns whether
+   * it was allowed plus the resulting usage. Safe under concurrent calls.
+   */
+  consume(userId: string, limit: number): Promise<{ allowed: boolean } & AiUsage>;
+}
