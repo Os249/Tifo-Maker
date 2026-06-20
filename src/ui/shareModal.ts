@@ -101,7 +101,7 @@ export function openShareModal(target: ShareTarget): void {
     <div class="sm-card" role="dialog" aria-modal="true" aria-label="Share tifo">
       <div class="sm-head"><h3>Share this tifo</h3><button class="sm-x" aria-label="Close">&times;</button></div>
       <img class="sm-preview" src="${ogImageUrl(target.id)}" alt="" />
-      ${navigator.share ? `<button class="sm-native"><i class="ti ti-share"></i> Share…</button>` : ''}
+      ${'share' in navigator ? `<button class="sm-native"><i class="ti ti-share"></i> Share…</button>` : ''}
       <div class="sm-grid"></div>
       <div class="sm-row">
         <input class="sm-link" readonly value="${url}" />
