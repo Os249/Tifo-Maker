@@ -87,13 +87,15 @@ export function buildSystemPrompt(): string {
     `FontId: ${SPEC_FONT_IDS.join(', ')}.`,
     `SymbolName (drawable vector symbols): ${SYMBOL_NAMES.join(', ')}.`,
     'For a PORTRAIT, a player, a face, a mascot or detailed artwork, use an "image"',
-    'layer — it is the HERO: make it large (scaleFrac 0.85-1.0) on its OWN stand,',
+    'layer — it is the HERO: make it large (scaleFrac 0.9-1.0) on its OWN stand,',
     'with the name/number on the OPPOSITE stand. Describe the subject in "prompt".',
-    'Such designs NEED a tonal palette of 5-6 colours (dark/mid/light of the main',
-    'colour + skin tones) so the picture shades — never just two flat colours. Do',
-    'NOT flood the whole bowl with one flat fill behind a portrait; give each stand',
-    'a distinct role. Use vector symbols for simple emblems, image layers for any',
-    'real person or photographic subject.',
+    'Such designs NEED a tonal palette of 5-6 colours so the face shades cleanly:',
+    'even if the brief names only one or two colours, ADD the in-between tones',
+    '(e.g. black → dark grey → mid grey → light grey → white) PLUS one skin tone —',
+    'a portrait rendered in two flat colours reads as a shapeless blob. Order the',
+    'palette dark → light. Do NOT flood the whole bowl with one flat fill behind a',
+    'portrait; give each stand a distinct role. Use vector symbols for simple',
+    'emblems, image layers for any real person or photographic subject.',
     '',
     'Rules: keep the palette tight (2-5 colours typically). Put one clear focal',
     'element. Maximise contrast between text/symbol and the field behind it.',
@@ -132,36 +134,45 @@ async function postJson(url: string, headers: Record<string, string>, body: unkn
   }
 }
 
+export interface ProviderResult {
+  /** Parsed (UNvalidated) JSON spec, or null on failure. */
+  spec: unknown | null;
+  /** Human-readable failure reason (surfaced to the UI when it falls back offline). */
+  error?: string;
+}
+
+async function httpError(label: string, res: Response): Promise<string> {
+  let body = '';
+  try {
+    body = (await res.text()).slice(0, 180).replace(/\s+/g, ' ').trim();
+  } catch {
+    /* ignore */
+  }
+  return `${label}: HTTP ${res.status}${body ? ` — ${body}` : ''}`;
+}
+
 /**
- * Ask the configured model for a TifoSpec. Returns the parsed (UNvalidated) JSON,
- * or null if no provider is configured or the call/parsing fails — the caller
- * always validates and falls back to the offline designer.
+ * Ask the configured model for a TifoSpec. Returns the parsed (UNvalidated) JSON
+ * plus, on failure, a human-readable reason. The caller validates and falls back
+ * to the offline designer, surfacing the reason in the UI.
  */
-export async function generateSpecViaProvider(prompt: string): Promise<unknown | null> {
+export async function generateSpecViaProvider(prompt: string): Promise<ProviderResult> {
   const provider = activeProvider();
-  if (provider === 'none') return null;
+  if (provider === 'none') return { spec: null, error: 'no AI provider configured' };
   const timeoutMs = Number(process.env.AI_TIMEOUT_MS ?? 20000);
   const system = buildSystemPrompt();
   try {
     if (provider === 'anthropic') {
       const res = await postJson(
         'https://api.anthropic.com/v1/messages',
-        {
-          'content-type': 'application/json',
-          'x-api-key': process.env.ANTHROPIC_API_KEY!,
-          'anthropic-version': '2023-06-01',
-        },
-        {
-          model: process.env.AI_MODEL ?? 'claude-3-5-sonnet-latest',
-          max_tokens: 1500,
-          system,
-          messages: [{ role: 'user', content: userMessage(prompt) }],
-        },
+        { 'content-type': 'application/json', 'x-api-key': process.env.ANTHROPIC_API_KEY!, 'anthropic-version': '2023-06-01' },
+        { model: process.env.AI_MODEL ?? 'claude-3-5-sonnet-latest', max_tokens: 1500, system, messages: [{ role: 'user', content: userMessage(prompt) }] },
         timeoutMs,
       );
-      if (!res.ok) return null;
+      if (!res.ok) return { spec: null, error: await httpError('claude', res) };
       const data = (await res.json()) as { content?: Array<{ text?: string }> };
-      return extractJson(data.content?.[0]?.text ?? '');
+      const spec = extractJson(data.content?.[0]?.text ?? '');
+      return spec ? { spec } : { spec: null, error: 'claude: response was not valid JSON' };
     }
     if (provider === 'gemini') {
       const model = process.env.AI_MODEL ?? 'gemini-2.5-flash';
@@ -175,28 +186,23 @@ export async function generateSpecViaProvider(prompt: string): Promise<unknown |
         },
         timeoutMs,
       );
-      if (!res.ok) return null;
+      if (!res.ok) return { spec: null, error: await httpError(`gemini "${model}"`, res) };
       const data = (await res.json()) as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
-      return extractJson(data.candidates?.[0]?.content?.parts?.[0]?.text ?? '');
+      const spec = extractJson(data.candidates?.[0]?.content?.parts?.[0]?.text ?? '');
+      return spec ? { spec } : { spec: null, error: `gemini "${model}": response was not valid JSON` };
     }
     // openai
     const res = await postJson(
       'https://api.openai.com/v1/chat/completions',
       { 'content-type': 'application/json', authorization: `Bearer ${process.env.OPENAI_API_KEY!}` },
-      {
-        model: process.env.AI_MODEL ?? 'gpt-4o-mini',
-        response_format: { type: 'json_object' },
-        messages: [
-          { role: 'system', content: system },
-          { role: 'user', content: userMessage(prompt) },
-        ],
-      },
+      { model: process.env.AI_MODEL ?? 'gpt-4o-mini', response_format: { type: 'json_object' }, messages: [{ role: 'system', content: system }, { role: 'user', content: userMessage(prompt) }] },
       timeoutMs,
     );
-    if (!res.ok) return null;
+    if (!res.ok) return { spec: null, error: await httpError('openai', res) };
     const data = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
-    return extractJson(data.choices?.[0]?.message?.content ?? '');
-  } catch {
-    return null; // network/timeout/parse → fall back to offline
+    const spec = extractJson(data.choices?.[0]?.message?.content ?? '');
+    return spec ? { spec } : { spec: null, error: 'openai: response was not valid JSON' };
+  } catch (e) {
+    return { spec: null, error: `${provider}: ${(e as Error)?.name === 'AbortError' ? 'timed out' : 'network error'}` };
   }
 }

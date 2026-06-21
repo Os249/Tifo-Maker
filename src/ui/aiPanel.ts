@@ -134,10 +134,14 @@ export function mountAiPanel(deps: AiPanelDeps): void {
       try {
         const bmp = await dataUrlToBitmap(layer.assetRef);
         const rect = regionRect(layer.region, map);
-        const side = layer.scaleFrac * Math.min(rect.width, rect.height);
+        // Portrait is the hero: fill the stand's HEIGHT (its natural large axis),
+        // let width follow the image aspect, and cap to the stand width so it
+        // never bleeds into the neighbouring stands.
         const aspect = bmp.width / bmp.height || 1;
-        const w = aspect >= 1 ? side : side * aspect;
-        const h = aspect >= 1 ? side / aspect : side;
+        let h = layer.scaleFrac * rect.height;
+        let w = h * aspect;
+        const maxW = rect.width * 0.98;
+        if (w > maxW) { w = maxW; h = w / aspect; }
         const created = objects.addImage({
           cx: rect.cx,
           cy: rect.cy,

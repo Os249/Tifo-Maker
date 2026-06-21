@@ -116,12 +116,15 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
     // Try the configured model first; fall back to the deterministic designer.
     let source: 'model' | 'offline' = 'offline';
     let result = { valid: false } as ReturnType<typeof validateSpec>;
-    const fromModel = await generateSpecViaProvider(prompt);
-    if (fromModel) {
-      const r = validateSpec(fromModel);
+    const modelResult = await generateSpecViaProvider(prompt);
+    let modelError = modelResult.error;
+    if (modelResult.spec) {
+      const r = validateSpec(modelResult.spec);
       if (r.valid) {
         result = r;
         source = 'model';
+      } else {
+        modelError = 'text model output failed schema validation';
       }
     }
     if (!result.valid) {
@@ -137,7 +140,7 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
     // Diagnostics surfaced to the UI so failures are visible, not silent.
     const notes: string[] = [];
     if (source === 'offline' && activeProvider() !== 'none') {
-      notes.push('Text model did not respond (rate limit or error) — used the offline designer.');
+      notes.push(`Text model unavailable — ${modelError ?? 'unknown error'} — used the offline designer.`);
     }
 
     // Phase 5: generate a picture for each image layer (portraits/figures).

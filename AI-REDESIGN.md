@@ -1,6 +1,6 @@
 # TifoMaker — AI Tifo Designer Redesign
 
-Status: **Phase 1 complete (AI admin-locked). Phases 2–5 are design-only.**
+Status: **Phases 1–5 shipped.** AI admin-locked; bilingual model planning (Google Gemini, free tier); scene-graph spec with gradient/pattern/image layers; multi-stand composition with a refine/repair pass; free portrait generation (Pollinations) baked to seats.
 Goal: the best AI-powered stadium-choreography designer in the world — not an incremental patch.
 
 ---
@@ -99,17 +99,19 @@ Editor AI panel
 
 **Phase 1 — modified:** `server/src/aiRoutes.ts` (admin gate + `/api/ai/unlock` + HMAC token), `server/src/routes.ts` (pass `isAdmin` + `adminPassword`), `.env.example` (`AI_ADMIN_PASSWORD` + instructions), `src/net/api.ts` (unlock token, headers, `unlockAi`), `src/ui/aiPanel.ts` (locked UI + unlock flow). **New files:** none (reused existing modules).
 
-**Phases 2–5 — anticipated new files:** `src/core/tifoSpec.v2.ts` (scene-graph schema + validator), `src/core/specCompilerV2.ts` (gradient/image/pattern/multi-line text renderers + multi-tone portrait quantizer), `server/src/aiPlanner.ts` (BRIEF → spec, bilingual), `server/src/imageAssets.ts` (image-gen → asset store). **Modified:** `aiProvider.ts` (bilingual system prompt, hybrid routing), `aiRoutes.ts` (re-open with quota), `aiPanel.ts` (richer UX).
+**Phases 2–5 — shipped (extended existing modules rather than separate v2 files):** `server/src/aiProvider.ts` (bilingual system prompt + Gemini call returning `{spec,error}` for precise diagnostics), `server/src/imageAssets.ts` (provider-agnostic image generation — Pollinations free default / Gemini paid), `src/core/specRefine.ts` (art-director contrast/legibility/field repair). **Extended in place:** `src/core/tifoSpec.ts` + `src/core/specCompiler.ts` (gradient/pattern/image layers + renderers, reusing `quantizePixels`/`applyGridToSeats`), `server/src/aiRoutes.ts` (model→offline fallback + surfaced diagnostics), `src/ui/aiPanel.ts` (image layers baked into seats, portrait fills its stand).
 
 ---
 
 ## 8. Roadmap
 
-1. **Admin lock — ✅ done.**
-2. **Prompt interpretation:** wire a real model; bilingual (EN/AR) BRIEF stage; richer designer system prompt.
-3. **TifoSpec v2:** scene graph + image/gradient/pattern/multi-line-text layers; compiler extensions (reuse `quantizePixels`).
-4. **Advanced composition:** multi-region scenes, focal points, critique/repair loop.
-5. **Portrait-quality art:** image-gen → multi-tone/halftone quantizer → seats.
+1. **Admin lock — ✅ done.** Server-side HMAC gate; password lives only in env.
+2. **Prompt interpretation — ✅ done.** Google Gemini (free tier) authors the spec; bilingual EN/AR system prompt; deterministic offline designer as fallback, with the specific failure reason surfaced to the UI.
+3. **Richer design language — ✅ done.** Extended `TifoSpec` in place: added `gradient`, `pattern`, and `image` layers + compiler renderers; reuses `quantizePixels` / `applyGridToSeats`.
+4. **Advanced composition — ✅ done.** Multi-stand regions with disjoint stand bucketing; `specRefine.ts` art-director pass repairs contrast/legibility/field before render.
+5. **Portrait-quality art — ✅ done.** Free image generation via Pollinations (FLUX) → quantized → **baked into seats** (shows in 2D and 3D); the portrait fills its stand and the model is pushed to emit a 5–6 tone palette so faces shade cleanly.
+
+**Next polish (optional):** halftone/dither option per image layer, a richer club-identity library, and a fast/premium model split (see §9).
 
 ## 9. Long-term / future
 
