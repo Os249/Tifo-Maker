@@ -19,6 +19,7 @@ import type { ObjectLayer } from '../core/objects';
 import type { Preview3D } from '../render/preview3d';
 import type { TifoSpec } from '../core/tifoSpec';
 import { compileSpec, regionRect } from '../core/specCompiler';
+import { EDITOR_UNITS } from '../core/seatmap';
 import { generateAiTifo, fetchAiQuota, unlockAi, aiUnlockToken, type AiError, type AiQuota } from '../net/api';
 import { isSignedIn } from '../net/api';
 import { openAuthModal } from './authModal';
@@ -125,43 +126,52 @@ export function mountAiPanel(deps: AiPanelDeps): void {
     objects.clear(); // floating (unbaked) objects don't belong to a fresh generation
     const result = compileSpec(spec, map, store);
 
-    // Image layers (portraits/figures) → floating, editable image objects placed
-    // in their region, rendered to seats by the existing Image-tool quantizer.
+    // Image layers (portraits/figures): place each in its region and BAKE into
+    // the seats (reusing the Image-tool quantizer) so it shows in 2D AND 3D and
+    // becomes part of the design — not an unbaked floating object.
+    let imagesWanted = 0;
+    let imagesDone = 0;
     for (const layer of spec.layers) {
-      if (layer.kind === 'image' && layer.assetRef) {
-        try {
-          const bmp = await dataUrlToBitmap(layer.assetRef);
-          const rect = regionRect(layer.region, map);
-          const side = layer.scaleFrac * Math.min(rect.width, rect.height);
-          const aspect = bmp.width / bmp.height || 1;
-          const w = aspect >= 1 ? side : side * aspect;
-          const h = aspect >= 1 ? side / aspect : side;
-          objects.addImage({
-            cx: rect.cx,
-            cy: rect.cy,
-            width: w,
-            height: h,
-            colorIndex: 0,
-            tier: typeof layer.region.tier === 'number' ? layer.region.tier : null,
-            bitmap: bmp,
-            name: 'AI image',
-            dither: layer.dither,
-            alphaThreshold: 128,
-          });
-        } catch {
-          /* decode failed → skip this image */
-        }
+      if (layer.kind !== 'image') continue;
+      imagesWanted++;
+      if (!layer.assetRef) continue;
+      try {
+        const bmp = await dataUrlToBitmap(layer.assetRef);
+        const rect = regionRect(layer.region, map);
+        const side = layer.scaleFrac * Math.min(rect.width, rect.height);
+        const aspect = bmp.width / bmp.height || 1;
+        const w = aspect >= 1 ? side : side * aspect;
+        const h = aspect >= 1 ? side / aspect : side;
+        const created = objects.addImage({
+          cx: rect.cx,
+          cy: rect.cy,
+          width: w,
+          height: h,
+          colorIndex: 0,
+          tier: typeof layer.region.tier === 'number' ? layer.region.tier : null,
+          bitmap: bmp,
+          name: 'AI image',
+          dither: layer.dither,
+          alphaThreshold: 128,
+        });
+        objects.bake(created, store, map, EDITOR_UNITS.width); // → seats (shows in 3D)
+        imagesDone++;
+      } catch {
+        /* decode/bake failed → skip this image */
       }
     }
-    editor.objectOverlay?.sync();
+    objects.clear(); // floating copies are now baked into the cells
 
     refresh();
     editor.fitToView();
     if (summaryEl) {
-      const warn = result.fragileSeats > result.seatsPainted * 0.25
+      let note = result.fragileSeats > result.seatsPainted * 0.25
         ? ' · some thin detail may not read at scale'
         : '';
-      summaryEl.textContent = (spec.summary ?? spec.title) + warn;
+      if (imagesWanted > 0 && imagesDone === 0) {
+        note += ' · portrait couldn’t be generated — your Gemini plan may not include image generation';
+      }
+      summaryEl.textContent = (spec.summary ?? spec.title) + note;
     }
     if (resultEl) resultEl.style.display = '';
   };

@@ -52,7 +52,8 @@ export async function generateImage(prompt: string): Promise<string | null> {
               ],
             },
           ],
-          generationConfig: { responseModalities: ['IMAGE'] },
+          // Image models require BOTH modalities — IMAGE-only is rejected.
+          generationConfig: { responseModalities: ['TEXT', 'IMAGE'] },
         }),
         signal: ctrl.signal,
       },
