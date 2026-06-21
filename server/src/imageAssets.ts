@@ -50,13 +50,17 @@ interface Attempt {
 
 /** Pollinations.ai — free, no key. Prompt goes in the URL path; returns image bytes. */
 async function callPollinations(prompt: string, timeoutMs: number): Promise<Attempt> {
+  const key = process.env.AI_POLLINATIONS_KEY || process.env.POLLINATIONS_KEY;
+  if (!key) {
+    return { url: null, error: 'pollinations needs a free key — create one at enter.pollinations.ai and set AI_POLLINATIONS_KEY' };
+  }
   const base = process.env.AI_POLLINATIONS_URL || 'https://gen.pollinations.ai/image/';
   const model = process.env.AI_POLLINATIONS_MODEL || 'flux';
-  const url = `${base}${encodeURIComponent(prompt + MOSAIC_STYLE)}?width=768&height=768&nologo=true&model=${encodeURIComponent(model)}`;
+  const url = `${base}${encodeURIComponent(prompt + MOSAIC_STYLE)}?width=768&height=768&model=${encodeURIComponent(model)}`;
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
-    const res = await fetch(url, { signal: ctrl.signal });
+    const res = await fetch(url, { headers: { authorization: `Bearer ${key}` }, signal: ctrl.signal });
     if (!res.ok) {
       let body = '';
       try { body = (await res.text()).slice(0, 160).replace(/\s+/g, ' ').trim(); } catch { /* ignore */ }
