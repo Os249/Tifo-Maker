@@ -820,6 +820,8 @@ export interface AiGenerateResult {
   spec: TifoSpec;
   quota: AiQuota;
   source: 'model' | 'offline';
+  /** Server-side diagnostics (image-gen failures, offline fallback) for the UI. */
+  notes?: string[];
 }
 
 /** Error thrown by the AI calls; `status` 403 with `locked` = admin-only. */

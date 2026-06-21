@@ -134,17 +134,24 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
     // Phase 4: deterministic art-director pass — fix legibility/contrast/field.
     const spec = refineSpec(result.spec);
 
+    // Diagnostics surfaced to the UI so failures are visible, not silent.
+    const notes: string[] = [];
+    if (source === 'offline' && activeProvider() !== 'none') {
+      notes.push('Text model did not respond (rate limit or error) — used the offline designer.');
+    }
+
     // Phase 5: generate a picture for each image layer (portraits/figures).
-    // Best-effort — a failed/unavailable generation just leaves assetRef unset
-    // and the client skips that layer, so the rest of the tifo still renders.
+    // Best-effort — a failed/unavailable generation leaves assetRef unset (the
+    // client skips it) and records WHY so it shows in the status bar.
     for (const layer of spec.layers) {
       if (layer.kind === 'image' && !layer.assetRef) {
-        const url = await generateImage(layer.prompt).catch(() => null);
-        if (url) layer.assetRef = url;
+        const r = await generateImage(layer.prompt).catch((e) => ({ url: null, error: String(e) }) as { url: null; error: string });
+        if (r.url) layer.assetRef = r.url;
+        else notes.push(`Portrait not generated — ${r.error ?? 'unknown error'}`);
       }
     }
 
     // Admin-only lock: unlimited, no per-account credit consumed.
-    return reply.code(200).send({ spec, quota: { admin: true, used: 0, limit: 0, remaining: 999999 }, source });
+    return reply.code(200).send({ spec, quota: { admin: true, used: 0, limit: 0, remaining: 999999 }, source, notes });
   });
 }

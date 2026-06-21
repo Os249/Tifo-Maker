@@ -129,12 +129,8 @@ export function mountAiPanel(deps: AiPanelDeps): void {
     // Image layers (portraits/figures): place each in its region and BAKE into
     // the seats (reusing the Image-tool quantizer) so it shows in 2D AND 3D and
     // becomes part of the design — not an unbaked floating object.
-    let imagesWanted = 0;
-    let imagesDone = 0;
     for (const layer of spec.layers) {
-      if (layer.kind !== 'image') continue;
-      imagesWanted++;
-      if (!layer.assetRef) continue;
+      if (layer.kind !== 'image' || !layer.assetRef) continue;
       try {
         const bmp = await dataUrlToBitmap(layer.assetRef);
         const rect = regionRect(layer.region, map);
@@ -155,7 +151,6 @@ export function mountAiPanel(deps: AiPanelDeps): void {
           alphaThreshold: 128,
         });
         objects.bake(created, store, map, EDITOR_UNITS.width); // → seats (shows in 3D)
-        imagesDone++;
       } catch {
         /* decode/bake failed → skip this image */
       }
@@ -165,13 +160,10 @@ export function mountAiPanel(deps: AiPanelDeps): void {
     refresh();
     editor.fitToView();
     if (summaryEl) {
-      let note = result.fragileSeats > result.seatsPainted * 0.25
+      const warn = result.fragileSeats > result.seatsPainted * 0.25
         ? ' · some thin detail may not read at scale'
         : '';
-      if (imagesWanted > 0 && imagesDone === 0) {
-        note += ' · portrait couldn’t be generated — your Gemini plan may not include image generation';
-      }
-      summaryEl.textContent = (spec.summary ?? spec.title) + note;
+      summaryEl.textContent = (spec.summary ?? spec.title) + warn;
     }
     if (resultEl) resultEl.style.display = '';
   };
@@ -207,8 +199,18 @@ export function mountAiPanel(deps: AiPanelDeps): void {
     try {
       const res = await generateAiTifo(text);
       await applySpec(res.spec);
-      setStatus(res.source === 'model' ? 'Designed with AI.' : 'Designed.');
+      setStatus(res.source === 'model' ? 'Designed with Gemini.' : 'Designed (offline designer — model not reached).');
       setQuota(res.quota);
+      // Surface server diagnostics in the panel AND the footer "ground bar".
+      const notes = res.notes ?? [];
+      const bar = document.getElementById('message');
+      if (notes.length) {
+        setError(notes.join('  ·  '));
+        if (bar) bar.textContent = 'AI: ' + notes.join('  ·  ');
+      } else {
+        setError(null);
+        if (bar) bar.textContent = res.source === 'model' ? 'AI: designed with Gemini ✓' : '';
+      }
     } catch (e) {
       const err = e as AiError;
       if (err.status === 403) {

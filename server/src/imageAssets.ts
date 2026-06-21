@@ -25,9 +25,15 @@ export function imageGenAvailable(): boolean {
  * Generate one image for a subject description. Returns a `data:image/...;base64`
  * URL, or null on any failure (caller treats null as "skip this layer").
  */
-export async function generateImage(prompt: string): Promise<string | null> {
+export interface ImageResult {
+  url: string | null;
+  /** Human-readable reason when url is null (surfaced to the UI for debugging). */
+  error?: string;
+}
+
+export async function generateImage(prompt: string): Promise<ImageResult> {
   const key = geminiKey();
-  if (!key) return null;
+  if (!key) return { url: null, error: 'no GEMINI_API_KEY configured' };
   const model = process.env.AI_IMAGE_MODEL ?? 'gemini-2.5-flash-image';
   const timeoutMs = Number(process.env.AI_IMAGE_TIMEOUT_MS ?? 30000);
   const ctrl = new AbortController();
@@ -58,18 +64,27 @@ export async function generateImage(prompt: string): Promise<string | null> {
         signal: ctrl.signal,
       },
     );
-    if (!res.ok) return null;
+    if (!res.ok) {
+      let body = '';
+      try {
+        body = (await res.text()).slice(0, 160).replace(/\s+/g, ' ').trim();
+      } catch {
+        /* ignore */
+      }
+      return { url: null, error: `image model "${model}": HTTP ${res.status}${body ? ` — ${body}` : ''}` };
+    }
     const data = (await res.json()) as {
       candidates?: Array<{ content?: { parts?: Array<{ inlineData?: { mimeType?: string; data?: string } }> } }>;
     };
     for (const part of data.candidates?.[0]?.content?.parts ?? []) {
       if (part.inlineData?.data) {
-        return `data:${part.inlineData.mimeType ?? 'image/png'};base64,${part.inlineData.data}`;
+        return { url: `data:${part.inlineData.mimeType ?? 'image/png'};base64,${part.inlineData.data}` };
       }
     }
-    return null;
-  } catch {
-    return null; // network/timeout/unavailable → skip the image layer
+    return { url: null, error: `image model "${model}" returned no image` };
+  } catch (e) {
+    const why = (e as Error)?.name === 'AbortError' ? 'request timed out' : 'network error';
+    return { url: null, error: `image model "${model}": ${why}` };
   } finally {
     clearTimeout(timer);
   }
