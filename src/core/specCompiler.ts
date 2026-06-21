@@ -188,6 +188,61 @@ function applyLayer(layer: SpecLayer, map: SeatMap, store: DesignStore): number 
     return painted;
   }
 
+  if (layer.kind === 'gradient') {
+    const { stand } = layer.region;
+    const g = stand === 'all' ? null : STAND_GEOMETRY[stand as Stand];
+    const cols = layer.colors;
+    const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
+    for (let i = 0; i < map.count; i++) {
+      if (!accept(i)) continue;
+      const u = map.uv[i * 2];
+      const v = map.uv[i * 2 + 1];
+      const uLocal = g ? wrapDelta(u, g.centerU) / (2 * g.halfU) + 0.5 : u;
+      let t: number;
+      if (layer.direction === 'horizontal') t = uLocal;
+      else if (layer.direction === 'radial') t = Math.min(1, Math.hypot((uLocal - 0.5) * 2, (v - 0.5) * 2));
+      else t = 1 - v; // vertical: front (bottom) → back (top)
+      const seg = t * (cols.length - 1);
+      const lo = Math.max(0, Math.min(cols.length - 1, Math.floor(seg)));
+      const frac = seg - lo;
+      const th = (BAYER[(map.rowOf[i] % 4) * 4 + (Math.floor(u * 250) % 4)] + 0.5) / 16;
+      const idx = frac > th && lo + 1 < cols.length ? cols[lo + 1] : cols[lo];
+      if (store.paint(i, idx)) painted++;
+    }
+    return painted;
+  }
+
+  if (layer.kind === 'pattern') {
+    const { stand } = layer.region;
+    const g = stand === 'all' ? null : STAND_GEOMETRY[stand as Stand];
+    const cols = layer.colors;
+    const n = Math.max(4, layer.scale);
+    for (let i = 0; i < map.count; i++) {
+      if (!accept(i)) continue;
+      const u = map.uv[i * 2];
+      const v = map.uv[i * 2 + 1];
+      const uLocal = g ? wrapDelta(u, g.centerU) / (2 * g.halfU) + 0.5 : u;
+      const cx = Math.floor(uLocal * n);
+      const cy = Math.floor(v * n);
+      let idx: number;
+      if (layer.pattern === 'flag') {
+        idx = cols[Math.min(cols.length - 1, Math.floor(v * cols.length))];
+      } else {
+        let k = 0;
+        switch (layer.pattern) {
+          case 'checker': k = (cx + cy) & 1; break;
+          case 'grid': k = cx % 2 === 0 || cy % 2 === 0 ? 1 : 0; break;
+          case 'hoops': k = cy & 1; break;
+          case 'chevron': k = (Math.floor(Math.abs(uLocal - 0.5) * n * 2) + cy) & 1; break;
+          default: k = (cx + cy) & 1;
+        }
+        idx = cols[k % cols.length];
+      }
+      if (store.paint(i, idx)) painted++;
+    }
+    return painted;
+  }
+
   // text / symbol → build a target rect, then stamp a mask.
   const { centerX, width: standW } = standExtent(layer.region);
   const { minY, maxY, count } = yBounds(accept, map);

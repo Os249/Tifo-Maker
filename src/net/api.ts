@@ -766,11 +766,54 @@ export async function submitLead(lead: LeadInput): Promise<{ ok: boolean; id?: s
 
 // ---------- AI Tifo Designer ----------
 
+const AI_UNLOCK_KEY = 'tifo_ai_unlock_v1';
+
+/** The admin AI-unlock token (opaque, server-signed). Persists across sessions. */
+export function aiUnlockToken(): string | null {
+  try {
+    return localStorage.getItem(AI_UNLOCK_KEY);
+  } catch {
+    return null;
+  }
+}
+function setAiUnlockToken(t: string | null): void {
+  try {
+    if (t) localStorage.setItem(AI_UNLOCK_KEY, t);
+    else localStorage.removeItem(AI_UNLOCK_KEY);
+  } catch {
+    /* storage unavailable */
+  }
+}
+
+/** Auth headers, plus the AI admin-unlock token when present. */
+function aiHeaders(json: boolean): Record<string, string> {
+  const h = authHeaders(json);
+  const tok = aiUnlockToken();
+  if (tok) h['x-ai-unlock'] = tok;
+  return h;
+}
+
+/** Exchange the admin password for a signed unlock token (stored locally). */
+export async function unlockAi(password: string): Promise<boolean> {
+  const res = await fetch(`${API}/ai/unlock`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ password }),
+  });
+  if (!res.ok) return false;
+  const data = (await res.json().catch(() => null)) as { token?: string } | null;
+  if (!data?.token) return false;
+  setAiUnlockToken(data.token);
+  return true;
+}
+
 export interface AiQuota {
   used: number;
   limit: number;
   remaining: number;
   provider?: string;
+  /** True when the caller has admin access during the AI lock. */
+  admin?: boolean;
 }
 
 export interface AiGenerateResult {
@@ -779,34 +822,44 @@ export interface AiGenerateResult {
   source: 'model' | 'offline';
 }
 
-/** Error thrown by generateAiTifo, carrying the HTTP status and (if any) quota. */
+/** Error thrown by the AI calls; `status` 403 with `locked` = admin-only. */
 export interface AiError extends Error {
   status?: number;
   quota?: AiQuota;
+  locked?: boolean;
 }
 
 /**
  * Ask the server to design a tifo from a prompt. Returns a validated TifoSpec
  * (the client compiles it to seats). On failure throws an AiError whose `status`
- * distinguishes 401 (sign in), 402 (out of free credits, with `quota`), etc.
+ * distinguishes 403 (locked, admin-only), 401 (sign in), 402 (out of credits).
  */
 export async function generateAiTifo(prompt: string): Promise<AiGenerateResult> {
   const res = await fetch(`${API}/ai/generate`, {
     method: 'POST',
-    headers: authHeaders(true),
+    headers: aiHeaders(true),
     body: JSON.stringify({ prompt }),
   });
-  const data = (await res.json().catch(() => null)) as (AiGenerateResult & { error?: string; quota?: AiQuota }) | null;
+  const data = (await res.json().catch(() => null)) as (AiGenerateResult & { error?: string; quota?: AiQuota; locked?: boolean }) | null;
   if (!res.ok) {
     const err = new Error(data?.error ?? `generation failed (${res.status})`) as AiError;
     err.status = res.status;
     err.quota = data?.quota;
+    err.locked = data?.locked;
     throw err;
   }
   return data as AiGenerateResult;
 }
 
-/** Read the signed-in account's remaining AI generations. */
+/** Read AI access/quota. Throws an AiError (status 403, locked) when admin-only. */
 export async function fetchAiQuota(): Promise<AiQuota> {
-  return (await expectOk(await fetch(`${API}/ai/quota`, { headers: authHeaders(false) }))) as AiQuota;
+  const res = await fetch(`${API}/ai/quota`, { headers: aiHeaders(false) });
+  const data = (await res.json().catch(() => null)) as (AiQuota & { error?: string; locked?: boolean }) | null;
+  if (!res.ok) {
+    const err = new Error(data?.error ?? `request failed (${res.status})`) as AiError;
+    err.status = res.status;
+    err.locked = data?.locked;
+    throw err;
+  }
+  return data as AiQuota;
 }

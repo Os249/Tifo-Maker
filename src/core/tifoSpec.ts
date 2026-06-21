@@ -121,7 +121,32 @@ export interface SymbolLayer extends BaseLayer {
   align: TextAlign;
 }
 
-export type SpecLayer = FillLayer | StripesLayer | TextLayer | SymbolLayer;
+export const PATTERN_NAMES = ['checker', 'chevron', 'grid', 'flag', 'hoops'] as const;
+export type PatternName = (typeof PATTERN_NAMES)[number];
+
+/** A dithered gradient blending 2+ palette colours across a region. */
+export interface GradientLayer extends BaseLayer {
+  kind: 'gradient';
+  colors: number[];
+  direction: 'vertical' | 'horizontal' | 'radial';
+}
+
+/** A repeating geometric pattern — mosaic backgrounds beyond plain stripes. */
+export interface PatternLayer extends BaseLayer {
+  kind: 'pattern';
+  pattern: PatternName;
+  colors: number[];
+  /** Cells across the region (4..80). */
+  scale: number;
+}
+
+export type SpecLayer =
+  | FillLayer
+  | StripesLayer
+  | TextLayer
+  | SymbolLayer
+  | GradientLayer
+  | PatternLayer;
 
 export interface TifoSpec {
   version: typeof SPEC_VERSION;
@@ -309,8 +334,31 @@ export function validateSpec(input: unknown): SpecValidationResult {
           });
           break;
         }
+        case 'gradient': {
+          const colors = Array.isArray(raw.colors) ? raw.colors : [];
+          if (colors.length < 2 || !colors.every(inRange)) { err(`${p}.colors`, `colors must be 2+ palette indices in range 0..${paletteLen - 1}`); return; }
+          const dir = raw.direction;
+          const direction = dir === 'horizontal' || dir === 'radial' ? dir : 'vertical';
+          layers.push({ kind: 'gradient', id, region, colors: colors as number[], direction });
+          break;
+        }
+        case 'pattern': {
+          const colors = Array.isArray(raw.colors) ? raw.colors : [];
+          if (colors.length < 2 || !colors.every(inRange)) { err(`${p}.colors`, `colors must be 2+ palette indices in range 0..${paletteLen - 1}`); return; }
+          if (typeof raw.pattern !== 'string' || !(PATTERN_NAMES as readonly string[]).includes(raw.pattern)) {
+            err(`${p}.pattern`, `pattern must be one of: ${PATTERN_NAMES.join(', ')}`);
+            return;
+          }
+          layers.push({
+            kind: 'pattern', id, region,
+            pattern: raw.pattern as PatternName,
+            colors: colors as number[],
+            scale: Math.round(clampNum(raw.scale, 4, 80, 12)),
+          });
+          break;
+        }
         default:
-          err(`${p}.kind`, 'kind must be fill|stripes|text|symbol');
+          err(`${p}.kind`, 'kind must be fill|stripes|gradient|pattern|text|symbol');
       }
     });
   }

@@ -19,7 +19,7 @@ import type { ObjectLayer } from '../core/objects';
 import type { Preview3D } from '../render/preview3d';
 import type { TifoSpec } from '../core/tifoSpec';
 import { compileSpec } from '../core/specCompiler';
-import { generateAiTifo, fetchAiQuota, type AiError, type AiQuota } from '../net/api';
+import { generateAiTifo, fetchAiQuota, unlockAi, aiUnlockToken, type AiError, type AiQuota } from '../net/api';
 import { isSignedIn } from '../net/api';
 import { openAuthModal } from './authModal';
 
@@ -61,13 +61,49 @@ export function mountAiPanel(deps: AiPanelDeps): void {
     errorEl.textContent = msg ?? '';
   };
   const quotaText = (q: AiQuota): string =>
-    q.remaining > 0
-      ? `${q.remaining} of ${q.limit} free generations left`
-      : `No free generations left (used ${q.used}/${q.limit}).`;
+    q.admin
+      ? 'Admin mode — unlimited (AI is in admin-only rebuild).'
+      : q.remaining > 0
+        ? `${q.remaining} of ${q.limit} free generations left`
+        : `No free generations left (used ${q.used}/${q.limit}).`;
   const setQuota = (q: AiQuota | null): void => {
     if (!quotaEl) return;
-    quotaEl.textContent = q ? quotaText(q) : isSignedIn() ? '' : 'Sign in to use the AI designer — 5 free generations.';
+    quotaEl.textContent = q ? quotaText(q) : isSignedIn() ? '' : 'Sign in to use the AI designer.';
   };
+
+  // ---- admin lock (Phase 1 of the AI rebuild): gate the panel behind unlock ----
+  const section = (promptEl.closest('.panel-section') as HTMLElement | null) ?? root;
+  const examplesEl = $('#ai-examples');
+  const lockEl = document.createElement('div');
+  lockEl.className = 'ai-lock';
+  lockEl.style.display = 'none';
+  lockEl.innerHTML = `
+    <p class="hint" style="font-size:12px;color:var(--text-2);margin:0 0 8px;">🔒 The AI Designer is being rebuilt and is currently <b>admin-only</b>.</p>
+    <input type="password" id="ai-pw" placeholder="Admin password" autocomplete="off" style="width:100%;box-sizing:border-box;padding:8px;border:1px solid var(--line-1);border-radius:var(--r-md);background:var(--bg-1);color:var(--text-1);" />
+    <button id="ai-unlock" class="primary" style="width:100%;margin-top:8px;">Unlock AI</button>
+    <p id="ai-unlock-msg" class="hint" style="font-size:11px;color:var(--text-3);margin:8px 0 0;"></p>`;
+  section.appendChild(lockEl);
+
+  const lockToggle = ([promptEl, genBtn, examplesEl, quotaEl] as (HTMLElement | null)[]).filter(
+    (e): e is HTMLElement => !!e,
+  );
+  const setLocked = (locked: boolean): void => {
+    lockEl.style.display = locked ? '' : 'none';
+    for (const el of lockToggle) el.style.display = locked ? 'none' : '';
+    if (locked && resultEl) resultEl.style.display = 'none';
+  };
+  lockEl.querySelector('#ai-unlock')!.addEventListener('click', async () => {
+    const pwEl = lockEl.querySelector('#ai-pw') as HTMLInputElement;
+    const msgEl = lockEl.querySelector('#ai-unlock-msg') as HTMLElement;
+    msgEl.textContent = 'Checking…';
+    if (await unlockAi(pwEl.value)) {
+      setLocked(false);
+      setStatus('Admin mode unlocked.');
+      fetchAiQuota().then(setQuota).catch(() => {});
+    } else {
+      msgEl.textContent = 'Incorrect password.';
+    }
+  });
 
   const captureBaseline = (): void => {
     if (baselineCells === null) {
@@ -108,9 +144,9 @@ export function mountAiPanel(deps: AiPanelDeps): void {
     if (busy) return;
     const text = prompt.trim();
     if (!text) { setError('Describe the tifo you want first.'); return; }
-    if (!isSignedIn()) {
+    if (!isSignedIn() && !aiUnlockToken()) {
       setError(null);
-      setStatus('Sign in to use the AI designer.');
+      setStatus('Sign in or unlock with the admin password.');
       void openAuthModal();
       return;
     }
@@ -126,7 +162,11 @@ export function mountAiPanel(deps: AiPanelDeps): void {
       setQuota(res.quota);
     } catch (e) {
       const err = e as AiError;
-      if (err.status === 401) {
+      if (err.status === 403) {
+        setStatus('');
+        setError(err.message || 'AI is admin-only right now.');
+        setLocked(true);
+      } else if (err.status === 401) {
         setStatus('');
         setError('Please sign in to generate.');
         void openAuthModal();
@@ -163,8 +203,11 @@ export function mountAiPanel(deps: AiPanelDeps): void {
     });
   }
 
-  // Initial quota (best-effort; ignored when signed out).
+  // Determine access: admins (account OR unlock token) see the panel; everyone
+  // else gets the lock. The server is the real gate — this is UX only.
   setQuota(null);
-  if (isSignedIn()) fetchAiQuota().then(setQuota).catch(() => {});
+  fetchAiQuota()
+    .then((q) => { setLocked(false); setQuota(q); })
+    .catch((e) => { setLocked((e as AiError).status === 403); });
   void getPreview; // reserved: future per-layer live preview in the 3D view
 }

@@ -274,6 +274,8 @@ export async function buildApp(
     registerAiRoutes(app, {
       aiUsage: options.aiUsage,
       userOf,
+      isAdmin: isAdminUser,
+      adminPassword: process.env.AI_ADMIN_PASSWORD,
       freeLimit: options.aiFreeLimit ?? 5,
       routeConfig: options.rateLimit ? { config: { rateLimit: { max: 12, timeWindow: '1 minute' } } } : undefined,
     });

@@ -9,20 +9,26 @@
  * assignments. Validation happens in the route via validateSpec(), so a model
  * that drifts from the schema simply gets rejected and the offline result wins.
  *
- * Provider-agnostic: AI_PROVIDER=anthropic|openai (auto-detected from whichever
- * key is set). No SDK dependency — we call the REST API with global fetch.
+ * Provider-agnostic: AI_PROVIDER=anthropic|openai|gemini (auto-detected from
+ * whichever key is set). No SDK dependency — we call the REST API with global fetch.
  */
 
 import { SYMBOL_NAMES, SPEC_FONT_IDS, STANDS, SPEC_LIMITS } from '../../src/core/tifoSpec';
 
-export type AiProvider = 'anthropic' | 'openai' | 'none';
+export type AiProvider = 'anthropic' | 'openai' | 'gemini' | 'none';
+
+function geminiKey(): string | undefined {
+  return process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || undefined;
+}
 
 export function activeProvider(): AiProvider {
   const forced = (process.env.AI_PROVIDER ?? '').toLowerCase();
   if (forced === 'anthropic' && process.env.ANTHROPIC_API_KEY) return 'anthropic';
   if (forced === 'openai' && process.env.OPENAI_API_KEY) return 'openai';
+  if (forced === 'gemini' && geminiKey()) return 'gemini';
   if (!forced && process.env.ANTHROPIC_API_KEY) return 'anthropic';
   if (!forced && process.env.OPENAI_API_KEY) return 'openai';
+  if (!forced && geminiKey()) return 'gemini';
   return 'none';
 }
 
@@ -37,6 +43,25 @@ export function buildSystemPrompt(): string {
     'director of a card stunt: bold, readable shapes that survive a ~10% no-show',
     'rate; never fine photographic detail.',
     '',
+    'LANGUAGE: the brief may be in English or Arabic, or mix both — understand both',
+    'fully. Interpret intent, mood, club identity, rivalries and any named person or',
+    'club. Text layers may be Arabic OR English (the renderer shapes Arabic/RTL',
+    'correctly); pick whatever fits the club and region, and transliterate names',
+    'sensibly. If the brief is Arabic, prefer Arabic headline text unless asked otherwise.',
+    '',
+    'THINK LIKE AN ULTRAS CHOREOGRAPHER: choose ONE clear focal point, use the named',
+    'stand(s) deliberately, build strong contrast and visual hierarchy, express the',
+    'club identity and its real colours, and VARY the composition — never fall back',
+    'on a single default template. Reflect the emotion in the brief (defiance, pride,',
+    'celebration, mourning, derby intensity).',
+    '',
+    'COMPOSITION: for stadium-wide briefs, plan a MULTI-STAND scene — e.g. a hero',
+    'emblem or figure on one end, a giant headline on the opposite end, and a',
+    'gradient or patterned field on the sides — so the whole bowl tells ONE coherent',
+    'story. Target each element to its stand; keep one dominant focal point per stand',
+    'and never crowd a stand with competing big elements. Use gradient/pattern fields',
+    'for depth and mosaic texture, not always a flat fill.',
+    '',
     'Output STRICT JSON ONLY (no prose, no code fences) matching this shape:',
     '{',
     '  "title": string,',
@@ -46,6 +71,8 @@ export function buildSystemPrompt(): string {
     '  "layers": [                              // painted bottom→top',
     '    { "kind":"fill",    "region":Region, "colorIndex":number },',
     '    { "kind":"stripes", "region":Region, "colors":[number,...], "orientation":"vertical|horizontal|diagonal", "bands":number },',
+    '    { "kind":"gradient","region":Region, "colors":[number,number], "direction":"vertical|horizontal|radial" },',
+    '    { "kind":"pattern", "region":Region, "pattern":"checker|chevron|grid|flag|hoops", "colors":[number,...], "scale":number },',
     '    { "kind":"text",    "region":Region, "text":string, "colorIndex":number, "fontId":FontId, "arcDeg":number, "heightFrac":number, "align":"center|top|bottom" },',
     '    { "kind":"symbol",  "region":Region, "symbol":SymbolName, "colorIndex":number, "scaleFrac":number, "align":"center|top|bottom" }',
     '  ]',
@@ -130,6 +157,22 @@ export async function generateSpecViaProvider(prompt: string): Promise<unknown |
       if (!res.ok) return null;
       const data = (await res.json()) as { content?: Array<{ text?: string }> };
       return extractJson(data.content?.[0]?.text ?? '');
+    }
+    if (provider === 'gemini') {
+      const model = process.env.AI_MODEL ?? 'gemini-2.0-flash';
+      const res = await postJson(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey()!}`,
+        { 'content-type': 'application/json' },
+        {
+          systemInstruction: { parts: [{ text: system }] },
+          contents: [{ role: 'user', parts: [{ text: userMessage(prompt) }] }],
+          generationConfig: { responseMimeType: 'application/json', temperature: 0.9, maxOutputTokens: 2048 },
+        },
+        timeoutMs,
+      );
+      if (!res.ok) return null;
+      const data = (await res.json()) as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
+      return extractJson(data.candidates?.[0]?.content?.parts?.[0]?.text ?? '');
     }
     // openai
     const res = await postJson(
