@@ -74,7 +74,8 @@ export function buildSystemPrompt(): string {
     '    { "kind":"gradient","region":Region, "colors":[number,number], "direction":"vertical|horizontal|radial" },',
     '    { "kind":"pattern", "region":Region, "pattern":"checker|chevron|grid|flag|hoops", "colors":[number,...], "scale":number },',
     '    { "kind":"text",    "region":Region, "text":string, "colorIndex":number, "fontId":FontId, "arcDeg":number, "heightFrac":number, "align":"center|top|bottom" },',
-    '    { "kind":"symbol",  "region":Region, "symbol":SymbolName, "colorIndex":number, "scaleFrac":number, "align":"center|top|bottom" }',
+    '    { "kind":"symbol",  "region":Region, "symbol":SymbolName, "colorIndex":number, "scaleFrac":number, "align":"center|top|bottom" },',
+    '    { "kind":"image",   "region":Region, "prompt":string, "scaleFrac":number, "dither":boolean }',
     '  ]',
     '}',
     '',
@@ -84,11 +85,13 @@ export function buildSystemPrompt(): string {
     '',
     `Stands: ${STANDS.join(', ')} (each is one side of the bowl).`,
     `FontId: ${SPEC_FONT_IDS.join(', ')}.`,
-    `SymbolName (the ONLY drawable symbols): ${SYMBOL_NAMES.join(', ')}.`,
-    'For figures you cannot draw (players, animals, crests), DESIGN like a real',
-    'ultras group would: a giant surname + shirt number in big text, an emblem',
-    'from the symbol list (e.g. "shield" for a lion/bull, "eagle" for a bird),',
-    'and a strong colour field. Legibility and impact over literal depiction.',
+    `SymbolName (drawable vector symbols): ${SYMBOL_NAMES.join(', ')}.`,
+    'For a PORTRAIT, a player, a face, a mascot or detailed artwork, use an "image"',
+    'layer: describe the subject in "prompt" (the system generates the picture and',
+    'renders it onto the seats via card tones). Give such designs a palette with',
+    'several TONES — e.g. a dark, a mid and a light of the main colour, plus skin',
+    'tones for faces — so the portrait shades well. Use vector symbols for simple',
+    'emblems (star, crown, shield, eagle…) and image layers for anything photographic.',
     '',
     'Rules: keep the palette tight (2-5 colours typically). Put one clear focal',
     'element. Maximise contrast between text/symbol and the field behind it.',
@@ -159,7 +162,7 @@ export async function generateSpecViaProvider(prompt: string): Promise<unknown |
       return extractJson(data.content?.[0]?.text ?? '');
     }
     if (provider === 'gemini') {
-      const model = process.env.AI_MODEL ?? 'gemini-2.0-flash';
+      const model = process.env.AI_MODEL ?? 'gemini-2.5-flash';
       const res = await postJson(
         `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey()!}`,
         { 'content-type': 'application/json' },

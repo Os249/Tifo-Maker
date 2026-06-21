@@ -27,6 +27,7 @@ import { validateSpec } from '../../src/core/tifoSpec';
 import { refineSpec } from '../../src/core/specRefine';
 import { designFromPrompt } from '../../src/core/promptDesigner';
 import { generateSpecViaProvider, activeProvider } from './aiProvider';
+import { generateImage } from './imageAssets';
 
 const MAX_PROMPT = 400;
 const UNLOCK_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
@@ -132,6 +133,16 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
     }
     // Phase 4: deterministic art-director pass — fix legibility/contrast/field.
     const spec = refineSpec(result.spec);
+
+    // Phase 5: generate a picture for each image layer (portraits/figures).
+    // Best-effort — a failed/unavailable generation just leaves assetRef unset
+    // and the client skips that layer, so the rest of the tifo still renders.
+    for (const layer of spec.layers) {
+      if (layer.kind === 'image' && !layer.assetRef) {
+        const url = await generateImage(layer.prompt).catch(() => null);
+        if (url) layer.assetRef = url;
+      }
+    }
 
     // Admin-only lock: unlimited, no per-account credit consumed.
     return reply.code(200).send({ spec, quota: { admin: true, used: 0, limit: 0, remaining: 999999 }, source });

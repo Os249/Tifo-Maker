@@ -77,6 +77,16 @@ function standExtent(region: Region): { centerX: number; width: number } {
   return { centerX: g.centerU * W, width: g.halfU * 2 * W };
 }
 
+/** Editor-space box (centre + size) of a region — used to place image objects. */
+export function regionRect(region: Region, map: SeatMap): { cx: number; cy: number; width: number; height: number } {
+  const { centerX, width } = standExtent(region);
+  const { minY, maxY, count } = yBounds(regionPredicate(region, map), map);
+  if (count === 0 || !isFinite(minY)) {
+    return { cx: centerX, cy: (map.bounds.minY + map.bounds.maxY) / 2, width, height: map.bounds.maxY - map.bounds.minY };
+  }
+  return { cx: centerX, cy: (minY + maxY) / 2, width, height: Math.max(EDITOR_UNITS.rowPx, maxY - minY) };
+}
+
 /** Vertical bounds (editor y) of the seats a predicate accepts. */
 function yBounds(accept: (i: number) => boolean, map: SeatMap): { minY: number; maxY: number; count: number } {
   let minY = Infinity;
@@ -242,6 +252,10 @@ function applyLayer(layer: SpecLayer, map: SeatMap, store: DesignStore): number 
     }
     return painted;
   }
+
+  // Image layers are rendered as floating, editable image objects by the AI
+  // panel (reusing the Image tool's quantizer), not baked here.
+  if (layer.kind === 'image') return 0;
 
   // text / symbol → build a target rect, then stamp a mask.
   const { centerX, width: standW } = standExtent(layer.region);

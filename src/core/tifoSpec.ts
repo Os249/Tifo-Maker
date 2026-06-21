@@ -140,13 +140,31 @@ export interface PatternLayer extends BaseLayer {
   scale: number;
 }
 
+/**
+ * A generated picture — a portrait, player, figure, crest or detailed artwork —
+ * rendered onto seats through the image-import quantizer (so it shades with the
+ * palette's tones). The model only DESCRIBES the subject in `prompt`; the server
+ * generates the image and fills `assetRef`. If generation is unavailable the
+ * layer is simply skipped, so the rest of the design still renders.
+ */
+export interface ImageLayer extends BaseLayer {
+  kind: 'image';
+  prompt: string;
+  /** Data URL filled server-side after generation; absent if it failed. */
+  assetRef?: string;
+  /** Size as a fraction of the region's smaller side (0.2..1). */
+  scaleFrac: number;
+  dither: boolean;
+}
+
 export type SpecLayer =
   | FillLayer
   | StripesLayer
   | TextLayer
   | SymbolLayer
   | GradientLayer
-  | PatternLayer;
+  | PatternLayer
+  | ImageLayer;
 
 export interface TifoSpec {
   version: typeof SPEC_VERSION;
@@ -171,6 +189,7 @@ export const SPEC_LIMITS = {
   maxSummary: 240,
   maxBands: 40,
   minBands: 2,
+  maxImagePrompt: 200,
 } as const;
 
 // ---- validation ----
@@ -357,8 +376,19 @@ export function validateSpec(input: unknown): SpecValidationResult {
           });
           break;
         }
+        case 'image': {
+          if (typeof raw.prompt !== 'string' || !raw.prompt.trim()) { err(`${p}.prompt`, 'image prompt is required'); return; }
+          layers.push({
+            kind: 'image', id, region,
+            prompt: raw.prompt.trim().slice(0, SPEC_LIMITS.maxImagePrompt),
+            assetRef: typeof raw.assetRef === 'string' ? raw.assetRef : undefined,
+            scaleFrac: clampNum(raw.scaleFrac, 0.2, 1, 0.9),
+            dither: raw.dither !== false,
+          });
+          break;
+        }
         default:
-          err(`${p}.kind`, 'kind must be fill|stripes|gradient|pattern|text|symbol');
+          err(`${p}.kind`, 'kind must be fill|stripes|gradient|pattern|text|symbol|image');
       }
     });
   }
