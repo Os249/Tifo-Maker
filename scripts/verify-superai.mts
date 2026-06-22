@@ -10,6 +10,7 @@ import { normalizeRegion, standIndexOfU, STAND_ORDER, validateSpec, narrowToSing
 import { regionPredicate } from '../src/core/specCompiler';
 import { SUPER_AI_EXEMPLARS, fewShotBlock } from '../src/core/exemplars';
 import { critiqueDesign, repairSpec } from '../src/core/critique';
+import { quantizePixels } from '../src/core/importImage';
 import { buildDirectorPrompt } from '../server/src/aiProvider';
 
 let failures = 0;
@@ -115,6 +116,30 @@ const after = rep.spec.layers[0];
 check('repair enlarges fragile text', rep.changed && before.kind === 'text' && after.kind === 'text' && after.heightFrac > before.heightFrac);
 const rep2 = repairSpec(textSpec, { score: 95, issues: [], fragileSeats: 5, paintedSeats: 1000, perStandFill: { north: 0.5, south: 0.5, east: 0.5, west: 0.5 } });
 check('repair is a no-op when legible', rep2.changed === false);
+
+// ---- 8. halftone quantization is more legible than dither (Phase 5) ----
+{
+  const gc = 30, gr = 30;
+  const px = new Uint8ClampedArray(gc * gr * 4);
+  for (let y = 0; y < gr; y++) for (let x = 0; x < gc; x++) { const p = y * gc + x; const t = Math.round((y / (gr - 1)) * 255); px[p * 4] = t; px[p * 4 + 1] = t; px[p * 4 + 2] = t; px[p * 4 + 3] = 255; }
+  const pal = ['#262a33', '#000000', '#555555', '#aaaaaa', '#ffffff'];
+  const dith = quantizePixels(px, gc, gr, pal, { dither: true, alphaThreshold: 128 });
+  const half = quantizePixels(px, gc, gr, pal, { dither: false, halftone: true, halftoneCell: 3, alphaThreshold: 128 });
+  const gridFragile = (g: Int16Array): number => {
+    const run = (x: number, y: number, dx: number, dy: number): number => {
+      const v = g[y * gc + x]; let r = 1; let xx = x - dx, yy = y - dy;
+      while (xx >= 0 && yy >= 0 && xx < gc && yy < gr && g[yy * gc + xx] === v && r < 3) { r++; xx -= dx; yy -= dy; }
+      xx = x + dx; yy = y + dy;
+      while (xx >= 0 && yy >= 0 && xx < gc && yy < gr && g[yy * gc + xx] === v && r < 3) { r++; xx += dx; yy += dy; }
+      return r;
+    };
+    let c = 0; for (let y = 0; y < gr; y++) for (let x = 0; x < gc; x++) { if (g[y * gc + x] < 0) continue; if (run(x, y, 1, 0) < 3 || run(x, y, 0, 1) < 3) c++; } return c;
+  };
+  const fD = gridFragile(dith), fH = gridFragile(half);
+  const tones = new Set([...half].filter((v) => v > 0)).size;
+  check('halftone far less fragile than dither', fH < fD * 0.25, `halftone ${fH} vs dither ${fD}`);
+  check('halftone preserves multiple tones', tones >= 2, `${tones} tones`);
+}
 
 console.log(`\n${failures === 0 ? 'ALL PASS' : failures + ' FAILED'}`);
 if (failures > 0) process.exit(1);

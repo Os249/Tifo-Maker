@@ -45,6 +45,7 @@ export interface ImageObject extends BaseObject {
   bitmap: ImageBitmap;
   name: string;
   dither: boolean;
+  halftone?: boolean;
   alphaThreshold: number;
 }
 
@@ -203,6 +204,7 @@ export class ObjectLayer {
       obj.kind === 'image'
         ? quantizePixels(pixels, cols, rows, store.palette, {
             dither: obj.dither,
+            halftone: obj.halftone,
             alphaThreshold: obj.alphaThreshold,
           })
         : maskFromAlpha(pixels, cols, rows, obj.colorIndex); // text + shape: 1-colour mask

@@ -185,6 +185,8 @@ export interface ImageLayer extends BaseLayer {
   /** Size as a fraction of the region's smaller side (0.2..1). */
   scaleFrac: number;
   dither: boolean;
+  /** Clustered halftone quantization — chunkier, more legible portraits at seat scale. */
+  halftone?: boolean;
 }
 
 export type SpecLayer =
@@ -456,6 +458,7 @@ export function validateSpec(input: unknown): SpecValidationResult {
             assetRef: typeof raw.assetRef === 'string' ? raw.assetRef : undefined,
             scaleFrac: clampNum(raw.scaleFrac, 0.2, 1, 0.9),
             dither: raw.dither !== false,
+            halftone: raw.halftone === true,
           });
           break;
         }

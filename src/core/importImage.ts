@@ -19,6 +19,11 @@ export interface ImportOptions {
   dither: boolean;
   /** Pixels with alpha below this are skipped (existing seats keep their color). */
   alphaThreshold: number;
+  /** Clustered "halftone" quantization: average BxB cells into one tone. Chunkier
+   *  and far more legible at seat scale than fine dithering (no fragile specks). */
+  halftone?: boolean;
+  /** Halftone block size in grid cells (default 3 → blocks clear the legibility check). */
+  halftoneCell?: number;
 }
 
 export interface TargetRect {
@@ -144,6 +149,54 @@ export function quantizePixels(
     work[p * 3] = pixels[p * 4];
     work[p * 3 + 1] = pixels[p * 4 + 1];
     work[p * 3 + 2] = pixels[p * 4 + 2];
+  }
+
+  const nearest = (r: number, g: number, b: number): number => {
+    let best = targets[0];
+    let bd = Infinity;
+    for (const t of targets) {
+      const dr = r - t.rgb[0];
+      const dg = g - t.rgb[1];
+      const db = b - t.rgb[2];
+      const d = dr * dr * 0.299 + dg * dg * 0.587 + db * db * 0.114;
+      if (d < bd) {
+        bd = d;
+        best = t;
+      }
+    }
+    return best.idx;
+  };
+
+  // Halftone: one tone per BxB block → chunky, contiguous tones that survive the
+  // ~10% no-show rate, instead of fragile single-seat dither specks. Trades fine
+  // detail for stadium legibility — ideal for portraits.
+  if (opts.halftone) {
+    const B = Math.max(2, Math.round(opts.halftoneCell ?? 3));
+    const ht = new Int16Array(cols * rows).fill(-1);
+    for (let by = 0; by < rows; by += B) {
+      for (let bx = 0; bx < cols; bx += B) {
+        const yEnd = Math.min(rows, by + B);
+        const xEnd = Math.min(cols, bx + B);
+        let r = 0, g = 0, b = 0, n = 0;
+        for (let yy = by; yy < yEnd; yy++)
+          for (let xx = bx; xx < xEnd; xx++) {
+            const p = yy * cols + xx;
+            if (skip[p]) continue;
+            r += work[p * 3];
+            g += work[p * 3 + 1];
+            b += work[p * 3 + 2];
+            n++;
+          }
+        if (n === 0) continue; // wholly transparent block stays skipped
+        const idx = nearest(r / n, g / n, b / n);
+        for (let yy = by; yy < yEnd; yy++)
+          for (let xx = bx; xx < xEnd; xx++) {
+            const p = yy * cols + xx;
+            if (!skip[p]) ht[p] = idx;
+          }
+      }
+    }
+    return ht;
   }
 
   const out = new Int16Array(cols * rows).fill(-1);
