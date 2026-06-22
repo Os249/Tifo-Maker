@@ -153,5 +153,15 @@ check('offline composer: player brief yields a portrait image layer', offPlayer.
 const offEagle = composeSuperOffline('giant eagle covering the stadium in black and gold');
 check('offline composer: symbol brief yields a symbol layer', offEagle.layers.some((l) => l.kind === 'symbol'));
 
+// ---- 10. occasion-aware composer variety (free path) ----
+const derbySpec = composeSuperOffline('city derby vs united, red and black');
+check('derby: validates + chevron pattern', validateSpec(derbySpec).valid && derbySpec.layers.some((l) => l.kind === 'pattern'));
+const titleSpec = composeSuperOffline('champions of europe, gold and black');
+check('title: validates + gradient field', validateSpec(titleSpec).valid && titleSpec.layers.some((l) => l.kind === 'gradient'));
+const anniSpec = composeSuperOffline('100 years anniversary, green and white');
+check('anniversary: validates + mosaic pattern', validateSpec(anniSpec).valid && anniSpec.layers.some((l) => l.kind === 'pattern'));
+const genSpec = composeSuperOffline('blue and white full stadium');
+check('occasions differ from the generic layout', derbySpec.summary !== genSpec.summary && titleSpec.summary !== genSpec.summary && anniSpec.summary !== genSpec.summary);
+
 console.log(`\n${failures === 0 ? 'ALL PASS' : failures + ' FAILED'}`);
 if (failures > 0) process.exit(1);

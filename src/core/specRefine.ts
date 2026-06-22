@@ -19,9 +19,11 @@
 
 import type { TifoSpec, SpecLayer, Region } from './tifoSpec';
 
-const MIN_TEXT_HEIGHT = 0.1;
-const MIN_SYMBOL_SCALE = 0.15;
-const CONTRAST_FLOOR = 55; // luminance gap (0–255) below which a layer is hard to read
+// Boldness floors — stadium tifos are seen from 100m+ and on TV, so timid sizing
+// reads as thin/scattered. Keep these high: it's better to be too big than too small.
+const MIN_TEXT_HEIGHT = 0.22; // a headline below ~22% of its stand's height looks weak
+const MIN_SYMBOL_SCALE = 0.45; // a crest/symbol should dominate its stand
+const CONTRAST_FLOOR = 70; // luminance gap (0–255) below which a layer is hard to read
 
 function lum(hex: string): number {
   const v = parseInt(hex.slice(1), 16);

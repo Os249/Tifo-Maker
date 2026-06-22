@@ -282,18 +282,60 @@ function portraitPrompt(original: string, lower: string): string {
   return `${original.trim().slice(0, 120)} — bold graphic poster portrait, flat tones`;
 }
 
+type Occasion = 'derby' | 'farewell' | 'anniversary' | 'title' | 'heritage' | 'generic';
+
+/** Classify the brief into a choreography occasion → drives a distinct layout. */
+function detectOccasion(p: string): Occasion {
+  if (/\bderby\b|\brival|clasico|clásico|\bvs\b|versus|\bagainst\b/.test(p)) return 'derby';
+  if (/farewell|goodbye|tribute|\bretir|thank you|grazie|gracias|memorial|\brip\b|forever|legend/.test(p)) return 'farewell';
+  if (/anniversar|centenar|\byears?\b|since\s*\d{4}|est\.?\s*\d{4}|founded|\b\d{4}\s*[-–]\s*\d{4}\b/.test(p)) return 'anniversary';
+  if (/champion|\btitle\b|troph|winners?|\bglory\b|victory|\bcup\b|treble|invincible/.test(p)) return 'title';
+  if (/heritage|history|tradition|legacy|roots|dynasty/.test(p)) return 'heritage';
+  return 'generic';
+}
+
+/** A standalone number for an anniversary headline (e.g. "100" from "100 years"). */
+function pickNumber(p: string): string | null {
+  const yrs = p.match(/\b(\d{1,3})\s*years?\b/);
+  if (yrs) return yrs[1];
+  const any = p.match(/\b(\d{2,3})\b/);
+  return any ? any[1] : null;
+}
+
+/** A years line for the sub-headline (a range, or "EST. yyyy"). */
+function pickYears(p: string): string | null {
+  const range = p.match(/\b(\d{4})\s*[-–to ]+\s*(\d{4})\b/);
+  if (range) return `${range[1]} – ${range[2]}`;
+  const since = p.match(/(?:since|est\.?|founded(?:\s+in)?)\s*(\d{4})/);
+  return since ? `EST. ${since[1]}` : null;
+}
+
+/** Warmest palette card (gold/yellow/red) for celebrations; else a contrast card. */
+function warmestIndex(palette: string[], avoid: number): number {
+  let best = -1;
+  let bestW = -Infinity;
+  for (let i = 1; i < palette.length; i++) {
+    if (i === avoid) continue;
+    const v = parseInt(palette[i].slice(1), 16);
+    const w = ((v >> 16) & 255) + 0.5 * ((v >> 8) & 255) - (v & 255);
+    if (w > bestW) { bestW = w; best = i; }
+  }
+  return best < 0 ? contrastIndex(palette, avoid) : best;
+}
+
 /**
- * Offline MULTI-STAND composer for Super AI (Mode 3) — a deterministic full-bowl
- * design with NO model call. Used as Super AI's fallback when the model is
+ * Offline MULTI-STAND composer for Super AI (Mode 3) — a deterministic, varied,
+ * full-bowl design with NO model call. Super AI's fallback when the model is
  * unavailable (e.g. a free-tier 429), so "design the whole stadium" still yields
- * a real multi-stand scene instead of degrading to a single-template result.
+ * a real, occasion-appropriate scene rather than one fixed template.
  *
- * Layout: a HERO on the north (portrait image for a person/player, else a bold
- * symbol, else a headline), the name/number or slogan on the OPPOSITE (south)
- * stand, and a club-colour field wrapping the two sides (the multi-stand "sides"
- * region). Portraits ride the free image path (Pollinations) so even this offline
- * route can render a face without touching the text-model quota. Normalized
- * through validateSpec, so its output obeys the exact same contract.
+ * The brief is classified into an OCCASION and each gets a distinct composition:
+ * chevrons + colour blocking for a derby, solemn gradients + portrait for a
+ * farewell, a mosaic + giant number for an anniversary, a gold radial glow for a
+ * title, classic stripes + crest for heritage, else a clean hero/name/sides
+ * layout. Portraits ride the free image path (Pollinations), so even this offline
+ * route renders a face without touching the text-model quota. Bold by default and
+ * normalized through validateSpec (same contract as model output).
  */
 export function composeSuperOffline(prompt: string): TifoSpec {
   const original = (prompt ?? '').slice(0, 400);
@@ -306,48 +348,96 @@ export function composeSuperOffline(prompt: string): TifoSpec {
   const bg = darkestIndex(palette);
   const head = contrastIndex(palette, bg);
   const accent = accentIndex(palette, [bg, head]);
+  const gold = warmestIndex(palette, bg);
 
   const { head: headline, sub } = pickText(original, p);
   const symbol = pickSymbol(p);
   const isPerson = hasKnownPlayer(p) || /\b(portrait|face|captain|legend|player|hero|footballer|photo|striker|keeper|icon)\b/.test(p);
+  const occasion = detectOccasion(p);
 
   const layers: SpecLayer[] = [];
+  let seq = 0;
+  const nid = (): string => `L${seq++}`;
 
-  // Sides (east + west): a club-colour field wrapping the bowl — one multi-stand layer.
-  layers.push({
-    kind: 'stripes', id: 'sides', region: regionObj('sides'),
-    colors: [bg, head], orientation: 'horizontal', bands: 6,
-  });
+  // Hero on the north: a portrait for a person, else a bold symbol, else a headline.
+  const addHero = (preferred: SymbolName | null): 'image' | 'symbol' | 'text' => {
+    if (isPerson) {
+      layers.push({ kind: 'image', id: nid(), region: regionObj('north'), prompt: portraitPrompt(original, p), scaleFrac: 0.95, dither: true, halftone: true });
+      return 'image';
+    }
+    const s = symbol ?? preferred;
+    if (s) {
+      layers.push({ kind: 'symbol', id: nid(), region: regionObj('north'), symbol: s, colorIndex: head, scaleFrac: 0.85, align: 'center' });
+      return 'symbol';
+    }
+    layers.push({ kind: 'text', id: nid(), region: regionObj('north'), text: headline ?? 'ULTRAS', colorIndex: head, fontId: 'black', arcDeg: 0, heightFrac: 0.7, align: 'center' });
+    return 'text';
+  };
 
-  // Hero on the north: portrait > symbol > headline.
-  let heroKind: 'image' | 'symbol' | 'text';
-  if (isPerson) {
-    heroKind = 'image';
-    layers.push({ kind: 'image', id: 'hero', region: regionObj('north'), prompt: portraitPrompt(original, p), scaleFrac: 0.95, dither: true, halftone: true });
-  } else if (symbol) {
-    heroKind = 'symbol';
-    layers.push({ kind: 'fill', id: 'hero-bg', region: regionObj('north'), colorIndex: bg });
-    layers.push({ kind: 'symbol', id: 'hero', region: regionObj('north'), symbol, colorIndex: head, scaleFrac: 0.85, align: 'center' });
-  } else {
+  // Name (+ optional number) or a slogan on the south, big and bold.
+  const addName = (text: string | null, color: number): void => {
+    if (!text) return;
+    if (sub) {
+      layers.push({ kind: 'text', id: nid(), region: rowsObj('south', [0.4, 1]), text, colorIndex: color, fontId: 'black', arcDeg: 0, heightFrac: 0.55, align: 'center' });
+      layers.push({ kind: 'text', id: nid(), region: rowsObj('south', [0, 0.36]), text: sub, colorIndex: accent, fontId: 'impact', arcDeg: 0, heightFrac: 0.34, align: 'center' });
+    } else {
+      layers.push({ kind: 'text', id: nid(), region: regionObj('south'), text, colorIndex: color, fontId: 'black', arcDeg: 0, heightFrac: 0.66, align: 'center' });
+    }
+  };
+
+  let heroKind: 'image' | 'symbol' | 'text' = 'text';
+  let summary: string;
+
+  if (occasion === 'derby') {
+    layers.push({ kind: 'fill', id: nid(), region: regionObj('all'), colorIndex: bg });
+    layers.push({ kind: 'pattern', id: nid(), region: regionObj('sides'), pattern: 'chevron', colors: [bg, head], scale: 10 });
+    heroKind = addHero('shield');
+    layers.push({ kind: 'fill', id: nid(), region: regionObj('south'), colorIndex: head });
+    addName(headline ?? 'PRIDE OF THE CITY', bg);
+    summary = 'Derby: chevron-charged sides, a crest on the north, a defiant headline blazed across the south.';
+  } else if (occasion === 'farewell') {
+    layers.push({ kind: 'gradient', id: nid(), region: regionObj('sides'), colors: [bg, head], direction: 'vertical' });
+    layers.push({ kind: 'gradient', id: nid(), region: regionObj('ends'), colors: [bg, accent], direction: 'vertical' });
+    heroKind = addHero('crown');
+    addName(headline ?? 'GRAZIE', gold);
+    summary = 'Farewell: solemn gradients framing the bowl, the portrait/crest hero on the north, the name on the south.';
+  } else if (occasion === 'anniversary') {
+    const num = pickNumber(p) ?? '100';
+    layers.push({ kind: 'pattern', id: nid(), region: regionObj('all'), pattern: 'checker', colors: [bg, head], scale: 26 });
+    layers.push({ kind: 'text', id: nid(), region: regionObj('north'), text: num, colorIndex: gold, fontId: 'black', arcDeg: 0, heightFrac: 0.85, align: 'center' });
+    addName(pickYears(p) ?? headline ?? 'YEARS', head);
+    layers.push({ kind: 'symbol', id: nid(), region: regionObj('sides'), symbol: 'star', colorIndex: gold, scaleFrac: 0.5, align: 'center' });
     heroKind = 'text';
-    layers.push({ kind: 'fill', id: 'hero-bg', region: regionObj('north'), colorIndex: bg });
-    layers.push({ kind: 'text', id: 'hero', region: regionObj('north'), text: headline ?? 'ULTRAS', colorIndex: head, fontId: 'impact', arcDeg: 0, heightFrac: 0.6, align: 'center' });
+    summary = `Anniversary: a mosaic across the bowl, a giant ${num} on the north, the founding years on the south, stars down the sides.`;
+  } else if (occasion === 'title') {
+    layers.push({ kind: 'gradient', id: nid(), region: regionObj('all'), colors: [bg, gold], direction: 'radial' });
+    layers.push({ kind: 'symbol', id: nid(), region: rowsObj('north', [0.45, 1]), symbol: symbol ?? 'crown', colorIndex: gold, scaleFrac: 0.6, align: 'top' });
+    layers.push({ kind: 'text', id: nid(), region: rowsObj('north', [0, 0.5]), text: headline ?? 'CHAMPIONS', colorIndex: head, fontId: 'black', arcDeg: 0, heightFrac: 0.42, align: 'bottom' });
+    layers.push({ kind: 'symbol', id: nid(), region: regionObj('sides'), symbol: 'star', colorIndex: gold, scaleFrac: 0.5, align: 'center' });
+    addName(pickYears(p) ?? 'GLORY', head);
+    heroKind = 'symbol';
+    summary = 'Title: a gold radial glow, a crown and CHAMPIONS on the north, stars down the sides, the year on the south.';
+  } else if (occasion === 'heritage') {
+    layers.push({ kind: 'stripes', id: nid(), region: regionObj('sides'), colors: [bg, head], orientation: 'vertical', bands: 8 });
+    layers.push({ kind: 'fill', id: nid(), region: regionObj('north'), colorIndex: bg });
+    heroKind = addHero('shield');
+    layers.push({ kind: 'fill', id: nid(), region: regionObj('south'), colorIndex: bg });
+    addName(headline ?? 'HISTORY', head);
+    summary = 'Heritage: classic vertical stripes on the sides, the club crest on the north, the motto on the south.';
+  } else {
+    layers.push({ kind: 'stripes', id: nid(), region: regionObj('sides'), colors: [bg, head], orientation: 'horizontal', bands: 6 });
+    layers.push({ kind: 'fill', id: nid(), region: regionObj('north'), colorIndex: bg });
+    heroKind = addHero(null);
+    layers.push({ kind: 'fill', id: nid(), region: regionObj('south'), colorIndex: bg });
+    addName(headline ?? (heroKind !== 'text' ? 'ULTRAS' : null), head);
+    summary = `Full-bowl: a ${heroKind === 'image' ? 'portrait' : heroKind} on the north, the name on the south, club colours on the sides.`;
   }
 
-  // Opposite stand (south): the name + number, or a slogan, on a dark field.
-  layers.push({ kind: 'fill', id: 'opp-bg', region: regionObj('south'), colorIndex: bg });
-  const oppText = headline ?? (heroKind !== 'text' ? 'ULTRAS' : null);
-  if (oppText && sub) {
-    layers.push({ kind: 'text', id: 'name', region: rowsObj('south', [0.4, 1]), text: oppText, colorIndex: head, fontId: 'impact', arcDeg: 0, heightFrac: 0.5, align: 'center' });
-    layers.push({ kind: 'text', id: 'number', region: rowsObj('south', [0, 0.36]), text: sub, colorIndex: accent, fontId: 'impact', arcDeg: 0, heightFrac: 0.34, align: 'center' });
-  } else if (oppText) {
-    layers.push({ kind: 'text', id: 'name', region: regionObj('south'), text: oppText, colorIndex: head, fontId: 'impact', arcDeg: 0, heightFrac: 0.6, align: 'center' });
-  }
-
+  const titleWord = headline || (occasion !== 'generic' ? occasion : symbol || 'Full stadium');
   const spec: TifoSpec = {
     version: 1,
-    title: cap((headline || symbol || 'Full stadium') + ' tifo'),
-    summary: `Offline full-bowl: a ${heroKind === 'image' ? 'portrait' : heroKind} on the north${oppText ? `, “${oppText}” on the south` : ''}, club colours on the sides.`,
+    title: cap(`${titleWord} tifo`),
+    summary,
     palette,
     background: bg,
     layers,
