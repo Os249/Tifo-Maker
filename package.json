@@ -8,6 +8,7 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "verify": "tsx scripts/verify.mts",
+    "verify:superai": "tsx scripts/verify-superai.mts",
     "export:sample": "tsx scripts/export-sample.mts",
     "server": "tsx server/src/server.ts",
     "server:watch": "tsx watch server/src/server.ts",

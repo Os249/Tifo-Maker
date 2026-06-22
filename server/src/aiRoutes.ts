@@ -26,7 +26,7 @@ import type { AiUsageRepository } from './repo';
 import { validateSpec } from '../../src/core/tifoSpec';
 import { refineSpec } from '../../src/core/specRefine';
 import { designFromPrompt } from '../../src/core/promptDesigner';
-import { generateSpecViaProvider, activeProvider } from './aiProvider';
+import { generateSpecViaProvider, buildDirectorPrompt, critiqueSpecViaProvider, activeProvider } from './aiProvider';
 import { generateImage } from './imageAssets';
 
 const MAX_PROMPT = 400;
@@ -113,10 +113,18 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
     if (!prompt) return reply.code(400).send({ error: 'a prompt is required' });
     if (prompt.length > MAX_PROMPT) return reply.code(400).send({ error: `prompt too long (max ${MAX_PROMPT} characters)` });
 
+    // Mode 3 (Super AI): whole-bowl director prompt + the client's stadium context.
+    const body = (req.body ?? {}) as { mode?: unknown; stadium?: unknown };
+    const isSuper = body.mode === 'super';
+    const stadium = isSuper && typeof body.stadium === 'string' ? body.stadium.slice(0, 2000) : undefined;
+
     // Try the configured model first; fall back to the deterministic designer.
     let source: 'model' | 'offline' = 'offline';
     let result = { valid: false } as ReturnType<typeof validateSpec>;
-    const modelResult = await generateSpecViaProvider(prompt);
+    const modelResult = await generateSpecViaProvider(
+      prompt,
+      isSuper ? { system: buildDirectorPrompt(), context: stadium, tier: 'premium' } : { tier: 'fast' },
+    );
     let modelError = modelResult.error;
     if (modelResult.spec) {
       const r = validateSpec(modelResult.spec);
@@ -156,5 +164,38 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
 
     // Admin-only lock: unlimited, no per-account credit consumed.
     return reply.code(200).send({ spec, quota: { admin: true, used: 0, limit: 0, remaining: 999999 }, source, notes });
+  });
+
+  // Phase 4b: vision critique — take the current design + a render of it, ask the
+  // model to fix legibility/balance, and return an improved spec. Best-effort: any
+  // failure returns the ORIGINAL design unchanged, so polish never breaks a design.
+  app.post('/api/ai/critique', deps.routeConfig ?? {}, async (req, reply) => {
+    if (!(await hasAiAccess(req))) {
+      return reply.code(403).send({ error: 'AI is temporarily admin-only', locked: true });
+    }
+    const b = (req.body ?? {}) as { spec?: unknown; image?: unknown; stadium?: unknown };
+    const incoming = validateSpec(b.spec);
+    if (!incoming.valid || !incoming.spec) {
+      return reply.code(400).send({ error: 'a valid current spec is required', errors: incoming.errors });
+    }
+    const image = typeof b.image === 'string' ? b.image : undefined;
+    const stadium = typeof b.stadium === 'string' ? b.stadium.slice(0, 2000) : undefined;
+
+    const notes: string[] = [];
+    let spec = incoming.spec;
+    let source: 'model' | 'original' = 'original';
+    if (activeProvider() === 'none') {
+      notes.push('No AI provider configured — design left unchanged.');
+    } else {
+      const res = await critiqueSpecViaProvider(incoming.spec, image, stadium);
+      const improved = res.spec ? validateSpec(res.spec) : null;
+      if (improved && improved.valid && improved.spec) {
+        spec = refineSpec(improved.spec);
+        source = 'model';
+      } else {
+        notes.push(`Critique unavailable — ${res.error ?? 'invalid response'} — design left unchanged.`);
+      }
+    }
+    return reply.code(200).send({ spec, source, notes });
   });
 }

@@ -193,7 +193,7 @@ export class ObjectLayer {
    * Bake one object into the seat grid as a single undoable stroke.
    * Returns the dirty seat indices (already flushed by the caller's store).
    */
-  bake(obj: TifoObject, store: DesignStore, map: SeatMap, wrapWidth: number): number[] {
+  bake(obj: TifoObject, store: DesignStore, map: SeatMap, wrapWidth: number, clip?: (i: number) => boolean): number[] {
     const source = renderObjectCanvas(obj);
     if (!source) return [];
     const cols = Math.max(2, Math.min(2400, Math.round(obj.width / 3)));
@@ -207,7 +207,9 @@ export class ObjectLayer {
           })
         : maskFromAlpha(pixels, cols, rows, obj.colorIndex); // text + shape: 1-colour mask
     const target = { x: obj.cx - obj.width / 2, y: obj.cy - obj.height / 2, width: obj.width, height: obj.height };
-    const accept = obj.tier === null ? undefined : (i: number) => map.tierOf[i] === obj.tier;
+    const tierAccept = obj.tier === null ? undefined : (i: number) => map.tierOf[i] === obj.tier;
+    // Optional region clip (e.g. keep an AI portrait inside its own stand), AND-ed with the tier.
+    const accept = clip && tierAccept ? (i: number) => clip(i) && tierAccept(i) : (clip ?? tierAccept);
     store.beginStroke();
     const dirty = applyGridToSeats(store, map, grid, cols, rows, target, wrapWidth, accept);
     store.commitStroke();

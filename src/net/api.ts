@@ -836,11 +836,18 @@ export interface AiError extends Error {
  * (the client compiles it to seats). On failure throws an AiError whose `status`
  * distinguishes 403 (locked, admin-only), 401 (sign in), 402 (out of credits).
  */
-export async function generateAiTifo(prompt: string): Promise<AiGenerateResult> {
+export async function generateAiTifo(
+  prompt: string,
+  opts: { mode?: 'super'; stadium?: string } = {},
+): Promise<AiGenerateResult> {
   const res = await fetch(`${API}/ai/generate`, {
     method: 'POST',
     headers: aiHeaders(true),
-    body: JSON.stringify({ prompt }),
+    body: JSON.stringify({
+      prompt,
+      ...(opts.mode ? { mode: opts.mode } : {}),
+      ...(opts.stadium ? { stadium: opts.stadium } : {}),
+    }),
   });
   const data = (await res.json().catch(() => null)) as (AiGenerateResult & { error?: string; quota?: AiQuota; locked?: boolean }) | null;
   if (!res.ok) {
@@ -851,6 +858,28 @@ export async function generateAiTifo(prompt: string): Promise<AiGenerateResult> 
     throw err;
   }
   return data as AiGenerateResult;
+}
+
+export interface AiCritiqueResult {
+  spec: TifoSpec;
+  source: 'model' | 'original';
+  notes?: string[];
+}
+
+/** Phase 4b: send the current design + a low-res render to the vision critic; get an improved spec back. */
+export async function critiqueAiTifo(spec: TifoSpec, image?: string, stadium?: string): Promise<AiCritiqueResult> {
+  const res = await fetch(`${API}/ai/critique`, {
+    method: 'POST',
+    headers: aiHeaders(true),
+    body: JSON.stringify({ spec, ...(image ? { image } : {}), ...(stadium ? { stadium } : {}) }),
+  });
+  const data = (await res.json().catch(() => null)) as (AiCritiqueResult & { error?: string }) | null;
+  if (!res.ok) {
+    const err = new Error(data?.error ?? `critique failed (${res.status})`) as AiError;
+    err.status = res.status;
+    throw err;
+  }
+  return data as AiCritiqueResult;
 }
 
 /** Read AI access/quota. Throws an AiError (status 403, locked) when admin-only. */

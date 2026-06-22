@@ -18,7 +18,7 @@
 import type { SeatMap } from './types';
 import type { DesignStore } from './design';
 import type { TifoSpec, SpecLayer, Region, Stand } from './tifoSpec';
-import { STAND_GEOMETRY } from './tifoSpec';
+import { STAND_GEOMETRY, standIndexOfU } from './tifoSpec';
 import { EDITOR_UNITS } from './seatmap';
 import { rasterize, maskFromAlpha, applyGridToSeats } from './importImage';
 import { renderTextCanvas, TIFO_FONTS } from './text';
@@ -50,17 +50,23 @@ function wrapDelta(u: number, c: number): number {
  * exactly one), so painting "north" then "east" never double-claims the corner.
  */
 const STAND_INDEX: Record<Stand, number> = { east: 0, north: 1, west: 2, south: 3 };
-function standOf(u: number): number {
-  return Math.floor(((u + 0.125) % 1) * 4);
-}
+/** Quarter-stand index for a seat's u — single source of truth (tifoSpec). */
+const standOf = standIndexOfU;
 
 /** Build an accept(i) predicate for a region (stand ∧ tier ∧ rows). */
 export function regionPredicate(region: Region, map: SeatMap): (i: number) => boolean {
   const standIdx = region.stand === 'all' ? -1 : STAND_INDEX[region.stand as Stand];
+  // Multi-stand coverage (cross-stand composition); null for ordinary regions.
+  const standSet = region.stands?.length ? new Set(region.stands.map((s) => STAND_INDEX[s])) : null;
   const tier = region.tier;
   const rows = region.rows;
   return (i: number): boolean => {
-    if (standIdx >= 0 && standOf(map.uv[i * 2]) !== standIdx) return false;
+    const su = standOf(map.uv[i * 2]);
+    if (standSet) {
+      if (!standSet.has(su)) return false;
+    } else if (standIdx >= 0 && su !== standIdx) {
+      return false;
+    }
     if (tier !== 'all' && map.tierOf[i] !== tier) return false;
     if (rows) {
       const v = map.uv[i * 2 + 1];

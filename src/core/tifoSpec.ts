@@ -38,6 +38,29 @@ export const STAND_GEOMETRY: Record<Stand, { centerU: number; halfU: number }> =
   south: { centerU: 0.75, halfU: 0.125 },
 };
 
+/**
+ * Perimeter order of the four stands by index — the single source of truth for
+ * "which stand is this seat in", shared by the compiler and the stadium-context
+ * serializer. Matches the `split` pattern: floor(((u + 0.125) % 1) * 4).
+ */
+export const STAND_ORDER: Stand[] = ['east', 'north', 'west', 'south'];
+
+/** Quarter-stand index (0=east, 1=north, 2=west, 3=south) for a perimeter fraction u. */
+export function standIndexOfU(u: number): number {
+  return Math.floor(((u + 0.125) % 1) * 4);
+}
+
+/** The stand a perimeter fraction u falls in. */
+export function standAtU(u: number): Stand {
+  return STAND_ORDER[standIndexOfU(u)] ?? 'east';
+}
+
+/** Multi-stand group shorthands the planner can target in one region. */
+export const STAND_GROUPS: Record<'sides' | 'ends', Stand[]> = {
+  sides: ['east', 'west'], // the two long sides, facing each other across the pitch
+  ends: ['north', 'south'], // the two ends, facing each other
+};
+
 /** Font ids the renderer can draw. Mirrors TIFO_FONTS in core/text.ts. */
 export const SPEC_FONT_IDS = ['impact', 'black', 'verdana', 'georgia', 'courier'] as const;
 export type SpecFontId = (typeof SPEC_FONT_IDS)[number];
@@ -72,9 +95,16 @@ export interface Region {
   stand: Stand | 'all';
   tier: number | 'all';
   rows?: [number, number];
+  /**
+   * Optional multi-stand coverage (cross-stand composition). When present the
+   * region spans exactly these stands and `stand` is left as 'all', so per-stand
+   * pattern maths fall back to whole-bowl coordinates. Absent for single-stand
+   * regions, so every existing spec behaves identically.
+   */
+  stands?: Stand[];
 }
 
-export type RegionInput = Region | Stand | 'all' | 'lower' | 'upper';
+export type RegionInput = Region | Stand | 'all' | 'lower' | 'upper' | 'sides' | 'ends';
 
 // ---- layers ----
 
@@ -221,6 +251,34 @@ function clampNum(v: unknown, lo: number, hi: number, dflt: number): number {
   return Math.max(lo, Math.min(hi, n));
 }
 
+/**
+ * Reduce a region to a SINGLE stand for placing a hero image/portrait. A picture
+ * spanning multiple disjoint stands ('sides'/'ends'/stands[]) or the whole bowl
+ * ('all') makes no sense, so pick one stand: the first of an explicit stands[],
+ * or 'north' (the conventional hero end) for 'all'. Single-stand regions pass
+ * through unchanged; tier and rows are preserved.
+ */
+export function narrowToSingleStand(region: Region): Region {
+  if (region.stands && region.stands.length > 0) {
+    return region.rows
+      ? { stand: region.stands[0], tier: region.tier, rows: region.rows }
+      : { stand: region.stands[0], tier: region.tier };
+  }
+  if (region.stand === 'all') return { ...region, stand: 'north' };
+  return region;
+}
+
+/** Validate a stands[] array → deduped Stand[], or null if any entry is invalid. */
+function normalizeStands(raw: unknown): Stand[] | null {
+  if (!Array.isArray(raw)) return null;
+  const out: Stand[] = [];
+  for (const s of raw) {
+    if (typeof s !== 'string' || !(STANDS as string[]).includes(s)) return null;
+    if (!out.includes(s as Stand)) out.push(s as Stand);
+  }
+  return out.length ? out : null;
+}
+
 /** Normalize a region shorthand/object to a full Region, or null if invalid. */
 export function normalizeRegion(input: unknown): Region | null {
   if (input === undefined || input === null) return { stand: 'all', tier: 'all' };
@@ -228,12 +286,13 @@ export function normalizeRegion(input: unknown): Region | null {
     if (input === 'all') return { stand: 'all', tier: 'all' };
     if (input === 'lower') return { stand: 'all', tier: 0 };
     if (input === 'upper') return { stand: 'all', tier: 1 };
+    if (input === 'sides' || input === 'ends') return { stand: 'all', tier: 'all', stands: [...STAND_GROUPS[input]] };
     if ((STANDS as string[]).includes(input)) return { stand: input as Stand, tier: 'all' };
     return null;
   }
   if (!isObj(input)) return null;
   const standRaw = input.stand ?? 'all';
-  const stand = standRaw === 'all' || (STANDS as string[]).includes(standRaw as string) ? (standRaw as Stand | 'all') : null;
+  let stand = standRaw === 'all' || (STANDS as string[]).includes(standRaw as string) ? (standRaw as Stand | 'all') : null;
   if (stand === null) return null;
   const tierRaw = input.tier ?? 'all';
   const tier = tierRaw === 'all' ? 'all' : Number.isInteger(tierRaw) && (tierRaw as number) >= 0 ? (tierRaw as number) : null;
@@ -244,7 +303,20 @@ export function normalizeRegion(input: unknown): Region | null {
     const b = clampNum(input.rows[1], 0, 1, 1);
     rows = [Math.min(a, b), Math.max(a, b)];
   }
-  return rows ? { stand, tier, rows } : { stand, tier };
+  // Optional multi-stand coverage (cross-stand composition). A present-but-invalid
+  // stands[] rejects the whole region, like every other field (strict).
+  let stands: Stand[] | undefined;
+  if (input.stands !== undefined) {
+    const ns = normalizeStands(input.stands);
+    if (ns === null) return null;
+    if (ns.length === 1) stand = ns[0]; // collapse to a single-stand region
+    else if (ns.length < STANDS.length) { stands = ns; stand = 'all'; } // true multi-stand
+    else stand = 'all'; // all four stands → whole bowl
+  }
+  const region: Region = { stand, tier };
+  if (rows) region.rows = rows;
+  if (stands) region.stands = stands;
+  return region;
 }
 
 /**
@@ -303,7 +375,7 @@ export function validateSpec(input: unknown): SpecValidationResult {
       }
       const region = normalizeRegion(raw.region);
       if (region === null) {
-        err(`${p}.region`, 'region must be a stand ("north"/"south"/"east"/"west"), "all"/"lower"/"upper", or { stand, tier, rows }');
+        err(`${p}.region`, 'region must be a stand ("north"/"south"/"east"/"west"), "all"/"lower"/"upper"/"sides"/"ends", or { stand, tier, rows, stands }');
         return;
       }
       const id = typeof raw.id === 'string' && raw.id ? raw.id : `L${li}`;

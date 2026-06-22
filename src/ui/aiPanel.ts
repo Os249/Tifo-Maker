@@ -17,10 +17,12 @@ import type { DesignStore } from '../core/design';
 import type { SeatMap } from '../core/types';
 import type { ObjectLayer } from '../core/objects';
 import type { Preview3D } from '../render/preview3d';
-import type { TifoSpec } from '../core/tifoSpec';
-import { compileSpec, regionRect } from '../core/specCompiler';
+import { type TifoSpec, narrowToSingleStand } from '../core/tifoSpec';
+import { compileSpec, regionRect, regionPredicate } from '../core/specCompiler';
 import { EDITOR_UNITS } from '../core/seatmap';
-import { generateAiTifo, fetchAiQuota, unlockAi, aiUnlockToken, type AiError, type AiQuota } from '../net/api';
+import { buildStadiumContext, describeStadiumContext } from '../core/stadiumContext';
+import { critiqueDesign, repairSpec } from '../core/critique';
+import { generateAiTifo, critiqueAiTifo, fetchAiQuota, unlockAi, aiUnlockToken, type AiError, type AiQuota } from '../net/api';
 import { isSignedIn } from '../net/api';
 import { openAuthModal } from './authModal';
 
@@ -49,12 +51,14 @@ export function mountAiPanel(deps: AiPanelDeps): void {
 
   const promptEl = $<HTMLTextAreaElement>('#ai-prompt');
   const genBtn = $<HTMLButtonElement>('#ai-generate');
+  const superBtn = $<HTMLButtonElement>('#ai-generate-super');
   const statusEl = $('#ai-status');
   const errorEl = $('#ai-error');
   const resultEl = $('#ai-result');
   const summaryEl = $('#ai-summary');
   const regenBtn = $<HTMLButtonElement>('#ai-regen');
   const revertBtn = $<HTMLButtonElement>('#ai-revert');
+  const polishBtn = $<HTMLButtonElement>('#ai-polish');
   const quotaEl = $('#ai-quota');
   if (!promptEl || !genBtn) return; // panel not present (e.g. phone build)
 
@@ -62,6 +66,9 @@ export function mountAiPanel(deps: AiPanelDeps): void {
   let baselineCells: Uint8Array | null = null;
   let baselinePalette: string[] | null = null;
   let busy = false;
+  let lastSuper = false; // so Regenerate repeats the same mode
+  let lastSpec: TifoSpec | null = null; // the applied design (for AI critique/polish)
+  let lastStadium: string | undefined; // stadium context used (Super AI)
 
   const setStatus = (msg: string): void => { if (statusEl) statusEl.textContent = msg; };
   const setError = (msg: string | null): void => {
@@ -93,7 +100,7 @@ export function mountAiPanel(deps: AiPanelDeps): void {
     <p id="ai-unlock-msg" class="hint" style="font-size:11px;color:var(--text-3);margin:8px 0 0;"></p>`;
   section.appendChild(lockEl);
 
-  const lockToggle = ([promptEl, genBtn, examplesEl, quotaEl] as (HTMLElement | null)[]).filter(
+  const lockToggle = ([promptEl, genBtn, superBtn, examplesEl, quotaEl] as (HTMLElement | null)[]).filter(
     (e): e is HTMLElement => !!e,
   );
   const setLocked = (locked: boolean): void => {
@@ -124,16 +131,32 @@ export function mountAiPanel(deps: AiPanelDeps): void {
   const applySpec = async (spec: TifoSpec): Promise<void> => {
     captureBaseline();
     objects.clear(); // floating (unbaked) objects don't belong to a fresh generation
-    const result = compileSpec(spec, map, store);
+    let working = spec;
+    compileSpec(working, map, store);
+
+    // Phase 4: deterministic critique of the rendered seats, with ONE bounded
+    // repair pass (enlarge fragile text/symbols) when fine detail won't read.
+    let critique = critiqueDesign(store.cells, map, working);
+    if (critique.paintedSeats > 0 && critique.fragileSeats > critique.paintedSeats * 0.2) {
+      const repaired = repairSpec(working, critique);
+      if (repaired.changed) {
+        working = repaired.spec;
+        compileSpec(working, map, store);
+        critique = critiqueDesign(store.cells, map, working);
+      }
+    }
 
     // Image layers (portraits/figures): place each in its region and BAKE into
     // the seats (reusing the Image-tool quantizer) so it shows in 2D AND 3D and
     // becomes part of the design — not an unbaked floating object.
-    for (const layer of spec.layers) {
+    for (const layer of working.layers) {
       if (layer.kind !== 'image' || !layer.assetRef) continue;
       try {
         const bmp = await dataUrlToBitmap(layer.assetRef);
-        const rect = regionRect(layer.region, map);
+        // Phase 3: a portrait belongs to ONE stand — narrow multi-stand/'all'
+        // image regions so the hero never stretches across the whole bowl.
+        const region = narrowToSingleStand(layer.region);
+        const rect = regionRect(region, map);
         // Portrait is the hero: fill the stand's HEIGHT (its natural large axis),
         // let width follow the image aspect, and cap to the stand width so it
         // never bleeds into the neighbouring stands.
@@ -148,13 +171,14 @@ export function mountAiPanel(deps: AiPanelDeps): void {
           width: w,
           height: h,
           colorIndex: 0,
-          tier: typeof layer.region.tier === 'number' ? layer.region.tier : null,
+          tier: typeof region.tier === 'number' ? region.tier : null,
           bitmap: bmp,
           name: 'AI image',
           dither: layer.dither,
           alphaThreshold: 128,
         });
-        objects.bake(created, store, map, EDITOR_UNITS.width); // → seats (shows in 3D)
+        // Clip the bake to the stand so the portrait can't bleed into neighbours.
+        objects.bake(created, store, map, EDITOR_UNITS.width, regionPredicate(region, map));
       } catch {
         /* decode/bake failed → skip this image */
       }
@@ -164,11 +188,10 @@ export function mountAiPanel(deps: AiPanelDeps): void {
     refresh();
     editor.fitToView();
     if (summaryEl) {
-      const warn = result.fragileSeats > result.seatsPainted * 0.25
-        ? ' · some thin detail may not read at scale'
-        : '';
-      summaryEl.textContent = (spec.summary ?? spec.title) + warn;
+      const base = working.summary ?? working.title;
+      summaryEl.textContent = critique.issues.length ? `${base}  ·  ${critique.issues[0]}` : base;
     }
+    lastSpec = working; // the live design — input for AI critique/polish
     if (resultEl) resultEl.style.display = '';
   };
 
@@ -185,7 +208,7 @@ export function mountAiPanel(deps: AiPanelDeps): void {
     setStatus('Reverted to your previous canvas.');
   };
 
-  const run = async (prompt: string): Promise<void> => {
+  const run = async (prompt: string, opts: { super?: boolean } = {}): Promise<void> => {
     if (busy) return;
     const text = prompt.trim();
     if (!text) { setError('Describe the tifo you want first.'); return; }
@@ -195,25 +218,33 @@ export function mountAiPanel(deps: AiPanelDeps): void {
       void openAuthModal();
       return;
     }
+    const useSuper = !!opts.super;
+    lastSuper = useSuper;
+    const label = useSuper ? 'Super AI' : 'AI';
     busy = true;
     setError(null);
     genBtn.disabled = true;
+    if (superBtn) superBtn.disabled = true;
     if (regenBtn) regenBtn.disabled = true;
-    setStatus('Designing your tifo…');
+    if (polishBtn) polishBtn.disabled = true;
+    setStatus(useSuper ? 'Super AI is designing the whole stadium…' : 'Designing your tifo…');
     try {
-      const res = await generateAiTifo(text);
+      // Mode 3 sends the bowl geometry so the director can plan per-stand.
+      const stadium = useSuper ? describeStadiumContext(buildStadiumContext(map)) : undefined;
+      lastStadium = stadium;
+      const res = await generateAiTifo(text, useSuper ? { mode: 'super', stadium } : {});
       await applySpec(res.spec);
-      setStatus(res.source === 'model' ? 'Designed with Gemini.' : 'Designed (offline designer — model not reached).');
+      setStatus(res.source === 'model' ? `Designed with Gemini${useSuper ? ' (Super AI)' : ''}.` : 'Designed (offline designer — model not reached).');
       setQuota(res.quota);
       // Surface server diagnostics in the panel AND the footer "ground bar".
       const notes = res.notes ?? [];
       const bar = document.getElementById('message');
       if (notes.length) {
         setError(notes.join('  ·  '));
-        if (bar) bar.textContent = 'AI: ' + notes.join('  ·  ');
+        if (bar) bar.textContent = `${label}: ` + notes.join('  ·  ');
       } else {
         setError(null);
-        if (bar) bar.textContent = res.source === 'model' ? 'AI: designed with Gemini ✓' : '';
+        if (bar) bar.textContent = res.source === 'model' ? `${label}: designed with Gemini ✓` : '';
       }
     } catch (e) {
       const err = e as AiError;
@@ -236,12 +267,74 @@ export function mountAiPanel(deps: AiPanelDeps): void {
     } finally {
       busy = false;
       genBtn.disabled = false;
+      if (superBtn) superBtn.disabled = false;
       if (regenBtn) regenBtn.disabled = false;
+      if (polishBtn) polishBtn.disabled = false;
+    }
+  };
+
+  // Capture a low-res flat render of the current seats (mirrors viewer.paint2D) for
+  // the vision critic — kept local to avoid importing the viewer's heavy 3D graph.
+  const captureRender = (): string | undefined => {
+    try {
+      const bw = map.bounds.maxX - map.bounds.minX;
+      const bh = map.bounds.maxY - map.bounds.minY;
+      const W = 384;
+      const scale = W / bw;
+      const c = document.createElement('canvas');
+      c.width = W;
+      c.height = Math.max(1, Math.round(bh * scale));
+      const ctx = c.getContext('2d');
+      if (!ctx) return undefined;
+      ctx.fillStyle = '#07080A';
+      ctx.fillRect(0, 0, c.width, c.height);
+      for (let i = 0; i < map.count; i++) {
+        ctx.fillStyle = store.cells[i] === 0 ? '#262a33' : store.palette[store.cells[i]] ?? '#262a33';
+        const x = (map.xy[i * 2] - map.bounds.minX) * scale;
+        const y = (map.xy[i * 2 + 1] - map.bounds.minY) * scale;
+        ctx.fillRect(x, y, Math.max(0.6, 3.2 * scale), Math.max(1, 8 * scale * 0.85));
+      }
+      return c.toDataURL('image/jpeg', 0.82);
+    } catch {
+      return undefined;
+    }
+  };
+
+  // Phase 4b: vision critique — send the render + spec, apply the improved design.
+  const polish = async (): Promise<void> => {
+    const spec = lastSpec;
+    if (busy || !spec) return;
+    busy = true;
+    setError(null);
+    genBtn.disabled = true;
+    if (superBtn) superBtn.disabled = true;
+    if (regenBtn) regenBtn.disabled = true;
+    if (polishBtn) polishBtn.disabled = true;
+    setStatus('Polishing with AI critique…');
+    try {
+      const res = await critiqueAiTifo(spec, captureRender(), lastStadium);
+      await applySpec(res.spec);
+      const bar = document.getElementById('message');
+      setStatus(res.source === 'model' ? 'Polished by AI critique.' : 'Kept your design (critique suggested no change).');
+      if (bar) bar.textContent = res.source === 'model' ? 'AI: polished ✓' : '';
+      if (res.notes && res.notes.length) setError(res.notes.join('  ·  '));
+    } catch (e) {
+      const err = e as AiError;
+      setStatus('');
+      setError(err.message || 'Polish failed. Please try again.');
+    } finally {
+      busy = false;
+      genBtn.disabled = false;
+      if (superBtn) superBtn.disabled = false;
+      if (regenBtn) regenBtn.disabled = false;
+      if (polishBtn) polishBtn.disabled = false;
     }
   };
 
   genBtn.addEventListener('click', () => void run(promptEl.value));
-  regenBtn?.addEventListener('click', () => void run(promptEl.value));
+  superBtn?.addEventListener('click', () => void run(promptEl.value, { super: true }));
+  regenBtn?.addEventListener('click', () => void run(promptEl.value, { super: lastSuper }));
+  polishBtn?.addEventListener('click', () => void polish());
   revertBtn?.addEventListener('click', revert);
   // Ctrl/Cmd+Enter generates from the textarea.
   promptEl.addEventListener('keydown', (e) => {
