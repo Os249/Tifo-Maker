@@ -11,7 +11,9 @@ import { regionPredicate } from '../src/core/specCompiler';
 import { SUPER_AI_EXEMPLARS, fewShotBlock } from '../src/core/exemplars';
 import { critiqueDesign, repairSpec } from '../src/core/critique';
 import { composeSuperOffline } from '../src/core/promptDesigner';
+import { matchClub } from '../src/core/clubs';
 import { quantizePixels } from '../src/core/importImage';
+import { TtlCache, cacheKey } from '../server/src/aiCache';
 import { buildDirectorPrompt } from '../server/src/aiProvider';
 
 let failures = 0;
@@ -162,6 +164,25 @@ const anniSpec = composeSuperOffline('100 years anniversary, green and white');
 check('anniversary: validates + mosaic pattern', validateSpec(anniSpec).valid && anniSpec.layers.some((l) => l.kind === 'pattern'));
 const genSpec = composeSuperOffline('blue and white full stadium');
 check('occasions differ from the generic layout', derbySpec.summary !== genSpec.summary && titleSpec.summary !== genSpec.summary && anniSpec.summary !== genSpec.summary);
+
+// ---- 11. result cache (Wave 1: tokens + fewer calls) ----
+const cc = new TtlCache<number>(2, 60000);
+cc.set('a', 1); cc.set('b', 2); cc.get('a'); cc.set('c', 3); // touch a, then overflow evicts b
+check('cache: LRU evicts least-recently-used', cc.get('b') === undefined && cc.get('a') === 1 && cc.get('c') === 3);
+check('cache: keys separate parts (no collision)', cacheKey('a', 'b') !== cacheKey('ab', ''));
+check('cache: expired entry is dropped', (() => { const t = new TtlCache<number>(5, -1); t.set('x', 9); return t.get('x') === undefined; })());
+
+// ---- 12. club-identity presets (Wave 3: free accuracy) ----
+check('club: barcelona → blaugrana', matchClub('barcelona derby')?.palette[0] === '#a50044');
+check('club: unknown brief → null', matchClub('a plain blue and white tifo') === null);
+const clubSpec = composeSuperOffline('real madrid champions tifo');
+check('club: composer adopts the club palette', clubSpec.palette.includes('#febe10'));
+
+// ---- 13. offline variant / shuffle (Wave 4: free variety) ----
+const v1 = composeSuperOffline('blue white and red full stadium', { variant: 1 });
+const v2 = composeSuperOffline('blue white and red full stadium', { variant: 2 });
+check('variant: different seeds produce different designs', JSON.stringify(v1.palette) !== JSON.stringify(v2.palette));
+check('variant: still validates', validateSpec(v1).valid && validateSpec(v2).valid);
 
 console.log(`\n${failures === 0 ? 'ALL PASS' : failures + ' FAILED'}`);
 if (failures > 0) process.exit(1);

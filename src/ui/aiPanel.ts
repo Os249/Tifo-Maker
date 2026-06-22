@@ -22,6 +22,7 @@ import { compileSpec, regionRect, regionPredicate } from '../core/specCompiler';
 import { EDITOR_UNITS } from '../core/seatmap';
 import { buildStadiumContext, describeStadiumContext } from '../core/stadiumContext';
 import { critiqueDesign, repairSpec } from '../core/critique';
+import { composeSuperOffline } from '../core/promptDesigner';
 import { generateAiTifo, critiqueAiTifo, fetchAiQuota, unlockAi, aiUnlockToken, type AiError, type AiQuota } from '../net/api';
 import { isSignedIn } from '../net/api';
 import { openAuthModal } from './authModal';
@@ -59,6 +60,7 @@ export function mountAiPanel(deps: AiPanelDeps): void {
   const regenBtn = $<HTMLButtonElement>('#ai-regen');
   const revertBtn = $<HTMLButtonElement>('#ai-revert');
   const polishBtn = $<HTMLButtonElement>('#ai-polish');
+  const shuffleBtn = $<HTMLButtonElement>('#ai-shuffle');
   const quotaEl = $('#ai-quota');
   if (!promptEl || !genBtn) return; // panel not present (e.g. phone build)
 
@@ -69,6 +71,7 @@ export function mountAiPanel(deps: AiPanelDeps): void {
   let lastSuper = false; // so Regenerate repeats the same mode
   let lastSpec: TifoSpec | null = null; // the applied design (for AI critique/polish)
   let lastStadium: string | undefined; // stadium context used (Super AI)
+  let shuffleN = 0; // increments per free offline "shuffle"
 
   const setStatus = (msg: string): void => { if (statusEl) statusEl.textContent = msg; };
   const setError = (msg: string | null): void => {
@@ -100,7 +103,7 @@ export function mountAiPanel(deps: AiPanelDeps): void {
     <p id="ai-unlock-msg" class="hint" style="font-size:11px;color:var(--text-3);margin:8px 0 0;"></p>`;
   section.appendChild(lockEl);
 
-  const lockToggle = ([promptEl, genBtn, superBtn, examplesEl, quotaEl] as (HTMLElement | null)[]).filter(
+  const lockToggle = ([promptEl, genBtn, superBtn, shuffleBtn, examplesEl, quotaEl] as (HTMLElement | null)[]).filter(
     (e): e is HTMLElement => !!e,
   );
   const setLocked = (locked: boolean): void => {
@@ -332,10 +335,31 @@ export function mountAiPanel(deps: AiPanelDeps): void {
     }
   };
 
+  // Free offline "shuffle": re-compose a multi-stand design client-side (no model,
+  // no tokens, instant) with a different variant each click. Portraits need the
+  // server path, so a shuffled person-brief shows the layout without the face.
+  const shuffle = async (): Promise<void> => {
+    if (busy) return;
+    const text = promptEl.value.trim();
+    if (!text) { setError('Describe the tifo you want first.'); return; }
+    busy = true;
+    setError(null);
+    try {
+      shuffleN++;
+      await applySpec(composeSuperOffline(text, { variant: shuffleN }));
+      setStatus(`Shuffled a free offline variation (#${shuffleN}).`);
+      const bar = document.getElementById('message');
+      if (bar) bar.textContent = 'AI: offline shuffle ✓ (no tokens)';
+    } finally {
+      busy = false;
+    }
+  };
+
   genBtn.addEventListener('click', () => void run(promptEl.value));
   superBtn?.addEventListener('click', () => void run(promptEl.value, { super: true }));
   regenBtn?.addEventListener('click', () => void run(promptEl.value, { super: lastSuper }));
   polishBtn?.addEventListener('click', () => void polish());
+  shuffleBtn?.addEventListener('click', () => void shuffle());
   revertBtn?.addEventListener('click', revert);
   // Ctrl/Cmd+Enter generates from the textarea.
   promptEl.addEventListener('keydown', (e) => {

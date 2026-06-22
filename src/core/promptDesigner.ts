@@ -23,6 +23,7 @@ import {
   normalizeRegion,
   validateSpec,
 } from './tifoSpec';
+import { matchClub } from './clubs';
 
 const EMPTY = '#262a33';
 
@@ -196,7 +197,8 @@ export function designFromPrompt(prompt: string): TifoSpec {
   const p = original.toLowerCase();
 
   // ---- palette ----
-  const colors = pickColors(p);
+  const club = matchClub(p);
+  const colors = club ? club.palette : pickColors(p);
   const palette = colors.length > 0 ? [EMPTY, ...colors.slice(0, 7)] : [EMPTY, '#16161a', '#f2f1ec'];
   if (palette.length < 3) palette.push(palette[1] === '#f2f1ec' ? '#16161a' : '#f2f1ec'); // guarantee a contrast colour
 
@@ -231,7 +233,7 @@ export function designFromPrompt(prompt: string): TifoSpec {
   }
 
   // 3) symbol (centred, bold)
-  const symbol = pickSymbol(p);
+  const symbol = pickSymbol(p) ?? club?.crest ?? null;
   if (symbol) {
     layers.push({
       kind: 'symbol', id: 'symbol', region: regionObj(region),
@@ -337,11 +339,19 @@ function warmestIndex(palette: string[], avoid: number): number {
  * route renders a face without touching the text-model quota. Bold by default and
  * normalized through validateSpec (same contract as model output).
  */
-export function composeSuperOffline(prompt: string): TifoSpec {
+export function composeSuperOffline(prompt: string, opts: { variant?: number } = {}): TifoSpec {
   const original = (prompt ?? '').slice(0, 400);
   const p = original.toLowerCase();
 
-  const colors = pickColors(p);
+  const club = matchClub(p);
+  let colors = club ? club.palette : pickColors(p);
+  // Variant seed: rotate the design colours so each "shuffle" emphasises a
+  // different one — free, deterministic variety with no model call.
+  const variant = Math.max(0, Math.floor(opts.variant ?? 0));
+  if (variant > 0 && colors.length > 1) {
+    const k = variant % colors.length;
+    colors = [...colors.slice(k), ...colors.slice(0, k)];
+  }
   const palette = colors.length > 0 ? [EMPTY, ...colors.slice(0, 6)] : [EMPTY, '#16161a', '#f2f1ec'];
   if (palette.length < 3) palette.push(palette[1] === '#f2f1ec' ? '#16161a' : '#f2f1ec');
 
@@ -351,7 +361,7 @@ export function composeSuperOffline(prompt: string): TifoSpec {
   const gold = warmestIndex(palette, bg);
 
   const { head: headline, sub } = pickText(original, p);
-  const symbol = pickSymbol(p);
+  const symbol = pickSymbol(p) ?? club?.crest ?? null;
   const isPerson = hasKnownPlayer(p) || /\b(portrait|face|captain|legend|player|hero|footballer|photo|striker|keeper|icon)\b/.test(p);
   const occasion = detectOccasion(p);
 
@@ -425,7 +435,8 @@ export function composeSuperOffline(prompt: string): TifoSpec {
     addName(headline ?? 'HISTORY', head);
     summary = 'Heritage: classic vertical stripes on the sides, the club crest on the north, the motto on the south.';
   } else {
-    layers.push({ kind: 'stripes', id: nid(), region: regionObj('sides'), colors: [bg, head], orientation: 'horizontal', bands: 6 });
+    const sideDir = (['horizontal', 'vertical', 'diagonal'] as const)[variant % 3];
+    layers.push({ kind: 'stripes', id: nid(), region: regionObj('sides'), colors: [bg, head], orientation: sideDir, bands: 6 });
     layers.push({ kind: 'fill', id: nid(), region: regionObj('north'), colorIndex: bg });
     heroKind = addHero(null);
     layers.push({ kind: 'fill', id: nid(), region: regionObj('south'), colorIndex: bg });

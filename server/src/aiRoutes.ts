@@ -23,14 +23,18 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { AiUsageRepository } from './repo';
-import { validateSpec } from '../../src/core/tifoSpec';
+import { validateSpec, type TifoSpec } from '../../src/core/tifoSpec';
 import { refineSpec } from '../../src/core/specRefine';
 import { designFromPrompt, composeSuperOffline } from '../../src/core/promptDesigner';
 import { generateSpecViaProvider, buildDirectorPrompt, critiqueSpecViaProvider, activeProvider } from './aiProvider';
 import { generateImage } from './imageAssets';
+import { TtlCache, cacheKey } from './aiCache';
 
 const MAX_PROMPT = 400;
 const UNLOCK_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+// Result cache: identical (mode+prompt+stadium+provider) generations return the
+// prior model design instantly — no model call, no image gen. Cuts tokens + RPD.
+const genCache = new TtlCache<{ spec: TifoSpec; source: 'model' }>(80, 30 * 60 * 1000);
 
 export interface AiRouteDeps {
   /** Quota store (retained for when AI reopens to all users; unused during the lock). */
@@ -118,6 +122,18 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
     const isSuper = body.mode === 'super';
     const stadium = isSuper && typeof body.stadium === 'string' ? body.stadium.slice(0, 2000) : undefined;
 
+    // Result cache: an identical brief returns the prior model design instantly.
+    const key = cacheKey('gen', isSuper ? 'super' : 'std', prompt, stadium, activeProvider());
+    const hit = genCache.get(key);
+    if (hit) {
+      return reply.code(200).send({
+        spec: hit.spec,
+        quota: { admin: true, used: 0, limit: 0, remaining: 999999 },
+        source: hit.source,
+        notes: ['Served from cache — no AI call.'],
+      });
+    }
+
     // Try the configured model first; fall back to the deterministic designer.
     let source: 'model' | 'offline' = 'offline';
     let result = { valid: false } as ReturnType<typeof validateSpec>;
@@ -163,6 +179,10 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
         else notes.push(`Portrait not generated — ${r.error ?? 'unknown error'}`);
       }
     }
+
+    // Cache successful MODEL designs only — a later identical brief is then free,
+    // while offline fallbacks (e.g. after a 429) still retry the model next time.
+    if (source === 'model') genCache.set(key, { spec, source });
 
     // Admin-only lock: unlimited, no per-account credit consumed.
     return reply.code(200).send({ spec, quota: { admin: true, used: 0, limit: 0, remaining: 999999 }, source, notes });
