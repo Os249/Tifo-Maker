@@ -25,7 +25,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { AiUsageRepository } from './repo';
 import { validateSpec } from '../../src/core/tifoSpec';
 import { refineSpec } from '../../src/core/specRefine';
-import { designFromPrompt } from '../../src/core/promptDesigner';
+import { designFromPrompt, composeSuperOffline } from '../../src/core/promptDesigner';
 import { generateSpecViaProvider, buildDirectorPrompt, critiqueSpecViaProvider, activeProvider } from './aiProvider';
 import { generateImage } from './imageAssets';
 
@@ -136,7 +136,9 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
       }
     }
     if (!result.valid) {
-      result = validateSpec(designFromPrompt(prompt));
+      // Super AI falls back to the multi-stand composer (still a full-bowl design),
+      // standard mode to the single-template designer.
+      result = validateSpec(isSuper ? composeSuperOffline(prompt) : designFromPrompt(prompt));
       source = 'offline';
     }
     if (!result.valid || !result.spec) {
@@ -148,7 +150,7 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
     // Diagnostics surfaced to the UI so failures are visible, not silent.
     const notes: string[] = [];
     if (source === 'offline' && activeProvider() !== 'none') {
-      notes.push(`Text model unavailable — ${modelError ?? 'unknown error'} — used the offline designer.`);
+      notes.push(`Text model unavailable — ${modelError ?? 'unknown error'} — used the offline ${isSuper ? 'full-bowl composer' : 'designer'}.`);
     }
 
     // Phase 5: generate a picture for each image layer (portraits/figures).

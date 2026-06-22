@@ -270,6 +270,92 @@ export function designFromPrompt(prompt: string): TifoSpec {
   return res.spec ?? spec;
 }
 
+function hasKnownPlayer(lower: string): boolean {
+  return Object.keys(PLAYERS).some((k) => lower.includes(k));
+}
+
+/** Build an image prompt for a portrait hero (known player → name; else the brief). */
+function portraitPrompt(original: string, lower: string): string {
+  for (const key of Object.keys(PLAYERS)) {
+    if (lower.includes(key)) return `bold graphic poster portrait of ${PLAYERS[key].name}, flat tones`;
+  }
+  return `${original.trim().slice(0, 120)} — bold graphic poster portrait, flat tones`;
+}
+
+/**
+ * Offline MULTI-STAND composer for Super AI (Mode 3) — a deterministic full-bowl
+ * design with NO model call. Used as Super AI's fallback when the model is
+ * unavailable (e.g. a free-tier 429), so "design the whole stadium" still yields
+ * a real multi-stand scene instead of degrading to a single-template result.
+ *
+ * Layout: a HERO on the north (portrait image for a person/player, else a bold
+ * symbol, else a headline), the name/number or slogan on the OPPOSITE (south)
+ * stand, and a club-colour field wrapping the two sides (the multi-stand "sides"
+ * region). Portraits ride the free image path (Pollinations) so even this offline
+ * route can render a face without touching the text-model quota. Normalized
+ * through validateSpec, so its output obeys the exact same contract.
+ */
+export function composeSuperOffline(prompt: string): TifoSpec {
+  const original = (prompt ?? '').slice(0, 400);
+  const p = original.toLowerCase();
+
+  const colors = pickColors(p);
+  const palette = colors.length > 0 ? [EMPTY, ...colors.slice(0, 6)] : [EMPTY, '#16161a', '#f2f1ec'];
+  if (palette.length < 3) palette.push(palette[1] === '#f2f1ec' ? '#16161a' : '#f2f1ec');
+
+  const bg = darkestIndex(palette);
+  const head = contrastIndex(palette, bg);
+  const accent = accentIndex(palette, [bg, head]);
+
+  const { head: headline, sub } = pickText(original, p);
+  const symbol = pickSymbol(p);
+  const isPerson = hasKnownPlayer(p) || /\b(portrait|face|captain|legend|player|hero|footballer|photo|striker|keeper|icon)\b/.test(p);
+
+  const layers: SpecLayer[] = [];
+
+  // Sides (east + west): a club-colour field wrapping the bowl — one multi-stand layer.
+  layers.push({
+    kind: 'stripes', id: 'sides', region: regionObj('sides'),
+    colors: [bg, head], orientation: 'horizontal', bands: 6,
+  });
+
+  // Hero on the north: portrait > symbol > headline.
+  let heroKind: 'image' | 'symbol' | 'text';
+  if (isPerson) {
+    heroKind = 'image';
+    layers.push({ kind: 'image', id: 'hero', region: regionObj('north'), prompt: portraitPrompt(original, p), scaleFrac: 0.95, dither: true, halftone: true });
+  } else if (symbol) {
+    heroKind = 'symbol';
+    layers.push({ kind: 'fill', id: 'hero-bg', region: regionObj('north'), colorIndex: bg });
+    layers.push({ kind: 'symbol', id: 'hero', region: regionObj('north'), symbol, colorIndex: head, scaleFrac: 0.85, align: 'center' });
+  } else {
+    heroKind = 'text';
+    layers.push({ kind: 'fill', id: 'hero-bg', region: regionObj('north'), colorIndex: bg });
+    layers.push({ kind: 'text', id: 'hero', region: regionObj('north'), text: headline ?? 'ULTRAS', colorIndex: head, fontId: 'impact', arcDeg: 0, heightFrac: 0.6, align: 'center' });
+  }
+
+  // Opposite stand (south): the name + number, or a slogan, on a dark field.
+  layers.push({ kind: 'fill', id: 'opp-bg', region: regionObj('south'), colorIndex: bg });
+  const oppText = headline ?? (heroKind !== 'text' ? 'ULTRAS' : null);
+  if (oppText && sub) {
+    layers.push({ kind: 'text', id: 'name', region: rowsObj('south', [0.4, 1]), text: oppText, colorIndex: head, fontId: 'impact', arcDeg: 0, heightFrac: 0.5, align: 'center' });
+    layers.push({ kind: 'text', id: 'number', region: rowsObj('south', [0, 0.36]), text: sub, colorIndex: accent, fontId: 'impact', arcDeg: 0, heightFrac: 0.34, align: 'center' });
+  } else if (oppText) {
+    layers.push({ kind: 'text', id: 'name', region: regionObj('south'), text: oppText, colorIndex: head, fontId: 'impact', arcDeg: 0, heightFrac: 0.6, align: 'center' });
+  }
+
+  const spec: TifoSpec = {
+    version: 1,
+    title: cap((headline || symbol || 'Full stadium') + ' tifo'),
+    summary: `Offline full-bowl: a ${heroKind === 'image' ? 'portrait' : heroKind} on the north${oppText ? `, “${oppText}” on the south` : ''}, club colours on the sides.`,
+    palette,
+    background: bg,
+    layers,
+  };
+  const res = validateSpec(spec);
+  return res.spec ?? spec;
+}
+
 /** Normalize a region shorthand to the object form layers require. */
 function regionObj(r: RegionInput): Region {
   return normalizeRegion(r) ?? { stand: 'all', tier: 'all' };

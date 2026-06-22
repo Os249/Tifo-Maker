@@ -10,6 +10,7 @@ import { normalizeRegion, standIndexOfU, STAND_ORDER, validateSpec, narrowToSing
 import { regionPredicate } from '../src/core/specCompiler';
 import { SUPER_AI_EXEMPLARS, fewShotBlock } from '../src/core/exemplars';
 import { critiqueDesign, repairSpec } from '../src/core/critique';
+import { composeSuperOffline } from '../src/core/promptDesigner';
 import { quantizePixels } from '../src/core/importImage';
 import { buildDirectorPrompt } from '../server/src/aiProvider';
 
@@ -140,6 +141,17 @@ check('repair is a no-op when legible', rep2.changed === false);
   check('halftone far less fragile than dither', fH < fD * 0.25, `halftone ${fH} vs dither ${fD}`);
   check('halftone preserves multiple tones', tones >= 2, `${tones} tones`);
 }
+
+// ---- 9. offline multi-stand composer (Super AI fallback, no model call) ----
+const offPlayer = composeSuperOffline('farewell to Ronaldo, red white and black, full stadium');
+const offValid = validateSpec(offPlayer);
+check('offline composer output validates', offValid.valid, offValid.valid ? '' : JSON.stringify(offValid.errors));
+const offStands = new Set<string>();
+for (const l of offPlayer.layers) { if (l.region.stands) l.region.stands.forEach((s) => offStands.add(s)); else offStands.add(l.region.stand); }
+check('offline composer is multi-stand (all four)', ['north', 'south', 'east', 'west'].every((s) => offStands.has(s)), [...offStands].join(','));
+check('offline composer: player brief yields a portrait image layer', offPlayer.layers.some((l) => l.kind === 'image'));
+const offEagle = composeSuperOffline('giant eagle covering the stadium in black and gold');
+check('offline composer: symbol brief yields a symbol layer', offEagle.layers.some((l) => l.kind === 'symbol'));
 
 console.log(`\n${failures === 0 ? 'ALL PASS' : failures + ' FAILED'}`);
 if (failures > 0) process.exit(1);
