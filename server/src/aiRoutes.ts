@@ -187,9 +187,24 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
     if (activeProvider() === 'none') {
       notes.push('No AI provider configured — design left unchanged.');
     } else {
-      const res = await critiqueSpecViaProvider(incoming.spec, image, stadium);
+      // Portrait assetRefs are huge base64 data URLs; the critic sees the rendered
+      // image, so send a SLIM spec (assetRef removed) — otherwise the prompt
+      // balloons and the model's JSON reply truncates. Re-attach originals after.
+      const origImages = incoming.spec.layers.filter((l) => l.kind === 'image');
+      const slim = {
+        ...incoming.spec,
+        layers: incoming.spec.layers.map((l) => (l.kind === 'image' ? { ...l, assetRef: undefined } : l)),
+      };
+      const res = await critiqueSpecViaProvider(slim, image, stadium);
       const improved = res.spec ? validateSpec(res.spec) : null;
       if (improved && improved.valid && improved.spec) {
+        let k = 0;
+        for (const l of improved.spec.layers) {
+          if (l.kind === 'image') {
+            const o = origImages[k++];
+            if (o && o.kind === 'image' && o.assetRef && !l.assetRef) l.assetRef = o.assetRef;
+          }
+        }
         spec = refineSpec(improved.spec);
         source = 'model';
       } else {

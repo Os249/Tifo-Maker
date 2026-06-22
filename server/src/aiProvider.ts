@@ -300,7 +300,7 @@ export async function generateSpecViaProvider(
         {
           systemInstruction: { parts: [{ text: system }] },
           contents: [{ role: 'user', parts: geminiParts(userMessage(prompt, opts.context), opts.image) }],
-          generationConfig: { responseMimeType: 'application/json', temperature: 0.9, maxOutputTokens: 2048 },
+          generationConfig: { responseMimeType: 'application/json', temperature: 0.9, maxOutputTokens: 4096 },
         },
         timeoutMs,
       );
