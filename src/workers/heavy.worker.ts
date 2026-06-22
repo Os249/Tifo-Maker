@@ -1,6 +1,6 @@
 /// <reference lib="webworker" />
 import { generateSeatMap } from '../core/seatmap';
-import { TEMPLATES } from '../core/template';
+import { templateById } from '../core/stadiumCatalog';
 import { encodeGif } from '../core/gif';
 import type { SeatMap } from '../core/types';
 
@@ -44,7 +44,7 @@ function seatMapTransfer(m: SeatMap): Transferable[] {
 self.onmessage = (e: MessageEvent<Req>) => {
   const msg = e.data;
   if (msg.kind === 'seatmap') {
-    const tpl = TEMPLATES.find((t) => t.id === msg.templateId);
+    const tpl = templateById(msg.templateId);
     if (!tpl) {
       (self as unknown as Worker).postMessage({ id: msg.id, error: `unknown template ${msg.templateId}` });
       return;

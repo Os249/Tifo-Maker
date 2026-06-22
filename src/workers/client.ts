@@ -1,5 +1,5 @@
 import { generateSeatMap } from '../core/seatmap';
-import { TEMPLATES } from '../core/template';
+import { templateById } from '../core/stadiumCatalog';
 import { encodeGif, renderRevealFrames, type GifOptions } from '../core/gif';
 import type { DesignStore } from '../core/design';
 import type { SeatMap } from '../core/types';
@@ -51,7 +51,7 @@ export async function generateSeatMapAsync(templateId: string): Promise<SeatMap>
   } catch {
     /* fall through */
   }
-  const tpl = TEMPLATES.find((t) => t.id === templateId);
+  const tpl = templateById(templateId);
   if (!tpl) throw new Error(`unknown template ${templateId}`);
   return generateSeatMap(tpl);
 }

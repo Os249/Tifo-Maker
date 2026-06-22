@@ -15,6 +15,7 @@ import { extractPalette, rasterize } from '../core/importImage';
 import { openAuthModal } from './authModal';
 import { openGallery } from './gallery';
 import { mountAiPanel } from './aiPanel';
+import { mountStadiumPanel } from './stadiumPanel';
 import { openShareModal } from './shareModal';
 import { EDITOR_UNITS } from '../core/seatmap';
 import { drawSymbol, SHAPE_ASPECT } from '../core/symbols';
@@ -67,10 +68,11 @@ export function mountToolbar(
   // 'save' / 'animation' focus the panel onto sections tagged with data-menu, so
   // the left-rail Save button and the right Animation button each open just their
   // own options. Picking any paint tool returns to 'design'.
-  let panelMode: 'design' | 'save' | 'animation' | 'ai' = 'design';
+  let panelMode: 'design' | 'save' | 'animation' | 'ai' | 'stadium' = 'design';
   const railSaveBtn = root.querySelector<HTMLButtonElement>('#rail-save');
   const animOpenBtn = root.querySelector<HTMLButtonElement>('#rail-anim');
   const aiOpenBtn = root.querySelector<HTMLButtonElement>('#rail-ai');
+  const stadiumOpenBtn = root.querySelector<HTMLButtonElement>('#rail-stadium');
 
   const showSection = (sec: HTMLElement, show: boolean): void => {
     if (show) {
@@ -104,15 +106,17 @@ export function mountToolbar(
     if (railSaveBtn) railSaveBtn.classList.toggle('menu-active', panelMode === 'save');
     if (animOpenBtn) animOpenBtn.classList.toggle('menu-active', panelMode === 'animation');
     if (aiOpenBtn) aiOpenBtn.classList.toggle('menu-active', panelMode === 'ai');
+    if (stadiumOpenBtn) stadiumOpenBtn.classList.toggle('menu-active', panelMode === 'stadium');
   };
 
-  const setPanelMode = (mode: 'design' | 'save' | 'animation' | 'ai'): void => {
+  const setPanelMode = (mode: 'design' | 'save' | 'animation' | 'ai' | 'stadium'): void => {
     panelMode = mode;
     applyContextPanel(editor.tool);
   };
   railSaveBtn?.addEventListener('click', () => setPanelMode(panelMode === 'save' ? 'design' : 'save'));
   animOpenBtn?.addEventListener('click', () => setPanelMode(panelMode === 'animation' ? 'design' : 'animation'));
   aiOpenBtn?.addEventListener('click', () => setPanelMode(panelMode === 'ai' ? 'design' : 'ai'));
+  stadiumOpenBtn?.addEventListener('click', () => setPanelMode(panelMode === 'stadium' ? 'design' : 'stadium'));
 
   const setTool = (tool: ToolId): void => {
     editor.tool = tool;
@@ -214,6 +218,9 @@ export function mountToolbar(
       try { getPreview?.()?.recolorAll(); } catch { /* preview not yet created */ }
     },
   });
+
+  // ---- Stadium panel (rail "stadium" button → panelMode 'stadium') ----
+  mountStadiumPanel({ root, map, store });
 
   // Pick ANY colour and start painting with it. Auto-adds it as a swatch so it's
   // reusable (the confirmed behaviour). Uses a hidden native colour input.

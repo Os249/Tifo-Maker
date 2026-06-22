@@ -3,6 +3,8 @@ import { installTheme } from './ui/theme';
 import { initLang, applyDom, toggleLang, t } from './ui/i18n';
 import { generateSeatMapAsync } from './workers/client';
 import { DEFAULT_PALETTE, DEFAULT_TEMPLATE, PALETTE_PRESETS, TEMPLATES } from './core/template';
+import { templateById } from './core/stadiumCatalog';
+import { requestStadiumSwitch } from './ui/stadiumSwitch';
 import { PATTERN_PRESETS } from './core/patterns';
 import { DesignStore } from './core/design';
 import { ObjectLayer } from './core/objects';
@@ -48,13 +50,13 @@ async function main(): Promise<void> {
     try {
       const { fetchDesignTemplate } = await import('./net/api');
       const ref = await fetchDesignTemplate(sharedId);
-      template = TEMPLATES.find((t) => t.id === ref.templateId) ?? DEFAULT_TEMPLATE;
+      template = templateById(ref.templateId) ?? DEFAULT_TEMPLATE;
     } catch {
       // Fall back to the default template; the load below will surface errors.
     }
   } else {
     const wanted = new URLSearchParams(location.search).get('template');
-    template = TEMPLATES.find((t) => t.id === wanted) ?? DEFAULT_TEMPLATE;
+    template = templateById(wanted ?? '') ?? DEFAULT_TEMPLATE;
   }
 
   const t0 = performance.now();
@@ -93,28 +95,13 @@ async function main(): Promise<void> {
   }
   stadiumSel.value = template.id;
   stadiumSel.addEventListener('change', () => {
-    const fromId = template.id;
-    const toId = stadiumSel.value;
-    if (toId === fromId) return;
-    // Carry the current design across the size change. We stash it (with the
-    // source template) and reload on the target template; the load path remaps
-    // by relative position so the look is preserved. Also remember where we came
-    // from so the switch is reversible (switch back = remap back).
-    try {
-      sessionStorage.setItem(
-        'tifo_stadium_remap',
-        JSON.stringify({
-          fromTemplate: fromId,
-          palette: store.palette,
-          cells: Array.from(store.cells),
-          title: docTitleValue(),
-          prevTemplate: fromId,
-        }),
-      );
-    } catch {
-      /* if stash fails we simply switch without carrying — acceptable fallback */
-    }
-    location.search = `?template=${encodeURIComponent(toId)}`;
+    // Shared switch path (also used by the Stadium panel): stash → reload → remap.
+    requestStadiumSwitch(stadiumSel.value, {
+      fromId: template.id,
+      palette: store.palette,
+      cells: store.cells,
+      title: docTitleValue(),
+    });
   });
 
   // Read the current document title from the input without coupling to toolbar.
@@ -136,7 +123,7 @@ async function main(): Promise<void> {
     if (raw) {
       sessionStorage.removeItem('tifo_stadium_remap');
       const data = JSON.parse(raw) as { fromTemplate: string; palette: string[]; cells: number[]; title?: string; prevTemplate?: string };
-      const fromTpl = TEMPLATES.find((t) => t.id === data.fromTemplate);
+      const fromTpl = templateById(data.fromTemplate);
       if (fromTpl && Array.isArray(data.cells)) {
         const oldMap = await generateSeatMapAsync(fromTpl.id);
         if (data.cells.length === oldMap.count) {

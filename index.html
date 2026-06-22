@@ -50,6 +50,7 @@
         <span class="sep"></span>
         <button class="tool" data-tool="select" title="Select &amp; move objects (V)" aria-label="Select"><i class="ti ti-pointer"></i></button>
         <span class="rail-spacer"></span>
+        <button class="tool rail-menu" id="rail-stadium" title="Stadium" aria-label="Stadium configuration"><i class="ti ti-building-stadium"></i></button>
         <button class="tool rail-menu" id="rail-ai" title="AI Designer" aria-label="AI tifo designer"><i class="ti ti-sparkles"></i></button>
         <button class="tool rail-menu" id="rail-anim" title="Animation" aria-label="Animation preferences"><i class="ti ti-movie"></i></button>
         <button class="tool rail-menu" id="rail-save" title="Save &amp; export" aria-label="Save and export"><i class="ti ti-device-floppy"></i></button>
@@ -154,6 +155,16 @@
           <button id="panel-toggle" aria-label="Collapse panel" style="padding:2px 6px;border:none;"><i class="ti ti-layout-sidebar-right-collapse"></i></button>
         </div>
         <p class="panel-orient">Paint on the <b>canvas</b> at left. These panels set <b>how</b> you paint and the look. Switch <b>Design / Stadium / Split</b> above to see it on the seats or in 3D.</p>
+
+        <div class="panel-section" id="ctx-stadium-config" data-panel="__menu_only__" data-menu="stadium">
+          <h4>Stadium <span class="h4-tag">choose &amp; configure the bowl</span></h4>
+          <p class="hint" style="font-size:11px;color:var(--text-3);margin:0 0 8px;">Pick the stadium your tifo is designed for. Switching remaps your current design onto the new bowl.</p>
+          <div class="chips" id="stadium-tabs" style="margin-bottom:8px;flex-wrap:wrap;"></div>
+          <div id="stadium-filters" style="margin-bottom:8px;"></div>
+          <div id="stadium-list" style="display:flex;flex-direction:column;gap:6px;max-height:240px;overflow:auto;"></div>
+          <div id="stadium-info" style="margin-top:12px;"></div>
+          <div id="stadium-disclaimer" style="margin-top:8px;display:none;"></div>
+        </div>
 
         <div class="panel-section" id="ctx-ai" data-panel="__menu_only__" data-menu="ai">
           <h4>AI Designer <span class="h4-tag">describe it, get a tifo</span></h4>
