@@ -14,7 +14,7 @@ import { renderDistributionPdf } from '../../src/export/distributionPdf';
 import { tmpdir } from 'node:os';
 import { readFile, unlink } from 'node:fs/promises';
 import type { AiUsageRepository, AuthRepository, DesignRepository, EventsRepository, LeadsRepository, SocialRepository } from './repo';
-import { registerAiRoutes } from './aiRoutes';
+import { registerAiRoutes, verifyUnlock } from './aiRoutes';
 import type { StadiumSubmissionRepository } from './stadiumRepo';
 import type { AdminStatsRepository } from './statsRepo';
 import { ADMIN_HTML, ADMIN_JS } from './adminPage';
@@ -329,8 +329,19 @@ export async function buildApp(
   // protection lives here, on the data endpoint.
   if (options.stats) {
     const stats = options.stats;
+    // Admin gate for analytics: a valid AI_ADMIN_PASSWORD unlock token (the
+    // dashboard exchanges the password for it via /api/ai/unlock) OR a signed-in
+    // ADMIN_USERNAMES account. Mirrors the AI routes' hasAiAccess so the same
+    // "admin password" opens both the AI designer and this dashboard.
+    const aiAdminPassword = process.env.AI_ADMIN_PASSWORD;
+    const adminAccess = async (req: FastifyRequest): Promise<boolean> => {
+      const tok = req.headers['x-ai-unlock'];
+      if (typeof tok === 'string' && aiAdminPassword && verifyUnlock(aiAdminPassword, tok)) return true;
+      const userId = await userOf(req);
+      return userId ? isAdminUser(userId) : false;
+    };
     app.get('/api/admin/overview', async (req, reply) => {
-      if (!(await requireAdmin(req, reply))) return;
+      if (!(await adminAccess(req))) return reply.code(403).send({ error: 'admin access required' });
       return reply.send(await stats.overview());
     });
   }

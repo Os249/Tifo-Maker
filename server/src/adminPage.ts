@@ -87,10 +87,8 @@ export const ADMIN_HTML = `<!doctype html>
 <div id="login" class="login-wrap">
   <form class="login" id="login-form">
     <h1>Admin sign in</h1>
-    <p>Use your admin account — the username listed in ADMIN_USERNAMES and its password.</p>
-    <label for="u">Username</label>
-    <input id="u" autocomplete="username" autocapitalize="off" spellcheck="false">
-    <label for="p">Password</label>
+    <p>Enter the admin password (the AI_ADMIN_PASSWORD set on the server).</p>
+    <label for="p">Admin password</label>
     <input id="p" type="password" autocomplete="current-password">
     <button class="primary" type="submit">Sign in</button>
     <div class="msg" id="msg"></div>
@@ -107,13 +105,13 @@ export const ADMIN_HTML = `<!doctype html>
 </html>`;
 
 export const ADMIN_JS = `
-var TOKEN_KEY = 'tifo_token_v1';
+var UNLOCK_KEY = 'tifo_ai_unlock_v1';
 var currentDays = 30;
 
 function el(id){ return document.getElementById(id); }
-function getToken(){ try { return localStorage.getItem(TOKEN_KEY); } catch(e){ return null; } }
-function setToken(t){ try { localStorage.setItem(TOKEN_KEY, t); } catch(e){} }
-function clearToken(){ try { localStorage.removeItem(TOKEN_KEY); } catch(e){} }
+function getUnlock(){ try { return localStorage.getItem(UNLOCK_KEY); } catch(e){ return null; } }
+function setUnlock(t){ try { localStorage.setItem(UNLOCK_KEY, t); } catch(e){} }
+function clearUnlock(){ try { localStorage.removeItem(UNLOCK_KEY); } catch(e){} }
 function fmt(n){ n = Number(n)||0; return n.toLocaleString(); }
 function labelize(s){ return String(s==null?'':s).replace(/_/g,' '); }
 function esc(s){ s = String(s==null?'':s); return s.replace(/[&<>"]/g, function(c){ return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[c]; }); }
@@ -122,8 +120,8 @@ function sum(arr){ var t=0; for (var i=0;i<arr.length;i++){ t += Number(arr[i].c
 async function api(path, opts){
   opts = opts || {};
   var headers = {};
-  var t = getToken();
-  if (t) headers['Authorization'] = 'Bearer ' + t;
+  var t = getUnlock();
+  if (t) headers['x-ai-unlock'] = t;
   var body;
   if (opts.body){ headers['Content-Type'] = 'application/json'; body = JSON.stringify(opts.body); }
   var res;
@@ -148,30 +146,26 @@ function showDash(){
 function setStatus(s){ el('status').textContent = s || ''; }
 
 async function init(){
-  if (!getToken()){ showLogin(''); return; }
-  var me = await api('/api/me');
-  if (me.ok && me.data && me.data.isAdmin){ showDash(); await loadAll(); }
-  else if (me.ok && me.data){ showLogin('That account is not an admin.'); }
-  else { showLogin(''); }
+  if (!getUnlock()){ showLogin(''); return; }
+  showDash();
+  await loadAll();
 }
 
 async function doLogin(ev){
   ev.preventDefault();
-  var u = el('u').value.trim();
   var p = el('p').value;
-  if (!u || !p){ el('msg').textContent = 'Enter username and password.'; return; }
+  if (!p){ el('msg').textContent = 'Enter the admin password.'; return; }
   el('msg').textContent = 'Signing in...';
-  var r = await api('/api/auth/login', { method:'POST', body:{ username:u, password:p } });
-  if (!r.ok || !r.data || !r.data.token){ el('msg').textContent = 'Login failed. Check username and password.'; return; }
-  setToken(r.data.token);
-  var me = await api('/api/me');
-  if (me.ok && me.data && me.data.isAdmin){ el('msg').textContent=''; el('p').value=''; showDash(); await loadAll(); }
-  else { clearToken(); el('msg').textContent = 'Signed in, but this account is not an admin (add it to ADMIN_USERNAMES).'; }
+  var r = await api('/api/ai/unlock', { method:'POST', body:{ password:p } });
+  if (!r.ok || !r.data || !r.data.token){ el('msg').textContent = 'Wrong password, or no admin password is configured on the server.'; return; }
+  setUnlock(r.data.token);
+  el('msg').textContent=''; el('p').value='';
+  showDash();
+  await loadAll();
 }
 
 async function doLogout(){
-  await api('/api/auth/logout', { method:'POST' });
-  clearToken();
+  clearUnlock();
   showLogin('Signed out.');
 }
 
@@ -182,7 +176,7 @@ async function loadAll(){
   var ov = await ovP;
   var fn = await fnP;
   if (!ov.ok){
-    if (ov.status === 403){ clearToken(); showLogin('Session expired or not an admin. Sign in again.'); return; }
+    if (ov.status === 403){ clearUnlock(); showLogin('Wrong or expired password. Sign in again.'); return; }
     setStatus('Failed to load (' + ov.status + ').');
     return;
   }

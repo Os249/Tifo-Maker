@@ -66,7 +66,7 @@ function signUnlock(secret: string, exp: number): string {
 }
 
 /** Verify an unlock token against the current password (and its expiry). */
-function verifyUnlock(secret: string, token: string): boolean {
+export function verifyUnlock(secret: string, token: string): boolean {
   const dot = token.indexOf('.');
   if (dot <= 0) return false;
   const exp = Number(token.slice(0, dot));
