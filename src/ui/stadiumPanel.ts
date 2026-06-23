@@ -34,7 +34,7 @@ import { loadFavorites, toggleFavorite } from './stadiumFavorites';
 import { ACTIVE_AREAS, getActiveArea, setActiveArea } from '../core/activeArea';
 import { orientCells, type OrientOp } from '../core/orientation';
 import { createCustomTemplate, addCustomTemplate, removeCustomTemplate, parseImportedTemplate, exportTemplate, type CustomSize } from '../core/customStadiums';
-import { submitStadium } from '../net/api';
+import { submitStadium, fetchPendingStadiums, reviewStadium, type PendingStadium } from '../net/api';
 
 export interface StadiumPanelDeps {
   root: HTMLElement;
@@ -66,6 +66,8 @@ export function mountStadiumPanel(deps: StadiumPanelDeps): void {
   const discEl = $('#stadium-disclaimer');
   const areaEl = $('#stadium-area');
   const orientEl = $('#stadium-orient');
+  const reviewEl = $('#stadium-review');
+  const reviewListEl = $('#stadium-review-list');
   if (!listEl || !infoEl) return; // panel not present (e.g. phone build)
 
   const currentId = map.templateRef.id;
@@ -316,6 +318,52 @@ export function mountStadiumPanel(deps: StadiumPanelDeps): void {
     }
   }
 
+  // ---- Admin: community review queue (visible only to moderators) ----
+  // The /pending endpoint is admin-gated server-side; non-admins get [] (403),
+  // so the section stays hidden for them. Fetched once on mount, not per render.
+  function reviewRow(s: PendingStadium): HTMLElement {
+    const row = document.createElement('div');
+    row.style.cssText =
+      'display:flex;align-items:center;gap:6px;padding:6px;border:1px solid var(--line-1);border-radius:var(--r-md);background:var(--bg-1);';
+    const tiers = Array.isArray(s.template?.tiers) ? s.template.tiers.length : 0;
+    const meta = document.createElement('div');
+    meta.style.cssText = 'flex:1;min-width:0;';
+    meta.innerHTML =
+      `<div style="font-size:11px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(s.name)}</div>` +
+      `<div style="font-size:10px;color:var(--text-3);">${esc(s.country ?? '—')} · ${tiers} tier${tiers === 1 ? '' : 's'}</div>`;
+    const approve = document.createElement('button');
+    approve.textContent = 'Approve';
+    approve.style.cssText = 'font-size:10px;padding:4px 8px;';
+    const reject = document.createElement('button');
+    reject.textContent = 'Reject';
+    reject.style.cssText = 'font-size:10px;padding:4px 8px;';
+    const act = async (approveIt: boolean): Promise<void> => {
+      approve.disabled = reject.disabled = true;
+      const ok = await reviewStadium(s.id, approveIt);
+      if (ok) {
+        row.remove();
+        if (reviewListEl && !reviewListEl.children.length && reviewEl) reviewEl.style.display = 'none';
+      } else {
+        approve.disabled = reject.disabled = false;
+        approve.textContent = approveIt ? 'Retry' : 'Approve';
+      }
+    };
+    approve.addEventListener('click', () => void act(true));
+    reject.addEventListener('click', () => void act(false));
+    row.append(meta, approve, reject);
+    return row;
+  }
+  async function renderReviewQueue(): Promise<void> {
+    if (!reviewEl || !reviewListEl) return;
+    const pending = await fetchPendingStadiums();
+    if (pending.length === 0) {
+      reviewEl.style.display = 'none';
+      return;
+    }
+    reviewListEl.replaceChildren(...pending.map(reviewRow));
+    reviewEl.style.display = '';
+  }
+
   // ---- Section 7: custom-stadium authoring (Custom tab) ----
   function downloadJson(t: StadiumTemplate): void {
     try {
@@ -448,4 +496,5 @@ export function mountStadiumPanel(deps: StadiumPanelDeps): void {
     renderOrient();
   }
   render();
+  void renderReviewQueue(); // one admin-gated probe; hides itself for non-admins
 }

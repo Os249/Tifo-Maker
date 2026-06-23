@@ -48,6 +48,41 @@ export async function submitStadium(template: StadiumTemplate, name: string, cou
     return null;
   }
 }
+
+export interface PendingStadium {
+  id: string;
+  name: string;
+  country: string | null;
+  template: StadiumTemplate;
+  status: string;
+  createdAt: string;
+}
+
+/** Admin: pending community submissions. Returns [] for non-admins (403) or errors. */
+export async function fetchPendingStadiums(): Promise<PendingStadium[]> {
+  try {
+    const res = await fetch(`${API}/stadiums/pending`, { headers: authHeaders(false) });
+    if (!res.ok) return [];
+    const data = (await res.json().catch(() => null)) as { stadiums?: PendingStadium[] } | null;
+    return Array.isArray(data?.stadiums) ? (data as { stadiums: PendingStadium[] }).stadiums : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Admin: approve or reject a submission. Returns whether it succeeded. */
+export async function reviewStadium(id: string, approve: boolean): Promise<boolean> {
+  try {
+    const res = await fetch(`${API}/stadiums/${encodeURIComponent(id)}/review`, {
+      method: 'POST',
+      headers: authHeaders(true),
+      body: JSON.stringify({ approve }),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
 // Restore a persisted session on load so auth survives navigation between the
 // editor, the community page, and share links (all separate page loads).
 let token: string | null = (() => {
