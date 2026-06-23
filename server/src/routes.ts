@@ -15,6 +15,8 @@ import { tmpdir } from 'node:os';
 import { readFile, unlink } from 'node:fs/promises';
 import type { AiUsageRepository, AuthRepository, DesignRepository, EventsRepository, LeadsRepository, SocialRepository } from './repo';
 import { registerAiRoutes } from './aiRoutes';
+import type { StadiumSubmissionRepository } from './stadiumRepo';
+import { isValidTemplate } from '../../src/core/customStadiums';
 
 /**
  * HTTP surface (blueprint §2.2, completed with auth + gallery):
@@ -76,6 +78,8 @@ export interface AppOptions {
   aiUsage?: AiUsageRepository;
   /** Free AI generations per account (default 5). */
   aiFreeLimit?: number;
+  /** Optional community stadium submissions store. When present, /api/stadiums/* is enabled. */
+  stadiums?: StadiumSubmissionRepository;
 }
 
 export async function buildApp(
@@ -278,6 +282,39 @@ export async function buildApp(
       adminPassword: process.env.AI_ADMIN_PASSWORD,
       freeLimit: options.aiFreeLimit ?? 5,
       routeConfig: options.rateLimit ? { config: { rateLimit: { max: 12, timeWindow: '1 minute' } } } : undefined,
+    });
+  }
+
+  // ---------- community stadium templates (submit → moderate → public) ----------
+  if (options.stadiums) {
+    const stadiums = options.stadiums;
+    const submitCfg = options.rateLimit ? { config: { rateLimit: { max: 6, timeWindow: '1 minute' } } } : {};
+    // Public: submit a community template (validated server-side; stored pending).
+    app.post('/api/stadiums', submitCfg, async (req, reply) => {
+      const b = (req.body ?? {}) as { template?: unknown; name?: unknown; country?: unknown };
+      if (!isValidTemplate(b.template)) return reply.code(400).send({ error: 'invalid stadium template' });
+      const name = typeof b.name === 'string' && b.name.trim() ? b.name.trim().slice(0, 60) : b.template.name;
+      const country = typeof b.country === 'string' && b.country.trim() ? b.country.trim().slice(0, 60) : null;
+      const submitterId = await userOf(req);
+      const { id } = await stadiums.submit({ template: b.template, name, country, submitterId });
+      return reply.code(201).send({ id, status: 'pending' });
+    });
+    // Public: approved community templates, for the catalog.
+    app.get('/api/stadiums/community', async (_req, reply) => {
+      const rows = await stadiums.listApproved();
+      return reply.send({ stadiums: rows.map((r) => ({ id: r.id, name: r.name, country: r.country, template: r.template })) });
+    });
+    // Admin: review queue + decision.
+    app.get('/api/stadiums/pending', async (req, reply) => {
+      if (!(await requireAdmin(req, reply))) return;
+      return reply.send({ stadiums: await stadiums.listPending() });
+    });
+    app.post('/api/stadiums/:id/review', async (req, reply) => {
+      if (!(await requireAdmin(req, reply))) return;
+      const id = (req.params as { id: string }).id;
+      const approve = (req.body as { approve?: unknown } | null)?.approve === true;
+      const ok = await stadiums.review(id, approve);
+      return ok ? reply.send({ ok: true }) : reply.code(404).send({ error: 'submission not found' });
     });
   }
 

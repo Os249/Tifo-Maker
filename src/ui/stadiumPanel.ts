@@ -34,6 +34,7 @@ import { loadFavorites, toggleFavorite } from './stadiumFavorites';
 import { ACTIVE_AREAS, getActiveArea, setActiveArea } from '../core/activeArea';
 import { orientCells, type OrientOp } from '../core/orientation';
 import { createCustomTemplate, addCustomTemplate, removeCustomTemplate, parseImportedTemplate, exportTemplate, type CustomSize } from '../core/customStadiums';
+import { submitStadium } from '../net/api';
 
 export interface StadiumPanelDeps {
   root: HTMLElement;
@@ -343,7 +344,26 @@ export function mountStadiumPanel(deps: StadiumPanelDeps): void {
       });
       return b;
     };
+    const submitBtn = document.createElement('button');
+    submitBtn.textContent = '▲';
+    submitBtn.title = 'Submit to the community for review';
+    submitBtn.setAttribute('aria-label', submitBtn.title);
+    submitBtn.style.cssText = 'background:none;border:1px solid var(--line-1);border-radius:var(--r-md);color:var(--text-2);font-size:12px;cursor:pointer;padding:4px 7px;line-height:1;';
+    submitBtn.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      submitBtn.disabled = true;
+      submitBtn.textContent = '…';
+      void submitStadium(e.template, e.meta.name, e.meta.country ?? undefined)
+        .then((r) => {
+          submitBtn.textContent = r ? '✓' : '✗';
+          submitBtn.title = r ? 'Submitted for community review' : 'Submission failed — try again';
+        })
+        .catch(() => {
+          submitBtn.textContent = '✗';
+        });
+    });
     return [
+      submitBtn,
       mk('⤓', 'Export this stadium as JSON (share it)', () => downloadJson(e.template)),
       mk('🗑', 'Delete this custom stadium', () => {
         removeCustomTemplate(e.id);

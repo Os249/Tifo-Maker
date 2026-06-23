@@ -3,7 +3,8 @@ import { installTheme } from './ui/theme';
 import { initLang, applyDom, toggleLang, t } from './ui/i18n';
 import { generateSeatMapAsync } from './workers/client';
 import { DEFAULT_PALETTE, DEFAULT_TEMPLATE, PALETTE_PRESETS, TEMPLATES } from './core/template';
-import { templateById } from './core/stadiumCatalog';
+import { templateById, registerServerCommunity, type StadiumEntry } from './core/stadiumCatalog';
+import { fetchCommunityStadiums } from './net/api';
 import { requestStadiumSwitch } from './ui/stadiumSwitch';
 import { registerCustom } from './core/customStadiums';
 import { PATTERN_PRESETS } from './core/patterns';
@@ -44,6 +45,18 @@ async function main(): Promise<void> {
   });
   const sharedId = sharedDesignId();
   registerCustom(); // make user-authored custom stadiums resolvable before we pick one
+  // Best-effort: pull approved community stadiums into the catalog (non-blocking).
+  void fetchCommunityStadiums()
+    .then((list) =>
+      registerServerCommunity(
+        list.map((c): StadiumEntry => ({
+          id: c.id,
+          template: { ...c.template, id: c.id },
+          meta: { name: c.name, source: 'community', country: c.country ?? undefined, type: c.template.tiers.length === 1 ? 'Single-tier' : 'Two-tier', tags: ['community-server'] },
+        })),
+      ),
+    )
+    .catch(() => {});
 
   // A shared design may live on any template, so resolve its template BEFORE
   // generating the seat map (the map must match the saved cell count).

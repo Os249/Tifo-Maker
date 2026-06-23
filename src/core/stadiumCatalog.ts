@@ -177,6 +177,14 @@ export function registerCustomStadiums(entries: StadiumEntry[]): void {
   STADIUM_CATALOG.push(...entries.filter((e) => e.meta.source === 'custom'));
 }
 
+/** Replace catalog entries fetched from the server's approved-community endpoint. */
+export function registerServerCommunity(entries: StadiumEntry[]): void {
+  for (let i = STADIUM_CATALOG.length - 1; i >= 0; i--) {
+    if (STADIUM_CATALOG[i].meta.tags?.includes('community-server')) STADIUM_CATALOG.splice(i, 1);
+  }
+  STADIUM_CATALOG.push(...entries);
+}
+
 /** Resolve an id to its template (used by the seat-map worker + loaders). */
 export function templateById(id: string): StadiumTemplate | undefined {
   return STADIUM_CATALOG.find((e) => e.id === id)?.template;

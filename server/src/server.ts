@@ -8,6 +8,7 @@ import { MemoryAiUsageRepository, MemoryAuthRepository, MemoryDesignRepository, 
 import { PgAiUsageRepository, PgAuthRepository, PgDesignRepository, PgEventsRepository, PgLeadsRepository } from './pgRepo';
 import { PgSocialRepository } from './pgSocial';
 import { MemorySocialRepository } from './memorySocial';
+import { MemoryStadiumRepository, PgStadiumRepository } from './stadiumRepo';
 import { buildApp, type TemplateInfo } from './routes';
 
 /**
@@ -66,6 +67,16 @@ async function main(): Promise<void> {
   if (process.env.DATABASE_URL) {
     const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
     await applySchema(pool);
+    // Community stadium submissions — best-effort table init so a schema slip here
+    // can never block server boot; on failure the feature is simply disabled.
+    let stadiums: PgStadiumRepository | undefined;
+    try {
+      const s = new PgStadiumRepository(pool);
+      await s.init();
+      stadiums = s;
+    } catch (e) {
+      console.error('[tifo] community_stadiums init failed — submissions disabled:', e);
+    }
     app = await buildApp(new PgDesignRepository(pool), new PgAuthRepository(pool), templates, {
       staticDir,
       rateLimit: true,
@@ -76,6 +87,7 @@ async function main(): Promise<void> {
       leads: new PgLeadsRepository(pool),
       aiUsage: new PgAiUsageRepository(pool),
       aiFreeLimit: Number(process.env.AI_FREE_LIMIT ?? 5),
+      stadiums,
     });
   } else {
     if (isProd) {
@@ -97,6 +109,7 @@ async function main(): Promise<void> {
       leads: new MemoryLeadsRepository(),
       aiUsage: new MemoryAiUsageRepository(),
       aiFreeLimit: Number(process.env.AI_FREE_LIMIT ?? 5),
+      stadiums: new MemoryStadiumRepository(),
     });
   }
 

@@ -1,5 +1,5 @@
 import type { DesignStore } from '../core/design';
-import type { SeatMap } from '../core/types';
+import type { SeatMap, StadiumTemplate } from '../core/types';
 import type { TifoSpec } from '../core/tifoSpec';
 
 /**
@@ -14,6 +14,40 @@ import type { TifoSpec } from '../core/tifoSpec';
 
 const API = '/api';
 const TOKEN_KEY = 'tifo_token_v1';
+
+export interface CommunityStadium {
+  id: string;
+  name: string;
+  country: string | null;
+  template: StadiumTemplate;
+}
+
+/** Fetch approved community stadium templates (best-effort; [] on any failure). */
+export async function fetchCommunityStadiums(): Promise<CommunityStadium[]> {
+  try {
+    const res = await fetch(`${API}/stadiums/community`);
+    if (!res.ok) return [];
+    const data = (await res.json().catch(() => null)) as { stadiums?: CommunityStadium[] } | null;
+    return Array.isArray(data?.stadiums) ? (data as { stadiums: CommunityStadium[] }).stadiums : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Submit a stadium template to the community for review. Returns its id, or null. */
+export async function submitStadium(template: StadiumTemplate, name: string, country?: string): Promise<{ id: string } | null> {
+  try {
+    const res = await fetch(`${API}/stadiums`, {
+      method: 'POST',
+      headers: authHeaders(true),
+      body: JSON.stringify({ template, name, ...(country ? { country } : {}) }),
+    });
+    if (!res.ok) return null;
+    return (await res.json().catch(() => null)) as { id: string } | null;
+  } catch {
+    return null;
+  }
+}
 // Restore a persisted session on load so auth survives navigation between the
 // editor, the community page, and share links (all separate page loads).
 let token: string | null = (() => {
