@@ -16,6 +16,8 @@ import { readFile, unlink } from 'node:fs/promises';
 import type { AiUsageRepository, AuthRepository, DesignRepository, EventsRepository, LeadsRepository, SocialRepository } from './repo';
 import { registerAiRoutes } from './aiRoutes';
 import type { StadiumSubmissionRepository } from './stadiumRepo';
+import type { AdminStatsRepository } from './statsRepo';
+import { ADMIN_HTML, ADMIN_JS } from './adminPage';
 import { isValidTemplate } from '../../src/core/customStadiums';
 
 /**
@@ -80,6 +82,8 @@ export interface AppOptions {
   aiFreeLimit?: number;
   /** Optional community stadium submissions store. When present, /api/stadiums/* is enabled. */
   stadiums?: StadiumSubmissionRepository;
+  /** Optional admin analytics aggregates. When present, /api/admin/overview is enabled. */
+  stats?: AdminStatsRepository;
 }
 
 export async function buildApp(
@@ -317,6 +321,27 @@ export async function buildApp(
       return ok ? reply.send({ ok: true }) : reply.code(404).send({ error: 'submission not found' });
     });
   }
+
+  // ---------- admin analytics dashboard ----------
+  // Read-only aggregates powering /admin. Admin-gated: the caller must present a
+  // login token whose username is in ADMIN_USERNAMES (the "admin password" is
+  // simply that account's password). The dashboard PAGE is public HTML/JS — all
+  // protection lives here, on the data endpoint.
+  if (options.stats) {
+    const stats = options.stats;
+    app.get('/api/admin/overview', async (req, reply) => {
+      if (!(await requireAdmin(req, reply))) return;
+      return reply.send(await stats.overview());
+    });
+  }
+  // The dashboard shell + its ES module. CSP forbids inline <script> and
+  // cross-origin CDNs, so the JS is served from our own origin and all charts are
+  // hand-drawn SVG (no external libraries). Registered before the SPA fallback so
+  // /admin and /admin.js resolve to these, not index.html.
+  app.get('/admin', async (_req, reply) => reply.type('text/html').send(ADMIN_HTML));
+  app.get('/admin.js', async (_req, reply) =>
+    reply.header('cache-control', 'no-cache').type('text/javascript').send(ADMIN_JS),
+  );
 
   // ---------- auth ----------
   // Tighter limit on credential endpoints: 10 attempts/minute/IP. Only takes

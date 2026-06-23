@@ -9,6 +9,7 @@ import { PgAiUsageRepository, PgAuthRepository, PgDesignRepository, PgEventsRepo
 import { PgSocialRepository } from './pgSocial';
 import { MemorySocialRepository } from './memorySocial';
 import { MemoryStadiumRepository, PgStadiumRepository } from './stadiumRepo';
+import { MemoryAdminStatsRepository, PgAdminStatsRepository } from './statsRepo';
 import { buildApp, type TemplateInfo } from './routes';
 
 /**
@@ -88,6 +89,7 @@ async function main(): Promise<void> {
       aiUsage: new PgAiUsageRepository(pool),
       aiFreeLimit: Number(process.env.AI_FREE_LIMIT ?? 5),
       stadiums,
+      stats: new PgAdminStatsRepository(pool),
     });
   } else {
     if (isProd) {
@@ -110,6 +112,7 @@ async function main(): Promise<void> {
       aiUsage: new MemoryAiUsageRepository(),
       aiFreeLimit: Number(process.env.AI_FREE_LIMIT ?? 5),
       stadiums: new MemoryStadiumRepository(),
+      stats: new MemoryAdminStatsRepository(),
     });
   }
 
