@@ -203,24 +203,19 @@ export function mountToolbar(
   store.onDirty(() => track('paint_first'));
 
   // ---- AI Tifo Designer panel (rail "sparkles" button → panelMode 'ai') ----
-  mountAiPanel({
-    root,
-    store,
-    editor,
-    map,
-    objects,
-    getPreview,
-    refresh: () => {
-      editor.rebuildPalette();
-      editor.repaintAll();
-      renderPalette();
-      reflectFg();
-      try { getPreview?.()?.recolorAll(); } catch { /* preview not yet created */ }
-    },
-  });
+  // Shared repaint after a panel changes the cells/palette (2D + 3D).
+  const panelRefresh = (): void => {
+    editor.rebuildPalette();
+    editor.repaintAll();
+    renderPalette();
+    reflectFg();
+    try { getPreview?.()?.recolorAll(); } catch { /* preview not yet created */ }
+  };
+
+  mountAiPanel({ root, store, editor, map, objects, getPreview, refresh: panelRefresh });
 
   // ---- Stadium panel (rail "stadium" button → panelMode 'stadium') ----
-  mountStadiumPanel({ root, map, store });
+  mountStadiumPanel({ root, map, store, refresh: panelRefresh });
 
   // Pick ANY colour and start painting with it. Auto-adds it as a swatch so it's
   // reusable (the confirmed behaviour). Uses a hidden native colour input.

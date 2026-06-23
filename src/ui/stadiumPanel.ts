@@ -17,7 +17,7 @@
  */
 
 import type { DesignStore } from '../core/design';
-import type { SeatMap } from '../core/types';
+import type { SeatMap, StadiumTemplate } from '../core/types';
 import {
   entryById,
   queryCatalog,
@@ -31,11 +31,16 @@ import {
 } from '../core/stadiumCatalog';
 import { requestStadiumSwitch } from './stadiumSwitch';
 import { loadFavorites, toggleFavorite } from './stadiumFavorites';
+import { ACTIVE_AREAS, getActiveArea, setActiveArea } from '../core/activeArea';
+import { orientCells, type OrientOp } from '../core/orientation';
+import { createCustomTemplate, addCustomTemplate, removeCustomTemplate, parseImportedTemplate, exportTemplate, type CustomSize } from '../core/customStadiums';
 
 export interface StadiumPanelDeps {
   root: HTMLElement;
   map: SeatMap;
   store: DesignStore;
+  /** Repaint 2D + 3D after the cells change (orientation). */
+  refresh: () => void;
 }
 
 const DISCLAIMER =
@@ -51,19 +56,22 @@ const INPUT_CSS =
 type Tab = StadiumSource | 'favorites';
 
 export function mountStadiumPanel(deps: StadiumPanelDeps): void {
-  const { root, map, store } = deps;
+  const { root, map, store, refresh } = deps;
   const $ = <T extends HTMLElement>(s: string): T | null => root.querySelector<T>(s);
   const tabsEl = $('#stadium-tabs');
   const filtersEl = $('#stadium-filters');
   const listEl = $('#stadium-list');
   const infoEl = $('#stadium-info');
   const discEl = $('#stadium-disclaimer');
+  const areaEl = $('#stadium-area');
+  const orientEl = $('#stadium-orient');
   if (!listEl || !infoEl) return; // panel not present (e.g. phone build)
 
   const currentId = map.templateRef.id;
   let favorites = loadFavorites();
   let activeTab: Tab = entryById(currentId)?.meta.source ?? 'builtin';
   let selectedId = currentId;
+  let customTools: HTMLElement | null = null;
 
   let searchEl: HTMLInputElement | null = null;
   let typeEl: HTMLSelectElement | null = null;
@@ -164,7 +172,7 @@ export function mountStadiumPanel(deps: StadiumPanelDeps): void {
       p.className = 'hint';
       p.style.cssText = 'font-size:11px;color:var(--text-3);margin:4px 0;';
       p.textContent =
-        activeTab === 'favorites' ? 'No favourites yet — tap ☆ on a stadium to add it.' : activeTab === 'custom' ? 'No custom stadiums yet — coming soon.' : 'No stadiums match your filters.';
+        activeTab === 'favorites' ? 'No favourites yet — tap ☆ on a stadium to add it.' : activeTab === 'custom' ? 'No custom stadiums yet — create one above.' : 'No stadiums match your filters.';
       listEl.appendChild(p);
       return;
     }
@@ -189,6 +197,7 @@ export function mountStadiumPanel(deps: StadiumPanelDeps): void {
         if (!isCurrent) confirmSwitch(e);
       });
       row.append(sel, favStar(e));
+      if (e.meta.source === 'custom') for (const b of customRowButtons(e)) row.append(b);
       listEl.appendChild(row);
     }
   }
@@ -263,11 +272,160 @@ export function mountStadiumPanel(deps: StadiumPanelDeps): void {
     (box.querySelector('#sw-continue') as HTMLButtonElement).focus();
   }
 
+  // ---- Section 3: Active Tifo Area ----
+  function renderArea(): void {
+    if (!areaEl) return;
+    areaEl.innerHTML = '';
+    const cur = getActiveArea();
+    for (const a of ACTIVE_AREAS) {
+      const b = document.createElement('button');
+      b.className = 'chip';
+      b.textContent = a.label;
+      if (a.id === cur) b.style.cssText = 'font-weight:600;border-color:var(--text-2);color:var(--text-1);';
+      b.addEventListener('click', () => {
+        setActiveArea(a.id);
+        renderArea();
+      });
+      areaEl.appendChild(b);
+    }
+  }
+
+  // ---- Section 4: Stadium Orientation (re-orient the design; undoable) ----
+  function applyOrient(op: OrientOp): void {
+    store.beginStroke();
+    const next = orientCells(store.cells, map, op);
+    for (let i = 0; i < map.count; i++) store.paint(i, next[i]);
+    store.commitStroke();
+    refresh();
+  }
+  function renderOrient(): void {
+    if (!orientEl || orientEl.dataset.built) return;
+    orientEl.dataset.built = '1';
+    const ops: { op: OrientOp; label: string; icon: string }[] = [
+      { op: 'rotate', label: 'Rotate', icon: 'ti-rotate-clockwise' },
+      { op: 'flip-ns', label: 'Flip N/S', icon: 'ti-flip-vertical' },
+      { op: 'flip-ew', label: 'Flip E/W', icon: 'ti-flip-horizontal' },
+    ];
+    for (const o of ops) {
+      const b = document.createElement('button');
+      b.style.cssText = 'flex:1;';
+      b.innerHTML = `<i class="ti ${o.icon}"></i> ${o.label}`;
+      b.addEventListener('click', () => applyOrient(o.op));
+      orientEl.appendChild(b);
+    }
+  }
+
+  // ---- Section 7: custom-stadium authoring (Custom tab) ----
+  function downloadJson(t: StadiumTemplate): void {
+    try {
+      const blob = new Blob([exportTemplate(t)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${t.id}.json`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch {
+      /* download unavailable */
+    }
+  }
+
+  function customRowButtons(e: StadiumEntry): HTMLButtonElement[] {
+    const mk = (label: string, title: string, fn: () => void): HTMLButtonElement => {
+      const b = document.createElement('button');
+      b.textContent = label;
+      b.title = title;
+      b.setAttribute('aria-label', title);
+      b.style.cssText = 'background:none;border:1px solid var(--line-1);border-radius:var(--r-md);color:var(--text-2);font-size:12px;cursor:pointer;padding:4px 7px;line-height:1;';
+      b.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        fn();
+      });
+      return b;
+    };
+    return [
+      mk('⤓', 'Export this stadium as JSON (share it)', () => downloadJson(e.template)),
+      mk('🗑', 'Delete this custom stadium', () => {
+        removeCustomTemplate(e.id);
+        if (selectedId === e.id) selectedId = currentId;
+        render();
+      }),
+    ];
+  }
+
+  function buildCustomTools(): void {
+    if (customTools || !listEl) return;
+    customTools = document.createElement('div');
+    customTools.style.cssText = 'margin-bottom:8px;border:1px solid var(--line-1);border-radius:var(--r-md);padding:8px;display:none;';
+    const nameI = document.createElement('input');
+    nameI.placeholder = 'Custom stadium name';
+    nameI.style.cssText = INPUT_CSS;
+    const grid = document.createElement('div');
+    grid.style.cssText = 'display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:6px;';
+    const baseSel = document.createElement('select');
+    baseSel.style.cssText = INPUT_CSS;
+    for (const e of [...queryCatalog({ source: 'builtin' }), ...queryCatalog({ source: 'community' })]) {
+      const o = document.createElement('option');
+      o.value = e.id;
+      o.textContent = `Base: ${e.meta.name}`;
+      baseSel.appendChild(o);
+    }
+    const sizeSel = document.createElement('select');
+    sizeSel.style.cssText = INPUT_CSS;
+    for (const [v, l] of [['standard', 'Standard'], ['compact', 'Compact'], ['large', 'Large']] as [CustomSize, string][]) {
+      const o = document.createElement('option');
+      o.value = v;
+      o.textContent = l;
+      sizeSel.appendChild(o);
+    }
+    grid.append(baseSel, sizeSel);
+    const createBtn = document.createElement('button');
+    createBtn.className = 'primary';
+    createBtn.textContent = 'Create custom stadium';
+    createBtn.style.cssText = 'width:100%;margin-top:6px;';
+    createBtn.addEventListener('click', () => {
+      const t = createCustomTemplate({ name: nameI.value.trim() || 'Custom stadium', baseId: baseSel.value, size: sizeSel.value as CustomSize });
+      if (!t) return;
+      addCustomTemplate(t);
+      nameI.value = '';
+      selectedId = t.id;
+      render();
+    });
+    const importI = document.createElement('textarea');
+    importI.placeholder = 'Paste a stadium JSON to import…';
+    importI.rows = 2;
+    importI.style.cssText = INPUT_CSS + 'margin-top:8px;resize:vertical;';
+    const importBtn = document.createElement('button');
+    importBtn.textContent = 'Import from JSON';
+    importBtn.style.cssText = 'width:100%;margin-top:6px;';
+    const importMsg = document.createElement('p');
+    importMsg.className = 'hint';
+    importMsg.style.cssText = 'font-size:10px;color:var(--text-3);margin:4px 0 0;';
+    importBtn.addEventListener('click', () => {
+      const t = parseImportedTemplate(importI.value);
+      if (!t) {
+        importMsg.textContent = 'That JSON is not a valid stadium template.';
+        return;
+      }
+      addCustomTemplate(t);
+      importI.value = '';
+      importMsg.textContent = `Imported “${t.name}”.`;
+      selectedId = t.id;
+      render();
+    });
+    customTools.append(nameI, grid, createBtn, importI, importBtn, importMsg);
+    listEl.parentElement?.insertBefore(customTools, listEl);
+  }
+
   function render(): void {
     buildFilters();
+    buildCustomTools();
+    if (customTools) customTools.style.display = activeTab === 'custom' ? '' : 'none';
     renderTabs();
     renderList();
     renderInfo();
+    renderArea();
+    renderOrient();
   }
   render();
 }

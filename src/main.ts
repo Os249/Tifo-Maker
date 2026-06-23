@@ -5,6 +5,7 @@ import { generateSeatMapAsync } from './workers/client';
 import { DEFAULT_PALETTE, DEFAULT_TEMPLATE, PALETTE_PRESETS, TEMPLATES } from './core/template';
 import { templateById } from './core/stadiumCatalog';
 import { requestStadiumSwitch } from './ui/stadiumSwitch';
+import { registerCustom } from './core/customStadiums';
 import { PATTERN_PRESETS } from './core/patterns';
 import { DesignStore } from './core/design';
 import { ObjectLayer } from './core/objects';
@@ -42,6 +43,7 @@ async function main(): Promise<void> {
     if (langToggle) langToggle.textContent = t('common.language');
   });
   const sharedId = sharedDesignId();
+  registerCustom(); // make user-authored custom stadiums resolvable before we pick one
 
   // A shared design may live on any template, so resolve its template BEFORE
   // generating the seat map (the map must match the saved cell count).

@@ -23,6 +23,7 @@ import { EDITOR_UNITS } from '../core/seatmap';
 import { buildStadiumContext, describeStadiumContext } from '../core/stadiumContext';
 import { critiqueDesign, repairSpec } from '../core/critique';
 import { composeSuperOffline } from '../core/promptDesigner';
+import { describeActiveArea } from '../core/activeArea';
 import { generateAiTifo, critiqueAiTifo, fetchAiQuota, unlockAi, aiUnlockToken, type AiError, type AiQuota } from '../net/api';
 import { isSignedIn } from '../net/api';
 import { openAuthModal } from './authModal';
@@ -236,7 +237,10 @@ export function mountAiPanel(deps: AiPanelDeps): void {
       // Mode 3 sends the bowl geometry so the director can plan per-stand.
       const stadium = useSuper ? describeStadiumContext(buildStadiumContext(map)) : undefined;
       lastStadium = stadium;
-      const res = await generateAiTifo(text, useSuper ? { mode: 'super', stadium } : {});
+      // Section 3: focus the design on the chosen active area, if any.
+      const focus = describeActiveArea();
+      const brief = focus ? `${text} — focus the design on ${focus}` : text;
+      const res = await generateAiTifo(brief, useSuper ? { mode: 'super', stadium } : {});
       await applySpec(res.spec);
       setStatus(res.source === 'model' ? `Designed with Gemini${useSuper ? ' (Super AI)' : ''}.` : 'Designed (offline designer — model not reached).');
       setQuota(res.quota);

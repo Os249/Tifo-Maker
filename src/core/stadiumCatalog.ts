@@ -126,6 +126,35 @@ const COMMUNITY: StadiumEntry[] = [
     },
     meta: { name: 'Compact Wall', source: 'community', country: 'Europe', capacity: 30000, type: 'Single-tier', inspiredBy: 'a single-tier terrace wall', tags: ['single-tier', 'wall', 'compact'] },
   },
+  {
+    id: 'community-desert-arena-68k',
+    template: {
+      id: 'community-desert-arena-68k',
+      name: 'Desert Arena',
+      version: 1,
+      plan: { a: 108, b: 88, exponent: 2.4 },
+      tiers: [
+        { rows: 28, rowDepth: 0.85, rakeDeg: 24, baseElevation: 1.5, baseOffset: 0, seatPitch: 0.5 },
+        { rows: 22, rowDepth: 0.8, rakeDeg: 33, baseElevation: 15, baseOffset: 27, seatPitch: 0.5 },
+      ],
+      aisles: { count: 30, widthMeters: 1.2 },
+      sectionsPerTier: 30,
+    },
+    meta: { name: 'Desert Arena', source: 'community', country: 'Middle East', capacity: 68000, type: 'Two-tier', inspiredBy: 'a modern desert-region arena', tags: ['modern', 'two-tier', 'large'] },
+  },
+  {
+    id: 'community-roaring-terraces-48k',
+    template: {
+      id: 'community-roaring-terraces-48k',
+      name: 'Roaring Terraces',
+      version: 1,
+      plan: { a: 74, b: 58, exponent: 2.9 },
+      tiers: [{ rows: 44, rowDepth: 0.78, rakeDeg: 36, baseElevation: 1.5, baseOffset: 0, seatPitch: 0.48 }],
+      aisles: { count: 22, widthMeters: 1.1 },
+      sectionsPerTier: 22,
+    },
+    meta: { name: 'Roaring Terraces', source: 'community', country: 'South America', capacity: 48000, type: 'Single-tier', inspiredBy: 'a single-tier terraced ground', tags: ['single-tier', 'steep', 'atmosphere'] },
+  },
 ];
 
 /** The full catalog. Order: built-ins first, then community, then custom. */
@@ -134,6 +163,18 @@ export const STADIUM_CATALOG: StadiumEntry[] = [...BUILTINS, ...COMMUNITY];
 /** Every template the generator might be asked for (built-in + community + custom). */
 export function allTemplates(): StadiumTemplate[] {
   return STADIUM_CATALOG.map((e) => e.template);
+}
+
+/**
+ * Replace the catalog's 'custom' entries (user-authored, loaded from storage at
+ * boot). Mutates the live array in place so templateById/queryCatalog/allTemplates
+ * pick them up everywhere without re-importing.
+ */
+export function registerCustomStadiums(entries: StadiumEntry[]): void {
+  for (let i = STADIUM_CATALOG.length - 1; i >= 0; i--) {
+    if (STADIUM_CATALOG[i].meta.source === 'custom') STADIUM_CATALOG.splice(i, 1);
+  }
+  STADIUM_CATALOG.push(...entries.filter((e) => e.meta.source === 'custom'));
 }
 
 /** Resolve an id to its template (used by the seat-map worker + loaders). */
