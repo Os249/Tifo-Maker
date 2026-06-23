@@ -287,6 +287,30 @@ async function main(): Promise<void> {
   btn3d.addEventListener('click', () => void setView('3d'));
   btnSplit.addEventListener('click', () => void setView('split'));
 
+  // Match Day Simulator: a separate, lazy-loaded high-fidelity renderer shown in
+  // a fullscreen overlay. The editor preview is paused while it runs so only one
+  // heavy WebGL context is live at a time, and resumes when the overlay closes.
+  const matchDayBtn = document.getElementById('match-day') as HTMLButtonElement | null;
+  let simOpen = false;
+  matchDayBtn?.addEventListener('click', async () => {
+    if (simOpen) return;
+    simOpen = true;
+    const resumePreview = !previewHost.hidden;
+    preview?.stop();
+    try {
+      const { openMatchDaySimulator } = await import('./render/simulator/overlay');
+      openMatchDaySimulator(map, store, template, {
+        onClose: () => {
+          simOpen = false;
+          if (resumePreview) preview?.start();
+        },
+      });
+    } catch {
+      simOpen = false;
+      if (resumePreview) preview?.start();
+    }
+  });
+
   const stat = document.getElementById('stat')!;
   stat.textContent = `${template.name} · ${map.count.toLocaleString()} seats · map generated in ${genMs.toFixed(0)} ms`;
   track('landed'); // editor is interactive — top of the funnel

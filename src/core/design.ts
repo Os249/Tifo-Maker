@@ -45,6 +45,18 @@ export class DesignStore {
     this.paletteListeners.push(fn);
   }
 
+  /** Detach a dirty listener (for views that mount/unmount, e.g. the simulator). */
+  offDirty(fn: DirtyListener): void {
+    const i = this.listeners.indexOf(fn);
+    if (i >= 0) this.listeners.splice(i, 1);
+  }
+
+  /** Detach a palette listener. */
+  offPaletteChange(fn: () => void): void {
+    const i = this.paletteListeners.indexOf(fn);
+    if (i >= 0) this.paletteListeners.splice(i, 1);
+  }
+
   /**
    * Replace the palette and notify every view. The single funnel for palette
    * changes — callers must use this rather than assigning `palette` directly,
