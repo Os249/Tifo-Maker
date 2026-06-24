@@ -4,6 +4,10 @@ import { MatchDaySimulator } from './index';
 import { probeQuality, type QualityTier } from './quality';
 import { REVEAL_MODES, type RevealMode } from './choreo';
 import type { CrowdPreset } from './crowd';
+import type { AssetStore } from '../../core/sceneAssets';
+import type { Cue, EffectName } from './timeline';
+import type { TimeOfDay } from './index';
+import type { Weather } from './weather';
 
 /**
  * Fullscreen Match Day Simulator overlay — the lazy-loaded entry point.
@@ -47,12 +51,15 @@ interface SimState {
   smoke: boolean;
   fly: boolean;
   reveal: RevealMode;
+  tod: TimeOfDay;
+  weather: Weather;
 }
 
 export function openMatchDaySimulator(
   map: SeatMap,
   store: DesignStore,
   template: StadiumTemplate,
+  assetStore: AssetStore,
   opts: { onClose?: () => void } = {},
 ): SimulatorHandle {
   const startTier = probeQuality();
@@ -68,6 +75,8 @@ export function openMatchDaySimulator(
     smoke: false,
     fly: false,
     reveal: 'wipe-lr',
+    tod: 'dusk',
+    weather: 'clear',
   };
 
   const overlay = document.createElement('div');
@@ -96,10 +105,12 @@ export function openMatchDaySimulator(
   const flyBtn = document.createElement('button');
   flyBtn.textContent = 'Flyover';
   flyBtn.style.cssText = BTN;
+  const snapBtn = button('Snapshot');
+  const linkBtn = button('Copy link');
   const closeBtn = document.createElement('button');
   closeBtn.textContent = 'Close';
   closeBtn.style.cssText = BTN;
-  bar.append(title, wrap('Camera', camSel), wrap('Quality', qSel), flyBtn, closeBtn);
+  bar.append(title, wrap('Camera', camSel), wrap('Quality', qSel), flyBtn, snapBtn, linkBtn, closeBtn);
 
   // ----- controls row -----
   const ctrls = document.createElement('div');
@@ -143,6 +154,26 @@ export function openMatchDaySimulator(
   revealBtn.textContent = 'Play reveal';
   revealBtn.style.cssText = BTN;
 
+  const todSel = document.createElement('select');
+  todSel.style.cssText = SEL;
+  for (const [v, l] of [['day', 'Day'], ['dusk', 'Dusk'], ['night', 'Night'], ['sunset', 'Sunset']]) {
+    const o = document.createElement('option');
+    o.value = v;
+    o.textContent = l;
+    if (v === state.tod) o.selected = true;
+    todSel.appendChild(o);
+  }
+  const weatherSel = document.createElement('select');
+  weatherSel.style.cssText = SEL;
+  for (const [v, l] of [['clear', 'Clear'], ['rain', 'Rain'], ['snow', 'Snow']]) {
+    const o = document.createElement('option');
+    o.value = v;
+    o.textContent = l;
+    weatherSel.appendChild(o);
+  }
+  const expRange = range(0.4, 2, 1.05, 0.05);
+  const sunRange = range(0, 3, 1.25, 0.05);
+
   ctrls.append(
     wrap('Crowd', crowdSel),
     wrap('Density', density),
@@ -155,9 +186,107 @@ export function openMatchDaySimulator(
     pyroBtn,
     wrap('Reveal', revealSel),
     revealBtn,
+    wrap('Time', todSel),
+    wrap('Weather', weatherSel),
+    wrap('Exposure', expRange),
+    wrap('Sun', sunRange),
   );
 
-  overlay.append(bar, ctrls, host);
+  // ----- assets row (banners / text / floor) -----
+  const assetBar = document.createElement('div');
+  assetBar.style.cssText =
+    'display:flex;align-items:center;gap:12px;padding:8px 14px;background:#070a0e;border-bottom:1px solid #141a21;flex:0 0 auto;flex-wrap:wrap;';
+  const standSel = document.createElement('select');
+  standSel.style.cssText = SEL;
+  for (const [v, l] of [['1', 'North'], ['3', 'South'], ['0', 'East'], ['2', 'West']]) {
+    const o = document.createElement('option');
+    o.value = v;
+    o.textContent = l;
+    standSel.appendChild(o);
+  }
+  const addBannerBtn = button('Add banner');
+  const textInput = document.createElement('input');
+  textInput.type = 'text';
+  textInput.placeholder = 'ULTRAS';
+  textInput.style.cssText = 'font:12px system-ui,sans-serif;color:#e6e9ee;background:#1c232c;border:1px solid #2c3742;border-radius:7px;padding:5px 8px;width:110px;';
+  const addTextBtn = button('Add text');
+  const addFloorBtn = button('Add floor');
+  const addSurfaceBtn = button('Add surface');
+  const addFlagBtn = button('Add mega-flag');
+  const addScarfBtn = button('Add scarves');
+  const projInput = document.createElement('input');
+  projInput.type = 'file';
+  projInput.accept = 'image/*';
+  projInput.style.cssText = 'font:11px system-ui,sans-serif;color:#aab2bd;width:140px;';
+  const assetSel = document.createElement('select');
+  assetSel.style.cssText = SEL;
+  const imgInput = document.createElement('input');
+  imgInput.type = 'file';
+  imgInput.accept = 'image/*';
+  imgInput.style.cssText = 'font:11px system-ui,sans-serif;color:#aab2bd;width:150px;';
+  const wRange = range(4, 60, 18);
+  const hRange = range(1, 30, 4);
+  const yRange = range(0, 60, 14);
+  const unfurlBtn = button('Unfurl');
+  const printBtn = button('Print panels');
+  const delBtn = button('Delete');
+  assetBar.append(
+    wrap('Stand', standSel),
+    addBannerBtn,
+    textInput,
+    addTextBtn,
+    addFloorBtn,
+    addSurfaceBtn,
+    addFlagBtn,
+    addScarfBtn,
+    wrap('Project image', projInput),
+    wrap('Selected', assetSel),
+    wrap('Image', imgInput),
+    wrap('W', wRange),
+    wrap('H', hRange),
+    wrap('Y', yRange),
+    unfurlBtn,
+    printBtn,
+    delBtn,
+  );
+
+  // ----- choreography row -----
+  const choreoBar = document.createElement('div');
+  choreoBar.style.cssText =
+    'display:flex;align-items:center;gap:12px;padding:8px 14px;background:#060809;border-bottom:1px solid #141a21;flex:0 0 auto;flex-wrap:wrap;';
+  const autoBtn = button('Auto choreo');
+  const stopBtn = button('Stop');
+  const cueTime = document.createElement('input');
+  cueTime.type = 'number';
+  cueTime.min = '0';
+  cueTime.max = '30';
+  cueTime.step = '0.5';
+  cueTime.value = '0';
+  cueTime.style.cssText = 'font:12px system-ui,sans-serif;color:#e6e9ee;background:#1c232c;border:1px solid #2c3742;border-radius:7px;padding:5px 8px;width:62px;';
+  const cueKind = document.createElement('select');
+  cueKind.style.cssText = SEL;
+  for (const [v, l] of [
+    ['reveal', 'Reveal'],
+    ['camera', 'Camera (current)'],
+    ['confetti', 'Confetti'],
+    ['pyro', 'Pyro'],
+    ['smoke-on', 'Smoke on'],
+    ['floods-on', 'Floodlights on'],
+  ]) {
+    const o = document.createElement('option');
+    o.value = v;
+    o.textContent = l;
+    cueKind.appendChild(o);
+  }
+  const addCueBtn = button('Add cue');
+  const playSeqBtn = button('Play sequence');
+  const clearSeqBtn = button('Clear');
+  const cueCount = document.createElement('span');
+  cueCount.style.cssText = LBL;
+  cueCount.textContent = '0 cues';
+  choreoBar.append(autoBtn, stopBtn, wrap('At (s)', cueTime), wrap('Cue', cueKind), addCueBtn, playSeqBtn, clearSeqBtn, cueCount);
+
+  overlay.append(bar, ctrls, assetBar, choreoBar, host);
   document.body.appendChild(overlay);
   const prevOverflow = document.body.style.overflow;
   document.body.style.overflow = 'hidden';
@@ -184,12 +313,30 @@ export function openMatchDaySimulator(
     sim.setFloodlights(state.floods);
     sim.setSmoke(state.smoke);
     sim.setFlyover(state.fly);
+    sim.setTimeOfDay(state.tod);
+    sim.setWeather(state.weather);
     if (!state.fly) sim.applyShot(shots[state.camIdx] ?? shots[0]);
   }
 
+  function refreshAssets(): void {
+    const assets = sim.listAssets();
+    assetSel.replaceChildren();
+    const none = document.createElement('option');
+    none.value = '';
+    none.textContent = assets.length ? '— select —' : '(no assets)';
+    assetSel.appendChild(none);
+    assets.forEach((a, i) => {
+      const o = document.createElement('option');
+      o.value = a.id;
+      o.textContent = a.type + ' ' + (i + 1);
+      assetSel.appendChild(o);
+    });
+    assetSel.value = sim.selectedAssetId ?? '';
+  }
   function mount(): void {
-    sim = new MatchDaySimulator(host, map, store, template, { quality: state.tier });
+    sim = new MatchDaySimulator(host, map, store, template, assetStore, { quality: state.tier });
     applyState();
+    refreshAssets();
     sim.start();
   }
   mount();
@@ -248,6 +395,123 @@ export function openMatchDaySimulator(
     state.reveal = revealSel.value as RevealMode;
   });
   revealBtn.addEventListener('click', () => sim.playReveal(state.reveal));
+  todSel.addEventListener('change', () => {
+    state.tod = todSel.value as TimeOfDay;
+    sim.setTimeOfDay(state.tod);
+  });
+  weatherSel.addEventListener('change', () => {
+    state.weather = weatherSel.value as Weather;
+    sim.setWeather(state.weather);
+  });
+  expRange.addEventListener('input', () => sim.setExposure(Number(expRange.value)));
+  sunRange.addEventListener('input', () => sim.setSunIntensity(Number(sunRange.value)));
+
+  // ----- asset wiring -----
+  const stand = (): 0 | 1 | 2 | 3 => (Number(standSel.value) || 1) as 0 | 1 | 2 | 3;
+  addBannerBtn.addEventListener('click', () => {
+    sim.addBanner(stand());
+    refreshAssets();
+  });
+  addTextBtn.addEventListener('click', () => {
+    sim.addTextBanner(textInput.value.trim() || 'ULTRAS', stand());
+    refreshAssets();
+  });
+  addFloorBtn.addEventListener('click', () => {
+    sim.addFloorBanner();
+    refreshAssets();
+  });
+  addSurfaceBtn.addEventListener('click', () => {
+    sim.addSurface(stand());
+    refreshAssets();
+  });
+  addFlagBtn.addEventListener('click', () => {
+    sim.addMegaFlag(stand());
+    refreshAssets();
+  });
+  addScarfBtn.addEventListener('click', () => {
+    sim.addScarves(stand());
+    refreshAssets();
+  });
+  unfurlBtn.addEventListener('click', () => sim.unfurlSelected());
+  printBtn.addEventListener('click', () => {
+    if (!sim.printSelectedPanels()) title.textContent = 'Select an image asset (banner/surface) to print panels';
+  });
+  projInput.addEventListener('change', () => {
+    const f = projInput.files?.[0];
+    if (!f) return;
+    const r = new FileReader();
+    r.onload = () => {
+      if (typeof r.result !== 'string') return;
+      const img = new Image();
+      img.onload = () => sim.projectImageToMosaic(img);
+      img.src = r.result;
+    };
+    r.readAsDataURL(f);
+  });
+  assetSel.addEventListener('change', () => sim.selectAsset(assetSel.value || null));
+  imgInput.addEventListener('change', () => {
+    const f = imgInput.files?.[0];
+    if (!f) return;
+    const r = new FileReader();
+    r.onload = () => {
+      if (typeof r.result === 'string') sim.updateSelected({ imageRef: r.result });
+    };
+    r.readAsDataURL(f);
+  });
+  const applySize = (): void => sim.updateSelected({ scale: { x: Number(wRange.value), y: Number(hRange.value), z: 1 } });
+  wRange.addEventListener('input', applySize);
+  hRange.addEventListener('input', applySize);
+  yRange.addEventListener('input', () => sim.setSelectedY(Number(yRange.value)));
+  delBtn.addEventListener('click', () => {
+    sim.removeSelected();
+    refreshAssets();
+  });
+
+  // ----- choreography wiring -----
+  const cues: Cue[] = [];
+  const updateCueCount = (): void => {
+    cueCount.textContent = cues.length + ' cues';
+  };
+  autoBtn.addEventListener('click', () => sim.playAutoChoreo());
+  stopBtn.addEventListener('click', () => sim.stopTimeline());
+  addCueBtn.addEventListener('click', () => {
+    const t = Number(cueTime.value) || 0;
+    const k = cueKind.value;
+    if (k === 'reveal') cues.push({ kind: 'reveal', start: t, dur: 4, mode: state.reveal });
+    else if (k === 'camera') {
+      const shot = sim.shots()[Number(camSel.value)] ?? sim.shots()[0];
+      cues.push({ kind: 'camera', start: t, shot: shot.name });
+    } else cues.push({ kind: 'effect', start: t, effect: k as EffectName });
+    updateCueCount();
+  });
+  playSeqBtn.addEventListener('click', () => {
+    if (!cues.length) {
+      sim.playAutoChoreo();
+      return;
+    }
+    const dur = Math.max(5, ...cues.map((c) => c.start)) + 5;
+    sim.playTimeline({ duration: dur, cues: cues.slice() });
+  });
+  clearSeqBtn.addEventListener('click', () => {
+    cues.length = 0;
+    updateCueCount();
+  });
+
+  snapBtn.addEventListener('click', () => {
+    const a = document.createElement('a');
+    a.href = sim.snapshot();
+    a.download = 'tifo-matchday.png';
+    a.click();
+  });
+  linkBtn.addEventListener('click', () => {
+    const u = new URL(location.href);
+    u.searchParams.set('sim', '1');
+    navigator.clipboard?.writeText(u.toString());
+    linkBtn.textContent = 'Copied!';
+    setTimeout(() => {
+      linkBtn.textContent = 'Copy link';
+    }, 1500);
+  });
 
   let closed = false;
   const close = (): void => {
@@ -279,4 +543,19 @@ function checkbox(checked: boolean): HTMLInputElement {
   c.type = 'checkbox';
   c.checked = checked;
   return c;
+}
+function button(label: string): HTMLButtonElement {
+  const b = document.createElement('button');
+  b.textContent = label;
+  b.style.cssText = BTN;
+  return b;
+}
+function range(min: number, max: number, val: number, step = 1): HTMLInputElement {
+  const r = document.createElement('input');
+  r.type = 'range';
+  r.min = String(min);
+  r.max = String(max);
+  r.value = String(val);
+  r.step = String(step);
+  return r;
 }

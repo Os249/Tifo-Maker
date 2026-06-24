@@ -9,6 +9,7 @@ import { requestStadiumSwitch } from './ui/stadiumSwitch';
 import { registerCustom } from './core/customStadiums';
 import { PATTERN_PRESETS } from './core/patterns';
 import { DesignStore } from './core/design';
+import { AssetStore } from './core/sceneAssets';
 import { ObjectLayer } from './core/objects';
 import { Editor } from './render/editor';
 import type { Preview3D } from './render/preview3d';
@@ -290,6 +291,9 @@ async function main(): Promise<void> {
   // Match Day Simulator: a separate, lazy-loaded high-fidelity renderer shown in
   // a fullscreen overlay. The editor preview is paused while it runs so only one
   // heavy WebGL context is live at a time, and resumes when the overlay closes.
+  // Tifo assets (banners/flags/surfaces) live in a shared store so they persist
+  // across opening/closing the simulator within a session.
+  const assetStore = new AssetStore();
   const matchDayBtn = document.getElementById('match-day') as HTMLButtonElement | null;
   let simOpen = false;
   matchDayBtn?.addEventListener('click', async () => {
@@ -299,7 +303,7 @@ async function main(): Promise<void> {
     preview?.stop();
     try {
       const { openMatchDaySimulator } = await import('./render/simulator/overlay');
-      openMatchDaySimulator(map, store, template, {
+      openMatchDaySimulator(map, store, template, assetStore, {
         onClose: () => {
           simOpen = false;
           if (resumePreview) preview?.start();
@@ -310,6 +314,11 @@ async function main(): Promise<void> {
       if (resumePreview) preview?.start();
     }
   });
+
+  // Shareable Match Day link: ?sim=1 opens the simulator straight onto the loaded design.
+  if (new URLSearchParams(location.search).get('sim') === '1') {
+    setTimeout(() => matchDayBtn?.click(), 400);
+  }
 
   const stat = document.getElementById('stat')!;
   stat.textContent = `${template.name} · ${map.count.toLocaleString()} seats · map generated in ${genMs.toFixed(0)} ms`;
