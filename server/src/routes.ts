@@ -1155,8 +1155,12 @@ export async function buildApp(
     // bookmark /app; first-time visitors get the pitch. Share links (/d/:id)
     // and the SPA fallback both serve the editor.
     const landingHtml = readFileSync(join(staticDir, 'landing.html'), 'utf8');
-    app.get('/', async (_req, reply) => reply.type('text/html').send(landingHtml));
-    app.get('/app', async (_req, reply) => reply.type('text/html').send(indexHtml));
+    // HTML entry points are served no-cache so the browser/CDN always revalidate
+    // and never reference stale hashed chunks after a deploy (the cause of
+    // "Failed to load module script / MIME text/html" errors). The hashed
+    // /assets/* files are immutable by name, so they stay long-cacheable.
+    app.get('/', async (_req, reply) => reply.header('cache-control', 'no-cache').type('text/html').send(landingHtml));
+    app.get('/app', async (_req, reply) => reply.header('cache-control', 'no-cache').type('text/html').send(indexHtml));
     // Public developer spec for the .tifo format.
     try {
       const specHtml = readFileSync(join(staticDir, 'tifo-spec.html'), 'utf8');
@@ -1197,7 +1201,7 @@ export async function buildApp(
         return reply.code(404).send({ error: 'not found' });
       }
       // Unknown client routes fall back to the editor SPA.
-      return reply.type('text/html').send(indexHtml);
+      return reply.header('cache-control', 'no-cache').type('text/html').send(indexHtml);
     });
   }
 

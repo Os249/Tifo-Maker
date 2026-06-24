@@ -1,21 +1,21 @@
 import type { SeatMap, StadiumTemplate } from '../../core/types';
 import type { DesignStore } from '../../core/design';
-import { MatchDaySimulator } from './index';
+import { MatchDaySimulator, type TimeOfDay } from './index';
 import { probeQuality, type QualityTier } from './quality';
 import { REVEAL_MODES, type RevealMode } from './choreo';
 import type { CrowdPreset } from './crowd';
 import type { AssetStore } from '../../core/sceneAssets';
 import type { Cue, EffectName } from './timeline';
-import type { TimeOfDay } from './index';
 import type { Weather } from './weather';
 
 /**
  * Fullscreen Match Day Simulator overlay — the lazy-loaded entry point.
  *
- * Builds its own DOM (no index.html / CSS changes), mounts a MatchDaySimulator
- * and a control bar for every subsystem (camera, quality, crowd, banners/flags,
- * effects, reveal). State is kept here and re-applied when quality changes (which
- * rebuilds the scene), and everything disposes on close.
+ * UI: a slim top bar (global actions) plus a collapsible left "glass" panel with
+ * five accordion sections (Camera, Crowd, Atmosphere, Tifo Assets, Choreography),
+ * so the controls are organized and discoverable rather than a wall of buttons.
+ * All controls drive the same MatchDaySimulator API; state is re-applied when
+ * quality changes (which rebuilds the scene), and everything disposes on close.
  */
 
 export interface SimulatorHandle {
@@ -35,9 +35,47 @@ const CROWD_PRESETS: [CrowdPreset, string, number][] = [
   ['empty', 'Empty', 0],
 ];
 
-const BTN = 'font:12px system-ui,sans-serif;color:#e6e9ee;background:#1c232c;border:1px solid #2c3742;border-radius:7px;padding:6px 10px;cursor:pointer;';
-const SEL = 'font:12px system-ui,sans-serif;color:#e6e9ee;background:#1c232c;border:1px solid #2c3742;border-radius:7px;padding:5px 8px;cursor:pointer;';
-const LBL = 'font:11px system-ui,sans-serif;color:#aab2bd;display:inline-flex;align-items:center;gap:5px;';
+const CSS = `
+.mds-overlay{position:fixed;inset:0;z-index:10000;background:#05070a;display:flex;flex-direction:column;font:13px/1.4 system-ui,-apple-system,sans-serif;color:#e6e9ee;}
+.mds-bar{display:flex;align-items:center;gap:10px;padding:10px 16px;background:rgba(10,13,18,.92);backdrop-filter:blur(8px);border-bottom:1px solid #1c232c;flex:0 0 auto;z-index:3;}
+.mds-brand{font-weight:700;font-size:15px;letter-spacing:.2px;display:flex;align-items:center;gap:8px;}
+.mds-brand .dot{width:9px;height:9px;border-radius:50%;background:#3fb950;box-shadow:0 0 9px #3fb950;}
+.mds-spacer{margin-left:auto;}
+.mds-status{font-size:12px;color:#7fcf96;min-width:6px;transition:opacity .3s;}
+.mds-bf{display:flex;align-items:center;gap:6px;font-size:12px;color:#8a93a0;}
+.mds-btn{font:13px system-ui,sans-serif;color:#e6e9ee;background:#1c232c;border:1px solid #2c3742;border-radius:8px;padding:7px 12px;cursor:pointer;transition:background .12s,border-color .12s,transform .05s;white-space:nowrap;}
+.mds-btn:hover{background:#283340;border-color:#3a4654;}
+.mds-btn:active{transform:translateY(1px);}
+.mds-btn.active{background:#225338;border-color:#3fb950;color:#eafff0;}
+.mds-btn.primary{background:#3fb950;border-color:#3fb950;color:#06210f;font-weight:600;}
+.mds-btn.primary:hover{background:#4ad063;}
+.mds-icon{padding:7px 10px;font-size:14px;}
+.mds-sel,.mds-input{font:13px system-ui,sans-serif;color:#e6e9ee;background:#161b22;border:1px solid #2c3742;border-radius:8px;padding:6px 9px;cursor:pointer;width:100%;box-sizing:border-box;}
+.mds-input{cursor:text;}
+.mds-input[type=file]{font-size:11px;color:#aab2bd;padding:5px;cursor:pointer;}
+.mds-input[type=number]{width:80px;}
+.mds-panel{position:absolute;top:62px;left:14px;width:286px;max-height:calc(100vh - 84px);overflow-y:auto;background:rgba(13,17,23,.92);backdrop-filter:blur(12px);border:1px solid #242c37;border-radius:14px;padding:8px;display:flex;flex-direction:column;gap:7px;box-shadow:0 12px 44px rgba(0,0,0,.55);z-index:2;transition:transform .22s ease,opacity .22s;}
+.mds-panel.collapsed{transform:translateX(-310px);opacity:0;pointer-events:none;}
+.mds-panel::-webkit-scrollbar{width:8px;}
+.mds-panel::-webkit-scrollbar-thumb{background:#2c3742;border-radius:8px;}
+.mds-section{border:1px solid #1e2630;border-radius:10px;overflow:hidden;background:#10151c;}
+.mds-shead{display:flex;align-items:center;gap:9px;width:100%;padding:11px 12px;background:#141a22;border:none;color:#e6e9ee;font:600 13px system-ui,sans-serif;cursor:pointer;text-align:left;}
+.mds-shead:hover{background:#1a212b;}
+.mds-shead .ico{font-size:15px;}
+.mds-shead .chev{margin-left:auto;transition:transform .15s;color:#8a93a0;font-size:12px;}
+.mds-section.open .chev{transform:rotate(90deg);}
+.mds-sbody{display:none;flex-direction:column;gap:11px;padding:13px 12px;}
+.mds-section.open .mds-sbody{display:flex;}
+.mds-field{display:flex;flex-direction:column;gap:5px;}
+.mds-flabel{font-size:11px;color:#8a93a0;}
+.mds-row{display:flex;flex-wrap:wrap;gap:6px;align-items:center;}
+.mds-row .mds-btn{flex:1 1 auto;text-align:center;}
+.mds-divider{height:1px;background:#1e2630;margin:1px 0;}
+.mds-checkrow{display:flex;align-items:center;gap:9px;font-size:12.5px;color:#cfd6df;cursor:pointer;}
+.mds-hint{font-size:11px;color:#6b7480;}
+input[type=range].mds-range{width:100%;accent-color:#3fb950;}
+input[type=checkbox].mds-check{accent-color:#3fb950;width:16px;height:16px;cursor:pointer;}
+`;
 
 interface SimState {
   camIdx: number;
@@ -80,229 +118,183 @@ export function openMatchDaySimulator(
   };
 
   const overlay = document.createElement('div');
-  overlay.style.cssText = 'position:fixed;inset:0;z-index:10000;background:#05070a;display:flex;flex-direction:column;';
+  overlay.className = 'mds-overlay';
+  const style = document.createElement('style');
+  style.textContent = CSS;
+  overlay.appendChild(style);
+
   const host = document.createElement('div');
   host.style.cssText = 'flex:1 1 auto;position:relative;min-height:0;';
 
-  // ----- top bar -----
+  // ---------- top bar ----------
   const bar = document.createElement('div');
-  bar.style.cssText =
-    'display:flex;align-items:center;gap:10px;padding:9px 14px;background:#0a0d12;border-bottom:1px solid #1c232c;color:#e6e9ee;font:13px system-ui,sans-serif;flex:0 0 auto;flex-wrap:wrap;';
-  const title = document.createElement('div');
-  title.textContent = 'Match Day Simulator';
-  title.style.cssText = 'font-weight:700;margin-right:auto;';
-  const camSel = document.createElement('select');
-  camSel.style.cssText = SEL;
-  const qSel = document.createElement('select');
-  qSel.style.cssText = SEL;
-  for (const [tier, label] of TIER_LABELS) {
-    const o = document.createElement('option');
-    o.value = tier;
-    o.textContent = label;
-    if (tier === state.tier) o.selected = true;
-    qSel.appendChild(o);
-  }
-  const flyBtn = document.createElement('button');
-  flyBtn.textContent = 'Flyover';
-  flyBtn.style.cssText = BTN;
-  const snapBtn = button('Snapshot');
-  const linkBtn = button('Copy link');
-  const closeBtn = document.createElement('button');
-  closeBtn.textContent = 'Close';
-  closeBtn.style.cssText = BTN;
-  bar.append(title, wrap('Camera', camSel), wrap('Quality', qSel), flyBtn, snapBtn, linkBtn, closeBtn);
+  bar.className = 'mds-bar';
+  const panelToggle = btn('☰', 'mds-icon');
+  panelToggle.title = 'Show/hide controls';
+  const brand = document.createElement('div');
+  brand.className = 'mds-brand';
+  brand.innerHTML = '<span class="dot"></span>Match Day Simulator';
+  const spacer = document.createElement('div');
+  spacer.className = 'mds-spacer';
+  const status = document.createElement('div');
+  status.className = 'mds-status';
+  const qSel = sel();
+  for (const [tier, label] of TIER_LABELS) opt(qSel, tier, label, tier === state.tier);
+  const snapBtn = btn('Snapshot');
+  const fullBtn = btn('Fullscreen');
+  const linkBtn = btn('Copy link');
+  const closeBtn = btn('Close');
+  bar.append(panelToggle, brand, spacer, status, barField('Quality', qSel), snapBtn, fullBtn, linkBtn, closeBtn);
 
-  // ----- controls row -----
-  const ctrls = document.createElement('div');
-  ctrls.style.cssText =
-    'display:flex;align-items:center;gap:14px;padding:8px 14px;background:#080b10;border-bottom:1px solid #161b22;flex:0 0 auto;flex-wrap:wrap;';
+  let toastT = 0;
+  const toast = (m: string): void => {
+    status.textContent = m;
+    status.style.opacity = '1';
+    window.clearTimeout(toastT);
+    toastT = window.setTimeout(() => {
+      status.style.opacity = '0';
+    }, 2200);
+  };
 
-  const crowdSel = document.createElement('select');
-  crowdSel.style.cssText = SEL;
-  for (const [id, label] of CROWD_PRESETS) {
-    const o = document.createElement('option');
-    o.value = id;
-    o.textContent = label;
-    if (id === state.crowd) o.selected = true;
-    crowdSel.appendChild(o);
-  }
-  const density = document.createElement('input');
-  density.type = 'range';
-  density.min = '0';
-  density.max = '100';
-  density.value = String(Math.round(state.density * 100));
-  const onTifo = checkbox(state.showOnTifo);
-  const banners = checkbox(state.banners);
-  const flags = checkbox(state.flags);
-  const floods = checkbox(state.floods);
-  const smoke = checkbox(state.smoke);
-  const confettiBtn = document.createElement('button');
-  confettiBtn.textContent = 'Confetti';
-  confettiBtn.style.cssText = BTN;
-  const pyroBtn = document.createElement('button');
-  pyroBtn.textContent = 'Pyro';
-  pyroBtn.style.cssText = BTN;
-  const revealSel = document.createElement('select');
-  revealSel.style.cssText = SEL;
-  for (const m of REVEAL_MODES) {
-    const o = document.createElement('option');
-    o.value = m.id;
-    o.textContent = m.label;
-    revealSel.appendChild(o);
-  }
-  const revealBtn = document.createElement('button');
-  revealBtn.textContent = 'Play reveal';
-  revealBtn.style.cssText = BTN;
+  // ---------- panel ----------
+  const panel = document.createElement('div');
+  panel.className = 'mds-panel';
 
-  const todSel = document.createElement('select');
-  todSel.style.cssText = SEL;
-  for (const [v, l] of [['day', 'Day'], ['dusk', 'Dusk'], ['night', 'Night'], ['sunset', 'Sunset']]) {
-    const o = document.createElement('option');
-    o.value = v;
-    o.textContent = l;
-    if (v === state.tod) o.selected = true;
-    todSel.appendChild(o);
-  }
-  const weatherSel = document.createElement('select');
-  weatherSel.style.cssText = SEL;
-  for (const [v, l] of [['clear', 'Clear'], ['rain', 'Rain'], ['snow', 'Snow']]) {
-    const o = document.createElement('option');
-    o.value = v;
-    o.textContent = l;
-    weatherSel.appendChild(o);
-  }
-  const expRange = range(0.4, 2, 1.05, 0.05);
-  const sunRange = range(0, 3, 1.25, 0.05);
+  // Camera & Views
+  const camSel = sel();
+  const flyBtn = btn('Cinematic flyover');
+  const secCam = section('🎥', 'Camera & Views', true);
+  secCam.body.append(field('View', camSel), flyBtn);
 
-  ctrls.append(
-    wrap('Crowd', crowdSel),
-    wrap('Density', density),
-    wrap('On tifo', onTifo),
-    wrap('Banners', banners),
-    wrap('Flags', flags),
-    wrap('Floodlights', floods),
-    wrap('Smoke', smoke),
-    confettiBtn,
-    pyroBtn,
-    wrap('Reveal', revealSel),
-    revealBtn,
-    wrap('Time', todSel),
-    wrap('Weather', weatherSel),
-    wrap('Exposure', expRange),
-    wrap('Sun', sunRange),
+  // Crowd
+  const crowdSel = sel();
+  for (const [id, label] of CROWD_PRESETS) opt(crowdSel, id, label, id === state.crowd);
+  const density = rng(0, 100, Math.round(state.density * 100));
+  const onTifo = chk(state.showOnTifo);
+  const secCrowd = section('👥', 'Crowd', false);
+  secCrowd.body.append(field('Stadium fill', crowdSel), field('Density', density), checkField('Show crowd on tifo seats', onTifo));
+
+  // Atmosphere
+  const todSel = sel();
+  for (const [v, l] of [['day', 'Day'], ['dusk', 'Dusk'], ['night', 'Night'], ['sunset', 'Sunset']]) opt(todSel, v, l, v === state.tod);
+  const weatherSel = sel();
+  for (const [v, l] of [['clear', 'Clear'], ['rain', 'Rain'], ['snow', 'Snow']]) opt(weatherSel, v, l, false);
+  const expRange = rng(0.4, 2, 1.05, 0.05);
+  const sunRange = rng(0, 3, 1.25, 0.05);
+  const floods = chk(state.floods);
+  const smoke = chk(state.smoke);
+  const bannersChk = chk(state.banners);
+  const flagsChk = chk(state.flags);
+  const confettiBtn = btn('Confetti');
+  const pyroBtn = btn('Pyro');
+  const secAtmo = section('🌇', 'Atmosphere', false);
+  secAtmo.body.append(
+    field('Time of day', todSel),
+    field('Weather', weatherSel),
+    field('Exposure', expRange),
+    field('Sun intensity', sunRange),
+    checkField('Floodlights', floods),
+    checkField('Smoke', smoke),
+    checkField('Rail banners', bannersChk),
+    checkField('Corner flags', flagsChk),
+    row(confettiBtn, pyroBtn),
   );
 
-  // ----- assets row (banners / text / floor) -----
-  const assetBar = document.createElement('div');
-  assetBar.style.cssText =
-    'display:flex;align-items:center;gap:12px;padding:8px 14px;background:#070a0e;border-bottom:1px solid #141a21;flex:0 0 auto;flex-wrap:wrap;';
-  const standSel = document.createElement('select');
-  standSel.style.cssText = SEL;
-  for (const [v, l] of [['1', 'North'], ['3', 'South'], ['0', 'East'], ['2', 'West']]) {
-    const o = document.createElement('option');
-    o.value = v;
-    o.textContent = l;
-    standSel.appendChild(o);
-  }
-  const addBannerBtn = button('Add banner');
+  // Tifo Assets
+  const standSel = sel();
+  for (const [v, l] of [['1', 'North'], ['3', 'South'], ['0', 'East'], ['2', 'West']]) opt(standSel, v, l, false);
   const textInput = document.createElement('input');
   textInput.type = 'text';
   textInput.placeholder = 'ULTRAS';
-  textInput.style.cssText = 'font:12px system-ui,sans-serif;color:#e6e9ee;background:#1c232c;border:1px solid #2c3742;border-radius:7px;padding:5px 8px;width:110px;';
-  const addTextBtn = button('Add text');
-  const addFloorBtn = button('Add floor');
-  const addSurfaceBtn = button('Add surface');
-  const addFlagBtn = button('Add mega-flag');
-  const addScarfBtn = button('Add scarves');
-  const projInput = document.createElement('input');
-  projInput.type = 'file';
-  projInput.accept = 'image/*';
-  projInput.style.cssText = 'font:11px system-ui,sans-serif;color:#aab2bd;width:140px;';
-  const assetSel = document.createElement('select');
-  assetSel.style.cssText = SEL;
-  const imgInput = document.createElement('input');
-  imgInput.type = 'file';
-  imgInput.accept = 'image/*';
-  imgInput.style.cssText = 'font:11px system-ui,sans-serif;color:#aab2bd;width:150px;';
-  const wRange = range(4, 60, 18);
-  const hRange = range(1, 30, 4);
-  const yRange = range(0, 60, 14);
-  const unfurlBtn = button('Unfurl');
-  const printBtn = button('Print panels');
-  const delBtn = button('Delete');
-  assetBar.append(
-    wrap('Stand', standSel),
-    addBannerBtn,
-    textInput,
-    addTextBtn,
-    addFloorBtn,
-    addSurfaceBtn,
-    addFlagBtn,
-    addScarfBtn,
-    wrap('Project image', projInput),
-    wrap('Selected', assetSel),
-    wrap('Image', imgInput),
-    wrap('W', wRange),
-    wrap('H', hRange),
-    wrap('Y', yRange),
-    unfurlBtn,
-    printBtn,
-    delBtn,
+  textInput.className = 'mds-input';
+  const addBannerBtn = btn('Banner');
+  const addTextBtn = btn('Text');
+  const addFloorBtn = btn('Floor');
+  const addSurfaceBtn = btn('Surface');
+  const addFlagBtn = btn('Mega-flag');
+  const addScarfBtn = btn('Scarves');
+  const projInput = fileInput();
+  const assetSel = sel();
+  const imgInput = fileInput();
+  const wRange = rng(4, 60, 18);
+  const hRange = rng(1, 30, 4);
+  const yRange = rng(0, 60, 14);
+  const unfurlBtn = btn('Unfurl');
+  const printBtn = btn('Print panels');
+  const delBtn = btn('Delete');
+  const secAssets = section('🎌', 'Tifo Assets', false);
+  secAssets.body.append(
+    field('Add to stand', standSel),
+    field('Banner / surface text', textInput),
+    row(addBannerBtn, addTextBtn, addFloorBtn),
+    row(addSurfaceBtn, addFlagBtn, addScarfBtn),
+    divider(),
+    field('Project image from this camera', projInput),
+    divider(),
+    field('Selected asset', assetSel),
+    field('Replace image', imgInput),
+    field('Width', wRange),
+    field('Height', hRange),
+    field('Height off ground', yRange),
+    row(unfurlBtn, printBtn, delBtn),
   );
 
-  // ----- choreography row -----
-  const choreoBar = document.createElement('div');
-  choreoBar.style.cssText =
-    'display:flex;align-items:center;gap:12px;padding:8px 14px;background:#060809;border-bottom:1px solid #141a21;flex:0 0 auto;flex-wrap:wrap;';
-  const autoBtn = button('Auto choreo');
-  const stopBtn = button('Stop');
+  // Choreography
+  const autoBtn = btn('Auto choreo', 'primary');
+  const stopBtn = btn('Stop');
+  const revealSel = sel();
+  for (const m of REVEAL_MODES) opt(revealSel, m.id, m.label, false);
+  const revealBtn = btn('Play reveal');
   const cueTime = document.createElement('input');
   cueTime.type = 'number';
   cueTime.min = '0';
-  cueTime.max = '30';
+  cueTime.max = '40';
   cueTime.step = '0.5';
   cueTime.value = '0';
-  cueTime.style.cssText = 'font:12px system-ui,sans-serif;color:#e6e9ee;background:#1c232c;border:1px solid #2c3742;border-radius:7px;padding:5px 8px;width:62px;';
-  const cueKind = document.createElement('select');
-  cueKind.style.cssText = SEL;
-  for (const [v, l] of [
-    ['reveal', 'Reveal'],
-    ['camera', 'Camera (current)'],
-    ['confetti', 'Confetti'],
-    ['pyro', 'Pyro'],
-    ['smoke-on', 'Smoke on'],
-    ['floods-on', 'Floodlights on'],
-  ]) {
-    const o = document.createElement('option');
-    o.value = v;
-    o.textContent = l;
-    cueKind.appendChild(o);
-  }
-  const addCueBtn = button('Add cue');
-  const playSeqBtn = button('Play sequence');
-  const clearSeqBtn = button('Clear');
-  const cueCount = document.createElement('span');
-  cueCount.style.cssText = LBL;
+  cueTime.className = 'mds-input';
+  const cueKind = sel();
+  for (const [v, l] of [['reveal', 'Reveal'], ['camera', 'Camera (current)'], ['confetti', 'Confetti'], ['pyro', 'Pyro'], ['smoke-on', 'Smoke on'], ['floods-on', 'Floodlights on']]) opt(cueKind, v, l, false);
+  const addCueBtn = btn('Add cue');
+  const playSeqBtn = btn('Play sequence', 'primary');
+  const clearSeqBtn = btn('Clear');
+  const cueCount = document.createElement('div');
+  cueCount.className = 'mds-hint';
   cueCount.textContent = '0 cues';
-  choreoBar.append(autoBtn, stopBtn, wrap('At (s)', cueTime), wrap('Cue', cueKind), addCueBtn, playSeqBtn, clearSeqBtn, cueCount);
+  const secChoreo = section('🎬', 'Choreography', false);
+  secChoreo.body.append(
+    row(autoBtn, stopBtn),
+    divider(),
+    field('Reveal style', revealSel),
+    revealBtn,
+    divider(),
+    document.createTextNode(''),
+    field('Cue time (seconds)', cueTime),
+    field('Cue type', cueKind),
+    row(addCueBtn, playSeqBtn, clearSeqBtn),
+    cueCount,
+  );
 
-  overlay.append(bar, ctrls, assetBar, choreoBar, host);
+  panel.append(secCam.root, secCrowd.root, secAtmo.root, secAssets.root, secChoreo.root);
+  overlay.append(bar, panel, host);
   document.body.appendChild(overlay);
   const prevOverflow = document.body.style.overflow;
   document.body.style.overflow = 'hidden';
 
+  // ---------- simulator instance + state ----------
   let sim: MatchDaySimulator;
 
+  function refreshAssets(): void {
+    const assets = sim.listAssets();
+    assetSel.replaceChildren();
+    opt(assetSel, '', assets.length ? '— select —' : '(no assets yet)', false);
+    assets.forEach((a, i) => opt(assetSel, a.id, a.type + ' ' + (i + 1), false));
+    assetSel.value = sim.selectedAssetId ?? '';
+  }
   function applyState(): void {
     const shots = sim.shots();
     if (camSel.options.length !== shots.length) {
       camSel.replaceChildren();
-      shots.forEach((s, i) => {
-        const o = document.createElement('option');
-        o.value = String(i);
-        o.textContent = s.name;
-        camSel.appendChild(o);
-      });
+      shots.forEach((s, i) => opt(camSel, String(i), s.name, false));
     }
     camSel.value = String(state.camIdx);
     sim.setCrowdPreset(state.crowd);
@@ -317,22 +309,6 @@ export function openMatchDaySimulator(
     sim.setWeather(state.weather);
     if (!state.fly) sim.applyShot(shots[state.camIdx] ?? shots[0]);
   }
-
-  function refreshAssets(): void {
-    const assets = sim.listAssets();
-    assetSel.replaceChildren();
-    const none = document.createElement('option');
-    none.value = '';
-    none.textContent = assets.length ? '— select —' : '(no assets)';
-    assetSel.appendChild(none);
-    assets.forEach((a, i) => {
-      const o = document.createElement('option');
-      o.value = a.id;
-      o.textContent = a.type + ' ' + (i + 1);
-      assetSel.appendChild(o);
-    });
-    assetSel.value = sim.selectedAssetId ?? '';
-  }
   function mount(): void {
     sim = new MatchDaySimulator(host, map, store, template, assetStore, { quality: state.tier });
     applyState();
@@ -341,21 +317,23 @@ export function openMatchDaySimulator(
   }
   mount();
 
-  // ----- wiring -----
+  // ---------- wiring ----------
+  panelToggle.addEventListener('click', () => panel.classList.toggle('collapsed'));
   camSel.addEventListener('change', () => {
     state.camIdx = Number(camSel.value);
     state.fly = false;
-    flyBtn.style.background = '#1c232c';
+    flyBtn.classList.remove('active');
     sim.applyShot(sim.shots()[state.camIdx]);
   });
   qSel.addEventListener('change', () => {
     state.tier = qSel.value as QualityTier;
     sim.dispose();
     mount();
+    toast('Quality: ' + state.tier);
   });
   flyBtn.addEventListener('click', () => {
     state.fly = !state.fly;
-    flyBtn.style.background = state.fly ? '#2a6f43' : '#1c232c';
+    flyBtn.classList.toggle('active', state.fly);
     sim.setFlyover(state.fly);
   });
   crowdSel.addEventListener('change', () => {
@@ -373,28 +351,6 @@ export function openMatchDaySimulator(
     state.showOnTifo = onTifo.checked;
     sim.setCrowdShowOnTifo(state.showOnTifo);
   });
-  banners.addEventListener('change', () => {
-    state.banners = banners.checked;
-    sim.setBannersVisible(state.banners);
-  });
-  flags.addEventListener('change', () => {
-    state.flags = flags.checked;
-    sim.setFlagsVisible(state.flags);
-  });
-  floods.addEventListener('change', () => {
-    state.floods = floods.checked;
-    sim.setFloodlights(state.floods);
-  });
-  smoke.addEventListener('change', () => {
-    state.smoke = smoke.checked;
-    sim.setSmoke(state.smoke);
-  });
-  confettiBtn.addEventListener('click', () => sim.burstConfetti());
-  pyroBtn.addEventListener('click', () => sim.burstPyro());
-  revealSel.addEventListener('change', () => {
-    state.reveal = revealSel.value as RevealMode;
-  });
-  revealBtn.addEventListener('click', () => sim.playReveal(state.reveal));
   todSel.addEventListener('change', () => {
     state.tod = todSel.value as TimeOfDay;
     sim.setTimeOfDay(state.tod);
@@ -405,8 +361,25 @@ export function openMatchDaySimulator(
   });
   expRange.addEventListener('input', () => sim.setExposure(Number(expRange.value)));
   sunRange.addEventListener('input', () => sim.setSunIntensity(Number(sunRange.value)));
+  floods.addEventListener('change', () => {
+    state.floods = floods.checked;
+    sim.setFloodlights(state.floods);
+  });
+  smoke.addEventListener('change', () => {
+    state.smoke = smoke.checked;
+    sim.setSmoke(state.smoke);
+  });
+  bannersChk.addEventListener('change', () => {
+    state.banners = bannersChk.checked;
+    sim.setBannersVisible(state.banners);
+  });
+  flagsChk.addEventListener('change', () => {
+    state.flags = flagsChk.checked;
+    sim.setFlagsVisible(state.flags);
+  });
+  confettiBtn.addEventListener('click', () => sim.burstConfetti());
+  pyroBtn.addEventListener('click', () => sim.burstPyro());
 
-  // ----- asset wiring -----
   const stand = (): 0 | 1 | 2 | 3 => (Number(standSel.value) || 1) as 0 | 1 | 2 | 3;
   addBannerBtn.addEventListener('click', () => {
     sim.addBanner(stand());
@@ -434,7 +407,7 @@ export function openMatchDaySimulator(
   });
   unfurlBtn.addEventListener('click', () => sim.unfurlSelected());
   printBtn.addEventListener('click', () => {
-    if (!sim.printSelectedPanels()) title.textContent = 'Select an image asset (banner/surface) to print panels';
+    if (!sim.printSelectedPanels()) toast('Select an image asset first');
   });
   projInput.addEventListener('change', () => {
     const f = projInput.files?.[0];
@@ -443,7 +416,10 @@ export function openMatchDaySimulator(
     r.onload = () => {
       if (typeof r.result !== 'string') return;
       const img = new Image();
-      img.onload = () => sim.projectImageToMosaic(img);
+      img.onload = () => {
+        const n = sim.projectImageToMosaic(img);
+        toast(n.toLocaleString() + ' seats painted');
+      };
       img.src = r.result;
     };
     r.readAsDataURL(f);
@@ -467,10 +443,13 @@ export function openMatchDaySimulator(
     refreshAssets();
   });
 
-  // ----- choreography wiring -----
+  revealBtn.addEventListener('click', () => sim.playReveal(state.reveal));
+  revealSel.addEventListener('change', () => {
+    state.reveal = revealSel.value as RevealMode;
+  });
   const cues: Cue[] = [];
   const updateCueCount = (): void => {
-    cueCount.textContent = cues.length + ' cues';
+    cueCount.textContent = cues.length + ' cue' + (cues.length === 1 ? '' : 's') + ' in sequence';
   };
   autoBtn.addEventListener('click', () => sim.playAutoChoreo());
   stopBtn.addEventListener('click', () => sim.stopTimeline());
@@ -502,29 +481,38 @@ export function openMatchDaySimulator(
     a.href = sim.snapshot();
     a.download = 'tifo-matchday.png';
     a.click();
+    toast('Snapshot saved');
   });
   linkBtn.addEventListener('click', () => {
     const u = new URL(location.href);
     u.searchParams.set('sim', '1');
-    navigator.clipboard?.writeText(u.toString());
-    linkBtn.textContent = 'Copied!';
-    setTimeout(() => {
-      linkBtn.textContent = 'Copy link';
-    }, 1500);
+    void navigator.clipboard?.writeText(u.toString());
+    toast('Link copied');
   });
+
+  const onFsChange = (): void => {
+    fullBtn.textContent = document.fullscreenElement ? 'Exit full' : 'Fullscreen';
+  };
+  fullBtn.addEventListener('click', () => {
+    if (document.fullscreenElement) void document.exitFullscreen();
+    else void overlay.requestFullscreen?.();
+  });
+  document.addEventListener('fullscreenchange', onFsChange);
 
   let closed = false;
   const close = (): void => {
     if (closed) return;
     closed = true;
     document.removeEventListener('keydown', onKey);
+    document.removeEventListener('fullscreenchange', onFsChange);
+    if (document.fullscreenElement) void document.exitFullscreen();
     sim.dispose();
     document.body.style.overflow = prevOverflow;
     overlay.remove();
     opts.onClose?.();
   };
   const onKey = (e: KeyboardEvent): void => {
-    if (e.key === 'Escape') close();
+    if (e.key === 'Escape' && !document.fullscreenElement) close();
   };
   closeBtn.addEventListener('click', close);
   document.addEventListener('keydown', onKey);
@@ -532,30 +520,100 @@ export function openMatchDaySimulator(
   return { close };
 }
 
-function wrap(label: string, el: HTMLElement): HTMLElement {
-  const span = document.createElement('label');
-  span.style.cssText = LBL;
-  span.append(document.createTextNode(label), el);
-  return span;
-}
-function checkbox(checked: boolean): HTMLInputElement {
-  const c = document.createElement('input');
-  c.type = 'checkbox';
-  c.checked = checked;
-  return c;
-}
-function button(label: string): HTMLButtonElement {
+// ---------- DOM helpers ----------
+function btn(label: string, cls = ''): HTMLButtonElement {
   const b = document.createElement('button');
   b.textContent = label;
-  b.style.cssText = BTN;
+  b.className = 'mds-btn' + (cls ? ' ' + cls : '');
   return b;
 }
-function range(min: number, max: number, val: number, step = 1): HTMLInputElement {
+function sel(): HTMLSelectElement {
+  const s = document.createElement('select');
+  s.className = 'mds-sel';
+  return s;
+}
+function opt(s: HTMLSelectElement, value: string, label: string, selected: boolean): void {
+  const o = document.createElement('option');
+  o.value = value;
+  o.textContent = label;
+  if (selected) o.selected = true;
+  s.appendChild(o);
+}
+function fileInput(): HTMLInputElement {
+  const i = document.createElement('input');
+  i.type = 'file';
+  i.accept = 'image/*';
+  i.className = 'mds-input';
+  return i;
+}
+function rng(min: number, max: number, val: number, step = 1): HTMLInputElement {
   const r = document.createElement('input');
   r.type = 'range';
   r.min = String(min);
   r.max = String(max);
   r.value = String(val);
   r.step = String(step);
+  r.className = 'mds-range';
   return r;
+}
+function chk(checked: boolean): HTMLInputElement {
+  const c = document.createElement('input');
+  c.type = 'checkbox';
+  c.checked = checked;
+  c.className = 'mds-check';
+  return c;
+}
+function field(label: string, ctrl: HTMLElement): HTMLElement {
+  const d = document.createElement('div');
+  d.className = 'mds-field';
+  const l = document.createElement('div');
+  l.className = 'mds-flabel';
+  l.textContent = label;
+  d.append(l, ctrl);
+  return d;
+}
+function checkField(label: string, c: HTMLInputElement): HTMLElement {
+  const l = document.createElement('label');
+  l.className = 'mds-checkrow';
+  l.append(c, document.createTextNode(label));
+  return l;
+}
+function row(...els: HTMLElement[]): HTMLElement {
+  const d = document.createElement('div');
+  d.className = 'mds-row';
+  d.append(...els);
+  return d;
+}
+function divider(): HTMLElement {
+  const d = document.createElement('div');
+  d.className = 'mds-divider';
+  return d;
+}
+function barField(label: string, ctrl: HTMLElement): HTMLElement {
+  const d = document.createElement('div');
+  d.className = 'mds-bf';
+  const l = document.createElement('span');
+  l.textContent = label;
+  d.append(l, ctrl);
+  return d;
+}
+function section(icon: string, title: string, open: boolean): { root: HTMLElement; body: HTMLElement } {
+  const root = document.createElement('div');
+  root.className = 'mds-section' + (open ? ' open' : '');
+  const head = document.createElement('button');
+  head.className = 'mds-shead';
+  const ico = document.createElement('span');
+  ico.className = 'ico';
+  ico.textContent = icon;
+  const t = document.createElement('span');
+  t.textContent = title;
+  const chev = document.createElement('span');
+  chev.className = 'chev';
+  chev.textContent = '›';
+  head.append(ico, t, chev);
+  const body = document.createElement('div');
+  body.className = 'mds-sbody';
+  head.addEventListener('click', () => root.classList.toggle('open'));
+  root.append(head, body);
+  return { root, body };
 }
