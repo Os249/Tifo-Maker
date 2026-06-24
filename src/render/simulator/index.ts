@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { Reflector } from 'three/examples/jsm/objects/Reflector.js';
 import type { SeatMap, StadiumTemplate } from '../../core/types';
 import type { DesignStore } from '../../core/design';
 import { CAMERA_PRESETS, type CameraPreset } from '../preview3d';
@@ -17,6 +18,7 @@ import type { AssetStore, SceneAsset } from '../../core/sceneAssets';
 import { rasterize } from '../../core/importImage';
 import { printAssetPanels } from './printPanels';
 import { buildWeather, type WeatherController, type Weather } from './weather';
+import { buildSurroundings, type Surroundings } from './surroundings';
 
 /**
  * Match Day Stadium Simulator — Phase 0 core (the HIGH/ULTRA renderer).
@@ -87,6 +89,8 @@ export class MatchDaySimulator {
   private sun!: THREE.DirectionalLight;
   private fill!: THREE.DirectionalLight;
   private readonly weather: WeatherController;
+  private readonly surroundings: Surroundings;
+  private wetPitch: Reflector | null = null;
   private paletteColors: THREE.Color[] = [];
   private running = false;
   private disposed = false;
@@ -167,6 +171,8 @@ export class MatchDaySimulator {
     this.assetLayer = buildAssetLayer(this.assetStore, () => this.store.palette);
     this.scene.add(this.assetLayer.object);
     this.weather = buildWeather(this.scene);
+    this.surroundings = buildSurroundings();
+    this.scene.add(this.surroundings.object);
 
     this.onDirtyCb = (indices): void => {
       if (this.disposed) return;
@@ -369,6 +375,21 @@ export class MatchDaySimulator {
   }
   setSunIntensity(v: number): void {
     this.sun.intensity = v;
+  }
+  /** Wet-look reflective pitch (a planar Reflector; lazily created, off by default). */
+  setWetPitch(on: boolean): void {
+    if (on && !this.wetPitch) {
+      const refl = new Reflector(new THREE.PlaneGeometry(105, 68), {
+        textureWidth: 1024,
+        textureHeight: 1024,
+        color: 0x152217,
+      });
+      refl.rotation.x = -Math.PI / 2;
+      refl.position.y = 0.05;
+      this.wetPitch = refl;
+      this.scene.add(refl);
+    }
+    if (this.wetPitch) this.wetPitch.visible = on;
   }
 
   /** Capture the current frame as a PNG data URL (Wave G — poster export). */
@@ -720,6 +741,13 @@ export class MatchDaySimulator {
     this.effects.dispose();
     this.assetLayer.dispose();
     this.weather.dispose();
+    this.surroundings.dispose();
+    if (this.wetPitch) {
+      this.scene.remove(this.wetPitch);
+      this.wetPitch.geometry.dispose();
+      (this.wetPitch.material as THREE.Material).dispose();
+      this.wetPitch.dispose();
+    }
     for (const d of this.disposables) d.dispose();
     this.skyTex.dispose();
     this.renderer.dispose();

@@ -155,6 +155,39 @@ const COMMUNITY: StadiumEntry[] = [
     },
     meta: { name: 'Roaring Terraces', source: 'community', country: 'South America', capacity: 48000, type: 'Single-tier', inspiredBy: 'a single-tier terraced ground', tags: ['single-tier', 'steep', 'atmosphere'] },
   },
+  {
+    id: 'community-cauldron-dome-62k',
+    template: {
+      id: 'community-cauldron-dome-62k',
+      name: 'Cauldron Dome',
+      version: 1,
+      plan: { a: 86, b: 68, exponent: 2.7 },
+      tiers: [
+        { rows: 22, rowDepth: 0.8, rakeDeg: 30, baseElevation: 1.5, baseOffset: 0, seatPitch: 0.48 },
+        { rows: 20, rowDepth: 0.78, rakeDeg: 36, baseElevation: 11, baseOffset: 18, seatPitch: 0.48 },
+        { rows: 18, rowDepth: 0.76, rakeDeg: 40, baseElevation: 22, baseOffset: 34, seatPitch: 0.48 },
+      ],
+      aisles: { count: 28, widthMeters: 1.1 },
+      sectionsPerTier: 28,
+    },
+    meta: { name: 'Cauldron Dome', source: 'community', country: 'Europe', capacity: 62000, type: 'Bowl', inspiredBy: 'a steep three-tier cauldron', tags: ['steep', 'three-tier', 'enclosed', 'atmosphere'] },
+  },
+  {
+    id: 'community-wide-oval-72k',
+    template: {
+      id: 'community-wide-oval-72k',
+      name: 'Wide Athletics Oval',
+      version: 1,
+      plan: { a: 128, b: 92, exponent: 2.1 },
+      tiers: [
+        { rows: 30, rowDepth: 0.85, rakeDeg: 20, baseElevation: 1.5, baseOffset: 8, seatPitch: 0.5 },
+        { rows: 24, rowDepth: 0.82, rakeDeg: 28, baseElevation: 14, baseOffset: 30, seatPitch: 0.5 },
+      ],
+      aisles: { count: 32, widthMeters: 1.2 },
+      sectionsPerTier: 32,
+    },
+    meta: { name: 'Wide Athletics Oval', source: 'community', country: 'International', capacity: 72000, type: 'Oval', inspiredBy: 'a wide running-track oval', tags: ['oval', 'athletics', 'two-tier', 'large'] },
+  },
 ];
 
 /** The full catalog. Order: built-ins first, then community, then custom. */

@@ -294,6 +294,26 @@ async function main(): Promise<void> {
   // Tifo assets (banners/flags/surfaces) live in a shared store so they persist
   // across opening/closing the simulator within a session.
   const assetStore = new AssetStore();
+  // Persist them locally too, so they survive a page reload (client-only and
+  // wrapped in try/catch — never touches the server save path; full per-design +
+  // server persistence is a later, test-gated step).
+  try {
+    const raw = localStorage.getItem('tifo_scene_v1');
+    if (raw) assetStore.loadJSON(JSON.parse(raw));
+  } catch {
+    /* ignore corrupt/unavailable storage */
+  }
+  let sceneSaveTimer = 0;
+  assetStore.onChange(() => {
+    window.clearTimeout(sceneSaveTimer);
+    sceneSaveTimer = window.setTimeout(() => {
+      try {
+        localStorage.setItem('tifo_scene_v1', JSON.stringify(assetStore.toJSON()));
+      } catch {
+        /* quota exceeded (large images) or storage off — assets stay for this session */
+      }
+    }, 500);
+  });
   const matchDayBtn = document.getElementById('match-day') as HTMLButtonElement | null;
   let simOpen = false;
   matchDayBtn?.addEventListener('click', async () => {

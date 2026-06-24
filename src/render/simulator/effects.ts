@@ -117,6 +117,25 @@ export function buildEffects(
     floodGroup.add(spot);
     floodGroup.add(spot.target);
     spots.push(spot);
+
+    // Visible volumetric-ish beam from the lamp toward the pitch (glows at night + bloom).
+    const beamLen = Math.hypot(x, 55, z);
+    const beamGeo = new THREE.ConeGeometry(30, beamLen, 20, 1, true);
+    const beamMat = new THREE.MeshBasicMaterial({
+      color: 0xfff0cf,
+      transparent: true,
+      opacity: 0.05,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    });
+    const beam = new THREE.Mesh(beamGeo, beamMat);
+    const lampPos = new THREE.Vector3(x, 55, z);
+    const dir = lampPos.clone().negate().normalize(); // lamp -> pitch centre
+    beam.position.copy(lampPos).addScaledVector(dir, beamLen / 2);
+    beam.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.clone().negate());
+    floodGroup.add(beam);
+    trash.push(beamGeo, beamMat);
   }
   scene.add(floodGroup);
 

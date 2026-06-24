@@ -91,6 +91,7 @@ interface SimState {
   reveal: RevealMode;
   tod: TimeOfDay;
   weather: Weather;
+  wet: boolean;
 }
 
 export function openMatchDaySimulator(
@@ -115,6 +116,7 @@ export function openMatchDaySimulator(
     reveal: 'wipe-lr',
     tod: 'dusk',
     weather: 'clear',
+    wet: false,
   };
 
   const overlay = document.createElement('div');
@@ -185,6 +187,7 @@ export function openMatchDaySimulator(
   const smoke = chk(state.smoke);
   const bannersChk = chk(state.banners);
   const flagsChk = chk(state.flags);
+  const wetChk = chk(state.wet);
   const confettiBtn = btn('Confetti');
   const pyroBtn = btn('Pyro');
   const secAtmo = section('🌇', 'Atmosphere', false);
@@ -197,6 +200,7 @@ export function openMatchDaySimulator(
     checkField('Smoke', smoke),
     checkField('Rail banners', bannersChk),
     checkField('Corner flags', flagsChk),
+    checkField('Wet pitch (reflections)', wetChk),
     row(confettiBtn, pyroBtn),
   );
 
@@ -307,6 +311,7 @@ export function openMatchDaySimulator(
     sim.setFlyover(state.fly);
     sim.setTimeOfDay(state.tod);
     sim.setWeather(state.weather);
+    sim.setWetPitch(state.wet);
     if (!state.fly) sim.applyShot(shots[state.camIdx] ?? shots[0]);
   }
   function mount(): void {
