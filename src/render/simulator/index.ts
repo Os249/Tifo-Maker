@@ -5,6 +5,12 @@ import type { DesignStore } from '../../core/design';
 import { CAMERA_PRESETS, type CameraPreset } from '../preview3d';
 import { type QualityTier, type QualitySettings, settingsFor, probeQuality } from './quality';
 import { buildStands } from './stands';
+import { buildCrowd, type CrowdController, type CrowdPreset } from './crowd';
+import { buildPitchside, type PitchsideController } from './pitchside';
+import { buildBanners, type BannerController } from './banners';
+import { buildEffects, type EffectsController } from './effects';
+import { SIM_SHOTS, seatShot, flyover, applyShot as applyCameraShot, type SimShot } from './cameras';
+import { revealVisibility, type RevealMode } from './choreo';
 
 /**
  * Match Day Stadium Simulator — Phase 0 core (the HIGH/ULTRA renderer).
@@ -60,6 +66,16 @@ export class MatchDaySimulator {
   private readonly onPaletteCb: () => void;
   readonly settings: QualitySettings;
 
+  // Phase 2-7 subsystems.
+  private readonly crowd: CrowdController;
+  private readonly pitchside: PitchsideController;
+  private readonly banners: BannerController;
+  private readonly effects: EffectsController;
+  private readonly clock = new THREE.Clock();
+  private elapsed = 0;
+  private flyActive = false;
+  private reveal: { mode: RevealMode; start: number; dur: number } | null = null;
+
   constructor(
     private readonly host: HTMLElement,
     private readonly map: SeatMap,
@@ -103,6 +119,15 @@ export class MatchDaySimulator {
     this.seats = this.buildSeats();
     this.scene.add(this.seats);
 
+    // Subsystems (Phases 2-7). Each is independently toggleable from the overlay.
+    this.crowd = buildCrowd(this.map, this.store);
+    this.scene.add(this.crowd.object);
+    this.pitchside = buildPitchside(this.settings.shadows);
+    this.scene.add(this.pitchside.object);
+    this.banners = buildBanners(this.map, this.store);
+    this.scene.add(this.banners.object);
+    this.effects = buildEffects(this.scene, this.renderer, this.camera, { bloom: this.settings.tier === 'ultra' });
+
     this.onDirtyCb = (indices): void => {
       if (this.disposed) return;
       if (indices === 'all') this.recolorAll();
@@ -124,7 +149,7 @@ export class MatchDaySimulator {
 
   // ---- colour (shared semantics with the editor preview) ----
   private rebuildPalette(): void {
-    this.paletteColors = this.store.palette.map((hex) => new THREE.Color(hex).convertSRGBToLinear());
+    this.paletteColors = this.store.palette.map((hex) => new THREE.Color(hex));
   }
   private colorFor(i: number): THREE.Color {
     const cell = this.store.cells[i];
@@ -234,6 +259,91 @@ export class MatchDaySimulator {
     this.controls.update();
   }
 
+  // ---- camera director (Phase 6) ----
+  shots(): SimShot[] {
+    return [...SIM_SHOTS, seatShot(this.map, 'crowd'), seatShot(this.map, 'ultra')];
+  }
+  applyShot(s: SimShot): void {
+    this.flyActive = false;
+    applyCameraShot(this.camera, this.controls, s);
+  }
+  setFlyover(on: boolean): void {
+    this.flyActive = on;
+  }
+
+  // ---- crowd (Phase 2) ----
+  setCrowdDensity(f: number): void {
+    this.crowd.setDensity(f);
+  }
+  setCrowdPreset(p: CrowdPreset): void {
+    this.crowd.setPreset(p);
+  }
+  setCrowdShowOnTifo(b: boolean): void {
+    this.crowd.setShowOnTifo(b);
+  }
+  setCrowdVisible(b: boolean): void {
+    this.crowd.object.visible = b;
+  }
+
+  // ---- pitch-side (Phase 3) ----
+  setPitchsideVisible(b: boolean): void {
+    this.pitchside.object.visible = b;
+  }
+
+  // ---- banners & flags (Phase 4) ----
+  setBannersVisible(b: boolean): void {
+    this.banners.setVisible(b);
+  }
+  setFlagsVisible(b: boolean): void {
+    this.banners.setFlagsVisible(b);
+  }
+
+  // ---- effects (Phase 5) ----
+  setFloodlights(b: boolean): void {
+    this.effects.setFloodlights(b);
+  }
+  setSmoke(b: boolean, color?: THREE.ColorRepresentation): void {
+    this.effects.setSmoke(b, color);
+  }
+  burstConfetti(): void {
+    this.effects.burstConfetti();
+  }
+  burstPyro(): void {
+    this.effects.burstPyro();
+  }
+
+  // ---- choreography reveal (Phase 7) ----
+  playReveal(mode: RevealMode, durationMs = 4500): void {
+    this.reveal = { mode, start: this.elapsed, dur: Math.max(0.5, durationMs / 1000) };
+  }
+  private stepReveal(): void {
+    if (!this.reveal) return;
+    const p = (this.elapsed - this.reveal.start) / this.reveal.dur;
+    if (p >= 1) {
+      this.applyReveal(null);
+      this.reveal = null;
+      return;
+    }
+    this.applyReveal(revealVisibility(this.map, this.reveal.mode, Math.max(0, p)));
+  }
+  private applyReveal(vis: ((seat: number) => number) | null): void {
+    if (!vis) {
+      this.recolorAll();
+      return;
+    }
+    const tmp = new THREE.Color();
+    for (let i = 0; i < this.map.count; i++) {
+      const full = this.colorFor(i);
+      const a = vis(i);
+      if (a >= 1) this.seats.setColorAt(i, full);
+      else {
+        tmp.copy(EMPTY_COLOR).lerp(full, a);
+        this.seats.setColorAt(i, tmp);
+      }
+    }
+    if (this.seats.instanceColor) this.seats.instanceColor.needsUpdate = true;
+  }
+
   private resize(): void {
     const w = this.host.clientWidth;
     const h = this.host.clientHeight;
@@ -241,16 +351,24 @@ export class MatchDaySimulator {
     this.renderer.setSize(w, h);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
+    this.effects.setSize(this.renderer, w, h);
   }
 
   start(): void {
     if (this.running || this.disposed) return;
     this.running = true;
     this.resize();
+    this.clock.start();
     const loop = (): void => {
       if (!this.running) return;
+      const dt = this.clock.getDelta();
+      this.elapsed += dt;
+      if (this.flyActive) applyCameraShot(this.camera, this.controls, flyover(this.elapsed));
+      this.banners.update(this.elapsed);
+      this.effects.update(dt);
+      if (this.reveal) this.stepReveal();
       this.controls.update();
-      this.renderer.render(this.scene, this.camera);
+      this.effects.render(this.renderer, this.scene, this.camera);
       requestAnimationFrame(loop);
     };
     requestAnimationFrame(loop);
@@ -277,6 +395,10 @@ export class MatchDaySimulator {
       if (Array.isArray(mat)) mat.forEach((m) => m.dispose());
       else if (mat) mat.dispose();
     });
+    this.crowd.dispose();
+    this.pitchside.dispose();
+    this.banners.dispose();
+    this.effects.dispose();
     for (const d of this.disposables) d.dispose();
     this.skyTex.dispose();
     this.renderer.dispose();
