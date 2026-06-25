@@ -54,7 +54,7 @@ const CSS = `
 .mds-input{cursor:text;}
 .mds-input[type=file]{font-size:11px;color:#aab2bd;padding:5px;cursor:pointer;}
 .mds-input[type=number]{width:80px;}
-.mds-panel{position:absolute;top:62px;left:14px;width:286px;max-height:calc(100vh - 84px);overflow-y:auto;background:rgba(13,17,23,.92);backdrop-filter:blur(12px);border:1px solid #242c37;border-radius:14px;padding:8px;display:flex;flex-direction:column;gap:7px;box-shadow:0 12px 44px rgba(0,0,0,.55);z-index:2;transition:transform .22s ease,opacity .22s;}
+.mds-panel{position:absolute;top:62px;bottom:14px;left:14px;width:286px;overflow-y:auto;overscroll-behavior:contain;background:rgba(13,17,23,.92);backdrop-filter:blur(12px);border:1px solid #242c37;border-radius:14px;padding:8px;display:flex;flex-direction:column;gap:7px;box-shadow:0 12px 44px rgba(0,0,0,.55);z-index:2;transition:transform .22s ease,opacity .22s;}
 .mds-panel.collapsed{transform:translateX(-310px);opacity:0;pointer-events:none;}
 .mds-panel::-webkit-scrollbar{width:8px;}
 .mds-panel::-webkit-scrollbar-thumb{background:#2c3742;border-radius:8px;}
@@ -108,7 +108,7 @@ export function openMatchDaySimulator(
     crowd: 'sellout',
     density: 0.97,
     showOnTifo: false,
-    banners: true,
+    banners: false,
     flags: true,
     floods: false,
     smoke: false,
@@ -211,7 +211,8 @@ export function openMatchDaySimulator(
   textInput.type = 'text';
   textInput.placeholder = 'ULTRAS';
   textInput.className = 'mds-input';
-  const addBannerBtn = btn('Banner');
+  const addBannerBtn = btn('Big banner');
+  const addSmallBtn = btn('Small banner');
   const addTextBtn = btn('Text');
   const addFloorBtn = btn('Floor');
   const addSurfaceBtn = btn('Surface');
@@ -225,22 +226,24 @@ export function openMatchDaySimulator(
   const yRange = rng(0, 60, 14);
   const unfurlBtn = btn('Unfurl');
   const printBtn = btn('Print panels');
-  const delBtn = btn('Delete');
+  const delBtn = btn('Delete selected');
+  const clearAllBtn = btn('Clear all');
   const secAssets = section('🎌', 'Tifo Assets', false);
   secAssets.body.append(
     field('Add to stand', standSel),
     field('Banner / surface text', textInput),
-    row(addBannerBtn, addTextBtn, addFloorBtn),
+    row(addBannerBtn, addSmallBtn),
+    row(addTextBtn, addFloorBtn),
     row(addSurfaceBtn, addFlagBtn, addScarfBtn),
     divider(),
-    field('Project image from this camera', projInput),
+    field('Paint design onto seats from this view (edits your tifo)', projInput),
     divider(),
     field('Selected asset', assetSel),
     field('Replace image', imgInput),
     field('Width', wRange),
     field('Height', hRange),
     field('Height off ground', yRange),
-    row(unfurlBtn, printBtn, delBtn),
+    row(unfurlBtn, printBtn, delBtn, clearAllBtn),
   );
 
   // Choreography
@@ -283,6 +286,46 @@ export function openMatchDaySimulator(
   document.body.appendChild(overlay);
   const prevOverflow = document.body.style.overflow;
   document.body.style.overflow = 'hidden';
+
+  // Hover tooltips on the non-obvious controls.
+  for (const [elT, t] of [
+    [panelToggle, 'Show or hide the controls panel'],
+    [snapBtn, 'Download a PNG of the current view'],
+    [fullBtn, 'Toggle fullscreen'],
+    [linkBtn, 'Copy a link that opens straight into the simulator'],
+    [flyBtn, 'Toggle a cinematic auto-orbit camera'],
+    [density, 'Fraction of seats with spectators'],
+    [todSel, 'Sky + lighting time of day'],
+    [weatherSel, 'Rain or snow'],
+    [expRange, 'Overall brightness'],
+    [sunRange, 'Sun / key light strength'],
+    [floods, 'Floodlight towers + light beams'],
+    [smoke, 'Drifting smoke'],
+    [wetChk, 'Reflective wet-look pitch (heavier on GPU)'],
+    [confettiBtn, 'Burst of confetti'],
+    [pyroBtn, 'Burst of pyro flares'],
+    [addBannerBtn, 'Big 3D banner that drapes the whole stand'],
+    [addSmallBtn, 'Small banner covering the dark front wall / infrastructure'],
+    [addTextBtn, 'Text banner using the text box above'],
+    [addFloorBtn, 'Banner laid flat on the pitch'],
+    [addSurfaceBtn, 'Giant draped surface tifo over the stand'],
+    [addFlagBtn, 'Huge waving flag over the crowd'],
+    [addScarfBtn, 'Waving scarf wall'],
+    [projInput, 'Paints your tifo onto the seats from this view — EDITS your design'],
+    [imgInput, 'Put a custom image on the selected asset'],
+    [unfurlBtn, 'Drop / unfurl the selected surface tifo'],
+    [printBtn, 'Print the selected image as tiled paper panels'],
+    [delBtn, 'Delete the selected asset'],
+    [clearAllBtn, 'Remove every asset you added'],
+    [autoBtn, 'Play a ready-made choreography show'],
+    [stopBtn, 'Stop the choreography'],
+    [revealBtn, 'Play the selected reveal animation'],
+    [addCueBtn, 'Add this cue to your sequence'],
+    [playSeqBtn, 'Play your built sequence (or auto choreo if empty)'],
+    [clearSeqBtn, 'Clear the sequence'],
+  ] as [HTMLElement, string][]) {
+    elT.title = t;
+  }
 
   // ---------- simulator instance + state ----------
   let sim: MatchDaySimulator;
@@ -390,6 +433,10 @@ export function openMatchDaySimulator(
     sim.addBanner(stand());
     refreshAssets();
   });
+  addSmallBtn.addEventListener('click', () => {
+    sim.addSmallBanner(stand());
+    refreshAssets();
+  });
   addTextBtn.addEventListener('click', () => {
     sim.addTextBanner(textInput.value.trim() || 'ULTRAS', stand());
     refreshAssets();
@@ -422,8 +469,13 @@ export function openMatchDaySimulator(
       if (typeof r.result !== 'string') return;
       const img = new Image();
       img.onload = () => {
+        if (!window.confirm('This PAINTS your tifo onto the seats as seen from this camera — it edits your actual design (undo with Ctrl+Z in the editor). Continue?')) {
+          projInput.value = '';
+          return;
+        }
         const n = sim.projectImageToMosaic(img);
         toast(n.toLocaleString() + ' seats painted');
+        projInput.value = '';
       };
       img.src = r.result;
     };
@@ -445,6 +497,10 @@ export function openMatchDaySimulator(
   yRange.addEventListener('input', () => sim.setSelectedY(Number(yRange.value)));
   delBtn.addEventListener('click', () => {
     sim.removeSelected();
+    refreshAssets();
+  });
+  clearAllBtn.addEventListener('click', () => {
+    assetStore.clear();
     refreshAssets();
   });
 

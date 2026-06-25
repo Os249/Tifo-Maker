@@ -382,10 +382,10 @@ export class MatchDaySimulator {
       const refl = new Reflector(new THREE.PlaneGeometry(105, 68), {
         textureWidth: 1024,
         textureHeight: 1024,
-        color: 0x152217,
+        color: 0x6b806b, // lighter so the reflection actually reads
       });
       refl.rotation.x = -Math.PI / 2;
-      refl.position.y = 0.05;
+      refl.position.y = 0.09; // sit above the pitch + mown stripes
       this.wetPitch = refl;
       this.scene.add(refl);
     }
@@ -434,16 +434,78 @@ export class MatchDaySimulator {
     return { position: { x, y, z }, rotationY: Math.atan2(-x, -z) };
   }
 
+  /** Centroid + extent of a whole stand (0 E,1 N,2 W,3 S), for sizing banners to it. */
+  private standExtent(stand: 0 | 1 | 2 | 3): {
+    cx: number; cy: number; cz: number; width: number; height: number; rotationY: number; frontY: number; dx: number; dz: number;
+  } {
+    let sx = 0;
+    let sy = 0;
+    let sz = 0;
+    let n = 0;
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minZ = Infinity;
+    let maxZ = -Infinity;
+    let minY = Infinity;
+    let maxY = -Infinity;
+    for (let i = 0; i < this.map.count; i++) {
+      if (Math.floor(((this.map.uv[i * 2] + 0.125) % 1) * 4) !== stand) continue;
+      const x = this.map.pos3[i * 3];
+      const y = this.map.pos3[i * 3 + 1];
+      const z = this.map.pos3[i * 3 + 2];
+      sx += x;
+      sy += y;
+      sz += z;
+      n++;
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (z < minZ) minZ = z;
+      if (z > maxZ) maxZ = z;
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
+    }
+    if (n === 0) return { cx: 0, cy: 12, cz: -60, width: 30, height: 16, rotationY: 0, frontY: 2, dx: 0, dz: 1 };
+    const cx = sx / n;
+    const cy = sy / n;
+    const cz = sz / n;
+    const len = Math.hypot(cx, cz) || 1;
+    return {
+      cx,
+      cy,
+      cz,
+      width: Math.hypot(maxX - minX, maxZ - minZ),
+      height: maxY - minY,
+      rotationY: Math.atan2(-cx, -cz),
+      frontY: minY,
+      dx: -cx / len,
+      dz: -cz / len,
+    };
+  }
+
+  /** Big 3D banner draping the stand's seating. */
   addBanner(stand: 0 | 1 | 2 | 3 = 1): void {
-    const a = this.standAnchor(stand);
-    this.assetStore.add('banner', { position: a.position, rotationY: a.rotationY, scale: { x: 18, y: 4, z: 1 } });
+    const e = this.standExtent(stand);
+    this.assetStore.add('banner', {
+      position: { x: e.cx + e.dx * 5, y: Math.max(6, e.cy), z: e.cz + e.dz * 5 },
+      rotationY: e.rotationY,
+      scale: { x: Math.max(10, e.width * 0.7), y: Math.max(8, e.height * 0.85), z: 1 },
+    });
+  }
+  /** Small banner covering the dark front-wall / infrastructure of a stand. */
+  addSmallBanner(stand: 0 | 1 | 2 | 3 = 1): void {
+    const e = this.standExtent(stand);
+    this.assetStore.add('banner', {
+      position: { x: e.cx + e.dx * 6, y: Math.max(2, e.frontY * 0.55 + 1), z: e.cz + e.dz * 6 },
+      rotationY: e.rotationY,
+      scale: { x: Math.max(10, e.width * 0.85), y: Math.max(2.5, e.frontY * 0.7), z: 1 },
+    });
   }
   addTextBanner(text: string, stand: 0 | 1 | 2 | 3 = 1): void {
-    const a = this.standAnchor(stand);
+    const e = this.standExtent(stand);
     this.assetStore.add('banner', {
-      position: { x: a.position.x, y: Math.max(2, a.position.y - 1), z: a.position.z },
-      rotationY: a.rotationY,
-      scale: { x: 22, y: 3, z: 1 },
+      position: { x: e.cx + e.dx * 5, y: Math.max(4, e.cy * 0.85), z: e.cz + e.dz * 5 },
+      rotationY: e.rotationY,
+      scale: { x: Math.max(12, e.width * 0.7), y: 4, z: 1 },
       text,
     });
   }

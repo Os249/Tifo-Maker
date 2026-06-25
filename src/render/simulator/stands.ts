@@ -127,11 +127,14 @@ export function buildStands(template: StadiumTemplate, shadows: boolean): THREE.
   // Outer skirt: back of the top tier down to the ground.
   add(strip(ring(a, b, p, topBackRadial, 0), ring(a, b, p, topBackRadial, topBackY)), structure, false, true);
 
-  // Cantilever roof ring over the top tier (partway over the seats, slight tilt up to the back).
-  const roofY = topBackY + 7;
-  const roofInner = ring(a, b, p, topBackRadial - (topBackRadial * 0) - 8, roofY); // 8 m in over the back rows
-  const roofOuter = ring(a, b, p, topBackRadial + 6, roofY + 1.5); // 6 m overhang outward
+  // Cantilever roof over the top tier, connected to the back wall by a vertical
+  // fascia so it reads as supported rather than floating in the air.
+  const roofY = topBackY + 4;
+  const roofInner = ring(a, b, p, topBackRadial - 16, roofY); // reaches in over the back rows
+  const roofOuter = ring(a, b, p, topBackRadial + 5, roofY);
   add(strip(roofInner, roofOuter), roofMat, true, false);
+  // Fascia: vertical web from the stand top edge up to the roof's outer lip.
+  add(strip(ring(a, b, p, topBackRadial + 5, topBackY), ring(a, b, p, topBackRadial + 5, roofY)), structure, false, true);
 
   // Avoid an unused-variable lint while keeping the running total documented.
   void rowsBefore;
