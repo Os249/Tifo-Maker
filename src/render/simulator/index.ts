@@ -1,6 +1,5 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { Reflector } from 'three/examples/jsm/objects/Reflector.js';
 import type { SeatMap, StadiumTemplate } from '../../core/types';
 import type { DesignStore } from '../../core/design';
 import { CAMERA_PRESETS, type CameraPreset } from '../preview3d';
@@ -90,7 +89,7 @@ export class MatchDaySimulator {
   private fill!: THREE.DirectionalLight;
   private readonly weather: WeatherController;
   private readonly surroundings: Surroundings;
-  private wetPitch: Reflector | null = null;
+  private pitchMat!: THREE.MeshStandardMaterial;
   private paletteColors: THREE.Color[] = [];
   private running = false;
   private disposed = false;
@@ -145,10 +144,13 @@ export class MatchDaySimulator {
     this.scene.background = this.skyTex;
     if (this.settings.fog) this.scene.fog = new THREE.Fog(SKIES.dusk.fog, 260, 620);
 
-    this.camera = new THREE.PerspectiveCamera(50, 1, 0.5, 2200);
+    this.camera = new THREE.PerspectiveCamera(50, 1, 0.5, 5000);
     this.controls = new OrbitControls(this.camera, this.canvas);
     this.controls.enableDamping = true;
     this.controls.maxPolarAngle = Math.PI / 2 - 0.02;
+    this.controls.minDistance = 2; // zoom right in
+    this.controls.maxDistance = 2500; // and far out past the skyline
+    this.controls.zoomSpeed = 1.2;
     this.applyPreset(CAMERA_PRESETS[0]);
 
     this.buildLights();
@@ -249,12 +251,12 @@ export class MatchDaySimulator {
 
     // Pitch (lit grass).
     const pitchGeo = new THREE.PlaneGeometry(105, 68);
-    const pitchMat = new THREE.MeshStandardMaterial({ color: 0x1f7a3a, roughness: 0.92, metalness: 0 });
-    const pitch = new THREE.Mesh(pitchGeo, pitchMat);
+    this.pitchMat = new THREE.MeshStandardMaterial({ color: 0x1f7a3a, roughness: 0.92, metalness: 0 });
+    const pitch = new THREE.Mesh(pitchGeo, this.pitchMat);
     pitch.rotation.x = -Math.PI / 2;
     pitch.receiveShadow = this.settings.shadows;
     this.scene.add(pitch);
-    this.disposables.push(pitchGeo, pitchMat);
+    this.disposables.push(pitchGeo, this.pitchMat);
 
     // Markings (unlit lines, like the editor preview).
     const lineMat = new THREE.LineBasicMaterial({ color: 0xe7eee7, transparent: true, opacity: 0.75 });
@@ -376,20 +378,13 @@ export class MatchDaySimulator {
   setSunIntensity(v: number): void {
     this.sun.intensity = v;
   }
-  /** Wet-look reflective pitch (a planar Reflector; lazily created, off by default). */
+  /** Wet-look pitch: drop the turf roughness so the sun + floodlights glint off it. */
   setWetPitch(on: boolean): void {
-    if (on && !this.wetPitch) {
-      const refl = new Reflector(new THREE.PlaneGeometry(105, 68), {
-        textureWidth: 1024,
-        textureHeight: 1024,
-        color: 0x6b806b, // lighter so the reflection actually reads
-      });
-      refl.rotation.x = -Math.PI / 2;
-      refl.position.y = 0.09; // sit above the pitch + mown stripes
-      this.wetPitch = refl;
-      this.scene.add(refl);
-    }
-    if (this.wetPitch) this.wetPitch.visible = on;
+    if (!this.pitchMat) return;
+    this.pitchMat.roughness = on ? 0.16 : 0.92;
+    this.pitchMat.metalness = on ? 0.3 : 0;
+    this.pitchMat.color.set(on ? 0x16331f : 0x1f7a3a);
+    this.pitchMat.needsUpdate = true;
   }
 
   /** Capture the current frame as a PNG data URL (Wave G — poster export). */
@@ -804,12 +799,6 @@ export class MatchDaySimulator {
     this.assetLayer.dispose();
     this.weather.dispose();
     this.surroundings.dispose();
-    if (this.wetPitch) {
-      this.scene.remove(this.wetPitch);
-      this.wetPitch.geometry.dispose();
-      (this.wetPitch.material as THREE.Material).dispose();
-      this.wetPitch.dispose();
-    }
     for (const d of this.disposables) d.dispose();
     this.skyTex.dispose();
     this.renderer.dispose();

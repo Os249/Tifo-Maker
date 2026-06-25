@@ -298,7 +298,7 @@ async function main(): Promise<void> {
   // wrapped in try/catch — never touches the server save path; full per-design +
   // server persistence is a later, test-gated step).
   try {
-    const raw = localStorage.getItem('tifo_scene_v1');
+    const raw = localStorage.getItem('tifo_scene_v2');
     if (raw) assetStore.loadJSON(JSON.parse(raw));
   } catch {
     /* ignore corrupt/unavailable storage */
@@ -308,7 +308,7 @@ async function main(): Promise<void> {
     window.clearTimeout(sceneSaveTimer);
     sceneSaveTimer = window.setTimeout(() => {
       try {
-        localStorage.setItem('tifo_scene_v1', JSON.stringify(assetStore.toJSON()));
+        localStorage.setItem('tifo_scene_v2', JSON.stringify(assetStore.toJSON()));
       } catch {
         /* quota exceeded (large images) or storage off — assets stay for this session */
       }
