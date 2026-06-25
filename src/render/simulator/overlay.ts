@@ -54,7 +54,7 @@ const CSS = `
 .mds-input{cursor:text;}
 .mds-input[type=file]{font-size:11px;color:#aab2bd;padding:5px;cursor:pointer;}
 .mds-input[type=number]{width:80px;}
-.mds-panel{position:absolute;top:62px;bottom:14px;left:14px;width:286px;overflow-y:auto;overscroll-behavior:contain;background:rgba(13,17,23,.92);backdrop-filter:blur(12px);border:1px solid #242c37;border-radius:14px;padding:8px;display:flex;flex-direction:column;gap:7px;box-shadow:0 12px 44px rgba(0,0,0,.55);z-index:2;transition:transform .22s ease,opacity .22s;}
+.mds-panel{position:absolute;top:62px;left:14px;width:286px;height:calc(100vh - 76px);overflow-y:auto;overscroll-behavior:contain;background:rgba(13,17,23,.92);backdrop-filter:blur(12px);border:1px solid #242c37;border-radius:14px;padding:8px;display:flex;flex-direction:column;gap:7px;box-shadow:0 12px 44px rgba(0,0,0,.55);z-index:2;transition:transform .22s ease,opacity .22s;}
 .mds-panel.collapsed{transform:translateX(-310px);opacity:0;pointer-events:none;}
 .mds-panel::-webkit-scrollbar{width:8px;}
 .mds-panel::-webkit-scrollbar-thumb{background:#2c3742;border-radius:8px;}
@@ -674,7 +674,13 @@ function section(icon: string, title: string, open: boolean): { root: HTMLElemen
   head.append(ico, t, chev);
   const body = document.createElement('div');
   body.className = 'mds-sbody';
-  head.addEventListener('click', () => root.classList.toggle('open'));
+  // Exclusive accordion: opening one section closes the rest, so the panel stays
+  // short and every control (incl. Delete / Clear) is reachable without a fight.
+  head.addEventListener('click', () => {
+    const wasOpen = root.classList.contains('open');
+    root.parentElement?.querySelectorAll('.mds-section').forEach((s) => s.classList.remove('open'));
+    if (!wasOpen) root.classList.add('open');
+  });
   root.append(head, body);
   return { root, body };
 }
