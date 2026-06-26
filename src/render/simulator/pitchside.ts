@@ -11,6 +11,7 @@ import * as THREE from 'three';
 
 export interface PitchsideController {
   readonly object: THREE.Object3D;
+  setWet(on: boolean): void;
   dispose(): void;
 }
 
@@ -88,6 +89,13 @@ export function buildPitchside(shadows: boolean): PitchsideController {
 
   return {
     object: group,
+    setWet(on) {
+      // The visible turf surface is these stripes, so the wet sheen must live here.
+      stripeMat.roughness = on ? 0.12 : 0.95;
+      stripeMat.metalness = on ? 0.5 : 0;
+      stripeMat.opacity = on ? 0.72 : 0.55;
+      stripeMat.needsUpdate = true;
+    },
     dispose() {
       for (const d of trash) d.dispose();
     },

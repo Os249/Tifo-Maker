@@ -7,6 +7,7 @@ import type { CrowdPreset } from './crowd';
 import type { AssetStore } from '../../core/sceneAssets';
 import type { Cue, EffectName } from './timeline';
 import type { Weather } from './weather';
+import { dbg } from './debug';
 
 /**
  * Fullscreen Match Day Simulator overlay — the lazy-loaded entry point.
@@ -74,7 +75,8 @@ const CSS = `
 .mds-checkrow{display:flex;align-items:center;gap:9px;font-size:12.5px;color:#cfd6df;cursor:pointer;}
 .mds-hint{font-size:11px;color:#6b7480;}
 input[type=range].mds-range{width:100%;accent-color:#3fb950;}
-input[type=checkbox].mds-check{accent-color:#3fb950;width:16px;height:16px;cursor:pointer;}
+input[type=checkbox].mds-check{accent-color:#3fb950;width:15px;height:15px;min-width:15px;margin:0;flex:0 0 auto;cursor:pointer;}
+.mds-checkrow{line-height:1.2;}
 `;
 
 interface SimState {
@@ -288,6 +290,19 @@ export function openMatchDaySimulator(
   const prevOverflow = document.body.style.overflow;
   document.body.style.overflow = 'hidden';
 
+  // Bulletproof panel scroll: drive it manually and stop the wheel reaching the
+  // editor's global zoom handler behind the overlay (which was eating the scroll).
+  panel.addEventListener(
+    'wheel',
+    (e) => {
+      panel.scrollTop += e.deltaY;
+      dbg('panel wheel d=' + e.deltaY + ' top=' + Math.round(panel.scrollTop) + '/' + (panel.scrollHeight - panel.clientHeight));
+      e.preventDefault();
+      e.stopPropagation();
+    },
+    { passive: false },
+  );
+
   // Hover tooltips on the non-obvious controls.
   for (const [elT, t] of [
     [panelToggle, 'Show or hide the controls panel'],
@@ -365,6 +380,7 @@ export function openMatchDaySimulator(
     sim.start();
   }
   mount();
+  dbg('panel @mount', { scrollHeight: panel.scrollHeight, clientHeight: panel.clientHeight, overflowing: panel.scrollHeight > panel.clientHeight });
 
   // ---------- wiring ----------
   panelToggle.addEventListener('click', () => panel.classList.toggle('collapsed'));
@@ -425,6 +441,11 @@ export function openMatchDaySimulator(
   flagsChk.addEventListener('change', () => {
     state.flags = flagsChk.checked;
     sim.setFlagsVisible(state.flags);
+  });
+  wetChk.addEventListener('change', () => {
+    state.wet = wetChk.checked;
+    dbg('wet toggle ->', state.wet, '(turn Floodlights on + Night to see it best)');
+    sim.setWetPitch(state.wet);
   });
   confettiBtn.addEventListener('click', () => sim.burstConfetti());
   pyroBtn.addEventListener('click', () => sim.burstPyro());
@@ -497,10 +518,12 @@ export function openMatchDaySimulator(
   hRange.addEventListener('input', applySize);
   yRange.addEventListener('input', () => sim.setSelectedY(Number(yRange.value)));
   delBtn.addEventListener('click', () => {
+    dbg('delete selected ->', sim.selectedAssetId, '(assets:', sim.listAssets().length + ')');
     sim.removeSelected();
     refreshAssets();
   });
   clearAllBtn.addEventListener('click', () => {
+    dbg('clear all assets, count was', sim.listAssets().length);
     assetStore.clear();
     refreshAssets();
   });

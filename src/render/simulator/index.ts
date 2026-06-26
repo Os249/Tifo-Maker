@@ -18,6 +18,7 @@ import { rasterize } from '../../core/importImage';
 import { printAssetPanels } from './printPanels';
 import { buildWeather, type WeatherController, type Weather } from './weather';
 import { buildSurroundings, type Surroundings } from './surroundings';
+import { dbg } from './debug';
 
 /**
  * Match Day Stadium Simulator — Phase 0 core (the HIGH/ULTRA renderer).
@@ -203,6 +204,7 @@ export class MatchDaySimulator {
     this.resizeObserver = new ResizeObserver(() => this.resize());
     this.resizeObserver.observe(host);
     this.resize();
+    dbg('mounted', { tier: this.settings.tier, seats: this.map.count, shadows: this.settings.shadows, fog: this.settings.fog });
   }
 
   // ---- colour (shared semantics with the editor preview) ----
@@ -421,10 +423,12 @@ export class MatchDaySimulator {
   /** Wet-look pitch: drop the turf roughness so the sun + floodlights glint off it. */
   setWetPitch(on: boolean): void {
     if (!this.pitchMat) return;
-    this.pitchMat.roughness = on ? 0.16 : 0.92;
-    this.pitchMat.metalness = on ? 0.3 : 0;
-    this.pitchMat.color.set(on ? 0x16331f : 0x1f7a3a);
+    this.pitchMat.roughness = on ? 0.1 : 0.92;
+    this.pitchMat.metalness = on ? 0.5 : 0;
+    this.pitchMat.color.set(on ? 0x123018 : 0x1f7a3a);
     this.pitchMat.needsUpdate = true;
+    this.pitchside.setWet(on); // the visible mown-stripe layer must go glossy too
+    dbg('setWetPitch', on, '-> pitch roughness', this.pitchMat.roughness, 'metalness', this.pitchMat.metalness);
   }
 
   /** Capture the current frame as a PNG data URL (Wave G — poster export). */
@@ -650,6 +654,7 @@ export class MatchDaySimulator {
     }
     this.store.commitStroke();
     this.store.flush(dirty);
+    dbg('projectImageToMosaic painted', dirty.length, 'seats from camera');
     return dirty.length;
   }
   selectAsset(id: string | null): void {
