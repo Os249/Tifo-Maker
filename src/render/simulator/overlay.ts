@@ -55,11 +55,11 @@ const CSS = `
 .mds-input{cursor:text;}
 .mds-input[type=file]{font-size:11px;color:#aab2bd;padding:5px;cursor:pointer;}
 .mds-input[type=number]{width:80px;}
-.mds-panel{position:absolute;top:62px;left:14px;width:286px;height:calc(100vh - 76px);overflow-y:auto;overscroll-behavior:contain;background:rgba(13,17,23,.92);backdrop-filter:blur(12px);border:1px solid #242c37;border-radius:14px;padding:8px;display:flex;flex-direction:column;gap:7px;box-shadow:0 12px 44px rgba(0,0,0,.55);z-index:2;transition:transform .22s ease,opacity .22s;}
+.mds-panel{position:absolute;top:62px;left:14px;width:286px;overflow-y:auto;overscroll-behavior:contain;background:rgba(13,17,23,.92);backdrop-filter:blur(12px);border:1px solid #242c37;border-radius:14px;padding:8px;display:block;box-shadow:0 12px 44px rgba(0,0,0,.55);z-index:2;transition:transform .22s ease,opacity .22s;}
 .mds-panel.collapsed{transform:translateX(-310px);opacity:0;pointer-events:none;}
 .mds-panel::-webkit-scrollbar{width:8px;}
 .mds-panel::-webkit-scrollbar-thumb{background:#2c3742;border-radius:8px;}
-.mds-section{border:1px solid #1e2630;border-radius:10px;overflow:hidden;background:#10151c;}
+.mds-section{border:1px solid #1e2630;border-radius:10px;overflow:hidden;background:#10151c;margin-bottom:7px;}
 .mds-shead{display:flex;align-items:center;gap:9px;width:100%;padding:11px 12px;background:#141a22;border:none;color:#e6e9ee;font:600 13px system-ui,sans-serif;cursor:pointer;text-align:left;}
 .mds-shead:hover{background:#1a212b;}
 .mds-shead .ico{font-size:15px;}
@@ -75,7 +75,10 @@ const CSS = `
 .mds-checkrow{display:flex;align-items:center;gap:9px;font-size:12.5px;color:#cfd6df;cursor:pointer;}
 .mds-hint{font-size:11px;color:#6b7480;}
 input[type=range].mds-range{width:100%;accent-color:#3fb950;}
-input[type=checkbox].mds-check{accent-color:#3fb950;width:15px;height:15px;min-width:15px;margin:0;flex:0 0 auto;cursor:pointer;}
+input[type=checkbox].mds-check{appearance:none;-webkit-appearance:none;width:16px;height:16px;min-width:16px;margin:0;flex:0 0 auto;cursor:pointer;border:1.5px solid #3a4554;border-radius:5px;background:#0d1117;display:grid;place-content:center;transition:background .15s,border-color .15s;}
+input[type=checkbox].mds-check::after{content:"";width:5px;height:9px;border:solid #fff;border-width:0 2px 2px 0;transform:rotate(45deg) scale(0);transition:transform .12s ease;margin-top:-1px;}
+input[type=checkbox].mds-check:checked{background:#3fb950;border-color:#3fb950;}
+input[type=checkbox].mds-check:checked::after{transform:rotate(45deg) scale(1);}
 .mds-checkrow{line-height:1.2;}
 `;
 
@@ -380,7 +383,14 @@ export function openMatchDaySimulator(
     sim.start();
   }
   mount();
-  dbg('panel @mount', { scrollHeight: panel.scrollHeight, clientHeight: panel.clientHeight, overflowing: panel.scrollHeight > panel.clientHeight });
+  // Bound the panel height in pixels (inline style beats any CSS) so overflow
+  // actually scrolls instead of the panel growing to fit its content.
+  const fitPanel = (): void => {
+    panel.style.height = Math.max(200, window.innerHeight - 76) + 'px';
+  };
+  fitPanel();
+  window.addEventListener('resize', fitPanel);
+  dbg('panel @mount client=' + panel.clientHeight + ' scroll=' + panel.scrollHeight + ' (open Tifo Assets, then scroll)');
 
   // ---------- wiring ----------
   panelToggle.addEventListener('click', () => panel.classList.toggle('collapsed'));
@@ -590,6 +600,7 @@ export function openMatchDaySimulator(
     closed = true;
     document.removeEventListener('keydown', onKey);
     document.removeEventListener('fullscreenchange', onFsChange);
+    window.removeEventListener('resize', fitPanel);
     if (document.fullscreenElement) void document.exitFullscreen();
     sim.dispose();
     document.body.style.overflow = prevOverflow;
