@@ -136,6 +136,7 @@ export function openMatchDaySimulator(
   const brand = document.createElement('div');
   brand.className = 'mds-brand';
   brand.innerHTML = '<span class="dot"></span>Match Day Simulator';
+  brand.title = 'Shortcuts: 1-9 camera views · H hide panel · F fullscreen · Space play show';
   const spacer = document.createElement('div');
   spacer.className = 'mds-spacer';
   const status = document.createElement('div');
@@ -573,7 +574,29 @@ export function openMatchDaySimulator(
     opts.onClose?.();
   };
   const onKey = (e: KeyboardEvent): void => {
-    if (e.key === 'Escape' && !document.fullscreenElement) close();
+    if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return; // don't hijack typing
+    if (e.key === 'Escape') {
+      if (!document.fullscreenElement) close();
+      return;
+    }
+    if (e.key >= '1' && e.key <= '9') {
+      const i = Number(e.key) - 1;
+      const shots = sim.shots();
+      if (shots[i]) {
+        state.camIdx = i;
+        state.fly = false;
+        flyBtn.classList.remove('active');
+        camSel.value = String(i);
+        sim.applyShot(shots[i]);
+      }
+    } else if (e.key === 'f' || e.key === 'F') {
+      fullBtn.click();
+    } else if (e.key === 'h' || e.key === 'H') {
+      panel.classList.toggle('collapsed');
+    } else if (e.key === ' ') {
+      e.preventDefault();
+      sim.playAutoChoreo();
+    }
   };
   closeBtn.addEventListener('click', close);
   document.addEventListener('keydown', onKey);

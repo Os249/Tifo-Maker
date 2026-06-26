@@ -114,6 +114,16 @@ export class MatchDaySimulator {
   private tlLoop = false;
   private lastCamName: string | null = null;
   private revealActiveLast = false;
+  private camTween: {
+    t0: number;
+    dur: number;
+    fromPos: THREE.Vector3;
+    toPos: THREE.Vector3;
+    fromTgt: THREE.Vector3;
+    toTgt: THREE.Vector3;
+    fromFov: number;
+    toFov: number;
+  } | null = null;
 
   constructor(
     private readonly host: HTMLElement,
@@ -312,12 +322,42 @@ export class MatchDaySimulator {
   shots(): SimShot[] {
     return [...SIM_SHOTS, seatShot(this.map, 'crowd'), seatShot(this.map, 'ultra')];
   }
+  /** Smoothly glide to a shot (eased), instead of snapping. */
   applyShot(s: SimShot): void {
     this.flyActive = false;
-    applyCameraShot(this.camera, this.controls, s);
+    this.camTween = {
+      t0: this.elapsed,
+      dur: 0.8,
+      fromPos: this.camera.position.clone(),
+      toPos: new THREE.Vector3(s.position[0], s.position[1], s.position[2]),
+      fromTgt: this.controls.target.clone(),
+      toTgt: new THREE.Vector3(s.target[0], s.target[1], s.target[2]),
+      fromFov: this.camera.fov,
+      toFov: s.fov,
+    };
+    this.controls.enabled = false;
+  }
+  private stepCamTween(): void {
+    const tw = this.camTween;
+    if (!tw) return;
+    let t = tw.dur > 0 ? (this.elapsed - tw.t0) / tw.dur : 1;
+    if (t > 1) t = 1;
+    const e = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2; // easeInOutQuad
+    this.camera.position.lerpVectors(tw.fromPos, tw.toPos, e);
+    this.controls.target.lerpVectors(tw.fromTgt, tw.toTgt, e);
+    this.camera.fov = tw.fromFov + (tw.toFov - tw.fromFov) * e;
+    this.camera.updateProjectionMatrix();
+    if (t >= 1) {
+      this.camTween = null;
+      this.controls.enabled = true;
+    }
   }
   setFlyover(on: boolean): void {
     this.flyActive = on;
+    if (on) {
+      this.camTween = null;
+      this.controls.enabled = true;
+    }
   }
 
   // ---- crowd (Phase 2) ----
@@ -640,6 +680,8 @@ export class MatchDaySimulator {
   playTimeline(tl: Timeline, loop = false): void {
     this.reveal = null;
     this.flyActive = false;
+    this.camTween = null;
+    this.controls.enabled = true;
     this.timeline = tl;
     this.tlStart = this.elapsed;
     this.tlPrev = 0;
@@ -764,6 +806,7 @@ export class MatchDaySimulator {
       this.weather.update(dt);
       if (this.reveal) this.stepReveal();
       if (this.timeline) this.stepTimeline();
+      if (this.camTween) this.stepCamTween();
       this.controls.update();
       this.effects.render(this.renderer, this.scene, this.camera);
       requestAnimationFrame(loop);
