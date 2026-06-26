@@ -20,6 +20,7 @@ import type { DesignStore } from '../../core/design';
 export interface BannerController {
   readonly object: THREE.Object3D;
   setVisible(b: boolean): void;
+  setStairsVisible(b: boolean): void;
   setFlagsVisible(b: boolean): void;
   update(elapsed: number): void;
   dispose(): void;
@@ -63,9 +64,11 @@ function bannerTexture(c1: string, c2: string): THREE.Texture {
 
 export function buildBanners(map: SeatMap, store: DesignStore): BannerController {
   const group = new THREE.Group(); // container, always visible
-  const bannerGroup = new THREE.Group(); // gap fillers, toggled by "Rail banners"
-  const flagGroup = new THREE.Group(); // corner flags, toggled by "Corner flags"
-  group.add(bannerGroup, flagGroup);
+  const bannerGroup = new THREE.Group(); // inter-tier walkway fill ("Rail banners")
+  const stairGroup = new THREE.Group(); // aisle / stair fill ("Cover stairs")
+  const flagGroup = new THREE.Group(); // corner flags ("Corner flags")
+  group.add(bannerGroup, stairGroup, flagGroup);
+  stairGroup.visible = false; // unorthodox — off by default
   const trash: { dispose(): void }[] = [];
 
   const c1 = store.palette[1] ?? '#b22234';
@@ -84,14 +87,17 @@ export function buildBanners(map: SeatMap, store: DesignStore): BannerController
   ];
 
   // ---- Gap-fill ribbons (vertex-coloured) -------------------------------
-  const positions: number[] = [];
-  const colors: number[] = [];
-  const quad = (
+  const wPos: number[] = []; // walkway (inter-tier) fill
+  const wCol: number[] = [];
+  const sPos: number[] = []; // stair (aisle) fill
+  const sCol: number[] = [];
+  const pushQuad = (
+    pos: number[], col: number[],
     A: number[], B: number[], C: number[], D: number[],
     ca: RGB, cb: RGB, cc: RGB, cd: RGB,
   ): void => {
-    positions.push(...A, ...B, ...C, ...A, ...C, ...D);
-    colors.push(...ca, ...cb, ...cc, ...ca, ...cc, ...cd);
+    pos.push(...A, ...B, ...C, ...A, ...C, ...D);
+    col.push(...ca, ...cb, ...cc, ...ca, ...cc, ...cd);
   };
 
   const tiers = Array.from(new Set(Array.from(map.tierOf))).sort((a, b) => a - b);
@@ -126,7 +132,7 @@ export function buildBanners(map: SeatMap, store: DesignStore): BannerController
         continue;
       }
       const cur = { Pb: P(bi, 0.3), Pf: P(fi, 0.3), cb: seatColor(bi), cf: seatColor(fi) };
-      if (prev) quad(prev.Pb, cur.Pb, cur.Pf, prev.Pf, prev.cb, cur.cb, cur.cf, prev.cf);
+      if (prev) pushQuad(wPos, wCol, prev.Pb, cur.Pb, cur.Pf, prev.Pf, prev.cb, cur.cb, cur.cf, prev.cf);
       prev = cur;
     }
   }
@@ -175,20 +181,23 @@ export function buildBanners(map: SeatMap, store: DesignStore): BannerController
           continue;
         }
         const cur = { L: P(li, 0.25), R: P(ri, 0.25), cL: seatColor(li), cR: seatColor(ri) };
-        if (prev) quad(prev.L, prev.R, cur.R, cur.L, prev.cL, prev.cR, cur.cR, cur.cL);
+        if (prev) pushQuad(sPos, sCol, prev.L, prev.R, cur.R, cur.L, prev.cL, prev.cR, cur.cR, cur.cL);
         prev = cur;
       }
     }
   }
 
-  if (positions.length) {
+  const buildFill = (pos: number[], col: number[], parent: THREE.Group): void => {
+    if (!pos.length) return;
     const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-    geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
     const mat = new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide });
-    bannerGroup.add(new THREE.Mesh(geo, mat));
+    parent.add(new THREE.Mesh(geo, mat));
     trash.push(geo, mat);
-  }
+  };
+  buildFill(wPos, wCol, bannerGroup);
+  buildFill(sPos, sCol, stairGroup);
 
   // ---- Corner flags on poles (one shared animated geometry) -------------
   let backTier = 0;
@@ -224,6 +233,9 @@ export function buildBanners(map: SeatMap, store: DesignStore): BannerController
     object: group,
     setVisible(b) {
       bannerGroup.visible = b;
+    },
+    setStairsVisible(b) {
+      stairGroup.visible = b;
     },
     setFlagsVisible(b) {
       flagGroup.visible = b;

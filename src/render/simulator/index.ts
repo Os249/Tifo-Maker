@@ -385,6 +385,9 @@ export class MatchDaySimulator {
   setBannersVisible(b: boolean): void {
     this.banners.setVisible(b);
   }
+  setStairsVisible(b: boolean): void {
+    this.banners.setStairsVisible(b);
+  }
   setFlagsVisible(b: boolean): void {
     this.banners.setFlagsVisible(b);
   }

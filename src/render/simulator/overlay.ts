@@ -89,6 +89,7 @@ interface SimState {
   density: number;
   showOnTifo: boolean;
   banners: boolean;
+  stairs: boolean;
   flags: boolean;
   floods: boolean;
   smoke: boolean;
@@ -114,6 +115,7 @@ export function openMatchDaySimulator(
     density: 0.97,
     showOnTifo: false,
     banners: false,
+    stairs: false,
     flags: true,
     floods: false,
     smoke: false,
@@ -192,6 +194,7 @@ export function openMatchDaySimulator(
   const floods = chk(state.floods);
   const smoke = chk(state.smoke);
   const bannersChk = chk(state.banners);
+  const stairsChk = chk(state.stairs);
   const flagsChk = chk(state.flags);
   const wetChk = chk(state.wet);
   const confettiBtn = btn('Confetti');
@@ -205,6 +208,7 @@ export function openMatchDaySimulator(
     checkField('Floodlights', floods),
     checkField('Smoke', smoke),
     checkField('Rail banners', bannersChk),
+    checkField('Cover stairs', stairsChk),
     checkField('Corner flags', flagsChk),
     checkField('Wet pitch (reflections)', wetChk),
     row(confettiBtn, pyroBtn),
@@ -320,6 +324,8 @@ export function openMatchDaySimulator(
     [sunRange, 'Sun / key light strength'],
     [floods, 'Floodlight towers + light beams'],
     [smoke, 'Drifting smoke'],
+    [bannersChk, 'Fill the dark walkway gap between tiers with your design'],
+    [stairsChk, 'Also fill the aisles / stairs between sections (unorthodox — off by default)'],
     [wetChk, 'Reflective wet-look pitch (heavier on GPU)'],
     [confettiBtn, 'Burst of confetti'],
     [pyroBtn, 'Burst of pyro flares'],
@@ -367,6 +373,7 @@ export function openMatchDaySimulator(
     sim.setCrowdDensity(state.density);
     sim.setCrowdShowOnTifo(state.showOnTifo);
     sim.setBannersVisible(state.banners);
+    sim.setStairsVisible(state.stairs);
     sim.setFlagsVisible(state.flags);
     sim.setFloodlights(state.floods);
     sim.setSmoke(state.smoke);
@@ -447,6 +454,11 @@ export function openMatchDaySimulator(
   bannersChk.addEventListener('change', () => {
     state.banners = bannersChk.checked;
     sim.setBannersVisible(state.banners);
+  });
+  stairsChk.addEventListener('change', () => {
+    state.stairs = stairsChk.checked;
+    dbg('cover stairs ->', state.stairs);
+    sim.setStairsVisible(state.stairs);
   });
   flagsChk.addEventListener('change', () => {
     state.flags = flagsChk.checked;
