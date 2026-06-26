@@ -351,6 +351,18 @@ input[type="checkbox"]:focus-visible { outline:none; box-shadow:var(--ring-focus
 .panel-section .group + .group { margin-top:12px; }
 .panel-section .group { flex-wrap:wrap; }
 
+/* ---- panel consistency helpers (standardise repeated inline styles) ---- */
+.panel-section .note { font-size:11px; color:var(--text-3); margin:0 0 8px; }
+.panel-section .note-sm { font-size:10px; color:var(--text-3); margin:0 0 6px; }
+.val { font-variant-numeric:tabular-nums; min-width:18px; }
+.grow { flex:1; }
+.grow0 { flex:1; min-width:0; }
+.ai-input {
+  width:100%; box-sizing:border-box; resize:vertical; font:inherit; padding:8px;
+  border:1px solid var(--line-1); border-radius:var(--r-md); background:var(--ink-2); color:var(--text-1);
+}
+.ai-input:focus-visible { outline:none; box-shadow:var(--ring-focus); }
+
 /* ---- status bar ---- */
 footer {
   height:26px; flex:0 0 26px; display:flex; align-items:center; gap:14px;
