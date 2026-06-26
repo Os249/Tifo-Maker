@@ -37,50 +37,91 @@ const CROWD_PRESETS: [CrowdPreset, string, number][] = [
 ];
 
 const CSS = `
-.mds-overlay{position:fixed;inset:0;z-index:10000;background:#05070a;display:flex;flex-direction:column;font:13px/1.4 system-ui,-apple-system,sans-serif;color:#e6e9ee;}
-.mds-bar{display:flex;align-items:center;gap:10px;padding:10px 16px;background:rgba(10,13,18,.92);backdrop-filter:blur(8px);border-bottom:1px solid #1c232c;flex:0 0 auto;z-index:3;}
+.mds-overlay{
+  --bg:#05070a;--surface:#0d1117;--surface-2:#10151c;--surface-3:#161b22;
+  --panel:rgba(13,17,23,.92);--bar:rgba(10,13,18,.92);--head:#141a22;--head-hover:#1a212b;
+  --elev:#1c232c;--elev-hover:#283340;
+  --border:#2c3742;--border-soft:#1e2630;--border-strong:#3a4554;
+  --text:#e6e9ee;--text-dim:#8a93a0;--text-faint:#6b7480;
+  --accent:#3fb950;--accent-hover:#4ad063;--accent-weak:#225338;--accent-ink:#06210f;--accent-soft:#7fcf96;
+  --r:8px;--r-lg:14px;--r-sm:5px;
+  --shadow:0 12px 44px rgba(0,0,0,.55);
+  --t-fast:.12s;--t-med:.22s;
+  --focus:0 0 0 2px rgba(63,185,80,.6);
+  position:fixed;inset:0;z-index:10000;background:var(--bg);display:flex;flex-direction:column;font:13px/1.4 system-ui,-apple-system,sans-serif;color:var(--text);}
+.mds-bar{display:flex;align-items:center;gap:10px;padding:10px 16px;background:var(--bar);backdrop-filter:blur(8px);border-bottom:1px solid var(--elev);flex:0 0 auto;z-index:3;}
 .mds-brand{font-weight:700;font-size:15px;letter-spacing:.2px;display:flex;align-items:center;gap:8px;}
-.mds-brand .dot{width:9px;height:9px;border-radius:50%;background:#3fb950;box-shadow:0 0 9px #3fb950;}
+.mds-brand .dot{width:9px;height:9px;border-radius:50%;background:var(--accent);box-shadow:0 0 9px var(--accent);}
 .mds-spacer{margin-left:auto;}
-.mds-status{font-size:12px;color:#7fcf96;min-width:6px;transition:opacity .3s;}
-.mds-bf{display:flex;align-items:center;gap:6px;font-size:12px;color:#8a93a0;}
-.mds-btn{font:13px system-ui,sans-serif;color:#e6e9ee;background:#1c232c;border:1px solid #2c3742;border-radius:8px;padding:7px 12px;cursor:pointer;transition:background .12s,border-color .12s,transform .05s;white-space:nowrap;}
-.mds-btn:hover{background:#283340;border-color:#3a4654;}
+.mds-status{font-size:12px;color:var(--accent-soft);min-width:6px;transition:opacity .3s;}
+.mds-bf{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-dim);}
+.mds-btn{font:13px system-ui,sans-serif;color:var(--text);background:var(--elev);border:1px solid var(--border);border-radius:var(--r);padding:7px 12px;cursor:pointer;transition:background var(--t-fast),border-color var(--t-fast),transform .05s,box-shadow var(--t-fast);white-space:nowrap;display:inline-flex;align-items:center;justify-content:center;gap:6px;}
+.mds-btn:hover{background:var(--elev-hover);border-color:var(--border-strong);}
 .mds-btn:active{transform:translateY(1px);}
-.mds-btn.active{background:#225338;border-color:#3fb950;color:#eafff0;}
-.mds-btn.primary{background:#3fb950;border-color:#3fb950;color:#06210f;font-weight:600;}
-.mds-btn.primary:hover{background:#4ad063;}
-.mds-icon{padding:7px 10px;font-size:14px;}
-.mds-sel,.mds-input{font:13px system-ui,sans-serif;color:#e6e9ee;background:#161b22;border:1px solid #2c3742;border-radius:8px;padding:6px 9px;cursor:pointer;width:100%;box-sizing:border-box;}
+.mds-btn.active{background:var(--accent-weak);border-color:var(--accent);color:#eafff0;}
+.mds-btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);font-weight:600;}
+.mds-btn.primary:hover{background:var(--accent-hover);}
+.mds-icon{padding:7px 10px;}
+.mds-icon svg{width:16px;height:16px;display:block;}
+.mds-sel,.mds-input{font:13px system-ui,sans-serif;color:var(--text);background:var(--surface-3);border:1px solid var(--border);border-radius:var(--r);padding:6px 9px;cursor:pointer;width:100%;box-sizing:border-box;transition:border-color var(--t-fast),box-shadow var(--t-fast);}
 .mds-input{cursor:text;}
 .mds-input[type=file]{font-size:11px;color:#aab2bd;padding:5px;cursor:pointer;}
 .mds-input[type=number]{width:80px;}
-.mds-panel{position:absolute;top:62px;left:14px;width:286px;overflow-y:auto;overscroll-behavior:contain;background:rgba(13,17,23,.92);backdrop-filter:blur(12px);border:1px solid #242c37;border-radius:14px;padding:8px;display:block;box-shadow:0 12px 44px rgba(0,0,0,.55);z-index:2;transition:transform .22s ease,opacity .22s;}
+.mds-panel{position:absolute;top:62px;left:14px;width:286px;overflow-y:auto;overscroll-behavior:contain;background:var(--panel);backdrop-filter:blur(12px);border:1px solid #242c37;border-radius:var(--r-lg);padding:8px;display:block;box-shadow:var(--shadow);z-index:2;transition:transform var(--t-med) ease,opacity var(--t-med);}
 .mds-panel.collapsed{transform:translateX(-310px);opacity:0;pointer-events:none;}
 .mds-panel::-webkit-scrollbar{width:8px;}
-.mds-panel::-webkit-scrollbar-thumb{background:#2c3742;border-radius:8px;}
-.mds-section{border:1px solid #1e2630;border-radius:10px;overflow:hidden;background:#10151c;margin-bottom:7px;}
-.mds-shead{display:flex;align-items:center;gap:9px;width:100%;padding:11px 12px;background:#141a22;border:none;color:#e6e9ee;font:600 13px system-ui,sans-serif;cursor:pointer;text-align:left;}
-.mds-shead:hover{background:#1a212b;}
-.mds-shead .ico{font-size:15px;}
-.mds-shead .chev{margin-left:auto;transition:transform .15s;color:#8a93a0;font-size:12px;}
+.mds-panel::-webkit-scrollbar-thumb{background:var(--border);border-radius:8px;}
+.mds-section{border:1px solid var(--border-soft);border-radius:10px;overflow:hidden;background:var(--surface-2);margin-bottom:7px;}
+.mds-shead{display:flex;align-items:center;gap:9px;width:100%;padding:11px 12px;background:var(--head);border:none;color:var(--text);font:600 13px system-ui,sans-serif;cursor:pointer;text-align:left;transition:background var(--t-fast);}
+.mds-shead:hover{background:var(--head-hover);}
+.mds-shead .ico{display:flex;align-items:center;color:var(--accent);}
+.mds-shead .ico svg{width:16px;height:16px;display:block;}
+.mds-shead .chev{margin-left:auto;display:flex;align-items:center;transition:transform .15s;color:var(--text-dim);}
+.mds-shead .chev svg{width:14px;height:14px;display:block;}
 .mds-section.open .chev{transform:rotate(90deg);}
 .mds-sbody{display:none;flex-direction:column;gap:11px;padding:13px 12px;}
 .mds-section.open .mds-sbody{display:flex;}
 .mds-field{display:flex;flex-direction:column;gap:5px;}
-.mds-flabel{font-size:11px;color:#8a93a0;}
+.mds-flabel{font-size:11px;color:var(--text-dim);}
 .mds-row{display:flex;flex-wrap:wrap;gap:6px;align-items:center;}
 .mds-row .mds-btn{flex:1 1 auto;text-align:center;}
-.mds-divider{height:1px;background:#1e2630;margin:1px 0;}
+.mds-divider{height:1px;background:var(--border-soft);margin:1px 0;}
 .mds-checkrow{display:flex;align-items:center;gap:9px;font-size:12.5px;line-height:1.3;color:#cfd6df;cursor:pointer;margin:0;}
-.mds-hint{font-size:11px;color:#6b7480;}
-input[type=range].mds-range{width:100%;accent-color:#3fb950;}
-input[type=checkbox].mds-check{appearance:none;-webkit-appearance:none;position:relative;width:16px;height:16px;min-width:16px;margin:0;flex:0 0 auto;cursor:pointer;border:1.5px solid #3a4554;border-radius:5px;background:#0d1117;transition:background .15s,border-color .15s;}
-input[type=checkbox].mds-check:checked{background:#3fb950;border-color:#3fb950;}
+.mds-hint{font-size:11px;color:var(--text-faint);}
+input[type=range].mds-range{width:100%;accent-color:var(--accent);}
+input[type=checkbox].mds-check{appearance:none;-webkit-appearance:none;position:relative;width:16px;height:16px;min-width:16px;margin:0;flex:0 0 auto;cursor:pointer;border:1.5px solid var(--border-strong);border-radius:var(--r-sm);background:var(--surface);transition:background .15s,border-color .15s;}
+input[type=checkbox].mds-check:checked{background:var(--accent);border-color:var(--accent);}
 input[type=checkbox].mds-check::after{content:"";position:absolute;left:4.5px;top:1.5px;width:4px;height:8px;border:solid #fff;border-width:0 2px 2px 0;transform:rotate(45deg) scale(0);transition:transform .12s ease;}
 input[type=checkbox].mds-check:checked::after{transform:rotate(45deg) scale(1);}
 .mds-checkrow span{flex:1;}
+.mds-help{position:absolute;inset:0;z-index:6;display:flex;align-items:center;justify-content:center;padding:16px;background:rgba(3,5,8,.55);backdrop-filter:blur(3px);opacity:0;pointer-events:none;transition:opacity var(--t-med);}
+.mds-help.show{opacity:1;pointer-events:auto;}
+.mds-help-card{width:min(440px,92vw);max-height:84vh;overflow-y:auto;background:var(--panel);border:1px solid var(--border);border-radius:var(--r-lg);box-shadow:var(--shadow);padding:22px;transform:translateY(8px) scale(.98);transition:transform var(--t-med);}
+.mds-help.show .mds-help-card{transform:none;}
+.mds-help-card h2{margin:0 0 4px;font-size:18px;}
+.mds-help-card .sub{margin:0 0 16px;color:var(--text-dim);font-size:13px;}
+.mds-help-grp{margin:0 0 14px;}
+.mds-help-grp h3{margin:0 0 6px;font-size:11px;text-transform:uppercase;letter-spacing:.6px;color:var(--accent);}
+.mds-kv{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:5px 0;border-bottom:1px solid var(--border-soft);font-size:13px;}
+.mds-kv:last-child{border-bottom:none;}
+.mds-kv .k{color:var(--text-dim);}
+.mds-key{display:inline-block;min-width:16px;text-align:center;padding:1px 6px;border:1px solid var(--border-strong);border-bottom-width:2px;border-radius:5px;background:var(--surface-3);font:600 11px ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--text);}
+.mds-help-actions{display:flex;justify-content:flex-end;margin-top:8px;}
+.mds-overlay :focus-visible{outline:none;box-shadow:var(--focus);border-color:var(--accent);}
+@media (prefers-reduced-motion: reduce){.mds-overlay *,.mds-overlay *::after{transition-duration:.01ms!important;animation-duration:.01ms!important;}}
 `;
+
+/** Inline line-icons (stroke = currentColor), sized via CSS. Replaces emoji. */
+const ICONS = {
+  menu: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg>',
+  chevron: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>',
+  camera: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="13" height="12" rx="2"/><path d="M15 10.5l6-3.5v10l-6-3.5Z"/></svg>',
+  crowd: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3"/><path d="M3.5 20a5.5 5.5 0 0 1 11 0"/><path d="M16 5.5a3 3 0 0 1 0 5.5"/><path d="M18.5 20a5.5 5.5 0 0 0-2.7-4.7"/></svg>',
+  atmosphere: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M19.1 4.9l-1.4 1.4M6.3 17.7l-1.4 1.4"/></svg>',
+  assets: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 21V4"/><path d="M5 4h12l-2.5 4L17 12H5"/></svg>',
+  choreo: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="8" width="18" height="12" rx="2"/><path d="M3 8l2.5-4h3.5L6.5 8M11 8l2.5-4H17l-2.5 4"/></svg>',
+  help: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9.2"/><path d="M9.3 9.2a2.7 2.7 0 1 1 3.9 2.5c-.8.4-1.2.9-1.2 1.8"/><path d="M12 17h.01"/></svg>',
+} as const;
 
 interface SimState {
   camIdx: number;
@@ -138,8 +179,10 @@ export function openMatchDaySimulator(
   // ---------- top bar ----------
   const bar = document.createElement('div');
   bar.className = 'mds-bar';
-  const panelToggle = btn('☰', 'mds-icon');
+  const panelToggle = btn('', 'mds-icon');
+  panelToggle.innerHTML = ICONS.menu;
   panelToggle.title = 'Show/hide controls';
+  panelToggle.setAttribute('aria-label', 'Show or hide controls');
   const brand = document.createElement('div');
   brand.className = 'mds-brand';
   brand.innerHTML = '<span class="dot"></span>Match Day Simulator';
@@ -153,8 +196,12 @@ export function openMatchDaySimulator(
   const snapBtn = btn('Snapshot');
   const fullBtn = btn('Fullscreen');
   const linkBtn = btn('Copy link');
+  const helpBtn = btn('', 'mds-icon');
+  helpBtn.innerHTML = ICONS.help;
+  helpBtn.title = 'Help & controls (?)';
+  helpBtn.setAttribute('aria-label', 'Help and controls');
   const closeBtn = btn('Close');
-  bar.append(panelToggle, brand, spacer, status, barField('Quality', qSel), snapBtn, fullBtn, linkBtn, closeBtn);
+  bar.append(panelToggle, brand, spacer, status, barField('Quality', qSel), snapBtn, fullBtn, linkBtn, helpBtn, closeBtn);
 
   let toastT = 0;
   const toast = (m: string): void => {
@@ -173,7 +220,7 @@ export function openMatchDaySimulator(
   // Camera & Views
   const camSel = sel();
   const flyBtn = btn('Cinematic flyover');
-  const secCam = section('🎥', 'Camera & Views', true);
+  const secCam = section(ICONS.camera, 'Camera & Views', true);
   secCam.body.append(field('View', camSel), flyBtn);
 
   // Crowd
@@ -181,7 +228,7 @@ export function openMatchDaySimulator(
   for (const [id, label] of CROWD_PRESETS) opt(crowdSel, id, label, id === state.crowd);
   const density = rng(0, 100, Math.round(state.density * 100));
   const onTifo = chk(state.showOnTifo);
-  const secCrowd = section('👥', 'Crowd', false);
+  const secCrowd = section(ICONS.crowd, 'Crowd', false);
   secCrowd.body.append(field('Stadium fill', crowdSel), field('Density', density), checkField('Show crowd on tifo seats', onTifo));
 
   // Atmosphere
@@ -199,7 +246,7 @@ export function openMatchDaySimulator(
   const wetChk = chk(state.wet);
   const confettiBtn = btn('Confetti');
   const pyroBtn = btn('Pyro');
-  const secAtmo = section('🌇', 'Atmosphere', false);
+  const secAtmo = section(ICONS.atmosphere, 'Atmosphere', false);
   secAtmo.body.append(
     field('Time of day', todSel),
     field('Weather', weatherSel),
@@ -238,7 +285,7 @@ export function openMatchDaySimulator(
   const printBtn = btn('Print panels');
   const delBtn = btn('Delete selected');
   const clearAllBtn = btn('Clear all');
-  const secAssets = section('🎌', 'Tifo Assets', false);
+  const secAssets = section(ICONS.assets, 'Tifo Assets', false);
   secAssets.body.append(
     field('Add to stand', standSel),
     field('Banner / surface text', textInput),
@@ -277,7 +324,7 @@ export function openMatchDaySimulator(
   const cueCount = document.createElement('div');
   cueCount.className = 'mds-hint';
   cueCount.textContent = '0 cues';
-  const secChoreo = section('🎬', 'Choreography', false);
+  const secChoreo = section(ICONS.choreo, 'Choreography', false);
   secChoreo.body.append(
     row(autoBtn, stopBtn),
     divider(),
@@ -296,6 +343,60 @@ export function openMatchDaySimulator(
   document.body.appendChild(overlay);
   const prevOverflow = document.body.style.overflow;
   document.body.style.overflow = 'hidden';
+
+  // ---------- onboarding / help ----------
+  const help = document.createElement('div');
+  help.className = 'mds-help';
+  help.setAttribute('role', 'dialog');
+  help.setAttribute('aria-modal', 'true');
+  help.setAttribute('aria-label', 'Match Day Simulator help');
+  const helpCard = document.createElement('div');
+  helpCard.className = 'mds-help-card';
+  const kv = (k: string, v: string): string => '<div class="mds-kv"><span class="k">' + k + '</span><span>' + v + '</span></div>';
+  const key = (s: string): string => '<span class="mds-key">' + s + '</span>';
+  helpCard.innerHTML =
+    '<h2>Match Day Simulator</h2>' +
+    '<p class="sub">See your tifo come alive in a packed 3D stadium.</p>' +
+    '<div class="mds-help-grp"><h3>Move the camera</h3>' +
+    kv('Look around', 'Drag') + kv('Zoom', 'Scroll / pinch') + kv('Pan', 'Right-drag') + '</div>' +
+    '<div class="mds-help-grp"><h3>Shortcuts</h3>' +
+    kv('Camera views', key('1') + ' to ' + key('9')) +
+    kv('Play the reveal', key('Space')) +
+    kv('Fullscreen', key('F')) +
+    kv('Hide panel', key('H')) +
+    kv('Help', key('?')) +
+    kv('Close', key('Esc')) +
+    '</div>' +
+    '<div class="mds-help-grp"><h3>Make it yours</h3>' +
+    kv('Banners and flags', 'Tifo Assets') +
+    kv('Time, weather, effects', 'Atmosphere') +
+    kv('Auto choreography', 'Choreography') +
+    '</div>';
+  const gotBtn = btn('Got it', 'primary');
+  const helpActions = document.createElement('div');
+  helpActions.className = 'mds-help-actions';
+  helpActions.append(gotBtn);
+  helpCard.append(helpActions);
+  help.append(helpCard);
+  overlay.append(help);
+
+  const showHelp = (): void => help.classList.add('show');
+  const hideHelp = (): void => help.classList.remove('show');
+  const helpOpen = (): boolean => help.classList.contains('show');
+  helpBtn.addEventListener('click', () => (helpOpen() ? hideHelp() : showHelp()));
+  gotBtn.addEventListener('click', hideHelp);
+  help.addEventListener('click', (e) => {
+    if (e.target === help) hideHelp();
+  });
+  // Greet first-time visitors once.
+  try {
+    if (!localStorage.getItem('mds_seen_intro')) {
+      showHelp();
+      localStorage.setItem('mds_seen_intro', '1');
+    }
+  } catch {
+    /* storage blocked — skip the intro */
+  }
 
   // Bulletproof panel scroll: drive it manually and stop the wheel reaching the
   // editor's global zoom handler behind the overlay (which was eating the scroll).
@@ -622,7 +723,13 @@ export function openMatchDaySimulator(
   const onKey = (e: KeyboardEvent): void => {
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return; // don't hijack typing
     if (e.key === 'Escape') {
-      if (!document.fullscreenElement) close();
+      if (helpOpen()) hideHelp();
+      else if (!document.fullscreenElement) close();
+      return;
+    }
+    if (e.key === '?') {
+      if (helpOpen()) hideHelp();
+      else showHelp();
       return;
     }
     if (e.key >= '1' && e.key <= '9') {
@@ -653,6 +760,7 @@ export function openMatchDaySimulator(
 // ---------- DOM helpers ----------
 function btn(label: string, cls = ''): HTMLButtonElement {
   const b = document.createElement('button');
+  b.type = 'button';
   b.textContent = label;
   b.className = 'mds-btn' + (cls ? ' ' + cls : '');
   return b;
@@ -733,15 +841,17 @@ function section(icon: string, title: string, open: boolean): { root: HTMLElemen
   const root = document.createElement('div');
   root.className = 'mds-section' + (open ? ' open' : '');
   const head = document.createElement('button');
+  head.type = 'button';
   head.className = 'mds-shead';
+  head.setAttribute('aria-expanded', String(open));
   const ico = document.createElement('span');
   ico.className = 'ico';
-  ico.textContent = icon;
+  ico.innerHTML = icon;
   const t = document.createElement('span');
   t.textContent = title;
   const chev = document.createElement('span');
   chev.className = 'chev';
-  chev.textContent = '›';
+  chev.innerHTML = ICONS.chevron;
   head.append(ico, t, chev);
   const body = document.createElement('div');
   body.className = 'mds-sbody';
@@ -749,8 +859,14 @@ function section(icon: string, title: string, open: boolean): { root: HTMLElemen
   // short and every control (incl. Delete / Clear) is reachable without a fight.
   head.addEventListener('click', () => {
     const wasOpen = root.classList.contains('open');
-    root.parentElement?.querySelectorAll('.mds-section').forEach((s) => s.classList.remove('open'));
-    if (!wasOpen) root.classList.add('open');
+    root.parentElement?.querySelectorAll('.mds-section').forEach((s) => {
+      s.classList.remove('open');
+      s.querySelector('.mds-shead')?.setAttribute('aria-expanded', 'false');
+    });
+    if (!wasOpen) {
+      root.classList.add('open');
+      head.setAttribute('aria-expanded', 'true');
+    }
   });
   root.append(head, body);
   return { root, body };
