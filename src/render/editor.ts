@@ -162,6 +162,20 @@ export class Editor {
     this.onSelectionChange?.(this.selectedRegion.size);
   }
 
+  /** Box-select every seat whose centre falls inside the world-space rectangle.
+   * Powers the Select tool's drag-a-box gesture (any area, regardless of colour). */
+  selectRegionInRect(minX: number, minY: number, maxX: number, maxY: number, add = false): void {
+    if (!add) this.selectedRegion.clear();
+    const xy = this.map.xy;
+    for (let i = 0; i < this.map.count; i++) {
+      const x = xy[i * 2];
+      const y = xy[i * 2 + 1];
+      if (x >= minX && x <= maxX && y >= minY && y <= maxY) this.selectedRegion.add(i);
+    }
+    this.repaintAll();
+    this.onSelectionChange?.(this.selectedRegion.size);
+  }
+
   clearSelection(): void {
     if (this.selectedRegion.size === 0) return;
     this.selectedRegion.clear();
@@ -428,6 +442,18 @@ export class Editor {
     const canvas = this.app.canvas;
     canvas.style.touchAction = 'none';
 
+    // Box (marquee) selection state for the Select tool, shared by the pointer
+    // handlers below. A plain click (no drag) falls back to magic-wand select.
+    let marqEl: HTMLDivElement | null = null;
+    let marq: { sx: number; sy: number; wx: number; wy: number; ewx: number; ewy: number; ex: number; ey: number; add: boolean } | null = null;
+    const clearMarquee = (): void => {
+      if (marqEl) {
+        marqEl.remove();
+        marqEl = null;
+      }
+      marq = null;
+    };
+
     canvas.addEventListener('pointerdown', (e) => {
       canvas.setPointerCapture(e.pointerId);
       const [wx, wy] = this.toWorld(e);
@@ -443,10 +469,10 @@ export class Editor {
           this.clearSelection();
           this.objectOverlay.beginDrag(hit.id, hit.onHandle, wx, wy);
         } else {
-          // No live object here → magic-wand select the painted region. Shift
-          // adds to the current selection. Scope follows the fill scope setting.
+          // Begin a box-select. If the pointer doesn't move, end() falls back to
+          // magic-wand. Shift adds to the current selection.
           this.objectOverlay.selectAt(null);
-          this.selectRegionAt(wx, wy, this.fillScope, e.shiftKey);
+          marq = { sx: e.clientX, sy: e.clientY, wx, wy, ewx: wx, ewy: wy, ex: e.clientX, ey: e.clientY, add: e.shiftKey };
         }
         return;
       }
@@ -495,6 +521,24 @@ export class Editor {
         if (r && this.onObjectResize) this.onObjectResize(r.resizedToHeight);
         return;
       }
+      if (marq) {
+        marq.ex = e.clientX;
+        marq.ey = e.clientY;
+        const [mwx, mwy] = this.toWorld(e);
+        marq.ewx = mwx;
+        marq.ewy = mwy;
+        if (!marqEl) {
+          marqEl = document.createElement('div');
+          marqEl.style.cssText =
+            'position:fixed;border:1.5px dashed var(--violet);background:rgba(139,124,255,.14);z-index:50;pointer-events:none;border-radius:2px;';
+          document.body.appendChild(marqEl);
+        }
+        marqEl.style.left = Math.min(marq.sx, e.clientX) + 'px';
+        marqEl.style.top = Math.min(marq.sy, e.clientY) + 'px';
+        marqEl.style.width = Math.abs(e.clientX - marq.sx) + 'px';
+        marqEl.style.height = Math.abs(e.clientY - marq.sy) + 'px';
+        return;
+      }
       if ((this.tool === 'text' || this.tool === 'import' || this.tool === 'shape') && this.stampPreview) {
         const [tx, ty] = this.toWorld(e);
         this.stampPreview.position.set(tx - this.stampPreviewW / 2, ty - this.stampPreviewH / 2);
@@ -520,6 +564,22 @@ export class Editor {
     const end = () => {
       if (this.painting) this.store.commitStroke();
       if (this.objectOverlay?.isDragging) this.objectOverlay.endDrag();
+      if (marq) {
+        const moved = Math.abs(marq.ex - marq.sx) > 4 || Math.abs(marq.ey - marq.sy) > 4;
+        if (moved) {
+          this.selectRegionInRect(
+            Math.min(marq.wx, marq.ewx),
+            Math.min(marq.wy, marq.ewy),
+            Math.max(marq.wx, marq.ewx),
+            Math.max(marq.wy, marq.ewy),
+            marq.add,
+          );
+        } else {
+          // No drag → behave like the old magic-wand click.
+          this.selectRegionAt(marq.wx, marq.wy, this.fillScope, marq.add);
+        }
+        clearMarquee();
+      }
       this.painting = false;
       this.panning = false;
     };

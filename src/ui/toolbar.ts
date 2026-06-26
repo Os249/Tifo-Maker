@@ -800,8 +800,9 @@ export function mountToolbar(
       shape: kind,
     });
     editor.objectOverlay?.sync();
-    setTool('select');
-    message.textContent = `${kind} added — drag to position, resize from the corner, then Bake`;
+    // Stay in the shape tool so multiple shapes can be dropped in a row, then
+    // committed together with "Bake all". Switch to Select to fine-tune any one.
+    message.textContent = `${kind} added — click to drop more, then “Bake all”. Switch to Select to move/resize.`;
   };
 
   // One shared placement-click callback, dispatched by the active mode.

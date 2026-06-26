@@ -8,7 +8,7 @@
  * so the tour never blocks the UI even if the DOM changes.
  */
 
-const TOUR_FLAG = 'tifo_tour_v1';
+const TOUR_FLAG = 'tifo_tour_v2';
 
 export function hasSeenTour(): boolean {
   try {
@@ -36,7 +36,7 @@ const STEPS: TourStep[] = [
   {
     selector: '.tool-rail',
     title: 'Your tools',
-    body: 'Brush to paint seats, Fill to flood an area, Eraser to clear, Text and Image to add a logo or words, and Select to move things. Hover any tool for its shortcut key.',
+    body: 'Brush, Fill and Eraser paint the seats; Text and Image add words or a logo. Shapes drops crests, stars and more — add as many as you like, then “Bake all”. Select now lets you drag a box around any area to recolour or clear it. Hover any tool for its shortcut.',
     place: 'right',
   },
   {
@@ -44,6 +44,18 @@ const STEPS: TourStep[] = [
     title: 'Your colors',
     body: 'This is your active paint color. Click it to change it, hit “+ Color” to add any color to your palette, then click a swatch to paint with it.',
     place: 'left',
+  },
+  {
+    selector: '#rail-ai',
+    title: 'AI Designer',
+    body: 'Describe a display in plain words and the AI paints a fully editable tifo on the seats. “Super AI” designs the whole bowl at once; “Shuffle” gives instant free variations — no tokens needed.',
+    place: 'right',
+  },
+  {
+    selector: '#rail-stadium',
+    title: 'Choose your stadium',
+    body: 'Pick the stadium your tifo is for and set the active area. Switching stadiums remaps your design onto the new bowl, so a display can be reused anywhere.',
+    place: 'right',
   },
   {
     selector: '#view-2d',
@@ -54,7 +66,7 @@ const STEPS: TourStep[] = [
   {
     selector: '#view-3d',
     title: 'Stadium view',
-    body: 'Switch here to see your design wrap around the real 3D stadium bowl — exactly what the crowd will see when every card goes up.',
+    body: 'See your design wrap around the real 3D bowl — and open the Match Day Simulator for a packed, cinematic night-match view with crowds, flags, smoke and choreography.',
     place: 'bottom',
   },
   {
@@ -65,8 +77,8 @@ const STEPS: TourStep[] = [
   },
   {
     selector: '#save',
-    title: 'Save & share',
-    body: 'Save your project to your account, publish it to the community, or export match-day instructions and a fan QR code from here.',
+    title: 'Save, share & produce',
+    body: 'Save to your account, publish to the community, or export match-day logistics — a distribution PDF, seat manifest and a fan QR code — from here.',
     place: 'top',
   },
   {
