@@ -423,6 +423,7 @@ body.zen .tool-rail, body.zen .panel, body.zen footer, body.zen .tool-bar { disp
 .section-cell:hover { border-color:var(--violet); color:var(--text-1); }
 
 /* ---- tablet (768-1099px): editor with slide-over panel, bigger touch targets ---- */
+.panel-scrim { display:none; }
 @media (max-width: 1099px) {
   .tool { width:42px; height:42px; }
   .tool-rail { width:54px; flex-basis:54px; }
@@ -432,6 +433,13 @@ body.zen .tool-rail, body.zen .panel, body.zen footer, body.zen .tool-bar { disp
     box-shadow:-8px 0 24px rgba(0,0,0,.4);
   }
   .panel.open { transform:translateX(0); }
+  /* tap-to-dismiss scrim behind the slide-over so taps don't reach the canvas */
+  .panel-scrim { display:block; position:absolute; inset:0; z-index:19; background:rgba(4,6,12,.5); opacity:0; pointer-events:none; transition:opacity .18s ease; }
+  .panel-scrim.show { opacity:1; pointer-events:auto; }
+  /* keep dense tool-bars on one scrollable row instead of stacking tall */
+  .tool-bar { flex-wrap:nowrap; overflow-x:auto; }
+  /* comfortable 44px touch targets in the panel */
+  .panel button, .panel select, .panel .chip { min-height:44px; }
   .panel-fab {
     position:absolute; right:12px; top:60px; z-index:15;
     width:44px; height:44px; border-radius:50%;

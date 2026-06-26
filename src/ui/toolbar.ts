@@ -492,16 +492,30 @@ export function mountToolbar(
     const scale = (Number(textSize.value) * EDITOR_UNITS.rowPx) / previewRendered.glyphHeight;
     editor.setStampPreviewSize(previewRendered.canvas.width * scale, previewRendered.canvas.height * scale);
   };
+  // Coalesce rapid slider/typing updates into one render per animation frame so
+  // dragging stays smooth on large seat maps (value labels still update instantly).
+  const rafThrottle = (fn: () => void): (() => void) => {
+    let scheduled = false;
+    return () => {
+      if (scheduled) return;
+      scheduled = true;
+      requestAnimationFrame(() => {
+        scheduled = false;
+        fn();
+      });
+    };
+  };
   const rebuildTextPreview = (): void => {
     previewRendered = renderTextCanvas(textInput.value, currentFontCss(), Number(textArc.value));
     editor.setStampPreview(previewRendered?.canvas ?? null, true);
     updateTextPreviewSize();
   };
-  textInput.addEventListener('input', rebuildTextPreview);
+  const rebuildTextPreviewT = rafThrottle(rebuildTextPreview);
+  textInput.addEventListener('input', rebuildTextPreviewT);
   textFont.addEventListener('change', rebuildTextPreview);
   textArc.addEventListener('input', () => {
     textArcOut.textContent = textArc.value;
-    rebuildTextPreview();
+    rebuildTextPreviewT();
   });
   textSize.addEventListener('input', () => {
     textSizeOut.textContent = textSize.value;
@@ -732,7 +746,7 @@ export function mountToolbar(
       message.textContent = `image load failed: ${(err as Error).message}`;
     }
   });
-  importWidth.addEventListener('input', refreshImportUI);
+  importWidth.addEventListener('input', rafThrottle(refreshImportUI));
   importTier.addEventListener('change', refreshImportUI);
   importPlace.addEventListener('change', refreshImportUI);
   importAlpha.addEventListener('input', () => {
@@ -767,10 +781,11 @@ export function mountToolbar(
     editor.setStampPreview(renderShapeCanvas(kind), true); // tints to the active swatch
     editor.setStampPreviewSize(h * shapeAspect(kind), h);
   };
+  const refreshShapePreviewT = rafThrottle(refreshShapePreview);
   shapeKind.addEventListener('change', refreshShapePreview);
   shapeSize.addEventListener('input', () => {
     shapeSizeOut.textContent = shapeSize.value;
-    refreshShapePreview();
+    refreshShapePreviewT();
   });
   const placeShapeAt = (x: number, y: number): void => {
     const kind = shapeKind.value;
@@ -897,6 +912,7 @@ export function mountToolbar(
     if (!avatarMenu) return;
     const show = force ?? avatarMenu.hidden;
     avatarMenu.hidden = !show;
+    avatarEl?.setAttribute('aria-expanded', String(show));
   }
   avatarEl?.addEventListener('click', (e) => {
     e.stopPropagation();
@@ -915,6 +931,27 @@ export function mountToolbar(
     if (avatarMenu && !avatarMenu.hidden) {
       const wrap = (e.target as HTMLElement).closest('.avatar-wrap');
       if (!wrap) toggleAvatarMenu(false);
+    }
+  });
+  // Accessibility: make the avatar a real, keyboard-operable menu button.
+  if (avatarEl) {
+    avatarEl.setAttribute('role', 'button');
+    avatarEl.setAttribute('tabindex', '0');
+    avatarEl.setAttribute('aria-haspopup', 'menu');
+    avatarEl.setAttribute('aria-expanded', 'false');
+    avatarEl.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        avatarEl.click();
+      }
+    });
+  }
+  avatarMenu?.setAttribute('role', 'menu');
+  // Esc closes the avatar menu and returns focus to the avatar.
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && avatarMenu && !avatarMenu.hidden) {
+      toggleAvatarMenu(false);
+      avatarEl?.focus();
     }
   });
   document.getElementById('menu-profile')?.addEventListener('click', async () => {
@@ -1214,10 +1251,19 @@ export function mountToolbar(
 
   // Panel collapse and zen mode.
   const panel = $('#panel');
+  // Backdrop for the tablet slide-over: dims the canvas and taps to dismiss.
+  const panelScrim = document.createElement('div');
+  panelScrim.className = 'panel-scrim';
+  document.querySelector('.workspace')?.appendChild(panelScrim);
+  const closeSlideOver = (): void => {
+    panel.classList.remove('open');
+    panelScrim.classList.remove('show');
+  };
+  panelScrim.addEventListener('click', closeSlideOver);
   $('#panel-toggle').addEventListener('click', () => {
     // On tablet the panel is a slide-over (.open); on desktop it collapses (.collapsed).
     if (window.matchMedia('(max-width: 1099px)').matches) {
-      panel.classList.remove('open');
+      closeSlideOver();
     } else {
       panel.classList.toggle('collapsed');
       requestAnimationFrame(() => {
@@ -1232,7 +1278,10 @@ export function mountToolbar(
   fab.className = 'panel-fab';
   fab.setAttribute('aria-label', 'Properties');
   fab.innerHTML = '<i class="ti ti-adjustments"></i>';
-  fab.addEventListener('click', () => panel.classList.toggle('open'));
+  fab.addEventListener('click', () => {
+    const open = panel.classList.toggle('open');
+    panelScrim.classList.toggle('show', open);
+  });
   document.querySelector('.workspace')?.appendChild(fab);
 
   // Live cursor coordinates in stadium language (stand · section · row · seat).
