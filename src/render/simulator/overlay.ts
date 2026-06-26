@@ -107,6 +107,27 @@ input[type=checkbox].mds-check:checked::after{transform:rotate(45deg) scale(1);}
 .mds-kv .k{color:var(--text-dim);}
 .mds-key{display:inline-block;min-width:16px;text-align:center;padding:1px 6px;border:1px solid var(--border-strong);border-bottom-width:2px;border-radius:5px;background:var(--surface-3);font:600 11px ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--text);}
 .mds-help-actions{display:flex;justify-content:flex-end;margin-top:8px;}
+.mds-baracts{display:flex;align-items:center;gap:10px;}
+.mds-panel-acts{display:none;}
+.mds-brand .brand-txt{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.mds-overlay canvas{touch-action:none;display:block;}
+@media (max-width:640px){
+  .mds-bar{padding:8px 10px;gap:7px;}
+  .mds-brand{min-width:0;font-size:14px;}
+  .mds-panel{top:auto;left:0;right:0;bottom:0;width:auto;max-height:64vh;height:auto!important;border-radius:16px 16px 0 0;border-left:none;border-right:none;border-bottom:none;padding:10px 12px calc(10px + env(safe-area-inset-bottom));transition:transform var(--t-med) ease,opacity var(--t-med);}
+  .mds-panel.collapsed{transform:translateY(102%);opacity:1;}
+  .mds-panel-acts{display:flex;flex-direction:column;gap:8px;margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid var(--border-soft);}
+  .mds-panel-acts .mds-baracts{display:flex;flex-wrap:wrap;gap:8px;width:100%;}
+  .mds-panel-acts .mds-baracts .mds-bf{flex:1 1 100%;}
+  .mds-panel-acts .mds-baracts .mds-bf .mds-sel{flex:1 1 auto;}
+  .mds-panel-acts .mds-baracts .mds-btn{flex:1 1 auto;}
+  .mds-btn,.mds-sel,.mds-input{min-height:44px;}
+  .mds-icon{min-width:44px;min-height:44px;}
+  .mds-shead{min-height:48px;}
+  input[type=checkbox].mds-check{width:20px;height:20px;min-width:20px;}
+  input[type=checkbox].mds-check::after{left:6px;top:2.5px;width:5px;height:10px;}
+  .mds-help-card{padding:18px;}
+}
 .mds-overlay :focus-visible{outline:none;box-shadow:var(--focus);border-color:var(--accent);}
 @media (prefers-reduced-motion: reduce){.mds-overlay *,.mds-overlay *::after{transition-duration:.01ms!important;animation-duration:.01ms!important;}}
 `;
@@ -185,7 +206,7 @@ export function openMatchDaySimulator(
   panelToggle.setAttribute('aria-label', 'Show or hide controls');
   const brand = document.createElement('div');
   brand.className = 'mds-brand';
-  brand.innerHTML = '<span class="dot"></span>Match Day Simulator';
+  brand.innerHTML = '<span class="dot"></span><span class="brand-txt">Match Day Simulator</span>';
   brand.title = 'Shortcuts: 1-9 camera views · H hide panel · F fullscreen · Space play show';
   const spacer = document.createElement('div');
   spacer.className = 'mds-spacer';
@@ -201,7 +222,12 @@ export function openMatchDaySimulator(
   helpBtn.title = 'Help & controls (?)';
   helpBtn.setAttribute('aria-label', 'Help and controls');
   const closeBtn = btn('Close');
-  bar.append(panelToggle, brand, spacer, status, barField('Quality', qSel), snapBtn, fullBtn, linkBtn, helpBtn, closeBtn);
+  // Secondary actions are grouped so they can relocate into the bottom-sheet
+  // panel on mobile (keeps the top bar from overflowing on small screens).
+  const barActions = document.createElement('div');
+  barActions.className = 'mds-baracts';
+  barActions.append(barField('Quality', qSel), snapBtn, fullBtn, linkBtn);
+  bar.append(panelToggle, brand, spacer, status, barActions, helpBtn, closeBtn);
 
   let toastT = 0;
   const toast = (m: string): void => {
@@ -338,7 +364,9 @@ export function openMatchDaySimulator(
     cueCount,
   );
 
-  panel.append(secCam.root, secCrowd.root, secAtmo.root, secAssets.root, secChoreo.root);
+  const actionsHost = document.createElement('div'); // holds barActions on mobile
+  actionsHost.className = 'mds-panel-acts';
+  panel.append(actionsHost, secCam.root, secCrowd.root, secAtmo.root, secAssets.root, secChoreo.root);
   overlay.append(bar, panel, host);
   document.body.appendChild(overlay);
   const prevOverflow = document.body.style.overflow;
@@ -494,10 +522,28 @@ export function openMatchDaySimulator(
   // Bound the panel height in pixels (inline style beats any CSS) so overflow
   // actually scrolls instead of the panel growing to fit its content.
   const fitPanel = (): void => {
-    panel.style.height = Math.max(200, window.innerHeight - 76) + 'px';
+    // On mobile the panel is a bottom sheet sized by CSS (max-height); on desktop
+    // we bound it in px so its overflow actually scrolls.
+    if (window.innerWidth <= 640) panel.style.height = '';
+    else panel.style.height = Math.max(200, window.innerHeight - 76) + 'px';
   };
   fitPanel();
   window.addEventListener('resize', fitPanel);
+
+  // Responsive: move the secondary actions into the panel on phones, back to the
+  // top bar on desktop, so the bar never overflows.
+  const mqMobile = window.matchMedia('(max-width: 640px)');
+  const placeActions = (): void => {
+    if (mqMobile.matches) {
+      if (barActions.parentElement !== actionsHost) actionsHost.appendChild(barActions);
+    } else if (barActions.parentElement !== bar) {
+      bar.insertBefore(barActions, helpBtn);
+    }
+    fitPanel();
+  };
+  placeActions();
+  mqMobile.addEventListener('change', placeActions);
+  if (mqMobile.matches) panel.classList.add('collapsed'); // start clear on phones
   dbg('panel @mount client=' + panel.clientHeight + ' scroll=' + panel.scrollHeight + ' (open Tifo Assets, then scroll)');
 
   // ---------- wiring ----------
@@ -714,6 +760,7 @@ export function openMatchDaySimulator(
     document.removeEventListener('keydown', onKey);
     document.removeEventListener('fullscreenchange', onFsChange);
     window.removeEventListener('resize', fitPanel);
+    mqMobile.removeEventListener('change', placeActions);
     if (document.fullscreenElement) void document.exitFullscreen();
     sim.dispose();
     document.body.style.overflow = prevOverflow;
