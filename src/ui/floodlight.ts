@@ -133,6 +133,9 @@ header {
   font-size:12px; color:var(--text-2);
 }
 .tool-bar .hint { color:var(--text-3); font-size:11px; }
+/* contextual tool-bars fade in when their tool becomes active (cam-bar excluded:
+   it relies on a translateX centering transform a keyframe would clobber) */
+#import-bar, #text-bar, #shape-bar { animation:ctxFadeIn .15s ease; }
 
 .canvas-wrap { flex:1; min-height:0; position:relative; background:var(--canvas-pit); }
 #canvas-host, #preview-host { position:absolute; inset:0; }
@@ -345,6 +348,22 @@ input[type="checkbox"]:checked::after {
 }
 input[type="checkbox"]:focus-visible { outline:none; box-shadow:var(--ring-focus); }
 
+/* number fields: drop native spinners for a clean, consistent control */
+input[type="number"] { -moz-appearance:textfield; }
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button { -webkit-appearance:none; margin:0; }
+
+/* one disabled treatment for every control */
+button:disabled, select:disabled, input:disabled, textarea:disabled, .chip:disabled {
+  opacity:.45; cursor:default; pointer-events:none;
+}
+
+/* native colour input → clean rounded swatch (colour popover) */
+input[type="color"] { -webkit-appearance:none; appearance:none; padding:0; cursor:pointer; }
+input[type="color"]::-webkit-color-swatch-wrapper { padding:0; }
+input[type="color"]::-webkit-color-swatch { border:none; border-radius:6px; }
+input[type="color"]::-moz-color-swatch { border:none; border-radius:6px; }
+
 /* groups: inline in bars (with dividers), stacked with breathing room in cards */
 .group { display:flex; align-items:center; gap:10px; }
 .tool-bar .group + .group { padding-left:14px; border-left:1px solid var(--line-1); }
@@ -357,6 +376,7 @@ input[type="checkbox"]:focus-visible { outline:none; box-shadow:var(--ring-focus
 .val { font-variant-numeric:tabular-nums; min-width:18px; }
 .grow { flex:1; }
 .grow0 { flex:1; min-width:0; }
+.empty { color:var(--text-3); font-size:12px; line-height:1.5; }
 .ai-input {
   width:100%; box-sizing:border-box; resize:vertical; font:inherit; padding:8px;
   border:1px solid var(--line-1); border-radius:var(--r-md); background:var(--ink-2); color:var(--text-1);
