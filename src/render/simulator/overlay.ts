@@ -128,8 +128,18 @@ input[type=checkbox].mds-check:checked::after{transform:rotate(45deg) scale(1);}
   input[type=checkbox].mds-check::after{left:6px;top:2.5px;width:5px;height:10px;}
   .mds-help-card{padding:18px;}
 }
+@keyframes mds-in{from{opacity:0}to{opacity:1}}
+@keyframes mds-pop{from{opacity:0;transform:translateY(-5px)}to{opacity:1;transform:none}}
+@keyframes mds-flash{0%{opacity:0}10%{opacity:.85}100%{opacity:0}}
+.mds-overlay{animation:mds-in .26s ease;}
+.mds-section.open .mds-sbody{animation:mds-pop .2s ease;}
+.mds-btn{box-shadow:0 1px 2px rgba(0,0,0,.18);}
+.mds-btn:hover{box-shadow:0 3px 14px rgba(0,0,0,.3);}
+.mds-btn:active{box-shadow:0 1px 2px rgba(0,0,0,.25);}
+.mds-flash{position:absolute;inset:0;z-index:7;background:#fff;opacity:0;pointer-events:none;}
+.mds-flash.go{animation:mds-flash .5s ease;}
 .mds-overlay :focus-visible{outline:none;box-shadow:var(--focus);border-color:var(--accent);}
-@media (prefers-reduced-motion: reduce){.mds-overlay *,.mds-overlay *::after{transition-duration:.01ms!important;animation-duration:.01ms!important;}}
+@media (prefers-reduced-motion: reduce){.mds-overlay,.mds-overlay *,.mds-overlay *::after{transition-duration:.01ms!important;animation-duration:.01ms!important;}}
 `;
 
 /** Inline line-icons (stroke = currentColor), sized via CSS. Replaces emoji. */
@@ -406,7 +416,9 @@ export function openMatchDaySimulator(
   helpActions.append(gotBtn);
   helpCard.append(helpActions);
   help.append(helpCard);
-  overlay.append(help);
+  const flash = document.createElement('div'); // snapshot capture flash
+  flash.className = 'mds-flash';
+  overlay.append(help, flash);
 
   const showHelp = (): void => help.classList.add('show');
   const hideHelp = (): void => help.classList.remove('show');
@@ -735,6 +747,9 @@ export function openMatchDaySimulator(
     a.href = sim.snapshot();
     a.download = 'tifo-matchday.png';
     a.click();
+    flash.classList.remove('go');
+    void flash.offsetWidth; // reflow so the flash animation restarts each time
+    flash.classList.add('go');
     toast('Snapshot saved');
   });
   linkBtn.addEventListener('click', () => {

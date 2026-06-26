@@ -808,8 +808,44 @@ export class MatchDaySimulator {
     this.effects.setSize(this.renderer, w, h);
   }
 
+  // ---- performance governor -------------------------------------------
+  private fpsT = 0;
+  private fpsN = 0;
+  private visBound = false;
+  /** Pause the loop while the tab is hidden (saves battery / heat). */
+  private readonly onVisibility = (): void => {
+    if (document.hidden) this.stop();
+    else if (!this.disposed) this.start();
+  };
+
+  /** Hold a smooth frame rate by trimming/raising pixel ratio (no rebuild). */
+  private adaptPerf(dt: number): void {
+    if (this.elapsed < 2.5) return; // let the scene settle before judging
+    this.fpsT += dt;
+    this.fpsN++;
+    if (this.fpsT < 1.2) return;
+    const fps = this.fpsN / this.fpsT;
+    this.fpsT = 0;
+    this.fpsN = 0;
+    const cur = this.renderer.getPixelRatio();
+    const cap = Math.min(this.settings.maxPixelRatio, window.devicePixelRatio || 1);
+    if (fps < 45 && cur > 0.75) {
+      this.renderer.setPixelRatio(Math.max(0.75, cur - 0.2));
+      this.resize();
+      dbg('adaptPerf low fps=' + Math.round(fps) + ' -> pr=' + this.renderer.getPixelRatio().toFixed(2));
+    } else if (fps > 58 && cur < cap - 0.01) {
+      this.renderer.setPixelRatio(Math.min(cap, cur + 0.2));
+      this.resize();
+      dbg('adaptPerf recover fps=' + Math.round(fps) + ' -> pr=' + this.renderer.getPixelRatio().toFixed(2));
+    }
+  }
+
   start(): void {
     if (this.running || this.disposed) return;
+    if (!this.visBound) {
+      document.addEventListener('visibilitychange', this.onVisibility);
+      this.visBound = true;
+    }
     this.running = true;
     this.resize();
     this.clock.start();
@@ -826,6 +862,7 @@ export class MatchDaySimulator {
       if (this.timeline) this.stepTimeline();
       if (this.camTween) this.stepCamTween();
       this.controls.update();
+      this.adaptPerf(dt);
       this.effects.render(this.renderer, this.scene, this.camera);
       requestAnimationFrame(loop);
     };
@@ -840,6 +877,7 @@ export class MatchDaySimulator {
     if (this.disposed) return;
     this.disposed = true;
     this.running = false;
+    document.removeEventListener('visibilitychange', this.onVisibility);
     this.resizeObserver.disconnect();
     this.store.offDirty(this.onDirtyCb);
     this.store.offPaletteChange(this.onPaletteCb);
