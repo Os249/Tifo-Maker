@@ -72,14 +72,14 @@ const CSS = `
 .mds-row{display:flex;flex-wrap:wrap;gap:6px;align-items:center;}
 .mds-row .mds-btn{flex:1 1 auto;text-align:center;}
 .mds-divider{height:1px;background:#1e2630;margin:1px 0;}
-.mds-checkrow{display:flex;align-items:center;gap:9px;font-size:12.5px;color:#cfd6df;cursor:pointer;}
+.mds-checkrow{display:flex;align-items:center;gap:9px;font-size:12.5px;line-height:1.3;color:#cfd6df;cursor:pointer;margin:0;}
 .mds-hint{font-size:11px;color:#6b7480;}
 input[type=range].mds-range{width:100%;accent-color:#3fb950;}
-input[type=checkbox].mds-check{appearance:none;-webkit-appearance:none;width:16px;height:16px;min-width:16px;margin:0;flex:0 0 auto;cursor:pointer;border:1.5px solid #3a4554;border-radius:5px;background:#0d1117;display:grid;place-content:center;transition:background .15s,border-color .15s;}
-input[type=checkbox].mds-check::after{content:"";width:5px;height:9px;border:solid #fff;border-width:0 2px 2px 0;transform:rotate(45deg) scale(0);transition:transform .12s ease;margin-top:-1px;}
+input[type=checkbox].mds-check{appearance:none;-webkit-appearance:none;position:relative;width:16px;height:16px;min-width:16px;margin:0;flex:0 0 auto;cursor:pointer;border:1.5px solid #3a4554;border-radius:5px;background:#0d1117;transition:background .15s,border-color .15s;}
 input[type=checkbox].mds-check:checked{background:#3fb950;border-color:#3fb950;}
+input[type=checkbox].mds-check::after{content:"";position:absolute;left:4.5px;top:1.5px;width:4px;height:8px;border:solid #fff;border-width:0 2px 2px 0;transform:rotate(45deg) scale(0);transition:transform .12s ease;}
 input[type=checkbox].mds-check:checked::after{transform:rotate(45deg) scale(1);}
-.mds-checkrow{line-height:1.2;}
+.mds-checkrow span{flex:1;}
 `;
 
 interface SimState {
@@ -693,7 +693,9 @@ function field(label: string, ctrl: HTMLElement): HTMLElement {
 function checkField(label: string, c: HTMLInputElement): HTMLElement {
   const l = document.createElement('label');
   l.className = 'mds-checkrow';
-  l.append(c, document.createTextNode(label));
+  const t = document.createElement('span');
+  t.textContent = label;
+  l.append(c, t);
   return l;
 }
 function row(...els: HTMLElement[]): HTMLElement {

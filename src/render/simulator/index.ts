@@ -475,7 +475,7 @@ export class MatchDaySimulator {
 
   /** Centroid + extent of a whole stand (0 E,1 N,2 W,3 S), for sizing banners to it. */
   private standExtent(stand: 0 | 1 | 2 | 3): {
-    cx: number; cy: number; cz: number; width: number; height: number; rotationY: number; frontY: number; dx: number; dz: number;
+    cx: number; cy: number; cz: number; width: number; height: number; rotationY: number; frontY: number; frontX: number; frontZ: number; dx: number; dz: number;
   } {
     let sx = 0;
     let sy = 0;
@@ -487,6 +487,7 @@ export class MatchDaySimulator {
     let maxZ = -Infinity;
     let minY = Infinity;
     let maxY = -Infinity;
+    let minR = Infinity;
     for (let i = 0; i < this.map.count; i++) {
       if (Math.floor(((this.map.uv[i * 2] + 0.125) % 1) * 4) !== stand) continue;
       const x = this.map.pos3[i * 3];
@@ -502,12 +503,16 @@ export class MatchDaySimulator {
       if (z > maxZ) maxZ = z;
       if (y < minY) minY = y;
       if (y > maxY) maxY = y;
+      const r = Math.hypot(x, z);
+      if (r < minR) minR = r;
     }
-    if (n === 0) return { cx: 0, cy: 12, cz: -60, width: 30, height: 16, rotationY: 0, frontY: 2, dx: 0, dz: 1 };
+    if (n === 0) return { cx: 0, cy: 12, cz: -60, width: 30, height: 16, rotationY: 0, frontY: 2, frontX: 0, frontZ: -60, dx: 0, dz: 1 };
     const cx = sx / n;
     const cy = sy / n;
     const cz = sz / n;
     const len = Math.hypot(cx, cz) || 1;
+    const ang = Math.atan2(cz, cx);
+    const fr = isFinite(minR) ? minR : len;
     return {
       cx,
       cy,
@@ -516,6 +521,8 @@ export class MatchDaySimulator {
       height: maxY - minY,
       rotationY: Math.atan2(-cx, -cz),
       frontY: minY,
+      frontX: Math.cos(ang) * fr,
+      frontZ: Math.sin(ang) * fr,
       dx: -cx / len,
       dz: -cz / len,
     };
@@ -533,10 +540,13 @@ export class MatchDaySimulator {
   /** Small banner covering the dark front-wall / infrastructure of a stand. */
   addSmallBanner(stand: 0 | 1 | 2 | 3 = 1): void {
     const e = this.standExtent(stand);
+    // Hug the dark front wall: the stand's front edge (inner radius), from pitch
+    // level up to the first row of seats — not floating over the seating.
+    const wallH = Math.max(3, e.frontY + 1);
     this.assetStore.add('banner', {
-      position: { x: e.cx + e.dx * 6, y: Math.max(2, e.frontY * 0.55 + 1), z: e.cz + e.dz * 6 },
+      position: { x: e.frontX + e.dx * 1.5, y: wallH / 2, z: e.frontZ + e.dz * 1.5 },
       rotationY: e.rotationY,
-      scale: { x: Math.max(10, e.width * 0.85), y: Math.max(2.5, e.frontY * 0.7), z: 1 },
+      scale: { x: Math.max(12, e.width * 0.8), y: wallH, z: 1 },
     });
   }
   addTextBanner(text: string, stand: 0 | 1 | 2 | 3 = 1): void {
