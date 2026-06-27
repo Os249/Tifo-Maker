@@ -155,6 +155,7 @@ const ICONS = {
   assets: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 21V4"/><path d="M5 4h12l-2.5 4L17 12H5"/></svg>',
   choreo: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="8" width="18" height="12" rx="2"/><path d="M3 8l2.5-4h3.5L6.5 8M11 8l2.5-4H17l-2.5 4"/></svg>',
   help: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9.2"/><path d="M9.3 9.2a2.7 2.7 0 1 1 3.9 2.5c-.8.4-1.2.9-1.2 1.8"/><path d="M12 17h.01"/></svg>',
+  record: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="13" height="12" rx="2"/><path d="M15 10.5l6-3.5v10l-6-3.5Z"/><circle cx="8.5" cy="12" r="2.4" fill="currentColor" stroke="none"/></svg>',
 } as const;
 
 /**
@@ -313,6 +314,14 @@ const MDS_T: Record<string, { en: string; ar: string }> = {
   recording: { en: 'Recording…', ar: 'يسجّل…' },
   recordSaved: { en: 'Reveal video saved', ar: 'تم حفظ فيديو الكشف' },
   recordUnsupported: { en: 'Recording is not supported in this browser', ar: 'التسجيل غير مدعوم في هذا المتصفح' },
+  recTitle: { en: 'Recording', ar: 'التسجيل' },
+  recLength: { en: 'Length', ar: 'المدة' },
+  frameRate: { en: 'Frame rate', ar: 'معدل الإطارات' },
+  resolution: { en: 'Resolution', ar: 'الدقة' },
+  resSource: { en: 'Source', ar: 'الأصلية' },
+  recPreview: { en: 'Preview', ar: 'معاينة' },
+  recordVideo: { en: 'Record video', ar: 'سجّل فيديو' },
+  previewing: { en: 'Previewing the reveal…', ar: 'معاينة الكشف…' },
 };
 const L = (k: string): string => {
   const e = MDS_T[k];
@@ -541,9 +550,27 @@ export function openMatchDaySimulator(
     cueCount,
   );
 
+  // Recording — configurable reveal capture (duration / fps / resolution) with a
+  // Preview that plays exactly what will be recorded.
+  const recDur = sel();
+  for (const [v, l] of [['6', '6s'], ['9', '9s'], ['12', '12s'], ['15', '15s']]) opt(recDur, v, l, v === '9');
+  const recFps = sel();
+  for (const f of ['24', '30', '60']) opt(recFps, f, f + ' fps', f === '30');
+  const recRes = sel();
+  for (const [v, l] of [['720', '720p'], ['1080', '1080p'], ['source', L('resSource')]]) opt(recRes, v, l, v === '720');
+  const previewBtn = btn(L('recPreview'));
+  const recordBtn2 = btn(L('recordVideo'), 'primary');
+  const secRecord = section(ICONS.record, L('recTitle'), false);
+  secRecord.body.append(
+    field(L('recLength'), recDur),
+    field(L('frameRate'), recFps),
+    field(L('resolution'), recRes),
+    row(previewBtn, recordBtn2),
+  );
+
   const actionsHost = document.createElement('div'); // holds barActions on mobile
   actionsHost.className = 'mds-panel-acts';
-  panel.append(actionsHost, secCam.root, secCrowd.root, secAtmo.root, secAssets.root, secChoreo.root);
+  panel.append(actionsHost, secCam.root, secCrowd.root, secAtmo.root, secAssets.root, secChoreo.root, secRecord.root);
   overlay.append(bar, panel, host);
   document.body.appendChild(overlay);
   const prevOverflow = document.body.style.overflow;
@@ -689,6 +716,7 @@ export function openMatchDaySimulator(
     sim.setTimeOfDay(state.tod);
     sim.setWeather(state.weather);
     sim.setWetPitch(state.wet);
+    sim.setAutoReveal(state.reveal);
     if (!state.fly) sim.applyShot(shots[state.camIdx] ?? shots[0]);
   }
   function mount(): void {
@@ -879,6 +907,7 @@ export function openMatchDaySimulator(
   revealBtn.addEventListener('click', () => sim.playReveal(state.reveal));
   revealSel.addEventListener('change', () => {
     state.reveal = revealSel.value as RevealMode;
+    sim.setAutoReveal(state.reveal);
   });
   const cues: Cue[] = [];
   const updateCueCount = (): void => {
@@ -920,13 +949,18 @@ export function openMatchDaySimulator(
     toast(L('toast.snapSaved'));
   });
   // Record the choreography reveal as a shareable WebM (the growth artifact).
-  recBtn.addEventListener('click', async () => {
+  const recOpts = (): { seconds: number; fps: number; height?: number } => ({
+    seconds: Number(recDur.value),
+    fps: Number(recFps.value),
+    height: recRes.value === 'source' ? undefined : Number(recRes.value),
+  });
+  const doRecord = async (): Promise<void> => {
     if (sim.isRecording()) return;
-    const label = recBtn.textContent;
     recBtn.disabled = true;
-    const blob = await sim.recordReveal(9, (s) => toast(L('recording') + ' ' + s));
+    recordBtn2.disabled = true;
+    const blob = await sim.recordReveal(recOpts(), (s) => toast(L('recording') + ' ' + s));
     recBtn.disabled = false;
-    recBtn.textContent = label;
+    recordBtn2.disabled = false;
     if (!blob) {
       toast(L('recordUnsupported'));
       return;
@@ -938,7 +972,14 @@ export function openMatchDaySimulator(
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 3000);
     toast(L('recordSaved'));
+  };
+  // Preview plays the exact reveal (with the selected style) without recording.
+  previewBtn.addEventListener('click', () => {
+    sim.playAutoChoreo();
+    toast(L('previewing'));
   });
+  recordBtn2.addEventListener('click', () => void doRecord());
+  recBtn.addEventListener('click', () => void doRecord());
   linkBtn.addEventListener('click', () => {
     const u = new URL(location.href);
     u.searchParams.set('sim', '1');

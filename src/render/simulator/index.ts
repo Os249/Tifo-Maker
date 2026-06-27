@@ -451,12 +451,21 @@ export class MatchDaySimulator {
    * ad for the site wherever it's posted). Returns null if the browser can't
    * record. `onTick` reports remaining whole seconds for a countdown UI.
    */
-  async recordReveal(seconds = 9, onTick?: (remaining: number) => void): Promise<Blob | null> {
+  async recordReveal(
+    opts: { seconds?: number; fps?: number; height?: number } = {},
+    onTick?: (remaining: number) => void,
+  ): Promise<Blob | null> {
     if (this.recording) return null;
     if (typeof MediaRecorder === 'undefined' || typeof this.canvas.captureStream !== 'function') return null;
     this.recording = true;
-    const w = this.canvas.width;
-    const h = this.canvas.height;
+    const seconds = Math.max(1, Math.round(opts.seconds ?? 9));
+    const fps = opts.fps ?? 30;
+    const srcW = this.canvas.width;
+    const srcH = this.canvas.height;
+    const outH = Math.min(opts.height ?? srcH, srcH); // never upscale past the canvas
+    const scale = srcH > 0 ? outH / srcH : 1;
+    const w = Math.max(2, Math.round(srcW * scale));
+    const h = Math.max(2, Math.round(srcH * scale));
     const comp = document.createElement('canvas');
     comp.width = w;
     comp.height = h;
@@ -476,7 +485,7 @@ export class MatchDaySimulator {
       raf = requestAnimationFrame(drawFrame);
     };
     drawFrame();
-    const stream = comp.captureStream(30);
+    const stream = comp.captureStream(fps);
     const mime = MediaRecorder.isTypeSupported('video/webm;codecs=vp9') ? 'video/webm;codecs=vp9' : 'video/webm';
     const recorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 8_000_000 });
     const chunks: BlobPart[] = [];
@@ -488,7 +497,7 @@ export class MatchDaySimulator {
     });
     recorder.start();
     this.playAutoChoreo();
-    for (let s = Math.max(1, Math.round(seconds)); s > 0; s--) {
+    for (let s = seconds; s > 0; s--) {
       onTick?.(s);
       await new Promise((r) => setTimeout(r, 1000));
     }
@@ -749,6 +758,11 @@ export class MatchDaySimulator {
   }
 
   // ---- choreography reveal (Phase 7) ----
+  private autoReveal: RevealMode = 'wipe-lr';
+  /** Reveal style the auto-choreography uses (kept in sync with the panel). */
+  setAutoReveal(mode: RevealMode): void {
+    this.autoReveal = mode;
+  }
   playReveal(mode: RevealMode, durationMs = 4500): void {
     this.timeline = null;
     this.reveal = { mode, start: this.elapsed, dur: Math.max(0.5, durationMs / 1000) };
@@ -776,7 +790,7 @@ export class MatchDaySimulator {
   buildAutoChoreo(): Timeline {
     const cues: Cue[] = [
       { kind: 'camera', start: 0, shot: 'TV Broadcast' },
-      { kind: 'reveal', start: 0.5, dur: 4, mode: 'wipe-lr' },
+      { kind: 'reveal', start: 0.5, dur: 4, mode: this.autoReveal },
       { kind: 'effect', start: 5, effect: 'smoke-on' },
       { kind: 'camera', start: 5.5, shot: 'Ultra View' },
       { kind: 'effect', start: 7.5, effect: 'pyro' },
