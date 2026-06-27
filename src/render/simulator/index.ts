@@ -439,6 +439,66 @@ export class MatchDaySimulator {
     this.effects.render(this.renderer, this.scene, this.camera);
     return this.renderer.domElement.toDataURL('image/png');
   }
+
+  private recording = false;
+  isRecording(): boolean {
+    return this.recording;
+  }
+
+  /**
+   * Record the auto-choreography reveal off the live canvas as a shareable WebM,
+   * with the tifomaker.org watermark burned into every frame (so the clip is an
+   * ad for the site wherever it's posted). Returns null if the browser can't
+   * record. `onTick` reports remaining whole seconds for a countdown UI.
+   */
+  async recordReveal(seconds = 9, onTick?: (remaining: number) => void): Promise<Blob | null> {
+    if (this.recording) return null;
+    if (typeof MediaRecorder === 'undefined' || typeof this.canvas.captureStream !== 'function') return null;
+    this.recording = true;
+    const w = this.canvas.width;
+    const h = this.canvas.height;
+    const comp = document.createElement('canvas');
+    comp.width = w;
+    comp.height = h;
+    const ctx = comp.getContext('2d')!;
+    const fs = Math.max(14, Math.round(h * 0.026));
+    let raf = 0;
+    const drawFrame = (): void => {
+      ctx.drawImage(this.canvas, 0, 0, w, h);
+      const txt = 'tifomaker.org';
+      ctx.font = `600 ${fs}px system-ui, -apple-system, sans-serif`;
+      const tw = ctx.measureText(txt).width;
+      const pad = Math.round(fs * 0.5);
+      ctx.fillStyle = 'rgba(0,0,0,0.4)';
+      ctx.fillRect(w - tw - pad * 3, h - fs - pad * 2, tw + pad * 2, fs + pad);
+      ctx.fillStyle = 'rgba(255,255,255,0.92)';
+      ctx.fillText(txt, w - tw - pad * 2, h - Math.round(pad * 1.5));
+      raf = requestAnimationFrame(drawFrame);
+    };
+    drawFrame();
+    const stream = comp.captureStream(30);
+    const mime = MediaRecorder.isTypeSupported('video/webm;codecs=vp9') ? 'video/webm;codecs=vp9' : 'video/webm';
+    const recorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 8_000_000 });
+    const chunks: BlobPart[] = [];
+    recorder.ondataavailable = (e): void => {
+      if (e.data.size) chunks.push(e.data);
+    };
+    const finished = new Promise<Blob>((resolve) => {
+      recorder.onstop = (): void => resolve(new Blob(chunks, { type: 'video/webm' }));
+    });
+    recorder.start();
+    this.playAutoChoreo();
+    for (let s = Math.max(1, Math.round(seconds)); s > 0; s--) {
+      onTick?.(s);
+      await new Promise((r) => setTimeout(r, 1000));
+    }
+    recorder.stop();
+    cancelAnimationFrame(raf);
+    const blob = await finished;
+    this.recording = false;
+    return blob;
+  }
+
   setSmoke(b: boolean, color?: THREE.ColorRepresentation): void {
     this.effects.setSmoke(b, color);
   }

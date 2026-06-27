@@ -309,6 +309,10 @@ const MDS_T: Record<string, { en: string; ar: string }> = {
   'toast.painted': { en: ' seats painted', ar: ' مقعد تم رسمها' },
   'toast.snapSaved': { en: 'Snapshot saved', ar: 'تم حفظ اللقطة' },
   'toast.linkCopied': { en: 'Link copied', ar: 'تم نسخ الرابط' },
+  record: { en: 'Record', ar: 'تسجيل' },
+  recording: { en: 'Recording…', ar: 'يسجّل…' },
+  recordSaved: { en: 'Reveal video saved', ar: 'تم حفظ فيديو الكشف' },
+  recordUnsupported: { en: 'Recording is not supported in this browser', ar: 'التسجيل غير مدعوم في هذا المتصفح' },
 };
 const L = (k: string): string => {
   const e = MDS_T[k];
@@ -387,6 +391,7 @@ export function openMatchDaySimulator(
   const qSel = sel();
   for (const [tier] of TIER_LABELS) opt(qSel, tier, L('tier.' + tier), tier === state.tier);
   const snapBtn = btn(L('snapshot'));
+  const recBtn = btn(L('record'));
   const fullBtn = btn(L('fullscreen'));
   const linkBtn = btn(L('copyLink'));
   const helpBtn = btn('', 'mds-icon');
@@ -398,7 +403,7 @@ export function openMatchDaySimulator(
   // panel on mobile (keeps the top bar from overflowing on small screens).
   const barActions = document.createElement('div');
   barActions.className = 'mds-baracts';
-  barActions.append(barField(L('quality'), qSel), snapBtn, fullBtn, linkBtn);
+  barActions.append(barField(L('quality'), qSel), snapBtn, recBtn, fullBtn, linkBtn);
   bar.append(panelToggle, brand, spacer, status, barActions, helpBtn, closeBtn);
 
   let toastT = 0;
@@ -913,6 +918,26 @@ export function openMatchDaySimulator(
     void flash.offsetWidth; // reflow so the flash animation restarts each time
     flash.classList.add('go');
     toast(L('toast.snapSaved'));
+  });
+  // Record the choreography reveal as a shareable WebM (the growth artifact).
+  recBtn.addEventListener('click', async () => {
+    if (sim.isRecording()) return;
+    const label = recBtn.textContent;
+    recBtn.disabled = true;
+    const blob = await sim.recordReveal(9, (s) => toast(L('recording') + ' ' + s));
+    recBtn.disabled = false;
+    recBtn.textContent = label;
+    if (!blob) {
+      toast(L('recordUnsupported'));
+      return;
+    }
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'tifo-matchday.webm';
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 3000);
+    toast(L('recordSaved'));
   });
   linkBtn.addEventListener('click', () => {
     const u = new URL(location.href);

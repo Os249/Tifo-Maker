@@ -8,6 +8,7 @@ import { DEFAULT_TEMPLATE } from '../../src/core/template';
 import { MemoryAuthRepository, MemoryDesignRepository, MemoryEventsRepository, MemoryLeadsRepository } from '../src/memoryRepo';
 import { MemorySocialRepository } from '../src/memorySocial';
 import { PgAuthRepository, PgDesignRepository } from '../src/pgRepo';
+import { PgSocialRepository } from '../src/pgSocial';
 import { buildApp, SNAPSHOT_EVERY, type TemplateInfo } from '../src/routes';
 import { toB64 } from '../src/codec';
 import type { AuthRepository, DesignRepository } from '../src/repo';
@@ -563,6 +564,32 @@ if (process.env.DATABASE_URL) {
   await pool.query(readFileSync(new URL('../schema.sql', import.meta.url), 'utf8'));
   await pool.query('TRUNCATE design_revisions, designs, auth_tokens, users CASCADE');
   await runSuite('postgres repos', new PgDesignRepository(pool), new PgAuthRepository(pool));
+
+  // Social layer on real Postgres — guards pg-only bugs the memory suite cannot
+  // catch, e.g. the JSONB palette round-trip in remix that shipped a 500.
+  {
+    const pAuth = new PgAuthRepository(pool);
+    const pDesigns = new PgDesignRepository(pool);
+    const pSocial = new PgSocialRepository(pool);
+    const app = await buildApp(pDesigns, pAuth, templates, { social: pSocial });
+    const u = (n: string): string => `${n}_${Math.random().toString(36).slice(2, 8)}`;
+    const aliceTok = await registerUser(app, u('alice'));
+    const bobTok = await registerUser(app, u('bob'));
+    const cellsGzB64 = gzipSync(sampleCells()).toString('base64');
+    const created = await app.inject({
+      method: 'POST', url: '/api/designs', headers: bearer(aliceTok),
+      payload: { title: 'PG Clasico', templateId: DEFAULT_TEMPLATE.id, templateVersion: 1, palette: PALETTE, cellsGzB64 },
+    });
+    const designId = (created.json() as { id: string }).id;
+    await app.inject({ method: 'PUT', url: `/api/designs/${designId}/publish-meta`, headers: bearer(aliceTok), payload: { description: 'derby', allowRemix: true } });
+    await app.inject({ method: 'PATCH', url: `/api/designs/${designId}`, headers: bearer(aliceTok), payload: { isPublic: true } });
+    const remixed = await app.inject({ method: 'POST', url: `/api/designs/${designId}/remix`, headers: bearer(bobTok), payload: { title: 'PG remix' } });
+    assert.equal(remixed.statusCode, 201, `pg remix must succeed (regression guard for the JSONB palette bug): ${remixed.body}`);
+    const remix = remixed.json() as { id: string; palette: string[]; remixedFrom: string };
+    assert.deepEqual(remix.palette, PALETTE, 'palette survives the JSONB remix round-trip on Postgres');
+    assert.equal(remix.remixedFrom, designId, 'remix lineage stamped on Postgres');
+    console.log('social (postgres): remix + palette round-trip passed');
+  }
   await pool.end();
 } else {
   console.log('postgres repos: skipped (set DATABASE_URL to run)');
