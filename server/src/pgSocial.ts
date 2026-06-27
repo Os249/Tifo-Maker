@@ -53,7 +53,10 @@ export class PgSocialRepository implements SocialRepository {
          VALUES ($1, $2, $3, $4, $5, $6, false, $7)
          RETURNING id, title, template_id, template_version, palette, revision_count,
                    is_public, owner_id, created_at, updated_at, description, allow_remix, remixed_from`,
-        [title, s.template_id, s.template_version, s.palette, s.cells, newOwnerId, sourceId],
+        // palette is JSONB: it comes back from SELECT as a parsed JS array, so it
+        // must be re-serialized on the way back in (node-pg would otherwise send a
+        // JS array as a Postgres array literal, which JSONB rejects → 500).
+        [title, s.template_id, s.template_version, typeof s.palette === 'string' ? s.palette : JSON.stringify(s.palette), s.cells, newOwnerId, sourceId],
       );
       // Notify the original creator that their work was remixed.
       if (s.owner_id && s.owner_id !== newOwnerId) {
