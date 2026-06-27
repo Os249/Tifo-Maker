@@ -179,6 +179,7 @@ const STRINGS: Record<string, { en: string; ar: string }> = {
   'ed.replayTour': { en: 'Replay tutorial', ar: 'إعادة الجولة التعريفية' },
   'ed.moderate': { en: 'Moderate', ar: 'الإشراف' },
   'ed.docTitlePlaceholder': { en: 'Untitled tifo', ar: 'تيفو بدون اسم' },
+  'ed.mobileNote': { en: 'You are creating on mobile — the full editor (more tools) is best on desktop or tablet.', ar: 'أنت تصمم على الجوال — المحرر الكامل بأدوات أكثر أفضل على الكمبيوتر أو التابلت.' },
 
   // ---- editor: tool bars / panels ----
   'ed.props': { en: 'Properties', ar: 'الخصائص' },

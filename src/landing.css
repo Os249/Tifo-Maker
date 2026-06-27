@@ -394,6 +394,11 @@ a { color: inherit; text-decoration: none; }
   .clubs-inner { grid-template-columns: 1fr; gap: 36px; padding: 40px 28px; }
   .nav-links { gap: 16px; }
   .nav-links a:not(.nav-cta) { display: none; }
+  .nav { padding: 12px 16px; padding-top: calc(12px + env(safe-area-inset-top)); }
+  .hero { padding-left: 18px; padding-right: 18px; }
+  .hero h1 { font-size: clamp(30px, 8.5vw, 46px); line-height: 1.1; }
+  .cta-row { gap: 10px; }
+  .cta-row .btn { flex: 1 1 100%; text-align: center; justify-content: center; }
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -33,6 +33,38 @@ function sharedDesignId(): string | null {
   return q && /^[A-Za-z0-9-]+$/.test(q) ? q : null;
 }
 
+/** Dismissible bottom note shown to phone create-lite users. */
+function showCreateLiteBanner(): void {
+  try {
+    if (localStorage.getItem('tifo_mobile_note') === '1') return;
+  } catch {
+    /* storage blocked — show it anyway */
+  }
+  const bar = document.createElement('div');
+  bar.id = 'mobile-create-note';
+  bar.style.cssText =
+    'position:fixed;left:0;right:0;bottom:0;z-index:60;display:flex;align-items:center;gap:10px;justify-content:center;' +
+    'padding:10px 14px calc(10px + env(safe-area-inset-bottom));background:#1C6FE0;color:#fff;' +
+    "font:500 13px 'Inter',system-ui,sans-serif;box-shadow:0 -6px 20px rgba(0,0,0,.3);";
+  const msg = document.createElement('span');
+  msg.textContent = t('ed.mobileNote');
+  const x = document.createElement('button');
+  x.textContent = '✕';
+  x.setAttribute('aria-label', 'Dismiss');
+  x.style.cssText =
+    'background:rgba(255,255,255,.2);border:none;color:#fff;width:26px;height:26px;min-width:26px;border-radius:50%;cursor:pointer;flex:0 0 auto;font-size:13px;';
+  x.addEventListener('click', () => {
+    bar.remove();
+    try {
+      localStorage.setItem('tifo_mobile_note', '1');
+    } catch {
+      /* ignore */
+    }
+  });
+  bar.append(msg, x);
+  document.body.appendChild(bar);
+}
+
 async function main(): Promise<void> {
   installTheme();
   initLang();
@@ -80,26 +112,25 @@ async function main(): Promise<void> {
   const map = await generateSeatMapAsync(template.id);
   const genMs = performance.now() - t0;
 
-  // Phone branch: build the seeded store and hand off to the read-only viewer.
-  if (isPhone()) {
+  // Phone + shared link → lightweight read-only viewer (great for opening a
+  // shared tifo on a phone). Phone /app falls through to the editor (create-lite).
+  if (isPhone() && sharedId) {
     const vstore = new DesignStore(map, DEFAULT_PALETTE.slice());
     let vtitle = 'Untitled tifo';
-    if (sharedId) {
-      try {
-        const { loadDesign } = await import('./net/api');
-        const r = await loadDesign(vstore, sharedId);
-        vtitle = r.title;
-      } catch {
-        const vseed = PATTERN_PRESETS.find((p) => p.id === 'border')!.cellAt(map);
-        for (let i = 0; i < map.count; i++) vstore.cells[i] = vseed(i);
-      }
-    } else {
+    try {
+      const { loadDesign } = await import('./net/api');
+      const r = await loadDesign(vstore, sharedId);
+      vtitle = r.title;
+    } catch {
       const vseed = PATTERN_PRESETS.find((p) => p.id === 'border')!.cellAt(map);
       for (let i = 0; i < map.count; i++) vstore.cells[i] = vseed(i);
     }
-    await mountViewer({ map, store: vstore, templateName: template.name, title: vtitle, designId: sharedId ?? undefined });
+    await mountViewer({ map, store: vstore, templateName: template.name, title: vtitle, designId: sharedId });
     return;
   }
+  // Phone create-lite: the real editor runs (paint + AI + simulate + share),
+  // with a gentle, dismissible note that desktop/tablet unlock the full toolset.
+  if (window.matchMedia(`(max-width: ${PHONE_MAX - 1}px)`).matches) showCreateLiteBanner();
 
   // Stadium selector: switching reloads with a fresh canvas for that bowl.
   const stadiumSel = document.getElementById('stadium') as HTMLSelectElement;

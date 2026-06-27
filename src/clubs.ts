@@ -1,9 +1,11 @@
 import './clubs.css';
 import { initLang, applyDom, toggleLang, t } from './ui/i18n';
 import { submitLead } from './net/api';
+import { installMobileNav } from './ui/mobileNav';
 
 initLang();
 applyDom(document);
+installMobileNav();
 
 const langToggle = document.getElementById('lang-toggle');
 if (langToggle) {

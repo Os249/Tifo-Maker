@@ -1,5 +1,6 @@
 import './community.css';
 import { initLang, applyDom, toggleLang, t } from './ui/i18n';
+import { installMobileNav } from './ui/mobileNav';
 import { generateSeatMapAsync } from './workers/client';
 import { TEMPLATES } from './core/template';
 import { DesignStore } from './core/design';
@@ -34,6 +35,7 @@ import {
 // ---------- bootstrap ----------
 initLang();
 applyDom(document);
+installMobileNav();
 
 const $ = <T extends HTMLElement = HTMLElement>(sel: string): T => document.querySelector(sel) as T;
 let me: { id: string; username: string; isAdmin: boolean } | null = null;
