@@ -211,8 +211,110 @@ const STRINGS: Record<string, { en: string; ar: string }> = {
   'ed.openFile': { en: 'Open file', ar: 'افتح ملف' },
   'ed.publicList': { en: 'List in public gallery', ar: 'انشره في المعرض العام' },
   'ed.addPhoto': { en: 'Add match-day photo', ar: 'أضف صورة يوم المباراة' },
+  'ed.addPhoto.hint': { en: 'Show the real stand beside your design — proof it came to life.', ar: 'اعرض المدرج الحقيقي جنب تصميمك — إثبات إنه صار حقيقة.' },
+  'ed.share': { en: 'Share', ar: 'شارك' },
+  'ed.save.tag': { en: '& share', ar: 'والمشاركة' },
+
+  // ---- editor: stadium config / area / orientation ----
+  'ed.cfg.tag': { en: 'choose & configure the bowl', ar: 'اختر وجهّز المدرج' },
+  'ed.cfg.hint': { en: 'Pick the stadium your tifo is designed for. Switching remaps your current design onto the new bowl.', ar: 'اختر الملعب اللي تصمّم له تيفوك. لما تبدّل، ينتقل تصميمك الحالي على المدرج الجديد.' },
+  'ed.area': { en: 'Active tifo area', ar: 'منطقة التيفو' },
+  'ed.area.hint': { en: 'Which part of the bowl the design targets — the AI focuses here.', ar: 'أي جزء من المدرج يستهدفه التصميم — الذكاء يركّز هنا.' },
+  'ed.orient': { en: 'Orientation', ar: 'الاتجاه' },
+  'ed.orient.hint': { en: 'Re-orient your design around the bowl (undoable).', ar: 'لِف تصميمك حول المدرج (يمكن التراجع).' },
+  'ed.review': { en: 'Admin · review queue', ar: 'الإدارة · قائمة المراجعة' },
+  'ed.review.hint': { en: 'Pending community submissions. Approve to publish, reject to discard.', ar: 'مشاركات المجتمع المعلّقة. وافق للنشر، أو ارفض للحذف.' },
+
+  // ---- editor: AI panel ----
+  'ed.ai.title': { en: 'AI Designer', ar: 'مصمّم الذكاء' },
+  'ed.ai.tag': { en: 'describe it, get a tifo', ar: 'صِفه، وخذ تيفو' },
+  'ed.ai.hint': { en: 'Describe a display in plain words — a stand, colours, text, a symbol. The AI composes a fully editable tifo on the seats.', ar: 'صِف الاستعراض بكلامك — مدرج، ألوان، نص، شعار. الذكاء يركّب لك تيفو كامل وقابل للتعديل على المقاعد.' },
+  'ed.ai.placeholder': { en: 'e.g. Giant eagle covering the south stand in black and gold', ar: 'مثال: نسر ضخم يغطّي المدرج الجنوبي بالأسود والذهبي' },
+  'ed.ai.generate': { en: 'Generate tifo', ar: 'صمّم تيفو' },
+  'ed.ai.super': { en: 'Super AI — design full stadium', ar: 'الذكاء الخارق — صمّم الملعب كامل' },
+  'ed.ai.superHint': { en: 'Plans every stand together — portraits, text and colour blocking across the whole bowl.', ar: 'يخطّط لكل المدرجات سوا — وجوه ونصوص وتقسيم ألوان على المدرج كامل.' },
+  'ed.ai.shuffle': { en: 'Shuffle — free offline variation', ar: 'تشكيل — نسخة ببلاش بدون نت' },
+  'ed.ai.regen': { en: 'Regenerate', ar: 'أعد التوليد' },
+  'ed.ai.revert': { en: 'Revert', ar: 'رجّع' },
+  'ed.ai.polish': { en: 'Polish with AI critique', ar: 'حسّن بمراجعة الذكاء' },
+
+  // ---- editor: object panel ----
+  'ed.obj': { en: 'Object', ar: 'عنصر' },
+  'ed.obj.recolor': { en: 'Recolor', ar: 'لوّن من جديد' },
+  'ed.obj.deselect': { en: 'Deselect', ar: 'إلغاء التحديد' },
+  'ed.obj.empty': { en: 'No object selected. Click a painted area to select it, or use Text/Image.', ar: 'ما في عنصر محدّد. اضغط منطقة ملوّنة عشان تحدّدها، أو استخدم نص/صورة.' },
+  'ed.height': { en: 'Height', ar: 'الارتفاع' },
+  'ed.tier': { en: 'Tier', ar: 'الطابق' },
+  'ed.tier.both': { en: 'Both', ar: 'الكل' },
+  'ed.tier.lower': { en: 'Lower', ar: 'السفلي' },
+  'ed.tier.upper': { en: 'Upper', ar: 'العلوي' },
+  'ed.obj.sendBack': { en: 'Send back', ar: 'للخلف' },
+  'ed.obj.bringFront': { en: 'Bring front', ar: 'للأمام' },
+  'ed.obj.bake': { en: 'Bake to seats', ar: 'ثبّت على المقاعد' },
+  'ed.obj.bakeAll': { en: 'Bake all', ar: 'ثبّت الكل' },
+
+  // ---- editor: stadium (shape) panel ----
+  'ed.stadium.pattern': { en: 'Pattern…', ar: 'نمط…' },
+  'ed.stadium.fillBase': { en: 'Fill base', ar: 'عبّي الأساس' },
+  'ed.stadium.check': { en: 'Check', ar: 'افحص' },
+
+  // ---- editor: reveal panel ----
+  'ed.reveal': { en: 'Animate reveal', ar: 'حركة الكشف' },
+  'ed.reveal.play': { en: 'Play', ar: 'شغّل' },
+  'ed.reveal.length': { en: 'Length', ar: 'المدة' },
+  'ed.reveal.gif': { en: 'Export GIF (flat)', ar: 'صدّر GIF (مسطّح)' },
+
+  // ---- editor: stadium animation export ----
+  'ed.sx': { en: 'Stadium animation', ar: 'حركة الملعب' },
+  'ed.sx.tag': { en: 'video / GIF (3D)', ar: 'فيديو / GIF (ثلاثي الأبعاد)' },
+  'ed.sx.hint': { en: 'Renders the 3D bowl lighting up with your chosen reveal. Style & length come from the Animation panel.', ar: 'يصوّر المدرج ثلاثي الأبعاد وهو يضيء بحركة الكشف اللي اخترتها. الستايل والمدة من لوحة الحركة.' },
+  'ed.sx.format': { en: 'Format', ar: 'الصيغة' },
+  'ed.sx.video': { en: 'Video (WebM)', ar: 'فيديو (WebM)' },
+  'ed.sx.gif': { en: 'GIF', ar: 'GIF' },
+  'ed.sx.gifWidth': { en: 'GIF width', ar: 'عرض الـGIF' },
+  'ed.sx.noshow': { en: 'Export with 10% no-shows', ar: 'صدّر مع ١٠٪ مقاعد فاضية' },
+  'ed.sx.preview': { en: 'Preview', ar: 'معاينة' },
+  'ed.sx.export': { en: 'Export', ar: 'صدّر' },
+
+  // ---- editor: history / production ----
+  'ed.history': { en: 'History', ar: 'السجل' },
+  'ed.undo': { en: 'Undo', ar: 'تراجع' },
+  'ed.redo': { en: 'Redo', ar: 'إعادة' },
+  'ed.prod': { en: 'Production export', ar: 'تصدير التنفيذ' },
+  'ed.prod.tag': { en: 'match-day logistics', ar: 'تجهيزات يوم المباراة' },
+  'ed.prod.bag': { en: 'Cards / bag', ar: 'كروت / كيس' },
+  'ed.prod.pdf': { en: 'Distribution PDF', ar: 'ملف التوزيع PDF' },
+  'ed.prod.csv': { en: 'Seat manifest (CSV)', ar: 'كشف المقاعد (CSV)' },
+  'ed.prod.qr': { en: 'Fan QR code', ar: 'رمز QR للمشجّع' },
+  'ed.prod.note': { en: 'Seat-by-seat instructions, material & bag counts, and a QR fans scan to find their card.', ar: 'تعليمات لكل مقعد، أعداد المواد والأكياس، ورمز QR يمسحه المشجّع عشان يلقى كرته.' },
+
+  // ---- editor: camera + tool bars ----
+  'ed.camera': { en: 'Camera', ar: 'الكاميرا' },
+  'ed.noshow': { en: 'No-shows 10%', ar: '١٠٪ مقاعد فاضية' },
+  'ed.matchDay': { en: 'Match Day', ar: 'يوم المباراة' },
+  'ed.import.width': { en: 'Width', ar: 'العرض' },
+  'ed.import.place': { en: 'Place', ar: 'المكان' },
+  'ed.import.placeClick': { en: 'Click on canvas', ar: 'اضغط على اللوحة' },
+  'ed.import.north': { en: 'North stand', ar: 'المدرج الشمالي' },
+  'ed.import.east': { en: 'East end', ar: 'الجهة الشرقية' },
+  'ed.import.south': { en: 'South stand', ar: 'المدرج الجنوبي' },
+  'ed.import.west': { en: 'West stand', ar: 'المدرج الغربي' },
+  'ed.import.realColors': { en: 'Real colours', ar: 'الألوان الأصلية' },
+  'ed.import.dither': { en: 'Dither', ar: 'تنعيم' },
+  'ed.import.alpha': { en: 'Alpha', ar: 'الشفافية' },
+  'ed.import.cancel': { en: 'Cancel', ar: 'إلغاء' },
+  'ed.import.apply': { en: 'Place', ar: 'ضع' },
+  'ed.text.placeholder': { en: 'YOUR TEXT', ar: 'نصّك' },
+  'ed.text.arc': { en: 'Arc', ar: 'القوس' },
+  'ed.text.fontFile': { en: 'Font file…', ar: 'ملف خط…' },
+  'ed.text.hint': { en: 'pick a color, then click a stand to place', ar: 'اختر لون، ثم اضغط مدرج عشان تضعه' },
+  'ed.shape': { en: 'Shape', ar: 'الشكل' },
+  'ed.shape.hint': { en: 'pick a colour, then click a stand to place', ar: 'اختر لون، ثم اضغط مدرج عشان تضعه' },
+  'ed.seats': { en: 'seats', ar: 'مقعد' },
 
   // ---- common ----
+  'ed.stat.generating': { en: 'generating seat map…', ar: 'يجهّز خريطة المقاعد…' },
+
   'common.language': { en: 'العربية', ar: 'English' }, // toggle shows the OTHER language
 };
 
