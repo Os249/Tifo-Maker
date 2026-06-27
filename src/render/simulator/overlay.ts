@@ -8,6 +8,7 @@ import type { AssetStore } from '../../core/sceneAssets';
 import type { Cue, EffectName } from './timeline';
 import type { Weather } from './weather';
 import { dbg } from './debug';
+import { getLang } from '../../ui/i18n';
 
 /**
  * Fullscreen Match Day Simulator overlay — the lazy-loaded entry point.
@@ -69,6 +70,8 @@ const CSS = `
 .mds-input[type=number]{width:80px;}
 .mds-panel{position:absolute;top:62px;left:14px;width:286px;overflow-y:auto;overscroll-behavior:contain;background:var(--panel);backdrop-filter:blur(12px);border:1px solid #242c37;border-radius:var(--r-lg);padding:8px;display:block;box-shadow:var(--shadow);z-index:2;transition:transform var(--t-med) ease,opacity var(--t-med);}
 .mds-panel.collapsed{transform:translateX(-310px);opacity:0;pointer-events:none;}
+.mds-overlay[dir="rtl"] .mds-panel{left:auto;right:14px;}
+.mds-overlay[dir="rtl"] .mds-panel.collapsed{transform:translateX(310px);}
 .mds-panel::-webkit-scrollbar{width:8px;}
 .mds-panel::-webkit-scrollbar-thumb{background:var(--border);border-radius:8px;}
 .mds-section{border:1px solid var(--border-soft);border-radius:10px;overflow:hidden;background:var(--surface-2);margin-bottom:7px;}
@@ -154,6 +157,164 @@ const ICONS = {
   help: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9.2"/><path d="M9.3 9.2a2.7 2.7 0 1 1 3.9 2.5c-.8.4-1.2.9-1.2 1.8"/><path d="M12 17h.01"/></svg>',
 } as const;
 
+/**
+ * Self-contained Arabic for the simulator (keyed, so homonyms like "Clear" stay
+ * distinct). L(key) returns the live language each time the overlay is opened.
+ */
+const MDS_T: Record<string, { en: string; ar: string }> = {
+  brand: { en: 'Match Day Simulator', ar: 'محاكي يوم المباراة' },
+  showHide: { en: 'Show/hide controls', ar: 'إظهار/إخفاء الأدوات' },
+  shortcuts: { en: 'Shortcuts: 1-9 camera views · H hide panel · F fullscreen · Space play show', ar: 'اختصارات: ١-٩ لقطات الكاميرا · H إخفاء اللوحة · F ملء الشاشة · مسافة لتشغيل العرض' },
+  quality: { en: 'Quality', ar: 'الجودة' },
+  snapshot: { en: 'Snapshot', ar: 'لقطة' },
+  fullscreen: { en: 'Fullscreen', ar: 'ملء الشاشة' },
+  copyLink: { en: 'Copy link', ar: 'انسخ الرابط' },
+  close: { en: 'Close', ar: 'إغلاق' },
+  helpControls: { en: 'Help & controls (?)', ar: 'المساعدة والأدوات (؟)' },
+  'tier.medium': { en: 'Medium', ar: 'متوسط' },
+  'tier.high': { en: 'High', ar: 'عالي' },
+  'tier.ultra': { en: 'Ultra', ar: 'فائق' },
+  camCam: { en: 'Camera & Views', ar: 'الكاميرا واللقطات' },
+  view: { en: 'View', ar: 'اللقطة' },
+  flyover: { en: 'Cinematic flyover', ar: 'تحليق سينمائي' },
+  crowd: { en: 'Crowd', ar: 'الجمهور' },
+  stadiumFill: { en: 'Stadium fill', ar: 'امتلاء الملعب' },
+  density: { en: 'Density', ar: 'الكثافة' },
+  showCrowd: { en: 'Show crowd on tifo seats', ar: 'إظهار الجمهور على مقاعد التيفو' },
+  'crowd.sellout': { en: 'Sell-out', ar: 'كامل العدد' },
+  'crowd.home': { en: 'Home', ar: 'أرضنا' },
+  'crowd.away-end': { en: 'Away end', ar: 'مدرج الضيوف' },
+  'crowd.half': { en: 'Half full', ar: 'نصف ممتلئ' },
+  'crowd.empty': { en: 'Empty', ar: 'فاضي' },
+  atmo: { en: 'Atmosphere', ar: 'الأجواء' },
+  timeOfDay: { en: 'Time of day', ar: 'وقت اليوم' },
+  weather: { en: 'Weather', ar: 'الطقس' },
+  exposure: { en: 'Exposure', ar: 'السطوع' },
+  sunIntensity: { en: 'Sun intensity', ar: 'شدة الشمس' },
+  floodlights: { en: 'Floodlights', ar: 'الكشافات' },
+  smoke: { en: 'Smoke', ar: 'الدخان' },
+  railBanners: { en: 'Rail banners', ar: 'لافتات الفواصل' },
+  coverStairs: { en: 'Cover stairs', ar: 'تغطية الدرج' },
+  cornerFlags: { en: 'Corner flags', ar: 'أعلام الأركان' },
+  wetPitch: { en: 'Wet pitch (reflections)', ar: 'أرضية مبلّلة (انعكاسات)' },
+  confetti: { en: 'Confetti', ar: 'قصاصات' },
+  pyro: { en: 'Pyro', ar: 'شماريخ' },
+  'tod.day': { en: 'Day', ar: 'نهار' },
+  'tod.dusk': { en: 'Dusk', ar: 'غروب' },
+  'tod.night': { en: 'Night', ar: 'ليل' },
+  'tod.sunset': { en: 'Sunset', ar: 'مغيب' },
+  'weather.clear': { en: 'Clear', ar: 'صحو' },
+  'weather.rain': { en: 'Rain', ar: 'مطر' },
+  'weather.snow': { en: 'Snow', ar: 'ثلج' },
+  assets: { en: 'Tifo Assets', ar: 'عناصر التيفو' },
+  addToStand: { en: 'Add to stand', ar: 'أضف للمدرج' },
+  bannerText: { en: 'Banner / surface text', ar: 'نص اللافتة / السطح' },
+  bigBanner: { en: 'Big banner', ar: 'لافتة كبيرة' },
+  smallBanner: { en: 'Small banner', ar: 'لافتة صغيرة' },
+  text: { en: 'Text', ar: 'نص' },
+  floor: { en: 'Floor', ar: 'أرضية' },
+  surface: { en: 'Surface', ar: 'سطح' },
+  megaFlag: { en: 'Mega-flag', ar: 'علم عملاق' },
+  scarves: { en: 'Scarves', ar: 'أوشحة' },
+  projectField: { en: 'Paint design onto seats from this view (edits your tifo)', ar: 'ارسم التصميم على المقاعد من هذي اللقطة (يعدّل تيفوك)' },
+  selectedAsset: { en: 'Selected asset', ar: 'العنصر المحدد' },
+  replaceImage: { en: 'Replace image', ar: 'استبدل الصورة' },
+  width: { en: 'Width', ar: 'العرض' },
+  height: { en: 'Height', ar: 'الارتفاع' },
+  heightOff: { en: 'Height off ground', ar: 'الارتفاع عن الأرض' },
+  unfurl: { en: 'Unfurl', ar: 'انشر' },
+  printPanels: { en: 'Print panels', ar: 'اطبع الألواح' },
+  deleteSelected: { en: 'Delete selected', ar: 'احذف المحدد' },
+  clearAll: { en: 'Clear all', ar: 'امسح الكل' },
+  'stand.1': { en: 'North', ar: 'الشمالي' },
+  'stand.3': { en: 'South', ar: 'الجنوبي' },
+  'stand.0': { en: 'East', ar: 'الشرقي' },
+  'stand.2': { en: 'West', ar: 'الغربي' },
+  choreo: { en: 'Choreography', ar: 'الكوريغرافيا' },
+  autoChoreo: { en: 'Auto choreo', ar: 'كوريغرافيا تلقائية' },
+  stop: { en: 'Stop', ar: 'إيقاف' },
+  revealStyle: { en: 'Reveal style', ar: 'نمط الكشف' },
+  playReveal: { en: 'Play reveal', ar: 'شغّل الكشف' },
+  cueTime: { en: 'Cue time (seconds)', ar: 'وقت اللقطة (ثواني)' },
+  cueType: { en: 'Cue type', ar: 'نوع اللقطة' },
+  addCue: { en: 'Add cue', ar: 'أضف لقطة' },
+  playSeq: { en: 'Play sequence', ar: 'شغّل التسلسل' },
+  clearSeq: { en: 'Clear', ar: 'مسح' },
+  'cue.reveal': { en: 'Reveal', ar: 'كشف' },
+  'cue.camera': { en: 'Camera (current)', ar: 'كاميرا (الحالية)' },
+  'cue.confetti': { en: 'Confetti', ar: 'قصاصات' },
+  'cue.pyro': { en: 'Pyro', ar: 'شماريخ' },
+  'cue.smoke-on': { en: 'Smoke on', ar: 'تشغيل الدخان' },
+  'cue.floods-on': { en: 'Floodlights on', ar: 'تشغيل الكشافات' },
+  noAssets: { en: '(no assets yet)', ar: '(ما في عناصر بعد)' },
+  selectDash: { en: '— select —', ar: '— اختر —' },
+  helpSub: { en: 'See your tifo come alive in a packed 3D stadium.', ar: 'شوف تيفوك يصير حقيقة في ملعب ثلاثي الأبعاد ممتلئ.' },
+  hMove: { en: 'Move the camera', ar: 'حرّك الكاميرا' },
+  hLook: { en: 'Look around', ar: 'انظر حولك' },
+  hDrag: { en: 'Drag', ar: 'سحب' },
+  hZoom: { en: 'Zoom', ar: 'تكبير' },
+  hScroll: { en: 'Scroll / pinch', ar: 'تمرير / قرص' },
+  hPan: { en: 'Pan', ar: 'تحريك' },
+  hRightDrag: { en: 'Right-drag', ar: 'سحب باليمين' },
+  hShortcuts: { en: 'Shortcuts', ar: 'اختصارات' },
+  hCamViews: { en: 'Camera views', ar: 'لقطات الكاميرا' },
+  hPlayReveal: { en: 'Play the reveal', ar: 'تشغيل الكشف' },
+  hFull: { en: 'Fullscreen', ar: 'ملء الشاشة' },
+  hHide: { en: 'Hide panel', ar: 'إخفاء اللوحة' },
+  hHelp: { en: 'Help', ar: 'مساعدة' },
+  hClose: { en: 'Close', ar: 'إغلاق' },
+  hYours: { en: 'Make it yours', ar: 'خلّه لك' },
+  hBanners: { en: 'Banners and flags', ar: 'اللافتات والأعلام' },
+  hTimeWeather: { en: 'Time, weather, effects', ar: 'الوقت والطقس والمؤثرات' },
+  hAutoChoreo: { en: 'Auto choreography', ar: 'كوريغرافيا تلقائية' },
+  gotIt: { en: 'Got it', ar: 'تمام' },
+  'tip.panel': { en: 'Show or hide the controls panel', ar: 'إظهار أو إخفاء لوحة الأدوات' },
+  'tip.snap': { en: 'Download a PNG of the current view', ar: 'نزّل صورة PNG للقطة الحالية' },
+  'tip.full': { en: 'Toggle fullscreen', ar: 'تبديل ملء الشاشة' },
+  'tip.link': { en: 'Copy a link that opens straight into the simulator', ar: 'انسخ رابط يفتح المحاكي مباشرة' },
+  'tip.fly': { en: 'Toggle a cinematic auto-orbit camera', ar: 'تبديل كاميرا دوران سينمائي تلقائي' },
+  'tip.density': { en: 'Fraction of seats with spectators', ar: 'نسبة المقاعد اللي فيها جمهور' },
+  'tip.tod': { en: 'Sky + lighting time of day', ar: 'السماء والإضاءة حسب وقت اليوم' },
+  'tip.weather': { en: 'Rain or snow', ar: 'مطر أو ثلج' },
+  'tip.exp': { en: 'Overall brightness', ar: 'السطوع العام' },
+  'tip.sun': { en: 'Sun / key light strength', ar: 'قوة ضوء الشمس الرئيسي' },
+  'tip.floods': { en: 'Floodlight towers + light beams', ar: 'أبراج الكشافات وأشعة الضوء' },
+  'tip.smoke': { en: 'Drifting smoke', ar: 'دخان منساب' },
+  'tip.banners': { en: 'Fill the dark walkway gap between tiers with your design', ar: 'عبّي الفراغ المعتم بين الطوابق بتصميمك' },
+  'tip.stairs': { en: 'Also fill the aisles / stairs between sections (unorthodox — off by default)', ar: 'عبّي كمان الممرات/الدرج بين القطاعات (غير معتاد — مطفأ افتراضياً)' },
+  'tip.wet': { en: 'Reflective wet-look pitch (heavier on GPU)', ar: 'أرضية مبلّلة عاكسة (أثقل على المعالج الرسومي)' },
+  'tip.confetti': { en: 'Burst of confetti', ar: 'انفجار قصاصات' },
+  'tip.pyro': { en: 'Burst of pyro flares', ar: 'انفجار شماريخ' },
+  'tip.bigBanner': { en: 'Big 3D banner that drapes the whole stand', ar: 'لافتة ثلاثية الأبعاد كبيرة تغطي المدرج كامل' },
+  'tip.smallBanner': { en: 'Small banner covering the dark front wall / infrastructure', ar: 'لافتة صغيرة تغطي الجدار الأمامي المعتم' },
+  'tip.text': { en: 'Text banner using the text box above', ar: 'لافتة نص باستخدام مربع النص فوق' },
+  'tip.floor': { en: 'Banner laid flat on the pitch', ar: 'لافتة مفروشة على الأرضية' },
+  'tip.surface': { en: 'Giant draped surface tifo over the stand', ar: 'تيفو سطح عملاق منسدل على المدرج' },
+  'tip.flag': { en: 'Huge waving flag over the crowd', ar: 'علم ضخم يرفرف فوق الجمهور' },
+  'tip.scarf': { en: 'Waving scarf wall', ar: 'جدار أوشحة يرفرف' },
+  'tip.proj': { en: 'Paints your tifo onto the seats from this view — EDITS your design', ar: 'يرسم تيفوك على المقاعد من هذي اللقطة — يعدّل تصميمك' },
+  'tip.img': { en: 'Put a custom image on the selected asset', ar: 'حط صورة مخصصة على العنصر المحدد' },
+  'tip.unfurl': { en: 'Drop / unfurl the selected surface tifo', ar: 'أسقط / انشر تيفو السطح المحدد' },
+  'tip.print': { en: 'Print the selected image as tiled paper panels', ar: 'اطبع الصورة المحددة كألواح ورقية' },
+  'tip.del': { en: 'Delete the selected asset', ar: 'احذف العنصر المحدد' },
+  'tip.clearAll': { en: 'Remove every asset you added', ar: 'احذف كل العناصر اللي أضفتها' },
+  'tip.auto': { en: 'Play a ready-made choreography show', ar: 'شغّل عرض كوريغرافيا جاهز' },
+  'tip.stop': { en: 'Stop the choreography', ar: 'أوقف الكوريغرافيا' },
+  'tip.reveal': { en: 'Play the selected reveal animation', ar: 'شغّل حركة الكشف المحددة' },
+  'tip.addCue': { en: 'Add this cue to your sequence', ar: 'أضف هذي اللقطة لتسلسلك' },
+  'tip.playSeq': { en: 'Play your built sequence (or auto choreo if empty)', ar: 'شغّل تسلسلك (أو الكوريغرافيا التلقائية لو فاضي)' },
+  'tip.clearSeq': { en: 'Clear the sequence', ar: 'امسح التسلسل' },
+  'toast.quality': { en: 'Quality: ', ar: 'الجودة: ' },
+  'toast.printFirst': { en: 'Select an image asset first', ar: 'اختر عنصر صورة أول' },
+  'toast.painted': { en: ' seats painted', ar: ' مقعد تم رسمها' },
+  'toast.snapSaved': { en: 'Snapshot saved', ar: 'تم حفظ اللقطة' },
+  'toast.linkCopied': { en: 'Link copied', ar: 'تم نسخ الرابط' },
+};
+const L = (k: string): string => {
+  const e = MDS_T[k];
+  return e ? (getLang() === 'ar' ? e.ar : e.en) : k;
+};
+
 interface SimState {
   camIdx: number;
   tier: QualityTier;
@@ -200,6 +361,7 @@ export function openMatchDaySimulator(
 
   const overlay = document.createElement('div');
   overlay.className = 'mds-overlay';
+  overlay.dir = getLang() === 'ar' ? 'rtl' : 'ltr';
   const style = document.createElement('style');
   style.textContent = CSS;
   overlay.appendChild(style);
@@ -212,31 +374,31 @@ export function openMatchDaySimulator(
   bar.className = 'mds-bar';
   const panelToggle = btn('', 'mds-icon');
   panelToggle.innerHTML = ICONS.menu;
-  panelToggle.title = 'Show/hide controls';
-  panelToggle.setAttribute('aria-label', 'Show or hide controls');
+  panelToggle.title = L('showHide');
+  panelToggle.setAttribute('aria-label', L('showHide'));
   const brand = document.createElement('div');
   brand.className = 'mds-brand';
-  brand.innerHTML = '<span class="dot"></span><span class="brand-txt">Match Day Simulator</span>';
-  brand.title = 'Shortcuts: 1-9 camera views · H hide panel · F fullscreen · Space play show';
+  brand.innerHTML = '<span class="dot"></span><span class="brand-txt">' + L('brand') + '</span>';
+  brand.title = L('shortcuts');
   const spacer = document.createElement('div');
   spacer.className = 'mds-spacer';
   const status = document.createElement('div');
   status.className = 'mds-status';
   const qSel = sel();
-  for (const [tier, label] of TIER_LABELS) opt(qSel, tier, label, tier === state.tier);
-  const snapBtn = btn('Snapshot');
-  const fullBtn = btn('Fullscreen');
-  const linkBtn = btn('Copy link');
+  for (const [tier] of TIER_LABELS) opt(qSel, tier, L('tier.' + tier), tier === state.tier);
+  const snapBtn = btn(L('snapshot'));
+  const fullBtn = btn(L('fullscreen'));
+  const linkBtn = btn(L('copyLink'));
   const helpBtn = btn('', 'mds-icon');
   helpBtn.innerHTML = ICONS.help;
-  helpBtn.title = 'Help & controls (?)';
-  helpBtn.setAttribute('aria-label', 'Help and controls');
-  const closeBtn = btn('Close');
+  helpBtn.title = L('helpControls');
+  helpBtn.setAttribute('aria-label', L('helpControls'));
+  const closeBtn = btn(L('close'));
   // Secondary actions are grouped so they can relocate into the bottom-sheet
   // panel on mobile (keeps the top bar from overflowing on small screens).
   const barActions = document.createElement('div');
   barActions.className = 'mds-baracts';
-  barActions.append(barField('Quality', qSel), snapBtn, fullBtn, linkBtn);
+  barActions.append(barField(L('quality'), qSel), snapBtn, fullBtn, linkBtn);
   bar.append(panelToggle, brand, spacer, status, barActions, helpBtn, closeBtn);
 
   let toastT = 0;
@@ -255,23 +417,23 @@ export function openMatchDaySimulator(
 
   // Camera & Views
   const camSel = sel();
-  const flyBtn = btn('Cinematic flyover');
-  const secCam = section(ICONS.camera, 'Camera & Views', true);
-  secCam.body.append(field('View', camSel), flyBtn);
+  const flyBtn = btn(L('flyover'));
+  const secCam = section(ICONS.camera, L('camCam'), true);
+  secCam.body.append(field(L('view'), camSel), flyBtn);
 
   // Crowd
   const crowdSel = sel();
-  for (const [id, label] of CROWD_PRESETS) opt(crowdSel, id, label, id === state.crowd);
+  for (const [id] of CROWD_PRESETS) opt(crowdSel, id, L('crowd.' + id), id === state.crowd);
   const density = rng(0, 100, Math.round(state.density * 100));
   const onTifo = chk(state.showOnTifo);
-  const secCrowd = section(ICONS.crowd, 'Crowd', false);
-  secCrowd.body.append(field('Stadium fill', crowdSel), field('Density', density), checkField('Show crowd on tifo seats', onTifo));
+  const secCrowd = section(ICONS.crowd, L('crowd'), false);
+  secCrowd.body.append(field(L('stadiumFill'), crowdSel), field(L('density'), density), checkField(L('showCrowd'), onTifo));
 
   // Atmosphere
   const todSel = sel();
-  for (const [v, l] of [['day', 'Day'], ['dusk', 'Dusk'], ['night', 'Night'], ['sunset', 'Sunset']]) opt(todSel, v, l, v === state.tod);
+  for (const v of ['day', 'dusk', 'night', 'sunset']) opt(todSel, v, L('tod.' + v), v === state.tod);
   const weatherSel = sel();
-  for (const [v, l] of [['clear', 'Clear'], ['rain', 'Rain'], ['snow', 'Snow']]) opt(weatherSel, v, l, false);
+  for (const v of ['clear', 'rain', 'snow']) opt(weatherSel, v, L('weather.' + v), false);
   const expRange = rng(0.4, 2, 1.05, 0.05);
   const sunRange = rng(0, 3, 1.25, 0.05);
   const floods = chk(state.floods);
@@ -280,71 +442,71 @@ export function openMatchDaySimulator(
   const stairsChk = chk(state.stairs);
   const flagsChk = chk(state.flags);
   const wetChk = chk(state.wet);
-  const confettiBtn = btn('Confetti');
-  const pyroBtn = btn('Pyro');
-  const secAtmo = section(ICONS.atmosphere, 'Atmosphere', false);
+  const confettiBtn = btn(L('confetti'));
+  const pyroBtn = btn(L('pyro'));
+  const secAtmo = section(ICONS.atmosphere, L('atmo'), false);
   secAtmo.body.append(
-    field('Time of day', todSel),
-    field('Weather', weatherSel),
-    field('Exposure', expRange),
-    field('Sun intensity', sunRange),
-    checkField('Floodlights', floods),
-    checkField('Smoke', smoke),
-    checkField('Rail banners', bannersChk),
-    checkField('Cover stairs', stairsChk),
-    checkField('Corner flags', flagsChk),
-    checkField('Wet pitch (reflections)', wetChk),
+    field(L('timeOfDay'), todSel),
+    field(L('weather'), weatherSel),
+    field(L('exposure'), expRange),
+    field(L('sunIntensity'), sunRange),
+    checkField(L('floodlights'), floods),
+    checkField(L('smoke'), smoke),
+    checkField(L('railBanners'), bannersChk),
+    checkField(L('coverStairs'), stairsChk),
+    checkField(L('cornerFlags'), flagsChk),
+    checkField(L('wetPitch'), wetChk),
     row(confettiBtn, pyroBtn),
   );
 
   // Tifo Assets
   const standSel = sel();
-  for (const [v, l] of [['1', 'North'], ['3', 'South'], ['0', 'East'], ['2', 'West']]) opt(standSel, v, l, false);
+  for (const v of ['1', '3', '0', '2']) opt(standSel, v, L('stand.' + v), false);
   const textInput = document.createElement('input');
   textInput.type = 'text';
   textInput.placeholder = 'ULTRAS';
   textInput.className = 'mds-input';
-  const addBannerBtn = btn('Big banner');
-  const addSmallBtn = btn('Small banner');
-  const addTextBtn = btn('Text');
-  const addFloorBtn = btn('Floor');
-  const addSurfaceBtn = btn('Surface');
-  const addFlagBtn = btn('Mega-flag');
-  const addScarfBtn = btn('Scarves');
+  const addBannerBtn = btn(L('bigBanner'));
+  const addSmallBtn = btn(L('smallBanner'));
+  const addTextBtn = btn(L('text'));
+  const addFloorBtn = btn(L('floor'));
+  const addSurfaceBtn = btn(L('surface'));
+  const addFlagBtn = btn(L('megaFlag'));
+  const addScarfBtn = btn(L('scarves'));
   const projInput = fileInput();
   const assetSel = sel();
   const imgInput = fileInput();
   const wRange = rng(4, 60, 18);
   const hRange = rng(1, 30, 4);
   const yRange = rng(0, 60, 14);
-  const unfurlBtn = btn('Unfurl');
-  const printBtn = btn('Print panels');
-  const delBtn = btn('Delete selected');
-  const clearAllBtn = btn('Clear all');
-  const secAssets = section(ICONS.assets, 'Tifo Assets', false);
+  const unfurlBtn = btn(L('unfurl'));
+  const printBtn = btn(L('printPanels'));
+  const delBtn = btn(L('deleteSelected'));
+  const clearAllBtn = btn(L('clearAll'));
+  const secAssets = section(ICONS.assets, L('assets'), false);
   secAssets.body.append(
-    field('Add to stand', standSel),
-    field('Banner / surface text', textInput),
+    field(L('addToStand'), standSel),
+    field(L('bannerText'), textInput),
     row(addBannerBtn, addSmallBtn),
     row(addTextBtn, addFloorBtn),
     row(addSurfaceBtn, addFlagBtn, addScarfBtn),
     divider(),
-    field('Paint design onto seats from this view (edits your tifo)', projInput),
+    field(L('projectField'), projInput),
     divider(),
-    field('Selected asset', assetSel),
-    field('Replace image', imgInput),
-    field('Width', wRange),
-    field('Height', hRange),
-    field('Height off ground', yRange),
+    field(L('selectedAsset'), assetSel),
+    field(L('replaceImage'), imgInput),
+    field(L('width'), wRange),
+    field(L('height'), hRange),
+    field(L('heightOff'), yRange),
     row(unfurlBtn, printBtn, delBtn, clearAllBtn),
   );
 
   // Choreography
-  const autoBtn = btn('Auto choreo', 'primary');
-  const stopBtn = btn('Stop');
+  const autoBtn = btn(L('autoChoreo'), 'primary');
+  const stopBtn = btn(L('stop'));
   const revealSel = sel();
   for (const m of REVEAL_MODES) opt(revealSel, m.id, m.label, false);
-  const revealBtn = btn('Play reveal');
+  const revealBtn = btn(L('playReveal'));
   const cueTime = document.createElement('input');
   cueTime.type = 'number';
   cueTime.min = '0';
@@ -353,23 +515,23 @@ export function openMatchDaySimulator(
   cueTime.value = '0';
   cueTime.className = 'mds-input';
   const cueKind = sel();
-  for (const [v, l] of [['reveal', 'Reveal'], ['camera', 'Camera (current)'], ['confetti', 'Confetti'], ['pyro', 'Pyro'], ['smoke-on', 'Smoke on'], ['floods-on', 'Floodlights on']]) opt(cueKind, v, l, false);
-  const addCueBtn = btn('Add cue');
-  const playSeqBtn = btn('Play sequence', 'primary');
-  const clearSeqBtn = btn('Clear');
+  for (const v of ['reveal', 'camera', 'confetti', 'pyro', 'smoke-on', 'floods-on']) opt(cueKind, v, L('cue.' + v), false);
+  const addCueBtn = btn(L('addCue'));
+  const playSeqBtn = btn(L('playSeq'), 'primary');
+  const clearSeqBtn = btn(L('clearSeq'));
   const cueCount = document.createElement('div');
   cueCount.className = 'mds-hint';
   cueCount.textContent = '0 cues';
-  const secChoreo = section(ICONS.choreo, 'Choreography', false);
+  const secChoreo = section(ICONS.choreo, L('choreo'), false);
   secChoreo.body.append(
     row(autoBtn, stopBtn),
     divider(),
-    field('Reveal style', revealSel),
+    field(L('revealStyle'), revealSel),
     revealBtn,
     divider(),
     document.createTextNode(''),
-    field('Cue time (seconds)', cueTime),
-    field('Cue type', cueKind),
+    field(L('cueTime'), cueTime),
+    field(L('cueType'), cueKind),
     row(addCueBtn, playSeqBtn, clearSeqBtn),
     cueCount,
   );
@@ -393,24 +555,24 @@ export function openMatchDaySimulator(
   const kv = (k: string, v: string): string => '<div class="mds-kv"><span class="k">' + k + '</span><span>' + v + '</span></div>';
   const key = (s: string): string => '<span class="mds-key">' + s + '</span>';
   helpCard.innerHTML =
-    '<h2>Match Day Simulator</h2>' +
-    '<p class="sub">See your tifo come alive in a packed 3D stadium.</p>' +
-    '<div class="mds-help-grp"><h3>Move the camera</h3>' +
-    kv('Look around', 'Drag') + kv('Zoom', 'Scroll / pinch') + kv('Pan', 'Right-drag') + '</div>' +
-    '<div class="mds-help-grp"><h3>Shortcuts</h3>' +
-    kv('Camera views', key('1') + ' to ' + key('9')) +
-    kv('Play the reveal', key('Space')) +
-    kv('Fullscreen', key('F')) +
-    kv('Hide panel', key('H')) +
-    kv('Help', key('?')) +
-    kv('Close', key('Esc')) +
+    '<h2>' + L('brand') + '</h2>' +
+    '<p class="sub">' + L('helpSub') + '</p>' +
+    '<div class="mds-help-grp"><h3>' + L('hMove') + '</h3>' +
+    kv(L('hLook'), L('hDrag')) + kv(L('hZoom'), L('hScroll')) + kv(L('hPan'), L('hRightDrag')) + '</div>' +
+    '<div class="mds-help-grp"><h3>' + L('hShortcuts') + '</h3>' +
+    kv(L('hCamViews'), key('1') + ' to ' + key('9')) +
+    kv(L('hPlayReveal'), key('Space')) +
+    kv(L('hFull'), key('F')) +
+    kv(L('hHide'), key('H')) +
+    kv(L('hHelp'), key('?')) +
+    kv(L('hClose'), key('Esc')) +
     '</div>' +
-    '<div class="mds-help-grp"><h3>Make it yours</h3>' +
-    kv('Banners and flags', 'Tifo Assets') +
-    kv('Time, weather, effects', 'Atmosphere') +
-    kv('Auto choreography', 'Choreography') +
+    '<div class="mds-help-grp"><h3>' + L('hYours') + '</h3>' +
+    kv(L('hBanners'), L('assets')) +
+    kv(L('hTimeWeather'), L('atmo')) +
+    kv(L('hAutoChoreo'), L('choreo')) +
     '</div>';
-  const gotBtn = btn('Got it', 'primary');
+  const gotBtn = btn(L('gotIt'), 'primary');
   const helpActions = document.createElement('div');
   helpActions.className = 'mds-help-actions';
   helpActions.append(gotBtn);
@@ -452,45 +614,45 @@ export function openMatchDaySimulator(
   );
 
   // Hover tooltips on the non-obvious controls.
-  for (const [elT, t] of [
-    [panelToggle, 'Show or hide the controls panel'],
-    [snapBtn, 'Download a PNG of the current view'],
-    [fullBtn, 'Toggle fullscreen'],
-    [linkBtn, 'Copy a link that opens straight into the simulator'],
-    [flyBtn, 'Toggle a cinematic auto-orbit camera'],
-    [density, 'Fraction of seats with spectators'],
-    [todSel, 'Sky + lighting time of day'],
-    [weatherSel, 'Rain or snow'],
-    [expRange, 'Overall brightness'],
-    [sunRange, 'Sun / key light strength'],
-    [floods, 'Floodlight towers + light beams'],
-    [smoke, 'Drifting smoke'],
-    [bannersChk, 'Fill the dark walkway gap between tiers with your design'],
-    [stairsChk, 'Also fill the aisles / stairs between sections (unorthodox — off by default)'],
-    [wetChk, 'Reflective wet-look pitch (heavier on GPU)'],
-    [confettiBtn, 'Burst of confetti'],
-    [pyroBtn, 'Burst of pyro flares'],
-    [addBannerBtn, 'Big 3D banner that drapes the whole stand'],
-    [addSmallBtn, 'Small banner covering the dark front wall / infrastructure'],
-    [addTextBtn, 'Text banner using the text box above'],
-    [addFloorBtn, 'Banner laid flat on the pitch'],
-    [addSurfaceBtn, 'Giant draped surface tifo over the stand'],
-    [addFlagBtn, 'Huge waving flag over the crowd'],
-    [addScarfBtn, 'Waving scarf wall'],
-    [projInput, 'Paints your tifo onto the seats from this view — EDITS your design'],
-    [imgInput, 'Put a custom image on the selected asset'],
-    [unfurlBtn, 'Drop / unfurl the selected surface tifo'],
-    [printBtn, 'Print the selected image as tiled paper panels'],
-    [delBtn, 'Delete the selected asset'],
-    [clearAllBtn, 'Remove every asset you added'],
-    [autoBtn, 'Play a ready-made choreography show'],
-    [stopBtn, 'Stop the choreography'],
-    [revealBtn, 'Play the selected reveal animation'],
-    [addCueBtn, 'Add this cue to your sequence'],
-    [playSeqBtn, 'Play your built sequence (or auto choreo if empty)'],
-    [clearSeqBtn, 'Clear the sequence'],
+  for (const [elT, k] of [
+    [panelToggle, 'tip.panel'],
+    [snapBtn, 'tip.snap'],
+    [fullBtn, 'tip.full'],
+    [linkBtn, 'tip.link'],
+    [flyBtn, 'tip.fly'],
+    [density, 'tip.density'],
+    [todSel, 'tip.tod'],
+    [weatherSel, 'tip.weather'],
+    [expRange, 'tip.exp'],
+    [sunRange, 'tip.sun'],
+    [floods, 'tip.floods'],
+    [smoke, 'tip.smoke'],
+    [bannersChk, 'tip.banners'],
+    [stairsChk, 'tip.stairs'],
+    [wetChk, 'tip.wet'],
+    [confettiBtn, 'tip.confetti'],
+    [pyroBtn, 'tip.pyro'],
+    [addBannerBtn, 'tip.bigBanner'],
+    [addSmallBtn, 'tip.smallBanner'],
+    [addTextBtn, 'tip.text'],
+    [addFloorBtn, 'tip.floor'],
+    [addSurfaceBtn, 'tip.surface'],
+    [addFlagBtn, 'tip.flag'],
+    [addScarfBtn, 'tip.scarf'],
+    [projInput, 'tip.proj'],
+    [imgInput, 'tip.img'],
+    [unfurlBtn, 'tip.unfurl'],
+    [printBtn, 'tip.print'],
+    [delBtn, 'tip.del'],
+    [clearAllBtn, 'tip.clearAll'],
+    [autoBtn, 'tip.auto'],
+    [stopBtn, 'tip.stop'],
+    [revealBtn, 'tip.reveal'],
+    [addCueBtn, 'tip.addCue'],
+    [playSeqBtn, 'tip.playSeq'],
+    [clearSeqBtn, 'tip.clearSeq'],
   ] as [HTMLElement, string][]) {
-    elT.title = t;
+    elT.title = L(k);
   }
 
   // ---------- simulator instance + state ----------
@@ -499,7 +661,7 @@ export function openMatchDaySimulator(
   function refreshAssets(): void {
     const assets = sim.listAssets();
     assetSel.replaceChildren();
-    opt(assetSel, '', assets.length ? '— select —' : '(no assets yet)', false);
+    opt(assetSel, '', assets.length ? L('selectDash') : L('noAssets'), false);
     assets.forEach((a, i) => opt(assetSel, a.id, a.type + ' ' + (i + 1), false));
     assetSel.value = sim.selectedAssetId ?? '';
   }
@@ -570,7 +732,7 @@ export function openMatchDaySimulator(
     state.tier = qSel.value as QualityTier;
     sim.dispose();
     mount();
-    toast('Quality: ' + state.tier);
+    toast(L('toast.quality') + L('tier.' + state.tier));
   });
   flyBtn.addEventListener('click', () => {
     state.fly = !state.fly;
@@ -662,7 +824,7 @@ export function openMatchDaySimulator(
   });
   unfurlBtn.addEventListener('click', () => sim.unfurlSelected());
   printBtn.addEventListener('click', () => {
-    if (!sim.printSelectedPanels()) toast('Select an image asset first');
+    if (!sim.printSelectedPanels()) toast(L('toast.printFirst'));
   });
   projInput.addEventListener('change', () => {
     const f = projInput.files?.[0];
@@ -677,7 +839,7 @@ export function openMatchDaySimulator(
           return;
         }
         const n = sim.projectImageToMosaic(img);
-        toast(n.toLocaleString() + ' seats painted');
+        toast(n.toLocaleString() + L('toast.painted'));
         projInput.value = '';
       };
       img.src = r.result;
@@ -750,13 +912,13 @@ export function openMatchDaySimulator(
     flash.classList.remove('go');
     void flash.offsetWidth; // reflow so the flash animation restarts each time
     flash.classList.add('go');
-    toast('Snapshot saved');
+    toast(L('toast.snapSaved'));
   });
   linkBtn.addEventListener('click', () => {
     const u = new URL(location.href);
     u.searchParams.set('sim', '1');
     void navigator.clipboard?.writeText(u.toString());
-    toast('Link copied');
+    toast(L('toast.linkCopied'));
   });
 
   const onFsChange = (): void => {
