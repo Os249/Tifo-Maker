@@ -51,7 +51,21 @@ function resolveDist(): string | undefined {
 async function applySchema(pool: pg.Pool): Promise<void> {
   const schemaPath = join(__dirname, '../schema.sql');
   const sql = readFileSync(schemaPath, 'utf8');
-  await pool.query(sql);
+  // Run statements individually so one failing statement on a pre-existing database
+  // can't abort the rest — every CREATE/ALTER ... IF NOT EXISTS still gets applied.
+  // (Running the whole file as one query meant an early error skipped the new
+  // email/is_pro/accepted_terms columns, which then 500'd signup.)
+  const statements = sql
+    .split(/;\s*(?:\r?\n|$)/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  for (const stmt of statements) {
+    try {
+      await pool.query(stmt);
+    } catch (e) {
+      console.error('[tifo] schema statement skipped:', (e as Error).message);
+    }
+  }
 }
 
 async function main(): Promise<void> {

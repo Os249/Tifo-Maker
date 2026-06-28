@@ -131,7 +131,8 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
     if (typeof tok === 'string' && adminPassword && verifyUnlock(adminPassword, tok)) return { kind: 'admin' };
     const userId = await deps.userOf(req);
     if (!userId) return { kind: 'deny', status: 401, error: 'Sign in to use the AI Designer.', reason: 'signin' };
-    if (await deps.isAdmin(userId)) return { kind: 'admin' };
+    // Admins are metered like everyone for now (no auto-unlimited AI); the /admin
+    // dashboard is separate. Only the unlock token and paid (pro) accounts are unlimited.
     const st = await deps.userState(userId);
     if (!st) return { kind: 'deny', status: 401, error: 'Sign in to use the AI Designer.', reason: 'signin' };
     if (!st.emailVerified) {
