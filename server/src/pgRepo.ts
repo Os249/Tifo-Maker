@@ -580,12 +580,14 @@ export class PgAuthRepository implements AuthRepository {
     passwordHash: string,
     opts: { email?: string | null; acceptedVersion?: string | null } = {},
   ): Promise<UserRow | null> {
+    const acceptedVersion = opts.acceptedVersion ?? null;
+    const acceptedAt = acceptedVersion ? new Date() : null;
     try {
       const res = await this.pool.query(
         `INSERT INTO users (username, password_hash, email, accepted_terms_version, accepted_terms_at)
-         VALUES ($1, $2, $3, $4, CASE WHEN $4 IS NULL THEN NULL ELSE now() END)
+         VALUES ($1, $2, $3, $4, $5)
          RETURNING id, username, password_hash, email, email_verified_at`,
-        [username, passwordHash, opts.email ?? null, opts.acceptedVersion ?? null],
+        [username, passwordHash, opts.email ?? null, acceptedVersion, acceptedAt],
       );
       return mapUserRow(res.rows[0]);
     } catch (err) {
