@@ -5,7 +5,7 @@
  *
  * Resolves true if an email was saved (and a verification link sent).
  */
-import { setAccountEmail, resendVerification } from '../net/api';
+import { setAccountEmail } from '../net/api';
 import { t, getLang } from './i18n';
 import { POLICY_VERSION } from './authModal';
 
@@ -66,7 +66,6 @@ export function openAddEmailModal(): Promise<boolean> {
       submit.textContent = t('auth.sending');
       try {
         await setAccountEmail(email, POLICY_VERSION);
-        await resendVerification().catch(() => {});
         added = true;
         form.hidden = true;
         okMsg.hidden = false;

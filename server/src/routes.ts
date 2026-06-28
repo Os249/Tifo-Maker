@@ -568,6 +568,9 @@ export async function buildApp(
     const version = typeof acceptedVersion === 'string' ? acceptedVersion.slice(0, 32) : null;
     const ok = await auth.setEmail(userId, mail, version);
     if (!ok) return reply.code(409).send({ error: 'email already in use' });
+    // Send the verification link for the newly added/changed email, server-side,
+    // so it never depends on a separate client call.
+    await sendVerifyEmail(req, { id: userId, email: mail });
     return reply.code(200).send({ email: mail, emailVerified: false });
   });
 
