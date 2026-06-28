@@ -1,6 +1,7 @@
 import '@tabler/icons-webfont/dist/tabler-icons.min.css';
 import { installTheme } from './ui/theme';
 import { initLang, applyDom, toggleLang, t } from './ui/i18n';
+import { installConsent } from './ui/consent';
 import { generateSeatMapAsync } from './workers/client';
 import { DEFAULT_PALETTE, DEFAULT_TEMPLATE, PALETTE_PRESETS, TEMPLATES } from './core/template';
 import { templateById, registerServerCommunity, type StadiumEntry } from './core/stadiumCatalog';
@@ -69,6 +70,21 @@ async function main(): Promise<void> {
   installTheme();
   initLang();
   applyDom(document);
+  installConsent();
+  // Confirmation toast after returning from an email-verification link.
+  const verifiedFlag = new URLSearchParams(location.search).get('verified');
+  if (verifiedFlag === '1' || verifiedFlag === '0') {
+    const toast = document.createElement('div');
+    toast.textContent = verifiedFlag === '1' ? t('verify.ok') : t('verify.fail');
+    toast.style.cssText =
+      'position:fixed;left:50%;top:14px;transform:translateX(-50%);z-index:1100;' +
+      'padding:10px 16px;border-radius:10px;color:#fff;font:600 13px/1.3 "Inter",system-ui,sans-serif;' +
+      'box-shadow:0 8px 24px rgba(0,0,0,.3);max-width:90vw;text-align:center;' +
+      (verifiedFlag === '1' ? 'background:#15924D;' : 'background:#C0392B;');
+    document.body.appendChild(toast);
+    setTimeout(() => toast.remove(), 5000);
+    history.replaceState(null, '', location.pathname);
+  }
   // Language toggle in the editor header.
   const langToggle = document.getElementById('lang-toggle');
   langToggle?.addEventListener('click', () => {

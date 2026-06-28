@@ -18,6 +18,7 @@ import {
   type SpecLayer,
   type Region,
   type SymbolName,
+  type PatternName,
   type RegionInput,
   SYMBOL_NAMES,
   normalizeRegion,
@@ -29,51 +30,53 @@ const EMPTY = '#262a33';
 
 /** Colour lexicon: word(s) → hex. Two-word phrases are matched before singles. */
 const COLOR_WORDS: Array<[RegExp, string]> = [
-  [/royal blue/, '#1c5fd9'],
-  [/sky blue/, '#5bc0eb'],
-  [/navy( blue)?/, '#10233f'],
+  // Two-word / specific shades first so "navy blue" isn't also caught as "blue".
+  [/royal blue|أزرق ملكي/, '#1c5fd9'],
+  [/sky blue|سماوي|سماوية/, '#5bc0eb'],
+  [/navy( blue)?|كحلي|كحلية/, '#10233f'],
   [/light blue/, '#5bc0eb'],
   [/dark blue/, '#10233f'],
-  [/claret/, '#7a1f3d'],
-  [/maroon/, '#6e1423'],
-  [/burgundy/, '#6e1423'],
-  [/\bgold(en)?\b/, '#e8b73a'],
-  [/\byellow\b/, '#f4d03f'],
-  [/\bred\b/, '#c8242c'],
-  [/crimson|scarlet/, '#c8242c'],
-  [/\bwhite\b/, '#f2f1ec'],
-  [/\bblack\b/, '#16161a'],
-  [/\bblue\b/, '#1c5fd9'],
-  [/\bgreen\b/, '#0f7a3d'],
-  [/\borange\b/, '#e8731a'],
-  [/\bpurple|violet\b/, '#6b2fb3'],
-  [/\bpink|magenta\b/, '#e85aa0'],
-  [/\bcyan|teal\b/, '#1bb6c1'],
+  [/claret|عنابي/, '#7a1f3d'],
+  [/maroon|burgundy|خمري|نبيتي/, '#6e1423'],
+  [/\bgold(en)?\b|ذهبي|ذهبية|دهبي/, '#e8b73a'],
+  [/\byellow\b|أصفر|صفراء|اصفر/, '#f4d03f'],
+  [/\bred\b|crimson|scarlet|أحمر|حمراء|احمر/, '#c8242c'],
+  [/\bwhite\b|أبيض|بيضاء|ابيض/, '#f2f1ec'],
+  [/\bblack\b|أسود|سوداء|اسود/, '#16161a'],
+  [/\bblue\b|أزرق|زرقاء|ازرق/, '#1c5fd9'],
+  [/\bgreen\b|أخضر|خضراء|اخضر/, '#0f7a3d'],
+  [/\borange\b|برتقالي|برتقالية/, '#e8731a'],
+  [/\bpurple|violet\b|بنفسجي|أرجواني/, '#6b2fb3'],
+  [/\bpink|magenta\b|وردي|زهري/, '#e85aa0'],
+  [/\bcyan|teal|turquoise\b|تركواز|فيروزي/, '#1bb6c1'],
   [/\blime\b/, '#7ac70c'],
-  [/\bsilver\b/, '#c7ccd1'],
-  [/\bgrey|gray\b/, '#8a8f98'],
-  [/\bbrown\b/, '#6b4423'],
+  [/\bsilver\b|فضي|فضية/, '#c7ccd1'],
+  [/\bgrey|gray\b|رمادي|رمادية/, '#8a8f98'],
+  [/\bbrown\b|بني|بنية/, '#6b4423'],
+  [/\bbeige|cream\b|بيج|كريمي/, '#e8dcc0'],
 ];
 
 /** Keyword → symbol. Animals/figures we can't draw map to a bold emblem. */
 const SYMBOL_WORDS: Array<[RegExp, SymbolName]> = [
-  [/eagle|falcon|hawk|bird/, 'eagle'],
-  [/wings?/, 'wings'],
-  [/crown|king|royal/, 'crown'],
-  [/shield|crest|emblem|badge|lion|bull|tiger|wolf|dragon|bear|ram|fox|devil/, 'shield'],
-  [/star\b|stars?/, 'star'],
-  [/heart|love/, 'heart'],
-  [/\bcross\b/, 'cross'],
-  [/lightning|bolt|thunder|power/, 'bolt'],
-  [/flame|fire|burn/, 'flame'],
-  [/anchor|harbou?r|port|dock/, 'anchor'],
-  [/ball|football|soccer/, 'ball'],
-  [/fist|strength|fight|resist/, 'fist'],
-  [/crescent|moon/, 'crescent'],
-  [/diamond/, 'diamond'],
-  [/circle|round|dot/, 'circle'],
-  [/ring|hoop/, 'ring'],
-  [/chevron|arrow/, 'chevron'],
+  [/eagle|falcon|hawk|bird|نسر|صقر|طائر/, 'eagle'],
+  [/wings?|أجنحة|جناح/, 'wings'],
+  [/crown|king|royal|تاج|ملك|ملكي/, 'crown'],
+  [/shield|crest|emblem|badge|lion|bull|tiger|wolf|dragon|bear|ram|fox|devil|درع|شعار|أسد|نمر|ثور|ذئب|تنين/, 'shield'],
+  [/star\b|stars?|نجمة|نجوم|نجم/, 'star'],
+  [/heart|love|قلب|حب/, 'heart'],
+  [/\bcross\b|صليب/, 'cross'],
+  [/lightning|bolt|thunder|power|برق|رعد|قوة/, 'bolt'],
+  [/flame|fire|burn|نار|لهب|لهيب/, 'flame'],
+  [/anchor|harbou?r|port|dock|مرساة|ميناء/, 'anchor'],
+  [/ball|football|soccer|كرة|كورة/, 'ball'],
+  [/fist|strength|fight|resist|قبضة|نضال/, 'fist'],
+  [/crescent|moon|هلال|قمر/, 'crescent'],
+  [/diamond|ماس|معين/, 'diamond'],
+  [/triangle|مثلث/, 'triangle'],
+  [/square|مربع/, 'square'],
+  [/circle|round|dot|دائرة/, 'circle'],
+  [/ring|hoop|حلقة/, 'ring'],
+  [/chevron|arrow|سهم/, 'chevron'],
 ];
 
 /** A few well-known players → display name + shirt number, for "<player> tifo". */
@@ -91,7 +94,10 @@ const PLAYERS: Record<string, { name: string; num?: string }> = {
 };
 
 /** Slogan words worth promoting to the headline when no explicit text is given. */
-const SLOGANS = ['champions', 'forza', 'ultras', 'allez', 'history', 'legends', 'glory', 'pride', 'believe', 'invincible', 'fortuna', 'fede'];
+const SLOGANS = [
+  'champions', 'forza', 'ultras', 'allez', 'history', 'legends', 'glory', 'pride', 'believe', 'invincible', 'fortuna', 'fede',
+  'الزعيم', 'العالمي', 'أبطال', 'مجد', 'شرف', 'الأسطورة', 'جمهور', 'إيمان', 'فخر', 'العنيد', 'عشق',
+];
 
 function luminance(hex: string): number {
   const v = parseInt(hex.slice(1), 16);
@@ -141,14 +147,14 @@ function pickColors(p: string): string[] {
 }
 
 function pickRegion(p: string): RegionInput {
-  if (/\b(across|whole|entire|all stands?|full|stadium-?wide|everywhere|four stands?)\b/.test(p)) return 'all';
-  if (/\bnorth\b/.test(p)) return 'north';
-  if (/\bsouth\b/.test(p)) return 'south';
-  if (/\beast\b/.test(p)) return 'east';
-  if (/\bwest\b/.test(p)) return 'west';
+  if (/\b(across|whole|entire|all stands?|full|stadium-?wide|everywhere|four stands?)\b|كامل|كل المدرجات|الملعب كامل|كل الملعب|المدرجات كلها/.test(p)) return 'all';
+  if (/\bnorth\b|الشمال|الشمالي|شمالي/.test(p)) return 'north';
+  if (/\bsouth\b|الجنوب|الجنوبي|جنوبي/.test(p)) return 'south';
+  if (/\beast\b|الشرق|الشرقي|شرقي/.test(p)) return 'east';
+  if (/\bwest\b|الغرب|الغربي|غربي/.test(p)) return 'west';
   if (/\bkop\b/.test(p)) return 'north';
-  if (/\bupper\b/.test(p)) return 'upper';
-  if (/\blower\b/.test(p)) return 'lower';
+  if (/\bupper\b|علوي|العلوي/.test(p)) return 'upper';
+  if (/\blower\b|سفلي|السفلي/.test(p)) return 'lower';
   return 'all';
 }
 
@@ -172,6 +178,10 @@ function pickText(original: string, lower: string): { head: string | null; sub: 
   const says = original.match(/\b(?:says?|saying|reads?|text|word|slogan)\s+["“']?([A-Za-z0-9 ]{2,30})/i);
   if (says) return { head: says[1].toUpperCase().trim(), sub: null };
 
+  // 3b) Arabic text trigger: "مكتوب / يقول / شعار / عبارة / كلمة X".
+  const saysAr = original.match(/(?:مكتوب|يقول|شعار|عبارة|كلمة)\s*[:\-]?\s*["“']?([؀-ۿ0-9 ]{2,30})/);
+  if (saysAr) return { head: saysAr[1].trim(), sub: null };
+
   // 4) A standalone ALL-CAPS token already in the brief (e.g. CHAMPIONS).
   const caps = original.match(/\b[A-Z][A-Z0-9]{2,20}\b/g)?.filter((w) => !['AI', 'TIFO'].includes(w));
   if (caps && caps.length) return { head: caps[0], sub: null };
@@ -183,8 +193,25 @@ function pickText(original: string, lower: string): { head: string | null; sub: 
 }
 
 function detectStripes(p: string): 'stripes' | 'halves' | null {
-  if (/\bstripe|striped|stripes|hoops?|bands?\b/.test(p)) return 'stripes';
-  if (/\bhalf|halves|half-?and-?half|split\b/.test(p)) return 'halves';
+  if (/\bstripe|striped|stripes|hoops?|bands?\b|مخطط|خطوط|مقلم/.test(p)) return 'stripes';
+  if (/\bhalf|halves|half-?and-?half|split\b|نصفين|نصفان|مقسوم/.test(p)) return 'halves';
+  return null;
+}
+
+/** Detect a repeating mosaic pattern (checker/grid/flag/hoops/chevron). */
+function detectPattern(p: string): PatternName | null {
+  if (/checker|chequer|checked|رقعة|شطرنج/.test(p)) return 'checker';
+  if (/mosaic|grid|pixel|tiles?|بلاط|فسيفساء|موزاييك|شبكة/.test(p)) return 'grid';
+  if (/\bflag\b|tricolor|tricolour|علم|أعلام/.test(p)) return 'flag';
+  if (/hoops?|طوق|حلقات/.test(p)) return 'hoops';
+  if (/chevron|zigzag|أسهم|متعرج|زجزاج/.test(p)) return 'chevron';
+  return null;
+}
+
+/** Detect a dithered gradient and its direction. */
+function detectGradient(p: string): 'vertical' | 'horizontal' | 'radial' | null {
+  if (/radial|glow|halo|sunburst|burst|إشعاع|توهج|دائري/.test(p)) return 'radial';
+  if (/gradient|fade|ombre|تدرج|متدرج/.test(p)) return /horizontal|أفقي/.test(p) ? 'horizontal' : 'vertical';
   return null;
 }
 
@@ -218,13 +245,21 @@ export function designFromPrompt(prompt: string): TifoSpec {
   // 1) background field over the scoped region
   layers.push({ kind: 'fill', id: 'bg', region: regionObj(region), colorIndex: bg });
 
-  // 2) stripes / halves, if asked
+  // 2) field treatment — gradient > pattern (checker/grid/flag/hoops/chevron) > stripes/halves
+  const gradientKind = detectGradient(p);
+  const patternKind = detectPattern(p);
   const stripeKind = detectStripes(p);
-  if (stripeKind && palette.length >= 3) {
+  const triCols = [bg, head, accent].slice(0, Math.min(3, palette.length - 1));
+  if (gradientKind && palette.length >= 3) {
+    layers.push({ kind: 'gradient', id: 'grad', region: regionObj(region), colors: [bg, head], direction: gradientKind });
+  } else if (patternKind && palette.length >= 3) {
+    const scale = patternKind === 'grid' ? 18 : patternKind === 'hoops' ? 9 : patternKind === 'flag' ? 6 : 14;
+    layers.push({ kind: 'pattern', id: 'pattern', region: regionObj(region), pattern: patternKind, colors: triCols, scale });
+  } else if (stripeKind && palette.length >= 3) {
     layers.push({
       kind: 'stripes', id: 'stripes', region: regionObj(region),
-      colors: stripeKind === 'halves' ? [bg, head] : [bg, head, accent].slice(0, Math.min(3, palette.length - 1)),
-      orientation: /horizontal|hoops?/.test(p) ? 'horizontal' : /diagonal|sash/.test(p) ? 'diagonal' : 'vertical',
+      colors: stripeKind === 'halves' ? [bg, head] : triCols,
+      orientation: /horizontal|hoops?|أفقي/.test(p) ? 'horizontal' : /diagonal|sash|مائل/.test(p) ? 'diagonal' : 'vertical',
       bands: stripeKind === 'halves' ? 2 : 0, // 0 → compiler/validator default; set explicitly below
     });
     // validator clamps bands to >=2; pick a sensible count for true stripes.
@@ -284,15 +319,17 @@ function portraitPrompt(original: string, lower: string): string {
   return `${original.trim().slice(0, 120)} — bold graphic poster portrait, flat tones`;
 }
 
-type Occasion = 'derby' | 'farewell' | 'anniversary' | 'title' | 'heritage' | 'generic';
+type Occasion = 'derby' | 'farewell' | 'anniversary' | 'title' | 'heritage' | 'welcome' | 'mosaic' | 'generic';
 
 /** Classify the brief into a choreography occasion → drives a distinct layout. */
 function detectOccasion(p: string): Occasion {
-  if (/\bderby\b|\brival|clasico|clásico|\bvs\b|versus|\bagainst\b/.test(p)) return 'derby';
-  if (/farewell|goodbye|tribute|\bretir|thank you|grazie|gracias|memorial|\brip\b|forever|legend/.test(p)) return 'farewell';
-  if (/anniversar|centenar|\byears?\b|since\s*\d{4}|est\.?\s*\d{4}|founded|\b\d{4}\s*[-–]\s*\d{4}\b/.test(p)) return 'anniversary';
-  if (/champion|\btitle\b|troph|winners?|\bglory\b|victory|\bcup\b|treble|invincible/.test(p)) return 'title';
-  if (/heritage|history|tradition|legacy|roots|dynasty/.test(p)) return 'heritage';
+  if (/\bderby\b|\brival|clasico|clásico|\bvs\b|versus|\bagainst\b|ديربي|كلاسيكو|ضد|مواجهة/.test(p)) return 'derby';
+  if (/farewell|goodbye|tribute|\bretir|thank you|grazie|gracias|memorial|\brip\b|forever|legend|وداع|شكرا|شكرًا|تكريم|أسطورة|رحيل/.test(p)) return 'farewell';
+  if (/anniversar|centenar|\byears?\b|since\s*\d{4}|est\.?\s*\d{4}|founded|\b\d{4}\s*[-–]\s*\d{4}\b|ذكرى|سنوية|تأسيس|سنة|عام/.test(p)) return 'anniversary';
+  if (/champion|\btitle\b|troph|winners?|\bglory\b|victory|\bcup\b|treble|invincible|بطل|بطولة|كأس|لقب|مجد|انتصار/.test(p)) return 'title';
+  if (/heritage|history|tradition|legacy|roots|dynasty|تاريخ|تراث|إرث|عراقة|تقاليد/.test(p)) return 'heritage';
+  if (/welcome|promotion|promoted|\breturn\b|back to|مرحبا|أهلا|أهلاً|العودة|صعود|ترقية/.test(p)) return 'welcome';
+  if (/mosaic|card stunt|mega.?word|فسيفساء|موزاييك|بطاقات/.test(p)) return 'mosaic';
   return 'generic';
 }
 
@@ -368,6 +405,8 @@ export function composeSuperOffline(prompt: string, opts: { variant?: number } =
   const layers: SpecLayer[] = [];
   let seq = 0;
   const nid = (): string => `L${seq++}`;
+  // Deterministic seeded picker so each shuffle varies motif/orientation/symbol.
+  const pick = <T>(arr: readonly T[], n: number): T => arr[((n % arr.length) + arr.length) % arr.length];
 
   // Hero on the north: a portrait for a person, else a bold symbol, else a headline.
   const addHero = (preferred: SymbolName | null): 'image' | 'symbol' | 'text' => {
@@ -400,7 +439,7 @@ export function composeSuperOffline(prompt: string, opts: { variant?: number } =
 
   if (occasion === 'derby') {
     layers.push({ kind: 'fill', id: nid(), region: regionObj('all'), colorIndex: bg });
-    layers.push({ kind: 'pattern', id: nid(), region: regionObj('sides'), pattern: 'chevron', colors: [bg, head], scale: 10 });
+    layers.push({ kind: 'pattern', id: nid(), region: regionObj('sides'), pattern: pick<PatternName>(['chevron', 'checker', 'grid'], variant), colors: [bg, head], scale: 10 });
     heroKind = addHero('shield');
     layers.push({ kind: 'fill', id: nid(), region: regionObj('south'), colorIndex: head });
     addName(headline ?? 'PRIDE OF THE CITY', bg);
@@ -428,12 +467,23 @@ export function composeSuperOffline(prompt: string, opts: { variant?: number } =
     heroKind = 'symbol';
     summary = 'Title: a gold radial glow, a crown and CHAMPIONS on the north, stars down the sides, the year on the south.';
   } else if (occasion === 'heritage') {
-    layers.push({ kind: 'stripes', id: nid(), region: regionObj('sides'), colors: [bg, head], orientation: 'vertical', bands: 8 });
+    layers.push({ kind: 'stripes', id: nid(), region: regionObj('sides'), colors: [bg, head], orientation: pick(['vertical', 'diagonal', 'horizontal'] as const, variant), bands: 8 });
     layers.push({ kind: 'fill', id: nid(), region: regionObj('north'), colorIndex: bg });
     heroKind = addHero('shield');
     layers.push({ kind: 'fill', id: nid(), region: regionObj('south'), colorIndex: bg });
     addName(headline ?? 'HISTORY', head);
     summary = 'Heritage: classic vertical stripes on the sides, the club crest on the north, the motto on the south.';
+  } else if (occasion === 'welcome') {
+    layers.push({ kind: 'gradient', id: nid(), region: regionObj('all'), colors: [bg, head], direction: 'vertical' });
+    heroKind = addHero(symbol ?? 'wings');
+    addName(headline ?? 'WELCOME', gold);
+    layers.push({ kind: 'symbol', id: nid(), region: regionObj('sides'), symbol: pick<SymbolName>(['star', 'star6', 'diamond'], variant), colorIndex: accent, scaleFrac: 0.45, align: 'center' });
+    summary = 'Welcome: a bright gradient bowl, a bold hero on the north, the welcome word across the south, stars down the sides.';
+  } else if (occasion === 'mosaic') {
+    layers.push({ kind: 'pattern', id: nid(), region: regionObj('all'), pattern: pick<PatternName>(['checker', 'grid', 'flag'], variant), colors: [bg, head], scale: 22 });
+    layers.push({ kind: 'text', id: nid(), region: regionObj('all'), text: headline ?? 'ULTRAS', colorIndex: accent, fontId: 'black', arcDeg: 0, heightFrac: 0.5, align: 'center' });
+    heroKind = 'text';
+    summary = 'Mosaic: a full-bowl pattern with a giant mega-word stretched across the whole stadium.';
   } else {
     const sideDir = (['horizontal', 'vertical', 'diagonal'] as const)[variant % 3];
     layers.push({ kind: 'stripes', id: nid(), region: regionObj('sides'), colors: [bg, head], orientation: sideDir, bands: 6 });

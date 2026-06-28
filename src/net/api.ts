@@ -139,16 +139,82 @@ export async function login(username: string, password: string): Promise<string>
   return data.username;
 }
 
-export async function register(username: string, password: string): Promise<string> {
+export async function register(
+  username: string,
+  password: string,
+  email: string,
+  acceptedVersion: string,
+): Promise<string> {
   const data = (await expectOk(
     await fetch(`${API}/auth/register`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ username, password }),
+      body: JSON.stringify({ username, password, email, acceptedVersion }),
     }),
   )) as { token: string; username: string };
   setToken(data.token);
   return data.username;
+}
+
+/** Attach or change the signed-in user's email (resets verification). */
+export async function setAccountEmail(email: string, acceptedVersion?: string): Promise<void> {
+  await expectOk(
+    await fetch(`${API}/account/email`, {
+      method: 'POST',
+      headers: authHeaders(true),
+      body: JSON.stringify({ email, acceptedVersion }),
+    }),
+  );
+}
+
+/** Ask the server to re-send the email-verification link to the signed-in user. */
+export async function resendVerification(): Promise<void> {
+  await expectOk(await fetch(`${API}/auth/verify/resend`, { method: 'POST', headers: authHeaders(true) }));
+}
+
+/** Change the signed-in user's password (requires the current one). */
+export async function changePassword(currentPassword: string, newPassword: string): Promise<void> {
+  await expectOk(
+    await fetch(`${API}/account/password`, {
+      method: 'POST',
+      headers: authHeaders(true),
+      body: JSON.stringify({ currentPassword, newPassword }),
+    }),
+  );
+}
+
+/** Request a password-reset email. Always resolves (no account enumeration). */
+export async function requestPasswordReset(email: string): Promise<void> {
+  await expectOk(
+    await fetch(`${API}/auth/forgot`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email }),
+    }),
+  );
+}
+
+/** Complete a password reset using the emailed token. */
+export async function resetPassword(token: string, newPassword: string): Promise<void> {
+  await expectOk(
+    await fetch(`${API}/auth/reset`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ token, newPassword }),
+    }),
+  );
+}
+
+/** Download the signed-in user's data (PDPL/GDPR access right). */
+export async function exportMyData(): Promise<unknown> {
+  return await expectOk(await fetch(`${API}/account/export`, { headers: authHeaders(false) }));
+}
+
+/** Permanently delete the signed-in user's account + designs, then sign out. */
+export async function deleteAccount(): Promise<void> {
+  const res = await fetch(`${API}/account`, { method: 'DELETE', headers: authHeaders(false) });
+  if (!res.ok && res.status !== 204) throw new Error('could not delete account');
+  signOut();
 }
 
 // ---------- codecs ----------
@@ -613,12 +679,20 @@ export async function fetchProfile(userId: string): Promise<ProfileData> {
 }
 
 /** The signed-in user's id + name, or null. */
-export async function fetchMe(): Promise<{ id: string; username: string; isAdmin: boolean } | null> {
+export async function fetchMe(): Promise<{
+  id: string;
+  username: string;
+  email: string | null;
+  emailVerified: boolean;
+  isAdmin: boolean;
+} | null> {
   if (!token) return null;
   try {
     return (await expectOk(await fetch(`${API}/me`, { headers: authHeaders(false) }))) as {
       id: string;
       username: string;
+      email: string | null;
+      emailVerified: boolean;
       isAdmin: boolean;
     };
   } catch {
@@ -881,16 +955,31 @@ export interface AiQuota {
   limit: number;
   remaining: number;
   provider?: string;
-  /** True when the caller has admin access during the AI lock. */
+  /** True when the caller has admin access. */
   admin?: boolean;
+  /** True when the caller has unlimited use (admin or paid). */
+  unlimited?: boolean;
+  /** Seconds until the hourly quota resets (for the "resets in …" UI). */
+  resetInSec?: number;
 }
 
 export interface AiGenerateResult {
   spec: TifoSpec;
   quota: AiQuota;
-  source: 'model' | 'offline';
-  /** Server-side diagnostics (image-gen failures, offline fallback) for the UI. */
+  source: 'model' | 'offline' | 'quick';
+  /** Server-side diagnostics (image-gen failures) for the UI. */
   notes?: string[];
+}
+
+/**
+ * Returned by generate when premium can't deliver right now (busy, or hourly cap
+ * reached): the client offers a choice — use the free Quick Designer, or wait + retry.
+ */
+export interface AiChoice {
+  needsChoice: true;
+  reason: 'busy' | 'quota' | 'premium_off';
+  retryAfterSec: number;
+  quota: AiQuota;
 }
 
 /** Error thrown by the AI calls; `status` 403 with `locked` = admin-only. */
@@ -898,6 +987,8 @@ export interface AiError extends Error {
   status?: number;
   quota?: AiQuota;
   locked?: boolean;
+  /** Why access was denied: 'signin', 'verify' (email), or 'quota' (limit reached). */
+  reason?: 'signin' | 'verify' | 'quota';
 }
 
 /**
@@ -907,8 +998,8 @@ export interface AiError extends Error {
  */
 export async function generateAiTifo(
   prompt: string,
-  opts: { mode?: 'super'; stadium?: string } = {},
-): Promise<AiGenerateResult> {
+  opts: { mode?: 'super'; stadium?: string; engine?: 'offline' } = {},
+): Promise<AiGenerateResult | AiChoice> {
   const res = await fetch(`${API}/ai/generate`, {
     method: 'POST',
     headers: aiHeaders(true),
@@ -916,15 +1007,27 @@ export async function generateAiTifo(
       prompt,
       ...(opts.mode ? { mode: opts.mode } : {}),
       ...(opts.stadium ? { stadium: opts.stadium } : {}),
+      ...(opts.engine ? { engine: opts.engine } : {}),
     }),
   });
-  const data = (await res.json().catch(() => null)) as (AiGenerateResult & { error?: string; quota?: AiQuota; locked?: boolean }) | null;
+  const data = (await res.json().catch(() => null)) as
+    | ({ needsChoice?: boolean; reason?: string; retryAfterSec?: number; quota?: AiQuota; error?: string; locked?: boolean } & Partial<AiGenerateResult>)
+    | null;
   if (!res.ok) {
     const err = new Error(data?.error ?? `generation failed (${res.status})`) as AiError;
     err.status = res.status;
     err.quota = data?.quota;
     err.locked = data?.locked;
+    err.reason = data?.reason as AiError['reason'];
     throw err;
+  }
+  if (data?.needsChoice) {
+    return {
+      needsChoice: true,
+      reason: (data.reason ?? 'busy') as AiChoice['reason'],
+      retryAfterSec: data.retryAfterSec ?? 90,
+      quota: data.quota as AiQuota,
+    };
   }
   return data as AiGenerateResult;
 }
@@ -954,11 +1057,12 @@ export async function critiqueAiTifo(spec: TifoSpec, image?: string, stadium?: s
 /** Read AI access/quota. Throws an AiError (status 403, locked) when admin-only. */
 export async function fetchAiQuota(): Promise<AiQuota> {
   const res = await fetch(`${API}/ai/quota`, { headers: aiHeaders(false) });
-  const data = (await res.json().catch(() => null)) as (AiQuota & { error?: string; locked?: boolean }) | null;
+  const data = (await res.json().catch(() => null)) as (AiQuota & { error?: string; locked?: boolean; reason?: AiError['reason'] }) | null;
   if (!res.ok) {
     const err = new Error(data?.error ?? `request failed (${res.status})`) as AiError;
     err.status = res.status;
     err.locked = data?.locked;
+    err.reason = data?.reason;
     throw err;
   }
   return data as AiQuota;

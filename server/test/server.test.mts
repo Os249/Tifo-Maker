@@ -5,7 +5,7 @@ import pg from 'pg';
 import type { FastifyInstance } from 'fastify';
 import { generateSeatMap } from '../../src/core/seatmap';
 import { DEFAULT_TEMPLATE } from '../../src/core/template';
-import { MemoryAuthRepository, MemoryDesignRepository, MemoryEventsRepository, MemoryLeadsRepository } from '../src/memoryRepo';
+import { MemoryAiUsageRepository, MemoryAuthRepository, MemoryDesignRepository, MemoryEventsRepository, MemoryLeadsRepository } from '../src/memoryRepo';
 import { MemorySocialRepository } from '../src/memorySocial';
 import { PgAuthRepository, PgDesignRepository } from '../src/pgRepo';
 import { PgSocialRepository } from '../src/pgSocial';
@@ -34,7 +34,7 @@ async function registerUser(app: FastifyInstance, username: string): Promise<str
   const res = await app.inject({
     method: 'POST',
     url: '/api/auth/register',
-    payload: { username, password: 'hunter22pass' },
+    payload: { username, password: 'hunter22pass', email: `${username}@example.test`, acceptedVersion: 'test' },
   });
   assert.equal(res.statusCode, 201, res.body);
   return res.json().token as string;
@@ -42,8 +42,19 @@ async function registerUser(app: FastifyInstance, username: string): Promise<str
 
 const bearer = (token: string) => ({ authorization: `Bearer ${token}` });
 
+// Capturing email sender: records the verification link from each message so the
+// verify-flow test can follow it. Reset at the start of each suite run.
+const sentEmails: { to: string; token: string }[] = [];
+const captureSender = {
+  async send(m: { to: string; subject: string; html: string; text?: string }): Promise<void> {
+    const match = /(?:\/api\/auth\/verify|\/reset)\?token=([^\s"<&]+)/.exec(`${m.text ?? ''} ${m.html}`);
+    sentEmails.push({ to: m.to, token: match ? match[1] : '' });
+  },
+};
+
 async function runSuite(name: string, repo: DesignRepository, auth: AuthRepository): Promise<void> {
-  const app = await buildApp(repo, auth, templates);
+  sentEmails.length = 0;
+  const app = await buildApp(repo, auth, templates, { emailSender: captureSender, aiUsage: new MemoryAiUsageRepository() });
   const cells = sampleCells();
   const gz = gzipSync(cells);
   const cellsGzB64 = gz.toString('base64');
@@ -52,7 +63,7 @@ async function runSuite(name: string, repo: DesignRepository, auth: AuthReposito
   const aliceTok = await registerUser(app, 'alice');
   const bobTok = await registerUser(app, 'bob');
   assert.equal(
-    (await app.inject({ method: 'POST', url: '/api/auth/register', payload: { username: 'alice', password: 'hunter22pass' } })).statusCode,
+    (await app.inject({ method: 'POST', url: '/api/auth/register', payload: { username: 'alice', password: 'hunter22pass', email: 'alice2@example.test', acceptedVersion: 'test' } })).statusCode,
     409,
   );
   assert.equal(
@@ -63,6 +74,155 @@ async function runSuite(name: string, repo: DesignRepository, auth: AuthReposito
   assert.equal(login.statusCode, 200);
   assert.equal((await app.inject({ method: 'GET', url: '/api/me' })).statusCode, 401);
   assert.equal((await app.inject({ method: 'GET', url: '/api/me', headers: bearer(aliceTok) })).statusCode, 200);
+
+  // ---- email: required at signup, returned by /api/me, add/replace + uniqueness ----
+  assert.equal(
+    (await app.inject({ method: 'POST', url: '/api/auth/register', payload: { username: 'noemail', password: 'hunter22pass' } })).statusCode,
+    400,
+    'register without email is rejected',
+  );
+  assert.equal(
+    (await app.inject({ method: 'POST', url: '/api/auth/register', payload: { username: 'dupemail', password: 'hunter22pass', email: 'alice@example.test', acceptedVersion: 'test' } })).statusCode,
+    409,
+    'duplicate email is rejected',
+  );
+  const meAlice = await app.inject({ method: 'GET', url: '/api/me', headers: bearer(aliceTok) });
+  assert.equal(meAlice.json().email, 'alice@example.test');
+  assert.equal(meAlice.json().emailVerified, false);
+  assert.equal(
+    (await app.inject({ method: 'POST', url: '/api/account/email', headers: bearer(aliceTok), payload: { email: 'alice.new@example.test' } })).statusCode,
+    200,
+  );
+  assert.equal(
+    (await app.inject({ method: 'GET', url: '/api/me', headers: bearer(aliceTok) })).json().email,
+    'alice.new@example.test',
+  );
+  assert.equal(
+    (await app.inject({ method: 'POST', url: '/api/account/email', headers: bearer(aliceTok), payload: { email: 'bob@example.test' } })).statusCode,
+    409,
+    'cannot take another account\'s email',
+  );
+  assert.equal(
+    (await app.inject({ method: 'POST', url: '/api/account/email', headers: bearer(aliceTok), payload: { email: 'nope' } })).statusCode,
+    400,
+    'invalid email rejected',
+  );
+
+  // ---- email verification: signup emails a single-use link that verifies ----
+  const carolTok = await registerUser(app, 'carol');
+  const carolMail = sentEmails.find((e) => e.to === 'carol@example.test');
+  assert.ok(carolMail?.token, 'verification email sent on signup');
+  assert.equal(
+    (await app.inject({ method: 'GET', url: '/api/me', headers: bearer(carolTok) })).json().emailVerified,
+    false,
+  );
+  const verify1 = await app.inject({ method: 'GET', url: `/api/auth/verify?token=${carolMail!.token}` });
+  assert.equal(verify1.statusCode, 302);
+  assert.match(String(verify1.headers.location), /verified=1/);
+  assert.equal(
+    (await app.inject({ method: 'GET', url: '/api/me', headers: bearer(carolTok) })).json().emailVerified,
+    true,
+  );
+  const verify2 = await app.inject({ method: 'GET', url: `/api/auth/verify?token=${carolMail!.token}` });
+  assert.match(String(verify2.headers.location), /verified=0/, 'verification token is single-use');
+  const daveTok = await registerUser(app, 'dave');
+  assert.equal(
+    (await app.inject({ method: 'POST', url: '/api/auth/verify/resend', headers: bearer(daveTok) })).statusCode,
+    202,
+  );
+
+  // ---- password: change (authed) + forgot/reset via emailed token ----
+  assert.equal(
+    (await app.inject({ method: 'POST', url: '/api/account/password', headers: bearer(daveTok), payload: { currentPassword: 'wrongpass99', newPassword: 'newpass1234' } })).statusCode,
+    401,
+    'wrong current password rejected',
+  );
+  assert.equal(
+    (await app.inject({ method: 'POST', url: '/api/account/password', headers: bearer(daveTok), payload: { currentPassword: 'hunter22pass', newPassword: 'newpass1234' } })).statusCode,
+    200,
+  );
+  assert.equal(
+    (await app.inject({ method: 'POST', url: '/api/auth/login', payload: { username: 'dave', password: 'newpass1234' } })).statusCode,
+    200,
+    'can log in with the changed password',
+  );
+  // forgot is always 200 (no account enumeration), known email or not
+  assert.equal(
+    (await app.inject({ method: 'POST', url: '/api/auth/forgot', payload: { email: 'nobody@example.test' } })).statusCode,
+    200,
+  );
+  const erinTok = await registerUser(app, 'erin');
+  void erinTok;
+  assert.equal(
+    (await app.inject({ method: 'POST', url: '/api/auth/forgot', payload: { email: 'erin@example.test' } })).statusCode,
+    200,
+  );
+  const resetMail = [...sentEmails].reverse().find((e) => e.to === 'erin@example.test' && e.token);
+  assert.ok(resetMail?.token, 'reset email sent');
+  assert.equal(
+    (await app.inject({ method: 'POST', url: '/api/auth/reset', payload: { token: resetMail!.token, newPassword: 'erinreset1234' } })).statusCode,
+    200,
+  );
+  assert.equal(
+    (await app.inject({ method: 'POST', url: '/api/auth/login', payload: { username: 'erin', password: 'erinreset1234' } })).statusCode,
+    200,
+    'can log in after reset',
+  );
+  assert.equal(
+    (await app.inject({ method: 'POST', url: '/api/auth/reset', payload: { token: resetMail!.token, newPassword: 'again123456' } })).statusCode,
+    400,
+    'reset token is single-use',
+  );
+
+  // ---- AI gate: signed-in + verified email required; free-for-all = unlimited ----
+  assert.equal(
+    (await app.inject({ method: 'GET', url: '/api/ai/quota' })).statusCode,
+    401,
+    'AI requires sign in',
+  );
+  assert.equal(
+    (await app.inject({ method: 'GET', url: '/api/ai/quota', headers: bearer(daveTok) })).statusCode,
+    403,
+    'AI requires a verified email',
+  );
+  const carolQuota = await app.inject({ method: 'GET', url: '/api/ai/quota', headers: bearer(carolTok) });
+  assert.equal(carolQuota.statusCode, 200, 'verified user can access AI');
+  assert.equal(carolQuota.json().unlimited, false, 'verified users are metered hourly');
+  assert.equal(carolQuota.json().limit, 10, 'hourly cap is 10');
+
+  // ---- AI safety screen + account export/delete (launch hardening) ----
+  assert.equal(
+    (await app.inject({ method: 'POST', url: '/api/ai/generate', headers: bearer(carolTok), payload: { prompt: 'naked child' } })).statusCode,
+    400,
+    'unsafe prompt blocked before the model',
+  );
+  // No AI provider in tests → premium can't deliver, so we offer a choice (never an error)…
+  const autoGen = await app.inject({ method: 'POST', url: '/api/ai/generate', headers: bearer(carolTok), payload: { prompt: 'red and white stripes' } });
+  assert.equal(autoGen.statusCode, 200);
+  assert.equal(autoGen.json().needsChoice, true, 'premium busy offers a choice, never an error');
+  // …and the free Quick Designer always returns a design without spending a credit.
+  const quickGen = await app.inject({ method: 'POST', url: '/api/ai/generate', headers: bearer(carolTok), payload: { prompt: 'red and white stripes', engine: 'offline' } });
+  assert.equal(quickGen.statusCode, 200);
+  assert.equal(quickGen.json().source, 'quick', 'Quick Designer is the free engine');
+  assert.ok(quickGen.json().spec, 'Quick Designer produced a design');
+  // Bilingual + club DB: an Arabic club brief maps to the right palette, offline.
+  const quickAr = await app.inject({ method: 'POST', url: '/api/ai/generate', headers: bearer(carolTok), payload: { prompt: 'الهلال نسر ذهبي على المدرج الجنوبي', engine: 'offline' } });
+  assert.equal(quickAr.statusCode, 200);
+  assert.ok((quickAr.json().spec.palette as string[]).includes('#0033a0'), 'Arabic "الهلال" → Al Hilal blue');
+  const exported = await app.inject({ method: 'GET', url: '/api/account/export', headers: bearer(carolTok) });
+  assert.equal(exported.statusCode, 200);
+  assert.equal(exported.json().account.username, 'carol', 'export includes account data');
+  const frankTok = await registerUser(app, 'frank');
+  assert.equal(
+    (await app.inject({ method: 'DELETE', url: '/api/account', headers: bearer(frankTok) })).statusCode,
+    204,
+    'account deletion succeeds',
+  );
+  assert.equal(
+    (await app.inject({ method: 'GET', url: '/api/me', headers: bearer(frankTok) })).statusCode,
+    401,
+    'session is dead after account deletion',
+  );
 
   // logout invalidates the token
   const tempTok = login.json().token as string;
@@ -96,6 +256,15 @@ async function runSuite(name: string, repo: DesignRepository, auth: AuthReposito
     payload: { ...basePayload, cellsGzB64: gzipSync(new Uint8Array(123)).toString('base64') },
   });
   assert.equal(bad.statusCode, 400);
+
+  // zip-bomb rejected: a tiny payload that decompresses past the 4 MB cap → 400, not OOM
+  const bomb = await app.inject({
+    method: 'POST',
+    url: '/api/designs',
+    headers: bearer(aliceTok),
+    payload: { ...basePayload, cellsGzB64: gzipSync(new Uint8Array(5 * 1024 * 1024)).toString('base64') },
+  });
+  assert.equal(bomb.statusCode, 400, 'oversized decompression rejected');
 
   // ---- visibility: private design is 404 to bob and anonymous ----
   assert.equal((await app.inject({ method: 'GET', url: `/api/designs/${id}` })).statusCode, 404);
@@ -225,6 +394,34 @@ async function runSuite(name: string, repo: DesignRepository, auth: AuthReposito
 {
   const auth = new MemoryAuthRepository();
   await runSuite('memory repos', new MemoryDesignRepository((id) => auth.usernameOf(id)), auth);
+
+  // ---- security guardrail: no eval / new Function anywhere in client source ----
+  {
+    const { readdirSync, readFileSync } = await import('node:fs');
+    const { join, dirname } = await import('node:path');
+    const { fileURLToPath } = await import('node:url');
+    const offenders: string[] = [];
+    try {
+      const srcRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'src');
+      const stack = [srcRoot];
+      while (stack.length) {
+        const dir = stack.pop()!;
+        for (const ent of readdirSync(dir, { withFileTypes: true })) {
+          const full = join(dir, ent.name);
+          if (ent.isDirectory()) {
+            if (ent.name !== 'node_modules') stack.push(full);
+          } else if (/\.(ts|mts)$/.test(ent.name)) {
+            const code = readFileSync(full, 'utf8');
+            if (/\beval\s*\(/.test(code) || /\bnew\s+Function\s*\(/.test(code)) offenders.push(ent.name);
+          }
+        }
+      }
+    } catch {
+      /* path issues must not fail the suite */
+    }
+    assert.deepEqual(offenders, [], `eval/new Function in client source: ${offenders.join(', ')}`);
+    console.log('  ✓ security guard: no eval / new Function in client source');
+  }
 }
 
 // ---- Before/After match-day photos ----

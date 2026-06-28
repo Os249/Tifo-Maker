@@ -11,6 +11,7 @@ import { MemorySocialRepository } from './memorySocial';
 import { MemoryStadiumRepository, PgStadiumRepository } from './stadiumRepo';
 import { MemoryAdminStatsRepository, PgAdminStatsRepository } from './statsRepo';
 import { buildApp, type TemplateInfo } from './routes';
+import { createEmailSender } from './email';
 
 /**
  * Production bootstrap.
@@ -87,9 +88,11 @@ async function main(): Promise<void> {
       social: new PgSocialRepository(pool),
       leads: new PgLeadsRepository(pool),
       aiUsage: new PgAiUsageRepository(pool),
-      aiFreeLimit: Number(process.env.AI_FREE_LIMIT ?? 5),
+      aiFreeLimit: Number(process.env.AI_FREE_LIMIT ?? 10), // premium designs per hour
       stadiums,
       stats: new PgAdminStatsRepository(pool),
+      emailSender: createEmailSender(),
+      publicUrl: process.env.PUBLIC_URL,
     });
   } else {
     if (isProd) {
@@ -110,9 +113,11 @@ async function main(): Promise<void> {
       social: new MemorySocialRepository(designs, auth),
       leads: new MemoryLeadsRepository(),
       aiUsage: new MemoryAiUsageRepository(),
-      aiFreeLimit: Number(process.env.AI_FREE_LIMIT ?? 5),
+      aiFreeLimit: Number(process.env.AI_FREE_LIMIT ?? 10), // premium designs per hour
       stadiums: new MemoryStadiumRepository(),
       stats: new MemoryAdminStatsRepository(),
+      emailSender: createEmailSender(),
+      publicUrl: process.env.PUBLIC_URL,
     });
   }
 

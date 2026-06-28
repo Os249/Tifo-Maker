@@ -15,6 +15,7 @@ import { tmpdir } from 'node:os';
 import { readFile, unlink } from 'node:fs/promises';
 import type { AiUsageRepository, AuthRepository, DesignRepository, EventsRepository, LeadsRepository, SocialRepository } from './repo';
 import { registerAiRoutes, verifyUnlock } from './aiRoutes';
+import type { EmailSender } from './email';
 import type { StadiumSubmissionRepository } from './stadiumRepo';
 import type { AdminStatsRepository } from './statsRepo';
 import { ADMIN_HTML, ADMIN_JS } from './adminPage';
@@ -47,6 +48,9 @@ import { isValidTemplate } from '../../src/core/customStadiums';
 export const SNAPSHOT_EVERY = 20;
 const HEX = /^#[0-9a-fA-F]{6}$/;
 const USERNAME = /^[a-zA-Z0-9_]{3,24}$/;
+// Pragmatic email check; real validation is delivery of the verification email.
+const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const MAX_EMAIL = 254;
 const MAX_THUMB_BYTES = 128 * 1024;
 const MAX_PHOTO_BYTES = 2 * 1024 * 1024; // real photos, resized client-side before upload
 // A full 60k design gzips to a few hundred bytes, but base64 of (cells + a
@@ -84,6 +88,10 @@ export interface AppOptions {
   stadiums?: StadiumSubmissionRepository;
   /** Optional admin analytics aggregates. When present, /api/admin/overview is enabled. */
   stats?: AdminStatsRepository;
+  /** Transactional email sender (verification, password reset). When absent, emails are skipped. */
+  emailSender?: EmailSender;
+  /** Public base URL for links in emails. Defaults to the request's own origin. */
+  publicUrl?: string;
 }
 
 export async function buildApp(
@@ -92,7 +100,9 @@ export async function buildApp(
   templates: TemplateInfo[],
   options: AppOptions = {},
 ): Promise<FastifyInstance> {
-  const app = Fastify({ logger: options.logger ?? false, bodyLimit: MAX_BODY_BYTES });
+  // trustProxy only when explicitly behind a reverse proxy/CDN — otherwise clients
+  // could spoof X-Forwarded-For to evade per-IP rate limits. Set TRUST_PROXY=1 in prod.
+  const app = Fastify({ logger: options.logger ?? false, bodyLimit: MAX_BODY_BYTES, trustProxy: process.env.TRUST_PROXY === '1' });
 
   // Security headers, including a real Content-Security-Policy. The policy is a
   // strict allow-list derived from exactly what the pages load:
@@ -284,7 +294,14 @@ export async function buildApp(
       userOf,
       isAdmin: isAdminUser,
       adminPassword: process.env.AI_ADMIN_PASSWORD,
-      freeLimit: options.aiFreeLimit ?? 5,
+      freeLimit: options.aiFreeLimit ?? 10,
+      // Launch: AI is free for any signed-in, email-verified user. Set
+      // AI_FREE_FOR_ALL=false later to enforce the per-account monthly free limit.
+      freeForAll: (process.env.AI_FREE_FOR_ALL ?? 'true') !== 'false',
+      userState: async (userId) => {
+        const u = await auth.getUserById(userId).catch(() => null);
+        return u ? { emailVerified: !!u.emailVerifiedAt, isPro: u.isPro } : null;
+      },
       routeConfig: options.rateLimit ? { config: { rateLimit: { max: 12, timeWindow: '1 minute' } } } : undefined,
     });
   }
@@ -359,16 +376,153 @@ export async function buildApp(
   // effect when the rate-limit plugin is registered (production), ignored in tests.
   const authLimit = { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } };
 
+  const VERIFY_TTL_MS = 24 * 60 * 60 * 1000;
+  // Issue a fresh verification token and email the link. Best-effort: a mail
+  // failure never blocks the API response (the user can request a resend).
+  const sendVerifyEmail = async (req: FastifyRequest, user: { id: string; email: string }): Promise<void> => {
+    if (!options.emailSender) return;
+    try {
+      await auth.deleteEmailTokens(user.id, 'verify_email');
+      const { token, tokenHash } = issueToken();
+      await auth.createEmailToken(user.id, tokenHash, 'verify_email', new Date(Date.now() + VERIFY_TTL_MS));
+      const base = options.publicUrl ?? `${req.protocol}://${req.headers.host}`;
+      const link = `${base}/api/auth/verify?token=${token}`;
+      await options.emailSender.send({
+        to: user.email,
+        subject: 'Verify your TifoMaker email',
+        html:
+          `<p>Welcome to TifoMaker.</p>` +
+          `<p>Confirm your email to unlock the AI Designer:</p>` +
+          `<p><a href="${link}">Verify my email</a></p>` +
+          `<p>This link expires in 24 hours. If you didn't create an account, ignore this email.</p>`,
+        text: `Verify your TifoMaker email: ${link}\nThis link expires in 24 hours.`,
+      });
+    } catch (err) {
+      app.log.error({ err }, 'verification email failed');
+    }
+  };
+
+  const RESET_TTL_MS = 60 * 60 * 1000;
+  // Issue a password-reset token and email the link. Best-effort.
+  const sendResetEmail = async (req: FastifyRequest, user: { id: string; email: string }): Promise<void> => {
+    if (!options.emailSender) return;
+    try {
+      await auth.deleteEmailTokens(user.id, 'reset_password');
+      const { token, tokenHash } = issueToken();
+      await auth.createEmailToken(user.id, tokenHash, 'reset_password', new Date(Date.now() + RESET_TTL_MS));
+      const base = options.publicUrl ?? `${req.protocol}://${req.headers.host}`;
+      const link = `${base}/reset?token=${token}`;
+      await options.emailSender.send({
+        to: user.email,
+        subject: 'Reset your TifoMaker password',
+        html:
+          `<p>We received a request to reset your TifoMaker password.</p>` +
+          `<p><a href="${link}">Choose a new password</a></p>` +
+          `<p>This link expires in 1 hour. If you didn't request this, ignore this email — your password is unchanged.</p>`,
+        text: `Reset your TifoMaker password: ${link}\nThis link expires in 1 hour. If you didn't request this, ignore this email.`,
+      });
+    } catch (err) {
+      app.log.error({ err }, 'reset email failed');
+    }
+  };
+
   app.post('/api/auth/register', authLimit, async (req, reply) => {
-    const { username, password } = (req.body ?? {}) as { username?: string; password?: string };
+    const { username, password, email, acceptedVersion } = (req.body ?? {}) as {
+      username?: string;
+      password?: string;
+      email?: string;
+      acceptedVersion?: string;
+    };
     if (!username || !USERNAME.test(username) || !password || password.length < 8) {
       return reply.code(400).send({ error: 'username 3-24 [a-zA-Z0-9_], password >= 8 chars' });
     }
-    const user = await auth.createUser(username, hashPassword(password));
-    if (!user) return reply.code(409).send({ error: 'username taken' });
+    const mail = typeof email === 'string' ? email.trim() : '';
+    if (!mail || mail.length > MAX_EMAIL || !EMAIL.test(mail)) {
+      return reply.code(400).send({ error: 'a valid email is required' });
+    }
+    // Clear message for duplicates; the unique index is the real race guard.
+    if (await auth.getUserByEmail(mail).catch(() => null)) {
+      return reply.code(409).send({ error: 'email already in use' });
+    }
+    const version = typeof acceptedVersion === 'string' ? acceptedVersion.slice(0, 32) : null;
+    const user = await auth.createUser(username, hashPassword(password), { email: mail, acceptedVersion: version });
+    if (!user) return reply.code(409).send({ error: 'username or email taken' });
     const { token, tokenHash } = issueToken();
     await auth.createToken(user.id, tokenHash, new Date(Date.now() + TOKEN_TTL_MS));
-    return reply.code(201).send({ token, username: user.username });
+    await sendVerifyEmail(req, { id: user.id, email: mail });
+    return reply.code(201).send({
+      token,
+      username: user.username,
+      email: user.email,
+      emailVerified: !!user.emailVerifiedAt,
+    });
+  });
+
+  // Email-link verification: a GET that consumes the (single-use, expiring) token
+  // and redirects back to the app — works straight from an email client, no JS,
+  // CSP-safe. A consumed or expired link simply lands on verified=0.
+  app.get('/api/auth/verify', async (req, reply) => {
+    const q = req.query as { token?: string };
+    const token = typeof q.token === 'string' ? q.token : '';
+    const userId = token ? await auth.consumeEmailToken(hashToken(token), 'verify_email') : null;
+    if (userId) await auth.markEmailVerified(userId);
+    // The token is in the URL: don't cache it and don't leak it via the Referer header.
+    return reply
+      .header('cache-control', 'no-store')
+      .header('referrer-policy', 'no-referrer')
+      .redirect(`/app?verified=${userId ? 1 : 0}`);
+  });
+
+  // Re-send the verification email to the signed-in user.
+  app.post('/api/auth/verify/resend', authLimit, async (req, reply) => {
+    const userId = await requireUser(req, reply);
+    if (!userId) return;
+    const user = await auth.getUserById(userId).catch(() => null);
+    if (!user?.email) return reply.code(400).send({ error: 'no email on file' });
+    if (user.emailVerifiedAt) return reply.code(200).send({ ok: true, alreadyVerified: true });
+    await sendVerifyEmail(req, { id: user.id, email: user.email });
+    return reply.code(202).send({ ok: true });
+  });
+
+  // Change password while signed in (requires the current password).
+  app.post('/api/account/password', authLimit, async (req, reply) => {
+    const userId = await requireUser(req, reply);
+    if (!userId) return;
+    const { currentPassword, newPassword } = (req.body ?? {}) as { currentPassword?: string; newPassword?: string };
+    if (!newPassword || newPassword.length < 8) {
+      return reply.code(400).send({ error: 'new password must be at least 8 characters' });
+    }
+    const user = await auth.getUserById(userId).catch(() => null);
+    if (!user || !currentPassword || !verifyPassword(currentPassword, user.passwordHash)) {
+      return reply.code(401).send({ error: 'current password is incorrect' });
+    }
+    await auth.setPasswordHash(userId, hashPassword(newPassword));
+    return reply.code(200).send({ ok: true });
+  });
+
+  // Forgot password: always 200 so the response can't be used to probe which
+  // emails have accounts. Sends a reset link only when the address actually exists.
+  app.post('/api/auth/forgot', authLimit, async (req, reply) => {
+    const { email } = (req.body ?? {}) as { email?: string };
+    const mail = typeof email === 'string' ? email.trim() : '';
+    if (mail && mail.length <= MAX_EMAIL && EMAIL.test(mail)) {
+      const user = await auth.getUserByEmail(mail).catch(() => null);
+      if (user?.email) await sendResetEmail(req, { id: user.id, email: user.email });
+    }
+    return reply.code(200).send({ ok: true });
+  });
+
+  // Reset password using the emailed token. Single-use; invalidates all sessions.
+  app.post('/api/auth/reset', authLimit, async (req, reply) => {
+    const { token, newPassword } = (req.body ?? {}) as { token?: string; newPassword?: string };
+    if (!newPassword || newPassword.length < 8) {
+      return reply.code(400).send({ error: 'new password must be at least 8 characters' });
+    }
+    const userId = token ? await auth.consumeEmailToken(hashToken(token), 'reset_password') : null;
+    if (!userId) return reply.code(400).send({ error: 'invalid or expired reset link' });
+    await auth.setPasswordHash(userId, hashPassword(newPassword));
+    await auth.deleteUserTokens(userId);
+    return reply.code(200).send({ ok: true });
   });
 
   app.post('/api/auth/login', authLimit, async (req, reply) => {
@@ -392,7 +546,66 @@ export async function buildApp(
     const userId = await requireUser(req, reply);
     if (!userId) return;
     const user = await auth.getUserById(userId).catch(() => null);
-    return { id: userId, username: user?.username ?? null, isAdmin: await isAdminUser(userId) };
+    return {
+      id: userId,
+      username: user?.username ?? null,
+      email: user?.email ?? null,
+      emailVerified: !!user?.emailVerifiedAt,
+      isAdmin: await isAdminUser(userId),
+    };
+  });
+
+  // Add or replace the caller's email (pre-launch accounts, or changing it).
+  // Resets verification; uniqueness is enforced case-insensitively.
+  app.post('/api/account/email', authLimit, async (req, reply) => {
+    const userId = await requireUser(req, reply);
+    if (!userId) return;
+    const { email, acceptedVersion } = (req.body ?? {}) as { email?: string; acceptedVersion?: string };
+    const mail = typeof email === 'string' ? email.trim() : '';
+    if (!mail || mail.length > MAX_EMAIL || !EMAIL.test(mail)) {
+      return reply.code(400).send({ error: 'a valid email is required' });
+    }
+    const version = typeof acceptedVersion === 'string' ? acceptedVersion.slice(0, 32) : null;
+    const ok = await auth.setEmail(userId, mail, version);
+    if (!ok) return reply.code(409).send({ error: 'email already in use' });
+    return reply.code(200).send({ email: mail, emailVerified: false });
+  });
+
+  // Export the caller's data (PDPL/GDPR access right): account fields + their designs.
+  app.get('/api/account/export', authLimit, async (req, reply) => {
+    const userId = await requireUser(req, reply);
+    if (!userId) return;
+    const user = await auth.getUserById(userId).catch(() => null);
+    const designs = await repo.listByOwner(userId).catch(() => []);
+    return reply.header('content-disposition', 'attachment; filename="tifomaker-data.json"').send({
+      exportedAt: new Date().toISOString(),
+      account: user
+        ? { id: user.id, username: user.username, email: user.email, emailVerified: !!user.emailVerifiedAt }
+        : null,
+      designs,
+    });
+  });
+
+  // Permanently delete the caller's account and all their designs (right to erasure).
+  app.delete('/api/account', authLimit, async (req, reply) => {
+    const userId = await requireUser(req, reply);
+    if (!userId) return;
+    await repo.deleteByOwner(userId).catch(() => {});
+    await auth.deleteUser(userId);
+    return reply.code(204).send();
+  });
+
+  // Admin: grant/revoke the paid (unlimited-AI) entitlement. No payment processor
+  // yet — this lets you comp testers or friends to Pro until billing exists.
+  app.post('/api/admin/pro', authLimit, async (req, reply) => {
+    const adminId = await requireUser(req, reply);
+    if (!adminId) return;
+    if (!(await isAdminUser(adminId))) return reply.code(403).send({ error: 'admin access required' });
+    const { username, isPro } = (req.body ?? {}) as { username?: string; isPro?: boolean };
+    const target = username ? await auth.getUserByName(username) : null;
+    if (!target) return reply.code(404).send({ error: 'user not found' });
+    await auth.setPro(target.id, isPro !== false);
+    return { username: target.username, isPro: isPro !== false };
   });
 
   // ---------- gallery ----------
@@ -1191,6 +1404,22 @@ export async function buildApp(
       app.get('/clubs', async (_req, reply) => reply.type('text/html').send(clubsHtml));
     } catch {
       /* clubs page optional in API-only builds */
+    }
+
+    // Legal documents (Terms, Privacy, Acceptable Use, Cookies) at /legal.
+    try {
+      const legalHtml = readFileSync(join(staticDir, 'legal.html'), 'utf8');
+      app.get('/legal', async (_req, reply) => reply.type('text/html').send(legalHtml));
+    } catch {
+      /* legal page optional in API-only builds */
+    }
+
+    // Password-reset landing (opened from the reset email link).
+    try {
+      const resetHtml = readFileSync(join(staticDir, 'reset.html'), 'utf8');
+      app.get('/reset', async (_req, reply) => reply.header('cache-control', 'no-cache').type('text/html').send(resetHtml));
+    } catch {
+      /* reset page optional in API-only builds */
     }
 
     // index:false so the static plugin doesn't auto-serve index.html at '/'

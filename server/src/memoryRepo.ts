@@ -21,6 +21,7 @@ import type {
   PhotoReviewItem,
   FunnelStep,
 } from './repo';
+import { aiPeriod } from './repo';
 
 interface Row extends DesignRecord {
   thumbnail: Buffer | null;
@@ -37,18 +38,23 @@ interface Row extends DesignRecord {
 
 /** In-memory AI quota store: dev mode and route tests. Same contract as Postgres. */
 export class MemoryAiUsageRepository implements AiUsageRepository {
-  private used = new Map<string, number>();
+  private rows = new Map<string, { used: number; period: string }>();
+
+  private currentUsed(userId: string): number {
+    const r = this.rows.get(userId);
+    return r && r.period === aiPeriod() ? r.used : 0;
+  }
 
   async get(userId: string, limit: number): Promise<AiUsage> {
-    const u = this.used.get(userId) ?? 0;
+    const u = this.currentUsed(userId);
     return { used: u, limit, remaining: Math.max(0, limit - u) };
   }
 
   async consume(userId: string, limit: number): Promise<{ allowed: boolean } & AiUsage> {
-    const u = this.used.get(userId) ?? 0;
+    const u = this.currentUsed(userId);
     if (u >= limit) return { allowed: false, used: u, limit, remaining: 0 };
     const n = u + 1;
-    this.used.set(userId, n);
+    this.rows.set(userId, { used: n, period: aiPeriod() });
     return { allowed: true, used: n, limit, remaining: Math.max(0, limit - n) };
   }
 }
@@ -96,6 +102,10 @@ export class MemoryDesignRepository implements DesignRepository {
       .filter((r) => r.ownerId === ownerId)
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
       .map((r) => this.meta(r));
+  }
+
+  async deleteByOwner(ownerId: string): Promise<void> {
+    for (const [id, r] of this.rows) if (r.ownerId === ownerId) this.rows.delete(id);
   }
 
   private score(r: Row): number {
@@ -448,10 +458,17 @@ export function normalizeTags(slugs: string[]): string[] {
 export class MemoryAuthRepository implements AuthRepository {
   readonly users = new Map<string, UserRow>(); // by username
   private tokens = new Map<string, { userId: string; expiresAt: number }>();
+  private emailTokens = new Map<string, { userId: string; purpose: string; expiresAt: number; used: boolean }>();
 
-  async createUser(username: string, passwordHash: string): Promise<UserRow | null> {
+  async createUser(
+    username: string,
+    passwordHash: string,
+    opts: { email?: string | null; acceptedVersion?: string | null } = {},
+  ): Promise<UserRow | null> {
     if (this.users.has(username)) return null;
-    const row: UserRow = { id: randomUUID(), username, passwordHash };
+    const email = opts.email ?? null;
+    if (email && this.emailTaken(email)) return null;
+    const row: UserRow = { id: randomUUID(), username, passwordHash, email, emailVerifiedAt: null, isPro: false };
     this.users.set(username, row);
     return row;
   }
@@ -463,6 +480,38 @@ export class MemoryAuthRepository implements AuthRepository {
   async getUserById(id: string): Promise<UserRow | null> {
     for (const u of this.users.values()) if (u.id === id) return u;
     return null;
+  }
+
+  private emailTaken(email: string): boolean {
+    const e = email.toLowerCase();
+    for (const u of this.users.values()) if (u.email && u.email.toLowerCase() === e) return true;
+    return false;
+  }
+
+  async getUserByEmail(email: string): Promise<UserRow | null> {
+    const e = email.toLowerCase();
+    for (const u of this.users.values()) if (u.email && u.email.toLowerCase() === e) return u;
+    return null;
+  }
+
+  async setEmail(userId: string, email: string, _acceptedVersion?: string | null): Promise<boolean> {
+    const u = await this.getUserById(userId);
+    if (!u) return false;
+    const mine = u.email && u.email.toLowerCase() === email.toLowerCase();
+    if (!mine && this.emailTaken(email)) return false;
+    u.email = email;
+    u.emailVerifiedAt = null; // re-verify whenever the address changes
+    return true;
+  }
+
+  async markEmailVerified(userId: string): Promise<void> {
+    const u = await this.getUserById(userId);
+    if (u) u.emailVerifiedAt = new Date().toISOString();
+  }
+
+  async setPro(userId: string, isPro: boolean): Promise<void> {
+    const u = await this.getUserById(userId);
+    if (u) u.isPro = isPro;
   }
 
   async createToken(userId: string, tokenHash: string, expiresAt: Date): Promise<void> {
@@ -477,6 +526,38 @@ export class MemoryAuthRepository implements AuthRepository {
 
   async deleteToken(tokenHash: string): Promise<void> {
     this.tokens.delete(tokenHash);
+  }
+
+  async createEmailToken(userId: string, tokenHash: string, purpose: string, expiresAt: Date): Promise<void> {
+    this.emailTokens.set(tokenHash, { userId, purpose, expiresAt: expiresAt.getTime(), used: false });
+  }
+
+  async consumeEmailToken(tokenHash: string, purpose: string): Promise<string | null> {
+    const t = this.emailTokens.get(tokenHash);
+    if (!t || t.used || t.purpose !== purpose || t.expiresAt < Date.now()) return null;
+    t.used = true;
+    return t.userId;
+  }
+
+  async deleteEmailTokens(userId: string, purpose: string): Promise<void> {
+    for (const [hash, t] of this.emailTokens) {
+      if (t.userId === userId && t.purpose === purpose) this.emailTokens.delete(hash);
+    }
+  }
+
+  async setPasswordHash(userId: string, passwordHash: string): Promise<void> {
+    const u = await this.getUserById(userId);
+    if (u) u.passwordHash = passwordHash;
+  }
+
+  async deleteUserTokens(userId: string): Promise<void> {
+    for (const [hash, t] of this.tokens) if (t.userId === userId) this.tokens.delete(hash);
+  }
+
+  async deleteUser(userId: string): Promise<void> {
+    for (const [name, u] of this.users) if (u.id === userId) this.users.delete(name);
+    for (const [hash, t] of this.tokens) if (t.userId === userId) this.tokens.delete(hash);
+    for (const [hash, t] of this.emailTokens) if (t.userId === userId) this.emailTokens.delete(hash);
   }
 
   usernameOf(id: string | null): string {

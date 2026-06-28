@@ -24,9 +24,13 @@ import { buildStadiumContext, describeStadiumContext } from '../core/stadiumCont
 import { critiqueDesign, repairSpec } from '../core/critique';
 import { composeSuperOffline } from '../core/promptDesigner';
 import { describeActiveArea } from '../core/activeArea';
-import { generateAiTifo, critiqueAiTifo, fetchAiQuota, unlockAi, aiUnlockToken, type AiError, type AiQuota } from '../net/api';
-import { isSignedIn } from '../net/api';
+import { generateAiTifo, critiqueAiTifo, fetchAiQuota, unlockAi, aiUnlockToken, type AiError, type AiQuota, type AiChoice } from '../net/api';
+import { isSignedIn, fetchMe, resendVerification } from '../net/api';
 import { openAuthModal } from './authModal';
+import { openAddEmailModal } from './openAddEmailModal';
+
+// Auto-resend the verification email at most once per session when AI is blocked.
+let verifyResent = false;
 
 export interface AiPanelDeps {
   root: HTMLElement;
@@ -80,12 +84,13 @@ export function mountAiPanel(deps: AiPanelDeps): void {
     errorEl.style.display = msg ? '' : 'none';
     errorEl.textContent = msg ?? '';
   };
+  const resetMins = (q: AiQuota): number => Math.max(1, Math.ceil((q.resetInSec ?? 0) / 60));
   const quotaText = (q: AiQuota): string =>
-    q.admin
-      ? 'Admin mode — unlimited (AI is in admin-only rebuild).'
+    q.unlimited || q.admin
+      ? 'AI Designer — unlimited'
       : q.remaining > 0
-        ? `${q.remaining} of ${q.limit} free generations left`
-        : `No free generations left (used ${q.used}/${q.limit}).`;
+        ? `${q.remaining} of ${q.limit} premium designs left this hour`
+        : `Hourly limit reached — resets in ${resetMins(q)} min`;
   const setQuota = (q: AiQuota | null): void => {
     if (!quotaEl) return;
     quotaEl.textContent = q ? quotaText(q) : isSignedIn() ? '' : 'Sign in to use the AI designer.';
@@ -103,6 +108,59 @@ export function mountAiPanel(deps: AiPanelDeps): void {
     <button id="ai-unlock" class="primary" style="width:100%;margin-top:8px;">Unlock AI</button>
     <p id="ai-unlock-msg" class="hint" style="font-size:11px;color:var(--text-3);margin:8px 0 0;"></p>`;
   section.appendChild(lockEl);
+
+  // ---- "premium busy / hourly cap" choice card: Quick Designer, or wait + retry ----
+  const choiceEl = document.createElement('div');
+  choiceEl.className = 'ai-choice';
+  choiceEl.style.display = 'none';
+  section.appendChild(choiceEl);
+  let choiceTimer: number | null = null;
+  const hideChoice = (): void => {
+    if (choiceTimer) { clearInterval(choiceTimer); choiceTimer = null; }
+    choiceEl.style.display = 'none';
+    choiceEl.innerHTML = '';
+  };
+  const showChoice = (choice: AiChoice, prompt: string, useSuper: boolean): void => {
+    hideChoice();
+    const cap = choice.reason === 'quota';
+    choiceEl.innerHTML =
+      `<p class="ai-choice-title"></p>` +
+      `<button class="primary ai-choice-quick" type="button">⚡ Use Quick Designer — instant &amp; free</button>` +
+      `<button class="ai-choice-wait" type="button"></button>` +
+      `<p class="ai-choice-hint"></p>`;
+    (choiceEl.querySelector('.ai-choice-title') as HTMLElement).textContent = cap
+      ? `You've used your ${choice.quota.limit || 10} premium designs this hour.`
+      : 'Premium AI is busy right now.';
+    (choiceEl.querySelector('.ai-choice-hint') as HTMLElement).textContent = cap
+      ? 'The Quick Designer is always free.'
+      : 'The Quick Designer is free, or wait for premium to free up.';
+    choiceEl.style.display = '';
+    const waitBtn = choiceEl.querySelector('.ai-choice-wait') as HTMLButtonElement;
+    let left = Math.max(0, Math.round(choice.retryAfterSec));
+    const fmt = (s: number): string => (s >= 60 ? `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}` : `${s}s`);
+    const tick = (): void => {
+      if (left > 0) {
+        waitBtn.disabled = true;
+        waitBtn.textContent = cap ? `⏳ Premium resets in ${fmt(left)}` : `⏳ Wait for Premium AI · ${fmt(left)}`;
+        left -= 1;
+      } else {
+        waitBtn.disabled = false;
+        waitBtn.textContent = '↻ Try Premium AI again';
+        if (choiceTimer) { clearInterval(choiceTimer); choiceTimer = null; }
+      }
+    };
+    tick();
+    choiceTimer = window.setInterval(tick, 1000);
+    (choiceEl.querySelector('.ai-choice-quick') as HTMLButtonElement).addEventListener('click', () => {
+      hideChoice();
+      void run(prompt, { super: useSuper, engine: 'offline' });
+    });
+    waitBtn.addEventListener('click', () => {
+      if (waitBtn.disabled) return;
+      hideChoice();
+      void run(prompt, { super: useSuper });
+    });
+  };
 
   const lockToggle = ([promptEl, genBtn, superBtn, shuffleBtn, examplesEl, quotaEl] as (HTMLElement | null)[]).filter(
     (e): e is HTMLElement => !!e,
@@ -213,7 +271,7 @@ export function mountAiPanel(deps: AiPanelDeps): void {
     setStatus('Reverted to your previous canvas.');
   };
 
-  const run = async (prompt: string, opts: { super?: boolean } = {}): Promise<void> => {
+  const run = async (prompt: string, opts: { super?: boolean; engine?: 'offline' } = {}): Promise<void> => {
     if (busy) return;
     const text = prompt.trim();
     if (!text) { setError('Describe the tifo you want first.'); return; }
@@ -228,6 +286,7 @@ export function mountAiPanel(deps: AiPanelDeps): void {
     const label = useSuper ? 'Super AI' : 'AI';
     busy = true;
     setError(null);
+    hideChoice();
     genBtn.disabled = true;
     if (superBtn) superBtn.disabled = true;
     if (regenBtn) regenBtn.disabled = true;
@@ -240,9 +299,18 @@ export function mountAiPanel(deps: AiPanelDeps): void {
       // Section 3: focus the design on the chosen active area, if any.
       const focus = describeActiveArea();
       const brief = focus ? `${text} — focus the design on ${focus}` : text;
-      const res = await generateAiTifo(brief, useSuper ? { mode: 'super', stadium } : {});
+      const res = await generateAiTifo(brief, {
+        ...(useSuper ? { mode: 'super', stadium } : {}),
+        ...(opts.engine ? { engine: opts.engine } : {}),
+      });
+      if ('needsChoice' in res) {
+        setStatus('');
+        setQuota(res.quota);
+        showChoice(res, text, useSuper);
+        return;
+      }
       await applySpec(res.spec);
-      setStatus(res.source === 'model' ? `Designed with Gemini${useSuper ? ' (Super AI)' : ''}.` : 'Designed (offline designer — model not reached).');
+      setStatus(res.source === 'model' ? `Designed with Premium AI${useSuper ? ' (Super AI)' : ''}.` : 'Designed with the Quick Designer.');
       setQuota(res.quota);
       // Surface server diagnostics in the panel AND the footer "ground bar".
       const notes = res.notes ?? [];
@@ -252,24 +320,35 @@ export function mountAiPanel(deps: AiPanelDeps): void {
         if (bar) bar.textContent = `${label}: ` + notes.join('  ·  ');
       } else {
         setError(null);
-        if (bar) bar.textContent = res.source === 'model' ? `${label}: designed with Gemini ✓` : '';
+        if (bar) bar.textContent = res.source === 'model' ? `${label}: designed ✓` : '';
       }
     } catch (e) {
       const err = e as AiError;
-      if (err.status === 403) {
-        setStatus('');
-        setError(err.message || 'AI is admin-only right now.');
-        setLocked(true);
-      } else if (err.status === 401) {
-        setStatus('');
+      setStatus('');
+      if (err.reason === 'verify') {
+        // Signed in but the email isn't usable yet. No email on the account →
+        // offer to add one; otherwise it's unverified → offer to resend the link.
+        const me = await fetchMe().catch(() => null);
+        if (me && !me.email) {
+          const added = await openAddEmailModal();
+          setError(added ? 'Check your inbox to verify, then try again.' : 'Add a verified email to use the AI Designer.');
+        } else if (!verifyResent) {
+          verifyResent = true;
+          void resendVerification().catch(() => {});
+          setError('Verify your email to use the AI Designer — I just re-sent the link to your inbox.');
+        } else {
+          setError('Verify your email to use the AI Designer. Check your inbox for the link.');
+        }
+      } else if (err.reason === 'quota' || err.status === 429 || err.status === 402) {
+        setError(err.message || 'You have used all your free AI designs for this month.');
+        if (err.quota) setQuota(err.quota);
+      } else if (err.status === 401 || err.reason === 'signin') {
         setError('Please sign in to generate.');
         void openAuthModal();
-      } else if (err.status === 402) {
-        setStatus('');
-        setError(err.message || 'You have used all your free AI generations.');
-        if (err.quota) setQuota(err.quota);
+      } else if (err.status === 403) {
+        setError(err.message || 'AI is admin-only right now.');
+        setLocked(true);
       } else {
-        setStatus('');
         setError(err.message || 'Generation failed. Please try again.');
       }
     } finally {
@@ -385,6 +464,18 @@ export function mountAiPanel(deps: AiPanelDeps): void {
   setQuota(null);
   fetchAiQuota()
     .then((q) => { setLocked(false); setQuota(q); })
-    .catch((e) => { setLocked((e as AiError).status === 403); });
+    .catch((e) => {
+      const err = e as AiError;
+      // Don't show the admin-unlock box for ordinary "sign in / verify" denials.
+      setLocked(false);
+      if (quotaEl) {
+        quotaEl.textContent =
+          err.reason === 'verify'
+            ? 'Verify your email to use the AI Designer.'
+            : !isSignedIn()
+              ? 'Sign in to use the AI Designer.'
+              : '';
+      }
+    });
   void getPreview; // reserved: future per-layer live preview in the 3D view
 }

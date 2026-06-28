@@ -1,6 +1,7 @@
 import './community.css';
 import { initLang, applyDom, toggleLang, t } from './ui/i18n';
 import { installMobileNav } from './ui/mobileNav';
+import { installConsent } from './ui/consent';
 import { generateSeatMapAsync } from './workers/client';
 import { TEMPLATES } from './core/template';
 import { DesignStore } from './core/design';
@@ -16,6 +17,7 @@ import {
   voteDesign,
   thumbnailUrl,
   remixDesign,
+  reportDesign,
   followUser,
   unfollowUser,
   searchUsers,
@@ -36,6 +38,7 @@ import {
 initLang();
 applyDom(document);
 installMobileNav();
+installConsent();
 
 const $ = <T extends HTMLElement = HTMLElement>(sel: string): T => document.querySelector(sel) as T;
 let me: { id: string; username: string; isAdmin: boolean } | null = null;
@@ -315,6 +318,7 @@ async function openPreview(item: GalleryItem): Promise<void> {
           <div class="side-actions">
             <button class="act-btn like ${item.myVote === 1 ? 'on' : ''}" id="like-btn"><i class="ti ti-heart${item.myVote === 1 ? '-filled' : ''}"></i> <span id="like-count">${item.likeScore}</span></button>
             ${item.allowRemix !== false ? `<button class="act-btn remix" id="remix-btn"><i class="ti ti-git-fork"></i> Remix</button>` : ''}
+            <button class="act-btn report" id="report-btn" title="Report this design" aria-label="Report this design"><i class="ti ti-flag"></i></button>
           </div>
         </div>
         <div class="comments" id="comments"><div class="comments-head">Comments</div><div id="comment-list"></div></div>
@@ -444,6 +448,21 @@ function wirePreviewActions(item: GalleryItem): void {
       setTimeout(() => {
         window.location.href = `/app?design=${created.id}`;
       }, 700);
+    } catch (e) {
+      toast((e as Error).message);
+    }
+  });
+
+  // Report (sends to the moderation queue; you act on it from /admin or the DB).
+  const reportBtn = document.getElementById('report-btn');
+  reportBtn?.addEventListener('click', async () => {
+    const reason = window.prompt('Report this design — why? (e.g. offensive, infringes my rights, spam)');
+    if (reason == null) return;
+    const text = reason.trim();
+    if (!text) return;
+    try {
+      await reportDesign(item.id, text.slice(0, 300));
+      toast('Thanks — your report has been sent.');
     } catch (e) {
       toast((e as Error).message);
     }

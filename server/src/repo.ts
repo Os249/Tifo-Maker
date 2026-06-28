@@ -80,6 +80,8 @@ export interface DiffBytes {
 export interface DesignRepository {
   create(d: NewDesign): Promise<DesignMeta>;
   listByOwner(ownerId: string): Promise<DesignMeta[]>;
+  /** Delete all of an owner's designs (used by account deletion). */
+  deleteByOwner(ownerId: string): Promise<void>;
   listPublic(query: GalleryQuery): Promise<GalleryItem[]>;
   get(id: string): Promise<DesignRecord | null>;
   /** thumbnailPng null = keep existing. */
@@ -260,17 +262,50 @@ export interface UserRow {
   id: string;
   username: string;
   passwordHash: string;
+  /** null until the user adds an email (pre-launch accounts have none). */
+  email: string | null;
+  /** ISO timestamp when the current email was verified, else null. */
+  emailVerifiedAt: string | null;
+  /** Paid entitlement: unlimited AI. */
+  isPro: boolean;
 }
 
 export interface AuthRepository {
-  /** Returns null if the username is taken. */
-  createUser(username: string, passwordHash: string): Promise<UserRow | null>;
+  /** Returns null if the username or email is already taken. */
+  createUser(
+    username: string,
+    passwordHash: string,
+    opts?: { email?: string | null; acceptedVersion?: string | null },
+  ): Promise<UserRow | null>;
   getUserByName(username: string): Promise<UserRow | null>;
   getUserById(id: string): Promise<UserRow | null>;
+  /** Case-insensitive email lookup (uniqueness checks + password reset). */
+  getUserByEmail(email: string): Promise<UserRow | null>;
+  /**
+   * Attach or replace the caller's email (e.g. pre-launch accounts adding one).
+   * Resets verification. Returns false if the email belongs to someone else.
+   */
+  setEmail(userId: string, email: string, acceptedVersion?: string | null): Promise<boolean>;
+  /** Mark the user's current email as verified now. */
+  markEmailVerified(userId: string): Promise<void>;
+  /** Set the paid (unlimited-AI) entitlement flag. */
+  setPro(userId: string, isPro: boolean): Promise<void>;
   createToken(userId: string, tokenHash: string, expiresAt: Date): Promise<void>;
   /** Returns the user id for a live (unexpired) token hash. */
   getUserIdByToken(tokenHash: string): Promise<string | null>;
   deleteToken(tokenHash: string): Promise<void>;
+  /** Store a single-use email/reset token (hashed), with a purpose + expiry. */
+  createEmailToken(userId: string, tokenHash: string, purpose: string, expiresAt: Date): Promise<void>;
+  /** Consume a matching, unused, unexpired token; returns its user id and marks it used. */
+  consumeEmailToken(tokenHash: string, purpose: string): Promise<string | null>;
+  /** Invalidate any outstanding tokens of a purpose for a user (before issuing a new one). */
+  deleteEmailTokens(userId: string, purpose: string): Promise<void>;
+  /** Replace the user's password hash (change password / reset). */
+  setPasswordHash(userId: string, passwordHash: string): Promise<void>;
+  /** Invalidate all of a user's bearer tokens (e.g. force re-login after a reset). */
+  deleteUserTokens(userId: string): Promise<void>;
+  /** Permanently delete a user (account deletion). Cascades tokens/usage rows. */
+  deleteUser(userId: string): Promise<void>;
 }
 
 /** A single point in the conversion funnel, with how many unique sessions reached it. */
@@ -324,4 +359,15 @@ export interface AiUsageRepository {
    * it was allowed plus the resulting usage. Safe under concurrent calls.
    */
   consume(userId: string, limit: number): Promise<{ allowed: boolean } & AiUsage>;
+}
+
+/** Current hourly metering period, e.g. "2026-06-28T14" (UTC). Usage resets each hour. */
+export function aiPeriod(d: Date = new Date()): string {
+  const p = (n: number): string => String(n).padStart(2, '0');
+  return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())}T${p(d.getUTCHours())}`;
+}
+
+/** Seconds until the current hourly period rolls over (for "resets in …" UI). */
+export function secondsToNextPeriod(d: Date = new Date()): number {
+  return 3600 - (d.getUTCMinutes() * 60 + d.getUTCSeconds());
 }

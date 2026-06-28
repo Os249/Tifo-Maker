@@ -91,9 +91,11 @@ async function main(): Promise<void> {
 
   (document.getElementById('s-title') as HTMLElement).textContent = meta.title;
   const sub = document.getElementById('s-sub') as HTMLElement;
+  const esc = (s: string): string =>
+    s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c] ?? c);
   const parts = [
-    meta.ownerName ? `by <span class="at">@${meta.ownerName}</span>` : '',
-    template.name,
+    meta.ownerName ? `by <span class="at">@${esc(meta.ownerName)}</span>` : '',
+    esc(template.name),
     fmtDate(meta.createdAt),
     `<span id="s-views">${meta.viewCount.toLocaleString()}</span> views`,
   ].filter(Boolean);

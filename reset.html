@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>Reset password · TifoMaker</title>
+  <meta name="robots" content="noindex" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;800&display=swap" rel="stylesheet" />
+  <style>
+    :root { --ink:#0e1426; --muted:#5b6473; --line:#e6e8ee; --blue:#1c6fe0; --bg:#fbfbfd; --danger:#c0392b; }
+    * { box-sizing:border-box; }
+    body { margin:0; min-height:100vh; display:grid; place-items:center; background:var(--bg); color:var(--ink);
+      font:16px/1.6 'Inter',system-ui,-apple-system,sans-serif; -webkit-font-smoothing:antialiased; padding:20px; }
+    .card { width:100%; max-width:380px; background:#fff; border:1px solid var(--line); border-radius:16px; padding:28px 26px;
+      box-shadow:0 12px 40px rgba(20,26,46,.08); }
+    .brand { display:block; font-weight:800; letter-spacing:.03em; color:var(--ink); text-decoration:none; margin-bottom:14px; }
+    .brand b { color:var(--blue); }
+    h1 { font-size:21px; margin:0 0 16px; }
+    label { display:block; font-size:13px; color:var(--muted); margin:0 0 12px; }
+    input { display:block; width:100%; margin-top:5px; padding:10px 12px; font:inherit; font-size:14px;
+      border:1px solid var(--line); border-radius:10px; }
+    input:focus-visible { outline:none; border-color:var(--blue); box-shadow:0 0 0 3px rgba(28,111,224,.18); }
+    button { width:100%; margin-top:4px; padding:11px 0; font:inherit; font-weight:600; color:#fff; background:var(--blue);
+      border:none; border-radius:999px; cursor:pointer; }
+    button:disabled { opacity:.6; cursor:default; }
+    .err { background:rgba(192,57,43,.1); color:var(--danger); border:1px solid rgba(192,57,43,.3); border-radius:8px;
+      padding:8px 10px; font-size:13px; margin:0 0 12px; }
+    .done { font-size:14px; }
+    .done a { color:var(--blue); font-weight:600; }
+  </style>
+</head>
+<body>
+  <main class="card">
+    <a class="brand" href="/">TIFO<b>MAKER</b></a>
+    <h1>Reset your password</h1>
+    <div class="err" id="err" hidden></div>
+    <form id="reset-form">
+      <label>New password
+        <input type="password" id="pw" autocomplete="new-password" placeholder="at least 8 characters" />
+      </label>
+      <label>Confirm new password
+        <input type="password" id="pw2" autocomplete="new-password" />
+      </label>
+      <button type="submit" id="submit">Update password</button>
+    </form>
+    <p class="done" id="done" hidden>Your password has been updated. <a href="/app">Go to sign in</a></p>
+  </main>
+  <script type="module" src="/src/reset.ts"></script>
+</body>
+</html>

@@ -8,7 +8,8 @@ import { renderTextCanvas, TIFO_FONTS, type RenderedText } from '../core/text';
 import type { ObjectLayer } from '../core/objects';
 import { MIN_LEGIBLE_RUN, findFragileSeats } from '../core/analysis';
 import { RevealPlayer, REVEAL_PRESETS, type RevealId } from '../core/reveal';
-import { fetchMe, isSignedIn, loadDesign, saveDesign, setPublic } from '../net/api';
+import { fetchMe, isSignedIn, loadDesign, saveDesign, setPublic, exportMyData, deleteAccount } from '../net/api';
+import { t as i18nT } from './i18n';
 import { track, setAnalyticsSignedIn } from '../net/analytics';
 import { buildTifoV2 } from '../core/tifoFormat';
 import { extractPalette, rasterize } from '../core/importImage';
@@ -924,6 +925,12 @@ export function mountToolbar(
     const nameItem = document.getElementById('avatar-menu-name');
     if (profileItem) profileItem.hidden = !signed;
     if (signoutItem) signoutItem.hidden = !signed;
+    const passwordItem = document.getElementById('menu-password');
+    if (passwordItem) passwordItem.hidden = !signed;
+    const exportItem = document.getElementById('menu-export');
+    if (exportItem) exportItem.hidden = !signed;
+    const deleteItem = document.getElementById('menu-delete');
+    if (deleteItem) deleteItem.hidden = !signed;
     if (nameItem) nameItem.hidden = !signed;
     toggleAvatarMenu();
   });
@@ -964,6 +971,36 @@ export function mountToolbar(
   });
   document.getElementById('menu-community')?.addEventListener('click', () => {
     window.location.href = '/community';
+  });
+  document.getElementById('menu-password')?.addEventListener('click', async () => {
+    toggleAvatarMenu(false);
+    const { openChangePasswordModal } = await import('./changePasswordModal');
+    openChangePasswordModal();
+  });
+  document.getElementById('menu-export')?.addEventListener('click', async () => {
+    toggleAvatarMenu(false);
+    try {
+      const data = await exportMyData();
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'tifomaker-data.json';
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      /* best-effort download */
+    }
+  });
+  document.getElementById('menu-delete')?.addEventListener('click', async () => {
+    toggleAvatarMenu(false);
+    if (!window.confirm(i18nT('ed.deleteConfirm'))) return;
+    try {
+      await deleteAccount();
+      window.location.href = '/';
+    } catch {
+      /* ignore — stay on the page if deletion failed */
+    }
   });
   document.getElementById('menu-tutorial')?.addEventListener('click', async () => {
     toggleAvatarMenu(false);

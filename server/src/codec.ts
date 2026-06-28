@@ -6,8 +6,12 @@ export function gzipBytes(data: Uint8Array): Buffer {
   return gzipSync(data);
 }
 
+// Bound decompression so a tiny malicious payload can't balloon to gigabytes
+// (zip-bomb DoS). 4 MB ≫ any real stadium's seat bytes; over it, gunzip throws
+// (RangeError) and the route returns an error instead of allocating.
+const MAX_GUNZIP_BYTES = 4 * 1024 * 1024;
 export function gunzipBytes(data: Uint8Array): Buffer {
-  return gunzipSync(data);
+  return gunzipSync(data, { maxOutputLength: MAX_GUNZIP_BYTES });
 }
 
 export function toB64(view: ArrayBufferView): string {

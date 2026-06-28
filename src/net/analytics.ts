@@ -20,6 +20,19 @@ export type FunnelEvent =
 const SESSION_KEY = 'tifo_session_v1';
 const fired = new Set<FunnelEvent>();
 
+/**
+ * Non-essential analytics run only after explicit "Accept all" consent. We read
+ * the consent banner's localStorage key directly (no import) to avoid coupling;
+ * until the user accepts all, nothing is sent.
+ */
+function analyticsAllowed(): boolean {
+  try {
+    return localStorage.getItem('tifo_consent_v1') === 'all';
+  } catch {
+    return false;
+  }
+}
+
 function sessionId(): string {
   try {
     let id = sessionStorage.getItem(SESSION_KEY);
@@ -46,6 +59,7 @@ export function setAnalyticsSignedIn(value: boolean): void {
  * available so it survives navigation/unload; falls back to fetch keepalive.
  */
 export function track(event: FunnelEvent, opts: { once?: boolean } = {}): void {
+  if (!analyticsAllowed()) return;
   const once = opts.once ?? true;
   if (once && fired.has(event)) return;
   fired.add(event);

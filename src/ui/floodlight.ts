@@ -519,6 +519,17 @@ body.viewer { display:block; overflow-y:auto; background:var(--ink-0); }
   border-radius:var(--r-md); padding:10px 12px; font:inherit; font-size:14px; width:100%;
 }
 .auth-field input:focus-visible { outline:none; box-shadow:var(--ring-focus); }
+.auth-accept { flex-direction:row; align-items:flex-start; gap:9px; font-size:12px; color:var(--text-2); line-height:1.45; cursor:pointer; }
+.auth-accept input { width:18px; height:18px; flex:0 0 auto; margin-top:1px; accent-color:var(--flare); cursor:pointer; }
+.auth-accept a { color:var(--flare); }
+.auth-forgot-link, .auth-back { background:none; border:none; color:var(--flare); font:inherit; font-size:13px; cursor:pointer; padding:8px 0; width:100%; text-align:center; }
+.auth-forgot { display:flex; flex-direction:column; gap:12px; }
+.auth-forgot-msg { font-size:13px; color:var(--text-2); background:var(--ink-3); border:1px solid var(--line-2); border-radius:var(--r-sm); padding:8px 10px; }
+.ai-choice { display:flex; flex-direction:column; gap:8px; background:var(--ink-3); border:1px solid var(--line-2); border-radius:var(--r-md); padding:12px; margin-top:8px; }
+.ai-choice-title { margin:0; font-size:13px; font-weight:600; color:var(--text-1); }
+.ai-choice .ai-choice-wait { background:transparent; border:1px solid var(--line-2); color:var(--text-1); border-radius:var(--r-md); padding:9px; font:inherit; font-size:13px; cursor:pointer; }
+.ai-choice .ai-choice-wait:disabled { opacity:.7; cursor:default; }
+.ai-choice-hint { margin:0; font-size:11px; color:var(--text-3); }
 .auth-error {
   background:rgba(240,69,90,.12); border:1px solid var(--danger); color:#F58A96;
   border-radius:var(--r-sm); padding:8px 10px; font-size:12px;

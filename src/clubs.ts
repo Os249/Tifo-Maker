@@ -2,10 +2,12 @@ import './clubs.css';
 import { initLang, applyDom, toggleLang, t } from './ui/i18n';
 import { submitLead } from './net/api';
 import { installMobileNav } from './ui/mobileNav';
+import { installConsent } from './ui/consent';
 
 initLang();
 applyDom(document);
 installMobileNav();
+installConsent();
 
 const langToggle = document.getElementById('lang-toggle');
 if (langToggle) {

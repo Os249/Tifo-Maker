@@ -40,12 +40,35 @@ CREATE TABLE IF NOT EXISTS users (
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- Launch: email accounts. email is nullable so pre-launch accounts keep working
+-- until they add one. AI Designer is gated on a verified email; every other tool
+-- stays open. accepted_terms_* records which policy version the user agreed to.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS email                  TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified_at      TIMESTAMPTZ;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS accepted_terms_version TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS accepted_terms_at      TIMESTAMPTZ;
+-- Paid entitlement (unlimited AI). No payment processor yet; flipped manually/admin for now.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS is_pro                 BOOLEAN NOT NULL DEFAULT false;
+-- Case-insensitive uniqueness, but only across rows that actually have an email.
+CREATE UNIQUE INDEX IF NOT EXISTS users_email_key ON users (lower(email)) WHERE email IS NOT NULL;
+
 -- Opaque bearer tokens, stored hashed. A leaked DB row cannot be replayed.
 CREATE TABLE IF NOT EXISTS auth_tokens (
   token_hash TEXT PRIMARY KEY,                -- sha256(token) hex
   user_id    UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   expires_at TIMESTAMPTZ NOT NULL
 );
+
+-- Single-use, hashed, expiring tokens for email verification and password reset.
+-- purpose is 'verify_email' or 'reset_password'. used_at marks consumption.
+CREATE TABLE IF NOT EXISTS email_tokens (
+  token_hash TEXT PRIMARY KEY,                -- sha256(token) hex
+  user_id    UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  purpose    TEXT NOT NULL,
+  expires_at TIMESTAMPTZ NOT NULL,
+  used_at    TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS email_tokens_user_idx ON email_tokens (user_id, purpose);
 
 ALTER TABLE designs ADD COLUMN IF NOT EXISTS owner_id  UUID REFERENCES users(id);
 ALTER TABLE designs ADD COLUMN IF NOT EXISTS is_public BOOLEAN NOT NULL DEFAULT false;
@@ -194,6 +217,8 @@ CREATE TABLE IF NOT EXISTS ai_usage (
   used       INT NOT NULL DEFAULT 0,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+-- Monthly metering: usage counts reset when the period (YYYY-MM) changes.
+ALTER TABLE ai_usage ADD COLUMN IF NOT EXISTS period TEXT;
 
 -- Sharing system: a public view counter on each design, a branded social-card
 -- image, and a per-platform share/open log for analytics.

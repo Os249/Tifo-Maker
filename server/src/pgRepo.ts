@@ -1,4 +1,5 @@
 import pg from 'pg';
+import { aiPeriod } from './repo';
 import type {
   AuthRepository,
   AiUsage,
@@ -50,20 +51,25 @@ export class PgAiUsageRepository implements AiUsageRepository {
   constructor(private readonly pool: pg.Pool) {}
 
   async get(userId: string, limit: number): Promise<AiUsage> {
-    const r = await this.pool.query('SELECT used FROM ai_usage WHERE user_id = $1', [userId]);
-    const used = r.rows[0] ? Number(r.rows[0].used) : 0;
+    const r = await this.pool.query('SELECT used, period FROM ai_usage WHERE user_id = $1', [userId]);
+    const row = r.rows[0];
+    const used = row && row.period === aiPeriod() ? Number(row.used) : 0;
     return { used, limit, remaining: Math.max(0, limit - used) };
   }
 
   async consume(userId: string, limit: number): Promise<{ allowed: boolean } & AiUsage> {
-    // First generation inserts used=1; later ones increment ONLY while under the
-    // limit (the WHERE on DO UPDATE). No matching row returned ⇒ over quota.
+    // Monthly meter: a new period resets the count to 1; within a period it
+    // increments only while under the limit. No row returned ⇒ over quota.
+    const period = aiPeriod();
     const r = await this.pool.query(
-      `INSERT INTO ai_usage (user_id, used) VALUES ($1, 1)
-       ON CONFLICT (user_id) DO UPDATE SET used = ai_usage.used + 1, updated_at = now()
-         WHERE ai_usage.used < $2
+      `INSERT INTO ai_usage (user_id, used, period) VALUES ($1, 1, $3)
+       ON CONFLICT (user_id) DO UPDATE
+         SET used = CASE WHEN ai_usage.period = $3 THEN ai_usage.used + 1 ELSE 1 END,
+             period = $3,
+             updated_at = now()
+         WHERE ai_usage.period <> $3 OR ai_usage.used < $2
        RETURNING used`,
-      [userId, limit],
+      [userId, limit, period],
     );
     if (r.rows[0]) {
       const used = Number(r.rows[0].used);
@@ -92,6 +98,10 @@ export class PgDesignRepository implements DesignRepository {
       [ownerId],
     );
     return res.rows.map(rowToMeta);
+  }
+
+  async deleteByOwner(ownerId: string): Promise<void> {
+    await this.pool.query('DELETE FROM designs WHERE owner_id = $1', [ownerId]);
   }
 
   async listPublic(query: GalleryQuery): Promise<GalleryItem[]> {
@@ -543,38 +553,95 @@ export class PgDesignRepository implements DesignRepository {
   }
 }
 
+/** Map a users row (incl. email columns) to a UserRow. */
+function mapUserRow(r: {
+  id: unknown;
+  username: unknown;
+  password_hash: unknown;
+  email?: unknown;
+  email_verified_at?: unknown;
+  is_pro?: unknown;
+}): UserRow {
+  return {
+    id: String(r.id),
+    username: String(r.username),
+    passwordHash: String(r.password_hash),
+    email: r.email == null ? null : String(r.email),
+    emailVerifiedAt: r.email_verified_at == null ? null : new Date(r.email_verified_at as string).toISOString(),
+    isPro: r.is_pro === true,
+  };
+}
+
 export class PgAuthRepository implements AuthRepository {
   constructor(private readonly pool: pg.Pool) {}
 
-  async createUser(username: string, passwordHash: string): Promise<UserRow | null> {
+  async createUser(
+    username: string,
+    passwordHash: string,
+    opts: { email?: string | null; acceptedVersion?: string | null } = {},
+  ): Promise<UserRow | null> {
     try {
       const res = await this.pool.query(
-        'INSERT INTO users (username, password_hash) VALUES ($1, $2) RETURNING id, username, password_hash',
-        [username, passwordHash],
+        `INSERT INTO users (username, password_hash, email, accepted_terms_version, accepted_terms_at)
+         VALUES ($1, $2, $3, $4, CASE WHEN $4 IS NULL THEN NULL ELSE now() END)
+         RETURNING id, username, password_hash, email, email_verified_at`,
+        [username, passwordHash, opts.email ?? null, opts.acceptedVersion ?? null],
       );
-      const r = res.rows[0];
-      return { id: String(r.id), username: String(r.username), passwordHash: String(r.password_hash) };
+      return mapUserRow(res.rows[0]);
     } catch (err) {
-      if ((err as { code?: string }).code === '23505') return null; // unique_violation
+      if ((err as { code?: string }).code === '23505') return null; // username or email taken
       throw err;
     }
   }
 
   async getUserByName(username: string): Promise<UserRow | null> {
     const res = await this.pool.query(
-      'SELECT id, username, password_hash FROM users WHERE username = $1',
+      'SELECT id, username, password_hash, email, email_verified_at FROM users WHERE username = $1',
       [username],
     );
-    if (res.rowCount === 0) return null;
-    const r = res.rows[0];
-    return { id: String(r.id), username: String(r.username), passwordHash: String(r.password_hash) };
+    return res.rowCount ? mapUserRow(res.rows[0]) : null;
   }
 
   async getUserById(id: string): Promise<UserRow | null> {
-    const res = await this.pool.query('SELECT id, username, password_hash FROM users WHERE id = $1', [id]);
-    if (res.rowCount === 0) return null;
-    const r = res.rows[0];
-    return { id: String(r.id), username: String(r.username), passwordHash: String(r.password_hash) };
+    const res = await this.pool.query(
+      'SELECT id, username, password_hash, email, email_verified_at FROM users WHERE id = $1',
+      [id],
+    );
+    return res.rowCount ? mapUserRow(res.rows[0]) : null;
+  }
+
+  async getUserByEmail(email: string): Promise<UserRow | null> {
+    const res = await this.pool.query(
+      'SELECT id, username, password_hash, email, email_verified_at FROM users WHERE lower(email) = lower($1)',
+      [email],
+    );
+    return res.rowCount ? mapUserRow(res.rows[0]) : null;
+  }
+
+  async setEmail(userId: string, email: string, acceptedVersion?: string | null): Promise<boolean> {
+    try {
+      const res = await this.pool.query(
+        `UPDATE users
+           SET email = $2,
+               email_verified_at = NULL,
+               accepted_terms_version = COALESCE($3, accepted_terms_version),
+               accepted_terms_at = CASE WHEN $3 IS NULL THEN accepted_terms_at ELSE now() END
+         WHERE id = $1`,
+        [userId, email, acceptedVersion ?? null],
+      );
+      return (res.rowCount ?? 0) > 0;
+    } catch (err) {
+      if ((err as { code?: string }).code === '23505') return false; // email taken
+      throw err;
+    }
+  }
+
+  async markEmailVerified(userId: string): Promise<void> {
+    await this.pool.query('UPDATE users SET email_verified_at = now() WHERE id = $1', [userId]);
+  }
+
+  async setPro(userId: string, isPro: boolean): Promise<void> {
+    await this.pool.query('UPDATE users SET is_pro = $2 WHERE id = $1', [userId, isPro]);
   }
 
   async createToken(userId: string, tokenHash: string, expiresAt: Date): Promise<void> {
@@ -594,6 +661,40 @@ export class PgAuthRepository implements AuthRepository {
 
   async deleteToken(tokenHash: string): Promise<void> {
     await this.pool.query('DELETE FROM auth_tokens WHERE token_hash = $1', [tokenHash]);
+  }
+
+  async createEmailToken(userId: string, tokenHash: string, purpose: string, expiresAt: Date): Promise<void> {
+    await this.pool.query(
+      'INSERT INTO email_tokens (token_hash, user_id, purpose, expires_at) VALUES ($1, $2, $3, $4)',
+      [tokenHash, userId, purpose, expiresAt],
+    );
+  }
+
+  async consumeEmailToken(tokenHash: string, purpose: string): Promise<string | null> {
+    // Single-use + atomic: only the first caller to flip used_at gets the row back.
+    const res = await this.pool.query(
+      `UPDATE email_tokens SET used_at = now()
+         WHERE token_hash = $1 AND purpose = $2 AND used_at IS NULL AND expires_at > now()
+       RETURNING user_id`,
+      [tokenHash, purpose],
+    );
+    return res.rowCount ? String(res.rows[0].user_id) : null;
+  }
+
+  async deleteEmailTokens(userId: string, purpose: string): Promise<void> {
+    await this.pool.query('DELETE FROM email_tokens WHERE user_id = $1 AND purpose = $2', [userId, purpose]);
+  }
+
+  async setPasswordHash(userId: string, passwordHash: string): Promise<void> {
+    await this.pool.query('UPDATE users SET password_hash = $2 WHERE id = $1', [userId, passwordHash]);
+  }
+
+  async deleteUserTokens(userId: string): Promise<void> {
+    await this.pool.query('DELETE FROM auth_tokens WHERE user_id = $1', [userId]);
+  }
+
+  async deleteUser(userId: string): Promise<void> {
+    await this.pool.query('DELETE FROM users WHERE id = $1', [userId]);
   }
 }
 

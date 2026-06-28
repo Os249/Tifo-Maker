@@ -23,18 +23,50 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { AiUsageRepository } from './repo';
+import { secondsToNextPeriod } from './repo';
 import { validateSpec, type TifoSpec } from '../../src/core/tifoSpec';
 import { refineSpec } from '../../src/core/specRefine';
 import { designFromPrompt, composeSuperOffline } from '../../src/core/promptDesigner';
 import { generateSpecViaProvider, buildDirectorPrompt, critiqueSpecViaProvider, activeProvider } from './aiProvider';
 import { generateImage } from './imageAssets';
 import { TtlCache, cacheKey } from './aiCache';
+import { screenPrompt } from './promptSafety';
 
 const MAX_PROMPT = 400;
+const PREMIUM_RETRY_SEC = 90; // "wait and retry" countdown when premium is busy
 const UNLOCK_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 // Result cache: identical (mode+prompt+stadium+provider) generations return the
 // prior model design instantly — no model call, no image gen. Cuts tokens + RPD.
 const genCache = new TtlCache<{ spec: TifoSpec; source: 'model' }>(80, 30 * 60 * 1000);
+
+// Daily circuit breaker: cap premium model calls per UTC day so we never blow past
+// the provider's free daily quota / budget. When spent, everyone is routed to the
+// free Quick Designer ("premium resting") until midnight UTC. <=0 disables the cap.
+// In-memory (fine for a single instance); a multi-instance deploy would share this.
+const DAILY_BUDGET = Number(process.env.AI_DAILY_BUDGET ?? 1000);
+let premiumDay = '';
+let premiumCount = 0;
+function rollPremiumDay(): void {
+  const today = new Date().toISOString().slice(0, 10);
+  if (today !== premiumDay) {
+    premiumDay = today;
+    premiumCount = 0;
+  }
+}
+/** True when the day's premium budget is spent (breaker tripped). */
+function premiumExhausted(): boolean {
+  if (!(DAILY_BUDGET > 0)) return false;
+  rollPremiumDay();
+  return premiumCount >= DAILY_BUDGET;
+}
+function notePremiumCall(): void {
+  rollPremiumDay();
+  premiumCount += 1;
+}
+/** Busy-retry countdown with a little jitter so retries don't stampede the same second. */
+function busyRetrySec(): number {
+  return PREMIUM_RETRY_SEC + Math.floor(Math.random() * 16);
+}
 
 export interface AiRouteDeps {
   /** Quota store (retained for when AI reopens to all users; unused during the lock). */
@@ -45,8 +77,12 @@ export interface AiRouteDeps {
   isAdmin: (userId: string) => Promise<boolean>;
   /** The admin unlock password (from AI_ADMIN_PASSWORD). Unset ⇒ password unlock disabled. */
   adminPassword?: string;
-  /** Free generations per account (retained for re-enable). */
+  /** Free generations per account per month (used when metering is enforced). */
   freeLimit: number;
+  /** When true, AI is free for any signed-in, email-verified user (no per-account limit). */
+  freeForAll: boolean;
+  /** Email-verification + paid state for a user, used to gate AI. null ⇒ unknown user. */
+  userState: (userId: string) => Promise<{ emailVerified: boolean; isPro: boolean } | null>;
   /** Per-route rate-limit options ({config:{rateLimit}}) when limiting is on. */
   routeConfig?: object;
 }
@@ -78,13 +114,40 @@ export function verifyUnlock(secret: string, token: string): boolean {
 export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void {
   const adminPassword = deps.adminPassword;
 
-  /** Does this request have AI access (unlock token OR admin account)? */
-  const hasAiAccess = async (req: FastifyRequest): Promise<boolean> => {
+  type Access =
+    | { kind: 'admin' }
+    | { kind: 'user'; userId: string; pro: boolean }
+    | { kind: 'deny'; status: number; error: string; reason: 'signin' | 'verify' };
+
+  /**
+   * Who may use the AI Designer:
+   *  - an admin unlock token or ADMIN_USERNAMES account → unlimited;
+   *  - otherwise a signed-in user whose email is verified.
+   * Anonymous or unverified callers are denied with a reason the client acts on
+   * (prompt to sign in / verify). This is the loophole guard for free AI usage.
+   */
+  const baseAccess = async (req: FastifyRequest): Promise<Access> => {
     const tok = req.headers['x-ai-unlock'];
-    if (typeof tok === 'string' && adminPassword && verifyUnlock(adminPassword, tok)) return true;
+    if (typeof tok === 'string' && adminPassword && verifyUnlock(adminPassword, tok)) return { kind: 'admin' };
     const userId = await deps.userOf(req);
-    return userId ? deps.isAdmin(userId) : false;
+    if (!userId) return { kind: 'deny', status: 401, error: 'Sign in to use the AI Designer.', reason: 'signin' };
+    if (await deps.isAdmin(userId)) return { kind: 'admin' };
+    const st = await deps.userState(userId);
+    if (!st) return { kind: 'deny', status: 401, error: 'Sign in to use the AI Designer.', reason: 'signin' };
+    if (!st.emailVerified) {
+      return { kind: 'deny', status: 403, error: 'Verify your email to use the AI Designer.', reason: 'verify' };
+    }
+    return { kind: 'user', userId, pro: st.isPro };
   };
+
+  /** Unlimited use: admins and paid accounts. Everyone else is metered hourly. */
+  const isUnlimited = (a: Access): boolean => a.kind === 'admin' || (a.kind === 'user' && a.pro);
+  /** May the caller use the premium model at all? freeForAll is the kill-switch. */
+  const premiumAllowed = (a: Access): boolean =>
+    a.kind === 'admin' || (a.kind === 'user' && (a.pro || deps.freeForAll));
+  /** Free, instant offline ("Quick Designer") spec — never consumes a credit. */
+  const quickDesign = (prompt: string, isSuper: boolean): ReturnType<typeof validateSpec> =>
+    validateSpec(isSuper ? composeSuperOffline(prompt) : designFromPrompt(prompt));
 
   // Exchange the admin password for a signed, time-limited unlock token.
   app.post('/api/ai/unlock', async (req, reply) => {
@@ -98,102 +161,110 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
   });
 
   app.get('/api/ai/quota', async (req, reply) => {
-    if (!(await hasAiAccess(req))) return reply.code(403).send({ error: 'AI is temporarily admin-only', locked: true });
-    // During the lock, admins are unlimited; the per-account quota is paused.
-    return { admin: true, used: 0, limit: 0, remaining: 999999, provider: activeProvider() };
+    const access = await baseAccess(req);
+    if (access.kind === 'deny') {
+      return reply.code(access.status).send({ error: access.error, reason: access.reason, locked: true });
+    }
+    if (access.kind !== 'user' || isUnlimited(access)) {
+      return { unlimited: true, used: 0, limit: 0, remaining: 999999, resetInSec: 0, provider: activeProvider() };
+    }
+    const usage = await deps.aiUsage.get(access.userId, deps.freeLimit);
+    return { unlimited: false, ...usage, resetInSec: secondsToNextPeriod(), provider: activeProvider() };
   });
 
   app.post('/api/ai/generate', deps.routeConfig ?? {}, async (req, reply) => {
-    if (!(await hasAiAccess(req))) {
-      return reply.code(403).send({
-        error: 'AI generation is temporarily limited to admins while it is being rebuilt.',
-        locked: true,
-      });
+    const access = await baseAccess(req);
+    if (access.kind === 'deny') {
+      return reply.code(access.status).send({ error: access.error, reason: access.reason, locked: true });
     }
 
-    const prompt = typeof (req.body as { prompt?: unknown } | null)?.prompt === 'string'
-      ? (req.body as { prompt: string }).prompt.trim()
-      : '';
+    const body = (req.body ?? {}) as { prompt?: unknown; mode?: unknown; stadium?: unknown; engine?: unknown };
+    const prompt = typeof body.prompt === 'string' ? body.prompt.trim() : '';
     if (!prompt) return reply.code(400).send({ error: 'a prompt is required' });
     if (prompt.length > MAX_PROMPT) return reply.code(400).send({ error: `prompt too long (max ${MAX_PROMPT} characters)` });
+    // First-line safety screen — block clearly-harmful prompts before the model.
+    const safe = screenPrompt(prompt);
+    if (!safe.ok) return reply.code(400).send({ error: safe.message, reason: 'blocked' });
 
     // Mode 3 (Super AI): whole-bowl director prompt + the client's stadium context.
-    const body = (req.body ?? {}) as { mode?: unknown; stadium?: unknown };
     const isSuper = body.mode === 'super';
     const stadium = isSuper && typeof body.stadium === 'string' ? body.stadium.slice(0, 2000) : undefined;
+    const engine = body.engine === 'offline' ? 'offline' : 'auto';
+    const userId = access.kind === 'user' ? access.userId : null;
+    const unlimited = isUnlimited(access);
+    const usage = userId && !unlimited ? await deps.aiUsage.get(userId, deps.freeLimit) : null;
+    const quotaInfo = usage
+      ? { admin: false, used: usage.used, limit: usage.limit, remaining: usage.remaining, resetInSec: secondsToNextPeriod() }
+      : { admin: true, used: 0, limit: 0, remaining: 999999, resetInSec: 0 };
 
-    // Result cache: an identical brief returns the prior model design instantly.
+    // Quick Designer: free, instant offline engine — the user's explicit choice, or
+    // used automatically when premium is switched off. Never consumes a credit.
+    if (engine === 'offline' || !premiumAllowed(access)) {
+      const q = quickDesign(prompt, isSuper);
+      if (!q.valid || !q.spec) return reply.code(502).send({ error: 'could not produce a valid design', errors: q.errors });
+      return reply.code(200).send({ spec: refineSpec(q.spec), quota: quotaInfo, source: 'quick', notes: [] });
+    }
+
+    // Result cache: an identical brief returns the prior premium design instantly (free).
     const key = cacheKey('gen', isSuper ? 'super' : 'std', prompt, stadium, activeProvider());
     const hit = genCache.get(key);
     if (hit) {
-      return reply.code(200).send({
-        spec: hit.spec,
-        quota: { admin: true, used: 0, limit: 0, remaining: 999999 },
-        source: hit.source,
-        notes: ['Served from cache — no AI call.'],
-      });
+      return reply.code(200).send({ spec: hit.spec, quota: quotaInfo, source: hit.source, notes: ['Served instantly from cache.'] });
     }
 
-    // Try the configured model first; fall back to the deterministic designer.
-    let source: 'model' | 'offline' = 'offline';
-    let result = { valid: false } as ReturnType<typeof validateSpec>;
+    // Hourly cap reached → offer the choice (Quick Designer now, or wait for reset).
+    if (usage && usage.remaining <= 0) {
+      return reply.code(200).send({ needsChoice: true, reason: 'quota', retryAfterSec: secondsToNextPeriod(), quota: quotaInfo });
+    }
+
+    // Daily circuit breaker: budget spent → route to the Quick Designer instead of
+    // burning the provider's daily quota. Same "choice" UX, no error shown.
+    if (premiumExhausted()) {
+      return reply.code(200).send({ needsChoice: true, reason: 'busy', retryAfterSec: busyRetrySec(), quota: quotaInfo });
+    }
+
+    // Try the premium model (counts against the daily budget).
+    notePremiumCall();
     const modelResult = await generateSpecViaProvider(
       prompt,
       isSuper ? { system: buildDirectorPrompt(), context: stadium, tier: 'premium' } : { tier: 'fast' },
     );
-    let modelError = modelResult.error;
-    if (modelResult.spec) {
-      const r = validateSpec(modelResult.spec);
-      if (r.valid) {
-        result = r;
-        source = 'model';
-      } else {
-        modelError = 'text model output failed schema validation';
-      }
+    const r = modelResult.spec ? validateSpec(modelResult.spec) : ({ valid: false } as ReturnType<typeof validateSpec>);
+    if (!r.valid || !r.spec) {
+      // Premium couldn't deliver — we don't admit failure; the client offers a choice
+      // (use the free Quick Designer now, or wait out a short timer and retry).
+      return reply.code(200).send({ needsChoice: true, reason: 'busy', retryAfterSec: busyRetrySec(), quota: quotaInfo });
     }
-    if (!result.valid) {
-      // Super AI falls back to the multi-stand composer (still a full-bowl design),
-      // standard mode to the single-template designer.
-      result = validateSpec(isSuper ? composeSuperOffline(prompt) : designFromPrompt(prompt));
-      source = 'offline';
+
+    // Premium succeeded — the ONLY path that consumes a credit.
+    let quota = quotaInfo;
+    if (usage && userId) {
+      const c = await deps.aiUsage.consume(userId, deps.freeLimit);
+      quota = { admin: false, used: c.used, limit: c.limit, remaining: c.remaining, resetInSec: secondsToNextPeriod() };
     }
-    if (!result.valid || !result.spec) {
-      return reply.code(502).send({ error: 'could not produce a valid design', errors: result.errors });
-    }
+
     // Phase 4: deterministic art-director pass — fix legibility/contrast/field.
-    const spec = refineSpec(result.spec);
-
-    // Diagnostics surfaced to the UI so failures are visible, not silent.
+    const spec = refineSpec(r.spec);
+    // Phase 5: best-effort picture for each image layer; failures just skip the layer.
     const notes: string[] = [];
-    if (source === 'offline' && activeProvider() !== 'none') {
-      notes.push(`Text model unavailable — ${modelError ?? 'unknown error'} — used the offline ${isSuper ? 'full-bowl composer' : 'designer'}.`);
-    }
-
-    // Phase 5: generate a picture for each image layer (portraits/figures).
-    // Best-effort — a failed/unavailable generation leaves assetRef unset (the
-    // client skips it) and records WHY so it shows in the status bar.
     for (const layer of spec.layers) {
       if (layer.kind === 'image' && !layer.assetRef) {
-        const r = await generateImage(layer.prompt).catch((e) => ({ url: null, error: String(e) }) as { url: null; error: string });
-        if (r.url) layer.assetRef = r.url;
-        else notes.push(`Portrait not generated — ${r.error ?? 'unknown error'}`);
+        const img = await generateImage(layer.prompt).catch((e) => ({ url: null, error: String(e) }) as { url: null; error: string });
+        if (img.url) layer.assetRef = img.url;
+        else notes.push(`Portrait not generated — ${img.error ?? 'unknown error'}`);
       }
     }
-
-    // Cache successful MODEL designs only — a later identical brief is then free,
-    // while offline fallbacks (e.g. after a 429) still retry the model next time.
-    if (source === 'model') genCache.set(key, { spec, source });
-
-    // Admin-only lock: unlimited, no per-account credit consumed.
-    return reply.code(200).send({ spec, quota: { admin: true, used: 0, limit: 0, remaining: 999999 }, source, notes });
+    genCache.set(key, { spec, source: 'model' });
+    return reply.code(200).send({ spec, quota, source: 'model', notes });
   });
 
   // Phase 4b: vision critique — take the current design + a render of it, ask the
   // model to fix legibility/balance, and return an improved spec. Best-effort: any
   // failure returns the ORIGINAL design unchanged, so polish never breaks a design.
   app.post('/api/ai/critique', deps.routeConfig ?? {}, async (req, reply) => {
-    if (!(await hasAiAccess(req))) {
-      return reply.code(403).send({ error: 'AI is temporarily admin-only', locked: true });
+    const access = await baseAccess(req);
+    if (access.kind === 'deny') {
+      return reply.code(access.status).send({ error: access.error, reason: access.reason, locked: true });
     }
     const b = (req.body ?? {}) as { spec?: unknown; image?: unknown; stadium?: unknown };
     const incoming = validateSpec(b.spec);

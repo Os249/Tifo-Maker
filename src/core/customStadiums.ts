@@ -117,8 +117,11 @@ export function parseImportedTemplate(json: string): StadiumTemplate | null {
   try {
     const t = JSON.parse(json) as unknown;
     if (!isValidTemplate(t)) return null;
-    const name = (t as StadiumTemplate).name;
-    return { ...(t as StadiumTemplate), id: `custom-${slug(name)}-${Date.now().toString(36)}` };
+    const src = t as StadiumTemplate;
+    // Defense-in-depth: cap + strip the user-controlled name so it's safe even if a
+    // caller ever renders it as HTML (the rest of the template is range-validated).
+    const name = src.name.replace(/[<>]/g, '').trim().slice(0, 60) || 'Imported stadium';
+    return { ...src, name, id: `custom-${slug(name)}-${Date.now().toString(36)}` };
   } catch {
     return null;
   }

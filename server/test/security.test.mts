@@ -24,7 +24,7 @@ const cellsGzB64 = gzipSync(new Uint8Array(map.count)).toString('base64');
 const bearer = (t: string) => ({ authorization: `Bearer ${t}` });
 
 async function reg(app: FastifyInstance, u: string): Promise<{ token: string; id: string }> {
-  const r = await app.inject({ method: 'POST', url: '/api/auth/register', payload: { username: u, password: 'password1234' } });
+  const r = await app.inject({ method: 'POST', url: '/api/auth/register', payload: { username: u, password: 'password1234', email: `${u}@example.test`, acceptedVersion: 'test' } });
   const token = (r.json() as { token: string }).token;
   const id = (await app.inject({ method: 'GET', url: '/api/me', headers: bearer(token) })).json().id as string;
   return { token, id };
