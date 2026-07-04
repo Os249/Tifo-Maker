@@ -1344,10 +1344,12 @@ export function mountToolbar(
     panel.classList.toggle('open', open);
     panelScrim.classList.toggle('show', open);
   };
-  // On a phone, greet each fresh session with the AI "describe it" front door —
-  // the fastest path to a tifo on a small screen (reuses the #ctx-ai section).
+  // On a phone, greet RETURNING users each fresh session with the AI "describe it"
+  // front door. First-timers reach the AI via the guided tour instead, so skip it
+  // for them (avoids opening the sheet behind the onboarding modal + tour).
   try {
-    if (mobileSheet() && !sessionStorage.getItem('tifo_m5_intro')) {
+    const onboardedBefore = localStorage.getItem('tifo_onboarded_v1') === '1';
+    if (mobileSheet() && onboardedBefore && !sessionStorage.getItem('tifo_m5_intro')) {
       sessionStorage.setItem('tifo_m5_intro', '1');
       setPanelMode('ai');
       openOptionsSheet();

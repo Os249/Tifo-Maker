@@ -322,6 +322,20 @@ export function mountAiPanel(deps: AiPanelDeps): void {
         setError(null);
         if (bar) bar.textContent = res.source === 'model' ? `${label}: designed ✓` : '';
       }
+      // Phone: complete the cycle — close the AI sheet, drop the user onto their
+      // 3D result (Stadium view), and pulse Match Day so they open the full show.
+      if (window.matchMedia('(max-width: 767px)').matches) {
+        document.getElementById('panel')?.classList.remove('open');
+        document.querySelector('.panel-scrim')?.classList.remove('show');
+        (document.getElementById('view-3d') as HTMLButtonElement | null)?.click();
+        setTimeout(() => {
+          const md = document.getElementById('match-day');
+          if (md) {
+            md.classList.add('nudge');
+            setTimeout(() => md.classList.remove('nudge'), 4200);
+          }
+        }, 300);
+      }
     } catch (e) {
       const err = e as AiError;
       setStatus('');
@@ -456,6 +470,14 @@ export function mountAiPanel(deps: AiPanelDeps): void {
     chip.addEventListener('click', () => {
       promptEl.value = chip.dataset.ex ?? '';
       promptEl.focus();
+    });
+  }
+  // Club quick-picks: fill the prompt with the club brief and generate at once,
+  // so a fan gets their club's tifo in a single tap (the front-door path).
+  for (const chip of Array.from(root.querySelectorAll<HTMLButtonElement>('#ai-clubs [data-club]'))) {
+    chip.addEventListener('click', () => {
+      promptEl.value = chip.dataset.club ?? '';
+      genBtn.click();
     });
   }
 

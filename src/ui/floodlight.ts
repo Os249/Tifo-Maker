@@ -498,6 +498,13 @@ body.zen .tool-rail, body.zen .panel, body.zen footer, body.zen .tool-bar { disp
   header #gallery, header #community-link { display: none; }
 }
 
+/* pulse that draws the eye to Match Day after an AI generate (Mobile M-cycle) */
+@keyframes tifoNudge {
+  0%, 100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(28,111,224,.55); }
+  50% { transform: scale(1.06); box-shadow: 0 0 0 9px rgba(28,111,224,0); }
+}
+.nudge { animation: tifoNudge 1s ease-in-out 3; }
+
 /* ---- phone viewer (<768px) ---- */
 body.viewer { display:block; overflow-y:auto; background:var(--ink-0); }
 .viewer-root { max-width:520px; margin:0 auto; }

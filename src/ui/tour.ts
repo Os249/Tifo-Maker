@@ -89,10 +89,22 @@ const STEPS: TourStep[] = [
   },
 ];
 
+// Short, phone-native tour: fewer steps, targets the bottom ribbon + view tabs,
+// and ends on AI so finishing drops the user into the AI front door.
+const MOBILE_STEPS: TourStep[] = [
+  { selector: '.tool-rail', title: 'Your toolbar', body: 'Every tool lives down here. Tap one to use it — tap it again for its options.', place: 'top' },
+  { selector: '#view-3d', title: 'See it in 3D', body: 'Tap Stadium to see your tifo on the real bowl, then Match Day for the full night-match show.', place: 'bottom' },
+  { selector: '#rail-ai', title: 'Start with AI', body: 'Fastest way to a tifo: tap AI, describe it (or just your club), and watch it appear.', place: 'top' },
+];
+
 /** Run the tour. Resolves when finished or skipped. */
 export function startTour(): Promise<void> {
   return new Promise((resolve) => {
-    const steps = STEPS.filter((s) => document.querySelector(s.selector));
+    const isPhone = window.matchMedia('(max-width: 767px)').matches;
+    const steps = (isPhone ? MOBILE_STEPS : STEPS).filter((s) => {
+      const el = document.querySelector<HTMLElement>(s.selector);
+      return !!el && el.getClientRects().length > 0; // exists AND actually visible
+    });
     if (steps.length === 0) {
       markTourSeen();
       resolve();
@@ -125,6 +137,11 @@ export function startTour(): Promise<void> {
       markTourSeen();
       window.removeEventListener('resize', render);
       overlay.remove();
+      // On phones, hand off to the AI front door (unless it's already open).
+      if (isPhone) {
+        const p = document.getElementById('panel');
+        if (p && !p.classList.contains('open')) (document.getElementById('rail-ai') as HTMLButtonElement | null)?.click();
+      }
       resolve();
     };
 
