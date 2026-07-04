@@ -449,6 +449,55 @@ body.zen .tool-rail, body.zen .panel, body.zen footer, body.zen .tool-bar { disp
 }
 @media (min-width: 1100px) { .panel-fab { display:none; } }
 
+/* ---- phone-native editor (<=767px): canvas-first, bottom tool ribbon (Mobile M1) ---- */
+@media (max-width: 767px) {
+  /* Stack the workspace so the canvas fills the screen and the left tool-rail
+     drops to a thumb-reachable bottom ribbon. The desktop 3-col layout is
+     untouched above this breakpoint — this only re-flows on phones. */
+  .workspace { flex-direction: column; }
+  .stage { order: 0; min-height: 0; }
+  footer { display: none; }
+
+  /* vertical left rail -> horizontal scrolling bottom ribbon (thumb zone) */
+  .tool-rail {
+    order: 2; width: auto; flex: 0 0 auto; height: 58px;
+    flex-direction: row; align-items: center; justify-content: flex-start;
+    gap: 4px; padding: 6px 10px calc(6px + env(safe-area-inset-bottom));
+    border-right: none; border-top: 1px solid var(--line-1);
+    overflow-x: auto; overflow-y: hidden; -webkit-overflow-scrolling: touch;
+  }
+  .tool-rail::-webkit-scrollbar { display: none; }
+  .tool-rail .sep { width: 1px; height: 26px; margin: 0 4px; }
+  .tool-rail .rail-spacer { display: none; }
+  .tool { width: 46px; height: 46px; flex: 0 0 auto; font-size: 19px; }
+  [dir="rtl"] .tool-rail { border-left: none; border-top: 1px solid var(--line-1); }
+
+  /* right slide-over becomes a bottom SHEET on phones — thumb-friendly options
+     for the active tool, reusing every existing .panel-section (Mobile M3/M4) */
+  .panel {
+    left: 0; right: 0; top: auto; bottom: 0; width: auto;
+    max-height: 74vh; height: auto;
+    transform: translateY(100%);
+    border-left: none; border-top: 1px solid var(--line-2);
+    border-top-left-radius: 16px; border-top-right-radius: 16px;
+    box-shadow: 0 -10px 30px rgba(0,0,0,.5);
+    overflow-y: auto; z-index: 40;
+    padding-bottom: calc(14px + env(safe-area-inset-bottom));
+  }
+  .panel.open { transform: translateY(0); }
+  .panel::before {
+    content: ''; display: block; width: 40px; height: 4px;
+    margin: 8px auto 2px; border-radius: 3px; background: var(--line-2);
+  }
+  .panel-fab { top: auto; bottom: 70px; }
+  .zoom-pill { bottom: 68px; }
+  .minimap { display: none; }
+  #canvas-watermark { bottom: 72px; }
+
+  /* declutter the header on phones (these links live in the avatar menu) */
+  header #gallery, header #community-link { display: none; }
+}
+
 /* ---- phone viewer (<768px) ---- */
 body.viewer { display:block; overflow-y:auto; background:var(--ink-0); }
 .viewer-root { max-width:520px; margin:0 auto; }

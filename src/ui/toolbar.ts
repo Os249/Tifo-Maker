@@ -58,6 +58,9 @@ export function mountToolbar(
   let pendingImport: { bitmap: ImageBitmap; name: string } | null = null;
   let onEnterMode: (tool: ToolId) => void = () => {};
   let objectPanelHook: () => void = () => {};
+  // Mobile options sheet — assigned once the panel + scrim exist (see chrome below).
+  let openOptionsSheet: () => void = () => {};
+  let setOptionsSheet: (open: boolean) => void = () => {};
 
   // ---- contextual properties panel ----
   // Each .panel-section carries data-panel listing the tools it belongs to
@@ -114,10 +117,10 @@ export function mountToolbar(
     panelMode = mode;
     applyContextPanel(editor.tool);
   };
-  railSaveBtn?.addEventListener('click', () => setPanelMode(panelMode === 'save' ? 'design' : 'save'));
-  animOpenBtn?.addEventListener('click', () => setPanelMode(panelMode === 'animation' ? 'design' : 'animation'));
-  aiOpenBtn?.addEventListener('click', () => setPanelMode(panelMode === 'ai' ? 'design' : 'ai'));
-  stadiumOpenBtn?.addEventListener('click', () => setPanelMode(panelMode === 'stadium' ? 'design' : 'stadium'));
+  railSaveBtn?.addEventListener('click', () => { const on = panelMode !== 'save'; setPanelMode(on ? 'save' : 'design'); setOptionsSheet(on); });
+  animOpenBtn?.addEventListener('click', () => { const on = panelMode !== 'animation'; setPanelMode(on ? 'animation' : 'design'); setOptionsSheet(on); });
+  aiOpenBtn?.addEventListener('click', () => { const on = panelMode !== 'ai'; setPanelMode(on ? 'ai' : 'design'); setOptionsSheet(on); });
+  stadiumOpenBtn?.addEventListener('click', () => { const on = panelMode !== 'stadium'; setPanelMode(on ? 'stadium' : 'design'); setOptionsSheet(on); });
 
   const setTool = (tool: ToolId): void => {
     editor.tool = tool;
@@ -134,7 +137,14 @@ export function mountToolbar(
     onEnterMode(tool);
     objectPanelHook();
   };
-  for (const b of toolButtons) b.addEventListener('click', () => setTool(b.dataset.tool as ToolId));
+  const TOOL_OPTS = new Set<ToolId>(['brush', 'eraser', 'fill', 'text', 'shape']);
+  for (const b of toolButtons)
+    b.addEventListener('click', () => {
+      const tool = b.dataset.tool as ToolId;
+      const reTap = editor.tool === tool; // re-tapping the active tool reveals its options
+      setTool(tool);
+      if (reTap && TOOL_OPTS.has(tool)) openOptionsSheet();
+    });
   setTool('brush');
 
   // ---- Swatches panel (Photoshop-style colour model) ----
@@ -1321,6 +1331,30 @@ export function mountToolbar(
     panelScrim.classList.toggle('show', open);
   });
   document.querySelector('.workspace')?.appendChild(fab);
+
+  // ---- Mobile options sheet + AI front door (Mobile M4/M5) ----
+  const mobileSheet = (): boolean => window.matchMedia('(max-width: 767px)').matches;
+  openOptionsSheet = (): void => {
+    if (!mobileSheet()) return;
+    panel.classList.add('open');
+    panelScrim.classList.add('show');
+  };
+  setOptionsSheet = (open: boolean): void => {
+    if (!mobileSheet()) return;
+    panel.classList.toggle('open', open);
+    panelScrim.classList.toggle('show', open);
+  };
+  // On a phone, greet each fresh session with the AI "describe it" front door —
+  // the fastest path to a tifo on a small screen (reuses the #ctx-ai section).
+  try {
+    if (mobileSheet() && !sessionStorage.getItem('tifo_m5_intro')) {
+      sessionStorage.setItem('tifo_m5_intro', '1');
+      setPanelMode('ai');
+      openOptionsSheet();
+    }
+  } catch {
+    /* storage blocked — skip the one-time intro */
+  }
 
   // Live cursor coordinates in stadium language (stand · section · row · seat).
   const coords = $('#coords');

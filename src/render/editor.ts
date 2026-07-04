@@ -454,8 +454,33 @@ export class Editor {
       marq = null;
     };
 
+    // Multi-touch gesture state: 2+ fingers = pinch-zoom + two-finger pan; a
+    // single finger keeps painting/selecting through the handlers below.
+    const pointers = new Map<number, { x: number; y: number }>();
+    let gesturing = false;
+    let pinchDist = 0;
+    let pinchMX = 0;
+    let pinchMY = 0;
+
     canvas.addEventListener('pointerdown', (e) => {
       canvas.setPointerCapture(e.pointerId);
+      pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (pointers.size >= 2) {
+        // Second finger down → enter pinch/pan and abort any single-finger action.
+        if (this.painting) {
+          this.store.commitStroke();
+          this.painting = false;
+        }
+        if (this.objectOverlay?.isDragging) this.objectOverlay.endDrag();
+        clearMarquee();
+        this.panning = false;
+        gesturing = true;
+        const pts = [...pointers.values()];
+        pinchDist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y) || 1;
+        pinchMX = (pts[0].x + pts[1].x) / 2;
+        pinchMY = (pts[0].y + pts[1].y) / 2;
+        return;
+      }
       const [wx, wy] = this.toWorld(e);
       if (this.tool === 'pan' || e.button === 1 || e.button === 2) {
         this.panning = true;
@@ -507,6 +532,36 @@ export class Editor {
     });
 
     canvas.addEventListener('pointermove', (e) => {
+      const pt = pointers.get(e.pointerId);
+      if (pt) {
+        pt.x = e.clientX;
+        pt.y = e.clientY;
+      }
+      if (gesturing) {
+        if (pointers.size >= 2) {
+          const pts = [...pointers.values()];
+          const dist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y) || 1;
+          const mx = (pts[0].x + pts[1].x) / 2;
+          const my = (pts[0].y + pts[1].y) / 2;
+          const rect = canvas.getBoundingClientRect();
+          const sx = mx - rect.left;
+          const sy = my - rect.top;
+          // pinch → zoom about the fingers' midpoint
+          const next = Math.min(12, Math.max(0.1, this.world.scale.x * (dist / pinchDist)));
+          const applied = next / this.world.scale.x;
+          this.world.position.x = sx - (sx - this.world.position.x) * applied;
+          this.world.position.y = sy - (sy - this.world.position.y) * applied;
+          this.world.scale.set(next);
+          // two-finger drag → pan by the midpoint delta
+          this.world.position.x += mx - pinchMX;
+          this.world.position.y += my - pinchMY;
+          pinchDist = dist;
+          pinchMX = mx;
+          pinchMY = my;
+          this.emitView();
+        }
+        return; // a lone finger left mid-gesture does nothing until it lifts
+      }
       if (this.panning) {
         this.world.position.x += e.clientX - this.lastX;
         this.world.position.y += e.clientY - this.lastY;
@@ -561,7 +616,9 @@ export class Editor {
       this.lastY = wy;
     });
 
-    const end = () => {
+    const end = (ev?: PointerEvent) => {
+      if (ev) pointers.delete(ev.pointerId);
+      if (pointers.size === 0) gesturing = false;
       if (this.painting) this.store.commitStroke();
       if (this.objectOverlay?.isDragging) this.objectOverlay.endDrag();
       if (marq) {
