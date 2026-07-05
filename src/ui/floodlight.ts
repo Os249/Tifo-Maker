@@ -146,6 +146,23 @@ header {
 .canvas-wrap.split #preview-host { position:relative; inset:auto; flex:1 1 50%; min-width:0; height:100%; }
 .canvas-wrap.split #canvas-host { border-right:2px solid var(--line-2); }
 
+/* One-time "draw here" coaching hint, overlaid on the design pane in Split. */
+.draw-hint { position:absolute; inset:0; z-index:6; pointer-events:none; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:14px; animation:dhFade 4.2s ease forwards; }
+.draw-hint-art { position:relative; width:200px; height:90px; }
+.draw-hint-art svg { position:absolute; inset:0; width:200px; height:90px; overflow:visible; }
+.draw-hint-stroke { fill:none; stroke:var(--blue); stroke-width:7; stroke-linecap:round; stroke-linejoin:round; stroke-dasharray:340; stroke-dashoffset:340; filter:drop-shadow(0 2px 6px rgba(0,0,0,.55)); animation:dhDraw 1.7s ease .35s forwards; }
+.draw-hint-brush { position:absolute; left:4px; top:40px; font-size:26px; color:#fff; filter:drop-shadow(0 3px 5px rgba(0,0,0,.6)); animation:dhBrush 1.7s ease .35s forwards; }
+.draw-hint-label { font-weight:700; color:#fff; font-size:14px; background:rgba(10,12,18,.72); padding:8px 16px; border-radius:999px; border:1px solid rgba(255,255,255,.16); box-shadow:0 6px 20px rgba(0,0,0,.35); }
+@keyframes dhDraw { to { stroke-dashoffset:0; } }
+@keyframes dhBrush { 0% { transform:translateX(0) rotate(-8deg); opacity:0; } 12% { opacity:1; } 100% { transform:translateX(170px) rotate(-8deg); opacity:1; } }
+@keyframes dhFade { 0% { opacity:0; } 10% { opacity:1; } 84% { opacity:1; } 100% { opacity:0; } }
+@media (prefers-reduced-motion: reduce) { .draw-hint-stroke, .draw-hint-brush { animation-duration:.01ms; animation-delay:0s; } }
+/* Second-beat hint: tooltip floated under the Match Day button. */
+.md-hint { position:fixed; transform:translateX(-50%); z-index:40; pointer-events:none; }
+.md-hint-inner { position:relative; background:var(--blue); color:#fff; font-weight:700; font-size:13px; padding:7px 14px; border-radius:999px; white-space:nowrap; box-shadow:0 8px 24px rgba(0,0,0,.4); animation:mdHint 3.8s ease forwards; }
+.md-hint-inner::before { content:''; position:absolute; left:50%; top:-6px; transform:translateX(-50%); border-left:6px solid transparent; border-right:6px solid transparent; border-bottom:6px solid var(--blue); }
+@keyframes mdHint { 0% { opacity:0; transform:translateY(-6px); } 8% { opacity:1; transform:translateY(0); } 85% { opacity:1; } 100% { opacity:0; } }
+
 /* floating canvas chrome */
 .zoom-pill, .minimap {
   position:absolute; background:var(--ink-1); border:1px solid var(--line-1);

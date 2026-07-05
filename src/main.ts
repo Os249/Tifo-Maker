@@ -287,6 +287,12 @@ async function main(): Promise<void> {
       sel.appendChild(opt);
     });
     sel.addEventListener('change', () => preview!.applyPreset(CAMERA_PRESETS[Number(sel.value)]));
+    // Default to the whole-bowl "Full view" so the entire tifo reads at a glance.
+    const fullIdx = CAMERA_PRESETS.findIndex((p) => p.name === 'Full view');
+    if (fullIdx >= 0) {
+      sel.value = String(fullIdx);
+      preview!.applyPreset(CAMERA_PRESETS[fullIdx]);
+    }
     const noshow = document.getElementById('noshow') as HTMLInputElement;
     noshow.addEventListener('change', () => preview!.setNoShows(noshow.checked));
     loading = false;
@@ -334,6 +340,65 @@ async function main(): Promise<void> {
   btn2d.addEventListener('click', () => void setView('2d'));
   btn3d.addEventListener('click', () => void setView('3d'));
   btnSplit.addEventListener('click', () => void setView('split'));
+
+  // One-time coaching hint on the design pane: a brush drawing a stroke, nudging
+  // newcomers to paint and watch the 3D stadium fill live. Appended INSIDE
+  // #canvas-host so it overlays the design half correctly in both LTR and RTL.
+  function showDrawHint(): void {
+    try {
+      if (localStorage.getItem('tifo_draw_hint_v1') === '1') return;
+    } catch {
+      return; // storage blocked → skip quietly
+    }
+    const drawHost = document.getElementById('canvas-host');
+    if (!drawHost) return;
+    const hint = document.createElement('div');
+    hint.className = 'draw-hint';
+    hint.innerHTML =
+      '<div class="draw-hint-art">' +
+      '<svg viewBox="0 0 200 90" aria-hidden="true"><path class="draw-hint-stroke" d="M12 62 q34 -50 62 -10 q24 32 50 -6 q22 -28 46 2"/></svg>' +
+      '<i class="ti ti-brush draw-hint-brush" aria-hidden="true"></i>' +
+      '</div><div class="draw-hint-label"></div>';
+    const label = hint.querySelector('.draw-hint-label');
+    if (label) label.textContent = t('ed.drawHint');
+    drawHost.appendChild(hint);
+    try {
+      localStorage.setItem('tifo_draw_hint_v1', '1');
+    } catch {
+      /* ignore */
+    }
+    window.setTimeout(() => hint.remove(), 4200);
+    // Beat 2: once the draw nudge fades, pulse the Match Day button so newcomers
+    // know where the cinematic payoff lives.
+    window.setTimeout(() => showMatchDayHint(), 4600);
+  }
+
+  // Second beat of the first-run hint: pulse the Match Day button and float a
+  // tooltip beneath it.
+  function showMatchDayHint(): void {
+    const md = document.getElementById('match-day');
+    if (!md) return;
+    const r = md.getBoundingClientRect();
+    if (!r.width) return; // not visible (e.g. not in split) → skip
+    md.classList.add('nudge');
+    window.setTimeout(() => md.classList.remove('nudge'), 3200);
+    const tip = document.createElement('div');
+    tip.className = 'md-hint';
+    tip.innerHTML = '<div class="md-hint-inner"></div>';
+    const inner = tip.querySelector('.md-hint-inner');
+    if (inner) inner.textContent = t('ed.matchDayHint');
+    document.body.appendChild(tip);
+    tip.style.left = `${r.left + r.width / 2}px`;
+    tip.style.top = `${r.bottom + 10}px`;
+    window.setTimeout(() => tip.remove(), 3800);
+  }
+
+  // First load: land in Split on desktop so newcomers instantly see how the 2D
+  // design maps onto the 3D stadium. Phones/tablets keep the single-pane Design
+  // view — split needs the width.
+  if (window.matchMedia('(min-width: 1100px)').matches) {
+    void setView('split').then(() => showDrawHint());
+  }
 
   // Match Day Simulator: a separate, lazy-loaded high-fidelity renderer shown in
   // a fullscreen overlay. The editor preview is paused while it runs so only one

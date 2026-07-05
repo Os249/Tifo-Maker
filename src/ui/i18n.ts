@@ -287,6 +287,8 @@ const STRINGS: Record<string, { en: string; ar: string }> = {
   'ed.ai.placeholder': { en: 'e.g. Giant eagle covering the south stand in black and gold', ar: 'مثال: نسر ضخم يغطّي المدرج الجنوبي بالأسود والذهبي' },
   'ed.ai.generate': { en: 'Generate tifo', ar: 'صمّم تيفو' },
   'ed.ai.yourClub': { en: 'Your club — one tap', ar: 'ناديك — بضغطة واحدة' },
+  'ed.drawHint': { en: 'Draw here — watch it fill the stadium →', ar: 'ارسم هنا — وشوفه يملأ الملعب ←' },
+  'ed.matchDayHint': { en: 'Now watch it come alive ▲', ar: 'الحين شوفه يصير حقيقي ▲' },
   'ed.ai.super': { en: 'Super AI — design full stadium', ar: 'الذكاء الخارق — صمّم الملعب كامل' },
   'ed.ai.superHint': { en: 'Plans every stand together — portraits, text and colour blocking across the whole bowl.', ar: 'يخطّط لكل المدرجات سوا — وجوه ونصوص وتقسيم ألوان على المدرج كامل.' },
   'ed.ai.shuffle': { en: 'Shuffle — free offline variation', ar: 'تشكيل — نسخة ببلاش بدون نت' },
