@@ -12,7 +12,7 @@ import { fetchMe, isSignedIn, loadDesign, saveDesign, setPublic, exportMyData, d
 import { t as i18nT } from './i18n';
 import { track, setAnalyticsSignedIn } from '../net/analytics';
 import { buildTifoV2 } from '../core/tifoFormat';
-import { extractPalette, rasterize } from '../core/importImage';
+import { extractPhotoPalette, rasterize } from '../core/importImage';
 import { openAuthModal } from './authModal';
 import { openGallery } from './gallery';
 import { mountAiPanel } from './aiPanel';
@@ -699,7 +699,7 @@ export function mountToolbar(
       const sampleCols = Math.min(200, Math.max(32, Math.round(w / 3)));
       const sampleRows = Math.max(2, Math.round((sampleCols * pendingImport.bitmap.height) / pendingImport.bitmap.width));
       const px = rasterize(pendingImport.bitmap, sampleCols, sampleRows);
-      const extracted = extractPalette(px, sampleCols, sampleRows, 6, Number(importAlpha.value));
+      const extracted = extractPhotoPalette(px, sampleCols, sampleRows, 14, Number(importAlpha.value));
       if (extracted.length > 0) {
         // Append the picture's real colours as NEW swatches without disturbing
         // existing palette indices — every already-painted seat keeps its colour.

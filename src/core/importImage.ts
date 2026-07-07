@@ -296,3 +296,114 @@ export function applyGridToSeats(
   }
   return dirty;
 }
+
+/** Relative luminance (Rec. 601) of an 8-bit RGB triple. */
+function luma(r: number, g: number, b: number): number {
+  return 0.299 * r + 0.587 * g + 0.114 * b;
+}
+
+/**
+ * Photo/portrait palette: like extractPalette but tuned for faces — finer tonal
+ * buckets, more colours, AND guaranteed luminance ANCHORS (a near-white for
+ * teeth/eye-highlights and a near-black for pupils/eye-sockets). Population-only
+ * palettes drop these tiny high-contrast features, which is exactly what makes
+ * imported faces look expressionless. Anchors are the mean colour of the
+ * brightest/darkest ~2% of opaque pixels (robust to single hot pixels). Fills
+ * slots 1..N (slot 0 stays the empty seat).
+ */
+export function extractPhotoPalette(
+  pixels: Uint8ClampedArray,
+  cols: number,
+  rows: number,
+  count = 14,
+  alphaThreshold = 128,
+): string[] {
+  const SHIFT = 3; // 32 levels/channel → finer tones than extractPalette's 16
+  const sums = new Map<number, { r: number; g: number; b: number; n: number }>();
+  const lumas: number[] = [];
+  for (let p = 0; p < cols * rows; p++) {
+    if (pixels[p * 4 + 3] < alphaThreshold) continue;
+    const r = pixels[p * 4];
+    const g = pixels[p * 4 + 1];
+    const b = pixels[p * 4 + 2];
+    lumas.push(luma(r, g, b));
+    const key = ((r >> SHIFT) << 10) | ((g >> SHIFT) << 5) | (b >> SHIFT);
+    const e = sums.get(key);
+    if (e) {
+      e.r += r;
+      e.g += g;
+      e.b += b;
+      e.n++;
+    } else {
+      sums.set(key, { r, g, b, n: 1 });
+    }
+  }
+  if (lumas.length === 0) return [];
+
+  // Luminance anchors: mean colour of the brightest/darkest ~2% of pixels.
+  const sorted = [...lumas].sort((a, b) => a - b);
+  const loCut = sorted[Math.floor(sorted.length * 0.02)];
+  const hiCut = sorted[Math.floor(sorted.length * 0.98)];
+  let dR = 0, dG = 0, dB = 0, dN = 0, bR = 0, bG = 0, bB = 0, bN = 0;
+  for (let p = 0; p < cols * rows; p++) {
+    if (pixels[p * 4 + 3] < alphaThreshold) continue;
+    const r = pixels[p * 4];
+    const g = pixels[p * 4 + 1];
+    const b = pixels[p * 4 + 2];
+    const L = luma(r, g, b);
+    if (L <= loCut) { dR += r; dG += g; dB += b; dN++; }
+    if (L >= hiCut) { bR += r; bG += g; bB += b; bN++; }
+  }
+
+  const chosen: string[] = [];
+  const push = (hex: string, minDist: number): void => {
+    if (chosen.some((c) => colorDist(hexToRGB(c), hexToRGB(hex)) < minDist)) return;
+    chosen.push(hex);
+  };
+  // Anchors first so they always survive the count cap.
+  if (bN) push(rgbToHex(bR / bN, bG / bN, bB / bN), 0);
+  if (dN) push(rgbToHex(dR / dN, dG / dN, dB / dN), 0);
+  // Then the most-populous distinct tones (a looser dedup than extractPalette so
+  // skin ramps read as a gradient rather than one flat block).
+  for (const bkt of [...sums.values()].sort((a, b) => b.n - a.n)) {
+    if (chosen.length >= count) break;
+    push(rgbToHex(bkt.r / bkt.n, bkt.g / bkt.n, bkt.b / bkt.n), 500);
+  }
+  return chosen.slice(0, count);
+}
+
+/**
+ * Detail-preserving pre-pass for photo bakes: a light unsharp mask (local
+ * contrast) plus a gentle S-curve, so tiny bright/dark features (teeth, eyes)
+ * push toward the palette's white/black anchors and survive quantization at seat
+ * scale instead of averaging into the surrounding skin. Pure; returns a NEW RGBA
+ * buffer, alpha untouched.
+ */
+export function enhanceForBake(
+  pixels: Uint8ClampedArray,
+  cols: number,
+  rows: number,
+  contrast = 1.28,
+  sharpen = 0.55,
+): Uint8ClampedArray {
+  const out = new Uint8ClampedArray(pixels.length);
+  const at = (x: number, y: number, c: number): number =>
+    pixels[(Math.min(rows - 1, Math.max(0, y)) * cols + Math.min(cols - 1, Math.max(0, x))) * 4 + c];
+  const curve = (v: number): number => 128 + (v - 128) * contrast;
+  for (let y = 0; y < rows; y++) {
+    for (let x = 0; x < cols; x++) {
+      const p = (y * cols + x) * 4;
+      out[p + 3] = pixels[p + 3];
+      if (pixels[p + 3] === 0) continue;
+      for (let c = 0; c < 3; c++) {
+        let blur = 0; // 3×3 box blur = the unsharp reference
+        for (let dy = -1; dy <= 1; dy++)
+          for (let dx = -1; dx <= 1; dx++) blur += at(x + dx, y + dy, c);
+        blur /= 9;
+        const v = pixels[p + c];
+        out[p + c] = Math.max(0, Math.min(255, Math.round(curve(v + (v - blur) * sharpen))));
+      }
+    }
+  }
+  return out;
+}

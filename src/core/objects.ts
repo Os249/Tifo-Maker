@@ -1,6 +1,6 @@
 import type { SeatMap } from './types';
 import type { DesignStore } from './design';
-import { applyGridToSeats, maskFromAlpha, quantizePixels, rasterize } from './importImage';
+import { applyGridToSeats, enhanceForBake, maskFromAlpha, quantizePixels, rasterize } from './importImage';
 import { renderTextCanvas, type TifoFont } from './text';
 import { drawSymbol } from './symbols';
 
@@ -202,7 +202,7 @@ export class ObjectLayer {
     const pixels = rasterize(source, cols, rows);
     const grid =
       obj.kind === 'image'
-        ? quantizePixels(pixels, cols, rows, store.palette, {
+        ? quantizePixels(enhanceForBake(pixels, cols, rows), cols, rows, store.palette, {
             dither: obj.dither,
             halftone: obj.halftone,
             alphaThreshold: obj.alphaThreshold,
