@@ -24,6 +24,16 @@ export interface StadiumTemplate {
    * stands (Kingdom Arena style). ~0.6 = generous corners, ~0.75 = small notch.
    */
   cornerCut?: number;
+  /**
+   * Space seats evenly along each row's own (offset) curve instead of the base
+   * plan curve. Fixes seats bunching on the straights and stretching round the
+   * corners — the error grows with every row back.
+   *
+   * OPT-IN because it moves seat positions: a template's SeatMap must stay
+   * byte-identical for a given version or saved designs would shift. Set it on
+   * new templates; leave existing ones alone (or bump their version).
+   */
+  evenRows?: boolean;
 }
 
 export interface TierSpec {

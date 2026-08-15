@@ -93,9 +93,64 @@ function offsetLength(curve: Curve, d: number): number {
   return curve.total + 2 * Math.PI * d;
 }
 
+/** The plan curve pushed outward by `d`, with its OWN cumulative arc-length table. */
+interface OffsetCurve {
+  x: Float64Array;
+  z: Float64Array;
+  s: Float64Array;
+  total: number;
+}
+
+/**
+ * Build the offset curve for a row so seats can be spaced evenly along the row
+ * the spectator actually sits on.
+ *
+ * Why this exists: pointAt() walks `u` along the BASE curve then pushes outward,
+ * but a row's seat count comes from the OFFSET perimeter. Local spacing on the
+ * offset curve scales by (1 + curvature*d), so sampling the base curve bunches
+ * seats on the straights and stretches them round the corners — and the error
+ * grows with every row back. Sampling this table instead gives a genuinely
+ * uniform seat pitch all the way round.
+ */
+function buildOffsetCurve(curve: Curve, d: number): OffsetCurve {
+  const n = CURVE_SAMPLES;
+  const x = new Float64Array(n);
+  const z = new Float64Array(n);
+  const s = new Float64Array(n);
+  for (let i = 0; i < n; i++) {
+    x[i] = curve.px[i] + curve.nx[i] * d;
+    z[i] = curve.py[i] + curve.ny[i] * d;
+  }
+  let total = 0;
+  for (let i = 0; i < n; i++) {
+    s[i] = total;
+    const j = (i + 1) % n;
+    total += Math.hypot(x[j] - x[i], z[j] - z[i]);
+  }
+  return { x, z, s, total };
+}
+
+/** Point at arc-length fraction u along the offset curve (uniform seat spacing). */
+function pointOnOffset(oc: OffsetCurve, u: number): [number, number] {
+  const target = u * oc.total;
+  let lo = 0;
+  let hi = CURVE_SAMPLES - 1;
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1;
+    if (oc.s[mid] <= target) lo = mid;
+    else hi = mid - 1;
+  }
+  const i = lo;
+  const i1 = (i + 1) % CURVE_SAMPLES;
+  const segLen = (i1 === 0 ? oc.total : oc.s[i1]) - oc.s[i] || 1e-9;
+  const f = (target - oc.s[i]) / segLen;
+  return [oc.x[i] + (oc.x[i1] - oc.x[i]) * f, oc.z[i] + (oc.z[i1] - oc.z[i]) * f];
+}
+
 export function generateSeatMap(template: StadiumTemplate): SeatMap {
   const curve = samplePlanCurve(template.plan.a, template.plan.b, template.plan.exponent);
   const cornerCut = template.cornerCut ?? 0;
+  const evenRows = template.evenRows === true;
 
   // Aisle bands as [uStart, uEnd) fractions; computed per row since row length varies,
   // but anchored at fixed u positions so aisles are radial.
@@ -131,7 +186,9 @@ export function generateSeatMap(template: StadiumTemplate): SeatMap {
       rowStart[globalRow] = xs.length;
       const radial = tier.baseOffset + r * tier.rowDepth;
       const elevation = tier.baseElevation + r * tier.rowDepth * rake;
-      const rowLen = offsetLength(curve, radial);
+      // Even-spacing mode measures the row on the curve the seats actually sit on.
+      const oc = evenRows ? buildOffsetCurve(curve, radial) : null;
+      const rowLen = oc ? oc.total : offsetLength(curve, radial);
       // Even seat count per row: the reflection u → 0.5 − u then maps each row's
       // seat set exactly onto itself, making the mirror map an exact involution.
       let nSeats = Math.floor(rowLen / tier.seatPitch);
@@ -154,7 +211,7 @@ export function generateSeatMap(template: StadiumTemplate): SeatMap {
         }
         if (inAisle) continue;
 
-        const [wx, wy] = pointAt(curve, u, radial);
+        const [wx, wy] = oc ? pointOnOffset(oc, u) : pointAt(curve, u, radial);
         // Box-arena corner cut: drop seats where BOTH plan axes are near their
         // extent (the rounded corners), leaving four straight stands with open
         // corners. Normalise by the row's outer extent so the notch is radial.

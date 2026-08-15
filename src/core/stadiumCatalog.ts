@@ -198,6 +198,7 @@ const COMMUNITY: StadiumEntry[] = [
       name: 'The Jewel of Jeddah',
       version: 1,
       plan: { a: 83, b: 73, exponent: 2.15 },
+      evenRows: true,
       tiers: [
         { rows: 20, rowDepth: 0.8, rakeDeg: 28, baseElevation: 1.5, baseOffset: 0, seatPitch: 0.48 },
         { rows: 18, rowDepth: 0.78, rakeDeg: 35, baseElevation: 11, baseOffset: 18, seatPitch: 0.48 },
@@ -218,6 +219,7 @@ const COMMUNITY: StadiumEntry[] = [
       name: 'Al-Awwal Park (Riyadh)',
       version: 1,
       plan: { a: 64, b: 50, exponent: 2.4 },
+      evenRows: true,
       tiers: [
         { rows: 16, rowDepth: 0.8, rakeDeg: 28, baseElevation: 1.5, baseOffset: 0, seatPitch: 0.48 },
         { rows: 12, rowDepth: 0.78, rakeDeg: 35, baseElevation: 10, baseOffset: 16, seatPitch: 0.48 },
@@ -240,6 +242,7 @@ const COMMUNITY: StadiumEntry[] = [
       // Box arena: open the four corners so the bowl reads as four straight
       // stands (sidelines reach the goal lines, ends cover the pitch width).
       cornerCut: 0.8,
+      evenRows: true,
       tiers: [
         { rows: 16, rowDepth: 0.76, rakeDeg: 34, baseElevation: 1.5, baseOffset: 0, seatPitch: 0.47 },
         { rows: 12, rowDepth: 0.74, rakeDeg: 40, baseElevation: 10, baseOffset: 14, seatPitch: 0.47 },
