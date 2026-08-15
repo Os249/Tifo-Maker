@@ -50,6 +50,8 @@ export interface SceneAsset {
   /** Draw/stack order. */
   order?: number;
   visible?: boolean;
+  /** Editor-placed banner: zone-snap placement the simulator resolves on open. */
+  place?: 'surface' | 'big' | 'small' | 'floor' | 'gap' | 'stairs';
 }
 
 export interface SceneModel {
@@ -102,6 +104,7 @@ export class AssetStore {
       unfurl: init.unfurl ?? 1,
       order: init.order ?? this.assets.length,
       visible: init.visible ?? true,
+      place: init.place,
     };
     this.assets.push(a);
     this.selectedId = a.id;

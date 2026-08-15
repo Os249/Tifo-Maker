@@ -95,6 +95,7 @@ function offsetLength(curve: Curve, d: number): number {
 
 export function generateSeatMap(template: StadiumTemplate): SeatMap {
   const curve = samplePlanCurve(template.plan.a, template.plan.b, template.plan.exponent);
+  const cornerCut = template.cornerCut ?? 0;
 
   // Aisle bands as [uStart, uEnd) fractions; computed per row since row length varies,
   // but anchored at fixed u positions so aisles are radial.
@@ -154,6 +155,14 @@ export function generateSeatMap(template: StadiumTemplate): SeatMap {
         if (inAisle) continue;
 
         const [wx, wy] = pointAt(curve, u, radial);
+        // Box-arena corner cut: drop seats where BOTH plan axes are near their
+        // extent (the rounded corners), leaving four straight stands with open
+        // corners. Normalise by the row's outer extent so the notch is radial.
+        if (cornerCut > 0) {
+          const nxp = Math.abs(wx) / (template.plan.a + radial);
+          const nyp = Math.abs(wy) / (template.plan.b + radial);
+          if (nxp > cornerCut && nyp > cornerCut) continue;
+        }
         xs.push(u * EDITOR_WIDTH);
         ys.push(editorY);
         us.push(u);

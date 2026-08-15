@@ -4,12 +4,13 @@ import type { SeatMap, StadiumTemplate } from '../../core/types';
 import type { DesignStore } from '../../core/design';
 import { CAMERA_PRESETS, type CameraPreset } from '../preview3d';
 import { type QualityTier, type QualitySettings, settingsFor, probeQuality } from './quality';
+import { applyNightIBL } from './env';
 import { buildStands } from './stands';
 import { buildCrowd, type CrowdController, type CrowdPreset } from './crowd';
 import { buildPitchside, type PitchsideController } from './pitchside';
 import { buildBanners, type BannerController } from './banners';
 import { buildEffects, type EffectsController } from './effects';
-import { SIM_SHOTS, seatShot, flyover, applyShot as applyCameraShot, type SimShot } from './cameras';
+import { bowlShots, seatShot, flyover, applyShot as applyCameraShot, type SimShot } from './cameras';
 import { revealVisibility, type RevealMode } from './choreo';
 import { evalTimeline, type Timeline, type Cue } from './timeline';
 import { buildAssetLayer, type AssetLayer } from './assetLayer';
@@ -18,6 +19,10 @@ import { rasterize } from '../../core/importImage';
 import { printAssetPanels } from './printPanels';
 import { buildWeather, type WeatherController, type Weather } from './weather';
 import { buildSurroundings, type Surroundings } from './surroundings';
+import { buildPhoneFlash, type PhoneFlash } from './sparkles';
+import { buildJewelCrown } from './jewelCrown';
+import { buildAlAwwalExtras, buildKingdomArenaExtras } from './stadiumExtras';
+import { buildPitchDetail, pitchStripeTexture } from './pitchDetail';
 import { dbg } from './debug';
 
 /**
@@ -90,6 +95,13 @@ export class MatchDaySimulator {
   private fill!: THREE.DirectionalLight;
   private readonly weather: WeatherController;
   private readonly surroundings: Surroundings;
+  private readonly sparkles: PhoneFlash;
+  private manassaMask: Uint8Array | null = null;
+  private readonly manassaColor = new THREE.Color(0xc69a3a);
+  private readonly jewelSeatColors = [new THREE.Color(0x8f2d2d), new THREE.Color(0xb14a2a), new THREE.Color(0xc98a4b), new THREE.Color(0x6f2222), new THREE.Color(0xd8b98a), new THREE.Color(0xa33b2b)];
+  private readonly alawwalSeatColors = [new THREE.Color(0xf2c40f), new THREE.Color(0xe8bd10), new THREE.Color(0xf5cd2a), new THREE.Color(0xd9ae0c), new THREE.Color(0xf7d43a), new THREE.Color(0xf2c40f), new THREE.Color(0xefc200)];
+  private readonly alawwalBlue = new THREE.Color(0x15245e);
+  private readonly kingdomSeatColors = [new THREE.Color(0x1c2a5e), new THREE.Color(0x2b4a9c), new THREE.Color(0xe8ecf6), new THREE.Color(0x24377a), new THREE.Color(0xd8deea), new THREE.Color(0x1c3a8a), new THREE.Color(0x203a72)];
   private pitchMat!: THREE.MeshStandardMaterial;
   private paletteColors: THREE.Color[] = [];
   private running = false;
@@ -154,6 +166,8 @@ export class MatchDaySimulator {
     this.skyTex = skyTexture(SKIES.dusk.sky);
     this.scene.background = this.skyTex;
     if (this.settings.fog) this.scene.fog = new THREE.Fog(SKIES.dusk.fog, 260, 620);
+    // P1: image-based lighting — real ambient + reflections on every PBR surface.
+    if (this.settings.ibl) applyNightIBL(this.renderer, this.scene, this.settings.envIntensity);
 
     this.camera = new THREE.PerspectiveCamera(50, 1, 0.5, 5000);
     this.controls = new OrbitControls(this.camera, this.canvas);
@@ -170,6 +184,7 @@ export class MatchDaySimulator {
     this.scene.add(this.standsGroup);
 
     this.rebuildPalette();
+    this.manassaMask = this.computeManassaMask();
     this.seats = this.buildSeats();
     this.scene.add(this.seats);
 
@@ -180,12 +195,46 @@ export class MatchDaySimulator {
     this.scene.add(this.pitchside.object);
     this.banners = buildBanners(this.map, this.store);
     this.scene.add(this.banners.object);
-    this.effects = buildEffects(this.scene, this.renderer, this.camera, { bloom: this.settings.tier === 'ultra' });
+    this.effects = buildEffects(this.scene, this.renderer, this.camera, { bloom: this.settings.tier === 'high' || this.settings.tier === 'ultra' });
     this.assetLayer = buildAssetLayer(this.assetStore, () => this.store.palette);
     this.scene.add(this.assetLayer.object);
+    this.resolveEditorBanners();
     this.weather = buildWeather(this.scene);
     this.surroundings = buildSurroundings();
     this.scene.add(this.surroundings.object);
+    this.sparkles = buildPhoneFlash(this.map);
+    this.scene.add(this.sparkles.object);
+    if (this.template.id === 'community-jewel-jeddah-62k') {
+      const crown = buildJewelCrown();
+      this.scene.add(crown.object);
+      this.disposables.push(...crown.disposables);
+    }
+    if (this.template.id === 'community-alawwal-park-25k') {
+      let mx = 1;
+      let mz = 1;
+      let my = 1;
+      for (let k = 0; k < this.map.count; k++) {
+        mx = Math.max(mx, Math.abs(this.map.pos3[k * 3]));
+        my = Math.max(my, this.map.pos3[k * 3 + 1]);
+        mz = Math.max(mz, Math.abs(this.map.pos3[k * 3 + 2]));
+      }
+      const ex = buildAlAwwalExtras(mx, mz, my);
+      this.scene.add(ex.object);
+      this.disposables.push(...ex.disposables);
+    }
+    if (this.template.id === 'community-kingdom-arena-28k') {
+      let kx = 1;
+      let kz = 1;
+      let ky = 1;
+      for (let k = 0; k < this.map.count; k++) {
+        kx = Math.max(kx, Math.abs(this.map.pos3[k * 3]));
+        ky = Math.max(ky, this.map.pos3[k * 3 + 1]);
+        kz = Math.max(kz, Math.abs(this.map.pos3[k * 3 + 2]));
+      }
+      const ex = buildKingdomArenaExtras(kx, kz, ky);
+      this.scene.add(ex.object);
+      this.disposables.push(...ex.disposables);
+    }
 
     this.onDirtyCb = (indices): void => {
       if (this.disposed) return;
@@ -212,8 +261,37 @@ export class MatchDaySimulator {
     this.paletteColors = this.store.palette.map((hex) => new THREE.Color(hex));
   }
   private colorFor(i: number): THREE.Color {
+    if (this.manassaMask && this.manassaMask[i] === 1) return this.manassaColor;
     const cell = this.store.cells[i];
+    if (cell === 0 && this.template.id === 'community-jewel-jeddah-62k') {
+      return this.jewelSeatColors[(Math.imul(i, 2654435761) >>> 0) % this.jewelSeatColors.length];
+    }
+    if (cell === 0 && this.template.id === 'community-alawwal-park-25k') {
+      // Two-tone Al-Nassr: blue pitch-side front rail, gold body (matches the ground).
+      if (this.map.rowOf[i] < 4) return this.alawwalBlue;
+      return this.alawwalSeatColors[(Math.imul(i, 2654435761) >>> 0) % this.alawwalSeatColors.length];
+    }
+    if (cell === 0 && this.template.id === 'community-kingdom-arena-28k') {
+      return this.kingdomSeatColors[(Math.imul(i, 2654435761) >>> 0) % this.kingdomSeatColors.length];
+    }
     return cell === 0 ? EMPTY_COLOR : (this.paletteColors[cell] ?? EMPTY_COLOR);
+  }
+
+  /** The Jewel's main VIP tribune (al-manassa) — West-stand centre, lower two
+   * tiers. Those gold-ticket seats never take the tifo; they render as a fixed
+   * premium gold block. Jewel template only. */
+  private computeManassaMask(): Uint8Array | null {
+    if (this.template.id !== 'community-jewel-jeddah-62k') return null;
+    const n = this.map.count;
+    const mask = new Uint8Array(n);
+    for (let i = 0; i < n; i++) {
+      const u = (((this.map.uv[i * 2] + 0.125) % 1) + 1) % 1;
+      const s = u * 4;
+      const stand = Math.floor(s);
+      const frac = s - stand;
+      if (stand === 2 && this.map.tierOf[i] <= 1 && frac > 0.34 && frac < 0.66) mask[i] = 1;
+    }
+    return mask;
   }
   private recolor(i: number): void {
     this.seats.setColorAt(i, this.colorFor(i));
@@ -253,22 +331,35 @@ export class MatchDaySimulator {
   private buildEnvironment(): void {
     // Concourse apron (receives shadow).
     const apronGeo = new THREE.CircleGeometry(190, 72);
-    const apronMat = new THREE.MeshStandardMaterial({ color: 0x0c0f15, roughness: 1, metalness: 0 });
+    const apronMat = new THREE.MeshStandardMaterial({ color: 0x0c0f15, roughness: 0.85, metalness: 0, envMapIntensity: 0.5 });
     const apron = new THREE.Mesh(apronGeo, apronMat);
     apron.rotation.x = -Math.PI / 2;
     apron.position.y = -0.06;
     apron.receiveShadow = this.settings.shadows;
     this.scene.add(apron);
     this.disposables.push(apronGeo, apronMat);
+    if (this.template.id === 'community-jewel-jeddah-62k') {
+      // The Jewel's wide flat run-off (warm sand) between the pitch and the stands.
+      const roGeo = new THREE.CircleGeometry(58, 64);
+      const roMat = new THREE.MeshStandardMaterial({ color: 0x5f5540, roughness: 0.9, metalness: 0, envMapIntensity: 0.5 });
+      const ro = new THREE.Mesh(roGeo, roMat);
+      ro.rotation.x = -Math.PI / 2;
+      ro.scale.set(1.2, 1, 1);
+      ro.position.y = -0.02;
+      ro.receiveShadow = this.settings.shadows;
+      this.scene.add(ro);
+      this.disposables.push(roGeo, roMat);
+    }
 
     // Pitch (lit grass).
     const pitchGeo = new THREE.PlaneGeometry(105, 68);
-    this.pitchMat = new THREE.MeshStandardMaterial({ color: 0x1f7a3a, roughness: 0.92, metalness: 0 });
+    this.pitchMat = new THREE.MeshStandardMaterial({ color: 0x1f7a3a, map: pitchStripeTexture(), roughness: 0.72, metalness: 0, envMapIntensity: 1.1 });
     const pitch = new THREE.Mesh(pitchGeo, this.pitchMat);
     pitch.rotation.x = -Math.PI / 2;
     pitch.receiveShadow = this.settings.shadows;
     this.scene.add(pitch);
     this.disposables.push(pitchGeo, this.pitchMat);
+    this.scene.add(buildPitchDetail(this.settings.shadows)); // goals + full markings
 
     // Markings (unlit lines, like the editor preview).
     const lineMat = new THREE.LineBasicMaterial({ color: 0xe7eee7, transparent: true, opacity: 0.75 });
@@ -321,8 +412,36 @@ export class MatchDaySimulator {
   }
 
   // ---- camera director (Phase 6) ----
+  private seatBoundsCache: { ax: number; bz: number; ty: number } | null = null;
+  /** Bowl extent from the seat map. Memoised — the flyover asks for it per frame. */
+  private seatBounds(): { ax: number; bz: number; ty: number } {
+    if (this.seatBoundsCache) return this.seatBoundsCache;
+    let ax = 1;
+    let bz = 1;
+    let ty = 1;
+    for (let k = 0; k < this.map.count; k++) {
+      ax = Math.max(ax, Math.abs(this.map.pos3[k * 3]));
+      ty = Math.max(ty, this.map.pos3[k * 3 + 1]);
+      bz = Math.max(bz, Math.abs(this.map.pos3[k * 3 + 2]));
+    }
+    this.seatBoundsCache = { ax, bz, ty };
+    return this.seatBoundsCache;
+  }
   shots(): SimShot[] {
-    return [...SIM_SHOTS, seatShot(this.map, 'crowd'), seatShot(this.map, 'ultra')];
+    if (this.template.id === 'community-kingdom-arena-28k') {
+      const { ax, bz, ty } = this.seatBounds();
+      return [
+        { name: 'TV Broadcast', position: [-ax * 0.62, ty * 0.85, bz * 0.6], target: [ax * 0.62, ty * 0.42, 0], fov: 62 },
+        { name: 'Main Camera', position: [ax * 0.2, ty + 4, -bz * 0.92], target: [0, 1, 0], fov: 60 },
+        { name: 'Behind Goal', position: [-ax * 0.98, ty * 0.7, 0], target: [ax * 0.35, 2, 0], fov: 62 },
+        { name: 'Pitch Level', position: [ax * 0.4, 2.5, bz * 0.5], target: [-ax * 0.5, 8, -bz * 0.3], fov: 62 },
+        { name: 'High Corner', position: [ax * 0.95, ty + 4, bz * 0.95], target: [0, 0, 0], fov: 62 },
+        { name: 'Centre', position: [0, ty + 5, -bz * 0.98], target: [0, 1, bz * 0.3], fov: 62 },
+      ];
+    }
+    // Every other ground: shots derived from ITS bowl, so the cameras always sit
+    // on the seating looking in (absolute SIM_SHOTS only fit the default 92x70).
+    return [...bowlShots(this.seatBounds()), seatShot(this.map, 'crowd'), seatShot(this.map, 'ultra')];
   }
   /** Smoothly glide to a shot (eased), instead of snapping. */
   applyShot(s: SimShot): void {
@@ -600,6 +719,33 @@ export class MatchDaySimulator {
     };
   }
 
+  /** Resolve editor-placed banners (they carry a `place` hint + stand anchor) to
+   * real 3D transforms with the same math as the add* helpers. Idempotent. */
+  private resolveEditorBanners(): void {
+    for (const a of this.assetStore.list()) {
+      if (!a.place) continue;
+      if (a.place === 'floor') {
+        this.assetStore.update(a.id, { position: { x: 0, y: 0.05, z: 0 }, rotationY: 0, scale: { x: 26, y: 14, z: 1 } });
+        continue;
+      }
+      const stand = (a.anchor?.stand ?? 1) as 0 | 1 | 2 | 3;
+      const e = this.standExtent(stand);
+      if (a.place === 'surface') {
+        const an = this.standAnchor(stand);
+        this.assetStore.update(a.id, { position: { x: an.position.x, y: Math.max(8, an.position.y - 6), z: an.position.z }, rotationY: an.rotationY, scale: { x: 44, y: 26, z: 1 } });
+      } else if (a.place === 'big') {
+        this.assetStore.update(a.id, { position: { x: e.cx + e.dx * 5, y: Math.max(6, e.cy), z: e.cz + e.dz * 5 }, rotationY: e.rotationY, scale: { x: Math.max(10, e.width * 0.7), y: Math.max(8, e.height * 0.85), z: 1 } });
+      } else if (a.place === 'small') {
+        const wallH = Math.max(3, e.frontY + 1);
+        this.assetStore.update(a.id, { position: { x: e.frontX + e.dx * 1.5, y: wallH / 2, z: e.frontZ + e.dz * 1.5 }, rotationY: e.rotationY, scale: { x: Math.max(12, e.width * 0.8), y: wallH, z: 1 } });
+      } else if (a.place === 'gap') {
+        this.assetStore.update(a.id, { position: { x: e.cx + e.dx * 4, y: Math.max(4, e.cy), z: e.cz + e.dz * 4 }, rotationY: e.rotationY, scale: { x: Math.max(12, e.width * 0.85), y: 4, z: 1 } });
+      } else if (a.place === 'stairs') {
+        this.assetStore.update(a.id, { position: { x: e.cx + e.dx * 4, y: Math.max(6, e.cy), z: e.cz + e.dz * 4 }, rotationY: e.rotationY, scale: { x: 5, y: Math.max(10, e.height * 0.8), z: 1 } });
+      }
+    }
+  }
+
   /** Big 3D banner draping the stand's seating. */
   addBanner(stand: 0 | 1 | 2 | 3 = 1): void {
     const e = this.standExtent(stand);
@@ -671,6 +817,18 @@ export class MatchDaySimulator {
   setSelectedY(y: number): void {
     const s = this.assetStore.selected;
     if (s) this.assetStore.update(s.id, { position: { x: s.position.x, y, z: s.position.z } });
+  }
+  setSelectedX(x: number): void {
+    const s = this.assetStore.selected;
+    if (s) this.assetStore.update(s.id, { position: { x, y: s.position.y, z: s.position.z } });
+  }
+  setSelectedZ(z: number): void {
+    const s = this.assetStore.selected;
+    if (s) this.assetStore.update(s.id, { position: { x: s.position.x, y: s.position.y, z } });
+  }
+  setSelectedRot(deg: number): void {
+    const s = this.assetStore.selected;
+    if (s) this.assetStore.update(s.id, { rotationY: (deg * Math.PI) / 180 });
   }
   /** Print the selected image asset as tiled A4 panels (Wave E / #15). */
   printSelectedPanels(): boolean {
@@ -927,10 +1085,20 @@ export class MatchDaySimulator {
       if (!this.running) return;
       const dt = this.clock.getDelta();
       this.elapsed += dt;
-      if (this.flyActive) applyCameraShot(this.camera, this.controls, flyover(this.elapsed));
+      if (this.flyActive) {
+      if (this.template.id === 'community-kingdom-arena-28k') {
+        const { ax, bz, ty } = this.seatBounds();
+        const a = ((this.elapsed % 22) / 22) * Math.PI * 2;
+        applyCameraShot(this.camera, this.controls, { name: 'Flyover', position: [Math.cos(a) * ax * 0.95, ty + 8, Math.sin(a) * bz * 0.95], target: [0, 1, 0], fov: 60 });
+      } else {
+        applyCameraShot(this.camera, this.controls, flyover(this.elapsed, this.seatBounds()));
+      }
+    }
       this.banners.update(this.elapsed);
       this.assetLayer.update(this.elapsed);
       this.effects.update(dt);
+      this.surroundings.update(dt);
+      this.sparkles.update(dt);
       this.weather.update(dt);
       if (this.reveal) this.stepReveal();
       if (this.timeline) this.stepTimeline();
@@ -972,6 +1140,7 @@ export class MatchDaySimulator {
     this.assetLayer.dispose();
     this.weather.dispose();
     this.surroundings.dispose();
+    this.sparkles.dispose();
     for (const d of this.disposables) d.dispose();
     this.skyTex.dispose();
     this.renderer.dispose();

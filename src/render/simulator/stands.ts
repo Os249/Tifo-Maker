@@ -52,8 +52,12 @@ function ring(a: number, b: number, p: number, off: number, y: number): Pt[] {
   return pts;
 }
 
-/** Triangulate a strip between two equal-length closed rings (inner -> outer). */
-function strip(inner: Pt[], outer: Pt[]): THREE.BufferGeometry {
+/**
+ * Triangulate a strip between two equal-length closed rings (inner -> outer).
+ * When `keep` is given, quads whose either edge sample is masked-out are skipped,
+ * opening the ring at those samples (used to cut the four corners of a box arena).
+ */
+function strip(inner: Pt[], outer: Pt[], keep?: boolean[]): THREE.BufferGeometry {
   const n = inner.length;
   const pos = new Float32Array(n * 6);
   for (let i = 0; i < n; i++) {
@@ -67,6 +71,7 @@ function strip(inner: Pt[], outer: Pt[]): THREE.BufferGeometry {
   const idx: number[] = [];
   for (let i = 0; i < n; i++) {
     const j = (i + 1) % n;
+    if (keep && (!keep[i] || !keep[j])) continue; // open the corner gap
     const a = i;
     const b = j;
     const c = n + i;
@@ -84,9 +89,22 @@ export function buildStands(template: StadiumTemplate, shadows: boolean): THREE.
   const group = new THREE.Group();
   const { a, b, exponent: p } = template.plan;
 
-  const concrete = new THREE.MeshStandardMaterial({ color: 0x6b7178, roughness: 0.96, metalness: 0 });
-  const structure = new THREE.MeshStandardMaterial({ color: 0x4c515a, roughness: 0.95, metalness: 0 });
-  const roofMat = new THREE.MeshStandardMaterial({ color: 0x23272e, roughness: 0.55, metalness: 0.35, side: THREE.DoubleSide });
+  // Box-arena corner mask: same criterion as the seat generator (core/seatmap.ts)
+  // so the concrete shell opens at exactly the corners where seats were dropped.
+  const cornerCut = template.cornerCut ?? 0;
+  let keep: boolean[] | undefined;
+  if (cornerCut > 0) {
+    keep = [];
+    for (let i = 0; i < SAMPLES; i++) {
+      const t = (i / SAMPLES) * Math.PI * 2;
+      const [x0, z0] = se(a, b, p, t);
+      keep.push(!(Math.abs(x0) / a > cornerCut && Math.abs(z0) / b > cornerCut));
+    }
+  }
+
+  const concrete = new THREE.MeshStandardMaterial({ color: 0x6b7178, roughness: 0.96, metalness: 0, envMapIntensity: 0.8 });
+  const structure = new THREE.MeshStandardMaterial({ color: 0x4c515a, roughness: 0.95, metalness: 0, envMapIntensity: 0.8 });
+  const roofMat = new THREE.MeshStandardMaterial({ color: 0x23272e, roughness: 0.5, metalness: 0.4, side: THREE.DoubleSide, envMapIntensity: 1.3 });
 
   const add = (geo: THREE.BufferGeometry, mat: THREE.Material, cast: boolean, receive: boolean): void => {
     const m = new THREE.Mesh(geo, mat);
@@ -110,13 +128,13 @@ export function buildStands(template: StadiumTemplate, shadows: boolean): THREE.
     const backY = tier.baseElevation + lastRow * tier.rowDepth * rakeTan + tier.rowDepth * rakeTan * 0.5;
 
     // Sloped seating deck.
-    add(strip(ring(a, b, p, frontRadial, frontY), ring(a, b, p, backRadial, backY)), concrete, true, true);
+    add(strip(ring(a, b, p, frontRadial, frontY), ring(a, b, p, backRadial, backY), keep), concrete, true, true);
 
     // Vertical riser under the front of this tier, down to the previous tier's
     // top (tier 0 goes to ground). Closes the step between tiers.
     const floor = idx === 0 ? 0 : Math.max(0, topBackY - 0.2);
     if (frontY - floor > 0.4) {
-      add(strip(ring(a, b, p, frontRadial, floor), ring(a, b, p, frontRadial, frontY)), structure, false, true);
+      add(strip(ring(a, b, p, frontRadial, floor), ring(a, b, p, frontRadial, frontY), keep), structure, false, true);
     }
 
     rowsBefore += tier.rows;
@@ -125,16 +143,16 @@ export function buildStands(template: StadiumTemplate, shadows: boolean): THREE.
   });
 
   // Outer skirt: back of the top tier down to the ground.
-  add(strip(ring(a, b, p, topBackRadial, 0), ring(a, b, p, topBackRadial, topBackY)), structure, false, true);
+  add(strip(ring(a, b, p, topBackRadial, 0), ring(a, b, p, topBackRadial, topBackY), keep), structure, false, true);
 
   // Cantilever roof over the top tier, connected to the back wall by a vertical
   // fascia so it reads as supported rather than floating in the air.
   const roofY = topBackY + 4;
   const roofInner = ring(a, b, p, topBackRadial - 16, roofY); // reaches in over the back rows
   const roofOuter = ring(a, b, p, topBackRadial + 5, roofY);
-  add(strip(roofInner, roofOuter), roofMat, true, false);
+  add(strip(roofInner, roofOuter, keep), roofMat, true, false);
   // Fascia: vertical web from the stand top edge up to the roof's outer lip.
-  add(strip(ring(a, b, p, topBackRadial + 5, topBackY), ring(a, b, p, topBackRadial + 5, roofY)), structure, false, true);
+  add(strip(ring(a, b, p, topBackRadial + 5, topBackY), ring(a, b, p, topBackRadial + 5, roofY), keep), structure, false, true);
 
   // Avoid an unused-variable lint while keeping the running total documented.
   void rowsBefore;

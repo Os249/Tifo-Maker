@@ -15,6 +15,7 @@ import { ObjectLayer } from './core/objects';
 import { Editor } from './render/editor';
 import type { Preview3D } from './render/preview3d';
 import { mountToolbar } from './ui/toolbar';
+import { mountBannerStudio } from './ui/bannerStudio';
 import { track } from './net/analytics';
 import { mountViewer } from './ui/viewer';
 import { hasOnboarded } from './ui/onboarding';
@@ -406,6 +407,7 @@ async function main(): Promise<void> {
   // Tifo assets (banners/flags/surfaces) live in a shared store so they persist
   // across opening/closing the simulator within a session.
   const assetStore = new AssetStore();
+  mountBannerStudio({ trigger: document.getElementById('banner-studio-btn'), assetStore, store, map });
   // Persist them locally too, so they survive a page reload (client-only and
   // wrapped in try/catch — never touches the server save path; full per-design +
   // server persistence is a later, test-gated step).

@@ -1,14 +1,16 @@
 import * as THREE from 'three';
 
 /**
- * Surroundings — the world the stadium sits in (so it isn't floating in a void).
- * A large dark ground plane plus an instanced city‑skyline ring of buildings with
- * a window texture that glows at night (emissiveMap). One instanced draw for the
- * whole skyline, so it's cheap. Purely decorative backdrop; no shadows.
+ * Surroundings — the living world the stadium sits in. A dark ground plane, an
+ * instanced city-skyline ring (glowing windows), a warm lamp-post plaza ring at
+ * the stadium base, and streams of instanced pedestrians walking in toward the
+ * ground on match night. Pedestrians are cross-quad billboards (read from any
+ * angle) animated in update(dt). All instanced — a handful of draw calls.
  */
 
 export interface Surroundings {
   readonly object: THREE.Group;
+  update(dt: number): void;
   dispose(): void;
 }
 
@@ -31,6 +33,48 @@ function windowTexture(): THREE.Texture {
   t.wrapT = THREE.RepeatWrapping;
   t.repeat.set(2, 6);
   return t;
+}
+
+/** A dark person silhouette with a warm rim light, on a transparent canvas. */
+function personTexture(): THREE.Texture {
+  const c = document.createElement('canvas');
+  c.width = 32;
+  c.height = 64;
+  const g = c.getContext('2d')!;
+  g.clearRect(0, 0, 32, 64);
+  g.fillStyle = '#0a0c11';
+  g.beginPath();
+  g.ellipse(16, 46, 7, 17, 0, 0, Math.PI * 2); // torso + legs
+  g.fill();
+  g.beginPath();
+  g.arc(16, 22, 6, 0, Math.PI * 2); // head
+  g.fill();
+  g.strokeStyle = 'rgba(255,196,120,0.5)'; // warm rim light down one side
+  g.lineWidth = 2.5;
+  g.beginPath();
+  g.ellipse(16, 46, 7, 17, 0, -Math.PI / 2, Math.PI / 2);
+  g.stroke();
+  g.beginPath();
+  g.arc(16, 22, 6, -Math.PI / 2, Math.PI / 2);
+  g.stroke();
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+
+function crossQuad(w: number, h: number): THREE.BufferGeometry {
+  const hw = w / 2;
+  const hh = h / 2;
+  const positions = new Float32Array([
+    -hw, -hh, 0, hw, -hh, 0, hw, hh, 0, -hw, -hh, 0, hw, hh, 0, -hw, hh, 0,
+    0, -hh, -hw, 0, -hh, hw, 0, hh, hw, 0, -hh, -hw, 0, hh, hw, 0, hh, -hw,
+  ]);
+  const uvs = new Float32Array([0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1]);
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  g.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+  g.computeVertexNormals();
+  return g;
 }
 
 export function buildSurroundings(): Surroundings {
@@ -82,9 +126,86 @@ export function buildSurroundings(): Surroundings {
   group.add(mesh);
   trash.push(bGeo, bMat, winTex);
 
+  // Warm lamp-post plaza ring at the stadium base.
+  const postGeo = new THREE.CylinderGeometry(0.35, 0.5, 15, 6);
+  const postMat = new THREE.MeshStandardMaterial({ color: 0x161a22, roughness: 0.6, metalness: 0.6, envMapIntensity: 0.6 });
+  const bulbGeo = new THREE.SphereGeometry(1.2, 10, 10);
+  const bulbMat = new THREE.MeshStandardMaterial({ color: 0xfff2d4, emissive: 0xffcf87, emissiveIntensity: 2.4 });
+  const LAMPS = 52;
+  const posts = new THREE.InstancedMesh(postGeo, postMat, LAMPS);
+  const bulbs = new THREE.InstancedMesh(bulbGeo, bulbMat, LAMPS);
+  posts.frustumCulled = false;
+  bulbs.frustumCulled = false;
+  const lm = new THREE.Object3D();
+  for (let i = 0; i < LAMPS; i++) {
+    const ang = (i / LAMPS) * Math.PI * 2;
+    const x = Math.cos(ang) * 202;
+    const z = Math.sin(ang) * 202;
+    lm.position.set(x, 7.3, z);
+    lm.updateMatrix();
+    posts.setMatrixAt(i, lm.matrix);
+    lm.position.set(x, 15.4, z);
+    lm.updateMatrix();
+    bulbs.setMatrixAt(i, lm.matrix);
+  }
+  posts.instanceMatrix.needsUpdate = true;
+  bulbs.instanceMatrix.needsUpdate = true;
+  group.add(posts, bulbs);
+  trash.push(postGeo, postMat, bulbGeo, bulbMat);
+
+  // Pedestrians — streams of fans converging on the stadium (cross-quad billboards).
+  const personTex = personTexture();
+  const personGeo = crossQuad(3.4, 7.2);
+  const personMat = new THREE.MeshBasicMaterial({
+    map: personTex,
+    transparent: true,
+    alphaTest: 0.4,
+    depthWrite: true,
+    side: THREE.DoubleSide,
+  });
+  const PEOPLE = 360;
+  const people = new THREE.InstancedMesh(personGeo, personMat, PEOPLE);
+  people.frustumCulled = false;
+  const pAng = new Float32Array(PEOPLE);
+  const pRad = new Float32Array(PEOPLE);
+  const pSpd = new Float32Array(PEOPLE);
+  const pPhase = new Float32Array(PEOPLE);
+  const spawn = (i: number, near: boolean): void => {
+    pAng[i] = Math.random() * Math.PI * 2;
+    pRad[i] = near ? 200 + Math.random() * 170 : 345 + Math.random() * 45;
+    pSpd[i] = 6 + Math.random() * 9;
+    pPhase[i] = Math.random() * Math.PI * 2;
+  };
+  for (let i = 0; i < PEOPLE; i++) spawn(i, true);
+  const pd = new THREE.Object3D();
+  const writePeople = (t: number): void => {
+    for (let i = 0; i < PEOPLE; i++) {
+      const x = Math.cos(pAng[i]) * pRad[i];
+      const z = Math.sin(pAng[i]) * pRad[i];
+      const y = 3.7 + Math.sin(t * (pSpd[i] * 0.6) + pPhase[i]) * 0.35; // walking bob
+      pd.position.set(x, y, z);
+      pd.lookAt(0, y, 0); // face (and walk toward) the stadium
+      pd.updateMatrix();
+      people.setMatrixAt(i, pd.matrix);
+    }
+    people.instanceMatrix.needsUpdate = true;
+  };
+  writePeople(0);
+  group.add(people);
+  trash.push(personGeo, personMat, personTex);
+
+  let clock = 0;
   return {
     object: group,
-    dispose() {
+    update(dt: number): void {
+      clock += dt;
+      for (let i = 0; i < PEOPLE; i++) {
+        pRad[i] -= pSpd[i] * dt;
+        if (pRad[i] < 196) spawn(i, false); // reached the ground — loop back out
+      }
+      writePeople(clock);
+    },
+    dispose(): void {
       for (const t of trash) t.dispose();
     },
   };

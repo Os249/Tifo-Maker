@@ -219,6 +219,9 @@ const MDS_T: Record<string, { en: string; ar: string }> = {
   scarves: { en: 'Scarves', ar: 'أوشحة' },
   projectField: { en: 'Paint design onto seats from this view (edits your tifo)', ar: 'ارسم التصميم على المقاعد من هذي اللقطة (يعدّل تيفوك)' },
   selectedAsset: { en: 'Selected asset', ar: 'العنصر المحدد' },
+  posX: { en: 'Move ↔ (X)', ar: 'تحريك ↔ (X)' },
+  posZ: { en: 'Move ↕ (Z)', ar: 'تحريك ↕ (Z)' },
+  rotate: { en: 'Rotate', ar: 'تدوير' },
   replaceImage: { en: 'Replace image', ar: 'استبدل الصورة' },
   width: { en: 'Width', ar: 'العرض' },
   height: { en: 'Height', ar: 'الارتفاع' },
@@ -363,13 +366,13 @@ export function openMatchDaySimulator(
     banners: false,
     stairs: false,
     flags: true,
-    floods: false,
+    floods: true,
     smoke: false,
     fly: false,
     reveal: 'wipe-lr',
     tod: 'dusk',
     weather: 'clear',
-    wet: false,
+    wet: true,
   };
 
   const overlay = document.createElement('div');
@@ -493,6 +496,9 @@ export function openMatchDaySimulator(
   const wRange = rng(4, 60, 18);
   const hRange = rng(1, 30, 4);
   const yRange = rng(0, 60, 14);
+  const xRange = rng(-140, 140, 0);
+  const zRange = rng(-140, 140, 0);
+  const rotRange = rng(0, 360, 0);
   const unfurlBtn = btn(L('unfurl'));
   const printBtn = btn(L('printPanels'));
   const delBtn = btn(L('deleteSelected'));
@@ -512,6 +518,9 @@ export function openMatchDaySimulator(
     field(L('width'), wRange),
     field(L('height'), hRange),
     field(L('heightOff'), yRange),
+    field(L('posX'), xRange),
+    field(L('posZ'), zRange),
+    field(L('rotate'), rotRange),
     row(unfurlBtn, printBtn, delBtn, clearAllBtn),
   );
 
@@ -879,7 +888,17 @@ export function openMatchDaySimulator(
     };
     r.readAsDataURL(f);
   });
-  assetSel.addEventListener('change', () => sim.selectAsset(assetSel.value || null));
+  const syncAssetControls = (): void => {
+    const a = assetStore.selected;
+    if (!a) return;
+    wRange.value = String(Math.round(Math.abs(a.scale.x)));
+    hRange.value = String(Math.round(Math.abs(a.scale.y)));
+    yRange.value = String(Math.round(a.position.y));
+    xRange.value = String(Math.round(a.position.x));
+    zRange.value = String(Math.round(a.position.z));
+    rotRange.value = String(Math.round((a.rotationY * 180) / Math.PI));
+  };
+  assetSel.addEventListener('change', () => { sim.selectAsset(assetSel.value || null); syncAssetControls(); });
   imgInput.addEventListener('change', () => {
     const f = imgInput.files?.[0];
     if (!f) return;
@@ -893,6 +912,9 @@ export function openMatchDaySimulator(
   wRange.addEventListener('input', applySize);
   hRange.addEventListener('input', applySize);
   yRange.addEventListener('input', () => sim.setSelectedY(Number(yRange.value)));
+  xRange.addEventListener('input', () => sim.setSelectedX(Number(xRange.value)));
+  zRange.addEventListener('input', () => sim.setSelectedZ(Number(zRange.value)));
+  rotRange.addEventListener('input', () => sim.setSelectedRot(Number(rotRange.value)));
   delBtn.addEventListener('click', () => {
     dbg('delete selected ->', sim.selectedAssetId, '(assets:', sim.listAssets().length + ')');
     sim.removeSelected();

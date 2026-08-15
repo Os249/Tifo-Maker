@@ -210,6 +210,13 @@ export function mountToolbar(
   };
   renderPalette();
   reflectFg();
+  editor.onColorPick = (idx) => {
+    editor.colorIndex = idx;
+    editor.refreshStampPreviewTint();
+    renderPalette();
+    reflectFg();
+    setTool('brush'); // pick a colour, then paint with it immediately
+  };
   store.onDirty(renderPalette);
   store.onDirty(() => track('paint_first'));
 
@@ -1287,6 +1294,7 @@ export function mountToolbar(
     if (k === 'b') setTool('brush');
     if (k === 'f') setTool('fill');
     if (k === 'e') setTool('eraser');
+    if (k === 'i') setTool('eyedropper');
     if (k === ' ') setTool('pan');
   });
   window.addEventListener('keyup', (e) => {

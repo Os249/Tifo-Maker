@@ -22,13 +22,17 @@ export interface QualitySettings {
   fog: boolean;
   /** Shadow map resolution when shadows are on. */
   shadowMapSize: number;
+  /** Image-based lighting (night-sky env) for PBR ambient + reflections. */
+  ibl: boolean;
+  /** scene.environmentIntensity applied when ibl is on. */
+  envIntensity: number;
 }
 
 export const QUALITY_PRESETS: Record<QualityTier, QualitySettings> = {
-  low: { tier: 'low', shadows: false, maxPixelRatio: 1, antialias: false, fog: false, shadowMapSize: 0 },
-  medium: { tier: 'medium', shadows: false, maxPixelRatio: 1.5, antialias: true, fog: true, shadowMapSize: 0 },
-  high: { tier: 'high', shadows: true, maxPixelRatio: 2, antialias: true, fog: true, shadowMapSize: 2048 },
-  ultra: { tier: 'ultra', shadows: true, maxPixelRatio: 2, antialias: true, fog: true, shadowMapSize: 4096 },
+  low: { tier: 'low', shadows: false, maxPixelRatio: 1, antialias: false, fog: false, shadowMapSize: 0, ibl: false, envIntensity: 0 },
+  medium: { tier: 'medium', shadows: false, maxPixelRatio: 1.5, antialias: true, fog: true, shadowMapSize: 0, ibl: true, envIntensity: 0.22 },
+  high: { tier: 'high', shadows: true, maxPixelRatio: 2, antialias: true, fog: true, shadowMapSize: 2048, ibl: true, envIntensity: 0.45 },
+  ultra: { tier: 'ultra', shadows: true, maxPixelRatio: 2, antialias: true, fog: true, shadowMapSize: 4096, ibl: true, envIntensity: 0.55 },
 };
 
 export const ALL_TIERS: QualityTier[] = ['low', 'medium', 'high', 'ultra'];

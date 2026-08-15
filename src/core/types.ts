@@ -17,6 +17,13 @@ export interface StadiumTemplate {
   aisles: { count: number; widthMeters: number };
   /** Sections per tier, bucketed by u. The organizational unit tifo planners think in. */
   sectionsPerTier: number;
+  /**
+   * Box-arena corner cut (0..1). 0 / undefined = full continuous bowl (default).
+   * When > 0, seats whose normalised plan coords satisfy |x/a| > c AND |y/b| > c
+   * are dropped, opening the four corners so the bowl reads as four straight
+   * stands (Kingdom Arena style). ~0.6 = generous corners, ~0.75 = small notch.
+   */
+  cornerCut?: number;
 }
 
 export interface TierSpec {
@@ -80,5 +87,5 @@ export interface SparseDiff {
   after: Uint8Array;
 }
 
-export type ToolId = 'brush' | 'fill' | 'eraser' | 'pan' | 'text' | 'import' | 'select' | 'shape';
+export type ToolId = 'brush' | 'fill' | 'eraser' | 'pan' | 'text' | 'import' | 'select' | 'shape' | 'eyedropper';
 export type FillScope = 'section' | 'global';

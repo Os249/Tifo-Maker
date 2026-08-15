@@ -3,6 +3,26 @@ import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
+import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
+
+let _beamGrad: THREE.Texture | null = null;
+/** Soft vertical gradient (bright at the lamp, fading toward the pitch) so the
+ * floodlight beams read as haze rather than a hard cone. Cached module-wide. */
+function beamGradient(): THREE.Texture {
+  if (_beamGrad) return _beamGrad;
+  const c = document.createElement('canvas');
+  c.width = 4;
+  c.height = 64;
+  const g = c.getContext('2d')!;
+  const grd = g.createLinearGradient(0, 0, 0, 64);
+  grd.addColorStop(0, 'rgba(255,255,255,1)');
+  grd.addColorStop(0.55, 'rgba(255,255,255,0.5)');
+  grd.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = grd;
+  g.fillRect(0, 0, 4, 64);
+  _beamGrad = new THREE.CanvasTexture(c);
+  return _beamGrad;
+}
 
 /**
  * Match Day Simulator — effects & atmosphere (Phase 5).
@@ -80,6 +100,34 @@ class Particles {
   }
 }
 
+const GRADE_SHADER = {
+  uniforms: {
+    tDiffuse: { value: null },
+    uContrast: { value: 1.11 },
+    uSaturation: { value: 1.16 },
+    uLift: { value: new THREE.Color(0.02, 0.03, 0.055) },
+    uGain: { value: new THREE.Color(0.05, 0.03, 0.0) },
+  },
+  vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+  fragmentShader: `
+    uniform sampler2D tDiffuse;
+    uniform float uContrast; uniform float uSaturation;
+    uniform vec3 uLift; uniform vec3 uGain;
+    varying vec2 vUv;
+    void main() {
+      vec4 c = texture2D(tDiffuse, vUv);
+      vec3 col = c.rgb;
+      col = (col - 0.5) * uContrast + 0.5;
+      float l = dot(col, vec3(0.299, 0.587, 0.114));
+      col = mix(vec3(l), col, uSaturation);
+      col += uLift * (1.0 - l) + uGain * l;
+      vec2 d = vUv - 0.5;
+      col *= 1.0 - smoothstep(0.32, 0.8, length(d)) * 0.55;
+      gl_FragColor = vec4(clamp(col, 0.0, 1.0), c.a);
+    }
+  `,
+};
+
 export function buildEffects(
   scene: THREE.Scene,
   renderer: THREE.WebGLRenderer,
@@ -93,7 +141,7 @@ export function buildEffects(
   const floodGroup = new THREE.Group();
   floodGroup.visible = false;
   const mastMat = new THREE.MeshStandardMaterial({ color: 0x2a2e36, roughness: 0.5, metalness: 0.5 });
-  const lampMat = new THREE.MeshStandardMaterial({ color: 0xfff4d6, emissive: 0xfff0c8, emissiveIntensity: 3 });
+  const lampMat = new THREE.MeshStandardMaterial({ color: 0xfff4d6, emissive: 0xfff0c8, emissiveIntensity: 1.15 });
   const mastGeo = new THREE.BoxGeometry(1.4, 55, 1.4);
   const lampGeo = new THREE.BoxGeometry(7, 3.2, 1);
   trash.push(mastMat, lampMat, mastGeo, lampGeo);
@@ -120,7 +168,7 @@ export function buildEffects(
 
     // Visible volumetric-ish beam from the lamp toward the pitch (glows at night + bloom).
     const beamLen = Math.hypot(x, 55, z);
-    const beamGeo = new THREE.ConeGeometry(30, beamLen, 20, 1, true);
+    const beamGeo = new THREE.ConeGeometry(34, beamLen, 48, 1, true);
     const beamMat = new THREE.MeshBasicMaterial({
       color: 0xfff0cf,
       transparent: true,
@@ -128,6 +176,7 @@ export function buildEffects(
       blending: THREE.AdditiveBlending,
       depthWrite: false,
       side: THREE.DoubleSide,
+      alphaMap: beamGradient(),
     });
     const beam = new THREE.Mesh(beamGeo, beamMat);
     const lampPos = new THREE.Vector3(x, 55, z);
@@ -140,8 +189,8 @@ export function buildEffects(
   scene.add(floodGroup);
 
   // ---- Smoke ----
-  const smoke = new Particles(240, tex, 9, 0xcfd6df, false);
-  smoke.mat.opacity = 0.35;
+  const smoke = new Particles(240, tex, 6, 0xcfd6df, false);
+  smoke.mat.opacity = 0.2;
   smoke.points.visible = false;
   scene.add(smoke.points);
   trash.push(smoke);
@@ -175,8 +224,9 @@ export function buildEffects(
     try {
       composer = new EffectComposer(renderer);
       composer.addPass(new RenderPass(scene, camera));
-      composer.addPass(new UnrealBloomPass(new THREE.Vector2(1, 1), 0.6, 0.6, 0.82));
+      composer.addPass(new UnrealBloomPass(new THREE.Vector2(1, 1), 0.32, 0.6, 0.95));
       composer.addPass(new OutputPass());
+      composer.addPass(new ShaderPass(GRADE_SHADER));
     } catch {
       composer = null;
     }
@@ -255,8 +305,18 @@ export function buildEffects(
       pyro.flush();
     },
     render(r, s, cam) {
-      if (composer) composer.render();
-      else r.render(s, cam);
+      if (composer) {
+        try {
+          composer.render();
+          return;
+        } catch {
+          // A post pass failed at runtime — degrade to a plain render instead of
+          // a black frame, and stop trying the broken composer.
+          composer.dispose();
+          composer = null;
+        }
+      }
+      r.render(s, cam);
     },
     setSize(r, w, h) {
       if (composer) {

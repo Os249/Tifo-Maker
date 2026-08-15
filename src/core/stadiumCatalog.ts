@@ -188,6 +188,67 @@ const COMMUNITY: StadiumEntry[] = [
     },
     meta: { name: 'Wide Athletics Oval', source: 'community', country: 'International', capacity: 72000, type: 'Oval', inspiredBy: 'a wide running-track oval', tags: ['oval', 'athletics', 'two-tier', 'large'] },
   },
+  {
+    // Tribute to King Abdullah Sports City (Alinma Stadium), Jeddah - "The Shining Jewel".
+    // A near-circular, enclosed bowl with THREE very compact tiers (Lower ~24k, Middle
+    // ~24k, Upper ~14k) matching the real venue's L/M/U configuration; full ~62,241.
+    id: 'community-jewel-jeddah-62k',
+    template: {
+      id: 'community-jewel-jeddah-62k',
+      name: 'The Jewel of Jeddah',
+      version: 1,
+      plan: { a: 83, b: 73, exponent: 2.15 },
+      tiers: [
+        { rows: 20, rowDepth: 0.8, rakeDeg: 28, baseElevation: 1.5, baseOffset: 0, seatPitch: 0.48 },
+        { rows: 18, rowDepth: 0.78, rakeDeg: 35, baseElevation: 11, baseOffset: 18, seatPitch: 0.48 },
+        { rows: 12, rowDepth: 0.76, rakeDeg: 42, baseElevation: 20, baseOffset: 32, seatPitch: 0.48 },
+      ],
+      aisles: { count: 32, widthMeters: 1.1 },
+      sectionsPerTier: 32,
+    },
+    meta: { name: 'The Jewel of Jeddah', source: 'community', country: 'Middle East', capacity: 62241, type: 'Bowl', inspiredBy: 'King Abdullah Sports City (Alinma Stadium), Jeddah - nicknamed "The Shining Jewel"', tags: ['jewel', 'jeddah', 'saudi', 'three-tier', 'circular', 'bowl', 'large', 'world-cup-2034'] },
+  },
+  {
+    // Tribute to Al-Awwal Park (King Saud University Stadium), Riyadh - Al-Nassr's
+    // home. Open two-tier ground with a gold perforated metal skin and a roof that
+    // bends over the West (main) stand. ~25,000.
+    id: 'community-alawwal-park-25k',
+    template: {
+      id: 'community-alawwal-park-25k',
+      name: 'Al-Awwal Park (Riyadh)',
+      version: 1,
+      plan: { a: 64, b: 50, exponent: 2.4 },
+      tiers: [
+        { rows: 16, rowDepth: 0.8, rakeDeg: 28, baseElevation: 1.5, baseOffset: 0, seatPitch: 0.48 },
+        { rows: 12, rowDepth: 0.78, rakeDeg: 35, baseElevation: 10, baseOffset: 16, seatPitch: 0.48 },
+      ],
+      aisles: { count: 22, widthMeters: 1.1 },
+      sectionsPerTier: 22,
+    },
+    meta: { name: 'Al-Awwal Park (Riyadh)', source: 'community', country: 'Middle East', capacity: 25000, type: 'Two-tier', inspiredBy: 'Al-Awwal Park (King Saud University Stadium), Riyadh - home of Al-Nassr', tags: ['al-nassr', 'riyadh', 'saudi', 'two-tier', 'gold', 'open'] },
+  },
+  {
+    // Tribute to Kingdom Arena, Riyadh - Al-Hilal's fully covered indoor arena, the
+    // largest covered football stadium. Enclosed rectangular box, closed roof, a
+    // four-sided screen hung over the centre. ~28,000.
+    id: 'community-kingdom-arena-28k',
+    template: {
+      id: 'community-kingdom-arena-28k',
+      name: 'Kingdom Arena (Riyadh)',
+      version: 1,
+      plan: { a: 66, b: 50, exponent: 4.6 },
+      // Box arena: open the four corners so the bowl reads as four straight
+      // stands (sidelines reach the goal lines, ends cover the pitch width).
+      cornerCut: 0.8,
+      tiers: [
+        { rows: 16, rowDepth: 0.76, rakeDeg: 34, baseElevation: 1.5, baseOffset: 0, seatPitch: 0.47 },
+        { rows: 12, rowDepth: 0.74, rakeDeg: 40, baseElevation: 10, baseOffset: 14, seatPitch: 0.47 },
+      ],
+      aisles: { count: 20, widthMeters: 1.0 },
+      sectionsPerTier: 20,
+    },
+    meta: { name: 'Kingdom Arena (Riyadh)', source: 'community', country: 'Middle East', capacity: 28000, type: 'Arena', inspiredBy: "Kingdom Arena, Riyadh - Al-Hilal's fully covered indoor arena", tags: ['al-hilal', 'riyadh', 'saudi', 'arena', 'covered', 'indoor'] },
+  },
 ];
 
 /** The full catalog. Order: built-ins first, then community, then custom. */

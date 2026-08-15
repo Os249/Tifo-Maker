@@ -80,7 +80,7 @@ export function buildPitchside(shadows: boolean): PitchsideController {
   trash.push(dugMat);
 
   // Players' tunnel mouth behind the dugouts.
-  const tunMat = new THREE.MeshStandardMaterial({ color: 0x04060a, roughness: 1 });
+  const tunMat = new THREE.MeshStandardMaterial({ color: 0x0a0d14, emissive: 0x1a1408, emissiveIntensity: 0.5, roughness: 1 });
   const tunGeo = new THREE.BoxGeometry(4, 3, 3);
   const tunnel = new THREE.Mesh(tunGeo, tunMat);
   tunnel.position.set(0, 1.5, HALF_Z + m + 5.5);

@@ -56,6 +56,8 @@ export class Editor {
   aisleCount = 28;
   /** Fired on hover with the seat index under the cursor (-1 if none). */
   onHoverSeat: ((seat: number) => void) | null = null;
+  /** Fired when the eyedropper picks a painted seat's colour (palette index). */
+  onColorPick: ((index: number) => void) | null = null;
   /** Fired after pan/zoom with the normalized viewport rect for the minimap. */
   onViewChange: ((u0: number, v0: number, u1: number, v1: number, zoom: number) => void) | null = null;
 
@@ -504,6 +506,14 @@ export class Editor {
       if (this.tool === 'text' || this.tool === 'import' || this.tool === 'shape') {
         // Stamps are never mirrored — reflected glyphs/crests read backwards.
         this.onPlaceStamp?.(wx, wy);
+        return;
+      }
+      if (this.tool === 'eyedropper') {
+        const seat = this.hash.nearest(wx, wy, 24);
+        if (seat >= 0 && this.store.cells[seat] > 0) {
+          this.colorIndex = this.store.cells[seat];
+          this.onColorPick?.(this.colorIndex);
+        }
         return;
       }
       if (this.revealActive) this.onEditWhileRevealed?.();
