@@ -12,8 +12,13 @@ export type FunnelEvent =
   | 'landed'
   | 'paint_first'
   | 'view_3d'
+  | 'draft_restored'   // came back and their work was still here
   | 'save_clicked'
+  | 'save_local'       // kept without an account
+  | 'account_prompt'   // the "keep it anywhere" offer was shown, after a save
+  | 'auth_opened'      // they opened the sign-up form
   | 'signed_up'
+  | 'draft_claimed'    // their local draft was attached to the new account
   | 'published'
   | 'exported';
 
