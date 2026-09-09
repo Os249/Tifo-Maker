@@ -233,3 +233,39 @@ CREATE TABLE IF NOT EXISTS design_shares (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS design_shares_design_idx ON design_shares (design_id, created_at);
+
+-- ============ TRAFFIC SOURCES ============
+
+-- Cookieless, server-side reach measurement — the answer to "where did they come
+-- from", which the consent-gated client funnel above structurally cannot give.
+--
+-- Deliberately holds NO personal data, so it needs no cookie banner:
+--   * no IP address is ever written here (used once, in memory, then discarded);
+--   * no raw User-Agent — only coarse device / os / browser buckets;
+--   * referrer_host is a HOSTNAME only, so a referring URL's path and query (which
+--     can carry search terms or tokens) never reach this table;
+--   * visitor_key is a SHA-256 of (ip + ua + date) salted with 32 random bytes that
+--     live only in process memory and rotate every UTC day — irreversible, and not
+--     linkable across days even by whoever holds this database. It is set to NULL
+--     entirely after 2 days, leaving pure aggregates.
+-- Used only to understand traffic: never advertising, retargeting or profiling.
+CREATE TABLE IF NOT EXISTS visits (
+  id            BIGSERIAL PRIMARY KEY,
+  visitor_key   TEXT,                          -- daily-rotating salted hash; NULLed after 2 days
+  source        TEXT NOT NULL,                 -- search|social|ai|referral|campaign|direct|internal
+  referrer_host TEXT,                          -- hostname or friendly label, never a full URL
+  utm_source    TEXT,
+  utm_medium    TEXT,
+  utm_campaign  TEXT,
+  path          TEXT NOT NULL,
+  device        TEXT,                          -- Desktop|Mobile|Tablet
+  os            TEXT,
+  browser       TEXT,
+  lang          TEXT,                          -- primary subtag only, e.g. 'ar'
+  country       TEXT,                          -- 2-letter, only when an edge provides it
+  is_bot        BOOLEAN NOT NULL DEFAULT false,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS visits_created_idx ON visits (created_at DESC);
+CREATE INDEX IF NOT EXISTS visits_source_idx ON visits (source, created_at DESC);
+CREATE INDEX IF NOT EXISTS visits_human_idx ON visits (created_at DESC) WHERE NOT is_bot;

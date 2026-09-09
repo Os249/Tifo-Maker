@@ -12,6 +12,10 @@ import { PgSocialRepository } from '../src/pgSocial';
 import { buildApp, SNAPSHOT_EVERY, type TemplateInfo } from '../src/routes';
 import { toB64 } from '../src/codec';
 import type { AuthRepository, DesignRepository } from '../src/repo';
+import {
+  buildVisit, classifyClient, classifySource, isBotUa, MemoryTrafficRepository,
+  normCountry, primaryLang, referrerHost, visitorKeyFor,
+} from '../src/trafficRepo';
 
 const map = generateSeatMap(DEFAULT_TEMPLATE);
 const templates: TemplateInfo[] = [
@@ -633,9 +637,17 @@ async function runSuite(name: string, repo: DesignRepository, auth: AuthReposito
   assert.equal(aliceProfile.isFollowing, true, 'bob follows alice');
   assert.ok(aliceProfile.designCount >= 2, 'profile counts public designs');
 
-  // User search finds alice by prefix.
-  const found = (await app.inject({ method: 'GET', url: '/api/users/search?q=ali' })).json() as { username: string }[];
-  assert.ok(found.some((u) => u.username === 'alice'), 'user search matches by prefix');
+  // User search: signed-in only, and a real prefix is required. As a public endpoint
+  // answering "?q=a" it let anyone walk the whole account list one letter at a time.
+  assert.equal(
+    (await app.inject({ method: 'GET', url: '/api/users/search?q=ali' })).statusCode,
+    401,
+    'user search rejects anonymous callers',
+  );
+  const oneLetter = (await app.inject({ method: 'GET', url: '/api/users/search?q=a', headers: bearer(bobTok) })).json() as unknown[];
+  assert.equal(oneLetter.length, 0, 'single-letter search returns nothing (no enumeration)');
+  const found = (await app.inject({ method: 'GET', url: '/api/users/search?q=ali', headers: bearer(bobTok) })).json() as { username: string }[];
+  assert.ok(found.some((u) => u.username === 'alice'), 'user search matches by prefix for signed-in users');
 
   // Unfollow drops the follower count.
   await app.inject({ method: 'DELETE', url: `/api/users/${aliceId}/follow`, headers: bearer(bobTok) });
@@ -722,7 +734,11 @@ async function runSuite(name: string, repo: DesignRepository, auth: AuthReposito
 {
   const auth = new MemoryAuthRepository();
   const events = new MemoryEventsRepository();
-  const app = await buildApp(new MemoryDesignRepository((id) => auth.usernameOf(id)), auth, templates, { events });
+  const app = await buildApp(new MemoryDesignRepository((id) => auth.usernameOf(id)), auth, templates, {
+    events,
+    adminUsernames: ['boss'],
+  });
+  const bossTok = await registerUser(app, 'boss');
 
   const send = (session: string, name: string, signedIn = false) =>
     app.inject({ method: 'POST', url: '/api/events', payload: { session, name, signedIn } });
@@ -741,7 +757,14 @@ async function runSuite(name: string, repo: DesignRepository, auth: AuthReposito
   const unknown = await send('s9', 'not_a_real_step');
   assert.equal(unknown.statusCode, 204);
 
-  const res = await app.inject({ method: 'GET', url: '/api/funnel?days=1' });
+  // The funnel exposes conversion rates and account counts — business intelligence,
+  // and previously world-readable. It is admin-only now.
+  assert.equal(
+    (await app.inject({ method: 'GET', url: '/api/funnel?days=1' })).statusCode,
+    403,
+    'funnel rejects anonymous callers',
+  );
+  const res = await app.inject({ method: 'GET', url: '/api/funnel?days=1', headers: bearer(bossTok) });
   assert.equal(res.statusCode, 200);
   const body = res.json() as { steps: { name: string; sessions: number; pctOfTop: number; pctOfPrev: number }[] };
   const by = Object.fromEntries(body.steps.map((s) => [s.name, s]));
@@ -753,7 +776,101 @@ async function runSuite(name: string, repo: DesignRepository, auth: AuthReposito
   assert.equal(by.landed.pctOfTop, 100);
   // Unknown step never created a row.
   assert.ok(!('not_a_real_step' in by));
-  console.log('events/funnel: all assertions passed (capture, dedupe, junk-rejection, conversion math)');
+  console.log('events/funnel: all assertions passed (capture, dedupe, junk-rejection, conversion math, admin gate)');
+}
+
+// ---- traffic sources: the privacy guarantees, asserted ----
+// These are not cosmetic tests. The whole legal basis for measuring traffic without
+// a consent banner is that NO personal data is stored, so each of those properties
+// is pinned here — if a future change starts persisting an IP or a raw user-agent,
+// this block fails loudly instead of quietly creating a compliance problem.
+{
+  const IP = '203.0.113.77';
+  const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1';
+
+  // A referrer is reduced to a bare hostname: the path and query of the referring
+  // URL (which can carry search terms, tokens or personal identifiers) never land.
+  assert.equal(referrerHost('https://www.google.com/search?q=how+to+make+a+tifo&hl=ar', 'tifomaker.org'), 'google.com');
+  assert.equal(referrerHost('https://news.ycombinator.com/item?id=123', 'tifomaker.org'), 'news.ycombinator.com');
+  // Same-site navigation is not a referral at all.
+  assert.equal(referrerHost('https://tifomaker.org/app', 'tifomaker.org'), null);
+  assert.equal(referrerHost('https://www.tifomaker.org/app', 'tifomaker.org'), null);
+  assert.equal(referrerHost(undefined, 'tifomaker.org'), null);
+  assert.equal(referrerHost('not a url', 'tifomaker.org'), null);
+
+  // Source classification.
+  assert.equal(classifySource('google.com', null, null, true).kind, 'search');
+  assert.equal(classifySource('google.co.uk', null, null, true).kind, 'search');
+  assert.equal(classifySource('tiktok.com', null, null, true).kind, 'social');
+  assert.equal(classifySource('tiktok.com', null, null, true).label, 'TikTok');
+  assert.equal(classifySource('chatgpt.com', null, null, true).kind, 'ai');
+  assert.equal(classifySource('somefanblog.example', null, null, true).kind, 'referral');
+  assert.equal(classifySource(null, null, null, false).kind, 'direct');
+  assert.equal(classifySource(null, 'tiktok', 'social', false).kind, 'campaign');
+
+  // Bots are recognised and kept out of the human counts.
+  assert.equal(isBotUa('Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)'), true);
+  assert.equal(isBotUa('curl/8.4.0'), true);
+  assert.equal(isBotUa(''), true, 'a missing user-agent is a script, not a browser');
+  assert.equal(isBotUa(UA), false);
+
+  // In-app webviews are distinguishable from ordinary browsers.
+  assert.equal(classifyClient(UA).device, 'Mobile');
+  assert.equal(classifyClient(UA).os, 'iOS');
+  assert.equal(classifyClient('Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/119 Mobile Safari/537.36 musical_ly_2022 BytedanceWebview').browser, 'TikTok in-app');
+  assert.equal(classifyClient('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36').device, 'Desktop');
+
+  // Language is reduced to a primary subtag; country rejects non-countries.
+  assert.equal(primaryLang('ar-SA,ar;q=0.9,en-US;q=0.8'), 'ar');
+  assert.equal(primaryLang(undefined), null);
+  assert.equal(normCountry('sa'), 'SA');
+  assert.equal(normCountry('XX'), null, 'Cloudflare unknown is not a country');
+  assert.equal(normCountry('T1'), null, 'Tor is not a country');
+
+  // The visitor key is stable within a day, and changes with the visitor.
+  assert.equal(visitorKeyFor(IP, UA), visitorKeyFor(IP, UA), 'same visitor, same key within a day');
+  assert.notEqual(visitorKeyFor(IP, UA), visitorKeyFor('198.51.100.4', UA), 'different address, different key');
+  assert.notEqual(visitorKeyFor(IP, UA), visitorKeyFor(IP, UA + ' Edg/120'), 'different client, different key');
+
+  // THE important one: nothing identifying survives into the stored row.
+  const visit = buildVisit({
+    ip: IP,
+    ua: UA,
+    referer: 'https://www.google.com/search?q=tifo+maker',
+    host: 'tifomaker.org',
+    path: '/app?utm_source=tiktok&utm_campaign=hookA',
+    query: { utm_source: 'tiktok', utm_campaign: 'hookA' },
+    acceptLanguage: 'ar-SA,ar;q=0.9',
+    country: 'SA',
+  });
+  const serialized = JSON.stringify(visit);
+  assert.ok(!serialized.includes(IP), 'the IP address is never stored');
+  assert.ok(!serialized.includes('AppleWebKit'), 'the raw user-agent is never stored');
+  assert.ok(!serialized.includes('q=tifo+maker'), 'the referring query string is never stored');
+  assert.ok(!visit.visitorKey.includes(IP), 'the visitor key does not embed the address');
+  assert.equal(visit.visitorKey.length, 32);
+  assert.equal(visit.path, '/app', 'the query string is stripped from the stored path');
+  assert.equal(visit.source, 'campaign', 'utm tags win over the referrer');
+  assert.equal(visit.utmSource, 'tiktok');
+  assert.equal(visit.lang, 'ar');
+  assert.equal(visit.country, 'SA');
+  assert.equal(visit.device, 'Mobile');
+  assert.equal(visit.isBot, false);
+
+  // The store aggregates, and excludes bots from every human number.
+  const traffic = new MemoryTrafficRepository();
+  await traffic.record(visit);
+  await traffic.record(buildVisit({ ip: '198.51.100.4', ua: UA, referer: 'https://www.google.com/', host: 'tifomaker.org', path: '/', query: {}, acceptLanguage: 'en-GB' }));
+  await traffic.record(buildVisit({ ip: '198.51.100.9', ua: 'curl/8.4.0', host: 'tifomaker.org', path: '/', query: {} }));
+  const sm = await traffic.summary(30);
+  assert.equal(sm.totals.visits, 2, 'bot visits are excluded from the visit count');
+  assert.equal(sm.totals.botVisits, 1);
+  assert.equal(sm.totals.visitors, 2);
+  assert.ok(sm.sources.some((b) => b.key === 'search'), 'the google visit is classified as search');
+  assert.ok(sm.sources.some((b) => b.key === 'campaign'), 'the utm-tagged visit is classified as a campaign');
+  assert.ok(sm.daily.length >= 1);
+
+  console.log('traffic: all assertions passed (no IP/UA/query stored, referrer reduced to host, bot exclusion, utm attribution)');
 }
 
 if (process.env.DATABASE_URL) {

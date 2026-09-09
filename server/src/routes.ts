@@ -18,6 +18,7 @@ import { registerAiRoutes, verifyUnlock } from './aiRoutes';
 import type { EmailSender } from './email';
 import type { StadiumSubmissionRepository } from './stadiumRepo';
 import type { AdminStatsRepository } from './statsRepo';
+import { buildVisit, type TrafficRepository } from './trafficRepo';
 import { ADMIN_HTML, ADMIN_JS } from './adminPage';
 import { isValidTemplate } from '../../src/core/customStadiums';
 
@@ -88,6 +89,8 @@ export interface AppOptions {
   stadiums?: StadiumSubmissionRepository;
   /** Optional admin analytics aggregates. When present, /api/admin/overview is enabled. */
   stats?: AdminStatsRepository;
+  /** Optional cookieless traffic-source store. When present, /api/admin/traffic is enabled. */
+  traffic?: TrafficRepository;
   /** Transactional email sender (verification, password reset). When absent, emails are skipped. */
   emailSender?: EmailSender;
   /** Public base URL for links in emails. Defaults to the request's own origin. */
@@ -100,9 +103,18 @@ export async function buildApp(
   templates: TemplateInfo[],
   options: AppOptions = {},
 ): Promise<FastifyInstance> {
-  // trustProxy only when explicitly behind a reverse proxy/CDN — otherwise clients
-  // could spoof X-Forwarded-For to evade per-IP rate limits. Set TRUST_PROXY=1 in prod.
-  const app = Fastify({ logger: options.logger ?? false, bodyLimit: MAX_BODY_BYTES, trustProxy: process.env.TRUST_PROXY === '1' });
+  // Behind a reverse proxy, req.ip must come from X-Forwarded-For or EVERY request
+  // looks like it came from the proxy — which silently collapses per-IP rate limiting
+  // into a single global bucket (one abuser then locks out the whole site) and makes
+  // visitor counting meaningless. But trusting the header when there is NO proxy lets
+  // anyone spoof their address, so this is deliberately explicit:
+  //   TRUST_PROXY=0  → never trust (direct exposure)
+  //   TRUST_PROXY=<n> → trust n proxy hops: 1 = Railway alone, 2 = Cloudflare → Railway
+  //   unset          → on in production (Railway always terminates at its edge), off in dev/tests
+  const tp = process.env.TRUST_PROXY;
+  const trustProxy: boolean | number =
+    tp === '0' ? false : tp && /^\d+$/.test(tp) ? Number(tp) : tp === undefined ? process.env.NODE_ENV === 'production' : true;
+  const app = Fastify({ logger: options.logger ?? false, bodyLimit: MAX_BODY_BYTES, trustProxy });
 
   // Security headers, including a real Content-Security-Policy. The policy is a
   // strict allow-list derived from exactly what the pages load:
@@ -194,6 +206,17 @@ export async function buildApp(
     return userId;
   };
 
+  // Admin gate for read-only analytics: either a valid AI_ADMIN_PASSWORD unlock token
+  // (the dashboard exchanges the password for one via /api/ai/unlock) or a signed-in
+  // ADMIN_USERNAMES account. Hoisted here so the funnel and traffic endpoints share it.
+  const aiAdminPassword = process.env.AI_ADMIN_PASSWORD;
+  const adminAccess = async (req: FastifyRequest): Promise<boolean> => {
+    const tok = req.headers['x-ai-unlock'];
+    if (typeof tok === 'string' && aiAdminPassword && verifyUnlock(aiAdminPassword, tok)) return true;
+    const userId = await userOf(req);
+    return userId ? isAdminUser(userId) : false;
+  };
+
   /** undefined = invalid (reply sent); null = none provided; Buffer = decoded. */
   const decodeThumb = (b64: string | undefined, reply: FastifyReply): Buffer | null | undefined => {
     if (b64 === undefined) return null;
@@ -263,9 +286,11 @@ export async function buildApp(
   });
 
   // Funnel summary: distinct sessions per step over a window, plus step-to-step
-  // conversion. Read path so the instrumentation is actually usable, not just
-  // captured. Public read is fine (aggregate, no PII); gate later if desired.
-  app.get('/api/funnel', async (req) => {
+  // conversion. Admin-gated: this is business intelligence — conversion rates and
+  // account counts — and it was previously world-readable, so anyone could watch the
+  // site's performance without credentials.
+  app.get('/api/funnel', async (req, reply) => {
+    if (!(await adminAccess(req))) return reply.code(403).send({ error: 'admin access required' });
     const q = req.query as { days?: string };
     const days = Math.min(365, Math.max(1, Number(q.days) || 30));
     if (!options.events) return { days, steps: [], note: 'analytics not enabled' };
@@ -283,6 +308,47 @@ export async function buildApp(
     });
     return { days, steps: annotated };
   });
+  // ---------- traffic sources (cookieless, server-side reach measurement) ----------
+  // Records ONE row per HTML page view, after the response has already been sent, so
+  // it can never slow down or break a request. See trafficRepo.ts for the privacy
+  // model: no cookie, no IP stored, no raw user-agent, referrer reduced to a hostname.
+  if (options.traffic) {
+    const traffic = options.traffic;
+    app.addHook('onResponse', async (req, reply) => {
+      try {
+        if (reply.statusCode >= 400) return;
+        const ct = String(reply.getHeader('content-type') ?? '');
+        if (!ct.startsWith('text/html')) return; // pages only — not assets, not API
+        const url = req.url || '/';
+        if (url.startsWith('/api/') || url.startsWith('/admin')) return;
+        const h = req.headers;
+        const one = (v: unknown): string | undefined => (typeof v === 'string' ? v : undefined);
+        await traffic.record(
+          buildVisit({
+            ip: req.ip || '0.0.0.0',
+            ua: one(h['user-agent']) ?? '',
+            referer: one(h.referer),
+            host: one(h.host),
+            path: url,
+            query: (req.query ?? {}) as Record<string, unknown>,
+            acceptLanguage: one(h['accept-language']),
+            // Present only when Cloudflare (or another edge that sets it) fronts the app.
+            country: one(h['cf-ipcountry']),
+          }),
+        );
+      } catch {
+        /* analytics must never affect a response */
+      }
+    });
+
+    app.get('/api/admin/traffic', async (req, reply) => {
+      if (!(await adminAccess(req))) return reply.code(403).send({ error: 'admin access required' });
+      const q = req.query as { days?: string };
+      const days = Math.min(365, Math.max(1, Number(q.days) || 30));
+      return reply.send(await traffic.summary(days));
+    });
+  }
+
   app.get('/api/templates', async () => templates);
 
   // ---------- AI Tifo Designer (offline designer + optional model) ----------
@@ -350,13 +416,6 @@ export async function buildApp(
     // dashboard exchanges the password for it via /api/ai/unlock) OR a signed-in
     // ADMIN_USERNAMES account. Mirrors the AI routes' hasAiAccess so the same
     // "admin password" opens both the AI designer and this dashboard.
-    const aiAdminPassword = process.env.AI_ADMIN_PASSWORD;
-    const adminAccess = async (req: FastifyRequest): Promise<boolean> => {
-      const tok = req.headers['x-ai-unlock'];
-      if (typeof tok === 'string' && aiAdminPassword && verifyUnlock(aiAdminPassword, tok)) return true;
-      const userId = await userOf(req);
-      return userId ? isAdminUser(userId) : false;
-    };
     app.get('/api/admin/overview', async (req, reply) => {
       if (!(await adminAccess(req))) return reply.code(403).send({ error: 'admin access required' });
       return reply.send(await stats.overview());
@@ -1191,10 +1250,14 @@ export async function buildApp(
   // Public profile is served by the merged /api/users/:id/profile above
   // (it includes the social graph fields when the social layer is enabled).
 
-  // User search (typeahead). Public.
+  // User search (typeahead). Signed-in only, and a real prefix is required: as a
+  // public endpoint that answered "?q=a" it let anyone walk the entire user list one
+  // letter at a time, which is exactly the enumeration the social layer must not allow.
   app.get('/api/users/search', async (req, reply) => {
     if (!socialOn(reply)) return;
-    const q = (req.query as { q?: string }).q ?? '';
+    if (!(await requireUser(req, reply))) return;
+    const q = ((req.query as { q?: string }).q ?? '').trim();
+    if (q.length < 2) return reply.send([]);
     return social!.searchUsers(q, 12);
   });
 

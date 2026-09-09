@@ -10,6 +10,7 @@ import { PgSocialRepository } from './pgSocial';
 import { MemorySocialRepository } from './memorySocial';
 import { MemoryStadiumRepository, PgStadiumRepository } from './stadiumRepo';
 import { MemoryAdminStatsRepository, PgAdminStatsRepository } from './statsRepo';
+import { MemoryTrafficRepository, PgTrafficRepository, type TrafficRepository } from './trafficRepo';
 import { buildApp, type TemplateInfo } from './routes';
 import { createEmailSender } from './email';
 
@@ -93,6 +94,20 @@ async function main(): Promise<void> {
     } catch (e) {
       console.error('[tifo] community_stadiums init failed — submissions disabled:', e);
     }
+    // Traffic sources — best-effort table init, like community_stadiums above, so a
+    // schema slip here can never block boot; on failure the feature simply stays off.
+    let traffic: TrafficRepository | undefined;
+    try {
+      const t = new PgTrafficRepository(pool);
+      await t.init();
+      await t.purge();
+      // Daily minimisation: strip visitor keys past the anonymisation window and drop
+      // rows past retention. unref() so this timer never holds the process open.
+      setInterval(() => void t.purge(), 24 * 60 * 60 * 1000).unref();
+      traffic = t;
+    } catch (e) {
+      console.error('[tifo] visits init failed — traffic sources disabled:', e);
+    }
     app = await buildApp(new PgDesignRepository(pool), new PgAuthRepository(pool), templates, {
       staticDir,
       rateLimit: true,
@@ -105,6 +120,7 @@ async function main(): Promise<void> {
       aiFreeLimit: Number(process.env.AI_FREE_LIMIT ?? 10), // premium designs per hour
       stadiums,
       stats: new PgAdminStatsRepository(pool),
+      traffic,
       emailSender: createEmailSender(),
       publicUrl: process.env.PUBLIC_URL,
     });
@@ -130,6 +146,7 @@ async function main(): Promise<void> {
       aiFreeLimit: Number(process.env.AI_FREE_LIMIT ?? 10), // premium designs per hour
       stadiums: new MemoryStadiumRepository(),
       stats: new MemoryAdminStatsRepository(),
+      traffic: new MemoryTrafficRepository(),
       emailSender: createEmailSender(),
       publicUrl: process.env.PUBLIC_URL,
     });
