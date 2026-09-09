@@ -137,6 +137,16 @@ const SOCIAL: [RegExp, string][] = [
   [/(^|\.)threads\.(net|com)$/, 'Threads'],
 ];
 
+/**
+ * True when a referrer host is a social or messaging platform. Exported for the
+ * shares dashboard, which uses it to separate "arrived from something someone
+ * shared" from ordinary referral traffic. It is a floor, not a count: most
+ * messaging apps send no referrer at all, so those arrivals look direct.
+ */
+export function isSocialHost(host: string): boolean {
+  return SOCIAL.some(([re]) => re.test(host.toLowerCase()));
+}
+
 const AI_REFERRERS: [RegExp, string][] = [
   [/(^|\.)chatgpt\.com$|(^|\.)openai\.com$/, 'ChatGPT'],
   [/(^|\.)perplexity\.ai$/, 'Perplexity'],

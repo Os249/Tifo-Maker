@@ -208,15 +208,16 @@ async function loadAll(){
   var results = await Promise.all([
     api('/api/admin/overview'),
     api('/api/admin/traffic?days=' + currentDays),
-    api('/api/funnel?days=' + currentDays)
+    api('/api/funnel?days=' + currentDays),
+    api('/api/admin/shares?days=' + currentDays)
   ]);
-  var ov = results[0], tr = results[1], fn = results[2];
+  var ov = results[0], tr = results[1], fn = results[2], sh = results[3];
   if (!ov.ok){
     if (ov.status === 403){ clearUnlock(); showLogin('Wrong or expired password. Sign in again.'); return; }
     setStatus('Failed to load (' + ov.status + ').');
     return;
   }
-  render(ov.data || {}, (tr.ok && tr.data) ? tr.data : null, (fn.ok && fn.data) ? fn.data : { steps:[], days: currentDays });
+  render(ov.data || {}, (tr.ok && tr.data) ? tr.data : null, (fn.ok && fn.data) ? fn.data : { steps:[], days: currentDays }, (sh.ok && sh.data) ? sh.data : null);
   setStatus('Updated ' + new Date().toLocaleTimeString());
 }
 
@@ -348,6 +349,109 @@ function tableCard(head, rows, cols){
   return '<div class="card"><table><thead><tr>' + th + '</tr></thead><tbody>' + body + '</tbody></table></div>';
 }
 
+
+/* ---------- sharing ---------- */
+
+var PLATFORM_LABEL = {
+  whatsapp:'WhatsApp', x:'X', twitter:'X / Twitter', telegram:'Telegram', facebook:'Facebook',
+  reddit:'Reddit', email:'Email', instagram:'Instagram', tiktok:'TikTok', discord:'Discord',
+  copy:'Copy link', webshare:'Device share sheet', qr:'QR code', link:'Direct link'
+};
+var PLATFORM_COLOR = {
+  // X's brand black is invisible on a dark dashboard, and its white is so light
+  // the bar label stops being readable. Its own mid grey works for both.
+  whatsapp:'#25d366', x:'#71767b', twitter:'#71767b', telegram:'#2aabee', facebook:'#1877f2',
+  reddit:'#ff4500', email:'#8b949e', instagram:'#e1306c', tiktok:'#69c9d0', discord:'#5865f2',
+  copy:'#58a6ff', webshare:'#a371f7', qr:'#d29922', link:'#58a6ff'
+};
+
+/* Bars for share destinations. Presses and opens are separate numbers on
+   purpose: one is intent, the other is arrival, and summing them means nothing. */
+function shareBars(title, caption, items){
+  var html = '<div class="card"><p class="lt">' + esc(title) + '</p><p class="lc">' + esc(caption) + '</p>';
+  if (!items || !items.length){ return html + '<p class="empty">Nothing recorded yet.</p></div>'; }
+  var max = 0, i;
+  for (i=0;i<items.length;i++){ if ((Number(items[i].shares)||0) > max) max = Number(items[i].shares)||0; }
+  if (!max) max = 1;
+  for (i=0;i<items.length;i++){
+    var it = items[i];
+    var name = PLATFORM_LABEL[it.key] || labelize(it.key);
+    var w = Math.max(1.5, (Number(it.shares)||0) / max * 100);
+    var c = PLATFORM_COLOR[it.key] || '#58a6ff';
+    html += '<div class="row">'
+      + '<div class="bg" style="width:' + w.toFixed(1) + '%;background:' + c + '"></div>'
+      + '<div class="nm" title="' + esc(name) + '">' + esc(name) + '</div>'
+      + '<div class="vv"><b>' + fmt(it.shares) + '</b> <span class="dim">/ ' + fmt(it.opens) + '</span></div>'
+      + '</div>';
+  }
+  return html + '</div>';
+}
+
+/* Presses vs opens over time, reusing the two-series chart shape. */
+function shareChart(daily){
+  if (!daily || daily.length < 2) return '<div class="card"><p class="lt">Daily</p><p class="empty">Not enough days yet.</p></div>';
+  var a = [], b = [], i;
+  for (i=0;i<daily.length;i++){ a.push(Number(daily[i].shares)||0); b.push(Number(daily[i].opens)||0); }
+  var max = 1;
+  for (i=0;i<a.length;i++){ if (a[i] > max) max = a[i]; if (b[i] > max) max = b[i]; }
+  var W = 560, H = 120, pad = 4;
+  function path(vals){
+    var d = '', j;
+    for (j=0;j<vals.length;j++){
+      var x = pad + (j/(vals.length-1)) * (W - pad*2);
+      var y = H - pad - (vals[j]/max) * (H - pad*2);
+      d += (j ? 'L' : 'M') + x.toFixed(1) + ' ' + y.toFixed(1) + ' ';
+    }
+    return d;
+  }
+  return '<div class="card"><p class="lt">Day by day</p>'
+    + '<p class="lc"><span style="color:#a371f7">&#9632;</span> shared &nbsp; <span style="color:#3fb950">&#9632;</span> opened</p>'
+    + '<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" style="width:100%;height:120px">'
+    + '<path d="' + path(a) + '" fill="none" stroke="#a371f7" stroke-width="2"/>'
+    + '<path d="' + path(b) + '" fill="none" stroke="#3fb950" stroke-width="2"/>'
+    + '</svg>'
+    + '<p class="lc">' + esc(daily[0].day) + ' to ' + esc(daily[daily.length-1].day) + ' · peak ' + fmt(max) + '</p></div>';
+}
+
+function sharesSection(sh, days){
+  if (!sh) return '<div class="card"><p class="empty">Share data unavailable.</p></div>';
+  var shares = Number(sh.shares)||0, opens = Number(sh.opens)||0;
+  var inb = sh.inbound || null;
+
+  var html = '<div class="grid">';
+  html += kpi('Shared', shares, 'platform buttons pressed', true);
+  html += kpi('Links opened', opens, 'arrived on a shared link', true);
+  html += kpi('Tifos shared', sh.designsShared, 'distinct designs', true);
+  html += kpi('Opens per share', shares ? (Math.round((opens/shares)*100)/100) : 0, 'reach per press', true);
+  html += '</div>';
+
+  html += '<div class="grid two">';
+  html += shareBars('Where they shared to', 'shared / opened · last ' + days + ' days', sh.platforms);
+  html += shareChart(sh.daily);
+  html += '</div>';
+
+  html += '<div class="grid two">';
+  html += tableCard(['Most-shared tifos','Shares'], sh.topDesigns,
+    [function(d){ return (d.title || 'Untitled') + (d.owner ? ' · @' + d.owner : ''); }, function(d){ return d.shares; }]);
+  html += inb
+    ? barList('Landing pages of shared links', 'visits / unique visitors', inb.pages, '#3fb950')
+    : '<div class="card"><p class="lt">Landing pages of shared links</p><p class="empty">Traffic measurement is off.</p></div>';
+  html += '</div>';
+
+  if (inb){
+    html += '<div class="grid">';
+    html += kpi('Visits to shared pages', inb.visits, 'server-side, counts everyone', true);
+    html += kpi('Tifos opened', inb.tifosOpened, 'distinct shared pages visited', true);
+    html += '</div>';
+    if (inb.social && inb.social.length){
+      html += barList('Arrived from a social or messaging site', 'visits / unique visitors', inb.social, 'social');
+    }
+  }
+
+  html += '<div class="callout"><b>A share is a button press, not a delivered message.</b> Once the platform takes over, nothing on this site can see whether it was sent, so treat <em>Shared</em> as intent and <em>Links opened</em> as the result. The two do not have to match, and opens can exceed shares when one link is passed on repeatedly.<br><br><b>The social row below is a floor.</b> WhatsApp, Telegram, Discord and most messaging apps strip the referrer, so links passed around there arrive looking like direct traffic. Real reach from sharing is higher than that row shows, never lower.</div>';
+  return html;
+}
+
 /* ---------- render ---------- */
 
 function trafficSection(tr, days){
@@ -398,7 +502,7 @@ function trafficSection(tr, days){
   return html;
 }
 
-function render(ov, tr, funnel){
+function render(ov, tr, funnel, sh){
   var t = ov.totals || {};
   var r7 = ov.recent7d || {};
   var mod = ov.moderation || {};
@@ -448,6 +552,9 @@ function render(ov, tr, funnel){
   html += kpi('Match photos', t.photos, fmt(t.verifiedPhotos) + ' verified', true);
   html += kpi('Shares', t.shares);
   html += '</div>';
+
+  html += '<h2 class="sec">Sharing <span class="hint">last ' + days + ' days · server-side, counts everyone</span></h2>';
+  html += sharesSection(sh, days);
 
   /* 4. Things needing action. */
   var queue = (Number(mod.openReports)||0) + (Number(mod.unverifiedPhotos)||0) + (Number(mod.pendingStadiums)||0);

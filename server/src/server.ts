@@ -145,7 +145,7 @@ async function main(): Promise<void> {
       aiUsage: new MemoryAiUsageRepository(),
       aiFreeLimit: Number(process.env.AI_FREE_LIMIT ?? 10), // premium designs per hour
       stadiums: new MemoryStadiumRepository(),
-      stats: new MemoryAdminStatsRepository(),
+      stats: new MemoryAdminStatsRepository(designs),
       traffic: new MemoryTrafficRepository(),
       emailSender: createEmailSender(),
       publicUrl: process.env.PUBLIC_URL,

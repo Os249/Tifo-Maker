@@ -32,7 +32,7 @@ interface Row extends DesignRecord {
   isTemplate: boolean;
   tags: string[];
   views: number;
-  shareLog: { platform: string; kind: string }[];
+  shareLog: { platform: string; kind: string; at: number }[];
   ogImage: Buffer | null;
 }
 
@@ -409,7 +409,25 @@ export class MemoryDesignRepository implements DesignRepository {
 
   async recordShare(designId: string, platform: string, kind: 'share' | 'open'): Promise<void> {
     const r = this.rows.get(designId);
-    if (r) r.shareLog.push({ platform, kind });
+    if (r) r.shareLog.push({ platform, kind, at: Date.now() });
+  }
+
+  /**
+   * Every share row, flattened, for the site-wide dashboard aggregate. The
+   * Postgres side reads design_shares directly; in memory this is the closest
+   * equivalent, so /admin behaves the same in dev as it does in production.
+   */
+  shareLogAll(): { designId: string; title: string; owner: string | null; platform: string; kind: string; at: number }[] {
+    const out: { designId: string; title: string; owner: string | null; platform: string; kind: string; at: number }[] = [];
+    for (const [id, r] of this.rows) {
+      // Resolve to a username here, the way the Postgres side joins users:
+      // an owner id on the dashboard is unreadable.
+      const owner = r.ownerId ? this.usernames(r.ownerId) : null;
+      for (const e of r.shareLog) {
+        out.push({ designId: id, title: r.title, owner, platform: e.platform, kind: e.kind, at: e.at });
+      }
+    }
+    return out;
   }
 
   async shareStats(id: string): Promise<ShareStats> {

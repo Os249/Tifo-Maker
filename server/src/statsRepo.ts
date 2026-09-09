@@ -41,8 +41,40 @@ export interface AdminOverview {
   topStadiums: { templateId: string; count: number }[];
 }
 
+/**
+ * Sharing, aggregated site-wide.
+ *
+ * Source is the design_shares table, which has been recording every press of a
+ * platform button since sharing shipped - so this panel has history behind it
+ * rather than starting from the day it was built.
+ *
+ * Two kinds live in that table and they mean different things:
+ *   'share' - somebody pressed a platform button in the share modal. It is an
+ *             INTENT: the platform takes over from there and nothing can tell
+ *             whether the message was ever sent.
+ *   'open'  - somebody arrived on the shared link.
+ * Adding them together would be meaningless, so they are kept apart everywhere.
+ */
+export interface ShareSummary {
+  days: number;
+  /** Platform buttons pressed in the window. */
+  shares: number;
+  /** Shared links opened in the window. */
+  opens: number;
+  /** How many distinct designs were shared at all. */
+  designsShared: number;
+  /** Presses per destination, most-shared first. */
+  platforms: { key: string; shares: number; opens: number }[];
+  /** Daily presses and opens, oldest first. */
+  daily: { day: string; shares: number; opens: number }[];
+  /** The tifos people actually pass around. */
+  topDesigns: { id: string; title: string; owner: string | null; shares: number }[];
+}
+
 export interface AdminStatsRepository {
   overview(): Promise<AdminOverview>;
+  /** Site-wide sharing over the last `days`. */
+  shares(days: number): Promise<ShareSummary>;
 }
 
 const ZERO_TOTALS: AdminOverview['totals'] = {
@@ -50,8 +82,21 @@ const ZERO_TOTALS: AdminOverview['totals'] = {
   leads: 0, photos: 0, verifiedPhotos: 0, comments: 0, follows: 0, votes: 0, totalViews: 0, shares: 0,
 };
 
-/** Dev/in-memory mode has no SQL store; return an empty-but-valid overview. */
+/** What the in-memory stats repo needs to aggregate sharing without SQL. */
+export interface MemoryShareSource {
+  shareLogAll(): { designId: string; title: string; owner: string | null; platform: string; kind: string; at: number }[];
+}
+
+/**
+ * Dev/in-memory mode has no SQL store, so the overview stays empty-but-valid.
+ * Sharing is the exception: the memory design repo keeps a share log, so when
+ * one is handed in the Sharing panel works in dev exactly as it does against
+ * Postgres. That matters because it is the only way to see the panel render
+ * with real numbers before it reaches production.
+ */
 export class MemoryAdminStatsRepository implements AdminStatsRepository {
+  constructor(private readonly source?: MemoryShareSource) {}
+
   async overview(): Promise<AdminOverview> {
     return {
       generatedAt: new Date().toISOString(),
@@ -63,6 +108,59 @@ export class MemoryAdminStatsRepository implements AdminStatsRepository {
       topDesigns: [],
       topStadiums: [],
     };
+  }
+
+  async shares(days: number): Promise<ShareSummary> {
+    const out: ShareSummary = {
+      days, shares: 0, opens: 0, designsShared: 0, platforms: [], daily: [], topDesigns: [],
+    };
+    if (!this.source) return out;
+
+    const since = Date.now() - days * 864e5;
+    const rows = this.source.shareLogAll().filter((r) => r.at >= since);
+
+    const platform = new Map<string, { shares: number; opens: number }>();
+    const daily = new Map<string, { shares: number; opens: number }>();
+    const design = new Map<string, { title: string; owner: string | null; shares: number }>();
+    const sharedIds = new Set<string>();
+
+    for (const r of rows) {
+      const isOpen = r.kind === 'open';
+      if (isOpen) out.opens += 1;
+      else {
+        out.shares += 1;
+        sharedIds.add(r.designId);
+      }
+
+      const p = platform.get(r.platform) ?? { shares: 0, opens: 0 };
+      if (isOpen) p.opens += 1; else p.shares += 1;
+      platform.set(r.platform, p);
+
+      const key = new Date(r.at).toISOString().slice(0, 10);
+      const d = daily.get(key) ?? { shares: 0, opens: 0 };
+      if (isOpen) d.opens += 1; else d.shares += 1;
+      daily.set(key, d);
+
+      if (!isOpen) {
+        const e = design.get(r.designId) ?? { title: r.title, owner: r.owner, shares: 0 };
+        e.shares += 1;
+        design.set(r.designId, e);
+      }
+    }
+
+    out.designsShared = sharedIds.size;
+    out.platforms = [...platform.entries()]
+      .map(([key, v]) => ({ key, shares: v.shares, opens: v.opens }))
+      .sort((a, b) => b.shares - a.shares || b.opens - a.opens)
+      .slice(0, 20);
+    out.daily = [...daily.entries()]
+      .map(([day, v]) => ({ day, shares: v.shares, opens: v.opens }))
+      .sort((a, b) => a.day.localeCompare(b.day));
+    out.topDesigns = [...design.entries()]
+      .map(([id, v]) => ({ id, title: v.title, owner: v.owner, shares: v.shares }))
+      .sort((a, b) => b.shares - a.shares)
+      .slice(0, 8);
+    return out;
   }
 }
 
@@ -198,5 +296,88 @@ export class PgAdminStatsRepository implements AdminStatsRepository {
       topDesigns,
       topStadiums,
     };
+  }
+
+  /**
+   * Sharing over a window. Four independent queries rather than one join, each
+   * defensive: a single failure yields an empty section instead of blanking the
+   * whole panel, which is the same contract overview() keeps.
+   */
+  async shares(days: number): Promise<ShareSummary> {
+    const out: ShareSummary = {
+      days, shares: 0, opens: 0, designsShared: 0, platforms: [], daily: [], topDesigns: [],
+    };
+    const window = "created_at >= now() - ($1::int * interval '1 day')";
+
+    try {
+      const r = await this.pool.query(
+        `SELECT count(*) FILTER (WHERE kind = 'share')::int AS shares,
+                count(*) FILTER (WHERE kind = 'open')::int  AS opens,
+                count(DISTINCT design_id) FILTER (WHERE kind = 'share')::int AS designs_shared
+           FROM design_shares WHERE ${window}`,
+        [days],
+      );
+      const x = (r.rows[0] ?? {}) as Record<string, unknown>;
+      out.shares = Number(x.shares) || 0;
+      out.opens = Number(x.opens) || 0;
+      out.designsShared = Number(x.designs_shared) || 0;
+    } catch {
+      /* keep zeros */
+    }
+
+    try {
+      const r = await this.pool.query(
+        `SELECT platform AS key,
+                count(*) FILTER (WHERE kind = 'share')::int AS shares,
+                count(*) FILTER (WHERE kind = 'open')::int  AS opens
+           FROM design_shares WHERE ${window}
+          GROUP BY 1 ORDER BY shares DESC, opens DESC LIMIT 20`,
+        [days],
+      );
+      out.platforms = (r.rows as Record<string, unknown>[]).map((row) => ({
+        key: String(row.key), shares: Number(row.shares) || 0, opens: Number(row.opens) || 0,
+      }));
+    } catch {
+      out.platforms = [];
+    }
+
+    try {
+      const r = await this.pool.query(
+        `SELECT to_char(date_trunc('day', created_at), 'YYYY-MM-DD') AS day,
+                count(*) FILTER (WHERE kind = 'share')::int AS shares,
+                count(*) FILTER (WHERE kind = 'open')::int  AS opens
+           FROM design_shares WHERE ${window}
+          GROUP BY 1 ORDER BY 1`,
+        [days],
+      );
+      out.daily = (r.rows as Record<string, unknown>[]).map((row) => ({
+        day: String(row.day).slice(0, 10), shares: Number(row.shares) || 0, opens: Number(row.opens) || 0,
+      }));
+    } catch {
+      out.daily = [];
+    }
+
+    try {
+      const r = await this.pool.query(
+        `SELECT d.id, d.title, u.username AS owner, count(*)::int AS shares
+           FROM design_shares s
+           JOIN designs d ON d.id = s.design_id
+           LEFT JOIN users u ON u.id = d.owner_id
+          WHERE s.kind = 'share' AND s.${window}
+          GROUP BY d.id, d.title, u.username
+          ORDER BY shares DESC LIMIT 8`,
+        [days],
+      );
+      out.topDesigns = (r.rows as Record<string, unknown>[]).map((row) => ({
+        id: String(row.id),
+        title: String(row.title ?? 'Untitled'),
+        owner: row.owner == null ? null : String(row.owner),
+        shares: Number(row.shares) || 0,
+      }));
+    } catch {
+      out.topDesigns = [];
+    }
+
+    return out;
   }
 }

@@ -7,6 +7,7 @@ import { generateSeatMap } from '../../src/core/seatmap';
 import { DEFAULT_TEMPLATE } from '../../src/core/template';
 import { MemoryAiUsageRepository, MemoryAuthRepository, MemoryDesignRepository, MemoryEventsRepository, MemoryLeadsRepository } from '../src/memoryRepo';
 import { MemorySocialRepository } from '../src/memorySocial';
+import { MemoryAdminStatsRepository } from '../src/statsRepo';
 import { PgAuthRepository, PgDesignRepository } from '../src/pgRepo';
 import { PgSocialRepository } from '../src/pgSocial';
 import { buildApp, SNAPSHOT_EVERY, type TemplateInfo } from '../src/routes';
@@ -76,6 +77,36 @@ async function runSuite(name: string, repo: DesignRepository, auth: AuthReposito
   );
   const login = await app.inject({ method: 'POST', url: '/api/auth/login', payload: { username: 'alice', password: 'hunter22pass' } });
   assert.equal(login.statusCode, 200);
+
+  // Sign-in accepts an email as well as a username. Accounts created in the
+  // editor never pick a username (it is derived from the email), so without this
+  // they would have no way back in.
+  await app.inject({
+    method: 'POST', url: '/api/auth/register',
+    payload: { username: 'emailer', password: 'hunter22pass', email: 'emailer@example.test', acceptedVersion: 'test' },
+  });
+  const byEmail = await app.inject({
+    method: 'POST', url: '/api/auth/login',
+    payload: { username: 'emailer@example.test', password: 'hunter22pass' },
+  });
+  assert.equal(byEmail.statusCode, 200, 'can sign in with an email address');
+  assert.equal(byEmail.json().username, 'emailer', 'email sign-in resolves to the right account');
+  assert.equal(
+    (await app.inject({
+      method: 'POST', url: '/api/auth/login',
+      payload: { username: 'emailer@example.test', password: 'wrongpass99' },
+    })).statusCode,
+    401,
+    'a wrong password still fails when signing in by email',
+  );
+  assert.equal(
+    (await app.inject({
+      method: 'POST', url: '/api/auth/login',
+      payload: { username: 'nobody@example.test', password: 'hunter22pass' },
+    })).statusCode,
+    401,
+    'an unknown email fails the same way as an unknown username',
+  );
   assert.equal((await app.inject({ method: 'GET', url: '/api/me' })).statusCode, 401);
   assert.equal((await app.inject({ method: 'GET', url: '/api/me', headers: bearer(aliceTok) })).statusCode, 200);
 
@@ -871,6 +902,81 @@ async function runSuite(name: string, repo: DesignRepository, auth: AuthReposito
   assert.ok(sm.daily.length >= 1);
 
   console.log('traffic: all assertions passed (no IP/UA/query stored, referrer reduced to host, bot exclusion, utm attribution)');
+}
+
+// ---------- sharing ----------
+// design_shares has been recording platform + kind since sharing shipped; the
+// dashboard reads it through stats.shares(). What matters here is the gate and
+// the fact that presses and opens never get added together.
+{
+  const auth = new MemoryAuthRepository();
+  const designs = new MemoryDesignRepository((id) => auth.usernameOf(id));
+  const app = await buildApp(designs, auth, templates, {
+    stats: new MemoryAdminStatsRepository(),
+    traffic: new MemoryTrafficRepository(),
+    adminUsernames: ['boss'],
+  });
+  const bossTok = await registerUser(app, 'boss');
+  const fanTok = await registerUser(app, 'fan');
+
+  // Same class of business intelligence as the funnel, so the same gate.
+  assert.equal(
+    (await app.inject({ method: 'GET', url: '/api/admin/shares?days=30' })).statusCode,
+    403,
+    'shares rejects anonymous callers',
+  );
+  assert.equal(
+    (await app.inject({ method: 'GET', url: '/api/admin/shares?days=30', headers: bearer(fanTok) })).statusCode,
+    403,
+    'shares rejects signed-in non-admins',
+  );
+
+  const res = await app.inject({ method: 'GET', url: '/api/admin/shares?days=30', headers: bearer(bossTok) });
+  assert.equal(res.statusCode, 200);
+  const body = res.json() as {
+    days: number; shares: number; opens: number; designsShared: number;
+    platforms: unknown[]; daily: unknown[]; topDesigns: unknown[];
+    inbound: { visits: number; tifosOpened: number; pages: unknown[]; social: unknown[] } | null;
+  };
+  assert.equal(body.days, 30);
+  // Presses and opens are separate fields, never one summed number.
+  assert.equal(typeof body.shares, 'number');
+  assert.equal(typeof body.opens, 'number');
+  assert.ok(Array.isArray(body.platforms) && Array.isArray(body.daily) && Array.isArray(body.topDesigns));
+  // The inbound half is present whenever traffic measurement is on.
+  assert.ok(body.inbound && Array.isArray(body.inbound.pages), 'inbound half is derived from the visits table');
+
+  // The window is clamped, so a hostile days value cannot become an unbounded scan.
+  const wide = await app.inject({ method: 'GET', url: '/api/admin/shares?days=99999', headers: bearer(bossTok) });
+  assert.equal((wide.json() as { days: number }).days, 365, 'days is clamped to a year');
+  const negative = await app.inject({ method: 'GET', url: '/api/admin/shares?days=-5', headers: bearer(bossTok) });
+  assert.equal((negative.json() as { days: number }).days, 1, 'a negative window is floored at one day');
+  // 0 and junk are falsy through Number(), so both land on the 30-day default
+  // rather than a zero-length window. Same rule as /api/funnel and /api/admin/traffic.
+  const zero = await app.inject({ method: 'GET', url: '/api/admin/shares?days=0', headers: bearer(bossTok) });
+  assert.equal((zero.json() as { days: number }).days, 30, 'a zero window falls back to the default');
+  const junk = await app.inject({ method: 'GET', url: '/api/admin/shares?days=abc', headers: bearer(bossTok) });
+  assert.equal((junk.json() as { days: number }).days, 30, 'an unparseable window falls back to the default');
+
+  // Only visits to shared pages count toward the inbound half.
+  const DESKTOP_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36';
+  const traffic = new MemoryTrafficRepository();
+  for (const path of ['/d/abc', '/d/abc', '/t/xyz', '/app', '/']) {
+    await traffic.record(buildVisit({ ip: '203.0.113.7', ua: DESKTOP_UA, host: 'tifomaker.org', path, query: {} }));
+  }
+  const sm = await traffic.summary(30);
+  const sharedPages = sm.pages.filter((p) => /^\/(d|t)\//.test(p.key));
+  assert.equal(sharedPages.reduce((n, p) => n + p.visits, 0), 3, '/d/ and /t/ visits count, /app and / do not');
+  assert.equal(sharedPages.length, 2, 'two distinct shared pages were opened');
+  // Why the endpoint reports visits and a page count but never a visitor total:
+  // the summary buckets uniques PER PAGE, so summing them counts this single
+  // visitor twice as soon as they open a second tifo.
+  assert.equal(
+    sharedPages.reduce((n, p) => n + p.visitors, 0), 2,
+    'per-page unique columns sum to 2 for one visitor, which is why they are not summed in the API',
+  );
+
+  console.log('shares: all assertions passed (admin gate, share/open kept separate, day clamping, inbound from /d/ and /t/ only)');
 }
 
 if (process.env.DATABASE_URL) {

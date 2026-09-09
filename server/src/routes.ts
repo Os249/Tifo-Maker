@@ -18,7 +18,7 @@ import { registerAiRoutes, verifyUnlock } from './aiRoutes';
 import type { EmailSender } from './email';
 import type { StadiumSubmissionRepository } from './stadiumRepo';
 import type { AdminStatsRepository } from './statsRepo';
-import { buildVisit, type TrafficRepository } from './trafficRepo';
+import { buildVisit, isSocialHost, type TrafficRepository } from './trafficRepo';
 import { ADMIN_HTML, ADMIN_JS } from './adminPage';
 import { isValidTemplate } from '../../src/core/customStadiums';
 
@@ -395,6 +395,46 @@ export async function buildApp(
       const q = req.query as { days?: string };
       const days = Math.min(365, Math.max(1, Number(q.days) || 30));
       return reply.send(await traffic.summary(days));
+    });
+  }
+
+  // Sharing, site-wide. Admin-gated for the same reason as the funnel: it is
+  // business intelligence, not public information.
+  if (options.stats) {
+    const stats = options.stats;
+    app.get('/api/admin/shares', async (req, reply) => {
+      if (!(await adminAccess(req))) return reply.code(403).send({ error: 'admin access required' });
+      const q = req.query as { days?: string };
+      const days = Math.min(365, Math.max(1, Number(q.days) || 30));
+      const summary = await stats.shares(days);
+
+      // The return leg: where shared links actually land. Visits to /d/:id and
+      // /t/:id are already in the visits table, so this costs no new tracking,
+      // and it is the half that says whether the sharing did anything.
+      // No `visitors` total here on purpose. The traffic summary buckets unique
+      // visitors PER PAGE, so summing those columns counts one person twice as
+      // soon as they open two shared tifos - it reported 2 uniques for a single
+      // visitor in testing. Visits sum correctly, so that is what is reported,
+      // alongside how many distinct tifos were opened.
+      let inbound: {
+        visits: number;
+        tifosOpened: number;
+        pages: { key: string; visits: number; visitors: number }[];
+        social: { key: string; visits: number; visitors: number }[];
+      } | null = null;
+      if (options.traffic) {
+        const t = await options.traffic.summary(days);
+        const shared = t.pages.filter((p) => /^\/(d|t)\//.test(p.key));
+        inbound = {
+          visits: shared.reduce((n, p) => n + p.visits, 0),
+          tifosOpened: shared.length,
+          pages: shared.slice(0, 10),
+          // A floor, not a count: most messaging apps send no referrer at all,
+          // so links passed round WhatsApp or Discord arrive looking direct.
+          social: t.referrers.filter((r) => isSocialHost(r.key)).slice(0, 10),
+        };
+      }
+      return reply.send({ ...summary, inbound });
     });
   }
 
