@@ -22,6 +22,72 @@ const STRINGS: Record<string, { en: string; ar: string }> = {
   'nav.terms': { en: 'Terms', ar: 'الشروط' },
   'nav.privacy': { en: 'Privacy', ar: 'الخصوصية' },
   'nav.legal': { en: 'Legal', ar: 'الشروط والخصوصية' },
+  // ---- slimmed sign-in / sign-up ----
+  'auth.identity': { en: 'Email or username', ar: 'البريد أو اسم المستخدم' },
+  'auth.identityPh': { en: 'you@example.com', ar: 'you@example.com' },
+  'auth.errIdentity': { en: 'Enter your email or username.', ar: 'اكتب بريدك أو اسم المستخدم.' },
+  'auth.termsInline': {
+    en: 'By creating an account you agree to the',
+    ar: 'بإنشائك حساب فأنت توافق على',
+  },
+
+  // ---- save / draft / publish (the rebuilt save flow) ----
+  'common.close': { en: 'Close', ar: 'إغلاق' },
+  'common.cancel': { en: 'Cancel', ar: 'إلغاء' },
+  'common.optional': { en: 'optional', ar: 'اختياري' },
+
+  'ed.publish': { en: 'Publish to the community', ar: 'انشره في المجتمع' },
+  'ed.downloadCopy': { en: 'Download a .tifo copy', ar: 'نزّل نسخة .tifo' },
+
+  // Deliberately says "in this browser", not "saved". It is localStorage, and
+  // browsers do clear it; promising more than that is how people lose work.
+  'draft.savedLocal': { en: 'Saved in this browser', ar: 'محفوظ في هذا المتصفح' },
+  'draft.savedAccount': { en: 'Saved to your account', ar: 'محفوظ في حسابك' },
+  'draft.full': {
+    en: 'This browser is out of storage, so your work is not being kept here. Download a .tifo copy.',
+    ar: 'ذاكرة المتصفح ممتلئة، فشغلك ما ينحفظ هنا. نزّل نسخة .tifo.',
+  },
+  'draft.blocked': {
+    en: 'This browser is blocking storage, so your work is not being kept here. Download a .tifo copy.',
+    ar: 'المتصفح يمنع التخزين، فشغلك ما ينحفظ هنا. نزّل نسخة .tifo.',
+  },
+
+  'save.local': { en: 'Saved in this browser', ar: 'انحفظ في هذا المتصفح' },
+  'save.toAccount': { en: 'Saved to your account', ar: 'انحفظ في حسابك' },
+  'save.claimed': { en: 'Your tifo is now in your account', ar: 'تيفوك صار في حسابك' },
+  'save.claiming': { en: 'Moving your tifo into your account...', ar: 'ننقل تيفوك إلى حسابك...' },
+  'save.failed': { en: 'Save failed', ar: 'فشل الحفظ' },
+  'save.localFailed': {
+    en: 'This browser will not keep your tifo. Download a .tifo copy so you do not lose it.',
+    ar: 'هذا المتصفح ما راح يحفظ تيفوك. نزّل نسخة .tifo عشان ما يضيع.',
+  },
+
+  'offer.lead': {
+    en: 'Your tifo is kept in this browser. Create a free account to keep it anywhere, on any device.',
+    ar: 'تيفوك محفوظ في هذا المتصفح. سوّ حساب مجاني عشان يبقى معك في أي جهاز.',
+  },
+  'offer.cta': { en: 'Create a free account', ar: 'سوّ حساب مجاني' },
+  'offer.later': { en: 'Not now', ar: 'مو الحين' },
+
+  'publish.aria': { en: 'Publish your tifo', ar: 'انشر تيفوك' },
+  'publish.h': { en: 'Publish to the community', ar: 'انشره في المجتمع' },
+  'publish.updateH': { en: 'Update your published tifo', ar: 'حدّث تيفوك المنشور' },
+  'publish.lead': {
+    en: '"{title}" will appear in the community feed for others to see and remix.',
+    ar: '"{title}" بيظهر في مجتمع التصاميم عشان يشوفونه ويعيدون تصميمه.',
+  },
+  'publish.tags': { en: 'Tags', ar: 'وسوم' },
+  'publish.tagsPh': { en: 'e.g. serie-a, derby, black-gold', ar: 'مثلاً: دوري-روشن، ديربي، أسود-ذهبي' },
+  'publish.tagsHint': { en: 'Comma separated. Helps people find your tifo.', ar: 'افصلها بفواصل. تساعد الناس يلقون تيفوك.' },
+  'publish.desc': { en: "The story behind it", ar: 'القصة وراه' },
+  'publish.descPh': { en: 'The match, the moment, what the display means…', ar: 'المباراة، اللحظة، وش يعني الاستعراض…' },
+  'publish.allowRemix': { en: 'Let others remix this tifo', ar: 'اسمح للآخرين يعيدون تصميمه' },
+  'publish.asTemplate': { en: 'Offer it as a starting template', ar: 'قدّمه كقالب للبداية' },
+  'publish.cta': { en: 'Publish', ar: 'انشر' },
+  'publish.updateCta': { en: 'Update', ar: 'حدّث' },
+  'publish.done': { en: 'Published to the community feed', ar: 'اننشر في مجتمع التصاميم' },
+  'publish.failed': { en: 'Publish failed', ar: 'فشل النشر' },
+
   // ---- the solo-dev credit on the landing page ----
   'maker.badge': { en: 'SOLO DEV', ar: 'مطوّر واحد' },
   'maker.title': { en: 'One person builds all of this.', ar: 'شخص واحد يبني هذا كله.' },

@@ -304,13 +304,18 @@ export async function buildApp(
   // The ordered funnel steps. Capture is whitelisted to these so the table
   // can't be polluted with arbitrary names.
   const FUNNEL_STEPS = [
-    'landed',        // arrived in the editor
-    'paint_first',   // first brush stroke
-    'view_3d',       // opened the stadium / split view
-    'save_clicked',  // opened the save dialog
-    'signed_up',     // created an account
-    'published',     // published to the community
-    'exported',      // exported a production PDF/CSV
+    'landed',          // arrived in the editor
+    'paint_first',     // first brush stroke
+    'view_3d',         // opened the stadium / split view
+    'draft_restored',  // returned and their local draft was still there
+    'save_clicked',    // pressed Save
+    'save_local',      // work kept without an account
+    'account_prompt',  // the "keep it anywhere" offer was shown, after a save
+    'auth_opened',     // opened the sign-up form
+    'signed_up',       // created an account
+    'draft_claimed',   // the local draft was attached to that new account
+    'published',       // published to the community
+    'exported',        // exported a production PDF/CSV
   ];
   const FUNNEL_SET = new Set(FUNNEL_STEPS);
 
@@ -630,7 +635,13 @@ export async function buildApp(
 
   app.post('/api/auth/login', authLimit, async (req, reply) => {
     const { username, password } = (req.body ?? {}) as { username?: string; password?: string };
-    const user = username ? await auth.getUserByName(username) : null;
+    // Accounts created through the editor never choose a username (it is derived
+    // from the email), so the sign-in field accepts either. The generic 401 below
+    // still means neither form reveals whether an account exists.
+    let user = username ? await auth.getUserByName(username) : null;
+    if (!user && username && username.includes('@')) {
+      user = await auth.getUserByEmail(username);
+    }
     if (!user || !password || !verifyPassword(password, user.passwordHash)) {
       return reply.code(401).send({ error: 'invalid credentials' });
     }

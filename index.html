@@ -174,7 +174,7 @@
           <div id="stadium-info" style="margin-top:12px;"></div>
           <div id="stadium-disclaimer" style="margin-top:8px;display:none;"></div>
           <h4 style="margin:14px 0 6px;" data-i18n="ed.area">Active tifo area</h4>
-          <p class="hint note-sm">Which part of the bowl the design targets — the AI focuses here.</p>
+          <p class="hint note-sm">Which part of the bowl the design targets: the AI focuses here.</p>
           <div class="chips" id="stadium-area" style="flex-wrap:wrap;"></div>
           <h4 style="margin:14px 0 6px;" data-i18n="ed.orient">Orientation</h4>
           <p class="hint note-sm">Re-orient your design around the bowl (undoable).</p>
@@ -188,14 +188,14 @@
 
         <div class="panel-section" id="ctx-ai" data-panel="__menu_only__" data-menu="ai">
           <h4><span data-i18n="ed.ai.title">AI Designer</span> <span class="h4-tag" data-i18n="ed.ai.tag">describe it, get a tifo</span></h4>
-          <p class="hint note" data-i18n="ed.ai.hint">Describe a display in plain words — a stand, colours, text, a symbol. The AI composes a fully editable tifo on the seats.</p>
+          <p class="hint note" data-i18n="ed.ai.hint">Describe a display in plain words: a stand, colours, text, a symbol. The AI composes a fully editable tifo on the seats.</p>
           <textarea id="ai-prompt" class="ai-input" rows="3" maxlength="400" placeholder="e.g. Giant eagle covering the south stand in black and gold" data-i18n-attr="placeholder:ed.ai.placeholder"></textarea>
           <div class="chips" id="ai-examples" style="margin-top:8px;flex-wrap:wrap;">
             <button class="chip" data-ex="Red and white CHAMPIONS card stunt across the stadium">CHAMPIONS stunt</button>
             <button class="chip" data-ex="Giant Cristiano Ronaldo tifo in the north stand using black, white and yellow">Ronaldo · north</button>
             <button class="chip" data-ex="Giant eagle covering the south stand in black and gold">Eagle · south</button>
           </div>
-          <div class="hint" style="font-size:11px;color:var(--text-3);margin:10px 0 4px;" data-i18n="ed.ai.yourClub">Your club — one tap</div>
+          <div class="hint" style="font-size:11px;color:var(--text-3);margin:10px 0 4px;" data-i18n="ed.ai.yourClub">Your club, one tap</div>
           <div class="chips" id="ai-clubs" style="flex-wrap:wrap;">
             <button class="chip" data-club="A giant Al Hilal tifo filling the whole stadium in the club's colours">Al Hilal</button>
             <button class="chip" data-club="A giant Al Nassr tifo filling the whole stadium in the club's colours">Al Nassr</button>
@@ -204,9 +204,9 @@
             <button class="chip" data-club="A giant Al Shabab tifo filling the whole stadium in the club's colours">Al Shabab</button>
           </div>
           <button id="ai-generate" class="primary" style="width:100%;margin-top:10px;"><i class="ti ti-sparkles"></i> <span data-i18n="ed.ai.generate">Generate tifo</span></button>
-          <button id="ai-generate-super" class="primary" style="width:100%;margin-top:8px;"><i class="ti ti-building-stadium"></i> <span data-i18n="ed.ai.super">Super AI — design full stadium</span></button>
-          <p class="hint" style="font-size:10px;color:var(--text-3);margin:4px 0 0;" data-i18n="ed.ai.superHint">Plans every stand together — portraits, text and colour blocking across the whole bowl.</p>
-          <button id="ai-shuffle" style="width:100%;margin-top:8px;" title="Compose a multi-stand design instantly, offline — no tokens, no quota"><i class="ti ti-arrows-shuffle"></i> <span data-i18n="ed.ai.shuffle">Shuffle — free offline variation</span></button>
+          <button id="ai-generate-super" class="primary" style="width:100%;margin-top:8px;"><i class="ti ti-building-stadium"></i> <span data-i18n="ed.ai.super">Super AI: design full stadium</span></button>
+          <p class="hint" style="font-size:10px;color:var(--text-3);margin:4px 0 0;" data-i18n="ed.ai.superHint">Plans every stand together: portraits, text and colour blocking across the whole bowl.</p>
+          <button id="ai-shuffle" style="width:100%;margin-top:8px;" title="Compose a multi-stand design instantly, offline: no tokens, no quota"><i class="ti ti-arrows-shuffle"></i> <span data-i18n="ed.ai.shuffle">Shuffle: free offline variation</span></button>
           <p id="ai-status" class="hint" style="font-size:11px;color:var(--text-3);margin:8px 0 0;min-height:14px;"></p>
           <div id="ai-error" class="hint" style="display:none;font-size:11px;color:var(--flare);margin-top:8px;"></div>
           <div id="ai-result" style="display:none;margin-top:10px;">
@@ -280,7 +280,7 @@
         <div class="panel-section" id="ctx-colors" data-panel="brush eraser fill text">
           <h4><span data-i18n="ed.colors">Colors</span> <span class="h4-tag" data-i18n="ed.colors.yourSwatches">your swatches</span></h4>
           <div class="color-well-row">
-            <button id="fg-well" class="fg-well" title="Active paint color — click to change"></button>
+            <button id="fg-well" class="fg-well" title="Active paint color: click to change"></button>
             <div class="fg-meta">
               <span id="fg-hex" class="fg-hex">#000000</span>
               <span class="fg-sub" data-i18n="ed.colors.painting">painting color</span>
@@ -380,13 +380,17 @@
             <button id="save" class="primary grow" data-i18n="ed.save">Save</button>
             <button id="load" class="grow" title="Open a .tifo file" data-i18n="ed.openFile">Open file</button>
           </div>
-          <div class="chips" style="margin-top:10px;">
-            <label><input type="checkbox" id="public" /> <span data-i18n="ed.publicList">List in public gallery</span></label>
-          </div>
-          <button id="share-design" style="width:100%;margin-top:10px;"><i class="ti ti-share"></i> <span data-i18n="ed.share">Share</span></button>
+          <p class="draft-state" id="draft-state" aria-live="polite"></p>
+          <div id="account-offer" class="account-offer" hidden></div>
+          <button id="publish-design" style="width:100%;margin-top:10px;"><i class="ti ti-world"></i> <span data-i18n="ed.publish">Publish to the community</span></button>
+          <button id="download-tifo" style="width:100%;margin-top:8px;"><i class="ti ti-download"></i> <span data-i18n="ed.downloadCopy">Download a .tifo copy</span></button>
+          <!-- Public state is now driven by the Publish flow; kept as a hidden mirror
+               so the rest of the editor can still read and reflect it. -->
+          <label hidden><input type="checkbox" id="public" /></label>
+          <button id="share-design" style="width:100%;margin-top:8px;"><i class="ti ti-share"></i> <span data-i18n="ed.share">Share</span></button>
           <div id="photo-row" style="margin-top:12px;" hidden>
             <button id="add-photo" style="width:100%;"><i class="ti ti-camera"></i> <span data-i18n="ed.addPhoto">Add match-day photo</span></button>
-            <p class="hint" style="font-size:11px;color:var(--text-3);margin:6px 0 0;" data-i18n="ed.addPhoto.hint">Show the real stand beside your design — proof it came to life.</p>
+            <p class="hint" style="font-size:11px;color:var(--text-3);margin:6px 0 0;" data-i18n="ed.addPhoto.hint">Show the real stand beside your design: proof it came to life.</p>
           </div>
         </div>
 

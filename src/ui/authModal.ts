@@ -15,6 +15,35 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 /** Bump when Terms/Privacy change materially; recorded with each signup acceptance. */
 export const POLICY_VERSION = '2026-06-27';
 
+/** A username derived from the email local part, sanitised to the server's rules. */
+function deriveUsername(email: string, attempt: number): string {
+  const base = (email.split('@')[0] ?? '')
+    .replace(/[^a-zA-Z0-9_]/g, '')
+    .slice(0, 16)
+    .replace(/^_+/, '');
+  const stem = base.length >= 3 ? base : `${base}fan`;
+  const name = attempt === 0 ? stem : `${stem}${Math.floor(1000 + Math.random() * 9000)}`;
+  return USERNAME_RE.test(name) ? name : `tifo${Math.floor(1000 + Math.random() * 9000)}`;
+}
+
+/** Register, retrying with a different handle when the derived one is taken. */
+async function registerWithDerivedName(email: string, password: string): Promise<string> {
+  let lastErr: unknown = null;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    try {
+      return await register(deriveUsername(email, attempt), password, email, POLICY_VERSION);
+    } catch (err) {
+      lastErr = err;
+      const m = (err as Error).message;
+      // Only a username collision is worth retrying. A taken EMAIL means this
+      // person already has an account and needs to be told, not looped.
+      if (/email/i.test(m)) throw err;
+      if (!/taken|exists|409/i.test(m)) throw err;
+    }
+  }
+  throw lastErr instanceof Error ? lastErr : new Error('could not create an account');
+}
+
 export function openAuthModal(): Promise<string | null> {
   return new Promise((resolve) => {
     const backdrop = document.createElement('div');
@@ -29,26 +58,21 @@ export function openAuthModal(): Promise<string | null> {
         </div>
         <form class="auth-form" novalidate>
           <label class="auth-field">
-            <span>${t('auth.username')}</span>
-            <input type="text" name="username" autocomplete="username" autocapitalize="off"
-                   spellcheck="false" placeholder="${t('auth.usernamePh')}" />
-          </label>
-          <label class="auth-field auth-email" hidden>
-            <span>${t('auth.email')}</span>
-            <input type="email" name="email" autocomplete="email" autocapitalize="off"
-                   spellcheck="false" placeholder="${t('auth.emailPh')}" />
+            <span class="auth-id-label">${t('auth.identity')}</span>
+            <input type="text" name="identity" autocomplete="username" autocapitalize="off"
+                   spellcheck="false" placeholder="${t('auth.identityPh')}" />
           </label>
           <label class="auth-field">
             <span>${t('auth.password')}</span>
             <input type="password" name="password" autocomplete="current-password"
                    placeholder="${t('auth.passwordPh')}" />
           </label>
-          <label class="auth-field auth-accept" hidden>
-            <input type="checkbox" name="accept" />
-            <span>${t('auth.accept')} <a href="/legal#terms" target="_blank" rel="noopener">${t('auth.termsLink')}</a> ${t('auth.and')} <a href="/legal#privacy" target="_blank" rel="noopener">${t('auth.privacyLink')}</a>.</span>
-          </label>
           <div class="auth-error" role="alert" hidden></div>
           <button type="submit" class="auth-submit primary">${t('auth.signin')}</button>
+          <p class="auth-terms" hidden>${t('auth.termsInline')}
+            <a href="/legal#terms" target="_blank" rel="noopener">${t('auth.termsLink')}</a>
+            ${t('auth.and')}
+            <a href="/legal#privacy" target="_blank" rel="noopener">${t('auth.privacyLink')}</a>.</p>
         </form>
         <button type="button" class="auth-forgot-link">${t('auth.forgot')}</button>
         <form class="auth-forgot" hidden novalidate>
@@ -72,12 +96,10 @@ export function openAuthModal(): Promise<string | null> {
     const errorEl = backdrop.querySelector('.auth-error') as HTMLElement;
     const submit = backdrop.querySelector('.auth-submit') as HTMLButtonElement;
     const tabs = Array.from(backdrop.querySelectorAll('.auth-tab')) as HTMLButtonElement[];
-    const usernameInput = form.username as HTMLInputElement;
+    const identityInput = form.identity as HTMLInputElement;
     const passwordInput = form.password as HTMLInputElement;
-    const emailInput = form.email as HTMLInputElement;
-    const emailRow = backdrop.querySelector('.auth-email') as HTMLElement;
-    const acceptInput = form.accept as HTMLInputElement;
-    const acceptRow = backdrop.querySelector('.auth-accept') as HTMLElement;
+    const idLabel = backdrop.querySelector('.auth-id-label') as HTMLElement;
+    const termsRow = backdrop.querySelector('.auth-terms') as HTMLElement;
     const tabsRow = backdrop.querySelector('.auth-tabs') as HTMLElement;
     const note = backdrop.querySelector('.auth-note') as HTMLElement;
     const forgotLink = backdrop.querySelector('.auth-forgot-link') as HTMLButtonElement;
@@ -114,8 +136,13 @@ export function openAuthModal(): Promise<string | null> {
       tabs.forEach((tab) => tab.classList.toggle('active', tab.dataset.mode === next));
       submit.textContent = next === 'signin' ? t('auth.signin') : t('auth.signup');
       passwordInput.autocomplete = next === 'signin' ? 'current-password' : 'new-password';
-      emailRow.hidden = next !== 'signup';
-      acceptRow.hidden = next !== 'signup';
+      // Signing up asks only for an email. Signing in accepts either, because
+      // accounts created here never had to choose a username.
+      idLabel.textContent = next === 'signin' ? t('auth.identity') : t('auth.email');
+      identityInput.placeholder = next === 'signin' ? t('auth.identityPh') : t('auth.emailPh');
+      identityInput.type = next === 'signup' ? 'email' : 'text';
+      identityInput.autocomplete = next === 'signup' ? 'email' : 'username';
+      termsRow.hidden = next !== 'signup';
       forgotLink.hidden = next !== 'signin';
       clearError();
     };
@@ -165,12 +192,16 @@ export function openAuthModal(): Promise<string | null> {
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
       clearError();
-      const username = usernameInput.value.trim();
+      const identity = identityInput.value.trim();
       const password = passwordInput.value;
-      const email = emailInput.value.trim();
-      if (!USERNAME_RE.test(username)) {
-        showError(t('auth.errUsername'));
-        usernameInput.focus();
+      if (mode === 'signup' && !EMAIL_RE.test(identity)) {
+        showError(t('auth.errEmail'));
+        identityInput.focus();
+        return;
+      }
+      if (mode === 'signin' && identity.length < 3) {
+        showError(t('auth.errIdentity'));
+        identityInput.focus();
         return;
       }
       if (password.length < 8) {
@@ -178,20 +209,17 @@ export function openAuthModal(): Promise<string | null> {
         passwordInput.focus();
         return;
       }
-      if (mode === 'signup' && !EMAIL_RE.test(email)) {
-        showError(t('auth.errEmail'));
-        emailInput.focus();
-        return;
-      }
-      if (mode === 'signup' && !acceptInput.checked) {
-        showError(t('auth.errAccept'));
-        acceptInput.focus();
-        return;
-      }
       submit.disabled = true;
       submit.textContent = mode === 'signin' ? t('auth.signingIn') : t('auth.creating');
       try {
-        const name = mode === 'signin' ? await login(username, password) : await register(username, password, email, POLICY_VERSION);
+        let name: string;
+        if (mode === 'signin') {
+          name = await login(identity, password);
+        } else {
+          // The API still needs a username; nobody should have to invent one to
+          // keep a drawing. Derive it, and step aside if that handle is taken.
+          name = await registerWithDerivedName(identity, password);
+        }
         close(name);
       } catch (err) {
         const m = (err as Error).message;
@@ -209,7 +237,7 @@ export function openAuthModal(): Promise<string | null> {
     });
 
     // Focus the first field once mounted.
-    setTimeout(() => usernameInput.focus(), 0);
+    setTimeout(() => identityInput.focus(), 0);
     void modal;
   });
 }

@@ -838,6 +838,38 @@ body.viewer { display:block; overflow-y:auto; background:var(--ink-0); }
 .save-tags-hint { font-size:11px; color:var(--text-3); margin-top:5px; }
 .save-template-row { display:flex; align-items:center; gap:8px; margin-top:14px; font-size:13px; color:var(--text-2); }
 
+/* ---- rebuilt save flow ---- */
+/* The saved-state line. Quiet when things are fine, loud only when the browser
+   is actually refusing to keep the work, because that is the case where staying
+   quiet costs someone their design. */
+.draft-state { margin:10px 0 0; font-size:11.5px; line-height:1.5; min-height:1em; }
+.draft-state.ok { color:var(--text-3); }
+.draft-state.ok::before { content:"✓ "; color:var(--ok, #3fb950); }
+.draft-state.warn { color:var(--warn, #d29922); }
+
+/* The account offer, shown only after a save already succeeded. Inline in the
+   panel rather than a modal: it must be ignorable without a decision. */
+.account-offer {
+  margin-top:12px; padding:12px; border-radius:10px;
+  background:var(--ink-2, rgba(255,255,255,.04));
+  border:1px solid var(--line-2);
+}
+.account-offer .ao-lead { margin:0 0 10px; font-size:12px; line-height:1.6; color:var(--text-2); }
+.account-offer .ao-go { width:100%; }
+.account-offer .ao-dismiss {
+  width:100%; margin-top:6px; background:none; border:none;
+  font-size:11.5px; color:var(--text-3); cursor:pointer; padding:6px;
+}
+.account-offer .ao-dismiss:hover { color:var(--text-2); }
+
+.auth-terms { margin:12px 0 0; font-size:11px; line-height:1.6; color:var(--text-3); text-align:center; }
+.auth-terms a { color:var(--text-2); text-decoration:underline; }
+
+.pub-optional { font-weight:400; color:var(--text-3); font-size:11px; }
+.pub-actions { display:flex; gap:10px; margin-top:20px; }
+.pub-actions .pub-go { flex:1; }
+.pub-actions .pub-cancel { flex:none; padding:10px 16px; }
+
 /* feed: Before/After badge + button */
 .feed-thumb-wrap { position:relative; }
 .feed-ba-btn {

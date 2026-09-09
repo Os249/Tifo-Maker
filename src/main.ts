@@ -223,6 +223,7 @@ async function main(): Promise<void> {
   // A .tifo file for a different stadium reloads with ?template= and stashes the
   // design here; pick it up now that this template's seat map matches its cells.
   let pendingTitle: string | null = null;
+  let draftAge: string | null = null; // set when a local draft was restored
   if (!sharedLoaded) {
     let pending: string | null = null;
     try {
@@ -250,6 +251,35 @@ async function main(): Promise<void> {
     }
   }
 
+  // Nothing else claimed the canvas, so restore whatever this browser was last
+  // working on. This is the whole point of the draft: someone who painted a tifo
+  // and closed the tab gets it back instead of starting from nothing.
+  let restoredDesignId: string | null = null;
+  if (!sharedLoaded) {
+    const { readDraft, describeAge } = await import('./core/draft');
+    const draft = readDraft();
+    // Only restore into the stadium it was drawn for; seat counts differ per
+    // template and cells are positional.
+    if (draft && draft.templateId === template.id && draft.templateVersion === template.version) {
+      try {
+        const { validateTifo, flattenLayers } = await import('./core/tifoFormat');
+        const result = validateTifo(draft.doc, (id, v) =>
+          id === template.id && v === template.version ? map.count : null,
+        );
+        if (result.valid && result.doc) {
+          store.setPalette(result.doc.palette.slice(0, 256));
+          store.loadCells(flattenLayers(result.doc));
+          pendingTitle = draft.title || result.doc.meta?.title || 'Untitled tifo';
+          restoredDesignId = draft.designId;
+          sharedLoaded = true; // suppress the starter seed + onboarding
+          draftAge = describeAge(draft.savedAt);
+        }
+      } catch {
+        /* a corrupt draft must never block the editor from opening */
+      }
+    }
+  }
+
   if (!sharedLoaded) {
     const seed = PATTERN_PRESETS.find((p) => p.id === 'border')!.cellAt(map);
     for (let i = 0; i < map.count; i++) store.cells[i] = seed(i);
@@ -261,7 +291,7 @@ async function main(): Promise<void> {
   editor.drawGrid(true);
   const objects = new ObjectLayer();
   editor.attachObjectLayer(objects);
-  mountToolbar(document.body, editor, store, map, objects, () => preview);
+  mountToolbar(document.body, editor, store, map, objects, () => preview, restoredDesignId);
 
   // --- Phase 2: lazy-initialized 3D preview sharing the same store ---
   const previewHost = document.getElementById('preview-host')!;
@@ -457,6 +487,11 @@ async function main(): Promise<void> {
   const stat = document.getElementById('stat')!;
   stat.textContent = `${template.name} · ${map.count.toLocaleString()} seats · map generated in ${genMs.toFixed(0)} ms`;
   track('landed'); // editor is interactive — top of the funnel
+  if (draftAge) {
+    track('draft_restored');
+    const msg = document.getElementById('message');
+    if (msg) msg.textContent = `restored your tifo from ${draftAge}`;
+  }
 
   // If we loaded a shared design or an imported file, reflect title + repaint.
   const loadedTitle = sharedTitle ?? pendingTitle ?? remapTitle;

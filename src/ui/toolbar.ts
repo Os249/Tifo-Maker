@@ -12,6 +12,10 @@ import { fetchMe, isSignedIn, loadDesign, saveDesign, setPublic, exportMyData, d
 import { t as i18nT } from './i18n';
 import { track, setAnalyticsSignedIn } from '../net/analytics';
 import { buildTifoV2 } from '../core/tifoFormat';
+import {
+  buildDraft, createDraftWriter,
+  type DraftTextObject, type DraftWriteResult,
+} from '../core/draft';
 import { extractPhotoPalette, rasterize } from '../core/importImage';
 import { openAuthModal } from './authModal';
 import { openGallery } from './gallery';
@@ -42,6 +46,8 @@ export function mountToolbar(
   map: SeatMap,
   objects: ObjectLayer,
   getPreview?: () => Preview3D | null,
+  /** Design id carried by a restored local draft, so saving updates the original. */
+  restoredDesignId?: string | null,
 ): void {
   const $ = <T extends HTMLElement>(sel: string): T => {
     const el = root.querySelector<T>(sel);
@@ -457,7 +463,7 @@ export function mountToolbar(
     const { saveUserPalette, serializePaletteHex } = await import('./paletteIo');
     saveUserPalette(name, colors);
     await refreshMyPalettes();
-    message.textContent = `saved "${name}" — find it under your saved palettes`;
+    message.textContent = `saved "${name}": find it under your saved palettes`;
     // Also offer a portable file.
     const blob = new Blob([serializePaletteHex(colors)], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
@@ -564,7 +570,7 @@ export function mountToolbar(
     });
     editor.objectOverlay?.sync();
     setTool('select');
-    message.textContent = `"${textInput.value.trim()}" added — drag to position, resize from the corner, then Bake`;
+    message.textContent = `"${textInput.value.trim()}" added: drag to position, resize from the corner, then Bake`;
   };
 
     // Custom font upload: FontFace API, available immediately in the font select.
@@ -625,10 +631,10 @@ export function mountToolbar(
   $('#legibility').addEventListener('click', () => {
     const fragile = findFragileSeats(store.cells, map);
     if (fragile.length === 0) {
-      message.textContent = `legibility ok — every stroke is ${MIN_LEGIBLE_RUN}+ seats thick`;
+      message.textContent = `legibility ok: every stroke is ${MIN_LEGIBLE_RUN}+ seats thick`;
     } else {
       editor.flashSeats(fragile);
-      message.textContent = `${fragile.length.toLocaleString()} seats sit in strokes thinner than ${MIN_LEGIBLE_RUN} — they may vanish with no-shows`;
+      message.textContent = `${fragile.length.toLocaleString()} seats sit in strokes thinner than ${MIN_LEGIBLE_RUN}, they may vanish with no-shows`;
     }
   });
 
@@ -738,7 +744,7 @@ export function mountToolbar(
     pendingImport = null;
     editor.setStampPreview(null);
     setTool('select');
-    message.textContent = `"${objects.selected && objects.selected.kind === 'image' ? objects.selected.name : 'image'}" added — drag to position, resize from the corner, then Bake`;
+    message.textContent = `"${objects.selected && objects.selected.kind === 'image' ? objects.selected.name : 'image'}" added: drag to position, resize from the corner, then Bake`;
   };
 
   const cancelImport = (): void => {
@@ -820,7 +826,7 @@ export function mountToolbar(
     editor.objectOverlay?.sync();
     // Stay in the shape tool so multiple shapes can be dropped in a row, then
     // committed together with "Bake all". Switch to Select to fine-tune any one.
-    message.textContent = `${kind} added — click to drop more, then “Bake all”. Switch to Select to move/resize.`;
+    message.textContent = `${kind} added: click to drop more, then “Bake all”. Switch to Select to move/resize.`;
   };
 
   // One shared placement-click callback, dispatched by the active mode.
@@ -841,7 +847,7 @@ export function mountToolbar(
   };
 
   // Account + persistence (run `npm run server` alongside `npm run dev`).
-  let designId: string | null = null;
+  let designId: string | null = restoredDesignId ?? null;
   const publicChk = $('#public') as unknown as HTMLInputElement;
   const signinBtn = $('#signin') as unknown as HTMLButtonElement;
   let myUserId: string | null = null;
@@ -866,7 +872,7 @@ export function mountToolbar(
     const { promptModal } = await import('./modal');
     const caption = (await promptModal({
       title: 'Add a caption',
-      message: 'Optional — describe the match or moment.',
+      message: 'Optional: describe the match or moment.',
       placeholder: 'e.g. Liverpool vs Madrid, May 2026',
       confirmLabel: 'Continue',
       maxLength: 140,
@@ -877,7 +883,7 @@ export function mountToolbar(
     try {
       const { uploadPhoto } = await import('../net/api');
       await uploadPhoto(designId, file, caption.trim());
-      message.textContent = 'match-day photo added — it shows as Before/After in the feed';
+      message.textContent = 'match-day photo added: it shows as Before/After in the feed';
     } catch (err) {
       message.textContent = `photo upload failed: ${(err as Error).message}`;
     } finally {
@@ -1152,62 +1158,184 @@ export function mountToolbar(
     }
   };
 
-  saveBtn.addEventListener('click', async () => {
-    track('save_clicked');
-    const { openSaveDialog } = await import('./saveDialog');
-    const choice = await openSaveDialog({
-      isExisting: designId !== null,
-      isSignedIn: isSignedIn(),
-      currentlyPublic: publicChk.checked,
-    });
-    if (!choice) return;
+  // ================= local draft: the safety net =================
+  // Every change is written to this browser, so nothing is ever lost by closing
+  // the tab and nothing requires an account. See core/draft.ts for what this can
+  // and cannot promise.
+  const draftState = $('#draft-state') as unknown as HTMLElement;
+  const accountOffer = $('#account-offer') as unknown as HTMLElement;
+  let lastDraft: DraftWriteResult | null = null;
 
-    if (choice.kind === 'download') {
-      downloadLocal();
+  const draftTextObjects = (): DraftTextObject[] =>
+    objects
+      .list()
+      .filter((o) => o.kind === 'text')
+      .map((o) => {
+        const t = o as unknown as DraftTextObject;
+        return {
+          id: t.id, kind: 'text' as const, text: t.text, fontId: t.fontId, arcDeg: t.arcDeg,
+          colorIndex: t.colorIndex, tier: t.tier, cx: t.cx, cy: t.cy, width: t.width, height: t.height,
+        };
+      });
+
+  const renderDraftState = (): void => {
+    if (!lastDraft) { draftState.textContent = ''; return; }
+    if (lastDraft.ok) {
+      draftState.className = 'draft-state ok';
+      draftState.textContent = isSignedIn() ? i18nT('draft.savedAccount') : i18nT('draft.savedLocal');
       return;
     }
+    draftState.className = 'draft-state warn';
+    draftState.textContent =
+      lastDraft.reason === 'quota' || lastDraft.reason === 'too-big'
+        ? i18nT('draft.full')
+        : i18nT('draft.blocked');
+  };
 
-    // Account save (private or public) — ensure signed in first.
-    if (!isSignedIn()) {
-      const name = await openAuthModal();
-      if (!name) return;
-      const me = await fetchMe();
-      reflectSignedIn(name, me?.id, true);
-      reflectAdmin(me?.isAdmin ?? false);
-    }
+  const draftWriter = createDraftWriter(
+    () =>
+      buildDraft({
+        title: docTitle.value.trim() || 'Untitled tifo',
+        templateId: map.templateRef.id,
+        templateVersion: map.templateRef.version,
+        palette: store.palette,
+        cells: store.cells,
+        textObjects: draftTextObjects(),
+        designId,
+      }),
+    (r) => { lastDraft = r; renderDraftState(); },
+  );
+
+  store.onDirty(() => draftWriter.schedule());
+  objects.onChange(() => draftWriter.schedule());
+  docTitle.addEventListener('input', () => draftWriter.schedule());
+  // A closing tab gets no timer callback, so flush synchronously on the way out.
+  window.addEventListener('pagehide', () => draftWriter.flush());
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') draftWriter.flush();
+  });
+
+  // ================= save =================
+  /** Persist to the signed-in account. Returns false and reports on failure. */
+  const saveToAccount = async (announce: boolean): Promise<boolean> => {
     saveBtn.disabled = true;
     try {
-      const saveAsNew = choice.asNew || designId === null;
-      const targetId = saveAsNew ? null : designId;
-      const title = saveAsNew ? docTitle.value.trim() || 'Untitled tifo' : '';
-      const meta = await saveDesign(store, map, map.templateRef.id, map.templateRef.version, title, targetId);
+      const isNew = designId === null;
+      const title = isNew ? docTitle.value.trim() || 'Untitled tifo' : '';
+      const meta = await saveDesign(store, map, map.templateRef.id, map.templateRef.version, title, designId);
       designId = meta.id ?? designId;
-      if (designId) {
-        await setPublic(designId, choice.makePublic);
-        publicChk.checked = choice.makePublic;
-        refreshPhotoRow();
-        // Apply tags + template flag (only meaningful once it's saved to the account).
-        if (choice.tags.length > 0 || choice.isTemplate) {
-          const { setDesignTags, setDesignTemplate } = await import('../net/api');
-          if (choice.tags.length > 0) await setDesignTags(designId, choice.tags).catch(() => {});
-          if (choice.isTemplate) await setDesignTemplate(designId, true).catch(() => {});
-        }
-        // Creator's explanation + remix permission (shown in the community 3D preview).
-        if (choice.description !== null || choice.allowRemix === false) {
-          const { setPublishMeta } = await import('../net/api');
-          await setPublishMeta(designId, choice.description, choice.allowRemix).catch(() => {});
-        }
-      }
-      if (choice.makePublic) track('published');
-      message.textContent = choice.makePublic
-        ? `published "${meta.title || docTitle.value}": it's now in the community feed`
-        : `saved privately${choice.asNew ? ' as a new copy' : ''}`;
+      refreshPhotoRow();
+      // Flush rather than schedule: the debounce would leave a ~1s window in
+      // which the draft still says designId=null, and a tab closed inside it
+      // would fork a duplicate on the next save.
+      draftWriter.flush();
+      if (announce) message.textContent = i18nT('save.toAccount');
+      return true;
     } catch (err) {
-      message.textContent = `save failed: ${(err as Error).message}`;
+      message.textContent = `${i18nT('save.failed')}: ${(err as Error).message}`;
+      return false;
     } finally {
       saveBtn.disabled = false;
     }
+  };
+
+  /** Sign in or sign up, then adopt the session. Returns true when signed in. */
+  const ensureSignedIn = async (): Promise<boolean> => {
+    if (isSignedIn()) return true;
+    track('auth_opened');
+    const name = await openAuthModal();
+    if (!name) return false;
+    const me = await fetchMe();
+    reflectSignedIn(name, me?.id, true); // fires signed_up when genuinely fresh
+    reflectAdmin(me?.isAdmin ?? false);
+    return true;
+  };
+
+  /**
+   * The offer to keep work beyond this browser. Shown only AFTER a save has
+   * already succeeded, so it reads as an upgrade rather than a toll: the user
+   * can ignore it entirely and still have their tifo.
+   */
+  const showAccountOffer = (): void => {
+    if (isSignedIn() || !accountOffer.hidden) return;
+    track('account_prompt');
+    accountOffer.hidden = false;
+    accountOffer.innerHTML =
+      `<p class="ao-lead">${i18nT('offer.lead')}</p>` +
+      `<button class="primary ao-go" type="button">${i18nT('offer.cta')}</button>` +
+      `<button class="ao-dismiss" type="button">${i18nT('offer.later')}</button>`;
+    accountOffer.querySelector('.ao-dismiss')!.addEventListener('click', () => {
+      accountOffer.hidden = true;
+    });
+    accountOffer.querySelector('.ao-go')!.addEventListener('click', async () => {
+      if (!(await ensureSignedIn())) return;
+      accountOffer.hidden = true;
+      // Claim: push the work they already made onto the brand-new account, so
+      // they land on their tifo instead of an empty account. This can take a
+      // few seconds on a big design, and reflectSignedIn has just overwritten
+      // the message with "signed in as ...", so say what is still happening.
+      message.textContent = i18nT('save.claiming');
+      if (await saveToAccount(false)) {
+        track('draft_claimed');
+        message.textContent = i18nT('save.claimed');
+      }
+      renderDraftState();
+    });
+  };
+
+  // One action. It always succeeds, and it never asks a question first.
+  saveBtn.addEventListener('click', async () => {
+    track('save_clicked');
+    if (!isSignedIn()) {
+      draftWriter.flush(); // forces a write, so lastDraft reflects reality
+      track('save_local');
+      if (!lastDraft || !lastDraft.ok) {
+        // Never claim a save that did not happen: point at the download instead.
+        renderDraftState();
+        message.textContent = i18nT('save.localFailed');
+        return;
+      }
+      message.textContent = i18nT('save.local');
+      showAccountOffer();
+      return;
+    }
+    await saveToAccount(true);
   });
+
+  // ================= publish (a separate intent, with its own metadata) =================
+  const publishBtn = $('#publish-design') as unknown as HTMLButtonElement;
+  publishBtn.addEventListener('click', async () => {
+    if (!(await ensureSignedIn())) return;
+    if (designId === null && !(await saveToAccount(false))) return;
+    const { openPublishDialog } = await import('./publishDialog');
+    const choice = await openPublishDialog({
+      title: docTitle.value.trim() || 'Untitled tifo',
+      currentlyPublic: publicChk.checked,
+    });
+    if (!choice) return;
+    publishBtn.disabled = true;
+    try {
+      if (!(await saveToAccount(false))) return;
+      if (!designId) return;
+      await setPublic(designId, true);
+      publicChk.checked = true;
+      const { setDesignTags, setDesignTemplate, setPublishMeta } = await import('../net/api');
+      if (choice.tags.length > 0) await setDesignTags(designId, choice.tags).catch(() => {});
+      if (choice.isTemplate) await setDesignTemplate(designId, true).catch(() => {});
+      if (choice.description !== null || !choice.allowRemix) {
+        await setPublishMeta(designId, choice.description, choice.allowRemix).catch(() => {});
+      }
+      track('published');
+      message.textContent = i18nT('publish.done');
+    } catch (err) {
+      message.textContent = `${i18nT('publish.failed')}: ${(err as Error).message}`;
+    } finally {
+      publishBtn.disabled = false;
+    }
+  });
+
+  // The durable escape hatch, no longer buried inside a modal.
+  ($('#download-tifo') as unknown as HTMLButtonElement).addEventListener('click', () => downloadLocal());
 
   const doLoad = async (id: string): Promise<void> => {
     try {
