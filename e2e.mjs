@@ -38,7 +38,14 @@ check('draft survives a reload', !!b && b.head===a.head, b?`${b.runs} runs`:'');
 const msg = await page.evaluate(()=>document.getElementById('message')?.textContent||'');
 check('user is told their work came back', /restored/i.test(msg), JSON.stringify(msg));
 
-// Save, signed out.
+// Save, signed out. Scroll the panel back to the top first: that is the state
+// that used to render the offer far below the fold, so the in-view assertion
+// below is a real guard rather than one the layout satisfies by luck.
+await page.evaluate(()=>{
+  const p=document.getElementById('save').closest('.panel'); if(p) p.scrollTop=0;
+  document.scrollingElement.scrollTop=0;
+});
+await page.waitForTimeout(300);
 await page.evaluate(()=>document.getElementById('save').click());
 await page.waitForTimeout(1200);
 const after = await page.evaluate(()=>({
@@ -48,6 +55,15 @@ const after = await page.evaluate(()=>({
 }));
 check('Save works signed out (no modal, no wall)', /this browser/i.test(after.msg), JSON.stringify(after.msg));
 check('account is offered AFTER the save', after.offer, after.text);
+
+// An offer below the fold is the same as no offer: pressing Save without
+// scrolling used to leave it ~700px under the viewport.
+const offerInView = await page.evaluate(()=>{
+  const o=document.getElementById('account-offer'); if(!o||o.hidden) return null;
+  const r=o.getBoundingClientRect();
+  return {top:Math.round(r.top), bottom:Math.round(r.bottom), vh:innerHeight, inView:r.top>=0 && r.bottom<=innerHeight};
+});
+check('the offer is scrolled into view', !!offerInView?.inView, JSON.stringify(offerInView));
 
 // Dismissible without consequence.
 await page.evaluate(()=>document.querySelector('#account-offer .ao-dismiss')?.click());

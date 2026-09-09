@@ -1267,6 +1267,15 @@ export function mountToolbar(
     accountOffer.querySelector('.ao-dismiss')!.addEventListener('click', () => {
       accountOffer.hidden = true;
     });
+    // The offer renders below the Save button in a panel that scrolls. Pressing
+    // Save near the bottom of the viewport put it entirely below the fold, with
+    // nothing to say it had appeared: an offer nobody sees is the same as no
+    // offer. 'nearest' is a no-op when it is already in view, so this only ever
+    // moves the panel when it has to.
+    accountOffer.scrollIntoView({
+      block: 'nearest',
+      behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
+    });
     accountOffer.querySelector('.ao-go')!.addEventListener('click', async () => {
       if (!(await ensureSignedIn())) return;
       accountOffer.hidden = true;
