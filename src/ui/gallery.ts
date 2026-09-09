@@ -22,7 +22,7 @@ export async function openGallery(
     <div class="feed-panel" role="dialog" aria-modal="true" aria-label="Community feed">
       <div class="feed-head">
         <div class="feed-title">Community feed</div>
-        <div class="feed-sub">Open any tifo to remix it — your changes start a fresh copy.</div>
+        <div class="feed-sub">Open any tifo to remix it, your changes start a fresh copy.</div>
         <button class="feed-close" aria-label="Close">&times;</button>
         <div class="feed-controls">
           <input type="search" class="feed-search" id="feed-search" placeholder="Search by name…" />
@@ -72,7 +72,7 @@ export async function openGallery(
       const filtering = search || templatesOnly || activeTags.size > 0;
       grid.innerHTML = filtering
         ? '<div class="feed-empty">No tifos match those filters.</div>'
-        : '<div class="feed-empty">No public tifos yet — be the first! Design something, then tick “List in public gallery” and Save.</div>';
+        : '<div class="feed-empty">No public tifos yet, be the first! Design something, then tick “List in public gallery” and Save.</div>';
       return;
     }
     for (const item of items) {
@@ -173,7 +173,7 @@ export async function openGallery(
         try {
           await reportDesign(item.id, reason.trim());
           reportBtn.classList.add('reported');
-          reportBtn.title = 'Reported — thank you';
+          reportBtn.title = 'Reported: thank you';
         } catch {
           /* ignore */
         }

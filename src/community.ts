@@ -456,13 +456,13 @@ function wirePreviewActions(item: GalleryItem): void {
   // Report (sends to the moderation queue; you act on it from /admin or the DB).
   const reportBtn = document.getElementById('report-btn');
   reportBtn?.addEventListener('click', async () => {
-    const reason = window.prompt('Report this design — why? (e.g. offensive, infringes my rights, spam)');
+    const reason = window.prompt('Report this design: why? (e.g. offensive, infringes my rights, spam)');
     if (reason == null) return;
     const text = reason.trim();
     if (!text) return;
     try {
       await reportDesign(item.id, text.slice(0, 300));
-      toast('Thanks — your report has been sent.');
+      toast('Thanks: your report has been sent.');
     } catch (e) {
       toast((e as Error).message);
     }
@@ -553,7 +553,7 @@ function renderComments(list: HTMLElement, comments: CommentItem[], item: Galler
   const headEl = document.querySelector('.comments-head');
   if (headEl) headEl.textContent = `${comments.length} comment${comments.length === 1 ? '' : 's'}`;
   if (comments.length === 0) {
-    list.innerHTML = `<div style="color:var(--muted);font-size:14px;">No comments yet — be the first.</div>`;
+    list.innerHTML = `<div style="color:var(--muted);font-size:14px;">No comments yet, be the first.</div>`;
     return;
   }
   for (const c of top) {

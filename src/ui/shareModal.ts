@@ -76,7 +76,7 @@ function toast(msg: string): void {
 export function openShareModal(target: ShareTarget): void {
   ensureCss();
   const url = target.url ?? shareUrl(target.id);
-  const text = `${target.title} — made with TifoMaker`;
+  const text = `${target.title}: made with TifoMaker`;
   const enc = encodeURIComponent;
 
   // Platforms with a real web share-intent.
@@ -156,7 +156,7 @@ export function openShareModal(target: ShareTarget): void {
     b.addEventListener('click', async () => {
       await navigator.clipboard.writeText(url).catch(() => {});
       recordShare(target.id, p.id);
-      toast(`Link copied — paste it into ${p.label}`);
+      toast(`Link copied: paste it into ${p.label}`);
     });
     grid.appendChild(b);
   }

@@ -52,7 +52,7 @@ interface Attempt {
 async function callPollinations(prompt: string, timeoutMs: number): Promise<Attempt> {
   const key = process.env.AI_POLLINATIONS_KEY || process.env.POLLINATIONS_KEY;
   if (!key) {
-    return { url: null, error: 'pollinations needs a free key — create one at enter.pollinations.ai and set AI_POLLINATIONS_KEY' };
+    return { url: null, error: 'pollinations needs a free key, create one at enter.pollinations.ai and set AI_POLLINATIONS_KEY' };
   }
   const base = process.env.AI_POLLINATIONS_URL || 'https://gen.pollinations.ai/image/';
   const model = process.env.AI_POLLINATIONS_MODEL || 'flux';
@@ -64,7 +64,7 @@ async function callPollinations(prompt: string, timeoutMs: number): Promise<Atte
     if (!res.ok) {
       let body = '';
       try { body = (await res.text()).slice(0, 160).replace(/\s+/g, ' ').trim(); } catch { /* ignore */ }
-      return { url: null, status: res.status, error: `pollinations: HTTP ${res.status}${body ? ` — ${body}` : ''}` };
+      return { url: null, status: res.status, error: `pollinations: HTTP ${res.status}${body ? `: ${body}` : ''}` };
     }
     const ab = await res.arrayBuffer();
     if (ab.byteLength < 128) return { url: null, error: 'pollinations returned an empty image' };
@@ -100,7 +100,7 @@ async function callGemini(prompt: string, timeoutMs: number): Promise<Attempt> {
     if (!res.ok) {
       let body = '';
       try { body = (await res.text()).slice(0, 160).replace(/\s+/g, ' ').trim(); } catch { /* ignore */ }
-      return { url: null, status: res.status, error: `image model "${model}": HTTP ${res.status}${body ? ` — ${body}` : ''}` };
+      return { url: null, status: res.status, error: `image model "${model}": HTTP ${res.status}${body ? `: ${body}` : ''}` };
     }
     const data = (await res.json()) as {
       candidates?: Array<{ content?: { parts?: Array<{ inlineData?: { mimeType?: string; data?: string } }> } }>;

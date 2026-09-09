@@ -39,7 +39,7 @@ export function printAssetPanels(imageUrl: string, widthM: number, heightM: numb
         rows +
         ' x ' +
         cols +
-        ' panels) — full surface ' +
+        ' panels): full surface ' +
         widthM.toFixed(1) +
         ' x ' +
         heightM.toFixed(1) +

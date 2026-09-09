@@ -252,7 +252,7 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
       if (layer.kind === 'image' && !layer.assetRef) {
         const img = await generateImage(layer.prompt).catch((e) => ({ url: null, error: String(e) }) as { url: null; error: string });
         if (img.url) layer.assetRef = img.url;
-        else notes.push(`Portrait not generated — ${img.error ?? 'unknown error'}`);
+        else notes.push(`Portrait not generated: ${img.error ?? 'unknown error'}`);
       }
     }
     genCache.set(key, { spec, source: 'model' });
@@ -279,7 +279,7 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
     let spec = incoming.spec;
     let source: 'model' | 'original' = 'original';
     if (activeProvider() === 'none') {
-      notes.push('No AI provider configured — design left unchanged.');
+      notes.push('No AI provider configured: design left unchanged.');
     } else {
       // Portrait assetRefs are huge base64 data URLs; the critic sees the rendered
       // image, so send a SLIM spec (assetRef removed) — otherwise the prompt
@@ -302,7 +302,7 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
         spec = refineSpec(improved.spec);
         source = 'model';
       } else {
-        notes.push(`Critique unavailable — ${res.error ?? 'invalid response'} — design left unchanged.`);
+        notes.push(`Critique unavailable: ${res.error ?? 'invalid response'}: design left unchanged.`);
       }
     }
     return reply.code(200).send({ spec, source, notes });

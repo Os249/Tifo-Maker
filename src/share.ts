@@ -85,7 +85,7 @@ async function main(): Promise<void> {
       </div>
       <canvas class="s-flat" id="s-flat" width="900"></canvas>
       <div class="s-foot">
-        Made with <a href="/">TifoMaker</a> — design your own 60,000-seat tifo.
+        Made with <a href="/">TifoMaker</a>: design your own 60,000-seat tifo.
       </div>
     </div>`;
 
@@ -103,7 +103,7 @@ async function main(): Promise<void> {
 
   paint2D(document.getElementById('s-flat') as HTMLCanvasElement, map, store);
 
-  // 3D hero — reuse the editor's Preview3D, defaulting to the Full view camera.
+  // 3D hero: reuse the editor's Preview3D, defaulting to the Full view camera.
   const host = document.getElementById('s-preview-host')!;
   const { Preview3D, CAMERA_PRESETS } = await import('./render/preview3d');
   const preview = new Preview3D(host, map, store);

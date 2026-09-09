@@ -180,7 +180,7 @@ export function mountBannerStudio(deps: BannerStudioDeps): void {
       });
       close();
       const where = zone === 'floor' ? 'pitch-side' : `${STAND_NAME[stand]} stand`;
-      toast(`Banner added to the ${where} — open Match Day to see it`);
+      toast(`Banner added to the ${where}, open Match Day to see it`);
     });
 
     // painting

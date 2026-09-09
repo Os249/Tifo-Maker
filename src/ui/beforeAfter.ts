@@ -18,7 +18,7 @@ export async function openBeforeAfter(item: GalleryItem): Promise<void> {
     <div class="ba-panel" role="dialog" aria-modal="true" aria-label="Before and after">
       <button class="ba-close" aria-label="Close">&times;</button>
       <div class="ba-title">${escapeHtml(item.title)}</div>
-      <div class="ba-sub">Drag the divider — the design on the left, the real stand on the right.</div>
+      <div class="ba-sub">Drag the divider: the design on the left, the real stand on the right.</div>
       <div class="ba-stage" id="ba-stage">
         <img class="ba-img ba-after" id="ba-after" alt="Real match-day photo" />
         <div class="ba-before-wrap" id="ba-before-wrap">

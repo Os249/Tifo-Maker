@@ -70,14 +70,14 @@ export function critiqueDesign(cells: Uint8Array, map: SeatMap, spec: TifoSpec):
   const fragileRatio = paintedSeats ? fragileSeats / paintedSeats : 0;
   if (fragileRatio > FRAGILE_RATIO_WARN) {
     issues.push(
-      `Fine detail may not read at stadium scale (${Math.round(fragileRatio * 100)}% of painted seats sit in thin strokes) — enlarge text/symbols.`,
+      `Fine detail may not read at stadium scale (${Math.round(fragileRatio * 100)}% of painted seats sit in thin strokes), enlarge text/symbols.`,
     );
   }
 
   const intended = intendedStands(spec);
   const emptyStands = STAND_ORDER.filter((s) => intended.has(s) && perStandFill[s] < EMPTY_FILL);
   for (const s of emptyStands) {
-    issues.push(`The ${s} stand is nearly empty — give it a focal element or colour field.`);
+    issues.push(`The ${s} stand is nearly empty, give it a focal element or colour field.`);
   }
 
   let score = 100;

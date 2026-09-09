@@ -72,7 +72,7 @@ async function applySchema(pool: pg.Pool): Promise<void> {
 async function main(): Promise<void> {
   const staticDir = resolveDist();
   if (!staticDir) {
-    console.warn('[tifo] no dist/ found — serving API only (run `npm run build` first to serve the app)');
+    console.warn('[tifo] no dist/ found: serving API only (run `npm run build` first to serve the app)');
   }
   // Moderators are designated via env, never via any API — bootstrap-safe.
   const adminUsernames = (process.env.ADMIN_USERNAMES ?? '')
@@ -92,7 +92,7 @@ async function main(): Promise<void> {
       await s.init();
       stadiums = s;
     } catch (e) {
-      console.error('[tifo] community_stadiums init failed — submissions disabled:', e);
+      console.error('[tifo] community_stadiums init failed: submissions disabled:', e);
     }
     // Traffic sources — best-effort table init, like community_stadiums above, so a
     // schema slip here can never block boot; on failure the feature simply stays off.
@@ -106,7 +106,7 @@ async function main(): Promise<void> {
       setInterval(() => void t.purge(), 24 * 60 * 60 * 1000).unref();
       traffic = t;
     } catch (e) {
-      console.error('[tifo] visits init failed — traffic sources disabled:', e);
+      console.error('[tifo] visits init failed: traffic sources disabled:', e);
     }
     app = await buildApp(new PgDesignRepository(pool), new PgAuthRepository(pool), templates, {
       staticDir,

@@ -22,7 +22,7 @@ export const ADMIN_HTML = `<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex,nofollow">
-<title>TifoMaker — Admin</title>
+<title>TifoMaker: Admin</title>
 <style>
   :root{
     --bg:#0d1117; --bg2:#151b23; --bg3:#1c232c; --line:#2a323d; --line2:#374151;
@@ -119,7 +119,7 @@ export const ADMIN_HTML = `<!doctype html>
 <div id="login" class="login-wrap">
   <form class="login" id="login-form">
     <h1>Admin sign in</h1>
-    <p>Enter the admin password — the <code>AI_ADMIN_PASSWORD</code> set on the server.</p>
+    <p>Enter the admin password, the <code>AI_ADMIN_PASSWORD</code> set on the server.</p>
     <label for="p">Admin password</label>
     <input id="p" type="password" autocomplete="current-password">
     <button class="primary" type="submit">Sign in</button>
@@ -287,7 +287,7 @@ function trafficChart(daily){
     + '<polyline fill="none" stroke="#58a6ff" stroke-width="1.6" stroke-dasharray="4 3" stroke-linejoin="round" stroke-linecap="round" points="' + series('visitors', false) + '"></polyline>'
     + '</svg>';
   var first = daily[0].day, last = daily[n-1].day;
-  return '<div class="card"><p class="lt">Visits per day <span class="dim" style="font-weight:400">— ' + fmt(totalV) + ' total, peak ' + fmt(max) + '</span></p>'
+  return '<div class="card"><p class="lt">Visits per day <span class="dim" style="font-weight:400">: ' + fmt(totalV) + ' total, peak ' + fmt(max) + '</span></p>'
     + '<p class="lc"><span style="color:#3fb950">&#9632;</span> visits &nbsp; <span style="color:#58a6ff">&#9632;</span> unique visitors</p>'
     + svg
     + '<p class="lc" style="margin:5px 0 0;display:flex;justify-content:space-between">' + esc(first) + '<span>' + esc(last) + '</span></p></div>';
@@ -362,8 +362,8 @@ function trafficSection(tr, days){
     return html;
   }
 
-  var topSource = (tr.sources && tr.sources.length) ? (SOURCE_LABEL[tr.sources[0].key] || tr.sources[0].key) : '—';
-  var topRef = (tr.referrers && tr.referrers.length) ? tr.referrers[0].key : '—';
+  var topSource = (tr.sources && tr.sources.length) ? (SOURCE_LABEL[tr.sources[0].key] || tr.sources[0].key) : '-';
+  var topRef = (tr.referrers && tr.referrers.length) ? tr.referrers[0].key : '-';
 
   html += '<div class="grid">';
   html += kpi('Page views', t.visits);
@@ -384,17 +384,17 @@ function trafficSection(tr, days){
   html += '</div>';
 
   html += '<div class="grid three" style="margin-top:10px">';
-  html += barList('Countries', tr.countries && tr.countries.length ? 'from the edge network' : 'needs Cloudflare in front — see CLOUDFLARE.md', tr.countries, '#d29922');
+  html += barList('Countries', tr.countries && tr.countries.length ? 'from the edge network' : 'needs Cloudflare in front, see CLOUDFLARE.md', tr.countries, '#d29922');
   html += barList('Languages', 'browser language, aggregated', tr.languages, '#a371f7');
   html += barList('Devices', 'desktop vs phone vs tablet', tr.devices, '#39c5cf');
   html += '</div>';
 
   html += '<div class="grid two" style="margin-top:10px">';
   html += barList('Browsers & in-app webviews', 'a TikTok or Instagram webview here means the link was opened inside that app', tr.browsers, '#58a6ff');
-  html += barList('Tagged campaigns', 'links you tagged with ?utm_source=... — nothing here means no tagged link was used', tr.campaigns, '#d29922');
+  html += barList('Tagged campaigns', 'links you tagged with ?utm_source=..., nothing here means no tagged link was used', tr.campaigns, '#d29922');
   html += '</div>';
 
-  html += '<div class="callout ok"><b>How this is measured.</b> Recorded on the server, after each page is sent, so it counts every visitor rather than only those who accept analytics. No cookie is set. Your IP address is never stored — it is hashed once in memory with a secret that is regenerated every day and never written to disk, so visitors cannot be identified or followed from one day to the next. Referring URLs are reduced to a hostname before storage.</div>';
+  html += '<div class="callout ok"><b>How this is measured.</b> Recorded on the server, after each page is sent, so it counts every visitor rather than only those who accept analytics. No cookie is set. Your IP address is never stored: it is hashed once in memory with a secret that is regenerated every day and never written to disk, so visitors cannot be identified or followed from one day to the next. Referring URLs are reduced to a hostname before storage.</div>';
   return html;
 }
 
@@ -439,7 +439,7 @@ function render(ov, tr, funnel){
   /* 3. The funnel, with the caveat that makes its numbers readable. */
   html += '<h2 class="sec">Editor funnel <span class="hint">last ' + days + ' days · consent-gated</span></h2>';
   html += funnelHtml(funnel);
-  html += '<div class="callout"><b>Read these as a shape, not a headcount.</b> These steps come from in-browser tracking that only runs after a visitor picks &ldquo;Accept all&rdquo; in the cookie banner, so the totals are far lower than the page views above and the two sections will never reconcile. The drop-off <em>between</em> steps is still meaningful — that is what to watch.</div>';
+  html += '<div class="callout"><b>Read these as a shape, not a headcount.</b> These steps come from in-browser tracking that only runs after a visitor picks &ldquo;Accept all&rdquo; in the cookie banner, so the totals are far lower than the page views above and the two sections will never reconcile. The drop-off <em>between</em> steps is still meaningful, that is what to watch.</div>';
 
   html += '<h2 class="sec">Engagement</h2><div class="grid">';
   html += kpi('Likes / votes', t.votes);

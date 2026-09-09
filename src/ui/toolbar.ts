@@ -189,7 +189,7 @@ export function mountToolbar(
       b.addEventListener('contextmenu', (e) => {
         e.preventDefault();
         if (counts[idx] > 0) {
-          message.textContent = `that colour is used by ${counts[idx].toLocaleString()} seats — recolour them before removing`;
+          message.textContent = `that colour is used by ${counts[idx].toLocaleString()} seats: recolour them before removing`;
           return;
         }
         if (store.palette.length <= 2) return;
@@ -1133,7 +1133,7 @@ export function mountToolbar(
       );
       if (!result.valid || !result.doc) {
         const first = result.errors[0];
-        message.textContent = first ? `can\u2019t open: ${first.path ? first.path + ' — ' : ''}${first.message}` : 'invalid .tifo file';
+        message.textContent = first ? `can\u2019t open: ${first.path ? first.path + ': ' : ''}${first.message}` : 'invalid .tifo file';
         return;
       }
       const { flattenLayers } = await import('../core/tifoFormat');
@@ -1200,7 +1200,7 @@ export function mountToolbar(
       }
       if (choice.makePublic) track('published');
       message.textContent = choice.makePublic
-        ? `published "${meta.title || docTitle.value}" — it's now in the community feed`
+        ? `published "${meta.title || docTitle.value}": it's now in the community feed`
         : `saved privately${choice.asNew ? ' as a new copy' : ''}`;
     } catch (err) {
       message.textContent = `save failed: ${(err as Error).message}`;
@@ -1371,7 +1371,7 @@ export function mountToolbar(
   const STANDS = ['East', 'North', 'West', 'South'];
   editor.onHoverSeat = (seat) => {
     if (seat < 0) {
-      coords.textContent = '—';
+      coords.textContent = '-';
       return;
     }
     const u = map.uv[seat * 2];
@@ -1578,7 +1578,7 @@ export function mountToolbar(
         c.title = `${stand} section ${n + 1} · ${sec.seats.length.toLocaleString()} seats`;
         c.addEventListener('click', () => {
           editor.zoomToSeats(sec.seats);
-          message.textContent = `${stand} section ${n + 1} — ${sec.seats.length.toLocaleString()} seats`;
+          message.textContent = `${stand} section ${n + 1}: ${sec.seats.length.toLocaleString()} seats`;
         });
         cells.appendChild(c);
       });
@@ -1730,7 +1730,7 @@ export function mountToolbar(
       say(`GIF exported (${(blob.size / 1024).toFixed(0)} KB)`);
     } else {
       if (!videoExportSupported()) {
-        say('Video capture is not supported in this browser — switch Format to GIF.');
+        say('Video capture is not supported in this browser, switch Format to GIF.');
         return;
       }
       say('Recording video…');
@@ -1757,7 +1757,7 @@ export function mountToolbar(
         <div class="sx-modal" role="dialog" aria-modal="true" aria-label="Stadium animation preview">
           <button class="sx-close" aria-label="Close">&times;</button>
           <h3>Animation preview</h3>
-          <p class="sx-lead">Exactly what will be exported — watermark included.</p>
+          <p class="sx-lead">Exactly what will be exported, watermark included.</p>
           <canvas class="sx-canvas"></canvas>
           <div class="sx-actions">
             <button id="sx-modal-download" class="primary"><i class="ti ti-download"></i> Download ${sxFormat.value === 'gif' ? 'GIF' : 'video'}</button>
@@ -1846,7 +1846,7 @@ export function mountToolbar(
       track('exported', { once: false }); // bottom of funnel; count every export
       message.textContent = isSignedIn()
         ? `distribution PDF exported (${(blob.size / 1024).toFixed(0)} KB)`
-        : `distribution PDF exported — sign in for a clean, watermark-free version`;
+        : `distribution PDF exported: sign in for a clean, watermark-free version`;
     } catch (err) {
       message.textContent = `PDF export failed: ${(err as Error).message}`;
     } finally {
@@ -1880,7 +1880,7 @@ export function mountToolbar(
   const qrBtn = $('#export-qr') as unknown as HTMLButtonElement;
   qrBtn.addEventListener('click', async () => {
     if (!designId) {
-      message.textContent = 'save or publish your tifo first — the QR points fans to it';
+      message.textContent = 'save or publish your tifo first, the QR points fans to it';
       return;
     }
     const url = `${location.origin}/s/${designId}`;

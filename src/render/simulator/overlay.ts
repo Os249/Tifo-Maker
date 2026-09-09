@@ -251,7 +251,7 @@ const MDS_T: Record<string, { en: string; ar: string }> = {
   'cue.smoke-on': { en: 'Smoke on', ar: 'تشغيل الدخان' },
   'cue.floods-on': { en: 'Floodlights on', ar: 'تشغيل الكشافات' },
   noAssets: { en: '(no assets yet)', ar: '(ما في عناصر بعد)' },
-  selectDash: { en: '— select —', ar: '— اختر —' },
+  selectDash: { en: '(select)', ar: '(اختر)' },
   helpSub: { en: 'See your tifo come alive in a packed 3D stadium.', ar: 'شوف تيفوك يصير حقيقة في ملعب ثلاثي الأبعاد ممتلئ.' },
   hMove: { en: 'Move the camera', ar: 'حرّك الكاميرا' },
   hLook: { en: 'Look around', ar: 'انظر حولك' },
@@ -285,7 +285,7 @@ const MDS_T: Record<string, { en: string; ar: string }> = {
   'tip.floods': { en: 'Floodlight towers + light beams', ar: 'أبراج الكشافات وأشعة الضوء' },
   'tip.smoke': { en: 'Drifting smoke', ar: 'دخان منساب' },
   'tip.banners': { en: 'Fill the dark walkway gap between tiers with your design', ar: 'عبّي الفراغ المعتم بين الطوابق بتصميمك' },
-  'tip.stairs': { en: 'Also fill the aisles / stairs between sections (unorthodox — off by default)', ar: 'عبّي كمان الممرات/الدرج بين القطاعات (غير معتاد — مطفأ افتراضياً)' },
+  'tip.stairs': { en: 'Also fill the aisles / stairs between sections (unorthodox, off by default)', ar: 'عبّي كمان الممرات/الدرج بين القطاعات (غير معتاد، مطفأ افتراضياً)' },
   'tip.wet': { en: 'Reflective wet-look pitch (heavier on GPU)', ar: 'أرضية مبلّلة عاكسة (أثقل على المعالج الرسومي)' },
   'tip.confetti': { en: 'Burst of confetti', ar: 'انفجار قصاصات' },
   'tip.pyro': { en: 'Burst of pyro flares', ar: 'انفجار شماريخ' },
@@ -296,7 +296,7 @@ const MDS_T: Record<string, { en: string; ar: string }> = {
   'tip.surface': { en: 'Giant draped surface tifo over the stand', ar: 'تيفو سطح عملاق منسدل على المدرج' },
   'tip.flag': { en: 'Huge waving flag over the crowd', ar: 'علم ضخم يرفرف فوق الجمهور' },
   'tip.scarf': { en: 'Waving scarf wall', ar: 'جدار أوشحة يرفرف' },
-  'tip.proj': { en: 'Paints your tifo onto the seats from this view — EDITS your design', ar: 'يرسم تيفوك على المقاعد من هذي اللقطة — يعدّل تصميمك' },
+  'tip.proj': { en: 'Paints your tifo onto the seats from this view, EDITS your design', ar: 'يرسم تيفوك على المقاعد من هذي اللقطة، يعدّل تصميمك' },
   'tip.img': { en: 'Put a custom image on the selected asset', ar: 'حط صورة مخصصة على العنصر المحدد' },
   'tip.unfurl': { en: 'Drop / unfurl the selected surface tifo', ar: 'أسقط / انشر تيفو السطح المحدد' },
   'tip.print': { en: 'Print the selected image as tiled paper panels', ar: 'اطبع الصورة المحددة كألواح ورقية' },
@@ -876,7 +876,7 @@ export function openMatchDaySimulator(
       if (typeof r.result !== 'string') return;
       const img = new Image();
       img.onload = () => {
-        if (!window.confirm('This PAINTS your tifo onto the seats as seen from this camera — it edits your actual design (undo with Ctrl+Z in the editor). Continue?')) {
+        if (!window.confirm('This PAINTS your tifo onto the seats as seen from this camera, it edits your actual design (undo with Ctrl+Z in the editor). Continue?')) {
           projInput.value = '';
           return;
         }

@@ -32,7 +32,7 @@ export function openSaveDialog(opts: {
           <button class="save-option" data-act="private">
             <i class="ti ti-lock"></i>
             <span class="save-opt-title">Save to your account</span>
-            <span class="save-opt-sub">Private — only you can see it. ${opts.isSignedIn ? '' : 'Sign in required.'}</span>
+            <span class="save-opt-sub">Private, only you can see it. ${opts.isSignedIn ? '' : 'Sign in required.'}</span>
           </button>
           <button class="save-option" data-act="public">
             <i class="ti ti-world"></i>

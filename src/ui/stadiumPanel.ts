@@ -50,7 +50,7 @@ const DISCLAIMER =
 function esc(s: string): string {
   return s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c] ?? c);
 }
-const fmt = (n?: number): string => (typeof n === 'number' ? n.toLocaleString() : '—');
+const fmt = (n?: number): string => (typeof n === 'number' ? n.toLocaleString() : '-');
 const INPUT_CSS =
   'width:100%;box-sizing:border-box;padding:6px;border:1px solid var(--line-1);border-radius:var(--r-md);background:var(--bg-1);color:var(--text-1);font:inherit;font-size:11px;';
 
@@ -175,7 +175,7 @@ export function mountStadiumPanel(deps: StadiumPanelDeps): void {
       p.className = 'hint';
       p.style.cssText = 'font-size:11px;color:var(--text-3);margin:4px 0;';
       p.textContent =
-        activeTab === 'favorites' ? 'No favourites yet — tap ☆ on a stadium to add it.' : activeTab === 'custom' ? 'No custom stadiums yet — create one above.' : 'No stadiums match your filters.';
+        activeTab === 'favorites' ? 'No favourites yet: tap ☆ on a stadium to add it.' : activeTab === 'custom' ? 'No custom stadiums yet: create one above.' : 'No stadiums match your filters.';
       listEl.appendChild(p);
       return;
     }
@@ -214,12 +214,12 @@ export function mountStadiumPanel(deps: StadiumPanelDeps): void {
       return;
     }
     const rows: [string, string][] = [
-      ['Country', e.meta.country ?? '—'],
-      ['Capacity', e.meta.capacity ? '~' + fmt(e.meta.capacity) : '—'],
-      ['Seats', e.id === currentId ? fmt(map.count) : e.meta.capacity ? '~' + fmt(e.meta.capacity) : '—'],
+      ['Country', e.meta.country ?? '-'],
+      ['Capacity', e.meta.capacity ? '~' + fmt(e.meta.capacity) : '-'],
+      ['Seats', e.id === currentId ? fmt(map.count) : e.meta.capacity ? '~' + fmt(e.meta.capacity) : '-'],
       ['Sections', String(sectionCount(e.template))],
       ['Tiers', String(tierCount(e.template))],
-      ['Type', e.meta.type ?? '—'],
+      ['Type', e.meta.type ?? '-'],
     ];
     infoEl.innerHTML =
       `<h4 style="margin:0 0 6px;">${esc(e.meta.name)}</h4>` +
@@ -330,7 +330,7 @@ export function mountStadiumPanel(deps: StadiumPanelDeps): void {
     meta.style.cssText = 'flex:1;min-width:0;';
     meta.innerHTML =
       `<div style="font-size:11px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(s.name)}</div>` +
-      `<div style="font-size:10px;color:var(--text-3);">${esc(s.country ?? '—')} · ${tiers} tier${tiers === 1 ? '' : 's'}</div>`;
+      `<div style="font-size:10px;color:var(--text-3);">${esc(s.country ?? '-')} · ${tiers} tier${tiers === 1 ? '' : 's'}</div>`;
     const approve = document.createElement('button');
     approve.textContent = 'Approve';
     approve.style.cssText = 'font-size:10px;padding:4px 8px;';
@@ -404,7 +404,7 @@ export function mountStadiumPanel(deps: StadiumPanelDeps): void {
       void submitStadium(e.template, e.meta.name, e.meta.country ?? undefined)
         .then((r) => {
           submitBtn.textContent = r ? '✓' : '✗';
-          submitBtn.title = r ? 'Submitted for community review' : 'Submission failed — try again';
+          submitBtn.title = r ? 'Submitted for community review' : 'Submission failed, try again';
         })
         .catch(() => {
           submitBtn.textContent = '✗';

@@ -52,7 +52,7 @@ console.log('elevation m:', minEl.toFixed(1), '→', maxEl.toFixed(1),
 const lowerFrontOk = minEl > 0.5 && minEl < 3;
 const upperTopOk = maxEl > 20 && maxEl < 35;
 const pitchClearOk = minR > Math.hypot(52.5, 34); // first row outside pitch corner
-console.log('bowl plausibility — front row:', lowerFrontOk, '| top row:', upperTopOk, '| pitch clearance:', pitchClearOk);
+console.log('bowl plausibility: front row:', lowerFrontOk, '| top row:', upperTopOk, '| pitch clearance:', pitchClearOk);
 
 // --- Image import: pure quantizer + seat application ---
 import { applyGridToSeats, fitRect, quantizePixels } from '../src/core/importImage';

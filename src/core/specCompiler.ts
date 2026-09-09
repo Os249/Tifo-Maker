@@ -163,7 +163,7 @@ export function compileSpec(
     try {
       const applied = applyLayer(layer, map, store);
       seatsPainted += applied;
-      if (applied === 0) warnings.push(`layer "${layer.id}" (${layer.kind}) painted no seats — region may be empty`);
+      if (applied === 0) warnings.push(`layer "${layer.id}" (${layer.kind}) painted no seats: region may be empty`);
       else layersApplied++;
     } catch (e) {
       warnings.push(`layer "${layer.id}" failed: ${(e as Error).message}`);

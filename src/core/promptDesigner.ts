@@ -245,7 +245,7 @@ export function designFromPrompt(prompt: string): TifoSpec {
   // 1) background field over the scoped region
   layers.push({ kind: 'fill', id: 'bg', region: regionObj(region), colorIndex: bg });
 
-  // 2) field treatment — gradient > pattern (checker/grid/flag/hoops/chevron) > stripes/halves
+  // 2) field treatment: gradient > pattern (checker/grid/flag/hoops/chevron) > stripes/halves
   const gradientKind = detectGradient(p);
   const patternKind = detectPattern(p);
   const stripeKind = detectStripes(p);
@@ -278,7 +278,7 @@ export function designFromPrompt(prompt: string): TifoSpec {
     });
   }
 
-  // 4) text — headline + optional number, stacked when both present
+  // 4) text: headline + optional number, stacked when both present
   const { head: headline, sub } = pickText(original, p);
   if (headline) {
     const wide = scopeAll || headline.length >= 9;
@@ -316,7 +316,7 @@ function portraitPrompt(original: string, lower: string): string {
   for (const key of Object.keys(PLAYERS)) {
     if (lower.includes(key)) return `bold graphic poster portrait of ${PLAYERS[key].name}, flat tones`;
   }
-  return `${original.trim().slice(0, 120)} — bold graphic poster portrait, flat tones`;
+  return `${original.trim().slice(0, 120)}: bold graphic poster portrait, flat tones`;
 }
 
 type Occasion = 'derby' | 'farewell' | 'anniversary' | 'title' | 'heritage' | 'welcome' | 'mosaic' | 'generic';

@@ -590,7 +590,7 @@ async function runSuite(name: string, repo: DesignRepository, auth: AuthReposito
   assert.equal((await app.inject({ method: 'POST', url: `/api/users/${aliceId}/follow`, headers: bearer(bobTok) })).statusCode, 200);
 
   // Set publish meta (description + allowRemix), then publish.
-  await app.inject({ method: 'PUT', url: `/api/designs/${designId}/publish-meta`, headers: bearer(aliceTok), payload: { description: 'For the derby — top tier gold.', allowRemix: true } });
+  await app.inject({ method: 'PUT', url: `/api/designs/${designId}/publish-meta`, headers: bearer(aliceTok), payload: { description: 'For the derby, top tier gold.', allowRemix: true } });
   await app.inject({ method: 'PATCH', url: `/api/designs/${designId}`, headers: bearer(aliceTok), payload: { isPublic: true } });
 
   // Bob (a follower) gets a 'follow_post' notification about Alice's publish.
@@ -757,7 +757,7 @@ async function runSuite(name: string, repo: DesignRepository, auth: AuthReposito
   const unknown = await send('s9', 'not_a_real_step');
   assert.equal(unknown.statusCode, 204);
 
-  // The funnel exposes conversion rates and account counts — business intelligence,
+  // The funnel exposes conversion rates and account counts, business intelligence,
   // and previously world-readable. It is admin-only now.
   assert.equal(
     (await app.inject({ method: 'GET', url: '/api/funnel?days=1' })).statusCode,
@@ -782,7 +782,7 @@ async function runSuite(name: string, repo: DesignRepository, auth: AuthReposito
 // ---- traffic sources: the privacy guarantees, asserted ----
 // These are not cosmetic tests. The whole legal basis for measuring traffic without
 // a consent banner is that NO personal data is stored, so each of those properties
-// is pinned here — if a future change starts persisting an IP or a raw user-agent,
+// is pinned here, if a future change starts persisting an IP or a raw user-agent,
 // this block fails loudly instead of quietly creating a compliance problem.
 {
   const IP = '203.0.113.77';
@@ -879,7 +879,7 @@ if (process.env.DATABASE_URL) {
   await pool.query('TRUNCATE design_revisions, designs, auth_tokens, users CASCADE');
   await runSuite('postgres repos', new PgDesignRepository(pool), new PgAuthRepository(pool));
 
-  // Social layer on real Postgres — guards pg-only bugs the memory suite cannot
+  // Social layer on real Postgres, guards pg-only bugs the memory suite cannot
   // catch, e.g. the JSONB palette round-trip in remix that shipped a 500.
   {
     const pAuth = new PgAuthRepository(pool);

@@ -83,6 +83,9 @@ const NOT_FOUND_HTML = `<!doctype html>
      border:1px solid #2a323d; color:#e6edf3; text-decoration:none; font-size:14px; }
   a.p{ background:#3fb950; border-color:#3fb950; color:#04220e; font-weight:600; }
   a:hover{ border-color:#3d4754; }
+  .c{ margin:28px 0 0; font-size:13px; color:#6b7480; }
+  .c a{ display:inline; margin:0; padding:0; border:0; color:#58a6ff; text-decoration:underline; }
+  .c a:hover{ color:#79b8ff; }
 </style>
 </head>
 <body>
@@ -93,6 +96,9 @@ const NOT_FOUND_HTML = `<!doctype html>
     <a class="p" href="/app">Open the editor</a>
     <a href="/">Go home</a>
     <a href="/community">Browse community</a>
+    <p class="c">Followed a link that should have worked?
+      <a href="https://x.com/OS99GameDev" target="_blank" rel="noopener noreferrer">Tell the developer</a>.
+      One person builds this, so it goes straight to him.</p>
   </main>
 </body>
 </html>`;
@@ -515,7 +521,7 @@ export async function buildApp(
         html:
           `<p>We received a request to reset your TifoMaker password.</p>` +
           `<p><a href="${link}">Choose a new password</a></p>` +
-          `<p>This link expires in 1 hour. If you didn't request this, ignore this email — your password is unchanged.</p>`,
+          `<p>This link expires in 1 hour. If you didn't request this, ignore this email, your password is unchanged.</p>`,
         text: `Reset your TifoMaker password: ${link}\nThis link expires in 1 hour. If you didn't request this, ignore this email.`,
       });
     } catch (err) {
@@ -1385,7 +1391,7 @@ export async function buildApp(
 
     // Share links: /d/:id. Inject Open Graph + Twitter Card tags so a pasted
     // link shows a rich preview (title, author, the stadium thumbnail) in
-    // WhatsApp, Twitter/X, Discord, Slack, etc. — before any JS runs. Humans
+    // WhatsApp, Twitter/X, Discord, Slack, etc., before any JS runs. Humans
     // get the same HTML and the SPA boots and loads the design normally.
     app.get('/d/:id', async (req, reply) => {
       const { id } = req.params as { id: string };
@@ -1396,7 +1402,7 @@ export async function buildApp(
       let image = `${base}/og-default.png`;
       // Only expose metadata for PUBLIC designs (private ones stay unlisted).
       if (rec && rec.isPublic) {
-        title = `${rec.title} — Tifo Maker`;
+        title = `${rec.title}: Tifo Maker`;
         description = 'A stadium tifo on Tifo Maker. Open it to remix.';
         const thumb = await repo.getThumbnail(rec.id).catch(() => null);
         if (thumb) image = `${base}/api/designs/${rec.id}/thumbnail.png`;
@@ -1425,7 +1431,7 @@ export async function buildApp(
       return reply.type('text/html').send(html);
     });
 
-    // Dedicated public VIEW page at /t/:id — the canonical share link. Serves the
+    // Dedicated public VIEW page at /t/:id, the canonical share link. Serves the
     // standalone share page with a branded OG/Twitter card so it previews richly
     // in WhatsApp/X/Discord/Telegram/Facebook. Private/unknown designs get the
     // generic card (no metadata leak); the page client shows "unavailable".
@@ -1442,11 +1448,11 @@ export async function buildApp(
         const rec = await repo.get(id).catch(() => null);
         const base = origin(req);
         let title = 'TifoMaker';
-        let description = 'A stadium tifo on TifoMaker — open it to view in full.';
+        let description = 'A stadium tifo on TifoMaker, open it to view in full.';
         let image = `${base}/og-default.png`;
         if (rec && rec.isPublic) {
           const owner = rec.ownerId ? await auth.getUserById(rec.ownerId).catch(() => null) : null;
-          title = `${rec.title} — TifoMaker`;
+          title = `${rec.title}: TifoMaker`;
           description = `A stadium tifo${owner ? ` by @${owner.username}` : ''} on TifoMaker.`;
           image = `${base}/api/designs/${rec.id}/og.png`;
         }
@@ -1529,7 +1535,7 @@ export async function buildApp(
       /* reset page optional in API-only builds */
     }
 
-    // sitemap.xml — generated per request rather than shipped as a static file, so
+    // sitemap.xml: generated per request rather than shipped as a static file, so
     // designs published after the last deploy still get discovered. robots.txt (a
     // static file in public/) points here. Public designs only: private ones must
     // never be enumerable, and /t/:id is the canonical URL for each one.
@@ -1561,7 +1567,7 @@ export async function buildApp(
       }
       for (const d of designs) {
         // lastmod is optional in the spec, and an unparseable date would throw and
-        // 500 the whole sitemap — so omit the element rather than risk that.
+        // 500 the whole sitemap, so omit the element rather than risk that.
         const t = Date.parse(d.updatedAt);
         const lastmod = Number.isFinite(t) ? `    <lastmod>${new Date(t).toISOString().slice(0, 10)}</lastmod>\n` : '';
         urls.push(

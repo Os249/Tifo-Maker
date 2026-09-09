@@ -36,7 +36,7 @@ const STEPS: TourStep[] = [
   {
     selector: '.tool-rail',
     title: 'Your tools',
-    body: 'Brush, Fill and Eraser paint the seats; Text and Image add words or a logo. Shapes drops crests, stars and more — add as many as you like, then “Bake all”. Select now lets you drag a box around any area to recolour or clear it. Hover any tool for its shortcut.',
+    body: 'Brush, Fill and Eraser paint the seats; Text and Image add words or a logo. Shapes drops crests, stars and more: add as many as you like, then “Bake all”. Select now lets you drag a box around any area to recolour or clear it. Hover any tool for its shortcut.',
     place: 'right',
   },
   {
@@ -48,7 +48,7 @@ const STEPS: TourStep[] = [
   {
     selector: '#rail-ai',
     title: 'AI Designer',
-    body: 'Describe a display in plain words and the AI paints a fully editable tifo on the seats. “Super AI” designs the whole bowl at once; “Shuffle” gives instant free variations — no tokens needed.',
+    body: 'Describe a display in plain words and the AI paints a fully editable tifo on the seats. “Super AI” designs the whole bowl at once; “Shuffle” gives instant free variations, no tokens needed.',
     place: 'right',
   },
   {
@@ -66,25 +66,25 @@ const STEPS: TourStep[] = [
   {
     selector: '#view-3d',
     title: 'Stadium view',
-    body: 'See your design wrap around the real 3D bowl — and open the Match Day Simulator for a packed, cinematic night-match view with crowds, flags, smoke and choreography.',
+    body: 'See your design wrap around the real 3D bowl, and open the Match Day Simulator for a packed, cinematic night-match view with crowds, flags, smoke and choreography.',
     place: 'bottom',
   },
   {
     selector: '#view-split',
-    title: 'Split view — both at once',
+    title: 'Split view: both at once',
     body: 'Paint on the left and watch the 3D stadium update live on the right. The best of both while you fine-tune.',
     place: 'bottom',
   },
   {
     selector: '#save',
     title: 'Save, share & produce',
-    body: 'Save to your account, publish to the community, or export match-day logistics — a distribution PDF, seat manifest and a fan QR code — from here.',
+    body: 'Save to your account, publish to the community, or export match-day logistics (a distribution PDF, seat manifest and a fan QR code) from here.',
     place: 'top',
   },
   {
     selector: '#gallery',
     title: 'Get inspired',
-    body: 'Browse tifos from supporters worldwide — like, comment, and remix any of them into your own starting point.',
+    body: 'Browse tifos from supporters worldwide: like, comment, and remix any of them into your own starting point.',
     place: 'bottom',
   },
 ];
@@ -92,7 +92,7 @@ const STEPS: TourStep[] = [
 // Short, phone-native tour: fewer steps, targets the bottom ribbon + view tabs,
 // and ends on AI so finishing drops the user into the AI front door.
 const MOBILE_STEPS: TourStep[] = [
-  { selector: '.tool-rail', title: 'Your toolbar', body: 'Every tool lives down here. Tap one to use it — tap it again for its options.', place: 'top' },
+  { selector: '.tool-rail', title: 'Your toolbar', body: 'Every tool lives down here. Tap one to use it, tap it again for its options.', place: 'top' },
   { selector: '#view-3d', title: 'See it in 3D', body: 'Tap Stadium to see your tifo on the real bowl, then Match Day for the full night-match show.', place: 'bottom' },
   { selector: '#rail-ai', title: 'Start with AI', body: 'Fastest way to a tifo: tap AI, describe it (or just your club), and watch it appear.', place: 'top' },
 ];

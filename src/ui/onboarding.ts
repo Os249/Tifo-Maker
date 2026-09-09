@@ -79,7 +79,7 @@ export function openOnboarding(patterns: PatternPreset[]): Promise<QuickStart | 
         <div class="ob-hero">
           <div class="ob-brand">TIFO<b>MAKER</b></div>
           <h2 class="ob-h2">Start your tifo</h2>
-          <p class="ob-lead">A blank 60,000-seat bowl is a lot. Name your project and pick a starting point — you can change everything later.</p>
+          <p class="ob-lead">A blank 60,000-seat bowl is a lot. Name your project and pick a starting point, you can change everything later.</p>
         </div>
         <div class="ob-section">
           <label class="ob-label" for="ob-name">Project name</label>

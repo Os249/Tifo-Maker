@@ -238,7 +238,7 @@ export async function renderDistributionPdf(
   doc.text(summary.totalBags.toLocaleString(), cols.bags, my, { width: 80, align: 'right' });
 
   doc.font('Helvetica').fontSize(9).fillColor('#888888').text(
-    'Color families and hex values are a procurement guide. Confirm physical card stock against a printed sample — screen color differs from print.',
+    'Color families and hex values are a procurement guide. Confirm physical card stock against a printed sample, screen color differs from print.',
     MARGIN,
     PAGE.height - MARGIN - 16,
     { width: PAGE.width - 2 * MARGIN },

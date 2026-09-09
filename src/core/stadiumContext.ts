@@ -88,7 +88,7 @@ export function buildStadiumContext(map: SeatMap): StadiumContext {
 
   const notes = [
     'Stands are disjoint quarters of the perimeter, in order East, North, West, South.',
-    'The East stand straddles the u=0 seam — art that must read across the seam needs care.',
+    'The East stand straddles the u=0 seam, art that must read across the seam needs care.',
     'East and West are the long sides facing each other; North and South are the ends facing each other.',
   ];
 

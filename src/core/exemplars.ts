@@ -47,7 +47,7 @@ export const SUPER_AI_EXEMPLARS: Exemplar[] = [
     },
   },
   {
-    brief: 'Farewell to a legendary captain — portrait hero, his name opposite, solemn blue and gold.',
+    brief: 'Farewell to a legendary captain: portrait hero, his name opposite, solemn blue and gold.',
     spec: {
       title: 'Grazie Capitano',
       summary: 'Portrait fills the west stand; gold name on the east; deep gradient on the ends frames the bowl.',
@@ -61,7 +61,7 @@ export const SUPER_AI_EXEMPLARS: Exemplar[] = [
     },
   },
   {
-    brief: 'Club centenary anniversary — festive green and gold mosaic, giant 100, founding years.',
+    brief: 'Club centenary anniversary: festive green and gold mosaic, giant 100, founding years.',
     spec: {
       title: 'One Hundred Years',
       summary: 'Checker mosaic across the whole bowl, a giant 100 on the north, founding years on the south, stars on the sides.',
@@ -83,7 +83,7 @@ export const SUPER_AI_EXEMPLARS: Exemplar[] = [
 export function fewShotBlock(): string {
   const parts = ['Study these example full-stadium designs (brief, then the JSON), then design in the same spirit:'];
   SUPER_AI_EXEMPLARS.forEach((ex, i) => {
-    parts.push(`\nExample ${i + 1} — ${ex.brief}\n${JSON.stringify(ex.spec)}`);
+    parts.push(`\nExample ${i + 1}: ${ex.brief}\n${JSON.stringify(ex.spec)}`);
   });
   return parts.join('\n');
 }

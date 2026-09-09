@@ -87,10 +87,10 @@ export function mountAiPanel(deps: AiPanelDeps): void {
   const resetMins = (q: AiQuota): number => Math.max(1, Math.ceil((q.resetInSec ?? 0) / 60));
   const quotaText = (q: AiQuota): string =>
     q.unlimited || q.admin
-      ? 'AI Designer — unlimited'
+      ? 'AI Designer: unlimited'
       : q.remaining > 0
         ? `${q.remaining} of ${q.limit} premium designs left this hour`
-        : `Hourly limit reached — resets in ${resetMins(q)} min`;
+        : `Hourly limit reached: resets in ${resetMins(q)} min`;
   const setQuota = (q: AiQuota | null): void => {
     if (!quotaEl) return;
     quotaEl.textContent = q ? quotaText(q) : isSignedIn() ? '' : 'Sign in to use the AI designer.';
@@ -125,7 +125,7 @@ export function mountAiPanel(deps: AiPanelDeps): void {
     const cap = choice.reason === 'quota';
     choiceEl.innerHTML =
       `<p class="ai-choice-title"></p>` +
-      `<button class="primary ai-choice-quick" type="button">⚡ Use Quick Designer — instant &amp; free</button>` +
+      `<button class="primary ai-choice-quick" type="button">⚡ Use Quick Designer, instant &amp; free</button>` +
       `<button class="ai-choice-wait" type="button"></button>` +
       `<p class="ai-choice-hint"></p>`;
     (choiceEl.querySelector('.ai-choice-title') as HTMLElement).textContent = cap
@@ -298,7 +298,7 @@ export function mountAiPanel(deps: AiPanelDeps): void {
       lastStadium = stadium;
       // Section 3: focus the design on the chosen active area, if any.
       const focus = describeActiveArea();
-      const brief = focus ? `${text} — focus the design on ${focus}` : text;
+      const brief = focus ? `${text}: focus the design on ${focus}` : text;
       const res = await generateAiTifo(brief, {
         ...(useSuper ? { mode: 'super', stadium } : {}),
         ...(opts.engine ? { engine: opts.engine } : {}),
@@ -349,7 +349,7 @@ export function mountAiPanel(deps: AiPanelDeps): void {
         } else if (!verifyResent) {
           verifyResent = true;
           void resendVerification().catch(() => {});
-          setError('Verify your email to use the AI Designer — I just re-sent the link to your inbox.');
+          setError('Verify your email to use the AI Designer, I just re-sent the link to your inbox.');
         } else {
           setError('Verify your email to use the AI Designer. Check your inbox for the link.');
         }
