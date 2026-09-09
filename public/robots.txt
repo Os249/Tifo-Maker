@@ -1,0 +1,16 @@
+# TifoMaker — https://tifomaker.org
+# Search is the main way people find this site, so crawling is welcome.
+
+User-agent: *
+Allow: /
+
+# Nothing here is useful to a crawler: the API returns JSON, /admin is
+# credential-gated, and /reset only works with a one-time token from an email.
+Disallow: /api/
+Disallow: /admin
+Disallow: /reset
+
+# Per-design QR landing pages — one per seat lookup, no standalone value.
+Disallow: /s/
+
+Sitemap: https://tifomaker.org/sitemap.xml

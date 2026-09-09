@@ -59,6 +59,44 @@ const MAX_PHOTO_BYTES = 2 * 1024 * 1024; // real photos, resized client-side bef
 // while still capping the request body as an abuse ceiling.
 const MAX_BODY_BYTES = 1024 * 1024;
 
+/**
+ * The 404 page. Deliberately a self-contained string: the site CSP forbids inline
+ * <script> and external origins, and a 404 must render even if the build output is
+ * missing, so it carries no scripts and no asset references at all.
+ */
+const NOT_FOUND_HTML = `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Page not found - TifoMaker</title>
+<style>
+  :root{ color-scheme: dark; }
+  body{ margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center;
+        background:#0d1117; color:#e6edf3; text-align:center; padding:24px;
+        font:16px/1.6 -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif; }
+  .n{ font-size:64px; font-weight:800; letter-spacing:-.03em; margin:0; color:#3fb950; }
+  h1{ font-size:20px; margin:12px 0 8px; font-weight:600; }
+  p{ margin:0 0 24px; color:#8b949e; max-width:32rem; }
+  a{ display:inline-block; margin:0 6px; padding:10px 18px; border-radius:8px;
+     border:1px solid #2a323d; color:#e6edf3; text-decoration:none; font-size:14px; }
+  a.p{ background:#3fb950; border-color:#3fb950; color:#04220e; font-weight:600; }
+  a:hover{ border-color:#3d4754; }
+</style>
+</head>
+<body>
+  <main>
+    <p class="n">404</p>
+    <h1>This page does not exist</h1>
+    <p>The link may be broken, or the design may have been deleted or made private.</p>
+    <a class="p" href="/app">Open the editor</a>
+    <a href="/">Go home</a>
+    <a href="/community">Browse community</a>
+  </main>
+</body>
+</html>`;
+
 export interface TemplateInfo {
   id: string;
   version: number;
@@ -1376,6 +1414,9 @@ export async function buildApp(
         `<meta name="twitter:title" content="${esc(title)}" />`,
         `<meta name="twitter:description" content="${esc(description)}" />`,
         `<meta name="twitter:image" content="${esc(image)}" />`,
+        // /d/:id and /t/:id render the same design. Point both at /t/:id so search
+        // engines consolidate them instead of treating each as duplicate content.
+        `<link rel="canonical" href="${esc(base)}/t/${esc(id)}" />`,
       ].join('\n    ');
       // Inject after <head>, and drop the SPA's default <title> to avoid a dupe.
       const html = indexHtml
@@ -1488,15 +1529,70 @@ export async function buildApp(
       /* reset page optional in API-only builds */
     }
 
+    // sitemap.xml — generated per request rather than shipped as a static file, so
+    // designs published after the last deploy still get discovered. robots.txt (a
+    // static file in public/) points here. Public designs only: private ones must
+    // never be enumerable, and /t/:id is the canonical URL for each one.
+    app.get('/sitemap.xml', async (req, reply) => {
+      const base = origin(req);
+      const staticPages: [string, string, string][] = [
+        // path, changefreq, priority
+        ['/', 'weekly', '1.0'],
+        ['/app', 'weekly', '0.9'],
+        ['/community', 'daily', '0.8'],
+        ['/clubs', 'monthly', '0.6'],
+        ['/tifo-spec', 'yearly', '0.4'],
+        ['/legal', 'yearly', '0.3'],
+      ];
+      let designs: { id: string; updatedAt: string }[] = [];
+      try {
+        const items = await repo.listPublic({ sort: 'recent' });
+        // The protocol caps a sitemap at 50k URLs; stay well inside it.
+        designs = items.slice(0, 5000).map((d) => ({ id: d.id, updatedAt: d.updatedAt }));
+      } catch {
+        designs = []; // a gallery failure must not take the sitemap down
+      }
+      const urls: string[] = [];
+      for (const [path, freq, pri] of staticPages) {
+        urls.push(
+          `  <url>\n    <loc>${esc(base + path)}</loc>\n` +
+            `    <changefreq>${freq}</changefreq>\n    <priority>${pri}</priority>\n  </url>`,
+        );
+      }
+      for (const d of designs) {
+        // lastmod is optional in the spec, and an unparseable date would throw and
+        // 500 the whole sitemap — so omit the element rather than risk that.
+        const t = Date.parse(d.updatedAt);
+        const lastmod = Number.isFinite(t) ? `    <lastmod>${new Date(t).toISOString().slice(0, 10)}</lastmod>\n` : '';
+        urls.push(
+          `  <url>\n    <loc>${esc(base)}/t/${esc(d.id)}</loc>\n` +
+            lastmod +
+            `    <changefreq>monthly</changefreq>\n    <priority>0.7</priority>\n  </url>`,
+        );
+      }
+      const xml =
+        `<?xml version="1.0" encoding="UTF-8"?>\n` +
+        `<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n` +
+        urls.join('\n') +
+        `\n</urlset>\n`;
+      return reply.header('cache-control', 'public, max-age=3600').type('application/xml').send(xml);
+    });
+
     // index:false so the static plugin doesn't auto-serve index.html at '/'
     // (we serve the landing there instead); assets still resolve by path.
     await app.register(fastifyStatic, { root: staticDir, wildcard: false, index: false });
+    // Unknown paths get a REAL 404. Previously this served the editor with a 200,
+    // which meant every mistyped link and every vulnerability probe (/.git/config,
+    // /wp-login.php — hundreds a week) looked to Google like a real page, producing
+    // an unbounded set of soft-404 duplicates competing with the pages that matter.
+    // Safe to do: every genuine page is registered explicitly above, and the client
+    // only ever reads /d/:id, /t/:id and /s/:id from the URL — there is no
+    // client-side router relying on this fallback.
     app.setNotFoundHandler((req, reply) => {
       if (req.url.startsWith('/api/')) {
         return reply.code(404).send({ error: 'not found' });
       }
-      // Unknown client routes fall back to the editor SPA.
-      return reply.header('cache-control', 'no-cache').type('text/html').send(indexHtml);
+      return reply.code(404).header('cache-control', 'no-cache').type('text/html').send(NOT_FOUND_HTML);
     });
   }
 
