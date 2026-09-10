@@ -172,9 +172,22 @@ async function runSuite(name: string, repo: DesignRepository, auth: AuthReposito
     401,
     'wrong current password rejected',
   );
+  const pwChange = await app.inject({ method: 'POST', url: '/api/account/password', headers: bearer(daveTok), payload: { currentPassword: 'hunter22pass', newPassword: 'newpass1234' } });
+  assert.equal(pwChange.statusCode, 200);
+  // Changing a password must end every other session, or it is useless as the
+  // remedy for a stolen token: tokens live 30 days.
   assert.equal(
-    (await app.inject({ method: 'POST', url: '/api/account/password', headers: bearer(daveTok), payload: { currentPassword: 'hunter22pass', newPassword: 'newpass1234' } })).statusCode,
+    (await app.inject({ method: 'GET', url: '/api/me', headers: bearer(daveTok) })).statusCode,
+    401,
+    'the pre-change token is revoked',
+  );
+  // The caller keeps working, on a freshly minted token handed back in the body.
+  const rotated = (pwChange.json() as { token?: string }).token;
+  assert.ok(rotated && rotated !== daveTok, 'a replacement token is issued');
+  assert.equal(
+    (await app.inject({ method: 'GET', url: '/api/me', headers: bearer(rotated!) })).statusCode,
     200,
+    'the rotated token works',
   );
   assert.equal(
     (await app.inject({ method: 'POST', url: '/api/auth/login', payload: { username: 'dave', password: 'newpass1234' } })).statusCode,
@@ -216,7 +229,7 @@ async function runSuite(name: string, repo: DesignRepository, auth: AuthReposito
     'AI requires sign in',
   );
   assert.equal(
-    (await app.inject({ method: 'GET', url: '/api/ai/quota', headers: bearer(daveTok) })).statusCode,
+    (await app.inject({ method: 'GET', url: '/api/ai/quota', headers: bearer(rotated!) })).statusCode,
     403,
     'AI requires a verified email',
   );

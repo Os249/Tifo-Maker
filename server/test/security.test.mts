@@ -120,3 +120,93 @@ async function makeDesign(app: FastifyInstance, token: string, isPublic = false)
 
   console.log('security: all assertions passed (auth bypass, IDOR, privilege escalation, cross-user delete, input hardening)');
 }
+
+// ---------- 2026-09 audit regressions ----------
+// Every assertion below reproduces an exploit that WORKED against this code.
+// They exist so the same door cannot be reopened quietly.
+{
+  const auth = new MemoryAuthRepository();
+  const designs = new MemoryDesignRepository((id) => auth.usernameOf(id));
+  // A real allow-list, which is what made the case-collision reachable.
+  const app = await buildApp(designs, auth, templates, { staticDir: process.cwd(), adminUsernames: ['admin'] });
+
+  // 1. CRITICAL was: usernames are unique case-SENSITIVELY, but the admin
+  //    allow-list matched case-INSENSITIVELY, so "Admin" registered beside the
+  //    real "admin" and inherited moderator in one unauthenticated request.
+  await reg(app, 'admin');
+  const lookalike = await app.inject({ method: 'POST', url: '/api/auth/register', payload: { username: 'Admin', password: 'password1234', email: 'evil@example.test', acceptedVersion: 'test' } });
+  assert.equal(lookalike.statusCode, 409, 'a username that case-folds onto an admin name is refused');
+  const plain = await reg(app, 'nobody');
+  assert.equal(
+    ((await app.inject({ method: 'GET', url: '/api/me', headers: bearer(plain.token) })).json() as { isAdmin: boolean }).isAdmin,
+    false,
+    'an ordinary account is not admin',
+  );
+  assert.equal(
+    (await app.inject({ method: 'GET', url: '/api/admin/reports', headers: bearer(plain.token) })).statusCode,
+    403,
+    'moderation stays shut to non-admins',
+  );
+
+  // 2. CRITICAL was: String.replace expands $' in the replacement, and a design
+  //    title reaches the injected <meta> block. A 400-byte title returned a
+  //    31.6MB page; a 20KB one took the process out.
+  const owner = await reg(app, 'titler');
+  const dollarId = await makeDesign(app, owner.token, true);
+  await app.inject({ method: 'PATCH', url: `/api/designs/${dollarId}`, headers: bearer(owner.token), payload: { title: "$'".repeat(60) } });
+  const page = await app.inject({ method: 'GET', url: `/d/${dollarId}` });
+  assert.equal(page.statusCode, 200);
+  assert.ok(page.body.length < 200_000, `no dollar-expansion amplification (got ${page.body.length} bytes)`);
+
+  // 3. Titles are bounded on EVERY write path, not just PATCH.
+  const long = await app.inject({ method: 'POST', url: '/api/designs', headers: bearer(owner.token), payload: { title: 'x'.repeat(5000), templateId: DEFAULT_TEMPLATE.id, templateVersion: 1, palette: PALETTE, cellsGzB64 } });
+  assert.equal(long.statusCode, 400, 'an oversized title is refused at create');
+  const forked = await app.inject({ method: 'POST', url: `/api/designs/${dollarId}/fork`, headers: bearer(owner.token), payload: { title: 'y'.repeat(5000) } });
+  assert.ok((forked.json() as { title: string }).title.length <= 120, 'fork truncates the title');
+
+  // 4. Photos on a PRIVATE design were world-readable while the design 404'd.
+  const secret = await makeDesign(app, owner.token, false);
+  const jpeg = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(1024, 3)]).toString('base64');
+  const up = await app.inject({ method: 'POST', url: `/api/designs/${secret}/photos`, headers: bearer(owner.token), payload: { imageB64: jpeg, caption: 'venue, date, opponent' } });
+  assert.equal(up.statusCode, 200, 'the owner can still attach a photo');
+  assert.equal((await app.inject({ method: 'GET', url: `/api/designs/${secret}` })).statusCode, 404, 'the design is hidden');
+  assert.equal((await app.inject({ method: 'GET', url: `/api/designs/${secret}/photos` })).statusCode, 404, 'and so are its photos');
+  const ownerList = (await app.inject({ method: 'GET', url: `/api/designs/${secret}/photos`, headers: bearer(owner.token) })).json() as { id: string }[];
+  assert.equal(ownerList.length, 1, 'the owner still sees their own photos');
+  assert.equal(
+    (await app.inject({ method: 'GET', url: `/api/photos/${ownerList[0].id}` })).statusCode,
+    404,
+    'the raw bytes are not served to anonymous callers either',
+  );
+  assert.equal(
+    (await app.inject({ method: 'GET', url: `/api/photos/${ownerList[0].id}`, headers: bearer(owner.token) })).statusCode,
+    200,
+    'the owner can still fetch their own photo bytes',
+  );
+
+  // 5. Registration was an email-enumeration oracle: a distinct "email already
+  //    in use" told an anonymous caller which addresses had accounts.
+  const known = await app.inject({ method: 'POST', url: '/api/auth/register', payload: { username: 'titler', password: 'password1234', email: 'titler@example.test', acceptedVersion: 'test' } });
+  const unknown = await app.inject({ method: 'POST', url: '/api/auth/register', payload: { username: 'titler', password: 'password1234', email: 'nobody@example.test', acceptedVersion: 'test' } });
+  assert.equal(known.statusCode, 409);
+  assert.equal(unknown.statusCode, 409);
+  assert.equal(known.body, unknown.body, 'registration cannot be used to test whether an email exists');
+
+  // 6. A repeated query parameter arrives as an array and used to 500.
+  assert.equal((await app.inject({ method: 'GET', url: '/api/gallery?search=a&search=b' })).statusCode, 200, 'a duplicated query param is handled, not a 500');
+
+  // 7. Email links must never follow a forged Host header.
+  const captured: string[] = [];
+  const mailAuth = new MemoryAuthRepository();
+  const mailApp = await buildApp(new MemoryDesignRepository((id) => mailAuth.usernameOf(id)), mailAuth, templates, {
+    emailSender: { async send(msg: { to: string; subject: string; html?: string; text?: string }) { captured.push(`${msg.html ?? ''}${msg.text ?? ''}`); } },
+  });
+  await mailApp.inject({ method: 'POST', url: '/api/auth/register', payload: { username: 'mailer', password: 'password1234', email: 'mailer@example.test', acceptedVersion: 'test' } });
+  captured.length = 0;
+  await mailApp.inject({ method: 'POST', url: '/api/auth/forgot', payload: { email: 'mailer@example.test' }, headers: { host: 'evil.attacker.test' } });
+  assert.ok(captured.length > 0, 'a reset email was sent');
+  assert.ok(!captured[0].includes('evil.attacker.test'), 'the reset link does not follow a forged Host header');
+
+  console.log('audit regressions: all assertions passed (admin case-collision, $-expansion DoS, title bounds, private photos, email enumeration, query arrays, Host-forged reset links)');
+
+}

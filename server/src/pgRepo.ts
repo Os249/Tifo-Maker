@@ -419,9 +419,11 @@ export class PgDesignRepository implements DesignRepository {
     }));
   }
 
-  async getPhoto(photoId: string): Promise<{ image: Buffer } | null> {
-    const res = await this.pool.query('SELECT image FROM design_photos WHERE id = $1', [photoId]);
-    return res.rowCount ? { image: res.rows[0].image as Buffer } : null;
+  async getPhoto(photoId: string): Promise<{ image: Buffer; designId: string } | null> {
+    const res = await this.pool.query('SELECT image, design_id FROM design_photos WHERE id = $1', [photoId]);
+    return res.rowCount
+      ? { image: res.rows[0].image as Buffer, designId: String(res.rows[0].design_id) }
+      : null;
   }
 
   async deletePhoto(photoId: string, ownerId: string): Promise<boolean> {

@@ -320,9 +320,9 @@ export class MemoryDesignRepository implements DesignRepository {
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
       .map(({ image: _image, ...meta }) => meta);
   }
-  async getPhoto(photoId: string): Promise<{ image: Buffer } | null> {
+  async getPhoto(photoId: string): Promise<{ image: Buffer; designId: string } | null> {
     const p = this.photos.find((x) => x.id === photoId);
-    return p ? { image: p.image } : null;
+    return p ? { image: p.image, designId: p.designId } : null;
   }
   async deletePhoto(photoId: string, ownerId: string): Promise<boolean> {
     const p = this.photos.find((x) => x.id === photoId);

@@ -85,6 +85,8 @@ export interface AiRouteDeps {
   userState: (userId: string) => Promise<{ emailVerified: boolean; isPro: boolean } | null>;
   /** Per-route rate-limit options ({config:{rateLimit}}) when limiting is on. */
   routeConfig?: object;
+  /** Tighter limit for the password-guessing surface. */
+  authRouteConfig?: object;
 }
 
 /** Constant-time string compare that never throws on length mismatch. */
@@ -151,7 +153,11 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
     validateSpec(isSuper ? composeSuperOffline(prompt) : designFromPrompt(prompt));
 
   // Exchange the admin password for a signed, time-limited unlock token.
-  app.post('/api/ai/unlock', async (req, reply) => {
+  // This single shared password gates the AI designer AND every /api/admin/*
+  // analytics endpoint. It had no route limit, so the global 300/min allowed
+  // 432,000 guesses a day from one IP against one password. It belongs on the
+  // same limiter as /api/auth/login.
+  app.post('/api/ai/unlock', deps.authRouteConfig ?? {}, async (req, reply) => {
     if (!adminPassword) return reply.code(403).send({ error: 'admin unlock is not configured' });
     const pw = typeof (req.body as { password?: unknown } | null)?.password === 'string'
       ? (req.body as { password: string }).password

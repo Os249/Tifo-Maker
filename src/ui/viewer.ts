@@ -146,9 +146,22 @@ export async function mountViewer(ctx: ViewerContext): Promise<void> {
     for (const item of items.slice(0, 8)) {
       const card = document.createElement('button');
       card.className = 'v-g-card';
-      card.innerHTML = `${
-        item.hasThumbnail ? `<img src="${thumbnailUrl(item.id)}" alt="${item.title}" />` : ''
-      }<span>${item.title}</span><small>by ${item.ownerName}</small>`;
+      // Built with DOM nodes, not an HTML string. These values are another
+      // user's design title and handle, straight off the public gallery feed,
+      // and they were being interpolated raw into innerHTML three times - once
+      // inside an alt="" attribute. This viewer is what every phone gets for a
+      // /d/:id share link, so any published title became markup on those pages.
+      if (item.hasThumbnail) {
+        const img = document.createElement('img');
+        img.src = thumbnailUrl(item.id);
+        img.alt = item.title;
+        card.appendChild(img);
+      }
+      const nameEl = document.createElement('span');
+      nameEl.textContent = item.title;
+      const byEl = document.createElement('small');
+      byEl.textContent = `by ${item.ownerName}`;
+      card.append(nameEl, byEl);
       card.addEventListener('click', async () => {
         const { title } = await loadDesign(store, item.id);
         (document.getElementById('v-title') as HTMLElement).textContent = title;

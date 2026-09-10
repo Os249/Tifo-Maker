@@ -118,7 +118,9 @@ export interface DesignRepository {
   /** A design's photos (id, dimensions, caption, verified) newest first — no image bytes. */
   listPhotos(designId: string): Promise<PhotoMeta[]>;
   /** Raw bytes for one photo (for the image route). */
-  getPhoto(photoId: string): Promise<{ image: Buffer } | null>;
+  /** Returns the bytes AND the parent design id, so the caller can apply the
+   *  same visibility rule the rest of the design routes use. */
+  getPhoto(photoId: string): Promise<{ image: Buffer; designId: string } | null>;
   /** Delete a photo (owner of the parent design only). */
   deletePhoto(photoId: string, ownerId: string): Promise<boolean>;
 

@@ -49,6 +49,14 @@ import { isValidTemplate } from '../../src/core/customStadiums';
 export const SNAPSHOT_EVERY = 20;
 const HEX = /^#[0-9a-fA-F]{6}$/;
 const USERNAME = /^[a-zA-Z0-9_]{3,24}$/;
+/** Longest design title anywhere. PATCH already enforced this; create, fork and
+ *  remix did not, so a title could be as large as the 1MB body allowed - and it
+ *  is echoed into page <title> and OG tags on every share page. */
+const MAX_TITLE = 120;
+const cleanTitle = (v: unknown, fallback: string): string => {
+  const t = typeof v === 'string' ? v.trim() : '';
+  return (t || fallback).slice(0, MAX_TITLE);
+};
 // Pragmatic email check; real validation is delivery of the verification email.
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MAX_EMAIL = 254;
@@ -156,8 +164,18 @@ export async function buildApp(
   //   TRUST_PROXY=<n> → trust n proxy hops: 1 = Railway alone, 2 = Cloudflare → Railway
   //   unset          → on in production (Railway always terminates at its edge), off in dev/tests
   const tp = process.env.TRUST_PROXY;
-  const trustProxy: boolean | number =
-    tp === '0' ? false : tp && /^\d+$/.test(tp) ? Number(tp) : tp === undefined ? process.env.NODE_ENV === 'production' : true;
+  // Hop COUNT, never `true`. `true` trusts every hop, which makes req.ip the
+  // leftmost X-Forwarded-For entry - a value the caller writes - so rotating one
+  // header defeated every rate limit and poisoned the visitor hashing. Expressed
+  // as the predicate Fastify uses internally for a numeric setting: trust the
+  // first n addresses from the socket inward, and nothing beyond them.
+  const hops =
+    tp === '0' ? 0
+      : tp && /^\d+$/.test(tp) ? Number(tp)
+        : tp === undefined ? (process.env.NODE_ENV === 'production' ? 1 : 0)
+          : 1;
+  const trustProxy: boolean | ((addr: string, hop: number) => boolean) =
+    hops === 0 ? false : (_addr: string, hop: number) => hop < hops;
   const app = Fastify({ logger: options.logger ?? false, bodyLimit: MAX_BODY_BYTES, trustProxy });
 
   // Security headers, including a real Content-Security-Policy. The policy is a
@@ -212,6 +230,23 @@ export async function buildApp(
   // format: one byte per seat ⇒ up to 256 distinct colours. (It used to cap at 8,
   // which silently rejected any design with more swatches — e.g. after an image
   // import or "real colours" — so saving privately AND publishing both failed.)
+  /**
+   * Base URL for links we put in EMAIL. Never trust the request's Host header
+   * here: a forged Host on /api/auth/forgot produces an authentic-looking mail
+   * whose reset link carries a real token to the attacker's domain. PUBLIC_URL
+   * wins; otherwise the Host must match a known hostname before it is used, and
+   * failing that we fall back to the canonical domain.
+   */
+  const CANONICAL_ORIGIN = 'https://tifomaker.org';
+  const ALLOWED_EMAIL_HOSTS = new Set(['tifomaker.org', 'www.tifomaker.org', 'localhost', '127.0.0.1']);
+  const emailBase = (req: FastifyRequest): string => {
+    if (options.publicUrl) return options.publicUrl.replace(/\/+$/, '');
+    const host = String(req.headers.host ?? '');
+    const bare = host.split(':')[0]?.toLowerCase() ?? '';
+    if (ALLOWED_EMAIL_HOSTS.has(bare)) return `${req.protocol}://${host}`;
+    return CANONICAL_ORIGIN;
+  };
+
   const validPalette = (p: unknown): p is string[] =>
     Array.isArray(p) && p.length >= 2 && p.length <= 256 && p.every((c) => typeof c === 'string' && HEX.test(c));
 
@@ -234,11 +269,17 @@ export async function buildApp(
   // Admin = the user's username is in the ADMIN_USERNAMES allow-list. This is
   // intentionally NOT grantable via any API — you bootstrap admins through the
   // environment, so no request (forged or otherwise) can escalate privilege.
-  const adminSet = new Set((options.adminUsernames ?? []).map((u) => u.toLowerCase()));
+  // Matched EXACTLY, not case-folded. Usernames are unique case-sensitively
+  // (schema.sql has no lower(username) index), so a case-insensitive compare here
+  // meant registering "Admin" next to the real "admin" and inheriting moderator:
+  // one unauthenticated request to full admin. Registration now also refuses any
+  // username that case-folds onto an allow-listed one, so the pair cannot exist.
+  const adminSet = new Set(options.adminUsernames ?? []);
+  const adminFolded = new Set((options.adminUsernames ?? []).map((u) => u.toLowerCase()));
   const isAdminUser = async (userId: string): Promise<boolean> => {
     if (adminSet.size === 0) return false;
     const user = await auth.getUserById(userId).catch(() => null);
-    return user ? adminSet.has(user.username.toLowerCase()) : false;
+    return user ? adminSet.has(user.username) : false;
   };
   const requireAdmin = async (req: FastifyRequest, reply: FastifyReply): Promise<string | null> => {
     const userId = await requireUser(req, reply);
@@ -458,6 +499,8 @@ export async function buildApp(
         return u ? { emailVerified: !!u.emailVerifiedAt, isPro: u.isPro } : null;
       },
       routeConfig: options.rateLimit ? { config: { rateLimit: { max: 12, timeWindow: '1 minute' } } } : undefined,
+      // The unlock endpoint is a password prompt, so it gets the login limit.
+      authRouteConfig: options.rateLimit ? { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } } : undefined,
     });
   }
 
@@ -533,7 +576,7 @@ export async function buildApp(
       await auth.deleteEmailTokens(user.id, 'verify_email');
       const { token, tokenHash } = issueToken();
       await auth.createEmailToken(user.id, tokenHash, 'verify_email', new Date(Date.now() + VERIFY_TTL_MS));
-      const base = options.publicUrl ?? `${req.protocol}://${req.headers.host}`;
+      const base = emailBase(req);
       const link = `${base}/api/auth/verify?token=${token}`;
       await options.emailSender.send({
         to: user.email,
@@ -558,7 +601,7 @@ export async function buildApp(
       await auth.deleteEmailTokens(user.id, 'reset_password');
       const { token, tokenHash } = issueToken();
       await auth.createEmailToken(user.id, tokenHash, 'reset_password', new Date(Date.now() + RESET_TTL_MS));
-      const base = options.publicUrl ?? `${req.protocol}://${req.headers.host}`;
+      const base = emailBase(req);
       const link = `${base}/reset?token=${token}`;
       await options.emailSender.send({
         to: user.email,
@@ -581,6 +624,12 @@ export async function buildApp(
       email?: string;
       acceptedVersion?: string;
     };
+    // Reject any username that case-folds onto an admin name, whether or not that
+    // account exists yet: it closes the impersonation angle as well as the
+    // escalation one, and it keeps the allow-list unambiguous.
+    if (typeof username === 'string' && adminFolded.has(username.toLowerCase()) && !adminSet.has(username)) {
+      return reply.code(409).send({ error: 'username or email taken' });
+    }
     if (!username || !USERNAME.test(username) || !password || password.length < 8) {
       return reply.code(400).send({ error: 'username 3-24 [a-zA-Z0-9_], password >= 8 chars' });
     }
@@ -589,8 +638,13 @@ export async function buildApp(
       return reply.code(400).send({ error: 'a valid email is required' });
     }
     // Clear message for duplicates; the unique index is the real race guard.
+    // One generic 409 for BOTH cases. A distinct "email already in use" turned
+    // registration into an oracle: pick a username you know exists, vary the
+    // email, and the response tells you which addresses have accounts - exactly
+    // what /api/auth/forgot refuses to reveal. The unique index below is the
+    // real race guard, so nothing is lost by dropping the friendly message.
     if (await auth.getUserByEmail(mail).catch(() => null)) {
-      return reply.code(409).send({ error: 'email already in use' });
+      return reply.code(409).send({ error: 'username or email taken' });
     }
     const version = typeof acceptedVersion === 'string' ? acceptedVersion.slice(0, 32) : null;
     const user = await auth.createUser(username, hashPassword(password), { email: mail, acceptedVersion: version });
@@ -645,7 +699,15 @@ export async function buildApp(
       return reply.code(401).send({ error: 'current password is incorrect' });
     }
     await auth.setPasswordHash(userId, hashPassword(newPassword));
-    return reply.code(200).send({ ok: true });
+    // Changing a password is what someone does when they think a session is
+    // compromised. It has to end the other sessions, or it is theatre: tokens
+    // live 30 days, so a stolen one otherwise outlived the "fix" by a month.
+    // /api/auth/reset already did this; this path did not.
+    await auth.deleteUserTokens(userId).catch(() => {});
+    // Mint a replacement so the person who just changed it stays signed in here.
+    const { token, tokenHash } = issueToken();
+    await auth.createToken(userId, tokenHash, new Date(Date.now() + TOKEN_TTL_MS));
+    return reply.code(200).send({ ok: true, token, signedOutEverywhereElse: true });
   });
 
   // Forgot password: always 200 so the response can't be used to probe which
@@ -766,12 +828,21 @@ export async function buildApp(
   });
 
   // ---------- gallery ----------
+  // Fastify hands back an ARRAY when a query key repeats (?search=a&search=b), and
+  // .trim()/.split() on an array threw an unauthenticated 500. Collapse to one value.
+  const oneParam = (v: unknown): string | undefined => {
+    const raw = Array.isArray(v) ? v[v.length - 1] : v;
+    return typeof raw === 'string' ? raw : undefined;
+  };
+
   app.get('/api/gallery', async (req) => {
-    const q = req.query as { sort?: string; search?: string; tags?: string; templates?: string };
-    const sort = q.sort === 'likes' ? 'likes' : 'recent';
+    const q = req.query as Record<string, unknown>;
+    const sort = oneParam(q.sort) === 'likes' ? 'likes' : 'recent';
     const viewerId = await userOf(req); // annotate the caller's votes when signed in
-    const tags = q.tags ? q.tags.split(',').map((t) => t.trim()).filter(Boolean) : undefined;
-    return repo.listPublic({ sort, search: q.search, viewerId, tags, templatesOnly: q.templates === '1' });
+    const rawTags = oneParam(q.tags);
+    const tags = rawTags ? rawTags.split(',').map((t) => t.trim()).filter(Boolean).slice(0, 8) : undefined;
+    const search = oneParam(q.search)?.slice(0, 80);
+    return repo.listPublic({ sort, search, viewerId, tags, templatesOnly: oneParam(q.templates) === '1' });
   });
 
   // Most-used tags, for the filter chips.
@@ -812,9 +883,13 @@ export async function buildApp(
 
   // ---------- Before/After real match-day photos ----------
   // List a design's photos (metadata only; bytes via the image route below).
-  app.get('/api/designs/:id/photos', async (req) => {
-    const { id } = req.params as { id: string };
-    return repo.listPhotos(id);
+  app.get('/api/designs/:id/photos', async (req, reply) => {
+    // getVisible, like every other design route. Without it a private design
+    // answered 404 while its photos answered 200 with captions naming the
+    // venue, date and opponent.
+    const v = await getVisible(req, reply);
+    if (!v) return;
+    return repo.listPhotos(v.rec.id);
   });
 
   // Upload a real photo to a design (owner only). Resized client-side; a larger
@@ -852,6 +927,14 @@ export async function buildApp(
     const { photoId } = req.params as { photoId: string };
     const photo = await repo.getPhoto(photoId).catch(() => null);
     if (!photo) return reply.code(404).send({ error: 'not found' });
+    // The bytes need the same gate as the listing: a leaked photo id was enough
+    // to pull an image off a design its owner had kept private.
+    const parent = await repo.get(photo.designId).catch(() => null);
+    if (!parent) return reply.code(404).send({ error: 'not found' });
+    if (!parent.isPublic) {
+      const viewer = await userOf(req);
+      if (!viewer || viewer !== parent.ownerId) return reply.code(404).send({ error: 'not found' });
+    }
     const b = photo.image;
     const type =
       b[0] === 0xff && b[1] === 0xd8 ? 'image/jpeg' :
@@ -995,6 +1078,9 @@ export async function buildApp(
       thumbnailPngB64?: string;
     };
     const count = seatCount(body.templateId ?? '', body.templateVersion ?? -1);
+    if (typeof body.title === 'string' && body.title.length > MAX_TITLE) {
+      return reply.code(400).send({ error: `title must be 1..${MAX_TITLE} chars` });
+    }
     if (!body.title || count === null || !validPalette(body.palette) || !body.cellsGzB64) {
       return reply.code(400).send({ error: 'title, known templateRef, palette (2-256 hex), cellsGzB64 required' });
     }
@@ -1141,7 +1227,11 @@ export async function buildApp(
   // Production distribution PDF. Accepts the design inline (cells + palette +
   // template) so it works whether or not the design is saved. Generates server-
   // side (pdfkit is Node-only) and streams the file back. Free tier watermarks.
-  app.post('/api/export/pdf', async (req, reply) => {
+  // The heaviest route here by far (0.5-1.9s of CPU even with valid input), and
+  // reachable without an account. The global 300/min let one IP demand ~9x the
+  // CPU the process has.
+  const pdfLimit = options.rateLimit ? { config: { rateLimit: { max: 6, timeWindow: '1 minute' } } } : {};
+  app.post('/api/export/pdf', pdfLimit, async (req, reply) => {
     const userId = await userOf(req); // signed-in users get clean (un-watermarked) output
     const body = (req.body ?? {}) as {
       title?: string;
@@ -1175,7 +1265,12 @@ export async function buildApp(
         designTitle: body.title || 'Tifo',
         stadiumName: tpl.name,
         cardsPerBag: body.cardsPerBag ?? 100,
-        colorNames: body.colorNames,
+        // pdfkit flows this text and auto-adds pages, so an oversized name is
+        // quadratic synchronous CPU on the only thread the server has. Measured
+        // 8s from one 20KB entry; longer ones run for minutes.
+        colorNames: Array.isArray(body.colorNames)
+          ? body.colorNames.slice(0, 256).map((n) => (typeof n === 'string' ? n.slice(0, 40) : ''))
+          : undefined,
         watermark: !userId, // anonymous/free → watermark; signed-in → clean
       },
       outPath,
@@ -1282,7 +1377,7 @@ export async function buildApp(
     const v = await getVisible(req, reply);
     if (!v) return;
     if (!v.userId) return reply.code(401).send({ error: 'authentication required' });
-    const title = (req.body as { title?: string } | null)?.title ?? `${v.rec.title} (fork)`;
+    const title = cleanTitle((req.body as { title?: string } | null)?.title, `${v.rec.title} (fork)`);
     return reply.code(201).send(await repo.fork(v.rec.id, title, v.userId));
   });
 
@@ -1318,7 +1413,7 @@ export async function buildApp(
     const { id } = req.params as { id: string };
     const title = (req.body as { title?: string } | null)?.title;
     const rec = await repo.get(id).catch(() => null);
-    const remixTitle = title || `${rec?.title ?? 'Tifo'} (remix)`;
+    const remixTitle = cleanTitle(title, `${rec?.title ?? 'Tifo'} (remix)`);
     const created = await social!.remix(id, userId, remixTitle);
     if (!created) return reply.code(403).send({ error: 'this design cannot be remixed' });
     return reply.code(201).send(created);
@@ -1437,6 +1532,20 @@ export async function buildApp(
       const host = req.headers.host ?? 'tifomaker.org';
       return `${proto}://${host}`;
     };
+    /**
+     * Insert a built block into a page WITHOUT letting its content be reinterpreted.
+     *
+     * String.prototype.replace expands $&, $` and $' when the replacement is a
+     * string. Design titles reach the injected <meta> block, and "$'" means
+     * "everything after the match" - with <head> near the top of a 31KB page,
+     * each pair re-emitted almost the whole document. Measured: a 400-byte title
+     * produced a 31.6MB response, and titles have no length cap on create, so a
+     * 20KB one is roughly 1.5GB and takes the process out. A replacer FUNCTION
+     * is returned verbatim, with no dollar expansion at all.
+     */
+    const injectOnce = (haystack: string, pattern: RegExp, replacement: string): string =>
+      haystack.replace(pattern, () => replacement);
+
     const esc = (s: string): string =>
       s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
@@ -1515,9 +1624,11 @@ export async function buildApp(
         `<link rel="canonical" href="${esc(base)}/t/${esc(id)}" />`,
       ].join('\n    ');
       // Inject after <head>, and drop the SPA's default <title> to avoid a dupe.
-      const html = indexHtml
-        .replace(/<title>.*?<\/title>/i, '')
-        .replace(/<head>/i, `<head>\n    ${meta}`);
+      const html = injectOnce(
+        indexHtml.replace(/<title>.*?<\/title>/i, ''),
+        /<head>/i,
+        `<head>\n    ${meta}`,
+      );
       return reply.type('text/html').send(html);
     });
 
@@ -1562,7 +1673,7 @@ export async function buildApp(
           `<meta name="twitter:description" content="${esc(description)}" />`,
           `<meta name="twitter:image" content="${esc(image)}" />`,
         ].join('\n    ');
-        const html = sharePage.replace(/<title>.*?<\/title>/i, '').replace(/<head>/i, `<head>\n    ${meta}`);
+        const html = injectOnce(sharePage.replace(/<title>.*?<\/title>/i, ''), /<head>/i, `<head>\n    ${meta}`);
         return reply.type('text/html').send(html);
       });
     }
@@ -1618,7 +1729,8 @@ export async function buildApp(
         const seo = items.length
           ? `<nav id="seo-feed" class="seo-feed" aria-label="Published tifos"><ul>${list}</ul></nav>`
           : '';
-        const html = communityHtml.replace(
+        const html = injectOnce(
+          communityHtml,
           /<div class="grid-loading" id="grid-loading">/i,
           `${seo}<div class="grid-loading" id="grid-loading">`,
         );

@@ -172,15 +172,22 @@ export async function resendVerification(): Promise<void> {
   await expectOk(await fetch(`${API}/auth/verify/resend`, { method: 'POST', headers: authHeaders(true) }));
 }
 
-/** Change the signed-in user's password (requires the current one). */
+/**
+ * Change the signed-in user's password (requires the current one).
+ *
+ * The server now ends every other session on success, which is the point of
+ * changing a password after a device is lost. It hands back a fresh token so
+ * this tab stays signed in; without adopting it, the next request would 401.
+ */
 export async function changePassword(currentPassword: string, newPassword: string): Promise<void> {
-  await expectOk(
+  const res = (await expectOk(
     await fetch(`${API}/account/password`, {
       method: 'POST',
       headers: authHeaders(true),
       body: JSON.stringify({ currentPassword, newPassword }),
     }),
-  );
+  )) as { token?: string } | null;
+  if (res?.token) setToken(res.token);
 }
 
 /** Request a password-reset email. Always resolves (no account enumeration). */
