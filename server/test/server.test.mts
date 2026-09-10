@@ -979,6 +979,67 @@ async function runSuite(name: string, repo: DesignRepository, auth: AuthReposito
   console.log('shares: all assertions passed (admin gate, share/open kept separate, day clamping, inbound from /d/ and /t/ only)');
 }
 
+// ---------- discoverability ----------
+// Published tifos were orphan pages: /community built its grid client-side, so
+// a crawler saw a heading and no links, and every design page carried the same
+// boilerplate description. Both make a set of pages look worthless to search.
+{
+  const auth = new MemoryAuthRepository();
+  const designs = new MemoryDesignRepository((id) => auth.usernameOf(id));
+  const app = await buildApp(designs, auth, templates, { staticDir: process.cwd(), adminUsernames: [] });
+  const tok = await registerUser(app, 'ultra');
+  const cellsGzB64 = gzipSync(sampleCells()).toString('base64');
+
+  const mk = async (title: string) => {
+    const r = await app.inject({ method: 'POST', url: '/api/designs', headers: bearer(tok),
+      payload: { title, templateId: DEFAULT_TEMPLATE.id, templateVersion: DEFAULT_TEMPLATE.version, palette: PALETTE, cellsGzB64 } });
+    const id = (r.json() as { id: string }).id;
+    await app.inject({ method: 'PATCH', url: `/api/designs/${id}`, headers: bearer(tok), payload: { isPublic: true } });
+    return id;
+  };
+  const namedId = await mk('Riyadh derby');
+  const otherId = await mk('North stand mosaic');
+
+  // 1. The community page must carry real links, not just a loading message.
+  const feed = await app.inject({ method: 'GET', url: '/community' });
+  if (feed.statusCode === 200) {
+    const html = feed.body;
+    assert.ok(html.includes(`href="/t/${namedId}"`), 'community links the published design');
+    assert.ok(html.includes(`href="/t/${otherId}"`), 'community links every published design');
+    assert.ok(html.includes('Riyadh derby'), 'the link carries the design name as anchor text');
+    // /t/ is canonical; linking /d/ as well would split the signal.
+    assert.ok(!html.includes(`href="/d/${namedId}"`), 'links point at the canonical /t/ URL only');
+  }
+
+  // 2. Two different designs must not describe themselves identically.
+  const descOf = (body: string): string => (body.match(/<meta name="description" content="([^"]*)"/i) ?? [])[1] ?? '';
+  const a = await app.inject({ method: 'GET', url: `/t/${namedId}` });
+  const b = await app.inject({ method: 'GET', url: `/t/${otherId}` });
+  if (a.statusCode === 200 && b.statusCode === 200) {
+    const da = descOf(a.body), db = descOf(b.body);
+    assert.ok(da.length > 20 && db.length > 20, 'design pages carry a description');
+    assert.notEqual(da, db, 'two designs must not share one boilerplate description');
+    assert.ok(da.includes('Riyadh derby'), 'the description names the design');
+    assert.ok(da.includes('@ultra'), 'the description credits the creator');
+  }
+
+  // 3. A private design stays invisible: no link, no metadata leak.
+  const privR = await app.inject({ method: 'POST', url: '/api/designs', headers: bearer(tok),
+    payload: { title: 'Secret plan', templateId: DEFAULT_TEMPLATE.id, templateVersion: DEFAULT_TEMPLATE.version, palette: PALETTE, cellsGzB64 } });
+  const privId = (privR.json() as { id: string }).id;
+  const feed2 = await app.inject({ method: 'GET', url: '/community' });
+  if (feed2.statusCode === 200) {
+    assert.ok(!feed2.body.includes(privId), 'a private design is never linked from the feed');
+    assert.ok(!feed2.body.includes('Secret plan'), 'a private title never appears in the feed');
+  }
+  const privPage = await app.inject({ method: 'GET', url: `/t/${privId}` });
+  if (privPage.statusCode === 200) {
+    assert.ok(!descOf(privPage.body).includes('Secret plan'), 'a private title never reaches the meta description');
+  }
+
+  console.log('discoverability: all assertions passed (feed links designs, canonical /t/ only, unique descriptions, private stays hidden)');
+}
+
 if (process.env.DATABASE_URL) {
   const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
   await pool.query(readFileSync(new URL('../schema.sql', import.meta.url), 'utf8'));

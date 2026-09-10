@@ -73,8 +73,14 @@ const STRINGS: Record<string, { en: string; ar: string }> = {
   'publish.h': { en: 'Publish to the community', ar: 'انشره في المجتمع' },
   'publish.updateH': { en: 'Update your published tifo', ar: 'حدّث تيفوك المنشور' },
   'publish.lead': {
-    en: '"{title}" will appear in the community feed for others to see and remix.',
-    ar: '"{title}" بيظهر في مجتمع التصاميم عشان يشوفونه ويعيدون تصميمه.',
+    en: 'This goes in the community feed for others to see and remix.',
+    ar: 'بيظهر في مجتمع التصاميم عشان يشوفونه ويعيدون تصميمه.',
+  },
+  'publish.title': { en: 'Name', ar: 'الاسم' },
+  'publish.titlePh': { en: 'e.g. Riyadh derby, north stand', ar: 'مثلاً: ديربي الرياض، المدرج الشمالي' },
+  'publish.titleHint': {
+    en: 'This is the page title people see when your tifo is shared or found in search.',
+    ar: 'هذا هو العنوان اللي يشوفونه الناس لما ينشرون تيفوك أو يلقونه في البحث.',
   },
   'publish.tags': { en: 'Tags', ar: 'وسوم' },
   'publish.tagsPh': { en: 'e.g. serie-a, derby, black-gold', ar: 'مثلاً: دوري-روشن، ديربي، أسود-ذهبي' },

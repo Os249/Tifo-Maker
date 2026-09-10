@@ -110,6 +110,10 @@ async function loadGallery(): Promise<void> {
   const grid = $('#gallery-grid');
   const loading = $('#grid-loading');
   const empty = $('#grid-empty');
+  // The server ships a plain list of links so crawlers (and anyone without JS)
+  // can reach every published tifo. Once the real grid is about to render it
+  // has done its job, and leaving it would show the same designs twice.
+  document.getElementById('seo-feed')?.remove();
   loading.hidden = false;
   empty.hidden = true;
   try {

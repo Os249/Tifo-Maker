@@ -313,6 +313,19 @@ export async function saveDesign(
   return meta;
 }
 
+/**
+ * Rename a saved design. Used when publishing: the public name is the page
+ * title of the URL other people see, so it must not stay "Untitled tifo".
+ */
+export async function setDesignTitle(id: string, title: string): Promise<SavedMeta> {
+  const res = await fetch(`${API}/designs/${id}`, {
+    method: 'PATCH',
+    headers: authHeaders(true),
+    body: JSON.stringify({ title }),
+  });
+  return (await expectOk(res)) as SavedMeta;
+}
+
 export async function setPublic(id: string, isPublic: boolean): Promise<SavedMeta> {
   const res = await fetch(`${API}/designs/${id}`, {
     method: 'PATCH',

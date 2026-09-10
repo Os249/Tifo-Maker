@@ -17,6 +17,13 @@
 import { t } from './i18n';
 
 export interface PublishChoice {
+  /**
+   * What the tifo is called in public. Prefilled from the editor title and
+   * never blocking, but it does not stay "Untitled tifo": the name becomes the
+   * page title of the only URL other people will ever see, and three of the
+   * first five published designs were called Untitled.
+   */
+  title: string;
   tags: string[];
   isTemplate: boolean;
   description: string | null;
@@ -34,10 +41,15 @@ export function openPublishDialog(opts: {
       <div class="save-modal" role="dialog" aria-modal="true" aria-label="${t('publish.aria')}">
         <button class="save-close" aria-label="${t('common.close')}">&times;</button>
         <h3 class="save-h3">${opts.currentlyPublic ? t('publish.updateH') : t('publish.h')}</h3>
-        <p class="save-lead">${t('publish.lead').replace('{title}', escapeHtml(opts.title))}</p>
+        <p class="save-lead">${t('publish.lead')}</p>
 
         <div class="save-tags-row">
-          <label class="save-tags-label" for="pub-tags">${t('publish.tags')}
+          <label class="save-tags-label" for="pub-title">${t('publish.title')}</label>
+          <input type="text" id="pub-title" class="save-tags-input" maxlength="80"
+                 placeholder="${t('publish.titlePh')}" value="${escapeHtml(opts.title)}" />
+          <div class="save-tags-hint">${t('publish.titleHint')}</div>
+
+          <label class="save-tags-label" for="pub-tags" style="margin-top:12px;">${t('publish.tags')}
             <span class="pub-optional">${t('common.optional')}</span>
           </label>
           <input type="text" id="pub-tags" class="save-tags-input" placeholder="${t('publish.tagsPh')}" />
@@ -80,7 +92,11 @@ export function openPublishDialog(opts: {
     backdrop.querySelector('.pub-go')!.addEventListener('click', () => {
       const raw = (backdrop.querySelector('#pub-tags') as HTMLInputElement | null)?.value ?? '';
       const desc = (backdrop.querySelector('#pub-desc') as HTMLTextAreaElement | null)?.value.trim() ?? '';
+      const typed = (backdrop.querySelector('#pub-title') as HTMLInputElement | null)?.value.trim() ?? '';
       close({
+        // Falling back to the editor title keeps this non-blocking: an empty
+        // field publishes what Save already had rather than refusing.
+        title: (typed || opts.title).slice(0, 80),
         tags: raw.split(',').map((s) => s.trim()).filter(Boolean).slice(0, 12),
         isTemplate: (backdrop.querySelector('#pub-template') as HTMLInputElement | null)?.checked ?? false,
         description: desc ? desc.slice(0, 2000) : null,
@@ -88,7 +104,12 @@ export function openPublishDialog(opts: {
       });
     });
 
-    setTimeout(() => (backdrop.querySelector('#pub-tags') as HTMLInputElement | null)?.focus(), 0);
+    setTimeout(() => {
+      const el = backdrop.querySelector('#pub-title') as HTMLInputElement | null;
+      el?.focus();
+      // Select a placeholder name so typing replaces it; leave a real one alone.
+      if (el && /^untitled/i.test(el.value)) el.select();
+    }, 0);
   });
 }
 

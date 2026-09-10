@@ -1440,6 +1440,44 @@ export async function buildApp(
     const esc = (s: string): string =>
       s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
+    /**
+     * The meta description for one design page.
+     *
+     * Every design page used to carry the same sentence, which makes a set of
+     * pages look like near-duplicates to a search engine and gives a searcher
+     * no reason to click one over another. This builds a line out of what the
+     * design actually is.
+     *
+     * The creator's own words win when they wrote any: nothing generated here
+     * beats a human describing their own tifo. Otherwise it is assembled from
+     * the stadium, its size, and who made it - facts that genuinely differ from
+     * one design to the next.
+     */
+    const describeDesign = (
+      rec: { title: string; templateId: string; description?: string | null; remixedFrom?: string | null },
+      ownerName: string | null,
+    ): string => {
+      const own = (rec.description ?? '').trim().replace(/\s+/g, ' ');
+      if (own.length >= 40) return own.slice(0, 300);
+
+      const tpl = templates.find((t) => t.id === rec.templateId);
+      const where = tpl ? tpl.name : 'a stadium';
+      const seats = tpl?.seatCount ? `${tpl.seatCount.toLocaleString('en-US')} seats` : null;
+      const name = (rec.title ?? '').trim();
+
+      const parts: string[] = [];
+      parts.push(name && !/^untitled/i.test(name) ? `"${name}", a tifo` : 'A tifo');
+      parts.push(`on ${where}`);
+      if (seats) parts.push(`across ${seats}`);
+      if (ownerName) parts.push(`by @${ownerName}`);
+      let line = `${parts.join(' ')}.`;
+      if (rec.remixedFrom) line += ' Remixed from another supporter\u2019s design.';
+      // Short one, so give the searcher the next useful fact.
+      if (own) line += ` ${own}`;
+      else line += ' Open it to view the full stand in 3D, or remix it into your own.';
+      return line.slice(0, 300);
+    };
+
     // Share links: /d/:id. Inject Open Graph + Twitter Card tags so a pasted
     // link shows a rich preview (title, author, the stadium thumbnail) in
     // WhatsApp, Twitter/X, Discord, Slack, etc., before any JS runs. Humans
@@ -1453,8 +1491,9 @@ export async function buildApp(
       let image = `${base}/og-default.png`;
       // Only expose metadata for PUBLIC designs (private ones stay unlisted).
       if (rec && rec.isPublic) {
+        const owner = rec.ownerId ? await auth.getUserById(rec.ownerId).catch(() => null) : null;
         title = `${rec.title}: Tifo Maker`;
-        description = 'A stadium tifo on Tifo Maker. Open it to remix.';
+        description = describeDesign(rec, owner?.username ?? null);
         const thumb = await repo.getThumbnail(rec.id).catch(() => null);
         if (thumb) image = `${base}/api/designs/${rec.id}/thumbnail.png`;
       }
@@ -1504,7 +1543,7 @@ export async function buildApp(
         if (rec && rec.isPublic) {
           const owner = rec.ownerId ? await auth.getUserById(rec.ownerId).catch(() => null) : null;
           title = `${rec.title}: TifoMaker`;
-          description = `A stadium tifo${owner ? ` by @${owner.username}` : ''} on TifoMaker.`;
+          description = describeDesign(rec, owner?.username ?? null);
           image = `${base}/api/designs/${rec.id}/og.png`;
         }
         const meta = [
@@ -1547,9 +1586,44 @@ export async function buildApp(
     }
 
     // The standalone community / social feed page (third pillar).
+    //
+    // The grid is built client-side, which meant a crawler saw a heading, a
+    // promise and no links: every published tifo was an ORPHAN, reachable only
+    // through sitemap.xml. Orphan pages get crawled rarely and rank badly,
+    // because nothing on the site points at them. So the server injects a real
+    // list of links before sending the page. The client still renders the rich
+    // interactive grid on top and hides this one, so nothing is shown twice and
+    // nobody sees a flash of a second list.
     try {
       const communityHtml = readFileSync(join(staticDir, 'community.html'), 'utf8');
-      app.get('/community', async (_req, reply) => reply.type('text/html').send(communityHtml));
+      app.get('/community', async (req, reply) => {
+        let items: { id: string; title: string; ownerName: string; hasThumbnail: boolean }[] = [];
+        try {
+          items = (await repo.listPublic({ sort: 'recent' })).slice(0, 60);
+        } catch {
+          items = []; // a failed query must never take the page down
+        }
+        const base = origin(req);
+        const list = items
+          .map((d) => {
+            const name = d.title?.trim() || 'Untitled tifo';
+            const thumb = d.hasThumbnail
+              ? `<img src="${base}/api/designs/${esc(d.id)}/thumbnail.png" alt="${esc(name)}" width="320" height="200" loading="lazy" />`
+              : '';
+            // /t/:id is the canonical URL for a design, so link that, not /d/:id.
+            return `<li><a href="/t/${esc(d.id)}">${thumb}<span>${esc(name)}</span></a>`
+              + `<small> by ${esc(d.ownerName || 'a supporter')}</small></li>`;
+          })
+          .join('');
+        const seo = items.length
+          ? `<nav id="seo-feed" class="seo-feed" aria-label="Published tifos"><ul>${list}</ul></nav>`
+          : '';
+        const html = communityHtml.replace(
+          /<div class="grid-loading" id="grid-loading">/i,
+          `${seo}<div class="grid-loading" id="grid-loading">`,
+        );
+        return reply.type('text/html').send(html);
+      });
     } catch {
       /* community page optional in API-only builds */
     }

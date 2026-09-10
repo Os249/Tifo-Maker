@@ -11,6 +11,20 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/src/community.css" />
+  <style>
+    /* The server-rendered link list. Real, visible content: it is what a crawler
+       and a no-JS visitor get, and it is removed the moment the interactive grid
+       renders. Styled as a plain thumbnail list so the brief moment it is on
+       screen looks deliberate rather than broken. */
+    .seo-feed ul { list-style: none; margin: 0; padding: 0;
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px; }
+    .seo-feed li { background: rgba(255,255,255,.03); border: 1px solid rgba(255,255,255,.08);
+      border-radius: 12px; overflow: hidden; }
+    .seo-feed a { display: block; color: inherit; text-decoration: none; }
+    .seo-feed img { display: block; width: 100%; height: auto; }
+    .seo-feed span { display: block; padding: 10px 12px 2px; font-weight: 600; }
+    .seo-feed small { display: block; padding: 0 12px 10px; opacity: .6; }
+  </style>
 </head>
 <body>
   <header class="nav">

@@ -8,7 +8,7 @@ import { renderTextCanvas, TIFO_FONTS, type RenderedText } from '../core/text';
 import type { ObjectLayer } from '../core/objects';
 import { MIN_LEGIBLE_RUN, findFragileSeats } from '../core/analysis';
 import { RevealPlayer, REVEAL_PRESETS, type RevealId } from '../core/reveal';
-import { fetchMe, isSignedIn, loadDesign, saveDesign, setPublic, exportMyData, deleteAccount } from '../net/api';
+import { fetchMe, isSignedIn, loadDesign, saveDesign, setPublic, setDesignTitle, exportMyData, deleteAccount } from '../net/api';
 import { t as i18nT } from './i18n';
 import { track, setAnalyticsSignedIn } from '../net/analytics';
 import { buildTifoV2 } from '../core/tifoFormat';
@@ -1326,6 +1326,13 @@ export function mountToolbar(
     try {
       if (!(await saveToAccount(false))) return;
       if (!designId) return;
+      // Apply the public name first, so the design is never briefly public
+      // under a placeholder title that a crawler or a share preview could catch.
+      if (choice.title && choice.title !== docTitle.value.trim()) {
+        docTitle.value = choice.title;
+        await setDesignTitle(designId, choice.title).catch(() => {});
+        draftWriter.schedule(); // keep the local draft's title in step
+      }
       await setPublic(designId, true);
       publicChk.checked = true;
       const { setDesignTags, setDesignTemplate, setPublishMeta } = await import('../net/api');
