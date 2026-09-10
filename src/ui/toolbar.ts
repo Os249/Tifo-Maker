@@ -995,6 +995,11 @@ export function mountToolbar(
   document.getElementById('menu-community')?.addEventListener('click', () => {
     window.location.href = '/community';
   });
+  // The header Gallery button is folded away on phones, so the menu carries it.
+  document.getElementById('menu-gallery')?.addEventListener('click', () => {
+    toggleAvatarMenu(false);
+    ($('#gallery') as unknown as HTMLButtonElement).click();
+  });
   document.getElementById('menu-password')?.addEventListener('click', async () => {
     toggleAvatarMenu(false);
     const { openChangePasswordModal } = await import('./changePasswordModal');
@@ -1178,18 +1183,32 @@ export function mountToolbar(
         };
       });
 
+  // The header Save. The panel one stays for anyone already down there, but this
+  // is the one almost everybody will use, because it is the only one on screen.
+  const saveTopBtn = document.getElementById('save-top') as HTMLButtonElement | null;
+  const saveStateTop = document.getElementById('save-state-top');
+
   const renderDraftState = (): void => {
-    if (!lastDraft) { draftState.textContent = ''; return; }
+    const show = (cls: string, text: string): void => {
+      draftState.className = cls;
+      draftState.textContent = text;
+      if (saveStateTop) {
+        saveStateTop.className = cls.replace('draft-state', 'save-state-top');
+        saveStateTop.textContent = text;
+        saveStateTop.hidden = !text;
+      }
+    };
+    if (!lastDraft) { show('draft-state', ''); return; }
     if (lastDraft.ok) {
-      draftState.className = 'draft-state ok';
-      draftState.textContent = isSignedIn() ? i18nT('draft.savedAccount') : i18nT('draft.savedLocal');
+      show('draft-state ok', isSignedIn() ? i18nT('draft.savedAccount') : i18nT('draft.savedLocal'));
       return;
     }
-    draftState.className = 'draft-state warn';
-    draftState.textContent =
+    show(
+      'draft-state warn',
       lastDraft.reason === 'quota' || lastDraft.reason === 'too-big'
         ? i18nT('draft.full')
-        : i18nT('draft.blocked');
+        : i18nT('draft.blocked'),
+    );
   };
 
   const draftWriter = createDraftWriter(
@@ -1217,8 +1236,13 @@ export function mountToolbar(
 
   // ================= save =================
   /** Persist to the signed-in account. Returns false and reports on failure. */
+  const setSaveBusy = (busy: boolean): void => {
+    saveBtn.disabled = busy;
+    if (saveTopBtn) saveTopBtn.disabled = busy;
+  };
+
   const saveToAccount = async (announce: boolean): Promise<boolean> => {
-    saveBtn.disabled = true;
+    setSaveBusy(true);
     try {
       const isNew = designId === null;
       const title = isNew ? docTitle.value.trim() || 'Untitled tifo' : '';
@@ -1235,7 +1259,7 @@ export function mountToolbar(
       message.textContent = `${i18nT('save.failed')}: ${(err as Error).message}`;
       return false;
     } finally {
-      saveBtn.disabled = false;
+      setSaveBusy(false);
     }
   };
 
@@ -1252,14 +1276,32 @@ export function mountToolbar(
   };
 
   /**
+   * Put the offer directly under the control that triggered it, clamped so it
+   * can never hang off the edge of a narrow screen.
+   */
+  const placeOffer = (anchor: HTMLElement): void => {
+    const r = anchor.getBoundingClientRect();
+    const w = Math.min(300, window.innerWidth - 24);
+    accountOffer.style.width = `${w}px`;
+    let left = r.left + r.width / 2 - w / 2;
+    left = Math.max(12, Math.min(left, window.innerWidth - w - 12));
+    accountOffer.style.left = `${Math.round(left)}px`;
+    accountOffer.style.top = `${Math.round(Math.min(r.bottom + 10, window.innerHeight - 24))}px`;
+  };
+
+  /**
    * The offer to keep work beyond this browser. Shown only AFTER a save has
    * already succeeded, so it reads as an upgrade rather than a toll: the user
    * can ignore it entirely and still have their tifo.
    */
-  const showAccountOffer = (): void => {
+  const showAccountOffer = (anchor: HTMLElement): void => {
     if (isSignedIn() || !accountOffer.hidden) return;
     track('account_prompt');
     accountOffer.hidden = false;
+    // Anchor it to the button that was actually pressed. Fixed to the header one
+    // it would ambush someone saving from the panel, and pinned in the panel it
+    // is invisible to someone saving from the header - which is the whole bug.
+    placeOffer(anchor);
     accountOffer.innerHTML =
       `<p class="ao-lead">${i18nT('offer.lead')}</p>` +
       `<button class="primary ao-go" type="button">${i18nT('offer.cta')}</button>` +
@@ -1292,8 +1334,9 @@ export function mountToolbar(
     });
   };
 
-  // One action. It always succeeds, and it never asks a question first.
-  saveBtn.addEventListener('click', async () => {
+  // One action, reachable from two places. It always succeeds, and it never
+  // asks a question first.
+  const doSave = async (trigger: HTMLElement): Promise<void> => {
     track('save_clicked');
     if (!isSignedIn()) {
       draftWriter.flush(); // forces a write, so lastDraft reflects reality
@@ -1305,10 +1348,24 @@ export function mountToolbar(
         return;
       }
       message.textContent = i18nT('save.local');
-      showAccountOffer();
+      showAccountOffer(trigger);
       return;
     }
     await saveToAccount(true);
+  };
+
+  saveBtn.addEventListener('click', () => void doSave(saveBtn));
+  saveTopBtn?.addEventListener('click', () => void doSave(saveTopBtn));
+  // Ctrl/Cmd+S is what people reach for before they hunt for a button.
+  window.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+      e.preventDefault();
+      void doSave(saveTopBtn ?? saveBtn);
+    }
+  });
+  // A popover pinned in viewport coordinates has to follow its anchor.
+  window.addEventListener('resize', () => {
+    if (!accountOffer.hidden) placeOffer(saveTopBtn ?? saveBtn);
   });
 
   // ================= publish (a separate intent, with its own metadata) =================

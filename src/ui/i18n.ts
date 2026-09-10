@@ -347,6 +347,7 @@ const STRINGS: Record<string, { en: string; ar: string }> = {
   'ed.stadium.tag': { en: 'shape & whole-bowl fills', ar: 'الشكل وتعبئة المدرج كامل' },
   'ed.stadium.guides': { en: 'Section guides', ar: 'حدود القطاعات' },
   'ed.save': { en: 'Save', ar: 'احفظ' },
+  'ed.saveTitle': { en: 'Save your tifo', ar: 'احفظ تيفوك' },
   'ed.openFile': { en: 'Open file', ar: 'افتح ملف' },
   'ed.publicList': { en: 'List in public gallery', ar: 'انشره في المعرض العام' },
   'ed.addPhoto': { en: 'Add match-day photo', ar: 'أضف صورة يوم المباراة' },

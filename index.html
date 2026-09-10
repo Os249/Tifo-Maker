@@ -20,7 +20,14 @@
         </div>
       </div>
       <div class="topbar-right">
-        <span class="save-dot" id="save-dot" title="Saved"></span>
+        <!-- Save lives here because the panel's Save button sits ~580px below the
+             fold: of 116 people who painted a tifo, 12 ever pressed it. The dot
+             that used to sit here was decorative and always green, which said
+             "saved" whether or not anything had been. -->
+        <button id="save-top" class="save-top" data-i18n-attr="title:ed.saveTitle" title="Save your tifo">
+          <i class="ti ti-device-floppy"></i><span data-i18n="ed.save">Save</span>
+        </button>
+        <span class="save-state-top" id="save-state-top" hidden></span>
         <button id="lang-toggle" class="lang-toggle" data-i18n="common.language">العربية</button>
         <button id="signin" class="signup-shine" data-i18n="ed.signup">Sign up</button>
         <a href="/community" id="community-link" class="topbar-link" data-i18n="nav.community">Community</a>
@@ -32,6 +39,7 @@
             <div class="avatar-menu-name" id="avatar-menu-name"></div>
             <button class="avatar-menu-item" id="menu-profile"><i class="ti ti-user"></i> <span data-i18n="ed.viewProfile">View profile</span></button>
             <button class="avatar-menu-item" id="menu-community"><i class="ti ti-users"></i> <span data-i18n="nav.community">Community</span></button>
+            <button class="avatar-menu-item" id="menu-gallery"><i class="ti ti-photo"></i> <span data-i18n="ed.gallery">Gallery</span></button>
             <button class="avatar-menu-item" id="menu-tutorial"><i class="ti ti-help-circle"></i> <span data-i18n="ed.replayTour">Replay tutorial</span></button>
             <button class="avatar-menu-item" id="menu-password"><i class="ti ti-key"></i> <span data-i18n="ed.changePassword">Change password</span></button>
             <button class="avatar-menu-item" id="menu-export"><i class="ti ti-download"></i> <span data-i18n="ed.exportData">Export my data</span></button>

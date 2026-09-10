@@ -38,6 +38,44 @@ check('draft survives a reload', !!b && b.head===a.head, b?`${b.runs} runs`:'');
 const msg = await page.evaluate(()=>document.getElementById('message')?.textContent||'');
 check('user is told their work came back', /restored/i.test(msg), JSON.stringify(msg));
 
+// The bug that starved every number below it: Save sat ~580px under the fold in
+// a side panel, so most people who painted never saw it. Check the sizes real
+// visitors actually use, including a phone.
+for (const vp of [{width:1366,height:768},{width:1920,height:1080},{width:390,height:844}]) {
+  await page.setViewportSize(vp);
+  await page.waitForTimeout(400);
+  const r = await page.evaluate(()=>{
+    const b=document.getElementById('save-top');
+    if(!b) return null;
+    const q=b.getBoundingClientRect();
+    return {onScreen:q.top>=0&&q.bottom<=innerHeight&&q.left>=0&&q.right<=innerWidth,
+            top:Math.round(q.top), w:Math.round(q.width), h:Math.round(q.height)};
+  });
+  check(`Save is on screen at ${vp.width}x${vp.height}`, !!r && r.onScreen, JSON.stringify(r));
+  // Comfortable-target guidance is ~44px; a 56px header caps that, so 36 is the
+  // floor worth holding. Anything near 27 is a miss waiting to happen.
+  check(`Save is a real tap target at ${vp.width}x${vp.height}`, !!r && r.h>=36 && r.w>=36, r?`${r.w}x${r.h}`:'missing');
+  // A bounding-box-inside-the-viewport check passed while the header children
+  // were overlapping each other, with Save painted over the "Split" tab. Boxes
+  // being on screen is not the same as a layout that works.
+  const clash = await page.evaluate(()=>{
+    const ids=['doc-title','save-top','lang-toggle','signin','avatar','view-2d','view-3d','view-split'];
+    const boxes=ids.map(id=>{const e=document.getElementById(id); if(!e) return null;
+      const r=e.getBoundingClientRect(); return r.width>0&&r.height>0?{id,r}:null;}).filter(Boolean);
+    const hits=[];
+    for(let i=0;i<boxes.length;i++) for(let j=i+1;j<boxes.length;j++){
+      const a=boxes[i].r,b=boxes[j].r;
+      const ov=Math.max(0,Math.min(a.right,b.right)-Math.max(a.left,b.left))
+             * Math.max(0,Math.min(a.bottom,b.bottom)-Math.max(a.top,b.top));
+      if(ov>16) hits.push(`${boxes[i].id}/${boxes[j].id}`);
+    }
+    return hits;
+  });
+  check(`header controls do not overlap at ${vp.width}x${vp.height}`, clash.length===0, clash.join(', ')||'clean');
+}
+await page.setViewportSize({width:1400,height:900});
+await page.waitForTimeout(400);
+
 // Save, signed out. Scroll the panel back to the top first: that is the state
 // that used to render the offer far below the fold, so the in-view assertion
 // below is a real guard rather than one the layout satisfies by luck.
@@ -46,7 +84,7 @@ await page.evaluate(()=>{
   document.scrollingElement.scrollTop=0;
 });
 await page.waitForTimeout(300);
-await page.evaluate(()=>document.getElementById('save').click());
+await page.evaluate(()=>document.getElementById('save-top').click());
 await page.waitForTimeout(1200);
 const after = await page.evaluate(()=>({
   msg: document.getElementById('message')?.textContent||'',

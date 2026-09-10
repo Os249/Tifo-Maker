@@ -847,12 +847,15 @@ body.viewer { display:block; overflow-y:auto; background:var(--ink-0); }
 .draft-state.ok::before { content:"✓ "; color:var(--ok, #3fb950); }
 .draft-state.warn { color:var(--warn, #d29922); }
 
-/* The account offer, shown only after a save already succeeded. Inline in the
-   panel rather than a modal: it must be ignorable without a decision. */
+/* The account offer, shown only after a save already succeeded. A popover
+   anchored to whichever Save was pressed, never a modal: it must be ignorable
+   without a decision. Fixed rather than inline because the panel it used to
+   live in scrolls, and an offer below the fold is the same as no offer. */
 .account-offer {
-  margin-top:12px; padding:12px; border-radius:10px;
-  background:var(--ink-2, rgba(255,255,255,.04));
+  position:fixed; z-index:60; padding:12px; border-radius:10px;
+  background:var(--ink-2, rgba(20,22,28,.98));
   border:1px solid var(--line-2);
+  box-shadow:0 12px 32px rgba(0,0,0,.45);
 }
 .account-offer .ao-lead { margin:0 0 10px; font-size:12px; line-height:1.6; color:var(--text-2); }
 .account-offer .ao-go { width:100%; }
@@ -861,6 +864,63 @@ body.viewer { display:block; overflow-y:auto; background:var(--ink-0); }
   font-size:11.5px; color:var(--text-3); cursor:pointer; padding:6px;
 }
 .account-offer .ao-dismiss:hover { color:var(--text-2); }
+
+/* The header on phones.
+   At 390px it used to lay out 880px of content and simply run off the right
+   edge: Save, Sign up, Gallery and the avatar menu were all past the fold with
+   no way to scroll to them. Nothing shrank because every child sized itself
+   from its content. So on phones the decorative parts give up their space and
+   the two that matter - Save and the account menu - are pinned. */
+@media (max-width: 767px) {
+  /* Two rows rather than one squeezed row. Squeezing looked fine to a
+     bounding-box check and was a mess on screen: the children would not shrink
+     below their content, so they overflowed their containers and painted on top
+     of each other - Save landed over the "Split" tab. Wrapping is the honest
+     fix, and it costs about 40px of height. */
+  header {
+    height:auto; flex:0 0 auto; flex-wrap:wrap;
+    gap:8px; padding:8px 10px;
+  }
+  .brand { display:none; }
+  /* width:0 with flex-grow makes the input share row one with the buttons
+     instead of claiming its intrinsic ~200px and pushing them onto a row of
+     their own, which cost a third of the header's height. */
+  .doc-title { order:1; flex:1 1 0; width:0; min-width:0; max-width:none; }
+  .topbar-right { order:2; flex:0 0 auto; gap:6px; margin-inline-start:auto; }
+  /* Second row, full width, so the view switcher keeps its readable labels. */
+  .topbar-center { order:3; flex:1 0 100%; justify-content:flex-start; }
+  .segmented { width:100%; padding:2px; }
+  .segmented button { flex:1 1 0; padding:8px 4px; font-size:12.5px; white-space:nowrap; }
+  /* Both of these live in the avatar menu, so nothing is lost by folding them
+     away here. */
+  #community-link, #gallery { display:none; }
+  #lang-toggle, #signin { padding:6px 10px; font-size:12px; white-space:nowrap; }
+  .save-top, .avatar-wrap { flex:0 0 auto; }
+}
+
+/* Save, in the header, where people already are. */
+.save-top {
+  display:inline-flex; align-items:center; gap:6px;
+  background:var(--accent, #1c5fd9); color:#fff; border:none;
+  padding:8px 14px; min-height:36px; border-radius:8px; font-weight:600; font-size:13px; cursor:pointer;
+}
+.save-top:hover { filter:brightness(1.08); }
+.save-top:disabled { opacity:.6; cursor:default; }
+.save-top:focus-visible { outline:none; box-shadow:var(--ring-focus); }
+.save-state-top { font-size:11.5px; color:var(--text-3); white-space:nowrap; }
+.save-state-top.ok { color:var(--ok, #0fbf6b); }
+.save-state-top.warn { color:var(--warn, #e0a63a); }
+/* On phones the header is tight: keep the button, drop the words beside it. */
+@media (max-width: 767px) {
+  .save-state-top { display:none; }
+  /* Icon only, but still a real thumb target: 27px tall is a miss waiting to
+     happen, and this is the one control on the page that must not be missed. */
+  .save-top {
+    padding:0; min-width:40px; min-height:40px;
+    justify-content:center; font-size:18px;
+  }
+  .save-top span { display:none; }
+}
 
 .auth-terms { margin:12px 0 0; font-size:11px; line-height:1.6; color:var(--text-3); text-align:center; }
 .auth-terms a { color:var(--text-2); text-decoration:underline; }
