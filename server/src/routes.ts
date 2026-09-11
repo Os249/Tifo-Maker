@@ -255,6 +255,12 @@ export async function buildApp(
   const validPalette = (p: unknown): p is string[] =>
     Array.isArray(p) && p.length >= 2 && p.length <= 256 && p.every((c) => typeof c === 'string' && HEX.test(c));
 
+  /**
+   * The site's own share card, loaded once from the static build. Used as the
+   * last resort for a design that has no image of its own.
+   */
+  let defaultCardPng: Buffer | null = null;
+
   /** User id from a bearer token, or null. Never writes to the reply. */
   const userOf = async (req: FastifyRequest): Promise<string | null> => {
     const header = req.headers.authorization;
@@ -1272,17 +1278,36 @@ export async function buildApp(
 
   // Branded 1200x630 social card (public OR owner via getVisible). Falls back to
   // the existing thumbnail if no OG image has been generated yet.
-  app.get('/api/designs/:id/og.png', async (req, reply) => {
+  /**
+   * The link-preview image for one design.
+   *
+   * Served from /og/ as well as /api/, and the card points at /og/. robots.txt
+   * has to disallow /api/ because everything else under it is JSON, and
+   * Twitterbot, facebookexternalhit, LinkedInBot and TelegramBot all obey
+   * robots.txt - so a card image living under /api/ is fetched by none of them.
+   * Wildcard Allow rules are unevenly supported, so the path moves instead.
+   */
+  const sendDesignCard = async (req: FastifyRequest, reply: FastifyReply) => {
     const v = await getVisible(req, reply);
     if (!v) return;
-    const img = (await repo.getOgImage(v.rec.id)) ?? (await repo.getThumbnail(v.rec.id));
+    // Never 404 here. This URL is what og:image points at, and a card image that
+    // fails to fetch is cached as a failure for up to a week on X and a month on
+    // Facebook - so one missing thumbnail silently kills the preview for every
+    // share of that design long after the thumbnail arrives. Designs published
+    // before the og-image upload existed, or whose canvas export failed, land on
+    // the site card instead of nothing.
+    const img =
+      (await repo.getOgImage(v.rec.id)) ?? (await repo.getThumbnail(v.rec.id)) ?? defaultCardPng;
     if (!img) return reply.code(404).send({ error: 'no image' });
     return reply
       .header('content-type', 'image/png')
       .header('x-content-type-options', 'nosniff')
       .header('cache-control', 'public, max-age=3600')
       .send(img);
-  });
+  };
+  app.get('/og/t/:id.png', sendDesignCard);
+  // Kept so cards already sitting in a platform's cache keep resolving.
+  app.get('/api/designs/:id/og.png', sendDesignCard);
 
   // Store the branded OG card (owner only). Decoupled from the save path so the
   // core save stays lean; the client posts it right after a public save.
@@ -1632,10 +1657,91 @@ export async function buildApp(
   if (options.staticDir) {
     const staticDir = options.staticDir;
     const indexHtml = readFileSync(join(staticDir, 'index.html'), 'utf8');
+    /**
+     * Absolute base for anything we put IN the page - og:url, og:image, canonical.
+     * Same rule as email links: PUBLIC_URL wins, otherwise the Host has to be one
+     * we know before it is echoed back, because a forged Host would otherwise
+     * write an attacker's domain into the canonical URL of our own card.
+     */
     const origin = (req: FastifyRequest): string => {
-      const proto = (req.headers['x-forwarded-proto'] as string) || 'https';
-      const host = req.headers.host ?? 'tifomaker.org';
-      return `${proto}://${host}`;
+      if (options.publicUrl) return options.publicUrl.replace(/\/+$/, '');
+      const host = String(req.headers.host ?? '');
+      const bare = host.split(':')[0]?.toLowerCase() ?? '';
+      if (!ALLOWED_EMAIL_HOSTS.has(bare)) return CANONICAL_ORIGIN;
+      // https unless this is plainly a dev host. An http:// og:image is a
+      // documented way to lose the card entirely: an edge rule that upgrades
+      // http to https answers the crawler with a 301 the origin never sees,
+      // and og:image:secure_url is https by definition.
+      const local = bare === 'localhost' || bare === '127.0.0.1';
+      return `${local ? 'http' : 'https'}://${host}`;
+    };
+
+    /**
+     * The link preview card, as HTML the crawler can actually read.
+     *
+     * No social crawler runs JavaScript - not Twitterbot, facebookexternalhit,
+     * LinkedInBot, WhatsApp, Telegram, Discord or Slack - so a single-page app
+     * that sets these from JS shows an empty card on every platform. They have
+     * to be in the bytes the server sends.
+     *
+     * Three details that are each enough on their own to blank the card:
+     *  - og:image MUST be absolute. A relative path is never resolved.
+     *  - twitter:card has no Open Graph fallback. Without it X renders the small
+     *    thumbnail card and Discord crops to an 80px square.
+     *  - width/height let a card render before the image has downloaded; without
+     *    them the image is commonly missing on the FIRST share of a URL.
+     */
+    const CARD_PATH = '/og-card.png';
+    const CARD_ALT =
+      'A stadium bowl with a red and white tifo across the stands, designed in TifoMaker.';
+
+    const cardTags = (
+      req: FastifyRequest,
+      o: { title: string; description: string; path: string; image?: string; alt?: string },
+    ): string => {
+      const base = origin(req);
+      const url = `${base}${o.path}`;
+      const img = o.image ?? `${base}${CARD_PATH}`;
+      const alt = o.alt ?? CARD_ALT;
+      return [
+        `<title>${esc(o.title)}</title>`,
+        `<link rel="canonical" href="${esc(url)}" />`,
+        `<meta name="description" content="${esc(o.description)}" />`,
+        `<meta property="og:type" content="website" />`,
+        `<meta property="og:site_name" content="TifoMaker" />`,
+        `<meta property="og:locale" content="en_US" />`,
+        `<meta property="og:url" content="${esc(url)}" />`,
+        `<meta property="og:title" content="${esc(o.title)}" />`,
+        `<meta property="og:description" content="${esc(o.description)}" />`,
+        `<meta property="og:image" content="${esc(img)}" />`,
+        `<meta property="og:image:secure_url" content="${esc(img)}" />`,
+        `<meta property="og:image:type" content="image/png" />`,
+        `<meta property="og:image:width" content="1200" />`,
+        `<meta property="og:image:height" content="630" />`,
+        `<meta property="og:image:alt" content="${esc(alt)}" />`,
+        `<meta name="twitter:card" content="summary_large_image" />`,
+        `<meta name="twitter:title" content="${esc(o.title)}" />`,
+        `<meta name="twitter:description" content="${esc(o.description)}" />`,
+        `<meta name="twitter:image" content="${esc(img)}" />`,
+        `<meta name="twitter:image:alt" content="${esc(alt)}" />`,
+      ].join('\n    ');
+    };
+
+    /**
+     * Put the card into a static page. Any title or og:/twitter: tag already in
+     * the file is dropped first, so there is exactly one of each - duplicates are
+     * resolved differently by each platform and produce cards nobody intended.
+     */
+    const withCard = (
+      html: string,
+      req: FastifyRequest,
+      o: { title: string; description: string; path: string; image?: string; alt?: string },
+    ): string => {
+      const stripped = html
+        .replace(/<title>[\s\S]*?<\/title>/gi, '')
+        .replace(/<meta[^>]+(?:property|name)=["'](?:og:|twitter:)[^"']*["'][^>]*>\s*/gi, '')
+        .replace(/<link[^>]+rel=["']canonical["'][^>]*>\s*/gi, '');
+      return injectOnce(stripped, /<head>/i, `<head>\n    ${cardTags(req, o)}`);
     };
     /**
      * Insert a built block into a page WITHOUT letting its content be reinterpreted.
@@ -1755,30 +1861,19 @@ export async function buildApp(
         const base = origin(req);
         let title = 'TifoMaker';
         let description = 'A stadium tifo on TifoMaker, open it to view in full.';
-        let image = `${base}/og-default.png`;
+        let image = `${base}${CARD_PATH}`;
+        let alt: string | undefined;
         if (rec && rec.isPublic) {
           const owner = rec.ownerId ? await auth.getUserById(rec.ownerId).catch(() => null) : null;
           title = `${rec.title}: TifoMaker`;
           description = describeDesign(rec, owner?.username ?? null);
-          image = `${base}/api/designs/${rec.id}/og.png`;
+          image = `${base}/og/t/${rec.id}.png`;
+          // Alt text describes the picture, not the page: what a card reader hears.
+          alt = `"${rec.title}", a stadium tifo designed in TifoMaker${
+            owner?.username ? ` by @${owner.username}` : ''
+          }.`;
         }
-        const meta = [
-          `<title>${esc(title)}</title>`,
-          `<meta name="description" content="${esc(description)}" />`,
-          `<meta property="og:type" content="website" />`,
-          `<meta property="og:site_name" content="TifoMaker" />`,
-          `<meta property="og:title" content="${esc(title)}" />`,
-          `<meta property="og:description" content="${esc(description)}" />`,
-          `<meta property="og:image" content="${esc(image)}" />`,
-          `<meta property="og:image:width" content="1200" />`,
-          `<meta property="og:image:height" content="630" />`,
-          `<meta property="og:url" content="${esc(base)}/t/${esc(id)}" />`,
-          `<meta name="twitter:card" content="summary_large_image" />`,
-          `<meta name="twitter:title" content="${esc(title)}" />`,
-          `<meta name="twitter:description" content="${esc(description)}" />`,
-          `<meta name="twitter:image" content="${esc(image)}" />`,
-        ].join('\n    ');
-        const html = injectOnce(sharePage.replace(/<title>.*?<\/title>/i, ''), /<head>/i, `<head>\n    ${meta}`);
+        const html = withCard(sharePage, req, { title, description, path: `/t/${id}`, image, alt });
         return reply.type('text/html').send(html);
       });
     }
@@ -1787,16 +1882,52 @@ export async function buildApp(
     // bookmark /app; first-time visitors get the pitch. Share links (/d/:id)
     // and the SPA fallback both serve the editor.
     const landingHtml = readFileSync(join(staticDir, 'landing.html'), 'utf8');
+    // Held in memory so the og.png fallback never touches the disk per request.
+    try {
+      defaultCardPng = readFileSync(join(staticDir, 'og-card.png'));
+    } catch {
+      /* no card in this build; og.png then 404s exactly as it used to */
+    }
     // HTML entry points are served no-cache so the browser/CDN always revalidate
     // and never reference stale hashed chunks after a deploy (the cause of
     // "Failed to load module script / MIME text/html" errors). The hashed
     // /assets/* files are immutable by name, so they stay long-cacheable.
-    app.get('/', async (_req, reply) => reply.header('cache-control', 'no-cache').type('text/html').send(landingHtml));
-    app.get('/app', async (_req, reply) => reply.header('cache-control', 'no-cache').type('text/html').send(indexHtml));
+    app.get('/', async (req, reply) =>
+      reply
+        .header('cache-control', 'no-cache')
+        .type('text/html')
+        .send(
+          withCard(landingHtml, req, {
+            title: 'TifoMaker: design the display 60,000 fans will never forget',
+            description:
+              'Design a stadium tifo in your browser, watch it light up the stands in 3D, and export the seat-by-seat instructions that make it real on match day. Free, no account needed to start.',
+            path: '/',
+          }),
+        ));
+    app.get('/app', async (req, reply) =>
+      reply
+        .header('cache-control', 'no-cache')
+        .type('text/html')
+        .send(
+          withCard(indexHtml, req, {
+            title: 'The TifoMaker editor: paint 60,000 seats',
+            description:
+              'Paint a tifo seat by seat, drop in a crest or text, and watch the whole bowl update in 3D as you work. Free, in the browser, no download.',
+            path: '/app',
+          }),
+        ));
     // Public developer spec for the .tifo format.
     try {
       const specHtml = readFileSync(join(staticDir, 'tifo-spec.html'), 'utf8');
-      app.get('/tifo-spec', async (_req, reply) => reply.type('text/html').send(specHtml));
+      app.get('/tifo-spec', async (req, reply) =>
+        reply.type('text/html').send(
+          withCard(specHtml, req, {
+            title: 'The .tifo format: an open spec for stadium choreography',
+            description:
+              'The open file format behind TifoMaker: seat maps, palettes and per-seat instructions, documented so anyone can read or write a tifo.',
+            path: '/tifo-spec',
+          }),
+        ));
     } catch {
       /* spec page optional in API-only builds */
     }
@@ -1834,11 +1965,17 @@ export async function buildApp(
         const seo = items.length
           ? `<nav id="seo-feed" class="seo-feed" aria-label="Published tifos"><ul>${list}</ul></nav>`
           : '';
-        const html = injectOnce(
+        const withFeed = injectOnce(
           communityHtml,
           /<div class="grid-loading" id="grid-loading">/i,
           `${seo}<div class="grid-loading" id="grid-loading">`,
         );
+        const html = withCard(withFeed, req, {
+          title: 'The tifo community: displays from supporters worldwide',
+          description:
+            'Browse tifos designed by supporters around the world. Like, comment, follow the people making them, and remix any display into your own.',
+          path: '/community',
+        });
         return reply.type('text/html').send(html);
       });
     } catch {
@@ -1856,7 +1993,15 @@ export async function buildApp(
     // B2B "For Clubs" enterprise page with lead capture.
     try {
       const clubsHtml = readFileSync(join(staticDir, 'clubs.html'), 'utf8');
-      app.get('/clubs', async (_req, reply) => reply.type('text/html').send(clubsHtml));
+      app.get('/clubs', async (req, reply) =>
+        reply.type('text/html').send(
+          withCard(clubsHtml, req, {
+            title: 'TifoMaker for clubs: run the whole stand like a production',
+            description:
+              'Your actual venue modelled to seat-level accuracy, a branded editor for your design team, white-label fan pages and match-day exports.',
+            path: '/clubs',
+          }),
+        ));
     } catch {
       /* clubs page optional in API-only builds */
     }
@@ -1864,7 +2009,15 @@ export async function buildApp(
     // Legal documents (Terms, Privacy, Acceptable Use, Cookies) at /legal.
     try {
       const legalHtml = readFileSync(join(staticDir, 'legal.html'), 'utf8');
-      app.get('/legal', async (_req, reply) => reply.type('text/html').send(legalHtml));
+      app.get('/legal', async (req, reply) =>
+        reply.type('text/html').send(
+          withCard(legalHtml, req, {
+            title: 'Terms, privacy and acceptable use: TifoMaker',
+            description:
+              'How TifoMaker handles your designs and your data, what you can publish, and how to get in touch.',
+            path: '/legal',
+          }),
+        ));
     } catch {
       /* legal page optional in API-only builds */
     }

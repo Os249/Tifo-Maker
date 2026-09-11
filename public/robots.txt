@@ -13,4 +13,9 @@ Disallow: /reset
 # Per-design QR landing pages — one per seat lookup, no standalone value.
 Disallow: /s/
 
+# Link-preview images live here, deliberately outside /api/: Twitterbot,
+# facebookexternalhit, LinkedInBot and TelegramBot all obey this file, and a
+# card image they are not allowed to fetch is a blank card on every share.
+Allow: /og/
+
 Sitemap: https://tifomaker.org/sitemap.xml

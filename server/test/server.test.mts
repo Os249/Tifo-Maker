@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { gunzipSync, gzipSync } from 'node:zlib';
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
+import { join } from 'node:path';
 import pg from 'pg';
 import type { FastifyInstance } from 'fastify';
 import { generateSeatMap } from '../../src/core/seatmap';
@@ -1101,7 +1102,13 @@ async function runSuite(name: string, repo: DesignRepository, auth: AuthReposito
 {
   const auth = new MemoryAuthRepository();
   const designs = new MemoryDesignRepository((id) => auth.usernameOf(id));
-  const app = await buildApp(designs, auth, templates, { staticDir: process.cwd(), adminUsernames: [] });
+  // Prefer a real build when one exists: dist/ is the only directory that has
+  // og-card.png, and the card-fallback assertion below needs it. Without a
+  // build the suite still runs, it just skips that one check.
+  const distDir = join(process.cwd(), 'dist');
+  const staticRoot = existsSync(join(distDir, 'og-card.png')) ? distDir : process.cwd();
+  const hasCardAsset = existsSync(join(staticRoot, 'og-card.png'));
+  const app = await buildApp(designs, auth, templates, { staticDir: staticRoot, adminUsernames: [] });
   const tok = await registerUser(app, 'ultra');
   const cellsGzB64 = gzipSync(sampleCells()).toString('base64');
 
@@ -1151,6 +1158,75 @@ async function runSuite(name: string, repo: DesignRepository, auth: AuthReposito
   if (privPage.statusCode === 200) {
     assert.ok(!descOf(privPage.body).includes('Secret plan'), 'a private title never reaches the meta description');
   }
+
+  // ---- 4. Link preview cards -------------------------------------------
+  // No social crawler runs JavaScript, so every one of these tags has to be in
+  // the HTML the server sends. The site shipped for months with og:image and
+  // twitter:card missing from every page except /t/:id, which is why a shared
+  // link rendered as a grey placeholder with no picture.
+  const SHAREABLE = ['/', '/app', '/community', '/clubs', '/legal', '/tifo-spec', `/t/${namedId}`];
+  for (const path of SHAREABLE) {
+    const r = await app.inject({ method: 'GET', url: path, headers: { host: 'tifomaker.org' } });
+    if (r.statusCode !== 200) continue; // page absent in an API-only build
+    const html = r.body;
+    const one = (re: RegExp): string | null => (html.match(re) ?? [])[1] ?? null;
+
+    const img = one(/<meta property="og:image" content="([^"]+)"/i);
+    assert.ok(img, `${path}: og:image present`);
+    // A relative og:image is never resolved by any crawler - the single most
+    // common cause of an empty card.
+    assert.ok(img!.startsWith('https://'), `${path}: og:image is absolute https (${img})`);
+
+    // twitter:card has no Open Graph fallback. Without it X renders the small
+    // thumbnail card and Discord crops the image to an 80px square.
+    assert.equal(
+      one(/<meta name="twitter:card" content="([^"]+)"/i),
+      'summary_large_image',
+      `${path}: twitter:card is summary_large_image`,
+    );
+
+    // Declared dimensions let the card render before the image downloads;
+    // without them the image is commonly missing on the FIRST share of a URL.
+    assert.equal(one(/<meta property="og:image:width" content="([^"]+)"/i), '1200', `${path}: og:image:width`);
+    assert.equal(one(/<meta property="og:image:height" content="([^"]+)"/i), '630', `${path}: og:image:height`);
+    assert.ok(one(/<meta property="og:image:alt" content="([^"]+)"/i), `${path}: og:image:alt`);
+
+    const ogUrl = one(/<meta property="og:url" content="([^"]+)"/i);
+    assert.ok(ogUrl?.startsWith('https://tifomaker.org'), `${path}: og:url is the canonical origin`);
+
+    // Duplicated tags are resolved differently by each platform.
+    assert.equal((html.match(/property="og:title"/gi) ?? []).length, 1, `${path}: exactly one og:title`);
+    assert.equal((html.match(/<title>/gi) ?? []).length, 1, `${path}: exactly one <title>`);
+  }
+
+  // A forged Host must never be echoed into the card's own canonical URL.
+  const forged = await app.inject({ method: 'GET', url: '/', headers: { host: 'evil.example.com' } });
+  if (forged.statusCode === 200) {
+    assert.ok(
+      !forged.body.includes('evil.example.com'),
+      'a forged Host never reaches og:url or og:image',
+    );
+  }
+
+  // The card image must never 404. A failed fetch is cached as a failure for up
+  // to a week on X and a month on Facebook, so one missing thumbnail would kill
+  // the preview for every share of that design long after the thumbnail lands.
+  if (hasCardAsset) {
+    const cardRes = await app.inject({ method: 'GET', url: `/og/t/${namedId}.png` });
+    assert.equal(cardRes.statusCode, 200, 'a design with no image of its own falls back to the site card');
+    assert.equal(cardRes.headers['content-type'], 'image/png', 'the fallback is served as a png');
+  }
+
+  // The card lives outside /api/ on purpose: robots.txt has to disallow /api/,
+  // and Twitterbot, facebookexternalhit, LinkedInBot and TelegramBot obey it.
+  const shared = await app.inject({ method: 'GET', url: `/t/${namedId}`, headers: { host: 'tifomaker.org' } });
+  if (shared.statusCode === 200) {
+    const cardUrl = (shared.body.match(/<meta property="og:image" content="([^"]+)"/i) ?? [])[1] ?? '';
+    assert.ok(cardUrl.includes('/og/'), 'a design card is served from /og/, not from under /api/');
+    assert.ok(!cardUrl.includes('/api/'), 'the card URL is not inside the robots-disallowed /api/ tree');
+  }
+
+  console.log('link cards: all assertions passed (image absolute + https, summary_large_image, dimensions, single tags, no host injection, never 404, outside /api/)');
 
   console.log('discoverability: all assertions passed (feed links designs, canonical /t/ only, unique descriptions, private stays hidden)');
 }
