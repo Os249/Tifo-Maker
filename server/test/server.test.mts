@@ -8,6 +8,7 @@ import { DEFAULT_TEMPLATE } from '../../src/core/template';
 import { MemoryAiUsageRepository, MemoryAuthRepository, MemoryDesignRepository, MemoryEventsRepository, MemoryLeadsRepository } from '../src/memoryRepo';
 import { MemorySocialRepository } from '../src/memorySocial';
 import { MemoryAdminStatsRepository } from '../src/statsRepo';
+import { MemoryFeedbackRepository } from '../src/feedbackRepo';
 import { PgAuthRepository, PgDesignRepository } from '../src/pgRepo';
 import { PgSocialRepository } from '../src/pgSocial';
 import { buildApp, SNAPSHOT_EVERY, type TemplateInfo } from '../src/routes';
@@ -1016,6 +1017,81 @@ async function runSuite(name: string, repo: DesignRepository, auth: AuthReposito
   );
 
   console.log('shares: all assertions passed (admin gate, share/open kept separate, day clamping, inbound from /d/ and /t/ only)');
+}
+
+// ---------- in-product feedback ----------
+// An open, unauthenticated write endpoint. The traps below are the whole reason
+// it can stay open without a CAPTCHA, so they are asserted rather than assumed.
+{
+  const auth = new MemoryAuthRepository();
+  const designs = new MemoryDesignRepository((id) => auth.usernameOf(id));
+  const feedback = new MemoryFeedbackRepository();
+  const sent: { to: string; subject: string }[] = [];
+  const app = await buildApp(designs, auth, templates, {
+    feedback,
+    feedbackTo: 'dev@example.test',
+    emailSender: { async send(msg) { sent.push({ to: msg.to, subject: msg.subject }); } },
+    adminUsernames: ['boss'],
+  });
+  const bossTok = await registerUser(app, 'boss');
+  // Registering sends a verification mail through this same sender, so start
+  // counting from here or the first entry is that, not the report.
+  await new Promise((r) => setTimeout(r, 20));
+  sent.length = 0;
+
+  const post = (payload: Record<string, unknown>) =>
+    app.inject({ method: 'POST', url: '/api/feedback', payload: { elapsedMs: 9000, ...payload } });
+
+  // A real report lands, and reaches the developer by mail.
+  const ok = await post({ kind: 'bug', message: 'The save button does nothing on my phone', steps: 'painted, pressed save',
+    context: { path: '/app', browser: 'Safari', os: 'iOS', device: 'Mobile', viewport: '390x844', language: 'en', signedIn: false } });
+  assert.equal(ok.statusCode, 201, 'a genuine report is accepted');
+  // The mail is deliberately fire-and-forget: the report is already stored, and
+  // a slow or failing mail provider must never cost the person their report or
+  // hold the response open. So let the microtask settle before checking.
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(sent.length, 1, 'and is emailed to the developer');
+  assert.ok(sent[0].subject.includes('bug'), 'the subject says what kind it is');
+
+  // Honeypot: answered 200 so a bot learns nothing, but never stored.
+  const trapped = await post({ kind: 'bug', message: 'buy cheap watches', website: 'http://spam.example' });
+  assert.equal(trapped.statusCode, 200, 'the honeypot answers success rather than revealing the trap');
+
+  // Time-trap: nothing a person typed is submitted in under two seconds.
+  const tooFast = await app.inject({ method: 'POST', url: '/api/feedback',
+    payload: { kind: 'bug', message: 'instant spam', elapsedMs: 40 } });
+  assert.equal(tooFast.statusCode, 200, 'an instant submission is answered without storing');
+
+  const stored = await feedback.list(50);
+  assert.equal(stored.length, 1, 'neither trap wrote a row');
+  assert.equal(stored[0].message, 'The save button does nothing on my phone');
+
+  // Never stored: the IP and the raw user agent. The context is the coarse
+  // facts only, exactly as shown to the person before they sent it.
+  const blob = JSON.stringify(stored[0]);
+  assert.ok(!/Mozilla|AppleWebKit|\d+\.\d+\.\d+\.\d+/.test(blob), 'no user agent or IP reaches storage');
+  assert.equal(stored[0].context?.browser, 'Safari');
+
+  // Opting out really drops it.
+  await post({ kind: 'idea', message: 'Let me pick a stadium from a photo', context: null });
+  const withoutCtx = (await feedback.list(50))[0];
+  assert.equal(withoutCtx.context, null, 'declining diagnostics stores nothing about the device');
+  assert.equal(withoutCtx.kind, 'idea');
+
+  // Input guards.
+  assert.equal((await post({ kind: 'bug', message: 'hm' })).statusCode, 400, 'a too-short message is refused');
+  assert.equal((await post({ kind: 'nonsense', message: 'a real message' })).statusCode, 400, 'an unknown kind is refused');
+  assert.equal((await post({ kind: 'bug', message: 'a real message', email: 'not-an-email' })).statusCode, 400, 'a malformed reply address is refused');
+
+  // Reading them back is admin-only, like every other business signal here.
+  assert.equal((await app.inject({ method: 'GET', url: '/api/admin/feedback' })).statusCode, 403, 'anonymous cannot read reports');
+  const mine = await app.inject({ method: 'GET', url: '/api/admin/feedback', headers: bearer(bossTok) });
+  assert.equal(mine.statusCode, 200);
+  const body = mine.json() as { items: unknown[]; counts: { bugs: number; ideas: number } };
+  assert.equal(body.counts.bugs, 1);
+  assert.equal(body.counts.ideas, 1);
+
+  console.log('feedback: all assertions passed (honeypot, time-trap, no UA/IP stored, opt-out honoured, admin gate, email delivery)');
 }
 
 // ---------- discoverability ----------

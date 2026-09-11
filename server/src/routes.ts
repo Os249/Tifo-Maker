@@ -19,6 +19,7 @@ import type { EmailSender } from './email';
 import type { StadiumSubmissionRepository } from './stadiumRepo';
 import type { AdminStatsRepository } from './statsRepo';
 import { buildVisit, isSocialHost, type TrafficRepository } from './trafficRepo';
+import { isFeedbackKind, type FeedbackContext, type FeedbackRepository } from './feedbackRepo';
 import { ADMIN_HTML, ADMIN_JS } from './adminPage';
 import { isValidTemplate } from '../../src/core/customStadiums';
 
@@ -143,8 +144,12 @@ export interface AppOptions {
   stats?: AdminStatsRepository;
   /** Optional cookieless traffic-source store. When present, /api/admin/traffic is enabled. */
   traffic?: TrafficRepository;
+  /** Optional in-product bug/idea store. When present, /api/feedback is enabled. */
+  feedback?: FeedbackRepository;
   /** Transactional email sender (verification, password reset). When absent, emails are skipped. */
   emailSender?: EmailSender;
+  /** Where in-product feedback is emailed. Unset means store-only. */
+  feedbackTo?: string;
   /** Public base URL for links in emails. Defaults to the request's own origin. */
   publicUrl?: string;
 }
@@ -476,6 +481,106 @@ export async function buildApp(
         };
       }
       return reply.send({ ...summary, inbound });
+    });
+  }
+
+  // ---------- in-product feedback ----------
+  // The only route out of a broken state used to be leaving the site and
+  // messaging the developer, which nobody does, so bugs cost users silently.
+  if (options.feedback) {
+    const feedback = options.feedback;
+
+    /** Bots fill every field they can see, including the ones humans cannot. */
+    const HONEYPOT = 'website';
+    /** Nothing a person actually typed arrives this fast. */
+    const MIN_FILL_MS = 2000;
+
+    const oneLine = (v: unknown, max: number): string | null => {
+      if (typeof v !== 'string') return null;
+      const t = v.trim().replace(/\s+/g, ' ').slice(0, max);
+      return t || null;
+    };
+
+    app.post('/api/feedback', {
+      config: options.rateLimit ? { rateLimit: { max: 5, timeWindow: '10 minutes' } } : undefined,
+    }, async (req, reply) => {
+      const body = (req.body ?? {}) as Record<string, unknown>;
+
+      // Both traps answer 200 rather than an error: telling a bot which check it
+      // failed is how it learns to pass. A person never sees either path.
+      if (typeof body[HONEYPOT] === 'string' && body[HONEYPOT] !== '') {
+        return reply.code(200).send({ ok: true });
+      }
+      const elapsed = Number(body.elapsedMs);
+      if (!Number.isFinite(elapsed) || elapsed < MIN_FILL_MS) {
+        return reply.code(200).send({ ok: true });
+      }
+
+      const message = typeof body.message === 'string' ? body.message.trim() : '';
+      if (message.length < 4) {
+        return reply.code(400).send({ error: 'tell me a little more than that' });
+      }
+      if (!isFeedbackKind(body.kind)) {
+        return reply.code(400).send({ error: 'unknown kind' });
+      }
+
+      const rawEmail = typeof body.email === 'string' ? body.email.trim() : '';
+      if (rawEmail && !EMAIL.test(rawEmail)) {
+        return reply.code(400).send({ error: 'that email does not look right' });
+      }
+
+      // Only ever the coarse facts, and only when the sender left them attached.
+      const c = (body.context ?? null) as Record<string, unknown> | null;
+      const context: FeedbackContext | null = c
+        ? {
+            path: oneLine(c.path, 120),
+            browser: oneLine(c.browser, 40),
+            os: oneLine(c.os, 40),
+            device: oneLine(c.device, 20),
+            viewport: oneLine(c.viewport, 20),
+            language: oneLine(c.language, 12),
+            signedIn: Boolean(c.signedIn),
+          }
+        : null;
+
+      const userId = await userOf(req);
+      const saved = await feedback
+        .create({ kind: body.kind, message, email: rawEmail || null, steps: oneLine(body.steps, 2000), context, userId })
+        .catch(() => null);
+      if (!saved) return reply.code(503).send({ error: 'could not save that, please try again' });
+
+      // Best-effort notification: a bug the developer hears about tomorrow is
+      // worth far more than one sitting in a dashboard nobody opened. Never let
+      // a mail failure lose the report, which is already stored by this point.
+      if (options.emailSender && options.feedbackTo) {
+        const esc2 = (x: string): string =>
+          x.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        const ctxLine = context
+          ? `${context.path ?? '?'} · ${context.browser ?? '?'} on ${context.os ?? '?'} · ${context.device ?? '?'} · ${context.viewport ?? '?'}`
+          : 'no diagnostics attached';
+        void options.emailSender
+          .send({
+            to: options.feedbackTo,
+            subject: `TifoMaker ${body.kind}: ${message.slice(0, 60)}`,
+            html:
+              `<p><b>${esc2(body.kind)}</b>${rawEmail ? ` from ${esc2(rawEmail)}` : ' (no reply address)'}</p>` +
+              `<p style="white-space:pre-wrap">${esc2(message)}</p>` +
+              (body.steps ? `<p><b>What they were doing</b><br><span style="white-space:pre-wrap">${esc2(String(body.steps))}</span></p>` : '') +
+              `<p style="color:#666;font-size:12px">${esc2(ctxLine)}</p>`,
+            text: `${body.kind}: ${message}\n\n${body.steps ? 'Doing: ' + String(body.steps) + '\n\n' : ''}${ctxLine}`,
+          })
+          .catch(() => {});
+      }
+
+      return reply.code(201).send({ ok: true, id: saved.id });
+    });
+
+    app.get('/api/admin/feedback', async (req, reply) => {
+      if (!(await adminAccess(req))) return reply.code(403).send({ error: 'admin access required' });
+      const q = req.query as { limit?: string };
+      const limit = Math.min(200, Math.max(1, Number(q.limit) || 50));
+      const [items, counts] = await Promise.all([feedback.list(limit), feedback.counts()]);
+      return reply.send({ items, counts });
     });
   }
 

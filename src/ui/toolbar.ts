@@ -995,6 +995,14 @@ export function mountToolbar(
   document.getElementById('menu-community')?.addEventListener('click', () => {
     window.location.href = '/community';
   });
+  // The only way to report a bug used to be leaving the site and finding the
+  // developer on Twitter, which effectively meant bugs were never reported.
+  document.getElementById('menu-feedback')?.addEventListener('click', async () => {
+    toggleAvatarMenu(false);
+    const { openFeedbackModal } = await import('./feedbackModal');
+    openFeedbackModal('bug');
+  });
+
   // The header Gallery button is folded away on phones, so the menu carries it.
   document.getElementById('menu-gallery')?.addEventListener('click', () => {
     toggleAvatarMenu(false);

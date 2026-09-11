@@ -61,3 +61,10 @@ function escapeHtml(s: string): string {
   d.textContent = s;
   return d.innerHTML;
 }
+
+// The footer feedback entry. Lazy: the modal is only fetched once someone
+// actually asks for it, so a visitor who never clicks pays nothing for it.
+document.getElementById('foot-feedback')?.addEventListener('click', async () => {
+  const { openFeedbackModal } = await import('./ui/feedbackModal');
+  openFeedbackModal('other');
+});

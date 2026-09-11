@@ -65,6 +65,17 @@ export const ADMIN_HTML = `<!doctype html>
   .strip-val{ font-size:26px; font-weight:700; line-height:1.1; letter-spacing:-.01em; }
   .strip-lab{ font-size:12px; color:var(--tx); margin-top:3px; }
   .strip-sub{ font-size:11px; color:var(--dim); margin-top:5px; line-height:1.5; }
+  .fbrow{ padding:13px 0; border-bottom:1px solid var(--line); }
+  .fbrow:last-child{ border-bottom:none; padding-bottom:2px; }
+  .fbtop{ display:flex; align-items:center; gap:9px; flex-wrap:wrap; margin-bottom:6px; }
+  .fbkind{ font-size:10.5px; font-weight:700; padding:2px 8px; border-radius:20px; letter-spacing:.03em; }
+  .fbwhen{ font-size:11px; color:var(--dim); }
+  .fbmail{ font-size:11px; color:var(--blue); margin-inline-start:auto; text-decoration:none; }
+  .fbmail:hover{ text-decoration:underline; }
+  .fbmail.dim{ color:var(--dim); }
+  .fbmsg{ margin:0 0 5px; font-size:13px; line-height:1.6; white-space:pre-wrap; word-break:break-word; }
+  .fbsteps{ margin:0 0 5px; font-size:12px; line-height:1.6; color:var(--mut); white-space:pre-wrap; }
+  .fbctx{ margin:0; font-size:10.5px; color:var(--dim); font-family:ui-monospace,SFMono-Regular,Menlo,monospace; word-break:break-word; }
   .flab .fsub{ display:block; font-size:10.5px; color:var(--dim); font-weight:400; line-height:1.4; margin-top:1px; }
   .fnum .flost{ display:inline-block; margin-left:7px; font-size:11px; color:var(--red); font-weight:600; }
   @media (max-width: 640px){
@@ -239,15 +250,16 @@ async function loadAll(){
     api('/api/admin/overview'),
     api('/api/admin/traffic?days=' + currentDays),
     api('/api/funnel?days=' + currentDays),
-    api('/api/admin/shares?days=' + currentDays)
+    api('/api/admin/shares?days=' + currentDays),
+    api('/api/admin/feedback?limit=50')
   ]);
-  var ov = results[0], tr = results[1], fn = results[2], sh = results[3];
+  var ov = results[0], tr = results[1], fn = results[2], sh = results[3], fb = results[4];
   if (!ov.ok){
     if (ov.status === 403){ clearUnlock(); showLogin('Wrong or expired password. Sign in again.'); return; }
     setStatus('Failed to load (' + ov.status + ').');
     return;
   }
-  render(ov.data || {}, (tr.ok && tr.data) ? tr.data : null, (fn.ok && fn.data) ? fn.data : { steps:[], days: currentDays }, (sh.ok && sh.data) ? sh.data : null);
+  render(ov.data || {}, (tr.ok && tr.data) ? tr.data : null, (fn.ok && fn.data) ? fn.data : { steps:[], days: currentDays }, (sh.ok && sh.data) ? sh.data : null, (fb.ok && fb.data) ? fb.data : null);
   setStatus('Updated ' + new Date().toLocaleTimeString());
 }
 
@@ -586,6 +598,60 @@ function sharesSection(sh, days){
   return html;
 }
 
+/* ---------- what people told me ---------- */
+
+var FB_KIND = { bug:['Broken','#f85149'], idea:['Idea','#58a6ff'], other:['Note','#8b949e'] };
+
+function timeAgo(iso){
+  var s = Math.max(0, Math.round((Date.now() - new Date(iso).getTime())/1000));
+  if (s < 90) return 'just now';
+  var m = Math.round(s/60); if (m < 60) return m + 'm ago';
+  var h = Math.round(m/60); if (h < 24) return h + 'h ago';
+  var d = Math.round(h/24); return d === 1 ? 'yesterday' : d + 'd ago';
+}
+
+function feedbackSection(fb){
+  var counts = (fb && fb.counts) || { total:0, open:0, bugs:0, ideas:0 };
+  var items = (fb && fb.items) || [];
+  var html = '<h2 class="sec">What people told me'
+    + (counts.bugs ? ' <span class="badge warn">' + fmt(counts.bugs) + ' broken</span>' : '')
+    + ' <span class="hint">sent from inside the site</span></h2>';
+
+  if (!items.length){
+    return html + '<div class="card"><p class="empty">Nothing reported yet. '
+      + 'The form is in the account menu in the editor, and in the footer of every public page.</p></div>';
+  }
+
+  html += '<div class="grid">';
+  html += kpi('Reports', counts.total);
+  html += kpi('Bugs', counts.bugs);
+  html += kpi('Feature ideas', counts.ideas);
+  html += '</div>';
+
+  html += '<div class="card" style="margin-top:10px">';
+  for (var i=0;i<items.length;i++){
+    var it = items[i];
+    var meta = FB_KIND[it.kind] || FB_KIND.other;
+    var c = it.context;
+    var ctxLine = c
+      ? [c.path, c.browser && c.os ? c.browser + ' on ' + c.os : (c.browser || c.os), c.device, c.viewport]
+          .filter(Boolean).join(' · ')
+      : 'no diagnostics attached';
+    html += '<div class="fbrow">'
+      + '<div class="fbtop">'
+      +   '<span class="fbkind" style="background:' + meta[1] + '22;color:' + meta[1] + '">' + esc(meta[0]) + '</span>'
+      +   '<span class="fbwhen">' + esc(timeAgo(it.createdAt)) + '</span>'
+      +   (it.email ? '<a class="fbmail" href="mailto:' + esc(it.email) + '">' + esc(it.email) + '</a>'
+                    : '<span class="fbmail dim">no reply address</span>')
+      + '</div>'
+      + '<p class="fbmsg">' + esc(it.message) + '</p>'
+      + (it.steps ? '<p class="fbsteps"><b>Doing:</b> ' + esc(it.steps) + '</p>' : '')
+      + '<p class="fbctx">' + esc(ctxLine) + '</p>'
+      + '</div>';
+  }
+  return html + '</div>';
+}
+
 /* ---------- the header strip ---------- */
 
 /* One row, before anything else: is it growing, and where from. Everything that
@@ -714,7 +780,7 @@ function trafficSection(tr, days){
   return html;
 }
 
-function render(ov, tr, funnel, sh){
+function render(ov, tr, funnel, sh, fb){
   var t = ov.totals || {};
   var r7 = ov.recent7d || {};
   var mod = ov.moderation || {};
@@ -752,6 +818,9 @@ function render(ov, tr, funnel, sh){
   html += kpi('Follows', t.follows);
   html += kpi('Match photos', t.photos, fmt(t.verifiedPhotos) + ' verified', true);
   html += '</div>';
+
+  /* ---- what people told me ---- */
+  html += feedbackSection(fb);
 
   /* ---- 4. the library, and the reference numbers ---- */
   var queue = (Number(mod.openReports)||0) + (Number(mod.unverifiedPhotos)||0) + (Number(mod.pendingStadiums)||0);

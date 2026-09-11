@@ -102,10 +102,11 @@ button { font-family: inherit; cursor: pointer; }
 .b-sent-body { color: var(--muted); font-size: 16px; line-height: 1.5; max-width: 320px; }
 
 /* footer */
-.b-foot { padding: 36px 6vw; border-top: 1px solid var(--line); display: flex; align-items: center; justify-content: space-between; }
+.b-foot { padding: 36px 6vw; border-top: 1px solid var(--line); display: flex; flex-wrap: wrap;
+  align-items: center; justify-content: space-between; gap: 16px; }
 .b-foot-brand { font-weight: 800; }
 .b-foot-brand b { color: var(--blue); }
-.b-foot-links { display: flex; gap: 22px; }
+.b-foot-links { display: flex; flex-wrap: wrap; gap: 12px 22px; }
 .b-foot-links a { color: var(--muted); font-weight: 600; font-size: 15px; }
 .b-foot-links a:hover { color: var(--ink); }
 
@@ -124,3 +125,10 @@ button { font-family: inherit; cursor: pointer; }
 [dir="rtl"] .b-checklist li::before { left: auto; right: 0; }
 [dir="rtl"] .b-field select { background-position: left 14px center; }
 [dir="rtl"] .b-hero-inner, [dir="rtl"] .b-contact-copy { text-align: right; }
+
+/* The feedback entry point. This rule lives here, not in the lazily-loaded
+   modal module, so the button is styled on first paint rather than after
+   someone clicks it. */
+.fb-entry{ display:inline-flex; align-items:center; gap:6px; background:none; border:none;
+  color:inherit; font:inherit; font-size:inherit; cursor:pointer; padding:0; opacity:.85; }
+.fb-entry:hover{ opacity:1; text-decoration:underline; }

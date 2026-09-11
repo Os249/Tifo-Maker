@@ -11,6 +11,7 @@ import { MemorySocialRepository } from './memorySocial';
 import { MemoryStadiumRepository, PgStadiumRepository } from './stadiumRepo';
 import { MemoryAdminStatsRepository, PgAdminStatsRepository } from './statsRepo';
 import { MemoryTrafficRepository, PgTrafficRepository, type TrafficRepository } from './trafficRepo';
+import { MemoryFeedbackRepository, PgFeedbackRepository, type FeedbackRepository } from './feedbackRepo';
 import { buildApp, type TemplateInfo } from './routes';
 import { createEmailSender } from './email';
 
@@ -108,6 +109,14 @@ async function main(): Promise<void> {
     } catch (e) {
       console.error('[tifo] visits init failed: traffic sources disabled:', e);
     }
+    let feedback: FeedbackRepository | undefined;
+    try {
+      const fb = new PgFeedbackRepository(pool);
+      await fb.init();
+      feedback = fb;
+    } catch (e) {
+      console.error('[tifo] feedback init failed: in-product reports disabled:', e);
+    }
     app = await buildApp(new PgDesignRepository(pool), new PgAuthRepository(pool), templates, {
       staticDir,
       rateLimit: true,
@@ -121,6 +130,8 @@ async function main(): Promise<void> {
       stadiums,
       stats: new PgAdminStatsRepository(pool),
       traffic,
+      feedback,
+      feedbackTo: process.env.FEEDBACK_TO,
       emailSender: createEmailSender(),
       publicUrl: process.env.PUBLIC_URL,
     });
@@ -147,6 +158,8 @@ async function main(): Promise<void> {
       stadiums: new MemoryStadiumRepository(),
       stats: new MemoryAdminStatsRepository(designs),
       traffic: new MemoryTrafficRepository(),
+      feedback: new MemoryFeedbackRepository(),
+      feedbackTo: process.env.FEEDBACK_TO,
       emailSender: createEmailSender(),
       publicUrl: process.env.PUBLIC_URL,
     });
