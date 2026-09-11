@@ -914,6 +914,32 @@ async function runSuite(name: string, repo: DesignRepository, auth: AuthReposito
   assert.ok(sm.sources.some((b) => b.key === 'campaign'), 'the utm-tagged visit is classified as a campaign');
   assert.ok(sm.daily.length >= 1);
 
+  // ChatGPT rewrites the links it recommends with ?utm_source=chatgpt.com. That
+  // used to short-circuit to "campaign" before the AI list was consulted, which
+  // hid the site's largest referrer inside a bucket that reads as "my own ads".
+  const fromChatGpt = buildVisit({ ip: '203.0.113.20', ua: UA, host: 'tifomaker.org', path: '/', query: { utm_source: 'chatgpt.com' } });
+  assert.equal(fromChatGpt.source, 'ai', 'a utm_source naming an AI assistant is classified as ai, not campaign');
+  // Matching is hostname-shaped on purpose. A bare "google" utm_source is how ad
+  // platforms tag themselves, and that really is a campaign; "google.com" is a
+  // referrer naming itself.
+  const fromGoogleHost = buildVisit({ ip: '203.0.113.21', ua: UA, host: 'tifomaker.org', path: '/', query: { utm_source: 'google.com' } });
+  assert.equal(fromGoogleHost.source, 'search', 'a utm_source naming a search host is classified as search');
+  const adTag = buildVisit({ ip: '203.0.113.23', ua: UA, host: 'tifomaker.org', path: '/', query: { utm_source: 'google', utm_medium: 'cpc' } });
+  assert.equal(adTag.source, 'campaign', 'a bare ad-platform tag stays a campaign');
+  const realCampaign = buildVisit({ ip: '203.0.113.22', ua: UA, host: 'tifomaker.org', path: '/', query: { utm_source: 'spring-flyer', utm_campaign: 'derby' } });
+  assert.equal(realCampaign.source, 'campaign', 'an actual campaign tag is still a campaign');
+
+  // And the "Tagged campaigns" panel must list campaigns only: the AI-tagged
+  // arrivals are already shown as AI, and counting them twice in two panels
+  // made the same 13 visits look like 26.
+  const camps = new MemoryTrafficRepository();
+  await camps.record(fromChatGpt);
+  await camps.record(realCampaign);
+  const cs = await camps.summary(30);
+  assert.equal(cs.campaigns.length, 1, 'only the real campaign is listed');
+  assert.ok(cs.campaigns[0].key.includes('spring-flyer'), 'and it is the flyer, not chatgpt.com');
+  assert.ok(cs.sources.some((x) => x.key === 'ai'), 'the AI arrival still appears under its own source');
+
   console.log('traffic: all assertions passed (no IP/UA/query stored, referrer reduced to host, bot exclusion, utm attribution)');
 }
 

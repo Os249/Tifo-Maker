@@ -190,6 +190,18 @@ export function classifySource(
   utmMedium: string | null,
   hadReferer: boolean,
 ): { kind: SourceKind; label: string } {
+  // A utm_source used to short-circuit straight to "campaign", before the AI,
+  // search and social lists were ever consulted. ChatGPT rewrites the links it
+  // recommends with ?utm_source=chatgpt.com, so the site's single largest
+  // referrer was being filed under "campaign" - a bucket that reads as "my own
+  // marketing" - and was invisible as a result. Classify the utm_source by WHO
+  // it names first; fall back to "campaign" only for a genuine campaign tag.
+  if (utmSource) {
+    const claimed = utmSource.replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+    for (const [re, label] of AI_REFERRERS) if (re.test(claimed)) return { kind: 'ai', label };
+    for (const [re, label] of SEARCH) if (re.test(claimed)) return { kind: 'search', label };
+    for (const [re, label] of SOCIAL) if (re.test(claimed)) return { kind: 'social', label };
+  }
   if (utmSource || utmMedium) {
     return { kind: 'campaign', label: (utmSource || utmMedium || 'campaign').slice(0, 60) };
   }
@@ -384,7 +396,11 @@ export class MemoryTrafficRepository implements TrafficRepository {
       },
       sources: bucket((r) => r.source),
       referrers: bucket((r) => r.referrerHost),
-      campaigns: bucket((r) => (r.utmCampaign || r.utmSource ? `${r.utmSource ?? '-'} / ${r.utmCampaign ?? '-'}` : null)),
+      campaigns: bucket((r) =>
+        r.source === 'campaign' && (r.utmCampaign || r.utmSource)
+          ? `${r.utmSource ?? '-'} / ${r.utmCampaign ?? '-'}`
+          : null,
+      ),
       pages: bucket((r) => r.path),
       devices: bucket((r) => r.device),
       browsers: bucket((r) => r.browser),
@@ -480,7 +496,11 @@ export class PgTrafficRepository implements TrafficRepository {
 
     out.sources = await this.bucket('source', days);
     out.referrers = await this.bucket('referrer_host', days);
-    out.campaigns = await this.bucket("coalesce(utm_source,'-') || ' / ' || coalesce(utm_campaign,'-')", days, "AND (utm_source IS NOT NULL OR utm_campaign IS NOT NULL)");
+    out.campaigns = await this.bucket(
+      "coalesce(utm_source,'-') || ' / ' || coalesce(utm_campaign,'-')",
+      days,
+      "AND source = 'campaign' AND (utm_source IS NOT NULL OR utm_campaign IS NOT NULL)",
+    );
     out.pages = await this.bucket('path', days);
     out.devices = await this.bucket('device', days);
     out.browsers = await this.bucket('browser', days);

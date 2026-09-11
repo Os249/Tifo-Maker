@@ -49,6 +49,29 @@ export const ADMIN_HTML = `<!doctype html>
   h2.sec:first-child{ margin-top:14px; }
   h2.sec .hint{ text-transform:none; letter-spacing:0; font-weight:400; color:var(--dim); font-size:11.5px; }
 
+  /* Third-level headings inside a group. The page used to be nine peer sections
+     with no hierarchy, so nothing looked more important than anything else. */
+  h3.sub{ font-size:12.5px; color:var(--tx); margin:20px 0 9px; font-weight:600; display:flex; align-items:center; gap:9px; flex-wrap:wrap; }
+  h3.sub .hint{ font-weight:400; color:var(--dim); font-size:11.5px; }
+
+  /* The header strip: the one row that answers "is it growing, and where from"
+     before any scrolling. */
+  .strip{
+    display:grid; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr));
+    gap:1px; background:var(--line); border:1px solid var(--line);
+    border-radius:12px; overflow:hidden; margin:14px 0 4px;
+  }
+  .strip-cell{ background:var(--bg2); padding:15px 16px 14px; }
+  .strip-val{ font-size:26px; font-weight:700; line-height:1.1; letter-spacing:-.01em; }
+  .strip-lab{ font-size:12px; color:var(--tx); margin-top:3px; }
+  .strip-sub{ font-size:11px; color:var(--dim); margin-top:5px; line-height:1.5; }
+  .flab .fsub{ display:block; font-size:10.5px; color:var(--dim); font-weight:400; line-height:1.4; margin-top:1px; }
+  .fnum .flost{ display:inline-block; margin-left:7px; font-size:11px; color:var(--red); font-weight:600; }
+  @media (max-width: 640px){
+    .strip{ grid-template-columns:repeat(2, 1fr); }
+    .strip-val{ font-size:22px; }
+  }
+
   .grid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(148px,1fr)); gap:10px; }
   .grid.two{ grid-template-columns:repeat(auto-fit,minmax(320px,1fr)); }
   .grid.three{ grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); }
@@ -66,8 +89,15 @@ export const ADMIN_HTML = `<!doctype html>
   .row .vv{ position:relative; z-index:1; font-variant-numeric:tabular-nums; font-size:12.5px; color:var(--mut); white-space:nowrap; padding-right:5px; }
   .row .vv b{ color:var(--tx); font-weight:600; }
 
-  .frow{ display:grid; grid-template-columns:minmax(90px,132px) 1fr minmax(88px,110px); align-items:center; gap:10px; padding:5px 0; }
-  .flab{ font-size:13px; text-transform:capitalize; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  /* Wider label column and no capitalize: the rows now carry a real sentence
+     plus a one-line explanation, and title-casing turned "Opened the editor"
+     into "Opened The Editor". */
+  .frow{ display:grid; grid-template-columns:minmax(120px,190px) 1fr minmax(96px,124px); align-items:center; gap:12px; padding:7px 0; }
+  .flab{ font-size:13px; line-height:1.35; min-width:0; }
+  @media (max-width: 640px){
+    .frow{ grid-template-columns:1fr minmax(80px,104px); row-gap:4px; }
+    .fbar{ grid-column:1 / -1; }
+  }
   .fbar{ background:var(--bg3); border-radius:6px; height:13px; overflow:hidden; }
   .ffill{ background:var(--green); height:100%; border-radius:6px; }
   .fnum{ text-align:right; font-variant-numeric:tabular-nums; font-size:12.5px; }
@@ -221,6 +251,53 @@ async function loadAll(){
   setStatus('Updated ' + new Date().toLocaleTimeString());
 }
 
+/* ---------- honest windows ---------- */
+
+/* The panels used to print the window you ASKED for. The visits table only
+   started collecting on 9 Sept, so "204 page views - last 30 days" invited you
+   to read three days of traffic as a month of it. Every panel now states the
+   span it actually covers, derived from the data rather than the request. */
+function spanOf(daily){
+  if (!daily || !daily.length) return null;
+  var days = daily.map(function(d){ return d.day; }).sort();
+  return { first: days[0], last: days[days.length-1], count: days.length };
+}
+function niceDay(iso){
+  var p = String(iso).split('-');
+  if (p.length !== 3) return iso;
+  var m = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][Number(p[1])-1] || p[1];
+  return Number(p[2]) + ' ' + m;
+}
+/* "last 30 days" only when the data really reaches back that far. */
+function spanLabel(daily, requestedDays){
+  var s = spanOf(daily);
+  if (!s) return 'no data yet';
+  if (s.count >= requestedDays - 1) return 'last ' + requestedDays + ' days';
+  return s.count === 1
+    ? 'one day of data (' + niceDay(s.first) + ')'
+    : s.count + ' days of data (' + niceDay(s.first) + ' to ' + niceDay(s.last) + ')';
+}
+/* True when a panel is showing less history than the picker implies, which is
+   the case worth calling out rather than hiding. */
+function isShortSpan(daily, requestedDays){
+  var s = spanOf(daily);
+  return !!s && s.count < requestedDays - 1;
+}
+
+/* Sum a daily series over the last n entries, and over the n before those, so a
+   change can be stated against a like-for-like period instead of a guess. */
+function periodCompare(daily, key, n){
+  if (!daily || daily.length < 2) return null;
+  var sorted = daily.slice().sort(function(a,b){ return a.day < b.day ? -1 : 1; });
+  var take = Math.min(n, Math.floor(sorted.length / 2));
+  if (take < 1) return null;
+  var recent = sorted.slice(-take), prior = sorted.slice(-take*2, -take);
+  if (!prior.length) return null;
+  var sum = function(rows){ var t=0; for (var i=0;i<rows.length;i++) t += Number(rows[i][key])||0; return t; };
+  var now = sum(recent), was = sum(prior);
+  return { now: now, was: was, days: take, delta: was ? Math.round(((now-was)/was)*1000)/10 : null };
+}
+
 /* ---------- components ---------- */
 
 function kpi(label, value, sub, subDim){
@@ -264,6 +341,14 @@ function trafficChart(daily){
   var W=560, H=140, padX=6, padY=10;
   if (!daily || !daily.length){
     return '<div class="card"><p class="lt">Visits per day</p><p class="empty">No traffic recorded yet.</p></div>';
+  }
+  // One point is not a line. Drawing it produced a triangle sloping up from
+  // zero, which reads as growth that has not been measured.
+  if (daily.length < 2){
+    return '<div class="card"><p class="lt">Visits per day</p>'
+      + '<p class="lc">' + esc(niceDay(daily[0].day)) + '</p>'
+      + '<p class="empty">One day of data so far, so there is no trend to draw yet. '
+      + fmt(daily[0].visits) + ' visits from ' + fmt(daily[0].visitors) + ' people.</p></div>';
   }
   var max=1, i;
   for (i=0;i<daily.length;i++){
@@ -319,18 +404,67 @@ function chartCard(title, points, color){
     + lineChart(points, color) + '</div>';
 }
 
+/* The rows used to print the raw event name: "Paint First", "View 3d",
+   "Account Prompt". Those are the names the code uses, not what happened to a
+   person, and you had to remember which was which. */
+var FUNNEL_STEP = {
+  landed:         ['Opened the editor',      'arrived on /app'],
+  paint_first:    ['Painted something',      'first brush stroke'],
+  view_3d:        ['Looked at it in 3D',     'opened the stadium or split view'],
+  draft_restored: ['Came back to their work','their draft was still here on a later visit'],
+  save_clicked:   ['Pressed Save',           ''],
+  save_local:     ['Kept it in the browser', 'saved without an account'],
+  account_prompt: ['Saw the account offer',  'shown only after a save worked'],
+  auth_opened:    ['Opened the sign-up form',''],
+  signed_up:      ['Created an account',     ''],
+  draft_claimed:  ['Moved it to the account','the work survived the sign-up'],
+  published:      ['Published it',           'visible in the community'],
+  exported:       ['Exported a PDF or CSV',  'the production files'],
+};
+
+/* Only these are a sequence everyone passes through in order, so only these get
+   a drop-off figure. The rest are side signals - a draft being restored is not
+   a stage between painting and saving, and printing "-3" beside it invented a
+   loss that never happened. */
+var MAIN_PATH = ['landed', 'paint_first', 'view_3d', 'save_clicked', 'signed_up', 'published'];
+
+function funnelRow(s, lost){
+  var p = Number(s.pctOfTop)||0;
+  var meta = FUNNEL_STEP[s.name] || [labelize(s.name), ''];
+  return '<div class="frow"><div class="flab">' + esc(meta[0])
+    + (meta[1] ? '<span class="fsub">' + esc(meta[1]) + '</span>' : '') + '</div>'
+    + '<div class="fbar"><div class="ffill" style="width:' + Math.max(1.5, p) + '%"></div></div>'
+    + '<div class="fnum">' + fmt(s.sessions) + ' <span class="dim">' + p + '%</span>'
+    + (lost > 0 ? '<span class="flost" title="lost since the step above">&minus;' + fmt(lost) + '</span>' : '')
+    + '</div></div>';
+}
+
 function funnelHtml(funnel){
   var steps = (funnel && funnel.steps) || [];
   if (!steps.length) return '<div class="card"><p class="empty">No funnel data captured yet.</p></div>';
+  var byName = {}, i;
+  for (i=0;i<steps.length;i++) byName[steps[i].name] = steps[i];
+
   var html = '<div class="card">';
-  for (var i=0;i<steps.length;i++){
-    var s = steps[i];
-    var p = Number(s.pctOfTop)||0;
-    html += '<div class="frow"><div class="flab">' + esc(labelize(s.name)) + '</div>'
-      + '<div class="fbar"><div class="ffill" style="width:' + Math.max(1.5, p) + '%"></div></div>'
-      + '<div class="fnum">' + fmt(s.sessions) + ' <span class="dim">' + p + '%</span></div></div>';
+  var prev = 0;
+  for (i=0;i<MAIN_PATH.length;i++){
+    var s = byName[MAIN_PATH[i]];
+    if (!s) continue;
+    var lost = prev > 0 ? prev - (Number(s.sessions)||0) : 0;
+    html += funnelRow(s, lost);
+    prev = Number(s.sessions)||0;
   }
-  return html + '</div>';
+  html += '</div>';
+
+  var side = steps.filter(function(x){ return MAIN_PATH.indexOf(x.name) === -1; });
+  if (side.length){
+    html += '<div class="card" style="margin-top:10px">'
+      + '<p class="lt">Along the way</p>'
+      + '<p class="lc">things that happen off the main path, so no drop-off is implied</p>';
+    for (i=0;i<side.length;i++) html += funnelRow(side[i], 0);
+    html += '</div>';
+  }
+  return html;
 }
 
 function tableCard(head, rows, cols){
@@ -452,10 +586,81 @@ function sharesSection(sh, days){
   return html;
 }
 
+/* ---------- the header strip ---------- */
+
+/* One row, before anything else: is it growing, and where from. Everything that
+   follows is detail; this is the part you read and then decide whether to keep
+   scrolling. Where there is not enough history to compare fairly it says so
+   rather than inventing a direction from two days of noise. */
+function deltaChip(cmp){
+  if (!cmp || cmp.delta === null) return '';
+  var up = cmp.delta >= 0;
+  var arrow = up ? '&#9650;' : '&#9660;';
+  var col = up ? '#3fb950' : '#f85149';
+  return '<span style="color:' + col + ';font-weight:600">' + arrow + ' ' + Math.abs(cmp.delta) + '%</span>'
+    + '<span class="dim"> vs previous ' + cmp.days + (cmp.days === 1 ? ' day' : ' days') + '</span>';
+}
+
+function headerStrip(ov, tr, sh){
+  var t = (tr && tr.totals) || null;
+  var daily = (tr && tr.daily) || [];
+  var span = spanOf(daily);
+  var visitors = t ? t.visitors : 0;
+
+  /* Channel mix, with internal navigation removed: "where from" is about how
+     people ARRIVE, and a second page view by someone already here is not a
+     source. Leaving it in made Internal look like an acquisition channel. */
+  var external = ((tr && tr.sources) || []).filter(function(s){ return s.key !== 'internal'; });
+  var topSource = external.length ? external[0] : null;
+  var externalVisits = 0;
+  for (var i=0;i<external.length;i++) externalVisits += Number(external[i].visits)||0;
+
+  var cmp = periodCompare(daily, 'visitors', 7);
+
+  var html = '<div class="strip">';
+
+  html += '<div class="strip-cell"><div class="strip-val">' + fmt(visitors) + '</div>'
+    + '<div class="strip-lab">people</div>'
+    + '<div class="strip-sub">' + (span
+        ? (span.count === 1 ? 'on ' + niceDay(span.first) : niceDay(span.first) + ' to ' + niceDay(span.last))
+        : 'nothing recorded yet') + '</div></div>';
+
+  html += '<div class="strip-cell"><div class="strip-val">' + (cmp ? fmt(cmp.now) : '&mdash;') + '</div>'
+    + '<div class="strip-lab">' + (cmp ? 'last ' + cmp.days + (cmp.days === 1 ? ' day' : ' days') : 'trend') + '</div>'
+    + '<div class="strip-sub">' + (cmp ? deltaChip(cmp) : 'needs a few more days before a trend means anything') + '</div></div>';
+
+  html += '<div class="strip-cell"><div class="strip-val">' + (topSource ? fmt(topSource.visits) : '&mdash;') + '</div>'
+    + '<div class="strip-lab">' + (topSource ? (SOURCE_LABEL[topSource.key] || labelize(topSource.key)) : 'top channel') + '</div>'
+    + '<div class="strip-sub">' + (topSource && externalVisits
+        ? pct(topSource.visits, externalVisits) + ' of arrivals'
+        : 'no external arrivals yet') + '</div></div>';
+
+  var r7 = (ov && ov.recent7d) || {};
+  html += '<div class="strip-cell"><div class="strip-val">' + fmt(r7.signups) + '</div>'
+    + '<div class="strip-lab">new accounts</div>'
+    + '<div class="strip-sub dim">last 7 days</div></div>';
+
+  var mod = (ov && ov.moderation) || {};
+  var queue = (Number(mod.openReports)||0) + (Number(mod.unverifiedPhotos)||0) + (Number(mod.pendingStadiums)||0);
+  html += '<div class="strip-cell"><div class="strip-val">' + fmt(queue) + '</div>'
+    + '<div class="strip-lab">needs review</div>'
+    + '<div class="strip-sub">' + (queue
+        ? '<span class="badge warn">waiting on you</span>'
+        : '<span class="badge good">all clear</span>') + '</div></div>';
+
+  return html + '</div>';
+}
+
 /* ---------- render ---------- */
 
 function trafficSection(tr, days){
-  var html = '<h2 class="sec">Where visitors come from <span class="hint">last ' + days + ' days · measured server-side, counts everyone</span></h2>';
+  // The span comes from the data, not the picker: the visits table began on 9
+  // Sept, so "last 30 days" over three days of rows invited a month-sized
+  // reading of a three-day number.
+  var label = (tr && tr.daily) ? spanLabel(tr.daily, days) : 'last ' + days + ' days';
+  var short = (tr && tr.daily) ? isShortSpan(tr.daily, days) : false;
+  var html = '<h2 class="sec">Where visitors come from <span class="hint">' + esc(label)
+    + ' · measured server-side, counts everyone' + (short ? ' · all the history there is' : '') + '</span></h2>';
 
   if (!tr || !tr.enabled){
     return html + '<div class="callout"><b>Traffic sources are not enabled yet.</b> Deploy this build with a DATABASE_URL set and the <code>visits</code> table is created automatically on boot. Data starts appearing within minutes of the first page view.</div>';
@@ -466,15 +671,14 @@ function trafficSection(tr, days){
     return html;
   }
 
-  var topSource = (tr.sources && tr.sources.length) ? (SOURCE_LABEL[tr.sources[0].key] || tr.sources[0].key) : '-';
-  var topRef = (tr.referrers && tr.referrers.length) ? tr.referrers[0].key : '-';
-
+  // Only what the strip does not already say. Page views per visitor is the one
+  // number neither shows on its own, and it is the useful one: it separates
+  // "people arrive and leave" from "people arrive and look around".
+  var perVisitor = t.visitors ? Math.round((t.visits / t.visitors) * 10) / 10 : 0;
   html += '<div class="grid">';
-  html += kpi('Page views', t.visits);
-  html += kpi('Unique visitors', t.visitors, 'approx., resets daily', true);
-  html += kpi('Biggest source', topSource);
-  html += kpi('Top referrer', topRef);
-  html += kpi('Bot requests filtered', t.botVisits, 'excluded from every number above', true);
+  html += kpi('Page views', t.visits, fmt(t.visitors) + ' people', true);
+  html += kpi('Pages per person', perVisitor, 'higher means they looked around', true);
+  html += kpi('Bot requests filtered', t.botVisits, 'excluded from every number here', true);
   html += '</div>';
 
   html += '<div class="grid two" style="margin-top:10px">';
@@ -487,11 +691,19 @@ function trafficSection(tr, days){
   html += barList('Landing pages', 'the first page they opened', tr.pages, '#3fb950');
   html += '</div>';
 
-  html += '<div class="grid three" style="margin-top:10px">';
-  html += barList('Countries', tr.countries && tr.countries.length ? 'from the edge network' : 'needs Cloudflare in front, see CLOUDFLARE.md', tr.countries, '#d29922');
-  html += barList('Languages', 'browser language, aggregated', tr.languages, '#a371f7');
+  // Countries only fills in behind an edge that sets CF-IPCountry. Rather than
+  // hold a full column open to say "nothing recorded yet" forever, it appears
+  // when there is something in it and becomes one line of prose when there is
+  // not - language is a decent stand-in for reach in the meantime.
+  var hasCountries = tr.countries && tr.countries.length;
+  html += '<div class="grid ' + (hasCountries ? 'three' : 'two') + '" style="margin-top:10px">';
+  if (hasCountries) html += barList('Countries', 'from the edge network', tr.countries, '#d29922');
+  html += barList('Languages', 'browser language - the best reach signal available without country data', tr.languages, '#a371f7');
   html += barList('Devices', 'desktop vs phone vs tablet', tr.devices, '#39c5cf');
   html += '</div>';
+  if (!hasCountries){
+    html += '<p class="note">Country data needs an edge that sets <code>CF-IPCountry</code>. Putting Cloudflare in front turns it on and costs nothing; see <code>CLOUDFLARE.md</code>.</p>';
+  }
 
   html += '<div class="grid two" style="margin-top:10px">';
   html += barList('Browsers & in-app webviews', 'a TikTok or Instagram webview here means the link was opened inside that app', tr.browsers, '#58a6ff');
@@ -512,62 +724,65 @@ function render(ov, tr, funnel, sh){
   el('mode').textContent = (ov.mode === 'memory') ? 'in-memory (dev)' : 'postgres';
   el('mode').className = (ov.mode === 'memory') ? 'badge warn' : 'badge good';
 
-  var html = '';
+  /* Four groups, not nine sections. Each answers one question:
+       1. How is it going        - the strip, read first and then stop
+       2. Where people come from - acquisition
+       3. What they do here      - funnel, sharing, engagement
+       4. What is in the library - designs, moderation, leaderboards, reference
+     Time windows are stated per panel from the data, never from the picker. */
+  var html = headerStrip(ov, tr, sh);
 
-  /* 1. The question this dashboard exists to answer. */
+  /* ---- 2. acquisition ---- */
   html += trafficSection(tr, days);
 
-  /* 2. The business. */
-  html += '<h2 class="sec">Totals</h2><div class="grid">';
-  html += kpi('Accounts', t.users);
-  html += kpi('Designs', t.designs);
-  html += kpi('Public designs', t.publicDesigns);
-  html += kpi('Templates', t.templates);
-  html += kpi('AI generations', t.aiGenerations, fmt(t.aiUsers) + ' accounts used AI', true);
-  html += kpi('Design views', t.totalViews);
-  html += kpi('B2B leads', t.leads);
-  html += '</div>';
+  /* ---- 3. what they do here ---- */
+  html += '<h2 class="sec">What people do here</h2>';
 
-  html += '<h2 class="sec">Last 7 days</h2><div class="grid">';
-  html += kpi('New accounts', r7.signups);
-  html += kpi('New designs', r7.designs);
-  html += kpi('New leads', r7.leads);
-  html += kpi('Active AI users', r7.aiActiveUsers);
-  html += '</div>';
-
-  html += '<h2 class="sec">Growth <span class="hint">last 30 days</span></h2><div class="grid two">';
-  html += chartCard('New accounts per day', series.signups, '#58a6ff');
-  html += chartCard('New designs per day', series.designs, '#d29922');
-  html += '</div>';
-
-  /* 3. The funnel, with the caveat that makes its numbers readable. */
-  html += '<h2 class="sec">Editor funnel <span class="hint">last ' + days + ' days · consent-gated</span></h2>';
+  var funnelShort = 'consent-gated, so far below the page views above';
+  html += '<h3 class="sub">Editor funnel <span class="hint">last ' + days + ' days &middot; ' + funnelShort + '</span></h3>';
   html += funnelHtml(funnel);
-  html += '<div class="callout"><b>Read these as a shape, not a headcount.</b> These steps come from in-browser tracking that only runs after a visitor picks &ldquo;Accept all&rdquo; in the cookie banner, so the totals are far lower than the page views above and the two sections will never reconcile. The drop-off <em>between</em> steps is still meaningful, that is what to watch.</div>';
+  html += '<p class="note">These steps only fire after a visitor accepts analytics, so they will never reconcile with the traffic numbers. Read the drop-off <em>between</em> steps, not the totals.</p>';
 
-  html += '<h2 class="sec">Engagement</h2><div class="grid">';
+  html += '<h3 class="sub">Sharing <span class="hint">' + esc(spanLabel(sh && sh.daily, days)) + ' &middot; counts everyone</span></h3>';
+  html += sharesSection(sh, days);
+
+  html += '<h3 class="sub">Engagement <span class="hint">all time</span></h3><div class="grid">';
   html += kpi('Likes / votes', t.votes);
   html += kpi('Comments', t.comments);
   html += kpi('Follows', t.follows);
   html += kpi('Match photos', t.photos, fmt(t.verifiedPhotos) + ' verified', true);
-  html += kpi('Shares', t.shares);
   html += '</div>';
 
-  html += '<h2 class="sec">Sharing <span class="hint">last ' + days + ' days · server-side, counts everyone</span></h2>';
-  html += sharesSection(sh, days);
-
-  /* 4. Things needing action. */
+  /* ---- 4. the library, and the reference numbers ---- */
   var queue = (Number(mod.openReports)||0) + (Number(mod.unverifiedPhotos)||0) + (Number(mod.pendingStadiums)||0);
-  html += '<h2 class="sec">Moderation ' + (queue ? '<span class="badge warn">' + fmt(queue) + ' waiting</span>' : '<span class="badge good">all clear</span>') + '</h2><div class="grid">';
-  html += kpi('Open reports', mod.openReports);
-  html += kpi('Unverified photos', mod.unverifiedPhotos);
-  html += kpi('Pending stadiums', mod.pendingStadiums);
-  html += kpi('Approved stadiums', mod.approvedStadiums);
-  html += '</div>';
-  html += '<p class="note">Act on the queues inside the app: open the editor, then the <strong>Stadium</strong> panel shows the community review queue. <a href="/app">Open the app &rarr;</a></p>';
+  html += '<h2 class="sec">The library ' + (queue ? '<span class="badge warn">' + fmt(queue) + ' waiting</span>' : '') + '</h2>';
 
-  html += '<h2 class="sec">Leaderboards</h2><div class="grid two">';
-  html += tableCard(['Top public designs','Views','Likes'], ov.topDesigns,
+  html += '<div class="grid">';
+  html += kpi('Accounts', t.users, fmt(r7.signups) + ' in the last 7 days', true);
+  html += kpi('Designs', t.designs, fmt(r7.designs) + ' in the last 7 days', true);
+  html += kpi('Published', t.publicDesigns, 'visible in the community', true);
+  html += kpi('Templates', t.templates);
+  html += kpi('AI generations', t.aiGenerations, fmt(t.aiUsers) + ' accounts used AI', true);
+  html += kpi('B2B leads', t.leads, fmt(r7.leads) + ' in the last 7 days', true);
+  html += '</div>';
+
+  if (queue){
+    html += '<div class="grid">';
+    html += kpi('Open reports', mod.openReports);
+    html += kpi('Unverified photos', mod.unverifiedPhotos);
+    html += kpi('Pending stadiums', mod.pendingStadiums);
+    html += kpi('Approved stadiums', mod.approvedStadiums);
+    html += '</div>';
+    html += '<p class="note">Act on these in the app: open the editor, then the <strong>Stadium</strong> panel shows the community review queue. <a href="/app">Open the app &rarr;</a></p>';
+  }
+
+  html += '<div class="grid two">';
+  html += chartCard('New accounts per day', series.signups, '#58a6ff');
+  html += chartCard('New designs per day', series.designs, '#d29922');
+  html += '</div>';
+
+  html += '<div class="grid two">';
+  html += tableCard(['Most-viewed designs','Views','Likes'], ov.topDesigns,
     [function(d){ return d.title || 'Untitled'; }, function(d){ return d.views; }, function(d){ return d.likeScore; }]);
   html += tableCard(['Stadium','Designs'], ov.topStadiums,
     [function(d){ return d.templateId; }, function(d){ return d.count; }]);
@@ -576,6 +791,7 @@ function render(ov, tr, funnel, sh){
   el('dash-body').innerHTML = html;
   el('generated').textContent = 'Snapshot generated ' + (ov.generatedAt ? new Date(ov.generatedAt).toLocaleString() : 'now') + '.';
 }
+
 
 el('login-form').addEventListener('submit', doLogin);
 el('refresh').addEventListener('click', function(){ loadAll(); });
