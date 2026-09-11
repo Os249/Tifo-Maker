@@ -32,6 +32,8 @@ const STRINGS: Record<string, { en: string; ar: string }> = {
   },
 
   // ---- save / draft / publish (the rebuilt save flow) ----
+  'ed.obj.x': { en: 'Across', ar: 'أفقي' },
+  'ed.obj.y': { en: 'Up', ar: 'رأسي' },
   'common.close': { en: 'Close', ar: 'إغلاق' },
   'common.cancel': { en: 'Cancel', ar: 'إلغاء' },
   'common.optional': { en: 'optional', ar: 'اختياري' },

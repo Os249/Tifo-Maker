@@ -1,4 +1,3 @@
-@import url('https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@2.47.0/tabler-icons.min.css');
 
 :root {
   --purple: #5B2A86;
@@ -8,7 +7,7 @@
   --blue: #1C6FE0;
   --ink: #0E0A1A;
   --paper: #FBFAFF;
-  --muted: #8B86A0;
+  --muted: #767188; /* was #8B86A0 at 3.36:1 on the page ground; 4.5:1 is the floor for body text */
   --line: #ECE9F5;
   --card: #FFFFFF;
   --font: 'Inter', system-ui, -apple-system, sans-serif;
@@ -335,6 +334,11 @@ a { color: inherit; text-decoration: none; }
 [dir="rtl"] .profile-counts { flex-direction: row-reverse; }
 
 /* legal footer */
+/* These three were sized as though the container had padding on one side
+   only, so they ran 5px past a 320px viewport - the width WCAG names for
+   reflow, and a real device width. */
+.search-wrap, .search-wrap input, .sort-tabs { max-width: 100%; box-sizing: border-box; }
+
 .site-foot { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px 22px; padding: 36px 20px calc(36px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); margin-top: 40px; color: var(--muted); font-size: 14px; }
 .site-foot a { color: var(--muted); text-decoration: none; font-weight: 600; }
 .site-foot a:hover { color: var(--blue); }
@@ -343,5 +347,15 @@ a { color: inherit; text-decoration: none; }
    modal module, so the button is styled on first paint rather than after
    someone clicks it. */
 .fb-entry{ display:inline-flex; align-items:center; gap:6px; background:none; border:none;
-  color:inherit; font:inherit; font-size:inherit; cursor:pointer; padding:0; opacity:.85; }
+  color:inherit; font:inherit; font-size:inherit; cursor:pointer; padding:0; }
 .fb-entry:hover{ opacity:1; text-decoration:underline; }
+
+/* Skip link: first focusable element, invisible until focused. Never
+   display:none - that removes it from the tab order, which is the point. */
+.skip-link {
+  position:absolute; left:-9999px; top:0; z-index:1000;
+  background:#0e1424; color:#ffffff; border-radius:0 0 8px 0;
+  padding:10px 16px; font-weight:600; text-decoration:none;
+}
+.skip-link:focus { left:0; outline:2px solid #1c6fe0; outline-offset:2px; }
+[dir="rtl"] .skip-link:focus { left:auto; right:0; border-radius:0 0 0 8px; }

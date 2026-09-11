@@ -11,28 +11,61 @@ const sig=()=>page.evaluate(()=>{const r=localStorage.getItem('tifo_draft_v1');i
 let pass=0, fail=0;
 const check=(name,ok,extra='')=>{ (ok?pass++:fail++); console.log(`  ${ok?'PASS':'FAIL'}  ${name}${extra?'  '+extra:''}`); };
 
+// Clear the first-run dialog the way a user does. It makes the rest of the app
+// inert while it is open - deliberately, so a keyboard user cannot tab into
+// controls hidden behind it - which also means nothing behind it takes pointer
+// events. A test that paints straight through it is testing something no real
+// visitor can do.
+const dismissOnboarding = async () => {
+  await page.evaluate(() => {
+    const go = [...document.querySelectorAll('.ob-modal button')]
+      .find((b) => /start designing/i.test(b.textContent || ''));
+    (go ?? document.querySelector('.ob-skip'))?.click();
+  }).catch(() => {});
+  await page.waitForTimeout(1500);
+};
+
 await page.goto(B+'/app',{waitUntil:'domcontentloaded'}); await ready(); await page.waitForTimeout(1000);
 check('no draft on a first visit', await page.evaluate(()=>!localStorage.getItem('tifo_draft_v1')));
+await dismissOnboarding();
+check('the first-run dialog makes the app behind it inert',
+  await page.evaluate(()=>document.querySelectorAll('[inert]').length===0), 'cleared on dismiss');
 
 // Paint with real pointer events (Pixi listens for these, not synthetic mouse).
 await page.evaluate(()=>{
   const c=document.querySelector('#canvas-host canvas'); const r=c.getBoundingClientRect();
   const ev=(type,x,y)=>c.dispatchEvent(new PointerEvent(type,{pointerId:1,isPrimary:true,bubbles:true,
     cancelable:true,composed:true,clientX:x,clientY:y,buttons:type==='pointerup'?0:1,pointerType:'mouse'}));
-  const cx=r.left+r.width*0.4, cy=r.top+r.height*0.4;
-  ev('pointerdown',cx,cy);
-  for(let i=0;i<25;i++) ev('pointermove',cx+i*4,cy+i*3);
-  ev('pointerup',cx+100,cy+75);
+  // Sweep a grid across the middle of the canvas rather than one line: the
+  // seat band is a thin horizontal strip whose exact height depends on the
+  // fit, and a single line at a fixed fraction can miss it entirely.
+  const x0 = r.left + r.width * 0.20, x1 = r.left + r.width * 0.80;
+  for (const f of [0.45, 0.50, 0.55, 0.60, 0.65]) {
+    const y = r.top + r.height * f;
+    ev('pointerdown', x0, y);
+    for (let i = 0; i <= 20; i++) ev('pointermove', x0 + ((x1 - x0) * i) / 20, y);
+    ev('pointerup', x1, y);
+  }
 });
 await page.waitForTimeout(3000);
 const a = await sig();
 check('painting writes a draft', !!a, a?`${a.runs} runs, ${a.kb}KB`:'');
 
-const state = await page.evaluate(()=>document.getElementById('draft-state')?.textContent||'');
+// The result appears beside whichever Save was pressed, and NOWHERE else. It
+// used to be written to the header chip, the panel chip and the message line at
+// once, so one save read as three things happening.
+const savedText = () => page.evaluate(()=>{
+  const hits=[...document.querySelectorAll('*')].filter(e=>e.children.length===0
+    && /saved in this browser/i.test(e.textContent||'')
+    && e.getBoundingClientRect().height>0);
+  return { count: hits.length, where: hits.map(e=>e.id||e.className||e.tagName) };
+});
+const state = await page.evaluate(()=>
+  (document.getElementById('save-state-top')?.textContent || document.getElementById('draft-state')?.textContent || ''));
 check('saved-state says "this browser", not "saved"', /this browser/i.test(state), JSON.stringify(state));
 
 // Reload: the whole point.
-await page.reload({waitUntil:'domcontentloaded'}); await ready(); await page.waitForTimeout(1500);
+await page.reload({waitUntil:'domcontentloaded'}); await ready(); await page.waitForTimeout(1500); await dismissOnboarding();
 const b = await sig();
 check('draft survives a reload', !!b && b.head===a.head, b?`${b.runs} runs`:'');
 const msg = await page.evaluate(()=>document.getElementById('message')?.textContent||'');
@@ -87,11 +120,13 @@ await page.waitForTimeout(300);
 await page.evaluate(()=>document.getElementById('save-top').click());
 await page.waitForTimeout(1200);
 const after = await page.evaluate(()=>({
-  msg: document.getElementById('message')?.textContent||'',
+  topState: document.getElementById('save-state-top')?.textContent||'',
   offer: !document.getElementById('account-offer')?.hidden,
   text: (document.getElementById('account-offer')?.innerText||'').replace(/\s+/g,' ').slice(0,110),
 }));
-check('Save works signed out (no modal, no wall)', /this browser/i.test(after.msg), JSON.stringify(after.msg));
+check('Save works signed out (no modal, no wall)', /this browser/i.test(after.topState), JSON.stringify(after.topState));
+const dupes = await savedText();
+check('the save result is shown once, not in three places', dupes.count === 1, JSON.stringify(dupes));
 check('account is offered AFTER the save', after.offer, after.text);
 
 // An offer below the fold is the same as no offer: pressing Save without

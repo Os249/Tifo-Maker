@@ -4,7 +4,7 @@
   --emerald: #0F8A4D;
   --ink: #0E0A1A;
   --paper: #FBFAFF;
-  --muted: #8B86A0;
+  --muted: #767188; /* was #8B86A0 at 3.36:1 on the page ground; 4.5:1 is the floor for body text */
   --line: #ECE9F5;
   --font: 'Inter', system-ui, -apple-system, sans-serif;
   --grad: linear-gradient(135deg, var(--purple), var(--blue) 60%, var(--emerald));

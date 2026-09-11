@@ -4,7 +4,10 @@
   --line: #232a36;
   --text: #f2f1ec;
   --muted: #9aa3b2;
-  --blue: #5b8cff;
+  --blue: #5b8cff;          /* text on the dark ground */
+  /* White on #5b8cff is 3.16:1 - fine for large text, not for a 12px chip.
+     Anything that puts white ON the accent uses this darker one instead. */
+  --blue-solid: #3a6ad9;    /* 4.95:1 against white */
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; background: var(--bg); color: var(--text); font-family: Inter, system-ui, Arial, sans-serif; }
@@ -38,7 +41,7 @@ a { color: inherit; }
   padding: 6px 10px; border-radius: 8px;
 }
 .s-cam:hover { color: var(--text); background: #1b2230; }
-.s-cam.active { color: #fff; background: var(--blue); }
+.s-cam.active { color: #fff; background: var(--blue-solid); }
 
 .s-body { padding: 22px 6px; }
 .s-title { font-size: clamp(24px, 4vw, 38px); font-weight: 800; letter-spacing: -0.02em; margin: 0 0 8px; }
@@ -48,7 +51,7 @@ a { color: inherit; }
 .s-actions { display: flex; gap: 10px; margin-bottom: 22px; }
 .s-share {
   all: unset; cursor: pointer; display: inline-flex; align-items: center; gap: 8px;
-  background: var(--blue); color: #fff; font-weight: 800; font-size: 16px; padding: 13px 24px; border-radius: 12px;
+  background: var(--blue-solid); color: #fff; font-weight: 800; font-size: 16px; padding: 13px 24px; border-radius: 12px;
 }
 .s-share:hover { background: #4575ec; }
 .s-fork {
@@ -74,3 +77,30 @@ a { color: inherit; }
   .s-actions { flex-direction: column; }
   .s-share, .s-fork { justify-content: center; }
 }
+
+/* Eight of the ten focusable controls on this page - Open in TifoMaker and
+   every camera angle - showed nothing at all when focused. This is the page a
+   shared link lands on, so it is the widest-reach surface the product has.
+   The ring needs 3:1 against what is behind it (WCAG 1.4.11), which a light
+   ring gives on this dark chrome; the editor already does the same thing. */
+.s-open:focus-visible,
+.s-cam:focus-visible,
+.s-share:focus-visible,
+.s-foot a:focus-visible,
+.s-cta:focus-visible,
+button:focus-visible,
+a:focus-visible {
+  outline: 2px solid #cfe0ff;
+  outline-offset: 2px;
+  border-radius: 8px;
+}
+
+/* Skip link: first focusable element, invisible until focused. Never
+   display:none - that removes it from the tab order, which is the point. */
+.skip-link {
+  position:absolute; left:-9999px; top:0; z-index:1000;
+  background:#0e1424; color:#ffffff; border-radius:0 0 8px 0;
+  padding:10px 16px; font-weight:600; text-decoration:none;
+}
+.skip-link:focus { left:0; outline:2px solid #1c6fe0; outline-offset:2px; }
+[dir="rtl"] .skip-link:focus { left:auto; right:0; border-radius:0 0 0 8px; }

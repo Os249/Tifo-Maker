@@ -964,20 +964,19 @@ export function mountToolbar(
       if (!wrap) toggleAvatarMenu(false);
     }
   });
-  // Accessibility: make the avatar a real, keyboard-operable menu button.
-  if (avatarEl) {
-    avatarEl.setAttribute('role', 'button');
-    avatarEl.setAttribute('tabindex', '0');
-    avatarEl.setAttribute('aria-haspopup', 'menu');
-    avatarEl.setAttribute('aria-expanded', 'false');
-    avatarEl.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' || e.key === ' ') {
-        e.preventDefault();
-        avatarEl.click();
-      }
-    });
-  }
-  avatarMenu?.setAttribute('role', 'menu');
+  /*
+   * The avatar is a real <button> in the markup now, so Enter and Space work
+   * without a keydown shim and it is in the tab order by itself.
+   *
+   * It no longer claims role="menu" / aria-haspopup="menu". It had the roles
+   * but none of the behaviour the ARIA menu pattern requires - the items were
+   * not menuitems and arrow keys did nothing - which is worse than saying
+   * nothing: a screen reader user is promised menu navigation and finds a
+   * list of buttons. As a plain popover of buttons everything works, and
+   * nothing is announced that is not true. aria-expanded, which IS honoured,
+   * stays; Escape still closes it and returns focus below.
+   */
+  if (avatarEl) avatarEl.setAttribute('aria-expanded', 'false');
   // Esc closes the avatar menu and returns focus to the avatar.
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && avatarMenu && !avatarMenu.hidden) {
@@ -1196,14 +1195,26 @@ export function mountToolbar(
   const saveTopBtn = document.getElementById('save-top') as HTMLButtonElement | null;
   const saveStateTop = document.getElementById('save-state-top');
 
+  /**
+   * Which Save the user last pressed, so the result appears at that control.
+   *
+   * Both indicators used to be written at once, so "Saved in this browser" was
+   * on screen twice - three times counting the account offer's own copy - which
+   * reads as three separate things happening rather than one. The header is the
+   * default because it is the one that is always visible, including on a first
+   * load where the state came from a restored draft rather than a press.
+   */
+  let lastSaveTrigger: 'top' | 'panel' = 'top';
+
   const renderDraftState = (): void => {
     const show = (cls: string, text: string): void => {
+      const inPanel = lastSaveTrigger === 'panel';
       draftState.className = cls;
-      draftState.textContent = text;
+      draftState.textContent = inPanel ? text : '';
       if (saveStateTop) {
         saveStateTop.className = cls.replace('draft-state', 'save-state-top');
-        saveStateTop.textContent = text;
-        saveStateTop.hidden = !text;
+        saveStateTop.textContent = inPanel ? '' : text;
+        saveStateTop.hidden = inPanel || !text;
       }
     };
     if (!lastDraft) { show('draft-state', ''); return; }
@@ -1345,6 +1356,8 @@ export function mountToolbar(
   // One action, reachable from two places. It always succeeds, and it never
   // asks a question first.
   const doSave = async (trigger: HTMLElement): Promise<void> => {
+    // Report the result where the press happened, not in both places at once.
+    lastSaveTrigger = trigger === saveTopBtn ? 'top' : 'panel';
     track('save_clicked');
     if (!isSignedIn()) {
       draftWriter.flush(); // forces a write, so lastDraft reflects reality
@@ -1355,7 +1368,10 @@ export function mountToolbar(
         message.textContent = i18nT('save.localFailed');
         return;
       }
-      message.textContent = i18nT('save.local');
+      // The draft-state chip beside whichever Save was pressed already says
+      // this. Repeating it here put the same sentence on screen twice, which
+      // reads as two things having happened rather than one.
+      message.textContent = '';
       showAccountOffer(trigger);
       return;
     }
@@ -1465,10 +1481,50 @@ export function mountToolbar(
     const { openModeration } = await import('./moderation');
     await openModeration();
   });
+
+  /**
+   * Deep link from the admin dashboard: /app?admin=reports|photos|stadiums.
+   *
+   * The three review queues live in two different places - reports and photos
+   * in the Moderation panel, stadium submissions in the Stadium panel - which
+   * is impossible to guess from a count on a dashboard. The dashboard now links
+   * each count straight at the panel that handles it.
+   *
+   * Run only after the session is known, so a link forwarded to someone who is
+   * not an admin opens nothing rather than flashing a panel they cannot use.
+   * The endpoints behind both panels are admin-gated server-side regardless.
+   */
+  const openAdminQueue = async (what: string): Promise<void> => {
+    if (what === 'reports' || what === 'photos') {
+      const { openModeration } = await import('./moderation');
+      await openModeration(what);
+      return;
+    }
+    if (what === 'stadiums') {
+      setPanelMode('stadium');
+      setOptionsSheet(true);
+      // The queue is at the bottom of a long panel; land on it, not above it.
+      requestAnimationFrame(() =>
+        document.getElementById('stadium-review')?.scrollIntoView({ block: 'center' }),
+      );
+    }
+  };
+
   // Check admin status on load (once the session is known).
   void (async () => {
     const me = await fetchMe();
-    reflectAdmin(me?.isAdmin ?? false);
+    const isAdmin = me?.isAdmin ?? false;
+    reflectAdmin(isAdmin);
+    const wanted = new URLSearchParams(location.search).get('admin');
+    if (isAdmin && wanted) {
+      // Drop the parameter first, not after: a refresh or a bookmark made from
+      // here should not reopen the panel over whatever the user moved on to,
+      // and doing it up front does not depend on when the panel settles.
+      const url = new URL(location.href);
+      url.searchParams.delete('admin');
+      history.replaceState(null, '', url.toString());
+      await openAdminQueue(wanted);
+    }
   })();
 
   // Keyboard shortcuts
@@ -1654,6 +1710,8 @@ export function mountToolbar(
   const objEmpty = $('#obj-empty');
   const objControls = $('#obj-controls');
   const objKind = $('#obj-kind');
+  const objX = $('#obj-x') as unknown as HTMLInputElement;
+  const objY = $('#obj-y') as unknown as HTMLInputElement;
   const objHeight = $('#obj-height') as unknown as HTMLInputElement;
   const objHeightOut = $('#obj-height-out');
   const objTier = $('#obj-tier') as unknown as HTMLSelectElement;
@@ -1700,6 +1758,9 @@ export function mountToolbar(
     const heightSeats = Math.round(sel.height / EDITOR_UNITS.rowPx);
     objHeight.value = String(Math.max(6, Math.min(60, heightSeats)));
     objHeightOut.textContent = objHeight.value;
+    // Shown in seats and rows, the units the rest of the panel already uses.
+    objX.value = String(Math.round(sel.cx / EDITOR_UNITS.colPx));
+    objY.value = String(Math.round(sel.cy / EDITOR_UNITS.rowPx));
     objTier.value = sel.tier === null ? 'both' : String(sel.tier);
   };
 
@@ -1724,6 +1785,16 @@ export function mountToolbar(
     const aspect = sel.width / sel.height;
     objects.mutateSelected({ height: newH, width: newH * aspect });
   });
+  /** Move the selection to the typed position - the non-drag path required by 2.5.7. */
+  const applyObjectPosition = (): void => {
+    if (!objects.selected) return;
+    const x = Number(objX.value), y = Number(objY.value);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+    objects.mutateSelected({ cx: x * EDITOR_UNITS.colPx, cy: y * EDITOR_UNITS.rowPx });
+  };
+  objX.addEventListener('change', applyObjectPosition);
+  objY.addEventListener('change', applyObjectPosition);
+
   objTier.addEventListener('change', () => {
     objects.mutateSelected({ tier: objTier.value === 'both' ? null : Number(objTier.value) });
   });

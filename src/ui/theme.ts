@@ -1,20 +1,17 @@
-import { FLOODLIGHT_CSS } from './floodlight';
+import './floodlight.css';
 
 /**
- * Installs the Floodlight design system: injects the token stylesheet and
- * pulls Inter + JetBrains Mono. Called once before the editor mounts. Kept
- * separate from index.html so the design tokens live in TS the rest of the
- * app imports from, while markup stays declarative.
+ * Installs the Floodlight design system.
+ *
+ * The stylesheet is a static import so Vite emits it as a <link> in the built
+ * HTML, applied before first paint. It used to be injected into a <style> tag
+ * here at runtime, which produced a flash of unstyled content and a layout
+ * shift of 1.171 as the whole page re-laid-out around it.
+ *
+ * The webfonts are declared in index.html for the same reason; nothing is
+ * appended to <head> from JavaScript any more.
  */
 export function installTheme(): void {
-  const fonts = document.createElement('link');
-  fonts.rel = 'stylesheet';
-  fonts.href =
-    'https://fonts.googleapis.com/css2?family=Inter:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap';
-  document.head.appendChild(fonts);
-
-
-  const style = document.createElement('style');
-  style.textContent = FLOODLIGHT_CSS;
-  document.head.appendChild(style);
+  /* Kept as a no-op so the call sites, which run before the editor mounts,
+     do not all need touching; the import above does the work. */
 }

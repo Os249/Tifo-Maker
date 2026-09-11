@@ -18,6 +18,11 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;800&display=swap" rel="stylesheet" />
   <style>
+    /* Skip link: first focusable element, invisible until focused. */
+    .skip-link { position:absolute; left:-9999px; top:0; z-index:1000;
+      background:#0e1424; color:#fff; border-radius:0 0 8px 0; padding:10px 16px;
+      font-weight:600; text-decoration:none; }
+    .skip-link:focus { left:0; outline:2px solid #1c6fe0; outline-offset:2px; }
     :root { --ink:#0e1426; --muted:#5b6473; --line:#e6e8ee; --blue:#1c6fe0; --bg:#fbfbfd; }
     * { box-sizing:border-box; }
     body { margin:0; background:var(--bg); color:var(--ink); font:16px/1.65 'Inter',system-ui,-apple-system,sans-serif; -webkit-font-smoothing:antialiased; }
@@ -47,10 +52,12 @@
   </style>
 </head>
 <body>
+<a class="skip-link" href="#main">Skip to main content</a>
   <header class="bar">
     <a class="brand" href="/">TIFO<b>MAKER</b></a>
     <a class="home" href="/">&larr; Home</a>
   </header>
+  <main id="main" tabindex="-1">
 
   <div class="wrap">
     <nav class="toc" aria-label="Legal documents">
@@ -71,7 +78,7 @@
         <p>In the spirit of being fully open: parts of TifoMaker (including some of its code and these documents) were created with the help of AI tools, then reviewed by me. I mention this so you know exactly what this project is: a genuine solo effort, made with modern tools.</p>
       </div>
       <p>TifoMaker is not affiliated with, endorsed by, or sponsored by any football club, league, federation, or stadium. Any stadium shapes or names are generic references.</p>
-      <p>You can reach me about anything on this page (questions, privacy requests, or reports) at <a href="mailto:osamah9070@gmail.com">osamah9070@gmail.com</a>.</p>
+      <p>You can reach me about anything on this page (questions, privacy requests, or reports) at <a href="mailto:osamah9070@gmail.com">email the developer</a>.</p>
     </section>
 
     <!-- ============ TERMS ============ -->
@@ -98,7 +105,7 @@
       <p>Your use of the site is subject to the <a href="#acceptable-use">Acceptable Use</a> rules. I can remove content and suspend or close accounts that break them.</p>
 
       <h3>7. Other people's rights</h3>
-      <p>The site's own software and branding belong to me. Please don't copy or misuse them. I respect intellectual property and expect the same from you: if you believe something on the site infringes your rights, email <a href="mailto:osamah9070@gmail.com">osamah9070@gmail.com</a> and I'll review it and remove anything that shouldn't be there.</p>
+      <p>The site's own software and branding belong to me. Please don't copy or misuse them. I respect intellectual property and expect the same from you: if you believe something on the site infringes your rights, email <a href="mailto:osamah9070@gmail.com">report it by email</a> and I'll review it and remove anything that shouldn't be there.</p>
 
       <h3>8. Payments</h3>
       <p>Right now the site is free. If paid features are added later, the price and terms will be shown clearly before you pay, and payments would be handled by a trusted third‑party provider, I would not store your card details.</p>
@@ -122,7 +129,7 @@
       <p>These terms follow the laws of the Kingdom of Saudi Arabia, and any dispute is handled by its competent courts.</p>
 
       <h3>15. Contact</h3>
-      <p>Questions about these terms: <a href="mailto:osamah9070@gmail.com">osamah9070@gmail.com</a>.</p>
+      <p>Questions about these terms: <a href="mailto:osamah9070@gmail.com">email the developer</a>.</p>
     </section>
 
     <!-- ============ PRIVACY ============ -->
@@ -131,7 +138,7 @@
       <p>I try to collect as little as possible. This explains what I collect and why, in line with the Saudi Personal Data Protection Law (PDPL) and similar good practice.</p>
 
       <h3>Who's responsible</h3>
-      <p>TifoMaker is run by one individual developer. For any privacy question or request, email <a href="mailto:osamah9070@gmail.com">osamah9070@gmail.com</a>.</p>
+      <p>TifoMaker is run by one individual developer. For any privacy question or request, email <a href="mailto:osamah9070@gmail.com">email your request</a>.</p>
 
       <h3>What I collect</h3>
       <ul>
@@ -171,7 +178,7 @@
       <p>I will comply with valid, lawful requests from competent authorities, and may disclose information where the law requires it or where it's needed to protect safety or rights. I won't hand over more than what's lawfully required.</p>
 
       <h3>Keeping it / your choices</h3>
-      <p>I keep personal data only as long as it's needed or required by law. You can delete your content or your account at any time. Subject to the law, you can also ask me to show you, correct, or delete your data, or to stop certain uses, just email <a href="mailto:osamah9070@gmail.com">osamah9070@gmail.com</a>.</p>
+      <p>I keep personal data only as long as it's needed or required by law. You can delete your content or your account at any time. Subject to the law, you can also ask me to show you, correct, or delete your data, or to stop certain uses, just email <a href="mailto:osamah9070@gmail.com">email the developer</a>.</p>
 
       <h3>Children</h3>
       <p>Accounts are for people 18 and older, and I don't knowingly collect personal data from anyone under 18. If you think a minor has given me personal data, email me and I'll delete it.</p>
@@ -198,7 +205,7 @@
       </ul>
       <p>TifoMaker is an independent platform and isn't affiliated with any club, league, or stadium.</p>
       <h3>Reporting &amp; enforcement</h3>
-      <p>If you see something that breaks these rules, email <a href="mailto:osamah9070@gmail.com">osamah9070@gmail.com</a>. I may remove content, limit features, or close accounts that break them, and I cooperate with lawful requests from authorities.</p>
+      <p>If you see something that breaks these rules, email <a href="mailto:osamah9070@gmail.com">email the developer</a>. I may remove content, limit features, or close accounts that break them, and I cooperate with lawful requests from authorities.</p>
     </section>
 
     <!-- ============ COOKIES ============ -->
@@ -220,6 +227,7 @@
       <p>You can change your mind any time from the cookie banner, or by clearing site data in your browser.</p>
     </section>
 
+  </main>
     <footer>
       <p>&copy; <span id="yr"></span> TifoMaker: an independent project by one developer, built with the help of AI. Not affiliated with any club, league, or stadium.</p>
       <p><a href="/">Home</a> &middot; <a href="#terms">Terms</a> &middot; <a href="#privacy">Privacy</a> &middot; <a href="#acceptable-use">Acceptable Use</a> &middot; <a href="#cookies">Cookies</a></p>

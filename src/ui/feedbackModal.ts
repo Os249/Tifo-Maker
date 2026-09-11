@@ -197,6 +197,7 @@ export function openFeedbackModal(initialKind: Kind = 'bug'): void {
         <button type="button" class="primary fb-send">${t('fb.send')}</button>
       </div>
     </div>`;
+  const opener = document.activeElement as HTMLElement | null;
   document.body.appendChild(backdrop);
 
   const $ = <T extends HTMLElement>(sel: string): T => backdrop.querySelector(sel) as T;
@@ -228,6 +229,9 @@ export function openFeedbackModal(initialKind: Kind = 'bug'): void {
 
   const close = (): void => {
     backdrop.remove();
+    // Focus goes back to whatever opened this, so a keyboard user who
+    // closes it is not dropped at the top of the document.
+    if (opener && document.contains(opener)) opener.focus();
     document.removeEventListener('keydown', onKey);
   };
   const onKey = (e: KeyboardEvent): void => { if (e.key === 'Escape') close(); };

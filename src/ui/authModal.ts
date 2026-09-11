@@ -88,6 +88,7 @@ export function openAuthModal(): Promise<string | null> {
         <p class="auth-note">${t('auth.note')}</p>
       </div>
     `;
+    const opener = document.activeElement as HTMLElement | null;
     document.body.appendChild(backdrop);
 
     let mode: 'signin' | 'signup' = 'signin';
@@ -111,6 +112,10 @@ export function openAuthModal(): Promise<string | null> {
 
     const close = (result: string | null): void => {
       backdrop.remove();
+      // Return focus to whatever opened the dialog. Without this a keyboard user
+      // who opens it, changes their mind and presses Escape is dropped at the top
+      // of the document and has to tab through the whole header to get back.
+      if (opener && document.contains(opener)) opener.focus();
       document.removeEventListener('keydown', onKey);
       resolve(result);
     };

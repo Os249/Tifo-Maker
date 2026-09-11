@@ -37,6 +37,8 @@ export interface QuickStart {
   paletteName: string;
   patternId: string | null;
   projectName: string;
+  /** True when the user asked for the guided tour here, rather than it launching itself. */
+  wantsTour: boolean;
 }
 
 // Intent-first starter templates — framed as outcomes, not features. Each maps
@@ -122,18 +124,79 @@ export function openOnboarding(patterns: PatternPreset[]): Promise<QuickStart | 
         </div>
         <div class="ob-actions">
           <button class="ob-start primary">Start designing</button>
+          <!-- The tour used to launch itself on top of everything else. Offered
+               here it is a choice made by someone who wants it, at the one
+               moment they are already deciding how to begin. -->
+          <button class="ob-tour">Start with a tour</button>
           <button class="ob-skip">Skip</button>
         </div>
       </div>
     `;
     document.body.appendChild(backdrop);
 
+    /*
+     * Make the app behind the dialog inert, and put focus inside it.
+     *
+     * Without both, a keyboard user arriving for the first time tabbed straight
+     * past the dialog into the project title, the view switcher and Save - all
+     * of them underneath a full-screen backdrop, none of them visible or
+     * clickable - while the fifteen controls that actually start their tifo
+     * were unreachable. Every one of those focused controls was entirely
+     * covered by author content, which is what WCAG 2.4.11 forbids.
+     *
+     * `inert` also removes the background from the screen reader's virtual
+     * cursor, which a focus trap alone would not do.
+     */
+    const shell = document.getElementById('app') ?? document.body.firstElementChild;
+    const inertTargets = Array.from(document.body.children).filter(
+      (el) => el !== backdrop && el instanceof HTMLElement,
+    ) as HTMLElement[];
+    for (const el of inertTargets) el.inert = true;
+    void shell;
+
+    // The name field is the first thing the copy asks for, so start there.
+    const firstField = backdrop.querySelector('#ob-name') as HTMLElement | null;
+    const dialog = backdrop.querySelector('.ob-modal') as HTMLElement | null;
+    requestAnimationFrame(() => (firstField ?? dialog)?.focus());
+    if (dialog && !dialog.hasAttribute('tabindex')) dialog.tabIndex = -1;
+
+    // Whatever had focus when the editor booted gets it back on close.
+    const opener = document.activeElement as HTMLElement | null;
+
     const finish = (result: QuickStart | null): void => {
       markOnboarded();
+      for (const el of inertTargets) el.inert = false;
       backdrop.remove();
       document.removeEventListener('keydown', onKey);
+      document.removeEventListener('keydown', trapTab, true);
+      if (opener && document.contains(opener)) opener.focus();
       resolve(result);
     };
+
+    /**
+     * Keep Tab inside the dialog, wrapping at both ends, per the ARIA dialog
+     * pattern. `inert` stops the background being reachable, but the browser
+     * would still walk focus out to its own chrome and back in at the top.
+     */
+    const trapTab = (e: KeyboardEvent): void => {
+      if (e.key !== 'Tab') return;
+      const focusable = Array.from(
+        backdrop.querySelectorAll<HTMLElement>(
+          'a[href],button:not([disabled]),input:not([disabled]),select,textarea,[tabindex]:not([tabindex="-1"])',
+        ),
+      ).filter((el) => el.offsetParent !== null || el === document.activeElement);
+      if (!focusable.length) return;
+      const first = focusable[0]!;
+      const last = focusable[focusable.length - 1]!;
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener('keydown', trapTab, true);
     const onKey = (e: KeyboardEvent): void => {
       if (e.key === 'Escape') finish(null);
     };
@@ -176,11 +239,13 @@ export function openOnboarding(patterns: PatternPreset[]): Promise<QuickStart | 
       });
     });
 
-    backdrop.querySelector('.ob-start')!.addEventListener('click', () => {
+    const start = (wantsTour: boolean): void => {
       const nameInput = backdrop.querySelector('#ob-name') as HTMLInputElement | null;
       const projectName = (nameInput?.value.trim() || 'My first tifo').slice(0, 80);
-      finish({ kind: chosenKind, paletteName: chosenPalette, patternId: chosenPattern, projectName });
-    });
+      finish({ kind: chosenKind, paletteName: chosenPalette, patternId: chosenPattern, projectName, wantsTour });
+    };
+    backdrop.querySelector('.ob-start')!.addEventListener('click', () => start(false));
+    backdrop.querySelector('.ob-tour')!.addEventListener('click', () => start(true));
     backdrop.querySelector('.ob-skip')!.addEventListener('click', () => finish(null));
 
     void patterns;

@@ -10,7 +10,7 @@
   --blue: #1C6FE0;
   --ink: #0E0A1A;
   --paper: #FBFAFF;
-  --muted: #8B86A0;
+  --muted: #767188; /* was #8B86A0 at 3.36:1 on the page ground; 4.5:1 is the floor for body text */
   --line: #ECE9F5;
   --font: 'Inter', system-ui, -apple-system, sans-serif;
 }
@@ -124,7 +124,10 @@ a { color: inherit; text-decoration: none; }
   box-shadow: 0 8px 24px rgba(28, 111, 224, 0.32);
 }
 .btn-primary:hover { background: #155ec4; box-shadow: 0 10px 30px rgba(28, 111, 224, 0.42); }
-.btn-ghost { background: transparent; border: 1.5px solid rgba(14, 10, 26, 0.18); }
+/* Secondary, and it should read as secondary: these two used to be the same
+   size and weight, so neither looked like the thing to press. */
+.btn-ghost { background: transparent; border: 1.5px solid rgba(14, 10, 26, 0.18);
+  font-size: .95em; padding-inline: 1.1em; }
 .btn-ghost:hover { border-color: var(--purple); color: var(--purple); }
 .btn-light { background: var(--neon); color: var(--ink); box-shadow: 0 8px 24px rgba(217, 240, 0, 0.3); }
 .btn-light:hover { background: #c4d900; }
@@ -389,7 +392,18 @@ a { color: inherit; text-decoration: none; }
 /* ============ RESPONSIVE ============ */
 @media (max-width: 860px) {
   .hero { grid-template-columns: 1fr; gap: 40px; padding-top: 48px; }
+  /* The 3D stadium stays first - it is the best thing on the page - but the
+     eyebrow and headline move above it, so the first screenful says what this
+     is before it shows what it looks like. It used to open with a button
+     labelled "Preview Tifos" and a render, with the sentence that explains
+     them below the fold. */
+  .hero-copy { display: contents; }
+  .eyebrow { order: -3; }
+  .hero-copy h1 { order: -2; }
   .hero-visual { order: -1; }
+  .lead { order: 1; }
+  .cta-row { order: 2; }
+  .trust-line { order: 3; }
   .stadium-mock { max-width: 340px; }
   .trio { grid-template-columns: 1fr; }
   .clubs-inner { grid-template-columns: 1fr; gap: 36px; padding: 40px 28px; }
@@ -566,5 +580,15 @@ a { color: inherit; text-decoration: none; }
    modal module, so the button is styled on first paint rather than after
    someone clicks it. */
 .fb-entry{ display:inline-flex; align-items:center; gap:6px; background:none; border:none;
-  color:inherit; font:inherit; font-size:inherit; cursor:pointer; padding:0; opacity:.85; }
+  color:inherit; font:inherit; font-size:inherit; cursor:pointer; padding:0; }
 .fb-entry:hover{ opacity:1; text-decoration:underline; }
+
+/* Skip link: first focusable element, invisible until focused. Never
+   display:none - that removes it from the tab order, which is the point. */
+.skip-link {
+  position:absolute; left:-9999px; top:0; z-index:1000;
+  background:#0e1424; color:#ffffff; border-radius:0 0 8px 0;
+  padding:10px 16px; font-weight:600; text-decoration:none;
+}
+.skip-link:focus { left:0; outline:2px solid #1c6fe0; outline-offset:2px; }
+[dir="rtl"] .skip-link:focus { left:auto; right:0; border-radius:0 0 0 8px; }

@@ -424,12 +424,20 @@ async function main(): Promise<void> {
     window.setTimeout(() => tip.remove(), 3800);
   }
 
-  // First load: land in Split on desktop so newcomers instantly see how the 2D
-  // design maps onto the 3D stadium. Phones/tablets keep the single-pane Design
-  // view — split needs the width.
-  if (window.matchMedia('(min-width: 1100px)').matches) {
-    void setView('split').then(() => showDrawHint());
-  }
+  // First load: land in Design, fitted.
+  //
+  // This used to open in Split on desktop, to show newcomers how the 2D design
+  // maps onto the 3D stadium. The intent is right but the timing was wrong:
+  // someone who has just asked for an empty bowl arrives at a half-width canvas
+  // at 11% zoom showing a strip of seats about a centimetre tall, with nothing
+  // yet painted for the 3D half to mirror. The mapping is the product's best
+  // trick and it lands far harder once there is something on the seats, so
+  // Split stays one tap away and the hint below points at it after the first
+  // stroke rather than the view being chosen for them.
+  void setView('2d').then(() => {
+    editor.fitToView();
+    showDrawHint();
+  });
 
   // Match Day Simulator: a separate, lazy-loaded high-fidelity renderer shown in
   // a fullscreen overlay. The editor preview is paused while it runs so only one
@@ -547,11 +555,34 @@ async function main(): Promise<void> {
       if (choice.kind === 'text') document.querySelector<HTMLButtonElement>('[data-tool="text"]')?.click();
       else if (choice.kind === 'crest') document.querySelector<HTMLButtonElement>('[data-tool="import"]')?.click();
 
-      // First-timer guided tour of the major controls (skippable). Only runs if
-      // the user completed onboarding (didn't skip) and hasn't seen the tour.
-      const { hasSeenTour, startTour } = await import('./ui/tour');
-      if (!hasSeenTour()) {
-        // Let the layout settle (panels/tools rendered) before spotlighting.
+      // The guided tour is no longer started for them.
+      //
+      // It used to launch itself here, which put a nine-step spotlight on top of
+      // a first-time user at the same moment the account offer and the consent
+      // bar were also on screen — three things competing for attention in the
+      // first thirty seconds. Tutorials pushed at people interrupt, do not
+      // reliably improve task performance, and are forgotten quickly; the same
+      // content works far better pulled at the moment it is needed, which the
+      // tool tooltips and the "B brush · F fill · T text" hint strip already do.
+      //
+      // It is still one click away: the onboarding dialog offers it up front,
+      // and "Replay tutorial" in the avatar menu starts it any time.
+      /*
+       * Re-fit once the dialog is gone.
+       *
+       * The initial fit happens while the onboarding dialog is still up, so it
+       * measures a layout that is about to change; applying a starter then
+       * repaints without re-fitting, and the design ended up rendered outside
+       * the visible canvas - a black pane on the screen a first-time user sees
+       * immediately after saying what they wanted to make.
+       */
+      requestAnimationFrame(() => {
+        editor.app.resize();
+        editor.fitToView();
+      });
+
+      if (choice.wantsTour) {
+        const { startTour } = await import('./ui/tour');
         setTimeout(() => void startTour(), 400);
       }
     }
@@ -559,7 +590,18 @@ async function main(): Promise<void> {
 
   window.addEventListener('keydown', (e) => {
     const tag = (e.target as HTMLElement | null)?.tagName;
-    if (e.key === 'Tab' && tag !== 'INPUT' && tag !== 'SELECT' && tag !== 'TEXTAREA') {
+    /*
+     * Zen mode is on Z, not Tab.
+     *
+     * It used to be Tab, with preventDefault(), for every keypress that did not
+     * originate in a form field - which meant a keyboard user could not move
+     * focus anywhere in the editor at all. Tab is how you navigate; a page that
+     * swallows it is a keyboard trap (WCAG 2.1.2) across the entire product,
+     * and it also made every other keyboard fix here untestable. Z matches the
+     * single-letter shortcuts the tools already use (B, F, T, I).
+     */
+    if (e.key.toLowerCase() === 'z' && !e.ctrlKey && !e.metaKey && !e.altKey
+        && tag !== 'INPUT' && tag !== 'SELECT' && tag !== 'TEXTAREA') {
       e.preventDefault();
       document.body.classList.toggle('zen');
       requestAnimationFrame(() => {

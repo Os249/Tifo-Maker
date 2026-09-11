@@ -47,6 +47,7 @@ function mount(html: string): { backdrop: HTMLElement; close: (then?: () => void
   const backdrop = document.createElement('div');
   backdrop.className = 'dlg-backdrop';
   backdrop.innerHTML = html;
+  const opener = document.activeElement as HTMLElement | null;
   document.body.appendChild(backdrop);
   liveBackdrop = backdrop;
 
@@ -54,6 +55,10 @@ function mount(html: string): { backdrop: HTMLElement; close: (then?: () => void
     backdrop.remove();
     if (liveBackdrop === backdrop) liveBackdrop = null;
     document.removeEventListener('keydown', onKey);
+    // Return focus to whatever opened the dialog. Without this a keyboard user
+    // who opens it, changes their mind and presses Escape is dropped at the top
+    // of the document and has to tab through the whole header to get back.
+    if (opener && document.contains(opener)) opener.focus();
     then?.();
   };
   function onKey(e: KeyboardEvent): void {

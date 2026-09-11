@@ -1,6 +1,12 @@
 <!doctype html>
 <html lang="en">
   <head>
+  <!-- Declared here, not appended from JavaScript: a font link added after the
+       bundle runs blocks text late instead of early, and the stylesheet it
+       pairs with is now a real <link> too (see src/ui/theme.ts). -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap" />
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <link rel="icon" href="/favicon.ico" sizes="32x32" />
@@ -9,6 +15,7 @@
     <title>Tifo Maker</title>
   </head>
   <body>
+<a class="skip-link" href="#main">Skip to main content</a>
     <header>
       <div class="brand">TIFO<b>MAKER</b></div>
       <input class="doc-title" id="doc-title" value="Untitled tifo" aria-label="Design title" />
@@ -34,7 +41,7 @@
         <button id="gallery" data-i18n="ed.gallery">Gallery</button>
         <button id="moderation" hidden title="Moderation queue"><i class="ti ti-shield-check"></i> <span data-i18n="ed.moderate">Moderate</span></button>
         <div class="avatar-wrap">
-          <span class="avatar" id="avatar">U</span>
+          <button class="avatar" id="avatar" type="button" aria-expanded="false" aria-controls="avatar-menu">U</button>
           <div class="avatar-menu" id="avatar-menu" hidden>
             <div class="avatar-menu-name" id="avatar-menu-name"></div>
             <button class="avatar-menu-item" id="menu-profile"><i class="ti ti-user"></i> <span data-i18n="ed.viewProfile">View profile</span></button>
@@ -50,6 +57,7 @@
         </div>
       </div>
     </header>
+    <main id="main" tabindex="-1">
 
     <div class="workspace">
       <nav class="tool-rail" aria-label="Tools">
@@ -174,7 +182,7 @@
         </div>
         <p class="panel-orient">Paint on the <b>canvas</b> at left. These panels set <b>how</b> you paint and the look. Switch <b>Design / Stadium / Split</b> above to see it on the seats or in 3D.</p>
 
-        <div class="panel-section" id="ctx-stadium-config" data-panel="__menu_only__" data-menu="stadium">
+        <div class="panel-section ctx-hidden" id="ctx-stadium-config" data-panel="__menu_only__" data-menu="stadium" style="display:none">
           <h4><span data-i18n="ed.stadium">Stadium</span> <span class="h4-tag" data-i18n="ed.cfg.tag">choose &amp; configure the bowl</span></h4>
           <p class="hint note">Pick the stadium your tifo is designed for. Switching remaps your current design onto the new bowl.</p>
           <div class="chips" id="stadium-tabs" style="margin-bottom:8px;flex-wrap:wrap;"></div>
@@ -195,7 +203,7 @@
           </div>
         </div>
 
-        <div class="panel-section" id="ctx-ai" data-panel="__menu_only__" data-menu="ai">
+        <div class="panel-section ctx-hidden" id="ctx-ai" data-panel="__menu_only__" data-menu="ai" style="display:none">
           <h4><span data-i18n="ed.ai.title">AI Designer</span> <span class="h4-tag" data-i18n="ed.ai.tag">describe it, get a tifo</span></h4>
           <p class="hint note" data-i18n="ed.ai.hint">Describe a display in plain words: a stand, colours, text, a symbol. The AI composes a fully editable tifo on the seats.</p>
           <textarea id="ai-prompt" class="ai-input" rows="3" maxlength="400" placeholder="e.g. Giant eagle covering the south stand in black and gold" data-i18n-attr="placeholder:ed.ai.placeholder"></textarea>
@@ -229,7 +237,7 @@
           <p id="ai-quota" class="hint" style="font-size:11px;color:var(--text-3);margin:8px 0 0;"></p>
         </div>
 
-        <div class="panel-section" id="ctx-objects" data-panel="select">
+        <div class="panel-section ctx-hidden" id="ctx-objects" data-panel="select" style="display:none">
           <h4><span data-i18n="ed.obj">Object</span> <span id="obj-kind" style="color:var(--text-3);"></span></h4>
           <div id="region-actions" hidden>
             <p class="hint" style="font-size:12px;color:var(--text-2);margin:0 0 10px;"><b id="region-count">0</b> seats selected. Recolor with the active swatch, or clear them.</p>
@@ -242,7 +250,22 @@
           <div id="obj-empty" class="hint empty" data-i18n="ed.obj.empty">No object selected. Click a painted area to select it, or use Text/Image.</div>
           <div id="obj-controls" hidden>
             <div class="group" style="margin-bottom:8px;">
-              <label for="obj-height" style="white-space:nowrap;" data-i18n="ed.height">Height</label>
+              <!-- Position, as numbers.
+               Everything else about a placed object could already be changed
+               without dragging - height by the slider, depth by the buttons,
+               tier by the select - but moving one could only be done by press,
+               hold and drag. WCAG 2.5.7 asks that anything done by dragging can
+               also be done with a single pointer that does not drag, for people
+               using a head pointer, an eye tracker or a hand that shakes. Two
+               fields discharge it, and they give everyone precision that a
+               finger on a 60,000-seat bowl cannot. -->
+          <div class="group" style="gap:8px;">
+            <label for="obj-x" style="white-space:nowrap;" data-i18n="ed.obj.x">Across</label>
+            <input type="number" id="obj-x" class="grow0" step="1" aria-label="Position across the bowl, in seats" style="width:74px;" />
+            <label for="obj-y" style="white-space:nowrap;" data-i18n="ed.obj.y">Up</label>
+            <input type="number" id="obj-y" class="grow0" step="1" aria-label="Position up the bowl, in rows" style="width:74px;" />
+          </div>
+          <label for="obj-height" style="white-space:nowrap;" data-i18n="ed.height">Height</label>
               <input type="range" id="obj-height" min="6" max="60" step="1" value="18" class="grow" />
               <span id="obj-height-out" class="val">18</span>
             </div>
@@ -271,7 +294,7 @@
         <div class="panel-section" id="ctx-brush" data-panel="brush eraser fill">
           <h4><span data-i18n="ed.brush">Brush</span> <span class="h4-tag" data-i18n="ed.brush.activeTool">active tool</span></h4>
           <div class="group">
-            <input type="range" id="brush-size" min="1" max="40" step="1" value="10" class="grow" />
+            <input type="range" id="brush-size" min="1" max="40" step="1" value="10" class="grow" aria-label="Brush size" />
             <span id="brush-size-out" class="val">10</span>
           </div>
           <div class="chips" style="margin-top:10px;">
@@ -314,10 +337,10 @@
         <div class="panel-section" id="ctx-stadium" data-panel="brush fill">
           <h4><span data-i18n="ed.stadium">Stadium</span> <span class="h4-tag" data-i18n="ed.stadium.tag">shape &amp; whole-bowl fills</span></h4>
           <div class="group">
-            <select id="stadium" class="grow0"></select>
+            <select id="stadium" class="grow0" aria-label="Stadium"></select>
           </div>
           <div class="group" style="margin-top:10px;">
-            <select id="pattern" class="grow0"><option value="" data-i18n="ed.stadium.pattern">Pattern&hellip;</option></select>
+            <select id="pattern" class="grow0" aria-label="Pattern"><option value="" data-i18n="ed.stadium.pattern">Pattern&hellip;</option></select>
           </div>
           <div class="chips" style="margin-top:10px;">
             <label><input type="checkbox" id="grid" checked /> <span data-i18n="ed.stadium.guides">Section guides</span></label>
@@ -329,7 +352,7 @@
           </div>
         </div>
 
-        <div class="panel-section" id="ctx-reveal" data-panel="pan select" data-menu="animation">
+        <div class="panel-section ctx-hidden" id="ctx-reveal" data-panel="pan select" data-menu="animation" style="display:none">
           <h4 data-i18n="ed.reveal">Animate reveal</h4>
           <div class="group">
             <select id="reveal-preset" class="grow0"></select>
@@ -349,7 +372,7 @@
           <button id="reveal-gif" style="width:100%;margin-top:10px;"><i class="ti ti-gif"></i> <span data-i18n="ed.reveal.gif">Export GIF (flat)</span></button>
         </div>
 
-        <div class="panel-section" id="ctx-stadium-export" data-panel="__menu_only__" data-menu="save animation">
+        <div class="panel-section ctx-hidden" id="ctx-stadium-export" data-panel="__menu_only__" data-menu="save animation" style="display:none">
           <h4><span data-i18n="ed.sx">Stadium animation</span> <span class="h4-tag" data-i18n="ed.sx.tag">video / GIF (3D)</span></h4>
           <p class="hint" style="font-size:11px;color:var(--text-3);margin:0 0 10px;" data-i18n="ed.sx.hint">Renders the 3D bowl lighting up with your chosen reveal. Style &amp; length come from the Animation panel.</p>
           <div class="group">
@@ -417,12 +440,13 @@
       </aside>
     </div>
 
+    </main>
     <footer>
       <span class="coords" id="coords">&mdash;</span>
       <span id="stat" data-i18n="ed.stat.generating">generating seat map&hellip;</span>
       <span class="spacer"></span>
       <span class="legible-chip ok" id="message"></span>
-      <span><kbd>B</kbd> brush &middot; <kbd>F</kbd> fill &middot; <kbd>T</kbd> text &middot; <kbd>I</kbd> image &middot; <kbd>Tab</kbd> zen</span>
+      <span><kbd>B</kbd> brush &middot; <kbd>F</kbd> fill &middot; <kbd>T</kbd> text &middot; <kbd>I</kbd> image &middot; <kbd>Z</kbd> zen</span>
     </footer>
 
     <script type="module" src="/src/main.ts"></script>

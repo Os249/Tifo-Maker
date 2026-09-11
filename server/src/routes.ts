@@ -92,7 +92,7 @@ const NOT_FOUND_HTML = `<!doctype html>
      border:1px solid #2a323d; color:#e6edf3; text-decoration:none; font-size:14px; }
   a.p{ background:#3fb950; border-color:#3fb950; color:#04220e; font-weight:600; }
   a:hover{ border-color:#3d4754; }
-  .c{ margin:28px 0 0; font-size:13px; color:#6b7480; }
+  .c{ margin:28px 0 0; font-size:13px; color:#7b8592; } /* #6b7480 was 4.00:1 on this ground */
   .c a{ display:inline; margin:0; padding:0; border:0; color:#58a6ff; text-decoration:underline; }
   .c a:hover{ color:#79b8ff; }
 </style>

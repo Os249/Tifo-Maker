@@ -91,6 +91,11 @@ export const ADMIN_HTML = `<!doctype html>
   .k-lab{ color:var(--mut); font-size:12px; margin-top:3px; }
   .k-sub{ font-size:11px; margin-top:6px; color:var(--green); }
   .k-sub.n{ color:var(--dim); }
+  /* A queue card is a door, not a readout: it says where the work is handled. */
+  a.card{ display:block; text-decoration:none; color:inherit; transition:border-color .12s, background .12s; }
+  a.card:hover{ border-color:var(--blue); background:var(--bg3, var(--bg2)); }
+  a.card .k-go{ font-size:11px; margin-top:6px; color:var(--blue); }
+  a.card.clear{ opacity:.55; }
 
   .lt{ font-size:12.5px; font-weight:600; color:var(--tx); margin:0 0 2px; }
   .lc{ color:var(--dim); font-size:11px; margin:0 0 11px; }
@@ -311,6 +316,21 @@ function periodCompare(daily, key, n){
 }
 
 /* ---------- components ---------- */
+
+/**
+ * A review-queue count that links to the panel that actually handles it.
+ *
+ * The three queues live in two different places - reports and photos in the
+ * Moderation panel, stadium submissions in the Stadium panel - which no count
+ * on a dashboard can convey. So each card carries its own destination.
+ */
+function queueKpi(label, value, where, href){
+  var n = Number(value) || 0;
+  return '<a class="card' + (n ? '' : ' clear') + '" href="' + esc(href) + '">'
+    + '<div class="k-val">' + fmt(n) + '</div>'
+    + '<div class="k-lab">' + esc(label) + '</div>'
+    + '<div class="k-go">' + (n ? esc(where) + ' &rarr;' : 'nothing waiting') + '</div></a>';
+}
 
 function kpi(label, value, sub, subDim){
   return '<div class="card"><div class="k-val">' + (typeof value === 'string' ? esc(value) : fmt(value)) + '</div>'
@@ -837,12 +857,12 @@ function render(ov, tr, funnel, sh, fb){
 
   if (queue){
     html += '<div class="grid">';
-    html += kpi('Open reports', mod.openReports);
-    html += kpi('Unverified photos', mod.unverifiedPhotos);
-    html += kpi('Pending stadiums', mod.pendingStadiums);
-    html += kpi('Approved stadiums', mod.approvedStadiums);
+    html += queueKpi('Open reports', mod.openReports, 'Moderation panel', '/app?admin=reports');
+    html += queueKpi('Unverified photos', mod.unverifiedPhotos, 'Moderation panel', '/app?admin=photos');
+    html += queueKpi('Pending stadiums', mod.pendingStadiums, 'Stadium panel', '/app?admin=stadiums');
+    html += kpi('Approved stadiums', mod.approvedStadiums, 'live in the picker', true);
     html += '</div>';
-    html += '<p class="note">Act on these in the app: open the editor, then the <strong>Stadium</strong> panel shows the community review queue. <a href="/app">Open the app &rarr;</a></p>';
+    html += '<p class="note">Each of these opens the editor with the right panel already up. You need to be signed in as an admin \u2014 the Moderation button only appears once the server confirms it.</p>';
   }
 
   html += '<div class="grid two">';

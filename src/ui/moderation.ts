@@ -12,7 +12,9 @@ import {
  *   • Reports queue — review reported designs and dismiss or take them down.
  *   • Photo verification — confirm real match-day photos as genuine.
  */
-export async function openModeration(): Promise<void> {
+export type ModerationTab = 'reports' | 'photos';
+
+export async function openModeration(startOn: ModerationTab = 'reports'): Promise<void> {
   const backdrop = document.createElement('div');
   backdrop.className = 'feed-backdrop';
   backdrop.innerHTML = `
@@ -22,17 +24,21 @@ export async function openModeration(): Promise<void> {
         <div class="feed-sub">Review reports and verify match-day photos.</div>
         <button class="feed-close" aria-label="Close">&times;</button>
         <div class="feed-sorts" style="margin-top:12px;">
-          <button class="feed-sort active" data-tab="reports">Reports</button>
-          <button class="feed-sort" data-tab="photos">Photo verification</button>
+          <button class="feed-sort${startOn === 'reports' ? ' active' : ''}" data-tab="reports">Reports</button>
+          <button class="feed-sort${startOn === 'photos' ? ' active' : ''}" data-tab="photos">Photo verification</button>
         </div>
       </div>
       <div class="mod-body" id="mod-body"><div class="feed-loading">Loading…</div></div>
     </div>
   `;
+  const opener = document.activeElement as HTMLElement | null;
   document.body.appendChild(backdrop);
 
   const close = (): void => {
     backdrop.remove();
+    // Focus goes back to whatever opened this, so a keyboard user who
+    // closes it is not dropped at the top of the document.
+    if (opener && document.contains(opener)) opener.focus();
     document.removeEventListener('keydown', onKey);
   };
   const onKey = (e: KeyboardEvent): void => {
@@ -46,7 +52,7 @@ export async function openModeration(): Promise<void> {
 
   const body = backdrop.querySelector('#mod-body') as HTMLElement;
   const tabs = Array.from(backdrop.querySelectorAll('.feed-sort[data-tab]')) as HTMLButtonElement[];
-  let tab: 'reports' | 'photos' = 'reports';
+  let tab: ModerationTab = startOn;
 
   const renderReports = (items: ReportItem[]): void => {
     if (items.length === 0) {
