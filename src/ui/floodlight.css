@@ -1248,3 +1248,253 @@ body.gate { display:block; overflow-y:auto; background:var(--ink-0); }
   border-top:1px solid var(--line-1);
   font-size:12px; line-height:1.6; color:var(--text-3);
 }
+
+/* ==========================================================================
+   Phone editor shell (<=899px) — see src/ui/mobileShell.ts
+
+   Replaces the overflowing 752px tool rail with a five-tab ribbon and bottom
+   sheets. Everything that is not the canvas floats over it, so the drawing
+   surface keeps the whole screen.
+
+   dvh, not vh: the shell is fixed-position and full-screen, so the browser
+   chrome collapsing does not shift anything behind it — the case where dvh is
+   the right unit rather than the thrashy one.
+   ========================================================================== */
+@media (max-width: 899px) {
+  /* --- the shell owns the screen --- */
+  body.m-shell { height:100dvh; overflow:hidden; }
+  body.m-shell footer { display:none; }
+
+  /* The old ribbon is replaced. display:none takes its fourteen buttons out of
+     the layout entirely — clipping the parent does not, because the children
+     keep their laid-out boxes and still measure as off-screen targets. They
+     remain in the DOM, and HTMLElement.click() fires their listeners whether or
+     not they are rendered, which is how the sheet drives them. */
+  body.m-shell .tool-rail { display:none; }
+  /* Same for the desktop panel: its sections are lent to the sheet. */
+  body.m-shell .panel, body.m-shell .panel-fab, body.m-shell .panel-scrim { display:none !important; }
+  body.m-shell .tool-bar { display:none; }
+  body.m-shell .m-sheet .tool-bar {
+    display:flex; flex-wrap:wrap; position:static; overflow:visible;
+    background:transparent; border:none; padding:0; gap:10px;
+  }
+  body.m-shell .m-sheet .tool-bar > * { flex:0 0 auto; }
+  body.m-shell .m-sheet .tool-bar label { display:flex; align-items:center; gap:6px; min-height:44px; }
+  body.m-shell .m-sheet .tool-bar input[type="range"] { flex:1 1 140px; min-width:120px; }
+  body.m-shell .m-sheet .tool-bar button { min-height:44px; }
+
+  /* --- canvas takes everything left over --- */
+  body.m-shell .workspace { flex-direction:column; }
+  body.m-shell .stage { order:0; flex:1; min-height:0; position:relative; }
+  body.m-shell #canvas-watermark { bottom:calc(var(--m-ribbon) + 8px); }
+  body.m-shell .zoom-pill {
+    left:50%; transform:translateX(-50%);
+    bottom:calc(var(--m-ribbon) + 8px);
+    background:rgba(15,23,42,.86); backdrop-filter:blur(6px);
+    border:1px solid var(--line-1); border-radius:var(--r-pill);
+  }
+  body.m-shell .minimap { display:none; }
+
+  /* --- floating view switcher --- */
+  .m-view {
+    position:absolute; top:10px; left:50%; transform:translateX(-50%); z-index:12;
+    display:flex; gap:2px; padding:3px;
+    background:rgba(15,23,42,.86); backdrop-filter:blur(8px);
+    border:1px solid var(--line-1); border-radius:var(--r-pill);
+    box-shadow:0 4px 16px rgba(0,0,0,.35);
+  }
+  .m-view-b {
+    display:inline-flex; align-items:center; gap:5px;
+    min-height:38px; padding:0 14px; border:none; background:transparent;
+    color:var(--text-2); font:inherit; font-size:12.5px; font-weight:600;
+    border-radius:var(--r-pill); white-space:nowrap;
+  }
+  .m-view-b.on { background:var(--blue); color:#fff; }
+  .m-view-b:focus-visible { outline:none; box-shadow:var(--ring-focus); }
+
+  /* --- stand chips: the "get me behind the goal" control --- */
+  .m-stands {
+    position:absolute; left:0; right:0; z-index:12;
+    bottom:calc(var(--m-ribbon) + 56px);
+    display:flex; gap:6px; padding:0 10px;
+    overflow-x:auto; scrollbar-width:none; -webkit-overflow-scrolling:touch;
+  }
+  .m-stands::-webkit-scrollbar { display:none; }
+  .m-stand {
+    flex:0 0 auto; min-height:36px; padding:0 14px;
+    background:rgba(15,23,42,.86); backdrop-filter:blur(6px);
+    border:1px solid var(--line-1); border-radius:var(--r-pill);
+    color:var(--text-2); font:inherit; font-size:12.5px; font-weight:600;
+  }
+  .m-stand.on { background:var(--blue); border-color:var(--blue); color:#fff; }
+  .m-stand:focus-visible { outline:none; box-shadow:var(--ring-focus); }
+
+  /* --- undo / redo in the top bar --- */
+  .m-hist { display:flex; gap:4px; }
+  .m-hist-b {
+    width:40px; height:40px; min-width:40px; padding:0;
+    display:flex; align-items:center; justify-content:center;
+    background:var(--ink-3); border:1px solid var(--line-2); border-radius:var(--r-sm);
+    color:var(--text-1); font-size:17px;
+  }
+
+  /* --- the five-tab ribbon --- */
+  :root, body.m-shell { --m-ribbon:calc(62px + env(safe-area-inset-bottom)); }
+  .m-ribbon {
+    position:fixed; left:0; right:0; bottom:0; z-index:41;
+    display:flex; align-items:stretch; justify-content:space-around;
+    gap:2px; padding:4px 4px calc(4px + env(safe-area-inset-bottom));
+    background:var(--ink-1); border-top:1px solid var(--line-1);
+    box-shadow:0 -4px 18px rgba(0,0,0,.35);
+  }
+  .m-tab {
+    flex:1 1 0; min-width:0; min-height:54px;
+    display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px;
+    background:transparent; border:none; border-radius:var(--r-md);
+    color:var(--text-3); font:inherit; font-size:10.5px; font-weight:600;
+    padding:0 2px;
+  }
+  .m-tab i { font-size:21px; line-height:1; }
+  .m-tab span { max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  /* --blue (#1C6FE0) on the tinted active background is 2.6:1, and even
+     --flare-hover only reaches 4.47:1 — just under the line. #5B9BF2 measures
+     5.6:1 on the same ground and still reads as the brand blue. */
+  .m-tab.active { color:#5B9BF2; background:rgba(28,111,224,.12); }
+  .m-tab:focus-visible { outline:none; box-shadow:var(--ring-focus); }
+
+  /* --- bottom sheet --- */
+  .m-scrim {
+    position:fixed; left:0; right:0; top:0; bottom:var(--m-ribbon); z-index:38; background:rgba(4,6,12,.45);
+    opacity:0; pointer-events:none; transition:opacity .18s ease;
+  }
+  .m-scrim.show { opacity:1; pointer-events:auto; }
+  .m-sheet {
+    position:fixed; left:0; right:0; bottom:0; z-index:39;
+    display:flex; flex-direction:column;
+    /* Capped so the canvas stays visible behind it: a non-modal sheet that
+       covers what you are editing defeats the point of being non-modal. */
+    max-height:60dvh;
+    background:var(--ink-1); border-top:1px solid var(--line-2);
+    border-radius:18px 18px 0 0; box-shadow:0 -12px 34px rgba(0,0,0,.55);
+    transform:translateY(110%); transition:transform .22s cubic-bezier(.32,.72,0,1);
+    padding-bottom:var(--m-ribbon);
+  }
+  .m-sheet.open { transform:translateY(0); }
+  .m-grab {
+    width:40px; height:4px; border-radius:3px; background:var(--line-2);
+    margin:9px auto 2px; flex:0 0 auto; touch-action:none; cursor:grab;
+  }
+  .m-sheet-head {
+    display:flex; align-items:center; gap:10px; padding:4px 14px 10px;
+    flex:0 0 auto; touch-action:none;
+  }
+  .m-sheet-title { flex:1; margin:0; font-size:15px; font-weight:700; color:var(--text-1); }
+  .m-sheet-x {
+    width:40px; height:40px; min-width:40px; padding:0; flex:0 0 auto;
+    display:flex; align-items:center; justify-content:center;
+    background:var(--ink-3); border:1px solid var(--line-2); border-radius:50%;
+    color:var(--text-2); font-size:17px;
+  }
+  .m-sheet-body {
+    flex:1 1 auto; overflow-y:auto; -webkit-overflow-scrolling:touch;
+    overscroll-behavior:contain; padding:0 14px 14px;
+  }
+  /* Panel sections are lent into the sheet; strip their desktop chrome. */
+  .m-sheet-body .panel-section {
+    border:none; background:transparent; padding:0; margin:0 0 18px;
+    display:block !important;
+  }
+  .m-sheet-body .panel-section h3 { margin-top:0; }
+  .m-sheet-body .panel-section.ctx-hidden { display:block !important; }
+  .m-sheet-body button, .m-sheet-body select, .m-sheet-body .chip { min-height:44px; }
+  .m-sheet-body input[type="range"] { min-height:44px; }
+
+  /* --- tool grids inside a sheet --- */
+  .m-tools {
+    display:grid; grid-template-columns:repeat(auto-fill, minmax(74px, 1fr));
+    gap:8px; margin-bottom:16px;
+  }
+  .m-tool {
+    display:flex; flex-direction:column; align-items:center; justify-content:center; gap:6px;
+    min-height:72px; padding:8px 4px;
+    background:var(--ink-3); border:1px solid var(--line-1); border-radius:var(--r-md);
+    color:var(--text-2); font:inherit; font-size:11px; font-weight:600; text-align:center;
+  }
+  .m-tool i { font-size:22px; line-height:1; }
+  .m-tool span { max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .m-tool.on { background:rgba(28,111,224,.16); border-color:var(--blue); color:var(--text-1); }
+  .m-tool:focus-visible { outline:none; box-shadow:var(--ring-focus); }
+  .m-wide {
+    display:flex; align-items:center; justify-content:center; gap:8px; width:100%;
+    min-height:48px; border-radius:var(--r-md); margin-bottom:12px;
+    background:var(--ink-3); border:1px solid var(--line-2); color:var(--text-1);
+    font:inherit; font-size:14px; font-weight:600;
+  }
+
+  /* The header's segmented view switcher is replaced by the floating pill. */
+  body.m-shell .topbar-center { display:none; }
+}
+
+/* Landscape phones are short: give the canvas back its height. */
+@media (max-width: 900px) and (max-height: 480px) {
+  body.m-shell { --m-ribbon:calc(52px + env(safe-area-inset-bottom)); }
+  .m-tab { min-height:46px; font-size:0; gap:0; }
+  .m-tab i { font-size:20px; }
+  .m-tab span { display:none; }
+  .m-sheet { max-height:78dvh; }
+  .m-stands { bottom:calc(var(--m-ribbon) + 50px); }
+}
+
+/* Gesture confirmation. A two-finger tap that undoes silently reads as a bug. */
+.gesture-toast {
+  position:fixed; left:50%; top:50%; transform:translate(-50%,-50%) scale(.94);
+  z-index:60; pointer-events:none;
+  padding:10px 18px; border-radius:var(--r-pill);
+  background:rgba(15,23,42,.92); border:1px solid var(--line-2);
+  color:var(--text-1); font:600 14px var(--font-ui);
+  opacity:0; transition:opacity .14s ease, transform .14s ease;
+}
+.gesture-toast.show { opacity:1; transform:translate(-50%,-50%) scale(1); }
+@media (prefers-reduced-motion: reduce) { .gesture-toast { transition:none; } }
+
+/* Phone header: one row. The title input was 66px tall and the second row cost
+   another 40 — 101px of chrome above a 516px canvas. */
+.avatar-menu-item.m-only { display:none; }
+@media (max-width: 899px) {
+  body.m-shell header {
+    flex-wrap:nowrap; gap:6px; padding:6px 8px;
+    padding-top:calc(6px + env(safe-area-inset-top));
+  }
+  body.m-shell .doc-title {
+    order:0; flex:1 1 0; width:0; min-width:0;
+    min-height:40px; padding:0 10px; font-size:14px;
+  }
+  body.m-shell .topbar-right { order:1; gap:5px; margin-inline-start:0; }
+  /* Both now live in the avatar menu. */
+  body.m-shell #lang-toggle, body.m-shell #signin { display:none; }
+  body.m-shell .avatar-menu-item.m-only { display:flex; }
+  body.m-shell .avatar { width:40px; height:40px; }
+
+  /* Zoom sits below the view switcher, not beside it: at 390px the centred
+     pill is 208px wide and the two overlapped. Out of the thumb zone on
+     purpose — pinch and double-tap are the primary way to move around now, so
+     these buttons are the fallback, not the main event. */
+  body.m-shell .zoom-pill {
+    left:auto; right:8px; top:64px; bottom:auto; transform:none;
+    flex-direction:row; padding:2px 4px;
+  }
+  body.m-shell .zoom-pill button { min-width:36px; min-height:36px; }
+  body.m-shell .zoom-pill span { font-size:11px; min-width:34px; text-align:center; }
+  body.m-shell .m-stands { bottom:calc(var(--m-ribbon) + 10px); }
+  body.m-shell #canvas-watermark { bottom:calc(var(--m-ribbon) + 54px); right:8px; }
+}
+
+/* A 20x20 checkbox is under the 24px floor of WCAG 2.5.8 and is a miss waiting
+   to happen with a finger. #mirror and #grid were the two that shipped that
+   way; this covers every checkbox on a touch device. */
+@media (pointer: coarse) {
+  input[type="checkbox"], input[type="radio"] { width:24px; height:24px; }
+}
+.m-sheet-body input[type="checkbox"], .m-sheet-body input[type="radio"] {
+  width:24px; height:24px; flex:0 0 auto;
+}

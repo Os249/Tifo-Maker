@@ -1,12 +1,13 @@
 /**
- * Desktop-only gate: /app must refuse to open the editor below 900px.
+ * The editor's width floor.
  *
- * Two live bug reports came from the same place — a phone was allowed into the
- * full editor and then hit walls it was never built for (no way to pan the bowl
- * to another stand; adding an image appearing to hang). The gate is the fix, so
- * these are the checks that keep it fixed: the door stays shut on phones, it
- * stays open on desktops, and the two escape hatches (?editor=1 and shared /d/
- * links) keep working.
+ * This suite used to assert a desktop-only gate at 900px: phones had been let
+ * into a layout built for 1400 and hit walls it could not serve, which is what
+ * the two live bug reports were. Phones now have their own front end
+ * (ui/mobileShell.ts), so the gate is no longer a policy about phones — it is a
+ * floor for viewports too narrow for ANY layout, and the checks below hold the
+ * new line: 320px and up opens the editor, narrower than that is turned away,
+ * and the escape hatches still work.
  */
 import { chromium } from 'playwright';
 const B = 'http://127.0.0.1:8911';
@@ -47,32 +48,32 @@ async function probe(width, height, path = '/app', opts = {}) {
   return { ...r, errs, scripts };
 }
 
-console.log('\n— the gate closes the editor on narrow viewports —');
-for (const [w, h, label] of [[360, 680, 'Android 360'], [390, 844, 'iPhone 390'], [430, 932, 'Pro Max 430'], [768, 1024, 'iPad 768'], [899, 900, 'one under the line']]) {
+console.log('\n— below the floor, the gate still turns people away —');
+for (const [w, h, label] of [[280, 600, 'sub-320 window'], [300, 640, 'one under the line']]) {
   const r = await probe(w, h);
   check(`${label}: gate shown, editor never mounts`, r.gate && !r.canvas && !r.header, r.gate ? `"${r.h1}"` : `canvas=${r.canvas}`);
   check(`${label}: no horizontal scroll`, !r.hscroll);
-  check(`${label}: every target >=24px`, r.small.length === 0, r.small.length ? JSON.stringify(r.small) : '');
   check(`${label}: no page errors`, r.errs.length === 0, r.errs.join(' | '));
   check(`${label}: offers community + home`, JSON.stringify(r.links) === '["/community","/"]', JSON.stringify(r.links));
   const heavy = r.scripts.filter((s) => /^(editor|toolbar|preview3d|overlay)-/.test(s));
   check(`${label}: editor/toolbar/three never downloaded`, heavy.length === 0, heavy.join(',') || '0 heavy chunks');
 }
 
-console.log('\n— and stays open at and above it —');
-for (const [w, h, label] of [[900, 900, 'exactly 900'], [1280, 800, 'laptop'], [1400, 900, 'desktop']]) {
+console.log('\n— every real phone now gets the editor —');
+for (const [w, h, label] of [[320, 568, 'iPhone SE'], [360, 680, 'Android 360'], [390, 844, 'iPhone 390'],
+                             [430, 932, 'Pro Max'], [768, 1024, 'iPad'], [900, 900, 'small laptop'], [1400, 900, 'desktop']]) {
   const r = await probe(w, h);
   check(`${label} ${w}x${h}: editor opens, no gate`, !r.gate && r.header, `canvas=${r.canvas}`);
 }
 
 console.log('\n— the escape hatches —');
-let r = await probe(360, 680, '/app?editor=1');
-check('?editor=1 still opens the editor on a phone', !r.gate && r.header);
-r = await probe(360, 680, '/d/does-not-exist');
-check('a shared link on a phone still gets the read-only viewer', r.viewer && !r.gate, `viewer=${r.viewer}`);
+let r = await probe(300, 640, '/app?editor=1');
+check('?editor=1 still opens the editor below the floor', !r.gate && r.header);
+r = await probe(300, 640, '/d/does-not-exist');
+check('a shared link below the floor still gets the read-only viewer', r.viewer && !r.gate, `viewer=${r.viewer}`);
 
 console.log('\n— Arabic (both bug reports were written in Arabic) —');
-r = await probe(360, 680, '/app', {
+r = await probe(300, 640, '/app', {
   storageState: { cookies: [], origins: [{ origin: B, localStorage: [{ name: 'tifo_lang_v1', value: 'ar' }] }] },
 });
 check('the gate renders RTL with Arabic copy', r.dir === 'rtl' && /[؀-ۿ]/.test(r.h1), `dir=${r.dir} "${r.h1}"`);
@@ -80,21 +81,21 @@ check('Arabic: no horizontal scroll', !r.hscroll);
 
 console.log('\n— resizing —');
 {
-  const ctx = await browser.newContext({ viewport: { width: 400, height: 800 } });
+  const ctx = await browser.newContext({ viewport: { width: 300, height: 700 } });
   const page = await ctx.newPage();
   await page.goto(B + '/app', { waitUntil: 'networkidle' });
   const gated = await page.evaluate(() => !!document.querySelector('.gate-root'));
   await page.setViewportSize({ width: 1200, height: 800 });
   await page.waitForTimeout(4000);
   const widened = await page.evaluate(() => ({ gate: !!document.querySelector('.gate-root'), header: !!document.querySelector('body > header') }));
-  check('widening past 900 hands over the editor', gated && !widened.gate && widened.header);
+  check('widening past the floor hands over the editor', gated && !widened.gate && widened.header);
 
   // The reverse must NOT happen: tearing down a running editor because someone
   // dragged the window narrow would destroy their unsaved work. Entry-only.
   await page.setViewportSize({ width: 1400, height: 900 });
   await page.goto(B + '/app', { waitUntil: 'networkidle' });
   await page.waitForTimeout(2500);
-  await page.setViewportSize({ width: 380, height: 800 });
+  await page.setViewportSize({ width: 300, height: 700 });
   await page.waitForTimeout(3000);
   const narrowed = await page.evaluate(() => ({ gate: !!document.querySelector('.gate-root'), header: !!document.querySelector('body > header') }));
   check('narrowing an OPEN editor never destroys the session', !narrowed.gate && narrowed.header);

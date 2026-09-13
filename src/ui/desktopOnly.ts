@@ -21,8 +21,14 @@ import { t } from './i18n';
  *    downloads a small page instead of ~1.3 MB to be told to come back later.
  */
 
-/** Below this width the editor is not offered. ?editor=1 overrides it. */
-export const EDITOR_MIN_WIDTH = 900;
+/**
+ * Below this width the editor is not offered. ?editor=1 overrides it.
+ *
+ * Was 900 while the editor was desktop-only. Phones now get their own front end
+ * (ui/mobileShell.ts), so the gate only has to catch what neither layout serves:
+ * a window too narrow for the phone ribbon's five tabs to hold their labels.
+ */
+export const EDITOR_MIN_WIDTH = 320;
 
 const NARROW_QUERY = `(max-width: ${EDITOR_MIN_WIDTH - 1}px)`;
 

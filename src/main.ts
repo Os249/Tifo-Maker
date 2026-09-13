@@ -1,4 +1,4 @@
-import '@tabler/icons-webfont/dist/tabler-icons.min.css';
+import './vendor/tabler-subset.css';
 import { installTheme } from './ui/theme';
 import { initLang, applyDom, toggleLang, t, tl } from './ui/i18n';
 import { installConsent } from './ui/consent';
@@ -48,6 +48,19 @@ async function main(): Promise<void> {
     mountDesktopOnly();
     return;
   }
+
+  // Start pulling the editor chunks NOW, before the seat map, the template
+  // lookup and the design fetch. Measured on a 4x-throttled phone they did not
+  // begin downloading until 3.1s because every await above them had to settle
+  // first; from here they stream in parallel with all of it. Not awaited — the
+  // call site below awaits this promise.
+  //
+  // The one path that does not want them is a shared link on a screen too
+  // narrow for any editor, which falls through to the read-only viewer.
+  const wantsEditor = !(isNarrowForEditor() && sharedId);
+  const editorChunks = wantsEditor
+    ? Promise.all([import('./render/editor'), import('./ui/toolbar')])
+    : null;
   // Confirmation toast after returning from an email-verification link.
   const verifiedFlag = new URLSearchParams(location.search).get('verified');
   if (verifiedFlag === '1' || verifiedFlag === '0') {
@@ -121,12 +134,6 @@ async function main(): Promise<void> {
     await mountViewer({ map, store: vstore, templateName: template.name, title: vtitle, designId: sharedId });
     return;
   }
-
-  // Everyone still here is getting the editor, so start pulling its chunks now
-  // rather than at the call site. They download alongside the design load and
-  // draft restore below, which is why splitting them out of the entry bundle
-  // costs desktop nothing. Deliberately not awaited here.
-  const editorChunks = Promise.all([import('./render/editor'), import('./ui/toolbar')]);
 
   // Stadium selector: switching reloads with a fresh canvas for that bowl.
   const stadiumSel = document.getElementById('stadium') as HTMLSelectElement;
@@ -265,7 +272,7 @@ async function main(): Promise<void> {
   }
 
   const host = document.getElementById('canvas-host')!;
-  const [{ Editor }, { mountToolbar }] = await editorChunks;
+  const [{ Editor }, { mountToolbar }] = await editorChunks!;
   const editor = await Editor.create(host, map, store);
   editor.aisleCount = template.aisles.count;
   editor.drawGrid(true);
@@ -425,6 +432,21 @@ async function main(): Promise<void> {
   // Tifo assets (banners/flags/surfaces) live in a shared store so they persist
   // across opening/closing the simulator within a session.
   const assetStore = new AssetStore();
+  // Phones get a different front end over the same editor: a five-tab ribbon
+  // and bottom sheets instead of a 752px tool rail that ran off the screen.
+  const { mountMobileShell, PHONE_MAX } = await import('./ui/mobileShell');
+  let shell = mountMobileShell();
+  // The shell collapses the header from two rows to one, so the canvas has ~53px
+  // more to fill than it measured at creation. Re-fit before anyone sees it.
+  if (shell) requestAnimationFrame(() => { editor.app.resize(); editor.fitToView(); });
+  // Rotating or resizing across the breakpoint swaps front ends rather than
+  // leaving a desktop rail on a phone (or a phone ribbon on a laptop).
+  window.matchMedia(`(max-width: ${PHONE_MAX}px)`).addEventListener('change', (e) => {
+    if (e.matches && !shell) shell = mountMobileShell();
+    else if (!e.matches && shell) { shell.destroy(); shell = null; }
+    requestAnimationFrame(() => { editor.app.resize(); editor.fitToView(); });
+  });
+
   const { mountBannerStudio } = await import('./ui/bannerStudio');
   mountBannerStudio({ trigger: document.getElementById('banner-studio-btn'), assetStore, store, map });
   // Persist them locally too, so they survive a page reload (client-only and

@@ -6,7 +6,7 @@
 // whole job is browsing images, made before the consent bar is answered, and
 // when it failed all thirteen icons on the page rendered as nothing: the like
 // and comment counts became a bare "0  0".
-import '@tabler/icons-webfont/dist/tabler-icons.min.css';
+import './vendor/tabler-subset.css';
 import './community.css';
 import { initLang, applyDom, toggleLang, t } from './ui/i18n';
 import { installMobileNav } from './ui/mobileNav';

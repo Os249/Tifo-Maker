@@ -1,4 +1,4 @@
-import '@tabler/icons-webfont/dist/tabler-icons.min.css';
+import './vendor/tabler-subset.css';
 import { generateSeatMapAsync } from './workers/client';
 import { TEMPLATES, DEFAULT_PALETTE } from './core/template';
 import { DesignStore } from './core/design';

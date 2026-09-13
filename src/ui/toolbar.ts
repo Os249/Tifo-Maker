@@ -39,6 +39,23 @@ import {
  * grows real chrome (galleries, dialogs, auth) this layer is replaced by
  * React + Zustand; the engine API below stays identical.
  */
+
+/** Brief centred confirmation for a gesture that has no button to flash. */
+let gestureToastEl: HTMLElement | null = null;
+let gestureToastTimer = 0;
+function gestureToast(text: string): void {
+  if (!gestureToastEl) {
+    gestureToastEl = document.createElement('div');
+    gestureToastEl.className = 'gesture-toast';
+    gestureToastEl.setAttribute('role', 'status');
+    document.body.appendChild(gestureToastEl);
+  }
+  gestureToastEl.textContent = text;
+  gestureToastEl.classList.add('show');
+  window.clearTimeout(gestureToastTimer);
+  gestureToastTimer = window.setTimeout(() => gestureToastEl?.classList.remove('show'), 900);
+}
+
 export function mountToolbar(
   root: HTMLElement,
   editor: Editor,
@@ -655,6 +672,20 @@ export function mountToolbar(
   });
   store.onDirty(refreshHistory);
   refreshHistory();
+
+  // Touch gestures land here: two fingers tapped = undo, double tap = fit.
+  // A toast confirms the undo, because a gesture with no feedback reads as the
+  // app having glitched rather than having done what you asked.
+  editor.onTwoFingerTap = (): void => {
+    if (!store.canUndo) return;
+    store.undo();
+    refreshHistory();
+    gestureToast(i18nT('mb.undoTap'));
+  };
+  editor.onDoubleTap = (): void => {
+    editor.fitToView();
+    gestureToast(i18nT('mb.fitTap'));
+  };
 
   // Fill the whole bowl with the ACTIVE painting colour (not a fixed slot).
   $('#fill-base').addEventListener('click', () => store.fillAll(editor.colorIndex));

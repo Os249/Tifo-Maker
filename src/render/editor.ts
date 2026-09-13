@@ -56,6 +56,15 @@ export class Editor {
   aisleCount = 28;
   /** Fired on hover with the seat index under the cursor (-1 if none). */
   onHoverSeat: ((seat: number) => void) | null = null;
+  /**
+   * Touch shortcuts, wired by the toolbar. These are the conventions a drawing
+   * app is expected to honour (Procreate set them): two fingers tapped once is
+   * undo, and a double tap fits the whole canvas. On a phone, where the undo
+   * button is a 40px target in a crowded bar, the gesture is what people
+   * actually reach for.
+   */
+  onTwoFingerTap: (() => void) | null = null;
+  onDoubleTap: (() => void) | null = null;
   /** Fired when the eyedropper picks a painted seat's colour (palette index). */
   onColorPick: ((index: number) => void) | null = null;
   /** Fired after pan/zoom with the normalized viewport rect for the minimap. */
@@ -463,10 +472,56 @@ export class Editor {
     let pinchDist = 0;
     let pinchMX = 0;
     let pinchMY = 0;
+    // Gesture recognition: a "tap" is a short touch that barely moved. Tracked
+    // here rather than in the toolbar because only this handler sees the raw
+    // multi-touch stream.
+    let gestureStart = 0;
+    let gestureMoved = 0;
+    let peakFingers = 0;
+    let lastTapAt = 0;
+    let lastTapX = 0;
+    let lastTapY = 0;
+    let lastPointerAt = 0;
 
     canvas.addEventListener('pointerdown', (e) => {
-      canvas.setPointerCapture(e.pointerId);
+      // setPointerCapture throws if the pointer is no longer active — a finger
+      // released between the event being queued and this handler running. The
+      // throw would abort the rest of pointerdown, so painting would simply
+      // stop working for that touch. Capture is an optimisation here (it keeps
+      // events coming when a stroke leaves the canvas), not a requirement.
+      try {
+        canvas.setPointerCapture(e.pointerId);
+      } catch {
+        /* pointer already gone; carry on without capture */
+      }
+      // A pointerup that never arrives — capture lost to a system gesture, an
+      // app switch, a browser quirk, a multi-touch release that reports only
+      // one of two fingers — leaves a phantom finger in the map. The next real
+      // touch then counts as two, so a single tap reads as a two-finger tap and
+      // painting silently stops working.
+      //
+      // hasPointerCapture is the browser's own answer to "is this pointer still
+      // down": capture is released automatically on pointerup and on
+      // lostpointercapture, so anything we hold that the browser has let go of
+      // is a ghost. The elapsed-time sweep is the fallback for a pointer that
+      // somehow keeps its capture.
+      for (const id of [...pointers.keys()]) {
+        if (id !== e.pointerId && !canvas.hasPointerCapture(id)) pointers.delete(id);
+      }
+      if (pointers.size > 0 && performance.now() - lastPointerAt > 900) pointers.clear();
+      if (pointers.size === 0) {
+        gesturing = false;
+        this.painting = false;
+        this.panning = false;
+      }
+      lastPointerAt = performance.now();
       pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (pointers.size === 1) {
+        gestureStart = performance.now();
+        gestureMoved = 0;
+        peakFingers = 1;
+      }
+      peakFingers = Math.max(peakFingers, pointers.size);
       if (pointers.size >= 2) {
         // Second finger down → enter pinch/pan and abort any single-finger action.
         if (this.painting) {
@@ -542,6 +597,11 @@ export class Editor {
     });
 
     canvas.addEventListener('pointermove', (e) => {
+      {
+        const prev = pointers.get(e.pointerId);
+        if (prev) gestureMoved += Math.hypot(e.clientX - prev.x, e.clientY - prev.y);
+        lastPointerAt = performance.now();
+      }
       const pt = pointers.get(e.pointerId);
       if (pt) {
         pt.x = e.clientX;
@@ -628,7 +688,32 @@ export class Editor {
 
     const end = (ev?: PointerEvent) => {
       if (ev) pointers.delete(ev.pointerId);
-      if (pointers.size === 0) gesturing = false;
+      if (pointers.size === 0) {
+        gesturing = false;
+        const quick = performance.now() - gestureStart < 320 && gestureMoved < 14;
+        // eslint-disable-next-line
+        if (quick && peakFingers >= 2 && ev?.pointerType !== 'mouse') {
+          this.onTwoFingerTap?.();
+        } else if (quick && peakFingers === 1 && ev) {
+          const now = performance.now();
+          const near = Math.hypot(ev.clientX - lastTapX, ev.clientY - lastTapY) < 32;
+          // 400ms, not the 300 the desktop double-click uses. Measured on a
+          // throttled mid-range profile a single tap took 285ms to travel from
+          // touchstart to the handler, so a genuine double tap landed 359ms
+          // apart and a 300ms window missed it. Low-end Androids are most of
+          // this audience; the looser window costs nothing, because two
+          // deliberately separate taps are far further apart than this.
+          if (now - lastTapAt < 400 && near) {
+            this.onDoubleTap?.();
+            lastTapAt = 0;
+          } else {
+            lastTapAt = now;
+            lastTapX = ev.clientX;
+            lastTapY = ev.clientY;
+          }
+        }
+        peakFingers = 0;
+      }
       if (this.painting) this.store.commitStroke();
       if (this.objectOverlay?.isDragging) this.objectOverlay.endDrag();
       if (marq) {

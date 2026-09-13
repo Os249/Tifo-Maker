@@ -811,6 +811,16 @@ const STRINGS: Record<string, { en: string; ar: string }> = {
   // ---- last gaps ----
   'gal.emptyAll': { en: 'No public tifos yet, be the first! Design something, then tick "List in public gallery" and Save.', ar: 'ما فيه تيفوهات عامة بعد، كن أول واحد! صمّم شي، وبعدين علّم على «انشره في المعرض العام» واحفظ.' },
 
+  // ---- phone editor shell (ui/mobileShell.ts) ----
+  'mb.paint': { en: 'Paint', ar: 'الرسم' },
+  'mb.add': { en: 'Add', ar: 'إضافة' },
+  'mb.ai': { en: 'AI', ar: 'الذكاء' },
+  'mb.more': { en: 'More', ar: 'المزيد' },
+  'mb.jump': { en: 'Jump to a stand', ar: 'انتقل لمدرج' },
+  'mb.all': { en: 'All', ar: 'الكل' },
+  'mb.undoTap': { en: 'Undone', ar: 'تم التراجع' },
+  'mb.fitTap': { en: 'Whole stadium', ar: 'الملعب كامل' },
+
   // ---- phone viewer (shared /d/:id links) ----
   'v.open': { en: 'Edit on desktop', ar: 'عدّل على الكمبيوتر' },
   'v.openT': { en: 'Open the full editor on desktop', ar: 'افتح المحرر الكامل على الكمبيوتر' },
