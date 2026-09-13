@@ -12,20 +12,17 @@ import { PATTERN_PRESETS } from './core/patterns';
 import { DesignStore } from './core/design';
 import { AssetStore } from './core/sceneAssets';
 import { ObjectLayer } from './core/objects';
-import { Editor } from './render/editor';
 import type { Preview3D } from './render/preview3d';
-import { mountToolbar } from './ui/toolbar';
-import { mountBannerStudio } from './ui/bannerStudio';
 import { track } from './net/analytics';
-import { mountViewer } from './ui/viewer';
 import { hasOnboarded } from './ui/onboarding';
-
-/** Phones get the viewer; tablet/desktop get the editor. ?editor=1 forces the editor. */
-const PHONE_MAX = 768;
-function isPhone(): boolean {
-  const forced = new URLSearchParams(location.search).get('editor') === '1';
-  return !forced && window.matchMedia(`(max-width: ${PHONE_MAX - 1}px)`).matches;
-}
+// Narrow viewports (under EDITOR_MIN_WIDTH) get the read-only viewer for a
+// shared link and the desktop-only gate for /app; ?editor=1 opts out of both,
+// so a draft started on a phone is never permanently stranded.
+import { isNarrowForEditor } from './ui/desktopOnly';
+// Editor (Pixi), the toolbar and the banner studio are imported dynamically
+// inside main(), below the desktop-only gate. They are the bulk of the bundle,
+// and a phone that is about to be told "come back on a laptop" should not pay
+// to download them. Vite splits them into their own chunks.
 
 /** Parse a /d/:id share path OR a ?design=:id query param. Returns the id, or null. */
 function sharedDesignId(): string | null {
@@ -35,43 +32,22 @@ function sharedDesignId(): string | null {
   return q && /^[A-Za-z0-9-]+$/.test(q) ? q : null;
 }
 
-/** Dismissible bottom note shown to phone create-lite users. */
-function showCreateLiteBanner(): void {
-  try {
-    if (localStorage.getItem('tifo_mobile_note') === '1') return;
-  } catch {
-    /* storage blocked — show it anyway */
-  }
-  const bar = document.createElement('div');
-  bar.id = 'mobile-create-note';
-  bar.style.cssText =
-    'position:fixed;left:0;right:0;bottom:0;z-index:60;display:flex;align-items:center;gap:10px;justify-content:center;' +
-    'padding:10px 14px calc(10px + env(safe-area-inset-bottom));background:#1C6FE0;color:#fff;' +
-    "font:500 13px 'Inter',system-ui,sans-serif;box-shadow:0 -6px 20px rgba(0,0,0,.3);";
-  const msg = document.createElement('span');
-  msg.textContent = t('ed.mobileNote');
-  const x = document.createElement('button');
-  x.textContent = '✕';
-  x.setAttribute('aria-label', 'Dismiss');
-  x.style.cssText =
-    'background:rgba(255,255,255,.2);border:none;color:#fff;width:26px;height:26px;min-width:26px;border-radius:50%;cursor:pointer;flex:0 0 auto;font-size:13px;';
-  x.addEventListener('click', () => {
-    bar.remove();
-    try {
-      localStorage.setItem('tifo_mobile_note', '1');
-    } catch {
-      /* ignore */
-    }
-  });
-  bar.append(msg, x);
-  document.body.appendChild(bar);
-}
-
 async function main(): Promise<void> {
   installTheme();
   initLang();
   applyDom(document);
   installConsent();
+
+  const sharedId = sharedDesignId();
+  // The editor is desktop-only for now. Two phone bug reports were both people
+  // hitting walls inside an editor that had let them in; this stops them at the
+  // door instead, and stops here so the seat map, Pixi, Three and the toolbar
+  // are never loaded. A shared link falls through to the read-only viewer.
+  if (isNarrowForEditor() && !sharedId) {
+    const { mountDesktopOnly } = await import('./ui/desktopOnly');
+    mountDesktopOnly();
+    return;
+  }
   // Confirmation toast after returning from an email-verification link.
   const verifiedFlag = new URLSearchParams(location.search).get('verified');
   if (verifiedFlag === '1' || verifiedFlag === '0') {
@@ -93,7 +69,6 @@ async function main(): Promise<void> {
     applyDom(document);
     if (langToggle) langToggle.textContent = t('common.language');
   });
-  const sharedId = sharedDesignId();
   registerCustom(); // make user-authored custom stadiums resolvable before we pick one
   // Best-effort: pull approved community stadiums into the catalog (non-blocking).
   void fetchCommunityStadiums()
@@ -129,9 +104,9 @@ async function main(): Promise<void> {
   const map = await generateSeatMapAsync(template.id);
   const genMs = performance.now() - t0;
 
-  // Phone + shared link → lightweight read-only viewer (great for opening a
-  // shared tifo on a phone). Phone /app falls through to the editor (create-lite).
-  if (isPhone() && sharedId) {
+  // Narrow + shared link → lightweight read-only viewer (great for opening a
+  // shared tifo on a phone). Narrow /app never reaches here: it was gated above.
+  if (isNarrowForEditor() && sharedId) {
     const vstore = new DesignStore(map, DEFAULT_PALETTE.slice());
     let vtitle = 'Untitled tifo';
     try {
@@ -142,12 +117,16 @@ async function main(): Promise<void> {
       const vseed = PATTERN_PRESETS.find((p) => p.id === 'border')!.cellAt(map);
       for (let i = 0; i < map.count; i++) vstore.cells[i] = vseed(i);
     }
+    const { mountViewer } = await import('./ui/viewer');
     await mountViewer({ map, store: vstore, templateName: template.name, title: vtitle, designId: sharedId });
     return;
   }
-  // Phone create-lite: the real editor runs (paint + AI + simulate + share),
-  // with a gentle, dismissible note that desktop/tablet unlock the full toolset.
-  if (window.matchMedia(`(max-width: ${PHONE_MAX - 1}px)`).matches) showCreateLiteBanner();
+
+  // Everyone still here is getting the editor, so start pulling its chunks now
+  // rather than at the call site. They download alongside the design load and
+  // draft restore below, which is why splitting them out of the entry bundle
+  // costs desktop nothing. Deliberately not awaited here.
+  const editorChunks = Promise.all([import('./render/editor'), import('./ui/toolbar')]);
 
   // Stadium selector: switching reloads with a fresh canvas for that bowl.
   const stadiumSel = document.getElementById('stadium') as HTMLSelectElement;
@@ -286,6 +265,7 @@ async function main(): Promise<void> {
   }
 
   const host = document.getElementById('canvas-host')!;
+  const [{ Editor }, { mountToolbar }] = await editorChunks;
   const editor = await Editor.create(host, map, store);
   editor.aisleCount = template.aisles.count;
   editor.drawGrid(true);
@@ -445,6 +425,7 @@ async function main(): Promise<void> {
   // Tifo assets (banners/flags/surfaces) live in a shared store so they persist
   // across opening/closing the simulator within a session.
   const assetStore = new AssetStore();
+  const { mountBannerStudio } = await import('./ui/bannerStudio');
   mountBannerStudio({ trigger: document.getElementById('banner-studio-btn'), assetStore, store, map });
   // Persist them locally too, so they survive a page reload (client-only and
   // wrapped in try/catch — never touches the server save path; full per-design +

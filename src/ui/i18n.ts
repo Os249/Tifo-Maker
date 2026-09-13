@@ -269,7 +269,23 @@ const STRINGS: Record<string, { en: string; ar: string }> = {
   'ed.replayTour': { en: 'Replay tutorial', ar: 'إعادة الجولة التعريفية' },
   'ed.moderate': { en: 'Moderate', ar: 'الإشراف' },
   'ed.docTitlePlaceholder': { en: 'Untitled tifo', ar: 'تيفو بدون اسم' },
-  'ed.mobileNote': { en: 'You are creating on mobile, the full editor (more tools) is best on desktop or tablet.', ar: 'أنت تصمم على الجوال: المحرر الكامل بأدوات أكثر أفضل على الكمبيوتر أو التابلت.' },
+  // ---- desktop-only gate (the editor below 900px) ----
+  // Replaces the old 'you are on mobile' note. That note sat under a full
+  // editor people could not actually use, which is how both phone bug reports
+  // happened; the gate says it once, up front, and offers somewhere to go.
+  'dt.title': { en: 'The editor needs a bigger screen', ar: 'المحرر يبي شاشة أكبر' },
+  'dt.body': {
+    en: 'Designing a tifo means painting tens of thousands of seats at once, so it needs a mouse and a wide screen. Open tifomaker.org on a laptop or a computer to design. A phone version is on the way.',
+    ar: 'تصميم التيفو معناه تلوين عشرات الآلاف من الكراسي مرة وحدة، فيبي له ماوس وشاشة عريضة. افتح tifomaker.org على لابتوب أو كمبيوتر عشان تصمم. ونسخة الجوال جاية في الطريق.',
+  },
+  'dt.browse': { en: 'Browse community tifos', ar: 'تصفّح تيفوهات المجتمع' },
+  'dt.home': { en: 'Back to the home page', ar: 'ارجع للصفحة الرئيسية' },
+  'dt.copy': { en: 'Copy the link for later', ar: 'انسخ الرابط لبعدين' },
+  'dt.copied': { en: 'Link copied', ar: 'اننسخ الرابط' },
+  'dt.note': {
+    en: 'Shared tifo links still open here — it is only the editor that needs a desktop.',
+    ar: 'روابط التيفو المشاركة تفتح عندك عادي، المحرر بس هو اللي يبي كمبيوتر.',
+  },
   // ---- cookie consent banner ----
   'consent.msg': { en: 'We use essential cookies to run TifoMaker, and (only with your consent) analytics to improve it.', ar: 'نستخدم ملفات تعريف ارتباط أساسية لتشغيل تيفو ميكر، وبموافقتك فقط نستخدم أدوات تحليل لتحسينه.' },
   'consent.learn': { en: 'Learn more', ar: 'اعرف أكثر' },
