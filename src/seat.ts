@@ -85,6 +85,7 @@ async function main(): Promise<void> {
         <div class="seat-brand">TIFO<b>MAKER</b></div>
         <div class="seat-title">${escapeHtml(title)}</div>
         <p class="seat-intro">${t('seat.intro')}</p>
+        <p class="seat-intro">${t('seat.findTitle')}</p>
       </div>
       <div class="seat-form">
         <label class="seat-field">

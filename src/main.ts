@@ -1,6 +1,6 @@
 import '@tabler/icons-webfont/dist/tabler-icons.min.css';
 import { installTheme } from './ui/theme';
-import { initLang, applyDom, toggleLang, t } from './ui/i18n';
+import { initLang, applyDom, toggleLang, t, tl } from './ui/i18n';
 import { installConsent } from './ui/consent';
 import { generateSeatMapAsync } from './workers/client';
 import { DEFAULT_PALETTE, DEFAULT_TEMPLATE, PALETTE_PRESETS, TEMPLATES } from './core/template';
@@ -108,7 +108,7 @@ async function main(): Promise<void> {
   // shared tifo on a phone). Narrow /app never reaches here: it was gated above.
   if (isNarrowForEditor() && sharedId) {
     const vstore = new DesignStore(map, DEFAULT_PALETTE.slice());
-    let vtitle = 'Untitled tifo';
+    let vtitle = t('ed.docTitlePlaceholder');
     try {
       const { loadDesign } = await import('./net/api');
       const r = await loadDesign(vstore, sharedId);
@@ -133,7 +133,7 @@ async function main(): Promise<void> {
   for (const t of TEMPLATES) {
     const opt = document.createElement('option');
     opt.value = t.id;
-    opt.textContent = t.name;
+    opt.textContent = tl(t.id);
     stadiumSel.appendChild(opt);
   }
   stadiumSel.value = template.id;
@@ -248,7 +248,7 @@ async function main(): Promise<void> {
         if (result.valid && result.doc) {
           store.setPalette(result.doc.palette.slice(0, 256));
           store.loadCells(flattenLayers(result.doc));
-          pendingTitle = draft.title || result.doc.meta?.title || 'Untitled tifo';
+          pendingTitle = draft.title || result.doc.meta?.title || t('ed.docTitlePlaceholder');
           restoredDesignId = draft.designId;
           sharedLoaded = true; // suppress the starter seed + onboarding
           draftAge = describeAge(draft.savedAt);
@@ -474,7 +474,7 @@ async function main(): Promise<void> {
   }
 
   const stat = document.getElementById('stat')!;
-  stat.textContent = `${template.name} · ${map.count.toLocaleString()} seats · map generated in ${genMs.toFixed(0)} ms`;
+  stat.textContent = `${tl(template.id)} · ${map.count.toLocaleString()} ${t('ed.seats')} · ${t('ed.stat.made')} ${genMs.toFixed(0)} ms`;
   track('landed'); // editor is interactive — top of the funnel
   if (draftAge) {
     track('draft_restored');

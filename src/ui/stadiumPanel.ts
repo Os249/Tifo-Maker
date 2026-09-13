@@ -36,6 +36,7 @@ import { orientCells, type OrientOp } from '../core/orientation';
 import { createCustomTemplate, addCustomTemplate, removeCustomTemplate, parseImportedTemplate, exportTemplate, type CustomSize } from '../core/customStadiums';
 import { submitStadium, fetchPendingStadiums, reviewStadium, type PendingStadium } from '../net/api';
 
+import { t, tl } from './i18n';
 export interface StadiumPanelDeps {
   root: HTMLElement;
   map: SeatMap;
@@ -85,10 +86,10 @@ export function mountStadiumPanel(deps: StadiumPanelDeps): void {
   const docTitle = (): string => (document.getElementById('doc-title') as HTMLInputElement | null)?.value ?? '';
 
   const TABS: { id: Tab; label: string }[] = [
-    { id: 'builtin', label: 'Built-in' },
-    { id: 'community', label: 'Community' },
-    { id: 'custom', label: 'Custom' },
-    { id: 'favorites', label: '★ Favourites' },
+    { id: 'builtin', label: t('sp.builtin') },
+    { id: 'community', label: t('sp.community') },
+    { id: 'custom', label: t('sp.custom') },
+    { id: 'favorites', label: `★ ${t('sp.favorites')}` },
   ];
 
   function mkSelect(opts: [string, string][]): HTMLSelectElement {
@@ -108,14 +109,14 @@ export function mountStadiumPanel(deps: StadiumPanelDeps): void {
     filtersEl.dataset.built = '1';
     searchEl = document.createElement('input');
     searchEl.type = 'search';
-    searchEl.placeholder = 'Search stadiums…';
+    searchEl.placeholder = t('sp.search');
     searchEl.style.cssText = INPUT_CSS;
     const grid = document.createElement('div');
     grid.style.cssText = 'display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:6px;';
-    typeEl = mkSelect([['', 'Any type'], ['Bowl', 'Bowl'], ['Single-tier', 'Single-tier'], ['Two-tier', 'Two-tier'], ['Oval', 'Oval'], ['Arena', 'Arena']]);
-    tiersEl = mkSelect([['', 'Any tiers'], ['1', '1 tier'], ['2', '2 tiers'], ['3', '3 tiers']]);
-    countryEl = mkSelect([['', 'Any country'], ...catalogCountries().map((c) => [c, c] as [string, string])]);
-    capEl = mkSelect([['', 'Any size'], ['20000', '20k+'], ['40000', '40k+'], ['60000', '60k+'], ['80000', '80k+']]);
+    typeEl = mkSelect([['', t('sp.anyType')], ...(['Bowl', 'Single-tier', 'Two-tier', 'Oval', 'Arena'] as const).map((v) => [v, tl(v)] as [string, string])]);
+    tiersEl = mkSelect([['', t('sp.anyTiers')], ['1', `1 ${t('sp.tier')}`], ['2', `2 ${t('sp.tiers')}`], ['3', `3 ${t('sp.tiers')}`]]);
+    countryEl = mkSelect([['', t('sp.anyCountry')], ...catalogCountries().map((c) => [c, tl(c)] as [string, string])]);
+    capEl = mkSelect([['', t('sp.anySize')], ['20000', '20k+'], ['40000', '40k+'], ['60000', '60k+'], ['80000', '80k+']]);
     grid.append(typeEl, tiersEl, countryEl, capEl);
     filtersEl.append(searchEl, grid);
     for (const el of [searchEl, typeEl, tiersEl, countryEl, capEl]) el.addEventListener('input', () => renderList());
@@ -136,13 +137,13 @@ export function mountStadiumPanel(deps: StadiumPanelDeps): void {
   function renderTabs(): void {
     if (!tabsEl) return;
     tabsEl.innerHTML = '';
-    for (const t of TABS) {
+    for (const tab of TABS) {
       const b = document.createElement('button');
       b.className = 'chip';
-      b.textContent = t.id === 'favorites' ? `★ Favourites (${favorites.size})` : t.label;
-      if (t.id === activeTab) b.style.cssText = 'font-weight:600;border-color:var(--text-2);color:var(--text-1);';
+      b.textContent = tab.id === 'favorites' ? `★ ${t('sp.favorites')} (${favorites.size})` : tab.label;
+      if (tab.id === activeTab) b.style.cssText = 'font-weight:600;border-color:var(--text-2);color:var(--text-1);';
       b.addEventListener('click', () => {
-        activeTab = t.id;
+        activeTab = tab.id;
         const first = queryCatalog(buildQuery())[0];
         selectedId = first ? first.id : selectedId;
         render();
@@ -155,7 +156,7 @@ export function mountStadiumPanel(deps: StadiumPanelDeps): void {
     const star = document.createElement('button');
     const on = favorites.has(e.id);
     star.textContent = on ? '★' : '☆';
-    star.title = on ? 'Remove from favourites' : 'Add to favourites';
+    star.title = on ? t('sp.unfav') : t('sp.fav');
     star.setAttribute('aria-label', star.title);
     star.style.cssText = 'background:none;border:1px solid var(--line-1);border-radius:var(--r-md);color:var(--text-2);font-size:13px;cursor:pointer;padding:4px 7px;line-height:1;';
     star.addEventListener('click', (ev) => {
@@ -175,7 +176,7 @@ export function mountStadiumPanel(deps: StadiumPanelDeps): void {
       p.className = 'hint';
       p.style.cssText = 'font-size:11px;color:var(--text-3);margin:4px 0;';
       p.textContent =
-        activeTab === 'favorites' ? 'No favourites yet: tap ☆ on a stadium to add it.' : activeTab === 'custom' ? 'No custom stadiums yet: create one above.' : 'No stadiums match your filters.';
+        activeTab === 'favorites' ? t('sp.noFav') : activeTab === 'custom' ? t('sp.noCustom') : t('sp.noMatch');
       listEl.appendChild(p);
       return;
     }
@@ -190,9 +191,9 @@ export function mountStadiumPanel(deps: StadiumPanelDeps): void {
         'padding:8px;border:1px solid var(--line-1);border-radius:var(--r-md);color:var(--text-1);cursor:pointer;' +
         `background:${isSel ? 'rgba(255,255,255,0.05)' : 'var(--bg-1)'};${isCurrent ? 'border-color:var(--text-2);' : ''}`;
       sel.innerHTML =
-        `<span><b style="font-size:12px;">${esc(e.meta.name)}</b><br>` +
-        `<span style="font-size:10px;color:var(--text-3);">${esc(e.meta.type ?? '')}${e.meta.capacity ? ' · ~' + fmt(e.meta.capacity) : ''}</span></span>` +
-        `<span style="font-size:10px;color:var(--text-3);white-space:nowrap;">${isCurrent ? '● Current' : 'Load →'}</span>`;
+        `<span><b style="font-size:12px;">${esc(tl(e.id) === e.id ? e.meta.name : tl(e.id))}</b><br>` +
+        `<span style="font-size:10px;color:var(--text-3);">${esc(e.meta.type ? tl(e.meta.type) : '')}${e.meta.capacity ? ' · ~' + fmt(e.meta.capacity) : ''}</span></span>` +
+        `<span style="font-size:10px;color:var(--text-3);white-space:nowrap;">${isCurrent ? `● ${t('sp.current')}` : `${t('sp.load')} →`}</span>`;
       sel.addEventListener('click', () => {
         selectedId = e.id;
         renderList();
@@ -214,15 +215,15 @@ export function mountStadiumPanel(deps: StadiumPanelDeps): void {
       return;
     }
     const rows: [string, string][] = [
-      ['Country', e.meta.country ?? '-'],
-      ['Capacity', e.meta.capacity ? '~' + fmt(e.meta.capacity) : '-'],
-      ['Seats', e.id === currentId ? fmt(map.count) : e.meta.capacity ? '~' + fmt(e.meta.capacity) : '-'],
-      ['Sections', String(sectionCount(e.template))],
-      ['Tiers', String(tierCount(e.template))],
-      ['Type', e.meta.type ?? '-'],
+      [t('sp.country'), e.meta.country ? tl(e.meta.country) : '-'],
+      [t('sp.capacity'), e.meta.capacity ? '~' + fmt(e.meta.capacity) : '-'],
+      [t('sp.seats'), e.id === currentId ? fmt(map.count) : e.meta.capacity ? '~' + fmt(e.meta.capacity) : '-'],
+      [t('sp.sections'), String(sectionCount(e.template))],
+      [t('sp.tiersLabel'), String(tierCount(e.template))],
+      [t('sp.type'), e.meta.type ? tl(e.meta.type) : '-'],
     ];
     infoEl.innerHTML =
-      `<h4 style="margin:0 0 6px;">${esc(e.meta.name)}</h4>` +
+      `<h4 style="margin:0 0 6px;">${esc(tl(e.id) === e.id ? e.meta.name : tl(e.id))}</h4>` +
       rows
         .map(
           ([k, v]) =>
@@ -249,12 +250,12 @@ export function mountStadiumPanel(deps: StadiumPanelDeps): void {
     box.style.cssText =
       'max-width:380px;width:100%;background:var(--bg-1);border:1px solid var(--line-1);border-radius:var(--r-md);padding:18px;color:var(--text-1);box-shadow:0 12px 40px rgba(0,0,0,0.5);';
     box.innerHTML =
-      `<h3 style="margin:0 0 8px;font-size:15px;">Change stadium to “${esc(e.meta.name)}”?</h3>` +
-      `<p style="font-size:12px;color:var(--text-2);line-height:1.5;margin:0 0 14px;">Changing stadiums may reposition, resize, crop, or remove parts of your current design because stadium layouts differ. Are you sure you want to continue?</p>` +
+      `<h3 style="margin:0 0 8px;font-size:15px;">${t('sp.changeQ')} “${esc(tl(e.id) === e.id ? e.meta.name : tl(e.id))}”?</h3>` +
+      `<p style="font-size:12px;color:var(--text-2);line-height:1.5;margin:0 0 14px;">${t('sp.changeMsg')}</p>` +
       (e.meta.source === 'community'
         ? `<p class="hint" style="font-size:10px;color:var(--text-3);line-height:1.4;margin:0 0 14px;border-left:2px solid var(--line-1);padding-left:8px;">${DISCLAIMER}</p>`
         : '') +
-      `<div style="display:flex;gap:8px;justify-content:flex-end;"><button id="sw-cancel">Cancel</button><button id="sw-continue" class="primary">Continue</button></div>`;
+      `<div style="display:flex;gap:8px;justify-content:flex-end;"><button id="sw-cancel">${t('common.cancel')}</button><button id="sw-continue" class="primary">${t('sp.continue')}</button></div>`;
     overlay.appendChild(box);
     document.body.appendChild(overlay);
     const close = (): void => overlay.remove();
@@ -283,7 +284,7 @@ export function mountStadiumPanel(deps: StadiumPanelDeps): void {
     for (const a of ACTIVE_AREAS) {
       const b = document.createElement('button');
       b.className = 'chip';
-      b.textContent = a.label;
+      b.textContent = tl(a.label);
       if (a.id === cur) b.style.cssText = 'font-weight:600;border-color:var(--text-2);color:var(--text-1);';
       b.addEventListener('click', () => {
         setActiveArea(a.id);
@@ -305,9 +306,9 @@ export function mountStadiumPanel(deps: StadiumPanelDeps): void {
     if (!orientEl || orientEl.dataset.built) return;
     orientEl.dataset.built = '1';
     const ops: { op: OrientOp; label: string; icon: string }[] = [
-      { op: 'rotate', label: 'Rotate', icon: 'ti-rotate-clockwise' },
-      { op: 'flip-ns', label: 'Flip N/S', icon: 'ti-flip-vertical' },
-      { op: 'flip-ew', label: 'Flip E/W', icon: 'ti-flip-horizontal' },
+      { op: 'rotate', label: t('sp.rotate'), icon: 'ti-rotate-clockwise' },
+      { op: 'flip-ns', label: t('sp.flipNS'), icon: 'ti-flip-vertical' },
+      { op: 'flip-ew', label: t('sp.flipEW'), icon: 'ti-flip-horizontal' },
     ];
     for (const o of ops) {
       const b = document.createElement('button');
@@ -332,10 +333,10 @@ export function mountStadiumPanel(deps: StadiumPanelDeps): void {
       `<div style="font-size:11px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(s.name)}</div>` +
       `<div style="font-size:10px;color:var(--text-3);">${esc(s.country ?? '-')} · ${tiers} tier${tiers === 1 ? '' : 's'}</div>`;
     const approve = document.createElement('button');
-    approve.textContent = 'Approve';
+    approve.textContent = t('sp.approve');
     approve.style.cssText = 'font-size:10px;padding:4px 8px;';
     const reject = document.createElement('button');
-    reject.textContent = 'Reject';
+    reject.textContent = t('sp.reject');
     reject.style.cssText = 'font-size:10px;padding:4px 8px;';
     const act = async (approveIt: boolean): Promise<void> => {
       approve.disabled = reject.disabled = true;
@@ -345,7 +346,7 @@ export function mountStadiumPanel(deps: StadiumPanelDeps): void {
         if (reviewListEl && !reviewListEl.children.length && reviewEl) reviewEl.style.display = 'none';
       } else {
         approve.disabled = reject.disabled = false;
-        approve.textContent = approveIt ? 'Retry' : 'Approve';
+        approve.textContent = approveIt ? t('sp.retry') : t('sp.approve');
       }
     };
     approve.addEventListener('click', () => void act(true));
@@ -394,7 +395,7 @@ export function mountStadiumPanel(deps: StadiumPanelDeps): void {
     };
     const submitBtn = document.createElement('button');
     submitBtn.textContent = '▲';
-    submitBtn.title = 'Submit to the community for review';
+    submitBtn.title = t('sp.submitT');
     submitBtn.setAttribute('aria-label', submitBtn.title);
     submitBtn.style.cssText = 'background:none;border:1px solid var(--line-1);border-radius:var(--r-md);color:var(--text-2);font-size:12px;cursor:pointer;padding:4px 7px;line-height:1;';
     submitBtn.addEventListener('click', (ev) => {
@@ -404,7 +405,7 @@ export function mountStadiumPanel(deps: StadiumPanelDeps): void {
       void submitStadium(e.template, e.meta.name, e.meta.country ?? undefined)
         .then((r) => {
           submitBtn.textContent = r ? '✓' : '✗';
-          submitBtn.title = r ? 'Submitted for community review' : 'Submission failed, try again';
+          submitBtn.title = r ? t('sp.submitted') : t('sp.submitFail');
         })
         .catch(() => {
           submitBtn.textContent = '✗';
@@ -412,8 +413,8 @@ export function mountStadiumPanel(deps: StadiumPanelDeps): void {
     });
     return [
       submitBtn,
-      mk('⤓', 'Export this stadium as JSON (share it)', () => downloadJson(e.template)),
-      mk('🗑', 'Delete this custom stadium', () => {
+      mk('⤓', t('sp.exportT'), () => downloadJson(e.template)),
+      mk('🗑', t('sp.deleteT'), () => {
         removeCustomTemplate(e.id);
         if (selectedId === e.id) selectedId = currentId;
         render();
@@ -426,7 +427,7 @@ export function mountStadiumPanel(deps: StadiumPanelDeps): void {
     customTools = document.createElement('div');
     customTools.style.cssText = 'margin-bottom:8px;border:1px solid var(--line-1);border-radius:var(--r-md);padding:8px;display:none;';
     const nameI = document.createElement('input');
-    nameI.placeholder = 'Custom stadium name';
+    nameI.placeholder = t('sp.namePh');
     nameI.style.cssText = INPUT_CSS;
     const grid = document.createElement('div');
     grid.style.cssText = 'display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:6px;';
@@ -440,7 +441,7 @@ export function mountStadiumPanel(deps: StadiumPanelDeps): void {
     }
     const sizeSel = document.createElement('select');
     sizeSel.style.cssText = INPUT_CSS;
-    for (const [v, l] of [['standard', 'Standard'], ['compact', 'Compact'], ['large', 'Large']] as [CustomSize, string][]) {
+    for (const [v, l] of [['standard', t('sp.standard')], ['compact', t('sp.compact')], ['large', t('sp.large')]] as [CustomSize, string][]) {
       const o = document.createElement('option');
       o.value = v;
       o.textContent = l;
@@ -449,7 +450,7 @@ export function mountStadiumPanel(deps: StadiumPanelDeps): void {
     grid.append(baseSel, sizeSel);
     const createBtn = document.createElement('button');
     createBtn.className = 'primary';
-    createBtn.textContent = 'Create custom stadium';
+    createBtn.textContent = t('sp.create');
     createBtn.style.cssText = 'width:100%;margin-top:6px;';
     createBtn.addEventListener('click', () => {
       const t = createCustomTemplate({ name: nameI.value.trim() || 'Custom stadium', baseId: baseSel.value, size: sizeSel.value as CustomSize });
@@ -460,25 +461,25 @@ export function mountStadiumPanel(deps: StadiumPanelDeps): void {
       render();
     });
     const importI = document.createElement('textarea');
-    importI.placeholder = 'Paste a stadium JSON to import…';
+    importI.placeholder = t('sp.importPh');
     importI.rows = 2;
     importI.style.cssText = INPUT_CSS + 'margin-top:8px;resize:vertical;';
     const importBtn = document.createElement('button');
-    importBtn.textContent = 'Import from JSON';
+    importBtn.textContent = t('sp.import');
     importBtn.style.cssText = 'width:100%;margin-top:6px;';
     const importMsg = document.createElement('p');
     importMsg.className = 'hint';
     importMsg.style.cssText = 'font-size:10px;color:var(--text-3);margin:4px 0 0;';
     importBtn.addEventListener('click', () => {
-      const t = parseImportedTemplate(importI.value);
-      if (!t) {
-        importMsg.textContent = 'That JSON is not a valid stadium template.';
+      const parsed = parseImportedTemplate(importI.value);
+      if (!parsed) {
+        importMsg.textContent = t('sp.importBad');
         return;
       }
-      addCustomTemplate(t);
+      addCustomTemplate(parsed);
       importI.value = '';
-      importMsg.textContent = `Imported “${t.name}”.`;
-      selectedId = t.id;
+      importMsg.textContent = `${t('sp.imported')} “${parsed.name}”.`;
+      selectedId = parsed.id;
       render();
     });
     customTools.append(nameI, grid, createBtn, importI, importBtn, importMsg);

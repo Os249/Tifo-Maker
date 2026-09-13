@@ -1175,12 +1175,17 @@ input[type="range"]:focus-visible {
    never display:none, which would take it out of the tab order entirely. The
    editor puts 125 tab stops between the top of the document and the canvas. */
 .skip-link {
-  position:absolute; left:-9999px; top:0; z-index:1000;
+  position:absolute; inset-inline-start:0; top:0; z-index:1000;
+  width:1px; height:1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap;
   background:var(--ink-1); color:var(--text-1);
   border:1px solid var(--blue); border-radius:0 0 8px 0;
   padding:10px 16px; font-weight:600; text-decoration:none;
 }
-.skip-link:focus { left:0; outline:2px solid var(--blue); outline-offset:2px; }
+[dir="rtl"] .skip-link { border-radius:0 0 0 8px; }
+.skip-link:focus {
+  width:auto; height:auto; overflow:visible; clip-path:none;
+  outline:2px solid var(--blue); outline-offset:2px;
+}
 
 /* The editor's <main> wrapper.
    body is a column flex container - header, stage, footer - and the stage used

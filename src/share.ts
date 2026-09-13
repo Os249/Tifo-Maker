@@ -5,6 +5,7 @@ import { DesignStore } from './core/design';
 import { fetchDesignTemplate, loadPublicDesign, recordView } from './net/api';
 import { paint2D } from './ui/viewer';
 import { openShareModal } from './ui/shareModal';
+import { initLang, applyDom, t, tl } from './ui/i18n';
 
 /**
  * The dedicated public tifo page served at /t/:id.
@@ -28,9 +29,9 @@ function unavailable(app: HTMLElement, msg: string): void {
   app.innerHTML = `
     <div class="s-unavailable">
       <div class="s-brand"><a href="/">TIFO<b>MAKER</b></a></div>
-      <h1>Tifo unavailable</h1>
+      <h1>${t('sh.unavailable')}</h1>
       <p>${msg}</p>
-      <a class="s-cta" href="/community">Browse the community →</a>
+      <a class="s-cta" href="/community">${t('sh.browse')} →</a>
     </div>`;
 }
 
@@ -40,17 +41,19 @@ function fmtDate(iso: string): string {
 }
 
 async function main(): Promise<void> {
+  initLang();
+  applyDom(document);
   const app = document.getElementById('share-app')!;
   const id = designIdFromLocation();
   if (!id) {
-    unavailable(app, 'No tifo was specified in the link.');
+    unavailable(app, t('sh.noId'));
     return;
   }
 
   // Resolve the template first so the seat map matches the saved cell count.
   const ref = await fetchDesignTemplate(id).catch(() => null);
   if (!ref) {
-    unavailable(app, 'This tifo is private or no longer available.');
+    unavailable(app, t('sh.gone'));
     return;
   }
   const template = TEMPLATES.find((t) => t.id === ref.templateId) ?? TEMPLATES[0];
@@ -59,18 +62,18 @@ async function main(): Promise<void> {
 
   const meta = await loadPublicDesign(store, id).catch(() => null);
   if (!meta) {
-    unavailable(app, 'This tifo is private or no longer available.');
+    unavailable(app, t('sh.gone'));
     return;
   }
   if (!meta.isPublic && !meta.ownerIsMe) {
-    unavailable(app, 'This tifo is private.');
+    unavailable(app, t('sh.private'));
     return;
   }
 
   app.innerHTML = `
     <header class="s-top">
       <div class="s-brand"><a href="/">TIFO<b>MAKER</b></a></div>
-      <button class="s-open" id="s-open"><i class="ti ti-external-link"></i> Open in TifoMaker</button>
+      <button class="s-open" id="s-open"><i class="ti ti-external-link"></i> ${t('sh.open')}</button>
     </header>
     <div class="s-hero">
       <div id="s-preview-host"></div>
@@ -80,12 +83,12 @@ async function main(): Promise<void> {
       <h1 class="s-title" id="s-title"></h1>
       <div class="s-sub" id="s-sub"></div>
       <div class="s-actions">
-        <button class="s-share" id="s-share"><i class="ti ti-share"></i> Share</button>
-        <button class="s-fork" id="s-fork"><i class="ti ti-git-fork"></i> Remix</button>
+        <button class="s-share" id="s-share"><i class="ti ti-share"></i> ${t('v.share')}</button>
+        <button class="s-fork" id="s-fork"><i class="ti ti-git-fork"></i> ${t('sh.remix')}</button>
       </div>
       <canvas class="s-flat" id="s-flat" width="900"></canvas>
       <div class="s-foot">
-        Made with <a href="/">TifoMaker</a>: design your own 60,000-seat tifo.
+        ${t('sh.madeWith')} <a href="/">TifoMaker</a>: ${t('sh.madeWith2')}
       </div>
     </div>`;
 
@@ -94,10 +97,10 @@ async function main(): Promise<void> {
   const esc = (s: string): string =>
     s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c] ?? c);
   const parts = [
-    meta.ownerName ? `by <span class="at">@${esc(meta.ownerName)}</span>` : '',
-    esc(template.name),
+    meta.ownerName ? `${t('v.by')} <span class="at">@${esc(meta.ownerName)}</span>` : '',
+    esc(tl(template.id)),
     fmtDate(meta.createdAt),
-    `<span id="s-views">${meta.viewCount.toLocaleString()}</span> views`,
+    `<span id="s-views">${meta.viewCount.toLocaleString()}</span> ${t('sh.views')}`,
   ].filter(Boolean);
   sub.innerHTML = parts.join(' · ');
 
@@ -115,7 +118,7 @@ async function main(): Promise<void> {
   CAMERA_PRESETS.forEach((p, i) => {
     const b = document.createElement('button');
     b.className = 's-cam' + (i === fullIdx ? ' active' : '');
-    b.textContent = p.name;
+    b.textContent = tl(p.name);
     b.addEventListener('click', () => {
       preview.applyPreset(p);
       cams.querySelectorAll('.s-cam').forEach((el) => el.classList.remove('active'));

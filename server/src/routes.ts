@@ -79,7 +79,7 @@ const NOT_FOUND_HTML = `<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex">
-<title>Page not found - TifoMaker</title>
+<title>الصفحة غير موجودة · Page not found · TifoMaker</title>
 <style>
   :root{ color-scheme: dark; }
   body{ margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center;
@@ -100,12 +100,19 @@ const NOT_FOUND_HTML = `<!doctype html>
 <body>
   <main>
     <p class="n">404</p>
-    <h1>This page does not exist</h1>
-    <p>The link may be broken, or the design may have been deleted or made private.</p>
-    <a class="p" href="/app">Open the editor</a>
-    <a href="/">Go home</a>
-    <a href="/community">Browse community</a>
-    <p class="c">Followed a link that should have worked?
+    <!-- Server-rendered, so there is no client i18n here and no way to know the
+         visitor's language. Both languages ship, Arabic first. -->
+    <h1 dir="rtl" lang="ar">هذي الصفحة ما هي موجودة</h1>
+    <p dir="rtl" lang="ar">يمكن الرابط مكسور، أو التصميم انحذف أو صار خاص.</p>
+    <h1 lang="en">This page does not exist</h1>
+    <p lang="en">The link may be broken, or the design may have been deleted or made private.</p>
+    <a class="p" href="/app">افتح المحرر · Open the editor</a>
+    <a href="/">الرئيسية · Go home</a>
+    <a href="/community">المجتمع · Browse community</a>
+    <p class="c">تابعت رابط المفروض يشتغل؟
+      <a href="https://x.com/OS99GameDev" target="_blank" rel="noopener noreferrer">بلّغ المطوّر</a>.
+      شخص واحد يبني هذا الموقع، فالرسالة توصله مباشرة.<br />
+      Followed a link that should have worked?
       <a href="https://x.com/OS99GameDev" target="_blank" rel="noopener noreferrer">Tell the developer</a>.
       One person builds this, so it goes straight to him.</p>
   </main>
@@ -689,15 +696,28 @@ export async function buildApp(
       await auth.createEmailToken(user.id, tokenHash, 'verify_email', new Date(Date.now() + VERIFY_TTL_MS));
       const base = emailBase(req);
       const link = `${base}/api/auth/verify?token=${token}`;
+      // Bilingual: the server does not know which language the person picked
+      // (that lives in their browser), and most of the audience is Saudi, so
+      // both languages ship in one message with Arabic first.
       await options.emailSender.send({
         to: user.email,
-        subject: 'Verify your TifoMaker email',
+        subject: 'وثّق بريدك في تيفو ميكر · Verify your TifoMaker email',
         html:
+          `<div dir="rtl" lang="ar" style="text-align:right">` +
+          `<p>أهلاً بك في تيفو ميكر.</p>` +
+          `<p>وثّق بريدك عشان تفتح مصمّم الذكاء الاصطناعي:</p>` +
+          `<p><a href="${link}">وثّق بريدي</a></p>` +
+          `<p>الرابط ينتهي خلال 24 ساعة. وإذا ما أنشأت حساب، تجاهل هذي الرسالة.</p>` +
+          `</div><hr />` +
+          `<div dir="ltr" lang="en">` +
           `<p>Welcome to TifoMaker.</p>` +
           `<p>Confirm your email to unlock the AI Designer:</p>` +
           `<p><a href="${link}">Verify my email</a></p>` +
-          `<p>This link expires in 24 hours. If you didn't create an account, ignore this email.</p>`,
-        text: `Verify your TifoMaker email: ${link}\nThis link expires in 24 hours.`,
+          `<p>This link expires in 24 hours. If you didn't create an account, ignore this email.</p>` +
+          `</div>`,
+        text:
+          `وثّق بريدك في تيفو ميكر: ${link}\nالرابط ينتهي خلال 24 ساعة.\n\n` +
+          `Verify your TifoMaker email: ${link}\nThis link expires in 24 hours.`,
       });
     } catch (err) {
       app.log.error({ err }, 'verification email failed');
@@ -716,12 +736,21 @@ export async function buildApp(
       const link = `${base}/reset?token=${token}`;
       await options.emailSender.send({
         to: user.email,
-        subject: 'Reset your TifoMaker password',
+        subject: 'إعادة تعيين كلمة مرور تيفو ميكر · Reset your TifoMaker password',
         html:
+          `<div dir="rtl" lang="ar" style="text-align:right">` +
+          `<p>وصلنا طلب لإعادة تعيين كلمة مرورك في تيفو ميكر.</p>` +
+          `<p><a href="${link}">اختر كلمة مرور جديدة</a></p>` +
+          `<p>الرابط ينتهي خلال ساعة. وإذا ما طلبت هذا، تجاهل الرسالة وكلمة مرورك ما تغيّرت.</p>` +
+          `</div><hr />` +
+          `<div dir="ltr" lang="en">` +
           `<p>We received a request to reset your TifoMaker password.</p>` +
           `<p><a href="${link}">Choose a new password</a></p>` +
-          `<p>This link expires in 1 hour. If you didn't request this, ignore this email, your password is unchanged.</p>`,
-        text: `Reset your TifoMaker password: ${link}\nThis link expires in 1 hour. If you didn't request this, ignore this email.`,
+          `<p>This link expires in 1 hour. If you didn't request this, ignore this email, your password is unchanged.</p>` +
+          `</div>`,
+        text:
+          `إعادة تعيين كلمة مرور تيفو ميكر: ${link}\nالرابط ينتهي خلال ساعة.\n\n` +
+          `Reset your TifoMaker password: ${link}\nThis link expires in 1 hour. If you didn't request this, ignore this email.`,
       });
     } catch (err) {
       app.log.error({ err }, 'reset email failed');
@@ -1754,8 +1783,14 @@ export async function buildApp(
      * 20KB one is roughly 1.5GB and takes the process out. A replacer FUNCTION
      * is returned verbatim, with no dollar expansion at all.
      */
+    /**
+     * Insert `replacement` at the first match of `pattern`. `$&` in the
+     * replacement stands for the matched text, so callers can prepend to an
+     * element without having to restate its attributes — restating them is how
+     * adding data-i18n to #grid-loading silently switched the crawler feed off.
+     */
     const injectOnce = (haystack: string, pattern: RegExp, replacement: string): string =>
-      haystack.replace(pattern, () => replacement);
+      haystack.replace(pattern, (m) => replacement.replace(/\$&/g, m));
 
     const esc = (s: string): string =>
       s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -1967,8 +2002,8 @@ export async function buildApp(
           : '';
         const withFeed = injectOnce(
           communityHtml,
-          /<div class="grid-loading" id="grid-loading">/i,
-          `${seo}<div class="grid-loading" id="grid-loading">`,
+          /<div class="grid-loading" id="grid-loading"[^>]*>/i,
+          `${seo}$&`,
         );
         const html = withCard(withFeed, req, {
           title: 'The tifo community: displays from supporters worldwide',

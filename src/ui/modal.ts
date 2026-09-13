@@ -1,3 +1,5 @@
+import { t } from './i18n';
+
 /**
  * Themed modal dialogs that replace native window.confirm()/alert(). These match
  * the app's visual language (dark surfaces, pill buttons, the brand accent) and
@@ -85,8 +87,8 @@ export function confirmModal(opts: ConfirmOptions): Promise<boolean> {
         <h3 class="dlg-title">${esc(opts.title)}</h3>
         ${opts.message ? `<p class="dlg-msg">${esc(opts.message)}</p>` : ''}
         <div class="dlg-actions">
-          <button class="dlg-btn dlg-cancel">${esc(opts.cancelLabel ?? 'Cancel')}</button>
-          <button class="dlg-btn ${opts.danger ? 'danger' : 'primary'} dlg-confirm">${esc(opts.confirmLabel ?? 'Confirm')}</button>
+          <button class="dlg-btn dlg-cancel">${esc(opts.cancelLabel ?? t('common.cancel'))}</button>
+          <button class="dlg-btn ${opts.danger ? 'danger' : 'primary'} dlg-confirm">${esc(opts.confirmLabel ?? t('common.confirm'))}</button>
         </div>
       </div>`);
     const done = (v: boolean): void => close(() => resolve(v));
@@ -120,8 +122,8 @@ export function promptModal(opts: {
         ${opts.message ? `<p class="dlg-msg">${esc(opts.message)}</p>` : ''}
         <div class="dlg-field">${field}</div>
         <div class="dlg-actions">
-          <button class="dlg-btn dlg-cancel">${esc(opts.cancelLabel ?? 'Cancel')}</button>
-          <button class="dlg-btn primary dlg-confirm">${esc(opts.confirmLabel ?? 'OK')}</button>
+          <button class="dlg-btn dlg-cancel">${esc(opts.cancelLabel ?? t('common.cancel'))}</button>
+          <button class="dlg-btn primary dlg-confirm">${esc(opts.confirmLabel ?? t('common.ok'))}</button>
         </div>
       </div>`);
     const input = backdrop.querySelector('.dlg-input') as HTMLInputElement | HTMLTextAreaElement;
@@ -154,7 +156,7 @@ export function choiceModal(opts: ChoiceOptions): Promise<string | null> {
         </button>`,
       )
       .join('');
-    const cancel = opts.cancelLabel === null ? '' : `<button class="dlg-btn dlg-cancel">${esc(opts.cancelLabel ?? 'Cancel')}</button>`;
+    const cancel = opts.cancelLabel === null ? '' : `<button class="dlg-btn dlg-cancel">${esc(opts.cancelLabel ?? t('common.cancel'))}</button>`;
     const { backdrop, close } = mount(`
       <div class="dlg" role="dialog" aria-modal="true">
         <h3 class="dlg-title">${esc(opts.title)}</h3>

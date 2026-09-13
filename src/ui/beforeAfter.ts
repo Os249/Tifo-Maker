@@ -1,5 +1,6 @@
 import { listPhotos, photoUrl, thumbnailUrl, type GalleryItem } from '../net/api';
 
+import { t } from './i18n';
 /**
  * Before/After detail view — the social-proof centerpiece. Shows the design's
  * 3D/digital thumbnail beside a real match-day photo, split by a draggable
@@ -15,17 +16,17 @@ export async function openBeforeAfter(item: GalleryItem): Promise<void> {
   const backdrop = document.createElement('div');
   backdrop.className = 'ba-backdrop';
   backdrop.innerHTML = `
-    <div class="ba-panel" role="dialog" aria-modal="true" aria-label="Before and after">
-      <button class="ba-close" aria-label="Close">&times;</button>
+    <div class="ba-panel" role="dialog" aria-modal="true" aria-label="${t('ba.title')}">
+      <button class="ba-close" aria-label="${t('common.close')}">&times;</button>
       <div class="ba-title">${escapeHtml(item.title)}</div>
-      <div class="ba-sub">Drag the divider: the design on the left, the real stand on the right.</div>
+      <div class="ba-sub">${t('ba.sub')}</div>
       <div class="ba-stage" id="ba-stage">
-        <img class="ba-img ba-after" id="ba-after" alt="Real match-day photo" />
+        <img class="ba-img ba-after" id="ba-after" alt="${t('ba.photo')}" />
         <div class="ba-before-wrap" id="ba-before-wrap">
-          <img class="ba-img ba-before" id="ba-before" src="${item.hasThumbnail ? thumbnailUrl(item.id) : ''}" alt="Digital design" />
-          <span class="ba-tag ba-tag-before">Design</span>
+          <img class="ba-img ba-before" id="ba-before" src="${item.hasThumbnail ? thumbnailUrl(item.id) : ''}" alt="${t('ba.design')}" />
+          <span class="ba-tag ba-tag-before">${t('ba.designTag')}</span>
         </div>
-        <span class="ba-tag ba-tag-after">Real stand</span>
+        <span class="ba-tag ba-tag-after">${t('ba.realTag')}</span>
         <div class="ba-divider" id="ba-divider"><div class="ba-handle">⟷</div></div>
       </div>
       <div class="ba-caption" id="ba-caption"></div>
@@ -57,7 +58,7 @@ export async function openBeforeAfter(item: GalleryItem): Promise<void> {
     afterImg.src = photoUrl(photos[i].id);
     const cap = photos[i].caption ?? '';
     captionEl.innerHTML = photos[i].isVerified
-      ? `<span class="ba-verified" title="Verified by a moderator as a genuine match"><i class="ti ti-rosette-discount-check"></i> Verified match</span>${cap ? ' · ' + escapeHtml(cap) : ''}`
+      ? `<span class="ba-verified" title="${t('ba.verifiedT')}"><i class="ti ti-rosette-discount-check"></i> ${t('ba.verified')}</span>${cap ? ' · ' + escapeHtml(cap) : ''}`
       : escapeHtml(cap);
     setSplit(50);
   };

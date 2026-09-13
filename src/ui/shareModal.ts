@@ -14,6 +14,7 @@
 
 import { shareUrl, ogImageUrl, recordShare } from '../net/api';
 
+import { t } from './i18n';
 export interface ShareTarget {
   id: string;
   title: string;
@@ -98,8 +99,8 @@ export function openShareModal(target: ShareTarget): void {
   const overlay = document.createElement('div');
   overlay.className = 'sm-overlay';
   overlay.innerHTML = `
-    <div class="sm-card" role="dialog" aria-modal="true" aria-label="Share tifo">
-      <div class="sm-head"><h3>Share this tifo</h3><button class="sm-x" aria-label="Close">&times;</button></div>
+    <div class="sm-card" role="dialog" aria-modal="true" aria-label="${t('sm.title')}">
+      <div class="sm-head"><h3>${t('sm.head')}</h3><button class="sm-x" aria-label="${t('common.close')}">&times;</button></div>
       <img class="sm-preview" src="${ogImageUrl(target.id)}" alt="" />
       ${'share' in navigator ? `<button class="sm-native"><i class="ti ti-share"></i> Share…</button>` : ''}
       <div class="sm-grid"></div>
@@ -108,7 +109,7 @@ export function openShareModal(target: ShareTarget): void {
         <button class="sm-copy"><i class="ti ti-copy"></i> Copy</button>
       </div>
       <div class="sm-foot">
-        <a class="sm-open" href="${url}" target="_blank" rel="noopener">Open public page ↗</a>
+        <a class="sm-open" href="${url}" target="_blank" rel="noopener">${t('sm.openPublic')} ↗</a>
         <button class="sm-qrbtn"><i class="ti ti-qrcode"></i> QR code</button>
       </div>
       <div class="sm-qr" hidden></div>
@@ -156,7 +157,7 @@ export function openShareModal(target: ShareTarget): void {
     b.addEventListener('click', async () => {
       await navigator.clipboard.writeText(url).catch(() => {});
       recordShare(target.id, p.id);
-      toast(`Link copied: paste it into ${p.label}`);
+      toast(`${t('sm.copiedFor')} ${p.label}`);
     });
     grid.appendChild(b);
   }
@@ -165,7 +166,7 @@ export function openShareModal(target: ShareTarget): void {
   overlay.querySelector('.sm-copy')!.addEventListener('click', async () => {
     await navigator.clipboard.writeText(url).catch(() => {});
     recordShare(target.id, 'copy');
-    toast('Link copied to clipboard');
+    toast(t('sm.copied'));
   });
 
   // QR code (lazy: only build the qrcode lib + image when requested).
@@ -182,10 +183,10 @@ export function openShareModal(target: ShareTarget): void {
         const dataUrl = await QRCode.toDataURL(url, { width: 360, margin: 1 });
         const img = document.createElement('img');
         img.src = dataUrl;
-        img.alt = 'QR code to open this tifo';
+        img.alt = t('sm.qrAlt');
         qrWrap.appendChild(img);
       } catch {
-        qrWrap.textContent = 'Could not generate QR code.';
+        qrWrap.textContent = t('sm.qrFail');
       }
     }
   });

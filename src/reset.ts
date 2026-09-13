@@ -4,6 +4,10 @@
  * On success the user's other sessions are invalidated server-side.
  */
 import { resetPassword } from './net/api';
+import { initLang, applyDom, t } from './ui/i18n';
+
+initLang();
+applyDom(document);
 
 const token = new URLSearchParams(location.search).get('token') ?? '';
 const form = document.getElementById('reset-form') as HTMLFormElement;
@@ -19,7 +23,7 @@ function showErr(msg: string): void {
 }
 
 if (!token) {
-  showErr('This reset link is missing its token. Request a new one from the sign-in screen.');
+  showErr(t('rs.noToken'));
   submit.disabled = true;
 }
 
@@ -27,22 +31,22 @@ form.addEventListener('submit', async (e) => {
   e.preventDefault();
   err.hidden = true;
   if (pw.value.length < 8) {
-    showErr('Password must be at least 8 characters.');
+    showErr(t('rs.tooShort'));
     return;
   }
   if (pw.value !== pw2.value) {
-    showErr('Passwords do not match.');
+    showErr(t('rs.mismatch'));
     return;
   }
   submit.disabled = true;
-  submit.textContent = 'Updating…';
+  submit.textContent = t('rs.updating');
   try {
     await resetPassword(token, pw.value);
     form.hidden = true;
     done.hidden = false;
   } catch (e2) {
-    showErr((e2 as Error).message || 'That reset link is invalid or has expired.');
+    showErr((e2 as Error).message || t('rs.badLink'));
     submit.disabled = false;
-    submit.textContent = 'Update password';
+    submit.textContent = t('rs.submit');
   }
 });

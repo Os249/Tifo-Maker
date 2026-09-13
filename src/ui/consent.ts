@@ -55,7 +55,7 @@ export function installConsent(onChange?: (c: Consent) => void): void {
   bar.id = 'consent-bar';
   bar.className = 'consent-bar';
   bar.setAttribute('role', 'dialog');
-  bar.setAttribute('aria-label', 'Cookie choices');
+  bar.setAttribute('aria-label', t('consent.aria'));
 
   const msg = document.createElement('span');
   msg.className = 'consent-msg';

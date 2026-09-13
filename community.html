@@ -33,10 +33,10 @@
       <a href="/community" class="active" data-i18n="nav.community">Community</a>
       <a href="/app" data-i18n="nav.openEditor">Open the editor</a>
       <button class="lang-toggle" id="lang-toggle" data-i18n="common.language">العربية</button>
-      <button class="icon-btn notif-btn" id="notif-btn" title="Notifications" hidden>
+      <button class="icon-btn notif-btn" id="notif-btn" title="Notifications" data-i18n-attr="title:cm.notif" hidden>
         <i class="ti ti-bell"></i><span class="notif-dot" id="notif-dot" hidden></span>
       </button>
-      <button class="nav-cta" id="auth-btn">Sign in</button>
+      <button class="nav-cta" id="auth-btn" data-i18n="ed.signup">Sign in</button>
     </nav>
   </header>
 
@@ -48,7 +48,7 @@
         <div class="hub-controls">
           <div class="search-wrap">
             <i class="ti ti-search"></i>
-            <input type="text" id="user-search" placeholder="Search creators by @username…" autocomplete="off" />
+            <input type="text" id="user-search" placeholder="Search creators by @username…" data-i18n-attr="placeholder:cm.searchUsers" autocomplete="off" />
             <div class="search-results" id="search-results" hidden></div>
           </div>
           <div class="sort-tabs" id="sort-tabs">
@@ -65,10 +65,10 @@
       <div class="gallery-grid" id="gallery-grid"></div>
       <div class="grid-empty" id="grid-empty" hidden>
         <i class="ti ti-mood-empty"></i>
-        <p>No tifos here yet. Be the first to publish one!</p>
-        <a class="btn btn-primary" href="/app">Open the editor</a>
+        <p data-i18n="cm.empty">No tifos here yet. Be the first to publish one!</p>
+        <a class="btn btn-primary" href="/app" data-i18n="nav.openEditor">Open the editor</a>
       </div>
-      <div class="grid-loading" id="grid-loading">Loading the community feed…</div>
+      <div class="grid-loading" id="grid-loading" data-i18n="cm.loading">Loading the community feed…</div>
     </section>
   </main>
 

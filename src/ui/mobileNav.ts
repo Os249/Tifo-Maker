@@ -1,3 +1,5 @@
+import { t } from './i18n';
+
 /**
  * Shared mobile navigation + base mobile foundations for the marketing / content
  * pages (landing, community, clubs). On phones the inline nav links are hidden
@@ -76,7 +78,7 @@ export function installMobileNav(): void {
   const burger = document.createElement('button');
   burger.className = 'mnav-burger';
   burger.type = 'button';
-  burger.setAttribute('aria-label', 'Menu');
+  burger.setAttribute('aria-label', t('nav.menu'));
   burger.setAttribute('aria-expanded', 'false');
   burger.innerHTML = BURGER_SVG;
 
@@ -85,7 +87,7 @@ export function installMobileNav(): void {
   const drawer = document.createElement('div');
   drawer.className = 'mnav-drawer';
   drawer.setAttribute('role', 'dialog');
-  drawer.setAttribute('aria-label', 'Menu');
+  drawer.setAttribute('aria-label', t('nav.menu'));
 
   const title = document.createElement('div');
   title.className = 'mnav-title';

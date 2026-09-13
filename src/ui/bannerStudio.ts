@@ -2,6 +2,7 @@ import type { AssetStore, AssetType } from '../core/sceneAssets';
 import type { DesignStore } from '../core/design';
 import type { SeatMap } from '../core/types';
 
+import { t } from './i18n';
 /**
  * Banner Studio — design a custom banner on its OWN artboard, completely separate
  * from the seat-paint grid, then zone-snap it onto a stand. It paints an image and
@@ -79,42 +80,42 @@ export function mountBannerStudio(deps: BannerStudioDeps): void {
     overlay = document.createElement('div');
     overlay.className = 'bstudio-overlay';
     overlay.innerHTML = `
-      <div class="bstudio" role="dialog" aria-label="Banner Studio">
+      <div class="bstudio" role="dialog" aria-label="${t('ed.bannerStudio')}">
         <div class="bstudio-head">
-          <h3>🎌 Banner Studio</h3>
-          <button class="bstudio-x" data-x aria-label="Close">✕</button>
+          <h3>🎌 ${t('ed.bannerStudio')}</h3>
+          <button class="bstudio-x" data-x aria-label="${t('common.close')}">✕</button>
         </div>
         <div class="bstudio-body">
           <div class="bstudio-canvas-wrap"><canvas id="bstudio-canvas" width="640" height="192"></canvas></div>
           <div class="bstudio-tools">
             <div class="bstudio-sw" data-sw></div>
             <label class="bstudio-field">＋<input type="color" data-color value="#1c6fe0"></label>
-            <label class="bstudio-field">Brush <input type="range" data-brush min="3" max="48" value="16"></label>
-            <button class="bstudio-btn" data-erase>Eraser</button>
-            <button class="bstudio-btn" data-fill>Fill bg</button>
-            <button class="bstudio-btn" data-clear>Clear</button>
+            <label class="bstudio-field">${t('ed.brush')} <input type="range" data-brush min="3" max="48" value="16"></label>
+            <button class="bstudio-btn" data-erase>${t('ed.tool.eraser')}</button>
+            <button class="bstudio-btn" data-fill>${t('bs.fillBg')}</button>
+            <button class="bstudio-btn" data-clear>${t('bs.clear')}</button>
           </div>
           <div class="bstudio-place">
-            <label class="bstudio-field">Place as
+            <label class="bstudio-field">${t('bs.placeAs')}
               <select class="bstudio-sel" data-zone>
-                <option value="surface">Drape whole stand (surface tifo)</option>
-                <option value="big">Hang over the seats (big banner)</option>
-                <option value="small">Cover the front fence (Zaunfahne)</option>
-                <option value="gap">Fill the walkway gap (rail banner)</option>
-                <option value="stairs">Cover the stairs (vertical strip)</option>
-                <option value="floor">Pitch-side floor banner</option>
+                <option value="surface">${t('bs.surface')}</option>
+                <option value="big">${t('bs.big')}</option>
+                <option value="small">${t('bs.small')}</option>
+                <option value="gap">${t('bs.gap')}</option>
+                <option value="stairs">${t('bs.stairs')}</option>
+                <option value="floor">${t('bs.floor')}</option>
               </select>
             </label>
-            <label class="bstudio-field">Stand
+            <label class="bstudio-field">${t('bs.stand')}
               <select class="bstudio-sel" data-stand>
-                <option value="1">North</option>
-                <option value="0">East</option>
-                <option value="3">South</option>
-                <option value="2">West</option>
+                <option value="1">${t('dir.north')}</option>
+                <option value="0">${t('dir.east')}</option>
+                <option value="3">${t('dir.south')}</option>
+                <option value="2">${t('dir.west')}</option>
               </select>
             </label>
             <span class="bstudio-grow"></span>
-            <button class="bstudio-btn primary" data-place>Add to stadium</button>
+            <button class="bstudio-btn primary" data-place>${t('bs.add')}</button>
           </div>
         </div>
       </div>`;

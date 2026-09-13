@@ -9,7 +9,7 @@ import type { ObjectLayer } from '../core/objects';
 import { MIN_LEGIBLE_RUN, findFragileSeats } from '../core/analysis';
 import { RevealPlayer, REVEAL_PRESETS, type RevealId } from '../core/reveal';
 import { fetchMe, isSignedIn, loadDesign, saveDesign, setPublic, setDesignTitle, exportMyData, deleteAccount } from '../net/api';
-import { t as i18nT } from './i18n';
+import { t as i18nT, tl } from './i18n';
 import { track, setAnalyticsSignedIn } from '../net/analytics';
 import { buildTifoV2 } from '../core/tifoFormat';
 import {
@@ -181,8 +181,8 @@ export function mountToolbar(
       const b = document.createElement('button');
       b.className = 'swatch' + (idx === editor.colorIndex ? ' active' : '');
       b.style.background = hex;
-      b.title = `${hex} · ${counts[idx].toLocaleString()} seats · double-click to edit`;
-      b.setAttribute('aria-label', `Swatch ${hex}, ${counts[idx].toLocaleString()} seats`);
+      b.title = `${hex} · ${counts[idx].toLocaleString()} ${i18nT('ed.seats')} · ${i18nT('ed.colors.editT')}`;
+      b.setAttribute('aria-label', `${i18nT('ed.colors.swatch')} ${hex}, ${counts[idx].toLocaleString()} ${i18nT('ed.seats')}`);
       b.addEventListener('click', () => {
         editor.colorIndex = idx;
         if (editor.tool === 'eraser') setTool('brush');
@@ -363,12 +363,12 @@ export function mountToolbar(
   const presetSel = $('#preset') as unknown as HTMLSelectElement;
   const presetPlaceholder = document.createElement('option');
   presetPlaceholder.value = '';
-  presetPlaceholder.textContent = 'Choose a preset…';
+  presetPlaceholder.textContent = i18nT('ed.colors.choosePreset');
   presetSel.appendChild(presetPlaceholder);
   for (const name of Object.keys(PALETTE_PRESETS)) {
     const opt = document.createElement('option');
     opt.value = name;
-    opt.textContent = name;
+    opt.textContent = tl(name);
     presetSel.appendChild(opt);
   }
   presetSel.addEventListener('change', () => {
@@ -387,7 +387,7 @@ export function mountToolbar(
     myPalettesSel.innerHTML = '';
     const ph = document.createElement('option');
     ph.value = '';
-    ph.textContent = saved.length ? 'Your saved palettes…' : 'No saved palettes yet';
+    ph.textContent = saved.length ? i18nT('ed.colors.savedPlaceholder') : i18nT('ed.colors.noSaved');
     myPalettesSel.appendChild(ph);
     for (const p of saved) {
       const opt = document.createElement('option');
@@ -479,7 +479,7 @@ export function mountToolbar(
   for (const p of PATTERN_PRESETS) {
     const opt = document.createElement('option');
     opt.value = p.id;
-    opt.textContent = p.name;
+    opt.textContent = tl(p.id);
     patternSel.appendChild(opt);
   }
   patternSel.addEventListener('change', () => {
@@ -1075,12 +1075,12 @@ export function mountToolbar(
       message.textContent = 'save your design (and tick “List in public gallery”) first, then share';
       return;
     }
-    openShareModal({ id: designId, title: docTitle.value.trim() || 'Untitled tifo' });
+    openShareModal({ id: designId, title: docTitle.value.trim() || i18nT('ed.docTitlePlaceholder') });
   });
 
   // Download the current design as a portable .tifo file (JSON: template + palette + cells).
   const downloadLocal = (): void => {
-    const title = docTitle.value.trim() || 'Untitled tifo';
+    const title = docTitle.value.trim() || i18nT('ed.docTitlePlaceholder');
     // Bake image objects into cells (they're pixels); text objects serialize as
     // first-class v2 objects so they reopen editable.
     const imageObjs = objects.list().filter((o) => o.kind === 'image');
@@ -1233,7 +1233,7 @@ export function mountToolbar(
   const draftWriter = createDraftWriter(
     () =>
       buildDraft({
-        title: docTitle.value.trim() || 'Untitled tifo',
+        title: docTitle.value.trim() || i18nT('ed.docTitlePlaceholder'),
         templateId: map.templateRef.id,
         templateVersion: map.templateRef.version,
         palette: store.palette,
@@ -1264,7 +1264,7 @@ export function mountToolbar(
     setSaveBusy(true);
     try {
       const isNew = designId === null;
-      const title = isNew ? docTitle.value.trim() || 'Untitled tifo' : '';
+      const title = isNew ? docTitle.value.trim() || i18nT('ed.docTitlePlaceholder') : '';
       const meta = await saveDesign(store, map, map.templateRef.id, map.templateRef.version, title, designId);
       designId = meta.id ?? designId;
       refreshPhotoRow();
@@ -1399,7 +1399,7 @@ export function mountToolbar(
     if (designId === null && !(await saveToAccount(false))) return;
     const { openPublishDialog } = await import('./publishDialog');
     const choice = await openPublishDialog({
-      title: docTitle.value.trim() || 'Untitled tifo',
+      title: docTitle.value.trim() || i18nT('ed.docTitlePlaceholder'),
       currentlyPublic: publicChk.checked,
     });
     if (!choice) return;
@@ -1848,17 +1848,17 @@ export function mountToolbar(
       wrap.className = 'section-stand';
       const label = document.createElement('div');
       label.className = 'section-stand-label';
-      label.textContent = stand;
+      label.textContent = tl(stand);
       const cells = document.createElement('div');
       cells.className = 'section-cells';
       group.forEach((sec, n) => {
         const c = document.createElement('button');
         c.className = 'section-cell';
         c.textContent = String(n + 1);
-        c.title = `${stand} section ${n + 1} · ${sec.seats.length.toLocaleString()} seats`;
+        c.title = `${tl(stand)} ${i18nT('ed.section')} ${n + 1} · ${sec.seats.length.toLocaleString()} ${i18nT('ed.seats')}`;
         c.addEventListener('click', () => {
           editor.zoomToSeats(sec.seats);
-          message.textContent = `${stand} section ${n + 1}: ${sec.seats.length.toLocaleString()} seats`;
+          message.textContent = `${tl(stand)} ${i18nT('ed.section')} ${n + 1}: ${sec.seats.length.toLocaleString()} ${i18nT('ed.seats')}`;
         });
         cells.appendChild(c);
       });
@@ -1872,7 +1872,7 @@ export function mountToolbar(
   for (const r of REVEAL_PRESETS) {
     const opt = document.createElement('option');
     opt.value = r.id;
-    opt.textContent = r.name;
+    opt.textContent = tl(r.id);
     revealSel.appendChild(opt);
   }
   // Default the reveal to right → left, the standard tifo sweep direction.

@@ -2,6 +2,7 @@ import type { SeatMap, DesignState } from '../core/types';
 import { DesignStore } from '../core/design';
 import { EMPTY_SEAT_COLOR } from '../core/template';
 import { listGallery, loadDesign, thumbnailUrl, type GalleryItem } from '../net/api';
+import { t, tl } from './i18n';
 
 /**
  * Phone viewer (<768px). Not a crippled editor — a first-class read-only
@@ -69,8 +70,8 @@ export async function mountViewer(ctx: ViewerContext): Promise<void> {
   root.innerHTML = `
     <header class="v-top">
       <div class="brand">TIFO<b>MAKER</b></div>
-      <button class="v-open" id="v-open" title="Open the full editor on desktop">
-        <i class="ti ti-device-desktop"></i> Edit on desktop
+      <button class="v-open" id="v-open" title="${t('v.openT')}">
+        <i class="ti ti-device-desktop"></i> ${t('v.open')}
       </button>
     </header>
     <div class="v-hero">
@@ -83,11 +84,11 @@ export async function mountViewer(ctx: ViewerContext): Promise<void> {
       <canvas class="v-flat" id="v-flat" width="600"></canvas>
       <div class="v-bom" id="v-bom"></div>
       <div class="v-actions">
-        <button class="primary" id="v-share"><i class="ti ti-share"></i> Share</button>
-        <button id="v-fork" title="Open as a working copy"><i class="ti ti-git-fork"></i></button>
+        <button class="primary" id="v-share"><i class="ti ti-share"></i> ${t('v.share')}</button>
+        <button id="v-fork" title="${t('v.forkT')}"><i class="ti ti-git-fork"></i></button>
       </div>
       <div class="v-gallery-head">
-        <span>From the gallery</span>
+        <span>${t('v.gallery')}</span>
       </div>
       <div class="v-gallery" id="v-gallery"></div>
     </div>
@@ -95,7 +96,7 @@ export async function mountViewer(ctx: ViewerContext): Promise<void> {
   document.body.appendChild(root);
 
   (document.getElementById('v-title') as HTMLElement).textContent = ctx.title;
-  (document.getElementById('v-sub') as HTMLElement).textContent = ctx.templateName;
+  (document.getElementById('v-sub') as HTMLElement).textContent = tl(ctx.templateName);
   paint2D(document.getElementById('v-flat') as HTMLCanvasElement, map, store);
 
   const bomEl = document.getElementById('v-bom')!;
@@ -115,7 +116,7 @@ export async function mountViewer(ctx: ViewerContext): Promise<void> {
   CAMERA_PRESETS.forEach((p, i) => {
     const b = document.createElement('button');
     b.className = 'v-cam' + (i === 0 ? ' active' : '');
-    b.textContent = p.name;
+    b.textContent = tl(p.name);
     b.addEventListener('click', () => {
       preview.applyPreset(p);
       cams.querySelectorAll('.v-cam').forEach((el) => el.classList.remove('active'));
@@ -141,7 +142,11 @@ export async function mountViewer(ctx: ViewerContext): Promise<void> {
   try {
     const items: GalleryItem[] = await listGallery();
     if (items.length === 0) {
-      galleryEl.innerHTML = '<div class="v-muted">Nothing published yet.</div>';
+      galleryEl.textContent = '';
+      const empty = document.createElement('div');
+      empty.className = 'v-muted';
+      empty.textContent = t('v.empty');
+      galleryEl.appendChild(empty);
     }
     for (const item of items.slice(0, 8)) {
       const card = document.createElement('button');
@@ -160,7 +165,7 @@ export async function mountViewer(ctx: ViewerContext): Promise<void> {
       const nameEl = document.createElement('span');
       nameEl.textContent = item.title;
       const byEl = document.createElement('small');
-      byEl.textContent = `by ${item.ownerName}`;
+      byEl.textContent = `${t('v.by')} ${item.ownerName}`;
       card.append(nameEl, byEl);
       card.addEventListener('click', async () => {
         const { title } = await loadDesign(store, item.id);
@@ -172,7 +177,11 @@ export async function mountViewer(ctx: ViewerContext): Promise<void> {
       galleryEl.appendChild(card);
     }
   } catch {
-    galleryEl.innerHTML = '<div class="v-muted">Gallery unavailable.</div>';
+    galleryEl.textContent = '';
+    const oops = document.createElement('div');
+    oops.className = 'v-muted';
+    oops.textContent = t('v.unavailable');
+    galleryEl.appendChild(oops);
   }
 }
 

@@ -89,7 +89,7 @@ async function refreshAuthUI(): Promise<void> {
     notifBtn.hidden = false;
     void refreshNotifications();
   } else {
-    authBtn.textContent = 'Sign in';
+    authBtn.textContent = t('ed.signup');
     authBtn.onclick = async () => {
       const tok = await openAuthModal();
       if (tok) {
@@ -140,7 +140,7 @@ async function loadGallery(): Promise<void> {
     }
     for (const item of items) grid.appendChild(renderCard(item));
   } catch {
-    loading.textContent = 'Could not load the feed. Please try again.';
+    loading.textContent = t('cm.errFeed');
   }
 }
 
@@ -221,7 +221,7 @@ async function openProfile(userId: string): Promise<void> {
     profile = await fetchProfile(userId);
   } catch {
     const modal = root.querySelector('.profile-modal');
-    if (modal) modal.querySelector('.profile-loading')!.textContent = 'Could not load this profile.';
+    if (modal) modal.querySelector('.profile-loading')!.textContent = t('cm.errProfile');
     return;
   }
 
@@ -257,16 +257,16 @@ async function openProfile(userId: string): Promise<void> {
         if (following) {
           await unfollowUser(userId);
           following = false;
-          followBtn.textContent = 'Follow';
+          followBtn.textContent = t('cm.follow');
           followBtn.classList.remove('following');
         } else {
           await followUser(userId);
           following = true;
-          followBtn.textContent = 'Following';
+          followBtn.textContent = t('cm.following');
           followBtn.classList.add('following');
         }
       } catch {
-        toast('Could not update follow');
+        toast(t('cm.errFollow'));
       }
     });
   }
@@ -331,7 +331,7 @@ async function openPreview(item: GalleryItem): Promise<void> {
           <div class="side-actions">
             <button class="act-btn like ${item.myVote === 1 ? 'on' : ''}" id="like-btn"><i class="ti ti-heart${item.myVote === 1 ? '-filled' : ''}"></i> <span id="like-count">${item.likeScore}</span></button>
             ${item.allowRemix !== false ? `<button class="act-btn remix" id="remix-btn"><i class="ti ti-git-fork"></i> Remix</button>` : ''}
-            <button class="act-btn report" id="report-btn" title="Report this design" aria-label="Report this design"><i class="ti ti-flag"></i></button>
+            <button class="act-btn report" id="report-btn" title="${t('cm.report')}" aria-label="${t('cm.report')}"><i class="ti ti-flag"></i></button>
           </div>
         </div>
         <div class="comments" id="comments"><div class="comments-head">Comments</div><div id="comment-list"></div></div>
@@ -396,7 +396,7 @@ async function mountPreview3D(item: GalleryItem): Promise<void> {
     }
   } catch {
     const host = document.getElementById('modal-3d-host');
-    if (host) host.innerHTML = '<div class="grid-loading" style="color:#9aa3b5;padding-top:80px;">Could not render this tifo.</div>';
+    if (host) host.innerHTML = `<div class="grid-loading" style="color:#9aa3b5;padding-top:80px;">${t('cm.errRender')}</div>`;
   }
 }
 
@@ -423,7 +423,7 @@ function wirePreviewActions(item: GalleryItem): void {
       likeBtn.classList.toggle('on', r.myVote === 1);
       likeBtn.querySelector('i')!.className = `ti ti-heart${r.myVote === 1 ? '-filled' : ''}`;
     } catch {
-      toast('Could not register your vote');
+      toast(t('cm.errVote'));
     }
   });
 
@@ -437,16 +437,16 @@ function wirePreviewActions(item: GalleryItem): void {
         if (following) {
           await unfollowUser(item.ownerId!);
           following = false;
-          followBtn.textContent = 'Follow';
+          followBtn.textContent = t('cm.follow');
           followBtn.classList.remove('following');
         } else {
           await followUser(item.ownerId!);
           following = true;
-          followBtn.textContent = 'Following';
+          followBtn.textContent = t('cm.following');
           followBtn.classList.add('following');
         }
       } catch {
-        toast('Could not update follow');
+        toast(t('cm.errFollow'));
       }
     });
   }
@@ -457,7 +457,7 @@ function wirePreviewActions(item: GalleryItem): void {
     if (!(await ensureAuth())) return;
     try {
       const created = await remixDesign(item.id);
-      toast('Remixed! Opening in the editor…');
+      toast(t('cm.remixed'));
       setTimeout(() => {
         window.location.href = `/app?design=${created.id}`;
       }, 700);
@@ -469,13 +469,13 @@ function wirePreviewActions(item: GalleryItem): void {
   // Report (sends to the moderation queue; you act on it from /admin or the DB).
   const reportBtn = document.getElementById('report-btn');
   reportBtn?.addEventListener('click', async () => {
-    const reason = window.prompt('Report this design: why? (e.g. offensive, infringes my rights, spam)');
+    const reason = window.prompt(t('cm.reportWhy'));
     if (reason == null) return;
     const text = reason.trim();
     if (!text) return;
     try {
       await reportDesign(item.id, text.slice(0, 300));
-      toast('Thanks: your report has been sent.');
+      toast(t('cm.reportThanks'));
     } catch (e) {
       toast((e as Error).message);
     }
@@ -494,7 +494,7 @@ async function fetchAuthorStats(item: GalleryItem): Promise<void> {
     if (stats) stats.textContent = `${p.followerCount} follower${p.followerCount === 1 ? '' : 's'} · ${p.designCount} tifo${p.designCount === 1 ? '' : 's'}`;
     const followBtn = document.getElementById('follow-btn') as HTMLButtonElement | null;
     if (followBtn && p.isFollowing) {
-      followBtn.textContent = 'Following';
+      followBtn.textContent = t('cm.following');
       followBtn.classList.add('following');
     }
   } catch {
@@ -534,7 +534,7 @@ async function loadCommentThread(item: GalleryItem): Promise<void> {
         await loadCommentThread(item);
         bumpCommentCount(item.id);
       } catch {
-        toast('Could not post comment');
+        toast(t('cm.errComment'));
         send.disabled = false;
       }
     };
@@ -595,7 +595,7 @@ function commentNode(c: CommentItem, item: GalleryItem, isReply: boolean): HTMLE
       await deleteComment(c.id);
       await loadCommentThread(item);
     } catch {
-      toast('Could not delete');
+      toast(t('cm.errDelete'));
     }
   });
   return node;
@@ -623,7 +623,7 @@ function openReplyBox(anchor: HTMLElement, parent: CommentItem, item: GalleryIte
       await loadCommentThread(item);
       bumpCommentCount(item.id);
     } catch {
-      toast('Could not reply');
+      toast(t('cm.errReply'));
     }
   });
 }

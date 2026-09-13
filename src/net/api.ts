@@ -2,6 +2,7 @@ import type { DesignStore } from '../core/design';
 import type { SeatMap, StadiumTemplate } from '../core/types';
 import type { TifoSpec } from '../core/tifoSpec';
 
+import { tErr } from '../ui/i18n';
 /**
  * Browser client for the Tifo Maker API. Cells gzip client-side with
  * CompressionStream (a 60k design is ~300 B on the wire); thumbnails are
@@ -120,7 +121,7 @@ function authHeaders(json: boolean): Record<string, string> {
 async function expectOk(res: Response): Promise<unknown> {
   if (!res.ok) {
     const body = (await res.json().catch(() => null)) as { error?: string } | null;
-    throw new Error(body?.error ?? `${res.status} ${res.statusText}`);
+    throw new Error(body?.error ? tErr(body.error) : `${res.status} ${res.statusText}`);
   }
   return res.status === 204 ? null : res.json();
 }
@@ -790,7 +791,7 @@ export async function exportDistributionPdf(
   });
   if (!res.ok) {
     const err = (await res.json().catch(() => ({ error: res.statusText }))) as { error?: string };
-    throw new Error(err.error ?? `export failed (${res.status})`);
+    throw new Error(err.error ? tErr(err.error) : `export failed (${res.status})`);
   }
   return res.blob();
 }
@@ -848,7 +849,7 @@ export async function remixDesign(id: string, title?: string): Promise<{ id: str
   });
   if (!res.ok) {
     const e = (await res.json().catch(() => ({ error: res.statusText }))) as { error?: string };
-    throw new Error(e.error ?? `remix failed (${res.status})`);
+    throw new Error(e.error ? tErr(e.error) : `remix failed (${res.status})`);
   }
   return res.json() as Promise<{ id: string }>;
 }
@@ -881,7 +882,7 @@ export async function addComment(designId: string, body: string, parentId: strin
   });
   if (!res.ok) {
     const e = (await res.json().catch(() => ({ error: res.statusText }))) as { error?: string };
-    throw new Error(e.error ?? `comment failed (${res.status})`);
+    throw new Error(e.error ? tErr(e.error) : `comment failed (${res.status})`);
   }
   return res.json() as Promise<CommentItem>;
 }
@@ -922,7 +923,7 @@ export async function submitLead(lead: LeadInput): Promise<{ ok: boolean; id?: s
   });
   if (!res.ok) {
     const e = (await res.json().catch(() => ({ error: res.statusText }))) as { error?: string };
-    throw new Error(e.error ?? `submission failed (${res.status})`);
+    throw new Error(e.error ? tErr(e.error) : `submission failed (${res.status})`);
   }
   return res.json() as Promise<{ ok: boolean; id?: string }>;
 }
@@ -1034,7 +1035,7 @@ export async function generateAiTifo(
     | ({ needsChoice?: boolean; reason?: string; retryAfterSec?: number; quota?: AiQuota; error?: string; locked?: boolean } & Partial<AiGenerateResult>)
     | null;
   if (!res.ok) {
-    const err = new Error(data?.error ?? `generation failed (${res.status})`) as AiError;
+    const err = new Error(data?.error ? tErr(data.error) : `generation failed (${res.status})`) as AiError;
     err.status = res.status;
     err.quota = data?.quota;
     err.locked = data?.locked;
@@ -1067,7 +1068,7 @@ export async function critiqueAiTifo(spec: TifoSpec, image?: string, stadium?: s
   });
   const data = (await res.json().catch(() => null)) as (AiCritiqueResult & { error?: string }) | null;
   if (!res.ok) {
-    const err = new Error(data?.error ?? `critique failed (${res.status})`) as AiError;
+    const err = new Error(data?.error ? tErr(data.error) : `critique failed (${res.status})`) as AiError;
     err.status = res.status;
     throw err;
   }
@@ -1079,7 +1080,7 @@ export async function fetchAiQuota(): Promise<AiQuota> {
   const res = await fetch(`${API}/ai/quota`, { headers: aiHeaders(false) });
   const data = (await res.json().catch(() => null)) as (AiQuota & { error?: string; locked?: boolean; reason?: AiError['reason'] }) | null;
   if (!res.ok) {
-    const err = new Error(data?.error ?? `request failed (${res.status})`) as AiError;
+    const err = new Error(data?.error ? tErr(data.error) : `request failed (${res.status})`) as AiError;
     err.status = res.status;
     err.locked = data?.locked;
     err.reason = data?.reason;

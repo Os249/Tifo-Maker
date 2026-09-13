@@ -5,6 +5,7 @@ import {
   type ReportItem, type PhotoReviewItem,
 } from '../net/api';
 
+import { t } from './i18n';
 /**
  * Moderation panel (admins only — the button that opens this is gated on
  * me.isAdmin, and every endpoint is gated server-side regardless). Two jobs that
@@ -18,17 +19,17 @@ export async function openModeration(startOn: ModerationTab = 'reports'): Promis
   const backdrop = document.createElement('div');
   backdrop.className = 'feed-backdrop';
   backdrop.innerHTML = `
-    <div class="feed-panel" role="dialog" aria-modal="true" aria-label="Moderation">
+    <div class="feed-panel" role="dialog" aria-modal="true" aria-label="${t('mod.title')}">
       <div class="feed-head">
-        <div class="feed-title">Moderation</div>
-        <div class="feed-sub">Review reports and verify match-day photos.</div>
+        <div class="feed-title">${t('mod.title')}</div>
+        <div class="feed-sub">${t('mod.sub')}</div>
         <button class="feed-close" aria-label="Close">&times;</button>
         <div class="feed-sorts" style="margin-top:12px;">
-          <button class="feed-sort${startOn === 'reports' ? ' active' : ''}" data-tab="reports">Reports</button>
-          <button class="feed-sort${startOn === 'photos' ? ' active' : ''}" data-tab="photos">Photo verification</button>
+          <button class="feed-sort${startOn === 'reports' ? ' active' : ''}" data-tab="reports">${t('mod.reports')}</button>
+          <button class="feed-sort${startOn === 'photos' ? ' active' : ''}" data-tab="photos">${t('mod.photos')}</button>
         </div>
       </div>
-      <div class="mod-body" id="mod-body"><div class="feed-loading">Loading…</div></div>
+      <div class="mod-body" id="mod-body"><div class="feed-loading">${t('common.loading')}</div></div>
     </div>
   `;
   const opener = document.activeElement as HTMLElement | null;
@@ -56,7 +57,7 @@ export async function openModeration(startOn: ModerationTab = 'reports'): Promis
 
   const renderReports = (items: ReportItem[]): void => {
     if (items.length === 0) {
-      body.innerHTML = '<div class="feed-empty">No open reports. The queue is clear.</div>';
+      body.innerHTML = `<div class="feed-empty">${t('mod.noReports')}</div>`;
       return;
     }
     body.innerHTML = '';
@@ -76,8 +77,8 @@ export async function openModeration(startOn: ModerationTab = 'reports'): Promis
           <div class="mod-meta mod-date">${new Date(r.createdAt).toLocaleString()}</div>
         </div>
         <div class="mod-actions">
-          ${!gone && r.targetIsPublic !== false ? '<button class="mod-btn mod-danger" data-act="takedown">Take down</button>' : ''}
-          <button class="mod-btn" data-act="dismiss">Dismiss</button>
+          ${!gone && r.targetIsPublic !== false ? `<button class="mod-btn mod-danger" data-act="takedown">${t('mod.takedown')}</button>` : ''}
+          <button class="mod-btn" data-act="dismiss">${t('mod.dismiss')}</button>
         </div>
       `;
       row.querySelector('[data-act="dismiss"]')?.addEventListener('click', async () => {
@@ -88,9 +89,9 @@ export async function openModeration(startOn: ModerationTab = 'reports'): Promis
       row.querySelector('[data-act="takedown"]')?.addEventListener('click', async () => {
         const { confirmModal } = await import('./modal');
         const ok = await confirmModal({
-          title: 'Take down this design?',
+          title: t('mod.takedownQ'),
           message: `“${r.targetTitle}” will be hidden from the public gallery.`,
-          confirmLabel: 'Take it down',
+          confirmLabel: t('mod.takedownYes'),
           danger: true,
         });
         if (!ok) return;
@@ -104,7 +105,7 @@ export async function openModeration(startOn: ModerationTab = 'reports'): Promis
 
   const renderPhotos = (items: PhotoReviewItem[]): void => {
     if (items.length === 0) {
-      body.innerHTML = '<div class="feed-empty">No photos awaiting verification.</div>';
+      body.innerHTML = `<div class="feed-empty">${t('mod.noPhotos')}</div>`;
       return;
     }
     body.innerHTML = '';
@@ -119,8 +120,8 @@ export async function openModeration(startOn: ModerationTab = 'reports'): Promis
           <div class="mod-meta mod-date">${new Date(p.createdAt).toLocaleString()}</div>
         </div>
         <div class="mod-actions">
-          <button class="mod-btn mod-ok" data-act="verify">Verify</button>
-          <button class="mod-btn mod-danger" data-act="remove">Remove</button>
+          <button class="mod-btn mod-ok" data-act="verify">${t('mod.verify')}</button>
+          <button class="mod-btn mod-danger" data-act="remove">${t('mod.remove')}</button>
         </div>
       `;
       row.querySelector('[data-act="verify"]')?.addEventListener('click', async () => {
@@ -131,9 +132,9 @@ export async function openModeration(startOn: ModerationTab = 'reports'): Promis
       row.querySelector('[data-act="remove"]')?.addEventListener('click', async () => {
         const { confirmModal } = await import('./modal');
         const ok = await confirmModal({
-          title: 'Remove this photo?',
-          message: 'This permanently deletes the photo. This can’t be undone.',
-          confirmLabel: 'Remove photo',
+          title: t('mod.removeQ'),
+          message: t('mod.removeMsg'),
+          confirmLabel: t('mod.removeYes'),
           danger: true,
         });
         if (!ok) return;
@@ -146,12 +147,12 @@ export async function openModeration(startOn: ModerationTab = 'reports'): Promis
   };
 
   const load = async (): Promise<void> => {
-    body.innerHTML = '<div class="feed-loading">Loading…</div>';
+    body.innerHTML = `<div class="feed-loading">${t('common.loading')}</div>`;
     try {
       if (tab === 'reports') renderReports(await listReports('open'));
       else renderPhotos(await listUnverifiedPhotos());
     } catch (err) {
-      body.innerHTML = `<div class="feed-empty">Couldn’t load: ${escapeHtml((err as Error).message)}</div>`;
+      body.innerHTML = `<div class="feed-empty">${t('mod.loadFail')}: ${escapeHtml((err as Error).message)}</div>`;
     }
   };
 

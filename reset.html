@@ -36,18 +36,18 @@
 <body>
   <main class="card">
     <a class="brand" href="/">TIFO<b>MAKER</b></a>
-    <h1>Reset your password</h1>
+    <h1 data-i18n="rs.title">Reset your password</h1>
     <div class="err" id="err" hidden></div>
     <form id="reset-form">
-      <label>New password
-        <input type="password" id="pw" autocomplete="new-password" placeholder="at least 8 characters" />
+      <label><span data-i18n="rs.new">New password</span>
+        <input type="password" id="pw" autocomplete="new-password" placeholder="at least 8 characters" data-i18n-attr="placeholder:rs.ph" />
       </label>
-      <label>Confirm new password
+      <label><span data-i18n="rs.confirm">Confirm new password</span>
         <input type="password" id="pw2" autocomplete="new-password" />
       </label>
-      <button type="submit" id="submit">Update password</button>
+      <button type="submit" id="submit" data-i18n="rs.submit">Update password</button>
     </form>
-    <p class="done" id="done" hidden>Your password has been updated. <a href="/app">Go to sign in</a></p>
+    <p class="done" id="done" hidden><span data-i18n="rs.done">Your password has been updated.</span> <a href="/app" data-i18n="rs.goSignIn">Go to sign in</a></p>
   </main>
   <script type="module" src="/src/reset.ts"></script>
 </body>

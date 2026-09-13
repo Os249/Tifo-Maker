@@ -15,15 +15,15 @@
     <title>Tifo Maker</title>
   </head>
   <body>
-<a class="skip-link" href="#main">Skip to main content</a>
+<a class="skip-link" href="#main" data-i18n="common.skip">Skip to main content</a>
     <header>
       <div class="brand">TIFO<b>MAKER</b></div>
-      <input class="doc-title" id="doc-title" value="Untitled tifo" aria-label="Design title" />
+      <input class="doc-title" id="doc-title" value="Untitled tifo" aria-label="Design title" data-i18n-attr="aria-label:ed.a11y.docTitle,value:ed.docTitlePlaceholder" />
       <div class="topbar-center">
         <div class="segmented">
           <button id="view-2d" class="active" data-i18n="ed.view.design">Design</button>
           <button id="view-3d" data-i18n="ed.view.stadium">Stadium</button>
-          <button id="view-split" title="Paint while watching the stadium update live" data-i18n="ed.view.split">Split</button>
+          <button id="view-split" title="Paint while watching the stadium update live" data-i18n="ed.view.split" data-i18n-attr="title:ed.view.splitT">Split</button>
         </div>
       </div>
       <div class="topbar-right">
@@ -39,7 +39,7 @@
         <button id="signin" class="signup-shine" data-i18n="ed.signup">Sign up</button>
         <a href="/community" id="community-link" class="topbar-link" data-i18n="nav.community">Community</a>
         <button id="gallery" data-i18n="ed.gallery">Gallery</button>
-        <button id="moderation" hidden title="Moderation queue"><i class="ti ti-shield-check"></i> <span data-i18n="ed.moderate">Moderate</span></button>
+        <button id="moderation" hidden title="Moderation queue" data-i18n-attr="title:ed.moderationQueue"><i class="ti ti-shield-check"></i> <span data-i18n="ed.moderate">Moderate</span></button>
         <div class="avatar-wrap">
           <button class="avatar" id="avatar" type="button" aria-expanded="false" aria-controls="avatar-menu">U</button>
           <div class="avatar-menu" id="avatar-menu" hidden>
@@ -60,25 +60,25 @@
     <main id="main" tabindex="-1">
 
     <div class="workspace">
-      <nav class="tool-rail" aria-label="Tools">
-        <button class="tool active" data-tool="brush" title="Brush (B)" aria-label="Brush"><i class="ti ti-brush"></i></button>
-        <button class="tool" data-tool="eraser" title="Eraser (E)" aria-label="Eraser"><i class="ti ti-eraser"></i></button>
-        <button class="tool" data-tool="fill" title="Fill (F)" aria-label="Fill"><i class="ti ti-bucket-droplet"></i></button>
-        <button class="tool" data-tool="eyedropper" title="Eyedropper: pick a colour (I)" aria-label="Eyedropper"><i class="ti ti-color-picker"></i></button>
+      <nav class="tool-rail" aria-label="Tools" data-i18n-attr="aria-label:ed.a11y.tools">
+        <button class="tool active" data-tool="brush" title="Brush (B)" aria-label="Brush" data-i18n-attr="title:ed.tool.brushT,aria-label:ed.brush"><i class="ti ti-brush"></i></button>
+        <button class="tool" data-tool="eraser" title="Eraser (E)" aria-label="Eraser" data-i18n-attr="title:ed.tool.eraserT,aria-label:ed.tool.eraser"><i class="ti ti-eraser"></i></button>
+        <button class="tool" data-tool="fill" title="Fill (F)" aria-label="Fill" data-i18n-attr="title:ed.tool.fillT,aria-label:ed.tool.fill"><i class="ti ti-bucket-droplet"></i></button>
+        <button class="tool" data-tool="eyedropper" title="Eyedropper: pick a colour (I)" aria-label="Eyedropper" data-i18n-attr="title:ed.tool.eyedropT,aria-label:ed.tool.eyedrop"><i class="ti ti-color-picker"></i></button>
         <span class="sep"></span>
-        <button class="tool" data-tool="text" title="Text (T)" aria-label="Text"><i class="ti ti-typography"></i></button>
-        <button class="tool" data-tool="import" title="Import image" aria-label="Import image"><i class="ti ti-photo"></i></button>
-        <button class="tool" data-tool="shape" title="Shapes (S)" aria-label="Shapes"><i class="ti ti-shape"></i></button>
+        <button class="tool" data-tool="text" title="Text (T)" aria-label="Text" data-i18n-attr="title:ed.tool.textT,aria-label:ed.tool.text"><i class="ti ti-typography"></i></button>
+        <button class="tool" data-tool="import" title="Import image" aria-label="Import image" data-i18n-attr="title:ed.tool.importT,aria-label:ed.tool.import"><i class="ti ti-photo"></i></button>
+        <button class="tool" data-tool="shape" title="Shapes (S)" aria-label="Shapes" data-i18n-attr="title:ed.tool.shapesT,aria-label:ed.tool.shapes"><i class="ti ti-shape"></i></button>
         <span class="sep"></span>
-        <button class="tool" data-tool="pan" title="Pan (Space)" aria-label="Pan"><i class="ti ti-arrows-move"></i></button>
+        <button class="tool" data-tool="pan" title="Pan (Space)" aria-label="Pan" data-i18n-attr="title:ed.tool.panT,aria-label:ed.tool.pan"><i class="ti ti-arrows-move"></i></button>
         <span class="sep"></span>
-        <button class="tool" data-tool="select" title="Select: drag a box to grab an area, or click a region · move objects (V)" aria-label="Select"><i class="ti ti-pointer"></i></button>
-        <button class="tool" id="banner-studio-btn" title="Banner Studio: design a banner &amp; place it on the stands" aria-label="Banner Studio"><i class="ti ti-flag"></i></button>
+        <button class="tool" data-tool="select" title="Select: drag a box to grab an area, or click a region · move objects (V)" aria-label="Select" data-i18n-attr="title:ed.tool.selectT,aria-label:ed.tool.select"><i class="ti ti-pointer"></i></button>
+        <button class="tool" id="banner-studio-btn" title="Banner Studio: design a banner &amp; place it on the stands" aria-label="Banner Studio" data-i18n-attr="title:ed.tool.bannerT,aria-label:ed.bannerStudio"><i class="ti ti-flag"></i></button>
         <span class="rail-spacer"></span>
-        <button class="tool rail-menu" id="rail-stadium" title="Stadium" aria-label="Stadium configuration"><i class="ti ti-building-stadium"></i></button>
-        <button class="tool rail-menu" id="rail-ai" title="AI Designer" aria-label="AI tifo designer"><i class="ti ti-sparkles"></i></button>
-        <button class="tool rail-menu" id="rail-anim" title="Animation" aria-label="Animation preferences"><i class="ti ti-movie"></i></button>
-        <button class="tool rail-menu" id="rail-save" title="Save &amp; export" aria-label="Save and export"><i class="ti ti-device-floppy"></i></button>
+        <button class="tool rail-menu" id="rail-stadium" title="Stadium" aria-label="Stadium configuration" data-i18n-attr="title:ed.rail.stadiumT,aria-label:ed.rail.stadium"><i class="ti ti-building-stadium"></i></button>
+        <button class="tool rail-menu" id="rail-ai" title="AI Designer" aria-label="AI tifo designer" data-i18n-attr="title:ed.rail.aiT,aria-label:ed.rail.ai"><i class="ti ti-sparkles"></i></button>
+        <button class="tool rail-menu" id="rail-anim" title="Animation" aria-label="Animation preferences" data-i18n-attr="title:ed.rail.animT,aria-label:ed.rail.anim"><i class="ti ti-movie"></i></button>
+        <button class="tool rail-menu" id="rail-save" title="Save &amp; export" aria-label="Save and export" data-i18n-attr="title:ed.rail.saveT,aria-label:ed.rail.save"><i class="ti ti-device-floppy"></i></button>
       </nav>
 
       <div class="stage">
@@ -102,7 +102,7 @@
             <option value="0.5" data-i18n="ed.import.west">West stand</option>
           </select>
           <button id="import-apply" class="primary" disabled data-i18n="ed.import.apply">Place</button>
-          <label title="Use the picture's own colours as the palette"><input type="checkbox" id="real-colors" checked /> <span data-i18n="ed.import.realColors">Real colours</span></label>
+          <label title="Use the picture's own colours as the palette" data-i18n-attr="title:ed.import.realColorsT"><input type="checkbox" id="real-colors" checked /> <span data-i18n="ed.import.realColors">Real colours</span></label>
           <label><input type="checkbox" id="dither" /> <span data-i18n="ed.import.dither">Dither</span></label>
           <label for="import-alpha" data-i18n="ed.import.alpha">Alpha</label>
           <input type="range" id="import-alpha" min="1" max="254" step="1" value="128" style="width:90px;" />
@@ -126,22 +126,22 @@
         <div id="shape-bar" class="tool-bar" hidden>
           <label for="shape-kind" data-i18n="ed.shape">Shape</label>
           <select id="shape-kind">
-            <option value="rect">Rectangle</option>
-            <option value="ellipse">Ellipse</option>
-            <option value="circle">Circle</option>
-            <option value="triangle">Triangle</option>
-            <option value="diamond">Diamond</option>
-            <option value="line">Line / bar</option>
-            <option value="star">Star</option>
-            <option value="star6">Star (6)</option>
-            <option value="heart">Heart</option>
-            <option value="crown">Crown</option>
-            <option value="shield">Shield</option>
-            <option value="ring">Ring</option>
-            <option value="cross">Cross</option>
-            <option value="chevron">Chevron</option>
-            <option value="bolt">Bolt</option>
-            <option value="flame">Flame</option>
+            <option value="rect" data-i18n="shape.rect">Rectangle</option>
+            <option value="ellipse" data-i18n="shape.ellipse">Ellipse</option>
+            <option value="circle" data-i18n="shape.circle">Circle</option>
+            <option value="triangle" data-i18n="shape.triangle">Triangle</option>
+            <option value="diamond" data-i18n="shape.diamond">Diamond</option>
+            <option value="line" data-i18n="shape.line">Line / bar</option>
+            <option value="star" data-i18n="shape.star">Star</option>
+            <option value="star6" data-i18n="shape.star6">Star (6)</option>
+            <option value="heart" data-i18n="shape.heart">Heart</option>
+            <option value="crown" data-i18n="shape.crown">Crown</option>
+            <option value="shield" data-i18n="shape.shield">Shield</option>
+            <option value="ring" data-i18n="shape.ring">Ring</option>
+            <option value="cross" data-i18n="shape.cross">Cross</option>
+            <option value="chevron" data-i18n="shape.chevron">Chevron</option>
+            <option value="bolt" data-i18n="shape.bolt">Bolt</option>
+            <option value="flame" data-i18n="shape.flame">Flame</option>
           </select>
           <label for="shape-size"><span data-i18n="ed.height">Height</span> <span id="shape-size-out">40</span> <span data-i18n="ed.seats">seats</span></label>
           <input type="range" id="shape-size" min="6" max="160" step="1" value="40" />
@@ -156,14 +156,14 @@
             <label for="camera-preset" data-i18n="ed.camera">Camera</label>
             <select id="camera-preset"></select>
             <label><input type="checkbox" id="noshow" /> <span data-i18n="ed.noshow">No-shows 10%</span></label>
-            <button id="match-day" type="button" title="Open the Match Day Simulator (high-fidelity view)"><i class="ti ti-building-stadium"></i> <span data-i18n="ed.matchDay">Match Day</span></button>
+            <button id="match-day" type="button" title="Open the Match Day Simulator (high-fidelity view)" data-i18n-attr="title:ed.matchDayT"><i class="ti ti-building-stadium"></i> <span data-i18n="ed.matchDay">Match Day</span></button>
           </div>
 
           <div class="zoom-pill">
-            <button id="zoom-out" aria-label="Zoom out"><i class="ti ti-minus"></i></button>
-            <span id="zoom-level">Fit</span>
-            <button id="zoom-in" aria-label="Zoom in"><i class="ti ti-plus"></i></button>
-            <button id="fit" aria-label="Fit to view"><i class="ti ti-maximize"></i></button>
+            <button id="zoom-out" aria-label="Zoom out" data-i18n-attr="aria-label:ed.a11y.zoomOut"><i class="ti ti-minus"></i></button>
+            <span id="zoom-level" data-i18n="ed.fit">Fit</span>
+            <button id="zoom-in" aria-label="Zoom in" data-i18n-attr="aria-label:ed.a11y.zoomIn"><i class="ti ti-plus"></i></button>
+            <button id="fit" aria-label="Fit to view" data-i18n-attr="aria-label:ed.a11y.fit"><i class="ti ti-maximize"></i></button>
           </div>
 
           <div class="minimap" id="minimap">
@@ -175,30 +175,30 @@
         </div>
       </div>
 
-      <aside class="panel" id="panel" aria-label="Properties">
+      <aside class="panel" id="panel" aria-label="Properties" data-i18n-attr="aria-label:ed.a11y.panel">
         <div class="panel-head">
           <span data-i18n="ed.props">Properties</span>
-          <button id="panel-toggle" aria-label="Collapse panel" style="padding:2px 6px;border:none;"><i class="ti ti-layout-sidebar-right-collapse"></i></button>
+          <button id="panel-toggle" aria-label="Collapse panel" style="padding:2px 6px;border:none;" data-i18n-attr="aria-label:ed.a11y.panelToggle"><i class="ti ti-layout-sidebar-right-collapse"></i></button>
         </div>
-        <p class="panel-orient">Paint on the <b>canvas</b> at left. These panels set <b>how</b> you paint and the look. Switch <b>Design / Stadium / Split</b> above to see it on the seats or in 3D.</p>
+        <p class="panel-orient" data-i18n="ed.props.hint"></p>
 
         <div class="panel-section ctx-hidden" id="ctx-stadium-config" data-panel="__menu_only__" data-menu="stadium" style="display:none">
           <h4><span data-i18n="ed.stadium">Stadium</span> <span class="h4-tag" data-i18n="ed.cfg.tag">choose &amp; configure the bowl</span></h4>
-          <p class="hint note">Pick the stadium your tifo is designed for. Switching remaps your current design onto the new bowl.</p>
+          <p class="hint note" data-i18n="ed.cfg.hint"></p>
           <div class="chips" id="stadium-tabs" style="margin-bottom:8px;flex-wrap:wrap;"></div>
           <div id="stadium-filters" style="margin-bottom:8px;"></div>
           <div id="stadium-list" style="display:flex;flex-direction:column;gap:6px;max-height:240px;overflow:auto;"></div>
           <div id="stadium-info" style="margin-top:12px;"></div>
           <div id="stadium-disclaimer" style="margin-top:8px;display:none;"></div>
           <h4 style="margin:14px 0 6px;" data-i18n="ed.area">Active tifo area</h4>
-          <p class="hint note-sm">Which part of the bowl the design targets: the AI focuses here.</p>
+          <p class="hint note-sm" data-i18n="ed.area.hint"></p>
           <div class="chips" id="stadium-area" style="flex-wrap:wrap;"></div>
           <h4 style="margin:14px 0 6px;" data-i18n="ed.orient">Orientation</h4>
-          <p class="hint note-sm">Re-orient your design around the bowl (undoable).</p>
+          <p class="hint note-sm" data-i18n="ed.orient.hint"></p>
           <div class="group" id="stadium-orient"></div>
           <div id="stadium-review" style="margin-top:14px;display:none;">
             <h4 style="margin:14px 0 6px;" data-i18n="ed.review">Admin · review queue</h4>
-            <p class="hint note-sm">Pending community submissions. Approve to publish, reject to discard.</p>
+            <p class="hint note-sm" data-i18n="ed.review.hint"></p>
             <div id="stadium-review-list" style="display:flex;flex-direction:column;gap:6px;"></div>
           </div>
         </div>
@@ -208,31 +208,31 @@
           <p class="hint note" data-i18n="ed.ai.hint">Describe a display in plain words: a stand, colours, text, a symbol. The AI composes a fully editable tifo on the seats.</p>
           <textarea id="ai-prompt" class="ai-input" rows="3" maxlength="400" placeholder="e.g. Giant eagle covering the south stand in black and gold" data-i18n-attr="placeholder:ed.ai.placeholder"></textarea>
           <div class="chips" id="ai-examples" style="margin-top:8px;flex-wrap:wrap;">
-            <button class="chip" data-ex="Red and white CHAMPIONS card stunt across the stadium">CHAMPIONS stunt</button>
-            <button class="chip" data-ex="Giant Cristiano Ronaldo tifo in the north stand using black, white and yellow">Ronaldo · north</button>
-            <button class="chip" data-ex="Giant eagle covering the south stand in black and gold">Eagle · south</button>
+            <button class="chip" data-ex="Red and white CHAMPIONS card stunt across the stadium" data-i18n="ai.ex.champions">CHAMPIONS stunt</button>
+            <button class="chip" data-ex="Giant Cristiano Ronaldo tifo in the north stand using black, white and yellow" data-i18n="ai.ex.ronaldo">Ronaldo · north</button>
+            <button class="chip" data-ex="Giant eagle covering the south stand in black and gold" data-i18n="ai.ex.eagle">Eagle · south</button>
           </div>
           <div class="hint" style="font-size:11px;color:var(--text-3);margin:10px 0 4px;" data-i18n="ed.ai.yourClub">Your club, one tap</div>
           <div class="chips" id="ai-clubs" style="flex-wrap:wrap;">
-            <button class="chip" data-club="A giant Al Hilal tifo filling the whole stadium in the club's colours">Al Hilal</button>
-            <button class="chip" data-club="A giant Al Nassr tifo filling the whole stadium in the club's colours">Al Nassr</button>
-            <button class="chip" data-club="A giant Al Ittihad tifo filling the whole stadium in the club's colours">Al Ittihad</button>
-            <button class="chip" data-club="A giant Al Ahli tifo filling the whole stadium in the club's colours">Al Ahli</button>
-            <button class="chip" data-club="A giant Al Shabab tifo filling the whole stadium in the club's colours">Al Shabab</button>
+            <button class="chip" data-club="A giant Al Hilal tifo filling the whole stadium in the club's colours" data-i18n="club.hilal">Al Hilal</button>
+            <button class="chip" data-club="A giant Al Nassr tifo filling the whole stadium in the club's colours" data-i18n="club.nassr">Al Nassr</button>
+            <button class="chip" data-club="A giant Al Ittihad tifo filling the whole stadium in the club's colours" data-i18n="club.ittihad">Al Ittihad</button>
+            <button class="chip" data-club="A giant Al Ahli tifo filling the whole stadium in the club's colours" data-i18n="club.ahli">Al Ahli</button>
+            <button class="chip" data-club="A giant Al Shabab tifo filling the whole stadium in the club's colours" data-i18n="club.shabab">Al Shabab</button>
           </div>
           <button id="ai-generate" class="primary" style="width:100%;margin-top:10px;"><i class="ti ti-sparkles"></i> <span data-i18n="ed.ai.generate">Generate tifo</span></button>
           <button id="ai-generate-super" class="primary" style="width:100%;margin-top:8px;"><i class="ti ti-building-stadium"></i> <span data-i18n="ed.ai.super">Super AI: design full stadium</span></button>
           <p class="hint" style="font-size:10px;color:var(--text-3);margin:4px 0 0;" data-i18n="ed.ai.superHint">Plans every stand together: portraits, text and colour blocking across the whole bowl.</p>
-          <button id="ai-shuffle" style="width:100%;margin-top:8px;" title="Compose a multi-stand design instantly, offline: no tokens, no quota"><i class="ti ti-arrows-shuffle"></i> <span data-i18n="ed.ai.shuffle">Shuffle: free offline variation</span></button>
+          <button id="ai-shuffle" style="width:100%;margin-top:8px;" title="Compose a multi-stand design instantly, offline: no tokens, no quota" data-i18n-attr="title:ed.ai.shuffleT"><i class="ti ti-arrows-shuffle"></i> <span data-i18n="ed.ai.shuffle">Shuffle: free offline variation</span></button>
           <p id="ai-status" class="hint" style="font-size:11px;color:var(--text-3);margin:8px 0 0;min-height:14px;"></p>
           <div id="ai-error" class="hint" style="display:none;font-size:11px;color:var(--flare);margin-top:8px;"></div>
           <div id="ai-result" style="display:none;margin-top:10px;">
             <p id="ai-summary" style="font-size:12px;color:var(--text-2);margin:0 0 8px;"></p>
             <div class="group">
               <button id="ai-regen" class="primary grow"><i class="ti ti-refresh"></i> <span data-i18n="ed.ai.regen">Regenerate</span></button>
-              <button id="ai-revert" title="Restore the canvas from before this design" data-i18n="ed.ai.revert">Revert</button>
+              <button id="ai-revert" title="Restore the canvas from before this design" data-i18n="ed.ai.revert" data-i18n-attr="title:ed.ai.revertT">Revert</button>
             </div>
-            <button id="ai-polish" style="width:100%;margin-top:8px;" title="Render the design and ask the AI to fix legibility and balance"><i class="ti ti-wand"></i> <span data-i18n="ed.ai.polish">Polish with AI critique</span></button>
+            <button id="ai-polish" style="width:100%;margin-top:8px;" title="Render the design and ask the AI to fix legibility and balance" data-i18n-attr="title:ed.ai.polishT"><i class="ti ti-wand"></i> <span data-i18n="ed.ai.polish">Polish with AI critique</span></button>
           </div>
           <p id="ai-quota" class="hint" style="font-size:11px;color:var(--text-3);margin:8px 0 0;"></p>
         </div>
@@ -240,10 +240,10 @@
         <div class="panel-section ctx-hidden" id="ctx-objects" data-panel="select" style="display:none">
           <h4><span data-i18n="ed.obj">Object</span> <span id="obj-kind" style="color:var(--text-3);"></span></h4>
           <div id="region-actions" hidden>
-            <p class="hint" style="font-size:12px;color:var(--text-2);margin:0 0 10px;"><b id="region-count">0</b> seats selected. Recolor with the active swatch, or clear them.</p>
+            <p class="hint" style="font-size:12px;color:var(--text-2);margin:0 0 10px;"><b id="region-count">0</b> <span data-i18n="ed.region.hint">seats selected. Recolor with the active swatch, or clear them.</span></p>
             <div class="group">
               <button class="primary grow" id="region-recolor" data-i18n="ed.obj.recolor">Recolor</button>
-              <button class="danger" id="region-delete" title="Clear selected seats"><i class="ti ti-eraser"></i></button>
+              <button class="danger" id="region-delete" title="Clear selected seats" data-i18n-attr="title:ed.region.deleteT"><i class="ti ti-eraser"></i></button>
             </div>
             <button id="region-clear" style="width:100%;margin-top:8px;" data-i18n="ed.obj.deselect">Deselect</button>
           </div>
@@ -261,16 +261,16 @@
                finger on a 60,000-seat bowl cannot. -->
           <div class="group" style="gap:8px;">
             <label for="obj-x" style="white-space:nowrap;" data-i18n="ed.obj.x">Across</label>
-            <input type="number" id="obj-x" class="grow0" step="1" aria-label="Position across the bowl, in seats" style="width:74px;" />
+            <input type="number" id="obj-x" class="grow0" step="1" aria-label="Position across the bowl, in seats" style="width:74px;"  data-i18n-attr="aria-label:ed.a11y.objX" />
             <label for="obj-y" style="white-space:nowrap;" data-i18n="ed.obj.y">Up</label>
-            <input type="number" id="obj-y" class="grow0" step="1" aria-label="Position up the bowl, in rows" style="width:74px;" />
+            <input type="number" id="obj-y" class="grow0" step="1" aria-label="Position up the bowl, in rows" style="width:74px;"  data-i18n-attr="aria-label:ed.a11y.objY" />
           </div>
           <label for="obj-height" style="white-space:nowrap;" data-i18n="ed.height">Height</label>
               <input type="range" id="obj-height" min="6" max="60" step="1" value="18" class="grow" />
               <span id="obj-height-out" class="val">18</span>
             </div>
             <div class="group" style="margin-bottom:8px;">
-              <label for="obj-tier">Tier</label>
+              <label for="obj-tier" data-i18n="ed.tier">Tier</label>
               <select id="obj-tier" class="grow0">
                 <option value="both" data-i18n="ed.tier.both">Both</option>
                 <option value="0" data-i18n="ed.tier.lower">Lower</option>
@@ -283,7 +283,7 @@
             </div>
             <div class="group">
               <button class="primary grow" id="obj-bake" data-i18n="ed.obj.bake">Bake to seats</button>
-              <button class="danger" id="obj-delete" title="Delete object"><i class="ti ti-trash"></i></button>
+              <button class="danger" id="obj-delete" title="Delete object" data-i18n-attr="title:ed.obj.deleteT"><i class="ti ti-trash"></i></button>
             </div>
           </div>
           <div class="group" style="margin-top:10px;">
@@ -294,7 +294,7 @@
         <div class="panel-section" id="ctx-brush" data-panel="brush eraser fill">
           <h4><span data-i18n="ed.brush">Brush</span> <span class="h4-tag" data-i18n="ed.brush.activeTool">active tool</span></h4>
           <div class="group">
-            <input type="range" id="brush-size" min="1" max="40" step="1" value="10" class="grow" aria-label="Brush size" />
+            <input type="range" id="brush-size" min="1" max="40" step="1" value="10" class="grow" aria-label="Brush size"  data-i18n-attr="aria-label:ed.a11y.brushSize" />
             <span id="brush-size-out" class="val">10</span>
           </div>
           <div class="chips" style="margin-top:10px;">
@@ -303,8 +303,8 @@
           <div style="margin-top:10px;">
             <label for="fill-scope" data-i18n="ed.brush.fillScope">Fill scope</label>
             <select id="fill-scope" style="margin-left:6px;">
-              <option value="section">Section</option>
-              <option value="global">Global</option>
+              <option value="section" data-i18n="ed.scope.section">Section</option>
+              <option value="global" data-i18n="ed.scope.global">Global</option>
             </select>
           </div>
         </div>
@@ -312,12 +312,12 @@
         <div class="panel-section" id="ctx-colors" data-panel="brush eraser fill text">
           <h4><span data-i18n="ed.colors">Colors</span> <span class="h4-tag" data-i18n="ed.colors.yourSwatches">your swatches</span></h4>
           <div class="color-well-row">
-            <button id="fg-well" class="fg-well" title="Active paint color: click to change"></button>
+            <button id="fg-well" class="fg-well" title="Active paint color: click to change" data-i18n-attr="title:ed.colors.wellT"></button>
             <div class="fg-meta">
               <span id="fg-hex" class="fg-hex">#000000</span>
               <span class="fg-sub" data-i18n="ed.colors.painting">painting color</span>
             </div>
-            <button id="add-swatch" class="add-swatch" title="Pick any color &amp; add it to your swatches" data-i18n="ed.colors.addColor">+ Color</button>
+            <button id="add-swatch" class="add-swatch" title="Pick any color &amp; add it to your swatches" data-i18n="ed.colors.addColor" data-i18n-attr="title:ed.colors.addT">+ Color</button>
           </div>
           <div class="swatch-grid" id="palette"></div>
           <div class="swatch-hint hint" id="swatch-hint" data-i18n="ed.colors.hint">Click a swatch to paint with it · double-click to edit · drag a new color from “+ Color”.</div>
@@ -327,20 +327,20 @@
               <select id="preset" class="grow0"></select>
             </div>
             <div class="group" style="margin-top:8px;">
-              <button id="palette-import" class="grow" title="Load a .gpl / .hex / .json palette or an image" data-i18n="ed.colors.import">Import palette</button>
-              <button id="palette-save" class="grow" title="Save your current swatches as a reusable palette" data-i18n="ed.colors.save">Save palette</button>
+              <button id="palette-import" class="grow" title="Load a .gpl / .hex / .json palette or an image" data-i18n="ed.colors.import" data-i18n-attr="title:ed.colors.importT">Import palette</button>
+              <button id="palette-save" class="grow" title="Save your current swatches as a reusable palette" data-i18n="ed.colors.save" data-i18n-attr="title:ed.colors.saveT">Save palette</button>
             </div>
-            <select id="my-palettes" style="margin-top:8px;width:100%;" title="Your saved palettes"></select>
+            <select id="my-palettes" style="margin-top:8px;width:100%;" title="Your saved palettes" data-i18n-attr="title:ed.colors.mineT"></select>
           </div>
         </div>
 
         <div class="panel-section" id="ctx-stadium" data-panel="brush fill">
           <h4><span data-i18n="ed.stadium">Stadium</span> <span class="h4-tag" data-i18n="ed.stadium.tag">shape &amp; whole-bowl fills</span></h4>
           <div class="group">
-            <select id="stadium" class="grow0" aria-label="Stadium"></select>
+            <select id="stadium" class="grow0" aria-label="Stadium" data-i18n-attr="aria-label:ed.a11y.stadium"></select>
           </div>
           <div class="group" style="margin-top:10px;">
-            <select id="pattern" class="grow0" aria-label="Pattern"><option value="" data-i18n="ed.stadium.pattern">Pattern&hellip;</option></select>
+            <select id="pattern" class="grow0" aria-label="Pattern" data-i18n-attr="aria-label:ed.a11y.pattern"><option value="" data-i18n="ed.stadium.pattern">Pattern&hellip;</option></select>
           </div>
           <div class="chips" style="margin-top:10px;">
             <label><input type="checkbox" id="grid" checked /> <span data-i18n="ed.stadium.guides">Section guides</span></label>
@@ -359,7 +359,7 @@
           </div>
           <div class="group" style="margin-top:10px;">
             <button id="reveal-play" class="primary grow"><i class="ti ti-player-play"></i> <span data-i18n="ed.reveal.play">Play</span></button>
-            <button id="reveal-reset" title="Reset"><i class="ti ti-rewind-backward"></i></button>
+            <button id="reveal-reset" title="Reset" data-i18n-attr="title:common.reset"><i class="ti ti-rewind-backward"></i></button>
           </div>
           <div class="group" style="margin-top:10px;">
             <input type="range" id="reveal-scrub" min="0" max="100" step="1" value="0" class="grow" />
@@ -385,9 +385,9 @@
           <div class="group" id="sx-gif-size-row" style="margin-top:10px;" hidden>
             <label for="sx-gif-width" style="white-space:nowrap;" data-i18n="ed.sx.gifWidth">GIF width</label>
             <select id="sx-gif-width" class="grow0">
-              <option value="360">360 px (small)</option>
-              <option value="480" selected>480 px</option>
-              <option value="640">640 px (large)</option>
+              <option value="360" data-i18n="ed.gif.360">360 px (small)</option>
+              <option value="480" selected data-i18n="ed.gif.480">480 px</option>
+              <option value="640" data-i18n="ed.gif.640">640 px (large)</option>
             </select>
           </div>
           <label class="chips" style="margin-top:10px;display:block;"><input type="checkbox" id="sx-noshow" /> <span data-i18n="ed.sx.noshow">Export with 10% no-shows</span></label>
@@ -410,7 +410,7 @@
           <h4><span data-i18n="ed.save">Save</span> <span data-i18n="ed.save.tag">&amp; share</span></h4>
           <div class="group">
             <button id="save" class="primary grow" data-i18n="ed.save">Save</button>
-            <button id="load" class="grow" title="Open a .tifo file" data-i18n="ed.openFile">Open file</button>
+            <button id="load" class="grow" title="Open a .tifo file" data-i18n="ed.openFile" data-i18n-attr="title:ed.loadT">Open file</button>
           </div>
           <p class="draft-state" id="draft-state" aria-live="polite"></p>
           <div id="account-offer" class="account-offer" hidden></div>
@@ -418,7 +418,7 @@
           <button id="download-tifo" style="width:100%;margin-top:8px;"><i class="ti ti-download"></i> <span data-i18n="ed.downloadCopy">Download a .tifo copy</span></button>
           <!-- Public state is now driven by the Publish flow; kept as a hidden mirror
                so the rest of the editor can still read and reflect it. -->
-          <label hidden><input type="checkbox" id="public" /></label>
+          <label hidden><input type="checkbox" id="public" /> <span data-i18n="ed.publicList">List in public gallery</span></label>
           <button id="share-design" style="width:100%;margin-top:8px;"><i class="ti ti-share"></i> <span data-i18n="ed.share">Share</span></button>
           <div id="photo-row" style="margin-top:12px;" hidden>
             <button id="add-photo" style="width:100%;"><i class="ti ti-camera"></i> <span data-i18n="ed.addPhoto">Add match-day photo</span></button>
@@ -446,7 +446,7 @@
       <span id="stat" data-i18n="ed.stat.generating">generating seat map&hellip;</span>
       <span class="spacer"></span>
       <span class="legible-chip ok" id="message"></span>
-      <span><kbd>B</kbd> brush &middot; <kbd>F</kbd> fill &middot; <kbd>T</kbd> text &middot; <kbd>I</kbd> image &middot; <kbd>Z</kbd> zen</span>
+      <span><kbd>B</kbd> <span data-i18n="ed.hint.brush">brush</span> &middot; <kbd>F</kbd> <span data-i18n="ed.hint.fill">fill</span> &middot; <kbd>T</kbd> <span data-i18n="ed.hint.text">text</span> &middot; <kbd>I</kbd> <span data-i18n="ed.hint.image">image</span> &middot; <kbd>Z</kbd> <span data-i18n="ed.hint.zen">zen</span></span>
     </footer>
 
     <script type="module" src="/src/main.ts"></script>

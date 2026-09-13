@@ -1,5 +1,6 @@
 import { fetchProfile, thumbnailUrl, type GalleryItem } from '../net/api';
 
+import { t } from './i18n';
 /**
  * Profile overlay. Shows a user's name, the tifos they've published (created),
  * and the public tifos they've liked. Clicking any opens it via onPick (load to
@@ -10,19 +11,19 @@ export async function openProfile(userId: string, onPick: (id: string) => void):
   const backdrop = document.createElement('div');
   backdrop.className = 'feed-backdrop';
   backdrop.innerHTML = `
-    <div class="feed-panel" role="dialog" aria-modal="true" aria-label="Profile">
+    <div class="feed-panel" role="dialog" aria-modal="true" aria-label="${t('pf.title')}">
       <div class="feed-head">
-        <div class="feed-title" id="pf-name">Profile</div>
-        <div class="feed-sub" id="pf-sub">Loading…</div>
-        <button class="feed-close" aria-label="Close">&times;</button>
+        <div class="feed-title" id="pf-name">${t('pf.title')}</div>
+        <div class="feed-sub" id="pf-sub">${t('common.loading')}</div>
+        <button class="feed-close" aria-label="${t('common.close')}">&times;</button>
         <div class="feed-controls">
           <div class="feed-sorts">
-            <button class="feed-sort active" data-tab="created">Created</button>
-            <button class="feed-sort" data-tab="liked">Liked</button>
+            <button class="feed-sort active" data-tab="created">${t('pf.created')}</button>
+            <button class="feed-sort" data-tab="liked">${t('pf.liked')}</button>
           </div>
         </div>
       </div>
-      <div class="feed-grid" id="pf-grid"><div class="feed-loading">Loading…</div></div>
+      <div class="feed-grid" id="pf-grid"><div class="feed-loading">${t('common.loading')}</div></div>
     </div>
   `;
   document.body.appendChild(backdrop);
@@ -61,7 +62,7 @@ export async function openProfile(userId: string, onPick: (id: string) => void):
           <div class="feed-card-title">${escapeHtml(item.title)}</div>
           <div class="feed-card-by">${item.likeScore} ${item.likeScore === 1 ? 'like' : 'likes'}</div>
         </div>
-        <button class="feed-open primary">Open &amp; remix</button>
+        <button class="feed-open primary">${t('gal.open')}</button>
       `;
       const open = (): void => {
         close();
@@ -80,8 +81,8 @@ export async function openProfile(userId: string, onPick: (id: string) => void):
       `${profile.created.length} created · ${profile.liked.length} liked`;
     let tab: 'created' | 'liked' = 'created';
     const show = (): void => {
-      if (tab === 'created') renderGrid(profile.created, 'No public tifos yet. Publish one to show it here!');
-      else renderGrid(profile.liked, 'No liked tifos yet. Like designs in the feed to collect them here.');
+      if (tab === 'created') renderGrid(profile.created, t('pf.noCreated'));
+      else renderGrid(profile.liked, t('pf.noLiked'));
     };
     tabs.forEach((b) =>
       b.addEventListener('click', () => {

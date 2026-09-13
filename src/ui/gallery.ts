@@ -3,6 +3,7 @@ import {
   type GalleryItem, type GallerySort,
 } from '../net/api';
 
+import { t } from './i18n';
 /**
  * Community feed: a full-screen overlay of published tifos. The heart of the
  * sharing loop. Browse what others made, search by name, sort by recent or most
@@ -19,23 +20,23 @@ export async function openGallery(
   const backdrop = document.createElement('div');
   backdrop.className = 'feed-backdrop';
   backdrop.innerHTML = `
-    <div class="feed-panel" role="dialog" aria-modal="true" aria-label="Community feed">
+    <div class="feed-panel" role="dialog" aria-modal="true" aria-label="${t('gal.title')}">
       <div class="feed-head">
-        <div class="feed-title">Community feed</div>
-        <div class="feed-sub">Open any tifo to remix it, your changes start a fresh copy.</div>
-        <button class="feed-close" aria-label="Close">&times;</button>
+        <div class="feed-title">${t('gal.title')}</div>
+        <div class="feed-sub">${t('gal.sub')}</div>
+        <button class="feed-close" aria-label="${t('common.close')}">&times;</button>
         <div class="feed-controls">
-          <input type="search" class="feed-search" id="feed-search" placeholder="Search by name…" />
+          <input type="search" class="feed-search" id="feed-search" placeholder="${t('gal.search')}" />
           <div class="feed-sorts">
-            <button class="feed-sort active" data-sort="recent">Recent</button>
-            <button class="feed-sort" data-sort="likes">Most liked</button>
-            <button class="feed-sort feed-templates" id="feed-templates">Templates</button>
+            <button class="feed-sort active" data-sort="recent">${t('gal.recent')}</button>
+            <button class="feed-sort" data-sort="likes">${t('gal.liked')}</button>
+            <button class="feed-sort feed-templates" id="feed-templates">${t('gal.templates')}</button>
           </div>
         </div>
         <div class="feed-tags" id="feed-tags"></div>
       </div>
       <div class="feed-grid" id="feed-grid">
-        <div class="feed-loading">Loading published tifos…</div>
+        <div class="feed-loading">${t('gal.loading')}</div>
       </div>
     </div>
   `;
@@ -71,8 +72,8 @@ export async function openGallery(
     if (items.length === 0) {
       const filtering = search || templatesOnly || activeTags.size > 0;
       grid.innerHTML = filtering
-        ? '<div class="feed-empty">No tifos match those filters.</div>'
-        : '<div class="feed-empty">No public tifos yet, be the first! Design something, then tick “List in public gallery” and Save.</div>';
+        ? `<div class="feed-empty">${t('gal.noMatch')}</div>`
+        : `<div class="feed-empty">${t('gal.emptyAll')}</div>`;
       return;
     }
     for (const item of items) {
@@ -86,27 +87,27 @@ export async function openGallery(
           ? `<div class="feed-card-tags">${item.tags.slice(0, 4).map((t) => `<span class="feed-card-tag" data-tag="${escapeHtml(t)}">${escapeHtml(t)}</span>`).join('')}</div>`
           : '';
       const tmplBadge = item.isTemplate ? '<span class="feed-tmpl-badge">Template</span>' : '';
-      const photoBadge = item.hasPhoto ? '<span class="feed-photo-badge">Before / After</span>' : '';
+      const photoBadge = item.hasPhoto ? `<span class="feed-photo-badge">${t('gal.ba')}</span>` : '';
       card.innerHTML = `
         <div class="feed-thumb-wrap">
           ${thumb}
-          ${item.hasPhoto ? '<button class="feed-ba-btn" title="See it built in real life"><i class="ti ti-arrows-left-right"></i> Before / After</button>' : ''}
+          ${item.hasPhoto ? `<button class="feed-ba-btn" title="${t('gal.baT')}"><i class="ti ti-arrows-left-right"></i> ${t('gal.ba')}</button>` : ''}
         </div>
         <div class="feed-card-body">
           <div class="feed-card-title">${escapeHtml(item.title)} ${tmplBadge} ${photoBadge}</div>
           <div class="feed-card-by">by ${escapeHtml(item.ownerName)}</div>
           ${tagline}
           <div class="feed-votes">
-            <button class="feed-vote like ${item.myVote === 1 ? 'on' : ''}" title="Like" aria-label="Like">
+            <button class="feed-vote like ${item.myVote === 1 ? 'on' : ''}" title="${t('gal.like')}" aria-label="${t('gal.like')}">
               <i class="ti ti-arrow-big-up"></i><span class="feed-score">${item.likeScore}</span>
             </button>
-            <button class="feed-vote dislike ${item.myVote === -1 ? 'on' : ''}" title="Dislike" aria-label="Dislike">
+            <button class="feed-vote dislike ${item.myVote === -1 ? 'on' : ''}" title="${t('gal.dislike')}" aria-label="${t('gal.dislike')}">
               <i class="ti ti-arrow-big-down"></i>
             </button>
-            <button class="feed-report" title="Report this tifo" aria-label="Report"><i class="ti ti-flag"></i></button>
+            <button class="feed-report" title="${t('gal.report')}" aria-label="${t('gal.report')}"><i class="ti ti-flag"></i></button>
           </div>
         </div>
-        <button class="feed-open primary">Open &amp; remix</button>
+        <button class="feed-open primary">${t('gal.open')}</button>
       `;
       const open = (): void => {
         close();
@@ -162,10 +163,10 @@ export async function openGallery(
       reportBtn.addEventListener('click', async () => {
         const { promptModal } = await import('./modal');
         const reason = await promptModal({
-          title: 'Report this tifo',
-          message: 'What’s the problem? This goes to the moderators.',
+          title: t('gal.report'),
+          message: t('gal.reportMsg'),
           placeholder: 'e.g. hateful content, spam, stolen design',
-          confirmLabel: 'Submit report',
+          confirmLabel: t('gal.reportSend'),
           multiline: true,
           maxLength: 300,
         });
@@ -173,7 +174,7 @@ export async function openGallery(
         try {
           await reportDesign(item.id, reason.trim());
           reportBtn.classList.add('reported');
-          reportBtn.title = 'Reported: thank you';
+          reportBtn.title = t('gal.reported');
         } catch {
           /* ignore */
         }
@@ -247,7 +248,7 @@ export async function openGallery(
       const suggest = document.createElement('div');
       suggest.className = 'feed-tag-suggest';
       suggest.innerHTML =
-        '<span class="feed-tag-label">Popular:</span>' +
+        `<span class="feed-tag-label">${t('gal.popular')}</span>` +
         popular.slice(0, 12).map((t) => `<button class="feed-tag-chip" data-tag="${escapeHtml(t.slug)}">${escapeHtml(t.slug)}</button>`).join('');
       tagsBar.parentElement!.insertBefore(suggest, tagsBar);
       suggest.querySelectorAll('.feed-tag-chip').forEach((el) =>

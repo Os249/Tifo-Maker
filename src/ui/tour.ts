@@ -1,3 +1,5 @@
+import { t } from './i18n';
+
 /**
  * First-run guided tour. After onboarding, new users get a sequence of spotlight
  * coach-marks pointing at the major editor controls — what each does, and (the
@@ -27,64 +29,65 @@ export function markTourSeen(): void {
 
 interface TourStep {
   selector: string;
-  title: string;
-  body: string;
+  /** i18n keys, not literals: the tour is the one place a new user reads prose. */
+  titleKey: string;
+  bodyKey: string;
   place?: 'right' | 'left' | 'top' | 'bottom';
 }
 
 const STEPS: TourStep[] = [
   {
     selector: '.tool-rail',
-    title: 'Your tools',
-    body: 'Brush, Fill and Eraser paint the seats; Text and Image add words or a logo. Shapes drops crests, stars and more: add as many as you like, then “Bake all”. Select now lets you drag a box around any area to recolour or clear it. Hover any tool for its shortcut.',
+    titleKey: 'tour.tools',
+    bodyKey: 'tour.tools.b',
     place: 'right',
   },
   {
     selector: '#fg-well',
-    title: 'Your colors',
-    body: 'This is your active paint color. Click it to change it, hit “+ Color” to add any color to your palette, then click a swatch to paint with it.',
+    titleKey: 'tour.colors',
+    bodyKey: 'tour.colors.b',
     place: 'left',
   },
   {
     selector: '#rail-ai',
-    title: 'AI Designer',
-    body: 'Describe a display in plain words and the AI paints a fully editable tifo on the seats. “Super AI” designs the whole bowl at once; “Shuffle” gives instant free variations, no tokens needed.',
+    titleKey: 'tour.ai',
+    bodyKey: 'tour.ai.b',
     place: 'right',
   },
   {
     selector: '#rail-stadium',
-    title: 'Choose your stadium',
-    body: 'Pick the stadium your tifo is for and set the active area. Switching stadiums remaps your design onto the new bowl, so a display can be reused anywhere.',
+    titleKey: 'tour.stadium',
+    bodyKey: 'tour.stadium.b',
     place: 'right',
   },
   {
     selector: '#view-2d',
-    title: 'Design view',
-    body: 'This flat view is where you paint the choreography across all 60,000 seats. It’s where you’ll spend most of your time.',
+    titleKey: 'tour.design',
+    bodyKey: 'tour.design.b',
     place: 'bottom',
   },
   {
     selector: '#view-3d',
-    title: 'Stadium view',
-    body: 'See your design wrap around the real 3D bowl, and open the Match Day Simulator for a packed, cinematic night-match view with crowds, flags, smoke and choreography.',
+    titleKey: 'tour.stadiumView',
+    bodyKey: 'tour.stadiumView.b',
     place: 'bottom',
   },
   {
     selector: '#view-split',
-    title: 'Split view: both at once',
-    body: 'Paint on the left and watch the 3D stadium update live on the right. The best of both while you fine-tune.',
+    titleKey: 'tour.split',
+    bodyKey: 'tour.split.b',
     place: 'bottom',
   },
   {
     selector: '#save',
-    title: 'Save, share & produce',
-    body: 'Save to your account, publish to the community, or export match-day logistics (a distribution PDF, seat manifest and a fan QR code) from here.',
+    titleKey: 'tour.save',
+    bodyKey: 'tour.save.b',
     place: 'top',
   },
   {
     selector: '#gallery',
-    title: 'Get inspired',
-    body: 'Browse tifos from supporters worldwide: like, comment, and remix any of them into your own starting point.',
+    titleKey: 'tour.inspire',
+    bodyKey: 'tour.inspire.b',
     place: 'bottom',
   },
 ];
@@ -92,9 +95,9 @@ const STEPS: TourStep[] = [
 // Short, phone-native tour: fewer steps, targets the bottom ribbon + view tabs,
 // and ends on AI so finishing drops the user into the AI front door.
 const MOBILE_STEPS: TourStep[] = [
-  { selector: '.tool-rail', title: 'Your toolbar', body: 'Every tool lives down here. Tap one to use it, tap it again for its options.', place: 'top' },
-  { selector: '#view-3d', title: 'See it in 3D', body: 'Tap Stadium to see your tifo on the real bowl, then Match Day for the full night-match show.', place: 'bottom' },
-  { selector: '#rail-ai', title: 'Start with AI', body: 'Fastest way to a tifo: tap AI, describe it (or just your club), and watch it appear.', place: 'top' },
+  { selector: '.tool-rail', titleKey: 'tour.mtools', bodyKey: 'tour.mtools.b', place: 'top' },
+  { selector: '#view-3d', titleKey: 'tour.m3d', bodyKey: 'tour.m3d.b', place: 'bottom' },
+  { selector: '#rail-ai', titleKey: 'tour.mai', bodyKey: 'tour.mai.b', place: 'top' },
 ];
 
 /** Run the tour. Resolves when finished or skipped. */
@@ -120,10 +123,10 @@ export function startTour(): Promise<void> {
         <h4 class="tour-pop-title" id="tour-title"></h4>
         <p class="tour-pop-body" id="tour-body"></p>
         <div class="tour-pop-actions">
-          <button class="tour-skip" id="tour-skip">Skip tour</button>
+          <button class="tour-skip" id="tour-skip">${t('tour.skip')}</button>
           <div class="tour-nav">
-            <button class="tour-back" id="tour-back">Back</button>
-            <button class="tour-next primary" id="tour-next">Next</button>
+            <button class="tour-back" id="tour-back">${t('tour.back')}</button>
+            <button class="tour-next primary" id="tour-next">${t('tour.next')}</button>
           </div>
         </div>
       </div>`;
@@ -165,11 +168,11 @@ export function startTour(): Promise<void> {
       spot.style.height = `${r.height + pad * 2}px`;
 
       // Fill content.
-      (overlay.querySelector('#tour-step') as HTMLElement).textContent = `Step ${i + 1} of ${steps.length}`;
-      (overlay.querySelector('#tour-title') as HTMLElement).textContent = step.title;
-      (overlay.querySelector('#tour-body') as HTMLElement).textContent = step.body;
+      (overlay.querySelector('#tour-step') as HTMLElement).textContent = t('tour.step').replace('{n}', String(i + 1)).replace('{total}', String(steps.length));
+      (overlay.querySelector('#tour-title') as HTMLElement).textContent = t(step.titleKey);
+      (overlay.querySelector('#tour-body') as HTMLElement).textContent = t(step.bodyKey);
       (overlay.querySelector('#tour-back') as HTMLButtonElement).style.visibility = i === 0 ? 'hidden' : 'visible';
-      (overlay.querySelector('#tour-next') as HTMLButtonElement).textContent = i === steps.length - 1 ? 'Got it' : 'Next';
+      (overlay.querySelector('#tour-next') as HTMLButtonElement).textContent = i === steps.length - 1 ? t('tour.done') : t('tour.next');
 
       // Place the popover near the target, clamped to the viewport.
       pop.style.visibility = 'hidden';

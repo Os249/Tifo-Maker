@@ -29,6 +29,7 @@ import { isSignedIn, fetchMe, resendVerification } from '../net/api';
 import { openAuthModal } from './authModal';
 import { openAddEmailModal } from './openAddEmailModal';
 
+import { t } from './i18n';
 // Auto-resend the verification email at most once per session when AI is blocked.
 let verifyResent = false;
 
@@ -93,7 +94,7 @@ export function mountAiPanel(deps: AiPanelDeps): void {
         : `Hourly limit reached: resets in ${resetMins(q)} min`;
   const setQuota = (q: AiQuota | null): void => {
     if (!quotaEl) return;
-    quotaEl.textContent = q ? quotaText(q) : isSignedIn() ? '' : 'Sign in to use the AI designer.';
+    quotaEl.textContent = q ? quotaText(q) : isSignedIn() ? '' : t('err.aiSignIn');
   };
 
   // ---- admin lock (Phase 1 of the AI rebuild): gate the panel behind unlock ----
@@ -493,9 +494,9 @@ export function mountAiPanel(deps: AiPanelDeps): void {
       if (quotaEl) {
         quotaEl.textContent =
           err.reason === 'verify'
-            ? 'Verify your email to use the AI Designer.'
+            ? t('err.aiVerify')
             : !isSignedIn()
-              ? 'Sign in to use the AI Designer.'
+              ? t('err.aiSignIn')
               : '';
       }
     });

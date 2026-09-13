@@ -1,5 +1,6 @@
 import type { PatternPreset } from '../core/patterns';
 import { PALETTE_PRESETS as PALETTES } from '../core/template';
+import { t, tl } from './i18n';
 
 /**
  * First-run onboarding. Shown once (gated by a localStorage flag) on a normal
@@ -44,20 +45,15 @@ export interface QuickStart {
 // Intent-first starter templates — framed as outcomes, not features. Each maps
 // to a concrete editor setup the caller applies. "patterns" carries a default
 // pattern id the user lands on (changeable later in the Stadium panel).
-const STARTERS: { kind: StarterKind; icon: string; title: string; blurb: string; pattern: string | null }[] = [
-  { kind: 'blank', icon: '▢', title: 'Start blank', blurb: 'An empty bowl. Paint freely from scratch.', pattern: null },
-  { kind: 'patterns', icon: '▤', title: 'Stripes & patterns', blurb: 'Begin with hoops, halves, or a sash.', pattern: 'hoops' },
-  { kind: 'crest', icon: '◆', title: 'Club crest setup', blurb: 'A centered canvas, ready for your logo.', pattern: null },
-  { kind: 'text', icon: 'A', title: 'Typography / text', blurb: 'Start with a banner of big text.', pattern: null },
+const STARTERS: { kind: StarterKind; icon: string; titleKey: string; blurbKey: string; pattern: string | null }[] = [
+  { kind: 'blank', icon: '▢', titleKey: 'ob.blank', blurbKey: 'ob.blank.b', pattern: null },
+  { kind: 'patterns', icon: '▤', titleKey: 'ob.patterns', blurbKey: 'ob.patterns.b', pattern: 'hoops' },
+  { kind: 'crest', icon: '◆', titleKey: 'ob.crest', blurbKey: 'ob.crest.b', pattern: null },
+  { kind: 'text', icon: 'A', titleKey: 'ob.text', blurbKey: 'ob.text.b', pattern: null },
 ];
 
 // Default pattern offered inside the "Stripes & patterns" starter.
-const STARTER_PATTERNS: { id: string; label: string }[] = [
-  { id: 'hoops', label: 'Hoops' },
-  { id: 'split', label: 'Split stands' },
-  { id: 'sash', label: 'Diagonal sash' },
-  { id: 'gradient', label: 'Gradient' },
-];
+const STARTER_PATTERNS: string[] = ['hoops', 'split', 'sash', 'gradient'];
 
 /** Mini SVG swatch row previewing a palette's first three card colors. */
 function paletteSwatchRow(colors: string[]): string {
@@ -77,58 +73,58 @@ export function openOnboarding(patterns: PatternPreset[]): Promise<QuickStart | 
     const backdrop = document.createElement('div');
     backdrop.className = 'ob-backdrop';
     backdrop.innerHTML = `
-      <div class="ob-modal" role="dialog" aria-modal="true" aria-label="Welcome to Tifo Maker">
+      <div class="ob-modal" role="dialog" aria-modal="true" aria-label="${t('ob.aria')}">
         <div class="ob-hero">
           <div class="ob-brand">TIFO<b>MAKER</b></div>
-          <h2 class="ob-h2">Start your tifo</h2>
-          <p class="ob-lead">A blank 60,000-seat bowl is a lot. Name your project and pick a starting point, you can change everything later.</p>
+          <h2 class="ob-h2">${t('ob.title')}</h2>
+          <p class="ob-lead">${t('ob.lead')}</p>
         </div>
         <div class="ob-section">
-          <label class="ob-label" for="ob-name">Project name</label>
-          <input type="text" id="ob-name" class="ob-name-input" maxlength="80" placeholder="e.g. Derby Day Wall" value="My first tifo" />
+          <label class="ob-label" for="ob-name">${t('ob.name')}</label>
+          <input type="text" id="ob-name" class="ob-name-input" maxlength="80" placeholder="${t('ob.namePh')}" value="${t('ob.nameDefault')}" />
         </div>
         <div class="ob-section">
-          <div class="ob-label">Choose a starting point</div>
+          <div class="ob-label">${t('ob.start')}</div>
           <div class="ob-starters" id="ob-starters">
             ${STARTERS.map(
               (s, i) => `
               <button class="ob-starter ${i === 0 ? 'active' : ''}" data-kind="${s.kind}">
                 <span class="ob-starter-icon">${s.icon}</span>
-                <span class="ob-starter-title">${s.title}</span>
-                <span class="ob-starter-blurb">${s.blurb}</span>
+                <span class="ob-starter-title">${t(s.titleKey)}</span>
+                <span class="ob-starter-blurb">${t(s.blurbKey)}</span>
               </button>`,
             ).join('')}
           </div>
         </div>
         <div class="ob-section" id="ob-pattern-section" hidden>
-          <div class="ob-label">Which pattern?</div>
+          <div class="ob-label">${t('ob.which')}</div>
           <div class="ob-patterns" id="ob-patterns">
             ${STARTER_PATTERNS.map(
-              (p, i) => `<button class="ob-pattern ${i === 0 ? 'active' : ''}" data-pattern="${p.id}">${p.label}</button>`,
+              (p, i) => `<button class="ob-pattern ${i === 0 ? 'active' : ''}" data-pattern="${p}">${tl(p)}</button>`,
             ).join('')}
           </div>
         </div>
         <div class="ob-section">
-          <div class="ob-label">Pick your colors</div>
+          <div class="ob-label">${t('ob.colors')}</div>
           <div class="ob-palettes" id="ob-palettes">
             ${paletteNames
               .map(
                 (name, i) => `
               <button class="ob-palette ${i === 0 ? 'active' : ''}" data-palette="${name}">
                 <span class="ob-swatches">${paletteSwatchRow(PALETTES[name])}</span>
-                <span class="ob-palette-name">${name}</span>
+                <span class="ob-palette-name">${tl(name)}</span>
               </button>`,
               )
               .join('')}
           </div>
         </div>
         <div class="ob-actions">
-          <button class="ob-start primary">Start designing</button>
+          <button class="ob-start primary">${t('ob.go')}</button>
           <!-- The tour used to launch itself on top of everything else. Offered
                here it is a choice made by someone who wants it, at the one
                moment they are already deciding how to begin. -->
-          <button class="ob-tour">Start with a tour</button>
-          <button class="ob-skip">Skip</button>
+          <button class="ob-tour">${t('ob.tour')}</button>
+          <button class="ob-skip">${t('ob.skip')}</button>
         </div>
       </div>
     `;
@@ -213,7 +209,7 @@ export function openOnboarding(patterns: PatternPreset[]): Promise<QuickStart | 
         chosenKind = (btn as HTMLElement).dataset.kind as StarterKind;
         if (chosenKind === 'patterns') {
           patternSection.hidden = false;
-          chosenPattern = chosenPattern ?? STARTER_PATTERNS[0].id;
+          chosenPattern = chosenPattern ?? STARTER_PATTERNS[0];
         } else {
           patternSection.hidden = true;
           chosenPattern = null;
@@ -241,7 +237,7 @@ export function openOnboarding(patterns: PatternPreset[]): Promise<QuickStart | 
 
     const start = (wantsTour: boolean): void => {
       const nameInput = backdrop.querySelector('#ob-name') as HTMLInputElement | null;
-      const projectName = (nameInput?.value.trim() || 'My first tifo').slice(0, 80);
+      const projectName = (nameInput?.value.trim() || t('ob.nameDefault')).slice(0, 80);
       finish({ kind: chosenKind, paletteName: chosenPalette, patternId: chosenPattern, projectName, wantsTour });
     };
     backdrop.querySelector('.ob-start')!.addEventListener('click', () => start(false));
