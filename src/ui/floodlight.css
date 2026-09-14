@@ -1524,3 +1524,43 @@ body.gate { display:block; overflow-y:auto; background:var(--ink-0); }
 .m-sheet-body input[type="checkbox"], .m-sheet-body input[type="radio"] {
   width:24px; height:24px; flex:0 0 auto;
 }
+
+/* ---- AI progress -----------------------------------------------------------
+   A Super AI run makes two model calls and can take the better part of a
+   minute. A static line of text reads as a frozen app, so while a generation is
+   in flight the panel shows a moving bar, the stage it has reached, and an
+   elapsed counter — proof of life rather than a fake percentage, since the
+   server gives no progress signal to measure against. */
+.ai-progress { margin-top: 10px; }
+.ai-progress-bar {
+  height: 4px;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--text-3) 22%, transparent);
+  overflow: hidden;
+}
+.ai-progress-bar > span {
+  display: block;
+  width: 38%;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--blue-solid);
+  animation: aiProgressSlide 1.35s ease-in-out infinite;
+}
+@keyframes aiProgressSlide {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(263%); }
+}
+.ai-progress-label {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 11px;
+  color: var(--text-3);
+  margin: 6px 0 0;
+}
+#ai-progress-elapsed { font-variant-numeric: tabular-nums; opacity: 0.75; }
+/* Without motion the bar would read as a stuck 38% — show a full, calm track
+   and let the stage text and the counter carry the progress instead. */
+@media (prefers-reduced-motion: reduce) {
+  .ai-progress-bar > span { width: 100%; animation: none; opacity: 0.45; }
+}

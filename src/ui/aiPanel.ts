@@ -61,6 +61,9 @@ export function mountAiPanel(deps: AiPanelDeps): void {
   const genBtn = $<HTMLButtonElement>('#ai-generate');
   const superBtn = $<HTMLButtonElement>('#ai-generate-super');
   const statusEl = $('#ai-status');
+  const progressEl = $('#ai-progress');
+  const progressStageEl = $('#ai-progress-stage');
+  const progressElapsedEl = $('#ai-progress-elapsed');
   const errorEl = $('#ai-error');
   const resultEl = $('#ai-result');
   const summaryEl = $('#ai-summary');
@@ -81,6 +84,49 @@ export function mountAiPanel(deps: AiPanelDeps): void {
   let shuffleN = 0; // increments per free offline "shuffle"
 
   const setStatus = (msg: string): void => { if (statusEl) statusEl.textContent = msg; };
+
+  // ---- progress ------------------------------------------------------------
+  // The server returns one response for the whole pipeline, so there is no real
+  // progress to report. Rather than fake a percentage, show a moving bar, the
+  // stage the run has reached (timed to the actual pipeline) and an elapsed
+  // counter, so a 45-second Super run never looks like a hung app.
+  type Stage = { at: number; text: string };
+  const SUPER_STAGES: Stage[] = [
+    { at: 0, text: 'Choosing the words…' },
+    { at: 7, text: 'Designing the whole bowl…' },
+    { at: 22, text: 'Still designing — the whole stadium takes a moment…' },
+    { at: 40, text: 'Nearly there…' },
+  ];
+  const PLAIN_STAGES: Stage[] = [
+    { at: 0, text: 'Designing your tifo…' },
+    { at: 12, text: 'Still working…' },
+  ];
+  const POLISH_STAGES: Stage[] = [
+    { at: 0, text: 'Looking at the render…' },
+    { at: 10, text: 'Reworking the design…' },
+  ];
+  let progressTimer: number | null = null;
+
+  const stopProgress = (): void => {
+    if (progressTimer !== null) { clearInterval(progressTimer); progressTimer = null; }
+    if (progressEl) progressEl.hidden = true;
+  };
+
+  const startProgress = (stages: Stage[]): void => {
+    stopProgress();
+    if (!progressEl) return;
+    const started = Date.now();
+    const tick = (): void => {
+      const secs = Math.floor((Date.now() - started) / 1000);
+      let stage = stages[0].text;
+      for (const s of stages) if (secs >= s.at) stage = s.text;
+      if (progressStageEl) progressStageEl.textContent = stage;
+      if (progressElapsedEl) progressElapsedEl.textContent = `${secs}s`;
+    };
+    tick();
+    progressEl.hidden = false;
+    progressTimer = window.setInterval(tick, 1000);
+  };
   const setError = (msg: string | null): void => {
     if (!errorEl) return;
     errorEl.style.display = msg ? '' : 'none';
@@ -295,7 +341,8 @@ export function mountAiPanel(deps: AiPanelDeps): void {
     if (superBtn) superBtn.disabled = true;
     if (regenBtn) regenBtn.disabled = true;
     if (polishBtn) polishBtn.disabled = true;
-    setStatus(useSuper ? 'Super AI is designing the whole stadium…' : 'Designing your tifo…');
+    setStatus('');
+    startProgress(useSuper ? SUPER_STAGES : PLAIN_STAGES);
     try {
       // Mode 3 sends the bowl geometry so the director can plan per-stand.
       const stadium = useSuper ? describeStadiumContext(buildStadiumContext(map)) : undefined;
@@ -314,6 +361,7 @@ export function mountAiPanel(deps: AiPanelDeps): void {
         return;
       }
       await applySpec(res.spec);
+      stopProgress();
       setStatus(res.source === 'model' ? `Designed with Premium AI${useSuper ? ' (Super AI)' : ''}.` : 'Designed with the Quick Designer.');
       setQuota(res.quota);
       // Surface server diagnostics in the panel AND the footer "ground bar".
@@ -367,9 +415,12 @@ export function mountAiPanel(deps: AiPanelDeps): void {
         setError(err.message || 'AI is admin-only right now.');
         setLocked(true);
       } else {
-        setError(err.message || 'Generation failed. Please try again.');
+        setError(err.message || 'The design could not be generated. Try again, or use the Quick Designer for an instant offline version.');
       }
     } finally {
+      // Whatever happened — success, the "busy" choice panel, a thrown error —
+      // the bar must not be left spinning over a finished run.
+      stopProgress();
       busy = false;
       genBtn.disabled = false;
       if (superBtn) superBtn.disabled = false;
@@ -415,19 +466,24 @@ export function mountAiPanel(deps: AiPanelDeps): void {
     if (superBtn) superBtn.disabled = true;
     if (regenBtn) regenBtn.disabled = true;
     if (polishBtn) polishBtn.disabled = true;
-    setStatus('Polishing with AI critique…');
+    setStatus('');
+    startProgress(POLISH_STAGES);
     try {
       const res = await critiqueAiTifo(spec, captureRender(), lastStadium);
       await applySpec(res.spec);
       const bar = document.getElementById('message');
+      stopProgress();
       setStatus(res.source === 'model' ? 'Polished by AI critique.' : 'Kept your design (critique suggested no change).');
       if (bar) bar.textContent = res.source === 'model' ? 'AI: polished ✓' : '';
       if (res.notes && res.notes.length) setError(res.notes.join('  ·  '));
     } catch (e) {
       const err = e as AiError;
       setStatus('');
-      setError(err.message || 'Polish failed. Please try again.');
+      setError(err.message || 'Polish could not run — your design is untouched. Try again in a moment.');
     } finally {
+      // Whatever happened — success, the "busy" choice panel, a thrown error —
+      // the bar must not be left spinning over a finished run.
+      stopProgress();
       busy = false;
       genBtn.disabled = false;
       if (superBtn) superBtn.disabled = false;

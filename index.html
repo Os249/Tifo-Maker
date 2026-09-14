@@ -226,6 +226,10 @@
           <button id="ai-generate-super" class="primary" style="width:100%;margin-top:8px;"><i class="ti ti-building-stadium"></i> <span data-i18n="ed.ai.super">Super AI: design full stadium</span></button>
           <p class="hint" style="font-size:10px;color:var(--text-3);margin:4px 0 0;" data-i18n="ed.ai.superHint">Plans every stand together: portraits, text and colour blocking across the whole bowl.</p>
           <button id="ai-shuffle" style="width:100%;margin-top:8px;" title="Compose a multi-stand design instantly, offline: no tokens, no quota" data-i18n-attr="title:ed.ai.shuffleT"><i class="ti ti-arrows-shuffle"></i> <span data-i18n="ed.ai.shuffle">Shuffle: free offline variation</span></button>
+          <div id="ai-progress" class="ai-progress" hidden aria-live="polite">
+            <div class="ai-progress-bar"><span></span></div>
+            <p class="ai-progress-label"><span id="ai-progress-stage"></span><span id="ai-progress-elapsed"></span></p>
+          </div>
           <p id="ai-status" class="hint" style="font-size:11px;color:var(--text-3);margin:8px 0 0;min-height:14px;"></p>
           <div id="ai-error" class="hint" style="display:none;font-size:11px;color:var(--flare);margin-top:8px;"></div>
           <div id="ai-result" style="display:none;margin-top:10px;">
