@@ -1,0 +1,55 @@
+<!doctype html>
+<!-- Dev-only specimen sheet for scripts/font-specimen.mts. Not a Vite build input. -->
+<html lang="en"><head><meta charset="UTF-8"/><title>font specimen</title></head>
+<body style="margin:0;background:#111">
+<script type="module">
+  /** Rasterise text the way the spec compiler does, then blow it back up so a
+   *  seat grid is what you are judging — not a smooth screen font. */
+  const COLS = 300, ROWS = 40, ZOOM = 4;
+
+  window.__specimen = async (fonts, text, rtl) => {
+    const out = [];
+    for (const f of fonts) {
+      const px = 128;
+      const css = `bold ${px}px "${f.family}"`;
+      const probe = document.createElement('canvas').getContext('2d');
+      probe.font = css;
+      const m = probe.measureText(text);
+      const asc = m.actualBoundingBoxAscent || px * 0.8;
+      const desc = m.actualBoundingBoxDescent || px * 0.24;
+      const gh = asc + desc;
+      const pad = 6;
+      const src = document.createElement('canvas');
+      src.width = Math.max(2, Math.ceil(m.width) + pad * 2);
+      src.height = Math.max(2, Math.ceil(gh) + pad * 2);
+      const sx = src.getContext('2d');
+      sx.font = css; sx.textBaseline = 'alphabetic';
+      if (rtl) sx.direction = 'rtl';
+      sx.fillStyle = '#fff';
+      sx.fillText(text, rtl ? src.width - pad : pad, pad + asc);
+
+      // down to the seat grid, then hard-threshold: a seat is on or off.
+      const small = document.createElement('canvas');
+      small.width = COLS; small.height = ROWS;
+      const sm = small.getContext('2d');
+      sm.imageSmoothingEnabled = true;
+      sm.drawImage(src, 0, 0, COLS, ROWS);
+      const img = sm.getImageData(0, 0, COLS, ROWS);
+      const d = img.data;
+      for (let i = 0; i < d.length; i += 4) {
+        const on = d[i + 3] > 110;
+        d[i] = on ? 255 : 20; d[i+1] = on ? 255 : 20; d[i+2] = on ? 255 : 24; d[i+3] = 255;
+      }
+      sm.putImageData(img, 0, 0);
+
+      const big = document.createElement('canvas');
+      big.width = COLS * ZOOM; big.height = ROWS * ZOOM;
+      const bx = big.getContext('2d');
+      bx.imageSmoothingEnabled = false;
+      bx.drawImage(small, 0, 0, big.width, big.height);
+      out.push({ id: f.id, png: big.toDataURL('image/png') });
+    }
+    return out;
+  };
+  window.__ready = true;
+</script></body></html>
