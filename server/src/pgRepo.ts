@@ -13,6 +13,9 @@ import type {
   Lead,
   LeadsRepository,
   NewDesign,
+  AiEventsRepository,
+  AiOutcome,
+  AiStats,
   RevisionRow,
   SeedDesign,
   ShareStats,
@@ -78,6 +81,93 @@ export class PgAiUsageRepository implements AiUsageRepository {
       return { allowed: true, used, limit, remaining: Math.max(0, limit - used) };
     }
     return { allowed: false, ...(await this.get(userId, limit)) };
+  }
+}
+
+const OUTCOMES: AiOutcome[] = ['model', 'cache', 'quick', 'quota', 'busy', 'blocked', 'invalid'];
+const zero = (): Record<AiOutcome, number> & { all: number } => ({
+  model: 0, cache: 0, quick: 0, quota: 0, busy: 0, blocked: 0, invalid: 0, all: 0,
+});
+
+/** Postgres AI history. One row per request — see the ai_events comment in schema.sql. */
+export class PgAiEventsRepository implements AiEventsRepository {
+  constructor(private readonly pool: pg.Pool) {}
+
+  async record(e: { userId: string | null; mode: 'std' | 'super'; outcome: AiOutcome }): Promise<void> {
+    await this.pool.query(
+      'INSERT INTO ai_events (user_id, mode, outcome) VALUES ($1, $2, $3)',
+      [e.userId, e.mode, e.outcome],
+    );
+  }
+
+  async stats(days: number): Promise<AiStats> {
+    const since = `${days} days`;
+    const [tot, win, perDay, top, cap, modes, metered, first] = await Promise.all([
+      this.pool.query('SELECT outcome, count(*)::int AS n FROM ai_events GROUP BY outcome'),
+      this.pool.query(
+        `SELECT outcome, count(*)::int AS n FROM ai_events WHERE at > now() - $1::interval GROUP BY outcome`,
+        [since],
+      ),
+      this.pool.query(
+        `SELECT to_char(at AT TIME ZONE 'utc','YYYY-MM-DD') AS day,
+                count(*) FILTER (WHERE outcome = 'model')::int   AS model,
+                count(*) FILTER (WHERE outcome = 'quick')::int   AS quick,
+                count(*) FILTER (WHERE outcome = 'blocked')::int AS blocked
+         FROM ai_events WHERE at > now() - $1::interval GROUP BY day ORDER BY day`,
+        [since],
+      ),
+      this.pool.query(
+        `SELECT coalesce(u.username, 'admin / unlocked') AS username,
+                count(*) FILTER (WHERE e.outcome = 'model')::int AS model,
+                count(*) FILTER (WHERE e.outcome = 'quick')::int AS quick,
+                count(*) FILTER (WHERE e.outcome = 'quota')::int AS quota,
+                count(*)::int AS total, max(e.at) AS last
+         FROM ai_events e LEFT JOIN users u ON u.id = e.user_id
+         WHERE e.at > now() - $1::interval
+         GROUP BY 1 ORDER BY model DESC, total DESC LIMIT 20`,
+        [since],
+      ),
+      // Not windowed: "has anyone ever hit the cap" is the question.
+      this.pool.query(
+        `SELECT coalesce(u.username, 'admin / unlocked') AS username,
+                count(*)::int AS times, max(e.at) AS last
+         FROM ai_events e LEFT JOIN users u ON u.id = e.user_id
+         WHERE e.outcome = 'quota' GROUP BY 1 ORDER BY times DESC LIMIT 20`,
+      ),
+      this.pool.query(
+        `SELECT mode, count(*)::int AS n FROM ai_events WHERE at > now() - $1::interval GROUP BY mode`,
+        [since],
+      ),
+      this.pool.query('SELECT count(*)::int AS n FROM ai_usage WHERE used > 0'),
+      this.pool.query('SELECT min(at) AS first FROM ai_events'),
+    ]);
+
+    const fold = (rows: { outcome: string; n: number }[]) => {
+      const out = zero();
+      for (const r of rows) {
+        if ((OUTCOMES as string[]).includes(r.outcome)) out[r.outcome as AiOutcome] = Number(r.n);
+        out.all += Number(r.n);
+      }
+      return out;
+    };
+    const m = { std: 0, super: 0 };
+    for (const r of modes.rows) {
+      if (r.mode === 'super') m.super = Number(r.n); else m.std += Number(r.n);
+    }
+    return {
+      days,
+      since: first.rows[0]?.first ? new Date(first.rows[0].first).toISOString() : null,
+      totals: fold(tot.rows),
+      window: fold(win.rows),
+      perDay: perDay.rows.map((r) => ({ day: String(r.day), model: Number(r.model), quick: Number(r.quick), blocked: Number(r.blocked) })),
+      topUsers: top.rows.map((r) => ({
+        username: String(r.username), model: Number(r.model), quick: Number(r.quick),
+        quota: Number(r.quota), total: Number(r.total), last: new Date(r.last).toISOString(),
+      })),
+      hitCap: cap.rows.map((r) => ({ username: String(r.username), times: Number(r.times), last: new Date(r.last).toISOString() })),
+      modes: m,
+      meteredAccounts: Number(metered.rows[0]?.n ?? 0),
+    };
   }
 }
 

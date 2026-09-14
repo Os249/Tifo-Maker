@@ -22,7 +22,7 @@
 
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
-import type { AiUsageRepository } from './repo';
+import type { AiEventsRepository, AiOutcome, AiUsageRepository } from './repo';
 import { secondsToNextPeriod } from './repo';
 import { validateSpec, type TifoSpec } from '../../src/core/tifoSpec';
 import { refineSpec } from '../../src/core/specRefine';
@@ -71,6 +71,9 @@ function busyRetrySec(): number {
 export interface AiRouteDeps {
   /** Quota store (retained for when AI reopens to all users; unused during the lock). */
   aiUsage: AiUsageRepository;
+  /** History of every request, for the admin AI section. Optional so tests and
+   *  older wiring keep working; when absent nothing is recorded. */
+  aiEvents?: AiEventsRepository;
   /** Resolve a user id from the request's bearer token (null = anonymous). */
   userOf: (req: FastifyRequest) => Promise<string | null>;
   /** Whether a user id belongs to an ADMIN_USERNAMES admin. */
@@ -144,6 +147,15 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
   };
 
   /** Unlimited use: admins and paid accounts. Everyone else is metered hourly. */
+  /**
+   * Write down what happened. Best-effort in the strongest sense: a telemetry
+   * failure must never turn into a failed generation, so this is never awaited
+   * and never throws.
+   */
+  const note = (userId: string | null, mode: 'std' | 'super', outcome: AiOutcome): void => {
+    void deps.aiEvents?.record({ userId, mode, outcome }).catch(() => {});
+  };
+
   const isUnlimited = (a: Access): boolean => a.kind === 'admin' || (a.kind === 'user' && a.pro);
   /** May the caller use the premium model at all? freeForAll is the kill-switch. */
   const premiumAllowed = (a: Access): boolean =>
@@ -187,11 +199,16 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
 
     const body = (req.body ?? {}) as { prompt?: unknown; mode?: unknown; stadium?: unknown; engine?: unknown };
     const prompt = typeof body.prompt === 'string' ? body.prompt.trim() : '';
-    if (!prompt) return reply.code(400).send({ error: 'a prompt is required' });
-    if (prompt.length > MAX_PROMPT) return reply.code(400).send({ error: `prompt too long (max ${MAX_PROMPT} characters)` });
+    const mode0: 'std' | 'super' = body.mode === 'super' ? 'super' : 'std';
+    const who0 = access.kind === 'user' ? access.userId : null;
+    if (!prompt) { note(who0, mode0, 'invalid'); return reply.code(400).send({ error: 'a prompt is required' }); }
+    if (prompt.length > MAX_PROMPT) {
+      note(who0, mode0, 'invalid');
+      return reply.code(400).send({ error: `prompt too long (max ${MAX_PROMPT} characters)` });
+    }
     // First-line safety screen — block clearly-harmful prompts before the model.
     const safe = screenPrompt(prompt);
-    if (!safe.ok) return reply.code(400).send({ error: safe.message, reason: 'blocked' });
+    if (!safe.ok) { note(who0, mode0, 'blocked'); return reply.code(400).send({ error: safe.message, reason: 'blocked' }); }
 
     // Mode 3 (Super AI): whole-bowl director prompt + the client's stadium context.
     const isSuper = body.mode === 'super';
@@ -208,7 +225,11 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
     // used automatically when premium is switched off. Never consumes a credit.
     if (engine === 'offline' || !premiumAllowed(access)) {
       const q = quickDesign(prompt, isSuper);
-      if (!q.valid || !q.spec) return reply.code(502).send({ error: 'could not produce a valid design', errors: q.errors });
+      if (!q.valid || !q.spec) {
+        note(userId, mode0, 'invalid');
+        return reply.code(502).send({ error: 'could not produce a valid design', errors: q.errors });
+      }
+      note(userId, mode0, 'quick');
       return reply.code(200).send({ spec: refineSpec(q.spec), quota: quotaInfo, source: 'quick', notes: [] });
     }
 
@@ -216,17 +237,20 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
     const key = cacheKey('gen', isSuper ? 'super' : 'std', prompt, stadium, activeProvider());
     const hit = genCache.get(key);
     if (hit) {
+      note(userId, mode0, 'cache');
       return reply.code(200).send({ spec: hit.spec, quota: quotaInfo, source: hit.source, notes: ['Served instantly from cache.'] });
     }
 
     // Hourly cap reached → offer the choice (Quick Designer now, or wait for reset).
     if (usage && usage.remaining <= 0) {
+      note(userId, mode0, 'quota');
       return reply.code(200).send({ needsChoice: true, reason: 'quota', retryAfterSec: secondsToNextPeriod(), quota: quotaInfo });
     }
 
     // Daily circuit breaker: budget spent → route to the Quick Designer instead of
     // burning the provider's daily quota. Same "choice" UX, no error shown.
     if (premiumExhausted()) {
+      note(userId, mode0, 'busy');
       return reply.code(200).send({ needsChoice: true, reason: 'busy', retryAfterSec: busyRetrySec(), quota: quotaInfo });
     }
 
@@ -240,6 +264,7 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
     if (!r.valid || !r.spec) {
       // Premium couldn't deliver — we don't admit failure; the client offers a choice
       // (use the free Quick Designer now, or wait out a short timer and retry).
+      note(userId, mode0, 'busy');
       return reply.code(200).send({ needsChoice: true, reason: 'busy', retryAfterSec: busyRetrySec(), quota: quotaInfo });
     }
 
@@ -249,6 +274,7 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
       const c = await deps.aiUsage.consume(userId, deps.freeLimit);
       quota = { admin: false, used: c.used, limit: c.limit, remaining: c.remaining, resetInSec: secondsToNextPeriod() };
     }
+    note(userId, mode0, 'model');
 
     // Phase 4: deterministic art-director pass — fix legibility/contrast/field.
     const spec = refineSpec(r.spec);

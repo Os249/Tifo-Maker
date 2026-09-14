@@ -13,7 +13,7 @@ import { renderDistributionPdf } from '../../src/export/distributionPdf';
 
 import { tmpdir } from 'node:os';
 import { readFile, unlink } from 'node:fs/promises';
-import type { AiUsageRepository, AuthRepository, DesignRepository, EventsRepository, LeadsRepository, SocialRepository } from './repo';
+import type { AiEventsRepository, AiUsageRepository, AuthRepository, DesignRepository, EventsRepository, LeadsRepository, SocialRepository } from './repo';
 import { registerAiRoutes, verifyUnlock } from './aiRoutes';
 import type { EmailSender } from './email';
 import type { StadiumSubmissionRepository } from './stadiumRepo';
@@ -143,6 +143,7 @@ export interface AppOptions {
   leads?: LeadsRepository;
   /** AI Tifo Designer quota store. When present, the /api/ai/* routes are enabled. */
   aiUsage?: AiUsageRepository;
+  aiEvents?: AiEventsRepository;
   /** Free AI generations per account (default 5). */
   aiFreeLimit?: number;
   /** Optional community stadium submissions store. When present, /api/stadiums/* is enabled. */
@@ -461,6 +462,17 @@ export async function buildApp(
   // business intelligence, not public information.
   if (options.stats) {
     const stats = options.stats;
+    // AI: what people actually did with the designer. ai_usage is only a meter
+    // (one row per user, current hour only), so this reads the ai_events
+    // history instead — the difference is the whole point of the section.
+    app.get('/api/admin/ai', async (req, reply) => {
+      if (!(await adminAccess(req))) return reply.code(403).send({ error: 'admin access required' });
+      if (!options.aiEvents) return { days: 0, since: null, unavailable: true };
+      const q = req.query as { days?: string };
+      const days = Math.min(365, Math.max(1, Number(q.days) || 30));
+      return options.aiEvents.stats(days);
+    });
+
     app.get('/api/admin/shares', async (req, reply) => {
       if (!(await adminAccess(req))) return reply.code(403).send({ error: 'admin access required' });
       const q = req.query as { days?: string };
@@ -605,12 +617,14 @@ export async function buildApp(
   if (options.aiUsage) {
     registerAiRoutes(app, {
       aiUsage: options.aiUsage,
+      aiEvents: options.aiEvents,
       userOf,
       isAdmin: isAdminUser,
       adminPassword: process.env.AI_ADMIN_PASSWORD,
       freeLimit: options.aiFreeLimit ?? 10,
       // Launch: AI is free for any signed-in, email-verified user. Set
-      // AI_FREE_FOR_ALL=false later to enforce the per-account monthly free limit.
+      // AI_FREE_FOR_ALL=false later to enforce the per-account free limit
+      // (which is HOURLY — see aiPeriod; this comment used to say monthly).
       freeForAll: (process.env.AI_FREE_FOR_ALL ?? 'true') !== 'false',
       userState: async (userId) => {
         const u = await auth.getUserById(userId).catch(() => null);

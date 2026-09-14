@@ -12,6 +12,9 @@ import type {
   Lead,
   LeadsRepository,
   NewDesign,
+  AiEventsRepository,
+  AiOutcome,
+  AiStats,
   RevisionRow,
   SeedDesign,
   ShareStats,
@@ -57,6 +60,78 @@ export class MemoryAiUsageRepository implements AiUsageRepository {
     const n = u + 1;
     this.rows.set(userId, { used: n, period: aiPeriod() });
     return { allowed: true, used: n, limit, remaining: Math.max(0, limit - n) };
+  }
+}
+
+const zeroOutcomes = (): Record<AiOutcome, number> & { all: number } => ({
+  model: 0, cache: 0, quick: 0, quota: 0, busy: 0, blocked: 0, invalid: 0, all: 0,
+});
+
+/** In-memory AI history. Same shape as Postgres, so the dashboard behaves in dev. */
+export class MemoryAiEventsRepository implements AiEventsRepository {
+  private rows: { userId: string | null; at: number; mode: 'std' | 'super'; outcome: AiOutcome }[] = [];
+  constructor(private readonly usernames: (id: string | null) => string = () => 'unknown') {}
+
+  async record(e: { userId: string | null; mode: 'std' | 'super'; outcome: AiOutcome }): Promise<void> {
+    this.rows.push({ ...e, at: Date.now() });
+    if (this.rows.length > 20000) this.rows.splice(0, this.rows.length - 20000);
+  }
+
+  async stats(days: number): Promise<AiStats> {
+    const from = Date.now() - days * 86400_000;
+    const win = this.rows.filter((r) => r.at > from);
+    const fold = (rows: typeof this.rows) => {
+      const out = zeroOutcomes();
+      for (const r of rows) { out[r.outcome]++; out.all++; }
+      return out;
+    };
+    const name = (id: string | null): string => (id ? this.usernames(id) : 'admin / unlocked');
+
+    const byDay = new Map<string, { model: number; quick: number; blocked: number }>();
+    for (const r of win) {
+      const day = new Date(r.at).toISOString().slice(0, 10);
+      const d = byDay.get(day) ?? { model: 0, quick: 0, blocked: 0 };
+      if (r.outcome === 'model') d.model++;
+      else if (r.outcome === 'quick') d.quick++;
+      else if (r.outcome === 'blocked') d.blocked++;
+      byDay.set(day, d);
+    }
+
+    const byUser = new Map<string, { model: number; quick: number; quota: number; total: number; last: number }>();
+    for (const r of win) {
+      const k = name(r.userId);
+      const u = byUser.get(k) ?? { model: 0, quick: 0, quota: 0, total: 0, last: 0 };
+      if (r.outcome === 'model') u.model++;
+      if (r.outcome === 'quick') u.quick++;
+      if (r.outcome === 'quota') u.quota++;
+      u.total++;
+      u.last = Math.max(u.last, r.at);
+      byUser.set(k, u);
+    }
+
+    const caps = new Map<string, { times: number; last: number }>();
+    for (const r of this.rows.filter((x) => x.outcome === 'quota')) {
+      const k = name(r.userId);
+      const c = caps.get(k) ?? { times: 0, last: 0 };
+      c.times++; c.last = Math.max(c.last, r.at);
+      caps.set(k, c);
+    }
+
+    return {
+      days,
+      since: this.rows.length ? new Date(Math.min(...this.rows.map((r) => r.at))).toISOString() : null,
+      totals: fold(this.rows),
+      window: fold(win),
+      perDay: [...byDay.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([day, d]) => ({ day, ...d })),
+      topUsers: [...byUser.entries()]
+        .map(([username, u]) => ({ username, model: u.model, quick: u.quick, quota: u.quota, total: u.total, last: new Date(u.last).toISOString() }))
+        .sort((a, b) => b.model - a.model || b.total - a.total).slice(0, 20),
+      hitCap: [...caps.entries()]
+        .map(([username, c]) => ({ username, times: c.times, last: new Date(c.last).toISOString() }))
+        .sort((a, b) => b.times - a.times).slice(0, 20),
+      modes: { std: win.filter((r) => r.mode !== 'super').length, super: win.filter((r) => r.mode === 'super').length },
+      meteredAccounts: 0,
+    };
   }
 }
 

@@ -44,6 +44,22 @@ export const ADMIN_HTML = `<!doctype html>
   button.primary{ background:var(--green); color:#04220e; border-color:var(--green); font-weight:600; }
   button.primary:hover{ background:#4ac95c; }
 
+  /* Section tabs. The dashboard used to be one long scroll of nine peer
+     panels — everything visible, nothing findable. Each tab is now one
+     question, and the URL hash names it so a section can be linked to. */
+  .tabs{ position:sticky; top:49px; z-index:19; display:flex; gap:4px; overflow-x:auto; scrollbar-width:none;
+         padding:8px 20px; background:rgba(13,17,23,.94); backdrop-filter:blur(10px); border-bottom:1px solid var(--line); }
+  .tabs::-webkit-scrollbar{ display:none; }
+  .tab{ flex:0 0 auto; display:inline-flex; align-items:center; gap:7px; padding:7px 14px; border-radius:999px;
+        border:1px solid transparent; background:transparent; color:var(--mut); font-size:13px; font-weight:600;
+        cursor:pointer; white-space:nowrap; min-height:34px; }
+  .tab:hover{ background:var(--bg3); color:var(--tx); border-color:var(--line); }
+  .tab[aria-current="true"]{ background:var(--bg3); color:var(--tx); border-color:var(--line2); }
+  .tab .pill{ font-size:11px; font-weight:600; padding:1px 7px; border-radius:999px; background:var(--line); color:var(--mut); }
+  .tab[aria-current="true"] .pill{ background:var(--blue); color:#04203f; }
+  .tab .pill.warn{ background:var(--gold); color:#2a1d00; }
+  .lede{ color:var(--mut); font-size:13px; margin:14px 0 0; max-width:74ch; }
+
   main{ max-width:1240px; margin:0 auto; padding:16px 20px 64px; }
   h2.sec{ font-size:12px; text-transform:uppercase; letter-spacing:.09em; color:var(--mut); margin:30px 0 11px; font-weight:600; display:flex; align-items:center; gap:9px; flex-wrap:wrap; }
   h2.sec:first-child{ margin-top:14px; }
@@ -173,6 +189,8 @@ export const ADMIN_HTML = `<!doctype html>
   </form>
 </div>
 
+<nav id="tabs" class="tabs" style="display:none" aria-label="Dashboard sections"></nav>
+
 <main id="dash" style="display:none">
   <div id="dash-body"></div>
   <p class="note" id="generated"></p>
@@ -185,6 +203,9 @@ export const ADMIN_HTML = `<!doctype html>
 export const ADMIN_JS = `
 var UNLOCK_KEY = 'tifo_ai_unlock_v1';
 var currentDays = 30;
+/* The free ceiling, for the copy in the AI tab. Mirrors AI_FREE_LIMIT's default
+   in server.ts; it is a sentence, not a calculation, so a drift here is cosmetic. */
+var AI_LIMIT_HINT = 10;
 
 function el(id){ return document.getElementById(id); }
 function getUnlock(){ try { return localStorage.getItem(UNLOCK_KEY); } catch(e){ return null; } }
@@ -216,10 +237,13 @@ async function post(path, body){
   return { ok: res.ok, status: res.status, data: data };
 }
 
+function hideTabs(){ var n = el('tabs'); if (n) n.style.display = 'none'; }
+
 function showLogin(message){
   el('login').style.display = '';
   el('dash').style.display = 'none';
   el('ctrls').style.display = 'none';
+  hideTabs();
   el('msg').textContent = message || '';
 }
 function showDash(){
@@ -256,15 +280,16 @@ async function loadAll(){
     api('/api/admin/traffic?days=' + currentDays),
     api('/api/funnel?days=' + currentDays),
     api('/api/admin/shares?days=' + currentDays),
-    api('/api/admin/feedback?limit=50')
+    api('/api/admin/feedback?limit=50'),
+    api('/api/admin/ai?days=' + currentDays)
   ]);
-  var ov = results[0], tr = results[1], fn = results[2], sh = results[3], fb = results[4];
+  var ov = results[0], tr = results[1], fn = results[2], sh = results[3], fb = results[4], ai = results[5];
   if (!ov.ok){
     if (ov.status === 403){ clearUnlock(); showLogin('Wrong or expired password. Sign in again.'); return; }
     setStatus('Failed to load (' + ov.status + ').');
     return;
   }
-  render(ov.data || {}, (tr.ok && tr.data) ? tr.data : null, (fn.ok && fn.data) ? fn.data : { steps:[], days: currentDays }, (sh.ok && sh.data) ? sh.data : null, (fb.ok && fb.data) ? fb.data : null);
+  render(ov.data || {}, (tr.ok && tr.data) ? tr.data : null, (fn.ok && fn.data) ? fn.data : { steps:[], days: currentDays }, (sh.ok && sh.data) ? sh.data : null, (fb.ok && fb.data) ? fb.data : null, (ai.ok && ai.data) ? ai.data : null);
   setStatus('Updated ' + new Date().toLocaleTimeString());
 }
 
@@ -508,7 +533,12 @@ function tableCard(head, rows, cols){
     var r = rows[i], td='';
     for (var c=0;c<cols.length;c++){
       var v = cols[c](r);
-      td += '<td' + (c===0?' class="name" title="'+esc(String(v))+'"':'') + '>' + (c===0?esc(String(v)):fmt(v)) + '</td>';
+      /* Every column but the first used to go through the number formatter, so
+         a text cell (a date, a label) came out as "0". Numbers still format;
+         anything else is printed as written. */
+      var isNum = (typeof v === 'number') || (typeof v === 'string' && v !== '' && !isNaN(Number(v)));
+      var cell = (c === 0 || !isNum) ? esc(String(v)) : fmt(v);
+      td += '<td' + (c===0?' class="name" title="'+esc(String(v))+'"':'') + '>' + cell + '</td>';
     }
     body += '<tr>' + td + '</tr>';
   }
@@ -800,87 +830,271 @@ function trafficSection(tr, days){
   return html;
 }
 
-function render(ov, tr, funnel, sh, fb){
-  var t = ov.totals || {};
-  var r7 = ov.recent7d || {};
+/* ---------- sections ----------
+
+   One tab answers one question. The data is fetched once and kept, so
+   switching tabs is instant and does not re-hit the API; only the window
+   picker and Refresh reload.                                              */
+
+var TABS = [
+  { id:'board',    label:'Board' },
+  { id:'traffic',  label:'Where from' },
+  { id:'funnel',   label:'What they do' },
+  { id:'ai',       label:'AI' },
+  { id:'library',  label:'Library' },
+  { id:'feedback', label:'Feedback' }
+];
+var DATA = null;
+var currentTab = 'board';
+
+function tabFromUrl(){
+  var h = (location.hash || '').replace('#', '');
+  for (var i = 0; i < TABS.length; i++) if (TABS[i].id === h) return h;
+  try { var saved = localStorage.getItem('tifo_admin_tab'); if (saved) {
+    for (var j = 0; j < TABS.length; j++) if (TABS[j].id === saved) return saved;
+  } } catch(e){}
+  return 'board';
+}
+
+function tabBadge(id){
+  if (!DATA) return '';
+  var t = (DATA.ov && DATA.ov.totals) || {};
+  var mod = (DATA.ov && DATA.ov.moderation) || {};
+  if (id === 'ai'){
+    var a = DATA.ai;
+    if (a && a.window) return '<span class="pill">' + fmt(a.window.all) + '</span>';
+    return '';
+  }
+  if (id === 'feedback'){
+    var n = (DATA.fb && DATA.fb.items) ? DATA.fb.items.length : 0;
+    return n ? '<span class="pill">' + fmt(n) + '</span>' : '';
+  }
+  if (id === 'library'){
+    var queue = (Number(mod.openReports)||0) + (Number(mod.unverifiedPhotos)||0) + (Number(mod.pendingStadiums)||0);
+    return queue ? '<span class="pill warn">' + fmt(queue) + '</span>' : '';
+  }
+  if (id === 'traffic'){
+    var v = DATA.tr && DATA.tr.totals ? DATA.tr.totals.views : null;
+    return v ? '<span class="pill">' + fmt(v) + '</span>' : '';
+  }
+  void t;
+  return '';
+}
+
+function renderTabs(){
+  var html = '';
+  for (var i = 0; i < TABS.length; i++){
+    var tb = TABS[i];
+    html += '<button class="tab" type="button" data-tab="' + tb.id + '" aria-current="' + (tb.id === currentTab) + '">'
+          + esc(tb.label) + tabBadge(tb.id) + '</button>';
+  }
+  el('tabs').innerHTML = html;
+  var btns = el('tabs').querySelectorAll('.tab');
+  for (var k = 0; k < btns.length; k++){
+    btns[k].addEventListener('click', function(e){ selectTab(e.currentTarget.getAttribute('data-tab')); });
+  }
+}
+
+function selectTab(id){
+  currentTab = id;
+  try { localStorage.setItem('tifo_admin_tab', id); } catch(e){}
+  if (location.hash !== '#' + id) history.replaceState(null, '', '#' + id);
+  renderTabs();
+  paintSection();
+  window.scrollTo(0, 0);
+}
+
+/* ---- board: the strip, then the handful of numbers worth a glance ---- */
+function boardSection(){
+  var ov = DATA.ov, t = ov.totals || {}, r7 = ov.recent7d || {}, series = ov.series || {};
+  var html = headerStrip(ov, DATA.tr, DATA.sh);
+  html += '<p class="lede">Every other tab is one question in detail. This one is the glance: is it growing, and is anything waiting for you.</p>';
+
+  html += '<h2 class="sec">The numbers</h2><div class="grid">';
+  html += kpi('Accounts', t.users, fmt(r7.signups) + ' in the last 7 days', true);
+  html += kpi('Designs', t.designs, fmt(r7.designs) + ' in the last 7 days', true);
+  html += kpi('Published', t.publicDesigns, 'visible in the community', true);
+  html += kpi('Templates', t.templates);
+  html += aiBoardKpi();
+  html += kpi('B2B leads', t.leads, fmt(r7.leads) + ' in the last 7 days', true);
+  html += '</div>';
+
   var mod = ov.moderation || {};
-  var series = ov.series || {};
-  var days = Number(funnel && funnel.days) || currentDays;
+  var queue = (Number(mod.openReports)||0) + (Number(mod.unverifiedPhotos)||0) + (Number(mod.pendingStadiums)||0);
+  if (queue){
+    html += '<h2 class="sec">Waiting for you</h2><div class="grid">';
+    html += queueKpi('Open reports', mod.openReports, 'Moderation panel', '/app?admin=reports');
+    html += queueKpi('Unverified photos', mod.unverifiedPhotos, 'Moderation panel', '/app?admin=photos');
+    html += queueKpi('Pending stadiums', mod.pendingStadiums, 'Stadium panel', '/app?admin=stadiums');
+    html += '</div>';
+  }
 
-  el('mode').textContent = (ov.mode === 'memory') ? 'in-memory (dev)' : 'postgres';
-  el('mode').className = (ov.mode === 'memory') ? 'badge warn' : 'badge good';
+  html += '<h2 class="sec">Growth</h2><div class="grid two">';
+  html += chartCard('New accounts per day', series.signups, '#58a6ff');
+  html += chartCard('New designs per day', series.designs, '#d29922');
+  html += '</div>';
+  return html;
+}
 
-  /* Four groups, not nine sections. Each answers one question:
-       1. How is it going        - the strip, read first and then stop
-       2. Where people come from - acquisition
-       3. What they do here      - funnel, sharing, engagement
-       4. What is in the library - designs, moderation, leaderboards, reference
-     Time windows are stated per panel from the data, never from the picker. */
-  var html = headerStrip(ov, tr, sh);
+/* The old KPI read sum(used) from ai_usage and called it lifetime. That meter
+   holds one row per user carrying only the CURRENT hour, reset to 1 on the
+   hour — so a heavy user who last generated once yesterday counted as 1. The
+   real total comes from ai_events; the meter number is not shown any more. */
+function aiBoardKpi(){
+  var a = DATA.ai;
+  if (!a || a.unavailable || !a.totals) {
+    return kpi('AI generations', '\u2014', 'history not recorded yet', true);
+  }
+  return kpi('AI generations', a.totals.model, fmt(a.totals.all) + ' requests in total', true);
+}
 
-  /* ---- 2. acquisition ---- */
-  html += trafficSection(tr, days);
+function trafficTab(){ return trafficSection(DATA.tr, DATA.days); }
 
-  /* ---- 3. what they do here ---- */
-  html += '<h2 class="sec">What people do here</h2>';
-
-  var funnelShort = 'consent-gated, so far below the page views above';
-  html += '<h3 class="sub">Editor funnel <span class="hint">last ' + days + ' days &middot; ' + funnelShort + '</span></h3>';
-  html += funnelHtml(funnel);
+function funnelTab(){
+  var t = (DATA.ov && DATA.ov.totals) || {};
+  var html = '<h2 class="sec">Editor funnel <span class="hint">last ' + DATA.days + ' days &middot; consent-gated</span></h2>';
+  html += funnelHtml(DATA.funnel);
   html += '<p class="note">These steps only fire after a visitor accepts analytics, so they will never reconcile with the traffic numbers. Read the drop-off <em>between</em> steps, not the totals.</p>';
-
-  html += '<h3 class="sub">Sharing <span class="hint">' + esc(spanLabel(sh && sh.daily, days)) + ' &middot; counts everyone</span></h3>';
-  html += sharesSection(sh, days);
-
-  html += '<h3 class="sub">Engagement <span class="hint">all time</span></h3><div class="grid">';
+  html += '<h2 class="sec">Sharing <span class="hint">' + esc(spanLabel(DATA.sh && DATA.sh.daily, DATA.days)) + ' &middot; counts everyone</span></h2>';
+  html += sharesSection(DATA.sh, DATA.days);
+  html += '<h2 class="sec">Engagement <span class="hint">all time</span></h2><div class="grid">';
   html += kpi('Likes / votes', t.votes);
   html += kpi('Comments', t.comments);
   html += kpi('Follows', t.follows);
   html += kpi('Match photos', t.photos, fmt(t.verifiedPhotos) + ' verified', true);
   html += '</div>';
+  return html;
+}
 
-  /* ---- what people told me ---- */
-  html += feedbackSection(fb);
-
-  /* ---- 4. the library, and the reference numbers ---- */
-  var queue = (Number(mod.openReports)||0) + (Number(mod.unverifiedPhotos)||0) + (Number(mod.pendingStadiums)||0);
-  html += '<h2 class="sec">The library ' + (queue ? '<span class="badge warn">' + fmt(queue) + ' waiting</span>' : '') + '</h2>';
-
-  html += '<div class="grid">';
-  html += kpi('Accounts', t.users, fmt(r7.signups) + ' in the last 7 days', true);
-  html += kpi('Designs', t.designs, fmt(r7.designs) + ' in the last 7 days', true);
+function libraryTab(){
+  var ov = DATA.ov, t = ov.totals || {}, mod = ov.moderation || {};
+  var html = '<h2 class="sec">The library</h2><div class="grid">';
+  html += kpi('Designs', t.designs);
   html += kpi('Published', t.publicDesigns, 'visible in the community', true);
   html += kpi('Templates', t.templates);
-  html += kpi('AI generations', t.aiGenerations, fmt(t.aiUsers) + ' accounts used AI', true);
-  html += kpi('B2B leads', t.leads, fmt(r7.leads) + ' in the last 7 days', true);
+  html += kpi('Approved stadiums', mod.approvedStadiums, 'live in the picker', true);
   html += '</div>';
 
+  var queue = (Number(mod.openReports)||0) + (Number(mod.unverifiedPhotos)||0) + (Number(mod.pendingStadiums)||0);
   if (queue){
-    html += '<div class="grid">';
+    html += '<h2 class="sec">Moderation queue <span class="badge warn">' + fmt(queue) + ' waiting</span></h2><div class="grid">';
     html += queueKpi('Open reports', mod.openReports, 'Moderation panel', '/app?admin=reports');
     html += queueKpi('Unverified photos', mod.unverifiedPhotos, 'Moderation panel', '/app?admin=photos');
     html += queueKpi('Pending stadiums', mod.pendingStadiums, 'Stadium panel', '/app?admin=stadiums');
-    html += kpi('Approved stadiums', mod.approvedStadiums, 'live in the picker', true);
     html += '</div>';
     html += '<p class="note">Each of these opens the editor with the right panel already up. You need to be signed in as an admin \u2014 the Moderation button only appears once the server confirms it.</p>';
   }
 
-  html += '<div class="grid two">';
-  html += chartCard('New accounts per day', series.signups, '#58a6ff');
-  html += chartCard('New designs per day', series.designs, '#d29922');
-  html += '</div>';
-
-  html += '<div class="grid two">';
+  html += '<h2 class="sec">Leaderboards</h2><div class="grid two">';
   html += tableCard(['Most-viewed designs','Views','Likes'], ov.topDesigns,
     [function(d){ return d.title || 'Untitled'; }, function(d){ return d.views; }, function(d){ return d.likeScore; }]);
   html += tableCard(['Stadium','Designs'], ov.topStadiums,
     [function(d){ return d.templateId; }, function(d){ return d.count; }]);
   html += '</div>';
+  return html;
+}
 
+function feedbackTab(){ return feedbackSection(DATA.fb); }
+
+/* ---- AI: what people actually did with the designer ----
+
+   Everything here comes from ai_events, not ai_usage. The meter only ever
+   knew the current hour, so before this table existed none of these questions
+   had an answer: how much has been generated, has anyone hit the cap, how
+   often does premium fail, how many people take the free offline designer.  */
+function aiTab(){
+  var a = DATA.ai;
+  if (!a || a.unavailable){
+    return '<h2 class="sec">AI</h2><div class="card"><p class="empty">AI history is not being recorded on this server.</p></div>';
+  }
+  var W = a.window || {}, T = a.totals || {};
+  var since = a.since ? new Date(a.since) : null;
+  var sinceLabel = since ? 'since ' + since.toLocaleDateString() : 'nothing recorded yet';
+
+  var html = '<h2 class="sec">AI <span class="hint">last ' + a.days + ' days &middot; totals ' + esc(sinceLabel) + '</span></h2>';
+  html += '<p class="lede">Only <b>premium</b> generations cost money and spend a credit. A cache hit, the offline Quick Designer, a cap, a busy model and a blocked prompt are all free \u2014 and all of them used to be invisible.</p>';
+
+  html += '<div class="grid">';
+  html += kpi('Premium generations', W.model, fmt(T.model) + ' all time', true);
+  html += kpi('Quick Designer', W.quick, 'free offline engine', true);
+  html += kpi('Served from cache', W.cache, 'free, no model call', true);
+  html += kpi('Hit the hourly cap', W.quota, fmt(T.quota) + ' all time', true);
+  html += kpi('Model busy or failed', W.busy, 'fell back to the choice', true);
+  html += kpi('Blocked by safety', W.blocked, fmt(T.blocked) + ' all time', true);
+  html += '</div>';
+
+  /* The question that started this: has anyone actually been turned away? */
+  html += '<h2 class="sec">Has anyone hit the limit? <span class="hint">all time, not the window</span></h2>';
+  if (!a.hitCap || !a.hitCap.length){
+    html += '<div class="card"><p class="empty">Nobody has ever reached the hourly cap.</p>'
+         +  '<p class="note">The free ceiling is per <b>hour</b> (see aiPeriod), so it takes ' + fmt(AI_LIMIT_HINT) + ' premium designs within 60 minutes to meet it. If AI is going to be the reason people subscribe, this is the number to change.</p></div>';
+  } else {
+    html += tableCard(['Account','Times capped','Last time'], a.hitCap,
+      [function(d){ return d.username; }, function(d){ return d.times; }, function(d){ return new Date(d.last).toLocaleString(); }]);
+  }
+
+  html += '<h2 class="sec">Per day <span class="hint">last ' + a.days + ' days</span></h2>';
+  html += '<div class="grid two">';
+  html += chartCard('Premium generations', seriesOf(a.perDay, 'model'), '#a371f7');
+  html += chartCard('Quick Designer', seriesOf(a.perDay, 'quick'), '#39c5cf');
+  html += '</div>';
+
+  html += '<h2 class="sec">Who uses it <span class="hint">last ' + a.days + ' days</span></h2>';
+  html += tableCard(['Account','Premium','Quick','Capped','Last used'], a.topUsers,
+    [function(d){ return d.username; }, function(d){ return d.model; }, function(d){ return d.quick; },
+     function(d){ return d.quota; }, function(d){ return new Date(d.last).toLocaleDateString(); }]);
+
+  var modes = a.modes || { std:0, super:0 };
+  html += '<h2 class="sec">Reference</h2><div class="grid">';
+  html += kpi('Whole-bowl (Super)', modes.super, 'director prompt', true);
+  html += kpi('Single design', modes.std, 'standard mode', true);
+  html += kpi('Accounts metered', a.meteredAccounts, 'have an ai_usage row', true);
+  html += kpi('All requests', W.all, fmt(T.all) + ' all time', true);
+  html += '</div>';
+  html += '<p class="note">Prompt text is deliberately not stored \u2014 only what happened to each request. The outcome is what pricing and capacity need; the text is the part that would put this table at odds with the privacy page.</p>';
+  return html;
+}
+
+/* chartCard wants a plain {day,count} series. */
+function seriesOf(perDay, key){
+  var out = [];
+  for (var i = 0; i < (perDay || []).length; i++) out.push({ day: perDay[i].day, count: perDay[i][key] });
+  return out;
+}
+
+function paintSection(){
+  var html = '';
+  if (currentTab === 'board') html = boardSection();
+  else if (currentTab === 'traffic') html = trafficTab();
+  else if (currentTab === 'funnel') html = funnelTab();
+  else if (currentTab === 'ai') html = aiTab();
+  else if (currentTab === 'library') html = libraryTab();
+  else if (currentTab === 'feedback') html = feedbackTab();
   el('dash-body').innerHTML = html;
+}
+
+function render(ov, tr, funnel, sh, fb, ai){
+  DATA = { ov: ov, tr: tr, funnel: funnel, sh: sh, fb: fb, ai: ai, days: Number(funnel && funnel.days) || currentDays };
+
+  el('mode').textContent = (ov.mode === 'memory') ? 'in-memory (dev)' : 'postgres';
+  el('mode').className = (ov.mode === 'memory') ? 'badge warn' : 'badge good';
+  el('tabs').style.display = '';
+
+  currentTab = tabFromUrl();
+  renderTabs();
+  paintSection();
   el('generated').textContent = 'Snapshot generated ' + (ov.generatedAt ? new Date(ov.generatedAt).toLocaleString() : 'now') + '.';
 }
 
+/* Changing the hash — pasting a link, or Back/Forward — is a same-document
+   navigation: the module does not re-run, so without this the URL would say
+   one section while the page showed another. replaceState rather than push, so
+   Back leaves the dashboard instead of walking six tabs first. */
+window.addEventListener('hashchange', function(){
+  if (!DATA) return;
+  var id = tabFromUrl();
+  if (id !== currentTab) selectTab(id);
+});
 
 el('login-form').addEventListener('submit', doLogin);
 el('refresh').addEventListener('click', function(){ loadAll(); });

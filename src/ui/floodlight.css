@@ -237,6 +237,11 @@ header {
   transition:transform .1s, border-color .14s;
 }
 .fg-well:hover { transform:scale(1.05); border-color:var(--blue); }
+/* A colour that has been tried but not kept. The dashed ring says "this is not
+   in your swatches yet" without a line of copy, and + Color lights up to say
+   where it goes. */
+.fg-well.unsaved { border-style:dashed; border-color:var(--blue); }
+.add-swatch.ready { border-style:solid; border-color:var(--blue); color:var(--blue); background:rgba(28,111,224,.12); }
 .fg-meta { flex:1; min-width:0; display:flex; flex-direction:column; gap:1px; }
 .fg-hex { font-family:var(--font-data); font-size:13px; color:var(--text-1); text-transform:uppercase; }
 .fg-sub { font-size:11px; color:var(--text-3); }

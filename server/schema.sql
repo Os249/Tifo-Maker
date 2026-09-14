@@ -217,8 +217,31 @@ CREATE TABLE IF NOT EXISTS ai_usage (
   used       INT NOT NULL DEFAULT 0,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
--- Monthly metering: usage counts reset when the period (YYYY-MM) changes.
+-- Metering resets when the period changes. The period is HOURLY
+-- ("YYYY-MM-DDTHH", see aiPeriod) — this comment used to say monthly, which is
+-- what everyone believed until someone read the code.
 ALTER TABLE ai_usage ADD COLUMN IF NOT EXISTS period TEXT;
+
+-- Every AI request, kept. ai_usage is a meter, not a record: it holds one row
+-- per user carrying only the CURRENT hour's count, and a new hour resets it to
+-- 1 — so "how much has this person ever generated", "has anyone hit the cap"
+-- and "how often does premium fail" were all unanswerable. The dashboard's
+-- lifetime "AI generations" KPI was summing that meter and undercounting
+-- accordingly.
+--
+-- The prompt is deliberately NOT stored. The outcome is what pricing and
+-- capacity need; the text is the sensitive part and keeping it would put this
+-- table at odds with what legal.html promises.
+CREATE TABLE IF NOT EXISTS ai_events (
+  id      BIGSERIAL PRIMARY KEY,
+  user_id UUID REFERENCES users(id) ON DELETE SET NULL,  -- null = admin/unlocked
+  at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  mode    TEXT NOT NULL,     -- 'std' | 'super'
+  outcome TEXT NOT NULL      -- model | cache | quick | quota | busy | blocked | invalid
+);
+CREATE INDEX IF NOT EXISTS ai_events_at_idx      ON ai_events (at DESC);
+CREATE INDEX IF NOT EXISTS ai_events_user_idx    ON ai_events (user_id, at DESC);
+CREATE INDEX IF NOT EXISTS ai_events_outcome_idx ON ai_events (outcome, at DESC);
 
 -- Sharing system: a public view counter on each design, a branded social-card
 -- image, and a per-platform share/open log for analytics.

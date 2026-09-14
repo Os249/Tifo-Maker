@@ -1266,3 +1266,47 @@ if (process.env.DATABASE_URL) {
 } else {
   console.log('postgres repos: skipped (set DATABASE_URL to run)');
 }
+
+// ---------- AI history ----------
+//
+// ai_usage is a METER: one row per user holding only the current hour, reset to
+// 1 on the hour. Everything the admin AI section answers — how much has been
+// generated, has anyone hit the cap, how often the model fails — needs the
+// ai_events history instead, and the old dashboard KPI summed the meter and
+// called it lifetime. These assertions are what keep the two apart.
+{
+  const { MemoryAiEventsRepository, MemoryAiUsageRepository } = await import('../src/memoryRepo.js');
+  const events = new MemoryAiEventsRepository((id) => (id === 'u1' ? 'ahlawy' : 'someone'));
+
+  for (let i = 0; i < 4; i++) await events.record({ userId: 'u1', mode: 'std', outcome: 'model' });
+  await events.record({ userId: 'u1', mode: 'super', outcome: 'quota' });
+  await events.record({ userId: 'u1', mode: 'std', outcome: 'quota' });
+  await events.record({ userId: null, mode: 'std', outcome: 'quick' });
+  await events.record({ userId: 'u1', mode: 'std', outcome: 'blocked' });
+
+  const st = await events.stats(30);
+  assert.equal(st.totals.model, 4, 'premium generations counted');
+  assert.equal(st.totals.quota, 2, 'cap hits counted');
+  assert.equal(st.totals.all, 8, 'every request counted, not just the billable ones');
+  assert.equal(st.window.all, 8, 'all of them fall inside a 30-day window');
+  assert.equal(st.modes.super, 1, 'whole-bowl mode split out');
+  assert.equal(st.hitCap.length, 1, 'the account that hit the cap is named');
+  assert.equal(st.hitCap[0].username, 'ahlawy');
+  assert.equal(st.hitCap[0].times, 2);
+  assert.equal(st.topUsers[0].username, 'ahlawy', 'busiest account first');
+  assert.equal(st.topUsers[0].model, 4);
+  assert.ok(st.topUsers.some((u) => u.username === 'admin / unlocked'), 'admin traffic is attributed, not dropped');
+  assert.ok(st.perDay.length >= 1 && st.perDay[0].model === 4, 'per-day series carries premium counts');
+
+  // The distinction the whole section exists for: the meter forgets, the
+  // history does not. Consuming twice inside one hour leaves the meter at 2
+  // forever-ish, while the history keeps every request that ever happened.
+  const meter = new MemoryAiUsageRepository();
+  await meter.consume('u1', 10);
+  await meter.consume('u1', 10);
+  const m = await meter.get('u1', 10);
+  assert.equal(m.used, 2, 'the meter knows only this hour');
+  assert.ok(st.totals.all > m.used, 'the history knows more than the meter ever could');
+
+  console.log('ai history: all assertions passed (outcomes, cap attribution, mode split, meter-vs-history)');
+}

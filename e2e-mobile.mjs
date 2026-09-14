@@ -338,23 +338,58 @@ console.log('\n— the palette works by touch —');
   // clicked it. Desktop browsers open a picker for that; mobile ones do not
   // open one for an input that is not on screen, so the tap did nothing at all.
   // What has to be true is that the tap lands ON a real colour input.
-  const hits = await p.evaluate(() => ['#add-swatch', '#fg-well'].map((sel) => {
-    const r = document.querySelector(sel).getBoundingClientRect();
-    const at = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
-    return { sel, ok: at?.tagName === 'INPUT' && at.type === 'color' && r.width > 0 && r.x >= 0 };
-  }));
-  for (const h of hits) check(`${h.sel} opens a real colour input`, h.ok);
+  const hits = await p.evaluate(() => {
+    const at = (sel) => {
+      const r = document.querySelector(sel).getBoundingClientRect();
+      return { el: document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2), r };
+    };
+    const well = at('#fg-well');
+    const add = at('#add-swatch');
+    return {
+      // The well IS the picker: the tap has to land on a real, on-screen
+      // colour input. A hidden one off-canvas is what mobile browsers ignore.
+      well: well.el?.tagName === 'INPUT' && well.el.type === 'color' && well.r.width > 0 && well.r.x >= 0,
+      // "+ Color" is a plain button now — the commit, not a second picker.
+      add: add.el?.id === 'add-swatch' && add.r.width >= 24 && add.r.height >= 24,
+    };
+  });
+  check('the colour well opens a real colour input', hits.well);
+  check('"+ Color" is a tappable button of its own', hits.add);
 
   const before = await p.$$eval('#palette .swatch', (e) => e.length);
+  // Dragging through a picker fires `input` for every shade you pass. Each one
+  // used to become a swatch, so looking at colours filled the palette with
+  // things nobody chose. Picking previews; "+ Color" is what keeps it.
   await p.evaluate(() => {
-    const input = document.querySelector('#add-swatch').closest('.color-trigger').querySelector('input[type=color]');
-    input.value = '#ff8800';
-    input.dispatchEvent(new Event('input', { bubbles: true }));
+    const input = document.querySelector('#fg-well').closest('.color-trigger').querySelector('input[type=color]');
+    for (const hex of ['#ff0000', '#ee2200', '#dd4400', '#cc6600', '#ff8800']) {
+      input.value = hex;
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+    input.dispatchEvent(new Event('change', { bubbles: true }));
   });
   await p.waitForTimeout(300);
+  const afterPicks = await p.$$eval('#palette .swatch', (e) => e.length);
+  check('trying colours does not add any of them', afterPicks === before, `${before} -> ${afterPicks}`);
+  check('the tried colour is previewed', (await p.$eval('#fg-hex', (e) => e.textContent)).toLowerCase() === '#ff8800');
+  check('and it says it is not kept yet', await p.$eval('#fg-well', (e) => e.classList.contains('unsaved')));
+
+  await p.tap('#add-swatch');
+  await p.waitForTimeout(300);
   const after = await p.$$eval('#palette .swatch', (e) => e.length);
-  check('picking a colour adds and selects it', after === before + 1
-    && (await p.$eval('#fg-hex', (e) => e.textContent)).toLowerCase() === '#ff8800', `${before} -> ${after}`);
+  check('"+ Color" keeps exactly one', after === before + 1, `${before} -> ${after}`);
+  check('and the well settles', !(await p.$eval('#fg-well', (e) => e.classList.contains('unsaved'))));
+
+  // With nothing tried, the button must still do something: open the picker.
+  check('"+ Color" is never a dead button', await p.evaluate(() => {
+    const input = document.querySelector('#fg-well').closest('.color-trigger').querySelector('input[type=color]');
+    let opened = false;
+    const spy = () => { opened = true; };
+    input.addEventListener('click', spy, { once: true });
+    document.getElementById('add-swatch').click();
+    input.removeEventListener('click', spy);
+    return opened;
+  }));
 
   // A swatch could only be edited by double-clicking and only removed by
   // right-clicking, so a phone palette was add-only. Hold opens both.

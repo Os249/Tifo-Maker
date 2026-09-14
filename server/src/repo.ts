@@ -395,6 +395,43 @@ export interface AiUsageRepository {
   consume(userId: string, limit: number): Promise<{ allowed: boolean } & AiUsage>;
 }
 
+/**
+ * What happened to one AI request.
+ *
+ *  model   the premium model produced a design — the ONLY outcome that spends
+ *          a credit, and the only one that costs money
+ *  cache   an identical brief was served from the result cache, free
+ *  quick   the free offline Quick Designer ran (their choice, or premium off)
+ *  quota   the hourly cap was reached, so the user was offered the choice
+ *  busy    the daily budget was spent, or the model failed to deliver
+ *  blocked the prompt safety screen refused it
+ *  invalid the request never got as far as a design (bad or over-long prompt)
+ */
+export type AiOutcome = 'model' | 'cache' | 'quick' | 'quota' | 'busy' | 'blocked' | 'invalid';
+
+export interface AiEventsRepository {
+  /** Best-effort: telemetry must never fail a generation. */
+  record(e: { userId: string | null; mode: 'std' | 'super'; outcome: AiOutcome }): Promise<void>;
+  stats(days: number): Promise<AiStats>;
+}
+
+export interface AiStats {
+  days: number;
+  /** Since the table started collecting — say so in the UI, it is not "ever". */
+  since: string | null;
+  totals: Record<AiOutcome, number> & { all: number };
+  window: Record<AiOutcome, number> & { all: number };
+  /** Premium generations per day in the window. */
+  perDay: { day: string; model: number; quick: number; blocked: number }[];
+  /** Busiest accounts in the window, most premium generations first. */
+  topUsers: { username: string; model: number; quick: number; quota: number; total: number; last: string }[];
+  /** Everyone who has ever been turned away by the hourly cap. */
+  hitCap: { username: string; times: number; last: string }[];
+  modes: { std: number; super: number };
+  /** Accounts that have ever had a row in ai_usage (the meter), for contrast. */
+  meteredAccounts: number;
+}
+
 /** Current hourly metering period, e.g. "2026-06-28T14" (UTC). Usage resets each hour. */
 export function aiPeriod(d: Date = new Date()): string {
   const p = (n: number): string => String(n).padStart(2, '0');

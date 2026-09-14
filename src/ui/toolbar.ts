@@ -178,15 +178,33 @@ export function mountToolbar(
   const palEl = $('#palette');
   const fgWell = $('#fg-well') as unknown as HTMLButtonElement;
   const fgHex = $('#fg-hex');
+  const addBtn = $('#add-swatch') as HTMLButtonElement;
   const colorCounts = (): number[] => {
     const counts = new Array(store.palette.length).fill(0);
     for (let i = 0; i < store.cells.length; i++) counts[store.cells[i]]++;
     return counts;
   };
+  /**
+   * A colour that has been PICKED but not added to the palette yet.
+   *
+   * Picking used to add on every `input` event, and a desktop picker fires that
+   * continuously while you drag — so sliding through a gradient to look at a
+   * colour deposited a swatch for every shade you passed, and the palette
+   * filled with things nobody chose. Picking now only previews; the "+ Color"
+   * button is what commits.
+   */
+  let pendingHex: string | null = null;
+  const fgSub = document.querySelector('#ctx-colors .fg-sub');
+
   const reflectFg = (): void => {
-    const hex = store.palette[editor.colorIndex] ?? '#000000';
+    const active = store.palette[editor.colorIndex] ?? '#000000';
+    const hex = pendingHex ?? active;
     fgWell.style.background = hex;
     fgHex.textContent = hex.toLowerCase();
+    const unsaved = pendingHex !== null && store.palette.every((c) => c.toLowerCase() !== pendingHex);
+    fgWell.classList.toggle('unsaved', unsaved);
+    if (fgSub) fgSub.textContent = i18nT(unsaved ? 'ed.colors.notAdded' : 'ed.colors.painting');
+    addBtn?.classList.toggle('ready', unsaved);
   };
   const renderPalette = (): void => {
     palEl.innerHTML = '';
@@ -202,6 +220,7 @@ export function mountToolbar(
       b.setAttribute('aria-label', `${i18nT('ed.colors.swatch')} ${hex}, ${counts[idx].toLocaleString()} ${i18nT('ed.seats')}`);
       b.addEventListener('click', () => {
         editor.colorIndex = idx;
+        pendingHex = null; // choosing a swatch settles it; nothing is pending
         if (editor.tool === 'eraser') setTool('brush');
         editor.refreshStampPreviewTint();
         renderPalette();
@@ -269,7 +288,7 @@ export function mountToolbar(
    * browser. The button underneath keeps its own click handler as the
    * keyboard path, and is what a screen reader still announces.
    */
-  const wireColorPicker = (button: HTMLElement, onChoose: (hex: string) => void): void => {
+  const wireColorPicker = (button: HTMLElement, onChoose: (hex: string) => void): HTMLInputElement => {
     const wrap = document.createElement('span');
     wrap.className = 'color-trigger';
     button.parentNode?.insertBefore(wrap, button);
@@ -282,24 +301,26 @@ export function mountToolbar(
     input.setAttribute('aria-hidden', 'true');
     wrap.appendChild(input);
 
-    // Dragging inside a desktop picker fires `input` continuously; addSwatch
-    // returns the existing index for a colour already in the palette, so this
-    // tracks the drag live instead of piling up swatches.
+    // `input` fires continuously while a desktop picker is dragged. That is
+    // exactly why this previews instead of committing: the drag is the user
+    // looking, not choosing.
     const choose = (): void => onChoose(input.value.toLowerCase());
     input.addEventListener('input', choose);
     input.addEventListener('change', choose);
 
     button.addEventListener('click', () => {
-      input.value = /^#[0-9a-fA-F]{6}$/.test(store.palette[editor.colorIndex] ?? '')
-        ? store.palette[editor.colorIndex]
+      input.value = /^#[0-9a-fA-F]{6}$/.test(pendingHex ?? store.palette[editor.colorIndex] ?? '')
+        ? (pendingHex ?? store.palette[editor.colorIndex])
         : '#1c6fe0';
       input.click(); // keyboard: Enter on the button still opens the picker
     });
+    return input;
   };
 
   const addAndSelect = (hex: string): void => {
     const idx = store.addSwatch(hex);
     editor.colorIndex = idx;
+    pendingHex = null;
     if (editor.tool === 'eraser') setTool('brush');
     editor.rebuildPalette();
     editor.refreshStampPreviewTint();
@@ -307,9 +328,27 @@ export function mountToolbar(
     reflectFg();
   };
 
-  // "+ Color" and the foreground well both pick any colour and add it.
-  wireColorPicker($('#add-swatch'), addAndSelect);
-  wireColorPicker(fgWell, addAndSelect);
+  /** Look at a colour without committing to it. */
+  const preview = (hex: string): void => {
+    pendingHex = hex;
+    reflectFg();
+  };
+
+  // The well is the picker: tap the colour square, see the colour.
+  const wellInput = wireColorPicker(fgWell, preview);
+
+  // "+ Color" is the commit. With nothing previewed it opens the picker
+  // instead, so it is never a button that does nothing.
+  addBtn.addEventListener('click', () => {
+    if (pendingHex && store.palette.every((c) => c.toLowerCase() !== pendingHex)) {
+      addAndSelect(pendingHex);
+      return;
+    }
+    wellInput.value = /^#[0-9a-fA-F]{6}$/.test(pendingHex ?? store.palette[editor.colorIndex] ?? '')
+      ? (pendingHex ?? store.palette[editor.colorIndex])
+      : '#1c6fe0';
+    wellInput.click();
+  });
 
   // Edit one swatch in place — recolours the seats using it (intentional).
   let colorPopover: HTMLElement | null = null;
