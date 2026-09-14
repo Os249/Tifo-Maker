@@ -1,0 +1,67 @@
+<!doctype html>
+<!-- Dev-only harness for scripts/preview-compare.mts. Not a Vite build input. -->
+<html lang="en">
+<head><meta charset="UTF-8" /><title>preview harness</title></head>
+<body>
+  <div id="out">loading…</div>
+  <script type="module">
+    import { compileSpec } from '/src/core/specCompiler.ts';
+    import { DesignStore } from '/src/core/design.ts';
+    import { generateSeatMap } from '/src/core/seatmap.ts';
+    import { templateById } from '/src/core/stadiumCatalog.ts';
+    import { paint2D } from '/src/ui/viewer.ts';
+    import { Preview3D } from '/src/render/preview3d.ts';
+    import { validateSpec } from '/src/core/tifoSpec.ts';
+
+    let preview = null, previewStore = null, previewMapId = null, host = null;
+    const maps = new Map();
+    const mapFor = (id) => {
+      if (!maps.has(id)) maps.set(id, generateSeatMap(templateById(id)));
+      return maps.get(id);
+    };
+
+    const W = 1280, H = 800;
+
+    window.__shot = async (spec, stadiumId, cam) => {
+      const map = mapFor(stadiumId);
+      const v = validateSpec(spec);
+      if (!v.valid) return { ok: false, errors: v.errors };
+      if (!host) {
+        host = document.createElement('div');
+        host.style.cssText = `position:fixed;left:0;top:0;width:${W}px;height:${H}px;`;
+        document.body.appendChild(host);
+      }
+      if (previewMapId !== stadiumId) {
+        if (preview) { preview.dispose?.(); host.textContent = ''; }
+        previewStore = new DesignStore(map, spec.palette.slice());
+        preview = new Preview3D(host, map, previewStore);
+        previewMapId = stadiumId;
+      }
+      previewStore.setPalette(spec.palette.slice());
+      const r = compileSpec(spec, map, previewStore);
+      preview.applyPreset({ name: 'cmp', position: cam.position, target: cam.target });
+      preview.recolorAll();
+      preview.renderOnce?.();
+      await new Promise((res) => requestAnimationFrame(() => requestAnimationFrame(res)));
+      const c = host.querySelector('canvas');
+      const shot = c ? c.toDataURL('image/png') : null;
+
+      // Flat 2D unrolled view, from a throwaway store so the 3D one is untouched.
+      const flatStore = new DesignStore(map, spec.palette.slice());
+      compileSpec(spec, map, flatStore);
+      const canvas = document.createElement('canvas');
+      canvas.width = 1400;
+      paint2D(canvas, map, flatStore);
+
+      const hist = new Array(spec.palette.length).fill(0);
+      for (const cc of flatStore.cells) hist[cc] = (hist[cc] ?? 0) + 1;
+      const painted = map.count - (hist[0] ?? 0);
+      return { ok: true, shot, flat: canvas.toDataURL('image/png'),
+               seats: map.count, painted, warnings: r.warnings ?? [] };
+    };
+
+    document.getElementById('out').textContent = 'ready';
+    window.__ready = true;
+  </script>
+</body>
+</html>
