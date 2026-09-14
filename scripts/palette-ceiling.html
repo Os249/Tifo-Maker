@@ -1,0 +1,96 @@
+<!doctype html>
+<!-- Dev-only: how many colours does a stadium mosaic actually need? -->
+<html lang="en"><head><meta charset="UTF-8"/><title>palette ceiling</title></head><body><div id="out">loading…</div>
+<script type="module">
+  import { generateSeatMap } from '/src/core/seatmap.ts';
+  import { templateById } from '/src/core/stadiumCatalog.ts';
+  import { DesignStore } from '/src/core/design.ts';
+  import { paint2D } from '/src/ui/viewer.ts';
+  import { Preview3D } from '/src/render/preview3d.ts';
+  import { rasterize, quantizePixels, applyGridToSeats, extractPhotoPalette, enhanceForBake } from '/src/core/importImage.ts';
+  import { EDITOR_UNITS } from '/src/core/seatmap.ts';
+
+  const maps = new Map();
+  const mapFor = (id) => { if (!maps.has(id)) maps.set(id, generateSeatMap(templateById(id))); return maps.get(id); };
+  let preview = null, host = null, previewStore = null, previewMapId = null;
+
+  /** Draw a tifo-grade illustration: a crest with real tonal modelling — the
+   *  kind of artwork a designer would hand to a choreography group. */
+  window.__artwork = (w, h) => {
+    const c = document.createElement('canvas'); c.width = w; c.height = h;
+    const x = c.getContext('2d');
+    const sky = x.createLinearGradient(0, 0, 0, h);
+    sky.addColorStop(0, '#07122b'); sky.addColorStop(0.55, '#123a6b'); sky.addColorStop(1, '#2b6fa8');
+    x.fillStyle = sky; x.fillRect(0, 0, w, h);
+    // radiating beams
+    x.save(); x.translate(w / 2, h * 0.62);
+    for (let i = 0; i < 24; i++) {
+      x.rotate((Math.PI * 2) / 24);
+      const g = x.createLinearGradient(0, 0, 0, -h);
+      g.addColorStop(0, 'rgba(255,225,140,0.55)'); g.addColorStop(1, 'rgba(255,225,140,0)');
+      x.fillStyle = g; x.beginPath(); x.moveTo(0, 0); x.lineTo(-w * 0.02, -h); x.lineTo(w * 0.02, -h); x.fill();
+    }
+    x.restore();
+    // shield with bevel + highlight
+    const cx = w / 2, cy = h * 0.52, sw = h * 0.62, sh = h * 0.78;
+    const shield = (inset, fill) => {
+      x.beginPath();
+      x.moveTo(cx - sw / 2 + inset, cy - sh / 2 + inset);
+      x.lineTo(cx + sw / 2 - inset, cy - sh / 2 + inset);
+      x.lineTo(cx + sw / 2 - inset, cy + sh * 0.12);
+      x.quadraticCurveTo(cx, cy + sh / 2 - inset, cx - sw / 2 + inset, cy + sh * 0.12);
+      x.closePath(); x.fillStyle = fill; x.fill();
+    };
+    const gold = x.createLinearGradient(cx, cy - sh / 2, cx, cy + sh / 2);
+    gold.addColorStop(0, '#fff3b0'); gold.addColorStop(0.35, '#f2c230'); gold.addColorStop(0.7, '#b8860b'); gold.addColorStop(1, '#6b4e05');
+    shield(0, '#1a1205'); shield(h * 0.02, gold);
+    const glass = x.createLinearGradient(cx, cy - sh / 2, cx, cy);
+    glass.addColorStop(0, 'rgba(255,255,255,0.45)'); glass.addColorStop(1, 'rgba(255,255,255,0)');
+    shield(h * 0.02, glass);
+    // star with shading
+    x.save(); x.translate(cx, cy - h * 0.04);
+    const r1 = h * 0.2, r2 = r1 * 0.45;
+    const sg = x.createRadialGradient(0, -r1 * 0.3, 2, 0, 0, r1);
+    sg.addColorStop(0, '#ffffff'); sg.addColorStop(0.5, '#e8531f'); sg.addColorStop(1, '#8c1b06');
+    x.beginPath();
+    for (let i = 0; i < 10; i++) { const a = (Math.PI / 5) * i - Math.PI / 2; const r = i % 2 ? r2 : r1; x.lineTo(Math.cos(a) * r, Math.sin(a) * r); }
+    x.closePath(); x.fillStyle = sg; x.fill();
+    x.restore();
+    return c;
+  };
+
+  /** Bake artwork across the WHOLE unrolled bowl at a given palette size. */
+  window.__bakeArtwork = async (stadiumId, colours, wide) => {
+    const map = mapFor(stadiumId);
+    const W = EDITOR_UNITS.width;
+    const bowlH = map.bounds.maxY - map.bounds.minY;
+    const src = window.__artwork(wide ? 2048 : 900, wide ? Math.round(2048 * (bowlH / W)) : 900);
+
+    const cols = Math.min(2400, Math.round((wide ? W : 1000) / 3));
+    const rows = Math.min(400, Math.round(bowlH / 8));
+    const px = rasterize(src, cols, rows);
+    const pal = ['#262a33', ...extractPhotoPalette(px, cols, rows, colours - 1)];
+    const store = new DesignStore(map, pal);
+    const grid = quantizePixels(enhanceForBake(px, cols, rows), cols, rows, pal, { dither: true, halftone: false, alphaThreshold: 8 });
+    const target = wide
+      ? { x: 0, y: map.bounds.minY, width: W, height: bowlH }
+      : { x: W * 0.625, y: map.bounds.minY, width: 1000, height: bowlH };
+    applyGridToSeats(store, map, grid, cols, rows, target, W);
+
+    const flat = document.createElement('canvas'); flat.width = 1400; paint2D(flat, map, store);
+    if (!host) { host = document.createElement('div'); host.style.cssText = 'position:fixed;left:0;top:0;width:1280px;height:800px;'; document.body.appendChild(host); }
+    if (previewMapId !== stadiumId) {
+      if (preview) { preview.dispose?.(); host.textContent = ''; }
+      previewStore = new DesignStore(map, pal); preview = new Preview3D(host, map, previewStore); previewMapId = stadiumId;
+    }
+    previewStore.setPalette(pal);
+    previewStore.cells.set(store.cells);
+    preview.applyPreset({ name: 'tv', position: [0, 95, 205], target: [0, 4, 0] });
+    preview.recolorAll(); preview.renderOnce?.();
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    const cv = host.querySelector('canvas');
+    return { bowl: cv ? cv.toDataURL('image/png') : null, flat: flat.toDataURL('image/png'), source: src.toDataURL('image/png'), palette: pal };
+  };
+  document.getElementById('out').textContent = 'ready';
+  window.__ready = true;
+</script></body></html>
