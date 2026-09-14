@@ -27,7 +27,7 @@ import { secondsToNextPeriod } from './repo';
 import { validateSpec, type TifoSpec } from '../../src/core/tifoSpec';
 import { refineSpec } from '../../src/core/specRefine';
 import { designFromPrompt, composeSuperOffline } from '../../src/core/promptDesigner';
-import { generateSpecViaProvider, buildDirectorPrompt, critiqueSpecViaProvider, activeProvider } from './aiProvider';
+import { generateSpecViaProvider, buildDirectorPrompt, critiqueSpecViaProvider, activeProvider, clubHintLine } from './aiProvider';
 import { generateImage } from './imageAssets';
 import { TtlCache, cacheKey } from './aiCache';
 import { screenPrompt } from './promptSafety';
@@ -256,9 +256,12 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
 
     // Try the premium model (counts against the daily budget).
     notePremiumCall();
+    // The club hint is a pure function of `prompt`, so the result-cache key above
+    // stays correct without mentioning it.
+    const hint = clubHintLine(prompt);
     const modelResult = await generateSpecViaProvider(
       prompt,
-      isSuper ? { system: buildDirectorPrompt(), context: stadium, tier: 'premium' } : { tier: 'fast' },
+      isSuper ? { system: buildDirectorPrompt(), context: stadium, tier: 'premium', hint } : { tier: 'fast', hint },
     );
     const r = modelResult.spec ? validateSpec(modelResult.spec) : ({ valid: false } as ReturnType<typeof validateSpec>);
     if (!r.valid || !r.spec) {

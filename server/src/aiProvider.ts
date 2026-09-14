@@ -15,6 +15,8 @@
 
 import { SYMBOL_NAMES, SPEC_FONT_IDS, STANDS, SPEC_LIMITS, PATTERN_NAMES } from '../../src/core/tifoSpec';
 import { fewShotBlock } from '../../src/core/exemplars';
+import { TIFO_VOICES } from '../../src/core/tifoVoices';
+import { matchClub } from '../../src/core/clubs';
 
 export type AiProvider = 'anthropic' | 'openai' | 'gemini' | 'none';
 
@@ -44,35 +46,123 @@ export function activeProvider(): AiProvider {
   return 'none';
 }
 
+
+// ---- shared prompt material ------------------------------------------------
+// One source for the three prompts so they cannot drift, and so the additions
+// are paid for by deleting the prose they replace.
+
+/**
+ * The house style, measured by rendering designs on real seats and looking at
+ * them. Index 0..7 are whole-bowl rules; std mode gets no stadium context and
+ * often designs a single stand, so it receives only the first group.
+ */
+const HOUSE_RULES_CORE: string[] = [
+  '- Judge colour by VALUE, not hue. Any two colours that must read apart need',
+  '  3:1 contrast; two mid-tones of different hues merge into mud at 200m.',
+  '- Three dominant colours. Everything else is an accent or a tint of those.',
+  '- Palette index 0 is UNPAINTED seats (stadium grey) and it is free. Fill a',
+  '  stand with 0, then re-fill rows [0.07,0.93] with the field colour, and the',
+  '  art is framed in bare concrete. It is a FRAME, never a whole empty stand.',
+  '- A stand is a POSTER about 6.6:1 wide: margin, field, ONE hero, ONE',
+  '  supporting line. Put a stand\'s field fill immediately before the art on it.',
+  '- Jump scale 4:1 between hero and support — hero in rows [0.06,0.60], support',
+  '  in rows [0.70,0.92]. Two lines of similar size read as a paragraph.',
+  '- Posterise: flat blocks, hard edges. Never ramp between two close tones.',
+  '- The PHRASE decides the design. Text is aspect-locked and shrinks to fit its',
+  '  stand, so heightFrac is a ceiling, not a promise: fewer words = bigger',
+  '  letters. "GRAZIE CAPITANO" fills a stand; "10" cannot without stretch.',
+  '  Prefer the terrace nickname over the club\'s legal name.',
+];
+const HOUSE_RULES_BOWL: string[] = [
+  '- A black band of stairs crosses every stand between tiers. Let it fall',
+  '  BETWEEN hero and support (that is what the row bands are for), never',
+  '  through a word.',
+  '- The TV camera sees the far END head-on and the SIDES foreshortened to about',
+  '  a third: put WORDS on north/south and PATTERN or STRIPES on east/west.',
+  '  "east" also straddles the bowl seam, so never put text there. A stand the',
+  '  user NAMES still wins over this.',
+  '- ONE idea for the whole bowl, not one idea per stand.',
+];
+const houseRules = (bowl: boolean): string =>
+  ['HOUSE STYLE (measured on real seats — follow it):', ...HOUSE_RULES_CORE, ...(bowl ? HOUSE_RULES_BOWL : [])].join('\n');
+
+/**
+ * The four optional controls the renderer gained with the display faces. The
+ * worked two-line example is the highest-value text here: the likeliest failure
+ * is emitting one fat layer, or the pair in the wrong order — reversed, the fat
+ * copy paints over the plain one AND stops being recognised as a backing layer,
+ * so the refiner recolours it. Silent and ugly.
+ */
+const LETTERING = [
+  'LETTERING (all optional, all on top of the fields above):',
+  '- "outline" (0-24) fattens the glyphs. AN OUTLINED HEADLINE IS TWO LAYERS:',
+  '  the same text, region, fontId, heightFrac, arcDeg, stretch and align twice —',
+  '  FIRST the fattened copy in the edge colour, THEN the plain copy in the fill',
+  '  colour immediately after (layers paint bottom→top). Scale the stroke with',
+  '  the word: outline = round(letters * 0.6) clamped to 2..7; a fixed stroke',
+  '  welds a short word shut. Add "dx":1,"dy":6 to the FIRST copy and the',
+  '  outline becomes a drop shadow. Example:',
+  '  {"kind":"text","region":"south","text":"GRAZIE","colorIndex":4,"fontId":"condensed","arcDeg":0,"heightFrac":0.8,"align":"center","outline":4},',
+  '  {"kind":"text","region":"south","text":"GRAZIE","colorIndex":1,"fontId":"condensed","arcDeg":0,"heightFrac":0.8,"align":"center"}',
+  '- "stretch" (1-6) widens a run toward the stand edges. One or two words at',
+  '  natural aspect sit as an island in a 6.6:1 band: use 1.5-2 for two words,',
+  '  3 for a squad number. "dx"/"dy" (-20..20) shift by % of the region.',
+  '- symbol "scaleFrac" measures the region\'s HEIGHT, so a crest at 0.9 covers',
+  '  only ~15% of a stand\'s width. "wide" spends the rest — but it STRETCHES the',
+  '  mask, so keep it near 1.5 for anything with a recognisable outline (shield,',
+  '  crest, crescent, fist, crown, star): past about 2 they distort into blobs.',
+  '  Only naturally wide marks (eagle, wings, chevron, bolt) take 2.5-3.5.',
+].join('\n');
+
+const LEGACY_FONT_IDS = (SPEC_FONT_IDS as readonly string[]).filter((id) => !TIFO_VOICES.some((v) => v.id === id));
+
+/**
+ * The font line, derived from the shipped voice table so a new voice reaches all
+ * three prompts for free. `full` spends ~120 tokens on each voice's character;
+ * the compact form just steers away from the legacy stacks.
+ */
+function voiceLine(full: boolean): string {
+  const head = `FontId — prefer these six display voices (each ONE family covering Arabic AND Latin): ${TIFO_VOICES.map((v) => v.id).join(', ')}.`;
+  const legacy = `Legacy device fonts (${LEGACY_FONT_IDS.join(', ')}) still work but render differently on every device — avoid them.`;
+  if (!full) return `${head} ${legacy}`;
+  return [head, ...TIFO_VOICES.map((v) => `  ${v.id} — ${v.note}`), legacy].join('\n');
+}
+
+/**
+ * Authentic club colours for a brief, as one line for the USER turn.
+ *
+ * Deliberately a separate exported function that the CALLER opts into, not a
+ * lookup inside userMessage: critiqueSpecViaProvider passes a serialised spec as
+ * its `prompt`, and that blob is full of club names and hexes. Sniffing `prompt`
+ * would hand the critic a club hint for a design it is only meant to repair.
+ */
+export function clubHintLine(prompt: string): string {
+  const club = matchClub((prompt ?? '').toLowerCase());
+  if (!club) return '';
+  return `CLUB COLOURS (authentic, matched on "${club.aliases[0]}"): ${club.palette.join(', ')}; crest symbol: ${club.crest}. `
+    + 'Use these exact hexes unless the brief names different colours. Ignore this line if the club is wrong.';
+}
+
 /** The choreography-designer system prompt — also the human-readable spec contract. */
 export function buildSystemPrompt(): string {
   return [
     'You are the lead choreography designer for TifoMaker, planning stadium-scale',
     'tifo displays (the giant coordinated card mosaics ultras hold up).',
     '',
-    'You do NOT generate images or pixels. You output a DESIGN SPECIFICATION as',
-    'JSON that TifoMaker renders onto tens of thousands of seats. Think like a',
-    'director of a card stunt: bold, readable shapes that survive a ~10% no-show',
-    'rate; never fine photographic detail.',
+    'You output a DESIGN SPECIFICATION as JSON, never pixels. The renderer paints',
+    'it onto tens of thousands of seats, so think card stunt: bold shapes that',
+    'survive a ~10% no-show rate, never fine photographic detail.',
     '',
-    'LANGUAGE: the brief may be in English or Arabic, or mix both, understand both',
-    'fully. Interpret intent, mood, club identity, rivalries and any named person or',
-    'club. Text layers may be Arabic OR English (the renderer shapes Arabic/RTL',
-    'correctly); pick whatever fits the club and region, and transliterate names',
-    'sensibly. If the brief is Arabic, prefer Arabic headline text unless asked otherwise.',
+    'LANGUAGE: briefs may be English, Arabic or both — understand both fully. Text',
+    'layers may be either (the renderer shapes Arabic/RTL); pick what fits the club',
+    'and region, transliterate names sensibly, and prefer Arabic text for an',
+    'Arabic brief unless asked otherwise.',
     '',
-    'THINK LIKE AN ULTRAS CHOREOGRAPHER: choose ONE clear focal point, use the named',
-    'stand(s) deliberately, build strong contrast and visual hierarchy, express the',
-    'club identity and its real colours, and VARY the composition, never fall back',
-    'on a single default template. Reflect the emotion in the brief (defiance, pride,',
-    'celebration, mourning, derby intensity).',
-    '',
-    'COMPOSITION: for stadium-wide briefs, plan a MULTI-STAND scene, e.g. a hero',
-    'emblem or figure on one end, a giant headline on the opposite end, and a',
-    'gradient or patterned field on the sides, so the whole bowl tells ONE coherent',
-    'story. Target each element to its stand; keep one dominant focal point per stand',
-    'and never crowd a stand with competing big elements. Use gradient/pattern fields',
-    'for depth and mosaic texture, not always a flat fill.',
+    'Choose ONE focal point, use the stand(s) the brief names, express the club\'s',
+    'real colours, and vary the composition — never one default template. Reflect',
+    'the emotion in the brief. For a stadium-wide brief plan a MULTI-STAND scene:',
+    'a hero on one end, a headline on the opposite end, a patterned field on the',
+    'sides, so the bowl tells ONE story.',
     '',
     'Output STRICT JSON ONLY (no prose, no code fences) matching this shape:',
     '{',
@@ -85,35 +175,30 @@ export function buildSystemPrompt(): string {
     '    { "kind":"stripes", "region":Region, "colors":[number,...], "orientation":"vertical|horizontal|diagonal", "bands":number },',
     '    { "kind":"gradient","region":Region, "colors":[number,number], "direction":"vertical|horizontal|radial" },',
     '    { "kind":"pattern", "region":Region, "pattern":"checker|chevron|grid|flag|hoops", "colors":[number,...], "scale":number },',
-    '    { "kind":"text",    "region":Region, "text":string, "colorIndex":number, "fontId":FontId, "arcDeg":number, "heightFrac":number, "align":"center|top|bottom" },',
-    '    { "kind":"symbol",  "region":Region, "symbol":SymbolName, "colorIndex":number, "scaleFrac":number, "align":"center|top|bottom" },',
+    '    { "kind":"text",    "region":Region, "text":string, "colorIndex":number, "fontId":FontId, "arcDeg":number, "heightFrac":number, "align":"center|top|bottom", "outline":number?, "stretch":number?, "dx":number?, "dy":number? },',
+    '    { "kind":"symbol",  "region":Region, "symbol":SymbolName, "colorIndex":number, "scaleFrac":number, "align":"center|top|bottom", "wide":number? },',
     '    { "kind":"image",   "region":Region, "prompt":string, "scaleFrac":number, "dither":boolean }',
     '  ]',
     '}',
     '',
-    'Region is "all" | "lower" | "upper" | "north" | "south" | "east" | "west",',
-    'or { "stand":"north|south|east|west|all", "tier":number|"all", "rows":[from,to] }',
-    'where rows are fractions of stand height (0 = front row, 1 = back).',
-    '',
-    `Stands: ${STANDS.join(', ')} (each is one side of the bowl).`,
-    `FontId: ${SPEC_FONT_IDS.join(', ')}.`,
+    'Region is "all"|"lower"|"upper"|"north"|"south"|"east"|"west", or',
+    '{ "stand", "tier":number|"all", "rows":[from,to] } where rows are fractions of',
+    `stand height (0 = front, 1 = back). Stands: ${STANDS.join(', ')}.`,
+    voiceLine(false),
     `SymbolName (drawable vector symbols): ${SYMBOL_NAMES.join(', ')}.`,
-    'For a PORTRAIT, a player, a face, a mascot or detailed artwork, use an "image"',
-    'layer: it is the HERO: make it large (scaleFrac 0.9-1.0) on its OWN stand,',
-    'with the name/number on the OPPOSITE stand. Describe the subject in "prompt".',
-    'Such designs NEED a tonal palette of 5-6 colours so the face shades cleanly:',
-    'even if the brief names only one or two colours, ADD the in-between tones',
-    '(e.g. black → dark grey → mid grey → light grey → white) PLUS one skin tone -',
-    'a portrait rendered in two flat colours reads as a shapeless blob. Order the',
-    'palette dark → light. Do NOT flood the whole bowl with one flat fill behind a',
-    'portrait; give each stand a distinct role. Use vector symbols for simple',
-    'emblems, image layers for any real person or photographic subject.',
+    'For a PORTRAIT, player, face or detailed artwork use an "image" layer as the',
+    'HERO: scaleFrac 0.9-1.0 on its OWN stand, name/number on the OPPOSITE stand,',
+    'subject described in "prompt".',
+    'Portraits NEED a tonal palette of 5-6 colours so the face shades cleanly: even',
+    'if the brief names one or two, ADD the in-between tones (black → dark grey →',
+    'mid grey → light grey → white) PLUS one skin tone, ordered dark → light — two',
+    'flat colours read as a shapeless blob. Do not flood the bowl with one flat',
+    'fill behind a portrait. Vector symbols for simple emblems, image layers for',
+    'any real person or photographic subject.',
     '',
-    'Rules: keep the palette tight (2-5 colours typically). Put one clear focal',
-    'element. Maximise contrast between text/symbol and the field behind it.',
-    'heightFrac for a headline is usually 0.4-0.7; scaleFrac for a hero symbol',
-    '0.6-0.9. Scope everything to the stand(s) the user names; use "all" only for',
-    'stadium-wide stunts. Respect symmetry and a clear visual hierarchy.',
+    houseRules(false),
+    '',
+    LETTERING,
   ].join('\n');
 }
 
@@ -129,44 +214,40 @@ export function buildDirectorPrompt(): string {
     'You are the LEAD CHOREOGRAPHY DIRECTOR for TifoMaker, designing an ENTIRE',
     'stadium experience: not a single image dropped in one stand.',
     '',
-    'You output the SAME design-specification JSON as before (palette, background,',
-    'ordered layers; never pixels or seat indices). The renderer compiles it to',
-    'tens of thousands of seats and guarantees legibility, so think BOLD: shapes',
-    'that survive a ~10% no-show rate, never fine photographic detail.',
+    'You output a design-specification JSON, never pixels: shapes bold enough to',
+    'survive a ~10% no-show rate, never fine photographic detail.',
     '',
     'DESIGN THE WHOLE BOWL:',
-    '- Read the STADIUM CONTEXT in the user message (per-stand seat counts, tiers,',
-    '  rows, columns, aspect) and plan FOR that geometry.',
-    '- Give EACH stand a deliberate role: hero portrait/crest, giant headline,',
-    '  colour field, or pattern: with ONE dominant focal point per stand. Never',
-    '  crowd a stand with competing big elements.',
-    '- Compose ACROSS stands: use region "sides" (east+west), "ends" (north+south)',
-    '  or { "stands": ["north","east"] } for colour fields/patterns that wrap the',
-    '  bowl; target single stands ("north","south","east","west") for focal pieces.',
-    '- GO BIG: tifos are seen from 100m+ and on TV. Use FEW words and HUGE text',
-    '  (1-2 word headlines filling the stand, heightFrac 0.5-0.8); make symbols and',
-    '  portraits fill their stand; push maximum contrast. Thin, timid, small elements',
-    '  vanish at scale: when unsure, go bigger.',
-    '- Build clear hierarchy and strong contrast; reflect the brief’s emotion',
-    '  (derby intensity, farewell, anniversary, trophy, heritage, defiance).',
+    '- Read the STADIUM CONTEXT in the user message (per-stand seats, tiers, rows,',
+    '  columns, aspect) and plan FOR that geometry.',
+    '- Give EACH stand a deliberate role — hero, headline, colour field, pattern —',
+    '  with ONE dominant element each. Never crowd a stand.',
+    '- Compose ACROSS stands: "sides" (east+west), "ends" (north+south) or',
+    '  { "stands": [...] } for fields that wrap the bowl; single stands for focal',
+    '  pieces.',
+    '- The brief’s emotion picks the composition (derby, farewell, anniversary,',
+    '  trophy, heritage, defiance) — never a default template.',
     '',
-    'LANGUAGE: briefs may be English, Arabic, or both, understand both fully. Text',
-    'layers may be Arabic or English (the renderer shapes Arabic/RTL); pick what',
-    'fits the club/region and transliterate names sensibly.',
+    'LANGUAGE: briefs may be English, Arabic or both. Text layers may be either',
+    '(the renderer shapes Arabic/RTL); pick what fits the club and region.',
     '',
-    'PORTRAITS: for a player/legend/face use an "image" layer as the HERO on its',
-    'OWN stand (scaleFrac 0.9-1.0), the name/number on the OPPOSITE stand, and a',
-    '5-6 tone palette (dark→light + a skin tone) so the face shades cleanly. Set',
-    '"halftone": true on the image layer, clustered tones read far more cleanly at',
-    'seat scale than fine dithering.',
+    'PORTRAITS: a player/legend/face is an "image" layer HERO on its OWN stand',
+    '(scaleFrac 0.9-1.0), name on the OPPOSITE stand, with a 5-6 tone palette',
+    '(dark→light + a skin tone) and "halftone": true — clustered tones read far',
+    'better at seat scale than fine dithering.',
     '',
     `JSON: { "title", "summary", "palette":["#rrggbb",...] (index 0 = empty seat #262a33, ${SPEC_LIMITS.minPalette}-${SPEC_LIMITS.maxPalette}),`,
     '"background": number|null, "layers":[ ... ] }. Layer kinds: fill, stripes,',
     'gradient, pattern, text, symbol, image, each with a "region".',
     'Region: "all"|"lower"|"upper"|"north"|"south"|"east"|"west"|"sides"|"ends", or',
     '{ "stand", "tier", "rows":[from,to], "stands":[...] }.',
-    `Fonts: ${SPEC_FONT_IDS.join(', ')}. Symbols: ${SYMBOL_NAMES.join(', ')}. Patterns: ${PATTERN_NAMES.join(', ')}.`,
+    `Symbols: ${SYMBOL_NAMES.join(', ')}. Patterns: ${PATTERN_NAMES.join(', ')}.`,
     `Stands: ${STANDS.join(', ')}. Output STRICT JSON ONLY (no prose, no code fences).`,
+    voiceLine(true),
+    '',
+    houseRules(true),
+    '',
+    LETTERING,
     '',
     fewShotBlock(),
   ].join('\n');
@@ -193,11 +274,25 @@ export function buildCriticPrompt(): string {
     'Prefer bigger, bolder, higher-contrast. If it is already strong, return it',
     'essentially unchanged. Keep portraits as image layers on their own stand.',
     '',
+    'JUDGE BY: 3:1 minimum contrast between anything and the field behind it;',
+    'three dominant colours, the rest accents; a 4:1 scale jump between hero and',
+    'supporting line; flat posterised blocks, never a ramp between close tones;',
+    'depth from an offset copy, never from a soft edge. Words belong on the ends',
+    '(north/south), pattern on the sides — "east" straddles the bowl seam.',
+    '',
+    'PRESERVE: two text layers with the same words in the same region are an',
+    'outline/shadow PAIR — keep BOTH and keep their order (the fattened copy',
+    'first). Never drop "outline", "stretch", "dx", "dy" or "wide" from a layer',
+    'you rewrite. If a headline is losing to its field, ADD a pair rather than',
+    'recolouring it.',
+    '',
     `JSON: { "title", "summary", "palette":["#rrggbb",...] (index 0 = empty seat #262a33, ${SPEC_LIMITS.minPalette}-${SPEC_LIMITS.maxPalette}),`,
     '"background": number|null, "layers":[ fill|stripes|gradient|pattern|text|symbol|image ] },',
     'each layer with a "region": "all"|"lower"|"upper"|"north"|"south"|"east"|"west"|',
     '"sides"|"ends" or { "stand","tier","rows":[from,to],"stands":[...] }.',
-    `Fonts: ${SPEC_FONT_IDS.join(', ')}. Symbols: ${SYMBOL_NAMES.join(', ')}. Patterns: ${PATTERN_NAMES.join(', ')}.`,
+    'Text layers also take "outline", "stretch", "dx", "dy"; symbols take "wide".',
+    `Symbols: ${SYMBOL_NAMES.join(', ')}. Patterns: ${PATTERN_NAMES.join(', ')}.`,
+    voiceLine(false),
     'Output STRICT JSON ONLY (no prose, no code fences).',
   ].join('\n');
 }
@@ -207,19 +302,104 @@ export function buildCriticPrompt(): string {
  * `image` is a data: URL of the bowl render; `stadium` is the geometry context.
  */
 export async function critiqueSpecViaProvider(spec: unknown, image?: string, stadium?: string): Promise<ProviderResult> {
-  const prompt = [
+  // Note the missing `hint`: the critic must never be handed club colours. Its
+  // "prompt" is a serialised spec, not a brief.
+  return generateSpecViaProvider(criticUserMessage(spec, stadium), { system: buildCriticPrompt(), image, tier: 'premium' });
+}
+
+/** The critic's user turn. Exported so the no-club-hint invariant is testable. */
+export function criticUserMessage(spec: unknown, stadium?: string): string {
+  return [
     stadium ? `STADIUM CONTEXT:\n${stadium}` : '',
     'CURRENT DESIGN SPEC (improve it; keep the intent and palette):',
     JSON.stringify(spec),
   ]
     .filter(Boolean)
     .join('\n\n');
-  return generateSpecViaProvider(prompt, { system: buildCriticPrompt(), image, tier: 'premium' });
 }
 
-function userMessage(prompt: string, context?: string): string {
+/** The generator's user turn. `hint` is per-brief data and belongs here, not in
+ *  the system prompt, which stays identical across every user. */
+export function userMessage(prompt: string, context?: string, hint?: string): string {
   const ctx = context ? `STADIUM CONTEXT:\n${context}\n\n` : '';
-  return `${ctx}Brief: ${prompt}\n\nReturn the TifoSpec JSON now.`;
+  const h = hint ? `${hint}\n\n` : '';
+  return `${ctx}Brief: ${prompt}\n\n${h}Return the TifoSpec JSON now.`;
+}
+
+
+/**
+ * A JSON Schema for the TifoSpec, for Gemini's structured-output mode.
+ *
+ * OFF by default. Gemini now accepts `anyOf` and `$ref`, so the string-or-object
+ * `region` union is finally expressible — but constrained decoding changes what
+ * the model writes, not just whether it parses, and that cannot be judged from
+ * here without an API key. Set AI_RESPONSE_SCHEMA=1 to A/B it against real
+ * briefs; the tolerant `extractJson` path stays the default.
+ *
+ * Deliberately permissive: every layer field except `kind` and `region` is
+ * optional, because a schema that rejects a good design is far worse than one
+ * that lets a malformed one through to the validator.
+ */
+function tifoResponseSchema(): unknown {
+  const region = {
+    anyOf: [
+      { type: 'string', enum: ['all', 'lower', 'upper', 'sides', 'ends', ...STANDS] },
+      {
+        type: 'object',
+        properties: {
+          stand: { type: 'string', enum: ['all', ...STANDS] },
+          tier: { anyOf: [{ type: 'number' }, { type: 'string', enum: ['all'] }] },
+          rows: { type: 'array', items: { type: 'number' }, minItems: 2, maxItems: 2 },
+          stands: { type: 'array', items: { type: 'string', enum: STANDS } },
+        },
+      },
+    ],
+  };
+  const num = { type: 'number' };
+  return {
+    type: 'object',
+    required: ['title', 'palette', 'layers'],
+    properties: {
+      title: { type: 'string' },
+      summary: { type: 'string' },
+      palette: { type: 'array', items: { type: 'string' }, minItems: SPEC_LIMITS.minPalette, maxItems: SPEC_LIMITS.maxPalette },
+      background: num,
+      layers: {
+        type: 'array',
+        maxItems: SPEC_LIMITS.maxLayers,
+        items: {
+          type: 'object',
+          required: ['kind', 'region'],
+          properties: {
+            kind: { type: 'string', enum: ['fill', 'stripes', 'gradient', 'pattern', 'text', 'symbol', 'image'] },
+            region,
+            colorIndex: num,
+            colors: { type: 'array', items: num },
+            orientation: { type: 'string', enum: ['vertical', 'horizontal', 'diagonal'] },
+            direction: { type: 'string', enum: ['vertical', 'horizontal', 'radial'] },
+            pattern: { type: 'string', enum: PATTERN_NAMES as unknown as string[] },
+            bands: num,
+            scale: num,
+            text: { type: 'string' },
+            fontId: { type: 'string', enum: SPEC_FONT_IDS as unknown as string[] },
+            arcDeg: num,
+            heightFrac: num,
+            align: { type: 'string', enum: ['center', 'top', 'bottom'] },
+            outline: num,
+            stretch: num,
+            dx: num,
+            dy: num,
+            symbol: { type: 'string', enum: SYMBOL_NAMES as unknown as string[] },
+            scaleFrac: num,
+            wide: num,
+            prompt: { type: 'string' },
+            dither: { type: 'boolean' },
+            halftone: { type: 'boolean' },
+          },
+        },
+      },
+    },
+  };
 }
 
 /** Gemini user parts: the text plus an optional inline image (a data: URL). */
@@ -279,18 +459,26 @@ async function httpError(label: string, res: Response): Promise<string> {
  */
 export async function generateSpecViaProvider(
   prompt: string,
-  opts: { system?: string; context?: string; image?: string; tier?: 'fast' | 'premium' } = {},
+  opts: { system?: string; context?: string; image?: string; tier?: 'fast' | 'premium'; hint?: string } = {},
 ): Promise<ProviderResult> {
   const provider = activeProvider();
   if (provider === 'none') return { spec: null, error: 'no AI provider configured' };
   const timeoutMs = Number(process.env.AI_TIMEOUT_MS ?? 20000);
   const system = opts.system ?? buildSystemPrompt();
+  // Built ONCE. Three separate userMessage() calls meant a new argument had to
+  // be threaded through three bodies, and forgetting one would silently drop it
+  // for that provider alone.
+  const user = userMessage(prompt, opts.context, opts.hint);
+
   try {
     if (provider === 'anthropic') {
       const res = await postJson(
         'https://api.anthropic.com/v1/messages',
         { 'content-type': 'application/json', 'x-api-key': process.env.ANTHROPIC_API_KEY!, 'anthropic-version': '2023-06-01' },
-        { model: process.env.AI_MODEL ?? 'claude-3-5-sonnet-latest', max_tokens: 1500, system, messages: [{ role: 'user', content: userMessage(prompt, opts.context) }] },
+        // 4096 to match Gemini: outline pairs double the text-layer count and
+        // Anthropic is not in JSON mode, so it pretty-prints. A truncated reply
+        // fails extractJson and surfaces to the user as "premium is busy".
+        { model: process.env.AI_MODEL ?? 'claude-3-5-sonnet-latest', max_tokens: 4096, system, messages: [{ role: 'user', content: user }] },
         timeoutMs,
       );
       if (!res.ok) return { spec: null, error: await httpError('claude', res) };
@@ -305,8 +493,13 @@ export async function generateSpecViaProvider(
         { 'content-type': 'application/json' },
         {
           systemInstruction: { parts: [{ text: system }] },
-          contents: [{ role: 'user', parts: geminiParts(userMessage(prompt, opts.context), opts.image) }],
-          generationConfig: { responseMimeType: 'application/json', temperature: 0.9, maxOutputTokens: 4096 },
+          contents: [{ role: 'user', parts: geminiParts(user, opts.image) }],
+          generationConfig: {
+            responseMimeType: 'application/json',
+            ...(process.env.AI_RESPONSE_SCHEMA === '1' ? { responseJsonSchema: tifoResponseSchema() } : {}),
+            temperature: 0.9,
+            maxOutputTokens: 4096,
+          },
         },
         timeoutMs,
       );
@@ -319,7 +512,7 @@ export async function generateSpecViaProvider(
     const res = await postJson(
       'https://api.openai.com/v1/chat/completions',
       { 'content-type': 'application/json', authorization: `Bearer ${process.env.OPENAI_API_KEY!}` },
-      { model: process.env.AI_MODEL ?? 'gpt-4o-mini', response_format: { type: 'json_object' }, messages: [{ role: 'system', content: system }, { role: 'user', content: userMessage(prompt, opts.context) }] },
+      { model: process.env.AI_MODEL ?? 'gpt-4o-mini', response_format: { type: 'json_object' }, messages: [{ role: 'system', content: system }, { role: 'user', content: user }] },
       timeoutMs,
     );
     if (!res.ok) return { spec: null, error: await httpError('openai', res) };

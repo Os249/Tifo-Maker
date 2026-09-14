@@ -20,11 +20,14 @@ import {
   type SymbolName,
   type PatternName,
   type RegionInput,
+  type SpecFontId,
+  type TextAlign,
   SYMBOL_NAMES,
   normalizeRegion,
   validateSpec,
 } from './tifoSpec';
 import { matchClub } from './clubs';
+import { refineSpec } from './specRefine';
 
 const EMPTY = '#262a33';
 
@@ -281,13 +284,19 @@ export function designFromPrompt(prompt: string): TifoSpec {
   // 4) text: headline + optional number, stacked when both present
   const { head: headline, sub } = pickText(original, p);
   if (headline) {
-    const wide = scopeAll || headline.length >= 9;
+    let seq = 0;
+    const nid = (): string => `t${seq++}`;
+    const voice = pickVoice(headline, 'generic');
+    const fill = symbol ? accent : head;
     if (sub) {
       // surname on top, number below
-      layers.push({ kind: 'text', id: 'headline', region: rowsObj(region, [0.42, 1]), text: headline, colorIndex: symbol ? accent : head, fontId: 'impact', arcDeg: 0, heightFrac: 0.5, align: 'center' });
-      layers.push({ kind: 'text', id: 'number', region: rowsObj(region, [0, 0.38]), text: sub, colorIndex: accent, fontId: 'impact', arcDeg: 0, heightFrac: 0.34, align: 'center' });
+      layers.push(...headlinePair(nid, rowsObj(region, [0.42, 1]), headline, palette, fill, voice, 0.5, { stretch: stretchFor(headline) }));
+      layers.push({ kind: 'text', id: nid(), region: rowsObj(region, [0, 0.38]), text: sub, colorIndex: accent, fontId: voice, arcDeg: 0, heightFrac: 0.34, align: 'center', stretch: stretchFor(sub) });
     } else {
-      layers.push({ kind: 'text', id: 'headline', region: regionObj(region), text: headline, colorIndex: symbol ? accent : head, fontId: 'impact', arcDeg: wide ? 0 : 0, heightFrac: symbol ? 0.34 : 0.62, align: symbol ? 'bottom' : 'center' });
+      layers.push(...headlinePair(nid, regionObj(region), headline, palette, fill, voice, symbol ? 0.34 : 0.62, {
+        align: symbol ? 'bottom' : 'center',
+        stretch: stretchFor(headline),
+      }));
     }
   }
 
@@ -362,6 +371,89 @@ function warmestIndex(palette: string[], avoid: number): number {
   return best < 0 ? contrastIndex(palette, avoid) : best;
 }
 
+
+// ---- lettering --------------------------------------------------------------
+// The engine ships six display "voices" (core/tifoVoices), each one family
+// covering Arabic AND Latin. Before this the offline designer hard-coded the
+// legacy system stacks, so free designs never saw them.
+
+const HAS_ARABIC = /[\u0600-\u06FF]/;
+const glyphCount = (text: string): number => text.replace(/\s+/g, '').length;
+
+/**
+ * Pick a display voice. The occasion decides first, then the shape of the words;
+ * `variant` rotates within the matching pool so a shuffle changes the TYPE, not
+ * just the palette.
+ */
+function pickVoice(text: string, occasion: Occasion, variant = 0): SpecFontId {
+  const n = glyphCount(text);
+  const pool: SpecFontId[] =
+    occasion === 'anniversary' ? ['slab', 'grotesk']
+      : occasion === 'derby' ? ['sign', 'poster']
+        : occasion === 'heritage' ? ['slab', 'kufi']
+          : n >= 12 ? ['condensed', 'grotesk']
+            : n <= 6 ? ['poster', 'sign']
+              : HAS_ARABIC.test(text) ? ['kufi', 'poster']
+                : ['grotesk', 'poster'];
+  return pool[((variant % pool.length) + pool.length) % pool.length];
+}
+
+/**
+ * How far to widen a run toward the stand's edges. A stand is roughly 6.6:1, so
+ * text set at its natural aspect sits as an island in a wide empty band — and a
+ * two-glyph squad number can never fill one without help.
+ */
+function stretchFor(text: string): number {
+  const n = glyphCount(text);
+  return n <= 3 ? 3 : n <= 6 ? 2.2 : n <= 10 ? 1.6 : 1.2;
+}
+
+/**
+ * Outline weight, scaled to the word. A fixed stroke is fine on a long phrase
+ * and welds a short one shut — "AHLI" rendered as four solid blocks before this
+ * was tied to letter count.
+ */
+function outlineFor(text: string): number {
+  return Math.max(2, Math.min(7, Math.round(glyphCount(text) * 0.6)));
+}
+
+/**
+ * An outlined headline: a fattened backing copy, then the plain copy on top.
+ * A seat holds one palette index, so there is no soft edge available — the pair
+ * IS the outline.
+ *
+ * Both copies share the same `region` object and agree on every field except
+ * colour/outline/offset, because specRefine.isBacking compares them by
+ * JSON.stringify and exempts the backing half from contrast repair. Diverge them
+ * and the backing copy gets recoloured to match the top one, erasing the effect.
+ */
+function headlinePair(
+  nid: () => string,
+  region: Region,
+  text: string,
+  palette: string[],
+  fill: number,
+  fontId: SpecFontId,
+  heightFrac: number,
+  opts: { shadow?: boolean; align?: TextAlign; stretch?: number } = {},
+): SpecLayer[] {
+  const edge = contrastIndex(palette, fill);
+  const base = {
+    kind: 'text' as const,
+    region,
+    text,
+    fontId,
+    arcDeg: 0,
+    heightFrac,
+    align: opts.align ?? ('center' as TextAlign),
+    ...(opts.stretch && opts.stretch > 1 ? { stretch: opts.stretch } : {}),
+  };
+  return [
+    { ...base, id: nid(), colorIndex: edge, outline: outlineFor(text), ...(opts.shadow ? { dx: 1, dy: 6 } : {}) },
+    { ...base, id: nid(), colorIndex: fill },
+  ];
+}
+
 /**
  * Offline MULTI-STAND composer for Super AI (Mode 3) — a deterministic, varied,
  * full-bowl design with NO model call. Super AI's fallback when the model is
@@ -401,6 +493,7 @@ export function composeSuperOffline(prompt: string, opts: { variant?: number } =
   const symbol = pickSymbol(p) ?? club?.crest ?? null;
   const isPerson = hasKnownPlayer(p) || /\b(portrait|face|captain|legend|player|hero|footballer|photo|striker|keeper|icon)\b/.test(p);
   const occasion = detectOccasion(p);
+  const voice = pickVoice(headline ?? sub ?? '', occasion, variant);
 
   const layers: SpecLayer[] = [];
   let seq = 0;
@@ -419,7 +512,8 @@ export function composeSuperOffline(prompt: string, opts: { variant?: number } =
       layers.push({ kind: 'symbol', id: nid(), region: regionObj('north'), symbol: s, colorIndex: head, scaleFrac: 0.85, align: 'center' });
       return 'symbol';
     }
-    layers.push({ kind: 'text', id: nid(), region: regionObj('north'), text: headline ?? 'ULTRAS', colorIndex: head, fontId: 'black', arcDeg: 0, heightFrac: 0.7, align: 'center' });
+    const word = headline ?? 'ULTRAS';
+    layers.push(...headlinePair(nid, regionObj('north'), word, palette, head, voice, 0.7, { stretch: stretchFor(word) }));
     return 'text';
   };
 
@@ -427,10 +521,12 @@ export function composeSuperOffline(prompt: string, opts: { variant?: number } =
   const addName = (text: string | null, color: number): void => {
     if (!text) return;
     if (sub) {
-      layers.push({ kind: 'text', id: nid(), region: rowsObj('south', [0.4, 1]), text, colorIndex: color, fontId: 'black', arcDeg: 0, heightFrac: 0.55, align: 'center' });
-      layers.push({ kind: 'text', id: nid(), region: rowsObj('south', [0, 0.36]), text: sub, colorIndex: accent, fontId: 'impact', arcDeg: 0, heightFrac: 0.34, align: 'center' });
+      layers.push(...headlinePair(nid, rowsObj('south', [0.4, 1]), text, palette, color, voice, 0.55, { stretch: stretchFor(text) }));
+      // A squad number is one or two glyphs — aspect-locked, so it needs the
+      // widest stretch in the set or it sits as a dot in a 6.6:1 band.
+      layers.push({ kind: 'text', id: nid(), region: rowsObj('south', [0, 0.36]), text: sub, colorIndex: accent, fontId: voice, arcDeg: 0, heightFrac: 0.34, align: 'center', stretch: stretchFor(sub) });
     } else {
-      layers.push({ kind: 'text', id: nid(), region: regionObj('south'), text, colorIndex: color, fontId: 'black', arcDeg: 0, heightFrac: 0.66, align: 'center' });
+      layers.push(...headlinePair(nid, regionObj('south'), text, palette, color, voice, 0.66, { stretch: stretchFor(text) }));
     }
   };
 
@@ -453,15 +549,19 @@ export function composeSuperOffline(prompt: string, opts: { variant?: number } =
   } else if (occasion === 'anniversary') {
     const num = pickNumber(p) ?? '100';
     layers.push({ kind: 'pattern', id: nid(), region: regionObj('all'), pattern: 'checker', colors: [bg, head], scale: 26 });
-    layers.push({ kind: 'text', id: nid(), region: regionObj('north'), text: num, colorIndex: gold, fontId: 'black', arcDeg: 0, heightFrac: 0.85, align: 'center' });
-    addName(pickYears(p) ?? headline ?? 'YEARS', head);
+    // Hero in the top band, the years in the bottom one: a 4:1 scale jump with
+    // the stairs between tiers falling BETWEEN them rather than through a word.
+    layers.push(...headlinePair(nid, rowsObj('north', [0.06, 0.6]), num, palette, gold, voice, 0.92, { stretch: stretchFor(num) }));
+    const years = pickYears(p) ?? headline ?? 'YEARS';
+    layers.push({ kind: 'text', id: nid(), region: rowsObj('north', [0.7, 0.92]), text: years, colorIndex: head, fontId: voice, arcDeg: 0, heightFrac: 0.66, align: 'center' });
     layers.push({ kind: 'symbol', id: nid(), region: regionObj('sides'), symbol: 'star', colorIndex: gold, scaleFrac: 0.5, align: 'center' });
     heroKind = 'text';
     summary = `Anniversary: a mosaic across the bowl, a giant ${num} on the north, the founding years on the south, stars down the sides.`;
   } else if (occasion === 'title') {
     layers.push({ kind: 'gradient', id: nid(), region: regionObj('all'), colors: [bg, gold], direction: 'radial' });
     layers.push({ kind: 'symbol', id: nid(), region: rowsObj('north', [0.45, 1]), symbol: symbol ?? 'crown', colorIndex: gold, scaleFrac: 0.6, align: 'top' });
-    layers.push({ kind: 'text', id: nid(), region: rowsObj('north', [0, 0.5]), text: headline ?? 'CHAMPIONS', colorIndex: head, fontId: 'black', arcDeg: 0, heightFrac: 0.42, align: 'bottom' });
+    const champ = headline ?? 'CHAMPIONS';
+    layers.push(...headlinePair(nid, rowsObj('north', [0, 0.5]), champ, palette, head, voice, 0.42, { align: 'bottom', stretch: stretchFor(champ) }));
     layers.push({ kind: 'symbol', id: nid(), region: regionObj('sides'), symbol: 'star', colorIndex: gold, scaleFrac: 0.5, align: 'center' });
     addName(pickYears(p) ?? 'GLORY', head);
     heroKind = 'symbol';
@@ -481,7 +581,8 @@ export function composeSuperOffline(prompt: string, opts: { variant?: number } =
     summary = 'Welcome: a bright gradient bowl, a bold hero on the north, the welcome word across the south, stars down the sides.';
   } else if (occasion === 'mosaic') {
     layers.push({ kind: 'pattern', id: nid(), region: regionObj('all'), pattern: pick<PatternName>(['checker', 'grid', 'flag'], variant), colors: [bg, head], scale: 22 });
-    layers.push({ kind: 'text', id: nid(), region: regionObj('all'), text: headline ?? 'ULTRAS', colorIndex: accent, fontId: 'black', arcDeg: 0, heightFrac: 0.5, align: 'center' });
+    const mega = headline ?? 'ULTRAS';
+    layers.push(...headlinePair(nid, regionObj('all'), mega, palette, accent, voice, 0.5, { stretch: stretchFor(mega) }));
     heroKind = 'text';
     summary = 'Mosaic: a full-bowl pattern with a giant mega-word stretched across the whole stadium.';
   } else {
@@ -531,4 +632,17 @@ function summarize(region: RegionInput, nColors: number, headline: string | null
 }
 
 /** Exposed for the UI / docs: the vocabulary the designer understands. */
+/**
+ * Compose a shuffled variation AND refine it.
+ *
+ * The UI's free "shuffle" used to apply composeSuperOffline output raw — the one
+ * delivery path that skipped refineSpec, so shuffled designs silently missed the
+ * size floors and the 3:1 contrast repair every other path enforces. Exported
+ * (rather than inlined at the call site) so the invariant is testable from Node:
+ * the UI module is DOM-bound and the harness cannot import it.
+ */
+export function designShuffle(prompt: string, variant: number): TifoSpec {
+  return refineSpec(composeSuperOffline(prompt, { variant }));
+}
+
 export const DESIGNER_VOCAB = { symbols: SYMBOL_NAMES, players: Object.keys(PLAYERS) };

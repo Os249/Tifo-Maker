@@ -23,7 +23,7 @@ import { loadTifoFonts } from '../core/tifoFonts';
 import { EDITOR_UNITS } from '../core/seatmap';
 import { buildStadiumContext, describeStadiumContext } from '../core/stadiumContext';
 import { critiqueDesign, repairSpec } from '../core/critique';
-import { composeSuperOffline } from '../core/promptDesigner';
+import { designShuffle } from '../core/promptDesigner';
 import { describeActiveArea } from '../core/activeArea';
 import { generateAiTifo, critiqueAiTifo, fetchAiQuota, unlockAi, aiUnlockToken, type AiError, type AiQuota, type AiChoice } from '../net/api';
 import { isSignedIn, fetchMe, resendVerification } from '../net/api';
@@ -447,7 +447,7 @@ export function mountAiPanel(deps: AiPanelDeps): void {
     setError(null);
     try {
       shuffleN++;
-      await applySpec(composeSuperOffline(text, { variant: shuffleN }));
+      await applySpec(designShuffle(text, shuffleN));
       setStatus(`Shuffled a free offline variation (#${shuffleN}).`);
       const bar = document.getElementById('message');
       if (bar) bar.textContent = 'AI: offline shuffle ✓ (no tokens)';

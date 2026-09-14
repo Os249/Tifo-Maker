@@ -32,56 +32,92 @@ export interface Exemplar {
 
 export const SUPER_AI_EXEMPLARS: Exemplar[] = [
   {
-    brief: 'Derby night, whole stadium, club red and white, defiant mood.',
+    // Arabic + an outline pair + a wide crest. Half the audience writes Arabic
+    // briefs and the old gallery had none, so the model had nothing to copy.
+    brief: 'الهلال بطل آسيا — تيفو يملأ الملعب كله',
     spec: {
-      title: 'Pride of the City',
-      summary: 'Red hero stand with the crest, white headline opposite, banded sides wrapping the bowl.',
-      palette: ['#262a33', '#c8102e', '#ffffff', '#111111'],
+      title: 'زعيم آسيا',
+      summary: 'Blue sweep wrapping the bowl, a gold-edged headline filling one end, a wide crescent opposite.',
+      palette: ['#262a33', '#0033a0', '#ffffff', '#d4af37', '#001d5c', '#2f7bee'],
       layers: [
-        { kind: 'fill', region: 'north', colorIndex: 1 },
-        { kind: 'symbol', region: 'north', symbol: 'shield', colorIndex: 2, scaleFrac: 0.7, align: 'center' },
-        { kind: 'fill', region: 'south', colorIndex: 3 },
-        { kind: 'text', region: 'south', text: 'PRIDE OF THE CITY', colorIndex: 2, fontId: 'impact', arcDeg: 0, heightFrac: 0.5, align: 'center' },
-        { kind: 'stripes', region: 'sides', colors: [1, 2], orientation: 'horizontal', bands: 8 },
+        { kind: 'gradient', region: 'all', colors: [5, 1, 4, 1], direction: 'horizontal' },
+        { kind: 'fill', region: 'south', colorIndex: 2 },
+        { kind: 'text', region: 'south', text: 'زعيم آسيا', colorIndex: 3, fontId: 'poster', arcDeg: 0, heightFrac: 0.8, align: 'center', outline: 5 },
+        { kind: 'text', region: 'south', text: 'زعيم آسيا', colorIndex: 1, fontId: 'poster', arcDeg: 0, heightFrac: 0.8, align: 'center' },
+        { kind: 'fill', region: 'north', colorIndex: 4 },
+        { kind: 'symbol', region: 'north', symbol: 'crescent', colorIndex: 3, scaleFrac: 0.95, align: 'center', wide: 1.5 },
+        { kind: 'stripes', region: 'sides', colors: [1, 3], orientation: 'horizontal', bands: 13 },
       ],
     },
   },
   {
-    brief: 'Farewell to a legendary captain: portrait hero, his name opposite, solemn blue and gold.',
+    // Portrait on an END, not a side — the camera sees the ends head-on. Plus
+    // the index-0 frame, row bands either side of the tier gap, and a shadow.
+    brief: "Farewell to our captain's last game — his portrait, his years, black and gold.",
     spec: {
       title: 'Grazie Capitano',
-      summary: 'Portrait fills the west stand; gold name on the east; deep gradient on the ends frames the bowl.',
-      palette: ['#262a33', '#0b3d91', '#ffffff', '#d4af37', '#15171c', '#8a8f98'],
-      background: 4,
+      summary: 'Portrait filling one end; the farewell framed in bare seats on the other.',
+      palette: ['#262a33', '#0d0d0f', '#f5c518', '#ffffff', '#3a2f08'],
       layers: [
-        { kind: 'image', region: 'west', prompt: 'graphic poster portrait of a legendary football captain lifting a trophy, bold flat tones', scaleFrac: 0.95, dither: true },
-        { kind: 'text', region: 'east', text: 'GRAZIE CAPITANO', colorIndex: 3, fontId: 'georgia', arcDeg: 0, heightFrac: 0.45, align: 'center' },
-        { kind: 'gradient', region: 'ends', colors: [1, 4], direction: 'vertical' },
+        { kind: 'pattern', region: 'sides', pattern: 'chevron', colors: [1, 2], scale: 12 },
+        { kind: 'fill', region: 'north', colorIndex: 1 },
+        { kind: 'image', region: 'north', prompt: 'graphic poster portrait of a veteran football captain, flat poster tones', scaleFrac: 0.95, dither: true, halftone: true },
+        { kind: 'fill', region: 'south', colorIndex: 0 },
+        { kind: 'fill', region: { stand: 'south', tier: 'all', rows: [0.07, 0.93] }, colorIndex: 2 },
+        { kind: 'text', region: { stand: 'south', tier: 'all', rows: [0.1, 0.62] }, text: 'CAPITANO', colorIndex: 4, fontId: 'condensed', arcDeg: 0, heightFrac: 0.92, align: 'center', outline: 5, dx: 1, dy: 7 },
+        { kind: 'text', region: { stand: 'south', tier: 'all', rows: [0.1, 0.62] }, text: 'CAPITANO', colorIndex: 1, fontId: 'condensed', arcDeg: 0, heightFrac: 0.92, align: 'center' },
+        { kind: 'text', region: { stand: 'south', tier: 'all', rows: [0.7, 0.9] }, text: 'GRAZIE · 2009 — 2026', colorIndex: 1, fontId: 'condensed', arcDeg: 0, heightFrac: 0.66, align: 'center' },
       ],
     },
   },
   {
-    brief: 'Club centenary anniversary: festive green and gold mosaic, giant 100, founding years.',
+    // The worked answer to "two glyphs cannot fill a stand": stretch a number.
+    brief: 'Club centenary: festive green and gold mosaic, giant 100, founding years.',
     spec: {
       title: 'One Hundred Years',
-      summary: 'Checker mosaic across the whole bowl, a giant 100 on the north, founding years on the south, stars on the sides.',
-      palette: ['#262a33', '#00843d', '#ffffff', '#ffd200'],
+      summary: 'Checker mosaic across the bowl, a stretched 100 on one end above the founding years, a wide shield opposite.',
+      palette: ['#262a33', '#00843d', '#ffffff', '#ffd200', '#013d1d'],
       layers: [
-        { kind: 'pattern', region: 'all', pattern: 'checker', colors: [1, 2], scale: 28 },
-        { kind: 'text', region: 'north', text: '100', colorIndex: 3, fontId: 'black', arcDeg: 0, heightFrac: 0.8, align: 'center' },
-        { kind: 'text', region: 'south', text: '1925 – 2025', colorIndex: 2, fontId: 'impact', arcDeg: 0, heightFrac: 0.4, align: 'center' },
-        { kind: 'symbol', region: 'sides', symbol: 'star', colorIndex: 3, scaleFrac: 0.5, align: 'center' },
+        { kind: 'pattern', region: 'all', pattern: 'checker', colors: [1, 4], scale: 28 },
+        { kind: 'fill', region: 'north', colorIndex: 1 },
+        { kind: 'text', region: { stand: 'north', tier: 'all', rows: [0.06, 0.6] }, text: '100', colorIndex: 2, fontId: 'slab', arcDeg: 0, heightFrac: 0.95, align: 'center', stretch: 3, outline: 2 },
+        { kind: 'text', region: { stand: 'north', tier: 'all', rows: [0.06, 0.6] }, text: '100', colorIndex: 3, fontId: 'slab', arcDeg: 0, heightFrac: 0.95, align: 'center', stretch: 3 },
+        { kind: 'text', region: { stand: 'north', tier: 'all', rows: [0.7, 0.92] }, text: '1925 — 2025', colorIndex: 2, fontId: 'slab', arcDeg: 0, heightFrac: 0.95, align: 'center', stretch: 1.4 },
+        { kind: 'fill', region: 'south', colorIndex: 3 },
+        { kind: 'symbol', region: 'south', symbol: 'shield', colorIndex: 1, scaleFrac: 0.95, align: 'center', wide: 1.5 },
+      ],
+    },
+  },
+  {
+    // Two words + the heaviest voice + stretch. One idea, three values.
+    brief: 'Derby against our rivals — make the whole ground feel like a threat, red and white.',
+    spec: {
+      title: 'This Is Our City',
+      summary: 'Crimson bowl, a white claim filling one end, a raised fist opposite, diagonal bands down the sides.',
+      palette: ['#262a33', '#c8102e', '#ffffff', '#5c0713', '#111318'],
+      layers: [
+        { kind: 'gradient', region: 'all', colors: [3, 1, 4, 1], direction: 'horizontal' },
+        { kind: 'stripes', region: 'sides', colors: [1, 3], orientation: 'diagonal', bands: 9 },
+        { kind: 'fill', region: 'south', colorIndex: 1 },
+        { kind: 'text', region: 'south', text: 'OUR CITY', colorIndex: 4, fontId: 'sign', arcDeg: 0, heightFrac: 0.8, align: 'center', stretch: 1.6, outline: 4 },
+        { kind: 'text', region: 'south', text: 'OUR CITY', colorIndex: 2, fontId: 'sign', arcDeg: 0, heightFrac: 0.8, align: 'center', stretch: 1.6 },
+        { kind: 'fill', region: 'north', colorIndex: 4 },
+        { kind: 'symbol', region: 'north', symbol: 'fist', colorIndex: 2, scaleFrac: 0.95, align: 'center', wide: 1.5 },
       ],
     },
   },
 ];
+
 
 /**
  * Render the gallery as a compact few-shot block for the director's prompt:
  * each example is "brief → minified JSON". Minified to keep token cost down.
  */
 export function fewShotBlock(): string {
-  const parts = ['Study these example full-stadium designs (brief, then the JSON), then design in the same spirit:'];
+  const parts = [
+    'Study these example full-stadium designs (brief, then the JSON), then design in the same spirit.',
+    'They are examples of STRUCTURE and craft, not of content: never reuse their words, palettes or titles.',
+  ];
   SUPER_AI_EXEMPLARS.forEach((ex, i) => {
     parts.push(`\nExample ${i + 1}: ${ex.brief}\n${JSON.stringify(ex.spec)}`);
   });

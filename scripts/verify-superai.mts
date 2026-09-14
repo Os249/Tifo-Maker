@@ -6,15 +6,15 @@
 import { generateSeatMap } from '../src/core/seatmap';
 import { DEFAULT_TEMPLATE } from '../src/core/template';
 import { buildStadiumContext, describeStadiumContext } from '../src/core/stadiumContext';
-import { normalizeRegion, standIndexOfU, STAND_ORDER, validateSpec, narrowToSingleStand } from '../src/core/tifoSpec';
+import { normalizeRegion, standIndexOfU, STAND_ORDER, validateSpec, narrowToSingleStand, type SpecLayer } from '../src/core/tifoSpec';
 import { regionPredicate } from '../src/core/specCompiler';
 import { SUPER_AI_EXEMPLARS, fewShotBlock } from '../src/core/exemplars';
 import { critiqueDesign, repairSpec } from '../src/core/critique';
-import { composeSuperOffline } from '../src/core/promptDesigner';
-import { matchClub } from '../src/core/clubs';
+import { composeSuperOffline, designFromPrompt, designShuffle } from '../src/core/promptDesigner';
+import { matchClub, CLUBS } from '../src/core/clubs';
 import { quantizePixels } from '../src/core/importImage';
 import { TtlCache, cacheKey } from '../server/src/aiCache';
-import { buildDirectorPrompt } from '../server/src/aiProvider';
+import { buildDirectorPrompt, buildSystemPrompt, buildCriticPrompt, clubHintLine, userMessage, criticUserMessage } from '../server/src/aiProvider';
 import { TIFO_FONTS } from '../src/core/text';
 import { TIFO_VOICES } from '../src/core/tifoVoices';
 import { refineSpec, contrastRatio } from '../src/core/specRefine';
@@ -258,6 +258,153 @@ const muddy = validateSpec({
 });
 const fixedMud = refineSpec(muddy.spec!);
 check('1.12:1 headline is repaired away from the field', (fixedMud.layers[1] as { colorIndex: number }).colorIndex === 3, String((fixedMud.layers[1] as { colorIndex: number }).colorIndex));
+
+
+// ---- 15. display voices and outline pairs on the free (offline) path ----
+const VOICE_IDS = new Set(TIFO_VOICES.map((v) => v.id));
+
+/**
+ * Every text layer carrying an outline or an offset must be immediately followed
+ * by its plain twin, agreeing on everything specRefine.isBacking keys off. A
+ * lone or mismatched backing layer renders as a fat blob, or gets recoloured to
+ * match the copy on top and vanishes — both silent.
+ */
+function pairsWellFormed(layers: SpecLayer[]): boolean {
+  return layers.every((l, i) => {
+    if (l.kind !== 'text') return true;
+    if ((l.outline ?? 0) === 0 && (l.dx ?? 0) === 0 && (l.dy ?? 0) === 0) return true;
+    const n = layers[i + 1];
+    return !!n && n.kind === 'text' && n.text === l.text
+      && JSON.stringify(n.region) === JSON.stringify(l.region)
+      && n.fontId === l.fontId && n.heightFrac === l.heightFrac
+      && n.arcDeg === l.arcDeg && n.align === l.align && (n.stretch ?? 1) === (l.stretch ?? 1);
+  });
+}
+
+const OFFLINE_BRIEFS = [
+  'city derby vs united, red and black',
+  'farewell to Ronaldo, red white and black, full stadium',
+  '100 years anniversary, green and white',
+  'champions of europe, gold and black',
+  'الهلال بطل آسيا، الملعب كامل',
+  'heritage stripes for the whole bowl',
+  'blue and white full stadium',
+];
+let offBad = 0;
+let offPairs = 0;
+for (const b of OFFLINE_BRIEFS) {
+  for (const v of [0, 1, 2]) {
+    const sp = composeSuperOffline(b, { variant: v });
+    if (!validateSpec(sp).valid) offBad++;
+    if (!sp.layers.every((l) => l.kind !== 'text' || VOICE_IDS.has(l.fontId))) offBad++;
+    if (!pairsWellFormed(sp.layers)) offBad++;
+    const refined = refineSpec(sp);
+    for (let i = 0; i < sp.layers.length; i++) {
+      const l = sp.layers[i];
+      if (l.kind !== 'text' || (l.outline ?? 0) === 0) continue;
+      offPairs++;
+      const plain = sp.layers[i + 1] as { colorIndex: number };
+      // An outline nobody can see is worse than no outline at all.
+      if (contrastRatio(sp.palette[l.colorIndex], sp.palette[plain.colorIndex]) < 3) offBad++;
+      // refineSpec must not "repair" the backing half back into the fill colour.
+      if ((refined.layers[i] as { colorIndex: number }).colorIndex !== l.colorIndex) offBad++;
+    }
+  }
+}
+check('offline: 21 compositions are valid, voiced, paired and legible', offBad === 0, `${offBad} failures`);
+check('offline: outline pairs are actually emitted', offPairs >= OFFLINE_BRIEFS.length, `${offPairs} pairs`);
+check('offline: designFromPrompt uses display voices too',
+  designFromPrompt('CHAMPIONS across the stadium in red and white').layers.every((l) => l.kind !== 'text' || VOICE_IDS.has(l.fontId)));
+check('offline: a short squad number gets the widest stretch',
+  composeSuperOffline('ronaldo 7 farewell in red and black').layers.some((l) => l.kind === 'text' && (l.stretch ?? 1) >= 2.2));
+
+// designShuffle exists because the UI shuffle used to skip refineSpec entirely.
+const shuf = designShuffle('blue white and red full stadium', 3);
+check('designShuffle === refineSpec(composeSuperOffline)',
+  JSON.stringify(shuf) === JSON.stringify(refineSpec(composeSuperOffline('blue white and red full stadium', { variant: 3 }))));
+check('designShuffle output clears the legibility floors',
+  shuf.layers.every((l) => (l.kind !== 'text' || l.heightFrac >= 0.22) && (l.kind !== 'symbol' || l.scaleFrac >= 0.45)));
+
+// ---- 16. club matching is ranked, not first-club-wins ----
+// The structural test: this fails on the old loop and no future club addition
+// can break it silently.
+const strays = CLUBS.flatMap((c) => c.aliases.filter((a) => matchClub(a) !== c));
+check('every alias resolves to its own club', strays.length === 0, strays.join(', '));
+check('collision fixed: inter milan is not AC Milan', matchClub('inter milan derby')?.palette[0] === '#0068a8');
+check('collision fixed: atletico madrid is not Real', matchClub('atletico madrid at home')?.palette[0] === '#cb3524');
+check('collision fixed: Egyptian Al Ahly is not Saudi', matchClub('الأهلي المصري')?.palette[0] === '#c8102e');
+check('no regression: al ahli jeddah is still Saudi', matchClub('al ahli jeddah')?.palette[0] === '#0a7d3e');
+check('no regression: ac milan', matchClub('ac milan tifo')?.palette[0] === '#fb090b');
+check('short latin aliases need word boundaries', matchClub('an international friendly') === null);
+check('arabic aliases still match with glued prefixes', matchClub('تيفو بالهلال') !== null);
+
+
+// ---- 17. the prompts teach what the renderer can now draw ----
+const PROMPTS = [
+  ['system', buildSystemPrompt()],
+  ['director', buildDirectorPrompt()],
+  ['critic', buildCriticPrompt()],
+] as const;
+for (const [name, p] of PROMPTS) {
+  check(`${name} prompt teaches the five controls`,
+    ['outline', 'stretch', '"dx"', '"dy"', 'wide'].every((k) => p.includes(k)));
+  check(`${name} prompt states the 3:1 floor`, p.includes('3:1'));
+  check(`${name} prompt names every display voice`, TIFO_VOICES.every((v) => p.includes(v.id)));
+  check(`${name} prompt warns off the legacy stacks`, p.includes('Legacy device fonts'));
+}
+check('system + director show the two-layer outline pair',
+  [PROMPTS[0][1], PROMPTS[1][1]].every((p) => p.includes('TWO LAYERS') && p.includes('immediately after')));
+check('critic is told to preserve pairs and the new fields',
+  PROMPTS[2][1].includes('keep BOTH') && PROMPTS[2][1].includes('Never drop'));
+check('director carries whole-bowl rules that std does not',
+  PROMPTS[1][1].includes('foreshortened') && !PROMPTS[0][1].includes('foreshortened'));
+// Budgets: these are paid on EVERY generation, so a future edit that quietly
+// adds 400 tokens should fail here rather than on the invoice.
+check('system prompt within budget', PROMPTS[0][1].length <= 6200, `${PROMPTS[0][1].length}`);
+// The director is premium-only and capped by AI_DAILY_BUDGET, and ~45% of it is
+// the few-shot gallery — the highest-leverage tokens in the whole system.
+check('director prompt within budget', PROMPTS[1][1].length <= 10400, `${PROMPTS[1][1].length}`);
+check('critic prompt within budget', PROMPTS[2][1].length <= 3000, `${PROMPTS[2][1].length}`);
+check('few-shot gallery within budget', fewShotBlock().length <= 5000, `${fewShotBlock().length}`);
+
+// ---- 18. the gallery is a design the product actually renders ----
+let galBad = 0;
+for (const ex of SUPER_AI_EXEMPLARS) {
+  const r = validateSpec(ex.spec);
+  if (!r.valid || !r.spec) { galBad++; continue; }
+  const L = r.spec.layers;
+  if (!L.every((l) => l.kind !== 'text' || VOICE_IDS.has(l.fontId))) galBad++;
+  // "east" straddles the bowl seam, so text there breaks apart.
+  if (!L.every((l) => l.kind !== 'text' || (l.region.stand !== 'east' && !l.region.stands?.includes('east')))) galBad++;
+  if (!pairsWellFormed(L)) galBad++;
+  // If refineSpec rewrites an exemplar, the gallery teaches a design we do not render.
+  if (JSON.stringify(refineSpec(r.spec).layers) !== JSON.stringify(L)) galBad++;
+}
+check('every exemplar is valid, voiced, off the seam, paired and refiner-clean', galBad === 0, `${galBad} failures`);
+const galleryKeys = new Set(SUPER_AI_EXEMPLARS.flatMap((e) => e.spec.layers.flatMap((l) => Object.keys(l))));
+check('gallery demonstrates all five new controls',
+  ['outline', 'stretch', 'dx', 'dy', 'wide'].every((k) => galleryKeys.has(k)));
+check('gallery demonstrates index-0 negative space',
+  SUPER_AI_EXEMPLARS.some((e) => e.spec.layers.some((l) => l.kind === 'fill' && l.colorIndex === 0)));
+check('gallery includes an Arabic exemplar',
+  SUPER_AI_EXEMPLARS.some((e) => /[\u0600-\u06FF]/.test(JSON.stringify(e.spec))));
+check('gallery tells the model not to copy its content', fewShotBlock().includes('never reuse their words'));
+
+// ---- 19. club colours reach the model, and never reach the critic ----
+check('club hint carries the palette and the crest',
+  clubHintLine('al hilal tifo').includes('#0033a0') && clubHintLine('al hilal tifo').includes('crescent'));
+check('no club → no hint', clubHintLine('a plain blue and white tifo') === '');
+check('club hint stays short', clubHintLine('manchester united derby').length <= 260, `${clubHintLine('manchester united derby').length}`);
+check('hint lands in the user turn', userMessage('al hilal', undefined, clubHintLine('al hilal')).includes('#0033a0'));
+check('no hint passed → no hint text', !userMessage('al hilal').includes('#0033a0'));
+// THE HAZARD: the critic's "prompt" is a spec blob full of club words and hexes.
+const baitSpec = {
+  title: 'Inter Milan derby',
+  palette: ['#262a33', '#0068a8'],
+  layers: [{ kind: 'text', region: 'south', text: 'AL HILAL', colorIndex: 1, fontId: 'poster', arcDeg: 0, heightFrac: 0.8, align: 'center' }],
+};
+check('critic user turn never carries a club hint',
+  !criticUserMessage(baitSpec, 'Stadium: 60,000 seats').includes('CLUB COLOURS') && clubHintLine(JSON.stringify(baitSpec)) !== '');
 
 console.log(`\n${failures === 0 ? 'ALL PASS' : failures + ' FAILED'}`);
 if (failures > 0) process.exit(1);

@@ -67,12 +67,46 @@ export const CLUBS: ClubIdentity[] = [
   { aliases: ['flamengo', 'فلامنغو'], palette: ['#c8102e', '#16161a'], crest: 'shield' },
 ];
 
-/** First club whose alias appears in the (lower-cased) brief, or null. */
+/**
+ * Latin aliases must sit on word boundaries, so 'inter' stops matching
+ * "international friendly". Arabic aliases are matched bare on purpose: Arabic
+ * glues prefixes and suffixes straight onto the word (بالهلال, الهلالي), so a
+ * boundary rule there would lose real matches rather than false ones.
+ */
+const ASCII_ONLY = /^[\x00-\x7f]+$/;
+const LETTER_OR_DIGIT = /[\p{L}\p{N}]/u;
+function boundaryOk(lower: string, alias: string, at: number): boolean {
+  if (!ASCII_ONLY.test(alias)) return true;
+  return !LETTER_OR_DIGIT.test(lower[at - 1] ?? ' ') && !LETTER_OR_DIGIT.test(lower[at + alias.length] ?? ' ');
+}
+
+/**
+ * The club a (lower-cased) brief names, or null.
+ *
+ * Ranked over EVERY alias rather than first-club-wins, because alias
+ * specificity is what actually decides the answer:
+ *   1. earliest position in the brief — "inter milan" beats "milan"
+ *   2. then the longest alias         — "الأهلي المصري" beats "الأهلي"
+ *
+ * The old club-major loop returned the first hit, so a club's position in CLUBS
+ * silently decided ties: "inter milan" resolved to AC Milan, "atletico madrid"
+ * to Real Madrid, and Egyptian Al Ahly could never win against Saudi Al Ahli.
+ * Ranking means adding a club can no longer steal another club's briefs.
+ */
 export function matchClub(lower: string): ClubIdentity | null {
+  let best: ClubIdentity | null = null;
+  let bestAt = Infinity;
+  let bestLen = 0;
   for (const club of CLUBS) {
     for (const alias of club.aliases) {
-      if (lower.includes(alias)) return club;
+      const at = lower.indexOf(alias);
+      if (at < 0 || !boundaryOk(lower, alias, at)) continue;
+      if (at < bestAt || (at === bestAt && alias.length > bestLen)) {
+        best = club;
+        bestAt = at;
+        bestLen = alias.length;
+      }
     }
   }
-  return null;
+  return best;
 }
