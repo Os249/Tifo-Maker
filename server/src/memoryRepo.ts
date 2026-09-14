@@ -13,6 +13,7 @@ import type {
   LeadsRepository,
   NewDesign,
   RevisionRow,
+  SeedDesign,
   ShareStats,
   UserRow,
   EventsRepository,
@@ -107,6 +108,21 @@ export class MemoryDesignRepository implements DesignRepository {
 
   async listTitlesByOwner(ownerId: string): Promise<string[]> {
     return [...this.rows.values()].filter((r) => r.ownerId === ownerId).map((r) => r.title);
+  }
+
+  async seedDesigns(ownerId: string, items: SeedDesign[]): Promise<number> {
+    for (const d of items) {
+      const meta = await this.create({
+        title: d.title, titleAr: d.titleAr, templateId: d.templateId,
+        templateVersion: d.templateVersion, palette: d.palette, cellsGz: d.cellsGz,
+        ownerId, thumbnailPng: d.thumbnailPng,
+      });
+      const row = this.rows.get(meta.id)!;
+      row.isPublic = true;
+      row.isTemplate = true;
+      row.tags = normalizeTags(d.tags);
+    }
+    return items.length;
   }
 
   async deleteByOwner(ownerId: string): Promise<void> {

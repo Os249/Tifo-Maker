@@ -79,6 +79,18 @@ export interface NewDesign {
   thumbnailPng: Buffer | null;
 }
 
+/** One design for the bulk seeding path. */
+export interface SeedDesign {
+  title: string;
+  titleAr: string | null;
+  templateId: string;
+  templateVersion: number;
+  palette: string[];
+  cellsGz: Buffer;
+  thumbnailPng: Buffer | null;
+  tags: string[];
+}
+
 export interface DiffBytes {
   indices: Buffer;
   before: Buffer;
@@ -92,6 +104,14 @@ export interface DesignRepository {
    *  stops at 200; the template seeder needs the whole set to know what it has
    *  already published, or it re-adds the library on every restart. */
   listTitlesByOwner(ownerId: string): Promise<string[]>;
+  /**
+   * Insert many designs, already public and flagged as templates, with their
+   * tags. One call instead of create + patchMeta + setTemplate + setTags per
+   * design: that was about seventeen round trips each, so seeding the 619-design
+   * library meant ten thousand serial queries — fine against a socket, minutes
+   * against a database across a network. Returns how many were written.
+   */
+  seedDesigns(ownerId: string, items: SeedDesign[]): Promise<number>;
   /** Delete all of an owner's designs (used by account deletion). */
   deleteByOwner(ownerId: string): Promise<void>;
   listPublic(query: GalleryQuery): Promise<GalleryItem[]>;

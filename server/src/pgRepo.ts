@@ -14,6 +14,7 @@ import type {
   LeadsRepository,
   NewDesign,
   RevisionRow,
+  SeedDesign,
   ShareStats,
   UserRow,
   EventsRepository,
@@ -104,6 +105,83 @@ export class PgDesignRepository implements DesignRepository {
   async listTitlesByOwner(ownerId: string): Promise<string[]> {
     const res = await this.pool.query('SELECT title FROM designs WHERE owner_id = $1', [ownerId]);
     return res.rows.map((r) => String(r.title));
+  }
+
+  async seedDesigns(ownerId: string, items: SeedDesign[]): Promise<number> {
+    if (items.length === 0) return 0;
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      // Resolve every tag slug in the whole batch in two statements.
+      const slugs = [...new Set(items.flatMap((i) => i.tags))];
+      const tagId = new Map<string, number>();
+      if (slugs.length) {
+        await client.query(
+          'INSERT INTO tags (slug) SELECT unnest($1::text[]) ON CONFLICT (slug) DO NOTHING',
+          [slugs],
+        );
+        const rows = await client.query('SELECT id, slug FROM tags WHERE slug = ANY($1::text[])', [slugs]);
+        for (const r of rows.rows) tagId.set(String(r.slug), Number(r.id));
+      }
+
+      // Designs and their tag links, a hundred at a time — enough to make the
+      // round trips negligible, small enough to stay far inside Postgres's
+      // parameter limit.
+      const CHUNK = 100;
+      let written = 0;
+      for (let at = 0; at < items.length; at += CHUNK) {
+        const chunk = items.slice(at, at + CHUNK);
+        const params: unknown[] = [ownerId];
+        const values = chunk.map((d) => {
+          const p = params.length;
+          params.push(d.title, d.titleAr, d.templateId, d.templateVersion,
+            JSON.stringify(d.palette), d.cellsGz, d.thumbnailPng);
+          return `($${p + 1}, $${p + 2}, $${p + 3}, $${p + 4}, $${p + 5}::jsonb, $${p + 6}, $${p + 7}, $1, true, true)`;
+        });
+        const res = await client.query(
+          `INSERT INTO designs
+             (title, title_ar, template_id, template_version, palette, cells, thumbnail,
+              owner_id, is_public, is_template)
+           VALUES ${values.join(', ')} RETURNING id, title`,
+          params,
+        );
+        written += res.rowCount ?? 0;
+
+        // Match rows back by title rather than by position. Postgres does
+        // return RETURNING rows in insertion order, but tags landing on the
+        // wrong design is a silent, permanent kind of wrong, and titles are
+        // unique across the library anyway.
+        const idOf = new Map<string, string>(res.rows.map((r) => [String(r.title), String(r.id)]));
+        const links: string[] = [];
+        const linkParams: unknown[] = [];
+        chunk.forEach((d) => {
+          const rowId = idOf.get(d.title);
+          if (!rowId) return;
+          for (const slug of normalizeTags(d.tags)) {
+            const id = tagId.get(slug);
+            if (id === undefined) continue;
+            const p = linkParams.length;
+            linkParams.push(rowId, id);
+            links.push(`($${p + 1}::uuid, $${p + 2}::int)`); // tags.id is a SERIAL, not a uuid
+          }
+        });
+        if (links.length) {
+          await client.query(
+            `INSERT INTO design_tags (design_id, tag_id) VALUES ${links.join(', ')} ON CONFLICT DO NOTHING`,
+            linkParams,
+          );
+        }
+      }
+
+      await client.query('COMMIT');
+      return written;
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
   }
 
   async deleteByOwner(ownerId: string): Promise<void> {

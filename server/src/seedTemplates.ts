@@ -1,7 +1,7 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { gzipSync } from 'node:zlib';
 import { randomBytes, scryptSync } from 'node:crypto';
-import type { DesignRepository } from './repo';
+import type { DesignRepository, SeedDesign } from './repo';
 import type { AuthRepository } from './repo';
 
 /**
@@ -126,28 +126,30 @@ export async function seedTemplates(
   const have = new Set(await designs.listTitlesByOwner(owner.id));
   result.existing = have.size;
 
+  const pending: SeedDesign[] = [];
   for (const t of entries) {
     if (have.has(t.titleEn)) continue;
     have.add(t.titleEn); // a duplicate title inside one run must not double either
     try {
-      const meta = await designs.create({
+      pending.push({
         title: t.titleEn,
         titleAr: t.titleAr,
         templateId: t.stadiumId,
         templateVersion: t.templateVersion,
         palette: t.palette,
         cellsGz: cellsGzOf(t),
-        ownerId: owner.id,
         thumbnailPng: t.thumbnailPng ? Buffer.from(t.thumbnailPng, 'base64') : null,
+        tags: [...new Set([...t.tags, ...(t.club ? ['club'] : ['palette'])])].slice(0, 8),
       });
-      await designs.patchMeta(meta.id, { isPublic: true });
-      await designs.setTemplate(meta.id, owner.id, true);
-      const tags = [...new Set([...t.tags, ...(t.club ? ['club'] : ['palette'])])].slice(0, 8);
-      await designs.setTags(meta.id, owner.id, tags);
-      result.added++;
     } catch {
-      result.skipped.push(t.id);
+      result.skipped.push(t.id); // unreadable cells; the rest of the library is fine
     }
   }
+
+  // One call, not four per design. Writing them one at a time cost about
+  // seventeen round trips each, so the first deploy spent forty seconds seeding
+  // before it opened its port and Railway killed it on a thirty-second
+  // healthcheck. Seeding now runs after listen, and takes about a second.
+  result.added = await designs.seedDesigns(owner.id, pending);
   return result;
 }

@@ -172,21 +172,6 @@ async function main(): Promise<void> {
     });
   }
 
-  // Load the starter-template library. Best-effort and after listen, so a
-  // problem here can never stop the site from coming up.
-  if (seedRepos) {
-    try {
-      const file = join(__dirname, '../data/templates.jsonl');
-      const r = await seedTemplates(seedRepos.designs, seedRepos.auth, file);
-      if (r.added || r.skipped.length) {
-        console.log(`[tifo] templates: +${r.added} added, ${r.existing} already present` +
-          (r.skipped.length ? `, ${r.skipped.length} skipped` : ''));
-      }
-    } catch (e) {
-      console.warn('[tifo] template seeding skipped:', (e as Error).message);
-    }
-  }
-
   const port = Number(process.env.PORT ?? 8787);
   await app.listen({ port, host: '0.0.0.0' });
   console.log(
@@ -194,6 +179,32 @@ async function main(): Promise<void> {
       `${staticDir ? 'serving app + api' : 'api only'}, ` +
       `${templates.map((t) => `${t.id}=${t.seatCount}`).join(', ')})`,
   );
+
+  // Load the starter-template library — AFTER listen, and not awaited.
+  //
+  // It used to run before, and on a fresh Postgres it took about forty seconds
+  // to write 619 designs, so the port opened too late and Railway killed the
+  // deploy on its thirty-second healthcheck. Nothing about seeding needs to
+  // block the site from answering: a gallery that fills a second after boot is
+  // strictly better than one that never gets to come up. Best-effort, too, so a
+  // problem in the library can never take the site down.
+  if (seedRepos) {
+    const { designs, auth: authRepo } = seedRepos;
+    void (async () => {
+      try {
+        const file = join(__dirname, '../data/templates.jsonl');
+        const started = Date.now();
+        const r = await seedTemplates(designs, authRepo, file);
+        if (r.added || r.skipped.length) {
+          console.log(`[tifo] templates: +${r.added} added, ${r.existing} already present` +
+            (r.skipped.length ? `, ${r.skipped.length} skipped` : '') +
+            ` (${((Date.now() - started) / 1000).toFixed(1)}s)`);
+        }
+      } catch (e) {
+        console.warn('[tifo] template seeding skipped:', (e as Error).message);
+      }
+    })();
+  }
 }
 
 main().catch((err) => {
