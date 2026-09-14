@@ -27,7 +27,7 @@ import { secondsToNextPeriod } from './repo';
 import { validateSpec, type TifoSpec } from '../../src/core/tifoSpec';
 import { refineSpec } from '../../src/core/specRefine';
 import { designFromPrompt, composeSuperOffline } from '../../src/core/promptDesigner';
-import { generateSpecViaProvider, buildDirectorPrompt, critiqueSpecViaProvider, activeProvider, clubHintLine } from './aiProvider';
+import { generateSpecViaProvider, buildDirectorPrompt, critiqueSpecViaProvider, activeProvider, clubHintLine, writeCopy, copyLine } from './aiProvider';
 import { generateImage } from './imageAssets';
 import { TtlCache, cacheKey } from './aiCache';
 import { screenPrompt } from './promptSafety';
@@ -259,8 +259,19 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
     // The club hint is a pure function of `prompt`, so the result-cache key above
     // stays correct without mentioning it.
     const hint = clubHintLine(prompt);
+
+    // Stage 1 (Super only): the copywriter picks the WORDS before anything is
+    // laid out. A hero phrase is what decides whether a stand can be filled at
+    // all, and a model choosing words while already reasoning about regions
+    // reliably picks the club's legal name or the brief verbatim. Best-effort:
+    // a failure or a disabled stage just means the director designs from the raw
+    // brief, exactly as before. Costs a fraction of a cent on the fast tier.
+    const wantsCopy = isSuper && process.env.AI_COPYWRITER !== '0';
+    const copy = wantsCopy ? await writeCopy(prompt, hint).catch(() => null) : null;
+    const brief = copy ? `${prompt}\n\n${copyLine(copy)}` : prompt;
+
     const modelResult = await generateSpecViaProvider(
-      prompt,
+      brief,
       isSuper ? { system: buildDirectorPrompt(), context: stadium, tier: 'premium', hint } : { tier: 'fast', hint },
     );
     const r = modelResult.spec ? validateSpec(modelResult.spec) : ({ valid: false } as ReturnType<typeof validateSpec>);

@@ -14,7 +14,8 @@ import { composeSuperOffline, designFromPrompt, designShuffle } from '../src/cor
 import { matchClub, CLUBS } from '../src/core/clubs';
 import { quantizePixels } from '../src/core/importImage';
 import { TtlCache, cacheKey } from '../server/src/aiCache';
-import { buildDirectorPrompt, buildSystemPrompt, buildCriticPrompt, clubHintLine, userMessage, criticUserMessage } from '../server/src/aiProvider';
+import { aiPeriod, secondsToNextPeriod } from '../server/src/repo';
+import { buildDirectorPrompt, buildSystemPrompt, buildCriticPrompt, clubHintLine, userMessage, criticUserMessage, buildCopywriterPrompt, copyLine } from '../server/src/aiProvider';
 import { TIFO_FONTS } from '../src/core/text';
 import { TIFO_VOICES } from '../src/core/tifoVoices';
 import { refineSpec, contrastRatio } from '../src/core/specRefine';
@@ -363,7 +364,7 @@ check('director carries whole-bowl rules that std does not',
 check('system prompt within budget', PROMPTS[0][1].length <= 6200, `${PROMPTS[0][1].length}`);
 // The director is premium-only and capped by AI_DAILY_BUDGET, and ~45% of it is
 // the few-shot gallery — the highest-leverage tokens in the whole system.
-check('director prompt within budget', PROMPTS[1][1].length <= 10400, `${PROMPTS[1][1].length}`);
+check('director prompt within budget', PROMPTS[1][1].length <= 10600, `${PROMPTS[1][1].length}`);
 check('critic prompt within budget', PROMPTS[2][1].length <= 3000, `${PROMPTS[2][1].length}`);
 check('few-shot gallery within budget', fewShotBlock().length <= 5000, `${fewShotBlock().length}`);
 
@@ -405,6 +406,32 @@ const baitSpec = {
 };
 check('critic user turn never carries a club hint',
   !criticUserMessage(baitSpec, 'Stadium: 60,000 seats').includes('CLUB COLOURS') && clubHintLine(JSON.stringify(baitSpec)) !== '');
+
+
+// ---- 20. the copywriter stage ----
+const cw = buildCopywriterPrompt();
+check('copywriter asks for words only', cw.includes('you do not design') || cw.includes('do not design anything'));
+check('copywriter caps the word count', cw.includes('One to three words'));
+check('copywriter prefers the terrace name', cw.toLowerCase().includes('nickname'));
+check('copywriter offers every voice', TIFO_VOICES.every((v) => cw.includes(v.id)));
+check('copywriter prompt stays cheap', cw.length <= 2200, `${cw.length}`);
+
+const copied = copyLine({ phrase: 'زعيم آسيا', support: 'AFC 2026', language: 'ar', mood: 'triumphant', voice: 'poster' });
+check('copy block carries the hero, the support and the voice',
+  copied.includes('زعيم آسيا') && copied.includes('AFC 2026') && copied.includes('poster'));
+check('copy block forbids paraphrasing', copied.includes('do not invent your own'));
+check('no copy → no block', copyLine(null) === '');
+check('director is told the COPY block is authoritative',
+  PROMPTS[1][1].includes('COPY block') && PROMPTS[1][1].includes('do not translate'));
+
+// ---- 21. the free-quota period is a switch, and hourly is still the default ----
+const at2130 = new Date(Date.UTC(2026, 8, 14, 21, 30, 0));
+delete process.env.AI_PERIOD;
+check('default period is hourly', aiPeriod(at2130) === '2026-09-14T21' && secondsToNextPeriod(at2130) === 1800);
+process.env.AI_PERIOD = 'day';
+check('AI_PERIOD=day buckets by UTC day', aiPeriod(at2130) === '2026-09-14' && secondsToNextPeriod(at2130) === 9000);
+delete process.env.AI_PERIOD;
+check('period switch is reversible', aiPeriod(at2130) === '2026-09-14T21');
 
 console.log(`\n${failures === 0 ? 'ALL PASS' : failures + ' FAILED'}`);
 if (failures > 0) process.exit(1);

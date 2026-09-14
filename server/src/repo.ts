@@ -433,12 +433,27 @@ export interface AiStats {
 }
 
 /** Current hourly metering period, e.g. "2026-06-28T14" (UTC). Usage resets each hour. */
-export function aiPeriod(d: Date = new Date()): string {
-  const p = (n: number): string => String(n).padStart(2, '0');
-  return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())}T${p(d.getUTCHours())}`;
+/**
+ * The bucket a free-tier AI credit is counted against.
+ *
+ * Hourly by default, which is what shipped. Set AI_PERIOD=day for the
+ * "one or two free designs a day" model — the credit then resets at 00:00 UTC
+ * instead of on the hour. Nothing else in the quota path changes.
+ */
+export type AiPeriodUnit = 'hour' | 'day';
+export function aiPeriodUnit(): AiPeriodUnit {
+  return process.env.AI_PERIOD === 'day' ? 'day' : 'hour';
 }
 
-/** Seconds until the current hourly period rolls over (for "resets in …" UI). */
+export function aiPeriod(d: Date = new Date()): string {
+  const p = (n: number): string => String(n).padStart(2, '0');
+  const day = `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())}`;
+  return aiPeriodUnit() === 'day' ? day : `${day}T${p(d.getUTCHours())}`;
+}
+
+/** Seconds until the current period rolls over (for "resets in …" UI). */
 export function secondsToNextPeriod(d: Date = new Date()): number {
-  return 3600 - (d.getUTCMinutes() * 60 + d.getUTCSeconds());
+  const intoHour = d.getUTCMinutes() * 60 + d.getUTCSeconds();
+  if (aiPeriodUnit() === 'hour') return 3600 - intoHour;
+  return 86400 - (d.getUTCHours() * 3600 + intoHour);
 }

@@ -231,6 +231,10 @@ export function buildDirectorPrompt(): string {
     'LANGUAGE: briefs may be English, Arabic or both. Text layers may be either',
     '(the renderer shapes Arabic/RTL); pick what fits the club and region.',
     '',
+    'If the user message carries a COPY block, a copywriter has already chosen the',
+    'words. Use them EXACTLY as the hero and supporting text — do not translate,',
+    'shorten, expand or paraphrase them. Your job is then purely to stage them.',
+    '',
     'PORTRAITS: a player/legend/face is an "image" layer HERO on its OWN stand',
     '(scaleFrac 0.9-1.0), name on the OPPOSITE stand, with a 5-6 tone palette',
     '(dark→light + a skin tone) and "halftone": true — clustered tones read far',
@@ -402,6 +406,89 @@ function tifoResponseSchema(): unknown {
   };
 }
 
+
+/**
+ * Stage 1 of a two-call generation: the COPYWRITER.
+ *
+ * Every strong tifo in our rendering tests turned on the phrase, not the
+ * layout. "GRAZIE CAPITANO" fills a stand; "10" is two glyphs and aspect-locked,
+ * so no amount of art direction saves it. Asking one model to invent the words
+ * AND lay them out means the words are chosen while it is already thinking about
+ * regions — so they come out as the club's legal name, or the literal brief.
+ *
+ * This call does nothing but choose words. It is tiny (a few hundred tokens in,
+ * a few dozen out) and runs on the fast tier, so the whole stage costs a
+ * fraction of a cent.
+ */
+export function buildCopywriterPrompt(): string {
+  return [
+    'You are the COPYWRITER for a stadium tifo. You do not design anything: you',
+    'choose the WORDS the crowd will hold up, and nothing else.',
+    '',
+    'A stand is roughly 6.6:1. Letters are sized to fit it, so fewer words means',
+    'bigger letters. One to three words is the target; five is the ceiling.',
+    '',
+    'Prefer what a terrace would actually chant: the club\'s nickname over its',
+    'legal name (الزعيم over الهلال, "I Zingari" over the registered name), a',
+    'claim or a vow over a statement of fact, the emotion over the fixture.',
+    'Never output the brief back verbatim, and never a full sentence.',
+    '',
+    'Match the brief\'s language. An Arabic brief gets Arabic words; an English',
+    'brief gets English. If the brief mixes both, pick the one the club\'s own',
+    'supporters would use.',
+    '',
+    'Also return a SUPPORTING line — a date, a score, a year range, a squad',
+    'number with a word ("NUMERO 10", not "10"), or a second short phrase. It is',
+    'set small under the hero, so it may be longer. Use "" if nothing fits.',
+    '',
+    'Output STRICT JSON ONLY, no prose, no code fences:',
+    '{ "phrase": string, "support": string, "language": "ar"|"en",',
+    '  "mood": string (one word), "voice": string }',
+    `where voice is one of: ${TIFO_VOICES.map((v) => v.id).join(', ')} —`,
+    ...TIFO_VOICES.map((v) => `  ${v.id}: ${v.note}`),
+  ].join('\n');
+}
+
+export interface TifoCopy {
+  phrase: string;
+  support: string;
+  language: 'ar' | 'en';
+  mood: string;
+  voice: string;
+}
+
+const VOICE_IDS = new Set(TIFO_VOICES.map((v) => v.id));
+
+/**
+ * Run the copywriter. Best-effort by contract: any failure returns null and the
+ * director simply designs from the raw brief, exactly as it did before. A words
+ * stage that can break generation would not be worth having.
+ */
+export async function writeCopy(prompt: string, hint?: string): Promise<TifoCopy | null> {
+  const r = await generateSpecViaProvider(prompt, { system: buildCopywriterPrompt(), tier: 'fast', hint });
+  const o = r.spec as Partial<TifoCopy> | null;
+  if (!o || typeof o.phrase !== 'string' || !o.phrase.trim()) return null;
+  const phrase = o.phrase.trim().slice(0, 60);
+  return {
+    phrase,
+    support: typeof o.support === 'string' ? o.support.trim().slice(0, 60) : '',
+    language: o.language === 'ar' ? 'ar' : 'en',
+    mood: typeof o.mood === 'string' ? o.mood.trim().slice(0, 24) : '',
+    voice: typeof o.voice === 'string' && VOICE_IDS.has(o.voice) ? o.voice : 'poster',
+  };
+}
+
+/** The copywriter's choices, as one block for the director's user turn. */
+export function copyLine(copy: TifoCopy | null): string {
+  if (!copy) return '';
+  return [
+    `COPY (already chosen — use these exact words as the hero text; do not invent your own):`,
+    `  hero: "${copy.phrase}"`,
+    ...(copy.support ? [`  supporting line: "${copy.support}"`] : []),
+    `  mood: ${copy.mood || 'n/a'} · suggested fontId: ${copy.voice}`,
+  ].join('\n');
+}
+
 /** Gemini user parts: the text plus an optional inline image (a data: URL). */
 function geminiParts(text: string, image?: string): unknown[] {
   const parts: unknown[] = [{ text }];
@@ -463,7 +550,11 @@ export async function generateSpecViaProvider(
 ): Promise<ProviderResult> {
   const provider = activeProvider();
   if (provider === 'none') return { spec: null, error: 'no AI provider configured' };
-  const timeoutMs = Number(process.env.AI_TIMEOUT_MS ?? 20000);
+  // Premium runs a bigger model on a longer prompt, and Super now makes two
+  // calls. 20s was tuned for a single fast call and truncates the rest.
+  const timeoutMs = opts.tier === 'premium'
+    ? Number(process.env.AI_TIMEOUT_PREMIUM_MS ?? 45000)
+    : Number(process.env.AI_TIMEOUT_MS ?? 20000);
   const system = opts.system ?? buildSystemPrompt();
   // Built ONCE. Three separate userMessage() calls meant a new argument had to
   // be threaded through three bodies, and forgetting one would silently drop it
