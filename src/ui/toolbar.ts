@@ -208,22 +208,21 @@ export function mountToolbar(
         reflectFg();
       });
       b.addEventListener('dblclick', () => openColorEditor(idx, b));
-      // Right-click removes a swatch (unless it's in use or the last one).
-      b.addEventListener('contextmenu', (e) => {
-        e.preventDefault();
-        if (counts[idx] > 0) {
-          message.textContent = `that colour is used by ${counts[idx].toLocaleString()} seats: recolour them before removing`;
-          return;
-        }
-        if (store.palette.length <= 2) return;
-        const next = store.palette.filter((_, i) => i !== idx);
-        store.setPalette(next);
-        if (editor.colorIndex >= next.length) editor.colorIndex = next.length - 1;
-        editor.rebuildPalette();
-        editor.repaintAll();
-        renderPalette();
-        reflectFg();
+      b.addEventListener('contextmenu', (e) => { e.preventDefault(); openColorEditor(idx, b); });
+      // Press and hold. A swatch could only be edited by double-clicking it and
+      // only removed by right-clicking it, so on a phone a palette was
+      // add-only: no second tap gesture, no right button. Hold is the gesture
+      // touch already uses for "more about this thing".
+      let holdTimer: number | undefined;
+      const cancelHold = (): void => { window.clearTimeout(holdTimer); holdTimer = undefined; };
+      b.addEventListener('pointerdown', (e) => {
+        if (e.pointerType === 'mouse') return; // mouse has dblclick and right-click
+        cancelHold();
+        holdTimer = window.setTimeout(() => { holdTimer = undefined; openColorEditor(idx, b); }, 450);
       });
+      for (const ev of ['pointerup', 'pointercancel', 'pointermove', 'pointerleave'] as const) {
+        b.addEventListener(ev, cancelHold);
+      }
       const tally = document.createElement('span');
       tally.className = 'swatch-count';
       tally.textContent = counts[idx] >= 1000 ? `${(counts[idx] / 1000).toFixed(1)}k` : String(counts[idx]);
@@ -258,21 +257,44 @@ export function mountToolbar(
   // ---- Stadium panel (rail "stadium" button → panelMode 'stadium') ----
   mountStadiumPanel({ root, map, store, refresh: panelRefresh });
 
-  // Pick ANY colour and start painting with it. Auto-adds it as a swatch so it's
-  // reusable (the confirmed behaviour). Uses a hidden native colour input.
-  const pickAnyColor = (initial: string, onChoose: (hex: string) => void): void => {
+  /**
+   * Put a real <input type="color"> over a control, so the user's own tap is
+   * what opens the native picker.
+   *
+   * This used to build a hidden input at left:-9999px and call .click() on it.
+   * Desktop browsers oblige; mobile ones will not open a picker for an input
+   * that is not actually on screen, so "+ Color" and the paint well did nothing
+   * at all on a phone — no picker, no error, nothing. Making the input the
+   * thing being tapped needs no synthetic click and no permission from the
+   * browser. The button underneath keeps its own click handler as the
+   * keyboard path, and is what a screen reader still announces.
+   */
+  const wireColorPicker = (button: HTMLElement, onChoose: (hex: string) => void): void => {
+    const wrap = document.createElement('span');
+    wrap.className = 'color-trigger';
+    button.parentNode?.insertBefore(wrap, button);
+    wrap.appendChild(button);
+
     const input = document.createElement('input');
     input.type = 'color';
-    input.value = /^#[0-9a-fA-F]{6}$/.test(initial) ? initial : '#1c6fe0';
-    input.style.position = 'fixed';
-    input.style.left = '-9999px';
-    document.body.appendChild(input);
-    input.addEventListener('input', () => onChoose(input.value.toLowerCase()), { once: false });
-    input.addEventListener('change', () => {
-      onChoose(input.value.toLowerCase());
-      input.remove();
+    input.className = 'color-trigger-input';
+    input.tabIndex = -1;
+    input.setAttribute('aria-hidden', 'true');
+    wrap.appendChild(input);
+
+    // Dragging inside a desktop picker fires `input` continuously; addSwatch
+    // returns the existing index for a colour already in the palette, so this
+    // tracks the drag live instead of piling up swatches.
+    const choose = (): void => onChoose(input.value.toLowerCase());
+    input.addEventListener('input', choose);
+    input.addEventListener('change', choose);
+
+    button.addEventListener('click', () => {
+      input.value = /^#[0-9a-fA-F]{6}$/.test(store.palette[editor.colorIndex] ?? '')
+        ? store.palette[editor.colorIndex]
+        : '#1c6fe0';
+      input.click(); // keyboard: Enter on the button still opens the picker
     });
-    input.click();
   };
 
   const addAndSelect = (hex: string): void => {
@@ -285,13 +307,9 @@ export function mountToolbar(
     reflectFg();
   };
 
-  // "+ Color" and the foreground well both open the any-colour picker.
-  $('#add-swatch').addEventListener('click', () => {
-    pickAnyColor(store.palette[editor.colorIndex] ?? '#1c6fe0', (hex) => addAndSelect(hex));
-  });
-  fgWell.addEventListener('click', () => {
-    pickAnyColor(store.palette[editor.colorIndex] ?? '#1c6fe0', (hex) => addAndSelect(hex));
-  });
+  // "+ Color" and the foreground well both pick any colour and add it.
+  wireColorPicker($('#add-swatch'), addAndSelect);
+  wireColorPicker(fgWell, addAndSelect);
 
   // Edit one swatch in place — recolours the seats using it (intentional).
   let colorPopover: HTMLElement | null = null;
@@ -299,9 +317,7 @@ export function mountToolbar(
     colorPopover?.remove();
     const pop = document.createElement('div');
     pop.className = 'color-pop';
-    const r = anchor.getBoundingClientRect();
-    pop.style.left = `${Math.min(r.left, window.innerWidth - 240)}px`;
-    pop.style.top = `${r.bottom + 6}px`;
+    document.body.appendChild(pop);
     const picker = document.createElement('input');
     picker.type = 'color';
     picker.value = store.palette[idx];
@@ -328,20 +344,63 @@ export function mountToolbar(
         apply(hex.value);
       }
     });
+
+    const close = (): void => { pop.remove(); colorPopover = null; };
+
+    // Removal used to be right-click only, which a touch screen has no way to
+    // ask for. It lives here instead, under the same two guards: a colour still
+    // painted on seats would silently repaint them, and a design needs one
+    // colour besides the empty seat.
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'color-pop-remove';
+    remove.textContent = i18nT('ed.colors.remove');
+    remove.addEventListener('click', () => {
+      const used = colorCounts()[idx] ?? 0;
+      if (used > 0) {
+        message.textContent = i18nT('ed.colors.inUse').replace('{n}', used.toLocaleString());
+        close();
+        return;
+      }
+      if (store.palette.length <= 2) {
+        message.textContent = i18nT('ed.colors.lastTwo');
+        close();
+        return;
+      }
+      const next = store.palette.filter((_, i) => i !== idx);
+      store.setPalette(next);
+      if (editor.colorIndex >= next.length) editor.colorIndex = next.length - 1;
+      editor.rebuildPalette();
+      editor.repaintAll();
+      renderPalette();
+      reflectFg();
+      close();
+    });
+
     const label = document.createElement('span');
-    label.textContent = 'Edit swatch';
-    pop.append(label, picker, hex);
-    document.body.appendChild(pop);
+    label.textContent = i18nT('ed.colors.edit');
+    pop.append(label, picker, hex, remove);
+
+    // Placed after it is in the DOM and has a width: a phone is narrow enough
+    // that the old fixed 240px guess put it off the edge of the screen.
+    const r = anchor.getBoundingClientRect();
+    const w = pop.offsetWidth;
+    const h = pop.offsetHeight;
+    pop.style.left = `${Math.max(8, Math.min(r.left, window.innerWidth - w - 8))}px`;
+    pop.style.top = r.bottom + 6 + h <= window.innerHeight
+      ? `${r.bottom + 6}px`
+      : `${Math.max(8, r.top - h - 6)}px`;
     colorPopover = pop;
+
     setTimeout(() => {
-      const close = (e: MouseEvent): void => {
-        if (!pop.contains(e.target as Node)) {
-          pop.remove();
-          colorPopover = null;
-          document.removeEventListener('mousedown', close);
-        }
+      const away = (e: Event): void => {
+        if (pop.contains(e.target as Node)) return;
+        close();
+        document.removeEventListener('pointerdown', away);
       };
-      document.addEventListener('mousedown', close);
+      // pointerdown, not mousedown: on touch the synthesised mouse event only
+      // arrives after the tap has already done something else.
+      document.addEventListener('pointerdown', away);
     }, 0);
   };
 

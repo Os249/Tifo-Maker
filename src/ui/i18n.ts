@@ -348,8 +348,18 @@ const STRINGS: Record<string, { en: string; ar: string }> = {
   'ed.colors.painting': { en: 'painting color', ar: 'لون الرسم' },
   'ed.colors.addColor': { en: '+ Color', ar: '+ لون' },
   'ed.colors.hint': {
-    en: 'Click a swatch to paint with it · double-click to edit · drag a new color from “+ Color”.',
-    ar: 'اضغط لون عشان ترسم فيه · ضغطتين عشان تعدّله · أضف لون جديد من «+ لون».',
+    en: 'Tap a swatch to paint with it · press and hold to edit or remove it · add one from “+ Color”.',
+    ar: 'اضغط لون عشان ترسم فيه · استمر بالضغط عشان تعدّله أو تشيله · أضف لون جديد من «+ لون».',
+  },
+  'ed.colors.edit': { en: 'Edit swatch', ar: 'تعديل اللون' },
+  'ed.colors.remove': { en: 'Remove', ar: 'إزالة' },
+  'ed.colors.inUse': {
+    en: 'That colour is painted on {n} seats — recolour them before removing it.',
+    ar: 'هذا اللون مرسوم على {n} مقعد — غيّر لونها قبل ما تشيله.',
+  },
+  'ed.colors.lastTwo': {
+    en: 'A design needs at least one colour besides the empty seat.',
+    ar: 'التصميم يحتاج لون واحد على الأقل غير المقعد الفاضي.',
   },
   'ed.colors.presets': { en: 'Presets', ar: 'جاهزة' },
   'ed.colors.choosePreset': { en: 'Choose a preset…', ar: 'اختر مجموعة جاهزة…' },
@@ -699,7 +709,7 @@ const STRINGS: Record<string, { en: string; ar: string }> = {
   'rev.rows': { en: 'Row by row', ar: 'صف ورا صف' },
   'rev.random': { en: 'Sparkle (random)', ar: 'تلألؤ (عشوائي)' },
   'rev.instant': { en: 'Instant', ar: 'فوري' },
-  'ed.colors.editT': { en: 'double-click to edit', ar: 'ضغطتين عشان تعدّله' },
+  'ed.colors.editT': { en: 'hold to edit or remove', ar: 'استمر بالضغط عشان تعدّله أو تشيله' },
   'ed.colors.swatch': { en: 'Swatch', ar: 'لون' },
 
   // ---- section nav and status bar ----

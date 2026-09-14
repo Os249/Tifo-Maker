@@ -328,6 +328,69 @@ console.log('\n— the two bug reports —');
 }
 
 
+console.log('\n— the palette works by touch —');
+{
+  const [ctx, p, errs] = await editor();
+  await p.tap('[data-tab="colors"]');
+  await p.waitForTimeout(700);
+
+  // The bug: "+ Color" built an <input type="color"> at left:-9999px and
+  // clicked it. Desktop browsers open a picker for that; mobile ones do not
+  // open one for an input that is not on screen, so the tap did nothing at all.
+  // What has to be true is that the tap lands ON a real colour input.
+  const hits = await p.evaluate(() => ['#add-swatch', '#fg-well'].map((sel) => {
+    const r = document.querySelector(sel).getBoundingClientRect();
+    const at = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+    return { sel, ok: at?.tagName === 'INPUT' && at.type === 'color' && r.width > 0 && r.x >= 0 };
+  }));
+  for (const h of hits) check(`${h.sel} opens a real colour input`, h.ok);
+
+  const before = await p.$$eval('#palette .swatch', (e) => e.length);
+  await p.evaluate(() => {
+    const input = document.querySelector('#add-swatch').closest('.color-trigger').querySelector('input[type=color]');
+    input.value = '#ff8800';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await p.waitForTimeout(300);
+  const after = await p.$$eval('#palette .swatch', (e) => e.length);
+  check('picking a colour adds and selects it', after === before + 1
+    && (await p.$eval('#fg-hex', (e) => e.textContent)).toLowerCase() === '#ff8800', `${before} -> ${after}`);
+
+  // A swatch could only be edited by double-clicking and only removed by
+  // right-clicking, so a phone palette was add-only. Hold opens both.
+  const swatch = (await p.$$('#palette .swatch')).at(-1);
+  const box = await swatch.boundingBox();
+  await p.evaluate(({ x, y }) => document.elementFromPoint(x, y)
+    .dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerType: 'touch', pointerId: 1 })),
+    { x: box.x + box.width / 2, y: box.y + box.height / 2 });
+  await p.waitForTimeout(700);
+  const pop = await p.$('.color-pop');
+  check('holding a swatch opens the editor', !!pop);
+  if (pop) {
+    const r = await pop.boundingBox();
+    const vw = p.viewportSize();
+    check('the editor stays on screen', r.x >= 0 && r.x + r.width <= vw.width + 1 && r.y + r.height <= vw.height + 1,
+      JSON.stringify([Math.round(r.x), Math.round(r.y), Math.round(r.width)]));
+    await p.tap('.color-pop-remove');
+    await p.waitForTimeout(300);
+    check('an unused colour can be removed', (await p.$$eval('#palette .swatch', (e) => e.length)) === before);
+  }
+
+  // Removing a colour that is painted on seats would silently repaint them.
+  const used = (await p.$$('#palette .swatch'))[0];
+  const ub = await used.boundingBox();
+  await p.evaluate(({ x, y }) => document.elementFromPoint(x, y)
+    .dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerType: 'touch', pointerId: 1 })),
+    { x: ub.x + ub.width / 2, y: ub.y + ub.height / 2 });
+  await p.waitForTimeout(700);
+  const keep = await p.$$eval('#palette .swatch', (e) => e.length);
+  if (await p.$('.color-pop-remove')) await p.tap('.color-pop-remove');
+  await p.waitForTimeout(300);
+  check('a colour in use is not removable', (await p.$$eval('#palette .swatch', (e) => e.length)) === keep);
+  check('no errors from the palette', errs.length === 0, errs.join(' | '));
+  await ctx.close();
+}
+
 console.log('\n— every screen size, both orientations, both languages —');
 {
   const SIZES = [

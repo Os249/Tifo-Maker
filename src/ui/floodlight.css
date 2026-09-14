@@ -245,6 +245,16 @@ header {
   background:var(--ink-3); color:var(--text-1); border:1px dashed var(--line-2); cursor:pointer;
 }
 .add-swatch:hover { border-style:solid; border-color:var(--blue); color:var(--blue); background:rgba(28,111,224,.1); }
+/* A real colour input sits invisibly over the control it belongs to, so the
+   tap that opens the native picker is the user's own. A picker driven by a
+   synthetic click on an off-screen input works on desktop and does nothing at
+   all on a phone. */
+.color-trigger { position:relative; display:inline-flex; flex:0 0 auto; }
+.color-trigger-input {
+  position:absolute; inset:0; width:100%; height:100%; margin:0; padding:0;
+  border:none; background:transparent; opacity:0; cursor:pointer;
+  -webkit-appearance:none; appearance:none;
+}
 .swatch-hint { font-size:11px; color:var(--text-3); margin-top:10px; line-height:1.45; }
 .palette-tools { margin-top:14px; padding-top:14px; border-top:1px solid var(--line-1); }
 .swatch {
@@ -404,6 +414,17 @@ body.zen .tool-rail, body.zen .panel, body.zen footer, body.zen .tool-bar { disp
 .color-pop span { font-size:11px; color:var(--text-3); }
 .color-pop input[type="color"] { width:32px; height:28px; padding:0; border:1px solid var(--line-1); border-radius:var(--r-sm); background:transparent; cursor:pointer; }
 .color-pop input[type="text"] { width:84px; font-family:var(--font-data); font-size:12px; }
+.color-pop-remove {
+  min-height:32px; padding:6px 11px; font-size:12px; font-weight:600; border-radius:var(--r-sm);
+  background:transparent; color:var(--text-2); border:1px solid var(--line-2); cursor:pointer; white-space:nowrap;
+}
+.color-pop-remove:hover { border-color:#e5484d; color:#e5484d; background:rgba(229,72,77,.1); }
+/* Narrow screens: the popover is a row of controls, and 390px is not much. */
+@media (max-width: 480px) {
+  .color-pop { max-width:calc(100vw - 16px); flex-wrap:wrap; }
+  .color-pop input[type="color"] { width:44px; height:36px; }
+  .color-pop input[type="text"] { width:92px; min-height:36px; }
+}
 
 /* section navigator strip */
 .section-strip { display:flex; flex-direction:column; gap:6px; }
