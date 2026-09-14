@@ -121,16 +121,22 @@ a { color: inherit; text-decoration: none; }
 .tifo-card:hover { transform: translateY(-4px); box-shadow: var(--shadow-lg); }
 .card-thumb {
   position: relative; display: block; overflow: hidden; background: #11121a;
-  aspect-ratio: 5 / 1; /* panoramic — the tifo is the full unrolled bowl (~10:1) */
+  /* Panoramic, because the tifo IS the full unrolled bowl. Every thumbnail the
+     site makes — the library's and the ones the editor saves — comes out near
+     9.5:1, so a 5:1 box spent half its height on empty letterbox and, worse,
+     made a design with a dark lower tier look like it stopped halfway. This is
+     the shape the library's strips are emitted at, so a template card is all
+     tifo; a design saved from the editor lands within a hair of it. */
+  aspect-ratio: 800 / 84;
 }
 /* Show the FULL tifo (contain = never crop/zoom) at a uniform banner size. */
 .card-thumb-img { display: block; width: 100%; height: 100%; object-fit: contain; image-rendering: pixelated; }
-.card-thumb .badge {
-  position: absolute; top: 10px; font-size: 11px; font-weight: 700; padding: 4px 10px; border-radius: var(--r-pill);
-  backdrop-filter: blur(8px); color: #fff;
+.card-badges { display: flex; flex-wrap: wrap; gap: 6px; }
+.card-badges .badge {
+  font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: var(--r-pill); color: #fff;
 }
-.badge.template { left: 10px; background: rgba(91, 42, 134, 0.85); }
-.badge.photo { right: 10px; background: rgba(15, 138, 77, 0.85); }
+.badge.template { background: rgba(91, 42, 134, 0.92); }
+.badge.photo { background: rgba(15, 138, 77, 0.92); }
 .card-body { padding: 16px 18px; display: flex; flex-direction: column; gap: 10px; flex: 1; }
 .card-title { font-weight: 700; font-size: 17px; letter-spacing: -0.01em; line-height: 1.25; }
 .card-by { font-size: 13px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
@@ -144,6 +150,15 @@ a { color: inherit; text-decoration: none; }
 .card-share:hover { color: var(--blue); }
 
 .grid-loading, .grid-empty { text-align: center; color: var(--muted); padding: 60px 0; }
+/* Paging control. Sits under the grid; the sentinel above it is zero-height. */
+.grid-more { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 32px 0 8px; }
+.grid-more-count { font-size: 13px; color: var(--muted); }
+.grid-more[data-busy='1'] .btn { opacity: 0.6; pointer-events: none; }
+.btn-ghost {
+  background: #fff; color: var(--ink); border: 1px solid var(--line); cursor: pointer;
+  min-height: 44px; box-shadow: var(--shadow-sm);
+}
+.btn-ghost:hover { border-color: var(--blue); color: var(--blue); }
 .grid-empty { display: flex; flex-direction: column; align-items: center; gap: 14px; }
 .grid-empty .ti { font-size: 44px; opacity: 0.4; }
 .btn { border: none; border-radius: var(--r-pill); padding: 12px 24px; font-weight: 600; font-size: 15px; }

@@ -221,7 +221,12 @@ function applyLayer(layer: SpecLayer, map: SeatMap, store: DesignStore): number 
       const seg = t * (cols.length - 1);
       const lo = Math.max(0, Math.min(cols.length - 1, Math.floor(seg)));
       const frac = seg - lo;
-      const th = (BAYER[(map.rowOf[i] % 4) * 4 + (Math.floor(u * 250) % 4)] + 0.5) / 16;
+      // Dither per SEAT, not per slice of the bowl. Keying the Bayer column on
+      // `u * 250` made one threshold cell about five seats wide, so a gradient
+      // came out as chunky vertical banding instead of a blend — obvious on the
+      // gallery card and worse in the stand, where the fade is the whole point.
+      // The seat index steps along a row, so `i % 4` is the per-seat column.
+      const th = (BAYER[(map.rowOf[i] % 4) * 4 + (i % 4)] + 0.5) / 16;
       const idx = frac > th && lo + 1 < cols.length ? cols[lo + 1] : cols[lo];
       if (store.paint(i, idx)) painted++;
     }

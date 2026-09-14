@@ -545,6 +545,8 @@ function clip(ctx: CanvasRenderingContext2D, text: string, maxW: number): string
 export interface GalleryItem {
   id: string;
   title: string;
+  /** Arabic title, when the design has one — the starter library ships them. */
+  titleAr?: string | null;
   ownerId: string | null;
   ownerName: string;
   hasThumbnail: boolean;
@@ -564,13 +566,19 @@ export interface GalleryItem {
 export type GallerySort = 'recent' | 'likes';
 
 export async function listGallery(
-  opts: { sort?: GallerySort; search?: string; tags?: string[]; templatesOnly?: boolean } = {},
+  opts: {
+    sort?: GallerySort; search?: string; tags?: string[]; templatesOnly?: boolean;
+    /** Page size and cursor. The server caps limit at 120 and defaults to 60. */
+    limit?: number; offset?: number;
+  } = {},
 ): Promise<GalleryItem[]> {
   const params = new URLSearchParams();
   if (opts.sort) params.set('sort', opts.sort);
   if (opts.search) params.set('search', opts.search);
   if (opts.tags && opts.tags.length) params.set('tags', opts.tags.join(','));
   if (opts.templatesOnly) params.set('templates', '1');
+  if (opts.limit != null) params.set('limit', String(opts.limit));
+  if (opts.offset) params.set('offset', String(opts.offset));
   const qs = params.toString();
   return (await expectOk(await fetch(`${API}/gallery${qs ? `?${qs}` : ''}`, { headers: authHeaders(false) }))) as GalleryItem[];
 }

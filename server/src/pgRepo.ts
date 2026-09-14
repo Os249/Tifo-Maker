@@ -25,12 +25,13 @@ import type {
 import { normalizeTags } from './memoryRepo';
 
 const META_COLS =
-  'id, title, template_id, template_version, palette, revision_count, is_public, owner_id, created_at, updated_at, description, allow_remix, remixed_from, view_count';
+  'id, title, title_ar, template_id, template_version, palette, revision_count, is_public, owner_id, created_at, updated_at, description, allow_remix, remixed_from, view_count';
 
 function rowToMeta(r: Record<string, unknown>): DesignMeta {
   return {
     id: String(r.id),
     title: String(r.title),
+    titleAr: (r.title_ar as string) ?? null,
     templateId: String(r.template_id),
     templateVersion: Number(r.template_version),
     palette: (typeof r.palette === 'string' ? JSON.parse(r.palette) : r.palette) as string[],
@@ -85,9 +86,9 @@ export class PgDesignRepository implements DesignRepository {
 
   async create(d: NewDesign): Promise<DesignMeta> {
     const res = await this.pool.query(
-      `INSERT INTO designs (title, template_id, template_version, palette, cells, owner_id, thumbnail)
-       VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7) RETURNING ${META_COLS}`,
-      [d.title, d.templateId, d.templateVersion, JSON.stringify(d.palette), d.cellsGz, d.ownerId, d.thumbnailPng],
+      `INSERT INTO designs (title, title_ar, template_id, template_version, palette, cells, owner_id, thumbnail)
+       VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8) RETURNING ${META_COLS}`,
+      [d.title, d.titleAr ?? null, d.templateId, d.templateVersion, JSON.stringify(d.palette), d.cellsGz, d.ownerId, d.thumbnailPng],
     );
     return rowToMeta(res.rows[0]);
   }
@@ -98,6 +99,11 @@ export class PgDesignRepository implements DesignRepository {
       [ownerId],
     );
     return res.rows.map(rowToMeta);
+  }
+
+  async listTitlesByOwner(ownerId: string): Promise<string[]> {
+    const res = await this.pool.query('SELECT title FROM designs WHERE owner_id = $1', [ownerId]);
+    return res.rows.map((r) => String(r.title));
   }
 
   async deleteByOwner(ownerId: string): Promise<void> {
@@ -129,9 +135,20 @@ export class PgDesignRepository implements DesignRepository {
     const viewerJoin = query.viewerId
       ? `LEFT JOIN design_votes v ON v.design_id = d.id AND v.user_id = $${params.length}`
       : '';
-    const order = query.sort === 'likes' ? 'd.like_score DESC, d.updated_at DESC' : 'd.updated_at DESC';
+    // d.id breaks ties so paging is stable: the template library is seeded in a
+    // single boot, so hundreds of rows share updated_at to the millisecond and
+    // an unbroken tie can repeat or skip rows between pages.
+    const order = query.sort === 'likes'
+      ? 'd.like_score DESC, d.updated_at DESC, d.id DESC'
+      : 'd.updated_at DESC, d.id DESC';
+    // Callers that want everything (sitemap, crawler feed) pass no limit; the
+    // 5000 ceiling is a backstop, not a page size.
+    params.push(Math.min(5000, query.limit ?? 5000));
+    const limitP = params.length;
+    params.push(Math.max(0, query.offset ?? 0));
+    const offsetP = params.length;
     const res = await this.pool.query(
-      `SELECT d.id, d.title, d.template_id, d.template_version, d.palette, d.revision_count,
+      `SELECT d.id, d.title, d.title_ar, d.template_id, d.template_version, d.palette, d.revision_count,
               d.is_public, d.owner_id, d.created_at, d.updated_at, d.like_score, d.is_template,
               d.description, d.allow_remix, d.remixed_from,
               coalesce(u.username, 'unknown') AS owner_name,
@@ -146,7 +163,7 @@ export class PgDesignRepository implements DesignRepository {
        LEFT JOIN designs rd ON rd.id = d.remixed_from
        LEFT JOIN users ru ON ru.id = rd.owner_id
        ${viewerJoin}
-       WHERE ${where} ORDER BY ${order} LIMIT 200`,
+       WHERE ${where} ORDER BY ${order} LIMIT $${limitP} OFFSET $${offsetP}`,
       params,
     );
     return res.rows.map((r) => ({
@@ -204,7 +221,7 @@ export class PgDesignRepository implements DesignRepository {
 
   async listLikedBy(userId: string): Promise<GalleryItem[]> {
     const res = await this.pool.query(
-      `SELECT d.id, d.title, d.template_id, d.template_version, d.palette, d.revision_count,
+      `SELECT d.id, d.title, d.title_ar, d.template_id, d.template_version, d.palette, d.revision_count,
               d.is_public, d.owner_id, d.created_at, d.updated_at, d.like_score, d.is_template,
               coalesce(u.username, 'unknown') AS owner_name,
               (d.thumbnail IS NOT NULL) AS has_thumbnail, 1 AS my_vote,

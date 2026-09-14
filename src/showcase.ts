@@ -18,6 +18,7 @@ export async function mountShowcase(): Promise<void> {
 
   try {
     const { listGallery, thumbnailUrl } = await import('./net/api');
+    const { t, tTitle } = await import('./ui/i18n');
     // Prefer the most-liked designs; they're the best social proof.
     let items = await listGallery({ sort: 'likes' });
     // Only show ones with a real thumbnail to avoid empty tiles.
@@ -29,10 +30,10 @@ export async function mountShowcase(): Promise<void> {
     grid.innerHTML = items
       .map(
         (item) => `
-        <a class="showcase-card" href="/community" aria-label="${escapeAttr(item.title)} by ${escapeAttr(item.ownerName)}">
+        <a class="showcase-card" href="/community" aria-label="${escapeAttr(t('cm.cardBy').replace('{title}', tTitle(item)).replace('{name}', item.ownerName))}">
           <div class="showcase-thumb" style="background-image:url('${thumbnailUrl(item.id)}')"></div>
           <div class="showcase-meta">
-            <span class="showcase-title">${escapeHtml(item.title)}</span>
+            <span class="showcase-title">${escapeHtml(tTitle(item))}</span>
             <span class="showcase-by">@${escapeHtml(item.ownerName)}</span>
           </div>
         </a>`,

@@ -34,7 +34,7 @@ const state = (extra = []) => ({ cookies: [], origins: [{ origin: B, localStorag
 const ALLOW = new Set([
   'TIFO', 'MAKER', 'TIFOMAKER', 'tifomaker.org', 'English', 'العربية',
   'PNG', 'JPG', 'SVG', 'PDF', 'CSV', 'GIF', 'WebM', 'MP4', 'QR', 'AI', 'RTL',
-  'CSV + PDF', '@OS99GameDev', '@OSNGameDev', 'Zaunfahne',
+  'CSV + PDF', '@OS99GameDev', '@OSNGameDev', 'Zaunfahne', 'tifomaker', '@tifomaker',
 ]);
 const ALLOW_RE = [
   /^[^\p{L}]*$/u,                         // digits, punctuation, symbols only

@@ -3,7 +3,7 @@ import {
   type GalleryItem, type GallerySort,
 } from '../net/api';
 
-import { t } from './i18n';
+import { t, tTag, tTitle } from './i18n';
 /**
  * Community feed: a full-screen overlay of published tifos. The heart of the
  * sharing loop. Browse what others made, search by name, sort by recent or most
@@ -80,13 +80,13 @@ export async function openGallery(
       const card = document.createElement('div');
       card.className = 'feed-card';
       const thumb = item.hasThumbnail
-        ? `<img class="feed-thumb" src="${thumbnailUrl(item.id)}" alt="${escapeHtml(item.title)}" loading="lazy" />`
+        ? `<img class="feed-thumb" src="${thumbnailUrl(item.id)}" alt="${escapeHtml(tTitle(item))}" loading="lazy" />`
         : '<div class="feed-thumb feed-thumb-empty"></div>';
       const tagline =
         item.tags.length > 0
-          ? `<div class="feed-card-tags">${item.tags.slice(0, 4).map((t) => `<span class="feed-card-tag" data-tag="${escapeHtml(t)}">${escapeHtml(t)}</span>`).join('')}</div>`
+          ? `<div class="feed-card-tags">${item.tags.slice(0, 4).map((slug) => `<span class="feed-card-tag" data-tag="${escapeHtml(slug)}">${escapeHtml(tTag(slug))}</span>`).join('')}</div>`
           : '';
-      const tmplBadge = item.isTemplate ? '<span class="feed-tmpl-badge">Template</span>' : '';
+      const tmplBadge = item.isTemplate ? `<span class="feed-tmpl-badge">${t('cm.badgeTemplate')}</span>` : '';
       const photoBadge = item.hasPhoto ? `<span class="feed-photo-badge">${t('gal.ba')}</span>` : '';
       card.innerHTML = `
         <div class="feed-thumb-wrap">
@@ -94,8 +94,8 @@ export async function openGallery(
           ${item.hasPhoto ? `<button class="feed-ba-btn" title="${t('gal.baT')}"><i class="ti ti-arrows-left-right"></i> ${t('gal.ba')}</button>` : ''}
         </div>
         <div class="feed-card-body">
-          <div class="feed-card-title">${escapeHtml(item.title)} ${tmplBadge} ${photoBadge}</div>
-          <div class="feed-card-by">by ${escapeHtml(item.ownerName)}</div>
+          <div class="feed-card-title">${escapeHtml(tTitle(item))} ${tmplBadge} ${photoBadge}</div>
+          <div class="feed-card-by">${escapeHtml(t('cm.by'))} ${escapeHtml(item.ownerName)}</div>
           ${tagline}
           <div class="feed-votes">
             <button class="feed-vote like ${item.myVote === 1 ? 'on' : ''}" title="${t('gal.like')}" aria-label="${t('gal.like')}">
@@ -213,7 +213,7 @@ export async function openGallery(
     for (const t of activeTags) {
       const chip = document.createElement('button');
       chip.className = 'feed-tag-chip active';
-      chip.innerHTML = `${escapeHtml(t)} <span class="x">&times;</span>`;
+      chip.innerHTML = `${escapeHtml(tTag(t))} <span class="x">&times;</span>`;
       chip.addEventListener('click', () => {
         activeTags.delete(t);
         syncTagChips();
@@ -249,7 +249,7 @@ export async function openGallery(
       suggest.className = 'feed-tag-suggest';
       suggest.innerHTML =
         `<span class="feed-tag-label">${t('gal.popular')}</span>` +
-        popular.slice(0, 12).map((t) => `<button class="feed-tag-chip" data-tag="${escapeHtml(t.slug)}">${escapeHtml(t.slug)}</button>`).join('');
+        popular.slice(0, 12).map((p) => `<button class="feed-tag-chip" data-tag="${escapeHtml(p.slug)}">${escapeHtml(tTag(p.slug))}</button>`).join('');
       tagsBar.parentElement!.insertBefore(suggest, tagsBar);
       suggest.querySelectorAll('.feed-tag-chip').forEach((el) =>
         el.addEventListener('click', () => {

@@ -738,6 +738,40 @@ const STRINGS: Record<string, { en: string; ar: string }> = {
   'cm.remixed': { en: 'Remixed! Opening in the editor…', ar: 'انسخت! نفتحها في المحرر…' },
   'cm.reportThanks': { en: 'Thanks: your report has been sent.', ar: 'شكرًا، انرسل بلاغك.' },
   'cm.errFeed': { en: 'Could not load the feed. Please try again.', ar: 'ما قدرنا نحمّل المنشورات. جرّب مرة ثانية.' },
+  'cm.loadMore': { en: 'Load more', ar: 'حمّل المزيد' },
+  'cm.badgeTemplate': { en: 'Template', ar: 'قالب' },
+  'cm.badgePhoto': { en: 'Real photo', ar: 'صورة حقيقية' },
+  'cm.by': { en: 'by', ar: 'بواسطة' },
+  'cm.shareThis': { en: 'Share this tifo', ar: 'شارك هذا التيفو' },
+  'cm.cardBy': { en: '{title} by {name}', ar: '{title} بواسطة {name}' },
+
+  // Gallery tag chips. The starter library seeds these, so in Arabic they were
+  // the one place the feed still read as English. A tag somebody types
+  // themselves has no entry here and shows exactly as they wrote it.
+  'tag.club': { en: 'club', ar: 'نادي' },
+  'tag.arabic': { en: 'Arabic', ar: 'عربي' },
+  'tag.palette': { en: 'palette', ar: 'لوحة ألوان' },
+  'tag.pattern': { en: 'pattern', ar: 'نقشة' },
+  'tag.split': { en: 'split', ar: 'تقسيم' },
+  'tag.block': { en: 'block', ar: 'كتلة' },
+  'tag.banner': { en: 'banner', ar: 'لافتة' },
+  'tag.crest': { en: 'crest', ar: 'شعار' },
+  'tag.checker': { en: 'checker', ar: 'رقعة شطرنج' },
+  'tag.chevron': { en: 'chevron', ar: 'أسهم' },
+  'tag.hoops': { en: 'hoops', ar: 'حلقات' },
+  'tag.scarf': { en: 'scarf', ar: 'شال' },
+  'tag.sash': { en: 'sash', ar: 'وشاح' },
+  'tag.halves': { en: 'halves', ar: 'نصفان' },
+  'tag.flag': { en: 'flag', ar: 'علم' },
+  'tag.gradient-wall': { en: 'gradient wall', ar: 'جدار متدرّج' },
+  'tag.ends-and-sides': { en: 'ends and sides', ar: 'الأطراف والجوانب' },
+  'tag.tier-split': { en: 'tier split', ar: 'تقسيم الطوابق' },
+  'tag.banner-framed': { en: 'framed banner', ar: 'لافتة بإطار' },
+  'tag.crest-on-stripes': { en: 'crest on stripes', ar: 'شعار على خطوط' },
+  'tag.crest-and-word': { en: 'crest and word', ar: 'شعار وكلمة' },
+  'tag.mosaic-word': { en: 'mosaic word', ar: 'فسيفساء بكلمة' },
+  'tag.goalline-band': { en: 'goal-line band', ar: 'شريط أمامي' },
+  'cm.shown': { en: '{n} shown', ar: 'ظهر {n}' },
   'cm.errProfile': { en: 'Could not load this profile.', ar: 'ما قدرنا نحمّل هذا الملف.' },
   'cm.errRender': { en: 'Could not render this tifo.', ar: 'ما قدرنا نعرض هذا التيفو.' },
   'cm.report': { en: 'Report this design', ar: 'بلّغ عن هذا التصميم' },
@@ -1133,6 +1167,25 @@ const ERROR_KEYS: Record<string, string> = {
   'Sign in to use the AI Designer.': 'err.aiSignIn',
   'Verify your email to use the AI Designer.': 'err.aiVerify',
 };
+
+/**
+ * A gallery tag as a label. Library tags have a translation; a tag a person
+ * typed is their own word and comes back untouched.
+ */
+export function tTag(slug: string): string {
+  const key = `tag.${slug}`;
+  const hit = t(key);
+  return hit === key ? slug : hit;
+}
+
+/**
+ * The title to show for a design. Only the starter library carries a second
+ * title — everything else is whatever its author typed, in whatever language
+ * they typed it, and translating that would be putting words in their mouth.
+ */
+export function tTitle(item: { title: string; titleAr?: string | null }): string {
+  return getLang() === 'ar' && item.titleAr ? item.titleAr : item.title;
+}
 
 export function tErr(message: string): string {
   const key = ERROR_KEYS[message.trim()];

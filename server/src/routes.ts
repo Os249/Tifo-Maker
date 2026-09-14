@@ -975,6 +975,9 @@ export async function buildApp(
     return typeof raw === 'string' ? raw : undefined;
   };
 
+  /** Default gallery page size, shared by the API and the crawler feed. */
+  const GALLERY_PAGE = 60;
+
   app.get('/api/gallery', async (req) => {
     const q = req.query as Record<string, unknown>;
     const sort = oneParam(q.sort) === 'likes' ? 'likes' : 'recent';
@@ -982,7 +985,14 @@ export async function buildApp(
     const rawTags = oneParam(q.tags);
     const tags = rawTags ? rawTags.split(',').map((t) => t.trim()).filter(Boolean).slice(0, 8) : undefined;
     const search = oneParam(q.search)?.slice(0, 80);
-    return repo.listPublic({ sort, search, viewerId, tags, templatesOnly: oneParam(q.templates) === '1' });
+    // The library alone is ~600 designs. Paging keeps the first paint small and
+    // stops a single request from shipping every card on the site.
+    const limit = Math.min(120, Math.max(1, Number(oneParam(q.limit)) || GALLERY_PAGE));
+    const offset = Math.max(0, Number(oneParam(q.offset)) || 0);
+    return repo.listPublic({
+      sort, search, viewerId, tags, limit, offset,
+      templatesOnly: oneParam(q.templates) === '1',
+    });
   });
 
   // Most-used tags, for the filter chips.
@@ -1981,7 +1991,7 @@ export async function buildApp(
       app.get('/community', async (req, reply) => {
         let items: { id: string; title: string; ownerName: string; hasThumbnail: boolean }[] = [];
         try {
-          items = (await repo.listPublic({ sort: 'recent' })).slice(0, 60);
+          items = await repo.listPublic({ sort: 'recent', limit: GALLERY_PAGE });
         } catch {
           items = []; // a failed query must never take the page down
         }

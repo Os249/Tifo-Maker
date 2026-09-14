@@ -1,6 +1,6 @@
 import { fetchProfile, thumbnailUrl, type GalleryItem } from '../net/api';
 
-import { t } from './i18n';
+import { t, tTitle } from './i18n';
 /**
  * Profile overlay. Shows a user's name, the tifos they've published (created),
  * and the public tifos they've liked. Clicking any opens it via onPick (load to
@@ -54,12 +54,12 @@ export async function openProfile(userId: string, onPick: (id: string) => void):
       const card = document.createElement('div');
       card.className = 'feed-card';
       const thumb = item.hasThumbnail
-        ? `<img class="feed-thumb" src="${thumbnailUrl(item.id)}" alt="${escapeHtml(item.title)}" loading="lazy" />`
+        ? `<img class="feed-thumb" src="${thumbnailUrl(item.id)}" alt="${escapeHtml(tTitle(item))}" loading="lazy" />`
         : '<div class="feed-thumb feed-thumb-empty"></div>';
       card.innerHTML = `
         ${thumb}
         <div class="feed-card-body">
-          <div class="feed-card-title">${escapeHtml(item.title)}</div>
+          <div class="feed-card-title">${escapeHtml(tTitle(item))}</div>
           <div class="feed-card-by">${item.likeScore} ${item.likeScore === 1 ? 'like' : 'likes'}</div>
         </div>
         <button class="feed-open primary">${t('gal.open')}</button>

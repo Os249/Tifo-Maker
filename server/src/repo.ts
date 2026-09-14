@@ -3,6 +3,9 @@
 export interface DesignMeta {
   id: string;
   title: string;
+  /** Arabic title, when the design has one. Set by the starter library, which
+   *  ships bilingual names; null for anything a person saved. */
+  titleAr?: string | null;
   templateId: string;
   templateVersion: number;
   palette: string[];
@@ -47,6 +50,10 @@ export interface GalleryQuery {
   tags?: string[];
   /** Only return designs flagged as templates. */
   templatesOnly?: boolean;
+  /** Page size. Omitted means "no cap" — only the sitemap and the crawler feed
+   *  want that; every user-facing list passes one. */
+  limit?: number;
+  offset?: number;
 }
 
 export interface DesignRecord extends DesignMeta {
@@ -63,6 +70,7 @@ export interface RevisionRow {
 
 export interface NewDesign {
   title: string;
+  titleAr?: string | null;
   templateId: string;
   templateVersion: number;
   palette: string[];
@@ -80,6 +88,10 @@ export interface DiffBytes {
 export interface DesignRepository {
   create(d: NewDesign): Promise<DesignMeta>;
   listByOwner(ownerId: string): Promise<DesignMeta[]>;
+  /** Every title an owner has, with no cap. listByOwner is a profile list and
+   *  stops at 200; the template seeder needs the whole set to know what it has
+   *  already published, or it re-adds the library on every restart. */
+  listTitlesByOwner(ownerId: string): Promise<string[]>;
   /** Delete all of an owner's designs (used by account deletion). */
   deleteByOwner(ownerId: string): Promise<void>;
   listPublic(query: GalleryQuery): Promise<GalleryItem[]>;

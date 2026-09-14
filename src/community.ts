@@ -8,7 +8,7 @@
 // and comment counts became a bare "0  0".
 import './vendor/tabler-subset.css';
 import './community.css';
-import { initLang, applyDom, toggleLang, t } from './ui/i18n';
+import { initLang, applyDom, toggleLang, t, tTag, tTitle } from './ui/i18n';
 import { installMobileNav } from './ui/mobileNav';
 import { installConsent } from './ui/consent';
 import { generateSeatMapAsync } from './workers/client';
@@ -115,7 +115,28 @@ async function ensureAuth(): Promise<boolean> {
 let currentSort: GallerySort | 'templates' = 'recent';
 let activeTags: string[] = [];
 
+/**
+ * Paging.
+ *
+ * The starter-template library alone is ~600 designs, so the old "fetch every
+ * public design and append 600 cards" load is no longer something a phone
+ * should be asked to do. Pages are 60; scrolling near the bottom pulls the
+ * next one, and the button below the sentinel is the keyboard/no-observer path.
+ *
+ * `token` guards against a slow page landing after the user has switched tab or
+ * tag: a response whose token no longer matches is dropped instead of being
+ * appended to a grid it does not belong to.
+ */
+const PAGE = 60;
+let pageOffset = 0;
+let pageToken = 0;
+let exhausted = false;
+let loadingPage = false;
+
 async function loadGallery(): Promise<void> {
+  pageOffset = 0;
+  exhausted = false;
+  pageToken++;
   const grid = $('#gallery-grid');
   const loading = $('#grid-loading');
   const empty = $('#grid-empty');
@@ -123,25 +144,58 @@ async function loadGallery(): Promise<void> {
   // can reach every published tifo. Once the real grid is about to render it
   // has done its job, and leaving it would show the same designs twice.
   document.getElementById('seo-feed')?.remove();
+  grid.innerHTML = '';
+  $('#grid-more').hidden = true;
   loading.hidden = false;
   empty.hidden = true;
+  const ok = await loadPage(pageToken);
+  loading.hidden = true;
+  if (!ok) return;
+  if (grid.childElementCount === 0) empty.hidden = false;
+}
+
+/** Append one page. Returns false if the request failed. */
+async function loadPage(token: number): Promise<boolean> {
+  if (loadingPage || exhausted) return true;
+  loadingPage = true;
+  const more = $('#grid-more');
+  more.dataset.busy = '1';
   try {
     const sort: GallerySort = currentSort === 'likes' ? 'likes' : 'recent';
     const items = await listGallery({
       sort,
       tags: activeTags,
       templatesOnly: currentSort === 'templates',
+      limit: PAGE,
+      offset: pageOffset,
     });
-    grid.innerHTML = '';
-    loading.hidden = true;
-    if (items.length === 0) {
-      empty.hidden = false;
-      return;
-    }
+    if (token !== pageToken) return true; // a newer tab/tag won the race
+    const grid = $('#gallery-grid');
     for (const item of items) grid.appendChild(renderCard(item));
+    pageOffset += items.length;
+    if (items.length < PAGE) exhausted = true;
+    more.hidden = exhausted || grid.childElementCount === 0;
+    $('#grid-more-count').textContent = exhausted ? '' : t('cm.shown').replace('{n}', String(pageOffset));
+    void fillCommentCounts(items);
+    return true;
   } catch {
-    loading.textContent = t('cm.errFeed');
+    if (token === pageToken) $('#grid-loading').textContent = t('cm.errFeed');
+    return false;
+  } finally {
+    loadingPage = false;
+    more.dataset.busy = '';
   }
+}
+
+/** Wire the sentinel and the button once, at mount. */
+function initPaging(): void {
+  $('#grid-more-btn').addEventListener('click', () => void loadPage(pageToken));
+  const sentinel = document.getElementById('grid-sentinel');
+  if (!sentinel || typeof IntersectionObserver === 'undefined') return;
+  new IntersectionObserver(
+    (entries) => { if (entries.some((e) => e.isIntersecting)) void loadPage(pageToken); },
+    { rootMargin: '600px 0px' }, // start fetching before the user reaches the end
+  ).observe(sentinel);
 }
 
 function renderCard(item: GalleryItem, onClick?: () => void): HTMLElement {
@@ -150,23 +204,32 @@ function renderCard(item: GalleryItem, onClick?: () => void): HTMLElement {
   const thumb = item.hasThumbnail
     ? `<div class="card-thumb"><img class="card-thumb-img" src="${thumbnailUrl(item.id)}" alt="" loading="lazy" />`
     : `<div class="card-thumb card-thumb-empty">`;
+  // Badges sit in the body, not over the art. They used to float on the
+  // thumbnail, which was free while the card wasted half its height on
+  // letterbox; once the thumbnail was tightened to the tifo's real shape the
+  // pill covered the left end of the design.
   const badges =
-    (item.isTemplate ? `<span class="badge template">Template</span>` : '') +
-    (item.hasPhoto ? `<span class="badge photo">Real photo</span>` : '');
+    item.isTemplate || item.hasPhoto
+      ? `<div class="card-badges">` +
+        (item.isTemplate ? `<span class="badge template">${escapeHtml(t('cm.badgeTemplate'))}</span>` : '') +
+        (item.hasPhoto ? `<span class="badge photo">${escapeHtml(t('cm.badgePhoto'))}</span>` : '') +
+        `</div>`
+      : '';
   const remixed = item.remixedFromName
     ? `<div class="card-remixed">↻ remixed from <span class="at">@${escapeHtml(item.remixedFromName)}</span></div>`
     : '';
   const liked = item.myVote === 1;
   card.innerHTML = `
-    ${thumb}${badges}</div>
+    ${thumb}</div>
     <div class="card-body">
-      <div class="card-title">${escapeHtml(item.title)}</div>
-      <div class="card-by">by <span class="at">@${escapeHtml(item.ownerName)}</span></div>
+      ${badges}
+      <div class="card-title">${escapeHtml(tTitle(item))}</div>
+      <div class="card-by">${escapeHtml(t('cm.by'))} <span class="at">@${escapeHtml(item.ownerName)}</span></div>
       ${remixed}
       <div class="card-stats">
         <span class="card-stat like ${liked ? 'on' : ''}"><i class="ti ti-heart${liked ? '-filled' : ''}"></i> ${item.likeScore}</span>
         <span class="card-stat"><i class="ti ti-message-circle"></i> <span class="cmt-count" data-id="${item.id}">·</span></span>
-        <button class="card-stat card-share" title="Share this tifo"><i class="ti ti-share"></i></button>
+        <button class="card-stat card-share" title="${escapeHtml(t('cm.shareThis'))}"><i class="ti ti-share"></i></button>
       </div>
     </div>`;
   card.addEventListener('click', () => (onClick ? onClick() : openPreview(item)));
@@ -314,7 +377,7 @@ async function openPreview(item: GalleryItem): Promise<void> {
       </div>
       <div class="modal-side">
         <div class="side-head">
-          <h2 class="side-title">${escapeHtml(item.title)}</h2>
+          <h2 class="side-title">${escapeHtml(tTitle(item))}</h2>
           <div class="side-author">
             <div class="side-avatar">${initials(item.ownerName)}</div>
             <div class="side-author-meta">
@@ -636,14 +699,26 @@ function bumpCommentCount(designId: string): void {
   }
 }
 
-// lazily fill comment counts on cards after the grid renders
+/**
+ * Fill in comment counts once a page of cards is on screen.
+ *
+ * One request per card, so it runs a few at a time rather than one after
+ * another: a 60-card page used to be 60 serial round-trips, which on a phone
+ * meant the last card's count landed long after the reader had scrolled past.
+ */
 async function fillCommentCounts(items: GalleryItem[]): Promise<void> {
-  for (const item of items) {
-    const el = document.querySelector(`.cmt-count[data-id="${item.id}"]`);
-    if (!el) continue;
-    const comments = await listComments(item.id).catch(() => []);
-    el.textContent = String(comments.length);
-  }
+  const queue = items.filter((i) => document.querySelector(`.cmt-count[data-id="${i.id}"]`));
+  let at = 0;
+  const worker = async (): Promise<void> => {
+    while (at < queue.length) {
+      const item = queue[at++];
+      const el = document.querySelector(`.cmt-count[data-id="${item.id}"]`);
+      if (!el) continue;
+      const comments = await listComments(item.id).catch(() => []);
+      el.textContent = String(comments.length);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(6, queue.length) }, worker));
 }
 
 // ---------- search ----------
@@ -765,7 +840,7 @@ async function loadTags(): Promise<void> {
   for (const tg of tags.slice(0, 12)) {
     const chip = document.createElement('button');
     chip.className = 'tag-chip';
-    chip.textContent = `#${tg.slug}`;
+    chip.textContent = `#${tTag(tg.slug)}`;
     chip.addEventListener('click', () => {
       chip.classList.toggle('active');
       if (activeTags.includes(tg.slug)) activeTags = activeTags.filter((x) => x !== tg.slug);
@@ -780,14 +855,8 @@ async function loadTags(): Promise<void> {
 async function main(): Promise<void> {
   langToggle.textContent = t('common.language');
   await refreshAuthUI();
+  initPaging();
   await Promise.all([loadGallery(), loadTags()]);
-  // fill comment counts after the grid is up
-  const items = await listGallery({
-    sort: currentSort === 'likes' ? 'likes' : 'recent',
-    tags: activeTags,
-    templatesOnly: currentSort === 'templates',
-  }).catch(() => []);
-  void fillCommentCounts(items);
 }
 void main();
 

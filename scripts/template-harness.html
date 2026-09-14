@@ -1,0 +1,97 @@
+<!doctype html>
+<!--
+  Dev-only harness for scripts/generate-templates.mts.
+
+  The spec compiler's text and symbol layers rasterise glyphs through a canvas,
+  so they throw "document is not defined" in plain Node — the composer is
+  DOM-free but the compiler is not. Rather than reimplement that rendering (and
+  risk templates that do not match what the editor draws), generation runs the
+  real modules inside headless Chromium against the Vite dev server.
+
+  Not a Vite build input, so it is served in dev and never shipped.
+-->
+<html lang="en">
+<head><meta charset="UTF-8" /><title>template harness</title></head>
+<body>
+  <div id="out">loading…</div>
+  <script type="module">
+    import { compileSpec } from '/src/core/specCompiler.ts';
+    import { DesignStore } from '/src/core/design.ts';
+    import { generateSeatMap } from '/src/core/seatmap.ts';
+    import { templateById } from '/src/core/stadiumCatalog.ts';
+    import { paint2D } from '/src/ui/viewer.ts';
+    import { Preview3D, CAMERA_PRESETS } from '/src/render/preview3d.ts';
+    import { validateSpec } from '/src/core/tifoSpec.ts';
+
+    // One Preview3D instance reused for every template: creating a WebGL
+    // context per design exhausts the browser's context limit after ~16.
+    let preview = null, previewStore = null, previewMapId = null, host = null;
+
+    const maps = new Map();
+    const mapFor = (id) => {
+      if (!maps.has(id)) maps.set(id, generateSeatMap(templateById(id)));
+      return maps.get(id);
+    };
+
+    /** Compile one spec and report everything the quality gates need. */
+    window.__render = (spec, stadiumId, wantThumb) => {
+      const map = mapFor(stadiumId);
+      const v = validateSpec(spec);
+      if (!v.valid) return { ok: false, why: 'invalid spec', errors: v.errors };
+      const store = new DesignStore(map, spec.palette.slice());
+      const r = compileSpec(spec, map, store);
+      const cells = Array.from(store.cells);
+      // Histogram drives the coverage and dominance gates.
+      const hist = new Array(spec.palette.length).fill(0);
+      for (const c of cells) hist[c] = (hist[c] ?? 0) + 1;
+      let thumb = null, flat = null;
+      if (wantThumb) {
+        const canvas = document.createElement('canvas');
+        canvas.width = 640;
+        paint2D(canvas, map, store);
+        flat = canvas.toDataURL('image/png');
+      }
+      return { ok: true, cells, hist, seatCount: map.count, warnings: r.warnings, thumb, flat,
+               templateVersion: templateById(stadiumId).version };
+    };
+    /**
+     * Render the design on the real 3D bowl.
+     *
+     * The flat 2D strip is an honest picture of the data and a terrible library
+     * thumbnail: unrolled, the bowl is 10:1, so every design reads as a
+     * barcode and they all look alike. The stadium view is what a tifo IS.
+     */
+    window.__render3d = async (spec, stadiumId) => {
+      const map = mapFor(stadiumId);
+      const v = validateSpec(spec);
+      if (!v.valid) return null;
+      if (!host) {
+        host = document.createElement('div');
+        host.style.cssText = 'position:fixed;left:0;top:0;width:720px;height:440px;';
+        document.body.appendChild(host);
+      }
+      if (previewMapId !== stadiumId) {
+        if (preview) { preview.dispose?.(); host.textContent = ''; }
+        previewStore = new DesignStore(map, spec.palette.slice());
+        preview = new Preview3D(host, map, previewStore);
+        previewMapId = stadiumId;
+        // "Full view" frames the whole bowl from far enough out that it sits
+        // small in the middle of a lot of empty black — honest, but a weak
+        // thumbnail. This is the same angle pulled in, so the stand fills the
+        // card and a centred crest is actually legible.
+        preview.applyPreset({ name: 'library', position: [0, 150, 96], target: [0, 6, 0] });
+      }
+      previewStore.setPalette(spec.palette.slice());
+      compileSpec(spec, map, previewStore);
+      preview.recolorAll();
+      preview.renderOnce?.();
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+      const c = host.querySelector('canvas');
+      return c ? c.toDataURL('image/png') : null;
+    };
+
+    document.getElementById('out').textContent = 'ready';
+    window.__ready = true;
+  </script>
+</body>
+</html>

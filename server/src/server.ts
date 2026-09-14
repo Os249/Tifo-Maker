@@ -14,6 +14,8 @@ import { MemoryTrafficRepository, PgTrafficRepository, type TrafficRepository } 
 import { MemoryFeedbackRepository, PgFeedbackRepository, type FeedbackRepository } from './feedbackRepo';
 import { buildApp, type TemplateInfo } from './routes';
 import { createEmailSender } from './email';
+import { seedTemplates } from './seedTemplates';
+import type { AuthRepository, DesignRepository } from './repo';
 
 /**
  * Production bootstrap.
@@ -82,6 +84,7 @@ async function main(): Promise<void> {
     .filter(Boolean);
 
   let app;
+  let seedRepos: { designs: DesignRepository; auth: AuthRepository } | null = null;
   if (process.env.DATABASE_URL) {
     const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
     await applySchema(pool);
@@ -117,7 +120,10 @@ async function main(): Promise<void> {
     } catch (e) {
       console.error('[tifo] feedback init failed: in-product reports disabled:', e);
     }
-    app = await buildApp(new PgDesignRepository(pool), new PgAuthRepository(pool), templates, {
+    const pgDesigns = new PgDesignRepository(pool);
+    const pgAuth = new PgAuthRepository(pool);
+    seedRepos = { designs: pgDesigns, auth: pgAuth };
+    app = await buildApp(pgDesigns, pgAuth, templates, {
       staticDir,
       rateLimit: true,
       logger: isProd,
@@ -145,6 +151,7 @@ async function main(): Promise<void> {
     }
     const auth = new MemoryAuthRepository();
     const designs = new MemoryDesignRepository((id) => auth.usernameOf(id));
+    seedRepos = { designs, auth };
     app = await buildApp(designs, auth, templates, {
       staticDir,
       rateLimit: false,
@@ -163,6 +170,21 @@ async function main(): Promise<void> {
       emailSender: createEmailSender(),
       publicUrl: process.env.PUBLIC_URL,
     });
+  }
+
+  // Load the starter-template library. Best-effort and after listen, so a
+  // problem here can never stop the site from coming up.
+  if (seedRepos) {
+    try {
+      const file = join(__dirname, '../data/templates.jsonl');
+      const r = await seedTemplates(seedRepos.designs, seedRepos.auth, file);
+      if (r.added || r.skipped.length) {
+        console.log(`[tifo] templates: +${r.added} added, ${r.existing} already present` +
+          (r.skipped.length ? `, ${r.skipped.length} skipped` : ''));
+      }
+    } catch (e) {
+      console.warn('[tifo] template seeding skipped:', (e as Error).message);
+    }
   }
 
   const port = Number(process.env.PORT ?? 8787);

@@ -65,8 +65,8 @@ export class MemoryDesignRepository implements DesignRepository {
   constructor(private readonly usernames: (id: string | null) => string = () => 'unknown') {}
 
   private meta(r: Row): DesignMeta {
-    const { id, title, templateId, templateVersion, palette, revisionCount, isPublic, ownerId, createdAt, updatedAt, description, allowRemix, remixedFrom } = r;
-    return { id, title, templateId, templateVersion, palette: [...palette], revisionCount, isPublic, ownerId, createdAt, updatedAt, description: description ?? null, allowRemix: allowRemix !== false, remixedFrom: remixedFrom ?? null, viewCount: r.views };
+    const { id, title, titleAr, templateId, templateVersion, palette, revisionCount, isPublic, ownerId, createdAt, updatedAt, description, allowRemix, remixedFrom } = r;
+    return { id, title, titleAr: titleAr ?? null, templateId, templateVersion, palette: [...palette], revisionCount, isPublic, ownerId, createdAt, updatedAt, description: description ?? null, allowRemix: allowRemix !== false, remixedFrom: remixedFrom ?? null, viewCount: r.views };
   }
 
   async create(d: NewDesign): Promise<DesignMeta> {
@@ -74,6 +74,7 @@ export class MemoryDesignRepository implements DesignRepository {
     const row: Row = {
       id: randomUUID(),
       title: d.title,
+      titleAr: d.titleAr ?? null,
       templateId: d.templateId,
       templateVersion: d.templateVersion,
       palette: [...d.palette],
@@ -102,6 +103,10 @@ export class MemoryDesignRepository implements DesignRepository {
       .filter((r) => r.ownerId === ownerId)
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
       .map((r) => this.meta(r));
+  }
+
+  async listTitlesByOwner(ownerId: string): Promise<string[]> {
+    return [...this.rows.values()].filter((r) => r.ownerId === ownerId).map((r) => r.title);
   }
 
   async deleteByOwner(ownerId: string): Promise<void> {
@@ -141,12 +146,17 @@ export class MemoryDesignRepository implements DesignRepository {
       const want = query.tags.map((t) => t.toLowerCase());
       rows = rows.filter((r) => want.every((t) => r.tags.includes(t)));
     }
+    // The id breaks ties. Without it paging is undefined whenever timestamps
+    // match, which is not a corner case: the whole template library is written
+    // in one boot and shares an updatedAt to the millisecond.
     rows.sort((a, b) =>
-      query.sort === 'likes'
+      (query.sort === 'likes'
         ? this.score(b) - this.score(a) || b.updatedAt.localeCompare(a.updatedAt)
-        : b.updatedAt.localeCompare(a.updatedAt),
+        : b.updatedAt.localeCompare(a.updatedAt)) || a.id.localeCompare(b.id),
     );
-    return rows.map((r) => this.galleryItem(r, query.viewerId));
+    const from = Math.max(0, query.offset ?? 0);
+    const page = query.limit == null ? rows.slice(from) : rows.slice(from, from + query.limit);
+    return page.map((r) => this.galleryItem(r, query.viewerId));
   }
 
   async vote(

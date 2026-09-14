@@ -222,6 +222,9 @@ ALTER TABLE ai_usage ADD COLUMN IF NOT EXISTS period TEXT;
 
 -- Sharing system: a public view counter on each design, a branded social-card
 -- image, and a per-platform share/open log for analytics.
+-- Arabic title. Only the starter library sets it (it ships bilingual names);
+-- a design somebody saves keeps whatever single title they typed.
+ALTER TABLE designs ADD COLUMN IF NOT EXISTS title_ar TEXT;
 ALTER TABLE designs ADD COLUMN IF NOT EXISTS view_count INT NOT NULL DEFAULT 0;
 ALTER TABLE designs ADD COLUMN IF NOT EXISTS og_image BYTEA;  -- client-rendered 1200x630 OG card
 

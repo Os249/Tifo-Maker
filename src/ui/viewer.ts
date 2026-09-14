@@ -2,7 +2,7 @@ import type { SeatMap, DesignState } from '../core/types';
 import { DesignStore } from '../core/design';
 import { EMPTY_SEAT_COLOR } from '../core/template';
 import { listGallery, loadDesign, thumbnailUrl, type GalleryItem } from '../net/api';
-import { t, tl } from './i18n';
+import { t, tl, tTitle } from './i18n';
 
 /**
  * Phone viewer (<768px). Not a crippled editor — a first-class read-only
@@ -163,7 +163,7 @@ export async function mountViewer(ctx: ViewerContext): Promise<void> {
         card.appendChild(img);
       }
       const nameEl = document.createElement('span');
-      nameEl.textContent = item.title;
+      nameEl.textContent = tTitle(item);
       const byEl = document.createElement('small');
       byEl.textContent = `${t('v.by')} ${item.ownerName}`;
       card.append(nameEl, byEl);

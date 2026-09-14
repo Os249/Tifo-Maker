@@ -1,6 +1,6 @@
 import { listPhotos, photoUrl, thumbnailUrl, type GalleryItem } from '../net/api';
 
-import { t } from './i18n';
+import { t, tTitle } from './i18n';
 /**
  * Before/After detail view — the social-proof centerpiece. Shows the design's
  * 3D/digital thumbnail beside a real match-day photo, split by a draggable
@@ -18,7 +18,7 @@ export async function openBeforeAfter(item: GalleryItem): Promise<void> {
   backdrop.innerHTML = `
     <div class="ba-panel" role="dialog" aria-modal="true" aria-label="${t('ba.title')}">
       <button class="ba-close" aria-label="${t('common.close')}">&times;</button>
-      <div class="ba-title">${escapeHtml(item.title)}</div>
+      <div class="ba-title">${escapeHtml(tTitle(item))}</div>
       <div class="ba-sub">${t('ba.sub')}</div>
       <div class="ba-stage" id="ba-stage">
         <img class="ba-img ba-after" id="ba-after" alt="${t('ba.photo')}" />

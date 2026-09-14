@@ -69,6 +69,13 @@
         <a class="btn btn-primary" href="/app" data-i18n="nav.openEditor">Open the editor</a>
       </div>
       <div class="grid-loading" id="grid-loading" data-i18n="cm.loading">Loading the community feed…</div>
+      <!-- Paging. The sentinel loads the next page on scroll; the button is the
+           accessible, no-observer fallback and the keyboard path. -->
+      <div class="grid-more" id="grid-more" hidden>
+        <button type="button" class="btn btn-ghost" id="grid-more-btn" data-i18n="cm.loadMore">Load more</button>
+        <span class="grid-more-count" id="grid-more-count"></span>
+      </div>
+      <div id="grid-sentinel" aria-hidden="true"></div>
     </section>
   </main>
 
