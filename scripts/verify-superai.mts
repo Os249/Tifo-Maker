@@ -353,6 +353,10 @@ for (const [name, p] of PROMPTS) {
   check(`${name} prompt names every display voice`, TIFO_VOICES.every((v) => p.includes(v.id)));
   check(`${name} prompt warns off the legacy stacks`, p.includes('Legacy device fonts'));
 }
+// A white edge on a gold field is 1.43:1 — the fattened copy swallows the
+// letterform instead of ringing it. The prompt has to say when NOT to outline.
+check('prompts say an outline needs contrast against the field too',
+  [PROMPTS[0][1], PROMPTS[1][1]].every((p) => p.includes('ONLY outline when') && p.includes('separate from BOTH')));
 check('system + director show the two-layer outline pair',
   [PROMPTS[0][1], PROMPTS[1][1]].every((p) => p.includes('TWO LAYERS') && p.includes('immediately after')));
 check('critic is told to preserve pairs and the new fields',
@@ -361,10 +365,10 @@ check('director carries whole-bowl rules that std does not',
   PROMPTS[1][1].includes('foreshortened') && !PROMPTS[0][1].includes('foreshortened'));
 // Budgets: these are paid on EVERY generation, so a future edit that quietly
 // adds 400 tokens should fail here rather than on the invoice.
-check('system prompt within budget', PROMPTS[0][1].length <= 6200, `${PROMPTS[0][1].length}`);
+check('system prompt within budget', PROMPTS[0][1].length <= 6500, `${PROMPTS[0][1].length}`);
 // The director is premium-only and capped by AI_DAILY_BUDGET, and ~45% of it is
 // the few-shot gallery — the highest-leverage tokens in the whole system.
-check('director prompt within budget', PROMPTS[1][1].length <= 10600, `${PROMPTS[1][1].length}`);
+check('director prompt within budget', PROMPTS[1][1].length <= 10900, `${PROMPTS[1][1].length}`);
 check('critic prompt within budget', PROMPTS[2][1].length <= 3000, `${PROMPTS[2][1].length}`);
 check('few-shot gallery within budget', fewShotBlock().length <= 5000, `${fewShotBlock().length}`);
 
