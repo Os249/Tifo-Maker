@@ -4,7 +4,8 @@ import { t } from './i18n';
  * Shared mobile navigation + base mobile foundations for the marketing / content
  * pages (landing, community, clubs). On phones the inline nav links are hidden
  * and a hamburger opens a right-side drawer containing every link, the language
- * toggle, and the primary CTA — so the site feels like one product on a phone.
+ * and theme toggles, and the primary CTA — so the site feels like one product
+ * on a phone.
  *
  * Items are mirrored into the drawer: anchors navigate via their own href;
  * buttons proxy to the original element so existing handlers (language toggle,
@@ -45,8 +46,23 @@ img, svg, video, canvas { max-width: 100%; }
   color: #F1F4FB; background: transparent; border: none; text-decoration: none; cursor: pointer; min-height: 48px;
 }
 .mnav-drawer a:hover, .mnav-drawer button:hover { background: rgba(255,255,255,.08); }
+/* The theme toggle is a 40px icon button in the header, but in the drawer
+   every row is full width, so it gets a label. The text comes from its own
+   aria-label, which the colour-scheme module keeps in step with the current
+   theme — so the row says "Dark mode" or "Light mode" without a second copy of
+   that string to keep in sync. */
+.mnav-drawer .theme-toggle {
+  display: flex; align-items: center; justify-content: flex-start; gap: 12px;
+  width: 100%; min-height: 48px; padding: 13px 14px; border: none; border-radius: 12px;
+  background: transparent; color: #F1F4FB; font: inherit; font-size: 16px; font-weight: 600;
+}
+.mnav-drawer .theme-toggle::after { content: attr(aria-label); }
+.mnav-drawer .theme-toggle:hover { background: rgba(255,255,255,.08); border-color: transparent; color: #F1F4FB; }
 .mnav-drawer a.nav-cta, .mnav-drawer button.nav-cta {
-  background: #1C6FE0; color: #fff; text-align: center; margin-top: 10px; border-radius: 999px;
+  /* !important because .nav-cta on the page sets its colour that way, and in
+     the drawer the pill is blue rather than the page's inverted ground — the
+     page's ink follows the theme and went near-black on blue in dark mode. */
+  background: #1C6FE0; color: #fff !important; text-align: center; margin-top: 10px; border-radius: 999px;
 }
 @media (max-width: 860px) {
   .mnav-burger { display: inline-flex; }

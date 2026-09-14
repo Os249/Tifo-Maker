@@ -2,18 +2,7 @@
    The counterpoint to the minimal dark editor. Signature element: a stylized
    stadium bowl whose tiers shimmer like a live card mosaic. */
 
-:root {
-  --purple: #5B2A86;
-  --purple-deep: #3D1A5E;
-  --emerald: #0F8A4D;
-  --neon: #D9F000;
-  --blue: #1C6FE0;
-  --ink: #0E0A1A;
-  --paper: #FBFAFF;
-  --muted: #767188; /* was #8B86A0 at 3.36:1 on the page ground; 4.5:1 is the floor for body text */
-  --line: #ECE9F5;
-  --font: 'Inter', system-ui, -apple-system, sans-serif;
-}
+@import './ui/colorScheme.css';
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -53,7 +42,7 @@ a { color: inherit; text-decoration: none; }
   align-items: center;
   justify-content: space-between;
   padding: 16px 32px;
-  background: rgba(251, 250, 255, 0.82);
+  background: var(--bar);
   backdrop-filter: blur(10px);
   border-bottom: 1px solid rgba(91, 42, 134, 0.10);
 }
@@ -62,8 +51,8 @@ a { color: inherit; text-decoration: none; }
 .nav-links { display: flex; align-items: center; gap: 28px; font-weight: 500; font-size: 15px; }
 .nav-links a:not(.nav-cta):hover { color: var(--purple); }
 .nav-cta {
-  background: var(--ink);
-  color: var(--paper) !important;
+  background: var(--invert);
+  color: var(--invert-ink) !important;
   padding: 9px 18px;
   border-radius: 999px;
   font-weight: 600;
@@ -98,12 +87,12 @@ a { color: inherit; text-decoration: none; }
   margin-bottom: 24px;
 }
 .grad {
-  background: linear-gradient(100deg, var(--purple) 0%, var(--blue) 55%, var(--emerald) 100%);
+  background: linear-gradient(100deg, var(--purple-solid) 0%, var(--blue-solid) 55%, var(--emerald-solid) 100%);
   -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;
 }
-.lead { font-size: clamp(17px, 2vw, 20px); color: #4A4560; max-width: 30em; margin-bottom: 32px; }
+.lead { font-size: clamp(17px, 2vw, 20px); color: var(--muted); max-width: 30em; margin-bottom: 32px; }
 .cta-row { display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 16px; }
 .trust-line { font-size: 14px; color: var(--muted); }
 
@@ -119,17 +108,19 @@ a { color: inherit; text-decoration: none; }
 }
 .btn:active { transform: translateY(1px); }
 .btn-primary {
-  background: var(--blue);
+  /* --blue-solid, not --blue: this is the surface the white sits on, and it
+     must not lighten with the theme or the label goes with it. */
+  background: var(--blue-solid);
   color: #fff;
   box-shadow: 0 8px 24px rgba(28, 111, 224, 0.32);
 }
-.btn-primary:hover { background: #155ec4; box-shadow: 0 10px 30px rgba(28, 111, 224, 0.42); }
+.btn-primary:hover { background: var(--blue-solid-hover); box-shadow: 0 10px 30px rgba(28, 111, 224, 0.42); }
 /* Secondary, and it should read as secondary: these two used to be the same
    size and weight, so neither looked like the thing to press. */
 .btn-ghost { background: transparent; border: 1.5px solid rgba(14, 10, 26, 0.18);
   font-size: .95em; padding-inline: 1.1em; }
 .btn-ghost:hover { border-color: var(--purple); color: var(--purple); }
-.btn-light { background: var(--neon); color: var(--ink); box-shadow: 0 8px 24px rgba(217, 240, 0, 0.3); }
+.btn-light { background: var(--neon); color: var(--on-bright); box-shadow: 0 8px 24px rgba(217, 240, 0, 0.3); }
 .btn-light:hover { background: #c4d900; }
 .btn-lg { font-size: 18px; padding: 17px 34px; }
 
@@ -153,7 +144,10 @@ a { color: inherit; text-decoration: none; }
 .hero-3d-wrap.ready .hero-3d-header { opacity: 1; }
 .hero-3d-badge {
   display: inline-block; font-weight: 800; font-size: 13px; letter-spacing: 0.04em;
-  color: #fff; background: linear-gradient(135deg, var(--purple), var(--blue) 60%, var(--emerald));
+  /* Solid, not the brand gradient: white on the gradient's blue stop is
+     4.41:1 at 13px, just under the floor for small text. The deep purple
+     clears it with room to spare and still reads as the brand. */
+  color: #fff; background: var(--purple-deep);
   padding: 6px 16px; border-radius: 999px; box-shadow: 0 6px 18px rgba(28,111,224,0.28);
 }
 .hero-3d-hint { display: block; font-size: 12.5px; color: var(--muted); margin-top: 8px; font-weight: 500; }
@@ -193,7 +187,7 @@ a { color: inherit; text-decoration: none; }
 .ring-mid {
   width: 84%;
   height: 62%;
-  background: var(--ink);
+  background: var(--panel-dark);
 }
 .ring-inner {
   width: 74%;
@@ -262,7 +256,7 @@ a { color: inherit; text-decoration: none; }
   padding: 36px 30px;
   border-radius: 20px;
   border: 1px solid rgba(14, 10, 26, 0.08);
-  background: #fff;
+  background: var(--card);
   position: relative;
   overflow: hidden;
 }
@@ -280,7 +274,7 @@ a { color: inherit; text-decoration: none; }
 .c-sim .trio-icon { color: var(--blue); }
 .c-exec .trio-icon { color: var(--emerald); }
 .trio-card h3 { font-size: 20px; font-weight: 700; margin-bottom: 10px; letter-spacing: -0.01em; }
-.trio-card p { font-size: 15px; color: #4A4560; }
+.trio-card p { font-size: 15px; color: var(--muted); }
 
 /* ============ SECTION TITLES ============ */
 .section-title {
@@ -294,8 +288,8 @@ a { color: inherit; text-decoration: none; }
 
 /* ============ HOW IT WORKS ============ */
 .how {
-  background: linear-gradient(160deg, var(--purple-deep), var(--ink));
-  color: var(--paper);
+  background: linear-gradient(160deg, var(--purple-deep), var(--panel-dark));
+  color: var(--panel-dark-ink);
   padding: 96px 32px;
 }
 .how .section-title { color: #fff; }
@@ -322,8 +316,8 @@ a { color: inherit; text-decoration: none; }
   color: var(--ink);
 }
 .n1 { background: var(--neon); }
-.n2 { background: var(--blue); color: #fff; }
-.n3 { background: var(--emerald); color: #fff; }
+.n2 { background: var(--blue-solid); color: #fff; }
+.n3 { background: var(--emerald-solid); color: #fff; }
 .step-body h3 { font-size: 21px; font-weight: 700; margin-bottom: 6px; }
 .step-body p { color: rgba(251, 250, 255, 0.72); font-size: 16px; }
 
@@ -336,8 +330,8 @@ a { color: inherit; text-decoration: none; }
   grid-template-columns: 1.2fr 0.8fr;
   gap: 56px;
   align-items: center;
-  background: var(--ink);
-  color: var(--paper);
+  background: var(--panel-dark);
+  color: var(--panel-dark-ink);
   border-radius: 28px;
   padding: 56px;
   position: relative;
@@ -359,7 +353,7 @@ a { color: inherit; text-decoration: none; }
 
 /* ============ SUPPORTERS ============ */
 .supporters { padding: 96px 32px; text-align: center; }
-.supporters-lead { max-width: 36em; margin: 0 auto; font-size: 18px; color: #4A4560; }
+.supporters-lead { max-width: 36em; margin: 0 auto; font-size: 18px; color: var(--muted); }
 
 /* ============ FINAL CTA ============ */
 .final-cta {
@@ -370,7 +364,7 @@ a { color: inherit; text-decoration: none; }
     radial-gradient(circle at 70% 80%, rgba(28, 111, 224, 0.12), transparent 50%);
 }
 .final-cta h2 { font-size: clamp(32px, 5vw, 52px); font-weight: 800; letter-spacing: -0.02em; margin-bottom: 16px; }
-.final-cta p { font-size: 18px; color: #4A4560; margin-bottom: 32px; }
+.final-cta p { font-size: 18px; color: var(--muted); margin-bottom: 32px; }
 
 /* ============ FOOTER ============ */
 .foot {
@@ -458,7 +452,7 @@ a { color: inherit; text-decoration: none; }
   display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px;
 }
 .showcase-card {
-  display: block; border-radius: 16px; overflow: hidden; background: #fff;
+  display: block; border-radius: 16px; overflow: hidden; background: var(--card);
   border: 1px solid var(--line); box-shadow: 0 2px 10px rgba(20,12,40,0.05);
   text-decoration: none; color: inherit; transition: transform 0.16s ease, box-shadow 0.16s ease;
 }
@@ -492,7 +486,7 @@ a { color: inherit; text-decoration: none; }
   background:
     radial-gradient(circle at 15% 0%, rgba(217, 240, 0, 0.16), transparent 55%),
     radial-gradient(circle at 90% 100%, rgba(28, 111, 224, 0.28), transparent 55%),
-    linear-gradient(150deg, var(--purple) 0%, var(--purple-deep) 100%);
+    linear-gradient(150deg, var(--purple-solid) 0%, var(--purple-deep) 100%);
   box-shadow: 0 24px 60px -24px rgba(61, 26, 94, 0.55);
 }
 
@@ -516,7 +510,7 @@ a { color: inherit; text-decoration: none; }
   padding: 5px 12px;
   border-radius: 999px;
   background: var(--neon);
-  color: var(--ink);
+  color: var(--on-bright);
   font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.14em;

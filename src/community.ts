@@ -9,6 +9,7 @@
 import './vendor/tabler-subset.css';
 import './community.css';
 import { initLang, applyDom, toggleLang, t, tTag, tTitle } from './ui/i18n';
+import { initScheme, setSchemeLabels } from './ui/colorScheme';
 import { installMobileNav } from './ui/mobileNav';
 import { installConsent } from './ui/consent';
 import { generateSeatMapAsync } from './workers/client';
@@ -45,6 +46,12 @@ import {
 
 // ---------- bootstrap ----------
 initLang();
+// Light / dark. The scheme is already on the <html> element (the inline head
+// script settles it before first paint); this wires the header toggle and the
+// translated labels.
+initScheme();
+setSchemeLabels({ dark: t('theme.dark'), light: t('theme.light') });
+
 applyDom(document);
 installMobileNav();
 installConsent();

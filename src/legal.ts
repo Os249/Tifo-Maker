@@ -7,6 +7,7 @@
  * one is shown, along with <html lang/dir> and the in-page anchors.
  */
 import { initLang, applyDom, getLang, toggleLang, t } from './ui/i18n';
+import { initScheme, setSchemeLabels } from './ui/colorScheme';
 
 const yr = document.getElementById('yr');
 if (yr) yr.textContent = String(new Date().getFullYear());
@@ -33,6 +34,12 @@ function show(): void {
 }
 
 initLang();
+// Light / dark. The scheme is already on the <html> element (the inline head
+// script settles it before first paint); this wires the header toggle and the
+// translated labels.
+initScheme();
+setSchemeLabels({ dark: t('theme.dark'), light: t('theme.light') });
+
 applyDom(document);
 show();
 

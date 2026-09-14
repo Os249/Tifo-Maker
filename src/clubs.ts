@@ -1,10 +1,17 @@
 import './clubs.css';
 import { initLang, applyDom, toggleLang, t } from './ui/i18n';
+import { initScheme, setSchemeLabels } from './ui/colorScheme';
 import { submitLead } from './net/api';
 import { installMobileNav } from './ui/mobileNav';
 import { installConsent } from './ui/consent';
 
 initLang();
+// Light / dark. The scheme is already on the <html> element (the inline head
+// script settles it before first paint); this wires the header toggle and the
+// translated labels.
+initScheme();
+setSchemeLabels({ dark: t('theme.dark'), light: t('theme.light') });
+
 applyDom(document);
 installMobileNav();
 installConsent();

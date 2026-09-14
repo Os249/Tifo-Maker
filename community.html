@@ -1,6 +1,9 @@
 <!doctype html>
 <html lang="en">
 <head>
+  <!-- Colour scheme, before anything paints: an explicit choice wins, otherwise the device decides. -->
+  <script>(function(){try{var t=localStorage.getItem('tifo_theme_v1');if(t!=='light'&&t!=='dark')t=matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';document.documentElement.setAttribute('data-theme',t);}catch(e){}})();</script>
+  <meta name="theme-color" content="#FBFAFF" />
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <link rel="icon" href="/favicon.ico" sizes="32x32" />
@@ -32,6 +35,7 @@
     <nav class="nav-links">
       <a href="/community" class="active" data-i18n="nav.community">Community</a>
       <a href="/app" data-i18n="nav.openEditor">Open the editor</a>
+      <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Dark mode" title="Dark mode"><svg class="ic-moon" viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.2A8.2 8.2 0 0 1 9.8 4a8.4 8.4 0 1 0 10.2 10.2z"/></svg><svg class="ic-sun" viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M18.4 5.6L17 7M7 17l-1.4 1.4"/></svg></button>
       <button class="lang-toggle" id="lang-toggle" data-i18n="common.language">العربية</button>
       <button class="icon-btn notif-btn" id="notif-btn" title="Notifications" data-i18n-attr="title:cm.notif" hidden>
         <i class="ti ti-bell"></i><span class="notif-dot" id="notif-dot" hidden></span>

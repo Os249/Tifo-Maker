@@ -751,6 +751,8 @@ const STRINGS: Record<string, { en: string; ar: string }> = {
   'cm.loadMore': { en: 'Load more', ar: 'حمّل المزيد' },
   'cm.badgeTemplate': { en: 'Template', ar: 'قالب' },
   'cm.badgePhoto': { en: 'Real photo', ar: 'صورة حقيقية' },
+  'theme.dark': { en: 'Dark mode', ar: 'الوضع الليلي' },
+  'theme.light': { en: 'Light mode', ar: 'الوضع النهاري' },
   'cm.by': { en: 'by', ar: 'بواسطة' },
   'cm.shareThis': { en: 'Share this tifo', ar: 'شارك هذا التيفو' },
   'cm.cardBy': { en: '{title} by {name}', ar: '{title} بواسطة {name}' },

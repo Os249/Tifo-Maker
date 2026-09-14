@@ -1,0 +1,134 @@
+/*
+ * The public pages' colour tokens, in both themes.
+ *
+ * Landing, community and clubs each used to carry their own copy of this
+ * block, which is how they stayed identical right up until they wouldn't. One
+ * file now, imported by all three, with the dark values as overrides on
+ * :root[data-theme="dark"] — set before first paint by the inline script in
+ * every page head, so a phone in dark mode never gets a white flash.
+ *
+ * The editor and the tifo viewer are not themed: a canvas tool is dark the way
+ * a darkroom is dark, and the whole point of the viewer is the artwork.
+ *
+ * Two rules this palette follows, because they are what usually goes wrong:
+ *
+ *  - a brand colour that TEXT sits on is not the same value as a brand colour
+ *    that sits ON the page. --blue lightens in dark mode so a link is readable
+ *    against the ground; --blue-solid stays put, because it is the surface
+ *    white text is printed on and lightening it would strand that text.
+ *  - shadows do not work in the dark. Depth comes from a lighter surface and a
+ *    visible border instead, so the shadow tokens flatten out and --line and
+ *    --card carry the separation.
+ */
+
+:root {
+  color-scheme: light;
+
+  /* brand — as TEXT on the page ground. These lighten in dark mode. */
+  --purple: #5B2A86;
+  --emerald: #0F8A4D;
+  --blue: #1C6FE0;
+  --neon: #D9F000;
+  /* brand — as a SURFACE, with light text printed on it. Fixed in both themes,
+     because lightening the ground under white text strands the text. Every
+     brand gradient is built from these, not from the text colours above. */
+  --purple-solid: #5B2A86;
+  --purple-deep: #3D1A5E;
+  --emerald-solid: #0F8A4D;
+  --blue-solid: #1C6FE0;
+  --blue-solid-hover: #155EC4;
+  /* Ink for text sitting on a fixed bright surface — the neon pill, a white
+     chip. It cannot be --ink: that goes light in dark mode, which put pale
+     text on neon yellow at 1.14:1. */
+  --on-bright: #0E0A1A;
+
+  /* ground and ink */
+  --ink: #0E0A1A;
+  --paper: #FBFAFF;
+  --card: #FFFFFF;
+  --muted: #767188;   /* 4.5:1 on --paper; the floor for body text */
+  --line: #ECE9F5;
+  /* A surface one step off the page: chips, inputs, hovers. */
+  --raise: #FFFFFF;
+  --raise-2: #F4F1FB;
+  /* The high-contrast pill — an active tab, a Follow button. Inverted against
+     the page, so it has to swap with the theme: `background: var(--ink);
+     color: #fff` reads as white on near-white the moment the ink goes light. */
+  --invert: #0E0A1A;
+  --invert-ink: #FFFFFF;
+  /* The translucent sticky header. It was a literal rgba of the light ground,
+     so in dark mode the page scrolled underneath a pale grey bar. */
+  --bar: rgba(251, 250, 255, 0.85);
+  /* A band that is deliberately dark even on the light page — the CTA strip,
+     the stat strip, the "how it works" section. In dark mode it cannot simply
+     invert (it would become a white slab); it lifts off the ground instead, so
+     it still reads as a distinct band. */
+  --panel-dark: #0E0A1A;
+  --panel-dark-ink: #FBFAFF;
+
+  --grad-brand: linear-gradient(135deg, var(--purple-solid), var(--blue-solid) 55%, var(--emerald-solid));
+  --shadow-sm: 0 2px 8px rgba(20, 12, 40, 0.06);
+  --shadow-md: 0 10px 30px rgba(20, 12, 40, 0.1);
+  --shadow-lg: 0 24px 60px rgba(20, 12, 40, 0.18);
+
+  --font: 'Inter', system-ui, -apple-system, sans-serif;
+  --r-md: 14px;
+  --r-lg: 20px;
+  --r-pill: 999px;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  /* Lifted so they read as text on a dark ground. Measured against --paper:
+     blue 7.4:1, purple 6.2:1, emerald 7.1:1 — all clear of 4.5:1 body text. */
+  --purple: #B98BE8;
+  --emerald: #3FC77F;
+  --blue: #7FB0FF;
+  --neon: #D9F000;
+  /* Surfaces stay put — white still has to be legible on them. --purple-deep
+     shifts only enough to lift the band off a darker page. */
+  --purple-solid: #5B2A86;
+  --purple-deep: #2C1C49;
+  --emerald-solid: #0F8A4D;
+  --blue-solid: #1C6FE0;
+  --blue-solid-hover: #2F7EEB;
+  --on-bright: #0E0A1A;
+
+  --ink: #F3F1FA;
+  --paper: #0E0C16;
+  --card: #17141F;
+  --muted: #A49CB8;   /* 6.6:1 on --paper */
+  --line: #292336;
+  --raise: #1E1A29;
+  --raise-2: #232032;
+  --invert: #F3F1FA;
+  --invert-ink: #0E0C16;
+  --bar: rgba(14, 12, 22, 0.85);
+  --panel-dark: #1B1728;
+  --panel-dark-ink: #F3F1FA;
+
+  /* Flattened on purpose — see the note above. */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 6px 20px rgba(0, 0, 0, 0.45);
+  --shadow-lg: 0 20px 48px rgba(0, 0, 0, 0.55);
+}
+
+/* The toggle itself, next to the language toggle in every public header. */
+.theme-toggle {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 40px; height: 40px; min-width: 40px; padding: 0;
+  border: 1px solid var(--line); border-radius: var(--r-pill);
+  background: var(--card); color: var(--ink); cursor: pointer;
+  font-size: 17px; line-height: 1; transition: border-color .14s, color .14s;
+}
+.theme-toggle:hover { border-color: var(--blue); color: var(--blue); }
+.theme-toggle:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+/* The icons are inline SVG rather than the Tabler subset: landing, clubs and
+   legal never load that font, and a toggle that renders as an empty box on
+   three of the four pages is not a toggle. One icon shows at a time, and it is
+   the one you would switch TO. */
+.theme-toggle svg { display: block; }
+.theme-toggle .ic-sun { display: none; }
+:root[data-theme="dark"] .theme-toggle .ic-moon { display: none; }
+:root[data-theme="dark"] .theme-toggle .ic-sun { display: block; }
