@@ -6,7 +6,7 @@
  * what will read from across a pitch; smooth screen previews lie.
  * Fonts come from @fontsource — see FAMILIES for the install list.
  */
-import { mkdirSync, writeFileSync, rmSync, existsSync, readdirSync, readFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync, rmSync, existsSync, readdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createServer, type ViteDevServer } from 'vite';
