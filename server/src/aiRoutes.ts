@@ -278,6 +278,21 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
     if (!r.valid || !r.spec) {
       // Premium couldn't deliver — we don't admit failure; the client offers a choice
       // (use the free Quick Designer now, or wait out a short timer and retry).
+      //
+      // The user sees "busy", but the OPERATOR needs the real reason: a bad model
+      // id, a key without access to that model, a timeout and a spec the
+      // validator rejected all look identical from the outside, and this error
+      // used to be computed and thrown away.
+      app.log.warn(
+        {
+          reason: modelResult.error ?? 'spec failed validation',
+          errors: modelResult.spec ? r.errors : undefined,
+          mode: mode0,
+          model: isSuper ? (process.env.AI_MODEL_PREMIUM ?? process.env.AI_MODEL ?? 'default') : (process.env.AI_MODEL_FAST ?? process.env.AI_MODEL ?? 'default'),
+          provider: activeProvider(),
+        },
+        'ai generate: premium could not deliver',
+      );
       note(userId, mode0, 'busy');
       return reply.code(200).send({ needsChoice: true, reason: 'busy', retryAfterSec: busyRetrySec(), quota: quotaInfo });
     }
