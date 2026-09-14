@@ -5,6 +5,7 @@ import { PALETTE_PRESETS } from '../core/template';
 import { PATTERN_PRESETS } from '../core/patterns';
 import { makeThumbnailB64 } from '../net/api';
 import { renderTextCanvas, TIFO_FONTS, type RenderedText } from '../core/text';
+import { loadTifoFonts } from '../core/tifoFonts';
 import type { ObjectLayer } from '../core/objects';
 import { MIN_LEGIBLE_RUN, findFragileSeats } from '../core/analysis';
 import { RevealPlayer, REVEAL_PRESETS, type RevealId } from '../core/reveal';
@@ -650,6 +651,9 @@ export function mountToolbar(
     updateTextPreviewSize();
   };
   const rebuildTextPreviewT = rafThrottle(rebuildTextPreview);
+  // The preview is drawn before the faces finish downloading; redraw once when
+  // they land so the preview matches what placing will actually stamp.
+  void loadTifoFonts().then(() => rebuildTextPreview());
   textInput.addEventListener('input', rebuildTextPreviewT);
   textFont.addEventListener('change', rebuildTextPreview);
   textArc.addEventListener('input', () => {
@@ -661,7 +665,10 @@ export function mountToolbar(
     updateTextPreviewSize();
   });
 
-  const placeTextAt = (x: number, y: number): void => {
+  const placeTextAt = async (x: number, y: number): Promise<void> => {
+    // Measuring a glyph before its face has arrived silently falls back to a
+    // system font, and that mistake would be baked into the seats for good.
+    await loadTifoFonts();
     const rendered = renderTextCanvas(textInput.value, currentFontCss(), Number(textArc.value));
     if (!rendered) {
       message.textContent = 'type some text first';
@@ -960,7 +967,7 @@ export function mountToolbar(
 
   // One shared placement-click callback, dispatched by the active mode.
   editor.onPlaceStamp = (x, y) => {
-    if (editor.tool === 'text') placeTextAt(x, y);
+    if (editor.tool === 'text') void placeTextAt(x, y);
     else if (editor.tool === 'shape') placeShapeAt(x, y);
     else if (editor.tool === 'import' && importPlace.value === 'click') stampImageAt(x, y);
   };

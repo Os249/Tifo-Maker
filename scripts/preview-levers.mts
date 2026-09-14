@@ -3,7 +3,6 @@
  *   npx tsx scripts/preview-levers.mts
  * Same engine, same stadium, same words in every frame — only the design
  * decision changes, so each lever can be judged on its own.
- * Needs full-vision-spike.patch + dx/dy, and the @fontsource packages.
  */
 import { mkdirSync, writeFileSync, rmSync, existsSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
@@ -27,8 +26,8 @@ const prep = (r: Raw): TifoSpec => {
 const TEXT = 'GRAZIE CAPITANO';
 const OUTLINE = Math.max(2, Math.min(7, Math.round(TEXT.replace(/\s/g, '').length * 0.6)));
 const say = (region: string, fill: number, edge: number | null, h = 0.8, extra: L = {}): L[] => [
-  ...(edge === null ? [] : [{ kind: 'text', region, text: TEXT, colorIndex: edge, fontId: 'verdana', arcDeg: 0, heightFrac: h, align: 'center', outline: OUTLINE, ...extra }]),
-  { kind: 'text', region, text: TEXT, colorIndex: fill, fontId: 'verdana', arcDeg: 0, heightFrac: h, align: 'center', ...extra },
+  ...(edge === null ? [] : [{ kind: 'text', region, text: TEXT, colorIndex: edge, fontId: 'condensed', arcDeg: 0, heightFrac: h, align: 'center', outline: OUTLINE, ...extra }]),
+  { kind: 'text', region, text: TEXT, colorIndex: fill, fontId: 'condensed', arcDeg: 0, heightFrac: h, align: 'center', ...extra },
 ];
 
 interface Step { key: string; lever: string; why: string; raw: Raw }
@@ -66,7 +65,7 @@ const SHADOW: Raw = {
   layers: [
     { kind: 'gradient', region: 'all', colors: [1, 2, 1], direction: 'horizontal' },
     { kind: 'fill', region: 'south', colorIndex: 2 },
-    { kind: 'text', region: 'south', text: TEXT, colorIndex: 1, fontId: 'verdana', arcDeg: 0, heightFrac: 0.8, align: 'center', outline: OUTLINE, dx: 1.1, dy: 7 },
+    { kind: 'text', region: 'south', text: TEXT, colorIndex: 1, fontId: 'condensed', arcDeg: 0, heightFrac: 0.8, align: 'center', outline: OUTLINE, dx: 1.1, dy: 7 },
     ...say('south', 1, 3),
     { kind: 'fill', region: 'north', colorIndex: 1 },
     { kind: 'pattern', region: 'sides', pattern: 'chevron', colors: [1, 2], scale: 12 },
@@ -80,9 +79,9 @@ const NEGATIVE: Raw = {
     { kind: 'gradient', region: 'all', colors: [1, 2, 1], direction: 'horizontal' },
     { kind: 'fill', region: 'south', colorIndex: 0 },
     { kind: 'fill', region: { stand: 'south', tier: 'all', rows: [0.08, 0.92] } as unknown as L, colorIndex: 2 },
-    { kind: 'text', region: { stand: 'south', tier: 'all', rows: [0.08, 0.92] } as unknown as L, text: TEXT, colorIndex: 1, fontId: 'verdana', arcDeg: 0, heightFrac: 0.8, align: 'center', outline: OUTLINE, dx: 1.1, dy: 7 },
-    { kind: 'text', region: { stand: 'south', tier: 'all', rows: [0.08, 0.92] } as unknown as L, text: TEXT, colorIndex: 1, fontId: 'verdana', arcDeg: 0, heightFrac: 0.8, align: 'center', outline: OUTLINE },
-    { kind: 'text', region: { stand: 'south', tier: 'all', rows: [0.08, 0.92] } as unknown as L, text: TEXT, colorIndex: 3, fontId: 'verdana', arcDeg: 0, heightFrac: 0.8, align: 'center' },
+    { kind: 'text', region: { stand: 'south', tier: 'all', rows: [0.08, 0.92] } as unknown as L, text: TEXT, colorIndex: 1, fontId: 'condensed', arcDeg: 0, heightFrac: 0.8, align: 'center', outline: OUTLINE, dx: 1.1, dy: 7 },
+    { kind: 'text', region: { stand: 'south', tier: 'all', rows: [0.08, 0.92] } as unknown as L, text: TEXT, colorIndex: 1, fontId: 'condensed', arcDeg: 0, heightFrac: 0.8, align: 'center', outline: OUTLINE },
+    { kind: 'text', region: { stand: 'south', tier: 'all', rows: [0.08, 0.92] } as unknown as L, text: TEXT, colorIndex: 3, fontId: 'condensed', arcDeg: 0, heightFrac: 0.8, align: 'center' },
     { kind: 'fill', region: 'north', colorIndex: 1 },
     { kind: 'pattern', region: 'sides', pattern: 'chevron', colors: [1, 2], scale: 12 },
   ],
@@ -94,9 +93,9 @@ const SCALE: Raw = {
   layers: [
     { kind: 'gradient', region: 'all', colors: [1, 2, 1], direction: 'horizontal' },
     { kind: 'fill', region: 'south', colorIndex: 2 },
-    { kind: 'text', region: { stand: 'south', tier: 'all', rows: [0.06, 0.60] } as unknown as L, text: 'CAPITANO', colorIndex: 1, fontId: 'verdana', arcDeg: 0, heightFrac: 0.92, align: 'center', outline: 5, dx: 1, dy: 6 },
-    { kind: 'text', region: { stand: 'south', tier: 'all', rows: [0.06, 0.60] } as unknown as L, text: 'CAPITANO', colorIndex: 1, fontId: 'verdana', arcDeg: 0, heightFrac: 0.92, align: 'center' },
-    { kind: 'text', region: { stand: 'south', tier: 'all', rows: [0.68, 0.94] } as unknown as L, text: '2009 — 2026', colorIndex: 1, fontId: 'verdana', arcDeg: 0, heightFrac: 0.7, align: 'center' },
+    { kind: 'text', region: { stand: 'south', tier: 'all', rows: [0.06, 0.60] } as unknown as L, text: 'CAPITANO', colorIndex: 1, fontId: 'condensed', arcDeg: 0, heightFrac: 0.92, align: 'center', outline: 5, dx: 1, dy: 6 },
+    { kind: 'text', region: { stand: 'south', tier: 'all', rows: [0.06, 0.60] } as unknown as L, text: 'CAPITANO', colorIndex: 1, fontId: 'condensed', arcDeg: 0, heightFrac: 0.92, align: 'center' },
+    { kind: 'text', region: { stand: 'south', tier: 'all', rows: [0.68, 0.94] } as unknown as L, text: '2009 — 2026', colorIndex: 1, fontId: 'condensed', arcDeg: 0, heightFrac: 0.7, align: 'center' },
     { kind: 'fill', region: 'north', colorIndex: 1 },
     { kind: 'pattern', region: 'sides', pattern: 'chevron', colors: [1, 2], scale: 12 },
   ],
@@ -110,9 +109,9 @@ const ALL: Raw = {
     { kind: 'gradient', region: 'all', colors: [1, 2, 1], direction: 'horizontal' },
     { kind: 'fill', region: 'south', colorIndex: 0 },
     { kind: 'fill', region: { stand: 'south', tier: 'all', rows: [0.07, 0.93] } as unknown as L, colorIndex: 2 },
-    { kind: 'text', region: { stand: 'south', tier: 'all', rows: [0.10, 0.62] } as unknown as L, text: 'CAPITANO', colorIndex: 1, fontId: 'verdana', arcDeg: 0, heightFrac: 0.92, align: 'center', outline: 5, dx: 1, dy: 7 },
-    { kind: 'text', region: { stand: 'south', tier: 'all', rows: [0.10, 0.62] } as unknown as L, text: 'CAPITANO', colorIndex: 1, fontId: 'verdana', arcDeg: 0, heightFrac: 0.92, align: 'center' },
-    { kind: 'text', region: { stand: 'south', tier: 'all', rows: [0.70, 0.90] } as unknown as L, text: 'GRAZIE  ·  2009 — 2026', colorIndex: 1, fontId: 'verdana', arcDeg: 0, heightFrac: 0.66, align: 'center' },
+    { kind: 'text', region: { stand: 'south', tier: 'all', rows: [0.10, 0.62] } as unknown as L, text: 'CAPITANO', colorIndex: 1, fontId: 'condensed', arcDeg: 0, heightFrac: 0.92, align: 'center', outline: 5, dx: 1, dy: 7 },
+    { kind: 'text', region: { stand: 'south', tier: 'all', rows: [0.10, 0.62] } as unknown as L, text: 'CAPITANO', colorIndex: 1, fontId: 'condensed', arcDeg: 0, heightFrac: 0.92, align: 'center' },
+    { kind: 'text', region: { stand: 'south', tier: 'all', rows: [0.70, 0.90] } as unknown as L, text: 'GRAZIE  ·  2009 — 2026', colorIndex: 1, fontId: 'condensed', arcDeg: 0, heightFrac: 0.66, align: 'center' },
     { kind: 'fill', region: 'north', colorIndex: 1 },
     { kind: 'pattern', region: 'sides', pattern: 'chevron', colors: [1, 2], scale: 12 },
   ],

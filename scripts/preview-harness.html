@@ -2,23 +2,7 @@
 <!-- Dev-only harness for scripts/preview-compare.mts. Not a Vite build input. -->
 <html lang="en">
 <head><meta charset="UTF-8" /><title>preview harness</title>
-<!-- Display faces for preview-vision.mts. Needs:
-     npm i --no-save @fontsource/anton @fontsource/noto-kufi-arabic @fontsource/archivo-black
-     Absent, the faces just fall back and the other preview scripts are unaffected. -->
-<style>
-  @font-face{font-family:"V_impact";src:url("/node_modules/@fontsource/cairo/files/cairo-arabic-900-normal.woff2") format("woff2");font-weight:100 900;font-display:block;unicode-range:U+0600-06FF,U+0750-077F,U+0870-088E,U+08A0-08FF,U+FB50-FDFF,U+FE70-FEFF,U+200C-200F,U+061B,U+061F,U+0640}
-  @font-face{font-family:"V_impact";src:url("/node_modules/@fontsource/passion-one/files/passion-one-latin-900-normal.woff2") format("woff2");font-weight:100 900;font-display:block}
-  @font-face{font-family:"V_kufi";src:url("/node_modules/@fontsource/kufam/files/kufam-arabic-900-normal.woff2") format("woff2");font-weight:100 900;font-display:block;unicode-range:U+0600-06FF,U+0750-077F,U+0870-088E,U+08A0-08FF,U+FB50-FDFF,U+FE70-FEFF,U+200C-200F,U+061B,U+061F,U+0640}
-  @font-face{font-family:"V_kufi";src:url("/node_modules/@fontsource/kufam/files/kufam-latin-900-normal.woff2") format("woff2");font-weight:100 900;font-display:block}
-  @font-face{font-family:"V_condensed";src:url("/node_modules/@fontsource/noto-kufi-arabic/files/noto-kufi-arabic-arabic-900-normal.woff2") format("woff2");font-weight:100 900;font-display:block;unicode-range:U+0600-06FF,U+0750-077F,U+0870-088E,U+08A0-08FF,U+FB50-FDFF,U+FE70-FEFF,U+200C-200F,U+061B,U+061F,U+0640}
-  @font-face{font-family:"V_condensed";src:url("/node_modules/@fontsource/anton/files/anton-latin-400-normal.woff2") format("woff2");font-weight:100 900;font-display:block}
-  @font-face{font-family:"V_slab";src:url("/node_modules/@fontsource/almarai/files/almarai-arabic-800-normal.woff2") format("woff2");font-weight:100 900;font-display:block;unicode-range:U+0600-06FF,U+0750-077F,U+0870-088E,U+08A0-08FF,U+FB50-FDFF,U+FE70-FEFF,U+200C-200F,U+061B,U+061F,U+0640}
-  @font-face{font-family:"V_slab";src:url("/node_modules/@fontsource/alfa-slab-one/files/alfa-slab-one-latin-400-normal.woff2") format("woff2");font-weight:100 900;font-display:block}
-  @font-face{font-family:"V_signage";src:url("/node_modules/@fontsource/changa/files/changa-arabic-800-normal.woff2") format("woff2");font-weight:100 900;font-display:block;unicode-range:U+0600-06FF,U+0750-077F,U+0870-088E,U+08A0-08FF,U+FB50-FDFF,U+FE70-FEFF,U+200C-200F,U+061B,U+061F,U+0640}
-  @font-face{font-family:"V_signage";src:url("/node_modules/@fontsource/bungee/files/bungee-latin-400-normal.woff2") format("woff2");font-weight:100 900;font-display:block}
-  @font-face{font-family:"V_grotesk";src:url("/node_modules/@fontsource/tajawal/files/tajawal-arabic-900-normal.woff2") format("woff2");font-weight:100 900;font-display:block;unicode-range:U+0600-06FF,U+0750-077F,U+0870-088E,U+08A0-08FF,U+FB50-FDFF,U+FE70-FEFF,U+200C-200F,U+061B,U+061F,U+0640}
-  @font-face{font-family:"V_grotesk";src:url("/node_modules/@fontsource/archivo-black/files/archivo-black-latin-400-normal.woff2") format("woff2");font-weight:100 900;font-display:block}
-</style></head>
+</head>
 <body>
   <div id="out">loading…</div>
   <script type="module">
@@ -29,6 +13,7 @@
     import { paint2D } from '/src/ui/viewer.ts';
     import { Preview3D } from '/src/render/preview3d.ts';
     import { validateSpec } from '/src/core/tifoSpec.ts';
+    import { loadTifoFonts } from '/src/core/tifoFonts.ts';
 
     let preview = null, previewStore = null, previewMapId = null, host = null;
     const maps = new Map();
@@ -77,13 +62,7 @@
                seats: map.count, painted, warnings: r.warnings ?? [] };
     };
 
-    await Promise.all([
-      ...['V_impact','V_kufi','V_condensed','V_slab','V_signage','V_grotesk'].flatMap((v) => [
-        document.fonts.load(`bold 128px "${v}"`, 'AB'),
-        document.fonts.load(`bold 128px "${v}"`, 'الهلال'),
-      ]),
-    ]).catch(() => {});
-    await document.fonts.ready;
+    await loadTifoFonts();
     window.__fonts = [...document.fonts].map((f) => f.family + ':' + f.status).join(', ');
     document.getElementById('out').textContent = 'ready';
     window.__ready = true;

@@ -19,6 +19,7 @@ import type { ObjectLayer } from '../core/objects';
 import type { Preview3D } from '../render/preview3d';
 import { type TifoSpec, narrowToSingleStand } from '../core/tifoSpec';
 import { compileSpec, regionRect, regionPredicate } from '../core/specCompiler';
+import { loadTifoFonts } from '../core/tifoFonts';
 import { EDITOR_UNITS } from '../core/seatmap';
 import { buildStadiumContext, describeStadiumContext } from '../core/stadiumContext';
 import { critiqueDesign, repairSpec } from '../core/critique';
@@ -195,6 +196,7 @@ export function mountAiPanel(deps: AiPanelDeps): void {
     captureBaseline();
     objects.clear(); // floating (unbaked) objects don't belong to a fresh generation
     let working = spec;
+    await loadTifoFonts();
     compileSpec(working, map, store);
 
     // Phase 4: deterministic critique of the rendered seats, with ONE bounded
@@ -204,7 +206,8 @@ export function mountAiPanel(deps: AiPanelDeps): void {
       const repaired = repairSpec(working, critique);
       if (repaired.changed) {
         working = repaired.spec;
-        compileSpec(working, map, store);
+        await loadTifoFonts();
+    compileSpec(working, map, store);
         critique = critiqueDesign(store.cells, map, working);
       }
     }

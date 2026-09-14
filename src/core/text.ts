@@ -16,6 +16,15 @@ export interface TifoFont {
 }
 
 export const TIFO_FONTS: TifoFont[] = [
+  // Shipped display voices — one family each, Arabic + Latin (see core/tifoFonts).
+  { id: 'poster', name: 'Poster', css: '"TifoPoster", Impact, sans-serif' },
+  { id: 'kufi', name: 'Kufi', css: '"TifoKufi", "Arial Black", sans-serif' },
+  { id: 'condensed', name: 'Condensed', css: '"TifoCondensed", Impact, sans-serif' },
+  { id: 'slab', name: 'Slab', css: '"TifoSlab", Georgia, serif' },
+  { id: 'sign', name: 'Signage', css: '"TifoSign", "Arial Black", sans-serif' },
+  { id: 'grotesk', name: 'Grotesk', css: '"TifoGrotesk", "Arial Black", sans-serif' },
+  // Legacy system stacks. Every design saved before the voices shipped names one
+  // of these, so they must keep rendering exactly as they always did.
   { id: 'impact', name: 'Impact', css: 'Impact, "Arial Black", sans-serif' },
   { id: 'black', name: 'Arial Black', css: '"Arial Black", Arial, sans-serif' },
   { id: 'verdana', name: 'Verdana', css: 'Verdana, Geneva, sans-serif' },
@@ -77,8 +86,28 @@ export interface RenderedText {
   glyphHeight: number;
 }
 
-/** White-on-transparent text; straight or arched by arcDeg (±170°). */
-export function renderTextCanvas(text: string, fontCss: string, arcDeg = 0): RenderedText | null {
+/**
+ * Paint one run stroke-first, then filled. A seat holds a single palette index,
+ * so there is no soft outline available: stroking with the SAME white simply
+ * fattens the glyph, and a fattened copy stamped under a plain one is what reads
+ * as an outline once the two are given different palette colours.
+ */
+function paintRun(ctx: CanvasRenderingContext2D, text: string, x: number, y: number, strokePx: number): void {
+  if (strokePx > 0) {
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = strokePx * 2;
+    ctx.lineJoin = 'round';
+    ctx.miterLimit = 2;
+    ctx.strokeText(text, x, y);
+  }
+  ctx.fillText(text, x, y);
+}
+
+/**
+ * White-on-transparent text; straight or arched by arcDeg (±170°).
+ * `strokePx` fattens the letterforms — see paintRun.
+ */
+export function renderTextCanvas(text: string, fontCss: string, arcDeg = 0, strokePx = 0): RenderedText | null {
   const trimmed = text.trim();
   if (!trimmed) return null;
   const px = 128;
@@ -92,7 +121,7 @@ export function renderTextCanvas(text: string, fontCss: string, arcDeg = 0): Ren
   const clamped = Math.max(-170, Math.min(170, arcDeg));
 
   if (Math.abs(clamped) < 2) {
-    const pad = 6;
+    const pad = 6 + strokePx;
     const canvas = document.createElement('canvas');
     canvas.width = Math.max(2, Math.ceil(m.width) + pad * 2);
     canvas.height = Math.max(2, Math.ceil(glyphHeight) + pad * 2);
@@ -100,7 +129,7 @@ export function renderTextCanvas(text: string, fontCss: string, arcDeg = 0): Ren
     ctx.font = font;
     ctx.textBaseline = 'alphabetic';
     ctx.fillStyle = '#ffffff';
-    ctx.fillText(trimmed, pad, pad + ascent);
+    paintRun(ctx, trimmed, pad, pad + ascent, strokePx);
     return { canvas, glyphHeight };
   }
 
@@ -111,7 +140,7 @@ export function renderTextCanvas(text: string, fontCss: string, arcDeg = 0): Ren
   // text engine do joining + bidi), then bend the resulting pixels along the arc
   // as vertical slices. This preserves correct text for any script.
   if (needsWholeStringShaping(trimmed)) {
-    return arcByWarp(trimmed, font, ascent, glyphHeight, (clamped * Math.PI) / 180);
+    return arcByWarp(trimmed, font, ascent, glyphHeight, (clamped * Math.PI) / 180, strokePx);
   }
 
   const chars = [...trimmed];
@@ -130,7 +159,7 @@ export function renderTextCanvas(text: string, fontCss: string, arcDeg = 0): Ren
     ctx.translate(g.x, g.y);
     ctx.rotate(g.rotation);
     // Baseline sits (ascent − descent)/2 below the glyph's vertical center.
-    ctx.fillText(chars[i], -widths[i] / 2, (ascent - descent) / 2);
+    paintRun(ctx, chars[i], -widths[i] / 2, (ascent - descent) / 2, strokePx);
     ctx.restore();
   }
   return { canvas, glyphHeight };
@@ -155,8 +184,9 @@ function arcByWarp(
   ascent: number,
   glyphH: number,
   theta: number,
+  strokePx = 0,
 ): RenderedText {
-  const pad = 4;
+  const pad = 4 + strokePx;
   const flat = document.createElement('canvas');
   const fctx = flat.getContext('2d')!;
   fctx.font = font;
@@ -167,7 +197,7 @@ function arcByWarp(
   fctx.font = font;
   fctx.textBaseline = 'alphabetic';
   fctx.fillStyle = '#ffffff';
-  fctx.fillText(text, pad, pad + ascent);
+  paintRun(fctx, text, pad, pad + ascent, strokePx);
 
   const total = flatW;
   const radius = total / Math.abs(theta);

@@ -1,4 +1,5 @@
 import './vendor/tabler-subset.css';
+import { loadTifoFonts } from './core/tifoFonts';
 import { installTheme } from './ui/theme';
 import { initLang, applyDom, toggleLang, t, tl } from './ui/i18n';
 import { installConsent } from './ui/consent';
@@ -19,6 +20,12 @@ import { hasOnboarded } from './ui/onboarding';
 // shared link and the desktop-only gate for /app; ?editor=1 opts out of both,
 // so a draft started on a phone is never permanently stranded.
 import { isNarrowForEditor } from './ui/desktopOnly';
+
+// The display faces are ~270 KB and nothing on first paint needs them, so warm
+// them when the browser is idle. The text tool and the AI panel await the same
+// promise, so an early click just waits for this fetch instead of racing it.
+if (typeof requestIdleCallback === 'function') requestIdleCallback(() => void loadTifoFonts(), { timeout: 4000 });
+else setTimeout(() => void loadTifoFonts(), 2000);
 // Editor (Pixi), the toolbar and the banner studio are imported dynamically
 // inside main(), below the desktop-only gate. They are the bulk of the bundle,
 // and a phone that is about to be told "come back on a laptop" should not pay

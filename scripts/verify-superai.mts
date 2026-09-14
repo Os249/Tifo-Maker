@@ -15,6 +15,10 @@ import { matchClub } from '../src/core/clubs';
 import { quantizePixels } from '../src/core/importImage';
 import { TtlCache, cacheKey } from '../server/src/aiCache';
 import { buildDirectorPrompt } from '../server/src/aiProvider';
+import { TIFO_FONTS } from '../src/core/text';
+import { TIFO_VOICES } from '../src/core/tifoVoices';
+import { refineSpec, contrastRatio } from '../src/core/specRefine';
+import { SPEC_FONT_IDS } from '../src/core/tifoSpec';
 
 let failures = 0;
 function check(name: string, cond: boolean, detail = ''): void {
@@ -183,6 +187,77 @@ const v1 = composeSuperOffline('blue white and red full stadium', { variant: 1 }
 const v2 = composeSuperOffline('blue white and red full stadium', { variant: 2 });
 check('variant: different seeds produce different designs', JSON.stringify(v1.palette) !== JSON.stringify(v2.palette));
 check('variant: still validates', validateSpec(v1).valid && validateSpec(v2).valid);
+
+
+// ---- 14. shipped display voices + the new layer controls ----
+const LEGACY_STACKS: Record<string, string> = {
+  impact: 'Impact, "Arial Black", sans-serif',
+  black: '"Arial Black", Arial, sans-serif',
+  verdana: 'Verdana, Geneva, sans-serif',
+  georgia: 'Georgia, "Times New Roman", serif',
+  courier: '"Courier New", Courier, monospace',
+};
+// REGRESSION GUARD: every design saved before the voices shipped names one of
+// these ids. If a stack changes here, all of them silently re-render.
+for (const [id, css] of Object.entries(LEGACY_STACKS)) {
+  const f = TIFO_FONTS.find((x) => x.id === id);
+  check(`legacy font "${id}" unchanged`, f?.css === css, f?.css ?? 'missing');
+}
+check('every voice has a spec id', TIFO_VOICES.every((v) => (SPEC_FONT_IDS as readonly string[]).includes(v.id)));
+check('every voice id maps to its family', TIFO_VOICES.every((v) => TIFO_FONTS.some((f) => f.id === v.id && f.css.includes(v.family))));
+check('every voice documents its face pair', TIFO_VOICES.every((v) => !!v.pair && !!v.note));
+check('voice ids are unique', new Set(TIFO_VOICES.map((v) => v.id)).size === TIFO_VOICES.length);
+
+check('contrastRatio: black vs white is 21:1', Math.abs(contrastRatio('#000000', '#ffffff') - 21) < 0.01);
+check('contrastRatio: a colour against itself is 1:1', Math.abs(contrastRatio('#0033a0', '#0033a0') - 1) < 1e-9);
+
+const withControls = validateSpec({
+  title: 'controls', palette: ['#262a33', '#0d0d0f', '#f5c518'],
+  layers: [
+    { kind: 'fill', region: 'south', colorIndex: 2 },
+    { kind: 'text', region: 'south', text: 'HELLO', colorIndex: 1, fontId: 'condensed', arcDeg: 0, heightFrac: 0.8, align: 'center', outline: 6, stretch: 2, dx: 1, dy: 4 },
+    { kind: 'symbol', region: 'north', symbol: 'eagle', colorIndex: 2, scaleFrac: 0.9, align: 'center', wide: 3 },
+  ],
+});
+check('new layer controls validate', withControls.valid, JSON.stringify(withControls.errors ?? []));
+const tl = withControls.spec?.layers[1] as { outline?: number; stretch?: number; dx?: number; dy?: number } | undefined;
+const sl = withControls.spec?.layers[2] as { wide?: number } | undefined;
+check('outline/stretch/dx/dy survive validation', tl?.outline === 6 && tl?.stretch === 2 && tl?.dx === 1 && tl?.dy === 4, JSON.stringify(tl));
+check('symbol wide survives validation', sl?.wide === 3);
+
+const clamped = validateSpec({
+  title: 'clamp', palette: ['#262a33', '#111111', '#ffffff'],
+  layers: [{ kind: 'text', region: 'south', text: 'X', colorIndex: 2, fontId: 'poster', arcDeg: 0, heightFrac: 0.8, align: 'center', outline: 999, stretch: 99, dx: -999 }],
+});
+const cl = clamped.spec?.layers[0] as { outline?: number; stretch?: number; dx?: number } | undefined;
+check('out-of-range controls are clamped, not rejected', clamped.valid && cl?.outline === 24 && cl?.stretch === 6 && cl?.dx === -20, JSON.stringify(cl));
+
+// An outlined headline is two layers: a fattened backing copy, then the plain
+// one. refineSpec must leave the backing copy alone — "repairing" its contrast
+// recolours it to match the copy on top and erases the outline.
+const outlined = validateSpec({
+  title: 'outline pair', palette: ['#262a33', '#0d0d0f', '#f5c518'],
+  layers: [
+    { kind: 'fill', region: 'south', colorIndex: 2 },
+    { kind: 'text', region: 'south', text: 'GRAZIE', colorIndex: 2, fontId: 'condensed', arcDeg: 0, heightFrac: 0.8, align: 'center', outline: 6 },
+    { kind: 'text', region: 'south', text: 'GRAZIE', colorIndex: 1, fontId: 'condensed', arcDeg: 0, heightFrac: 0.8, align: 'center' },
+  ],
+});
+check('outline pair validates', outlined.valid, JSON.stringify(outlined.errors ?? []));
+const refinedPair = refineSpec(outlined.spec!);
+check('backing layer keeps its colour', (refinedPair.layers[1] as { colorIndex: number }).colorIndex === 2, String((refinedPair.layers[1] as { colorIndex: number }).colorIndex));
+check('top layer keeps its colour', (refinedPair.layers[2] as { colorIndex: number }).colorIndex === 1);
+
+// A lone low-contrast headline still gets repaired.
+const muddy = validateSpec({
+  title: 'muddy', palette: ['#262a33', '#04341c', '#062a13', '#ffffff'],
+  layers: [
+    { kind: 'fill', region: 'south', colorIndex: 1 },
+    { kind: 'text', region: 'south', text: 'MUD', colorIndex: 2, fontId: 'poster', arcDeg: 0, heightFrac: 0.8, align: 'center' },
+  ],
+});
+const fixedMud = refineSpec(muddy.spec!);
+check('1.12:1 headline is repaired away from the field', (fixedMud.layers[1] as { colorIndex: number }).colorIndex === 3, String((fixedMud.layers[1] as { colorIndex: number }).colorIndex));
 
 console.log(`\n${failures === 0 ? 'ALL PASS' : failures + ' FAILED'}`);
 if (failures > 0) process.exit(1);

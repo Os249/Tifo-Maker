@@ -3,7 +3,7 @@
  * plan in — shipped display faces, outlined headlines, wide crests, bowl-wide
  * sweeps, 7-colour palettes, and a copywriter stage choosing the words.
  *   npx tsx scripts/preview-vision.mts
- * Requires the experimental engine patch; not a picture of today's build.
+ * Runs against the shipped engine.
  */
 import { mkdirSync, writeFileSync, rmSync, existsSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';

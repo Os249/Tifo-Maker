@@ -276,14 +276,19 @@ function applyLayer(layer: SpecLayer, map: SeatMap, store: DesignStore): number 
   const centerY = (minY + maxY) / 2;
 
   if (layer.kind === 'text') {
-    const rt = renderTextCanvas(layer.text, fontCssFor(layer.fontId), layer.arcDeg);
+    const rt = renderTextCanvas(layer.text, fontCssFor(layer.fontId), layer.arcDeg, layer.outline ?? 0);
     if (!rt) return 0;
     const glyphEditor = layer.heightFrac * regionH;
     const scale = glyphEditor / rt.glyphHeight;
     let rectW = rt.canvas.width * scale;
     let rectH = rt.canvas.height * scale;
-    // Keep the headline inside its stand: shrink to fit the available width.
     const maxW = standW * 0.96;
+    // Widen toward the stand's edges. stampMask rasterises the source into
+    // whatever rect it is handed, so this is purely a decision about the rect —
+    // no second render, no reflow.
+    const stretch = layer.stretch ?? 1;
+    if (stretch > 1) rectW = Math.min(maxW, rectW * stretch);
+    // Keep the headline inside its stand: shrink to fit the available width.
     if (rectW > maxW) {
       const k = maxW / rectW;
       rectW *= k;
@@ -292,12 +297,20 @@ function applyLayer(layer: SpecLayer, map: SeatMap, store: DesignStore): number 
     const cy = layer.align === 'top' ? minY + rectH / 2 + regionH * 0.03
       : layer.align === 'bottom' ? maxY - rectH / 2 - regionH * 0.03
       : centerY;
-    const rect = { x: centerX - rectW / 2, y: cy - rectH / 2, width: rectW, height: rectH };
+    // dx/dy are percentages of the region, so a shadow offset survives being
+    // moved to a bigger or smaller stadium.
+    const dx = ((layer.dx ?? 0) / 100) * standW;
+    const dy = ((layer.dy ?? 0) / 100) * regionH;
+    const rect = { x: centerX - rectW / 2 + dx, y: cy - rectH / 2 + dy, width: rectW, height: rectH };
     return stampMask(store, map, rt.canvas, rect, layer.colorIndex, accept);
   }
 
   // symbol — square box sized to a fraction of the region's smaller side.
-  const side = Math.max(EDITOR_UNITS.rowPx * 2, layer.scaleFrac * Math.min(standW, regionH));
+  // Height is the honest constraint (a stand is far wider than it is tall), so
+  // scaleFrac still measures against it; `wide` then spends the spare width.
+  const sideH = Math.max(EDITOR_UNITS.rowPx * 2, layer.scaleFrac * Math.min(standW, regionH));
+  const sideW = Math.max(EDITOR_UNITS.rowPx * 2, Math.min(standW * 0.96, sideH * (layer.wide ?? 1)));
+  const side = sideH;
   const cy = layer.align === 'top' ? minY + side / 2 + regionH * 0.03
     : layer.align === 'bottom' ? maxY - side / 2 - regionH * 0.03
     : centerY;
@@ -307,6 +320,6 @@ function applyLayer(layer: SpecLayer, map: SeatMap, store: DesignStore): number 
   const ctx = canvas.getContext('2d')!;
   ctx.fillStyle = '#ffffff';
   drawSymbol(ctx, layer.symbol, canvas.width, canvas.height);
-  const rect = { x: centerX - side / 2, y: cy - side / 2, width: side, height: side };
+  const rect = { x: centerX - sideW / 2, y: cy - side / 2, width: sideW, height: side };
   return stampMask(store, map, canvas, rect, layer.colorIndex, accept);
 }

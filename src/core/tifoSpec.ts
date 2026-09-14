@@ -62,7 +62,12 @@ export const STAND_GROUPS: Record<'sides' | 'ends', Stand[]> = {
 };
 
 /** Font ids the renderer can draw. Mirrors TIFO_FONTS in core/text.ts. */
-export const SPEC_FONT_IDS = ['impact', 'black', 'verdana', 'georgia', 'courier'] as const;
+export const SPEC_FONT_IDS = [
+  // Shipped display voices — each one family covering Arabic and Latin.
+  'poster', 'kufi', 'condensed', 'slab', 'sign', 'grotesk',
+  // Legacy system stacks, kept so designs saved before the voices still render.
+  'impact', 'black', 'verdana', 'georgia', 'courier',
+] as const;
 export type SpecFontId = (typeof SPEC_FONT_IDS)[number];
 
 /**
@@ -139,6 +144,23 @@ export interface TextLayer extends BaseLayer {
   /** Glyph height as a fraction of the region's height (0.02..1). */
   heightFrac: number;
   align: TextAlign;
+  /**
+   * Fatten the letterforms by this many source pixels (0..24). Stamp the layer
+   * twice — once fattened in the edge colour, once plain on top in the fill
+   * colour — and the pair reads as an outlined headline. Scale it with the word:
+   * a fixed stroke welds a short one shut.
+   */
+  outline?: number;
+  /**
+   * Stretch the run horizontally by up to this factor (1..6) to fill the
+   * region's width. A stand is roughly 6.6:1, so a short phrase set at its
+   * natural aspect sits as an island in a wide empty band.
+   */
+  stretch?: number;
+  /** Shift right by this % of the region's width (-20..20) — for drop shadows. */
+  dx?: number;
+  /** Shift down by this % of the region's height (-20..20). */
+  dy?: number;
 }
 
 /** A single-colour symbol scaled to a fraction of the region's smaller side. */
@@ -149,6 +171,12 @@ export interface SymbolLayer extends BaseLayer {
   /** Size as a fraction of min(regionWidth, regionHeight) (0.05..1). */
   scaleFrac: number;
   align: TextAlign;
+  /**
+   * Width multiplier (1..8). Symbols are sized off the region's HEIGHT, so on a
+   * 6.6:1 stand a "full scale" crest covers about 15% of the width. Above 1 the
+   * mask is stretched horizontally; past roughly 3 it starts to distort.
+   */
+  wide?: number;
 }
 
 export const PATTERN_NAMES = ['checker', 'chevron', 'grid', 'flag', 'hoops'] as const;
@@ -412,6 +440,10 @@ export function validateSpec(input: unknown): SpecValidationResult {
             arcDeg: clampNum(raw.arcDeg, -170, 170, 0),
             heightFrac: clampNum(raw.heightFrac, 0.02, 1, 0.6),
             align: typeof raw.align === 'string' && ALIGNS.has(raw.align) ? (raw.align as TextAlign) : 'center',
+            ...(raw.outline !== undefined ? { outline: clampNum(raw.outline, 0, 24, 0) } : {}),
+            ...(raw.stretch !== undefined ? { stretch: clampNum(raw.stretch, 1, 6, 1) } : {}),
+            ...(raw.dx !== undefined ? { dx: clampNum(raw.dx, -20, 20, 0) } : {}),
+            ...(raw.dy !== undefined ? { dy: clampNum(raw.dy, -20, 20, 0) } : {}),
           });
           break;
         }
@@ -422,6 +454,7 @@ export function validateSpec(input: unknown): SpecValidationResult {
             kind: 'symbol', id, region,
             symbol: raw.symbol as SymbolName,
             colorIndex: raw.colorIndex as number,
+            ...(raw.wide !== undefined ? { wide: clampNum(raw.wide, 1, 8, 1) } : {}),
             scaleFrac: clampNum(raw.scaleFrac, 0.05, 1, 0.7),
             align: typeof raw.align === 'string' && ALIGNS.has(raw.align) ? (raw.align as TextAlign) : 'center',
           });
