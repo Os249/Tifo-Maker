@@ -13,7 +13,8 @@ import { fileURLToPath } from 'node:url';
 import { createServer, type ViteDevServer } from 'vite';
 import { chromium, type Page } from 'playwright';
 import { STADIUM_CATALOG } from '../src/core/stadiumCatalog';
-import { solveRows } from './stadium-import.mjs';
+import { readFileSync } from 'node:fs';
+import { buildStadium, measureRing, solveRows, type RadialProbe } from '../src/core/stadiumFit';
 import type { StadiumTemplate } from '../src/core/types';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -22,23 +23,15 @@ const OUT = resolve(ROOT, 'preview-out/stadium');
 /**
  * Two readings of the SAME ground, plus a hand-built reference.
  *
- * `raw` is what scripts/stadium-import.mts produces today: fit a superellipse to
- * the OSM footprint (way 151158210) and use it as `plan`. The fit itself is good
- * - 2.1% rms radial error against the real outline - but `plan` is the INNER edge
- * of row 0, not the building outline, so every seat lands out where the outer
- * wall is and the bowl comes out as a thin ring far from the pitch.
+ * `raw` is the mistake worth keeping visible: fit a superellipse to the OSM
+ * footprint and use it as `plan`. The fit is good — 2.1% rms radial against the
+ * real outline — but `plan` is the INNER edge of row 0, not the building, so
+ * every seat lands where the concourse is and the bowl renders as a velodrome.
  *
- * `measured` takes `plan` from what the seating actually does. Sampling Esri
- * World Imagery radially for seat-coloured pixels puts row 0 at r = 72 m down the
- * sides and r = 100 m at the ends; a superellipse through those 175 points is
- * a = 100.0, b = 71.3, p = 2.00. Measured band depth is 9.0 m median (p25 7.8,
- * p75 9.6), i.e. a near-uniform ring of roughly 11 rows - so a constant-depth
- * ring, which is all a StadiumTemplate can express, is a fair model here.
- *
- * Rows are then solved against the stated 17,619 rather than against the 9 m we
- * measured, which lands ~16 rows. The measured depth would give ~11,000 seats;
- * the difference is mostly the roofed west main stand, which the colour sampler
- * cannot read at all, plus seat pitch tighter than our 0.5 m default.
+ * `fitted` is whatever src/core/stadiumFit currently produces from the committed
+ * evidence: the OSM way, the seating ring measured off overhead imagery, and the
+ * stated capacity. It is not a copy of those numbers — it is the estimator's
+ * live output, so if the estimator regresses this picture changes.
  */
 const AMMAN_RAW: StadiumTemplate = {
   id: 'amman-raw',
@@ -51,18 +44,21 @@ const AMMAN_RAW: StadiumTemplate = {
   evenRows: true,
 };
 
-const AMMAN_MEASURED: StadiumTemplate = {
-  ...AMMAN_RAW,
-  id: 'amman-measured',
-  name: 'Amman International (plan measured off the imagery)',
-  plan: { a: 100.0, b: 71.3, exponent: 2.0 },
-  tiers: [{ rows: 16, rowDepth: 0.8, rakeDeg: 20, baseElevation: 3, baseOffset: 0, seatPitch: 0.5 }],
-};
+const ringData = JSON.parse(readFileSync(resolve(ROOT, 'scripts/data/amman-ring.json'), 'utf8')) as { probes: RadialProbe[] };
+const ammanRing = measureRing(ringData.probes, { minHits: 25 });
+const AMMAN_FITTED = buildStadium({
+  id: 'amman-fitted',
+  name: 'Amman International (estimated)',
+  innerRing: ammanRing.points,
+  bandDepth: ammanRing.depth.median,
+  capacity: 17_619,
+  known: { tiers: 1, roof: 'west', aisles: 32 },
+}).template;
 
 const alAwwal = STADIUM_CATALOG.find((s) => s.id.includes('alawwal'))?.template;
 const SET: Array<[string, StadiumTemplate, number]> = [
   ['amman-raw', solveRows(AMMAN_RAW, 17619).template, 1],
-  ['amman-measured', solveRows(AMMAN_MEASURED, 17619).template, 1],
+  ['amman-fitted', AMMAN_FITTED, 1],
   ...(alAwwal ? ([['alawwal-handbuilt', alAwwal, 1.0]] as Array<[string, StadiumTemplate, number]>) : []),
 ];
 

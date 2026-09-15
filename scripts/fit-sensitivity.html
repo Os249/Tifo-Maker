@@ -1,0 +1,75 @@
+<!doctype html>
+<!-- Dev-only harness for scripts/fit-sensitivity.mts. Renders a template's
+     seating as a flat silhouette mask, so one parameter's effect on the picture
+     can be measured instead of argued about. -->
+<html lang="en"><head><meta charset="UTF-8"/><title>fit sensitivity</title></head>
+<body style="margin:0;background:#000"><div id="out">loading…</div>
+<script type="module">
+  import * as THREE from 'three';
+  import { generateSeatMap } from '/src/core/seatmap.ts';
+  import { buildStands } from '/src/render/simulator/stands.ts';
+
+  const W = 640, H = 400;
+  const host = document.createElement('div');
+  host.style.cssText = `position:fixed;left:0;top:0;width:${W}px;height:${H}px;`;
+  document.body.appendChild(host);
+  const renderer = new THREE.WebGLRenderer({ antialias: false, preserveDrawingBuffer: true });
+  renderer.setSize(W, H, false);
+  renderer.setClearColor(0x000000, 1);
+  host.appendChild(renderer.domElement);
+
+  /**
+   * Seats and shell as flat white-on-black, unlit. A silhouette is what a photo
+   * gives up most reliably — colour, exposure and time of day all vary, the
+   * outline of where the bowl meets the sky does not.
+   */
+  function maskOf(template, cam) {
+    const map = generateSeatMap(template);
+    const scene = new THREE.Scene();
+    const geo = new THREE.PlaneGeometry(0.5, 0.75);
+    const mat = new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide });
+    const mesh = new THREE.InstancedMesh(geo, mat, map.count);
+    const dummy = new THREE.Object3D();
+    for (let i = 0; i < map.count; i++) {
+      const y = map.pos3[i * 3 + 1] + 0.9;
+      dummy.position.set(map.pos3[i * 3], y, map.pos3[i * 3 + 2]);
+      dummy.lookAt(0, y, 0);
+      dummy.rotateX(-0.22);
+      dummy.updateMatrix();
+      mesh.setMatrixAt(i, dummy.matrix);
+    }
+    mesh.instanceMatrix.needsUpdate = true;
+    scene.add(mesh);
+
+    // The shell in mid grey: the roof and the stand back are part of the outline
+    // a photo shows, but they are not the tifo, so they must not score the same.
+    const stands = buildStands(template, false);
+    stands.traverse((o) => { if (o.material) o.material = new THREE.MeshBasicMaterial({ color: 0x808080, side: THREE.DoubleSide }); });
+    scene.add(stands);
+
+    const camera = new THREE.PerspectiveCamera(cam.fov, W / H, 0.5, 4000);
+    camera.position.set(cam.pos[0], cam.pos[1], cam.pos[2]);
+    camera.lookAt(cam.target[0], cam.target[1], cam.target[2]);
+    renderer.render(scene, camera);
+    const gl = renderer.getContext();
+    const buf = new Uint8Array(W * H * 4);
+    gl.readPixels(0, 0, W, H, gl.RGBA, gl.UNSIGNED_BYTE, buf);
+
+    // 0 = sky, 1 = shell, 2 = seats. Three labels, so a change that only moves
+    // the roof cannot be mistaken for one that moves the seating.
+    const lab = new Uint8Array(W * H);
+    for (let i = 0; i < W * H; i++) {
+      const r = buf[i * 4];
+      lab[i] = r > 200 ? 2 : r > 40 ? 1 : 0;
+    }
+    geo.dispose(); mat.dispose(); mesh.dispose();
+    stands.traverse((o) => { if (o.geometry) o.geometry.dispose(); if (o.material) o.material.dispose(); });
+    scene.clear();
+    return { lab: Array.from(lab), seats: map.count };
+  }
+
+  window.__mask = (template, cam) => maskOf(template, cam);
+  document.getElementById('out').textContent = 'ready';
+  window.__ready = true;
+  window.__W = W; window.__H = H;
+</script></body></html>
