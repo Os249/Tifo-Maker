@@ -15,7 +15,7 @@ import { matchClub, CLUBS } from '../src/core/clubs';
 import { quantizePixels } from '../src/core/importImage';
 import { TtlCache, cacheKey } from '../server/src/aiCache';
 import { aiPeriod, secondsToNextPeriod } from '../server/src/repo';
-import { buildDirectorPrompt, buildSystemPrompt, buildCriticPrompt, clubHintLine, userMessage, criticUserMessage, buildCopywriterPrompt, copyLine } from '../server/src/aiProvider';
+import { buildDirectorPrompt, buildSystemPrompt, buildCriticPrompt, clubHintLine, userMessage, criticUserMessage, buildCopywriterPrompt, copyLine, geminiText, whyNoJson, maxOutputTokens } from '../server/src/aiProvider';
 import { TIFO_FONTS } from '../src/core/text';
 import { mosaicStyle, colourName, pollinationsSize, geminiAspect } from '../server/src/imageAssets';
 import { TIFO_VOICES } from '../src/core/tifoVoices';
@@ -529,6 +529,39 @@ check('the cap still bites somewhere',
 check('the director is told to spend colours on tones, not hues',
   /TONES/.test(PROMPTS[1][1]) && /hues/i.test(PROMPTS[1][1]));
 check('the prompts expose fit to the model', PROMPTS[1][1].includes('cover') && PROMPTS[0][1].includes('contain'));
+
+// ---- 26. reading a model reply that did not go to plan ----
+// A thinking model puts its thought summary in the FIRST part and the answer in
+// a later one. Reading parts[0] threw the answer away and reported it as invalid
+// JSON, which reaches the user as "premium is busy" — a quota-shaped message for
+// a parsing bug.
+const thought = {
+  candidates: [{ content: { parts: [
+    { text: 'Let me consider the palette...', thought: true },
+    { text: '{"title":"X"}' },
+  ] }, finishReason: 'STOP' }],
+};
+check('a thought part never masks the answer', geminiText(thought) === '{"title":"X"}');
+check('answer parts are joined in order',
+  geminiText({ candidates: [{ content: { parts: [{ text: '{"a":' }, { text: '1}' }] } }] }) === '{"a":1}');
+check('an empty reply reads as empty', geminiText({}) === '');
+
+check('truncation is named, with the lever to pull',
+  /MAX_TOKENS/.test(whyNoJson({ candidates: [{ finishReason: 'MAX_TOKENS' }] }, '{"tit')) &&
+  /AI_MAX_OUTPUT_TOKENS/.test(whyNoJson({ candidates: [{ finishReason: 'MAX_TOKENS' }] }, '{"tit')));
+check('a safety block is not reported as bad JSON',
+  /safety/.test(whyNoJson({ promptFeedback: { blockReason: 'SAFETY' } }, '')));
+check('an empty response says so', /empty response/.test(whyNoJson({ candidates: [{ finishReason: 'STOP' }] }, '   ')));
+check('otherwise the text is quoted back', whyNoJson({ candidates: [{ finishReason: 'STOP' }] }, 'Sure! Here is your design').includes('Sure! Here is your design'));
+
+check('output ceiling leaves room to think and answer', maxOutputTokens() >= 8192);
+process.env.AI_MAX_OUTPUT_TOKENS = '"8192"'; // the quoted-env trap
+check('a quoted output ceiling falls back instead of passing NaN', maxOutputTokens() === 8192);
+process.env.AI_MAX_OUTPUT_TOKENS = '16000';
+check('a real output ceiling is honoured', maxOutputTokens() === 16000);
+process.env.AI_MAX_OUTPUT_TOKENS = '10';
+check('an absurdly small ceiling is refused', maxOutputTokens() === 8192);
+delete process.env.AI_MAX_OUTPUT_TOKENS;
 
 console.log(`\n${failures === 0 ? 'ALL PASS' : failures + ' FAILED'}`);
 if (failures > 0) process.exit(1);

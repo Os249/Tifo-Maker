@@ -511,6 +511,62 @@ function geminiParts(text: string, image?: string): unknown[] {
 }
 
 /** Pull the first JSON object out of a model response (tolerant of fences/prose). */
+/**
+ * The output-token ceiling for a generation.
+ *
+ * 8192, not 4096. On a thinking model the budget covers the model's REASONING as
+ * well as its answer, and the director prompt now carries a full house style, a
+ * lettering contract and a four-design gallery — plenty to think about. A design
+ * with a 16-tone palette and outline pairs (which double the text layers) is a
+ * bigger answer too. Run out and the reply is truncated to nothing usable, which
+ * the caller can only report as "premium is busy".
+ *
+ * Number() of a QUOTED env value is NaN, and NaN fails every > comparison, so an
+ * accidental AI_MAX_OUTPUT_TOKENS="8192" would silently pass 0 or NaN to the
+ * provider. Fall back rather than trust it.
+ */
+export function maxOutputTokens(): number {
+  const n = Number(process.env.AI_MAX_OUTPUT_TOKENS ?? 8192);
+  return Number.isFinite(n) && n >= 1024 ? Math.min(n, 32768) : 8192;
+}
+
+export interface GeminiReply {
+  candidates?: Array<{ content?: { parts?: Array<{ text?: string; thought?: boolean }> }; finishReason?: string }>;
+  promptFeedback?: { blockReason?: string };
+}
+
+/**
+ * Every answer part of a Gemini reply, joined.
+ *
+ * Reading parts[0] alone was wrong the moment a thinking model was pointed at
+ * this: the model emits its thought summary as the first part and the JSON as a
+ * later one, so the answer was being thrown away and reported as invalid JSON.
+ * Parts flagged `thought` are reasoning, never the answer.
+ */
+export function geminiText(data: GeminiReply): string {
+  return (data.candidates?.[0]?.content?.parts ?? [])
+    .filter((p) => !p?.thought)
+    .map((p) => p?.text ?? '')
+    .join('');
+}
+
+/**
+ * Why a reply carried no usable JSON, in words an operator can act on. All of
+ * these used to surface as the same "response was not valid JSON", which says
+ * nothing about whether to raise a limit, soften a prompt or fix a model id.
+ */
+export function whyNoJson(data: GeminiReply, text: string): string {
+  const finish = data.candidates?.[0]?.finishReason;
+  const blocked = data.promptFeedback?.blockReason;
+  if (finish === 'MAX_TOKENS') {
+    return `ran out of output tokens before finishing the JSON (finishReason MAX_TOKENS, limit ${maxOutputTokens()}) — raise AI_MAX_OUTPUT_TOKENS`;
+  }
+  if (blocked) return `prompt blocked by the safety filter (blockReason ${blocked})`;
+  if (finish && finish !== 'STOP') return `stopped early (finishReason ${finish})`;
+  if (!text.trim()) return 'empty response (no text parts)';
+  return `response was not valid JSON; it began: ${text.slice(0, 140).replace(/\s+/g, ' ')}`;
+}
+
 function extractJson(text: string): unknown | null {
   if (!text) return null;
   const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
@@ -582,13 +638,16 @@ export async function generateSpecViaProvider(
         // 4096 to match Gemini: outline pairs double the text-layer count and
         // Anthropic is not in JSON mode, so it pretty-prints. A truncated reply
         // fails extractJson and surfaces to the user as "premium is busy".
-        { model: process.env.AI_MODEL ?? 'claude-3-5-sonnet-latest', max_tokens: 4096, system, messages: [{ role: 'user', content: user }] },
+        { model: process.env.AI_MODEL ?? 'claude-3-5-sonnet-latest', max_tokens: maxOutputTokens(), system, messages: [{ role: 'user', content: user }] },
         timeoutMs,
       );
       if (!res.ok) return { spec: null, error: await httpError('claude', res) };
-      const data = (await res.json()) as { content?: Array<{ text?: string }> };
-      const spec = extractJson(data.content?.[0]?.text ?? '');
-      return spec ? { spec } : { spec: null, error: 'claude: response was not valid JSON' };
+      const data = (await res.json()) as { content?: Array<{ text?: string; type?: string }>; stop_reason?: string };
+      // Every text block, not just the first: with extended thinking on, block 0
+      // is a thinking block and the JSON is further down.
+      const text = (data.content ?? []).map((b) => b?.text ?? '').join('');
+      const spec = extractJson(text);
+      return spec ? { spec } : { spec: null, error: `claude: response was not valid JSON${data.stop_reason ? ` (stop_reason ${data.stop_reason})` : ''}` };
     }
     if (provider === 'gemini') {
       const model = geminiModel(opts.tier ?? 'fast');
@@ -602,15 +661,17 @@ export async function generateSpecViaProvider(
             responseMimeType: 'application/json',
             ...(process.env.AI_RESPONSE_SCHEMA === '1' ? { responseJsonSchema: tifoResponseSchema() } : {}),
             temperature: 0.9,
-            maxOutputTokens: 4096,
+            maxOutputTokens: maxOutputTokens(),
           },
         },
         timeoutMs,
       );
       if (!res.ok) return { spec: null, error: await httpError(`gemini "${model}"`, res) };
-      const data = (await res.json()) as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
-      const spec = extractJson(data.candidates?.[0]?.content?.parts?.[0]?.text ?? '');
-      return spec ? { spec } : { spec: null, error: `gemini "${model}": response was not valid JSON` };
+      const data = (await res.json()) as GeminiReply;
+      const text = geminiText(data);
+      const spec = extractJson(text);
+      if (spec) return { spec };
+      return { spec: null, error: `gemini "${model}": ${whyNoJson(data, text)}` };
     }
     // openai
     const res = await postJson(
