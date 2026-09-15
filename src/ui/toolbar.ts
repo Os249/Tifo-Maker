@@ -1093,6 +1093,15 @@ export function mountToolbar(
     const deleteItem = document.getElementById('menu-delete');
     if (deleteItem) deleteItem.hidden = !signed;
     if (nameItem) nameItem.hidden = !signed;
+    // The phone-only row. `menu-signup` was never in this list: .m-only is
+    // revealed by body.m-shell whatever the state, so a signed-in user on a
+    // phone saw "Sign up" sitting directly under their own username — and
+    // because the myUserId restore is async, tapping it early could open the
+    // auth modal on an account that was already signed in.
+    const signupItem = document.getElementById('menu-signup');
+    if (signupItem) signupItem.hidden = signed;
+    const accountItem = document.getElementById('menu-account');
+    if (accountItem) accountItem.hidden = !signed;
     toggleAvatarMenu();
   });
   // Close the menu on any outside click.
@@ -1144,6 +1153,10 @@ export function mountToolbar(
   document.getElementById('menu-gallery')?.addEventListener('click', () => {
     toggleAvatarMenu(false);
     ($('#gallery') as unknown as HTMLButtonElement).click();
+  });
+  document.getElementById('menu-account')?.addEventListener('click', () => {
+    toggleAvatarMenu(false);
+    window.location.href = '/account';
   });
   document.getElementById('menu-password')?.addEventListener('click', async () => {
     toggleAvatarMenu(false);

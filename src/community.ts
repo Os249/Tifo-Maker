@@ -89,6 +89,10 @@ async function refreshAuthUI(): Promise<void> {
   me = await fetchMe().catch(() => null);
   const notifBtn = $('#notif-btn');
   if (me) {
+    // Drop the i18n binding while it holds a username: applyDom() rewrites every
+    // [data-i18n] node on a language switch, so leaving it attached turned
+    // "@os99" back into "Sign in" the moment someone toggled to Arabic.
+    authBtn.removeAttribute('data-i18n');
     authBtn.textContent = `@${me.username}`;
     authBtn.onclick = () => {
       window.location.href = '/app';
@@ -96,6 +100,7 @@ async function refreshAuthUI(): Promise<void> {
     notifBtn.hidden = false;
     void refreshNotifications();
   } else {
+    authBtn.setAttribute('data-i18n', 'ed.signup');
     authBtn.textContent = t('ed.signup');
     authBtn.onclick = async () => {
       const tok = await openAuthModal();

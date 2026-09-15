@@ -829,6 +829,16 @@ export class PgAuthRepository implements AuthRepository {
     await this.pool.query('UPDATE users SET email_verified_at = now() WHERE id = $1', [userId]);
   }
 
+  async setUsername(userId: string, username: string): Promise<boolean> {
+    try {
+      const res = await this.pool.query('UPDATE users SET username = $2 WHERE id = $1', [userId, username]);
+      return (res.rowCount ?? 0) > 0;
+    } catch (err) {
+      if ((err as { code?: string }).code === '23505') return false; // name taken
+      throw err;
+    }
+  }
+
   async setPro(userId: string, isPro: boolean): Promise<void> {
     await this.pool.query('UPDATE users SET is_pro = $2 WHERE id = $1', [userId, isPro]);
   }

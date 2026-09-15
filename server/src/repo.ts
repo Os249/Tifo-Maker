@@ -322,6 +322,14 @@ export interface AuthRepository {
   setEmail(userId: string, email: string, acceptedVersion?: string | null): Promise<boolean>;
   /** Mark the user's current email as verified now. */
   markEmailVerified(userId: string): Promise<void>;
+  /**
+   * Rename the caller. Returns false if the name belongs to someone else.
+   *
+   * Attribution joins on the user rather than storing a copy of the name, so a
+   * rename follows the person across every design they have ever published —
+   * which is why this is safe to offer at all.
+   */
+  setUsername(userId: string, username: string): Promise<boolean>;
   /** Set the paid (unlimited-AI) entitlement flag. */
   setPro(userId: string, isPro: boolean): Promise<void>;
   createToken(userId: string, tokenHash: string, expiresAt: Date): Promise<void>;

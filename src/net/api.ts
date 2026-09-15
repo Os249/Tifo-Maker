@@ -106,8 +106,21 @@ function setToken(t: string | null): void {
 
 export const isSignedIn = (): boolean => token !== null;
 
-/** Sign out: clear the persisted session. */
+/**
+ * Sign out: revoke the session server-side, THEN clear it locally.
+ *
+ * Clearing the local token used to be the whole of it, which meant the bearer
+ * token stayed valid on the server for its full 30-day life. Anyone holding a
+ * copy — a shared computer's storage, a leaked log — kept access long after the
+ * person believed they had signed out. The revoke is fire-and-forget because a
+ * failed network call must never trap someone in a session they have left; the
+ * local clear happens either way.
+ */
 export function signOut(): void {
+  const had = token;
+  if (had) {
+    void fetch(`${API}/auth/logout`, { method: 'POST', headers: { authorization: `Bearer ${had}` } }).catch(() => {});
+  }
   setToken(null);
 }
 
@@ -168,9 +181,40 @@ export async function setAccountEmail(email: string, acceptedVersion?: string): 
   );
 }
 
-/** Ask the server to re-send the email-verification link to the signed-in user. */
+/** Ask the server to re-send the verification code and link to the signed-in user. */
 export async function resendVerification(): Promise<void> {
   await expectOk(await fetch(`${API}/auth/verify/resend`, { method: 'POST', headers: authHeaders(true) }));
+}
+
+/**
+ * Verify the signed-in account's email with the 6-digit code from the message.
+ *
+ * Resolves with how many guesses remain when the code is wrong, so the UI can
+ * say so before the budget runs out and a new code is needed.
+ */
+export async function verifyEmailCode(code: string): Promise<{ ok: boolean; triesLeft?: number; error?: string }> {
+  const res = await fetch(`${API}/auth/verify/code`, {
+    method: 'POST',
+    headers: authHeaders(true),
+    body: JSON.stringify({ code }),
+  });
+  const data = (await res.json().catch(() => null)) as
+    | { ok?: boolean; triesLeft?: number; error?: string; exhausted?: boolean }
+    | null;
+  if (res.ok) return { ok: true };
+  return { ok: false, triesLeft: data?.triesLeft, error: data?.error ?? 'could not verify' };
+}
+
+/** Rename the signed-in account. Throws with the server's reason on 400/409. */
+export async function changeUsername(username: string): Promise<string> {
+  const data = (await expectOk(
+    await fetch(`${API}/account/username`, {
+      method: 'POST',
+      headers: authHeaders(true),
+      body: JSON.stringify({ username }),
+    }),
+  )) as { username: string };
+  return data.username;
 }
 
 /**

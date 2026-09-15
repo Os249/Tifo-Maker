@@ -1,3 +1,4 @@
+import { randomInt } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
@@ -700,14 +701,46 @@ export async function buildApp(
   const authLimit = { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } };
 
   const VERIFY_TTL_MS = 24 * 60 * 60 * 1000;
+  /**
+   * The in-app code is short-lived where the emailed link is not.
+   *
+   * A link carries 256 bits of entropy; a six-digit code carries about twenty,
+   * so its safety comes from the controls around it rather than its length.
+   * Ten minutes, single use, and five wrong guesses before the code is
+   * destroyed — 5 chances in 1,000,000 per issued code, against NIST's ceiling
+   * of 100 consecutive failures.
+   *
+   * This is only safe because of WHAT the code unlocks. It does not sign anyone
+   * in and it does not reset a password: the endpoint requires an authenticated
+   * session and verifies an address on THAT account. Guessing it gains an
+   * attacker nothing they did not already have.
+   */
+  const VERIFY_CODE_TTL_MS = 10 * 60 * 1000;
+  const VERIFY_CODE_MAX_TRIES = 5;
+  /** Wrong-guess counters, per user. In-memory, like the AI budget — a second
+   *  instance would keep its own, which the link flow makes acceptable. */
+  const codeTries = new Map<string, number>();
+
+  /** A cryptographically random 6-digit code. Never Math.random. */
+  const newVerifyCode = (): string => String(randomInt(0, 1_000_000)).padStart(6, '0');
+  /** Salted with the user id, so two people can hold the same digits and one
+   *  person can never consume — or destroy — another's code. */
+  const codeHash = (userId: string, code: string): string => hashToken(`verify:${userId}:${code}`);
   // Issue a fresh verification token and email the link. Best-effort: a mail
   // failure never blocks the API response (the user can request a resend).
   const sendVerifyEmail = async (req: FastifyRequest, user: { id: string; email: string }): Promise<void> => {
     if (!options.emailSender) return;
     try {
       await auth.deleteEmailTokens(user.id, 'verify_email');
+      await auth.deleteEmailTokens(user.id, 'verify_code');
+      codeTries.delete(user.id);
       const { token, tokenHash } = issueToken();
       await auth.createEmailToken(user.id, tokenHash, 'verify_email', new Date(Date.now() + VERIFY_TTL_MS));
+      // The same message carries both: a code to type where the person already
+      // is, and a link for whoever would rather just click. On a phone, leaving
+      // for a mail app and finding the way back is where people give up.
+      const code = newVerifyCode();
+      await auth.createEmailToken(user.id, codeHash(user.id, code), 'verify_code', new Date(Date.now() + VERIFY_CODE_TTL_MS));
       const base = emailBase(req);
       const link = `${base}/api/auth/verify?token=${token}`;
       // Bilingual: the server does not know which language the person picked
@@ -719,19 +752,23 @@ export async function buildApp(
         html:
           `<div dir="rtl" lang="ar" style="text-align:right">` +
           `<p>أهلاً بك في تيفو ميكر.</p>` +
-          `<p>وثّق بريدك عشان تفتح مصمّم الذكاء الاصطناعي:</p>` +
+          `<p>وثّق بريدك عشان تفتح مصمّم الذكاء الاصطناعي. رمز التحقق:</p>` +
+          `<p style="font-size:30px;font-weight:700;letter-spacing:6px;font-family:monospace">${code}</p>` +
+          `<p>اكتب الرمز في الموقع خلال 10 دقائق، أو افتح هذا الرابط:</p>` +
           `<p><a href="${link}">وثّق بريدي</a></p>` +
           `<p>الرابط ينتهي خلال 24 ساعة. وإذا ما أنشأت حساب، تجاهل هذي الرسالة.</p>` +
           `</div><hr />` +
           `<div dir="ltr" lang="en">` +
           `<p>Welcome to TifoMaker.</p>` +
-          `<p>Confirm your email to unlock the AI Designer:</p>` +
+          `<p>Confirm your email to unlock the AI Designer. Your code:</p>` +
+          `<p style="font-size:30px;font-weight:700;letter-spacing:6px;font-family:monospace">${code}</p>` +
+          `<p>Type it on the site within 10 minutes, or open this link instead:</p>` +
           `<p><a href="${link}">Verify my email</a></p>` +
           `<p>This link expires in 24 hours. If you didn't create an account, ignore this email.</p>` +
           `</div>`,
         text:
-          `وثّق بريدك في تيفو ميكر: ${link}\nالرابط ينتهي خلال 24 ساعة.\n\n` +
-          `Verify your TifoMaker email: ${link}\nThis link expires in 24 hours.`,
+          `رمز التحقق في تيفو ميكر: ${code} (صالح 10 دقائق)\nأو افتح: ${link}\n\n` +
+          `Your TifoMaker code: ${code} (valid 10 minutes)\nOr open: ${link}`,
       });
     } catch (err) {
       app.log.error({ err }, 'verification email failed');
@@ -838,6 +875,72 @@ export async function buildApp(
     if (user.emailVerifiedAt) return reply.code(200).send({ ok: true, alreadyVerified: true });
     await sendVerifyEmail(req, { id: user.id, email: user.email });
     return reply.code(202).send({ ok: true });
+  });
+
+  /**
+   * Verify the signed-in account's email with the 6-digit code.
+   *
+   * Requires a session, so this can only ever verify an address on the caller's
+   * OWN account — which is what makes a short code acceptable here. One generic
+   * error for wrong, expired and already-spent, so it never becomes an oracle.
+   */
+  app.post('/api/auth/verify/code', authLimit, async (req, reply) => {
+    const userId = await requireUser(req, reply);
+    if (!userId) return;
+    const raw = (req.body ?? {}) as { code?: unknown };
+    const code = typeof raw.code === 'string' ? raw.code.replace(/\D/g, '') : '';
+    const user = await auth.getUserById(userId).catch(() => null);
+    if (user?.emailVerifiedAt) return reply.code(200).send({ ok: true, alreadyVerified: true });
+    if (code.length !== 6) return reply.code(400).send({ error: 'enter the 6-digit code' });
+
+    const tries = codeTries.get(userId) ?? 0;
+    if (tries >= VERIFY_CODE_MAX_TRIES) {
+      return reply.code(429).send({ error: 'too many attempts, request a new code', exhausted: true });
+    }
+    const ok = await auth.consumeEmailToken(codeHash(userId, code), 'verify_code');
+    if (ok !== userId) {
+      const next = tries + 1;
+      codeTries.set(userId, next);
+      // Burn the code once the budget is spent, so a new one must be requested.
+      if (next >= VERIFY_CODE_MAX_TRIES) await auth.deleteEmailTokens(userId, 'verify_code').catch(() => {});
+      return reply.code(400).send({
+        error: 'that code is not right or has expired',
+        triesLeft: Math.max(0, VERIFY_CODE_MAX_TRIES - next),
+      });
+    }
+    codeTries.delete(userId);
+    await auth.deleteEmailTokens(userId, 'verify_email');
+    await auth.markEmailVerified(userId);
+    return reply.code(200).send({ ok: true });
+  });
+
+  /**
+   * Rename the signed-in account.
+   *
+   * The handle is public — it is the @name on every design in the community —
+   * and attribution joins on the user rather than copying the name, so a rename
+   * follows the person everywhere rather than orphaning their work. Same
+   * character rules as registration, and the same generic 409 so this cannot be
+   * used to probe which names exist.
+   */
+  app.post('/api/account/username', authLimit, async (req, reply) => {
+    const userId = await requireUser(req, reply);
+    if (!userId) return;
+    const raw = (req.body ?? {}) as { username?: unknown };
+    const username = typeof raw.username === 'string' ? raw.username.trim() : '';
+    if (!USERNAME.test(username)) {
+      return reply.code(400).send({ error: '3-24 characters: letters, numbers or underscore' });
+    }
+    // Stricter than registration, deliberately. Registration allows the exact
+    // admin name through (that is how an admin bootstraps); a RENAME never can
+    // — if the allow-listed name is not yet registered, renaming onto it would
+    // hand the caller moderator rights, and uniqueness would not stop it.
+    if (adminFolded.has(username.toLowerCase())) {
+      return reply.code(409).send({ error: 'that name is taken' });
+    }
+    const ok = await auth.setUsername(userId, username);
+    if (!ok) return reply.code(409).send({ error: 'that name is taken' });
+    return reply.code(200).send({ ok: true, username });
   });
 
   // Change password while signed in (requires the current password).
@@ -2087,6 +2190,14 @@ export async function buildApp(
       app.get('/reset', async (_req, reply) => reply.header('cache-control', 'no-cache').type('text/html').send(resetHtml));
     } catch {
       /* reset page optional in API-only builds */
+    }
+
+    // Account settings. noindex in its own <head>; nothing here is public.
+    try {
+      const accountHtml = readFileSync(join(staticDir, 'account.html'), 'utf8');
+      app.get('/account', async (_req, reply) => reply.header('cache-control', 'no-cache').type('text/html').send(accountHtml));
+    } catch {
+      /* account page optional in API-only builds */
     }
 
     // sitemap.xml: generated per request rather than shipped as a static file, so

@@ -51,9 +51,11 @@
             <button class="avatar-menu-item" id="menu-gallery"><i class="ti ti-photo"></i> <span data-i18n="ed.gallery">Gallery</span></button>
             <button class="avatar-menu-item" id="menu-tutorial"><i class="ti ti-help-circle"></i> <span data-i18n="ed.replayTour">Replay tutorial</span></button>
             <button class="avatar-menu-item" id="menu-feedback"><i class="ti ti-message-report"></i> <span data-i18n="fb.entry">Feedback</span></button>
-            <button class="avatar-menu-item" id="menu-password"><i class="ti ti-key"></i> <span data-i18n="ed.changePassword">Change password</span></button>
-            <button class="avatar-menu-item" id="menu-export"><i class="ti ti-download"></i> <span data-i18n="ed.exportData">Export my data</span></button>
-            <button class="avatar-menu-item danger" id="menu-delete"><i class="ti ti-trash"></i> <span data-i18n="ed.deleteAccount">Delete account</span></button>
+            <!-- One row instead of three. Email, name, password, export and
+                 deletion all live on /account now, where each can show its own
+                 state (verified? when was the password last changed?) instead
+                 of being a modal with no memory. -->
+            <button class="avatar-menu-item" id="menu-account"><i class="ti ti-settings"></i> <span data-i18n="ed.account">Account settings</span></button>
             <button class="avatar-menu-item danger" id="menu-signout"><i class="ti ti-logout"></i> <span data-i18n="ed.signOut">Sign out</span></button>
           </div>
         </div>

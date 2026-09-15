@@ -115,27 +115,42 @@ export function installMobileNav(): void {
     scrim.classList.remove('open');
     burger.setAttribute('aria-expanded', 'false');
   };
+  /**
+   * Rebuild the drawer's rows from the live nav.
+   *
+   * These are clones with their ids stripped, so the auth refresh — which finds
+   * its button by id and rewrites the label — could never reach them. The drawer
+   * said "Sign in" to people who were already signed in, for as long as the page
+   * was open. Cloning on OPEN instead of once at install means the copy is made
+   * from whatever the nav says at that moment, so it cannot drift.
+   */
+  const fillDrawer = (): void => {
+    for (const old of Array.from(drawer.querySelectorAll('.mnav-cloned'))) old.remove();
+    Array.from(links.children).forEach((orig) => {
+      const el = orig as HTMLElement;
+      if (el.hidden || getComputedStyle(el).display === 'none') return; // hidden in the nav, hidden here
+      const clone = el.cloneNode(true) as HTMLElement;
+      clone.removeAttribute('id');
+      clone.classList.add('mnav-cloned');
+      if (el.tagName === 'BUTTON') {
+        clone.addEventListener('click', (e) => {
+          e.preventDefault();
+          el.click();
+          close();
+        });
+      } else {
+        clone.addEventListener('click', () => close());
+      }
+      drawer.appendChild(clone);
+    });
+  };
+
   const open = (): void => {
+    fillDrawer();
     drawer.classList.add('open');
     scrim.classList.add('open');
     burger.setAttribute('aria-expanded', 'true');
   };
-
-  Array.from(links.children).forEach((orig) => {
-    const el = orig as HTMLElement;
-    const clone = el.cloneNode(true) as HTMLElement;
-    clone.removeAttribute('id');
-    if (el.tagName === 'BUTTON') {
-      clone.addEventListener('click', (e) => {
-        e.preventDefault();
-        el.click();
-        close();
-      });
-    } else {
-      clone.addEventListener('click', () => close());
-    }
-    drawer.appendChild(clone);
-  });
 
   burger.addEventListener('click', () => (drawer.classList.contains('open') ? close() : open()));
   scrim.addEventListener('click', close);

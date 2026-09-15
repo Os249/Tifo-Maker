@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <link rel="icon" href="/favicon.ico" sizes="32x32" />
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+  <title>Account · TifoMaker</title>
+  <meta name="robots" content="noindex" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/src/ui/account.css" />
+</head>
+<body>
+  <header class="ac-top">
+    <!-- A latin wordmark must not reorder itself when the page is RTL. -->
+    <a class="ac-brand" href="/app" dir="ltr">TIFO<b>MAKER</b></a>
+    <a class="ac-back" href="/app"><span data-i18n="ac.backToEditor">Back to the editor</span></a>
+  </header>
+
+  <main class="ac-wrap">
+    <h1 data-i18n="ac.title">Account</h1>
+    <p class="ac-sub" data-i18n="ac.sub">Your sign-in details, your data, and how to leave.</p>
+
+    <!-- Each section saves on its own and reports its own result. A single
+         page-level Save would make one failure look like five. -->
+    <div id="ac-sections" hidden>
+
+      <section class="ac-card" id="sec-email">
+        <h2 data-i18n="ac.email.title">Email</h2>
+        <p class="ac-note" data-i18n="ac.email.note">Used to sign in, to reset your password, and to unlock the AI Designer.</p>
+        <div class="ac-row">
+          <span class="ac-value" id="ac-email-current">—</span>
+          <span class="ac-badge" id="ac-email-badge" hidden></span>
+        </div>
+
+        <!-- Verification lives INSIDE the email section: it is a fact about
+             this address, not a separate errand. -->
+        <div class="ac-verify" id="ac-verify" hidden>
+          <p class="ac-note" id="ac-verify-note"></p>
+          <div class="ac-code-row">
+            <label class="ac-sr" for="ac-code" data-i18n="ac.verify.codeLabel">6-digit code</label>
+            <input id="ac-code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]*" placeholder="000000" />
+            <button class="ac-btn primary" id="ac-code-submit" data-i18n="ac.verify.submit">Verify</button>
+          </div>
+          <button class="ac-link" id="ac-resend" data-i18n="ac.verify.resend">Send a new code</button>
+        </div>
+
+        <form class="ac-form" id="ac-email-form">
+          <label for="ac-email" data-i18n="ac.email.change">Change email</label>
+          <input id="ac-email" type="email" autocomplete="email" />
+          <button class="ac-btn" type="submit" id="ac-email-save" data-i18n="ac.save">Save</button>
+        </form>
+        <p class="ac-msg" id="ac-email-msg" role="status" aria-live="polite"></p>
+      </section>
+
+      <section class="ac-card" id="sec-name">
+        <h2 data-i18n="ac.name.title">Display name</h2>
+        <p class="ac-note" data-i18n="ac.name.note">This is the @name on every tifo you publish. Changing it updates your name everywhere, including on designs you have already shared.</p>
+        <form class="ac-form" id="ac-name-form">
+          <label for="ac-name" data-i18n="ac.name.label">Name</label>
+          <input id="ac-name" autocomplete="username" maxlength="24" />
+          <button class="ac-btn" type="submit" id="ac-name-save" data-i18n="ac.save">Save</button>
+        </form>
+        <p class="ac-msg" id="ac-name-msg" role="status" aria-live="polite"></p>
+      </section>
+
+      <section class="ac-card" id="sec-password">
+        <h2 data-i18n="ac.pw.title">Password</h2>
+        <p class="ac-note" data-i18n="ac.pw.note">Changing your password signs you out on every other device. This one stays signed in.</p>
+        <form class="ac-form" id="ac-pw-form">
+          <label for="ac-pw-current" data-i18n="ac.pw.current">Current password</label>
+          <input id="ac-pw-current" type="password" autocomplete="current-password" />
+          <label for="ac-pw-new" data-i18n="ac.pw.new">New password</label>
+          <input id="ac-pw-new" type="password" autocomplete="new-password" minlength="8" />
+          <button class="ac-btn" type="submit" id="ac-pw-save" data-i18n="ac.pw.save">Change password</button>
+        </form>
+        <p class="ac-msg" id="ac-pw-msg" role="status" aria-live="polite"></p>
+      </section>
+
+      <section class="ac-card" id="sec-data">
+        <h2 data-i18n="ac.data.title">Your data</h2>
+        <p class="ac-note" data-i18n="ac.data.note">Download everything on your account: your details and every tifo you have made.</p>
+        <button class="ac-btn" id="ac-export" data-i18n="ac.data.export">Download my data</button>
+        <p class="ac-msg" id="ac-export-msg" role="status" aria-live="polite"></p>
+      </section>
+
+      <!-- Danger zone: visually separated, and two steps rather than one. -->
+      <section class="ac-card danger" id="sec-danger">
+        <h2 data-i18n="ac.danger.title">Delete account</h2>
+        <p class="ac-note" data-i18n="ac.danger.note">This erases your account and every tifo you have made. It cannot be undone.</p>
+        <button class="ac-btn danger" id="ac-delete" data-i18n="ac.danger.start">Delete my account</button>
+        <div class="ac-confirm" id="ac-delete-confirm" hidden>
+          <p class="ac-note" id="ac-delete-ask"></p>
+          <input id="ac-delete-name" autocomplete="off" />
+          <div class="ac-confirm-actions">
+            <button class="ac-btn danger" id="ac-delete-go" data-i18n="ac.danger.confirm">Delete for good</button>
+            <button class="ac-btn" id="ac-delete-cancel" data-i18n="ac.cancel">Cancel</button>
+          </div>
+        </div>
+        <p class="ac-msg" id="ac-delete-msg" role="status" aria-live="polite"></p>
+      </section>
+
+      <button class="ac-btn wide" id="ac-signout" data-i18n="ac.signOut">Sign out</button>
+    </div>
+
+    <p class="ac-gate" id="ac-gate" data-i18n="ac.signedOut">Sign in to manage your account.</p>
+  </main>
+
+  <script type="module" src="/src/account.ts"></script>
+</body>
+</html>

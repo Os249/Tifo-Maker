@@ -1,0 +1,195 @@
+/**
+ * Account page. Standalone stylesheet rather than the editor's floodlight.css:
+ * this page is a plain document, not a canvas app, and it should still work if
+ * the editor's 86KB of styles never load.
+ *
+ * Layout is one column that simply gets wider. A settings sidebar is a desktop
+ * habit that costs a phone a third of its width, and there are five sections —
+ * not enough to need navigation.
+ */
+:root {
+  --ac-ink: #0e1426;
+  --ac-muted: #5b6473;
+  --ac-line: #e6e8ee;
+  --ac-blue: #1c6fe0;
+  --ac-bg: #fbfbfd;
+  --ac-ok: #1a7f52;
+  --ac-warn: #9a6205;
+  --ac-danger: #c0392b;
+  --ac-card: #fff;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ac-ink: #eaeef6; --ac-muted: #9aa3b4; --ac-line: #242c3f; --ac-blue: #4a94ff;
+    --ac-bg: #0b0f1a; --ac-ok: #4ec98d; --ac-warn: #e0a33a; --ac-danger: #ef6b5e; --ac-card: #121829;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--ac-bg);
+  color: var(--ac-ink);
+  font: 16px/1.6 'Inter', system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+.ac-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--ac-line);
+  background: var(--ac-card);
+}
+/* Header links are targets too — a 22px-tall anchor is a miss waiting to
+   happen, and it is the way back out of this page. */
+.ac-brand, .ac-back { display: inline-flex; align-items: center; min-height: 44px; }
+.ac-brand { font-weight: 800; letter-spacing: .03em; color: var(--ac-ink); text-decoration: none; }
+.ac-brand b { color: var(--ac-blue); }
+.ac-back { color: var(--ac-blue); text-decoration: none; font-size: 14px; }
+.ac-back:hover { text-decoration: underline; }
+
+.ac-wrap { max-width: 640px; margin: 0 auto; padding: 28px 20px 64px; }
+h1 { font-size: 26px; margin: 0 0 4px; }
+.ac-sub { margin: 0 0 22px; color: var(--ac-muted); font-size: 14px; }
+
+.ac-card {
+  background: var(--ac-card);
+  border: 1px solid var(--ac-line);
+  border-radius: 14px;
+  padding: 20px;
+  margin-bottom: 16px;
+}
+.ac-card h2 { font-size: 16px; margin: 0 0 4px; }
+.ac-note { margin: 0 0 14px; color: var(--ac-muted); font-size: 13px; }
+.ac-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
+.ac-value { font-weight: 600; word-break: break-all; }
+
+/* Status as a badge beside the value it describes, not a sentence elsewhere. */
+.ac-badge {
+  font-size: 11.5px;
+  font-weight: 650;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid currentColor;
+  white-space: nowrap;
+}
+.ac-badge[data-state='ok'] { color: var(--ac-ok); }
+.ac-badge[data-state='pending'] { color: var(--ac-warn); }
+.ac-badge[data-state='none'] { color: var(--ac-danger); }
+
+.ac-verify {
+  border: 1px solid color-mix(in srgb, var(--ac-warn) 40%, transparent);
+  background: color-mix(in srgb, var(--ac-warn) 8%, transparent);
+  border-radius: 10px;
+  padding: 14px;
+  margin-bottom: 16px;
+}
+.ac-code-row { display: flex; gap: 8px; align-items: stretch; flex-wrap: wrap; }
+#ac-code {
+  flex: 1 1 140px;
+  /* Both of these matter: an <input> carries an intrinsic size=20 width, which
+     at this font size and letter-spacing is wider than a phone, and a flex item
+     will not shrink below its intrinsic width without min-width:0. */
+  width: 100%;
+  min-width: 0;
+  font: inherit;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: .32em;
+  text-align: center;
+  padding: 10px 12px;
+  border: 1px solid var(--ac-line);
+  border-radius: 10px;
+  background: var(--ac-card);
+  color: var(--ac-ink);
+}
+/* An RTL page must not reverse digits the user is copying from an email. */
+#ac-code { direction: ltr; }
+
+.ac-form { display: flex; flex-direction: column; gap: 4px; }
+.ac-form label { font-size: 13px; color: var(--ac-muted); margin-top: 8px; }
+.ac-form input, .ac-confirm input {
+  font: inherit;
+  font-size: 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--ac-line);
+  border-radius: 10px;
+  background: var(--ac-card);
+  color: var(--ac-ink);
+  width: 100%;
+}
+input:focus-visible {
+  outline: none;
+  border-color: var(--ac-blue);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ac-blue) 22%, transparent);
+}
+.ac-btn {
+  align-self: flex-start;
+  margin-top: 12px;
+  padding: 10px 18px;
+  min-height: 42px;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ac-ink);
+  background: transparent;
+  border: 1px solid var(--ac-line);
+  border-radius: 999px;
+  cursor: pointer;
+}
+.ac-btn:hover:not(:disabled) { border-color: var(--ac-blue); color: var(--ac-blue); }
+.ac-btn.primary { background: var(--ac-blue); border-color: var(--ac-blue); color: #fff; }
+.ac-btn.primary:hover:not(:disabled) { color: #fff; opacity: .92; }
+.ac-btn.danger { color: var(--ac-danger); border-color: color-mix(in srgb, var(--ac-danger) 45%, transparent); }
+.ac-btn.danger:hover:not(:disabled) { background: var(--ac-danger); color: #fff; border-color: var(--ac-danger); }
+.ac-btn.wide { align-self: stretch; width: 100%; }
+/* Disabled until something actually changed, so "Save" always means something. */
+.ac-btn:disabled { opacity: .45; cursor: default; }
+.ac-link {
+  margin-top: 10px;
+  padding: 0;
+  background: none;
+  border: none;
+  color: var(--ac-blue);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  text-decoration: underline;
+  min-height: 34px;
+}
+
+.ac-msg { margin: 10px 0 0; font-size: 13px; min-height: 1px; }
+.ac-msg:empty { display: none; }
+.ac-msg[data-tone='ok'] { color: var(--ac-ok); }
+.ac-msg[data-tone='bad'] { color: var(--ac-danger); }
+.ac-msg[data-tone='info'] { color: var(--ac-muted); }
+
+.ac-card.danger { border-color: color-mix(in srgb, var(--ac-danger) 38%, transparent); }
+.ac-card.danger h2 { color: var(--ac-danger); }
+.ac-confirm { margin-top: 14px; }
+.ac-confirm-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
+.ac-confirm-actions .ac-btn { margin-top: 8px; }
+
+.ac-gate { color: var(--ac-muted); }
+.ac-sr {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+
+/* Phones: full-width targets, nothing narrower than a thumb. */
+@media (max-width: 599px) {
+  .ac-wrap { padding: 20px 14px 56px; }
+  .ac-card { padding: 16px 14px; border-radius: 12px; }
+  h1 { font-size: 22px; }
+  .ac-btn { align-self: stretch; width: 100%; min-height: 46px; }
+  .ac-confirm-actions { flex-direction: column; }
+  .ac-code-row { flex-direction: column; }
+  .ac-link { min-height: 44px; }
+  #ac-code { letter-spacing: .4em; font-size: 22px; }
+}
+/* Tablets: the column is comfortable already — just let it breathe. */
+@media (min-width: 600px) and (max-width: 1023px) {
+  .ac-wrap { max-width: 560px; padding: 26px 22px 60px; }
+}

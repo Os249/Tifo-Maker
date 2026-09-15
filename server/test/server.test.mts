@@ -271,6 +271,54 @@ async function runSuite(name: string, repo: DesignRepository, auth: AuthReposito
   // "Busy" must not charge either — the earlier premium attempt returned a choice.
   assert.equal(autoGen.json().quota?.used ?? 0, 0, 'a refused premium attempt costs nothing');
 
+  // ---- account: rename, verification code, real sign-out ----
+  {
+    const tok = await registerUser(app, 'renamer');
+    const bad = await app.inject({ method: 'POST', url: '/api/account/username', headers: bearer(tok), payload: { username: 'x' } });
+    assert.equal(bad.statusCode, 400, 'a two-character name is refused');
+    const taken = await app.inject({ method: 'POST', url: '/api/account/username', headers: bearer(tok), payload: { username: 'alice' } });
+    assert.equal(taken.statusCode, 409, 'an existing name is refused');
+    const ok = await app.inject({ method: 'POST', url: '/api/account/username', headers: bearer(tok), payload: { username: 'renamed_1' } });
+    assert.equal(ok.statusCode, 200, ok.body);
+    const meNow = await app.inject({ method: 'GET', url: '/api/me', headers: bearer(tok) });
+    assert.equal(meNow.json().username, 'renamed_1', 'the rename is reflected on /api/me');
+    // The old name must be free, and must no longer resolve to this account.
+    const reuse = await app.inject({
+      method: 'POST', url: '/api/auth/register',
+      payload: { username: 'renamer', password: 'hunter22pass', email: 'someone.else@example.test', acceptedVersion: 'test' },
+    });
+    assert.equal(reuse.statusCode, 201, 'the vacated name can be registered by someone else');
+
+    // Verification by code: wrong guesses are counted, then the code is burned.
+    const vt = await registerUser(app, 'verifier');
+    for (let i = 1; i <= 5; i++) {
+      const r = await app.inject({ method: 'POST', url: '/api/auth/verify/code', headers: bearer(vt), payload: { code: '000000' } });
+      assert.equal(r.statusCode, 400, `wrong code ${i} is rejected`);
+      assert.equal(r.json().triesLeft, 5 - i, 'the caller is told how many tries remain');
+    }
+    const sixth = await app.inject({ method: 'POST', url: '/api/auth/verify/code', headers: bearer(vt), payload: { code: '000000' } });
+    assert.equal(sixth.statusCode, 429, 'the sixth attempt is refused outright');
+    assert.equal(sixth.json().exhausted, true, 'and says a new code is needed');
+    const st = await registerUser(app, 'shorty');
+    const short = await app.inject({ method: 'POST', url: '/api/auth/verify/code', headers: bearer(st), payload: { code: '12' } });
+    assert.equal(short.statusCode, 400, 'a short code is refused');
+    // …and it must not have spent one of that account's five real tries.
+    const after = await app.inject({ method: 'POST', url: '/api/auth/verify/code', headers: bearer(st), payload: { code: '000000' } });
+    assert.equal(after.json().triesLeft, 4, 'a malformed code does not burn a try');
+    const anon = await app.inject({ method: 'POST', url: '/api/auth/verify/code', payload: { code: '000000' } });
+    assert.equal(anon.statusCode, 401, 'verification requires a session — this is what makes 6 digits safe');
+
+    // Sign-out must actually end the session server-side.
+    const outTok = await registerUser(app, 'signer');
+    assert.equal((await app.inject({ method: 'GET', url: '/api/me', headers: bearer(outTok) })).statusCode, 200);
+    assert.equal((await app.inject({ method: 'POST', url: '/api/auth/logout', headers: bearer(outTok) })).statusCode, 204);
+    assert.equal(
+      (await app.inject({ method: 'GET', url: '/api/me', headers: bearer(outTok) })).statusCode,
+      401,
+      'the token is dead after logout, not merely forgotten by the browser',
+    );
+  }
+
   const exported = await app.inject({ method: 'GET', url: '/api/account/export', headers: bearer(carolTok) });
   assert.equal(exported.statusCode, 200);
   assert.equal(exported.json().account.username, 'carol', 'export includes account data');

@@ -628,6 +628,30 @@ export class MemoryAuthRepository implements AuthRepository {
     if (u) u.emailVerifiedAt = new Date().toISOString();
   }
 
+  async setUsername(userId: string, username: string): Promise<boolean> {
+    const u = await this.getUserById(userId);
+    if (!u) return false;
+    const lower = username.toLowerCase();
+    if (u.username.toLowerCase() === lower && u.username !== username) {
+      // Same name, different case: re-key without a uniqueness check.
+      this.users.delete(u.username);
+      u.username = username;
+      this.users.set(username, u);
+      return true;
+    }
+    if (u.username === username) return true; // no-op
+    for (const other of this.users.values()) {
+      if (other.id !== userId && other.username.toLowerCase() === lower) return false;
+    }
+    // This map is keyed BY USERNAME, so a rename has to move the entry as well
+    // as the field — leaving the old key would make getUserByName resolve the
+    // old name forever and let someone else's rename collide with a ghost.
+    this.users.delete(u.username);
+    u.username = username;
+    this.users.set(username, u);
+    return true;
+  }
+
   async setPro(userId: string, isPro: boolean): Promise<void> {
     const u = await this.getUserById(userId);
     if (u) u.isPro = isPro;

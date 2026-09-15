@@ -783,19 +783,27 @@ const declared = new Set(Array.from(i18nSrc.matchAll(/^\s*'([\w.]+)':\s*\{\s*en:
 const used = Array.from(panelSrc.matchAll(/\bt[v]?\('([\w.]+)'/g), (m) => m[1]);
 const missing = [...new Set(used)].filter((k) => !declared.has(k));
 check('every key the AI panel asks for is declared', missing.length === 0, missing.join(', '));
+const accountSrc = readFileSync(new URL('../src/account.ts', import.meta.url), 'utf8');
+const accountHtml = readFileSync(new URL('../account.html', import.meta.url), 'utf8');
+const acUsed = [
+  ...Array.from(accountSrc.matchAll(/\bt[v]?\('([\w.]+)'/g), (m) => m[1]),
+  ...Array.from(accountHtml.matchAll(/data-i18n="([\w.]+)"/g), (m) => m[1]),
+];
+const acMissing = [...new Set(acUsed)].filter((k) => !declared.has(k));
+check('every key the account page asks for is declared', acMissing.length === 0, acMissing.join(', '));
 // Both languages, non-empty, for every card key.
 let arGaps = 0;
 // Lazily to the entry's own "}," — a greedy or [^}] match stops at the closing
 // brace of a {placeholder} and reports a perfectly good translation as missing.
-for (const m of i18nSrc.matchAll(/'(ai\.card\.[\w.]+)':\s*\{([\s\S]*?)\},\n/g)) {
+for (const m of i18nSrc.matchAll(/'((?:ai\.card|ac)\.[\w.]+)':\s*\{([\s\S]*?)\},\n/g)) {
   const body = m[2];
   const ar = /ar:\s*'([^']*)'|ar:\s*"([^"]*)"/.exec(body);
   if (!ar || !(ar[1] ?? ar[2] ?? '').trim()) arGaps++;
 }
-check('every AI card string has a non-empty Arabic translation', arGaps === 0, `${arGaps} gaps`);
+check('every AI card and account string has a non-empty Arabic translation', arGaps === 0, `${arGaps} gaps`);
 // Placeholders must survive translation, or a number lands nowhere.
 let phGaps = 0;
-for (const m of i18nSrc.matchAll(/'(ai\.card\.[\w.]+)':\s*\{\s*en:\s*(['"])([\s\S]*?)\2,\s*ar:\s*(['"])([\s\S]*?)\4,?\s*\}/g)) {
+for (const m of i18nSrc.matchAll(/'((?:ai\.card|ac)\.[\w.]+)':\s*\{\s*en:\s*(['"])([\s\S]*?)\2,\s*ar:\s*(['"])([\s\S]*?)\4,?\s*\}/g)) {
   const en = new Set(Array.from(m[3].matchAll(/\{(\w+)\}/g), (x) => x[1]));
   const ar = new Set(Array.from(m[5].matchAll(/\{(\w+)\}/g), (x) => x[1]));
   if (en.size !== ar.size || [...en].some((k) => !ar.has(k))) phGaps++;
