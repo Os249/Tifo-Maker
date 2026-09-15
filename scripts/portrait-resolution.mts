@@ -12,7 +12,7 @@ import { mkdirSync, writeFileSync, rmSync, existsSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { deflateSync } from 'node:zlib';
-import { quantizePixels, halftoneCellFor } from '../src/core/importImage';
+import { quantizePixels, halftoneCellFor, cutoutBackground } from '../src/core/importImage';
 
 const OUT = resolve(dirname(fileURLToPath(import.meta.url)), '../preview-out/portrait');
 
@@ -21,6 +21,7 @@ const PALETTE = ['#262a33', '#0a0a0a', '#3a3320', '#8a7300', '#ffd400', '#fff3b0
 
 // ---- a synthetic portrait: the tonal landmarks a face is actually read from ----
 const SW = 1536, SH = 640; // what the generator now returns for a stand
+const WHITE_BG = process.env.WHITE_BG === '1';
 function source(): Uint8ClampedArray {
   const px = new Uint8ClampedArray(SW * SH * 4);
   const cx = SW / 2, cy = SH * 0.52, rx = SH * 0.40, ry = SH * 0.50;
@@ -30,8 +31,8 @@ function source(): Uint8ClampedArray {
       const i = (y * SW + x) * 4;
       const nx = (x - cx) / rx, ny = (y - cy) / ry;
       const d = nx * nx + ny * ny;
-      if (d > 1) { put(i, 18); continue; }          // flat background
-      let v = 205 - nx * 70;                         // head, lit from the left
+      if (d > 1) { put(i, WHITE_BG ? 246 : 18); continue; }   // flat background
+      let v = Math.min(212, 196 - nx * 60);          // head, lit from the left (never paper-white)
       if (ny < -0.62) v = 30;                        // hair mass
       if (ny > -0.66 && ny < -0.44 && Math.abs(nx) < 0.75) v -= 70;   // brow shadow
       for (const ex of [-0.34, 0.34]) {              // eye sockets
@@ -41,6 +42,7 @@ function source(): Uint8ClampedArray {
       if (Math.abs(nx - 0.06) < 0.07 && ny > -0.28 && ny < 0.16) v -= 55; // nose shadow
       if (Math.abs(nx) < 0.30 && ny > 0.30 && ny < 0.42) v = 35;         // mouth
       if (ny > 0.50 && Math.abs(nx) < 0.62) v -= 45;                     // jaw shadow
+      if (ny > 0.74 && Math.abs(nx) < 0.34) v = 246;                     // white collar (enclosed)
       if (nx > 0.55) v -= 40;                                            // shadow side
       put(i, Math.max(0, Math.min(255, v)));
     }
@@ -118,6 +120,12 @@ const CASES: Array<[string, { dither: boolean; halftone: boolean; halftoneCell?:
 ];
 console.log(`grid ${COLS} x ${ROWS} cells — one stand, both tiers`);
 console.log(`halftoneCellFor(${ROWS}) = ${halftoneCellFor(ROWS)}  (was a hard-coded 3)\n`);
+if (process.env.CUTOUT === '1') {
+  const cut = cutoutBackground(px, COLS, ROWS);
+  let clear = 0;
+  for (let i = 0; i < COLS * ROWS; i++) if (px[i * 4 + 3] === 0) clear++;
+  console.log(`cutoutBackground -> ${cut ? 'cut' : 'refused'}, ${((clear / (COLS * ROWS)) * 100).toFixed(0)}% of cells now transparent\n`);
+}
 for (const [name, opts] of CASES) {
   const grid = quantizePixels(px, COLS, ROWS, PALETTE, { ...opts, alphaThreshold: 8 });
   // How much of it is detail too fine to hold up: cells whose horizontal run is < 3.

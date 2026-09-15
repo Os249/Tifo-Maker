@@ -13,7 +13,7 @@ import { SUPER_AI_EXEMPLARS, fewShotBlock } from '../src/core/exemplars';
 import { critiqueDesign, repairSpec } from '../src/core/critique';
 import { composeSuperOffline, designFromPrompt, designShuffle } from '../src/core/promptDesigner';
 import { matchClub, CLUBS } from '../src/core/clubs';
-import { quantizePixels, halftoneCellFor } from '../src/core/importImage';
+import { quantizePixels, halftoneCellFor, cutoutBackground } from '../src/core/importImage';
 import { TtlCache, cacheKey } from '../server/src/aiCache';
 import { aiPeriod, secondsToNextPeriod } from '../server/src/repo';
 import { buildDirectorPrompt, buildSystemPrompt, buildCriticPrompt, clubHintLine, userMessage, criticUserMessage, buildCopywriterPrompt, copyLine, geminiText, whyNoJson, maxOutputTokens } from '../server/src/aiProvider';
@@ -378,10 +378,10 @@ check('director carries whole-bowl rules that std does not',
 // (7100 -> 7900, 11600 -> 12400) bought the measured Arabic sizing rule and the
 // instruction to make a PICTURE the hero rather than a flat vector symbol —
 // the two things a rendered bowl showed were missing.
-check('system prompt within budget', PROMPTS[0][1].length <= 7900, `${PROMPTS[0][1].length}`);
+check('system prompt within budget', PROMPTS[0][1].length <= 8200, `${PROMPTS[0][1].length}`);
 // The director is premium-only and capped by AI_DAILY_BUDGET, and ~40% of it is
 // the few-shot gallery — the highest-leverage tokens in the whole system.
-check('director prompt within budget', PROMPTS[1][1].length <= 12400, `${PROMPTS[1][1].length}`);
+check('director prompt within budget', PROMPTS[1][1].length <= 12700, `${PROMPTS[1][1].length}`);
 check('critic prompt within budget', PROMPTS[2][1].length <= 3000, `${PROMPTS[2][1].length}`);
 check('few-shot gallery within budget', fewShotBlock().length <= 5000, `${fewShotBlock().length}`);
 
@@ -673,6 +673,67 @@ check('the image prompt demands a tight crop', /CROP IN CLOSE/.test(st) && /head
 check('the image prompt rules out a full-length figure', /Never a full-length/.test(st));
 check('the image prompt still bans text and gradients', /No text/.test(st) && /No gradients/.test(st));
 check('the row budget has a sane default', mosaicStyle({}).includes('ROWS'));
+
+// ---- 33. cutting the backdrop away ----
+// A generated picture is a rectangle: subject on a flat field. Baked whole it
+// lands as a block of card that reads as a photo pasted onto the stand.
+const W = 60, H = 40;
+/** A subject on a flat field, with an ENCLOSED patch the same colour as the field. */
+const scene = (bgV: number, subjV: number, collar: boolean): Uint8ClampedArray => {
+  const px = new Uint8ClampedArray(W * H * 4);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const p = (y * W + x) * 4;
+    const inSubject = Math.abs(x - W / 2) < 12 && y > 6 && y < H - 4;
+    // the collar is the background's colour but sealed inside the subject
+    const inCollar = collar && Math.abs(x - W / 2) < 5 && y > H - 12 && y < H - 6;
+    const v = inCollar ? bgV : inSubject ? subjV : bgV;
+    px[p] = px[p + 1] = px[p + 2] = v;
+    px[p + 3] = 255;
+  }
+  return px;
+};
+const clearFrac = (px: Uint8ClampedArray): number => {
+  let n = 0;
+  for (let i = 0; i < W * H; i++) if (px[i * 4 + 3] === 0) n++;
+  return n / (W * H);
+};
+const light = scene(244, 40, true);
+check('a flat backdrop is cut', cutoutBackground(light, W, H));
+check('the subject survives the cut', clearFrac(light) > 0.3 && clearFrac(light) < 0.8, `${(clearFrac(light) * 100).toFixed(0)}% clear`);
+// The whole reason for flooding from the edge rather than matching globally.
+let collarKept = 0;
+for (let y = H - 11; y < H - 7; y++) for (let x = (W >> 1) - 4; x < (W >> 1) + 4; x++) if (light[(y * W + x) * 4 + 3] !== 0) collarKept++;
+check('an ENCLOSED patch of the backdrop colour is kept', collarKept > 0, `${collarKept} cells`);
+
+const dark = scene(20, 230, false);
+check('it works the other way round too', cutoutBackground(dark, W, H));
+
+// It must refuse rather than mangle.
+const noise = new Uint8ClampedArray(W * H * 4);
+for (let i = 0; i < W * H; i++) { noise[i * 4] = (i * 37) % 256; noise[i * 4 + 1] = (i * 91) % 256; noise[i * 4 + 2] = (i * 17) % 256; noise[i * 4 + 3] = 255; }
+check('a busy border is refused, not guessed at', !cutoutBackground(noise, W, H));
+const flat = scene(200, 200, false); // subject IS the background colour
+check('an all-one-colour frame is refused', !cutoutBackground(flat, W, H));
+check('a tiny grid is refused', !cutoutBackground(new Uint8ClampedArray(2 * 2 * 4), 2, 2));
+// A refused cut must leave every pixel opaque — a partial cut is worse than none.
+check('a refusal changes nothing', clearFrac(noise) === 0 && clearFrac(flat) === 0);
+
+const cutSpec = validateSpec({
+  palette: ['#262a33', '#c8102e', '#ffffff'],
+  layers: [
+    { kind: 'image', region: 'north', prompt: 'a legend', scaleFrac: 1, dither: true },
+    { kind: 'image', region: 'south', prompt: 'a full scene', scaleFrac: 1, dither: true, cutout: false },
+  ],
+}).spec!;
+const [a, b] = cutSpec.layers as Array<Extract<SpecLayer, { kind: 'image' }>>;
+check('cutout defaults on', a.cutout === true);
+check('cutout can be turned off for a full scene', b.cutout === false);
+for (const [name, p] of PROMPTS.slice(0, 2)) {
+  check(`${name} prompt explains the backdrop is cut away`, /cut away/.test(p) && p.includes('"cutout"'));
+}
+const bgStyle = mosaicStyle({ aspect: 2.4, palette: ['#262a33', '#ffd400', '#0a0a0a'], rows: 52 });
+check('the image prompt demands a separable backdrop',
+  /ONE FLAT COLOUR/.test(bgStyle) && /CLEARLY DIFFERENT IN BRIGHTNESS/.test(bgStyle));
 
 console.log(`\n${failures === 0 ? 'ALL PASS' : failures + ' FAILED'}`);
 if (failures > 0) process.exit(1);

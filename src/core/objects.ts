@@ -1,6 +1,6 @@
 import type { SeatMap } from './types';
 import type { DesignStore } from './design';
-import { applyGridToSeats, enhanceForBake, halftoneCellFor, maskFromAlpha, quantizePixels, rasterize } from './importImage';
+import { applyGridToSeats, cutoutBackground, enhanceForBake, halftoneCellFor, maskFromAlpha, quantizePixels, rasterize } from './importImage';
 import { renderTextCanvas, type TifoFont } from './text';
 import { drawSymbol } from './symbols';
 
@@ -46,6 +46,8 @@ export interface ImageObject extends BaseObject {
   name: string;
   dither: boolean;
   halftone?: boolean;
+  /** Flood the flat backdrop away so the design underneath shows through. */
+  cutout?: boolean;
   alphaThreshold: number;
 }
 
@@ -211,6 +213,10 @@ export class ObjectLayer {
       // that yields big contiguous regions, which is what reads at 200m.
       const affordable = halftoneCellFor(rows);
       const cell = obj.halftone ? affordable : 1;
+      // Cut the backdrop BEFORE the contrast boost, while it is still the flat
+      // colour the generator produced. enhanceForBake preserves alpha, and the
+      // quantizer skips transparent cells, so the layers beneath keep their cards.
+      if (obj.cutout) cutoutBackground(pixels, cols, rows);
       grid = quantizePixels(enhanceForBake(pixels, cols, rows), cols, rows, store.palette, {
         dither: obj.dither && affordable > 1,
         halftone: obj.halftone && cell > 1,

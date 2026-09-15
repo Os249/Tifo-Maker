@@ -806,6 +806,7 @@ export function mountToolbar(
   const importPlace = $('#import-place') as unknown as HTMLSelectElement;
   const importApply = $('#import-apply') as unknown as HTMLButtonElement;
   const ditherChk = $('#dither') as unknown as HTMLInputElement;
+  const cutoutChk = $('#import-cutout') as unknown as HTMLInputElement;
   const realColorsChk = $('#real-colors') as unknown as HTMLInputElement;
   const importAlpha = $('#import-alpha') as unknown as HTMLInputElement;
   const importAlphaOut = $('#import-alpha-out');
@@ -873,6 +874,7 @@ export function mountToolbar(
       bitmap: pendingImport.bitmap,
       name: pendingImport.name,
       dither: ditherChk.checked,
+      cutout: cutoutChk?.checked === true,
       alphaThreshold: Number(importAlpha.value),
     });
     editor.objectOverlay?.sync();

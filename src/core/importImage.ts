@@ -57,6 +57,96 @@ export function halftoneCellFor(rows: number, requested?: number): number {
   return Math.max(1, Math.min(want, Math.floor(rows / MIN_TONE_ROWS)));
 }
 
+/**
+ * Make a picture's flat backdrop transparent, so the design underneath shows
+ * through instead of a rectangular block of card.
+ *
+ * Flood-filled INWARD FROM THE FRAME EDGES, never matched globally. A global
+ * "remove everything near white" eats the white of a shirt, the highlight in an
+ * eye, the teeth — and the figure falls apart. Only backdrop actually connected
+ * to the border is background; an enclosed region of the same colour is part of
+ * the subject and survives.
+ *
+ * Operates on the already-downsampled bake grid (~333x52 for one stand), so the
+ * whole fill is a few thousand cells. Alpha 0 is all it has to write:
+ * quantizePixels skips those cells and applyGridToSeats leaves those seats
+ * alone, so the layers beneath keep their cards.
+ *
+ * Refuses rather than guesses. If the border is not mostly ONE colour there is
+ * no clean backdrop to cut; if the fill would swallow nearly everything the
+ * subject matched the background. Either way the picture is returned untouched,
+ * because a rectangle of photo beats a hole where the hero was.
+ *
+ * The tolerance is deliberately tight — enough for JPEG noise on a flat fill,
+ * not enough to wander. What it CANNOT survive is a subject whose edge is
+ * genuinely the backdrop's colour: a white-lit cheek against white cuts away
+ * with the background, because at that point the two are the same pixels. That
+ * is why the image prompt demands a backdrop clearly different from the subject;
+ * this function cannot recover a distinction the picture never had.
+ */
+export function cutoutBackground(
+  pixels: Uint8ClampedArray,
+  cols: number,
+  rows: number,
+  tolerance = 900,
+): boolean {
+  if (cols < 3 || rows < 3) return false;
+  const at = (x: number, y: number): number => (y * cols + x) * 4;
+
+  // 1) The dominant border colour — the mode, not the mean. Averaging a white
+  //    backdrop with dark hair gives grey, which matches neither.
+  const border: number[] = [];
+  for (let x = 0; x < cols; x++) { border.push(at(x, 0), at(x, rows - 1)); }
+  for (let y = 1; y < rows - 1; y++) { border.push(at(0, y), at(cols - 1, y)); }
+  const buckets = new Map<number, { r: number; g: number; b: number; n: number }>();
+  for (const p of border) {
+    if (pixels[p + 3] === 0) continue;
+    const key = ((pixels[p] >> 4) << 8) | ((pixels[p + 1] >> 4) << 4) | (pixels[p + 2] >> 4);
+    const e = buckets.get(key);
+    if (e) { e.r += pixels[p]; e.g += pixels[p + 1]; e.b += pixels[p + 2]; e.n++; }
+    else buckets.set(key, { r: pixels[p], g: pixels[p + 1], b: pixels[p + 2], n: 1 });
+  }
+  let top: { r: number; g: number; b: number; n: number } | null = null;
+  for (const e of buckets.values()) if (!top || e.n > top.n) top = e;
+  if (!top || top.n < border.length * 0.4) return false; // no single clean backdrop
+  const bg: [number, number, number] = [top.r / top.n, top.g / top.n, top.b / top.n];
+
+  // 2) Flood inward from every border cell that matches it.
+  const near = (p: number): boolean => {
+    const dr = pixels[p] - bg[0];
+    const dg = pixels[p + 1] - bg[1];
+    const db = pixels[p + 2] - bg[2];
+    return dr * dr * 0.299 + dg * dg * 0.587 + db * db * 0.114 <= tolerance;
+  };
+  const seen = new Uint8Array(cols * rows);
+  const queue: number[] = [];
+  for (const p of border) {
+    const cell = p >> 2;
+    if (!seen[cell] && near(p)) { seen[cell] = 1; queue.push(cell); }
+  }
+  let removed = queue.length;
+  for (let head = 0; head < queue.length; head++) {
+    const cell = queue[head];
+    const x = cell % cols;
+    const y = (cell / cols) | 0;
+    const push = (nx: number, ny: number): void => {
+      if (nx < 0 || ny < 0 || nx >= cols || ny >= rows) return;
+      const nc = ny * cols + nx;
+      if (seen[nc] || !near(nc * 4)) return;
+      seen[nc] = 1;
+      queue.push(nc);
+      removed++;
+    };
+    push(x - 1, y); push(x + 1, y); push(x, y - 1); push(x, y + 1);
+  }
+
+  // 3) Sanity. Nothing worth cutting, or so much that the subject went with it.
+  const frac = removed / (cols * rows);
+  if (frac < 0.02 || frac > 0.92) return false;
+  for (let cell = 0; cell < cols * rows; cell++) if (seen[cell]) pixels[cell * 4 + 3] = 0;
+  return true;
+}
+
 export interface TargetRect {
   x: number;
   y: number;

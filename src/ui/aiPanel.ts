@@ -305,6 +305,7 @@ export function mountAiPanel(deps: AiPanelDeps): void {
           name: 'AI image',
           dither: layer.dither,
           halftone: layer.halftone,
+          cutout: layer.cutout !== false,
           alphaThreshold: 128,
         });
         // Clip the bake to the stand so the portrait can't bleed into neighbours.

@@ -226,6 +226,15 @@ export interface ImageLayer extends BaseLayer {
    * and the choice only matters for an asset that arrived the wrong shape.
    */
   fit?: 'contain' | 'cover';
+  /**
+   * Cut the picture's flat backdrop away so the design underneath shows through
+   * (default true). A generated picture arrives as a rectangle with the subject
+   * on a flat field; baked whole, that rectangle lands on the stand as a block
+   * of card that reads as a photo pasted on. Cut out, the subject stands on the
+   * stripes or pattern the design already painted — which is how a real tifo
+   * looks. Set false to keep the backdrop, e.g. for artwork that IS a full scene.
+   */
+  cutout?: boolean;
   dither: boolean;
   /** Clustered halftone quantization — chunkier, more legible portraits at seat scale. */
   halftone?: boolean;
@@ -617,6 +626,7 @@ export function validateSpec(input: unknown): SpecValidationResult {
             assetRef: typeof raw.assetRef === 'string' ? raw.assetRef : undefined,
             scaleFrac: clampNum(raw.scaleFrac, 0.2, 1, 0.9),
             fit: raw.fit === 'contain' ? 'contain' : 'cover',
+            cutout: raw.cutout !== false,
             dither: raw.dither !== false,
             halftone: raw.halftone === true,
           });
