@@ -377,8 +377,11 @@ check('director carries whole-bowl rules that std does not',
 // prompt used to carry were fused to pay for part of it. The raise after that
 // (7100 -> 7900, 11600 -> 12400) bought the measured Arabic sizing rule and the
 // instruction to make a PICTURE the hero rather than a flat vector symbol —
-// the two things a rendered bowl showed were missing.
-check('system prompt within budget', PROMPTS[0][1].length <= 8200, `${PROMPTS[0][1].length}`);
+// the two things a rendered bowl showed were missing. The one after that
+// (-> 8400, 12700) paid for the cutout contract and for spelling out WHY the
+// index-0 margin must not be repeated across stands, since the short version
+// of that rule is what produced a letterboxed bowl.
+check('system prompt within budget', PROMPTS[0][1].length <= 8400, `${PROMPTS[0][1].length}`);
 // The director is premium-only and capped by AI_DAILY_BUDGET, and ~40% of it is
 // the few-shot gallery — the highest-leverage tokens in the whole system.
 check('director prompt within budget', PROMPTS[1][1].length <= 12700, `${PROMPTS[1][1].length}`);
@@ -734,6 +737,39 @@ for (const [name, p] of PROMPTS.slice(0, 2)) {
 const bgStyle = mosaicStyle({ aspect: 2.4, palette: ['#262a33', '#ffd400', '#0a0a0a'], rows: 52 });
 check('the image prompt demands a separable backdrop',
   /ONE FLAT COLOUR/.test(bgStyle) && /CLEARLY DIFFERENT IN BRIGHTNESS/.test(bgStyle));
+
+// ---- 34. an accidental letterbox is undone ----
+// "Fill a stand with 0, re-fill rows [0.07,0.93]" is a real device on ONE stand.
+// Applied to the whole bowl it is not a frame — a stand has no left or right
+// edge of its own, so the only band it can make is horizontal, and every stand
+// wearing the same one is a dark stripe across the top of the stadium and
+// another across the bottom. 0.07 of ~50 rows is the three missing lines.
+const band = (layers: unknown[]): ReturnType<typeof refineSpec> =>
+  refineSpec(validateSpec({ palette: ['#262a33', '#006c35', '#ffffff'], layers }).spec!);
+const rowsOf = (sp: ReturnType<typeof refineSpec>, i: number): string => {
+  const r = sp.layers[i].region.rows;
+  return r ? `${r[0]},${r[1]}` : 'full';
+};
+check('a whole-bowl band is widened to full height',
+  rowsOf(band([{ kind: 'fill', region: { stand: 'all', tier: 'all', rows: [0.07, 0.93] }, colorIndex: 1 }]), 0) === '0,1');
+check('the same band done stand-by-stand is caught too',
+  rowsOf(band((['north', 'south', 'east', 'west'] as const).map((st) => ({ kind: 'fill', region: { stand: st, tier: 'all', rows: [0.07, 0.93] }, colorIndex: 1 }))), 0) === '0,1');
+check('a margin on ONE stand is left alone',
+  rowsOf(band([{ kind: 'fill', region: { stand: 'south', tier: 'all', rows: [0.07, 0.93] }, colorIndex: 1 }]), 0) === '0.07,0.93');
+check('two stands is still a choice',
+  rowsOf(band([
+    { kind: 'fill', region: { stand: 'south', tier: 'all', rows: [0.07, 0.93] }, colorIndex: 1 },
+    { kind: 'fill', region: { stand: 'north', tier: 'all', rows: [0.07, 0.93] }, colorIndex: 1 },
+  ]), 0) === '0.07,0.93');
+check('a genuine horizontal stripe survives',
+  rowsOf(band([{ kind: 'fill', region: { stand: 'all', tier: 'all', rows: [0.4, 0.6] }, colorIndex: 1 }]), 0) === '0.4,0.6');
+check('a text row band is not a field and is untouched',
+  rowsOf(band([
+    { kind: 'fill', region: 'all', colorIndex: 1 },
+    { kind: 'text', region: { stand: 'north', tier: 'all', rows: [0.06, 0.6] }, text: 'X', colorIndex: 2, fontId: 'poster', arcDeg: 0, heightFrac: 0.8, align: 'center' },
+  ]), 1) === '0.06,0.6');
+check('the house rule now forbids repeating the margin',
+  /NEVER on more/.test(PROMPTS[1][1]) && /cut off/.test(PROMPTS[1][1]));
 
 console.log(`\n${failures === 0 ? 'ALL PASS' : failures + ' FAILED'}`);
 if (failures > 0) process.exit(1);

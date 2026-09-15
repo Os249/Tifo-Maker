@@ -19,7 +19,8 @@
  * Pure and DOM-free, so it runs in the server endpoint and in the test harness.
  */
 
-import type { TifoSpec, SpecLayer, Region } from './tifoSpec';
+import type { TifoSpec, SpecLayer, Region, Stand } from './tifoSpec';
+import { STAND_ORDER } from './tifoSpec';
 
 // Boldness floors — stadium tifos are seen from 100m+ and on TV, so timid sizing
 // reads as thin/scattered. Keep these high: it's better to be too big than too small.
@@ -188,5 +189,52 @@ export function refineSpec(spec: TifoSpec): TifoSpec {
     }
   }
 
+  unletterbox(layers);
+
   return { ...spec, background, layers };
+}
+
+const FIELD_KINDS = new Set(['fill', 'stripes', 'gradient', 'pattern']);
+
+/** Which stands a region's field covers, as STAND_ORDER indices. */
+function standsCovered(region: Region): number[] {
+  if (region.stands && region.stands.length > 0) {
+    return region.stands.map((x) => STAND_ORDER.indexOf(x)).filter((i) => i >= 0);
+  }
+  if (region.stand === 'all') return [0, 1, 2, 3];
+  const i = STAND_ORDER.indexOf(region.stand as Stand);
+  return i >= 0 ? [i] : [];
+}
+
+/**
+ * Undo an accidental letterbox: a field band that leaves the same unpainted gap
+ * along the top and bottom of most of the bowl.
+ *
+ * Leaving index 0 showing is a real device — bare concrete around the art, and
+ * free, since an unpainted seat is a card nobody has to print. On ONE stand it
+ * reads as a margin under a hero. Repeated across the bowl it stops being a
+ * frame: a stand has no left or right edge of its own (its neighbours are right
+ * there), so the only band it can make is horizontal, and four stands wearing
+ * the same one is a single dark stripe across the top of the stadium and
+ * another across the bottom. That reads as the design being cut off, which is
+ * exactly what it looks like from the stands.
+ *
+ * Only near-full bands count. A field covering 80%+ of the height but not all
+ * of it is a margin; a genuine horizontal stripe at [0.4,0.6] is a design and is
+ * left alone.
+ */
+function unletterbox(layers: SpecLayer[]): void {
+  const banded: SpecLayer[] = [];
+  const stands = new Set<number>();
+  for (const l of layers) {
+    if (!FIELD_KINDS.has(l.kind)) continue;
+    const rows = l.region.rows;
+    if (!rows) continue;
+    const covers = Math.abs(rows[1] - rows[0]);
+    if (covers < 0.8 || covers >= 1) continue;
+    banded.push(l);
+    for (const i of standsCovered(l.region)) stands.add(i);
+  }
+  if (stands.size < 3) return; // a margin on one or two stands is a choice
+  for (const l of banded) l.region = { ...l.region, rows: [0, 1] };
 }
