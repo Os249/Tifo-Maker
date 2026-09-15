@@ -6,7 +6,7 @@
 import { generateSeatMap } from '../src/core/seatmap';
 import { DEFAULT_TEMPLATE } from '../src/core/template';
 import { buildStadiumContext, describeStadiumContext } from '../src/core/stadiumContext';
-import { normalizeRegion, standIndexOfU, STAND_ORDER, validateSpec, narrowToSingleStand, type SpecLayer } from '../src/core/tifoSpec';
+import { normalizeRegion, standIndexOfU, STAND_ORDER, validateSpec, narrowToSingleStand, standRun, isContiguousRegion, regionAspectHint, type SpecLayer } from '../src/core/tifoSpec';
 import { regionPredicate } from '../src/core/specCompiler';
 import { SUPER_AI_EXEMPLARS, fewShotBlock } from '../src/core/exemplars';
 import { critiqueDesign, repairSpec } from '../src/core/critique';
@@ -17,6 +17,7 @@ import { TtlCache, cacheKey } from '../server/src/aiCache';
 import { aiPeriod, secondsToNextPeriod } from '../server/src/repo';
 import { buildDirectorPrompt, buildSystemPrompt, buildCriticPrompt, clubHintLine, userMessage, criticUserMessage, buildCopywriterPrompt, copyLine } from '../server/src/aiProvider';
 import { TIFO_FONTS } from '../src/core/text';
+import { mosaicStyle, colourName, pollinationsSize, geminiAspect } from '../server/src/imageAssets';
 import { TIFO_VOICES } from '../src/core/tifoVoices';
 import { refineSpec, contrastRatio } from '../src/core/specRefine';
 import { SPEC_FONT_IDS } from '../src/core/tifoSpec';
@@ -364,11 +365,17 @@ check('critic is told to preserve pairs and the new fields',
 check('director carries whole-bowl rules that std does not',
   PROMPTS[1][1].includes('foreshortened') && !PROMPTS[0][1].includes('foreshortened'));
 // Budgets: these are paid on EVERY generation, so a future edit that quietly
-// adds 400 tokens should fail here rather than on the invoice.
-check('system prompt within budget', PROMPTS[0][1].length <= 6500, `${PROMPTS[0][1].length}`);
-// The director is premium-only and capped by AI_DAILY_BUDGET, and ~45% of it is
+// adds 400 tokens should fail here rather than on the invoice. Raising a cap is
+// allowed — deliberately, with the reason written down. The last raise (6500 →
+// 7100, 10900 → 11600) bought three things the renderer could not be told about
+// before: that a palette's headroom goes on TONES rather than more hues, that a
+// picture is generated at its region's shape and in the design's own palette,
+// and that "fit"/"stands" exist. The two duplicated portrait paragraphs each
+// prompt used to carry were fused to pay for part of it.
+check('system prompt within budget', PROMPTS[0][1].length <= 7100, `${PROMPTS[0][1].length}`);
+// The director is premium-only and capped by AI_DAILY_BUDGET, and ~40% of it is
 // the few-shot gallery — the highest-leverage tokens in the whole system.
-check('director prompt within budget', PROMPTS[1][1].length <= 10900, `${PROMPTS[1][1].length}`);
+check('director prompt within budget', PROMPTS[1][1].length <= 11600, `${PROMPTS[1][1].length}`);
 check('critic prompt within budget', PROMPTS[2][1].length <= 3000, `${PROMPTS[2][1].length}`);
 check('few-shot gallery within budget', fewShotBlock().length <= 5000, `${fewShotBlock().length}`);
 
@@ -436,6 +443,92 @@ process.env.AI_PERIOD = 'day';
 check('AI_PERIOD=day buckets by UTC day', aiPeriod(at2130) === '2026-09-14' && secondsToNextPeriod(at2130) === 9000);
 delete process.env.AI_PERIOD;
 check('period switch is reversible', aiPeriod(at2130) === '2026-09-14T21');
+
+// ---- 22. stand runs: which regions one picture can span (Wall 2) ----
+const runOf = (r: Parameters<typeof standRun>[0]): string => {
+  const x = standRun(r);
+  return x ? `${x.start}+${x.len}` : 'none';
+};
+check('a single stand is a run of one', runOf({ stand: 'west', tier: 'all' }) === '2+1');
+check('the whole bowl is a run of four', runOf({ stand: 'all', tier: 'all' }) === '0+4');
+check('sides (east|west) is NOT a run', !isContiguousRegion(normalizeRegion('sides')!));
+check('ends (north|south) is NOT a run', !isContiguousRegion(normalizeRegion('ends')!));
+check('adjacent stands are a run', runOf({ stand: 'all', tier: 'all', stands: ['north', 'west'] }) === '1+2');
+check('a run may wrap the u=0 seam', isContiguousRegion({ stand: 'all', tier: 'all', stands: ['south', 'east'] }));
+check('order within stands[] does not matter',
+  runOf({ stand: 'all', tier: 'all', stands: ['west', 'north'] }) === runOf({ stand: 'all', tier: 'all', stands: ['north', 'west'] }));
+// The run's extent must match what STAND_ORDER says, or a picture lands off its stands.
+for (const [a, b] of [['east', 'north'], ['north', 'west'], ['west', 'south'], ['south', 'east']] as const) {
+  const r = standRun({ stand: 'all', tier: 'all', stands: [a, b] });
+  const ia = STAND_ORDER.indexOf(a);
+  const expect = (ia + 1) % 4 === STAND_ORDER.indexOf(b) ? ia : STAND_ORDER.indexOf(b);
+  check(`run ${a}+${b} starts at the earlier stand`, !!r && r.start === expect && r.len === 2, runOf({ stand: 'all', tier: 'all', stands: [a, b] }));
+}
+// narrowToSingleStand must now KEEP a run — that is the whole point of Wall 2.
+const keptRun = narrowToSingleStand({ stand: 'all', tier: 'all', stands: ['north', 'west'] });
+check('narrow keeps a contiguous run intact', keptRun.stands?.length === 2 && keptRun.stands[0] === 'north');
+check('narrow still collapses a split set', narrowToSingleStand(normalizeRegion('ends')!).stand === 'north');
+
+// ---- 23. the shape a picture is generated at (Wall 3) ----
+const aspects: Array<[string, number]> = [
+  ['one stand, both tiers', regionAspectHint({ stand: 'north', tier: 'all' })],
+  ['one stand, one tier', regionAspectHint({ stand: 'north', tier: 0 })],
+  ['whole bowl', regionAspectHint({ stand: 'all', tier: 'all' })],
+  ['two stands', regionAspectHint({ stand: 'all', tier: 'all', stands: ['north', 'west'] })],
+  ['a row band', regionAspectHint({ stand: 'north', tier: 'all', rows: [0.2, 0.5] })],
+];
+for (const [name, a] of aspects) check(`aspect hint in range: ${name}`, a >= 0.5 && a <= 4, a.toFixed(2));
+check('a stand is wider than it is tall', regionAspectHint({ stand: 'north', tier: 'all' }) > 2);
+check('two stands are wider than one',
+  regionAspectHint({ stand: 'all', tier: 'all', stands: ['north', 'west'] }) >= regionAspectHint({ stand: 'north', tier: 'all' }));
+check('a thin row band never asks for a sliver', regionAspectHint({ stand: 'north', tier: 'all', rows: [0.4, 0.42] }) <= 4);
+
+check('colour names are human', colourName('#c8102e').includes('red') && colourName('#ffffff') === 'white' && colourName('#000000') === 'black');
+check('gold reads as gold, not yellow', colourName('#d4af37').includes('gold'));
+check('a near-grey is not given a hue', colourName('#7a7d80') === 'grey');
+check('a bad hex degrades quietly', colourName('nonsense') === 'grey');
+
+const style = mosaicStyle({ aspect: 2.4, palette: ['#262a33', '#c8102e', '#ffffff', '#111111'] });
+check('style names the palette', style.includes('red') && style.includes('white'));
+check('style states the shape', /wide/i.test(style));
+check('style forbids text in the picture', /No text, letters, numbers/.test(style));
+check('style asks for flat tones, not gradients', /FLAT hard-edged tones/.test(style) && /No gradients/.test(style));
+check('style survives an empty request', mosaicStyle().length > 100 && !mosaicStyle().includes('undefined'));
+check('a square brief still reads square', /square/i.test(mosaicStyle({ aspect: 1 })));
+
+for (const a of [0.5, 1, 1.78, 2.4, 4]) {
+  const { width, height } = pollinationsSize(a);
+  const got = width / height;
+  check(`image size tracks aspect ${a}`, Math.abs(Math.log(got / a)) < 0.35, `${width}x${height} = ${got.toFixed(2)}`);
+  check(`image size stays sane at ${a}`, width % 64 === 0 && height % 64 === 0 && Math.max(width, height) <= 1536 && Math.min(width, height) >= 256);
+}
+check('gemini snaps a stand to its widest ratio', geminiAspect(2.4) === '21:9');
+check('gemini snaps a square to 1:1', geminiAspect(1) === '1:1');
+check('gemini snaps 16:9 to itself', geminiAspect(16 / 9) === '16:9');
+
+// ---- 24. image layer fit (Wall 2) ----
+const imgSpec = validateSpec({
+  palette: ['#262a33', '#c8102e', '#ffffff'],
+  layers: [
+    { kind: 'image', region: 'north', prompt: 'a legend', scaleFrac: 1, dither: true },
+    { kind: 'image', region: 'south', prompt: 'a crest', scaleFrac: 1, dither: true, fit: 'contain' },
+  ],
+}).spec!;
+const [hero, crest] = imgSpec.layers as Array<Extract<SpecLayer, { kind: 'image' }>>;
+check('image fit defaults to cover (the full-bleed hero)', hero.fit === 'cover');
+check('image fit honours an explicit contain', crest.fit === 'contain');
+check('a nonsense fit falls back to cover',
+  (validateSpec({ palette: ['#262a33', '#c8102e'], layers: [{ kind: 'image', region: 'north', prompt: 'x', scaleFrac: 1, dither: true, fit: 'stretch' }] }).spec!
+    .layers[0] as Extract<SpecLayer, { kind: 'image' }>).fit === 'cover');
+
+// ---- 25. the palette ceiling is actually raised (Wall 1) ----
+const tonal = Array.from({ length: 17 }, (_, i) => (i === 0 ? '#262a33' : `#${i.toString(16).repeat(6).slice(0, 6)}`));
+check('a 17-tone palette validates', validateSpec({ palette: tonal, layers: [{ kind: 'fill', region: 'all', colorIndex: 1 }] }).valid);
+check('the cap still bites somewhere',
+  !validateSpec({ palette: Array.from({ length: 40 }, () => '#123456'), layers: [{ kind: 'fill', region: 'all', colorIndex: 1 }] }).valid);
+check('the director is told to spend colours on tones, not hues',
+  /TONES/.test(PROMPTS[1][1]) && /hues/i.test(PROMPTS[1][1]));
+check('the prompts expose fit to the model', PROMPTS[1][1].includes('cover') && PROMPTS[0][1].includes('contain'));
 
 console.log(`\n${failures === 0 ? 'ALL PASS' : failures + ' FAILED'}`);
 if (failures > 0) process.exit(1);

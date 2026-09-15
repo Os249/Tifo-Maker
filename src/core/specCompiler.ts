@@ -18,7 +18,7 @@
 import type { SeatMap } from './types';
 import type { DesignStore } from './design';
 import type { TifoSpec, SpecLayer, Region, Stand } from './tifoSpec';
-import { STAND_GEOMETRY, standIndexOfU } from './tifoSpec';
+import { STAND_GEOMETRY, standIndexOfU, standRun } from './tifoSpec';
 import { EDITOR_UNITS } from './seatmap';
 import { rasterize, maskFromAlpha, applyGridToSeats } from './importImage';
 import { renderTextCanvas, TIFO_FONTS } from './text';
@@ -78,9 +78,18 @@ export function regionPredicate(region: Region, map: SeatMap): (i: number) => bo
 
 /** Analytic horizontal extent (editor units) of a region's stand. */
 function standExtent(region: Region): { centerX: number; width: number } {
-  if (region.stand === 'all') return { centerX: W / 2, width: W };
-  const g = STAND_GEOMETRY[region.stand as Stand];
-  return { centerX: g.centerU * W, width: g.halfU * 2 * W };
+  if (!region.stands || region.stands.length === 0) {
+    if (region.stand === 'all') return { centerX: W / 2, width: W };
+    const g = STAND_GEOMETRY[region.stand as Stand];
+    return { centerX: g.centerU * W, width: g.halfU * 2 * W };
+  }
+  // An explicit run of stands is one continuous surface: take its union, so a
+  // picture asked to cross north+west is sized for both, not for the whole bowl
+  // (which would show only its middle half). Runs may wrap the u=0 seam; the
+  // object baker wraps at W, so a negative centre is fine.
+  const run = standRun(region);
+  if (!run) return { centerX: W / 2, width: W }; // split set: whole-bowl coords, as before
+  return { centerX: (run.start + (run.len - 1) / 2) * 0.25 * W, width: run.len * 0.25 * W };
 }
 
 /** Editor-space box (centre + size) of a region — used to place image objects. */

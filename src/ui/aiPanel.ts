@@ -265,18 +265,25 @@ export function mountAiPanel(deps: AiPanelDeps): void {
       if (layer.kind !== 'image' || !layer.assetRef) continue;
       try {
         const bmp = await dataUrlToBitmap(layer.assetRef);
-        // Phase 3: a portrait belongs to ONE stand — narrow multi-stand/'all'
-        // image regions so the hero never stretches across the whole bowl.
+        // A picture needs one continuous surface. A run of adjacent stands is
+        // one; a SPLIT set ('sides', 'ends') is not, so that collapses to a
+        // single stand. 'all' collapses too — a lazy whole-bowl region on a
+        // portrait means "big", not "smeared 9:1 across the ring".
         const region = narrowToSingleStand(layer.region);
         const rect = regionRect(region, map);
-        // Portrait is the hero: fill the stand's HEIGHT (its natural large axis),
-        // let width follow the image aspect, and cap to the stand width so it
-        // never bleeds into the neighbouring stands.
-        const aspect = bmp.width / bmp.height || 1;
-        let h = layer.scaleFrac * rect.height;
-        let w = h * aspect;
-        const maxW = rect.width * 0.98;
-        if (w > maxW) { w = maxW; h = w / aspect; }
+        // Fit the picture to the region, then scale by scaleFrac.
+        //
+        // The old code drove off HEIGHT alone and clamped width to 98% of the
+        // stand, which only ever shrank: a square portrait in a ~2.4:1 stand
+        // came out filling barely a third of its width, which is what made
+        // every AI hero look small. 'cover' fills the region and lets the
+        // region clip the overflow — the bake is masked by regionPredicate, so
+        // it still cannot touch a neighbouring stand.
+        const sx = rect.width / bmp.width;
+        const sy = rect.height / bmp.height;
+        const s = (layer.fit === 'contain' ? Math.min(sx, sy) : Math.max(sx, sy)) * layer.scaleFrac;
+        const w = bmp.width * s;
+        const h = bmp.height * s;
         const created = objects.addImage({
           cx: rect.cx,
           cy: rect.cy,

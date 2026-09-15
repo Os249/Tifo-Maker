@@ -24,7 +24,7 @@ import { createHmac, timingSafeEqual } from 'node:crypto';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { AiEventsRepository, AiOutcome, AiUsageRepository } from './repo';
 import { secondsToNextPeriod } from './repo';
-import { validateSpec, type TifoSpec } from '../../src/core/tifoSpec';
+import { validateSpec, narrowToSingleStand, regionAspectHint, type TifoSpec } from '../../src/core/tifoSpec';
 import { refineSpec } from '../../src/core/specRefine';
 import { designFromPrompt, composeSuperOffline } from '../../src/core/promptDesigner';
 import { generateSpecViaProvider, buildDirectorPrompt, critiqueSpecViaProvider, activeProvider, clubHintLine, writeCopy, copyLine } from './aiProvider';
@@ -311,7 +311,14 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
     const notes: string[] = [];
     for (const layer of spec.layers) {
       if (layer.kind === 'image' && !layer.assetRef) {
-        const img = await generateImage(layer.prompt).catch((e) => ({ url: null, error: String(e) }) as { url: null; error: string });
+        // Tell the generator what it is drawing FOR: the shape of the region the
+        // picture has to fill, and the palette it is about to be quantized into.
+        // Without both it returns a square in arbitrary colours, and the client
+        // then destroys it snapping to the design's palette.
+        const img = await generateImage(layer.prompt, {
+          aspect: regionAspectHint(narrowToSingleStand(layer.region)),
+          palette: spec.palette,
+        }).catch((e) => ({ url: null, error: String(e) }) as { url: null; error: string });
         if (img.url) layer.assetRef = img.url;
         else notes.push(`Portrait not generated: ${img.error ?? 'unknown error'}`);
       }

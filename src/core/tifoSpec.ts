@@ -210,8 +210,22 @@ export interface ImageLayer extends BaseLayer {
   prompt: string;
   /** Data URL filled server-side after generation; absent if it failed. */
   assetRef?: string;
-  /** Size as a fraction of the region's smaller side (0.2..1). */
+  /** Size as a fraction of the FITTED size (0.2..1); 1 = exactly the fit. */
   scaleFrac: number;
+  /**
+   * How the picture meets its region.
+   *
+   * 'cover' scales until BOTH axes are covered and lets the region clip the
+   * overflow — the full-bleed hero, the thing that makes a face read as huge
+   * instead of floating in the middle of a wide band. 'contain' scales until the
+   * whole picture fits inside, so nothing is cropped.
+   *
+   * Default 'cover'. The bake is clipped to the region either way, so cover can
+   * never bleed into a neighbouring stand; and the generator is now asked for
+   * the region's own aspect ratio, so in the normal case the two are identical
+   * and the choice only matters for an asset that arrived the wrong shape.
+   */
+  fit?: 'contain' | 'cover';
   dither: boolean;
   /** Clustered halftone quantization — chunkier, more legible portraits at seat scale. */
   halftone?: boolean;
@@ -242,7 +256,21 @@ export interface TifoSpec {
 
 export const SPEC_LIMITS = {
   maxLayers: 24,
-  maxPalette: 8,
+  /**
+   * 24, not 8.
+   *
+   * The seat store holds one byte per seat, so 256 colours are renderable, and
+   * the manual photo import already hands itself 14 extracted tones. The AI was
+   * capped at 7 paintable colours FOR THE WHOLE BOWL — which is why its designs
+   * could only ever be flat blocks: a portrait needs 5-6 tones for the face
+   * alone, leaving one colour for the other three stands.
+   *
+   * Every colour is a card type somebody has to print, sort and distribute, so
+   * this is not free — but that cost is linear and visible (production.ts
+   * reports per-colour counts), whereas the old cap made shading impossible.
+   * The prompts spend the headroom on TONES of a few hues, not on more hues.
+   */
+  maxPalette: 24,
   minPalette: 2,
   maxTitle: 120,
   maxText: 60,
@@ -290,12 +318,82 @@ function clampNum(v: unknown, lo: number, hi: number, dflt: number): number {
  */
 export function narrowToSingleStand(region: Region): Region {
   if (region.stands && region.stands.length > 0) {
+    // An unbroken run of stands is one continuous surface, so a picture can span
+    // it. Only a SPLIT set ('sides', 'ends') has to collapse.
+    if (isContiguousRegion(region)) return region;
     return region.rows
       ? { stand: region.stands[0], tier: region.tier, rows: region.rows }
       : { stand: region.stands[0], tier: region.tier };
   }
   if (region.stand === 'all') return { ...region, stand: 'north' };
   return region;
+}
+
+/**
+ * The unbroken run of stands a region covers, as a start index into STAND_ORDER
+ * and a length, or null when the stands are split by a gap.
+ *
+ * The bowl is a ring, so a run may wrap the u=0 seam — {south, east} is as
+ * continuous as {east, north} — and both the pattern compiler and the object
+ * baker wrap at the editor width, so art laid across a wrapping run is
+ * continuous too. 'sides' (east+west) and 'ends' (north+south) face each other
+ * across the pitch and are NOT runs: one picture across them would show its left
+ * half on one stand and its right half on the other, with the middle missing.
+ */
+export function standRun(region: Region): { start: number; len: number } | null {
+  const list =
+    region.stands && region.stands.length > 0
+      ? region.stands
+      : region.stand === 'all'
+        ? STAND_ORDER
+        : [region.stand as Stand];
+  const want = new Set(list.map((s) => STAND_ORDER.indexOf(s)));
+  if (want.size === 0 || want.has(-1)) return null;
+  for (let start = 0; start < STAND_ORDER.length; start++) {
+    let ok = true;
+    for (let k = 0; k < want.size; k++) {
+      if (!want.has((start + k) % STAND_ORDER.length)) { ok = false; break; }
+    }
+    if (ok) return { start, len: want.size };
+  }
+  return null;
+}
+
+/** True when one picture can span the region without a break in the middle. */
+export function isContiguousRegion(region: Region): boolean {
+  return standRun(region) !== null;
+}
+
+// A nominal bowl, used only to guess what SHAPE a generated picture should be.
+// Mirrors EDITOR_UNITS (4000px around, 8px a row, a 24px walkway) for a typical
+// two-tier stadium; seatmap.ts owns the real numbers, and it is browser-side.
+const NOMINAL_STAND_PX = 1000; // EDITOR_UNITS.width / 4 stands
+const NOMINAL_TIER_PX = 200; // ~25 rows x 8px
+const NOMINAL_TIERS = 2;
+const NOMINAL_GAP_PX = 24; // EDITOR_UNITS.tierGapPx
+
+/**
+ * Nominal editor-space aspect (width / height) of a region: what shape a picture
+ * has to be to fill it without distortion.
+ *
+ * The exact answer is regionRect(), which needs the seat map and so lives in the
+ * browser. This is the server's estimate, and it is only used to pick the
+ * dimensions of the image it asks a generator for — a nominal bowl is close
+ * enough for that, and the renderer's cover-fit absorbs the rest.
+ *
+ * Clamped to [0.5, 4]: past about 4:1 a diffusion model stops composing and
+ * starts smearing the subject across the strip, which is worse than a crop.
+ */
+export function regionAspectHint(region: Region): number {
+  const run = standRun(region);
+  const stands = run ? run.len : 1;
+  const tiers = region.tier === 'all' ? NOMINAL_TIERS : 1;
+  const rows = region.rows ? Math.abs(region.rows[1] - region.rows[0]) : 1;
+  const height = Math.max(
+    NOMINAL_TIER_PX * 0.1,
+    (tiers * NOMINAL_TIER_PX + (tiers - 1) * NOMINAL_GAP_PX) * Math.max(0.05, rows),
+  );
+  return Math.max(0.5, Math.min(4, (stands * NOMINAL_STAND_PX) / height));
 }
 
 /** Validate a stands[] array → deduped Stand[], or null if any entry is invalid. */
@@ -490,6 +588,7 @@ export function validateSpec(input: unknown): SpecValidationResult {
             prompt: raw.prompt.trim().slice(0, SPEC_LIMITS.maxImagePrompt),
             assetRef: typeof raw.assetRef === 'string' ? raw.assetRef : undefined,
             scaleFrac: clampNum(raw.scaleFrac, 0.2, 1, 0.9),
+            fit: raw.fit === 'contain' ? 'contain' : 'cover',
             dither: raw.dither !== false,
             halftone: raw.halftone === true,
           });
