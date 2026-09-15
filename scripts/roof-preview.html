@@ -1,0 +1,170 @@
+<!doctype html>
+<!-- Dev-only harness for scripts/roof-preview.mts. Stand shell + seats, no simulator. -->
+<html lang="en"><head><meta charset="UTF-8"/><title>roof preview</title></head>
+<body style="margin:0;background:#0b0f1a"><div id="out">loading…</div>
+<script type="module">
+  import * as THREE from 'three';
+  import { generateSeatMap } from '/src/core/seatmap.ts';
+  import { templateById } from '/src/core/stadiumCatalog.ts';
+  import { buildStands } from '/src/render/simulator/stands.ts';
+  import { buildRoof } from '/src/render/simulator/roof.ts';
+
+  const HOST = document.createElement('div');
+  HOST.style.cssText = 'position:fixed;left:0;top:0;width:1100px;height:660px;';
+  document.body.appendChild(HOST);
+
+  const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+  renderer.setSize(1100, 660, false);
+  renderer.setClearColor(0x0b0f1a, 1);
+  HOST.appendChild(renderer.domElement);
+
+  /**
+   * Seats as held-up cards, coloured per stand, UNLIT (MeshBasicMaterial) — the
+   * same choice src/render/preview3d.ts makes. Unlit matters here: the question
+   * is how much of the tifo the roof geometrically hides, and lit seats would
+   * let a lighting choice answer it instead of the geometry.
+   */
+  function seatMesh(map) {
+    const geo = new THREE.PlaneGeometry(0.45, 0.7);
+    const mat = new THREE.MeshBasicMaterial({ side: THREE.DoubleSide });
+    const mesh = new THREE.InstancedMesh(geo, mat, map.count);
+    const dummy = new THREE.Object3D();
+    const c = new THREE.Color();
+    const cols = [0x2f6fe0, 0xe0473a, 0xf0b429, 0x2fb37a];
+    for (let i = 0; i < map.count; i++) {
+      const y = map.pos3[i * 3 + 1] + 0.9;
+      dummy.position.set(map.pos3[i * 3], y, map.pos3[i * 3 + 2]);
+      dummy.lookAt(0, y, 0);
+      dummy.rotateX(-0.22);
+      dummy.updateMatrix();
+      mesh.setMatrixAt(i, dummy.matrix);
+      c.setHex(cols[Math.floor(((map.uv[i * 2] + 0.125) % 1) * 4)] ?? 0xffffff);
+      mesh.setColorAt(i, c);
+    }
+    mesh.instanceMatrix.needsUpdate = true;
+    return { mesh, geo, mat };
+  }
+
+  window.__render = async (id, shots) => {
+    const template = templateById(id);
+    const map = generateSeatMap(template);
+    const scene = new THREE.Scene();
+    scene.fog = null;
+
+    scene.add(new THREE.HemisphereLight(0x9fb6d8, 0x2c3a33, 1.05));
+    const sun = new THREE.DirectionalLight(0xfff0d8, 1.4);
+    sun.position.set(120, 190, 90);
+    scene.add(sun);
+    // Light thrown UP off the pitch. A roof underside faces DOWN, so neither the
+    // sun nor a hemisphere sky ever touches it, and without this it renders black
+    // whatever colour it is — the harness would then answer the one question it
+    // exists to answer with a lighting accident. A point light will not do it
+    // either: physical falloff over 150 m leaves nothing. A directional light
+    // aimed upward is the honest stand-in for floodlight bouncing off turf.
+    const up = new THREE.DirectionalLight(0xfff4e2, 0.95);
+    up.position.set(0, -60, 0);
+    up.target.position.set(0, 0, 0);
+    scene.add(up);
+    scene.add(up.target);
+
+    const stands = buildStands(template, false);
+    scene.add(stands);
+    const { mesh, geo, mat } = seatMesh(map);
+    scene.add(mesh);
+
+    const pitchGeo = new THREE.PlaneGeometry(105, 68);
+    const pitchMat = new THREE.MeshStandardMaterial({ color: 0x1f7a3a, roughness: 0.8 });
+    const pitch = new THREE.Mesh(pitchGeo, pitchMat);
+    pitch.rotation.x = -Math.PI / 2;
+    scene.add(pitch);
+
+    let top = 1, ax = 1, bz = 1;
+    for (let k = 0; k < map.count; k++) {
+      ax = Math.max(ax, Math.abs(map.pos3[k * 3]));
+      top = Math.max(top, map.pos3[k * 3 + 1]);
+      bz = Math.max(bz, Math.abs(map.pos3[k * 3 + 2]));
+    }
+    const R = Math.max(ax, bz);
+    // Cameras are placed off the PLAN curve, not off the seat extents. The back
+    // of a deep bowl can sit 40 m outside the front row, so a camera positioned
+    // at a fraction of the seat extent ends up behind the stand looking at the
+    // outside of the building — inside shots have to be inside the plan curve.
+    const PB = template.plan.b;
+
+    const cam = new THREE.PerspectiveCamera(50, 1100 / 660, 0.5, 4000);
+    const out = {};
+    for (const shot of shots) {
+      if (shot === 'outside') {
+        cam.position.set(R * 1.5, top * 1.6 + 34, R * 1.8);
+        cam.lookAt(0, top * 0.5, 0);
+        cam.fov = 45;
+      } else if (shot === 'inside') {
+        // Pitch level, right in front of the south stand, looking up at the roof
+        // over it: the spectator's view, and the one that shows the underside.
+        cam.position.set(0, 2.5, -PB * 0.72);
+        cam.lookAt(0, top * 1.15, -PB * 1.75);
+        cam.fov = 74;
+      } else {
+        // The gantry on the north stand — where a tifo is actually judged from,
+        // and so the shot that answers whether the roof is standing in front of it.
+        cam.position.set(0, top * 0.60, PB * 0.90);
+        cam.lookAt(0, top * 0.42, -PB * 1.15);
+        cam.fov = 52;
+      }
+      cam.updateProjectionMatrix();
+      renderer.render(scene, cam);
+      await new Promise((r) => requestAnimationFrame(r));
+      out[shot] = renderer.domElement.toDataURL('image/png');
+    }
+
+    // How much of the tifo is under the roof? Squinting at a render cannot
+    // answer this; comparing each seat's radius against the roof's leading edge
+    // at the same polar angle can. Both shapes are star-shaped about the origin,
+    // so a radius comparison at matched angle is exact enough to trust.
+    //
+    // Only INDEXED vertices count. strip() writes a position for every perimeter
+    // sample and masks the triangles, not the buffer — so reading raw positions
+    // says a west-only roof covers the whole ring, which is how this first
+    // reported 42% coverage for a roof over one stand.
+    const tier = template.tiers[template.tiers.length - 1];
+    const lastRow = Math.max(1, tier.rows - 1);
+    const rakeTan = Math.tan((tier.rakeDeg * Math.PI) / 180);
+    const backRadial = tier.baseOffset + lastRow * tier.rowDepth + tier.rowDepth * 0.5;
+    const frontRadial = tier.baseOffset - tier.rowDepth * 0.5;
+    const backY = tier.baseElevation + lastRow * tier.rowDepth * rakeTan + tier.rowDepth * rakeTan * 0.5;
+    const rb = buildRoof(template, backRadial, backY, backRadial - frontRadial, false);
+    // 120 buckets against the roof's 240 perimeter samples, so every bucket a
+    // roof covers gets at least one lip vertex. At 360 a third of the buckets
+    // came back empty and read as open sky: the kop's roof measured 44%
+    // coverage when the geometry says 63%.
+    const N = 120;
+    const bucket = (x, z) => Math.min(N - 1, Math.floor((((Math.atan2(z, x) + Math.PI * 2) % (Math.PI * 2)) / (Math.PI * 2)) * N));
+    const lipMin = new Array(N).fill(Infinity);
+    let deck = null;
+    rb.object.traverse((o) => { if (o.geometry && !deck) deck = o.geometry; });
+    if (deck && deck.getIndex()) {
+      const pos = deck.getAttribute('position').array;
+      const idx = deck.getIndex().array;
+      for (const v of idx) {
+        const x = pos[v * 3], z = pos[v * 3 + 2];
+        const k = bucket(x, z);
+        lipMin[k] = Math.min(lipMin[k], Math.hypot(x, z));
+      }
+    }
+    let covered = 0;
+    for (let i = 0; i < map.count; i++) {
+      const x = map.pos3[i * 3], z = map.pos3[i * 3 + 2];
+      const k = bucket(x, z);
+      if (Number.isFinite(lipMin[k]) && Math.hypot(x, z) >= lipMin[k]) covered++;
+    }
+    rb.dispose();
+
+    scene.clear();
+    geo.dispose(); mat.dispose(); mesh.dispose();
+    pitchGeo.dispose(); pitchMat.dispose();
+    stands.traverse((o) => { if (o.geometry) o.geometry.dispose(); });
+    return { shots: out, seats: map.count, topY: top, roof: template.roof ?? null, coveredPct: map.count ? (covered / map.count) * 100 : 0, reach: rb.reachMeters };
+  };
+  document.getElementById('out').textContent = 'ready';
+  window.__ready = true;
+</script></body></html>

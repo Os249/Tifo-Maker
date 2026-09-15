@@ -19,6 +19,7 @@ export const DEFAULT_TEMPLATE: StadiumTemplate = {
   ],
   aisles: { count: 28, widthMeters: 1.2 },
   sectionsPerTier: 28,
+  roof: { coverage: 'ring', reach: 0.5, rise: 7, slope: 2.2 },
 };
 
 /** Steep single-tier kop bowl — the Tottenham-style high-resolution wall. */
@@ -30,9 +31,15 @@ export const KOP_TEMPLATE: StadiumTemplate = {
   tiers: [{ rows: 38, rowDepth: 0.8, rakeDeg: 33, baseElevation: 1.5, baseOffset: 0, seatPitch: 0.5 }],
   aisles: { count: 24, widthMeters: 1.2 },
   sectionsPerTier: 24,
+  // English cantilever: covers most of the stand and sits close over it.
+  roof: { coverage: 'ring', reach: 0.62, rise: 5.5, slope: 2.6 },
 };
 
-/** Big shallow oval (p=2.0), Berlin-style continuous wrap. */
+/**
+ * Big shallow oval (p=2.0), Berlin-style continuous wrap. Roofed down the two
+ * long sides only, ends open — what an athletics oval usually looks like, and
+ * the case that proves partial coverage really works.
+ */
 export const OVAL_TEMPLATE: StadiumTemplate = {
   id: 'grand-oval-76k',
   name: 'Grand oval 76k',
@@ -44,6 +51,7 @@ export const OVAL_TEMPLATE: StadiumTemplate = {
   ],
   aisles: { count: 32, widthMeters: 1.2 },
   sectionsPerTier: 32,
+  roof: { coverage: 'sides', reach: 0.55, rise: 8, slope: 1.4 },
 };
 
 /** All known stadiums. New bowls are data entries here — no code changes. */

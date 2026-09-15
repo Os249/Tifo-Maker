@@ -203,6 +203,9 @@ export class MatchDaySimulator {
     this.surroundings = buildSurroundings();
     this.scene.add(this.surroundings.object);
     this.sparkles = buildPhoneFlash(this.map);
+    // Off until asked for: a bowl that twinkles by itself misreads a still tifo
+    // as motion, and it is the first thing to distract from the artwork.
+    this.sparkles.object.visible = false;
     this.scene.add(this.sparkles.object);
     if (this.template.id === 'community-jewel-jeddah-62k') {
       const crown = buildJewelCrown();
@@ -514,6 +517,11 @@ export class MatchDaySimulator {
   // ---- effects (Phase 5) ----
   setFloodlights(b: boolean): void {
     this.effects.setFloodlights(b);
+  }
+
+  /** Phone-flash twinkle across the stands. Starts off; see the constructor. */
+  setSparkles(b: boolean): void {
+    this.sparkles.object.visible = b;
   }
 
   // ---- environment (Wave D) ----
@@ -1098,7 +1106,7 @@ export class MatchDaySimulator {
       this.assetLayer.update(this.elapsed);
       this.effects.update(dt);
       this.surroundings.update(dt);
-      this.sparkles.update(dt);
+      if (this.sparkles.object.visible) this.sparkles.update(dt);
       this.weather.update(dt);
       if (this.reveal) this.stepReveal();
       if (this.timeline) this.stepTimeline();

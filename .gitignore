@@ -20,3 +20,6 @@ preview-out/
 # temp
 *.gif
 /tmp/
+
+# local scratch: stitched aerial tiles, not redistributable
+scratch-aerial/

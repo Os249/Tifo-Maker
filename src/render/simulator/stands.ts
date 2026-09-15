@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { StadiumTemplate } from '../../core/types';
+import { buildRoof } from './roof';
 
 /**
  * Match Day Simulator — extruded stand architecture (Phase 1).
@@ -13,7 +14,7 @@ import type { StadiumTemplate } from '../../core/types';
  * Per tier we loft a sloped "deck" ring between the front (row 0) and back (last
  * row) edges. We then close the bowl with a front wall (pitch-side of tier 0
  * down to ground), an outer skirt (back of the top tier down to ground), and a
- * simple cantilever roof ring over the top tier. Everything is a handful of
+ * roof (see ./roof.ts, driven by template.roof). Everything is a handful of
  * indexed ring-strips, so it is cheap and fully parametric.
  */
 
@@ -104,7 +105,6 @@ export function buildStands(template: StadiumTemplate, shadows: boolean): THREE.
 
   const concrete = new THREE.MeshStandardMaterial({ color: 0x6b7178, roughness: 0.96, metalness: 0, envMapIntensity: 0.8 });
   const structure = new THREE.MeshStandardMaterial({ color: 0x4c515a, roughness: 0.95, metalness: 0, envMapIntensity: 0.8 });
-  const roofMat = new THREE.MeshStandardMaterial({ color: 0x23272e, roughness: 0.5, metalness: 0.4, side: THREE.DoubleSide, envMapIntensity: 1.3 });
 
   const add = (geo: THREE.BufferGeometry, mat: THREE.Material, cast: boolean, receive: boolean): void => {
     const m = new THREE.Mesh(geo, mat);
@@ -117,6 +117,7 @@ export function buildStands(template: StadiumTemplate, shadows: boolean): THREE.
   const tiers = template.tiers;
   let topBackRadial = 0;
   let topBackY = 0;
+  let topTierDepth = 0;
 
   tiers.forEach((tier, idx) => {
     const rakeTan = Math.tan((tier.rakeDeg * Math.PI) / 180);
@@ -140,19 +141,17 @@ export function buildStands(template: StadiumTemplate, shadows: boolean): THREE.
     rowsBefore += tier.rows;
     topBackRadial = backRadial;
     topBackY = backY;
+    topTierDepth = backRadial - frontRadial;
   });
 
   // Outer skirt: back of the top tier down to the ground.
   add(strip(ring(a, b, p, topBackRadial, 0), ring(a, b, p, topBackRadial, topBackY), keep), structure, false, true);
 
-  // Cantilever roof over the top tier, connected to the back wall by a vertical
-  // fascia so it reads as supported rather than floating in the air.
-  const roofY = topBackY + 4;
-  const roofInner = ring(a, b, p, topBackRadial - 16, roofY); // reaches in over the back rows
-  const roofOuter = ring(a, b, p, topBackRadial + 5, roofY);
-  add(strip(roofInner, roofOuter, keep), roofMat, true, false);
-  // Fascia: vertical web from the stand top edge up to the roof's outer lip.
-  add(strip(ring(a, b, p, topBackRadial + 5, topBackY), ring(a, b, p, topBackRadial + 5, roofY), keep), structure, false, true);
+  // Roof. Was a flat ring reaching a hard-coded 16 m in over the seats, which on
+  // a shallow top tier covered the whole stand and some of the one below it —
+  // i.e. it hid the tifo. It is now a real slab whose reach is a fraction of the
+  // tier it sits over, and which the template can shape or switch off.
+  group.add(buildRoof(template, topBackRadial, topBackY, topTierDepth, shadows, keep).object);
 
   // Avoid an unused-variable lint while keeping the running total documented.
   void rowsBefore;

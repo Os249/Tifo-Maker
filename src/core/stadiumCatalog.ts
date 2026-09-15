@@ -94,6 +94,7 @@ const COMMUNITY: StadiumEntry[] = [
       ],
       aisles: { count: 34, widthMeters: 1.2 },
       sectionsPerTier: 34,
+      roof: { coverage: 'ring', reach: 0.5, rise: 9, slope: 2.5 },
     },
     meta: { name: 'Grand National Bowl', source: 'community', country: 'International', capacity: 80000, type: 'Two-tier', inspiredBy: 'a large national stadium', tags: ['large', 'national', 'two-tier'] },
   },
@@ -110,6 +111,9 @@ const COMMUNITY: StadiumEntry[] = [
       ],
       aisles: { count: 26, widthMeters: 1.1 },
       sectionsPerTier: 26,
+      // Low and deep: a roof that holds the noise in is half of what makes a
+      // cauldron a cauldron.
+      roof: { coverage: 'ring', reach: 0.68, rise: 4.5, slope: 2.8 },
     },
     meta: { name: 'Steep Cauldron', source: 'community', country: 'Europe', capacity: 55000, type: 'Two-tier', inspiredBy: 'a steep atmospheric club ground', tags: ['steep', 'atmosphere', 'compact'] },
   },
@@ -123,6 +127,7 @@ const COMMUNITY: StadiumEntry[] = [
       tiers: [{ rows: 40, rowDepth: 0.78, rakeDeg: 35, baseElevation: 1.5, baseOffset: 0, seatPitch: 0.48 }],
       aisles: { count: 20, widthMeters: 1.1 },
       sectionsPerTier: 20,
+      roof: { coverage: 'ring', reach: 0.55, rise: 5, slope: 2.4 },
     },
     meta: { name: 'Compact Wall', source: 'community', country: 'Europe', capacity: 30000, type: 'Single-tier', inspiredBy: 'a single-tier terrace wall', tags: ['single-tier', 'wall', 'compact'] },
   },
@@ -139,6 +144,8 @@ const COMMUNITY: StadiumEntry[] = [
       ],
       aisles: { count: 30, widthMeters: 1.2 },
       sectionsPerTier: 30,
+      // Modern build: broad, near-flat, pale soffit.
+      roof: { coverage: 'ring', reach: 0.6, rise: 9, slope: 1.2, thickness: 1.6, underColor: 0xd7d2c4 },
     },
     meta: { name: 'Desert Arena', source: 'community', country: 'Middle East', capacity: 68000, type: 'Two-tier', inspiredBy: 'a modern desert-region arena', tags: ['modern', 'two-tier', 'large'] },
   },
@@ -152,6 +159,8 @@ const COMMUNITY: StadiumEntry[] = [
       tiers: [{ rows: 44, rowDepth: 0.78, rakeDeg: 36, baseElevation: 1.5, baseOffset: 0, seatPitch: 0.48 }],
       aisles: { count: 22, widthMeters: 1.1 },
       sectionsPerTier: 22,
+      // One covered main stand, three sides open to the weather.
+      roof: { coverage: 'west', reach: 0.6, rise: 6, slope: 2.6 },
     },
     meta: { name: 'Roaring Terraces', source: 'community', country: 'South America', capacity: 48000, type: 'Single-tier', inspiredBy: 'a single-tier terraced ground', tags: ['single-tier', 'steep', 'atmosphere'] },
   },
@@ -169,6 +178,7 @@ const COMMUNITY: StadiumEntry[] = [
       ],
       aisles: { count: 28, widthMeters: 1.1 },
       sectionsPerTier: 28,
+      roof: { coverage: 'ring', reach: 0.72, rise: 5, slope: 1.6 },
     },
     meta: { name: 'Cauldron Dome', source: 'community', country: 'Europe', capacity: 62000, type: 'Bowl', inspiredBy: 'a steep three-tier cauldron', tags: ['steep', 'three-tier', 'enclosed', 'atmosphere'] },
   },
@@ -185,6 +195,7 @@ const COMMUNITY: StadiumEntry[] = [
       ],
       aisles: { count: 32, widthMeters: 1.2 },
       sectionsPerTier: 32,
+      roof: { coverage: 'sides', reach: 0.5, rise: 8.5, slope: 1.5 },
     },
     meta: { name: 'Wide Athletics Oval', source: 'community', country: 'International', capacity: 72000, type: 'Oval', inspiredBy: 'a wide running-track oval', tags: ['oval', 'athletics', 'two-tier', 'large'] },
   },
@@ -206,6 +217,8 @@ const COMMUNITY: StadiumEntry[] = [
       ],
       aisles: { count: 32, widthMeters: 1.1 },
       sectionsPerTier: 32,
+      // The Jewel's crown is hand-built (simulator/jewelCrown.ts).
+      roof: { coverage: 'none' },
     },
     meta: { name: 'The Jewel of Jeddah', source: 'community', country: 'Middle East', capacity: 62241, type: 'Bowl', inspiredBy: 'King Abdullah Sports City (Alinma Stadium), Jeddah - nicknamed "The Shining Jewel"', tags: ['jewel', 'jeddah', 'saudi', 'three-tier', 'circular', 'bowl', 'large', 'world-cup-2034'] },
   },
@@ -226,6 +239,8 @@ const COMMUNITY: StadiumEntry[] = [
       ],
       aisles: { count: 22, widthMeters: 1.1 },
       sectionsPerTier: 22,
+      // Roof + perforated skin are hand-built (simulator/stadiumExtras.ts).
+      roof: { coverage: 'none' },
     },
     meta: { name: 'Al-Awwal Park (Riyadh)', source: 'community', country: 'Middle East', capacity: 25000, type: 'Two-tier', inspiredBy: 'Al-Awwal Park (King Saud University Stadium), Riyadh - home of Al-Nassr', tags: ['al-nassr', 'riyadh', 'saudi', 'two-tier', 'gold', 'open'] },
   },
@@ -249,6 +264,8 @@ const COMMUNITY: StadiumEntry[] = [
       ],
       aisles: { count: 20, widthMeters: 1.0 },
       sectionsPerTier: 20,
+      // Indoor arena: walls and ceiling are hand-built (simulator/stadiumExtras.ts).
+      roof: { coverage: 'none' },
     },
     meta: { name: 'Kingdom Arena (Riyadh)', source: 'community', country: 'Middle East', capacity: 28000, type: 'Arena', inspiredBy: "Kingdom Arena, Riyadh - Al-Hilal's fully covered indoor arena", tags: ['al-hilal', 'riyadh', 'saudi', 'arena', 'covered', 'indoor'] },
   },

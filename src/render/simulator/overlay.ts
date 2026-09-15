@@ -198,6 +198,7 @@ const MDS_T: Record<string, { en: string; ar: string }> = {
   coverStairs: { en: 'Cover stairs', ar: 'تغطية الدرج' },
   cornerFlags: { en: 'Corner flags', ar: 'أعلام الأركان' },
   wetPitch: { en: 'Wet pitch (reflections)', ar: 'أرضية مبلّلة (انعكاسات)' },
+  phoneFlashes: { en: 'Phone flashes in the stands', ar: 'أضواء الجوالات في المدرجات' },
   confetti: { en: 'Confetti', ar: 'قصاصات' },
   pyro: { en: 'Pyro', ar: 'شماريخ' },
   'tod.day': { en: 'Day', ar: 'نهار' },
@@ -287,6 +288,7 @@ const MDS_T: Record<string, { en: string; ar: string }> = {
   'tip.banners': { en: 'Fill the dark walkway gap between tiers with your design', ar: 'عبّي الفراغ المعتم بين الطوابق بتصميمك' },
   'tip.stairs': { en: 'Also fill the aisles / stairs between sections (unorthodox, off by default)', ar: 'عبّي كمان الممرات/الدرج بين القطاعات (غير معتاد، مطفأ افتراضياً)' },
   'tip.wet': { en: 'Reflective wet-look pitch (heavier on GPU)', ar: 'أرضية مبلّلة عاكسة (أثقل على المعالج الرسومي)' },
+  'tip.sparkles': { en: 'Twinkling phone lights across the crowd — off by default, so a still tifo reads still', ar: 'أضواء جوالات تتلألأ بين الجمهور — مطفأة افتراضياً ليبقى التيفو الثابت ثابتاً' },
   'tip.confetti': { en: 'Burst of confetti', ar: 'انفجار قصاصات' },
   'tip.pyro': { en: 'Burst of pyro flares', ar: 'انفجار شماريخ' },
   'tip.bigBanner': { en: 'Big 3D banner that drapes the whole stand', ar: 'لافتة ثلاثية الأبعاد كبيرة تغطي المدرج كامل' },
@@ -347,6 +349,7 @@ interface SimState {
   tod: TimeOfDay;
   weather: Weather;
   wet: boolean;
+  sparkles: boolean;
 }
 
 export function openMatchDaySimulator(
@@ -373,6 +376,9 @@ export function openMatchDaySimulator(
     tod: 'dusk',
     weather: 'clear',
     wet: true,
+    // Always off when the simulator opens, every time. This is a deliberate
+    // default, not a remembered preference — nothing persists it.
+    sparkles: false,
   };
 
   const overlay = document.createElement('div');
@@ -459,6 +465,7 @@ export function openMatchDaySimulator(
   const stairsChk = chk(state.stairs);
   const flagsChk = chk(state.flags);
   const wetChk = chk(state.wet);
+  const sparklesChk = chk(state.sparkles);
   const confettiBtn = btn(L('confetti'));
   const pyroBtn = btn(L('pyro'));
   const secAtmo = section(ICONS.atmosphere, L('atmo'), false);
@@ -473,6 +480,7 @@ export function openMatchDaySimulator(
     checkField(L('coverStairs'), stairsChk),
     checkField(L('cornerFlags'), flagsChk),
     checkField(L('wetPitch'), wetChk),
+    checkField(L('phoneFlashes'), sparklesChk),
     row(confettiBtn, pyroBtn),
   );
 
@@ -671,6 +679,7 @@ export function openMatchDaySimulator(
     [bannersChk, 'tip.banners'],
     [stairsChk, 'tip.stairs'],
     [wetChk, 'tip.wet'],
+    [sparklesChk, 'tip.sparkles'],
     [confettiBtn, 'tip.confetti'],
     [pyroBtn, 'tip.pyro'],
     [addBannerBtn, 'tip.bigBanner'],
@@ -725,6 +734,7 @@ export function openMatchDaySimulator(
     sim.setTimeOfDay(state.tod);
     sim.setWeather(state.weather);
     sim.setWetPitch(state.wet);
+    sim.setSparkles(state.sparkles);
     sim.setAutoReveal(state.reveal);
     if (!state.fly) sim.applyShot(shots[state.camIdx] ?? shots[0]);
   }
@@ -831,6 +841,10 @@ export function openMatchDaySimulator(
     state.wet = wetChk.checked;
     dbg('wet toggle ->', state.wet, '(turn Floodlights on + Night to see it best)');
     sim.setWetPitch(state.wet);
+  });
+  sparklesChk.addEventListener('change', () => {
+    state.sparkles = sparklesChk.checked;
+    sim.setSparkles(state.sparkles);
   });
   confettiBtn.addEventListener('click', () => sim.burstConfetti());
   pyroBtn.addEventListener('click', () => sim.burstPyro());

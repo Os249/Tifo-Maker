@@ -34,6 +34,48 @@ export interface StadiumTemplate {
    * new templates; leave existing ones alone (or bump their version).
    */
   evenRows?: boolean;
+  /**
+   * The roof over the bowl. Omitted means the default cantilever ring, so every
+   * existing template keeps a roof without being edited; `{ coverage: 'none' }`
+   * is how a ground says it is genuinely open to the sky, and how the two
+   * stadiums with hand-built roofs (see simulator/stadiumExtras, jewelCrown)
+   * opt out of getting a second one.
+   *
+   * Roof geometry is shell only — it never touches seat positions, so changing
+   * it cannot move a saved design.
+   */
+  roof?: RoofSpec;
+}
+
+/** Which stands a roof covers. Matches the tifo stand names; 'ring' is all four. */
+export type RoofCoverage = 'none' | 'ring' | 'sides' | 'ends' | 'north' | 'south' | 'east' | 'west';
+
+/**
+ * A cantilever roof, described the way a stadium actually varies: how much of
+ * the bowl it covers, how far in it reaches, how high it sits and how it tilts.
+ *
+ * Reach is a FRACTION of the top tier's depth rather than metres, because the
+ * one number that must never be wrong is how much of the tifo the roof hides,
+ * and that is a proportion of the stand, not an absolute distance. A fixed
+ * metre reach silently swallows a shallow bowl.
+ */
+export interface RoofSpec {
+  /** Default 'ring'. */
+  coverage?: RoofCoverage;
+  /** How far in over the top tier, as a fraction of its depth. 0..1. Default 0.5. */
+  reach?: number;
+  /** Metres the roof oversails behind the back of the bowl. Default 5. */
+  overhang?: number;
+  /** Metres from the back of the top tier up to the roof's OUTER edge. Default 6. */
+  rise?: number;
+  /** Metres the leading (pitch-side) edge sits below the outer edge. Default 2. */
+  slope?: number;
+  /** Structural depth in metres, which is what gives the roof a visible edge. Default 1.2. */
+  thickness?: number;
+  /** Deck colour (seen from outside/above). */
+  color?: number;
+  /** Underside colour (what the crowd and the camera actually see). */
+  underColor?: number;
 }
 
 export interface TierSpec {

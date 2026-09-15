@@ -1,0 +1,71 @@
+<!doctype html>
+<!-- Dev-only harness for scripts/stadium-preview.mts. Renders a raw template. -->
+<html lang="en"><head><meta charset="UTF-8"/><title>stadium preview</title></head>
+<body style="margin:0;background:#0b0f1a"><div id="out">loading…</div>
+<script type="module">
+  import { generateSeatMap, EDITOR_UNITS } from '/src/core/seatmap.ts';
+  import { DesignStore } from '/src/core/design.ts';
+  import { paint2D } from '/src/ui/viewer.ts';
+  import { Preview3D } from '/src/render/preview3d.ts';
+  import { compileSpec } from '/src/core/specCompiler.ts';
+  import { validateSpec } from '/src/core/tifoSpec.ts';
+  import { loadTifoFonts } from '/src/core/tifoFonts.ts';
+
+  let preview = null, host = null, previewStore = null, previewKey = null;
+
+  // One colour per stand, so the stand distribution is the thing you SEE.
+  const SPEC = {
+    palette: ['#262a33', '#1f6fe0', '#e8443a', '#f0b429', '#2fb37a', '#ffffff'],
+    layers: [
+      { kind: 'fill', region: 'north', colorIndex: 1 },
+      { kind: 'fill', region: 'east',  colorIndex: 2 },
+      { kind: 'fill', region: 'south', colorIndex: 3 },
+      { kind: 'fill', region: 'west',  colorIndex: 4 },
+      { kind: 'text', region: 'north', text: 'NORTH', colorIndex: 5, fontId: 'poster', arcDeg: 0, heightFrac: 0.7, align: 'center' },
+      { kind: 'text', region: 'south', text: 'SOUTH', colorIndex: 5, fontId: 'poster', arcDeg: 0, heightFrac: 0.7, align: 'center' },
+    ],
+  };
+
+  window.__render = async (template, camScale) => {
+    const map = generateSeatMap(template);
+    await loadTifoFonts();
+    const v = validateSpec(SPEC);
+    if (!v.valid) return { error: v.errors };
+    const store = new DesignStore(map, v.spec.palette);
+    compileSpec(v.spec, map, store);
+
+    const flat = document.createElement('canvas');
+    flat.width = 1600;
+    paint2D(flat, map, store);
+
+    if (!host) {
+      host = document.createElement('div');
+      host.style.cssText = 'position:fixed;left:0;top:0;width:1280px;height:760px;';
+      document.body.appendChild(host);
+    }
+    if (previewKey !== template.id) {
+      if (preview) { preview.dispose?.(); host.textContent = ''; }
+      previewStore = new DesignStore(map, v.spec.palette);
+      preview = new Preview3D(host, map, previewStore);
+      previewKey = template.id;
+    }
+    previewStore.setPalette(v.spec.palette);
+    previewStore.cells.set(store.cells);
+    // Frame every bowl to the same apparent size, or a 200m oval and a 130m one
+    // cannot be compared: the difference you see would just be the camera.
+    const depth = template.tiers.reduce((m, t) => Math.max(m, (t.baseOffset ?? 0) + t.rows * t.rowDepth), 0);
+    const R = Math.max(template.plan.a, template.plan.b) + depth;
+    const k = R * (camScale ?? 1);
+    preview.applyPreset({ name: 'tv', position: [0, k * 0.80, k * 1.70], target: [0, 4, 0] });
+    preview.recolorAll(); preview.renderOnce?.();
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    const cv = host.querySelector('canvas');
+    return {
+      bowl: cv ? cv.toDataURL('image/png') : null,
+      flat: flat.toDataURL('image/png'),
+      seats: map.count,
+    };
+  };
+  document.getElementById('out').textContent = 'ready';
+  window.__ready = true;
+</script></body></html>

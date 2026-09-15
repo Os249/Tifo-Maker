@@ -277,3 +277,95 @@ import { productionSummary as prodSum, seatManifestCsv as manifestCsv, colorFami
     '| families', cFamily('#1c5fd9'), cFamily('#f2f1ec'));
   if (!consistent || !bagsOk || csvRows !== s.totalCards) throw new Error('production computation invariant failed');
 }
+
+// --- Roof geometry, and the sparkle default ---------------------------------
+// The roof is shell-only, so the invariant that matters most is a negative one:
+// it must not have moved a single seat. The rest is coverage behaving the way
+// a tifo region of the same name behaves.
+import { readFileSync as roofRead } from 'node:fs';
+import { STADIUM_CATALOG as ROOF_CATALOG } from '../src/core/stadiumCatalog';
+import { arcU, coverageMask, ROOF_DEFAULTS } from '../src/render/simulator/roof';
+{
+  const VALID = ['none', 'ring', 'sides', 'ends', 'north', 'south', 'east', 'west'];
+  for (const s of ROOF_CATALOG) {
+    const r = s.template.roof;
+    if (!r) continue;
+    if (r.coverage && !VALID.includes(r.coverage)) throw new Error(`${s.id}: bad roof coverage ${r.coverage}`);
+    if (r.reach !== undefined && (r.reach < 0 || r.reach > 1)) throw new Error(`${s.id}: roof reach out of 0..1`);
+  }
+
+  // Coverage must partition the bowl the way the stand names do: one stand is a
+  // quarter of the PERIMETER, 'sides' and 'ends' are halves, 'ring' is all of it.
+  // Measured by arc length, not by counting kept samples — samples are uniform in
+  // the angle parameter, which runs fast down the flat sides of a superellipse
+  // and slow round the ends, so a sample count says east is 28% of a bowl where
+  // it is exactly 25% of the perimeter.
+  const { a, b, exponent: p } = ROOF_CATALOG[0].template.plan;
+  const us = arcU(a, b, p);
+  const share = (c: Parameters<typeof coverageMask>[3]): number => {
+    const m = coverageMask(a, b, p, c);
+    let len = 0;
+    for (let i = 0; i < m.length; i++) {
+      if (!m[i]) continue;
+      const next = us[(i + 1) % us.length] + (i + 1 === us.length ? 1 : 0);
+      len += next - us[i];
+    }
+    return len;
+  };
+  const near = (x: number, want: number): boolean => Math.abs(x - want) < 0.01;
+  const covOk = near(share('ring'), 1) && share('none') === 0 &&
+    near(share('sides'), 0.5) && near(share('ends'), 0.5) &&
+    near(share('west'), 0.25) && near(share('north'), 0.25);
+  const masks = (['north', 'south', 'east', 'west'] as const).map((c) => coverageMask(a, b, p, c));
+  const partitions = masks[0].every((_, i) => masks.filter((m) => m[i]).length === 1);
+  const sides = coverageMask(a, b, p, 'sides');
+  const [n, so, e, w] = masks;
+  const groupsOk = sides.every((v, i) => v === (e[i] || w[i])) &&
+    coverageMask(a, b, p, 'ends').every((v, i) => v === (n[i] || so[i]));
+  // East straddles the seam, exactly as the tifo compiler has it.
+  const seamOk = e[0] === true;
+  console.log('roof coverage: quarters/halves by arc length', covOk,
+    '| four stands partition the ring', partitions, '| groups agree', groupsOk, '| east owns the seam', seamOk);
+  if (!covOk || !partitions || !groupsOk || !seamOk) throw new Error('roof coverage masks do not match the stand split');
+
+  // Seat maps must be untouched by roofs. These counts were measured before the
+  // roof existed; a roof that changes one of them is a roof that moved a seat.
+  const EXPECT: Record<string, number> = {
+    'generic-bowl-60k': 60832, 'single-kop-40k': 39700, 'grand-oval-76k': 75984,
+    'community-grand-national-80k': 90990, 'community-steep-cauldron-55k': 60834,
+    'community-compact-wall-30k': 38756, 'community-desert-arena-68k': 74008,
+    'community-roaring-terraces-48k': 48044, 'community-cauldron-dome-62k': 78648,
+    'community-wide-oval-72k': 91284, 'community-jewel-jeddah-62k': 61572,
+    'community-alawwal-park-25k': 24652, 'community-kingdom-arena-28k': 26052,
+  };
+  let moved = 0;
+  for (const s of ROOF_CATALOG) {
+    const want = EXPECT[s.id];
+    if (want === undefined) continue;
+    if (generateSeatMap(s.template).count !== want) moved++;
+  }
+  console.log('roofs moved no seats:', moved === 0, `(${Object.keys(EXPECT).length} templates)`);
+  if (moved) throw new Error(`${moved} template(s) changed seat count after the roof change`);
+
+  // Phone flashes must start OFF, every time. Three separate places have to agree,
+  // and any one of them drifting quietly turns the default back on.
+  const overlaySrc = roofRead('src/render/simulator/overlay.ts', 'utf8');
+  const simSrc = roofRead('src/render/simulator/index.ts', 'utf8');
+  const offByDefault = /\n\s*sparkles:\s*false,/.test(overlaySrc);
+  const hiddenAtBuild = /this\.sparkles\.object\.visible\s*=\s*false/.test(simSrc);
+  const applied = /sim\.setSparkles\(state\.sparkles\)/.test(overlaySrc);
+  const toggleable = /setSparkles\(b: boolean\)/.test(simSrc);
+  const noPersist = !/sparkles[^\n]*localStorage|localStorage[^\n]*sparkles/.test(overlaySrc);
+  console.log('phone flashes: default off', offByDefault, '| hidden at build', hiddenAtBuild,
+    '| applied', applied, '| toggle', toggleable, '| never persisted', noPersist);
+  if (!offByDefault || !hiddenAtBuild || !applied || !toggleable || !noPersist) {
+    throw new Error('phone-flash sparkles must start off and stay toggleable');
+  }
+
+  // Both languages, like every other label in that panel.
+  for (const k of ['phoneFlashes', 'tip.sparkles']) {
+    const row = new RegExp(`'?${k.replace('.', '\\.')}'?\\s*:\\s*\\{[^}]*\\}`).exec(overlaySrc)?.[0] ?? '';
+    if (!/en:/.test(row) || !/ar:/.test(row)) throw new Error(`${k} is missing an en/ar translation`);
+  }
+  console.log('sparkle strings carry en + ar: true | roof defaults reach', ROOF_DEFAULTS.reach);
+}
