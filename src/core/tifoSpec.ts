@@ -397,6 +397,21 @@ const NOMINAL_GAP_PX = 24; // EDITOR_UNITS.tierGapPx
  * Clamped to [0.5, 4]: past about 4:1 a diffusion model stops composing and
  * starts smearing the subject across the strip, which is worse than a crop.
  */
+/**
+ * Roughly how many ROWS OF SEATS a region has — the resolution the picture will
+ * actually be redrawn at, and the number that decides whether it reads.
+ *
+ * The bake samples one grid cell per row (EDITOR_UNITS.rowPx), so a hero on one
+ * stand across both tiers gets about 52. That is the whole budget: a full-length
+ * figure spends most of it on a body and leaves a dozen rows for a face.
+ */
+export function regionRowsHint(region: Region): number {
+  const tiers = region.tier === 'all' ? NOMINAL_TIERS : 1;
+  const rows = region.rows ? Math.abs(region.rows[1] - region.rows[0]) : 1;
+  const px = (tiers * NOMINAL_TIER_PX + (tiers - 1) * NOMINAL_GAP_PX) * Math.max(0.05, rows);
+  return Math.max(4, Math.round(px / 8)); // EDITOR_UNITS.rowPx
+}
+
 export function regionAspectHint(region: Region): number {
   const run = standRun(region);
   const stands = run ? run.len : 1;

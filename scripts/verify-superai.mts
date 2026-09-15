@@ -13,13 +13,14 @@ import { SUPER_AI_EXEMPLARS, fewShotBlock } from '../src/core/exemplars';
 import { critiqueDesign, repairSpec } from '../src/core/critique';
 import { composeSuperOffline, designFromPrompt, designShuffle } from '../src/core/promptDesigner';
 import { matchClub, CLUBS } from '../src/core/clubs';
-import { quantizePixels } from '../src/core/importImage';
+import { quantizePixels, halftoneCellFor } from '../src/core/importImage';
 import { TtlCache, cacheKey } from '../server/src/aiCache';
 import { aiPeriod, secondsToNextPeriod } from '../server/src/repo';
 import { buildDirectorPrompt, buildSystemPrompt, buildCriticPrompt, clubHintLine, userMessage, criticUserMessage, buildCopywriterPrompt, copyLine, geminiText, whyNoJson, maxOutputTokens } from '../server/src/aiProvider';
 import { TIFO_FONTS } from '../src/core/text';
 import { envNum } from '../server/src/env';
 import { mosaicStyle, colourName, pollinationsSize, geminiAspect } from '../server/src/imageAssets';
+import { regionRowsHint } from '../src/core/tifoSpec';
 import { TIFO_VOICES } from '../src/core/tifoVoices';
 import { refineSpec, contrastRatio } from '../src/core/specRefine';
 import { SPEC_FONT_IDS } from '../src/core/tifoSpec';
@@ -645,6 +646,33 @@ const provSrc = readFileSync(new URL('../server/src/aiProvider.ts', import.meta.
 check('the retry is keyed on status, not an error string', /r\.status !== 503/.test(provSrc));
 check('429 is never retried', !/status === 429/.test(provSrc.split('async function callProvider')[0]));
 check('every provider branch reports its status', (provSrc.match(/status: res\.status/g) ?? []).length >= 3);
+
+// ---- 31. a picture must not be clustered below what it can afford ----
+// Halftone averages BxB cells into one tone, so it DIVIDES tonal resolution by
+// B. A hero on one stand is ~52 rows; a hard-coded cell of 3 left eighteen rows
+// for a whole face. scripts/portrait-resolution.mts renders the difference.
+check('one stand cannot afford clustering at all', halftoneCellFor(52) === 1);
+check('a half-stand band certainly cannot', halftoneCellFor(25) === 1);
+check('a big grid still clusters', halftoneCellFor(400) === 3);
+check('clustering is capped at 3 however big the grid', halftoneCellFor(4000) === 3);
+check('the cell never goes below 1', halftoneCellFor(1) === 1 && halftoneCellFor(0) === 1);
+check('an explicit request is still bounded by the budget', halftoneCellFor(52, 3) === 1 && halftoneCellFor(400, 2) === 2);
+check('tone rows never drop below what a face needs, when affordable',
+  [120, 200, 400].every((r) => Math.ceil(r / halftoneCellFor(r)) >= 40));
+
+// The row budget the generator is told about must match what the bake will give it.
+check('one stand, both tiers is ~52 rows', Math.abs(regionRowsHint({ stand: 'north', tier: 'all' }) - 53) <= 2);
+check('one tier is about half of that', regionRowsHint({ stand: 'north', tier: 0 }) < 30);
+check('a row band is smaller still', regionRowsHint({ stand: 'north', tier: 'all', rows: [0.2, 0.5] }) < 25);
+check('rows never reach zero', regionRowsHint({ stand: 'north', tier: 'all', rows: [0.5, 0.5] }) >= 4);
+
+// ---- 32. the image prompt designs for that budget ----
+const st = mosaicStyle({ aspect: 2.4, palette: ['#262a33', '#ffd400', '#ffffff', '#0a0a0a'], rows: 52 });
+check('the image prompt states the row budget', st.includes('52 ROWS'));
+check('the image prompt demands a tight crop', /CROP IN CLOSE/.test(st) && /head-and-shoulders/.test(st));
+check('the image prompt rules out a full-length figure', /Never a full-length/.test(st));
+check('the image prompt still bans text and gradients', /No text/.test(st) && /No gradients/.test(st));
+check('the row budget has a sane default', mosaicStyle({}).includes('ROWS'));
 
 console.log(`\n${failures === 0 ? 'ALL PASS' : failures + ' FAILED'}`);
 if (failures > 0) process.exit(1);

@@ -26,6 +26,37 @@ export interface ImportOptions {
   halftoneCell?: number;
 }
 
+/**
+ * The tone rows a subject needs before clustering is affordable.
+ *
+ * A face is read from a handful of tonal landmarks — brow, eye sockets, the
+ * shadow down one cheek, the line of the jaw. Below roughly 40 rows those
+ * landmarks merge and it stops being a face.
+ */
+const MIN_TONE_ROWS = 40;
+
+/**
+ * Halftone block size for a grid of this many rows.
+ *
+ * A fixed cell of 3 was the single biggest reason AI portraits arrived as
+ * blobs. Halftone averages BxB cells into one tone, so it divides the tonal
+ * resolution by B — and a hero portrait on one stand is only ~52 rows tall to
+ * begin with:
+ *
+ *   B=1  333 x 52 cells      a face reads
+ *   B=2  167 x 26 cells      marginal
+ *   B=3  111 x 18 cells      eighteen rows for a whole face — a blob
+ *
+ * Clustering is worth it on a big grid, where it trades detail nobody could see
+ * for tones that survive a ~10% no-show rate. On a small one it spends
+ * resolution the design cannot afford. So the cell is whatever the row budget
+ * can pay for, never more.
+ */
+export function halftoneCellFor(rows: number, requested?: number): number {
+  const want = Math.max(1, Math.round(requested ?? 3));
+  return Math.max(1, Math.min(want, Math.floor(rows / MIN_TONE_ROWS)));
+}
+
 export interface TargetRect {
   x: number;
   y: number;

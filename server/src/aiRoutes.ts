@@ -24,7 +24,7 @@ import { createHmac, timingSafeEqual } from 'node:crypto';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { AiEventsRepository, AiOutcome, AiUsageRepository } from './repo';
 import { secondsToNextPeriod } from './repo';
-import { validateSpec, narrowToSingleStand, regionAspectHint, type TifoSpec } from '../../src/core/tifoSpec';
+import { validateSpec, narrowToSingleStand, regionAspectHint, regionRowsHint, type TifoSpec } from '../../src/core/tifoSpec';
 import { refineSpec } from '../../src/core/specRefine';
 import { designFromPrompt, composeSuperOffline } from '../../src/core/promptDesigner';
 import { generateSpecViaProvider, buildDirectorPrompt, critiqueSpecViaProvider, activeProvider, clubHintLine, writeCopy, copyLine } from './aiProvider';
@@ -324,9 +324,11 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
         // picture has to fill, and the palette it is about to be quantized into.
         // Without both it returns a square in arbitrary colours, and the client
         // then destroys it snapping to the design's palette.
+        const region = narrowToSingleStand(layer.region);
         const img = await generateImage(layer.prompt, {
-          aspect: regionAspectHint(narrowToSingleStand(layer.region)),
+          aspect: regionAspectHint(region),
           palette: spec.palette,
+          rows: regionRowsHint(region),
         }).catch((e) => ({ url: null, error: String(e) }) as { url: null; error: string });
         if (img.url) layer.assetRef = img.url;
         else notes.push(`Portrait not generated: ${img.error ?? 'unknown error'}`);

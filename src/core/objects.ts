@@ -1,6 +1,6 @@
 import type { SeatMap } from './types';
 import type { DesignStore } from './design';
-import { applyGridToSeats, enhanceForBake, maskFromAlpha, quantizePixels, rasterize } from './importImage';
+import { applyGridToSeats, enhanceForBake, halftoneCellFor, maskFromAlpha, quantizePixels, rasterize } from './importImage';
 import { renderTextCanvas, type TifoFont } from './text';
 import { drawSymbol } from './symbols';
 
@@ -200,14 +200,26 @@ export class ObjectLayer {
     const cols = Math.max(2, Math.min(2400, Math.round(obj.width / 3)));
     const rows = Math.max(2, Math.min(400, Math.round(obj.height / 8)));
     const pixels = rasterize(source, cols, rows);
-    const grid =
-      obj.kind === 'image'
-        ? quantizePixels(enhanceForBake(pixels, cols, rows), cols, rows, store.palette, {
-            dither: obj.dither,
-            halftone: obj.halftone,
-            alphaThreshold: obj.alphaThreshold,
-          })
-        : maskFromAlpha(pixels, cols, rows, obj.colorIndex); // text + shape: 1-colour mask
+    let grid: Int16Array;
+    if (obj.kind === 'image') {
+      // Both of these effects assume a grid with resolution to spare, and a hero
+      // portrait on one stand has ~52 rows. Clustering it 3x3 left EIGHTEEN rows
+      // of tone for a whole face, which is why AI portraits arrived as blobs;
+      // error diffusion at that size scatters single-cell specks a ~10% no-show
+      // erases. Below the threshold both are switched off and the picture is
+      // quantized straight to the palette — the source is already posterised, so
+      // that yields big contiguous regions, which is what reads at 200m.
+      const affordable = halftoneCellFor(rows);
+      const cell = obj.halftone ? affordable : 1;
+      grid = quantizePixels(enhanceForBake(pixels, cols, rows), cols, rows, store.palette, {
+        dither: obj.dither && affordable > 1,
+        halftone: obj.halftone && cell > 1,
+        halftoneCell: cell,
+        alphaThreshold: obj.alphaThreshold,
+      });
+    } else {
+      grid = maskFromAlpha(pixels, cols, rows, obj.colorIndex); // text + shape: 1-colour mask
+    }
     const target = { x: obj.cx - obj.width / 2, y: obj.cy - obj.height / 2, width: obj.width, height: obj.height };
     const tierAccept = obj.tier === null ? undefined : (i: number) => map.tierOf[i] === obj.tier;
     // Optional region clip (e.g. keep an AI portrait inside its own stand), AND-ed with the tier.

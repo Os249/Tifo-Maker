@@ -33,6 +33,8 @@ export interface ImageStyle {
   aspect?: number;
   /** The design palette the picture is quantized to. Index 0 is the empty seat. */
   palette?: string[];
+  /** Rows of seats the picture will actually be drawn with. ~52 for one stand. */
+  rows?: number;
 }
 
 export interface ImageResult {
@@ -141,18 +143,30 @@ export function mosaicStyle(style: ImageStyle = {}): string {
   const colour = names.length
     ? `Use this exact colour palette and nothing else: ${names.join(', ')}.`
     : 'Use a small set of bold, saturated flat colours.';
+  // The number that governs everything. A hero on one stand is redrawn with
+  // about 52 ROWS of cards — a person per card — so the composition, not the
+  // rendering, decides whether it reads. A full-length figure spends 40 of
+  // those rows on a body and leaves a dozen for the face.
+  const rows = Math.max(8, Math.round(style.rows ?? 52));
   return [
     '. Screen-printed poster art for a giant stadium card mosaic, where every',
-    `pixel becomes one coloured card held up by one person. Shape: ${shapeWord(aspect)}.`,
-    'One heroic subject, centred, filling the frame right to the edges, with a',
-    'small margin all round because the edges may be cropped. Unmistakable',
-    'silhouette, plain flat background behind it.',
+    'pixel becomes one coloured card held up by one person. The finished picture',
+    `is redrawn with only about ${rows} ROWS of cards from top to bottom, so it`,
+    'must survive being reduced to that: build it from a few big, flat, clearly',
+    'separated shapes and nothing that depends on fine detail.',
+    `Shape: ${shapeWord(aspect)}.`,
+    'CROP IN CLOSE. One subject, filling the frame from top edge to bottom edge',
+    'with almost no margin. For a person, that means a TIGHT head-and-shoulders',
+    'crop — the head alone spanning nearly the full height, cropped at the',
+    'shoulders. Never a full-length or waist-up figure: at this size the face',
+    'would be a handful of rows and read as a smudge.',
+    'Unmistakable silhouette, plain flat background behind it.',
     colour,
     `Build the form from about ${tones} FLAT hard-edged tones — deep shadow,`,
     'midtone, light, bright highlight — like a screen print with posterised',
-    'banding. No gradients, no soft focus, no blur, no photographic texture, no',
-    'drop shadows. No text, letters, numbers, logos, signatures or watermarks',
-    'anywhere in the image.',
+    'banding, each tone a big connected area rather than speckles. No gradients,',
+    'no soft focus, no blur, no photographic texture, no drop shadows, no fine',
+    'lines. No text, letters, numbers, logos, signatures or watermarks anywhere.',
   ].join(' ');
 }
 
