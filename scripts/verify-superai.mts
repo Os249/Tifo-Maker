@@ -17,6 +17,7 @@ import { TtlCache, cacheKey } from '../server/src/aiCache';
 import { aiPeriod, secondsToNextPeriod } from '../server/src/repo';
 import { buildDirectorPrompt, buildSystemPrompt, buildCriticPrompt, clubHintLine, userMessage, criticUserMessage, buildCopywriterPrompt, copyLine, geminiText, whyNoJson, maxOutputTokens } from '../server/src/aiProvider';
 import { TIFO_FONTS } from '../src/core/text';
+import { envNum } from '../server/src/env';
 import { mosaicStyle, colourName, pollinationsSize, geminiAspect } from '../server/src/imageAssets';
 import { TIFO_VOICES } from '../src/core/tifoVoices';
 import { refineSpec, contrastRatio } from '../src/core/specRefine';
@@ -562,6 +563,34 @@ check('a real output ceiling is honoured', maxOutputTokens() === 16000);
 process.env.AI_MAX_OUTPUT_TOKENS = '10';
 check('an absurdly small ceiling is refused', maxOutputTokens() === 8192);
 delete process.env.AI_MAX_OUTPUT_TOKENS;
+
+// ---- 27. the quoted-env trap ----
+// This is the bug that makes premium look permanently "busy": Railway's raw env
+// editor invites quotes, Number('"45000"') is NaN, setTimeout(abort, NaN) fires
+// on the next tick, and every model call aborts instantly and reports a timeout.
+// Nothing in the logs says "bad config" — it just looks like the provider is down.
+const ENV = 'TM_TEST_NUM';
+const envCases: Array<[string, string | undefined, number]> = [
+  ['unset', undefined, 45000],
+  ['empty', '', 45000],
+  ['plain', '30000', 30000],
+  ['double-quoted', '"30000"', 30000],
+  ['single-quoted', "'30000'", 30000],
+  ['padded', '  30000  ', 30000],
+  ['not a number', 'soon', 45000],
+  ['below the floor', '5', 45000],
+  ['negative', '-1', 45000],
+];
+for (const [name, val, want] of envCases) {
+  if (val === undefined) delete process.env[ENV]; else process.env[ENV] = val;
+  check(`env number: ${name}`, envNum(ENV, 45000, 1000) === want, `${envNum(ENV, 45000, 1000)}`);
+}
+delete process.env[ENV];
+// The specific failure: a NaN timeout must never reach setTimeout.
+process.env[ENV] = '"45000"';
+check('a quoted timeout is a real number, not NaN', Number.isFinite(envNum(ENV, 45000, 1000)));
+check('the raw parse it replaces really was NaN', Number.isNaN(Number(process.env[ENV])));
+delete process.env[ENV];
 
 console.log(`\n${failures === 0 ? 'ALL PASS' : failures + ' FAILED'}`);
 if (failures > 0) process.exit(1);

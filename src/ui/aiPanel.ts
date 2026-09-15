@@ -375,6 +375,15 @@ export function mountAiPanel(deps: AiPanelDeps): void {
         setStatus('');
         setQuota(res.quota);
         showChoice(res, text, useSuper);
+        // Admins only (the server decides): the actual reason behind "busy", so
+        // a misconfiguration is visible where it happens instead of in the logs.
+        const detail = (res as { detail?: string }).detail;
+        setError(detail ? `Premium could not deliver — ${detail}` : null);
+        if (detail) {
+          const bar = document.getElementById('message');
+          if (bar) bar.textContent = `${label}: ${detail}`;
+        }
+        stopProgress();
         return;
       }
       await applySpec(res.spec);

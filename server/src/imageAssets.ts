@@ -17,6 +17,8 @@
  * nearly lossless.
  */
 
+import { envNum } from './env';
+
 export type ImageProvider = 'pollinations' | 'gemini' | 'none';
 
 /**
@@ -292,8 +294,7 @@ async function callGemini(prompt: string, timeoutMs: number, style: ImageStyle, 
 export async function generateImage(prompt: string, style: ImageStyle = {}): Promise<ImageResult> {
   const provider = activeImageProvider();
   if (provider === 'none') return { url: null, error: 'image generation disabled (AI_IMAGE_PROVIDER=none)' };
-  const raw = Number(process.env.AI_IMAGE_TIMEOUT_MS ?? 45000);
-  const timeoutMs = Number.isFinite(raw) && raw > 0 ? raw : 45000;
+  const timeoutMs = envNum('AI_IMAGE_TIMEOUT_MS', 45000, 1000);
   const call = provider === 'gemini' ? callGemini : callPollinations;
   let r = await call(prompt, timeoutMs, style);
   if (!r.url && (r.status === 429 || r.status === 503)) {

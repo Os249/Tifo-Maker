@@ -29,6 +29,7 @@ import { refineSpec } from '../../src/core/specRefine';
 import { designFromPrompt, composeSuperOffline } from '../../src/core/promptDesigner';
 import { generateSpecViaProvider, buildDirectorPrompt, critiqueSpecViaProvider, activeProvider, clubHintLine, writeCopy, copyLine } from './aiProvider';
 import { generateImage } from './imageAssets';
+import { envNum } from './env';
 import { TtlCache, cacheKey } from './aiCache';
 import { screenPrompt } from './promptSafety';
 
@@ -43,7 +44,7 @@ const genCache = new TtlCache<{ spec: TifoSpec; source: 'model' }>(80, 30 * 60 *
 // the provider's free daily quota / budget. When spent, everyone is routed to the
 // free Quick Designer ("premium resting") until midnight UTC. <=0 disables the cap.
 // In-memory (fine for a single instance); a multi-instance deploy would share this.
-const DAILY_BUDGET = Number(process.env.AI_DAILY_BUDGET ?? 1000);
+const DAILY_BUDGET = envNum('AI_DAILY_BUDGET', 1000, 0);
 let premiumDay = '';
 let premiumCount = 0;
 function rollPremiumDay(): void {
@@ -294,7 +295,15 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
         'ai generate: premium could not deliver',
       );
       note(userId, mode0, 'busy');
-      return reply.code(200).send({ needsChoice: true, reason: 'busy', retryAfterSec: busyRetrySec(), quota: quotaInfo });
+      // An ADMIN gets the real reason in the reply. "Busy" is the right message
+      // for a visitor — it is honest about what they should do and gives nothing
+      // away — but it is useless to the person who has to fix it, who would
+      // otherwise be reading deploy logs to find out that a model id is wrong or
+      // an env var is quoted. Never sent to a normal user.
+      const detail = access.kind === 'admin'
+        ? (modelResult.error ?? `spec failed validation: ${(r.errors ?? []).slice(0, 3).map((e) => `${e.path} ${e.message}`).join('; ')}`)
+        : undefined;
+      return reply.code(200).send({ needsChoice: true, reason: 'busy', retryAfterSec: busyRetrySec(), quota: quotaInfo, ...(detail ? { detail } : {}) });
     }
 
     // Premium succeeded — the ONLY path that consumes a credit.

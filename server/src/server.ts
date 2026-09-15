@@ -16,6 +16,7 @@ import { buildApp, type TemplateInfo } from './routes';
 import { createEmailSender } from './email';
 import { seedTemplates } from './seedTemplates';
 import type { AuthRepository, DesignRepository } from './repo';
+import { envNum } from './env';
 
 /**
  * Production bootstrap.
@@ -133,7 +134,7 @@ async function main(): Promise<void> {
       leads: new PgLeadsRepository(pool),
       aiUsage: new PgAiUsageRepository(pool),
       aiEvents: new PgAiEventsRepository(pool),
-      aiFreeLimit: Number(process.env.AI_FREE_LIMIT ?? 10), // premium designs per hour
+      aiFreeLimit: envNum('AI_FREE_LIMIT', 10, 0), // premium designs per hour
       stadiums,
       stats: new PgAdminStatsRepository(pool),
       traffic,
@@ -163,7 +164,7 @@ async function main(): Promise<void> {
       leads: new MemoryLeadsRepository(),
       aiUsage: new MemoryAiUsageRepository(),
       aiEvents: new MemoryAiEventsRepository((id) => auth.usernameOf(id)),
-      aiFreeLimit: Number(process.env.AI_FREE_LIMIT ?? 10), // premium designs per hour
+      aiFreeLimit: envNum('AI_FREE_LIMIT', 10, 0), // premium designs per hour
       stadiums: new MemoryStadiumRepository(),
       stats: new MemoryAdminStatsRepository(designs),
       traffic: new MemoryTrafficRepository(),
@@ -174,7 +175,7 @@ async function main(): Promise<void> {
     });
   }
 
-  const port = Number(process.env.PORT ?? 8787);
+  const port = envNum('PORT', 8787, 1, 65535);
   await app.listen({ port, host: '0.0.0.0' });
   console.log(
     `tifo-maker on :${port} (${process.env.DATABASE_URL ? 'postgres' : 'memory'} repos, ` +

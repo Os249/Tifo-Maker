@@ -17,6 +17,9 @@ import { SYMBOL_NAMES, SPEC_FONT_IDS, STANDS, SPEC_LIMITS, PATTERN_NAMES } from 
 import { fewShotBlock } from '../../src/core/exemplars';
 import { TIFO_VOICES } from '../../src/core/tifoVoices';
 import { matchClub } from '../../src/core/clubs';
+import { envNum } from './env';
+
+export { envNum };
 
 export type AiProvider = 'anthropic' | 'openai' | 'gemini' | 'none';
 
@@ -526,8 +529,7 @@ function geminiParts(text: string, image?: string): unknown[] {
  * provider. Fall back rather than trust it.
  */
 export function maxOutputTokens(): number {
-  const n = Number(process.env.AI_MAX_OUTPUT_TOKENS ?? 8192);
-  return Number.isFinite(n) && n >= 1024 ? Math.min(n, 32768) : 8192;
+  return envNum('AI_MAX_OUTPUT_TOKENS', 8192, 1024, 32768);
 }
 
 export interface GeminiReply {
@@ -621,9 +623,10 @@ export async function generateSpecViaProvider(
   if (provider === 'none') return { spec: null, error: 'no AI provider configured' };
   // Premium runs a bigger model on a longer prompt, and Super now makes two
   // calls. 20s was tuned for a single fast call and truncates the rest.
+  // A quoted value here used to abort every call on the next tick — see envNum.
   const timeoutMs = opts.tier === 'premium'
-    ? Number(process.env.AI_TIMEOUT_PREMIUM_MS ?? 45000)
-    : Number(process.env.AI_TIMEOUT_MS ?? 20000);
+    ? envNum('AI_TIMEOUT_PREMIUM_MS', 45000, 1000)
+    : envNum('AI_TIMEOUT_MS', 20000, 1000);
   const system = opts.system ?? buildSystemPrompt();
   // Built ONCE. Three separate userMessage() calls meant a new argument had to
   // be threaded through three bodies, and forgetting one would silently drop it

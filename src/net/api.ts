@@ -1009,6 +1009,8 @@ export interface AiChoice {
   reason: 'busy' | 'quota' | 'premium_off';
   retryAfterSec: number;
   quota: AiQuota;
+  /** The real reason behind "busy". Sent by the server to ADMINS only. */
+  detail?: string;
 }
 
 /** Error thrown by the AI calls; `status` 403 with `locked` = admin-only. */
@@ -1040,7 +1042,7 @@ export async function generateAiTifo(
     }),
   });
   const data = (await res.json().catch(() => null)) as
-    | ({ needsChoice?: boolean; reason?: string; retryAfterSec?: number; quota?: AiQuota; error?: string; locked?: boolean } & Partial<AiGenerateResult>)
+    | ({ needsChoice?: boolean; reason?: string; retryAfterSec?: number; quota?: AiQuota; error?: string; locked?: boolean; detail?: string } & Partial<AiGenerateResult>)
     | null;
   if (!res.ok) {
     const err = new Error(data?.error ? tErr(data.error) : `generation failed (${res.status})`) as AiError;
@@ -1056,6 +1058,7 @@ export async function generateAiTifo(
       reason: (data.reason ?? 'busy') as AiChoice['reason'],
       retryAfterSec: data.retryAfterSec ?? 90,
       quota: data.quota as AiQuota,
+      ...(typeof data.detail === 'string' ? { detail: data.detail } : {}),
     };
   }
   return data as AiGenerateResult;
