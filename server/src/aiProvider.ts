@@ -75,6 +75,13 @@ const HOUSE_RULES_CORE: string[] = [
   '- Jump scale 4:1 between hero and support — hero in rows [0.06,0.60], support',
   '  in rows [0.70,0.92]. Two lines of similar size read as a paragraph.',
   '- Posterise: flat blocks, hard edges. Never ramp between two close tones.',
+  '- ARABIC NEEDS ROOM. Measured on real seats: at heightFrac 0.22 a Latin',
+  '  headline loses 2% of itself to strokes too fine to hold up; the same',
+  '  Arabic headline loses 45%, and on a SINGLE TIER it loses 100% — nothing',
+  '  in it reads. Give Arabic heightFrac 0.55+, span BOTH tiers, and keep it to',
+  '  two or three words. Past 0.55 more height buys nothing (width binds), so',
+  '  the only remaining lever is fewer words. Never set Arabic small as a',
+  '  supporting line on one tier — make it the hero or leave it out.',
   '- The PHRASE decides the design. Text is aspect-locked and shrinks to fit its',
   '  stand, so heightFrac is a ceiling, not a promise: fewer words = bigger',
   '  letters. "GRAZIE CAPITANO" fills a stand; "10" cannot without stretch.',
@@ -196,16 +203,20 @@ export function buildSystemPrompt(): string {
     `stand height (0 = front, 1 = back). Stands: ${STANDS.join(', ')}.`,
     voiceLine(false),
     `SymbolName (drawable vector symbols): ${SYMBOL_NAMES.join(', ')}.`,
-    'For a PORTRAIT, player, face or artwork use an "image" layer as the HERO:',
-    'scaleFrac 0.9-1.0 on its OWN stand, name/number on the OPPOSITE stand, subject',
-    'in "prompt". It is generated AT THE REGION\'S SHAPE and IN YOUR PALETTE, so the',
-    'palette you pick IS the picture\'s palette: give a face 5-6 tones ordered dark →',
-    'light (black → dark grey → mid grey → light grey → white) plus one skin tone —',
-    'two flat colours read as a shapeless blob, and do not flood the bowl with one',
-    'flat fill behind it. "fit":"cover" (default) fills the region edge to edge;',
-    '"contain" crops nothing. A mural may span ADJACENT stands via',
-    '"stands":["north","west"]; "sides"/"ends" face each other and would tear it.',
-    'Vector symbols for simple emblems, image layers for real people.',
+    'GIVE THE BOWL A PICTURE. An "image" layer is the HERO whenever the brief has',
+    'a SUBJECT at all — a player or legend, a trophy, an eagle or lion, a crest,',
+    'a crowd, a skyline, a moment. Not just people. scaleFrac 0.9-1.0 on its OWN',
+    'stand, words on the OPPOSITE stand, subject in "prompt".',
+    'Reach for a "symbol" only for a plain geometric mark (star, chevron, ring) or',
+    'when the brief is purely typographic. A vector symbol is ONE flat colour: it',
+    'cannot shade, so a design built on symbols and fills can only ever be flat',
+    'blocks. The picture is what makes a deep palette worth having.',
+    'It is generated AT THE REGION\'S SHAPE and IN YOUR PALETTE, so the palette you',
+    'pick IS the picture\'s palette: give it 6-10 tones ordered dark → light (plus a',
+    'skin tone for a face) — two flat colours read as a shapeless blob. Do not',
+    'flood the bowl with one flat fill behind it. "fit":"cover" (default) fills the',
+    'region edge to edge; "contain" crops nothing. A mural may span ADJACENT stands',
+    'via "stands":["north","west"]; "sides"/"ends" face each other and would tear it.',
     '',
     houseRules(false),
     '',
@@ -246,11 +257,16 @@ export function buildDirectorPrompt(): string {
     'words. Use them EXACTLY as the hero and supporting text — do not translate,',
     'shorten, expand or paraphrase them. Your job is then purely to stage them.',
     '',
-    'PORTRAITS: a player/legend/face is an "image" layer HERO on its OWN stand',
-    '(scaleFrac 0.9-1.0), name on the OPPOSITE stand, "halftone": true (clustered',
-    'tones read far better at seat scale than fine dithering). The picture is',
-    'generated AT ITS REGION\'S SHAPE and IN YOUR PALETTE, so the palette you pick',
-    'IS the picture\'s palette — give a face 5-6 tones dark→light plus a skin tone.',
+    'GIVE THE BOWL A PICTURE. Almost every brief has a SUBJECT — a legend, a',
+    'trophy, an eagle, a crest, a crowd, a skyline, a moment — and that subject is',
+    'an "image" layer HERO on its OWN stand (scaleFrac 0.9-1.0), words on the',
+    'OPPOSITE stand, "halftone": true (clustered tones read far better at seat',
+    'scale than fine dithering). Use a "symbol" only for a plain geometric mark or',
+    'a purely typographic brief: a symbol is ONE flat colour and cannot shade, so a',
+    'bowl of symbols and fills is flat blocks however many colours you list.',
+    'The picture is generated AT ITS REGION\'S SHAPE and IN YOUR PALETTE, so the',
+    'palette you pick IS the picture\'s palette — give it 6-10 tones dark→light',
+    '(plus a skin tone for a face). That is what the colour budget is FOR.',
     '"fit":"cover" (default) fills the region edge to edge; "contain" crops nothing.',
     'A mural may span ADJACENT stands via "stands":["north","west"];',
     '"sides"/"ends" face each other and would tear it.',
@@ -598,6 +614,8 @@ export interface ProviderResult {
   spec: unknown | null;
   /** Human-readable failure reason (surfaced to the UI when it falls back offline). */
   error?: string;
+  /** HTTP status when the provider refused, so the retry decision isn't a string match. */
+  status?: number;
 }
 
 async function httpError(label: string, res: Response): Promise<string> {
@@ -610,12 +628,34 @@ async function httpError(label: string, res: Response): Promise<string> {
   return `${label}: HTTP ${res.status}${body ? `: ${body}` : ''}`;
 }
 
+const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+
 /**
  * Ask the configured model for a TifoSpec. Returns the parsed (UNvalidated) JSON
  * plus, on failure, a human-readable reason. The caller validates and falls back
  * to the offline designer, surfacing the reason in the UI.
+ *
+ * Retries ONCE on 503. "This model is currently experiencing high demand" is
+ * Google's own wording for a temporary spike, and it costs the user a whole
+ * generation: the image path has always retried these, while the text path —
+ * the one that decides whether there is a design at all — did not.
+ *
+ * Never on 429. A quota error is not transient, and retrying it spends another
+ * request against the limit that just refused you.
  */
 export async function generateSpecViaProvider(
+  prompt: string,
+  opts: { system?: string; context?: string; image?: string; tier?: 'fast' | 'premium'; hint?: string } = {},
+): Promise<ProviderResult> {
+  const r = await callProvider(prompt, opts);
+  if (r.spec || r.status !== 503) return r;
+  await sleep(envNum('AI_RETRY_DELAY_MS', 1200, 100, 10000));
+  const again = await callProvider(prompt, opts);
+  // Report the SECOND failure: if it is still down, that is the current truth.
+  return again;
+}
+
+async function callProvider(
   prompt: string,
   opts: { system?: string; context?: string; image?: string; tier?: 'fast' | 'premium'; hint?: string } = {},
 ): Promise<ProviderResult> {
@@ -644,7 +684,7 @@ export async function generateSpecViaProvider(
         { model: process.env.AI_MODEL ?? 'claude-3-5-sonnet-latest', max_tokens: maxOutputTokens(), system, messages: [{ role: 'user', content: user }] },
         timeoutMs,
       );
-      if (!res.ok) return { spec: null, error: await httpError('claude', res) };
+      if (!res.ok) return { spec: null, status: res.status, error: await httpError('claude', res) };
       const data = (await res.json()) as { content?: Array<{ text?: string; type?: string }>; stop_reason?: string };
       // Every text block, not just the first: with extended thinking on, block 0
       // is a thinking block and the JSON is further down.
@@ -669,7 +709,7 @@ export async function generateSpecViaProvider(
         },
         timeoutMs,
       );
-      if (!res.ok) return { spec: null, error: await httpError(`gemini "${model}"`, res) };
+      if (!res.ok) return { spec: null, status: res.status, error: await httpError(`gemini "${model}"`, res) };
       const data = (await res.json()) as GeminiReply;
       const text = geminiText(data);
       const spec = extractJson(text);
@@ -683,7 +723,7 @@ export async function generateSpecViaProvider(
       { model: process.env.AI_MODEL ?? 'gpt-4o-mini', response_format: { type: 'json_object' }, messages: [{ role: 'system', content: system }, { role: 'user', content: user }] },
       timeoutMs,
     );
-    if (!res.ok) return { spec: null, error: await httpError('openai', res) };
+    if (!res.ok) return { spec: null, status: res.status, error: await httpError('openai', res) };
     const data = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
     const spec = extractJson(data.choices?.[0]?.message?.content ?? '');
     return spec ? { spec } : { spec: null, error: 'openai: response was not valid JSON' };

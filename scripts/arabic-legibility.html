@@ -1,0 +1,43 @@
+<!doctype html>
+<!-- Dev-only harness for scripts/arabic-legibility.mts. Not a Vite build input. -->
+<html lang="en"><head><meta charset="UTF-8" /><title>arabic legibility</title></head>
+<body><div id="out">loading…</div>
+<script type="module">
+  import { compileSpec } from '/src/core/specCompiler.ts';
+  import { DesignStore } from '/src/core/design.ts';
+  import { generateSeatMap } from '/src/core/seatmap.ts';
+  import { templateById } from '/src/core/stadiumCatalog.ts';
+  import { validateSpec } from '/src/core/tifoSpec.ts';
+  import { loadTifoFonts } from '/src/core/tifoFonts.ts';
+  import { findFragileSeats } from '/src/core/analysis.ts';
+
+  const maps = new Map();
+  const mapFor = (id) => { if (!maps.has(id)) maps.set(id, generateSeatMap(templateById(id))); return maps.get(id); };
+
+  // One text layer on one stand, nothing else. Returns how much of it survives
+  // at seat scale: seats painted, and how many sit in sub-threshold strokes.
+  window.__measure = async (stadiumId, text, fontId, heightFrac, tier) => {
+    const map = mapFor(stadiumId);
+    await loadTifoFonts();
+    const v = validateSpec({
+      palette: ['#262a33', '#c8102e', '#ffffff'],
+      layers: [
+        { kind: 'fill', region: { stand: 'north', tier }, colorIndex: 1 },
+        { kind: 'text', region: { stand: 'north', tier }, text, colorIndex: 2, fontId,
+          arcDeg: 0, heightFrac, align: 'center' },
+      ],
+    });
+    if (!v.valid) return { error: v.errors };
+    const store = new DesignStore(map, v.spec.palette);
+    compileSpec(v.spec, map, store);
+    // Count ONLY the headline's own seats (palette index 2), and only the
+    // fragile seats that belong to it — not the field's edges.
+    let painted = 0;
+    for (let i = 0; i < map.count; i++) if (store.cells[i] === 2) painted++;
+    let fragile = 0;
+    for (const i of findFragileSeats(store.cells, map)) if (store.cells[i] === 2) fragile++;
+    return { painted, fragile };
+  };
+  document.getElementById('out').textContent = 'ready';
+  window.__ready = true;
+</script></body></html>

@@ -24,7 +24,43 @@ import type { TifoSpec, SpecLayer, Region } from './tifoSpec';
 // Boldness floors — stadium tifos are seen from 100m+ and on TV, so timid sizing
 // reads as thin/scattered. Keep these high: it's better to be too big than too small.
 const MIN_TEXT_HEIGHT = 0.22; // a headline below ~22% of its stand's height looks weak
+/**
+ * Arabic needs far more height than Latin, and this is measured, not guessed:
+ * scripts/arabic-legibility.mts renders a headline on the real seat map and
+ * counts how much of it lands in strokes too fine to hold up.
+ *
+ *                        h=0.22   h=0.40   h=0.55   h=0.85
+ *   "CHAMPIONS"              2%       1%       1%       1%
+ *   "هدفنا أفريقيا"         45%      26%      13%      13%
+ *   ...on ONE tier:
+ *   "CHAMPIONS"             10%       4%       2%       1%
+ *   "نادي القرن"           100%      70%      32%      19%
+ *
+ * At the Latin floor an Arabic headline is 20x more fragile, and on a single
+ * tier it is 100% fragile — not "small", nothing in it resolves at all. Arabic
+ * carries dots and thin connecting strokes that Latin capitals do not.
+ *
+ * Raising the floor is safe: heightFrac is a CEILING, and the renderer shrinks
+ * text to fit its stand, so a bigger number can never overflow — it only stops
+ * the design asking for something smaller than the seats can draw.
+ *
+ * Past ~0.55 height stops buying anything (13%, 13%, 13%): the text is
+ * aspect-locked and width becomes binding. The only lever left there is fewer
+ * words, which is why the prompts push the phrase length so hard.
+ */
+const MIN_TEXT_HEIGHT_ARABIC = 0.55;
+/** One tier is half the rows, so Arabic there needs everything it can get. */
+const MIN_TEXT_HEIGHT_ARABIC_ONE_TIER = 0.8;
 const MIN_SYMBOL_SCALE = 0.45; // a crest/symbol should dominate its stand
+
+/** Arabic, Persian and Urdu ranges, plus the presentation forms. */
+const ARABIC_RE = /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]/;
+
+/** The smallest height this headline can be drawn at and still read. */
+function minHeightFor(text: string, region: Region): number {
+  if (!ARABIC_RE.test(text)) return MIN_TEXT_HEIGHT;
+  return region.tier === 'all' ? MIN_TEXT_HEIGHT_ARABIC : MIN_TEXT_HEIGHT_ARABIC_ONE_TIER;
+}
 /**
  * Minimum contrast between a layer and the field behind it, as a WCAG ratio.
  * 3:1 is the large-text threshold, and it is also where the outdoor-advertising
@@ -140,7 +176,8 @@ export function refineSpec(spec: TifoSpec): TifoSpec {
   for (let i = 0; i < layers.length; i++) {
     const l = layers[i];
     if (l.kind === 'text') {
-      if (l.heightFrac < MIN_TEXT_HEIGHT) l.heightFrac = MIN_TEXT_HEIGHT;
+      const floor = minHeightFor(l.text, l.region);
+      if (l.heightFrac < floor) l.heightFrac = floor;
       if (isBacking(layers, i)) continue;
       const field = fieldUnder(layers, i, background);
       if (!separates(palette, l.colorIndex, field)) l.colorIndex = mostContrasting(palette, field);

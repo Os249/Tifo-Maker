@@ -3,6 +3,7 @@
  *   npm run verify:superai      (or: npx tsx scripts/verify-superai.mts)
  * Throws on any failed invariant; prints a summary otherwise.
  */
+import { readFileSync } from 'node:fs';
 import { generateSeatMap } from '../src/core/seatmap';
 import { DEFAULT_TEMPLATE } from '../src/core/template';
 import { buildStadiumContext, describeStadiumContext } from '../src/core/stadiumContext';
@@ -372,11 +373,14 @@ check('director carries whole-bowl rules that std does not',
 // before: that a palette's headroom goes on TONES rather than more hues, that a
 // picture is generated at its region's shape and in the design's own palette,
 // and that "fit"/"stands" exist. The two duplicated portrait paragraphs each
-// prompt used to carry were fused to pay for part of it.
-check('system prompt within budget', PROMPTS[0][1].length <= 7100, `${PROMPTS[0][1].length}`);
+// prompt used to carry were fused to pay for part of it. The raise after that
+// (7100 -> 7900, 11600 -> 12400) bought the measured Arabic sizing rule and the
+// instruction to make a PICTURE the hero rather than a flat vector symbol —
+// the two things a rendered bowl showed were missing.
+check('system prompt within budget', PROMPTS[0][1].length <= 7900, `${PROMPTS[0][1].length}`);
 // The director is premium-only and capped by AI_DAILY_BUDGET, and ~40% of it is
 // the few-shot gallery — the highest-leverage tokens in the whole system.
-check('director prompt within budget', PROMPTS[1][1].length <= 11600, `${PROMPTS[1][1].length}`);
+check('director prompt within budget', PROMPTS[1][1].length <= 12400, `${PROMPTS[1][1].length}`);
 check('critic prompt within budget', PROMPTS[2][1].length <= 3000, `${PROMPTS[2][1].length}`);
 check('few-shot gallery within budget', fewShotBlock().length <= 5000, `${fewShotBlock().length}`);
 
@@ -591,6 +595,56 @@ process.env[ENV] = '"45000"';
 check('a quoted timeout is a real number, not NaN', Number.isFinite(envNum(ENV, 45000, 1000)));
 check('the raw parse it replaces really was NaN', Number.isNaN(Number(process.env[ENV])));
 delete process.env[ENV];
+
+// ---- 28. Arabic needs more room than Latin (measured, not guessed) ----
+// scripts/arabic-legibility.mts renders these on the real seat map: at the Latin
+// floor an Arabic headline loses 45% of itself to unreadable strokes, and 100%
+// on a single tier. The floor has to know which script it is looking at.
+const refinedHeight = (text: string, tier: number | 'all', asked: number): number => {
+  const v = validateSpec({
+    palette: ['#262a33', '#c8102e', '#ffffff'],
+    layers: [
+      { kind: 'fill', region: { stand: 'north', tier }, colorIndex: 1 },
+      { kind: 'text', region: { stand: 'north', tier }, text, colorIndex: 2, fontId: 'poster', arcDeg: 0, heightFrac: asked, align: 'center' },
+    ],
+  });
+  const l = refineSpec(v.spec!).layers[1] as Extract<SpecLayer, { kind: 'text' }>;
+  return l.heightFrac;
+};
+check('Latin keeps the old floor', refinedHeight('CHAMPIONS', 'all', 0.1) === 0.22);
+check('Arabic is lifted well above it', refinedHeight('نادي القرن', 'all', 0.1) >= 0.55);
+check('Arabic on ONE tier is lifted further', refinedHeight('نادي القرن', 0, 0.1) >= 0.8);
+check('a mixed AR+EN line counts as Arabic', refinedHeight('الأهلي 2026', 'all', 0.1) >= 0.55);
+check('a design that already asked for more is left alone', refinedHeight('نادي القرن', 'all', 0.9) === 0.9);
+check('Latin is never inflated by the Arabic floor', refinedHeight('GRAZIE CAPITANO', 'all', 0.3) === 0.3);
+// An outline pair must stay a pair: both copies have to land on the same height,
+// or the backing no longer sits behind the letterform it is backing.
+const pairSpec = validateSpec({
+  palette: ['#262a33', '#c8102e', '#ffffff', '#111111'],
+  layers: [
+    { kind: 'fill', region: 'north', colorIndex: 1 },
+    { kind: 'text', region: 'north', text: 'نادي القرن', colorIndex: 3, fontId: 'poster', arcDeg: 0, heightFrac: 0.2, align: 'center', outline: 4 },
+    { kind: 'text', region: 'north', text: 'نادي القرن', colorIndex: 2, fontId: 'poster', arcDeg: 0, heightFrac: 0.2, align: 'center' },
+  ],
+}).spec!;
+const pl = refineSpec(pairSpec).layers as Array<Extract<SpecLayer, { kind: 'text' }>>;
+check('both halves of an Arabic pair get the same floor', pl[1].heightFrac === pl[2].heightFrac && pl[1].heightFrac >= 0.55);
+
+// ---- 29. the prompts carry what the render showed was missing ----
+for (const [name, p] of PROMPTS.slice(0, 2)) {
+  check(`${name} prompt states the Arabic size rule`, /ARABIC NEEDS ROOM/.test(p) && p.includes('0.55'));
+  check(`${name} prompt makes a picture the hero`, /GIVE THE BOWL A PICTURE/.test(p));
+  check(`${name} prompt says a symbol cannot shade`, /cannot shade/.test(p));
+}
+check('the image rule is no longer people-only', !PROMPTS[1][1].includes('image layers for real people'));
+
+// ---- 30. a transient 503 is retried, a 429 is not ----
+// A quota error retried is a second request spent on the limit that just
+// refused you; an overload retried is usually a design the user does get.
+const provSrc = readFileSync(new URL('../server/src/aiProvider.ts', import.meta.url), 'utf8');
+check('the retry is keyed on status, not an error string', /r\.status !== 503/.test(provSrc));
+check('429 is never retried', !/status === 429/.test(provSrc.split('async function callProvider')[0]));
+check('every provider branch reports its status', (provSrc.match(/status: res\.status/g) ?? []).length >= 3);
 
 console.log(`\n${failures === 0 ? 'ALL PASS' : failures + ' FAILED'}`);
 if (failures > 0) process.exit(1);
