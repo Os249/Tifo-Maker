@@ -279,9 +279,19 @@ export function mountAiPanel(deps: AiPanelDeps): void {
         // every AI hero look small. 'cover' fills the region and lets the
         // region clip the overflow — the bake is masked by regionPredicate, so
         // it still cannot touch a neighbouring stand.
+        //
+        // Cover is BOUNDED. If the asset's shape and the region's diverge far
+        // enough, covering means throwing most of the picture away — and a
+        // portrait cropped to a band of cheek is worse than one with the bare
+        // concrete of index 0 showing at its sides. MAX_CROP caps the loss at
+        // about a quarter of the long axis. When the shapes match, which is the
+        // normal case now that the generator is asked for the region's own
+        // aspect, cover and contain are the same number and this never binds.
+        const MAX_CROP = 1.3;
         const sx = rect.width / bmp.width;
         const sy = rect.height / bmp.height;
-        const s = (layer.fit === 'contain' ? Math.min(sx, sy) : Math.max(sx, sy)) * layer.scaleFrac;
+        const contain = Math.min(sx, sy);
+        const s = (layer.fit === 'contain' ? contain : Math.min(Math.max(sx, sy), contain * MAX_CROP)) * layer.scaleFrac;
         const w = bmp.width * s;
         const h = bmp.height * s;
         const created = objects.addImage({

@@ -319,8 +319,9 @@ function clampNum(v: unknown, lo: number, hi: number, dflt: number): number {
 export function narrowToSingleStand(region: Region): Region {
   if (region.stands && region.stands.length > 0) {
     // An unbroken run of stands is one continuous surface, so a picture can span
-    // it. Only a SPLIT set ('sides', 'ends') has to collapse.
-    if (isContiguousRegion(region)) return region;
+    // it — but only up to MAX_IMAGE_STANDS. A SPLIT set ('sides', 'ends') and an
+    // over-long run both collapse.
+    if (isContiguousRegion(region) && region.stands.length <= MAX_IMAGE_STANDS) return region;
     return region.rows
       ? { stand: region.stands[0], tier: region.tier, rows: region.rows }
       : { stand: region.stands[0], tier: region.tier };
@@ -328,6 +329,18 @@ export function narrowToSingleStand(region: Region): Region {
   if (region.stand === 'all') return { ...region, stand: 'north' };
   return region;
 }
+
+/**
+ * How many stands one generated picture may span.
+ *
+ * Two, because of what is on the other end of the request. Three stands is a
+ * 7.5:1 strip and four is 10:1; no diffusion model composes a subject at those
+ * proportions, so the generator returns something nearer 4:1 and the renderer
+ * has to crop 47% of it away to cover the strip — a face reduced to a band of
+ * cheek. A picture that wide is a job for the pattern and lettering layers,
+ * which are drawn analytically and do not care how wide the region is.
+ */
+const MAX_IMAGE_STANDS = 2;
 
 /**
  * The unbroken run of stands a region covers, as a start index into STAND_ORDER
