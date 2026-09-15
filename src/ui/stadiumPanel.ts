@@ -35,6 +35,7 @@ import { ACTIVE_AREAS, getActiveArea, setActiveArea } from '../core/activeArea';
 import { orientCells, type OrientOp } from '../core/orientation';
 import { createCustomTemplate, addCustomTemplate, removeCustomTemplate, parseImportedTemplate, exportTemplate, type CustomSize } from '../core/customStadiums';
 import { submitStadium, fetchPendingStadiums, reviewStadium, type PendingStadium } from '../net/api';
+import { buildStadiumImport } from './stadiumImport';
 
 import { t, tl } from './i18n';
 export interface StadiumPanelDeps {
@@ -482,7 +483,16 @@ export function mountStadiumPanel(deps: StadiumPanelDeps): void {
       selectedId = parsed.id;
       render();
     });
-    customTools.append(nameI, grid, createBtn, importI, importBtn, importMsg);
+    // Building from a real ground sits under hand-authoring, not instead of it:
+    // the two answer different questions, and someone who wants an exact bowl
+    // they invented should not have to scroll past a search box to get it.
+    const fromReal = buildStadiumImport({
+      onAdded: (id) => {
+        selectedId = id;
+        render();
+      },
+    });
+    customTools.append(nameI, grid, createBtn, importI, importBtn, importMsg, fromReal);
     listEl.parentElement?.insertBefore(customTools, listEl);
   }
 

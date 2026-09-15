@@ -369,3 +369,60 @@ import { arcU, coverageMask, ROOF_DEFAULTS } from '../src/render/simulator/roof'
   }
   console.log('sparkle strings carry en + ar: true | roof defaults reach', ROOF_DEFAULTS.reach);
 }
+
+// --- The stadium import panel -----------------------------------------------
+// Its notes come from src/core/stadiumFit, which has no i18n, so they reach the
+// user only if core emits a key and the panel looks it up. That wiring shipped
+// broken once — English prose in the middle of the Arabic panel — and a
+// screenshot caught it rather than a test, which is the wrong way round.
+import { readFileSync as siRead } from 'node:fs';
+import { buildStadium as siBuild } from '../src/core/stadiumFit';
+{
+  const i18n = siRead('src/ui/i18n.ts', 'utf8');
+  const panel = siRead('src/ui/stadiumImport.ts', 'utf8');
+
+  // Every si.* string carries both languages.
+  //
+  // Matched to end-of-line, NOT with [^}]*: a string containing a {placeholder}
+  // has a closing brace in the middle of it, so the lazy version stops early and
+  // reports six perfectly good translations as missing. That regex has now been
+  // written wrong twice in this codebase; one entry per line is the invariant
+  // that makes the simple match correct.
+  const rows = (i18n.match(/^\s*'si\.[a-zA-Z.]+':.*$/gm) ?? []).map((r) => r.trim());
+  const missing = rows.filter((r) => !/\ben:/.test(r) || !/\bar:/.test(r));
+  console.log('stadium import: si.* strings', rows.length, '| missing a translation', missing.length);
+  if (rows.length < 30 || missing.length) throw new Error(`stadium import strings incomplete: ${missing.join(' ')}`);
+
+  // Every key core can emit has a string, or the panel prints the key at the user.
+  const core = siRead('src/core/stadiumFit.ts', 'utf8');
+  const emitted = [...core.matchAll(/'(si\.(?:note|warn)\.[a-zA-Z]+)'/g)].map((m) => m[1]);
+  const unstranslated = [...new Set(emitted)].filter((k) => !i18n.includes(`'${k}'`));
+  console.log('stadium import: keys core emits', new Set(emitted).size, '| without a string', unstranslated.length);
+  if (unstranslated.length) throw new Error(`stadiumFit emits untranslated keys: ${unstranslated.join(', ')}`);
+
+  // The panel must actually look them up rather than printing the English.
+  const looksUp = /p\.noteKey\s*\?\s*tv\(p\.noteKey/.test(panel) && /tv\(w\.key/.test(panel);
+  console.log('stadium import: panel translates notes and warnings', looksUp);
+  if (!looksUp) throw new Error('stadiumImport must render noteKey/warning keys through tv()');
+
+  // And the confidence of every field must be reachable as a label.
+  const fit = siBuild({
+    footprint: Array.from({ length: 24 }, (_, i) => {
+      const t2 = (i / 24) * Math.PI * 2;
+      return [35.9 + (Math.cos(t2) * 110) / 94000, 32 + (Math.sin(t2) * 85) / 111132] as [number, number];
+    }),
+    capacity: 40000,
+  });
+  const confs = new Set(Object.values(fit.provenance).map((p) => p.confidence));
+  const unlabelled = [...confs].filter((c) => !i18n.includes(`'si.conf.${c}'`));
+  console.log('stadium import: confidence levels in use', [...confs].join('/'), '| unlabelled', unlabelled.length);
+  if (unlabelled.length) throw new Error(`no label for confidence: ${unlabelled.join(', ')}`);
+
+  // The provenance must distinguish, not decorate: a footprint-only build has to
+  // report at least one guess and at least one non-guess, which is the whole
+  // reason the table exists.
+  const hasGuess = [...confs].includes('suggested');
+  const hasSolid = [...confs].some((c) => c === 'derived' || c === 'measured');
+  console.log('stadium import: separates guesses from measurements', hasGuess && hasSolid);
+  if (!hasGuess || !hasSolid) throw new Error('provenance is not distinguishing guesses from measurements');
+}

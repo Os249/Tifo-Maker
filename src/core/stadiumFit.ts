@@ -330,7 +330,24 @@ export type Confidence = 'measured' | 'derived' | 'suggested' | 'given';
 export interface FieldProvenance {
   source: string;
   confidence: Confidence;
+  /** English, for scripts and CLI output. */
   note?: string;
+  /**
+   * The same note as a translation key plus its numbers, so the UI can render it
+   * in the reader's language. Core stays free of i18n — it emits the key and the
+   * values, and ui/stadiumImport does the lookup. Without this the most
+   * informative part of the panel is English inside an Arabic interface, which
+   * is exactly how it first shipped and exactly what a screenshot caught.
+   */
+  noteKey?: string;
+  noteVars?: Record<string, string | number>;
+}
+
+/** A warning, keyed the same way and for the same reason. */
+export interface FitWarning {
+  text: string;
+  key: string;
+  vars?: Record<string, string | number>;
 }
 
 export interface FitInput {
@@ -362,7 +379,7 @@ export interface FitResult {
   provenance: Record<string, FieldProvenance>;
   /** Fields a human should look at before this is trusted. */
   confirm: string[];
-  warnings: string[];
+  warnings: FitWarning[];
   /** Seats the built bowl holds, and the capacity it was aiming at. */
   built: number;
   target?: number;
@@ -381,7 +398,7 @@ export interface FitResult {
 export function buildStadium(input: FitInput): FitResult {
   const prov: Record<string, FieldProvenance> = {};
   const confirm: string[] = [];
-  const warnings: string[] = [];
+  const warnings: FitWarning[] = [];
   const k = input.known ?? {};
 
   // ---- plan curve
@@ -393,6 +410,8 @@ export function buildStadium(input: FitInput): FitResult {
       source: 'imagery-inner-edge',
       confidence: 'measured',
       note: `${input.innerRing.length} points, ${(f.rms * 100).toFixed(1)}% rms radial`,
+      noteKey: 'si.note.ring',
+      noteVars: { n: input.innerRing.length, rms: (f.rms * 100).toFixed(1) },
     };
     prov['plan.a'] = p; prov['plan.b'] = p; prov['plan.exponent'] = p;
   } else if (input.footprint && input.footprint.length >= 6) {
@@ -406,10 +425,12 @@ export function buildStadium(input: FitInput): FitResult {
       source: 'osm-footprint-inset',
       confidence: 'suggested',
       note: `outer ${f.a}x${f.b} m inset by ${inset} m; plan is row 0, not the wall`,
+      noteKey: 'si.note.inset',
+      noteVars: { a: f.a, b: f.b, inset: Math.round(inset) },
     };
     prov['plan.a'] = p; prov['plan.b'] = p; prov['plan.exponent'] = p;
     confirm.push('plan.a', 'plan.b');
-    warnings.push('No seating ring measured: the plan curve is the building outline inset by a guess. Sample the imagery for a real one.');
+    warnings.push({ key: 'si.warn.noRing', text: 'No seating ring measured: the plan curve is the building outline inset by a guess. Sample the imagery for a real one.' });
   } else {
     throw new Error('buildStadium needs at least a footprint or a measured inner ring');
   }
@@ -418,23 +439,34 @@ export function buildStadium(input: FitInput): FitResult {
   const aisles = k.aisles ?? 28;
   prov['aisles.count'] = k.aisles
     ? { source: 'user', confidence: 'given' }
-    : { source: 'default', confidence: 'suggested', note: 'a stadium-sized default; imagery can count them' };
+    : { source: 'default', confidence: 'suggested', note: 'a stadium-sized default; imagery can count them', noteKey: 'si.note.aisles' };
   if (!k.aisles) confirm.push('aisles.count');
 
   const seatPitch = k.seatPitch ?? 0.5;
-  prov['seatPitch'] = { source: k.seatPitch ? 'user' : 'regulation', confidence: k.seatPitch ? 'given' : 'derived', note: '~0.5 m is the regulated working figure' };
+  prov['seatPitch'] = {
+    source: k.seatPitch ? 'user' : 'regulation',
+    confidence: k.seatPitch ? 'given' : 'derived',
+    note: '~0.5 m is the regulated working figure',
+    noteKey: k.seatPitch ? undefined : 'si.note.pitch',
+  };
 
   // Rows come from the band depth when imagery measured one, because that is a
   // measurement; otherwise they fall out of the capacity solve below.
   let totalRows = input.bandDepth ? Math.max(4, Math.round(input.bandDepth / 0.8)) : 30;
   if (input.bandDepth) {
-    prov['tiers.rows'] = { source: 'imagery-band-depth', confidence: 'measured', note: `${input.bandDepth.toFixed(1)} m at ~0.8 m per row` };
+    prov['tiers.rows'] = {
+      source: 'imagery-band-depth',
+      confidence: 'measured',
+      note: `${input.bandDepth.toFixed(1)} m at ~0.8 m per row`,
+      noteKey: 'si.note.band',
+      noteVars: { m: input.bandDepth.toFixed(1) },
+    };
   }
 
   const tierCount = k.tiers ?? suggestTierCount(totalRows);
   prov['tiers.length'] = k.tiers
     ? { source: 'user', confidence: 'given' }
-    : { source: 'row-count-rule', confidence: 'suggested', note: 'right on 10 of 13 shipped templates; a photo settles it' };
+    : { source: 'row-count-rule', confidence: 'suggested', note: 'right on 10 of 13 shipped templates; a photo settles it', noteKey: 'si.note.tiers' };
   if (!k.tiers) confirm.push('tiers.length');
 
   const base: StadiumTemplate = {
@@ -465,10 +497,18 @@ export function buildStadium(input: FitInput): FitResult {
       source: 'capacity-solve',
       confidence: 'derived',
       note: `${built.toLocaleString()} built vs ${input.capacity.toLocaleString()} stated, ${(err * 100).toFixed(1)}%`,
+      noteKey: 'si.note.capacity',
+      noteVars: { built: built.toLocaleString(), stated: input.capacity.toLocaleString(), pct: (err * 100).toFixed(1) },
     };
-    if (err > 0.1) warnings.push(`Capacity is ${(err * 100).toFixed(0)}% out after solving — the plan curve or the capacity is wrong.`);
+    if (err > 0.1) {
+      warnings.push({
+        key: 'si.warn.capOff',
+        vars: { pct: (err * 100).toFixed(0) },
+        text: `Capacity is ${(err * 100).toFixed(0)}% out after solving — the plan curve or the capacity is wrong.`,
+      });
+    }
   } else {
-    warnings.push('No capacity: the row count is a guess and nothing checks it.');
+    warnings.push({ key: 'si.warn.noCapacity', text: 'No capacity: the row count is a guess and nothing checks it.' });
     confirm.push('tiers.rows');
   }
 

@@ -184,11 +184,11 @@ console.log('\n--- provenance --------------------------------------------------
   const lonlat = ring.map(([x, y]) => [35.9 + x / 94000, 32 + y / 111132] as Pt);
   const guessed = buildStadium({ footprint: lonlat, capacity: 60000 });
   check(guessed.provenance['plan.a'].confidence === 'suggested', 'a footprint is reported as suggested, not measured');
-  check(guessed.warnings.some((w) => w.includes('outline')), 'and it warns that the outline is not row 0');
+  check(guessed.warnings.some((w) => w.key === 'si.warn.noRing'), 'and it warns that the outline is not row 0');
   check(guessed.confirm.includes('plan.a'), 'and asks a human to check the plan');
 
   const nocap = buildStadium({ innerRing: trueRing(truth) });
-  check(nocap.warnings.some((w) => w.includes('capacity')), 'no capacity is reported as a guess');
+  check(nocap.warnings.some((w) => w.key === 'si.warn.noCapacity'), 'no capacity is reported as a guess');
 
   let threw = false;
   try { buildStadium({}); } catch { threw = true; }

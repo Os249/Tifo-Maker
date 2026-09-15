@@ -20,7 +20,8 @@
     "test:server": "tsx server/test/server.test.mts",
     "build:prod": "tsc --noEmit && vite build",
     "start": "NODE_ENV=production tsx server/src/server.ts",
-    "verify:stadiumfit": "tsx scripts/verify-stadiumfit.mts"
+    "verify:stadiumfit": "tsx scripts/verify-stadiumfit.mts",
+    "shots:stadiumimport": "tsx scripts/stadium-import-shots.mts"
   },
   "dependencies": {
     "@fastify/helmet": "^13.0.2",
