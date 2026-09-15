@@ -259,6 +259,18 @@ async function runSuite(name: string, repo: DesignRepository, auth: AuthReposito
   const quickAr = await app.inject({ method: 'POST', url: '/api/ai/generate', headers: bearer(carolTok), payload: { prompt: 'الهلال نسر ذهبي على المدرج الجنوبي', engine: 'offline' } });
   assert.equal(quickAr.statusCode, 200);
   assert.ok((quickAr.json().spec.palette as string[]).includes('#0033a0'), 'Arabic "الهلال" → Al Hilal blue');
+  // The free engine must not move the meter, and every success path must say
+  // plainly what the caller got. A design is only charged when it is complete —
+  // a hero picture that never arrived used to cost a premium design anyway, and
+  // the holed result was then cached for half an hour.
+  assert.equal(quickGen.json().outcome?.kind, 'full', 'the Quick Designer reports a full result');
+  assert.equal(quickGen.json().outcome?.charged, false, 'the Quick Designer never charges');
+  const afterQuick = await app.inject({ method: 'GET', url: '/api/ai/quota', headers: bearer(carolTok) });
+  assert.equal(afterQuick.json().used, 0, 'three free designs later, nothing has been charged');
+  assert.equal(afterQuick.json().remaining, 10, 'the hourly allowance is untouched by free designs');
+  // "Busy" must not charge either — the earlier premium attempt returned a choice.
+  assert.equal(autoGen.json().quota?.used ?? 0, 0, 'a refused premium attempt costs nothing');
+
   const exported = await app.inject({ method: 'GET', url: '/api/account/export', headers: bearer(carolTok) });
   assert.equal(exported.statusCode, 200);
   assert.equal(exported.json().account.username, 'carol', 'export includes account data');

@@ -505,6 +505,63 @@ const STRINGS: Record<string, { en: string; ar: string }> = {
   'ed.import.dither': { en: 'Dither', ar: 'تنعيم' },
   'ed.import.cutout': { en: 'Remove background', ar: 'إزالة الخلفية' },
   'ed.ai.cancel': { en: 'Stop', ar: 'إيقاف' },
+  // ---- AI state card: every outcome the panel can report ----
+  'ai.card.doneSuper': { en: 'Designed with Super AI', ar: 'تم التصميم بالذكاء الخارق' },
+  'ai.card.donePremium': { en: 'Designed with Premium AI', ar: 'تم التصميم بالذكاء المتقدم' },
+  'ai.card.doneQuick': { en: 'Designed with the Quick Designer', ar: 'تم التصميم بالمصمّم السريع' },
+  'ai.card.degraded': { en: 'Designed — but {what} could not be generated', ar: 'تم التصميم — لكن تعذّر توليد {what}' },
+  'ai.card.aPicture': { en: 'the picture', ar: 'الصورة' },
+  'ai.card.nPictures': { en: '{n} pictures', ar: '{n} صور' },
+  'ai.card.degradedFree': {
+    en: 'The stand it was meant to fill is bare, so this one was free — your design count has not changed.',
+    ar: 'المدرج المخصص لها ظهر فارغًا، ولهذا لم نحتسب هذا التصميم — رصيدك لم يتغيّر.',
+  },
+  'ai.card.degradedPaid': { en: 'The stand it was meant to fill is bare.', ar: 'المدرج المخصص لها ظهر فارغًا.' },
+  'ai.card.degradedWhy': { en: 'The image service turned the request down.', ar: 'رفضت خدمة الصور الطلب.' },
+  'ai.card.reason': { en: 'Reason: {detail}', ar: 'السبب: {detail}' },
+  'ai.card.tryAgain': { en: 'Try again', ar: 'حاول مرة أخرى' },
+  'ai.card.keep': { en: 'Keep this design', ar: 'احتفظ بالتصميم' },
+  'ai.card.useQuick': { en: 'Use the Quick Designer', ar: 'استخدم المصمّم السريع' },
+  'ai.card.retryPremium': { en: 'Try Premium again', ar: 'جرّب الذكاء المتقدم مجددًا' },
+  'ai.card.premiumFreeIn': { en: 'Premium free in {left}', ar: 'يتاح خلال {left}' },
+  'ai.card.quotaTitle': {
+    en: "You've used all {limit} premium designs this hour",
+    ar: 'استهلكت كل تصاميمك المتقدمة ({limit}) هذه الساعة',
+  },
+  'ai.card.quotaBody': {
+    en: 'Your allowance resets in about {mins} min. The Quick Designer is free and instant, and its designs are fully editable too.',
+    ar: 'يتجدّد رصيدك خلال {mins} دقيقة تقريبًا. المصمّم السريع مجاني وفوري، وتصاميمه قابلة للتعديل بالكامل.',
+  },
+  'ai.card.busyTitle': { en: 'Premium AI could not deliver just now', ar: 'تعذّر على الذكاء المتقدم التنفيذ الآن' },
+  'ai.card.busyBody': {
+    en: 'It is busy or briefly unavailable. Your design allowance was not touched.',
+    ar: 'إما مشغول أو غير متاح مؤقتًا. ولم يُخصم من رصيدك شيء.',
+  },
+  'ai.card.stopped': { en: 'Stopped', ar: 'تم الإيقاف' },
+  'ai.card.stoppedBody': { en: 'Nothing was generated and no design was used.', ar: 'لم يتم توليد أي شيء ولم يُستهلك أي تصميم.' },
+  'ai.card.startAgain': { en: 'Start again', ar: 'ابدأ من جديد' },
+  'ai.card.quotaOut': { en: 'You have used all your premium designs for now', ar: 'استهلكت كل تصاميمك المتقدمة حاليًا' },
+  'ai.card.quotaOutBody': {
+    en: 'The Quick Designer is free, instant, and its designs are just as editable.',
+    ar: 'المصمّم السريع مجاني وفوري، وتصاميمه قابلة للتعديل تمامًا.',
+  },
+  'ai.card.signIn': { en: 'Sign in to generate', ar: 'سجّل الدخول للتوليد' },
+  'ai.card.signInBody': { en: 'Your brief is saved — it will still be here afterwards.', ar: 'وصفك محفوظ — سيبقى موجودًا بعد تسجيل الدخول.' },
+  'ai.card.offline': { en: 'You are offline', ar: 'أنت غير متصل بالإنترنت' },
+  'ai.card.offlineBody': {
+    en: 'The Quick Designer works without a connection and needs no quota.',
+    ar: 'المصمّم السريع يعمل دون اتصال ولا يحتاج رصيدًا.',
+  },
+  'ai.card.failed': { en: 'The design could not be generated', ar: 'تعذّر توليد التصميم' },
+  'ai.card.failedBody': {
+    en: 'Something went wrong on the way to the model. Nothing was used.',
+    ar: 'حدث خطأ في الطريق إلى النموذج. ولم يُستهلك شيء.',
+  },
+  'ai.card.polished': { en: 'Polished by AI critique', ar: 'تم التحسين بمراجعة الذكاء' },
+  'ai.card.polishKept': { en: 'Kept your design — the critique suggested no change', ar: 'أبقينا تصميمك — المراجعة لم تقترح أي تغيير' },
+  'ai.card.polishFailed': { en: 'Polish could not run', ar: 'تعذّر تشغيل التحسين' },
+  'ai.card.polishFailedBody': { en: 'Your design is untouched. Try again in a moment.', ar: 'تصميمك لم يتغيّر. جرّب بعد قليل.' },
+  'ai.card.describeFirst': { en: 'Describe the tifo you want first', ar: 'اكتب وصف التيفو أولًا' },
   'ed.import.cutoutT': { en: 'Flood the flat backdrop away so the design underneath shows through', ar: 'يزيل الخلفية المسطحة ليظهر التصميم خلف الصورة' },
   'ed.import.alpha': { en: 'Alpha', ar: 'الشفافية' },
   'ed.import.cancel': { en: 'Cancel', ar: 'إلغاء' },
@@ -1067,6 +1124,18 @@ export function t(key: string): string {
   const entry = STRINGS[key];
   if (!entry) return key;
   return entry[current];
+}
+
+/**
+ * Translate with {placeholders} filled in.
+ *
+ * Arabic puts numbers and names in different places than English does, so the
+ * sentence has to be translated whole and the values dropped into it — never
+ * assembled from fragments in code, which is how "designed with" ends up
+ * stranded in English inside an Arabic panel.
+ */
+export function tv(key: string, vars: Record<string, string | number>): string {
+  return t(key).replace(/\{(\w+)\}/g, (_, k: string) => String(vars[k] ?? ''));
 }
 
 /**

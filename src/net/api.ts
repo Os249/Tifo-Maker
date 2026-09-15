@@ -1013,7 +1013,8 @@ export interface AiGenerateResult {
  */
 export interface AiOutcome {
   kind: 'full' | 'degraded';
-  missing?: string;
+  /** How many pictures never arrived. A count, so the UI can translate it. */
+  missingCount?: number;
   of?: number;
   charged: boolean;
   detail?: string;

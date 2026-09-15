@@ -771,5 +771,42 @@ check('a text row band is not a field and is untouched',
 check('the house rule now forbids repeating the margin',
   /NEVER on more/.test(PROMPTS[1][1]) && /cut off/.test(PROMPTS[1][1]));
 
+// ---- 35. every string the AI panel can show exists in BOTH languages ----
+// The panel is used in Arabic. A message added in English only does not fail a
+// build, does not fail a type-check, and is invisible until an Arabic-speaking
+// user hits exactly that state — which is how "Designed with Premium AI" ended
+// up sitting in English inside an Arabic panel.
+const i18nSrc = readFileSync(new URL('../src/ui/i18n.ts', import.meta.url), 'utf8');
+const panelSrc = readFileSync(new URL('../src/ui/aiPanel.ts', import.meta.url), 'utf8');
+const declared = new Set(Array.from(i18nSrc.matchAll(/^\s*'([\w.]+)':\s*\{\s*en:/gm), (m) => m[1]));
+const used = Array.from(panelSrc.matchAll(/\bt[v]?\('([\w.]+)'/g), (m) => m[1]);
+const missing = [...new Set(used)].filter((k) => !declared.has(k));
+check('every key the AI panel asks for is declared', missing.length === 0, missing.join(', '));
+// Both languages, non-empty, for every card key.
+let arGaps = 0;
+// Lazily to the entry's own "}," — a greedy or [^}] match stops at the closing
+// brace of a {placeholder} and reports a perfectly good translation as missing.
+for (const m of i18nSrc.matchAll(/'(ai\.card\.[\w.]+)':\s*\{([\s\S]*?)\},\n/g)) {
+  const body = m[2];
+  const ar = /ar:\s*'([^']*)'|ar:\s*"([^"]*)"/.exec(body);
+  if (!ar || !(ar[1] ?? ar[2] ?? '').trim()) arGaps++;
+}
+check('every AI card string has a non-empty Arabic translation', arGaps === 0, `${arGaps} gaps`);
+// Placeholders must survive translation, or a number lands nowhere.
+let phGaps = 0;
+for (const m of i18nSrc.matchAll(/'(ai\.card\.[\w.]+)':\s*\{\s*en:\s*(['"])([\s\S]*?)\2,\s*ar:\s*(['"])([\s\S]*?)\4,?\s*\}/g)) {
+  const en = new Set(Array.from(m[3].matchAll(/\{(\w+)\}/g), (x) => x[1]));
+  const ar = new Set(Array.from(m[5].matchAll(/\{(\w+)\}/g), (x) => x[1]));
+  if (en.size !== ar.size || [...en].some((k) => !ar.has(k))) phGaps++;
+}
+check('placeholders match across languages', phGaps === 0, `${phGaps} mismatched`);
+// The panel must not have gone back to hard-coded sentences.
+check('no hard-coded card copy left in the panel',
+  !/\b(?:title|body|label):\s*'[A-Z][a-z]+ [a-z]/.test(panelSrc));
+check('the panel reports a degraded result as its own state', /outcome\?\.kind === 'degraded'/.test(panelSrc));
+check('a stopped run is not reported as an error', /AbortError/.test(panelSrc) && /ai\.card\.stopped/.test(panelSrc));
+check('every failure branch offers a way forward',
+  (panelSrc.match(/actions: \[/g) ?? []).length >= 6);
+
 console.log(`\n${failures === 0 ? 'ALL PASS' : failures + ' FAILED'}`);
 if (failures > 0) process.exit(1);

@@ -14,6 +14,14 @@ import { chromium, type Page } from 'playwright';
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const OUT = resolve(ROOT, 'preview-out/ai-ui');
 
+/** Keys, not sentences — the page translates them, which is the point of the AR pass. */
+const KEYED: Record<string, { title: string; body?: string; actions?: string[] }> = {
+  '1-success': { title: 'ai.card.doneSuper' },
+  '2-degraded': { title: 'ai.card.degraded', body: 'ai.card.degradedFree', actions: ['ai.card.tryAgain', 'ai.card.keep'] },
+  '3-quota': { title: 'ai.card.quotaTitle', body: 'ai.card.quotaBody', actions: ['ai.card.useQuick', 'ai.card.retryPremium'] },
+  '4-failed': { title: 'ai.card.failed', body: 'ai.card.failedBody', actions: ['ai.card.tryAgain', 'ai.card.useQuick'] },
+  '5-stopped': { title: 'ai.card.stopped', body: 'ai.card.stoppedBody', actions: ['ai.card.startAgain'] },
+};
 const CARDS: Array<[string, string, string, string, string[]]> = [
   ['1-success', 'good', 'ti-circle-check', 'Designed with Super AI', []],
   ['2-degraded', 'warn', 'ti-alert-triangle',
@@ -33,6 +41,18 @@ const BODY: Record<string, string> = {
   '5-stopped': 'Nothing was generated and no design was used.',
 };
 
+/** Ask the running page for a translated string, so the shots use the real copy. */
+const tr = async (page: Page, key: string): Promise<string> =>
+  page.evaluate(async (k) => {
+    // Resolved by the browser at runtime against the vite dev server; tsc has no
+    // business type-checking a path that only exists inside the page.
+    const m = (await import(/* @vite-ignore */ '/src/ui/i18n.ts' as string)) as {
+      t: (s: string) => string;
+      tv: (s: string, v: Record<string, string | number>) => string;
+    };
+    return m.tv(k, { what: m.t('ai.card.aPicture'), limit: 10, mins: 5, n: 2, left: '4:12', detail: '' });
+  }, key);
+
 const vite: ViteDevServer = await createServer({ root: ROOT, server: { port: 5221 }, logLevel: 'error' });
 await vite.listen(5221);
 const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' }).catch(() => chromium.launch());
@@ -40,8 +60,17 @@ const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromi
 if (existsSync(OUT)) rmSync(OUT, { recursive: true });
 mkdirSync(OUT, { recursive: true });
 
-for (const [device, width, height] of [['desktop', 420, 900], ['phone', 380, 820]] as const) {
+const LS_KEY = 'tifo_lang_v1';
+for (const [device, width, height, lang] of [
+  ['desktop', 420, 900, 'en'],
+  ['phone', 380, 820, 'en'],
+  // The panel is used in Arabic. RTL is where a card with icons, a countdown
+  // and wrapping buttons actually breaks, so it gets the same treatment.
+  ['phone-ar', 380, 820, 'ar'],
+  ['desktop-ar', 420, 900, 'ar'],
+] as const) {
   const page: Page = await browser.newPage({ viewport: { width, height } });
+  await page.addInitScript(([k, l]) => { try { localStorage.setItem(k as string, l as string); } catch { /* ignore */ } }, [LS_KEY, lang] as [string, string]);
   await page.goto('http://127.0.0.1:5221/index.html', { waitUntil: 'domcontentloaded', timeout: 60000 });
   await page.waitForTimeout(1200);
   // Clear whatever is actually on top, rather than guessing at class names:
@@ -68,6 +97,7 @@ for (const [device, width, height] of [['desktop', 420, 900], ['phone', 380, 820
   });
   await page.waitForTimeout(150);
   for (const [name, tone, icon, title, actions] of CARDS) {
+    const keyed = lang === 'ar' ? KEYED[name] : undefined;
     const overflow = await page.evaluate(
       ([t, ic, ti, acts, body]) => {
         const panel = document.getElementById('ctx-ai') as HTMLElement | null;
@@ -126,7 +156,13 @@ for (const [device, width, height] of [['desktop', 420, 900], ['phone', 380, 820
         }
         return { ok: true, overflow: Math.round(overflowPx), small, chain: [] as string[] };
       },
-      [tone, icon, title, actions, BODY[name] ?? ''] as [string, string, string, string[], string],
+      [
+        tone,
+        icon,
+        keyed ? await tr(page, keyed.title) : title,
+        keyed?.actions ? await Promise.all(keyed.actions.map((k) => tr(page, k))) : actions,
+        keyed?.body ? await tr(page, keyed.body) : (BODY[name] ?? ''),
+      ] as [string, string, string, string[], string],
     );
     if (!overflow.ok) { console.log('  invisible:', (overflow.chain ?? []).slice(0, 6).join('\n    ')); continue; }
     // Overlays can reappear (the consent bar is re-rendered), so clear right

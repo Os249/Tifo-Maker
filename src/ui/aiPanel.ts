@@ -30,7 +30,7 @@ import { isSignedIn, fetchMe, resendVerification } from '../net/api';
 import { openAuthModal } from './authModal';
 import { openAddEmailModal } from './openAddEmailModal';
 
-import { t } from './i18n';
+import { t, tv } from './i18n';
 // Auto-resend the verification email at most once per session when AI is blocked.
 let verifyResent = false;
 
@@ -260,14 +260,14 @@ export function mountAiPanel(deps: AiPanelDeps): void {
   const hideChoice = clearCard;
   const showChoice = (choice: AiChoice, prompt: string, useSuper: boolean): void => {
     const quick: CardAction = {
-      label: 'Use the Quick Designer',
+      label: t('ai.card.useQuick'),
       primary: true,
       run: () => { clearCard(); void run(prompt, { super: useSuper, engine: 'offline' }); },
     };
     const retry: CardAction = {
-      label: 'Try Premium again',
+      label: t('ai.card.retryPremium'),
       waitSec: Math.max(0, Math.round(choice.retryAfterSec)),
-      waitLabel: (left) => `Premium free in ${left}`,
+      waitLabel: (left) => tv('ai.card.premiumFreeIn', { left }),
       run: () => { clearCard(); void run(prompt, { super: useSuper }); },
     };
     const cap = choice.reason === 'quota';
@@ -276,16 +276,14 @@ export function mountAiPanel(deps: AiPanelDeps): void {
       cap
         ? {
             tone: 'warn',
-            title: `You've used all ${choice.quota?.limit || 10} premium designs this hour`,
-            body: `Your allowance resets in about ${mins} min. The Quick Designer is free and instant, and its designs are fully editable too.`,
+            title: tv('ai.card.quotaTitle', { limit: choice.quota?.limit || 10 }),
+            body: tv('ai.card.quotaBody', { mins }),
             actions: [quick, retry],
           }
         : {
             tone: 'warn',
-            title: 'Premium AI could not deliver just now',
-            body: choice.detail
-              ? `Reason: ${choice.detail}`
-              : 'It is busy or briefly unavailable. Your design allowance was not touched.',
+            title: t('ai.card.busyTitle'),
+            body: choice.detail ? tv('ai.card.reason', { detail: choice.detail }) : t('ai.card.busyBody'),
             actions: [quick, retry],
           },
     );
@@ -429,7 +427,7 @@ export function mountAiPanel(deps: AiPanelDeps): void {
   const run = async (prompt: string, opts: { super?: boolean; engine?: 'offline' } = {}): Promise<void> => {
     if (busy) return;
     const text = prompt.trim();
-    if (!text) { setError('Describe the tifo you want first.'); return; }
+    if (!text) { setError(t('ai.card.describeFirst')); return; }
     if (!isSignedIn() && !aiUnlockToken()) {
       setError(null);
       setStatus('Sign in or unlock with the admin password.');
@@ -483,28 +481,29 @@ export function mountAiPanel(deps: AiPanelDeps): void {
         // The case that started this: a design whose hero picture never
         // arrived. It used to say "Designed with Premium AI" and spend a
         // credit, with the failure in grey 11px underneath.
+        const n = outcome.missingCount ?? 1;
+        const what = n === 1 ? t('ai.card.aPicture') : tv('ai.card.nPictures', { n });
         showCard({
           tone: 'warn',
-          title: `Designed — but ${outcome.missing ?? 'a picture'} could not be generated`,
+          title: tv('ai.card.degraded', { what }),
           body:
-            (outcome.charged
-              ? 'The stand it was meant to fill is bare. '
-              : 'The stand it was meant to fill is bare, so this one was free — your design count has not changed. ') +
-            (outcome.detail ? `Reason: ${outcome.detail}` : 'The image service turned the request down.'),
+            (outcome.charged ? t('ai.card.degradedPaid') : t('ai.card.degradedFree')) +
+            ' ' +
+            (outcome.detail ? tv('ai.card.reason', { detail: outcome.detail }) : t('ai.card.degradedWhy')),
           actions: [
-            { label: 'Try again', primary: true, run: () => { clearCard(); void run(text, { super: useSuper }); } },
-            { label: 'Keep this design', run: clearCard },
+            { label: t('ai.card.tryAgain'), primary: true, run: () => { clearCard(); void run(text, { super: useSuper }); } },
+            { label: t('ai.card.keep'), run: clearCard },
           ],
         });
-        if (bar) bar.textContent = `${label}: designed without ${outcome.missing ?? 'a picture'}`;
+        if (bar) bar.textContent = `${label}: ${tv('ai.card.degraded', { what })}`;
       } else {
         const notes = (res.notes ?? []).filter((n) => !/^Served instantly/.test(n));
         showCard({
           tone: 'good',
           title:
             res.source === 'model'
-              ? `Designed with ${useSuper ? 'Super AI' : 'Premium AI'}`
-              : 'Designed with the Quick Designer',
+              ? t(useSuper ? 'ai.card.doneSuper' : 'ai.card.donePremium')
+              : t('ai.card.doneQuick'),
           body: notes.length ? notes.join(' · ') : undefined,
         });
         if (bar) bar.textContent = res.source === 'model' ? `${label}: designed ✓` : '';
@@ -525,7 +524,25 @@ export function mountAiPanel(deps: AiPanelDeps): void {
       }
     } catch (e) {
       const err = e as AiError;
-      setStatus('');
+      // A run the user stopped is not a failure and must not be dressed as one.
+      if ((e as Error)?.name === 'AbortError') {
+        showCard({
+          tone: 'info',
+          title: t('ai.card.stopped'),
+          body: t('ai.card.stoppedBody'),
+          actions: [{ label: t('ai.card.startAgain'), primary: true, run: () => { clearCard(); void run(text, { super: useSuper }); } }],
+        });
+        return;
+      }
+      const tryAgain: CardAction = {
+        label: t('ai.card.tryAgain'),
+        primary: true,
+        run: () => { clearCard(); void run(text, { super: useSuper }); },
+      };
+      const useQuick: CardAction = {
+        label: t('ai.card.useQuick'),
+        run: () => { clearCard(); void run(text, { super: useSuper, engine: 'offline' }); },
+      };
       if (err.reason === 'verify') {
         // Signed in but the email isn't usable yet. No email on the account →
         // offer to add one; otherwise it's unverified → offer to resend the link.
@@ -541,16 +558,30 @@ export function mountAiPanel(deps: AiPanelDeps): void {
           setError('Verify your email to use the AI Designer. Check your inbox for the link.');
         }
       } else if (err.reason === 'quota' || err.status === 429 || err.status === 402) {
-        setError(err.message || 'You have used all your free AI designs for this month.');
         if (err.quota) setQuota(err.quota);
+        showCard({
+          tone: 'warn',
+          title: err.message || t('ai.card.quotaOut'),
+          body: t('ai.card.quotaOutBody'),
+          actions: [useQuick],
+        });
       } else if (err.status === 401 || err.reason === 'signin') {
-        setError('Please sign in to generate.');
+        showCard({ tone: 'info', title: t('ai.card.signIn'), body: t('ai.card.signInBody') });
         void openAuthModal();
       } else if (err.status === 403) {
         setError(err.message || 'AI is admin-only right now.');
         setLocked(true);
+      } else if (!navigator.onLine) {
+        showCard({ tone: 'bad', title: t('ai.card.offline'), body: t('ai.card.offlineBody'), actions: [useQuick] });
       } else {
-        setError(err.message || 'The design could not be generated. Try again, or use the Quick Designer for an instant offline version.');
+        // Differentiated where we can be, honest where we cannot — but always
+        // with a way forward rather than a dead end.
+        showCard({
+          tone: 'bad',
+          title: t('ai.card.failed'),
+          body: err.message || t('ai.card.failedBody'),
+          actions: [tryAgain, useQuick],
+        });
       }
     } finally {
       // Whatever happened — success, the "busy" choice panel, a thrown error —
@@ -609,13 +640,20 @@ export function mountAiPanel(deps: AiPanelDeps): void {
       await applySpec(res.spec);
       const bar = document.getElementById('message');
       stopProgress();
-      setStatus(res.source === 'model' ? 'Polished by AI critique.' : 'Kept your design (critique suggested no change).');
+      showCard({
+        tone: 'good',
+        title: t(res.source === 'model' ? 'ai.card.polished' : 'ai.card.polishKept'),
+        body: (res.notes ?? []).join(' · ') || undefined,
+      });
       if (bar) bar.textContent = res.source === 'model' ? 'AI: polished ✓' : '';
-      if (res.notes && res.notes.length) setError(res.notes.join('  ·  '));
+
     } catch (e) {
       const err = e as AiError;
-      setStatus('');
-      setError(err.message || 'Polish could not run — your design is untouched. Try again in a moment.');
+      showCard({
+        tone: 'bad',
+        title: t('ai.card.polishFailed'),
+        body: err.message || t('ai.card.polishFailedBody'),
+      });
     } finally {
       // Whatever happened — success, the "busy" choice panel, a thrown error —
       // the bar must not be left spinning over a finished run.
@@ -634,7 +672,7 @@ export function mountAiPanel(deps: AiPanelDeps): void {
   const shuffle = async (): Promise<void> => {
     if (busy) return;
     const text = promptEl.value.trim();
-    if (!text) { setError('Describe the tifo you want first.'); return; }
+    if (!text) { setError(t('ai.card.describeFirst')); return; }
     busy = true;
     setError(null);
     try {

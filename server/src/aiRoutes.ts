@@ -46,8 +46,12 @@ const MAX_PROMPT = 400;
  */
 export interface GenOutcome {
   kind: 'full' | 'degraded';
-  /** Plain-language description of what is absent, e.g. "the picture". */
-  missing?: string;
+  /**
+   * How many pictures were asked for and never arrived. A COUNT, not a phrase:
+   * the client speaks Arabic as well as English, and a sentence assembled from
+   * English fragments on the server cannot be translated on the way out.
+   */
+  missingCount?: number;
   /** How many were attempted. */
   of?: number;
   /** Whether this consumed one of the caller's premium designs. */
@@ -379,7 +383,7 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
     const outcome: GenOutcome = degraded
       ? {
           kind: 'degraded',
-          missing: missed === 1 ? 'the picture' : `${missed} pictures`,
+          missingCount: missed,
           of: wanted,
           charged,
           ...(access.kind === 'admin' && firstFailure ? { detail: firstFailure } : {}),
