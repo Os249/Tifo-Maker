@@ -27,6 +27,8 @@ import { secondsToNextPeriod } from './repo';
 import { validateSpec, narrowToSingleStand, regionAspectHint, regionRowsHint, type TifoSpec } from '../../src/core/tifoSpec';
 import { refineSpec } from '../../src/core/specRefine';
 import { designFromPrompt, composeSuperOffline } from '../../src/core/promptDesigner';
+import { ensureHeroImage } from '../../src/core/heroImage';
+import { matchClub } from '../../src/core/clubs';
 import { generateSpecViaProvider, buildDirectorPrompt, critiqueSpecViaProvider, activeProvider, clubHintLine, writeCopy, copyLine } from './aiProvider';
 import { generateImage } from './imageAssets';
 import { envNum } from './env';
@@ -334,7 +336,19 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
     note(userId, mode0, 'model');
 
     // Phase 4: deterministic art-director pass — fix legibility/contrast/field.
-    const spec = refineSpec(r.spec);
+    let spec = refineSpec(r.spec);
+    // Super AI's whole promise is a picture on the bowl. The director is told
+    // to make one the hero and usually does, but a Super design that came back
+    // with only symbols and fills is a Quick Designer result charged as premium.
+    // So the guarantee is structural, not a request in a prompt.
+    if (isSuper) {
+      const club = matchClub(prompt.toLowerCase());
+      const hero = ensureHeroImage(spec, { brief: prompt, crest: club?.crest });
+      spec = hero.spec;
+      if (hero.via !== 'present') {
+        app.log.info({ via: hero.via, mode: mode0 }, 'ai generate: hero picture guaranteed');
+      }
+    }
     // Phase 5: best-effort picture for each image layer; failures just skip the layer.
     const notes: string[] = [];
     let wanted = 0;
@@ -348,16 +362,31 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
         // Without both it returns a square in arbitrary colours, and the client
         // then destroys it snapping to the design's palette.
         const region = narrowToSingleStand(layer.region);
-        const img = await generateImage(layer.prompt, {
+        const style = {
           aspect: regionAspectHint(region),
           palette: spec.palette,
           rows: regionRowsHint(region),
-        }).catch((e) => ({ url: null, error: String(e) }) as { url: null; error: string });
-        if (img.url) layer.assetRef = img.url;
+        };
+        const draw = (p: string): Promise<{ url: string | null; error?: string }> =>
+          generateImage(p, style).catch((e) => ({ url: null, error: String(e) }));
+
+        let { url, error } = await draw(layer.prompt);
+        if (!url) {
+          // A refused prompt is usually the BRIEF, not the subject: a player's
+          // name, a club, a phrase some provider filter dislikes. Try the bare
+          // subject once before giving up on the hero — a generic eagle beats an
+          // empty stand, and the picture is the reason Super AI exists.
+          const bare = layer.prompt.split(', for:')[0].trim();
+          if (bare && bare !== layer.prompt.trim()) {
+            const second = await draw(bare);
+            if (second.url) { url = second.url; error = undefined; }
+          }
+        }
+        if (url) layer.assetRef = url;
         else {
           missed++;
-          firstFailure = firstFailure ?? img.error ?? 'unknown error';
-          notes.push(`Picture not generated: ${img.error ?? 'unknown error'}`);
+          firstFailure = firstFailure ?? error ?? 'unknown error';
+          notes.push(`Picture not generated: ${error ?? 'unknown error'}`);
         }
       }
     }

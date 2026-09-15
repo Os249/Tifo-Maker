@@ -21,6 +21,7 @@ import { TIFO_FONTS } from '../src/core/text';
 import { envNum } from '../server/src/env';
 import { mosaicStyle, colourName, pollinationsSize, geminiAspect } from '../server/src/imageAssets';
 import { regionRowsHint } from '../src/core/tifoSpec';
+import { ensureHeroImage, heroPrompt } from '../src/core/heroImage';
 import { TIFO_VOICES } from '../src/core/tifoVoices';
 import { refineSpec, contrastRatio } from '../src/core/specRefine';
 import { SPEC_FONT_IDS } from '../src/core/tifoSpec';
@@ -807,6 +808,69 @@ check('the panel reports a degraded result as its own state', /outcome\?\.kind =
 check('a stopped run is not reported as an error', /AbortError/.test(panelSrc) && /ai\.card\.stopped/.test(panelSrc));
 check('every failure branch offers a way forward',
   (panelSrc.match(/actions: \[/g) ?? []).length >= 6);
+
+// ---- 36. Super AI always puts a PICTURE on the bowl ----
+// A Super design with only symbols and fills is a Quick Designer result charged
+// as premium: a vector symbol is one flat colour and cannot shade, so the
+// picture is the whole reason the mode exists. The director is told this and
+// usually obeys — "usually" is not a guarantee, so this one is structural.
+const mkHero = (layers: unknown[], opts: Parameters<typeof ensureHeroImage>[1] = { brief: 'a big night' }) =>
+  ensureHeroImage(validateSpec({ palette: ['#262a33', '#006c35', '#ffffff', '#d4af37'], layers }).spec!, opts);
+const imgOf = (r: ReturnType<typeof ensureHeroImage>) =>
+  r.spec.layers.find((l) => l.kind === 'image') as Extract<SpecLayer, { kind: 'image' }> | undefined;
+
+const already = mkHero([{ kind: 'image', region: 'north', prompt: 'keep me', scaleFrac: 1, dither: true }]);
+check('a design that already has a picture is untouched', already.via === 'present' && imgOf(already)?.prompt === 'keep me');
+
+const promoted = mkHero([
+  { kind: 'fill', region: 'all', colorIndex: 1 },
+  { kind: 'symbol', region: 'north', symbol: 'eagle', colorIndex: 2, scaleFrac: 0.9, align: 'center' },
+  { kind: 'text', region: 'south', text: 'AL AHLY', colorIndex: 2, fontId: 'poster', arcDeg: 0, heightFrac: 0.8, align: 'center' },
+]);
+check('a hero symbol is promoted to a picture', promoted.via === 'promoted');
+check('the promotion keeps the symbol\'s region', imgOf(promoted)?.region.stand === 'north');
+check('the promotion names the subject, not the symbol id', /eagle with spread wings/.test(imgOf(promoted)?.prompt ?? ''));
+check('no symbol is left behind where the picture went',
+  !promoted.spec.layers.some((l) => l.kind === 'symbol' && l.region.stand === 'north'));
+check('the text on the other stand survives',
+  promoted.spec.layers.some((l) => l.kind === 'text' && l.region.stand === 'south'));
+check('a promoted hero is full-bleed and cut out',
+  imgOf(promoted)?.fit === 'cover' && imgOf(promoted)?.cutout === true && imgOf(promoted)?.scaleFrac === 0.9);
+check('a promoted hero does not cluster or dither at stand scale',
+  imgOf(promoted)?.halftone === false && imgOf(promoted)?.dither === false);
+
+const biggest = mkHero([
+  { kind: 'symbol', region: 'east', symbol: 'star', colorIndex: 2, scaleFrac: 0.5, align: 'center' },
+  { kind: 'symbol', region: 'north', symbol: 'crown', colorIndex: 3, scaleFrac: 0.95, align: 'center' },
+]);
+check('the BIGGEST symbol becomes the hero', /crown/.test(imgOf(biggest)?.prompt ?? '') && imgOf(biggest)?.region.stand === 'north');
+
+// Nothing to promote: the picture is added, and not on top of the lettering.
+const added = mkHero(
+  [
+    { kind: 'fill', region: 'all', colorIndex: 1 },
+    { kind: 'text', region: 'north', text: 'CHAMPIONS', colorIndex: 2, fontId: 'poster', arcDeg: 0, heightFrac: 0.8, align: 'center' },
+  ],
+  { brief: 'Al Hilal champions', crest: 'crescent' },
+);
+check('with no symbol, a picture is added anyway', added.via === 'added');
+check('the added picture avoids the stand carrying the words', imgOf(added)?.region.stand !== 'north');
+check('the added picture uses the club crest as its subject', /crescent moon/.test(imgOf(added)?.prompt ?? ''));
+
+// A symbol spanning the bowl is not a host — a picture needs one continuous stand.
+const bowlSym = mkHero([{ kind: 'symbol', region: 'all', symbol: 'shield', colorIndex: 2, scaleFrac: 0.9, align: 'center' }], { brief: 'x', crest: 'shield' });
+check('a whole-bowl symbol is not promoted', bowlSym.via === 'added');
+check('the whole-bowl symbol is left in place', bowlSym.spec.layers.some((l) => l.kind === 'symbol'));
+
+// Whatever route it took, the result must still be a design the product renders.
+for (const [name, r] of [['promoted', promoted], ['added', added], ['bowl', bowlSym]] as const) {
+  const v = validateSpec(r.spec);
+  check(`a guaranteed hero still validates (${name})`, v.valid, (v.errors ?? []).map((e) => e.path).join(','));
+  check(`a guaranteed hero survives refineSpec (${name})`, !!refineSpec(v.spec!));
+  check(`exactly one picture (${name})`, r.spec.layers.filter((l) => l.kind === 'image').length === 1);
+}
+check('a prompt is produced even with nothing to go on', heroPrompt(undefined, { brief: '' }).length > 10);
+check('the brief is carried into the subject', /nihai|final/i.test(heroPrompt('eagle', { brief: 'the final' })));
 
 console.log(`\n${failures === 0 ? 'ALL PASS' : failures + ' FAILED'}`);
 if (failures > 0) process.exit(1);
