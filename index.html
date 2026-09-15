@@ -230,9 +230,19 @@
           <div id="ai-progress" class="ai-progress" hidden aria-live="polite">
             <div class="ai-progress-bar"><span></span></div>
             <p class="ai-progress-label"><span id="ai-progress-stage"></span><span id="ai-progress-elapsed"></span></p>
+            <button id="ai-cancel" class="ai-cancel" type="button" data-i18n="ed.ai.cancel">Stop</button>
           </div>
-          <p id="ai-status" class="hint" style="font-size:11px;color:var(--text-3);margin:8px 0 0;min-height:14px;"></p>
-          <div id="ai-error" class="hint" style="display:none;font-size:11px;color:var(--flare);margin-top:8px;"></div>
+          <!-- One state card for every outcome. Before this there were five
+               separate mechanisms (status line, error box, notes, choice panel,
+               quota line) that could each say something different at the same
+               time; that is what made a degraded result look like a success. -->
+          <div id="ai-state" class="ai-state" hidden role="status" aria-live="polite">
+            <p class="ai-state-title"><i class="ai-state-icon ti"></i> <span></span></p>
+            <p class="ai-state-body"></p>
+            <div class="ai-state-actions"></div>
+          </div>
+          <p id="ai-status" class="hint" hidden></p>
+          <div id="ai-error" class="hint" hidden></div>
           <div id="ai-result" style="display:none;margin-top:10px;">
             <p id="ai-summary" style="font-size:12px;color:var(--text-2);margin:0 0 8px;"></p>
             <div class="group">
@@ -241,7 +251,7 @@
             </div>
             <button id="ai-polish" style="width:100%;margin-top:8px;" title="Render the design and ask the AI to fix legibility and balance" data-i18n-attr="title:ed.ai.polishT"><i class="ti ti-wand"></i> <span data-i18n="ed.ai.polish">Polish with AI critique</span></button>
           </div>
-          <p id="ai-quota" class="hint" style="font-size:11px;color:var(--text-3);margin:8px 0 0;"></p>
+          <p id="ai-quota" class="ai-quota"></p>
         </div>
 
         <div class="panel-section ctx-hidden" id="ctx-objects" data-panel="select" style="display:none">

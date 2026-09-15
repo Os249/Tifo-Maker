@@ -72,6 +72,8 @@ export function mountAiPanel(deps: AiPanelDeps): void {
   const polishBtn = $<HTMLButtonElement>('#ai-polish');
   const shuffleBtn = $<HTMLButtonElement>('#ai-shuffle');
   const quotaEl = $('#ai-quota');
+  const stateEl = $('#ai-state');
+  const cancelBtn = $<HTMLButtonElement>('#ai-cancel');
   if (!promptEl || !genBtn) return; // panel not present (e.g. phone build)
 
   // Snapshot of the canvas before the first AI apply (for revert / clean regen).
@@ -83,7 +85,89 @@ export function mountAiPanel(deps: AiPanelDeps): void {
   let lastStadium: string | undefined; // stadium context used (Super AI)
   let shuffleN = 0; // increments per free offline "shuffle"
 
-  const setStatus = (msg: string): void => { if (statusEl) statusEl.textContent = msg; };
+  // ---- one state card -------------------------------------------------------
+  // Everything the panel has to say about a run goes through here. The old code
+  // had five independent channels — a status line, an error box, a notes string,
+  // a JS-built choice panel and the quota line — so a design that came back with
+  // a missing picture could show "Designed with Premium AI" in one place and the
+  // failure in grey 11px type in another. A person reads the big green line.
+  type Tone = 'good' | 'warn' | 'bad' | 'info';
+  interface CardAction {
+    label: string;
+    primary?: boolean;
+    run: () => void;
+    /** Seconds until this becomes clickable, counted down in the label. */
+    waitSec?: number;
+    waitLabel?: (left: string) => string;
+  }
+  interface Card {
+    tone: Tone;
+    title: string;
+    body?: string;
+    actions?: CardAction[];
+  }
+  const TONE_ICON: Record<Tone, string> = {
+    good: 'ti-circle-check',
+    warn: 'ti-alert-triangle',
+    bad: 'ti-alert-circle',
+    info: 'ti-info-circle',
+  };
+  let cardTimer: number | null = null;
+  const clearCard = (): void => {
+    if (cardTimer !== null) { clearInterval(cardTimer); cardTimer = null; }
+    if (stateEl) { stateEl.hidden = true; }
+  };
+  const fmtWait = (sec: number): string =>
+    sec >= 60 ? `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}` : `${sec}s`;
+  const showCard = (card: Card | null): void => {
+    clearCard();
+    if (!stateEl || !card) return;
+    stateEl.dataset.tone = card.tone;
+    const icon = stateEl.querySelector('.ai-state-icon') as HTMLElement | null;
+    if (icon) icon.className = `ai-state-icon ti ${TONE_ICON[card.tone]}`;
+    const title = stateEl.querySelector('.ai-state-title span') as HTMLElement | null;
+    if (title) title.textContent = card.title;
+    const body = stateEl.querySelector('.ai-state-body') as HTMLElement | null;
+    if (body) body.textContent = card.body ?? '';
+    const actions = stateEl.querySelector('.ai-state-actions') as HTMLElement | null;
+    if (actions) {
+      actions.innerHTML = '';
+      for (const a of card.actions ?? []) {
+        const b = document.createElement('button');
+        b.type = 'button';
+        if (a.primary) b.className = 'primary';
+        b.textContent = a.label;
+        // A countdown belongs ON the button it gates, so there is never a live
+        // action the user is silently not allowed to press.
+        if (a.waitSec && a.waitSec > 0) {
+          let left = Math.round(a.waitSec);
+          const tick = (): void => {
+            if (left > 0) {
+              b.disabled = true;
+              b.textContent = a.waitLabel ? a.waitLabel(fmtWait(left)) : `${a.label} · ${fmtWait(left)}`;
+              left -= 1;
+            } else {
+              b.disabled = false;
+              b.textContent = a.label;
+              if (cardTimer !== null) { clearInterval(cardTimer); cardTimer = null; }
+            }
+          };
+          tick();
+          cardTimer = window.setInterval(tick, 1000);
+        }
+        b.addEventListener('click', () => { if (!b.disabled) a.run(); });
+        actions.appendChild(b);
+      }
+    }
+    stateEl.hidden = false;
+  };
+  // Kept so the rest of the panel's call sites keep working; both now render
+  // into the single card rather than two competing lines of text.
+  const setStatus = (msg: string): void => {
+    if (statusEl) statusEl.textContent = msg;
+    if (msg) showCard({ tone: 'info', title: msg });
+    else clearCard();
+  };
 
   // ---- progress ------------------------------------------------------------
   // The server returns one response for the whole pipeline, so there is no real
@@ -106,10 +190,16 @@ export function mountAiPanel(deps: AiPanelDeps): void {
     { at: 10, text: 'Reworking the design…' },
   ];
   let progressTimer: number | null = null;
+  // A Super run is 20-40s. Leaving someone with no way out of that but a page
+  // reload is the thing every loading-state guide warns about, and it matters
+  // more now that a cancelled run costs nothing: the credit is charged at the
+  // END of a successful generation, not when the request leaves.
+  let inflight: AbortController | null = null;
 
   const stopProgress = (): void => {
     if (progressTimer !== null) { clearInterval(progressTimer); progressTimer = null; }
     if (progressEl) progressEl.hidden = true;
+    if (cancelBtn) cancelBtn.hidden = true;
   };
 
   const startProgress = (stages: Stage[]): void => {
@@ -125,12 +215,13 @@ export function mountAiPanel(deps: AiPanelDeps): void {
     };
     tick();
     progressEl.hidden = false;
+    if (cancelBtn) cancelBtn.hidden = false;
     progressTimer = window.setInterval(tick, 1000);
   };
-  const setError = (msg: string | null): void => {
-    if (!errorEl) return;
-    errorEl.style.display = msg ? '' : 'none';
-    errorEl.textContent = msg ?? '';
+  const setError = (msg: string | null, actions?: CardAction[]): void => {
+    if (errorEl) errorEl.textContent = msg ?? '';
+    if (msg) showCard({ tone: 'bad', title: msg, actions });
+    else clearCard();
   };
   const resetMins = (q: AiQuota): number => Math.max(1, Math.ceil((q.resetInSec ?? 0) / 60));
   const quotaText = (q: AiQuota): string =>
@@ -142,6 +233,10 @@ export function mountAiPanel(deps: AiPanelDeps): void {
   const setQuota = (q: AiQuota | null): void => {
     if (!quotaEl) return;
     quotaEl.textContent = q ? quotaText(q) : isSignedIn() ? '' : t('err.aiSignIn');
+    // Warn before the wall rather than at it.
+    const level = !q || q.unlimited || q.admin ? '' : q.remaining <= 0 ? 'none' : q.remaining <= 2 ? 'low' : '';
+    if (level) quotaEl.dataset.level = level;
+    else delete quotaEl.dataset.level;
   };
 
   // ---- admin lock (Phase 1 of the AI rebuild): gate the panel behind unlock ----
@@ -157,58 +252,50 @@ export function mountAiPanel(deps: AiPanelDeps): void {
     <p id="ai-unlock-msg" class="hint" style="font-size:11px;color:var(--text-3);margin:8px 0 0;"></p>`;
   section.appendChild(lockEl);
 
-  // ---- "premium busy / hourly cap" choice card: Quick Designer, or wait + retry ----
-  const choiceEl = document.createElement('div');
-  choiceEl.className = 'ai-choice';
-  choiceEl.style.display = 'none';
-  section.appendChild(choiceEl);
-  let choiceTimer: number | null = null;
-  const hideChoice = (): void => {
-    if (choiceTimer) { clearInterval(choiceTimer); choiceTimer = null; }
-    choiceEl.style.display = 'none';
-    choiceEl.innerHTML = '';
-  };
+  // ---- premium can't deliver right now: say WHICH reason, offer the way out ----
+  // Collapsing every refusal into "Premium AI is busy" is the anti-pattern that
+  // cost a whole evening of debugging: a quota error, a timeout, an unreachable
+  // model and a parsing bug all read identically. Each reason now gets its own
+  // words and its own next step.
+  const hideChoice = clearCard;
   const showChoice = (choice: AiChoice, prompt: string, useSuper: boolean): void => {
-    hideChoice();
-    const cap = choice.reason === 'quota';
-    choiceEl.innerHTML =
-      `<p class="ai-choice-title"></p>` +
-      `<button class="primary ai-choice-quick" type="button">⚡ Use Quick Designer, instant &amp; free</button>` +
-      `<button class="ai-choice-wait" type="button"></button>` +
-      `<p class="ai-choice-hint"></p>`;
-    (choiceEl.querySelector('.ai-choice-title') as HTMLElement).textContent = cap
-      ? `You've used your ${choice.quota.limit || 10} premium designs this hour.`
-      : 'Premium AI is busy right now.';
-    (choiceEl.querySelector('.ai-choice-hint') as HTMLElement).textContent = cap
-      ? 'The Quick Designer is always free.'
-      : 'The Quick Designer is free, or wait for premium to free up.';
-    choiceEl.style.display = '';
-    const waitBtn = choiceEl.querySelector('.ai-choice-wait') as HTMLButtonElement;
-    let left = Math.max(0, Math.round(choice.retryAfterSec));
-    const fmt = (s: number): string => (s >= 60 ? `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}` : `${s}s`);
-    const tick = (): void => {
-      if (left > 0) {
-        waitBtn.disabled = true;
-        waitBtn.textContent = cap ? `⏳ Premium resets in ${fmt(left)}` : `⏳ Wait for Premium AI · ${fmt(left)}`;
-        left -= 1;
-      } else {
-        waitBtn.disabled = false;
-        waitBtn.textContent = '↻ Try Premium AI again';
-        if (choiceTimer) { clearInterval(choiceTimer); choiceTimer = null; }
-      }
+    const quick: CardAction = {
+      label: 'Use the Quick Designer',
+      primary: true,
+      run: () => { clearCard(); void run(prompt, { super: useSuper, engine: 'offline' }); },
     };
-    tick();
-    choiceTimer = window.setInterval(tick, 1000);
-    (choiceEl.querySelector('.ai-choice-quick') as HTMLButtonElement).addEventListener('click', () => {
-      hideChoice();
-      void run(prompt, { super: useSuper, engine: 'offline' });
-    });
-    waitBtn.addEventListener('click', () => {
-      if (waitBtn.disabled) return;
-      hideChoice();
-      void run(prompt, { super: useSuper });
-    });
+    const retry: CardAction = {
+      label: 'Try Premium again',
+      waitSec: Math.max(0, Math.round(choice.retryAfterSec)),
+      waitLabel: (left) => `Premium free in ${left}`,
+      run: () => { clearCard(); void run(prompt, { super: useSuper }); },
+    };
+    const cap = choice.reason === 'quota';
+    const mins = Math.max(1, Math.ceil((choice.retryAfterSec ?? 0) / 60));
+    showCard(
+      cap
+        ? {
+            tone: 'warn',
+            title: `You've used all ${choice.quota?.limit || 10} premium designs this hour`,
+            body: `Your allowance resets in about ${mins} min. The Quick Designer is free and instant, and its designs are fully editable too.`,
+            actions: [quick, retry],
+          }
+        : {
+            tone: 'warn',
+            title: 'Premium AI could not deliver just now',
+            body: choice.detail
+              ? `Reason: ${choice.detail}`
+              : 'It is busy or briefly unavailable. Your design allowance was not touched.',
+            actions: [quick, retry],
+          },
+    );
   };
+
+  cancelBtn?.addEventListener('click', () => {
+    if (!inflight) return;
+    inflight.abort();
+    inflight = null;
+  });
 
   const lockToggle = ([promptEl, genBtn, superBtn, shuffleBtn, examplesEl, quotaEl] as (HTMLElement | null)[]).filter(
     (e): e is HTMLElement => !!e,
@@ -368,37 +455,58 @@ export function mountAiPanel(deps: AiPanelDeps): void {
       // Section 3: focus the design on the chosen active area, if any.
       const focus = describeActiveArea();
       const brief = focus ? `${text}: focus the design on ${focus}` : text;
+      inflight = new AbortController();
       const res = await generateAiTifo(brief, {
         ...(useSuper ? { mode: 'super', stadium } : {}),
         ...(opts.engine ? { engine: opts.engine } : {}),
+        signal: inflight.signal,
       });
       if ('needsChoice' in res) {
-        setStatus('');
+        stopProgress();
         setQuota(res.quota);
+        // The admin detail (when the server sends it) becomes the card's body
+        // rather than a second, competing message elsewhere in the panel.
         showChoice(res, text, useSuper);
-        // Admins only (the server decides): the actual reason behind "busy", so
-        // a misconfiguration is visible where it happens instead of in the logs.
         const detail = (res as { detail?: string }).detail;
-        setError(detail ? `Premium could not deliver — ${detail}` : null);
         if (detail) {
           const bar = document.getElementById('message');
           if (bar) bar.textContent = `${label}: ${detail}`;
         }
-        stopProgress();
         return;
       }
       await applySpec(res.spec);
       stopProgress();
-      setStatus(res.source === 'model' ? `Designed with Premium AI${useSuper ? ' (Super AI)' : ''}.` : 'Designed with the Quick Designer.');
       setQuota(res.quota);
-      // Surface server diagnostics in the panel AND the footer "ground bar".
-      const notes = res.notes ?? [];
       const bar = document.getElementById('message');
-      if (notes.length) {
-        setError(notes.join('  ·  '));
-        if (bar) bar.textContent = `${label}: ` + notes.join('  ·  ');
+      const outcome = res.outcome;
+      if (outcome?.kind === 'degraded') {
+        // The case that started this: a design whose hero picture never
+        // arrived. It used to say "Designed with Premium AI" and spend a
+        // credit, with the failure in grey 11px underneath.
+        showCard({
+          tone: 'warn',
+          title: `Designed — but ${outcome.missing ?? 'a picture'} could not be generated`,
+          body:
+            (outcome.charged
+              ? 'The stand it was meant to fill is bare. '
+              : 'The stand it was meant to fill is bare, so this one was free — your design count has not changed. ') +
+            (outcome.detail ? `Reason: ${outcome.detail}` : 'The image service turned the request down.'),
+          actions: [
+            { label: 'Try again', primary: true, run: () => { clearCard(); void run(text, { super: useSuper }); } },
+            { label: 'Keep this design', run: clearCard },
+          ],
+        });
+        if (bar) bar.textContent = `${label}: designed without ${outcome.missing ?? 'a picture'}`;
       } else {
-        setError(null);
+        const notes = (res.notes ?? []).filter((n) => !/^Served instantly/.test(n));
+        showCard({
+          tone: 'good',
+          title:
+            res.source === 'model'
+              ? `Designed with ${useSuper ? 'Super AI' : 'Premium AI'}`
+              : 'Designed with the Quick Designer',
+          body: notes.length ? notes.join(' · ') : undefined,
+        });
         if (bar) bar.textContent = res.source === 'model' ? `${label}: designed ✓` : '';
       }
       // Phone: complete the cycle — close the AI sheet, drop the user onto their
@@ -448,6 +556,7 @@ export function mountAiPanel(deps: AiPanelDeps): void {
       // Whatever happened — success, the "busy" choice panel, a thrown error —
       // the bar must not be left spinning over a finished run.
       stopProgress();
+      inflight = null;
       busy = false;
       genBtn.disabled = false;
       if (superBtn) superBtn.disabled = false;

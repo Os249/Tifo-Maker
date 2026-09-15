@@ -998,12 +998,27 @@ export interface AiGenerateResult {
   source: 'model' | 'offline' | 'quick';
   /** Server-side diagnostics (image-gen failures) for the UI. */
   notes?: string[];
+  /** Structured result: full or degraded, and whether it cost a design. */
+  outcome?: AiOutcome;
 }
 
 /**
  * Returned by generate when premium can't deliver right now (busy, or hourly cap
  * reached): the client offers a choice — use the free Quick Designer, or wait + retry.
  */
+/**
+ * What the caller actually received. 'degraded' means the design rendered but
+ * is missing part of what a premium call promises — a hero picture the image
+ * provider would not produce — and `charged` says whether it cost a design.
+ */
+export interface AiOutcome {
+  kind: 'full' | 'degraded';
+  missing?: string;
+  of?: number;
+  charged: boolean;
+  detail?: string;
+}
+
 export interface AiChoice {
   needsChoice: true;
   reason: 'busy' | 'quota' | 'premium_off';
@@ -1029,11 +1044,12 @@ export interface AiError extends Error {
  */
 export async function generateAiTifo(
   prompt: string,
-  opts: { mode?: 'super'; stadium?: string; engine?: 'offline' } = {},
+  opts: { mode?: 'super'; stadium?: string; engine?: 'offline'; signal?: AbortSignal } = {},
 ): Promise<AiGenerateResult | AiChoice> {
   const res = await fetch(`${API}/ai/generate`, {
     method: 'POST',
     headers: aiHeaders(true),
+    signal: opts.signal,
     body: JSON.stringify({
       prompt,
       ...(opts.mode ? { mode: opts.mode } : {}),

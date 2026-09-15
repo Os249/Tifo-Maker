@@ -34,6 +34,27 @@ import { TtlCache, cacheKey } from './aiCache';
 import { screenPrompt } from './promptSafety';
 
 const MAX_PROMPT = 400;
+
+/**
+ * What the caller actually received, in terms the UI can act on.
+ *
+ * 'full' is the thing that was promised. 'degraded' is a design that rendered
+ * but is missing part of what makes it worth a premium call — today that means
+ * a hero picture the image provider would not produce. The distinction exists
+ * because collapsing it into a generic note is how a user ends up paying a
+ * Super AI credit for a stand with a hole in it and never being told.
+ */
+export interface GenOutcome {
+  kind: 'full' | 'degraded';
+  /** Plain-language description of what is absent, e.g. "the picture". */
+  missing?: string;
+  /** How many were attempted. */
+  of?: number;
+  /** Whether this consumed one of the caller's premium designs. */
+  charged: boolean;
+  /** The provider's reason. Admins only. */
+  detail?: string;
+}
 const PREMIUM_RETRY_SEC = 90; // "wait and retry" countdown when premium is busy
 const UNLOCK_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 // Result cache: identical (mode+prompt+stadium+provider) generations return the
@@ -231,7 +252,7 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
         return reply.code(502).send({ error: 'could not produce a valid design', errors: q.errors });
       }
       note(userId, mode0, 'quick');
-      return reply.code(200).send({ spec: refineSpec(q.spec), quota: quotaInfo, source: 'quick', notes: [] });
+      return reply.code(200).send({ spec: refineSpec(q.spec), quota: quotaInfo, source: 'quick', notes: [], outcome: { kind: 'full', charged: false } satisfies GenOutcome });
     }
 
     // Result cache: an identical brief returns the prior premium design instantly (free).
@@ -239,7 +260,7 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
     const hit = genCache.get(key);
     if (hit) {
       note(userId, mode0, 'cache');
-      return reply.code(200).send({ spec: hit.spec, quota: quotaInfo, source: hit.source, notes: ['Served instantly from cache.'] });
+      return reply.code(200).send({ spec: hit.spec, quota: quotaInfo, source: hit.source, notes: ['Served instantly from cache.'], outcome: { kind: 'full', charged: false } satisfies GenOutcome });
     }
 
     // Hourly cap reached → offer the choice (Quick Designer now, or wait for reset).
@@ -306,20 +327,18 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
       return reply.code(200).send({ needsChoice: true, reason: 'busy', retryAfterSec: busyRetrySec(), quota: quotaInfo, ...(detail ? { detail } : {}) });
     }
 
-    // Premium succeeded — the ONLY path that consumes a credit.
-    let quota = quotaInfo;
-    if (usage && userId) {
-      const c = await deps.aiUsage.consume(userId, deps.freeLimit);
-      quota = { admin: false, used: c.used, limit: c.limit, remaining: c.remaining, resetInSec: secondsToNextPeriod() };
-    }
     note(userId, mode0, 'model');
 
     // Phase 4: deterministic art-director pass — fix legibility/contrast/field.
     const spec = refineSpec(r.spec);
     // Phase 5: best-effort picture for each image layer; failures just skip the layer.
     const notes: string[] = [];
+    let wanted = 0;
+    let missed = 0;
+    let firstFailure: string | undefined;
     for (const layer of spec.layers) {
       if (layer.kind === 'image' && !layer.assetRef) {
+        wanted++;
         // Tell the generator what it is drawing FOR: the shape of the region the
         // picture has to fill, and the palette it is about to be quantized into.
         // Without both it returns a square in arbitrary colours, and the client
@@ -331,11 +350,42 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
           rows: regionRowsHint(region),
         }).catch((e) => ({ url: null, error: String(e) }) as { url: null; error: string });
         if (img.url) layer.assetRef = img.url;
-        else notes.push(`Portrait not generated: ${img.error ?? 'unknown error'}`);
+        else {
+          missed++;
+          firstFailure = firstFailure ?? img.error ?? 'unknown error';
+          notes.push(`Picture not generated: ${img.error ?? 'unknown error'}`);
+        }
       }
     }
-    genCache.set(key, { spec, source: 'model' });
-    return reply.code(200).send({ spec, quota, source: 'model', notes });
+
+    // What the user actually got. A design whose hero picture failed is NOT what
+    // Super AI promises: the stand it was meant to carry comes out bare. So it
+    // is reported as degraded, and — the part that matters — it is NOT CHARGED.
+    // Charging used to happen the moment the model returned a valid spec, which
+    // meant a failed picture still cost a Super AI use and the user was told
+    // nothing beyond a line of small grey text.
+    const degraded = missed > 0;
+    const charged = !!(usage && userId) && !degraded;
+    let quota = quotaInfo;
+    if (charged && userId) {
+      const c = await deps.aiUsage.consume(userId, deps.freeLimit);
+      quota = { admin: false, used: c.used, limit: c.limit, remaining: c.remaining, resetInSec: secondsToNextPeriod() };
+    }
+    // Never cache a degraded design: the cache is keyed on the brief, so storing
+    // one meant the next 30 minutes of retries returned the same holed design
+    // instantly, without even attempting the picture again.
+    if (!degraded) genCache.set(key, { spec, source: 'model' });
+
+    const outcome: GenOutcome = degraded
+      ? {
+          kind: 'degraded',
+          missing: missed === 1 ? 'the picture' : `${missed} pictures`,
+          of: wanted,
+          charged,
+          ...(access.kind === 'admin' && firstFailure ? { detail: firstFailure } : {}),
+        }
+      : { kind: 'full', charged };
+    return reply.code(200).send({ spec, quota, source: 'model', notes, outcome });
   });
 
   // Phase 4b: vision critique — take the current design + a render of it, ask the

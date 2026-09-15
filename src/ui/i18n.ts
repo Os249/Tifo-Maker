@@ -504,6 +504,7 @@ const STRINGS: Record<string, { en: string; ar: string }> = {
   'ed.import.realColors': { en: 'Real colours', ar: 'الألوان الأصلية' },
   'ed.import.dither': { en: 'Dither', ar: 'تنعيم' },
   'ed.import.cutout': { en: 'Remove background', ar: 'إزالة الخلفية' },
+  'ed.ai.cancel': { en: 'Stop', ar: 'إيقاف' },
   'ed.import.cutoutT': { en: 'Flood the flat backdrop away so the design underneath shows through', ar: 'يزيل الخلفية المسطحة ليظهر التصميم خلف الصورة' },
   'ed.import.alpha': { en: 'Alpha', ar: 'الشفافية' },
   'ed.import.cancel': { en: 'Cancel', ar: 'إلغاء' },

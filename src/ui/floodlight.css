@@ -1564,3 +1564,85 @@ body.gate { display:block; overflow-y:auto; background:var(--ink-0); }
 @media (prefers-reduced-motion: reduce) {
   .ai-progress-bar > span { width: 100%; animation: none; opacity: 0.45; }
 }
+
+/* ---- AI state card -------------------------------------------------------
+   One card, one message, one set of next steps. It replaces a status line, an
+   error box, a notes string and a JS-built choice panel that could each be
+   saying something different at the same moment — which is how a design with a
+   hole in it could read as a clean success. Colour carries the outcome; the
+   title says what happened; the actions say what to do about it. */
+.ai-state {
+  margin-top: 10px;
+  padding: 11px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--tone, color-mix(in srgb, var(--text-3) 30%, transparent));
+  background: color-mix(in srgb, var(--tone, var(--text-3)) 10%, transparent);
+}
+.ai-state-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+  font-size: 12.5px;
+  font-weight: 650;
+  line-height: 1.35;
+  color: var(--tone, var(--text-1));
+}
+.ai-state-icon { font-size: 14px; flex: none; }
+.ai-state-body {
+  margin: 5px 0 0;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-2);
+}
+.ai-state-body:empty { display: none; }
+.ai-state-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 9px;
+}
+.ai-state-actions:empty { display: none; }
+/* Every action is a real target on a phone, and wraps rather than overflowing. */
+.ai-state-actions button {
+  flex: 1 1 auto;
+  min-height: 34px;
+  padding: 7px 11px;
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+.ai-state[data-tone='good']  { --tone: var(--ok, #38b57a); }
+.ai-state[data-tone='warn']  { --tone: var(--warn, #e0a33a); }
+.ai-state[data-tone='bad']   { --tone: var(--flare, #e0574a); }
+.ai-state[data-tone='info']  { --tone: var(--blue-solid); }
+
+/* Stop: present the whole time a run is in flight, never moving the layout when
+   it appears, because the research on loading states is explicit that controls
+   must not shift under the user while they wait. */
+.ai-cancel {
+  width: 100%;
+  margin-top: 8px;
+  min-height: 34px;
+  font-size: 11.5px;
+}
+
+.ai-quota {
+  font-size: 11px;
+  color: var(--text-3);
+  margin: 10px 0 0;
+}
+/* Warn before the wall, not at it. */
+.ai-quota[data-level='low']  { color: var(--warn, #e0a33a); }
+.ai-quota[data-level='none'] { color: var(--flare, #e0574a); }
+
+@media (max-width: 767px) {
+  /* Thumbs, not cursors: full-size targets and a card that can breathe. */
+  .ai-state { padding: 13px 14px; }
+  .ai-state-title { font-size: 13.5px; }
+  .ai-state-body { font-size: 12.5px; }
+  .ai-state-actions button { min-height: 44px; flex-basis: 100%; font-size: 13px; }
+  .ai-cancel { min-height: 44px; font-size: 13px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ai-state { transition: none; }
+}
