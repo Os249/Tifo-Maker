@@ -3,6 +3,7 @@ import type { DesignStore } from '../core/design';
 import { buildReveal, type RevealId } from '../core/reveal';
 import { encodeGif } from '../core/gif';
 import type { Preview3D } from '../render/preview3d';
+import { describeRecording, pickRecordingFormat } from '../render/simulator/recordPlan';
 
 /**
  * Stadium animation export (Phase: video/GIF of the 3D bowl).
@@ -61,24 +62,18 @@ function drawWatermark(ctx: CanvasRenderingContext2D, w: number, h: number, text
   ctx.restore();
 }
 
-/** Pick a MediaRecorder mime the browser actually supports. */
+/**
+ * Pick a MediaRecorder mime the browser actually supports.
+ *
+ * MP4 first now, and WebM only as the last resort. The order used to be the
+ * other way round — VP9 WebM was preferred and `video/mp4` sat at the bottom as
+ * a curiosity — which meant every exported video was a file that will not open
+ * in QuickTime, that most phone galleries refuse, and that several apps reject
+ * on upload. See simulator/recordPlan.ts for the candidate list and for why it
+ * names H.264 rather than trusting a bare `video/mp4`.
+ */
 export function pickVideoMime(): string {
-  const candidates = [
-    'video/webm;codecs=vp9',
-    'video/webm;codecs=vp8',
-    'video/webm',
-    'video/mp4',
-  ];
-  if (typeof MediaRecorder !== 'undefined') {
-    for (const m of candidates) {
-      try {
-        if (MediaRecorder.isTypeSupported(m)) return m;
-      } catch {
-        /* isTypeSupported can throw on some engines */
-      }
-    }
-  }
-  return 'video/webm';
+  return pickRecordingFormat()?.mimeType ?? 'video/webm';
 }
 
 export function videoExportSupported(): boolean {
@@ -183,19 +178,19 @@ export async function previewStadium(
   }
 }
 
-/** Record the reveal as a WebM (or browser-preferred) video blob. */
+/** Record the reveal as an MP4 (or, failing that, whatever the browser can do). */
 export async function exportStadiumVideo(
   preview: Preview3D,
   map: SeatMap,
   opts: StadiumExportOpts,
-): Promise<{ blob: Blob; mime: string }> {
+): Promise<{ blob: Blob; mime: string; extension: 'mp4' | 'webm'; universal: boolean }> {
   if (!videoExportSupported()) {
     throw new Error('Video capture is not supported in this browser. Try GIF instead.');
   }
   const play = buildPlayback(preview, map, opts, 1);
-  const mime = pickVideoMime();
+  const asked = pickRecordingFormat() ?? { mimeType: 'video/webm', extension: 'webm' as const, universal: false };
   const stream = (play.canvas as CapturableCanvas).captureStream(opts.fps);
-  const rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 8_000_000 });
+  const rec = new MediaRecorder(stream, { mimeType: asked.mimeType, videoBitsPerSecond: 8_000_000 });
   const chunks: BlobPart[] = [];
   rec.ondataavailable = (e: BlobEvent): void => {
     if (e.data && e.data.size > 0) chunks.push(e.data);
@@ -212,7 +207,11 @@ export async function exportStadiumVideo(
     play.finish();
     stream.getTracks().forEach((t) => t.stop());
   }
-  return { blob: new Blob(chunks, { type: mime }), mime };
+  // Read what it negotiated at the END: Chromium leaves `mimeType` as whatever
+  // it was asked for until recording has actually started, and a Chromium
+  // without proprietary codecs answers `video/mp4` and then hands back VP9.
+  const format = describeRecording(rec.mimeType, asked);
+  return { blob: new Blob(chunks, { type: format.mimeType }), mime: format.mimeType, extension: format.extension, universal: format.universal };
 }
 
 // ---- GIF (offline frame stepping + nearest-colour quantisation) ----

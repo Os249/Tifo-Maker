@@ -295,3 +295,20 @@ CREATE TABLE IF NOT EXISTS visits (
 CREATE INDEX IF NOT EXISTS visits_created_idx ON visits (created_at DESC);
 CREATE INDEX IF NOT EXISTS visits_source_idx ON visits (source, created_at DESC);
 CREATE INDEX IF NOT EXISTS visits_human_idx ON visits (created_at DESC) WHERE NOT is_bot;
+
+-- ---------------------------------------------------------------------------
+-- Filter facets (see src/core/facets.ts).
+--
+-- Derived from a design's palette and title, not chosen by anyone, and written
+-- by the repo rather than by a trigger because the rules are TypeScript: a hue
+-- classification and a club-alias match. Stored rather than computed per query
+-- because the community feed pages, and a filter that cannot run in the WHERE
+-- clause cannot page.
+--
+-- An empty `colors` is the "not computed yet" marker: every real design carries
+-- at least one colour, so the boot backfill can find the stragglers without a
+-- separate timestamp to keep in step.
+ALTER TABLE designs ADD COLUMN IF NOT EXISTS colors  TEXT[] NOT NULL DEFAULT '{}';
+ALTER TABLE designs ADD COLUMN IF NOT EXISTS club_id TEXT;
+CREATE INDEX IF NOT EXISTS designs_colors_idx  ON designs USING GIN (colors);
+CREATE INDEX IF NOT EXISTS designs_club_id_idx ON designs (club_id) WHERE club_id IS NOT NULL;

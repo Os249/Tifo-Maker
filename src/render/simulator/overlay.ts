@@ -155,6 +155,7 @@ const ICONS = {
   assets: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 21V4"/><path d="M5 4h12l-2.5 4L17 12H5"/></svg>',
   choreo: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="8" width="18" height="12" rx="2"/><path d="M3 8l2.5-4h3.5L6.5 8M11 8l2.5-4H17l-2.5 4"/></svg>',
   help: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9.2"/><path d="M9.3 9.2a2.7 2.7 0 1 1 3.9 2.5c-.8.4-1.2.9-1.2 1.8"/><path d="M12 17h.01"/></svg>',
+  sound: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9v6h3.5L12 19V5L7.5 9H4Z"/><path d="M16 9.2a4 4 0 0 1 0 5.6"/><path d="M18.6 6.6a7.6 7.6 0 0 1 0 10.8"/></svg>',
   record: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="13" height="12" rx="2"/><path d="M15 10.5l6-3.5v10l-6-3.5Z"/><circle cx="8.5" cy="12" r="2.4" fill="currentColor" stroke="none"/></svg>',
 } as const;
 
@@ -319,6 +320,19 @@ const MDS_T: Record<string, { en: string; ar: string }> = {
   recording: { en: 'Recording…', ar: 'يسجّل…' },
   recordSaved: { en: 'Reveal video saved', ar: 'تم حفظ فيديو الكشف' },
   recordSize: { en: 'MB', ar: 'م.ب' },
+  sound: { en: 'Sound', ar: 'الصوت' },
+  crowdNoise: { en: 'Crowd', ar: 'صوت الجمهور' },
+  volume: { en: 'Volume', ar: 'مستوى الصوت' },
+  drum: { en: 'Ultras drum', ar: 'طبل الألتراس' },
+  tryRoar: { en: 'Roar', ar: 'هدير' },
+  tryWhistle: { en: 'Whistle', ar: 'صافرة' },
+  soundBlocked: { en: 'This browser would not start audio. Click anywhere, then try again.', ar: 'المتصفح ما سمح بتشغيل الصوت. اضغط أي مكان وجرّب مرة ثانية.' },
+  'tip.crowdNoise': { en: 'The stadium, synthesised — it swells on its own and roars when the tifo goes up', ar: 'صوت الملعب مولَّد — يعلو وينخفض لحاله ويهدر لما يطلع التيفو' },
+  'tip.drum': { en: 'The terrace drum behind the crowd, about 96 beats a minute', ar: 'طبل المدرج خلف الجمهور، حوالي ٩٦ نبضة في الدقيقة' },
+  recordNotUniversal: {
+    en: 'This browser could not record H.264, so the file may not open on every device.',
+    ar: 'هذا المتصفح ما قدر يسجّل بصيغة H.264، فقد ما يفتح الملف على كل الأجهزة.',
+  },
   recordUnsupported: { en: 'Recording is not supported in this browser', ar: 'التسجيل غير مدعوم في هذا المتصفح' },
   recTitle: { en: 'Recording', ar: 'التسجيل' },
   recLength: { en: 'Length', ar: 'المدة' },
@@ -351,6 +365,9 @@ interface SimState {
   weather: Weather;
   wet: boolean;
   sparkles: boolean;
+  sound: boolean;
+  volume: number;
+  drum: boolean;
 }
 
 export function openMatchDaySimulator(
@@ -380,6 +397,11 @@ export function openMatchDaySimulator(
     // Always off when the simulator opens, every time. This is a deliberate
     // default, not a remembered preference — nothing persists it.
     sparkles: false,
+    // Off, like the phone flashes. Sound that starts by itself is hostile, and
+    // the browser will refuse it outside a gesture anyway.
+    sound: false,
+    volume: 0.6,
+    drum: true,
   };
 
   const overlay = document.createElement('div');
@@ -469,6 +491,15 @@ export function openMatchDaySimulator(
   const sparklesChk = chk(state.sparkles);
   const confettiBtn = btn(L('confetti'));
   const pyroBtn = btn(L('pyro'));
+  const soundChk = chk(state.sound);
+  try {
+    const saved = Number(localStorage.getItem('mds_volume'));
+    if (Number.isFinite(saved) && saved >= 0 && saved <= 1) state.volume = saved;
+  } catch { /* private mode: the default is fine */ }
+  const volRange = rng(0, 1, state.volume, 0.05);
+  const drumChk = chk(state.drum);
+  const roarBtn = btn(L('tryRoar'));
+  const whistleBtn = btn(L('tryWhistle'));
   const secAtmo = section(ICONS.atmosphere, L('atmo'), false);
   secAtmo.body.append(
     field(L('timeOfDay'), todSel),
@@ -483,6 +514,17 @@ export function openMatchDaySimulator(
     checkField(L('wetPitch'), wetChk),
     checkField(L('phoneFlashes'), sparklesChk),
     row(confettiBtn, pyroBtn),
+  );
+
+  // Sound gets its own section rather than a line in Atmosphere: it is the one
+  // control on this panel that makes a noise in a room, so it should be easy to
+  // find and easier to turn off.
+  const secSound = section(ICONS.sound, L('sound'), false);
+  secSound.body.append(
+    checkField(L('crowdNoise'), soundChk),
+    field(L('volume'), volRange),
+    checkField(L('drum'), drumChk),
+    row(roarBtn, whistleBtn),
   );
 
   // Tifo Assets
@@ -588,7 +630,7 @@ export function openMatchDaySimulator(
 
   const actionsHost = document.createElement('div'); // holds barActions on mobile
   actionsHost.className = 'mds-panel-acts';
-  panel.append(actionsHost, secCam.root, secCrowd.root, secAtmo.root, secAssets.root, secChoreo.root, secRecord.root);
+  panel.append(actionsHost, secCam.root, secCrowd.root, secAtmo.root, secSound.root, secAssets.root, secChoreo.root, secRecord.root);
   overlay.append(bar, panel, host);
   document.body.appendChild(overlay);
   const prevOverflow = document.body.style.overflow;
@@ -681,6 +723,8 @@ export function openMatchDaySimulator(
     [stairsChk, 'tip.stairs'],
     [wetChk, 'tip.wet'],
     [sparklesChk, 'tip.sparkles'],
+    [soundChk, 'tip.crowdNoise'],
+    [drumChk, 'tip.drum'],
     [confettiBtn, 'tip.confetti'],
     [pyroBtn, 'tip.pyro'],
     [addBannerBtn, 'tip.bigBanner'],
@@ -843,6 +887,39 @@ export function openMatchDaySimulator(
     dbg('wet toggle ->', state.wet, '(turn Floodlights on + Night to see it best)');
     sim.setWetPitch(state.wet);
   });
+  // Sound. The checkbox IS the user gesture the browser demands, so the
+  // AudioContext is created inside this handler and nowhere earlier — one
+  // created at construction sits suspended and silently does nothing, which
+  // reads as a broken feature rather than as a refused one.
+  soundChk.addEventListener('change', () => {
+    void (async () => {
+      state.sound = soundChk.checked;
+      await sim.setSound(state.sound);
+      if (state.sound && !sim.soundOn()) {
+        soundChk.checked = false;
+        state.sound = false;
+        toast(L('soundBlocked'));
+        return;
+      }
+      sim.setSoundVolume(state.volume);
+      sim.setDrum(state.sound && state.drum);
+    })();
+  });
+  volRange.addEventListener('input', () => {
+    state.volume = Number(volRange.value);
+    sim.setSoundVolume(state.volume);
+    // Remembered, unlike the on/off. How loud someone wants it is a preference;
+    // whether a page starts making noise is not a decision to make for them on
+    // their behalf a second time.
+    try { localStorage.setItem('mds_volume', String(state.volume)); } catch { /* private mode */ }
+  });
+  drumChk.addEventListener('change', () => {
+    state.drum = drumChk.checked;
+    sim.setDrum(state.sound && state.drum);
+  });
+  roarBtn.addEventListener('click', () => sim.roar(1));
+  whistleBtn.addEventListener('click', () => sim.whistle());
+
   sparklesChk.addEventListener('change', () => {
     state.sparkles = sparklesChk.checked;
     sim.setSparkles(state.sparkles);
@@ -995,22 +1072,28 @@ export function openMatchDaySimulator(
     if (sim.isRecording()) return;
     recBtn.disabled = true;
     recordBtn2.disabled = true;
-    const blob = await sim.recordReveal(recOpts(), (s) => toast(L('recording') + ' ' + s));
+    const clip = await sim.recordReveal(recOpts(), (s) => toast(L('recording') + ' ' + s));
     recBtn.disabled = false;
     recordBtn2.disabled = false;
-    if (!blob) {
+    if (!clip) {
       toast(L('recordUnsupported'));
       return;
     }
-    const url = URL.createObjectURL(blob);
+    const url = URL.createObjectURL(clip.blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'tifo-matchday.webm';
+    // The extension follows what the recorder actually produced. Naming a WebM
+    // .mp4 because that is what we asked for would be the one outcome worse than
+    // handing over a WebM.
+    a.download = `tifo-matchday.${clip.extension}`;
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 3000);
-    // Say how big it came out. The clip is sized to a budget rather than to a
-    // fixed bitrate, so the number is the only way anyone can see that working.
-    toast(`${L('recordSaved')} — ${(blob.size / (1024 * 1024)).toFixed(1)} ${L('recordSize')}`);
+    // Say how big it came out — the clip is sized to a budget rather than to a
+    // fixed bitrate, so the number is the only way anyone can see that working —
+    // and, when the browser could not give us H.264, that this one may not open
+    // everywhere, rather than letting them find out when they try to post it.
+    const size = `${(clip.blob.size / (1024 * 1024)).toFixed(1)} ${L('recordSize')}`;
+    toast(clip.universal ? `${L('recordSaved')} — ${size}` : `${L('recordSaved')} — ${size}. ${L('recordNotUniversal')}`);
   };
   // Preview plays the exact reveal (with the selected style) without recording.
   previewBtn.addEventListener('click', () => {

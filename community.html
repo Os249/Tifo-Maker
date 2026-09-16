@@ -58,10 +58,22 @@
           <div class="sort-tabs" id="sort-tabs">
             <button class="sort-tab active" data-sort="recent" data-i18n="community.recent">Recent</button>
             <button class="sort-tab" data-sort="likes" data-i18n="community.popular">Most liked</button>
+            <button class="sort-tab" data-sort="people" data-i18n="cm.byPeople">By people</button>
             <button class="sort-tab" data-sort="templates" data-i18n="community.templates">Templates</button>
           </div>
         </div>
         <div class="tag-row" id="tag-row"></div>
+        <div class="filter-row" id="filter-row">
+          <div class="filter-group" id="colour-row" hidden>
+            <span class="filter-label" data-i18n="cm.byColour">Colour</span>
+            <div class="chips" id="colour-chips"></div>
+          </div>
+          <div class="filter-group" id="club-group" hidden>
+            <span class="filter-label" data-i18n="cm.byClub">Club</span>
+            <select id="club-select" class="club-select" aria-label="Filter by club" data-i18n-attr="aria-label:cm.byClub"></select>
+          </div>
+          <button class="filter-clear" id="filter-clear" hidden data-i18n="cm.clearFilters">Clear filters</button>
+        </div>
       </div>
     </section>
 

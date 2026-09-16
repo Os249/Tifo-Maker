@@ -27,6 +27,7 @@ import type {
   PhotoReviewItem,
 } from './repo';
 import { normalizeTags } from './memoryRepo';
+import { designFacets } from '../../src/core/facets';
 
 const META_COLS =
   'id, title, title_ar, template_id, template_version, palette, revision_count, is_public, owner_id, created_at, updated_at, description, allow_remix, remixed_from, view_count';
@@ -181,6 +182,7 @@ export class PgDesignRepository implements DesignRepository {
        VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8) RETURNING ${META_COLS}`,
       [d.title, d.titleAr ?? null, d.templateId, d.templateVersion, JSON.stringify(d.palette), d.cellsGz, d.ownerId, d.thumbnailPng],
     );
+    await this.syncFacets(res.rows[0].id as string, { title: d.title, titleAr: d.titleAr, palette: d.palette });
     return rowToMeta(res.rows[0]);
   }
 
@@ -278,10 +280,69 @@ export class PgDesignRepository implements DesignRepository {
     await this.pool.query('DELETE FROM designs WHERE owner_id = $1', [ownerId]);
   }
 
+  /**
+   * Recompute a design's filter facets.
+   *
+   * One statement, called after anything that changes a title or a palette,
+   * rather than five bespoke column lists spliced into five INSERTs. The extra
+   * round trip is an indexed single-row update; the alternative is five places
+   * to forget, on paths I cannot exercise from a test without a database.
+   *
+   * Best-effort on purpose: a design that saved correctly must not fail because
+   * a filter facet did not. `backfillFacets` picks up anything that slipped.
+   */
+  private async syncFacets(id: string, d: { title?: string | null; titleAr?: string | null; palette: readonly string[] }): Promise<void> {
+    const f = designFacets(d);
+    await this.pool
+      .query('UPDATE designs SET colors = $2::text[], club_id = $3 WHERE id = $1', [id, f.colors, f.clubId])
+      .catch(() => undefined);
+  }
+
+  /**
+   * Fill in facets for rows written before they existed, or by a path that
+   * forgot. Runs at boot, reads only what it needs, and is a no-op once done.
+   */
+  async backfillFacets(limit = 5000): Promise<number> {
+    const res = await this.pool.query<{ id: string; title: string; title_ar: string | null; palette: string[] }>(
+      `SELECT id, title, title_ar, palette FROM designs WHERE colors = '{}' LIMIT $1`,
+      [limit],
+    );
+    if (!res.rowCount) return 0;
+    // One statement, not one per row. The template library is 619 designs, and
+    // 619 serial round trips is fine against a unix socket and minutes across a
+    // network — the same trap seedDesigns already had to be dug out of.
+    const values: string[] = [];
+    const params: unknown[] = [];
+    for (const r of res.rows) {
+      const f = designFacets({ title: r.title, titleAr: r.title_ar, palette: r.palette });
+      params.push(r.id, f.colors, f.clubId);
+      const n = params.length;
+      values.push(`($${n - 2}::uuid, $${n - 1}::text[], $${n}::text)`);
+    }
+    await this.pool.query(
+      `UPDATE designs d SET colors = v.colors, club_id = v.club_id
+         FROM (VALUES ${values.join(', ')}) AS v(id, colors, club_id)
+        WHERE d.id = v.id`,
+      params,
+    );
+    return res.rowCount;
+  }
+
   async listPublic(query: GalleryQuery): Promise<GalleryItem[]> {
     const params: unknown[] = [];
     let where = 'd.is_public';
     if (query.templatesOnly) where += ' AND d.is_template';
+    if (query.excludeTemplates) where += ' AND NOT d.is_template';
+    // ANY of the requested colours, not all: somebody filtering red and gold
+    // wants the red ones and the gold ones, which is how a colour chip row reads.
+    if (query.colors && query.colors.length > 0) {
+      params.push(query.colors);
+      where += ` AND d.colors && $${params.length}::text[]`;
+    }
+    if (query.clubId) {
+      params.push(query.clubId);
+      where += ` AND d.club_id = $${params.length}`;
+    }
     if (query.search && query.search.trim()) {
       params.push(`%${query.search.trim()}%`);
       where += ` AND d.title ILIKE $${params.length}`;
@@ -433,7 +494,10 @@ export class PgDesignRepository implements DesignRepository {
        WHERE id = $1 RETURNING ${META_COLS}`,
       [id, cellsGz, JSON.stringify(palette), thumbnailPng],
     );
-    return res.rowCount ? rowToMeta(res.rows[0]) : null;
+    if (!res.rowCount) return null;
+    const meta = rowToMeta(res.rows[0]);
+    await this.syncFacets(id, { title: meta.title, titleAr: meta.titleAr, palette });
+    return meta;
   }
 
   async patchMeta(id: string, patch: { title?: string; isPublic?: boolean }): Promise<DesignMeta | null> {
@@ -442,7 +506,12 @@ export class PgDesignRepository implements DesignRepository {
        WHERE id = $1 RETURNING ${META_COLS}`,
       [id, patch.title ?? null, patch.isPublic ?? null],
     );
-    return res.rowCount ? rowToMeta(res.rows[0]) : null;
+    if (!res.rowCount) return null;
+    const meta = rowToMeta(res.rows[0]);
+    // The title decides the club, so a rename can change which filter a design
+    // falls under.
+    if (patch.title !== undefined) await this.syncFacets(id, { title: meta.title, titleAr: meta.titleAr, palette: meta.palette });
+    return meta;
   }
 
   async getThumbnail(id: string): Promise<Buffer | null> {
@@ -505,7 +574,10 @@ export class PgDesignRepository implements DesignRepository {
        RETURNING ${META_COLS}`,
       [id, title, ownerId],
     );
-    return res.rowCount ? rowToMeta(res.rows[0]) : null;
+    if (!res.rowCount) return null;
+    const meta = rowToMeta(res.rows[0]);
+    await this.syncFacets(meta.id, { title: meta.title, titleAr: meta.titleAr, palette: meta.palette });
+    return meta;
   }
 
   async setTags(designId: string, ownerId: string, slugs: string[]): Promise<string[] | null> {

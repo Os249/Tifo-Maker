@@ -88,6 +88,39 @@ a { color: inherit; text-decoration: none; }
 .tag-chip:hover { border-color: var(--blue); color: var(--blue); }
 .tag-chip.active { background: rgba(28, 111, 224, 0.1); border-color: var(--blue); color: var(--blue); }
 
+/* ---- filter row: colour chips + club picker ----
+   A second row under the tags rather than more tags, because these are not
+   tags: a tag is something a person typed on their design, and these two are
+   derived from the palette and the title (see core/facets). Mixing them in the
+   same row would imply you could add "blue" to your own tifo. */
+.filter-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px; margin-top: 14px; }
+.filter-row[hidden] { display: none; }
+.filter-group { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.filter-label { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.colour-chip {
+  display: inline-flex; align-items: center; gap: 7px;
+  background: var(--card); border: 1px solid var(--line); border-radius: var(--r-pill);
+  padding: 6px 13px 6px 8px; font-size: 13px; font-weight: 600; color: var(--ink);
+  cursor: pointer; transition: border-color 0.14s, background 0.14s;
+}
+.colour-chip:hover { border-color: var(--blue); }
+.colour-chip.active { border-color: var(--blue); background: rgba(28, 111, 224, 0.1); color: var(--blue); }
+/* The swatch is the label. A row of colour words is a list; a row of colours
+   is a palette, and you can find the one you want without reading. */
+.colour-dot { width: 15px; height: 15px; border-radius: 50%; border: 1px solid rgba(128, 128, 128, 0.45); flex: 0 0 auto; }
+.colour-chip .count { color: var(--muted); font-weight: 500; font-size: 12px; }
+.colour-chip.active .count { color: inherit; opacity: 0.75; }
+.club-select {
+  background: var(--card); border: 1px solid var(--line); border-radius: var(--r-pill);
+  padding: 7px 14px; font-family: inherit; font-size: 13px; font-weight: 600; color: var(--ink);
+  min-height: 34px; cursor: pointer;
+}
+.club-select:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+.filter-clear { background: none; border: none; color: var(--blue); font-weight: 600; font-size: 13px; padding: 6px 4px; }
+.filter-clear[hidden] { display: none; }
+[dir="rtl"] .colour-chip { padding: 6px 8px 6px 13px; }
+
 /* ---- gallery grid ---- */
 .grid-wrap { margin-top: 12px; }
 .gallery-grid {
@@ -196,6 +229,8 @@ a { color: inherit; text-decoration: none; }
 .act-btn.like.on { border-color: var(--blue); color: var(--blue); background: rgba(28, 111, 224, 0.08); }
 .act-btn.remix { background: var(--grad-brand); color: #fff; border: none; }
 .act-btn.remix:hover { filter: brightness(1.05); }
+.act-btn.share { flex: 0 0 auto; }
+.act-btn.share:hover { border-color: var(--blue); color: var(--blue); }
 .act-btn.report { flex: 0 0 auto; color: var(--muted); }
 .act-btn.report:hover { color: var(--danger, #c0392b); border-color: var(--danger, #c0392b); }
 

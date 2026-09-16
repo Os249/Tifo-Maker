@@ -208,6 +208,13 @@ async function main(): Promise<void> {
             (r.skipped.length ? `, ${r.skipped.length} skipped` : '') +
             ` (${((Date.now() - started) / 1000).toFixed(1)}s)`);
         }
+        // AFTER the library lands, not before. Its batch insert does not set the
+        // filter facets, so running the backfill first would sweep an empty
+        // table and then miss all 619 rows until the next restart.
+        if (designs instanceof PgDesignRepository) {
+          const n = await designs.backfillFacets();
+          if (n) console.log(`[tifo] filter facets: backfilled ${n} design(s)`);
+        }
       } catch (e) {
         console.warn('[tifo] template seeding skipped:', (e as Error).message);
       }

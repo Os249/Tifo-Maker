@@ -59,26 +59,36 @@ const bootOnce = async (): Promise<{ budget: number; canvas: [number, number] }>
 
 const boot = await bootOnce();
 console.log(`budget ${(boot.budget / MB).toFixed(1)} MB · canvas ${boot.canvas[0]}x${boot.canvas[1]}\n`);
-console.log('case'.padEnd(38) + 'secs'.padStart(5) + 'fps'.padStart(5) + 'res'.padStart(6) + 'size'.padStart(9) + '   of budget');
+console.log('case'.padEnd(34) + 'secs'.padStart(5) + 'fps'.padStart(5) + 'res'.padStart(6) + 'size'.padStart(9) + '  of budget' + '  container' + '  codec');
 
 let over = 0;
 let measured = 0;
 let crashed = 0;
+/** Files whose extension does not match their own header bytes. */
+let mislabelled = 0;
 for (const [i, c] of CASES.entries()) {
   // A fresh simulator per case. Five stadiums' worth of geometry, five capture
   // streams and five recorders in one renderer process took the sixth case out
   // with "execution context was destroyed" — which is a harness running out of
   // memory, not a finding about the recorder.
   if (i > 0) {
-    await page.evaluate(() => (window as never as { __teardown: () => void }).__teardown());
+    // If the previous case took the renderer down, the page itself is gone and
+    // __teardown does not exist to call — reload rather than throwing out of the
+    // loop and losing every result that did run.
+    try {
+      await page.evaluate(() => (window as never as { __teardown: () => void }).__teardown());
+    } catch {
+      await page.goto('http://127.0.0.1:5233/scripts/record-size.html', { waitUntil: 'networkidle', timeout: 120000 });
+      await page.waitForFunction(() => (window as never as { __ready?: boolean }).__ready === true, { timeout: 120000 });
+    }
     await bootOnce();
   }
-  let r: { bytes?: number; unsupported?: boolean };
+  let r: { bytes?: number; unsupported?: boolean; mime?: string; extension?: string; universal?: boolean; magic?: string; ftyp?: string; brands?: string };
   try {
     r = (await page.evaluate(
       (o) => (window as never as { __record: (a: unknown) => Promise<unknown> }).__record(o),
       { seconds: c.seconds, fps: c.fps, height: c.height },
-    )) as { bytes?: number; unsupported?: boolean };
+    )) as typeof r;
   } catch (e) {
     // Report the case and carry on. A crashed browser is not a budget failure,
     // and losing the five results that did run to it would be the worse outcome.
@@ -90,11 +100,21 @@ for (const [i, c] of CASES.entries()) {
   const bytes = r.bytes ?? 0;
   measured++;
   const pct = (bytes / boot.budget) * 100;
-  if (bytes > boot.budget) over++;
+  const flags: string[] = [];
+  if (bytes > boot.budget) { over++; flags.push('OVER BUDGET'); }
+  // The container is asserted from the file's own bytes: 'ftyp' for MP4, the
+  // EBML magic 1a45dfa3 for WebM. An extension proves nothing.
+  const isMp4 = r.ftyp === 'ftyp';
+  const isWebm = r.magic === '1a45dfa3';
+  const container = isMp4 ? 'mp4' : isWebm ? 'webm' : `?${r.magic ?? ''}`;
+  if (r.extension === 'mp4' && !isMp4) { mislabelled++; flags.push('NOT-REALLY-MP4'); }
+  if (r.extension === 'webm' && !isWebm) { mislabelled++; flags.push('NOT-REALLY-WEBM'); }
+  const codec = (r.mime ?? '').split('codecs=')[1] ?? '(unnamed)';
   console.log(
-    c.label.slice(0, 37).padEnd(38) + String(c.seconds).padStart(5) + String(c.fps).padStart(5) +
+    c.label.slice(0, 33).padEnd(34) + String(c.seconds).padStart(5) + String(c.fps).padStart(5) +
     `${c.height}p`.padStart(6) + `${(bytes / MB).toFixed(2)} MB`.padStart(9) +
-    `   ${pct.toFixed(0)}%` + (bytes > boot.budget ? '  <- OVER BUDGET' : ''),
+    `${pct.toFixed(0)}%`.padStart(11) + container.padStart(11) + '  ' + codec +
+    (r.universal ? '' : ' (not H.264)') + (flags.length ? '  <- ' + flags.join(' ') : ''),
   );
 }
 
@@ -104,6 +124,6 @@ if (!measured) {
   console.log('\nNothing measured — MediaRecorder unavailable or the browser did not survive.');
   process.exitCode = 1;
 } else {
-  console.log(`\n${measured} of ${CASES.length} measured, ${over} over budget${crashed ? `, ${crashed} crashed` : ''}`);
-  if (over) process.exitCode = 1;
+  console.log(`\n${measured} of ${CASES.length} measured, ${over} over budget, ${mislabelled} mislabelled${crashed ? `, ${crashed} crashed` : ''}`);
+  if (over || mislabelled) process.exitCode = 1;
 }

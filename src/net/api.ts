@@ -610,9 +610,31 @@ export interface GalleryItem {
 
 export type GallerySort = 'recent' | 'likes';
 
+/** What the community filter chips can offer, and how many designs each covers. */
+export interface GalleryFacets {
+  total: number;
+  colors: { id: string; count: number }[];
+  clubs: { id: string; name: string; nameAr: string; count: number }[];
+}
+
+export async function listGalleryFacets(opts: { peopleOnly?: boolean; templatesOnly?: boolean } = {}): Promise<GalleryFacets> {
+  const params = new URLSearchParams();
+  if (opts.peopleOnly) params.set('made', 'people');
+  if (opts.templatesOnly) params.set('templates', '1');
+  const qs = params.toString();
+  const res = await fetch(`${API}/gallery/facets${qs ? `?${qs}` : ''}`, { headers: authHeaders(false) });
+  if (!res.ok) return { total: 0, colors: [], clubs: [] };
+  return (await res.json()) as GalleryFacets;
+}
+
 export async function listGallery(
   opts: {
     sort?: GallerySort; search?: string; tags?: string[]; templatesOnly?: boolean;
+    /** Exclude the shipped template library — the other half of templatesOnly. */
+    peopleOnly?: boolean;
+    /** Colour families; a design matches if it carries ANY of them. */
+    colors?: string[];
+    clubId?: string;
     /** Page size and cursor. The server caps limit at 120 and defaults to 60. */
     limit?: number; offset?: number;
   } = {},
@@ -622,6 +644,9 @@ export async function listGallery(
   if (opts.search) params.set('search', opts.search);
   if (opts.tags && opts.tags.length) params.set('tags', opts.tags.join(','));
   if (opts.templatesOnly) params.set('templates', '1');
+  if (opts.peopleOnly) params.set('made', 'people');
+  if (opts.colors && opts.colors.length) params.set('colors', opts.colors.join(','));
+  if (opts.clubId) params.set('club', opts.clubId);
   if (opts.limit != null) params.set('limit', String(opts.limit));
   if (opts.offset) params.set('offset', String(opts.offset));
   const qs = params.toString();

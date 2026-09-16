@@ -2166,9 +2166,10 @@ export function mountToolbar(
         return;
       }
       say('Recording video…');
-      const { blob } = await exportStadiumVideo(preview, map, buildExportOpts(false));
-      downloadBlob(blob, `${name}.webm`);
-      say(`Video exported (${(blob.size / 1024).toFixed(0)} KB)`);
+      const { blob, extension, universal } = await exportStadiumVideo(preview, map, buildExportOpts(false));
+      downloadBlob(blob, `${name}.${extension}`);
+      say(`Video exported (${(blob.size / 1024).toFixed(0)} KB)`
+        + (universal ? '' : ' — this browser could not record H.264, so it may not open everywhere.'));
     }
   };
 

@@ -26,6 +26,7 @@ import type {
   FunnelStep,
 } from './repo';
 import { aiPeriod } from './repo';
+import { designFacets, paletteColours } from '../../src/core/facets';
 
 interface Row extends DesignRecord {
   thumbnail: Buffer | null;
@@ -229,6 +230,17 @@ export class MemoryDesignRepository implements DesignRepository {
   async listPublic(query: GalleryQuery): Promise<GalleryItem[]> {
     let rows = [...this.rows.values()].filter((r) => r.isPublic);
     if (query.templatesOnly) rows = rows.filter((r) => r.isTemplate);
+    if (query.excludeTemplates) rows = rows.filter((r) => !r.isTemplate);
+    // Derived on the fly here. The Postgres repo stores them in a column because
+    // it has to filter before paging; in memory the whole set is already loaded,
+    // so computing is cheaper than keeping a second copy in sync.
+    if (query.colors && query.colors.length > 0) {
+      const want = new Set(query.colors);
+      rows = rows.filter((r) => paletteColours(r.palette).some((c) => want.has(c)));
+    }
+    if (query.clubId) {
+      rows = rows.filter((r) => designFacets({ title: r.title, titleAr: r.titleAr, palette: r.palette }).clubId === query.clubId);
+    }
     if (query.search && query.search.trim()) {
       const q = query.search.trim().toLowerCase();
       rows = rows.filter((r) => r.title.toLowerCase().includes(q));

@@ -23,6 +23,7 @@ import { buildVisit, isSocialHost, type TrafficRepository } from './trafficRepo'
 import { isFeedbackKind, type FeedbackContext, type FeedbackRepository } from './feedbackRepo';
 import { adminHtml, ADMIN_JS, ADMIN_UNLOCK_JS } from './adminPage';
 import { isValidTemplate } from '../../src/core/customStadiums';
+import { clubFilterOptions, COLOUR_FAMILIES, designFacets } from '../../src/core/facets';
 
 /**
  * HTTP surface (blueprint §2.2, completed with auth + gallery):
@@ -1157,10 +1158,50 @@ export async function buildApp(
     // stops a single request from shipping every card on the site.
     const limit = Math.min(120, Math.max(1, Number(oneParam(q.limit)) || GALLERY_PAGE));
     const offset = Math.max(0, Number(oneParam(q.offset)) || 0);
+    // Colour chips are OR'd (red + gold means either), tags are AND'd. That is
+    // not an inconsistency: picking two tags narrows a search, picking two
+    // colours widens one, and both match what the chips look like they do.
+    const rawColors = oneParam(q.colors);
+    const colors = rawColors
+      ? rawColors.split(',').map((c) => c.trim().toLowerCase()).filter((c) => (COLOUR_FAMILIES as readonly string[]).includes(c)).slice(0, 6)
+      : undefined;
+    const clubId = oneParam(q.club)?.slice(0, 60) || undefined;
     return repo.listPublic({
-      sort, search, viewerId, tags, limit, offset,
+      sort, search, viewerId, tags, limit, offset, colors, clubId,
       templatesOnly: oneParam(q.templates) === '1',
+      // `made=people` is the other half of the Templates tab: 619 seeded designs
+      // otherwise bury every real one on the newest page.
+      excludeTemplates: oneParam(q.made) === 'people',
     });
+  });
+
+  /**
+   * What the filter chips can offer.
+   *
+   * The colour list is fixed (it is a classification, not data), but the CLUB
+   * list is not worth showing in full: thirty-nine clubs of which the library
+   * covers a dozen is a wall of dead chips. So the clubs are the ones that
+   * actually have public designs, which means asking the feed.
+   */
+  app.get('/api/gallery/facets', async (req) => {
+    const q = req.query as Record<string, unknown>;
+    const made = oneParam(q.made) === 'people';
+    const rows = await repo.listPublic({ sort: 'recent', limit: 5000, excludeTemplates: made, templatesOnly: oneParam(q.templates) === '1' });
+    const colourCounts = new Map<string, number>();
+    const clubCounts = new Map<string, number>();
+    for (const r of rows) {
+      const f = designFacets({ title: r.title, titleAr: r.titleAr, palette: r.palette });
+      for (const c of f.colors) colourCounts.set(c, (colourCounts.get(c) ?? 0) + 1);
+      if (f.clubId) clubCounts.set(f.clubId, (clubCounts.get(f.clubId) ?? 0) + 1);
+    }
+    const names = new Map(clubFilterOptions().map((c) => [c.id, c]));
+    return {
+      total: rows.length,
+      colors: COLOUR_FAMILIES.filter((c) => colourCounts.has(c)).map((c) => ({ id: c, count: colourCounts.get(c)! })),
+      clubs: [...clubCounts.entries()]
+        .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+        .map(([id, count]) => ({ id, name: names.get(id)?.name ?? id, nameAr: names.get(id)?.nameAr ?? id, count })),
+    };
   });
 
   // Most-used tags, for the filter chips.

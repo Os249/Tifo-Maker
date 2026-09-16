@@ -7,7 +7,7 @@ import { type QualityTier, type QualitySettings, settingsFor, probeQuality } fro
 import { applyNightIBL } from './env';
 import { buildStands } from './stands';
 import { buildTrack, type TrackBuild } from './track';
-import { recordingPlan } from './recordPlan';
+import { describeRecording, pickRecordingFormat, recordingPlan, type RecordingFormat } from './recordPlan';
 
 export { RECORD_MAX_BYTES } from './recordPlan';
 import { buildCrowd, type CrowdController, type CrowdPreset } from './crowd';
@@ -28,6 +28,7 @@ import { buildJewelCrown } from './jewelCrown';
 import { buildAlAwwalExtras, buildKingdomArenaExtras } from './stadiumExtras';
 import { buildPitchDetail, pitchStripeTexture } from './pitchDetail';
 import { dbg } from './debug';
+import { buildAtmosphere, type Atmosphere } from './atmosphere';
 
 /**
  * Match Day Stadium Simulator — Phase 0 core (the HIGH/ULTRA renderer).
@@ -84,6 +85,11 @@ function skyTexture(stops: [number, string][]): THREE.Texture {
   return tex;
 }
 
+/** A finished recording, and what it actually is. */
+export interface RecordedClip extends RecordingFormat {
+  blob: Blob;
+}
+
 export class MatchDaySimulator {
   readonly canvas: HTMLCanvasElement;
   private readonly renderer: THREE.WebGLRenderer;
@@ -121,6 +127,7 @@ export class MatchDaySimulator {
   private readonly banners: BannerController;
   private track!: TrackBuild;
   private readonly effects: EffectsController;
+  private readonly atmosphere: Atmosphere;
   private readonly clock = new THREE.Clock();
   private elapsed = 0;
   private flyActive = false;
@@ -204,6 +211,9 @@ export class MatchDaySimulator {
     this.assetLayer = buildAssetLayer(this.assetStore, () => this.store.palette);
     this.scene.add(this.assetLayer.object);
     this.resolveEditorBanners();
+    // Silent until asked for. Sound that starts by itself is hostile, and a
+    // browser will refuse to start it outside a gesture anyway.
+    this.atmosphere = buildAtmosphere();
     this.weather = buildWeather(this.scene);
     // The city is placed relative to THIS bowl, not to a constant — see
     // buildSurroundings. The radius is the plan curve plus the deepest tier,
@@ -561,6 +571,20 @@ export class MatchDaySimulator {
     return { meshes, spotLights, lamps, instances };
   }
 
+  // ---- crowd sound (see ./atmosphere.ts) ----
+  /** Must be called from a user gesture the first time, or the browser refuses. */
+  async setSound(on: boolean): Promise<void> {
+    await this.atmosphere.setEnabled(on);
+  }
+  soundOn(): boolean { return this.atmosphere.isEnabled(); }
+  setSoundVolume(v: number): void { this.atmosphere.setVolume(v); }
+  soundVolume(): number { return this.atmosphere.getVolume(); }
+  setDrum(on: boolean): void { this.atmosphere.setDrum(on); }
+  drumOn(): boolean { return this.atmosphere.isDrumming(); }
+  /** For the overlay's "try it" button, and for anything that wants a cheer. */
+  roar(strength = 1): void { this.atmosphere.roar(strength); }
+  whistle(): void { this.atmosphere.whistle(); }
+
   /** Phone-flash twinkle across the stands. Starts off; see the constructor. */
   setSparkles(b: boolean): void {
     this.sparkles.object.visible = b;
@@ -632,7 +656,7 @@ export class MatchDaySimulator {
   async recordReveal(
     opts: { seconds?: number; fps?: number; height?: number; maxBytes?: number } = {},
     onTick?: (remaining: number) => void,
-  ): Promise<Blob | null> {
+  ): Promise<RecordedClip | null> {
     if (this.recording) return null;
     if (typeof MediaRecorder === 'undefined' || typeof this.canvas.captureStream !== 'function') return null;
     this.recording = true;
@@ -667,18 +691,30 @@ export class MatchDaySimulator {
     };
     drawFrame();
     const stream = comp.captureStream(fps);
-    // VP9 and not AV1, deliberately. AV1 would buy roughly a third more picture
-    // per bit, but it encodes in software while this same machine is already
-    // rendering a 3D scene at 30 fps, and a clip with dropped frames is worse
-    // than a slightly softer one. VP9 at these rates is not the bottleneck.
-    const mime = MediaRecorder.isTypeSupported('video/webm;codecs=vp9') ? 'video/webm;codecs=vp9' : 'video/webm';
-    const recorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: plan.bitsPerSecond });
+    // MP4 with H.264 where the browser has it, because that is what "a video"
+    // means outside a browser — see pickRecordingFormat for the order and why
+    // it names the codec rather than trusting video/mp4.
+    const asked = pickRecordingFormat();
+    if (!asked) {
+      cancelAnimationFrame(raf);
+      this.recording = false;
+      return null;
+    }
+    const recorder = new MediaRecorder(stream, { mimeType: asked.mimeType, videoBitsPerSecond: plan.bitsPerSecond });
+    // What it actually negotiated — read at the END, not here. Chromium leaves
+    // `mimeType` as whatever it was asked for until recording has actually
+    // started, so reading it at construction reports `video/mp4` with no codec
+    // and the clip looks like it might not be H.264 when it is.
+    let format = asked as RecordingFormat;
     const chunks: BlobPart[] = [];
     recorder.ondataavailable = (e): void => {
       if (e.data.size) chunks.push(e.data);
     };
     const finished = new Promise<Blob>((resolve) => {
-      recorder.onstop = (): void => resolve(new Blob(chunks, { type: 'video/webm' }));
+      recorder.onstop = (): void => {
+        format = describeRecording(recorder.mimeType, asked);
+        resolve(new Blob(chunks, { type: format.mimeType }));
+      };
     });
     recorder.start();
     this.playAutoChoreo();
@@ -690,7 +726,7 @@ export class MatchDaySimulator {
     cancelAnimationFrame(raf);
     const blob = await finished;
     this.recording = false;
-    return blob;
+    return { blob, ...format };
   }
 
   setSmoke(b: boolean, color?: THREE.ColorRepresentation): void {
@@ -1014,12 +1050,21 @@ export class MatchDaySimulator {
   buildAutoChoreo(): Timeline {
     const cues: Cue[] = [
       { kind: 'camera', start: 0, shot: 'TV Broadcast' },
+      // The drum starts before anything is visible — that is the order it
+      // happens in, and it is what makes the reveal feel like it was waited for.
+      { kind: 'effect', start: 0, effect: 'drum-on' },
       { kind: 'reveal', start: 0.5, dur: 4, mode: this.autoReveal },
+      // Timed to the END of the reveal, not the start. The crowd roars at the
+      // finished tifo; a roar on the first row of cards is a crowd cheering at
+      // nothing.
+      { kind: 'effect', start: 4.2, effect: 'roar' },
       { kind: 'effect', start: 5, effect: 'smoke-on' },
       { kind: 'camera', start: 5.5, shot: 'Ultra View' },
       { kind: 'effect', start: 7.5, effect: 'pyro' },
       { kind: 'effect', start: 8.5, effect: 'confetti' },
+      { kind: 'effect', start: 8.6, effect: 'roar' },
       { kind: 'camera', start: 11, shot: 'Drone' },
+      { kind: 'effect', start: 13.5, effect: 'drum-off' },
     ];
     return { duration: 15, cues };
   }
@@ -1061,6 +1106,10 @@ export class MatchDaySimulator {
       else if (e === 'smoke-off') this.effects.setSmoke(false);
       else if (e === 'floods-on') this.effects.setFloodlights(true);
       else if (e === 'floods-off') this.effects.setFloodlights(false);
+      else if (e === 'roar') this.atmosphere.roar(1);
+      else if (e === 'whistle') this.atmosphere.whistle();
+      else if (e === 'drum-on') this.atmosphere.setDrum(true);
+      else if (e === 'drum-off') this.atmosphere.setDrum(false);
     }
     if (st.camera && st.camera !== this.lastCamName) {
       const shot = this.shots().find((s) => s.name === st.camera);
@@ -1204,6 +1253,7 @@ export class MatchDaySimulator {
     this.track.dispose();
     this.banners.dispose();
     this.effects.dispose();
+    this.atmosphere.dispose();
     this.assetLayer.dispose();
     this.weather.dispose();
     this.surroundings.dispose();

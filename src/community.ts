@@ -9,7 +9,7 @@
 import { escapeHtml } from './core/escape';
 import './vendor/tabler-subset.css';
 import './community.css';
-import { initLang, applyDom, toggleLang, t, tTag, tTitle } from './ui/i18n';
+import { initLang, applyDom, getLang, toggleLang, t, tTag, tTitle } from './ui/i18n';
 import { initScheme, setSchemeLabels } from './ui/colorScheme';
 import { installMobileNav } from './ui/mobileNav';
 import { installConsent } from './ui/consent';
@@ -23,6 +23,7 @@ import {
   isSignedIn,
   fetchMe,
   listGallery,
+  listGalleryFacets,
   listPopularTags,
   loadDesign,
   voteDesign,
@@ -125,8 +126,11 @@ async function ensureAuth(): Promise<boolean> {
 }
 
 // ---------- gallery ----------
-let currentSort: GallerySort | 'templates' = 'recent';
+let currentSort: GallerySort | 'templates' | 'people' = 'recent';
 let activeTags: string[] = [];
+/** Colour families, OR'd. See core/facets for where they come from. */
+let activeColours: string[] = [];
+let activeClub = '';
 
 /**
  * Paging.
@@ -179,6 +183,9 @@ async function loadPage(token: number): Promise<boolean> {
       sort,
       tags: activeTags,
       templatesOnly: currentSort === 'templates',
+      peopleOnly: currentSort === 'people',
+      colors: activeColours,
+      clubId: activeClub || undefined,
       limit: PAGE,
       offset: pageOffset,
     });
@@ -401,7 +408,11 @@ async function openPreview(item: GalleryItem): Promise<void> {
           }
           <div class="side-actions">
             <button class="act-btn like ${item.myVote === 1 ? 'on' : ''}" id="like-btn"><i class="ti ti-heart${item.myVote === 1 ? '-filled' : ''}"></i> <span id="like-count">${item.likeScore}</span></button>
-            ${item.allowRemix !== false ? `<button class="act-btn remix" id="remix-btn"><i class="ti ti-git-fork"></i> Remix</button>` : ''}
+            ${item.allowRemix !== false ? `<button class="act-btn remix" id="remix-btn"><i class="ti ti-git-fork"></i> ${escapeHtml(t('cm.remix'))}</button>` : ''}
+            <!-- Share sat only on the grid card, so the one screen where somebody
+                 has just decided they like a tifo — open, in 3D, having read the
+                 creator's note — was the one screen with no way to send it on. -->
+            <button class="act-btn share" id="share-btn"><i class="ti ti-share"></i> ${escapeHtml(t('cm.share'))}</button>
             <button class="act-btn report" id="report-btn" title="${t('cm.report')}" aria-label="${t('cm.report')}"><i class="ti ti-flag"></i></button>
           </div>
         </div>
@@ -535,6 +546,12 @@ function wirePreviewActions(item: GalleryItem): void {
     } catch (e) {
       toast((e as Error).message);
     }
+  });
+
+  // Share — the same modal the grid cards open: WhatsApp, X, Telegram, Facebook,
+  // Reddit, the OS share sheet where there is one, and copy link.
+  document.getElementById('share-btn')?.addEventListener('click', () => {
+    openShareModal({ id: item.id, title: item.title });
   });
 
   // Report (sends to the moderation queue; you act on it from /admin or the DB).
@@ -837,6 +854,10 @@ $('#sort-tabs').querySelectorAll<HTMLButtonElement>('.sort-tab').forEach((tab) =
     $('#sort-tabs').querySelectorAll('.sort-tab').forEach((t) => t.classList.remove('active'));
     tab.classList.add('active');
     currentSort = tab.dataset.sort as typeof currentSort;
+    // The facets differ per tab — the library covers a dozen clubs, the people
+    // tab may cover none — so a chip row left over from the other tab would
+    // offer filters that return nothing.
+    void loadFilters();
     void loadGallery();
   });
 });
@@ -853,18 +874,108 @@ async function loadTags(): Promise<void> {
       chip.classList.toggle('active');
       if (activeTags.includes(tg.slug)) activeTags = activeTags.filter((x) => x !== tg.slug);
       else activeTags.push(tg.slug);
+      syncClearBtn();
       void loadGallery();
     });
     row.appendChild(chip);
   }
 }
 
+/** A representative swatch per colour family, for the chip's dot. */
+const COLOUR_SWATCH: Record<string, string> = {
+  red: '#d53434', orange: '#e8862a', yellow: '#f2c40f', green: '#22a559', cyan: '#28b8c4',
+  blue: '#2f6fe0', purple: '#8b5cf6', pink: '#e05a9a', white: '#f4f4f0', black: '#1b1e25', grey: '#8b9099',
+};
+
+/**
+ * Build the colour and club filters from what the feed ACTUALLY contains.
+ *
+ * Not from the full list of either. Thirty-nine clubs of which the library
+ * covers a dozen is a wall of chips that return nothing, and a chip that
+ * returns nothing is worse than no chip: it reads as a broken filter rather
+ * than an empty category.
+ */
+async function loadFilters(): Promise<void> {
+  const facets = await listGalleryFacets({
+    peopleOnly: currentSort === 'people',
+    templatesOnly: currentSort === 'templates',
+  }).catch(() => null);
+  const colourRow = $('#colour-row');
+  const clubGroup = $('#club-group');
+  const chips = $('#colour-chips');
+  const select = $('#club-select') as HTMLSelectElement;
+  if (!facets) { colourRow.hidden = true; clubGroup.hidden = true; return; }
+
+  chips.innerHTML = '';
+  for (const c of facets.colors) {
+    const chip = document.createElement('button');
+    chip.className = 'colour-chip' + (activeColours.includes(c.id) ? ' active' : '');
+    chip.type = 'button';
+    chip.setAttribute('aria-pressed', String(activeColours.includes(c.id)));
+    const dot = document.createElement('span');
+    dot.className = 'colour-dot';
+    dot.style.background = COLOUR_SWATCH[c.id] ?? '#888';
+    const label = document.createElement('span');
+    label.textContent = t(`cm.colour.${c.id}`);
+    const count = document.createElement('span');
+    count.className = 'count';
+    count.textContent = String(c.count);
+    chip.append(dot, label, count);
+    chip.addEventListener('click', () => {
+      activeColours = activeColours.includes(c.id) ? activeColours.filter((x) => x !== c.id) : [...activeColours, c.id];
+      chip.classList.toggle('active');
+      chip.setAttribute('aria-pressed', String(activeColours.includes(c.id)));
+      syncClearBtn();
+      void loadGallery();
+    });
+    chips.appendChild(chip);
+  }
+  colourRow.hidden = facets.colors.length === 0;
+
+  select.innerHTML = '';
+  const any = document.createElement('option');
+  any.value = '';
+  any.textContent = t('cm.allClubs');
+  select.appendChild(any);
+  for (const club of facets.clubs) {
+    const o = document.createElement('option');
+    o.value = club.id;
+    // The reader's language, not the matching vocabulary's. clubs.ts stores
+    // Arabic aliases for every club, so there is no reason to show "al shabab"
+    // to somebody reading the page in Arabic.
+    o.textContent = `${(getLang() === 'ar' ? club.nameAr : club.name) || club.name} (${club.count})`;
+    select.appendChild(o);
+  }
+  select.value = facets.clubs.some((c) => c.id === activeClub) ? activeClub : '';
+  if (select.value !== activeClub) activeClub = select.value;
+  clubGroup.hidden = facets.clubs.length === 0;
+  syncClearBtn();
+}
+
+function syncClearBtn(): void {
+  $('#filter-clear').hidden = activeColours.length === 0 && !activeClub && activeTags.length === 0;
+}
+
+($('#club-select') as HTMLSelectElement).addEventListener('change', (e) => {
+  activeClub = (e.target as HTMLSelectElement).value;
+  syncClearBtn();
+  void loadGallery();
+});
+$('#filter-clear').addEventListener('click', () => {
+  activeColours = [];
+  activeClub = '';
+  activeTags = [];
+  $('#tag-row').querySelectorAll('.tag-chip').forEach((c) => c.classList.remove('active'));
+  void loadFilters();
+  void loadGallery();
+});
+
 // ---------- go ----------
 async function main(): Promise<void> {
   langToggle.textContent = t('common.language');
   await refreshAuthUI();
   initPaging();
-  await Promise.all([loadGallery(), loadTags()]);
+  await Promise.all([loadGallery(), loadTags(), loadFilters()]);
 }
 void main();
 

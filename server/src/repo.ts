@@ -50,6 +50,18 @@ export interface GalleryQuery {
   tags?: string[];
   /** Only return designs flagged as templates. */
   templatesOnly?: boolean;
+  /**
+   * Exclude the shipped template library.
+   *
+   * 619 seeded designs against a handful of real ones means the newest page is
+   * almost entirely @tifomaker, and the people the community page exists for are
+   * buried under it. This is the other half of `templatesOnly`.
+   */
+  excludeTemplates?: boolean;
+  /** Colour families (see core/facets). A design matches if it carries ANY of them. */
+  colors?: string[];
+  /** A single club id (see core/facets). */
+  clubId?: string;
   /** Page size. Omitted means "no cap" — only the sitemap and the crawler feed
    *  want that; every user-facing list passes one. */
   limit?: number;

@@ -555,6 +555,33 @@ import { buildStadium as siBuild } from '../src/core/stadiumFit';
   console.log(`reveal video: budget ${(RECORD_MAX_BYTES / MB).toFixed(1)} MB | worst of ${DURATIONS.length * FPS.length} settings ${(worst / MB).toFixed(2)} MB | over budget ${over}`);
   if (over) throw new Error(`${over} recording setting(s) exceed the size budget`);
 
+  // MP4, and specifically H.264 MP4, is what "a video" means outside a browser.
+  // The order has to name the codec: isTypeSupported('video/mp4') answers true
+  // in browsers that then hand back VP9 INSIDE an MP4 — a real MP4 container
+  // that QuickTime and iOS still will not play, which is the same problem
+  // wearing a different extension.
+  const { pickRecordingFormat, describeRecording } = await import('../src/render/simulator/recordPlan');
+  const only = (...supported: string[]) => (m: string): boolean => supported.includes(m);
+  const everything = pickRecordingFormat(() => true);
+  console.log(`reveal video: a browser that supports everything records ${everything?.mimeType}`);
+  if (everything?.extension !== 'mp4' || !everything.universal) throw new Error('H.264 MP4 must be the first choice');
+
+  const noH264 = pickRecordingFormat(only('video/mp4', 'video/webm;codecs=vp9', 'video/webm'));
+  if (noH264?.mimeType !== 'video/mp4') throw new Error('a browser with MP4 but no named H.264 should still take MP4 over WebM');
+  const webmOnly = pickRecordingFormat(only('video/webm;codecs=vp9', 'video/webm'));
+  if (webmOnly?.extension !== 'webm') throw new Error('WebM is still the fallback');
+  if (pickRecordingFormat(() => false) !== null) throw new Error('a browser that can record nothing must say so, not guess');
+
+  // And the reply is believed over the request, because Chromium answers
+  // "video/mp4" and then hands back VP9 inside it.
+  const asked = { mimeType: 'video/mp4', extension: 'mp4' as const, universal: false };
+  const gotVp9 = describeRecording('video/mp4;codecs=vp9', asked);
+  const gotH264 = describeRecording('video/mp4;codecs=avc1.42E01E', asked);
+  console.log(`reveal video: mp4+vp9 reads as universal=${gotVp9.universal}, mp4+avc1 as universal=${gotH264.universal}`);
+  if (gotVp9.extension !== 'mp4' || gotVp9.universal) throw new Error('VP9 inside MP4 must not be called universal');
+  if (!gotH264.universal) throw new Error('H.264 inside MP4 is the universal case');
+  if (describeRecording('video/webm;codecs=vp9', asked).extension !== 'webm') throw new Error('the extension must follow the negotiated container, not the request');
+
   // The old behaviour, as a regression. A flat 8 Mbps made a 9-second clip 9 MB
   // and a 15-second one 15, whatever was in it.
   const before = (9 * 8_000_000) / 8;
@@ -591,4 +618,105 @@ import { buildStadium as siBuild } from '../src/core/stadiumFit';
   const squeezed = recordingPlan({ seconds: 60, maxBytes: 1 * MB });
   console.log('reveal video: an impossible budget holds the quality floor and admits it', squeezed.bitsPerSecond === 1_200_000 && squeezed.overBudget);
   if (squeezed.bitsPerSecond !== 1_200_000 || !squeezed.overBudget) throw new Error('the quality floor or its overBudget flag is wrong');
+}
+
+// ---------------------------------------------------------------------------
+// Community filters: what a design "is", derived rather than typed.
+{
+  const { COLOUR_FAMILIES, clubFilterOptions, clubId, colourSlug, designFacets, paletteColours } =
+    await import('../src/core/facets');
+  const { CLUBS } = await import('../src/core/clubs');
+
+  // Two clubs sharing an id would merge silently in every filter that uses one.
+  const ids = CLUBS.map((c) => clubId(c.aliases));
+  const dupes = ids.filter((id, i) => ids.indexOf(id) !== i);
+  console.log(`facets: ${ids.length} clubs filterable | duplicate ids ${dupes.length}${dupes.length ? ' (' + dupes.join(', ') + ')' : ''}`);
+  if (dupes.length) throw new Error(`club ids collide: ${dupes.join(', ')}`);
+  if (clubFilterOptions().length !== CLUBS.length) throw new Error('not every club is offered as a filter');
+
+  // Shade is dropped, hue is kept: somebody filtering for blue wants the dark
+  // navy and the sky blue, and a manifest's 'Dark blue' is the wrong grain here.
+  const shades = ['Dark blue', 'Blue', 'Light blue'].map(colourSlug);
+  console.log(`facets: 'Dark blue' / 'Blue' / 'Light blue' -> ${shades.join(', ')}`);
+  if (new Set(shades).size !== 1 || shades[0] !== 'blue') throw new Error('colour shades must collapse to one family');
+  if (colourSlug('Chartreuse') !== null) throw new Error('an unknown family must be dropped, not guessed');
+
+  // Index 0 is the empty seat, not a colour anyone chose. Counting it would tag
+  // every design in the catalogue dark grey and make the filter useless.
+  const withEmpty = paletteColours(['#262a33', '#0033a0', '#ffffff']);
+  console.log(`facets: palette #262a33/#0033a0/#ffffff -> ${withEmpty.join(', ')}`);
+  if (withEmpty.includes('grey')) throw new Error('the empty-seat colour must not become a filter facet');
+  if (!withEmpty.includes('blue') || !withEmpty.includes('white')) throw new Error('real palette colours are missing');
+  if (paletteColours(['#262a33', 'not-a-colour', '#zzzzzz']).length !== 0) throw new Error('malformed palette entries must be ignored');
+
+  // The club comes off the title, in either language, and matching nothing is a
+  // correct answer — half the clubs in the list are blue and white, so guessing
+  // from the palette would be worse than saying nothing.
+  const cases: [string, string | null][] = [
+    ['الهلال · أسهم', 'al-hilal'],
+    ['Al Ittihad stripes', 'al-ittihad'],
+    ['مانشستر سيتي · حلقات', 'manchester-city'],
+    ['ThaiPort FC Ultras', null],
+    ['', null],
+  ];
+  for (const [title, want] of cases) {
+    const got = designFacets({ title, palette: ['#262a33', '#0033a0'] }).clubId;
+    if (got !== want) throw new Error(`club from "${title}": expected ${want}, got ${got}`);
+  }
+  console.log(`facets: club from title right on ${cases.length}/${cases.length} (including two that should match nothing)`);
+
+  // An Arabic title on a design whose English title names no club still finds it.
+  const ar = designFacets({ title: 'Untitled tifo', titleAr: 'النصر · نصفان', palette: ['#262a33', '#f9d616'] });
+  console.log('facets: an Arabic title is read when the English one says nothing:', ar.clubId);
+  if (ar.clubId !== 'al-nassr') throw new Error('titleAr is not being consulted');
+
+  // Every family a chip can show must have a label in both languages, or the
+  // chip row comes out half in English.
+  const i18nSrc2 = roofRead('src/ui/i18n.ts', 'utf8');
+  const missing = COLOUR_FAMILIES.filter((c) => !new RegExp(`'cm\\.colour\\.${c}':[^\\n]*\\bar:`).test(i18nSrc2));
+  console.log(`facets: colour labels ${COLOUR_FAMILIES.length} | without Arabic ${missing.length}`);
+  if (missing.length) throw new Error(`no Arabic for colour chip(s): ${missing.join(', ')}`);
+}
+
+// ---------------------------------------------------------------------------
+// Crowd sound. The module needs an AudioContext, so what can be checked here is
+// the part that matters anyway: that it never starts by itself.
+{
+  const overlaySrc2 = roofRead('src/render/simulator/overlay.ts', 'utf8');
+  const atmoSrc = roofRead('src/render/simulator/atmosphere.ts', 'utf8');
+  const simSrc2 = roofRead('src/render/simulator/index.ts', 'utf8');
+
+  const offByDefault = /\n\s*sound:\s*false,/.test(overlaySrc2);
+  // The AudioContext must be built inside the toggle. One created at
+  // construction sits suspended and silently does nothing, which reads as a
+  // broken feature rather than a refused one.
+  const lazyCtx = /if \(!ctx\) \{\s*\n\s*ctx = new AudioCtor\(\)/.test(atmoSrc);
+  const refused = /soundBlocked/.test(overlaySrc2);
+  // Volume is remembered; the on/off is not. Whether a page starts making noise
+  // is not a decision to make on someone's behalf a second time.
+  const volumeKept = /localStorage\.setItem\('mds_volume'/.test(overlaySrc2);
+  const onNotKept = !/localStorage[^\n]*mds_sound|mds_sound[^\n]*localStorage/.test(overlaySrc2);
+  console.log('crowd sound: off by default', offByDefault, '| context built in the gesture', lazyCtx,
+    '| says so when the browser refuses', refused, '| volume remembered', volumeKept, '| on-state never remembered', onNotKept);
+  if (!offByDefault || !lazyCtx || !refused || !volumeKept || !onNotKept) {
+    throw new Error('crowd sound must stay opt-in, gesture-started, and honest when blocked');
+  }
+
+  // The roar is a choreography cue, not a setting: it has to land on the
+  // finished tifo. A roar at the start of the reveal is a crowd cheering at
+  // nothing.
+  const revealAt = /\{ kind: 'reveal', start: ([\d.]+), dur: ([\d.]+)/.exec(simSrc2);
+  const roarAt = /\{ kind: 'effect', start: ([\d.]+), effect: 'roar' \}/.exec(simSrc2);
+  const revealEnds = revealAt ? Number(revealAt[1]) + Number(revealAt[2]) : NaN;
+  console.log(`crowd sound: reveal finishes at ${revealEnds}s, the crowd roars at ${roarAt?.[1]}s`);
+  if (!roarAt || !revealAt || Number(roarAt[1]) < revealEnds - 0.6 || Number(roarAt[1]) > revealEnds + 1.5) {
+    throw new Error('the roar must land on the finished tifo, not during the reveal');
+  }
+
+  // Both languages, like every other label on that panel.
+  for (const k of ['sound', 'crowdNoise', 'volume', 'drum', 'soundBlocked', 'tip.crowdNoise']) {
+    const row2 = new RegExp(`'?${k.replace('.', '\\.')}'?\\s*:\\s*\\{.*$`, 'm').exec(overlaySrc2)?.[0] ?? '';
+    if (!/\ben:/.test(row2) || !/\bar:/.test(row2)) throw new Error(`sound string "${k}" is missing a translation`);
+  }
+  console.log('crowd sound: every new label carries en + ar');
 }

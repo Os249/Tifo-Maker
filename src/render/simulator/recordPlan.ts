@@ -78,3 +78,69 @@ export function recordingPlan(opts: { seconds: number; fps?: number; maxBytes?: 
     overBudget: bitsPerSecond > wanted,
   };
 }
+
+/**
+ * What container and codec to record in.
+ *
+ * WebM was the old answer because it was the only one `MediaRecorder` had for
+ * years. It is a bad answer for a clip people post: it will not open in
+ * QuickTime, most phone galleries refuse it, and several apps reject the upload
+ * outright. MP4 is what "a video" means outside a browser.
+ *
+ * The order below asks for **H.264 by name first**, and that is the whole point
+ * rather than a nicety. `isTypeSupported('video/mp4')` answers true in browsers
+ * that will then hand back VP9 *inside* an MP4 — a real MP4 container that
+ * QuickTime and iOS still will not play, which is the same problem wearing a
+ * different extension. Naming the codec gets a straight answer.
+ *
+ * H.264 is also less efficient than VP9, so the same byte budget buys a slightly
+ * softer picture. That is the right trade for a file whose purpose is to be sent
+ * to someone.
+ */
+export interface RecordingFormat {
+  /** Pass to the MediaRecorder constructor. */
+  mimeType: string;
+  /** File extension, without the dot. */
+  extension: 'mp4' | 'webm';
+  /** True when the result will play anywhere, i.e. H.264 in MP4. */
+  universal: boolean;
+}
+
+const CANDIDATES: Array<{ mimeType: string; extension: 'mp4' | 'webm'; universal: boolean }> = [
+  // H.264 baseline: the profile that plays on everything, including a decade of phones.
+  { mimeType: 'video/mp4;codecs=avc1.42E01E', extension: 'mp4', universal: true },
+  { mimeType: 'video/mp4;codecs=avc1.4D401F', extension: 'mp4', universal: true },
+  { mimeType: 'video/mp4;codecs=avc1', extension: 'mp4', universal: true },
+  { mimeType: 'video/mp4;codecs=h264', extension: 'mp4', universal: true },
+  // An MP4 whose codec the browser chooses. Better than WebM for anything that
+  // sniffs the container, and worse than H.264 for anything Apple made.
+  { mimeType: 'video/mp4', extension: 'mp4', universal: false },
+  { mimeType: 'video/webm;codecs=vp9', extension: 'webm', universal: false },
+  { mimeType: 'video/webm', extension: 'webm', universal: false },
+];
+
+/**
+ * @param isSupported injected so this is testable in Node, where MediaRecorder
+ *   does not exist. Defaults to the real thing in a browser.
+ */
+export function pickRecordingFormat(isSupported?: (mime: string) => boolean): RecordingFormat | null {
+  const can = isSupported
+    ?? ((m: string): boolean => typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported(m));
+  for (const c of CANDIDATES) if (can(c.mimeType)) return c;
+  return null;
+}
+
+/**
+ * What the recorder ACTUALLY negotiated, read back off the instance.
+ *
+ * `MediaRecorder.mimeType` after construction is the only honest source: ask for
+ * `video/mp4` in a Chromium built without proprietary codecs and it reports back
+ * `video/mp4;codecs=vp9`. Believing the request instead of the reply is how you
+ * hand somebody a .mp4 that their phone will not open.
+ */
+export function describeRecording(negotiated: string, asked: RecordingFormat): RecordingFormat {
+  const mime = negotiated || asked.mimeType;
+  const extension: 'mp4' | 'webm' = mime.includes('mp4') ? 'mp4' : 'webm';
+  const universal = extension === 'mp4' && /avc1|avc3|h264|hev1|hvc1/i.test(mime);
+  return { mimeType: mime, extension, universal };
+}

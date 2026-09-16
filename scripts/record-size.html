@@ -34,9 +34,24 @@
 
   window.__record = async (opts) => {
     const t0 = performance.now();
-    const blob = await sim.recordReveal(opts);
-    if (!blob) return { unsupported: true };
-    return { bytes: blob.size, type: blob.type, wallMs: Math.round(performance.now() - t0) };
+    const clip = await sim.recordReveal(opts);
+    if (!clip) return { unsupported: true };
+    // Read the container's own header rather than trusting the extension. An MP4
+    // starts with a 4-byte size then the ASCII 'ftyp' box and its brands; a WebM
+    // starts with the EBML magic 1A 45 DF A3. This is the only way to tell that
+    // a file named .mp4 really is one.
+    const head = new Uint8Array(await clip.blob.slice(0, 32).arrayBuffer());
+    const ascii = String.fromCharCode(...head).replace(/[^\x20-\x7e]/g, '.');
+    return {
+      bytes: clip.blob.size,
+      mime: clip.mimeType,
+      extension: clip.extension,
+      universal: clip.universal,
+      magic: Array.from(head.slice(0, 4)).map((b) => b.toString(16).padStart(2, '0')).join(''),
+      ftyp: ascii.slice(4, 8),
+      brands: ascii.slice(8, 32),
+      wallMs: Math.round(performance.now() - t0),
+    };
   };
 
   window.__teardown = () => { sim?.dispose(); sim = null; };

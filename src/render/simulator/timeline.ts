@@ -20,7 +20,13 @@ export type EffectName =
   | 'smoke-on'
   | 'smoke-off'
   | 'floods-on'
-  | 'floods-off';
+  | 'floods-off'
+  // Sound. Cues, not settings: the crowd reacts to the choreography, and a roar
+  // that arrives half a second after the tifo does is worse than no roar.
+  | 'roar'
+  | 'whistle'
+  | 'drum-on'
+  | 'drum-off';
 
 export interface RevealCue {
   kind: 'reveal';
