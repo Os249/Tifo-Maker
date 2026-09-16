@@ -23,3 +23,9 @@ preview-out/
 
 # local scratch: stitched aerial tiles, not redistributable
 scratch-aerial/
+
+# Hand-over files from an agent that could not push: a patch or a bundle is an
+# INPUT you apply, never a change you commit. One of them got committed instead
+# of applied once, and the fix it carried silently never reached the code.
+*.patch
+*.bundle
