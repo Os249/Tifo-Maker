@@ -1,0 +1,45 @@
+<!doctype html>
+<!-- Dev-only harness for scripts/record-size.mts. Boots the real simulator and
+     actually records, because a size budget is a claim about what comes out of
+     MediaRecorder and the only way to check it is to run MediaRecorder. -->
+<html lang="en"><head><meta charset="UTF-8"/><title>record size</title></head>
+<body style="margin:0;background:#05070c"><div id="out">loading…</div>
+<script type="module">
+  import { generateSeatMap } from '/src/core/seatmap.ts';
+  import { DesignStore } from '/src/core/design.ts';
+  import { templateById } from '/src/core/stadiumCatalog.ts';
+  import { MatchDaySimulator, RECORD_MAX_BYTES } from '/src/render/simulator/index.ts';
+  import { AssetStore } from '/src/core/sceneAssets.ts';
+
+  const HOST = document.createElement('div');
+  HOST.style.cssText = 'position:fixed;left:0;top:0;width:1280px;height:720px;';
+  document.body.appendChild(HOST);
+
+  let sim = null;
+  window.__boot = (id) => {
+    HOST.replaceChildren();
+    const template = templateById(id);
+    const map = generateSeatMap(template);
+    const store = new DesignStore(map, ['#0b1d4d', '#ffffff', '#f2c40f', '#c0392b']);
+    // A busy design on purpose. A flat two-colour bowl compresses to almost
+    // nothing and would let the budget pass on content nobody will ever make.
+    store.transform((i) => 1 + (i % 3));
+    sim = new MatchDaySimulator(HOST, map, store, template, new AssetStore(), { quality: 'high' });
+    sim.setTimeOfDay('night');
+    sim.setFloodlights(true);
+    sim.setSmoke(true);
+    sim.start();
+    return { budget: RECORD_MAX_BYTES, canvas: [sim.canvas.width, sim.canvas.height] };
+  };
+
+  window.__record = async (opts) => {
+    const t0 = performance.now();
+    const blob = await sim.recordReveal(opts);
+    if (!blob) return { unsupported: true };
+    return { bytes: blob.size, type: blob.type, wallMs: Math.round(performance.now() - t0) };
+  };
+
+  window.__teardown = () => { sim?.dispose(); sim = null; };
+  document.getElementById('out').textContent = 'ready';
+  window.__ready = true;
+</script></body></html>

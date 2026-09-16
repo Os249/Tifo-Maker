@@ -23,7 +23,8 @@
     "verify:stadiumfit": "tsx scripts/verify-stadiumfit.mts",
     "shots:stadiumimport": "tsx scripts/stadium-import-shots.mts",
     "shots:facade": "tsx scripts/facade-preview.mts",
-    "shots:matchday": "tsx scripts/matchday-shots.mts"
+    "shots:matchday": "tsx scripts/matchday-shots.mts",
+    "shots:recordsize": "tsx scripts/record-size.mts"
   },
   "dependencies": {
     "@fastify/helmet": "^13.0.2",

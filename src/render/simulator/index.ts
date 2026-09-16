@@ -7,6 +7,9 @@ import { type QualityTier, type QualitySettings, settingsFor, probeQuality } fro
 import { applyNightIBL } from './env';
 import { buildStands } from './stands';
 import { buildTrack, type TrackBuild } from './track';
+import { recordingPlan } from './recordPlan';
+
+export { RECORD_MAX_BYTES } from './recordPlan';
 import { buildCrowd, type CrowdController, type CrowdPreset } from './crowd';
 import { buildPitchside, type PitchsideController } from './pitchside';
 import { buildBanners, type BannerController } from './banners';
@@ -616,16 +619,28 @@ export class MatchDaySimulator {
    * with the tifomaker.org watermark burned into every frame (so the clip is an
    * ad for the site wherever it's posted). Returns null if the browser can't
    * record. `onTick` reports remaining whole seconds for a countdown UI.
+   *
+   * The clip is sized to a BYTE BUDGET, not to a bitrate someone once picked.
+   * It used to ask for a flat 8 Mbps, which is not a quality setting so much as
+   * a multiplication: nine seconds at 8 Mbps is nine megabytes, every time,
+   * whatever the clip contained. Past about 5 MB a video stops going through
+   * WhatsApp and Telegram without being re-encoded by them — which costs far
+   * more picture than encoding it properly ourselves would.
+   *
+   * Resolution is never what gives way. See the fps note below for what does.
    */
   async recordReveal(
-    opts: { seconds?: number; fps?: number; height?: number } = {},
+    opts: { seconds?: number; fps?: number; height?: number; maxBytes?: number } = {},
     onTick?: (remaining: number) => void,
   ): Promise<Blob | null> {
     if (this.recording) return null;
     if (typeof MediaRecorder === 'undefined' || typeof this.canvas.captureStream !== 'function') return null;
     this.recording = true;
     const seconds = Math.max(1, Math.round(opts.seconds ?? 9));
-    const fps = opts.fps ?? 30;
+    // Everything about the clip's weight is decided here, in one pure function
+    // that a test can call without a browser. See ./recordPlan.ts.
+    const plan = recordingPlan({ seconds, fps: opts.fps, maxBytes: opts.maxBytes });
+    const fps = plan.fps;
     const srcW = this.canvas.width;
     const srcH = this.canvas.height;
     const outH = Math.min(opts.height ?? srcH, srcH); // never upscale past the canvas
@@ -652,8 +667,12 @@ export class MatchDaySimulator {
     };
     drawFrame();
     const stream = comp.captureStream(fps);
+    // VP9 and not AV1, deliberately. AV1 would buy roughly a third more picture
+    // per bit, but it encodes in software while this same machine is already
+    // rendering a 3D scene at 30 fps, and a clip with dropped frames is worse
+    // than a slightly softer one. VP9 at these rates is not the bottleneck.
     const mime = MediaRecorder.isTypeSupported('video/webm;codecs=vp9') ? 'video/webm;codecs=vp9' : 'video/webm';
-    const recorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 8_000_000 });
+    const recorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: plan.bitsPerSecond });
     const chunks: BlobPart[] = [];
     recorder.ondataavailable = (e): void => {
       if (e.data.size) chunks.push(e.data);

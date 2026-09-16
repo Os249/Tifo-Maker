@@ -318,6 +318,7 @@ const MDS_T: Record<string, { en: string; ar: string }> = {
   record: { en: 'Record', ar: 'تسجيل' },
   recording: { en: 'Recording…', ar: 'يسجّل…' },
   recordSaved: { en: 'Reveal video saved', ar: 'تم حفظ فيديو الكشف' },
+  recordSize: { en: 'MB', ar: 'م.ب' },
   recordUnsupported: { en: 'Recording is not supported in this browser', ar: 'التسجيل غير مدعوم في هذا المتصفح' },
   recTitle: { en: 'Recording', ar: 'التسجيل' },
   recLength: { en: 'Length', ar: 'المدة' },
@@ -1007,7 +1008,9 @@ export function openMatchDaySimulator(
     a.download = 'tifo-matchday.webm';
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 3000);
-    toast(L('recordSaved'));
+    // Say how big it came out. The clip is sized to a budget rather than to a
+    // fixed bitrate, so the number is the only way anyone can see that working.
+    toast(`${L('recordSaved')} — ${(blob.size / (1024 * 1024)).toFixed(1)} ${L('recordSize')}`);
   };
   // Preview plays the exact reveal (with the selected style) without recording.
   previewBtn.addEventListener('click', () => {

@@ -526,3 +526,69 @@ import { buildStadium as siBuild } from '../src/core/stadiumFit';
   console.log('track: templates claiming one', claiming.length, '| without room for it', roomless.length);
   if (roomless.length) throw new Error(`template(s) claim a track that does not fit: ${roomless.map((t2) => t2.id).join(', ')}`);
 }
+
+// ---------------------------------------------------------------------------
+// The recorded reveal's size budget.
+//
+// A clip that will not go through WhatsApp without being re-encoded is a clip
+// nobody shares intact, so the recorder is sized to a byte budget rather than to
+// a bitrate someone picked. Duration times bitrate IS the file, near enough, so
+// this arithmetic decides the answer — and it is checked here rather than in the
+// browser harness, because under software rendering the canvas barely repaints
+// and every recorded clip comes out 20x smaller than it would on real hardware.
+{
+  const { recordingPlan, RECORD_MAX_BYTES } = await import('../src/render/simulator/recordPlan');
+  const MB = 1024 * 1024;
+
+  // Every combination the overlay's selects can produce.
+  const DURATIONS = [6, 9, 12, 15];
+  const FPS = [24, 30, 60];
+  let over = 0;
+  let worst = 0;
+  for (const seconds of DURATIONS) {
+    for (const fps of FPS) {
+      const p = recordingPlan({ seconds, fps });
+      worst = Math.max(worst, p.estimatedBytes);
+      if (p.estimatedBytes > RECORD_MAX_BYTES) over++;
+    }
+  }
+  console.log(`reveal video: budget ${(RECORD_MAX_BYTES / MB).toFixed(1)} MB | worst of ${DURATIONS.length * FPS.length} settings ${(worst / MB).toFixed(2)} MB | over budget ${over}`);
+  if (over) throw new Error(`${over} recording setting(s) exceed the size budget`);
+
+  // The old behaviour, as a regression. A flat 8 Mbps made a 9-second clip 9 MB
+  // and a 15-second one 15, whatever was in it.
+  const before = (9 * 8_000_000) / 8;
+  const after = recordingPlan({ seconds: 9 }).estimatedBytes;
+  console.log(`reveal video: a 9s clip was ${(before / MB).toFixed(1)} MB at the old flat 8 Mbps, now ${(after / MB).toFixed(2)} MB`);
+  if (after >= before) throw new Error('the budget did not make the default clip smaller');
+
+  // Longer clip, thinner bitrate — otherwise the budget is not a budget.
+  const bits = DURATIONS.map((s) => recordingPlan({ seconds: s }).bitsPerSecond);
+  const monotonic = bits.every((b, i) => i === 0 || b <= bits[i - 1]);
+  console.log(`reveal video: bitrate falls with length ${bits.map((b) => (b / 1e6).toFixed(2)).join(' -> ')} Mbps`);
+  if (!monotonic) throw new Error('bitrate does not fall as the clip gets longer');
+
+  // Resolution is never the thing that gives way — the user asked for a smaller
+  // file at the SAME resolution. recordReveal's only resolution input is
+  // `opts.height`, which comes straight from the overlay's select; the plan must
+  // not have an opinion about it at all.
+  const planKeys = Object.keys(recordingPlan({ seconds: 15, fps: 60 }));
+  const touchesRes = planKeys.some((k) => /height|width|res|scale/i.test(k));
+  console.log('reveal video: the size plan has no opinion about resolution', !touchesRes, `(${planKeys.join(', ')})`);
+  if (touchesRes) throw new Error('the size budget must never reduce resolution');
+
+  // When the per-frame budget gets thin, the frame rate steps down instead.
+  const thin = recordingPlan({ seconds: 15, fps: 60 });
+  const roomy = recordingPlan({ seconds: 6, fps: 60 });
+  console.log(`reveal video: 60 fps kept at 6s (${roomy.fps}) and stepped down at 15s (${thin.fps})`);
+  if (roomy.fps !== 60 || thin.fps !== 24) throw new Error('frame rate is not the lever that gives way');
+
+  // And it never asks for more than it used to, however generous the budget.
+  const generous = recordingPlan({ seconds: 2, maxBytes: 500 * MB });
+  if (generous.bitsPerSecond > 8_000_000) throw new Error('a large budget must not exceed the old 8 Mbps ceiling');
+  // Nor below the rate where the crowd turns to blocks; it reports the overshoot
+  // instead of quietly shipping something unwatchable.
+  const squeezed = recordingPlan({ seconds: 60, maxBytes: 1 * MB });
+  console.log('reveal video: an impossible budget holds the quality floor and admits it', squeezed.bitsPerSecond === 1_200_000 && squeezed.overBudget);
+  if (squeezed.bitsPerSecond !== 1_200_000 || !squeezed.overBudget) throw new Error('the quality floor or its overBudget flag is wrong');
+}
