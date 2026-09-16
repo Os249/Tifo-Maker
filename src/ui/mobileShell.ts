@@ -120,6 +120,22 @@ export function mountMobileShell(): MobileShell | null {
   document.body.append(scrim, sheet);
 
   let openTab: TabId | null = null;
+  /**
+   * True while the sheet is showing the import options.
+   *
+   * Dismissing that sheet — the X, the scrim, Escape, Back, a drag down — has
+   * to cancel the import, not just hide it. Otherwise the editor is left in
+   * import mode with its only controls off-screen, which is the same dead end
+   * this sheet exists to fix, reached a different way.
+   */
+  let importView = false;
+  /**
+   * True while the sheet shows a sub-view of its tab — the Text options rather
+   * than the Add grid, say. The ribbon tab is still lit, so tapping it has to
+   * mean "back to the tab", not "close": a tab that closes the panel you
+   * reached through it is a dead end you cannot see your way out of.
+   */
+  let subView = false;
 
   const closeSheet = (): void => {
     openTab = null;
@@ -128,6 +144,11 @@ export function mountMobileShell(): MobileShell | null {
     for (const b of ribbonBtns) b.classList.remove('active');
     // Hand the panel back to whatever the desktop code expects.
     document.getElementById('panel')?.classList.remove('open');
+    subView = false;
+    if (importView) {
+      importView = false; // before the proxy: cancelling re-enters this function
+      proxy('#import-cancel');
+    }
   };
 
   closeBtn.addEventListener('click', closeSheet);
@@ -202,14 +223,55 @@ export function mountMobileShell(): MobileShell | null {
     return grid;
   };
 
+  /**
+   * Show an arbitrary set of live panel sections in the sheet, under a title,
+   * with one ribbon tab marked active.
+   *
+   * This exists because the obvious spelling — build the body, then call
+   * open('add') — cannot work: open() starts with returnAll(), which puts every
+   * borrowed section straight back where it came from, and then rebuilds the
+   * tab's own contents over the top. Worse, open() toggles, so calling it while
+   * the Add sheet was already open (which is the only way you reach the Add
+   * tools) simply CLOSED the sheet. That is why picking Text on a phone made
+   * the sheet vanish instead of showing the text options.
+   */
+  const openView = (tab: TabId, heading: string, ids: string[]): void => {
+    returnAll();
+    openTab = tab;
+    subView = true;
+    importView = ids.includes('import-bar');
+    bodyEl.textContent = '';
+    title.textContent = heading;
+    for (const id of ids) lend(id);
+    sheet.classList.add('open');
+    scrim.classList.add('show');
+    for (const b of ribbonBtns) b.classList.toggle('active', b.dataset.tab === tab);
+    bodyEl.scrollTop = 0;
+  };
+
   /** The text / shape / import option rows are desktop-width; host them here. */
   const showToolBar = (tool: string): void => {
     const barId = tool === 'text' ? 'text-bar' : tool === 'shape' ? 'shape-bar' : 'import-bar';
-    bodyEl.textContent = '';
-    title.textContent = t(tool === 'text' ? 'ed.tool.text' : tool === 'shape' ? 'ed.shape' : 'ed.tool.import');
-    lend(barId);
-    open('add');
+    openView('add', t(tool === 'text' ? 'ed.tool.text' : tool === 'shape' ? 'ed.shape' : 'ed.tool.import'), [barId]);
   };
+
+  /**
+   * A picked photo has finished decoding.
+   *
+   * `body.m-shell .tool-bar { display:none }` hides the desktop import row, so
+   * without this a phone user who chose a photo saw nothing happen at all: no
+   * width, no stand, no Place, no Cancel, and no way back out of import mode.
+   * The toolbar announces the moment the file is actually decoded — only it
+   * knows — and the options come up in a sheet a thumb can reach.
+   */
+  const onImportArmed = (): void => showToolBar('import');
+  /** Placed or cancelled: get out of the way so the bowl is fully visible. */
+  const onImportDone = (): void => {
+    importView = false; // already placed or cancelled — nothing left to cancel
+    if (openTab) closeSheet();
+  };
+  document.addEventListener('tifo:import-armed', onImportArmed);
+  document.addEventListener('tifo:import-done', onImportDone);
 
   const buildPaint = (): void => {
     title.textContent = t('mb.paint');
@@ -275,9 +337,12 @@ export function mountMobileShell(): MobileShell | null {
   };
 
   function open(tab: TabId): void {
+    const back = openTab === tab && subView; // in a sub-view: go up, don't close
     returnAll();
-    if (openTab === tab) { closeSheet(); return; }
+    importView = false;
+    if (openTab === tab && !back) { closeSheet(); return; }
     openTab = tab;
+    subView = false;
     BUILD[tab]();
     sheet.classList.add('open');
     scrim.classList.add('show');
@@ -346,6 +411,42 @@ export function mountMobileShell(): MobileShell | null {
   }
   stage.appendChild(stands);
 
+  // ---------- selected-object actions ----------
+  // Placing a picture leaves it selected, and what you want next is to size it,
+  // move it and bake it. On a phone all three lived in the Paint sheet, under
+  // the brush controls, past the bottom of a scrolling panel — so the answer to
+  // "I placed it, now what?" was two taps and a scroll, under a tab called
+  // Paint. This floats the one action people are actually after right above the
+  // ribbon, and only while something is selected.
+  const objBar = el('div', 'm-objbar');
+  objBar.setAttribute('role', 'group');
+  objBar.setAttribute('aria-label', t('ed.obj'));
+  objBar.hidden = true;
+  const objBtn = (cls: string, icon: string, label: string, onTap: () => void, withText: boolean): HTMLButtonElement => {
+    const b = el('button', `m-objbar-b ${cls}`) as HTMLButtonElement;
+    b.type = 'button';
+    b.innerHTML = `<i class="ti ${icon}" aria-hidden="true"></i>${withText ? `<span>${label}</span>` : ''}`;
+    if (!withText) b.setAttribute('aria-label', label);
+    b.addEventListener('click', onTap);
+    objBar.appendChild(b);
+    return b;
+  };
+  objBtn('primary', 'ti-stamp', t('mb.bake'), () => { closeSheet(); proxy('#obj-bake'); }, true);
+  objBtn('', 'ti-adjustments-horizontal', t('mb.objOptions'), () => openView('paint', t('ed.obj'), ['ctx-objects']), true);
+  objBtn('danger', 'ti-trash', t('ed.obj.deleteT'), () => proxy('#obj-delete'), false);
+  stage.appendChild(objBar);
+
+  // #obj-controls is un-hidden by the toolbar whenever the object layer has a
+  // selection, so watching its `hidden` attribute is how this stays in step
+  // without the shell knowing anything about the object layer.
+  const objControls = document.getElementById('obj-controls');
+  const syncObjBar = (): void => {
+    objBar.hidden = !objControls || objControls.hidden;
+  };
+  const objObserver = new MutationObserver(syncObjBar);
+  if (objControls) objObserver.observe(objControls, { attributes: true, attributeFilter: ['hidden'] });
+  syncObjBar();
+
   // ---------- top bar: undo / redo where a thumb can reach them ----------
   const topRight = document.querySelector('.topbar-right');
   const histWrap = el('div', 'm-hist');
@@ -388,8 +489,11 @@ export function mountMobileShell(): MobileShell | null {
     destroy(): void {
       returnAll();
       zoomObserver.disconnect();
+      objObserver.disconnect();
+      document.removeEventListener('tifo:import-armed', onImportArmed);
+      document.removeEventListener('tifo:import-done', onImportDone);
       document.body.classList.remove('m-shell');
-      ribbon.remove(); sheet.remove(); scrim.remove(); viewPill.remove(); stands.remove(); histWrap.remove();
+      ribbon.remove(); sheet.remove(); scrim.remove(); viewPill.remove(); stands.remove(); histWrap.remove(); objBar.remove();
     },
   };
 }

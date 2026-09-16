@@ -732,3 +732,80 @@ import { buildStadium as siBuild } from '../src/core/stadiumFit';
   }
   console.log('crowd sound: every new label carries en + ar');
 }
+
+// ---------------------------------------------------------------------------
+// Adding a picture.
+//
+// The bug this guards against was invisible in every DOM assertion we had: the
+// object was in the layer, the panel showed it, the bake was correct — and the
+// canvas was empty, because the cursor ghost and the placed object shared one
+// cached Pixi texture and the ghost's destroy() took the GPU source with it.
+// The live proof lives in scripts/image-ux.mts, which decodes a screenshot and
+// counts the picture's own colours. These are the cheap invariants behind it.
+{
+  const overlaySrc3 = roofRead('src/render/objectOverlay.ts', 'utf8');
+  const editorSrc = roofRead('src/render/editor.ts', 'utf8');
+  const ownSrc = roofRead('src/render/ownTexture.ts', 'utf8');
+  const importSrc = roofRead('src/core/importImage.ts', 'utf8');
+  const toolbarSrc = roofRead('src/ui/toolbar.ts', 'utf8');
+  const shellSrc = roofRead('src/ui/mobileShell.ts', 'utf8');
+  const i18nSrc3 = roofRead('src/ui/i18n.ts', 'utf8');
+
+  // Texture.from() caches by resource identity, so anything that later calls
+  // destroy({ textureSource: true }) must NOT use it. Texture.EMPTY is a shared
+  // singleton pixi itself protects, and ownTexture is where the skipCache lives.
+  const strayFrom = [overlaySrc3, editorSrc]
+    .flatMap((src) => src.split('\n'))
+    .filter((l) => /Texture\.from\(/.test(l) && !/skipCache|^\s*\*/.test(l));
+  console.log('image: shared-texture call sites', strayFrom.length, '| ownTexture uses skipCache',
+    /Texture\.from\(source, true\)/.test(ownSrc));
+  if (strayFrom.length) throw new Error(`Texture.from() shares a cached texture — use ownTexture(): ${strayFrom[0].trim()}`);
+  if (!/Texture\.from\(source, true\)/.test(ownSrc)) throw new Error('ownTexture must skip the cache');
+
+  // Every WebGL device accepts 2048; plenty of phones stop at 4096, and a
+  // modern camera hands you more than that on the long edge.
+  const cap = Number(/IMPORT_MAX_EDGE = (\d+)/.exec(importSrc)?.[1] ?? 0);
+  const capped = /decodeImportBitmap\(file\)/.test(toolbarSrc) && !/createImageBitmap\(file\), name/.test(toolbarSrc);
+  console.log(`image: decode capped at ${cap}px on the long edge | the picker uses it`, capped);
+  if (!(cap > 0 && cap <= 2048)) throw new Error('IMPORT_MAX_EDGE must stay at or under 2048 — the WebGL floor');
+  if (!capped) throw new Error('the image picker must decode through decodeImportBitmap');
+
+  // The cap is only free while the widest possible import still fits inside it.
+  // A seat is 3.2 editor units and bake() samples one cell per 3, so the widest
+  // grid the editor can ask for is sliderMax * 3.2 / 3 cells.
+  const sliderMax = Number(/id="import-width"[^>]*max="(\d+)"/.exec(roofRead('index.html', 'utf8'))?.[1] ?? 0);
+  const widestGrid = Math.round((sliderMax * 3.2) / 3);
+  console.log(`image: widest import is ${sliderMax} seats = ${widestGrid} cells, fed from ${cap}px`);
+  if (!sliderMax || widestGrid > cap) {
+    throw new Error(`a ${sliderMax}-seat import wants ${widestGrid} cells but the decode caps at ${cap}px — raise IMPORT_MAX_EDGE or lower the slider`);
+  }
+
+  // Place is the only way to put a picture down on a touch screen, because
+  // there is no hover and therefore no ghost to aim with. It must never be
+  // disabled for a mode, only for "no file yet".
+  const placeAlive = /importApply\.disabled = !pendingImport;/.test(toolbarSrc);
+  console.log('image: Place stays live in every mode', placeAlive);
+  if (!placeAlive) throw new Error('Place must not switch off for the click-on-canvas mode');
+
+  // `body.m-shell .tool-bar { display:none }` hides the import row on a phone,
+  // so the shell has to be told when a file has decoded — only the toolbar
+  // knows — and it has to cancel the import when that sheet is dismissed.
+  const announces = /tifo:import-armed/.test(toolbarSrc) && /tifo:import-done/.test(toolbarSrc);
+  const listens = /tifo:import-armed/.test(shellSrc) && /proxy\('#import-cancel'\)/.test(shellSrc);
+  console.log('image: the picker announces itself', announces, '| the phone shell answers', listens);
+  if (!announces || !listens) throw new Error('a phone must be told when an import arms, and must cancel it on dismiss');
+
+  // The status line is what the user reads after every step of this flow, and
+  // it was the one part still hard-coded in English inside an Arabic editor.
+  for (const k of ['ed.import.size', 'ed.import.reading', 'ed.import.armed', 'ed.import.failed',
+    'ed.import.placed', 'ed.obj.added', 'ed.obj.shapeAdded', 'ed.obj.baked', 'ed.obj.bakedAll',
+    'mb.bake', 'mb.objOptions']) {
+    const row3 = new RegExp(`'${k.replace(/\./g, '\\.')}':\\s*\\{.*$`, 'm').exec(i18nSrc3)?.[0] ?? '';
+    if (!/\ben:/.test(row3) || !/\bar:/.test(row3)) throw new Error(`image-flow string "${k}" is missing a translation`);
+  }
+  const stillEnglish = toolbarSrc
+    .split('\n')
+    .filter((l) => /message\.textContent = `/.test(l) && /added|baked|image load|configure the import/.test(l));
+  console.log('image: flow strings translated | hard-coded sentences left', stillEnglish.length);
+  if (stillEnglish.length) throw new Error(`hard-coded status sentence: ${stillEnglish[0].trim()}`);
+}

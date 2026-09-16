@@ -18,7 +18,7 @@ import {
   buildDraft, createDraftWriter,
   type DraftTextObject, type DraftWriteResult,
 } from '../core/draft';
-import { extractPhotoPalette, rasterize } from '../core/importImage';
+import { decodeImportBitmap, extractPhotoPalette, rasterize } from '../core/importImage';
 import { openAuthModal } from './authModal';
 import { openGallery } from './gallery';
 import { mountAiPanel } from './aiPanel';
@@ -693,7 +693,7 @@ export function mountToolbar(
     });
     editor.objectOverlay?.sync();
     setTool('select');
-    message.textContent = `"${textInput.value.trim()}" added: drag to position, resize from the corner, then Bake`;
+    message.textContent = i18nT('ed.obj.added').replace('{name}', textInput.value.trim());
   };
 
     // Custom font upload: FontFace API, available immediately in the font select.
@@ -836,14 +836,43 @@ export function mountToolbar(
 
   const refreshImportUI = (): void => {
     const { w, h, rows } = importRect();
-    importSizeOut.textContent = `${importWidth.value} × ${rows} seats`;
-    importApply.disabled = importPlace.value === 'click' || !pendingImport;
+    importSizeOut.textContent = i18nT('ed.import.size').replace('{w}', importWidth.value).replace('{n}', String(rows));
+    // Place stays live in every mode. It used to switch OFF for "click on
+    // canvas", which on a phone is a dead end: touch has no hover, so there is
+    // no ghost to aim with, and the one button that could put the picture down
+    // was greyed out. In click mode Place drops it in the middle of whatever
+    // you are looking at — exactly where the ghost would have been.
+    importApply.disabled = !pendingImport;
     editor.setStampPreviewSize(w, h);
+  };
+
+  /**
+   * Tell the rest of the UI that an import is armed / finished.
+   *
+   * The phone shell hosts the import options in a bottom sheet, because the
+   * desktop bar is `display:none` under `.m-shell` — a phone user who picked a
+   * photo got no width, no tier, no Place and no Cancel, and no way back. It
+   * cannot watch for that itself: only this module knows when a file has
+   * actually decoded. A DOM event rather than a direct call, so the shell stays
+   * a presentation layer and neither module imports the other.
+   */
+  const importArmed = (): void => {
+    document.dispatchEvent(new CustomEvent('tifo:import-armed'));
+  };
+  const importDone = (): void => {
+    document.dispatchEvent(new CustomEvent('tifo:import-done'));
   };
 
   const stampImageAt = (cx: number, cy: number): void => {
     if (!pendingImport) return;
     const { w, h } = importRect();
+    // Release the cursor ghost FIRST. addImage notifies the overlay, which
+    // builds the object's sprite synchronously, so anything after that point
+    // would leave the same bitmap live in two GPU textures — 12MB each for a
+    // phone photo. Correctness does not depend on the order (each texture is
+    // its own; see render/ownTexture.ts) but the peak memory does. The ghost
+    // is already invisible here: the click that got us here placed it.
+    editor.setStampPreview(null);
     // "Real colours": add the picture's own dominant colours to the palette so
     // the imported art keeps its true look instead of only mapping to club cards.
     if (realColorsChk.checked) {
@@ -878,18 +907,25 @@ export function mountToolbar(
       cutout: cutoutChk?.checked === true,
       alphaThreshold: Number(importAlpha.value),
     });
-    editor.objectOverlay?.sync();
     // Keep the bitmap alive (the object now owns a reference); just exit import mode.
     pendingImport = null;
-    editor.setStampPreview(null);
     setTool('select');
-    message.textContent = `"${objects.selected && objects.selected.kind === 'image' ? objects.selected.name : 'image'}" added: drag to position, resize from the corner, then Bake`;
+    importDone();
+    const placed = objects.selected;
+    message.textContent = i18nT('ed.import.placed').replace(
+      '{name}',
+      placed && placed.kind === 'image' ? placed.name : i18nT('ed.import.thePicture'),
+    );
   };
 
   const cancelImport = (): void => {
+    // Texture first, then the bitmap it was made from. Nothing renders between
+    // these two lines today, but a texture pointing at a closed bitmap is the
+    // kind of thing that only breaks once someone adds an await.
+    editor.setStampPreview(null);
     pendingImport?.bitmap.close();
     pendingImport = null;
-    editor.setStampPreview(null);
+    importDone();
     if (editor.tool === 'import') setTool('brush');
   };
 
@@ -897,16 +933,21 @@ export function mountToolbar(
     const file = fileInput.files?.[0];
     fileInput.value = '';
     if (!file) return;
+    message.textContent = i18nT('ed.import.reading');
     try {
       pendingImport?.bitmap.close();
-      pendingImport = { bitmap: await createImageBitmap(file), name: file.name };
+      // decodeImportBitmap, not createImageBitmap: a phone camera hands you
+      // 4000-8000px on the long edge, which is both a 47MB+ texture and, past
+      // 4096, larger than many mobile GPUs will accept at all.
+      pendingImport = { bitmap: await decodeImportBitmap(file), name: file.name };
       importName.textContent = file.name;
       setTool('import');
       editor.setStampPreview(pendingImport.bitmap, false);
       refreshImportUI();
-      message.textContent = 'configure the import, then click a stand (or pick a preset and Place)';
+      importArmed();
+      message.textContent = i18nT('ed.import.armed');
     } catch (err) {
-      message.textContent = `image load failed: ${(err as Error).message}`;
+      message.textContent = i18nT('ed.import.failed').replace('{err}', (err as Error).message);
     }
   });
   importWidth.addEventListener('input', rafThrottle(refreshImportUI));
@@ -916,7 +957,14 @@ export function mountToolbar(
     importAlphaOut.textContent = importAlpha.value;
   });
   importApply.addEventListener('click', () => {
-    if (importPlace.value === 'click' || !pendingImport) return;
+    if (!pendingImport) return;
+    if (importPlace.value === 'click') {
+      // No stand chosen → the centre of the current viewport, which is the one
+      // place the user is demonstrably looking at.
+      const view = editor.getViewportRect();
+      stampImageAt(view.x + view.width / 2, view.y + view.height / 2);
+      return;
+    }
     const u = Number(importPlace.value);
     stampImageAt(u * EDITOR_UNITS.width, tierY[importTier.value] ?? tierY.both);
   });
@@ -965,7 +1013,12 @@ export function mountToolbar(
     editor.objectOverlay?.sync();
     // Stay in the shape tool so multiple shapes can be dropped in a row, then
     // committed together with "Bake all". Switch to Select to fine-tune any one.
-    message.textContent = `${kind} added: click to drop more, then “Bake all”. Switch to Select to move/resize.`;
+    // The <option>'s own label, which applyDom has already translated — a
+    // second copy of sixteen shape names in the string table would only rot.
+    message.textContent = i18nT('ed.obj.shapeAdded').replace(
+      '{name}',
+      shapeKind.selectedOptions[0]?.textContent?.trim() || kind,
+    );
   };
 
   // One shared placement-click callback, dispatched by the active mode.
@@ -1961,14 +2014,14 @@ export function mountToolbar(
     store.flush(dirty);
     objects.deleteSelected();
     refreshHistory();
-    message.textContent = `baked onto ${dirty.length.toLocaleString()} seats`;
+    message.textContent = i18nT('ed.obj.baked').replace('{n}', dirty.length.toLocaleString());
   };
   $('#obj-bake').addEventListener('click', bakeSelected);
   $('#obj-bake-all').addEventListener('click', () => {
     const n = objects.bakeAll(store, map, EDITOR_UNITS.width);
     overlay.sync();
     refreshHistory();
-    message.textContent = `baked all objects onto ${n.toLocaleString()} seats`;
+    message.textContent = i18nT('ed.obj.bakedAll').replace('{n}', n.toLocaleString());
   });
 
   syncObjectPanelVisibility();

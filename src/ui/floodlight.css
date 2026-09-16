@@ -97,6 +97,10 @@ header {
   font-size:12px; color:var(--text-2);
 }
 .tool-bar .hint { color:var(--text-3); font-size:11px; }
+/* A label and the control it labels, kept together when the bar wraps. On a
+   desktop this is invisible: display:contents leaves the flex row exactly as
+   it was before the wrappers existed. */
+.tool-bar .tb-field { display:contents; }
 /* contextual tool-bars fade in when their tool becomes active (cam-bar excluded:
    it relies on a translateX centering transform a keyframe would clobber) */
 #import-bar, #text-bar, #shape-bar { animation:ctxFadeIn .15s ease; }
@@ -1300,6 +1304,15 @@ body.gate { display:block; overflow-y:auto; background:var(--ink-0); }
     background:transparent; border:none; padding:0; gap:10px;
   }
   body.m-shell .m-sheet .tool-bar > * { flex:0 0 auto; }
+  /* A tool bar is a flat row of labels and controls, which reflows into
+     nonsense the moment it wraps: "Tier" ends one line and its <select> starts
+     the next, and two different things called "Place" end up side by side.
+     .tb-field groups a label with what it labels; `display:contents` on the
+     desktop means the row is byte-for-byte what it always was. */
+  body.m-shell .m-sheet .tool-bar .tb-field {
+    display:flex; align-items:center; gap:8px; flex:1 1 100%; min-width:0; flex-wrap:wrap;
+  }
+  body.m-shell .m-sheet .tool-bar .tb-field > label { flex:0 0 auto; }
   body.m-shell .m-sheet .tool-bar label { display:flex; align-items:center; gap:6px; min-height:44px; }
   body.m-shell .m-sheet .tool-bar input[type="range"] { flex:1 1 140px; min-width:120px; }
   body.m-shell .m-sheet .tool-bar button { min-height:44px; }
@@ -1349,6 +1362,32 @@ body.gate { display:block; overflow-y:auto; background:var(--ink-0); }
   }
   .m-stand.on { background:var(--blue); border-color:var(--blue); color:#fff; }
   .m-stand:focus-visible { outline:none; box-shadow:var(--ring-focus); }
+
+  /* --- selected-object actions: the phone's answer to "now what?" ---
+     A picture the user just placed needs three things next — resize, move,
+     bake — and on a phone all three lived inside the Paint sheet, below the
+     brush controls, off the bottom of a scrolling panel. This puts the one
+     irreversible-ish action and a way into the rest right above the ribbon,
+     and shows only while something is actually selected. */
+  .m-objbar {
+    position:absolute; left:0; right:0; z-index:13;
+    /* Above the stand chips, which sit at +56 and are 36 tall. Measured, not
+       guessed: at +8 the two rows drew straight through each other. */
+    bottom:calc(var(--m-ribbon) + 100px);
+    display:flex; gap:8px; padding:0 10px; justify-content:center;
+  }
+  .m-objbar[hidden] { display:none; }
+  .m-objbar-b {
+    flex:0 0 auto; min-height:44px; padding:0 16px;
+    display:flex; align-items:center; gap:6px;
+    background:rgba(15,23,42,.92); backdrop-filter:blur(6px);
+    border:1px solid var(--line-1); border-radius:var(--r-pill);
+    color:var(--text-1); font:inherit; font-size:13px; font-weight:600;
+  }
+  .m-objbar-b i { font-size:17px; line-height:1; }
+  .m-objbar-b.primary { background:var(--blue); border-color:var(--blue); color:#fff; }
+  .m-objbar-b.danger { color:var(--danger, #f87171); }
+  .m-objbar-b:focus-visible { outline:none; box-shadow:var(--ring-focus); }
 
   /* --- undo / redo in the top bar --- */
   .m-hist { display:flex; gap:4px; }

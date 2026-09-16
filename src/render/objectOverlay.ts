@@ -1,6 +1,7 @@
 import { Container, Graphics, Sprite, Texture } from 'pixi.js';
 import type { ObjectLayer, TifoObject } from '../core/objects';
 import { renderObjectCanvas } from '../core/objects';
+import { ownTexture } from './ownTexture';
 
 /**
  * Renders the floating ObjectLayer above the seat grid inside the editor's
@@ -55,7 +56,10 @@ export class ObjectOverlay {
           entry.frame.destroy();
         }
         const source = renderObjectCanvas(obj);
-        const sprite = source ? new Sprite(Texture.from(source)) : new Sprite(Texture.EMPTY);
+        // ownTexture, never Texture.from: the ghost preview holds the same
+        // ImageBitmap, and a shared texture dies with whichever owner is
+        // destroyed first. See render/ownTexture.ts.
+        const sprite = source ? new Sprite(ownTexture(source)) : new Sprite(Texture.EMPTY);
         sprite.alpha = 0.65;
         sprite.eventMode = 'none';
         const frame = new Graphics();

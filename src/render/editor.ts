@@ -9,6 +9,7 @@ import {
 } from 'pixi.js';
 import type { SeatMap, ToolId } from '../core/types';
 import { ObjectOverlay } from './objectOverlay';
+import { ownTexture } from './ownTexture';
 import type { ObjectLayer } from '../core/objects';
 import type { DesignStore } from '../core/design';
 import { SpatialHash } from '../core/spatialHash';
@@ -266,7 +267,10 @@ export class Editor {
       this.stampPreview = null;
     }
     if (!source) return;
-    const sprite = new Sprite(Texture.from(source));
+    // ownTexture, never Texture.from: this ghost is destroyed the moment the
+    // object is placed, and a cached texture would take the placed object's
+    // GPU source down with it. See render/ownTexture.ts.
+    const sprite = new Sprite(ownTexture(source));
     sprite.alpha = 0.55;
     sprite.visible = false;
     sprite.eventMode = 'none';

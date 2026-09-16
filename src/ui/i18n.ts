@@ -530,6 +530,23 @@ const STRINGS: Record<string, { en: string; ar: string }> = {
   'ed.import.realColors': { en: 'Real colours', ar: 'الألوان الأصلية' },
   'ed.import.dither': { en: 'Dither', ar: 'تنعيم' },
   'ed.import.cutout': { en: 'Remove background', ar: 'إزالة الخلفية' },
+
+  // Status-line sentences for the add-a-picture flow. Whole sentences, not
+  // fragments: Arabic puts the file name and the count in different places than
+  // English does, and the old code built these by concatenation, which is how
+  // an Arabic editor ended up reading `"images.png" added: drag to position`.
+  'ed.import.size': { en: '{w} × {n} seats', ar: '{w} × {n} مقعد' },
+  'ed.import.reading': { en: 'reading the picture…', ar: 'جارٍ قراءة الصورة…' },
+  'ed.import.armed': { en: 'set the size and stand, then press Place — or click straight onto a stand', ar: 'حدّد المقاس والمدرج ثم اضغط «ضع» — أو اضغط على المدرج مباشرة' },
+  'ed.import.failed': { en: 'couldn’t read that picture: {err}', ar: 'ما قدرنا نقرأ الصورة: {err}' },
+  'ed.import.thePicture': { en: 'the picture', ar: 'الصورة' },
+  'ed.import.placed': { en: '“{name}” is on the bowl — drag it, resize from the corner, then Bake', ar: '«{name}» صارت على المدرج — اسحبها، غيّر مقاسها من الزاوية، ثم ثبّتها' },
+  'ed.obj.added': { en: '“{name}” added — drag it, resize from the corner, then Bake', ar: 'أُضيف «{name}» — اسحبه، غيّر مقاسه من الزاوية، ثم ثبّته' },
+  'ed.obj.shapeAdded': { en: '{name} added — click to drop more, then “Bake all”. Switch to Select to move or resize.', ar: 'أُضيف {name} — اضغط عشان تضيف غيره، ثم «ثبّت الكل». بدّل إلى «تحديد» عشان تحرّكه أو تغيّر مقاسه.' },
+  'ed.obj.baked': { en: 'baked onto {n} seats', ar: 'ثُبّت على {n} مقعد' },
+  'ed.obj.bakedAll': { en: 'baked everything onto {n} seats', ar: 'ثُبّت كل شيء على {n} مقعد' },
+  'mb.bake': { en: 'Bake', ar: 'ثبّت' },
+  'mb.objOptions': { en: 'Options', ar: 'خيارات' },
   'ed.ai.cancel': { en: 'Stop', ar: 'إيقاف' },
   // ---- account settings page ----
   'ed.account': { en: 'Account settings', ar: 'إعدادات الحساب' },

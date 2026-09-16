@@ -86,32 +86,48 @@
       </nav>
 
       <div class="stage">
+        <!-- .tb-field keeps each label with its control. It is display:contents
+             on a desktop, so this row is unchanged there; in the phone sheet,
+             where the bar has to wrap, it is what stops "Tier" ending one line
+             and its menu starting the next. -->
         <div id="import-bar" class="tool-bar" hidden>
           <span id="import-name" style="font-weight:500;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-1);"></span>
-          <label for="import-width" data-i18n="ed.import.width">Width</label>
-          <input type="range" id="import-width" min="8" max="1250" step="2" value="120" style="width:150px;" />
-          <span id="import-size-out" style="min-width:110px;">120 &times; ? seats</span>
-          <label for="import-tier" data-i18n="ed.tier">Tier</label>
-          <select id="import-tier">
-            <option value="both" data-i18n="ed.tier.both">Both</option>
-            <option value="0" data-i18n="ed.tier.lower">Lower</option>
-            <option value="1" data-i18n="ed.tier.upper">Upper</option>
-          </select>
-          <label for="import-place" data-i18n="ed.import.place">Place</label>
-          <select id="import-place">
-            <option value="click" data-i18n="ed.import.placeClick">Click on canvas</option>
-            <option value="0.25" data-i18n="ed.import.north">North stand</option>
-            <option value="0" data-i18n="ed.import.east">East end</option>
-            <option value="0.75" data-i18n="ed.import.south">South stand</option>
-            <option value="0.5" data-i18n="ed.import.west">West stand</option>
-          </select>
-          <button id="import-apply" class="primary" disabled data-i18n="ed.import.apply">Place</button>
-          <label title="Use the picture's own colours as the palette" data-i18n-attr="title:ed.import.realColorsT"><input type="checkbox" id="real-colors" checked /> <span data-i18n="ed.import.realColors">Real colours</span></label>
-          <label><input type="checkbox" id="dither" /> <span data-i18n="ed.import.dither">Dither</span></label>
-          <label title="Flood the flat backdrop away so the design underneath shows through" data-i18n-attr="title:ed.import.cutoutT"><input type="checkbox" id="import-cutout" /> <span data-i18n="ed.import.cutout">Remove background</span></label>
-          <label for="import-alpha" data-i18n="ed.import.alpha">Alpha</label>
-          <input type="range" id="import-alpha" min="1" max="254" step="1" value="128" style="width:90px;" />
-          <span id="import-alpha-out">128</span>
+          <span class="tb-field">
+            <label for="import-width" data-i18n="ed.import.width">Width</label>
+            <input type="range" id="import-width" min="8" max="1250" step="2" value="120" style="width:150px;" />
+            <span id="import-size-out" style="min-width:110px;">120 &times; ? seats</span>
+          </span>
+          <span class="tb-field">
+            <label for="import-tier" data-i18n="ed.tier">Tier</label>
+            <select id="import-tier">
+              <option value="both" data-i18n="ed.tier.both">Both</option>
+              <option value="0" data-i18n="ed.tier.lower">Lower</option>
+              <option value="1" data-i18n="ed.tier.upper">Upper</option>
+            </select>
+          </span>
+          <span class="tb-field">
+            <label for="import-place" data-i18n="ed.import.place">Place</label>
+            <select id="import-place">
+              <option value="click" data-i18n="ed.import.placeClick">Click on canvas</option>
+              <option value="0.25" data-i18n="ed.import.north">North stand</option>
+              <option value="0" data-i18n="ed.import.east">East end</option>
+              <option value="0.75" data-i18n="ed.import.south">South stand</option>
+              <option value="0.5" data-i18n="ed.import.west">West stand</option>
+            </select>
+            <button id="import-apply" class="primary" disabled data-i18n="ed.import.apply">Place</button>
+          </span>
+          <span class="tb-field">
+            <label title="Use the picture's own colours as the palette" data-i18n-attr="title:ed.import.realColorsT"><input type="checkbox" id="real-colors" checked /> <span data-i18n="ed.import.realColors">Real colours</span></label>
+            <label><input type="checkbox" id="dither" /> <span data-i18n="ed.import.dither">Dither</span></label>
+          </span>
+          <span class="tb-field">
+            <label title="Flood the flat backdrop away so the design underneath shows through" data-i18n-attr="title:ed.import.cutoutT"><input type="checkbox" id="import-cutout" /> <span data-i18n="ed.import.cutout">Remove background</span></label>
+          </span>
+          <span class="tb-field">
+            <label for="import-alpha" data-i18n="ed.import.alpha">Alpha</label>
+            <input type="range" id="import-alpha" min="1" max="254" step="1" value="128" style="width:90px;" />
+            <span id="import-alpha-out">128</span>
+          </span>
           <button id="import-cancel" data-i18n="ed.import.cancel">Cancel</button>
           <input type="file" id="import-file" accept="image/*" hidden />
         </div>

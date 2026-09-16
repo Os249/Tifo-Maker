@@ -167,6 +167,68 @@ export function fitRect(imgW: number, imgH: number, viewport: TargetRect): Targe
   };
 }
 
+/**
+ * The long edge an imported picture is decoded down to.
+ *
+ * 2048 is not a taste call, it is the floor of what every WebGL device can hold:
+ * MAX_TEXTURE_SIZE is guaranteed >= 2048 on WebGL1 hardware and is 4096 on a
+ * great many phones still in use. A modern phone camera hands you 4000-8000px
+ * on the long edge, and a 48MP shot at 8160px silently fails to upload on
+ * anything with a 4096 limit — the picture is simply not there, which is a much
+ * worse bug than a soft one, because nothing reports it.
+ *
+ * Nothing downstream wants the pixels either, and the margin is not close. The
+ * widest an import can be placed is the slider's 1250 seats; a seat is 3.2
+ * editor units and `bake` samples one cell per 3, so the biggest grid any
+ * picture is ever rasterised onto is 1250*3.2/3 = 1333 cells across. 2048
+ * feeds that with room to spare, so the cap costs nothing at any size the
+ * editor can produce. What the full-size bitmap costs is real: a 4032x3024
+ * photo is a 47MB GPU texture and 47MB of bitmap, held for as long as the
+ * object exists; at 2048 it is 12MB.
+ *
+ * Raising the width slider past ~1900 seats would start to matter. verify.mts
+ * checks that pairing so it cannot drift silently.
+ */
+export const IMPORT_MAX_EDGE = 2048;
+
+/**
+ * Browser-only: decode a picked file to an ImageBitmap no larger than
+ * `maxEdge` on its long side, preserving aspect.
+ *
+ * Three paths, because `createImageBitmap`'s resize options are not universal:
+ * a browser that honours them does a filtered downscale itself, one that
+ * ignores them hands back a full-size bitmap (checked, not assumed), and one
+ * that rejects them throws — the canvas fallback covers both of the last two.
+ * Whatever happens, the full-size bitmap is closed rather than left to the GC.
+ */
+export async function decodeImportBitmap(file: Blob, maxEdge = IMPORT_MAX_EDGE): Promise<ImageBitmap> {
+  const full = await createImageBitmap(file);
+  const long = Math.max(full.width, full.height);
+  if (long <= maxEdge) return full;
+  const scale = maxEdge / long;
+  const w = Math.max(1, Math.round(full.width * scale));
+  const h = Math.max(1, Math.round(full.height * scale));
+  try {
+    const small = await createImageBitmap(full, { resizeWidth: w, resizeHeight: h, resizeQuality: 'high' });
+    if (small.width <= maxEdge && small.height <= maxEdge) {
+      full.close();
+      return small;
+    }
+    small.close(); // options ignored — fall through to the canvas
+  } catch {
+    /* options rejected — fall through to the canvas */
+  }
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext('2d')!;
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(full, 0, 0, w, h);
+  full.close();
+  return await createImageBitmap(canvas);
+}
+
 /** Browser-only: resample a drawable source down to cols×rows RGBA pixels. */
 export function rasterize(
   source: ImageBitmap | HTMLImageElement | HTMLCanvasElement,
