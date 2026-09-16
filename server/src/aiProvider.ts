@@ -539,6 +539,33 @@ function geminiParts(text: string, image?: string): unknown[] {
   return parts;
 }
 
+/**
+ * Anthropic user content: the text, plus the image when there is one.
+ *
+ * There was one, and it was being dropped. `opts.image` reached this function's
+ * Gemini twin and nowhere else, so on an Anthropic key the vision critic was
+ * told "you are looking at a low-resolution render of that design" and shown
+ * nothing at all — and then judged the design anyway. A prompt that describes a
+ * picture the model cannot see is worse than no picture.
+ */
+function anthropicContent(text: string, image?: string): unknown {
+  const m = image?.match(/^data:([^;]+);base64,(.+)$/);
+  if (!m) return text;
+  return [
+    { type: 'image', source: { type: 'base64', media_type: m[1], data: m[2] } },
+    { type: 'text', text },
+  ];
+}
+
+/** OpenAI user content: same fix, same reason. It takes the data: URL whole. */
+function openaiContent(text: string, image?: string): unknown {
+  if (!image || !/^data:[^;]+;base64,/.test(image)) return text;
+  return [
+    { type: 'image_url', image_url: { url: image } },
+    { type: 'text', text },
+  ];
+}
+
 /** Pull the first JSON object out of a model response (tolerant of fences/prose). */
 /**
  * The output-token ceiling for a generation.
@@ -655,7 +682,7 @@ const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms
  */
 export async function generateSpecViaProvider(
   prompt: string,
-  opts: { system?: string; context?: string; image?: string; tier?: 'fast' | 'premium'; hint?: string } = {},
+  opts: { system?: string; context?: string; image?: string; tier?: 'fast' | 'premium'; hint?: string; raw?: boolean } = {},
 ): Promise<ProviderResult> {
   const r = await callProvider(prompt, opts);
   if (r.spec || r.status !== 503) return r;
@@ -667,7 +694,7 @@ export async function generateSpecViaProvider(
 
 async function callProvider(
   prompt: string,
-  opts: { system?: string; context?: string; image?: string; tier?: 'fast' | 'premium'; hint?: string } = {},
+  opts: { system?: string; context?: string; image?: string; tier?: 'fast' | 'premium'; hint?: string; raw?: boolean } = {},
 ): Promise<ProviderResult> {
   const provider = activeProvider();
   if (provider === 'none') return { spec: null, error: 'no AI provider configured' };
@@ -681,7 +708,10 @@ async function callProvider(
   // Built ONCE. Three separate userMessage() calls meant a new argument had to
   // be threaded through three bodies, and forgetting one would silently drop it
   // for that provider alone.
-  const user = userMessage(prompt, opts.context, opts.hint);
+  // `raw` is for callers asking something that is not "design me a tifo" — the
+  // photo reader in src/core/photoFacts, for one. Wrapping its question in
+  // "Return the TifoSpec JSON now" would ask the model for the wrong object.
+  const user = opts.raw ? prompt : userMessage(prompt, opts.context, opts.hint);
 
   try {
     if (provider === 'anthropic') {
@@ -691,7 +721,7 @@ async function callProvider(
         // 4096 to match Gemini: outline pairs double the text-layer count and
         // Anthropic is not in JSON mode, so it pretty-prints. A truncated reply
         // fails extractJson and surfaces to the user as "premium is busy".
-        { model: process.env.AI_MODEL ?? 'claude-3-5-sonnet-latest', max_tokens: maxOutputTokens(), system, messages: [{ role: 'user', content: user }] },
+        { model: process.env.AI_MODEL ?? 'claude-3-5-sonnet-latest', max_tokens: maxOutputTokens(), system, messages: [{ role: 'user', content: anthropicContent(user, opts.image) }] },
         timeoutMs,
       );
       if (!res.ok) return { spec: null, status: res.status, error: await httpError('claude', res) };
@@ -730,7 +760,7 @@ async function callProvider(
     const res = await postJson(
       'https://api.openai.com/v1/chat/completions',
       { 'content-type': 'application/json', authorization: `Bearer ${process.env.OPENAI_API_KEY!}` },
-      { model: process.env.AI_MODEL ?? 'gpt-4o-mini', response_format: { type: 'json_object' }, messages: [{ role: 'system', content: system }, { role: 'user', content: user }] },
+      { model: process.env.AI_MODEL ?? 'gpt-4o-mini', response_format: { type: 'json_object' }, messages: [{ role: 'system', content: system }, { role: 'user', content: openaiContent(user, opts.image) }] },
       timeoutMs,
     );
     if (!res.ok) return { spec: null, status: res.status, error: await httpError('openai', res) };

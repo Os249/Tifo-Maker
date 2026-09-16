@@ -426,3 +426,103 @@ import { buildStadium as siBuild } from '../src/core/stadiumFit';
   console.log('stadium import: separates guesses from measurements', hasGuess && hasSolid);
   if (!hasGuess || !hasSolid) throw new Error('provenance is not distinguishing guesses from measurements');
 }
+
+// ---------------------------------------------------------------------------
+// Floodlights, the track and the facade: the three things that make one ground
+// look unlike another. Each one is checked against the rule that produced it,
+// not against a screenshot, because the whole point of driving them from the
+// template is that the rule is the thing being claimed.
+{
+  const { layOutLights, structureTop, kelvinToRgb } = await import('../src/render/simulator/lighting');
+  const { buildFacade } = await import('../src/render/simulator/facade');
+  const { trackFits, trackExtent } = await import('../src/render/simulator/track');
+  const { STADIUM_CATALOG: LC } = await import('../src/core/stadiumCatalog');
+  const { TEMPLATES: LT } = await import('../src/core/template');
+  const all = [...LT, ...LC.map((s) => s.template)];
+
+  // The angle rules. Corner towers are measured from the PITCH CENTRE and must
+  // clear 25 degrees; a roof-rim array is measured from the nearest point of the
+  // PITCH EDGE and must clear 20. Reading the first rule onto the second is what
+  // once pushed rim lights 25 m above their own roof, so both are checked here
+  // with their own reference point.
+  let angleFails = 0;
+  let floaters = 0;
+  let wedgeFails = 0;
+  for (const tpl of all) {
+    const plan = layOutLights(tpl);
+    if (!plan.luminaires.length) continue;
+    const floor = plan.angleRef === 'centre' ? 24.9 : 19.9;
+    if (plan.minAngleDeg < floor) angleFails++;
+    if (plan.style === 'corner-masts') {
+      // Nothing inside 15 degrees either side of the goal line.
+      for (const l of plan.luminaires) {
+        const deg = (Math.atan2(Math.abs(l.pos[2]), Math.abs(l.pos[0])) * 180) / Math.PI;
+        if (deg < 14.9) wedgeFails++;
+      }
+    } else {
+      // A rim luminaire is bolted to the structure. If it is metres above the
+      // top of the building it is not a luminaire, it is a floating dot.
+      const top = structureTop(tpl);
+      if (plan.luminaires.some((l) => l.pos[1] > top + 4)) floaters++;
+    }
+  }
+  console.log('floodlights: angle rule broken', angleFails, '| in the goal-line wedge', wedgeFails,
+    '| rim lights floating above the roof', floaters, `(${all.length} templates)`);
+  if (angleFails || wedgeFails || floaters) throw new Error('floodlight layout breaks its own rules');
+
+  // A bowl too low to be lit from its roof must SAY so by falling back, not by
+  // lifting the lights into the sky. Same shape as trackFits.
+  const flat = { ...LT[0], tiers: [{ rows: 6, rowDepth: 0.8, rakeDeg: 20, baseElevation: 1, baseOffset: 0, seatPitch: 0.5 }], roof: { coverage: 'none' as const }, lighting: { style: 'roof-rim' as const } };
+  const fell = layOutLights(flat);
+  console.log('floodlights: a bowl too low for a rim array falls back to', fell.style, '|', fell.note ? 'and says why' : 'SILENTLY');
+  if (fell.style !== 'corner-masts' || !fell.note) throw new Error('a rim array on a flat bowl must fall back with a reason');
+
+  // Colour temperature: 5700 K is near-white, 4200 K is visibly warm. If these
+  // come out the same, every ground is lit by the same lamp again.
+  const warm = kelvinToRgb(4200);
+  const cool = kelvinToRgb(5700);
+  const blueDiff = (cool & 0xff) - (warm & 0xff);
+  console.log('floodlights: 4200 K reads warmer than 5700 K by', blueDiff, 'of blue');
+  if (blueDiff < 15) throw new Error('colour temperature is not reaching the lamp colour');
+
+  // Every facade style has to produce geometry, and produce DIFFERENT geometry.
+  // A vocabulary of eight where three are the same object is a vocabulary of six
+  // with a longer menu.
+  const STYLES = ['plain', 'berm', 'truss', 'concrete', 'brick', 'cladding', 'membrane', 'lattice'] as const;
+  const tris = new Map<string, number>();
+  for (const style of STYLES) {
+    const f = buildFacade({ ...LT[0], facade: { style } }, 30, 26, false);
+    let n = 0;
+    f.object.traverse((o) => {
+      const m = o as unknown as { geometry?: { getIndex(): { count: number } | null }; count?: number; isInstancedMesh?: boolean };
+      if (!m.geometry) return;
+      const idx = m.geometry.getIndex();
+      n += ((idx ? idx.count : 0) / 3) * (m.isInstancedMesh ? (m.count ?? 1) : 1);
+    });
+    tris.set(style, Math.round(n));
+    f.dispose();
+  }
+  const empties = [...tris].filter(([, n]) => n < 200).map(([s]) => s);
+  const distinct = new Set(tris.values()).size;
+  console.log('facades:', [...tris].map(([s, n]) => `${s} ${n}`).join(', '));
+  console.log('facades: empty', empties.length, '| distinct geometries', distinct, 'of', STYLES.length);
+  if (empties.length) throw new Error(`facade style(s) produce nothing: ${empties.join(', ')}`);
+  if (distinct < STYLES.length - 1) throw new Error('facade styles are not producing distinct geometry');
+
+  // The track has to refuse a bowl it cannot fit into. An 8-lane oval is
+  // 176.9 x 92.5 m to the outside of lane 8, so a 128 x 100 m football ground
+  // has no room for one and must not be allowed to claim it.
+  const ext = trackExtent(8);
+  const okOval = trackFits(LT[2], 8);
+  const small = LC.find((s) => s.id === 'community-alawwal-park-25k')!.template;
+  const badFit = trackFits(small, 8);
+  console.log(`track: 8 lanes need ${(ext.halfLength * 2).toFixed(1)} x ${(ext.halfWidth * 2).toFixed(1)} m | oval fits`, okOval, '| 25k football ground refused', !badFit);
+  if (!okOval || badFit) throw new Error('trackFits is not gating on the real oval size');
+
+  // Every template that claims a track must have room for it. A template that
+  // says `track: {}` and gets nothing drawn is a lie the renderer swallows.
+  const claiming = all.filter((t2) => t2.track);
+  const roomless = claiming.filter((t2) => !trackFits(t2, t2.track?.lanes ?? 8));
+  console.log('track: templates claiming one', claiming.length, '| without room for it', roomless.length);
+  if (roomless.length) throw new Error(`template(s) claim a track that does not fit: ${roomless.map((t2) => t2.id).join(', ')}`);
+}

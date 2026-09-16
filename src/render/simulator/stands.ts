@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { StadiumTemplate } from '../../core/types';
 import { buildRoof } from './roof';
+import { buildFacade } from './facade';
 
 /**
  * Match Day Simulator — extruded stand architecture (Phase 1).
@@ -144,8 +145,15 @@ export function buildStands(template: StadiumTemplate, shadows: boolean): THREE.
     topTierDepth = backRadial - frontRadial;
   });
 
-  // Outer skirt: back of the top tier down to the ground.
-  add(strip(ring(a, b, p, topBackRadial, 0), ring(a, b, p, topBackRadial, topBackY), keep), structure, false, true);
+  // The outside of the bowl. A template that says nothing gets the flat grey
+  // skirt this has always drawn, byte for byte — buildFacade's 'plain' is that
+  // strip and that material. A template that names a style gets a real facade
+  // instead, and the skirt is not drawn twice.
+  if (template.facade?.style && template.facade.style !== 'plain') {
+    group.add(buildFacade(template, topBackRadial, topBackY, shadows, keep).object);
+  } else {
+    add(strip(ring(a, b, p, topBackRadial, 0), ring(a, b, p, topBackRadial, topBackY), keep), structure, false, true);
+  }
 
   // Roof. Was a flat ring reaching a hard-coded 16 m in over the seats, which on
   // a shallow top tier covered the whole stand and some of the one below it —

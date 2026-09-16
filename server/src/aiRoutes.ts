@@ -30,6 +30,7 @@ import { designFromPrompt, composeSuperOffline } from '../../src/core/promptDesi
 import { ensureHeroImage } from '../../src/core/heroImage';
 import { matchClub } from '../../src/core/clubs';
 import { generateSpecViaProvider, buildDirectorPrompt, critiqueSpecViaProvider, activeProvider, clubHintLine, writeCopy, copyLine } from './aiProvider';
+import { readGroundPhoto, PHOTO_SAMPLE_DEFAULT, PHOTO_SAMPLE_MAX } from './photoRead';
 import { generateImage } from './imageAssets';
 import { envNum } from './env';
 import { TtlCache, cacheKey } from './aiCache';
@@ -468,5 +469,36 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
       }
     }
     return reply.code(200).send({ spec, source, notes });
+  });
+
+  // Read a photo of a real ground and report the categorical facts the bowl
+  // estimator would otherwise have to guess: tiers, roof, track, floodlights,
+  // facade. The reply is a VOTE, not an answer — n readings of the same picture,
+  // with the agreement rate for each field — because a single confident reply
+  // entering a template as plain data is exactly what the provenance record in
+  // src/core/stadiumFit exists to prevent.
+  //
+  // A photo is a megabyte or two, well past the global 1 MB body limit, so this
+  // route carries its own like the design-photo upload does.
+  app.post('/api/stadium/photo', { ...(deps.routeConfig ?? {}), bodyLimit: 3 * 1024 * 1024 }, async (req, reply) => {
+    const access = await baseAccess(req);
+    if (access.kind === 'deny') {
+      return reply.code(access.status).send({ error: access.error, reason: access.reason, locked: true });
+    }
+    const b = (req.body ?? {}) as { image?: unknown; samples?: unknown };
+    const image = typeof b.image === 'string' ? b.image : '';
+    if (!/^data:image\/(png|jpeg|jpg|webp);base64,[A-Za-z0-9+/=]+$/.test(image)) {
+      return reply.code(400).send({ error: 'image must be a png/jpeg/webp data URL' });
+    }
+    if (activeProvider() === 'none') {
+      return reply.code(503).send({ error: 'no AI provider configured' });
+    }
+    const samples = Math.max(1, Math.min(PHOTO_SAMPLE_MAX, Number(b.samples) || PHOTO_SAMPLE_DEFAULT));
+    const out = await readGroundPhoto(image, samples);
+    // Every reading failed: that is an upstream problem, not an empty photo.
+    if (!out.vote.samples) {
+      return reply.code(502).send({ error: out.errors[0] ?? 'the model did not answer', errors: out.errors });
+    }
+    return reply.code(200).send(out);
   });
 }

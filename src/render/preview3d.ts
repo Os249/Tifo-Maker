@@ -177,6 +177,15 @@ export class Preview3D {
     this.controls.update();
   }
 
+  /**
+   * Add extra scene furniture — a running track, say. Kept deliberately narrow:
+   * the preview owns its scene and its lifecycle, so callers hand over an object
+   * and dispose of it themselves rather than reaching into the scene graph.
+   */
+  addSceneObject(obj: THREE.Object3D): void {
+    this.scene.add(obj);
+  }
+
   private buildSeats(): THREE.InstancedMesh {
     // A held-up card: ~45 × 70 cm, flat-shaded (cards are matte plastic under
     // floodlights — MeshBasicMaterial reads truer than lit shading here).

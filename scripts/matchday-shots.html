@@ -1,0 +1,56 @@
+<!doctype html>
+<!-- Dev-only harness for scripts/matchday-shots.mts. Boots the REAL
+     MatchDaySimulator — not a stripped-down scene — because the facade and the
+     floodlights are wired through buildStands and buildEffects, and a preview
+     harness that reimplements either of those can pass while the product is
+     broken. -->
+<html lang="en"><head><meta charset="UTF-8"/><title>match day shots</title></head>
+<body style="margin:0;background:#05070c"><div id="out">loading…</div>
+<script type="module">
+  import { generateSeatMap } from '/src/core/seatmap.ts';
+  import { DesignStore } from '/src/core/design.ts';
+  import { templateById } from '/src/core/stadiumCatalog.ts';
+  import { MatchDaySimulator } from '/src/render/simulator/index.ts';
+  import { AssetStore } from '/src/core/sceneAssets.ts';
+
+  const HOST = document.createElement('div');
+  HOST.style.cssText = 'position:fixed;left:0;top:0;width:1100px;height:660px;';
+  document.body.appendChild(HOST);
+
+  window.__shoot = async (id, floods) => {
+    HOST.replaceChildren();
+    const template = templateById(id);
+    const map = generateSeatMap(template);
+    const store = new DesignStore(map, ['#0b1d4d', '#ffffff', '#f2c40f']);
+    // A plain two-colour bowl: the point of these shots is the building, and a
+    // busy tifo is exactly what stops you noticing that the facade is missing.
+    store.transform((i) => 1 + (i % 2));
+    const sim = new MatchDaySimulator(HOST, map, store, template, new AssetStore(), { quality: 'high' });
+    sim.setTimeOfDay('night');
+    sim.setFloodlights(floods);
+    // Frame the whole building from outside, at the scale someone arriving sees.
+    // Through the public preset API, so this harness drives the simulator the
+    // same way the overlay does rather than reaching past it.
+    const back = template.tiers.reduce((m, t) => Math.max(m, t.baseOffset + t.rows * t.rowDepth), 0);
+    const R = Math.max(template.plan.a, template.plan.b) + back;
+    sim.applyPreset({
+      name: 'facade',
+      position: [R * 1.5, R * 0.42, R * 0.75],
+      target: [0, R * 0.12, 0],
+      fov: 46,
+    });
+
+    sim.start();
+    await new Promise((r) => setTimeout(r, 450));
+    sim.stop();
+    const png = sim.canvas.toDataURL('image/png');
+
+    // Count what the scene actually contains. A screenshot cannot tell you that
+    // the floodlight group exists but is empty; this can.
+    const census = sim.sceneCensus();
+    sim.dispose();
+    return { png, ...census };
+  };
+  document.getElementById('out').textContent = 'ready';
+  window.__ready = true;
+</script></body></html>

@@ -18,7 +18,7 @@
  * in tests, so one stadium resolves the same way everywhere.
  */
 import { generateSeatMap } from './seatmap';
-import type { RoofCoverage, StadiumTemplate, TierSpec } from './types';
+import type { FacadeStyle, LightingStyle, RoofCoverage, StadiumTemplate, TierSpec } from './types';
 
 // ---- geometry --------------------------------------------------------------
 
@@ -350,6 +350,44 @@ export interface FitWarning {
   vars?: Record<string, string | number>;
 }
 
+/**
+ * A guess at how a ground is lit, from the only structural signal there is.
+ *
+ * Lights ride the roof when there is a roof to ride: a ring or two covered sides
+ * carry a linear array, and a ground that is open, or has one roofed stand, has
+ * pylons. That is genuinely how it works, and it is still only a guess, because
+ * the real predictor is the decade the ground was built in and nothing public
+ * tells us that. Measured against the shipped catalogue, this rule
+ * agrees with the hand-set answer 8 times out of 13.
+ * scripts/verify-stadiumfit.mts reads that sentence back out of this comment and
+ * fails if it has drifted from what the rule actually scores, because a stale
+ * accuracy figure is worse than none: it is the number the panel hedges by. The
+ * five it misses are all grounds whose age, not whose roof, decided the answer.
+ */
+export function suggestLighting(roof: RoofCoverage | undefined): LightingStyle {
+  if (roof === 'ring') return 'roof-rim';
+  if (roof === 'sides') return 'side-banks';
+  return 'corner-masts';
+}
+
+/**
+ * A guess at what the outside is made of.
+ *
+ * Weaker than the lighting guess and honestly labelled as such: no public data
+ * says what a building is clad in. What the inputs DO carry is a rough type —
+ * a big roofed bowl, a municipal athletics ground, a mid-size club ground — and
+ * each type has a usual answer. A photograph settles it properly; this is what
+ * to draw until there is one.
+ */
+export function suggestFacade(opts: { capacity?: number; hasTrack?: boolean; roof?: RoofCoverage; bowlHeight: number }): FacadeStyle {
+  // Banked earth is a real ground's answer only while the bowl is low enough to
+  // bank. Above that the bank cannot explain the height and something is built.
+  if (opts.hasTrack && opts.bowlHeight < 15) return 'berm';
+  if (opts.hasTrack) return 'truss';
+  if ((opts.capacity ?? 0) >= 55_000 && opts.roof === 'ring') return 'cladding';
+  return 'concrete';
+}
+
 export interface FitInput {
   name?: string;
   id?: string;
@@ -370,6 +408,12 @@ export interface FitInput {
     aisles?: number;
     seatPitch?: number;
     roof?: RoofCoverage;
+    /** Does this ground have an athletics track? The renderer still checks it fits. */
+    hasTrack?: boolean;
+    /** How it is lit. Corner pylons or a roof-rim array is the clearest cue to a ground's age. */
+    lighting?: LightingStyle;
+    /** What the outside is made of. */
+    facade?: FacadeStyle;
     cornerCut?: number;
   };
 }
@@ -480,9 +524,12 @@ export function buildStadium(input: FitInput): FitResult {
     evenRows: true,
     ...(k.cornerCut !== undefined ? { cornerCut: k.cornerCut } : {}),
     ...(k.roof ? { roof: { coverage: k.roof } } : {}),
+    ...(k.hasTrack ? { track: {} } : {}),
   };
   if (k.roof) prov['roof.coverage'] = { source: 'user', confidence: 'given' };
   else confirm.push('roof.coverage');
+  if (k.hasTrack !== undefined) prov['track'] = { source: 'user', confidence: 'given' };
+  else confirm.push('track');
 
   // ---- rows against the stated capacity, if there is one
   let template = base;
@@ -511,6 +558,37 @@ export function buildStadium(input: FitInput): FitResult {
     warnings.push({ key: 'si.warn.noCapacity', text: 'No capacity: the row count is a guess and nothing checks it.' });
     confirm.push('tiers.rows');
   }
+
+  // ---- how it is lit, and what the outside is made of
+  // Both come last, because both depend on the bowl's final height and that is
+  // only settled once the rows have been solved against the capacity. A facade
+  // chosen from the pre-solve height is a facade chosen from a number we were
+  // about to change.
+  const bowlHeight = template.tiers.reduce((h, t) => {
+    const last = Math.max(1, t.rows - 1);
+    return Math.max(h, t.baseElevation + last * t.rowDepth * Math.tan((t.rakeDeg * Math.PI) / 180));
+  }, 0);
+  const lighting = k.lighting ?? suggestLighting(k.roof);
+  const facade = k.facade ?? suggestFacade({ capacity: input.capacity, hasTrack: k.hasTrack, roof: k.roof, bowlHeight });
+  template = { ...template, lighting: { style: lighting }, facade: { style: facade } };
+  prov['lighting.style'] = k.lighting
+    ? { source: 'user', confidence: 'given' }
+    : {
+      source: 'roof-shape-rule',
+      confidence: 'suggested',
+      note: 'from the roof: a ring or two covered sides carry a linear array, anything else has pylons',
+      noteKey: 'si.note.lighting',
+    };
+  if (!k.lighting) confirm.push('lighting.style');
+  prov['facade.style'] = k.facade
+    ? { source: 'user', confidence: 'given' }
+    : {
+      source: 'ground-type-rule',
+      confidence: 'suggested',
+      note: 'nothing public says what a building is clad in — a photo settles this one',
+      noteKey: 'si.note.facade',
+    };
+  if (!k.facade) confirm.push('facade.style');
 
   return { template, provenance: prov, confirm, warnings, built, target: input.capacity };
 }

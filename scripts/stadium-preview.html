@@ -8,6 +8,7 @@
   import { paint2D } from '/src/ui/viewer.ts';
   import { Preview3D } from '/src/render/preview3d.ts';
   import { compileSpec } from '/src/core/specCompiler.ts';
+  import { buildTrack } from '/src/render/simulator/track.ts';
   import { validateSpec } from '/src/core/tifoSpec.ts';
   import { loadTifoFonts } from '/src/core/tifoFonts.ts';
 
@@ -49,6 +50,9 @@
       preview = new Preview3D(host, map, previewStore);
       previewKey = template.id;
     }
+    // The track sits in the 3D scene, not the flat view.
+    const trk = buildTrack(template, false, { unlit: true });
+    if (trk.lanes) preview.addSceneObject(trk.object);
     previewStore.setPalette(v.spec.palette);
     previewStore.cells.set(store.cells);
     // Frame every bowl to the same apparent size, or a 200m oval and a 130m one

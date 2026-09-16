@@ -4,6 +4,8 @@ import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
+import type { StadiumTemplate } from '../../core/types';
+import { kelvinToRgb, layOutLights } from './lighting';
 
 let _beamGrad: THREE.Texture | null = null;
 /** Soft vertical gradient (bright at the lamp, fading toward the pitch) so the
@@ -132,60 +134,91 @@ export function buildEffects(
   scene: THREE.Scene,
   renderer: THREE.WebGLRenderer,
   camera: THREE.Camera,
-  opts: { bloom: boolean },
+  opts: { bloom: boolean; template: StadiumTemplate },
 ): EffectsController {
   const tex = dotTexture();
   const trash: { dispose(): void }[] = [tex];
 
   // ---- Floodlights ----
+  // Positions, heights and colour all come from the template now (see
+  // ./lighting.ts), because the four masts that used to be hard-coded at
+  // (+-122, +-96) and 55 m up hung in mid-air over a small ground and stood
+  // inside the stand of a large one. The layout obeys the 25-degree elevation
+  // rule and the 15-degree goalkeeper-dazzle exclusion; nothing here chooses a
+  // coordinate.
+  const plan = layOutLights(opts.template);
   const floodGroup = new THREE.Group();
   floodGroup.visible = false;
+  const lampHex = kelvinToRgb(plan.kelvin);
   const mastMat = new THREE.MeshStandardMaterial({ color: 0x2a2e36, roughness: 0.5, metalness: 0.5 });
-  const lampMat = new THREE.MeshStandardMaterial({ color: 0xfff4d6, emissive: 0xfff0c8, emissiveIntensity: 1.15 });
-  const mastGeo = new THREE.BoxGeometry(1.4, 55, 1.4);
-  const lampGeo = new THREE.BoxGeometry(7, 3.2, 1);
-  trash.push(mastMat, lampMat, mastGeo, lampGeo);
+  const lampMat = new THREE.MeshStandardMaterial({ color: lampHex, emissive: lampHex, emissiveIntensity: 1.15 });
+  trash.push(mastMat, lampMat);
   const spots: THREE.SpotLight[] = [];
-  for (const [x, z] of [
-    [122, 96],
-    [122, -96],
-    [-122, 96],
-    [-122, -96],
-  ]) {
-    const mast = new THREE.Mesh(mastGeo, mastMat);
-    mast.position.set(x, 27.5, z);
-    floodGroup.add(mast);
+  /** Per-spot "on" intensity, so a near light is not brighter than a far one. */
+  const spotPower: number[] = [];
+
+  // At most this many real lights. A roof-rim array is 60-odd luminaires and
+  // sixty THREE.SpotLights would cost more than the rest of the scene put
+  // together; the honest split is that every luminaire is geometry and a
+  // representative handful of them actually cast light.
+  const MAX_SPOTS = 4;
+  const spotEvery = Math.max(1, Math.floor(plan.luminaires.length / MAX_SPOTS));
+
+  plan.luminaires.forEach((lum, i) => {
+    const [x, y, z] = lum.pos;
+
+    if (lum.mast) {
+      // A tower under the lamp, reaching the ground — and sized to this lamp's
+      // own height rather than a fixed 55 m box that floats or buries itself.
+      const mastGeo = new THREE.BoxGeometry(1.4, y, 1.4);
+      const mast = new THREE.Mesh(mastGeo, mastMat);
+      mast.position.set(x, y / 2, z);
+      floodGroup.add(mast);
+      trash.push(mastGeo);
+    }
+
+    const lampGeo = new THREE.BoxGeometry(lum.width, lum.mast ? 3.2 : 1.1, 0.9);
     const lamp = new THREE.Mesh(lampGeo, lampMat);
-    lamp.position.set(x, 55, z);
+    lamp.position.set(x, y, z);
     lamp.lookAt(0, 0, 0);
     floodGroup.add(lamp);
-    const spot = new THREE.SpotLight(0xfff2d8, 0, 360, Math.PI / 6, 0.4, 1.2);
-    spot.position.set(x, 55, z);
+    trash.push(lampGeo);
+
+    if (i % spotEvery !== 0 || spots.length >= MAX_SPOTS) return;
+    const dist = Math.hypot(x, y, z);
+    const spot = new THREE.SpotLight(lampHex, 0, dist * 3, Math.PI / 6, 0.4, 1.2);
+    spot.position.set(x, y, z);
     spot.target.position.set(0, 0, 0);
     floodGroup.add(spot);
     floodGroup.add(spot.target);
     spots.push(spot);
+    // The old single intensity of 700 was tuned for a mast 155 m from the
+    // middle. THREE's physical falloff means the same number on a roof-rim
+    // luminaire 60 m away is four times the light on the grass, so the power
+    // follows the throw: 700 at 155 m, matched through the decay exponent.
+    spotPower.push(1.648 * dist ** 1.2);
 
-    // Visible volumetric-ish beam from the lamp toward the pitch (glows at night + bloom).
-    const beamLen = Math.hypot(x, 55, z);
-    const beamGeo = new THREE.ConeGeometry(34, beamLen, 48, 1, true);
+    // Visible volumetric-ish beam toward the pitch (glows at night + bloom).
+    // Its width scales with the throw: a cone tuned for a 155 m mast is a
+    // searchlight when it starts 60 m away on a roof rim.
+    const beamGeo = new THREE.ConeGeometry(dist * 0.22, dist, 40, 1, true);
     const beamMat = new THREE.MeshBasicMaterial({
-      color: 0xfff0cf,
+      color: lampHex,
       transparent: true,
-      opacity: 0.05,
+      opacity: lum.mast ? 0.05 : 0.035,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
       side: THREE.DoubleSide,
       alphaMap: beamGradient(),
     });
     const beam = new THREE.Mesh(beamGeo, beamMat);
-    const lampPos = new THREE.Vector3(x, 55, z);
+    const lampPos = new THREE.Vector3(x, y, z);
     const dir = lampPos.clone().negate().normalize(); // lamp -> pitch centre
-    beam.position.copy(lampPos).addScaledVector(dir, beamLen / 2);
+    beam.position.copy(lampPos).addScaledVector(dir, dist / 2);
     beam.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.clone().negate());
     floodGroup.add(beam);
     trash.push(beamGeo, beamMat);
-  }
+  });
   scene.add(floodGroup);
 
   // ---- Smoke ----
@@ -235,7 +268,7 @@ export function buildEffects(
   return {
     setFloodlights(on) {
       floodGroup.visible = on;
-      for (const s of spots) s.intensity = on ? 700 : 0;
+      spots.forEach((s, i) => { s.intensity = on ? spotPower[i] : 0; });
     },
     setSmoke(on, color) {
       smokeOn = on;

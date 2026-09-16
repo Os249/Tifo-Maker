@@ -77,7 +77,15 @@ function crossQuad(w: number, h: number): THREE.BufferGeometry {
   return g;
 }
 
-export function buildSurroundings(): Surroundings {
+/**
+ * @param bowlRadius metres from the middle to the outside of the building. The
+ *   city is pushed out beyond it: a fixed ring put tower blocks inside the
+ *   approach shot of a large ground — a 180 m oval had a skyscraper standing
+ *   between the camera and its own facade — while leaving a small ground
+ *   marooned in a car park. The skyline is context, so it has to know how big
+ *   the thing it is context for actually is.
+ */
+export function buildSurroundings(bowlRadius = 130): Surroundings {
   const group = new THREE.Group();
   const trash: { dispose(): void }[] = [];
 
@@ -109,7 +117,7 @@ export function buildSurroundings(): Surroundings {
   const tint = new THREE.Color();
   for (let i = 0; i < COUNT; i++) {
     const ang = (i / COUNT) * Math.PI * 2 + (Math.random() - 0.5) * 0.18;
-    const r = 240 + Math.random() * 240;
+    const r = Math.max(240, bowlRadius * 1.9) + Math.random() * 240;
     const w = 8 + Math.random() * 22;
     const h = 14 + Math.random() * 92;
     const d = 8 + Math.random() * 22;

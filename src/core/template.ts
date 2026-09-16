@@ -20,6 +20,11 @@ export const DEFAULT_TEMPLATE: StadiumTemplate = {
   aisles: { count: 28, widthMeters: 1.2 },
   sectionsPerTier: 28,
   roof: { coverage: 'ring', reach: 0.5, rise: 7, slope: 2.2 },
+  // A modern all-seater: panel skin, lights along the roof rim. UEFA notes
+  // four corner towers 'will not generally meet' its requirements, so a ground
+  // of this size and age would not have them.
+  facade: { style: 'cladding' },
+  lighting: { style: 'roof-rim' },
 };
 
 /** Steep single-tier kop bowl — the Tottenham-style high-resolution wall. */
@@ -33,6 +38,10 @@ export const KOP_TEMPLATE: StadiumTemplate = {
   sectionsPerTier: 24,
   // English cantilever: covers most of the stand and sits close over it.
   roof: { coverage: 'ring', reach: 0.62, rise: 5.5, slope: 2.6 },
+  // An old British club ground: brick between piers, and the corner pylons
+  // that came with it. 4200 K is metal halide, which is what it would still have.
+  facade: { style: 'brick' },
+  lighting: { style: 'corner-masts', kelvin: 4200 },
 };
 
 /**
@@ -52,6 +61,12 @@ export const OVAL_TEMPLATE: StadiumTemplate = {
   aisles: { count: 32, widthMeters: 1.2 },
   sectionsPerTier: 32,
   roof: { coverage: 'sides', reach: 0.55, rise: 8, slope: 1.4 },
+  // A municipal athletics bowl: open steel behind the stands, and banks of
+  // lights along the two covered sides only — nothing over the ends.
+  facade: { style: 'truss' },
+  lighting: { style: 'side-banks', kelvin: 4800 },
+  // An athletics oval: 118 x 92 m of plan comfortably holds a 400 m track.
+  track: {},
 };
 
 /** All known stadiums. New bowls are data entries here — no code changes. */

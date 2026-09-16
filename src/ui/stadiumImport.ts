@@ -16,8 +16,10 @@
 import { buildStadium, type FitResult } from '../core/stadiumFit';
 import { addCustomTemplate } from '../core/customStadiums';
 import { findStadiums, OSM_ATTRIBUTION, type OsmStadium } from '../net/osm';
+import { readGroundPhoto } from '../net/api';
+import type { FactsVote } from '../core/photoFacts';
 import { t, tv } from './i18n';
-import type { RoofCoverage } from '../core/types';
+import type { FacadeStyle, LightingStyle, RoofCoverage } from '../core/types';
 
 const INPUT =
   'width:100%;box-sizing:border-box;padding:6px;border:1px solid var(--line-1);border-radius:var(--r-md);background:var(--bg-1);color:var(--text-1);font:inherit;font-size:11px;';
@@ -110,14 +112,115 @@ export function buildStadiumImport(deps: StadiumImportDeps): HTMLElement {
   aislesI.max = '80';
   aislesI.placeholder = t('si.aislesPh');
   aislesI.style.cssText = INPUT;
-  grid.append(capI, tierSel, roofSel, aislesI);
+
+  // Three things no public dataset records and no aerial can settle, but which
+  // anyone who has seen the ground knows at a glance. Left on "estimate" they
+  // are guessed and the report says so; answered, they stop being guesses.
+  const mkSel = (opts: [string, string][]): HTMLSelectElement => {
+    const sel = document.createElement('select');
+    sel.style.cssText = INPUT;
+    for (const [v, k] of opts) {
+      const o = document.createElement('option');
+      o.value = v;
+      o.textContent = t(k);
+      sel.appendChild(o);
+    }
+    return sel;
+  };
+  const trackSel = mkSel([['', 'si.trackAuto'], ['yes', 'si.trackYes'], ['no', 'si.trackNo']]);
+  trackSel.dataset.tm = 'osm-track';
+  const lightSel = mkSel([
+    ['', 'si.lightAuto'], ['corner-masts', 'si.lightMasts'],
+    ['roof-rim', 'si.lightRim'], ['side-banks', 'si.lightSides'], ['none', 'si.lightNone'],
+  ]);
+  lightSel.dataset.tm = 'osm-lighting';
+  const faceSel = mkSel([
+    ['', 'si.faceAuto'], ['berm', 'si.faceBerm'], ['truss', 'si.faceTruss'],
+    ['concrete', 'si.faceConcrete'], ['brick', 'si.faceBrick'], ['cladding', 'si.faceCladding'],
+    ['membrane', 'si.faceMembrane'], ['lattice', 'si.faceLattice'], ['plain', 'si.facePlain'],
+  ]);
+  faceSel.dataset.tm = 'osm-facade';
+  faceSel.style.cssText = INPUT + 'grid-column:1 / -1;';
+
+  grid.append(capI, tierSel, roofSel, aislesI, trackSel, lightSel, faceSel);
+
+  // A photo answers the three selects above better than any rule can, because
+  // there is no rule — nothing public records how a ground is lit or clad. What
+  // comes back is a vote, not an answer, and the line under the button says so:
+  // "2 of 3 readings" is a different claim from "the AI said", and it is the
+  // only one that belongs in a panel built around saying where numbers came from.
+  const photoRow = document.createElement('div');
+  photoRow.style.cssText = 'margin-top:6px;';
+  const photoIn = document.createElement('input');
+  photoIn.type = 'file';
+  photoIn.accept = 'image/*';
+  photoIn.style.display = 'none';
+  const photoBtn = document.createElement('button');
+  photoBtn.dataset.tm = 'osm-photo';
+  photoBtn.type = 'button';
+  photoBtn.textContent = t('si.photo');
+  photoBtn.style.cssText = 'width:100%;';
+  const photoNote = document.createElement('p');
+  photoNote.className = 'hint';
+  photoNote.dataset.tm = 'osm-photo-note';
+  photoNote.style.cssText = 'font-size:10px;color:var(--text-3);margin:4px 0 0;';
+  photoRow.append(photoIn, photoBtn, photoNote);
+
+  // The photo reader names its fields after the questions it asks; the template
+  // names them after the fields they fill. One table, so the two never drift.
+  const PHOTO_FIELD: Record<string, string> = {
+    tiers: 'tiers.length', roof: 'roof.coverage', track: 'track',
+    lighting: 'lighting.style', facade: 'facade.style', openCorners: 'cornerCut',
+  };
+  const agreeLine = (field: string, v?: { agreement: number; answered: number; samples: number }): string => {
+    if (!v) return '';
+    const n = Math.round(v.agreement * v.answered);
+    return `${fieldLabel(PHOTO_FIELD[field] ?? field)} ${tv('si.photo.agree', { n, of: v.samples })}`;
+  };
+
+  async function readPhoto(file: File): Promise<void> {
+    photoBtn.disabled = true;
+    photoNote.textContent = t('si.photo.reading');
+    try {
+      const r = await readGroundPhoto(file);
+      const v = r.vote as FactsVote;
+      if (r.known.tiers) tierSel.value = String(r.known.tiers);
+      if (r.known.roof) roofSel.value = r.known.roof;
+      if (r.known.hasTrack !== undefined) trackSel.value = r.known.hasTrack ? 'yes' : 'no';
+      if (r.known.lighting) lightSel.value = r.known.lighting;
+      if (r.known.facade) faceSel.value = r.known.facade;
+      const parts = [
+        r.known.tiers ? agreeLine('tiers', v.tiers) : '',
+        r.known.roof ? agreeLine('roof', v.roof) : '',
+        r.known.hasTrack !== undefined ? agreeLine('track', v.track) : '',
+        r.known.lighting ? agreeLine('lighting', v.lighting) : '',
+        r.known.facade ? agreeLine('facade', v.facade) : '',
+      ].filter(Boolean);
+      const unsure = r.dropped.map((d) => fieldLabel(PHOTO_FIELD[d.field] ?? d.field));
+      photoNote.textContent = [
+        parts.length ? parts.join(' · ') : t('si.photo.nothing'),
+        unsure.length ? `${t('si.photo.unsure')} ${unsure.join(', ')}` : '',
+      ].filter(Boolean).join(' — ');
+    } catch {
+      photoNote.textContent = t('si.photo.failed');
+    } finally {
+      photoBtn.disabled = false;
+      photoIn.value = '';
+    }
+  }
+
+  photoBtn.addEventListener('click', () => photoIn.click());
+  photoIn.addEventListener('change', () => {
+    const f = photoIn.files?.[0];
+    if (f) void readPhoto(f);
+  });
 
   const buildBtn = document.createElement('button');
   buildBtn.className = 'primary';
   buildBtn.dataset.tm = 'osm-build';
   buildBtn.textContent = t('si.build');
   buildBtn.style.cssText = 'width:100%;margin-top:6px;';
-  knobs.append(grid, buildBtn);
+  knobs.append(grid, photoRow, buildBtn);
 
   const report = document.createElement('div');
   report.dataset.tm = 'osm-report';
@@ -253,13 +356,23 @@ export function buildStadiumImport(deps: StadiumImportDeps): HTMLElement {
     const tiers = tierSel.value ? Number(tierSel.value) : undefined;
     const roof = roofSel.value ? (roofSel.value as RoofCoverage) : undefined;
     const aisles = Number(aislesI.value) || undefined;
+    const hasTrack = trackSel.value ? trackSel.value === 'yes' : undefined;
+    const lighting = lightSel.value ? (lightSel.value as LightingStyle) : undefined;
+    const facade = faceSel.value ? (faceSel.value as FacadeStyle) : undefined;
     try {
       const fit = buildStadium({
         id: `osm-${s.id}`,
         name: s.name,
         footprint: s.ring,
         capacity,
-        known: { ...(tiers ? { tiers } : {}), ...(roof ? { roof } : {}), ...(aisles ? { aisles } : {}) },
+        known: {
+          ...(tiers ? { tiers } : {}),
+          ...(roof ? { roof } : {}),
+          ...(aisles ? { aisles } : {}),
+          ...(hasTrack !== undefined ? { hasTrack } : {}),
+          ...(lighting ? { lighting } : {}),
+          ...(facade ? { facade } : {}),
+        },
       });
       renderReport(fit, s);
     } catch {

@@ -21,7 +21,9 @@
     "build:prod": "tsc --noEmit && vite build",
     "start": "NODE_ENV=production tsx server/src/server.ts",
     "verify:stadiumfit": "tsx scripts/verify-stadiumfit.mts",
-    "shots:stadiumimport": "tsx scripts/stadium-import-shots.mts"
+    "shots:stadiumimport": "tsx scripts/stadium-import-shots.mts",
+    "shots:facade": "tsx scripts/facade-preview.mts",
+    "shots:matchday": "tsx scripts/matchday-shots.mts"
   },
   "dependencies": {
     "@fastify/helmet": "^13.0.2",

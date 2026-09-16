@@ -1,4 +1,5 @@
 import type { DesignStore } from '../core/design';
+import type { FactsVote, PhotoKnown } from '../core/photoFacts';
 import type { SeatMap, StadiumTemplate } from '../core/types';
 import type { TifoSpec } from '../core/tifoSpec';
 
@@ -706,6 +707,34 @@ export async function uploadPhoto(
 /** Delete a photo (owner only). */
 export async function deletePhoto(photoId: string): Promise<void> {
   await expectOk(await fetch(`${API}/photos/${photoId}`, { method: 'DELETE', headers: authHeaders(true) }));
+}
+
+/**
+ * Show the model a photo of a real ground and get back what several readings of
+ * it agreed on. The reply is a vote per field, not an answer — see
+ * src/core/photoFacts for why that distinction is the whole feature.
+ *
+ * 1024 px on the longest edge. A vision model reads a stadium's tiers, roof and
+ * floodlights from a thumbnail; the extra pixels cost upload time and tokens and
+ * answer nothing.
+ */
+export async function readGroundPhoto(file: File, samples?: number): Promise<PhotoReadReply> {
+  const { dataUrl } = await resizeToJpeg(file, 1024);
+  return (await expectOk(
+    await fetch(`${API}/stadium/photo`, {
+      method: 'POST',
+      headers: authHeaders(true),
+      body: JSON.stringify({ image: dataUrl, ...(samples ? { samples } : {}) }),
+    }),
+  )) as PhotoReadReply;
+}
+
+export interface PhotoReadReply {
+  vote: FactsVote;
+  known: PhotoKnown;
+  used: string[];
+  dropped: Array<{ field: string; agreement: number; answered: number }>;
+  errors: string[];
 }
 
 /** Downscale an image to fit maxDim and re-encode as JPEG. Browser-side. */

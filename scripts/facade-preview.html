@@ -1,0 +1,196 @@
+<!doctype html>
+<!-- Dev-only harness for scripts/facade-preview.mts. Bowl shell + facade + the
+     floodlight rig that src/render/simulator/lighting.ts lays out. No simulator:
+     the question here is whether the OUTSIDE of a ground reads, so the scene is
+     the shell, the lights, and nothing else that could flatter it. -->
+<html lang="en"><head><meta charset="UTF-8"/><title>facade preview</title></head>
+<body style="margin:0;background:#05070c"><div id="out">loading…</div>
+<script type="module">
+  import * as THREE from 'three';
+  import { templateById } from '/src/core/stadiumCatalog.ts';
+  import { buildStands } from '/src/render/simulator/stands.ts';
+  import { buildFacade } from '/src/render/simulator/facade.ts';
+  import { layOutLights, kelvinToRgb, bowlBack, structureTop } from '/src/render/simulator/lighting.ts';
+  import { buildTrack } from '/src/render/simulator/track.ts';
+  import { applyNightIBL } from '/src/render/simulator/env.ts';
+
+  const W = 1100, H = 660;
+  const HOST = document.createElement('div');
+  HOST.style.cssText = `position:fixed;left:0;top:0;width:${W}px;height:${H}px;`;
+  document.body.appendChild(HOST);
+
+  const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+  renderer.setSize(W, H, false);
+  renderer.setClearColor(0x070b14, 1);
+  HOST.appendChild(renderer.domElement);
+
+  // `spec` is a catalogue id, or a whole template — so a style that no shipped
+  // stadium uses can still be looked at, which is the only way a vocabulary of
+  // eight gets tested rather than the four that happen to be in the catalogue.
+  window.__render = async (spec, shots) => {
+    const template = typeof spec === 'string' ? templateById(spec) : spec;
+    const scene = new THREE.Scene();
+
+    // Night, lit the way the simulator lights it: image-based sky ambience plus
+    // the warm ground-level spill from the plaza (simulator/surroundings.ts puts
+    // real lamp posts there). Without that fill the outside of a stadium is
+    // genuinely near-black — physically right, and useless for judging whether
+    // a facade reads, which is the one thing this harness exists to do.
+    // The simulator's own night IBL, not an approximation of it. Metalness
+    // without an environment map renders black, so a harness with no env would
+    // report a painted steel truss as a fault that does not exist in the app.
+    const envTex = applyNightIBL(renderer, scene, 0.5);
+    scene.add(new THREE.HemisphereLight(0x33405a, 0x141a24, 1.0));
+    const moon = new THREE.DirectionalLight(0x9fb2d4, 0.35);
+    moon.position.set(-140, 160, -90);
+    scene.add(moon);
+    const plaza = new THREE.DirectionalLight(0xffd9a0, 0.5);
+    plaza.position.set(320, 26, 120);
+    plaza.target.position.set(0, 14, 0);
+    scene.add(plaza);
+    scene.add(plaza.target);
+
+    const stands = buildStands(template, false);
+    scene.add(stands);
+    const track = buildTrack(template, false);
+    scene.add(track.object);
+
+    const pitchGeo = new THREE.PlaneGeometry(105, 68);
+    const pitchMat = new THREE.MeshStandardMaterial({ color: 0x1f7a3a, roughness: 0.8 });
+    const pitch = new THREE.Mesh(pitchGeo, pitchMat);
+    pitch.rotation.x = -Math.PI / 2;
+    scene.add(pitch);
+
+    const groundGeo = new THREE.CircleGeometry(900, 48);
+    const groundMat = new THREE.MeshStandardMaterial({ color: 0x0c1017, roughness: 1 });
+    const ground = new THREE.Mesh(groundGeo, groundMat);
+    ground.rotation.x = -Math.PI / 2;
+    ground.position.y = -0.4;
+    scene.add(ground);
+
+    // The lighting rig, exactly as lighting.ts lays it out.
+    const plan = layOutLights(template);
+    const hex = kelvinToRgb(plan.kelvin);
+    const lampMat = new THREE.MeshBasicMaterial({ color: hex });
+    const mastMat = new THREE.MeshStandardMaterial({ color: 0x2a2e36, roughness: 0.5, metalness: 0.5 });
+    const rigTrash = [lampMat, mastMat];
+    let spots = 0;
+    for (let i = 0; i < plan.luminaires.length; i++) {
+      const lum = plan.luminaires[i];
+      const [x, y, z] = lum.pos;
+      if (lum.mast) {
+        const g = new THREE.BoxGeometry(1.4, y, 1.4);
+        const m = new THREE.Mesh(g, mastMat);
+        m.position.set(x, y / 2, z);
+        scene.add(m);
+        rigTrash.push(g);
+      }
+      const lg = new THREE.BoxGeometry(lum.width, lum.mast ? 3.2 : 1.1, 0.9);
+      const lamp = new THREE.Mesh(lg, lampMat);
+      lamp.position.set(x, y, z);
+      lamp.lookAt(0, 0, 0);
+      scene.add(lamp);
+      rigTrash.push(lg);
+      const every = Math.max(1, Math.floor(plan.luminaires.length / 4));
+      if (i % every === 0 && spots < 4) {
+        const d = Math.hypot(x, y, z);
+        const sp = new THREE.SpotLight(hex, 1.648 * d ** 1.2, d * 3, Math.PI / 6, 0.4, 1.2);
+        sp.position.set(x, y, z);
+        sp.target.position.set(0, 0, 0);
+        scene.add(sp);
+        scene.add(sp.target);
+        spots++;
+      }
+    }
+
+    const back = bowlBack(template);
+    const top = structureTop(template);
+    const R = Math.max(template.plan.a, template.plan.b) + back.radial;
+
+    const cam = new THREE.PerspectiveCamera(50, W / H, 0.5, 6000);
+    const out = {};
+    const stats = {};
+    for (const shot of shots) {
+      if (shot === 'approach') {
+        // Standing on the plaza looking up at the facade: the shot a fan takes.
+        cam.position.set(R * 1.55, top * 0.34, R * 0.30);
+        cam.lookAt(0, top * 0.62, 0);
+        cam.fov = 46;
+      } else if (shot === 'aerial') {
+        // High three-quarter — masts, roof line and the whole skin at once.
+        cam.position.set(R * 1.7, top * 2.6 + 60, R * 1.9);
+        cam.lookAt(0, top * 0.4, 0);
+        cam.fov = 42;
+      } else {
+        // From inside on the pitch, looking up past the roof: where the lamps
+        // are seen from, and the only place the elevation angle is legible.
+        cam.position.set(0, 2.0, 0);
+        cam.lookAt(R * 0.9, top * 1.5, 0);
+        cam.fov = 78;
+      }
+      cam.updateProjectionMatrix();
+      renderer.render(scene, cam);
+      await new Promise((r) => requestAnimationFrame(r));
+      out[shot] = renderer.domElement.toDataURL('image/png');
+
+      // Read the picture back rather than trusting it. A facade that renders
+      // black (the roof-underside fault, which happened) and a facade that is
+      // not drawn at all both look fine in a thumbnail and are obvious here.
+      const c = document.createElement('canvas');
+      c.width = W; c.height = H;
+      const g2 = c.getContext('2d');
+      const img = new Image();
+      await new Promise((res) => { img.onload = res; img.src = out[shot]; });
+      g2.drawImage(img, 0, 0);
+      const d = g2.getImageData(0, Math.floor(H * 0.42), W, Math.floor(H * 0.46)).data;
+      let sum = 0, sum2 = 0, dark = 0, n = 0;
+      for (let k = 0; k < d.length; k += 4) {
+        const L = (d[k] * 0.299 + d[k + 1] * 0.587 + d[k + 2] * 0.114);
+        sum += L; sum2 += L * L; if (L < 12) dark++; n++;
+      }
+      const mean = sum / n;
+      // Spread, not just brightness. A wall and a trussed facade can have the
+      // same average and look nothing alike; what separates them is texture,
+      // and a facade with no spread is one nobody will be able to see.
+      stats[shot] = { meanL: mean, sdL: Math.sqrt(Math.max(0, sum2 / n - mean * mean)), darkPct: (dark / n) * 100 };
+    }
+
+    // How different is this facade from a plain skirt? Build both and compare
+    // triangle counts and bounding radius: a style that produces the same
+    // geometry as 'plain' is a style that does nothing.
+    const fac = buildFacade(template, back.radial, back.y, false);
+    let tris = 0;
+    fac.object.traverse((o) => {
+      if (!o.geometry) return;
+      const idx = o.geometry.getIndex();
+      const per = idx ? idx.count / 3 : o.geometry.getAttribute('position').count / 3;
+      tris += per * (o.isInstancedMesh ? o.count : 1);
+    });
+    const result = {
+      shots: out, stats,
+      style: fac.style, footprintOut: fac.footprintOut, facadeTris: Math.round(tris),
+      lighting: {
+        style: plan.style, requested: plan.requested, kelvin: plan.kelvin, count: plan.luminaires.length,
+        angleRef: plan.angleRef, minAngleDeg: plan.minAngleDeg, note: plan.note ?? '',
+        maxY: plan.luminaires.length ? Math.max(...plan.luminaires.map((l) => l.pos[1])) : 0,
+        spots,
+      },
+      bowl: { backRadial: back.radial, backY: back.y, top },
+    };
+    fac.dispose();
+    for (const t of rigTrash) t.dispose();
+    envTex.dispose();
+    scene.environment = null;
+    track.dispose();
+    pitchGeo.dispose(); pitchMat.dispose(); groundGeo.dispose(); groundMat.dispose();
+    stands.traverse((o) => {
+      if (o.geometry) o.geometry.dispose();
+      const m = o.material;
+      if (Array.isArray(m)) m.forEach((x) => x.dispose()); else if (m) m.dispose();
+    });
+    scene.clear();
+    return result;
+  };
+  document.getElementById('out').textContent = 'ready';
+  window.__ready = true;
+</script></body></html>

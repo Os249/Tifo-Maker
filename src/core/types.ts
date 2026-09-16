@@ -45,6 +45,84 @@ export interface StadiumTemplate {
    * it cannot move a saved design.
    */
   roof?: RoofSpec;
+  /**
+   * A 400 m athletics track around the pitch. Present means the ground has one;
+   * the renderer still checks it FITS, so a template cannot claim a track its
+   * bowl has no room for.
+   */
+  track?: TrackSpec;
+  /**
+   * How this ground is lit. Omitted means the historic default — four corner
+   * masts — so every existing template renders as it did.
+   */
+  lighting?: LightingSpec;
+  /**
+   * What the outside of the bowl is made of. Omitted means the plain concrete
+   * skirt the renderer has always drawn, so every existing template is
+   * untouched; a style here replaces that skirt.
+   */
+  facade?: FacadeSpec;
+}
+
+/**
+ * Where a ground's floodlights are.
+ *
+ * Not a decoration: UEFA states that four corner towers "will not generally
+ * meet" its requirements for a top-tier ground, because they light the grass
+ * and leave players' faces dark. Corner masts are the 1955-1990 look; a
+ * continuous array along the roof rim is what a modern broadcast venue has.
+ * Which one a stadium has is the single biggest cue to its age.
+ */
+export type LightingStyle = 'none' | 'corner-masts' | 'side-banks' | 'roof-rim';
+
+export interface LightingSpec {
+  /** Default 'corner-masts', which is what the renderer drew before this existed. */
+  style?: LightingStyle;
+  /**
+   * Colour temperature in kelvin. LED installations are specified at 5000-6200 K
+   * (5700 typical); metal halide, which is what anything built before roughly
+   * 2010 has, runs 4000-5600 K and reads visibly warmer. Default 5700.
+   */
+  kelvin?: number;
+}
+
+/**
+ * What the outside of the bowl is made of.
+ *
+ * These are the seven things you can tell apart in a photograph taken from
+ * outside a stadium, which is the only place this information can come from.
+ * They differ in three ways that survive at 150 m: whether you can see through
+ * the skin, what rhythm it has, and whether it glows after dark.
+ */
+export type FacadeStyle =
+  | 'plain'     // a flat concrete skirt: the renderer's historic default
+  | 'berm'      // no wall at all — the bowl is banked into an earth slope
+  | 'truss'     // open steel: posts and rails, and you see the deck behind
+  | 'concrete'  // structural frame with the piers standing proud
+  | 'brick'     // brick infill between piers
+  | 'cladding'  // a continuous panel skin with vertical fins
+  | 'membrane'  // translucent fabric or ETFE, lit from within at night
+  | 'lattice';  // an expressive diagrid standing clear of the bowl
+
+export interface FacadeSpec {
+  /** Default 'plain'. */
+  style?: FacadeStyle;
+  /** Main skin colour. Each style has a sensible default. */
+  color?: number;
+  /** Piers, fins, posts — whatever the style's secondary element is. */
+  accent?: number;
+  /** Metres between piers/fins/posts. Default depends on the style. */
+  bayMeters?: number;
+}
+
+/** An athletics track. All optional — `{}` means "a standard eight-lane one". */
+export interface TrackSpec {
+  /** 4-9. Default 8, the World Athletics standard for a Category I facility. */
+  lanes?: number;
+  /** Surface colour. Default brick red; there is no official standard. */
+  surface?: number;
+  /** Lane lines and the finish line. Default true. */
+  markings?: boolean;
 }
 
 /** Which stands a roof covers. Matches the tifo stand names; 'ring' is all four. */

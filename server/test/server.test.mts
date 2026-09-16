@@ -265,6 +265,31 @@ async function runSuite(name: string, repo: DesignRepository, auth: AuthReposito
   // the holed result was then cached for half an hour.
   assert.equal(quickGen.json().outcome?.kind, 'full', 'the Quick Designer reports a full result');
   assert.equal(quickGen.json().outcome?.charged, false, 'the Quick Designer never charges');
+  // ---- reading a photo of a real ground ----
+  // The route is gated like every other AI route, refuses anything that is not
+  // an image, and — with no provider configured, which is the state these tests
+  // run in — says so plainly rather than returning an empty vote that would
+  // read as "the model saw nothing in your photo".
+  const tinyPng = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+  assert.equal(
+    (await app.inject({ method: 'POST', url: '/api/stadium/photo', payload: { image: tinyPng } })).statusCode,
+    401,
+    'reading a ground photo requires sign in',
+  );
+  assert.equal(
+    (await app.inject({ method: 'POST', url: '/api/stadium/photo', headers: bearer(carolTok), payload: { image: 'https://example.com/a.png' } })).statusCode,
+    400,
+    'a URL is not an image: the route takes a data URL or nothing',
+  );
+  assert.equal(
+    (await app.inject({ method: 'POST', url: '/api/stadium/photo', headers: bearer(carolTok), payload: { image: 'data:text/html;base64,PGI+' } })).statusCode,
+    400,
+    'and it has to be an image type, not just a data URL',
+  );
+  const noProvider = await app.inject({ method: 'POST', url: '/api/stadium/photo', headers: bearer(carolTok), payload: { image: tinyPng } });
+  assert.equal(noProvider.statusCode, 503, 'with no model configured it says so rather than voting on nothing');
+  console.log('stadium photo: all assertions passed (auth gate, data-URL only, image types only, honest 503)');
+
   const afterQuick = await app.inject({ method: 'GET', url: '/api/ai/quota', headers: bearer(carolTok) });
   assert.equal(afterQuick.json().used, 0, 'three free designs later, nothing has been charged');
   assert.equal(afterQuick.json().remaining, 10, 'the hourly allowance is untouched by free designs');

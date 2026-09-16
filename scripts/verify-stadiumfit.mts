@@ -18,11 +18,29 @@ import {
   fitRing,
   measureRing,
   stackTiers,
+  suggestFacade,
+  suggestLighting,
   suggestTierCount,
   type Pt,
   type RadialProbe,
 } from '../src/core/stadiumFit';
+import { TEMPLATES } from '../src/core/template';
+import {
+  DEFAULT_MIN_AGREEMENT,
+  aggregateFacts,
+  factsToKnown,
+  parsePhotoFacts,
+  PHOTO_FACTS_PROMPT,
+  type PhotoFacts,
+} from '../src/core/photoFacts';
 import type { StadiumTemplate } from '../src/core/types';
+import { readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+/** The estimator's own source, for checking that its stated figures are true. */
+const fitSource = (): string =>
+  readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '../src/core/stadiumFit.ts'), 'utf8');
 
 let failures = 0;
 const check = (ok: boolean, label: string, detail = ''): void => {
@@ -193,6 +211,137 @@ console.log('\n--- provenance --------------------------------------------------
   let threw = false;
   try { buildStadium({}); } catch { threw = true; }
   check(threw, 'nothing in, nothing out — it refuses rather than inventing a stadium');
+}
+
+console.log('\n--- the two rules with no data behind them ------------------------');
+{
+  // suggestLighting claims a hit rate in its own doc comment. Print the real one
+  // rather than trusting the comment, and fail if the comment has drifted from
+  // the measurement — a stale accuracy claim is worse than none, because it is
+  // the number the UI uses to decide how loudly to hedge.
+  // Deduped by id: the catalogue re-exports the three built-in templates, and
+  // counting them twice would quietly change the score.
+  const all = [...new Map([...TEMPLATES, ...STADIUM_CATALOG.map((s) => s.template)].map((t2) => [t2.id, t2])).values()];
+  let hits = 0;
+  const misses: string[] = [];
+  for (const tpl of all) {
+    const want = tpl.lighting?.style ?? 'corner-masts';
+    const got = suggestLighting(tpl.roof?.coverage);
+    if (got === want) hits++;
+    else misses.push(`${tpl.id} wanted ${want}, rule said ${got}`);
+  }
+  console.log(`      lighting rule agrees with the hand-set answer ${hits}/${all.length}`);
+  for (const m of misses) console.log(`        - ${m}`);
+  check(hits >= Math.ceil(all.length * 0.55), 'the lighting rule beats a coin flip', `${hits}/${all.length}`);
+
+  // The docstring quotes that score. A comment that says "8 of 13" while the
+  // code scores 5 is worse than a comment that says nothing, because the UI
+  // hedges by that number. So the claim is read back out of the source and
+  // checked against what was just measured.
+  const src = fitSource();
+  const claimed = /agrees with the hand-set answer (\d+) times? out of (\d+)/.exec(src);
+  check(!!claimed, 'the docstring states its own hit rate');
+  check(!!claimed && Number(claimed[1]) === hits && Number(claimed[2]) === all.length,
+    'and the stated hit rate is the measured one', claimed ? `says ${claimed[1]}/${claimed[2]}` : '');
+
+  // The panel quotes it too, in English and in Arabic. Same drift, same check —
+  // the user-facing number is the one it actually matters to get right.
+  const i18nSrc = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '../src/ui/i18n.ts'), 'utf8');
+  const line = /'si\.note\.lighting':.*$/m.exec(i18nSrc)?.[0] ?? '';
+  const AR = '٠١٢٣٤٥٦٧٨٩';
+  const enNum = /right on (\d+) of our (\d+)/.exec(line);
+  // Arabic-Indic digits, read as whole runs: ٨ and ١٣ are one digit and two, and
+  // filtering character by character turns "13" into a 1 and a 3.
+  const arNums = (line.match(new RegExp(`[${AR}]+`, 'g')) ?? [])
+    .map((run) => Number([...run].map((c) => AR.indexOf(c)).join('')));
+  check(!!enNum && Number(enNum[1]) === hits && Number(enNum[2]) === all.length,
+    'the English hedge in the panel quotes the measured rate', line ? `says ${enNum?.[1]}/${enNum?.[2]}` : 'no string');
+  check(arNums.length === 2 && arNums[0] === hits && arNums[1] === all.length,
+    'and so does the Arabic one', arNums.join('/'));
+
+  // The tier rule quotes a score in the panel too, and it was measured once, a
+  // while ago, before the catalogue grew. Same treatment: measure it now and
+  // check the string still says what is true.
+  let tierHits = 0;
+  for (const tpl of all) {
+    const rows = tpl.tiers.reduce((n, t2) => n + t2.rows, 0);
+    if (suggestTierCount(rows) === tpl.tiers.length) tierHits++;
+  }
+  console.log(`      tier-count rule agrees with the shipped split ${tierHits}/${all.length}`);
+  const tierLine = /'si\.note\.tiers':.*$/m.exec(i18nSrc)?.[0] ?? '';
+  const tierEn = /right on (\d+) of our (\d+)/.exec(tierLine);
+  check(!!tierEn && Number(tierEn[1]) === tierHits && Number(tierEn[2]) === all.length,
+    'the tier hedge in the panel quotes the measured rate', tierEn ? `says ${tierEn[1]}/${tierEn[2]}` : 'no string');
+  const tierAr = (tierLine.match(new RegExp(`[${AR}]+`, 'g')) ?? [])
+    .map((run) => Number([...run].map((c) => AR.indexOf(c)).join('')));
+  check(tierAr.length >= 2 && tierAr[0] === tierHits && tierAr[1] === all.length,
+    'and so does its Arabic', tierAr.join('/'));
+
+  // The facade rule only has to be sane, and its own docstring says so. What it
+  // must never do is claim a bank on a bowl too tall to bank.
+  check(suggestFacade({ hasTrack: true, bowlHeight: 8 }) === 'berm', 'a low ground with a track reads as an earth bank');
+  check(suggestFacade({ hasTrack: true, bowlHeight: 30 }) === 'truss', 'a tall ground with a track does not');
+  check(suggestFacade({ capacity: 70000, roof: 'ring', bowlHeight: 32 }) === 'cladding', 'a big roofed bowl reads as clad');
+  check(suggestFacade({ capacity: 20000, bowlHeight: 18 }) === 'concrete', 'and anything else falls back to concrete');
+}
+
+console.log('\n--- reading a photo ----------------------------------------------');
+{
+  // None of this needs a key: the parsing, the vote and the threshold are the
+  // parts that can be wrong in a way nobody would notice, and they are pure.
+  check(/unsure/.test(PHOTO_FACTS_PROMPT), 'the prompt offers "unsure" as an answer');
+  check(/not that\s*\n?\s*stadium|describing this picture/.test(PHOTO_FACTS_PROMPT),
+    'and tells the model to describe the picture, not a stadium it recognises');
+
+  // Anything that is not exactly a legal answer must not vote. A model that
+  // replies "two" has not answered; coercing it is how a guess becomes data.
+  const junk = parsePhotoFacts({ tiers: 'two', roof: 'half', track: 'yes', lighting: 'floodlights', facade: 'glass', seatColours: ['blue', '#123456'] });
+  check(junk.tiers === undefined && junk.roof === undefined, 'a near-miss answer is dropped, not coerced');
+  check(junk.track === undefined, 'a string where a boolean was asked for is dropped');
+  check(junk.seatColours?.length === 1 && junk.seatColours[0] === '#123456', 'only real hex colours survive');
+  const one = parsePhotoFacts({ tiers: 2, roof: 'one', track: true, lighting: 'roof-rim', facade: 'brick', openCorners: false });
+  check(one.roof === 'west', '"one roofed stand" becomes the main stand the compiler knows');
+  check(one.tiers === 2 && one.track === true && one.facade === 'brick', 'legal answers come through intact');
+
+  // The vote. Three readings, two of which agree.
+  const samples: PhotoFacts[] = [
+    { tiers: 2, roof: 'ring', track: false, facade: 'cladding' },
+    { tiers: 2, roof: 'ring', track: false, facade: 'membrane' },
+    { tiers: 3, roof: 'sides', track: false, facade: 'concrete' },
+  ];
+  const vote = aggregateFacts(samples);
+  check(vote.tiers?.value === 2 && Math.abs((vote.tiers?.agreement ?? 0) - 2 / 3) < 1e-9, 'the majority wins, and its share is reported');
+  check(vote.track?.agreement === 1, 'unanimity reads as unanimous');
+  check(vote.facade?.agreement === 1 / 3, 'three different answers report as a third each');
+
+  const { known, used, dropped } = factsToKnown(vote);
+  check(known.tiers === 2 && used.includes('tiers'), 'a 2-of-3 answer is firm enough to use');
+  check(known.facade === undefined && dropped.some((d) => d.field === 'facade'), 'a 1-of-3 answer is dropped and says so');
+  check(DEFAULT_MIN_AGREEMENT > 0.5, 'the threshold is above a coin flip');
+
+  // The trap this whole arrangement exists to avoid: one lone reading agrees
+  // with itself 100% of the time. That is not confidence, it is an n of 1.
+  const lonely = aggregateFacts([{ facade: 'lattice' }, {}, {}, {}, {}]);
+  check(lonely.facade?.agreement === 1, 'one answer out of five scores 100% agreement with itself');
+  check(factsToKnown(lonely).known.facade === undefined, 'and is refused anyway, because one reading is not agreement');
+
+  // A single sample IS allowed when only one was asked for — otherwise asking
+  // for one reading would always return nothing, which is a trap of its own.
+  const single = factsToKnown(aggregateFacts([{ facade: 'brick' }]));
+  check(single.known.facade === 'brick', 'but a single requested reading is still usable');
+
+  // And the facts have to actually reach a template.
+  const truth2 = STADIUM_CATALOG[0].template;
+  const photo = factsToKnown(aggregateFacts([
+    { tiers: 1, roof: 'west', track: true, lighting: 'corner-masts', facade: 'berm' },
+    { tiers: 1, roof: 'west', track: true, lighting: 'corner-masts', facade: 'berm' },
+  ]));
+  const built = buildStadium({ innerRing: trueRing(truth2), capacity: 30000, known: photo.known });
+  check(built.template.tiers.length === 1, 'a photo-read tier count reaches the template');
+  check(built.template.track !== undefined, 'so does the track');
+  check(built.template.lighting?.style === 'corner-masts' && built.template.facade?.style === 'berm', 'so do the lights and the facade');
+  check(built.provenance['lighting.style'].confidence === 'given', 'and they are recorded as told to us, not guessed');
+  check(!built.confirm.includes('facade.style'), 'and no longer asked about');
 }
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILED`);

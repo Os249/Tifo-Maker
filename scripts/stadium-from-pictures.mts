@@ -45,7 +45,7 @@ const fit = buildStadium({
   // What a person can see in one glance at the aerial and nothing else can tell
   // us: there is a 400 m track, one roofed main stand on the west, and the bowl
   // is a single continuous tier.
-  known: { tiers: 1, roof: 'west', aisles: 32 },
+  known: { tiers: 1, roof: 'west', aisles: 32, hasTrack: true },
 });
 
 const t = fit.template;

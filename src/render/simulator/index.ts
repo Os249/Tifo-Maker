@@ -6,6 +6,7 @@ import { CAMERA_PRESETS, type CameraPreset } from '../preview3d';
 import { type QualityTier, type QualitySettings, settingsFor, probeQuality } from './quality';
 import { applyNightIBL } from './env';
 import { buildStands } from './stands';
+import { buildTrack, type TrackBuild } from './track';
 import { buildCrowd, type CrowdController, type CrowdPreset } from './crowd';
 import { buildPitchside, type PitchsideController } from './pitchside';
 import { buildBanners, type BannerController } from './banners';
@@ -115,6 +116,7 @@ export class MatchDaySimulator {
   private readonly crowd: CrowdController;
   private readonly pitchside: PitchsideController;
   private readonly banners: BannerController;
+  private track!: TrackBuild;
   private readonly effects: EffectsController;
   private readonly clock = new THREE.Clock();
   private elapsed = 0;
@@ -195,12 +197,18 @@ export class MatchDaySimulator {
     this.scene.add(this.pitchside.object);
     this.banners = buildBanners(this.map, this.store);
     this.scene.add(this.banners.object);
-    this.effects = buildEffects(this.scene, this.renderer, this.camera, { bloom: this.settings.tier === 'high' || this.settings.tier === 'ultra' });
+    this.effects = buildEffects(this.scene, this.renderer, this.camera, { bloom: this.settings.tier === 'high' || this.settings.tier === 'ultra', template: this.template });
     this.assetLayer = buildAssetLayer(this.assetStore, () => this.store.palette);
     this.scene.add(this.assetLayer.object);
     this.resolveEditorBanners();
     this.weather = buildWeather(this.scene);
-    this.surroundings = buildSurroundings();
+    // The city is placed relative to THIS bowl, not to a constant — see
+    // buildSurroundings. The radius is the plan curve plus the deepest tier,
+    // which is the outside of the building.
+    this.surroundings = buildSurroundings(
+      Math.max(this.template.plan.a, this.template.plan.b) +
+      this.template.tiers.reduce((m, tr) => Math.max(m, (tr.baseOffset ?? 0) + tr.rows * tr.rowDepth), 0),
+    );
     this.scene.add(this.surroundings.object);
     this.sparkles = buildPhoneFlash(this.map);
     // Off until asked for: a bowl that twinkles by itself misreads a still tifo
@@ -364,6 +372,12 @@ export class MatchDaySimulator {
     this.disposables.push(pitchGeo, this.pitchMat);
     this.scene.add(buildPitchDetail(this.settings.shadows)); // goals + full markings
 
+    // The track, if this ground has one AND has room for it. buildTrack checks
+    // the fit itself, so a template cannot claim a 400 m oval its bowl could
+    // never hold — see track.ts.
+    this.track = buildTrack(this.template, this.settings.shadows);
+    this.scene.add(this.track.object);
+
     // Markings (unlit lines, like the editor preview).
     const lineMat = new THREE.LineBasicMaterial({ color: 0xe7eee7, transparent: true, opacity: 0.75 });
     const y = 0.03;
@@ -517,6 +531,31 @@ export class MatchDaySimulator {
   // ---- effects (Phase 5) ----
   setFloodlights(b: boolean): void {
     this.effects.setFloodlights(b);
+  }
+
+  /**
+   * What the built scene actually contains.
+   *
+   * A screenshot cannot tell you that the floodlight group exists but is empty,
+   * or that a facade was requested and produced nothing: both look exactly like
+   * a dark night. This can, which is what scripts/matchday-shots.mts checks
+   * before anyone squints at a picture.
+   */
+  sceneCensus(): { meshes: number; spotLights: number; lamps: number; instances: number } {
+    let meshes = 0;
+    let spotLights = 0;
+    let lamps = 0;
+    let instances = 0;
+    this.scene.traverse((o) => {
+      const m = o as THREE.Mesh & { isInstancedMesh?: boolean; count?: number };
+      if ((o as THREE.SpotLight).isSpotLight) spotLights++;
+      if (!m.isMesh) return;
+      meshes++;
+      if (m.isInstancedMesh) instances += m.count ?? 0;
+      const mat = m.material as THREE.MeshStandardMaterial | undefined;
+      if (mat && 'emissiveIntensity' in mat && (mat.emissiveIntensity ?? 0) >= 1) lamps++;
+    });
+    return { meshes, spotLights, lamps, instances };
   }
 
   /** Phone-flash twinkle across the stands. Starts off; see the constructor. */
@@ -1143,6 +1182,7 @@ export class MatchDaySimulator {
     });
     this.crowd.dispose();
     this.pitchside.dispose();
+    this.track.dispose();
     this.banners.dispose();
     this.effects.dispose();
     this.assetLayer.dispose();

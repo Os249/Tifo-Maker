@@ -52,7 +52,7 @@ const AMMAN_FITTED = buildStadium({
   innerRing: ammanRing.points,
   bandDepth: ammanRing.depth.median,
   capacity: 17_619,
-  known: { tiers: 1, roof: 'west', aisles: 32 },
+  known: { tiers: 1, roof: 'west', aisles: 32, hasTrack: true },
 }).template;
 
 const alAwwal = STADIUM_CATALOG.find((s) => s.id.includes('alawwal'))?.template;

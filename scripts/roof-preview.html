@@ -8,6 +8,7 @@
   import { templateById } from '/src/core/stadiumCatalog.ts';
   import { buildStands } from '/src/render/simulator/stands.ts';
   import { buildRoof } from '/src/render/simulator/roof.ts';
+  import { buildTrack } from '/src/render/simulator/track.ts';
 
   const HOST = document.createElement('div');
   HOST.style.cssText = 'position:fixed;left:0;top:0;width:1100px;height:660px;';
@@ -67,6 +68,8 @@
     scene.add(up);
     scene.add(up.target);
 
+    const track = buildTrack(template, false, { unlit: true });
+    scene.add(track.object);
     const stands = buildStands(template, false);
     scene.add(stands);
     const { mesh, geo, mat } = seatMesh(map);
@@ -163,6 +166,7 @@
     geo.dispose(); mat.dispose(); mesh.dispose();
     pitchGeo.dispose(); pitchMat.dispose();
     stands.traverse((o) => { if (o.geometry) o.geometry.dispose(); });
+    track.dispose();
     return { shots: out, seats: map.count, topY: top, roof: template.roof ?? null, coveredPct: map.count ? (covered / map.count) * 100 : 0, reach: rb.reachMeters };
   };
   document.getElementById('out').textContent = 'ready';
