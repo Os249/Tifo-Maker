@@ -51,19 +51,21 @@ In **DNS → Records**, the cloud icon next to the `tifomaker.org` record should
 
 **If the site shows a certificate error right after switching:** Railway may need to re-issue its certificate and Cloudflare is in the way. Toggle that record to grey (DNS only), wait a few minutes for Railway to show the domain as issued, then toggle it back to orange.
 
-## 5. Tell the server it is behind two proxies
+## 5. Tell the server it is behind Cloudflare
 
 This step is easy to forget and it silently breaks visitor counting and rate limiting.
 
-Your app works out a visitor's address from the `X-Forwarded-For` header. Behind Cloudflare *and* Railway there are now **two** proxies in that chain, so the server has to skip two hops to find the real client.
+Your app works out a visitor's address from the `X-Forwarded-For` header. Behind Cloudflare *and* Railway there are now **two** proxies in that chain, so the server has to look one hop further to find the real client.
 
 In Railway → your **Tifo-Maker** service → **Variables**, set:
 
 ```
-TRUST_PROXY=2
+TRUST_PROXY=cloudflare
 ```
 
-(Use `TRUST_PROXY=1` if you ever remove Cloudflare and go back to Railway alone. `TRUST_PROXY=0` disables it entirely — only correct if nothing sits in front of the app.)
+Not `TRUST_PROXY=2`. Cloudflare does not stop anyone sending requests straight to Railway, and a plain `2` believes the extra hop whoever wrote it: a script that skips Cloudflare could pick its own IP address on every request and never hit a rate limit. `cloudflare` believes that hop only when the connection really came from one of Cloudflare's published address ranges (the list is in `server/src/proxyTrust.ts`), and only then does the Countries panel trust the `CF-IPCountry` header. The server prints a warning at boot if it sees `2`.
+
+(Use `TRUST_PROXY=1`, or delete the variable, if you ever remove Cloudflare and go back to Railway alone. `TRUST_PROXY=0` disables it entirely — only correct if nothing sits in front of the app.)
 
 Railway redeploys automatically when you save a variable.
 

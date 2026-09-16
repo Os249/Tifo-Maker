@@ -6,7 +6,7 @@
  *
  *   the default   a phone in dark mode must never be handed a white page, and
  *                 must never be handed one for a frame either — the scheme is
- *                 settled by an inline script in the head, before anything
+ *                 settled by /theme-boot.js at the top of the head, before anything
  *                 paints, and this checks that it really is ahead of the body.
  *   the choice    pressing the toggle outranks the system, on every page and
  *                 on the next visit.
@@ -73,13 +73,19 @@ for (const scheme of ['dark', 'light']) {
 }
 
 console.log('\n— and it is settled before anything paints —');
+// A classic (not module, not async, not deferred) script from this origin, at
+// the top of the head. It used to be inline, which the Content-Security-Policy
+// blocked on every production load while this check still passed.
+const bootJs = await (await fetch(B + '/theme-boot.js')).text();
+check('/theme-boot.js is served and reads the saved choice', bootJs.includes("localStorage.getItem('tifo_theme_v1')"));
 for (const path of PAGES) {
   const html = await (await fetch(B + path)).text();
-  const boot = html.indexOf("localStorage.getItem('tifo_theme_v1')");
+  const boot = html.indexOf('<script src="/theme-boot.js"></script>');
   const body = html.indexOf('<body');
   const css = html.indexOf('<link rel="stylesheet"');
   check(`${path} decides the scheme before the body`, boot > -1 && boot < body, `boot=${boot} body=${body}`);
   check(`${path} decides it before the stylesheet`, boot > -1 && (css === -1 || boot < css), `boot=${boot} css=${css}`);
+  check(`${path} has no inline script for the policy to block`, !/<script(?![^>]*\bsrc=)[^>]*>\s*\S/i.test(html));
 }
 
 // ---------- the toggle ----------

@@ -179,6 +179,24 @@ const ADMIN_HTML_HEAD = `<!doctype html>
   .msg{ min-height:18px; font-size:12px; color:var(--red); margin-top:11px; }
   a{ color:var(--blue); }
   @media (max-width:560px){ main{ padding:12px 13px 48px; } .k-val{ font-size:22px; } }
+
+  /* Security tab. State chips carry a word as well as a colour, so the verdict
+     survives colour-blindness and a greyscale screenshot. */
+  .callout.bad{ border-left-color:var(--red); }
+  .callout.bad b{ color:var(--red); }
+  .st{ display:inline-block; min-width:52px; text-align:center; font-size:10.5px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; padding:2px 7px; border-radius:999px; border:1px solid var(--line); color:var(--mut); white-space:nowrap; }
+  .st.good{ color:var(--green); border-color:#1e4429; background:#0d2213; }
+  .st.warn{ color:var(--gold); border-color:#4a3c1d; background:#241d0c; }
+  .st.bad{ color:var(--red); border-color:#5a1d1d; background:#2a0f0f; }
+  .st.info{ color:var(--mut); }
+  .tagcode{ font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12px; color:var(--teal); }
+  td.when{ white-space:nowrap; }
+  .scroll{ overflow-x:auto; }
+  .scroll table{ min-width:560px; }
+  .posture-row{ display:grid; grid-template-columns:70px minmax(140px,220px) 1fr; gap:12px; align-items:start; padding:9px 0; border-bottom:1px solid var(--line); font-size:13px; }
+  .posture-row:last-child{ border-bottom:none; }
+  .posture-row .pd{ color:var(--mut); line-height:1.55; }
+  @media (max-width:640px){ .posture-row{ grid-template-columns:70px 1fr; } .posture-row .pd{ grid-column:1 / -1; } }
 </style>
 </head>
 <body>
@@ -302,6 +320,11 @@ async function api(path){
   try { data = await res.json(); } catch(e){ data = null; }
   return { ok: res.ok, status: res.status, data: data };
 }
+/* A reply link that cannot carry extra mail headers. The address comes from an
+   anonymous feedback form: "dev@example.com?bcc=attacker@evil&body=..." made the
+   reply open with a hidden BCC and the attacker's text. The server now refuses
+   such addresses, and this encodes the characters mailto: treats as structure. */
+function mailtoHref(addr){ return 'mailto:' + String(addr).replace(/[?&#%]/g, function(c){ return encodeURIComponent(c); }); }
 async function post(path, body){
   var res;
   /* The unlock token travels on admin POSTs too. /api/ai/unlock is the one call
@@ -368,15 +391,16 @@ async function loadAll(){
     api('/api/admin/shares?days=' + currentDays),
     api('/api/admin/feedback?limit=50'),
     api('/api/admin/ai?days=' + currentDays),
-    api('/api/admin/email')
+    api('/api/admin/email'),
+    api('/api/admin/soc')
   ]);
-  var ov = results[0], tr = results[1], fn = results[2], sh = results[3], fb = results[4], ai = results[5], em = results[6];
+  var ov = results[0], tr = results[1], fn = results[2], sh = results[3], fb = results[4], ai = results[5], em = results[6], sc = results[7];
   if (!ov.ok){
     if (ov.status === 403){ clearUnlock(); showLogin('Wrong or expired password. Sign in again.'); return; }
     setStatus('Failed to load (' + ov.status + ').');
     return;
   }
-  render(ov.data || {}, (tr.ok && tr.data) ? tr.data : null, (fn.ok && fn.data) ? fn.data : { steps:[], days: currentDays }, (sh.ok && sh.data) ? sh.data : null, (fb.ok && fb.data) ? fb.data : null, (ai.ok && ai.data) ? ai.data : null, (em.ok && em.data) ? em.data : null);
+  render(ov.data || {}, (tr.ok && tr.data) ? tr.data : null, (fn.ok && fn.data) ? fn.data : { steps:[], days: currentDays }, (sh.ok && sh.data) ? sh.data : null, (fb.ok && fb.data) ? fb.data : null, (ai.ok && ai.data) ? ai.data : null, (em.ok && em.data) ? em.data : null, (sc.ok && sc.data) ? sc.data : null);
   setStatus('Updated ' + new Date().toLocaleTimeString());
 }
 
@@ -778,7 +802,7 @@ function feedbackSection(fb){
       + '<div class="fbtop">'
       +   '<span class="fbkind" style="background:' + meta[1] + '22;color:' + meta[1] + '">' + esc(meta[0]) + '</span>'
       +   '<span class="fbwhen">' + esc(timeAgo(it.createdAt)) + '</span>'
-      +   (it.email ? '<a class="fbmail" href="mailto:' + esc(it.email) + '">' + esc(it.email) + '</a>'
+      +   (it.email ? '<a class="fbmail" href="' + esc(mailtoHref(it.email)) + '">' + esc(it.email) + '</a>'
                     : '<span class="fbmail dim">no reply address</span>')
       + '</div>'
       + '<p class="fbmsg">' + esc(it.message) + '</p>'
@@ -930,7 +954,8 @@ var TABS = [
   { id:'ai',       label:'AI' },
   { id:'library',  label:'Library' },
   { id:'feedback', label:'Feedback' },
-  { id:'email',    label:'Email' }
+  { id:'email',    label:'Email' },
+  { id:'security', label:'Security' }
 ];
 var DATA = null;
 var currentTab = 'board';
@@ -964,6 +989,10 @@ function tabBadge(id){
   if (id === 'traffic'){
     var v = DATA.tr && DATA.tr.totals ? DATA.tr.totals.views : null;
     return v ? '<span class="pill">' + fmt(v) + '</span>' : '';
+  }
+  if (id === 'security'){
+    var firing = socFiring();
+    return firing.length ? '<span class="pill warn">' + fmt(firing.length) + '</span>' : '';
   }
   void t;
   return '';
@@ -1009,8 +1038,10 @@ function boardSection(){
 
   var mod = ov.moderation || {};
   var queue = (Number(mod.openReports)||0) + (Number(mod.unverifiedPhotos)||0) + (Number(mod.pendingStadiums)||0);
-  if (queue){
+  var firingNow = socFiring().length;
+  if (queue || firingNow){
     html += '<h2 class="sec">Waiting for you</h2><div class="grid">';
+    if (firingNow) html += queueKpi('Security alerts firing', firingNow, 'Security tab', '#security');
     html += queueKpi('Open reports', mod.openReports, 'Moderation panel', '/app?admin=reports');
     html += queueKpi('Unverified photos', mod.unverifiedPhotos, 'Moderation panel', '/app?admin=photos');
     html += queueKpi('Pending stadiums', mod.pendingStadiums, 'Stadium panel', '/app?admin=stadiums');
@@ -1159,8 +1190,255 @@ function paintSection(){
   else if (currentTab === 'library') html = libraryTab();
   else if (currentTab === 'feedback') html = feedbackTab();
   else if (currentTab === 'email') html = emailTab();
+  else if (currentTab === 'security') html = securityTab();
   el('dash-body').innerHTML = html;
   if (currentTab === 'email') wireEmailTest();
+  if (currentTab === 'security') wireSecurity();
+}
+
+/* ---- security: is anyone attacking the site, and is it set up to cope ----
+   Everything here is counted on the server after each response. Addresses
+   arrive as 12-character tags, never as addresses; accounts only by their
+   public @name. See server/src/soc.ts for what is recorded and why. */
+var SOC_KIND = {
+  login_failed:           ['Failed sign-ins', 'wrong password, or an account that does not exist'],
+  login_ok:               ['Successful sign-ins', 'context, not an attack'],
+  register_conflict:      ['Sign-ups that hit an existing account', 'the way someone tests which emails are registered'],
+  reset_requested:        ['Password reset requests', ''],
+  code_failed:            ['Wrong verification codes', ''],
+  code_exhausted:         ['Verification codes used up', 'five wrong guesses at one code'],
+  mail_refused:           ['Emails refused by the per-address limits', 'someone trying to flood a mailbox'],
+  password_change_failed: ['Wrong current password when changing it', ''],
+  admin_unlock_failed:    ['Wrong admin password', 'the /admin sign-in'],
+  admin_denied:           ['Admin requests without admin rights', ''],
+  rate_limited:           ['Rate-limited requests', 'past 300 a minute, or 10 a minute on sign-in routes'],
+  oversized_body:         ['Oversized requests', 'past the body size limit'],
+  scanner_probe:          ['Vulnerability scanner probes', '/.env, /wp-login.php and the like'],
+  bot_trap:               ['Bots caught by the feedback form', 'honeypot field or impossibly fast'],
+  upload_refused:         ['Uploads that were not images', ''],
+  server_error:           ['Server errors', 'a 500 answer']
+};
+var SOC_SIGNIN = ['login_failed', 'code_failed', 'code_exhausted', 'password_change_failed', 'register_conflict', 'reset_requested', 'mail_refused', 'login_ok'];
+var SOC_ABUSE = ['rate_limited', 'oversized_body', 'scanner_probe', 'admin_unlock_failed', 'admin_denied', 'bot_trap', 'upload_refused', 'server_error'];
+var SOC_COLOR = { signin:'#f85149', admin:'#a371f7', abuse:'#d29922', errors:'#58a6ff' };
+var STATE_WORD = { good:'good', warn:'check', bad:'fix', info:'note' };
+
+function socFiring(){
+  var sc = DATA && DATA.sc;
+  if (!sc || !sc.rules) return [];
+  return sc.rules.filter(function(r){ return r.firing; });
+}
+function socTotal(kind, span){
+  var sc = DATA.sc, t = (sc && sc.summary && sc.summary.totals) || [];
+  for (var i = 0; i < t.length; i++) if (t[i].kind === kind) return Number(t[i][span || 'day']) || 0;
+  return 0;
+}
+function socTotals(kinds, span){
+  var n = 0;
+  for (var i = 0; i < kinds.length; i++) n += socTotal(kinds[i], span);
+  return n;
+}
+function kindLabel(k){ return (SOC_KIND[k] && SOC_KIND[k][0]) || labelize(k); }
+function clockTime(iso){
+  var d = new Date(iso);
+  if (isNaN(d.getTime())) return String(iso || '');
+  return d.toLocaleString(undefined, { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' });
+}
+function stateChip(state){ return '<span class="st ' + esc(state) + '">' + esc(STATE_WORD[state] || state) + '</span>'; }
+function tagCell(t){ return t ? '<span class="tagcode" title="Hashed address">' + esc(t) + '</span>' : '<span class="dim">-</span>'; }
+
+/* 48 hourly stacked bars. Hours with nothing in them are still drawn as gaps,
+   so a quiet night reads as quiet rather than being squeezed out. */
+function socHourlyChart(sc){
+  var W = 720, H = 150, padB = 4;
+  var rows = (sc.summary && sc.summary.hourly) || [];
+  var byHour = {};
+  for (var i = 0; i < rows.length; i++) byHour[rows[i].hour] = rows[i];
+  var end = Math.floor(Date.parse(sc.generatedAt || new Date().toISOString()) / 3600000) * 3600000;
+  var slots = [], max = 0;
+  for (var h = 47; h >= 0; h--){
+    var key = new Date(end - h * 3600000).toISOString();
+    var r = byHour[key] || { signin:0, admin:0, abuse:0, errors:0 };
+    var tot = (Number(r.signin)||0) + (Number(r.admin)||0) + (Number(r.abuse)||0) + (Number(r.errors)||0);
+    if (tot > max) max = tot;
+    slots.push({ key: key, r: r, tot: tot });
+  }
+  if (!max){
+    return '<div class="card"><p class="lt">The last 48 hours</p><p class="empty">Nothing recorded: no attacks, no blocked requests, no server errors.</p></div>';
+  }
+  var bw = W / 48, svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" width="100%" height="150" preserveAspectRatio="none" role="img" aria-label="Security events per hour, last 48 hours">';
+  for (var s2 = 0; s2 < slots.length; s2++){
+    var sl = slots[s2], y = H - padB, parts = ['errors', 'abuse', 'admin', 'signin'];
+    for (var p = 0; p < parts.length; p++){
+      var v = Number(sl.r[parts[p]]) || 0;
+      if (!v) continue;
+      var bh = Math.max(1.5, v / max * (H - padB - 6));
+      y -= bh;
+      svg += '<rect x="' + (s2 * bw + 1).toFixed(1) + '" y="' + y.toFixed(1) + '" width="' + Math.max(1, bw - 2).toFixed(1) + '" height="' + bh.toFixed(1) + '" fill="' + SOC_COLOR[parts[p]] + '"><title>' + esc(clockTime(sl.key)) + ': ' + fmt(v) + ' ' + parts[p] + '</title></rect>';
+    }
+  }
+  svg += '</svg>';
+  return '<div class="card"><p class="lt">The last 48 hours <span class="dim" style="font-weight:400">: peak ' + fmt(max) + ' in an hour</span></p>'
+    + '<p class="lc"><span style="color:' + SOC_COLOR.signin + '">&#9632;</span> sign-in attacks &nbsp; <span style="color:' + SOC_COLOR.admin + '">&#9632;</span> admin &nbsp; <span style="color:' + SOC_COLOR.abuse + '">&#9632;</span> blocked and abusive &nbsp; <span style="color:' + SOC_COLOR.errors + '">&#9632;</span> server errors</p>'
+    + svg
+    + '<p class="lc" style="margin:5px 0 0;display:flex;justify-content:space-between">' + esc(clockTime(slots[0].key)) + '<span>now</span></p></div>';
+}
+
+function socKindTable(kinds){
+  var body = '';
+  for (var i = 0; i < kinds.length; i++){
+    var k = kinds[i], info = SOC_KIND[k] || [k, ''];
+    body += '<tr><td class="name" title="' + esc(info[1]) + '">' + esc(info[0]) + (info[1] ? '<span class="fsub dim" style="display:block;font-size:11px">' + esc(info[1]) + '</span>' : '') + '</td>'
+      + '<td>' + fmt(socTotal(k, 'day')) + '</td><td>' + fmt(socTotal(k, 'week')) + '</td><td>' + fmt(socTotal(k, 'month')) + '</td></tr>';
+  }
+  return '<div class="card scroll"><table><thead><tr><th class="name">What</th><th>24 hours</th><th>7 days</th><th>30 days</th></tr></thead><tbody>' + body + '</tbody></table></div>';
+}
+
+function securityTab(){
+  var sc = DATA.sc;
+  if (!sc) return '<h2 class="sec">Security</h2><p class="note">Could not read the security log. The server may be running without the monitor.</p>';
+  var firing = socFiring();
+  var html = '<h2 class="sec">Security <span class="hint">counts are for the last 24 hours unless a column says otherwise</span></h2>';
+
+  if (firing.length){
+    html += '<div class="callout bad"><b>' + fmt(firing.length) + (firing.length === 1 ? ' alert is' : ' alerts are') + ' over threshold right now.</b><br>';
+    for (var f = 0; f < firing.length; f++){
+      var fr = firing[f];
+      html += esc(fr.title) + ': ' + fmt(fr.count) + ' in ' + fmt(fr.windowMin) + ' min' + (fr.perSource ? ' from one address' : '') + ' (threshold ' + fmt(fr.threshold) + ')' + (fr.lastAlertAt ? ', emailed ' + esc(timeAgo(fr.lastAlertAt)) : '') + '<br>';
+    }
+    html += '</div>';
+  } else {
+    html += '<div class="callout ok"><b>All quiet.</b> No alert rule is over its threshold in its window.</div>';
+  }
+
+  html += '<div class="grid" style="margin-top:12px">';
+  html += kpi('Failed sign-ins', socTotal('login_failed'), fmt(socTotal('login_failed', 'week')) + ' in 7 days', true);
+  html += kpi('Code and password guesses', socTotals(['code_failed', 'code_exhausted', 'password_change_failed']), 'verification codes, password changes', true);
+  html += kpi('Wrong admin password', socTotal('admin_unlock_failed'), fmt(socTotal('admin_unlock_failed', 'week')) + ' in 7 days', true);
+  html += kpi('Blocked requests', socTotals(['rate_limited', 'oversized_body']), 'rate limits and size limits', true);
+  html += kpi('Scanner probes', socTotal('scanner_probe'), 'bots looking for weak spots', true);
+  html += kpi('Server errors', socTotal('server_error'), fmt(socTotal('server_error', 'week')) + ' in 7 days', true);
+  html += '</div>';
+  html += '<div style="margin-top:10px">' + socHourlyChart(sc) + '</div>';
+
+  /* ---- attacks on sign-in ---- */
+  var summary = sc.summary || {};
+  html += '<h2 class="sec">Attacks on sign-in</h2>';
+  html += socKindTable(SOC_SIGNIN);
+  html += '<div class="grid two" style="margin-top:10px">';
+  var subj = summary.topSubjects || [];
+  html += '<div class="card"><p class="lt">Most targeted accounts</p><p class="lc">failed sign-ins in the last 7 days, and from how many addresses</p>';
+  if (!subj.length) html += '<p class="empty">No failed sign-ins against a real account.</p>';
+  for (var a = 0; a < subj.length; a++){
+    html += '<div class="row"><div class="nm">@' + esc(subj[a].subject) + '</div><div class="vv"><b>' + fmt(subj[a].failures) + '</b> <span class="dim">from ' + fmt(subj[a].sources) + '</span></div></div>';
+  }
+  html += '</div>';
+  var srcs = summary.topSources || [];
+  html += '<div class="card"><p class="lt">Busiest addresses</p><p class="lc">hashed; everything they triggered in the last 24 hours</p>';
+  if (!srcs.length) html += '<p class="empty">Nothing recorded.</p>';
+  for (var b = 0; b < srcs.length; b++){
+    var ks = (srcs[b].kinds || []).map(kindLabel).join(', ');
+    html += '<div class="row"><div class="nm" title="' + esc(ks) + '">' + tagCell(srcs[b].source) + ' <span class="dim" style="font-size:11.5px">' + esc(ks) + '</span></div><div class="vv"><b>' + fmt(srcs[b].total) + '</b></div></div>';
+  }
+  html += '</div></div>';
+
+  /* ---- blocked and abusive traffic ---- */
+  html += '<h2 class="sec">Blocked and abusive traffic</h2>';
+  html += socKindTable(SOC_ABUSE);
+  var routes = summary.topRoutes || [];
+  html += '<div class="card" style="margin-top:10px"><p class="lt">What was refused, and where</p><p class="lc">last 24 hours</p>';
+  if (!routes.length) html += '<p class="empty">Nothing refused.</p>';
+  for (var c = 0; c < routes.length; c++){
+    html += '<div class="row"><div class="nm"><code>' + esc(routes[c].route) + '</code> <span class="dim" style="font-size:11.5px">' + esc(kindLabel(routes[c].kind)) + '</span></div><div class="vv"><b>' + fmt(routes[c].total) + '</b></div></div>';
+  }
+  html += '</div>';
+
+  /* ---- alerts ---- */
+  html += '<h2 class="sec">Alerts <span class="hint">emailed at most once an hour per rule</span></h2>';
+  html += sc.alertsTo
+    ? '<p class="lede">Alerts go to <b>' + esc(sc.alertsTo) + '</b>.</p>'
+    : '<div class="callout"><b>Nobody is emailed.</b> Set <code>SECURITY_ALERT_TO</code> in Railway to the address that should hear about an attack while it is happening. Everything is still recorded here.</div>';
+  var rules = sc.rules || [], rb = '';
+  for (var d = 0; d < rules.length; d++){
+    var ru = rules[d];
+    rb += '<tr><td class="name" title="' + esc(ru.title) + '">' + esc(ru.title) + '</td>'
+      + '<td>' + (ru.firing ? '<span class="st bad">firing</span>' : '<span class="st good">quiet</span>') + '</td>'
+      + '<td>' + fmt(ru.count) + ' / ' + fmt(ru.threshold) + '</td>'
+      + '<td>' + fmt(ru.windowMin) + ' min' + (ru.perSource ? ', one address' : '') + '</td>'
+      + '<td>' + (ru.lastAlertAt ? esc(clockTime(ru.lastAlertAt)) : '<span class="dim">never</span>') + '</td></tr>';
+  }
+  html += '<div class="card scroll" style="margin-top:10px"><table><thead><tr><th class="name">Rule</th><th>Now</th><th>Count / threshold</th><th>Window</th><th>Last alert</th></tr></thead><tbody>' + rb + '</tbody></table></div>';
+  var al = sc.alerts || [];
+  if (al.length){
+    var ab = '';
+    for (var e = 0; e < al.length; e++){
+      ab += '<tr><td class="when">' + esc(clockTime(al[e].at)) + '</td><td class="name" title="' + esc(al[e].summary) + '">' + esc(al[e].rule) + '</td><td>' + fmt(al[e].count) + '</td><td>'
+        + (al[e].delivered ? '<span class="st good">sent</span>' : '<span class="st warn" title="' + esc(al[e].error || '') + '">not sent</span> <span class="dim" style="font-size:11.5px">' + esc(al[e].error || '') + '</span>') + '</td></tr>';
+    }
+    html += '<div class="card scroll" style="margin-top:10px"><p class="lt">Alert history</p><table><thead><tr><th>When</th><th class="name">Rule</th><th>Count</th><th>Email</th></tr></thead><tbody>' + ab + '</tbody></table></div>';
+  }
+  html += '<p style="margin-top:12px"><button id="soc-test" type="button">Send a test alert</button> <span id="soc-test-out" class="note"></span></p>';
+
+  /* ---- audit trail ---- */
+  var audit = sc.audit || [];
+  html += '<h2 class="sec">Admin audit trail <span class="hint">every admin sign-in and action</span></h2>';
+  if (!audit.length){
+    html += '<p class="empty">No admin actions recorded yet.</p>';
+  } else {
+    var tb = '';
+    for (var g = 0; g < audit.length; g++){
+      var au = audit[g], det = '';
+      if (au.detail){ for (var dk in au.detail){ if (Object.prototype.hasOwnProperty.call(au.detail, dk)) det += (det ? ', ' : '') + dk + ': ' + au.detail[dk]; } }
+      tb += '<tr><td class="when">' + esc(clockTime(au.at)) + '</td><td>' + esc(au.actor) + '</td><td class="name" title="' + esc(au.action) + '">' + esc(au.action) + (det ? ' <span class="dim">(' + esc(det) + ')</span>' : '') + '</td><td>' + (au.target ? '<code>' + esc(au.target) + '</code>' : '<span class="dim">-</span>') + '</td><td>' + tagCell(au.source) + '</td></tr>';
+    }
+    html += '<div class="card scroll"><table><thead><tr><th>When</th><th>Who</th><th class="name">What</th><th>On</th><th>From</th></tr></thead><tbody>' + tb + '</tbody></table></div>';
+    html += '<p class="note">An address you do not recognise next to "signed in with the admin password" means someone else has it: change <code>AI_ADMIN_PASSWORD</code>, which signs every session out.</p>';
+  }
+
+  /* ---- posture ---- */
+  var posture = sc.posture || [], bad = 0, warn = 0, pr = '';
+  for (var q = 0; q < posture.length; q++){
+    var pc = posture[q];
+    if (pc.state === 'bad') bad++;
+    if (pc.state === 'warn') warn++;
+    pr += '<div class="posture-row"><div>' + stateChip(pc.state) + '</div><div><b>' + esc(pc.label) + '</b></div><div class="pd">' + esc(pc.detail) + '</div></div>';
+  }
+  html += '<h2 class="sec">Security posture' + (bad ? ' <span class="badge warn">' + fmt(bad) + ' to fix</span>' : '') + (warn ? ' <span class="badge">' + fmt(warn) + ' to check</span>' : '') + '</h2>';
+  html += '<div class="card">' + (pr || '<p class="empty">No checks available.</p>') + '</div>';
+
+  /* ---- recent events ---- */
+  var recent = sc.recent || [];
+  html += '<h2 class="sec">Recent events <span class="hint">the latest ' + fmt(recent.length) + ' since this server started</span></h2>';
+  if (!recent.length){
+    html += '<p class="empty">Nothing since the last restart.</p>';
+  } else {
+    var rbody = '';
+    for (var x = 0; x < recent.length; x++){
+      var ev = recent[x];
+      rbody += '<tr><td class="when">' + esc(clockTime(ev.at)) + '</td><td class="name" title="' + esc(kindLabel(ev.kind)) + '">' + esc(kindLabel(ev.kind)) + '</td><td><code>' + esc(ev.route || '-') + '</code></td><td>' + (ev.status == null ? '' : esc(ev.status)) + '</td><td>' + tagCell(ev.source) + '</td><td>' + (ev.subject ? '@' + esc(ev.subject) : '') + '</td></tr>';
+    }
+    html += '<div class="card scroll"><table><thead><tr><th>When</th><th class="name">What</th><th>Route</th><th>Status</th><th>From</th><th>Account</th></tr></thead><tbody>' + rbody + '</tbody></table></div>';
+    html += '<p class="note">To act on an address, for example to block it at Cloudflare, find the request in the Railway logs at that time (the log line carries the real address); the dashboard never has it.</p>';
+  }
+
+  html += '<div class="callout ok" style="margin-top:22px"><b>What is kept.</b> Counts per minute, for ' + fmt(sc.retentionDays || 30) + ' days, then deleted. Addresses are never stored: each becomes a 12-character tag made with a secret key that is not in the database'
+    + (sc.keyStable ? ' (SOC_IP_KEY, so a tag means the same address across restarts).' : ', regenerated at every restart, so tags do not carry over a deploy.')
+    + ' Accounts appear only by their public @name, and only when the account exists. Passwords and codes are never recorded, right or wrong.</div>';
+  return html;
+}
+
+function wireSecurity(){
+  var btn = el('soc-test');
+  if (!btn) return;
+  btn.addEventListener('click', async function(){
+    var out = el('soc-test-out');
+    btn.disabled = true;
+    out.textContent = 'Sending...';
+    var r = await post('/api/admin/soc/test-alert', {});
+    btn.disabled = false;
+    if (r.ok && r.data && r.data.ok){ out.innerHTML = '<b>Sent.</b> Check the inbox (and the spam folder, the first time).'; }
+    else { out.innerHTML = '<b class="warn">Not sent.</b> ' + esc((r.data && r.data.error) || ('HTTP ' + r.status)); }
+  });
 }
 
 /* ---- email: is anything actually being delivered ----
@@ -1211,8 +1489,8 @@ function wireEmailTest(){
   });
 }
 
-function render(ov, tr, funnel, sh, fb, ai, em){
-  DATA = { ov: ov, tr: tr, funnel: funnel, sh: sh, fb: fb, ai: ai, em: em, days: Number(funnel && funnel.days) || currentDays };
+function render(ov, tr, funnel, sh, fb, ai, em, sc){
+  DATA = { ov: ov, tr: tr, funnel: funnel, sh: sh, fb: fb, ai: ai, em: em, sc: sc, days: Number(funnel && funnel.days) || currentDays };
 
   el('mode').textContent = (ov.mode === 'memory') ? 'in-memory (dev)' : 'postgres';
   el('mode').className = (ov.mode === 'memory') ? 'badge warn' : 'badge good';

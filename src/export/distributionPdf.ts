@@ -138,7 +138,13 @@ export async function renderDistributionPdf(
   doc.pipe(stream);
 
   // ---------- Cover: title, purchase list, bowl overview ----------
-  doc.font('Helvetica-Bold').fontSize(26).fillColor('#111111').text(meta.designTitle, MARGIN, 48);
+  // One line, clipped with an ellipsis. Unbounded, pdfkit wraps a long title
+  // onto as many pages as it takes, synchronously, and this runs on the server.
+  doc
+    .font('Helvetica-Bold')
+    .fontSize(26)
+    .fillColor('#111111')
+    .text(meta.designTitle.slice(0, 200), MARGIN, 48, { width: doc.page.width - MARGIN * 2, height: 32, ellipsis: true, lineBreak: false });
   doc
     .font('Helvetica')
     .fontSize(12)

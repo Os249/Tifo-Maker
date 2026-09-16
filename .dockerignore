@@ -1,7 +1,36 @@
+# Never in the image: dependencies are installed fresh, output is rebuilt.
 node_modules
 dist
 out
+preview-out
 .git
-.env
-*.log
+
+# Secrets, wherever they sit and whatever they are called. ".env" alone missed
+# server/.env, .env.local and .env.production.
+**/.env*
+!.env.example
+**/*.pem
+**/*.key
+
+# Logs, hand-over files and local scratch
+**/*.log
+*.patch
+*.bundle
+scratch-aerial/
+tmp/
+vite.config.ts.timestamp-*
+
+# Large tracked files the server never reads (about 150 MB): marketing video,
+# third-party reference material, archives and reports.
+marketing/
+_katmp/
+Claude outputs/
+docs/
+*.zip
+ziSEnLa7
 *.gif
+*.docx
+*.pdf
+
+# the build writes its own
+audit-snapshot.json

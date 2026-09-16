@@ -102,9 +102,18 @@ class RecordingSender implements EmailSender {
 
 /** Dev/test fallback: logs instead of sending. Never throws. */
 export class ConsoleEmailSender implements EmailSender {
+  /**
+   * In production this sender only runs when RESEND_API_KEY is missing. The body
+   * holds a one-time code and a sign-in or password-reset link, and a log is read
+   * by more people and services than the inbox it was meant for, so there the log
+   * says who a message was for and what it was, never what was in it.
+   */
+  constructor(private readonly withholdBody = process.env.NODE_ENV === 'production') {}
+
   async send(msg: EmailMessage): Promise<void> {
+    const body = this.withholdBody ? '(body withheld in production: it holds a one-time code or link)' : (msg.text ?? msg.html);
     // eslint-disable-next-line no-console
-    console.log(`[email:dev] to=${msg.to} | ${msg.subject}\n${msg.text ?? msg.html}`);
+    console.log(`[email:dev] to=${msg.to} | ${msg.subject}\n${body}`);
   }
 }
 

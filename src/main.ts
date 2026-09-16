@@ -528,8 +528,14 @@ async function main(): Promise<void> {
     const msg = document.getElementById('message');
     const prevTpl = TEMPLATES.find((t) => t.id === remappedFrom);
     if (msg && prevTpl) {
-      msg.innerHTML = `design fitted to ${template.name}. <button id="undo-stadium" style="all:unset;color:var(--flare);cursor:pointer;text-decoration:underline;">Switch back to ${prevTpl.name}</button>`;
-      document.getElementById('undo-stadium')?.addEventListener('click', () => {
+      // Built from nodes: a custom stadium's name is whatever its author typed.
+      msg.textContent = `design fitted to ${template.name}. `;
+      const undo = document.createElement('button');
+      undo.id = 'undo-stadium';
+      undo.style.cssText = 'all:unset;color:var(--flare);cursor:pointer;text-decoration:underline;';
+      undo.textContent = `Switch back to ${prevTpl.name}`;
+      msg.appendChild(undo);
+      undo.addEventListener('click', () => {
         stadiumSel.value = remappedFrom!;
         stadiumSel.dispatchEvent(new Event('change'));
       });

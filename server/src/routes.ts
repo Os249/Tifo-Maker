@@ -1,6 +1,6 @@
 import { randomInt } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, sep } from 'node:path';
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
 import rateLimit from '@fastify/rate-limit';
 import helmet from '@fastify/helmet';
@@ -18,6 +18,12 @@ import type { AiEventsRepository, AiUsageRepository, AuthRepository, DesignRepos
 import { registerAiRoutes, verifyUnlock } from './aiRoutes';
 import { emailHealth, type EmailSender } from './email';
 import { button, codeBox, layoutEmail, para, smallPrint, textFooter } from './emailLayout';
+import { proxyModeFrom, trustProxyFor, viaCloudflare } from './proxyTrust';
+import { RESET_TO_ADDRESS, SendBudget, VERIFY_BY_ACCOUNT, VERIFY_TO_ADDRESS } from './sendBudget';
+import { stripImageMetadata } from './imageMeta';
+import { attachSecurityMonitor, maskEmail, type SocMonitor } from './soc';
+import { RETENTION_DAYS } from './socRepo';
+import { securityPosture } from './posture';
 import type { StadiumSubmissionRepository } from './stadiumRepo';
 import type { AdminStatsRepository } from './statsRepo';
 import { buildVisit, isSocialHost, type TrafficRepository } from './trafficRepo';
@@ -62,8 +68,28 @@ const cleanTitle = (v: unknown, fallback: string): string => {
   return (t || fallback).slice(0, MAX_TITLE);
 };
 // Pragmatic email check; real validation is delivery of the verification email.
-const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+/**
+ * An address we are willing to send to, or to print as a link.
+ *
+ * The domain half must be a real hostname: letters (any script), digits and
+ * hyphens in dot-separated labels, ending in a letter. The old pattern took any
+ * non-space characters, so "dev@example.com?bcc=attacker%40evil.example&body=…"
+ * was a valid feedback reply address, and the admin's "reply" link opened a mail
+ * with a hidden BCC and the attacker's text pre-filled.
+ */
+const EMAIL = /^[^\s@<>()[\],;:"\\]+@(?:[\p{L}\p{N}](?:[\p{L}\p{N}-]{0,61}[\p{L}\p{N}])?\.)+\p{L}[\p{L}\p{N}-]{0,62}$/u;
 const MAX_EMAIL = 254;
+
+/** Request URLs as they may be logged: one-time secrets in the query replaced. */
+export const redactUrl = (url: string): string =>
+  url.replace(/([?&](?:token|code|password|key|secret|unlock)=)[^&#]*/gi, '$1[redacted]');
+
+declare module 'fastify' {
+  interface FastifyInstance {
+    /** Resolves once every response-independent task (e.g. a reset email) has finished. */
+    drainBackground(): Promise<void>;
+  }
+}
 const MAX_THUMB_BYTES = 128 * 1024;
 const MAX_PHOTO_BYTES = 2 * 1024 * 1024; // real photos, resized client-side before upload
 // A full 60k design gzips to a few hundred bytes, but base64 of (cells + a
@@ -136,6 +162,8 @@ export interface AppOptions {
   rateLimit?: boolean;
   /** Fastify request logging. */
   logger?: boolean;
+  /** Where request logs go when logger is on. Tests capture them; production uses stdout. */
+  logStream?: { write(line: string): void };
   /** Optional anonymous-analytics sink. When absent, event endpoints no-op. */
   events?: EventsRepository;
   /** Usernames with moderator privileges (from ADMIN_USERNAMES). Case-insensitive. */
@@ -168,6 +196,10 @@ export interface AppOptions {
    * the same account. Defaults to a minute; tests shorten it rather than wait.
    */
   verifyResendCooldownMs?: number;
+  /** Security monitor behind /admin#security. When present, /api/admin/soc is enabled. */
+  soc?: SocMonitor;
+  /** Which store the repositories use, for the posture panel. */
+  database?: 'postgres' | 'memory';
 }
 
 export async function buildApp(
@@ -177,27 +209,78 @@ export async function buildApp(
   options: AppOptions = {},
 ): Promise<FastifyInstance> {
   // Behind a reverse proxy, req.ip must come from X-Forwarded-For or EVERY request
-  // looks like it came from the proxy — which silently collapses per-IP rate limiting
-  // into a single global bucket (one abuser then locks out the whole site) and makes
-  // visitor counting meaningless. But trusting the header when there is NO proxy lets
-  // anyone spoof their address, so this is deliberately explicit:
-  //   TRUST_PROXY=0  → never trust (direct exposure)
-  //   TRUST_PROXY=<n> → trust n proxy hops: 1 = Railway alone, 2 = Cloudflare → Railway
-  //   unset          → on in production (Railway always terminates at its edge), off in dev/tests
-  const tp = process.env.TRUST_PROXY;
-  // Hop COUNT, never `true`. `true` trusts every hop, which makes req.ip the
-  // leftmost X-Forwarded-For entry - a value the caller writes - so rotating one
-  // header defeated every rate limit and poisoned the visitor hashing. Expressed
-  // as the predicate Fastify uses internally for a numeric setting: trust the
-  // first n addresses from the socket inward, and nothing beyond them.
-  const hops =
-    tp === '0' ? 0
-      : tp && /^\d+$/.test(tp) ? Number(tp)
-        : tp === undefined ? (process.env.NODE_ENV === 'production' ? 1 : 0)
-          : 1;
-  const trustProxy: boolean | ((addr: string, hop: number) => boolean) =
-    hops === 0 ? false : (_addr: string, hop: number) => hop < hops;
-  const app = Fastify({ logger: options.logger ?? false, bodyLimit: MAX_BODY_BYTES, trustProxy });
+  // looks like it came from the proxy, which collapses per-IP rate limiting into
+  // one global bucket. Trusting the header when there is no proxy lets anyone
+  // spoof their address. The rules, including why Cloudflare is its own mode and
+  // not "2", are in proxyTrust.ts.
+  const proxyMode = proxyModeFrom(process.env.TRUST_PROXY, process.env.NODE_ENV);
+  const trustProxy = trustProxyFor(proxyMode);
+  const app = Fastify({
+    logger: options.logger
+      ? {
+          ...(options.logStream ? { stream: options.logStream } : {}),
+          serializers: {
+            // Fastify's default request log line carries the full URL, and two
+            // of this site's URLs carry one-time secrets: /reset?token= (a
+            // password reset, valid for an hour and not spent until the form is
+            // submitted) and /api/auth/verify?token=. Anyone who could read the
+            // logs could take over an account. The line keeps its shape, so log
+            // searches like @req.url still work, minus the secret.
+            req: (request: FastifyRequest) => ({
+              method: request.method,
+              url: redactUrl(request.url),
+              host: request.host,
+              remoteAddress: request.ip,
+              remotePort: request.socket?.remotePort,
+            }),
+          },
+        }
+      : false,
+    bodyLimit: MAX_BODY_BYTES,
+    trustProxy,
+  });
+
+  // What a finished request meant for security, for /admin#security. Declared
+  // before any route so every one of them is watched. See soc.ts.
+  app.decorateRequest('socNote', null);
+  app.decorateRequest('socActor', null);
+  attachSecurityMonitor(app, options.soc);
+
+  // No stack traces, driver messages or constraint names in a response.
+  //
+  // Without a handler, Fastify answers an unexpected throw with the error's own
+  // message and code, in production too. A Postgres error like "duplicate key
+  // value violates unique constraint ... DETAIL: Key (email)=(someone@...)"
+  // went straight to the caller, naming tables, constraints and another
+  // person's email address. Deliberate client errors (4xx: bad JSON, body too
+  // large, rate limited) keep their message, because it is written for them.
+  app.setErrorHandler((err, req, reply) => {
+    const e = err as { statusCode?: number };
+    const status = typeof e.statusCode === 'number' && e.statusCode >= 400 && e.statusCode < 600 ? e.statusCode : 500;
+    if (status >= 500) {
+      req.log.error({ err }, 'request failed');
+      return reply.code(status).send({ error: 'internal error' });
+    }
+    return reply.code(status).send(err);
+  });
+
+  // Work that must not decide how long a response takes. Password-reset mail is
+  // the case in point: awaiting the provider only when the account exists made
+  // /api/auth/forgot ~150 ms slower for real accounts, which is the enumeration
+  // oracle the identical response body was meant to prevent. Tests and shutdown
+  // wait for these through drainBackground().
+  const background = new Set<Promise<unknown>>();
+  const inBackground = (task: Promise<unknown>): void => {
+    const p = task.catch((err) => app.log.error({ err: String((err as Error)?.message ?? err) }, 'background task failed'));
+    background.add(p);
+    void p.finally(() => background.delete(p));
+  };
+  app.decorate('drainBackground', async (): Promise<void> => {
+    while (background.size) await Promise.allSettled([...background]);
+  });
+  app.addHook('onClose', async () => {
+    while (background.size) await Promise.allSettled([...background]);
+  });
 
   // An empty body is not broken JSON.
   //
@@ -331,18 +414,22 @@ export async function buildApp(
   // username that case-folds onto an allow-listed one, so the pair cannot exist.
   const adminSet = new Set(options.adminUsernames ?? []);
   const adminFolded = new Set((options.adminUsernames ?? []).map((u) => u.toLowerCase()));
-  const isAdminUser = async (userId: string): Promise<boolean> => {
-    if (adminSet.size === 0) return false;
+  /** The username when the account is an allow-listed admin, else null. */
+  const adminNameOf = async (userId: string): Promise<string | null> => {
+    if (adminSet.size === 0) return null;
     const user = await auth.getUserById(userId).catch(() => null);
-    return user ? adminSet.has(user.username) : false;
+    return user && adminSet.has(user.username) ? user.username : null;
   };
+  const isAdminUser = async (userId: string): Promise<boolean> => (await adminNameOf(userId)) !== null;
   const requireAdmin = async (req: FastifyRequest, reply: FastifyReply): Promise<string | null> => {
     const userId = await requireUser(req, reply);
     if (!userId) return null;
-    if (!(await isAdminUser(userId))) {
+    const name = await adminNameOf(userId);
+    if (!name) {
       await reply.code(403).send({ error: 'moderator access required' });
       return null;
     }
+    req.socActor = `@${name}`; // for the audit trail
     return userId;
   };
 
@@ -365,9 +452,15 @@ export async function buildApp(
   const aiAdminPassword = process.env.AI_ADMIN_PASSWORD;
   const adminAccess = async (req: FastifyRequest): Promise<boolean> => {
     const tok = req.headers['x-ai-unlock'];
-    if (typeof tok === 'string' && aiAdminPassword && verifyUnlock(aiAdminPassword, tok)) return true;
+    if (typeof tok === 'string' && aiAdminPassword && verifyUnlock(aiAdminPassword, tok)) {
+      // The token's random id names the session without exposing the token.
+      req.socActor = `admin password (session ${tok.split('.')[2]?.slice(0, 6) ?? '?'})`;
+      return true;
+    }
     const userId = await userOf(req);
-    return userId ? isAdminUser(userId) : false;
+    const name = userId ? await adminNameOf(userId) : null;
+    if (name) req.socActor = `@${name}`;
+    return name !== null;
   };
 
   /** undefined = invalid (reply sent); null = none provided; Buffer = decoded. */
@@ -490,8 +583,9 @@ export async function buildApp(
             path: url,
             query: (req.query ?? {}) as Record<string, unknown>,
             acceptLanguage: one(h['accept-language']),
-            // Present only when Cloudflare (or another edge that sets it) fronts the app.
-            country: one(h['cf-ipcountry']),
+            // Cloudflare's country header, believed only when the request really
+            // came through Cloudflare; otherwise it is just text the caller sent.
+            country: viaCloudflare(proxyMode, h['x-forwarded-for']) ? one(h['cf-ipcountry']) : undefined,
           }),
         );
       } catch {
@@ -583,10 +677,12 @@ export async function buildApp(
       // Both traps answer 200 rather than an error: telling a bot which check it
       // failed is how it learns to pass. A person never sees either path.
       if (typeof body[HONEYPOT] === 'string' && body[HONEYPOT] !== '') {
+        req.socNote = { kind: 'bot_trap' };
         return reply.code(200).send({ ok: true });
       }
       const elapsed = Number(body.elapsedMs);
       if (!Number.isFinite(elapsed) || elapsed < MIN_FILL_MS) {
+        req.socNote = { kind: 'bot_trap' };
         return reply.code(200).send({ ok: true });
       }
 
@@ -635,13 +731,13 @@ export async function buildApp(
         void options.emailSender
           .send({
             to: options.feedbackTo,
-            subject: `TifoMaker ${body.kind}: ${message.slice(0, 60)}`,
+            subject: `TifoMaker ${body.kind}: ${message.slice(0, 60).replace(/[\r\n\t]+/g, ' ')}`,
             html:
               `<p><b>${esc2(body.kind)}</b>${rawEmail ? ` from ${esc2(rawEmail)}` : ' (no reply address)'}</p>` +
-              `<p style="white-space:pre-wrap">${esc2(message)}</p>` +
-              (body.steps ? `<p><b>What they were doing</b><br><span style="white-space:pre-wrap">${esc2(String(body.steps))}</span></p>` : '') +
+              `<p style="white-space:pre-wrap">${esc2(message.slice(0, 4000))}</p>` +
+              (body.steps ? `<p><b>What they were doing</b><br><span style="white-space:pre-wrap">${esc2(String(body.steps).slice(0, 2000))}</span></p>` : '') +
               `<p style="color:#666;font-size:12px">${esc2(ctxLine)}</p>`,
-            text: `${body.kind}: ${message}\n\n${body.steps ? 'Doing: ' + String(body.steps) + '\n\n' : ''}${ctxLine}`,
+            text: `${body.kind}: ${message.slice(0, 4000)}\n\n${body.steps ? 'Doing: ' + String(body.steps).slice(0, 2000) + '\n\n' : ''}${ctxLine}`,
           })
           .catch(() => {});
       }
@@ -793,6 +889,17 @@ export async function buildApp(
   /** Wrong-guess counters, per user. In-memory, like the AI budget — a second
    *  instance would keep its own, which the link flow makes acceptable. */
   const codeTries = new Map<string, number>();
+  const codeTriesAt = new Map<string, number>();
+  const noteCodeTry = (userId: string, n: number): void => {
+    const now = Date.now();
+    codeTries.set(userId, n);
+    codeTriesAt.set(userId, now);
+    if (codeTries.size > 5000) {
+      for (const [id, at] of codeTriesAt) {
+        if (now - at > VERIFY_CODE_TTL_MS) { codeTries.delete(id); codeTriesAt.delete(id); }
+      }
+    }
+  };
 
   /**
    * Per-account cooldown between verification messages, and the clock behind
@@ -815,6 +922,9 @@ export async function buildApp(
    * on its way, and the first code keeps working.
    */
   const RESEND_COOLDOWN_MS = Math.max(0, options.verifyResendCooldownMs ?? 60_000);
+  /** Per-recipient and per-account mail limits; see sendBudget.ts. */
+  const mailBudget = new SendBudget();
+  const addressKey = (prefix: string, email: string): string => `${prefix}:${email.trim().toLowerCase()}`;
   const lastVerifySentAt = new Map<string, number>();
   const noteVerifySent = (userId: string): void => {
     const now = Date.now();
@@ -986,7 +1096,15 @@ export async function buildApp(
     // The account is real whether or not the mail went out, so registration
     // still succeeds — but it says which, so the UI can offer a resend instead
     // of sending someone to an inbox nothing is coming to.
+    // The signup message counts toward the same per-account and per-address
+    // daily limits as every later one.
+    mailBudget.take(`verify-by:${user.id}`, VERIFY_BY_ACCOUNT);
+    mailBudget.take(addressKey('verify-to', mail), VERIFY_TO_ADDRESS);
     const emailSent = await sendVerifyEmail(req, { id: user.id, email: mail });
+    if (!emailSent) {
+      mailBudget.refund(`verify-by:${user.id}`);
+      mailBudget.refund(addressKey('verify-to', mail));
+    }
     return reply.code(201).send({
       token,
       username: user.username,
@@ -1022,10 +1140,18 @@ export async function buildApp(
     const last = lastVerifySentAt.get(userId);
     const since = last === undefined ? Number.POSITIVE_INFINITY : Date.now() - last;
     if (since < RESEND_COOLDOWN_MS) {
+      req.socNote = { ignore: true }; // a second press, not an attack
       return reply.code(429).send({
         error: 'a message is already on its way',
         retryInSeconds: Math.max(1, Math.ceil((RESEND_COOLDOWN_MS - since) / 1000)),
       });
+    }
+    // Ten verification messages a day per account. Each one is five guesses at
+    // a 6-digit code, so this is also what keeps guessing out of reach.
+    const dailyWait = mailBudget.take(`verify-by:${userId}`, VERIFY_BY_ACCOUNT);
+    if (dailyWait > 0) {
+      req.socNote = { kind: 'mail_refused' };
+      return reply.code(429).send({ error: 'too many verification emails today', retryInSeconds: dailyWait });
     }
     // Claim the slot before the provider call, so two quick presses cannot
     // both get through while the first is still waiting on Resend.
@@ -1033,6 +1159,7 @@ export async function buildApp(
     const sent = await sendVerifyEmail(req, { id: user.id, email: user.email });
     if (!sent) {
       // Don't let someone's failed send lock them out of retrying.
+      mailBudget.refund(`verify-by:${userId}`);
       if (last === undefined) lastVerifySentAt.delete(userId);
       else lastVerifySentAt.set(userId, last);
       // Generic to the caller, exact in the log and on /api/admin/email: the
@@ -1060,14 +1187,16 @@ export async function buildApp(
 
     const tries = codeTries.get(userId) ?? 0;
     if (tries >= VERIFY_CODE_MAX_TRIES) {
+      req.socNote = { kind: 'code_exhausted' };
       return reply.code(429).send({ error: 'too many attempts, request a new code', exhausted: true });
     }
     const ok = await auth.consumeEmailToken(codeHash(userId, code), 'verify_code');
     if (ok !== userId) {
       const next = tries + 1;
-      codeTries.set(userId, next);
+      noteCodeTry(userId, next);
       // Burn the code once the budget is spent, so a new one must be requested.
       if (next >= VERIFY_CODE_MAX_TRIES) await auth.deleteEmailTokens(userId, 'verify_code').catch(() => {});
+      req.socNote = { kind: next >= VERIFY_CODE_MAX_TRIES ? 'code_exhausted' : 'code_failed' };
       return reply.code(400).send({
         error: 'that code is not right or has expired',
         triesLeft: Math.max(0, VERIFY_CODE_MAX_TRIES - next),
@@ -1119,6 +1248,7 @@ export async function buildApp(
     const user = await auth.getUserById(userId).catch(() => null);
     const current = await verifyPassword(currentPassword ?? '', user?.passwordHash ?? await dummyHash());
     if (!user || !currentPassword || !current.ok) {
+      req.socNote = { kind: 'password_change_failed', subject: user?.username };
       return reply.code(401).send({ error: 'current password is incorrect' });
     }
     await auth.setPasswordHash(userId, await hashPassword(newPassword));
@@ -1139,8 +1269,21 @@ export async function buildApp(
     const { email } = (req.body ?? {}) as { email?: string };
     const mail = typeof email === 'string' ? email.trim() : '';
     if (mail && mail.length <= MAX_EMAIL && EMAIL.test(mail)) {
-      const user = await auth.getUserByEmail(mail).catch(() => null);
-      if (user?.email) await sendResetEmail(req, { id: user.id, email: user.email });
+      // The lookup and the send happen after the answer is decided. Awaiting the
+      // provider only for real accounts made them ~150 ms slower, which told a
+      // caller which addresses have accounts; the identical body did not help.
+      // And at most one reset email per address every 5 minutes (5 a day): the
+      // rate limit is per caller, so without this one IP could mail a victim a
+      // reset link every six seconds and spend the provider's daily allowance.
+      inBackground((async () => {
+        const user = await auth.getUserByEmail(mail).catch(() => null);
+        if (!user?.email) return;
+        if (mailBudget.take(addressKey('reset', user.email), RESET_TO_ADDRESS) > 0) {
+          options.soc?.record('mail_refused', { ip: req.ip, route: 'POST /api/auth/forgot', subject: user.username, reqId: String(req.id) });
+          return;
+        }
+        await sendResetEmail(req, { id: user.id, email: user.email });
+      })());
     }
     return reply.code(200).send({ ok: true });
   });
@@ -1173,6 +1316,9 @@ export async function buildApp(
     // to enumerate who has an account here. Verifying against a dummy spends the
     // same time on an address that has never registered.
     const check = await verifyPassword(password ?? '', user?.passwordHash ?? await dummyHash());
+    // The account a sign-in was aimed at, for the Security tab: its public
+    // @name when it exists, nothing when it does not (what was typed stays out).
+    req.socNote = { subject: user?.username };
     if (!user || !password || !check.ok) {
       return reply.code(401).send({ error: 'invalid credentials' });
     }
@@ -1217,8 +1363,35 @@ export async function buildApp(
       return reply.code(400).send({ error: 'a valid email is required' });
     }
     const version = typeof acceptedVersion === 'string' ? acceptedVersion.slice(0, 32) : null;
+    // Every call here mails a code to whatever address it names, so without
+    // limits one signed-in account could mail any stranger over and over. And an
+    // address that already has an account answers 409, which a person changing
+    // their email needs to be told, so each attempt costs the account one of its
+    // ten daily emails whatever the answer: otherwise a signed-in script could
+    // test every address on a mailing list for free.
+    const byWait = mailBudget.take(`verify-by:${userId}`, VERIFY_BY_ACCOUNT);
+    if (byWait > 0) {
+      req.socNote = { kind: 'mail_refused' };
+      return reply.code(429).send({ error: 'too many verification emails today', retryInSeconds: byWait });
+    }
+    const holder = await auth.getUserByEmail(mail).catch(() => null);
+    if (holder && holder.id !== userId) {
+      return reply.code(409).send({ error: 'email already in use' });
+    }
+    // At most one message a minute and five a day to one address. Checked before
+    // anything changes, so a refusal leaves the account exactly as it was.
+    const toWait = mailBudget.take(addressKey('verify-to', mail), VERIFY_TO_ADDRESS);
+    if (toWait > 0) {
+      mailBudget.refund(`verify-by:${userId}`); // nothing was sent and nothing was learned
+      req.socNote = { kind: 'mail_refused' };
+      return reply.code(429).send({ error: 'too many emails to that address, try again later', retryInSeconds: toWait });
+    }
     const ok = await auth.setEmail(userId, mail, version);
-    if (!ok) return reply.code(409).send({ error: 'email already in use' });
+    if (!ok) {
+      // Taken between the lookup and the write. Nothing went to the address.
+      mailBudget.refund(addressKey('verify-to', mail));
+      return reply.code(409).send({ error: 'email already in use' });
+    }
     // Send the verification link for the newly added/changed email, server-side,
     // so it never depends on a separate client call.
     await sendVerifyEmail(req, { id: userId, email: mail });
@@ -1416,9 +1589,17 @@ export async function buildApp(
       if (buf.byteLength === 0 || buf.byteLength > MAX_PHOTO_BYTES) {
         return reply.code(400).send({ error: `image must decode to 1..${MAX_PHOTO_BYTES} bytes (resize before upload)` });
       }
+      // Only real JPEG/PNG/WebP, and never with its metadata: a photo sent
+      // straight to the API kept its EXIF GPS position, served to anyone who
+      // could see the design. See imageMeta.ts.
+      const clean = stripImageMetadata(buf);
+      if (!clean) {
+        req.socNote = { kind: 'upload_refused' };
+        return reply.code(400).send({ error: 'photo must be a JPEG, PNG or WebP image' });
+      }
       const w = Number(body.width) || 0;
       const h = Number(body.height) || 0;
-      const photoId = await repo.addPhoto(id, userId, buf, w, h, body.caption ?? null);
+      const photoId = await repo.addPhoto(id, userId, clean, w, h, typeof body.caption === 'string' ? body.caption.slice(0, 280) : null);
       if (!photoId) return reply.code(404).send({ error: 'not found or not yours' });
       return { photoId };
     },
@@ -1562,6 +1743,48 @@ export async function buildApp(
       return reply.code(502).send({ ok: false, error: String((err as Error)?.message ?? err).slice(0, 400) });
     }
   });
+
+  // ---------- security operations: /admin#security ----------
+  // One read for the whole tab: whether anything is firing, the counts behind
+  // it, the admin audit trail, the alerts sent, and the posture checklist.
+  // Everything in it is already aggregate or hashed; see soc.ts and socRepo.ts.
+  if (options.soc) {
+    const soc = options.soc;
+    app.get('/api/admin/soc', async (req, reply) => {
+      if (!(await adminAccess(req))) return reply.code(403).send({ error: 'admin access required' });
+      await soc.flush(); // include the last few seconds, not just what the timer wrote
+      const [summary, audit, alerts] = await Promise.all([soc.summary(), soc.auditTrail(60), soc.alerts(30)]);
+      return reply.header('cache-control', 'no-store').send({
+        generatedAt: new Date().toISOString(),
+        rules: soc.status(),
+        summary,
+        recent: soc.recent(80),
+        audit,
+        alerts,
+        alertsTo: soc.alertTo ? maskEmail(soc.alertTo) : null,
+        retentionDays: RETENTION_DAYS,
+        keyStable: soc.keyInfo.stable,
+        posture: securityPosture({
+          env: process.env,
+          nodeVersion: process.version,
+          uid: typeof process.getuid === 'function' ? process.getuid() : null,
+          rateLimit: !!options.rateLimit,
+          database: options.database ?? 'memory',
+          email: options.emailSender ? emailHealth() : null,
+          soc: { alertTo: soc.alertTo, keyStable: soc.keyInfo.stable, lastWriteError: soc.lastWriteError },
+        }),
+      });
+    });
+    // Proves the address and the provider before an attack does. Answers 200
+    // either way: a refusal here is a setup problem, not a server error, and
+    // counting it as one would trip the error-spike alert it is testing.
+    app.post('/api/admin/soc/test-alert', options.rateLimit ? { config: { rateLimit: { max: 3, timeWindow: '10 minutes' } } } : {}, async (req, reply) => {
+      if (!(await adminAccess(req))) return reply.code(403).send({ error: 'admin access required' });
+      const result = await soc.sendTestAlert();
+      if (!result.ok) req.socActor = null; // nothing was sent, so nothing to audit
+      return reply.code(200).send(result);
+    });
+  }
 
   // Photo verification queue.
   app.get('/api/admin/photos/unverified', async (req, reply) => {
@@ -1866,9 +2089,12 @@ export async function buildApp(
       { cells: new Uint8Array(cells), palette: body.palette as string[], seatMapRef: { id: tpl.id, version: tpl.version } },
       map,
       {
-        designTitle: body.title || 'Tifo',
+        // Capped like every other title. It was the one uncapped string on this
+        // anonymous route: pdfkit flows a long title across pages synchronously,
+        // and a 60 KB title held the only event loop for 6 seconds.
+        designTitle: cleanTitle(body.title, 'Tifo'),
         stadiumName: tpl.name,
-        cardsPerBag: body.cardsPerBag ?? 100,
+        cardsPerBag: Number.isFinite(Number(body.cardsPerBag)) ? Math.min(10_000, Math.max(1, Math.round(Number(body.cardsPerBag)))) : 100,
         // pdfkit flows this text and auto-adds pages, so an oversized name is
         // quadratic synchronous CPU on the only thread the server has. Measured
         // 8s from one 20KB entry; longer ones run for minutes.
@@ -2224,7 +2450,7 @@ export async function buildApp(
         .replace(/<title>[\s\S]*?<\/title>/gi, '')
         .replace(/<meta[^>]+(?:property|name)=["'](?:og:|twitter:)[^"']*["'][^>]*>\s*/gi, '')
         .replace(/<link[^>]+rel=["']canonical["'][^>]*>\s*/gi, '');
-      return injectOnce(stripped, /<head>/i, `<head>\n    ${cardTags(req, o)}`);
+      return injectOnce(stripped, /<head>/i, (m) => `${m}\n    ${cardTags(req, o)}`);
     };
     /**
      * Insert a built block into a page WITHOUT letting its content be reinterpreted.
@@ -2243,8 +2469,14 @@ export async function buildApp(
      * element without having to restate its attributes — restating them is how
      * adding data-i18n to #grid-loading silently switched the crawler feed off.
      */
-    const injectOnce = (haystack: string, pattern: RegExp, replacement: string): string =>
-      haystack.replace(pattern, (m) => replacement.replace(/\$&/g, m));
+    // The insert is built by a function from the match, so no `$` in it is ever
+    // special. The old version ran `replacement.replace(/\$&/g, m)` over the
+    // whole block, titles included: a design called "Ultras $& Co" put a copy of
+    // the matched tag into every page that listed it (a duplicate
+    // #grid-loading on /community that left the loader stuck, <head> inside
+    // share titles), and a title of repeated $& added 4 KB per card.
+    const injectOnce = (haystack: string, pattern: RegExp, insert: (match: string) => string): string =>
+      haystack.replace(pattern, (m) => insert(m));
 
     const esc = (s: string): string =>
       s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -2327,7 +2559,7 @@ export async function buildApp(
       const html = injectOnce(
         indexHtml.replace(/<title>.*?<\/title>/i, ''),
         /<head>/i,
-        `<head>\n    ${meta}`,
+        (m) => `${m}\n    ${meta}`,
       );
       return reply.type('text/html').send(html);
     });
@@ -2457,7 +2689,7 @@ export async function buildApp(
         const withFeed = injectOnce(
           communityHtml,
           /<div class="grid-loading" id="grid-loading"[^>]*>/i,
-          `${seo}$&`,
+          (m) => `${seo}${m}`,
         );
         const html = withCard(withFeed, req, {
           title: 'The tifo community: displays from supporters worldwide',
@@ -2578,7 +2810,22 @@ export async function buildApp(
 
     // index:false so the static plugin doesn't auto-serve index.html at '/'
     // (we serve the landing there instead); assets still resolve by path.
-    await app.register(fastifyStatic, { root: staticDir, wildcard: false, index: false });
+    const hashedAssets = join(staticDir, 'assets') + sep;
+    await app.register(fastifyStatic, {
+      root: staticDir,
+      wildcard: false,
+      index: false,
+      // Vite names every file under /assets after a hash of its contents, so a
+      // changed file is a new URL and the old one can be cached for good. The
+      // plugin's default is max-age=0, which made the browser re-ask for every
+      // script, stylesheet and font on every page view: 26 requests for the home
+      // page and 109 for /community, each counted by the 300-a-minute limit, so a
+      // supporter who opened /community three times in a minute was locked out by
+      // their own browser, and the security log filled with them.
+      setHeaders: (reply, filePath) => {
+        if (filePath.startsWith(hashedAssets)) reply.header('cache-control', 'public, max-age=31536000, immutable');
+      },
+    });
     // Unknown paths get a REAL 404. Previously this served the editor with a 200,
     // which meant every mistyped link and every vulnerability probe (/.git/config,
     // /wp-login.php — hundreds a week) looked to Google like a real page, producing

@@ -12,25 +12,21 @@
  *  - once they press the toggle, that is the answer until they change it. An
  *    explicit choice outranks the system, on every page and every visit.
  *
- * The attribute itself is set by a tiny inline script in each page's head (see
- * THEME_BOOT), because a module loads too late: the page would paint white and
- * then snap to dark, which is worse than not having the feature at all. This
- * module handles only what happens after that first paint.
+ * The attribute itself is set by /theme-boot.js (public/theme-boot.js), a tiny
+ * classic script at the top of each page's head, because a module loads too
+ * late: the page would paint white and then snap to dark, which is worse than
+ * not having the feature at all. This module handles only what happens after
+ * that first paint.
  */
 export type Scheme = 'light' | 'dark';
 
 const KEY = 'tifo_theme_v1';
 const DARK_QUERY = '(prefers-color-scheme: dark)';
 
-/**
- * Inlined into every public page's <head> and run before first paint. Kept in
- * step with stored() and systemScheme() below by hand — it is four lines, and
- * the alternative is a flash of the wrong colour on every load.
- */
-export const THEME_BOOT =
-  `(function(){try{var t=localStorage.getItem('${KEY}');` +
-  `if(t!=='light'&&t!=='dark')t=matchMedia('${DARK_QUERY}').matches?'dark':'light';` +
-  `document.documentElement.setAttribute('data-theme',t);}catch(e){}})();`;
+// public/theme-boot.js repeats stored() and systemScheme() below in plain ES5,
+// kept in step by hand: it is four lines, and it cannot import anything. It is a
+// file rather than an inline <script> because the Content-Security-Policy allows
+// scripts from this origin only, and it blocked the inline copy on every load.
 
 const stored = (): Scheme | null => {
   try {

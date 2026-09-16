@@ -1,0 +1,96 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  # New advisories are published whether or not anyone pushes, so the
+  # dependency and secret checks also run every Monday morning.
+  schedule:
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+# Read-only unless a job asks for more. Every job below runs third-party code
+# (npm packages and their install scripts); with a read/write token, one bad
+# package could push to main, and Railway deploys main.
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+
+    # Real Postgres so the pg + social paths run in CI. The memory-only suite
+    # missed a JSONB round-trip bug in remix; this prevents that class of bug.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: tifo_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/tifo_test
+
+    steps:
+      # Actions are pinned to a commit, not a tag: a tag can be moved to other
+      # code after the fact, a commit cannot. Dependabot keeps the pins current.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Do not leave the token in .git/config while npm runs install scripts.
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+
+      - name: Install dependencies (exactly the lockfile)
+        run: npm ci --no-audit --no-fund
+
+      - name: Apply database schema
+        run: psql "$DATABASE_URL" -f server/schema.sql
+
+      - name: Typecheck + build
+        run: npm run build
+
+      - name: Server tests (Postgres + social)
+        run: npm run test:server
+
+      - name: Security regression tests
+        run: npm run test:security
+
+      - name: Security operations (SOC) tests
+        run: npm run test:soc
+
+      - name: Email tests
+        run: npm run test:email
+
+      - name: Deployment checks (Node support window, image, CI)
+        run: npm run test:deploy
+
+  security-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+
+      - name: No credentials in tracked files
+        run: node scripts/secret-scan.mjs
+
+      # Production packages only: the dev toolchain (Vite, esbuild) never runs
+      # on the server. Reads the lockfile, so nothing is installed or executed.
+      - name: No known high or critical advisories in production dependencies
+        run: npm audit --omit=dev --audit-level=high --package-lock-only

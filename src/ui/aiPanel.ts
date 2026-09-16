@@ -30,7 +30,7 @@ import { isSignedIn, fetchMe, resendVerification } from '../net/api';
 import { openAuthModal } from './authModal';
 import { openAddEmailModal } from './openAddEmailModal';
 
-import { t, tv } from './i18n';
+import { t, tErr, tv } from './i18n';
 // Auto-resend the verification email at most once per session when AI is blocked.
 let verifyResent = false;
 
@@ -567,6 +567,7 @@ export function mountAiPanel(deps: AiPanelDeps): void {
           const res = await resendVerification().catch(() => null);
           if (res?.ok && res.alreadyVerified) setError(t('ai.verify.nowVerified'), [tryAgain]);
           else if (res?.ok) setError(t('ai.verify.sent'), [enterCode]);
+          else if (res?.status === 429 && res.error === 'too many verification emails today') setError(tErr(res.error), [enterCode]);
           else if (res?.status === 429) setError(t('ai.verify.onItsWay'), [enterCode]);
           else setError(t('ai.verify.notSent'), [enterCode]);
         } else {

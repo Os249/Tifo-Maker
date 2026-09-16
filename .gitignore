@@ -6,10 +6,12 @@ dist/
 out/
 preview-out/
 
-# environment / secrets
-.env
-.env.local
-.env.*.local
+# environment / secrets: every variant (.env.production, .env.backup, .envrc),
+# except the documented template
+.env*
+!.env.example
+*.pem
+*.key
 
 # editor / OS
 .DS_Store
@@ -20,6 +22,10 @@ preview-out/
 # temp
 *.gif
 /tmp/
+# Vite writes this beside its config when a build is interrupted; one was committed.
+vite.config.ts.timestamp-*
+# Archives are how a whole folder (and whatever was in it) gets committed by accident.
+*.zip
 
 # local scratch: stitched aerial tiles, not redistributable
 scratch-aerial/
@@ -29,3 +35,6 @@ scratch-aerial/
 # of applied once, and the fix it carried silently never reached the code.
 *.patch
 *.bundle
+
+# written by the Docker build, read by /admin#security
+audit-snapshot.json

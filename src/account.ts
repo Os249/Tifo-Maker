@@ -22,7 +22,7 @@ import {
   deleteAccount,
   signOut,
 } from './net/api';
-import { applyDom, getLang, initLang, t, tv } from './ui/i18n';
+import { applyDom, getLang, initLang, t, tErr, tv } from './ui/i18n';
 import { POLICY_VERSION } from './ui/authModal';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string): T | null => document.getElementById(id) as T | null;
@@ -152,6 +152,11 @@ $('ac-resend')?.addEventListener('click', async () => {
       return say(msg, t('ac.verify.done'), 'ok');
     }
     if (res.ok) return say(msg, tv('ac.verify.resent', { email: me?.email ?? '' }), 'ok');
+    // The daily cap is not a cooldown: waiting a minute will not help, and the
+    // "already on its way" wording would be wrong.
+    if (res.status === 429 && res.error === 'too many verification emails today') {
+      return say(msg, tErr(res.error), 'info');
+    }
     // A cooldown is not a failure — the message they are waiting for is already
     // on its way, and pressing again would invalidate the code in it.
     if (res.status === 429 && res.retryInSeconds) {

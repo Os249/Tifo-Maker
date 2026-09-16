@@ -100,9 +100,9 @@ function premiumExhausted(): boolean {
   rollPremiumDay();
   return premiumCount >= DAILY_BUDGET;
 }
-function notePremiumCall(): void {
+function notePremiumCall(calls = 1): void {
   rollPremiumDay();
-  premiumCount += 1;
+  premiumCount += calls;
 }
 /** Busy-retry countdown with a little jitter so retries don't stampede the same second. */
 function busyRetrySec(): number {
@@ -274,6 +274,8 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
     if (!pw || !safeEqual(pw, adminPassword)) return reply.code(401).send({ error: 'incorrect password' });
     const exp = Date.now() + UNLOCK_TTL_MS;
     const token = signUnlock(adminPassword, exp);
+    // Names this admin session in the audit trail by the token's random id.
+    req.socActor = `admin password (session ${token.split('.')[2]?.slice(0, 6) ?? '?'})`;
     // The same token as a cookie, for the one thing a header cannot do: let a
     // <script src> and a browser navigation prove who they are, so /admin.js
     // can stop being public. HttpOnly, so script cannot read it back out;
@@ -530,7 +532,12 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
     let source: 'model' | 'original' = 'original';
     if (activeProvider() === 'none') {
       notes.push('No AI provider configured: design left unchanged.');
+    } else if (premiumExhausted()) {
+      // The critic is a premium call like any other. It used to skip the daily
+      // budget entirely, so it kept spending once generation had stopped.
+      notes.push('Critique resting: the daily AI budget is spent. Design left unchanged.');
     } else {
+      notePremiumCall();
       // Portrait assetRefs are huge base64 data URLs; the critic sees the rendered
       // image, so send a SLIM spec (assetRef removed) — otherwise the prompt
       // balloons and the model's JSON reply truncates. Re-attach originals after.
@@ -581,6 +588,13 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
       return reply.code(503).send({ error: 'no AI provider configured' });
     }
     const samples = Math.max(1, Math.min(PHOTO_SAMPLE_MAX, Number(b.samples) || PHOTO_SAMPLE_DEFAULT));
+    // Up to eight premium vision calls per request, and none of them used to
+    // count against AI_DAILY_BUDGET: the breaker that stops generation did not
+    // stop this. Every reading now counts.
+    if (premiumExhausted()) {
+      return reply.code(503).send({ error: 'premium AI is resting for today, try again tomorrow', reason: 'busy', retryAfterSec: busyRetrySec() });
+    }
+    notePremiumCall(samples);
     const out = await readGroundPhoto(image, samples);
     // Every reading failed: that is an upstream problem, not an empty photo.
     if (!out.vote.samples) {

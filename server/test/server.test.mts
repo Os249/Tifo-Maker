@@ -214,6 +214,7 @@ async function runSuite(name: string, repo: DesignRepository, auth: AuthReposito
     (await app.inject({ method: 'POST', url: '/api/auth/forgot', payload: { email: 'erin@example.test' } })).statusCode,
     200,
   );
+  await app.drainBackground(); // the reset email goes out after the reply, so known and unknown addresses take the same time
   const resetMail = [...sentEmails].reverse().find((e) => e.to === 'erin@example.test' && e.token);
   assert.ok(resetMail?.token, 'reset email sent');
   assert.equal(

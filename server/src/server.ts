@@ -18,6 +18,8 @@ import { seedTemplates } from './seedTemplates';
 import type { AuthRepository, DesignRepository } from './repo';
 import { envNum } from './env';
 import { logConfigWarnings } from './preflight';
+import { SocMonitor, socKeyFrom } from './soc';
+import { MemorySocRepository, PgSocRepository } from './socRepo';
 
 /**
  * Production bootstrap.
@@ -87,6 +89,15 @@ async function main(): Promise<void> {
 
   let app;
   let seedRepos: { designs: DesignRepository; auth: AuthRepository } | null = null;
+  // One sender for account mail and security alerts, so the email tab's
+  // delivery counts cover both.
+  const emailSender = createEmailSender();
+  const socOptions = {
+    key: socKeyFrom(process.env),
+    sender: emailSender,
+    alertTo: process.env.SECURITY_ALERT_TO,
+    publicUrl: process.env.PUBLIC_URL,
+  };
   if (process.env.DATABASE_URL) {
     const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
     await applySchema(pool);
@@ -122,6 +133,19 @@ async function main(): Promise<void> {
     } catch (e) {
       console.error('[tifo] feedback init failed: in-product reports disabled:', e);
     }
+    // Security monitor. Best-effort like the tables above: if its tables cannot
+    // be created, alerts and recent events still work from memory, history is
+    // not kept, and the Security tab shows the storage error.
+    const socRepo = new PgSocRepository(pool);
+    try {
+      await socRepo.init();
+      await socRepo.purge();
+      // Thirty days, then gone. unref() so the timer never holds the process open.
+      setInterval(() => void socRepo.purge().catch(() => {}), 6 * 60 * 60 * 1000).unref();
+    } catch (e) {
+      console.error('[tifo] security log init failed: history will not be kept:', e);
+    }
+    const soc = new SocMonitor({ ...socOptions, repo: socRepo });
     const pgDesigns = new PgDesignRepository(pool);
     const pgAuth = new PgAuthRepository(pool);
     seedRepos = { designs: pgDesigns, auth: pgAuth };
@@ -141,9 +165,11 @@ async function main(): Promise<void> {
       traffic,
       feedback,
       feedbackTo: process.env.FEEDBACK_TO,
-      emailSender: createEmailSender(),
+      emailSender,
       publicUrl: process.env.PUBLIC_URL,
       verifyResendCooldownMs: envNum('VERIFY_RESEND_COOLDOWN_MS', 60_000, 0, 3_600_000),
+      soc,
+      database: 'postgres',
     });
   } else {
     if (isProd) {
@@ -172,9 +198,11 @@ async function main(): Promise<void> {
       traffic: new MemoryTrafficRepository(),
       feedback: new MemoryFeedbackRepository(),
       feedbackTo: process.env.FEEDBACK_TO,
-      emailSender: createEmailSender(),
+      emailSender,
       publicUrl: process.env.PUBLIC_URL,
       verifyResendCooldownMs: envNum('VERIFY_RESEND_COOLDOWN_MS', 60_000, 0, 3_600_000),
+      soc: new SocMonitor({ ...socOptions, repo: new MemorySocRepository() }),
+      database: 'memory',
     });
   }
 
@@ -184,6 +212,18 @@ async function main(): Promise<void> {
 
   const port = envNum('PORT', 8787, 1, 65535);
   await app.listen({ port, host: '0.0.0.0' });
+
+  // Railway stops the old container with SIGTERM on every deploy. Without a
+  // handler Node exits on the spot: requests in flight are cut, a reset email
+  // queued after its reply is never sent, and the last seconds of the security
+  // log are lost. Close properly, but never hang a deploy waiting for it.
+  for (const signal of ['SIGTERM', 'SIGINT'] as const) {
+    process.once(signal, () => {
+      console.log(`[tifo] ${signal}: closing (in-flight requests, queued email, security log)`);
+      setTimeout(() => process.exit(0), 10_000).unref();
+      app.close().then(() => process.exit(0), () => process.exit(0));
+    });
+  }
   console.log(
     `tifo-maker on :${port} (${process.env.DATABASE_URL ? 'postgres' : 'memory'} repos, ` +
       `${staticDir ? 'serving app + api' : 'api only'}, ` +

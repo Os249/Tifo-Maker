@@ -298,6 +298,7 @@ const codeIn = (m: EmailMessage | undefined): string => /code: (\d{6})/.exec(m?.
   check('well under Gmail\'s 102 KB clipping limit', kb < 30, `${kb.toFixed(1)} KB`);
   check('the plain-text part has the code, the link and the footer', !!code && new RegExp(`code: ${code}`).test(m.text ?? '') && /https:\/\/tifomaker\.org\/api\/auth\/verify\?token=/.test(m.text ?? '') && /You received this because/.test(m.text ?? ''));
   const forgot = await app.inject({ method: 'POST', url: '/api/auth/forgot', payload: { email: 'echo1@example.com' } });
+  await app.drainBackground(); // sent after the reply
   const reset = mail.sent.at(-1)!;
   check('the password-reset email uses the same layout', forgot.statusCode < 300 && reset !== m && /^<!doctype html>/i.test(reset.html) && /\/reset\?token=/.test(reset.html) && /You received this because/.test(reset.text ?? ''), String(forgot.statusCode));
   await app.close();

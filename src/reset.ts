@@ -10,6 +10,9 @@ initLang();
 applyDom(document);
 
 const token = new URLSearchParams(location.search).get('token') ?? '';
+// The token is a one-time password-reset secret. Keep it in memory only: out of
+// the address bar, the history, and anything that copies the current URL.
+if (token) history.replaceState(null, '', location.pathname);
 const form = document.getElementById('reset-form') as HTMLFormElement;
 const pw = document.getElementById('pw') as HTMLInputElement;
 const pw2 = document.getElementById('pw2') as HTMLInputElement;

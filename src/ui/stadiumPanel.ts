@@ -38,6 +38,7 @@ import { submitStadium, fetchPendingStadiums, reviewStadium, type PendingStadium
 import { buildStadiumImport } from './stadiumImport';
 
 import { t, tl } from './i18n';
+import { escapeHtml } from '../core/escape';
 export interface StadiumPanelDeps {
   root: HTMLElement;
   map: SeatMap;
@@ -49,9 +50,6 @@ export interface StadiumPanelDeps {
 const DISCLAIMER =
   'Community-created template inspired by a real-world venue. This template is not affiliated with, endorsed by, or officially connected to any club, stadium owner, or venue operator.';
 
-function esc(s: string): string {
-  return s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c] ?? c);
-}
 const fmt = (n?: number): string => (typeof n === 'number' ? n.toLocaleString() : '-');
 const INPUT_CSS =
   'width:100%;box-sizing:border-box;padding:6px;border:1px solid var(--line-1);border-radius:var(--r-md);background:var(--bg-1);color:var(--text-1);font:inherit;font-size:11px;';
@@ -192,8 +190,8 @@ export function mountStadiumPanel(deps: StadiumPanelDeps): void {
         'padding:8px;border:1px solid var(--line-1);border-radius:var(--r-md);color:var(--text-1);cursor:pointer;' +
         `background:${isSel ? 'rgba(255,255,255,0.05)' : 'var(--bg-1)'};${isCurrent ? 'border-color:var(--text-2);' : ''}`;
       sel.innerHTML =
-        `<span><b style="font-size:12px;">${esc(tl(e.id) === e.id ? e.meta.name : tl(e.id))}</b><br>` +
-        `<span style="font-size:10px;color:var(--text-3);">${esc(e.meta.type ? tl(e.meta.type) : '')}${e.meta.capacity ? ' · ~' + fmt(e.meta.capacity) : ''}</span></span>` +
+        `<span><b style="font-size:12px;">${escapeHtml(tl(e.id) === e.id ? e.meta.name : tl(e.id))}</b><br>` +
+        `<span style="font-size:10px;color:var(--text-3);">${escapeHtml(e.meta.type ? tl(e.meta.type) : '')}${e.meta.capacity ? ' · ~' + fmt(e.meta.capacity) : ''}</span></span>` +
         `<span style="font-size:10px;color:var(--text-3);white-space:nowrap;">${isCurrent ? `● ${t('sp.current')}` : `${t('sp.load')} →`}</span>`;
       sel.addEventListener('click', () => {
         selectedId = e.id;
@@ -224,12 +222,12 @@ export function mountStadiumPanel(deps: StadiumPanelDeps): void {
       [t('sp.type'), e.meta.type ? tl(e.meta.type) : '-'],
     ];
     infoEl.innerHTML =
-      `<h4 style="margin:0 0 6px;">${esc(tl(e.id) === e.id ? e.meta.name : tl(e.id))}</h4>` +
+      `<h4 style="margin:0 0 6px;">${escapeHtml(tl(e.id) === e.id ? e.meta.name : tl(e.id))}</h4>` +
       rows
         .map(
           ([k, v]) =>
             `<div style="display:flex;justify-content:space-between;font-size:11px;padding:3px 0;border-bottom:1px solid var(--line-1);">` +
-            `<span style="color:var(--text-3);">${k}</span><span style="color:var(--text-1);">${esc(v)}</span></div>`,
+            `<span style="color:var(--text-3);">${k}</span><span style="color:var(--text-1);">${escapeHtml(v)}</span></div>`,
         )
         .join('');
     if (discEl) {
@@ -251,7 +249,7 @@ export function mountStadiumPanel(deps: StadiumPanelDeps): void {
     box.style.cssText =
       'max-width:380px;width:100%;background:var(--bg-1);border:1px solid var(--line-1);border-radius:var(--r-md);padding:18px;color:var(--text-1);box-shadow:0 12px 40px rgba(0,0,0,0.5);';
     box.innerHTML =
-      `<h3 style="margin:0 0 8px;font-size:15px;">${t('sp.changeQ')} “${esc(tl(e.id) === e.id ? e.meta.name : tl(e.id))}”?</h3>` +
+      `<h3 style="margin:0 0 8px;font-size:15px;">${t('sp.changeQ')} “${escapeHtml(tl(e.id) === e.id ? e.meta.name : tl(e.id))}”?</h3>` +
       `<p style="font-size:12px;color:var(--text-2);line-height:1.5;margin:0 0 14px;">${t('sp.changeMsg')}</p>` +
       (e.meta.source === 'community'
         ? `<p class="hint" style="font-size:10px;color:var(--text-3);line-height:1.4;margin:0 0 14px;border-left:2px solid var(--line-1);padding-left:8px;">${DISCLAIMER}</p>`
@@ -331,8 +329,8 @@ export function mountStadiumPanel(deps: StadiumPanelDeps): void {
     const meta = document.createElement('div');
     meta.style.cssText = 'flex:1;min-width:0;';
     meta.innerHTML =
-      `<div style="font-size:11px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(s.name)}</div>` +
-      `<div style="font-size:10px;color:var(--text-3);">${esc(s.country ?? '-')} · ${tiers} tier${tiers === 1 ? '' : 's'}</div>`;
+      `<div style="font-size:11px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(s.name)}</div>` +
+      `<div style="font-size:10px;color:var(--text-3);">${escapeHtml(s.country ?? '-')} · ${tiers} tier${tiers === 1 ? '' : 's'}</div>`;
     const approve = document.createElement('button');
     approve.textContent = t('sp.approve');
     approve.style.cssText = 'font-size:10px;padding:4px 8px;';

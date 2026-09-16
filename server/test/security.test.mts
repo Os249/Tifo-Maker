@@ -166,7 +166,12 @@ async function makeDesign(app: FastifyInstance, token: string, isPublic = false)
 
   // 4. Photos on a PRIVATE design were world-readable while the design 404'd.
   const secret = await makeDesign(app, owner.token, false);
-  const jpeg = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(1024, 3)]).toString('base64');
+  // A small but well-formed JPEG (SOI, JFIF, one scan, EOI): since round three
+  // the server refuses bytes that are not an image it can strip.
+  const jpeg = Buffer.concat([
+    Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]), Buffer.from('JFIF\0', 'latin1'), Buffer.from([1, 1, 0, 0, 1, 0, 1, 0, 0]),
+    Buffer.from([0xff, 0xda, 0x00, 0x08, 1, 1, 0, 0, 0x3f, 0]), Buffer.alloc(1024, 3), Buffer.from([0xff, 0xd9]),
+  ]).toString('base64');
   const up = await app.inject({ method: 'POST', url: `/api/designs/${secret}/photos`, headers: bearer(owner.token), payload: { imageB64: jpeg, caption: 'venue, date, opponent' } });
   assert.equal(up.statusCode, 200, 'the owner can still attach a photo');
   assert.equal((await app.inject({ method: 'GET', url: `/api/designs/${secret}` })).statusCode, 404, 'the design is hidden');
@@ -204,6 +209,7 @@ async function makeDesign(app: FastifyInstance, token: string, isPublic = false)
   await mailApp.inject({ method: 'POST', url: '/api/auth/register', payload: { username: 'mailer', password: 'password1234', email: 'mailer@example.test', acceptedVersion: 'test' } });
   captured.length = 0;
   await mailApp.inject({ method: 'POST', url: '/api/auth/forgot', payload: { email: 'mailer@example.test' }, headers: { host: 'evil.attacker.test' } });
+  await mailApp.drainBackground(); // the reset email is sent after the reply (round three)
   assert.ok(captured.length > 0, 'a reset email was sent');
   assert.ok(!captured[0].includes('evil.attacker.test'), 'the reset link does not follow a forged Host header');
 
@@ -380,7 +386,7 @@ async function makeDesign(app: FastifyInstance, token: string, isPublic = false)
   const prodBare = configWarnings({ NODE_ENV: 'production' } as NodeJS.ProcessEnv).map((w) => w.key);
   assert.deepEqual(
     prodBare.sort(),
-    ['AI_ADMIN_PASSWORD', 'PUBLIC_URL', 'RESEND_API_KEY', 'TRUST_PROXY'],
+    ['AI_ADMIN_PASSWORD', 'PUBLIC_URL', 'RESEND_API_KEY', 'SECURITY_ALERT_TO', 'TRUST_PROXY'],
     'production names what it was not told',
   );
   const silentPortraits = configWarnings({ AI_IMAGE_PROVIDER: 'gemini', AI_ADMIN_PASSWORD: 'x' } as NodeJS.ProcessEnv);
@@ -397,4 +403,386 @@ async function makeDesign(app: FastifyInstance, token: string, isPublic = false)
 
   delete process.env.AI_ADMIN_PASSWORD;
   console.log('audit round two: all assertions passed (login timing, scrypt cost + in-place upgrade, derived unlock key, gated /admin.js, private comments, id validation, one escapeHtml, boot config report)');
+}
+
+// ---------- 2026-09 audit, round three ----------
+//
+// A full pass over the server, the client, the dependencies and the deployment.
+// Same standard as the earlier rounds: each block below is an attack that
+// worked against the code before this round, asserted to fail now.
+{
+  const { stripImageMetadata, sniffImage } = await import('../src/imageMeta');
+  const { proxyModeFrom, trustProxyFor, viaCloudflare, isCloudflareAddress } = await import('../src/proxyTrust');
+  const { redactUrl } = await import('../src/routes');
+  const { ADMIN_JS } = await import('../src/adminPage');
+  const { readFileSync, readdirSync, statSync } = await import('node:fs');
+  const Fastify = (await import('fastify')).default;
+
+  // An email sender that behaves like a real provider: it takes time.
+  const sent: { to: string; subject: string; html: string; text?: string }[] = [];
+  const slowSender = {
+    async send(m: { to: string; subject: string; html: string; text?: string }): Promise<void> {
+      await new Promise((r) => setTimeout(r, 150));
+      sent.push(m);
+    },
+  };
+  const logLines: string[] = [];
+  const auth = new MemoryAuthRepository();
+  const designs = new MemoryDesignRepository((id) => auth.usernameOf(id));
+  const { MemoryFeedbackRepository } = await import('../src/feedbackRepo');
+  const app = await buildApp(designs, auth, templates, {
+    staticDir: process.cwd(),
+    feedback: new MemoryFeedbackRepository(),
+    emailSender: slowSender,
+    logger: true,
+    logStream: { write: (line: string) => { logLines.push(line); } },
+    verifyResendCooldownMs: 0,
+  });
+
+  // ---- HIGH: anonymous CPU exhaustion through the PDF title ----
+  // The one uncapped string on an unauthenticated route: pdfkit flowed it across
+  // pages synchronously. 60 KB held the only event loop for 6.2 s.
+  {
+    const exportWith = async (title: string): Promise<{ status: number; ms: number; pages: number }> => {
+      const started = Date.now();
+      const pdf = await app.inject({
+        method: 'POST', url: '/api/export/pdf',
+        payload: { title, templateId: DEFAULT_TEMPLATE.id, templateVersion: DEFAULT_TEMPLATE.version, palette: PALETTE, cellsGzB64 },
+      });
+      const pages = (pdf.rawPayload.toString('latin1').match(/\/Type \/Page\b/g) ?? []).length;
+      return { status: pdf.statusCode, ms: Date.now() - started, pages };
+    };
+    await exportWith('warm-up'); // the first export loads fonts and compiles; that is not the title's cost
+    const normal = await exportWith('Derby day');
+    const long = await exportWith('W'.repeat(60_000));
+    assert.equal(long.status, 200, 'the export still works');
+    assert.equal(long.pages, normal.pages, `a long title adds no pages (${long.pages} vs ${normal.pages})`);
+    assert.ok(long.ms < Math.max(1500, normal.ms * 4), `a 60 KB title no longer stalls the server (${long.ms} ms vs ${normal.ms} ms for a normal one)`);
+  }
+
+  // ---- MEDIUM: 500s repeated the error's own message ----
+  {
+    const leaky = designs as unknown as { popularTags: () => Promise<never> };
+    const original = leaky.popularTags;
+    leaky.popularTags = async () => {
+      throw Object.assign(new Error('duplicate key value violates unique constraint "users_email_key" DETAIL: Key (email)=(ceo@club.example) already exists'), { code: '23505' });
+    };
+    const r = await app.inject({ method: 'GET', url: '/api/tags' });
+    leaky.popularTags = original;
+    assert.equal(r.statusCode, 500);
+    assert.doesNotMatch(r.body, /duplicate key|users_email_key|ceo@club|23505/, 'no driver message, constraint name or someone else\'s email in the body');
+    const bad = await app.inject({ method: 'POST', url: '/api/auth/login', headers: { 'content-type': 'application/json' }, payload: '{"username":' });
+    assert.equal(bad.statusCode, 400, 'a deliberate client error keeps its status');
+    assert.match(bad.body, /FST_ERR_CTP_INVALID_JSON_BODY/, '...and its explanation');
+  }
+
+  // ---- MEDIUM: one-time tokens in the request log ----
+  {
+    await app.inject({ method: 'GET', url: '/reset?token=RESETSECRET0123456789' });
+    await app.inject({ method: 'GET', url: '/api/auth/verify?token=VERIFYSECRET0123456789' });
+    const joined = logLines.join('');
+    assert.ok(joined.includes('/api/auth/verify'), 'requests are still logged');
+    assert.doesNotMatch(joined, /RESETSECRET|VERIFYSECRET/, 'but the tokens in them are not');
+    assert.equal(redactUrl('/reset?token=abc&lang=ar'), '/reset?token=[redacted]&lang=ar');
+    assert.equal(redactUrl('/community?search=token'), '/community?search=token', 'a word in a search is not a secret');
+    const resetPage = readFileSync('src/reset.ts', 'utf8');
+    assert.match(resetPage, /history\.replaceState\(/, 'the reset page takes the token out of the address bar');
+
+    // With no RESEND_API_KEY in production the console sender "delivers" mail by
+    // printing it, one-time code and reset link included, into the same log.
+    const { ConsoleEmailSender } = await import('../src/email');
+    const printed: string[] = [];
+    const realLog = console.log;
+    console.log = (...args: unknown[]) => { printed.push(args.join(' ')); };
+    try {
+      const msg = { to: 'fan@example.test', subject: 'Reset your TifoMaker password', html: '<a href="https://tifomaker.org/reset?token=PRODSECRET42">reset</a>', text: 'https://tifomaker.org/reset?token=PRODSECRET42 code: 918273' };
+      await new ConsoleEmailSender(true).send(msg);
+      await new ConsoleEmailSender(false).send(msg);
+    } finally {
+      console.log = realLog;
+    }
+    assert.match(printed[0], /fan@example\.test/, 'production still records who a message was for');
+    assert.doesNotMatch(printed[0], /PRODSECRET42|918273/, 'but not the link or the code');
+    assert.match(printed[1], /PRODSECRET42/, 'development keeps the whole message, which the e2e tests read');
+  }
+
+  // ---- MEDIUM: reset mail as an enumeration oracle, and as a mail bomb ----
+  {
+    await reg(app, 'known_member');
+    const time = async (email: string): Promise<number> => {
+      const t0 = process.hrtime.bigint();
+      await app.inject({ method: 'POST', url: '/api/auth/forgot', payload: { email } });
+      return Number(process.hrtime.bigint() - t0) / 1e6;
+    };
+    const median = (xs: number[]): number => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)];
+    const known: number[] = [];
+    const unknown: number[] = [];
+    for (let i = 0; i < 5; i++) {
+      known.push(await time('known_member@example.test'));
+      unknown.push(await time(`nobody${i}@example.test`));
+    }
+    await app.drainBackground();
+    assert.ok(Math.abs(median(known) - median(unknown)) < 60, `forgot answers in the same time either way (${median(known).toFixed(1)} vs ${median(unknown).toFixed(1)} ms)`);
+    const toKnown = sent.filter((m) => m.to === 'known_member@example.test' && /Reset/.test(m.subject));
+    assert.equal(toKnown.length, 1, `five requests in a row mail the address once, not five times (got ${toKnown.length})`);
+  }
+
+  // ---- MEDIUM: a signed-in account mailing strangers through "change email" ----
+  {
+    const attacker = await reg(app, 'mailer_attacker');
+    const before = sent.filter((m) => m.to === 'victim@example.test').length;
+    const statuses: number[] = [];
+    for (let i = 0; i < 6; i++) {
+      const target = i % 2 === 0 ? 'victim@example.test' : `decoy${i}@example.test`;
+      statuses.push((await app.inject({ method: 'POST', url: '/api/account/email', headers: bearer(attacker.token), payload: { email: target } })).statusCode);
+    }
+    const toVictim = sent.filter((m) => m.to === 'victim@example.test').length - before;
+    assert.equal(toVictim, 1, `alternating addresses still reaches the victim once a minute at most (got ${toVictim})`);
+    assert.ok(statuses.includes(429), `the repeats are refused, not silently sent (${statuses.join(',')})`);
+
+    // The same route answers 409 for an address that already has an account.
+    // Those answers used to be free, so one account could test a whole mailing
+    // list. Each now costs one of the account's ten daily emails.
+    await auth.createUser('listed_member', 'not-a-real-hash', { email: 'listed@example.test', acceptedVersion: null });
+    const prober = await reg(app, 'email_prober'); // the signup email is one of the ten
+    const probes: number[] = [];
+    for (let i = 0; i < 12; i++) {
+      probes.push((await app.inject({ method: 'POST', url: '/api/account/email', headers: bearer(prober.token), payload: { email: 'listed@example.test' } })).statusCode);
+    }
+    assert.equal(probes.filter((c) => c === 409).length, 9, `nine lookups, then the account is out of allowance (${probes.join(',')})`);
+    assert.equal(probes.at(-1), 429);
+  }
+
+  // ---- LOW: unlimited codes per day made code guessing a matter of time ----
+  {
+    const guesser = await reg(app, 'code_guesser');
+    let accepted = 0;
+    for (let i = 0; i < 15; i++) {
+      const r = await app.inject({ method: 'POST', url: '/api/auth/verify/resend', headers: bearer(guesser.token) });
+      if (r.statusCode === 202) accepted++;
+    }
+    // The signup message counts too: ten in a day, so 50 guesses, not 7,200.
+    assert.equal(accepted, 9, `nine resends after the signup email, then the daily cap (got ${accepted})`);
+  }
+
+  // ---- LOW/MEDIUM: photo GPS metadata served to anyone ----
+  {
+    const u8 = (...parts: (number[] | string)[]): Buffer =>
+      Buffer.concat(parts.map((p) => (typeof p === 'string' ? Buffer.from(p, 'latin1') : Buffer.from(p))));
+    const seg = (marker: number, payload: Buffer): Buffer => {
+      const h = Buffer.from([0xff, marker, 0, 0]);
+      h.writeUInt16BE(payload.length + 2, 2);
+      return Buffer.concat([h, payload]);
+    };
+    const jpeg = Buffer.concat([
+      Buffer.from([0xff, 0xd8]),
+      seg(0xe0, u8('JFIF\0', [1, 1, 0, 0, 1, 0, 1, 0, 0])),
+      seg(0xe1, u8('Exif\0\0', 'GPSLatitude 24.713552 GPSLongitude 46.675297')),
+      seg(0xed, u8('Photoshop 3.0\0', 'IPTC by-line: A Supporter')),
+      seg(0xfe, u8('taken at home')),
+      seg(0xdb, Buffer.alloc(65, 1)),
+      seg(0xc0, Buffer.from([8, 0, 1, 0, 1, 1, 1, 0x11, 0])),
+      seg(0xc4, Buffer.alloc(29, 0)),
+      seg(0xda, Buffer.from([1, 1, 0, 0, 0x3f, 0])),
+      Buffer.from([0x12, 0xff, 0x00, 0x34, 0xff, 0xd0, 0x56]),
+      Buffer.from([0xff, 0xd9]),
+    ]);
+    const cleanJpeg = stripImageMetadata(jpeg)!;
+    assert.ok(cleanJpeg, 'a JPEG parses');
+    assert.doesNotMatch(cleanJpeg.toString('latin1'), /Exif|GPS|Photoshop|IPTC|taken at home/, 'EXIF, IPTC and comments are gone');
+    assert.match(cleanJpeg.toString('latin1'), /JFIF/, 'the JFIF header stays');
+    assert.ok(cleanJpeg.subarray(-9).equals(Buffer.from([0x12, 0xff, 0x00, 0x34, 0xff, 0xd0, 0x56, 0xff, 0xd9])), 'scan data is untouched');
+
+    const chunk = (type: string, data: Buffer): Buffer => {
+      const len = Buffer.alloc(4);
+      len.writeUInt32BE(data.length);
+      return Buffer.concat([len, Buffer.from(type, 'latin1'), data, Buffer.alloc(4)]);
+    };
+    const png = Buffer.concat([
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+      chunk('IHDR', Buffer.alloc(13, 1)),
+      chunk('tEXt', u8('Comment\0GPS 24.7135,46.6753')),
+      chunk('eXIf', u8('MM\0*GPS')),
+      chunk('IDAT', Buffer.alloc(10, 7)),
+      chunk('IEND', Buffer.alloc(0)),
+    ]);
+    const cleanPng = stripImageMetadata(png)!;
+    assert.doesNotMatch(cleanPng.toString('latin1'), /GPS|Comment/, 'PNG text and EXIF chunks are gone');
+    assert.match(cleanPng.toString('latin1'), /IHDR[\s\S]*IDAT[\s\S]*IEND/, 'the image chunks stay, in order');
+
+    const riff = (fourcc: string, data: Buffer): Buffer => {
+      const h = Buffer.alloc(8);
+      h.write(fourcc, 0, 'latin1');
+      h.writeUInt32LE(data.length, 4);
+      return Buffer.concat([h, data, data.length % 2 ? Buffer.alloc(1) : Buffer.alloc(0)]);
+    };
+    const webpBody = Buffer.concat([
+      riff('VP8X', Buffer.from([0x08 | 0x04 | 0x10, 0, 0, 0, 0, 0, 0, 0, 0, 0])),
+      riff('VP8L', Buffer.alloc(12, 3)),
+      riff('EXIF', u8('GPSLatitude 24.71')),
+      riff('XMP ', u8('<x:xmpmeta>GPS</x:xmpmeta>')),
+    ]);
+    const webpHead = Buffer.alloc(12);
+    webpHead.write('RIFF', 0, 'latin1');
+    webpHead.writeUInt32LE(4 + webpBody.length, 4);
+    webpHead.write('WEBP', 8, 'latin1');
+    const cleanWebp = stripImageMetadata(Buffer.concat([webpHead, webpBody]))!;
+    assert.doesNotMatch(cleanWebp.toString('latin1'), /GPS|xmpmeta/, 'WebP EXIF and XMP chunks are gone');
+    assert.equal(cleanWebp[20] & 0x0c, 0, 'and VP8X no longer claims to have them');
+    assert.equal(cleanWebp[20] & 0x10, 0x10, 'other flags are kept');
+    assert.equal(cleanWebp.readUInt32LE(4), cleanWebp.length - 8, 'the RIFF size is rewritten');
+    assert.equal(sniffImage(Buffer.from('<svg onload=alert(1)>')), null);
+
+    // Through the real route: what anyone can download is the clean copy.
+    const owner = await reg(app, 'photo_owner');
+    const designId = await makeDesign(app, owner.token, true);
+    const html = await app.inject({ method: 'POST', url: `/api/designs/${designId}/photos`, headers: bearer(owner.token), payload: { imageB64: Buffer.from('<html><script>x</script></html>').toString('base64') } });
+    assert.equal(html.statusCode, 400, 'a file that is not an image is refused');
+    const up = await app.inject({ method: 'POST', url: `/api/designs/${designId}/photos`, headers: bearer(owner.token), payload: { imageB64: jpeg.toString('base64'), caption: 'derby' } });
+    assert.equal(up.statusCode, 200);
+    const served = await app.inject({ method: 'GET', url: `/api/photos/${up.json().photoId}` });
+    assert.equal(served.statusCode, 200);
+    assert.doesNotMatch(served.rawPayload.toString('latin1'), /GPS|Exif/, 'the served photo carries no location');
+  }
+
+  // ---- LOW: "$&" in a title rewrote the pages that list it ----
+  {
+    const owner = await reg(app, 'dollar_amp');
+    const id = await makeDesign(app, owner.token, true);
+    await app.inject({ method: 'PATCH', url: `/api/designs/${id}`, headers: bearer(owner.token), payload: { title: 'Ultras $& Co' } });
+    const community = await app.inject({ method: 'GET', url: '/community' });
+    assert.equal(community.statusCode, 200);
+    assert.equal((community.body.match(/id="grid-loading"/g) ?? []).length, 1, 'one loader on /community, not one per "$&"');
+    assert.match(community.body, /Ultras \$&amp; Co/, 'the title appears as written');
+    const page = await app.inject({ method: 'GET', url: `/d/${id}` });
+    const title = /<title>([^<]*)<\/title>/.exec(page.body)?.[1] ?? '';
+    assert.doesNotMatch(title, /head/, `the share title is the design's, not a copy of <head> (${title})`);
+  }
+
+  // ---- LOW: a feedback reply address that smuggles mail headers ----
+  {
+    const fb = await app.inject({
+      method: 'POST', url: '/api/feedback',
+      payload: { kind: 'bug', message: 'The save button does nothing', email: 'dev@example.com?bcc=attacker%40evil.example&body=send+your+password', elapsedMs: 5000 },
+    });
+    assert.equal(fb.statusCode, 400, 'an address with a query string is not an address');
+    assert.doesNotMatch(ADMIN_JS, /href="mailto:' \+ esc\(/, 'the dashboard no longer builds reply links from raw addresses');
+    assert.match(ADMIN_JS, /function mailtoHref\(/);
+  }
+
+  // ---- LOW: escapers that do not escape quotes, and a raw name in innerHTML ----
+  {
+    const walk = (dir: string): string[] =>
+      readdirSync(dir).flatMap((n) => {
+        const p = `${dir}/${n}`;
+        return statSync(p).isDirectory() ? walk(p) : p.endsWith('.ts') ? [p] : [];
+      });
+    // Any local function or const whose body HTML-escapes: the &amp; table, or
+    // the textContent-then-innerHTML trick that leaves quotes alone.
+    const localEscapers = walk('src')
+      .filter((f) => f !== 'src/core/escape.ts')
+      .filter((f) => {
+        const src = readFileSync(f, 'utf8');
+        return /(?:function\s+\w*esc\w*\s*\(|const\s+\w*esc\w*\s*=)[^\n]*(?:\n[^\n]*){0,4}(?:&amp;|\.innerHTML)/i.test(src);
+      });
+    assert.deepEqual(localEscapers, [], 'every HTML escape is the shared, quote-safe one');
+    assert.doesNotMatch(readFileSync('src/main.ts', 'utf8'), /innerHTML = `design fitted to \$\{template\.name\}/, 'stadium names are not written as HTML');
+  }
+
+  // ---- LOW: premium AI calls that skipped the daily budget ----
+  {
+    const aiSrc = readFileSync('server/src/aiRoutes.ts', 'utf8');
+    const critique = aiSrc.slice(aiSrc.indexOf("app.post('/api/ai/critique'"), aiSrc.indexOf("app.post('/api/stadium/photo'"));
+    const photo = aiSrc.slice(aiSrc.indexOf("app.post('/api/stadium/photo'"));
+    assert.match(critique, /premiumExhausted\(\)[\s\S]*notePremiumCall\(\)/, 'the critic checks and spends the budget');
+    assert.match(photo, /premiumExhausted\(\)[\s\S]*notePremiumCall\(samples\)/, 'each photo reading spends the budget');
+  }
+
+  // ---- MEDIUM (latent): TRUST_PROXY=2 behind Cloudflare trusted a forged hop ----
+  // CLOUDFLARE.md told the operator to set TRUST_PROXY=2 when the orange cloud
+  // goes on. Cloudflare does not stop anyone connecting to Railway directly, and
+  // "2" believed the second hop whoever wrote it: a script that skipped
+  // Cloudflare rotated a fake first X-Forwarded-For entry and was never limited.
+  {
+    const { configWarnings } = await import('../src/preflight');
+    /** How many of 14 logins from ONE real address get past the 10-a-minute limit. */
+    const loginsAllowed = async (trust: string, connectingHop: string): Promise<number> => {
+      const saved = process.env.TRUST_PROXY;
+      process.env.TRUST_PROXY = trust;
+      const a = new MemoryAuthRepository();
+      const probe = await buildApp(new MemoryDesignRepository((id) => a.usernameOf(id)), a, templates, { rateLimit: true });
+      if (saved === undefined) delete process.env.TRUST_PROXY; else process.env.TRUST_PROXY = saved;
+      let allowed = 0;
+      for (let i = 0; i < 14; i++) {
+        const r = await probe.inject({
+          method: 'POST', url: '/api/auth/login', remoteAddress: '10.0.0.5',
+          headers: { 'x-forwarded-for': `203.0.113.${i + 1}, ${connectingHop}` },
+          payload: { username: 'nobody', password: 'wrong password' },
+        });
+        if (r.statusCode !== 429) allowed++;
+      }
+      await probe.close();
+      return allowed;
+    };
+    // Straight to the origin, skipping Cloudflare, rotating a forged first entry.
+    assert.equal(await loginsAllowed('cloudflare', '198.51.100.7'), 10, 'a hop that is not Cloudflare is not believed: one address, one bucket');
+    // Through Cloudflare the entry before its hop is written by Cloudflare: real, distinct visitors.
+    assert.equal(await loginsAllowed('cloudflare', '172.64.3.9'), 14, 'a real Cloudflare hop is believed');
+    assert.ok(isCloudflareAddress('2606:4700::6810:84e5') && !isCloudflareAddress('8.8.8.8') && !isCloudflareAddress('::ffff:8.8.8.8'));
+
+    const ipOf = async (mode: string | undefined, xff: string): Promise<string> => {
+      const probe = Fastify({ trustProxy: trustProxyFor(proxyModeFrom(mode, 'production')) });
+      probe.get('/ip', async (req) => ({ ip: req.ip }));
+      const r = await probe.inject({ method: 'GET', url: '/ip', remoteAddress: '10.0.0.5', headers: { 'x-forwarded-for': xff } });
+      await probe.close();
+      return r.json().ip;
+    };
+    assert.equal(await ipOf(undefined, '203.0.113.99, 198.51.100.7'), '198.51.100.7', 'Railway alone still trusts one hop');
+    assert.equal(await ipOf('0', '203.0.113.99'), '10.0.0.5', 'TRUST_PROXY=0 uses the socket');
+    assert.equal(await ipOf('cloudfare', '203.0.113.99, 198.51.100.7'), '198.51.100.7', 'a typo fails closed to one hop');
+    assert.equal(viaCloudflare(proxyModeFrom('cloudflare', 'production'), '1.2.3.4, 104.16.0.1'), true);
+    assert.equal(viaCloudflare(proxyModeFrom(undefined, 'production'), '1.2.3.4, 104.16.0.1'), false, 'CF-IPCountry is ignored unless Cloudflare mode is on');
+
+    // The operator is told, in the guide and at boot.
+    const guide = readFileSync('CLOUDFLARE.md', 'utf8');
+    assert.doesNotMatch(guide, /^TRUST_PROXY=2\s*$/m, 'the Cloudflare guide no longer says TRUST_PROXY=2');
+    assert.match(guide, /^TRUST_PROXY=cloudflare\s*$/m);
+    const warnFor = (v: string) => configWarnings({ NODE_ENV: 'production', TRUST_PROXY: v } as NodeJS.ProcessEnv).find((w) => w.key === 'TRUST_PROXY');
+    assert.equal(warnFor('2')?.state, 'wrong', 'TRUST_PROXY=2 is flagged at boot');
+    assert.equal(warnFor('cloudfare')?.state, 'wrong', 'and so is a misspelling');
+    assert.equal(warnFor('cloudflare'), undefined);
+    assert.equal(warnFor('1'), undefined);
+  }
+
+  // ---- LOW (availability): every asset revalidated on every page view ----
+  // /assets/* were served max-age=0, so each view of /community re-requested
+  // 109 files and three views a minute tripped the 300-a-minute limit.
+  {
+    const { mkdtempSync, writeFileSync, mkdirSync, copyFileSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const dist = mkdtempSync(`${tmpdir()}/tifo-static-`);
+    for (const f of readdirSync('.').filter((n) => n.endsWith('.html'))) copyFileSync(f, `${dist}/${f}`);
+    mkdirSync(`${dist}/assets`);
+    writeFileSync(`${dist}/assets/community-Ab12Cd34.js`, 'export {}');
+    writeFileSync(`${dist}/theme-boot.js`, '/* not hashed */');
+    const a = new MemoryAuthRepository();
+    const staticApp = await buildApp(new MemoryDesignRepository((id) => a.usernameOf(id)), a, templates, { staticDir: dist });
+    const hashed = await staticApp.inject({ method: 'GET', url: '/assets/community-Ab12Cd34.js' });
+    const plain = await staticApp.inject({ method: 'GET', url: '/theme-boot.js' });
+    await staticApp.close();
+    assert.equal(hashed.statusCode, 200);
+    assert.match(String(hashed.headers['cache-control']), /max-age=31536000.*immutable/, 'hashed assets are cached for good');
+    assert.equal(plain.statusCode, 200);
+    assert.doesNotMatch(String(plain.headers['cache-control']), /immutable/, 'a file whose name does not change is not');
+  }
+
+  // ---- INFO: inline scripts the CSP blocks on every load ----
+  {
+    const pages = readdirSync('.').filter((f) => f.endsWith('.html'));
+    const inline = pages.filter((f) => /<script(?![^>]*\bsrc=)[^>]*>\s*\S/i.test(readFileSync(f, 'utf8')));
+    assert.deepEqual(inline, [], 'no page relies on an inline script the policy refuses to run');
+  }
+
+  await app.close();
+  console.log('audit round three: all assertions passed (PDF title DoS, 500 bodies, tokens in logs + console mail, reset timing + mail bomb, change-email mail bomb + lookup cost, code-guess cap, photo metadata, $& injection, feedback mailto, local escapers, AI budget, Cloudflare hop trust, asset caching, inline scripts)');
 }

@@ -1,4 +1,5 @@
 import { t } from './i18n';
+import { escapeHtml } from '../core/escape';
 
 /**
  * Themed modal dialogs that replace native window.confirm()/alert(). These match
@@ -73,22 +74,17 @@ function mount(html: string): { backdrop: HTMLElement; close: (then?: () => void
   return { backdrop, close };
 }
 
-function esc(s: string): string {
-  const d = document.createElement('div');
-  d.textContent = s;
-  return d.innerHTML;
-}
 
 /** Themed yes/no confirmation. Resolves true if confirmed, false otherwise. */
 export function confirmModal(opts: ConfirmOptions): Promise<boolean> {
   return new Promise((resolve) => {
     const { backdrop, close } = mount(`
       <div class="dlg" role="dialog" aria-modal="true">
-        <h3 class="dlg-title">${esc(opts.title)}</h3>
-        ${opts.message ? `<p class="dlg-msg">${esc(opts.message)}</p>` : ''}
+        <h3 class="dlg-title">${escapeHtml(opts.title)}</h3>
+        ${opts.message ? `<p class="dlg-msg">${escapeHtml(opts.message)}</p>` : ''}
         <div class="dlg-actions">
-          <button class="dlg-btn dlg-cancel">${esc(opts.cancelLabel ?? t('common.cancel'))}</button>
-          <button class="dlg-btn ${opts.danger ? 'danger' : 'primary'} dlg-confirm">${esc(opts.confirmLabel ?? t('common.confirm'))}</button>
+          <button class="dlg-btn dlg-cancel">${escapeHtml(opts.cancelLabel ?? t('common.cancel'))}</button>
+          <button class="dlg-btn ${opts.danger ? 'danger' : 'primary'} dlg-confirm">${escapeHtml(opts.confirmLabel ?? t('common.confirm'))}</button>
         </div>
       </div>`);
     const done = (v: boolean): void => close(() => resolve(v));
@@ -114,16 +110,16 @@ export function promptModal(opts: {
 }): Promise<string | null> {
   return new Promise((resolve) => {
     const field = opts.multiline
-      ? `<textarea class="dlg-input" rows="3" maxlength="${opts.maxLength ?? 200}" placeholder="${esc(opts.placeholder ?? '')}">${esc(opts.defaultValue ?? '')}</textarea>`
-      : `<input type="text" class="dlg-input" maxlength="${opts.maxLength ?? 200}" placeholder="${esc(opts.placeholder ?? '')}" value="${esc(opts.defaultValue ?? '')}" />`;
+      ? `<textarea class="dlg-input" rows="3" maxlength="${opts.maxLength ?? 200}" placeholder="${escapeHtml(opts.placeholder ?? '')}">${escapeHtml(opts.defaultValue ?? '')}</textarea>`
+      : `<input type="text" class="dlg-input" maxlength="${opts.maxLength ?? 200}" placeholder="${escapeHtml(opts.placeholder ?? '')}" value="${escapeHtml(opts.defaultValue ?? '')}" />`;
     const { backdrop, close } = mount(`
       <div class="dlg" role="dialog" aria-modal="true">
-        <h3 class="dlg-title">${esc(opts.title)}</h3>
-        ${opts.message ? `<p class="dlg-msg">${esc(opts.message)}</p>` : ''}
+        <h3 class="dlg-title">${escapeHtml(opts.title)}</h3>
+        ${opts.message ? `<p class="dlg-msg">${escapeHtml(opts.message)}</p>` : ''}
         <div class="dlg-field">${field}</div>
         <div class="dlg-actions">
-          <button class="dlg-btn dlg-cancel">${esc(opts.cancelLabel ?? t('common.cancel'))}</button>
-          <button class="dlg-btn primary dlg-confirm">${esc(opts.confirmLabel ?? t('common.ok'))}</button>
+          <button class="dlg-btn dlg-cancel">${escapeHtml(opts.cancelLabel ?? t('common.cancel'))}</button>
+          <button class="dlg-btn primary dlg-confirm">${escapeHtml(opts.confirmLabel ?? t('common.ok'))}</button>
         </div>
       </div>`);
     const input = backdrop.querySelector('.dlg-input') as HTMLInputElement | HTMLTextAreaElement;
@@ -150,17 +146,17 @@ export function choiceModal(opts: ChoiceOptions): Promise<string | null> {
     const buttons = opts.choices
       .map(
         (c) => `
-        <button class="dlg-choice ${c.variant ?? 'default'}" data-value="${esc(c.value)}">
-          <span class="dlg-choice-label">${esc(c.label)}</span>
-          ${c.hint ? `<span class="dlg-choice-hint">${esc(c.hint)}</span>` : ''}
+        <button class="dlg-choice ${c.variant ?? 'default'}" data-value="${escapeHtml(c.value)}">
+          <span class="dlg-choice-label">${escapeHtml(c.label)}</span>
+          ${c.hint ? `<span class="dlg-choice-hint">${escapeHtml(c.hint)}</span>` : ''}
         </button>`,
       )
       .join('');
-    const cancel = opts.cancelLabel === null ? '' : `<button class="dlg-btn dlg-cancel">${esc(opts.cancelLabel ?? t('common.cancel'))}</button>`;
+    const cancel = opts.cancelLabel === null ? '' : `<button class="dlg-btn dlg-cancel">${escapeHtml(opts.cancelLabel ?? t('common.cancel'))}</button>`;
     const { backdrop, close } = mount(`
       <div class="dlg" role="dialog" aria-modal="true">
-        <h3 class="dlg-title">${esc(opts.title)}</h3>
-        ${opts.message ? `<p class="dlg-msg">${esc(opts.message)}</p>` : ''}
+        <h3 class="dlg-title">${escapeHtml(opts.title)}</h3>
+        ${opts.message ? `<p class="dlg-msg">${escapeHtml(opts.message)}</p>` : ''}
         <div class="dlg-choices">${buttons}</div>
         ${cancel ? `<div class="dlg-actions">${cancel}</div>` : ''}
       </div>`);
