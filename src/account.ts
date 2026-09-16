@@ -144,8 +144,17 @@ $('ac-resend')?.addEventListener('click', async () => {
   const msg = $('ac-email-msg');
   say(msg, t('ac.saving'), 'info');
   try {
-    await resendVerification();
-    say(msg, tv('ac.verify.resent', { email: me?.email ?? '' }), 'ok');
+    const res = await resendVerification();
+    if (res.ok) return say(msg, tv('ac.verify.resent', { email: me?.email ?? '' }), 'ok');
+    // A cooldown is not a failure — the message they are waiting for is already
+    // on its way, and pressing again would invalidate the code in it.
+    say(
+      msg,
+      res.retryInSeconds
+        ? tv('ac.verify.cooldown', { n: res.retryInSeconds })
+        : t('ac.verify.sendRefused'),
+      res.retryInSeconds ? 'info' : 'bad',
+    );
   } catch {
     say(msg, t('ac.verify.resendFailed'), 'bad');
   }

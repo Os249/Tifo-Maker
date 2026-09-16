@@ -10,7 +10,7 @@ import { loadTifoFonts } from '../core/tifoFonts';
 import type { ObjectLayer } from '../core/objects';
 import { MIN_LEGIBLE_RUN, findFragileSeats } from '../core/analysis';
 import { RevealPlayer, REVEAL_PRESETS, type RevealId } from '../core/reveal';
-import { fetchMe, isSignedIn, loadDesign, saveDesign, setPublic, setDesignTitle, exportMyData, deleteAccount } from '../net/api';
+import { fetchMe, isSignedIn, loadDesign, registrationEmailWasSent, saveDesign, setPublic, setDesignTitle, exportMyData, deleteAccount } from '../net/api';
 import { t as i18nT, tl, tv } from './i18n';
 import { track, setAnalyticsSignedIn } from '../net/analytics';
 import { buildTifoV2 } from '../core/tifoFormat';
@@ -1103,7 +1103,11 @@ export function mountToolbar(
     if (avatar) avatar.textContent = name[0].toUpperCase();
     const menuName = document.getElementById('avatar-menu-name');
     if (menuName) menuName.textContent = `@${name}`;
-    message.textContent = tv('ed.msg.signedInAs', { name });
+    // A registration whose verification email was refused still signs you in,
+    // so without this the only clue is an inbox nothing is coming to.
+    message.textContent = registrationEmailWasSent()
+      ? tv('ed.msg.signedInAs', { name })
+      : i18nT('ac.verify.noEmailSent');
     setAnalyticsSignedIn(true);
     if (fresh) track('signed_up'); // genuine auth this session, not a reload-restore
   };

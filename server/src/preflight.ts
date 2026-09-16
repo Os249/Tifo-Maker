@@ -32,6 +32,26 @@ export function configWarnings(env: NodeJS.ProcessEnv): ConfigWarning[] {
       effect: 'password-reset links fall back to matching the Host header against a known list. Set PUBLIC_URL=https://tifomaker.org so the link never depends on what a caller sent.',
     });
   }
+  // The one that answers "verification emails stopped arriving". With no key
+  // the server silently falls back to the console sender: every verification
+  // and password-reset message is written to the log and delivered to nobody,
+  // while the API still answers 201 and 202 and the UI still says "check your
+  // inbox". Nothing else in the product reports it.
+  if (prod && !env.RESEND_API_KEY) {
+    out.push({
+      key: 'RESEND_API_KEY',
+      effect: 'NO EMAIL IS BEING SENT. Verification and password-reset messages are written to this log instead of delivered, and the app still tells people to check their inbox.',
+    });
+  }
+  // Resend refuses any From on a domain you have not verified with it, and it
+  // re-checks those DNS records — so a send can start failing with nothing
+  // changed at this end. The default From is on tifomaker.org for that reason.
+  if (prod && env.RESEND_API_KEY && env.EMAIL_FROM && !/@([\w-]+\.)*tifomaker\.org>?\s*$/i.test(env.EMAIL_FROM)) {
+    out.push({
+      key: 'EMAIL_FROM',
+      effect: `sending as ${env.EMAIL_FROM}, which is not on tifomaker.org. Resend rejects any From whose domain is not verified in your account.`,
+    });
+  }
   if (!env.AI_ADMIN_PASSWORD) {
     out.push({ key: 'AI_ADMIN_PASSWORD', effect: '/admin cannot be unlocked at all, and the AI designer has no admin bypass.' });
   }

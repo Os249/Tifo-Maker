@@ -378,7 +378,11 @@ async function makeDesign(app: FastifyInstance, token: string, isPublic = false)
   const quiet = configWarnings({ NODE_ENV: 'development', AI_ADMIN_PASSWORD: 'x' } as NodeJS.ProcessEnv);
   assert.deepEqual(quiet, [], 'a configured dev box says nothing');
   const prodBare = configWarnings({ NODE_ENV: 'production' } as NodeJS.ProcessEnv).map((w) => w.key);
-  assert.deepEqual(prodBare.sort(), ['AI_ADMIN_PASSWORD', 'PUBLIC_URL', 'TRUST_PROXY'], 'production names what it was not told');
+  assert.deepEqual(
+    prodBare.sort(),
+    ['AI_ADMIN_PASSWORD', 'PUBLIC_URL', 'RESEND_API_KEY', 'TRUST_PROXY'],
+    'production names what it was not told',
+  );
   const silentPortraits = configWarnings({ AI_IMAGE_PROVIDER: 'gemini', AI_ADMIN_PASSWORD: 'x' } as NodeJS.ProcessEnv);
   assert.equal(silentPortraits.length, 1, 'gemini with no key is reported');
   assert.match(silentPortraits[0].effect, /face missing/, 'and says what it will actually look like');

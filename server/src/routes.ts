@@ -16,7 +16,7 @@ import { tmpdir } from 'node:os';
 import { readFile, unlink } from 'node:fs/promises';
 import type { AiEventsRepository, AiUsageRepository, AuthRepository, DesignRepository, EventsRepository, LeadsRepository, SocialRepository } from './repo';
 import { registerAiRoutes, verifyUnlock } from './aiRoutes';
-import type { EmailSender } from './email';
+import { emailHealth, type EmailSender } from './email';
 import type { StadiumSubmissionRepository } from './stadiumRepo';
 import type { AdminStatsRepository } from './statsRepo';
 import { buildVisit, isSocialHost, type TrafficRepository } from './trafficRepo';
@@ -767,8 +767,8 @@ export async function buildApp(
   const codeHash = (userId: string, code: string): string => hashToken(`verify:${userId}:${code}`);
   // Issue a fresh verification token and email the link. Best-effort: a mail
   // failure never blocks the API response (the user can request a resend).
-  const sendVerifyEmail = async (req: FastifyRequest, user: { id: string; email: string }): Promise<void> => {
-    if (!options.emailSender) return;
+  const sendVerifyEmail = async (req: FastifyRequest, user: { id: string; email: string }): Promise<boolean> => {
+    if (!options.emailSender) return false;
     try {
       await auth.deleteEmailTokens(user.id, 'verify_email');
       await auth.deleteEmailTokens(user.id, 'verify_code');
@@ -809,8 +809,14 @@ export async function buildApp(
           `رمز التحقق في تيفو ميكر: ${code} (صالح 10 دقائق)\nأو افتح: ${link}\n\n` +
           `Your TifoMaker code: ${code} (valid 10 minutes)\nOr open: ${link}`,
       });
+      return true;
     } catch (err) {
-      app.log.error({ err }, 'verification email failed');
+      // Loud, and with the provider's own words. This used to be the ONLY trace
+      // a failed verification email left anywhere — the API answered 201/202
+      // either way and the UI said "check your inbox", so "email verification
+      // stopped working" arrived with nothing to go on but the time of day.
+      app.log.error({ err: String((err as Error)?.message ?? err) }, 'verification email was NOT sent');
+      return false;
     }
   };
 
@@ -843,7 +849,10 @@ export async function buildApp(
           `Reset your TifoMaker password: ${link}\nThis link expires in 1 hour. If you didn't request this, ignore this email.`,
       });
     } catch (err) {
-      app.log.error({ err }, 'reset email failed');
+      // /api/auth/forgot answers 202 whether or not the address exists — that is
+      // deliberate, so it cannot be used to test for accounts — which means the
+      // log and /api/admin/email are the ONLY places a refused send can show up.
+      app.log.error({ err: String((err as Error)?.message ?? err) }, 'password-reset email was NOT sent');
     }
   };
 
@@ -881,12 +890,16 @@ export async function buildApp(
     if (!user) return reply.code(409).send({ error: 'username or email taken' });
     const { token, tokenHash } = issueToken();
     await auth.createToken(user.id, tokenHash, new Date(Date.now() + TOKEN_TTL_MS));
-    await sendVerifyEmail(req, { id: user.id, email: mail });
+    // The account is real whether or not the mail went out, so registration
+    // still succeeds — but it says which, so the UI can offer a resend instead
+    // of sending someone to an inbox nothing is coming to.
+    const emailSent = await sendVerifyEmail(req, { id: user.id, email: mail });
     return reply.code(201).send({
       token,
       username: user.username,
       email: user.email,
       emailVerified: !!user.emailVerifiedAt,
+      emailSent,
     });
   });
 
@@ -905,6 +918,19 @@ export async function buildApp(
       .redirect(`/app?verified=${userId ? 1 : 0}`);
   });
 
+  /**
+   * Per-user cooldown between resends.
+   *
+   * The rate limit is 10 a minute per ADDRESS, which does nothing to stop one
+   * impatient person pressing Resend twenty times — and on a transactional mail
+   * plan with a daily allowance, that is how a whole day's quota disappears
+   * before lunch and everyone else's verification silently stops arriving.
+   * A new message also invalidates the previous code, so rapid resends are
+   * actively unhelpful: the code in the message you just opened stops working.
+   */
+  const RESEND_COOLDOWN_MS = 60_000;
+  const lastResendAt = new Map<string, number>();
+
   // Re-send the verification email to the signed-in user.
   app.post('/api/auth/verify/resend', authLimit, async (req, reply) => {
     const userId = await requireUser(req, reply);
@@ -912,8 +938,23 @@ export async function buildApp(
     const user = await auth.getUserById(userId).catch(() => null);
     if (!user?.email) return reply.code(400).send({ error: 'no email on file' });
     if (user.emailVerifiedAt) return reply.code(200).send({ ok: true, alreadyVerified: true });
-    await sendVerifyEmail(req, { id: user.id, email: user.email });
-    return reply.code(202).send({ ok: true });
+    const since = Date.now() - (lastResendAt.get(userId) ?? 0);
+    if (since < RESEND_COOLDOWN_MS) {
+      return reply.code(429).send({
+        error: 'a message is already on its way',
+        retryInSeconds: Math.ceil((RESEND_COOLDOWN_MS - since) / 1000),
+      });
+    }
+    lastResendAt.set(userId, Date.now());
+    const sent = await sendVerifyEmail(req, { id: user.id, email: user.email });
+    if (!sent) {
+      // Don't let someone's failed send lock them out of retrying.
+      lastResendAt.delete(userId);
+      // Generic to the caller, exact in the log and on /api/admin/email: the
+      // provider's refusal can name the account and the sending domain.
+      return reply.code(502).send({ error: 'we could not send that email just now', emailSent: false });
+    }
+    return reply.code(202).send({ ok: true, emailSent: true });
   });
 
   /**
@@ -1367,6 +1408,67 @@ export async function buildApp(
     const ok = await repo.takedownDesign(id);
     if (!ok) return reply.code(404).send({ error: 'design not found' });
     return { takendown: true };
+  });
+
+  /**
+   * Is email working right now?
+   *
+   * Admin-gated because the answer names the sending domain and quotes the
+   * provider's refusal verbatim, which can carry account details. This exists
+   * so "verification emails stopped arriving" is a question with an answer
+   * rather than an afternoon of guessing: it distinguishes a missing key from a
+   * refused key from an unverified sending domain from an exhausted quota.
+   */
+  app.get('/api/admin/email', async (req, reply) => {
+    if (!(await adminAccess(req))) return reply.code(403).send({ error: 'forbidden' });
+    const h = emailHealth();
+    return {
+      ...h,
+      // Spelled out, because the whole point is that nobody has to infer it.
+      summary: !h.delivering
+        ? 'NOT DELIVERING: no RESEND_API_KEY is set, so every message is written to the server log and nobody receives it.'
+        : h.lastError && (!h.lastSentAt || h.lastErrorAt! > h.lastSentAt)
+          ? `FAILING: the last attempt was refused — ${h.lastError}`
+          : h.sent > 0
+            ? `delivering; ${h.sent} sent, ${h.failed} refused since this process started`
+            : 'configured, but nothing has been sent since this process started',
+    };
+  });
+
+  /**
+   * Send one real message to a chosen address and report exactly what happened.
+   *
+   * The provider's own words, not a summary — "The tifomaker.org domain is not
+   * verified", "You have reached your daily sending quota" and "API key is
+   * invalid" are three completely different problems that all present to a user
+   * as an email that never arrives.
+   */
+  app.post('/api/admin/email/test', async (req, reply) => {
+    if (!(await adminAccess(req))) return reply.code(403).send({ error: 'forbidden' });
+    if (!options.emailSender) return reply.code(503).send({ ok: false, error: 'no email sender is configured' });
+    const to = String((req.body as { to?: unknown } | null)?.to ?? '').trim();
+    if (!to || to.length > MAX_EMAIL || !EMAIL.test(to)) {
+      return reply.code(400).send({ ok: false, error: 'a valid address is required' });
+    }
+    const stamp = new Date().toISOString();
+    try {
+      await options.emailSender.send({
+        to,
+        subject: `TifoMaker email test · ${stamp}`,
+        html: `<p>This is a test from the TifoMaker admin dashboard.</p><p>Sent ${stamp}.</p>`,
+        text: `This is a test from the TifoMaker admin dashboard.\nSent ${stamp}.`,
+      });
+      const h = emailHealth();
+      return {
+        ok: true,
+        delivering: h.delivering,
+        note: h.delivering
+          ? 'the provider accepted it — if it does not arrive, the problem is after the hand-off (SPF/DKIM, spam, or the recipient)'
+          : 'NO KEY IS SET: this went to the server log, not to an inbox',
+      };
+    } catch (err) {
+      return reply.code(502).send({ ok: false, error: String((err as Error)?.message ?? err).slice(0, 400) });
+    }
   });
 
   // Photo verification queue.

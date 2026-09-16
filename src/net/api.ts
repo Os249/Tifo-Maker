@@ -149,9 +149,24 @@ export async function login(username: string, password: string): Promise<string>
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ username, password }),
     }),
-  )) as { token: string; username: string };
+  )) as { token: string; username: string; emailSent?: boolean };
   setToken(data.token);
+  // The account exists either way; whether the verification email went out is a
+  // separate question, and the server is now the only thing that knows it.
+  lastRegisterEmailSent = data.emailSent !== false;
   return data.username;
+}
+
+/**
+ * Did the verification email for the most recent registration actually go out?
+ *
+ * A module-level answer rather than a changed return type, because `register`
+ * is retried with different handles and its result is threaded through two
+ * callers that only care about the name.
+ */
+let lastRegisterEmailSent = true;
+export function registrationEmailWasSent(): boolean {
+  return lastRegisterEmailSent;
 }
 
 export async function register(
@@ -182,9 +197,20 @@ export async function setAccountEmail(email: string, acceptedVersion?: string): 
   );
 }
 
-/** Ask the server to re-send the verification code and link to the signed-in user. */
-export async function resendVerification(): Promise<void> {
-  await expectOk(await fetch(`${API}/auth/verify/resend`, { method: 'POST', headers: authHeaders(true) }));
+/**
+ * Ask the server to re-send the verification code and link.
+ *
+ * Reports what actually happened rather than throwing on everything: a refused
+ * send and a cooldown are different situations and the person can act on both,
+ * where "resend failed" tells them nothing. The endpoint used to answer 202
+ * whether or not the message went out, which is how an inbox that was never
+ * going to receive anything still said "check your inbox".
+ */
+export async function resendVerification(): Promise<{ ok: boolean; retryInSeconds?: number; error?: string }> {
+  const res = await fetch(`${API}/auth/verify/resend`, { method: 'POST', headers: authHeaders(true) });
+  if (res.ok) return { ok: true };
+  const data = (await res.json().catch(() => null)) as { error?: string; retryInSeconds?: number } | null;
+  return { ok: false, retryInSeconds: data?.retryInSeconds, error: data?.error };
 }
 
 /**

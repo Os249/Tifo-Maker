@@ -304,7 +304,12 @@ async function api(path){
 }
 async function post(path, body){
   var res;
-  try { res = await fetch(path, { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify(body) }); }
+  /* The unlock token travels on admin POSTs too. /api/ai/unlock is the one call
+     that has no token yet, and sending nothing there is exactly right. */
+  var headers = { 'Content-Type':'application/json' };
+  var t = getUnlock();
+  if (t) headers['x-ai-unlock'] = t;
+  try { res = await fetch(path, { method:'POST', headers: headers, body: JSON.stringify(body) }); }
   catch(e){ return { ok:false, status:0, data:null }; }
   var data = null;
   try { data = await res.json(); } catch(e){ data = null; }
@@ -362,15 +367,16 @@ async function loadAll(){
     api('/api/funnel?days=' + currentDays),
     api('/api/admin/shares?days=' + currentDays),
     api('/api/admin/feedback?limit=50'),
-    api('/api/admin/ai?days=' + currentDays)
+    api('/api/admin/ai?days=' + currentDays),
+    api('/api/admin/email')
   ]);
-  var ov = results[0], tr = results[1], fn = results[2], sh = results[3], fb = results[4], ai = results[5];
+  var ov = results[0], tr = results[1], fn = results[2], sh = results[3], fb = results[4], ai = results[5], em = results[6];
   if (!ov.ok){
     if (ov.status === 403){ clearUnlock(); showLogin('Wrong or expired password. Sign in again.'); return; }
     setStatus('Failed to load (' + ov.status + ').');
     return;
   }
-  render(ov.data || {}, (tr.ok && tr.data) ? tr.data : null, (fn.ok && fn.data) ? fn.data : { steps:[], days: currentDays }, (sh.ok && sh.data) ? sh.data : null, (fb.ok && fb.data) ? fb.data : null, (ai.ok && ai.data) ? ai.data : null);
+  render(ov.data || {}, (tr.ok && tr.data) ? tr.data : null, (fn.ok && fn.data) ? fn.data : { steps:[], days: currentDays }, (sh.ok && sh.data) ? sh.data : null, (fb.ok && fb.data) ? fb.data : null, (ai.ok && ai.data) ? ai.data : null, (em.ok && em.data) ? em.data : null);
   setStatus('Updated ' + new Date().toLocaleTimeString());
 }
 
@@ -923,7 +929,8 @@ var TABS = [
   { id:'funnel',   label:'What they do' },
   { id:'ai',       label:'AI' },
   { id:'library',  label:'Library' },
-  { id:'feedback', label:'Feedback' }
+  { id:'feedback', label:'Feedback' },
+  { id:'email',    label:'Email' }
 ];
 var DATA = null;
 var currentTab = 'board';
@@ -1151,11 +1158,60 @@ function paintSection(){
   else if (currentTab === 'ai') html = aiTab();
   else if (currentTab === 'library') html = libraryTab();
   else if (currentTab === 'feedback') html = feedbackTab();
+  else if (currentTab === 'email') html = emailTab();
   el('dash-body').innerHTML = html;
+  if (currentTab === 'email') wireEmailTest();
 }
 
-function render(ov, tr, funnel, sh, fb, ai){
-  DATA = { ov: ov, tr: tr, funnel: funnel, sh: sh, fb: fb, ai: ai, days: Number(funnel && funnel.days) || currentDays };
+/* ---- email: is anything actually being delivered ----
+   This tab exists because a verification email that never arrives used to leave
+   no trace anywhere a human would look. A missing API key, a refused key, an
+   unverified sending domain and an exhausted daily quota all present to the
+   person signing up as the same silence, and they need four different fixes. */
+function emailTab(){
+  var em = DATA.em;
+  if (!em) return '<h2 class="sec">Email</h2><p class="note">Could not read the email status.</p>';
+  var bad = !em.delivering || (em.lastError && (!em.lastSentAt || em.lastErrorAt > em.lastSentAt));
+  var html = '<h2 class="sec">Email</h2>';
+  html += '<p class="lede">' + (bad ? '<b class="warn">' : '') + esc(em.summary) + (bad ? '</b>' : '') + '</p>';
+  html += '<div class="grid">';
+  html += kpi('Provider', em.provider === 'resend' ? 'Resend' : 'console (log only)');
+  html += kpi('Sent', em.sent, 'since this process started', true);
+  html += kpi('Refused', em.failed, 'since this process started', true);
+  html += '</div>';
+  html += '<table class="tbl"><tbody>';
+  html += '<tr><th>From</th><td>' + esc(em.from || '-') + '</td></tr>';
+  html += '<tr><th>Last delivered</th><td>' + esc(em.lastSentAt || 'never') + '</td></tr>';
+  html += '<tr><th>Last refusal</th><td>' + esc(em.lastErrorAt || 'none') + '</td></tr>';
+  if (em.lastError) html += '<tr><th>What the provider said</th><td><code>' + esc(em.lastError) + '</code></td></tr>';
+  html += '</tbody></table>';
+  html += '<h2 class="sec">Send a test</h2>';
+  html += '<p class="note">One real message, and the provider\'s own answer. If it is accepted but never arrives, the problem is after the hand-off: SPF/DKIM records, or the recipient\'s spam filter.</p>';
+  html += '<p><input id="em-to" type="email" placeholder="you@example.com" style="min-width:260px" /> '
+        + '<button id="em-send" type="button">Send test</button></p>';
+  html += '<p id="em-out" class="note"></p>';
+  return html;
+}
+
+function wireEmailTest(){
+  var btn = el('em-send');
+  if (!btn) return;
+  btn.addEventListener('click', async function(){
+    var to = (el('em-to').value || '').trim();
+    var out = el('em-out');
+    if (!to){ out.textContent = 'Type an address first.'; return; }
+    btn.disabled = true;
+    out.textContent = 'Sending...';
+    var r = await post('/api/admin/email/test', { to: to });
+    btn.disabled = false;
+    if (r.ok && r.data && r.data.ok){ out.innerHTML = '<b>Accepted.</b> ' + esc(r.data.note || ''); }
+    else { out.innerHTML = '<b class="warn">Refused.</b> <code>' + esc((r.data && r.data.error) || ('HTTP ' + r.status)) + '</code>'; }
+    loadAll();
+  });
+}
+
+function render(ov, tr, funnel, sh, fb, ai, em){
+  DATA = { ov: ov, tr: tr, funnel: funnel, sh: sh, fb: fb, ai: ai, em: em, days: Number(funnel && funnel.days) || currentDays };
 
   el('mode').textContent = (ov.mode === 'memory') ? 'in-memory (dev)' : 'postgres';
   el('mode').className = (ov.mode === 'memory') ? 'badge warn' : 'badge good';
