@@ -547,6 +547,59 @@ const STRINGS: Record<string, { en: string; ar: string }> = {
   'ed.obj.bakedAll': { en: 'baked everything onto {n} seats', ar: 'ثُبّت كل شيء على {n} مقعد' },
   'mb.bake': { en: 'Bake', ar: 'ثبّت' },
   'mb.objOptions': { en: 'Options', ar: 'خيارات' },
+
+  // Every sentence the editor's status line can say. These were hard-coded
+  // English, so an Arabic editor answered in English the moment anything
+  // happened — check legibility, apply a pattern, open a file. Whole sentences
+  // with named placeholders, never fragments: Arabic puts the name and the
+  // number in different places than English does.
+  'ed.msg.paletteNoColors': { en: 'couldn’t pull colours from that image', ar: 'ما قدرنا نطلع ألوان من هذي الصورة' },
+  'ed.msg.paletteNoFile': { en: 'no colours found in that file (.gpl / .hex / .json supported)', ar: 'ما لقينا ألوان في هذا الملف (ندعم ‎.gpl و‎.hex و‎.json)' },
+  'ed.msg.paletteFailed': { en: 'palette import failed: {err}', ar: 'فشل استيراد لوحة الألوان: {err}' },
+  'ed.msg.addColorsFirst': { en: 'add some colours first', ar: 'أضف ألوان أول' },
+  'ed.msg.paletteSaved': { en: 'saved “{name}” — it’s under your saved palettes', ar: 'حفظنا «{name}» — بتلقاها ضمن لوحاتك المحفوظة' },
+  'ed.msg.patternApplied': { en: 'pattern “{name}” applied (palette slots 1-3)', ar: 'طبّقنا نقشة «{name}» (خانات الألوان ١-٣)' },
+  'ed.msg.typeTextFirst': { en: 'type some text first', ar: 'اكتب نص أول' },
+  'ed.msg.fontLoaded': { en: 'font “{name}” loaded', ar: 'حمّلنا الخط «{name}»' },
+  'ed.msg.fontFailed': { en: 'font load failed: {err}', ar: 'فشل تحميل الخط: {err}' },
+  'ed.msg.legibleOk': { en: 'legibility ok: every stroke is {n}+ seats thick', ar: 'الوضوح تمام: كل خط سماكته {n} مقاعد أو أكثر' },
+  'ed.msg.legibleThin': { en: '{n} seats sit in strokes thinner than {min} — they may vanish with no-shows', ar: '{n} مقعد داخل خطوط أرفع من {min} — وقد تختفي مع المقاعد الفاضية' },
+  'ed.msg.photoAdded': { en: 'match-day photo added: it shows as Before/After in the feed', ar: 'أضفنا صورة يوم المباراة: بتظهر «قبل/بعد» في المجتمع' },
+  'ed.msg.photoFailed': { en: 'photo upload failed: {err}', ar: 'فشل رفع الصورة: {err}' },
+  'ed.msg.signedInAs': { en: 'signed in as {name}', ar: 'سجّلت الدخول باسم {name}' },
+  'ed.msg.signedOut': { en: 'signed out', ar: 'سجّلت الخروج' },
+  'ed.msg.saveBeforeShare': { en: 'save your design (and tick “List in public gallery”) first, then share', ar: 'احفظ تصميمك (وفعّل «اعرضه في المعرض العام») قبل المشاركة' },
+  'ed.msg.downloaded': { en: 'downloaded “{name}.tifo”', ar: 'نزّلنا «{name}.tifo»' },
+  'ed.msg.notJson': { en: 'that file isn’t valid JSON', ar: 'هذا الملف ليس JSON صالح' },
+  'ed.msg.openingStadium': { en: 'opening in the matching stadium…', ar: 'نفتحه في الملعب المطابق…' },
+  'ed.msg.opened': { en: 'opened “{name}”', ar: 'فتحنا «{name}»' },
+  'ed.msg.openFailed': { en: 'couldn’t open that file: {err}', ar: 'ما قدرنا نفتح الملف: {err}' },
+  'ed.msg.loadFailed': { en: 'load failed: {err}', ar: 'فشل التحميل: {err}' },
+  'ed.msg.gifExported': { en: 'GIF exported ({kb} KB)', ar: 'صدّرنا GIF ({kb} كيلوبايت)' },
+  'ed.msg.gifFailed': { en: 'GIF export failed: {err}', ar: 'فشل تصدير GIF: {err}' },
+  'ed.msg.pdfFailed': { en: 'PDF export failed: {err}', ar: 'فشل تصدير PDF: {err}' },
+  'ed.msg.manifestExported': { en: 'seat manifest exported ({n} seats)', ar: 'صدّرنا كشف المقاعد ({n} مقعد)' },
+  'ed.msg.saveBeforeQr': { en: 'save or publish your tifo first — the QR points fans to it', ar: 'احفظ أو انشر التيفو أول — رمز QR يوصّل المشجّعين له' },
+  'ed.msg.qrFailed': { en: 'couldn’t generate the QR code', ar: 'ما قدرنا ننشئ رمز QR' },
+
+  // The dialogs a painting session actually opens. Hard-coded English here
+  // meant an Arabic editor put up an entirely English modal the moment someone
+  // picked a palette preset — the most ordinary thing in the panel.
+  'ed.dlg.applyPalette': { en: 'Apply “{name}”', ar: 'تطبيق «{name}»' },
+  'ed.dlg.applyHow': { en: 'How should these colours be applied to your design?', ar: 'كيف تبي نطبّق هذي الألوان على تصميمك؟' },
+  'ed.dlg.remap': { en: 'Remap my design', ar: 'أعد تلوين تصميمي' },
+  'ed.dlg.remapHint': { en: 'Recolour every seat to the nearest new colour.', ar: 'يلوّن كل مقعد بأقرب لون من الجديدة.' },
+  'ed.dlg.justAdd': { en: 'Just add the colours', ar: 'أضف الألوان فقط' },
+  'ed.dlg.justAddHint': { en: 'Add them to your swatches; the design stays as-is.', ar: 'تُضاف إلى ألوانك، والتصميم يبقى كما هو.' },
+  'ed.dlg.namePalette': { en: 'Name this palette', ar: 'سمِّ لوحة الألوان' },
+  'ed.dlg.namePaletteHint': { en: 'e.g. Derby black & gold', ar: 'مثال: أسود وذهبي للديربي' },
+  'ed.dlg.myPalette': { en: 'My palette', ar: 'لوحتي' },
+  'ed.dlg.savePalette': { en: 'Save palette', ar: 'احفظ اللوحة' },
+  'ed.dlg.addCaption': { en: 'Add a caption', ar: 'أضف وصفًا' },
+  'ed.dlg.captionHint': { en: 'Optional: describe the match or moment.', ar: 'اختياري: صف المباراة أو اللحظة.' },
+  'ed.dlg.captionPlaceholder': { en: 'e.g. Liverpool vs Madrid, May 2026', ar: 'مثال: الهلال والنصر، مايو ٢٠٢٦' },
+  'ed.dlg.continue': { en: 'Continue', ar: 'تابع' },
+  'ed.dlg.uploading': { en: 'Uploading…', ar: 'جارٍ الرفع…' },
   'ed.ai.cancel': { en: 'Stop', ar: 'إيقاف' },
   // ---- account settings page ----
   'ed.account': { en: 'Account settings', ar: 'إعدادات الحساب' },

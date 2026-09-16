@@ -194,7 +194,14 @@ export class ObjectLayer {
 
   /**
    * Bake one object into the seat grid as a single undoable stroke.
-   * Returns the dirty seat indices (already flushed by the caller's store).
+   *
+   * Flushes its own dirty set before returning. It did not, and the ONE caller
+   * that remembered to flush was the single-object Bake button — so "Bake all",
+   * and the implicit bake that every export and save does first, wrote the art
+   * into the cells and left the bowl on screen showing the old design and the
+   * palette showing the old seat counts. The work was there; nothing said so.
+   * Owning the flush here is the only arrangement that cannot rot: there are
+   * nine call sites and any new one gets it for free.
    */
   bake(obj: TifoObject, store: DesignStore, map: SeatMap, wrapWidth: number, clip?: (i: number) => boolean): number[] {
     const source = renderObjectCanvas(obj);
@@ -233,6 +240,7 @@ export class ObjectLayer {
     store.beginStroke();
     const dirty = applyGridToSeats(store, map, grid, cols, rows, target, wrapWidth, accept);
     store.commitStroke();
+    store.flush(dirty);
     return dirty;
   }
 

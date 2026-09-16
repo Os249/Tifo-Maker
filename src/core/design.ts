@@ -22,6 +22,7 @@ export class DesignStore {
   private redoStack: SparseDiff[] = [];
   private listeners: DirtyListener[] = [];
   private paletteListeners: (() => void)[] = [];
+  private historyListeners: (() => void)[] = [];
 
   /** Max undo depth; a diff is typically a few hundred bytes, so this is cheap. */
   private static readonly MAX_UNDO = 200;
@@ -43,6 +44,25 @@ export class DesignStore {
   /** Notified whenever the palette colors change (preset swap or swatch edit). */
   onPaletteChange(fn: () => void): void {
     this.paletteListeners.push(fn);
+  }
+
+  /**
+   * Notified whenever the undo/redo stacks change.
+   *
+   * This exists because `onDirty` cannot answer "can I undo yet". A brush
+   * stroke paints and flushes on every pointer event and only COMMITS on
+   * pointerup, so at the moment of the last dirty notification the stroke is
+   * not on the undo stack. The Undo button, refreshed from onDirty, therefore
+   * sat greyed out immediately after the stroke that created something to
+   * undo — and only lit up during the NEXT stroke, always one behind.
+   * (Fill never showed it: fill commits before it flushes.)
+   */
+  onHistoryChange(fn: () => void): void {
+    this.historyListeners.push(fn);
+  }
+
+  private notifyHistory(): void {
+    for (const fn of this.historyListeners) fn();
   }
 
   /** Detach a dirty listener (for views that mount/unmount, e.g. the simulator). */
@@ -147,6 +167,7 @@ export class DesignStore {
       });
       if (this.undoStack.length > DesignStore.MAX_UNDO) this.undoStack.shift();
       this.redoStack = [];
+      this.notifyHistory();
     }
     for (const fn of this.paletteListeners) fn();
     this.notify('all');
@@ -170,6 +191,29 @@ export class DesignStore {
     return true;
   }
 
+  /**
+   * Abandon the stroke in progress and put every cell it touched back.
+   *
+   * A touch that turns out to be the start of a two-finger gesture has already
+   * painted a dab by the time the second finger lands — there is no way to know
+   * in advance, and delaying the first dab would put latency on every stroke.
+   * Committing that dab meant a two-finger tap (undo) spent itself undoing the
+   * accident instead of the user's last real action: the toast said "Undone"
+   * and nothing the user recognised changed.
+   */
+  cancelStroke(): number[] {
+    const old = this.strokeOld;
+    this.strokeOld = null;
+    if (!old || old.size === 0) return [];
+    const dirty: number[] = [];
+    for (const [i, before] of old) {
+      this.cells[i] = before;
+      dirty.push(i);
+    }
+    this.notify(dirty);
+    return dirty;
+  }
+
   /** Close the stroke into a single undoable SparseDiff. */
   commitStroke(): SparseDiff | null {
     const old = this.strokeOld;
@@ -186,6 +230,7 @@ export class DesignStore {
     this.undoStack.push(diff);
     if (this.undoStack.length > DesignStore.MAX_UNDO) this.undoStack.shift();
     this.redoStack.length = 0;
+    this.notifyHistory();
     return diff;
   }
 
@@ -202,6 +247,7 @@ export class DesignStore {
     if (!diff) return;
     this.applyValues(diff.indices, diff.before);
     this.redoStack.push(diff);
+    this.notifyHistory();
   }
 
   redo(): void {
@@ -209,6 +255,7 @@ export class DesignStore {
     if (!diff) return;
     this.applyValues(diff.indices, diff.after);
     this.undoStack.push(diff);
+    this.notifyHistory();
   }
 
   private applyValues(indices: Uint32Array, values: Uint8Array): void {
@@ -247,6 +294,7 @@ export class DesignStore {
     this.cells.set(cells.subarray(0, this.cells.length));
     this.undoStack.length = 0;
     this.redoStack.length = 0;
+    this.notifyHistory();
     this.notify('all');
   }
 }

@@ -11,7 +11,7 @@ import type { ObjectLayer } from '../core/objects';
 import { MIN_LEGIBLE_RUN, findFragileSeats } from '../core/analysis';
 import { RevealPlayer, REVEAL_PRESETS, type RevealId } from '../core/reveal';
 import { fetchMe, isSignedIn, loadDesign, saveDesign, setPublic, setDesignTitle, exportMyData, deleteAccount } from '../net/api';
-import { t as i18nT, tl } from './i18n';
+import { t as i18nT, tl, tv } from './i18n';
 import { track, setAnalyticsSignedIn } from '../net/analytics';
 import { buildTifoV2 } from '../core/tifoFormat';
 import {
@@ -452,13 +452,13 @@ export function mountToolbar(
     if (incoming.length === 0) return;
     const { choiceModal } = await import('./modal');
     const choice = await choiceModal({
-      title: `Apply “${label}”`,
-      message: 'How should these colours be applied to your design?',
+      title: tv('ed.dlg.applyPalette', { name: tl(label) }),
+      message: i18nT('ed.dlg.applyHow'),
       choices: [
-        { value: 'remap', label: 'Remap my design', hint: 'Recolour every seat to the nearest new colour.', variant: 'primary' },
-        { value: 'add', label: 'Just add the colours', hint: 'Add them to your swatches; the design stays as-is.' },
+        { value: 'remap', label: i18nT('ed.dlg.remap'), hint: i18nT('ed.dlg.remapHint'), variant: 'primary' },
+        { value: 'add', label: i18nT('ed.dlg.justAdd'), hint: i18nT('ed.dlg.justAddHint') },
       ],
-      cancelLabel: 'Cancel',
+      cancelLabel: i18nT('common.cancel'),
     });
     if (choice === null) return; // dismissed — do nothing
     if (choice === 'remap') {
@@ -548,16 +548,16 @@ export function mountToolbar(
         bmp.close?.();
         const colors = extractPalette(ctx.getImageData(0, 0, W, H).data, W, H, 8);
         if (colors.length) void applyPalette(colors, file.name);
-        else message.textContent = 'couldn’t pull colours from that image';
+        else message.textContent = i18nT('ed.msg.paletteNoColors');
       } else {
         const text = await file.text();
         const { parsePaletteText } = await import('./paletteIo');
         const colors = parsePaletteText(text, file.name.toLowerCase());
         if (colors.length) void applyPalette(colors, file.name);
-        else message.textContent = 'no colours found in that file (.gpl/.hex/.json supported)';
+        else message.textContent = i18nT('ed.msg.paletteNoFile');
       }
     } catch (err) {
-      message.textContent = `palette import failed: ${(err as Error).message}`;
+      message.textContent = tv('ed.msg.paletteFailed', { err: (err as Error).message });
     }
   });
 
@@ -565,22 +565,22 @@ export function mountToolbar(
   $('#palette-save').addEventListener('click', async () => {
     const colors = store.palette.slice(1).filter((c) => /^#[0-9a-fA-F]{6}$/.test(c));
     if (colors.length === 0) {
-      message.textContent = 'add some colours first';
+      message.textContent = i18nT('ed.msg.addColorsFirst');
       return;
     }
     const { promptModal } = await import('./modal');
     const name = (await promptModal({
-      title: 'Name this palette',
-      placeholder: 'e.g. Derby black & gold',
-      defaultValue: 'My palette',
-      confirmLabel: 'Save palette',
+      title: i18nT('ed.dlg.namePalette'),
+      placeholder: i18nT('ed.dlg.namePaletteHint'),
+      defaultValue: i18nT('ed.dlg.myPalette'),
+      confirmLabel: i18nT('ed.dlg.savePalette'),
       maxLength: 60,
     })) ?? '';
     if (name === '') return;
     const { saveUserPalette, serializePaletteHex } = await import('./paletteIo');
     saveUserPalette(name, colors);
     await refreshMyPalettes();
-    message.textContent = `saved "${name}": find it under your saved palettes`;
+    message.textContent = tv('ed.msg.paletteSaved', { name });
     // Also offer a portable file.
     const blob = new Blob([serializePaletteHex(colors)], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
@@ -604,7 +604,9 @@ export function mountToolbar(
     patternSel.value = '';
     if (!preset) return;
     store.transform(preset.cellAt(map));
-    message.textContent = `pattern "${preset.name}" applied (palette slots 1-3)`;
+    // tl(preset.id), not preset.name: LABEL_KEYS is keyed on the id, which is
+    // also what the <option> labels use, so this cannot drift from the menu.
+    message.textContent = tv('ed.msg.patternApplied', { name: tl(preset.id) });
   });
 
   // Text tool: real-font canvas rasterization → alpha mask → seat stamp.
@@ -672,7 +674,7 @@ export function mountToolbar(
     await loadTifoFonts();
     const rendered = renderTextCanvas(textInput.value, currentFontCss(), Number(textArc.value));
     if (!rendered) {
-      message.textContent = 'type some text first';
+      message.textContent = i18nT('ed.msg.typeTextFirst');
       return;
     }
     const heightSeats = Number(textSize.value);
@@ -719,9 +721,9 @@ export function mountToolbar(
       textFont.appendChild(opt);
       textFont.value = family;
       rebuildTextPreview();
-      message.textContent = `font "${name}" loaded`;
+      message.textContent = tv('ed.msg.fontLoaded', { name });
     } catch (err) {
-      message.textContent = `font load failed: ${(err as Error).message}`;
+      message.textContent = tv('ed.msg.fontFailed', { err: (err as Error).message });
     }
   });
 
@@ -754,10 +756,10 @@ export function mountToolbar(
   $('#legibility').addEventListener('click', () => {
     const fragile = findFragileSeats(store.cells, map);
     if (fragile.length === 0) {
-      message.textContent = `legibility ok: every stroke is ${MIN_LEGIBLE_RUN}+ seats thick`;
+      message.textContent = tv('ed.msg.legibleOk', { n: MIN_LEGIBLE_RUN });
     } else {
       editor.flashSeats(fragile);
-      message.textContent = `${fragile.length.toLocaleString()} seats sit in strokes thinner than ${MIN_LEGIBLE_RUN}, they may vanish with no-shows`;
+      message.textContent = tv('ed.msg.legibleThin', { n: fragile.length.toLocaleString(), min: MIN_LEGIBLE_RUN });
     }
   });
 
@@ -776,7 +778,13 @@ export function mountToolbar(
     store.redo();
     refreshHistory();
   });
+  // Both, deliberately. onDirty covers a repaint that did not move the stacks
+  // (an object bake reaching in through its own stroke); onHistoryChange covers
+  // the case onDirty CANNOT see — a brush stroke commits on pointerup, after
+  // its last flush, so without this the Undo button stayed greyed out until the
+  // next stroke and was always one behind.
   store.onDirty(refreshHistory);
+  store.onHistoryChange(refreshHistory);
   refreshHistory();
 
   // Touch gestures land here: two fingers tapped = undo, double tap = fit.
@@ -1063,21 +1071,21 @@ export function mountToolbar(
     if (!file || !designId) return;
     const { promptModal } = await import('./modal');
     const caption = (await promptModal({
-      title: 'Add a caption',
-      message: 'Optional: describe the match or moment.',
-      placeholder: 'e.g. Liverpool vs Madrid, May 2026',
-      confirmLabel: 'Continue',
+      title: i18nT('ed.dlg.addCaption'),
+      message: i18nT('ed.dlg.captionHint'),
+      placeholder: i18nT('ed.dlg.captionPlaceholder'),
+      confirmLabel: i18nT('ed.dlg.continue'),
       maxLength: 140,
     })) ?? '';
     addPhotoBtn && (addPhotoBtn.disabled = true);
     const original = addPhotoBtn?.innerHTML ?? '';
-    if (addPhotoBtn) addPhotoBtn.textContent = 'Uploading…';
+    if (addPhotoBtn) addPhotoBtn.textContent = i18nT('ed.dlg.uploading');
     try {
       const { uploadPhoto } = await import('../net/api');
       await uploadPhoto(designId, file, caption.trim());
-      message.textContent = 'match-day photo added: it shows as Before/After in the feed';
+      message.textContent = i18nT('ed.msg.photoAdded');
     } catch (err) {
-      message.textContent = `photo upload failed: ${(err as Error).message}`;
+      message.textContent = tv('ed.msg.photoFailed', { err: (err as Error).message });
     } finally {
       if (addPhotoBtn) {
         addPhotoBtn.disabled = false;
@@ -1095,7 +1103,7 @@ export function mountToolbar(
     if (avatar) avatar.textContent = name[0].toUpperCase();
     const menuName = document.getElementById('avatar-menu-name');
     if (menuName) menuName.textContent = `@${name}`;
-    message.textContent = `signed in as ${name}`;
+    message.textContent = tv('ed.msg.signedInAs', { name });
     setAnalyticsSignedIn(true);
     if (fresh) track('signed_up'); // genuine auth this session, not a reload-restore
   };
@@ -1260,7 +1268,7 @@ export function mountToolbar(
     reflectAdmin(false);
     const photoRow2 = document.getElementById('photo-row');
     if (photoRow2) photoRow2.hidden = true;
-    message.textContent = 'signed out';
+    message.textContent = i18nT('ed.msg.signedOut');
   });
 
   // Restore session on load: if a token is present, show the name (no shine).
@@ -1277,7 +1285,7 @@ export function mountToolbar(
   // (A design must be saved first so it has an id / public link.)
   root.querySelector<HTMLButtonElement>('#share-design')?.addEventListener('click', () => {
     if (!designId) {
-      message.textContent = 'save your design (and tick “List in public gallery”) first, then share';
+      message.textContent = i18nT('ed.msg.saveBeforeShare');
       return;
     }
     openShareModal({ id: designId, title: docTitle.value.trim() || i18nT('ed.docTitlePlaceholder') });
@@ -1319,7 +1327,7 @@ export function mountToolbar(
     a.download = `${title.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}.tifo`;
     a.click();
     URL.revokeObjectURL(url);
-    message.textContent = `downloaded "${title}.tifo"`;
+    message.textContent = tv('ed.msg.downloaded', { name: title });
   };
 
   // Load a .tifo file back in — closes the download/upload loop. Validates with
@@ -1333,7 +1341,7 @@ export function mountToolbar(
       try {
         parsed = JSON.parse(text);
       } catch {
-        message.textContent = 'that file isn\u2019t valid JSON';
+        message.textContent = i18nT('ed.msg.notJson');
         return;
       }
       const { validateTifo } = await import('../core/tifoFormat');
@@ -1347,7 +1355,7 @@ export function mountToolbar(
         } catch {
           /* ignore quota */
         }
-        message.textContent = 'opening in the matching stadium\u2026';
+        message.textContent = i18nT('ed.msg.openingStadium');
         location.search = `?template=${encodeURIComponent(stadiumId)}`;
         return;
       }
@@ -1369,9 +1377,9 @@ export function mountToolbar(
       editor.rebuildPalette();
       editor.repaintAll();
       renderPalette();
-      message.textContent = `opened "${title ?? file.name}"`;
+      message.textContent = tv('ed.msg.opened', { name: title ?? file.name });
     } catch (err) {
-      message.textContent = `couldn\u2019t open file: ${(err as Error).message}`;
+      message.textContent = tv('ed.msg.openFailed', { err: (err as Error).message });
     }
   };
 
@@ -1651,7 +1659,7 @@ export function mountToolbar(
       renderPalette();
       message.textContent = ownerIsMe ? `loaded "${title}"` : `loaded "${title}" (read-only copy - Save creates your own)`;
     } catch (err) {
-      message.textContent = `load failed: ${(err as Error).message}`;
+      message.textContent = tv('ed.msg.loadFailed', { err: (err as Error).message });
     }
   };
   // Hidden input for opening .tifo files.
@@ -2010,8 +2018,7 @@ export function mountToolbar(
   const bakeSelected = (): void => {
     const sel = objects.selected;
     if (!sel) return;
-    const dirty = objects.bake(sel, store, map, EDITOR_UNITS.width);
-    store.flush(dirty);
+    const dirty = objects.bake(sel, store, map, EDITOR_UNITS.width); // bake() flushes
     objects.deleteSelected();
     refreshHistory();
     message.textContent = i18nT('ed.obj.baked').replace('{n}', dirty.length.toLocaleString());
@@ -2148,9 +2155,9 @@ export function mountToolbar(
       a.download = `${docTitle.value.trim() || 'tifo'}-reveal.gif`;
       a.click();
       URL.revokeObjectURL(url);
-      message.textContent = `GIF exported (${(blob.size / 1024).toFixed(0)} KB)`;
+      message.textContent = tv('ed.msg.gifExported', { kb: (blob.size / 1024).toFixed(0) });
     } catch (err) {
-      message.textContent = `GIF export failed: ${(err as Error).message}`;
+      message.textContent = tv('ed.msg.gifFailed', { err: (err as Error).message });
     } finally {
       gifBtn.disabled = false;
       gifBtn.innerHTML = '<i class="ti ti-gif"></i> Export GIF';
@@ -2334,7 +2341,7 @@ export function mountToolbar(
         ? `distribution PDF exported (${(blob.size / 1024).toFixed(0)} KB)`
         : `distribution PDF exported: sign in for a clean, watermark-free version`;
     } catch (err) {
-      message.textContent = `PDF export failed: ${(err as Error).message}`;
+      message.textContent = tv('ed.msg.pdfFailed', { err: (err as Error).message });
     } finally {
       pdfBtn.disabled = false;
       pdfBtn.innerHTML = original;
@@ -2358,7 +2365,7 @@ export function mountToolbar(
     URL.revokeObjectURL(url);
     const rows = csv.split('\n').length - 1;
     track('exported', { once: false });
-    message.textContent = `seat manifest exported (${rows.toLocaleString()} seats)`;
+    message.textContent = tv('ed.msg.manifestExported', { n: rows.toLocaleString() });
   });
 
   // Fan QR code: one stadium-wide code that points at /s/:id. Fans scan it,
@@ -2366,7 +2373,7 @@ export function mountToolbar(
   const qrBtn = $('#export-qr') as unknown as HTMLButtonElement;
   qrBtn.addEventListener('click', async () => {
     if (!designId) {
-      message.textContent = 'save or publish your tifo first, the QR points fans to it';
+      message.textContent = i18nT('ed.msg.saveBeforeQr');
       return;
     }
     const url = `${location.origin}/s/${designId}`;
@@ -2375,7 +2382,7 @@ export function mountToolbar(
       const dataUrl = await QR.toDataURL(url, { width: 720, margin: 2, color: { dark: '#0E0A1A', light: '#FFFFFF' } });
       openQrDialog(dataUrl, url, docTitle.value.trim() || 'Tifo');
     } catch {
-      message.textContent = 'could not generate the QR code';
+      message.textContent = i18nT('ed.msg.qrFailed');
     }
   });
 

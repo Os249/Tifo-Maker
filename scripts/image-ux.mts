@@ -43,6 +43,23 @@ function countInk(buf: Buffer): { magenta: number; cyan: number } {
   return { magenta, cyan };
 }
 
+/**
+ * Roughly how much bowl is on screen: the default palette's royal blue and
+ * white seats, which cover the grid at fit zoom. Near zero means the canvas
+ * went black — which is what a dead Pixi renderer looks like.
+ */
+function seatInk(buf: Buffer): number {
+  const png = readPng(buf);
+  let n = 0;
+  for (let i = 0; i < png.data.length; i += 4) {
+    const r = png.data[i], g = png.data[i + 1], b = png.data[i + 2];
+    if (b > 120 && b > r + 40 && g < b) n++;            // royal blue seats
+    else if (r > 200 && g > 190 && b > 180) n++;        // white / cream seats
+    else if (r > 180 && g > 140 && b < 120) n++;        // gold seats
+  }
+  return n;
+}
+
 /** Put a PNG of the given size on the real <input type=file>, as a picker would. */
 async function pickFile(page: Page, w: number, h: number): Promise<void> {
   await page.evaluate(
@@ -162,6 +179,12 @@ async function run(label: string, imgW: number, imgH: number, lang: 'en' | 'ar' 
     check('so is the size readout', strayLatin(armed.size).length === 0, armed.size);
     check('the editor is in RTL', await page.evaluate(() => document.documentElement.getAttribute('dir') === 'rtl'));
   }
+  // The bug did not merely hide the picture: a throw inside the render loop
+  // takes the whole Pixi canvas down, so the seat grid goes black too and the
+  // editor looks dead. Count the bowl's own seat colours, not just the test ink.
+  const bowlBefore = seatInk(await page.screenshot({ clip }));
+  const bowlAfter = seatInk(shot);
+  check('THE BOWL IS STILL DRAWN', bowlAfter > bowlBefore * 0.5 && bowlAfter > 20000, `${bowlBefore} → ${bowlAfter} seat pixels`);
   check(
     'THE PICTURE IS ON SCREEN',
     after.magenta - before.magenta > 2000 && after.cyan - before.cyan > 400,

@@ -77,6 +77,7 @@ export class Editor {
   private stampPreviewH = 0;
 
   private flashTimer: ReturnType<typeof setTimeout> | null = null;
+  private hostObserver: ResizeObserver | null = null;
 
   private painting = false;
   private panning = false;
@@ -139,7 +140,51 @@ export class Editor {
       resolution: Math.min(2, window.devicePixelRatio || 1),
     });
     canvasHost.appendChild(app.canvas);
-    return new Editor(map, store, app);
+    const editor = new Editor(map, store, app);
+    editor.watchHost(canvasHost);
+    return editor;
+  }
+
+  /**
+   * Keep the drawing surface the size of its container.
+   *
+   * `resizeTo: canvasHost` sounds like it does this, but Pixi's resize plugin
+   * only listens to WINDOW resize — a layout change that resizes the host on
+   * its own is never noticed. The editor changes that layout constantly: the
+   * Text, Image and Shape tools each open a tool bar ABOVE the canvas, which
+   * pushes the host down and shortens it while the canvas keeps its old height.
+   * Measured at 1500x900: opening the Text bar left an 818px canvas in a 723px
+   * host, 95px of drawing surface hanging out the bottom, 69px of it below the
+   * window — so the bottom rows of the bowl were simply unreachable, and every
+   * view-dependent number (fit, the minimap rect) was computed against a screen
+   * height the canvas no longer had.
+   *
+   * The transform is deliberately left alone. A resize is not a request to
+   * re-frame the design: refitting here would yank the view out from under
+   * anyone who had zoomed into a stand and then reached for the Text tool.
+   */
+  watchHost(host: HTMLElement): void {
+    if (typeof ResizeObserver === 'undefined') return;
+    let w = 0;
+    let h = 0;
+    this.hostObserver = new ResizeObserver(() => {
+      const r = host.getBoundingClientRect();
+      const nw = Math.round(r.width);
+      const nh = Math.round(r.height);
+      if (nw === w && nh === h) return; // sub-pixel jitter is not a resize
+      w = nw;
+      h = nh;
+      if (nw === 0 || nh === 0) return; // hidden (zen, 3D view): nothing to size to
+      this.app.resize();
+      this.emitView(); // the minimap rect is a fraction of the screen size
+    });
+    this.hostObserver.observe(host);
+  }
+
+  /** Stop watching the host (the editor outlives nothing else, so this is for tests). */
+  unwatchHost(): void {
+    this.hostObserver?.disconnect();
+    this.hostObserver = null;
   }
 
   private tintFor(cell: number): number {
@@ -529,7 +574,17 @@ export class Editor {
       if (pointers.size >= 2) {
         // Second finger down → enter pinch/pan and abort any single-finger action.
         if (this.painting) {
-          this.store.commitStroke();
+          // A dab, or a real stroke? The first finger of a two-finger gesture
+          // has always already painted something — you cannot know it was a
+          // gesture until the second finger lands, and delaying the first dab
+          // would put latency on every stroke. So use the same test the tap
+          // recogniser uses: barely moved, barely any time, and it was the
+          // start of a gesture, not a mark the user meant. Throwing away a
+          // stroke someone actually drew (then reached for a two-finger pan)
+          // would be far worse than keeping a dab, so the guard is strict.
+          const wasADab = performance.now() - gestureStart < 320 && gestureMoved < 14;
+          if (wasADab) this.store.flush(this.store.cancelStroke());
+          else this.store.commitStroke();
           this.painting = false;
         }
         if (this.objectOverlay?.isDragging) this.objectOverlay.endDrag();

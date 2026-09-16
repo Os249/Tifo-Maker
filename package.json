@@ -25,7 +25,8 @@
     "shots:facade": "tsx scripts/facade-preview.mts",
     "shots:matchday": "tsx scripts/matchday-shots.mts",
     "shots:recordsize": "tsx scripts/record-size.mts",
-    "probe:imageux": "tsx scripts/image-ux.mts"
+    "probe:imageux": "tsx scripts/image-ux.mts",
+    "audit:editor": "tsx scripts/editor-audit.mts"
   },
   "dependencies": {
     "@fastify/helmet": "^13.0.2",

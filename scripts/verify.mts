@@ -809,3 +809,76 @@ import { buildStadium as siBuild } from '../src/core/stadiumFit';
   console.log('image: flow strings translated | hard-coded sentences left', stillEnglish.length);
   if (stillEnglish.length) throw new Error(`hard-coded status sentence: ${stillEnglish[0].trim()}`);
 }
+
+// ---------------------------------------------------------------------------
+// The painting experience.
+//
+// Five defects the end-to-end audit (scripts/editor-audit.mts) found by
+// driving the editor rather than reading it. These are the cheap invariants
+// that keep each of them from coming back.
+{
+  const designSrc = roofRead('src/core/design.ts', 'utf8');
+  const editorSrc2 = roofRead('src/render/editor.ts', 'utf8');
+  const objectsSrc = roofRead('src/core/objects.ts', 'utf8');
+  const toolbarSrc2 = roofRead('src/ui/toolbar.ts', 'utf8');
+  const i18nSrc4 = roofRead('src/ui/i18n.ts', 'utf8');
+
+  // 1. The Undo button. onDirty cannot answer "can I undo yet": a brush stroke
+  // flushes on every pointer event and COMMITS on pointerup, so the button's
+  // last refresh happened before the stroke reached the undo stack. It sat
+  // greyed out after the stroke that created something to undo, and lit up
+  // during the next one — always exactly one behind.
+  const historyHook = /onHistoryChange\(fn: \(\) => void\)/.test(designSrc)
+    && /store\.onHistoryChange\(refreshHistory\)/.test(toolbarSrc2);
+  const firesOnCommit = /this\.notifyHistory\(\);\n\s*return diff;/.test(designSrc);
+  console.log('painting: undo button tracks the stacks', historyHook, '| commitStroke announces it', firesOnCommit);
+  if (!historyHook || !firesOnCommit) throw new Error('the Undo button must follow the undo stack, not the dirty set');
+
+  // 2. The canvas has to follow its container. Pixi's resizeTo only listens to
+  // WINDOW resize, and the Text/Image/Shape bars resize the host on their own:
+  // measured at 1500x900, opening the Text bar left an 818px canvas in a 723px
+  // host, so 95px of drawing surface hung out the bottom AND every click landed
+  // higher than it was aimed — text placed at the visible centre came down 18
+  // rows ABOVE the bowl and baked nothing.
+  const watches = /new ResizeObserver\(/.test(editorSrc2) && /watchHost\(canvasHost\)/.test(editorSrc2);
+  console.log('painting: the canvas follows its container', watches);
+  if (!watches) throw new Error('the editor canvas must be resized by a ResizeObserver, not only by window resize');
+
+  // 3. A bake has to reach the screen. Eight of the nine bake call sites never
+  // flushed, so "Bake all" — and the implicit bake before every save and export
+  // — wrote the art into the cells and left the bowl showing the old design.
+  const bakeFlushes = /store\.commitStroke\(\);\n\s*store\.flush\(dirty\);\n\s*return dirty;/.test(objectsSrc);
+  const noDoubleFlush = !/objects\.bake\(sel[^\n]*\n\s*store\.flush\(dirty\)/.test(toolbarSrc2);
+  console.log('painting: bake() flushes its own dirty set', bakeFlushes, '| callers no longer have to', noDoubleFlush);
+  if (!bakeFlushes) throw new Error('ObjectLayer.bake must flush — nine call sites cannot each be trusted to');
+
+  // 4. The first finger of a two-finger gesture has always already painted a
+  // dab. Committing it meant the two-finger-tap undo spent itself undoing the
+  // accident: the toast said "Undone" and nothing the user recognised changed.
+  const cancels = /cancelStroke\(\): number\[\]/.test(designSrc)
+    && /const wasADab =/.test(editorSrc2) && /cancelStroke\(\)/.test(editorSrc2);
+  console.log('painting: an accidental first-finger dab is rolled back, not committed', cancels);
+  if (!cancels) throw new Error('a second finger must cancel a dab, not commit it');
+
+  // 5. Everything the editor says while you paint. These were hard-coded
+  // English, so an Arabic editor answered in English the moment anything
+  // happened — and the palette-preset modal was English end to end.
+  const stray = toolbarSrc2
+    .split('\n')
+    .filter((l) => /message\.textContent = [`']/.test(l) && !/i18nT\(|tv\(|= ''/.test(l));
+  const dialogs = toolbarSrc2
+    .split('\n')
+    .filter((l) => /^\s*(title|message|placeholder|confirmLabel|cancelLabel|defaultValue|hint|label):\s*['`]/.test(l));
+  console.log(`painting: hard-coded status sentences ${stray.length} | hard-coded dialog copy ${dialogs.length}`);
+  if (stray.length) throw new Error(`hard-coded status sentence: ${stray[0].trim()}`);
+  if (dialogs.length) throw new Error(`hard-coded dialog copy: ${dialogs[0].trim()}`);
+  for (const k of ['ed.msg.legibleOk', 'ed.msg.legibleThin', 'ed.msg.patternApplied', 'ed.msg.signedOut',
+    'ed.dlg.applyPalette', 'ed.dlg.remap', 'ed.dlg.namePalette', 'ed.dlg.addCaption']) {
+    const row4 = new RegExp(`'${k.replace(/\./g, '\\.')}':\\s*\\{.*$`, 'm').exec(i18nSrc4)?.[0] ?? '';
+    if (!/\ben:/.test(row4) || !/\bar:/.test(row4)) throw new Error(`editor string "${k}" is missing a translation`);
+  }
+  // A pattern's NAME has no string-table entry; its id does, and the id is also
+  // what the <option> labels use, so the menu and the message cannot drift.
+  if (/tl\(preset\.name\)/.test(toolbarSrc2)) throw new Error('translate the pattern by id, not by name');
+  console.log('painting: every status sentence and dialog carries en + ar');
+}
