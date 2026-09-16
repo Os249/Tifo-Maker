@@ -1,3 +1,4 @@
+import { escapeHtml } from '../core/escape';
 import { listPhotos, photoUrl, thumbnailUrl, type GalleryItem } from '../net/api';
 
 import { t, tTitle } from './i18n';
@@ -120,6 +121,3 @@ export async function openBeforeAfter(item: GalleryItem): Promise<void> {
   showPhoto(0);
 }
 
-function escapeHtml(s: string): string {
-  return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
-}

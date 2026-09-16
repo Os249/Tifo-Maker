@@ -7,6 +7,7 @@
  * Fails gracefully: if there's nothing to show (or the request fails), the whole
  * section hides itself rather than showing an empty box on a cold homepage.
  */
+import { escapeHtml } from './core/escape';
 
 const GRID_ID = 'showcase-grid';
 const SECTION_ID = 'showcase';
@@ -30,7 +31,7 @@ export async function mountShowcase(): Promise<void> {
     grid.innerHTML = items
       .map(
         (item) => `
-        <a class="showcase-card" href="/community" aria-label="${escapeAttr(t('cm.cardBy').replace('{title}', tTitle(item)).replace('{name}', item.ownerName))}">
+        <a class="showcase-card" href="/community" aria-label="${escapeHtml(t('cm.cardBy').replace('{title}', tTitle(item)).replace('{name}', item.ownerName))}">
           <div class="showcase-thumb" style="background-image:url('${thumbnailUrl(item.id)}')"></div>
           <div class="showcase-meta">
             <span class="showcase-title">${escapeHtml(tTitle(item))}</span>
@@ -45,11 +46,3 @@ export async function mountShowcase(): Promise<void> {
   }
 }
 
-function escapeHtml(s: string): string {
-  const d = document.createElement('div');
-  d.textContent = s;
-  return d.innerHTML;
-}
-function escapeAttr(s: string): string {
-  return escapeHtml(s).replace(/"/g, '&quot;');
-}

@@ -1,3 +1,4 @@
+import { escapeHtml } from '../core/escape';
 import {
   listGallery, listPopularTags, reportDesign, thumbnailUrl, voteDesign, isSignedIn,
   type GalleryItem, type GallerySort,
@@ -266,6 +267,3 @@ export async function openGallery(
   await load();
 }
 
-function escapeHtml(s: string): string {
-  return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
-}

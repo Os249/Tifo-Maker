@@ -17,6 +17,7 @@ import { createEmailSender } from './email';
 import { seedTemplates } from './seedTemplates';
 import type { AuthRepository, DesignRepository } from './repo';
 import { envNum } from './env';
+import { logConfigWarnings } from './preflight';
 
 /**
  * Production bootstrap.
@@ -174,6 +175,10 @@ async function main(): Promise<void> {
       publicUrl: process.env.PUBLIC_URL,
     });
   }
+
+  // Say what the deployment has not been told, before it starts serving. Every
+  // one of these has a safe default, which is why they go unnoticed.
+  logConfigWarnings();
 
   const port = envNum('PORT', 8787, 1, 65535);
   await app.listen({ port, host: '0.0.0.0' });

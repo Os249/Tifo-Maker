@@ -16,7 +16,26 @@
  * string concatenation throughout to honour that.
  */
 
-export const ADMIN_HTML = `<!doctype html>
+/**
+ * The dashboard shell.
+ *
+ * `unlocked` decides whether the page carries the dashboard module at all. It
+ * used to always carry it, so /admin.js — nine hundred lines naming every
+ * /api/admin/* endpoint the server has — was readable by anyone who typed the
+ * URL. Every one of those endpoints is gated, so this was a map rather than a
+ * key; but handing a stranger the map is still the first step of everything
+ * that comes after, and there is no reason to.
+ *
+ * The unlock module is always served, because the password form has to exist
+ * before there is anything to prove. It is a separate file rather than an
+ * inline script because the CSP forbids inline script, and duplicating twenty
+ * lines of fetch-and-reload is a better trade than relaxing that.
+ */
+export function adminHtml(unlocked: boolean): string {
+  return ADMIN_HTML_HEAD + (unlocked ? '<script type="module" src="/admin.js"></script>\n' : '') + ADMIN_HTML_TAIL;
+}
+
+const ADMIN_HTML_HEAD = `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -196,11 +215,66 @@ export const ADMIN_HTML = `<!doctype html>
   <p class="note" id="generated"></p>
 </main>
 
-<script type="module" src="/admin.js"></script>
+`;
+
+// The unlock module runs AFTER the dashboard module, so that on an unlocked page
+// it can see __tifoAdminLoaded and stand down. Module scripts execute in
+// document order, so this ordering is the whole mechanism — reversed, both
+// modules attach a submit handler to the same form and the login screen flashes
+// up on every admin page load.
+const ADMIN_HTML_TAIL = `<script type="module" src="/admin-unlock.js"></script>
 </body>
 </html>`;
 
+/**
+ * The unlock form, and nothing else.
+ *
+ * Deliberately knows one endpoint. On success the server sets an HttpOnly
+ * cookie alongside the token, and the reload is what makes the page come back
+ * carrying the dashboard module. The token still goes to localStorage because
+ * that is what every data request sends as a header — the cookie authorises
+ * exactly one thing, fetching a script, and no state-changing request accepts it.
+ */
+export const ADMIN_UNLOCK_JS = `
+var UNLOCK_KEY = 'tifo_ai_unlock_v1';
+function el(id){ return document.getElementById(id); }
+function have(){ try { return !!localStorage.getItem(UNLOCK_KEY); } catch(e){ return false; } }
+
+/* Already signed in and the dashboard module loaded: leave it alone. */
+if (!window.__tifoAdminLoaded) {
+  var login = el('login');
+  if (login) login.style.display = '';
+  var form = el('login-form') || login;
+  if (form) form.addEventListener('submit', async function(ev){
+    ev.preventDefault();
+    var p = el('p').value;
+    var msg = el('msg');
+    if (!p){ msg.textContent = 'Enter the admin password.'; return; }
+    msg.textContent = 'Signing in...';
+    var res, data = null;
+    try {
+      res = await fetch('/api/ai/unlock', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ password: p }) });
+      data = await res.json();
+    } catch(e){ msg.textContent = 'Could not reach the server.'; return; }
+    if (!res.ok || !data || !data.token){
+      msg.textContent = 'Wrong password, or no admin password is configured on the server.';
+      return;
+    }
+    try { localStorage.setItem(UNLOCK_KEY, data.token); } catch(e){}
+    el('p').value = '';
+    location.reload();
+  });
+  if (have() && !window.__tifoAdminLoaded) {
+    /* localStorage says unlocked but the page came back without the dashboard,
+       so the cookie has expired. Say so rather than showing a blank shell. */
+    var m = el('msg');
+    if (m) m.textContent = 'Your session expired. Enter the password again.';
+  }
+}
+`;
+
 export const ADMIN_JS = `
+window.__tifoAdminLoaded = true;
 var UNLOCK_KEY = 'tifo_ai_unlock_v1';
 var currentDays = 30;
 /* The free ceiling, for the copy in the AI tab. Mirrors AI_FREE_LIMIT's default
@@ -271,7 +345,14 @@ async function doLogin(ev){
   showDash();
   await loadAll();
 }
-async function doLogout(){ clearUnlock(); showLogin('Signed out.'); }
+async function doLogout(){
+  clearUnlock();
+  /* Clear the cookie as well, or the page keeps being served the dashboard
+     module after signing out. Best-effort: a failed clear must not trap anyone
+     on a page they are trying to leave. */
+  try { await fetch('/api/ai/unlock', { method:'DELETE' }); } catch(e){}
+  location.reload();
+}
 
 async function loadAll(){
   setStatus('Loading...');

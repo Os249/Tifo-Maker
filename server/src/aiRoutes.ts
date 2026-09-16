@@ -20,7 +20,7 @@
  * HMAC key).
  */
 
-import { createHmac, timingSafeEqual } from 'node:crypto';
+import { createHmac, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { AiEventsRepository, AiOutcome, AiUsageRepository } from './repo';
 import { secondsToNextPeriod } from './repo';
@@ -63,7 +63,19 @@ export interface GenOutcome {
   detail?: string;
 }
 const PREMIUM_RETRY_SEC = 90; // "wait and retry" countdown when premium is busy
-const UNLOCK_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+/**
+ * How long an unlock token lives.
+ *
+ * Was 30 days. This one token is the whole key to the AI designer and every
+ * /api/admin/* endpoint, and it lives in a browser on whatever machine the
+ * operator last used — a month is a long time for that to be true of a laptop.
+ * Twelve hours covers a working day and expires overnight; AI_UNLOCK_TTL_HOURS
+ * raises it to at most a week for anyone who genuinely needs longer.
+ */
+const UNLOCK_TTL_MS = Math.min(
+  7 * 24 * 60 * 60 * 1000,
+  Math.max(1, Number(process.env.AI_UNLOCK_TTL_HOURS) || 12) * 60 * 60 * 1000,
+);
 // Result cache: identical (mode+prompt+stadium+provider) generations return the
 // prior model design instantly — no model call, no image gen. Cuts tokens + RPD.
 const genCache = new TtlCache<{ spec: TifoSpec; source: 'model' }>(80, 30 * 60 * 1000);
@@ -129,20 +141,76 @@ function safeEqual(a: string, b: string): boolean {
   return timingSafeEqual(ba, bb);
 }
 
-/** Sign an unlock token: "<exp>.<hmac>", keyed by the admin password. */
-function signUnlock(secret: string, exp: number): string {
-  const sig = createHmac('sha256', secret).update(`ai-admin:${exp}`).digest('hex');
-  return `${exp}.${sig}`;
+/**
+ * The HMAC key for unlock tokens, derived from the admin password.
+ *
+ * It used to BE the admin password. An HMAC key is recoverable offline from a
+ * single signed message at roughly 500,000 guesses per second per core, so
+ * anyone who ever held one issued token — a browser extension, a shared
+ * screenshot, a proxy log — could work the password back out at leisure. And
+ * that one password gates the AI designer and every /api/admin/* endpoint.
+ *
+ * Putting scrypt in front makes each of those guesses cost 348 ms instead of
+ * two microseconds: about eight orders of magnitude, which is the difference
+ * between an afternoon and never.
+ *
+ * The salt is fixed rather than random because the key has to come out the same
+ * on every process and after every restart, and there is nowhere to keep a
+ * random one. That is the normal trade for a derived key with no store: it
+ * costs the (irrelevant here) protection against a precomputed table of one
+ * specific application's admin passwords, and keeps all of the per-guess cost,
+ * which is the part that matters.
+ *
+ * Cached, and this is not an optimisation — verifyUnlock runs on EVERY AI and
+ * admin request, and a 348 ms derivation per request would be a denial of
+ * service we inflicted on ourselves.
+ */
+const unlockKeys = new Map<string, Buffer>();
+function unlockKey(secret: string): Buffer {
+  let key = unlockKeys.get(secret);
+  if (!key) {
+    key = scryptSync(secret, Buffer.from('tifomaker/ai-unlock/v2'), 32, { N: 65536, r: 8, p: 2, maxmem: 256 * 65536 * 8 });
+    unlockKeys.set(secret, key);
+  }
+  return key;
 }
 
-/** Verify an unlock token against the current password (and its expiry). */
+/**
+ * Sign an unlock token: "v2.<exp>.<jti>.<hmac>".
+ *
+ * `jti` is a random id, so two tokens issued in the same millisecond differ and
+ * a token can be named in a log without printing the token itself. It is not a
+ * revocation handle: revoking one token would need somewhere to write it down,
+ * and an in-memory list would be undone by the next restart or the next
+ * instance — theatre rather than a control. The lever that does work is rotating
+ * AI_ADMIN_PASSWORD, which the derivation above makes total and immediate,
+ * because every existing token is keyed to the old one.
+ */
+function signUnlock(secret: string, exp: number, jti = randomBytes(9).toString('hex')): string {
+  const sig = createHmac('sha256', unlockKey(secret)).update(`ai-admin:${exp}:${jti}`).digest('hex');
+  return `v2.${exp}.${jti}.${sig}`;
+}
+
+/**
+ * Verify an unlock token against the current password (and its expiry).
+ *
+ * Tokens signed before the key derivation existed are refused rather than
+ * grandfathered: there are only ever a handful outstanding, they are held by
+ * the operator, and re-entering the password costs one click — whereas
+ * accepting them would keep the recoverable-key window open for their full life.
+ */
 export function verifyUnlock(secret: string, token: string): boolean {
-  const dot = token.indexOf('.');
-  if (dot <= 0) return false;
-  const exp = Number(token.slice(0, dot));
+  const parts = token.split('.');
+  if (parts.length !== 4 || parts[0] !== 'v2') return false;
+  const exp = Number(parts[1]);
   if (!Number.isFinite(exp) || exp < Date.now()) return false;
-  const expected = createHmac('sha256', secret).update(`ai-admin:${exp}`).digest('hex');
-  return safeEqual(token.slice(dot + 1), expected);
+  // Bound the horizon too. A token whose expiry is years out is either forged
+  // against a leaked key or was minted before the TTL came down, and neither is
+  // something to honour.
+  if (exp > Date.now() + UNLOCK_TTL_MS + 60_000) return false;
+  if (!/^[0-9a-f]{18}$/.test(parts[2])) return false;
+  const expected = createHmac('sha256', unlockKey(secret)).update(`ai-admin:${exp}:${parts[2]}`).digest('hex');
+  return safeEqual(parts[3], expected);
 }
 
 export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void {
@@ -205,7 +273,26 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
       : '';
     if (!pw || !safeEqual(pw, adminPassword)) return reply.code(401).send({ error: 'incorrect password' });
     const exp = Date.now() + UNLOCK_TTL_MS;
-    return { token: signUnlock(adminPassword, exp), expiresAt: new Date(exp).toISOString() };
+    const token = signUnlock(adminPassword, exp);
+    // The same token as a cookie, for the one thing a header cannot do: let a
+    // <script src> and a browser navigation prove who they are, so /admin.js
+    // can stop being public. HttpOnly, so script cannot read it back out;
+    // SameSite=Strict, so it never leaves this site; Secure whenever the request
+    // arrived over TLS — unconditionally Secure would silently break admin on a
+    // local http dev server, which reads as "the password is wrong".
+    const secure = req.protocol === 'https' || process.env.NODE_ENV === 'production';
+    void reply.header('set-cookie',
+      `tm_admin=${encodeURIComponent(token)}; Path=/; Max-Age=${Math.floor(UNLOCK_TTL_MS / 1000)}; HttpOnly; SameSite=Strict${secure ? '; Secure' : ''}`);
+    return { token, expiresAt: new Date(exp).toISOString() };
+  });
+
+  // Signing out has to clear the cookie too, or the dashboard module keeps
+  // being served to a browser whose localStorage token is gone.
+  app.delete('/api/ai/unlock', async (req, reply) => {
+    const secure = req.protocol === 'https' || process.env.NODE_ENV === 'production';
+    void reply.header('set-cookie',
+      `tm_admin=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict${secure ? '; Secure' : ''}`);
+    return reply.code(204).send();
   });
 
   app.get('/api/ai/quota', async (req, reply) => {

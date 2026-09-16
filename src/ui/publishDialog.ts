@@ -14,6 +14,7 @@
  * Everything here is optional. The primary button works with the form untouched.
  */
 
+import { escapeHtml } from '../core/escape';
 import { t } from './i18n';
 
 export interface PublishChoice {
@@ -113,6 +114,3 @@ export function openPublishDialog(opts: {
   });
 }
 
-function escapeHtml(s: string): string {
-  return s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c] as string);
-}

@@ -1,3 +1,4 @@
+import { escapeHtml } from '../core/escape';
 import type { Editor } from '../render/editor';
 import type { DesignStore } from '../core/design';
 import type { SeatMap, ToolId } from '../core/types';
@@ -2332,8 +2333,8 @@ export function mountToolbar(
         <button class="qr-close" aria-label="Close">&times;</button>
         <h3 class="qr-h3">Fan QR code</h3>
         <p class="qr-lead">Print this on the cards, banners, or the big screen. Fans scan it, pick their seat, and see exactly which colour to hold up.</p>
-        <img class="qr-img" src="${dataUrl}" alt="QR code for ${escapeHtmlLocal(name)}" />
-        <div class="qr-url">${escapeHtmlLocal(url)}</div>
+        <img class="qr-img" src="${dataUrl}" alt="QR code for ${escapeHtml(name)}" />
+        <div class="qr-url">${escapeHtml(url)}</div>
         <div class="qr-actions">
           <button class="primary" id="qr-download"><i class="ti ti-download"></i> Download PNG</button>
           <button id="qr-copy"><i class="ti ti-link"></i> Copy link</button>
@@ -2361,9 +2362,4 @@ export function mountToolbar(
     });
   }
 
-  function escapeHtmlLocal(s: string): string {
-    const d = document.createElement('div');
-    d.textContent = s;
-    return d.innerHTML;
-  }
 }

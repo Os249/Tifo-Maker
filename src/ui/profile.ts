@@ -1,3 +1,4 @@
+import { escapeHtml } from '../core/escape';
 import { fetchProfile, thumbnailUrl, type GalleryItem } from '../net/api';
 
 import { t, tTitle } from './i18n';
@@ -97,6 +98,3 @@ export async function openProfile(userId: string, onPick: (id: string) => void):
   }
 }
 
-function escapeHtml(s: string): string {
-  return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
-}

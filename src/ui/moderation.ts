@@ -1,3 +1,4 @@
+import { escapeHtml } from '../core/escape';
 import {
   listReports, dismissReport, takedownDesign,
   listUnverifiedPhotos, verifyPhoto, adminDeletePhoto,
@@ -167,6 +168,3 @@ export async function openModeration(startOn: ModerationTab = 'reports'): Promis
   await load();
 }
 
-function escapeHtml(s: string): string {
-  return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
-}

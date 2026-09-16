@@ -210,3 +210,187 @@ async function makeDesign(app: FastifyInstance, token: string, isPublic = false)
   console.log('audit regressions: all assertions passed (admin case-collision, $-expansion DoS, title bounds, private photos, email enumeration, query arrays, Host-forged reset links)');
 
 }
+
+// ---------- 2026-09 audit, round two ----------
+//
+// The findings the first pass left open, each one reproduced the same way the
+// first pass reproduced its own: assert the attack FAILS, not that the code
+// looks right.
+{
+  const { scryptSync, createHmac } = await import('node:crypto');
+  const { hashPassword, verifyPassword, SCRYPT_PARAMS } = await import('../src/auth');
+  const { verifyUnlock } = await import('../src/aiRoutes');
+  const { configWarnings } = await import('../src/preflight');
+  const { escapeHtml } = await import('../../src/core/escape');
+  const { MemoryAiUsageRepository } = await import('../src/memoryRepo');
+
+  const auth = new MemoryAuthRepository();
+  const designs = new MemoryDesignRepository((id) => auth.usernameOf(id));
+  const social = new MemorySocialRepository(designs, auth);
+  const leads = new MemoryLeadsRepository();
+  process.env.AI_ADMIN_PASSWORD = 'correct horse battery staple';
+  // aiUsage is what registers the AI routes, and /api/ai/unlock is one of them.
+  const app = await buildApp(designs, auth, templates, { social, leads, aiUsage: new MemoryAiUsageRepository() });
+
+  // ---- MEDIUM: the login timing oracle ----
+  // A missing account used to short-circuit in ~0.3 ms against ~35 ms for a real
+  // one. The bodies were always identical; the clock was the oracle. Medians of
+  // three, because one sample on a busy machine proves nothing either way.
+  await reg(app, 'timing_alice');
+  const timeLogin = async (username: string): Promise<number> => {
+    const t0 = process.hrtime.bigint();
+    await app.inject({ method: 'POST', url: '/api/auth/login', payload: { username, password: 'definitely wrong' } });
+    return Number(process.hrtime.bigint() - t0) / 1e6;
+  };
+  const median = async (u: string): Promise<number> => {
+    const runs = [await timeLogin(u), await timeLogin(u), await timeLogin(u)].sort((a, b) => a - b);
+    return runs[1];
+  };
+  const realMs = await median('timing_alice');
+  const missingMs = await median('nobody_has_this_name_at_all');
+  assert.ok(
+    missingMs > realMs / 3,
+    `a missing account must not answer faster than a real one: ${missingMs.toFixed(0)}ms vs ${realMs.toFixed(0)}ms`,
+  );
+
+  // ---- MEDIUM: scrypt cost, and upgrading in place ----
+  const fresh = await hashPassword('password1234');
+  assert.match(fresh, /^s2:\d+:\d+:\d+:[0-9a-f]{32}:[0-9a-f]{64}$/, 'a new hash records the parameters it was made with');
+  assert.ok(SCRYPT_PARAMS.N >= 65536, 'scrypt N is at or above the raised floor');
+  assert.equal((await verifyPassword('password1234', fresh)).ok, true);
+  assert.equal((await verifyPassword('wrong', fresh)).ok, false);
+  assert.equal((await verifyPassword('password1234', fresh)).needsRehash, false, 'a current hash does not need rehashing');
+
+  // A hash in the old unprefixed form still verifies — nobody is locked out —
+  // and is flagged for upgrade.
+  const legacySalt = Buffer.from('00112233445566778899aabbccddeeff', 'hex');
+  const legacy = `${legacySalt.toString('hex')}:${scryptSync('password1234', legacySalt, 32).toString('hex')}`;
+  const legacyCheck = await verifyPassword('password1234', legacy);
+  assert.equal(legacyCheck.ok, true, 'an old hash still verifies');
+  assert.equal(legacyCheck.needsRehash, true, 'and is marked for upgrade');
+  assert.equal((await verifyPassword('wrong', legacy)).needsRehash, false, 'a wrong password never triggers a rehash');
+
+  // And the upgrade actually happens, on the one occasion the password is in
+  // the clear: a successful sign-in.
+  const bob = await reg(app, 'rehash_bob');
+  await auth.setPasswordHash(bob.id, legacy);
+  assert.equal((await auth.getUserById(bob.id))!.passwordHash, legacy);
+  const relog = await app.inject({ method: 'POST', url: '/api/auth/login', payload: { username: 'rehash_bob', password: 'password1234' } });
+  assert.equal(relog.statusCode, 200, 'the old password still signs in');
+  const after = (await auth.getUserById(bob.id))!.passwordHash;
+  assert.ok(after.startsWith('s2:'), 'and the stored hash was upgraded in place');
+  assert.equal((await verifyPassword('password1234', after)).ok, true, 'the upgraded hash still matches the same password');
+
+  // A stored row must not be able to ask for an unbounded allocation.
+  assert.equal((await verifyPassword('x', 's2:1073741824:8:1:aa:bb')).ok, false, 'an absurd N in the stored hash is refused, not honoured');
+
+  // ---- MEDIUM: the unlock token's key ----
+  const pw = 'correct horse battery staple';
+  const unlockRes = await app.inject({ method: 'POST', url: '/api/ai/unlock', payload: { password: pw } });
+  assert.equal(unlockRes.statusCode, 200);
+  const unlockToken = unlockRes.json().token as string;
+  assert.equal(verifyUnlock(pw, unlockToken), true, 'a freshly issued token verifies');
+  assert.equal(verifyUnlock('some other password', unlockToken), false);
+
+  // The whole finding: the key used to BE the password, so one token recovered
+  // it offline. A token signed with the raw password must no longer verify.
+  const exp = Date.now() + 60_000;
+  const jti = 'aabbccddeeff001122';
+  const rawKeyed = `v2.${exp}.${jti}.${createHmac('sha256', pw).update(`ai-admin:${exp}:${jti}`).digest('hex')}`;
+  assert.equal(verifyUnlock(pw, rawKeyed), false, 'the admin password is no longer the HMAC key');
+
+  // Old-format tokens are refused rather than grandfathered.
+  const oldFormat = `${exp}.${createHmac('sha256', pw).update(`ai-admin:${exp}`).digest('hex')}`;
+  assert.equal(verifyUnlock(pw, oldFormat), false, 'a pre-derivation token is refused');
+
+  // And the TTL is actually bounded: a token claiming to last a year is not
+  // honoured even if it were correctly signed.
+  const far = Date.now() + 365 * 24 * 3600 * 1000;
+  assert.equal(verifyUnlock(pw, `v2.${far}.${jti}.deadbeef`), false, 'an expiry beyond the TTL horizon is refused');
+  assert.equal(verifyUnlock(pw, `v2.${Date.now() - 1000}.${jti}.deadbeef`), false, 'an expired token is refused');
+
+  // ---- STILL WORTH DOING #5: the /admin shell ----
+  const cookieHeader = unlockRes.headers['set-cookie'];
+  const cookie = Array.isArray(cookieHeader) ? cookieHeader[0] : String(cookieHeader ?? '');
+  assert.match(cookie, /^tm_admin=/, 'unlocking sets the admin cookie');
+  assert.match(cookie, /HttpOnly/, 'which script cannot read back');
+  assert.match(cookie, /SameSite=Strict/, 'and which never leaves this site');
+
+  const jsAnon = await app.inject({ method: 'GET', url: '/admin.js' });
+  assert.equal(jsAnon.statusCode, 404, 'the dashboard module is not public');
+  const jsAuthed = await app.inject({ method: 'GET', url: '/admin.js', headers: { cookie: cookie.split(';')[0] } });
+  assert.equal(jsAuthed.statusCode, 200, 'and is served to an unlocked browser');
+  assert.ok(jsAuthed.body.includes('/api/admin/'), 'the module really does carry the endpoint map that was being given away');
+
+  const shellAnon = await app.inject({ method: 'GET', url: '/admin' });
+  assert.equal(shellAnon.statusCode, 200, 'the shell still loads, or nobody could sign in');
+  assert.ok(!shellAnon.body.includes('src="/admin.js"'), 'but it does not point at the module');
+  assert.ok(shellAnon.body.includes('src="/admin-unlock.js"'), 'it points at the password form instead');
+  const shellAuthed = await app.inject({ method: 'GET', url: '/admin', headers: { cookie: cookie.split(';')[0] } });
+  assert.ok(shellAuthed.body.includes('src="/admin.js"'), 'an unlocked browser gets the module');
+  // Ordering is the mechanism that stops both modules binding the same form.
+  assert.ok(
+    shellAuthed.body.indexOf('src="/admin.js"') < shellAuthed.body.indexOf('src="/admin-unlock.js"'),
+    'the dashboard module runs before the unlock module, so the unlock module can stand down',
+  );
+  assert.equal((await app.inject({ method: 'GET', url: '/admin-unlock.js' })).statusCode, 200, 'the password form is always reachable');
+  const signedOut = await app.inject({ method: 'DELETE', url: '/api/ai/unlock' });
+  assert.equal(signedOut.statusCode, 204);
+  assert.match(String(signedOut.headers['set-cookie']), /Max-Age=0/, 'signing out clears the cookie');
+
+  // ---- LOW: comments on private designs ----
+  const owner = await reg(app, 'comment_owner');
+  const stranger = await reg(app, 'comment_stranger');
+  const priv = await makeDesign(app, owner.token, false);
+  const pub = await makeDesign(app, owner.token, true);
+
+  const postPriv = await app.inject({ method: 'POST', url: `/api/designs/${priv}/comments`, headers: bearer(stranger.token), payload: { body: 'hello' } });
+  assert.equal(postPriv.statusCode, 404, 'a stranger cannot comment on a private design');
+  const readPriv = await app.inject({ method: 'GET', url: `/api/designs/${priv}/comments` });
+  assert.equal(readPriv.statusCode, 404, 'nor read its thread back anonymously');
+  const ownerReads = await app.inject({ method: 'GET', url: `/api/designs/${priv}/comments`, headers: bearer(owner.token) });
+  assert.equal(ownerReads.statusCode, 200, 'the owner still can');
+  const postPub = await app.inject({ method: 'POST', url: `/api/designs/${pub}/comments`, headers: bearer(stranger.token), payload: { body: 'nice' } });
+  assert.equal(postPub.statusCode, 201, 'and a public design still takes comments');
+
+  // ---- LOW: ids that are not ids ----
+  const badReport = await app.inject({ method: 'POST', url: '/api/report', payload: { targetType: 'design', targetId: 'not-a-uuid', reason: 'spam' } });
+  assert.equal(badReport.statusCode, 400, 'a malformed id is a bad request, not a server error');
+  const badFollow = await app.inject({ method: 'POST', url: '/api/users/not-a-uuid/follow', headers: bearer(stranger.token) });
+  assert.equal(badFollow.statusCode, 400);
+  const badUnfollow = await app.inject({ method: 'DELETE', url: '/api/users/not-a-uuid/follow', headers: bearer(stranger.token) });
+  assert.equal(badUnfollow.statusCode, 400);
+  const goodFollow = await app.inject({ method: 'POST', url: `/api/users/${owner.id}/follow`, headers: bearer(stranger.token) });
+  assert.equal(goodFollow.statusCode, 200, 'a real id still works');
+
+  // ---- LOW: escapeHtml and quotes ----
+  assert.equal(escapeHtml(`a"b'c<d>e&f`), 'a&quot;b&#39;c&lt;d&gt;e&amp;f', 'quotes are escaped, so an attribute cannot be closed early');
+  const { readdirSync, readFileSync, statSync } = await import('node:fs');
+  const walk = (dir: string): string[] =>
+    readdirSync(dir).flatMap((n) => {
+      const p = `${dir}/${n}`;
+      return statSync(p).isDirectory() ? walk(p) : p.endsWith('.ts') ? [p] : [];
+    });
+  const copies = walk('src').filter((f) => f !== 'src/core/escape.ts' && /function escapeHtml|function escapeAttr|function escapeHtmlLocal/.test(readFileSync(f, 'utf8')));
+  assert.deepEqual(copies, [], 'there is one escapeHtml, so the next one is an import');
+
+  // ---- the boot-time config report ----
+  const quiet = configWarnings({ NODE_ENV: 'development', AI_ADMIN_PASSWORD: 'x' } as NodeJS.ProcessEnv);
+  assert.deepEqual(quiet, [], 'a configured dev box says nothing');
+  const prodBare = configWarnings({ NODE_ENV: 'production' } as NodeJS.ProcessEnv).map((w) => w.key);
+  assert.deepEqual(prodBare.sort(), ['AI_ADMIN_PASSWORD', 'PUBLIC_URL', 'TRUST_PROXY'], 'production names what it was not told');
+  const silentPortraits = configWarnings({ AI_IMAGE_PROVIDER: 'gemini', AI_ADMIN_PASSWORD: 'x' } as NodeJS.ProcessEnv);
+  assert.equal(silentPortraits.length, 1, 'gemini with no key is reported');
+  assert.match(silentPortraits[0].effect, /face missing/, 'and says what it will actually look like');
+  assert.deepEqual(
+    configWarnings({ AI_IMAGE_PROVIDER: 'gemini', GEMINI_API_KEY: 'k', AI_ADMIN_PASSWORD: 'x' } as NodeJS.ProcessEnv),
+    [],
+    'gemini with a key is fine',
+  );
+  // Unset is the safe default (Pollinations), so it must NOT warn — a warning
+  // nobody needs to act on is how people learn to skip the whole block.
+  assert.deepEqual(configWarnings({ AI_ADMIN_PASSWORD: 'x' } as NodeJS.ProcessEnv), [], 'an unset image provider is the free default, not a fault');
+
+  delete process.env.AI_ADMIN_PASSWORD;
+  console.log('audit round two: all assertions passed (login timing, scrypt cost + in-place upgrade, derived unlock key, gated /admin.js, private comments, id validation, one escapeHtml, boot config report)');
+}

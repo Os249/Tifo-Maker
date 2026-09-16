@@ -5,7 +5,7 @@ import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest }
 import rateLimit from '@fastify/rate-limit';
 import helmet from '@fastify/helmet';
 import fastifyStatic from '@fastify/static';
-import { hashPassword, hashToken, issueToken, TOKEN_TTL_MS, verifyPassword } from './auth';
+import { dummyHash, hashPassword, hashToken, issueToken, TOKEN_TTL_MS, verifyPassword } from './auth';
 import { gunzipBytes, gzipBytes, u32FromB64, u8FromB64 } from './codec';
 import { generateSeatMap } from '../../src/core/seatmap';
 import { TEMPLATES } from '../../src/core/template';
@@ -21,7 +21,7 @@ import type { StadiumSubmissionRepository } from './stadiumRepo';
 import type { AdminStatsRepository } from './statsRepo';
 import { buildVisit, isSocialHost, type TrafficRepository } from './trafficRepo';
 import { isFeedbackKind, type FeedbackContext, type FeedbackRepository } from './feedbackRepo';
-import { ADMIN_HTML, ADMIN_JS } from './adminPage';
+import { adminHtml, ADMIN_JS, ADMIN_UNLOCK_JS } from './adminPage';
 import { isValidTemplate } from '../../src/core/customStadiums';
 
 /**
@@ -314,6 +314,19 @@ export async function buildApp(
   // Admin gate for read-only analytics: either a valid AI_ADMIN_PASSWORD unlock token
   // (the dashboard exchanges the password for one via /api/ai/unlock) or a signed-in
   // ADMIN_USERNAMES account. Hoisted here so the funnel and traffic endpoints share it.
+  const UNLOCK_COOKIE = 'tm_admin';
+  /** One cookie by name. No cookie plugin is registered, and one line is enough. */
+  const readCookie = (req: FastifyRequest, name: string): string | null => {
+    const raw = req.headers.cookie;
+    if (typeof raw !== 'string') return null;
+    for (const part of raw.split(';')) {
+      const eq = part.indexOf('=');
+      if (eq < 0) continue;
+      if (part.slice(0, eq).trim() === name) return decodeURIComponent(part.slice(eq + 1).trim());
+    }
+    return null;
+  };
+
   const aiAdminPassword = process.env.AI_ADMIN_PASSWORD;
   const adminAccess = async (req: FastifyRequest): Promise<boolean> => {
     const tok = req.headers['x-ai-unlock'];
@@ -690,9 +703,34 @@ export async function buildApp(
   // cross-origin CDNs, so the JS is served from our own origin and all charts are
   // hand-drawn SVG (no external libraries). Registered before the SPA fallback so
   // /admin and /admin.js resolve to these, not index.html.
-  app.get('/admin', async (_req, reply) => reply.type('text/html').send(ADMIN_HTML));
-  app.get('/admin.js', async (_req, reply) =>
-    reply.header('cache-control', 'no-cache').type('text/javascript').send(ADMIN_JS),
+  //
+  // /admin.js names every /api/admin/* endpoint the server has, and it was
+  // served to anyone who typed the URL. All of those endpoints are gated, so it
+  // was a map rather than a key — but a map is the first step of everything that
+  // comes after, and there is no reason to hand one out. It is now behind the
+  // same unlock the data is, and the shell only references it when the caller
+  // can already prove they are through.
+  //
+  // The proof is a cookie rather than the x-ai-unlock header, because a <script
+  // src> and a browser navigation cannot send a header. It is HttpOnly (so the
+  // token cannot be read back out by script), Secure, SameSite=Strict, and it
+  // authorises exactly one thing: fetching a script. Every endpoint that
+  // *changes* anything still requires the header, so the cookie carries no CSRF
+  // surface — there is no state-changing request it can authorise.
+  const adminUnlocked = async (req: FastifyRequest): Promise<boolean> => {
+    const cookie = readCookie(req, UNLOCK_COOKIE);
+    if (cookie && aiAdminPassword && verifyUnlock(aiAdminPassword, cookie)) return true;
+    return adminAccess(req);
+  };
+  app.get('/admin', async (req, reply) =>
+    reply.type('text/html').header('cache-control', 'no-store').send(adminHtml(await adminUnlocked(req))));
+  app.get('/admin.js', async (req, reply) => {
+    // 404 and not 403: a 403 confirms the file is there to be had.
+    if (!(await adminUnlocked(req))) return reply.code(404).send({ error: 'not found' });
+    return reply.header('cache-control', 'no-store').type('text/javascript').send(ADMIN_JS);
+  });
+  app.get('/admin-unlock.js', async (_req, reply) =>
+    reply.header('cache-control', 'no-cache').type('text/javascript').send(ADMIN_UNLOCK_JS),
   );
 
   // ---------- auth ----------
@@ -838,7 +876,7 @@ export async function buildApp(
       return reply.code(409).send({ error: 'username or email taken' });
     }
     const version = typeof acceptedVersion === 'string' ? acceptedVersion.slice(0, 32) : null;
-    const user = await auth.createUser(username, hashPassword(password), { email: mail, acceptedVersion: version });
+    const user = await auth.createUser(username, await hashPassword(password), { email: mail, acceptedVersion: version });
     if (!user) return reply.code(409).send({ error: 'username or email taken' });
     const { token, tokenHash } = issueToken();
     await auth.createToken(user.id, tokenHash, new Date(Date.now() + TOKEN_TTL_MS));
@@ -952,10 +990,11 @@ export async function buildApp(
       return reply.code(400).send({ error: 'new password must be at least 8 characters' });
     }
     const user = await auth.getUserById(userId).catch(() => null);
-    if (!user || !currentPassword || !verifyPassword(currentPassword, user.passwordHash)) {
+    const current = await verifyPassword(currentPassword ?? '', user?.passwordHash ?? await dummyHash());
+    if (!user || !currentPassword || !current.ok) {
       return reply.code(401).send({ error: 'current password is incorrect' });
     }
-    await auth.setPasswordHash(userId, hashPassword(newPassword));
+    await auth.setPasswordHash(userId, await hashPassword(newPassword));
     // Changing a password is what someone does when they think a session is
     // compromised. It has to end the other sessions, or it is theatre: tokens
     // live 30 days, so a stolen one otherwise outlived the "fix" by a month.
@@ -987,7 +1026,7 @@ export async function buildApp(
     }
     const userId = token ? await auth.consumeEmailToken(hashToken(token), 'reset_password') : null;
     if (!userId) return reply.code(400).send({ error: 'invalid or expired reset link' });
-    await auth.setPasswordHash(userId, hashPassword(newPassword));
+    await auth.setPasswordHash(userId, await hashPassword(newPassword));
     await auth.deleteUserTokens(userId);
     return reply.code(200).send({ ok: true });
   });
@@ -1001,8 +1040,20 @@ export async function buildApp(
     if (!user && username && username.includes('@')) {
       user = await auth.getUserByEmail(username);
     }
-    if (!user || !password || !verifyPassword(password, user.passwordHash)) {
+    // Always hash, even when no account matched. The bodies below were already
+    // identical for both cases; the CLOCK was the oracle — a missing account
+    // short-circuited in about 0.3 ms against 35 for a real one, which is enough
+    // to enumerate who has an account here. Verifying against a dummy spends the
+    // same time on an address that has never registered.
+    const check = await verifyPassword(password ?? '', user?.passwordHash ?? await dummyHash());
+    if (!user || !password || !check.ok) {
       return reply.code(401).send({ error: 'invalid credentials' });
+    }
+    // Right password, weaker parameters than we now use: this is the only moment
+    // the password exists in the clear, so it is the only moment it can be
+    // upgraded. Best-effort — a failed rehash must not fail the sign-in.
+    if (check.needsRehash) {
+      await auth.setPasswordHash(user.id, await hashPassword(password)).catch(() => {});
     }
     const { token, tokenHash } = issueToken();
     await auth.createToken(user.id, tokenHash, new Date(Date.now() + TOKEN_TTL_MS));
@@ -1144,6 +1195,7 @@ export async function buildApp(
     if (!body.targetId || typeof body.reason !== 'string' || !body.reason.trim()) {
       return reply.code(400).send({ error: 'targetId and reason required' });
     }
+    if (badId(body.targetId, reply)) return;
     const reportId = await repo.report(type, body.targetId, reporterId, body.reason.trim());
     return { reportId, status: 'received' };
   });
@@ -1377,6 +1429,21 @@ export async function buildApp(
   });
 
   /** Load + visibility check. Sends 404 itself when not visible. */
+  /**
+   * Every id this API hands out is a UUID. Anything else reached the driver and
+   * came back as an unhandled Postgres error — "invalid input syntax for type
+   * uuid" — which the error handler correctly turned into a 500. A 500 is the
+   * server saying it broke; a client sending `abc` as an id has sent a bad
+   * request, and saying so is both truer and cheaper than a round trip to the
+   * database to find out.
+   */
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  const badId = (id: unknown, reply: FastifyReply): boolean => {
+    if (typeof id === 'string' && UUID_RE.test(id)) return false;
+    void reply.code(400).send({ error: 'invalid id' });
+    return true;
+  };
+
   const getVisible = async (req: FastifyRequest, reply: FastifyReply) => {
     const { id } = req.params as { id: string };
     const rec = await repo.get(id).catch(() => null);
@@ -1711,6 +1778,7 @@ export async function buildApp(
     const userId = await requireUser(req, reply);
     if (!userId) return;
     const { id } = req.params as { id: string };
+    if (badId(id, reply)) return;
     await social!.follow(userId, id);
     return { following: true };
   });
@@ -1719,6 +1787,7 @@ export async function buildApp(
     const userId = await requireUser(req, reply);
     if (!userId) return;
     const { id } = req.params as { id: string };
+    if (badId(id, reply)) return;
     await social!.unfollow(userId, id);
     return { following: false };
   });
@@ -1738,22 +1807,29 @@ export async function buildApp(
   });
 
   // Comments: list (public), add (auth), delete (author or design owner).
+  // Both gated by getVisible, like every other design route. Without it, anyone
+  // could post a comment on a PRIVATE design — which the owner then received a
+  // notification about — and read the thread back anonymously, while the design
+  // itself answered 404. The comment is on the design; it cannot be more visible
+  // than the design is.
   app.get('/api/designs/:id/comments', async (req, reply) => {
     if (!socialOn(reply)) return;
-    const { id } = req.params as { id: string };
-    return social!.listComments(id);
+    const v = await getVisible(req, reply);
+    if (!v) return;
+    return social!.listComments(v.rec.id);
   });
   app.post('/api/designs/:id/comments', async (req, reply) => {
     if (!socialOn(reply)) return;
     const userId = await requireUser(req, reply);
     if (!userId) return;
-    const { id } = req.params as { id: string };
+    const v = await getVisible(req, reply);
+    if (!v) return;
     const body = (req.body ?? {}) as { body?: unknown; parentId?: unknown };
     if (typeof body.body !== 'string' || !body.body.trim()) {
       return reply.code(400).send({ error: 'comment body required' });
     }
     const parentId = typeof body.parentId === 'string' ? body.parentId : null;
-    const comment = await social!.addComment(id, userId, body.body, parentId);
+    const comment = await social!.addComment(v.rec.id, userId, body.body, parentId);
     if (!comment) return reply.code(400).send({ error: 'could not add comment' });
     return reply.code(201).send(comment);
   });

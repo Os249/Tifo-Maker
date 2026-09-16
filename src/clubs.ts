@@ -1,3 +1,4 @@
+import { escapeHtml } from './core/escape';
 import './clubs.css';
 import { initLang, applyDom, toggleLang, t } from './ui/i18n';
 import { initScheme, setSchemeLabels } from './ui/colorScheme';
@@ -63,11 +64,6 @@ form?.addEventListener('submit', async (e) => {
   }
 });
 
-function escapeHtml(s: string): string {
-  const d = document.createElement('div');
-  d.textContent = s;
-  return d.innerHTML;
-}
 
 // The footer feedback entry. Lazy: the modal is only fetched once someone
 // actually asks for it, so a visitor who never clicks pays nothing for it.

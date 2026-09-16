@@ -6,6 +6,7 @@
 // whole job is browsing images, made before the consent bar is answered, and
 // when it failed all thirteen icons on the page rendered as nothing: the like
 // and comment counts became a bare "0  0".
+import { escapeHtml } from './core/escape';
 import './vendor/tabler-subset.css';
 import './community.css';
 import { initLang, applyDom, toggleLang, t, tTag, tTitle } from './ui/i18n';
@@ -265,11 +266,6 @@ function renderCard(item: GalleryItem, onClick?: () => void): HTMLElement {
   return card;
 }
 
-function escapeHtml(s: string): string {
-  const d = document.createElement('div');
-  d.textContent = s;
-  return d.innerHTML;
-}
 
 // ---------- creator profile view ----------
 async function openProfile(userId: string): Promise<void> {

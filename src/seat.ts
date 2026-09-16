@@ -1,3 +1,4 @@
+import { escapeHtml } from './core/escape';
 import './seat.css';
 import { initLang, t } from './ui/i18n';
 import { generateSeatMapAsync } from './workers/client';
@@ -221,10 +222,5 @@ function errorScreen(title: string, body: string): string {
     </div>`;
 }
 
-function escapeHtml(s: string): string {
-  const d = document.createElement('div');
-  d.textContent = s;
-  return d.innerHTML;
-}
 
 void main();
