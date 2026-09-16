@@ -1186,7 +1186,8 @@ export async function buildApp(
   app.get('/api/gallery/facets', async (req) => {
     const q = req.query as Record<string, unknown>;
     const made = oneParam(q.made) === 'people';
-    const rows = await repo.listPublic({ sort: 'recent', limit: 5000, excludeTemplates: made, templatesOnly: oneParam(q.templates) === '1' });
+    const scope = { sort: 'recent' as const, limit: 5000, excludeTemplates: made, templatesOnly: oneParam(q.templates) === '1' };
+    const rows = await repo.listPublic(scope);
     const colourCounts = new Map<string, number>();
     const clubCounts = new Map<string, number>();
     for (const r of rows) {
@@ -1195,8 +1196,23 @@ export async function buildApp(
       if (f.clubId) clubCounts.set(f.clubId, (clubCounts.get(f.clubId) ?? 0) + 1);
     }
     const names = new Map(clubFilterOptions().map((c) => [c.id, c]));
+
+    // How many a candidate selection would return.
+    //
+    // The filter panel stages your choices and only applies them when you
+    // confirm, so without this the confirm button is a leap: you pick three
+    // things, press it, and land on an empty grid with no idea which one was
+    // the mistake. Counting first turns that into a number you can watch.
+    const wantColors = oneParam(q.colors)?.split(',').map((c) => c.trim().toLowerCase()).filter(Boolean).slice(0, 6);
+    const wantTags = oneParam(q.tags)?.split(',').map((t) => t.trim()).filter(Boolean).slice(0, 8);
+    const wantClub = oneParam(q.club)?.slice(0, 60) || undefined;
+    const matching = (wantColors?.length || wantTags?.length || wantClub)
+      ? (await repo.listPublic({ ...scope, colors: wantColors, tags: wantTags, clubId: wantClub })).length
+      : rows.length;
+
     return {
       total: rows.length,
+      matching,
       colors: COLOUR_FAMILIES.filter((c) => colourCounts.has(c)).map((c) => ({ id: c, count: colourCounts.get(c)! })),
       clubs: [...clubCounts.entries()]
         .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))

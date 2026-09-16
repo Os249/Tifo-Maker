@@ -61,19 +61,50 @@
             <button class="sort-tab" data-sort="people" data-i18n="cm.byPeople">By people</button>
             <button class="sort-tab" data-sort="templates" data-i18n="community.templates">Templates</button>
           </div>
-        </div>
-        <div class="tag-row" id="tag-row"></div>
-        <div class="filter-row" id="filter-row">
-          <div class="filter-group" id="colour-row" hidden>
-            <span class="filter-label" data-i18n="cm.byColour">Colour</span>
-            <div class="chips" id="colour-chips"></div>
+          <!-- One button for everything. Colour, club and tags used to sit in the
+               bar as three separate live controls, which meant four lines of
+               chrome above the grid and a feed that jumped on every click. -->
+          <div class="filter-wrap">
+            <button class="filter-btn" id="filter-btn" aria-expanded="false" aria-controls="filter-panel" aria-haspopup="dialog">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h16l-6.2 7.3v5.2l-3.6 2v-7.2Z"/></svg>
+              <span data-i18n="cm.filters">Filters</span>
+              <span class="filter-count" id="filter-count" hidden>0</span>
+            </button>
+
+            <div class="filter-panel" id="filter-panel" role="dialog" aria-modal="false" aria-labelledby="filter-panel-title" hidden>
+              <div class="fp-head">
+                <h2 id="filter-panel-title" data-i18n="cm.filters">Filters</h2>
+                <button class="fp-close" id="fp-close" aria-label="Close" data-i18n-attr="aria-label:cm.close">&times;</button>
+              </div>
+              <div class="fp-body">
+                <section class="fp-sec">
+                  <h3 data-i18n="cm.byColour">Colour</h3>
+                  <div class="chips" id="colour-chips"></div>
+                  <p class="fp-none" id="colour-none" hidden data-i18n="cm.noneHere">Nothing to filter by here yet.</p>
+                </section>
+                <section class="fp-sec">
+                  <h3 data-i18n="cm.byClub">Club</h3>
+                  <div class="chips" id="club-chips"></div>
+                  <p class="fp-none" id="club-none" hidden data-i18n="cm.noneHere">Nothing to filter by here yet.</p>
+                </section>
+                <section class="fp-sec">
+                  <h3 data-i18n="cm.byTag">Tag</h3>
+                  <div class="chips" id="tag-chips"></div>
+                </section>
+              </div>
+              <div class="fp-foot">
+                <button class="fp-clear" id="fp-clear" data-i18n="cm.clearAll">Clear all</button>
+                <!-- No data-i18n: this label is the live result count, and applyDom would
+                     overwrite "Show 47 tifos" with "Apply" on every language switch.
+                     refreshCount() re-renders it in the current language instead. -->
+                <button class="fp-apply" id="fp-apply">Apply</button>
+              </div>
+            </div>
           </div>
-          <div class="filter-group" id="club-group" hidden>
-            <span class="filter-label" data-i18n="cm.byClub">Club</span>
-            <select id="club-select" class="club-select" aria-label="Filter by club" data-i18n-attr="aria-label:cm.byClub"></select>
-          </div>
-          <button class="filter-clear" id="filter-clear" hidden data-i18n="cm.clearFilters">Clear filters</button>
         </div>
+        <!-- What is actually applied, once you have confirmed it. Each one comes
+             off on its own, which is the thing a chip row is genuinely good at. -->
+        <div class="applied-row" id="applied-row" hidden></div>
       </div>
     </section>
 

@@ -9,7 +9,7 @@
 import { escapeHtml } from './core/escape';
 import './vendor/tabler-subset.css';
 import './community.css';
-import { initLang, applyDom, getLang, toggleLang, t, tTag, tTitle } from './ui/i18n';
+import { initLang, applyDom, getLang, onLangChange, toggleLang, t, tv, tTag, tTitle } from './ui/i18n';
 import { initScheme, setSchemeLabels } from './ui/colorScheme';
 import { installMobileNav } from './ui/mobileNav';
 import { installConsent } from './ui/consent';
@@ -24,6 +24,7 @@ import {
   fetchMe,
   listGallery,
   listGalleryFacets,
+  type GalleryFacets,
   listPopularTags,
   loadDesign,
   voteDesign,
@@ -148,7 +149,22 @@ const PAGE = 60;
 let pageOffset = 0;
 let pageToken = 0;
 let exhausted = false;
-let loadingPage = false;
+/**
+ * Which request is in flight, by token — not a bare boolean.
+ *
+ * It used to be a boolean, and loadPage refused outright while one was
+ * running. But loadGallery CLEARS THE GRID before it calls loadPage, so a
+ * refused call left the feed permanently empty: no cards, no loader, no retry,
+ * until the next thing you clicked. Two quick tab clicks did it, and removing
+ * a filter pill — which reloads the panel and the feed together — did it every
+ * time.
+ *
+ * A newer token must always be allowed through; the older call discards its own
+ * result at the token check below, which is what that check has always been
+ * for. The same token twice is still refused, which is the infinite scroll not
+ * fetching the same page twice.
+ */
+let loadingToken = -1;
 
 async function loadGallery(): Promise<void> {
   pageOffset = 0;
@@ -173,8 +189,8 @@ async function loadGallery(): Promise<void> {
 
 /** Append one page. Returns false if the request failed. */
 async function loadPage(token: number): Promise<boolean> {
-  if (loadingPage || exhausted) return true;
-  loadingPage = true;
+  if (exhausted || loadingToken === token) return true;
+  loadingToken = token;
   const more = $('#grid-more');
   more.dataset.busy = '1';
   try {
@@ -202,8 +218,15 @@ async function loadPage(token: number): Promise<boolean> {
     if (token === pageToken) $('#grid-loading').textContent = t('cm.errFeed');
     return false;
   } finally {
-    loadingPage = false;
-    more.dataset.busy = '';
+    // Only if we are still the current request. A stale call finishing late
+    // must not unlock — or un-busy — the newer one that replaced it. An `if`
+    // block and not an early return: a `return` inside a finally REPLACES
+    // whatever the try or catch was returning, so this one would quietly hand
+    // back undefined and loadGallery would read it as a failed page.
+    if (loadingToken === token) {
+      loadingToken = -1;
+      more.dataset.busy = '';
+    }
   }
 }
 
@@ -855,31 +878,12 @@ $('#sort-tabs').querySelectorAll<HTMLButtonElement>('.sort-tab').forEach((tab) =
     tab.classList.add('active');
     currentSort = tab.dataset.sort as typeof currentSort;
     // The facets differ per tab — the library covers a dozen clubs, the people
-    // tab may cover none — so a chip row left over from the other tab would
-    // offer filters that return nothing.
+    // tab may cover none — so a panel left over from the other tab would offer
+    // filters that return nothing.
     void loadFilters();
     void loadGallery();
   });
 });
-
-async function loadTags(): Promise<void> {
-  const tags = await listPopularTags().catch(() => []);
-  const row = $('#tag-row');
-  row.innerHTML = '';
-  for (const tg of tags.slice(0, 12)) {
-    const chip = document.createElement('button');
-    chip.className = 'tag-chip';
-    chip.textContent = `#${tTag(tg.slug)}`;
-    chip.addEventListener('click', () => {
-      chip.classList.toggle('active');
-      if (activeTags.includes(tg.slug)) activeTags = activeTags.filter((x) => x !== tg.slug);
-      else activeTags.push(tg.slug);
-      syncClearBtn();
-      void loadGallery();
-    });
-    row.appendChild(chip);
-  }
-}
 
 /** A representative swatch per colour family, for the chip's dot. */
 const COLOUR_SWATCH: Record<string, string> = {
@@ -888,7 +892,64 @@ const COLOUR_SWATCH: Record<string, string> = {
 };
 
 /**
- * Build the colour and club filters from what the feed ACTUALLY contains.
+ * The filter panel.
+ *
+ * Two sets of state, and the distinction is the whole design: `draft` is what
+ * you have clicked inside the panel, `active` is what the grid is actually
+ * showing. Nothing crosses from one to the other until you press Apply. A live
+ * filter re-fetches and reflows the feed under your hand on every click, which
+ * is fine for one control and unusable for three.
+ */
+interface Selection { colors: string[]; clubs: string[]; tags: string[] }
+const emptySelection = (): Selection => ({ colors: [], clubs: [], tags: [] });
+let draft: Selection = emptySelection();
+let facetCache: GalleryFacets | null = null;
+let tagCache: { slug: string; count: number }[] = [];
+let countTimer: number | undefined;
+
+const selectionCount = (sel: Selection): number => sel.colors.length + sel.clubs.length + sel.tags.length;
+const sameSelection = (a: Selection, b: Selection): boolean =>
+  (['colors', 'clubs', 'tags'] as const).every((k) => a[k].length === b[k].length && a[k].every((v) => b[k].includes(v)));
+
+const clubLabel = (id: string): string => {
+  const c = facetCache?.clubs.find((x) => x.id === id);
+  if (!c) return id;
+  return (getLang() === 'ar' ? c.nameAr : c.name) || c.name;
+};
+
+function chip(label: string, on: boolean, dot: string | null, count: number | null, onToggle: () => void): HTMLButtonElement {
+  const b = document.createElement('button');
+  b.className = 'f-chip';
+  b.type = 'button';
+  b.setAttribute('aria-pressed', String(on));
+  if (dot) {
+    const d = document.createElement('span');
+    d.className = 'colour-dot';
+    d.style.background = dot;
+    b.appendChild(d);
+  }
+  const t2 = document.createElement('span');
+  t2.textContent = label;
+  b.appendChild(t2);
+  if (count != null) {
+    const c = document.createElement('span');
+    c.className = 'count';
+    c.textContent = String(count);
+    b.appendChild(c);
+  }
+  b.addEventListener('click', () => {
+    const next = b.getAttribute('aria-pressed') !== 'true';
+    b.setAttribute('aria-pressed', String(next));
+    onToggle();
+  });
+  return b;
+}
+
+const toggle = (list: string[], id: string): string[] =>
+  list.includes(id) ? list.filter((x) => x !== id) : [...list, id];
+
+/**
+ * Fill the panel from what the current tab ACTUALLY contains.
  *
  * Not from the full list of either. Thirty-nine clubs of which the library
  * covers a dozen is a wall of chips that return nothing, and a chip that
@@ -896,78 +957,185 @@ const COLOUR_SWATCH: Record<string, string> = {
  * than an empty category.
  */
 async function loadFilters(): Promise<void> {
-  const facets = await listGalleryFacets({
-    peopleOnly: currentSort === 'people',
-    templatesOnly: currentSort === 'templates',
-  }).catch(() => null);
-  const colourRow = $('#colour-row');
-  const clubGroup = $('#club-group');
-  const chips = $('#colour-chips');
-  const select = $('#club-select') as HTMLSelectElement;
-  if (!facets) { colourRow.hidden = true; clubGroup.hidden = true; return; }
+  const scope = { peopleOnly: currentSort === 'people', templatesOnly: currentSort === 'templates' };
+  const [facets, tags] = await Promise.all([
+    listGalleryFacets(scope).catch(() => null),
+    listPopularTags().catch(() => []),
+  ]);
+  facetCache = facets;
+  tagCache = tags.slice(0, 14);
 
-  chips.innerHTML = '';
-  for (const c of facets.colors) {
-    const chip = document.createElement('button');
-    chip.className = 'colour-chip' + (activeColours.includes(c.id) ? ' active' : '');
-    chip.type = 'button';
-    chip.setAttribute('aria-pressed', String(activeColours.includes(c.id)));
-    const dot = document.createElement('span');
-    dot.className = 'colour-dot';
-    dot.style.background = COLOUR_SWATCH[c.id] ?? '#888';
+  const colourBox = $('#colour-chips');
+  const clubBox = $('#club-chips');
+  const tagBox = $('#tag-chips');
+  colourBox.innerHTML = '';
+  clubBox.innerHTML = '';
+  tagBox.innerHTML = '';
+
+  for (const c of facets?.colors ?? []) {
+    colourBox.appendChild(chip(t(`cm.colour.${c.id}`), draft.colors.includes(c.id), COLOUR_SWATCH[c.id] ?? '#888', c.count, () => {
+      draft.colors = toggle(draft.colors, c.id);
+      void refreshCount();
+    }));
+  }
+  $('#colour-none').hidden = (facets?.colors.length ?? 0) > 0;
+
+  for (const club of facets?.clubs ?? []) {
+    clubBox.appendChild(chip(clubLabel(club.id), draft.clubs.includes(club.id), null, club.count, () => {
+      draft.clubs = toggle(draft.clubs, club.id);
+      void refreshCount();
+    }));
+  }
+  $('#club-none').hidden = (facets?.clubs.length ?? 0) > 0;
+
+  for (const tg of tagCache) {
+    tagBox.appendChild(chip(`#${tTag(tg.slug)}`, draft.tags.includes(tg.slug), null, null, () => {
+      draft.tags = toggle(draft.tags, tg.slug);
+      void refreshCount();
+    }));
+  }
+  void refreshCount();
+}
+
+/**
+ * What Apply would give you, before you press it.
+ *
+ * Without this the confirm button is a leap: pick three things, press it, land
+ * on an empty grid, and have no idea which one was the mistake. Debounced,
+ * because it is one request per click otherwise.
+ */
+async function refreshCount(): Promise<void> {
+  const apply = $('#fp-apply') as HTMLButtonElement;
+  const clear = $('#fp-clear') as HTMLButtonElement;
+  clear.disabled = selectionCount(draft) === 0;
+  window.clearTimeout(countTimer);
+  countTimer = window.setTimeout(async () => {
+    // The club filter takes ONE club server-side, so a multi-club draft cannot
+    // be counted in a single request. Counting only the first would be a lie, so
+    // the button falls back to a plain label rather than a wrong number.
+    if (draft.clubs.length > 1) {
+      apply.disabled = false;
+      apply.textContent = t('cm.apply');
+      return;
+    }
+    const facets = await listGalleryFacets({
+      peopleOnly: currentSort === 'people',
+      templatesOnly: currentSort === 'templates',
+      colors: draft.colors,
+      tags: draft.tags,
+      clubId: draft.clubs[0],
+    }).catch(() => null);
+    if (!facets) { apply.disabled = false; apply.textContent = t('cm.apply'); return; }
+    apply.disabled = facets.matching === 0;
+    apply.textContent = facets.matching === 0
+      ? t('cm.noMatches')
+      : tv('cm.showN', { n: facets.matching });
+  }, 220);
+}
+
+/** The pills under the bar: what is applied, each removable on its own. */
+function renderApplied(): void {
+  const row = $('#applied-row');
+  row.innerHTML = '';
+  const items: { label: string; drop: () => void }[] = [
+    ...activeColours.map((id) => ({ label: t(`cm.colour.${id}`), drop: () => { activeColours = activeColours.filter((x) => x !== id); } })),
+    ...(activeClub ? [{ label: clubLabel(activeClub), drop: (): void => { activeClub = ''; } }] : []),
+    ...activeTags.map((slug) => ({ label: `#${tTag(slug)}`, drop: () => { activeTags = activeTags.filter((x) => x !== slug); } })),
+  ];
+  const count = $('#filter-count');
+  count.textContent = String(items.length);
+  count.hidden = items.length === 0;
+  row.hidden = items.length === 0;
+  if (!items.length) return;
+
+  for (const it of items) {
+    const pill = document.createElement('span');
+    pill.className = 'applied-pill';
     const label = document.createElement('span');
-    label.textContent = t(`cm.colour.${c.id}`);
-    const count = document.createElement('span');
-    count.className = 'count';
-    count.textContent = String(c.count);
-    chip.append(dot, label, count);
-    chip.addEventListener('click', () => {
-      activeColours = activeColours.includes(c.id) ? activeColours.filter((x) => x !== c.id) : [...activeColours, c.id];
-      chip.classList.toggle('active');
-      chip.setAttribute('aria-pressed', String(activeColours.includes(c.id)));
-      syncClearBtn();
+    label.textContent = it.label;
+    const x = document.createElement('button');
+    x.type = 'button';
+    x.textContent = '\u00d7';
+    x.setAttribute('aria-label', `${t('cm.remove')} ${it.label}`);
+    x.addEventListener('click', () => {
+      it.drop();
+      draft = { colors: [...activeColours], clubs: activeClub ? [activeClub] : [], tags: [...activeTags] };
+      renderApplied();
+      void loadFilters();
       void loadGallery();
     });
-    chips.appendChild(chip);
+    pill.append(label, x);
+    row.appendChild(pill);
   }
-  colourRow.hidden = facets.colors.length === 0;
-
-  select.innerHTML = '';
-  const any = document.createElement('option');
-  any.value = '';
-  any.textContent = t('cm.allClubs');
-  select.appendChild(any);
-  for (const club of facets.clubs) {
-    const o = document.createElement('option');
-    o.value = club.id;
-    // The reader's language, not the matching vocabulary's. clubs.ts stores
-    // Arabic aliases for every club, so there is no reason to show "al shabab"
-    // to somebody reading the page in Arabic.
-    o.textContent = `${(getLang() === 'ar' ? club.nameAr : club.name) || club.name} (${club.count})`;
-    select.appendChild(o);
-  }
-  select.value = facets.clubs.some((c) => c.id === activeClub) ? activeClub : '';
-  if (select.value !== activeClub) activeClub = select.value;
-  clubGroup.hidden = facets.clubs.length === 0;
-  syncClearBtn();
+  const clearAll = document.createElement('button');
+  clearAll.className = 'applied-clear';
+  clearAll.type = 'button';
+  clearAll.textContent = t('cm.clearAll');
+  clearAll.addEventListener('click', () => {
+    activeColours = [];
+    activeClub = '';
+    activeTags = [];
+    draft = emptySelection();
+    renderApplied();
+    void loadFilters();
+    void loadGallery();
+  });
+  row.appendChild(clearAll);
 }
 
-function syncClearBtn(): void {
-  $('#filter-clear').hidden = activeColours.length === 0 && !activeClub && activeTags.length === 0;
-}
+// ---- opening, closing, applying ----
+const panel = $('#filter-panel');
+const filterBtn = $('#filter-btn');
 
-($('#club-select') as HTMLSelectElement).addEventListener('change', (e) => {
-  activeClub = (e.target as HTMLSelectElement).value;
-  syncClearBtn();
-  void loadGallery();
-});
-$('#filter-clear').addEventListener('click', () => {
-  activeColours = [];
-  activeClub = '';
-  activeTags = [];
-  $('#tag-row').querySelectorAll('.tag-chip').forEach((c) => c.classList.remove('active'));
+function openPanel(): void {
+  // Start from what is applied, so opening the panel shows you where you are
+  // rather than a blank slate you have to rebuild.
+  draft = { colors: [...activeColours], clubs: activeClub ? [activeClub] : [], tags: [...activeTags] };
+  panel.hidden = false;
+  filterBtn.setAttribute('aria-expanded', 'true');
   void loadFilters();
-  void loadGallery();
+  (panel.querySelector('.f-chip') as HTMLElement | null)?.focus();
+}
+function closePanel(focusBtn = true): void {
+  panel.hidden = true;
+  filterBtn.setAttribute('aria-expanded', 'false');
+  if (focusBtn) filterBtn.focus();
+}
+
+// The panel's labels are built in JS, so a language switch has to rebuild them:
+// applyDom only reaches the markup, and the chips, the pills and the Apply
+// button's live count are all made here.
+onLangChange(() => {
+  renderApplied();
+  if (!panel.hidden) void loadFilters();
+  else void refreshCount();
+});
+
+filterBtn.addEventListener('click', () => (panel.hidden ? openPanel() : closePanel()));
+$('#fp-close').addEventListener('click', () => closePanel());
+$('#fp-clear').addEventListener('click', () => {
+  draft = emptySelection();
+  void loadFilters();
+});
+$('#fp-apply').addEventListener('click', () => {
+  const applied: Selection = { colors: [...activeColours], clubs: activeClub ? [activeClub] : [], tags: [...activeTags] };
+  activeColours = [...draft.colors];
+  // One club at a time: the server filter is a single club id, and pretending
+  // otherwise in the UI would quietly drop every club after the first.
+  activeClub = draft.clubs[0] ?? '';
+  activeTags = [...draft.tags];
+  renderApplied();
+  closePanel();
+  // Nothing changed, so do not throw the grid away and rebuild it identically.
+  if (!sameSelection(applied, draft)) void loadGallery();
+});
+document.addEventListener('keydown', (e) => {
+  if ((e as KeyboardEvent).key === 'Escape' && !panel.hidden) closePanel();
+});
+document.addEventListener('click', (e) => {
+  const target = e.target as Node;
+  if (panel.hidden || panel.contains(target) || filterBtn.contains(target)) return;
+  closePanel(false);
 });
 
 // ---------- go ----------
@@ -975,7 +1143,8 @@ async function main(): Promise<void> {
   langToggle.textContent = t('common.language');
   await refreshAuthUI();
   initPaging();
-  await Promise.all([loadGallery(), loadTags(), loadFilters()]);
+  await Promise.all([loadGallery(), loadFilters()]);
+  renderApplied();
 }
 void main();
 

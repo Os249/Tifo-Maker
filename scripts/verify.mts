@@ -670,6 +670,18 @@ import { buildStadium as siBuild } from '../src/core/stadiumFit';
   console.log('facets: an Arabic title is read when the English one says nothing:', ar.clubId);
   if (ar.clubId !== 'al-nassr') throw new Error('titleAr is not being consulted');
 
+  // The filter panel's own invariants, from the markup.
+  const commHtml = roofRead('community.html', 'utf8');
+  const oneButton = /id="filter-btn"/.test(commHtml) && !/id="tag-row"|id="club-select"|class="filter-row"/.test(commHtml);
+  // The Apply button's label is the live result count. data-i18n on it would let
+  // applyDom overwrite "Show 47 tifos" with "Apply" on every language switch —
+  // which is exactly what it did until a screenshot caught it.
+  const applyLine = /<button class="fp-apply"[^>]*>/.exec(commHtml)?.[0] ?? '';
+  const applyFree = !!applyLine && !/data-i18n/.test(applyLine);
+  console.log('filters: one button, no loose controls', oneButton, '| Apply label left to the live count', applyFree);
+  if (!oneButton) throw new Error('the filters must stay behind one button');
+  if (!applyFree) throw new Error('the Apply button must not carry data-i18n: its label is the live count');
+
   // Every family a chip can show must have a label in both languages, or the
   // chip row comes out half in English.
   const i18nSrc2 = roofRead('src/ui/i18n.ts', 'utf8');

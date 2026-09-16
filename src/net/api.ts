@@ -613,17 +613,24 @@ export type GallerySort = 'recent' | 'likes';
 /** What the community filter chips can offer, and how many designs each covers. */
 export interface GalleryFacets {
   total: number;
+  /** How many designs the passed selection would return. Equals total when none. */
+  matching: number;
   colors: { id: string; count: number }[];
   clubs: { id: string; name: string; nameAr: string; count: number }[];
 }
 
-export async function listGalleryFacets(opts: { peopleOnly?: boolean; templatesOnly?: boolean } = {}): Promise<GalleryFacets> {
+export async function listGalleryFacets(
+  opts: { peopleOnly?: boolean; templatesOnly?: boolean; colors?: string[]; tags?: string[]; clubId?: string } = {},
+): Promise<GalleryFacets> {
   const params = new URLSearchParams();
   if (opts.peopleOnly) params.set('made', 'people');
   if (opts.templatesOnly) params.set('templates', '1');
+  if (opts.colors?.length) params.set('colors', opts.colors.join(','));
+  if (opts.tags?.length) params.set('tags', opts.tags.join(','));
+  if (opts.clubId) params.set('club', opts.clubId);
   const qs = params.toString();
   const res = await fetch(`${API}/gallery/facets${qs ? `?${qs}` : ''}`, { headers: authHeaders(false) });
-  if (!res.ok) return { total: 0, colors: [], clubs: [] };
+  if (!res.ok) return { total: 0, matching: 0, colors: [], clubs: [] };
   return (await res.json()) as GalleryFacets;
 }
 
