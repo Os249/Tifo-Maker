@@ -14,6 +14,7 @@
  * whether Resend is up.
  */
 import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { Script } from 'node:vm';
 import { gzipSync } from 'node:zlib';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -22,8 +23,9 @@ import { generateSeatMap } from '../../src/core/seatmap';
 import { DEFAULT_TEMPLATE } from '../../src/core/template';
 import { MemoryAuthRepository, MemoryDesignRepository } from '../src/memoryRepo';
 import { buildApp, type AppOptions, type TemplateInfo } from '../src/routes';
-import { configWarnings } from '../src/preflight';
-import type { EmailSender, EmailMessage } from '../src/email';
+import { configWarnings, logConfigWarnings } from '../src/preflight';
+import { ADMIN_JS, ADMIN_UNLOCK_JS } from '../src/adminPage';
+import { createEmailSender, DEFAULT_FROM, emailHealth, isNoReplyAddress, ResendEmailSender, type EmailSender, type EmailMessage } from '../src/email';
 
 let pass = 0, fail = 0;
 const check = (n: string, ok: boolean, x: unknown = '') => {
@@ -119,6 +121,15 @@ const codeIn = (m: EmailMessage | undefined): string => /code: (\d{6})/.exec(m?.
   console.log('\n— the admin can ask what the mail is doing —');
   const open = await app.inject({ method: 'GET', url: '/api/admin/email' });
   check('it is admin-gated', open.statusCode === 403, String(open.statusCode));
+  // The dashboard is one script inside a TypeScript template literal, where \'
+  // is just '. The Email tab's note wrote provider\'s, so the served /admin.js
+  // had a bare quote inside a quoted string and the whole dashboard failed to
+  // parse. Every route test still passed.
+  for (const [name, src] of [['/admin.js', ADMIN_JS], ['/admin-unlock.js', ADMIN_UNLOCK_JS]] as const) {
+    let err = '';
+    try { new Script(src, { filename: name }); } catch (e) { err = (e as Error).message; }
+    check(`${name} is valid JavaScript`, err === '', err);
+  }
   await app.close();
 }
 
@@ -226,6 +237,73 @@ const codeIn = (m: EmailMessage | undefined): string => /code: (\d{6})/.exec(m?.
 }
 
 // ---------------------------------------------------------------------------
+{
+  console.log('\n— what a mailbox provider sees —');
+  // The message that reached Gmail's spam folder passed SPF, DKIM and DMARC and
+  // had no tracking rewrites. What it did have: a no-reply sender on a domain
+  // with no inbox, and a body that was a bare HTML fragment with no footer.
+  check('the default sender is not a no-reply address', !isNoReplyAddress(DEFAULT_FROM) && /@tifomaker\.org>$/.test(DEFAULT_FROM), DEFAULT_FROM);
+  check('...and the old one would have been caught', isNoReplyAddress('TifoMaker <no-reply@tifomaker.org>') && isNoReplyAddress('noreply@x.org') && !isNoReplyAddress('Hello <hello@x.org>'));
+
+  const saved = { key: process.env.RESEND_API_KEY, from: process.env.EMAIL_FROM, reply: process.env.EMAIL_REPLY_TO };
+  process.env.RESEND_API_KEY = 're_test';
+  delete process.env.EMAIL_FROM;
+  delete process.env.EMAIL_REPLY_TO;
+  createEmailSender();
+  check('with no EMAIL_FROM, mail goes out from the default', emailHealth().from === DEFAULT_FROM && emailHealth().replyTo === null, JSON.stringify(emailHealth().from));
+  process.env.EMAIL_REPLY_TO = 'support@example.com';
+  createEmailSender();
+  check('EMAIL_REPLY_TO is picked up', emailHealth().replyTo === 'support@example.com');
+  for (const [k, v] of Object.entries({ RESEND_API_KEY: saved.key, EMAIL_FROM: saved.from, EMAIL_REPLY_TO: saved.reply })) {
+    if (v === undefined) delete process.env[k]; else process.env[k] = v;
+  }
+
+  // What actually goes over the wire to Resend.
+  const bodies: Array<Record<string, unknown>> = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async (_url: unknown, init?: { body?: unknown }) => {
+    bodies.push(JSON.parse(String(init?.body ?? '{}')));
+    return new Response('{"id":"stub"}', { status: 200 });
+  }) as typeof fetch;
+  try {
+    const msg = { to: 'a@example.com', subject: 's', html: '<p>h</p>', text: 't' };
+    await new ResendEmailSender('re_test', DEFAULT_FROM, 'support@example.com').send(msg);
+    await new ResendEmailSender('re_test', DEFAULT_FROM, 'support@example.com').send(msg);
+    await new ResendEmailSender('re_test', DEFAULT_FROM).send(msg);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+  const ref = (b: Record<string, unknown> | undefined) => (b?.headers as Record<string, string> | undefined)?.['X-Entity-Ref-ID'];
+  check('replies are routed with reply_to when one is configured', bodies[0]?.reply_to === 'support@example.com', JSON.stringify(bodies[0]?.reply_to));
+  check('...and it is left out when not', !('reply_to' in (bodies[2] ?? {})));
+  check('every message carries its own X-Entity-Ref-ID, so Gmail does not thread them', !!ref(bodies[0]) && !!ref(bodies[1]) && ref(bodies[0]) !== ref(bodies[1]), `${ref(bodies[0])} / ${ref(bodies[1])}`);
+
+  // The verification email itself, built by the real route.
+  const { app, mail } = await makeApp({ publicUrl: 'https://tifomaker.org' });
+  await reg(app, 'echo1');
+  const m = mail.sent.at(-1)!;
+  const html = m.html;
+  const code = codeIn(m);
+  check('the HTML is a whole document with a declared charset', /^<!doctype html>/i.test(html) && /<meta charset="utf-8">/.test(html) && /<\/html>$/.test(html));
+  check('...with a title, and no hidden text (a spam-filter tell)', /<title>[^<]+<\/title>/.test(html) && !/display:\s*none|color:\s*transparent|opacity:\s*0/i.test(html));
+  check('...both languages, each with its own direction', /dir="rtl" lang="ar"/.test(html) && /dir="ltr" lang="en"/.test(html));
+  check('...and a footer that says who sent it and why', /tifomaker\.org<\/a>/.test(html) && /used for an account on TifoMaker/.test(html) && /استُخدم في حساب على تيفو ميكر/.test(html));
+  const hrefs = [...html.matchAll(/href="([^"]+)"/g)].map((x) => x[1]);
+  check('every link is on the sending domain', hrefs.length >= 3 && hrefs.every((h) => /^https:\/\/tifomaker\.org(\/|$)/.test(h)), JSON.stringify(hrefs.map((h) => h.slice(0, 40))));
+  check('no images, nothing loaded from anywhere else', !/<img\b|src=|url\(/i.test(html));
+  // SpamAssassin reads background-color but not the background shorthand; with
+  // the shorthand the white button label scored as hidden text (+0.7).
+  check('backgrounds are longhand, so the white button label is not read as hidden text', !/background:\s*#/i.test(html) && /background-color:#15924d/.test(html));
+  const kb = Buffer.byteLength(html) / 1024;
+  check('well under Gmail\'s 102 KB clipping limit', kb < 30, `${kb.toFixed(1)} KB`);
+  check('the plain-text part has the code, the link and the footer', !!code && new RegExp(`code: ${code}`).test(m.text ?? '') && /https:\/\/tifomaker\.org\/api\/auth\/verify\?token=/.test(m.text ?? '') && /You received this because/.test(m.text ?? ''));
+  const forgot = await app.inject({ method: 'POST', url: '/api/auth/forgot', payload: { email: 'echo1@example.com' } });
+  const reset = mail.sent.at(-1)!;
+  check('the password-reset email uses the same layout', forgot.statusCode < 300 && reset !== m && /^<!doctype html>/i.test(reset.html) && /\/reset\?token=/.test(reset.html) && /You received this because/.test(reset.text ?? ''), String(forgot.statusCode));
+  await app.close();
+}
+
+// ---------------------------------------------------------------------------
 console.log('\n— preflight says it out loud —');
 const prodNoKey = configWarnings({ NODE_ENV: 'production' } as NodeJS.ProcessEnv);
 const w = prodNoKey.find((x) => x.key === 'RESEND_API_KEY');
@@ -235,8 +313,16 @@ const devNoKey = configWarnings({} as NodeJS.ProcessEnv);
 check('but not in development', !devNoKey.some((x) => x.key === 'RESEND_API_KEY'));
 const oddFrom = configWarnings({ NODE_ENV: 'production', RESEND_API_KEY: 'k', EMAIL_FROM: 'a@gmail.com' } as NodeJS.ProcessEnv);
 check('a From off the verified domain is a warning', oddFrom.some((x) => x.key === 'EMAIL_FROM'));
-const okFrom = configWarnings({ NODE_ENV: 'production', RESEND_API_KEY: 'k', EMAIL_FROM: 'TifoMaker <no-reply@tifomaker.org>' } as NodeJS.ProcessEnv);
-check('the default From is not', !okFrom.some((x) => x.key === 'EMAIL_FROM'));
+const okFrom = configWarnings({ NODE_ENV: 'production', RESEND_API_KEY: 'k', EMAIL_FROM: 'TifoMaker <hello@tifomaker.org>' } as NodeJS.ProcessEnv);
+check('a From on the domain that can be replied to is not', !okFrom.some((x) => x.key === 'EMAIL_FROM'));
+const noReply = configWarnings({ NODE_ENV: 'production', RESEND_API_KEY: 'k', EMAIL_FROM: 'TifoMaker <no-reply@tifomaker.org>' } as NodeJS.ProcessEnv);
+const nr = noReply.find((x) => x.key === 'EMAIL_FROM');
+check('a no-reply From is a warning', !!nr && nr.state === 'wrong' && /no-reply sender/.test(nr.effect), nr?.effect.slice(0, 70));
+const unsetFrom = configWarnings({ NODE_ENV: 'production', RESEND_API_KEY: 'k' } as NodeJS.ProcessEnv);
+check('leaving EMAIL_FROM unset is fine now that the default can be replied to', !unsetFrom.some((x) => x.key === 'EMAIL_FROM'));
+const logged: string[] = [];
+logConfigWarnings({ NODE_ENV: 'production', RESEND_API_KEY: 'k', EMAIL_FROM: 'noreply@tifomaker.org' } as NodeJS.ProcessEnv, (line: string) => logged.push(line));
+check('...and the boot line does not claim a set variable is unset', logged.some((l) => /EMAIL_FROM needs changing/.test(l)) && !logged.some((l) => /EMAIL_FROM is not set/.test(l)), logged.find((l) => /EMAIL_FROM/.test(l))?.slice(0, 60));
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -9,11 +9,14 @@
  *
  * Pure, so a test can assert the wording without booting a server.
  */
+import { DEFAULT_FROM, isNoReplyAddress } from './email';
 
 export interface ConfigWarning {
   key: string;
   /** What is happening right now, in the absence of the setting. */
   effect: string;
+  /** How the boot line reads. Most of these are unset; EMAIL_FROM can be set and wrong. */
+  state?: 'unset' | 'wrong';
 }
 
 export function configWarnings(env: NodeJS.ProcessEnv): ConfigWarning[] {
@@ -50,6 +53,18 @@ export function configWarnings(env: NodeJS.ProcessEnv): ConfigWarning[] {
     out.push({
       key: 'EMAIL_FROM',
       effect: `sending as ${env.EMAIL_FROM}, which is not on tifomaker.org. Resend rejects any From whose domain is not verified in your account.`,
+      state: 'wrong',
+    });
+  }
+  // A no-reply sender is one of the few spam signals the operator sets by hand.
+  // Resend's own deliverability checks flag it, and the verification email was
+  // landing in Gmail's spam folder with authentication fully passing.
+  const from = env.EMAIL_FROM?.trim() || DEFAULT_FROM;
+  if (prod && env.RESEND_API_KEY && isNoReplyAddress(from)) {
+    out.push({
+      key: 'EMAIL_FROM',
+      effect: `sending as ${from}. Mailbox providers trust a no-reply sender less and replies bounce. Use ${DEFAULT_FROM} (or delete EMAIL_FROM) and forward hello@ to a real inbox.`,
+      state: 'wrong',
     });
   }
   if (!env.AI_ADMIN_PASSWORD) {
@@ -75,5 +90,5 @@ export function configWarnings(env: NodeJS.ProcessEnv): ConfigWarning[] {
 
 /** Print them, once, at boot. Nothing here should ever stop the server. */
 export function logConfigWarnings(env: NodeJS.ProcessEnv = process.env, log = console.warn): void {
-  for (const w of configWarnings(env)) log(`[tifo] ${w.key} is not set: ${w.effect}`);
+  for (const w of configWarnings(env)) log(`[tifo] ${w.key} ${w.state === 'wrong' ? 'needs changing' : 'is not set'}: ${w.effect}`);
 }

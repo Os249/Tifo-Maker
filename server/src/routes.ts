@@ -17,6 +17,7 @@ import { readFile, unlink } from 'node:fs/promises';
 import type { AiEventsRepository, AiUsageRepository, AuthRepository, DesignRepository, EventsRepository, LeadsRepository, SocialRepository } from './repo';
 import { registerAiRoutes, verifyUnlock } from './aiRoutes';
 import { emailHealth, type EmailSender } from './email';
+import { button, codeBox, layoutEmail, para, smallPrint, textFooter } from './emailLayout';
 import type { StadiumSubmissionRepository } from './stadiumRepo';
 import type { AdminStatsRepository } from './statsRepo';
 import { buildVisit, isSocialHost, type TrafficRepository } from './trafficRepo';
@@ -849,30 +850,45 @@ export async function buildApp(
       const link = `${base}/api/auth/verify?token=${token}`;
       // Bilingual: the server does not know which language the person picked
       // (that lives in their browser), and most of the audience is Saudi, so
-      // both languages ship in one message with Arabic first.
+      // both languages ship in one message with Arabic first. The layout (a
+      // real HTML document, and a footer saying who sent it and why) is in
+      // emailLayout.ts; the words are here.
+      const subject = 'وثّق بريدك في تيفو ميكر · Verify your TifoMaker email';
       await options.emailSender.send({
         to: user.email,
-        subject: 'وثّق بريدك في تيفو ميكر · Verify your TifoMaker email',
-        html:
-          `<div dir="rtl" lang="ar" style="text-align:right">` +
-          `<p>أهلاً بك في تيفو ميكر.</p>` +
-          `<p>وثّق بريدك عشان تفتح مصمّم الذكاء الاصطناعي. رمز التحقق:</p>` +
-          `<p style="font-size:30px;font-weight:700;letter-spacing:6px;font-family:monospace">${code}</p>` +
-          `<p>اكتب الرمز في الموقع خلال 10 دقائق، أو افتح هذا الرابط:</p>` +
-          `<p><a href="${link}">وثّق بريدي</a></p>` +
-          `<p>الرابط ينتهي خلال 24 ساعة. وإذا ما أنشأت حساب، تجاهل هذي الرسالة.</p>` +
-          `</div><hr />` +
-          `<div dir="ltr" lang="en">` +
-          `<p>Welcome to TifoMaker.</p>` +
-          `<p>Confirm your email to unlock the AI Designer. Your code:</p>` +
-          `<p style="font-size:30px;font-weight:700;letter-spacing:6px;font-family:monospace">${code}</p>` +
-          `<p>Type it on the site within 10 minutes, or open this link instead:</p>` +
-          `<p><a href="${link}">Verify my email</a></p>` +
-          `<p>This link expires in 24 hours. If you didn't create an account, ignore this email.</p>` +
-          `</div>`,
+        subject,
+        html: layoutEmail({
+          title: subject,
+          siteUrl: base,
+          blocks: [
+            {
+              lang: 'ar',
+              html:
+                para('أهلاً بك في تيفو ميكر.') +
+                para('وثّق بريدك عشان تفتح مصمّم الذكاء الاصطناعي. رمز التحقق:') +
+                codeBox(code) +
+                para('اكتب الرمز في الموقع خلال 10 دقائق، أو اضغط الزر:') +
+                button(link, 'وثّق بريدي') +
+                smallPrint('الرابط ينتهي خلال 24 ساعة. وإذا ما أنشأت حساب، تجاهل هذي الرسالة.'),
+            },
+            {
+              lang: 'en',
+              html:
+                para('Welcome to TifoMaker.') +
+                para('Confirm your email to unlock the AI Designer. Your code:') +
+                codeBox(code) +
+                para('Type it on the site within 10 minutes, or use the button:') +
+                button(link, 'Verify my email') +
+                smallPrint("This link expires in 24 hours. If you didn't create an account, ignore this email."),
+            },
+          ],
+        }),
         text:
+          `أهلاً بك في تيفو ميكر.\n` +
           `رمز التحقق في تيفو ميكر: ${code} (صالح 10 دقائق)\nأو افتح: ${link}\n\n` +
-          `Your TifoMaker code: ${code} (valid 10 minutes)\nOr open: ${link}`,
+          `Welcome to TifoMaker.\n` +
+          `Your TifoMaker code: ${code} (valid 10 minutes)\nOr open: ${link}` +
+          textFooter(base),
       });
       noteVerifySent(user.id);
       return true;
@@ -896,23 +912,34 @@ export async function buildApp(
       await auth.createEmailToken(user.id, tokenHash, 'reset_password', new Date(Date.now() + RESET_TTL_MS));
       const base = emailBase(req);
       const link = `${base}/reset?token=${token}`;
+      const subject = 'إعادة تعيين كلمة مرور تيفو ميكر · Reset your TifoMaker password';
       await options.emailSender.send({
         to: user.email,
-        subject: 'إعادة تعيين كلمة مرور تيفو ميكر · Reset your TifoMaker password',
-        html:
-          `<div dir="rtl" lang="ar" style="text-align:right">` +
-          `<p>وصلنا طلب لإعادة تعيين كلمة مرورك في تيفو ميكر.</p>` +
-          `<p><a href="${link}">اختر كلمة مرور جديدة</a></p>` +
-          `<p>الرابط ينتهي خلال ساعة. وإذا ما طلبت هذا، تجاهل الرسالة وكلمة مرورك ما تغيّرت.</p>` +
-          `</div><hr />` +
-          `<div dir="ltr" lang="en">` +
-          `<p>We received a request to reset your TifoMaker password.</p>` +
-          `<p><a href="${link}">Choose a new password</a></p>` +
-          `<p>This link expires in 1 hour. If you didn't request this, ignore this email, your password is unchanged.</p>` +
-          `</div>`,
+        subject,
+        html: layoutEmail({
+          title: subject,
+          siteUrl: base,
+          blocks: [
+            {
+              lang: 'ar',
+              html:
+                para('وصلنا طلب لإعادة تعيين كلمة مرورك في تيفو ميكر.') +
+                button(link, 'اختر كلمة مرور جديدة') +
+                smallPrint('الرابط ينتهي خلال ساعة. وإذا ما طلبت هذا، تجاهل الرسالة وكلمة مرورك ما تغيّرت.'),
+            },
+            {
+              lang: 'en',
+              html:
+                para('We received a request to reset your TifoMaker password.') +
+                button(link, 'Choose a new password') +
+                smallPrint("This link expires in 1 hour. If you didn't request this, ignore this email, your password is unchanged."),
+            },
+          ],
+        }),
         text:
           `إعادة تعيين كلمة مرور تيفو ميكر: ${link}\nالرابط ينتهي خلال ساعة.\n\n` +
-          `Reset your TifoMaker password: ${link}\nThis link expires in 1 hour. If you didn't request this, ignore this email.`,
+          `Reset your TifoMaker password: ${link}\nThis link expires in 1 hour. If you didn't request this, ignore this email.` +
+          textFooter(base),
       });
     } catch (err) {
       // /api/auth/forgot answers 202 whether or not the address exists — that is
@@ -1510,11 +1537,18 @@ export async function buildApp(
     }
     const stamp = new Date().toISOString();
     try {
+      // Same layout as the real account email, so a test says something about
+      // how those are received rather than about a two-line fragment.
+      const subject = `TifoMaker email test · ${stamp}`;
       await options.emailSender.send({
         to,
-        subject: `TifoMaker email test · ${stamp}`,
-        html: `<p>This is a test from the TifoMaker admin dashboard.</p><p>Sent ${stamp}.</p>`,
-        text: `This is a test from the TifoMaker admin dashboard.\nSent ${stamp}.`,
+        subject,
+        html: layoutEmail({
+          title: subject,
+          siteUrl: emailBase(req),
+          blocks: [{ lang: 'en', html: para('This is a test from the TifoMaker admin dashboard.') + smallPrint(`Sent ${stamp}.`) }],
+        }),
+        text: `This is a test from the TifoMaker admin dashboard.\nSent ${stamp}.` + textFooter(emailBase(req)),
       });
       const h = emailHealth();
       return {

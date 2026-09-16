@@ -1180,13 +1180,14 @@ function emailTab(){
   html += kpi('Refused', em.failed, 'since this process started', true);
   html += '</div>';
   html += '<table class="tbl"><tbody>';
-  html += '<tr><th>From</th><td>' + esc(em.from || '-') + '</td></tr>';
+  html += '<tr><th>From</th><td>' + esc(em.from || '-') + (/(^|[<\\s"])(no[-_.]?reply|do[-_.]?not[-_.]?reply)@/i.test(em.from || '') ? ' <b>(no-reply: a spam signal)</b>' : '') + '</td></tr>';
+  html += '<tr><th>Replies go to</th><td>' + esc(em.replyTo || em.from || '-') + '</td></tr>';
   html += '<tr><th>Last delivered</th><td>' + esc(em.lastSentAt || 'never') + '</td></tr>';
   html += '<tr><th>Last refusal</th><td>' + esc(em.lastErrorAt || 'none') + '</td></tr>';
   if (em.lastError) html += '<tr><th>What the provider said</th><td><code>' + esc(em.lastError) + '</code></td></tr>';
   html += '</tbody></table>';
   html += '<h2 class="sec">Send a test</h2>';
-  html += '<p class="note">One real message, and the provider\'s own answer. If it is accepted but never arrives, the problem is after the hand-off: SPF/DKIM records, or the recipient\'s spam filter.</p>';
+  html += '<p class="note">One real message, and the provider&#39;s own answer. If it is accepted but never arrives, the problem is after the hand-off: SPF/DKIM records, or the recipient&#39;s spam filter.</p>';
   html += '<p><input id="em-to" type="email" placeholder="you@example.com" style="min-width:260px" /> '
         + '<button id="em-send" type="button">Send test</button></p>';
   html += '<p id="em-out" class="note"></p>';

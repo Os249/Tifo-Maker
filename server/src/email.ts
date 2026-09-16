@@ -7,6 +7,21 @@
  * console sender is used so local/dev never breaks — it just logs the message
  * (including the verification/reset link) instead of sending it.
  */
+import { randomUUID } from 'node:crypto';
+
+/**
+ * Who account email comes from when EMAIL_FROM is not set.
+ *
+ * It used to be no-reply@. Resend's deliverability checks flag a no-reply
+ * sender ("indicating that this is a one-way communication decreases trust"),
+ * and tifomaker.org had no inbox, so a reply bounced. hello@ is meant to be
+ * forwarded to a real inbox; see EMAIL_REPLY_TO for sending replies elsewhere.
+ */
+export const DEFAULT_FROM = 'TifoMaker <hello@tifomaker.org>';
+
+/** Local parts that tell a mailbox provider nobody reads the replies. */
+export const isNoReplyAddress = (from: string): boolean =>
+  /(^|[<\s"])(no[-_.]?reply|do[-_.]?not[-_.]?reply)@/i.test(from);
 
 export interface EmailMessage {
   to: string;
@@ -36,6 +51,8 @@ export interface EmailHealth {
   /** False means every message is being written to the log and delivered to nobody. */
   delivering: boolean;
   from: string;
+  /** Where replies go, when that is not the From address. */
+  replyTo: string | null;
   sent: number;
   failed: number;
   lastSentAt: string | null;
@@ -47,6 +64,7 @@ const health: EmailHealth = {
   provider: 'console',
   delivering: false,
   from: '',
+  replyTo: null,
   sent: 0,
   failed: 0,
   lastSentAt: null,
@@ -95,6 +113,7 @@ export class ResendEmailSender implements EmailSender {
   constructor(
     private readonly apiKey: string,
     private readonly from: string,
+    private readonly replyTo?: string,
   ) {}
 
   async send(msg: EmailMessage): Promise<void> {
@@ -107,6 +126,12 @@ export class ResendEmailSender implements EmailSender {
         subject: msg.subject,
         html: msg.html,
         text: msg.text,
+        ...(this.replyTo ? { reply_to: this.replyTo } : {}),
+        // A fresh id per message stops Gmail threading them. Every verification
+        // email has the same subject, so a new code was folded under the old one
+        // and people opened the message whose code had just been replaced.
+        // Resend documents this header for exactly that.
+        headers: { 'X-Entity-Ref-ID': randomUUID() },
       }),
     });
     if (!res.ok) {
@@ -122,10 +147,12 @@ export class ResendEmailSender implements EmailSender {
  * EMAIL_PROVIDER can force a provider later (e.g. 'postmark') as we add adapters.
  */
 export function createEmailSender(): EmailSender {
-  const from = process.env.EMAIL_FROM ?? 'TifoMaker <no-reply@tifomaker.org>';
+  const from = process.env.EMAIL_FROM?.trim() || DEFAULT_FROM;
+  const replyTo = process.env.EMAIL_REPLY_TO?.trim() || undefined;
   const key = process.env.RESEND_API_KEY;
   health.from = from;
+  health.replyTo = replyTo ?? null;
   health.provider = key ? 'resend' : 'console';
   health.delivering = !!key;
-  return new RecordingSender(key ? new ResendEmailSender(key, from) : new ConsoleEmailSender());
+  return new RecordingSender(key ? new ResendEmailSender(key, from, replyTo) : new ConsoleEmailSender());
 }
