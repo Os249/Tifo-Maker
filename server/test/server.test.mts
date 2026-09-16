@@ -163,10 +163,17 @@ async function runSuite(name: string, repo: DesignRepository, auth: AuthReposito
   const verify2 = await app.inject({ method: 'GET', url: `/api/auth/verify?token=${carolMail!.token}` });
   assert.match(String(verify2.headers.location), /verified=0/, 'verification token is single-use');
   const daveTok = await registerUser(app, 'dave');
-  assert.equal(
-    (await app.inject({ method: 'POST', url: '/api/auth/verify/resend', headers: bearer(daveTok) })).statusCode,
-    202,
-  );
+  // The signup email starts the resend clock, so an immediate resend (the AI
+  // panel fires one about two seconds after a signup) must not replace the code
+  // in the message that just went out. Sent the way the browser sends it: a
+  // JSON content-type and no body, which used to be a 400 before the route ran.
+  const daveMails = sentEmails.filter((e) => e.to === 'dave@example.test').length;
+  const earlyResend = await app.inject({
+    method: 'POST', url: '/api/auth/verify/resend',
+    headers: { ...bearer(daveTok), 'content-type': 'application/json' },
+  });
+  assert.equal(earlyResend.statusCode, 429, 'a resend straight after signup is a cooldown, not a 400');
+  assert.equal(sentEmails.filter((e) => e.to === 'dave@example.test').length, daveMails, 'and sends nothing');
 
   // ---- password: change (authed) + forgot/reset via emailed token ----
   assert.equal(

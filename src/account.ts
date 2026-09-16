@@ -145,15 +145,29 @@ $('ac-resend')?.addEventListener('click', async () => {
   say(msg, t('ac.saving'), 'info');
   try {
     const res = await resendVerification();
+    if (res.ok && res.alreadyVerified) {
+      // Verified from another tab or from the link in the meantime.
+      me = await fetchMe().catch(() => me);
+      renderEmail();
+      return say(msg, t('ac.verify.done'), 'ok');
+    }
     if (res.ok) return say(msg, tv('ac.verify.resent', { email: me?.email ?? '' }), 'ok');
     // A cooldown is not a failure — the message they are waiting for is already
     // on its way, and pressing again would invalidate the code in it.
+    if (res.status === 429 && res.retryInSeconds) {
+      return say(msg, tv('ac.verify.cooldown', { n: res.retryInSeconds }), 'info');
+    }
+    // Only a 502 means the email provider refused. Every other failure used to
+    // be reported as that too, including the 400 that was actually breaking
+    // this button, which sent the diagnosis looking at the wrong system.
     say(
       msg,
-      res.retryInSeconds
-        ? tv('ac.verify.cooldown', { n: res.retryInSeconds })
-        : t('ac.verify.sendRefused'),
-      res.retryInSeconds ? 'info' : 'bad',
+      res.status === 502
+        ? t('ac.verify.sendRefused')
+        : res.status === 401
+          ? t('ac.sessionOver')
+          : t('ac.verify.resendFailed'),
+      'bad',
     );
   } catch {
     say(msg, t('ac.verify.resendFailed'), 'bad');

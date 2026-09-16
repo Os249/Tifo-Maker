@@ -1,15 +1,27 @@
 /**
- * Email delivery is now something the server can be asked about.
+ * Email verification, exercised the way the site actually calls it.
  *
- * Every assertion here failed before this change: a refused send answered 202
- * with {ok:true}, nothing counted it, and no endpoint could tell a missing key
- * from a refused one. The provider is stubbed, because the point is what the
- * SERVER does when a send fails — not whether Resend is up.
+ * The first version of this suite proved the server could report a refused
+ * send, and every assertion passed while the Resend button was broken in
+ * production. It injected `POST /api/auth/verify/resend` with nothing but an
+ * Authorization header. The browser sends `content-type: application/json`
+ * with no body, and Fastify refused that pairing with a 400
+ * (FST_ERR_CTP_EMPTY_JSON_BODY) before the route ever ran. So every resend
+ * request here now carries the browser's exact headers, and the last section
+ * reads the client source to make sure nothing starts sending that pairing again.
+ *
+ * The provider is stubbed, because the point is what the SERVER does, not
+ * whether Resend is up.
  */
+import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { gzipSync } from 'node:zlib';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import type { FastifyInstance } from 'fastify';
 import { generateSeatMap } from '../../src/core/seatmap';
 import { DEFAULT_TEMPLATE } from '../../src/core/template';
 import { MemoryAuthRepository, MemoryDesignRepository } from '../src/memoryRepo';
-import { buildApp, type TemplateInfo } from '../src/routes';
+import { buildApp, type AppOptions, type TemplateInfo } from '../src/routes';
 import { configWarnings } from '../src/preflight';
 import type { EmailSender, EmailMessage } from '../src/email';
 
@@ -32,51 +44,188 @@ const map = generateSeatMap(DEFAULT_TEMPLATE);
 const templates: TemplateInfo[] = [
   { id: DEFAULT_TEMPLATE.id, version: DEFAULT_TEMPLATE.version, name: DEFAULT_TEMPLATE.name, seatCount: map.count },
 ];
-const mail = new Stub();
-const auth = new MemoryAuthRepository();
-const designs = new MemoryDesignRepository((id) => auth.usernameOf(id));
-const app = await buildApp(designs, auth, templates, { emailSender: mail });
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-const reg = async (n: string) => app.inject({
+async function makeApp(opts: AppOptions = {}) {
+  const mail = new Stub();
+  const auth = new MemoryAuthRepository();
+  const designs = new MemoryDesignRepository((id) => auth.usernameOf(id));
+  const app = await buildApp(designs, auth, templates, { emailSender: mail, ...opts });
+  return { app, mail };
+}
+
+const reg = async (app: FastifyInstance, n: string) => app.inject({
   method: 'POST', url: '/api/auth/register',
   payload: { username: n, password: 'correct-horse-battery-9', email: `${n}@example.com`, acceptedVersion: '1' },
 });
 
-console.log('\n— registration says whether the email went out —');
-let r = await reg('alpha1');
-check('a sent one reports emailSent: true', r.json().emailSent === true, JSON.stringify(r.json()).slice(0, 90));
-const tokenA = r.json().token;
+/** Exactly what src/net/api.ts used to send: a JSON content-type and no body. */
+const JSON_NO_BODY = { 'content-type': 'application/json' } as const;
+const resend = (app: FastifyInstance, token: string) => app.inject({
+  method: 'POST', url: '/api/auth/verify/resend',
+  headers: { authorization: `Bearer ${token}`, ...JSON_NO_BODY },
+});
+const codeIn = (m: EmailMessage | undefined): string => /code: (\d{6})/.exec(m?.text ?? '')?.[1] ?? '';
 
-mail.refuse = 'The tifomaker.org domain is not verified';
-r = await reg('bravo1');
-check('registration still succeeds when mail is refused', r.statusCode === 201, String(r.statusCode));
-check('...and says emailSent: false', r.json().emailSent === false, JSON.stringify(r.json()).slice(0, 110));
-const tokenB = r.json().token;
+// ---------------------------------------------------------------------------
+{
+  const { app, mail } = await makeApp();
 
-console.log('\n— resend tells the truth —');
-let rs = await app.inject({ method: 'POST', url: '/api/auth/verify/resend', headers: { authorization: `Bearer ${tokenB}` } });
-check('a refused resend is a 502, not a 202', rs.statusCode === 502, `${rs.statusCode} ${rs.body.slice(0, 80)}`);
-check('...and does not leak the provider text to the caller', !/tifomaker\.org domain/.test(rs.body), rs.body.slice(0, 80));
+  console.log('\n— registration says whether the email went out —');
+  let r = await reg(app, 'alpha1');
+  check('a sent one reports emailSent: true', r.json().emailSent === true, JSON.stringify(r.json()).slice(0, 90));
 
-mail.refuse = null;
-rs = await app.inject({ method: 'POST', url: '/api/auth/verify/resend', headers: { authorization: `Bearer ${tokenB}` } });
-check('a successful resend is a 202', rs.statusCode === 202 && rs.json().emailSent === true, `${rs.statusCode} ${rs.body.slice(0, 60)}`);
+  mail.refuse = 'The tifomaker.org domain is not verified';
+  r = await reg(app, 'bravo1');
+  check('registration still succeeds when mail is refused', r.statusCode === 201, String(r.statusCode));
+  check('...and says emailSent: false', r.json().emailSent === false, JSON.stringify(r.json()).slice(0, 110));
+  const tokenB = r.json().token;
 
-console.log('\n— the cooldown —');
-rs = await app.inject({ method: 'POST', url: '/api/auth/verify/resend', headers: { authorization: `Bearer ${tokenB}` } });
-check('a second resend inside a minute is refused', rs.statusCode === 429, `${rs.statusCode} ${rs.body.slice(0, 80)}`);
-check('...and says how long to wait', typeof rs.json().retryInSeconds === 'number' && rs.json().retryInSeconds <= 60, rs.body.slice(0, 80));
-// A refusal must not start the clock, or one bad send locks you out for a minute.
-mail.refuse = 'rate_limit_exceeded';
-const rsA = await app.inject({ method: 'POST', url: '/api/auth/verify/resend', headers: { authorization: `Bearer ${tokenA}` } });
-mail.refuse = null;
-const rsA2 = await app.inject({ method: 'POST', url: '/api/auth/verify/resend', headers: { authorization: `Bearer ${tokenA}` } });
-check('a refused send does not spend the cooldown', rsA.statusCode === 502 && rsA2.statusCode === 202, `${rsA.statusCode} then ${rsA2.statusCode}`);
+  console.log('\n— resend, called the way the browser calls it —');
+  let rs = await resend(app, tokenB);
+  check('a JSON content-type with no body reaches the route instead of a 400', rs.statusCode !== 400 && !/FST_ERR_CTP_EMPTY_JSON_BODY/.test(rs.body), `${rs.statusCode} ${rs.body.slice(0, 90)}`);
+  check('a refused resend is a 502, not a 202', rs.statusCode === 502, `${rs.statusCode} ${rs.body.slice(0, 80)}`);
+  check('...and does not leak the provider text to the caller', !/tifomaker\.org domain/.test(rs.body), rs.body.slice(0, 80));
 
-console.log('\n— the admin can ask what the mail is doing —');
-const open = await app.inject({ method: 'GET', url: '/api/admin/email' });
-check('it is admin-gated', open.statusCode === 403, String(open.statusCode));
+  mail.refuse = null;
+  const before = mail.sent.length;
+  rs = await resend(app, tokenB);
+  check('a successful resend is a 202', rs.statusCode === 202 && rs.json().emailSent === true, `${rs.statusCode} ${rs.body.slice(0, 60)}`);
+  check('...and a message really went to the provider', mail.sent.length === before + 1 && mail.sent.at(-1)?.to === 'bravo1@example.com', `${mail.sent.length - before} sent`);
+  const plain = await app.inject({ method: 'POST', url: '/api/auth/verify/resend', headers: { authorization: `Bearer ${tokenB}` } });
+  check('a resend with no content-type at all still reaches the route', plain.statusCode === 429, `${plain.statusCode} ${plain.body.slice(0, 60)}`);
 
+  console.log('\n— the cooldown —');
+  rs = await resend(app, tokenB);
+  check('a second resend inside a minute is refused', rs.statusCode === 429, `${rs.statusCode} ${rs.body.slice(0, 80)}`);
+  check('...and says how long to wait', typeof rs.json().retryInSeconds === 'number' && rs.json().retryInSeconds <= 60, rs.body.slice(0, 80));
+
+  // The AI panel resends on its own the moment it meets an unverified account,
+  // which for a new signup is about two seconds after registering. That must
+  // not replace the code in the email that is arriving at that moment.
+  const sentBefore = mail.sent.length;
+  r = await reg(app, 'charlie1');
+  const tokenC = r.json().token;
+  const code = codeIn(mail.sent.at(-1));
+  rs = await resend(app, tokenC);
+  check('the registration email starts the clock: an immediate resend is a 429', rs.statusCode === 429, `${rs.statusCode} ${rs.body.slice(0, 80)}`);
+  check('...which sends nothing', mail.sent.length === sentBefore + 1, `${mail.sent.length - sentBefore} sent`);
+  const v = await app.inject({
+    method: 'POST', url: '/api/auth/verify/code',
+    headers: { authorization: `Bearer ${tokenC}` }, payload: { code },
+  });
+  check('...and the code in the registration email still verifies', code.length === 6 && v.statusCode === 200, `${code} → ${v.statusCode} ${v.body.slice(0, 60)}`);
+
+  console.log('\n— the admin can ask what the mail is doing —');
+  const open = await app.inject({ method: 'GET', url: '/api/admin/email' });
+  check('it is admin-gated', open.statusCode === 403, String(open.statusCode));
+  await app.close();
+}
+
+// ---------------------------------------------------------------------------
+{
+  // A short window so the clock can be watched run out.
+  const { app, mail } = await makeApp({ verifyResendCooldownMs: 40 });
+  console.log('\n— when the window has passed —');
+  const r = await reg(app, 'delta1');
+  const token = r.json().token;
+  const first = codeIn(mail.sent.at(-1));
+  await sleep(60);
+  mail.refuse = 'rate_limit_exceeded';
+  const refused = await resend(app, token);
+  mail.refuse = null;
+  const retried = await resend(app, token);
+  check('a refused send does not spend the cooldown', refused.statusCode === 502 && retried.statusCode === 202, `${refused.statusCode} then ${retried.statusCode}`);
+  const second = codeIn(mail.sent.at(-1));
+  const stale = await app.inject({ method: 'POST', url: '/api/auth/verify/code', headers: { authorization: `Bearer ${token}` }, payload: { code: first } });
+  check('a new message replaces the old code', second !== first && stale.statusCode === 400, `${first}/${second} → ${stale.statusCode}`);
+  const fresh = await app.inject({ method: 'POST', url: '/api/auth/verify/code', headers: { authorization: `Bearer ${token}` }, payload: { code: second } });
+  check('...and the new one verifies', fresh.statusCode === 200, `${fresh.statusCode} ${fresh.body.slice(0, 60)}`);
+  const after = await resend(app, token);
+  check('a verified account is told so rather than mailed again', after.statusCode === 200 && after.json().alreadyVerified === true, `${after.statusCode} ${after.body.slice(0, 60)}`);
+  await app.close();
+}
+
+// ---------------------------------------------------------------------------
+{
+  console.log('\n— every other bodiless call the client makes reaches its route —');
+  const { app } = await makeApp({ adminUsernames: ['boss1'] });
+  const bearer = (t: string) => ({ authorization: `Bearer ${t}` });
+  const boss = (await reg(app, 'boss1')).json().token as string;
+  const fan = (await reg(app, 'fan1')).json().token as string;
+  const cellsGzB64 = gzipSync(new Uint8Array(map.count)).toString('base64');
+  const made = await app.inject({
+    method: 'POST', url: '/api/designs', headers: bearer(fan),
+    payload: { title: 'Report me', templateId: DEFAULT_TEMPLATE.id, templateVersion: DEFAULT_TEMPLATE.version, palette: ['#262a33', '#1c5fd9'], cellsGzB64 },
+  });
+  const designId = made.json().id as string;
+  await app.inject({ method: 'PATCH', url: `/api/designs/${designId}`, headers: bearer(fan), payload: { isPublic: true } });
+  await app.inject({ method: 'POST', url: '/api/report', headers: bearer(fan), payload: { targetType: 'design', targetId: designId, reason: 'test' } });
+  const reports = (await app.inject({ method: 'GET', url: '/api/admin/reports', headers: bearer(boss) })).json() as Array<{ id: string }>;
+  const reportId = reports[0]?.id ?? '00000000-0000-4000-8000-000000000000';
+
+  const dismiss = await app.inject({ method: 'POST', url: `/api/admin/reports/${reportId}/dismiss`, headers: { ...bearer(boss), ...JSON_NO_BODY } });
+  check('dismissing a report', dismiss.statusCode === 200, `${dismiss.statusCode} ${dismiss.body.slice(0, 70)}`);
+  const takedown = await app.inject({ method: 'POST', url: `/api/admin/designs/${designId}/takedown`, headers: { ...bearer(boss), ...JSON_NO_BODY } });
+  check('taking a design down', takedown.statusCode === 200, `${takedown.statusCode} ${takedown.body.slice(0, 70)}`);
+  const nobody = '00000000-0000-4000-8000-000000000000';
+  const delPhoto = await app.inject({ method: 'DELETE', url: `/api/photos/${nobody}`, headers: { ...bearer(fan), ...JSON_NO_BODY } });
+  check('deleting a photo gets as far as looking for it', delPhoto.statusCode === 404, `${delPhoto.statusCode} ${delPhoto.body.slice(0, 70)}`);
+  const modPhoto = await app.inject({ method: 'DELETE', url: `/api/admin/photos/${nobody}`, headers: { ...bearer(boss), ...JSON_NO_BODY } });
+  check('a moderator deleting a photo gets as far as looking for it', modPhoto.statusCode === 404, `${modPhoto.statusCode} ${modPhoto.body.slice(0, 70)}`);
+
+  console.log('\n— the JSON parser still refuses what it should —');
+  const broken = await app.inject({ method: 'POST', url: '/api/auth/login', headers: JSON_NO_BODY, payload: '{"username":' });
+  check('malformed JSON is still a 400', broken.statusCode === 400 && /FST_ERR_CTP_INVALID_JSON_BODY/.test(broken.body), `${broken.statusCode} ${broken.body.slice(0, 70)}`);
+  const poisoned = await app.inject({ method: 'POST', url: '/api/auth/login', headers: JSON_NO_BODY, payload: '{"__proto__":{"admin":true},"username":"x","password":"y"}' });
+  check('a __proto__ key is still refused', poisoned.statusCode === 400, `${poisoned.statusCode} ${poisoned.body.slice(0, 70)}`);
+  const real = await app.inject({ method: 'POST', url: '/api/auth/login', headers: JSON_NO_BODY, payload: '{"username":"fan1","password":"correct-horse-battery-9"}' });
+  check('a real JSON body still parses', real.statusCode === 200 && typeof real.json().token === 'string', `${real.statusCode}`);
+  await app.close();
+}
+
+// ---------------------------------------------------------------------------
+{
+  console.log('\n— the client never sends a JSON content-type without a body —');
+  // A tripwire over the source, not a parser: every fetch( … ) call that asks
+  // for a JSON content-type must also pass a body. The server now tolerates the
+  // pairing, but the client sending it is how this broke, and a stricter
+  // proxy or a future Fastify would break it again.
+  const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'src');
+  const files: string[] = [];
+  const walk = (dir: string) => {
+    for (const name of readdirSync(dir)) {
+      const p = join(dir, name);
+      if (statSync(p).isDirectory()) walk(p);
+      else if (/\.ts$/.test(name)) files.push(p);
+    }
+  };
+  walk(root);
+  const offenders: string[] = [];
+  let scanned = 0;
+  for (const file of files) {
+    const src = readFileSync(file, 'utf8');
+    for (let at = src.indexOf('fetch('); at !== -1; at = src.indexOf('fetch(', at + 6)) {
+      let i = at + 6, depth = 1;
+      while (i < src.length && depth) {
+        if (src[i] === '(') depth++;
+        else if (src[i] === ')') depth--;
+        i++;
+      }
+      const call = src.slice(at, i);
+      const asksJson = /authHeaders\(true\)|content-type['"]?\s*:\s*['"]application\/json/i.test(call);
+      if (!asksJson) continue;
+      scanned++;
+      if (!/\bbody\s*:/.test(call)) {
+        const line = src.slice(0, at).split('\n').length;
+        offenders.push(`${file.slice(root.length + 1)}:${line}`);
+      }
+    }
+  }
+  check(`no JSON header without a body (${scanned} JSON calls scanned)`, scanned > 20 && offenders.length === 0, offenders.join(', '));
+}
+
+// ---------------------------------------------------------------------------
 console.log('\n— preflight says it out loud —');
 const prodNoKey = configWarnings({ NODE_ENV: 'production' } as NodeJS.ProcessEnv);
 const w = prodNoKey.find((x) => x.key === 'RESEND_API_KEY');
@@ -89,6 +238,5 @@ check('a From off the verified domain is a warning', oddFrom.some((x) => x.key =
 const okFrom = configWarnings({ NODE_ENV: 'production', RESEND_API_KEY: 'k', EMAIL_FROM: 'TifoMaker <no-reply@tifomaker.org>' } as NodeJS.ProcessEnv);
 check('the default From is not', !okFrom.some((x) => x.key === 'EMAIL_FROM'));
 
-await app.close();
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

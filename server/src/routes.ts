@@ -162,6 +162,11 @@ export interface AppOptions {
   feedbackTo?: string;
   /** Public base URL for links in emails. Defaults to the request's own origin. */
   publicUrl?: string;
+  /**
+   * How long after a verification email goes out before another may be sent to
+   * the same account. Defaults to a minute; tests shorten it rather than wait.
+   */
+  verifyResendCooldownMs?: number;
 }
 
 export async function buildApp(
@@ -192,6 +197,34 @@ export async function buildApp(
   const trustProxy: boolean | ((addr: string, hop: number) => boolean) =
     hops === 0 ? false : (_addr: string, hop: number) => hop < hops;
   const app = Fastify({ logger: options.logger ?? false, bodyLimit: MAX_BODY_BYTES, trustProxy });
+
+  // An empty body is not broken JSON.
+  //
+  // Fastify's JSON parser rejects a request that says `content-type:
+  // application/json` and then sends no body. It answers 400
+  // FST_ERR_CTP_EMPTY_JSON_BODY before any route runs. The browser client did
+  // exactly that for every action with nothing to send: resend the
+  // verification email, dismiss a report, take a design down, delete a photo.
+  // In production every one of those answered 400 and never reached its
+  // handler, so "Resend" sent no email at all. The route tests never saw it
+  // because app.inject sends no content-type unless it is given a payload.
+  //
+  // Every handler already reads `req.body ?? {}`, so an empty body now means
+  // the same as no body. A body that IS there still goes through Fastify's own
+  // parser, with the same proto/constructor poisoning rules as before.
+  {
+    const { onProtoPoisoning, onConstructorPoisoning } = app.initialConfig;
+    const strictJson = app.getDefaultJsonParser(onProtoPoisoning ?? 'error', onConstructorPoisoning ?? 'error');
+    app.removeContentTypeParser('application/json');
+    app.addContentTypeParser('application/json', { parseAs: 'string' }, (req, body, done) => {
+      const text = typeof body === 'string' ? body : body.toString('utf8');
+      if (text.length === 0) {
+        done(null, undefined);
+        return;
+      }
+      strictJson(req, text, done);
+    });
+  }
 
   // Security headers, including a real Content-Security-Policy. The policy is a
   // strict allow-list derived from exactly what the pages load:
@@ -760,6 +793,38 @@ export async function buildApp(
    *  instance would keep its own, which the link flow makes acceptable. */
   const codeTries = new Map<string, number>();
 
+  /**
+   * Per-account cooldown between verification messages, and the clock behind
+   * it: when each account was last sent one, by ANY path (registration, adding
+   * or changing an address, or Resend).
+   *
+   * The rate limit is 10 a minute per ADDRESS, which does nothing to stop one
+   * impatient person pressing Resend twenty times — and on a transactional mail
+   * plan with a daily allowance, that is how a whole day's quota disappears
+   * before lunch and everyone else's verification silently stops arriving.
+   * A new message also invalidates the previous code, so rapid resends are
+   * actively unhelpful: the code in the message you just opened stops working.
+   *
+   * The clock used to be started only by the Resend route, so the message
+   * registration had just sent did not count. The AI panel resends on its own
+   * the moment it finds an unverified account, which for a new signup is about
+   * two seconds after registering. Once Resend actually worked, that would
+   * silently replace the code in the email the person was already opening.
+   * Now the second request inside the window is a 429 that says a message is
+   * on its way, and the first code keeps working.
+   */
+  const RESEND_COOLDOWN_MS = Math.max(0, options.verifyResendCooldownMs ?? 60_000);
+  const lastVerifySentAt = new Map<string, number>();
+  const noteVerifySent = (userId: string): void => {
+    const now = Date.now();
+    lastVerifySentAt.set(userId, now);
+    // In-memory, like codeTries; forget entries once they can no longer matter,
+    // so a long-lived process does not keep one per account it ever mailed.
+    if (lastVerifySentAt.size > 5000) {
+      for (const [id, at] of lastVerifySentAt) if (now - at >= RESEND_COOLDOWN_MS) lastVerifySentAt.delete(id);
+    }
+  };
+
   /** A cryptographically random 6-digit code. Never Math.random. */
   const newVerifyCode = (): string => String(randomInt(0, 1_000_000)).padStart(6, '0');
   /** Salted with the user id, so two people can hold the same digits and one
@@ -809,6 +874,7 @@ export async function buildApp(
           `رمز التحقق في تيفو ميكر: ${code} (صالح 10 دقائق)\nأو افتح: ${link}\n\n` +
           `Your TifoMaker code: ${code} (valid 10 minutes)\nOr open: ${link}`,
       });
+      noteVerifySent(user.id);
       return true;
     } catch (err) {
       // Loud, and with the provider's own words. This used to be the ONLY trace
@@ -918,38 +984,30 @@ export async function buildApp(
       .redirect(`/app?verified=${userId ? 1 : 0}`);
   });
 
-  /**
-   * Per-user cooldown between resends.
-   *
-   * The rate limit is 10 a minute per ADDRESS, which does nothing to stop one
-   * impatient person pressing Resend twenty times — and on a transactional mail
-   * plan with a daily allowance, that is how a whole day's quota disappears
-   * before lunch and everyone else's verification silently stops arriving.
-   * A new message also invalidates the previous code, so rapid resends are
-   * actively unhelpful: the code in the message you just opened stops working.
-   */
-  const RESEND_COOLDOWN_MS = 60_000;
-  const lastResendAt = new Map<string, number>();
-
-  // Re-send the verification email to the signed-in user.
+  // Re-send the verification email to the signed-in user. The cooldown and its
+  // reasons are with lastVerifySentAt, above sendVerifyEmail.
   app.post('/api/auth/verify/resend', authLimit, async (req, reply) => {
     const userId = await requireUser(req, reply);
     if (!userId) return;
     const user = await auth.getUserById(userId).catch(() => null);
     if (!user?.email) return reply.code(400).send({ error: 'no email on file' });
     if (user.emailVerifiedAt) return reply.code(200).send({ ok: true, alreadyVerified: true });
-    const since = Date.now() - (lastResendAt.get(userId) ?? 0);
+    const last = lastVerifySentAt.get(userId);
+    const since = last === undefined ? Number.POSITIVE_INFINITY : Date.now() - last;
     if (since < RESEND_COOLDOWN_MS) {
       return reply.code(429).send({
         error: 'a message is already on its way',
-        retryInSeconds: Math.ceil((RESEND_COOLDOWN_MS - since) / 1000),
+        retryInSeconds: Math.max(1, Math.ceil((RESEND_COOLDOWN_MS - since) / 1000)),
       });
     }
-    lastResendAt.set(userId, Date.now());
+    // Claim the slot before the provider call, so two quick presses cannot
+    // both get through while the first is still waiting on Resend.
+    lastVerifySentAt.set(userId, Date.now());
     const sent = await sendVerifyEmail(req, { id: user.id, email: user.email });
     if (!sent) {
       // Don't let someone's failed send lock them out of retrying.
-      lastResendAt.delete(userId);
+      if (last === undefined) lastVerifySentAt.delete(userId);
+      else lastVerifySentAt.set(userId, last);
       // Generic to the caller, exact in the log and on /api/admin/email: the
       // provider's refusal can name the account and the sending domain.
       return reply.code(502).send({ error: 'we could not send that email just now', emailSent: false });

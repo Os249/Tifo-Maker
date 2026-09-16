@@ -143,6 +143,7 @@ async function main(): Promise<void> {
       feedbackTo: process.env.FEEDBACK_TO,
       emailSender: createEmailSender(),
       publicUrl: process.env.PUBLIC_URL,
+      verifyResendCooldownMs: envNum('VERIFY_RESEND_COOLDOWN_MS', 60_000, 0, 3_600_000),
     });
   } else {
     if (isProd) {
@@ -173,6 +174,7 @@ async function main(): Promise<void> {
       feedbackTo: process.env.FEEDBACK_TO,
       emailSender: createEmailSender(),
       publicUrl: process.env.PUBLIC_URL,
+      verifyResendCooldownMs: envNum('VERIFY_RESEND_COOLDOWN_MS', 60_000, 0, 3_600_000),
     });
   }
 

@@ -19,6 +19,7 @@
     "server:local": "node --env-file=.env --import tsx server/src/server.ts",
     "test:server": "tsx server/test/server.test.mts",
     "test:email": "tsx server/test/email.test.mts",
+    "test:verify": "npm run build && node e2e-verify.mjs",
     "build:prod": "tsc --noEmit && vite build",
     "start": "NODE_ENV=production tsx server/src/server.ts",
     "verify:stadiumfit": "tsx scripts/verify-stadiumfit.mts",

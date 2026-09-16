@@ -664,6 +664,13 @@ const STRINGS: Record<string, { en: string; ar: string }> = {
   'ac.danger.mismatch': { en: 'That does not match your name.', ar: 'هذا لا يطابق اسمك.' },
   'ac.danger.failed': { en: 'Could not delete the account. Try again shortly.', ar: 'تعذّر حذف الحساب. جرّب بعد قليل.' },
   // ---- AI state card: every outcome the panel can report ----
+  'ai.verify.sent': { en: 'Verify your email to use the AI Designer. A new code is on its way to your inbox.', ar: 'وثّق بريدك عشان تستخدم مصمّم الذكاء الاصطناعي. رمز جديد في طريقه لبريدك.' },
+  'ai.verify.onItsWay': { en: 'Verify your email to use the AI Designer. The code is in the email we sent you.', ar: 'وثّق بريدك عشان تستخدم مصمّم الذكاء الاصطناعي. الرمز موجود في الرسالة اللي أرسلناها لك.' },
+  'ai.verify.notSent': { en: 'Verify your email to use the AI Designer. We could not send a new code just now — try again from your account page.', ar: 'وثّق بريدك عشان تستخدم مصمّم الذكاء الاصطناعي. ما قدرنا نرسل رمزًا جديدًا الحين — جرّب من صفحة حسابك.' },
+  'ai.verify.nowVerified': { en: 'Your email is verified. Try again.', ar: 'بريدك موثّق. جرّب مرة ثانية.' },
+  'ai.verify.addedCheckInbox': { en: 'Check your inbox for the code, then try again.', ar: 'شوف بريدك وخذ الرمز، وبعدها جرّب مرة ثانية.' },
+  'ai.verify.addEmail': { en: 'Add a verified email to use the AI Designer.', ar: 'أضف بريدًا موثّقًا عشان تستخدم مصمّم الذكاء الاصطناعي.' },
+  'ai.verify.enterCode': { en: 'Enter the code', ar: 'اكتب الرمز' },
   'ai.card.doneSuper': { en: 'Designed with Super AI', ar: 'تم التصميم بالذكاء الخارق' },
   'ai.card.donePremium': { en: 'Designed with Premium AI', ar: 'تم التصميم بالذكاء المتقدم' },
   'ai.card.doneQuick': { en: 'Designed with the Quick Designer', ar: 'تم التصميم بالمصمّم السريع' },

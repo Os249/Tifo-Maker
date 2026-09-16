@@ -125,6 +125,17 @@ export function signOut(): void {
   setToken(null);
 }
 
+/**
+ * Headers for an API call.
+ *
+ * Pass `json: true` ONLY when the request carries a JSON body. The server
+ * refused `content-type: application/json` with an empty body (400
+ * FST_ERR_CTP_EMPTY_JSON_BODY) before any route ran. That is how the Resend
+ * verification button, report dismissal, takedown and both photo deletes all
+ * failed in production without ever reaching the server code behind them.
+ * The server now tolerates it, and server/test/email.test.mts fails if a call
+ * here goes back to sending the header without a body.
+ */
 function authHeaders(json: boolean): Record<string, string> {
   const h: Record<string, string> = {};
   if (json) h['content-type'] = 'application/json';
@@ -149,11 +160,11 @@ export async function login(username: string, password: string): Promise<string>
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ username, password }),
     }),
-  )) as { token: string; username: string; emailSent?: boolean };
+  )) as { token: string; username: string };
   setToken(data.token);
-  // The account exists either way; whether the verification email went out is a
-  // separate question, and the server is now the only thing that knows it.
-  lastRegisterEmailSent = data.emailSent !== false;
+  // A sign-in sends no email, so it must not carry over what an earlier
+  // registration in this tab reported.
+  lastRegisterEmailSent = true;
   return data.username;
 }
 
@@ -181,8 +192,13 @@ export async function register(
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ username, password, email, acceptedVersion }),
     }),
-  )) as { token: string; username: string };
+  )) as { token: string; username: string; emailSent?: boolean };
   setToken(data.token);
+  // The account exists either way; whether the verification email went out is a
+  // separate question, and the server is the only thing that knows it. This used
+  // to be read in login(), which never returns the field, so a refused
+  // registration email still said "signed in" and pointed at an empty inbox.
+  lastRegisterEmailSent = data.emailSent !== false;
   return data.username;
 }
 
@@ -206,11 +222,26 @@ export async function setAccountEmail(email: string, acceptedVersion?: string): 
  * whether or not the message went out, which is how an inbox that was never
  * going to receive anything still said "check your inbox".
  */
-export async function resendVerification(): Promise<{ ok: boolean; retryInSeconds?: number; error?: string }> {
-  const res = await fetch(`${API}/auth/verify/resend`, { method: 'POST', headers: authHeaders(true) });
-  if (res.ok) return { ok: true };
-  const data = (await res.json().catch(() => null)) as { error?: string; retryInSeconds?: number } | null;
-  return { ok: false, retryInSeconds: data?.retryInSeconds, error: data?.error };
+export interface ResendResult {
+  ok: boolean;
+  /** HTTP status, so a caller can tell a refused send (502) from a cooldown
+   *  (429), an expired session (401) and anything else. */
+  status: number;
+  /** Set on a cooldown: a message already went out this long ago. */
+  retryInSeconds?: number;
+  /** The address was verified in the meantime; nothing was sent. */
+  alreadyVerified?: boolean;
+  error?: string;
+}
+export async function resendVerification(): Promise<ResendResult> {
+  // No body, so no JSON content-type: that pairing is what made every press of
+  // this button a 400 that never reached the server's send code.
+  const res = await fetch(`${API}/auth/verify/resend`, { method: 'POST', headers: authHeaders(false) });
+  const data = (await res.json().catch(() => null)) as
+    | { error?: string; retryInSeconds?: number; alreadyVerified?: boolean }
+    | null;
+  if (res.ok) return { ok: true, status: res.status, alreadyVerified: data?.alreadyVerified === true };
+  return { ok: false, status: res.status, retryInSeconds: data?.retryInSeconds, error: data?.error };
 }
 
 /**
@@ -764,7 +795,7 @@ export async function uploadPhoto(
 
 /** Delete a photo (owner only). */
 export async function deletePhoto(photoId: string): Promise<void> {
-  await expectOk(await fetch(`${API}/photos/${photoId}`, { method: 'DELETE', headers: authHeaders(true) }));
+  await expectOk(await fetch(`${API}/photos/${photoId}`, { method: 'DELETE', headers: authHeaders(false) }));
 }
 
 /**
@@ -882,16 +913,16 @@ export interface PhotoReviewItem {
 }
 
 export async function listReports(status = 'open'): Promise<ReportItem[]> {
-  return (await expectOk(await fetch(`${API}/admin/reports?status=${status}`, { headers: authHeaders(true) }))) as ReportItem[];
+  return (await expectOk(await fetch(`${API}/admin/reports?status=${status}`, { headers: authHeaders(false) }))) as ReportItem[];
 }
 export async function dismissReport(id: string): Promise<void> {
-  await expectOk(await fetch(`${API}/admin/reports/${id}/dismiss`, { method: 'POST', headers: authHeaders(true) }));
+  await expectOk(await fetch(`${API}/admin/reports/${id}/dismiss`, { method: 'POST', headers: authHeaders(false) }));
 }
 export async function takedownDesign(id: string): Promise<void> {
-  await expectOk(await fetch(`${API}/admin/designs/${id}/takedown`, { method: 'POST', headers: authHeaders(true) }));
+  await expectOk(await fetch(`${API}/admin/designs/${id}/takedown`, { method: 'POST', headers: authHeaders(false) }));
 }
 export async function listUnverifiedPhotos(): Promise<PhotoReviewItem[]> {
-  return (await expectOk(await fetch(`${API}/admin/photos/unverified`, { headers: authHeaders(true) }))) as PhotoReviewItem[];
+  return (await expectOk(await fetch(`${API}/admin/photos/unverified`, { headers: authHeaders(false) }))) as PhotoReviewItem[];
 }
 export async function verifyPhoto(photoId: string, verified: boolean): Promise<void> {
   await expectOk(
@@ -903,7 +934,7 @@ export async function verifyPhoto(photoId: string, verified: boolean): Promise<v
   );
 }
 export async function adminDeletePhoto(photoId: string): Promise<void> {
-  await expectOk(await fetch(`${API}/admin/photos/${photoId}`, { method: 'DELETE', headers: authHeaders(true) }));
+  await expectOk(await fetch(`${API}/admin/photos/${photoId}`, { method: 'DELETE', headers: authHeaders(false) }));
 }
 
 export const thumbnailUrl = (id: string): string => `${API}/designs/${id}/thumbnail.png`;

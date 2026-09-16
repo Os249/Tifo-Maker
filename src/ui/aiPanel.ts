@@ -546,16 +546,31 @@ export function mountAiPanel(deps: AiPanelDeps): void {
       if (err.reason === 'verify') {
         // Signed in but the email isn't usable yet. No email on the account →
         // offer to add one; otherwise it's unverified → offer to resend the link.
+        // The code is typed on the account page. A new tab, so a design in
+        // progress here is not navigated away from.
+        const enterCode: CardAction = {
+          label: t('ai.verify.enterCode'),
+          primary: true,
+          run: () => { window.open('/account', '_blank', 'noopener'); },
+        };
         const me = await fetchMe().catch(() => null);
         if (me && !me.email) {
           const added = await openAddEmailModal();
-          setError(added ? 'Check your inbox to verify, then try again.' : 'Add a verified email to use the AI Designer.');
+          setError(added ? t('ai.verify.addedCheckInbox') : t('ai.verify.addEmail'), added ? [enterCode] : undefined);
         } else if (!verifyResent) {
           verifyResent = true;
-          void resendVerification().catch(() => {});
-          setError('Verify your email to use the AI Designer, I just re-sent the link to your inbox.');
+          // Say what actually happened. This used to announce "I just re-sent
+          // the link" without waiting, while every one of these requests was
+          // being refused with a 400. It also fires about two seconds after a
+          // signup, which the server now answers with a cooldown rather than
+          // replacing the code in the email that just arrived.
+          const res = await resendVerification().catch(() => null);
+          if (res?.ok && res.alreadyVerified) setError(t('ai.verify.nowVerified'), [tryAgain]);
+          else if (res?.ok) setError(t('ai.verify.sent'), [enterCode]);
+          else if (res?.status === 429) setError(t('ai.verify.onItsWay'), [enterCode]);
+          else setError(t('ai.verify.notSent'), [enterCode]);
         } else {
-          setError('Verify your email to use the AI Designer. Check your inbox for the link.');
+          setError(t('ai.verify.onItsWay'), [enterCode]);
         }
       } else if (err.reason === 'quota' || err.status === 429 || err.status === 402) {
         if (err.quota) setQuota(err.quota);
