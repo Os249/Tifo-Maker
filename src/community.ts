@@ -850,7 +850,7 @@ $('#notif-btn').addEventListener('click', async () => {
 });
 
 function notifRow(n: NotificationItem): string {
-  const icon = { follow_post: 'ti-photo', new_follower: 'ti-user-plus', comment: 'ti-message-circle', remix: 'ti-git-fork' }[n.kind] ?? 'ti-bell';
+  const icon = { follow_post: 'ti-photo', new_follower: 'ti-user-plus', comment: 'ti-message-circle', remix: 'ti-git-fork', featured: 'ti-sparkles' }[n.kind] ?? 'ti-bell';
   const actor = n.actorName ? `<span class="at">@${escapeHtml(n.actorName)}</span>` : 'Someone';
   const text =
     {
@@ -858,6 +858,10 @@ function notifRow(n: NotificationItem): string {
       new_follower: `${actor} started following you`,
       comment: `${actor} commented on your tifo`,
       remix: `${actor} remixed your tifo`,
+      // The site featured it, so there is no actor to name — and this one is
+      // worth spelling out, because it is the only notification that put the
+      // person's work in front of everybody who lands on the home page.
+      featured: `<b>${escapeHtml(n.designTitle ?? 'Your tifo')}</b> is the Tifo of the Day on the home page`,
     }[n.kind] ?? `${actor} did something`;
   return `
     <div class="notif-item ${n.readAt ? '' : 'unread'}">

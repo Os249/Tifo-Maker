@@ -8,6 +8,8 @@ import { generateSeatMap } from '../../src/core/seatmap';
 import { DEFAULT_TEMPLATE } from '../../src/core/template';
 import { MemoryAiUsageRepository, MemoryAuthRepository, MemoryDesignRepository, MemoryEventsRepository, MemoryLeadsRepository } from '../src/memoryRepo';
 import { MemorySocialRepository } from '../src/memorySocial';
+import { MemoryDailyFeatureRepository } from '../src/featureRepo';
+import { DailyFeaturePicker } from '../src/featured';
 import { MemoryAdminStatsRepository } from '../src/statsRepo';
 import { MemoryFeedbackRepository } from '../src/feedbackRepo';
 import { PgAuthRepository, PgDesignRepository } from '../src/pgRepo';
@@ -794,6 +796,113 @@ async function runSuite(name: string, repo: DesignRepository, auth: AuthReposito
   assert.equal(after.followerCount, 0, 'unfollow works');
 
   console.log('social: all assertions passed (remix lineage, follow graph, comments+threads, notifications, search)');
+}
+
+// ---- tifo of the day: the daily pick, its stability, and the creator's notification ----
+{
+  const auth = new MemoryAuthRepository();
+  const designs = new MemoryDesignRepository((id) => auth.usernameOf(id));
+  const social = new MemorySocialRepository(designs, auth);
+  const featured = new MemoryDailyFeatureRepository();
+  const app = await buildApp(designs, auth, templates, { social, featured });
+  const cellsGzB64 = gzipSync(sampleCells()).toString('base64');
+
+  const aliceTok = await registerUser(app, 'alice');
+  const bobTok = await registerUser(app, 'bob');
+
+  // Publish one design WITH a thumbnail, one WITHOUT. Only the first can be
+  // featured: the card is the thumbnail, so a design with none is not a card.
+  const publish = async (token: string, title: string, withThumb: boolean): Promise<string> => {
+    const payload: Record<string, unknown> = { title, templateId: DEFAULT_TEMPLATE.id, templateVersion: 1, palette: PALETTE, cellsGzB64 };
+    if (withThumb) payload.thumbnailPngB64 = PNG_1PX.toString('base64');
+    const created = await app.inject({ method: 'POST', url: '/api/designs', headers: bearer(token), payload });
+    const id = (created.json() as { id: string }).id;
+    await app.inject({ method: 'PATCH', url: `/api/designs/${id}`, headers: bearer(token), payload: { isPublic: true } });
+    return id;
+  };
+
+  // Nothing published yet: the endpoint answers, with nothing in it. A young
+  // site is not an error, and the home page has to render either way. Asked on
+  // its own app because an empty answer is remembered for a minute — the pool
+  // query is the expensive one and a cold site must not run it per request.
+  const coldApp = await buildApp(designs, auth, templates, { social, featured });
+  const cold = (await coldApp.inject({ method: 'GET', url: '/api/featured/today' })).json() as { day: string; item: unknown };
+  assert.equal(cold.item, null, 'no community designs yet means no feature, not a failure');
+  assert.match(cold.day, /^\d{4}-\d{2}-\d{2}$/, 'the day is a UTC date string');
+
+  const shown = await publish(aliceTok, 'Curva Nord', true);
+  await publish(bobTok, 'No thumbnail here', false);
+
+  const first = (await app.inject({ method: 'GET', url: '/api/featured/today' })).json() as {
+    day: string; item: { id: string; ownerName: string; hasThumbnail: boolean } | null;
+  };
+  assert.ok(first.item, 'a published design with a thumbnail gets featured');
+  assert.equal(first.item!.id, shown, 'the design without a thumbnail is not eligible');
+  assert.equal(first.item!.ownerName, 'alice');
+
+  // Alice is told, once, with the design attached so the feed can name it.
+  const notifs = (await app.inject({ method: 'GET', url: '/api/notifications', headers: bearer(aliceTok) })).json() as {
+    items: { kind: string; designId: string | null; actorId: string | null }[];
+  };
+  const featuredNotes = notifs.items.filter((n) => n.kind === 'featured');
+  assert.equal(featuredNotes.length, 1, 'the creator is notified exactly once');
+  assert.equal(featuredNotes[0].designId, shown, 'the notification carries the design');
+  assert.equal(featuredNotes[0].actorId, null, 'the site featured it, so there is no actor');
+
+  // Asking again does not re-pick or re-notify, however many times the home
+  // page is loaded — which is the whole reason the day is a stored row.
+  for (let i = 0; i < 3; i++) await app.inject({ method: 'GET', url: '/api/featured/today' });
+  const again = (await app.inject({ method: 'GET', url: '/api/notifications', headers: bearer(aliceTok) })).json() as { items: { kind: string }[] };
+  assert.equal(again.items.filter((n) => n.kind === 'featured').length, 1, 'one feature, one notification');
+
+  // A second instance on the same day inherits the SAME pick from the store,
+  // even though its own pool now favours a newer, more-liked design.
+  const hyped = await publish(bobTok, 'Tifo with all the likes', true);
+  await app.inject({ method: 'POST', url: `/api/designs/${hyped}/vote`, headers: bearer(aliceTok), payload: { value: 1 } });
+  const second = await buildApp(designs, auth, templates, { social, featured });
+  const stable = (await second.inject({ method: 'GET', url: '/api/featured/today' })).json() as { item: { id: string } | null };
+  assert.equal(stable.item!.id, shown, "today's pick is fixed for the day, across instances and restarts");
+  const bobNotes = (await app.inject({ method: 'GET', url: '/api/notifications', headers: bearer(bobTok) })).json() as { items: { kind: string }[] };
+  assert.equal(bobNotes.items.filter((n) => n.kind === 'featured').length, 0, 'a second instance does not notify for a day already claimed');
+
+  // Tomorrow moves on to someone who has not had a turn, rather than repeating
+  // the best design forever.
+  const picker = new DailyFeaturePicker(designs, featured, social);
+  const tomorrow = await picker.today(new Date(Date.now() + 86_400_000));
+  assert.equal(tomorrow!.item.id, hyped, 'the next day goes to a design that has not been featured');
+  assert.notEqual(tomorrow!.day, first.day, 'and it is a different day');
+
+  // The starter library is not somebody's work to celebrate, so it never wins.
+  const libraryOwner = await registerUser(app, 'tifomaker');
+  const libraryId = await publish(libraryOwner, 'Library strip', true);
+  const libraryUser = (await app.inject({ method: 'GET', url: '/api/me', headers: bearer(libraryOwner) })).json().id as string;
+  await designs.setTemplate(libraryId, libraryUser, true);
+  const day3 = await picker.today(new Date(Date.now() + 2 * 86_400_000));
+  assert.notEqual(day3!.item.id, libraryId, 'templates are never the tifo of the day');
+
+  // The card is rendered INTO the home page, not fetched by the browser: it is
+  // the home page's first link to a design page, and an orphan design page is
+  // what /community's crawler feed exists to fix. This is the assertion that
+  // fails if landing.html's container is renamed and the injection stops
+  // matching — which would fail silently, the page merely losing a section.
+  if (existsSync(join(process.cwd(), 'landing.html'))) {
+    const served = await buildApp(designs, auth, templates, { social, featured, staticDir: process.cwd() });
+    const home = await served.inject({ method: 'GET', url: '/' });
+    assert.equal(home.statusCode, 200);
+    assert.ok(home.body.includes('id="featured-tifo"'), 'the home page still has the container to inject into');
+    assert.ok(home.body.includes(`href="/t/${shown}"`), 'the home page links straight to the featured design page');
+    assert.ok(home.body.includes('Curva Nord'), "the featured design's name is in the HTML a crawler gets");
+    assert.ok(home.body.includes('data-i18n="daily.badge"'), 'the fixed labels stay translatable');
+    assert.ok(/\/api\/designs\/[0-9a-f-]+\/thumbnail\.png/.test(home.body), 'and its thumbnail is a real image tag');
+  }
+
+  // Without the store the feature is simply absent — the endpoint still answers
+  // so the home page never has to special-case a deployment that has it off.
+  const noStore = await buildApp(designs, auth, templates, { social });
+  const off = (await noStore.inject({ method: 'GET', url: '/api/featured/today' })).json() as { item: unknown };
+  assert.equal(off.item, null, 'no store means no feature, not a 500');
+
+  console.log('tifo of the day: all assertions passed (eligibility, one notification, stable for the day, rotation, templates excluded, rendered into the home page)');
 }
 
 // ---- B2B lead capture ----

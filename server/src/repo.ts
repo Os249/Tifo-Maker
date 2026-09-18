@@ -264,6 +264,14 @@ export interface SocialRepository {
   // ---- notifications ----
   /** Fan out a "new public post" notification to all the author's followers. */
   notifyFollowersOfPost(authorId: string, designId: string): Promise<void>;
+  /**
+   * Tell a creator their design is the Tifo of the Day on the home page.
+   *
+   * The site itself is the actor here, not a person, so the notification is
+   * stored with no actor_id — which the column already allows and the feed
+   * already renders ("Someone" is replaced by the featured wording client-side).
+   */
+  notifyFeatured(userId: string, designId: string): Promise<void>;
   /** Recent notifications for a user, newest first. */
   listNotifications(userId: string, limit: number): Promise<NotificationItem[]>;
   /** Count of unread notifications. */

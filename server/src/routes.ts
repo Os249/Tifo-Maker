@@ -25,6 +25,8 @@ import { attachSecurityMonitor, maskEmail, type SocMonitor } from './soc';
 import { RETENTION_DAYS } from './socRepo';
 import { securityPosture } from './posture';
 import type { StadiumSubmissionRepository } from './stadiumRepo';
+import type { DailyFeatureRepository } from './featureRepo';
+import { DailyFeaturePicker, utcDay, type FeaturedTifo } from './featured';
 import type { AdminStatsRepository } from './statsRepo';
 import { buildVisit, isSocialHost, type TrafficRepository } from './trafficRepo';
 import { isFeedbackKind, type FeedbackContext, type FeedbackRepository } from './feedbackRepo';
@@ -179,6 +181,12 @@ export interface AppOptions {
   aiFreeLimit?: number;
   /** Optional community stadium submissions store. When present, /api/stadiums/* is enabled. */
   stadiums?: StadiumSubmissionRepository;
+  /**
+   * Tifo of the day store. When present the home page features one community
+   * design a day and /api/featured/today answers; when absent the section is
+   * simply not there.
+   */
+  featured?: DailyFeatureRepository;
   /** Optional admin analytics aggregates. When present, /api/admin/overview is enabled. */
   stats?: AdminStatsRepository;
   /** Optional cookieless traffic-source store. When present, /api/admin/traffic is enabled. */
@@ -1474,6 +1482,33 @@ export async function buildApp(
     });
   });
 
+  // ---------- tifo of the day ----------
+  /**
+   * One community design on the home page, changing daily, and its creator told
+   * about it. The pick itself lives in featured.ts; this is the wiring.
+   *
+   * Constructed once per app so the day's answer is cached in the process: the
+   * home page asks on EVERY request, crawlers included, and the answer cannot
+   * change until midnight UTC.
+   */
+  const daily = options.featured
+    ? new DailyFeaturePicker(repo, options.featured, options.social)
+    : null;
+
+  /**
+   * Today's featured tifo, or `item: null` when there is nothing to feature.
+   *
+   * Always 200 with a nullable item rather than a 404: "no community designs
+   * with a thumbnail yet" is an ordinary state of a young site, not an error,
+   * and the client hides the section either way. The home page is rendered
+   * with this server-side, so in production this endpoint is the development
+   * path (vite serves landing.html itself, with no injection) and a fallback.
+   */
+  app.get('/api/featured/today', async () => {
+    const picked = daily ? await daily.today() : null;
+    return { day: picked?.day ?? utcDay(), item: picked?.item ?? null };
+  });
+
   /**
    * What the filter chips can offer.
    *
@@ -2613,18 +2648,67 @@ export async function buildApp(
     // and never reference stale hashed chunks after a deploy (the cause of
     // "Failed to load module script / MIME text/html" errors). The hashed
     // /assets/* files are immutable by name, so they stay long-cacheable.
-    app.get('/', async (req, reply) =>
-      reply
+    /**
+     * The Tifo of the Day card, rendered on the server into the home page.
+     *
+     * Server-rendered for two reasons. It is the largest block on the page and
+     * should not arrive a request late on a phone. And it is the first link the
+     * home page has ever had to a design page: /community got its crawlable feed
+     * because every published tifo was an orphan that nothing on the site
+     * pointed at, and the home page is the strongest page there is to point
+     * from.
+     *
+     * Only phrasing content inside the <a>, so spans rather than headings. The
+     * fixed labels carry data-i18n and are translated on load with the rest of
+     * the static page; the design's own title ships in both languages because
+     * only the browser knows which one is wanted.
+     */
+    const featuredCard = (req: FastifyRequest, picked: FeaturedTifo): string => {
+      const base = origin(req);
+      const d = picked.item;
+      const name = d.title?.trim() || 'Untitled tifo';
+      const nameAr = d.titleAr?.trim() ?? '';
+      const by = d.ownerName || 'a supporter';
+      return (
+        `<div class="fd-label"><span class="fd-star" aria-hidden="true">★</span>` +
+        `<span data-i18n="daily.badge">Tifo of the day</span></div>` +
+        `<a class="fd-card" href="/t/${esc(d.id)}">` +
+        `<span class="fd-shot-wrap">` +
+        `<img class="fd-shot" src="${base}/api/designs/${esc(d.id)}/thumbnail.png"` +
+        ` alt="${esc(name)}, a stadium tifo by @${esc(by)}" width="800" height="84" /></span>` +
+        `<span class="fd-body"><span class="fd-main">` +
+        `<span class="fd-title" data-title-en="${esc(name)}"${nameAr ? ` data-title-ar="${esc(nameAr)}"` : ''}>${esc(name)}</span>` +
+        `<span class="fd-by">@${esc(by)}</span></span>` +
+        `<span class="fd-cta" data-i18n="daily.view">See it in 3D →</span>` +
+        `</span></a>` +
+        `<p class="fd-note" data-i18n="daily.sub">Picked from what the community published. A different one every day.</p>`
+      );
+    };
+
+    app.get('/', async (req, reply) => {
+      // Never let the feature section take the page down: today() already
+      // swallows its own failures and answers null, and a null simply leaves
+      // the empty container, which CSS hides.
+      const picked = daily ? await daily.today() : null;
+      const page = picked
+        ? injectOnce(
+            landingHtml,
+            /<div class="featured-daily" id="featured-tifo"[^>]*>/i,
+            (m) => `${m}${featuredCard(req, picked)}`,
+          )
+        : landingHtml;
+      return reply
         .header('cache-control', 'no-cache')
         .type('text/html')
         .send(
-          withCard(landingHtml, req, {
+          withCard(page, req, {
             title: 'TifoMaker: design the display 60,000 fans will never forget',
             description:
               'Design a stadium tifo in your browser, watch it light up the stands in 3D, and export the seat-by-seat instructions that make it real on match day. Free, no account needed to start.',
             path: '/',
           }),
-        ));
+        );
+    });
     app.get('/app', async (req, reply) =>
       reply
         .header('cache-control', 'no-cache')

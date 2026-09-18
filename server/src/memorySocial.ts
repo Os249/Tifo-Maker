@@ -154,6 +154,12 @@ export class MemorySocialRepository implements SocialRepository {
     }
   }
 
+  async notifyFeatured(userId: string, designId: string): Promise<void> {
+    const title = (await this.designs.getMeta?.(designId))?.title ?? null;
+    // No actor: the home page featured it, nobody did.
+    this.notify(userId, { kind: 'featured', actorId: null, actorName: null, designId, designTitle: title, commentId: null });
+  }
+
   async listNotifications(userId: string, limit: number): Promise<NotificationItem[]> {
     return this.notifs
       .filter((n) => n.userId === userId)

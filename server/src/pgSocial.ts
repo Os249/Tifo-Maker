@@ -233,6 +233,19 @@ export class PgSocialRepository implements SocialRepository {
     );
   }
 
+  /**
+   * Tifo of the day: tell the creator their design is on the home page. No
+   * actor_id — the site featured it, nobody did — and the title is read back
+   * by the listing's join, so nothing is duplicated into the row.
+   */
+  async notifyFeatured(userId: string, designId: string): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO notifications (user_id, actor_id, kind, design_id)
+       VALUES ($1, NULL, 'featured', $2)`,
+      [userId, designId],
+    );
+  }
+
   async listNotifications(userId: string, limit: number): Promise<NotificationItem[]> {
     const res = await this.pool.query(
       `SELECT n.id, n.kind, n.actor_id, n.design_id, n.comment_id, n.read_at, n.created_at,

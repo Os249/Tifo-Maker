@@ -9,6 +9,7 @@ import { PgAiEventsRepository, PgAiUsageRepository, PgAuthRepository, PgDesignRe
 import { PgSocialRepository } from './pgSocial';
 import { MemorySocialRepository } from './memorySocial';
 import { MemoryStadiumRepository, PgStadiumRepository } from './stadiumRepo';
+import { MemoryDailyFeatureRepository, PgDailyFeatureRepository, type DailyFeatureRepository } from './featureRepo';
 import { MemoryAdminStatsRepository, PgAdminStatsRepository } from './statsRepo';
 import { MemoryTrafficRepository, PgTrafficRepository, type TrafficRepository } from './trafficRepo';
 import { MemoryFeedbackRepository, PgFeedbackRepository, type FeedbackRepository } from './feedbackRepo';
@@ -133,6 +134,16 @@ async function main(): Promise<void> {
     } catch (e) {
       console.error('[tifo] feedback init failed: in-product reports disabled:', e);
     }
+    // Tifo of the day — same best-effort init. Without the table the home page
+    // simply has no featured section; it is never a reason to fail a deploy.
+    let featured: DailyFeatureRepository | undefined;
+    try {
+      const df = new PgDailyFeatureRepository(pool);
+      await df.init();
+      featured = df;
+    } catch (e) {
+      console.error('[tifo] daily_features init failed: tifo of the day disabled:', e);
+    }
     // Security monitor. Best-effort like the tables above: if its tables cannot
     // be created, alerts and recent events still work from memory, history is
     // not kept, and the Security tab shows the storage error.
@@ -164,6 +175,7 @@ async function main(): Promise<void> {
       stats: new PgAdminStatsRepository(pool),
       traffic,
       feedback,
+      featured,
       feedbackTo: process.env.FEEDBACK_TO,
       emailSender,
       publicUrl: process.env.PUBLIC_URL,
@@ -197,6 +209,7 @@ async function main(): Promise<void> {
       stats: new MemoryAdminStatsRepository(designs),
       traffic: new MemoryTrafficRepository(),
       feedback: new MemoryFeedbackRepository(),
+      featured: new MemoryDailyFeatureRepository(),
       feedbackTo: process.env.FEEDBACK_TO,
       emailSender,
       publicUrl: process.env.PUBLIC_URL,

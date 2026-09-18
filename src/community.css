@@ -345,6 +345,10 @@ a { color: inherit; text-decoration: none; }
 .notif-icon.new_follower { background: var(--emerald-solid); }
 .notif-icon.comment { background: var(--purple-solid); }
 .notif-icon.remix { background: linear-gradient(135deg, var(--purple-solid), var(--blue-solid)); }
+/* Tifo of the day. Gold, and the only one that is not somebody doing something
+   to your design — it is the home page carrying it. --on-bright because the
+   ink has to survive on a fixed bright surface in both themes. */
+.notif-icon.featured { background: linear-gradient(135deg, #F2C40F, #E8862A); color: var(--on-bright); }
 .notif-text { flex: 1; line-height: 1.4; }
 .notif-text .at { font-weight: 700; }
 .notif-time { font-size: 12px; color: var(--muted); margin-top: 2px; }

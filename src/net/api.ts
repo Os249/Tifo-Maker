@@ -717,6 +717,23 @@ export async function listGallery(
   return (await expectOk(await fetch(`${API}/gallery${qs ? `?${qs}` : ''}`, { headers: authHeaders(false) }))) as GalleryItem[];
 }
 
+/**
+ * Today's Tifo of the Day, or null when the site has nothing to feature yet.
+ *
+ * Only the development path uses this: in production the home page arrives with
+ * the card already in it (the server picks the day and renders it). Never
+ * throws — an empty feature section is a normal state, not an error to show.
+ */
+export async function fetchFeaturedTifo(): Promise<{ day: string; item: GalleryItem | null } | null> {
+  try {
+    const res = await fetch(`${API}/featured/today`);
+    if (!res.ok) return null;
+    return (await res.json()) as { day: string; item: GalleryItem | null };
+  } catch {
+    return null;
+  }
+}
+
 /** Most-used tags across public designs (for filter chips). */
 export async function listPopularTags(): Promise<{ slug: string; kind: string; count: number }[]> {
   return (await expectOk(await fetch(`${API}/tags`))) as { slug: string; kind: string; count: number }[];

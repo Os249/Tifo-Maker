@@ -2,6 +2,7 @@ import { initLang, applyDom, toggleLang, t } from './ui/i18n';
 import { initScheme, setSchemeLabels } from './ui/colorScheme';
 import { mountHeroStadium } from './heroStadium';
 import { mountShowcase } from './showcase';
+import { localizeDailyTifo, mountDailyTifo } from './dailyTifo';
 import { installMobileNav } from './ui/mobileNav';
 import { installConsent } from './ui/consent';
 
@@ -21,12 +22,18 @@ installConsent();
 void mountHeroStadium();
 // Populate the community showcase with real designs (social proof).
 void mountShowcase();
+// Tifo of the day. Usually already in the HTML (the server renders it), in
+// which case this only settles which language the design's title shows in.
+void mountDailyTifo();
 
 // Keep the document <title> and toggle button label in sync.
 const toggle = document.getElementById('lang-toggle');
 toggle?.addEventListener('click', () => {
   toggleLang();
   applyDom(document);
+  // A design's own title is data, not a string table entry, so applyDom cannot
+  // reach it — it ships in both languages on the element and swaps here.
+  localizeDailyTifo();
   if (toggle) toggle.textContent = t('common.language');
 });
 

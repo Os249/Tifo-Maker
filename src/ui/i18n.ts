@@ -216,6 +216,13 @@ const STRINGS: Record<string, { en: string; ar: string }> = {
   'showcase.title': { en: 'Made with TifoMaker', ar: 'صُنع بتيفو ميكر' },
   'showcase.sub': { en: 'Real displays designed by supporters around the world. Tap any to explore it in 3D.', ar: 'استعراضات حقيقية صمّمها مشجعين من كل العالم. اضغط أي وحدة تشوفها ثلاثي الأبعاد.' },
   'showcase.browseAll': { en: 'Browse the community →', ar: 'تصفّح المجتمع ←' },
+  // ---- tifo of the day (home page) ----
+  'daily.badge': { en: 'Tifo of the day', ar: 'تيفو اليوم' },
+  'daily.sub': {
+    en: 'Picked from what the community published. A different one every day.',
+    ar: 'مختار من اللي نشره المجتمع. كل يوم واحد جديد.',
+  },
+  'daily.view': { en: 'See it in 3D →', ar: 'شوفه ثلاثي الأبعاد ←' },
   'hero.previewBadge': { en: '✦ Preview Tifos', ar: '✦ استعرض التيفوهات' },
   // ---- match-day seat page (/s/:id) ----
   'seat.loading': { en: 'Loading the display…', ar: 'جاري تحميل الاستعراض…' },

@@ -107,6 +107,12 @@
       <h2 class="section-title" data-i18n="showcase.title">Made with TifoMaker</h2>
       <p class="section-sub" data-i18n="showcase.sub">Real displays designed by supporters around the world. Tap any to explore it in 3D.</p>
     </div>
+    <!-- Tifo of the day. Filled by the server (see routes.ts featuredCard) so it
+         is in the HTML a crawler gets and paints with the page; dailyTifo.ts
+         fills it from the API instead when the server did not, which is what
+         happens under `vite dev`. Empty = no community design to feature yet,
+         and CSS hides it. -->
+    <div class="featured-daily" id="featured-tifo"></div>
     <div class="showcase-grid" id="showcase-grid" aria-busy="true"></div>
     <div class="showcase-cta">
       <a class="btn btn-ghost" href="/community" data-i18n="showcase.browseAll">Browse the community →</a>

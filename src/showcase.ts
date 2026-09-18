@@ -4,13 +4,31 @@
  * /community hub (where the live 3D preview modal already lives), so this adds
  * zero new backend and reuses the existing thumbnail + gallery endpoints.
  *
- * Fails gracefully: if there's nothing to show (or the request fails), the whole
- * section hides itself rather than showing an empty box on a cold homepage.
+ * Fails gracefully: if there's nothing to show (or the request fails), the grid
+ * hides itself rather than showing an empty box on a cold homepage — and the
+ * whole section goes with it UNLESS the Tifo of the Day card is up, which lives
+ * in the same section and is not this module's to take down.
  */
 import { escapeHtml } from './core/escape';
 
 const GRID_ID = 'showcase-grid';
 const SECTION_ID = 'showcase';
+
+/**
+ * Take the grid down without taking the Tifo of the Day with it: that card sits
+ * in this section too and is rendered by the server, so hiding the section on a
+ * failed gallery fetch would hide a card that is perfectly fine.
+ */
+function hideGrid(section: HTMLElement): void {
+  const featured = document.getElementById('featured-tifo');
+  if (featured && featured.children.length > 0) {
+    // The heading stays: it introduces the featured card just as well.
+    section.querySelector<HTMLElement>('.showcase-grid')?.style.setProperty('display', 'none');
+    section.querySelector<HTMLElement>('.showcase-cta')?.style.setProperty('display', 'none');
+    return;
+  }
+  section.style.display = 'none';
+}
 
 export async function mountShowcase(): Promise<void> {
   const grid = document.getElementById(GRID_ID);
@@ -25,7 +43,7 @@ export async function mountShowcase(): Promise<void> {
     // Only show ones with a real thumbnail to avoid empty tiles.
     items = items.filter((d) => d.hasThumbnail).slice(0, 8);
     if (items.length === 0) {
-      section.style.display = 'none';
+      hideGrid(section);
       return;
     }
     grid.innerHTML = items
@@ -42,7 +60,7 @@ export async function mountShowcase(): Promise<void> {
       .join('');
     grid.setAttribute('aria-busy', 'false');
   } catch {
-    section.style.display = 'none';
+    hideGrid(section);
   }
 }
 

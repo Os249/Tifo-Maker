@@ -182,7 +182,20 @@ CREATE TABLE IF NOT EXISTS comments (
 );
 CREATE INDEX IF NOT EXISTS comments_design_idx ON comments (design_id, created_at);
 
--- Notifications feed. kind = follow_post|new_follower|comment|remix|like.
+-- Tifo of the day: which published design was on the home page on which day.
+-- One row per UTC day, which is what makes the pick stable across instances and
+-- restarts, keeps the creator's notification to exactly one, and lets the picker
+-- see who has already had a turn. `day` is TEXT because node-pg reads a DATE back
+-- at LOCAL midnight, which can format as the day before. Also created at boot by
+-- PgDailyFeatureRepository.init(), best-effort, so a fresh database works either way.
+CREATE TABLE IF NOT EXISTS daily_features (
+  day        TEXT PRIMARY KEY,                -- UTC 'YYYY-MM-DD'
+  design_id  UUID NOT NULL REFERENCES designs(id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS daily_features_design_idx ON daily_features (design_id);
+
+-- Notifications feed. kind = follow_post|new_follower|comment|remix|like|featured.
 -- actor_id did the thing; user_id receives it; design_id/comment_id give context.
 CREATE TABLE IF NOT EXISTS notifications (
   id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
