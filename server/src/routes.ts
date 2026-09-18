@@ -44,6 +44,7 @@ import { clubFilterOptions, COLOUR_FAMILIES, designFacets } from '../../src/core
  *   GET   /api/me                          (bearer) → { id }
  *   GET   /api/templates
  *   GET   /api/gallery                     public designs + owner names
+ *   GET   /api/gallery/:id                 one public design, same card shape
  *   GET   /api/designs                     (bearer) caller's designs
  *   POST  /api/designs                     (bearer) create; optional thumbnailPngB64
  *   GET   /api/designs/:id                 public OR owner
@@ -1480,6 +1481,24 @@ export async function buildApp(
       // otherwise bury every real one on the newest page.
       excludeTemplates: oneParam(q.made) === 'people',
     });
+  });
+
+  /**
+   * One public design, as the feed would show it.
+   *
+   * A notification, or a /community?t=<id> link, arrives holding an id and
+   * nothing else, and the preview needs a full card: owner name, like score,
+   * the caller's own vote, views. The alternative was fetching a page of the
+   * feed and hoping the design was on it.
+   */
+  app.get('/api/gallery/:id', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const viewerId = await userOf(req);
+    const item = await repo.getPublicItem(id, viewerId);
+    // Private and missing are the same answer on purpose: "this id is not
+    // public" must not become a way to learn that a private design exists.
+    if (!item) return reply.code(404).send({ error: 'not found' });
+    return item;
   });
 
   // ---------- tifo of the day ----------

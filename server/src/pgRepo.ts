@@ -52,6 +52,48 @@ function rowToMeta(r: Record<string, unknown>): DesignMeta {
   };
 }
 
+/**
+ * The gallery projection, in one place.
+ *
+ * listPublic and getPublicItem have to agree exactly: the feed and the single
+ * design a notification opens are the same card, and the moment they drift the
+ * card changes when you arrive at it from a different direction. view_count was
+ * missing from the feed's column list for exactly that reason — it is in
+ * META_COLS, so `rowToMeta` read `undefined` and every card in the feed showed
+ * zero views while /t/:id showed the real number.
+ */
+const GALLERY_COLS =
+  `d.id, d.title, d.title_ar, d.template_id, d.template_version, d.palette, d.revision_count,
+   d.is_public, d.owner_id, d.created_at, d.updated_at, d.like_score, d.is_template,
+   d.description, d.allow_remix, d.remixed_from, d.view_count,
+   coalesce(u.username, 'unknown') AS owner_name,
+   ru.username AS remixed_from_name, rd.title AS remixed_from_title,
+   (d.thumbnail IS NOT NULL) AS has_thumbnail,
+   coalesce((SELECT array_agg(t.slug ORDER BY t.slug) FROM design_tags dt
+             JOIN tags t ON t.id = dt.tag_id WHERE dt.design_id = d.id), '{}') AS tags,
+   EXISTS (SELECT 1 FROM design_photos dp WHERE dp.design_id = d.id) AS has_photo`;
+
+const GALLERY_JOINS =
+  `FROM designs d
+   LEFT JOIN users u ON u.id = d.owner_id
+   LEFT JOIN designs rd ON rd.id = d.remixed_from
+   LEFT JOIN users ru ON ru.id = rd.owner_id`;
+
+function rowToGalleryItem(r: Record<string, unknown>): GalleryItem {
+  return {
+    ...rowToMeta(r),
+    ownerName: String(r.owner_name),
+    hasThumbnail: Boolean(r.has_thumbnail),
+    likeScore: Number(r.like_score ?? 0),
+    myVote: Number(r.my_vote ?? 0),
+    isTemplate: Boolean(r.is_template),
+    tags: (r.tags as string[]) ?? [],
+    hasPhoto: Boolean(r.has_photo),
+    remixedFromName: (r.remixed_from_name as string) ?? null,
+    remixedFromTitle: (r.remixed_from_title as string) ?? null,
+  };
+}
+
 /** Postgres AI quota store. consume() is atomic via a conditional UPSERT. */
 export class PgAiUsageRepository implements AiUsageRepository {
   constructor(private readonly pool: pg.Pool) {}
@@ -377,36 +419,32 @@ export class PgDesignRepository implements DesignRepository {
     params.push(Math.max(0, query.offset ?? 0));
     const offsetP = params.length;
     const res = await this.pool.query(
-      `SELECT d.id, d.title, d.title_ar, d.template_id, d.template_version, d.palette, d.revision_count,
-              d.is_public, d.owner_id, d.created_at, d.updated_at, d.like_score, d.is_template,
-              d.description, d.allow_remix, d.remixed_from,
-              coalesce(u.username, 'unknown') AS owner_name,
-              ru.username AS remixed_from_name, rd.title AS remixed_from_title,
-              (d.thumbnail IS NOT NULL) AS has_thumbnail,
-              coalesce((SELECT array_agg(t.slug ORDER BY t.slug) FROM design_tags dt
-                        JOIN tags t ON t.id = dt.tag_id WHERE dt.design_id = d.id), '{}') AS tags,
-              EXISTS (SELECT 1 FROM design_photos dp WHERE dp.design_id = d.id) AS has_photo,
-              ${voteSelect}
-       FROM designs d
-       LEFT JOIN users u ON u.id = d.owner_id
-       LEFT JOIN designs rd ON rd.id = d.remixed_from
-       LEFT JOIN users ru ON ru.id = rd.owner_id
+      `SELECT ${GALLERY_COLS}, ${voteSelect}
+       ${GALLERY_JOINS}
        ${viewerJoin}
        WHERE ${where} ORDER BY ${order} LIMIT $${limitP} OFFSET $${offsetP}`,
       params,
     );
-    return res.rows.map((r) => ({
-      ...rowToMeta(r),
-      ownerName: String(r.owner_name),
-      hasThumbnail: Boolean(r.has_thumbnail),
-      likeScore: Number(r.like_score ?? 0),
-      myVote: Number(r.my_vote ?? 0),
-      isTemplate: Boolean(r.is_template),
-      tags: (r.tags as string[]) ?? [],
-      hasPhoto: Boolean(r.has_photo),
-      remixedFromName: (r.remixed_from_name as string) ?? null,
-      remixedFromTitle: (r.remixed_from_title as string) ?? null,
-    }));
+    return res.rows.map(rowToGalleryItem);
+  }
+
+  async getPublicItem(id: string, viewerId?: string | null): Promise<GalleryItem | null> {
+    const params: unknown[] = [id];
+    let voteSelect = '0 AS my_vote';
+    let viewerJoin = '';
+    if (viewerId) {
+      params.push(viewerId);
+      voteSelect = 'coalesce(v.value, 0) AS my_vote';
+      viewerJoin = `LEFT JOIN design_votes v ON v.design_id = d.id AND v.user_id = $${params.length}`;
+    }
+    const res = await this.pool.query(
+      `SELECT ${GALLERY_COLS}, ${voteSelect}
+       ${GALLERY_JOINS}
+       ${viewerJoin}
+       WHERE d.id = $1 AND d.is_public`,
+      params,
+    );
+    return res.rows[0] ? rowToGalleryItem(res.rows[0]) : null;
   }
 
   async vote(

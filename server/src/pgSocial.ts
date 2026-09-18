@@ -147,12 +147,30 @@ export class PgSocialRepository implements SocialRepository {
 
   // ---- comments ----
 
+  /**
+   * Add a comment, or a reply to any comment — including a reply to a reply.
+   * Depth is not capped here; the thread is stored as it was written and the
+   * client decides how far to indent it.
+   */
   async addComment(designId: string, authorId: string, body: string, parentId: string | null): Promise<CommentItem | null> {
     const text = body.trim().slice(0, 2000);
     if (!text) return null;
     const client = await this.pool.connect();
     try {
       await client.query('BEGIN');
+      // A parent has to be a comment on THIS design. Without the check a reply
+      // could be pinned to a comment on someone else's tifo, where it would
+      // never render in either thread and would notify a stranger.
+      let parentAuthorId: string | null = null;
+      if (parentId) {
+        const parent = await client.query('SELECT author_id, design_id FROM comments WHERE id = $1', [parentId]);
+        const p = parent.rows[0];
+        if (!p || String(p.design_id) !== designId) {
+          await client.query('ROLLBACK');
+          return null;
+        }
+        parentAuthorId = String(p.author_id);
+      }
       const ins = await client.query(
         `INSERT INTO comments (design_id, author_id, parent_id, body)
          VALUES ($1, $2, $3, $4)
@@ -160,10 +178,20 @@ export class PgSocialRepository implements SocialRepository {
         [designId, authorId, parentId, text],
       );
       const row = ins.rows[0];
-      // Notify the design owner (if it's not their own comment).
       const owner = await client.query('SELECT owner_id FROM designs WHERE id = $1', [designId]);
-      const ownerId = owner.rows[0]?.owner_id as string | undefined;
-      if (ownerId && ownerId !== authorId) {
+      const ownerId = owner.rows[0]?.owner_id ? String(owner.rows[0].owner_id) : null;
+      // Whoever was replied to hears about it — the notification that actually
+      // matters in a thread, and the one that was missing. Never yourself.
+      if (parentAuthorId && parentAuthorId !== authorId) {
+        await client.query(
+          `INSERT INTO notifications (user_id, actor_id, kind, design_id, comment_id)
+           VALUES ($1, $2, 'reply', $3, $4)`,
+          [parentAuthorId, authorId, designId, row.id],
+        );
+      }
+      // Then the design owner — unless they wrote it, or already got the reply
+      // notification above, which says the same thing more precisely.
+      if (ownerId && ownerId !== authorId && ownerId !== parentAuthorId) {
         await client.query(
           `INSERT INTO notifications (user_id, actor_id, kind, design_id, comment_id)
            VALUES ($1, $2, 'comment', $3, $4)`,

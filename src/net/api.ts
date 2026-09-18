@@ -654,6 +654,8 @@ export interface GalleryItem {
   hasThumbnail: boolean;
   likeScore: number;
   myVote: number;
+  /** Public view count. Absent on an older server; treat it as 0, not unknown. */
+  viewCount?: number;
   updatedAt: string;
   isTemplate: boolean;
   tags: string[];
@@ -732,6 +734,18 @@ export async function fetchFeaturedTifo(): Promise<{ day: string; item: GalleryI
   } catch {
     return null;
   }
+}
+
+/**
+ * One public design as a feed card, or null when it is private or gone.
+ *
+ * What a notification opens with: it carries a design id and nothing else, and
+ * the preview needs the whole card.
+ */
+export async function fetchGalleryItem(id: string): Promise<GalleryItem | null> {
+  const res = await fetch(`${API}/gallery/${encodeURIComponent(id)}`, { headers: authHeaders(false) });
+  if (!res.ok) return null;
+  return (await res.json()) as GalleryItem;
 }
 
 /** Most-used tags across public designs (for filter chips). */

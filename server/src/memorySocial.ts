@@ -117,6 +117,15 @@ export class MemorySocialRepository implements SocialRepository {
   async addComment(designId: string, authorId: string, body: string, parentId: string | null): Promise<CommentItem | null> {
     const text = body.trim().slice(0, 2000);
     if (!text) return null;
+    // A parent has to be a comment on THIS design — a reply pinned to another
+    // tifo's comment renders in neither thread and notifies a stranger. Depth
+    // is not capped: a reply to a reply is an ordinary comment with a parent.
+    let parentAuthorId: string | null = null;
+    if (parentId) {
+      const parent = this.comments.find((x) => x.id === parentId);
+      if (!parent || parent.designId !== designId) return null;
+      parentAuthorId = parent.authorId;
+    }
     const c: CommentItem = {
       id: randomUUID(),
       designId,
@@ -128,8 +137,16 @@ export class MemorySocialRepository implements SocialRepository {
     };
     this.comments.push(c);
     const owner = this.designs.ownerOf(designId);
-    if (owner && owner !== authorId) {
-      this.notify(owner, { kind: 'comment', actorId: authorId, actorName: c.authorName, designId, designTitle: null, commentId: c.id });
+    // The title, because Postgres joins it into the feed and a dev build that
+    // shows "your tifo" where production shows its name hides the difference.
+    const title = (await this.designs.getMeta?.(designId))?.title ?? null;
+    // Whoever was replied to first, and never yourself.
+    if (parentAuthorId && parentAuthorId !== authorId) {
+      this.notify(parentAuthorId, { kind: 'reply', actorId: authorId, actorName: c.authorName, designId, designTitle: title, commentId: c.id });
+    }
+    // The owner only if they have not already been told more precisely.
+    if (owner && owner !== authorId && owner !== parentAuthorId) {
+      this.notify(owner, { kind: 'comment', actorId: authorId, actorName: c.authorName, designId, designTitle: title, commentId: c.id });
     }
     return c;
   }

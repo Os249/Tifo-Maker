@@ -262,6 +262,11 @@ export class MemoryDesignRepository implements DesignRepository {
     return page.map((r) => this.galleryItem(r, query.viewerId));
   }
 
+  async getPublicItem(id: string, viewerId?: string | null): Promise<GalleryItem | null> {
+    const r = this.rows.get(id);
+    return r && r.isPublic ? this.galleryItem(r, viewerId) : null;
+  }
+
   async vote(
     designId: string,
     userId: string,

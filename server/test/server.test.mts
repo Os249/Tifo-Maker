@@ -905,6 +905,151 @@ async function runSuite(name: string, repo: DesignRepository, auth: AuthReposito
   console.log('tifo of the day: all assertions passed (eligibility, one notification, stable for the day, rotation, templates excluded, rendered into the home page)');
 }
 
+// ---- threads, view counts, and the single-design card ----
+//
+// Three things the community page needed and did not have: a reply could not
+// answer a reply (the server always allowed it; the client was the wall), the
+// person you replied to was never told, and the feed's view count was always
+// zero on Postgres because listPublic did not select the column.
+{
+  const auth = new MemoryAuthRepository();
+  const designs = new MemoryDesignRepository((id) => auth.usernameOf(id));
+  const social = new MemorySocialRepository(designs, auth);
+  const app = await buildApp(designs, auth, templates, { social });
+  const cellsGzB64 = gzipSync(sampleCells()).toString('base64');
+
+  const aliceTok = await registerUser(app, 'alice');
+  const bobTok = await registerUser(app, 'bob');
+  const carolTok = await registerUser(app, 'carol');
+  const idOf = async (token: string): Promise<string> =>
+    (await app.inject({ method: 'GET', url: '/api/me', headers: bearer(token) })).json().id as string;
+  const aliceId = await idOf(aliceTok);
+  const bobId = await idOf(bobTok);
+  const notifs = async (token: string): Promise<{ kind: string; commentId: string | null; designId: string | null }[]> =>
+    ((await app.inject({ method: 'GET', url: '/api/notifications', headers: bearer(token) })).json() as {
+      items: { kind: string; commentId: string | null; designId: string | null }[];
+    }).items;
+
+  const made = await app.inject({
+    method: 'POST', url: '/api/designs', headers: bearer(aliceTok),
+    payload: { title: 'Curva Sud', templateId: DEFAULT_TEMPLATE.id, templateVersion: 1, palette: PALETTE, cellsGzB64, thumbnailPngB64: PNG_1PX.toString('base64') },
+  });
+  const designId = (made.json() as { id: string }).id;
+  await app.inject({ method: 'PATCH', url: `/api/designs/${designId}`, headers: bearer(aliceTok), payload: { isPublic: true } });
+
+  // ---- one design, as the feed would show it ----
+  const one = await app.inject({ method: 'GET', url: `/api/gallery/${designId}`, headers: bearer(bobTok) });
+  assert.equal(one.statusCode, 200);
+  const card = one.json() as { id: string; ownerName: string; hasThumbnail: boolean; likeScore: number; myVote: number; viewCount: number };
+  assert.equal(card.id, designId);
+  assert.equal(card.ownerName, 'alice', 'the single card carries the owner name, like the feed');
+  assert.equal(card.hasThumbnail, true);
+  await app.inject({ method: 'POST', url: `/api/designs/${designId}/vote`, headers: bearer(bobTok), payload: { value: 1 } });
+  const voted = (await app.inject({ method: 'GET', url: `/api/gallery/${designId}`, headers: bearer(bobTok) })).json() as { likeScore: number; myVote: number };
+  assert.equal(voted.myVote, 1, "and the caller's own vote, so the heart is right on arrival");
+  assert.equal(voted.likeScore, 1);
+  assert.equal(
+    (await app.inject({ method: 'GET', url: `/api/gallery/${designId}` })).json().myVote, 0,
+    'an anonymous caller has no vote',
+  );
+
+  // A private design and an unknown id answer the same way: 404. Otherwise the
+  // endpoint tells a stranger which ids exist.
+  const secret = await app.inject({
+    method: 'POST', url: '/api/designs', headers: bearer(aliceTok),
+    payload: { title: 'Not ready', templateId: DEFAULT_TEMPLATE.id, templateVersion: 1, palette: PALETTE, cellsGzB64 },
+  });
+  const secretId = (secret.json() as { id: string }).id;
+  assert.equal((await app.inject({ method: 'GET', url: `/api/gallery/${secretId}`, headers: bearer(aliceTok) })).statusCode, 404, 'private stays private even to its owner here');
+  assert.equal((await app.inject({ method: 'GET', url: '/api/gallery/00000000-0000-0000-0000-000000000000' })).statusCode, 404);
+
+  // ---- views ----
+  assert.equal(card.viewCount, 0, 'a design starts on zero views');
+  await app.inject({ method: 'POST', url: `/api/designs/${designId}/view` });
+  await app.inject({ method: 'POST', url: `/api/designs/${designId}/view`, headers: bearer(bobTok) });
+  const seen = (await app.inject({ method: 'GET', url: `/api/gallery/${designId}` })).json() as { viewCount: number };
+  assert.equal(seen.viewCount, 2, 'views reach the single card');
+  const feed = (await app.inject({ method: 'GET', url: '/api/gallery' })).json() as { id: string; viewCount: number }[];
+  assert.equal(feed.find((d) => d.id === designId)?.viewCount, 2, 'and the feed — the column the gallery query used to leave out');
+  assert.equal((await app.inject({ method: 'POST', url: `/api/designs/${secretId}/view`, headers: bearer(aliceTok) })).statusCode, 403, 'a private design counts no views');
+
+  // ---- a reply to a reply to a reply ----
+  const say = async (token: string, body: string, parentId: string | null): Promise<{ status: number; id?: string }> => {
+    const res = await app.inject({ method: 'POST', url: `/api/designs/${designId}/comments`, headers: bearer(token), payload: { body, parentId } });
+    return { status: res.statusCode, id: res.statusCode === 201 ? (res.json() as { id: string }).id : undefined };
+  };
+  const top = await say(bobTok, 'Top tier looks unreal', null);
+  assert.equal(top.status, 201);
+  const lvl2 = await say(aliceTok, 'Thanks! Took three weeks', top.id!);
+  assert.equal(lvl2.status, 201, 'a reply to a comment');
+  const lvl3 = await say(carolTok, 'Three weeks?! respect', lvl2.id!);
+  assert.equal(lvl3.status, 201, 'a reply to a reply — the whole point of this change');
+  const lvl4 = await say(bobTok, 'agreed', lvl3.id!);
+  assert.equal(lvl4.status, 201, 'and it does not stop at three');
+
+  const thread = (await app.inject({ method: 'GET', url: `/api/designs/${designId}/comments` })).json() as { id: string; parentId: string | null }[];
+  assert.equal(thread.length, 4);
+  assert.equal(thread.find((c) => c.id === lvl3.id)?.parentId, lvl2.id, 'the chain is stored as it was written, not flattened');
+  assert.equal(thread.find((c) => c.id === lvl4.id)?.parentId, lvl3.id);
+
+  // A parent from ANOTHER design is refused. Without this a reply lands in a
+  // thread it can never be rendered in, and notifies a stranger.
+  const other = await app.inject({
+    method: 'POST', url: '/api/designs', headers: bearer(bobTok),
+    payload: { title: 'Somebody else', templateId: DEFAULT_TEMPLATE.id, templateVersion: 1, palette: PALETTE, cellsGzB64 },
+  });
+  const otherId = (other.json() as { id: string }).id;
+  await app.inject({ method: 'PATCH', url: `/api/designs/${otherId}`, headers: bearer(bobTok), payload: { isPublic: true } });
+  const crossed = await app.inject({
+    method: 'POST', url: `/api/designs/${otherId}/comments`, headers: bearer(carolTok),
+    payload: { body: 'wrong thread', parentId: top.id },
+  });
+  assert.equal(crossed.statusCode, 400, "a reply cannot be pinned to another design's comment");
+  assert.equal(
+    (await app.inject({ method: 'POST', url: `/api/designs/${designId}/comments`, headers: bearer(carolTok), payload: { body: 'ghost', parentId: '00000000-0000-0000-0000-000000000000' } })).statusCode,
+    400,
+    'nor to a comment that does not exist',
+  );
+
+  // ---- who hears about a reply ----
+  const bobNotes = await notifs(bobTok);
+  assert.ok(
+    bobNotes.some((n) => n.kind === 'reply' && n.commentId === lvl2.id),
+    'the person replied to is told — the notification that was missing',
+  );
+  const carolNotes = await notifs(carolTok);
+  assert.ok(carolNotes.some((n) => n.kind === 'reply' && n.commentId === lvl4.id), 'at any depth');
+  assert.equal(
+    bobNotes.filter((n) => n.kind === 'comment' && n.commentId === lvl2.id).length, 0,
+    'and not twice: a reply notification replaces the owner one when they are the same person',
+  );
+  // Alice owns the design AND wrote lvl2; carol replied to it. She should have
+  // exactly one notification for that reply, as the person answered.
+  const aliceNotes = await notifs(aliceTok);
+  assert.equal(
+    aliceNotes.filter((n) => n.commentId === lvl3.id).length, 1,
+    'the owner who was also replied to hears once, not once per role',
+  );
+  assert.equal(aliceNotes.find((n) => n.commentId === lvl3.id)?.kind, 'reply', 'and hears the more precise of the two');
+  // A top-level comment on somebody's design still notifies the owner.
+  assert.ok(aliceNotes.some((n) => n.kind === 'comment' && n.commentId === top.id), 'a top-level comment still reaches the owner');
+  // Replying to yourself notifies nobody.
+  const before = (await notifs(bobTok)).length;
+  await say(bobTok, 'one more thing', lvl4.id!);
+  assert.equal((await notifs(bobTok)).length, before, 'replying to yourself is not news');
+
+  // Every notification an owner can get carries what the client needs to open
+  // it: a design for the design kinds, a comment for the comment kinds.
+  for (const n of aliceNotes) {
+    if (n.kind === 'comment' || n.kind === 'reply') {
+      assert.ok(n.designId && n.commentId, `${n.kind} notification must carry both ids so it can be opened`);
+    }
+  }
+  void aliceId; void bobId;
+
+  console.log('community: all assertions passed (single card + vote + 404, views in feed and card, replies at any depth, cross-design parent refused, reply notifications)');
+}
+
 // ---- B2B lead capture ----
 {
   const auth = new MemoryAuthRepository();

@@ -284,6 +284,10 @@ a { color: inherit; text-decoration: none; }
   background: var(--invert); color: var(--invert-ink); border: none; border-radius: var(--r-pill); padding: 8px 18px; font-weight: 600; font-size: 14px;
 }
 .follow-btn.following { background: var(--card); color: var(--ink); border: 1px solid var(--line); }
+/* How many times this tifo has been opened. It existed in the database all
+   along and was shown nowhere the creator would look. */
+.side-stats { display: flex; gap: 16px; margin-bottom: 14px; color: var(--muted); font-size: 13px; font-weight: 600; }
+.side-stat { display: inline-flex; align-items: center; gap: 6px; }
 
 .explanation {
   background: linear-gradient(135deg, rgba(91, 42, 134, 0.06), rgba(28, 111, 224, 0.06));
@@ -306,7 +310,24 @@ a { color: inherit; text-decoration: none; }
 .comments { flex: 1; overflow-y: auto; padding: 18px 24px; }
 .comments-head { font-size: 14px; font-weight: 700; color: var(--muted); margin-bottom: 14px; }
 .comment { display: flex; gap: 10px; margin-bottom: 16px; }
-.comment.reply { margin-left: 38px; }
+/* Depth-driven indent, capped by the renderer (INDENT_CAP) rather than here:
+   a reply to a reply to a reply is normal, and four levels of 38px is most of a
+   phone's width gone. Logical margin, so RTL mirrors without a second rule. */
+.comment.reply { margin-inline-start: calc(var(--depth, 1) * 34px); }
+/* Only on replies past the cap, where the indent no longer says who is being
+   answered. */
+.c-answering { font-size: 12px; color: var(--muted); margin-bottom: 3px; }
+.c-answering::before { content: '↳'; margin-inline-end: 4px; }
+.comments-empty { color: var(--muted); font-size: 14px; }
+/* Arriving from a notification: brief, so it reads as "here" and not as a
+   state the comment is now in. */
+.comment.c-focus { animation: cFocus 2.6s ease both; border-radius: var(--r-md); }
+@keyframes cFocus {
+  0%, 60% { background: rgba(28, 111, 224, 0.12); box-shadow: 0 0 0 6px rgba(28, 111, 224, 0.12); }
+  100% { background: transparent; box-shadow: none; }
+}
+.reply-box { margin-top: 8px; }
+.reply-box .comment-form { padding: 0; border: none; background: none; }
 .c-avatar { width: 30px; height: 30px; border-radius: 50%; background: var(--grad-brand); color: #fff; display: grid; place-items: center; font-weight: 700; font-size: 12px; flex: 0 0 auto; }
 .c-body { flex: 1; min-width: 0; }
 .c-meta { font-size: 13px; margin-bottom: 2px; }
@@ -340,11 +361,15 @@ a { color: inherit; text-decoration: none; }
 .notif-item { display: flex; gap: 12px; padding: 14px 18px; border-bottom: 1px solid var(--line); font-size: 14px; cursor: pointer; }
 .notif-item.unread { background: rgba(28, 111, 224, 0.04); }
 .notif-item:hover { background: var(--paper); }
+.notif-item:focus-visible { outline: 2px solid var(--blue); outline-offset: -2px; }
 .notif-icon { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; flex: 0 0 auto; color: #fff; }
 .notif-icon.follow_post { background: var(--blue-solid); }
 .notif-icon.new_follower { background: var(--emerald-solid); }
 .notif-icon.comment { background: var(--purple-solid); }
 .notif-icon.remix { background: linear-gradient(135deg, var(--purple-solid), var(--blue-solid)); }
+/* A reply to your comment. Related to .comment but its own colour, because in
+   a list of notifications the two are answers to different questions. */
+.notif-icon.reply { background: var(--blue-solid); }
 /* Tifo of the day. Gold, and the only one that is not somebody doing something
    to your design — it is the home page carrying it. --on-bright because the
    ink has to survive on a fixed bright surface in both themes. */
@@ -379,7 +404,6 @@ a { color: inherit; text-decoration: none; }
 [dir="rtl"] .search-wrap > .ti { left: auto; right: 16px; }
 [dir="rtl"] .search-wrap input { padding: 13px 44px 13px 16px; }
 [dir="rtl"] .card-stats { flex-direction: row-reverse; }
-[dir="rtl"] .comment.reply { margin-left: 0; margin-right: 38px; }
 [dir="rtl"] .notif-panel { right: auto; left: 6vw; }
 
 /* ---- auth modal (light theme for the community page) ---- */

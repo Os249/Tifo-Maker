@@ -1070,6 +1070,39 @@ const STRINGS: Record<string, { en: string; ar: string }> = {
   'theme.dark': { en: 'Dark mode', ar: 'الوضع الليلي' },
   'theme.light': { en: 'Light mode', ar: 'الوضع النهاري' },
   'cm.by': { en: 'by', ar: 'بواسطة' },
+
+  // ---- comments + views (the community modal) ----
+  'cm.comments': { en: 'Comments', ar: 'التعليقات' },
+  'cm.commentsN': { en: '{n} comments', ar: '{n} تعليق' },
+  'cm.noComments': { en: 'No comments yet, be the first.', ar: 'ما فيه تعليقات، كن أول واحد.' },
+  'cm.addComment': { en: 'Add a comment…', ar: 'اكتب تعليق…' },
+  'cm.post': { en: 'Post', ar: 'انشر' },
+  'cm.reply': { en: 'Reply', ar: 'رد' },
+  'cm.replyTo': { en: 'Reply to @{name}…', ar: 'رد على @{name}…' },
+  // Shown on a reply that is deeper than the indent goes, so the thread is
+  // still followable once the offset stops growing.
+  'cm.replyingTo': { en: 'replying to @{name}', ar: 'رد على @{name}' },
+  'cm.delete': { en: 'Delete', ar: 'احذف' },
+  'cm.signIn': { en: 'Sign in', ar: 'سجّل دخول' },
+  'cm.joinConvo': { en: 'to join the conversation.', ar: 'عشان تشارك في النقاش.' },
+  'cm.explanation': { en: "Creator's explanation", ar: 'كلام المصمم' },
+  'cm.viewsWord': { en: 'views', ar: 'مشاهدة' },
+  'cm.viewsTitle': { en: 'Times this tifo has been opened', ar: 'كم مرة انفتح هذا التيفو' },
+
+  // ---- the notifications bell ----
+  'nt.title': { en: 'Notifications', ar: 'الإشعارات' },
+  'nt.markAll': { en: 'Mark all read', ar: 'علّم الكل مقروء' },
+  'nt.empty': { en: 'No notifications yet.', ar: 'ما فيه إشعارات بعد.' },
+  'nt.someone': { en: 'Someone', ar: 'أحدهم' },
+  'nt.aTifo': { en: 'a tifo', ar: 'تيفو' },
+  'nt.followPost': { en: '{actor} published {title}', ar: '{actor} نشر {title}' },
+  'nt.newFollower': { en: '{actor} started following you', ar: '{actor} صار يتابعك' },
+  'nt.comment': { en: '{actor} commented on {title}', ar: '{actor} علّق على {title}' },
+  'nt.reply': { en: '{actor} replied to you', ar: '{actor} رد عليك' },
+  'nt.remix': { en: '{actor} remixed {title}', ar: '{actor} سوّى ريمكس لـ {title}' },
+  'nt.featured': { en: '{title} is the Tifo of the Day on the home page', ar: '{title} هو تيفو اليوم في الصفحة الرئيسية' },
+  'nt.generic': { en: '{actor} did something', ar: '{actor} سوّى شي' },
+  'nt.gone': { en: 'That tifo is not available any more.', ar: 'هذا التيفو ما عاد موجود.' },
   'cm.shareThis': { en: 'Share this tifo', ar: 'شارك هذا التيفو' },
   'cm.cardBy': { en: '{title} by {name}', ar: '{title} بواسطة {name}' },
 

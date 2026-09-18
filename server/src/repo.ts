@@ -127,6 +127,15 @@ export interface DesignRepository {
   /** Delete all of an owner's designs (used by account deletion). */
   deleteByOwner(ownerId: string): Promise<void>;
   listPublic(query: GalleryQuery): Promise<GalleryItem[]>;
+  /**
+   * One public design as a feed card, or null if it is private or gone.
+   *
+   * The same projection listPublic returns, for the cases that arrive at a
+   * single design rather than a page of them: a notification being opened, a
+   * /community?t=<id> link. Loading a 60-card page to find one card was the
+   * alternative.
+   */
+  getPublicItem(id: string, viewerId?: string | null): Promise<GalleryItem | null>;
   get(id: string): Promise<DesignRecord | null>;
   /** thumbnailPng null = keep existing. */
   updateCells(

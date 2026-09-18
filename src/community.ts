@@ -37,6 +37,8 @@ import {
   listComments,
   addComment,
   deleteComment,
+  fetchGalleryItem,
+  recordView,
   listNotifications,
   markNotificationsRead,
   fetchProfile,
@@ -102,6 +104,7 @@ async function refreshAuthUI(): Promise<void> {
     };
     notifBtn.hidden = false;
     void refreshNotifications();
+    startNotifPolling();
   } else {
     authBtn.setAttribute('data-i18n', 'ed.signup');
     authBtn.textContent = t('ed.signup');
@@ -272,6 +275,7 @@ function renderCard(item: GalleryItem, onClick?: () => void): HTMLElement {
       <div class="card-stats">
         <span class="card-stat like ${liked ? 'on' : ''}"><i class="ti ti-heart${liked ? '-filled' : ''}"></i> ${item.likeScore}</span>
         <span class="card-stat"><i class="ti ti-message-circle"></i> <span class="cmt-count" data-id="${item.id}">·</span></span>
+        <span class="card-stat views" title="${escapeHtml(t('cm.viewsTitle'))}"><i class="ti ti-eye"></i> <span class="view-count" data-id="${item.id}">${item.viewCount ?? 0}</span></span>
         <button class="card-stat card-share" title="${escapeHtml(t('cm.shareThis'))}"><i class="ti ti-share"></i></button>
       </div>
     </div>`;
@@ -401,7 +405,7 @@ function escProfile(e: KeyboardEvent): void {
 // ---------- 3D preview modal ----------
 let activePreview: Preview3D | null = null;
 
-async function openPreview(item: GalleryItem): Promise<void> {
+async function openPreview(item: GalleryItem, focusCommentId?: string | null): Promise<void> {
   const root = $('#modal-root');
   root.hidden = false;
   root.innerHTML = `
@@ -424,9 +428,12 @@ async function openPreview(item: GalleryItem): Promise<void> {
             </div>
             <button class="follow-btn" id="follow-btn" ${!item.ownerId || (me && me.id === item.ownerId) ? 'hidden' : ''}>Follow</button>
           </div>
+          <div class="side-stats">
+            <span class="side-stat"><i class="ti ti-eye"></i> <span id="view-count">${item.viewCount ?? 0}</span> <span id="view-word">${escapeHtml(t('cm.viewsWord'))}</span></span>
+          </div>
           ${
             item.description
-              ? `<div class="explanation"><div class="explanation-label">Creator's explanation</div><div class="explanation-body">${escapeHtml(item.description)}</div></div>`
+              ? `<div class="explanation"><div class="explanation-label">${escapeHtml(t('cm.explanation'))}</div><div class="explanation-body">${escapeHtml(item.description)}</div></div>`
               : ''
           }
           <div class="side-actions">
@@ -439,7 +446,7 @@ async function openPreview(item: GalleryItem): Promise<void> {
             <button class="act-btn report" id="report-btn" title="${t('cm.report')}" aria-label="${t('cm.report')}"><i class="ti ti-flag"></i></button>
           </div>
         </div>
-        <div class="comments" id="comments"><div class="comments-head">Comments</div><div id="comment-list"></div></div>
+        <div class="comments" id="comments"><div class="comments-head">${escapeHtml(t('cm.comments'))}</div><div id="comment-list"></div></div>
         <div id="comment-foot"></div>
       </div>
     </div>`;
@@ -457,9 +464,51 @@ async function openPreview(item: GalleryItem): Promise<void> {
   // follow / like / remix
   wirePreviewActions(item);
   // comments
-  void loadCommentThread(item);
+  void loadCommentThread(item, focusCommentId);
   // author stats
   void fetchAuthorStats(item);
+  // and this counts as a view
+  void countView(item);
+}
+
+/**
+ * Designs opened in this page session, so re-opening the same tifo does not
+ * keep adding views.
+ *
+ * Until now the ONLY thing that counted a view was landing on a /t/:id share
+ * link, so the number on a design was close to meaningless for anyone whose
+ * tifo was found through the community. Opening it in 3D is a view.
+ */
+const viewed = new Set<string>();
+
+async function countView(item: GalleryItem): Promise<void> {
+  if (viewed.has(item.id)) return;
+  viewed.add(item.id);
+  try {
+    const views = await recordView(item.id);
+    item.viewCount = views;
+    const inModal = document.getElementById('view-count');
+    if (inModal) inModal.textContent = String(views);
+    // The card behind the modal, so the number is right when it closes.
+    const onCard = document.querySelector(`.view-count[data-id="${cssId(item.id)}"]`);
+    if (onCard) onCard.textContent = String(views);
+  } catch {
+    /* a view that fails to record is not worth telling anyone about */
+  }
+}
+
+/**
+ * An id inside a QUOTED attribute selector: [data-id="<here>"].
+ *
+ * Not CSS.escape — that escapes identifiers, and a UUID beginning with a digit
+ * comes back as `\34 1ab…`, which is correct for `#41ab…` and matches nothing
+ * inside quotes. Roughly half of all UUIDs start with a digit, so the first
+ * version of this silently failed to find the comment a notification pointed
+ * at, or the card whose view count had just changed, about half the time.
+ * Inside quotes only the quote and the backslash are special.
+ */
+function cssId(id: string): string {
+  return id.replace(/["\\]/g, '\\$&');
 }
 
 function escClose(e: KeyboardEvent): void {
@@ -614,18 +663,34 @@ async function fetchAuthorStats(item: GalleryItem): Promise<void> {
 }
 
 // ---------- comments ----------
-async function loadCommentThread(item: GalleryItem): Promise<void> {
+/**
+ * The comment thread.
+ *
+ * Replies go to any depth — replying to a reply is the ordinary way a
+ * conversation continues, and the client used to be the only thing stopping it:
+ * the server has always accepted a parent at any level, but Reply was hidden on
+ * anything that was already a reply and the renderer only walked two levels, so
+ * a third-level reply would have been stored and never shown.
+ *
+ * The INDENT is capped (see INDENT_CAP). Unbounded nesting is unreadable on a
+ * phone at about the fourth step; past the cap a reply sits at the same offset
+ * and says who it is answering instead.
+ */
+const INDENT_CAP = 2;
+
+async function loadCommentThread(item: GalleryItem, focusCommentId?: string | null): Promise<void> {
   const list = document.getElementById('comment-list');
   const foot = document.getElementById('comment-foot');
   if (!list || !foot) return;
   const comments = await listComments(item.id);
   renderComments(list, comments, item);
+  if (focusCommentId) focusComment(focusCommentId);
   // comment composer (or sign-in prompt)
   if (isSignedIn()) {
     foot.innerHTML = `
       <div class="comment-form">
-        <textarea id="comment-input" placeholder="Add a comment…" rows="1"></textarea>
-        <button class="comment-send" id="comment-send" disabled>Post</button>
+        <textarea id="comment-input" placeholder="${escapeHtml(t('cm.addComment'))}" rows="1"></textarea>
+        <button class="comment-send" id="comment-send" disabled>${escapeHtml(t('cm.post'))}</button>
       </div>`;
     const input = document.getElementById('comment-input') as HTMLTextAreaElement;
     const send = document.getElementById('comment-send') as HTMLButtonElement;
@@ -654,7 +719,7 @@ async function loadCommentThread(item: GalleryItem): Promise<void> {
       if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) submit();
     });
   } else {
-    foot.innerHTML = `<div class="comments-signin"><a id="cmt-signin">Sign in</a> to join the conversation.</div>`;
+    foot.innerHTML = `<div class="comments-signin"><a id="cmt-signin">${escapeHtml(t('cm.signIn'))}</a> ${escapeHtml(t('cm.joinConvo'))}</div>`;
     document.getElementById('cmt-signin')?.addEventListener('click', async () => {
       if (await ensureAuth()) loadCommentThread(item);
     });
@@ -662,42 +727,57 @@ async function loadCommentThread(item: GalleryItem): Promise<void> {
 }
 
 function renderComments(list: HTMLElement, comments: CommentItem[], item: GalleryItem): void {
-  const head = list.previousElementSibling; // .comments-head not present; we keep list only
-  void head;
-  const top = comments.filter((c) => !c.parentId);
-  const repliesByParent = new Map<string, CommentItem[]>();
+  const byId = new Map(comments.map((c) => [c.id, c]));
+  const childrenOf = new Map<string, CommentItem[]>();
+  const roots: CommentItem[] = [];
   for (const c of comments) {
-    if (c.parentId) {
-      const arr = repliesByParent.get(c.parentId) ?? [];
+    // A reply whose parent is not in this thread (deleted since) is promoted to
+    // the top rather than disappearing with it — the words are still somebody's.
+    if (c.parentId && byId.has(c.parentId)) {
+      const arr = childrenOf.get(c.parentId) ?? [];
       arr.push(c);
-      repliesByParent.set(c.parentId, arr);
+      childrenOf.set(c.parentId, arr);
+    } else {
+      roots.push(c);
     }
   }
   list.innerHTML = '';
   const headEl = document.querySelector('.comments-head');
-  if (headEl) headEl.textContent = `${comments.length} comment${comments.length === 1 ? '' : 's'}`;
+  if (headEl) headEl.textContent = tv('cm.commentsN', { n: comments.length });
   if (comments.length === 0) {
-    list.innerHTML = `<div style="color:var(--muted);font-size:14px;">No comments yet, be the first.</div>`;
+    list.innerHTML = `<div class="comments-empty">${escapeHtml(t('cm.noComments'))}</div>`;
     return;
   }
-  for (const c of top) {
-    list.appendChild(commentNode(c, item, false));
-    for (const r of repliesByParent.get(c.id) ?? []) list.appendChild(commentNode(r, item, true));
-  }
+  const walk = (c: CommentItem, depth: number): void => {
+    const parent = c.parentId ? byId.get(c.parentId) : undefined;
+    // Only worth saying once the indent has stopped tracking the nesting.
+    const replyingTo = depth > INDENT_CAP ? (parent?.authorName ?? null) : null;
+    list.appendChild(commentNode(c, item, depth, replyingTo));
+    for (const child of childrenOf.get(c.id) ?? []) walk(child, depth + 1);
+  };
+  for (const root of roots) walk(root, 0);
 }
 
-function commentNode(c: CommentItem, item: GalleryItem, isReply: boolean): HTMLElement {
+function commentNode(c: CommentItem, item: GalleryItem, depth: number, replyingTo: string | null): HTMLElement {
   const node = document.createElement('div');
-  node.className = `comment${isReply ? ' reply' : ''}`;
+  node.className = `comment${depth > 0 ? ' reply' : ''}`;
+  node.dataset.id = c.id;
+  // The indent stops growing at the cap so a long back-and-forth does not walk
+  // off the side of a phone; the "replying to" line carries the thread instead.
+  node.style.setProperty('--depth', String(Math.min(depth, INDENT_CAP)));
   const canDelete = me && (me.id === c.authorId || me.id === item.ownerId);
+  const answering = replyingTo
+    ? `<div class="c-answering">${escapeHtml(tv('cm.replyingTo', { name: replyingTo }))}</div>`
+    : '';
   node.innerHTML = `
     <div class="c-avatar">${initials(c.authorName)}</div>
     <div class="c-body">
       <div class="c-meta"><span class="c-name">@${escapeHtml(c.authorName)}</span><span class="c-time">${timeAgo(c.createdAt)}</span></div>
+      ${answering}
       <div class="c-text">${escapeHtml(c.body)}</div>
       <div class="c-actions">
-        ${!isReply ? `<button class="c-reply">Reply</button>` : ''}
-        ${canDelete ? `<button class="c-del">Delete</button>` : ''}
+        <button class="c-reply">${escapeHtml(t('cm.reply'))}</button>
+        ${canDelete ? `<button class="c-del">${escapeHtml(t('cm.delete'))}</button>` : ''}
       </div>
     </div>`;
   node.querySelector('.c-reply')?.addEventListener('click', () => openReplyBox(node, c, item));
@@ -716,31 +796,48 @@ function openReplyBox(anchor: HTMLElement, parent: CommentItem, item: GalleryIte
   if (anchor.querySelector('.reply-box')) return;
   const box = document.createElement('div');
   box.className = 'reply-box';
-  box.style.marginTop = '8px';
   box.innerHTML = `
-    <div class="comment-form" style="padding:0;border:none;background:none;">
-      <textarea rows="1" placeholder="Reply to @${escapeHtml(parent.authorName)}…"></textarea>
-      <button class="comment-send">Reply</button>
+    <div class="comment-form">
+      <textarea rows="1" placeholder="${escapeHtml(tv('cm.replyTo', { name: parent.authorName }))}"></textarea>
+      <button class="comment-send">${escapeHtml(t('cm.reply'))}</button>
     </div>`;
   anchor.querySelector('.c-body')!.appendChild(box);
   const ta = box.querySelector('textarea') as HTMLTextAreaElement;
   ta.focus();
-  box.querySelector('.comment-send')!.addEventListener('click', async () => {
+  const send = box.querySelector('.comment-send') as HTMLButtonElement;
+  const submit = async (): Promise<void> => {
     if (!(await ensureAuth())) return;
     const body = ta.value.trim();
     if (!body) return;
+    send.disabled = true;
     try {
       await addComment(item.id, body, parent.id);
       await loadCommentThread(item);
       bumpCommentCount(item.id);
     } catch {
       toast(t('cm.errReply'));
+      send.disabled = false;
     }
+  };
+  send.addEventListener('click', submit);
+  ta.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) void submit();
   });
 }
 
+/** Scroll a comment into view and mark it, for arriving from a notification. */
+function focusComment(commentId: string): void {
+  const el = document.querySelector<HTMLElement>(`.comment[data-id="${cssId(commentId)}"]`);
+  if (!el) return;
+  el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  el.classList.add('c-focus');
+  // Long enough to catch the eye after the scroll, short enough not to become
+  // a permanent highlight on a comment the reader has already found.
+  window.setTimeout(() => el.classList.remove('c-focus'), 2600);
+}
+
 function bumpCommentCount(designId: string): void {
-  const el = document.querySelector(`.cmt-count[data-id="${designId}"]`);
+  const el = document.querySelector(`.cmt-count[data-id="${cssId(designId)}"]`);
   if (el) {
     const n = parseInt(el.textContent ?? '0', 10);
     el.textContent = String((isNaN(n) ? 0 : n) + 1);
@@ -755,12 +852,12 @@ function bumpCommentCount(designId: string): void {
  * meant the last card's count landed long after the reader had scrolled past.
  */
 async function fillCommentCounts(items: GalleryItem[]): Promise<void> {
-  const queue = items.filter((i) => document.querySelector(`.cmt-count[data-id="${i.id}"]`));
+  const queue = items.filter((i) => document.querySelector(`.cmt-count[data-id="${cssId(i.id)}"]`));
   let at = 0;
   const worker = async (): Promise<void> => {
     while (at < queue.length) {
       const item = queue[at++];
-      const el = document.querySelector(`.cmt-count[data-id="${item.id}"]`);
+      const el = document.querySelector(`.cmt-count[data-id="${cssId(item.id)}"]`);
       if (!el) continue;
       const comments = await listComments(item.id).catch(() => []);
       el.textContent = String(comments.length);
@@ -815,11 +912,43 @@ document.addEventListener('click', (e) => {
 });
 
 // ---------- notifications ----------
+/**
+ * The bell.
+ *
+ * Two things were missing and both made the feature look broken rather than
+ * quiet. The rows did nothing when clicked — the CSS said `cursor: pointer`, so
+ * they announced themselves as clickable and were not — and the unread dot was
+ * read once at page load and never again, so anything arriving while the tab
+ * sat open was invisible until a reload.
+ */
+
+/** How often the unread count is re-checked while the tab is in front. */
+const NOTIF_POLL_MS = 60_000;
+let notifTimer: number | undefined;
+
 async function refreshNotifications(): Promise<void> {
   if (!isSignedIn()) return;
-  const { unread } = await listNotifications();
-  const dot = $('#notif-dot');
-  dot.hidden = unread === 0;
+  try {
+    const { unread } = await listNotifications();
+    $('#notif-dot').hidden = unread === 0;
+  } catch {
+    /* a failed poll is not worth a toast; the next one will do */
+  }
+}
+
+/**
+ * Poll while the tab is in front, and stop while it is not — a background tab
+ * polling forever is a battery cost nobody asked for. Checking on the way back
+ * also means the dot is right the moment somebody returns to the page.
+ */
+function startNotifPolling(): void {
+  if (notifTimer !== undefined) return;
+  notifTimer = window.setInterval(() => {
+    if (document.visibilityState === 'visible') void refreshNotifications();
+  }, NOTIF_POLL_MS);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') void refreshNotifications();
+  });
 }
 
 $('#notif-btn').addEventListener('click', async () => {
@@ -830,13 +959,16 @@ $('#notif-btn').addEventListener('click', async () => {
   }
   const { items } = await listNotifications();
   panel.innerHTML = `
-    <div class="notif-head"><h3>Notifications</h3><button id="notif-read-all">Mark all read</button></div>
+    <div class="notif-head"><h3>${escapeHtml(t('nt.title'))}</h3><button id="notif-read-all">${escapeHtml(t('nt.markAll'))}</button></div>
     <div class="notif-list" id="notif-list"></div>`;
   const list = $('#notif-list');
   if (items.length === 0) {
-    list.innerHTML = `<div class="notif-empty">No notifications yet.</div>`;
+    list.innerHTML = `<div class="notif-empty">${escapeHtml(t('nt.empty'))}</div>`;
   } else {
     list.innerHTML = items.map(notifRow).join('');
+    for (const el of list.querySelectorAll<HTMLElement>('.notif-item')) {
+      el.addEventListener('click', () => void openNotification(el, items));
+    }
   }
   panel.hidden = false;
   $('#notif-read-all').addEventListener('click', async () => {
@@ -849,23 +981,62 @@ $('#notif-btn').addEventListener('click', async () => {
   await refreshNotifications();
 });
 
+/**
+ * Open what a notification is about.
+ *
+ * Everything except a new follower is about a design, so the design's preview
+ * opens — and for the two comment kinds the thread is scrolled to the comment
+ * itself, because "somebody replied to you" is not much use if you then have to
+ * find the reply. A new follower opens their profile.
+ */
+async function openNotification(el: HTMLElement, items: NotificationItem[]): Promise<void> {
+  const n = items.find((x) => x.id === el.dataset.notif);
+  if (!n) return;
+  $('#notif-panel').hidden = true;
+  el.classList.remove('unread');
+  void markNotificationsRead(n.id).then(() => refreshNotifications());
+
+  if (n.kind === 'new_follower') {
+    if (n.actorId) void openProfile(n.actorId);
+    return;
+  }
+  if (!n.designId) return;
+  const item = await fetchGalleryItem(n.designId).catch(() => null);
+  // Taken down, made private, or deleted since. Say so rather than opening an
+  // empty modal — the notification is real, the tifo is what is gone.
+  if (!item) {
+    toast(t('nt.gone'));
+    return;
+  }
+  void openPreview(item, n.commentId);
+}
+
 function notifRow(n: NotificationItem): string {
-  const icon = { follow_post: 'ti-photo', new_follower: 'ti-user-plus', comment: 'ti-message-circle', remix: 'ti-git-fork', featured: 'ti-sparkles' }[n.kind] ?? 'ti-bell';
-  const actor = n.actorName ? `<span class="at">@${escapeHtml(n.actorName)}</span>` : 'Someone';
+  const icon = {
+    follow_post: 'ti-photo',
+    new_follower: 'ti-user-plus',
+    comment: 'ti-message-circle',
+    reply: 'ti-message',
+    remix: 'ti-git-fork',
+    featured: 'ti-sparkles',
+  }[n.kind] ?? 'ti-bell';
+  const actor = n.actorName ? `<span class="at">@${escapeHtml(n.actorName)}</span>` : escapeHtml(t('nt.someone'));
+  const title = `<b>${escapeHtml(n.designTitle ?? t('nt.aTifo'))}</b>`;
   const text =
     {
-      follow_post: `${actor} published <b>${escapeHtml(n.designTitle ?? 'a new tifo')}</b>`,
-      new_follower: `${actor} started following you`,
-      comment: `${actor} commented on your tifo`,
-      remix: `${actor} remixed your tifo`,
+      follow_post: tv('nt.followPost', { actor, title }),
+      new_follower: tv('nt.newFollower', { actor }),
+      comment: tv('nt.comment', { actor, title }),
+      reply: tv('nt.reply', { actor }),
+      remix: tv('nt.remix', { actor, title }),
       // The site featured it, so there is no actor to name — and this one is
       // worth spelling out, because it is the only notification that put the
       // person's work in front of everybody who lands on the home page.
-      featured: `<b>${escapeHtml(n.designTitle ?? 'Your tifo')}</b> is the Tifo of the Day on the home page`,
-    }[n.kind] ?? `${actor} did something`;
+      featured: tv('nt.featured', { title }),
+    }[n.kind] ?? tv('nt.generic', { actor });
   return `
-    <div class="notif-item ${n.readAt ? '' : 'unread'}">
-      <div class="notif-icon ${n.kind}"><i class="ti ${icon}"></i></div>
+    <div class="notif-item ${n.readAt ? '' : 'unread'}" data-notif="${escapeHtml(n.id)}" role="button" tabindex="0">
+      <div class="notif-icon ${escapeHtml(n.kind)}"><i class="ti ${icon}"></i></div>
       <div class="notif-text">${text}<div class="notif-time">${timeAgo(n.createdAt)}</div></div>
     </div>`;
 }
@@ -873,6 +1044,14 @@ document.addEventListener('click', (e) => {
   const panel = $('#notif-panel');
   const btn = $('#notif-btn');
   if (!panel.hidden && !panel.contains(e.target as Node) && !btn.contains(e.target as Node)) panel.hidden = true;
+});
+// Enter/Space on a focused row, since the rows are buttons in all but element.
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter' && e.key !== ' ') return;
+  const row = (e.target as HTMLElement)?.closest?.('.notif-item') as HTMLElement | null;
+  if (!row) return;
+  e.preventDefault();
+  row.click();
 });
 
 // ---------- sort tabs + tags ----------
@@ -1143,12 +1322,27 @@ document.addEventListener('click', (e) => {
 });
 
 // ---------- go ----------
+/**
+ * /community?t=<id> opens straight into that tifo.
+ *
+ * Which is what a notification needs when it is not opened from this page —
+ * and what anyone linking a design into a chat gets for free. An id that is
+ * private or gone just leaves the feed showing, which is the honest result.
+ */
+async function openDeepLink(): Promise<void> {
+  const id = new URLSearchParams(window.location.search).get('t');
+  if (!id) return;
+  const item = await fetchGalleryItem(id).catch(() => null);
+  if (item) void openPreview(item);
+}
+
 async function main(): Promise<void> {
   langToggle.textContent = t('common.language');
   await refreshAuthUI();
   initPaging();
   await Promise.all([loadGallery(), loadFilters()]);
   renderApplied();
+  void openDeepLink();
 }
 void main();
 
