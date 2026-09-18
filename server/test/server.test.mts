@@ -43,7 +43,7 @@ async function registerUser(app: FastifyInstance, username: string): Promise<str
   const res = await app.inject({
     method: 'POST',
     url: '/api/auth/register',
-    payload: { username, password: 'hunter22pass', email: `${username}@example.test`, acceptedVersion: 'test' },
+    payload: { username, password: 'harbor-kite-moss-31', email: `${username}@example.test`, acceptedVersion: 'test' },
   });
   assert.equal(res.statusCode, 201, res.body);
   return res.json().token as string;
@@ -72,14 +72,14 @@ async function runSuite(name: string, repo: DesignRepository, auth: AuthReposito
   const aliceTok = await registerUser(app, 'alice');
   const bobTok = await registerUser(app, 'bob');
   assert.equal(
-    (await app.inject({ method: 'POST', url: '/api/auth/register', payload: { username: 'alice', password: 'hunter22pass', email: 'alice2@example.test', acceptedVersion: 'test' } })).statusCode,
+    (await app.inject({ method: 'POST', url: '/api/auth/register', payload: { username: 'alice', password: 'harbor-kite-moss-31', email: 'alice2@example.test', acceptedVersion: 'test' } })).statusCode,
     409,
   );
   assert.equal(
     (await app.inject({ method: 'POST', url: '/api/auth/login', payload: { username: 'alice', password: 'wrongpass99' } })).statusCode,
     401,
   );
-  const login = await app.inject({ method: 'POST', url: '/api/auth/login', payload: { username: 'alice', password: 'hunter22pass' } });
+  const login = await app.inject({ method: 'POST', url: '/api/auth/login', payload: { username: 'alice', password: 'harbor-kite-moss-31' } });
   assert.equal(login.statusCode, 200);
 
   // Sign-in accepts an email as well as a username. Accounts created in the
@@ -87,11 +87,11 @@ async function runSuite(name: string, repo: DesignRepository, auth: AuthReposito
   // they would have no way back in.
   await app.inject({
     method: 'POST', url: '/api/auth/register',
-    payload: { username: 'emailer', password: 'hunter22pass', email: 'emailer@example.test', acceptedVersion: 'test' },
+    payload: { username: 'emailer', password: 'harbor-kite-moss-31', email: 'emailer@example.test', acceptedVersion: 'test' },
   });
   const byEmail = await app.inject({
     method: 'POST', url: '/api/auth/login',
-    payload: { username: 'emailer@example.test', password: 'hunter22pass' },
+    payload: { username: 'emailer@example.test', password: 'harbor-kite-moss-31' },
   });
   assert.equal(byEmail.statusCode, 200, 'can sign in with an email address');
   assert.equal(byEmail.json().username, 'emailer', 'email sign-in resolves to the right account');
@@ -106,7 +106,7 @@ async function runSuite(name: string, repo: DesignRepository, auth: AuthReposito
   assert.equal(
     (await app.inject({
       method: 'POST', url: '/api/auth/login',
-      payload: { username: 'nobody@example.test', password: 'hunter22pass' },
+      payload: { username: 'nobody@example.test', password: 'harbor-kite-moss-31' },
     })).statusCode,
     401,
     'an unknown email fails the same way as an unknown username',
@@ -116,12 +116,12 @@ async function runSuite(name: string, repo: DesignRepository, auth: AuthReposito
 
   // ---- email: required at signup, returned by /api/me, add/replace + uniqueness ----
   assert.equal(
-    (await app.inject({ method: 'POST', url: '/api/auth/register', payload: { username: 'noemail', password: 'hunter22pass' } })).statusCode,
+    (await app.inject({ method: 'POST', url: '/api/auth/register', payload: { username: 'noemail', password: 'harbor-kite-moss-31' } })).statusCode,
     400,
     'register without email is rejected',
   );
   assert.equal(
-    (await app.inject({ method: 'POST', url: '/api/auth/register', payload: { username: 'dupemail', password: 'hunter22pass', email: 'alice@example.test', acceptedVersion: 'test' } })).statusCode,
+    (await app.inject({ method: 'POST', url: '/api/auth/register', payload: { username: 'dupemail', password: 'harbor-kite-moss-31', email: 'alice@example.test', acceptedVersion: 'test' } })).statusCode,
     409,
     'duplicate email is rejected',
   );
@@ -179,11 +179,11 @@ async function runSuite(name: string, repo: DesignRepository, auth: AuthReposito
 
   // ---- password: change (authed) + forgot/reset via emailed token ----
   assert.equal(
-    (await app.inject({ method: 'POST', url: '/api/account/password', headers: bearer(daveTok), payload: { currentPassword: 'wrongpass99', newPassword: 'newpass1234' } })).statusCode,
+    (await app.inject({ method: 'POST', url: '/api/account/password', headers: bearer(daveTok), payload: { currentPassword: 'wrongpass99', newPassword: 'tundra-cobalt-58' } })).statusCode,
     401,
     'wrong current password rejected',
   );
-  const pwChange = await app.inject({ method: 'POST', url: '/api/account/password', headers: bearer(daveTok), payload: { currentPassword: 'hunter22pass', newPassword: 'newpass1234' } });
+  const pwChange = await app.inject({ method: 'POST', url: '/api/account/password', headers: bearer(daveTok), payload: { currentPassword: 'harbor-kite-moss-31', newPassword: 'tundra-cobalt-58' } });
   assert.equal(pwChange.statusCode, 200);
   // Changing a password must end every other session, or it is useless as the
   // remedy for a stolen token: tokens live 30 days.
@@ -201,7 +201,7 @@ async function runSuite(name: string, repo: DesignRepository, auth: AuthReposito
     'the rotated token works',
   );
   assert.equal(
-    (await app.inject({ method: 'POST', url: '/api/auth/login', payload: { username: 'dave', password: 'newpass1234' } })).statusCode,
+    (await app.inject({ method: 'POST', url: '/api/auth/login', payload: { username: 'dave', password: 'tundra-cobalt-58' } })).statusCode,
     200,
     'can log in with the changed password',
   );
@@ -229,7 +229,7 @@ async function runSuite(name: string, repo: DesignRepository, auth: AuthReposito
     'can log in after reset',
   );
   assert.equal(
-    (await app.inject({ method: 'POST', url: '/api/auth/reset', payload: { token: resetMail!.token, newPassword: 'again123456' } })).statusCode,
+    (await app.inject({ method: 'POST', url: '/api/auth/reset', payload: { token: resetMail!.token, newPassword: 'again-marble-orbit' } })).statusCode,
     400,
     'reset token is single-use',
   );
@@ -320,7 +320,7 @@ async function runSuite(name: string, repo: DesignRepository, auth: AuthReposito
     // The old name must be free, and must no longer resolve to this account.
     const reuse = await app.inject({
       method: 'POST', url: '/api/auth/register',
-      payload: { username: 'renamer', password: 'hunter22pass', email: 'someone.else@example.test', acceptedVersion: 'test' },
+      payload: { username: 'renamer', password: 'harbor-kite-moss-31', email: 'someone.else@example.test', acceptedVersion: 'test' },
     });
     assert.equal(reuse.statusCode, 201, 'the vacated name can be registered by someone else');
 

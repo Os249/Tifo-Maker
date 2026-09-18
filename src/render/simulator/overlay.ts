@@ -24,7 +24,24 @@ export interface SimulatorHandle {
   close(): void;
 }
 
+/**
+ * Where the simulator stops being a desktop app.
+ *
+ * 899, to match `PHONE_MAX` in `ui/mobileShell.ts` — one number for the whole
+ * product. It used to be 640, and the 641-899 band was a trap: measured at
+ * 844x390 (a phone turned sideways) the top bar overflowed by 17px and put
+ * **Close** off the right edge, and at 768x1024 (iPad portrait) it overflowed
+ * by 93px and took Help with it. With no keyboard there is no Escape, so the
+ * only way out of the simulator was to leave the page — which is the "adding
+ * an image hangs" dead end again, one screen further in.
+ */
+const MOBILE_MAX = 899;
+
 const TIER_LABELS: [QualityTier, string][] = [
+  // 'low' is offered, not just probed into. A three-year-old Android is most
+  // of this audience, and the honest answer to a stuttering bowl is fewer
+  // pixels — not a menu whose floor is already above what the phone can hold.
+  ['low', 'Low'],
   ['medium', 'Medium'],
   ['high', 'High'],
   ['ultra', 'Ultra'],
@@ -62,6 +79,7 @@ const CSS = `
 .mds-btn.active{background:var(--accent-weak);border-color:var(--accent);color:#eafff0;}
 .mds-btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);font-weight:600;}
 .mds-btn.primary:hover{background:var(--accent-hover);}
+.mds-btn[hidden]{display:none;}
 .mds-icon{padding:7px 10px;}
 .mds-icon svg{width:16px;height:16px;display:block;}
 .mds-sel,.mds-input{font:13px system-ui,sans-serif;color:var(--text);background:var(--surface-3);border:1px solid var(--border);border-radius:var(--r);padding:6px 9px;cursor:pointer;width:100%;box-sizing:border-box;transition:border-color var(--t-fast),box-shadow var(--t-fast);}
@@ -110,15 +128,32 @@ input[type=checkbox].mds-check:checked::after{transform:rotate(45deg) scale(1);}
 .mds-kv .k{color:var(--text-dim);}
 .mds-key{display:inline-block;min-width:16px;text-align:center;padding:1px 6px;border:1px solid var(--border-strong);border-bottom-width:2px;border-radius:5px;background:var(--surface-3);font:600 11px ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--text);}
 .mds-help-actions{display:flex;justify-content:flex-end;margin-top:8px;}
+.mds-fail{position:absolute;inset:0;z-index:8;display:none;align-items:center;justify-content:center;padding:18px;background:rgba(3,5,8,.82);backdrop-filter:blur(3px);}
+.mds-fail.show{display:flex;}
+.mds-fail-card{width:min(420px,92vw);background:var(--panel);border:1px solid var(--border);border-radius:var(--r-lg);box-shadow:var(--shadow);padding:22px;text-align:center;}
+.mds-fail-card h2{margin:0 0 8px;font-size:17px;}
+.mds-fail-card p{margin:0 0 16px;color:var(--text-dim);font-size:13px;line-height:1.55;}
+.mds-fail-acts{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;}
+.mds-fail-acts .mds-btn{flex:0 1 auto;}
 .mds-baracts{display:flex;align-items:center;gap:10px;}
 .mds-panel-acts{display:none;}
 .mds-brand .brand-txt{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .mds-overlay canvas{touch-action:none;display:block;}
-@media (max-width:640px){
+@media (max-width:${MOBILE_MAX}px){
   .mds-bar{padding:8px 10px;gap:7px;}
   .mds-brand{min-width:0;font-size:14px;}
   .mds-panel{top:auto;left:0;right:0;bottom:0;width:auto;max-height:64vh;height:auto!important;border-radius:16px 16px 0 0;border-left:none;border-right:none;border-bottom:none;padding:10px 12px calc(10px + env(safe-area-inset-bottom));transition:transform var(--t-med) ease,opacity var(--t-med);}
   .mds-panel.collapsed{transform:translateY(102%);opacity:1;}
+  /* The base sheet has two RTL rules, .mds-overlay[dir=rtl] .mds-panel and
+     ...collapsed, and those outrank a bare .mds-panel however late it comes.
+     Without the two below to answer them, Arabic on
+     a phone kept the 286px side rail pinned to the right edge AND the sideways
+     collapse: measured at 360px the panel sat at x=310, 90% off-screen, with
+     fourteen controls — quality, cameras, crowd, atmosphere, recording — that
+     could not be reached at all. Both bug reports that started this work were
+     written in Arabic. */
+  .mds-overlay[dir="rtl"] .mds-panel{left:0;right:0;}
+  .mds-overlay[dir="rtl"] .mds-panel.collapsed{transform:translateY(102%);}
   .mds-panel-acts{display:flex;flex-direction:column;gap:8px;margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid var(--border-soft);}
   .mds-panel-acts .mds-baracts{display:flex;flex-wrap:wrap;gap:8px;width:100%;}
   .mds-panel-acts .mds-baracts .mds-bf{flex:1 1 100%;}
@@ -172,7 +207,20 @@ const MDS_T: Record<string, { en: string; ar: string }> = {
   fullscreen: { en: 'Fullscreen', ar: 'ملء الشاشة' },
   copyLink: { en: 'Copy link', ar: 'انسخ الرابط' },
   close: { en: 'Close', ar: 'إغلاق' },
+  exitFull: { en: 'Exit full', ar: 'إنهاء ملء الشاشة' },
   helpControls: { en: 'Help & controls (?)', ar: 'المساعدة والأدوات (؟)' },
+  noWebgl: { en: 'This phone cannot run the stadium', ar: 'هذا الجهاز ما يقدر يشغّل الملعب' },
+  noWebglBody: {
+    en: 'Match Day needs 3D graphics (WebGL), and this browser did not give us any. Try another browser, or open tifomaker.org on a computer.',
+    ar: 'يوم المباراة يحتاج رسومات ثلاثية الأبعاد (WebGL)، وهذا المتصفح ما وفّرها. جرّب متصفح ثاني، أو افتح tifomaker.org على كمبيوتر.',
+  },
+  lost: { en: 'The stadium ran out of memory', ar: 'الملعب خلصت ذاكرته' },
+  lostBody: {
+    en: 'Your phone reclaimed the 3D view — usually because another app needed the memory. Rebuild it, or drop the quality first.',
+    ar: 'جهازك سحب الذاكرة من العرض ثلاثي الأبعاد — غالبًا لأن تطبيق ثاني احتاجها. أعد البناء، أو نزّل الجودة أول.',
+  },
+  rebuild: { en: 'Rebuild', ar: 'أعد البناء' },
+  'tier.low': { en: 'Low', ar: 'منخفض' },
   'tier.medium': { en: 'Medium', ar: 'متوسط' },
   'tier.high': { en: 'High', ar: 'عالي' },
   'tier.ultra': { en: 'Ultra', ar: 'فائق' },
@@ -262,6 +310,9 @@ const MDS_T: Record<string, { en: string; ar: string }> = {
   hScroll: { en: 'Scroll / pinch', ar: 'تمرير / قرص' },
   hPan: { en: 'Pan', ar: 'تحريك' },
   hRightDrag: { en: 'Right-drag', ar: 'سحب باليمين' },
+  hOneFinger: { en: 'One finger', ar: 'إصبع واحد' },
+  hTwoFinger: { en: 'Two fingers', ar: 'إصبعين' },
+  hPinch: { en: 'Pinch', ar: 'قرص' },
   hShortcuts: { en: 'Shortcuts', ar: 'اختصارات' },
   hCamViews: { en: 'Camera views', ar: 'لقطات الكاميرا' },
   hPlayReveal: { en: 'Play the reveal', ar: 'تشغيل الكشف' },
@@ -377,10 +428,15 @@ export function openMatchDaySimulator(
   assetStore: AssetStore,
   opts: { onClose?: () => void } = {},
 ): SimulatorHandle {
-  const startTier = probeQuality();
   const state: SimState = {
     camIdx: 0,
-    tier: startTier === 'low' ? 'medium' : startTier,
+    // Take the probe's word for it. This used to read
+    // `startTier === 'low' ? 'medium' : startTier`, which meant the one device
+    // the probe was written to protect — a phone reporting <=3GB of memory —
+    // was the one device that got overruled, into 1.5x pixel ratio with MSAA
+    // and image-based lighting. LOW is a real tier the simulator renders; the
+    // picker now offers it, so nobody is stuck below the floor either.
+    tier: probeQuality(),
     crowd: 'sellout',
     density: 0.97,
     showOnTifo: false,
@@ -403,6 +459,21 @@ export function openMatchDaySimulator(
     volume: 0.6,
     drum: true,
   };
+
+  /**
+   * Coarse *primary* pointer → this is a finger, whatever the viewport says.
+   *
+   * `maxTouchPoints > 0` would be wrong here: a touchscreen Windows laptop
+   * reports touch and is still driven with a mouse, and it would be told to
+   * pinch. `(pointer: coarse)` asks about the pointer someone is actually
+   * using, which is the question.
+   */
+  const TOUCH =
+    typeof matchMedia === 'function'
+      ? matchMedia('(pointer: coarse)').matches
+      : (navigator.maxTouchPoints ?? 0) > 0;
+  /** A hover-capable pointer implies a keyboard; a phone in a dock is rare enough. */
+  const KEYS = typeof matchMedia !== 'function' || matchMedia('(hover: hover)').matches;
 
   const overlay = document.createElement('div');
   overlay.className = 'mds-overlay';
@@ -646,19 +717,26 @@ export function openMatchDaySimulator(
   helpCard.className = 'mds-help-card';
   const kv = (k: string, v: string): string => '<div class="mds-kv"><span class="k">' + k + '</span><span>' + v + '</span></div>';
   const key = (s: string): string => '<span class="mds-key">' + s + '</span>';
+  // The first card a phone user ever sees said "Right-drag to pan" and then
+  // listed six keyboard shortcuts. Read the input, not the width: a laptop with
+  // a touchscreen still has the keys.
   helpCard.innerHTML =
     '<h2>' + L('brand') + '</h2>' +
     '<p class="sub">' + L('helpSub') + '</p>' +
     '<div class="mds-help-grp"><h3>' + L('hMove') + '</h3>' +
-    kv(L('hLook'), L('hDrag')) + kv(L('hZoom'), L('hScroll')) + kv(L('hPan'), L('hRightDrag')) + '</div>' +
-    '<div class="mds-help-grp"><h3>' + L('hShortcuts') + '</h3>' +
-    kv(L('hCamViews'), key('1') + ' to ' + key('9')) +
-    kv(L('hPlayReveal'), key('Space')) +
-    kv(L('hFull'), key('F')) +
-    kv(L('hHide'), key('H')) +
-    kv(L('hHelp'), key('?')) +
-    kv(L('hClose'), key('Esc')) +
-    '</div>' +
+    kv(L('hLook'), TOUCH ? L('hOneFinger') : L('hDrag')) +
+    kv(L('hZoom'), TOUCH ? L('hPinch') : L('hScroll')) +
+    kv(L('hPan'), TOUCH ? L('hTwoFinger') : L('hRightDrag')) + '</div>' +
+    (KEYS
+      ? '<div class="mds-help-grp"><h3>' + L('hShortcuts') + '</h3>' +
+        kv(L('hCamViews'), key('1') + ' to ' + key('9')) +
+        kv(L('hPlayReveal'), key('Space')) +
+        kv(L('hFull'), key('F')) +
+        kv(L('hHide'), key('H')) +
+        kv(L('hHelp'), key('?')) +
+        kv(L('hClose'), key('Esc')) +
+        '</div>'
+      : '') +
     '<div class="mds-help-grp"><h3>' + L('hYours') + '</h3>' +
     kv(L('hBanners'), L('assets')) +
     kv(L('hTimeWeather'), L('atmo')) +
@@ -783,19 +861,100 @@ export function openMatchDaySimulator(
     sim.setAutoReveal(state.reveal);
     if (!state.fly) sim.applyShot(shots[state.camIdx] ?? shots[0]);
   }
-  function mount(): void {
-    sim = new MatchDaySimulator(host, map, store, template, assetStore, { quality: state.tier });
+  /**
+   * True once a simulator instance exists and is safe to talk to.
+   *
+   * Everything below assumes `sim`. A phone with WebGL switched off (or a
+   * browser that hands back a null context under memory pressure) makes the
+   * constructor throw, and `main.ts` catches that and does nothing at all — so
+   * the report is "I tapped Match Day and nothing happened", which is
+   * unfixable from the outside. The overlay now stays up and says what
+   * happened.
+   */
+  let mounted = false;
+  /**
+   * An instance exists and has not been disposed.
+   *
+   * Separate from `mounted` on purpose. A lost context clears `mounted` — the
+   * object is no longer safe to drive — but the instance, and its canvas, are
+   * still there. Folding the two together meant Rebuild skipped `dispose()`
+   * and left the dead canvas in the DOM: two canvases, and the GPU memory of
+   * the one that just died still held, on the device that had just run out of
+   * it.
+   */
+  let built = false;
+  function disposeSim(): void {
+    if (!built) return;
+    built = false;
+    mounted = false;
+    try {
+      sim.dispose();
+    } catch {
+      /* a lost context makes most GL teardown a no-op; never block on it */
+    }
+  }
+  function mount(): boolean {
+    try {
+      sim = new MatchDaySimulator(host, map, store, template, assetStore, {
+        quality: state.tier,
+        onContextLost: () => showFail('lost'),
+      });
+    } catch {
+      built = false;
+      mounted = false;
+      showFail('nogl');
+      return false;
+    }
+    built = true;
+    mounted = true;
+    hideFail();
     applyState();
     refreshAssets();
     sim.start();
+    return true;
   }
+
+  // ---------- the "it did not start" card ----------
+  const fail = document.createElement('div');
+  fail.className = 'mds-fail';
+  fail.setAttribute('role', 'alertdialog');
+  fail.setAttribute('aria-modal', 'true');
+  const failCard = document.createElement('div');
+  failCard.className = 'mds-fail-card';
+  const failTitle = document.createElement('h2');
+  const failBody = document.createElement('p');
+  const failActs = document.createElement('div');
+  failActs.className = 'mds-fail-acts';
+  const failRetry = btn(L('rebuild'), 'primary');
+  const failClose = btn(L('close'));
+  failActs.append(failRetry, failClose);
+  failCard.append(failTitle, failBody, failActs);
+  fail.append(failCard);
+  overlay.append(fail);
+
+  const hideFail = (): void => fail.classList.remove('show');
+  function showFail(kind: 'nogl' | 'lost'): void {
+    mounted = false;
+    failTitle.textContent = L(kind === 'nogl' ? 'noWebgl' : 'lost');
+    failBody.textContent = L(kind === 'nogl' ? 'noWebglBody' : 'lostBody');
+    // No WebGL is not something a second attempt fixes; a reclaimed context is.
+    failRetry.hidden = kind === 'nogl';
+    fail.classList.add('show');
+    fail.setAttribute('aria-label', failTitle.textContent);
+  }
+  failRetry.addEventListener('click', () => {
+    disposeSim();
+    mount();
+  });
+  failClose.addEventListener('click', () => close());
+
   mount();
   // Bound the panel height in pixels (inline style beats any CSS) so overflow
   // actually scrolls instead of the panel growing to fit its content.
   const fitPanel = (): void => {
     // On mobile the panel is a bottom sheet sized by CSS (max-height); on desktop
     // we bound it in px so its overflow actually scrolls.
-    if (window.innerWidth <= 640) panel.style.height = '';
+    if (window.innerWidth <= MOBILE_MAX) panel.style.height = '';
     else panel.style.height = Math.max(200, window.innerHeight - 76) + 'px';
   };
   fitPanel();
@@ -803,7 +962,7 @@ export function openMatchDaySimulator(
 
   // Responsive: move the secondary actions into the panel on phones, back to the
   // top bar on desktop, so the bar never overflows.
-  const mqMobile = window.matchMedia('(max-width: 640px)');
+  const mqMobile = window.matchMedia(`(max-width: ${MOBILE_MAX}px)`);
   const placeActions = (): void => {
     if (mqMobile.matches) {
       if (barActions.parentElement !== actionsHost) actionsHost.appendChild(barActions);
@@ -827,7 +986,7 @@ export function openMatchDaySimulator(
   });
   qSel.addEventListener('change', () => {
     state.tier = qSel.value as QualityTier;
-    sim.dispose();
+    disposeSim();
     mount();
     toast(L('toast.quality') + L('tier.' + state.tier));
   });
@@ -1109,14 +1268,44 @@ export function openMatchDaySimulator(
     toast(L('toast.linkCopied'));
   });
 
+  // iOS Safari implements fullscreen for <video> only — Element.requestFullscreen
+  // is not there at all. Left in, the button sat on the most common phone in
+  // this audience doing precisely nothing when tapped.
+  const canFullscreen =
+    typeof overlay.requestFullscreen === 'function' && document.fullscreenEnabled !== false;
+  fullBtn.hidden = !canFullscreen;
   const onFsChange = (): void => {
-    fullBtn.textContent = document.fullscreenElement ? 'Exit full' : 'Fullscreen';
+    fullBtn.textContent = document.fullscreenElement ? L('exitFull') : L('fullscreen');
   };
   fullBtn.addEventListener('click', () => {
     if (document.fullscreenElement) void document.exitFullscreen();
     else void overlay.requestFullscreen?.();
   });
   document.addEventListener('fullscreenchange', onFsChange);
+
+  /**
+   * One history entry, owned by the overlay.
+   *
+   * Back is the phone's Escape, and there is no Escape on a phone. Before
+   * this, Back from the simulator did not dismiss it — it left `/app`
+   * altogether and took the unsaved design with it, because a fullscreen div
+   * puts nothing on the history stack. We push an entry when the simulator
+   * opens and spend it when it closes, whichever end the user reaches first.
+   * `pushed` is cleared before either direction acts, so back → popstate →
+   * close → back cannot loop.
+   */
+  let pushed = false;
+  try {
+    history.pushState({ mds: 1 }, '');
+    pushed = true;
+  } catch {
+    /* history unavailable (sandboxed iframe) — Escape and Close still work */
+  }
+  const onPop = (): void => {
+    pushed = false;
+    close();
+  };
+  window.addEventListener('popstate', onPop);
 
   let closed = false;
   const close = (): void => {
@@ -1125,15 +1314,30 @@ export function openMatchDaySimulator(
     document.removeEventListener('keydown', onKey);
     document.removeEventListener('fullscreenchange', onFsChange);
     window.removeEventListener('resize', fitPanel);
+    window.removeEventListener('popstate', onPop);
     mqMobile.removeEventListener('change', placeActions);
     if (document.fullscreenElement) void document.exitFullscreen();
-    sim.dispose();
+    disposeSim();
     document.body.style.overflow = prevOverflow;
     overlay.remove();
+    if (pushed) {
+      pushed = false;
+      try {
+        history.back();
+      } catch {
+        /* nothing to unwind */
+      }
+    }
     opts.onClose?.();
   };
   const onKey = (e: KeyboardEvent): void => {
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return; // don't hijack typing
+    // Nothing mounted: every shortcut below dereferences `sim`. Escape still
+    // has to work, because the failure card is the only thing on screen.
+    if (!mounted) {
+      if (e.key === 'Escape') close();
+      return;
+    }
     if (e.key === 'Escape') {
       if (helpOpen()) hideHelp();
       else if (!document.fullscreenElement) close();
@@ -1154,7 +1358,7 @@ export function openMatchDaySimulator(
         camSel.value = String(i);
         sim.applyShot(shots[i]);
       }
-    } else if (e.key === 'f' || e.key === 'F') {
+    } else if ((e.key === 'f' || e.key === 'F') && canFullscreen) {
       fullBtn.click();
     } else if (e.key === 'h' || e.key === 'H') {
       panel.classList.toggle('collapsed');

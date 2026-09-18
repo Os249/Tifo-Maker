@@ -10,6 +10,8 @@
  * flips <html dir/lang>, persists the choice, and re-applies the DOM.
  */
 
+import { PASSWORD_MAX, PASSWORD_MIN } from '../core/password';
+
 export type Lang = 'en' | 'ar';
 
 const STRINGS: Record<string, { en: string; ar: string }> = {
@@ -329,7 +331,7 @@ const STRINGS: Record<string, { en: string; ar: string }> = {
   'auth.email': { en: 'Email', ar: 'البريد الإلكتروني' },
   'auth.emailPh': { en: 'you@example.com', ar: 'you@example.com' },
   'auth.password': { en: 'Password', ar: 'كلمة المرور' },
-  'auth.passwordPh': { en: 'at least 8 characters', ar: '٨ أحرف على الأقل' },
+  'auth.passwordPh': { en: 'at least {min} characters', ar: '{min} خانة على الأقل' },
   'auth.signingIn': { en: 'Signing in…', ar: 'جارٍ تسجيل الدخول…' },
   'auth.creating': { en: 'Creating…', ar: 'جارٍ الإنشاء…' },
   'auth.note': { en: 'Designs are tied to your account. Your session lasts until you sign out or refresh.', ar: 'التصاميم مرتبطة بحسابك، وتبقى جلستك حتى تسجّل الخروج أو تُحدّث الصفحة.' },
@@ -338,7 +340,7 @@ const STRINGS: Record<string, { en: string; ar: string }> = {
   'auth.privacyLink': { en: 'Privacy Policy', ar: 'سياسة الخصوصية' },
   'auth.close': { en: 'Close', ar: 'إغلاق' },
   'auth.errEmail': { en: 'Please enter a valid email address.', ar: 'يرجى إدخال بريد إلكتروني صحيح.' },
-  'auth.errPassword': { en: 'Password must be at least 8 characters.', ar: 'كلمة المرور يجب أن تكون ٨ أحرف على الأقل.' },
+  'auth.errPassword': { en: 'Password must be at least {min} characters.', ar: 'كلمة المرور لازم {min} خانة على الأقل.' },
   'auth.errInvalid': { en: 'Wrong username or password. New here? Create an account.', ar: 'اسم المستخدم أو كلمة المرور غير صحيحة. جديد هنا؟ أنشئ حسابًا.' },
   'auth.errTaken': { en: 'That username is taken: try another, or sign in.', ar: 'اسم المستخدم محجوز: جرّب اسمًا آخر أو سجّل الدخول.' },
   'verify.ok': { en: 'Email verified: thank you!', ar: 'تم تأكيد بريدك الإلكتروني: شكرًا!' },
@@ -349,6 +351,33 @@ const STRINGS: Record<string, { en: string; ar: string }> = {
   'auth.forgotSent': { en: 'If that email has an account, a reset link is on its way.', ar: 'إذا كان لهذا البريد حساب، فإن رابط إعادة التعيين في طريقه إليك.' },
   'auth.sending': { en: 'Sending…', ar: 'جارٍ الإرسال…' },
   'ed.changePassword': { en: 'Change password', ar: 'تغيير كلمة المرور' },
+  // ---- choosing a password (src/ui/passwordField.ts) ----
+  // No key here spells the minimum out as a literal: it arrives as {min} from
+  // src/core/password.ts, so raising the bar is one constant and not a hunt
+  // through two languages' worth of copy.
+  'pw.tip': {
+    en: 'At least {min} characters. Four unrelated words beat one clever word.',
+    ar: '{min} خانة على الأقل. أربع كلمات ما لها علاقة ببعض أقوى من كلمة وحدة "ذكية".',
+  },
+  'pw.hint.short': { en: '{n} more to go', ar: 'باقي {n}' },
+  'pw.ph': { en: 'at least {min} characters', ar: '{min} خانة على الأقل' },
+  'pw.confirm': { en: 'Confirm password', ar: 'أكّد كلمة المرور' },
+  'pw.show': { en: 'Show password', ar: 'إظهار كلمة المرور' },
+  'pw.hide': { en: 'Hide password', ar: 'إخفاء كلمة المرور' },
+  'pw.suggest': { en: 'Suggest one', ar: 'اقترح لي وحدة' },
+  'pw.level1': { en: 'Weak', ar: 'ضعيفة' },
+  'pw.level2': { en: 'Fair', ar: 'مقبولة' },
+  'pw.level3': { en: 'Good', ar: 'جيدة' },
+  'pw.level4': { en: 'Strong', ar: 'قوية' },
+  'pw.err.blank': { en: 'Enter a password.', ar: 'اكتب كلمة المرور.' },
+  'pw.err.short': { en: 'Password must be at least {min} characters.', ar: 'كلمة المرور لازم {min} خانة على الأقل.' },
+  'pw.err.long': { en: 'Password must be at most {max} characters.', ar: 'كلمة المرور {max} خانة كحد أقصى.' },
+  'pw.err.digits': { en: 'Numbers alone are easy to guess — add some words.', ar: 'أرقام بس سهلة التخمين — زِد كلمات.' },
+  'pw.err.repeated': { en: 'That is the same thing over and over.', ar: 'هذي نفس الشي متكرر.' },
+  'pw.err.sequence': { en: 'That is a straight run of letters or keys.', ar: 'هذي مجرد تسلسل حروف أو أزرار.' },
+  'pw.err.context': { en: 'Leave your email and username out of it.', ar: 'لا تحط فيها بريدك ولا اسم المستخدم.' },
+  'pw.err.common': { en: 'Too easy to guess — try a few unrelated words.', ar: 'سهلة التخمين — جرّب كم كلمة ما لها علاقة ببعض.' },
+  'pw.err.mismatch': { en: 'The two passwords do not match.', ar: 'كلمتا المرور ما تطابقن.' },
   'cp.current': { en: 'Current password', ar: 'كلمة المرور الحالية' },
   'cp.new': { en: 'New password', ar: 'كلمة المرور الجديدة' },
   'cp.submit': { en: 'Update password', ar: 'تحديث كلمة المرور' },
@@ -1040,14 +1069,14 @@ const STRINGS: Record<string, { en: string; ar: string }> = {
   // ---- reset, community and seat pages ----
   'rs.title': { en: 'Reset your password', ar: 'أعد تعيين كلمة المرور' },
   'rs.new': { en: 'New password', ar: 'كلمة مرور جديدة' },
-  'rs.ph': { en: 'at least 8 characters', ar: '8 خانات على الأقل' },
+  'rs.ph': { en: 'at least {min} characters', ar: '{min} خانة على الأقل' },
   'rs.confirm': { en: 'Confirm new password', ar: 'أكّد كلمة المرور الجديدة' },
   'rs.submit': { en: 'Update password', ar: 'حدّث كلمة المرور' },
   'rs.updating': { en: 'Updating…', ar: 'يحدّث…' },
   'rs.done': { en: 'Your password has been updated.', ar: 'تم تحديث كلمة المرور.' },
   'rs.goSignIn': { en: 'Go to sign in', ar: 'روح لتسجيل الدخول' },
   'rs.noToken': { en: 'This reset link is missing its token. Request a new one from the sign-in screen.', ar: 'رابط إعادة التعيين ناقص الرمز. اطلب رابط جديد من شاشة تسجيل الدخول.' },
-  'rs.tooShort': { en: 'Password must be at least 8 characters.', ar: 'كلمة المرور لازم 8 خانات على الأقل.' },
+  'rs.tooShort': { en: 'Password must be at least {min} characters.', ar: 'كلمة المرور لازم {min} خانة على الأقل.' },
   'rs.mismatch': { en: 'Passwords do not match.', ar: 'كلمتا المرور ما تطابقن.' },
   'rs.badLink': { en: 'That reset link is invalid or has expired.', ar: 'رابط إعادة التعيين غير صالح أو منتهي.' },
   'cm.notif': { en: 'Notifications', ar: 'الإشعارات' },
@@ -1217,6 +1246,8 @@ const STRINGS: Record<string, { en: string; ar: string }> = {
   'mb.more': { en: 'More', ar: 'المزيد' },
   'mb.jump': { en: 'Jump to a stand', ar: 'انتقل لمدرج' },
   'mb.all': { en: 'All', ar: 'الكل' },
+  'mb.mdLoading': { en: 'Loading…', ar: 'جاري التحميل…' },
+  'mb.mdFailed': { en: 'Could not load', ar: 'ما قدر يحمّل' },
   'mb.undoTap': { en: 'Undone', ar: 'تم التراجع' },
   'mb.fitTap': { en: 'Whole stadium', ar: 'الملعب كامل' },
 
@@ -1533,7 +1564,19 @@ const ERROR_KEYS: Record<string, string> = {
   'not your design': 'err.notYours',
   'not public': 'err.notPublic',
   'could not save that, please try again': 'err.saveFailed',
+  // Kept for a tab that loaded the old bundle before the policy changed.
   'new password must be at least 8 characters': 'err.pwTooShort',
+  // Every way server-side password grading can answer. The two length strings
+  // are built from the same constants the server formats them with, so they
+  // match by construction rather than by someone remembering to edit both.
+  'a password is required': 'pw.err.blank',
+  [`password must be at least ${PASSWORD_MIN} characters`]: 'pw.err.short',
+  [`password must be at most ${PASSWORD_MAX} characters`]: 'pw.err.long',
+  'a password of only numbers is too easy to guess': 'pw.err.digits',
+  'that password repeats one short pattern': 'pw.err.repeated',
+  'that password is a straight run of letters or keys': 'pw.err.sequence',
+  'a password must not contain your email or username': 'pw.err.context',
+  'that password is too easy to guess': 'pw.err.common',
   'invalid or expired reset link': 'err.badReset',
   'a valid email is required': 'err.needEmail',
   'no email on file': 'err.noEmail',
@@ -1570,7 +1613,10 @@ export function tTitle(item: { title: string; titleAr?: string | null }): string
 
 export function tErr(message: string): string {
   const key = ERROR_KEYS[message.trim()];
-  return key ? t(key) : message;
+  if (!key) return message;
+  // The password-length messages are the only server errors carrying a number,
+  // and it is a constant both sides import; `tv` is a no-op on the rest.
+  return tv(key, { min: PASSWORD_MIN, max: PASSWORD_MAX });
 }
 
 function applyDir(): void {

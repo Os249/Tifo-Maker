@@ -33,12 +33,22 @@ import { isFeedbackKind, type FeedbackContext, type FeedbackRepository } from '.
 import { adminHtml, ADMIN_JS, ADMIN_UNLOCK_JS } from './adminPage';
 import { isValidTemplate } from '../../src/core/customStadiums';
 import { clubFilterOptions, COLOUR_FAMILIES, designFacets } from '../../src/core/facets';
+import {
+  checkPassword,
+  normalizePassword,
+  PASSWORD_MAX,
+  PASSWORD_MIN,
+  type PasswordContext,
+  type PasswordProblem,
+  type PasswordVerdict,
+} from '../../src/core/password';
 
 /**
  * HTTP surface (blueprint §2.2, completed with auth + gallery):
  *
  *   GET   /health
  *   POST  /api/auth/register               { username, password } → { token, username }
+ *         (password policy: src/core/password.ts, shared with the browser)
  *   POST  /api/auth/login                  { username, password } → { token, username }
  *   POST  /api/auth/logout                 (bearer)
  *   GET   /api/me                          (bearer) → { id }
@@ -1068,6 +1078,52 @@ export async function buildApp(
     }
   };
 
+  /**
+   * English for every way a password can be refused.
+   *
+   * These strings are part of the wire format: `src/ui/i18n.ts` maps each one
+   * to its Arabic, so the sentence the user reads is chosen by their language
+   * rather than by this file. The `code` beside it exists so that anything
+   * needing to branch on the reason — a test, a future funnel event — can do it
+   * without matching on prose.
+   */
+  const PASSWORD_ERRORS: Record<PasswordProblem, string> = {
+    blank: 'a password is required',
+    short: `password must be at least ${PASSWORD_MIN} characters`,
+    long: `password must be at most ${PASSWORD_MAX} characters`,
+    digits: 'a password of only numbers is too easy to guess',
+    repeated: 'that password repeats one short pattern',
+    sequence: 'that password is a straight run of letters or keys',
+    context: 'a password must not contain your email or username',
+    common: 'that password is too easy to guess',
+  };
+
+  const passwordError = (verdict: PasswordVerdict): { error: string; code: string } => {
+    const problem = verdict.problem ?? 'common';
+    return { error: PASSWORD_ERRORS[problem], code: `password_${problem}` };
+  };
+
+  /**
+   * The policy, applied. Returns the NFC-normalised password when it passes and
+   * null when it has already been refused, so every caller reads:
+   *
+   *   const next = await gradePassword(reply, body.password, ctx);
+   *   if (next === null) return;
+   *
+   * Normalising here rather than at each call site is the point: the string that
+   * was judged is the string that gets hashed, which is the only way those two
+   * can never disagree.
+   */
+  const gradePassword = (reply: FastifyReply, supplied: unknown, ctx?: PasswordContext): string | null => {
+    const pw = normalizePassword(typeof supplied === 'string' ? supplied : '');
+    const verdict = checkPassword(pw, ctx);
+    if (!verdict.ok) {
+      void reply.code(400).send(passwordError(verdict));
+      return null;
+    }
+    return pw;
+  };
+
   app.post('/api/auth/register', authLimit, async (req, reply) => {
     const { username, password, email, acceptedVersion } = (req.body ?? {}) as {
       username?: string;
@@ -1081,13 +1137,18 @@ export async function buildApp(
     if (typeof username === 'string' && adminFolded.has(username.toLowerCase()) && !adminSet.has(username)) {
       return reply.code(409).send({ error: 'username or email taken' });
     }
-    if (!username || !USERNAME.test(username) || !password || password.length < 8) {
-      return reply.code(400).send({ error: 'username 3-24 [a-zA-Z0-9_], password >= 8 chars' });
+    if (!username || !USERNAME.test(username)) {
+      return reply.code(400).send({ error: 'username 3-24 [a-zA-Z0-9_]' });
     }
     const mail = typeof email === 'string' ? email.trim() : '';
     if (!mail || mail.length > MAX_EMAIL || !EMAIL.test(mail)) {
       return reply.code(400).send({ error: 'a valid email is required' });
     }
+    // The password is judged last of the three because it is the only one whose
+    // verdict depends on the other two: `osamah@gmail.com` is a fine email and a
+    // terrible password for the person who owns it.
+    const secret = gradePassword(reply, password, { email: mail, username });
+    if (secret === null) return;
     // Clear message for duplicates; the unique index is the real race guard.
     // One generic 409 for BOTH cases. A distinct "email already in use" turned
     // registration into an oracle: pick a username you know exists, vary the
@@ -1098,7 +1159,7 @@ export async function buildApp(
       return reply.code(409).send({ error: 'username or email taken' });
     }
     const version = typeof acceptedVersion === 'string' ? acceptedVersion.slice(0, 32) : null;
-    const user = await auth.createUser(username, await hashPassword(password), { email: mail, acceptedVersion: version });
+    const user = await auth.createUser(username, await hashPassword(secret), { email: mail, acceptedVersion: version });
     if (!user) return reply.code(409).send({ error: 'username or email taken' });
     const { token, tokenHash } = issueToken();
     await auth.createToken(user.id, tokenHash, new Date(Date.now() + TOKEN_TTL_MS));
@@ -1251,16 +1312,18 @@ export async function buildApp(
     const userId = await requireUser(req, reply);
     if (!userId) return;
     const { currentPassword, newPassword } = (req.body ?? {}) as { currentPassword?: string; newPassword?: string };
-    if (!newPassword || newPassword.length < 8) {
-      return reply.code(400).send({ error: 'new password must be at least 8 characters' });
-    }
     const user = await auth.getUserById(userId).catch(() => null);
+    // Ownership first, then the policy. The old order graded the new password
+    // before checking that the caller could prove the account was theirs, which
+    // meant anyone holding a stale token could probe the blocklist for free.
     const current = await verifyPassword(currentPassword ?? '', user?.passwordHash ?? await dummyHash());
     if (!user || !currentPassword || !current.ok) {
       req.socNote = { kind: 'password_change_failed', subject: user?.username };
       return reply.code(401).send({ error: 'current password is incorrect' });
     }
-    await auth.setPasswordHash(userId, await hashPassword(newPassword));
+    const next = gradePassword(reply, newPassword, { email: user.email ?? undefined, username: user.username });
+    if (next === null) return;
+    await auth.setPasswordHash(userId, await hashPassword(next));
     // Changing a password is what someone does when they think a session is
     // compromised. It has to end the other sessions, or it is theatre: tokens
     // live 30 days, so a stolen one otherwise outlived the "fix" by a month.
@@ -1300,12 +1363,19 @@ export async function buildApp(
   // Reset password using the emailed token. Single-use; invalidates all sessions.
   app.post('/api/auth/reset', authLimit, async (req, reply) => {
     const { token, newPassword } = (req.body ?? {}) as { token?: string; newPassword?: string };
-    if (!newPassword || newPassword.length < 8) {
-      return reply.code(400).send({ error: 'new password must be at least 8 characters' });
-    }
+    // Graded before the token is spent. `consumeEmailToken` is single-use, so
+    // grading afterwards would burn someone's reset link on a typo and send them
+    // back to the forgot-password form to ask for another one.
+    //
+    // That ordering costs the one thing the other two paths have: there is no
+    // account in hand yet, so the email-and-username check cannot run here. A
+    // reset is the rarer path and the link is proof of the mailbox, so the
+    // trade is worth it.
+    const next = gradePassword(reply, newPassword);
+    if (next === null) return;
     const userId = token ? await auth.consumeEmailToken(hashToken(token), 'reset_password') : null;
     if (!userId) return reply.code(400).send({ error: 'invalid or expired reset link' });
-    await auth.setPasswordHash(userId, await hashPassword(newPassword));
+    await auth.setPasswordHash(userId, await hashPassword(next));
     await auth.deleteUserTokens(userId);
     return reply.code(200).send({ ok: true });
   });
@@ -1324,7 +1394,22 @@ export async function buildApp(
     // short-circuited in about 0.3 ms against 35 for a real one, which is enough
     // to enumerate who has an account here. Verifying against a dummy spends the
     // same time on an address that has never registered.
-    const check = await verifyPassword(password ?? '', user?.passwordHash ?? await dummyHash());
+    //
+    // The password is normalised to NFC first, because that is the form
+    // registration now stores. For ASCII the two strings are identical, so no
+    // existing account notices; for Arabic it is the difference between the same
+    // password typed on two keyboards matching and not. The raw form is tried
+    // afterwards so an account created before this change, with a password that
+    // was never NFC, still opens — a second scrypt that only ever runs for a
+    // password that is not already NFC and did not match, which is nobody's
+    // normal sign-in and no new signal about whether the account exists.
+    const supplied = typeof password === 'string' ? password : '';
+    let matched = normalizePassword(supplied);
+    let check = await verifyPassword(matched, user?.passwordHash ?? await dummyHash());
+    if (!check.ok && matched !== supplied) {
+      matched = supplied;
+      check = await verifyPassword(matched, user?.passwordHash ?? await dummyHash());
+    }
     // The account a sign-in was aimed at, for the Security tab: its public
     // @name when it exists, nothing when it does not (what was typed stays out).
     req.socNote = { subject: user?.username };
@@ -1335,7 +1420,7 @@ export async function buildApp(
     // the password exists in the clear, so it is the only moment it can be
     // upgraded. Best-effort — a failed rehash must not fail the sign-in.
     if (check.needsRehash) {
-      await auth.setPasswordHash(user.id, await hashPassword(password)).catch(() => {});
+      await auth.setPasswordHash(user.id, await hashPassword(matched)).catch(() => {});
     }
     const { token, tokenHash } = issueToken();
     await auth.createToken(user.id, tokenHash, new Date(Date.now() + TOKEN_TTL_MS));

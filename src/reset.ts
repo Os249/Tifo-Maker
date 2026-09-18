@@ -4,7 +4,9 @@
  * On success the user's other sessions are invalidated server-side.
  */
 import { resetPassword } from './net/api';
-import { initLang, applyDom, t } from './ui/i18n';
+import { PASSWORD_MIN } from './core/password';
+import { enhancePasswordField } from './ui/passwordField';
+import { initLang, applyDom, t, tv } from './ui/i18n';
 
 initLang();
 applyDom(document);
@@ -20,6 +22,11 @@ const err = document.getElementById('err') as HTMLElement;
 const submit = document.getElementById('submit') as HTMLButtonElement;
 const done = document.getElementById('done') as HTMLElement;
 
+// The placeholder carries the minimum, so it is filled from the constant rather
+// than written out in two languages that would then have to be kept in step.
+pw.placeholder = tv('pw.ph', { min: PASSWORD_MIN });
+const passwordField = enhancePasswordField({ input: pw, confirm: pw2, suggest: true });
+
 function showErr(msg: string): void {
   err.textContent = msg;
   err.hidden = false;
@@ -33,12 +40,10 @@ if (!token) {
 form.addEventListener('submit', async (e) => {
   e.preventDefault();
   err.hidden = true;
-  if (pw.value.length < 8) {
-    showErr(t('rs.tooShort'));
-    return;
-  }
-  if (pw.value !== pw2.value) {
-    showErr(t('rs.mismatch'));
+  const complaint = passwordField.validate();
+  if (complaint) {
+    showErr(complaint.message);
+    complaint.field.focus();
     return;
   }
   submit.disabled = true;

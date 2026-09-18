@@ -426,6 +426,421 @@ console.log('\n— the palette works by touch —');
   await ctx.close();
 }
 
+// ---------------------------------------------------------------------------
+// Match Day on a phone.
+//
+// The simulator is the payoff — the screen where a painted seat map becomes a
+// tifo in a full stadium — and on a phone it could not be reached at all.
+// `#match-day` lives inside `#cam-bar`, which is a `.tool-bar`, and
+// `body.m-shell .tool-bar { display:none }`: measured, that button was 0x0.
+// The only way in was somebody else's `?sim=1` link.
+//
+// And the way out was worse. The overlay's own mobile layout stopped at 640px,
+// so at 844x390 (a phone turned sideways) the top bar overflowed by 17px and
+// put Close off the right edge, and at 768x1024 it overflowed by 93px and took
+// Help with it. No keyboard means no Escape: the simulator was a room with no
+// door on exactly the devices this shell exists for.
+// ---------------------------------------------------------------------------
+const simAudit = () => {
+  const ov = document.querySelector('.mds-overlay');
+  if (!ov) return { missing: true, off: ['no overlay'], small: [] };
+  const off = [], small = [];
+  for (const el of ov.querySelectorAll('button,select,input')) {
+    const b = el.getBoundingClientRect();
+    if (b.width < 1 || b.height < 1) continue;
+    const st = getComputedStyle(el);
+    if (st.visibility === 'hidden' || st.display === 'none') continue;
+    if (el.closest('[hidden]')) continue;
+    let sc = el.parentElement, scrolls = false;
+    while (sc && sc !== document.body) {
+      const s = getComputedStyle(sc);
+      const sx = (s.overflowX === 'auto' || s.overflowX === 'scroll') && sc.scrollWidth > sc.clientWidth;
+      const sy = (s.overflowY === 'auto' || s.overflowY === 'scroll') && sc.scrollHeight > sc.clientHeight;
+      if (sx || sy) { scrolls = true; break; }
+      sc = sc.parentElement;
+    }
+    if (!scrolls && (b.right > innerWidth + 1 || b.left < -1 || b.bottom > innerHeight + 1 || b.top < -1)) {
+      off.push(`${el.className} @${Math.round(b.x)},${Math.round(b.y)} ${Math.round(b.width)}x${Math.round(b.height)}`);
+    }
+    if (b.height < 24 || b.width < 24) small.push(`${el.className} ${Math.round(b.width)}x${Math.round(b.height)}`);
+  }
+  const bar = ov.querySelector('.mds-bar');
+  // The way out, specifically: whatever else is on screen, Close has to be on it.
+  const closeBtn = [...bar.querySelectorAll('.mds-btn')].pop();
+  const cb = closeBtn.getBoundingClientRect();
+  return {
+    off, small,
+    barOverflow: bar.scrollWidth - bar.clientWidth,
+    closeOnScreen: cb.right <= innerWidth + 1 && cb.left >= -1 && cb.bottom <= innerHeight + 1 && cb.top >= -1,
+    closeBox: `${Math.round(cb.width)}x${Math.round(cb.height)} @${Math.round(cb.x)}`,
+    canvases: ov.querySelectorAll('canvas').length,
+  };
+};
+/**
+ * Land the bottom sheet before measuring it.
+ *
+ * Headless swiftshader starves the document animation timeline — measured, it
+ * runs about 3s behind `performance.now()` — so a 0.22s sheet transition still
+ * reads as `currentTime: 0, playState: running` a second and a half after the
+ * tap, and the sheet measures where it started rather than where it lands.
+ * Finishing the animations is the deterministic answer; on a real phone this
+ * is a non-event.
+ */
+const settleSheet = async (p) => {
+  await p.evaluate(() => {
+    const ov = document.querySelector('.mds-overlay');
+    if (!ov) return;
+    for (const a of ov.getAnimations({ subtree: true })) { try { a.finish(); } catch { /* infinite */ } }
+  });
+  await p.waitForTimeout(250);
+};
+const dismissIntro = async (p) => {
+  await p.evaluate(() => {
+    const h = document.querySelector('.mds-help');
+    if (h && h.classList.contains('show')) h.querySelector('.mds-help-actions .mds-btn').click();
+  });
+  await p.waitForTimeout(400);
+};
+
+console.log('\n— Match Day: reaching it at all —');
+{
+  const [ctx, p, errs] = await editor();
+  // The 690KB of Three.js behind this must not be in the first load: it is the
+  // single biggest chunk in the app and most visits never open the simulator.
+  const asked = [];
+  p.on('request', (r) => { if (/\/assets\/(overlay|preview3d)-/.test(r.url())) asked.push(r.url().split('/').pop()); });
+
+  check('Match Day is not downloaded on arrival', asked.length === 0, asked.join(','));
+  check('no Match Day pill in the Design view', await p.evaluate(() => document.querySelector('.m-md').hidden));
+
+  await p.tap('.m-view-b:nth-child(2)'); // Stadium
+  await p.waitForTimeout(4000);
+  const pill = await p.evaluate(() => {
+    const w = document.querySelector('.m-md'), b = document.querySelector('.m-md-b');
+    const r = b.getBoundingClientRect();
+    return { hidden: w.hidden, w: Math.round(r.width), h: Math.round(r.height), label: b.textContent.trim(),
+      onScreen: r.right <= innerWidth + 1 && r.bottom <= innerHeight + 1 && r.top >= 0 };
+  });
+  check('Stadium view offers Match Day', !pill.hidden && pill.label.length > 0, JSON.stringify(pill));
+  check('the pill is a real target, on screen', pill.h >= 44 && pill.onScreen, `${pill.w}x${pill.h}`);
+  check('nothing off-screen with the pill up', (await p.evaluate(offscreen)).length === 0,
+    JSON.stringify(await p.evaluate(offscreen)).slice(0, 140));
+
+  await p.tap('.m-view-b:nth-child(1)'); // back to Design
+  await p.waitForTimeout(1200);
+  check('the pill goes away with the Stadium view', await p.evaluate(() => document.querySelector('.m-md').hidden));
+
+  // ...and the labelled way in, for anyone who never touches the view pill.
+  await p.tap('.m-tab[data-tab="more"]');
+  await p.waitForTimeout(700);
+  const inMore = await p.evaluate(() => {
+    const b = document.querySelector('.m-sheet-body > [data-md-open]');
+    if (!b) return null;
+    const r = b.getBoundingClientRect();
+    return { first: document.querySelector('.m-sheet-body').firstElementChild === b,
+      w: Math.round(r.width), h: Math.round(r.height), text: b.textContent.trim() };
+  });
+  check('More leads with Match Day, full width', !!inMore && inMore.first && inMore.w > 200 && inMore.h >= 44, JSON.stringify(inMore));
+
+  // A tap with no acknowledgement is how "it hangs" reports get written.
+  await p.route('**/assets/overlay-*.js', async (r) => { await new Promise((s) => setTimeout(s, 2500)); await r.continue(); });
+  await p.tap('.m-sheet [data-md-open]');
+  await p.waitForTimeout(800);
+  const busy = await p.evaluate(() => {
+    const b = document.querySelector('.m-md-b');
+    return { label: b.querySelector('span').textContent.trim(), disabled: b.disabled };
+  });
+  check('it says something while the chunk is in flight', busy.disabled && busy.label !== 'Match Day', JSON.stringify(busy));
+
+  await p.waitForSelector('.mds-overlay canvas', { timeout: 120000 });
+  await p.waitForTimeout(5000);
+  check('the simulator opens', await p.evaluate(() => !!document.querySelector('.mds-overlay canvas')));
+  check('the sheet does not stay open underneath', await p.evaluate(() => !document.querySelector('.m-sheet.open')));
+  check('the pill goes back to normal once it is up', await p.evaluate(() => {
+    const b = document.querySelector('.m-md-b');
+    return !b.disabled && b.querySelector('span').textContent.trim() === 'Match Day';
+  }));
+  check('it did have to download the simulator', asked.length > 0, asked.join(','));
+
+  // Back is the phone's Escape. Before this it left /app and took the design.
+  await dismissIntro(p);
+  await p.goBack();
+  await p.waitForTimeout(2000);
+  const afterBack = await p.evaluate(() => ({
+    gone: !document.querySelector('.mds-overlay'),
+    editorAlive: !!document.querySelector('#canvas-host canvas'),
+    shell: document.body.classList.contains('m-shell'),
+  }));
+  check('Back closes the simulator, not the editor', afterBack.gone && afterBack.editorAlive && afterBack.shell, JSON.stringify(afterBack));
+  check('no page errors reaching Match Day', errs.length === 0, errs.join(' | ').slice(0, 160));
+  await ctx.close();
+}
+
+console.log('\n— Match Day: the pill fits the short screens too —');
+{
+  // The smallest phone we serve and a phone on its side: the pill sits under
+  // the view pill, and both live on a stage that is only ~330px tall in
+  // landscape once the header and the ribbon have taken their share.
+  for (const [w, h, name] of [[320, 568, 'iPhone SE'], [844, 390, 'landscape iPhone']]) {
+    const [ctx, p, errs] = await editor({ w, h });
+    await p.tap('.m-view-b:nth-child(2)');
+    await p.waitForTimeout(4500);
+    const r = await p.evaluate(() => {
+      const b = document.querySelector('.m-md-b').getBoundingClientRect();
+      const v = document.querySelector('.m-view').getBoundingClientRect();
+      return { box: `${Math.round(b.width)}x${Math.round(b.height)} @${Math.round(b.x)},${Math.round(b.y)}`,
+        onScreen: b.top >= 0 && b.left >= -1 && b.right <= innerWidth + 1 && b.bottom <= innerHeight + 1,
+        clearOfViewPill: b.top >= v.bottom - 1, tall: b.height >= 44 };
+    });
+    check(`${name} ${w}x${h}: the pill is on screen`, r.onScreen, r.box);
+    check(`${name} ${w}x${h}: it does not sit on the view switcher`, r.clearOfViewPill, r.box);
+    check(`${name} ${w}x${h}: still a 44px target`, r.tall, r.box);
+    check(`${name} ${w}x${h}: nothing else pushed off`, (await p.evaluate(offscreen)).length === 0,
+      JSON.stringify(await p.evaluate(offscreen)).slice(0, 140));
+    check(`${name} ${w}x${h}: no page errors`, errs.length === 0, errs.join(' | ').slice(0, 120));
+    await ctx.close();
+  }
+}
+
+console.log('\n— Match Day: the way out is on every screen —');
+{
+  // 844x390 and 768x1024 are the two that were broken: both sat in the
+  // 641-899 band where the overlay still laid itself out like a desktop.
+  const SIZES = [[360, 680, 'Pixel'], [390, 844, 'iPhone 14'], [844, 390, 'landscape iPhone'], [768, 1024, 'iPad portrait']];
+  for (const [w, h, name] of SIZES) {
+    const ctx = await browser.newContext({
+      viewport: { width: w, height: h }, deviceScaleFactor: 2, isMobile: true, hasTouch: true,
+      storageState: { cookies: [], origins: [{ origin: B, localStorage: LS('en') }] },
+    });
+    const p = await ctx.newPage();
+    const errs = [];
+    p.on('pageerror', (e) => errs.push(e.message.slice(0, 140)));
+    await p.goto(B + '/app?sim=1', { waitUntil: 'networkidle', timeout: 120000 });
+    await p.waitForSelector('.mds-overlay canvas', { timeout: 120000 });
+    await p.waitForTimeout(5000);
+    await dismissIntro(p);
+    const closed = await p.evaluate(simAudit);
+    // ...and again with the controls out, which is where a 286px side panel
+    // used to shoulder the bar over the edge.
+    await p.evaluate(() => document.querySelector('.mds-overlay .mds-bar .mds-icon').click());
+    await p.waitForTimeout(700);
+    await p.evaluate(() => { for (const s of document.querySelectorAll('.mds-shead')) if (!s.parentElement.classList.contains('open')) s.click(); });
+    await p.waitForTimeout(700);
+    await settleSheet(p);
+    const open = await p.evaluate(simAudit);
+    const sheet = await p.evaluate(() => {
+      const b = document.querySelector('.mds-panel').getBoundingClientRect();
+      return { onScreen: b.top < innerHeight - 40 && b.left >= -1 && b.right <= innerWidth + 1,
+        box: `${Math.round(b.width)}x${Math.round(b.height)} @${Math.round(b.x)},${Math.round(b.y)}`,
+        fullWidth: Math.round(b.width) === innerWidth };
+    });
+    const tag = `${name} ${w}x${h}`;
+    check(`${tag}: nothing unreachable`, closed.off.length === 0 && open.off.length === 0,
+      JSON.stringify([...closed.off, ...open.off]).slice(0, 140));
+    check(`${tag}: every control >=24px`, closed.small.length === 0 && open.small.length === 0,
+      JSON.stringify([...closed.small, ...open.small]).slice(0, 140));
+    check(`${tag}: the top bar does not overflow`, closed.barOverflow === 0 && open.barOverflow === 0,
+      `${closed.barOverflow} / ${open.barOverflow}`);
+    check(`${tag}: Close is on screen`, closed.closeOnScreen && open.closeOnScreen, `${closed.closeBox} / ${open.closeBox}`);
+    check(`${tag}: the controls land on screen`, sheet.onScreen && sheet.fullWidth, sheet.box);
+    check(`${tag}: one canvas, not two`, closed.canvases === 1, String(closed.canvases));
+    check(`${tag}: no page errors`, errs.length === 0, errs.join(' | ').slice(0, 120));
+    await ctx.close();
+  }
+}
+
+console.log('\n— Match Day: driving it with a finger —');
+{
+  const ctx = await browser.newContext({
+    viewport: { width: 360, height: 680 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true,
+    storageState: { cookies: [], origins: [{ origin: B, localStorage: LS('en') }] },
+  });
+  const p = await ctx.newPage();
+  const errs = [];
+  p.on('pageerror', (e) => errs.push(e.message.slice(0, 140)));
+  await p.goto(B + '/app?sim=1', { waitUntil: 'networkidle', timeout: 120000 });
+  await p.waitForSelector('.mds-overlay canvas', { timeout: 120000 });
+  await p.waitForTimeout(5000);
+
+  // The first card a phone user ever sees used to say "Right-drag to pan" and
+  // then list six keyboard shortcuts.
+  const help = await p.evaluate(() => {
+    const h = document.querySelector('.mds-help');
+    const c = h.querySelector('.mds-help-card');
+    const r = c.getBoundingClientRect();
+    return { shown: h.classList.contains('show'), text: c.innerText,
+      keys: c.querySelectorAll('.mds-key').length,
+      fits: r.width <= innerWidth && r.height <= innerHeight && r.top >= 0 };
+  });
+  check('the intro greets a phone', help.shown && help.fits, `${help.shown} fits=${help.fits}`);
+  check('it talks about fingers, not a mouse', /finger/i.test(help.text) && /pinch/i.test(help.text) && !/right-drag/i.test(help.text),
+    help.text.replace(/\n/g, ' · ').slice(0, 120));
+  check('it does not list keyboard shortcuts', help.keys === 0, `${help.keys} keycaps`);
+  await dismissIntro(p);
+
+  const frame = () => p.evaluate(() => {
+    const c = document.querySelector('.mds-overlay canvas');
+    const t = document.createElement('canvas'); t.width = 160; t.height = 160;
+    t.getContext('2d').drawImage(c, 0, 0, 160, 160);
+    return t.toDataURL().slice(2000, 2600);
+  });
+  const before = await frame();
+  const box = await (await p.$('.mds-overlay canvas')).boundingBox();
+  await p.mouse.move(box.x + 180, box.y + 300);
+  await p.mouse.down();
+  await p.mouse.move(box.x + 80, box.y + 300, { steps: 14 });
+  await p.mouse.up();
+  await p.waitForTimeout(1500);
+  check('one finger orbits the camera', (await frame()) !== before);
+
+  // A three-year-old Android is most of this audience. The floor of the
+  // quality menu used to be Medium, and the probe's own 'low' was overruled.
+  await p.evaluate(() => document.querySelector('.mds-overlay .mds-bar .mds-icon').click());
+  await p.waitForTimeout(600);
+  const tiers = await p.evaluate(() => [...document.querySelectorAll('.mds-panel-acts .mds-sel option')].map((o) => o.value));
+  check('the quality menu has a real floor', tiers.includes('low'), tiers.join(','));
+  await p.selectOption('.mds-panel-acts .mds-sel', 'low');
+  await p.waitForTimeout(8000);
+  const low = await p.evaluate(() => {
+    const cs = document.querySelectorAll('.mds-overlay canvas');
+    if (cs.length !== 1) return { canvases: cs.length, lit: 0 };
+    const c = cs[0];
+    const t = document.createElement('canvas'); t.width = c.width; t.height = c.height;
+    t.getContext('2d').drawImage(c, 0, 0);
+    const d = t.getContext('2d').getImageData(0, 0, t.width, t.height).data;
+    let lit = 0;
+    for (let i = 0; i < d.length; i += 4000) if (d[i] + d[i + 1] + d[i + 2] > 12) lit++;
+    return { canvases: cs.length, lit };
+  });
+  check('Low rebuilds into one live canvas', low.canvases === 1 && low.lit > 0, JSON.stringify(low));
+
+  // The door.
+  await p.evaluate(() => [...document.querySelectorAll('.mds-bar .mds-btn')].pop().click());
+  await p.waitForTimeout(1500);
+  check('Close returns to a live editor', await p.evaluate(() => !document.querySelector('.mds-overlay') && !!document.querySelector('#canvas-host canvas')));
+  check('no page errors driving it', errs.length === 0, errs.join(' | ').slice(0, 160));
+  await ctx.close();
+}
+
+console.log('\n— Match Day: when the phone says no —');
+{
+  // WebGL missing: the constructor throws, main.ts catches it, and before this
+  // the whole outcome was that nothing happened — unreportable, unfixable.
+  const [ctx, p, errs] = await editor();
+  await p.evaluate(() => {
+    const g = HTMLCanvasElement.prototype.getContext;
+    HTMLCanvasElement.prototype.getContext = function (t, ...a) {
+      if (typeof t === 'string' && /webgl/i.test(t)) return null;
+      return g.call(this, t, ...a);
+    };
+  });
+  await p.tap('.m-tab[data-tab="more"]');
+  await p.waitForTimeout(700);
+  await p.tap('.m-sheet [data-md-open]');
+  await p.waitForTimeout(8000);
+  const card = await p.evaluate(() => {
+    const f = document.querySelector('.mds-fail');
+    if (!f) return { shown: false };
+    const acts = [...f.querySelectorAll('.mds-btn')].filter((b) => !b.hidden);
+    const r = acts[acts.length - 1].getBoundingClientRect();
+    return { shown: f.classList.contains('show'), title: f.querySelector('h2').textContent.trim(),
+      body: f.querySelector('p').textContent.trim().length, acts: acts.length,
+      exit: `${Math.round(r.width)}x${Math.round(r.height)}`, exitOnScreen: r.bottom <= innerHeight + 1 && r.right <= innerWidth + 1 };
+  });
+  check('no WebGL says so instead of doing nothing', card.shown && card.title.length > 0 && card.body > 0, JSON.stringify(card));
+  check('no WebGL does not offer a pointless retry', card.acts === 1, `${card.acts} buttons`);
+  check('and the card has a reachable way out', card.exitOnScreen, card.exit);
+  await p.evaluate(() => [...document.querySelectorAll('.mds-fail-acts .mds-btn')].filter((b) => !b.hidden).pop().click());
+  await p.waitForTimeout(1500);
+  check('closing the card leaves the editor intact', await p.evaluate(() => !document.querySelector('.mds-overlay') && !!document.querySelector('#canvas-host canvas')));
+  check('no page errors on the WebGL failure path', errs.length === 0, errs.join(' | ').slice(0, 160));
+  await ctx.close();
+}
+{
+  // A phone under memory pressure takes the context back. Unhandled, the bowl
+  // goes black for good while the loop keeps drawing to a dead context.
+  const ctx = await browser.newContext({
+    viewport: { width: 360, height: 680 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true,
+    storageState: { cookies: [], origins: [{ origin: B, localStorage: LS('en') }] },
+  });
+  const p = await ctx.newPage();
+  const errs = [];
+  p.on('pageerror', (e) => errs.push(e.message.slice(0, 140)));
+  await p.goto(B + '/app?sim=1', { waitUntil: 'networkidle', timeout: 120000 });
+  await p.waitForSelector('.mds-overlay canvas', { timeout: 120000 });
+  await p.waitForTimeout(5000);
+  await dismissIntro(p);
+  await p.evaluate(() => {
+    const c = document.querySelector('.mds-overlay canvas');
+    (c.getContext('webgl2') || c.getContext('webgl')).getExtension('WEBGL_lose_context').loseContext();
+  });
+  await p.waitForTimeout(2000);
+  const lost = await p.evaluate(() => {
+    const f = document.querySelector('.mds-fail');
+    return { shown: f.classList.contains('show'), acts: [...f.querySelectorAll('.mds-btn')].filter((b) => !b.hidden).length };
+  });
+  check('a lost context is explained', lost.shown, JSON.stringify(lost));
+  check('and offers a rebuild as well as a way out', lost.acts === 2, `${lost.acts} buttons`);
+  await p.evaluate(() => [...document.querySelectorAll('.mds-fail-acts .mds-btn')].filter((b) => !b.hidden)[0].click());
+  await p.waitForTimeout(9000);
+  const rebuilt = await p.evaluate(() => ({
+    card: document.querySelector('.mds-fail').classList.contains('show'),
+    canvases: document.querySelectorAll('.mds-overlay canvas').length,
+  }));
+  check('Rebuild brings the stadium back', !rebuilt.card && rebuilt.canvases === 1, JSON.stringify(rebuilt));
+  check('and does not leave the dead canvas behind', rebuilt.canvases === 1, `${rebuilt.canvases} canvases`);
+  check('no page errors on the context-loss path', errs.length === 0, errs.join(' | ').slice(0, 160));
+  await ctx.close();
+}
+
+console.log('\n— Match Day: Arabic —');
+{
+  const [ctx, p, errs] = await editor({ lang: 'ar' });
+  const AR = /[؀-ۿ]/;
+  await p.tap('.m-tab[data-tab="more"]');
+  await p.waitForTimeout(700);
+  const label = await p.evaluate(() => document.querySelector('.m-sheet-body > [data-md-open]')?.textContent.trim() || '');
+  check('the Match Day button is Arabic', AR.test(label), label);
+  await p.tap('.m-sheet [data-md-open]');
+  await p.waitForSelector('.mds-overlay canvas', { timeout: 120000 });
+  await p.waitForTimeout(5000);
+  await dismissIntro(p);
+  await p.evaluate(() => document.querySelector('.mds-overlay .mds-bar .mds-icon').click());
+  await p.waitForTimeout(700);
+  await p.evaluate(() => { for (const s of document.querySelectorAll('.mds-shead')) if (!s.parentElement.classList.contains('open')) s.click(); });
+  await p.waitForTimeout(700);
+  await settleSheet(p);
+  const r = await p.evaluate(() => {
+    const ov = document.querySelector('.mds-overlay');
+    const panel = ov.querySelector('.mds-panel');
+    const b = panel.getBoundingClientRect();
+    // Every control the sheet holds, and whether a thumb could reach it.
+    const unreachable = [];
+    for (const el of panel.querySelectorAll('button,select,input')) {
+      const x = el.getBoundingClientRect();
+      if (x.width < 1 || x.height < 1 || getComputedStyle(el).display === 'none') continue;
+      if (x.right > innerWidth + 1 || x.left < -1) unreachable.push(`${el.className} @${Math.round(x.x)}`);
+    }
+    return { dir: ov.dir, help: ov.querySelector('.mds-help-card').innerText,
+      tiers: [...ov.querySelectorAll('.mds-panel-acts .mds-sel option')].map((o) => o.textContent),
+      box: `${Math.round(b.width)}x${Math.round(b.height)} @${Math.round(b.x)},${Math.round(b.y)}`,
+      sheetFullWidth: Math.round(b.width) === innerWidth,
+      onScreen: b.top < innerHeight - 40 && b.left >= -1 && b.right <= innerWidth + 1,
+      unreachable };
+  });
+  check('the simulator mirrors in RTL', r.dir === 'rtl', r.dir);
+  check('the phone help is Arabic', AR.test(r.help) && /إصبع/.test(r.help), r.help.replace(/\n/g, ' · ').slice(0, 100));
+  check('every quality tier is translated', r.tiers.length === 4 && r.tiers.every((x) => AR.test(x)), r.tiers.join(' · '));
+  // In RTL the two `.mds-overlay[dir=rtl] .mds-panel` rules outranked the
+  // phone layout, so the panel kept its 286px side rail AND its sideways
+  // collapse: measured at 360px it sat at x=310, with fourteen controls —
+  // quality, cameras, crowd, atmosphere, recording — off the screen entirely.
+  check('the panel is a full-width sheet, not a side rail', r.sheetFullWidth && r.onScreen, r.box);
+  check('every control in it is reachable in Arabic', r.unreachable.length === 0, JSON.stringify(r.unreachable).slice(0, 140));
+  check('no page errors in Arabic', errs.length === 0, errs.join(' | ').slice(0, 160));
+  await ctx.close();
+}
+
 console.log('\n— every screen size, both orientations, both languages —');
 {
   const SIZES = [

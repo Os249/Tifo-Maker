@@ -300,9 +300,78 @@ export function mountMobileShell(): MobileShell | null {
     bodyEl.textContent = '';
     lend('ctx-ai');
   };
+  /**
+   * Open the Match Day Simulator.
+   *
+   * On desktop the trigger is `#match-day`, which lives inside `#cam-bar` — a
+   * `.tool-bar`, and `body.m-shell .tool-bar { display:none }`. So on a phone
+   * that button measured 0x0 and the simulator could only ever be reached by
+   * opening somebody else's `?sim=1` link: the one screen that makes a tifo
+   * look like a tifo was unreachable from the editor that drew it.
+   *
+   * The sheet closes first. The simulator mounts a fullscreen overlay of its
+   * own and pauses the editor preview behind it; leaving a bottom sheet open
+   * underneath means it is still there, mid-scroll, when the overlay closes.
+   */
+  const openMatchDay = (): void => {
+    if (openTab) closeSheet();
+    proxy('#match-day');
+  };
+
+  /**
+   * Every Match Day control on screen, so they can say the same thing at once.
+   *
+   * There are two — one in the More sheet, one on the canvas in Stadium view —
+   * and the sheet rebuilds its own on every open, so this is a Set that gets
+   * pruned rather than two fixed references.
+   */
+  const mdButtons = new Set<HTMLButtonElement>();
+  const matchDayBtn = (cls: string, icon = 'ti-building-stadium'): HTMLButtonElement => {
+    const b = el('button', cls) as HTMLButtonElement;
+    b.type = 'button';
+    b.dataset.mdOpen = '1';
+    b.innerHTML = `<i class="ti ${icon}" aria-hidden="true"></i> <span>${t('ed.matchDay')}</span>`;
+    b.title = t('ed.matchDayT');
+    b.addEventListener('click', openMatchDay);
+    for (const old of mdButtons) if (!old.isConnected) mdButtons.delete(old);
+    mdButtons.add(b);
+    return b;
+  };
+
+  /**
+   * Say something while 690KB of Three.js is in flight.
+   *
+   * A tap with no acknowledgement is how "it hangs" bug reports are written —
+   * it is the same failure mode as the import bar, and this audience is on
+   * mid-range Androids over mobile data.
+   */
+  let mdResetT = 0;
+  const setMdState = (key: string | null, disabled: boolean): void => {
+    window.clearTimeout(mdResetT);
+    for (const b of [...mdButtons]) {
+      if (!b.isConnected) { mdButtons.delete(b); continue; }
+      b.disabled = disabled;
+      b.classList.toggle('busy', disabled);
+      const label = b.querySelector('span');
+      if (label) label.textContent = t(key ?? 'ed.matchDay');
+    }
+  };
+  const onSimLoading = (): void => setMdState('mb.mdLoading', true);
+  const onSimOpen = (): void => setMdState(null, false);
+  const onSimFailed = (): void => {
+    setMdState('mb.mdFailed', false);
+    mdResetT = window.setTimeout(() => setMdState(null, false), 4000);
+  };
+  document.addEventListener('tifo:sim-loading', onSimLoading);
+  document.addEventListener('tifo:sim-open', onSimOpen);
+  document.addEventListener('tifo:sim-failed', onSimFailed);
+
   const buildMore = (): void => {
     title.textContent = t('mb.more');
     bodyEl.textContent = '';
+    // First and full width: of everything behind More, this is the one people
+    // came for, and a 74px tile in a grid of four does not say so.
+    bodyEl.appendChild(matchDayBtn('m-wide primary'));
     const grid = el('div', 'm-tools');
     for (const [icon, key, sel] of [
       ['ti-building-stadium', 'ed.rail.stadiumT', '#rail-stadium'],
@@ -373,10 +442,23 @@ export function mountMobileShell(): MobileShell | null {
   const mk2d = el('button', 'm-view-b on', `<i class="ti ti-layout-grid" aria-hidden="true"></i> ${t('ed.view.design')}`) as HTMLButtonElement;
   const mk3d = el('button', 'm-view-b', `<i class="ti ti-building-stadium" aria-hidden="true"></i> ${t('ed.view.stadium')}`) as HTMLButtonElement;
   mk2d.type = 'button'; mk3d.type = 'button';
-  mk2d.addEventListener('click', () => { proxy('#view-2d'); mk2d.classList.add('on'); mk3d.classList.remove('on'); });
-  mk3d.addEventListener('click', () => { proxy('#view-3d'); mk3d.classList.add('on'); mk2d.classList.remove('on'); });
+  // Match Day rides along with the Stadium view, exactly as it does on desktop:
+  // #cam-bar (which holds #match-day) is un-hidden the moment the 3D view is
+  // shown. Someone looking at their tifo on the bowl is one tap from seeing it
+  // at kickoff; someone painting seats is not offered a 690KB download.
+  const mdPill = el('div', 'm-md');
+  mdPill.hidden = true;
+  mdPill.appendChild(matchDayBtn('m-md-b'));
+  const setView = (is3d: boolean): void => {
+    mk3d.classList.toggle('on', is3d);
+    mk2d.classList.toggle('on', !is3d);
+    mdPill.hidden = !is3d;
+  };
+  mk2d.addEventListener('click', () => { proxy('#view-2d'); setView(false); });
+  mk3d.addEventListener('click', () => { proxy('#view-3d'); setView(true); });
   viewPill.append(mk2d, mk3d);
   stage.appendChild(viewPill);
+  stage.appendChild(mdPill);
 
   // Stand chips — the direct answer to "I want to design behind the goal and I
   // cannot get there". #section-nav does exactly this and was display:none.
@@ -492,8 +574,12 @@ export function mountMobileShell(): MobileShell | null {
       objObserver.disconnect();
       document.removeEventListener('tifo:import-armed', onImportArmed);
       document.removeEventListener('tifo:import-done', onImportDone);
+      document.removeEventListener('tifo:sim-loading', onSimLoading);
+      document.removeEventListener('tifo:sim-open', onSimOpen);
+      document.removeEventListener('tifo:sim-failed', onSimFailed);
+      window.clearTimeout(mdResetT);
       document.body.classList.remove('m-shell');
-      ribbon.remove(); sheet.remove(); scrim.remove(); viewPill.remove(); stands.remove(); histWrap.remove(); objBar.remove();
+      ribbon.remove(); sheet.remove(); scrim.remove(); viewPill.remove(); mdPill.remove(); stands.remove(); histWrap.remove(); objBar.remove();
     },
   };
 }

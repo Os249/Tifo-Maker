@@ -4,7 +4,9 @@
  * (only password resets force re-login).
  */
 import { changePassword } from '../net/api';
-import { t, getLang } from './i18n';
+import { PASSWORD_MIN } from '../core/password';
+import { enhancePasswordField } from './passwordField';
+import { t, tv, getLang } from './i18n';
 
 export function openChangePasswordModal(): void {
   const backdrop = document.createElement('div');
@@ -20,7 +22,11 @@ export function openChangePasswordModal(): void {
         </label>
         <label class="auth-field">
           <span>${t('cp.new')}</span>
-          <input type="password" name="next" autocomplete="new-password" placeholder="${t('auth.passwordPh')}" />
+          <input type="password" name="next" autocomplete="new-password" placeholder="${tv('auth.passwordPh', { min: PASSWORD_MIN })}" />
+        </label>
+        <label class="auth-field">
+          <span>${t('pw.confirm')}</span>
+          <input type="password" name="confirm2" autocomplete="new-password" />
         </label>
         <div class="auth-error" role="alert" hidden></div>
         <div class="auth-forgot-msg" role="status" hidden></div>
@@ -32,9 +38,15 @@ export function openChangePasswordModal(): void {
   const form = backdrop.querySelector('.auth-form') as HTMLFormElement;
   const cur = form.current as HTMLInputElement;
   const next = form.next as HTMLInputElement;
+  const again = form.confirm2 as HTMLInputElement;
   const err = backdrop.querySelector('.auth-error') as HTMLElement;
   const okMsg = backdrop.querySelector('.auth-forgot-msg') as HTMLElement;
   const submit = backdrop.querySelector('.auth-submit') as HTMLButtonElement;
+
+  // A typo here is the most expensive one in the app: a successful change ends
+  // every other session, so the wrong password is now the only password, on
+  // every device. Hence a confirm field as well as the reveal button.
+  const passwordField = enhancePasswordField({ input: next, confirm: again, suggest: true });
 
   const close = (): void => {
     backdrop.remove();
@@ -52,10 +64,11 @@ export function openChangePasswordModal(): void {
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     err.hidden = true;
-    if (next.value.length < 8) {
-      err.textContent = t('auth.errPassword');
+    const complaint = passwordField.validate();
+    if (complaint) {
+      err.textContent = complaint.message;
       err.hidden = false;
-      next.focus();
+      complaint.field.focus();
       return;
     }
     submit.disabled = true;

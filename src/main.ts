@@ -481,6 +481,12 @@ async function main(): Promise<void> {
   matchDayBtn?.addEventListener('click', async () => {
     if (simOpen) return;
     simOpen = true;
+    // The simulator is ~690KB of Three.js and scene code that deliberately is
+    // not in the first load. On a desktop that arrives before anyone looks up;
+    // on 4G it is several seconds of a button that appears to have done
+    // nothing. The phone shell listens for these and says "Loading…" on the
+    // control the user actually tapped — it owns those, this module does not.
+    document.dispatchEvent(new CustomEvent('tifo:sim-loading'));
     const resumePreview = !previewHost.hidden;
     preview?.stop();
     try {
@@ -491,9 +497,11 @@ async function main(): Promise<void> {
           if (resumePreview) preview?.start();
         },
       });
+      document.dispatchEvent(new CustomEvent('tifo:sim-open'));
     } catch {
       simOpen = false;
       if (resumePreview) preview?.start();
+      document.dispatchEvent(new CustomEvent('tifo:sim-failed'));
     }
   });
 

@@ -23,6 +23,7 @@ import {
   signOut,
 } from './net/api';
 import { applyDom, getLang, initLang, t, tErr, tv } from './ui/i18n';
+import { enhancePasswordField } from './ui/passwordField';
 import { POLICY_VERSION } from './ui/authModal';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string): T | null => document.getElementById(id) as T | null;
@@ -209,17 +210,38 @@ $('ac-name-form')?.addEventListener('submit', async (e) => {
 
 // ---- password --------------------------------------------------------------
 
+// The same field as the sign-up modal and /reset: strength bar, reveal button,
+// suggester, confirm. The fourth place a password gets chosen, and the last one
+// that still had its own private idea of what a good one looks like.
+const pwNew = $<HTMLInputElement>('ac-pw-new');
+const pwAgain = $<HTMLInputElement>('ac-pw-again');
+const pwField =
+  pwNew && pwAgain
+    ? enhancePasswordField({
+        input: pwNew,
+        confirm: pwAgain,
+        suggest: true,
+        context: () => ({ email: me?.email ?? undefined, username: me?.username }),
+      })
+    : null;
+
 $('ac-pw-form')?.addEventListener('submit', async (e) => {
   e.preventDefault();
   const cur = $<HTMLInputElement>('ac-pw-current');
   const next = $<HTMLInputElement>('ac-pw-new');
   const msg = $('ac-pw-msg');
-  if ((next?.value ?? '').length < 8) return say(msg, t('ac.pw.short'), 'bad');
+  const complaint = pwField?.validate();
+  if (complaint) {
+    complaint.field.focus();
+    return say(msg, complaint.message, 'bad');
+  }
   say(msg, t('ac.saving'), 'info');
   try {
     await changePassword(cur?.value ?? '', next?.value ?? '');
     if (cur) cur.value = '';
     if (next) next.value = '';
+    if (pwAgain) pwAgain.value = '';
+    pwField?.refresh();
     // The server ended every other session. Saying so is the whole point of
     // changing a password after losing a device.
     say(msg, t('ac.pw.done'), 'ok');

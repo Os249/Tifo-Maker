@@ -16,6 +16,8 @@ import { DEFAULT_TEMPLATE } from '../../src/core/template';
 import { MemoryAuthRepository, MemoryDesignRepository, MemoryLeadsRepository } from '../src/memoryRepo';
 import { MemorySocialRepository } from '../src/memorySocial';
 import { buildApp, type TemplateInfo } from '../src/routes';
+import { hashPassword, hashToken } from '../src/auth';
+import { checkPassword, suggestPassphrase, PASSWORD_MAX, PASSWORD_MIN } from '../../src/core/password';
 
 const map = generateSeatMap(DEFAULT_TEMPLATE);
 const templates: TemplateInfo[] = [{ id: DEFAULT_TEMPLATE.id, version: DEFAULT_TEMPLATE.version, name: DEFAULT_TEMPLATE.name, seatCount: map.count }];
@@ -24,7 +26,7 @@ const cellsGzB64 = gzipSync(new Uint8Array(map.count)).toString('base64');
 const bearer = (t: string) => ({ authorization: `Bearer ${t}` });
 
 async function reg(app: FastifyInstance, u: string): Promise<{ token: string; id: string }> {
-  const r = await app.inject({ method: 'POST', url: '/api/auth/register', payload: { username: u, password: 'password1234', email: `${u}@example.test`, acceptedVersion: 'test' } });
+  const r = await app.inject({ method: 'POST', url: '/api/auth/register', payload: { username: u, password: 'quartz-lantern-echo7', email: `${u}@example.test`, acceptedVersion: 'test' } });
   const token = (r.json() as { token: string }).token;
   const id = (await app.inject({ method: 'GET', url: '/api/me', headers: bearer(token) })).json().id as string;
   return { token, id };
@@ -134,7 +136,7 @@ async function makeDesign(app: FastifyInstance, token: string, isPublic = false)
   //    allow-list matched case-INSENSITIVELY, so "Admin" registered beside the
   //    real "admin" and inherited moderator in one unauthenticated request.
   await reg(app, 'admin');
-  const lookalike = await app.inject({ method: 'POST', url: '/api/auth/register', payload: { username: 'Admin', password: 'password1234', email: 'evil@example.test', acceptedVersion: 'test' } });
+  const lookalike = await app.inject({ method: 'POST', url: '/api/auth/register', payload: { username: 'Admin', password: 'quartz-lantern-echo7', email: 'evil@example.test', acceptedVersion: 'test' } });
   assert.equal(lookalike.statusCode, 409, 'a username that case-folds onto an admin name is refused');
   const plain = await reg(app, 'nobody');
   assert.equal(
@@ -191,8 +193,8 @@ async function makeDesign(app: FastifyInstance, token: string, isPublic = false)
 
   // 5. Registration was an email-enumeration oracle: a distinct "email already
   //    in use" told an anonymous caller which addresses had accounts.
-  const known = await app.inject({ method: 'POST', url: '/api/auth/register', payload: { username: 'titler', password: 'password1234', email: 'titler@example.test', acceptedVersion: 'test' } });
-  const unknown = await app.inject({ method: 'POST', url: '/api/auth/register', payload: { username: 'titler', password: 'password1234', email: 'nobody@example.test', acceptedVersion: 'test' } });
+  const known = await app.inject({ method: 'POST', url: '/api/auth/register', payload: { username: 'titler', password: 'quartz-lantern-echo7', email: 'titler@example.test', acceptedVersion: 'test' } });
+  const unknown = await app.inject({ method: 'POST', url: '/api/auth/register', payload: { username: 'titler', password: 'quartz-lantern-echo7', email: 'nobody@example.test', acceptedVersion: 'test' } });
   assert.equal(known.statusCode, 409);
   assert.equal(unknown.statusCode, 409);
   assert.equal(known.body, unknown.body, 'registration cannot be used to test whether an email exists');
@@ -206,7 +208,7 @@ async function makeDesign(app: FastifyInstance, token: string, isPublic = false)
   const mailApp = await buildApp(new MemoryDesignRepository((id) => mailAuth.usernameOf(id)), mailAuth, templates, {
     emailSender: { async send(msg: { to: string; subject: string; html?: string; text?: string }) { captured.push(`${msg.html ?? ''}${msg.text ?? ''}`); } },
   });
-  await mailApp.inject({ method: 'POST', url: '/api/auth/register', payload: { username: 'mailer', password: 'password1234', email: 'mailer@example.test', acceptedVersion: 'test' } });
+  await mailApp.inject({ method: 'POST', url: '/api/auth/register', payload: { username: 'mailer', password: 'quartz-lantern-echo7', email: 'mailer@example.test', acceptedVersion: 'test' } });
   captured.length = 0;
   await mailApp.inject({ method: 'POST', url: '/api/auth/forgot', payload: { email: 'mailer@example.test' }, headers: { host: 'evil.attacker.test' } });
   await mailApp.drainBackground(); // the reset email is sent after the reply (round three)
@@ -260,18 +262,18 @@ async function makeDesign(app: FastifyInstance, token: string, isPublic = false)
   );
 
   // ---- MEDIUM: scrypt cost, and upgrading in place ----
-  const fresh = await hashPassword('password1234');
+  const fresh = await hashPassword('quartz-lantern-echo7');
   assert.match(fresh, /^s2:\d+:\d+:\d+:[0-9a-f]{32}:[0-9a-f]{64}$/, 'a new hash records the parameters it was made with');
   assert.ok(SCRYPT_PARAMS.N >= 65536, 'scrypt N is at or above the raised floor');
-  assert.equal((await verifyPassword('password1234', fresh)).ok, true);
+  assert.equal((await verifyPassword('quartz-lantern-echo7', fresh)).ok, true);
   assert.equal((await verifyPassword('wrong', fresh)).ok, false);
-  assert.equal((await verifyPassword('password1234', fresh)).needsRehash, false, 'a current hash does not need rehashing');
+  assert.equal((await verifyPassword('quartz-lantern-echo7', fresh)).needsRehash, false, 'a current hash does not need rehashing');
 
   // A hash in the old unprefixed form still verifies — nobody is locked out —
   // and is flagged for upgrade.
   const legacySalt = Buffer.from('00112233445566778899aabbccddeeff', 'hex');
-  const legacy = `${legacySalt.toString('hex')}:${scryptSync('password1234', legacySalt, 32).toString('hex')}`;
-  const legacyCheck = await verifyPassword('password1234', legacy);
+  const legacy = `${legacySalt.toString('hex')}:${scryptSync('quartz-lantern-echo7', legacySalt, 32).toString('hex')}`;
+  const legacyCheck = await verifyPassword('quartz-lantern-echo7', legacy);
   assert.equal(legacyCheck.ok, true, 'an old hash still verifies');
   assert.equal(legacyCheck.needsRehash, true, 'and is marked for upgrade');
   assert.equal((await verifyPassword('wrong', legacy)).needsRehash, false, 'a wrong password never triggers a rehash');
@@ -281,11 +283,11 @@ async function makeDesign(app: FastifyInstance, token: string, isPublic = false)
   const bob = await reg(app, 'rehash_bob');
   await auth.setPasswordHash(bob.id, legacy);
   assert.equal((await auth.getUserById(bob.id))!.passwordHash, legacy);
-  const relog = await app.inject({ method: 'POST', url: '/api/auth/login', payload: { username: 'rehash_bob', password: 'password1234' } });
+  const relog = await app.inject({ method: 'POST', url: '/api/auth/login', payload: { username: 'rehash_bob', password: 'quartz-lantern-echo7' } });
   assert.equal(relog.statusCode, 200, 'the old password still signs in');
   const after = (await auth.getUserById(bob.id))!.passwordHash;
   assert.ok(after.startsWith('s2:'), 'and the stored hash was upgraded in place');
-  assert.equal((await verifyPassword('password1234', after)).ok, true, 'the upgraded hash still matches the same password');
+  assert.equal((await verifyPassword('quartz-lantern-echo7', after)).ok, true, 'the upgraded hash still matches the same password');
 
   // A stored row must not be able to ask for an unbounded allocation.
   assert.equal((await verifyPassword('x', 's2:1073741824:8:1:aa:bb')).ok, false, 'an absurd N in the stored hash is refused, not honoured');
@@ -781,6 +783,131 @@ async function makeDesign(app: FastifyInstance, token: string, isPublic = false)
     const pages = readdirSync('.').filter((f) => f.endsWith('.html'));
     const inline = pages.filter((f) => /<script(?![^>]*\bsrc=)[^>]*>\s*\S/i.test(readFileSync(f, 'utf8')));
     assert.deepEqual(inline, [], 'no page relies on an inline script the policy refuses to run');
+  }
+
+
+  // ---- PASSWORD POLICY: src/core/password.ts, and the three routes that set one ----
+  //
+  // The rules are NIST SP 800-63B rev 4 and OWASP ASVS 5.0 as they actually
+  // read: a length floor, a blocklist, and NO composition rules. The tests that
+  // matter most here are the last three — that an account made before this
+  // policy still opens, that a refused password does not spend a reset link,
+  // and that a long password is refused rather than quietly cut short.
+  {
+    const verdict = (pw: string, ctx?: { email?: string; username?: string }) => {
+      const v = checkPassword(pw, ctx);
+      return v.ok ? null : v.problem;
+    };
+
+    // The rule, on its own.
+    assert.equal(verdict('short1'), 'short', 'under the minimum');
+    assert.equal(verdict('x'.repeat(PASSWORD_MAX + 1)), 'long', 'over the maximum');
+    assert.equal(verdict('   '.repeat(8)), 'blank', 'whitespace is not a password');
+    assert.equal(verdict('123456789012'), 'digits', 'a keypad run');
+    assert.equal(verdict('abcabcabcabc'), 'repeated', 'one unit typed four times');
+    assert.equal(verdict('abcdefghijkl'), 'sequence', 'straight down the alphabet');
+    // Folding: the blocklist has to catch the costume, not just the word.
+    for (const dressed of ['password1234', 'Password2026!', 'P@ssw0rd1234', 'passwordpassword']) {
+      assert.equal(verdict(dressed), 'common', `${dressed} is 'password' wearing a hat`);
+    }
+    // ASVS 6.2.11's context-specific words. On a tifo site, that is the clubs.
+    for (const local of ['liverpoolfc!!', 'L1verp00l2026', 'halamadrid1234', 'tifomaker2026']) {
+      assert.equal(verdict(local), 'common', `${local} is the first thing this audience types`);
+    }
+    // ...and the person's own identifiers (ASVS 6.2.11 again).
+    assert.equal(verdict('osamah.fan.2026!', { email: 'osamah.fan@example.test' }), 'context', 'their own email');
+    assert.equal(verdict('curvanorth-fan-77', { username: 'curvanorth' }), 'context', 'their own username');
+    // No composition rules: a phrase of lower-case words and spaces is fine,
+    // which is the whole point of dropping them.
+    for (const good of ['the curva sings at midnight', 'coffee-table-lamp', 'arsenal-is-my-life-99', 'x7#Qm2vL9pR4']) {
+      assert.equal(verdict(good), null, `${good} must be accepted`);
+    }
+    // What the "suggest" button hands people has to clear the bar it is
+    // suggested against — every time, not usually.
+    for (let i = 0; i < 500; i++) {
+      const made = suggestPassphrase();
+      assert.equal(verdict(made), null, `suggested password refused: ${made}`);
+    }
+
+    const GOOD = 'thistle-anchor-92x';
+    const pwUser = 'pw_policy';
+    const mail = `${pwUser}@example.test`;
+    const register = (password: string, username = pwUser, email = mail) =>
+      app.inject({ method: 'POST', url: '/api/auth/register', payload: { username, password, email, acceptedVersion: 'test' } });
+
+    // Registration applies it, and says which rule was broken.
+    for (const [password, code] of [
+      ['elevenchars', 'password_short'],
+      ['password1234', 'password_common'],
+      [`${pwUser}-and-more`, 'password_context'],
+      ['y'.repeat(PASSWORD_MAX + 1), 'password_long'],
+    ] as const) {
+      const r = await register(password);
+      assert.equal(r.statusCode, 400, `register must refuse ${JSON.stringify(password.slice(0, 20))}`);
+      assert.equal((r.json() as { code: string }).code, code, 'and say why');
+    }
+    const born = await register(GOOD);
+    assert.equal(born.statusCode, 201, 'a good password registers');
+    const pwToken = (born.json() as { token: string }).token;
+
+    // Changing a password: ownership is proven FIRST, so a stale token cannot
+    // be used to probe the blocklist for free.
+    const wrongCurrent = await app.inject({
+      method: 'POST', url: '/api/account/password', headers: bearer(pwToken),
+      payload: { currentPassword: 'not-the-password-99', newPassword: 'password1234' },
+    });
+    assert.equal(wrongCurrent.statusCode, 401, 'a wrong current password answers 401, not a grading of the new one');
+    const weakNext = await app.inject({
+      method: 'POST', url: '/api/account/password', headers: bearer(pwToken),
+      payload: { currentPassword: GOOD, newPassword: 'password1234' },
+    });
+    assert.equal(weakNext.statusCode, 400, 'the policy applies to a change, not only to sign-up');
+    assert.equal((weakNext.json() as { code: string }).code, 'password_common');
+
+    // An account created BEFORE this policy must still be able to sign in.
+    // Nothing about raising the bar is worth locking out the people who
+    // signed up first.
+    const legacy = await auth.createUser('pw_legacy', await hashPassword('old8char'), { email: 'pw_legacy@example.test' });
+    assert.ok(legacy, 'legacy account created');
+    const legacyIn = await app.inject({ method: 'POST', url: '/api/auth/login', payload: { username: 'pw_legacy', password: 'old8char' } });
+    assert.equal(legacyIn.statusCode, 200, 'an eight-character password from before the policy still signs in');
+
+    // A refused new password must not spend the reset link. Someone who fat-
+    // fingers the form should not have to go back and ask for another email.
+    const resetSecret = 'reset-token-for-the-policy-test';
+    await auth.createEmailToken(legacy!.id, hashToken(resetSecret), 'reset_password', new Date(Date.now() + 3600_000));
+    const refused = await app.inject({ method: 'POST', url: '/api/auth/reset', payload: { token: resetSecret, newPassword: 'qwertyuiop12' } });
+    assert.equal(refused.statusCode, 400, 'a weak new password is refused');
+    const accepted = await app.inject({ method: 'POST', url: '/api/auth/reset', payload: { token: resetSecret, newPassword: 'pebble-saffron-40' } });
+    assert.equal(accepted.statusCode, 200, 'and the same link still works on the second try');
+
+    // ASVS 6.2.8: verified exactly as received. A password at the ceiling is
+    // stored and matched whole; one character more is refused, not trimmed.
+    // Deliberately not 'z9'.repeat(64): that is one unit typed sixty-four times,
+    // which the policy refuses on its own merits. Stepping through the alphabet
+    // by seven gives a string with no run, no repeat and no word in it.
+    const ALPHA = 'abcdefghijkmnopqrstuvwxyz23456789';
+    const long = Array.from({ length: PASSWORD_MAX }, (_, i) => ALPHA[(i * 7 + 3) % ALPHA.length]).join('');
+    assert.equal(long.length, PASSWORD_MAX);
+    assert.equal(verdict(long), null, 'the ceiling-length password is otherwise fine');
+    assert.equal((await register(long, 'pw_long', 'pw_long@example.test')).statusCode, 201, 'the ceiling itself is allowed');
+    const longIn = await app.inject({ method: 'POST', url: '/api/auth/login', payload: { username: 'pw_long', password: long } });
+    assert.equal(longIn.statusCode, 200, 'and signs in whole');
+    const truncated = await app.inject({ method: 'POST', url: '/api/auth/login', payload: { username: 'pw_long', password: long.slice(0, 72) } });
+    assert.equal(truncated.statusCode, 401, 'a prefix of it is not the password');
+
+    // NIST's NFC normalisation, which is the difference between the same Arabic
+    // or accented password typed on two keyboards matching and not.
+    const composed = 'café-lantern-river-7';
+    const decomposed = 'café-lantern-river-7';
+    assert.notEqual(composed, decomposed, 'the two spellings really are different strings');
+    assert.equal((await register(decomposed, 'pw_nfc', 'pw_nfc@example.test')).statusCode, 201, 'a decomposed password registers');
+    for (const [form, name] of [[composed, 'composed'], [decomposed, 'decomposed']] as const) {
+      const r = await app.inject({ method: 'POST', url: '/api/auth/login', payload: { username: 'pw_nfc', password: form } });
+      assert.equal(r.statusCode, 200, `the ${name} spelling signs in`);
+    }
+    assert.ok(PASSWORD_MIN >= 12, 'the floor has not been quietly lowered');
+    console.log('password policy: all assertions passed (rules, folding, context, three routes, legacy sign-in, reset link not spent, no truncation, NFC)');
   }
 
   await app.close();

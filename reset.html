@@ -21,7 +21,10 @@
     .brand b { color:var(--blue); }
     h1 { font-size:21px; margin:0 0 16px; }
     label { display:block; font-size:13px; color:var(--muted); margin:0 0 12px; }
-    input { display:block; width:100%; margin-top:5px; padding:10px 12px; font:inherit; font-size:14px;
+    /* The spacing sits under the label text rather than above the input, so the
+       reveal button injected into the field centres on the input itself. */
+    label > span { display:block; margin-bottom:5px; }
+    input { display:block; width:100%; padding:10px 12px; font:inherit; font-size:14px;
       border:1px solid var(--line); border-radius:10px; }
     input:focus-visible { outline:none; border-color:var(--blue); box-shadow:0 0 0 3px rgba(28,111,224,.18); }
     button { width:100%; margin-top:4px; padding:11px 0; font:inherit; font-weight:600; color:#fff; background:var(--blue);
@@ -29,6 +32,9 @@
     button:disabled { opacity:.6; cursor:default; }
     .err { background:rgba(192,57,43,.1); color:var(--danger); border:1px solid rgba(192,57,43,.3); border-radius:8px;
       padding:8px 10px; font-size:13px; margin:0 0 12px; }
+    /* The strength meter is injected between two labels, and this page spaces
+       its fields with the label's own bottom margin rather than a gap. */
+    .pwf { margin-bottom:12px; }
     .done { font-size:14px; }
     .done a { color:var(--blue); font-weight:600; }
   </style>
@@ -40,7 +46,7 @@
     <div class="err" id="err" hidden></div>
     <form id="reset-form">
       <label><span data-i18n="rs.new">New password</span>
-        <input type="password" id="pw" autocomplete="new-password" placeholder="at least 8 characters" data-i18n-attr="placeholder:rs.ph" />
+        <input type="password" id="pw" autocomplete="new-password" placeholder="at least 12 characters" />
       </label>
       <label><span data-i18n="rs.confirm">Confirm new password</span>
         <input type="password" id="pw2" autocomplete="new-password" />

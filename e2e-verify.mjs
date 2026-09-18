@@ -89,7 +89,8 @@ try {
   await page.evaluate(() => document.querySelector('.auth-tab[data-mode="signup"]').click());
   await waitFor(() => document.querySelector('.auth-tab[data-mode="signup"]')?.classList.contains('active'));
   await setVal('.auth-form input[name=identity]', EMAIL);
-  await setVal('.auth-form input[name=password]', 'hunter22pass');
+  await setVal('.auth-form input[name=password]', 'harbor-kite-moss-31');
+  await setVal('.auth-form input[name=confirm]', 'harbor-kite-moss-31');
   await page.evaluate(() => document.querySelector('.auth-form .auth-submit').click());
   check('the account is created', await waitFor(() => !document.querySelector('.auth-backdrop')));
   const msg = await waitFor(() => /could not send the verification email/i.test(document.getElementById('message')?.textContent || ''), null, 15000);
@@ -167,7 +168,8 @@ try {
   await wait2(() => !!document.querySelector('.auth-backdrop .auth-form'));
   await p2.evaluate(() => document.querySelector('.auth-tab[data-mode="signup"]').click());
   await set2('.auth-form input[name=identity]', EMAIL2);
-  await set2('.auth-form input[name=password]', 'hunter22pass');
+  await set2('.auth-form input[name=password]', 'harbor-kite-moss-31');
+  await set2('.auth-form input[name=confirm]', 'harbor-kite-moss-31');
   await p2.evaluate(() => document.querySelector('.auth-form .auth-submit').click());
   await wait2(() => !document.querySelector('.auth-backdrop'));
   await set2('#ai-prompt', 'Giant eagle covering the south stand in black and gold');

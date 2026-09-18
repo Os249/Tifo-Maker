@@ -54,7 +54,8 @@ check('terms shown as a statement on sign-up', termsVisible);
 await page.evaluate((email)=>{
   const set=(sel,v)=>{const el=document.querySelector(sel);const p=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set;p.call(el,v);el.dispatchEvent(new Event('input',{bubbles:true}));};
   set('.auth-form input[name=identity]', email);
-  set('.auth-form input[name=password]', 'hunter22pass');
+  set('.auth-form input[name=password]', 'harbor-kite-moss-31');
+  set('.auth-form input[name=confirm]', 'harbor-kite-moss-31');
 }, EMAIL);
 await page.evaluate(()=>document.querySelector('.auth-form .auth-submit').click());
 
@@ -80,7 +81,7 @@ check('the design is saved server-side', mine>=1, `designs=${mine}`);
 
 // Sign in with the EMAIL in a clean session.
 const page2=await (await browser.newContext()).newPage();
-const login = await page2.request.post(B+'/api/auth/login',{data:{username:EMAIL,password:'hunter22pass'}});
+const login = await page2.request.post(B+'/api/auth/login',{data:{username:EMAIL,password:'harbor-kite-moss-31'}});
 check('can sign back in with the email', login.status()===200, `status=${login.status()}`);
 
 console.log(`\n  ${pass} passed, ${fail} failed`);

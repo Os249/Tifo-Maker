@@ -1,5 +1,7 @@
 import { login, register, requestPasswordReset } from '../net/api';
-import { t, getLang } from './i18n';
+import { PASSWORD_MIN } from '../core/password';
+import { enhancePasswordField } from './passwordField';
+import { t, tv, getLang } from './i18n';
 
 /**
  * Sign in / sign up modal. Replaces the window.prompt() auth with a proper
@@ -65,7 +67,11 @@ export function openAuthModal(): Promise<string | null> {
           <label class="auth-field">
             <span>${t('auth.password')}</span>
             <input type="password" name="password" autocomplete="current-password"
-                   placeholder="${t('auth.passwordPh')}" />
+                   placeholder="${tv('auth.passwordPh', { min: PASSWORD_MIN })}" />
+          </label>
+          <label class="auth-field auth-confirm" hidden>
+            <span>${t('pw.confirm')}</span>
+            <input type="password" name="confirm" autocomplete="new-password" />
           </label>
           <div class="auth-error" role="alert" hidden></div>
           <button type="submit" class="auth-submit primary">${t('auth.signin')}</button>
@@ -99,6 +105,8 @@ export function openAuthModal(): Promise<string | null> {
     const tabs = Array.from(backdrop.querySelectorAll('.auth-tab')) as HTMLButtonElement[];
     const identityInput = form.identity as HTMLInputElement;
     const passwordInput = form.password as HTMLInputElement;
+    const confirmInput = form.confirm as HTMLInputElement;
+    const confirmRow = backdrop.querySelector('.auth-confirm') as HTMLElement;
     const idLabel = backdrop.querySelector('.auth-id-label') as HTMLElement;
     const termsRow = backdrop.querySelector('.auth-terms') as HTMLElement;
     const tabsRow = backdrop.querySelector('.auth-tabs') as HTMLElement;
@@ -109,6 +117,19 @@ export function openAuthModal(): Promise<string | null> {
     const forgotMsg = backdrop.querySelector('.auth-forgot-msg') as HTMLElement;
     const forgotSubmit = forgotForm.querySelector('.auth-submit') as HTMLButtonElement;
     const backBtn = backdrop.querySelector('.auth-back') as HTMLButtonElement;
+
+    // The strength bar, the reveal button and the suggester. Off to begin with:
+    // the modal opens on the sign-in tab, where an account older than this
+    // policy is entitled to its old password.
+    const passwordField = enhancePasswordField({
+      input: passwordInput,
+      confirm: confirmInput,
+      suggest: true,
+      // Read at check time, not now — on the sign-up tab the email above is
+      // still being typed when the password field is first touched.
+      context: () => (mode === 'signup' ? { email: identityInput.value.trim() } : {}),
+    });
+    passwordField.setActive(false);
 
     const close = (result: string | null): void => {
       backdrop.remove();
@@ -149,6 +170,9 @@ export function openAuthModal(): Promise<string | null> {
       identityInput.autocomplete = next === 'signup' ? 'email' : 'username';
       termsRow.hidden = next !== 'signup';
       forgotLink.hidden = next !== 'signin';
+      confirmRow.hidden = next !== 'signup';
+      if (next !== 'signup') confirmInput.value = '';
+      passwordField.setActive(next === 'signup');
       clearError();
     };
     tabs.forEach((tab) => tab.addEventListener('click', () => setMode(tab.dataset.mode as 'signin' | 'signup')));
@@ -209,9 +233,14 @@ export function openAuthModal(): Promise<string | null> {
         identityInput.focus();
         return;
       }
-      if (password.length < 8) {
-        showError(t('auth.errPassword'));
-        passwordInput.focus();
+      // On sign-up this is the whole policy — length, blocklist, the email
+      // above, and the confirm field. On sign-in it only insists that something
+      // was typed, because the rules below apply to passwords being CHOSEN, and
+      // an account created before them still has to be able to get in.
+      const complaint = passwordField.validate();
+      if (complaint) {
+        showError(complaint.message);
+        complaint.field.focus();
         return;
       }
       submit.disabled = true;

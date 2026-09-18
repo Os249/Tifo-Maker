@@ -608,6 +608,9 @@ body.viewer { display:block; overflow-y:auto; background:var(--ink-0); }
 .auth-tab.active { background:var(--ink-1); color:var(--text-1); font-weight:500; box-shadow:0 1px 2px rgba(0,0,0,.3); }
 .auth-form { display:flex; flex-direction:column; gap:14px; }
 .auth-field { display:flex; flex-direction:column; gap:6px; }
+/* `display:flex` beats the [hidden] user-agent rule, so the confirm-password
+   row would stay on screen on the sign-in tab without this. */
+.auth-field[hidden] { display:none; }
 .auth-field span { font-size:12px; color:var(--text-3); }
 .auth-field input {
   background:var(--ink-3); color:var(--text-1); border:1px solid var(--line-2);
@@ -1490,6 +1493,29 @@ body.gate { display:block; overflow-y:auto; background:var(--ink-0); }
     background:var(--ink-3); border:1px solid var(--line-2); color:var(--text-1);
     font:inherit; font-size:14px; font-weight:600;
   }
+  .m-wide.primary { background:var(--blue); border-color:var(--blue); color:#fff; }
+  .m-wide i { font-size:18px; line-height:1; }
+
+  /* --- Match Day, riding with the Stadium view ---
+     Sits under the view pill (top:10, ~44 tall) rather than beside it: three
+     labelled segments do not fit 320px, and this is not a third view — it is a
+     door out of the editor into a fullscreen renderer. */
+  .m-md {
+    position:absolute; top:60px; left:50%; transform:translateX(-50%); z-index:12;
+    display:flex;
+  }
+  .m-md[hidden] { display:none; }
+  .m-md-b {
+    display:inline-flex; align-items:center; gap:7px;
+    min-height:44px; padding:0 18px;
+    background:var(--blue); border:1px solid var(--blue); border-radius:var(--r-pill);
+    color:#fff; font:inherit; font-size:13px; font-weight:700; white-space:nowrap;
+    box-shadow:0 4px 16px rgba(0,0,0,.4);
+  }
+  .m-md-b i { font-size:17px; line-height:1; }
+  .m-md-b:focus-visible { outline:none; box-shadow:var(--ring-focus); }
+  .m-md-b.busy, .m-wide.busy { opacity:.72; }
+  .m-md-b[disabled], .m-wide[disabled] { cursor:default; }
 
   /* The header's segmented view switcher is replaced by the floating pill. */
   body.m-shell .topbar-center { display:none; }

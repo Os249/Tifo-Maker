@@ -156,9 +156,10 @@ export class MatchDaySimulator {
     private readonly store: DesignStore,
     private readonly template: StadiumTemplate,
     private readonly assetStore: AssetStore,
-    options: { quality?: QualityTier } = {},
+    options: { quality?: QualityTier; onContextLost?: () => void } = {},
   ) {
     this.settings = settingsFor(options.quality ?? probeQuality());
+    this.onContextLost = options.onContextLost;
 
     this.renderer = new THREE.WebGLRenderer({
       antialias: this.settings.antialias,
@@ -173,6 +174,11 @@ export class MatchDaySimulator {
       this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     }
     this.canvas = this.renderer.domElement;
+    // A phone under memory pressure — a call arriving, a camera app opening —
+    // takes the GL context back. Unhandled, the bowl goes black and stays
+    // black while the loop keeps calling draw on a dead context, which is both
+    // silent and expensive. preventDefault is what makes it restorable at all.
+    this.canvas.addEventListener('webglcontextlost', this.onCtxLost);
     host.appendChild(this.canvas);
 
     this.skyTex = skyTexture(SKIES.dusk.sky);
@@ -1165,6 +1171,21 @@ export class MatchDaySimulator {
     else if (!this.disposed) this.start();
   };
 
+  private readonly onContextLost?: () => void;
+  /**
+   * The GPU took the context back.
+   *
+   * preventDefault keeps it restorable, and stopping the loop is not optional:
+   * every subsequent draw call on a lost context is a no-op that still costs a
+   * frame. Recovery is a rebuild, not a resume — every buffer, texture and
+   * program died with the context — so the owner is told and decides.
+   */
+  private readonly onCtxLost = (e: Event): void => {
+    e.preventDefault();
+    this.running = false;
+    this.onContextLost?.();
+  };
+
   /** Hold a smooth frame rate by trimming/raising pixel ratio (no rebuild). */
   private adaptPerf(dt: number): void {
     if (this.elapsed < 2.5) return; // let the scene settle before judging
@@ -1235,6 +1256,7 @@ export class MatchDaySimulator {
     this.disposed = true;
     this.running = false;
     document.removeEventListener('visibilitychange', this.onVisibility);
+    this.canvas.removeEventListener('webglcontextlost', this.onCtxLost);
     this.resizeObserver.disconnect();
     this.store.offDirty(this.onDirtyCb);
     this.store.offPaletteChange(this.onPaletteCb);

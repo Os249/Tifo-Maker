@@ -37,7 +37,7 @@ const ADMIN_PASSWORD = 'soc test admin password, long enough';
 type Mail = { to: string; subject: string; html: string; text?: string };
 
 async function reg(app: FastifyInstance, u: string, ip = '198.51.100.1'): Promise<string> {
-  const r = await app.inject({ method: 'POST', url: '/api/auth/register', remoteAddress: ip, payload: { username: u, password: 'password1234', email: `${u}@example.test`, acceptedVersion: 'test' } });
+  const r = await app.inject({ method: 'POST', url: '/api/auth/register', remoteAddress: ip, payload: { username: u, password: 'quartz-lantern-echo7', email: `${u}@example.test`, acceptedVersion: 'test' } });
   return (r.json() as { token: string }).token;
 }
 
@@ -72,8 +72,8 @@ console.log('— through the real app —');
     await app.inject({ method: 'POST', url: '/api/auth/login', remoteAddress: '203.0.113.7', payload: { username: 'victim', password: `guess-${i}` } });
   }
   await app.inject({ method: 'POST', url: '/api/auth/login', remoteAddress: '203.0.113.7', payload: { username: 'nobody.at.all@private.example', password: 'guess' } });
-  await app.inject({ method: 'POST', url: '/api/auth/login', remoteAddress: '198.51.100.1', payload: { username: 'victim', password: 'password1234' } });
-  await app.inject({ method: 'POST', url: '/api/auth/register', payload: { username: 'victim', password: 'password1234', email: 'other@example.test', acceptedVersion: 't' } });
+  await app.inject({ method: 'POST', url: '/api/auth/login', remoteAddress: '198.51.100.1', payload: { username: 'victim', password: 'quartz-lantern-echo7' } });
+  await app.inject({ method: 'POST', url: '/api/auth/register', payload: { username: 'victim', password: 'quartz-lantern-echo7', email: 'other@example.test', acceptedVersion: 't' } });
 
   const coder = await reg(app, 'coder');
   for (let i = 0; i < 6; i++) {
@@ -206,7 +206,7 @@ console.log('— through the real app —');
   for (let i = 0; i < 10; i++) {
     await app.inject({ method: 'POST', url: '/api/auth/login', remoteAddress: '203.0.113.99', payload: { username: 'victim', password: `stuffed-${i}` } });
   }
-  await app.inject({ method: 'POST', url: '/api/auth/login', remoteAddress: '203.0.113.99', payload: { username: 'victim', password: 'password1234' } });
+  await app.inject({ method: 'POST', url: '/api/auth/login', remoteAddress: '203.0.113.99', payload: { username: 'victim', password: 'quartz-lantern-echo7' } });
   await soc.flush();
   const takeover = mails.slice(beforeTakeover).find((m) => /account takeover/i.test(m.subject));
   assert.ok(takeover, `an address that failed ten times and then signed in raises the takeover alert (${mails.slice(beforeTakeover).map((m) => m.subject).join(' / ')})`);

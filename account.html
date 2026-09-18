@@ -73,7 +73,11 @@
           <label for="ac-pw-current" data-i18n="ac.pw.current">Current password</label>
           <input id="ac-pw-current" type="password" autocomplete="current-password" />
           <label for="ac-pw-new" data-i18n="ac.pw.new">New password</label>
-          <input id="ac-pw-new" type="password" autocomplete="new-password" minlength="8" />
+          <!-- No minlength: the minimum lives in src/core/password.ts, and a
+               number written here would be a second copy of it to forget. -->
+          <input id="ac-pw-new" type="password" autocomplete="new-password" />
+          <label for="ac-pw-again" data-i18n="pw.confirm">Confirm password</label>
+          <input id="ac-pw-again" type="password" autocomplete="new-password" />
           <button class="ac-btn" type="submit" id="ac-pw-save" data-i18n="ac.pw.save">Change password</button>
         </form>
         <p class="ac-msg" id="ac-pw-msg" role="status" aria-live="polite"></p>
