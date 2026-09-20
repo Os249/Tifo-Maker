@@ -47,6 +47,11 @@ export const SOC_KINDS = [
   'bot_trap',
   'upload_refused',
   'server_error',
+  // Signing in with a provider. A refused link is the interesting one: it is
+  // what an attacker sees when they have pre-registered someone else's address
+  // and the victim then signs in with Google.
+  'oauth_linked',
+  'oauth_link_refused',
 ] as const;
 export type SocKind = (typeof SOC_KINDS)[number];
 
@@ -70,6 +75,8 @@ export const SOC_CATEGORY: Readonly<Record<SocKind, SocCategory>> = {
   bot_trap: 'abuse',
   upload_refused: 'abuse',
   server_error: 'errors',
+  oauth_linked: 'normal',
+  oauth_link_refused: 'signin',
 };
 
 export function isSocKind(v: unknown): v is SocKind {

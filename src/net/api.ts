@@ -151,6 +151,127 @@ async function expectOk(res: Response): Promise<unknown> {
   return res.status === 204 ? null : res.json();
 }
 
+// ---------- signing in with a provider ----------
+
+/**
+ * Which providers the server has credentials for.
+ *
+ * Asked once and remembered: a button that appears a beat after the dialog
+ * opens is worse than one that was never offered, so the answer is cached for
+ * the life of the page and the dialog renders whatever it has.
+ */
+let providerList: Promise<string[]> | null = null;
+export function availableProviders(): Promise<string[]> {
+  providerList ??= fetch(`${API}/auth/providers`)
+    .then((r) => (r.ok ? r.json() : { providers: [] }))
+    .then((d: { providers?: unknown }) => (Array.isArray(d.providers) ? (d.providers as string[]) : []))
+    .catch(() => []);
+  return providerList;
+}
+
+/** Remembered across the redirect, because the page is about to be thrown away. */
+const CLAIM_KEY = 'tifo_oauth_claim';
+
+/**
+ * Leave for the provider's consent screen.
+ *
+ * A full navigation rather than a popup. A popup would keep the promise that
+ * `openAuthModal` returns, which is tidier — but a lot of this site's traffic
+ * arrives from TikTok and X links, which open pages inside the app's own
+ * browser, and those handle popups and `window.opener` badly. Google refuses
+ * OAuth in an embedded webview outright. A redirect is the one thing that works
+ * everywhere it can work at all.
+ */
+export function startProviderSignIn(provider: string, opts: { claim?: boolean; returnTo?: string; policy?: string } = {}): void {
+  try {
+    if (opts.claim) sessionStorage.setItem(CLAIM_KEY, '1');
+    else sessionStorage.removeItem(CLAIM_KEY);
+  } catch {
+    /* private mode: the claim is lost, the sign-in is not */
+  }
+  const q = new URLSearchParams({ returnTo: opts.returnTo ?? location.pathname });
+  if (opts.claim) q.set('claim', '1');
+  if (opts.policy) q.set('policy', opts.policy);
+  location.assign(`${API}/auth/${provider}?${q.toString()}`);
+}
+
+/** Was a draft-claim asked for before we left? Reading it also clears it. */
+export function takeClaimIntent(): boolean {
+  try {
+    const had = sessionStorage.getItem(CLAIM_KEY) === '1';
+    sessionStorage.removeItem(CLAIM_KEY);
+    return had;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Pick up the session the callback left behind.
+ *
+ * The token never travelled in the URL — it is in a one-time HttpOnly cookie
+ * that this call trades in. Returns the username on success. The `?signedin=`
+ * marker is stripped either way, so a refresh does not try again.
+ */
+export async function adoptProviderSession(): Promise<string | null> {
+  const params = new URLSearchParams(location.search);
+  const provider = params.get('signedin');
+  if (!provider) return null;
+  let name: string | null = null;
+  try {
+    const res = await fetch(`${API}/auth/handoff`, { method: 'POST', credentials: 'same-origin' });
+    if (res.ok) {
+      const data = (await res.json()) as { token?: string; username?: string };
+      if (data?.token) {
+        setToken(data.token);
+        name = data.username ?? null;
+      }
+    }
+  } catch {
+    /* a failed handoff leaves them signed out, which the UI already handles */
+  }
+  // Both markers go: `claim` was only ever a hint for the server's pending
+  // record, and a stray query string that survives into history and into
+  // anything the user copies out of the address bar is litter.
+  params.delete('signedin');
+  params.delete('claim');
+  const rest = params.toString();
+  history.replaceState(null, '', `${location.pathname}${rest ? `?${rest}` : ''}${location.hash}`);
+  return name;
+}
+
+/** Why a provider sign-in did not finish, from `?signin=failed&reason=…`. */
+export function providerFailure(): string | null {
+  const params = new URLSearchParams(location.search);
+  if (params.get('signin') !== 'failed') return null;
+  const reason = params.get('reason') ?? 'provider';
+  params.delete('signin');
+  params.delete('reason');
+  const rest = params.toString();
+  history.replaceState(null, '', `${location.pathname}${rest ? `?${rest}` : ''}${location.hash}`);
+  return reason;
+}
+
+/** Begin attaching a provider to the account we are already signed into. */
+export async function beginLinkProvider(provider: string, returnTo: string): Promise<void> {
+  const data = (await expectOk(
+    await fetch(`${API}/account/link/${provider}?returnTo=${encodeURIComponent(returnTo)}`, {
+      method: 'POST',
+      headers: authHeaders(false),
+      credentials: 'same-origin',
+    }),
+  )) as { url: string };
+  location.assign(data.url);
+}
+
+/** Detach one. The server refuses to leave an account with no way in. */
+export async function unlinkProvider(provider: string): Promise<string[]> {
+  const data = (await expectOk(
+    await fetch(`${API}/account/link/${provider}`, { method: 'DELETE', headers: authHeaders(false) }),
+  )) as { providers?: string[] };
+  return data?.providers ?? [];
+}
+
 // ---------- auth ----------
 
 export async function login(username: string, password: string): Promise<string> {
@@ -900,23 +1021,23 @@ export async function fetchProfile(userId: string): Promise<ProfileData> {
   return (await expectOk(await fetch(`${API}/users/${userId}/profile`, { headers: authHeaders(false) }))) as ProfileData;
 }
 
-/** The signed-in user's id + name, or null. */
-export async function fetchMe(): Promise<{
+export interface Me {
   id: string;
   username: string;
   email: string | null;
   emailVerified: boolean;
   isAdmin: boolean;
-} | null> {
+  /** Providers this account can sign in with, e.g. ['google']. */
+  providers?: string[];
+  /** False for an account created by signing in with a provider. */
+  hasPassword?: boolean;
+}
+
+/** The signed-in user's id + name, or null. */
+export async function fetchMe(): Promise<Me | null> {
   if (!token) return null;
   try {
-    return (await expectOk(await fetch(`${API}/me`, { headers: authHeaders(false) }))) as {
-      id: string;
-      username: string;
-      email: string | null;
-      emailVerified: boolean;
-      isAdmin: boolean;
-    };
+    return (await expectOk(await fetch(`${API}/me`, { headers: authHeaders(false) }))) as Me;
   } catch {
     return null;
   }

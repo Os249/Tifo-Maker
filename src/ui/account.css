@@ -108,6 +108,10 @@ h1 { font-size: 26px; margin: 0 0 4px; }
 /* An RTL page must not reverse digits the user is copying from an email. */
 #ac-code { direction: ltr; }
 
+.ac-link-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 0; }
+.ac-link-row + .ac-link-row { border-top: 1px solid var(--ac-line); }
+.ac-link-row .ac-btn { margin-top: 0; }
+
 .ac-form { display: flex; flex-direction: column; gap: 4px; }
 .ac-form label { font-size: 13px; color: var(--ac-muted); margin-top: 8px; }
 .ac-form input, .ac-confirm input {

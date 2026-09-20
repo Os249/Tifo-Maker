@@ -1209,6 +1209,8 @@ var SOC_KIND = {
   code_exhausted:         ['Verification codes used up', 'five wrong guesses at one code'],
   mail_refused:           ['Emails refused by the per-address limits', 'someone trying to flood a mailbox'],
   password_change_failed: ['Wrong current password when changing it', ''],
+  oauth_linked:           ['Google connected to an account', ''],
+  oauth_link_refused:     ['Google refused a link to an unverified account', 'the email is already taken by an account that never verified it'],
   admin_unlock_failed:    ['Wrong admin password', 'the /admin sign-in'],
   admin_denied:           ['Admin requests without admin rights', ''],
   rate_limited:           ['Rate-limited requests', 'past 300 a minute, or 10 a minute on sign-in routes'],
@@ -1218,7 +1220,7 @@ var SOC_KIND = {
   upload_refused:         ['Uploads that were not images', ''],
   server_error:           ['Server errors', 'a 500 answer']
 };
-var SOC_SIGNIN = ['login_failed', 'code_failed', 'code_exhausted', 'password_change_failed', 'register_conflict', 'reset_requested', 'mail_refused', 'login_ok'];
+var SOC_SIGNIN = ['login_failed', 'code_failed', 'code_exhausted', 'password_change_failed', 'register_conflict', 'reset_requested', 'mail_refused', 'oauth_link_refused', 'login_ok', 'oauth_linked'];
 var SOC_ABUSE = ['rate_limited', 'oversized_body', 'scanner_probe', 'admin_unlock_failed', 'admin_denied', 'bot_trap', 'upload_refused', 'server_error'];
 var SOC_COLOR = { signin:'#f85149', admin:'#a371f7', abuse:'#d29922', errors:'#58a6ff' };
 var STATE_WORD = { good:'good', warn:'check', bad:'fix', info:'note' };

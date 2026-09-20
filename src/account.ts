@@ -21,7 +21,13 @@ import {
   exportMyData,
   deleteAccount,
   signOut,
+  availableProviders,
+  beginLinkProvider,
+  unlinkProvider,
+  adoptProviderSession,
+  providerFailure,
 } from './net/api';
+import type { Me } from './net/api';
 import { applyDom, getLang, initLang, t, tErr, tv } from './ui/i18n';
 import { enhancePasswordField } from './ui/passwordField';
 import { POLICY_VERSION } from './ui/authModal';
@@ -35,7 +41,7 @@ const say = (el: HTMLElement | null, text: string, tone: Tone = 'info'): void =>
   el.dataset.tone = tone;
 };
 
-let me: { id: string; username: string; email: string | null; emailVerified: boolean } | null = null;
+let me: Me | null = null;
 
 /** Wire a Save button to stay disabled until its field actually differs. */
 function dirtyGate(input: HTMLInputElement | null, button: HTMLButtonElement | null, current: () => string): void {
@@ -95,6 +101,76 @@ async function load(): Promise<void> {
   if (sections) sections.hidden = false;
   renderEmail();
   renderName();
+  renderPasswordSection();
+  void renderConnections();
+}
+
+// ---- password, or the lack of one ------------------------------------------
+
+/**
+ * An account created by signing in with Google has no password to confirm, so
+ * the form asks for one rather than to change one. Hiding the current-password
+ * field is not cosmetic: leaving it there would ask for something that does not
+ * exist, and the only honest answer would be to leave it blank.
+ */
+function renderPasswordSection(): void {
+  const first = me?.hasPassword === false;
+  const current = $<HTMLInputElement>('ac-pw-current');
+  const currentLabel = document.querySelector('label[for="ac-pw-current"]') as HTMLElement | null;
+  const title = document.querySelector('#sec-password h2') as HTMLElement | null;
+  const note = document.querySelector('#sec-password .ac-note') as HTMLElement | null;
+  const save = $('ac-pw-save');
+  if (current) current.hidden = first;
+  if (currentLabel) currentLabel.hidden = first;
+  if (title) title.textContent = t(first ? 'ac.pw.titleSet' : 'ac.pw.title');
+  if (note) note.textContent = t(first ? 'ac.pw.noteSet' : 'ac.pw.note');
+  if (save) save.textContent = t(first ? 'ac.pw.setSave' : 'ac.pw.save');
+}
+
+// ---- connected accounts ----------------------------------------------------
+
+const PROVIDER_LABEL: Record<string, string> = { google: 'Google' };
+
+async function renderConnections(): Promise<void> {
+  const section = $('sec-connected');
+  const list = $('ac-link-list');
+  if (!section || !list) return;
+  const offered = await availableProviders();
+  if (!offered.length) return; // nothing configured: no section at all
+  section.hidden = false;
+  const linked = me?.providers ?? [];
+  list.replaceChildren();
+  for (const id of offered) {
+    const row = document.createElement('div');
+    row.className = 'ac-link-row';
+    const name = document.createElement('span');
+    name.textContent = PROVIDER_LABEL[id] ?? id;
+    const button = document.createElement('button');
+    button.className = 'ac-btn';
+    button.type = 'button';
+    const on = linked.includes(id);
+    button.textContent = t(on ? 'ac.link.remove' : 'ac.link.add');
+    button.addEventListener('click', async () => {
+      const msg = $('ac-link-msg');
+      button.disabled = true;
+      try {
+        if (on) {
+          const left = await unlinkProvider(id);
+          if (me) me.providers = left;
+          say(msg, t('ac.link.removed'), 'ok');
+          void renderConnections();
+        } else {
+          // Leaves the page for the consent screen and comes back to /account.
+          await beginLinkProvider(id, '/account');
+        }
+      } catch (err) {
+        say(msg, tErr((err as Error).message), 'bad');
+        button.disabled = false;
+      }
+    });
+    row.append(name, button);
+    list.append(row);
+  }
 }
 
 // ---- email -----------------------------------------------------------------
@@ -311,4 +387,23 @@ $('ac-signout')?.addEventListener('click', () => {
 initLang();
 document.documentElement.lang = getLang();
 applyDom(document);
-void load();
+
+/**
+ * This page is also a landing spot for a provider round trip: a link started
+ * here comes back here, and so does a sign-in whose `returnTo` was /account.
+ * Both have to be settled before `load()` asks the server who we are.
+ */
+void (async () => {
+  await adoptProviderSession();
+  const failed = providerFailure();
+  const params = new URLSearchParams(location.search);
+  const linked = params.get('linked');
+  if (linked) {
+    params.delete('linked');
+    const rest = params.toString();
+    history.replaceState(null, '', `${location.pathname}${rest ? `?${rest}` : ''}`);
+  }
+  await load();
+  if (failed) say($('ac-link-msg'), t(`auth.err.${failed}`), 'bad');
+  else if (linked) say($('ac-link-msg'), t('ac.link.added'), 'ok');
+})();

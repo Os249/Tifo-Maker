@@ -351,6 +351,49 @@ const STRINGS: Record<string, { en: string; ar: string }> = {
   'auth.forgotSent': { en: 'If that email has an account, a reset link is on its way.', ar: 'إذا كان لهذا البريد حساب، فإن رابط إعادة التعيين في طريقه إليك.' },
   'auth.sending': { en: 'Sending…', ar: 'جارٍ الإرسال…' },
   'ed.changePassword': { en: 'Change password', ar: 'تغيير كلمة المرور' },
+  // ---- signing in with a provider (src/core/../server/src/oauth.ts) ----
+  'auth.google': { en: 'Continue with Google', ar: 'المتابعة بحساب Google' },
+  'auth.or': { en: 'or', ar: 'أو' },
+  'auth.inApp': {
+    en: 'Google will not open inside this app. Open tifomaker.org in Chrome or Safari to use it.',
+    ar: 'Google ما يفتح جوه هذا التطبيق. افتح tifomaker.org في Chrome أو Safari عشان تستخدمه.',
+  },
+  'auth.err.state': {
+    en: 'That sign-in took too long or was started somewhere else. Try again.',
+    ar: 'محاولة الدخول انتهت مدتها أو بدأت من مكان ثاني. جرّب مرة ثانية.',
+  },
+  'auth.err.cancelled': { en: 'Sign-in cancelled.', ar: 'تم إلغاء تسجيل الدخول.' },
+  'auth.err.provider': {
+    en: 'We could not reach Google just then. Try again, or use your email and password.',
+    ar: 'ما قدرنا نوصل Google الحين. جرّب مرة ثانية، أو استخدم بريدك وكلمة المرور.',
+  },
+  'auth.err.verify_first': {
+    en: 'An account already uses that email. Sign in with your password first, then connect Google from your account page.',
+    ar: 'في حساب مستخدم نفس البريد. سجّل دخولك بكلمة المرور أول، وبعدها اربط Google من صفحة حسابك.',
+  },
+  'auth.err.linked_elsewhere': {
+    en: 'That Google account is already connected to a different TifoMaker account.',
+    ar: 'حساب Google هذا مربوط بحساب TifoMaker ثاني.',
+  },
+  'ac.link.title': { en: 'Connected accounts', ar: 'الحسابات المربوطة' },
+  'ac.link.note': {
+    en: 'Another way to sign in, alongside your password. Removing the last one is refused, so an account can never be left with no way in.',
+    ar: 'طريقة ثانية لتسجيل الدخول مع كلمة المرور. ما نسمح بحذف آخر طريقة، عشان ما يصير حساب بدون أي طريقة دخول.',
+  },
+  'ac.link.add': { en: 'Connect', ar: 'اربط' },
+  'ac.link.remove': { en: 'Disconnect', ar: 'فك الربط' },
+  'ac.link.added': { en: 'Connected.', ar: 'تم الربط.' },
+  'ac.link.removed': { en: 'Disconnected.', ar: 'تم فك الربط.' },
+  'ac.pw.titleSet': { en: 'Set a password', ar: 'عيّن كلمة مرور' },
+  'ac.pw.noteSet': {
+    en: 'You signed up with Google, so you have no password yet. Setting one gives you a second way in.',
+    ar: 'سجّلت بحساب Google، فما عندك كلمة مرور. تعيين وحدة يعطيك طريقة دخول ثانية.',
+  },
+  'ac.pw.setSave': { en: 'Set password', ar: 'عيّن كلمة المرور' },
+  'err.lastMethod': {
+    en: 'Set a password first — this is the only way you can sign in.',
+    ar: 'عيّن كلمة مرور أول — هذي طريقتك الوحيدة لتسجيل الدخول.',
+  },
   // ---- choosing a password (src/ui/passwordField.ts) ----
   // No key here spells the minimum out as a literal: it arrives as {min} from
   // src/core/password.ts, so raising the bar is one constant and not a hunt
@@ -1569,6 +1612,7 @@ const ERROR_KEYS: Record<string, string> = {
   // Every way server-side password grading can answer. The two length strings
   // are built from the same constants the server formats them with, so they
   // match by construction rather than by someone remembering to edit both.
+  'set a password before removing your last sign-in method': 'err.lastMethod',
   'a password is required': 'pw.err.blank',
   [`password must be at least ${PASSWORD_MIN} characters`]: 'pw.err.short',
   [`password must be at most ${PASSWORD_MAX} characters`]: 'pw.err.long',

@@ -285,7 +285,7 @@ async function makeDesign(app: FastifyInstance, token: string, isPublic = false)
   assert.equal((await auth.getUserById(bob.id))!.passwordHash, legacy);
   const relog = await app.inject({ method: 'POST', url: '/api/auth/login', payload: { username: 'rehash_bob', password: 'quartz-lantern-echo7' } });
   assert.equal(relog.statusCode, 200, 'the old password still signs in');
-  const after = (await auth.getUserById(bob.id))!.passwordHash;
+  const after = (await auth.getUserById(bob.id))!.passwordHash!;
   assert.ok(after.startsWith('s2:'), 'and the stored hash was upgraded in place');
   assert.equal((await verifyPassword('quartz-lantern-echo7', after)).ok, true, 'the upgraded hash still matches the same password');
 
@@ -908,6 +908,327 @@ async function makeDesign(app: FastifyInstance, token: string, isPublic = false)
     }
     assert.ok(PASSWORD_MIN >= 12, 'the floor has not been quietly lowered');
     console.log('password policy: all assertions passed (rules, folding, context, three routes, legacy sign-in, reset link not spent, no truncation, NFC)');
+  }
+
+
+  // ---- SIGN IN WITH GOOGLE: the round trip, and the linking rule ----
+  //
+  // The dangerous step in federated sign-in is not the crypto, it is deciding
+  // which existing account an identity may be attached to. The row that matters
+  // most below is `verify_first`: CVE-2026-53516 (Better Auth, CVSS 8.3) was
+  // exactly this check, done on the provider's claim alone.
+  {
+    const realFetch = globalThis.fetch;
+    let nextProfile: Record<string, unknown> | null = null;
+    let tokenCalls = 0;
+    const json = (body: unknown, status = 200): Response =>
+      new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input instanceof Request ? input.url : input);
+      if (url.startsWith('https://oauth2.googleapis.com/token')) {
+        tokenCalls++;
+        return json({ access_token: 'stub-access-token' });
+      }
+      if (url.startsWith('https://openidconnect.googleapis.com/v1/userinfo')) {
+        return nextProfile ? json(nextProfile) : json({ error: 'nope' }, 500);
+      }
+      return realFetch(input as RequestInfo, init);
+    }) as typeof fetch;
+
+    try {
+      const gAuth = new MemoryAuthRepository();
+      const gDesigns = new MemoryDesignRepository((id) => gAuth.usernameOf(id));
+      const gApp = await buildApp(gDesigns, gAuth, templates, {
+        oauth: { google: { id: 'test-client-id', secret: 'test-client-secret' } },
+      });
+
+      const cookiesFrom = (res: { headers: Record<string, unknown> }): Map<string, string> => {
+        const raw = res.headers['set-cookie'];
+        const lines = Array.isArray(raw) ? (raw as string[]) : raw ? [String(raw)] : [];
+        const out = new Map<string, string>();
+        for (const line of lines) {
+          const [pair] = line.split(';');
+          const eq = pair!.indexOf('=');
+          out.set(pair!.slice(0, eq), decodeURIComponent(pair!.slice(eq + 1)));
+        }
+        return out;
+      };
+      const cookieHeader = (jar: Map<string, string>): string =>
+        [...jar].map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join('; ');
+
+      /** Walk the whole flow and return the final redirect plus its cookies. */
+      const signInWith = async (
+        profile: Record<string, unknown>,
+        opts: { returnTo?: string; claim?: boolean; bearer?: string; link?: boolean } = {},
+      ) => {
+        const start = opts.link
+          ? await gApp.inject({
+              method: 'POST',
+              url: `/api/account/link/google?returnTo=${encodeURIComponent(opts.returnTo ?? '/account')}`,
+              headers: bearer(opts.bearer!),
+            })
+          : await gApp.inject({
+              method: 'GET',
+              url: `/api/auth/google?returnTo=${encodeURIComponent(opts.returnTo ?? '/app')}${opts.claim ? '&claim=1' : ''}`,
+            });
+        const jar = cookiesFrom(start);
+        const authorize = opts.link ? (start.json() as { url: string }).url : String(start.headers.location);
+        const state = new URL(authorize).searchParams.get('state')!;
+        nextProfile = profile;
+        const back = await gApp.inject({
+          method: 'GET',
+          url: `/api/auth/google/callback?code=stub-code&state=${encodeURIComponent(state)}`,
+          headers: { cookie: cookieHeader(jar) },
+        });
+        return { start, authorize, state, back, backCookies: cookiesFrom(back) };
+      };
+
+      // ---- the outward leg
+      const listed = await gApp.inject({ method: 'GET', url: '/api/auth/providers' });
+      assert.deepEqual((listed.json() as { providers: string[] }).providers, ['google'], 'a configured provider is offered');
+
+      const start = await gApp.inject({ method: 'GET', url: '/api/auth/google' });
+      assert.equal(start.statusCode, 302);
+      const consent = new URL(String(start.headers.location));
+      assert.equal(consent.origin + consent.pathname, 'https://accounts.google.com/o/oauth2/v2/auth');
+      assert.equal(consent.searchParams.get('scope'), 'openid email profile', 'non-sensitive scopes only: no verification review');
+      assert.equal(consent.searchParams.get('code_challenge_method'), 'S256', 'PKCE, as RFC 9700 recommends even for a confidential client');
+      assert.ok(consent.searchParams.get('code_challenge'), 'and a challenge to go with it');
+      assert.ok(cookiesFrom(start).get('tm_oauth'), 'the state rides in a cookie, so it is bound to this browser');
+      const pendingLine = (start.headers['set-cookie'] as string[]).find((l) => l.startsWith('tm_oauth='))!;
+      assert.match(pendingLine, /HttpOnly/, 'script must not be able to read the state');
+      assert.match(pendingLine, /SameSite=Lax/, 'Strict would withhold it on the callback and break every sign-in');
+
+      // ---- a callback with nothing to match it against
+      const noCookie = await gApp.inject({
+        method: 'GET',
+        url: `/api/auth/google/callback?code=x&state=${encodeURIComponent(consent.searchParams.get('state')!)}`,
+      });
+      assert.equal(noCookie.statusCode, 302);
+      assert.match(String(noCookie.headers.location), /signin=failed&reason=state/, 'no pending cookie, no sign-in');
+
+      // ---- a forged state
+      const fresh = await gApp.inject({ method: 'GET', url: '/api/auth/google' });
+      const forged = await gApp.inject({
+        method: 'GET',
+        url: '/api/auth/google/callback?code=x&state=not-the-one',
+        headers: { cookie: cookieHeader(cookiesFrom(fresh)) },
+      });
+      assert.match(String(forged.headers.location), /reason=state/, 'a state that does not match the cookie is refused');
+
+      // ---- a brand-new person
+      const newcomer = await signInWith({ sub: 'g-new-1', email: 'newfan@example.test', email_verified: true, name: 'New Fan' });
+      assert.equal(newcomer.back.statusCode, 302);
+      assert.match(String(newcomer.back.headers.location), /^\/app\?signedin=google/, 'signed in, and the token is NOT in the URL');
+      assert.doesNotMatch(String(newcomer.back.headers.location), /token/i, 'nothing token-shaped in the address bar');
+      const handoff = newcomer.backCookies.get('tm_handoff');
+      assert.ok(handoff, 'the session is handed over in a cookie instead');
+
+      const adopted = await gApp.inject({
+        method: 'POST',
+        url: '/api/auth/handoff',
+        headers: { cookie: `tm_handoff=${encodeURIComponent(handoff!)}` },
+      });
+      assert.equal(adopted.statusCode, 200);
+      const newcomerToken = (adopted.json() as { token: string }).token;
+      assert.ok(newcomerToken);
+      // Spent, not merely cleared: a replay of the same cookie is dead.
+      const replay = await gApp.inject({
+        method: 'POST',
+        url: '/api/auth/handoff',
+        headers: { cookie: `tm_handoff=${encodeURIComponent(handoff!)}` },
+      });
+      assert.equal(replay.statusCode, 401, 'the handoff cookie works exactly once');
+
+      const meNew = (await gApp.inject({ method: 'GET', url: '/api/me', headers: bearer(newcomerToken) })).json() as {
+        email: string;
+        emailVerified: boolean;
+        providers: string[];
+        hasPassword: boolean;
+      };
+      assert.equal(meNew.email, 'newfan@example.test');
+      assert.equal(meNew.emailVerified, true, 'Google verified it, so the inbox round trip is skipped');
+      assert.deepEqual(meNew.providers, ['google']);
+      assert.equal(meNew.hasPassword, false, 'no password was ever chosen');
+
+      // ---- the same person again: one account, not two
+      const again = await signInWith({ sub: 'g-new-1', email: 'newfan@example.test', email_verified: true });
+      const againToken = (
+        await gApp.inject({
+          method: 'POST',
+          url: '/api/auth/handoff',
+          headers: { cookie: `tm_handoff=${encodeURIComponent(again.backCookies.get('tm_handoff')!)}` },
+        })
+      ).json() as { token: string };
+      const meAgain = (await gApp.inject({ method: 'GET', url: '/api/me', headers: bearer(againToken.token) })).json() as { id: string };
+      assert.equal(meAgain.id, meNew ? (await gApp.inject({ method: 'GET', url: '/api/me', headers: bearer(newcomerToken) })).json().id : '', 'same sub, same account');
+
+      // ---- the identity is keyed on `sub`, not the address
+      const renamed = await signInWith({ sub: 'g-new-1', email: 'moved@example.test', email_verified: true });
+      const renamedTok = (
+        await gApp.inject({
+          method: 'POST',
+          url: '/api/auth/handoff',
+          headers: { cookie: `tm_handoff=${encodeURIComponent(renamed.backCookies.get('tm_handoff')!)}` },
+        })
+      ).json() as { token: string };
+      assert.equal(
+        ((await gApp.inject({ method: 'GET', url: '/api/me', headers: bearer(renamedTok.token) })).json() as { id: string }).id,
+        meAgain.id,
+        'a changed email still lands on the same account, because sub is the key',
+      );
+
+      // ---- CVE-2026-53516: the pre-registered, never-verified account
+      const victimMail = 'victim@example.test';
+      await gApp.inject({
+        method: 'POST',
+        url: '/api/auth/register',
+        payload: { username: 'victim_acct', password: 'thistle-anchor-92x', email: victimMail, acceptedVersion: 'test' },
+      });
+      const victim = (await gAuth.getUserByEmail(victimMail))!;
+      assert.equal(victim.emailVerifiedAt, null, 'the attacker never verified it — that is the whole trick');
+      const hijack = await signInWith({ sub: 'g-victim', email: victimMail, email_verified: true });
+      assert.match(
+        String(hijack.back.headers.location),
+        /reason=verify_first/,
+        'Google saying the address is verified is NOT enough to link to an unverified local account',
+      );
+      assert.equal(hijack.backCookies.get('tm_handoff'), undefined, 'and no session is handed out');
+      assert.equal(await gAuth.getUserIdByIdentity('google', 'g-victim'), null, 'nothing was linked');
+
+      // ---- the same thing, once the local account IS verified
+      await gAuth.markEmailVerified(victim.id);
+      const linkedOk = await signInWith({ sub: 'g-victim', email: victimMail, email_verified: true });
+      const linkedTok = (
+        await gApp.inject({
+          method: 'POST',
+          url: '/api/auth/handoff',
+          headers: { cookie: `tm_handoff=${encodeURIComponent(linkedOk.backCookies.get('tm_handoff')!)}` },
+        })
+      ).json() as { token: string };
+      assert.equal(
+        ((await gApp.inject({ method: 'GET', url: '/api/me', headers: bearer(linkedTok.token) })).json() as { id: string }).id,
+        victim.id,
+        'both sides verified: now it links',
+      );
+
+      // ---- an unverified address from the provider never links either
+      const strangerMail = 'stranger@example.test';
+      await gApp.inject({
+        method: 'POST',
+        url: '/api/auth/register',
+        payload: { username: 'stranger_acct', password: 'pebble-saffron-40', email: strangerMail, acceptedVersion: 'test' },
+      });
+      const stranger = (await gAuth.getUserByEmail(strangerMail))!;
+      await gAuth.markEmailVerified(stranger.id);
+      const unverified = await signInWith({ sub: 'g-stranger', email: strangerMail, email_verified: false });
+      const unverifiedTok = (
+        await gApp.inject({
+          method: 'POST',
+          url: '/api/auth/handoff',
+          headers: { cookie: `tm_handoff=${encodeURIComponent(unverified.backCookies.get('tm_handoff')!)}` },
+        })
+      ).json() as { token: string };
+      const strangerNew = (await gApp.inject({ method: 'GET', url: '/api/me', headers: bearer(unverifiedTok.token) })).json() as {
+        id: string;
+        email: string | null;
+      };
+      assert.notEqual(strangerNew.id, stranger.id, 'an unverified provider email is not a claim on anyone else’s account');
+      assert.equal(strangerNew.email, null, 'and the contested address is not written onto the new account either');
+
+      // ---- open redirect
+      for (const bad of ['https://evil.example/', '//evil.example/x', '/\\evil.example']) {
+        const evil = await gApp.inject({ method: 'GET', url: `/api/auth/google?returnTo=${encodeURIComponent(bad)}` });
+        const st = new URL(String(evil.headers.location)).searchParams.get('state')!;
+        nextProfile = { sub: 'g-redirect', email: 'r@example.test', email_verified: true };
+        const landed = await gApp.inject({
+          method: 'GET',
+          url: `/api/auth/google/callback?code=c&state=${encodeURIComponent(st)}`,
+          headers: { cookie: cookieHeader(cookiesFrom(evil)) },
+        });
+        assert.match(String(landed.headers.location), /^\/app\?/, `returnTo=${bad} must not leave this origin`);
+      }
+
+      // ---- the provider refusing, and the user cancelling
+      const cancelled = await gApp.inject({ method: 'GET', url: '/api/auth/google' });
+      const cancelledBack = await gApp.inject({
+        method: 'GET',
+        url: '/api/auth/google/callback?error=access_denied&state=x',
+        headers: { cookie: cookieHeader(cookiesFrom(cancelled)) },
+      });
+      assert.match(String(cancelledBack.headers.location), /reason=cancelled/, 'pressing cancel is not an error');
+
+      const broken = await gApp.inject({ method: 'GET', url: '/api/auth/google' });
+      nextProfile = null; // userinfo answers 500
+      const brokenBack = await gApp.inject({
+        method: 'GET',
+        url: `/api/auth/google/callback?code=c&state=${encodeURIComponent(new URL(String(broken.headers.location)).searchParams.get('state')!)}`,
+        headers: { cookie: cookieHeader(cookiesFrom(broken)) },
+      });
+      assert.match(String(brokenBack.headers.location), /reason=provider/, 'a provider that fails lands on the normal form, not a stack trace');
+
+      // ---- an account must never be left with no way in
+      const lastWay = await gApp.inject({ method: 'DELETE', url: '/api/account/link/google', headers: bearer(newcomerToken) });
+      assert.equal(lastWay.statusCode, 400, 'unlinking the only sign-in method is refused');
+      assert.equal((lastWay.json() as { code: string }).code, 'last_method');
+
+      // ...until a password is set. No current password is asked for, because
+      // there is none — the bearer token has already proved who is asking.
+      const setFirst = await gApp.inject({
+        method: 'POST',
+        url: '/api/account/password',
+        headers: bearer(newcomerToken),
+        payload: { newPassword: 'quartz-lantern-echo7' },
+      });
+      assert.equal(setFirst.statusCode, 200, 'a Google account can set its first password without confirming one');
+      const afterSet = (setFirst.json() as { token: string }).token;
+      const nowUnlink = await gApp.inject({ method: 'DELETE', url: '/api/account/link/google', headers: bearer(afterSet) });
+      assert.equal(nowUnlink.statusCode, 200, 'with a password in place, the link can go');
+      // And the policy still applies to that first password.
+      const weakFirst = await gApp.inject({
+        method: 'POST',
+        url: '/api/account/password',
+        headers: bearer(afterSet),
+        payload: { currentPassword: 'quartz-lantern-echo7', newPassword: 'password1234' },
+      });
+      assert.equal(weakFirst.statusCode, 400, 'the password policy did not stop applying');
+
+      // ---- linking from inside a session is the escape hatch the CVE row points at
+      const linkStart = await gApp.inject({
+        method: 'POST',
+        url: '/api/account/link/google?returnTo=%2Faccount',
+        headers: bearer(afterSet),
+      });
+      assert.equal(linkStart.statusCode, 200);
+      const linkState = new URL((linkStart.json() as { url: string }).url).searchParams.get('state')!;
+      nextProfile = { sub: 'g-relink', email: 'newfan@example.test', email_verified: true };
+      const linkBack = await gApp.inject({
+        method: 'GET',
+        url: `/api/auth/google/callback?code=c&state=${encodeURIComponent(linkState)}`,
+        headers: { cookie: cookieHeader(cookiesFrom(linkStart)) },
+      });
+      assert.match(String(linkBack.headers.location), /^\/account\?linked=google/, 'linking returns to the account page');
+
+      // ---- an identity already spoken for
+      const stealStart = await gApp.inject({
+        method: 'POST',
+        url: '/api/account/link/google?returnTo=%2Faccount',
+        headers: bearer(linkedTok.token),
+      });
+      nextProfile = { sub: 'g-relink', email: 'newfan@example.test', email_verified: true };
+      const stealBack = await gApp.inject({
+        method: 'GET',
+        url: `/api/auth/google/callback?code=c&state=${encodeURIComponent(new URL((stealStart.json() as { url: string }).url).searchParams.get('state')!)}`,
+        headers: { cookie: cookieHeader(cookiesFrom(stealStart)) },
+      });
+      assert.match(String(stealBack.headers.location), /reason=linked_elsewhere/, 'one Google account, one TifoMaker account');
+
+      assert.ok(tokenCalls > 0, 'the code really was exchanged server-side');
+      await gApp.close();
+      console.log('sign in with google: all assertions passed (PKCE + state, sub as the key, the CVE row, unverified emails, open redirect, single-use handoff, last-way-in, linking)');
+    } finally {
+      globalThis.fetch = realFetch;
+    }
   }
 
   await app.close();

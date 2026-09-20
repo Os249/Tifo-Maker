@@ -47,6 +47,18 @@ export function configWarnings(env: NodeJS.ProcessEnv): ConfigWarning[] {
       state: 'wrong',
     });
   }
+  // Half a Google client is the worst state to be in: the button never appears
+  // and nothing says why, because "no credentials" and "one credential" look
+  // identical from the outside.
+  const gid = env.GOOGLE_CLIENT_ID?.trim();
+  const gsecret = env.GOOGLE_CLIENT_SECRET?.trim();
+  if (!!gid !== !!gsecret) {
+    out.push({
+      key: gid ? 'GOOGLE_CLIENT_SECRET' : 'GOOGLE_CLIENT_ID',
+      effect: 'is missing while the other half is set, so Sign in with Google is off and the button does not appear. Set both, or neither.',
+      state: 'wrong',
+    });
+  }
   if (prod && !env.PUBLIC_URL) {
     out.push({
       key: 'PUBLIC_URL',

@@ -598,13 +598,22 @@ export class MemoryAuthRepository implements AuthRepository {
 
   async createUser(
     username: string,
-    passwordHash: string,
-    opts: { email?: string | null; acceptedVersion?: string | null } = {},
+    passwordHash: string | null,
+    opts: { email?: string | null; acceptedVersion?: string | null; emailVerified?: boolean } = {},
   ): Promise<UserRow | null> {
     if (this.users.has(username)) return null;
     const email = opts.email ?? null;
     if (email && this.emailTaken(email)) return null;
-    const row: UserRow = { id: randomUUID(), username, passwordHash, email, emailVerifiedAt: null, isPro: false };
+    const row: UserRow = {
+      id: randomUUID(),
+      username,
+      passwordHash,
+      email,
+      // Only a provider that says it verified the address gets to skip the
+      // code-in-your-inbox step; everyone else starts unverified.
+      emailVerifiedAt: email && opts.emailVerified ? new Date().toISOString() : null,
+      isPro: false,
+    };
     this.users.set(username, row);
     return row;
   }
@@ -718,6 +727,39 @@ export class MemoryAuthRepository implements AuthRepository {
     for (const [name, u] of this.users) if (u.id === userId) this.users.delete(name);
     for (const [hash, t] of this.tokens) if (t.userId === userId) this.tokens.delete(hash);
     for (const [hash, t] of this.emailTokens) if (t.userId === userId) this.emailTokens.delete(hash);
+    for (const [k, id] of this.identities) if (id === userId) this.identities.delete(k);
+  }
+
+  // ---- federated identities ----
+  /** Keyed `provider:providerUserId`, matching the table's primary key. */
+  private identities = new Map<string, string>();
+
+  async getUserIdByIdentity(provider: string, providerUserId: string): Promise<string | null> {
+    return this.identities.get(`${provider}:${providerUserId}`) ?? null;
+  }
+
+  async linkIdentity(provider: string, providerUserId: string, userId: string): Promise<boolean> {
+    const k = `${provider}:${providerUserId}`;
+    const owner = this.identities.get(k);
+    if (owner && owner !== userId) return false;
+    this.identities.set(k, userId);
+    return true;
+  }
+
+  async unlinkIdentity(provider: string, userId: string): Promise<boolean> {
+    for (const [k, id] of this.identities) {
+      if (id === userId && k.startsWith(`${provider}:`)) {
+        this.identities.delete(k);
+        return true;
+      }
+    }
+    return false;
+  }
+
+  async identitiesFor(userId: string): Promise<string[]> {
+    const out: string[] = [];
+    for (const [k, id] of this.identities) if (id === userId) out.push(k.slice(0, k.indexOf(':')));
+    return out.sort();
   }
 
   usernameOf(id: string | null): string {

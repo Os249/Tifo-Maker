@@ -1,5 +1,6 @@
-import { login, register, requestPasswordReset } from '../net/api';
+import { availableProviders, login, register, requestPasswordReset, startProviderSignIn } from '../net/api';
 import { PASSWORD_MIN } from '../core/password';
+import { deriveUsername } from '../core/handle';
 import { enhancePasswordField } from './passwordField';
 import { t, tv, getLang } from './i18n';
 
@@ -12,20 +13,35 @@ import { t, tv, getLang } from './i18n';
  * Resolves with the signed-in username, or null if the user dismisses.
  */
 
-const USERNAME_RE = /^[a-zA-Z0-9_]{3,24}$/;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 /** Bump when Terms/Privacy change materially; recorded with each signup acceptance. */
 export const POLICY_VERSION = '2026-06-27';
 
-/** A username derived from the email local part, sanitised to the server's rules. */
-function deriveUsername(email: string, attempt: number): string {
-  const base = (email.split('@')[0] ?? '')
-    .replace(/[^a-zA-Z0-9_]/g, '')
-    .slice(0, 16)
-    .replace(/^_+/, '');
-  const stem = base.length >= 3 ? base : `${base}fan`;
-  const name = attempt === 0 ? stem : `${stem}${Math.floor(1000 + Math.random() * 9000)}`;
-  return USERNAME_RE.test(name) ? name : `tifo${Math.floor(1000 + Math.random() * 9000)}`;
+/** Google's G, inline. No script and no image request to anyone else. */
+const GOOGLE_MARK =
+  '<svg viewBox="0 0 18 18" width="17" height="17" aria-hidden="true">' +
+  '<path fill="#4285F4" d="M17.64 9.2c0-.64-.06-1.25-.16-1.84H9v3.48h4.84a4.14 4.14 0 0 1-1.8 2.72v2.26h2.92c1.7-1.57 2.68-3.88 2.68-6.62Z"/>' +
+  '<path fill="#34A853" d="M9 18c2.43 0 4.47-.8 5.96-2.18l-2.92-2.26c-.8.54-1.84.86-3.04.86-2.34 0-4.32-1.58-5.03-3.7H.96v2.33A9 9 0 0 0 9 18Z"/>' +
+  '<path fill="#FBBC05" d="M3.97 10.72a5.4 5.4 0 0 1 0-3.44V4.95H.96a9 9 0 0 0 0 8.1l3.01-2.33Z"/>' +
+  '<path fill="#EA4335" d="M9 3.58c1.32 0 2.5.45 3.44 1.35l2.58-2.58C13.46.9 11.43 0 9 0A9 9 0 0 0 .96 4.95l3.01 2.33C4.68 5.16 6.66 3.58 9 3.58Z"/>' +
+  '</svg>';
+
+/**
+ * Is this page inside an app's own browser?
+ *
+ * Google answers `403 disallowed_useragent` to OAuth started from an embedded
+ * webview, which is not a bug we can work around — it is the policy. A large
+ * share of this site's arrivals come from TikTok and X links, and both open
+ * pages inside their own browser, so the button has to say so rather than lead
+ * someone to a Google error page they cannot read.
+ *
+ * Deliberately a short list of the ones that actually send us traffic. A UA
+ * sniff that tries to be exhaustive ends up hiding the button from people whose
+ * browser was fine.
+ */
+function inAppBrowser(): boolean {
+  const ua = navigator.userAgent;
+  return /\b(FBAN|FBAV|FB_IAB|Instagram|TikTok|musical_ly|Line\/|Snapchat|Twitter|MicroMessenger)\b/i.test(ua);
 }
 
 /** Register, retrying with a different handle when the derived one is taken. */
@@ -46,7 +62,15 @@ async function registerWithDerivedName(email: string, password: string): Promise
   throw lastErr instanceof Error ? lastErr : new Error('could not create an account');
 }
 
-export function openAuthModal(): Promise<string | null> {
+/**
+ * The sign-in dialog.
+ *
+ * `claimOnReturn` matters only for a provider: that path leaves the page, so the
+ * promise this returns never resolves and the caller's "now claim the draft"
+ * line never runs. The intent is recorded before the redirect and picked up
+ * again on the way back in. See `takeClaimIntent` in net/api.
+ */
+export function openAuthModal(claimOnReturn = false): Promise<string | null> {
   return new Promise((resolve) => {
     const backdrop = document.createElement('div');
     backdrop.className = 'auth-backdrop';
@@ -57,6 +81,13 @@ export function openAuthModal(): Promise<string | null> {
         <div class="auth-tabs">
           <button class="auth-tab active" data-mode="signin">${t('auth.signin')}</button>
           <button class="auth-tab" data-mode="signup">${t('auth.signup')}</button>
+        </div>
+        <div class="auth-providers" hidden>
+          <button type="button" class="auth-provider" data-provider="google">
+            ${GOOGLE_MARK}<span>${t('auth.google')}</span>
+          </button>
+          <p class="auth-inapp" hidden>${t('auth.inApp')}</p>
+          <div class="auth-or"><span>${t('auth.or')}</span></div>
         </div>
         <form class="auth-form" novalidate>
           <label class="auth-field">
@@ -111,12 +142,31 @@ export function openAuthModal(): Promise<string | null> {
     const termsRow = backdrop.querySelector('.auth-terms') as HTMLElement;
     const tabsRow = backdrop.querySelector('.auth-tabs') as HTMLElement;
     const note = backdrop.querySelector('.auth-note') as HTMLElement;
+    const providersRow = backdrop.querySelector('.auth-providers') as HTMLElement;
+    const inAppNote = backdrop.querySelector('.auth-inapp') as HTMLElement;
     const forgotLink = backdrop.querySelector('.auth-forgot-link') as HTMLButtonElement;
     const forgotForm = backdrop.querySelector('.auth-forgot') as HTMLFormElement;
     const femailInput = forgotForm.femail as HTMLInputElement;
     const forgotMsg = backdrop.querySelector('.auth-forgot-msg') as HTMLElement;
     const forgotSubmit = forgotForm.querySelector('.auth-submit') as HTMLButtonElement;
     const backBtn = backdrop.querySelector('.auth-back') as HTMLButtonElement;
+
+    // The provider row appears only once the server has confirmed it has
+    // credentials for something. A button that cannot work is worse than no
+    // button, and that is also why an in-app browser gets the note instead.
+    void availableProviders().then((list) => {
+      if (!list.includes('google') || !document.contains(backdrop)) return;
+      providersRow.hidden = false;
+      if (inAppBrowser()) {
+        inAppNote.hidden = false;
+        (providersRow.querySelector('.auth-provider') as HTMLButtonElement).disabled = true;
+      }
+    });
+    providersRow.querySelector('.auth-provider')!.addEventListener('click', () => {
+      // Whichever tab they are on, this is the same door — and if they are here
+      // from the save flow, the draft has to follow them through it.
+      startProviderSignIn('google', { claim: claimOnReturn, policy: POLICY_VERSION });
+    });
 
     // The strength bar, the reveal button and the suggester. Off to begin with:
     // the modal opens on the sign-in tab, where an account older than this

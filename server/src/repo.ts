@@ -324,7 +324,8 @@ export interface PhotoMeta {
 export interface UserRow {
   id: string;
   username: string;
-  passwordHash: string;
+  /** null for an account that only ever signed in with a provider. */
+  passwordHash: string | null;
   /** null until the user adds an email (pre-launch accounts have none). */
   email: string | null;
   /** ISO timestamp when the current email was verified, else null. */
@@ -334,11 +335,17 @@ export interface UserRow {
 }
 
 export interface AuthRepository {
-  /** Returns null if the username or email is already taken. */
+  /**
+   * Returns null if the username or email is already taken.
+   *
+   * `passwordHash` is null for an account created by signing in with a
+   * provider. Such an account has no password until the owner sets one from
+   * the account page, and `setPasswordHash` is what does that.
+   */
   createUser(
     username: string,
-    passwordHash: string,
-    opts?: { email?: string | null; acceptedVersion?: string | null },
+    passwordHash: string | null,
+    opts?: { email?: string | null; acceptedVersion?: string | null; emailVerified?: boolean },
   ): Promise<UserRow | null>;
   getUserByName(username: string): Promise<UserRow | null>;
   getUserById(id: string): Promise<UserRow | null>;
@@ -377,6 +384,21 @@ export interface AuthRepository {
   deleteUserTokens(userId: string): Promise<void>;
   /** Permanently delete a user (account deletion). Cascades tokens/usage rows. */
   deleteUser(userId: string): Promise<void>;
+
+  // ---- federated identities (Sign in with Google) ----
+  /**
+   * Which account owns this provider identity, if any.
+   *
+   * Keyed on the provider's id for the person, never their email — see
+   * `oauth_identities` in schema.sql.
+   */
+  getUserIdByIdentity(provider: string, providerUserId: string): Promise<string | null>;
+  /** Attach an identity. False when it already belongs to a different account. */
+  linkIdentity(provider: string, providerUserId: string, userId: string): Promise<boolean>;
+  /** Detach one. False when this user had no identity with that provider. */
+  unlinkIdentity(provider: string, userId: string): Promise<boolean>;
+  /** The providers this user can sign in with, for the account page. */
+  identitiesFor(userId: string): Promise<string[]>;
 }
 
 /** A single point in the conversion funnel, with how many unique sessions reached it. */

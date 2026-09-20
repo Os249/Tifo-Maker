@@ -4,7 +4,10 @@ import type { DesignStore } from '../core/design';
 import type { SeatMap, ToolId } from '../core/types';
 import { PALETTE_PRESETS } from '../core/template';
 import { PATTERN_PRESETS } from '../core/patterns';
-import { makeThumbnailB64 } from '../net/api';
+import {
+  makeThumbnailB64,
+  takeClaimIntent,
+} from '../net/api';
 import { renderTextCanvas, TIFO_FONTS, type RenderedText } from '../core/text';
 import { loadTifoFonts } from '../core/tifoFonts';
 import type { ObjectLayer } from '../core/objects';
@@ -1499,11 +1502,18 @@ export function mountToolbar(
     }
   };
 
-  /** Sign in or sign up, then adopt the session. Returns true when signed in. */
-  const ensureSignedIn = async (): Promise<boolean> => {
+  /**
+   * Sign in or sign up, then adopt the session. Returns true when signed in.
+   *
+   * `claim` is only meaningful on the provider path: pressing "Continue with
+   * Google" leaves the page, so this function never returns and the caller's
+   * next line never runs. The flag rides across the redirect instead, and the
+   * block near the save buttons picks the claim up on the way back.
+   */
+  const ensureSignedIn = async (claim = false): Promise<boolean> => {
     if (isSignedIn()) return true;
     track('auth_opened');
-    const name = await openAuthModal();
+    const name = await openAuthModal(claim);
     if (!name) return false;
     const me = await fetchMe();
     reflectSignedIn(name, me?.id, true); // fires signed_up when genuinely fresh
@@ -1555,19 +1565,31 @@ export function mountToolbar(
       behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
     });
     accountOffer.querySelector('.ao-go')!.addEventListener('click', async () => {
-      if (!(await ensureSignedIn())) return;
+      if (!(await ensureSignedIn(true))) return;
       accountOffer.hidden = true;
       // Claim: push the work they already made onto the brand-new account, so
       // they land on their tifo instead of an empty account. This can take a
       // few seconds on a big design, and reflectSignedIn has just overwritten
       // the message with "signed in as ...", so say what is still happening.
-      message.textContent = i18nT('save.claiming');
-      if (await saveToAccount(false)) {
-        track('draft_claimed');
-        message.textContent = i18nT('save.claimed');
-      }
-      renderDraftState();
+      await claimDraftOntoAccount();
     });
+  };
+
+  /**
+   * Push the work they already made onto the account they just created, so they
+   * land on their tifo instead of an empty account.
+   *
+   * This can take a few seconds on a big design, and whatever signed them in has
+   * just overwritten the message with "signed in as ...", so it says what is
+   * still happening.
+   */
+  const claimDraftOntoAccount = async (): Promise<void> => {
+    message.textContent = i18nT('save.claiming');
+    if (await saveToAccount(false)) {
+      track('draft_claimed');
+      message.textContent = i18nT('save.claimed');
+    }
+    renderDraftState();
   };
 
   // One action, reachable from two places. It always succeeds, and it never
@@ -1597,6 +1619,21 @@ export function mountToolbar(
 
   saveBtn.addEventListener('click', () => void doSave(saveBtn));
   saveTopBtn?.addEventListener('click', () => void doSave(saveTopBtn));
+
+  // Back from Google. The session was adopted in main() before the editor was
+  // built; what is left is the half of the save flow the redirect interrupted.
+  // Without this, someone who painted a tifo, pressed Save, and signed up with
+  // Google would arrive at an empty account — the exact failure the save-flow
+  // rewrite existed to fix, reintroduced by the redirect.
+  if (takeClaimIntent()) {
+    void (async () => {
+      const me = await fetchMe();
+      if (!me?.username) return;
+      reflectSignedIn(me.username, me.id, true);
+      reflectAdmin(me.isAdmin);
+      await claimDraftOntoAccount();
+    })();
+  }
   // Ctrl/Cmd+S is what people reach for before they hunt for a button.
   window.addEventListener('keydown', (e) => {
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {

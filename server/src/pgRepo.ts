@@ -862,7 +862,7 @@ function mapUserRow(r: {
   return {
     id: String(r.id),
     username: String(r.username),
-    passwordHash: String(r.password_hash),
+    passwordHash: r.password_hash == null ? null : String(r.password_hash),
     email: r.email == null ? null : String(r.email),
     emailVerifiedAt: r.email_verified_at == null ? null : new Date(r.email_verified_at as string).toISOString(),
     isPro: r.is_pro === true,
@@ -874,17 +874,20 @@ export class PgAuthRepository implements AuthRepository {
 
   async createUser(
     username: string,
-    passwordHash: string,
-    opts: { email?: string | null; acceptedVersion?: string | null } = {},
+    passwordHash: string | null,
+    opts: { email?: string | null; acceptedVersion?: string | null; emailVerified?: boolean } = {},
   ): Promise<UserRow | null> {
     const acceptedVersion = opts.acceptedVersion ?? null;
     const acceptedAt = acceptedVersion ? new Date() : null;
+    // Only a provider that told us it verified the address gets to skip the
+    // code-in-your-inbox step.
+    const verifiedAt = opts.email && opts.emailVerified ? new Date() : null;
     try {
       const res = await this.pool.query(
-        `INSERT INTO users (username, password_hash, email, accepted_terms_version, accepted_terms_at)
-         VALUES ($1, $2, $3, $4, $5)
+        `INSERT INTO users (username, password_hash, email, accepted_terms_version, accepted_terms_at, email_verified_at)
+         VALUES ($1, $2, $3, $4, $5, $6)
          RETURNING id, username, password_hash, email, email_verified_at`,
-        [username, passwordHash, opts.email ?? null, acceptedVersion, acceptedAt],
+        [username, passwordHash, opts.email ?? null, acceptedVersion, acceptedAt, verifiedAt],
       );
       return mapUserRow(res.rows[0]);
     } catch (err) {
@@ -1004,6 +1007,48 @@ export class PgAuthRepository implements AuthRepository {
 
   async deleteUser(userId: string): Promise<void> {
     await this.pool.query('DELETE FROM users WHERE id = $1', [userId]);
+  }
+
+  // ---- federated identities ----
+
+  async getUserIdByIdentity(provider: string, providerUserId: string): Promise<string | null> {
+    const res = await this.pool.query(
+      'SELECT user_id FROM oauth_identities WHERE provider = $1 AND provider_user_id = $2',
+      [provider, providerUserId],
+    );
+    return res.rowCount ? String(res.rows[0].user_id) : null;
+  }
+
+  async linkIdentity(provider: string, providerUserId: string, userId: string): Promise<boolean> {
+    // ON CONFLICT DO NOTHING, then report whether a row landed: two browsers
+    // finishing the same callback at once must not produce two accounts, and
+    // the primary key is the only thing that can decide that race.
+    const res = await this.pool.query(
+      `INSERT INTO oauth_identities (provider, provider_user_id, user_id)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (provider, provider_user_id) DO NOTHING`,
+      [provider, providerUserId, userId],
+    );
+    if (res.rowCount) return true;
+    // Already there: fine if it is already ours, a refusal if it is someone else's.
+    const owner = await this.getUserIdByIdentity(provider, providerUserId);
+    return owner === userId;
+  }
+
+  async unlinkIdentity(provider: string, userId: string): Promise<boolean> {
+    const res = await this.pool.query('DELETE FROM oauth_identities WHERE provider = $1 AND user_id = $2', [
+      provider,
+      userId,
+    ]);
+    return !!res.rowCount;
+  }
+
+  async identitiesFor(userId: string): Promise<string[]> {
+    const res = await this.pool.query(
+      'SELECT provider FROM oauth_identities WHERE user_id = $1 ORDER BY provider',
+      [userId],
+    );
+    return res.rows.map((r: { provider: unknown }) => String(r.provider));
   }
 }
 

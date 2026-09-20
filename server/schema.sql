@@ -52,6 +52,28 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS is_pro                 BOOLEAN NOT NU
 -- Case-insensitive uniqueness, but only across rows that actually have an email.
 CREATE UNIQUE INDEX IF NOT EXISTS users_email_key ON users (lower(email)) WHERE email IS NOT NULL;
 
+-- Signing in with Google (and, later, another provider) means an account can
+-- exist with no password at all, so the column stops being mandatory. Accounts
+-- that have one are unaffected; the policy in src/core/password.ts still governs
+-- every password that gets chosen.
+ALTER TABLE users ALTER COLUMN password_hash DROP NOT NULL;
+
+-- One row per (provider, their id for this person). A table rather than columns
+-- on users, because one person may end up with Google, a password, and whatever
+-- comes third — and because the primary key is then exactly the uniqueness rule
+-- that matters: a provider identity belongs to at most one account.
+--
+-- provider_user_id is the provider's own stable id (Google's `sub`), never an
+-- email address: an address can move between people, that id cannot.
+CREATE TABLE IF NOT EXISTS oauth_identities (
+  provider         TEXT NOT NULL,
+  provider_user_id TEXT NOT NULL,
+  user_id          UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  linked_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (provider, provider_user_id)
+);
+CREATE INDEX IF NOT EXISTS oauth_identities_user ON oauth_identities (user_id);
+
 -- Opaque bearer tokens, stored hashed. A leaked DB row cannot be replayed.
 CREATE TABLE IF NOT EXISTS auth_tokens (
   token_hash TEXT PRIMARY KEY,                -- sha256(token) hex

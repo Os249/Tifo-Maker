@@ -6,7 +6,7 @@ import { installConsent } from './ui/consent';
 import { generateSeatMapAsync } from './workers/client';
 import { DEFAULT_PALETTE, DEFAULT_TEMPLATE, PALETTE_PRESETS, TEMPLATES } from './core/template';
 import { templateById, registerServerCommunity, type StadiumEntry } from './core/stadiumCatalog';
-import { fetchCommunityStadiums } from './net/api';
+import { adoptProviderSession, fetchCommunityStadiums, providerFailure } from './net/api';
 import { requestStadiumSwitch } from './ui/stadiumSwitch';
 import { registerCustom } from './core/customStadiums';
 import { PATTERN_PRESETS } from './core/patterns';
@@ -44,6 +44,16 @@ async function main(): Promise<void> {
   initLang();
   applyDom(document);
   installConsent();
+
+  // Back from a provider's consent screen. This trades the one-time cookie the
+  // callback left for the session token, and strips the marker out of the URL.
+  //
+  // It happens before everything else because everything else asks whether we
+  // are signed in — including the desktop-only gate a few lines down, which
+  // returns early and would otherwise strand a session that had just been
+  // granted.
+  await adoptProviderSession();
+  const signinFailed = providerFailure();
 
   const sharedId = sharedDesignId();
   // The editor is desktop-only for now. Two phone bug reports were both people
@@ -286,6 +296,14 @@ async function main(): Promise<void> {
   const objects = new ObjectLayer();
   editor.attachObjectLayer(objects);
   mountToolbar(document.body, editor, store, map, objects, () => preview, restoredDesignId);
+
+  // A sign-in that did not finish says why, in the same place every other
+  // outcome is reported. Reasons are a fixed set from the callback; nothing the
+  // provider said is echoed into the page.
+  if (signinFailed) {
+    const msg = document.getElementById('message');
+    if (msg) msg.textContent = t(`auth.err.${signinFailed}`);
+  }
 
   // --- Phase 2: lazy-initialized 3D preview sharing the same store ---
   const previewHost = document.getElementById('preview-host')!;

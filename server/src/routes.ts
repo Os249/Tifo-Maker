@@ -42,6 +42,16 @@ import {
   type PasswordProblem,
   type PasswordVerdict,
 } from '../../src/core/password';
+import { deriveUsername } from '../../src/core/handle';
+import {
+  newChallenge,
+  openPending,
+  PROVIDERS,
+  safeReturnTo,
+  sameState,
+  sealPending,
+  type PendingAuth,
+} from './oauth';
 
 /**
  * HTTP surface (blueprint §2.2, completed with auth + gallery):
@@ -219,6 +229,14 @@ export interface AppOptions {
   soc?: SocMonitor;
   /** Which store the repositories use, for the posture panel. */
   database?: 'postgres' | 'memory';
+  /**
+   * Provider credentials, overriding the environment.
+   *
+   * Production reads GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET; tests pass them
+   * here so the sign-in routes can be exercised without setting process-wide
+   * variables that would leak into every other test in the file.
+   */
+  oauth?: Record<string, { id: string; secret: string }>;
 }
 
 export async function buildApp(
@@ -1313,14 +1331,22 @@ export async function buildApp(
     if (!userId) return;
     const { currentPassword, newPassword } = (req.body ?? {}) as { currentPassword?: string; newPassword?: string };
     const user = await auth.getUserById(userId).catch(() => null);
-    // Ownership first, then the policy. The old order graded the new password
-    // before checking that the caller could prove the account was theirs, which
-    // meant anyone holding a stale token could probe the blocklist for free.
-    const current = await verifyPassword(currentPassword ?? '', user?.passwordHash ?? await dummyHash());
-    if (!user || !currentPassword || !current.ok) {
-      req.socNote = { kind: 'password_change_failed', subject: user?.username };
-      return reply.code(401).send({ error: 'current password is incorrect' });
+    // An account created by signing in with a provider has no password to
+    // confirm. Asking for one it never had would lock it out of ever getting
+    // one — and the bearer token has already proved who is asking, which is the
+    // only thing the current password was ever there to prove.
+    const settingFirst = !!user && user.passwordHash === null;
+    if (!settingFirst) {
+      // Ownership first, then the policy. The old order graded the new password
+      // before checking that the caller could prove the account was theirs, which
+      // meant anyone holding a stale token could probe the blocklist for free.
+      const current = await verifyPassword(currentPassword ?? '', user?.passwordHash ?? await dummyHash());
+      if (!user || !currentPassword || !current.ok) {
+        req.socNote = { kind: 'password_change_failed', subject: user?.username };
+        return reply.code(401).send({ error: 'current password is incorrect' });
+      }
     }
+    if (!user) return reply.code(401).send({ error: 'current password is incorrect' });
     const next = gradePassword(reply, newPassword, { email: user.email ?? undefined, username: user.username });
     if (next === null) return;
     await auth.setPasswordHash(userId, await hashPassword(next));
@@ -1433,6 +1459,278 @@ export async function buildApp(
     return reply.code(204).send();
   });
 
+  // ---------- signing in with a provider ----------
+  //
+  // The whole round trip lives here. The provider-specific parts — which URL,
+  // which scopes, how to read a profile — are in oauth.ts; what is below is the
+  // part that is the same for every provider and is where the security is.
+
+  const providerSecrets: Record<string, { id: string; secret: string }> = {
+    google: {
+      id: process.env.GOOGLE_CLIENT_ID?.trim() ?? '',
+      secret: process.env.GOOGLE_CLIENT_SECRET?.trim() ?? '',
+    },
+    ...(options.oauth ?? {}),
+  };
+  /** A provider is offered only when it is fully configured. */
+  const providerReady = (id: string): boolean =>
+    !!PROVIDERS[id] && !!providerSecrets[id]?.id && !!providerSecrets[id]?.secret;
+
+  const PENDING_COOKIE = 'tm_oauth';
+  const HANDOFF_COOKIE = 'tm_handoff';
+  const PENDING_TTL_MS = 10 * 60 * 1000;
+  const HANDOFF_TTL_MS = 2 * 60 * 1000;
+
+  // Unconditional Secure would silently break sign-in on a local http dev
+  // server, which reads to the developer as "Google is broken".
+  const wantsSecure = (req: FastifyRequest): boolean =>
+    req.protocol === 'https' || process.env.NODE_ENV === 'production';
+
+  /**
+   * SameSite=Lax, not Strict.
+   *
+   * The callback is a top-level GET navigation arriving from accounts.google.com
+   * — a cross-site request. Strict would withhold the cookie exactly then, and
+   * every sign-in would fail the state check. Lax sends it on a top-level GET
+   * and withholds it on a cross-site POST, which is precisely the pair of
+   * behaviours this needs.
+   */
+  const cookieLine = (req: FastifyRequest, name: string, value: string, path: string, maxAgeMs: number): string =>
+    `${name}=${encodeURIComponent(value)}; Path=${path}; Max-Age=${Math.floor(maxAgeMs / 1000)}; HttpOnly; SameSite=Lax${wantsSecure(req) ? '; Secure' : ''}`;
+  const clearLine = (req: FastifyRequest, name: string, path: string): string =>
+    `${name}=; Path=${path}; Max-Age=0; HttpOnly; SameSite=Lax${wantsSecure(req) ? '; Secure' : ''}`;
+
+  /**
+   * The callback URL, built the same way email links are.
+   *
+   * `emailBase` prefers PUBLIC_URL and otherwise only trusts a Host it
+   * recognises. A forged Host header must not be able to bend an OAuth callback
+   * any more than it can bend a password-reset link — and the redirect_uri is
+   * matched exactly by the provider, so a wrong one fails loudly rather than
+   * quietly sending a code somewhere else.
+   */
+  const callbackUri = (req: FastifyRequest, provider: string): string =>
+    `${emailBase(req)}/api/auth/${provider}/callback`;
+
+  /** Which providers the sign-in form should offer. */
+  app.get('/api/auth/providers', async () => ({
+    providers: Object.keys(PROVIDERS).filter(providerReady),
+  }));
+
+  const startFlow = (req: FastifyRequest, reply: FastifyReply, provider: string, extra: Partial<PendingAuth>): string => {
+    const { state, verifier, challenge, nonce } = newChallenge();
+    const q = req.query as { returnTo?: string; claim?: string; policy?: string };
+    const pending: PendingAuth = {
+      p: provider,
+      s: state,
+      v: verifier,
+      r: safeReturnTo(q.returnTo),
+      c: q.claim === '1' ? 1 : 0,
+      e: Date.now() + PENDING_TTL_MS,
+      ...extra,
+    };
+    void reply.header('set-cookie', [cookieLine(req, PENDING_COOKIE, sealPending(pending), '/api/auth', PENDING_TTL_MS)]);
+    return PROVIDERS[provider]!.authorizeUrl({
+      clientId: providerSecrets[provider]!.id,
+      redirectUri: callbackUri(req, provider),
+      state,
+      challenge,
+      nonce,
+    });
+  };
+
+  // Step one: send the browser to the provider. A plain navigation, so there is
+  // no script from anyone else on any page of this site and the CSP is untouched.
+  app.get('/api/auth/:provider', authLimit, async (req, reply) => {
+    const { provider } = req.params as { provider: string };
+    if (!providerReady(provider)) return reply.code(404).send({ error: 'not found' });
+    const policy = (req.query as { policy?: string }).policy;
+    const url = startFlow(req, reply, provider, typeof policy === 'string' ? { a: policy.slice(0, 32) } : {});
+    return reply.header('cache-control', 'no-store').redirect(url);
+  });
+
+  // Step two: the browser comes back. Everything here is about being sure it is
+  // the same browser finishing the same request it started.
+  app.get('/api/auth/:provider/callback', authLimit, async (req, reply) => {
+    const { provider } = req.params as { provider: string };
+    const impl = PROVIDERS[provider];
+    const pending = openPending(readCookie(req, PENDING_COOKIE) ?? undefined);
+    const cleared = clearLine(req, PENDING_COOKIE, '/api/auth');
+
+    /**
+     * Fail towards the normal sign-in form with a reason in the query, never a
+     * stack trace and never a blank page. `reason` is one of a fixed set the
+     * client has copy for; nothing from the provider is echoed back.
+     */
+    const bail = (reason: string, to = '/app'): FastifyReply =>
+      reply
+        .header('set-cookie', [cleared])
+        .header('cache-control', 'no-store')
+        .header('referrer-policy', 'no-referrer')
+        .redirect(`${to}?signin=failed&reason=${encodeURIComponent(reason)}`);
+
+    if (!impl || !providerReady(provider) || !pending || pending.p !== provider) return bail('state');
+    const q = req.query as { code?: string; state?: string; error?: string };
+    // The user pressed "cancel" on the consent screen. Not an error worth a scary word.
+    if (typeof q.error === 'string') return bail('cancelled', pending.r);
+    if (typeof q.code !== 'string' || typeof q.state !== 'string') return bail('state', pending.r);
+    // RFC 9700: one-time state, bound to this user agent (it arrived in an
+    // HttpOnly cookie), compared without leaking position through timing.
+    if (!sameState(q.state, pending.s)) return bail('state', pending.r);
+
+    const accessToken = await impl.exchange({
+      code: q.code,
+      verifier: pending.v,
+      clientId: providerSecrets[provider]!.id,
+      clientSecret: providerSecrets[provider]!.secret,
+      redirectUri: callbackUri(req, provider),
+    });
+    if (!accessToken) return bail('provider', pending.r);
+    const profile = await impl.profile(accessToken);
+    if (!profile) return bail('provider', pending.r);
+
+    const owner = await auth.getUserIdByIdentity(provider, profile.id).catch(() => null);
+
+    // ---- linking an extra provider onto an account that is already signed in.
+    // Safe by construction: `pending.u` was written by us, in a request that
+    // carried a bearer token, and the cookie carrying it is signed.
+    if (pending.u) {
+      if (owner && owner !== pending.u) return bail('linked_elsewhere', pending.r);
+      if (!owner && !(await auth.linkIdentity(provider, profile.id, pending.u).catch(() => false))) {
+        return bail('provider', pending.r);
+      }
+      req.socNote = { kind: 'oauth_linked', subject: provider };
+      return reply
+        .header('set-cookie', [cleared])
+        .header('cache-control', 'no-store')
+        .redirect(`${pending.r}?linked=${provider}`);
+    }
+
+    // ---- signing in.
+    let userId = owner;
+
+    // Attaching this identity to an account that already exists is the one
+    // genuinely dangerous step in the whole flow, and it needs BOTH sides
+    // verified. Checking only the provider's claim is CVE-2026-53516: an
+    // attacker registers the victim's address with a password, leaves it
+    // unverified, waits for the victim to sign in with Google, and the link
+    // hands them an account with a password they know. So an unverified local
+    // account is never linked to — it is sent to prove ownership first.
+    if (!userId && profile.email && profile.emailVerified) {
+      const byEmail = await auth.getUserByEmail(profile.email).catch(() => null);
+      if (byEmail) {
+        if (!byEmail.emailVerifiedAt) {
+          req.socNote = { kind: 'oauth_link_refused', subject: byEmail.username };
+          return bail('verify_first', pending.r);
+        }
+        if (!(await auth.linkIdentity(provider, profile.id, byEmail.id).catch(() => false))) {
+          return bail('provider', pending.r);
+        }
+        userId = byEmail.id;
+      }
+    }
+
+    // ---- nobody here yet: a new account, with no password at all.
+    if (!userId) {
+      const seed = profile.email ?? profile.name ?? 'tifo';
+      // The address goes on the account only when the provider verified it, and
+      // only when it is free. An unverified address that already belongs to
+      // someone else is dropped rather than fought over — the account is created
+      // without one and the app asks for an address afterwards.
+      const mail = profile.email && profile.emailVerified ? profile.email : null;
+      let created = null as Awaited<ReturnType<typeof auth.createUser>>;
+      for (let attempt = 0; attempt < 5 && !created; attempt++) {
+        const name = deriveUsername(seed, attempt, () => randomInt(0, 1_000_000) / 1_000_000);
+        if (adminFolded.has(name.toLowerCase())) continue;
+        created =
+          (await auth
+            .createUser(name, null, { email: mail, acceptedVersion: pending.a ?? null, emailVerified: !!mail })
+            .catch(() => null)) ?? null;
+        // A taken EMAIL fails every attempt, so stop rewriting the name and try
+        // once without it rather than burning all five tries on the same clash.
+        if (!created && mail && attempt === 1) {
+          created =
+            (await auth
+              .createUser(deriveUsername(seed, attempt + 1, () => randomInt(0, 1_000_000) / 1_000_000), null, {
+                acceptedVersion: pending.a ?? null,
+              })
+              .catch(() => null)) ?? null;
+        }
+      }
+      if (!created) return bail('provider', pending.r);
+      if (!(await auth.linkIdentity(provider, profile.id, created.id).catch(() => false))) {
+        return bail('provider', pending.r);
+      }
+      userId = created.id;
+    }
+
+    const { token, tokenHash } = issueToken();
+    await auth.createToken(userId, tokenHash, new Date(Date.now() + TOKEN_TTL_MS));
+    req.socNote = { subject: (await auth.getUserById(userId).catch(() => null))?.username };
+
+    // The session must not travel in the URL. This site's own logger redacts
+    // `token=` out of request lines precisely because URLs end up in history,
+    // in Referer headers and in logs — so the token goes in a short-lived
+    // HttpOnly cookie scoped to the one endpoint that trades it back, and the
+    // page swaps it for the real thing on load.
+    return reply
+      .header('set-cookie', [cleared, cookieLine(req, HANDOFF_COOKIE, token, '/api/auth/handoff', HANDOFF_TTL_MS)])
+      .header('cache-control', 'no-store')
+      .header('referrer-policy', 'no-referrer')
+      .redirect(`${pending.r}?signedin=${provider}${pending.c ? '&claim=1' : ''}`);
+  });
+
+  /**
+   * Trade the handoff cookie for the bearer token the app actually uses.
+   *
+   * Single-use, and not merely because the cookie is cleared — clearing is a
+   * request to the browser, not a fact. The handed token is *spent*: a fresh one
+   * is minted and the old one deleted, so a replay of the same cookie finds a
+   * token that no longer exists. Whoever holds a copy gets 401, not a session.
+   *
+   * A POST, so SameSite=Lax withholds the cookie from any cross-site attempt.
+   */
+  app.post('/api/auth/handoff', authLimit, async (req, reply) => {
+    const handed = readCookie(req, HANDOFF_COOKIE);
+    void reply.header('set-cookie', [clearLine(req, HANDOFF_COOKIE, '/api/auth/handoff')]);
+    if (!handed) return reply.code(401).send({ error: 'no session to adopt' });
+    const userId = await auth.getUserIdByToken(hashToken(handed)).catch(() => null);
+    if (!userId) return reply.code(401).send({ error: 'no session to adopt' });
+    const fresh = issueToken();
+    await auth.createToken(userId, fresh.tokenHash, new Date(Date.now() + TOKEN_TTL_MS));
+    await auth.deleteToken(hashToken(handed)).catch(() => {});
+    const user = await auth.getUserById(userId).catch(() => null);
+    return { token: fresh.token, username: user?.username ?? null };
+  });
+
+  /** Start a link from the account page. Authenticated, so the callback can trust `u`. */
+  app.post('/api/account/link/:provider', authLimit, async (req, reply) => {
+    const userId = await requireUser(req, reply);
+    if (!userId) return;
+    const { provider } = req.params as { provider: string };
+    if (!providerReady(provider)) return reply.code(404).send({ error: 'not found' });
+    const url = startFlow(req, reply, provider, { u: userId });
+    return { url };
+  });
+
+  /** Remove one. Never leaves an account with no way back in. */
+  app.delete('/api/account/link/:provider', authLimit, async (req, reply) => {
+    const userId = await requireUser(req, reply);
+    if (!userId) return;
+    const { provider } = req.params as { provider: string };
+    const user = await auth.getUserById(userId).catch(() => null);
+    const linked = await auth.identitiesFor(userId).catch(() => [] as string[]);
+    if (!user?.passwordHash && linked.length <= 1) {
+      return reply.code(400).send({
+        error: 'set a password before removing your last sign-in method',
+        code: 'last_method',
+      });
+    }
+    const removed = await auth.unlinkIdentity(provider, userId).catch(() => false);
+    if (!removed) return reply.code(404).send({ error: 'not found' });
+    return { ok: true, providers: await auth.identitiesFor(userId).catch(() => [] as string[]) };
+  });
+
   app.get('/api/me', async (req, reply) => {
     const userId = await requireUser(req, reply);
     if (!userId) return;
@@ -1443,6 +1741,11 @@ export async function buildApp(
       email: user?.email ?? null,
       emailVerified: !!user?.emailVerifiedAt,
       isAdmin: await isAdminUser(userId),
+      // What this account can sign in with. The account page needs both: it
+      // offers "Set a password" instead of "Change password" when there is
+      // none, and it refuses to unlink the last way in.
+      providers: await auth.identitiesFor(userId).catch(() => [] as string[]),
+      hasPassword: !!user?.passwordHash,
     };
   });
 

@@ -7,8 +7,34 @@
  * fixed 2.5s wait fires before the claim finishes, which reads as a broken
  * feature when the feature is merely slow.
  */
+import { spawn } from 'node:child_process';
 import { chromium } from 'playwright';
-const B='http://127.0.0.1:8911';
+
+// Self-contained, like e2e-verify.mjs: it boots its own server on memory repos
+// rather than assuming one is already listening. Needing a second terminal is
+// how a check meant to run after every deploy quietly stops being run.
+const PORT = 8911;
+const B = `http://127.0.0.1:${PORT}`;
+const server = spawn(process.execPath, ['--import', 'tsx', 'server/src/server.ts'], {
+  env: { ...process.env, PORT: String(PORT), NODE_ENV: 'development', DATABASE_URL: '', RESEND_API_KEY: '' },
+  stdio: ['ignore', 'pipe', 'pipe'],
+});
+const serverLog = [];
+server.stdout.on('data', (d) => serverLog.push(String(d)));
+server.stderr.on('data', (d) => serverLog.push(String(d)));
+const stop = () => { try { server.kill(); } catch { /* already gone */ } };
+process.on('exit', stop);
+let up = false;
+for (let i = 0; i < 90; i++) {
+  if (await fetch(`${B}/health`).then((r) => r.ok).catch(() => false)) { up = true; break; }
+  await new Promise((r) => setTimeout(r, 500));
+}
+if (!up) {
+  // The usual cause is dist/ not being built yet, and the server says so.
+  console.error('the server never came up on ' + B + '\n' + serverLog.join(''));
+  stop();
+  process.exit(1);
+}
 const browser=await chromium.launch({executablePath:'/opt/pw-browsers/chromium',args:['--use-gl=swiftshader','--enable-unsafe-swiftshader']}).catch(()=>chromium.launch());
 const ctx=await browser.newContext({viewport:{width:1400,height:900}});
 const page=await ctx.newPage();
@@ -86,4 +112,4 @@ check('can sign back in with the email', login.status()===200, `status=${login.s
 
 console.log(`\n  ${pass} passed, ${fail} failed`);
 console.log('  pageerrors:', errs.length?errs:'none');
-await browser.close(); process.exit(fail?1:0);
+await browser.close(); stop(); process.exit(fail?1:0);

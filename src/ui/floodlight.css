@@ -583,12 +583,18 @@ body.viewer { display:block; overflow-y:auto; background:var(--ink-0); }
 .v-muted { color:var(--text-3); font-size:13px; grid-column:1/-1; }
 
 /* ---- auth modal ---- */
+/* `align-items:flex-start` with `margin:auto` on the dialog, rather than
+   `align-items:center`: a centred flex child that is taller than the scroll
+   container gets clipped at the TOP and cannot be scrolled to. The sign-up
+   dialog is now tall enough for that to happen on a short laptop window, and
+   the part that would disappear is the button. */
 .auth-backdrop {
-  position:fixed; inset:0; z-index:200; display:flex; align-items:center; justify-content:center;
+  position:fixed; inset:0; z-index:200; display:flex; align-items:flex-start; justify-content:center;
+  overflow-y:auto; overscroll-behavior:contain; padding:20px 16px;
   background:rgba(7,8,10,.72); backdrop-filter:blur(3px);
 }
 .auth-modal {
-  position:relative; width:360px; max-width:calc(100vw - 32px);
+  position:relative; width:360px; max-width:100%; margin:auto;
   background:var(--ink-1); border:1px solid var(--line-2); border-radius:14px;
   padding:24px; box-shadow:0 24px 60px rgba(0,0,0,.5);
 }
@@ -951,6 +957,21 @@ body.viewer { display:block; overflow-y:auto; background:var(--ink-0); }
   }
   .save-top span { display:none; }
 }
+
+/* ---- signing in with a provider ---- */
+.auth-providers { display:flex; flex-direction:column; gap:12px; margin-bottom:16px; }
+.auth-provider {
+  display:flex; align-items:center; justify-content:center; gap:10px; width:100%;
+  padding:11px 0; font:inherit; font-size:14px; font-weight:500;
+  background:var(--ink-3); color:var(--text-1);
+  border:1px solid var(--line-2); border-radius:var(--r-md); cursor:pointer;
+}
+.auth-provider:hover:not(:disabled) { border-color:var(--text-3); background:var(--ink-3); }
+.auth-provider:disabled { opacity:.45; cursor:default; }
+.auth-inapp { margin:0; font-size:11.5px; line-height:1.5; color:var(--text-3); text-align:center; }
+/* A rule with the word sitting in it, rather than two rules and a gap. */
+.auth-or { display:flex; align-items:center; gap:10px; color:var(--text-3); font-size:11px; }
+.auth-or::before, .auth-or::after { content:''; flex:1; height:1px; background:var(--line-2); }
 
 .auth-terms { margin:12px 0 0; font-size:11px; line-height:1.6; color:var(--text-3); text-align:center; }
 .auth-terms a { color:var(--text-2); text-decoration:underline; }
