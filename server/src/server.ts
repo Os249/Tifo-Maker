@@ -18,7 +18,8 @@ import { createEmailSender } from './email';
 import { seedTemplates } from './seedTemplates';
 import type { AuthRepository, DesignRepository } from './repo';
 import { envNum } from './env';
-import { logConfigWarnings } from './preflight';
+import { logConfigWarnings, logProviderSetup } from './preflight';
+import { schemaStatements } from './schema';
 import { SocMonitor, socKeyFrom } from './soc';
 import { MemorySocRepository, PgSocRepository } from './socRepo';
 
@@ -60,14 +61,12 @@ function resolveDist(): string | undefined {
 async function applySchema(pool: pg.Pool): Promise<void> {
   const schemaPath = join(__dirname, '../schema.sql');
   const sql = readFileSync(schemaPath, 'utf8');
-  // Run statements individually so one failing statement on a pre-existing database
-  // can't abort the rest — every CREATE/ALTER ... IF NOT EXISTS still gets applied.
-  // (Running the whole file as one query meant an early error skipped the new
-  // email/is_pro/accepted_terms columns, which then 500'd signup.)
-  const statements = sql
-    .split(/;\s*(?:\r?\n|$)/)
-    .map((s) => s.trim())
-    .filter(Boolean);
+  // Run statements individually so one failing statement on a pre-existing
+  // database can't abort the rest. The splitter is in schema.ts so a test can
+  // apply the file exactly the way a deploy does — see the Postgres block in
+  // server.test.mts, which forces password_hash back to NOT NULL and checks the
+  // migration takes.
+  const statements = schemaStatements(sql);
   for (const stmt of statements) {
     try {
       await pool.query(stmt);
@@ -222,6 +221,7 @@ async function main(): Promise<void> {
   // Say what the deployment has not been told, before it starts serving. Every
   // one of these has a safe default, which is why they go unnoticed.
   logConfigWarnings();
+  logProviderSetup();
 
   const port = envNum('PORT', 8787, 1, 65535);
   await app.listen({ port, host: '0.0.0.0' });

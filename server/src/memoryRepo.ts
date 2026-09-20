@@ -599,7 +599,7 @@ export class MemoryAuthRepository implements AuthRepository {
   async createUser(
     username: string,
     passwordHash: string | null,
-    opts: { email?: string | null; acceptedVersion?: string | null; emailVerified?: boolean } = {},
+    opts: { email?: string | null; acceptedVersion?: string | null; emailVerified?: boolean; usernameChosen?: boolean } = {},
   ): Promise<UserRow | null> {
     if (this.users.has(username)) return null;
     const email = opts.email ?? null;
@@ -613,6 +613,7 @@ export class MemoryAuthRepository implements AuthRepository {
       // code-in-your-inbox step; everyone else starts unverified.
       emailVerifiedAt: email && opts.emailVerified ? new Date().toISOString() : null,
       isPro: false,
+      usernameChosen: opts.usernameChosen !== false,
     };
     this.users.set(username, row);
     return row;
@@ -658,14 +659,20 @@ export class MemoryAuthRepository implements AuthRepository {
     const u = await this.getUserById(userId);
     if (!u) return false;
     const lower = username.toLowerCase();
+    // Any successful trip through here means the owner has settled on a name —
+    // including confirming the one we suggested, which is a choice too.
     if (u.username.toLowerCase() === lower && u.username !== username) {
       // Same name, different case: re-key without a uniqueness check.
       this.users.delete(u.username);
       u.username = username;
+      u.usernameChosen = true;
       this.users.set(username, u);
       return true;
     }
-    if (u.username === username) return true; // no-op
+    if (u.username === username) {
+      u.usernameChosen = true;
+      return true; // no-op on the name, but it confirms it
+    }
     for (const other of this.users.values()) {
       if (other.id !== userId && other.username.toLowerCase() === lower) return false;
     }
@@ -674,8 +681,13 @@ export class MemoryAuthRepository implements AuthRepository {
     // old name forever and let someone else's rename collide with a ghost.
     this.users.delete(u.username);
     u.username = username;
+    u.usernameChosen = true;
     this.users.set(username, u);
     return true;
+  }
+
+  async hasChosenUsername(userId: string): Promise<boolean> {
+    return (await this.getUserById(userId))?.usernameChosen !== false;
   }
 
   async setPro(userId: string, isPro: boolean): Promise<void> {

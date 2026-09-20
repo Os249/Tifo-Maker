@@ -1045,11 +1045,67 @@ async function makeDesign(app: FastifyInstance, token: string, isPublic = false)
         emailVerified: boolean;
         providers: string[];
         hasPassword: boolean;
+        needsUsername: boolean;
       };
       assert.equal(meNew.email, 'newfan@example.test');
       assert.equal(meNew.emailVerified, true, 'Google verified it, so the inbox round trip is skipped');
       assert.deepEqual(meNew.providers, ['google']);
       assert.equal(meNew.hasPassword, false, 'no password was ever chosen');
+
+      // ---- the handle is theirs to pick, and the wall says so
+      //
+      // A provider gives an email and no handle. Rather than stamping
+      // `gfan1789865580969` on someone, the account is created wearing that as a
+      // placeholder and held until its owner chooses. The wall is server-side
+      // because a wall only in the browser is a suggestion.
+      assert.equal(meNew.needsUsername, true, 'a Google account has not named itself yet');
+      const walled = await gApp.inject({
+        method: 'POST',
+        url: '/api/designs',
+        headers: bearer(newcomerToken),
+        payload: { title: 'nope', templateId: DEFAULT_TEMPLATE.id, templateVersion: 1, palette: PALETTE, cellsGzB64 },
+      });
+      assert.equal(walled.statusCode, 428, 'everything else is refused until a name is picked');
+      assert.equal((walled.json() as { code: string }).code, 'needs_username');
+      // ...but not the few things needed to get past it, or to leave.
+      assert.equal(
+        (await gApp.inject({ method: 'GET', url: '/api/me', headers: bearer(newcomerToken) })).statusCode,
+        200,
+        'they can still find out who they are',
+      );
+      const badName = await gApp.inject({
+        method: 'POST', url: '/api/account/username', headers: bearer(newcomerToken), payload: { username: 'no' },
+      });
+      assert.equal(badName.statusCode, 400, 'and the name still has to be a legal one');
+      const named = await gApp.inject({
+        method: 'POST', url: '/api/account/username', headers: bearer(newcomerToken), payload: { username: 'curva_north' },
+      });
+      assert.equal(named.statusCode, 200, 'picking one works');
+      const afterNaming = (await gApp.inject({ method: 'GET', url: '/api/me', headers: bearer(newcomerToken) })).json() as {
+        username: string; needsUsername: boolean;
+      };
+      assert.equal(afterNaming.username, 'curva_north');
+      assert.equal(afterNaming.needsUsername, false, 'and the wall comes down');
+      assert.equal(
+        (await gApp.inject({
+          method: 'POST', url: '/api/designs', headers: bearer(newcomerToken),
+          payload: { title: 'now', templateId: DEFAULT_TEMPLATE.id, templateVersion: 1, palette: PALETTE, cellsGzB64 },
+        })).statusCode,
+        201,
+        'the thing that was refused a moment ago now works',
+      );
+
+      // An account made with a password names itself, so it never sees any of this.
+      const pwAccount = await gApp.inject({
+        method: 'POST', url: '/api/auth/register',
+        payload: { username: 'chose_own', password: 'thistle-anchor-92x', email: 'chose@example.test', acceptedVersion: 'test' },
+      });
+      const pwTok = (pwAccount.json() as { token: string }).token;
+      assert.equal(
+        ((await gApp.inject({ method: 'GET', url: '/api/me', headers: bearer(pwTok) })).json() as { needsUsername: boolean }).needsUsername,
+        false,
+        'someone who typed their own name is never asked again',
+      );
 
       // ---- the same person again: one account, not two
       const again = await signInWith({ sub: 'g-new-1', email: 'newfan@example.test', email_verified: true });
@@ -1136,6 +1192,46 @@ async function makeDesign(app: FastifyInstance, token: string, isPublic = false)
       assert.notEqual(strangerNew.id, stranger.id, 'an unverified provider email is not a claim on anyone else’s account');
       assert.equal(strangerNew.email, null, 'and the contested address is not written onto the new account either');
 
+      // ---- what the provider sends is input, not truth
+      //
+      // Google will not do any of this. The point is that the account row a
+      // provider can create has to be one the rest of the app could also have
+      // created — an address that would be refused at the sign-up form must not
+      // get in through this door instead.
+      for (const [label, profile] of [
+        ['an address that is not one', { sub: 'g-bad-1', email: 'not an email', email_verified: true }],
+        ['an address over the 254 limit', { sub: 'g-bad-2', email: `${'a'.repeat(250)}@example.test`, email_verified: true }],
+        ['an address with a comma in it', { sub: 'g-bad-3', email: 'a,b@example.test', email_verified: true }],
+      ] as const) {
+        const r = await signInWith(profile as Record<string, unknown>);
+        const tok = (
+          await gApp.inject({
+            method: 'POST',
+            url: '/api/auth/handoff',
+            headers: { cookie: `tm_handoff=${encodeURIComponent(r.backCookies.get('tm_handoff')!)}` },
+          })
+        ).json() as { token?: string };
+        assert.ok(tok.token, `${label}: the sign-in still works`);
+        const who = (await gApp.inject({ method: 'GET', url: '/api/me', headers: bearer(tok.token!) })).json() as {
+          email: string | null;
+          username: string;
+        };
+        assert.equal(who.email, null, `${label}: but it is not written to the account`);
+        assert.match(who.username, /^[a-zA-Z0-9_]{3,24}$/, `${label}: and the derived username is still a legal one`);
+      }
+      // A display name cannot smuggle anything into the username either.
+      const nasty = await signInWith({ sub: 'g-nasty', name: '<script>alert(1)</script>', email_verified: false });
+      const nastyTok = (
+        await gApp.inject({
+          method: 'POST',
+          url: '/api/auth/handoff',
+          headers: { cookie: `tm_handoff=${encodeURIComponent(nasty.backCookies.get('tm_handoff')!)}` },
+        })
+      ).json() as { token: string };
+      const nastyMe = (await gApp.inject({ method: 'GET', url: '/api/me', headers: bearer(nastyTok.token) })).json() as { username: string };
+      assert.match(nastyMe.username, /^[a-zA-Z0-9_]{3,24}$/, 'a hostile display name still produces a legal username');
+      assert.doesNotMatch(nastyMe.username, /[<>()/]/, 'with none of it surviving');
+
       // ---- open redirect
       for (const bad of ['https://evil.example/', '//evil.example/x', '/\\evil.example']) {
         const evil = await gApp.inject({ method: 'GET', url: `/api/auth/google?returnTo=${encodeURIComponent(bad)}` });
@@ -1150,13 +1246,25 @@ async function makeDesign(app: FastifyInstance, token: string, isPublic = false)
       }
 
       // ---- the provider refusing, and the user cancelling
-      const cancelled = await gApp.inject({ method: 'GET', url: '/api/auth/google' });
-      const cancelledBack = await gApp.inject({
-        method: 'GET',
-        url: '/api/auth/google/callback?error=access_denied&state=x',
-        headers: { cookie: cookieHeader(cookiesFrom(cancelled)) },
-      });
-      assert.match(String(cancelledBack.headers.location), /reason=cancelled/, 'pressing cancel is not an error');
+      //
+      // Which word the user gets depends on which refusal it was. Being told
+      // "cancelled" when Google simply will not run inside an app's browser
+      // blames them for something they did not do — and that case is common
+      // here, because the traffic arrives from TikTok and X links.
+      for (const [raw, reason] of [
+        ['access_denied', 'cancelled'],
+        ['disallowed_useragent', 'inapp'],
+        ['server_error', 'provider'],
+      ] as const) {
+        const started = await gApp.inject({ method: 'GET', url: '/api/auth/google' });
+        const came = await gApp.inject({
+          method: 'GET',
+          url: `/api/auth/google/callback?error=${raw}&state=x`,
+          headers: { cookie: cookieHeader(cookiesFrom(started)) },
+        });
+        assert.match(String(came.headers.location), new RegExp(`reason=${reason}`), `${raw} must read as "${reason}"`);
+        assert.doesNotMatch(String(came.headers.location), /error=/, 'and nothing the provider wrote is echoed back into our URL');
+      }
 
       const broken = await gApp.inject({ method: 'GET', url: '/api/auth/google' });
       nextProfile = null; // userinfo answers 500

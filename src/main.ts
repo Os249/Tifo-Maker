@@ -55,6 +55,19 @@ async function main(): Promise<void> {
   await adoptProviderSession();
   const signinFailed = providerFailure();
 
+  // An account that signed up with a provider has a handle we invented for it,
+  // and the server refuses almost everything until its owner picks one. Ask
+  // here — before the desktop gate, before the editor, and before the draft
+  // claim, which is itself one of the calls the server would refuse.
+  {
+    const { fetchMe } = await import('./net/api');
+    const me = await fetchMe().catch(() => null);
+    if (me?.needsUsername) {
+      const { ensureUsernameChosen } = await import('./ui/chooseUsernameModal');
+      await ensureUsernameChosen(me);
+    }
+  }
+
   const sharedId = sharedDesignId();
   // The editor is desktop-only for now. Two phone bug reports were both people
   // hitting walls inside an editor that had let them in; this stops them at the

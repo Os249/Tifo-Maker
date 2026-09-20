@@ -13,6 +13,7 @@ import { initLang, applyDom, getLang, onLangChange, toggleLang, t, tv, tTag, tTi
 import { initScheme, setSchemeLabels } from './ui/colorScheme';
 import { installMobileNav } from './ui/mobileNav';
 import { installConsent } from './ui/consent';
+import { ensureUsernameChosen } from './ui/chooseUsernameModal';
 import { generateSeatMapAsync } from './workers/client';
 import { TEMPLATES } from './core/template';
 import { DesignStore } from './core/design';
@@ -91,7 +92,11 @@ langToggle?.addEventListener('click', () => {
 });
 
 async function refreshAuthUI(): Promise<void> {
-  me = await fetchMe().catch(() => null);
+  const who = await fetchMe().catch(() => null);
+  // Publishing, commenting and following all answer 428 until the account has a
+  // handle of its own, so ask before any of them can be pressed.
+  const named = await ensureUsernameChosen(who);
+  me = named ? { id: named.id, username: named.username, isAdmin: named.isAdmin } : null;
   const notifBtn = $('#notif-btn');
   if (me) {
     // Drop the i18n binding while it holds a username: applyDom() rewrites every

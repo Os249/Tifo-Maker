@@ -68,7 +68,25 @@ export interface OAuthProvider {
 /** Every call out to a provider is bounded. A hung sign-in is a broken sign-in. */
 const NET_TIMEOUT_MS = 8000;
 
-async function postForm(url: string, body: Record<string, string>): Promise<unknown | null> {
+/**
+ * Say why a call to the provider failed, on our side, in one line.
+ *
+ * Until this existed, every failure answered the browser with the same generic
+ * "we could not reach Google" and left nothing behind. A wrong client secret and
+ * a network blip looked identical from the logs, which is the worst possible
+ * state for the one thing that cannot be tested before the credentials exist.
+ *
+ * What is printed is the provider's own `error` / `error_description`. Never the
+ * request: it carries the client secret and the authorization code.
+ */
+function noteFailure(what: string, status: number, body: unknown): void {
+  const e = body as { error?: unknown; error_description?: unknown } | null;
+  const code = typeof e?.error === 'string' ? e.error : '';
+  const detail = typeof e?.error_description === 'string' ? e.error_description : '';
+  console.error(`[tifo] oauth ${what} failed (HTTP ${status})${code ? `: ${code}` : ''}${detail ? ` — ${detail}` : ''}`);
+}
+
+async function postForm(url: string, what: string, body: Record<string, string>): Promise<unknown | null> {
   try {
     const res = await fetch(url, {
       method: 'POST',
@@ -76,22 +94,32 @@ async function postForm(url: string, body: Record<string, string>): Promise<unkn
       body: new URLSearchParams(body).toString(),
       signal: AbortSignal.timeout(NET_TIMEOUT_MS),
     });
-    if (!res.ok) return null;
-    return await res.json();
-  } catch {
+    const parsed = await res.json().catch(() => null);
+    if (!res.ok) {
+      noteFailure(what, res.status, parsed);
+      return null;
+    }
+    return parsed;
+  } catch (err) {
+    console.error(`[tifo] oauth ${what} could not be reached: ${String((err as Error)?.message ?? err)}`);
     return null;
   }
 }
 
-async function getJson(url: string, accessToken: string): Promise<unknown | null> {
+async function getJson(url: string, what: string, accessToken: string): Promise<unknown | null> {
   try {
     const res = await fetch(url, {
       headers: { authorization: `Bearer ${accessToken}`, accept: 'application/json' },
       signal: AbortSignal.timeout(NET_TIMEOUT_MS),
     });
-    if (!res.ok) return null;
-    return await res.json();
-  } catch {
+    const parsed = await res.json().catch(() => null);
+    if (!res.ok) {
+      noteFailure(what, res.status, parsed);
+      return null;
+    }
+    return parsed;
+  } catch (err) {
+    console.error(`[tifo] oauth ${what} could not be reached: ${String((err as Error)?.message ?? err)}`);
     return null;
   }
 }
@@ -124,7 +152,7 @@ export const GOOGLE: OAuthProvider = {
   },
 
   async exchange({ code, verifier, clientId, clientSecret, redirectUri }) {
-    const data = (await postForm('https://oauth2.googleapis.com/token', {
+    const data = (await postForm('https://oauth2.googleapis.com/token', 'google token exchange', {
       code,
       client_id: clientId,
       client_secret: clientSecret,
@@ -136,26 +164,56 @@ export const GOOGLE: OAuthProvider = {
   },
 
   async profile(accessToken) {
-    const me = (await getJson('https://openidconnect.googleapis.com/v1/userinfo', accessToken)) as {
+    const me = (await getJson('https://openidconnect.googleapis.com/v1/userinfo', 'google userinfo', accessToken)) as {
       sub?: string;
       email?: string;
       email_verified?: boolean;
       name?: string;
     } | null;
     if (!me || typeof me.sub !== 'string' || !me.sub) return null;
-    const email = typeof me.email === 'string' && me.email.includes('@') ? me.email.trim() : null;
+    // Bound everything before it travels any further. Google will not send a
+    // megabyte of `sub`, but "the other end is well behaved" is not a check, and
+    // this is the exact seam where a compromised or swapped endpoint would push.
+    // `sub` is documented as at most 255 characters; the rest are ours to pick.
+    if (me.sub.length > 255) return null;
+    const raw = typeof me.email === 'string' ? me.email.trim() : '';
+    const email = raw.includes('@') && raw.length <= 254 ? raw : null;
     return {
       id: me.sub,
       email,
       // `=== true` and not truthiness: some providers send the string "true",
       // and a string is not a verification.
       emailVerified: email !== null && me.email_verified === true,
-      name: typeof me.name === 'string' ? me.name : null,
+      name: typeof me.name === 'string' ? me.name.slice(0, 120) : null,
     };
   },
 };
 
 export const PROVIDERS: Record<string, OAuthProvider> = { google: GOOGLE };
+
+/**
+ * What the provider said when it sent the browser back without a code.
+ *
+ * Only a fixed set is recognised, and the result is one of our own words —
+ * nothing the provider wrote is ever echoed into a page or a URL.
+ *
+ * `disallowed_useragent` is the one worth singling out: it is Google refusing to
+ * run sign-in inside an app's embedded browser, which for this site is a real
+ * and frequent case, and calling it "cancelled" would tell the user they did
+ * something they did not do. The button already hides itself in the in-app
+ * browsers we know about; this is what catches the ones we do not.
+ */
+export function describeProviderError(raw: string): 'cancelled' | 'inapp' | 'provider' {
+  switch (raw) {
+    case 'access_denied':
+    case 'user_cancelled':
+      return 'cancelled';
+    case 'disallowed_useragent':
+      return 'inapp';
+    default:
+      return 'provider';
+  }
+}
 
 // ---------------------------------------------------------------- the round trip
 

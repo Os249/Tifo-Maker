@@ -30,6 +30,7 @@ import {
 import type { Me } from './net/api';
 import { applyDom, getLang, initLang, t, tErr, tv } from './ui/i18n';
 import { enhancePasswordField } from './ui/passwordField';
+import { ensureUsernameChosen } from './ui/chooseUsernameModal';
 import { POLICY_VERSION } from './ui/authModal';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string): T | null => document.getElementById(id) as T | null;
@@ -91,6 +92,8 @@ async function load(): Promise<void> {
     return;
   }
   me = await fetchMe().catch(() => null);
+  // Same wall as everywhere else: this page's own saves would be refused too.
+  me = await ensureUsernameChosen(me);
   if (!me) {
     // A token that no longer works reads as signed in locally. Say so plainly
     // rather than showing empty fields that fail on save.

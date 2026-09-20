@@ -351,6 +351,23 @@ const STRINGS: Record<string, { en: string; ar: string }> = {
   'auth.forgotSent': { en: 'If that email has an account, a reset link is on its way.', ar: 'إذا كان لهذا البريد حساب، فإن رابط إعادة التعيين في طريقه إليك.' },
   'auth.sending': { en: 'Sending…', ar: 'جارٍ الإرسال…' },
   'ed.changePassword': { en: 'Change password', ar: 'تغيير كلمة المرور' },
+  // ---- picking a handle after a provider sign-up ----
+  'un.title': { en: "You're in. Now pick your name.", ar: 'تم تسجيلك. باقي تختار اسمك.' },
+  'un.note': {
+    en: 'This is how you appear on every tifo you publish. 3 to 24 characters: letters, numbers and underscores.',
+    ar: 'هذا اللي يظهر على كل تيفو تنشره. من ٣ إلى ٢٤ خانة: حروف وأرقام و_.',
+  },
+  'un.label': { en: 'Username', ar: 'اسم المستخدم' },
+  'un.placeholder': { en: 'curva_north', ar: 'curva_north' },
+  'un.save': { en: 'Save and continue', ar: 'احفظ وكمّل' },
+  'un.saving': { en: 'Saving…', ar: 'يحفظ…' },
+  'un.invalid': { en: '3 to 24 characters: letters, numbers and underscores.', ar: 'من ٣ إلى ٢٤ خانة: حروف وأرقام و_.' },
+  'un.taken': { en: 'That name is taken. Try another.', ar: 'الاسم محجوز. جرّب غيره.' },
+  'un.signout': { en: 'Sign out instead', ar: 'سجّل الخروج بدال' },
+  'err.needsUsername': {
+    en: 'Pick a username to finish setting up your account.',
+    ar: 'اختر اسم مستخدم عشان تكمّل إعداد حسابك.',
+  },
   // ---- signing in with a provider (src/core/../server/src/oauth.ts) ----
   'auth.google': { en: 'Continue with Google', ar: 'المتابعة بحساب Google' },
   'auth.or': { en: 'or', ar: 'أو' },
@@ -363,6 +380,10 @@ const STRINGS: Record<string, { en: string; ar: string }> = {
     ar: 'محاولة الدخول انتهت مدتها أو بدأت من مكان ثاني. جرّب مرة ثانية.',
   },
   'auth.err.cancelled': { en: 'Sign-in cancelled.', ar: 'تم إلغاء تسجيل الدخول.' },
+  'auth.err.inapp': {
+    en: 'Google will not run sign-in inside this app. Open tifomaker.org in Chrome or Safari and try again.',
+    ar: 'Google ما يشغّل تسجيل الدخول جوه هذا التطبيق. افتح tifomaker.org في Chrome أو Safari وجرّب مرة ثانية.',
+  },
   'auth.err.provider': {
     en: 'We could not reach Google just then. Try again, or use your email and password.',
     ar: 'ما قدرنا نوصل Google الحين. جرّب مرة ثانية، أو استخدم بريدك وكلمة المرور.',
@@ -1612,6 +1633,7 @@ const ERROR_KEYS: Record<string, string> = {
   // Every way server-side password grading can answer. The two length strings
   // are built from the same constants the server formats them with, so they
   // match by construction rather than by someone remembering to edit both.
+  'choose a username first': 'err.needsUsername',
   'set a password before removing your last sign-in method': 'err.lastMethod',
   'a password is required': 'pw.err.blank',
   [`password must be at least ${PASSWORD_MIN} characters`]: 'pw.err.short',

@@ -11,6 +11,7 @@
  * Pure file checks, no Docker needed:  npm run test:deploy
  */
 import assert from 'node:assert/strict';
+import { logProviderSetup } from '../src/preflight';
 import { readFileSync } from 'node:fs';
 import { NODE_END_OF_LIFE, nodeSupport } from '../src/nodeSupport';
 
@@ -95,3 +96,30 @@ const railway = JSON.parse(read('railway.json')) as { deploy?: { restartPolicyMa
 assert.ok((railway.deploy?.restartPolicyMaxRetries ?? 0) >= 5, 'a crash loop gets more than three restarts before the site stays down');
 
 console.log(`deploy: all assertions passed (${window.why}; non-root image, lockfile-only installs, dockerignore, CI token + pins, secret scan, restart policy)`);
+
+// ---- the redirect URI the operator has to register -------------------------
+//
+// `redirect_uri_mismatch` is the standard first-attempt failure and it happens
+// entirely at Google's end, so nothing reaches our logs and there is nothing to
+// debug. The boot line exists so the exact string can be copied rather than
+// guessed; these assertions are what keep it exact.
+{
+  const said: string[] = [];
+  logProviderSetup({ GOOGLE_CLIENT_ID: 'id', GOOGLE_CLIENT_SECRET: 'secret', PUBLIC_URL: 'https://tifomaker.org/' } as NodeJS.ProcessEnv, (m) => said.push(m));
+  assert.equal(said.length, 1);
+  assert.match(said[0]!, /https:\/\/tifomaker\.org\/api\/auth\/google\/callback/, 'it prints the exact URI, with the trailing slash of PUBLIC_URL trimmed');
+  assert.doesNotMatch(said[0]!, /secret/, 'and never the credentials');
+
+  const quiet: string[] = [];
+  logProviderSetup({} as NodeJS.ProcessEnv, (m) => quiet.push(m));
+  assert.deepEqual(quiet, [], 'nothing is said when Google is not configured');
+
+  const half: string[] = [];
+  logProviderSetup({ GOOGLE_CLIENT_ID: 'id' } as NodeJS.ProcessEnv, (m) => half.push(m));
+  assert.deepEqual(half, [], 'half a client is a warning, not a setup note');
+
+  const noBase: string[] = [];
+  logProviderSetup({ GOOGLE_CLIENT_ID: 'id', GOOGLE_CLIENT_SECRET: 's' } as NodeJS.ProcessEnv, (m) => noBase.push(m));
+  assert.match(noBase[0]!, /PUBLIC_URL/, 'without PUBLIC_URL it says the URI cannot be pinned down');
+  console.log('  provider setup line: exact URI, no secrets, quiet when unconfigured');
+}

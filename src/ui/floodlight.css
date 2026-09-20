@@ -958,6 +958,11 @@ body.viewer { display:block; overflow-y:auto; background:var(--ink-0); }
   .save-top span { display:none; }
 }
 
+/* ---- picking a handle after a provider sign-up ---- */
+.un-title { margin:0 0 8px; font-size:17px; font-weight:600; color:var(--text-1); }
+.un-note { margin:0 0 18px; font-size:12.5px; line-height:1.6; color:var(--text-3); }
+.un-signout { color:var(--text-3) !important; font-size:12px !important; }
+
 /* ---- signing in with a provider ---- */
 .auth-providers { display:flex; flex-direction:column; gap:12px; margin-bottom:16px; }
 .auth-provider {

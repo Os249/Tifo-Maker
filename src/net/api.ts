@@ -1031,6 +1031,13 @@ export interface Me {
   providers?: string[];
   /** False for an account created by signing in with a provider. */
   hasPassword?: boolean;
+  /**
+   * True while the account is still wearing a handle we invented for it.
+   *
+   * Everything except a tiny allow-list answers 428 until it is false, so this
+   * is not advisory — it is the shape of what the server will accept.
+   */
+  needsUsername?: boolean;
 }
 
 /** The signed-in user's id + name, or null. */

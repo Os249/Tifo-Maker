@@ -74,6 +74,15 @@ CREATE TABLE IF NOT EXISTS oauth_identities (
 );
 CREATE INDEX IF NOT EXISTS oauth_identities_user ON oauth_identities (user_id);
 
+-- Has this person actually chosen their @name, or is it one we invented?
+--
+-- Signing in with Google gives us an email and no handle, and a handle is
+-- public — it is what the community feed puts under every design. Rather than
+-- quietly stamping `gfan1789865580969` on someone, provider-created accounts
+-- start with this false and are asked to pick one before they can do anything.
+-- DEFAULT true, so every account that already exists is untouched.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS username_chosen BOOLEAN NOT NULL DEFAULT true;
+
 -- Opaque bearer tokens, stored hashed. A leaked DB row cannot be replayed.
 CREATE TABLE IF NOT EXISTS auth_tokens (
   token_hash TEXT PRIMARY KEY,                -- sha256(token) hex

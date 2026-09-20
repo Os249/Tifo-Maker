@@ -141,3 +141,31 @@ export function configWarnings(env: NodeJS.ProcessEnv): ConfigWarning[] {
 export function logConfigWarnings(env: NodeJS.ProcessEnv = process.env, log = console.warn): void {
   for (const w of configWarnings(env)) log(`[tifo] ${w.key} ${w.state === 'wrong' ? 'needs changing' : 'is not set'}: ${w.effect}`);
 }
+
+/**
+ * Say out loud which redirect URI Google will be sent.
+ *
+ * Not a warning — it is printed when the thing is configured *correctly*. It
+ * exists because `redirect_uri_mismatch` is the near-universal first-attempt
+ * failure, it happens entirely at Google's end (so nothing reaches our logs),
+ * and the fix is to have registered the exact string the server sends. Printing
+ * that string removes the guessing: copy it into the console, character for
+ * character.
+ *
+ * Deliberately not a list of every environment — it prints what THIS boot will
+ * use, which is the only one that can be wrong right now.
+ */
+export function logProviderSetup(env: NodeJS.ProcessEnv = process.env, log = console.info): void {
+  if (!env.GOOGLE_CLIENT_ID?.trim() || !env.GOOGLE_CLIENT_SECRET?.trim()) return;
+  const base = env.PUBLIC_URL?.trim().replace(/\/+$/, '');
+  if (base) {
+    log(`[tifo] Sign in with Google is on. Register this exact redirect URI: ${base}/api/auth/google/callback`);
+  } else {
+    // Without PUBLIC_URL the callback is built from the request's Host (checked
+    // against a known list first), so it cannot be printed with certainty.
+    log(
+      '[tifo] Sign in with Google is on, but PUBLIC_URL is not set, so the callback URL is built from each ' +
+        'request\'s host. Set PUBLIC_URL so the redirect URI is one fixed string you can register.',
+    );
+  }
+}

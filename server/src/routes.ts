@@ -44,6 +44,7 @@ import {
 } from '../../src/core/password';
 import { deriveUsername } from '../../src/core/handle';
 import {
+  describeProviderError,
   newChallenge,
   openPending,
   PROVIDERS,
@@ -432,10 +433,38 @@ export async function buildApp(
     return auth.getUserIdByToken(hashToken(header.slice(7)));
   };
 
+  /**
+   * The routes an account still wearing a name we invented may call.
+   *
+   * Signing up with Google gives us an email and no handle, and the handle is
+   * the public part — it goes under every design in the community feed. So a
+   * provider-created account is held at the door until its owner picks one, and
+   * this is the short list of things they can do while standing there: find out
+   * who they are, pick the name, and leave.
+   *
+   * The wall lives in `requireUser` rather than in the browser because a wall
+   * only in the browser is a suggestion. Anyone can call the API directly.
+   */
+  const OPEN_WHILE_UNNAMED = new Set([
+    'GET /api/me',
+    'POST /api/account/username',
+    'POST /api/auth/logout',
+    'POST /api/auth/handoff',
+    'DELETE /api/account',
+  ]);
+
   const requireUser = async (req: FastifyRequest, reply: FastifyReply): Promise<string | null> => {
     const userId = await userOf(req);
     if (!userId) {
       await reply.code(401).send({ error: 'authentication required' });
+      return null;
+    }
+    const where = `${req.method} ${(req.routeOptions?.url ?? req.url).split('?')[0]}`;
+    if (!OPEN_WHILE_UNNAMED.has(where) && !(await auth.hasChosenUsername(userId).catch(() => true))) {
+      // 428: the request is fine, something has to happen first. A 403 would
+      // read as "you may not", which is the wrong thing to tell someone who has
+      // simply not finished signing up.
+      await reply.code(428).send({ error: 'choose a username first', code: 'needs_username' });
       return null;
     }
     return userId;
@@ -1571,8 +1600,13 @@ export async function buildApp(
 
     if (!impl || !providerReady(provider) || !pending || pending.p !== provider) return bail('state');
     const q = req.query as { code?: string; state?: string; error?: string };
-    // The user pressed "cancel" on the consent screen. Not an error worth a scary word.
-    if (typeof q.error === 'string') return bail('cancelled', pending.r);
+    // The provider sent the browser back without a code. Which of our words that
+    // deserves depends on why — pressing cancel and Google refusing to run at
+    // all inside an app's browser are very different things to be told.
+    if (typeof q.error === 'string') {
+      console.error(`[tifo] oauth ${provider} returned error=${q.error.slice(0, 64)}`);
+      return bail(describeProviderError(q.error), pending.r);
+    }
     if (typeof q.code !== 'string' || typeof q.state !== 'string') return bail('state', pending.r);
     // RFC 9700: one-time state, bound to this user agent (it arrived in an
     // HttpOnly cookie), compared without leaking position through timing.
@@ -1616,8 +1650,16 @@ export async function buildApp(
     // unverified, waits for the victim to sign in with Google, and the link
     // hands them an account with a password they know. So an unverified local
     // account is never linked to — it is sent to prove ownership first.
-    if (!userId && profile.email && profile.emailVerified) {
-      const byEmail = await auth.getUserByEmail(profile.email).catch(() => null);
+    // An address from a provider is still an address, and it goes through the
+    // same gate as one typed into the form. Trusting Google to have validated it
+    // would leave this one path able to write a row every other path treats as
+    // impossible — and a stored value nothing else can produce is how a
+    // never-reproducible bug starts.
+    const claimedEmail =
+      profile.email && profile.email.length <= MAX_EMAIL && EMAIL.test(profile.email) ? profile.email : null;
+
+    if (!userId && claimedEmail && profile.emailVerified) {
+      const byEmail = await auth.getUserByEmail(claimedEmail).catch(() => null);
       if (byEmail) {
         if (!byEmail.emailVerifiedAt) {
           req.socNote = { kind: 'oauth_link_refused', subject: byEmail.username };
@@ -1632,19 +1674,27 @@ export async function buildApp(
 
     // ---- nobody here yet: a new account, with no password at all.
     if (!userId) {
-      const seed = profile.email ?? profile.name ?? 'tifo';
+      const seed = claimedEmail ?? profile.name ?? 'tifo';
       // The address goes on the account only when the provider verified it, and
       // only when it is free. An unverified address that already belongs to
       // someone else is dropped rather than fought over — the account is created
       // without one and the app asks for an address afterwards.
-      const mail = profile.email && profile.emailVerified ? profile.email : null;
+      const mail = claimedEmail && profile.emailVerified ? claimedEmail : null;
       let created = null as Awaited<ReturnType<typeof auth.createUser>>;
       for (let attempt = 0; attempt < 5 && !created; attempt++) {
         const name = deriveUsername(seed, attempt, () => randomInt(0, 1_000_000) / 1_000_000);
         if (adminFolded.has(name.toLowerCase())) continue;
         created =
           (await auth
-            .createUser(name, null, { email: mail, acceptedVersion: pending.a ?? null, emailVerified: !!mail })
+            .createUser(name, null, {
+              email: mail,
+              acceptedVersion: pending.a ?? null,
+              emailVerified: !!mail,
+              // We invented this handle from their email. It is a placeholder
+              // until they say otherwise, and the wall in `requireUser` is what
+              // makes sure they get asked.
+              usernameChosen: false,
+            })
             .catch(() => null)) ?? null;
         // A taken EMAIL fails every attempt, so stop rewriting the name and try
         // once without it rather than burning all five tries on the same clash.
@@ -1653,6 +1703,7 @@ export async function buildApp(
             (await auth
               .createUser(deriveUsername(seed, attempt + 1, () => randomInt(0, 1_000_000) / 1_000_000), null, {
                 acceptedVersion: pending.a ?? null,
+                usernameChosen: false,
               })
               .catch(() => null)) ?? null;
         }
@@ -1746,6 +1797,9 @@ export async function buildApp(
       // none, and it refuses to unlink the last way in.
       providers: await auth.identitiesFor(userId).catch(() => [] as string[]),
       hasPassword: !!user?.passwordHash,
+      // True only for an account created by a provider whose owner has not yet
+      // picked a handle. Everything else is refused with 428 until they do.
+      needsUsername: user ? user.usernameChosen === false : false,
     };
   });
 

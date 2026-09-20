@@ -858,6 +858,7 @@ function mapUserRow(r: {
   email?: unknown;
   email_verified_at?: unknown;
   is_pro?: unknown;
+  username_chosen?: unknown;
 }): UserRow {
   return {
     id: String(r.id),
@@ -866,6 +867,10 @@ function mapUserRow(r: {
     email: r.email == null ? null : String(r.email),
     emailVerifiedAt: r.email_verified_at == null ? null : new Date(r.email_verified_at as string).toISOString(),
     isPro: r.is_pro === true,
+    // Absent from a SELECT that does not ask for it — and "we did not look" must
+    // read as "yes", or a query that forgot the column would lock the owner out
+    // of their own account behind a prompt they already answered.
+    usernameChosen: r.username_chosen !== false,
   };
 }
 
@@ -875,7 +880,12 @@ export class PgAuthRepository implements AuthRepository {
   async createUser(
     username: string,
     passwordHash: string | null,
-    opts: { email?: string | null; acceptedVersion?: string | null; emailVerified?: boolean } = {},
+    opts: {
+      email?: string | null;
+      acceptedVersion?: string | null;
+      emailVerified?: boolean;
+      usernameChosen?: boolean;
+    } = {},
   ): Promise<UserRow | null> {
     const acceptedVersion = opts.acceptedVersion ?? null;
     const acceptedAt = acceptedVersion ? new Date() : null;
@@ -884,10 +894,10 @@ export class PgAuthRepository implements AuthRepository {
     const verifiedAt = opts.email && opts.emailVerified ? new Date() : null;
     try {
       const res = await this.pool.query(
-        `INSERT INTO users (username, password_hash, email, accepted_terms_version, accepted_terms_at, email_verified_at)
-         VALUES ($1, $2, $3, $4, $5, $6)
-         RETURNING id, username, password_hash, email, email_verified_at`,
-        [username, passwordHash, opts.email ?? null, acceptedVersion, acceptedAt, verifiedAt],
+        `INSERT INTO users (username, password_hash, email, accepted_terms_version, accepted_terms_at, email_verified_at, username_chosen)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
+         RETURNING id, username, password_hash, email, email_verified_at, username_chosen`,
+        [username, passwordHash, opts.email ?? null, acceptedVersion, acceptedAt, verifiedAt, opts.usernameChosen !== false],
       );
       return mapUserRow(res.rows[0]);
     } catch (err) {
@@ -898,7 +908,7 @@ export class PgAuthRepository implements AuthRepository {
 
   async getUserByName(username: string): Promise<UserRow | null> {
     const res = await this.pool.query(
-      'SELECT id, username, password_hash, email, email_verified_at FROM users WHERE username = $1',
+      'SELECT id, username, password_hash, email, email_verified_at, username_chosen FROM users WHERE username = $1',
       [username],
     );
     return res.rowCount ? mapUserRow(res.rows[0]) : null;
@@ -906,7 +916,7 @@ export class PgAuthRepository implements AuthRepository {
 
   async getUserById(id: string): Promise<UserRow | null> {
     const res = await this.pool.query(
-      'SELECT id, username, password_hash, email, email_verified_at FROM users WHERE id = $1',
+      'SELECT id, username, password_hash, email, email_verified_at, username_chosen FROM users WHERE id = $1',
       [id],
     );
     return res.rowCount ? mapUserRow(res.rows[0]) : null;
@@ -914,7 +924,7 @@ export class PgAuthRepository implements AuthRepository {
 
   async getUserByEmail(email: string): Promise<UserRow | null> {
     const res = await this.pool.query(
-      'SELECT id, username, password_hash, email, email_verified_at FROM users WHERE lower(email) = lower($1)',
+      'SELECT id, username, password_hash, email, email_verified_at, username_chosen FROM users WHERE lower(email) = lower($1)',
       [email],
     );
     return res.rowCount ? mapUserRow(res.rows[0]) : null;
@@ -944,12 +954,22 @@ export class PgAuthRepository implements AuthRepository {
 
   async setUsername(userId: string, username: string): Promise<boolean> {
     try {
-      const res = await this.pool.query('UPDATE users SET username = $2 WHERE id = $1', [userId, username]);
+      // Settling on a name is what clears the flag — including confirming the
+      // one we suggested, which is still the owner choosing it.
+      const res = await this.pool.query(
+        'UPDATE users SET username = $2, username_chosen = true WHERE id = $1',
+        [userId, username],
+      );
       return (res.rowCount ?? 0) > 0;
     } catch (err) {
       if ((err as { code?: string }).code === '23505') return false; // name taken
       throw err;
     }
+  }
+
+  async hasChosenUsername(userId: string): Promise<boolean> {
+    const res = await this.pool.query('SELECT username_chosen FROM users WHERE id = $1', [userId]);
+    return res.rowCount ? res.rows[0].username_chosen !== false : true;
   }
 
   async setPro(userId: string, isPro: boolean): Promise<void> {

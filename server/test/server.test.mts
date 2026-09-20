@@ -15,6 +15,7 @@ import { MemoryFeedbackRepository } from '../src/feedbackRepo';
 import { PgAuthRepository, PgDesignRepository } from '../src/pgRepo';
 import { PgSocialRepository } from '../src/pgSocial';
 import { buildApp, SNAPSHOT_EVERY, type TemplateInfo } from '../src/routes';
+import { schemaStatements } from '../src/schema';
 import { toB64 } from '../src/codec';
 import type { AuthRepository, DesignRepository } from '../src/repo';
 import {
@@ -1608,6 +1609,77 @@ if (process.env.DATABASE_URL) {
     assert.deepEqual(remix.palette, PALETTE, 'palette survives the JSONB remix round-trip on Postgres');
     assert.equal(remix.remixedFrom, designId, 'remix lineage stamped on Postgres');
     console.log('social (postgres): remix + palette round-trip passed');
+  }
+
+  // ---- the deploy path, and the federated-identity code that only runs here ----
+  //
+  // Everything above ran against a database that already had the new schema.
+  // What a real deploy does is different and is the part that can go wrong: an
+  // EXISTING database, where users.password_hash is still NOT NULL, has the file
+  // applied to it one statement at a time. So put the column back the old way
+  // and walk that path for real.
+  {
+    const schemaSql = readFileSync(new URL('../schema.sql', import.meta.url), 'utf8');
+    await pool.query('ALTER TABLE users ALTER COLUMN password_hash SET NOT NULL');
+    const before = await pool.query(
+      "SELECT is_nullable FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'password_hash'",
+    );
+    assert.equal(before.rows[0].is_nullable, 'NO', 'starting from a pre-change database');
+    await pool.query('DROP TABLE IF EXISTS oauth_identities');
+
+    const failures: string[] = [];
+    for (const stmt of schemaStatements(schemaSql)) {
+      try {
+        await pool.query(stmt);
+      } catch (e) {
+        failures.push(`${(e as Error).message} :: ${stmt.slice(0, 80)}`);
+      }
+    }
+    assert.deepEqual(failures, [], 'every statement in schema.sql applies to an existing database');
+
+    const after = await pool.query(
+      "SELECT is_nullable FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'password_hash'",
+    );
+    assert.equal(after.rows[0].is_nullable, 'YES', 'the migration really dropped NOT NULL — a Google account has no password');
+
+    // Idempotent: a second deploy must be a no-op, not a pile of errors.
+    const twice: string[] = [];
+    for (const stmt of schemaStatements(schemaSql)) {
+      try { await pool.query(stmt); } catch (e) { twice.push((e as Error).message); }
+    }
+    assert.deepEqual(twice, [], 'applying schema.sql a second time changes nothing and raises nothing');
+
+    // ---- the identity methods, on real SQL rather than a Map ----
+    const pAuth = new PgAuthRepository(pool);
+    const u = (n: string): string => `${n}_${Math.random().toString(36).slice(2, 8)}`;
+    const mail = `${u('g')}@example.test`;
+    const googler = await pAuth.createUser(u('googler'), null, { email: mail, emailVerified: true });
+    assert.ok(googler, 'an account with no password inserts');
+    assert.equal(googler!.passwordHash, null, 'and reads back as null rather than the string "null"');
+    assert.ok(googler!.emailVerifiedAt, 'a provider-verified address arrives already verified');
+
+    assert.equal(await pAuth.linkIdentity('google', 'sub-pg-1', googler!.id), true, 'the identity links');
+    assert.equal(await pAuth.linkIdentity('google', 'sub-pg-1', googler!.id), true, 'linking the same pair twice is not an error');
+    assert.equal(await pAuth.getUserIdByIdentity('google', 'sub-pg-1'), googler!.id);
+    assert.deepEqual(await pAuth.identitiesFor(googler!.id), ['google']);
+
+    // One Google account cannot be claimed by a second TifoMaker account: the
+    // primary key is what decides that, and it has to be reported as a refusal
+    // rather than thrown.
+    const other = await pAuth.createUser(u('other'), 'x'.repeat(40), {});
+    assert.equal(await pAuth.linkIdentity('google', 'sub-pg-1', other!.id), false, 'a taken identity is refused, not stolen');
+    assert.equal(await pAuth.getUserIdByIdentity('google', 'sub-pg-1'), googler!.id, 'and the original owner still owns it');
+
+    assert.equal(await pAuth.unlinkIdentity('google', googler!.id), true);
+    assert.equal(await pAuth.unlinkIdentity('google', googler!.id), false, 'unlinking what is not there says so');
+
+    // ON DELETE CASCADE: deleting the account must not leave an orphan row that
+    // would hand the next person with that sub someone else's deleted account.
+    await pAuth.linkIdentity('google', 'sub-pg-2', googler!.id);
+    await pAuth.deleteUser(googler!.id);
+    assert.equal(await pAuth.getUserIdByIdentity('google', 'sub-pg-2'), null, 'the identity goes with the account');
+
+    console.log('postgres: deploy migration + federated identities passed (NOT NULL dropped, idempotent, link/unlink/conflict/cascade)');
   }
   await pool.end();
 } else {

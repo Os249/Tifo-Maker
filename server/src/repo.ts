@@ -332,6 +332,14 @@ export interface UserRow {
   emailVerifiedAt: string | null;
   /** Paid entitlement: unlimited AI. */
   isPro: boolean;
+  /**
+   * False only while an account is wearing a name we invented for it.
+   *
+   * A provider gives us an email, never a handle, and the handle is the public
+   * part. Until the owner picks one, `requireUser` refuses everything except
+   * the handful of routes needed to pick it.
+   */
+  usernameChosen: boolean;
 }
 
 export interface AuthRepository {
@@ -345,7 +353,13 @@ export interface AuthRepository {
   createUser(
     username: string,
     passwordHash: string | null,
-    opts?: { email?: string | null; acceptedVersion?: string | null; emailVerified?: boolean },
+    opts?: {
+      email?: string | null;
+      acceptedVersion?: string | null;
+      emailVerified?: boolean;
+      /** False for a provider sign-up: the name is ours, not theirs, until they say so. */
+      usernameChosen?: boolean;
+    },
   ): Promise<UserRow | null>;
   getUserByName(username: string): Promise<UserRow | null>;
   getUserById(id: string): Promise<UserRow | null>;
@@ -366,6 +380,8 @@ export interface AuthRepository {
    * which is why this is safe to offer at all.
    */
   setUsername(userId: string, username: string): Promise<boolean>;
+  /** Did this account pick its own @name, or is it still wearing ours? */
+  hasChosenUsername(userId: string): Promise<boolean>;
   /** Set the paid (unlimited-AI) entitlement flag. */
   setPro(userId: string, isPro: boolean): Promise<void>;
   createToken(userId: string, tokenHash: string, expiresAt: Date): Promise<void>;
