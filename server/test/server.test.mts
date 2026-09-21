@@ -412,6 +412,84 @@ async function runSuite(name: string, repo: DesignRepository, auth: AuthReposito
   });
   assert.equal(bomb.statusCode, 400, 'oversized decompression rejected');
 
+  // ---- the scene: a design's banners ----
+  //
+  // Deliberately its own route pair, so the assertions that matter are about
+  // isolation: the scene must be reachable exactly where the design is, must
+  // be refused where the design would be, and — the point of the whole
+  // arrangement — must never be able to take the design down with it.
+  {
+    const sceneJson = JSON.stringify({ v: 1, banners: { version: 1, banners: [{ id: 'bn_1', kind: 'drop', widthM: 24 }] } });
+    const sceneGzB64 = gzipSync(Buffer.from(sceneJson)).toString('base64');
+
+    assert.equal(
+      (await app.inject({ method: 'GET', url: `/api/designs/${id}/scene`, headers: bearer(aliceTok) })).json().sceneGzB64,
+      null,
+      'a design with no banners answers null, not 404',
+    );
+    // A private design is 404 to anyone who cannot see it, and that includes
+    // anonymous: the same answer `PUT /api/designs/:id` gives, so the scene
+    // route leaks no more than the design route does.
+    assert.equal(
+      (await app.inject({ method: 'PUT', url: `/api/designs/${id}/scene`, payload: { sceneGzB64 } })).statusCode,
+      404,
+      'anonymous cannot write a scene',
+    );
+    assert.equal(
+      (await app.inject({ method: 'PUT', url: `/api/designs/${id}/scene`, headers: bearer(bobTok), payload: { sceneGzB64 } })).statusCode,
+      404,
+      'someone else cannot write your scene',
+    );
+    const put = await app.inject({ method: 'PUT', url: `/api/designs/${id}/scene`, headers: bearer(aliceTok), payload: { sceneGzB64 } });
+    assert.equal(put.statusCode, 200, put.body);
+    const back = await app.inject({ method: 'GET', url: `/api/designs/${id}/scene`, headers: bearer(aliceTok) });
+    assert.equal(
+      gunzipSync(Buffer.from(back.json().sceneGzB64 as string, 'base64')).toString('utf8'),
+      sceneJson,
+      'the scene comes back byte-exact',
+    );
+    // Writing again replaces rather than piles up — two tabs of one design is
+    // an ordinary thing to have open.
+    const second = JSON.stringify({ v: 1, banners: { version: 1, banners: [] } });
+    await app.inject({
+      method: 'PUT', url: `/api/designs/${id}/scene`, headers: bearer(aliceTok),
+      payload: { sceneGzB64: gzipSync(Buffer.from(second)).toString('base64') },
+    });
+    assert.equal(
+      gunzipSync(Buffer.from((await app.inject({ method: 'GET', url: `/api/designs/${id}/scene`, headers: bearer(aliceTok) })).json().sceneGzB64 as string, 'base64')).toString('utf8'),
+      second,
+      'the second write replaces the first',
+    );
+    assert.equal(
+      (await app.inject({ method: 'PUT', url: `/api/designs/${id}/scene`, headers: bearer(aliceTok), payload: { sceneGzB64: toB64(new Uint8Array([1, 2, 3])) } })).statusCode,
+      400,
+      'a payload that is not gzip is refused',
+    );
+    assert.equal(
+      (await app.inject({
+        method: 'PUT', url: `/api/designs/${id}/scene`, headers: bearer(aliceTok),
+        payload: { sceneGzB64: gzipSync(Buffer.from('not json at all')).toString('base64') },
+      })).statusCode,
+      400,
+      'a scene that will not parse is refused HERE, not on somebody else\'s load',
+    );
+    assert.equal(
+      (await app.inject({
+        method: 'PUT', url: `/api/designs/${id}/scene`, headers: bearer(aliceTok),
+        // Incompressible, so it is genuinely over the cap rather than a bomb.
+        payload: { sceneGzB64: toB64(Uint8Array.from({ length: 4 * 1024 * 1024 }, (_, k) => (k * 2654435761) & 255)) },
+      })).statusCode,
+      413,
+      'an oversized scene is refused with 413',
+    );
+    // And after all of that, the design itself is untouched.
+    assert.equal(
+      (await app.inject({ method: 'GET', url: `/api/designs/${id}`, headers: bearer(aliceTok) })).statusCode,
+      200,
+      'a rejected scene never damages the design',
+    );
+  }
+
   // ---- visibility: private design is 404 to bob and anonymous ----
   assert.equal((await app.inject({ method: 'GET', url: `/api/designs/${id}` })).statusCode, 404);
   assert.equal((await app.inject({ method: 'GET', url: `/api/designs/${id}`, headers: bearer(bobTok) })).statusCode, 404);

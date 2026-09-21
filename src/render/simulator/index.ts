@@ -18,6 +18,9 @@ import { bowlShots, seatShot, flyover, applyShot as applyCameraShot, type SimSho
 import { revealVisibility, type RevealMode } from './choreo';
 import { evalTimeline, type Timeline, type Cue } from './timeline';
 import { buildAssetLayer, type AssetLayer } from './assetLayer';
+import { buildBannerRigs, type BannerRigLayer } from './bannerRig';
+import { buildPlacement, type PlacementHelper } from './bannerPlace';
+import type { BannerStore, StandIndex } from '../../core/banner';
 import type { AssetStore, SceneAsset } from '../../core/sceneAssets';
 import { rasterize } from '../../core/importImage';
 import { printAssetPanels } from './printPanels';
@@ -173,8 +176,9 @@ export class MatchDaySimulator {
     private readonly store: DesignStore,
     private readonly template: StadiumTemplate,
     private readonly assetStore: AssetStore,
-    options: { quality?: QualityTier; onContextLost?: () => void } = {},
+    options: { quality?: QualityTier; onContextLost?: () => void; bannerStore?: BannerStore } = {},
   ) {
+    this.bannerStore = options.bannerStore ?? null;
     this.settings = settingsFor(options.quality ?? probeQuality());
     this.onContextLost = options.onContextLost;
 
@@ -234,6 +238,19 @@ export class MatchDaySimulator {
     this.assetLayer = buildAssetLayer(this.assetStore, () => this.store.palette);
     this.scene.add(this.assetLayer.object);
     this.resolveEditorBanners();
+    // Banners: their own layer, because a banner is not a decal on a stand —
+    // it is fabric on a rig, and both of those are geometry that has to follow
+    // the bowl's real shape. The placement helper owns the stand frames, so
+    // the rigs and the drag-and-snap agree on where a stand is by construction.
+    if (this.bannerStore) {
+      this.placement = buildPlacement(this.map, this.bannerStore, this.template.sectionsPerTier);
+      this.scene.add(this.placement.object);
+      const place = this.placement;
+      this.bannerRigs = buildBannerRigs(this.bannerStore, (st) => place.frameFor(st));
+      this.scene.add(this.bannerRigs.object);
+      this.bindBannerPointer();
+      document.addEventListener('tifo:stand-extent', this.onStandExtent as EventListener);
+    }
     // Silent until asked for. Sound that starts by itself is hostile, and a
     // browser will refuse to start it outside a gesture anyway.
     this.atmosphere = buildAtmosphere();
@@ -1128,6 +1145,178 @@ export class MatchDaySimulator {
     return this.assetStore.selected?.id ?? null;
   }
 
+  // ---- banners (the fourth view's output, hanging in the bowl) ----
+  private readonly bannerStore: BannerStore | null = null;
+  private bannerRigs: BannerRigLayer | null = null;
+  private placement: PlacementHelper | null = null;
+  private bannerDrag = true;
+  private draggingBanner = false;
+  private dragStartedAt = 0;
+  private readonly ray = new THREE.Raycaster();
+  private readonly ndc = new THREE.Vector2();
+
+  /**
+   * Answer the editor's "how big is that stand?" question.
+   *
+   * The Banner view's "Fit the stand" button needs the stand's real width and
+   * height in metres, and only the simulator has measured them. Rather than
+   * duplicate the measurement in the editor — where it would be a second
+   * opinion able to disagree — the editor asks by dispatching an event and
+   * this fills in the answer when a simulator is open. When none is, the
+   * button says so and falls back to the banner type's own default band,
+   * which is an honest guess rather than a confident wrong number.
+   */
+  private readonly onStandExtent = (e: CustomEvent<{ stand: number; width?: number; height?: number }>): void => {
+    if (!this.placement) return;
+    const f = this.placement.frameFor(((e.detail?.stand ?? 1) % 4) as StandIndex);
+    if (!f.ok) return;
+    e.detail.width = f.widthM;
+    e.detail.height = f.heightM;
+  };
+
+  private setNdc(ev: PointerEvent): void {
+    const r = this.canvas.getBoundingClientRect();
+    this.ndc.x = ((ev.clientX - r.left) / r.width) * 2 - 1;
+    this.ndc.y = -((ev.clientY - r.top) / r.height) * 2 + 1;
+    this.ray.setFromCamera(this.ndc, this.camera);
+  }
+
+  private bindBannerPointer(): void {
+    this.canvas.addEventListener('pointerdown', this.onBannerDown);
+    this.canvas.addEventListener('pointermove', this.onBannerMove);
+    this.canvas.addEventListener('pointerup', this.onBannerUp);
+    this.canvas.addEventListener('pointercancel', this.onBannerUp);
+  }
+
+  /**
+   * Press on a banner to take hold of it.
+   *
+   * There is no "move banners" mode to turn on, because a mode is a thing to
+   * forget you are in. Pressing ON a banner drags the banner; pressing
+   * anywhere else orbits the camera, which is what pressing anywhere else has
+   * always done. The camera is only given up for as long as the finger is on
+   * the fabric.
+   */
+  private readonly onBannerDown = (ev: PointerEvent): void => {
+    if (!this.bannerRigs || !this.placement || !this.bannerDrag || ev.button !== 0) return;
+    this.setNdc(ev);
+    const id = this.bannerRigs.pick(this.ray);
+    if (!id) return;
+    this.bannerRigs.select(id);
+    this.bannerStore?.setActive(id);
+    this.onBannerSelect?.(id);
+    if (!this.placement.begin(id, this.ray)) return;
+    this.bannerStore?.begin();
+    this.draggingBanner = true;
+    this.dragStartedAt = this.elapsed;
+    this.controls.enabled = false;
+    try {
+      this.canvas.setPointerCapture(ev.pointerId);
+    } catch {
+      /* some engines refuse capture on a canvas that already has one */
+    }
+    ev.preventDefault();
+  };
+
+  private readonly onBannerMove = (ev: PointerEvent): void => {
+    if (!this.draggingBanner || !this.placement || !this.bannerStore) return;
+    this.setNdc(ev);
+    const res = this.placement.move(this.ray, this.camera, this.canvas.clientHeight || 900);
+    if (!res) return;
+    const a = this.bannerStore.active;
+    if (!a) return;
+    this.bannerStore.patchPlace({ alongU: res.alongU, heightV: res.heightV });
+    this.onBannerSnap?.(res.snaps.map((s) => s.key));
+  };
+
+  private readonly onBannerUp = (ev: PointerEvent): void => {
+    if (!this.draggingBanner) return;
+    this.draggingBanner = false;
+    this.placement?.end();
+    this.bannerStore?.commit();
+    this.controls.enabled = true;
+    this.onBannerSnap?.([]);
+    try {
+      this.canvas.releasePointerCapture(ev.pointerId);
+    } catch {
+      /* already released */
+    }
+    // A press that never moved is a selection, not a move, and it should not
+    // leave an empty entry on the undo stack. `commit()` already drops a
+    // gesture that changed nothing, so this only guards the toast.
+    if (this.elapsed - this.dragStartedAt < 0.12) this.onBannerSnap?.([]);
+  };
+
+  /** Told which banner the user grabbed, so the panel can follow. */
+  onBannerSelect: ((id: string) => void) | null = null;
+  /** Told which guides are lit, so the panel can name the snap. */
+  onBannerSnap: ((keys: string[]) => void) | null = null;
+
+  /** Let the overlay turn dragging off (e.g. while recording). */
+  setBannerDrag(on: boolean): void {
+    this.bannerDrag = on;
+  }
+  /** Replay one banner's reveal, or every banner's. */
+  playBannerReveal(id?: string): void {
+    this.bannerRigs?.play(id);
+  }
+  /** Park a banner part-way through its reveal, for scrubbing. */
+  setBannerProgress(id: string, p: number): void {
+    this.bannerRigs?.setProgress(id, p);
+  }
+  selectBanner(id: string | null): void {
+    this.bannerRigs?.select(id);
+  }
+  /** What the banner layer actually contains. A screenshot cannot say this. */
+  bannerCensus(): { banners: number; ropes: number; nets: number; bars: number; poles: number } {
+    return this.bannerRigs?.census() ?? { banners: 0, ropes: 0, nets: 0, bars: 0, poles: 0 };
+  }
+  /**
+   * Put the camera where the banner is aimed.
+   *
+   * A banner is made to be read from the opposite side of the ground, so this
+   * stands off along the stand's own outward normal at a distance set by the
+   * banner's width — far enough to take the whole sheet in, which is the only
+   * view from which a tifo makes sense. It is also what the shot harness uses,
+   * so a screenshot is framed by the product's own idea of where to look from
+   * rather than by a constant that goes stale the moment a bowl changes shape.
+   */
+  focusBanner(id: string): boolean {
+    const doc = this.bannerStore?.get(id);
+    if (!doc || !this.placement) return false;
+    const f = this.placement.frameFor(doc.place.stand);
+    if (!f.ok) return false;
+    // Aim at the middle of the sheet, not at the rail it hangs from, and
+    // stand where the people it is aimed at stand: back across the pitch and
+    // LOW. A banner lying on a raked stand is a near-horizontal surface, so a
+    // camera parked above it sees an edge; the view that reads is the one from
+    // the opposite end, which is who a tifo is for.
+    const top = f.pointAt(doc.place.alongU, Math.min(1, doc.place.heightV));
+    const drop = Math.min(0.95, doc.heightM / Math.max(1, f.slopeM));
+    const mid = f.pointAt(doc.place.alongU, Math.max(0, doc.place.heightV - drop / 2));
+    const cy = doc.kind === 'pitch' ? 0 : (top.y + mid.y) / 2;
+    // Elevation matters more than distance. A banner lying on a raked stand is
+    // a near-horizontal surface: from pitch level you see its edge, and the
+    // artwork disappears. Thirty-odd degrees up is roughly where the main
+    // camera gantry sits, and it is the angle every photograph of a kop tifo
+    // is taken from.
+    const d = Math.max(72, doc.widthM * 1.9);
+    const el = doc.kind === 'pitch' ? 0.75 : 0.55;
+    applyCameraShot(this.camera, this.controls, {
+      name: 'Banner',
+      position: [mid.x + mid.ox * d * Math.cos(el), cy + d * Math.sin(el), mid.z + mid.oz * d * Math.cos(el)],
+      target: [mid.x, Math.max(1.5, cy), mid.z],
+      fov: 44,
+    });
+    return true;
+  }
+
+  /** A stand's real size in metres, for sizing a banner to it. */
+  standSizeM(stand: StandIndex): { width: number; height: number } | null {
+    const f = this.placement?.frameFor(stand);
+    return f && f.ok ? { width: f.widthM, height: f.heightM } : null;
+  }
+
   // ---- choreography reveal (Phase 7) ----
   private autoReveal: RevealMode = 'wipe-lr';
   /** Reveal style the auto-choreography uses (kept in sync with the panel). */
@@ -1156,6 +1345,9 @@ export class MatchDaySimulator {
     this.revealActiveLast = false;
     this.recolorAll();
     for (const a of this.assetStore.list()) this.assetLayer.setOpacity(a.id, 1);
+    // Stopping a show should leave the tifo up, not half-unrolled: the state
+    // people want to look at afterwards is the finished one.
+    for (const b of this.bannerStore?.list() ?? []) this.bannerRigs?.setProgress(b.id, 1);
   }
   /** A ready-made show: broadcast view -> tifo wipes in -> smoke -> ultra view -> pyro -> confetti -> drone. */
   buildAutoChoreo(): Timeline {
@@ -1186,10 +1378,32 @@ export class MatchDaySimulator {
       { kind: 'effect', start: 11.4, effect: 'applause' },
       { kind: 'effect', start: 13.5, effect: 'drum-off' },
     ];
+    // Where each banner belongs in the show, from how it is actually rigged.
+    //
+    // A roof-hung banner is put up by rope technicians before anyone is in the
+    // ground, so on the show's clock it is simply there first. A drop banner
+    // is released on the whistle. A rope lift rises WITH the cards — that is
+    // the whole point of an Aufziehfahne, the crowd behind it still has their
+    // hands free. And a crowd pass starts a beat later, because it has to
+    // travel the length of the block over people's heads.
+    for (const b of this.bannerStore?.list() ?? []) {
+      if (b.visible === false) continue;
+      const dur = Math.max(0.4, b.revealMs / 1000);
+      const start =
+        b.kind === 'roof-hung' ? 0
+        : b.reveal === 'drop' ? 0.2
+        : b.reveal === 'pass' ? 1.1
+        : b.reveal === 'fade' ? 0
+        : 0.5;
+      cues.push({ kind: 'banner', start, dur, bannerId: b.id });
+    }
     return { duration: 15, cues };
   }
   playAutoChoreo(): void {
     for (const a of this.assetStore.list()) if (a.type === 'surface') this.assetLayer.unfurl(a.id, 3000);
+    // Take every banner back to nothing before the clock starts, or a show
+    // replayed twice opens with the tifo already up.
+    for (const b of this.bannerStore?.list() ?? []) this.bannerRigs?.setProgress(b.id, 0);
     this.playTimeline(this.buildAutoChoreo(), false);
   }
   private stepTimeline(): void {
@@ -1218,6 +1432,9 @@ export class MatchDaySimulator {
     for (const a of this.assetStore.list()) {
       const o = st.assetOpacity[a.id];
       if (o !== undefined) this.assetLayer.setOpacity(a.id, o);
+    }
+    for (const id of Object.keys(st.bannerProgress)) {
+      this.bannerRigs?.setProgress(id, st.bannerProgress[id]);
     }
     for (const e of st.firedEffects) {
       // Through the wrappers, not straight at `this.effects` — the wrappers are
@@ -1356,6 +1573,7 @@ export class MatchDaySimulator {
     }
       this.banners.update(this.elapsed);
       this.assetLayer.update(this.elapsed);
+      this.bannerRigs?.update(this.elapsed);
       this.effects.update(dt);
       this.surroundings.update(dt);
       if (this.sparkles.object.visible) this.sparkles.update(dt);
@@ -1398,6 +1616,12 @@ export class MatchDaySimulator {
     this.pitchside.dispose();
     this.track.dispose();
     this.banners.dispose();
+    this.bannerRigs?.dispose();
+    this.placement?.dispose();
+    document.removeEventListener('tifo:stand-extent', this.onStandExtent as EventListener);
+    this.canvas.removeEventListener('pointerdown', this.onBannerDown);
+    this.canvas.removeEventListener('pointermove', this.onBannerMove);
+    this.canvas.removeEventListener('pointerup', this.onBannerUp);
     this.effects.dispose();
     this.atmosphere.dispose();
     this.assetLayer.dispose();

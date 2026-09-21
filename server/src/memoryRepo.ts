@@ -139,6 +139,8 @@ export class MemoryAiEventsRepository implements AiEventsRepository {
 /** In-memory repositories: dev mode and route tests. Same contracts as Postgres. */
 export class MemoryDesignRepository implements DesignRepository {
   private rows = new Map<string, Row>();
+  /** design id -> gzipped scene JSON. Separate from the row, like the table. */
+  private scenes = new Map<string, Buffer>();
   constructor(private readonly usernames: (id: string | null) => string = () => 'unknown') {}
 
   private meta(r: Row): DesignMeta {
@@ -317,6 +319,16 @@ export class MemoryDesignRepository implements DesignRepository {
 
   async getThumbnail(id: string): Promise<Buffer | null> {
     return this.rows.get(id)?.thumbnail ?? null;
+  }
+
+  async getScene(id: string): Promise<Buffer | null> {
+    return this.scenes.get(id) ?? null;
+  }
+
+  async putScene(id: string, sceneGz: Buffer): Promise<boolean> {
+    if (!this.rows.has(id)) return false;
+    this.scenes.set(id, sceneGz);
+    return true;
   }
 
   async appendRevision(id: string, diff: DiffBytes, newCellsGz: Buffer, snapshot: Buffer | null): Promise<DesignMeta | null> {

@@ -6,6 +6,7 @@ import { DEFAULT_LEVELS, type SoundBus, type SoundLevels } from './atmosphere';
 import { REVEAL_MODES, type RevealMode } from './choreo';
 import type { CrowdPreset } from './crowd';
 import type { AssetStore } from '../../core/sceneAssets';
+import type { BannerStore } from '../../core/banner';
 import type { Cue, EffectName } from './timeline';
 import type { Weather } from './weather';
 import { dbg } from './debug';
@@ -426,6 +427,39 @@ const MDS_T: Record<string, { en: string; ar: string }> = {
   recPreview: { en: 'Preview', ar: 'معاينة' },
   recordVideo: { en: 'Record video', ar: 'سجّل فيديو' },
   previewing: { en: 'Previewing the reveal…', ar: 'معاينة الكشف…' },
+
+  // ---- banners ----
+  bannersTitle: { en: 'Banners', ar: 'اللافتات' },
+  theBanner: { en: 'Banner', ar: 'اللافتة' },
+  noBanners: { en: '(draw one in the Banner view)', ar: '(ارسم وحدة في عرض اللافتة)' },
+  lookAtIt: { en: 'Look at it', ar: 'شوفها' },
+  playIt: { en: 'Play the reveal', ar: 'شغّل الكشف' },
+  scrub: { en: 'Scrub', ar: 'تقديم' },
+  onStand: { en: 'Stand', ar: 'المدرج' },
+  alongStand: { en: 'Along', ar: 'بالعرض' },
+  upStand: { en: 'Up', ar: 'للأعلى' },
+  outStand: { en: 'Out', ar: 'للأمام' },
+  centreIt: { en: 'Centre it', ar: 'وسّطها' },
+  snapOn: { en: 'Snap while dragging', ar: 'محاذاة أثناء السحب' },
+  bannerWind: { en: 'Wind', ar: 'الهواء' },
+  showBanner: { en: 'Show it', ar: 'أظهرها' },
+  dragHint: { en: 'Drag the banner itself to move it on the stand.', ar: 'اسحب اللافتة نفسها عشان تحركها على المدرج.' },
+  'snap.centre': { en: 'centre of the stand', ar: 'منتصف المدرج' },
+  'snap.quarter': { en: 'quarter', ar: 'الربع' },
+  'snap.end': { en: 'end of the stand', ar: 'طرف المدرج' },
+  'snap.section': { en: 'section edge', ar: 'حد القطاع' },
+  'snap.halfway': { en: 'the halfway line', ar: 'خط المنتصف' },
+  'snap.goal': { en: 'the goal centre line', ar: 'منتصف المرمى' },
+  'snap.rail': { en: 'the front rail', ar: 'السور الأمامي' },
+  'snap.back': { en: 'the back row', ar: 'الصف الأخير' },
+  'snap.middle': { en: 'half way up', ar: 'نص الارتفاع' },
+  'snap.tier': { en: 'the top of a tier', ar: 'أعلى الطابق' },
+  snapped: { en: 'Snapped to {what}', ar: 'انحاذت على {what}' },
+  'tip.lookAtIt': { en: 'Put the camera where this banner is meant to be read from', ar: 'حط الكاميرا من المكان اللي تنقرأ منه هذي اللافتة' },
+  'tip.playIt': { en: 'Run its reveal: the unroll, the haul, the pass over the crowd', ar: 'شغّل كشفها: الانفراد، السحب، المرور فوق الجمهور' },
+  'tip.scrub': { en: 'Hold the reveal anywhere in the middle, to line up a shot', ar: 'وقّف الكشف بأي لحظة، عشان تظبط اللقطة' },
+  'tip.centreIt': { en: 'Put it dead centre on the stand', ar: 'حطها بالضبط في منتصف المدرج' },
+  'tip.snapOn': { en: 'Catch the stand centre, the tier tops and the section edges', ar: 'تمسك منتصف المدرج وأعلى الطوابق وحدود القطاعات' },
 };
 const L = (k: string): string => {
   const e = MDS_T[k];
@@ -533,7 +567,7 @@ export function openMatchDaySimulator(
   store: DesignStore,
   template: StadiumTemplate,
   assetStore: AssetStore,
-  opts: { onClose?: () => void } = {},
+  opts: { onClose?: () => void; bannerStore?: BannerStore } = {},
 ): SimulatorHandle {
   const state: SimState = {
     camIdx: 0,
@@ -786,6 +820,43 @@ export function openMatchDaySimulator(
     row(unfurlBtn, printBtn, delBtn, clearAllBtn),
   );
 
+  // Banners. Separate from Tifo Assets on purpose: an asset is a decoration
+  // you add here, a banner is a thing you DREW, in its own view, with its own
+  // rig and its own reveal. Mixing them into one list would make the two feel
+  // like the same object, and they behave nothing alike.
+  const bnSel = sel();
+  const bnLook = btn(L('lookAtIt'));
+  const bnPlay = btn(L('playIt'), 'primary');
+  const bnScrub = rng(0, 100, 100);
+  const bnStand = sel();
+  for (const v of ['1', '3', '0', '2']) opt(bnStand, v, L('stand.' + v), v === '1');
+  const bnAlong = rng(0, 100, 50);
+  const bnUp = rng(0, 120, 60);
+  const bnOut = rng(-20, 200, 12);
+  const bnCentre = btn(L('centreIt'));
+  const bnSnap = chk(true);
+  const bnWind = rng(0, 100, 25);
+  const bnShow = chk(true);
+  const bnHint = document.createElement('div');
+  bnHint.className = 'mds-hint';
+  bnHint.textContent = L('dragHint');
+  const secBanners = section(ICONS.assets, L('bannersTitle'), false);
+  secBanners.body.append(
+    field(L('theBanner'), bnSel),
+    row(bnLook, bnPlay),
+    field(L('scrub'), bnScrub),
+    divider(),
+    field(L('onStand'), bnStand),
+    field(L('alongStand'), bnAlong),
+    field(L('upStand'), bnUp),
+    field(L('outStand'), bnOut),
+    row(bnCentre),
+    checkField(L('snapOn'), bnSnap),
+    field(L('bannerWind'), bnWind),
+    checkField(L('showBanner'), bnShow),
+    bnHint,
+  );
+
   // Choreography
   const autoBtn = btn(L('autoChoreo'), 'primary');
   const stopBtn = btn(L('stop'));
@@ -846,9 +917,9 @@ export function openMatchDaySimulator(
   // the kind of coupling that makes an Arabic run fail for no real reason.
   for (const [key, sec] of [
     ['camera', secCam], ['crowd', secCrowd], ['atmosphere', secAtmo], ['sound', secSound],
-    ['assets', secAssets], ['choreo', secChoreo], ['record', secRecord],
+    ['assets', secAssets], ['banners', secBanners], ['choreo', secChoreo], ['record', secRecord],
   ] as [string, { root: HTMLElement }][]) sec.root.dataset.sec = key;
-  panel.append(actionsHost, secCam.root, secCrowd.root, secAtmo.root, secSound.root, secAssets.root, secChoreo.root, secRecord.root);
+  panel.append(actionsHost, secCam.root, secCrowd.root, secAtmo.root, secSound.root, secAssets.root, secBanners.root, secChoreo.root, secRecord.root);
   overlay.append(bar, panel, host);
   document.body.appendChild(overlay);
   const prevOverflow = document.body.style.overflow;
@@ -996,6 +1067,36 @@ export function openMatchDaySimulator(
     assets.forEach((a, i) => opt(assetSel, a.id, a.type + ' ' + (i + 1), false));
     assetSel.value = sim.selectedAssetId ?? '';
   }
+
+  const bannerStore = opts.bannerStore ?? null;
+  let bnSyncing = false;
+  /** Read the banner store back into the Banners section. */
+  function refreshBanners(): void {
+    const list = bannerStore ? bannerStore.list() : [];
+    bnSel.replaceChildren();
+    if (!list.length) opt(bnSel, '', L('noBanners'), false);
+    for (const b of list) opt(bnSel, b.id, b.name, false);
+    const a = bannerStore?.active ?? null;
+    bnSel.value = a?.id ?? '';
+    const off = !a;
+    for (const el of [bnLook, bnPlay, bnCentre] as HTMLButtonElement[]) el.disabled = off;
+    for (const el of [bnScrub, bnAlong, bnUp, bnOut, bnWind, bnSnap, bnShow] as HTMLInputElement[]) el.disabled = off;
+    bnStand.disabled = off;
+    if (!a) return;
+    // Every one of these assignments fires `input`/`change` in some browsers,
+    // which would write the value straight back into the store mid-drag. The
+    // flag is what keeps a refresh from becoming an edit.
+    bnSyncing = true;
+    bnStand.value = String(a.place.stand);
+    bnAlong.value = String(Math.round(a.place.alongU * 100));
+    bnUp.value = String(Math.round(a.place.heightV * 100));
+    bnOut.value = String(Math.round(a.place.outM * 10));
+    bnWind.value = String(Math.round(a.wind * 100));
+    bnSnap.checked = a.place.snap;
+    bnShow.checked = a.visible !== false;
+    bnSyncing = false;
+  }
+  const unsubBanners = bannerStore ? bannerStore.onChange(refreshBanners) : null;
   /**
    * Push every sound setting at the rig.
    *
@@ -1081,6 +1182,7 @@ export function openMatchDaySimulator(
       sim = new MatchDaySimulator(host, map, store, template, assetStore, {
         quality: state.tier,
         onContextLost: () => showFail('lost'),
+        bannerStore: opts.bannerStore,
       });
     } catch {
       built = false;
@@ -1091,8 +1193,17 @@ export function openMatchDaySimulator(
     built = true;
     mounted = true;
     hideFail();
+    // Dragging a banner in the bowl and the panel's own sliders are two views
+    // of one number, so the drag reports back rather than letting them drift.
+    sim.onBannerSelect = () => refreshBanners();
+    sim.onBannerSnap = (keys) => {
+      bnHint.textContent = keys.length
+        ? L('snapped').replace('{what}', keys.map((k) => L('snap.' + k)).join(' + '))
+        : L('dragHint');
+    };
     applyState();
     refreshAssets();
+    refreshBanners();
     sim.start();
     return true;
   }
@@ -1380,6 +1491,44 @@ export function openMatchDaySimulator(
     refreshAssets();
   });
 
+  // ---------- banners ----------
+  const bnEdit = (fn: () => void): void => {
+    if (bnSyncing || !bannerStore) return;
+    bannerStore.begin();
+    fn();
+    bannerStore.commit();
+  };
+  bnSel.addEventListener('change', () => {
+    bannerStore?.setActive(bnSel.value || null);
+    sim.selectBanner(bnSel.value || null);
+    refreshBanners();
+  });
+  bnLook.addEventListener('click', () => {
+    const id = bannerStore?.activeId_;
+    if (id && !sim.focusBanner(id)) toast(L('noBanners'));
+  });
+  bnPlay.addEventListener('click', () => {
+    const id = bannerStore?.activeId_;
+    if (!id) return;
+    bnScrub.value = '100';
+    sim.playBannerReveal(id);
+  });
+  bnScrub.addEventListener('input', () => {
+    const id = bannerStore?.activeId_;
+    if (id) sim.setBannerProgress(id, Number(bnScrub.value) / 100);
+  });
+  bnStand.addEventListener('change', () => bnEdit(() => bannerStore?.patchPlace({ stand: (Number(bnStand.value) || 1) as 0 | 1 | 2 | 3 })));
+  bnAlong.addEventListener('input', () => bnEdit(() => bannerStore?.patchPlace({ alongU: Number(bnAlong.value) / 100 })));
+  bnUp.addEventListener('input', () => bnEdit(() => bannerStore?.patchPlace({ heightV: Number(bnUp.value) / 100 })));
+  bnOut.addEventListener('input', () => bnEdit(() => bannerStore?.patchPlace({ outM: Number(bnOut.value) / 10 })));
+  bnWind.addEventListener('input', () => bnEdit(() => bannerStore?.patch({ wind: Number(bnWind.value) / 100 })));
+  bnSnap.addEventListener('change', () => bnEdit(() => bannerStore?.patchPlace({ snap: bnSnap.checked })));
+  bnShow.addEventListener('change', () => bnEdit(() => bannerStore?.patch({ visible: bnShow.checked })));
+  bnCentre.addEventListener('click', () => {
+    bnEdit(() => bannerStore?.patchPlace({ alongU: 0.5, yawDeg: 0 }));
+    toast(L('snapped').replace('{what}', L('snap.centre')));
+  });
+
   revealBtn.addEventListener('click', () => sim.playReveal(state.reveal));
   revealSel.addEventListener('change', () => {
     state.reveal = revealSel.value as RevealMode;
@@ -1519,6 +1668,9 @@ export function openMatchDaySimulator(
     window.removeEventListener('resize', fitPanel);
     window.removeEventListener('popstate', onPop);
     mqMobile.removeEventListener('change', placeActions);
+    // The banner store outlives this overlay — it belongs to the editor — so
+    // the subscription has to come off with the panel that owned it.
+    unsubBanners?.();
     if (document.fullscreenElement) void document.exitFullscreen();
     disposeSim();
     document.body.style.overflow = prevOverflow;

@@ -11,8 +11,10 @@ import { requestStadiumSwitch } from './ui/stadiumSwitch';
 import { registerCustom } from './core/customStadiums';
 import { PATTERN_PRESETS } from './core/patterns';
 import { DesignStore } from './core/design';
-import { AssetStore } from './core/sceneAssets';
+import { AssetStore, type SceneModel } from './core/sceneAssets';
+import { BannerStore, type BannerSceneModel } from './core/banner';
 import { ObjectLayer } from './core/objects';
+import type { BannerView } from './ui/bannerView';
 import type { Preview3D } from './render/preview3d';
 import { track } from './net/analytics';
 import { hasOnboarded } from './ui/onboarding';
@@ -225,6 +227,8 @@ async function main(): Promise<void> {
   // blank (the border preset is template-agnostic — derives tier edges from the map).
   let sharedTitle: string | null = null;
   let sharedLoaded = sharedLoadedEarly;
+  /** A shared design's banners, restored once the stores exist further down. */
+  let sharedScene: unknown = null;
   if (sharedId && !sharedLoaded) {
     try {
       const { loadDesign } = await import('./net/api');
@@ -233,6 +237,16 @@ async function main(): Promise<void> {
       sharedLoaded = true;
     } catch {
       sharedLoaded = false;
+    }
+  }
+  if (sharedId && sharedLoaded) {
+    // Separate request, and a failure here costs the banners rather than the
+    // tifo: an old design simply has no scene, and that is not an error.
+    try {
+      const { fetchScene } = await import('./net/api');
+      sharedScene = await fetchScene(sharedId);
+    } catch {
+      sharedScene = null;
     }
   }
 
@@ -307,8 +321,27 @@ async function main(): Promise<void> {
   editor.aisleCount = template.aisles.count;
   editor.drawGrid(true);
   const objects = new ObjectLayer();
+  // Banners and the older overlay assets. Both are created here, before the
+  // toolbar, because saving a design has to be able to reach them: a banner
+  // that only exists in this browser is not a banner anyone can be shown.
+  const bannerStore = new BannerStore();
+  const assetStore = new AssetStore();
   editor.attachObjectLayer(objects);
-  mountToolbar(document.body, editor, store, map, objects, () => preview, restoredDesignId);
+
+  /** What travels with the design, and how it comes back. */
+  const sceneIO = {
+    snapshot: (): unknown => ({ v: 1, banners: bannerStore.toJSON(), assets: assetStore.toJSON() }),
+    restore: (raw: unknown): void => {
+      const scene = raw as { banners?: BannerSceneModel; assets?: SceneModel } | null;
+      if (!scene || typeof scene !== 'object') return;
+      if (scene.banners) bannerStore.loadJSON(scene.banners);
+      if (scene.assets) assetStore.loadJSON(scene.assets);
+    },
+  };
+
+  if (sharedScene) sceneIO.restore(sharedScene);
+
+  mountToolbar(document.body, editor, store, map, objects, () => preview, restoredDesignId, sceneIO);
 
   // A sign-in that did not finish says why, in the same place every other
   // outcome is reported. Reasons are a fixed set from the callback; nothing the
@@ -320,13 +353,39 @@ async function main(): Promise<void> {
 
   // --- Phase 2: lazy-initialized 3D preview sharing the same store ---
   const previewHost = document.getElementById('preview-host')!;
+  const bannerHostEl = document.getElementById('banner-host')!;
   const canvasWrap = host.parentElement as HTMLElement;
   const btn2d = document.getElementById('view-2d') as HTMLButtonElement;
+  const btnBanner = document.getElementById('view-banner') as HTMLButtonElement;
   const btn3d = document.getElementById('view-3d') as HTMLButtonElement;
   const btnSplit = document.getElementById('view-split') as HTMLButtonElement;
   const camBar = document.getElementById('cam-bar')!;
   let preview: Preview3D | null = null;
   let loading = false;
+
+  // Banners. The store is pure data and is created up front because the
+  // simulator, the save path and the mobile shell all read it; the VIEW —
+  // artboard, bar, panel — is a chunk of its own that only arrives when
+  // somebody actually presses Banner, the same bargain the 3D preview makes.
+  let bannerView: BannerView | null = null;
+  let bannerLoading: Promise<BannerView | null> | null = null;
+  const ensureBannerView = (): Promise<BannerView | null> => {
+    if (bannerView) return Promise.resolve(bannerView);
+    if (bannerLoading) return bannerLoading;
+    bannerLoading = import('./ui/bannerView')
+      .then(({ mountBannerView }) => {
+        bannerView = mountBannerView({
+          host: bannerHostEl,
+          store,
+          bannerStore,
+          message: document.getElementById('message'),
+          onOpenMatchDay: () => document.getElementById('match-day')?.click(),
+        });
+        return bannerView;
+      })
+      .catch(() => null);
+    return bannerLoading;
+  };
 
   // Lazily create the 3D preview (Three.js loads only when first needed).
   const ensurePreview = async (): Promise<Preview3D | null> => {
@@ -355,19 +414,31 @@ async function main(): Promise<void> {
     return preview;
   };
 
-  type ViewMode = '2d' | '3d' | 'split';
+  type ViewMode = '2d' | 'banner' | '3d' | 'split';
 
   const setView = async (next: ViewMode): Promise<void> => {
     const show2d = next === '2d' || next === 'split';
     const show3dView = next === '3d' || next === 'split';
     if (show3dView) track('view_3d');
+    if (next === 'banner') track('view_banner');
     host.hidden = !show2d;
     previewHost.hidden = !show3dView;
-    camBar.hidden = next === '2d';
+    camBar.hidden = next === '2d' || next === 'banner';
     canvasWrap.classList.toggle('split', next === 'split');
     btn2d.classList.toggle('active', next === '2d');
+    btnBanner?.classList.toggle('active', next === 'banner');
     btn3d.classList.toggle('active', next === '3d');
     btnSplit.classList.toggle('active', next === 'split');
+
+    // The Banner view owns the tool rail while it is up: the rail's buttons,
+    // the palette, undo and the touch gestures all reach it through
+    // `bannerHost` rather than through the seat editor.
+    if (next === 'banner') {
+      const bv = await ensureBannerView();
+      bv?.show();
+    } else {
+      bannerView?.hide();
+    }
 
     if (show3dView) {
       const p = await ensurePreview();
@@ -394,8 +465,13 @@ async function main(): Promise<void> {
   };
 
   btn2d.addEventListener('click', () => void setView('2d'));
+  btnBanner?.addEventListener('click', () => void setView('banner'));
   btn3d.addEventListener('click', () => void setView('3d'));
   btnSplit.addEventListener('click', () => void setView('split'));
+  // The tool rail's flag button is the other door into the same room. It used
+  // to open a modal with a brush and a stand picker; that studio is gone and
+  // this is where its work continued.
+  document.getElementById('banner-studio-btn')?.addEventListener('click', () => void setView('banner'));
 
   // One-time coaching hint on the design pane: a brush drawing a stroke, nudging
   // newcomers to paint and watch the 3D stadium fill live. Appended INSIDE
@@ -469,7 +545,6 @@ async function main(): Promise<void> {
   // heavy WebGL context is live at a time, and resumes when the overlay closes.
   // Tifo assets (banners/flags/surfaces) live in a shared store so they persist
   // across opening/closing the simulator within a session.
-  const assetStore = new AssetStore();
   // Phones get a different front end over the same editor: a five-tab ribbon
   // and bottom sheets instead of a 752px tool rail that ran off the screen.
   const { mountMobileShell, PHONE_MAX } = await import('./ui/mobileShell');
@@ -485,16 +560,30 @@ async function main(): Promise<void> {
     requestAnimationFrame(() => { editor.app.resize(); editor.fitToView(); });
   });
 
-  const { mountBannerStudio } = await import('./ui/bannerStudio');
-  mountBannerStudio({ trigger: document.getElementById('banner-studio-btn'), assetStore, store, map });
-  // Persist them locally too, so they survive a page reload (client-only and
-  // wrapped in try/catch — never touches the server save path; full per-design +
-  // server persistence is a later, test-gated step).
+  // Restore the scene, and bring any banner the retired Banner Studio made
+  // forward into the new model. Skipped entirely when a shared design brought
+  // its own — someone else's tifo should not arrive wearing your banners. A PNG in the scene store and a banner are the
+  // same thing now, so migrating is the only way the two do not render twice.
   try {
-    const raw = localStorage.getItem('tifo_scene_v2');
-    if (raw) assetStore.loadJSON(JSON.parse(raw));
+    const raw = sharedScene ? null : localStorage.getItem('tifo_scene_v2');
+    if (raw) {
+      const { migrateScene } = await import('./core/bannerMigrate');
+      const m = migrateScene(JSON.parse(raw), t('bn.banner'));
+      assetStore.loadJSON(m.scene);
+      if (m.moved > 0) {
+        bannerStore.loadJSON({ version: 1, banners: m.banners });
+        localStorage.setItem('tifo_scene_v2', JSON.stringify(m.scene));
+      }
+    }
   } catch {
     /* ignore corrupt/unavailable storage */
+  }
+  // Banners saved after the migration live in their own key.
+  try {
+    const rawB = sharedScene ? null : localStorage.getItem('tifo_banners_v1');
+    if (rawB && bannerStore.count === 0) bannerStore.loadJSON(JSON.parse(rawB));
+  } catch {
+    /* ignore */
   }
   let sceneSaveTimer = 0;
   assetStore.onChange(() => {
@@ -506,6 +595,17 @@ async function main(): Promise<void> {
         /* quota exceeded (large images) or storage off — assets stay for this session */
       }
     }, 500);
+  });
+  let bannerSaveTimer = 0;
+  bannerStore.onChange(() => {
+    window.clearTimeout(bannerSaveTimer);
+    bannerSaveTimer = window.setTimeout(() => {
+      try {
+        localStorage.setItem('tifo_banners_v1', JSON.stringify(bannerStore.toJSON()));
+      } catch {
+        /* quota exceeded (a pasted photo) — the banner still lives for this session */
+      }
+    }, 600);
   });
   const matchDayBtn = document.getElementById('match-day') as HTMLButtonElement | null;
   let simOpen = false;
@@ -523,6 +623,7 @@ async function main(): Promise<void> {
     try {
       const { openMatchDaySimulator } = await import('./render/simulator/overlay');
       openMatchDaySimulator(map, store, template, assetStore, {
+        bannerStore,
         onClose: () => {
           simOpen = false;
           if (resumePreview) preview?.start();

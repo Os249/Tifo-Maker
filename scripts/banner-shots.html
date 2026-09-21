@@ -1,0 +1,77 @@
+<!doctype html>
+<!-- Dev-only harness for scripts/banner-shots.mts. Boots the REAL
+     MatchDaySimulator with a real BannerStore, because every interesting part
+     of a banner — the stand frame it hangs on, the rig, the reveal curve — is
+     wired through the simulator, and a harness that builds its own little
+     scene can pass while the product hangs nothing at all. -->
+<html lang="en"><head><meta charset="UTF-8"/><title>banner shots</title></head>
+<body style="margin:0;background:#05070c"><div id="out">loading…</div>
+<script type="module">
+  import { generateSeatMap } from '/src/core/seatmap.ts';
+  import { DesignStore } from '/src/core/design.ts';
+  import { templateById } from '/src/core/stadiumCatalog.ts';
+  import { MatchDaySimulator } from '/src/render/simulator/index.ts';
+  import { AssetStore } from '/src/core/sceneAssets.ts';
+  import { BannerStore, newBanner } from '/src/core/banner.ts';
+
+  const HOST = document.createElement('div');
+  HOST.style.cssText = 'position:fixed;left:0;top:0;width:1200px;height:700px;';
+  document.body.appendChild(HOST);
+
+  /** Bold, flat artwork — what a real banner carries, and what reads at 120 m. */
+  function art(kind) {
+    const items = [
+      { id: 'bg', kind: 'fill', color: '#0d1b3e' },
+      { id: 's1', kind: 'shape', shape: 'shield', color: '#f2c40f', cx: 0.22, cy: 0.25, w: 0.24, h: 0.34, rot: 0 },
+      { id: 't1', kind: 'text', text: 'ULTRAS', fontId: 'anton', arcDeg: 0, color: '#ffffff', cx: 0.6, cy: 0.2, w: 0.62, h: 0.16, rot: 0 },
+      { id: 'k1', kind: 'stroke', color: '#e11d2a', width: 0.045,
+        pts: [0.08, 0.42, 0.3, 0.38, 0.52, 0.44, 0.74, 0.38, 0.94, 0.43] },
+      { id: 't2', kind: 'text', text: kind.toUpperCase(), fontId: 'anton', arcDeg: 0, color: '#f2c40f', cx: 0.5, cy: 0.36, w: 0.5, h: 0.09, rot: 0 },
+    ];
+    return items;
+  }
+
+  window.__shoot = async (spec) => {
+    HOST.replaceChildren();
+    const template = templateById(spec.template);
+    const map = generateSeatMap(template);
+    const store = new DesignStore(map, ['#0b1d4d', '#12224f', '#e8ecf5']);
+    // A quiet two-tone bowl. The point of these shots is the banner; a busy
+    // mosaic behind it is exactly what hides a rig that never got built.
+    store.transform((i) => 1 + (i % 7 === 0 ? 1 : 0));
+
+    const banners = new BannerStore();
+    const doc = newBanner(spec.kind, spec.kind);
+    doc.items = art(spec.kind);
+    doc.material = spec.material ?? 'solid';
+    doc.wind = spec.wind ?? 0.3;
+    doc.place.stand = 1;
+    banners.add(doc);
+
+    const sim = new MatchDaySimulator(HOST, map, store, template, new AssetStore(), {
+      quality: 'high',
+      bannerStore: banners,
+    });
+    sim.setTimeOfDay(spec.tod ?? 'dusk');
+    sim.setFloodlights(true);
+    sim.setCrowdPreset('sellout');
+
+    // Frame it the way the product frames it, so the shot cannot be composed
+    // better (or worse) than what a user actually sees.
+    const id = banners.list()[0].id;
+    sim.focusBanner(id);
+
+    sim.start();
+    // Park the reveal where the shot wants it, rather than racing an animation.
+    sim.setBannerProgress(id, spec.progress ?? 1);
+    await new Promise((r) => setTimeout(r, spec.settle ?? 700));
+    sim.stop();
+    const png = sim.canvas.toDataURL('image/png');
+    const census = sim.bannerCensus();
+    const stand = sim.standSizeM(1);
+    sim.dispose();
+    return { png, census, stand };
+  };
+  document.getElementById('out').textContent = 'ready';
+  window.__ready = true;
+</script></body></html>

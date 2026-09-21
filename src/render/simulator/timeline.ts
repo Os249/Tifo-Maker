@@ -12,6 +12,7 @@ import type { RevealMode } from './choreo';
  *  - assetShow  : fade an asset's opacity from -> to over [start, start+dur]
  *  - effect     : fire a one-shot / toggle effect at `start` (confetti, pyro, ...)
  *  - camera     : switch to a named shot at `start`
+ *  - banner     : run one banner's own reveal over [start, start+dur]
  */
 
 export type EffectName =
@@ -56,7 +57,22 @@ export interface CameraCue {
   start: number;
   shot: string;
 }
-export type Cue = RevealCue | AssetShowCue | EffectCue | CameraCue;
+/**
+ * One banner's reveal, on the show's clock.
+ *
+ * A banner's reveal is already a 0..1 progress, so it slots into a timeline
+ * with no new machinery: the cue carries the window and the evaluator reports
+ * where in it the clock is. That is the whole reason the rig was built around
+ * a progress rather than around an animation — an animation can only be
+ * played, and a show has to be scrubbed, previewed and recorded.
+ */
+export interface BannerCue {
+  kind: 'banner';
+  start: number;
+  dur: number;
+  bannerId: string;
+}
+export type Cue = RevealCue | AssetShowCue | EffectCue | CameraCue | BannerCue;
 
 export interface Timeline {
   duration: number;
@@ -70,6 +86,8 @@ export function emptyTimeline(): Timeline {
 export interface TimelineState {
   reveal: { mode: RevealMode; progress: number } | null;
   assetOpacity: Record<string, number>;
+  /** Banner id → reveal progress 0..1 for this instant. */
+  bannerProgress: Record<string, number>;
   /** Effect cues whose start was crossed in (prevT, t] — fire once. */
   firedEffects: EffectName[];
   camera: string | null;
@@ -82,6 +100,7 @@ export interface TimelineState {
 export function evalTimeline(tl: Timeline, t: number, prevT: number): TimelineState {
   let reveal: TimelineState['reveal'] = null;
   const assetOpacity: Record<string, number> = {};
+  const bannerProgress: Record<string, number> = {};
   const firedEffects: EffectName[] = [];
   let camera: string | null = null;
 
@@ -98,8 +117,11 @@ export function evalTimeline(tl: Timeline, t: number, prevT: number): TimelineSt
       if (c.start > prevT && c.start <= t) firedEffects.push(c.effect);
     } else if (c.kind === 'camera') {
       if (c.start <= t) camera = c.shot;
+    } else if (c.kind === 'banner') {
+      // Before its cue a banner is not there yet; after it, it stays.
+      bannerProgress[c.bannerId] = t <= c.start ? 0 : t >= c.start + c.dur ? 1 : (t - c.start) / Math.max(0.001, c.dur);
     }
   }
 
-  return { reveal, assetOpacity, firedEffects, camera };
+  return { reveal, assetOpacity, bannerProgress, firedEffects, camera };
 }

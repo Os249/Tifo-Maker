@@ -538,6 +538,23 @@ export class PgDesignRepository implements DesignRepository {
     return meta;
   }
 
+  async getScene(id: string): Promise<Buffer | null> {
+    const res = await this.pool.query('SELECT scene FROM design_scenes WHERE design_id = $1', [id]);
+    return res.rowCount ? (res.rows[0].scene as Buffer) : null;
+  }
+
+  async putScene(id: string, sceneGz: Buffer): Promise<boolean> {
+    // ON CONFLICT rather than a read-then-write: two tabs of the same design
+    // saving at once is ordinary, and the loser of that race should overwrite
+    // rather than error.
+    const res = await this.pool.query(
+      `INSERT INTO design_scenes (design_id, scene, updated_at) VALUES ($1, $2, now())
+       ON CONFLICT (design_id) DO UPDATE SET scene = EXCLUDED.scene, updated_at = now()`,
+      [id, sceneGz],
+    );
+    return (res.rowCount ?? 0) > 0;
+  }
+
   async patchMeta(id: string, patch: { title?: string; isPublic?: boolean }): Promise<DesignMeta | null> {
     const res = await this.pool.query(
       `UPDATE designs SET title = coalesce($2, title), is_public = coalesce($3, is_public), updated_at = now()

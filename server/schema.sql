@@ -356,3 +356,16 @@ ALTER TABLE designs ADD COLUMN IF NOT EXISTS colors  TEXT[] NOT NULL DEFAULT '{}
 ALTER TABLE designs ADD COLUMN IF NOT EXISTS club_id TEXT;
 CREATE INDEX IF NOT EXISTS designs_colors_idx  ON designs USING GIN (colors);
 CREATE INDEX IF NOT EXISTS designs_club_id_idx ON designs (club_id) WHERE club_id IS NOT NULL;
+
+-- The scene that travels with a design: banners, and the older overlay assets.
+--
+-- Its own table rather than a column on `designs`, deliberately. The design row
+-- is written by the hot save path that every existing design depends on, and
+-- the one thing a new feature must not do is give that path a new way to fail.
+-- A scene is optional, arrives on its own request, and a design with no row
+-- here is simply a design with no banners.
+CREATE TABLE IF NOT EXISTS design_scenes (
+  design_id  UUID PRIMARY KEY REFERENCES designs(id) ON DELETE CASCADE,
+  scene      BYTEA NOT NULL,              -- gzipped JSON: { banners, assets }
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);

@@ -1,0 +1,60 @@
+Banners: a fourth view, a real rig in the bowl, and the reveal
+
+A banner is the half of a tifo the card mosaic isn't, and the app had a modal
+with a brush for it. This replaces that with a whole surface.
+
+Banner joins Design / Stadium / Split. It borrows the tool rail and the
+palette unchanged — the nine tools keep their icons, their keys and their
+tool bars, and reach the artboard through one small object (ui/bannerHost)
+rather than by teaching toolbar.ts what a banner is.
+
+A banner is a display list, not a bitmap: polyline strokes, live text, shapes
+and images, in units normalised to the banner's width. That is what "draw on
+it properly, not pixel art" means, it stays crisp from a 900px artboard to a
+print panel, and it serialises to a few KB so banners fit in the save payload.
+
+The research is in the model, not in the copy:
+- Überziehfahne vs Aufziehfahne is a property of the type, because one ends up
+  ON the crowd (hiding the mosaic) and the other in front of them. Eight types
+  in all, each with its own rig and reveal.
+- No printer makes fabric wider than 3 m, so the artboard draws the seams.
+- Weight is area x g/m²; verify holds the published 70x120m / 756kg flag.
+- Mesh is really perforated and alpha-tested, and visibly moves less in wind.
+
+In the bowl, standFrame turns a stand into a surface you can hang things on
+(built from the seat map, so it fits any template) and bannerRig builds the
+fabric plus the ropes, the net, the weight bar, the poles and the roll. Every
+reveal is one 0..1 progress fed to the same surface function, so it can be
+scrubbed, previewed, put on the choreography timeline and screenshotted.
+Dragging works on the banner itself; the magnet catches the stand centre, the
+tier tops, section edges and the halfway line, with a threshold in screen
+pixels and a guide that names itself.
+
+Two fixes the screenshots could not have found: the stand window was
+s*0.25+0.125 (the END of a stand), so every stand read as empty and every
+banner hung on a fallback wall; and hanging a sheet vertically from mid-stand
+buries it in the terracing, so stand-mounted banners now follow the stand's
+own surface and stand off it along its normal.
+
+Banners save with the design, in their own design_scenes table rather than a
+column on designs — the hot save path must not gain a new way to fail. Scenes
+are capped at 3 MB gzipped and parsed on the way in.
+
+Phones get a third segment on the view pill and the banner controls in the
+existing bottom sheet; the header's segmented control is retuned for four
+items at 768px. The pill's buttons now carry data-view: e2e-mobile selected
+them by :nth-child, and inserting Banner silently retargeted six checks.
+
+Arabic complete: 81 strings, whole sentences with named placeholders, gated.
+
+Gates: 9 banner gates in verify; npm run shots:banner boots the real simulator
+and reads a scene census back (a screenshot cannot tell you the rig group is
+empty); e2e-banner.mjs is 47 checks across desktop, two phone orientations,
+768x1024 and Arabic RTL, checking pixels and the stored display list rather
+than asking the DOM whether drawing happened.
+
+Retires src/ui/bannerStudio.ts; anything it placed is migrated on load.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01NJL2ZR3v1pJ5VPRk3habHH
+

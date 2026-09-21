@@ -115,6 +115,17 @@ declare module 'fastify' {
   }
 }
 const MAX_THUMB_BYTES = 128 * 1024;
+/**
+ * How big a design's scene may be, gzipped.
+ *
+ * A banner is a display list — polylines, text, shapes — so a hand-drawn one
+ * is a few kilobytes and this cap is never near. What can reach it is an
+ * imported photograph embedded as a data URL, which is why the editor
+ * downscales those to 1,600 px on the long edge before they go in. 3 MB is
+ * room for several photographic banners and still small enough that the limit
+ * is reached long before a database row becomes a problem.
+ */
+const SCENE_MAX_BYTES = 3 * 1024 * 1024;
 const MAX_PHOTO_BYTES = 2 * 1024 * 1024; // real photos, resized client-side before upload
 // A full 60k design gzips to a few hundred bytes, but base64 of (cells + a
 // thumbnail PNG up to 128KB) can approach ~200KB. 1MB gives generous headroom
@@ -2452,6 +2463,53 @@ export async function buildApp(
     // Creator name is needed by the public share page; resolve it from the owner id.
     const owner = meta.ownerId ? await auth.getUserById(meta.ownerId).catch(() => null) : null;
     return { ...meta, ownerName: owner?.username ?? null, cellsGzB64: cellsGz.toString('base64') };
+  });
+
+  /**
+   * The scene a design carries: its banners.
+   *
+   * Two routes of its own rather than fields on the design, because a scene is
+   * optional, is written by a different part of the editor, and must never be
+   * able to fail a save of the tifo itself. A design with no scene answers
+   * `null` rather than 404 — "this one has no banners" is a normal state, not
+   * an error, and a share link should not have to tell the two apart.
+   */
+  app.get('/api/designs/:id/scene', async (req, reply) => {
+    const v = await getVisible(req, reply);
+    if (!v) return;
+    const gz = await repo.getScene(v.rec.id);
+    return { sceneGzB64: gz ? gz.toString('base64') : null };
+  });
+
+  app.put('/api/designs/:id/scene', async (req, reply) => {
+    const rec = await getOwned(req, reply);
+    if (!rec) return;
+    const body = (req.body ?? {}) as { sceneGzB64?: unknown };
+    if (typeof body.sceneGzB64 !== 'string' || body.sceneGzB64.length === 0) {
+      return reply.code(400).send({ error: 'sceneGzB64 required' });
+    }
+    const gz = Buffer.from(body.sceneGzB64, 'base64');
+    if (gz.byteLength > SCENE_MAX_BYTES) {
+      return reply.code(413).send({ error: `scene must be under ${Math.round(SCENE_MAX_BYTES / 1024)} KB gzipped` });
+    }
+    let json: string;
+    try {
+      json = gunzipBytes(gz).toString('utf8');
+    } catch {
+      return reply.code(400).send({ error: 'sceneGzB64 is not valid gzip' });
+    }
+    // Parsed, not just decompressed: a scene that cannot be read back is worse
+    // than no scene, because it fails on LOAD, in front of whoever opened the
+    // share link, rather than here in front of the person who can fix it.
+    try {
+      const parsed = JSON.parse(json) as unknown;
+      if (!parsed || typeof parsed !== 'object') throw new Error('not an object');
+    } catch {
+      return reply.code(400).send({ error: 'scene is not valid JSON' });
+    }
+    const ok = await repo.putScene(rec.id, gz);
+    if (!ok) return reply.code(404).send({ error: 'not found' });
+    return { ok: true, bytes: gz.byteLength };
   });
 
   app.get('/api/designs/:id/thumbnail.png', async (req, reply) => {

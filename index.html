@@ -22,6 +22,7 @@
       <div class="topbar-center">
         <div class="segmented">
           <button id="view-2d" class="active" data-i18n="ed.view.design">Design</button>
+          <button id="view-banner" title="Draw a banner: a printed sheet that hangs, drops or is pulled over the stand" data-i18n="ed.view.banner" data-i18n-attr="title:ed.view.bannerT">Banner</button>
           <button id="view-3d" data-i18n="ed.view.stadium">Stadium</button>
           <button id="view-split" title="Paint while watching the stadium update live" data-i18n="ed.view.split" data-i18n-attr="title:ed.view.splitT">Split</button>
         </div>
@@ -169,8 +170,66 @@
           <span class="hint" data-i18n="ed.shape.hint">pick a colour, then click a stand to place</span>
         </div>
 
+        <!-- Banner view. The identity of the sheet lives here, above the
+             artboard, because changing the type or the size changes what you
+             are drawing on. Where it hangs and how it is revealed live in the
+             panel (#ctx-banner) — those are about the stadium, not the art. -->
+        <div id="banner-bar" class="tool-bar" hidden>
+          <span class="tb-field">
+            <select id="bn-doc" aria-label="Banner" data-i18n-attr="aria-label:bn.banner"></select>
+            <button id="bn-new" title="New banner" data-i18n-attr="title:bn.newT"><i class="ti ti-plus"></i></button>
+            <button id="bn-del" title="Delete this banner" data-i18n-attr="title:bn.delT"><i class="ti ti-trash"></i></button>
+          </span>
+          <span class="tb-field">
+            <label for="bn-kind" data-i18n="bn.type">Type</label>
+            <select id="bn-kind">
+              <option value="drop" data-i18n="bn.kind.drop">Drop banner</option>
+              <option value="lift" data-i18n="bn.kind.lift">Rope lift</option>
+              <option value="overhead-pass" data-i18n="bn.kind.pass">Crowd pass</option>
+              <option value="roof-hung" data-i18n="bn.kind.roof">Roof-hung</option>
+              <option value="stand-cover" data-i18n="bn.kind.cover">Stand cover</option>
+              <option value="fence" data-i18n="bn.kind.fence">Fence banner</option>
+              <option value="pitch" data-i18n="bn.kind.pitch">Pitch banner</option>
+              <option value="pole-out" data-i18n="bn.kind.pole">3D pole-out</option>
+            </select>
+          </span>
+          <span class="tb-field">
+            <label for="bn-w" data-i18n="bn.size">Size</label>
+            <input type="number" id="bn-w" min="0.5" max="400" step="0.5" value="24" style="width:70px;" aria-label="Width in metres" data-i18n-attr="aria-label:bn.a11y.width" />
+            <span aria-hidden="true">&times;</span>
+            <input type="number" id="bn-h" min="0.3" max="120" step="0.5" value="12" style="width:70px;" aria-label="Height in metres" data-i18n-attr="aria-label:bn.a11y.height" />
+            <span data-i18n="bn.m">m</span>
+          </span>
+          <span class="tb-field">
+            <label for="bn-material" data-i18n="bn.material">Fabric</label>
+            <select id="bn-material">
+              <option value="solid" data-i18n="bn.solid">Solid</option>
+              <option value="mesh" data-i18n="bn.mesh">Mesh (perforated)</option>
+            </select>
+            <select id="bn-gsm" aria-label="Fabric weight" data-i18n-attr="aria-label:bn.a11y.gsm">
+              <option value="60">60 g/m&sup2;</option>
+              <option value="70">70 g/m&sup2;</option>
+              <option value="90">90 g/m&sup2;</option>
+              <option value="110" selected>110 g/m&sup2;</option>
+              <option value="230">230 g/m&sup2;</option>
+            </select>
+          </span>
+          <span class="tb-field">
+            <label title="Show where the 3 m fabric panels are joined" data-i18n-attr="title:bn.seamsT"><input type="checkbox" id="bn-seams" checked /> <span data-i18n="bn.seams">Seams</span></label>
+            <label title="Centre lines, thirds, and the smallest type that reads across the pitch" data-i18n-attr="title:bn.guidesT"><input type="checkbox" id="bn-guides" checked /> <span data-i18n="bn.guides">Guides</span></label>
+            <label title="Snap what you place to the centre, the thirds and the seams" data-i18n-attr="title:bn.snapT"><input type="checkbox" id="bn-snap" checked /> <span data-i18n="bn.snap">Snap</span></label>
+          </span>
+          <span class="tb-field">
+            <label for="bn-bg" data-i18n="bn.bg">Fabric colour</label>
+            <input type="color" id="bn-bg" value="#ffffff" />
+            <label title="No fabric behind the art — the stand shows through" data-i18n-attr="title:bn.clearT"><input type="checkbox" id="bn-bg-none" checked /> <span data-i18n="bn.clear">None</span></label>
+          </span>
+          <span class="hint" id="bn-facts"></span>
+        </div>
+
         <div class="canvas-wrap">
           <div id="canvas-host"></div>
+          <div id="banner-host" hidden></div>
           <div id="preview-host" hidden></div>
 
           <div id="cam-bar" class="tool-bar" hidden style="position:absolute;left:50%;transform:translateX(-50%);top:12px;border:1px solid var(--line-1);border-radius:var(--r-md);z-index:5;">
@@ -323,6 +382,86 @@
           </div>
           <div class="group" style="margin-top:10px;">
             <button id="obj-bake-all" class="grow" data-i18n="ed.obj.bakeAll">Bake all</button>
+          </div>
+        </div>
+
+        <!-- Where the banner hangs, and how it arrives.
+             Separate from #banner-bar on purpose: that bar is about the sheet
+             itself (what type, how big, what fabric), this is about the
+             stadium. A banner's placement is the part you judge against the
+             bowl, so it belongs beside the 3D view's controls, not above the
+             artboard. Shown only in Banner view, via body.banner-view. -->
+        <div class="panel-section" id="ctx-banner" data-panel="__menu_only__" style="display:none">
+          <h4><span data-i18n="bn.place">Placement</span> <span class="h4-tag" data-i18n="bn.place.tag">where it hangs</span></h4>
+          <div class="group" style="margin-bottom:8px;">
+            <label for="bn-stand" class="grow0" data-i18n="bn.stand">Stand</label>
+            <select id="bn-stand" class="grow">
+              <option value="1" data-i18n="dir.north">North</option>
+              <option value="0" data-i18n="dir.east">East</option>
+              <option value="3" data-i18n="dir.south">South</option>
+              <option value="2" data-i18n="dir.west">West</option>
+            </select>
+          </div>
+          <div class="group" style="gap:8px;margin-bottom:8px;">
+            <label for="bn-along" style="white-space:nowrap;" data-i18n="bn.along">Along</label>
+            <input type="range" id="bn-along" min="0" max="100" step="1" value="50" class="grow" />
+            <span id="bn-along-out" class="val">50</span>
+          </div>
+          <div class="group" style="gap:8px;margin-bottom:8px;">
+            <label for="bn-up" style="white-space:nowrap;" data-i18n="bn.up">Up</label>
+            <input type="range" id="bn-up" min="0" max="120" step="1" value="60" class="grow" />
+            <span id="bn-up-out" class="val">60</span>
+          </div>
+          <div class="group" style="gap:8px;margin-bottom:8px;">
+            <label for="bn-out" style="white-space:nowrap;" data-i18n="bn.out">Out</label>
+            <input type="range" id="bn-out" min="-20" max="200" step="1" value="12" class="grow" />
+            <span id="bn-out-out" class="val">1.2 m</span>
+          </div>
+          <div class="group" style="gap:8px;margin-bottom:8px;">
+            <label for="bn-tilt" style="white-space:nowrap;" data-i18n="bn.tilt">Lean</label>
+            <input type="range" id="bn-tilt" min="-90" max="90" step="1" value="0" class="grow" />
+            <span id="bn-tilt-out" class="val">0&deg;</span>
+          </div>
+          <div class="chips" style="margin-bottom:10px;">
+            <button class="chip" id="bn-centre" title="Put it dead centre on the stand" data-i18n-attr="title:bn.centreT" data-i18n="bn.centre">Centre it</button>
+            <button class="chip" id="bn-fit-stand" title="Size it to the stand it is on" data-i18n-attr="title:bn.fitStandT" data-i18n="bn.fitStand">Fit the stand</button>
+          </div>
+          <div class="chips" style="margin-bottom:10px;">
+            <label><input type="checkbox" id="bn-net" /> <span data-i18n="bn.net">Rope net</span></label>
+            <label><input type="checkbox" id="bn-bar" /> <span data-i18n="bn.bar">Weight bar</span></label>
+          </div>
+
+          <h4 style="margin-top:14px;"><span data-i18n="bn.reveal">Reveal</span> <span class="h4-tag" data-i18n="bn.reveal.tag">match day</span></h4>
+          <div class="group" style="margin-bottom:8px;">
+            <select id="bn-reveal" class="grow">
+              <option value="drop" data-i18n="bn.rev.drop">Unroll downward</option>
+              <option value="lift" data-i18n="bn.rev.lift">Haul up on ropes</option>
+              <option value="pass" data-i18n="bn.rev.pass">Passed over the crowd</option>
+              <option value="hoist" data-i18n="bn.rev.hoist">Lowered from the roof</option>
+              <option value="unfold" data-i18n="bn.rev.unfold">Unfold on poles</option>
+              <option value="fade" data-i18n="bn.rev.fade">Already in place</option>
+            </select>
+          </div>
+          <div class="group" style="gap:8px;margin-bottom:8px;">
+            <label for="bn-secs" style="white-space:nowrap;" data-i18n="bn.secs">Seconds</label>
+            <input type="range" id="bn-secs" min="5" max="200" step="1" value="42" class="grow" />
+            <span id="bn-secs-out" class="val">4.2</span>
+          </div>
+          <div class="group" style="gap:8px;margin-bottom:10px;">
+            <label for="bn-wind" style="white-space:nowrap;" data-i18n="bn.wind">Wind</label>
+            <input type="range" id="bn-wind" min="0" max="100" step="1" value="25" class="grow" />
+            <span id="bn-wind-out" class="val">25</span>
+          </div>
+          <button id="bn-matchday" class="primary" style="width:100%;"><i class="ti ti-building-stadium"></i> <span data-i18n="bn.seeIt">See it on match day</span></button>
+          <div id="bn-notes" class="bn-notes"></div>
+
+          <h4 style="margin-top:14px;"><span data-i18n="bn.brush">Banner brush</span></h4>
+          <div class="group">
+            <input type="range" id="bn-brush" min="2" max="300" step="1" value="35" class="grow" aria-label="Brush width in centimetres" data-i18n-attr="aria-label:bn.a11y.brush" />
+            <span id="bn-brush-out" class="val">35 cm</span>
+          </div>
+          <div class="chips" style="margin-top:10px;">
+            <button class="chip" id="bn-clear-art" data-i18n="bn.clearArt">Clear the art</button>
           </div>
         </div>
 

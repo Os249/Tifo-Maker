@@ -146,6 +146,15 @@ export interface DesignRepository {
   ): Promise<DesignMeta | null>;
   patchMeta(id: string, patch: { title?: string; isPublic?: boolean }): Promise<DesignMeta | null>;
   getThumbnail(id: string): Promise<Buffer | null>;
+  /**
+   * The design's scene — its banners, gzipped JSON. Null when it has none.
+   *
+   * Kept off the design row and out of the save path on purpose: see the
+   * comment on `design_scenes` in schema.sql. A scene that fails to save must
+   * not be able to take a tifo down with it.
+   */
+  getScene(id: string): Promise<Buffer | null>;
+  putScene(id: string, sceneGz: Buffer): Promise<boolean>;
   appendRevision(
     id: string,
     diff: DiffBytes,

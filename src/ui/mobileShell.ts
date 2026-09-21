@@ -274,9 +274,19 @@ export function mountMobileShell(): MobileShell | null {
   document.addEventListener('tifo:import-done', onImportDone);
 
   const buildPaint = (): void => {
-    title.textContent = t('mb.paint');
     bodyEl.textContent = '';
     bodyEl.appendChild(toolGrid(PAINT_TOOLS));
+    if (mview === 'banner') {
+      // `#banner-bar` is a `.tool-bar`, and `body.m-shell .tool-bar` is
+      // display:none — so on a phone the banner's type, size and fabric were
+      // simply not on the screen. The same borrow the text and import bars
+      // already use brings them into the sheet, where a thumb can reach them.
+      title.textContent = t('ed.view.banner');
+      lend('banner-bar');
+      lend('ctx-banner');
+      return;
+    }
+    title.textContent = t('mb.paint');
     lend('ctx-brush');
     lend('ctx-objects');
   };
@@ -291,8 +301,8 @@ export function mountMobileShell(): MobileShell | null {
     bodyEl.appendChild(toolGrid(ADD_TOOLS));
     const banner = el('button', 'm-wide') as HTMLButtonElement;
     banner.type = 'button';
-    banner.innerHTML = `<i class="ti ti-flag" aria-hidden="true"></i> ${t('ed.bannerStudio')}`;
-    banner.addEventListener('click', () => { closeSheet(); proxy('#banner-studio-btn'); });
+    banner.innerHTML = `<i class="ti ti-flag" aria-hidden="true"></i> ${t('ed.view.banner')}`;
+    banner.addEventListener('click', () => { closeSheet(); proxy('#view-banner'); setView('banner'); });
     bodyEl.appendChild(banner);
   };
   const buildAi = (): void => {
@@ -437,11 +447,22 @@ export function mountMobileShell(): MobileShell | null {
 
   // ---------- canvas overlays ----------
   // View switcher. Split is deliberately absent: two ~180px panes on a phone
-  // shows neither the design nor the stadium.
+  // shows neither the design nor the stadium. Banner is not — it is a whole
+  // drawing surface of its own, and it is the one that fits a phone best,
+  // because a banner is a couple of big shapes rather than sixty thousand
+  // seats you have to zoom into.
   const viewPill = el('div', 'm-view');
   const mk2d = el('button', 'm-view-b on', `<i class="ti ti-layout-grid" aria-hidden="true"></i> ${t('ed.view.design')}`) as HTMLButtonElement;
+  const mkBn = el('button', 'm-view-b', `<i class="ti ti-flag" aria-hidden="true"></i> ${t('ed.view.banner')}`) as HTMLButtonElement;
   const mk3d = el('button', 'm-view-b', `<i class="ti ti-building-stadium" aria-hidden="true"></i> ${t('ed.view.stadium')}`) as HTMLButtonElement;
-  mk2d.type = 'button'; mk3d.type = 'button';
+  mk2d.type = 'button'; mkBn.type = 'button'; mk3d.type = 'button';
+  // A stable name per segment. Positional selectors were what the suite used,
+  // and adding Banner between Design and Stadium silently retargeted six of
+  // its checks at the wrong button — the exact coupling the simulator panel's
+  // `data-sec` attribute exists to avoid.
+  mk2d.dataset.view = '2d';
+  mkBn.dataset.view = 'banner';
+  mk3d.dataset.view = '3d';
   // Match Day rides along with the Stadium view, exactly as it does on desktop:
   // #cam-bar (which holds #match-day) is un-hidden the moment the 3D view is
   // shown. Someone looking at their tifo on the bowl is one tap from seeing it
@@ -449,14 +470,22 @@ export function mountMobileShell(): MobileShell | null {
   const mdPill = el('div', 'm-md');
   mdPill.hidden = true;
   mdPill.appendChild(matchDayBtn('m-md-b'));
-  const setView = (is3d: boolean): void => {
-    mk3d.classList.toggle('on', is3d);
-    mk2d.classList.toggle('on', !is3d);
-    mdPill.hidden = !is3d;
+  type MView = '2d' | 'banner' | '3d';
+  let mview: MView = '2d';
+  const setView = (next: MView): void => {
+    mview = next;
+    mk2d.classList.toggle('on', next === '2d');
+    mkBn.classList.toggle('on', next === 'banner');
+    mk3d.classList.toggle('on', next === '3d');
+    mdPill.hidden = next !== '3d';
+    // The stand chips jump the SEAT canvas to a stand; on a banner they have
+    // nothing to jump to, and on the bowl the camera presets do the job.
+    stands.hidden = next !== '2d';
   };
-  mk2d.addEventListener('click', () => { proxy('#view-2d'); setView(false); });
-  mk3d.addEventListener('click', () => { proxy('#view-3d'); setView(true); });
-  viewPill.append(mk2d, mk3d);
+  mk2d.addEventListener('click', () => { proxy('#view-2d'); setView('2d'); });
+  mkBn.addEventListener('click', () => { proxy('#view-banner'); setView('banner'); });
+  mk3d.addEventListener('click', () => { proxy('#view-3d'); setView('3d'); });
+  viewPill.append(mk2d, mkBn, mk3d);
   stage.appendChild(viewPill);
   stage.appendChild(mdPill);
 

@@ -513,7 +513,7 @@ console.log('\n— Match Day: reaching it at all —');
   check('Match Day is not downloaded on arrival', asked.length === 0, asked.join(','));
   check('no Match Day pill in the Design view', await p.evaluate(() => document.querySelector('.m-md').hidden));
 
-  await p.tap('.m-view-b:nth-child(2)'); // Stadium
+  await p.tap('.m-view-b[data-view="3d"]'); // Stadium
   await p.waitForTimeout(4000);
   const pill = await p.evaluate(() => {
     const w = document.querySelector('.m-md'), b = document.querySelector('.m-md-b');
@@ -526,7 +526,7 @@ console.log('\n— Match Day: reaching it at all —');
   check('nothing off-screen with the pill up', (await p.evaluate(offscreen)).length === 0,
     JSON.stringify(await p.evaluate(offscreen)).slice(0, 140));
 
-  await p.tap('.m-view-b:nth-child(1)'); // back to Design
+  await p.tap('.m-view-b[data-view="2d"]'); // back to Design
   await p.waitForTimeout(1200);
   check('the pill goes away with the Stadium view', await p.evaluate(() => document.querySelector('.m-md').hidden));
 
@@ -583,7 +583,7 @@ console.log('\n— Match Day: the pill fits the short screens too —');
   // landscape once the header and the ribbon have taken their share.
   for (const [w, h, name] of [[320, 568, 'iPhone SE'], [844, 390, 'landscape iPhone']]) {
     const [ctx, p, errs] = await editor({ w, h });
-    await p.tap('.m-view-b:nth-child(2)');
+    await p.tap('.m-view-b[data-view="3d"]');
     await p.waitForTimeout(4500);
     const r = await p.evaluate(() => {
       const b = document.querySelector('.m-md-b').getBoundingClientRect();

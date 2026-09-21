@@ -936,3 +936,154 @@ import { buildStadium as siBuild } from '../src/core/stadiumFit';
   if (/tl\(preset\.name\)/.test(toolbarSrc2)) throw new Error('translate the pattern by id, not by name');
   console.log('painting: every status sentence and dialog carries en + ar');
 }
+
+// ---------------------------------------------------------------------------
+// Banners
+// ---------------------------------------------------------------------------
+//
+// Everything a banner asserts about the physical world is arithmetic, and
+// arithmetic can be checked without a browser. These gates hold the numbers the
+// Banner view PRINTS — the seam count, the weight, the legible cap height —
+// against the rules they came from, in the same posture `verify-stadiumfit`
+// takes with the estimator: a stale figure is worse than no figure, because it
+// is the number the panel hedges by.
+{
+  const {
+    BANNER_KINDS, KIND_PROFILE, PANEL_MAX_M, KG_PER_CARRIER,
+    applyKind, bannerFacts, newBanner, normalise, revealEase, occludesCrowd,
+  } = await import('../src/core/banner');
+  const { migrateScene } = await import('../src/core/bannerMigrate');
+  const { readFileSync: rf } = await import('node:fs');
+  const i18nBn = rf('src/ui/i18n.ts', 'utf8');
+
+  // 1. Every reveal runs 0 to 1. A curve that does not start at nothing leaves
+  // the banner already up; one that does not finish at one leaves it forever
+  // half-unrolled. `hoist` overshoots in the middle on purpose — that is a mass
+  // on a rope settling — so only the two ends are held.
+  for (const mode of ['drop', 'lift', 'pass', 'hoist', 'unfold', 'fade'] as const) {
+    const a = revealEase(mode, 0);
+    const b = revealEase(mode, 1);
+    if (Math.abs(a) > 1e-9 || Math.abs(b - 1) > 1e-9) {
+      throw new Error(`reveal "${mode}" runs ${a} -> ${b}, not 0 -> 1`);
+    }
+    // Monotonic apart from the deliberate overshoot, and never wildly outside.
+    for (let k = 0; k <= 40; k++) {
+      const v = revealEase(mode, k / 40);
+      // A banner may overshoot its rig — that is weight on a rope — but not by
+      // much: elastic easing's 36% first peak read as a mistake, not as mass.
+      if (!Number.isFinite(v) || v < -0.02 || v > 1.12) throw new Error(`reveal "${mode}" leaves its range at t=${k / 40}: ${v}`);
+    }
+  }
+  console.log('banners: all six reveals run 0 -> 1 and stay in range');
+
+  // 2. Seams. No printer makes fabric wider than 3 m, so the panel count is
+  // ceil(width / 3) and every joint is a line the artboard must draw.
+  for (const [w, panels] of [[2.9, 1], [3, 1], [3.1, 2], [6, 2], [9, 3], [24, 8], [70, 24]] as [number, number][]) {
+    const d = newBanner('drop');
+    d.widthM = w;
+    const f = bannerFacts(d);
+    if (f.panels !== panels) throw new Error(`${w} m of fabric is ${f.panels} panels, expected ${panels}`);
+    if (f.seamsM.length !== panels - 1) throw new Error(`${panels} panels should have ${panels - 1} seams, got ${f.seamsM.length}`);
+  }
+  if (PANEL_MAX_M !== 3) throw new Error('the panel width is 3.0 m — three independent suppliers give the same figure');
+  console.log('banners: seam count follows the 3 m panel, from 2.9 m to 70 m');
+
+  // 3. Weight is area times the fabric's areal density, and the one published
+  // example to check it against is a Polish supplier's 70 x 120 m flag: 23
+  // panels, about 760 kg, on 90 g/m² flag knit. 8,400 m² x 90 g/m² = 756 kg.
+  {
+    const d = newBanner('overhead-pass');
+    d.widthM = 70;
+    d.heightM = 120;
+    d.fabricGsm = 90;
+    const f = bannerFacts(d);
+    if (Math.abs(f.weightKg - 756) > 1) throw new Error(`the 70x120 m reference flag weighs ${f.weightKg} kg, expected ~756`);
+    if (f.panels !== 24) throw new Error(`the reference flag is ${f.panels} panels; the supplier says 23 at their own trim`);
+    if (f.carriers !== Math.ceil(756 / KG_PER_CARRIER)) throw new Error('carriers must follow the weight');
+  }
+  console.log('banners: weight matches the published 70x120 m / 760 kg flag');
+
+  // 4. The legible-type rule. Tifo sits between D/25 and D/40; D/40 is the
+  // floor the app recommends, and it is what the artboard's green band draws.
+  {
+    const f = bannerFacts(newBanner('drop'), 100);
+    if (Math.abs(f.headlineCapM - 2.5) > 1e-9) throw new Error(`a 100 m read needs ${f.headlineCapM} m of cap height, expected 2.5`);
+    if (f.minTypeFrac > 0.03) throw new Error('the minimum type fraction has drifted above what survives a broadcast');
+  }
+  console.log('banners: 100 m of viewing distance asks for 2.5 m of headline');
+
+  // 5. Every kind has a profile, and the Überziehfahne/Aufziehfahne split —
+  // which decides whether the mosaic underneath survives — is not a checkbox.
+  for (const k of BANNER_KINDS) {
+    if (!KIND_PROFILE[k]) throw new Error(`banner kind "${k}" has no profile`);
+  }
+  if (!occludesCrowd(newBanner('overhead-pass'))) throw new Error('a crowd-pass banner covers the crowd; that is what it IS');
+  if (occludesCrowd(newBanner('lift'))) throw new Error('a rope lift hangs in FRONT of the crowd — it must not hide the mosaic');
+  if (!occludesCrowd(newBanner('stand-cover'))) throw new Error('a stand cover lies on the seats');
+  console.log('banners: the pass/lift occlusion split holds');
+
+  // 6. Changing type re-rigs the banner but keeps a size the user chose.
+  {
+    const a = applyKind(newBanner('drop'), 'roof-hung');
+    if (a.widthM !== KIND_PROFILE['roof-hung'].widthM) throw new Error('an untouched size follows the new type');
+    const custom = newBanner('drop');
+    custom.widthM = 31;
+    custom.heightM = 7;
+    const b = applyKind(custom, 'roof-hung');
+    if (b.widthM !== 31 || b.heightM !== 7) throw new Error('a size the user typed must survive a type change');
+    if (!b.netBacked || b.reveal !== 'hoist') throw new Error('the rig and the reveal must follow the type');
+  }
+  console.log('banners: a type change re-rigs without discarding a chosen size');
+
+  // 7. Anything stored is filled in and clamped on the way back. Banners arrive
+  // from three places — this session, an older build's localStorage, and the
+  // server — and the older two can predate any field added since.
+  {
+    const n = normalise({ id: 'x', kind: 'nonsense' as never, widthM: 1e9, place: { stand: 9 as never } as never });
+    if (n.kind !== 'drop') throw new Error('an unknown kind must fall back, not crash');
+    if (n.widthM > 400) throw new Error('width must be clamped');
+    if (n.place.stand > 3) throw new Error('the stand index must be clamped to the four stands');
+    if (!Array.isArray(n.items)) throw new Error('items must always be an array');
+  }
+  console.log('banners: a stored banner is filled in and clamped on the way back');
+
+  // 8. The retired Banner Studio's work comes forward, and nothing that was
+  // never a banner is dragged along with it.
+  {
+    const m = migrateScene({
+      version: 1,
+      assets: [
+        { id: 'a1', type: 'banner', place: 'big', imageRef: 'data:image/png;base64,AA', anchor: { stand: 3 }, position: { x: 0, y: 0, z: 0 }, rotationY: 0, scale: { x: 30, y: 12, z: 1 } },
+        { id: 'a2', type: 'flag', position: { x: 0, y: 0, z: 0 }, rotationY: 0, scale: { x: 1, y: 1, z: 1 } },
+        { id: 'a3', type: 'surface', place: 'surface', imageRef: 'data:image/png;base64,BB', anchor: { stand: 1 }, position: { x: 0, y: 0, z: 0 }, rotationY: 0, scale: { x: 44, y: 26, z: 1 } },
+      ],
+    });
+    if (m.moved !== 2) throw new Error(`migration moved ${m.moved} assets, expected 2`);
+    if (m.scene.assets.length !== 1 || m.scene.assets[0].id !== 'a2') throw new Error('a corner flag is not a banner and must stay put');
+    if (m.banners[0].kind !== 'drop' || m.banners[0].place.stand !== 3) throw new Error('a "big" banner on the south stand must land there');
+    if (m.banners[1].kind !== 'stand-cover') throw new Error('a draped surface is a stand cover');
+    if (m.banners[0].items.length !== 1 || m.banners[0].items[0].kind !== 'image') throw new Error('the old PNG must survive as a full-bleed image');
+    if (m.banners[0].widthM !== 30) throw new Error('the size it was already sitting at must be kept');
+  }
+  console.log('banners: the old Banner Studio\'s work migrates, and only it');
+
+  // 9. Every banner string carries both languages. The two original phone bug
+  // reports were both written in Arabic; an English-only sentence in this view
+  // is the same failure in a new place.
+  {
+    // A window after the key, not a braces match: a sentence with a named
+    // placeholder ("Banner {n}") closes a brace inside its own value, and the
+    // obvious `\{([^}]*)\}` stops there and declares the Arabic missing.
+    const keys = [...i18nBn.matchAll(/^\s*'((?:bn|ed\.view)\.[\w.]+)':/gm)];
+    if (keys.length < 40) throw new Error(`only ${keys.length} banner strings found — the scan is not finding the table`);
+    for (const m of keys) {
+      const body = i18nBn.slice(m.index ?? 0, (m.index ?? 0) + 420);
+      if (!/\ben:/.test(body) || !/\bar:/.test(body)) throw new Error(`banner string "${m[1]}" is missing a translation`);
+    }
+    // Every note the facts function can emit has to have a sentence.
+    for (const note of ['seams', 'carry', 'mesh', 'wind', 'net', 'occludes', 'poles', 'fire']) {
+      if (!i18nBn.includes(`'bn.note.${note}'`)) throw new Error(`the note "${note}" has no sentence`);
+    }
+    console.log(`banners: ${keys.length} strings, all with en + ar`);
+  }
+}

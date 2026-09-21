@@ -597,6 +597,36 @@ export async function loadDesign(
   };
 }
 
+/**
+ * The scene that travels with a design: its banners.
+ *
+ * Its own request, not a field on the design. A banner is optional, it is
+ * written by a different part of the editor, and — the reason that matters —
+ * it must never be able to fail a save of the tifo itself. Both of these are
+ * best-effort at every call site: if the scene does not save, the design still
+ * did, and the user is told which happened rather than being handed a success
+ * that was half true.
+ */
+export async function saveScene(designId: string, scene: unknown): Promise<{ bytes: number }> {
+  const json = new TextEncoder().encode(JSON.stringify(scene));
+  const sceneGzB64 = toB64(await gzip(json));
+  const res = await fetch(`${API}/designs/${designId}/scene`, {
+    method: 'PUT',
+    headers: authHeaders(true),
+    body: JSON.stringify({ sceneGzB64 }),
+  });
+  return (await expectOk(res)) as { bytes: number };
+}
+
+/** A design's saved scene, or null when it has none. */
+export async function fetchScene(designId: string): Promise<unknown | null> {
+  const res = await fetch(`${API}/designs/${designId}/scene`, { headers: authHeaders(false) });
+  const data = (await expectOk(res)) as { sceneGzB64: string | null };
+  if (!data.sceneGzB64) return null;
+  const bytes = await gunzip(fromB64(data.sceneGzB64));
+  return JSON.parse(new TextDecoder().decode(bytes)) as unknown;
+}
+
 /** Fetch a design's template id/version without loading cells (for share-link boot). */
 export async function fetchDesignTemplate(id: string): Promise<{ templateId: string; templateVersion: number }> {
   const data = (await expectOk(await fetch(`${API}/designs/${id}`, { headers: authHeaders(false) }))) as {

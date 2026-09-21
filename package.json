@@ -33,7 +33,8 @@
     "shots:matchday": "tsx scripts/matchday-shots.mts",
     "shots:recordsize": "tsx scripts/record-size.mts",
     "probe:imageux": "tsx scripts/image-ux.mts",
-    "audit:editor": "tsx scripts/editor-audit.mts"
+    "audit:editor": "tsx scripts/editor-audit.mts",
+    "shots:banner": "tsx scripts/banner-shots.mts"
   },
   "dependencies": {
     "@fastify/helmet": "^13.0.2",

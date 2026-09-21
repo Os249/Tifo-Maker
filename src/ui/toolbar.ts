@@ -13,8 +13,8 @@ import { loadTifoFonts } from '../core/tifoFonts';
 import type { ObjectLayer } from '../core/objects';
 import { MIN_LEGIBLE_RUN, findFragileSeats } from '../core/analysis';
 import { RevealPlayer, REVEAL_PRESETS, type RevealId } from '../core/reveal';
-import { fetchMe, isSignedIn, loadDesign, registrationEmailWasSent, saveDesign, setPublic, setDesignTitle, exportMyData, deleteAccount } from '../net/api';
-import { t as i18nT, tl, tv } from './i18n';
+import { fetchMe, fetchScene, isSignedIn, loadDesign, registrationEmailWasSent, saveDesign, saveScene, setPublic, setDesignTitle, exportMyData, deleteAccount } from '../net/api';
+import { t as i18nT, tErr, tl, tv } from './i18n';
 import { track, setAnalyticsSignedIn } from '../net/analytics';
 import { buildTifoV2 } from '../core/tifoFormat';
 import {
@@ -22,6 +22,7 @@ import {
   type DraftTextObject, type DraftWriteResult,
 } from '../core/draft';
 import { decodeImportBitmap, extractPhotoPalette, rasterize } from '../core/importImage';
+import { BANNER_HISTORY_EVENT, bannerActive, bannerHost } from './bannerHost';
 import { openAuthModal } from './authModal';
 import { openGallery } from './gallery';
 import { mountAiPanel } from './aiPanel';
@@ -70,6 +71,14 @@ export function mountToolbar(
   getPreview?: () => Preview3D | null,
   /** Design id carried by a restored local draft, so saving updates the original. */
   restoredDesignId?: string | null,
+  /**
+   * The scene — banners — so it can travel with the design.
+   *
+   * Passed in rather than imported, because this module has no business
+   * knowing what a banner is: it hands the snapshot to the server and hands
+   * whatever comes back to whoever does.
+   */
+  sceneIO?: { snapshot(): unknown; restore(scene: unknown): void },
 ): void {
   const $ = <T extends HTMLElement>(sel: string): T => {
     const el = root.querySelector<T>(sel);
@@ -161,6 +170,9 @@ export function mountToolbar(
     if (tool !== 'text' && tool !== 'import' && tool !== 'shape') editor.hideStampPreview();
     if (tool === 'import' && !pendingImport) fileInput.click();
     if (tool !== 'select') editor.clearSelection();
+    // The Banner view borrows this rail wholesale. Every tool keeps its icon,
+    // its key and its tool bar; only the surface underneath changes.
+    bannerHost.current?.setTool(tool);
     applyContextPanel(tool);
     onEnterMode(tool);
     objectPanelHook();
@@ -206,6 +218,8 @@ export function mountToolbar(
     const hex = pendingHex ?? active;
     fgWell.style.background = hex;
     fgHex.textContent = hex.toLowerCase();
+    // One palette per design, whichever surface is in front of you.
+    bannerHost.current?.setColor(hex);
     const unsaved = pendingHex !== null && store.palette.every((c) => c.toLowerCase() !== pendingHex);
     fgWell.classList.toggle('unsaved', unsaved);
     if (fgSub) fgSub.textContent = i18nT(unsaved ? 'ed.colors.notAdded' : 'ed.colors.painting');
@@ -675,6 +689,24 @@ export function mountToolbar(
     // Measuring a glyph before its face has arrived silently falls back to a
     // system font, and that mistake would be baked into the seats for good.
     await loadTifoFonts();
+    if (bannerActive()) {
+      // On a banner the text stays a live object with real colour, and it is
+      // sized to the cap height that reads across the pitch rather than to a
+      // number of seats — a banner has no seats to count.
+      const ok = bannerHost.current?.placeText({
+        text: textInput.value,
+        fontId: textFont.value,
+        arcDeg: Number(textArc.value),
+        color: store.palette[editor.colorIndex] ?? '#ffffff',
+      });
+      if (!ok) {
+        message.textContent = i18nT('ed.msg.typeTextFirst');
+        return;
+      }
+      setTool('select');
+      message.textContent = i18nT('bn.msg.placedOnBanner');
+      return;
+    }
     const rendered = renderTextCanvas(textInput.value, currentFontCss(), Number(textArc.value));
     if (!rendered) {
       message.textContent = i18nT('ed.msg.typeTextFirst');
@@ -770,15 +802,21 @@ export function mountToolbar(
   const undoBtn = $('#undo') as unknown as HTMLButtonElement;
   const redoBtn = $('#redo') as unknown as HTMLButtonElement;
   const refreshHistory = (): void => {
-    undoBtn.disabled = !store.canUndo;
-    redoBtn.disabled = !store.canRedo;
+    // In the Banner view these buttons undo the banner, not the seats. Two
+    // surfaces, two histories, one pair of buttons — which is what a user
+    // expects, because only one of the two is in front of them.
+    const b = bannerActive() ? bannerHost.current : null;
+    undoBtn.disabled = b ? !b.canUndo : !store.canUndo;
+    redoBtn.disabled = b ? !b.canRedo : !store.canRedo;
   };
   undoBtn.addEventListener('click', () => {
-    store.undo();
+    if (bannerActive()) bannerHost.current?.undo();
+    else store.undo();
     refreshHistory();
   });
   redoBtn.addEventListener('click', () => {
-    store.redo();
+    if (bannerActive()) bannerHost.current?.redo();
+    else store.redo();
     refreshHistory();
   });
   // Both, deliberately. onDirty covers a repaint that did not move the stacks
@@ -788,6 +826,9 @@ export function mountToolbar(
   // next stroke and was always one behind.
   store.onDirty(refreshHistory);
   store.onHistoryChange(refreshHistory);
+  // The banner has its own history and its own store, and this module cannot
+  // subscribe to a store whose chunk has not been downloaded yet.
+  document.addEventListener(BANNER_HISTORY_EVENT, refreshHistory);
   refreshHistory();
 
   // Touch gestures land here: two fingers tapped = undo, double tap = fit.
@@ -806,7 +847,7 @@ export function mountToolbar(
 
   // Fill the whole bowl with the ACTIVE painting colour (not a fixed slot).
   $('#fill-base').addEventListener('click', () => store.fillAll(editor.colorIndex));
-  $('#fit').addEventListener('click', () => editor.fitToView());
+  $('#fit').addEventListener('click', () => (bannerActive() ? bannerHost.current?.fit() : editor.fitToView()));
 
   // Image import mode: load a file, configure size (in seats), tier, dither,
   // alpha cutoff, then place by clicking (ghost preview) or via a stand preset.
@@ -876,6 +917,22 @@ export function mountToolbar(
 
   const stampImageAt = (cx: number, cy: number): void => {
     if (!pendingImport) return;
+    if (bannerActive()) {
+      // A banner prints the picture, it does not quantize it to cards, so the
+      // palette is left alone and the bitmap is embedded (downscaled) instead.
+      editor.setStampPreview(null);
+      bannerHost.current?.placeImage({ bitmap: pendingImport.bitmap, name: pendingImport.name });
+      try {
+        pendingImport.bitmap.close();
+      } catch {
+        /* older engines have no close(); GC will get it */
+      }
+      pendingImport = null;
+      setTool('select');
+      importDone();
+      message.textContent = i18nT('bn.msg.placedOnBanner');
+      return;
+    }
     const { w, h } = importRect();
     // Release the cursor ghost FIRST. addImage notifies the overlay, which
     // builds the object's sprite synchronously, so anything after that point
@@ -1011,6 +1068,12 @@ export function mountToolbar(
   });
   const placeShapeAt = (x: number, y: number): void => {
     const kind = shapeKind.value;
+    if (bannerActive()) {
+      bannerHost.current?.placeShape({ shape: kind, color: store.palette[editor.colorIndex] ?? '#ffffff' });
+      setTool('select');
+      message.textContent = i18nT('bn.msg.placedOnBanner');
+      return;
+    }
     const h = Number(shapeSize.value) * EDITOR_UNITS.rowPx;
     objects.addShape({
       cx: x,
@@ -1031,6 +1094,21 @@ export function mountToolbar(
       shapeKind.selectedOptions[0]?.textContent?.trim() || kind,
     );
   };
+
+  /**
+   * A click on the BANNER artboard, in a tool that places something.
+   *
+   * The artboard cannot call these directly — the text string, the chosen
+   * shape and the pending import all live in this module — so it announces the
+   * click and the same three routines run, taking the banner branch. The
+   * coordinates are carried by the artboard itself, which already knows where
+   * the click landed.
+   */
+  document.addEventListener('tifo:banner-place', () => {
+    if (editor.tool === 'text') void placeTextAt(0, 0);
+    else if (editor.tool === 'shape') placeShapeAt(0, 0);
+    else if (editor.tool === 'import') stampImageAt(0, 0);
+  });
 
   // One shared placement-click callback, dispatched by the active mode.
   editor.onPlaceStamp = (x, y) => {
@@ -1486,13 +1564,29 @@ export function mountToolbar(
       const isNew = designId === null;
       const title = isNew ? docTitle.value.trim() || i18nT('ed.docTitlePlaceholder') : '';
       const meta = await saveDesign(store, map, map.templateRef.id, map.templateRef.version, title, designId);
+      // Best-effort, and AFTER the design: the tifo is the thing that must not
+      // be lost, and a banner too big for the cap should cost the banner, not
+      // the design. The message says which happened rather than reporting a
+      // success that was only half true.
+      let sceneFailed = '';
+      if (sceneIO && meta.id) {
+        try {
+          await saveScene(meta.id, sceneIO.snapshot());
+        } catch (err) {
+          sceneFailed = (err as Error).message;
+        }
+      }
       designId = meta.id ?? designId;
       refreshPhotoRow();
       // Flush rather than schedule: the debounce would leave a ~1s window in
       // which the draft still says designId=null, and a tab closed inside it
       // would fork a duplicate on the next save.
       draftWriter.flush();
-      if (announce) message.textContent = i18nT('save.toAccount');
+      if (announce) {
+        message.textContent = sceneFailed
+          ? tv('save.sceneFailed', { err: tErr(sceneFailed) })
+          : i18nT('save.toAccount');
+      }
       return true;
     } catch (err) {
       message.textContent = `${i18nT('save.failed')}: ${(err as Error).message}`;
@@ -1698,6 +1792,18 @@ export function mountToolbar(
       editor.rebuildPalette();
       editor.repaintAll();
       renderPalette();
+      // The banners come back with it. Best-effort in the same direction as
+      // the save: a design whose scene will not load is still a design, and
+      // silently showing it without its banners is better than refusing to
+      // open it at all.
+      if (sceneIO) {
+        try {
+          const scene = await fetchScene(id);
+          if (scene) sceneIO.restore(scene);
+        } catch {
+          /* no scene, or unreadable — the tifo itself loaded fine */
+        }
+      }
       message.textContent = ownerIsMe ? `loaded "${title}"` : `loaded "${title}" (read-only copy - Save creates your own)`;
     } catch (err) {
       message.textContent = tv('ed.msg.loadFailed', { err: (err as Error).message });
@@ -1945,8 +2051,8 @@ export function mountToolbar(
   });
 
   // Zoom pill buttons.
-  $('#zoom-in').addEventListener('click', () => editor.zoomBy(1.25));
-  $('#zoom-out').addEventListener('click', () => editor.zoomBy(0.8));
+  $('#zoom-in').addEventListener('click', () => (bannerActive() ? bannerHost.current?.zoomBy(1.25) : editor.zoomBy(1.25)));
+  $('#zoom-out').addEventListener('click', () => (bannerActive() ? bannerHost.current?.zoomBy(0.8) : editor.zoomBy(0.8)));
 
   // Legibility chip in the status bar mirrors message styling.
   const chip = $('#message');

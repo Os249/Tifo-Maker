@@ -12,6 +12,7 @@ export type FunnelEvent =
   | 'landed'
   | 'paint_first'
   | 'view_3d'
+  | 'view_banner'      // opened the Banner view
   | 'draft_restored'   // came back and their work was still here
   | 'save_clicked'
   | 'save_local'       // kept without an account
