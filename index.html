@@ -402,16 +402,30 @@
               <option value="2" data-i18n="dir.west">West</option>
             </select>
           </div>
-          <div class="group" style="gap:8px;margin-bottom:8px;">
+          <!-- Blocks, not a slider. A stand is divided by its aisles into
+               blocks and a crew thinks in those; a continuous position gives a
+               banner no reason to line up with anything and lets it hang off
+               the end of the ground. -->
+          <div class="group" style="gap:8px;margin-bottom:8px;" id="bn-block-row">
+            <label for="bn-block" class="grow0" data-i18n="bn.block">Blocks</label>
+            <select id="bn-block" class="grow"></select>
+            <select id="bn-span" class="grow0"></select>
+          </div>
+          <div class="group" style="gap:8px;margin-bottom:8px;" id="bn-tier-row">
+            <label for="bn-tier" class="grow0" data-i18n="bn.tier">Tier</label>
+            <select id="bn-tier" class="grow"></select>
+          </div>
+          <div class="group" style="gap:8px;margin-bottom:8px;" id="bn-along-row">
             <label for="bn-along" style="white-space:nowrap;" data-i18n="bn.along">Along</label>
             <input type="range" id="bn-along" min="0" max="100" step="1" value="50" class="grow" />
             <span id="bn-along-out" class="val">50</span>
           </div>
-          <div class="group" style="gap:8px;margin-bottom:8px;">
+          <div class="group" style="gap:8px;margin-bottom:8px;" id="bn-up-row">
             <label for="bn-up" style="white-space:nowrap;" data-i18n="bn.up">Up</label>
             <input type="range" id="bn-up" min="0" max="120" step="1" value="60" class="grow" />
             <span id="bn-up-out" class="val">60</span>
           </div>
+          <div id="bn-fit-note" class="bn-notes" style="display:none;margin-bottom:8px;"></div>
           <div class="group" style="gap:8px;margin-bottom:8px;">
             <label for="bn-out" style="white-space:nowrap;" data-i18n="bn.out">Out</label>
             <input type="range" id="bn-out" min="-20" max="200" step="1" value="12" class="grow" />

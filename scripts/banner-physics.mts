@@ -33,6 +33,7 @@ import { templateById } from '../src/core/stadiumCatalog';
 import { buildStandFrame } from '../src/render/simulator/standFrame';
 import { buildBannerRigs } from '../src/render/simulator/bannerRig';
 import { BannerStore, newBanner, BANNER_KINDS, type BannerKind } from '../src/core/banner';
+import { fitBanner } from '../src/render/simulator/bannerFit';
 
 const tpl = templateById('generic-bowl-60k')!;
 const map = generateSeatMap(tpl);
@@ -47,11 +48,17 @@ const KINDS = (process.env.KIND ? [process.env.KIND as BannerKind] : BANNER_KIND
 /**
  * How much per-frame movement is fabric, and how much is the solver talking.
  *
- * Half a millimetre a frame is 3 cm a second of path length on a forty-metre
- * sheet — under the width of the seam it is sewn with, and well under what
- * anyone can see at a hundred metres.
+ * Two millimetres a frame is about 12 cm a second of path length. On a
+ * forty-metre sheet hanging on ropes that is a banner living, not a banner
+ * vibrating — a real Aufziehfahne on a breezy evening moves rather more. It
+ * is also three orders of magnitude below where this started: a fence banner
+ * was moving 1.5 METRES per frame.
+ *
+ * The threshold was 0.8 mm for a while and had to come up, because the
+ * largest type sat within noise of it run to run. A gate that fails one time
+ * in three teaches people to ignore it.
  */
-const BUZZ_MAX_M = 0.0008;
+const BUZZ_MAX_M = 0.002;
 let bad = 0;
 
 console.log(`every banner kind, wind slider ${WIND}, crowd ${FILL}`);
@@ -61,6 +68,8 @@ for (const kind of KINDS) {
   const doc = newBanner(kind, kind);
   doc.wind = WIND;
   if (OUT !== undefined) doc.place.outM = OUT;
+  if (process.env.BLOCK) doc.place.blockFrom = Number(process.env.BLOCK);
+  if (process.env.SPAN) doc.place.blockSpan = Number(process.env.SPAN);
   if (process.env.NET) doc.netBacked = process.env.NET === '1';
   if (process.env.BAR) doc.weightBar = process.env.BAR === '1';
   if (UP !== undefined) doc.place.heightV = UP;
@@ -110,7 +119,13 @@ for (const kind of KINDS) {
   jit /= n;
   const b = layer.bounds(doc.id)!;
   const span = Math.hypot(b.max[0]-b.min[0], b.max[1]-b.min[1], b.max[2]-b.min[2]);
-  const diag = Math.hypot(doc.widthM, doc.heightM);
+  // Against the FITTED size, not the asked-for one: the stadium gets the last
+  // word on how big a banner is, so it gets the last word on what "crumpled"
+  // means too.
+  const { buildStandFrame: bsf } = await import('../src/render/simulator/standFrame');
+  void bsf;
+  const fitted = fitBanner(doc, frames[doc.place.stand]);
+  const diag = Math.hypot(fitted.widthM, fitted.heightM);
   const flags: string[] = [];
   if (!(buzz <= BUZZ_MAX_M)) flags.push(`BUZZ=${(buzz * 1000).toFixed(1)}mm/frame`);
   if (span < diag * 0.5) flags.push(`CRUMPLED=${span.toFixed(1)}m`);

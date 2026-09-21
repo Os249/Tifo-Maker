@@ -244,8 +244,11 @@ export function buildPlacement(map: SeatMap, bannerStore: BannerStore, sectionsP
       const at = nearestOnFrame(frameFor(dragStand), hit.point.x, hit.point.y, hit.point.z);
       // Grab offsets, so the banner does not jump its centre to the cursor —
       // you are moving the sheet, not teleporting it.
-      grabAlong = doc.place.alongU - at.alongU;
-      grabUp = doc.place.heightV - at.heightV;
+      // Dragging a block-placed banner moves it a block at a time, so the
+      // grab offset is measured from where it actually IS rather than from a
+      // free coordinate it is no longer using.
+      grabAlong = doc.place.blockSpan > 0 ? 0 : doc.place.alongU - at.alongU;
+      grabUp = doc.place.blockSpan > 0 ? 0 : doc.place.heightV - at.heightV;
       dragId = id;
       return true;
     },

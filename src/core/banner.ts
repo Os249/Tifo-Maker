@@ -104,6 +104,21 @@ export interface BannerPlacement {
   tiltDeg: number;
   /** Magnet on. Off means the banner goes exactly where it is dragged. */
   snap: boolean;
+  /**
+   * The first block of the stand this banner covers; -1 for free placement.
+   *
+   * Stands are divided by their radial aisles into blocks, and a crew thinks
+   * in those: "the whole of 4 and 5", not "62% along". Free placement stays
+   * as the fallback — old scenes were saved with it and some kinds (a pitch
+   * banner, a roof-hung one) do not sit on the terracing at all — but blocks
+   * are what the panel offers, because a banner snapped to blocks cannot end
+   * up straddling an aisle with a corner hanging off the end of the ground.
+   */
+  blockFrom: number;
+  /** How many consecutive blocks; 0 means free placement. */
+  blockSpan: number;
+  /** Which tier it belongs to; -1 for the whole face. */
+  tier: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -268,6 +283,14 @@ export interface KindProfile {
   occludesCrowd: boolean;
   /** Ropes are part of this banner's look. */
   roped: boolean;
+  /**
+   * How many blocks of the stand this kind covers by default.
+   *
+   * 0 means it is not a stand-mounted banner and blocks do not apply. The
+   * numbers are what each type is actually used for: a Blockfahne covers a
+   * block or two, a crowd pass covers a whole end.
+   */
+  blockSpan: number;
 }
 
 /**
@@ -284,19 +307,19 @@ export const KIND_PROFILE: Record<BannerKind, KindProfile> = {
     widthM: 24, heightM: 12, reveal: 'drop',
     alongU: 0.5, heightV: 0.98, outM: 0.5, tiltDeg: 0,
     netBacked: false, weightBar: true, fabricGsm: 110,
-    occludesCrowd: false, roped: false,
+    occludesCrowd: false, roped: false, blockSpan: 2,
   },
   lift: {
     widthM: 36, heightM: 18, reveal: 'lift',
     alongU: 0.5, heightV: 0.1, outM: 1.0, tiltDeg: 0,
     netBacked: true, weightBar: false, fabricGsm: 70,
-    occludesCrowd: false, roped: true,
+    occludesCrowd: false, roped: true, blockSpan: 2,
   },
   'overhead-pass': {
     widthM: 48, heightM: 28, reveal: 'pass',
     alongU: 0.5, heightV: 1.0, outM: 1.0, tiltDeg: 0,
     netBacked: false, weightBar: false, fabricGsm: 70,
-    occludesCrowd: true, roped: false,
+    occludesCrowd: true, roped: false, blockSpan: 3,
   },
   'roof-hung': {
     widthM: 20, heightM: 14, reveal: 'hoist',
@@ -304,25 +327,25 @@ export const KIND_PROFILE: Record<BannerKind, KindProfile> = {
     // front rail up to the roof; outM is how far out over the moat it flies.
     alongU: 0.5, heightV: 0.75, outM: 3, tiltDeg: 0,
     netBacked: true, weightBar: true, fabricGsm: 110,
-    occludesCrowd: false, roped: true,
+    occludesCrowd: false, roped: true, blockSpan: 0,
   },
   'stand-cover': {
     widthM: 44, heightM: 26, reveal: 'fade',
     alongU: 0.5, heightV: 1.0, outM: 0.55, tiltDeg: 0,
     netBacked: false, weightBar: false, fabricGsm: 110,
-    occludesCrowd: true, roped: false,
+    occludesCrowd: true, roped: false, blockSpan: 3,
   },
   fence: {
     widthM: 6, heightM: 1.2, reveal: 'fade',
     alongU: 0.5, heightV: 0.05, outM: 0.35, tiltDeg: 0,
     netBacked: false, weightBar: false, fabricGsm: 230,
-    occludesCrowd: false, roped: false,
+    occludesCrowd: false, roped: false, blockSpan: 1,
   },
   pitch: {
     widthM: 18.3, heightM: 18.3, reveal: 'fade',
     alongU: 0.5, heightV: 0, outM: 0, tiltDeg: 90,
     netBacked: false, weightBar: false, fabricGsm: 110,
-    occludesCrowd: false, roped: false,
+    occludesCrowd: false, roped: false, blockSpan: 0,
   },
   'pole-out': {
     // Smaller than the hung types on purpose: two people are holding it up on
@@ -335,7 +358,7 @@ export const KIND_PROFILE: Record<BannerKind, KindProfile> = {
     // weight on something two people are holding up, and a rope run to the
     // back of the stand would stop them walking it along the rail.
     netBacked: false, weightBar: false, fabricGsm: 110,
-    occludesCrowd: false, roped: false,
+    occludesCrowd: false, roped: false, blockSpan: 1,
   },
 };
 
@@ -491,6 +514,15 @@ export function newBanner(kind: BannerKind = 'drop', name = 'Banner'): BannerDoc
       yawDeg: 0,
       tiltDeg: p.tiltDeg,
       snap: true,
+      // Blocks by default for anything that sits on the terracing; the two
+      // that do not — a banner flown from the roof, one lying on the grass —
+      // keep free placement, because a block is not where they are.
+      // -1 with a span means "centred": a tifo goes in the middle of the kop
+      // unless someone moves it, and the number of blocks depends on the
+      // ground, so a fixed index would be wrong somewhere.
+      blockFrom: -1,
+      blockSpan: p.blockSpan,
+      tier: -1,
     },
     reveal: p.reveal,
     revealMs: physicalRevealMs(kind, p.widthM, p.heightM),
@@ -532,6 +564,7 @@ export function applyKind(doc: BannerDoc, kind: BannerKind): BannerDoc {
       heightV: to.heightV,
       outM: to.outM,
       tiltDeg: to.tiltDeg,
+      blockSpan: to.blockSpan,
     },
   };
 }
@@ -846,6 +879,12 @@ export function normalise(raw: Partial<BannerDoc>): BannerDoc {
       yawDeg: clamp(num(raw.place?.yawDeg, 0), -180, 180),
       tiltDeg: clamp(num(raw.place?.tiltDeg, p.tiltDeg), -90, 90),
       snap: raw.place?.snap !== false,
+      // An older scene has none of these. A banner saved before blocks
+      // existed keeps the free placement it was saved with rather than
+      // jumping to block 0 the moment it is opened.
+      blockFrom: Math.round(clamp(num(raw.place?.blockFrom, -1), -1, 63)),
+      blockSpan: Math.round(clamp(num(raw.place?.blockSpan, 0), 0, 32)),
+      tier: Math.round(clamp(num(raw.place?.tier, -1), -1, 7)),
     },
   };
 }

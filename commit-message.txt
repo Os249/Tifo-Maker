@@ -1,78 +1,80 @@
-Banners: lace the perimeter, make the net structural, stop the shiver
+Banners: place them on real blocks, and never bigger than the ground
 
-The banner was out of the stand and correctly timed, and it vibrated. No
-screenshot shows that and no census sees it, so the first thing built was a
-measuring stick: npm run probe:banner, reporting three numbers per type.
+Two things were wrong and they produced the same screenshot: a 48 x 28 m
+sheet hanging off the top of a stand and into the skyline.
 
-  flat   RMS distance from the fabric's own best-fit plane
-  buzz   mean per-FRAME vertex movement — this is jitter
-  drift  net movement over a second — this is sway, and a banner should
-         have some
+Placement was a slider. "Along" ran 0-100 across a stand, which gives a banner
+no reason to line up with anything: it straddled aisles, sat half on and half
+off a block, and near the corners it hung past the end of the ground. No crew
+thinks that way. They think "the whole of block 4 and 5, upper tier", because
+that is what a stand is divided into and what they can get people into.
 
-Buzz and drift had been one number, and that number could not tell a banner
-swaying on its ropes from a banner vibrating. At the top of the wind slider a
-fence banner was moving 1.5 m PER FRAME and a centre-circle banner 0.67 m.
+Size was unbounded. The editor rightly lets you draw at any size — you are
+designing artwork, not ordering fabric — but Match Day took the number
+literally.
 
-What the research changed
-A tifo banner is held at many points and is never a sheet hanging from one
-edge. Eyelets go in every 50 cm; the hem has a rope sewn into it; a
-supporters' group describing their own build says they "grommet around the
-edges and attach to the field goal net with zip ties"; the DFB's glossary
-defines a fence flag as one FIXED to the railings. Engineering analyses of
-banners under wind agree from the other end: the load is "dominated by the
-tension or catenary forces", which is only true of something anchored all
-round.
+Blocks and tiers, found rather than invented
+StandFrame now reports the stand's real structure. Blocks are the wedges of
+seating between the radial aisles, found by looking for the gaps at 320 bins
+across a stand rather than by dividing it into equal parts, so they land on
+the aisles whatever a template does — a 1.2 m aisle on a 133 m stand is under
+a percent of it, which is why the 56 columns the surface is built from could
+not see them. The generic bowl gets 8 blocks per stand, the single kop 6, the
+grand oval 8, the grand national 9.
 
-- Lashings: a particle tied to a point with a couple of centimetres of play,
-  which is literally a grommet on a zip tie. Every rigged type is now laced
-  along its whole perimeter; the two a crowd carries are held across their
-  whole area instead. The slack is geometrically amplified — 9 cm a side on a
-  20 m banner buys a metre of belly, 2 cm buys 40 cm, a roped hem buys none.
-- The net became structural. It was being DRAWN and not enforced: ropes lying
-  obediently over the surface of a bulge they should have prevented. Four
-  rope clamps per particle to the perimeter of its row and column. What that
-  buys is reach, not stiffness — local constraints move information one cell
-  per sweep, so on a 27-row sheet under seventy times its own weight the
-  tension never arrives. Belly on a 36x18 m rope lift: 2.9 m -> a few cm.
-- The bowl is a wind shadow. Wind falls to a fifth at pitch level, and fabric
-  resting on something sits in the boundary layer at a quarter of free stream,
-  a tenth under a crowd.
+Tiers are read off the seat map's tierOf. The first attempt looked for a
+horizontal band with no seats in it and found one tier on every ground in the
+catalogue including the two-tier ones: the walkway is a few metres out of
+forty and the dense rows either side smear across it. The map already carried
+the answer.
 
-Four more bugs, each found by a number
-- The rope lift had 1.7 m of slack built in: its rail anchor was cleared of
-  the crowd and its batten, 18 m up in open air, was not, so two pins 16.3 m
-  apart held 18 m of cloth.
-- More substeps made the shimmer WORSE, 0.030 -> 0.075 m/frame in still air.
-  Backwards for a convergence problem, and the signature of an injection once
-  per substep: the net clamps and the tethers moved p without q. Every
-  unilateral constraint is now inelastic.
-- A constraint sitting exactly on its limit chatters. A flat sheet puts the
-  net ropes precisely at length. A tenth of a percent of rope stretch, honest
-  for a lightly loaded polyester net, puts the rest state inside the limit.
-- A bend dead zone was tried and reverted: it let the sheet crease freely
-  inside the margin and shimmer went up two orders of magnitude.
+bannerFit.ts — one place decides where it goes and how big it may be
+Pure: frame in, geometry out, no Three.js and no DOM. Nothing in the rig reads
+doc.widthM, doc.heightM, doc.place.alongU or doc.place.heightV any more.
+- A block run means exactly those blocks; height follows the design's own
+  proportions.
+- blockFrom -1 means centred, which is where a tifo goes and the only sane
+  default when the block count depends on the ground.
+- Scaled, never squashed: the artwork is normalised to the banner's width, so
+  clamping the two dimensions independently would show a stretched version of
+  the design the user drew.
+- The reach is a different physical thing per type: terracing for a cover, the
+  air in front of the stand for a roof-hung one, 9 m of pole for a pole banner,
+  the height of the fence for a fence banner, the grass for a pitch banner.
+- The panel says "48x28 m does not fit here — cut to 18x11 m". Silently
+  resizing someone's artwork is worse than not fitting it.
+Old scenes keep the free placement they were saved with.
 
-Damping 0.18 -> 0.9 per second: not a fudge for instability, which was the
-sweep order, but the structural damping a seamed, laced, net-backed sheet has.
+In the panel: Stand, then Blocks and Tier, with the free sliders kept as a
+fallback that hides itself. Dragging a block-placed banner moves it a block at
+a time. The editor asks the built bowl for the block list through a
+tifo:stand-slots event, since only the simulator knows.
 
-Rigging corrected
-A pole banner is made off at its bottom edge at the rail like a rope lift. A
-roof-hung banner flies in free air in front of the terracing — hung above the
-middle of a rake it is inside the seating within two metres, and what came out
-of that was a banner draped over the seats being called roof-hung.
+Three bugs this turned up
+- A banner tied to a curved rail follows the rail. The anchored edge was laid
+  out as a straight chord from a single tangent — fine mid-stand, wrong at the
+  corners, where chord and rail part company by metres. Measured on a rope
+  lift: 0.04 mm per frame on the middle blocks, 2.5 mm on the corner ones.
+- But a banner flown from the roof does NOT: it hangs from a straight cable
+  and has no reason to inherit the stand's shape.
+- A flown banner's perimeter is pinned, not lashed. Its net is rigged taut
+  between roof points and we do not simulate the net's own movement; lashing
+  left every anchor drifting inside a 2 cm ball and 1400 particles drifting
+  with them, 5 mm per frame in dead still air.
 
-Result, at full wind
-  fence     1.519 -> 0.000 m/frame      pitch   0.673 -> 0.000
-  drop      0.113 -> 0.00014            lift    0.054 -> 0.00033
-  pole-out  0.008 -> 0.00004            roof    0.002 -> 0.00027
-and flatness: drop 0.76 -> 0.05, lift 1.06 -> 0.26, fence 0.34 -> 0.02,
-pitch 0.45 -> 0.001, pole-out 0.31 -> 0.001.
+Also: a failure to mount the Banner view was swallowed by a bare
+.catch(() => null), leaving a blank rectangle and no clue why. It now says so.
 
-26 shots: 0.000 m inside the stand and 0.000 m of sag on every one. A rendered
-clip was watched frame by frame rather than trusted as stills.
+Gated: three grounds x four stands x eight kinds, asking for 400 x 120 m and
+checking the result is inside the slot, reported as cut, keeps its proportions
+to 2%, and that blocks do not overlap, cover no more than the stand, and a
+named run lands on the blocks it names.
 
-verify (two headless physics gates), stadiumfit, tsc, build, server suite,
-probe:banner, e2e-banner 47, e2e-mobile 310.
+Full pass: tsc, build, verify, stadiumfit, probe:banner (every wind setting),
+shots:banner (26 shots, 0.000 m in-stand and 0.000 m sag), server suite,
+security:check, e2e 21, i18n 16, gate 23, theme 47, verify 21, claim 9,
+feedback 9, banner 47, mobile 310, sound 61. e2e-seo 5/10 and e2e-templates
+22/23 unchanged — both need a real database.
 
 Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
 Claude-Session: https://claude.ai/code/session_01NJL2ZR3v1pJ5VPRk3habHH

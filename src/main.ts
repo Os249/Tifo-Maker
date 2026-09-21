@@ -383,7 +383,15 @@ async function main(): Promise<void> {
         });
         return bannerView;
       })
-      .catch(() => null);
+      .catch((err) => {
+        // Say something. A swallowed mount failure leaves the Banner view a
+        // blank rectangle with no clue anywhere as to why, which cost a whole
+        // debugging session to work out once already.
+        console.error('[tifo] the Banner view failed to mount', err);
+        const m = document.getElementById('message');
+        if (m) m.textContent = 'The Banner view could not start — please reload.';
+        return null;
+      });
     return bannerLoading;
   };
 

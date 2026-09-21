@@ -72,6 +72,50 @@ export interface StandFrame {
   normalAt(alongU: number, heightV: number): { nx: number; ny: number; nz: number };
   /** A coarse triangle mesh of the face, for raycasting a drag onto it. */
   surfaceGrid(cols: number, rows: number): { positions: Float32Array; indices: Uint32Array };
+
+  /**
+   * The blocks this stand is divided into, left to right.
+   *
+   * These are the real ones — the wedges of seating between the radial
+   * aisles, which are the black gaps you can see running up every stand in
+   * the bowl. They are found by looking for the gaps in the seating rather
+   * than by dividing the stand into equal parts, so they land on the aisles
+   * whatever the template does.
+   *
+   * They exist because free placement was a mistake. A banner dragged along a
+   * continuous slider has no reason to line up with anything, ends up
+   * straddling two aisles with a corner hanging off the end of the stand, and
+   * a sheet sized in metres on a slider has no idea how much stand there is
+   * to cover. A crew does not think that way: they think "the whole of block
+   * 4 and 5". Blocks make that the unit.
+   */
+  blocks: StandBlock[];
+
+  /**
+   * The tiers, as bands of `heightV`.
+   *
+   * The vertical half of the same idea, and the same reason: a banner belongs
+   * to a tier, not to an arbitrary height up a rake that happens to cross a
+   * walkway.
+   */
+  tiers: TierBand[];
+}
+
+export interface StandBlock {
+  /** Extent across the stand, in `alongU`. */
+  u0: number;
+  u1: number;
+  /** Centre, and real width along the front rail in metres. */
+  centerU: number;
+  widthM: number;
+}
+
+export interface TierBand {
+  /** Extent up the stand, in `heightV`. */
+  v0: number;
+  v1: number;
+  /** Length of this band measured UP THE SLOPE, in metres. */
+  slopeM: number;
 }
 
 const COLS = 56;
@@ -145,6 +189,8 @@ export function buildStandFrame(map: SeatMap, stand: 0 | 1 | 2 | 3, roofRise = 9
       pointAt: (a, v) => ({ x: (a - 0.5) * 40, y: 2 + clamp01(v) * 16, z: -60, rx: 1, rz: 0, ox: 0, oz: 1 }),
       normalAt: () => ({ nx: 0, ny: 0, nz: 1 }),
       surfaceGrid: () => ({ positions: new Float32Array(0), indices: new Uint32Array(0) }),
+      blocks: [{ u0: 0, u1: 1, centerU: 0.5, widthM: 40 }],
+      tiers: [{ v0: 0, v1: 1, slopeM: 24 }],
     };
     return flat;
   }
@@ -291,7 +337,90 @@ export function buildStandFrame(map: SeatMap, stand: 0 | 1 | 2 | 3, roofRise = 9
     return { positions, indices };
   };
 
-  return { stand, widthM, heightM, slopeM, minY, maxY, railY, roofY, ok: true, pointAt, normalAt, surfaceGrid };
+  // ---- blocks: the wedges of seating between the radial aisles -----------
+  //
+  // Found by looking for the gaps rather than by dividing the stand up, so an
+  // unevenly laid-out ground still gets its real blocks. The binning has to be
+  // fine: a 1.2 m aisle on a 133 m stand is under a percent of it, and at the
+  // 56 columns the surface is built from it does not leave an empty bin.
+  const BINS = 320;
+  const pop = new Int32Array(BINS);
+  for (let i = 0; i < map.count; i++) {
+    const u = map.uv[i * 2];
+    if (standOfU(u) !== stand) continue;
+    const su = (((u - u0 + 1) % 1) / 0.25);
+    if (su < 0 || su >= 1) continue;
+    pop[Math.min(BINS - 1, Math.floor(su * BINS))]++;
+  }
+  // "Empty" against the stand's own density, not against zero: the top of a
+  // bin can catch a stray seat from the row above an aisle.
+  let occupied = 0;
+  for (let b = 0; b < BINS; b++) if (pop[b] > 0) occupied++;
+  const mean = occupied > 0 ? n / occupied : 0;
+  const gapAt = (b: number): boolean => pop[b] < mean * 0.25;
+
+  const blocks: StandBlock[] = [];
+  {
+    let start = -1;
+    for (let b = 0; b <= BINS; b++) {
+      const solid = b < BINS && !gapAt(b);
+      if (solid && start < 0) start = b;
+      if (!solid && start >= 0) {
+        const a0 = start / BINS;
+        const a1 = b / BINS;
+        // Ignore slivers: a couple of bins is noise, not a block.
+        if (a1 - a0 > 0.012) {
+          blocks.push({ u0: a0, u1: a1, centerU: (a0 + a1) / 2, widthM: (a1 - a0) * widthM });
+        }
+        start = -1;
+      }
+    }
+  }
+  // A stand with no detectable aisles is still one block, not none.
+  if (blocks.length === 0) blocks.push({ u0: 0, u1: 1, centerU: 0.5, widthM });
+
+  // ---- tiers: read off the seat map, not guessed from a histogram ---------
+  //
+  // The first version of this looked for a horizontal band with no seats in
+  // it, the way the blocks look for a vertical one. It found one tier on
+  // every ground in the catalogue including the two-tier ones, because the
+  // walkway between tiers is a few metres out of forty and the rows either
+  // side of it are dense enough to smear across it. The seat map already
+  // carries `tierOf`; there was never a reason to infer it.
+  const tierLo: number[] = [];
+  const tierHi: number[] = [];
+  for (let i = 0; i < map.count; i++) {
+    const u = map.uv[i * 2];
+    if (standOfU(u) !== stand) continue;
+    const t = map.tierOf[i];
+    const v = (map.pos3[i * 3 + 1] - minY) / Math.max(0.001, heightM);
+    if (tierLo[t] === undefined || v < tierLo[t]) tierLo[t] = v;
+    if (tierHi[t] === undefined || v > tierHi[t]) tierHi[t] = v;
+  }
+  const tiers: TierBand[] = [];
+  for (let t = 0; t < tierLo.length; t++) {
+    if (tierLo[t] === undefined) continue;
+    tiers.push({ v0: Math.max(0, tierLo[t]), v1: Math.min(1, tierHi[t]), slopeM: 0 });
+  }
+  tiers.sort((a, b) => a.v0 - b.v0);
+  if (tiers.length === 0) tiers.push({ v0: 0, v1: 1, slopeM: 0 });
+
+  const frame: StandFrame = {
+    stand, widthM, heightM, slopeM, minY, maxY, railY, roofY, ok: true,
+    pointAt, normalAt, surfaceGrid, blocks, tiers,
+  };
+  // Each tier's slope length, walked on the finished frame.
+  for (const t of tiers) {
+    let len = 0;
+    let q = pointAt(0.5, t.v0);
+    for (let k = 1; k <= 12; k++) {
+      const r = pointAt(0.5, t.v0 + ((t.v1 - t.v0) * k) / 12);
+      len += Math.hypot(r.x - q.x, r.y - q.y, r.z - q.z);
+      q = r;
+    }
+    t.slopeM = Math.max(0.5, len);
+  }
+  return frame;
 }
 
 /**

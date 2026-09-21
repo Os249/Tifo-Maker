@@ -20,6 +20,7 @@ import { evalTimeline, type Timeline, type Cue } from './timeline';
 import { buildAssetLayer, type AssetLayer } from './assetLayer';
 import { buildBannerRigs, type BannerRigLayer } from './bannerRig';
 import { buildPlacement, type PlacementHelper } from './bannerPlace';
+import { fitBanner } from './bannerFit';
 import type { BannerStore, StandIndex } from '../../core/banner';
 import type { AssetStore, SceneAsset } from '../../core/sceneAssets';
 import { rasterize } from '../../core/importImage';
@@ -256,6 +257,7 @@ export class MatchDaySimulator {
       this.scene.add(this.bannerRigs.object);
       this.bindBannerPointer();
       document.addEventListener('tifo:stand-extent', this.onStandExtent as EventListener);
+      document.addEventListener('tifo:stand-slots', this.onStandSlots as EventListener);
     }
     // Silent until asked for. Sound that starts by itself is hostile, and a
     // browser will refuse to start it outside a gesture anyway.
@@ -1172,6 +1174,27 @@ export class MatchDaySimulator {
    * button says so and falls back to the banner type's own default band,
    * which is an honest guess rather than a confident wrong number.
    */
+  /**
+   * What the editor can ask about a stand it cannot see.
+   *
+   * The editor has the template; only the simulator has the built bowl, and
+   * therefore the only honest answer to "how many blocks does the North stand
+   * have" or "will this banner fit". Answered through the same custom event
+   * the size button already used, so the editor stays able to run with no
+   * simulator open at all.
+   */
+  private readonly onStandSlots = (
+    e: CustomEvent<{ stand: number; blocks?: number[]; tiers?: number[]; fit?: unknown; bannerId?: string }>,
+  ): void => {
+    if (!this.placement) return;
+    const f = this.placement.frameFor(((e.detail?.stand ?? 1) % 4) as StandIndex);
+    if (!f.ok) return;
+    e.detail.blocks = f.blocks.map((b) => b.widthM);
+    e.detail.tiers = f.tiers.map((t) => t.slopeM);
+    const doc = e.detail.bannerId ? this.bannerStore?.get(e.detail.bannerId) : this.bannerStore?.active;
+    if (doc) e.detail.fit = fitBanner(doc, f);
+  };
+
   private readonly onStandExtent = (e: CustomEvent<{ stand: number; width?: number; height?: number }>): void => {
     if (!this.placement) return;
     const f = this.placement.frameFor(((e.detail?.stand ?? 1) % 4) as StandIndex);
@@ -1231,6 +1254,23 @@ export class MatchDaySimulator {
     if (!res) return;
     const a = this.bannerStore.active;
     if (!a) return;
+    if (a.place.blockSpan > 0) {
+      // A banner on blocks moves a block at a time. Dragging it is choosing a
+      // block, not sliding it along a rail, so the drag lands on whichever
+      // block the pointer is over and the banner snaps there whole — which is
+      // the point of blocks, and is also why it can never end up straddling
+      // an aisle with a corner hanging off the end of the stand.
+      const f = this.placement.frameFor(a.place.stand);
+      let hit = 0;
+      for (let i = 0; i < f.blocks.length; i++) {
+        if (res.alongU >= f.blocks[i].u0 && res.alongU <= f.blocks[i].u1) { hit = i; break; }
+        if (res.alongU > f.blocks[i].u1) hit = Math.min(f.blocks.length - 1, i + 1);
+      }
+      const from = Math.max(0, Math.min(f.blocks.length - a.place.blockSpan, hit - Math.floor((a.place.blockSpan - 1) / 2)));
+      if (from !== a.place.blockFrom) this.bannerStore.patchPlace({ blockFrom: from });
+      this.onBannerSnap?.(['block']);
+      return;
+    }
     this.bannerStore.patchPlace({ alongU: res.alongU, heightV: res.heightV });
     this.onBannerSnap?.(res.snaps.map((s) => s.key));
   };
@@ -1329,16 +1369,20 @@ export class MatchDaySimulator {
     // LOW. A banner lying on a raked stand is a near-horizontal surface, so a
     // camera parked above it sees an edge; the view that reads is the one from
     // the opposite end, which is who a tifo is for.
-    const top = f.pointAt(doc.place.alongU, Math.min(1, doc.place.heightV));
-    const drop = Math.min(0.95, doc.heightM / Math.max(1, f.slopeM));
-    const mid = f.pointAt(doc.place.alongU, Math.max(0, doc.place.heightV - drop / 2));
+    // Framed on the FITTED banner, not the asked-for one: after the stadium
+    // has had its say those can be a long way apart, and a camera aimed at
+    // where a 48 m banner would have been misses the 18 m one that is there.
+    const fit = fitBanner(doc, f);
+    const top = f.pointAt(fit.alongU, Math.min(1, fit.heightV));
+    const drop = Math.min(0.95, fit.heightM / Math.max(1, f.slopeM));
+    const mid = f.pointAt(fit.alongU, Math.max(0, fit.heightV - drop / 2));
     const cy = doc.kind === 'pitch' ? 0 : (top.y + mid.y) / 2;
     // Elevation matters more than distance. A banner lying on a raked stand is
     // a near-horizontal surface: from pitch level you see its edge, and the
     // artwork disappears. Thirty-odd degrees up is roughly where the main
     // camera gantry sits, and it is the angle every photograph of a kop tifo
     // is taken from.
-    const d = Math.max(72, doc.widthM * 1.9);
+    const d = Math.max(72, fit.widthM * 1.9);
     // Overridable, because the flattering angle and the honest angle are not
     // the same angle. From the gantry a sheet that has sunk into the seating
     // looks identical to one resting on it; from pitch level, grazing along
@@ -1665,6 +1709,7 @@ export class MatchDaySimulator {
     this.bannerRigs?.dispose();
     this.placement?.dispose();
     document.removeEventListener('tifo:stand-extent', this.onStandExtent as EventListener);
+    document.removeEventListener('tifo:stand-slots', this.onStandSlots as EventListener);
     this.canvas.removeEventListener('pointerdown', this.onBannerDown);
     this.canvas.removeEventListener('pointermove', this.onBannerMove);
     this.canvas.removeEventListener('pointerup', this.onBannerUp);

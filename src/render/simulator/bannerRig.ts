@@ -5,6 +5,7 @@ import { bannerToCanvas, onBannerImageReady } from '../bannerRender';
 import type { StandFrame } from './standFrame';
 import { bakeStandHeightfield, probe, type Heightfield, type Hit } from './standHeightfield';
 import { Cloth, type ClothWorld } from './cloth';
+import { fitBanner, type FittedBanner } from './bannerFit';
 
 /**
  * Banners in the bowl — real cloth, on a real rig, colliding with a real stand.
@@ -107,6 +108,15 @@ interface Rig {
   layout: Layout;
   /** Cached stand geometry — baking is not free, and the stand does not move. */
   frame: StandFrame;
+  /**
+   * Where this banner goes and how big the stand lets it be.
+   *
+   * Resolved once and used everywhere below. Nothing in the rig reads
+   * `doc.widthM`, `doc.heightM`, `doc.place.alongU` or `doc.place.heightV`
+   * directly any more — those are what the editor asked for, and the stadium
+   * gets the last word.
+   */
+  fit: FittedBanner;
   field: Heightfield | null;
   ropes: THREE.LineSegments | null;
   net: THREE.LineSegments | null;
@@ -177,10 +187,15 @@ function hash(s: string): number {
 }
 
 /** Everything that changes the mesh or the rig rather than just the picture. */
-function rigSignature(doc: BannerDoc): string {
+function rigSignature(doc: BannerDoc, fit: FittedBanner): string {
+  // Keyed on the FITTED size, not the asked-for one. The cloth grid is built
+  // from the size the banner ends up at, so two documents that ask for
+  // different sizes and get cut to the same one share a rig — and, more
+  // importantly, a banner that changes blocks and therefore changes size
+  // gets a new grid instead of stretching the old one.
   return [
-    doc.kind, doc.widthM, doc.heightM, doc.material, doc.fabricGsm,
-    doc.netBacked, doc.weightBar, doc.place.stand,
+    doc.kind, fit.widthM.toFixed(2), fit.heightM.toFixed(2), doc.material, doc.fabricGsm,
+    doc.netBacked, doc.weightBar, doc.place.stand, fit.blockFrom, fit.blockSpan, fit.tier,
   ].join('|');
 }
 
@@ -405,8 +420,9 @@ export function buildBannerRigs(
   function makeRig(doc: BannerDoc): Rig {
     const frame = frameFor(doc.place.stand);
     const layout = layoutFor(doc.kind);
-    const W = doc.widthM;
-    const H = doc.heightM;
+    const fit = fitBanner(doc, frame);
+    const W = fit.widthM;
+    const H = fit.heightM;
 
     // Grid resolution from area, so a fence flag is not simulated at the same
     // cost as a sheet covering a whole kop.
@@ -546,7 +562,7 @@ export function buildBannerRigs(
     root.add(group);
 
     const rig: Rig = {
-      doc, group, mesh, geo, mat, pos, nrm,
+      doc, group, mesh, geo, mat, pos, nrm, fit,
       texKey: textureKey(doc),
       cloth, world, layout, frame, field,
       ropes, net, bar, poles, roll, outline,
@@ -555,7 +571,7 @@ export function buildBannerRigs(
       rigZ: new Float64Array(cloth.count),
       prog: 1, playing: false, t0: 0,
       durationS: revealSeconds(doc),
-      sig: rigSignature(doc),
+      sig: rigSignature(doc, fit),
       accum: 0,
     };
     layoutCloth(rig);
@@ -617,7 +633,7 @@ export function buildBannerRigs(
 
   const hitScratch: Hit = { depth: 0, nx: 0, ny: 1, nz: 0 };
 
-  function anchorOf(doc: BannerDoc, frame: StandFrame): {
+  function anchorOf(rig: Rig): {
     ox: number; oy: number; oz: number;
     rx: number; rz: number; nx: number; nz: number;
   } {
@@ -630,10 +646,11 @@ export function buildBannerRigs(
     // banner draped over the seats being called roof-hung. So its horizontal
     // place is the front rail pushed out, and `heightV` runs its top edge
     // from the rail up to the roof rather than up the terracing.
+    const { doc, frame, fit } = rig;
     const inAir = doc.kind === 'roof-hung';
     const a = inAir
-      ? frame.pointAt(doc.place.alongU, 0)
-      : frame.pointAt(doc.place.alongU, Math.min(1, doc.place.heightV));
+      ? frame.pointAt(fit.alongU, 0)
+      : frame.pointAt(fit.alongU, Math.min(1, fit.heightV));
     const yaw = (doc.place.yawDeg * Math.PI) / 180;
     const c = Math.cos(yaw);
     const s = Math.sin(yaw);
@@ -645,7 +662,7 @@ export function buildBannerRigs(
     return {
       ox: a.x + nx * doc.place.outM,
       oy: inAir
-        ? frame.railY + Math.max(0.1, Math.min(1, doc.place.heightV)) * Math.max(4, headroom)
+        ? frame.railY + Math.max(0.1, Math.min(1, fit.heightV)) * Math.max(4, headroom)
         : a.y,
       oz: a.z + nz * doc.place.outM,
       rx, rz, nx, nz,
@@ -665,7 +682,7 @@ export function buildBannerRigs(
    * lift's remaining flap.
    */
   function clearedAnchor(rig: Rig): ReturnType<typeof anchorOf> {
-    const a = anchorOf(rig.doc, rig.frame);
+    const a = anchorOf(rig);
     pinClear(rig, tmpC.set(a.ox, a.oy, a.oz));
     a.ox = tmpC.x;
     a.oy = tmpC.y;
@@ -673,13 +690,92 @@ export function buildBannerRigs(
     return a;
   }
 
+  /**
+   * The anchor point for one column of the banner, `t` running 0..1 across it.
+   *
+   * A banner is made off along a rail, and an end stand's rail is curved — so
+   * the banner's anchored edge is curved too, and its fabric hangs from that
+   * curve. Laying the anchored edge out as a straight chord from a single
+   * tangent instead is fine in the middle of a side stand and wrong at the
+   * corners, where the chord and the rail part company by metres: the pins go
+   * one way, the collider pushes the other, and the sheet buzzes between them.
+   *
+   * Measured on a rope lift, the same banner on the middle blocks of a stand
+   * moved 0.04 mm per frame and on the corner blocks 2.5 mm — sixty times
+   * worse, for no reason except that the corner is round.
+   *
+   * Yaw is applied as a rotation of the whole curve about the banner's own
+   * centre, which is what turning a banner does.
+   */
+  function railAt(rig: Rig, t: number, out: THREE.Vector3): { nx: number; nz: number } {
+    const { doc, frame, fit } = rig;
+    const inAir = doc.kind === 'roof-hung';
+    let x: number;
+    let y: number;
+    let z: number;
+    let nx: number;
+    let nz: number;
+    if (inAir) {
+      // Flown from the roof steel, so the anchored edge is a STRAIGHT cable
+      // between two points, not a curve — this one does not touch the stand
+      // and has no reason to inherit its shape. Bending it to the rail's
+      // curve made a flat sheet hang from a curved line, and the sheet spent
+      // the rest of its life arguing about it.
+      const c = frame.pointAt(fit.alongU, 0);
+      const headroom = frame.roofY - frame.railY;
+      const s = (t - 0.5) * fit.widthM;
+      nx = c.ox;
+      nz = c.oz;
+      x = c.x + c.rx * s + nx * doc.place.outM;
+      z = c.z + c.rz * s + nz * doc.place.outM;
+      y = frame.railY + Math.max(0.1, Math.min(1, fit.heightV)) * Math.max(4, headroom);
+    } else {
+      const spanU = Math.min(1, fit.widthM / Math.max(1, frame.widthM));
+      const u = fit.alongU + (t - 0.5) * spanU;
+      const base = frame.pointAt(u, Math.min(1, fit.heightV));
+      nx = base.ox;
+      nz = base.oz;
+      x = base.x + nx * doc.place.outM;
+      z = base.z + nz * doc.place.outM;
+      y = base.y;
+    }
+
+    const yaw = (doc.place.yawDeg * Math.PI) / 180;
+    if (yaw !== 0) {
+      const c = Math.cos(yaw);
+      const sn = Math.sin(yaw);
+      const centre = anchorOf(rig);
+      const dx = x - centre.ox;
+      const dz = z - centre.oz;
+      x = centre.ox + dx * c - dz * sn;
+      z = centre.oz + dx * sn + dz * c;
+      const rnx = nx * c - nz * sn;
+      const rnz = nx * sn + nz * c;
+      nx = rnx;
+      nz = rnz;
+    }
+    // Cleared, exactly as the single centre anchor used to be. The layout
+    // and the pins both come through here, so if one were cleared and the
+    // other not they would sit a crowd's height apart and the banner would
+    // hold more cloth than the gap between its own anchors — which is the
+    // metre and a half of slack a rope lift used to flap in.
+    out.set(x, y, z);
+    // Rail-mounted anchors get lifted clear of whatever is standing on the
+    // rail; a flown banner does not, because it is in the air by definition
+    // and clearing it column by column against the edge of the collider
+    // leaves a ragged anchor line for the sheet to buzz along. Its fabric is
+    // still protected by the collision constraint like everything else.
+    if (!inAir) pinClear(rig, out);
+    return { nx, nz };
+  }
+
   function layoutCloth(rig: Rig): void {
-    const { doc, frame, cloth, layout } = rig;
-    const W = doc.widthM;
-    const H = doc.heightM;
+    const { doc, frame, cloth, layout, fit } = rig;
+    const W = fit.widthM;
+    const H = fit.heightM;
 
     if (layout === 'ground') {
-      const a = frame.pointAt(doc.place.alongU, 0);
+      const a = frame.pointAt(fit.alongU, 0);
       const cx = a.x + a.ox * (13 + doc.place.outM);
       const cz = a.z + a.oz * (13 + doc.place.outM);
       cloth.reset((i, j, out) => {
@@ -698,14 +794,14 @@ export function buildBannerRigs(
       // to cover twenty metres of height on a 30-degree rake needs forty
       // metres of cloth; getting that wrong is the commonest reason a
       // simulated tifo reads as a sticker rather than as fabric.
-      const spanU = Math.min(1.4, W / Math.max(1, frame.widthM));
-      const spanV = Math.min(1.4, H / Math.max(1, frame.slopeM));
-      const topV = doc.place.heightV;
+      const spanU = Math.min(1, W / Math.max(1, frame.widthM));
+      const spanV = Math.min(1, H / Math.max(1, frame.slopeM));
+      const topV = fit.heightV;
       cloth.reset((i, j, out) => {
         const u = i / (cloth.cols - 1);
         const v = j / (cloth.rows - 1);
-        const p = frame.pointAt(doc.place.alongU + (u - 0.5) * spanU, topV - v * spanV);
-        const n = frame.normalAt(doc.place.alongU + (u - 0.5) * spanU, topV - v * spanV);
+        const p = frame.pointAt(fit.alongU + (u - 0.5) * spanU, topV - v * spanV);
+        const n = frame.normalAt(fit.alongU + (u - 0.5) * spanU, topV - v * spanV);
         const off = rig.world.clearance + 0.05;
         out.x = p.x + n.nx * off;
         out.y = p.y + n.ny * off;
@@ -715,10 +811,9 @@ export function buildBannerRigs(
       return;
     }
 
-    // Hanging: straight down from the anchor, which is what a sheet held along
-    // its top edge does. It will meet the terracing below on its own, and the
-    // collision constraint is what decides where.
-    const a = clearedAnchor(rig);
+    // Hanging from the rail — curve and all — which is what a sheet made off
+    // along its top edge does. It meets the terracing below on its own, and
+    // the collision constraint is what decides where.
     const tilt = (doc.place.tiltDeg * Math.PI) / 180;
     const dy = -Math.cos(tilt);
     const dOut = Math.sin(tilt);
@@ -761,17 +856,18 @@ export function buildBannerRigs(
       const j = order[n];
       for (let i = 0; i < cols; i++) {
         const k = j * cols + i;
-        const u = i / (cols - 1) - 0.5;
         if (n === 0) {
-          walkX[k] = a.ox + a.rx * (u * W);
-          walkY[k] = a.oy;
-          walkZ[k] = a.oz + a.rz * (u * W);
+          railAt(rig, i / (cols - 1), tmpA);
+          walkX[k] = tmpA.x;
+          walkY[k] = tmpA.y;
+          walkZ[k] = tmpA.z;
         } else {
           const pk = order[n - 1] * cols + i;
           const px = walkX[pk];
           const py = walkY[pk];
           const pz = walkZ[pk];
-          tmpA.set(px + a.nx * (sOut * dv), py + sy * dv, pz + a.nz * (sOut * dv));
+          const cn = railAt(rig, i / (cols - 1), tmpB);
+          tmpA.set(px + cn.nx * (sOut * dv), py + sy * dv, pz + cn.nz * (sOut * dv));
           pinClear(rig, tmpA);
           // Re-scale back to one row spacing from the row above, so pushing
           // the sheet out of the stand never shortens it.
@@ -890,9 +986,9 @@ export function buildBannerRigs(
    * there is gravity and air and a stand, where does the fabric go".
    */
   function applyRig(rig: Rig, dt: number): void {
-    const { doc, frame, cloth } = rig;
+    const { doc, frame, cloth, fit } = rig;
     const p = rig.prog;
-    const H = doc.heightM;
+    const H = fit.heightM;
     const cols = cloth.cols;
     const rows = cloth.rows;
     const dv = H / (rows - 1);
@@ -917,9 +1013,9 @@ export function buildBannerRigs(
     }
 
     if (rig.layout === 'surface') {
-      const spanU = Math.min(1.4, doc.widthM / Math.max(1, frame.widthM));
-      const spanV = Math.min(1.4, H / Math.max(1, frame.slopeM));
-      const topV = doc.place.heightV;
+      const spanU = Math.min(1, fit.widthM / Math.max(1, frame.widthM));
+      const spanV = Math.min(1, H / Math.max(1, frame.slopeM));
+      const topV = fit.heightV;
       const off = rig.world.clearance;
       // A crowd pass travels backwards, one row of raised hands at a time. The
       // rows the fold has reached are being carried; the rest are still a
@@ -934,7 +1030,7 @@ export function buildBannerRigs(
         const carried = j % 2 === 0 && v >= held;
         if (!carried) continue;
         for (let i = 0; i < cols; i++) {
-          const su = doc.place.alongU + (i / (cols - 1) - 0.5) * spanU;
+          const su = fit.alongU + (i / (cols - 1) - 0.5) * spanU;
           const sv = topV - v * spanV;
           const q = frame.pointAt(su, sv);
           const n = frame.normalAt(su, sv);
@@ -945,12 +1041,12 @@ export function buildBannerRigs(
       }
       if (mode === 'pass' && held > 0) {
         // The undeployed remainder, gathered at the front rail.
-        const rail = frame.pointAt(doc.place.alongU, Math.max(0, topV - spanV));
-        const rn = frame.normalAt(doc.place.alongU, Math.max(0, topV - spanV));
+        const rail = frame.pointAt(fit.alongU, Math.max(0, topV - spanV));
+        const rn = frame.normalAt(fit.alongU, Math.max(0, topV - spanV));
         for (let j = 0; j < rows; j++) {
           if (j / (rows - 1) >= held) continue;
           for (let i = 0; i < cols; i++) {
-            const su = doc.place.alongU + (i / (cols - 1) - 0.5) * spanU;
+            const su = fit.alongU + (i / (cols - 1) - 0.5) * spanU;
             const q = frame.pointAt(su, Math.max(0, topV - spanV));
             const k = cloth.index(i, j);
             pinClear(rig, tmpA.set(
@@ -979,12 +1075,14 @@ export function buildBannerRigs(
      * pushed clear of the terracing if the rig asked for a point inside it.
      */
     const plane = (u: number, dist: number, yOff: number, outOff: number, o: THREE.Vector3): THREE.Vector3 => {
-      const s = (u - 0.5) * doc.widthM;
-      o.set(
-        a.ox + a.rx * s + a.nx * (tdOut * dist + outOff),
-        a.oy + tdy * dist + yOff,
-        a.oz + a.rz * s + a.nz * (tdOut * dist + outOff),
-      );
+      // Off the rail itself, curve and all, rather than off a straight chord
+      // through it — and out along THIS column's normal, which on a curved
+      // end stand points somewhere different from the centre's.
+      const n = railAt(rig, u, o);
+      const off = tdOut * dist + outOff;
+      o.x += n.nx * off;
+      o.y += tdy * dist + yOff;
+      o.z += n.nz * off;
       return pinClear(rig, o);
     };
 
@@ -1085,7 +1183,25 @@ export function buildBannerRigs(
       // This is the case the research describes most exactly: grommets all
       // round, zip-tied to a net. The whole perimeter is tied, and the whole
       // perimeter comes down together.
-      lashEdges(rig, 0, rows - 1, LASH_SLACK_M, y - restY);
+      //
+      // Pinned rather than lashed, because here the perimeter really is
+      // fixed: the net it is tied to is rigged taut between roof points, and
+      // we do not simulate the net's own movement. Lashing it instead left
+      // every anchor drifting inside a two-centimetre ball, and the fourteen
+      // hundred particles clamped to those anchors drifting with them —
+      // 5 mm per frame of shimmer in dead still air, which is not something
+      // a banner tied to steelwork does.
+      const dyNow = y - restY;
+      for (let j = 0; j < rows; j++) {
+        for (const i of [0, cols - 1]) {
+          const k = cloth.index(i, j);
+          cloth.pin(k, rig.rigX[k], rig.rigY[k] + dyNow, rig.rigZ[k], dt);
+        }
+      }
+      for (let i = 1; i < cols - 1; i++) {
+        const k = cloth.index(i, rows - 1);
+        cloth.pin(k, rig.rigX[k], rig.rigY[k] + dyNow, rig.rigZ[k], dt);
+      }
       cloth.buildTethers();
       return;
     }
@@ -1109,18 +1225,18 @@ export function buildBannerRigs(
       const up = H * Math.cos(tiltNow);
       const reach = H * Math.sin(tiltNow) + outNow;
       for (let i = 0; i < cols; i++) {
-        const s = (i / (cols - 1) - 0.5) * doc.widthM;
+        const t = i / (cols - 1);
         // Foot of the sheet: made off along the rail, and it stays there.
+        const cn = railAt(rig, t, tmpB);
+        const bx = tmpB.x;
+        const by = tmpB.y;
+        const bz = tmpB.z;
         const kBot = cloth.index(i, rows - 1);
-        pinClear(rig, tmpB.set(a.ox + a.rx * s, a.oy, a.oz + a.rz * s));
+        pinClear(rig, tmpB.set(bx, by, bz));
         cloth.pin(kBot, tmpB.x, tmpB.y, tmpB.z, dt);
         // Head of the sheet: on the pole tips, up and out over the moat.
         const kTop = cloth.index(i, 0);
-        pinClear(rig, tmpB.set(
-          a.ox + a.rx * s + a.nx * reach,
-          a.oy + up,
-          a.oz + a.rz * s + a.nz * reach,
-        ));
+        pinClear(rig, tmpB.set(bx + cn.nx * reach, by + up, bz + cn.nz * reach));
         cloth.pin(kTop, tmpB.x, tmpB.y, tmpB.z, dt);
       }
       // The poles are the side edges: the fabric is sleeved or tied along
@@ -1216,7 +1332,7 @@ export function buildBannerRigs(
 
   /** Ropes, net, weight bar, poles and the roll, all read off the fabric. */
   function updateHardware(rig: Rig): void {
-    const { doc, cloth, frame } = rig;
+    const { doc, cloth, frame, fit } = rig;
     const cols = cloth.cols;
     const rows = cloth.rows;
     const at = (i: number, j: number, v: THREE.Vector3): THREE.Vector3 => {
@@ -1226,9 +1342,9 @@ export function buildBannerRigs(
 
     if (rig.ropes) {
       const arr = rig.ropes.geometry.attributes.position.array as Float32Array;
-      const spanU = Math.min(0.5, doc.widthM / Math.max(1, frame.widthM) / 2);
+      const spanU = Math.min(0.5, fit.widthM / Math.max(1, frame.widthM) / 2);
       const anchorAt = (du: number, v: THREE.Vector3): THREE.Vector3 => {
-        const q = frame.pointAt(doc.place.alongU + du, 1);
+        const q = frame.pointAt(fit.alongU + du, 1);
         return v.set(q.x, doc.kind === 'roof-hung' ? frame.roofY : q.y + 1.6, q.z);
       };
       setSeg(arr, 0, anchorAt(-spanU, tmpA), at(0, 0, tmpB));
@@ -1267,8 +1383,8 @@ export function buildBannerRigs(
     if (rig.poles.length === 2) {
       // Based on the rail, reaching to the pole tips — which are the banner's
       // TOP corners now that it is stood up rather than hung.
-      const f0 = frame.pointAt(doc.place.alongU - doc.widthM / Math.max(1, frame.widthM) / 2, doc.place.heightV);
-      const f1 = frame.pointAt(doc.place.alongU + doc.widthM / Math.max(1, frame.widthM) / 2, doc.place.heightV);
+      const f0 = frame.pointAt(fit.alongU - fit.widthM / Math.max(1, frame.widthM) / 2, fit.heightV);
+      const f1 = frame.pointAt(fit.alongU + fit.widthM / Math.max(1, frame.widthM) / 2, fit.heightV);
       aimBetween(rig.poles[0], tmpA.set(f0.x, f0.y, f0.z), at(0, 0, tmpB), 1);
       aimBetween(rig.poles[1], tmpA.set(f1.x, f1.y, f1.z), at(cols - 1, 0, tmpB), 1);
     }
@@ -1282,7 +1398,7 @@ export function buildBannerRigs(
         const j = rows - 1;
         // The roll thins as the fabric comes off it. That is the cue nobody
         // fakes and everybody notices.
-        const rad = Math.max(0.1, Math.sqrt(left) * Math.min(1.0, doc.heightM * 0.045));
+        const rad = Math.max(0.1, Math.sqrt(left) * Math.min(1.0, fit.heightM * 0.045));
         aimBetween(rig.roll, at(0, j, tmpA), at(cols - 1, j, tmpB), 1);
         rig.roll.scale.y = rad;
         rig.roll.scale.z = rad;
@@ -1347,7 +1463,8 @@ export function buildBannerRigs(
         rigs.set(doc.id, makeRig(doc));
         continue;
       }
-      const sig = rigSignature(doc);
+      const fit = fitBanner(doc, existing.frame);
+      const sig = rigSignature(doc, fit);
       if (sig !== existing.sig) {
         const prog = existing.prog;
         disposeRig(existing);
@@ -1359,6 +1476,7 @@ export function buildBannerRigs(
       // Placement changed but the rig did not: keep the fabric, move the pins.
       // Re-laying it out on every slider drag would make the banner jump.
       existing.doc = doc;
+      existing.fit = fit;
       existing.durationS = revealSeconds(doc);
       existing.world.wind = makeWind(doc, 0, 1, existing.frame);
       const key = textureKey(doc);

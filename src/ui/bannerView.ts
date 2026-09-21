@@ -122,6 +122,14 @@ export function mountBannerView(deps: BannerViewDeps): BannerView {
   const factsEl = $<HTMLElement>('bn-facts');
 
   const standSel = $<HTMLSelectElement>('bn-stand');
+  const blockSel = $<HTMLSelectElement>('bn-block');
+  const spanSel = $<HTMLSelectElement>('bn-span');
+  const tierSel = $<HTMLSelectElement>('bn-tier');
+  const blockRow = $<HTMLElement>('bn-block-row');
+  const tierRow = $<HTMLElement>('bn-tier-row');
+  const alongRow = $<HTMLElement>('bn-along-row');
+  const upRow = $<HTMLElement>('bn-up-row');
+  const fitNoteEl = $<HTMLElement>('bn-fit-note');
   const alongIn = $<HTMLInputElement>('bn-along');
   const alongOut = $<HTMLElement>('bn-along-out');
   const upIn = $<HTMLInputElement>('bn-up');
@@ -148,6 +156,87 @@ export function mountBannerView(deps: BannerViewDeps): BannerView {
   const say = (text: string): void => {
     if (deps.message) deps.message.textContent = text;
   };
+
+  /**
+   * Ask the simulator what this stand is actually made of.
+   *
+   * The editor holds the template; only the built bowl knows how many blocks
+   * a stand has, how long each tier's slope is, and therefore whether a
+   * banner fits. With no simulator open the answer is undefined and the panel
+   * falls back to the free sliders, which is the honest thing to show when
+   * nothing can be said about the ground.
+   */
+  const askSlots = (stand: number, bannerId?: string): {
+    blocks?: number[];
+    tiers?: number[];
+    fit?: { widthM: number; heightM: number; askedWidthM: number; askedHeightM: number; cut: boolean; blockFrom: number; blockSpan: number };
+  } => {
+    const ev = new CustomEvent<{ stand: number; bannerId?: string; blocks?: number[]; tiers?: number[]; fit?: unknown }>(
+      'tifo:stand-slots',
+      { detail: { stand, bannerId } },
+    );
+    document.dispatchEvent(ev);
+    return ev.detail as ReturnType<typeof askSlots>;
+  };
+
+  const opt = (sel: HTMLSelectElement, value: string, label: string): void => {
+    const o = document.createElement('option');
+    o.value = value;
+    o.textContent = label;
+    sel.appendChild(o);
+  };
+
+  /** Fill the block, span and tier pickers from the stand the banner is on. */
+  function syncSlots(doc: BannerDoc): void {
+    const slots = askSlots(doc.place.stand, doc.id);
+    const nBlocks = slots.blocks?.length ?? 0;
+    const nTiers = slots.tiers?.length ?? 0;
+    const usingBlocks = doc.place.blockSpan > 0 && nBlocks > 0;
+
+    if (blockRow) blockRow.style.display = nBlocks > 0 ? '' : 'none';
+    if (tierRow) tierRow.style.display = nTiers > 1 ? '' : 'none';
+    // The free sliders are the fallback, not the main control: shown when the
+    // banner is not on blocks, or when there is no bowl to ask.
+    if (alongRow) alongRow.style.display = usingBlocks ? 'none' : '';
+    if (upRow) upRow.style.display = usingBlocks && nTiers > 1 && doc.place.tier >= 0 ? 'none' : '';
+
+    if (blockSel && nBlocks > 0) {
+      const want = String(slots.fit?.blockFrom ?? doc.place.blockFrom);
+      blockSel.replaceChildren();
+      opt(blockSel, '-1', t('bn.block.centred'));
+      for (let i = 0; i < nBlocks; i++) opt(blockSel, String(i), tv('bn.block.n', { n: i + 1 }));
+      blockSel.value = doc.place.blockFrom < 0 ? '-1' : want;
+      blockSel.disabled = !usingBlocks;
+    }
+    if (spanSel && nBlocks > 0) {
+      spanSel.replaceChildren();
+      opt(spanSel, '0', t('bn.span.free'));
+      for (let i = 1; i <= nBlocks; i++) {
+        opt(spanSel, String(i), i === 1 ? t('bn.span.one') : tv('bn.span.n', { n: i }));
+      }
+      spanSel.value = String(Math.min(nBlocks, doc.place.blockSpan));
+    }
+    if (tierSel && nTiers > 0) {
+      tierSel.replaceChildren();
+      opt(tierSel, '-1', t('bn.tier.all'));
+      for (let i = 0; i < nTiers; i++) opt(tierSel, String(i), tv('bn.tier.n', { n: i + 1 }));
+      tierSel.value = String(doc.place.tier);
+    }
+
+    // What the stadium did to the size the editor asked for.
+    if (fitNoteEl) {
+      const f = slots.fit;
+      if (f && f.cut) {
+        fitNoteEl.textContent = tv('bn.fit.cut', {
+          w: Math.round(f.askedWidthM), h: Math.round(f.askedHeightM),
+          fw: Math.round(f.widthM), fh: Math.round(f.heightM),
+        });
+        fitNoteEl.style.display = '';
+      } else {
+        fitNoteEl.style.display = 'none';
+      }
+    }
+  }
 
   // -------------------------------------------------------------------------
   // Reading the store into the controls
@@ -182,6 +271,7 @@ export function mountBannerView(deps: BannerViewDeps): BannerView {
         bgIn.disabled = doc.bg === null;
       }
       if (standSel) standSel.value = String(doc.place.stand);
+      syncSlots(doc);
       if (alongIn) alongIn.value = String(Math.round(doc.place.alongU * 100));
       if (alongOut) alongOut.textContent = String(Math.round(doc.place.alongU * 100));
       if (upIn) upIn.value = String(Math.round(doc.place.heightV * 100));
@@ -317,6 +407,19 @@ export function mountBannerView(deps: BannerViewDeps): BannerView {
   tiltIn?.addEventListener('input', () => {
     if (tiltOut) tiltOut.textContent = `${tiltIn.value}°`;
     edit(() => bannerStore.patchPlace({ tiltDeg: Number(tiltIn.value) }));
+  });
+
+  blockSel?.addEventListener('change', () => {
+    edit(() => bannerStore.patchPlace({ blockFrom: Number(blockSel.value) }));
+  });
+  spanSel?.addEventListener('change', () => {
+    const span = Number(spanSel.value);
+    // Turning blocks off hands the banner back to the free sliders where it
+    // is, rather than teleporting it to the middle of the stand.
+    edit(() => bannerStore.patchPlace(span > 0 ? { blockSpan: span } : { blockSpan: 0, blockFrom: -1 }));
+  });
+  tierSel?.addEventListener('change', () => {
+    edit(() => bannerStore.patchPlace({ tier: Number(tierSel.value) }));
   });
 
   centreBtn?.addEventListener('click', () => {

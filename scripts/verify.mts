@@ -1255,6 +1255,93 @@ import { buildStadium as siBuild } from '../src/core/stadiumFit';
   }
   console.log('banners: lacing the perimeter carries the wind as tension, not as movement');
 
+  // 8d. A banner cannot be bigger than the ground it is on.
+  //
+  // The editor lets you draw at any size, which is right — you are designing
+  // artwork, not ordering fabric. Match Day is the stadium, and the stadium
+  // gets the last word. Without that, a 48 x 28 m sheet went on a stand with
+  // 18 m of slope above the chosen point and hung off the top of the ground
+  // into the skyline.
+  {
+    const { generateSeatMap } = await import('../src/core/seatmap');
+    const { templateById } = await import('../src/core/stadiumCatalog');
+    const { buildStandFrame } = await import('../src/render/simulator/standFrame');
+    const { fitBanner } = await import('../src/render/simulator/bannerFit');
+
+    for (const id of ['generic-bowl-60k', 'single-kop-40k', 'community-grand-national-80k']) {
+      const tpl = templateById(id);
+      if (!tpl) throw new Error(`template ${id} is missing`);
+      const map = generateSeatMap(tpl);
+      for (const stand of [0, 1, 2, 3] as const) {
+        const frame = buildStandFrame(map, stand);
+        if (!frame.ok) continue;
+
+        // Real blocks, found from the aisles rather than invented.
+        if (frame.blocks.length < 2) throw new Error(`${id} stand ${stand} found ${frame.blocks.length} block(s); a stand has aisles`);
+        let span = 0;
+        for (const b of frame.blocks) {
+          if (!(b.u1 > b.u0)) throw new Error('a block must have width');
+          span += b.u1 - b.u0;
+        }
+        if (span > 1.001) throw new Error(`${id} stand ${stand} blocks cover ${span.toFixed(2)} of the stand`);
+        for (let i = 1; i < frame.blocks.length; i++) {
+          if (frame.blocks[i].u0 < frame.blocks[i - 1].u1) throw new Error('blocks must not overlap');
+        }
+        if (frame.tiers.length < 1) throw new Error('a stand has at least one tier');
+
+        // Nothing may come out bigger than the stand, whatever is asked for.
+        for (const kind of BANNER_KINDS) {
+          const doc = newBanner(kind);
+          // Ask for something absurd, the way a user can in the editor.
+          doc.widthM = 400;
+          doc.heightM = 120;
+          const fit = fitBanner(doc, frame);
+          if (fit.widthM > fit.maxWidthM + 1e-6) {
+            throw new Error(`${kind} on ${id}/${stand} came out ${fit.widthM.toFixed(1)} m wide against a limit of ${fit.maxWidthM.toFixed(1)} m`);
+          }
+          if (fit.heightM > fit.maxHeightM + 1e-6) {
+            throw new Error(`${kind} on ${id}/${stand} came out ${fit.heightM.toFixed(1)} m tall against a limit of ${fit.maxHeightM.toFixed(1)} m`);
+          }
+          if (kind !== 'pitch' && fit.widthM > frame.widthM + 1e-6) {
+            throw new Error(`${kind} is wider than the stand it is on`);
+          }
+          if (!fit.cut) throw new Error(`a 400 x 120 m banner must be reported as cut on ${id}/${stand}`);
+          // The design's proportions survive the cut: a squashed banner shows
+          // artwork the user never drew.
+          const asked = doc.heightM / doc.widthM;
+          const got = fit.heightM / fit.widthM;
+          if (Math.abs(got - asked) > Math.max(0.02, asked * 0.02)) {
+            throw new Error(`${kind} was squashed from ${asked.toFixed(3)} to ${got.toFixed(3)}`);
+          }
+        }
+
+        // A block run lands on the blocks it names, and stays on the stand.
+        {
+          const doc = newBanner('drop');
+          doc.place.blockFrom = 1;
+          doc.place.blockSpan = 2;
+          const fit = fitBanner(doc, frame);
+          const a = frame.blocks[1];
+          const b = frame.blocks[Math.min(frame.blocks.length - 1, 2)];
+          if (Math.abs(fit.alongU - (a.u0 + b.u1) / 2) > 1e-6) throw new Error('a block run must be centred on the blocks it names');
+          if (fit.alongU < 0 || fit.alongU > 1) throw new Error('a banner must stay on its stand');
+          const runW = (b.u1 - a.u0) * frame.widthM;
+          if (fit.widthM > runW + 1e-6) throw new Error('a banner must not be wider than the blocks it covers');
+        }
+
+        // Asking for more blocks than there are does not walk off the end.
+        {
+          const doc = newBanner('stand-cover');
+          doc.place.blockFrom = frame.blocks.length - 1;
+          doc.place.blockSpan = 99;
+          const fit = fitBanner(doc, frame);
+          if (fit.blockFrom + fit.blockSpan > frame.blocks.length) throw new Error('a block run must be clamped to the stand');
+        }
+      }
+    }
+  }
+  console.log('banners: every kind is clamped to the stand, and block runs land on real blocks');
+
   // 9. Every banner string carries both languages. The two original phone bug
   // reports were both written in Arabic; an English-only sentence in this view
   // is the same failure in a new place.

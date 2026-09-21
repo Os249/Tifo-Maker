@@ -448,6 +448,7 @@ const MDS_T: Record<string, { en: string; ar: string }> = {
   'snap.quarter': { en: 'quarter', ar: 'الربع' },
   'snap.end': { en: 'end of the stand', ar: 'طرف المدرج' },
   'snap.section': { en: 'section edge', ar: 'حد القطاع' },
+  'snap.block': { en: 'a whole block', ar: 'قطاع كامل' },
   'snap.halfway': { en: 'the halfway line', ar: 'خط المنتصف' },
   'snap.goal': { en: 'the goal centre line', ar: 'منتصف المرمى' },
   'snap.rail': { en: 'the front rail', ar: 'السور الأمامي' },
