@@ -300,7 +300,9 @@ export const KIND_PROFILE: Record<BannerKind, KindProfile> = {
   },
   'roof-hung': {
     widthM: 20, heightM: 14, reveal: 'hoist',
-    alongU: 0.5, heightV: 0.92, outM: 8, tiltDeg: 0,
+    // heightV is the top edge's height in the AIR for this one, from the
+    // front rail up to the roof; outM is how far out over the moat it flies.
+    alongU: 0.5, heightV: 0.75, outM: 3, tiltDeg: 0,
     netBacked: true, weightBar: true, fabricGsm: 110,
     occludesCrowd: false, roped: true,
   },

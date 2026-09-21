@@ -119,10 +119,48 @@ interface Rig {
   playing: boolean;
   t0: number;
   durationS: number;
+  /**
+   * The RIG FRAME: where the crew tied the banner.
+   *
+   * The shape the layout walk produced, kept so the perimeter can be lashed
+   * back to it every frame. This is the rigging itself — a banner's edge is
+   * fixed to the structure at the shape the banner is meant to hold, and
+   * everything between the grommets is free to breathe.
+   */
+  rigX: Float64Array;
+  rigY: Float64Array;
+  rigZ: Float64Array;
   /** Signature of everything that would require a rebuild. */
   sig: string;
   accum: number;
 }
+
+/**
+ * How much play a tied edge has, in metres.
+ *
+ * Small, and it has to be. Eyelets go in every 50 cm and the hem they are
+ * punched through has a rope sewn into it, so the EDGE ITSELF cannot get
+ * shorter — the only freedom is the centimetre or two of movement a zip tie
+ * through a grommet allows.
+ *
+ * That is not a detail. Slack along the edge is slack the middle of the sheet
+ * can spend on bellying out: for a 20 m banner, nine centimetres a side buys
+ * a metre of bulge, which is exactly the metre of bulge this had when the
+ * number was nine centimetres. Two centimetres buys 40 cm, and the real thing
+ * — roped hem, inextensible — buys almost none. A properly rigged tifo reads
+ * as a flat printed wall, and this is the line that makes it one.
+ */
+const LASH_SLACK_M = 0.02;
+
+/**
+ * Play on an edge a crowd is holding rather than one tied to steelwork.
+ *
+ * Hands move. A Blockfahne's sides, held by the people on the terracing, are
+ * not zip-tied to anything, so they breathe far more than a hem laced to a
+ * rail — but they are still held every arm's length, which is why the sheet
+ * stays a sheet.
+ */
+const HAND_SLACK_M = 0.45;
 
 function textureKey(doc: BannerDoc): string {
   const art = JSON.stringify(doc.items);
@@ -248,6 +286,7 @@ export function buildBannerRigs(
 
   const tmpA = new THREE.Vector3();
   const tmpB = new THREE.Vector3();
+  const tmpC = new THREE.Vector3();
 
   function fieldFor(stand: StandIndex): Heightfield | null {
     let f = fieldCache.get(stand);
@@ -296,17 +335,32 @@ export function buildBannerRigs(
    * speed, because a forty-metre sheet in uniform wind moves like one rigid
    * sail instead of like fabric.
    */
-  function makeWind(doc: BannerDoc, dirX: number, dirZ: number): ClothWorld['wind'] {
+  function makeWind(doc: BannerDoc, dirX: number, dirZ: number, frame: StandFrame): ClothWorld['wind'] {
     // 0..1 in the panel maps to a still bowl through to the speed at which a
     // real group would start thinking about not doing the display at all.
     const base = 0.4 + doc.wind * 7.5;
     const phase = hash(doc.id) % 1000;
+    // A bowl is a wind shadow.
+    //
+    // Everyone who has played in one knows it: the flags on the roof are
+    // streaming and the corner flag is barely moving. The stands block the
+    // flow and what reaches pitch level is a fraction of what crosses the
+    // rim. Without this, a banner pegged on the grass gets the same wind as
+    // one flown from the roof steel, and behaves like a kite — measured, a
+    // centre-circle banner was moving a quarter of a metre per frame.
+    const yLow = frame.railY;
+    const yHigh = Math.max(yLow + 6, frame.roofY);
+    const profile = (y: number): number => {
+      const t = (y - yLow) / (yHigh - yLow);
+      const u = t <= 0 ? 0 : t >= 1 ? 1 : t * t * (3 - 2 * t);
+      return 0.22 + 0.78 * u;
+    };
     return (x, y, z, out) => {
       const t = elapsed;
       const g = fbm(t * 0.06 + phase, 4);
       const along = x * dirX + z * dirZ;
       const sp = noise1((along - base * t) / 18);
-      const speed = base * (1 + 0.5 * (0.7 * g + 0.3 * sp));
+      const speed = base * profile(y) * (1 + 0.5 * (0.7 * g + 0.3 * sp));
       const yaw = 0.3 * fbm(t * 0.05 + phase + 137, 3);
       const c = Math.cos(yaw);
       const s = Math.sin(yaw);
@@ -314,6 +368,7 @@ export function buildBannerRigs(
       out.z = (dirX * s + dirZ * c) * speed;
       // A little vertical, because a crowd of thirty thousand is a heater.
       out.y = 0.18 * speed * fbm(t * 0.09 + phase + 913, 2) + Math.max(0, 1.2 - y * 0.02) * 0.15;
+      void yLow;
     };
   }
 
@@ -383,7 +438,7 @@ export function buildBannerRigs(
 
     const field = layout === 'ground' ? null : fieldFor(doc.place.stand);
     const world: ClothWorld = {
-      wind: makeWind(doc, 0, 1),
+      wind: makeWind(doc, 0, 1, frame),
       field,
       clearance: clearanceFor(doc.kind, crowdSupportM(crowdFill())),
       grip: gripFor(doc.kind, crowdFill()),
@@ -445,6 +500,10 @@ export function buildBannerRigs(
     const ropes = profile.roped ? lineSet(ROPE_COLOR, 8, 1) : null;
     if (ropes) group.add(ropes);
     const net = doc.netBacked ? lineSet(NET_COLOR, (NET_U + NET_V) * 14, 0.5) : null;
+    // The net is structure, not decoration. Drawing it and not enforcing it
+    // is what let a net-backed banner belly out by metres while its ropes sat
+    // obediently on the surface of the bulge.
+    cloth.netted = doc.netBacked;
     if (net) group.add(net);
 
     let bar: THREE.Mesh | null = null;
@@ -491,6 +550,9 @@ export function buildBannerRigs(
       texKey: textureKey(doc),
       cloth, world, layout, frame, field,
       ropes, net, bar, poles, roll, outline,
+      rigX: new Float64Array(cloth.count),
+      rigY: new Float64Array(cloth.count),
+      rigZ: new Float64Array(cloth.count),
       prog: 1, playing: false, t0: 0,
       durationS: revealSeconds(doc),
       sig: rigSignature(doc),
@@ -559,7 +621,19 @@ export function buildBannerRigs(
     ox: number; oy: number; oz: number;
     rx: number; rz: number; nx: number; nz: number;
   } {
-    const a = frame.pointAt(doc.place.alongU, Math.min(1, doc.place.heightV));
+    // A roof-hung banner is the one type that does not touch the stand at all.
+    //
+    // It is flown from the roof steel IN FRONT of the terracing, in the air
+    // over the first rows, which is the only place there is room for it: a
+    // sheet hung from the roof above the middle of a 30 degree rake is inside
+    // the seating within a couple of metres, and what came out of that was a
+    // banner draped over the seats being called roof-hung. So its horizontal
+    // place is the front rail pushed out, and `heightV` runs its top edge
+    // from the rail up to the roof rather than up the terracing.
+    const inAir = doc.kind === 'roof-hung';
+    const a = inAir
+      ? frame.pointAt(doc.place.alongU, 0)
+      : frame.pointAt(doc.place.alongU, Math.min(1, doc.place.heightV));
     const yaw = (doc.place.yawDeg * Math.PI) / 180;
     const c = Math.cos(yaw);
     const s = Math.sin(yaw);
@@ -567,12 +641,36 @@ export function buildBannerRigs(
     const rz = a.rx * s + a.rz * c;
     const nx = a.ox * c - a.oz * s;
     const nz = a.ox * s + a.oz * c;
+    const headroom = frame.roofY - frame.railY;
     return {
       ox: a.x + nx * doc.place.outM,
-      oy: a.y,
+      oy: inAir
+        ? frame.railY + Math.max(0.1, Math.min(1, doc.place.heightV)) * Math.max(4, headroom)
+        : a.y,
       oz: a.z + nz * doc.place.outM,
       rx, rz, nx, nz,
     };
+  }
+
+  /**
+   * The anchor, already lifted clear of whatever is under it.
+   *
+   * Both the layout and the rig have to measure from the SAME point or the
+   * banner ends up with slack it should not have. A rope lift is anchored at
+   * the front rail, and the rail is where the crowd is standing, so clearing
+   * lifts it about 1.7 m; the batten 18 m above it is in open air and gets
+   * lifted by nothing. Clear one and not the other and the two pins end up
+   * 16.3 m apart holding 18 m of cloth — a metre and a half of slack, which
+   * the wind then has something to do with. That was the whole of the rope
+   * lift's remaining flap.
+   */
+  function clearedAnchor(rig: Rig): ReturnType<typeof anchorOf> {
+    const a = anchorOf(rig.doc, rig.frame);
+    pinClear(rig, tmpC.set(a.ox, a.oy, a.oz));
+    a.ox = tmpC.x;
+    a.oy = tmpC.y;
+    a.oz = tmpC.z;
+    return a;
   }
 
   function layoutCloth(rig: Rig): void {
@@ -591,6 +689,7 @@ export function buildBannerRigs(
         out.y = 0.05;
         out.z = cz + a.rz * (u * W) + a.oz * (v * H);
       });
+      captureRigFrame(rig);
       return;
     }
 
@@ -612,13 +711,14 @@ export function buildBannerRigs(
         out.y = p.y + n.ny * off;
         out.z = p.z + n.nz * off;
       });
+      captureRigFrame(rig);
       return;
     }
 
     // Hanging: straight down from the anchor, which is what a sheet held along
     // its top edge does. It will meet the terracing below on its own, and the
     // collision constraint is what decides where.
-    const a = anchorOf(doc, frame);
+    const a = clearedAnchor(rig);
     const tilt = (doc.place.tiltDeg * Math.PI) / 180;
     const dy = -Math.cos(tilt);
     const dOut = Math.sin(tilt);
@@ -693,6 +793,89 @@ export function buildBannerRigs(
       out.y = walkY[k];
       out.z = walkZ[k];
     });
+    captureRigFrame(rig);
+  }
+
+  /**
+   * Remember the shape the crew tied the banner into.
+   *
+   * Taken straight off the laid-out cloth, so the rigging and the layout are
+   * the same description by construction — the perimeter is lashed back to
+   * exactly where it was put, which is what a grommet on a rail does.
+   */
+  function captureRigFrame(rig: Rig): void {
+    const c = rig.cloth;
+    for (let k = 0; k < c.count; k++) {
+      rig.rigX[k] = c.px[k];
+      rig.rigY[k] = c.py[k];
+      rig.rigZ[k] = c.pz[k];
+    }
+  }
+
+  /**
+   * Run a side rope down each edge, between whatever the rig is holding.
+   *
+   * The two ends of a side rope are the two pinned corners of that column, so
+   * the rope follows the rigging rather than a remembered shape — which is
+   * what a rope tied to a batten does when the batten moves. `deployed` is
+   * how much of the sheet is off the pile: the rest is not on the ropes yet.
+   */
+  function lashBetweenPinnedEnds(rig: Rig, slack: number, deployed: number): void {
+    const c = rig.cloth;
+    const cols = c.cols;
+    const rows = c.rows;
+    const first = Math.max(0, Math.floor((1 - Math.max(0, Math.min(1, deployed))) * (rows - 1)));
+    for (const i of [0, cols - 1]) {
+      const kT = c.index(i, 0);
+      const kB = c.index(i, rows - 1);
+      for (let j = first + 1; j < rows - 1; j++) {
+        const k = c.index(i, j);
+        if (c.w[k] === 0) continue;
+        const f = j / (rows - 1);
+        c.lash(
+          k,
+          c.px[kT] + (c.px[kB] - c.px[kT]) * f,
+          c.py[kT] + (c.py[kB] - c.py[kT]) * f,
+          c.pz[kT] + (c.pz[kB] - c.pz[kT]) * f,
+          slack,
+        );
+      }
+    }
+  }
+
+  /**
+   * Lace the banner's edges to the rig frame.
+   *
+   * `fromRow`/`toRow` bound the part of the sheet that is actually deployed:
+   * during a reveal the rest is still on the roll and has no business being
+   * tied to anything. `dy` shifts the whole frame, for the rigs that lower a
+   * finished banner rather than unrolling it.
+   */
+  function lashEdges(
+    rig: Rig,
+    fromRow: number,
+    toRow: number,
+    slack: number,
+    dy = 0,
+    lashFarEdge = true,
+  ): void {
+    const c = rig.cloth;
+    const cols = c.cols;
+    const lo = Math.max(0, Math.min(fromRow, toRow));
+    const hi = Math.min(c.rows - 1, Math.max(fromRow, toRow));
+    for (let j = lo; j <= hi; j++) {
+      for (const i of [0, cols - 1]) {
+        const k = c.index(i, j);
+        if (c.w[k] === 0) continue;
+        c.lash(k, rig.rigX[k], rig.rigY[k] + dy, rig.rigZ[k], slack);
+      }
+    }
+    if (!lashFarEdge) return;
+    for (let i = 1; i < cols - 1; i++) {
+      const k = c.index(i, hi);
+      if (c.w[k] === 0) continue;
+      c.lash(k, rig.rigX[k], rig.rigY[k] + dy, rig.rigZ[k], slack);
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -715,7 +898,7 @@ export function buildBannerRigs(
     const dv = H / (rows - 1);
     cloth.unpinAll();
 
-    const a = anchorOf(doc, frame);
+    const a = clearedAnchor(rig);
     const mode = doc.reveal;
 
     if (rig.layout === 'ground') {
@@ -725,6 +908,10 @@ export function buildBannerRigs(
         pinClear(rig, tmpA.set(cloth.px[k], Math.max(0.05, cloth.py[k]), cloth.pz[k]));
         cloth.pin(k, tmpA.x, tmpA.y, tmpA.z, dt);
       }
+      // Weighted all the way round, not just at the corners. A centre-circle
+      // banner pegged only at four points is a kite, and measured as one: it
+      // was moving 0.67 m per frame before this line existed.
+      lashEdges(rig, 0, cloth.rows - 1, LASH_SLACK_M);
       cloth.buildTethers();
       return;
     }
@@ -776,6 +963,8 @@ export function buildBannerRigs(
         }
         void rail;
       }
+      // The edges of a sheet over a block are in hands, not on hooks.
+      lashEdges(rig, Math.floor(held * (rows - 1)), rows - 1, HAND_SLACK_M);
       cloth.buildTethers();
       return;
     }
@@ -823,6 +1012,10 @@ export function buildBannerRigs(
         }
       }
       void fallT;
+      // The sides, as far down as the sheet has actually come. A Blockfahne's
+      // edges are held all the way down the block — on the barriers where
+      // there are barriers and in people's hands where there are not.
+      lashEdges(rig, 0, Math.min(rows - 1, Math.floor(deployed / dv)), HAND_SLACK_M);
       cloth.buildTethers();
       return;
     }
@@ -864,6 +1057,15 @@ export function buildBannerRigs(
           cloth.pin(k, tmpA.x, tmpA.y, tmpA.z, dt);
         }
       }
+      // Side ropes, run from the rail to the batten — which is what holds an
+      // Aufziehfahne flat enough to read while it is still going up.
+      //
+      // Taken from where the rigging IS right now, not from the shape the
+      // banner was laid out in. The batten leans out as it rises, so lashing
+      // the sides to the static layout puts the ropes and the batten in
+      // disagreement, and the sheet buzzes between the two. Measured, that
+      // disagreement was half a metre of movement per frame.
+      lashBetweenPinnedEnds(rig, LASH_SLACK_M, deployed / H);
       cloth.buildTethers();
       return;
     }
@@ -872,12 +1074,18 @@ export function buildBannerRigs(
       // Lowered from the roof on lines: controlled descent, not a drop. The
       // whole banner comes down together and settles on its ropes.
       const restY = a.oy;
-      const y = frame.roofY + (restY - frame.roofY) * p;
+      // From the roof steel down to where it flies. Never up: if the rest
+      // height is already at the roof there is nothing to lower.
+      const y = Math.max(restY, frame.roofY) + (restY - Math.max(restY, frame.roofY)) * p;
       for (let i = 0; i < cols; i++) {
         const k = cloth.index(i, 0);
         plane(i / (cols - 1), 0, y - restY, 0, tmpA);
         cloth.pin(k, tmpA.x, tmpA.y, tmpA.z, dt);
       }
+      // This is the case the research describes most exactly: grommets all
+      // round, zip-tied to a net. The whole perimeter is tied, and the whole
+      // perimeter comes down together.
+      lashEdges(rig, 0, rows - 1, LASH_SLACK_M, y - restY);
       cloth.buildTethers();
       return;
     }
@@ -915,16 +1123,41 @@ export function buildBannerRigs(
         ));
         cloth.pin(kTop, tmpB.x, tmpB.y, tmpB.z, dt);
       }
+      // The poles are the side edges: the fabric is sleeved or tied along
+      // them, so the sides are straight lines between rail and pole tip and
+      // the only thing free to move is the middle.
+      for (const i of [0, cols - 1]) {
+        const kB = cloth.index(i, rows - 1);
+        const kT = cloth.index(i, 0);
+        for (let j = 1; j < rows - 1; j++) {
+          const f = j / (rows - 1);
+          const k = cloth.index(i, j);
+          cloth.lash(
+            k,
+            cloth.px[kT] + (cloth.px[kB] - cloth.px[kT]) * f,
+            cloth.py[kT] + (cloth.py[kB] - cloth.py[kT]) * f,
+            cloth.pz[kT] + (cloth.pz[kB] - cloth.pz[kT]) * f,
+            LASH_SLACK_M,
+          );
+        }
+      }
       cloth.buildTethers();
       return;
     }
 
-    // fade, and anything that is simply already there: held along the top edge.
+    // Fade, and anything that is simply already there when the gates open.
+    //
+    // These are the ones that are rigged rather than deployed, and rigged
+    // means the WHOLE perimeter: the DFB's glossary defines a fence flag as
+    // one fixed to the railings, and it is fixed along its length, not held
+    // up by one edge. Tying only the top is what left a fence banner moving a
+    // metry and a half per frame in a stiff wind.
     for (let i = 0; i < cols; i++) {
       const k = cloth.index(i, 0);
       plane(i / (cols - 1), 0, 0, 0, tmpA);
       cloth.pin(k, tmpA.x, tmpA.y, tmpA.z, dt);
     }
+    lashEdges(rig, 0, rows - 1, LASH_SLACK_M);
     cloth.buildTethers();
   }
 
@@ -1127,7 +1360,7 @@ export function buildBannerRigs(
       // Re-laying it out on every slider drag would make the banner jump.
       existing.doc = doc;
       existing.durationS = revealSeconds(doc);
-      existing.world.wind = makeWind(doc, 0, 1);
+      existing.world.wind = makeWind(doc, 0, 1, existing.frame);
       const key = textureKey(doc);
       if (key !== existing.texKey) {
         existing.mat.map = texture(doc);

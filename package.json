@@ -34,7 +34,8 @@
     "shots:recordsize": "tsx scripts/record-size.mts",
     "probe:imageux": "tsx scripts/image-ux.mts",
     "audit:editor": "tsx scripts/editor-audit.mts",
-    "shots:banner": "tsx scripts/banner-shots.mts"
+    "shots:banner": "tsx scripts/banner-shots.mts",
+    "probe:banner": "tsx scripts/banner-physics.mts"
   },
   "dependencies": {
     "@fastify/helmet": "^13.0.2",

@@ -1183,6 +1183,78 @@ import { buildStadium as siBuild } from '../src/core/stadiumFit';
   }
   console.log('banners: the cloth solver holds still, drapes the rake and stays out of it');
 
+  // 8c. A laced banner does not shiver.
+  //
+  // The complaint this gate exists for was "too jittery", and neither the
+  // penetration number nor any screenshot could see it: the banner was in the
+  // right place, out of the stand, and vibrating. What it was, was a sheet
+  // hanging from one edge — which is not how anyone rigs a banner. Real ones
+  // are punched with eyelets every 50 cm and tied along the whole perimeter,
+  // and a supporters' group describing their own build says they "grommet
+  // around the edges and attach to the field goal net with zip ties".
+  //
+  // Tie the perimeter and the wind is carried as tension instead of as
+  // motion. This checks the mechanism rather than the outcome, on a bare
+  // cloth with no rig around it, so a rig change cannot quietly satisfy it.
+  {
+    const { Cloth } = await import('../src/render/simulator/cloth');
+    const cols = 25;
+    const rows = 17;
+    const W = 12;
+    const H = 8;
+    // A stiff, steady wind straight at the face of the sheet.
+    const gale = {
+      wind: (_x: number, _y: number, _z: number, o: { x: number; y: number; z: number }) => { o.x = 0; o.y = 0; o.z = 8; },
+      field: null,
+      clearance: 0,
+      groundY: -1e4,
+      grip: 0,
+    };
+    const run = (lashed: boolean): { buzz: number; flat: number } => {
+      const c = new Cloth({ cols, rows, arealKgM2: 0.11, dragC: 1.28, liftC: 0.35, bendCompliance: 4e-3, hemWeight: 0 }, W, H);
+      c.netted = lashed;
+      const at = (i: number, j: number): [number, number, number] => [
+        (i / (cols - 1) - 0.5) * W, 20 - (j / (rows - 1)) * H, 0,
+      ];
+      c.reset((i, j, out) => { const p = at(i, j); out.x = p[0]; out.y = p[1]; out.z = p[2]; });
+      const hold = (): void => {
+        c.unpinAll();
+        for (let i = 0; i < cols; i++) { const p = at(i, 0); c.pin(c.index(i, 0), p[0], p[1], p[2], 1 / 60); }
+        if (lashed) {
+          for (let j = 1; j < rows; j++) for (const i of [0, cols - 1]) { const p = at(i, j); c.lash(c.index(i, j), p[0], p[1], p[2], 0.02); }
+          for (let i = 1; i < cols - 1; i++) { const p = at(i, rows - 1); c.lash(c.index(i, rows - 1), p[0], p[1], p[2], 0.02); }
+        }
+        c.buildTethers();
+      };
+      for (let f = 0; f < 240; f++) { hold(); c.step(1 / 60, gale, 8); }
+      if (!c.healthy) throw new Error('the cloth solver went non-finite under wind');
+      const px = Float64Array.from(c.px), py = Float64Array.from(c.py), pz = Float64Array.from(c.pz);
+      let buzz = 0;
+      for (let f = 0; f < 60; f++) {
+        hold();
+        c.step(1 / 60, gale, 8);
+        for (let k = 0; k < c.count; k++) buzz += Math.hypot(c.px[k] - px[k], c.py[k] - py[k], c.pz[k] - pz[k]);
+        for (let k = 0; k < c.count; k++) { px[k] = c.px[k]; py[k] = c.py[k]; pz[k] = c.pz[k]; }
+      }
+      buzz /= c.count * 60;
+      let flat = 0;
+      for (let k = 0; k < c.count; k++) flat += c.pz[k] * c.pz[k];
+      return { buzz, flat: Math.sqrt(flat / c.count) };
+    };
+    const free = run(false);
+    const tied = run(true);
+    if (!(tied.buzz < free.buzz * 0.2)) {
+      throw new Error(`lacing the perimeter must calm the sheet: free ${free.buzz.toFixed(5)} m/frame, tied ${tied.buzz.toFixed(5)}`);
+    }
+    if (tied.buzz > 0.002) {
+      throw new Error(`a laced banner shivers ${(tied.buzz * 1000).toFixed(1)} mm per frame; it should be a fraction of that`);
+    }
+    if (tied.flat > 0.6) {
+      throw new Error(`a laced banner bellied ${tied.flat.toFixed(2)} m out of its own plane`);
+    }
+  }
+  console.log('banners: lacing the perimeter carries the wind as tension, not as movement');
+
   // 9. Every banner string carries both languages. The two original phone bug
   // reports were both written in Arabic; an English-only sentence in this view
   // is the same failure in a new place.

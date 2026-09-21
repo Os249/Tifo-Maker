@@ -1,70 +1,78 @@
-Banners: replace the parametric sheet with a real cloth solver
+Banners: lace the perimeter, make the net structural, stop the shiver
 
-The first version held a banner off the stand with a fixed normal offset.
-Against a raked, stepped surface that is not a collision, it is a hope, and
-it failed exactly the way it had to: the sheet cut straight through the
-terracing. The reveals were worse — every one of them ran for 4.2 seconds,
-which is about right for a drop and roughly ten times too fast for a rope
-lift.
+The banner was out of the stand and correctly timed, and it vibrated. No
+screenshot shows that and no census sees it, so the first thing built was a
+measuring stick: npm run probe:banner, reporting three numbers per type.
 
-The shot harness did not catch either, and that is the part worth recording.
-It checked that the RIG existed — ropes, net, bar, poles — and framed every
-screenshot from 31 degrees up, which is the one elevation where a banner
-buried in the seating looks identical to one resting on it.
+  flat   RMS distance from the fabric's own best-fit plane
+  buzz   mean per-FRAME vertex movement — this is jitter
+  drift  net movement over a second — this is sway, and a banner should
+         have some
 
-Physics
-- standHeightfield.ts bakes a stand into a heightfield half-space sampled
-  from the same pointAt() the geometry uses, so the collider and what the
-  user sees cannot drift apart. Two array reads per test, cheap enough to
-  run on every particle of every substep.
-- cloth.ts is substepped XPBD: zero-compliance distance constraints,
-  unilateral bend, LRA tethers, Coulomb friction, and aerodynamic load from
-  areal density. Mass, drag and gust period are all real numbers.
-- bannerRig.ts drives the solver instead of a surface function. The layout
-  WALKS the sheet down row by row and projects out of the collider at each
-  step, so it hangs where there is air and drapes where there is terracing.
+Buzz and drift had been one number, and that number could not tell a banner
+swaying on its ropes from a banner vibrating. At the top of the wind slider a
+fence banner was moving 1.5 m PER FRAME and a centre-circle banner 0.67 m.
 
-Three bugs the measurement found that no screenshot would have
-- The Gauss-Seidel sweep direction alternated every substep. One iteration
-  does not converge, velocity is (p-q)/h, so the residual flipped sign at
-  the substep frequency and the velocity feedback pumped it: 0.2, 1.6, 9.2,
-  52, 446 m/s over five frames on a 3x3 sheet with nothing but gravity.
-  Fixed order, and the same test sits still to five decimals.
-- Collision moved p but not q, so the push-out was handed back as velocity;
-  and with no velocity-level pass, a particle resting on a surface kept the
-  velocity driving it in. A corner reached 24 m/s while not moving at all.
-- Aero load used the grid cell area for every particle. A corner owns a
-  quarter of a cell and a quarter of the mass, so its edges took off at four
-  times the acceleration of the fabric they were attached to.
+What the research changed
+A tifo banner is held at many points and is never a sheet hanging from one
+edge. Eyelets go in every 50 cm; the hem has a rope sewn into it; a
+supporters' group describing their own build says they "grommet around the
+edges and attach to the field goal net with zip ties"; the DFB's glossary
+defines a fence flag as one FIXED to the railings. Engineering analyses of
+banners under wind agree from the other end: the load is "dominated by the
+tension or catenary forces", which is only true of something anchored all
+round.
 
-Reveals from deployment speeds, not a curve
-physicalRevealMs() derives each one: a drop is free fall plus settle (5.0 s),
-a rope lift is its height hauled at 0.5 m/s (40 s), a crowd pass is the block
-at 1.0 m/s (28 s), a roof hoist is 0.35 m/s (43.7 s). verify holds each to
-the band real deployments fall in. The seconds slider is now a power curve
-spanning 0.4 s to two minutes and prints the real figure beside the chosen
-one.
+- Lashings: a particle tied to a point with a couple of centimetres of play,
+  which is literally a grommet on a zip tie. Every rigged type is now laced
+  along its whole perimeter; the two a crowd carries are held across their
+  whole area instead. The slack is geometrically amplified — 9 cm a side on a
+  20 m banner buys a metre of belly, 2 cm buys 40 cm, a roped hem buys none.
+- The net became structural. It was being DRAWN and not enforced: ropes lying
+  obediently over the surface of a bulge they should have prevented. Four
+  rope clamps per particle to the perimeter of its row and column. What that
+  buys is reach, not stiffness — local constraints move information one cell
+  per sweep, so on a 27-row sheet under seventy times its own weight the
+  tension never arrives. Belly on a 36x18 m rope lift: 2.9 m -> a few cm.
+- The bowl is a wind shadow. Wind falls to a fifth at pitch level, and fabric
+  resting on something sits in the boundary layer at a quarter of free stream,
+  a tenth under a crowd.
+
+Four more bugs, each found by a number
+- The rope lift had 1.7 m of slack built in: its rail anchor was cleared of
+  the crowd and its batten, 18 m up in open air, was not, so two pins 16.3 m
+  apart held 18 m of cloth.
+- More substeps made the shimmer WORSE, 0.030 -> 0.075 m/frame in still air.
+  Backwards for a convergence problem, and the signature of an injection once
+  per substep: the net clamps and the tethers moved p without q. Every
+  unilateral constraint is now inelastic.
+- A constraint sitting exactly on its limit chatters. A flat sheet puts the
+  net ropes precisely at length. A tenth of a percent of rope stretch, honest
+  for a lightly loaded polyester net, puts the rest state inside the limit.
+- A bend dead zone was tried and reverted: it let the sheet crease freely
+  inside the margin and shimmer went up two orders of magnitude.
+
+Damping 0.18 -> 0.9 per second: not a fudge for instability, which was the
+sweep order, but the structural damping a seamed, laced, net-backed sheet has.
 
 Rigging corrected
-A rope lift and a pole banner are made off at their BOTTOM edge at the front
-rail and built upward, which is what an Aufziehfahne is. A pole banner cannot
-be propped out from the face of a stand at all — over the 8 m it drops, a 30
-degree rake falls away 14 m — so it stands at the rail and leans out over the
-moat, and it carries neither net nor ropes, because two poles are the rig.
+A pole banner is made off at its bottom edge at the rail like a rope lift. A
+roof-hung banner flies in free air in front of the terracing — hung above the
+middle of a rake it is inside the seating within two metres, and what came out
+of that was a banner draped over the seats being called roof-hung.
 
-A banner over a full kop rests on people
-Fifteen hundred of them, about 1.7 m above the treads, and they grip. Both
-scale with crowd fill and are read live, so emptying the stand lowers the
-sheet onto the seats while the user watches.
+Result, at full wind
+  fence     1.519 -> 0.000 m/frame      pitch   0.673 -> 0.000
+  drop      0.113 -> 0.00014            lift    0.054 -> 0.00033
+  pole-out  0.008 -> 0.00004            roof    0.002 -> 0.00027
+and flatness: drop 0.76 -> 0.05, lift 1.06 -> 0.26, fence 0.34 -> 0.02,
+pitch 0.45 -> 0.001, pole-out 0.31 -> 0.001.
 
-Measurement
-The harness now reports metres inside the stand and metres of sag, settles by
-stepping the solver rather than sleeping, shoots every type from 6 degrees as
-well, and checks the banner's bounding box so a crumple cannot pass as a
-banner. All 26 shots: 0.000 m inside the stand. verify gained a headless
-physics gate that needs no browser.
+26 shots: 0.000 m inside the stand and 0.000 m of sag on every one. A rendered
+clip was watched frame by frame rather than trusted as stills.
 
-verify, stadiumfit, tsc, build, server suite, e2e-banner 47, e2e-mobile 310.
+verify (two headless physics gates), stadiumfit, tsc, build, server suite,
+probe:banner, e2e-banner 47, e2e-mobile 310.
 
 Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
 Claude-Session: https://claude.ai/code/session_01NJL2ZR3v1pJ5VPRk3habHH

@@ -78,7 +78,17 @@ export interface ClothWorld {
 const GRAVITY = -9.81;
 const AIR_DENSITY = 1.225;
 /** Velocity damping per second. Per SECOND, not per substep — see the note. */
-const DAMP_PER_S = 0.18;
+/**
+ * Velocity damping, per second.
+ *
+ * Not a fudge for instability — that was the sweep order — but the structural
+ * damping a laced, seamed, net-backed sheet genuinely has. Woven polyester
+ * with a dozen sewn seams and a rope hem dissipates energy quickly; the
+ * aerodynamic term only damps as the square of velocity, so it does almost
+ * nothing to the slow buzz that makes a banner look like it is vibrating.
+ * An e-fold in a bit over a second, which still leaves a banner that moves.
+ */
+const DAMP_PER_S = 0.9;
 /** Friction of fabric on concrete. */
 const MU_S = 0.6;
 const MU_K = 0.45;
@@ -128,6 +138,29 @@ export class Cloth {
   private readonly tPin: Int32Array;
   private readonly tLen: Float64Array;
 
+  /**
+   * Lashings: the grommets.
+   *
+   * A real banner is not a sheet hanging from one edge. It is punched with
+   * eyelets every 50 cm and tied along its whole perimeter — a supporters'
+   * group describing their own process says they "grommet around the edges
+   * and attach to the field goal net with zip ties", and the DFB's glossary
+   * defines a fence flag as one FIXED to the railings. Engineering analyses
+   * of banners under wind say the same thing from the other end: the load is
+   * "dominated by the tension or catenary forces", which is only true of
+   * something anchored all round.
+   *
+   * So a lashing is a particle tied to a point in the world with a few
+   * centimetres of play — exactly a grommet on a zip tie. It keeps its mass
+   * and can still breathe, but it cannot leave. Unlike a pin it is unilateral
+   * and cheap, and it is what turns a flapping sheet into a membrane.
+   */
+  private readonly lashX: Float64Array;
+  private readonly lashY: Float64Array;
+  private readonly lashZ: Float64Array;
+  /** Metres of play. Negative means this particle is not tied to anything. */
+  private readonly lashSlack: Float64Array;
+
   /** Per-frame aerodynamic force, accumulated per particle. */
   private readonly fx: Float64Array;
   private readonly fy: Float64Array;
@@ -137,6 +170,16 @@ export class Cloth {
   readonly nx: Float64Array;
   readonly ny: Float64Array;
   readonly nz: Float64Array;
+
+  /**
+   * Is this banner laced to a rope net?
+   *
+   * Only the big ones are. A fence flag a metre deep does not need one and
+   * would be stiffened into a board by it; a forty-metre sheet tears without
+   * one, which is why suppliers sell the net, the ropes and the fastenings as
+   * a kit rather than as an accessory.
+   */
+  netted = false;
 
   private readonly opts: ClothOptions;
   private readonly spacing: { u: number; v: number };
@@ -159,6 +202,10 @@ export class Cloth {
     const N = this.cols * this.rows;
     this.count = N;
     this.contact = new Uint8Array(N);
+    this.lashX = new Float64Array(N);
+    this.lashY = new Float64Array(N);
+    this.lashZ = new Float64Array(N);
+    this.lashSlack = new Float64Array(N).fill(-1);
     this.cnx = new Float64Array(N);
     this.cny = new Float64Array(N);
     this.cnz = new Float64Array(N);
@@ -299,10 +346,24 @@ export class Cloth {
   /** Free every particle, then let the caller pin what the rig holds. */
   unpinAll(): void {
     for (let k = 0; k < this.count; k++) this.w[k] = this.wFree[k];
+    this.lashSlack.fill(-1);
     this.tPin.fill(-1);
   }
 
   /** Hold a particle at a world point. A pinned particle has no mass. */
+  /**
+   * Tie a particle to a point in the world, with `slack` metres of play.
+   *
+   * Cleared by `unpinAll()` along with the pins, so the rig re-states its
+   * lashings every frame the same way it re-states its pins.
+   */
+  lash(k: number, x: number, y: number, z: number, slack: number): void {
+    this.lashX[k] = x;
+    this.lashY[k] = y;
+    this.lashZ[k] = z;
+    this.lashSlack[k] = slack;
+  }
+
   pin(k: number, x: number, y: number, z: number, dt: number): void {
     if (dt > 0) {
       // A hauled bar has to report its real velocity, or the air force and the
@@ -428,7 +489,9 @@ export class Cloth {
       this.solveEdges(true);
       this.solveBend();
       this.solveTethers();
+      if (this.netted) this.solveNet();
       this.contact.fill(0);
+      this.solveLashes();
       this.solveCollisions(world);
 
       // Velocities from the positions the solver settled on.
@@ -530,6 +593,12 @@ export class Cloth {
       const dz = this.pz[a] - this.pz[b];
       const len = Math.sqrt(dx * dx + dy * dy + dz * dz);
       const rest = this.bL[e];
+      // No dead zone here, though the net ropes have one. Tried, measured,
+      // reverted: giving bend a margin let the sheet crease freely inside it
+      // and a rope lift's shimmer went up by two orders of magnitude. A flat
+      // sheet sits exactly on this limit and that is fine, because unlike the
+      // rope clamps this constraint is elastic and its correction is supposed
+      // to become velocity.
       if (len >= rest || len < 1e-9) continue;
       const c = ((len - rest) / len / (sum + alpha)) * 0.5;
       if (wa !== 0) {
@@ -545,6 +614,139 @@ export class Cloth {
     }
   }
 
+  /**
+   * Hold every lashed particle within reach of its grommet.
+   *
+   * A projection onto a sphere: unconditionally stable, one square root, and
+   * it does more for how a banner reads than anything else in this file. With
+   * the perimeter tied, wind is carried as tension across the sheet and shows
+   * up as a shallow bulge; without it, the same wind rolls the fabric into a
+   * ball. Measured on a fence banner at full wind, this is the difference
+   * between 1.5 metres of movement per frame and a few millimetres.
+   */
+  private solveLashes(): void {
+    for (let k = 0; k < this.count; k++) {
+      const slack = this.lashSlack[k];
+      if (slack < 0 || this.w[k] === 0) continue;
+      const dx = this.px[k] - this.lashX[k];
+      const dy = this.py[k] - this.lashY[k];
+      const dz = this.pz[k] - this.lashZ[k];
+      const len = Math.sqrt(dx * dx + dy * dy + dz * dz);
+      if (len <= slack || len < 1e-9) continue;
+      const s = slack / len;
+      const nx = this.lashX[k] + dx * s;
+      const ny = this.lashY[k] + dy * s;
+      const nz = this.lashZ[k] + dz * s;
+      this.qx[k] += nx - this.px[k];
+      this.qy[k] += ny - this.py[k];
+      this.qz[k] += nz - this.pz[k];
+      this.px[k] = nx;
+      this.py[k] = ny;
+      this.pz[k] = nz;
+      // Remember that this one came up hard against its tie, and which way,
+      // so the velocity pass can take the outward part away. A zip tie does
+      // not bounce; without this the perimeter rattles around inside its own
+      // slack at the substep rate, which is a shimmer rather than a motion
+      // and is exactly what "jittery" looks like.
+      this.contact[k] = 2;
+      this.cnx[k] = -dx / len;
+      this.cny[k] = -dy / len;
+      this.cnz[k] = -dz / len;
+    }
+  }
+
+  /**
+   * The net.
+   *
+   * This is the constraint that makes a big banner read as a printed wall
+   * rather than a bedsheet, and it is the one the rig was DRAWING but not
+   * enforcing: the ropes were geometry laid over a sheet that had no idea
+   * they were there.
+   *
+   * A net-backed banner is laced to a grid of ropes that run the full span
+   * and are made off at the perimeter. A rope is inextensible, so no point on
+   * it can be further from either of its ends than the length of rope between
+   * them — and that length is simply the material distance, `i` cells of
+   * spacing one way and `cols-1-i` the other. Four clamps per particle, and
+   * the perimeter nodes are held by the rigging, so they can be treated as
+   * fixed.
+   *
+   * What it buys is not stiffness, it is REACH. A chain of local distance
+   * constraints solved once per substep moves information one cell per sweep,
+   * so on a 27-row sheet under a wind load seventy times its own weight the
+   * tension never arrives and the middle bellies out by nearly three metres —
+   * which no amount of substepping fixes cheaply, because the problem is the
+   * speed of propagation, not the size of the step. A rope spans the whole
+   * sheet in one constraint. Measured, this took the belly on a 36 x 18 m
+   * rope lift from 2.9 m to a few centimetres.
+   */
+  private solveNet(): void {
+    const cols = this.cols;
+    const rows = this.rows;
+    // Rope stretches, a little.
+    //
+    // Polyester rope reaches 2-3% at WORKING load and a tifo net is nowhere
+    // near that, so a tenth of a percent is the honest figure — and the
+    // margin also keeps the clamp off its own limit in the rest state, which
+    // matters because a constraint sitting exactly on its limit switches on
+    // and off every substep and a constraint that chatters reads as a banner
+    // that shivers.
+    //
+    // The number is worth being careful with, because it is geometrically
+    // amplified: an allowance of e on a span L lets the middle bow out by
+    // about (L/2)*sqrt(2e), so on a 20 m banner half a percent buys a metre
+    // of belly and a tenth of a percent buys 45 cm. Measured on a roof-hung
+    // banner in still air, 0.5% left it shivering 35 mm per frame and 0.1%
+    // left it at 0.02 mm.
+    const du = this.spacing.u * 1.001;
+    const dv = this.spacing.v * 1.001;
+    for (let j = 0; j < rows; j++) {
+      const rowL = j * cols;
+      const aL = rowL;
+      const aR = rowL + cols - 1;
+      for (let i = 0; i < cols; i++) {
+        const k = rowL + i;
+        if (this.w[k] === 0) continue;
+        this.clampTo(k, aL, i * du);
+        this.clampTo(k, aR, (cols - 1 - i) * du);
+        this.clampTo(k, i, j * dv);
+        this.clampTo(k, (rows - 1) * cols + i, (rows - 1 - j) * dv);
+      }
+    }
+  }
+
+  /**
+   * Pull `k` back inside a sphere of radius `max` around `anchor`.
+   *
+   * Moves the PREVIOUS position by the same amount, for the same reason the
+   * collision push does: velocity here is (p - q)/h, so a correction applied
+   * to `p` alone is handed back as velocity, and a rope that catches a load
+   * every substep then pays that load a little energy every substep.
+   *
+   * The tell was that raising the substep count made the shimmer WORSE — from
+   * 0.030 to 0.075 m per frame on a roof-hung banner in still air — which is
+   * backwards for anything caused by poor convergence and is the signature of
+   * an injection happening once per substep.
+   */
+  private clampTo(k: number, anchor: number, max: number): void {
+    if (anchor === k || max <= 0) return;
+    const dx = this.px[k] - this.px[anchor];
+    const dy = this.py[k] - this.py[anchor];
+    const dz = this.pz[k] - this.pz[anchor];
+    const len = Math.sqrt(dx * dx + dy * dy + dz * dz);
+    if (len <= max || len < 1e-9) return;
+    const s = max / len;
+    const nx = this.px[anchor] + dx * s;
+    const ny = this.py[anchor] + dy * s;
+    const nz = this.pz[anchor] + dz * s;
+    this.qx[k] += nx - this.px[k];
+    this.qy[k] += ny - this.py[k];
+    this.qz[k] += nz - this.pz[k];
+    this.px[k] = nx;
+    this.py[k] = ny;
+    this.pz[k] = nz;
+  }
+
   private solveTethers(): void {
     for (let k = 0; k < this.count; k++) {
       const pin = this.tPin[k];
@@ -556,9 +758,16 @@ export class Cloth {
       const max = this.tLen[k];
       if (len <= max || len < 1e-9) continue;
       const s = max / len;
-      this.px[k] = this.px[pin] + dx * s;
-      this.py[k] = this.py[pin] + dy * s;
-      this.pz[k] = this.pz[pin] + dz * s;
+      const nx = this.px[pin] + dx * s;
+      const ny = this.py[pin] + dy * s;
+      const nz = this.pz[pin] + dz * s;
+      // Inelastic, like every other unilateral constraint in here.
+      this.qx[k] += nx - this.px[k];
+      this.qy[k] += ny - this.py[k];
+      this.qz[k] += nz - this.pz[k];
+      this.px[k] = nx;
+      this.py[k] = ny;
+      this.pz[k] = nz;
     }
   }
 
@@ -594,8 +803,12 @@ export class Cloth {
           nz = hit.nz;
         }
       }
-      // The pitch, which nothing may fall through.
-      const gy = world.groundY + 0.02;
+      // The grass, which nothing may fall through — and which a banner laid
+      // on it is genuinely RESTING on, so the contact has to register at the
+      // thickness of the fabric rather than at a hairline. Miss that and a
+      // centre-circle banner is treated as flying in free air, gets the full
+      // wind, and behaves like a kite.
+      const gy = world.groundY + 0.06;
       if (this.py[k] < gy && gy - this.py[k] > depth) {
         depth = gy - this.py[k];
         nx = 0;
@@ -691,11 +904,16 @@ export class Cloth {
       this.fy[k] = 0;
       this.fz[k] = 0;
       if (this.w[k] === 0) continue;
-      // Fabric lying on the stand is in the boundary layer, and under a crowd
-      // it is in their lee as well: the free-stream figure is simply not the
-      // wind it feels. Using the free-stream everywhere is what gave a sheet
-      // resting on a full kop five g of lift.
-      const shelter = this.contact[k] ? 1 - 0.85 * world.grip - 0.1 : 1;
+      // A lashed particle (contact === 2) is in free air, not on a surface,
+      // so it gets the full wind — only fabric actually resting on something
+      // is sheltered.
+      // Fabric lying on the stand is deep in the boundary layer, and under a
+      // crowd it is in their lee as well: the free-stream figure is simply
+      // not the wind it feels. A quarter of it on bare concrete, a tenth
+      // under people. Using the free-stream everywhere is what gave a sheet
+      // resting on a full kop five g of lift, and a banner pegged on the
+      // grass the aerodynamics of a kite.
+      const shelter = this.contact[k] === 1 ? 0.25 * (1 - 0.6 * world.grip) : 1;
       world.wind(this.px[k], this.py[k], this.pz[k], wOut);
       const rx = wOut.x - this.vx[k];
       const ry = wOut.y - this.vy[k];
