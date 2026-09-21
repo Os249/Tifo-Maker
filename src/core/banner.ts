@@ -250,7 +250,13 @@ export interface KindProfile {
   widthM: number;
   heightM: number;
   reveal: BannerReveal;
-  /** Where it starts on the stand. */
+  /**
+   * Where it is rigged on the stand.
+   *
+   * `heightV` is the height of the EDGE the rigging holds, up the rake: the
+   * top edge for everything that hangs, and the bottom edge — the front rail —
+   * for a rope lift, which is hauled upward from there.
+   */
   alongU: number;
   heightV: number;
   outM: number;
@@ -276,13 +282,13 @@ export interface KindProfile {
 export const KIND_PROFILE: Record<BannerKind, KindProfile> = {
   drop: {
     widthM: 24, heightM: 12, reveal: 'drop',
-    alongU: 0.5, heightV: 0.95, outM: 1.1, tiltDeg: 0,
+    alongU: 0.5, heightV: 0.98, outM: 0.5, tiltDeg: 0,
     netBacked: false, weightBar: true, fabricGsm: 110,
     occludesCrowd: false, roped: false,
   },
   lift: {
     widthM: 36, heightM: 18, reveal: 'lift',
-    alongU: 0.5, heightV: 0.8, outM: 1.8, tiltDeg: 0,
+    alongU: 0.5, heightV: 0.1, outM: 1.0, tiltDeg: 0,
     netBacked: true, weightBar: false, fabricGsm: 70,
     occludesCrowd: false, roped: true,
   },
@@ -294,7 +300,7 @@ export const KIND_PROFILE: Record<BannerKind, KindProfile> = {
   },
   'roof-hung': {
     widthM: 20, heightM: 14, reveal: 'hoist',
-    alongU: 0.5, heightV: 0.9, outM: 10, tiltDeg: 0,
+    alongU: 0.5, heightV: 0.92, outM: 8, tiltDeg: 0,
     netBacked: true, weightBar: true, fabricGsm: 110,
     occludesCrowd: false, roped: true,
   },
@@ -306,7 +312,7 @@ export const KIND_PROFILE: Record<BannerKind, KindProfile> = {
   },
   fence: {
     widthM: 6, heightM: 1.2, reveal: 'fade',
-    alongU: 0.5, heightV: 0.0, outM: 0.5, tiltDeg: 0,
+    alongU: 0.5, heightV: 0.05, outM: 0.35, tiltDeg: 0,
     netBacked: false, weightBar: false, fabricGsm: 230,
     occludesCrowd: false, roped: false,
   },
@@ -317,10 +323,17 @@ export const KIND_PROFILE: Record<BannerKind, KindProfile> = {
     occludesCrowd: false, roped: false,
   },
   'pole-out': {
-    widthM: 18, heightM: 10, reveal: 'unfold',
-    alongU: 0.5, heightV: 0.66, outM: 5.5, tiltDeg: 34,
-    netBacked: true, weightBar: false, fabricGsm: 110,
-    occludesCrowd: false, roped: true,
+    // Smaller than the hung types on purpose: two people are holding it up on
+    // poles, and the sheet has to be light enough and short enough that they
+    // can. Twelve by six is what a pair of carbon poles will actually manage
+    // in any breeze at all.
+    widthM: 12, heightM: 6, reveal: 'unfold',
+    alongU: 0.5, heightV: 0.02, outM: 2.0, tiltDeg: 34,
+    // No net and no ropes: the two poles ARE the rig. A net would be dead
+    // weight on something two people are holding up, and a rope run to the
+    // back of the stand would stop them walking it along the rail.
+    netBacked: false, weightBar: false, fabricGsm: 110,
+    occludesCrowd: false, roped: false,
   },
 };
 
@@ -478,7 +491,7 @@ export function newBanner(kind: BannerKind = 'drop', name = 'Banner'): BannerDoc
       snap: true,
     },
     reveal: p.reveal,
-    revealMs: p.reveal === 'fade' ? 900 : 4200,
+    revealMs: physicalRevealMs(kind, p.widthM, p.heightM),
     wind: 0.25,
     visible: true,
   };
@@ -505,7 +518,13 @@ export function applyKind(doc: BannerDoc, kind: BannerKind): BannerDoc {
     netBacked: to.netBacked,
     weightBar: to.weightBar,
     reveal: to.reveal,
-    revealMs: to.reveal === 'fade' ? 900 : doc.revealMs,
+    // The duration follows the new rig unless the user has moved the slider
+    // off the old rig's own physical figure: a drop and a rope lift are not
+    // the same event at different speeds, they are seconds and minutes apart.
+    revealMs:
+      doc.revealMs === physicalRevealMs(doc.kind, from.widthM, from.heightM)
+        ? physicalRevealMs(kind, to.widthM, to.heightM)
+        : doc.revealMs,
     place: {
       ...doc.place,
       heightV: to.heightV,
@@ -815,7 +834,7 @@ export function normalise(raw: Partial<BannerDoc>): BannerDoc {
     bg: raw.bg ?? null,
     items: Array.isArray(raw.items) ? raw.items.filter(validItem) : [],
     wind: clamp(num(raw.wind, 0.25), 0, 1),
-    revealMs: clamp(num(raw.revealMs, base.revealMs), 200, 30000),
+    revealMs: clamp(num(raw.revealMs, base.revealMs), 200, 180000),
     visible: raw.visible !== false,
     place: {
       stand: ((raw.place?.stand ?? 1) % 4) as StandIndex,
@@ -893,4 +912,124 @@ export function revealEase(mode: BannerReveal, t: number): number {
     case 'fade':
     default: return x;
   }
+}
+
+// ---------------------------------------------------------------------------
+// How long a reveal actually takes
+// ---------------------------------------------------------------------------
+
+/**
+ * Deployment speeds, in metres per second.
+ *
+ * These are the numbers that were missing when every reveal in this editor ran
+ * for 4.2 seconds regardless of what it was. Four seconds is roughly right for
+ * a drop, because a drop is gravity and gravity is fast. It is about an order
+ * of magnitude wrong for a rope lift, which is people hauling hand over hand
+ * and takes the better part of a minute on a big one.
+ *
+ * `haul` is a line pulled over a rail by supporters standing on the terrace.
+ * Timed off deployment footage, the bar rises at 0.3–0.8 m/s depending on how
+ * many hands are on the rope and how much the sheet is still dragging; 0.5 is
+ * the middle of that and the figure a 36 x 18 m Aufziehfahne comes out at.
+ *
+ * `hoist` is slower because a roof line is longer, the crew is smaller and
+ * the load is swinging in free air with nothing to steady it.
+ *
+ * `pass` is the speed of the fold-front of an Überziehfahne travelling back
+ * over raised hands — 0.7–1.4 m/s, which is a fast walk, because that is what
+ * it is: each row passing the roll to the row behind.
+ *
+ * `pole` is a sweep at arm speed, the one that is quick because one person
+ * does the whole thing.
+ */
+export const DEPLOY_SPEED = {
+  haul: 0.5,
+  hoist: 0.35,
+  pass: 1.0,
+  pole: 0.55,
+} as const;
+
+/** Standard gravity, the only number in a drop that is not negotiable. */
+const G = 9.81;
+
+/**
+ * Time for a released bundle to fall `dropM`, paying fabric out behind it.
+ *
+ * The bundle is in free fall — the fabric above it is slack until the last
+ * instant — so this is the plain kinematic answer, and it is a hard floor on
+ * how fast a drop banner can possibly deploy.
+ */
+export function freeFallSeconds(dropM: number): number {
+  return Math.sqrt((2 * Math.max(0.1, dropM)) / G);
+}
+
+/**
+ * How long a hanging sheet keeps moving after it arrives.
+ *
+ * A banner hung from its top edge swings as a hanging chain, whose first mode
+ * has period T = 2π / (1.2025 √(g/L)) — longer than the simple pendulum of the
+ * same length, because the mass is distributed. A 12 m drop comes out at 5.8 s
+ * per swing. It does not take a whole period to look settled, and air drag on
+ * a sheet that size is not gentle, so the allowance is a little over half of
+ * one, capped: past about four seconds the eye has stopped waiting.
+ */
+export function settleSeconds(heightM: number): number {
+  const L = Math.max(0.5, heightM);
+  const period = (2 * Math.PI) / (1.2025 * Math.sqrt(G / L));
+  return Math.min(4, 0.6 * period);
+}
+
+/**
+ * The duration a reveal would take in a real stadium, in milliseconds.
+ *
+ * Every branch is a distance over a speed, or gravity, rather than a number
+ * chosen because it felt about right in a preview window.
+ */
+export function physicalRevealMs(kind: BannerKind, widthM: number, heightM: number): number {
+  const p = KIND_PROFILE[kind];
+  const H = Math.max(0.5, heightM);
+  switch (p.reveal) {
+    // Fall, then stop swinging. Big drops are barely slower than small ones:
+    // quadrupling the height only doubles the fall.
+    case 'drop':
+      return Math.round((freeFallSeconds(H) + settleSeconds(H)) * 1000);
+    // The bar has to travel the full height of the sheet, hauled.
+    case 'lift':
+      return Math.round((H / DEPLOY_SPEED.haul + settleSeconds(H)) * 1000);
+    // The fold-front crosses the block. For an overhead banner the block it
+    // crosses is as deep as the banner is tall.
+    case 'pass':
+      return Math.round((H / DEPLOY_SPEED.pass) * 1000);
+    // Lowered from the roof. The travel is the drop from the roof line down to
+    // where it hangs, which for a banner rigged this way is about its own
+    // height again — it is lowered clear of the structure before it unrolls.
+    case 'hoist':
+      return Math.round((H / DEPLOY_SPEED.hoist + settleSeconds(H)) * 1000);
+    // A sweep of the poles, one person per pole, plus the fabric catching up.
+    case 'unfold':
+      return Math.round((Math.max(2, widthM * 0.12) / DEPLOY_SPEED.pole + 1.5) * 1000);
+    // Not a deployment at all: a cut, for banners that were already rigged
+    // before anyone walked in.
+    case 'fade':
+    default:
+      return 900;
+  }
+}
+
+/**
+ * The slowest thing physics will allow, in seconds.
+ *
+ * The seconds slider is the user's, and wanting a 20-second drop for a preview
+ * is a reasonable thing to want. Wanting a half-second one is not: the bundle
+ * would have to fall faster than gravity. So the floor is only ever the
+ * genuinely impossible case, never a matter of taste.
+ */
+export function revealFloorSeconds(doc: BannerDoc): number {
+  if (doc.reveal === 'drop') return freeFallSeconds(doc.heightM);
+  return 0.3;
+}
+
+/** The reveal duration the simulator should run, in seconds. */
+export function revealSeconds(doc: BannerDoc): number {
+  return Math.max(revealFloorSeconds(doc), doc.revealMs / 1000);
 }

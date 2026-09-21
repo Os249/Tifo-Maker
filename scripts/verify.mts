@@ -1067,6 +1067,122 @@ import { buildStadium as siBuild } from '../src/core/stadiumFit';
   }
   console.log('banners: the old Banner Studio\'s work migrates, and only it');
 
+  // 8b. The physics, without a browser.
+  //
+  // The gate this whole rewrite is here for, and the one that was missing when
+  // a banner went through the terracing while every shot in the harness came
+  // back green. Two things are checked and neither of them is a picture: that
+  // the cloth solver conserves rather than manufactures energy, and that a
+  // sheet laid on a stand stays out of it.
+  {
+    const { Cloth } = await import('../src/render/simulator/cloth');
+    const { generateSeatMap } = await import('../src/core/seatmap');
+    const { templateById } = await import('../src/core/stadiumCatalog');
+    const { buildStandFrame } = await import('../src/render/simulator/standFrame');
+    const { bakeStandHeightfield, probe } = await import('../src/render/simulator/standHeightfield');
+
+    const still = { wind: (_x: number, _y: number, _z: number, o: { x: number; y: number; z: number }) => { o.x = 0; o.y = 0; o.z = 0; }, field: null, clearance: 0, groundY: -1e4, grip: 0 };
+
+    // A 9-particle sheet hanging from its top edge under gravity. It must sit
+    // absolutely still. An earlier solver alternated its Gauss-Seidel sweep
+    // direction every substep, which flipped the sign of the unconverged
+    // residual at exactly the substep frequency and let the velocity feedback
+    // pump it: this test read 0.2, 1.6, 9.2, 52 and then 446 m/s over its
+    // first five frames, while the POSITIONS still looked plausible. Hence a
+    // speed check rather than a shape check.
+    const c = new Cloth({ cols: 3, rows: 3, arealKgM2: 0.11, dragC: 0, liftC: 0, bendCompliance: 1e9, hemWeight: 0 }, 1, 1);
+    c.reset((i, j, out) => { out.x = i * 0.5; out.y = 10 - j * 0.5; out.z = 0; });
+    for (let step = 0; step < 90; step++) {
+      c.unpinAll();
+      for (let i = 0; i < 3; i++) c.pin(c.index(i, 0), i * 0.5, 10, 0, 1 / 60);
+      c.buildTethers();
+      c.step(1 / 60, still, 8);
+    }
+    if (!c.healthy) throw new Error('the cloth solver went non-finite on a hanging sheet');
+    const bottom = c.index(1, 2);
+    if (Math.abs(c.py[bottom] - 9) > 0.02) {
+      throw new Error(`a sheet hanging from a pinned edge must hang still; its hem moved to y=${c.py[bottom].toFixed(3)} from 9`);
+    }
+
+    // The same sheet, draped down a real stand, must end up on the terracing
+    // and not in it.
+    const tpl = templateById('generic-bowl-60k');
+    if (!tpl) throw new Error('generic-bowl-60k is the template these gates are written against');
+    const frame = buildStandFrame(generateSeatMap(tpl), 1);
+    const field = bakeStandHeightfield(frame, 1.0);
+    const clearance = 0.06;
+    const hit = { depth: 0, nx: 0, ny: 1, nz: 0 };
+    const cols = 21;
+    const rows = 21;
+    const H = 12;
+    const dv = H / (rows - 1);
+    const anchor = frame.pointAt(0.5, 0.98);
+    const px = new Float64Array(rows * cols);
+    const py = new Float64Array(rows * cols);
+    const pz = new Float64Array(rows * cols);
+    const clear = (v: { x: number; y: number; z: number }): void => {
+      for (let pass = 0; pass < 3; pass++) {
+        probe(field, v.x, v.y, v.z, clearance, hit);
+        if (hit.depth <= 1e-4) break;
+        v.x += hit.nx * hit.depth; v.y += hit.ny * hit.depth; v.z += hit.nz * hit.depth;
+      }
+    };
+    for (let j = 0; j < rows; j++) {
+      for (let i = 0; i < cols; i++) {
+        const k = j * cols + i;
+        const u = i / (cols - 1) - 0.5;
+        if (j === 0) {
+          const v = { x: anchor.x + anchor.rx * (u * 24), y: anchor.y, z: anchor.z + anchor.rz * (u * 24) };
+          clear(v);
+          px[k] = v.x; py[k] = v.y; pz[k] = v.z;
+          continue;
+        }
+        const pk = (j - 1) * cols + i;
+        const v = { x: px[pk], y: py[pk] - dv, z: pz[pk] };
+        clear(v);
+        const dx = v.x - px[pk], dy = v.y - py[pk], dz = v.z - pz[pk];
+        const len = Math.hypot(dx, dy, dz) || 1;
+        const w = { x: px[pk] + (dx / len) * dv, y: py[pk] + (dy / len) * dv, z: pz[pk] + (dz / len) * dv };
+        clear(w);
+        px[k] = w.x; py[k] = w.y; pz[k] = w.z;
+      }
+    }
+    // The drape has to actually cover the stand, or "no penetration" is only
+    // the good news that the banner is a ball of cloth at the rail.
+    let lowest = Infinity;
+    for (let k = 0; k < rows * cols; k++) if (py[k] < lowest) lowest = py[k];
+    if (anchor.y - lowest < H * 0.4) {
+      throw new Error(`a ${H} m sheet draped down a 30 degree rake must descend at least ${(H * 0.4).toFixed(1)} m; it descended ${(anchor.y - lowest).toFixed(1)} m`);
+    }
+
+    const stand = new Cloth({ cols, rows, arealKgM2: 0.11, dragC: 1.28, liftC: 0.35, bendCompliance: 4e-3, hemWeight: 6 }, 24, H);
+    stand.reset((i, j, out) => { const k = j * cols + i; out.x = px[k]; out.y = py[k]; out.z = pz[k]; });
+    const breezy = {
+      // A stiff, steady wind, aimed INTO the stand — the direction that pushes
+      // the sheet up the terracing rather than off it.
+      wind: (_x: number, _y: number, _z: number, o: { x: number; y: number; z: number }) => { o.x = 0; o.y = 0; o.z = 4; },
+      field, clearance, groundY: 0, grip: 0.9,
+    };
+    for (let step = 0; step < 180; step++) {
+      stand.unpinAll();
+      for (let i = 0; i < cols; i++) stand.pin(stand.index(i, 0), px[i], py[i], pz[i], 1 / 60);
+      stand.buildTethers();
+      stand.step(1 / 60, breezy, 8);
+      if (!stand.healthy) throw new Error(`the cloth solver went non-finite on the stand at step ${step}`);
+    }
+    // Three centimetres: the thickness of the fabric. What this is really
+    // ruling out is the metre-deep intersection that started the rewrite.
+    const inStand = stand.measurePenetration(breezy, 0.03);
+    if (inStand > 0.05) throw new Error(`a banner settled ${inStand.toFixed(3)} m INSIDE the stand; nothing may be in the terracing`);
+    let worstV = 0;
+    for (let k = 0; k < stand.count; k++) {
+      const v = Math.hypot(stand.px[k] - px[k], stand.py[k] - py[k], stand.pz[k] - pz[k]);
+      if (v > worstV) worstV = v;
+    }
+    if (worstV > 3) throw new Error(`a banner resting on a stand drifted ${worstV.toFixed(1)} m in three seconds of wind; it is not resting on anything`);
+  }
+  console.log('banners: the cloth solver holds still, drapes the rake and stays out of it');
+
   // 9. Every banner string carries both languages. The two original phone bug
   // reports were both written in Arabic; an English-only sentence in this view
   // is the same failure in a new place.

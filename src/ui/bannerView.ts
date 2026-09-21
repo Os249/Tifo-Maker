@@ -3,7 +3,48 @@ import type { ToolId } from '../core/types';
 import type { BannerDoc, BannerKind, BannerReveal, StandIndex } from '../core/banner';
 import {
   BannerStore, KIND_PROFILE, aspectOf, applyKind, bannerFacts, newBanner,
+  physicalRevealMs, revealFloorSeconds,
 } from '../core/banner';
+
+/**
+ * The reveal-length slider, which now has to span half a second and two
+ * minutes on the same track.
+ *
+ * It did not have to before, because every reveal ran for 4.2 seconds. Now a
+ * drop takes five and a rope lift takes forty, so a linear track would put
+ * every useful value for a drop inside the first four pixels. A power curve
+ * gives fine control where the short reveals live and still reaches a minute
+ * and a half at the far end.
+ */
+const SECS_MIN = 0.4;
+const SECS_MAX = 120;
+const SECS_POW = 2.2;
+
+function sliderToSecs(raw: number): number {
+  const t = Math.max(0, Math.min(1, raw / 100));
+  return SECS_MIN + Math.pow(t, SECS_POW) * (SECS_MAX - SECS_MIN);
+}
+
+function secsToSlider(secs: number): number {
+  const t = (Math.max(SECS_MIN, Math.min(SECS_MAX, secs)) - SECS_MIN) / (SECS_MAX - SECS_MIN);
+  return 100 * Math.pow(t, 1 / SECS_POW);
+}
+
+/**
+ * The number under the slider, with a note when it is not what the rig does.
+ *
+ * Nobody watching a preview knows that a 36 x 18 m Aufziehfahne takes forty
+ * seconds to haul. Showing what the real one takes, next to what they have
+ * chosen, is how they find out — and it is the same figure the 3D uses, so
+ * "real" is not a claim here, it is the default.
+ */
+function secsLabel(doc: BannerDoc): string {
+  const secs = Math.max(revealFloorSeconds(doc), doc.revealMs / 1000);
+  const real = physicalRevealMs(doc.kind, doc.widthM, doc.heightM) / 1000;
+  const shown = secs >= 20 ? secs.toFixed(0) : secs.toFixed(1);
+  if (Math.abs(secs - real) < Math.max(0.3, real * 0.06)) return `${shown}s`;
+  return `${shown}s (real ${real >= 20 ? real.toFixed(0) : real.toFixed(1)}s)`;
+}
 import { BannerCanvas } from '../render/bannerCanvas';
 import { invalidateBannerText } from '../render/bannerRender';
 import { renderTextCanvas, TIFO_FONTS } from '../core/text';
@@ -152,8 +193,8 @@ export function mountBannerView(deps: BannerViewDeps): BannerView {
       if (netChk) netChk.checked = doc.netBacked;
       if (barChk) barChk.checked = doc.weightBar;
       if (revSel) revSel.value = doc.reveal;
-      if (secsIn) secsIn.value = String(Math.round(doc.revealMs / 100));
-      if (secsOut) secsOut.textContent = (doc.revealMs / 1000).toFixed(1);
+      if (secsIn) secsIn.value = String(Math.round(secsToSlider(doc.revealMs / 1000)));
+      if (secsOut) secsOut.textContent = secsLabel(doc);
       if (windIn) windIn.value = String(Math.round(doc.wind * 100));
       if (windOut) windOut.textContent = String(Math.round(doc.wind * 100));
       if (brushIn) brushIn.value = String(Math.round(canvas.brushM * 100));
@@ -316,8 +357,9 @@ export function mountBannerView(deps: BannerViewDeps): BannerView {
   barChk?.addEventListener('change', () => edit(() => bannerStore.patch({ weightBar: barChk.checked })));
   revSel?.addEventListener('change', () => edit(() => bannerStore.patch({ reveal: revSel.value as BannerReveal })));
   secsIn?.addEventListener('input', () => {
-    const ms = Number(secsIn.value) * 100;
-    if (secsOut) secsOut.textContent = (ms / 1000).toFixed(1);
+    const ms = Math.round(sliderToSecs(Number(secsIn.value)) * 1000);
+    const doc = bannerStore.active;
+    if (secsOut && doc) secsOut.textContent = secsLabel({ ...doc, revealMs: ms });
     edit(() => bannerStore.patch({ revealMs: ms }));
   });
   windIn?.addEventListener('input', () => {

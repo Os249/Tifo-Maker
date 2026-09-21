@@ -246,7 +246,13 @@ export class MatchDaySimulator {
       this.placement = buildPlacement(this.map, this.bannerStore, this.template.sectionsPerTier);
       this.scene.add(this.placement.object);
       const place = this.placement;
-      this.bannerRigs = buildBannerRigs(this.bannerStore, (st) => place.frameFor(st));
+      this.bannerRigs = buildBannerRigs(
+        this.bannerStore,
+        (st) => place.frameFor(st),
+        // Live, not captured: a banner that was resting on a full kop has to
+        // come down onto the seats when the user empties the stand.
+        () => this.crowdFill,
+      );
       this.scene.add(this.bannerRigs.object);
       this.bindBannerPointer();
       document.addEventListener('tifo:stand-extent', this.onStandExtent as EventListener);
@@ -1268,8 +1274,40 @@ export class MatchDaySimulator {
     this.bannerRigs?.select(id);
   }
   /** What the banner layer actually contains. A screenshot cannot say this. */
-  bannerCensus(): { banners: number; ropes: number; nets: number; bars: number; poles: number } {
-    return this.bannerRigs?.census() ?? { banners: 0, ropes: 0, nets: 0, bars: 0, poles: 0 };
+  bannerCensus(): { banners: number; ropes: number; nets: number; bars: number; poles: number; particles: number } {
+    return this.bannerRigs?.census() ?? { banners: 0, ropes: 0, nets: 0, bars: 0, poles: 0, particles: 0 };
+  }
+
+  /**
+   * Run the cloth forward without drawing, so a still is a settled still.
+   *
+   * A screenshot taken the instant a banner is placed catches it mid-fall.
+   * The shot harness and the reveal-progress scrub both want the shape the
+   * fabric ends up in, which is a few seconds of solver away.
+   */
+  settleBanners(seconds = 2.5): void {
+    this.bannerRigs?.settle(seconds);
+  }
+
+  /**
+   * Deepest a banner is inside the terracing right now, in metres.
+   *
+   * This is the number the whole rewrite exists to drive to zero, and it is
+   * measured against the same heightfield the solver collides with, so it
+   * cannot flatter itself.
+   */
+  worstBannerPenetration(): number {
+    return this.bannerRigs?.worstPenetration() ?? 0;
+  }
+
+  /** How far a banner has dipped below whatever is holding it up, in metres. */
+  worstBannerSag(): number {
+    return this.bannerRigs?.worstSag() ?? 0;
+  }
+
+  /** The world box a banner's fabric occupies once the solver has settled. */
+  bannerBounds(id: string): { min: [number, number, number]; max: [number, number, number] } | null {
+    return this.bannerRigs?.bounds(id) ?? null;
   }
   /**
    * Put the camera where the banner is aimed.
@@ -1281,7 +1319,7 @@ export class MatchDaySimulator {
    * so a screenshot is framed by the product's own idea of where to look from
    * rather than by a constant that goes stale the moment a bowl changes shape.
    */
-  focusBanner(id: string): boolean {
+  focusBanner(id: string, elevationDeg?: number): boolean {
     const doc = this.bannerStore?.get(id);
     if (!doc || !this.placement) return false;
     const f = this.placement.frameFor(doc.place.stand);
@@ -1301,7 +1339,15 @@ export class MatchDaySimulator {
     // camera gantry sits, and it is the angle every photograph of a kop tifo
     // is taken from.
     const d = Math.max(72, doc.widthM * 1.9);
-    const el = doc.kind === 'pitch' ? 0.75 : 0.55;
+    // Overridable, because the flattering angle and the honest angle are not
+    // the same angle. From the gantry a sheet that has sunk into the seating
+    // looks identical to one resting on it; from pitch level, grazing along
+    // the terracing, it is unmistakable. The shot harness asks for the second
+    // one on purpose.
+    const el =
+      elevationDeg !== undefined
+        ? (elevationDeg * Math.PI) / 180
+        : doc.kind === 'pitch' ? 0.75 : 0.55;
     applyCameraShot(this.camera, this.controls, {
       name: 'Banner',
       position: [mid.x + mid.ox * d * Math.cos(el), cy + d * Math.sin(el), mid.z + mid.oz * d * Math.cos(el)],
@@ -1573,7 +1619,7 @@ export class MatchDaySimulator {
     }
       this.banners.update(this.elapsed);
       this.assetLayer.update(this.elapsed);
-      this.bannerRigs?.update(this.elapsed);
+      this.bannerRigs?.update(this.elapsed, dt);
       this.effects.update(dt);
       this.surroundings.update(dt);
       if (this.sparkles.object.visible) this.sparkles.update(dt);

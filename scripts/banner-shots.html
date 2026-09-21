@@ -59,18 +59,35 @@
     // Frame it the way the product frames it, so the shot cannot be composed
     // better (or worse) than what a user actually sees.
     const id = banners.list()[0].id;
-    sim.focusBanner(id);
+    const framed = sim.focusBanner(id, spec.elevationDeg);
 
     sim.start();
     // Park the reveal where the shot wants it, rather than racing an animation.
     sim.setBannerProgress(id, spec.progress ?? 1);
-    await new Promise((r) => setTimeout(r, spec.settle ?? 700));
+    // Settle the cloth by stepping the solver a known number of times, not by
+    // sleeping and hoping. A wall-clock wait gives a different answer on a
+    // fast machine than on a loaded one, which is exactly the kind of harness
+    // that reports green while the product is wrong.
+    sim.settleBanners(spec.settleS ?? 3.0);
+    // Frame it again now the fabric has found its shape. Framing a banner by
+    // where its rigging is, before it has draped, aims the camera at a point
+    // the artwork never reaches.
+    sim.focusBanner(id, spec.elevationDeg);
+    await new Promise((r) => requestAnimationFrame(r));
     sim.stop();
     const png = sim.canvas.toDataURL('image/png');
     const census = sim.bannerCensus();
     const stand = sim.standSizeM(1);
+    // The measurement the pictures cannot make: how far into the terracing
+    // the fabric actually is, in metres, taken against the same collider the
+    // solver uses.
+    const penetration = sim.worstBannerPenetration();
+    const sag = sim.worstBannerSag();
+    // Before dispose(), which tears the rigs down.
+    const bounds = sim.bannerBounds(id);
+    const doc0 = banners.list()[0];
     sim.dispose();
-    return { png, census, stand };
+    return { png, census, stand, penetration, sag, framed, bounds, revealMs: doc0.revealMs };
   };
   document.getElementById('out').textContent = 'ready';
   window.__ready = true;
