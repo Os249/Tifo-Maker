@@ -2,6 +2,7 @@ import type { SeatMap, StadiumTemplate } from '../../core/types';
 import type { DesignStore } from '../../core/design';
 import { MatchDaySimulator, type TimeOfDay } from './index';
 import { probeQuality, type QualityTier } from './quality';
+import { DEFAULT_LEVELS, type SoundBus, type SoundLevels } from './atmosphere';
 import { REVEAL_MODES, type RevealMode } from './choreo';
 import type { CrowdPreset } from './crowd';
 import type { AssetStore } from '../../core/sceneAssets';
@@ -104,6 +105,8 @@ const CSS = `
 .mds-section.open .mds-sbody{display:flex;}
 .mds-field{display:flex;flex-direction:column;gap:5px;}
 .mds-flabel{font-size:11px;color:var(--text-dim);}
+.mds-flabel-row{display:flex;align-items:baseline;justify-content:space-between;gap:8px;}
+.mds-fval{font:600 11px ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--accent-soft);}
 .mds-row{display:flex;flex-wrap:wrap;gap:6px;align-items:center;}
 .mds-row .mds-btn{flex:1 1 auto;text-align:center;}
 .mds-divider{height:1px;background:var(--border-soft);margin:1px 0;}
@@ -162,8 +165,14 @@ input[type=checkbox].mds-check:checked::after{transform:rotate(45deg) scale(1);}
   .mds-btn,.mds-sel,.mds-input{min-height:44px;}
   .mds-icon{min-width:44px;min-height:44px;}
   .mds-shead{min-height:48px;}
-  input[type=checkbox].mds-check{width:20px;height:20px;min-width:20px;}
-  input[type=checkbox].mds-check::after{left:6px;top:2.5px;width:5px;height:10px;}
+  /* 24px is the WCAG 2.2 target-size floor and the number the rest of this app
+     is held to. These were 20, which nothing caught while the Sound section
+     was two checkboxes deep in a collapsed panel and is very visible now that
+     it is five faders and five boxes. */
+  input[type=checkbox].mds-check{width:24px;height:24px;min-width:24px;}
+  input[type=checkbox].mds-check::after{left:8px;top:3.5px;width:6px;height:12px;}
+  /* A range input is 20px tall by default, which is a fader you cannot grab. */
+  input[type=range].mds-range{min-height:28px;}
   .mds-help-card{padding:18px;}
 }
 @keyframes mds-in{from{opacity:0}to{opacity:1}}
@@ -372,13 +381,37 @@ const MDS_T: Record<string, { en: string; ar: string }> = {
   recordSaved: { en: 'Reveal video saved', ar: 'تم حفظ فيديو الكشف' },
   recordSize: { en: 'MB', ar: 'م.ب' },
   sound: { en: 'Sound', ar: 'الصوت' },
+  soundOn: { en: 'Stadium sound', ar: 'صوت الملعب' },
+  mute: { en: 'Mute', ar: 'كتم الصوت' },
   crowdNoise: { en: 'Crowd', ar: 'صوت الجمهور' },
   volume: { en: 'Volume', ar: 'مستوى الصوت' },
+  volMaster: { en: 'Overall', ar: 'العام' },
+  volCrowd: { en: 'Crowd', ar: 'الجمهور' },
+  volSfx: { en: 'Effects', ar: 'المؤثرات' },
+  volAmb: { en: 'Weather', ar: 'الطقس' },
+  volDrum: { en: 'Drum', ar: 'الطبل' },
+  reactive: { en: 'Crowd follows the stadium fill', ar: 'صوت الجمهور يتبع امتلاء الملعب' },
+  weatherSound: { en: 'Weather you can hear', ar: 'صوت المطر والهواء' },
   drum: { en: 'Ultras drum', ar: 'طبل الألتراس' },
   tryRoar: { en: 'Roar', ar: 'هدير' },
   tryWhistle: { en: 'Whistle', ar: 'صافرة' },
+  tryApplause: { en: 'Applause', ar: 'تصفيق' },
+  tryHorn: { en: 'Air horn', ar: 'بوق' },
+  tryChant: { en: 'Chant', ar: 'هتاف' },
   soundBlocked: { en: 'This browser would not start audio. Click anywhere, then try again.', ar: 'المتصفح ما سمح بتشغيل الصوت. اضغط أي مكان وجرّب مرة ثانية.' },
   'tip.crowdNoise': { en: 'The stadium, synthesised — it swells on its own and roars when the tifo goes up', ar: 'صوت الملعب مولَّد — يعلو وينخفض لحاله ويهدر لما يطلع التيفو' },
+  'tip.soundOn': { en: 'The whole rig: crowd, effects, weather and drum. Nothing plays until you ask', ar: 'كل الأصوات: الجمهور والمؤثرات والطقس والطبل. ما يشتغل شي إلا لما تطلبه' },
+  'tip.mute': { en: 'Silence everything without losing where you set the faders', ar: 'اسكت كل شي بدون ما تفقد إعدادات المستويات' },
+  'tip.volMaster': { en: 'Everything at once, after the four below', ar: 'كل شي مرة وحدة، بعد الأربعة اللي تحت' },
+  'tip.volCrowd': { en: 'The bed, its swell, roars, applause and the chant', ar: 'الأرضية وتموجها والهدير والتصفيق والهتاف' },
+  'tip.volSfx': { en: 'Whistle, air horn, pyro, confetti, the floodlight contactor', ar: 'الصافرة والبوق والألعاب النارية والقصاصات وكشافات الملعب' },
+  'tip.volAmb': { en: 'Rain and wind, when the weather is set to them', ar: 'المطر والهواء، لما يكون الطقس عليهم' },
+  'tip.volDrum': { en: 'The terrace drum on its own — it is the most intrusive thing here', ar: 'طبل المدرج لحاله — هو أكثر شي يفرض نفسه هنا' },
+  'tip.reactive': { en: 'An empty stadium should not roar like a sell-out', ar: 'الملعب الفاضي ما يصير يهدر مثل الممتلئ' },
+  'tip.weatherSound': { en: 'Rain on the roof and wind round the bowl, following the Atmosphere setting', ar: 'صوت المطر والهواء، يتبع إعداد الأجواء' },
+  'tip.tryApplause': { en: 'Hands, not voices', ar: 'تصفيق، مو أصوات' },
+  'tip.tryHorn': { en: 'The one every away end owns exactly one of', ar: 'البوق اللي ما يخلو منه مدرج ضيوف' },
+  'tip.tryChant': { en: 'One call-and-response cycle, over the drum', ar: 'دورة هتاف وحدة، فوق الطبل' },
   'tip.drum': { en: 'The terrace drum behind the crowd, about 96 beats a minute', ar: 'طبل المدرج خلف الجمهور، حوالي ٩٦ نبضة في الدقيقة' },
   recordNotUniversal: {
     en: 'This browser could not record H.264, so the file may not open on every device.',
@@ -417,8 +450,82 @@ interface SimState {
   wet: boolean;
   sparkles: boolean;
   sound: boolean;
-  volume: number;
+  muted: boolean;
+  levels: SoundLevels;
   drum: boolean;
+  reactive: boolean;
+  weatherSound: boolean;
+}
+
+/**
+ * What the Sound section remembers.
+ *
+ * One key holding one object, parsed defensively, because the last shape of
+ * this was a bare number under `mds_volume` read back with
+ * `Number(localStorage.getItem(...))` — and `Number(null)` is `0`, which passed
+ * every guard it was given. The result was that **every visitor who had never
+ * touched the slider got master volume 0**, so the crowd, the drum, the roar
+ * and the whistle were all wired up correctly and all completely silent. Nothing
+ * below reaches `Number()` without a `typeof` check first.
+ */
+interface SoundPrefs {
+  levels: SoundLevels;
+  muted: boolean;
+  drum: boolean;
+  reactive: boolean;
+  weather: boolean;
+}
+
+const SOUND_KEY = 'mds_sound_v1';
+/** The shape before this: a bare 0..1 master volume. Honoured once, then migrated. */
+const LEGACY_VOLUME_KEY = 'mds_volume';
+
+function readSoundPrefs(): SoundPrefs {
+  const base: SoundPrefs = {
+    levels: { ...DEFAULT_LEVELS },
+    muted: false,
+    drum: true,
+    reactive: true,
+    weather: true,
+  };
+  const num = (v: unknown, fallback: number): number =>
+    typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 1 ? v : fallback;
+  const bool = (v: unknown, fallback: boolean): boolean => (typeof v === 'boolean' ? v : fallback);
+  let raw: string | null = null;
+  try {
+    raw = localStorage.getItem(SOUND_KEY);
+    if (raw === null) {
+      // Somebody who did move the old slider keeps where they put it.
+      const legacy = localStorage.getItem(LEGACY_VOLUME_KEY);
+      if (legacy !== null && legacy !== '') {
+        const v = Number(legacy);
+        if (Number.isFinite(v) && v > 0 && v <= 1) base.levels.master = v;
+      }
+      return base;
+    }
+  } catch {
+    return base; // private mode: the defaults are the point
+  }
+  try {
+    const p = JSON.parse(raw) as Partial<SoundPrefs> | null;
+    if (!p || typeof p !== 'object') return base;
+    const lv = p.levels as Partial<SoundLevels> | undefined;
+    return {
+      levels: {
+        master: num(lv?.master, base.levels.master),
+        crowd: num(lv?.crowd, base.levels.crowd),
+        sfx: num(lv?.sfx, base.levels.sfx),
+        amb: num(lv?.amb, base.levels.amb),
+        drum: num(lv?.drum, base.levels.drum),
+      },
+      muted: bool(p.muted, base.muted),
+      drum: bool(p.drum, base.drum),
+      reactive: bool(p.reactive, base.reactive),
+      weather: bool(p.weather, base.weather),
+    };
+  } catch {
+    return base; // corrupt JSON is the same answer as no JSON
+  }
 }
 
 export function openMatchDaySimulator(
@@ -456,8 +563,19 @@ export function openMatchDaySimulator(
     // Off, like the phone flashes. Sound that starts by itself is hostile, and
     // the browser will refuse it outside a gesture anyway.
     sound: false,
-    volume: 0.6,
-    drum: true,
+    ...(() => {
+      const p = readSoundPrefs();
+      return { muted: p.muted, levels: p.levels, drum: p.drum, reactive: p.reactive, weatherSound: p.weather };
+    })(),
+  };
+
+  const saveSound = (): void => {
+    try {
+      localStorage.setItem(SOUND_KEY, JSON.stringify({
+        levels: state.levels, muted: state.muted, drum: state.drum,
+        reactive: state.reactive, weather: state.weatherSound,
+      } satisfies SoundPrefs));
+    } catch { /* private mode: the session keeps it, the next one does not */ }
   };
 
   /**
@@ -563,14 +681,22 @@ export function openMatchDaySimulator(
   const confettiBtn = btn(L('confetti'));
   const pyroBtn = btn(L('pyro'));
   const soundChk = chk(state.sound);
-  try {
-    const saved = Number(localStorage.getItem('mds_volume'));
-    if (Number.isFinite(saved) && saved >= 0 && saved <= 1) state.volume = saved;
-  } catch { /* private mode: the default is fine */ }
-  const volRange = rng(0, 1, state.volume, 0.05);
+  const muteChk = chk(state.muted);
+  const reactChk = chk(state.reactive);
+  const weatherSndChk = chk(state.weatherSound);
   const drumChk = chk(state.drum);
+  const lvl: Record<'master' | SoundBus, HTMLInputElement> = {
+    master: rng(0, 1, state.levels.master, 0.05),
+    crowd: rng(0, 1, state.levels.crowd, 0.05),
+    sfx: rng(0, 1, state.levels.sfx, 0.05),
+    amb: rng(0, 1, state.levels.amb, 0.05),
+    drum: rng(0, 1, state.levels.drum, 0.05),
+  };
   const roarBtn = btn(L('tryRoar'));
   const whistleBtn = btn(L('tryWhistle'));
+  const applauseBtn = btn(L('tryApplause'));
+  const hornBtn = btn(L('tryHorn'));
+  const chantBtn = btn(L('tryChant'));
   const secAtmo = section(ICONS.atmosphere, L('atmo'), false);
   secAtmo.body.append(
     field(L('timeOfDay'), todSel),
@@ -590,12 +716,26 @@ export function openMatchDaySimulator(
   // Sound gets its own section rather than a line in Atmosphere: it is the one
   // control on this panel that makes a noise in a room, so it should be easy to
   // find and easier to turn off.
+  //
+  // Five faders, not one. "Louder" is several different requests — the crowd up
+  // and the drum down for a clip, the whole thing at 10% at 2am, the roar
+  // landing on a projector — and a single master could answer none of them.
   const secSound = section(ICONS.sound, L('sound'), false);
   secSound.body.append(
-    checkField(L('crowdNoise'), soundChk),
-    field(L('volume'), volRange),
+    checkField(L('soundOn'), soundChk),
+    checkField(L('mute'), muteChk),
+    levelField(L('volMaster'), lvl.master),
+    divider(),
+    levelField(L('volCrowd'), lvl.crowd),
+    levelField(L('volSfx'), lvl.sfx),
+    levelField(L('volAmb'), lvl.amb),
     checkField(L('drum'), drumChk),
-    row(roarBtn, whistleBtn),
+    levelField(L('volDrum'), lvl.drum),
+    divider(),
+    checkField(L('reactive'), reactChk),
+    checkField(L('weatherSound'), weatherSndChk),
+    row(roarBtn, applauseBtn, chantBtn),
+    row(hornBtn, whistleBtn),
   );
 
   // Tifo Assets
@@ -701,6 +841,13 @@ export function openMatchDaySimulator(
 
   const actionsHost = document.createElement('div'); // holds barActions on mobile
   actionsHost.className = 'mds-panel-acts';
+  // A stable name per section, so a test (or a deep link, later) can find one
+  // without matching its heading — which is translated, and which is exactly
+  // the kind of coupling that makes an Arabic run fail for no real reason.
+  for (const [key, sec] of [
+    ['camera', secCam], ['crowd', secCrowd], ['atmosphere', secAtmo], ['sound', secSound],
+    ['assets', secAssets], ['choreo', secChoreo], ['record', secRecord],
+  ] as [string, { root: HTMLElement }][]) sec.root.dataset.sec = key;
   panel.append(actionsHost, secCam.root, secCrowd.root, secAtmo.root, secSound.root, secAssets.root, secChoreo.root, secRecord.root);
   overlay.append(bar, panel, host);
   document.body.appendChild(overlay);
@@ -801,7 +948,18 @@ export function openMatchDaySimulator(
     [stairsChk, 'tip.stairs'],
     [wetChk, 'tip.wet'],
     [sparklesChk, 'tip.sparkles'],
-    [soundChk, 'tip.crowdNoise'],
+    [soundChk, 'tip.soundOn'],
+    [muteChk, 'tip.mute'],
+    [lvl.master, 'tip.volMaster'],
+    [lvl.crowd, 'tip.volCrowd'],
+    [lvl.sfx, 'tip.volSfx'],
+    [lvl.amb, 'tip.volAmb'],
+    [lvl.drum, 'tip.volDrum'],
+    [reactChk, 'tip.reactive'],
+    [weatherSndChk, 'tip.weatherSound'],
+    [applauseBtn, 'tip.tryApplause'],
+    [hornBtn, 'tip.tryHorn'],
+    [chantBtn, 'tip.tryChant'],
     [drumChk, 'tip.drum'],
     [confettiBtn, 'tip.confetti'],
     [pyroBtn, 'tip.pyro'],
@@ -838,6 +996,23 @@ export function openMatchDaySimulator(
     assets.forEach((a, i) => opt(assetSel, a.id, a.type + ' ' + (i + 1), false));
     assetSel.value = sim.selectedAssetId ?? '';
   }
+  /**
+   * Push every sound setting at the rig.
+   *
+   * A function declaration rather than a const, because `applyState` below
+   * calls it and `applyState` runs from `mount()` — long before the wiring
+   * section further down has been reached.
+   */
+  function applySound(): void {
+    for (const k of ['master', 'crowd', 'sfx', 'amb', 'drum'] as ('master' | SoundBus)[]) {
+      sim.setSoundLevel(k, state.levels[k]);
+    }
+    sim.setSoundMuted(state.muted);
+    sim.setCrowdReactive(state.reactive);
+    sim.setWeatherSound(state.weatherSound);
+    sim.setDrum(state.sound && state.drum);
+  }
+
   function applyState(): void {
     const shots = sim.shots();
     if (camSel.options.length !== shots.length) {
@@ -860,6 +1035,14 @@ export function openMatchDaySimulator(
     sim.setSparkles(state.sparkles);
     sim.setAutoReveal(state.reveal);
     if (!state.fly) sim.applyShot(shots[state.camIdx] ?? shots[0]);
+    // Changing the quality tier disposes the simulator and builds a new one,
+    // and the new one's atmosphere starts silent and at its defaults. Without
+    // this, dropping from High to Medium halfway through turned the sound off
+    // and left the checkbox saying it was on.
+    applySound();
+    if (state.sound && !sim.soundOn()) {
+      void sim.setSound(true).then(() => { if (sim.soundOn()) applySound(); });
+    }
   }
   /**
    * True once a simulator instance exists and is safe to talk to.
@@ -1060,24 +1243,44 @@ export function openMatchDaySimulator(
         toast(L('soundBlocked'));
         return;
       }
-      sim.setSoundVolume(state.volume);
-      sim.setDrum(state.sound && state.drum);
+      applySound();
     })();
   });
-  volRange.addEventListener('input', () => {
-    state.volume = Number(volRange.value);
-    sim.setSoundVolume(state.volume);
-    // Remembered, unlike the on/off. How loud someone wants it is a preference;
-    // whether a page starts making noise is not a decision to make for them on
-    // their behalf a second time.
-    try { localStorage.setItem('mds_volume', String(state.volume)); } catch { /* private mode */ }
+  muteChk.addEventListener('change', () => {
+    state.muted = muteChk.checked;
+    sim.setSoundMuted(state.muted);
+    saveSound();
   });
+  for (const k of ['master', 'crowd', 'sfx', 'amb', 'drum'] as ('master' | SoundBus)[]) {
+    lvl[k].addEventListener('input', () => {
+      state.levels[k] = Number(lvl[k].value);
+      sim.setSoundLevel(k, state.levels[k]);
+      // Remembered, unlike the on/off. How loud someone wants it is a
+      // preference; whether a page starts making noise is not a decision to
+      // make for them on their behalf a second time.
+      saveSound();
+    });
+  }
   drumChk.addEventListener('change', () => {
     state.drum = drumChk.checked;
     sim.setDrum(state.sound && state.drum);
+    saveSound();
+  });
+  reactChk.addEventListener('change', () => {
+    state.reactive = reactChk.checked;
+    sim.setCrowdReactive(state.reactive);
+    saveSound();
+  });
+  weatherSndChk.addEventListener('change', () => {
+    state.weatherSound = weatherSndChk.checked;
+    sim.setWeatherSound(state.weatherSound);
+    saveSound();
   });
   roarBtn.addEventListener('click', () => sim.roar(1));
   whistleBtn.addEventListener('click', () => sim.whistle());
+  applauseBtn.addEventListener('click', () => sim.applause(1));
+  hornBtn.addEventListener('click', () => sim.airhorn());
+  chantBtn.addEventListener('click', () => sim.chant());
 
   sparklesChk.addEventListener('change', () => {
     state.sparkles = sparklesChk.checked;
@@ -1405,8 +1608,14 @@ function rng(min: number, max: number, val: number, step = 1): HTMLInputElement 
   r.type = 'range';
   r.min = String(min);
   r.max = String(max);
-  r.value = String(val);
+  // `step` BEFORE `value`. A range input sanitises whatever you assign against
+  // the step it has at that moment, and the default step is 1 — so setting
+  // `value = '0.7'` first and `step = '0.05'` second stores 1, silently, and
+  // the slider opens at the far right. Every fader in the Sound section read
+  // 100% because of this, and the exposure slider was landing on 1.4 instead
+  // of 1.05 for the same reason.
   r.step = String(step);
+  r.value = String(val);
   r.className = 'mds-range';
   return r;
 }
@@ -1423,6 +1632,31 @@ function field(label: string, ctrl: HTMLElement): HTMLElement {
   const l = document.createElement('div');
   l.className = 'mds-flabel';
   l.textContent = label;
+  d.append(l, ctrl);
+  return d;
+}
+/**
+ * A fader with its own number on it.
+ *
+ * A row of five unlabelled sliders is a mixing desk with the scribble strip
+ * torn off: you can tell they are at different heights and not what any of them
+ * is set to, and "is the drum at 20% or off?" is exactly the question these are
+ * here to answer. The readout follows the input event, so it is right while the
+ * thumb is still moving.
+ */
+function levelField(label: string, ctrl: HTMLInputElement): HTMLElement {
+  const d = document.createElement('div');
+  d.className = 'mds-field';
+  const l = document.createElement('div');
+  l.className = 'mds-flabel mds-flabel-row';
+  const name = document.createElement('span');
+  name.textContent = label;
+  const val = document.createElement('span');
+  val.className = 'mds-fval';
+  const show = (): void => { val.textContent = Math.round(Number(ctrl.value) * 100) + '%'; };
+  show();
+  ctrl.addEventListener('input', show);
+  l.append(name, val);
   d.append(l, ctrl);
   return d;
 }

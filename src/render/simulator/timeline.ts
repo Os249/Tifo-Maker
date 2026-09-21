@@ -25,6 +25,10 @@ export type EffectName =
   // that arrives half a second after the tifo does is worse than no roar.
   | 'roar'
   | 'whistle'
+  | 'whistle-long'
+  | 'applause'
+  | 'chant'
+  | 'airhorn'
   | 'drum-on'
   | 'drum-off';
 

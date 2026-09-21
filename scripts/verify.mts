@@ -582,6 +582,23 @@ import { buildStadium as siBuild } from '../src/core/stadiumFit';
   if (!gotH264.universal) throw new Error('H.264 inside MP4 is the universal case');
   if (describeRecording('video/webm;codecs=vp9', asked).extension !== 'webm') throw new Error('the extension must follow the negotiated container, not the request');
 
+  // The clip carries the crowd. A mime naming a video codec and no audio codec
+  // records the picture and silently drops the sound, which is a file that
+  // looks right and plays silent — and is what every Match Day clip was until
+  // the audio track was added to the recorder's stream.
+  const av = pickRecordingFormat(() => true, true);
+  console.log(`reveal video: with an audio track, a browser that supports everything records ${av?.mimeType}`);
+  if (!/mp4a/.test(av?.mimeType ?? '')) throw new Error('an audio-bearing clip must name an audio codec when the browser has one');
+  if (av?.extension !== 'mp4' || !av.universal) throw new Error('audio must not change the container preference');
+  const webmAv = pickRecordingFormat(only('video/webm;codecs=vp9,opus', 'video/webm'), true);
+  if (!/opus/.test(webmAv?.mimeType ?? '')) throw new Error('WebM takes Opus, not AAC');
+  // A browser with H.264 but no AAC records the picture rather than refusing
+  // the clip or dropping to WebM over one codec.
+  const noAac = pickRecordingFormat(only('video/mp4;codecs=avc1.42E01E'), true);
+  if (noAac?.mimeType !== 'video/mp4;codecs=avc1.42E01E') throw new Error('a missing audio codec must fall back to video-only in the same container');
+  // And the silent path is byte-for-byte what it was.
+  if (pickRecordingFormat(() => true)?.mimeType !== 'video/mp4;codecs=avc1.42E01E') throw new Error('asking without audio must be unchanged');
+
   // The old behaviour, as a regression. A flat 8 Mbps made a 9-second clip 9 MB
   // and a 15-second one 15, whatever was in it.
   const before = (9 * 8_000_000) / 8;
@@ -704,15 +721,50 @@ import { buildStadium as siBuild } from '../src/core/stadiumFit';
   // broken feature rather than a refused one.
   const lazyCtx = /if \(!ctx\) \{\s*\n\s*ctx = new AudioCtor\(\)/.test(atmoSrc);
   const refused = /soundBlocked/.test(overlaySrc2);
-  // Volume is remembered; the on/off is not. Whether a page starts making noise
-  // is not a decision to make on someone's behalf a second time.
-  const volumeKept = /localStorage\.setItem\('mds_volume'/.test(overlaySrc2);
-  const onNotKept = !/localStorage[^\n]*mds_sound|mds_sound[^\n]*localStorage/.test(overlaySrc2);
+  // The mix is remembered; the on/off is not. Whether a page starts making
+  // noise is not a decision to make on someone's behalf a second time.
+  const mixKept = /localStorage\.setItem\(SOUND_KEY/.test(overlaySrc2);
+  const saved = /localStorage\.setItem\(SOUND_KEY, JSON\.stringify\(\{([\s\S]*?)\}\s*satisfies/.exec(overlaySrc2)?.[1] ?? '';
+  const onNotKept = saved !== '' && !/\bsound\s*:/.test(saved);
+  /**
+   * The regression that made this whole pass necessary.
+   *
+   * `Number(localStorage.getItem('mds_volume'))` is `0` when nothing is stored,
+   * and `0` satisfied `Number.isFinite(v) && v >= 0 && v <= 1` — so the master
+   * gain was set to zero for every visitor who had never dragged the slider,
+   * and the entire sound system was correctly wired and completely silent.
+   * Nothing may go from getItem straight into Number() again.
+   */
+  // Comments stripped first: the docblock that explains the bug quotes the
+  // exact expression it is banning, and a guard that its own explanation trips
+  // is a guard nobody can keep.
+  const overlayCode = overlaySrc2.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/[^\n]*/g, '$1');
+  const noRawNumber = !/Number\(\s*localStorage\.getItem/.test(overlayCode);
+  // And nothing may default to zero, either.
+  const defaults = /DEFAULT_LEVELS[\s\S]*?\};/.exec(atmoSrc)?.[0] ?? '';
+  const loudDefaults = defaults !== '' && !/:\s*0\s*,/.test(defaults);
   console.log('crowd sound: off by default', offByDefault, '| context built in the gesture', lazyCtx,
-    '| says so when the browser refuses', refused, '| volume remembered', volumeKept, '| on-state never remembered', onNotKept);
-  if (!offByDefault || !lazyCtx || !refused || !volumeKept || !onNotKept) {
-    throw new Error('crowd sound must stay opt-in, gesture-started, and honest when blocked');
+    '| says so when the browser refuses', refused, '| mix remembered', mixKept,
+    '| on-state never remembered', onNotKept, '| no getItem straight into Number', noRawNumber,
+    '| no level defaults to zero', loudDefaults);
+  if (!offByDefault || !lazyCtx || !refused || !mixKept || !onNotKept || !noRawNumber || !loudDefaults) {
+    throw new Error('crowd sound must stay opt-in, gesture-started, honest when blocked, and audible out of the box');
   }
+
+  // Four buses and a master, each reachable from the panel. "Louder" is several
+  // different requests and one fader answered none of them.
+  const buses = ['master', 'crowd', 'sfx', 'amb', 'drum'];
+  const missingBus = buses.filter((b) => !new RegExp(`\\b${b}\\s*:\\s*rng\\(0, 1,`).test(overlaySrc2));
+  if (missingBus.length) throw new Error(`no fader for sound bus: ${missingBus.join(', ')}`);
+  // A range input sanitises against the step it has at assignment time, so a
+  // fractional default with the step set afterwards silently becomes the max.
+  const stepFirst = /r\.step = String\(step\);\s*\n\s*r\.value = String\(val\);/.test(overlaySrc2);
+  if (!stepFirst) throw new Error('rng() must set step before value, or every fractional slider opens at 100%');
+  // The effects that used to happen in silence.
+  for (const [name, call] of [['confetti', 'atmosphere.confetti'], ['pyro', 'atmosphere.pyro'], ['floodlights', 'atmosphere.floodlights']] as [string, string][]) {
+    if (!simSrc2.includes(call)) throw new Error(`${name} still fires without a sound`);
+  }
+  console.log(`crowd sound: ${buses.length} faders, and confetti/pyro/floodlights all make a noise`);
 
   // The roar is a choreography cue, not a setting: it has to land on the
   // finished tifo. A roar at the start of the reveal is a crowd cheering at
@@ -726,7 +778,9 @@ import { buildStadium as siBuild } from '../src/core/stadiumFit';
   }
 
   // Both languages, like every other label on that panel.
-  for (const k of ['sound', 'crowdNoise', 'volume', 'drum', 'soundBlocked', 'tip.crowdNoise']) {
+  for (const k of ['sound', 'soundOn', 'mute', 'crowdNoise', 'volume', 'volMaster', 'volCrowd', 'volSfx',
+    'volAmb', 'volDrum', 'reactive', 'weatherSound', 'drum', 'tryApplause', 'tryHorn', 'tryChant',
+    'soundBlocked', 'tip.crowdNoise', 'tip.soundOn', 'tip.volCrowd', 'tip.reactive']) {
     const row2 = new RegExp(`'?${k.replace('.', '\\.')}'?\\s*:\\s*\\{.*$`, 'm').exec(overlaySrc2)?.[0] ?? '';
     if (!/\ben:/.test(row2) || !/\bar:/.test(row2)) throw new Error(`sound string "${k}" is missing a translation`);
   }

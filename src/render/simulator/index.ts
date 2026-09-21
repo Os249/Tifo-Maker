@@ -28,7 +28,24 @@ import { buildJewelCrown } from './jewelCrown';
 import { buildAlAwwalExtras, buildKingdomArenaExtras } from './stadiumExtras';
 import { buildPitchDetail, pitchStripeTexture } from './pitchDetail';
 import { dbg } from './debug';
-import { buildAtmosphere, type Atmosphere } from './atmosphere';
+import { buildAtmosphere, type Atmosphere, type SoundBus, type SoundLevels } from './atmosphere';
+
+/**
+ * How full each crowd preset leaves the ground, for the mixer.
+ *
+ * The same numbers `crowd.ts` builds the instances from — duplicated rather
+ * than exported because the two are answering different questions (how many
+ * people to draw, how loud they are) and the day one of them wants a different
+ * curve is the day sharing a constant becomes a problem. If they drift, the
+ * drift is visible in one screen of code.
+ */
+const PRESET_FILL: Record<CrowdPreset, number> = {
+  sellout: 0.97,
+  home: 0.9,
+  'away-end': 0.88,
+  half: 0.5,
+  empty: 0,
+};
 
 /**
  * Match Day Stadium Simulator — Phase 0 core (the HIGH/ULTRA renderer).
@@ -518,11 +535,30 @@ export class MatchDaySimulator {
   }
 
   // ---- crowd (Phase 2) ----
+  /**
+   * How full the bowl is, as the mixer hears it.
+   *
+   * `crowdReactive` is what the checkbox turns off; `crowdFill` is what the
+   * scene last said. Keeping both means switching the checkback on does not
+   * need the density slider touched again to take effect.
+   */
+  private crowdFill = PRESET_FILL.sellout;
+  private crowdReactive = true;
+  private weatherSound = true;
+  private weatherNow: Weather = 'clear';
+
+  private pushCrowdFill(f: number): void {
+    this.crowdFill = Math.max(0, Math.min(1, f));
+    this.atmosphere.setCrowdFill(this.crowdReactive ? this.crowdFill : 1);
+  }
+
   setCrowdDensity(f: number): void {
     this.crowd.setDensity(f);
+    this.pushCrowdFill(f);
   }
   setCrowdPreset(p: CrowdPreset): void {
     this.crowd.setPreset(p);
+    this.pushCrowdFill(PRESET_FILL[p] ?? 1);
   }
   setCrowdShowOnTifo(b: boolean): void {
     this.crowd.setShowOnTifo(b);
@@ -550,6 +586,9 @@ export class MatchDaySimulator {
   // ---- effects (Phase 5) ----
   setFloodlights(b: boolean): void {
     this.effects.setFloodlights(b);
+    // The contactor. Stadium lights are one of the few things on this panel
+    // that everybody has heard as well as seen.
+    this.atmosphere.floodlights(b);
   }
 
   /**
@@ -577,19 +616,55 @@ export class MatchDaySimulator {
     return { meshes, spotLights, lamps, instances };
   }
 
-  // ---- crowd sound (see ./atmosphere.ts) ----
+  // ---- sound (see ./atmosphere.ts) ----
   /** Must be called from a user gesture the first time, or the browser refuses. */
   async setSound(on: boolean): Promise<void> {
     await this.atmosphere.setEnabled(on);
+    if (on) {
+      // Catch the rig up on everything it missed while it was off: the ground
+      // may have been emptied and the weather changed three times before
+      // anybody turned the sound on.
+      this.atmosphere.setCrowdFill(this.crowdFill);
+      this.atmosphere.setWeatherBed(this.weatherSound ? this.weatherNow : 'clear');
+    }
   }
   soundOn(): boolean { return this.atmosphere.isEnabled(); }
-  setSoundVolume(v: number): void { this.atmosphere.setVolume(v); }
-  soundVolume(): number { return this.atmosphere.getVolume(); }
+  setSoundLevel(b: 'master' | SoundBus, v: number): void { this.atmosphere.setLevel(b, v); }
+  soundLevels(): SoundLevels { return this.atmosphere.getLevels(); }
+  setSoundMuted(m: boolean): void { this.atmosphere.setMuted(m); }
+  soundMuted(): boolean { return this.atmosphere.isMuted(); }
   setDrum(on: boolean): void { this.atmosphere.setDrum(on); }
   drumOn(): boolean { return this.atmosphere.isDrumming(); }
-  /** For the overlay's "try it" button, and for anything that wants a cheer. */
+
+  /**
+   * Whether the crowd's level follows how full the ground is.
+   *
+   * On by default, because an empty stadium that roars like a sell-out is the
+   * audio version of painting a crowd onto empty seats. Off for anyone who
+   * wants the soundtrack regardless of what the bowl is showing.
+   */
+  setCrowdReactive(b: boolean): void {
+    this.crowdReactive = b;
+    // Through pushCrowdFill, which is the one place that knows the flag means
+    // "send 1 instead of the real fill". Setting the fill directly here made
+    // the checkbox one-way: it could quieten an empty ground and never bring
+    // it back.
+    this.pushCrowdFill(this.crowdFill);
+  }
+  crowdReactiveOn(): boolean { return this.crowdReactive; }
+  /** Whether rain and wind are audible. */
+  setWeatherSound(b: boolean): void {
+    this.weatherSound = b;
+    this.atmosphere.setWeatherBed(b ? this.weatherNow : 'clear');
+  }
+  weatherSoundOn(): boolean { return this.weatherSound; }
+
+  /** For the overlay's "try it" buttons, and for anything that wants a cheer. */
   roar(strength = 1): void { this.atmosphere.roar(strength); }
-  whistle(): void { this.atmosphere.whistle(); }
+  whistle(long = false): void { this.atmosphere.whistle(long); }
+  applause(strength = 1): void { this.atmosphere.applause(strength); }
+  chant(): void { this.atmosphere.chant(); }
+  airhorn(): void { this.atmosphere.airhorn(); }
 
   /** Phone-flash twinkle across the stands. Starts off; see the constructor. */
   setSparkles(b: boolean): void {
@@ -615,6 +690,8 @@ export class MatchDaySimulator {
   }
   setWeather(w: Weather): void {
     this.weather.setWeather(w);
+    this.weatherNow = w;
+    this.atmosphere.setWeatherBed(this.weatherSound ? w : 'clear');
   }
   setExposure(v: number): void {
     this.renderer.toneMappingExposure = v;
@@ -697,10 +774,29 @@ export class MatchDaySimulator {
     };
     drawFrame();
     const stream = comp.captureStream(fps);
+    /**
+     * The crowd goes in the file.
+     *
+     * Every clip this has ever produced was silent: `captureStream` on a canvas
+     * carries one video track and nothing else, so the thing people actually
+     * post — the reveal, the pyro, the roar — arrived with no roar. The
+     * atmosphere's own limiter is tapped into a MediaStreamDestination and its
+     * track is added here.
+     *
+     * Only when the sound is actually on. A suspended AudioContext produces a
+     * track that never delivers a buffer, and a recorder waiting on one can sit
+     * there producing nothing at all.
+     */
+    let audioTracks: MediaStreamTrack[] = [];
+    if (this.atmosphere.isEnabled()) {
+      const mix = this.atmosphere.captureStream();
+      audioTracks = mix ? mix.getAudioTracks() : [];
+      for (const track of audioTracks) stream.addTrack(track);
+    }
     // MP4 with H.264 where the browser has it, because that is what "a video"
     // means outside a browser — see pickRecordingFormat for the order and why
     // it names the codec rather than trusting video/mp4.
-    const asked = pickRecordingFormat();
+    const asked = pickRecordingFormat(undefined, audioTracks.length > 0);
     if (!asked) {
       cancelAnimationFrame(raf);
       this.recording = false;
@@ -731,6 +827,10 @@ export class MatchDaySimulator {
     recorder.stop();
     cancelAnimationFrame(raf);
     const blob = await finished;
+    // Detach, never stop: these tracks belong to the atmosphere's live output.
+    // `track.stop()` here would end them for good and leave every later
+    // recording — and the speakers — silent.
+    for (const track of audioTracks) stream.removeTrack(track);
     this.recording = false;
     return { blob, ...format };
   }
@@ -740,9 +840,14 @@ export class MatchDaySimulator {
   }
   burstConfetti(): void {
     this.effects.burstConfetti();
+    this.atmosphere.confetti();
+    // Paper goes up because something happened, and a crowd that watches it in
+    // silence is the wrong crowd.
+    this.atmosphere.applause(0.8);
   }
   burstPyro(): void {
     this.effects.burstPyro();
+    this.atmosphere.pyro();
   }
 
   // ---- tifo assets: banners / text / floor (Wave A) ----
@@ -1056,9 +1161,14 @@ export class MatchDaySimulator {
   buildAutoChoreo(): Timeline {
     const cues: Cue[] = [
       { kind: 'camera', start: 0, shot: 'TV Broadcast' },
+      // The referee's whistle opens it. Before this the show started on a drum
+      // with no reason for the drum to have started.
+      { kind: 'effect', start: 0, effect: 'whistle-long' },
       // The drum starts before anything is visible — that is the order it
       // happens in, and it is what makes the reveal feel like it was waited for.
       { kind: 'effect', start: 0, effect: 'drum-on' },
+      // And the stand answers it, over the drum, while the cards go up.
+      { kind: 'effect', start: 1.4, effect: 'chant' },
       { kind: 'reveal', start: 0.5, dur: 4, mode: this.autoReveal },
       // Timed to the END of the reveal, not the start. The crowd roars at the
       // finished tifo; a roar on the first row of cards is a crowd cheering at
@@ -1066,10 +1176,14 @@ export class MatchDaySimulator {
       { kind: 'effect', start: 4.2, effect: 'roar' },
       { kind: 'effect', start: 5, effect: 'smoke-on' },
       { kind: 'camera', start: 5.5, shot: 'Ultra View' },
+      { kind: 'effect', start: 7.2, effect: 'airhorn' },
       { kind: 'effect', start: 7.5, effect: 'pyro' },
       { kind: 'effect', start: 8.5, effect: 'confetti' },
       { kind: 'effect', start: 8.6, effect: 'roar' },
       { kind: 'camera', start: 11, shot: 'Drone' },
+      // The roar has four and a half seconds of tail; applause underneath it is
+      // how a crowd actually comes down off one, rather than stopping dead.
+      { kind: 'effect', start: 11.4, effect: 'applause' },
       { kind: 'effect', start: 13.5, effect: 'drum-off' },
     ];
     return { duration: 15, cues };
@@ -1106,14 +1220,21 @@ export class MatchDaySimulator {
       if (o !== undefined) this.assetLayer.setOpacity(a.id, o);
     }
     for (const e of st.firedEffects) {
-      if (e === 'confetti') this.effects.burstConfetti();
-      else if (e === 'pyro') this.effects.burstPyro();
+      // Through the wrappers, not straight at `this.effects` — the wrappers are
+      // where the sound of each of these lives, and a cue that fires the
+      // particles without the noise is the bug this whole pass is about.
+      if (e === 'confetti') this.burstConfetti();
+      else if (e === 'pyro') this.burstPyro();
       else if (e === 'smoke-on') this.effects.setSmoke(true);
       else if (e === 'smoke-off') this.effects.setSmoke(false);
-      else if (e === 'floods-on') this.effects.setFloodlights(true);
-      else if (e === 'floods-off') this.effects.setFloodlights(false);
+      else if (e === 'floods-on') this.setFloodlights(true);
+      else if (e === 'floods-off') this.setFloodlights(false);
       else if (e === 'roar') this.atmosphere.roar(1);
-      else if (e === 'whistle') this.atmosphere.whistle();
+      else if (e === 'whistle') this.atmosphere.whistle(false);
+      else if (e === 'whistle-long') this.atmosphere.whistle(true);
+      else if (e === 'applause') this.atmosphere.applause(1);
+      else if (e === 'chant') this.atmosphere.chant();
+      else if (e === 'airhorn') this.atmosphere.airhorn();
       else if (e === 'drum-on') this.atmosphere.setDrum(true);
       else if (e === 'drum-off') this.atmosphere.setDrum(false);
     }
@@ -1167,6 +1288,9 @@ export class MatchDaySimulator {
   private visBound = false;
   /** Pause the loop while the tab is hidden (saves battery / heat). */
   private readonly onVisibility = (): void => {
+    // The renderer already stopped here; the AudioContext did not, so until now
+    // switching tabs left a stadium roaring out of a tab nobody was looking at.
+    this.atmosphere.setSuspended(document.hidden);
     if (document.hidden) this.stop();
     else if (!this.disposed) this.start();
   };

@@ -120,13 +120,42 @@ const CANDIDATES: Array<{ mimeType: string; extension: 'mp4' | 'webm'; universal
 ];
 
 /**
+ * The audio codec that belongs in each container.
+ *
+ * AAC-LC in MP4 and Opus in WebM — the pairings every decoder that opens the
+ * container also handles. A mime type naming a video codec and no audio codec
+ * records a video track and silently drops the audio one, which is a clip that
+ * looks right and plays silent.
+ */
+const AUDIO_CODEC: Record<'mp4' | 'webm', string> = { mp4: 'mp4a.40.2', webm: 'opus' };
+
+/** `video/mp4;codecs=avc1.42E01E` -> `video/mp4;codecs=avc1.42E01E,mp4a.40.2` */
+function withAudio(mime: string, ext: 'mp4' | 'webm'): string {
+  const codec = AUDIO_CODEC[ext];
+  return mime.includes('codecs=') ? `${mime},${codec}` : `${mime};codecs=${codec}`;
+}
+
+/**
  * @param isSupported injected so this is testable in Node, where MediaRecorder
  *   does not exist. Defaults to the real thing in a browser.
+ * @param wantAudio true when the stream will carry an audio track. Each
+ *   candidate is then tried with its audio codec named first and without it
+ *   second, so a browser that cannot do AAC still records the picture rather
+ *   than refusing the whole clip — the fallback order is unchanged when false.
  */
-export function pickRecordingFormat(isSupported?: (mime: string) => boolean): RecordingFormat | null {
+export function pickRecordingFormat(
+  isSupported?: (mime: string) => boolean,
+  wantAudio = false,
+): RecordingFormat | null {
   const can = isSupported
     ?? ((m: string): boolean => typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported(m));
-  for (const c of CANDIDATES) if (can(c.mimeType)) return c;
+  for (const c of CANDIDATES) {
+    if (wantAudio) {
+      const av = withAudio(c.mimeType, c.extension);
+      if (can(av)) return { ...c, mimeType: av };
+    }
+    if (can(c.mimeType)) return c;
+  }
   return null;
 }
 
