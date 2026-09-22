@@ -14,7 +14,7 @@ So the model changed rather than the code. A banner now has a SLOT — a stand, 
 
 The shape is a pure function P(slot, u, v, t). For the sheet on the terracing every vertex is a point of the stand's own surface pushed out along that point's normal by a strictly positive amount, so it can no more be inside the seating than a decal can be inside a wall — for any size, any block, any tier, any ground, any frame. Nothing accumulates, so nothing resonates or explodes, and the same inputs give the same vertices to the bit. That deletes the cloth solver, the baked heightfield, the rope net and the lashing pass: 4,512 lines out, 2,908 in.
 
-Two types, both perfected: a stand banner over a run of blocks, and a hanging banner flown on ropes. A banner can stretch across two stands, carrying on round the corner into the next one.
+Two types, both perfected: a stand banner over a run of blocks, and a hanging banner flown on ropes. A banner can stretch across two stands, carrying on round the corner into the next one. Banners show in the editor's own 3D bowl as well as in Match Day, because a sheet you can only see by opening another view is a sheet you design blind.
 
 MEASUREMENT BUGS THE SWEEP FOUND BEFORE ANYTHING WAS RENDERED
 
@@ -44,7 +44,9 @@ GEOMETRY BUGS THE RENDERED SHOTS FOUND AFTER
 
 WHAT CHANGED IN THE PANEL
 
-Blocks, a tier, a shape and an across-stands choice, with the size as a readout in metres rather than a field to get wrong. "How many" stops where the banner stops growing, and says why. A tier is offered to a flown banner only when its fascia band is deep enough to hang anything in — measured across the catalogue that band is 3.3 to 3.5 m on most grounds, 0.8 m on two, and negative on one where the tiers overlap.
+Size presets named in blocks — one block, one block tall, two blocks, two blocks tall, four blocks — because a span and an aspect are the right things for the geometry to be built from and the wrong things to ask a person for. Each sets the run and the shape together, and they are gated against a built bowl rather than against their own numbers: a preset that draws the same sheet as the one above it is a menu entry that does nothing.
+
+Then blocks, a tier, a shape slider for sitting between the presets, and an across-stands choice, with the size as a readout in metres rather than a field to get wrong. "How many" stops where the banner stops growing, and says why. A tier is offered to a flown banner only when its fascia band is deep enough to hang anything in — measured across the catalogue that band is 3.3 to 3.5 m on most grounds, 0.8 m on two, and negative on one where the tiers overlap.
 
 A hanging banner over the whole stand or the lower tier reaches the grass and is fixed there; over an upper tier it fills the gap between that tier and the one below. Its reveal is an Aufziehfahne — hauled UP its ropes from a fixed hem.
 
@@ -60,4 +62,4 @@ IN-STAND, EXTENT, CHORD, OFFSET, FINITE, SAME, STILL — plus three added after 
 
 Partial reveals are swept too, at 37% as well as at rest: a sheet gathered near its top edge is a configuration the finished one never visits.
 
-verify 0 · build 0 · sweep 86,528 configurations 0 failures · e2e-banner 48 passed 0 failed · 30 shots
+verify 0 · build 0 · sweep 86,528 configurations 0 failures · e2e-banner 52 passed 0 failed · 30 shots

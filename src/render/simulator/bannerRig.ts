@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { BannerDoc, BannerStore, StandIndex } from '../../core/banner';
-import { revealEase } from '../../core/banner';
+import { revealEase, isOpaqueSheet } from '../../core/banner';
 import { bannerToCanvas, onBannerImageReady } from '../bannerRender';
 import type { StandFrame } from './standFrame';
 import { resolveSlot, type ResolvedSlot } from './bannerSlot';
@@ -211,6 +211,16 @@ export function buildBannerRigs(
     // the far side of a curve — while the diffuse half picks up the
     // floodlights and, with it, every fold the wave puts in the sheet.
     const tex = texture(doc);
+    // Opaque when the sheet is opaque.
+    //
+    // A solid banner with a background painted across it has no transparency
+    // anywhere, and drawing it in the transparent pass anyway left it at the
+    // mercy of render order — a stand full of seats showed faintly through
+    // the fabric. Opaque means it sorts with everything else and writes
+    // depth, so nothing behind it can reach the screen. Mesh fabric and a
+    // banner left on a transparent background still blend, because those
+    // really are see-through.
+    const opaque = isOpaqueSheet(doc);
     const mat = new THREE.MeshStandardMaterial({
       map: tex,
       emissive: 0xffffff,
@@ -219,8 +229,9 @@ export function buildBannerRigs(
       roughness: 0.94,
       metalness: 0,
       side: THREE.DoubleSide,
-      transparent: true,
-      alphaTest: 0.02,
+      transparent: !opaque,
+      alphaTest: opaque ? 0 : 0.02,
+      depthWrite: true,
     });
     const mesh = new THREE.Mesh(geo, mat);
     mesh.name = `banner-mesh:${doc.id}`;
@@ -420,6 +431,12 @@ export function buildBannerRigs(
       existing.slot = resolveSlot(doc, existing.frame);
       existing.durationS = revealSeconds(doc);
       existing.group.visible = doc.visible !== false;
+      const wantOpaque = isOpaqueSheet(doc);
+      if (existing.mat.transparent === wantOpaque) {
+        existing.mat.transparent = !wantOpaque;
+        existing.mat.alphaTest = wantOpaque ? 0 : 0.02;
+        existing.mat.needsUpdate = true;
+      }
       const key = textureKey(doc);
       if (key !== existing.texKey) {
         const t = texture(doc);

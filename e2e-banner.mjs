@@ -247,6 +247,66 @@ console.log('\n— the banner shows in the editor bowl —');
     !!withBanner && !!withoutBanner && withBanner.hash !== withoutBanner.hash,
     `${withBanner?.hash} vs ${withoutBanner?.hash}`,
   );
+  // The fabric is FABRIC, not a window.
+  //
+  // A solid banner with a background painted across it has no transparency
+  // anywhere, and it was being drawn in the transparent pass anyway — so the
+  // seats behind it showed faintly through, which is the one thing a sheet of
+  // cloth does not do. Checked in pixels, because that is the only place the
+  // symptom exists: give the banner a colour nothing else in the bowl uses,
+  // find where it lands, and require the middle of it to be that colour and
+  // nothing else.
+  await page.evaluate(() => {
+    const raw = localStorage.getItem('tifo_banners_v1');
+    const m = JSON.parse(raw);
+    for (const b of m.banners ?? []) { b.visible = true; b.bg = '#ff00ff'; b.material = 'solid'; }
+    localStorage.setItem('tifo_banners_v1', JSON.stringify(m));
+  });
+  await page.reload({ waitUntil: 'networkidle' });
+  await page.waitForTimeout(1500);
+  await page.click('#view-3d');
+  await page.waitForTimeout(9000);
+  const solid = await page.evaluate(() => {
+    const cv = document.querySelector('#preview-host canvas');
+    if (!cv) return null;
+    const c2 = document.createElement('canvas');
+    c2.width = cv.width;
+    c2.height = cv.height;
+    const g = c2.getContext('2d');
+    g.drawImage(cv, 0, 0);
+    const d = g.getImageData(0, 0, c2.width, c2.height).data;
+    const isBanner = (i) => d[i] > 110 && d[i + 2] > 110 && d[i + 1] < d[i] * 0.72;
+    let x0 = 1e9, y0 = 1e9, x1 = -1, y1 = -1, n = 0;
+    for (let y = 0; y < c2.height; y++) {
+      for (let x = 0; x < c2.width; x++) {
+        if (!isBanner((y * c2.width + x) * 4)) continue;
+        n++;
+        if (x < x0) x0 = x; if (x > x1) x1 = x;
+        if (y < y0) y0 = y; if (y > y1) y1 = y;
+      }
+    }
+    if (n < 400) return { found: n };
+    // The middle half of the sheet, away from its edges and its curvature.
+    const mx0 = Math.round(x0 + (x1 - x0) * 0.3);
+    const mx1 = Math.round(x0 + (x1 - x0) * 0.7);
+    const my0 = Math.round(y0 + (y1 - y0) * 0.3);
+    const my1 = Math.round(y0 + (y1 - y0) * 0.7);
+    let inside = 0;
+    let foreign = 0;
+    for (let y = my0; y <= my1; y++) {
+      for (let x = mx0; x <= mx1; x++) {
+        inside++;
+        if (!isBanner((y * c2.width + x) * 4)) foreign++;
+      }
+    }
+    return { found: n, inside, foreign, pct: inside ? foreign / inside : 1 };
+  });
+  check('the banner is found in the editor bowl', !!solid && solid.found > 400, JSON.stringify(solid));
+  check(
+    'nothing shows through the middle of the fabric',
+    !!solid && solid.inside > 0 && solid.pct < 0.02,
+    solid ? `${((solid.pct ?? 1) * 100).toFixed(1)}% of the middle is not the banner` : 'no reading',
+  );
   check('no page errors in the editor bowl', errs.length === 0, errs.join(' | '));
   await ctx.close();
 }

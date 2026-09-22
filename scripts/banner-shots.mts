@@ -40,6 +40,8 @@ interface Spec {
   tod?: 'day' | 'night';
   /** How many stands the run may stretch across. */
   stands?: number;
+  /** A plain field with no artwork, for the see-through check. */
+  plain?: boolean;
   label?: string;
   /**
    * Also write a second frame, most of a gust later.
@@ -83,6 +85,9 @@ const SHOTS: Spec[] = [
   // Close in at full wind on the stand that showed heads coming through the
   // fabric, and on the ground whose normal used to point downward.
   { name: 'crowd-close', ground: 'generic-bowl-60k', kind: 'stand', stand: 0, from: -1, span: 2, tier: -1, wind: 1, elevationDeg: 18, label: 'ALWAYS' },
+  // A plain sheet, close in. Any seat colour inside it is something showing
+  // through fabric that should be solid.
+  { name: 'opaque-check', ground: 'generic-bowl-60k', kind: 'stand', stand: 0, from: -1, span: 2, tier: -1, plain: true, elevationDeg: 22 },
   { name: 'wide-oval', ground: 'community-wide-oval-72k', kind: 'stand', stand: 1, from: 1, span: 4, tier: -1, wind: 1, label: 'OVAL' },
   // The same sheet carried round the corner into the next stand.
   { name: 'two-stands', ground: 'generic-bowl-60k', kind: 'stand', stand: 0, stands: 2, from: 5, span: 5, tier: -1, label: 'ONE CITY' },

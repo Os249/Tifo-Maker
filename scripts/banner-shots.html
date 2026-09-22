@@ -40,8 +40,10 @@
       // Something with a hard edge, a centre and a word on it, so a banner
       // that is stretched, mirrored or upside down is obvious rather than
       // plausible. A plain colour field looks correct in every orientation.
-      bg: '#101a3a',
-      items: (() => {
+      bg: spec.plain ? '#8a9a16' : '#101a3a',
+      // A plain field with nothing on it, for the see-through test: any colour
+      // inside the sheet that is not the field is something showing through.
+      items: spec.plain ? [] : (() => {
         const a = spec.aspect ?? 0.5;
         return [
           { id: 'f', kind: 'shape', shape: 'rect', cx: 0.5, cy: a / 2, w: 0.94, h: a - 0.06, rot: 0,

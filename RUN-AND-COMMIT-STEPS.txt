@@ -1,0 +1,106 @@
+Tifo Maker — banners rebuild: run it, then commit it
+=====================================================
+
+Everything is already in C:\Users\PCD\Desktop\tifo-maker. Nothing to bundle,
+nothing to download.
+
+
+PART 1 — LOOK AT IT (no commit, no build needed)
+------------------------------------------------
+
+1. Open PowerShell in the repo:
+
+       cd C:\Users\PCD\Desktop\tifo-maker
+
+2. Start the dev server:
+
+       npm run dev
+
+3. Open http://localhost:5173/  — that is the editor.
+
+   Leave this terminal running. It recompiles as you edit.
+
+4. OPTIONAL — only if you want save / account / community to work. In a
+   SECOND terminal:
+
+       npm run server
+
+   (The editor, the 3D view and Match Day all work without it. Only the API
+   calls need it.)
+
+You do NOT need to delete anything for this. `npm run dev` does not
+typecheck, and nothing in the live app imports the five dead files.
+
+
+PART 2 — WHAT TO CHECK
+----------------------
+
+In the Banner view:
+  - Size preset dropdown: one block / one block tall / two blocks /
+    two blocks tall / four blocks
+  - Shape slider (sits between the presets)
+  - Across: this stand, or two stands round the corner
+  - First block, how many, tier
+  - The size readout in metres under the pickers
+
+In the Stadium view (the 3D bowl in the editor):
+  - The banner should be there, solid, with visible folds
+
+In Match Day:
+  - Change the stand (W/E/N/S) — the banner should move
+  - Wind to max — the fabric should move, slightly
+  - Play the reveal: a stand banner unrolls DOWN, a hanging banner is
+    hauled UP from its hem
+  - Hanging banner: whole stand / lower tier reach the grass; upper tier
+    sits in the gap between the tiers
+
+
+PART 3 — COMMIT AND PUSH
+------------------------
+
+Only when you are happy with what you saw.
+
+1. Stop the dev server (Ctrl+C).
+
+2. Delete the five dead files. They are orphans — nothing imports them —
+   but `npm run build` typechecks the whole repo and will fail while they
+   are there:
+
+       git rm scripts/banner-physics.mts src/core/bannerMigrate.ts src/render/simulator/bannerFit.ts src/render/simulator/cloth.ts src/render/simulator/standHeightfield.ts
+
+3. Prove it builds:
+
+       npm run build
+       npm run verify
+
+   Optional but worth it once (about four minutes):
+
+       npm run sweep:banner
+
+4. Check which branch you are on:
+
+       git status
+
+   If you are on main and want this on its own branch:
+
+       git checkout -b banners-rebuild
+
+5. Stage and commit. The message is in BANNERS-REBUILD-COMMIT.txt in this
+   folder — Summary and Description are labelled separately in it:
+
+       git add -A
+       git commit
+
+   (Or paste the two parts into GitHub Desktop's Summary and Description
+   fields.)
+
+6. Push:
+
+       git push -u origin banners-rebuild
+
+
+IF THE BUILD FAILS
+------------------
+
+Send me the error. Most likely cause is one of the five files not deleted,
+or a file that did not copy across — I can check any file against my copy.

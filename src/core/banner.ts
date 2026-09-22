@@ -377,6 +377,25 @@ export function presetOf(doc: BannerDoc): string | null {
   return null;
 }
 
+/**
+ * Is this sheet solid all the way across?
+ *
+ * A banner with a painted background, or with a full-bleed fill over it, has
+ * no transparency anywhere — so it should be drawn as an OPAQUE object:
+ * sorted with the opaque pass, writing depth, unable to blend with whatever
+ * is behind it. Drawn as a transparent one it is at the mercy of render
+ * order, and a stand full of seats showed faintly through the fabric.
+ *
+ * Mesh fabric is never opaque — the perforation is the point of it — and
+ * neither is a banner left on a transparent background, which is a real
+ * choice: the terracing shows through, and some tifos are meant to.
+ */
+export function isOpaqueSheet(doc: BannerDoc): boolean {
+  if (doc.material === 'mesh') return false;
+  if (doc.bg !== null) return true;
+  return doc.items.some((it) => it.kind === 'fill' && !it.hidden);
+}
+
 /** Does this banner end up lying on top of the crowd (and its mosaic)? */
 export function occludesCrowd(doc: BannerDoc): boolean {
   return KIND_PROFILE[doc.kind].occludesCrowd;

@@ -111,6 +111,20 @@ export class Preview3D {
     this.rebuildPalette();
     this.seats = this.buildSeats();
     this.scene.add(this.seats);
+
+    // Light.
+    //
+    // The preview had NONE — the seats are `MeshBasicMaterial`, which ignores
+    // lighting, so nothing needed any until a banner arrived. A lit material
+    // in an unlit scene renders on its emissive term alone, which is how the
+    // fabric came out flat and washed. A hemisphere plus a key is enough to
+    // give the sheet its folds without touching the cards, which cannot see
+    // either of them.
+    const sky = new THREE.HemisphereLight(0xdfe8ff, 0x20242e, 2.1);
+    this.scene.add(sky);
+    const key = new THREE.DirectionalLight(0xffffff, 1.35);
+    key.position.set(90, 140, 60);
+    this.scene.add(key);
     this.buildEnvironment();
 
     // Palette swaps/edits must rebuild this view's color cache too — otherwise
