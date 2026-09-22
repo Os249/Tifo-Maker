@@ -114,8 +114,17 @@ export interface SurfaceEnv {
  * its rest place is the sum of these — a number I can state, rather than
  * whatever a solver happened to do that frame.
  */
-const WAVE_STILL_M = 0.05;
-const WAVE_WIND_M = 0.30;
+const WAVE_STILL_M = 0.06;
+/**
+ * At full wind.
+ *
+ * Reported as "no movement at all even at max", and the number is why: 30 cm
+ * of travel on a forty-metre sheet seen from across a pitch is about two
+ * pixels. The motion has to be a fraction of the BANNER to be visible, not a
+ * fraction of a metre — on a 40 m Blockfahne this is a sheet breathing by
+ * about a fiftieth of its own width, which is a slight move and nothing more.
+ */
+const WAVE_WIND_M = 1.1;
 
 /** How far the hem bows out between two ties. Eyelets go in every 50 cm. */
 const SCALLOP_TIED_M = 0.08;
@@ -124,6 +133,18 @@ const SCALLOP_HANDS_M = 0.22;
 
 /** Sag of a rope-hung top edge, as a fraction of its span. */
 const CATENARY_SAG_FRAC = 0.02;
+/**
+ * The most a top edge may dip, in metres, however long it is.
+ *
+ * Two per cent of the span is right for a banner slung between two corner
+ * ropes, and badly wrong for a long one: across a whole stand it came to
+ * 3.6 m of sag, which dropped a fascia banner straight out of the band it was
+ * meant to fill. Past a few tens of metres nobody hangs a sheet off two
+ * points — it is laced to the rail every metre or two, and what you see
+ * between the ties is a scallop, not a catenary. So the catenary is capped at
+ * about what one unsupported bay does.
+ */
+const CATENARY_SAG_MAX_M = 0.7;
 
 /**
  * The scallop between ties.
@@ -165,7 +186,12 @@ function freedom(u: number, v: number, bottomFree: boolean): number {
 function wave(xM: number, yM: number, t: number, amp: number): number {
   const a = Math.sin(xM * 0.42 + t * 1.7);
   const b = Math.sin((xM * 0.17 + yM * 0.31) + t * 1.1 + 2.3);
-  return amp * (0.62 * a + 0.38 * b);
+  // A third, very slow and very long: the sheet as a whole leaning in and out
+  // with the gust rather than only rippling within itself. Without it a
+  // banner shimmers in place and still reads as a rigid board, because
+  // nothing about it changes over the couple of seconds anyone looks at it.
+  const c = Math.sin(xM * 0.045 + t * 0.34 + 1.1);
+  return amp * (0.44 * a + 0.27 * b + 0.29 * c);
 }
 
 /**
@@ -299,14 +325,20 @@ function buildHanging(
   // dropped it straight down through every seat in the stand: in the shots it
   // simply did not appear, because it was inside the building.
   const mid = frame.pointAt((slot.u0 + slot.u1) / 2, slot.tier < 0 ? 0 : frame.tiers[slot.tier].v0);
-  const restY = hangAnchorY(frame, slot);
-  // Lowered from the roof during a reveal, in place at rest.
-  const fromY = Math.max(restY, frame.roofY);
-  const topY = fromY + (restY - fromY) * Math.max(0, Math.min(1, env.progress));
+  // The top edge does not move. The sheet is PAID OUT from it.
+  //
+  // It used to translate the whole banner down from the roof, which on a
+  // roof-hung sheet is a metre and a half of travel — invisible as a reveal,
+  // and with the bottom edge arriving before the top it read as rising rather
+  // than lowering. A banner lowered on ropes hangs from a fixed line and
+  // grows downward, so that is what this does: at zero it is a bundle at the
+  // rigging, at one it is the full drop.
+  const topY = hangAnchorY(frame, slot);
+  const paidOut = Math.max(0.0001, Math.min(1, env.progress));
   // Far enough out that the sheet hangs in front of everything below its
   // anchor, rather than through it.
   const standoff = hangStandoff(frame, slot);
-  const sag = CATENARY_SAG_FRAC * W;
+  const sag = Math.min(CATENARY_SAG_MAX_M, CATENARY_SAG_FRAC * W);
 
   let k = 0;
   for (let j = 0; j < SURF_ROWS; j++) {
@@ -316,7 +348,7 @@ function buildHanging(
       const s = (u - 0.5) * W;
       // The whole sheet hangs from the cable, so the cable's dip moves all of
       // it down — it is not a decoration on the top edge.
-      const y = topY - catenaryDip(u, W, sag) - v * H;
+      const y = topY - catenaryDip(u, W, sag) - v * H * paidOut;
       let off = standoff;
       // A weighted hem hangs straight; without one the bottom scallops as
       // freely as the sides do.

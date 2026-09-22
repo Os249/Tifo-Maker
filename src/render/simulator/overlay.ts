@@ -1096,21 +1096,23 @@ export function openMatchDaySimulator(
     // flag is what keeps a refresh from becoming an edit.
     bnSyncing = true;
     bnStand.value = String(a.slot.stand);
-    const shape = sim.standSlots(a.slot.stand);
+    const shape = sim.standSlots(a.slot.stand, a.id);
     const nb = Math.max(1, shape.blocks);
+    // Only the runs that actually make it bigger — see `maxUsefulSpan`.
+    const nSpan = Math.max(1, Math.min(nb, shape.maxSpan));
     bnBlock.replaceChildren();
     opt(bnBlock, '-1', L('blockCentred'), false);
     for (let i = 0; i < nb; i++) opt(bnBlock, String(i), L('blockN').replace('{n}', String(i + 1)), false);
     bnBlock.value = a.slot.blockFrom < 0 ? '-1' : String(Math.min(nb - 1, a.slot.blockFrom));
     bnSpan.replaceChildren();
-    for (let i = 1; i <= nb; i++) {
+    for (let i = 1; i <= nSpan; i++) {
       opt(bnSpan, String(i), i === 1 ? L('spanOne') : L('spanN').replace('{n}', String(i)), false);
     }
-    bnSpan.value = String(Math.max(1, Math.min(nb, a.slot.blockSpan)));
+    bnSpan.value = String(Math.max(1, Math.min(nSpan, a.slot.blockSpan)));
     bnTier.replaceChildren();
     opt(bnTier, '-1', L('tierAll'), false);
-    for (let i = 0; i < shape.tiers; i++) opt(bnTier, String(i), L('tierN').replace('{n}', String(i + 1)), false);
-    bnTier.value = String(a.slot.tier);
+    for (const i of shape.tierOptions) opt(bnTier, String(i), L('tierN').replace('{n}', String(i + 1)), false);
+    bnTier.value = shape.tierOptions.includes(a.slot.tier) ? String(a.slot.tier) : '-1';
     bnWind.value = String(Math.round(a.wind * 100));
     bnShow.checked = a.visible !== false;
     bnSyncing = false;

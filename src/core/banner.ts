@@ -912,20 +912,25 @@ export function revealEase(mode: BannerReveal, t: number): number {
     case 'unroll':
       return x * x * (1.7 - 0.7 * x);
     /**
-     * A mass on a rope: it arrives, overshoots once and settles.
+     * Rope paid out at a steady rate, then one small settle.
      *
-     * A damped harmonic oscillator rather than the usual "elastic" easing,
-     * whose first peak is early and enormous — measured, it threw the banner
-     * 36% PAST its rigging point before coming back, which for something on
-     * ropes reads as a mistake rather than as weight. This overshoots by
-     * about 8%, which is what a banner lowered onto its lines does.
+     * It used to be a damped harmonic — right for a rigid mass being lowered
+     * on lines, and wrong now that the sheet PAYS OUT from a fixed top edge
+     * rather than translating. A damped arrival is 97% complete a third of
+     * the way through, so the banner was simply there almost at once and the
+     * rest of the reveal was a settle nobody could see.
+     *
+     * A crew lowering a banner hauls at a roughly constant speed, and what
+     * moves at the end is the hem: it runs out of rope, swings, and takes up.
+     * So this is linear with a damped ripple in the last quarter, normalised
+     * so it still lands exactly on one.
      */
     case 'lower': {
       if (x <= 0) return 0;
       if (x >= 1) return 1;
-      const damped = (u: number): number =>
-        1 - Math.exp(-5 * u) * (Math.cos(6 * u) + (5 / 6) * Math.sin(6 * u));
-      return damped(x) / damped(1);
+      const settle = (u: number): number =>
+        (u <= 0.75 ? 0 : Math.exp(-14 * (u - 0.75)) * Math.sin(16 * (u - 0.75)) * 0.09);
+      return x + settle(x) - settle(1) * x;
     }
     case 'cut':
     default:

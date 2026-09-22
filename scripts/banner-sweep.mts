@@ -25,7 +25,9 @@
 import { generateSeatMap } from '../src/core/seatmap';
 import { templateById, STADIUM_CATALOG } from '../src/core/stadiumCatalog';
 import { buildStandFrame, type StandFrame } from '../src/render/simulator/standFrame';
-import { resolveSlot, slotsOf, crowdSupportM, type ResolvedSlot } from '../src/render/simulator/bannerSlot';
+import {
+  resolveSlot, slotsOf, crowdSupportM, hangSpan, type ResolvedSlot,
+} from '../src/render/simulator/bannerSlot';
 import {
   buildSurface, columnsU, maxOffsetM, SURF_VERTS, SURF_COLS, SURF_ROWS,
 } from '../src/render/simulator/bannerSurface';
@@ -33,6 +35,16 @@ import { newBanner, BANNER_KINDS, type BannerDoc, type StandIndex } from '../src
 
 const GROUNDS = process.env.GROUND ? [process.env.GROUND] : STADIUM_CATALOG.map((e) => e.template.id);
 const WINDS = [0, 0.5, 1];
+/**
+ * Where in its reveal to check it.
+ *
+ * One at the end, one a third of the way through. A partway reveal was never
+ * checked here and it is exactly where a banner can be somewhere it should
+ * not — a sheet gathered near its top edge is in a configuration the finished
+ * one never visits. The very first complaint in this whole saga was a banner
+ * going through the stand during its reveal.
+ */
+const PROGRESS = [1, 0.37];
 const CROWD = 0.97;
 
 /** Metres of fabric allowed inside the terracing. None. */
@@ -41,6 +53,15 @@ const IN_STAND_MAX = 0.001;
 const STILL_MAX = 0.05;
 /** Metres the flat mesh may cut inside the curve of the stand, mid-span. */
 const CHORD_MAX = 0.35;
+/**
+ * Metres a banner must move over a second at full wind.
+ *
+ * The lower bound nobody thought to write. Every check here was an upper
+ * bound — do not go inside the stand, do not exceed this size, do not jump
+ * between frames — so a banner that did not move AT ALL passed all of them
+ * perfectly, and that is what shipped: wind at maximum and the sheet a board.
+ */
+const MOVES_MIN = 0.25;
 
 interface Fail { where: string; what: string; detail: string }
 const fails: Fail[] = [];
@@ -122,9 +143,13 @@ for (const gid of GROUNDS) {
         slots++;
         const doc: BannerDoc = { ...newBanner(kind), slot };
         for (const wind of WINDS) {
+         for (const progress of PROGRESS) {
+          // The full battery only at rest; partway through, the checks that
+          // matter for a sheet in motion.
+          const full = progress === 1;
           const res = resolveSlot(doc, frame);
-          const env = { frame, crowdFill: CROWD, wind, progress: 1 };
-          const where = `${gid}/${stand}/${kind}/b${slot.blockFrom}+${slot.blockSpan}/t${slot.tier}/w${wind}`;
+          const env = { frame, crowdFill: CROWD, wind, progress };
+          const where = `${gid}/${stand}/${kind}/b${slot.blockFrom}+${slot.blockSpan}/t${slot.tier}/w${wind}${full ? '' : `/p${progress}`}`;
           checked++;
 
           buildSurface(doc, res, env, 3.0, a);
@@ -133,6 +158,24 @@ for (const gid of GROUNDS) {
           let bad = -1;
           for (let k = 0; k < a.length; k++) if (!Number.isFinite(a[k])) { bad = k; break; }
           if (bad >= 0) { fail(where, 'FINITE', `vertex ${(bad / 3) | 0}`); continue; }
+
+          if (!full) {
+            // Partway: nothing NaN, nothing in the stand. Extents are meant to
+            // be short here, so they are not checked.
+            if (kind === 'stand' && wind === 1) {
+              columnsU(res, frame, COL_U);
+              let worstIn = 0;
+              for (let j = 0; j < SURF_ROWS; j += 4) {
+                for (let i = 0; i < SURF_COLS; i += 5) {
+                  const k = (j * SURF_COLS + i) * 3;
+                  const c = clearanceAt(frame, COL_U[i], a[k], a[k + 1], a[k + 2]);
+                  if (-c > worstIn) worstIn = -c;
+                }
+              }
+              if (worstIn > IN_STAND_MAX) fail(where, 'IN-STAND', `${worstIn.toFixed(3)} m inside, mid-reveal`);
+            }
+            continue;
+          }
 
           // SAME — two evaluations must agree to the bit.
           buildSurface(doc, res, env, 3.0, b);
@@ -269,6 +312,47 @@ for (const gid of GROUNDS) {
           }
           if (move > STILL_MAX) fail(where, 'STILL', `${(move * 1000).toFixed(0)} mm in one frame`);
 
+          // MOVES — at full wind, the fabric is fabric.
+          if (wind === 1) {
+            buildSurface(doc, res, env, 3.0 + 0.9, b);
+            let moved = 0;
+            for (let k = 0; k < a.length; k += 3) {
+              const d = Math.hypot(a[k] - b[k], a[k + 1] - b[k + 1], a[k + 2] - b[k + 2]);
+              if (d > moved) moved = d;
+            }
+            if (moved < MOVES_MIN) {
+              fail(where, 'MOVES', `${(moved * 100).toFixed(0)} cm in a second at full wind`);
+            }
+          }
+
+          // HANG — a flown banner is in the air it was given, and no other.
+          //
+          // Over the whole stand or the lowest tier it reaches the grass and
+          // is fixed there; over an upper tier it lives in the gap between
+          // that tier and the one below, which is the one band of a stand
+          // with nobody sitting in it. Both were wrong: it used to hang from
+          // the BACK row and drop straight down through every seat, so it did
+          // not appear in a single rendered frame.
+          if (kind === 'hanging') {
+            const { topY, bottomY } = hangSpan(frame, res.tier);
+            let lo = Infinity;
+            let hi = -Infinity;
+            for (let k = 1; k < a.length; k += 3) {
+              if (a[k] < lo) lo = a[k];
+              if (a[k] > hi) hi = a[k];
+            }
+            const tol = 0.5 + maxOffsetM(wind);
+            if (hi > topY + tol) fail(where, 'HANG', `top at ${hi.toFixed(1)} m, above its ${topY.toFixed(1)} m rigging`);
+            if (lo < bottomY - tol) fail(where, 'HANG', `bottom at ${lo.toFixed(1)} m, below its ${bottomY.toFixed(1)} m floor`);
+            // Fixed where it is meant to be fixed, rather than floating.
+            const groundFixed = res.tier < 1 || res.tier >= frame.tiers.length;
+            const anchored = groundFixed ? lo : hi;
+            const want = groundFixed ? bottomY : topY;
+            if (Math.abs(anchored - want) > tol) {
+              fail(where, 'HANG', `${groundFixed ? 'bottom' : 'top'} at ${anchored.toFixed(1)} m, should be fixed at ${want.toFixed(1)} m`);
+            }
+          }
+
           // IN-STAND and OFFSET, at the top of the wind — the worst case, and
           // the only one worth paying the nearest-point search for.
           if (kind === 'stand' && wind === 1) {
@@ -287,6 +371,7 @@ for (const gid of GROUNDS) {
             if (worstIn > IN_STAND_MAX) fail(where, 'IN-STAND', `${worstIn.toFixed(3)} m inside`);
             if (worstOut > bound + 0.5) fail(where, 'OFFSET', `${worstOut.toFixed(2)} m out, bound ${bound.toFixed(2)} m`);
           }
+         }
         }
       }
     }

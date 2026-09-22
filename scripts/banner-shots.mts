@@ -39,6 +39,15 @@ interface Spec {
   elevationDeg?: number;
   tod?: 'day' | 'night';
   label?: string;
+  /**
+   * Also write a second frame, most of a gust later.
+   *
+   * For eyeballing the wind, which no single still can show. The GEOMETRY
+   * moving is proved by the sweep's MOVES check; what these two frames answer
+   * is whether you can SEE it, which is a question about the material as much
+   * as about the motion.
+   */
+  pair?: boolean;
 }
 
 /**
@@ -58,9 +67,23 @@ const SHOTS: Spec[] = [
   { name: 'lower-tier', ground: 'generic-bowl-60k', kind: 'stand', stand: 0, from: -1, span: 3, tier: 0, label: 'ULTRAS' },
   { name: 'tall-aspect', ground: 'generic-bowl-60k', kind: 'stand', stand: 0, from: -1, span: 1, tier: -1, aspect: 2.4, label: 'S' },
   { name: 'wide-aspect', ground: 'generic-bowl-60k', kind: 'stand', stand: 0, from: -1, span: 4, tier: -1, aspect: 0.18, label: 'FOREVER' },
-  { name: 'hanging-roof', ground: 'generic-bowl-60k', kind: 'hanging', stand: 0, from: -1, span: 2, tier: -1, label: 'CURVA' },
-  { name: 'hanging-tier', ground: 'generic-bowl-60k', kind: 'hanging', stand: 0, from: -1, span: 2, tier: 1, label: 'CURVA' },
-  { name: 'windy', ground: 'generic-bowl-60k', kind: 'stand', stand: 0, from: -1, span: 2, tier: -1, wind: 1, label: 'ALWAYS' },
+  { name: 'hanging-whole', ground: 'generic-bowl-60k', kind: 'hanging', stand: 0, from: -1, span: 2, tier: -1, label: 'CURVA' },
+  { name: 'hanging-lower', ground: 'generic-bowl-60k', kind: 'hanging', stand: 0, from: -1, span: 2, tier: 0, label: 'CURVA' },
+  { name: 'hanging-fascia', ground: 'generic-bowl-60k', kind: 'hanging', stand: 0, from: -1, span: 4, tier: 1, label: 'CURVA NORD' },
+  // Every stand, so "changing the stand does nothing" cannot come back
+  // unnoticed: the four frames have to be four different parts of the ground.
+  { name: 'stand-N', ground: 'generic-bowl-60k', kind: 'stand', stand: 0, from: -1, span: 2, tier: -1, label: 'NORD' },
+  { name: 'stand-E', ground: 'generic-bowl-60k', kind: 'stand', stand: 1, from: -1, span: 2, tier: -1, label: 'EST' },
+  { name: 'stand-S', ground: 'generic-bowl-60k', kind: 'stand', stand: 2, from: -1, span: 2, tier: -1, label: 'SUD' },
+  { name: 'stand-W', ground: 'generic-bowl-60k', kind: 'stand', stand: 3, from: -1, span: 2, tier: -1, label: 'OVEST' },
+  { name: 'windy', ground: 'generic-bowl-60k', kind: 'stand', stand: 0, from: -1, span: 2, tier: -1, wind: 1, pair: true, label: 'ALWAYS' },
+  { name: 'still', ground: 'generic-bowl-60k', kind: 'stand', stand: 0, from: -1, span: 2, tier: -1, wind: 0, pair: true, label: 'ALWAYS' },
+  // Halfway through each reveal. Both pay out DOWNWARD from a fixed top
+  // edge — a rolled cover down the terracing, a flown sheet off its rigging
+  // — so at a third of the way through each should be a short banner hanging
+  // from where its full-length one starts, not a full one somewhere else.
+  { name: 'reveal-stand-35', ground: 'generic-bowl-60k', kind: 'stand', stand: 0, from: -1, span: 2, tier: -1, progress: 0.35, label: 'ALWAYS' },
+  { name: 'reveal-hanging-35', ground: 'generic-bowl-60k', kind: 'hanging', stand: 0, from: -1, span: 2, tier: -1, progress: 0.35, label: 'CURVA' },
   { name: 'night', ground: 'generic-bowl-60k', kind: 'stand', stand: 0, from: -1, span: 3, tier: -1, tod: 'night', label: 'ALWAYS' },
   { name: 'steep-cauldron', ground: 'community-steep-cauldron-55k', kind: 'stand', stand: 0, from: -1, span: 3, tier: -1, label: 'CAULDRON' },
   { name: 'small-arena', ground: 'community-kingdom-arena-28k', kind: 'stand', stand: 0, from: 0, span: 4, tier: -1, label: 'RIYADH' },
@@ -75,6 +98,8 @@ interface Shot {
   penetration: number;
   bounds: { min: [number, number, number]; max: [number, number, number] } | null;
   focused: boolean;
+  png2: string | null;
+  travelled: number;
   cam: [number, number, number];
   error?: unknown;
 }
@@ -107,6 +132,7 @@ for (const s of wanted) {
   )) as Shot;
   if (r.error) { console.error(`${s.name}: ${String(r.error).slice(0, 200)}`); bad++; continue; }
   writeFileSync(`${OUT}/${s.name}.png`, Buffer.from(r.png.split(',')[1], 'base64'));
+  if (r.png2) writeFileSync(`${OUT}/${s.name}-later.png`, Buffer.from(r.png2.split(',')[1], 'base64'));
 
   const b = r.bounds;
   const dims = b
@@ -125,6 +151,7 @@ for (const s of wanted) {
     s.name.padEnd(26) + String(r.census.banners).padStart(8) + String(r.census.bars).padStart(6) +
     String(r.census.ropes).padStart(7) + r.penetration.toFixed(3).padStart(10) + '   ' + dims +
     `  cam(${r.cam.map((v) => v.toFixed(0)).join(',')})` +
+    (s.pair ? '  (+ -later.png, 0.9 s on)' : '') +
     (flags.length ? '   ' + flags.join(' ') : ''),
   );
 }

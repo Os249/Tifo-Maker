@@ -171,13 +171,15 @@ export function mountBannerView(deps: BannerViewDeps): BannerView {
   const askSlots = (stand: number, bannerId?: string): {
     blocks?: number[];
     tiers?: number[];
+    maxSpan?: number;
+    tierOptions?: number[];
     fit?: {
       size: { widthM: number; heightM: number };
       maxWidthM: number; maxHeightM: number; heightLimited: boolean;
       blockFrom: number; blockSpan: number; tier: number;
     };
   } => {
-    const ev = new CustomEvent<{ stand: number; bannerId?: string; blocks?: number[]; tiers?: number[]; fit?: unknown }>(
+    const ev = new CustomEvent<{ stand: number; bannerId?: string; blocks?: number[]; tiers?: number[]; fit?: unknown; maxSpan?: number; tierOptions?: number[] }>(
       'tifo:stand-slots',
       { detail: { stand, bannerId } },
     );
@@ -208,18 +210,27 @@ export function mountBannerView(deps: BannerViewDeps): BannerView {
       for (let i = 0; i < nBlocks; i++) opt(blockSel, String(i), tv('bn.block.n', { n: i + 1 }));
       blockSel.value = doc.slot.blockFrom < 0 ? '-1' : String(at);
     }
+    // Only the runs that actually make the banner bigger. Past a point the
+    // stand runs out of rake before the artwork's proportions are satisfied
+    // and every wider run draws the identical sheet, which reads as the
+    // control being broken rather than as the stand being full.
+    const nSpan = Math.max(1, Math.min(nBlocks, slots.maxSpan ?? nBlocks));
     if (spanSel && nBlocks > 0) {
       spanSel.replaceChildren();
-      for (let i = 1; i <= nBlocks; i++) {
+      for (let i = 1; i <= nSpan; i++) {
         opt(spanSel, String(i), i === 1 ? t('bn.span.one') : tv('bn.span.n', { n: i }));
       }
-      spanSel.value = String(Math.max(1, Math.min(nBlocks, doc.slot.blockSpan)));
+      spanSel.value = String(Math.max(1, Math.min(nSpan, doc.slot.blockSpan)));
     }
     if (tierSel && nTiers > 0) {
+      // A flown banner can only use a tier with a fascia band deep enough to
+      // hang something in — on two grounds in the catalogue that band is
+      // under a metre, and on one the tiers overlap outright.
+      const tierOpts = slots.tierOptions ?? Array.from({ length: nTiers }, (_, i) => i);
       tierSel.replaceChildren();
       opt(tierSel, '-1', t('bn.tier.all'));
-      for (let i = 0; i < nTiers; i++) opt(tierSel, String(i), tv('bn.tier.n', { n: i + 1 }));
-      tierSel.value = String(doc.slot.tier);
+      for (const i of tierOpts) opt(tierSel, String(i), tv('bn.tier.n', { n: i + 1 }));
+      tierSel.value = tierOpts.includes(doc.slot.tier) ? String(doc.slot.tier) : '-1';
     }
 
     // The size the blocks give it. Not a field to fill in — the whole point of
@@ -237,7 +248,12 @@ export function mountBannerView(deps: BannerViewDeps): BannerView {
     // of rake before the artwork's proportions are satisfied.
     if (fitNoteEl) {
       const f = slots.fit;
-      if (f && f.heightLimited) {
+      if (f && f.heightLimited && nSpan < nBlocks) {
+        // Say WHY the list stops where it does, in the terms that would fix
+        // it: a wider design would use more of the stand.
+        fitNoteEl.textContent = tv('bn.fit.capped', { n: nSpan });
+        fitNoteEl.style.display = '';
+      } else if (f && f.heightLimited) {
         fitNoteEl.textContent = tv('bn.fit.short', {
           fw: Math.round(f.size.widthM), fh: Math.round(f.size.heightM),
         });

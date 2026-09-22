@@ -71,12 +71,30 @@
     sim.settleBanners(0.5);
     sim.stop();
     const png = sim.canvas.toDataURL('image/png');
+    // A second frame, most of a gust later. Stills cannot answer "does the
+    // wind move it"; two stills nine tenths of a second apart can, and the
+    // harness prints how far the fabric actually travelled between them.
+    let png2 = null;
+    let travelled = 0;
+    if (spec.pair) {
+      const b0 = sim.bannerBounds(id);
+      sim.settleBanners(0.9);
+      png2 = sim.snapshot();
+      const b1 = sim.bannerBounds(id);
+      if (b0 && b1) {
+        for (let k = 0; k < 3; k++) {
+          travelled = Math.max(travelled, Math.abs(b1.min[k] - b0.min[k]), Math.abs(b1.max[k] - b0.max[k]));
+        }
+      }
+    }
     const out = {
       png,
       census: sim.bannerCensus(),
       penetration: sim.worstBannerPenetration(),
       bounds: sim.bannerBounds(id),
       focused,
+      png2,
+      travelled,
       cam: [sim.camera.position.x, sim.camera.position.y, sim.camera.position.z],
     };
     sim.dispose();

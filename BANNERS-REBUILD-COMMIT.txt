@@ -1,38 +1,32 @@
 === SUMMARY ===
 
-Banners: rebuild on a finite, provable model
+Banners: the stand picker, the wind, the reveals and the fascia
 
 
 === DESCRIPTION ===
 
-The last four rounds all failed the same way: a banner was fine where I tested it and broken where you went. That is not a bug pattern, it is what an infinite configuration space looks like from the inside. A free position and a size in metres made the set of states a banner could be in continuous, so it could be sampled and never proved.
+Eight things found in the rebuild. Four were one bug each; the other four were two bugs wearing four coats.
 
-So the model changed rather than the code. A banner now has a SLOT — a stand, a run of the blocks that stand is divided into, and a tier — and no size at all: it is as wide as the blocks it covers, and as deep as its artwork's proportions make it. That set is finite, about 26,000 configurations across the whole catalogue, so `npm run sweep:banner` enumerates every one of them and checks eight properties of each. It runs in two minutes without a browser.
+CHANGING THE STAND DID NOTHING, FOR EITHER KIND. `patchSlot` assigns to `a.slot` on the same document object, so the rig's `doc` and the document arriving in `refresh` are the SAME object — and `existing.doc.slot.stand !== doc.slot.stand` compared a number with itself and was never true. The frame was never rebuilt and the banner kept being drawn on the stand it started on. Changing the TYPE was silently broken the same way, so a banner switched to hanging kept its old rigging. The rig now holds the stand and kind it was built for as scalars, which cannot alias the thing they are compared to.
 
-The shape is now a pure function P(slot, u, v, t). For the sheet on the terracing every vertex is a point of the stand's own surface pushed out along that point's normal by a strictly positive amount, so it can no more be inside the seating than a decal can be inside a wall — for any size, any block, any tier, any ground, any frame. Nothing accumulates, so nothing resonates or explodes, and the same inputs give the same vertices to the bit. That deletes the cloth solver, the baked heightfield, the rope net and the lashing pass: 4,448 lines out, 2,203 in.
+NO MOVEMENT AT MAXIMUM WIND. Two reasons, and the second is the interesting one. The amplitude was 30 cm of travel on a forty-metre sheet, which across a pitch is about two pixels. And the material was unlit — with no shading term, moving a surface changes no pixel except at its silhouette, so the fabric was rippling the whole time with no way to see it. The sheet is lit now, carrying its artwork as emission at just over half so a tifo never goes to mud on the far side of a curve, and the wave has a third, very slow and very long term so the banner leans with the gust instead of only shimmering within itself. That is also why they read as painted boards.
 
-Two types, both perfected: a stand banner over a run of blocks, and a hanging banner flown on ropes.
+A HANGING BANNER HUNG IN THE WRONG PLACE, AND THE WRONG WAY UP. It now goes where it was asked to: over the whole stand or the lower tier it reaches the grass and is FIXED there, with air above a short one; over an upper tier it fills the gap between that tier and the one below — the fascia, the one band of a stand with nobody sitting in it. Measured across the catalogue that band is 3.3 to 3.5 m on most grounds, 0.8 m on two, and NEGATIVE on one where the tiers overlap, so a tier is offered for a flown banner only when it has 1.5 m of band, and a banner in one fills it rather than following its own proportions — a fascia is a strip, not a sheet.
 
-What the sweep found before anything was rendered:
+The reveal used to translate the whole sheet down from the roof by a metre and a half, with the bottom edge arriving before the top: invisible as a reveal and backwards as a motion. It pays out downward from a fixed top edge now, and the easing changed with it — the damped-harmonic curve was right for a rigid mass on lines and reached 97% a third of the way through, so the banner was simply there at once. Rope paid out at a steady rate, with one small settle as the hem takes up.
 
-- Arc length along a stand DIVERGED with sampling. The same 48 m rake measured 48 m at 8 steps, 75 at 64 and 214 at 256, because the surface was threaded through every individual seat and picked up a seat's width of lateral jitter between consecutive points. Every "metres down the slope" figure in the app therefore depended on its step count. The "corner rake is four times the centre" fixed last round was this artefact, not geometry. A column is now one point per ROW of seating, averaged, and the measurement converges everywhere.
+"HOW MANY" STOPPED CHANGING THE BANNER PAST THREE BLOCKS. Past a point the stand runs out of rake before the artwork's proportions are satisfied and every wider run resolves to the identical sheet, so "four", "five" and "six" all drew the same thing. The picker asks `maxUsefulSpan` and stops where the banner stops growing, and the panel says why: a wider design would use more of the stand.
 
-- Banner seams were spaced evenly in `u`, a fraction of the stand. On a ground whose end blocks are 3.7 m and middle blocks 29 m that put four columns across the tight corner and thirty across the straight, and the sheet cut 4.75 m inside the curve. They are spaced by metres of fabric now, which also stops the artwork being squashed at the corners.
+Two bugs the new checks caught on the way:
 
-- A stand's ends double back on themselves in plan where a corner is cut hard, and the block detector was offering those four-metre curls as places to hang a banner. Every geometric failure left in the sweep was on one of them. They are not blocks and are no longer offered.
+- The catenary sag is 2% of the span, which across a whole stand came to 3.6 m and dropped a fascia banner clean out of its band. Past a few tens of metres nobody hangs a sheet off two points — it is laced to the rail, and what you see between ties is a scallop. Capped at one unsupported bay.
 
-- Two adjacent columns filled from the same neighbour gave a zero tangent, and a 33 m hanging banner rendered as a 1.5 m sliver.
+- `worstPenetration` measured a half-unrolled banner against its fully-unrolled row heights and reported 2.4 m inside the terracing while it was lying on it perfectly. Same mistake as a test that recomputes the thing it checks.
 
-- A height-limited banner reported 54 m and drew 103 m, because the size shrank and the mesh did not.
+Three new gates, and the first is the one whose absence let this ship:
 
-And what the shot harness found after:
+- MOVES — at full wind the fabric must travel at least 25 cm in a second. Every check here was an UPPER bound, so a banner that did not move at all passed all of them perfectly.
+- HANG — a flown banner is inside the air it was given, and fixed at the end it is meant to be fixed at.
+- Partial reveals are swept now, at 37% as well as at rest. A sheet gathered near its top edge is a configuration the finished one never visits, and the very first complaint in this whole saga was a banner going through a stand during its reveal.
 
-- A hanging banner anchored at the back row, so it hung down through every seat in the stand and did not appear at all. It anchors at the front now, and stands off far enough to hang clear of the terracing below it.
-
-- A whole-stand banner pushed the camera 200 m out, behind the stand it was aimed at. In a roofed arena the default 31-degree elevation put it in the rafters, looking at the dark underside of the roof. Both shots came back black.
-
-The panel follows the model: blocks, a tier and a shape, with the size as a readout in metres rather than a field to get wrong. The retired Banner Studio's work is not migrated — its placement no longer exists, and inventing a slot for it would put it somewhere nobody chose.
-
-Still to come: the fabric look, the reveals, and the occlusion readout.
-
-verify 0 · build 0 · sweep 26,964 configurations 0 failures · e2e-banner 48 passed 0 failed · 17 shots
+verify 0 · build 0 · sweep 53,928 configurations 0 failures · e2e-banner 48 passed 0 failed · 25 shots

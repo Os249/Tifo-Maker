@@ -20,7 +20,7 @@ import { evalTimeline, type Timeline, type Cue } from './timeline';
 import { buildAssetLayer, type AssetLayer } from './assetLayer';
 import { buildBannerRigs, type BannerRigLayer } from './bannerRig';
 import { buildPlacement, type PlacementHelper } from './bannerPlace';
-import { resolveSlot, hangCentre } from './bannerSlot';
+import { resolveSlot, hangCentre, maxUsefulSpan, hangableTiers } from './bannerSlot';
 import type { BannerStore, StandIndex } from '../../core/banner';
 import type { AssetStore, SceneAsset } from '../../core/sceneAssets';
 import { rasterize } from '../../core/importImage';
@@ -1185,7 +1185,7 @@ export class MatchDaySimulator {
    * simulator open at all.
    */
   private readonly onStandSlots = (
-    e: CustomEvent<{ stand: number; blocks?: number[]; tiers?: number[]; fit?: unknown; bannerId?: string }>,
+    e: CustomEvent<{ stand: number; blocks?: number[]; tiers?: number[]; fit?: unknown; maxSpan?: number; tierOptions?: number[]; bannerId?: string }>,
   ): void => {
     if (!this.placement) return;
     const f = this.placement.frameFor(((e.detail?.stand ?? 1) % 4) as StandIndex);
@@ -1193,7 +1193,11 @@ export class MatchDaySimulator {
     e.detail.blocks = f.blocks.map((b) => b.widthM);
     e.detail.tiers = f.tiers.map((t) => t.slopeM);
     const doc = e.detail.bannerId ? this.bannerStore?.get(e.detail.bannerId) : this.bannerStore?.active;
-    if (doc) e.detail.fit = resolveSlot(doc, f);
+    if (doc) {
+      e.detail.fit = resolveSlot(doc, f);
+      e.detail.maxSpan = maxUsefulSpan(doc, f);
+      e.detail.tierOptions = doc.kind === 'hanging' ? hangableTiers(f) : f.tiers.map((_, i) => i);
+    }
   };
 
   private readonly onStandExtent = (e: CustomEvent<{ stand: number; width?: number; height?: number }>): void => {
@@ -1394,16 +1398,28 @@ export class MatchDaySimulator {
     // out — behind the stand it was aimed at, looking at the back of the
     // building. Every one of those shots came out black.
     const bowlR = Math.hypot(mid.x, mid.z) || 60;
-    const d = Math.min(bowlR * 1.85, Math.max(60, slot.size.widthM * 1.9));
+    // Far enough to hold BOTH dimensions. A flown banner can be taller than
+    // it is wide, and a distance chosen from the width alone put the camera
+    // inside a 23 m drop.
+    const reach = Math.max(slot.size.widthM, slot.size.heightM * 1.7);
+    const d = Math.min(bowlR * 1.85, Math.max(70, reach * 2.4));
     // Overridable, because the flattering angle and the honest angle are not
     // the same angle. From the gantry a sheet that has sunk into the seating
     // looks identical to one resting on it; from pitch level, grazing along
     // the terracing, it is unmistakable. The shot harness asks for the second
     // one on purpose.
+    // The angle follows what the banner IS, not a constant.
+    //
+    // A sheet lying on a raked stand is a near-horizontal surface: from pitch
+    // level you see its edge, so it wants the thirty-odd degrees where the
+    // main camera gantry sits. A flown banner is a vertical plane and wants
+    // the opposite — look down at it and you see its top hem. Using the
+    // stand's angle for both framed a hanging banner nearly edge-on, with the
+    // sheet below the bottom of the picture and only its ropes in shot.
     let el =
       elevationDeg !== undefined
         ? (elevationDeg * Math.PI) / 180
-        : 0.55;
+        : doc.kind === 'hanging' ? 0.2 : 0.55;
     // Under the roof.
     //
     // Thirty degrees up is roughly the main camera gantry and it is the angle
@@ -1433,10 +1449,21 @@ export class MatchDaySimulator {
    * places that exist on this ground rather than a fixed list that is wrong
    * on most of them.
    */
-  standSlots(stand: StandIndex): { blocks: number; tiers: number } {
+  standSlots(stand: StandIndex, bannerId?: string): {
+    blocks: number; tiers: number; maxSpan: number; tierOptions: number[];
+  } {
     const f = this.placement?.frameFor(((stand % 4) + 4) % 4 as StandIndex);
-    if (!f || !f.ok) return { blocks: 1, tiers: 1 };
-    return { blocks: f.blocks.length, tiers: f.tiers.length };
+    if (!f || !f.ok) return { blocks: 1, tiers: 1, maxSpan: 1, tierOptions: [0] };
+    const doc = bannerId ? this.bannerStore?.get(bannerId) : this.bannerStore?.active;
+    // A flown banner can only use a tier whose fascia band is deep enough to
+    // hang anything in; a banner on the terracing can use any of them.
+    const all = f.tiers.map((_, i) => i);
+    return {
+      blocks: f.blocks.length,
+      tiers: f.tiers.length,
+      maxSpan: doc ? maxUsefulSpan(doc, f) : f.blocks.length,
+      tierOptions: doc?.kind === 'hanging' ? hangableTiers(f) : all,
+    };
   }
 
   /** A stand's real size in metres, for sizing a banner to it. */

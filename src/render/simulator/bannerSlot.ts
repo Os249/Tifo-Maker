@@ -69,6 +69,33 @@ export function slotsOf(frame: StandFrame, stand: StandIndex): BannerSlot[] {
   return out;
 }
 
+/**
+ * The widest run of blocks that still makes this banner bigger.
+ *
+ * Past a point the stand runs out of rake before the artwork's proportions
+ * are satisfied, and every wider run resolves to the same sheet: on a generic
+ * bowl at 2:1 that happens at three blocks, so "four", "five" and "six" in
+ * the picker all drew the identical banner. An option that does nothing is
+ * worse than a missing one — it reads as the control being broken, which is
+ * exactly how it was reported.
+ *
+ * So the picker asks this and stops there, and the panel says why.
+ */
+export function maxUsefulSpan(doc: BannerDoc, frame: StandFrame): number {
+  const nb = Math.max(1, frame.blocks.length);
+  let best = 1;
+  let prev = 0;
+  for (let span = 1; span <= nb; span++) {
+    const r = resolveSlot({ ...doc, slot: { ...doc.slot, blockSpan: span } }, frame);
+    // Half a metre: below that it is measurement noise on a curved stand, not
+    // a banner anyone could tell apart from the one before it.
+    if (span > 1 && r.size.widthM <= prev + 0.5) break;
+    prev = r.size.widthM;
+    best = span;
+  }
+  return best;
+}
+
 /** How many slots a stand offers. `n(n+1)/2` runs × the tier choices. */
 export function slotCount(frame: StandFrame): number {
   const nb = Math.max(1, frame.blocks.length);
@@ -137,9 +164,7 @@ export function resolveSlot(doc: BannerDoc, frame: StandFrame): ResolvedSlot {
   // slope across the banner's own run rather than at the stand's middle. A
   // hanging banner is bounded by air rather than by terracing.
   const rakeM = Math.max(1, frame.slopeAt(a.u0, b.u1, band.v0, band.v1));
-  const maxHeightM = doc.kind === 'hanging'
-    ? Math.max(4, hangDrop(frame, tier))
-    : rakeM;
+  const maxHeightM = doc.kind === 'hanging' ? hangDrop(frame, tier) : rakeM;
 
   if (doc.kind === 'stand') {
     const deep = Math.min(maxHeightM, maxWidthM * clamp(doc.aspect, 0.05, 6));
@@ -158,7 +183,18 @@ export function resolveSlot(doc: BannerDoc, frame: StandFrame): ResolvedSlot {
   let heightLimited = false;
   let u0 = a.u0;
   let u1 = b.u1;
-  if (heightM > maxHeightM) {
+  // A banner in the gap between two tiers FILLS that gap.
+  //
+  // It is a fascia banner, and a fascia is three metres of band across a
+  // hundred metres of stand — the shape every ground in the world puts
+  // advertising on. Letting the artwork's proportions drive the depth there
+  // would size a 5:3 design to six metres wide and leave the rest of the
+  // band bare, which is not a thing anyone hangs.
+  const fascia = doc.kind === 'hanging' && tier >= 1 && tier < frame.tiers.length;
+  if (fascia) {
+    heightM = maxHeightM;
+    heightLimited = heightM < widthM * aspect - 1e-6;
+  } else if (heightM > maxHeightM) {
     heightLimited = true;
     widthM = maxHeightM / aspect;
     // And ACTUALLY be that narrow, centred on the chosen blocks.
@@ -219,25 +255,90 @@ export function resolveSlot(doc: BannerDoc, frame: StandFrame): ResolvedSlot {
   };
 }
 
+/** Grass level. The pitch plane sits at zero; this is a boot's height above it. */
+const GROUND_Y = 0.25;
+
+/**
+ * The air a hanging banner has to hang in, as two world heights.
+ *
+ * Three cases, and they are three different rigs rather than three sizes of
+ * one:
+ *
+ * - **The whole stand.** Flown from the roof steel and reaching the grass —
+ *   the full face of the building.
+ * - **The lower tier.** The same, but rigged off the top of that tier rather
+ *   than the roof, so it is bounded above by the tier it hangs from.
+ * - **An upper tier.** Not to the ground at all: into the GAP between that
+ *   tier and the one below it. That band of fascia is the one piece of a
+ *   stand with nobody sitting on it, which is why every ground in the world
+ *   has advertising along it and why a tifo hung there covers no one.
+ *
+ * Both of the first two are fixed at the bottom, on the grass. The third is
+ * fixed in its gap. That is what decides where a short banner sits: a short
+ * ground-fixed one still stands on the ground, with air above it.
+ */
+export function hangSpan(frame: StandFrame, tier: number): { topY: number; bottomY: number } {
+  const t = frame.tiers;
+  if (tier < 0 || t.length === 0) {
+    return { topY: frame.roofY - 1.5, bottomY: GROUND_Y };
+  }
+  const i = Math.min(t.length - 1, Math.max(0, tier));
+  if (i === 0) {
+    return { topY: frame.pointAt(0.5, t[0].v1).y, bottomY: GROUND_Y };
+  }
+  const bottomY = frame.pointAt(0.5, t[i - 1].v1).y;
+  // Never inverted. The bands come from the seat map's own tier numbering and
+  // on one ground in the catalogue the upper tier's lowest seat sits twenty
+  // centimetres BELOW the lower tier's highest — so the "gap" was negative
+  // and a banner in it hung below its own floor.
+  return { topY: Math.max(bottomY, frame.pointAt(0.5, t[i].v0).y), bottomY };
+}
+
+/**
+ * The height of the fascia band between a tier and the one below it.
+ *
+ * Measured across the catalogue: 3.3 to 3.5 m on most grounds, which is a
+ * real band and the one place on a stand with nobody sitting in it — but
+ * 0.8 m on two of them and negative on a third. Below about a metre and a
+ * half there is nothing to hang, so that tier is not offered for a flown
+ * banner at all rather than drawing a useless strip.
+ */
+export const FASCIA_MIN_M = 1.5;
+
+/** Which tiers a hanging banner can actually use on this stand. */
+export function hangableTiers(frame: StandFrame): number[] {
+  const out: number[] = [];
+  for (let i = 0; i < frame.tiers.length; i++) {
+    if (i === 0 || hangDrop(frame, i) >= FASCIA_MIN_M) out.push(i);
+  }
+  return out;
+}
+
 /**
  * How much air a hanging banner has under its rigging, in metres.
  *
- * From wherever it is tied — the roof steel, or the lip of a tier — down to a
- * couple of metres above the front rail. It is bounded by the building, which
- * is why a hanging banner cannot be made to reach the skyline, and it is NOT
- * bounded by the tier below: a sheet flown over the front of an upper tier
- * hangs down across the lower tier's view, which is the entire point of
- * hanging it there and is what every photograph of one shows.
- *
- * The first version stopped it at the tier below. On a two-tier bowl that is
- * about four metres of air, so a 37 m banner was scaled down to keep its
- * proportions and came out as a seven-metre handkerchief.
+ * Bounded by the building, which is why a hanging banner cannot be made to
+ * reach the skyline.
  */
 export function hangDrop(frame: StandFrame, tier: number): number {
-  const top = tier < 0 || tier >= frame.tiers.length
-    ? frame.roofY - 1.5
-    : frame.pointAt(0.5, frame.tiers[tier].v0).y;
-  return Math.max(4, top - frame.railY - 2);
+  const { topY, bottomY } = hangSpan(frame, tier);
+  // The span, not a comfortable minimum. A four-metre floor on a three-and-a-
+  // half-metre fascia is half a metre of banner hanging below its own band.
+  return Math.max(0.8, topY - bottomY);
+}
+
+/**
+ * Where a hanging banner's TOP edge is, in world Y.
+ *
+ * A banner that reaches the ground is fixed at the bottom, so its top edge is
+ * a sheet's height above the grass and a shorter one simply has more air
+ * above it. One in a gap between tiers hangs from the lip of the upper tier,
+ * which is the thing it is actually tied to.
+ */
+export function hangAnchorY(frame: StandFrame, slot: ResolvedSlot): number {
+  const { topY, bottomY } = hangSpan(frame, slot.tier);
+  if (slot.tier >= 1 && slot.tier < frame.tiers.length) return topY;
+  return Math.min(topY, bottomY + slot.size.heightM);
 }
 
 /**
@@ -258,24 +359,14 @@ export function hangDrop(frame: StandFrame, tier: number): number {
  */
 export function hangStandoff(frame: StandFrame, slot: ResolvedSlot): number {
   const u = (slot.u0 + slot.u1) / 2;
-  const anchorV = slot.tier < 0 ? 0 : frame.tiers[slot.tier].v0;
+  const t = frame.tiers;
+  const anchorV = slot.tier >= 1 && slot.tier < t.length ? t[slot.tier].v0 : 1;
   const a = frame.pointAt(u, anchorV);
   const rail = frame.pointAt(u, 0);
   const dr = Math.hypot(a.x, a.z) - Math.hypot(rail.x, rail.z);
   return Math.max(0.9, dr + 1.2);
 }
 
-/**
- * Where a hanging banner's top edge is, in world Y.
- *
- * The lip of the tier it hangs over, or the roof steel. Both are in front of
- * the terracing by construction, which is why a hanging banner never has to
- * be checked against the stand: there is nothing behind it to hit.
- */
-export function hangAnchorY(frame: StandFrame, slot: ResolvedSlot): number {
-  if (slot.tier < 0) return frame.roofY - 1.5;
-  return frame.pointAt(0.5, frame.tiers[slot.tier].v0).y;
-}
 
 /**
  * Where a hanging banner actually is, in world space.
@@ -289,7 +380,8 @@ export function hangAnchorY(frame: StandFrame, slot: ResolvedSlot): number {
  */
 export function hangCentre(frame: StandFrame, slot: ResolvedSlot): { x: number; y: number; z: number } {
   const u = (slot.u0 + slot.u1) / 2;
-  const anchorV = slot.tier < 0 ? 0 : frame.tiers[slot.tier].v0;
+  const t = frame.tiers;
+  const anchorV = slot.tier >= 1 && slot.tier < t.length ? t[slot.tier].v0 : 1;
   const p = frame.pointAt(u, anchorV);
   const off = hangStandoff(frame, slot);
   return {

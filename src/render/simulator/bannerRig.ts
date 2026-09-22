@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { BannerDoc, BannerStore, StandIndex } from '../../core/banner';
+import { revealEase } from '../../core/banner';
 import { bannerToCanvas, onBannerImageReady } from '../bannerRender';
 import type { StandFrame } from './standFrame';
 import { resolveSlot, hangAnchorY, type ResolvedSlot } from './bannerSlot';
@@ -65,12 +66,28 @@ const SOLID_CLEARANCE = 0.03;
 
 interface Rig {
   doc: BannerDoc;
+  /**
+   * The stand and kind this rig was BUILT for.
+   *
+   * Scalars, copied at build time, and that is the whole point. The store
+   * patches a banner in place — `patchSlot` assigns to `a.slot` on the same
+   * document object — so the rig's `doc` and the document arriving in
+   * `refresh` are the same object, and `existing.doc.slot.stand !== doc.slot.stand`
+   * compared a number with itself and was never true. Changing the stand in
+   * the panel therefore did nothing at all: the banner kept being drawn
+   * against the frame of the stand it started on. Changing the TYPE was
+   * silently broken the same way, so a banner switched to hanging kept its
+   * old rigging.
+   */
+  standOf: StandIndex;
+  kindOf: BannerDoc['kind'];
+  barOf: boolean;
   slot: ResolvedSlot;
   frame: StandFrame;
   group: THREE.Group;
   mesh: THREE.Mesh;
   geo: THREE.BufferGeometry;
-  mat: THREE.MeshBasicMaterial;
+  mat: THREE.MeshStandardMaterial;
   pos: Float32Array;
   nrm: Float32Array;
   texKey: string;
@@ -144,7 +161,12 @@ export function buildBannerRigs(
       frame: rig.frame,
       crowdFill: crowdFill(),
       wind: rig.doc.wind,
-      progress: rig.prog,
+      // EASED, not linear. The easing curves were written and gate-tested and
+      // then never reached the renderer, so every reveal ran at a constant
+      // rate: an unroll that should start slow and run away as the roll pays
+      // out crept down the stand instead, and a banner lowered on ropes
+      // arrived without the settle that makes it read as having weight.
+      progress: revealEase(rig.doc.reveal, rig.prog),
     };
   }
 
@@ -162,14 +184,27 @@ export function buildBannerRigs(
     geo.setAttribute('uv', new THREE.BufferAttribute(UVS, 2));
     geo.setIndex(new THREE.BufferAttribute(INDICES, 1));
 
-    const mat = new THREE.MeshBasicMaterial({
-      map: texture(doc),
+    // Lit, with the artwork also carried as emission.
+    //
+    // It was unlit, and that is why a banner read as a painted board and why
+    // the wind looked like nothing: with no shading term, moving the surface
+    // changes no pixel except at the silhouette. The fabric was rippling the
+    // whole time and there was no way to see it.
+    //
+    // Emission at just over half keeps the design legible in any light — a
+    // tifo is the brightest thing in the ground and must never go to mud on
+    // the far side of a curve — while the diffuse half picks up the
+    // floodlights and, with it, every fold the wave puts in the sheet.
+    const tex = texture(doc);
+    const mat = new THREE.MeshStandardMaterial({
+      map: tex,
+      emissive: 0xffffff,
+      emissiveMap: tex,
+      emissiveIntensity: 0.58,
+      roughness: 0.94,
+      metalness: 0,
       side: THREE.DoubleSide,
       transparent: true,
-      // A banner is lit by the same floodlights as everything else and read
-      // from a hundred metres away; unlit with a touch of shading baked into
-      // the texture reads better than a lambert term that turns the far half
-      // of a curved sheet to mud.
       alphaTest: 0.02,
     });
     const mesh = new THREE.Mesh(geo, mat);
@@ -212,7 +247,8 @@ export function buildBannerRigs(
 
     root.add(group);
     const rig: Rig = {
-      doc, slot, frame, group, mesh, geo, mat, pos, nrm,
+      doc, standOf: doc.slot.stand, kindOf: doc.kind, barOf: doc.weightBar,
+      slot, frame, group, mesh, geo, mat, pos, nrm,
       texKey: textureKey(doc), ropes, bar, outline,
       prog: 1, playing: false, t0: 0, durationS: revealSeconds(doc),
     };
@@ -328,9 +364,11 @@ export function buildBannerRigs(
       // topology and the shape is recomputed from the document every frame.
       // Moving a banner across the stand is a different `slot` and the same
       // vertices — which is why changing its size cannot break it any more.
-      const sameStand = existing.doc.slot.stand === doc.slot.stand;
-      if (!sameStand) existing.frame = frameFor(doc.slot.stand);
-      const kindChanged = existing.doc.kind !== doc.kind || existing.doc.weightBar !== doc.weightBar;
+      if (existing.standOf !== doc.slot.stand) {
+        existing.frame = frameFor(doc.slot.stand);
+        existing.standOf = doc.slot.stand;
+      }
+      const kindChanged = existing.kindOf !== doc.kind || existing.barOf !== doc.weightBar;
       if (kindChanged) {
         const prog = existing.prog;
         disposeRig(existing);
@@ -345,7 +383,9 @@ export function buildBannerRigs(
       existing.group.visible = doc.visible !== false;
       const key = textureKey(doc);
       if (key !== existing.texKey) {
-        existing.mat.map = texture(doc);
+        const t = texture(doc);
+        existing.mat.map = t;
+        existing.mat.emissiveMap = t;
         existing.mat.needsUpdate = true;
         existing.texKey = key;
       }
@@ -366,7 +406,9 @@ export function buildBannerRigs(
     for (const [, t] of texCache) t.dispose();
     texCache.clear();
     for (const r of rigs.values()) {
-      r.mat.map = texture(r.doc);
+      const t = texture(r.doc);
+      r.mat.map = t;
+      r.mat.emissiveMap = t;
       r.mat.needsUpdate = true;
       r.texKey = textureKey(r.doc);
     }
@@ -438,8 +480,13 @@ export function buildBannerRigs(
       for (const r of rigs.values()) {
         if (r.doc.visible === false || r.doc.kind !== 'stand' || !r.frame.ok) continue;
         columnsU(r.slot, r.frame, colU);
+        // The sheet's rows sit where the REVEAL has put them. Measuring them
+        // against the fully-unrolled heights says a half-unrolled banner is
+        // two metres inside the terracing when it is lying on it perfectly —
+        // the same mistake as a test that recomputes what it is checking.
+        const covered = Math.max(0.0001, Math.min(1, revealEase(r.doc.reveal, r.prog)));
         for (let j = 0; j < SURF_ROWS; j += 4) {
-          const frac = j / (SURF_ROWS - 1);
+          const frac = (j / (SURF_ROWS - 1)) * covered;
           const sv = Math.max(0, Math.min(1, r.slot.v1 + (r.slot.vBottom - r.slot.v1) * frac));
           for (let i = 0; i < SURF_COLS; i += 5) {
             const k = (j * SURF_COLS + i) * 3;
