@@ -199,6 +199,58 @@ console.log('\n— the banner reaches the bowl —');
   await ctx.close();
 }
 
+// The banner in the EDITOR's own bowl, not only in Match Day.
+//
+// Asked of pixels rather than of the DOM: the whole point is that the sheet is
+// DRAWN there, and a scene-graph assertion would pass just as happily with a
+// banner rendered somewhere off-camera or at zero size. So the check is to
+// photograph the preview with the banner shown and again with it hidden, and
+// require that the picture changed.
+console.log('\n— the banner shows in the editor bowl —');
+{
+  const { ctx, page, errs } = await openApp(1400, 880, 'en');
+  await page.click('#view-banner');
+  await page.waitForTimeout(900);
+  await drawOn(page, [[0.15, 0.35], [0.5, 0.2], [0.85, 0.4]]);
+  await page.waitForTimeout(400);
+  await page.click('#view-3d');
+  // Three.js loads lazily here and the bowl has to build before it draws.
+  await page.waitForTimeout(9000);
+  const shotOf = async () => {
+    const el = await page.$('#preview-host canvas');
+    if (!el) return null;
+    const b = await el.screenshot();
+    let h = 2166136261;
+    for (let i = 0; i < b.length; i += 7) { h ^= b[i]; h = Math.imul(h, 16777619); }
+    return { hash: h >>> 0, bytes: b.length };
+  };
+  const withBanner = await shotOf();
+  check('the editor bowl renders', !!withBanner, JSON.stringify(withBanner));
+  // Hide every banner through the store the app already exposes, so this does
+  // not depend on a control's markup.
+  const hidden = await page.evaluate(() => {
+    const raw = localStorage.getItem('tifo_banners_v1');
+    if (!raw) return false;
+    const m = JSON.parse(raw);
+    for (const b of m.banners ?? []) b.visible = false;
+    localStorage.setItem('tifo_banners_v1', JSON.stringify(m));
+    return (m.banners ?? []).length > 0;
+  });
+  check('a banner was stored to hide', hidden);
+  await page.reload({ waitUntil: 'networkidle' });
+  await page.waitForTimeout(1500);
+  await page.click('#view-3d');
+  await page.waitForTimeout(9000);
+  const withoutBanner = await shotOf();
+  check(
+    'hiding the banner changes what the bowl draws',
+    !!withBanner && !!withoutBanner && withBanner.hash !== withoutBanner.hash,
+    `${withBanner?.hash} vs ${withoutBanner?.hash}`,
+  );
+  check('no page errors in the editor bowl', errs.length === 0, errs.join(' | '));
+  await ctx.close();
+}
+
 console.log('\n— phones and tablets —');
 for (const [w, h, label] of [[390, 844, 'phone upright'], [844, 390, 'phone on its side'], [768, 1024, 'iPad portrait']]) {
   const { ctx, page, errs } = await openApp(w, h, 'en');

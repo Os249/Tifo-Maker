@@ -402,6 +402,9 @@ async function main(): Promise<void> {
     loading = true;
     const { Preview3D, CAMERA_PRESETS } = await import('./render/preview3d');
     preview = new Preview3D(previewHost, map, store);
+    // Banners belong in the editor's own bowl, not only in Match Day. A sheet
+    // you can only see by opening another view is a sheet you design blind.
+    preview.attachBanners(bannerStore, template);
     const sel = document.getElementById('camera-preset') as HTMLSelectElement;
     CAMERA_PRESETS.forEach((p, i) => {
       const opt = document.createElement('option');

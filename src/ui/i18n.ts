@@ -1397,6 +1397,15 @@ const STRINGS: Record<string, { en: string; ar: string }> = {
   'bn.type': { en: 'Type', ar: 'النوع' },
   'bn.size': { en: 'Size', ar: 'المقاس' },
   'bn.shape': { en: 'Shape', ar: 'الشكل' },
+  // Named in blocks, because that is how a crew describes a banner.
+  'bn.preset': { en: 'Size', ar: 'المقاس' },
+  'bn.preset.custom': { en: 'Custom', ar: 'مخصّص' },
+  'bn.preset.one': { en: 'One block', ar: 'قطاع واحد' },
+  'bn.preset.oneTall': { en: 'One block, tall', ar: 'قطاع واحد، طولي' },
+  'bn.preset.two': { en: 'Two blocks', ar: 'قطاعان' },
+  'bn.preset.twoTall': { en: 'Two blocks, tall', ar: 'قطاعان، طولي' },
+  'bn.preset.four': { en: 'Four blocks', ar: 'أربعة قطاعات' },
+  'bn.msg.preset': { en: 'Sized to {name}.', ar: 'انضبط المقاس على {name}.' },
   // The size is a READOUT, not a field: a banner is as wide as the blocks it
   // covers, so what the panel can say is what those blocks come to here.
   'bn.size.is': { en: '{w} x {h} m on this ground', ar: '{w} × {h} م في هذا الملعب' },

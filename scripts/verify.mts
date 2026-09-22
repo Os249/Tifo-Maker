@@ -957,7 +957,7 @@ import { buildStadium as siBuild } from '../src/core/stadiumFit';
   const {
     BANNER_KINDS, KIND_PROFILE, PANEL_MAX_M, KG_PER_CARRIER,
     applyKind, bannerFacts, newBanner, normalise, revealEase, occludesCrowd,
-    estimateSize, physicalRevealMs, TYPICAL_BLOCK_M,
+    estimateSize, physicalRevealMs, TYPICAL_BLOCK_M, BANNER_PRESETS, presetOf,
   } = await import('../src/core/banner');
 
   // 1. A reveal runs from nothing to done. An easing that starts above zero
@@ -1018,6 +1018,35 @@ import { buildStadium as siBuild } from '../src/core/stadiumFit';
     if (!occludesCrowd(newBanner('stand'))) throw new Error('a stand banner lies on the seats; that is what it IS');
     if (occludesCrowd(newBanner('hanging'))) throw new Error('a hanging banner is in the air — it must not hide the mosaic');
     console.log('banners: two kinds, and the occlusion split holds');
+  }
+
+  // 5b. The presets are real places on a real stand, and each one is distinct.
+  //
+  // A preset that resolves to the same sheet as the one above it is a menu
+  // entry that does nothing, which is exactly the complaint the span picker
+  // earned. These are checked against a built bowl rather than against their
+  // own numbers.
+  {
+    const { generateSeatMap } = await import('../src/core/seatmap');
+    const { STADIUM_CATALOG } = await import('../src/core/stadiumCatalog');
+    const { buildStandFrame } = await import('../src/render/simulator/standFrame');
+    const { resolveSlot } = await import('../src/render/simulator/bannerSlot');
+    const frame = buildStandFrame(generateSeatMap(STADIUM_CATALOG[0].template), 1);
+    const seen: string[] = [];
+    for (const b of BANNER_PRESETS) {
+      const doc = { ...newBanner('stand'), aspect: b.aspect, slot: { ...newBanner('stand').slot, blockSpan: b.blockSpan } };
+      if (presetOf(doc) !== b.id) throw new Error(`preset "${b.id}" does not recognise itself`);
+      const r = resolveSlot(doc, frame);
+      const key = `${r.size.widthM.toFixed(0)}x${r.size.heightM.toFixed(0)}`;
+      if (seen.includes(key)) throw new Error(`preset "${b.id}" draws the same ${key} m sheet as another`);
+      seen.push(key);
+      if (!(r.size.widthM > 1) || !(r.size.heightM > 1)) throw new Error(`preset "${b.id}" is not a banner`);
+    }
+    // And the shape slider can sit between them, which is what "custom" means.
+    if (presetOf({ ...newBanner('stand'), aspect: 0.77 }) !== null) {
+      throw new Error('a shape between the presets must read as custom');
+    }
+    console.log(`banners: ${BANNER_PRESETS.length} presets, each a different sheet on a real stand`);
   }
 
   // 6. Changing type re-rigs the banner but keeps a shape the user chose.

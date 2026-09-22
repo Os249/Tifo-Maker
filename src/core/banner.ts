@@ -335,6 +335,48 @@ export const KIND_PROFILE: Record<BannerKind, KindProfile> = {
 };
 
 
+/**
+ * The shapes people actually ask for, named in blocks.
+ *
+ * A span and an aspect are the right things for the geometry to be built
+ * from, and the wrong things to ask a person for: nobody stands in a kop
+ * thinking "two blocks at one to two". They think "a two-block banner", or
+ * "a tall one down a single block", and the numbers follow from that.
+ *
+ * So these are the presets, and the shape slider stays for anyone who wants
+ * to sit between them.
+ */
+export interface BannerPreset {
+  /** i18n key under `bn.preset.` */
+  id: string;
+  blockSpan: number;
+  aspect: number;
+}
+
+export const BANNER_PRESETS: BannerPreset[] = [
+  // One block, landscape: the small sheet over a single wedge of terracing.
+  { id: 'one', blockSpan: 1, aspect: 0.55 },
+  // One block, portrait: a tall narrow banner running down the rake, which is
+  // what a single block's shape actually invites.
+  { id: 'oneTall', blockSpan: 1, aspect: 1.6 },
+  // Two blocks: the Blockfahne. Two blocks of a generic bowl is about 37 m of
+  // stand, and 2:1 puts it at 18 m deep — the Kaiserslautern choreo's 40 m
+  // block flag with 4 m lettering was exactly this.
+  { id: 'two', blockSpan: 2, aspect: 0.5 },
+  // Two blocks, tall: the same width carried much further down the terracing.
+  { id: 'twoTall', blockSpan: 2, aspect: 1.1 },
+  // Four blocks: half a kop, and about as wide as a crew can carry in.
+  { id: 'four', blockSpan: 4, aspect: 0.4 },
+];
+
+/** Which preset a banner currently matches, or null if it sits between them. */
+export function presetOf(doc: BannerDoc): string | null {
+  for (const p of BANNER_PRESETS) {
+    if (p.blockSpan === doc.slot.blockSpan && Math.abs(p.aspect - doc.aspect) < 0.02) return p.id;
+  }
+  return null;
+}
+
 /** Does this banner end up lying on top of the crowd (and its mosaic)? */
 export function occludesCrowd(doc: BannerDoc): boolean {
   return KIND_PROFILE[doc.kind].occludesCrowd;

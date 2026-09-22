@@ -2,6 +2,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import type { SeatMap } from '../core/types';
 import type { DesignStore } from '../core/design';
+import type { BannerStore, StandIndex } from '../core/banner';
+import { buildBannerRigs, type BannerRigLayer } from './simulator/bannerRig';
+import { buildSpanFrame, type StandFrame } from './simulator/standFrame';
+import { standIsRoofed } from './simulator/roof';
 
 /**
  * Phase 2: the stadium preview.
@@ -47,6 +51,9 @@ export class Preview3D {
   private readonly noShowMask: Uint8Array;
   private noShowsEnabled = false;
   private running = false;
+  private banners: BannerRigLayer | null = null;
+  private bannerFrames = new Map<number, StandFrame>();
+  private lastFrameAt = 0;
   private readonly resizeObserver: ResizeObserver;
 
   constructor(
@@ -178,6 +185,44 @@ export class Preview3D {
   }
 
   /**
+   * Show this design's banners in the preview.
+   *
+   * The same rig the bowl uses, not a second implementation of one. A banner
+   * that only appears once you open Match Day is a banner you design blind —
+   * you are drawing a sheet for a stand you cannot see it on — and a separate
+   * preview-only version of it would be a second opinion able to disagree
+   * with the real thing, which is how the last round of these bugs stayed
+   * hidden.
+   *
+   * The preview has no crowd, so a banner here lies on the seats rather than
+   * on people, which is what an empty ground does.
+   */
+  attachBanners(store: BannerStore, template: { roof?: unknown }): void {
+    if (this.banners) return;
+    const frameFor = (stand: StandIndex, stands = 1): StandFrame => {
+      const key = stand * 8 + Math.max(1, Math.min(2, Math.round(stands)));
+      let f = this.bannerFrames.get(key);
+      if (!f) {
+        f = buildSpanFrame(this.map, stand, key % 8);
+        this.bannerFrames.set(key, f);
+      }
+      return f;
+    };
+    this.banners = buildBannerRigs(
+      store,
+      frameFor,
+      () => 0,
+      (st, stands, alongU) => {
+        const f = frameFor(st, stands);
+        const covered = standIsRoofed(template as { roof?: never }, st);
+        const q = f.pointAt(alongU, covered ? 0.84 : 1);
+        return { x: q.x, y: covered ? f.roofY : q.y + 1.4, z: q.z, onRoof: covered };
+      },
+    );
+    this.scene.add(this.banners.object);
+  }
+
+  /**
    * Add extra scene furniture — a running track, say. Kept deliberately narrow:
    * the preview owns its scene and its lifecycle, so callers hand over an object
    * and dispose of it themselves rather than reaching into the scene graph.
@@ -263,8 +308,16 @@ export class Preview3D {
     if (this.running) return;
     this.running = true;
     this.resize();
-    const loop = (): void => {
+    this.lastFrameAt = 0;
+    const loop = (now = 0): void => {
       if (!this.running) return;
+      if (this.banners) {
+        // Clamped: a preview that has been in a background tab for a minute
+        // must not hand the fabric a sixty-second step.
+        const dt = this.lastFrameAt ? Math.min(0.05, (now - this.lastFrameAt) / 1000) : 1 / 60;
+        this.lastFrameAt = now;
+        this.banners.update(0, dt);
+      }
       this.controls.update();
       this.renderer.render(this.scene, this.camera);
       requestAnimationFrame(loop);
@@ -289,6 +342,9 @@ export class Preview3D {
     this.running = false;
     this.resizeObserver.disconnect();
     this.controls.dispose();
+    this.banners?.dispose();
+    this.banners = null;
+    this.bannerFrames.clear();
     this.seats.geometry.dispose();
     const mat = this.seats.material;
     if (Array.isArray(mat)) mat.forEach((m) => m.dispose());

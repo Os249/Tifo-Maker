@@ -3,6 +3,7 @@ import type { ToolId } from '../core/types';
 import type { BannerDoc, BannerKind, BannerReveal, StandIndex } from '../core/banner';
 import {
   BannerStore, aspectOf, applyKind, bannerFacts, newBanner, estimateSize,
+  BANNER_PRESETS, presetOf,
   physicalRevealMs, revealFloorSeconds,
 } from '../core/banner';
 
@@ -122,6 +123,7 @@ export function mountBannerView(deps: BannerViewDeps): BannerView {
   const newBtn = $<HTMLButtonElement>('bn-new');
   const delBtn = $<HTMLButtonElement>('bn-del');
   const kindSel = $<HTMLSelectElement>('bn-kind');
+  const presetSel = $<HTMLSelectElement>('bn-preset');
   const aspIn = $<HTMLInputElement>('bn-aspect');
   const aspOut = $<HTMLElement>('bn-aspect-out');
   const matSel = $<HTMLSelectElement>('bn-material');
@@ -289,6 +291,13 @@ export function mountBannerView(deps: BannerViewDeps): BannerView {
       if (!doc) return;
 
       if (kindSel) kindSel.value = doc.kind;
+      if (presetSel) {
+        if (!presetSel.options.length) {
+          opt(presetSel, '', t('bn.preset.custom'));
+          for (const b of BANNER_PRESETS) opt(presetSel, b.id, t(`bn.preset.${b.id}`));
+        }
+        presetSel.value = presetOf(doc) ?? '';
+      }
       if (aspIn) aspIn.value = String(Math.round(aspectOf(doc) * 100));
       if (aspOut) aspOut.textContent = aspectLabel(aspectOf(doc));
       if (matSel) matSel.value = doc.material;
@@ -388,6 +397,18 @@ export function mountBannerView(deps: BannerViewDeps): BannerView {
   // the editor gets to say. Its SIZE comes from the blocks it covers, because
   // a size you can type in is a size that can be wrong for the ground you
   // are in — which is exactly what used to break in Match Day.
+  // A preset sets the run and the shape together, because that is the pair a
+  // person is actually choosing when they say "a two-block banner".
+  presetSel?.addEventListener('change', () => {
+    const b = BANNER_PRESETS.find((x) => x.id === presetSel.value);
+    if (!b) return;
+    edit(() => {
+      bannerStore.patch({ aspect: b.aspect });
+      bannerStore.patchSlot({ blockSpan: b.blockSpan });
+    });
+    canvas.fitToView();
+    say(tv('bn.msg.preset', { name: presetSel.selectedOptions[0]?.textContent?.trim() ?? '' }));
+  });
   aspIn?.addEventListener('input', () => {
     const a = clamp(Number(aspIn.value) / 100, 0.05, 6);
     if (aspOut) aspOut.textContent = aspectLabel(a);
