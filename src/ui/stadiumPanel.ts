@@ -37,7 +37,7 @@ import { createCustomTemplate, addCustomTemplate, removeCustomTemplate, parseImp
 import { submitStadium, fetchPendingStadiums, reviewStadium, type PendingStadium } from '../net/api';
 import { buildStadiumImport } from './stadiumImport';
 
-import { t, t as tr, tl } from './i18n';
+import { t, t as tr, tl, onLangChange } from './i18n';
 import { escapeHtml } from '../core/escape';
 export interface StadiumPanelDeps {
   root: HTMLElement;
@@ -61,6 +61,34 @@ const fmt = (n?: number): string => (typeof n === 'number' ? n.toLocaleString() 
 const INPUT_CSS =
   'width:100%;box-sizing:border-box;padding:6px;border:1px solid var(--line-1);border-radius:var(--r-md);background-color:var(--ink-3);color:var(--text-1);font:inherit;font-size:11px;';
 
+/**
+ * Custom and community stadiums are built, tested and switched off.
+ *
+ * Both features work — the OSM importer behind the Custom tab resolves a real
+ * ground and fits a bowl to within 2.5% of its stated capacity — but the panel
+ * is showing only the stadiums we built ourselves for now. Typed `boolean`
+ * rather than left as a literal `false` on purpose: TypeScript would otherwise
+ * narrow these to `false`, mark every guarded branch unreachable, and stop
+ * typechecking the code inside it. This way the hidden features keep compiling
+ * and keep failing the build if something else breaks them, and turning either
+ * back on is one word.
+ *
+ * What stays live while they are off:
+ *  - `registerCustom()` in main.ts, so a design already saved on a custom
+ *    stadium still resolves its template and still opens.
+ *  - every custom template in localStorage, untouched.
+ */
+const CUSTOM_STADIUMS: boolean = false;
+const COMMUNITY_STADIUMS: boolean = false;
+
+/** The sources a user can actually reach right now. */
+const VISIBLE_SOURCES: StadiumSource[] = [
+  'builtin',
+  ...(COMMUNITY_STADIUMS ? (['community'] as StadiumSource[]) : []),
+  ...(CUSTOM_STADIUMS ? (['custom'] as StadiumSource[]) : []),
+];
+const isVisible = (e: StadiumEntry): boolean => VISIBLE_SOURCES.includes(e.meta.source);
+
 type Tab = StadiumSource | 'favorites';
 
 export function mountStadiumPanel(deps: StadiumPanelDeps): void {
@@ -79,7 +107,12 @@ export function mountStadiumPanel(deps: StadiumPanelDeps): void {
 
   const currentId = map.templateRef.id;
   let favorites = loadFavorites();
-  let activeTab: Tab = entryById(currentId)?.meta.source ?? 'builtin';
+  // Landing on a hidden tab is a real path, not a hypothetical: a design saved
+  // while the Custom tab existed still reports source 'custom' when reopened,
+  // and without this the panel would show a tab bar with nothing selected and a
+  // list of stadiums the user has no tab for.
+  const openingSource = entryById(currentId)?.meta.source;
+  let activeTab: Tab = openingSource && VISIBLE_SOURCES.includes(openingSource) ? openingSource : 'builtin';
   let selectedId = currentId;
   let customTools: HTMLElement | null = null;
 
@@ -93,8 +126,8 @@ export function mountStadiumPanel(deps: StadiumPanelDeps): void {
 
   const TABS: { id: Tab; label: string }[] = [
     { id: 'builtin', label: t('sp.builtin') },
-    { id: 'community', label: t('sp.community') },
-    { id: 'custom', label: t('sp.custom') },
+    ...(COMMUNITY_STADIUMS ? [{ id: 'community' as Tab, label: t('sp.community') }] : []),
+    ...(CUSTOM_STADIUMS ? [{ id: 'custom' as Tab, label: t('sp.custom') }] : []),
     { id: 'favorites', label: `★ ${t('sp.favorites')}` },
   ];
 
@@ -124,7 +157,11 @@ export function mountStadiumPanel(deps: StadiumPanelDeps): void {
     // "Any region", not "Any country": the catalogue's values are Europe,
     // International, Middle East and South America. Labelling regions as
     // countries is why the filter read as broken even when it worked.
-    countryEl = mkSelect([['', t('sp.anyRegion')], ...catalogCountries().map((c) => [c, tl(c)] as [string, string])]);
+    // Scoped to what is reachable: offering "South America" when the only South
+    // American ground is on a hidden tab gives a filter that always finds
+    // nothing.
+    const regions = catalogCountries(queryCatalog({}).filter(isVisible));
+    countryEl = mkSelect([['', t('sp.anyRegion')], ...regions.map((c) => [c, tl(c)] as [string, string])]);
     capEl = mkSelect([['', t('sp.anySize')], ['20000', '20k+'], ['40000', '40k+'], ['60000', '60k+'], ['80000', '80k+']]);
     grid.append(typeEl, tiersEl, countryEl, capEl);
     filtersEl.append(searchEl, grid);
@@ -143,17 +180,30 @@ export function mountStadiumPanel(deps: StadiumPanelDeps): void {
     return q;
   }
 
+  /**
+   * Favourites are stored as bare ids, so the tab ignores source and would keep
+   * listing a starred custom or community ground after its tab was hidden.
+   */
+  function visibleEntries(): StadiumEntry[] {
+    const found = queryCatalog(buildQuery());
+    return activeTab === 'favorites' ? found.filter(isVisible) : found;
+  }
+
   function renderTabs(): void {
     if (!tabsEl) return;
     tabsEl.innerHTML = '';
     for (const tab of TABS) {
       const b = document.createElement('button');
       b.className = 'chip';
-      b.textContent = tab.id === 'favorites' ? `★ ${t('sp.favorites')} (${favorites.size})` : tab.label;
+      // Count what the tab will actually show. The raw set can hold ids of
+      // stadiums that no longer exist or are no longer reachable, and a tab
+      // reading "(3)" that opens onto one row is its own small bug.
+      const favCount = queryCatalog({ ids: favorites }).filter(isVisible).length;
+      b.textContent = tab.id === 'favorites' ? `★ ${t('sp.favorites')} (${favCount})` : tab.label;
       if (tab.id === activeTab) b.style.cssText = 'font-weight:600;border-color:var(--text-2);color:var(--text-1);';
       b.addEventListener('click', () => {
         activeTab = tab.id;
-        const first = queryCatalog(buildQuery())[0];
+        const first = visibleEntries()[0];
         selectedId = first ? first.id : selectedId;
         render();
       });
@@ -179,7 +229,7 @@ export function mountStadiumPanel(deps: StadiumPanelDeps): void {
   function renderList(): void {
     if (!listEl) return;
     listEl.innerHTML = '';
-    const entries = queryCatalog(buildQuery());
+    const entries = visibleEntries();
     if (entries.length === 0) {
       const p = document.createElement('p');
       p.className = 'hint';
@@ -241,7 +291,11 @@ export function mountStadiumPanel(deps: StadiumPanelDeps): void {
         )
         .join('');
     if (discEl) {
-      if (e.meta.source === 'community') {
+      // Driven by `inspiredBy`, not by source. A template resembles a real venue
+      // or it does not; who wrote it is a different question, and tying the
+      // notice to `source` meant retagging a template silently dropped its
+      // disclaimer.
+      if (e.meta.inspiredBy) {
         discEl.style.display = '';
         discEl.innerHTML = `<p class="hint" style="font-size:10px;color:var(--text-3);line-height:1.4;border-left:2px solid var(--line-1);padding-left:8px;margin:0;">${DISCLAIMER}</p>`;
       } else {
@@ -261,7 +315,7 @@ export function mountStadiumPanel(deps: StadiumPanelDeps): void {
     box.innerHTML =
       `<h3 style="margin:0 0 8px;font-size:15px;">${t('sp.changeQ')} “${escapeHtml(tl(e.id) === e.id ? e.meta.name : tl(e.id))}”?</h3>` +
       `<p style="font-size:12px;color:var(--text-2);line-height:1.5;margin:0 0 14px;">${t('sp.changeMsg')}</p>` +
-      (e.meta.source === 'community'
+      (e.meta.inspiredBy
         ? `<p class="hint" style="font-size:10px;color:var(--text-3);line-height:1.4;margin:0 0 14px;border-left:2px solid var(--line-1);padding-left:8px;">${DISCLAIMER}</p>`
         : '') +
       `<div style="display:flex;gap:8px;justify-content:flex-end;"><button id="sw-cancel">${t('common.cancel')}</button><button id="sw-continue" class="primary">${t('sp.continue')}</button></div>`;
@@ -364,6 +418,10 @@ export function mountStadiumPanel(deps: StadiumPanelDeps): void {
     return row;
   }
   async function renderReviewQueue(): Promise<void> {
+    // The queue moderates community submissions. With that switched off there is
+    // nothing to moderate, and this is a network request on every panel mount
+    // for every user to populate a section nobody can see.
+    if (!COMMUNITY_STADIUMS) return;
     if (!reviewEl || !reviewListEl) return;
     const pending = await fetchPendingStadiums();
     if (pending.length === 0) {
@@ -432,6 +490,7 @@ export function mountStadiumPanel(deps: StadiumPanelDeps): void {
   }
 
   function buildCustomTools(): void {
+    if (!CUSTOM_STADIUMS) return;
     if (customTools || !listEl) return;
     customTools = document.createElement('div');
     customTools.style.cssText = 'margin-bottom:8px;border:1px solid var(--line-1);border-radius:var(--r-md);padding:8px;display:none;';
@@ -516,4 +575,35 @@ export function mountStadiumPanel(deps: StadiumPanelDeps): void {
   }
   render();
   void renderReviewQueue(); // one admin-gated probe; hides itself for non-admins
+
+  // Switching language left this panel in English.
+  //
+  // setLang re-applies every [data-i18n] element in the document, which covers
+  // the headings in index.html but not a single control in here: the filters and
+  // the orientation buttons are built in JS with t(), and both are guarded by a
+  // `dataset.built` flag so they are built exactly once and never again. The
+  // tabs, list and info re-read their strings on every render(), but nothing
+  // called render() on a language change either — i18n has always exposed
+  // onLangChange and, before this, nothing in the app had ever subscribed to it.
+  //
+  // Clearing the two guards and re-rendering rebuilds the panel in the new
+  // language, keeping the selected stadium, tab and filters as they were.
+  onLangChange(() => {
+    const keptTab = activeTab;
+    const keptSearch = searchEl?.value ?? '';
+    const keptType = typeEl?.value ?? '';
+    const keptTiers = tiersEl?.value ?? '';
+    const keptCountry = countryEl?.value ?? '';
+    const keptCap = capEl?.value ?? '';
+    if (filtersEl) { delete filtersEl.dataset.built; filtersEl.innerHTML = ''; }
+    if (orientEl) { delete orientEl.dataset.built; orientEl.innerHTML = ''; }
+    activeTab = keptTab;
+    render();
+    if (searchEl) searchEl.value = keptSearch;
+    if (typeEl) typeEl.value = keptType;
+    if (tiersEl) tiersEl.value = keptTiers;
+    if (countryEl) countryEl.value = keptCountry;
+    if (capEl) capEl.value = keptCap;
+    renderList();
+  });
 }

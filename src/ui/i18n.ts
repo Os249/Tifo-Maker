@@ -988,6 +988,11 @@ const STRINGS: Record<string, { en: string; ar: string }> = {
   'sp.tier': { en: 'tier', ar: 'طابق' },
   'sp.tiers': { en: 'tiers', ar: 'طوابق' },
   'sp.anyCountry': { en: 'Any country', ar: 'أي دولة' },
+  // The catalogue's values are Europe / International / Middle East / South
+  // America, so "country" was simply the wrong word for what the list offered.
+  'sp.anyRegion': { en: 'Any region', ar: 'أي منطقة' },
+  'sp.region': { en: 'Region', ar: 'المنطقة' },
+  'sp.saveFailed': { en: 'Could not save that stadium — this browser\u2019s storage may be full.', ar: 'ما قدرنا نحفظ الملعب — يمكن مساحة التخزين في المتصفح ممتلئة.' },
   'sp.anySize': { en: 'Any size', ar: 'أي حجم' },
 
   // ---- stadium panel ----
@@ -1029,14 +1034,31 @@ const STRINGS: Record<string, { en: string; ar: string }> = {
   // stadium import (ui/stadiumImport.ts) — building a bowl from a real ground
   'si.title': { en: 'Build one from a real ground', ar: 'سوِّ ملعب من أرض حقيقية' },
   'si.blurb': { en: 'Finds the ground in OpenStreetMap and estimates its bowl. It will tell you which numbers it measured and which it guessed.', ar: 'يلقى الملعب في OpenStreetMap ويقدّر شكل مدرجاته. وبيقول لك أي أرقام قاسها وأيها خمّنها.' },
-  'si.searchPh': { en: 'Stadium name…', ar: 'اسم الملعب…' },
+  'si.searchPh': { en: 'Stadium name, e.g. Anfield', ar: 'اسم الملعب، مثلاً Anfield' },
   'si.find': { en: 'Find', ar: 'دوّر' },
   'si.searching': { en: 'Searching OpenStreetMap…', ar: 'يدوّر في OpenStreetMap…' },
   'si.tooShort': { en: 'Type at least three letters.', ar: 'اكتب ٣ حروف على الأقل.' },
-  'si.none': { en: 'No ground of that name in OpenStreetMap. Try the local-language name.', ar: 'ما فيه ملعب بهذا الاسم في OpenStreetMap. جرّب الاسم باللغة المحلية.' },
+  'si.none': { en: 'No ground of that name in OpenStreetMap. Try adding the city, the local-language name, or the full official name.', ar: 'ما فيه ملعب بهذا الاسم في OpenStreetMap. جرّب تزيد اسم المدينة، أو الاسم باللغة المحلية، أو الاسم الرسمي الكامل.' },
   'si.found1': { en: 'Found it.', ar: 'لقيته.' },
   'si.foundN': { en: 'matches — pick one.', ar: 'نتيجة — اختر وحدة.' },
-  'si.osmDown': { en: 'OpenStreetMap is not answering right now. Try again in a moment.', ar: 'OpenStreetMap ما يرد حالياً. جرّب بعد شوي.' },
+  // Three messages where there was one. The old single string blamed OSM for
+  // every failure, including our own malformed query — so the advice ("try
+  // again in a moment") was wrong most of the time it was shown.
+  'si.osmDown': { en: 'Could not reach OpenStreetMap. Check your connection and try again.', ar: 'ما قدرنا نوصل لـ OpenStreetMap. تأكد من اتصالك وجرّب مرة ثانية.' },
+  'si.osmBusy': { en: 'OpenStreetMap is busy right now. Wait about a minute and try again.', ar: 'OpenStreetMap مزحوم حالياً. انتظر تقريباً دقيقة وجرّب مرة ثانية.' },
+  'si.osmSlow': { en: 'OpenStreetMap took too long to answer. Try again.', ar: 'OpenStreetMap تأخّر في الرد. جرّب مرة ثانية.' },
+  'si.help': {
+    en: 'Type the ground’s own name — “Anfield”, “Old Trafford”, “King Fahd International Stadium”. Not the club, not the city. If nothing comes up, add the city (“Camp Nou Barcelona”) or use the full official name.',
+    ar: 'اكتب اسم الملعب نفسه — “استاد الملك فهد الدولي”، “Anfield”. مو اسم النادي ولا المدينة. للملاعب الكبيرة استخدم كلمة «استاد» مو «ملعب»؛ الخريطة تسجّلها كذا. وإذا ما طلع شي، زيد اسم المدينة أو جرّب الاسم بالإنجليزي.'
+  },
+  'si.fetchingShape': { en: 'Fetching the outline…', ar: 'يجيب حدود الملعب…' },
+  'si.noShape': { en: 'OpenStreetMap has this ground as a point, with no outline to measure. Pick another match, or hand-build it above.', ar: 'هذا الملعب مسجل في OpenStreetMap كنقطة بدون حدود تنقاس. اختر نتيجة ثانية أو سوّه بنفسك فوق.' },
+  'si.saveInvalid': { en: 'That bowl is outside what a template can describe, so it was not saved.', ar: 'شكل المدرجات خارج ما يقدر القالب يوصفه، فما انحفظ.' },
+  'si.saveFull': { en: 'Could not save it — this browser’s storage is full. Remove a custom stadium and try again.', ar: 'ما قدرنا نحفظه — مساحة التخزين في المتصفح ممتلئة. احذف ملعب مخصص وجرّب مرة ثانية.' },
+  'si.note.area': { en: 'outer bowl {a}x{b} m from a {m2} m² footprint; row 0 is set back by the seating band', ar: 'المدرج الخارجي {a}×{b} م من مساحة مبنى {m2} م²؛ الصف صفر مسحوب للخلف بعمق المدرجات' },
+  'si.warn.shape': { en: 'The building outline is not bowl-shaped on its own, so the corner shape and proportions were pulled to the range every real bowl sits in.', ar: 'حدود المبنى وحدها مو على شكل مدرج، فانضبطت الأركان والنِّسب على المدى اللي تقع فيه كل المدرجات الحقيقية.' },
+  'si.warn.outlineBig': { en: 'The outline OpenStreetMap has for this ground is far larger than its crowd needs, so it probably covers the surroundings too. The bowl was held to a plausible size — check it, or measure the imagery.', ar: 'حدود هذا الملعب في OpenStreetMap أكبر بكثير مما يحتاجه جمهوره، فغالباً تشمل المحيط كمان. انضبط المدرج على حجم منطقي — تأكد منه أو قِس من الصور الجوية.' },
+  'si.warn.clamped': { en: 'Pinned to the buildable range: {fields}. This ground may be bigger or smaller than a template can describe.', ar: 'انضبط على أقصى ما يقبله القالب: {fields}. قد يكون الملعب أكبر أو أصغر مما يقدر القالب يوصف.' },
   'si.capacityPh': { en: 'Capacity', ar: 'السعة' },
   'si.aislesPh': { en: 'Aisles', ar: 'الممرات' },
   'si.tiersAuto': { en: 'Tiers: estimate', ar: 'الطوابق: تقدير' },
@@ -1433,10 +1455,6 @@ const STRINGS: Record<string, { en: string; ar: string }> = {
   'bn.tier': { en: 'Tier', ar: 'الطابق' },
   'bn.tier.all': { en: 'Whole stand', ar: 'المدرج كامل' },
   'bn.tier.n': { en: 'Tier {n}', ar: 'الطابق {n}' },
-  'bn.fit.capped': {
-    en: 'This stand takes {n} blocks at this shape — a wider design would use more of it',
-    ar: 'هذا المدرج يسع {n} قطاعات بهذا الشكل — تصميم أعرض بيستغل أكثر',
-  },
   'bn.fit.short': {
     en: 'The stand runs out of rake first — {fw} x {fh} m',
     ar: 'المدرج ما يكفي عمقًا — {fw} × {fh} م',

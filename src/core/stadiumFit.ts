@@ -325,6 +325,225 @@ export function stackTiers(totalRows: number, tierCount: number, seatPitch = 0.5
   return out;
 }
 
+/**
+ * Turning a BUILDING outline into the bowl inside it.
+ *
+ * The old code took the footprint's half-extents and subtracted a flat 22 m. On
+ * Anfield's real outline that put row 0 at 100.3 m from the centre while the
+ * touchline is at 52.5 m — a 47.8 m gap, half a pitch of empty grass between the
+ * front row and the pitch, which is what the rendered bowl showed.
+ *
+ * Three things were wrong, and all three are fixed here.
+ *
+ * **Extents overshoot.** `fitSuperellipse` returns max|x| and max|y| of the
+ * rotated ring, so one stair core or one corner of the main stand sets the whole
+ * dimension. Measured on real outlines it makes grounds look square that are not:
+ * Al-Awwal came out 116 x 114.5 (ratio 1.01) and King Fahd 150 x 148.8 (1.01).
+ * AREA is the robust statistic — it is set by the whole polygon rather than by
+ * its two furthest points — so the size comes from area and only the proportions
+ * come from the extents.
+ *
+ * **The exponent is not a bowl's exponent.** Fitting the building returns 1.2 to
+ * 2.05 on the seven grounds measured, because a building has notches, ramps and
+ * an office block on the main stand. Every hand-built template in the catalogue
+ * is between 2.0 and 2.9, and a bowl drawn at p=1.2 is a diamond, not a stadium.
+ *
+ * **The building is not the bowl.** Outside the last row there is a concourse,
+ * an outer wall and the roof's supports. That is STRUCTURE_M of plan dimension
+ * that is not seating, calibrated against Al-Awwal, whose hand-built template
+ * (outer seating 86 x 72) sits inside a 28,219 m² footprint.
+ */
+
+/** A football pitch, half-extents in metres. Regulated, so this is not a guess. */
+const PITCH_HALF_LENGTH = 52.5;
+const PITCH_HALF_WIDTH = 34;
+/**
+ * How full of pitch the bowl is allowed to be, measured at the pitch's CORNER.
+ *
+ * A superellipse evaluates to 1 exactly on its own curve, so this is the value
+ * at (52.5, 34): 0.72 leaves the corner comfortably inside with room for the
+ * run-off and the advertising boards.
+ *
+ * It has to be a corner test, not a floor on a and b separately. Flooring the
+ * axes independently let the curve pass 59.5 x 41 at Anfield, which clears the
+ * touchline by 7 m on both axes and still cuts straight through the pitch
+ * corners — the superellipse reads 1.47 there, half as far out again as its own
+ * edge. Every hand-built template in the catalogue passes this test.
+ */
+const PITCH_FILL = 0.72;
+/**
+ * Outer edge of an 8-lane 400 m track, from World Athletics' marking plan
+ * (36.5 m kerb radius + 8 x 1.22 m lanes, on a 84.39 m straight). Duplicated
+ * from render/simulator/track rather than imported, because core stays free of
+ * anything that pulls in a renderer.
+ */
+const TRACK_HALF_LENGTH = 88.5;
+const TRACK_HALF_WIDTH = 46.3;
+
+/** Concourse, outer wall and roof supports: building dimension that is not seats. */
+const STRUCTURE_M = 10;
+
+/**
+ * How far behind the touchline row 0 may ever sit, without a track.
+ *
+ * Some OSM outlines are not the stadium. The Maracana's way covers the whole
+ * complex including its esplanade — 83,555 m², against Old Trafford's 41,779 for
+ * a similar crowd — and taken at face value it puts row 0 95 m behind the
+ * touchline, a running track and a half of empty ground. The widest hand-built
+ * bowl in the catalogue sets row 0 back 70 m, so past that the outline is
+ * describing more than the bowl and the fit says so instead of drawing it.
+ *
+ * Grounds WITH a track are exempt: there the setback is real and measured.
+ */
+const MAX_SETBACK = 70;
+
+/**
+ * Where a real bowl's proportions and corner shape actually live.
+ *
+ * Both ranges are read off the thirteen hand-built templates, not chosen. Their
+ * aspect ratios run 1.14 to 1.40; their exponents split cleanly by ground type,
+ * which is why there are two of them:
+ *
+ *   football grounds  2.15 - 2.90   a rounded rectangle, stands squared up to
+ *                                   the touchlines
+ *   athletics ovals   2.00 - 2.10   genuinely elliptical, because the bowl
+ *                                   follows the track's bends
+ *
+ * Fitting a BUILDING returns 1.6 to 2.95 with no regard for which it is, and 2.0
+ * on a football ground draws a pure ellipse — the oval ring, corners and all,
+ * that made the first Anfield render look nothing like Anfield.
+ */
+const PLAN_ASPECT = { min: 1.15, max: 1.45 };
+const PLAN_EXPONENT_FOOTBALL = { min: 2.35, max: 3.0 };
+const PLAN_EXPONENT_TRACK = { min: 2.0, max: 2.6 };
+
+/**
+ * Area of a superellipse with half-extents a, b and exponent p, as a multiple of
+ * a*b. p=2 gives pi (an ellipse); p→infinity gives 4 (a rectangle).
+ *
+ * Exact form is 4*Gamma(1+1/p)^2 / Gamma(1+2/p). Lanczos is overkill for one
+ * ratio over a two-unit range, so this is the exact value sampled and
+ * interpolated — worst error against the closed form is under 0.2%.
+ */
+function superellipseAreaCoeff(p: number): number {
+  const TABLE: [number, number][] = [
+    [1.5, 2.585], [1.75, 2.927], [2.0, 3.142], [2.25, 3.290],
+    [2.5, 3.397], [2.75, 3.478], [3.0, 3.541], [3.5, 3.632], [4.0, 3.695],
+  ];
+  if (p <= TABLE[0][0]) return TABLE[0][1];
+  const last = TABLE[TABLE.length - 1];
+  if (p >= last[0]) return last[1];
+  for (let i = 1; i < TABLE.length; i++) {
+    if (p <= TABLE[i][0]) {
+      const [p0, c0] = TABLE[i - 1];
+      const [p1, c1] = TABLE[i];
+      return c0 + ((c1 - c0) * (p - p0)) / (p1 - p0);
+    }
+  }
+  return last[1];
+}
+
+/** Planar area of a lon/lat ring, in square metres. */
+function ringAreaM2(ringLonLat: Pt[]): number {
+  const m = toMetres(ringLonLat);
+  let a = 0;
+  for (let i = 0, j = m.length - 1; i < m.length; j = i++) {
+    a += m[j][0] * m[i][1] - m[i][0] * m[j][1];
+  }
+  return Math.abs(a / 2);
+}
+
+export interface OuterBowl {
+  /** Half-extents of the OUTER edge of the seating, metres. */
+  a: number;
+  b: number;
+  exponent: number;
+  footArea: number;
+  /** True when the outline's own shape had to be pulled into the range real bowls occupy. */
+  clampedShape: boolean;
+}
+
+/**
+ * The outer edge of the seating, from the building footprint.
+ *
+ * Size from area, proportions and corner shape from the outline but held to what
+ * a bowl can actually be, then the non-seating structure taken off.
+ */
+export function outerBowlFromFootprint(
+  footArea: number,
+  f: { a: number; b: number; exponent: number },
+  hasTrack?: boolean,
+): OuterBowl {
+  const rawAspect = f.b > 0 ? f.a / f.b : 1.25;
+  const aspect = clamp(rawAspect, PLAN_ASPECT);
+  const exponent = clamp(f.exponent, hasTrack ? PLAN_EXPONENT_TRACK : PLAN_EXPONENT_FOOTBALL);
+  const clampedShape = Math.abs(aspect - rawAspect) > 0.02 || Math.abs(exponent - f.exponent) > 0.02;
+
+  // area = coeff * a * b, with b = a / aspect
+  const a = Math.sqrt((footArea * aspect) / superellipseAreaCoeff(exponent));
+  return {
+    a: Math.max(PITCH_HALF_LENGTH, a - STRUCTURE_M),
+    b: Math.max(PITCH_HALF_WIDTH, a / aspect - STRUCTURE_M),
+    exponent,
+    footArea,
+    clampedShape,
+  };
+}
+
+/**
+ * Row 0, given the outer edge and how deep the seating is.
+ *
+ * The floor is the thing that stops this swinging from one failure to the
+ * opposite one: however deep the band, the bowl may never close in past the
+ * pitch (or past the track, when the ground has one).
+ */
+export function planFromOuter(
+  outer: { a: number; b: number; exponent: number },
+  bandDepth: number,
+  hasTrack?: boolean,
+): { a: number; b: number; exponent: number; capped: boolean } {
+  const exponent = clamp(outer.exponent, LIMITS.exponent);
+  const aspect = outer.b > 0 ? outer.a / outer.b : 1.25;
+
+  // Smallest bowl of this shape that still contains the pitch corner.
+  //   (L/a)^p + (W/b)^p = PITCH_FILL, with a = aspect * b
+  // solves for b directly.
+  const bMin = Math.pow(
+    (Math.pow(PITCH_HALF_LENGTH / aspect, exponent) + Math.pow(PITCH_HALF_WIDTH, exponent)) / PITCH_FILL,
+    1 / exponent,
+  );
+  let floorA = aspect * bMin;
+  let floorB = bMin;
+
+  // A track is a discorectangle, not a superellipse, so it is checked on the
+  // axes the way render/simulator/track checks it — a corner test would demand a
+  // bowl far bigger than any real athletics ground.
+  if (hasTrack) {
+    floorA = Math.max(floorA, TRACK_HALF_LENGTH + 2);
+    floorB = Math.max(floorB, TRACK_HALF_WIDTH + 2);
+  }
+
+  let a = Math.max(floorA, outer.a - bandDepth);
+  let b = Math.max(floorB, outer.b - bandDepth);
+
+  // Scale the whole curve, not just the long axis, so a capped bowl keeps its
+  // proportions instead of turning into a different shape.
+  let capped = false;
+  if (!hasTrack && a > PITCH_HALF_LENGTH + MAX_SETBACK) {
+    const k = (PITCH_HALF_LENGTH + MAX_SETBACK) / a;
+    a *= k;
+    b = Math.max(floorB, b * k);
+    capped = true;
+  }
+
+  return {
+    a: clamp(a, LIMITS.planA),
+    b: clamp(b, LIMITS.planB),
+    exponent,
+    capped,
+  };
+}
+
 // ---- the entry point, and saying where every number came from --------------
 
 /**
@@ -456,6 +675,12 @@ export function buildStadium(input: FitInput): FitResult {
 
   // ---- plan curve
   let plan: { a: number; b: number; exponent: number };
+  // Set only on the footprint path: the bowl's outer edge, which row 0 is then
+  // set back from once the seating band is known. Null on the imagery path,
+  // where row 0 was measured directly and nothing should move it.
+  let footprintOuter: OuterBowl | null = null;
+  /** The footprint describes more than the bowl — reported, not silently drawn. */
+  let outlineTooBig = false;
   if (input.innerRing && input.innerRing.length >= 12) {
     const f = fitRing(input.innerRing);
     plan = { a: f.a, b: f.b, exponent: f.exponent };
@@ -469,28 +694,31 @@ export function buildStadium(input: FitInput): FitResult {
     prov['plan.a'] = p; prov['plan.b'] = p; prov['plan.exponent'] = p;
   } else if (input.footprint && input.footprint.length >= 6) {
     const f = fitSuperellipse(input.footprint);
-    // The footprint is the OUTER wall. plan is row 0. Inset by a plausible bowl
-    // depth or every seat lands in the concourse — the exact mistake the first
-    // Amman import made, which rendered a velodrome.
-    const inset = input.bandDepth ?? 22;
-    // Floors come from LIMITS, not from a number typed here. The old floor for b
-    // was 15, four metres under what isValidTemplate accepts, so a small ground
-    // produced a template the store silently threw away.
-    plan = {
-      a: clamp(f.a - inset, LIMITS.planA),
-      b: clamp(f.b - inset, LIMITS.planB),
-      exponent: clamp(f.exponent, LIMITS.exponent),
-    };
+    const outer = outerBowlFromFootprint(ringAreaM2(input.footprint), f, k.hasTrack);
+    // Placed below, once the row count is known: the bowl's inner edge is the
+    // OUTER edge minus the seating band, and the band is not known until the
+    // rows have been solved against the capacity. Seeded with a plausible band
+    // so the first pass has something to stand on.
+    footprintOuter = outer;
+    const seeded = planFromOuter(outer, 26, k.hasTrack);
+    if (seeded.capped) outlineTooBig = true;
+    plan = seeded;
     const p: FieldProvenance = {
-      source: 'osm-footprint-inset',
+      source: 'osm-footprint-area',
       confidence: 'suggested',
-      note: `outer ${f.a}x${f.b} m inset by ${inset} m; plan is row 0, not the wall`,
-      noteKey: 'si.note.inset',
-      noteVars: { a: f.a, b: f.b, inset: Math.round(inset) },
+      note: `outer bowl ${outer.a.toFixed(0)}x${outer.b.toFixed(0)} m from a ${Math.round(outer.footArea).toLocaleString()} m² footprint; plan is row 0, set back by the seating band`,
+      noteKey: 'si.note.area',
+      noteVars: { a: outer.a.toFixed(0), b: outer.b.toFixed(0), m2: Math.round(outer.footArea).toLocaleString() },
     };
     prov['plan.a'] = p; prov['plan.b'] = p; prov['plan.exponent'] = p;
     confirm.push('plan.a', 'plan.b');
-    warnings.push({ key: 'si.warn.noRing', text: 'No seating ring measured: the plan curve is the building outline inset by a guess. Sample the imagery for a real one.' });
+    warnings.push({ key: 'si.warn.noRing', text: 'No seating ring measured: the bowl is derived from the building footprint and the capacity. Sample the imagery for a measured one.' });
+    if (outer.clampedShape) {
+      warnings.push({
+        key: 'si.warn.shape',
+        text: 'The building outline is not bowl-shaped on its own, so the corner shape and proportions were pulled to the range every real bowl sits in.',
+      });
+    }
   } else {
     throw new Error('buildStadium needs at least a footprint or a measured inner ring');
   }
@@ -529,25 +757,31 @@ export function buildStadium(input: FitInput): FitResult {
     };
   }
 
-  const tierCount = k.tiers ?? suggestTierCount(totalRows);
+  let tierCount = k.tiers ?? suggestTierCount(totalRows);
   prov['tiers.length'] = k.tiers
     ? { source: 'user', confidence: 'given' }
     : { source: 'row-count-rule', confidence: 'suggested', note: 'right on 10 of 13 shipped templates; a photo settles it', noteKey: 'si.note.tiers' };
   if (!k.tiers) confirm.push('tiers.length');
 
-  const base: StadiumTemplate = {
+  const mkBase = (
+    p: { a: number; b: number; exponent: number },
+    rows: number,
+    tiers: number,
+  ): StadiumTemplate => ({
     id: input.id ?? 'fitted',
     name: input.name ?? 'Fitted stadium',
     version: 1,
-    plan,
-    tiers: stackTiers(totalRows, tierCount, seatPitch),
+    plan: p,
+    tiers: stackTiers(rows, tiers, seatPitch),
     aisles: { count: aisles, widthMeters: 1.2 },
     sectionsPerTier: aisles,
     evenRows: true,
     ...(k.cornerCut !== undefined ? { cornerCut: k.cornerCut } : {}),
     ...(k.roof ? { roof: { coverage: k.roof } } : {}),
     ...(k.hasTrack ? { track: {} } : {}),
-  };
+  });
+
+  let base = mkBase(plan, totalRows, tierCount);
   if (k.roof) prov['roof.coverage'] = { source: 'user', confidence: 'given' };
   else confirm.push('roof.coverage');
   if (k.hasTrack !== undefined) prov['track'] = { source: 'user', confidence: 'given' };
@@ -557,7 +791,33 @@ export function buildStadium(input: FitInput): FitResult {
   let template = base;
   let built = generateSeatMap(base).count;
   if (input.capacity && input.capacity > 0) {
-    const solved = solveRows(base, input.capacity);
+    // Plan, rows and tier count are one problem, not three in a row.
+    //
+    // Doing them in sequence is what produced a 43-row single tier at Anfield:
+    // the tier count was decided from the placeholder 30 rows BEFORE the
+    // capacity solve replaced it, and on the footprint path row 0 was fixed
+    // before anything knew how deep the seating would be. Each pass re-seats
+    // row 0 behind the band the previous pass produced, re-splits the tiers for
+    // the row count it found, and re-solves. It settles in two or three passes;
+    // the loop stops as soon as nothing moves.
+    let solved = solveRows(base, input.capacity);
+    for (let pass = 0; pass < 4; pass++) {
+      const rows = solved.template.tiers.reduce((n, t) => n + t.rows, 0);
+      const band = solved.template.tiers.reduce((d, t) => d + t.rows * t.rowDepth, 0);
+      const nextTiers = k.tiers ?? suggestTierCount(rows);
+      const next = footprintOuter ? planFromOuter(footprintOuter, band, k.hasTrack) : null;
+      if (next?.capped) outlineTooBig = true;
+      const nextPlan = next ?? plan;
+      const settled =
+        nextTiers === tierCount &&
+        Math.abs(nextPlan.a - base.plan.a) < 0.5 &&
+        Math.abs(nextPlan.b - base.plan.b) < 0.5;
+      if (settled) break;
+      tierCount = nextTiers;
+      plan = nextPlan;
+      base = mkBase(plan, rows, tierCount);
+      solved = solveRows(base, input.capacity);
+    }
     template = solved.template;
     built = solved.built;
     totalRows = template.tiers.reduce((n, t) => n + t.rows, 0);
@@ -611,6 +871,14 @@ export function buildStadium(input: FitInput): FitResult {
       noteKey: 'si.note.facade',
     };
   if (!k.facade) confirm.push('facade.style');
+
+  if (outlineTooBig) {
+    warnings.push({
+      key: 'si.warn.outlineBig',
+      text: 'The outline OpenStreetMap has for this ground is far larger than its crowd needs, so it probably covers the surroundings too. The bowl was held to a plausible size — check it, or measure the imagery.',
+    });
+    if (!confirm.includes('plan.a')) confirm.push('plan.a');
+  }
 
   // ---- last gate: never hand back a template the store will refuse
   // Everything above clamps as it goes, so this should be a no-op. It is here
