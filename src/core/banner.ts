@@ -54,18 +54,24 @@
  * property of the type rather than a checkbox.
  */
 export type BannerKind =
-  | 'drop'          // Abroller — released from the top of a tier, unrolls down its face
-  | 'lift'          // Aufziehfahne — anchored at the front rail, hauled up on ropes
-  | 'overhead-pass' // Überziehfahne — passed backwards over the crowd's heads
-  | 'roof-hung'     // rigged to the roof structure on ropes, hanging free
-  | 'stand-cover'   // copricurva / sektorówka — laid over the seats themselves
-  | 'fence'         // Zaunfahne — tied to the perimeter fence or front wall
-  | 'pitch'         // laid flat on the grass
-  | 'pole-out';     // 3D Tifo — held off the stand face on aluminium poles
+  /**
+   * The sheet that covers a block of the terracing.
+   *
+   * A Blockfahne: hung from the back rail of a tier and drawn down over the
+   * people in front of it, or laid on the seats when the stand is empty. The
+   * one in most photographs of a tifo, and the one that unrolls.
+   */
+  | 'stand'
+  /**
+   * The flat sheet that hangs in the air on ropes.
+   *
+   * From the roof steel, or over the front of a tier. It never touches the
+   * terracing, which is why it reads completely differently: a taut printed
+   * wall rather than fabric lying on a crowd.
+   */
+  | 'hanging';
 
-export const BANNER_KINDS: BannerKind[] = [
-  'drop', 'lift', 'overhead-pass', 'roof-hung', 'stand-cover', 'fence', 'pitch', 'pole-out',
-];
+export const BANNER_KINDS: BannerKind[] = ['stand', 'hanging'];
 
 /**
  * Solid fabric or perforated mesh.
@@ -78,46 +84,42 @@ export const BANNER_KINDS: BannerKind[] = [
  */
 export type BannerMaterial = 'solid' | 'mesh';
 
-/** How a banner arrives. One curve, so every one of these can be scrubbed. */
+/** How a banner arrives. One scalar, so every one of these can be scrubbed. */
 export type BannerReveal =
-  | 'drop'   // a roll at the top that shrinks as the sheet extends
-  | 'lift'   // rises from the bottom anchor, ropes shortening
-  | 'pass'   // travels front-to-back over the crowd, following the rake
-  | 'hoist'  // lowered from roof rigging, settles on a pendulum
-  | 'unfold' // rotates out from the stand face on its poles
-  | 'fade';  // already in place when the cameras find it
+  | 'unroll' // the covered fraction advances behind a shrinking roll
+  | 'lower'  // the sheet descends from its rigging on ropes
+  | 'cut';   // already in place when the cameras find it
 
 /** Which stand: 0 East, 1 North, 2 West, 3 South — the app's existing order. */
 export type StandIndex = 0 | 1 | 2 | 3;
 
-export interface BannerPlacement {
+/**
+ * Where a banner goes: a SLOT, not a position.
+ *
+ * This is the whole difference between this version and the four before it.
+ * A banner used to have a continuous position and a free size, which made the
+ * space of configurations infinite: I could test points in it, and the user
+ * walked around in it and found the points I had not tested.
+ *
+ * A slot is a stand, a run of the blocks that stand is divided into by its
+ * aisles, and a tier. That is a FINITE set — about 864 per ground — small
+ * enough to enumerate and test exhaustively rather than sample. The size is
+ * not in here at all: a banner is as wide as the blocks it covers, and its
+ * height follows the proportions of the artwork drawn on it.
+ */
+export interface BannerSlot {
   stand: StandIndex;
-  /** Along the stand, 0 = one end, 0.5 = dead centre, 1 = the other end. */
-  alongU: number;
-  /** Up the stand's face, 0 = the front rail, 1 = the back row. */
-  heightV: number;
-  /** Metres out from the stand's face, toward the pitch. */
-  outM: number;
-  /** Extra yaw in degrees on top of the stand's own facing. */
-  yawDeg: number;
-  /** Lean in degrees: 0 flat against the stand, 90 horizontal (a pole-out). */
-  tiltDeg: number;
-  /** Magnet on. Off means the banner goes exactly where it is dragged. */
-  snap: boolean;
-  /**
-   * The first block of the stand this banner covers; -1 for free placement.
-   *
-   * Stands are divided by their radial aisles into blocks, and a crew thinks
-   * in those: "the whole of 4 and 5", not "62% along". Free placement stays
-   * as the fallback — old scenes were saved with it and some kinds (a pitch
-   * banner, a roof-hung one) do not sit on the terracing at all — but blocks
-   * are what the panel offers, because a banner snapped to blocks cannot end
-   * up straddling an aisle with a corner hanging off the end of the ground.
-   */
+  /** First block of the run. Negative means "centre the run on the stand". */
   blockFrom: number;
-  /** How many consecutive blocks; 0 means free placement. */
+  /** How many consecutive blocks the run covers. At least one. */
   blockSpan: number;
-  /** Which tier it belongs to; -1 for the whole face. */
+  /**
+   * Which tier.
+   *
+   * For a stand banner: the tier whose face it covers, or -1 for the whole
+   * stand. For a hanging banner: the tier over whose front it hangs, or -1 to
+   * fly it from the roof.
+   */
   tier: number;
 }
 
@@ -222,9 +224,18 @@ export interface BannerDoc {
   id: string;
   name: string;
   kind: BannerKind;
-  /** Real size in metres. Everything physical is derived from these two. */
-  widthM: number;
-  heightM: number;
+  /**
+   * The shape of the artwork, as height divided by width.
+   *
+   * NOT a size. A banner's size comes from the slot it is in — it is as wide
+   * as the blocks it covers — and this is the only thing the editor gets to
+   * say about its geometry. That is deliberate: size as an independent number
+   * is what made the configuration space infinite, and an infinite space is
+   * one I can sample but never prove.
+   *
+   * Real banners sit between about 1:4 and 4:1.
+   */
+  aspect: number;
   material: BannerMaterial;
   /** Fabric weight in g/m². The real options are 60, 70, 90, 110 and 230. */
   fabricGsm: number;
@@ -242,7 +253,7 @@ export interface BannerDoc {
   /** Backdrop colour; null = transparent (the stand shows through). */
   bg: string | null;
   items: BannerItem[];
-  place: BannerPlacement;
+  slot: BannerSlot;
   reveal: BannerReveal;
   /** Reveal length in milliseconds. */
   revealMs: number;
@@ -261,21 +272,13 @@ export interface BannerSceneModel {
 // ---------------------------------------------------------------------------
 
 export interface KindProfile {
-  /** Default size in metres. */
-  widthM: number;
-  heightM: number;
+  /** The shape the type starts at, height over width. */
+  aspect: number;
   reveal: BannerReveal;
-  /**
-   * Where it is rigged on the stand.
-   *
-   * `heightV` is the height of the EDGE the rigging holds, up the rake: the
-   * top edge for everything that hangs, and the bottom edge — the front rail —
-   * for a rope lift, which is hauled upward from there.
-   */
-  alongU: number;
-  heightV: number;
-  outM: number;
-  tiltDeg: number;
+  /** How many blocks of the stand this type covers by default. */
+  blockSpan: number;
+  /** Which tier it starts on; -1 is the whole stand, or the roof. */
+  tier: number;
   netBacked: boolean;
   weightBar: boolean;
   fabricGsm: number;
@@ -283,14 +286,6 @@ export interface KindProfile {
   occludesCrowd: boolean;
   /** Ropes are part of this banner's look. */
   roped: boolean;
-  /**
-   * How many blocks of the stand this kind covers by default.
-   *
-   * 0 means it is not a stand-mounted banner and blocks do not apply. The
-   * numbers are what each type is actually used for: a Blockfahne covers a
-   * block or two, a crowd pass covers a whole end.
-   */
-  blockSpan: number;
 }
 
 /**
@@ -303,64 +298,31 @@ export interface KindProfile {
  * bound them; Section 8 Chicago's overhead is 8 x 8 m.
  */
 export const KIND_PROFILE: Record<BannerKind, KindProfile> = {
-  drop: {
-    widthM: 24, heightM: 12, reveal: 'drop',
-    alongU: 0.5, heightV: 0.98, outM: 0.5, tiltDeg: 0,
+  /**
+   * Two blocks, hung on the upper tier, roughly 2:1.
+   *
+   * Two blocks of a generic bowl is about 37 m of stand, and 2:1 puts it at
+   * 18 m deep — which is a Blockfahne, and which is what the Kaiserslautern
+   * choreo's 40 m block flag with 4 m lettering actually was.
+   */
+  stand: {
+    aspect: 0.5, reveal: 'unroll', blockSpan: 2, tier: -1,
     netBacked: false, weightBar: true, fabricGsm: 110,
-    occludesCrowd: false, roped: false, blockSpan: 2,
+    occludesCrowd: true, roped: false,
   },
-  lift: {
-    widthM: 36, heightM: 18, reveal: 'lift',
-    alongU: 0.5, heightV: 0.1, outM: 1.0, tiltDeg: 0,
-    netBacked: true, weightBar: false, fabricGsm: 70,
-    occludesCrowd: false, roped: true, blockSpan: 2,
-  },
-  'overhead-pass': {
-    widthM: 48, heightM: 28, reveal: 'pass',
-    alongU: 0.5, heightV: 1.0, outM: 1.0, tiltDeg: 0,
-    netBacked: false, weightBar: false, fabricGsm: 70,
-    occludesCrowd: true, roped: false, blockSpan: 3,
-  },
-  'roof-hung': {
-    widthM: 20, heightM: 14, reveal: 'hoist',
-    // heightV is the top edge's height in the AIR for this one, from the
-    // front rail up to the roof; outM is how far out over the moat it flies.
-    alongU: 0.5, heightV: 0.75, outM: 3, tiltDeg: 0,
+  /**
+   * Two blocks, flown from the roof, roughly 5:3.
+   *
+   * Squarer than a Blockfahne because it is read from across the ground
+   * rather than down a rake, and it has no terracing to follow.
+   */
+  hanging: {
+    aspect: 0.6, reveal: 'lower', blockSpan: 2, tier: -1,
     netBacked: true, weightBar: true, fabricGsm: 110,
-    occludesCrowd: false, roped: true, blockSpan: 0,
-  },
-  'stand-cover': {
-    widthM: 44, heightM: 26, reveal: 'fade',
-    alongU: 0.5, heightV: 1.0, outM: 0.55, tiltDeg: 0,
-    netBacked: false, weightBar: false, fabricGsm: 110,
-    occludesCrowd: true, roped: false, blockSpan: 3,
-  },
-  fence: {
-    widthM: 6, heightM: 1.2, reveal: 'fade',
-    alongU: 0.5, heightV: 0.05, outM: 0.35, tiltDeg: 0,
-    netBacked: false, weightBar: false, fabricGsm: 230,
-    occludesCrowd: false, roped: false, blockSpan: 1,
-  },
-  pitch: {
-    widthM: 18.3, heightM: 18.3, reveal: 'fade',
-    alongU: 0.5, heightV: 0, outM: 0, tiltDeg: 90,
-    netBacked: false, weightBar: false, fabricGsm: 110,
-    occludesCrowd: false, roped: false, blockSpan: 0,
-  },
-  'pole-out': {
-    // Smaller than the hung types on purpose: two people are holding it up on
-    // poles, and the sheet has to be light enough and short enough that they
-    // can. Twelve by six is what a pair of carbon poles will actually manage
-    // in any breeze at all.
-    widthM: 12, heightM: 6, reveal: 'unfold',
-    alongU: 0.5, heightV: 0.02, outM: 2.0, tiltDeg: 34,
-    // No net and no ropes: the two poles ARE the rig. A net would be dead
-    // weight on something two people are holding up, and a rope run to the
-    // back of the stand would stop them walking it along the rail.
-    netBacked: false, weightBar: false, fabricGsm: 110,
-    occludesCrowd: false, roped: false, blockSpan: 1,
+    occludesCrowd: false, roped: true,
   },
 };
+
 
 /** Does this banner end up lying on top of the crowd (and its mosaic)? */
 export function occludesCrowd(doc: BannerDoc): boolean {
@@ -434,15 +396,44 @@ const TIFO_CAP_DIVISOR = 40;
 const MIN_TYPE_FRAC = 0.02;
 
 /**
+ * A banner's real size, in metres.
+ *
+ * Passed IN rather than read off the document, because a banner no longer
+ * carries a size: it is as wide as the blocks it covers, and only the stand
+ * knows how wide those are. Match Day passes the exact figure; the editor,
+ * which has no bowl to ask, passes `estimateSize` below and says so.
+ */
+export interface BannerSize {
+  widthM: number;
+  heightM: number;
+}
+
+/** Metres of stand in one block, averaged over the catalogue. */
+export const TYPICAL_BLOCK_M = 18.5;
+
+/**
+ * What a banner will PROBABLY come out at, for the editor's panel.
+ *
+ * The editor has the artwork and the slot but not the ground, so it cannot
+ * know the real width. Eighteen and a half metres a block is the average
+ * across every template in the catalogue, and it is close enough for a seam
+ * count and a weight — which are the only things the panel prints.
+ */
+export function estimateSize(doc: BannerDoc): BannerSize {
+  const widthM = Math.max(1, doc.slot.blockSpan) * TYPICAL_BLOCK_M;
+  return { widthM, heightM: widthM * clamp(doc.aspect, 0.05, 6) };
+}
+
+/**
  * Everything the panel prints about a banner, derived rather than asserted.
  *
  * `viewDistanceM` is how far away the people reading it are — across the pitch
  * from the opposite stand, which the simulator can measure and which defaults
  * to 100 m here so this function stays pure.
  */
-export function bannerFacts(doc: BannerDoc, viewDistanceM = 100): BannerFacts {
-  const w = Math.max(0.1, doc.widthM);
-  const h = Math.max(0.1, doc.heightM);
+export function bannerFacts(doc: BannerDoc, size: BannerSize, viewDistanceM = 100): BannerFacts {
+  const w = Math.max(0.1, size.widthM);
+  const h = Math.max(0.1, size.heightM);
   const areaM2 = w * h;
   const panels = Math.max(1, Math.ceil(w / PANEL_MAX_M - 1e-9));
   const seamsM: number[] = [];
@@ -462,22 +453,15 @@ export function bannerFacts(doc: BannerDoc, viewDistanceM = 100): BannerFacts {
   if (doc.material === 'mesh') {
     notes.push({ key: 'mesh', level: 'info' });
   }
-  // A sail. Mesh is the documented answer; so is not projecting it into the wind.
-  const projecting = doc.kind === 'pole-out' || doc.kind === 'roof-hung' || doc.place.outM > 3;
-  if (doc.material === 'solid' && projecting && areaM2 > 120) {
+  // A sail. Mesh is the documented answer; so is not flying it in the wind.
+  if (doc.material === 'solid' && doc.kind === 'hanging' && areaM2 > 120) {
     notes.push({ key: 'wind', level: 'warn', vals: { area: Math.round(areaM2) } });
   }
-  if (doc.material === 'solid' && areaM2 > 400 && !doc.netBacked && doc.kind !== 'overhead-pass' && doc.kind !== 'stand-cover') {
+  if (doc.material === 'solid' && areaM2 > 400 && !doc.netBacked) {
     notes.push({ key: 'net', level: 'warn', vals: { area: Math.round(areaM2) } });
   }
   if (KIND_PROFILE[doc.kind].occludesCrowd) {
     notes.push({ key: 'occludes', level: 'warn' });
-  }
-  if (doc.kind === 'pole-out') {
-    // DFB model rules cap a banner pole at 1.50 m x 3 cm; RB Leipzig's house
-    // rules allow 2.00 m. Club rules override the model text, so this is a
-    // range rather than a number.
-    notes.push({ key: 'poles', level: 'info' });
   }
   notes.push({ key: 'fire', level: 'info' });
   return { areaM2, panels, seamsM, weightKg, carriers, headlineCapM, headlineCapFrac, minTypeFrac: MIN_TYPE_FRAC, notes };
@@ -492,40 +476,33 @@ function newId(prefix: string): string {
   return `${prefix}${Date.now().toString(36)}${(counter++).toString(36)}`;
 }
 
-export function newBanner(kind: BannerKind = 'drop', name = 'Banner'): BannerDoc {
+export function newBanner(kind: BannerKind = 'stand', name = 'Banner'): BannerDoc {
   const p = KIND_PROFILE[kind];
   return {
     id: newId('bn_'),
     name,
     kind,
-    widthM: p.widthM,
-    heightM: p.heightM,
+    aspect: p.aspect,
     material: 'solid',
     fabricGsm: p.fabricGsm,
     netBacked: p.netBacked,
     weightBar: p.weightBar,
     bg: null,
     items: [],
-    place: {
+    slot: {
       stand: 1,
-      alongU: p.alongU,
-      heightV: p.heightV,
-      outM: p.outM,
-      yawDeg: 0,
-      tiltDeg: p.tiltDeg,
-      snap: true,
-      // Blocks by default for anything that sits on the terracing; the two
-      // that do not — a banner flown from the roof, one lying on the grass —
-      // keep free placement, because a block is not where they are.
-      // -1 with a span means "centred": a tifo goes in the middle of the kop
-      // unless someone moves it, and the number of blocks depends on the
-      // ground, so a fixed index would be wrong somewhere.
+      // -1 means "centred". A tifo goes in the middle of the kop unless
+      // someone moves it, and the number of blocks depends on the ground, so
+      // a fixed index would be wrong on some of them.
       blockFrom: -1,
       blockSpan: p.blockSpan,
-      tier: -1,
+      tier: p.tier,
     },
     reveal: p.reveal,
-    revealMs: physicalRevealMs(kind, p.widthM, p.heightM),
+    revealMs: physicalRevealMs(kind, {
+      widthM: p.blockSpan * TYPICAL_BLOCK_M,
+      heightM: p.blockSpan * TYPICAL_BLOCK_M * p.aspect,
+    }),
     wind: 0.25,
     visible: true,
   };
@@ -534,44 +511,35 @@ export function newBanner(kind: BannerKind = 'drop', name = 'Banner'): BannerDoc
 /**
  * Re-profile a banner when its type changes.
  *
- * The art is kept — it is normalised to the width, so it rescales — but the
- * rig, the reveal and the default size all follow the new type, because those
- * are what the type IS. Size is only replaced when the user has not touched it,
- * so switching type twice does not silently undo a size they chose.
+ * The artwork is kept and so is the slot — moving a banner from the terracing
+ * into the air should not also move it to a different part of the ground. The
+ * rig and the reveal follow the new type, because those are what the type IS.
  */
 export function applyKind(doc: BannerDoc, kind: BannerKind): BannerDoc {
   const from = KIND_PROFILE[doc.kind];
   const to = KIND_PROFILE[kind];
-  const untouched = doc.widthM === from.widthM && doc.heightM === from.heightM;
-  return {
+  const next: BannerDoc = {
     ...doc,
     kind,
-    widthM: untouched ? to.widthM : doc.widthM,
-    heightM: untouched ? to.heightM : doc.heightM,
+    aspect: doc.aspect === from.aspect ? to.aspect : doc.aspect,
     fabricGsm: doc.fabricGsm === from.fabricGsm ? to.fabricGsm : doc.fabricGsm,
     netBacked: to.netBacked,
     weightBar: to.weightBar,
     reveal: to.reveal,
-    // The duration follows the new rig unless the user has moved the slider
-    // off the old rig's own physical figure: a drop and a rope lift are not
-    // the same event at different speeds, they are seconds and minutes apart.
-    revealMs:
-      doc.revealMs === physicalRevealMs(doc.kind, from.widthM, from.heightM)
-        ? physicalRevealMs(kind, to.widthM, to.heightM)
-        : doc.revealMs,
-    place: {
-      ...doc.place,
-      heightV: to.heightV,
-      outM: to.outM,
-      tiltDeg: to.tiltDeg,
-      blockSpan: to.blockSpan,
-    },
+    revealMs: doc.revealMs,
+    slot: { ...doc.slot },
   };
+  // The duration follows the new rig unless the user moved the slider off the
+  // old rig's own physical figure: an unroll and a rope lower are not the same
+  // event at different speeds, they are seconds and a minute apart.
+  const wasDefault = doc.revealMs === physicalRevealMs(doc.kind, estimateSize(doc));
+  if (wasDefault) next.revealMs = physicalRevealMs(kind, estimateSize(next));
+  return next;
 }
 
 /** Aspect in banner units: y runs 0..aspect. */
 export function aspectOf(doc: BannerDoc): number {
-  return Math.max(0.02, doc.heightM / Math.max(0.1, doc.widthM));
+  return clamp(doc.aspect, 0.05, 6);
 }
 
 export function makeStroke(color: string, width: number, erase = false): StrokeItem {
@@ -648,7 +616,7 @@ export class BannerStore {
   }
 
   private snapshot(): BannerDoc[] {
-    return this.banners.map((b) => ({ ...b, place: { ...b.place }, items: b.items.map((i) => ({ ...i })) }));
+    return this.banners.map((b) => ({ ...b, slot: { ...b.slot }, items: b.items.map((i) => ({ ...i })) }));
   }
 
   /**
@@ -684,7 +652,18 @@ export class BannerStore {
     this.emit();
   }
 
+  /**
+   * Add a banner, normalised.
+   *
+   * Anything that reaches the store is filled in and clamped first, so the
+   * renderer can never be handed a document with a missing `aspect` or a slot
+   * on a stand that does not exist. Trusting the caller here cost an
+   * afternoon: a harness left `aspect` off, `resolveSlot` multiplied by
+   * undefined, and every vertex came out NaN — which draws as nothing at all
+   * rather than as an error.
+   */
   add(doc: BannerDoc): BannerDoc {
+    doc = normalise(doc);
     this.begin();
     this.banners.push(doc);
     this.activeId = doc.id;
@@ -724,10 +703,10 @@ export class BannerStore {
     this.emit();
   }
 
-  patchPlace(p: Partial<BannerPlacement>): void {
+  patchSlot(p: Partial<BannerSlot>): void {
     const a = this.active;
     if (!a) return;
-    a.place = { ...a.place, ...p };
+    a.slot = { ...a.slot, ...p };
     this.emit();
   }
 
@@ -852,16 +831,25 @@ function sameScene(a: BannerDoc[], b: BannerDoc[]): boolean {
  * document.
  */
 export function normalise(raw: Partial<BannerDoc>): BannerDoc {
-  const kind = (raw.kind && KIND_PROFILE[raw.kind] ? raw.kind : 'drop') as BannerKind;
+  const kind = (raw.kind && KIND_PROFILE[raw.kind] ? raw.kind : 'stand') as BannerKind;
   const p = KIND_PROFILE[kind];
   const base = newBanner(kind, raw.name ?? 'Banner');
+  // A banner saved by an older build has a free position and a size in
+  // metres, neither of which exists any more. Its ARTWORK still does, so the
+  // artwork comes forward and the placement is simply the default slot —
+  // which is the clean break rather than a migration shim kept alive forever.
+  const legacy = raw as unknown as { widthM?: number; heightM?: number; place?: { stand?: number } };
+  const aspect = raw.aspect !== undefined
+    ? clamp(num(raw.aspect, p.aspect), 0.05, 6)
+    : legacy.widthM && legacy.heightM
+      ? clamp(legacy.heightM / legacy.widthM, 0.05, 6)
+      : p.aspect;
   return {
     ...base,
     ...raw,
     id: raw.id ?? base.id,
     kind,
-    widthM: clamp(num(raw.widthM, p.widthM), 0.5, 400),
-    heightM: clamp(num(raw.heightM, p.heightM), 0.3, 120),
+    aspect,
     fabricGsm: clamp(num(raw.fabricGsm, p.fabricGsm), 40, 600),
     material: raw.material === 'mesh' ? 'mesh' : 'solid',
     netBacked: raw.netBacked ?? p.netBacked,
@@ -870,24 +858,17 @@ export function normalise(raw: Partial<BannerDoc>): BannerDoc {
     items: Array.isArray(raw.items) ? raw.items.filter(validItem) : [],
     wind: clamp(num(raw.wind, 0.25), 0, 1),
     revealMs: clamp(num(raw.revealMs, base.revealMs), 200, 180000),
+    reveal: raw.reveal === 'unroll' || raw.reveal === 'lower' || raw.reveal === 'cut' ? raw.reveal : p.reveal,
     visible: raw.visible !== false,
-    place: {
-      stand: ((raw.place?.stand ?? 1) % 4) as StandIndex,
-      alongU: clamp(num(raw.place?.alongU, p.alongU), 0, 1),
-      heightV: clamp(num(raw.place?.heightV, p.heightV), 0, 1.4),
-      outM: clamp(num(raw.place?.outM, p.outM), -4, 60),
-      yawDeg: clamp(num(raw.place?.yawDeg, 0), -180, 180),
-      tiltDeg: clamp(num(raw.place?.tiltDeg, p.tiltDeg), -90, 90),
-      snap: raw.place?.snap !== false,
-      // An older scene has none of these. A banner saved before blocks
-      // existed keeps the free placement it was saved with rather than
-      // jumping to block 0 the moment it is opened.
-      blockFrom: Math.round(clamp(num(raw.place?.blockFrom, -1), -1, 63)),
-      blockSpan: Math.round(clamp(num(raw.place?.blockSpan, 0), 0, 32)),
-      tier: Math.round(clamp(num(raw.place?.tier, -1), -1, 7)),
+    slot: {
+      stand: (((raw.slot?.stand ?? legacy.place?.stand ?? 1) % 4) + 4) % 4 as StandIndex,
+      blockFrom: Math.round(clamp(num(raw.slot?.blockFrom, -1), -1, 63)),
+      blockSpan: Math.round(clamp(num(raw.slot?.blockSpan, p.blockSpan), 1, 32)),
+      tier: Math.round(clamp(num(raw.slot?.tier, p.tier), -1, 7)),
     },
   };
 }
+
 
 function validItem(it: BannerItem): boolean {
   if (!it || typeof it !== 'object' || typeof it.id !== 'string') return false;
@@ -926,32 +907,29 @@ function clamp(v: number, lo: number, hi: number): number {
 export function revealEase(mode: BannerReveal, t: number): number {
   const x = t < 0 ? 0 : t > 1 ? 1 : t;
   switch (mode) {
-    // Gravity on an unwinding roll: slow first, then away.
-    case 'drop': return x * x * (1.7 - 0.7 * x);
-    // Hauling: strong off the anchor, easing into the last metre.
-    case 'lift': return 1 - Math.pow(1 - x, 2.2);
-    // A wave crossing the block: smoothstep.
-    case 'pass': return x * x * (3 - 2 * x);
+    // Gravity on an unwinding roll: slow at first, then away, because the
+    // falling length grows as the roll pays out.
+    case 'unroll':
+      return x * x * (1.7 - 0.7 * x);
     /**
      * A mass on a rope: it arrives, overshoots once and settles.
      *
      * A damped harmonic oscillator rather than the usual "elastic" easing,
-     * because elastic's first peak is early and enormous — measured, it threw
-     * the banner 36% PAST its rigging point before coming back, which for
-     * something on ropes reads as a mistake rather than as weight. This
-     * overshoots by about 8%, which is what a banner lowered onto its lines
-     * actually does. Normalised by its own value at 1 so the ends are exact.
+     * whose first peak is early and enormous — measured, it threw the banner
+     * 36% PAST its rigging point before coming back, which for something on
+     * ropes reads as a mistake rather than as weight. This overshoots by
+     * about 8%, which is what a banner lowered onto its lines does.
      */
-    case 'hoist': {
+    case 'lower': {
       if (x <= 0) return 0;
       if (x >= 1) return 1;
-      const damped = (u: number): number => 1 - Math.exp(-5 * u) * (Math.cos(6 * u) + (5 / 6) * Math.sin(6 * u));
+      const damped = (u: number): number =>
+        1 - Math.exp(-5 * u) * (Math.cos(6 * u) + (5 / 6) * Math.sin(6 * u));
       return damped(x) / damped(1);
     }
-    // Poles swinging out, decelerating hard as they lock.
-    case 'unfold': return 1 - Math.pow(1 - x, 3);
-    case 'fade':
-    default: return x;
+    case 'cut':
+    default:
+      return x;
   }
 }
 
@@ -1026,32 +1004,21 @@ export function settleSeconds(heightM: number): number {
  * Every branch is a distance over a speed, or gravity, rather than a number
  * chosen because it felt about right in a preview window.
  */
-export function physicalRevealMs(kind: BannerKind, widthM: number, heightM: number): number {
+export function physicalRevealMs(kind: BannerKind, size: BannerSize): number {
   const p = KIND_PROFILE[kind];
-  const H = Math.max(0.5, heightM);
+  const H = Math.max(0.5, size.heightM);
   switch (p.reveal) {
-    // Fall, then stop swinging. Big drops are barely slower than small ones:
-    // quadrupling the height only doubles the fall.
-    case 'drop':
+    // Gravity on an unrolling sheet: it falls, then stops swinging. Big ones
+    // are barely slower than small ones — quadrupling the drop only doubles
+    // the fall.
+    case 'unroll':
       return Math.round((freeFallSeconds(H) + settleSeconds(H)) * 1000);
-    // The bar has to travel the full height of the sheet, hauled.
-    case 'lift':
-      return Math.round((H / DEPLOY_SPEED.haul + settleSeconds(H)) * 1000);
-    // The fold-front crosses the block. For an overhead banner the block it
-    // crosses is as deep as the banner is tall.
-    case 'pass':
-      return Math.round((H / DEPLOY_SPEED.pass) * 1000);
-    // Lowered from the roof. The travel is the drop from the roof line down to
-    // where it hangs, which for a banner rigged this way is about its own
-    // height again — it is lowered clear of the structure before it unrolls.
-    case 'hoist':
+    // Lowered on lines from the roof. The crew is small, the load is swinging
+    // in free air with nothing to steady it, and it takes as long as it takes.
+    case 'lower':
       return Math.round((H / DEPLOY_SPEED.hoist + settleSeconds(H)) * 1000);
-    // A sweep of the poles, one person per pole, plus the fabric catching up.
-    case 'unfold':
-      return Math.round((Math.max(2, widthM * 0.12) / DEPLOY_SPEED.pole + 1.5) * 1000);
-    // Not a deployment at all: a cut, for banners that were already rigged
-    // before anyone walked in.
-    case 'fade':
+    // Not a deployment: a banner that was rigged before anyone walked in.
+    case 'cut':
     default:
       return 900;
   }
@@ -1065,12 +1032,12 @@ export function physicalRevealMs(kind: BannerKind, widthM: number, heightM: numb
  * would have to fall faster than gravity. So the floor is only ever the
  * genuinely impossible case, never a matter of taste.
  */
-export function revealFloorSeconds(doc: BannerDoc): number {
-  if (doc.reveal === 'drop') return freeFallSeconds(doc.heightM);
+export function revealFloorSeconds(doc: BannerDoc, size: BannerSize): number {
+  if (doc.reveal === 'unroll') return freeFallSeconds(size.heightM);
   return 0.3;
 }
 
 /** The reveal duration the simulator should run, in seconds. */
-export function revealSeconds(doc: BannerDoc): number {
-  return Math.max(revealFloorSeconds(doc), doc.revealMs / 1000);
+export function revealSeconds(doc: BannerDoc, size: BannerSize): number {
+  return Math.max(revealFloorSeconds(doc, size), doc.revealMs / 1000);
 }

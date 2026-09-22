@@ -20,7 +20,7 @@ import { evalTimeline, type Timeline, type Cue } from './timeline';
 import { buildAssetLayer, type AssetLayer } from './assetLayer';
 import { buildBannerRigs, type BannerRigLayer } from './bannerRig';
 import { buildPlacement, type PlacementHelper } from './bannerPlace';
-import { fitBanner } from './bannerFit';
+import { resolveSlot, hangCentre } from './bannerSlot';
 import type { BannerStore, StandIndex } from '../../core/banner';
 import type { AssetStore, SceneAsset } from '../../core/sceneAssets';
 import { rasterize } from '../../core/importImage';
@@ -115,7 +115,8 @@ export class MatchDaySimulator {
   readonly canvas: HTMLCanvasElement;
   private readonly renderer: THREE.WebGLRenderer;
   private readonly scene = new THREE.Scene();
-  private readonly camera: THREE.PerspectiveCamera;
+  /** Public so a shot harness can report where it ended up. */
+  readonly camera: THREE.PerspectiveCamera;
   private readonly controls: OrbitControls;
   private readonly seats: THREE.InstancedMesh;
   private readonly standsGroup: THREE.Group;
@@ -1192,7 +1193,7 @@ export class MatchDaySimulator {
     e.detail.blocks = f.blocks.map((b) => b.widthM);
     e.detail.tiers = f.tiers.map((t) => t.slopeM);
     const doc = e.detail.bannerId ? this.bannerStore?.get(e.detail.bannerId) : this.bannerStore?.active;
-    if (doc) e.detail.fit = fitBanner(doc, f);
+    if (doc) e.detail.fit = resolveSlot(doc, f);
   };
 
   private readonly onStandExtent = (e: CustomEvent<{ stand: number; width?: number; height?: number }>): void => {
@@ -1254,25 +1255,21 @@ export class MatchDaySimulator {
     if (!res) return;
     const a = this.bannerStore.active;
     if (!a) return;
-    if (a.place.blockSpan > 0) {
-      // A banner on blocks moves a block at a time. Dragging it is choosing a
-      // block, not sliding it along a rail, so the drag lands on whichever
-      // block the pointer is over and the banner snaps there whole — which is
-      // the point of blocks, and is also why it can never end up straddling
-      // an aisle with a corner hanging off the end of the stand.
-      const f = this.placement.frameFor(a.place.stand);
-      let hit = 0;
-      for (let i = 0; i < f.blocks.length; i++) {
-        if (res.alongU >= f.blocks[i].u0 && res.alongU <= f.blocks[i].u1) { hit = i; break; }
-        if (res.alongU > f.blocks[i].u1) hit = Math.min(f.blocks.length - 1, i + 1);
-      }
-      const from = Math.max(0, Math.min(f.blocks.length - a.place.blockSpan, hit - Math.floor((a.place.blockSpan - 1) / 2)));
-      if (from !== a.place.blockFrom) this.bannerStore.patchPlace({ blockFrom: from });
-      this.onBannerSnap?.(['block']);
-      return;
+    // A banner moves a block at a time. Dragging it is choosing blocks, not
+    // sliding it along a rail, so the drag lands on whichever block the
+    // pointer is over and the banner goes there whole — which is the point of
+    // blocks, and is why it can never end up straddling an aisle with a
+    // corner hanging off the end of the stand.
+    const f = this.placement.frameFor(a.slot.stand);
+    const span = Math.max(1, Math.min(f.blocks.length, a.slot.blockSpan));
+    let hit = 0;
+    for (let i = 0; i < f.blocks.length; i++) {
+      if (res.alongU >= f.blocks[i].u0 && res.alongU <= f.blocks[i].u1) { hit = i; break; }
+      if (res.alongU > f.blocks[i].u1) hit = Math.min(f.blocks.length - 1, i + 1);
     }
-    this.bannerStore.patchPlace({ alongU: res.alongU, heightV: res.heightV });
-    this.onBannerSnap?.(res.snaps.map((s) => s.key));
+    const from = Math.max(0, Math.min(f.blocks.length - span, hit - Math.floor((span - 1) / 2)));
+    if (from !== a.slot.blockFrom) this.bannerStore.patchSlot({ blockFrom: from });
+    this.onBannerSnap?.(['block']);
   };
 
   private readonly onBannerUp = (ev: PointerEvent): void => {
@@ -1362,36 +1359,64 @@ export class MatchDaySimulator {
   focusBanner(id: string, elevationDeg?: number): boolean {
     const doc = this.bannerStore?.get(id);
     if (!doc || !this.placement) return false;
-    const f = this.placement.frameFor(doc.place.stand);
+    const f = this.placement.frameFor(doc.slot.stand);
     if (!f.ok) return false;
     // Aim at the middle of the sheet, not at the rail it hangs from, and
     // stand where the people it is aimed at stand: back across the pitch and
     // LOW. A banner lying on a raked stand is a near-horizontal surface, so a
     // camera parked above it sees an edge; the view that reads is the one from
     // the opposite end, which is who a tifo is for.
-    // Framed on the FITTED banner, not the asked-for one: after the stadium
-    // has had its say those can be a long way apart, and a camera aimed at
-    // where a 48 m banner would have been misses the 18 m one that is there.
-    const fit = fitBanner(doc, f);
-    const top = f.pointAt(fit.alongU, Math.min(1, fit.heightV));
-    const drop = Math.min(0.95, fit.heightM / Math.max(1, f.slopeM));
-    const mid = f.pointAt(fit.alongU, Math.max(0, fit.heightV - drop / 2));
-    const cy = doc.kind === 'pitch' ? 0 : (top.y + mid.y) / 2;
+    // Framed on the RESOLVED slot, not on anything the editor asked for: the
+    // slot is where the banner is and how big it is, and it already knows
+    // where its own top and bottom edges sit on the stand.
+    const slot = resolveSlot(doc, f);
+    const alongU = (slot.u0 + slot.u1) / 2;
+    const onStand = f.pointAt(alongU, Math.max(0, (slot.v1 + slot.vBottom) / 2));
+    // A hanging banner is not ON the stand, so the stand's own coordinates say
+    // nothing about where it is: it hangs in the air, standing off its anchor
+    // far enough to clear everything below, and aiming at the terracing
+    // behind it pointed the camera at the seats while the sheet hung out of
+    // frame entirely.
+    const c = doc.kind === 'hanging' ? hangCentre(f, slot) : null;
+    const mid = c
+      ? { x: c.x, y: c.y, z: c.z, ox: onStand.ox, oz: onStand.oz }
+      : onStand;
+    const cy = c ? c.y : (f.pointAt(alongU, Math.min(1, slot.v1)).y + onStand.y) / 2;
     // Elevation matters more than distance. A banner lying on a raked stand is
     // a near-horizontal surface: from pitch level you see its edge, and the
     // artwork disappears. Thirty-odd degrees up is roughly where the main
     // camera gantry sits, and it is the angle every photograph of a kop tifo
     // is taken from.
-    const d = Math.max(72, fit.widthM * 1.9);
+    // Far enough back to hold the banner, and never outside the ground.
+    //
+    // A banner covering a whole stand is over a hundred metres wide, and
+    // stepping back far enough to frame it put the camera two hundred metres
+    // out — behind the stand it was aimed at, looking at the back of the
+    // building. Every one of those shots came out black.
+    const bowlR = Math.hypot(mid.x, mid.z) || 60;
+    const d = Math.min(bowlR * 1.85, Math.max(60, slot.size.widthM * 1.9));
     // Overridable, because the flattering angle and the honest angle are not
     // the same angle. From the gantry a sheet that has sunk into the seating
     // looks identical to one resting on it; from pitch level, grazing along
     // the terracing, it is unmistakable. The shot harness asks for the second
     // one on purpose.
-    const el =
+    let el =
       elevationDeg !== undefined
         ? (elevationDeg * Math.PI) / 180
-        : doc.kind === 'pitch' ? 0.75 : 0.55;
+        : 0.55;
+    // Under the roof.
+    //
+    // Thirty degrees up is roughly the main camera gantry and it is the angle
+    // every photograph of a kop tifo is taken from — in an open bowl. In a
+    // roofed arena it puts the camera in the rafters, looking at the dark
+    // underside of the roof, and the shot comes back black. It did, on the
+    // Kingdom Arena, for every banner on it.
+    if (elevationDeg === undefined) {
+      const headroom = f.roofY - 3 - cy;
+      if (headroom < d * Math.sin(el)) {
+        el = Math.max(0.12, Math.asin(Math.max(-1, Math.min(1, headroom / d))));
+      }
+    }
     applyCameraShot(this.camera, this.controls, {
       name: 'Banner',
       position: [mid.x + mid.ox * d * Math.cos(el), cy + d * Math.sin(el), mid.z + mid.oz * d * Math.cos(el)],
@@ -1399,6 +1424,19 @@ export class MatchDaySimulator {
       fov: 44,
     });
     return true;
+  }
+
+  /**
+   * How many blocks and tiers a stand has.
+   *
+   * The overlay's pickers are built from this, so they offer exactly the
+   * places that exist on this ground rather than a fixed list that is wrong
+   * on most of them.
+   */
+  standSlots(stand: StandIndex): { blocks: number; tiers: number } {
+    const f = this.placement?.frameFor(((stand % 4) + 4) % 4 as StandIndex);
+    if (!f || !f.ok) return { blocks: 1, tiers: 1 };
+    return { blocks: f.blocks.length, tiers: f.tiers.length };
   }
 
   /** A stand's real size in metres, for sizing a banner to it. */
@@ -1479,12 +1517,10 @@ export class MatchDaySimulator {
     for (const b of this.bannerStore?.list() ?? []) {
       if (b.visible === false) continue;
       const dur = Math.max(0.4, b.revealMs / 1000);
-      const start =
-        b.kind === 'roof-hung' ? 0
-        : b.reveal === 'drop' ? 0.2
-        : b.reveal === 'pass' ? 1.1
-        : b.reveal === 'fade' ? 0
-        : 0.5;
+      // A sheet flown from the roof is rigged before anyone is in the ground,
+      // so on the show's clock it is simply there first. One rolled over the
+      // terracing is paid out by the crowd on the whistle, a beat later.
+      const start = b.kind === 'hanging' ? 0 : 0.5;
       cues.push({ kind: 'banner', start, dur, bannerId: b.id });
     }
     return { duration: 15, cues };

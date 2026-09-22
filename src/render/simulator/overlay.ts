@@ -436,11 +436,16 @@ const MDS_T: Record<string, { en: string; ar: string }> = {
   playIt: { en: 'Play the reveal', ar: 'شغّل الكشف' },
   scrub: { en: 'Scrub', ar: 'تقديم' },
   onStand: { en: 'Stand', ar: 'المدرج' },
-  alongStand: { en: 'Along', ar: 'بالعرض' },
-  upStand: { en: 'Up', ar: 'للأعلى' },
-  outStand: { en: 'Out', ar: 'للأمام' },
+  firstBlock: { en: 'First block', ar: 'القطاع الأول' },
+  howManyBlocks: { en: 'How many', ar: 'عدد القطاعات' },
+  whichTier: { en: 'Tier', ar: 'الطابق' },
+  blockCentred: { en: 'Centred', ar: 'في المنتصف' },
+  blockN: { en: 'Block {n}', ar: 'القطاع {n}' },
+  spanOne: { en: 'One block', ar: 'قطاع واحد' },
+  spanN: { en: '{n} blocks', ar: '{n} قطاعات' },
+  tierAll: { en: 'Whole stand', ar: 'المدرج كامل' },
+  tierN: { en: 'Tier {n}', ar: 'الطابق {n}' },
   centreIt: { en: 'Centre it', ar: 'وسّطها' },
-  snapOn: { en: 'Snap while dragging', ar: 'محاذاة أثناء السحب' },
   bannerWind: { en: 'Wind', ar: 'الهواء' },
   showBanner: { en: 'Show it', ar: 'أظهرها' },
   dragHint: { en: 'Drag the banner itself to move it on the stand.', ar: 'اسحب اللافتة نفسها عشان تحركها على المدرج.' },
@@ -831,11 +836,14 @@ export function openMatchDaySimulator(
   const bnScrub = rng(0, 100, 100);
   const bnStand = sel();
   for (const v of ['1', '3', '0', '2']) opt(bnStand, v, L('stand.' + v), v === '1');
-  const bnAlong = rng(0, 100, 50);
-  const bnUp = rng(0, 120, 60);
-  const bnOut = rng(-20, 200, 12);
+  // Blocks and a tier, not sliders. The stand is divided into blocks by its
+  // own aisles, a banner covers a run of them, and there is nothing in
+  // between to land on — which is why a banner can no longer end up
+  // straddling an aisle with a corner hanging into the sky.
+  const bnBlock = sel();
+  const bnSpan = sel();
+  const bnTier = sel();
   const bnCentre = btn(L('centreIt'));
-  const bnSnap = chk(true);
   const bnWind = rng(0, 100, 25);
   const bnShow = chk(true);
   const bnHint = document.createElement('div');
@@ -848,11 +856,10 @@ export function openMatchDaySimulator(
     field(L('scrub'), bnScrub),
     divider(),
     field(L('onStand'), bnStand),
-    field(L('alongStand'), bnAlong),
-    field(L('upStand'), bnUp),
-    field(L('outStand'), bnOut),
+    field(L('firstBlock'), bnBlock),
+    field(L('howManyBlocks'), bnSpan),
+    field(L('whichTier'), bnTier),
     row(bnCentre),
-    checkField(L('snapOn'), bnSnap),
     field(L('bannerWind'), bnWind),
     checkField(L('showBanner'), bnShow),
     bnHint,
@@ -1081,19 +1088,30 @@ export function openMatchDaySimulator(
     bnSel.value = a?.id ?? '';
     const off = !a;
     for (const el of [bnLook, bnPlay, bnCentre] as HTMLButtonElement[]) el.disabled = off;
-    for (const el of [bnScrub, bnAlong, bnUp, bnOut, bnWind, bnSnap, bnShow] as HTMLInputElement[]) el.disabled = off;
-    bnStand.disabled = off;
+    for (const el of [bnScrub, bnWind, bnShow] as HTMLInputElement[]) el.disabled = off;
+    for (const el of [bnStand, bnBlock, bnSpan, bnTier] as HTMLSelectElement[]) el.disabled = off;
     if (!a) return;
     // Every one of these assignments fires `input`/`change` in some browsers,
     // which would write the value straight back into the store mid-drag. The
     // flag is what keeps a refresh from becoming an edit.
     bnSyncing = true;
-    bnStand.value = String(a.place.stand);
-    bnAlong.value = String(Math.round(a.place.alongU * 100));
-    bnUp.value = String(Math.round(a.place.heightV * 100));
-    bnOut.value = String(Math.round(a.place.outM * 10));
+    bnStand.value = String(a.slot.stand);
+    const shape = sim.standSlots(a.slot.stand);
+    const nb = Math.max(1, shape.blocks);
+    bnBlock.replaceChildren();
+    opt(bnBlock, '-1', L('blockCentred'), false);
+    for (let i = 0; i < nb; i++) opt(bnBlock, String(i), L('blockN').replace('{n}', String(i + 1)), false);
+    bnBlock.value = a.slot.blockFrom < 0 ? '-1' : String(Math.min(nb - 1, a.slot.blockFrom));
+    bnSpan.replaceChildren();
+    for (let i = 1; i <= nb; i++) {
+      opt(bnSpan, String(i), i === 1 ? L('spanOne') : L('spanN').replace('{n}', String(i)), false);
+    }
+    bnSpan.value = String(Math.max(1, Math.min(nb, a.slot.blockSpan)));
+    bnTier.replaceChildren();
+    opt(bnTier, '-1', L('tierAll'), false);
+    for (let i = 0; i < shape.tiers; i++) opt(bnTier, String(i), L('tierN').replace('{n}', String(i + 1)), false);
+    bnTier.value = String(a.slot.tier);
     bnWind.value = String(Math.round(a.wind * 100));
-    bnSnap.checked = a.place.snap;
     bnShow.checked = a.visible !== false;
     bnSyncing = false;
   }
@@ -1518,15 +1536,14 @@ export function openMatchDaySimulator(
     const id = bannerStore?.activeId_;
     if (id) sim.setBannerProgress(id, Number(bnScrub.value) / 100);
   });
-  bnStand.addEventListener('change', () => bnEdit(() => bannerStore?.patchPlace({ stand: (Number(bnStand.value) || 1) as 0 | 1 | 2 | 3 })));
-  bnAlong.addEventListener('input', () => bnEdit(() => bannerStore?.patchPlace({ alongU: Number(bnAlong.value) / 100 })));
-  bnUp.addEventListener('input', () => bnEdit(() => bannerStore?.patchPlace({ heightV: Number(bnUp.value) / 100 })));
-  bnOut.addEventListener('input', () => bnEdit(() => bannerStore?.patchPlace({ outM: Number(bnOut.value) / 10 })));
+  bnStand.addEventListener('change', () => bnEdit(() => bannerStore?.patchSlot({ stand: (Number(bnStand.value) || 1) as 0 | 1 | 2 | 3 })));
+  bnBlock.addEventListener('change', () => bnEdit(() => bannerStore?.patchSlot({ blockFrom: Number(bnBlock.value) })));
+  bnSpan.addEventListener('change', () => bnEdit(() => bannerStore?.patchSlot({ blockSpan: Math.max(1, Number(bnSpan.value)) })));
+  bnTier.addEventListener('change', () => bnEdit(() => bannerStore?.patchSlot({ tier: Number(bnTier.value) })));
   bnWind.addEventListener('input', () => bnEdit(() => bannerStore?.patch({ wind: Number(bnWind.value) / 100 })));
-  bnSnap.addEventListener('change', () => bnEdit(() => bannerStore?.patchPlace({ snap: bnSnap.checked })));
   bnShow.addEventListener('change', () => bnEdit(() => bannerStore?.patch({ visible: bnShow.checked })));
   bnCentre.addEventListener('click', () => {
-    bnEdit(() => bannerStore?.patchPlace({ alongU: 0.5, yawDeg: 0 }));
+    bnEdit(() => bannerStore?.patchSlot({ blockFrom: -1 }));
     toast(L('snapped').replace('{what}', L('snap.centre')));
   });
 

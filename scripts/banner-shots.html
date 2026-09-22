@@ -1,9 +1,16 @@
 <!doctype html>
-<!-- Dev-only harness for scripts/banner-shots.mts. Boots the REAL
-     MatchDaySimulator with a real BannerStore, because every interesting part
-     of a banner — the stand frame it hangs on, the rig, the reveal curve — is
-     wired through the simulator, and a harness that builds its own little
-     scene can pass while the product hangs nothing at all. -->
+<!-- Dev-only harness for scripts/banner-shots.mts.
+
+     Boots the REAL MatchDaySimulator, because the whole point is to see what
+     the product draws. A harness that builds its own scene can render a
+     beautiful banner while the app renders nothing, which is exactly what
+     happened the last time this was a separate scene: every shot in the
+     harness looked right and the banner in the product went through the
+     terracing.
+
+     It also returns a census and the rig's own penetration figure alongside
+     the picture, because a screenshot cannot tell you a banner is two
+     centimetres inside the concrete. -->
 <html lang="en"><head><meta charset="UTF-8"/><title>banner shots</title></head>
 <body style="margin:0;background:#05070c"><div id="out">loading…</div>
 <script type="module">
@@ -15,79 +22,65 @@
   import { BannerStore, newBanner } from '/src/core/banner.ts';
 
   const HOST = document.createElement('div');
-  HOST.style.cssText = 'position:fixed;left:0;top:0;width:1200px;height:700px;';
+  HOST.style.cssText = 'position:fixed;left:0;top:0;width:1280px;height:720px;';
   document.body.appendChild(HOST);
-
-  /** Bold, flat artwork — what a real banner carries, and what reads at 120 m. */
-  function art(kind) {
-    const items = [
-      { id: 'bg', kind: 'fill', color: '#0d1b3e' },
-      { id: 's1', kind: 'shape', shape: 'shield', color: '#f2c40f', cx: 0.22, cy: 0.25, w: 0.24, h: 0.34, rot: 0 },
-      { id: 't1', kind: 'text', text: 'ULTRAS', fontId: 'anton', arcDeg: 0, color: '#ffffff', cx: 0.6, cy: 0.2, w: 0.62, h: 0.16, rot: 0 },
-      { id: 'k1', kind: 'stroke', color: '#e11d2a', width: 0.045,
-        pts: [0.08, 0.42, 0.3, 0.38, 0.52, 0.44, 0.74, 0.38, 0.94, 0.43] },
-      { id: 't2', kind: 'text', text: kind.toUpperCase(), fontId: 'anton', arcDeg: 0, color: '#f2c40f', cx: 0.5, cy: 0.36, w: 0.5, h: 0.09, rot: 0 },
-    ];
-    return items;
-  }
 
   window.__shoot = async (spec) => {
     HOST.replaceChildren();
-    const template = templateById(spec.template);
+    const template = templateById(spec.ground);
     const map = generateSeatMap(template);
-    const store = new DesignStore(map, ['#0b1d4d', '#12224f', '#e8ecf5']);
-    // A quiet two-tone bowl. The point of these shots is the banner; a busy
-    // mosaic behind it is exactly what hides a rig that never got built.
-    store.transform((i) => 1 + (i % 7 === 0 ? 1 : 0));
+    const store = new DesignStore(map, ['#0b1d4d', '#ffffff', '#f2c40f']);
+    store.transform((i) => 1 + (i % 3));
 
     const banners = new BannerStore();
-    const doc = newBanner(spec.kind, spec.kind);
-    doc.items = art(spec.kind);
-    doc.material = spec.material ?? 'solid';
-    doc.wind = spec.wind ?? 0.3;
-    doc.place.stand = 1;
+    const doc = {
+      ...newBanner(spec.kind, 'shot'),
+      wind: spec.wind ?? 0.25,
+      slot: { stand: spec.stand, blockFrom: spec.from, blockSpan: spec.span, tier: spec.tier },
+      // Something with a hard edge, a centre and a word on it, so a banner
+      // that is stretched, mirrored or upside down is obvious rather than
+      // plausible. A plain colour field looks correct in every orientation.
+      bg: '#101a3a',
+      items: (() => {
+        const a = spec.aspect ?? 0.5;
+        return [
+          { id: 'f', kind: 'shape', shape: 'rect', cx: 0.5, cy: a / 2, w: 0.94, h: a - 0.06, rot: 0,
+            color: '#101a3a', outline: 0.012, outlineColor: '#f2c40f' },
+          { id: 'c', kind: 'shape', shape: 'circle', cx: 0.5, cy: a * 0.62, w: a * 0.4, h: a * 0.4, rot: 0,
+            color: '#f2c40f' },
+          { id: 't', kind: 'text', text: spec.label ?? 'TIFO', cx: 0.5, cy: a * 0.24,
+            w: 0.8, h: a * 0.26, rot: 0, fontId: 'poster', arcDeg: 0, color: '#ffffff' },
+        ];
+      })(),
+    };
+    if (spec.aspect != null) doc.aspect = spec.aspect;
     banners.add(doc);
 
     const sim = new MatchDaySimulator(HOST, map, store, template, new AssetStore(), {
-      quality: 'high',
-      bannerStore: banners,
+      quality: 'high', bannerStore: banners,
     });
-    sim.setTimeOfDay(spec.tod ?? 'dusk');
-    sim.setFloodlights(true);
-    sim.setCrowdPreset('sellout');
-
-    // Frame it the way the product frames it, so the shot cannot be composed
-    // better (or worse) than what a user actually sees.
+    sim.setTimeOfDay(spec.tod ?? 'day');
+    sim.setFloodlights(spec.tod === 'night');
     const id = banners.list()[0].id;
-    const framed = sim.focusBanner(id, spec.elevationDeg);
+    window.__lastFocus = null;
+    sim.setBannerProgress(id, spec.progress ?? 1);
+    const focused = sim.focusBanner(id, spec.elevationDeg);
 
     sim.start();
-    // Park the reveal where the shot wants it, rather than racing an animation.
-    sim.setBannerProgress(id, spec.progress ?? 1);
-    // Settle the cloth by stepping the solver a known number of times, not by
-    // sleeping and hoping. A wall-clock wait gives a different answer on a
-    // fast machine than on a loaded one, which is exactly the kind of harness
-    // that reports green while the product is wrong.
-    sim.settleBanners(spec.settleS ?? 3.0);
-    // Frame it again now the fabric has found its shape. Framing a banner by
-    // where its rigging is, before it has draped, aims the camera at a point
-    // the artwork never reaches.
-    sim.focusBanner(id, spec.elevationDeg);
-    await new Promise((r) => requestAnimationFrame(r));
+    await new Promise((r) => setTimeout(r, 420));
+    sim.settleBanners(0.5);
     sim.stop();
     const png = sim.canvas.toDataURL('image/png');
-    const census = sim.bannerCensus();
-    const stand = sim.standSizeM(1);
-    // The measurement the pictures cannot make: how far into the terracing
-    // the fabric actually is, in metres, taken against the same collider the
-    // solver uses.
-    const penetration = sim.worstBannerPenetration();
-    const sag = sim.worstBannerSag();
-    // Before dispose(), which tears the rigs down.
-    const bounds = sim.bannerBounds(id);
-    const doc0 = banners.list()[0];
+    const out = {
+      png,
+      census: sim.bannerCensus(),
+      penetration: sim.worstBannerPenetration(),
+      bounds: sim.bannerBounds(id),
+      focused,
+      cam: [sim.camera.position.x, sim.camera.position.y, sim.camera.position.z],
+    };
     sim.dispose();
-    return { png, census, stand, penetration, sag, framed, bounds, revealMs: doc0.revealMs };
+    return out;
   };
   document.getElementById('out').textContent = 'ready';
   window.__ready = true;

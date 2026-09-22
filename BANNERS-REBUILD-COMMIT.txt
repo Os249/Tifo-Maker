@@ -1,0 +1,38 @@
+=== SUMMARY ===
+
+Banners: rebuild on a finite, provable model
+
+
+=== DESCRIPTION ===
+
+The last four rounds all failed the same way: a banner was fine where I tested it and broken where you went. That is not a bug pattern, it is what an infinite configuration space looks like from the inside. A free position and a size in metres made the set of states a banner could be in continuous, so it could be sampled and never proved.
+
+So the model changed rather than the code. A banner now has a SLOT — a stand, a run of the blocks that stand is divided into, and a tier — and no size at all: it is as wide as the blocks it covers, and as deep as its artwork's proportions make it. That set is finite, about 26,000 configurations across the whole catalogue, so `npm run sweep:banner` enumerates every one of them and checks eight properties of each. It runs in two minutes without a browser.
+
+The shape is now a pure function P(slot, u, v, t). For the sheet on the terracing every vertex is a point of the stand's own surface pushed out along that point's normal by a strictly positive amount, so it can no more be inside the seating than a decal can be inside a wall — for any size, any block, any tier, any ground, any frame. Nothing accumulates, so nothing resonates or explodes, and the same inputs give the same vertices to the bit. That deletes the cloth solver, the baked heightfield, the rope net and the lashing pass: 4,448 lines out, 2,203 in.
+
+Two types, both perfected: a stand banner over a run of blocks, and a hanging banner flown on ropes.
+
+What the sweep found before anything was rendered:
+
+- Arc length along a stand DIVERGED with sampling. The same 48 m rake measured 48 m at 8 steps, 75 at 64 and 214 at 256, because the surface was threaded through every individual seat and picked up a seat's width of lateral jitter between consecutive points. Every "metres down the slope" figure in the app therefore depended on its step count. The "corner rake is four times the centre" fixed last round was this artefact, not geometry. A column is now one point per ROW of seating, averaged, and the measurement converges everywhere.
+
+- Banner seams were spaced evenly in `u`, a fraction of the stand. On a ground whose end blocks are 3.7 m and middle blocks 29 m that put four columns across the tight corner and thirty across the straight, and the sheet cut 4.75 m inside the curve. They are spaced by metres of fabric now, which also stops the artwork being squashed at the corners.
+
+- A stand's ends double back on themselves in plan where a corner is cut hard, and the block detector was offering those four-metre curls as places to hang a banner. Every geometric failure left in the sweep was on one of them. They are not blocks and are no longer offered.
+
+- Two adjacent columns filled from the same neighbour gave a zero tangent, and a 33 m hanging banner rendered as a 1.5 m sliver.
+
+- A height-limited banner reported 54 m and drew 103 m, because the size shrank and the mesh did not.
+
+And what the shot harness found after:
+
+- A hanging banner anchored at the back row, so it hung down through every seat in the stand and did not appear at all. It anchors at the front now, and stands off far enough to hang clear of the terracing below it.
+
+- A whole-stand banner pushed the camera 200 m out, behind the stand it was aimed at. In a roofed arena the default 31-degree elevation put it in the rafters, looking at the dark underside of the roof. Both shots came back black.
+
+The panel follows the model: blocks, a tier and a shape, with the size as a readout in metres rather than a field to get wrong. The retired Banner Studio's work is not migrated — its placement no longer exists, and inventing a slot for it would put it somewhere nobody chose.
+
+Still to come: the fabric look, the reveals, and the occlusion readout.
+
+verify 0 · build 0 · sweep 26,964 configurations 0 failures · e2e-banner 48 passed 0 failed · 17 shots

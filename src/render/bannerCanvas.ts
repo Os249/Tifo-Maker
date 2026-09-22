@@ -1,6 +1,6 @@
 import type { ToolId } from '../core/types';
 import type { BannerDoc, BannerItem, ImageItem, ShapeItem, TextItem } from '../core/banner';
-import { aspectOf, bannerFacts, isPlaced, makeStroke, PANEL_MAX_M } from '../core/banner';
+import { aspectOf, bannerFacts, isPlaced, makeStroke, PANEL_MAX_M, estimateSize } from '../core/banner';
 import type { BannerStore } from '../core/banner';
 import { drawBanner, hitTest, itemBounds, onBannerImageReady, strokePath } from './bannerRender';
 
@@ -382,7 +382,7 @@ export class BannerCanvas implements BannerCanvasHooks {
    * portrait whose nose lands on a seam is the classic mistake.
    */
   private drawSeams(ctx: CanvasRenderingContext2D, doc: BannerDoc, w: number, h: number): void {
-    const panels = Math.max(1, Math.ceil(doc.widthM / PANEL_MAX_M - 1e-9));
+    const panels = Math.max(1, Math.ceil(estimateSize(doc).widthM / PANEL_MAX_M - 1e-9));
     if (panels < 2) return;
     ctx.save();
     ctx.strokeStyle = 'rgba(255,214,102,.5)';
@@ -427,7 +427,7 @@ export class BannerCanvas implements BannerCanvasHooks {
     ctx.beginPath(); ctx.moveTo(0, cy); ctx.lineTo(w, cy); ctx.stroke();
 
     // legible cap-height band
-    const facts = bannerFacts(doc);
+    const facts = bannerFacts(doc, estimateSize(doc));
     const capPx = facts.headlineCapFrac * w;
     if (capPx > 6 && capPx < h * 0.9) {
       ctx.fillStyle = 'rgba(80,220,160,.09)';
@@ -522,7 +522,7 @@ export class BannerCanvas implements BannerCanvasHooks {
 
   /** A metre scale along the bottom, because a banner is a physical object. */
   private drawRulers(ctx: CanvasRenderingContext2D, doc: BannerDoc): void {
-    const pxPerM = this.scale / doc.widthM;
+    const pxPerM = this.scale / estimateSize(doc).widthM;
     if (pxPerM < 1.5) return;
     // Pick a step that lands near 70 px.
     const steps = [0.1, 0.25, 0.5, 1, 2, 5, 10, 20, 50];
@@ -533,7 +533,7 @@ export class BannerCanvas implements BannerCanvasHooks {
     ctx.fillStyle = 'rgba(255,255,255,.55)';
     ctx.font = '11px ui-monospace, monospace';
     ctx.lineWidth = 1;
-    for (let m = 0; m <= doc.widthM + 1e-6; m += step) {
+    for (let m = 0; m <= estimateSize(doc).widthM + 1e-6; m += step) {
       const x = Math.round(this.originX + m * pxPerM) + 0.5;
       if (x < -20 || x > this.cssW + 20) continue;
       ctx.beginPath();
@@ -559,7 +559,7 @@ export class BannerCanvas implements BannerCanvasHooks {
       { axis: 'x', at: 1 / 3, label: 'third' },
       { axis: 'x', at: 2 / 3, label: 'third' },
     ];
-    const panels = Math.max(1, Math.ceil(doc.widthM / PANEL_MAX_M - 1e-9));
+    const panels = Math.max(1, Math.ceil(estimateSize(doc).widthM / PANEL_MAX_M - 1e-9));
     for (let k = 1; k < panels; k++) xs.push({ axis: 'x', at: k / panels, label: 'seam' });
     const ys: Snap[] = [
       { axis: 'y', at: aspect / 2, label: 'centre' },
@@ -652,7 +652,7 @@ export class BannerCanvas implements BannerCanvasHooks {
       case 'brush':
       case 'eraser': {
         this.store.begin();
-        const item = makeStroke(this.color, this.brushM / doc.widthM, this.tool === 'eraser');
+        const item = makeStroke(this.color, this.brushM / estimateSize(doc).widthM, this.tool === 'eraser');
         item.pts.push(d.x, d.y);
         this.drawing = { item };
         this.requestDraw();

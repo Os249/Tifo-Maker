@@ -2,7 +2,7 @@ import type { DesignStore } from '../core/design';
 import type { ToolId } from '../core/types';
 import type { BannerDoc, BannerKind, BannerReveal, StandIndex } from '../core/banner';
 import {
-  BannerStore, KIND_PROFILE, aspectOf, applyKind, bannerFacts, newBanner,
+  BannerStore, aspectOf, applyKind, bannerFacts, newBanner, estimateSize,
   physicalRevealMs, revealFloorSeconds,
 } from '../core/banner';
 
@@ -38,9 +38,21 @@ function secsToSlider(secs: number): number {
  * chosen, is how they find out — and it is the same figure the 3D uses, so
  * "real" is not a claim here, it is the default.
  */
+/**
+ * The shape of the sheet, as people describe banners.
+ *
+ * "2:1" rather than "0.50", because a tifo crew says "two to one" and because
+ * a decimal that is the height divided by the width is the wrong way up for
+ * anyone who has ever ordered fabric.
+ */
+function aspectLabel(a: number): string {
+  if (a <= 1) return `${(1 / a).toFixed(a > 0.5 ? 1 : 0)}:1`;
+  return `1:${a.toFixed(a < 2 ? 1 : 0)}`;
+}
+
 function secsLabel(doc: BannerDoc): string {
-  const secs = Math.max(revealFloorSeconds(doc), doc.revealMs / 1000);
-  const real = physicalRevealMs(doc.kind, doc.widthM, doc.heightM) / 1000;
+  const secs = Math.max(revealFloorSeconds(doc, estimateSize(doc)), doc.revealMs / 1000);
+  const real = physicalRevealMs(doc.kind, estimateSize(doc)) / 1000;
   const shown = secs >= 20 ? secs.toFixed(0) : secs.toFixed(1);
   if (Math.abs(secs - real) < Math.max(0.3, real * 0.06)) return `${shown}s`;
   return `${shown}s (real ${real >= 20 ? real.toFixed(0) : real.toFixed(1)}s)`;
@@ -95,7 +107,7 @@ export function mountBannerView(deps: BannerViewDeps): BannerView {
 
   // Always have something to draw on. A Banner view whose first frame is an
   // empty-state card is a worse introduction than a blank sheet of fabric.
-  if (bannerStore.count === 0) bannerStore.add(newBanner('drop', t('bn.defaultName')));
+  if (bannerStore.count === 0) bannerStore.add(newBanner('stand', t('bn.defaultName')));
 
   const canvas = BannerCanvas.create(host, bannerStore);
   let active = false;
@@ -110,8 +122,8 @@ export function mountBannerView(deps: BannerViewDeps): BannerView {
   const newBtn = $<HTMLButtonElement>('bn-new');
   const delBtn = $<HTMLButtonElement>('bn-del');
   const kindSel = $<HTMLSelectElement>('bn-kind');
-  const wIn = $<HTMLInputElement>('bn-w');
-  const hIn = $<HTMLInputElement>('bn-h');
+  const aspIn = $<HTMLInputElement>('bn-aspect');
+  const aspOut = $<HTMLElement>('bn-aspect-out');
   const matSel = $<HTMLSelectElement>('bn-material');
   const gsmSel = $<HTMLSelectElement>('bn-gsm');
   const seamsChk = $<HTMLInputElement>('bn-seams');
@@ -127,19 +139,9 @@ export function mountBannerView(deps: BannerViewDeps): BannerView {
   const tierSel = $<HTMLSelectElement>('bn-tier');
   const blockRow = $<HTMLElement>('bn-block-row');
   const tierRow = $<HTMLElement>('bn-tier-row');
-  const alongRow = $<HTMLElement>('bn-along-row');
-  const upRow = $<HTMLElement>('bn-up-row');
   const fitNoteEl = $<HTMLElement>('bn-fit-note');
-  const alongIn = $<HTMLInputElement>('bn-along');
-  const alongOut = $<HTMLElement>('bn-along-out');
-  const upIn = $<HTMLInputElement>('bn-up');
-  const upOut = $<HTMLElement>('bn-up-out');
-  const outIn = $<HTMLInputElement>('bn-out');
-  const outOut = $<HTMLElement>('bn-out-out');
-  const tiltIn = $<HTMLInputElement>('bn-tilt');
-  const tiltOut = $<HTMLElement>('bn-tilt-out');
+  const sizeOutEl = $<HTMLElement>('bn-size-out');
   const centreBtn = $<HTMLButtonElement>('bn-centre');
-  const fitStandBtn = $<HTMLButtonElement>('bn-fit-stand');
   const netChk = $<HTMLInputElement>('bn-net');
   const barChk = $<HTMLInputElement>('bn-bar');
   const revSel = $<HTMLSelectElement>('bn-reveal');
@@ -169,7 +171,11 @@ export function mountBannerView(deps: BannerViewDeps): BannerView {
   const askSlots = (stand: number, bannerId?: string): {
     blocks?: number[];
     tiers?: number[];
-    fit?: { widthM: number; heightM: number; askedWidthM: number; askedHeightM: number; cut: boolean; blockFrom: number; blockSpan: number };
+    fit?: {
+      size: { widthM: number; heightM: number };
+      maxWidthM: number; maxHeightM: number; heightLimited: boolean;
+      blockFrom: number; blockSpan: number; tier: number;
+    };
   } => {
     const ev = new CustomEvent<{ stand: number; bannerId?: string; blocks?: number[]; tiers?: number[]; fit?: unknown }>(
       'tifo:stand-slots',
@@ -188,48 +194,52 @@ export function mountBannerView(deps: BannerViewDeps): BannerView {
 
   /** Fill the block, span and tier pickers from the stand the banner is on. */
   function syncSlots(doc: BannerDoc): void {
-    const slots = askSlots(doc.place.stand, doc.id);
+    const slots = askSlots(doc.slot.stand, doc.id);
     const nBlocks = slots.blocks?.length ?? 0;
     const nTiers = slots.tiers?.length ?? 0;
-    const usingBlocks = doc.place.blockSpan > 0 && nBlocks > 0;
 
     if (blockRow) blockRow.style.display = nBlocks > 0 ? '' : 'none';
     if (tierRow) tierRow.style.display = nTiers > 1 ? '' : 'none';
-    // The free sliders are the fallback, not the main control: shown when the
-    // banner is not on blocks, or when there is no bowl to ask.
-    if (alongRow) alongRow.style.display = usingBlocks ? 'none' : '';
-    if (upRow) upRow.style.display = usingBlocks && nTiers > 1 && doc.place.tier >= 0 ? 'none' : '';
 
     if (blockSel && nBlocks > 0) {
-      const want = String(slots.fit?.blockFrom ?? doc.place.blockFrom);
+      const at = slots.fit?.blockFrom ?? doc.slot.blockFrom;
       blockSel.replaceChildren();
       opt(blockSel, '-1', t('bn.block.centred'));
       for (let i = 0; i < nBlocks; i++) opt(blockSel, String(i), tv('bn.block.n', { n: i + 1 }));
-      blockSel.value = doc.place.blockFrom < 0 ? '-1' : want;
-      blockSel.disabled = !usingBlocks;
+      blockSel.value = doc.slot.blockFrom < 0 ? '-1' : String(at);
     }
     if (spanSel && nBlocks > 0) {
       spanSel.replaceChildren();
-      opt(spanSel, '0', t('bn.span.free'));
       for (let i = 1; i <= nBlocks; i++) {
         opt(spanSel, String(i), i === 1 ? t('bn.span.one') : tv('bn.span.n', { n: i }));
       }
-      spanSel.value = String(Math.min(nBlocks, doc.place.blockSpan));
+      spanSel.value = String(Math.max(1, Math.min(nBlocks, doc.slot.blockSpan)));
     }
     if (tierSel && nTiers > 0) {
       tierSel.replaceChildren();
       opt(tierSel, '-1', t('bn.tier.all'));
       for (let i = 0; i < nTiers; i++) opt(tierSel, String(i), tv('bn.tier.n', { n: i + 1 }));
-      tierSel.value = String(doc.place.tier);
+      tierSel.value = String(doc.slot.tier);
     }
 
-    // What the stadium did to the size the editor asked for.
+    // The size the blocks give it. Not a field to fill in — the whole point of
+    // the slot model is that there is no size to get wrong — so this is a
+    // readout, in metres, of what those blocks come to on this ground.
+    if (sizeOutEl) {
+      const f = slots.fit;
+      sizeOutEl.textContent = f
+        ? tv('bn.size.is', { w: Math.round(f.size.widthM), h: Math.round(f.size.heightM) })
+        : tv('bn.size.about', {
+          w: Math.round(estimateSize(doc).widthM), h: Math.round(estimateSize(doc).heightM),
+        });
+    }
+    // Only one thing can overrule the blocks, and it is the stand running out
+    // of rake before the artwork's proportions are satisfied.
     if (fitNoteEl) {
       const f = slots.fit;
-      if (f && f.cut) {
-        fitNoteEl.textContent = tv('bn.fit.cut', {
-          w: Math.round(f.askedWidthM), h: Math.round(f.askedHeightM),
-          fw: Math.round(f.widthM), fh: Math.round(f.heightM),
+      if (f && f.heightLimited) {
+        fitNoteEl.textContent = tv('bn.fit.short', {
+          fw: Math.round(f.size.widthM), fh: Math.round(f.size.heightM),
         });
         fitNoteEl.style.display = '';
       } else {
@@ -261,8 +271,8 @@ export function mountBannerView(deps: BannerViewDeps): BannerView {
       if (!doc) return;
 
       if (kindSel) kindSel.value = doc.kind;
-      if (wIn) wIn.value = String(round2(doc.widthM));
-      if (hIn) hIn.value = String(round2(doc.heightM));
+      if (aspIn) aspIn.value = String(Math.round(aspectOf(doc) * 100));
+      if (aspOut) aspOut.textContent = aspectLabel(aspectOf(doc));
       if (matSel) matSel.value = doc.material;
       if (gsmSel) gsmSel.value = String(doc.fabricGsm);
       if (bgNone) bgNone.checked = doc.bg === null;
@@ -270,16 +280,8 @@ export function mountBannerView(deps: BannerViewDeps): BannerView {
         bgIn.value = doc.bg ?? '#ffffff';
         bgIn.disabled = doc.bg === null;
       }
-      if (standSel) standSel.value = String(doc.place.stand);
+      if (standSel) standSel.value = String(doc.slot.stand);
       syncSlots(doc);
-      if (alongIn) alongIn.value = String(Math.round(doc.place.alongU * 100));
-      if (alongOut) alongOut.textContent = String(Math.round(doc.place.alongU * 100));
-      if (upIn) upIn.value = String(Math.round(doc.place.heightV * 100));
-      if (upOut) upOut.textContent = String(Math.round(doc.place.heightV * 100));
-      if (outIn) outIn.value = String(Math.round(doc.place.outM * 10));
-      if (outOut) outOut.textContent = `${round1(doc.place.outM)} m`;
-      if (tiltIn) tiltIn.value = String(Math.round(doc.place.tiltDeg));
-      if (tiltOut) tiltOut.textContent = `${Math.round(doc.place.tiltDeg)}°`;
       if (netChk) netChk.checked = doc.netBacked;
       if (barChk) barChk.checked = doc.weightBar;
       if (revSel) revSel.value = doc.reveal;
@@ -304,7 +306,11 @@ export function mountBannerView(deps: BannerViewDeps): BannerView {
    * posture the stadium estimator takes: quote the rule, not an opinion.
    */
   function renderFacts(doc: BannerDoc): void {
-    const f = bannerFacts(doc);
+    // Measured on the real ground when one is open, and on a typical block
+    // when none is: a seam count is a fact about a physical sheet, so it has
+    // to come from the size the blocks actually give it.
+    const live = askSlots(doc.slot.stand, doc.id).fit;
+    const f = bannerFacts(doc, live ? live.size : estimateSize(doc));
     if (factsEl) {
       factsEl.textContent = tv('bn.facts', {
         panels: f.panels,
@@ -338,7 +344,7 @@ export function mountBannerView(deps: BannerViewDeps): BannerView {
   docSel?.addEventListener('change', () => bannerStore.setActive(docSel.value || null));
   newBtn?.addEventListener('click', () => {
     const n = bannerStore.count + 1;
-    bannerStore.add(newBanner('drop', tv('bn.nameN', { n })));
+    bannerStore.add(newBanner('stand', tv('bn.nameN', { n })));
     canvas.fitToView();
     say(t('bn.msg.added'));
   });
@@ -360,17 +366,16 @@ export function mountBannerView(deps: BannerViewDeps): BannerView {
     say(tv('bn.msg.kind', { name: kindSel.selectedOptions[0]?.textContent?.trim() ?? '' }));
   });
 
-  const sizeChanged = (): void => {
-    const doc = bannerStore.active;
-    if (!doc || !wIn || !hIn) return;
-    edit(() => bannerStore.patch({
-      widthM: clamp(Number(wIn.value) || doc.widthM, 0.5, 400),
-      heightM: clamp(Number(hIn.value) || doc.heightM, 0.3, 120),
-    }));
+  // The shape of the artwork, and the only thing about a banner's geometry
+  // the editor gets to say. Its SIZE comes from the blocks it covers, because
+  // a size you can type in is a size that can be wrong for the ground you
+  // are in — which is exactly what used to break in Match Day.
+  aspIn?.addEventListener('input', () => {
+    const a = clamp(Number(aspIn.value) / 100, 0.05, 6);
+    if (aspOut) aspOut.textContent = aspectLabel(a);
+    edit(() => bannerStore.patch({ aspect: a }));
     canvas.fitToView();
-  };
-  wIn?.addEventListener('change', sizeChanged);
-  hIn?.addEventListener('change', sizeChanged);
+  });
 
   matSel?.addEventListener('change', () => edit(() => bannerStore.patch({ material: matSel.value as 'solid' | 'mesh' })));
   gsmSel?.addEventListener('change', () => edit(() => bannerStore.patch({ fabricGsm: Number(gsmSel.value) })));
@@ -379,8 +384,7 @@ export function mountBannerView(deps: BannerViewDeps): BannerView {
   guidesChk?.addEventListener('change', () => { canvas.showGuides = guidesChk.checked; canvas.requestDraw(); });
   snapChk?.addEventListener('change', () => {
     canvas.snap = snapChk.checked;
-    const doc = bannerStore.active;
-    if (doc) edit(() => bannerStore.patchPlace({ snap: snapChk.checked }));
+    canvas.requestDraw();
   });
 
   const bgChanged = (): void => {
@@ -390,71 +394,24 @@ export function mountBannerView(deps: BannerViewDeps): BannerView {
   bgIn?.addEventListener('input', bgChanged);
   bgNone?.addEventListener('change', bgChanged);
 
-  standSel?.addEventListener('change', () => edit(() => bannerStore.patchPlace({ stand: Number(standSel.value) as StandIndex })));
-  alongIn?.addEventListener('input', () => {
-    if (alongOut) alongOut.textContent = alongIn.value;
-    edit(() => bannerStore.patchPlace({ alongU: Number(alongIn.value) / 100 }));
-  });
-  upIn?.addEventListener('input', () => {
-    if (upOut) upOut.textContent = upIn.value;
-    edit(() => bannerStore.patchPlace({ heightV: Number(upIn.value) / 100 }));
-  });
-  outIn?.addEventListener('input', () => {
-    const m = Number(outIn.value) / 10;
-    if (outOut) outOut.textContent = `${round1(m)} m`;
-    edit(() => bannerStore.patchPlace({ outM: m }));
-  });
-  tiltIn?.addEventListener('input', () => {
-    if (tiltOut) tiltOut.textContent = `${tiltIn.value}°`;
-    edit(() => bannerStore.patchPlace({ tiltDeg: Number(tiltIn.value) }));
-  });
-
+  standSel?.addEventListener('change', () => edit(() => bannerStore.patchSlot({ stand: Number(standSel.value) as StandIndex })));
   blockSel?.addEventListener('change', () => {
-    edit(() => bannerStore.patchPlace({ blockFrom: Number(blockSel.value) }));
+    edit(() => bannerStore.patchSlot({ blockFrom: Number(blockSel.value) }));
   });
   spanSel?.addEventListener('change', () => {
-    const span = Number(spanSel.value);
-    // Turning blocks off hands the banner back to the free sliders where it
-    // is, rather than teleporting it to the middle of the stand.
-    edit(() => bannerStore.patchPlace(span > 0 ? { blockSpan: span } : { blockSpan: 0, blockFrom: -1 }));
+    edit(() => bannerStore.patchSlot({ blockSpan: Math.max(1, Number(spanSel.value)) }));
   });
   tierSel?.addEventListener('change', () => {
-    edit(() => bannerStore.patchPlace({ tier: Number(tierSel.value) }));
+    edit(() => bannerStore.patchSlot({ tier: Number(tierSel.value) }));
   });
-
+  // Centring is a block choice now, not a coordinate: -1 means "the middle
+  // run of blocks", which is where a tifo goes and which stays the middle
+  // whatever ground the design is opened in.
   centreBtn?.addEventListener('click', () => {
-    edit(() => bannerStore.patchPlace({ alongU: 0.5, yawDeg: 0 }));
+    edit(() => bannerStore.patchSlot({ blockFrom: -1 }));
     say(t('bn.msg.centred'));
   });
 
-  /**
-   * Size the banner to the stand it is on.
-   *
-   * The real width and height of a stand are only known to the simulator, so
-   * this asks for the numbers the editor does have — the template's own plan —
-   * through a custom event the simulator answers when it is open, and falls
-   * back to the type's own default band when it is not. A banner sized to a
-   * stand it has never seen would be a confident wrong answer.
-   */
-  fitStandBtn?.addEventListener('click', () => {
-    const doc = bannerStore.active;
-    if (!doc) return;
-    const ev = new CustomEvent<{ stand: number; width?: number; height?: number }>('tifo:stand-extent', {
-      detail: { stand: doc.place.stand },
-    });
-    document.dispatchEvent(ev);
-    const w = ev.detail.width;
-    const h = ev.detail.height;
-    if (w && h) {
-      edit(() => bannerStore.patch({ widthM: round1(w * 0.82), heightM: round1(h * 0.8) }));
-      say(tv('bn.msg.fitStand', { w: round1(w * 0.82), h: round1(h * 0.8) }));
-    } else {
-      const p = KIND_PROFILE[doc.kind];
-      edit(() => bannerStore.patch({ widthM: p.widthM, heightM: p.heightM }));
-      say(t('bn.msg.fitStandGuess'));
-    }
-    canvas.fitToView();
-  });
 
   netChk?.addEventListener('change', () => edit(() => bannerStore.patch({ netBacked: netChk.checked })));
   barChk?.addEventListener('change', () => edit(() => bannerStore.patch({ weightBar: barChk.checked })));
@@ -580,7 +537,7 @@ export function mountBannerView(deps: BannerViewDeps): BannerView {
       // artboard draws. Resize handles take it from there — which is how you
       // size type in a vector editor, and why the seat editor's seat-count
       // slider is not plumbed through to here.
-      const capFrac = bannerFacts(doc).headlineCapFrac;
+      const capFrac = bannerFacts(doc, estimateSize(doc)).headlineCapFrac;
       const h = clamp((capFrac * r.canvas.height) / r.glyphHeight, 0.05 * aspect, 0.8 * aspect);
       const w = h * (r.canvas.width / r.canvas.height);
       const c = spendPoint();
@@ -670,9 +627,6 @@ function clamp(v: number, lo: number, hi: number): number {
 }
 function round1(n: number): number {
   return Math.round(n * 10) / 10;
-}
-function round2(n: number): number {
-  return Math.round(n * 100) / 100;
 }
 /** Keep a stamp on the fabric even when the view is scrolled off it. */
 function inBanner(v: number, lo: number, hi: number): number {

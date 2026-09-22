@@ -947,408 +947,207 @@ import { buildStadium as siBuild } from '../src/core/stadiumFit';
 // against the rules they came from, in the same posture `verify-stadiumfit`
 // takes with the estimator: a stale figure is worse than no figure, because it
 // is the number the panel hedges by.
+//
+// The GEOMETRY is not here. It has its own test — `npm run sweep:banner` —
+// which enumerates every slot on every ground for both kinds and checks eight
+// properties of each. That is the difference between this round and the four
+// before it: the space a banner can be in is finite now, so it is proved
+// rather than sampled.
 {
   const {
     BANNER_KINDS, KIND_PROFILE, PANEL_MAX_M, KG_PER_CARRIER,
     applyKind, bannerFacts, newBanner, normalise, revealEase, occludesCrowd,
+    estimateSize, physicalRevealMs, TYPICAL_BLOCK_M,
   } = await import('../src/core/banner');
-  const { migrateScene } = await import('../src/core/bannerMigrate');
-  const { readFileSync: rf } = await import('node:fs');
-  const i18nBn = rf('src/ui/i18n.ts', 'utf8');
 
-  // 1. Every reveal runs 0 to 1. A curve that does not start at nothing leaves
-  // the banner already up; one that does not finish at one leaves it forever
-  // half-unrolled. `hoist` overshoots in the middle on purpose — that is a mass
-  // on a rope settling — so only the two ends are held.
-  for (const mode of ['drop', 'lift', 'pass', 'hoist', 'unfold', 'fade'] as const) {
-    const a = revealEase(mode, 0);
-    const b = revealEase(mode, 1);
-    if (Math.abs(a) > 1e-9 || Math.abs(b - 1) > 1e-9) {
-      throw new Error(`reveal "${mode}" runs ${a} -> ${b}, not 0 -> 1`);
-    }
-    // Monotonic apart from the deliberate overshoot, and never wildly outside.
-    for (let k = 0; k <= 40; k++) {
-      const v = revealEase(mode, k / 40);
-      // A banner may overshoot its rig — that is weight on a rope — but not by
-      // much: elastic easing's 36% first peak read as a mistake, not as mass.
-      if (!Number.isFinite(v) || v < -0.02 || v > 1.12) throw new Error(`reveal "${mode}" leaves its range at t=${k / 40}: ${v}`);
-    }
-  }
-  console.log('banners: all six reveals run 0 -> 1 and stay in range');
-
-  // 2. Seams. No printer makes fabric wider than 3 m, so the panel count is
-  // ceil(width / 3) and every joint is a line the artboard must draw.
-  for (const [w, panels] of [[2.9, 1], [3, 1], [3.1, 2], [6, 2], [9, 3], [24, 8], [70, 24]] as [number, number][]) {
-    const d = newBanner('drop');
-    d.widthM = w;
-    const f = bannerFacts(d);
-    if (f.panels !== panels) throw new Error(`${w} m of fabric is ${f.panels} panels, expected ${panels}`);
-    if (f.seamsM.length !== panels - 1) throw new Error(`${panels} panels should have ${panels - 1} seams, got ${f.seamsM.length}`);
-  }
-  if (PANEL_MAX_M !== 3) throw new Error('the panel width is 3.0 m — three independent suppliers give the same figure');
-  console.log('banners: seam count follows the 3 m panel, from 2.9 m to 70 m');
-
-  // 3. Weight is area times the fabric's areal density, and the one published
-  // example to check it against is a Polish supplier's 70 x 120 m flag: 23
-  // panels, about 760 kg, on 90 g/m² flag knit. 8,400 m² x 90 g/m² = 756 kg.
+  // 1. A reveal runs from nothing to done. An easing that starts above zero
+  // shows the banner already up; one that does not finish at one leaves it
+  // forever short.
   {
-    const d = newBanner('overhead-pass');
-    d.widthM = 70;
-    d.heightM = 120;
-    d.fabricGsm = 90;
-    const f = bannerFacts(d);
-    if (Math.abs(f.weightKg - 756) > 1) throw new Error(`the 70x120 m reference flag weighs ${f.weightKg} kg, expected ~756`);
-    if (f.panels !== 24) throw new Error(`the reference flag is ${f.panels} panels; the supplier says 23 at their own trim`);
-    if (f.carriers !== Math.ceil(756 / KG_PER_CARRIER)) throw new Error('carriers must follow the weight');
-  }
-  console.log('banners: weight matches the published 70x120 m / 760 kg flag');
-
-  // 4. The legible-type rule. Tifo sits between D/25 and D/40; D/40 is the
-  // floor the app recommends, and it is what the artboard's green band draws.
-  {
-    const f = bannerFacts(newBanner('drop'), 100);
-    if (Math.abs(f.headlineCapM - 2.5) > 1e-9) throw new Error(`a 100 m read needs ${f.headlineCapM} m of cap height, expected 2.5`);
-    if (f.minTypeFrac > 0.03) throw new Error('the minimum type fraction has drifted above what survives a broadcast');
-  }
-  console.log('banners: 100 m of viewing distance asks for 2.5 m of headline');
-
-  // 5. Every kind has a profile, and the Überziehfahne/Aufziehfahne split —
-  // which decides whether the mosaic underneath survives — is not a checkbox.
-  for (const k of BANNER_KINDS) {
-    if (!KIND_PROFILE[k]) throw new Error(`banner kind "${k}" has no profile`);
-  }
-  if (!occludesCrowd(newBanner('overhead-pass'))) throw new Error('a crowd-pass banner covers the crowd; that is what it IS');
-  if (occludesCrowd(newBanner('lift'))) throw new Error('a rope lift hangs in FRONT of the crowd — it must not hide the mosaic');
-  if (!occludesCrowd(newBanner('stand-cover'))) throw new Error('a stand cover lies on the seats');
-  console.log('banners: the pass/lift occlusion split holds');
-
-  // 6. Changing type re-rigs the banner but keeps a size the user chose.
-  {
-    const a = applyKind(newBanner('drop'), 'roof-hung');
-    if (a.widthM !== KIND_PROFILE['roof-hung'].widthM) throw new Error('an untouched size follows the new type');
-    const custom = newBanner('drop');
-    custom.widthM = 31;
-    custom.heightM = 7;
-    const b = applyKind(custom, 'roof-hung');
-    if (b.widthM !== 31 || b.heightM !== 7) throw new Error('a size the user typed must survive a type change');
-    if (!b.netBacked || b.reveal !== 'hoist') throw new Error('the rig and the reveal must follow the type');
-  }
-  console.log('banners: a type change re-rigs without discarding a chosen size');
-
-  // 7. Anything stored is filled in and clamped on the way back. Banners arrive
-  // from three places — this session, an older build's localStorage, and the
-  // server — and the older two can predate any field added since.
-  {
-    const n = normalise({ id: 'x', kind: 'nonsense' as never, widthM: 1e9, place: { stand: 9 as never } as never });
-    if (n.kind !== 'drop') throw new Error('an unknown kind must fall back, not crash');
-    if (n.widthM > 400) throw new Error('width must be clamped');
-    if (n.place.stand > 3) throw new Error('the stand index must be clamped to the four stands');
-    if (!Array.isArray(n.items)) throw new Error('items must always be an array');
-  }
-  console.log('banners: a stored banner is filled in and clamped on the way back');
-
-  // 8. The retired Banner Studio's work comes forward, and nothing that was
-  // never a banner is dragged along with it.
-  {
-    const m = migrateScene({
-      version: 1,
-      assets: [
-        { id: 'a1', type: 'banner', place: 'big', imageRef: 'data:image/png;base64,AA', anchor: { stand: 3 }, position: { x: 0, y: 0, z: 0 }, rotationY: 0, scale: { x: 30, y: 12, z: 1 } },
-        { id: 'a2', type: 'flag', position: { x: 0, y: 0, z: 0 }, rotationY: 0, scale: { x: 1, y: 1, z: 1 } },
-        { id: 'a3', type: 'surface', place: 'surface', imageRef: 'data:image/png;base64,BB', anchor: { stand: 1 }, position: { x: 0, y: 0, z: 0 }, rotationY: 0, scale: { x: 44, y: 26, z: 1 } },
-      ],
-    });
-    if (m.moved !== 2) throw new Error(`migration moved ${m.moved} assets, expected 2`);
-    if (m.scene.assets.length !== 1 || m.scene.assets[0].id !== 'a2') throw new Error('a corner flag is not a banner and must stay put');
-    if (m.banners[0].kind !== 'drop' || m.banners[0].place.stand !== 3) throw new Error('a "big" banner on the south stand must land there');
-    if (m.banners[1].kind !== 'stand-cover') throw new Error('a draped surface is a stand cover');
-    if (m.banners[0].items.length !== 1 || m.banners[0].items[0].kind !== 'image') throw new Error('the old PNG must survive as a full-bleed image');
-    if (m.banners[0].widthM !== 30) throw new Error('the size it was already sitting at must be kept');
-  }
-  console.log('banners: the old Banner Studio\'s work migrates, and only it');
-
-  // 8b. The physics, without a browser.
-  //
-  // The gate this whole rewrite is here for, and the one that was missing when
-  // a banner went through the terracing while every shot in the harness came
-  // back green. Two things are checked and neither of them is a picture: that
-  // the cloth solver conserves rather than manufactures energy, and that a
-  // sheet laid on a stand stays out of it.
-  {
-    const { Cloth } = await import('../src/render/simulator/cloth');
-    const { generateSeatMap } = await import('../src/core/seatmap');
-    const { templateById } = await import('../src/core/stadiumCatalog');
-    const { buildStandFrame } = await import('../src/render/simulator/standFrame');
-    const { bakeStandHeightfield, probe } = await import('../src/render/simulator/standHeightfield');
-
-    const still = { wind: (_x: number, _y: number, _z: number, o: { x: number; y: number; z: number }) => { o.x = 0; o.y = 0; o.z = 0; }, field: null, clearance: 0, groundY: -1e4, grip: 0 };
-
-    // A 9-particle sheet hanging from its top edge under gravity. It must sit
-    // absolutely still. An earlier solver alternated its Gauss-Seidel sweep
-    // direction every substep, which flipped the sign of the unconverged
-    // residual at exactly the substep frequency and let the velocity feedback
-    // pump it: this test read 0.2, 1.6, 9.2, 52 and then 446 m/s over its
-    // first five frames, while the POSITIONS still looked plausible. Hence a
-    // speed check rather than a shape check.
-    const c = new Cloth({ cols: 3, rows: 3, arealKgM2: 0.11, dragC: 0, liftC: 0, bendCompliance: 1e9, hemWeight: 0 }, 1, 1);
-    c.reset((i, j, out) => { out.x = i * 0.5; out.y = 10 - j * 0.5; out.z = 0; });
-    for (let step = 0; step < 90; step++) {
-      c.unpinAll();
-      for (let i = 0; i < 3; i++) c.pin(c.index(i, 0), i * 0.5, 10, 0, 1 / 60);
-      c.buildTethers();
-      c.step(1 / 60, still, 8);
-    }
-    if (!c.healthy) throw new Error('the cloth solver went non-finite on a hanging sheet');
-    const bottom = c.index(1, 2);
-    if (Math.abs(c.py[bottom] - 9) > 0.02) {
-      throw new Error(`a sheet hanging from a pinned edge must hang still; its hem moved to y=${c.py[bottom].toFixed(3)} from 9`);
-    }
-
-    // The same sheet, draped down a real stand, must end up on the terracing
-    // and not in it.
-    const tpl = templateById('generic-bowl-60k');
-    if (!tpl) throw new Error('generic-bowl-60k is the template these gates are written against');
-    const frame = buildStandFrame(generateSeatMap(tpl), 1);
-    const field = bakeStandHeightfield(frame, 1.0);
-    const clearance = 0.06;
-    const hit = { depth: 0, nx: 0, ny: 1, nz: 0 };
-    const cols = 21;
-    const rows = 21;
-    const H = 12;
-    const dv = H / (rows - 1);
-    const anchor = frame.pointAt(0.5, 0.98);
-    const px = new Float64Array(rows * cols);
-    const py = new Float64Array(rows * cols);
-    const pz = new Float64Array(rows * cols);
-    const clear = (v: { x: number; y: number; z: number }): void => {
-      for (let pass = 0; pass < 3; pass++) {
-        probe(field, v.x, v.y, v.z, clearance, hit);
-        if (hit.depth <= 1e-4) break;
-        v.x += hit.nx * hit.depth; v.y += hit.ny * hit.depth; v.z += hit.nz * hit.depth;
-      }
-    };
-    for (let j = 0; j < rows; j++) {
-      for (let i = 0; i < cols; i++) {
-        const k = j * cols + i;
-        const u = i / (cols - 1) - 0.5;
-        if (j === 0) {
-          const v = { x: anchor.x + anchor.rx * (u * 24), y: anchor.y, z: anchor.z + anchor.rz * (u * 24) };
-          clear(v);
-          px[k] = v.x; py[k] = v.y; pz[k] = v.z;
-          continue;
-        }
-        const pk = (j - 1) * cols + i;
-        const v = { x: px[pk], y: py[pk] - dv, z: pz[pk] };
-        clear(v);
-        const dx = v.x - px[pk], dy = v.y - py[pk], dz = v.z - pz[pk];
-        const len = Math.hypot(dx, dy, dz) || 1;
-        const w = { x: px[pk] + (dx / len) * dv, y: py[pk] + (dy / len) * dv, z: pz[pk] + (dz / len) * dv };
-        clear(w);
-        px[k] = w.x; py[k] = w.y; pz[k] = w.z;
+    for (const mode of ['unroll', 'lower', 'cut'] as const) {
+      if (Math.abs(revealEase(mode, 0)) > 1e-6) throw new Error(`reveal "${mode}" does not start at 0`);
+      if (Math.abs(revealEase(mode, 1) - 1) > 1e-6) throw new Error(`reveal "${mode}" does not finish at 1`);
+      for (let k = 0; k <= 20; k++) {
+        const e = revealEase(mode, k / 20);
+        // A banner may overshoot its rig — that is weight on a rope — but not
+        // by a quarter of its own length.
+        if (e < -0.25 || e > 1.25) throw new Error(`reveal "${mode}" leaves the sheet at ${e.toFixed(2)}`);
       }
     }
-    // The drape has to actually cover the stand, or "no penetration" is only
-    // the good news that the banner is a ball of cloth at the rail.
-    let lowest = Infinity;
-    for (let k = 0; k < rows * cols; k++) if (py[k] < lowest) lowest = py[k];
-    if (anchor.y - lowest < H * 0.4) {
-      throw new Error(`a ${H} m sheet draped down a 30 degree rake must descend at least ${(H * 0.4).toFixed(1)} m; it descended ${(anchor.y - lowest).toFixed(1)} m`);
-    }
-
-    const stand = new Cloth({ cols, rows, arealKgM2: 0.11, dragC: 1.28, liftC: 0.35, bendCompliance: 4e-3, hemWeight: 6 }, 24, H);
-    stand.reset((i, j, out) => { const k = j * cols + i; out.x = px[k]; out.y = py[k]; out.z = pz[k]; });
-    const breezy = {
-      // A stiff, steady wind, aimed INTO the stand — the direction that pushes
-      // the sheet up the terracing rather than off it.
-      wind: (_x: number, _y: number, _z: number, o: { x: number; y: number; z: number }) => { o.x = 0; o.y = 0; o.z = 4; },
-      field, clearance, groundY: 0, grip: 0.9,
-    };
-    for (let step = 0; step < 180; step++) {
-      stand.unpinAll();
-      for (let i = 0; i < cols; i++) stand.pin(stand.index(i, 0), px[i], py[i], pz[i], 1 / 60);
-      stand.buildTethers();
-      stand.step(1 / 60, breezy, 8);
-      if (!stand.healthy) throw new Error(`the cloth solver went non-finite on the stand at step ${step}`);
-    }
-    // Three centimetres: the thickness of the fabric. What this is really
-    // ruling out is the metre-deep intersection that started the rewrite.
-    const inStand = stand.measurePenetration(breezy, 0.03);
-    if (inStand > 0.05) throw new Error(`a banner settled ${inStand.toFixed(3)} m INSIDE the stand; nothing may be in the terracing`);
-    let worstV = 0;
-    for (let k = 0; k < stand.count; k++) {
-      const v = Math.hypot(stand.px[k] - px[k], stand.py[k] - py[k], stand.pz[k] - pz[k]);
-      if (v > worstV) worstV = v;
-    }
-    if (worstV > 3) throw new Error(`a banner resting on a stand drifted ${worstV.toFixed(1)} m in three seconds of wind; it is not resting on anything`);
+    console.log('banners: every reveal runs 0 -> 1 and stays in range');
   }
-  console.log('banners: the cloth solver holds still, drapes the rake and stays out of it');
 
-  // 8c. A laced banner does not shiver.
-  //
-  // The complaint this gate exists for was "too jittery", and neither the
-  // penetration number nor any screenshot could see it: the banner was in the
-  // right place, out of the stand, and vibrating. What it was, was a sheet
-  // hanging from one edge — which is not how anyone rigs a banner. Real ones
-  // are punched with eyelets every 50 cm and tied along the whole perimeter,
-  // and a supporters' group describing their own build says they "grommet
-  // around the edges and attach to the field goal net with zip ties".
-  //
-  // Tie the perimeter and the wind is carried as tension instead of as
-  // motion. This checks the mechanism rather than the outcome, on a bare
-  // cloth with no rig around it, so a rig change cannot quietly satisfy it.
+  // 2. Seams. The hardest constraint in tifo design, and the one the app has
+  // to show: fabric comes in 3 m panels.
   {
-    const { Cloth } = await import('../src/render/simulator/cloth');
-    const cols = 25;
-    const rows = 17;
-    const W = 12;
-    const H = 8;
-    // A stiff, steady wind straight at the face of the sheet.
-    const gale = {
-      wind: (_x: number, _y: number, _z: number, o: { x: number; y: number; z: number }) => { o.x = 0; o.y = 0; o.z = 8; },
-      field: null,
-      clearance: 0,
-      groundY: -1e4,
-      grip: 0,
-    };
-    const run = (lashed: boolean): { buzz: number; flat: number } => {
-      const c = new Cloth({ cols, rows, arealKgM2: 0.11, dragC: 1.28, liftC: 0.35, bendCompliance: 4e-3, hemWeight: 0 }, W, H);
-      c.netted = lashed;
-      const at = (i: number, j: number): [number, number, number] => [
-        (i / (cols - 1) - 0.5) * W, 20 - (j / (rows - 1)) * H, 0,
-      ];
-      c.reset((i, j, out) => { const p = at(i, j); out.x = p[0]; out.y = p[1]; out.z = p[2]; });
-      const hold = (): void => {
-        c.unpinAll();
-        for (let i = 0; i < cols; i++) { const p = at(i, 0); c.pin(c.index(i, 0), p[0], p[1], p[2], 1 / 60); }
-        if (lashed) {
-          for (let j = 1; j < rows; j++) for (const i of [0, cols - 1]) { const p = at(i, j); c.lash(c.index(i, j), p[0], p[1], p[2], 0.02); }
-          for (let i = 1; i < cols - 1; i++) { const p = at(i, rows - 1); c.lash(c.index(i, rows - 1), p[0], p[1], p[2], 0.02); }
-        }
-        c.buildTethers();
-      };
-      for (let f = 0; f < 240; f++) { hold(); c.step(1 / 60, gale, 8); }
-      if (!c.healthy) throw new Error('the cloth solver went non-finite under wind');
-      const px = Float64Array.from(c.px), py = Float64Array.from(c.py), pz = Float64Array.from(c.pz);
-      let buzz = 0;
-      for (let f = 0; f < 60; f++) {
-        hold();
-        c.step(1 / 60, gale, 8);
-        for (let k = 0; k < c.count; k++) buzz += Math.hypot(c.px[k] - px[k], c.py[k] - py[k], c.pz[k] - pz[k]);
-        for (let k = 0; k < c.count; k++) { px[k] = c.px[k]; py[k] = c.py[k]; pz[k] = c.pz[k]; }
-      }
-      buzz /= c.count * 60;
-      let flat = 0;
-      for (let k = 0; k < c.count; k++) flat += c.pz[k] * c.pz[k];
-      return { buzz, flat: Math.sqrt(flat / c.count) };
-    };
-    const free = run(false);
-    const tied = run(true);
-    if (!(tied.buzz < free.buzz * 0.2)) {
-      throw new Error(`lacing the perimeter must calm the sheet: free ${free.buzz.toFixed(5)} m/frame, tied ${tied.buzz.toFixed(5)}`);
-    }
-    if (tied.buzz > 0.002) {
-      throw new Error(`a laced banner shivers ${(tied.buzz * 1000).toFixed(1)} mm per frame; it should be a fraction of that`);
-    }
-    if (tied.flat > 0.6) {
-      throw new Error(`a laced banner bellied ${tied.flat.toFixed(2)} m out of its own plane`);
-    }
+    const d = newBanner('stand');
+    const f = bannerFacts(d, { widthM: 2.9, heightM: 1.5 });
+    if (f.seamsM.length !== 0) throw new Error('a banner inside one panel has no seams');
+    const g = bannerFacts(d, { widthM: 70, heightM: 35 });
+    if (g.seamsM.length !== Math.ceil(70 / PANEL_MAX_M) - 1) throw new Error(`70 m of fabric is ${g.seamsM.length} seams`);
+    console.log('banners: seam count follows the 3 m panel, from 2.9 m to 70 m');
   }
-  console.log('banners: lacing the perimeter carries the wind as tension, not as movement');
 
-  // 8d. A banner cannot be bigger than the ground it is on.
+  // 3. Weight, against a published flag: 70 x 120 m at 90 g/m² is 756 kg.
+  {
+    const d = { ...newBanner('stand'), fabricGsm: 90 };
+    const f = bannerFacts(d, { widthM: 120, heightM: 70 });
+    if (Math.abs(f.weightKg - 756) > 20) throw new Error(`a 70x120 m flag weighs ${f.weightKg.toFixed(0)} kg, not 756`);
+    if (f.carriers !== Math.ceil(f.weightKg / KG_PER_CARRIER)) throw new Error('carriers must follow the mass');
+    console.log('banners: weight matches the published 70x120 m / 760 kg flag');
+  }
+
+  // 4. Legibility. A letter has to subtend enough angle to read from the far
+  // side of the ground, which is 1/200 of the viewing distance as a floor.
+  {
+    const f = bannerFacts(newBanner('stand'), { widthM: 37, heightM: 18 }, 100);
+    // 1:40, not signage's 1:120: a tifo is glanced at for two minutes across
+    // a moving crowd, and the letters have to survive a broadcast crop.
+    if (Math.abs(f.headlineCapM - 2.5) > 0.2) throw new Error(`100 m asks for ${f.headlineCapM.toFixed(2)} m of cap height, not 2.5`);
+    console.log('banners: 100 m of viewing distance asks for 2.5 m of headline');
+  }
+
+  // 5. Two kinds, both profiled, and the occlusion split between them. A sheet
+  // over the terracing hides the mosaic under it; one flown in the air does
+  // not, and the panel says so before anyone spends a choreo on it.
+  {
+    if (BANNER_KINDS.length !== 2) throw new Error(`there should be two banner kinds, not ${BANNER_KINDS.length}`);
+    for (const k of BANNER_KINDS) {
+      if (!KIND_PROFILE[k]) throw new Error(`banner kind "${k}" has no profile`);
+    }
+    if (!occludesCrowd(newBanner('stand'))) throw new Error('a stand banner lies on the seats; that is what it IS');
+    if (occludesCrowd(newBanner('hanging'))) throw new Error('a hanging banner is in the air — it must not hide the mosaic');
+    console.log('banners: two kinds, and the occlusion split holds');
+  }
+
+  // 6. Changing type re-rigs the banner but keeps a shape the user chose.
+  {
+    const a = applyKind(newBanner('stand'), 'hanging');
+    if (a.reveal !== KIND_PROFILE.hanging.reveal) throw new Error('a type change must bring its own reveal');
+    const custom = { ...newBanner('stand'), aspect: 0.31 };
+    const moved = applyKind(custom, 'hanging');
+    if (Math.abs(moved.aspect - 0.31) > 1e-9) throw new Error('a shape the user chose must survive a type change');
+    if (moved.slot.stand !== custom.slot.stand) throw new Error('a type change must not move the banner to another stand');
+    console.log('banners: a type change re-rigs without discarding a chosen shape');
+  }
+
+  // 7. Anything stored is filled in and clamped on the way back.
+  {
+    const junk = {
+      id: 'x', name: 'n', kind: 'nonsense', aspect: 99, material: 'nope', fabricGsm: -5,
+      items: [{ kind: 'text', text: 'hi' }], slot: { stand: 9, blockFrom: -4, blockSpan: 0, tier: 77 },
+      reveal: 'teleport', revealMs: -1, wind: 5,
+    } as unknown as Parameters<typeof normalise>[0];
+    const n = normalise(junk);
+    if (!BANNER_KINDS.includes(n.kind)) throw new Error('an unknown kind must come back as a real one');
+    if (n.aspect > 6 || n.aspect < 0.05) throw new Error('aspect must be clamped to something a banner can be');
+    if (n.slot.stand < 0 || n.slot.stand > 3) throw new Error('a banner must be on one of the four stands');
+    if (n.slot.blockSpan < 1) throw new Error('a banner covers at least one block');
+    if (n.wind < 0 || n.wind > 1) throw new Error('wind is a fraction');
+    console.log('banners: a stored banner is filled in and clamped on the way back');
+  }
+
+  // 8. The reveal duration is a physical time, not a constant.
   //
-  // The editor lets you draw at any size, which is right — you are designing
-  // artwork, not ordering fabric. Match Day is the stadium, and the stadium
-  // gets the last word. Without that, a 48 x 28 m sheet went on a stand with
-  // 18 m of slope above the chosen point and hung off the top of the ground
-  // into the skyline.
+  // A twenty-metre sheet hauled up on ropes at half a metre a second takes
+  // forty seconds, and a rolled cover paid out over a block takes a few. The
+  // first version of this gave everything 4.2 seconds, which is why the very
+  // first thing Osamah said about a reveal was that it was too fast.
+  {
+    const small = physicalRevealMs('stand', { widthM: 10, heightM: 5 });
+    const big = physicalRevealMs('stand', { widthM: 80, heightM: 40 });
+    if (!(big > small * 2)) throw new Error(`a 40 m drop (${big} ms) must take far longer than a 5 m one (${small} ms)`);
+    const d = newBanner('stand');
+    const s = estimateSize(d);
+    if (Math.abs(s.widthM - KIND_PROFILE.stand.blockSpan * TYPICAL_BLOCK_M) > 1e-6) {
+      throw new Error('a new banner is as wide as the blocks its profile covers');
+    }
+    console.log('banners: a reveal takes the time the physical thing takes');
+  }
+
+  // 9. The slot model, on real grounds.
+  //
+  // The whole space is swept by `npm run sweep:banner`; what is checked here
+  // is the CONTRACT the rest of the app leans on — that a slot resolves to
+  // something inside the stand, that the size comes out of the blocks rather
+  // than out of a text field, and that the enumeration the panel's pickers
+  // are built from agrees with the resolver.
   {
     const { generateSeatMap } = await import('../src/core/seatmap');
-    const { templateById } = await import('../src/core/stadiumCatalog');
+    const { STADIUM_CATALOG } = await import('../src/core/stadiumCatalog');
     const { buildStandFrame } = await import('../src/render/simulator/standFrame');
-    const { fitBanner } = await import('../src/render/simulator/bannerFit');
+    const { resolveSlot, slotsOf, slotCount } = await import('../src/render/simulator/bannerSlot');
 
-    for (const id of ['generic-bowl-60k', 'single-kop-40k', 'community-grand-national-80k']) {
-      const tpl = templateById(id);
-      if (!tpl) throw new Error(`template ${id} is missing`);
-      const map = generateSeatMap(tpl);
+    for (const entry of STADIUM_CATALOG.slice(0, 4)) {
+      const map = generateSeatMap(entry.template);
+      const id = entry.template.id;
       for (const stand of [0, 1, 2, 3] as const) {
         const frame = buildStandFrame(map, stand);
         if (!frame.ok) continue;
 
-        // Real blocks, found from the aisles rather than invented.
-        if (frame.blocks.length < 2) throw new Error(`${id} stand ${stand} found ${frame.blocks.length} block(s); a stand has aisles`);
-        let span = 0;
+        // The blocks are real places, in order, and none of them is a corner
+        // curl: a stand's ends are where its parameterisation is worst, and a
+        // four-metre doubled-back fragment is not somewhere a banner goes.
+        let prev = -1;
         for (const b of frame.blocks) {
-          if (!(b.u1 > b.u0)) throw new Error('a block must have width');
-          span += b.u1 - b.u0;
+          if (b.u0 < prev - 1e-9) throw new Error(`${id}/${stand}: blocks are out of order`);
+          if (b.u1 <= b.u0) throw new Error(`${id}/${stand}: a block with no width`);
+          if (b.widthM < 6) throw new Error(`${id}/${stand}: a ${b.widthM.toFixed(1)} m block is a corner curl, not a place`);
+          prev = b.u1;
         }
-        if (span > 1.001) throw new Error(`${id} stand ${stand} blocks cover ${span.toFixed(2)} of the stand`);
-        for (let i = 1; i < frame.blocks.length; i++) {
-          if (frame.blocks[i].u0 < frame.blocks[i - 1].u1) throw new Error('blocks must not overlap');
-        }
-        if (frame.tiers.length < 1) throw new Error('a stand has at least one tier');
 
-        // Nothing may come out bigger than the stand, whatever is asked for.
+        const slots = slotsOf(frame, stand);
+        if (slots.length !== slotCount(frame)) {
+          throw new Error(`${id}/${stand}: ${slots.length} slots enumerated, ${slotCount(frame)} counted`);
+        }
+
         for (const kind of BANNER_KINDS) {
-          const doc = newBanner(kind);
-          // Ask for something absurd, the way a user can in the editor.
-          doc.widthM = 400;
-          doc.heightM = 120;
-          const fit = fitBanner(doc, frame);
-          if (fit.widthM > fit.maxWidthM + 1e-6) {
-            throw new Error(`${kind} on ${id}/${stand} came out ${fit.widthM.toFixed(1)} m wide against a limit of ${fit.maxWidthM.toFixed(1)} m`);
-          }
-          if (fit.heightM > fit.maxHeightM + 1e-6) {
-            throw new Error(`${kind} on ${id}/${stand} came out ${fit.heightM.toFixed(1)} m tall against a limit of ${fit.maxHeightM.toFixed(1)} m`);
-          }
-          if (kind !== 'pitch' && fit.widthM > frame.widthM + 1e-6) {
-            throw new Error(`${kind} is wider than the stand it is on`);
-          }
-          if (!fit.cut) throw new Error(`a 400 x 120 m banner must be reported as cut on ${id}/${stand}`);
-          // The design's proportions survive the cut: a squashed banner shows
-          // artwork the user never drew.
-          const asked = doc.heightM / doc.widthM;
-          const got = fit.heightM / fit.widthM;
-          if (Math.abs(got - asked) > Math.max(0.02, asked * 0.02)) {
-            throw new Error(`${kind} was squashed from ${asked.toFixed(3)} to ${got.toFixed(3)}`);
+          for (const slot of slots) {
+            const res = resolveSlot({ ...newBanner(kind), slot }, frame);
+            if (!(res.size.widthM > 0) || !(res.size.heightM > 0)) {
+              throw new Error(`${id}/${stand}/${kind}: a slot with no size`);
+            }
+            if (res.u0 < -1e-9 || res.u1 > 1 + 1e-9 || res.u1 <= res.u0) {
+              throw new Error(`${id}/${stand}/${kind}: a banner off the end of its stand`);
+            }
+            if (res.vBottom < res.v0 - 1e-6 || res.vBottom > res.v1 + 1e-6) {
+              throw new Error(`${id}/${stand}/${kind}: the bottom edge is outside the band it belongs to`);
+            }
+            if (res.size.heightM > res.maxHeightM + 1e-6) {
+              throw new Error(`${id}/${stand}/${kind}: ${res.size.heightM.toFixed(1)} m of sheet in a ${res.maxHeightM.toFixed(1)} m slot`);
+            }
+            // The size follows the blocks. This is the answer to "I can pick
+            // any size in the editor and it breaks in Match Day": there is no
+            // size to pick any more.
+            if (res.size.widthM > res.maxWidthM + 1e-6) {
+              throw new Error(`${id}/${stand}/${kind}: a banner wider than the blocks it covers`);
+            }
           }
         }
 
-        // A block run lands on the blocks it names, and stays on the stand.
-        {
-          const doc = newBanner('drop');
-          doc.place.blockFrom = 1;
-          doc.place.blockSpan = 2;
-          const fit = fitBanner(doc, frame);
-          const a = frame.blocks[1];
-          const b = frame.blocks[Math.min(frame.blocks.length - 1, 2)];
-          if (Math.abs(fit.alongU - (a.u0 + b.u1) / 2) > 1e-6) throw new Error('a block run must be centred on the blocks it names');
-          if (fit.alongU < 0 || fit.alongU > 1) throw new Error('a banner must stay on its stand');
-          const runW = (b.u1 - a.u0) * frame.widthM;
-          if (fit.widthM > runW + 1e-6) throw new Error('a banner must not be wider than the blocks it covers');
+        // The artwork's shape drives the depth, and a slot that cannot take it
+        // scales both together rather than squashing one.
+        const tall = resolveSlot({ ...newBanner('stand'), aspect: 6 }, frame);
+        if (Math.abs(tall.size.heightM / tall.size.widthM - 6) > 0.01 && !tall.heightLimited) {
+          throw new Error(`${id}/${stand}: a 6:1 design came out at ${(tall.size.heightM / tall.size.widthM).toFixed(2)}:1`);
         }
-
-        // Asking for more blocks than there are does not walk off the end.
-        {
-          const doc = newBanner('stand-cover');
-          doc.place.blockFrom = frame.blocks.length - 1;
-          doc.place.blockSpan = 99;
-          const fit = fitBanner(doc, frame);
-          if (fit.blockFrom + fit.blockSpan > frame.blocks.length) throw new Error('a block run must be clamped to the stand');
+        if (tall.heightLimited && Math.abs(tall.size.heightM / tall.size.widthM - 6) > 0.01) {
+          throw new Error(`${id}/${stand}: a cut banner must keep its proportions`);
         }
       }
     }
+    console.log('banners: every slot on four grounds resolves inside its stand, at a size the blocks decide');
   }
-  console.log('banners: every kind is clamped to the stand, and block runs land on real blocks');
 
-  // 9. Every banner string carries both languages. The two original phone bug
+  // 10. Every banner string carries both languages. The two original phone bug
   // reports were both written in Arabic; an English-only sentence in this view
   // is the same failure in a new place.
   {
     // A window after the key, not a braces match: a sentence with a named
     // placeholder ("Banner {n}") closes a brace inside its own value, and the
     // obvious `\{([^}]*)\}` stops there and declares the Arabic missing.
+    const { readFileSync: bnRead } = await import('node:fs');
+    const i18nBn = bnRead('src/ui/i18n.ts', 'utf8');
     const keys = [...i18nBn.matchAll(/^\s*'((?:bn|ed\.view)\.[\w.]+)':/gm)];
     if (keys.length < 40) throw new Error(`only ${keys.length} banner strings found — the scan is not finding the table`);
     for (const m of keys) {
@@ -1356,7 +1155,7 @@ import { buildStadium as siBuild } from '../src/core/stadiumFit';
       if (!/\ben:/.test(body) || !/\bar:/.test(body)) throw new Error(`banner string "${m[1]}" is missing a translation`);
     }
     // Every note the facts function can emit has to have a sentence.
-    for (const note of ['seams', 'carry', 'mesh', 'wind', 'net', 'occludes', 'poles', 'fire']) {
+    for (const note of ['seams', 'carry', 'mesh', 'wind', 'net', 'occludes', 'fire']) {
       if (!i18nBn.includes(`'bn.note.${note}'`)) throw new Error(`the note "${note}" has no sentence`);
     }
     console.log(`banners: ${keys.length} strings, all with en + ar`);

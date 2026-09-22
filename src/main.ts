@@ -568,25 +568,20 @@ async function main(): Promise<void> {
     requestAnimationFrame(() => { editor.app.resize(); editor.fitToView(); });
   });
 
-  // Restore the scene, and bring any banner the retired Banner Studio made
-  // forward into the new model. Skipped entirely when a shared design brought
-  // its own — someone else's tifo should not arrive wearing your banners. A PNG in the scene store and a banner are the
-  // same thing now, so migrating is the only way the two do not render twice.
+  // Restore the scene.
+  //
+  // The retired Banner Studio's work is NOT brought forward. Its banners were
+  // placed by a free position and a size in metres, and neither of those
+  // exists any more — a banner is a run of blocks on a stand now. Inventing a
+  // slot for an old banner would put it somewhere nobody chose, which is
+  // worse than leaving it out; the artwork itself is untouched in storage.
   try {
     const raw = sharedScene ? null : localStorage.getItem('tifo_scene_v2');
-    if (raw) {
-      const { migrateScene } = await import('./core/bannerMigrate');
-      const m = migrateScene(JSON.parse(raw), t('bn.banner'));
-      assetStore.loadJSON(m.scene);
-      if (m.moved > 0) {
-        bannerStore.loadJSON({ version: 1, banners: m.banners });
-        localStorage.setItem('tifo_scene_v2', JSON.stringify(m.scene));
-      }
-    }
+    if (raw) assetStore.loadJSON(JSON.parse(raw));
   } catch {
     /* ignore corrupt/unavailable storage */
   }
-  // Banners saved after the migration live in their own key.
+  // Banners live in their own key.
   try {
     const rawB = sharedScene ? null : localStorage.getItem('tifo_banners_v1');
     if (rawB && bannerStore.count === 0) bannerStore.loadJSON(JSON.parse(rawB));

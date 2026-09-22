@@ -183,22 +183,17 @@
           <span class="tb-field">
             <label for="bn-kind" data-i18n="bn.type">Type</label>
             <select id="bn-kind">
-              <option value="drop" data-i18n="bn.kind.drop">Drop banner</option>
-              <option value="lift" data-i18n="bn.kind.lift">Rope lift</option>
-              <option value="overhead-pass" data-i18n="bn.kind.pass">Crowd pass</option>
-              <option value="roof-hung" data-i18n="bn.kind.roof">Roof-hung</option>
-              <option value="stand-cover" data-i18n="bn.kind.cover">Stand cover</option>
-              <option value="fence" data-i18n="bn.kind.fence">Fence banner</option>
-              <option value="pitch" data-i18n="bn.kind.pitch">Pitch banner</option>
-              <option value="pole-out" data-i18n="bn.kind.pole">3D pole-out</option>
+              <option value="stand" data-i18n="bn.kind.stand">Stand banner</option>
+              <option value="hanging" data-i18n="bn.kind.hanging">Hanging banner</option>
             </select>
           </span>
+          <!-- The SHAPE of the sheet, not its size. A banner is as wide as
+               the blocks it covers, so a size typed in here would be a number
+               the stadium immediately overrules. -->
           <span class="tb-field">
-            <label for="bn-w" data-i18n="bn.size">Size</label>
-            <input type="number" id="bn-w" min="0.5" max="400" step="0.5" value="24" style="width:70px;" aria-label="Width in metres" data-i18n-attr="aria-label:bn.a11y.width" />
-            <span aria-hidden="true">&times;</span>
-            <input type="number" id="bn-h" min="0.3" max="120" step="0.5" value="12" style="width:70px;" aria-label="Height in metres" data-i18n-attr="aria-label:bn.a11y.height" />
-            <span data-i18n="bn.m">m</span>
+            <label for="bn-aspect" data-i18n="bn.shape">Shape</label>
+            <input type="range" id="bn-aspect" min="15" max="300" step="1" value="50" style="width:110px;" aria-label="Shape of the banner" data-i18n-attr="aria-label:bn.a11y.shape" />
+            <span id="bn-aspect-out" class="val">2:1</span>
           </span>
           <span class="tb-field">
             <label for="bn-material" data-i18n="bn.material">Fabric</label>
@@ -415,30 +410,15 @@
             <label for="bn-tier" class="grow0" data-i18n="bn.tier">Tier</label>
             <select id="bn-tier" class="grow"></select>
           </div>
-          <div class="group" style="gap:8px;margin-bottom:8px;" id="bn-along-row">
-            <label for="bn-along" style="white-space:nowrap;" data-i18n="bn.along">Along</label>
-            <input type="range" id="bn-along" min="0" max="100" step="1" value="50" class="grow" />
-            <span id="bn-along-out" class="val">50</span>
-          </div>
-          <div class="group" style="gap:8px;margin-bottom:8px;" id="bn-up-row">
-            <label for="bn-up" style="white-space:nowrap;" data-i18n="bn.up">Up</label>
-            <input type="range" id="bn-up" min="0" max="120" step="1" value="60" class="grow" />
-            <span id="bn-up-out" class="val">60</span>
+          <!-- What those blocks come to on this ground. A readout, because
+               there is nothing here to type: the slot is the size. -->
+          <div class="group" style="gap:8px;margin-bottom:8px;">
+            <span class="grow0" data-i18n="bn.size">Size</span>
+            <span id="bn-size-out" class="val grow"></span>
           </div>
           <div id="bn-fit-note" class="bn-notes" style="display:none;margin-bottom:8px;"></div>
-          <div class="group" style="gap:8px;margin-bottom:8px;">
-            <label for="bn-out" style="white-space:nowrap;" data-i18n="bn.out">Out</label>
-            <input type="range" id="bn-out" min="-20" max="200" step="1" value="12" class="grow" />
-            <span id="bn-out-out" class="val">1.2 m</span>
-          </div>
-          <div class="group" style="gap:8px;margin-bottom:8px;">
-            <label for="bn-tilt" style="white-space:nowrap;" data-i18n="bn.tilt">Lean</label>
-            <input type="range" id="bn-tilt" min="-90" max="90" step="1" value="0" class="grow" />
-            <span id="bn-tilt-out" class="val">0&deg;</span>
-          </div>
           <div class="chips" style="margin-bottom:10px;">
             <button class="chip" id="bn-centre" title="Put it dead centre on the stand" data-i18n-attr="title:bn.centreT" data-i18n="bn.centre">Centre it</button>
-            <button class="chip" id="bn-fit-stand" title="Size it to the stand it is on" data-i18n-attr="title:bn.fitStandT" data-i18n="bn.fitStand">Fit the stand</button>
           </div>
           <div class="chips" style="margin-bottom:10px;">
             <label><input type="checkbox" id="bn-net" /> <span data-i18n="bn.net">Rope net</span></label>

@@ -106,18 +106,27 @@ console.log('\n— desktop: the fourth view exists and draws —');
   check('facts line is computed, not blank', s.facts.length > 10, s.facts);
   check('physical notes are listed', s.notes >= 1, `${s.notes} notes`);
 
-  // The seam count is the one number a tifo designer works against.
-  const seamCheck = await page.evaluate(() => {
-    const w = document.getElementById('bn-w');
-    w.value = '9';
-    w.dispatchEvent(new Event('change', { bubbles: true }));
-    return new Promise((r) => setTimeout(() => r(document.getElementById('bn-facts').textContent), 150));
+  // The shape control, which is the only thing about a banner's geometry the
+  // editor gets to say — its SIZE comes from the blocks it covers. Changing
+  // the shape has to move the facts line, because the seam count and the
+  // weight are computed from the sheet rather than stored on it.
+  const shapeCheck = await page.evaluate(() => {
+    const before = document.getElementById('bn-facts').textContent;
+    const a = document.getElementById('bn-aspect');
+    a.value = '180';
+    a.dispatchEvent(new Event('input', { bubbles: true }));
+    return new Promise((r) => setTimeout(() => r({
+      before,
+      after: document.getElementById('bn-facts').textContent,
+      label: document.getElementById('bn-aspect-out').textContent,
+    }), 200));
   });
-  check('9 m of fabric is 3 panels', /\b3\b/.test(seamCheck), seamCheck);
+  check('the shape control moves the facts', shapeCheck.before !== shapeCheck.after, `${shapeCheck.before} -> ${shapeCheck.after}`);
+  check('the shape reads as a ratio, not a decimal', /:/.test(shapeCheck.label), shapeCheck.label);
   await page.evaluate(() => {
-    const w = document.getElementById('bn-w');
-    w.value = '24';
-    w.dispatchEvent(new Event('change', { bubbles: true }));
+    const a = document.getElementById('bn-aspect');
+    a.value = '50';
+    a.dispatchEvent(new Event('input', { bubbles: true }));
   });
   await page.waitForTimeout(200);
 

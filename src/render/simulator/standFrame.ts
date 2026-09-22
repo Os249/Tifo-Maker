@@ -41,6 +41,12 @@ export interface StandFrame {
    * metres of THAT, not 18 metres of altitude. Sizing against the vertical
    * height is how a banner ends up covering three quarters of a stand when it
    * was meant to cover a third.
+   *
+   * `slopeAt` over the whole stand — see the note there for why it is
+   * measured in the (radius, height) plane. Across every ground in the
+   * catalogue the rake varies by 1-6% between one run of blocks and another,
+   * so this single number describes a stand well; the two-tier bend is in it
+   * because the measure follows the surface.
    */
   slopeM: number;
   /** Lowest and highest seat elevation. */
@@ -72,6 +78,44 @@ export interface StandFrame {
   normalAt(alongU: number, heightV: number): { nx: number; ny: number; nz: number };
   /** A coarse triangle mesh of the face, for raycasting a drag onto it. */
   surfaceGrid(cols: number, rows: number): { positions: Float32Array; indices: Uint32Array };
+
+  /**
+   * Metres across the stand between two `alongU`, at a given height.
+   *
+   * NOT the same as a fraction of `widthM`, and the difference is large. A
+   * bowl's back row sits on a bigger radius than its front rail, so the same
+   * angular span is far longer up the back: on the generic bowl, four blocks
+   * measure 74 m at the rail and 115 m at the back row.
+   *
+   * A banner high on a stand is therefore half as wide again as its share of
+   * `widthM` suggests, and sizing it off the rail understates its seams, its
+   * weight and the shape its artwork is stretched into. Measured by walking
+   * the row rather than assumed, because a superellipse does not have a
+   * radius to divide by.
+   */
+  widthAt(u0: number, u1: number, heightV: number): number;
+
+  /**
+   * Metres UP THE SLOPE across a run of the stand, between two heights.
+   *
+   * Measured in the (radius, height) plane rather than in world space, and
+   * that is not a refinement — it is the difference between a number and
+   * noise. A column of this surface is interpolated through individual seat
+   * positions, and consecutive seats jitter sideways; a 3-D arc length
+   * therefore picks up that jitter and DIVERGES as you sample it more finely.
+   * On the generic bowl the same 48 m rake measured 48 m at 8 steps, 75 m at
+   * 64 and 214 m at 256. Two rounds of banner bugs came out of trusting it:
+   * the "corner rake is four times the centre" I fixed last time was this
+   * artefact, not geometry.
+   *
+   * Going back up a stand, radius and height both increase monotonically, and
+   * the lateral jitter is entirely in the direction that (r, y) throws away.
+   * So this converges: 48.0 m at 8 steps, 48.1 m at 64.
+   *
+   * Taken as the median across the run, so one degenerate column at the very
+   * edge of a stand — where the bins straddle the corner — cannot move it.
+   */
+  slopeAt(u0: number, u1: number, v0: number, v1: number): number;
 
   /**
    * The blocks this stand is divided into, left to right.
@@ -149,8 +193,27 @@ function clamp01(v: number): number {
   return v < 0 ? 0 : v > 1 ? 1 : v;
 }
 
+/**
+ * A column of the stand: ONE POINT PER ROW OF SEATING, not one per seat.
+ *
+ * A column is a 1/56 slice of a stand, which is a couple of metres wide, and
+ * the seats inside it scatter across that width. Threading the surface
+ * through every one of them in elevation order makes it zig-zag sideways by
+ * a seat's width between consecutive points — noise at a scale far below
+ * anything the stand actually does.
+ *
+ * That noise is the hidden cause of a long run of banner problems. It made
+ * arc length along a column diverge as you sampled it more finely (a 48 m
+ * rake measured 214 m at 256 steps), which made every "metres down the
+ * slope" figure depend on its step count; and a banner with rows a
+ * centimetre apart in `heightV` inherited the zig-zag as a visible ripple.
+ *
+ * Averaging each row's seats within the column removes it at the source. The
+ * profile that comes out is the real one — the noses of the steps — and it
+ * is smooth, monotone and resolution-independent.
+ */
 interface Column {
-  /** Seats in this column, sorted by elevation. */
+  /** Row centres in this column, sorted by elevation. */
   ys: number[];
   xs: number[];
   zs: number[];
@@ -163,6 +226,8 @@ export function buildStandFrame(map: SeatMap, stand: 0 | 1 | 2 | 3, roofRise = 9
   let maxY = -Infinity;
   let n = 0;
 
+  // Accumulated per (column, row) and averaged below — see `Column`.
+  const acc = new Map<number, { x: number; y: number; z: number; n: number }>();
   for (let i = 0; i < map.count; i++) {
     const u = map.uv[i * 2];
     if (standOfU(u) !== stand) continue;
@@ -172,12 +237,22 @@ export function buildStandFrame(map: SeatMap, stand: 0 | 1 | 2 | 3, roofRise = 9
     if (su < 0 || su >= 1) continue;
     const ci = Math.min(COLS - 1, Math.floor(su * COLS));
     const y = map.pos3[i * 3 + 1];
-    cols[ci].xs.push(map.pos3[i * 3]);
-    cols[ci].ys.push(y);
-    cols[ci].zs.push(map.pos3[i * 3 + 2]);
+    const key = ci * 65536 + map.tierOf[i] * 4096 + map.rowOf[i];
+    let a = acc.get(key);
+    if (!a) { a = { x: 0, y: 0, z: 0, n: 0 }; acc.set(key, a); }
+    a.x += map.pos3[i * 3];
+    a.y += y;
+    a.z += map.pos3[i * 3 + 2];
+    a.n++;
     if (y < minY) minY = y;
     if (y > maxY) maxY = y;
     n++;
+  }
+  for (const [key, a] of acc) {
+    const c = cols[Math.floor(key / 65536)];
+    c.xs.push(a.x / a.n);
+    c.ys.push(a.y / a.n);
+    c.zs.push(a.z / a.n);
   }
 
   if (n === 0 || !isFinite(minY)) {
@@ -191,6 +266,8 @@ export function buildStandFrame(map: SeatMap, stand: 0 | 1 | 2 | 3, roofRise = 9
       surfaceGrid: () => ({ positions: new Float32Array(0), indices: new Uint32Array(0) }),
       blocks: [{ u0: 0, u1: 1, centerU: 0.5, widthM: 40 }],
       tiers: [{ v0: 0, v1: 1, slopeM: 24 }],
+      widthAt: (a0, a1) => Math.abs(a1 - a0) * 40,
+      slopeAt: (_a, _b, v0, v1) => Math.abs(v1 - v0) * 24,
     };
     return flat;
   }
@@ -256,12 +333,34 @@ export function buildStandFrame(map: SeatMap, stand: 0 | 1 | 2 | 3, roofRise = 9
 
     // Along-the-stand direction from the two bracketing columns; at the very
     // ends both are the same column, so step inward for the tangent.
+    //
+    // Widened until the pair is actually distinct. An empty column is filled
+    // from its nearest populated neighbour, so two adjacent columns can be
+    // copies of one another — and then the difference between them is zero,
+    // the tangent is zero, and anything built along it collapses to a point.
+    // On the little arena that is exactly what a hanging banner over the last
+    // two blocks did: 33 m of sheet rendered as a 1.5 m sliver.
     const ja = Math.max(0, Math.min(COLS - 2, i0));
-    const q0 = colAt(cols[ja], y);
-    const q1 = colAt(cols[ja + 1], y);
-    let rx = q1.x - q0.x;
-    let rz = q1.z - q0.z;
-    const rl = Math.hypot(rx, rz) || 1;
+    let rx = 0;
+    let rz = 0;
+    let rl = 0;
+    for (let w = 1; w < COLS && rl < 1e-6; w++) {
+      const lo = Math.max(0, ja - w + 1);
+      const hi = Math.min(COLS - 1, ja + w);
+      const q0 = colAt(cols[lo], y);
+      const q1 = colAt(cols[hi], y);
+      rx = q1.x - q0.x;
+      rz = q1.z - q0.z;
+      rl = Math.hypot(rx, rz);
+    }
+    if (rl < 1e-6) {
+      // A stand that is a single point in plan has no direction of its own;
+      // take the one perpendicular to the radius so the frame stays usable.
+      const rr = Math.hypot(x, z) || 1;
+      rx = -z / rr;
+      rz = x / rr;
+      rl = 1;
+    }
     rx /= rl;
     rz /= rl;
 
@@ -270,18 +369,8 @@ export function buildStandFrame(map: SeatMap, stand: 0 | 1 | 2 | 3, roofRise = 9
     return { x, y, z, rx, rz, ox: -x / rad, oz: -z / rad };
   };
 
-  // Slope length up the middle of the stand, walked rather than assumed: the
-  // rake is not constant once a bowl has two tiers with a walkway between them.
-  let slopeM = 0;
-  {
-    let prevP = pointAt(0.5, 0);
-    for (let k = 1; k <= 24; k++) {
-      const p = pointAt(0.5, k / 24);
-      slopeM += Math.hypot(p.x - prevP.x, p.y - prevP.y, p.z - prevP.z);
-      prevP = p;
-    }
-  }
-  slopeM = Math.max(heightM, slopeM);
+  // Filled in below, once `slopeAt` exists to measure it properly.
+  const slopeM = heightM;
 
   const normalAt = (alongU: number, heightV: number): { nx: number; ny: number; nz: number } => {
     const dv = 0.02;
@@ -376,6 +465,35 @@ export function buildStandFrame(map: SeatMap, stand: 0 | 1 | 2 | 3, roofRise = 9
       }
     }
   }
+  // ---- drop the corner curls ---------------------------------------------
+  //
+  // A stand's ends are where its parameterisation is worst. On a ground with
+  // a hard corner cut the last few metres of seating double back on
+  // themselves in plan — the front rail of the Kingdom Arena's end stand runs
+  // out to (66, -51), back to (61, -39), and only then forward along the
+  // straight — and the gap detector faithfully reports those curls as blocks
+  // three or four metres wide.
+  //
+  // They are not blocks. Nobody hangs a banner on four metres of doubled-back
+  // corner, and every geometric check in the sweep failed on exactly them:
+  // five metres of sheet standing clear of the terracing, because there is no
+  // single sensible surface there to lie on. Offering a place that cannot
+  // work is worse than not offering it.
+  //
+  // Judged against the stand's own blocks rather than an absolute: grounds in
+  // the catalogue run from 15 m blocks to 29 m ones. A half-width block at a
+  // stand boundary — the other half belongs to the next stand — is a real
+  // place and survives this.
+  if (blocks.length > 1) {
+    const widths = blocks.map((b) => b.widthM).sort((x, y) => x - y);
+    const median = widths[widths.length >> 1];
+    const floorM = Math.max(6, median * 0.4);
+    const kept = blocks.filter((b) => b.widthM >= floorM);
+    if (kept.length > 0) {
+      blocks.length = 0;
+      blocks.push(...kept);
+    }
+  }
   // A stand with no detectable aisles is still one block, not none.
   if (blocks.length === 0) blocks.push({ u0: 0, u1: 1, centerU: 0.5, widthM });
 
@@ -405,21 +523,57 @@ export function buildStandFrame(map: SeatMap, stand: 0 | 1 | 2 | 3, roofRise = 9
   tiers.sort((a, b) => a.v0 - b.v0);
   if (tiers.length === 0) tiers.push({ v0: 0, v1: 1, slopeM: 0 });
 
+  const widthAt = (a0: number, a1: number, heightV: number): number => {
+    const lo = Math.min(a0, a1);
+    const hi = Math.max(a0, a1);
+    let len = 0;
+    let prev = pointAt(lo, heightV);
+    const steps = 48;
+    for (let k = 1; k <= steps; k++) {
+      const p = pointAt(lo + ((hi - lo) * k) / steps, heightV);
+      len += Math.hypot(p.x - prev.x, p.y - prev.y, p.z - prev.z);
+      prev = p;
+    }
+    return len;
+  };
+
+  // Thirty-two steps: fine enough to follow the bend where a two-tier stand
+  // changes rake at the walkway, coarse enough not to start resolving
+  // individual seats — which is where the measurement stops converging.
+  const RAKE_STEPS = 32;
+  const rakeAt = (alongU: number, v0: number, v1: number): number => {
+    let len = 0;
+    let p = pointAt(alongU, v0);
+    let pr = Math.hypot(p.x, p.z);
+    for (let k = 1; k <= RAKE_STEPS; k++) {
+      const q = pointAt(alongU, v0 + ((v1 - v0) * k) / RAKE_STEPS);
+      const qr = Math.hypot(q.x, q.z);
+      len += Math.hypot(qr - pr, q.y - p.y);
+      p = q;
+      pr = qr;
+    }
+    return len;
+  };
+  const RAKE_SAMPLES = 7;
+  const rakeBuf = new Float64Array(RAKE_SAMPLES);
+  const slopeAt = (a0: number, a1: number, v0: number, v1: number): number => {
+    const lo = Math.min(a0, a1);
+    const hi = Math.max(a0, a1);
+    for (let k = 0; k < RAKE_SAMPLES; k++) {
+      rakeBuf[k] = rakeAt(lo + ((hi - lo) * k) / (RAKE_SAMPLES - 1), v0, v1);
+    }
+    rakeBuf.sort();
+    return Math.max(0.5, rakeBuf[RAKE_SAMPLES >> 1]);
+  };
+
   const frame: StandFrame = {
     stand, widthM, heightM, slopeM, minY, maxY, railY, roofY, ok: true,
-    pointAt, normalAt, surfaceGrid, blocks, tiers,
+    pointAt, normalAt, surfaceGrid, blocks, tiers, widthAt, slopeAt,
   };
-  // Each tier's slope length, walked on the finished frame.
-  for (const t of tiers) {
-    let len = 0;
-    let q = pointAt(0.5, t.v0);
-    for (let k = 1; k <= 12; k++) {
-      const r = pointAt(0.5, t.v0 + ((t.v1 - t.v0) * k) / 12);
-      len += Math.hypot(r.x - q.x, r.y - q.y, r.z - q.z);
-      q = r;
-    }
-    t.slopeM = Math.max(0.5, len);
-  }
+  // The stand's own rake, on the same convergent measure everything else uses.
+  frame.slopeM = slopeAt(0, 1, 0, 1);
+  // Each tier's rake, measured the same way.
+  for (const t of tiers) t.slopeM = slopeAt(0, 1, t.v0, t.v1);
   return frame;
 }
 

@@ -35,7 +35,8 @@
     "probe:imageux": "tsx scripts/image-ux.mts",
     "audit:editor": "tsx scripts/editor-audit.mts",
     "shots:banner": "tsx scripts/banner-shots.mts",
-    "probe:banner": "tsx scripts/banner-physics.mts"
+    "probe:banner": "tsx scripts/banner-physics.mts",
+    "sweep:banner": "tsx scripts/banner-sweep.mts"
   },
   "dependencies": {
     "@fastify/helmet": "^13.0.2",

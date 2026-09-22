@@ -1,0 +1,33 @@
+Banners rebuild — five files to delete in C:\Users\PCD\Desktop\tifo-maker
+
+I could not delete them from here: the Linux workspace on your PC did not
+start this session, so I could only write files, not remove them. They all
+reference modules that no longer exist, so `npm run build` will fail until
+they are gone.
+
+PowerShell, from the repo root:
+
+    Remove-Item scripts\banner-physics.mts
+    Remove-Item src\core\bannerMigrate.ts
+    Remove-Item src\render\simulator\bannerFit.ts
+    Remove-Item src\render\simulator\cloth.ts
+    Remove-Item src\render\simulator\standHeightfield.ts
+
+Or, if you prefer git to do it:
+
+    git rm scripts/banner-physics.mts src/core/bannerMigrate.ts src/render/simulator/bannerFit.ts src/render/simulator/cloth.ts src/render/simulator/standHeightfield.ts
+
+What they were:
+
+    cloth.ts              1,057 lines   the XPBD cloth solver
+    standHeightfield.ts     220 lines   the baked collider it checked against
+    bannerFit.ts            208 lines   sizing against a free position
+    bannerMigrate.ts         90 lines   the retired Banner Studio's importer
+    banner-physics.mts                  the old solver's test harness
+
+Then:
+
+    npm run build          # tsc + vite
+    npm run verify
+    npm run sweep:banner   # 26,964 configurations, about two minutes
+    npm run shots:banner   # 17 frames into preview-out/banners
