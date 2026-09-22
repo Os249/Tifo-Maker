@@ -98,7 +98,7 @@ const COMMUNITY: StadiumEntry[] = [
       facade: { style: 'cladding' },
       lighting: { style: 'roof-rim' },
     },
-    meta: { name: 'Grand National Bowl', source: 'community', country: 'International', capacity: 80000, type: 'Two-tier', inspiredBy: 'a large national stadium', tags: ['large', 'national', 'two-tier'] },
+    meta: { name: 'Grand National Bowl', source: 'builtin', country: 'International', capacity: 80000, type: 'Two-tier', inspiredBy: 'a large national stadium', tags: ['large', 'national', 'two-tier'] },
   },
   {
     id: 'community-steep-cauldron-55k',
@@ -119,7 +119,7 @@ const COMMUNITY: StadiumEntry[] = [
       facade: { style: 'concrete' },
       lighting: { style: 'roof-rim', kelvin: 5200 },
     },
-    meta: { name: 'Steep Cauldron', source: 'community', country: 'Europe', capacity: 55000, type: 'Two-tier', inspiredBy: 'a steep atmospheric club ground', tags: ['steep', 'atmosphere', 'compact'] },
+    meta: { name: 'Steep Cauldron', source: 'builtin', country: 'Europe', capacity: 55000, type: 'Two-tier', inspiredBy: 'a steep atmospheric club ground', tags: ['steep', 'atmosphere', 'compact'] },
   },
   {
     id: 'community-compact-wall-30k',
@@ -135,7 +135,7 @@ const COMMUNITY: StadiumEntry[] = [
       facade: { style: 'brick' },
       lighting: { style: 'corner-masts', kelvin: 4200 },
     },
-    meta: { name: 'Compact Wall', source: 'community', country: 'Europe', capacity: 30000, type: 'Single-tier', inspiredBy: 'a single-tier terrace wall', tags: ['single-tier', 'wall', 'compact'] },
+    meta: { name: 'Compact Wall', source: 'builtin', country: 'Europe', capacity: 30000, type: 'Single-tier', inspiredBy: 'a single-tier terrace wall', tags: ['single-tier', 'wall', 'compact'] },
   },
   {
     id: 'community-desert-arena-68k',
@@ -155,7 +155,7 @@ const COMMUNITY: StadiumEntry[] = [
       facade: { style: 'membrane' },
       lighting: { style: 'roof-rim' },
     },
-    meta: { name: 'Desert Arena', source: 'community', country: 'Middle East', capacity: 68000, type: 'Two-tier', inspiredBy: 'a modern desert-region arena', tags: ['modern', 'two-tier', 'large'] },
+    meta: { name: 'Desert Arena', source: 'builtin', country: 'Middle East', capacity: 68000, type: 'Two-tier', inspiredBy: 'a modern desert-region arena', tags: ['modern', 'two-tier', 'large'] },
   },
   {
     id: 'community-roaring-terraces-48k',
@@ -174,7 +174,7 @@ const COMMUNITY: StadiumEntry[] = [
       facade: { style: 'concrete' },
       lighting: { style: 'corner-masts', kelvin: 4400 },
     },
-    meta: { name: 'Roaring Terraces', source: 'community', country: 'South America', capacity: 48000, type: 'Single-tier', inspiredBy: 'a single-tier terraced ground', tags: ['single-tier', 'steep', 'atmosphere'] },
+    meta: { name: 'Roaring Terraces', source: 'builtin', country: 'South America', capacity: 48000, type: 'Single-tier', inspiredBy: 'a single-tier terraced ground', tags: ['single-tier', 'steep', 'atmosphere'] },
   },
   {
     id: 'community-cauldron-dome-62k',
@@ -194,7 +194,7 @@ const COMMUNITY: StadiumEntry[] = [
       facade: { style: 'cladding' },
       lighting: { style: 'roof-rim' },
     },
-    meta: { name: 'Cauldron Dome', source: 'community', country: 'Europe', capacity: 62000, type: 'Bowl', inspiredBy: 'a steep three-tier cauldron', tags: ['steep', 'three-tier', 'enclosed', 'atmosphere'] },
+    meta: { name: 'Cauldron Dome', source: 'builtin', country: 'Europe', capacity: 62000, type: 'Bowl', inspiredBy: 'a steep three-tier cauldron', tags: ['steep', 'three-tier', 'enclosed', 'atmosphere'] },
   },
   {
     id: 'community-wide-oval-72k',
@@ -214,7 +214,7 @@ const COMMUNITY: StadiumEntry[] = [
       facade: { style: 'truss' },
       lighting: { style: 'corner-masts', kelvin: 4600 },
     },
-    meta: { name: 'Wide Athletics Oval', source: 'community', country: 'International', capacity: 72000, type: 'Oval', inspiredBy: 'a wide running-track oval', tags: ['oval', 'athletics', 'two-tier', 'large'] },
+    meta: { name: 'Wide Athletics Oval', source: 'builtin', country: 'International', capacity: 72000, type: 'Oval', inspiredBy: 'a wide running-track oval', tags: ['oval', 'athletics', 'two-tier', 'large'] },
   },
   {
     // Tribute to King Abdullah Sports City (Alinma Stadium), Jeddah - "The Shining Jewel".
@@ -239,7 +239,7 @@ const COMMUNITY: StadiumEntry[] = [
       roof: { coverage: 'none' },
       lighting: { style: 'roof-rim' },
     },
-    meta: { name: 'The Jewel of Jeddah', source: 'community', country: 'Middle East', capacity: 62241, type: 'Bowl', inspiredBy: 'King Abdullah Sports City (Alinma Stadium), Jeddah - nicknamed "The Shining Jewel"', tags: ['jewel', 'jeddah', 'saudi', 'three-tier', 'circular', 'bowl', 'large', 'world-cup-2034'] },
+    meta: { name: 'The Jewel of Jeddah', source: 'builtin', country: 'Middle East', capacity: 62241, type: 'Bowl', inspiredBy: 'King Abdullah Sports City (Alinma Stadium), Jeddah - nicknamed "The Shining Jewel"', tags: ['jewel', 'jeddah', 'saudi', 'three-tier', 'circular', 'bowl', 'large', 'world-cup-2034'] },
   },
   {
     // Tribute to Al-Awwal Park (King Saud University Stadium), Riyadh - Al-Nassr's
@@ -263,7 +263,7 @@ const COMMUNITY: StadiumEntry[] = [
       roof: { coverage: 'none' },
       lighting: { style: 'corner-masts', kelvin: 5000 },
     },
-    meta: { name: 'Al-Awwal Park (Riyadh)', source: 'community', country: 'Middle East', capacity: 25000, type: 'Two-tier', inspiredBy: 'Al-Awwal Park (King Saud University Stadium), Riyadh - home of Al-Nassr', tags: ['al-nassr', 'riyadh', 'saudi', 'two-tier', 'gold', 'open'] },
+    meta: { name: 'Al-Awwal Park (Riyadh)', source: 'builtin', country: 'Middle East', capacity: 25000, type: 'Two-tier', inspiredBy: 'Al-Awwal Park (King Saud University Stadium), Riyadh - home of Al-Nassr', tags: ['al-nassr', 'riyadh', 'saudi', 'two-tier', 'gold', 'open'] },
   },
   {
     // Tribute to Kingdom Arena, Riyadh - Al-Hilal's fully covered indoor arena, the
@@ -292,7 +292,7 @@ const COMMUNITY: StadiumEntry[] = [
       roof: { coverage: 'none' },
       lighting: { style: 'roof-rim' },
     },
-    meta: { name: 'Kingdom Arena (Riyadh)', source: 'community', country: 'Middle East', capacity: 28000, type: 'Arena', inspiredBy: "Kingdom Arena, Riyadh - Al-Hilal's fully covered indoor arena", tags: ['al-hilal', 'riyadh', 'saudi', 'arena', 'covered', 'indoor'] },
+    meta: { name: 'Kingdom Arena (Riyadh)', source: 'builtin', country: 'Middle East', capacity: 28000, type: 'Arena', inspiredBy: "Kingdom Arena, Riyadh - Al-Hilal's fully covered indoor arena", tags: ['al-hilal', 'riyadh', 'saudi', 'arena', 'covered', 'indoor'] },
   },
 ];
 
@@ -317,6 +317,17 @@ export function registerCustomStadiums(entries: StadiumEntry[]): void {
 }
 
 /** Replace catalog entries fetched from the server's approved-community endpoint. */
+/**
+ * Replace the server-fetched community stadiums.
+ *
+ * Note what is NOT community: the templates hard-coded above. They ship in the
+ * bundle and we wrote them, and they were tagged `community` only because that
+ * tag was doubling as "show the non-affiliation disclaimer". It does not any
+ * more — the disclaimer follows `inspiredBy`, which is the field that actually
+ * says a template resembles a real venue — so they are `builtin`, which is what
+ * they always were. Ten of the thirteen shipped grounds were hidden behind a
+ * Community tab because of that conflation.
+ */
 export function registerServerCommunity(entries: StadiumEntry[]): void {
   for (let i = STADIUM_CATALOG.length - 1; i >= 0; i--) {
     if (STADIUM_CATALOG[i].meta.tags?.includes('community-server')) STADIUM_CATALOG.splice(i, 1);
