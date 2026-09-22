@@ -329,8 +329,26 @@ button.danger { background:rgba(240,69,90,.12); border-color:rgba(240,69,90,.5);
 button.danger:hover { background:rgba(240,69,90,.2); }
 button:focus-visible { outline:none; box-shadow:var(--ring-focus); }
 
+/* The open dropdown list is drawn by the operating system, not by this
+   stylesheet, and it takes its background from `color-scheme`. Without that
+   declaration Chrome on Windows assumed light, painted the popup WHITE, and let
+   every <option> inherit the near-white `color` set below — so the list rendered
+   as blank rows and only the highlighted item could be read. The app has no
+   light theme, so declaring dark here is unambiguous, and it fixes native date
+   pickers, scrollbars and autofill at the same time.
+
+   The explicit option colours are belt and braces for engines that honour the
+   author colour but not the scheme. */
+:root { color-scheme: dark; }
+
+option, optgroup {
+  background-color:var(--ink-3);
+  color:var(--text-1);
+}
+
 /* custom dropdown — no native arrow, brand chevron */
 select {
+  color-scheme:dark;
   -webkit-appearance:none; appearance:none;
   background:var(--ink-3); color:var(--text-1); border:1px solid var(--line-2);
   border-radius:var(--r-md); padding:9px 34px 9px 12px; font:inherit; font-size:13px; cursor:pointer;

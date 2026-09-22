@@ -18,6 +18,7 @@
  * in tests, so one stadium resolves the same way everywhere.
  */
 import { generateSeatMap } from './seatmap';
+import { LIMITS, MAX_TOTAL_ROWS, clamp, clampTemplate, outOfRange } from './templateLimits';
 import type { FacadeStyle, LightingStyle, RoofCoverage, StadiumTemplate, TierSpec } from './types';
 
 // ---- geometry --------------------------------------------------------------
@@ -134,12 +135,20 @@ const round = (n: number, d: number): number => Number(n.toFixed(d));
 export function solveRows(base: StadiumTemplate, capacity: number): { template: StadiumTemplate; built: number; iterations: number } {
   const shares = base.tiers.map((t) => t.rows);
   const total = shares.reduce((s, r) => s + r, 0) || 1;
+  // Every tier is clamped to the rows a template may legally hold. Without this
+  // the solver would happily answer a large stated capacity with 200 rows in one
+  // tier — a template no store will keep and no bowl could be built from.
   const withScale = (k: number): StadiumTemplate => ({
     ...base,
-    tiers: base.tiers.map((t, i) => ({ ...t, rows: Math.max(4, Math.round((shares[i] / total) * k)) })) as TierSpec[],
+    tiers: base.tiers.map((t, i) => ({
+      ...t,
+      rows: Math.round(clamp(Math.max(4, (shares[i] / total) * k), LIMITS.rows)),
+    })) as TierSpec[],
   });
-  // Bisect on total rows: the count rises monotonically with them.
-  let lo = 4, hi = 400, iterations = 0;
+  // Bisect on total rows: the count rises monotonically with them, and flattens
+  // once every tier is pinned at LIMITS.rows.max — which still converges, and
+  // leaves `built` short of the target so buildStadium can say the bowl is full.
+  let lo = 4, hi = MAX_TOTAL_ROWS, iterations = 0;
   let bestT = withScale(total), bestErr = Infinity, bestN = 0;
   while (lo <= hi) {
     const mid = Math.floor((lo + hi) / 2);
@@ -464,7 +473,14 @@ export function buildStadium(input: FitInput): FitResult {
     // depth or every seat lands in the concourse — the exact mistake the first
     // Amman import made, which rendered a velodrome.
     const inset = input.bandDepth ?? 22;
-    plan = { a: Math.max(20, f.a - inset), b: Math.max(15, f.b - inset), exponent: f.exponent };
+    // Floors come from LIMITS, not from a number typed here. The old floor for b
+    // was 15, four metres under what isValidTemplate accepts, so a small ground
+    // produced a template the store silently threw away.
+    plan = {
+      a: clamp(f.a - inset, LIMITS.planA),
+      b: clamp(f.b - inset, LIMITS.planB),
+      exponent: clamp(f.exponent, LIMITS.exponent),
+    };
     const p: FieldProvenance = {
       source: 'osm-footprint-inset',
       confidence: 'suggested',
@@ -480,7 +496,13 @@ export function buildStadium(input: FitInput): FitResult {
   }
 
   // ---- how many rows in total, and how they stack
-  const aisles = k.aisles ?? 28;
+  // Clamped because this number is also sectionsPerTier, whose floor is 4: a
+  // user typing "2" into the aisles box used to produce a template that failed
+  // validation on a field they had never seen.
+  const aisles = Math.round(clamp(k.aisles ?? 28, {
+    min: Math.max(LIMITS.aisleCount.min, LIMITS.sectionsPerTier.min),
+    max: Math.min(LIMITS.aisleCount.max, LIMITS.sectionsPerTier.max),
+  }));
   prov['aisles.count'] = k.aisles
     ? { source: 'user', confidence: 'given' }
     : { source: 'default', confidence: 'suggested', note: 'a stadium-sized default; imagery can count them', noteKey: 'si.note.aisles' };
@@ -589,6 +611,24 @@ export function buildStadium(input: FitInput): FitResult {
       noteKey: 'si.note.facade',
     };
   if (!k.facade) confirm.push('facade.style');
+
+  // ---- last gate: never hand back a template the store will refuse
+  // Everything above clamps as it goes, so this should be a no-op. It is here
+  // because the failure it guards against is invisible: an out-of-range template
+  // was saved, dropped on the next read, and the panel still said "Added". If a
+  // field does have to move, that is a fit which did not converge, and the user
+  // is told rather than handed a bowl that is not the one they asked for.
+  const moved = outOfRange(template);
+  if (moved.length) {
+    template = clampTemplate(template);
+    built = generateSeatMap(template).count;
+    warnings.push({
+      key: 'si.warn.clamped',
+      vars: { fields: moved.join(', ') },
+      text: `Pinned to the buildable range: ${moved.join(', ')}. The ground may be larger or smaller than a template can describe.`,
+    });
+    for (const f of moved) if (!confirm.includes(f)) confirm.push(f);
+  }
 
   return { template, provenance: prov, confirm, warnings, built, target: input.capacity };
 }

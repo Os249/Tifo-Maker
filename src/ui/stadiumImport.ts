@@ -14,15 +14,18 @@
  * panel prints the provenance and names the fields worth checking.
  */
 import { buildStadium, type FitResult } from '../core/stadiumFit';
-import { addCustomTemplate } from '../core/customStadiums';
-import { findStadiums, OSM_ATTRIBUTION, type OsmStadium } from '../net/osm';
+import { addCustomTemplate, isValidTemplate } from '../core/customStadiums';
+import { findStadiums, withGeometry, OsmError, OSM_ATTRIBUTION, type OsmStadium } from '../net/osm';
 import { readGroundPhoto } from '../net/api';
 import type { FactsVote } from '../core/photoFacts';
 import { t, tv } from './i18n';
 import type { FacadeStyle, LightingStyle, RoofCoverage } from '../core/types';
 
+// See the note on INPUT_CSS in stadiumPanel: `--bg-1` is undefined, which made
+// the whole `background` shorthand invalid and left every control here
+// transparent and without its chevron.
 const INPUT =
-  'width:100%;box-sizing:border-box;padding:6px;border:1px solid var(--line-1);border-radius:var(--r-md);background:var(--bg-1);color:var(--text-1);font:inherit;font-size:11px;';
+  'width:100%;box-sizing:border-box;padding:6px;border:1px solid var(--line-1);border-radius:var(--r-md);background-color:var(--ink-3);color:var(--text-1);font:inherit;font-size:11px;';
 
 const CONF_COLOUR: Record<string, string> = {
   measured: 'var(--ok, #2fb37a)',
@@ -61,6 +64,7 @@ export function buildStadiumImport(deps: StadiumImportDeps): HTMLElement {
   searchRow.style.cssText = 'display:flex;gap:6px;';
   const nameI = document.createElement('input');
   nameI.placeholder = t('si.searchPh');
+  nameI.title = t('si.help');
   // A hook, because the Custom tab has a second "stadium name" box right above
   // this one for hand-authoring. Matching on placeholder text picks the wrong
   // field, which is how the first screenshot run reported success while typing
@@ -73,6 +77,17 @@ export function buildStadiumImport(deps: StadiumImportDeps): HTMLElement {
   findBtn.textContent = t('si.find');
   findBtn.style.cssText = 'white-space:nowrap;';
   searchRow.append(nameI, findBtn);
+
+  // What to type. Measured, not invented: "Anfield", "Old Trafford", "Wembley
+  // Stadium" and "King Fahd International Stadium" all resolve first time;
+  // "Camp Nou" does not, because the ground is tagged "Spotify Camp Nou" and
+  // plain relevance buries it under a meadow, a hotel and a video-game shop —
+  // adding the city fixes it. That is the whole reason this line exists: the
+  // question users kept asking was what to put in the box.
+  const help = document.createElement('p');
+  help.className = 'hint';
+  help.textContent = t('si.help');
+  help.style.cssText = 'font-size:10px;color:var(--text-3);margin:6px 0 0;line-height:1.45;';
 
   const status = document.createElement('p');
   status.className = 'hint';
@@ -110,6 +125,7 @@ export function buildStadiumImport(deps: StadiumImportDeps): HTMLElement {
   aislesI.type = 'number';
   aislesI.min = '4';
   aislesI.max = '80';
+  // Below 4 the number is also sectionsPerTier, whose floor is 4.
   aislesI.placeholder = t('si.aislesPh');
   aislesI.style.cssText = INPUT;
 
@@ -231,7 +247,7 @@ export function buildStadiumImport(deps: StadiumImportDeps): HTMLElement {
   credit.textContent = OSM_ATTRIBUTION;
   credit.style.cssText = 'font-size:9px;color:var(--text-3);margin:8px 0 0;';
 
-  box.append(title, blurb, searchRow, status, resultSel, knobs, report, credit);
+  box.append(title, blurb, searchRow, help, status, resultSel, knobs, report, credit);
 
   // ---- state
   let found: OsmStadium[] = [];
@@ -251,12 +267,18 @@ export function buildStadiumImport(deps: StadiumImportDeps): HTMLElement {
     report.style.display = 'none';
     try {
       found = await findStadiums(q, inflight.signal);
+      // "Nothing by that name" is not "the service is down", and the advice for
+      // each is different. Saying OSM was down for both is what sent people
+      // round the retry loop that got reported.
       if (found.length === 0) { status.textContent = t('si.none'); return; }
       resultSel.replaceChildren();
       found.forEach((s, i) => {
         const o = document.createElement('option');
         o.value = String(i);
-        o.textContent = s.capacity ? `${s.name} — ${s.capacity.toLocaleString()}` : s.name;
+        // The town matters: several grounds share a name, and without it the
+        // only way to spot a wrong match was to build it and look at the shape.
+        const label = [s.name, s.where].filter(Boolean).join(' · ');
+        o.textContent = s.capacity ? `${label} — ${s.capacity.toLocaleString()}` : label;
         resultSel.appendChild(o);
       });
       resultSel.style.display = '';
@@ -265,7 +287,8 @@ export function buildStadiumImport(deps: StadiumImportDeps): HTMLElement {
       status.textContent = found.length === 1 ? t('si.found1') : `${found.length} ${t('si.foundN')}`;
     } catch (e) {
       if ((e as Error)?.name === 'AbortError') return;
-      status.textContent = t('si.osmDown');
+      const kind = e instanceof OsmError ? e.kind : 'offline';
+      status.textContent = t(kind === 'busy' ? 'si.osmBusy' : kind === 'timeout' ? 'si.osmSlow' : 'si.osmDown');
     } finally {
       findBtn.disabled = false;
     }
@@ -333,7 +356,13 @@ export function buildStadiumImport(deps: StadiumImportDeps): HTMLElement {
     add.style.cssText = 'width:100%;margin-top:8px;';
     add.textContent = t('si.add');
     add.addEventListener('click', () => {
-      addCustomTemplate(fit.template);
+      // addCustomTemplate returns false when the template would not survive the
+      // round trip through storage. It used to return a list, which this ignored,
+      // so a refused stadium was announced as added and then was not there.
+      if (!addCustomTemplate(fit.template)) {
+        status.textContent = t(isValidTemplate(fit.template) ? 'si.saveFull' : 'si.saveInvalid');
+        return;
+      }
       status.textContent = `${t('si.added')} “${fit.template.name}”.`;
       report.style.display = 'none';
       deps.onAdded(fit.template.id);
@@ -342,16 +371,39 @@ export function buildStadiumImport(deps: StadiumImportDeps): HTMLElement {
 
     const cite = document.createElement('p');
     cite.className = 'hint';
-    cite.textContent = `OSM way ${s.id} · ${fit.built.toLocaleString()} ${t('si.seats')}`;
+    cite.textContent = `OSM ${s.osmType} ${s.id} · ${fit.built.toLocaleString()} ${t('si.seats')}`;
     cite.style.cssText = 'font-size:9px;color:var(--text-3);margin:6px 0 0;';
     report.appendChild(cite);
 
     report.style.display = '';
   }
 
-  function build(): void {
-    const s = current();
-    if (!s) return;
+  async function build(): Promise<void> {
+    const picked = current();
+    if (!picked) return;
+    buildBtn.disabled = true;
+    let s = picked;
+    try {
+      // Nominatim leaves the outline out of a category-restricted answer, so the
+      // ground we are about to fit may have arrived without one. Fetching it by
+      // id is an index lookup and costs a fraction of a second; doing it here
+      // rather than for all twelve results means we only pay for the one the
+      // user actually chose.
+      if (s.ring.length < 6) {
+        status.textContent = t('si.fetchingShape');
+        s = await withGeometry(s, inflight?.signal);
+        found[Number(resultSel.value) || 0] = s;
+      }
+      if (s.ring.length < 6) { status.textContent = t('si.noShape'); return; }
+    } catch (e) {
+      if ((e as Error)?.name === 'AbortError') return;
+      const kind = e instanceof OsmError ? e.kind : 'offline';
+      status.textContent = t(kind === 'busy' ? 'si.osmBusy' : kind === 'timeout' ? 'si.osmSlow' : 'si.osmDown');
+      return;
+    } finally {
+      buildBtn.disabled = false;
+    }
+    status.textContent = '';
     const capacity = Number(capI.value) || undefined;
     const tiers = tierSel.value ? Number(tierSel.value) : undefined;
     const roof = roofSel.value ? (roofSel.value as RoofCoverage) : undefined;
@@ -383,7 +435,7 @@ export function buildStadiumImport(deps: StadiumImportDeps): HTMLElement {
   findBtn.addEventListener('click', () => { void search(); });
   nameI.addEventListener('keydown', (e) => { if ((e as KeyboardEvent).key === 'Enter') void search(); });
   resultSel.addEventListener('change', onPick);
-  buildBtn.addEventListener('click', build);
+  buildBtn.addEventListener('click', () => { void build(); });
 
   return box;
 }

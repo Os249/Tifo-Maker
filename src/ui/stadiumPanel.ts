@@ -37,7 +37,7 @@ import { createCustomTemplate, addCustomTemplate, removeCustomTemplate, parseImp
 import { submitStadium, fetchPendingStadiums, reviewStadium, type PendingStadium } from '../net/api';
 import { buildStadiumImport } from './stadiumImport';
 
-import { t, tl } from './i18n';
+import { t, t as tr, tl } from './i18n';
 import { escapeHtml } from '../core/escape';
 export interface StadiumPanelDeps {
   root: HTMLElement;
@@ -51,8 +51,15 @@ const DISCLAIMER =
   'Community-created template inspired by a real-world venue. This template is not affiliated with, endorsed by, or officially connected to any club, stadium owner, or venue operator.';
 
 const fmt = (n?: number): string => (typeof n === 'number' ? n.toLocaleString() : '-');
+// `--bg-1` does not exist. It is defined nowhere in the stylesheet, so
+// `background:var(--ink-2)` was an invalid value: the whole shorthand fell back
+// to its initial value, leaving these controls transparent AND wiping the
+// chevron that `select` sets via background-image. That is why the filter
+// dropdowns in the screenshot had no arrow and no fill. `--ink-3` is the token
+// the stylesheet uses for selects and inputs, and the longhand leaves the
+// chevron alone.
 const INPUT_CSS =
-  'width:100%;box-sizing:border-box;padding:6px;border:1px solid var(--line-1);border-radius:var(--r-md);background:var(--bg-1);color:var(--text-1);font:inherit;font-size:11px;';
+  'width:100%;box-sizing:border-box;padding:6px;border:1px solid var(--line-1);border-radius:var(--r-md);background-color:var(--ink-3);color:var(--text-1);font:inherit;font-size:11px;';
 
 type Tab = StadiumSource | 'favorites';
 
@@ -114,7 +121,10 @@ export function mountStadiumPanel(deps: StadiumPanelDeps): void {
     grid.style.cssText = 'display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:6px;';
     typeEl = mkSelect([['', t('sp.anyType')], ...(['Bowl', 'Single-tier', 'Two-tier', 'Oval', 'Arena'] as const).map((v) => [v, tl(v)] as [string, string])]);
     tiersEl = mkSelect([['', t('sp.anyTiers')], ['1', `1 ${t('sp.tier')}`], ['2', `2 ${t('sp.tiers')}`], ['3', `3 ${t('sp.tiers')}`]]);
-    countryEl = mkSelect([['', t('sp.anyCountry')], ...catalogCountries().map((c) => [c, tl(c)] as [string, string])]);
+    // "Any region", not "Any country": the catalogue's values are Europe,
+    // International, Middle East and South America. Labelling regions as
+    // countries is why the filter read as broken even when it worked.
+    countryEl = mkSelect([['', t('sp.anyRegion')], ...catalogCountries().map((c) => [c, tl(c)] as [string, string])]);
     capEl = mkSelect([['', t('sp.anySize')], ['20000', '20k+'], ['40000', '40k+'], ['60000', '60k+'], ['80000', '80k+']]);
     grid.append(typeEl, tiersEl, countryEl, capEl);
     filtersEl.append(searchEl, grid);
@@ -188,7 +198,7 @@ export function mountStadiumPanel(deps: StadiumPanelDeps): void {
       sel.style.cssText =
         'display:flex;justify-content:space-between;align-items:center;gap:8px;flex:1;text-align:left;' +
         'padding:8px;border:1px solid var(--line-1);border-radius:var(--r-md);color:var(--text-1);cursor:pointer;' +
-        `background:${isSel ? 'rgba(255,255,255,0.05)' : 'var(--bg-1)'};${isCurrent ? 'border-color:var(--text-2);' : ''}`;
+        `background:${isSel ? 'rgba(255,255,255,0.05)' : 'var(--ink-2)'};${isCurrent ? 'border-color:var(--text-2);' : ''}`;
       sel.innerHTML =
         `<span><b style="font-size:12px;">${escapeHtml(tl(e.id) === e.id ? e.meta.name : tl(e.id))}</b><br>` +
         `<span style="font-size:10px;color:var(--text-3);">${escapeHtml(e.meta.type ? tl(e.meta.type) : '')}${e.meta.capacity ? ' · ~' + fmt(e.meta.capacity) : ''}</span></span>` +
@@ -214,7 +224,7 @@ export function mountStadiumPanel(deps: StadiumPanelDeps): void {
       return;
     }
     const rows: [string, string][] = [
-      [t('sp.country'), e.meta.country ? tl(e.meta.country) : '-'],
+      [t('sp.region'), e.meta.country ? tl(e.meta.country) : '-'],
       [t('sp.capacity'), e.meta.capacity ? '~' + fmt(e.meta.capacity) : '-'],
       [t('sp.seats'), e.id === currentId ? fmt(map.count) : e.meta.capacity ? '~' + fmt(e.meta.capacity) : '-'],
       [t('sp.sections'), String(sectionCount(e.template))],
@@ -247,7 +257,7 @@ export function mountStadiumPanel(deps: StadiumPanelDeps): void {
       'position:fixed;inset:0;background:rgba(0,0,0,0.55);display:flex;align-items:center;justify-content:center;z-index:9999;padding:16px;';
     const box = document.createElement('div');
     box.style.cssText =
-      'max-width:380px;width:100%;background:var(--bg-1);border:1px solid var(--line-1);border-radius:var(--r-md);padding:18px;color:var(--text-1);box-shadow:0 12px 40px rgba(0,0,0,0.5);';
+      'max-width:380px;width:100%;background:var(--ink-1);border:1px solid var(--line-1);border-radius:var(--r-md);padding:18px;color:var(--text-1);box-shadow:0 12px 40px rgba(0,0,0,0.5);';
     box.innerHTML =
       `<h3 style="margin:0 0 8px;font-size:15px;">${t('sp.changeQ')} “${escapeHtml(tl(e.id) === e.id ? e.meta.name : tl(e.id))}”?</h3>` +
       `<p style="font-size:12px;color:var(--text-2);line-height:1.5;margin:0 0 14px;">${t('sp.changeMsg')}</p>` +
@@ -324,7 +334,7 @@ export function mountStadiumPanel(deps: StadiumPanelDeps): void {
   function reviewRow(s: PendingStadium): HTMLElement {
     const row = document.createElement('div');
     row.style.cssText =
-      'display:flex;align-items:center;gap:6px;padding:6px;border:1px solid var(--line-1);border-radius:var(--r-md);background:var(--bg-1);';
+      'display:flex;align-items:center;gap:6px;padding:6px;border:1px solid var(--line-1);border-radius:var(--r-md);background:var(--ink-2);';
     const tiers = Array.isArray(s.template?.tiers) ? s.template.tiers.length : 0;
     const meta = document.createElement('div');
     meta.style.cssText = 'flex:1;min-width:0;';
@@ -454,7 +464,7 @@ export function mountStadiumPanel(deps: StadiumPanelDeps): void {
     createBtn.addEventListener('click', () => {
       const t = createCustomTemplate({ name: nameI.value.trim() || 'Custom stadium', baseId: baseSel.value, size: sizeSel.value as CustomSize });
       if (!t) return;
-      addCustomTemplate(t);
+      if (!addCustomTemplate(t)) { importMsg.textContent = tr('sp.saveFailed'); return; }
       nameI.value = '';
       selectedId = t.id;
       render();
@@ -475,7 +485,7 @@ export function mountStadiumPanel(deps: StadiumPanelDeps): void {
         importMsg.textContent = t('sp.importBad');
         return;
       }
-      addCustomTemplate(parsed);
+      if (!addCustomTemplate(parsed)) { importMsg.textContent = t('sp.saveFailed'); return; }
       importI.value = '';
       importMsg.textContent = `${t('sp.imported')} “${parsed.name}”.`;
       selectedId = parsed.id;
