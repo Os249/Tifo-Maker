@@ -15,6 +15,9 @@ import { STADIUM_CATALOG } from '../src/core/stadiumCatalog';
 import { generateSeatMap } from '../src/core/seatmap';
 import {
   buildStadium,
+  outerBowlFromFootprint,
+  planFromOuter,
+  solveRows,
   fitRing,
   measureRing,
   stackTiers,
@@ -342,6 +345,103 @@ console.log('\n--- reading a photo ---------------------------------------------
   check(built.template.lighting?.style === 'corner-masts' && built.template.facade?.style === 'berm', 'so do the lights and the facade');
   check(built.provenance['lighting.style'].confidence === 'given', 'and they are recorded as told to us, not guessed');
   check(!built.confirm.includes('facade.style'), 'and no longer asked about');
+}
+
+// ---- a bowl from a building outline, on real grounds ----------------------
+//
+// The footprint path used to be checked only for its PROVENANCE — that it
+// admitted to guessing — and never for whether the bowl it drew was a stadium.
+// It was not. On Anfield's real outline it put row 0 100.3 m from the centre
+// against a touchline at 52.5 m: a 47.8 m gap, which is what shipped.
+//
+// These are the real fits and footprint areas of ten grounds, measured from
+// OpenStreetMap. They are frozen here as numbers rather than fetched, so this
+// section is offline and deterministic; scripts/verify-osm.mts is the one that
+// talks to the network.
+{
+  console.log('\n--- a bowl from a building outline ---------------------------------');
+
+  const PITCH_A = 52.5;
+  const PITCH_B = 34;
+
+  // name, fit a, fit b, fit exponent, footprint m², capacity, has a track
+  const GROUNDS: [string, number, number, number, number, number, boolean][] = [
+    ['Anfield',        122.3, 105.8, 1.60, 34193, 54074, false],
+    ['Old Trafford',   126.5, 103.8, 2.10, 41779, 75765, false],
+    ['Camp Nou',       104.5,  81.3, 2.95, 29626, 99354, false],
+    ['King Fahd Intl', 147.3, 147.2, 2.00, 67890, 58000, true ],
+    ['Amman Intl',     112.7,  91.0, 2.05, 31747, 17619, true ],
+    ['Al-Awwal Park',  105.4, 104.8, 1.60, 28370, 25000, false],
+    ['San Siro',       155.0, 154.0, 1.60, 45634, 75923, false],
+    ['Maracana',       264.0, 160.9, 1.60, 83555, 78838, false],
+    ['Allianz Arena',  130.4, 113.7, 2.85, 51494, 75021, false],
+    ['Wembley',        148.5, 144.0, 2.00, 66591, 90000, false],
+  ];
+
+  let worstCap = 0;
+  let pitchEscapes = 0;
+  let ovalFootballGrounds = 0;
+  let absurdGaps = 0;
+
+  for (const [name, fa, fb, fp, area, cap, track] of GROUNDS) {
+    const outer = outerBowlFromFootprint(area, { a: fa, b: fb, exponent: fp }, track);
+    let plan = planFromOuter(outer, 26, track);
+    let tiers = suggestTierCount(30);
+    const mk = (pl: typeof plan, rows: number, n: number) => ({
+      id: 'x', name: 'x', version: 1, plan: pl,
+      tiers: stackTiers(rows, n, 0.5),
+      aisles: { count: 28, widthMeters: 1.2 }, sectionsPerTier: 28, evenRows: true,
+      ...(track ? { track: {} } : {}),
+    });
+    let base = mk(plan, 30, tiers);
+    let solved = solveRows(base, cap);
+    for (let i = 0; i < 4; i++) {
+      const rows = solved.template.tiers.reduce((n, t) => n + t.rows, 0);
+      const band = solved.template.tiers.reduce((d, t) => d + t.rows * t.rowDepth, 0);
+      const nt = suggestTierCount(rows);
+      const np = planFromOuter(outer, band, track);
+      if (nt === tiers && Math.abs(np.a - base.plan.a) < 0.5 && Math.abs(np.b - base.plan.b) < 0.5) break;
+      tiers = nt; plan = np; base = mk(plan, rows, tiers); solved = solveRows(base, cap);
+    }
+    const t = solved.template;
+
+    // The pitch has to be INSIDE the bowl, corners included. A superellipse
+    // reads 1 on its own curve, so anything at or above 1 is a bowl drawn
+    // through the pitch.
+    const corner = (PITCH_A / t.plan.a) ** t.plan.exponent + (PITCH_B / t.plan.b) ** t.plan.exponent;
+    if (corner >= 0.95) pitchEscapes++;
+
+    const capErr = Math.abs(solved.built - cap) / cap;
+    worstCap = Math.max(worstCap, capErr);
+
+    // A football ground is a rounded rectangle. 2.0 is a pure ellipse, which is
+    // the shape the first Anfield render came out as.
+    if (!track && t.plan.exponent < 2.3) ovalFootballGrounds++;
+
+    // Row 0 more than 75 m behind the touchline, with no track to explain it.
+    if (!track && t.plan.a - PITCH_A > 75) absurdGaps++;
+
+    console.log(
+      `      ${name.padEnd(15)} ${t.plan.a.toFixed(0).padStart(3)} x ${t.plan.b.toFixed(0).padStart(3)} m  p=${t.plan.exponent.toFixed(2)}  ` +
+      `${t.tiers.length} tier${t.tiers.length === 1 ? ' ' : 's'}  setback ${(t.plan.a - PITCH_A).toFixed(0).padStart(3)}/${(t.plan.b - PITCH_B).toFixed(0).padStart(2)} m  ` +
+      `pitch ${corner.toFixed(2)}  ${solved.built.toLocaleString().padStart(7)} vs ${cap.toLocaleString()}`,
+    );
+  }
+
+  check(pitchEscapes === 0, 'the pitch stays inside the bowl on every ground', `${pitchEscapes} escaped`);
+  check(worstCap <= 0.03, 'every capacity lands within 3%', `worst ${(worstCap * 100).toFixed(1)}%`);
+  check(ovalFootballGrounds === 0, 'no football ground is drawn as a pure ellipse', `${ovalFootballGrounds} were`);
+  check(absurdGaps === 0, 'no trackless ground puts row 0 more than 75 m back', `${absurdGaps} did`);
+
+  // The specific regression: Anfield's old numbers must not come back.
+  const anfield = outerBowlFromFootprint(34193, { a: 122.3, b: 105.8, exponent: 1.6 }, false);
+  const anfieldPlan = planFromOuter(anfield, 40, false);
+  check(anfieldPlan.a - PITCH_A < 35, 'Anfield row 0 is near the pitch, not 47.8 m from it', `${(anfieldPlan.a - PITCH_A).toFixed(1)} m`);
+
+  // And an outline covering half a city block is reported rather than drawn.
+  const huge = outerBowlFromFootprint(83555, { a: 264, b: 160.9, exponent: 1.6 }, false);
+  check(planFromOuter(huge, 40, false).capped, "an oversized outline is capped and flagged");
+  check(!planFromOuter(anfield, 40, false).capped, 'a normal one is not');
 }
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILED`);
