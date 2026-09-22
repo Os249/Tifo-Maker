@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { BannerStore, StandIndex } from '../../core/banner';
-import { buildStandFrame, nearestOnFrame, type StandFrame } from './standFrame';
+import { buildSpanFrame, nearestOnFrame, type StandFrame } from './standFrame';
 import type { SeatMap } from '../../core/types';
 
 /**
@@ -37,7 +37,7 @@ export interface DragResult {
 
 export interface PlacementHelper {
   readonly object: THREE.Group;
-  frameFor(stand: StandIndex): StandFrame;
+  frameFor(stand: StandIndex, stands?: number): StandFrame;
   /** Start dragging a banner. Returns false if the pointer missed the stand. */
   begin(id: string, raycaster: THREE.Raycaster): boolean;
   /** Continue a drag. Returns the snapped stand coordinates it settled on. */
@@ -53,12 +53,15 @@ export function buildPlacement(map: SeatMap, bannerStore: BannerStore, _sections
   const object = new THREE.Group();
   object.name = 'banner-placement';
 
-  const frames = new Map<StandIndex, StandFrame>();
-  const frameFor = (stand: StandIndex): StandFrame => {
-    let f = frames.get(stand);
+  // Keyed by stand AND how many stands the window covers, because a banner
+  // that carries on round the corner is drawn against a frame twice as wide.
+  const frames = new Map<number, StandFrame>();
+  const frameFor = (stand: StandIndex, stands = 1): StandFrame => {
+    const key = stand * 8 + Math.max(1, Math.min(2, Math.round(stands)));
+    let f = frames.get(key);
     if (!f) {
-      f = buildStandFrame(map, stand);
-      frames.set(stand, f);
+      f = buildSpanFrame(map, stand, key % 8);
+      frames.set(key, f);
     }
     return f;
   };
@@ -84,12 +87,13 @@ export function buildPlacement(map: SeatMap, bannerStore: BannerStore, _sections
 
   let dragId: string | null = null;
   let dragStand: StandIndex = 1;
+  let dragStands = 1;
   let grabAlong = 0;
   let grabUp = 0;
 
-  function fitProxyTo(stand: StandIndex): void {
-    const f = frameFor(stand);
-    const g = f.surfaceGrid(40, 14);
+  function fitProxyTo(stand: StandIndex, stands = 1): void {
+    const f = frameFor(stand, stands);
+    const g = f.surfaceGrid(40 * stands, 14);
     proxyGeo.setAttribute('position', new THREE.BufferAttribute(g.positions, 3));
     proxyGeo.setIndex(new THREE.BufferAttribute(g.indices, 1));
     proxyGeo.computeBoundingSphere();
@@ -144,10 +148,11 @@ export function buildPlacement(map: SeatMap, bannerStore: BannerStore, _sections
       const doc = bannerStore.get(id);
       if (!doc) return false;
       dragStand = doc.slot.stand;
-      fitProxyTo(dragStand);
+      dragStands = doc.slot.stands;
+      fitProxyTo(dragStand, dragStands);
       const hit = raycaster.intersectObject(proxy, false)[0];
       if (!hit) return false;
-      nearestOnFrame(frameFor(dragStand), hit.point.x, hit.point.y, hit.point.z);
+      nearestOnFrame(frameFor(dragStand, dragStands), hit.point.x, hit.point.y, hit.point.z);
       // No grab offset. A banner is on a run of blocks, so dragging it is
       // choosing blocks rather than sliding a sheet: the block under the
       // pointer is the block you meant, and an offset would mean the banner
@@ -161,7 +166,7 @@ export function buildPlacement(map: SeatMap, bannerStore: BannerStore, _sections
       if (!dragId) return null;
       const hit = raycaster.intersectObject(proxy, false)[0];
       if (!hit) return null;
-      const at = nearestOnFrame(frameFor(dragStand), hit.point.x, hit.point.y, hit.point.z);
+      const at = nearestOnFrame(frameFor(dragStand, dragStands), hit.point.x, hit.point.y, hit.point.z);
       const raw = { alongU: at.alongU + grabAlong, heightV: at.heightV + grabUp };
       const doc = bannerStore.get(dragId);
       if (!doc) return null;

@@ -436,6 +436,9 @@ const MDS_T: Record<string, { en: string; ar: string }> = {
   playIt: { en: 'Play the reveal', ar: 'شغّل الكشف' },
   scrub: { en: 'Scrub', ar: 'تقديم' },
   onStand: { en: 'Stand', ar: 'المدرج' },
+  acrossStands: { en: 'Across', ar: 'الامتداد' },
+  acrossOne: { en: 'This stand', ar: 'هذا المدرج' },
+  acrossTwo: { en: 'Two stands, round the corner', ar: 'مدرجان، حول الزاوية' },
   firstBlock: { en: 'First block', ar: 'القطاع الأول' },
   howManyBlocks: { en: 'How many', ar: 'عدد القطاعات' },
   whichTier: { en: 'Tier', ar: 'الطابق' },
@@ -840,6 +843,7 @@ export function openMatchDaySimulator(
   // own aisles, a banner covers a run of them, and there is nothing in
   // between to land on — which is why a banner can no longer end up
   // straddling an aisle with a corner hanging into the sky.
+  const bnAcross = sel();
   const bnBlock = sel();
   const bnSpan = sel();
   const bnTier = sel();
@@ -856,6 +860,7 @@ export function openMatchDaySimulator(
     field(L('scrub'), bnScrub),
     divider(),
     field(L('onStand'), bnStand),
+    field(L('acrossStands'), bnAcross),
     field(L('firstBlock'), bnBlock),
     field(L('howManyBlocks'), bnSpan),
     field(L('whichTier'), bnTier),
@@ -1089,14 +1094,18 @@ export function openMatchDaySimulator(
     const off = !a;
     for (const el of [bnLook, bnPlay, bnCentre] as HTMLButtonElement[]) el.disabled = off;
     for (const el of [bnScrub, bnWind, bnShow] as HTMLInputElement[]) el.disabled = off;
-    for (const el of [bnStand, bnBlock, bnSpan, bnTier] as HTMLSelectElement[]) el.disabled = off;
+    for (const el of [bnStand, bnAcross, bnBlock, bnSpan, bnTier] as HTMLSelectElement[]) el.disabled = off;
     if (!a) return;
     // Every one of these assignments fires `input`/`change` in some browsers,
     // which would write the value straight back into the store mid-drag. The
     // flag is what keeps a refresh from becoming an edit.
     bnSyncing = true;
     bnStand.value = String(a.slot.stand);
-    const shape = sim.standSlots(a.slot.stand, a.id);
+    bnAcross.replaceChildren();
+    opt(bnAcross, '1', L('acrossOne'), false);
+    opt(bnAcross, '2', L('acrossTwo'), false);
+    bnAcross.value = String(a.slot.stands);
+    const shape = sim.standSlots(a.slot.stand, a.id, a.slot.stands);
     const nb = Math.max(1, shape.blocks);
     // Only the runs that actually make it bigger — see `maxUsefulSpan`.
     const nSpan = Math.max(1, Math.min(nb, shape.maxSpan));
@@ -1539,6 +1548,12 @@ export function openMatchDaySimulator(
     if (id) sim.setBannerProgress(id, Number(bnScrub.value) / 100);
   });
   bnStand.addEventListener('change', () => bnEdit(() => bannerStore?.patchSlot({ stand: (Number(bnStand.value) || 1) as 0 | 1 | 2 | 3 })));
+  bnAcross.addEventListener('change', () => bnEdit(() => bannerStore?.patchSlot({
+    stands: Math.max(1, Number(bnAcross.value) || 1),
+    // The block numbering changes with the window, so a run pinned to a block
+    // index would jump somewhere arbitrary. Centred is the honest reset.
+    blockFrom: -1,
+  })));
   bnBlock.addEventListener('change', () => bnEdit(() => bannerStore?.patchSlot({ blockFrom: Number(bnBlock.value) })));
   bnSpan.addEventListener('change', () => bnEdit(() => bannerStore?.patchSlot({ blockSpan: Math.max(1, Number(bnSpan.value)) })));
   bnTier.addEventListener('change', () => bnEdit(() => bannerStore?.patchSlot({ tier: Number(bnTier.value) })));

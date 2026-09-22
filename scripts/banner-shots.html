@@ -36,7 +36,7 @@
     const doc = {
       ...newBanner(spec.kind, 'shot'),
       wind: spec.wind ?? 0.25,
-      slot: { stand: spec.stand, blockFrom: spec.from, blockSpan: spec.span, tier: spec.tier },
+      slot: { stand: spec.stand, stands: spec.stands ?? 1, blockFrom: spec.from, blockSpan: spec.span, tier: spec.tier },
       // Something with a hard edge, a centre and a word on it, so a banner
       // that is stretched, mirrored or upside down is obvious rather than
       // plausible. A plain colour field looks correct in every orientation.

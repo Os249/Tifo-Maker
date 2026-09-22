@@ -24,7 +24,7 @@
  */
 import { generateSeatMap } from '../src/core/seatmap';
 import { templateById, STADIUM_CATALOG } from '../src/core/stadiumCatalog';
-import { buildStandFrame, type StandFrame } from '../src/render/simulator/standFrame';
+import { buildSpanFrame, type StandFrame } from '../src/render/simulator/standFrame';
 import {
   resolveSlot, slotsOf, crowdSupportM, hangSpan, CROWD_TOP_M, type ResolvedSlot,
 } from '../src/render/simulator/bannerSlot';
@@ -132,24 +132,31 @@ for (const gid of GROUNDS) {
   const tpl = templateById(gid);
   if (!tpl) { console.error(`no template ${gid}`); continue; }
   const map = generateSeatMap(tpl);
-  const frames: StandFrame[] = [0, 1, 2, 3].map((s) => buildStandFrame(map, s as StandIndex));
   let slots = 0;
 
+  // Every stand, and every stand paired with the one round the corner from
+  // it. A banner that crosses a stand boundary is drawn against a frame twice
+  // as wide, so it is a different set of blocks, tiers and rakes and it gets
+  // swept like any other.
   for (const stand of [0, 1, 2, 3] as StandIndex[]) {
-    const frame = frames[stand];
+   for (const stands of [1, 2]) {
+    const frame = buildSpanFrame(map, stand, stands);
     if (!frame.ok) continue;
     for (const kind of BANNER_KINDS) {
-      for (const slot of slotsOf(frame, stand)) {
+      for (const slot of slotsOf(frame, stand, stands)) {
         slots++;
         const doc: BannerDoc = { ...newBanner(kind), slot };
-        for (const wind of WINDS) {
-         for (const progress of PROGRESS) {
+        // A two-stand window doubles the space, so it is checked at the
+        // worst case only — full wind, fully revealed — rather than over the
+        // whole matrix. That keeps the sweep inside a few minutes.
+        for (const wind of stands === 1 ? WINDS : [1]) {
+         for (const progress of stands === 1 ? PROGRESS : [1]) {
           // The full battery only at rest; partway through, the checks that
           // matter for a sheet in motion.
           const full = progress === 1;
           const res = resolveSlot(doc, frame);
           const env = { frame, crowdFill: CROWD, wind, progress };
-          const where = `${gid}/${stand}/${kind}/b${slot.blockFrom}+${slot.blockSpan}/t${slot.tier}/w${wind}${full ? '' : `/p${progress}`}`;
+          const where = `${gid}/${stand}${stands > 1 ? `+${stands}` : ''}/${kind}/b${slot.blockFrom}+${slot.blockSpan}/t${slot.tier}/w${wind}${full ? '' : `/p${progress}`}`;
           checked++;
 
           buildSurface(doc, res, env, 3.0, a);
@@ -400,8 +407,9 @@ for (const gid of GROUNDS) {
         }
       }
     }
+   }
   }
-  console.log(`${gid.padEnd(32)} ${String(slots).padStart(5)} slots x ${WINDS.length} winds`);
+  console.log(`${gid.padEnd(32)} ${String(slots).padStart(5)} slots (one stand and two)`);
 }
 
 console.log(`\n${checked} configurations checked`);

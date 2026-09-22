@@ -3,7 +3,7 @@ import type { BannerDoc, BannerStore, StandIndex } from '../../core/banner';
 import { revealEase } from '../../core/banner';
 import { bannerToCanvas, onBannerImageReady } from '../bannerRender';
 import type { StandFrame } from './standFrame';
-import { resolveSlot, hangAnchorY, type ResolvedSlot } from './bannerSlot';
+import { resolveSlot, type ResolvedSlot } from './bannerSlot';
 import {
   buildSurface, buildNormals, surfaceIndices, surfaceUVs, columnsU,
   SURF_COLS, SURF_ROWS, SURF_VERTS, type SurfaceEnv,
@@ -80,6 +80,7 @@ interface Rig {
    * old rigging.
    */
   standOf: StandIndex;
+  standsOf: number;
   kindOf: BannerDoc['kind'];
   barOf: boolean;
   slot: ResolvedSlot;
@@ -91,7 +92,7 @@ interface Rig {
   pos: Float32Array;
   nrm: Float32Array;
   texKey: string;
-  ropes: THREE.LineSegments | null;
+  ropes: THREE.Mesh[];
   bar: THREE.Mesh | null;
   outline: THREE.LineSegments;
   /** Reveal progress 0..1, how long it takes, and when it started. */
@@ -119,11 +120,25 @@ function revealSeconds(doc: BannerDoc): number {
   return Math.max(0.2, doc.revealMs / 1000);
 }
 
+/** Where a flown banner's ropes are tied: the roof steel, or the back rail. */
+export interface RigPoint { x: number; y: number; z: number; onRoof: boolean }
+
 export function buildBannerRigs(
   bannerStore: BannerStore,
-  frameFor: (stand: StandIndex) => StandFrame,
+  frameFor: (stand: StandIndex, stands?: number) => StandFrame,
   /** Crowd fill 0..1, live: a banner over a full block rests on people. */
   crowdFill: () => number = () => 0,
+  /**
+   * Where the ropes go, asked of the simulator because only it knows whether
+   * this ground has a roof over that stand.
+   *
+   * The ropes used to run straight up in world Y from the sheet's corners to
+   * the roof's HEIGHT at the sheet's own position — a line to a point in
+   * empty air, which from most angles crossed the terracing and read as two
+   * stray threads over the seats. Real rigging leans back to something: the
+   * leading edge of the roof, or the rail at the back of the stand.
+   */
+  rigPointFor: ((stand: StandIndex, stands: number, alongU: number) => RigPoint) | null = null,
 ): BannerRigLayer {
   const root = new THREE.Group();
   root.name = 'banners';
@@ -171,7 +186,7 @@ export function buildBannerRigs(
   }
 
   function makeRig(doc: BannerDoc): Rig {
-    const frame = frameFor(doc.slot.stand);
+    const frame = frameFor(doc.slot.stand, doc.slot.stands);
     const slot = resolveSlot(doc, frame);
     const group = new THREE.Group();
     group.name = `banner:${doc.id}`;
@@ -227,13 +242,22 @@ export function buildBannerRigs(
 
     // Rope for anything flown, a weighted bar for anything with one in the
     // hem. Both are geometry the eye uses to read how the sheet is held.
-    let ropes: THREE.LineSegments | null = null;
+    // Rope as geometry, not as lines.
+    //
+    // A `LineSegments` rope is one pixel wide at any distance, which in a
+    // stadium reads as a scratch on the lens rather than as rigging. These
+    // are thin cylinders: they catch the floodlights, they get thinner with
+    // distance like everything else, and they can be seen to ARRIVE
+    // somewhere.
+    const ropes: THREE.Mesh[] = [];
     if (doc.kind === 'hanging') {
-      const g = new THREE.BufferGeometry();
-      g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(2 * 2 * 3), 3));
-      ropes = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color: ROPE_COLOR }));
-      ropes.frustumCulled = false;
-      group.add(ropes);
+      const ropeMat = new THREE.MeshStandardMaterial({ color: ROPE_COLOR, roughness: 0.9, metalness: 0 });
+      for (let i = 0; i < 2; i++) {
+        const m = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 1, 5), ropeMat);
+        m.frustumCulled = false;
+        ropes.push(m);
+        group.add(m);
+      }
     }
     let bar: THREE.Mesh | null = null;
     if (doc.weightBar) {
@@ -247,7 +271,7 @@ export function buildBannerRigs(
 
     root.add(group);
     const rig: Rig = {
-      doc, standOf: doc.slot.stand, kindOf: doc.kind, barOf: doc.weightBar,
+      doc, standOf: doc.slot.stand, standsOf: doc.slot.stands, kindOf: doc.kind, barOf: doc.weightBar,
       slot, frame, group, mesh, geo, mat, pos, nrm,
       texKey: textureKey(doc), ropes, bar, outline,
       prog: 1, playing: false, t0: 0, durationS: revealSeconds(doc),
@@ -275,21 +299,35 @@ export function buildBannerRigs(
 
   const vA = new THREE.Vector3();
   const vB = new THREE.Vector3();
+  const vC = new THREE.Vector3();
+  const UP = new THREE.Vector3(0, 1, 0);
+
+  /** Point a unit cylinder from `a` to `b`. */
+  function aimRope(m: THREE.Mesh, a: THREE.Vector3, b: THREE.Vector3): void {
+    const len = a.distanceTo(b);
+    m.visible = len > 0.4;
+    if (!m.visible) return;
+    m.position.copy(a).add(b).multiplyScalar(0.5);
+    m.scale.set(1, len, 1);
+    m.quaternion.setFromUnitVectors(UP, vC.copy(b).sub(a).normalize());
+  }
 
   function updateHardware(rig: Rig): void {
-    if (rig.ropes) {
-      // Two lines from the anchor up to the steel, at the sheet's top corners.
-      const anchorY = hangAnchorY(rig.frame, rig.slot);
-      const topY = Math.max(anchorY, rig.frame.roofY);
-      const p = (rig.ropes.geometry.getAttribute('position') as THREE.BufferAttribute).array as Float32Array;
-      vert(rig, 0, 0, vA);
-      vert(rig, SURF_COLS - 1, 0, vB);
-      p[0] = vA.x; p[1] = vA.y; p[2] = vA.z;
-      p[3] = vA.x; p[4] = topY; p[5] = vA.z;
-      p[6] = vB.x; p[7] = vB.y; p[8] = vB.z;
-      p[9] = vB.x; p[10] = topY; p[11] = vB.z;
-      (rig.ropes.geometry.getAttribute('position') as THREE.BufferAttribute).needsUpdate = true;
-      rig.ropes.visible = topY > anchorY + 0.2;
+    if (rig.ropes.length) {
+      // From the sheet's top corners BACK AND UP to what they are tied to.
+      const spanU = rig.slot.u1 - rig.slot.u0;
+      for (let i = 0; i < 2; i++) {
+        vert(rig, i === 0 ? 0 : SURF_COLS - 1, 0, vA);
+        const alongU = rig.slot.u0 + (i === 0 ? 0.04 : 0.96) * spanU;
+        const tie = rigPointFor
+          ? rigPointFor(rig.slot.stand, rig.doc.slot.stands, alongU)
+          : (() => {
+            const p = rig.frame.pointAt(alongU, 1);
+            return { x: p.x, y: p.y + 1.2, z: p.z, onRoof: false };
+          })();
+        vB.set(tie.x, tie.y, tie.z);
+        aimRope(rig.ropes[i], vA, vB);
+      }
     }
     if (rig.bar) {
       vert(rig, 0, SURF_ROWS - 1, vA);
@@ -336,9 +374,9 @@ export function buildBannerRigs(
     r.mat.dispose();
     (r.outline.geometry as THREE.BufferGeometry).dispose();
     (r.outline.material as THREE.Material).dispose();
-    if (r.ropes) {
-      r.ropes.geometry.dispose();
-      (r.ropes.material as THREE.Material).dispose();
+    for (const m of r.ropes) {
+      m.geometry.dispose();
+      (m.material as THREE.Material).dispose();
     }
     if (r.bar) {
       r.bar.geometry.dispose();
@@ -364,9 +402,10 @@ export function buildBannerRigs(
       // topology and the shape is recomputed from the document every frame.
       // Moving a banner across the stand is a different `slot` and the same
       // vertices — which is why changing its size cannot break it any more.
-      if (existing.standOf !== doc.slot.stand) {
-        existing.frame = frameFor(doc.slot.stand);
+      if (existing.standOf !== doc.slot.stand || existing.standsOf !== doc.slot.stands) {
+        existing.frame = frameFor(doc.slot.stand, doc.slot.stands);
         existing.standOf = doc.slot.stand;
+        existing.standsOf = doc.slot.stands;
       }
       const kindChanged = existing.kindOf !== doc.kind || existing.barOf !== doc.weightBar;
       if (kindChanged) {
@@ -470,7 +509,7 @@ export function buildBannerRigs(
       let ropes = 0;
       let bars = 0;
       for (const r of rigs.values()) {
-        if (r.ropes) ropes++;
+        if (r.ropes.length) ropes++;
         if (r.bar) bars++;
       }
       return { banners: rigs.size, ropes, nets: 0, bars, poles: 0, particles: rigs.size * SURF_VERTS };

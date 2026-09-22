@@ -162,7 +162,8 @@ export interface TierBand {
   slopeM: number;
 }
 
-const COLS = 56;
+/** Columns per quarter of the perimeter. A wider window gets proportionally more. */
+const COLS_PER_STAND = 56;
 
 /** Which stand a perimeter fraction belongs to — the app's existing convention. */
 export function standOfU(u: number): 0 | 1 | 2 | 3 {
@@ -184,9 +185,9 @@ function standU0(stand: 0 | 1 | 2 | 3): number {
   return (stand * 0.25 - 0.125 + 1) % 1;
 }
 
-/** `alongU` (0..1 across one stand) as a perimeter fraction. */
-export function alongToU(stand: 0 | 1 | 2 | 3, alongU: number): number {
-  return (standU0(stand) + clamp01(alongU) * 0.25) % 1;
+/** `alongU` (0..1 across a frame's window) as a perimeter fraction. */
+export function alongToU(stand: 0 | 1 | 2 | 3, alongU: number, stands = 1): number {
+  return (standU0(stand) + clamp01(alongU) * 0.25 * stands) % 1;
 }
 
 function clamp01(v: number): number {
@@ -219,7 +220,36 @@ interface Column {
   zs: number[];
 }
 
+/**
+ * A frame over one stand.
+ *
+ * The common case, and a thin wrapper over the general one below.
+ */
 export function buildStandFrame(map: SeatMap, stand: 0 | 1 | 2 | 3, roofRise = 9): StandFrame {
+  return buildSpanFrame(map, stand, 1, roofRise);
+}
+
+/**
+ * A frame over `stands` consecutive stands, starting at `stand`.
+ *
+ * The geometry never cared that a stand was a quarter of the bowl — every
+ * measurement in here is relative to the window it was built over. So a
+ * banner that stretches across two stands, wrapping the corner between them,
+ * is not a special case: it is this frame with a window twice as wide, and
+ * every block, tier, width, rake and normal follows.
+ *
+ * The column count scales with the window so the resolution per metre of
+ * stand is the same either way; nothing downstream can tell the difference.
+ */
+export function buildSpanFrame(
+  map: SeatMap,
+  stand: 0 | 1 | 2 | 3,
+  stands: number,
+  roofRise = 9,
+): StandFrame {
+  const span = Math.max(1, Math.min(4, Math.round(stands)));
+  const width = 0.25 * span;
+  const COLS = COLS_PER_STAND * span;
   const u0 = standU0(stand);
   const cols: Column[] = Array.from({ length: COLS }, () => ({ ys: [], xs: [], zs: [] }));
   let minY = Infinity;
@@ -230,10 +260,11 @@ export function buildStandFrame(map: SeatMap, stand: 0 | 1 | 2 | 3, roofRise = 9
   const acc = new Map<number, { x: number; y: number; z: number; n: number }>();
   for (let i = 0; i < map.count; i++) {
     const u = map.uv[i * 2];
-    if (standOfU(u) !== stand) continue;
-    // Position across this stand, 0..1. The +1 keeps the East stand — which
-    // straddles u = 0 — from wrapping into a negative index.
-    const su = (((u - u0 + 1) % 1) / 0.25);
+    // Position across the window, 0..1. The +1 keeps the East stand — which
+    // straddles u = 0 — from wrapping into a negative index. Selecting by the
+    // window rather than by `standOfU` is what lets the window be wider than
+    // one stand.
+    const su = (((u - u0 + 1) % 1) / width);
     if (su < 0 || su >= 1) continue;
     const ci = Math.min(COLS - 1, Math.floor(su * COLS));
     const y = map.pos3[i * 3 + 1];
@@ -459,12 +490,11 @@ export function buildStandFrame(map: SeatMap, stand: 0 | 1 | 2 | 3, roofRise = 9
   // unevenly laid-out ground still gets its real blocks. The binning has to be
   // fine: a 1.2 m aisle on a 133 m stand is under a percent of it, and at the
   // 56 columns the surface is built from it does not leave an empty bin.
-  const BINS = 320;
+  const BINS = 320 * span;
   const pop = new Int32Array(BINS);
   for (let i = 0; i < map.count; i++) {
     const u = map.uv[i * 2];
-    if (standOfU(u) !== stand) continue;
-    const su = (((u - u0 + 1) % 1) / 0.25);
+    const su = (((u - u0 + 1) % 1) / width);
     if (su < 0 || su >= 1) continue;
     pop[Math.min(BINS - 1, Math.floor(su * BINS))]++;
   }
@@ -536,7 +566,8 @@ export function buildStandFrame(map: SeatMap, stand: 0 | 1 | 2 | 3, roofRise = 9
   const tierHi: number[] = [];
   for (let i = 0; i < map.count; i++) {
     const u = map.uv[i * 2];
-    if (standOfU(u) !== stand) continue;
+    const su = (((u - u0 + 1) % 1) / width);
+    if (su < 0 || su >= 1) continue;
     const t = map.tierOf[i];
     const v = (map.pos3[i * 3 + 1] - minY) / Math.max(0.001, heightM);
     if (tierLo[t] === undefined || v < tierLo[t]) tierLo[t] = v;

@@ -1,32 +1,22 @@
 === SUMMARY ===
 
-Banners: the stand picker, the wind, the reveals and the fascia
+Banners: a sheet across two stands, and rope that arrives somewhere
 
 
 === DESCRIPTION ===
 
-Eight things found in the rebuild. Four were one bug each; the other four were two bugs wearing four coats.
+A BANNER CAN STRETCH ACROSS TWO STANDS NOW, carrying on round the corner into the next one — the same sheet, laced across the join.
 
-CHANGING THE STAND DID NOTHING, FOR EITHER KIND. `patchSlot` assigns to `a.slot` on the same document object, so the rig's `doc` and the document arriving in `refresh` are the SAME object — and `existing.doc.slot.stand !== doc.slot.stand` compared a number with itself and was never true. The frame was never rebuilt and the banner kept being drawn on the stand it started on. Changing the TYPE was silently broken the same way, so a banner switched to hanging kept its old rigging. The rig now holds the stand and kind it was built for as scalars, which cannot alias the thing they are compared to.
+It is not a special case, and that is the point. Every measurement in a stand frame was already relative to the window it was built over; nothing in it actually cared that the window was a quarter of the bowl. So the frame is now built over a span, the per-stand frame is a one-stand call of it, and the blocks, tiers, widths, rake and normals of a two-stand window follow with no further work. A banner picks its window with `slot.stands`, and the column count scales with it so the resolution per metre of stand is the same either way.
 
-NO MOVEMENT AT MAXIMUM WIND. Two reasons, and the second is the interesting one. The amplitude was 30 cm of travel on a forty-metre sheet, which across a pitch is about two pixels. And the material was unlit — with no shading term, moving a surface changes no pixel except at its silhouette, so the fabric was rippling the whole time with no way to see it. The sheet is lit now, carrying its artwork as emission at just over half so a tifo never goes to mud on the far side of a curve, and the wave has a third, very slow and very long term so the banner leans with the gust instead of only shimmering within itself. That is also why they read as painted boards.
+On the generic bowl one stand is eight blocks and 134 m; two are fifteen blocks and 268 m — fifteen rather than sixteen because the corner's two half blocks are one block once the join is inside the window, which is what they are on the ground.
 
-A HANGING BANNER HUNG IN THE WRONG PLACE, AND THE WRONG WAY UP. It now goes where it was asked to: over the whole stand or the lower tier it reaches the grass and is FIXED there, with air above a short one; over an upper tier it fills the gap between that tier and the one below — the fascia, the one band of a stand with nobody sitting in it. Measured across the catalogue that band is 3.3 to 3.5 m on most grounds, 0.8 m on two, and NEGATIVE on one where the tiers overlap, so a tier is offered for a flown banner only when it has 1.5 m of band, and a banner in one fills it rather than following its own proportions — a fascia is a strip, not a sheet.
+Changing the window re-centres the run rather than keeping its index: block 3 of a stand and block 3 of a pair are different places, and a banner that silently moved somewhere else would be the worse answer.
 
-The reveal used to translate the whole sheet down from the roof by a metre and a half, with the bottom edge arriving before the top: invisible as a reveal and backwards as a motion. It pays out downward from a fixed top edge now, and the easing changed with it — the damped-harmonic curve was right for a rigid mass on lines and reached 97% a third of the way through, so the banner was simply there at once. Rope paid out at a steady rate, with one small settle as the hem takes up.
+A FLOWN BANNER'S ROPES ARRIVE SOMEWHERE. They ran straight up in world Y from the sheet's corners to the roof's HEIGHT at the sheet's own position — a line to a point in empty air, which from most angles crossed the terracing and read as two stray threads over the seats. They are tied to the leading edge of the roof now, which makes them lean back the way real rigging does, and to the rail at the back of the stand on a ground with no roof over that side, because a rope to a roof that is not there is a thread ending in mid-air. The simulator answers where, since only it knows the template's roof coverage.
 
-"HOW MANY" STOPPED CHANGING THE BANNER PAST THREE BLOCKS. Past a point the stand runs out of rake before the artwork's proportions are satisfied and every wider run resolves to the identical sheet, so "four", "five" and "six" all drew the same thing. The picker asks `maxUsefulSpan` and stops where the banner stops growing, and the panel says why: a wider design would use more of the stand.
+They are also geometry rather than `LineSegments`. A line is one pixel wide at any distance, which in a stadium reads as a scratch on the lens; these are thin cylinders that catch the floodlights and get thinner with distance like everything else.
 
-Two bugs the new checks caught on the way:
+The sweep now enumerates both windows — every stand on its own, and every stand paired with the one round the corner from it. That is 86,528 configurations. The two-stand half is checked at the worst case only, full wind and fully revealed, to keep the whole run inside a few minutes.
 
-- The catenary sag is 2% of the span, which across a whole stand came to 3.6 m and dropped a fascia banner clean out of its band. Past a few tens of metres nobody hangs a sheet off two points — it is laced to the rail, and what you see between ties is a scallop. Capped at one unsupported bay.
-
-- `worstPenetration` measured a half-unrolled banner against its fully-unrolled row heights and reported 2.4 m inside the terracing while it was lying on it perfectly. Same mistake as a test that recomputes the thing it checks.
-
-Three new gates, and the first is the one whose absence let this ship:
-
-- MOVES — at full wind the fabric must travel at least 25 cm in a second. Every check here was an UPPER bound, so a banner that did not move at all passed all of them perfectly.
-- HANG — a flown banner is inside the air it was given, and fixed at the end it is meant to be fixed at.
-- Partial reveals are swept now, at 37% as well as at rest. A sheet gathered near its top edge is a configuration the finished one never visits, and the very first complaint in this whole saga was a banner going through a stand during its reveal.
-
-verify 0 · build 0 · sweep 53,928 configurations 0 failures · e2e-banner 48 passed 0 failed · 25 shots
+verify 0 · build 0 · sweep 86,528 configurations 0 failures · e2e-banner 48 passed 0 failed · 30 shots

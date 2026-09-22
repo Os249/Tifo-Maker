@@ -19,6 +19,7 @@ import { revealVisibility, type RevealMode } from './choreo';
 import { evalTimeline, type Timeline, type Cue } from './timeline';
 import { buildAssetLayer, type AssetLayer } from './assetLayer';
 import { buildBannerRigs, type BannerRigLayer } from './bannerRig';
+import { standIsRoofed } from './roof';
 import { buildPlacement, type PlacementHelper } from './bannerPlace';
 import { resolveSlot, hangCentre, maxUsefulSpan, hangableTiers } from './bannerSlot';
 import type { BannerStore, StandIndex } from '../../core/banner';
@@ -250,10 +251,22 @@ export class MatchDaySimulator {
       const place = this.placement;
       this.bannerRigs = buildBannerRigs(
         this.bannerStore,
-        (st) => place.frameFor(st),
+        (st, stands) => place.frameFor(st, stands),
         // Live, not captured: a banner that was resting on a full kop has to
         // come down onto the seats when the user empties the stand.
         () => this.crowdFill,
+        // Where a flown banner's ropes are tied. Only the simulator knows
+        // whether this ground has a roof over that stand, and a rope to a
+        // roof that is not there is two threads ending in mid-air.
+        (st, stands, alongU) => {
+          const f = place.frameFor(st, stands);
+          const covered = standIsRoofed(this.template, st);
+          // A cantilever reaches in over the top tier, so its leading edge is
+          // short of the back of the bowl — which is what makes the rope lean
+          // back instead of running straight up past the seats.
+          const p = f.pointAt(alongU, covered ? 0.84 : 1);
+          return { x: p.x, y: covered ? f.roofY : p.y + 1.4, z: p.z, onRoof: covered };
+        },
       );
       this.scene.add(this.bannerRigs.object);
       this.bindBannerPointer();
@@ -1185,10 +1198,10 @@ export class MatchDaySimulator {
    * simulator open at all.
    */
   private readonly onStandSlots = (
-    e: CustomEvent<{ stand: number; blocks?: number[]; tiers?: number[]; fit?: unknown; maxSpan?: number; tierOptions?: number[]; bannerId?: string }>,
+    e: CustomEvent<{ stand: number; blocks?: number[]; tiers?: number[]; fit?: unknown; maxSpan?: number; tierOptions?: number[]; stands?: number; bannerId?: string }>,
   ): void => {
     if (!this.placement) return;
-    const f = this.placement.frameFor(((e.detail?.stand ?? 1) % 4) as StandIndex);
+    const f = this.placement.frameFor(((e.detail?.stand ?? 1) % 4) as StandIndex, e.detail?.stands ?? 1);
     if (!f.ok) return;
     e.detail.blocks = f.blocks.map((b) => b.widthM);
     e.detail.tiers = f.tiers.map((t) => t.slopeM);
@@ -1264,7 +1277,7 @@ export class MatchDaySimulator {
     // pointer is over and the banner goes there whole — which is the point of
     // blocks, and is why it can never end up straddling an aisle with a
     // corner hanging off the end of the stand.
-    const f = this.placement.frameFor(a.slot.stand);
+    const f = this.placement.frameFor(a.slot.stand, a.slot.stands);
     const span = Math.max(1, Math.min(f.blocks.length, a.slot.blockSpan));
     let hit = 0;
     for (let i = 0; i < f.blocks.length; i++) {
@@ -1363,7 +1376,7 @@ export class MatchDaySimulator {
   focusBanner(id: string, elevationDeg?: number): boolean {
     const doc = this.bannerStore?.get(id);
     if (!doc || !this.placement) return false;
-    const f = this.placement.frameFor(doc.slot.stand);
+    const f = this.placement.frameFor(doc.slot.stand, doc.slot.stands);
     if (!f.ok) return false;
     // Aim at the middle of the sheet, not at the rail it hangs from, and
     // stand where the people it is aimed at stand: back across the pitch and
@@ -1449,10 +1462,10 @@ export class MatchDaySimulator {
    * places that exist on this ground rather than a fixed list that is wrong
    * on most of them.
    */
-  standSlots(stand: StandIndex, bannerId?: string): {
+  standSlots(stand: StandIndex, bannerId?: string, stands = 1): {
     blocks: number; tiers: number; maxSpan: number; tierOptions: number[];
   } {
-    const f = this.placement?.frameFor(((stand % 4) + 4) % 4 as StandIndex);
+    const f = this.placement?.frameFor(((stand % 4) + 4) % 4 as StandIndex, stands);
     if (!f || !f.ok) return { blocks: 1, tiers: 1, maxSpan: 1, tierOptions: [0] };
     const doc = bannerId ? this.bannerStore?.get(bannerId) : this.bannerStore?.active;
     // A flown banner can only use a tier whose fascia band is deep enough to

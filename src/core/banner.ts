@@ -109,6 +109,17 @@ export type StandIndex = 0 | 1 | 2 | 3;
  */
 export interface BannerSlot {
   stand: StandIndex;
+  /**
+   * How many stands the run may stretch across, starting at `stand`.
+   *
+   * One is a banner on a stand. Two is a banner that carries on round the
+   * corner into the next one — the same sheet, laced across the join, which
+   * is a thing crews do and the shape of a ground makes it the most striking
+   * place to do it. The geometry never cared that a stand was a quarter of
+   * the bowl, so this is not a special case: the frame is simply built over a
+   * window twice as wide, and the blocks, tiers, widths and rake follow.
+   */
+  stands: number;
   /** First block of the run. Negative means "centre the run on the stand". */
   blockFrom: number;
   /** How many consecutive blocks the run covers. At least one. */
@@ -491,6 +502,7 @@ export function newBanner(kind: BannerKind = 'stand', name = 'Banner'): BannerDo
     items: [],
     slot: {
       stand: 1,
+      stands: 1,
       // -1 means "centred". A tifo goes in the middle of the kop unless
       // someone moves it, and the number of blocks depends on the ground, so
       // a fixed index would be wrong on some of them.
@@ -867,6 +879,7 @@ export function normalise(raw: Partial<BannerDoc>): BannerDoc {
     visible: raw.visible !== false,
     slot: {
       stand: (((raw.slot?.stand ?? legacy.place?.stand ?? 1) % 4) + 4) % 4 as StandIndex,
+      stands: clamp(Math.round(raw.slot?.stands ?? 1), 1, 2),
       blockFrom: Math.round(clamp(num(raw.slot?.blockFrom, -1), -1, 63)),
       blockSpan: Math.round(clamp(num(raw.slot?.blockSpan, p.blockSpan), 1, 32)),
       tier: Math.round(clamp(num(raw.slot?.tier, p.tier), -1, 7)),

@@ -38,6 +38,8 @@ interface Spec {
   progress?: number;
   elevationDeg?: number;
   tod?: 'day' | 'night';
+  /** How many stands the run may stretch across. */
+  stands?: number;
   label?: string;
   /**
    * Also write a second frame, most of a gust later.
@@ -82,6 +84,10 @@ const SHOTS: Spec[] = [
   // fabric, and on the ground whose normal used to point downward.
   { name: 'crowd-close', ground: 'generic-bowl-60k', kind: 'stand', stand: 0, from: -1, span: 2, tier: -1, wind: 1, elevationDeg: 18, label: 'ALWAYS' },
   { name: 'wide-oval', ground: 'community-wide-oval-72k', kind: 'stand', stand: 1, from: 1, span: 4, tier: -1, wind: 1, label: 'OVAL' },
+  // The same sheet carried round the corner into the next stand.
+  { name: 'two-stands', ground: 'generic-bowl-60k', kind: 'stand', stand: 0, stands: 2, from: 5, span: 5, tier: -1, label: 'ONE CITY' },
+  { name: 'two-stands-upper', ground: 'generic-bowl-60k', kind: 'stand', stand: 1, stands: 2, from: 5, span: 6, tier: 1, label: 'ONE CITY' },
+  { name: 'two-stands-hanging', ground: 'generic-bowl-60k', kind: 'hanging', stand: 0, stands: 2, from: 5, span: 5, tier: -1, label: 'ONE CITY' },
   // Halfway through each reveal. Both pay out DOWNWARD from a fixed top
   // edge — a rolled cover down the terracing, a flown sheet off its rigging
   // — so at a third of the way through each should be a short banner hanging

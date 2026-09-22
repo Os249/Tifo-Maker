@@ -134,6 +134,7 @@ export function mountBannerView(deps: BannerViewDeps): BannerView {
   const factsEl = $<HTMLElement>('bn-facts');
 
   const standSel = $<HTMLSelectElement>('bn-stand');
+  const acrossSel = $<HTMLSelectElement>('bn-across');
   const blockSel = $<HTMLSelectElement>('bn-block');
   const spanSel = $<HTMLSelectElement>('bn-span');
   const tierSel = $<HTMLSelectElement>('bn-tier');
@@ -168,7 +169,7 @@ export function mountBannerView(deps: BannerViewDeps): BannerView {
    * falls back to the free sliders, which is the honest thing to show when
    * nothing can be said about the ground.
    */
-  const askSlots = (stand: number, bannerId?: string): {
+  const askSlots = (stand: number, bannerId?: string, stands = 1): {
     blocks?: number[];
     tiers?: number[];
     maxSpan?: number;
@@ -179,9 +180,9 @@ export function mountBannerView(deps: BannerViewDeps): BannerView {
       blockFrom: number; blockSpan: number; tier: number;
     };
   } => {
-    const ev = new CustomEvent<{ stand: number; bannerId?: string; blocks?: number[]; tiers?: number[]; fit?: unknown; maxSpan?: number; tierOptions?: number[] }>(
+    const ev = new CustomEvent<{ stand: number; bannerId?: string; blocks?: number[]; tiers?: number[]; fit?: unknown; maxSpan?: number; tierOptions?: number[]; stands?: number }>(
       'tifo:stand-slots',
-      { detail: { stand, bannerId } },
+      { detail: { stand, bannerId, stands } },
     );
     document.dispatchEvent(ev);
     return ev.detail as ReturnType<typeof askSlots>;
@@ -196,7 +197,8 @@ export function mountBannerView(deps: BannerViewDeps): BannerView {
 
   /** Fill the block, span and tier pickers from the stand the banner is on. */
   function syncSlots(doc: BannerDoc): void {
-    const slots = askSlots(doc.slot.stand, doc.id);
+    const slots = askSlots(doc.slot.stand, doc.id, doc.slot.stands);
+    if (acrossSel) acrossSel.value = String(doc.slot.stands);
     const nBlocks = slots.blocks?.length ?? 0;
     const nTiers = slots.tiers?.length ?? 0;
 
@@ -325,7 +327,7 @@ export function mountBannerView(deps: BannerViewDeps): BannerView {
     // Measured on the real ground when one is open, and on a typical block
     // when none is: a seam count is a fact about a physical sheet, so it has
     // to come from the size the blocks actually give it.
-    const live = askSlots(doc.slot.stand, doc.id).fit;
+    const live = askSlots(doc.slot.stand, doc.id, doc.slot.stands).fit;
     const f = bannerFacts(doc, live ? live.size : estimateSize(doc));
     if (factsEl) {
       factsEl.textContent = tv('bn.facts', {
@@ -411,6 +413,12 @@ export function mountBannerView(deps: BannerViewDeps): BannerView {
   bgNone?.addEventListener('change', bgChanged);
 
   standSel?.addEventListener('change', () => edit(() => bannerStore.patchSlot({ stand: Number(standSel.value) as StandIndex })));
+  // A banner that carries on round the corner into the next stand. The block
+  // numbering changes with the window, so the run is re-centred rather than
+  // left pinned to an index that now means somewhere else.
+  acrossSel?.addEventListener('change', () => {
+    edit(() => bannerStore.patchSlot({ stands: Math.max(1, Number(acrossSel.value) || 1), blockFrom: -1 }));
+  });
   blockSel?.addEventListener('change', () => {
     edit(() => bannerStore.patchSlot({ blockFrom: Number(blockSel.value) }));
   });

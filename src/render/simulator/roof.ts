@@ -259,3 +259,25 @@ export function buildRoof(
     },
   };
 }
+
+
+/**
+ * Is there a roof over this stand?
+ *
+ * Asked by the banner rig, because a flown banner's ropes have to be tied to
+ * something that exists: to the roof steel where there is a roof, and to the
+ * rail at the back of the stand where there is not. Ropes drawn to a roof
+ * that is not there are two threads ending in mid-air, which is what they
+ * looked like.
+ *
+ * The stand order is the renderer's own — 0 east, 1 north, 2 west, 3 south —
+ * the same one `coverageMask` indexes.
+ */
+export function standIsRoofed(template: { roof?: RoofSpec }, stand: 0 | 1 | 2 | 3): boolean {
+  const c = template.roof?.coverage ?? 'ring';
+  if (c === 'ring') return true;
+  if (c === 'none') return false;
+  if (c === 'sides') return stand === 0 || stand === 2;
+  if (c === 'ends') return stand === 1 || stand === 3;
+  return ['east', 'north', 'west', 'south'].indexOf(c) === stand;
+}

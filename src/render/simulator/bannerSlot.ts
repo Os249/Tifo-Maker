@@ -54,7 +54,7 @@ export interface ResolvedSlot {
  * whole space. `blockFrom` is always concrete here — never the -1 that means
  * "centred" — because this is the list of real places, not of intents.
  */
-export function slotsOf(frame: StandFrame, stand: StandIndex): BannerSlot[] {
+export function slotsOf(frame: StandFrame, stand: StandIndex, stands = 1): BannerSlot[] {
   const out: BannerSlot[] = [];
   const nb = Math.max(1, frame.blocks.length);
   const tiers: number[] = [-1];
@@ -62,7 +62,7 @@ export function slotsOf(frame: StandFrame, stand: StandIndex): BannerSlot[] {
   for (const tier of tiers) {
     for (let from = 0; from < nb; from++) {
       for (let span = 1; from + span <= nb; span++) {
-        out.push({ stand, blockFrom: from, blockSpan: span, tier });
+        out.push({ stand, stands, blockFrom: from, blockSpan: span, tier });
       }
     }
   }
