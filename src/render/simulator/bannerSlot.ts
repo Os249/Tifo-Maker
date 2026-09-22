@@ -103,18 +103,33 @@ export function slotCount(frame: StandFrame): number {
 }
 
 /**
- * How high the crowd holds a sheet off the concrete, in metres.
+ * How tall a crowd figure stands above its seat, in metres.
+ *
+ * Not a guess: the crowd is a 1.25 m billboard centred 0.62 m above the seat
+ * and scaled up to 1.10, so the tallest head reaches 1.31 m. A banner has to
+ * clear that VERTICALLY, and a margin on top for the ones nearest the camera.
+ */
+export const CROWD_TOP_M = 1.42;
+
+/**
+ * How high the crowd holds a sheet off the terracing, measured STRAIGHT UP.
  *
  * A banner drawn over a full block does not lie on the terracing — it lies on
- * the people, and stays about head height above the treads for as long as
- * they hold it. It needs a crowd to work: one person cannot hold up a sheet
- * spanning twenty rows, a packed block can, because the support is
- * continuous. So it comes in over the fill fraction rather than switching on.
+ * the people, and stays above their heads for as long as they hold it. It
+ * needs a crowd to work: one person cannot hold up a sheet spanning twenty
+ * rows, a packed block can, because the support is continuous. So it comes in
+ * over the fill fraction rather than switching on.
+ *
+ * Vertical, and that word is the fix. The surface offsets along the stand's
+ * NORMAL, which on a raked stand leans out by the angle of the rake — so
+ * 1.72 m measured along it is only about 1.4 m of height, right at the crowd's
+ * hairline, and heads came through the sheet. The surface now divides this by
+ * the normal's vertical component, so what is asked for here is what you get.
  */
 export function crowdSupportM(fill: number): number {
   const t = (fill - 0.15) / 0.45;
   const s = t <= 0 ? 0 : t >= 1 ? 1 : t * t * (3 - 2 * t);
-  return 1.72 * s;
+  return CROWD_TOP_M * s;
 }
 
 function clamp(v: number, lo: number, hi: number): number {
@@ -259,6 +274,24 @@ export function resolveSlot(doc: BannerDoc, frame: StandFrame): ResolvedSlot {
 const GROUND_Y = 0.25;
 
 /**
+ * Where on the stand a flown banner is rigged from, in `heightV`.
+ *
+ * ONE definition, because three places need it and they disagreed. The
+ * geometry anchored at the front rail while the standoff and the camera
+ * measured from the back row, so the standoff came out as the difference in
+ * radius between the two — twenty-five metres on a big bowl — and the banner
+ * was pushed that far out, hanging in the air over the pitch.
+ *
+ * A banner over the whole stand or the lowest tier is rigged at the front
+ * rail, which is the innermost thing the stand has. One in a fascia gap is
+ * rigged at the lip of the tier above it.
+ */
+export function hangAnchorV(frame: StandFrame, tier: number): number {
+  const t = frame.tiers;
+  return tier >= 1 && tier < t.length ? t[tier].v0 : 0;
+}
+
+/**
  * The air a hanging banner has to hang in, as two world heights.
  *
  * Three cases, and they are three different rigs rather than three sizes of
@@ -359,9 +392,7 @@ export function hangAnchorY(frame: StandFrame, slot: ResolvedSlot): number {
  */
 export function hangStandoff(frame: StandFrame, slot: ResolvedSlot): number {
   const u = (slot.u0 + slot.u1) / 2;
-  const t = frame.tiers;
-  const anchorV = slot.tier >= 1 && slot.tier < t.length ? t[slot.tier].v0 : 1;
-  const a = frame.pointAt(u, anchorV);
+  const a = frame.pointAt(u, hangAnchorV(frame, slot.tier));
   const rail = frame.pointAt(u, 0);
   const dr = Math.hypot(a.x, a.z) - Math.hypot(rail.x, rail.z);
   return Math.max(0.9, dr + 1.2);
@@ -380,9 +411,7 @@ export function hangStandoff(frame: StandFrame, slot: ResolvedSlot): number {
  */
 export function hangCentre(frame: StandFrame, slot: ResolvedSlot): { x: number; y: number; z: number } {
   const u = (slot.u0 + slot.u1) / 2;
-  const t = frame.tiers;
-  const anchorV = slot.tier >= 1 && slot.tier < t.length ? t[slot.tier].v0 : 1;
-  const p = frame.pointAt(u, anchorV);
+  const p = frame.pointAt(u, hangAnchorV(frame, slot.tier));
   const off = hangStandoff(frame, slot);
   return {
     x: p.x + p.ox * off,

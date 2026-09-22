@@ -87,7 +87,7 @@ export type BannerMaterial = 'solid' | 'mesh';
 /** How a banner arrives. One scalar, so every one of these can be scrubbed. */
 export type BannerReveal =
   | 'unroll' // the covered fraction advances behind a shrinking roll
-  | 'lower'  // the sheet descends from its rigging on ropes
+  | 'hoist'  // the sheet is hauled UP its ropes from a fixed hem
   | 'cut';   // already in place when the cameras find it
 
 /** Which stand: 0 East, 1 North, 2 West, 3 South — the app's existing order. */
@@ -317,7 +317,7 @@ export const KIND_PROFILE: Record<BannerKind, KindProfile> = {
    * rather than down a rake, and it has no terracing to follow.
    */
   hanging: {
-    aspect: 0.6, reveal: 'lower', blockSpan: 2, tier: -1,
+    aspect: 0.6, reveal: 'hoist', blockSpan: 2, tier: -1,
     netBacked: true, weightBar: true, fabricGsm: 110,
     occludesCrowd: false, roped: true,
   },
@@ -858,7 +858,12 @@ export function normalise(raw: Partial<BannerDoc>): BannerDoc {
     items: Array.isArray(raw.items) ? raw.items.filter(validItem) : [],
     wind: clamp(num(raw.wind, 0.25), 0, 1),
     revealMs: clamp(num(raw.revealMs, base.revealMs), 200, 180000),
-    reveal: raw.reveal === 'unroll' || raw.reveal === 'lower' || raw.reveal === 'cut' ? raw.reveal : p.reveal,
+    // 'lower' was this reveal's name while it descended from its rigging; it
+    // is hauled up from a fixed hem now, so anything stored under the old
+    // name means the new one.
+    reveal: raw.reveal === 'unroll' || raw.reveal === 'cut' ? raw.reveal
+      : raw.reveal === 'hoist' || raw.reveal === 'lower' ? 'hoist'
+      : p.reveal,
     visible: raw.visible !== false,
     slot: {
       stand: (((raw.slot?.stand ?? legacy.place?.stand ?? 1) % 4) + 4) % 4 as StandIndex,
@@ -912,20 +917,19 @@ export function revealEase(mode: BannerReveal, t: number): number {
     case 'unroll':
       return x * x * (1.7 - 0.7 * x);
     /**
-     * Rope paid out at a steady rate, then one small settle.
+     * Rope hauled at a steady rate, then one small settle.
      *
-     * It used to be a damped harmonic — right for a rigid mass being lowered
-     * on lines, and wrong now that the sheet PAYS OUT from a fixed top edge
-     * rather than translating. A damped arrival is 97% complete a third of
-     * the way through, so the banner was simply there almost at once and the
-     * rest of the reveal was a settle nobody could see.
+     * It was a damped harmonic — right for a rigid mass on lines, and wrong
+     * for a crew hauling: a damped arrival is 97% complete a third of the way
+     * through, so the banner was simply there almost at once and the rest of
+     * the reveal was a settle nobody could see.
      *
-     * A crew lowering a banner hauls at a roughly constant speed, and what
-     * moves at the end is the hem: it runs out of rope, swings, and takes up.
-     * So this is linear with a damped ripple in the last quarter, normalised
-     * so it still lands exactly on one.
+     * People on a rope pull at a roughly constant speed, and what moves at
+     * the end is the head of the banner: it runs out of rope, swings once and
+     * takes up. So this is linear with a damped ripple in the last quarter,
+     * normalised so it still lands exactly on one.
      */
-    case 'lower': {
+    case 'hoist': {
       if (x <= 0) return 0;
       if (x >= 1) return 1;
       const settle = (u: number): number =>
@@ -1018,9 +1022,9 @@ export function physicalRevealMs(kind: BannerKind, size: BannerSize): number {
     // the fall.
     case 'unroll':
       return Math.round((freeFallSeconds(H) + settleSeconds(H)) * 1000);
-    // Lowered on lines from the roof. The crew is small, the load is swinging
-    // in free air with nothing to steady it, and it takes as long as it takes.
-    case 'lower':
+    // Hauled up on lines. The crew is small, the load is swinging in free air
+    // with nothing to steady it, and it takes as long as it takes.
+    case 'hoist':
       return Math.round((H / DEPLOY_SPEED.hoist + settleSeconds(H)) * 1000);
     // Not a deployment: a banner that was rigged before anyone walked in.
     case 'cut':

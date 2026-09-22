@@ -964,7 +964,7 @@ import { buildStadium as siBuild } from '../src/core/stadiumFit';
   // shows the banner already up; one that does not finish at one leaves it
   // forever short.
   {
-    for (const mode of ['unroll', 'lower', 'cut'] as const) {
+    for (const mode of ['unroll', 'hoist', 'cut'] as const) {
       if (Math.abs(revealEase(mode, 0)) > 1e-6) throw new Error(`reveal "${mode}" does not start at 0`);
       if (Math.abs(revealEase(mode, 1) - 1) > 1e-6) throw new Error(`reveal "${mode}" does not finish at 1`);
       for (let k = 0; k <= 20; k++) {

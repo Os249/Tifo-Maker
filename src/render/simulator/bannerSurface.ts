@@ -1,6 +1,8 @@
 import type { BannerDoc } from '../../core/banner';
 import type { StandFrame } from './standFrame';
-import { crowdSupportM, hangAnchorY, hangStandoff, type ResolvedSlot } from './bannerSlot';
+import {
+  crowdSupportM, hangAnchorV, hangAnchorY, hangStandoff, type ResolvedSlot,
+} from './bannerSlot';
 
 /**
  * A banner's geometry, as a function of where it is and what time it is.
@@ -106,6 +108,12 @@ export interface SurfaceEnv {
   progress: number;
 }
 
+/**
+ * The most the terms below can add, for `maxOffsetM`.
+ *
+ * The wave's three coefficients sum to one by construction, so its extreme is
+ * exactly the amplitude.
+ */
 /**
  * How far a wave may move the fabric, in metres.
  *
@@ -276,9 +284,25 @@ function buildStand(
       const p = frame.pointAt(su, sv);
       const n = frame.normalAt(su, sv);
 
-      // Everything below is a distance OUT from the stand, and every term is
-      // positive or bounded, so the sum is always positive.
-      let off = support;
+      // Everything below is a distance OUT from the stand, along the normal.
+      //
+      // Two things have to hold and only one of them used to. The sum must be
+      // positive, so the sheet is never inside the terracing — that was true.
+      // And the sheet must clear the CROWD, which is a different question
+      // entirely, because measuring against the concrete says nothing about
+      // the people standing on it.
+      //
+      // A person is a VERTICAL segment, and what a vertical segment occupies
+      // along a tilted normal is its height times that normal's own vertical
+      // component. So that is the clearance: the full height where the
+      // terracing is shallow and the crowd stands proud of it, tailing to
+      // nothing on a face so steep that nobody is standing on it at all.
+      //
+      // The wave sits on a base raised by its own amplitude, so its trough
+      // still clears. Without that, a gust at full wind subtracts a metre and
+      // puts the sheet through the people holding it — which is exactly what
+      // it did, and it was invisible to every check here.
+      let off = Math.max(0.06, support * n.ny) + amp;
       // The hem and the two sides bow between the hands holding them.
       // A weighted hem hangs straighter than a loose one, so the bottom of
       // the sheet scallops less when there is a bar in it.
@@ -324,17 +348,21 @@ function buildHanging(
   // it at `v = 1`, the back row, hung it from the top of the terracing and
   // dropped it straight down through every seat in the stand: in the shots it
   // simply did not appear, because it was inside the building.
-  const mid = frame.pointAt((slot.u0 + slot.u1) / 2, slot.tier < 0 ? 0 : frame.tiers[slot.tier].v0);
-  // The top edge does not move. The sheet is PAID OUT from it.
+  const mid = frame.pointAt((slot.u0 + slot.u1) / 2, hangAnchorV(frame, slot.tier));
+  // The BOTTOM edge does not move. The sheet is HAULED UP from it.
   //
-  // It used to translate the whole banner down from the roof, which on a
-  // roof-hung sheet is a metre and a half of travel — invisible as a reveal,
-  // and with the bottom edge arriving before the top it read as rising rather
-  // than lowering. A banner lowered on ropes hangs from a fixed line and
-  // grows downward, so that is what this does: at zero it is a bundle at the
-  // rigging, at one it is the full drop.
+  // This is an Aufziehfahne: the banner is laid out along the front of the
+  // stand and hauled up its ropes, so it grows upward from a fixed hem. It
+  // is the rig that goes with a banner fixed on the ground, and it is the
+  // one worth watching — a sheet rising to cover a stand is the moment,
+  // where a sheet unrolling down from a line already in place is not.
+  //
+  // At zero it is a bundle along its own bottom edge; at one it is at full
+  // height. The artwork stays upright throughout, because the rows are laid
+  // out from the bottom rather than the sheet being moved.
   const topY = hangAnchorY(frame, slot);
-  const paidOut = Math.max(0.0001, Math.min(1, env.progress));
+  const hauled = Math.max(0.0001, Math.min(1, env.progress));
+  const baseY = topY - H;
   // Far enough out that the sheet hangs in front of everything below its
   // anchor, rather than through it.
   const standoff = hangStandoff(frame, slot);
@@ -348,7 +376,9 @@ function buildHanging(
       const s = (u - 0.5) * W;
       // The whole sheet hangs from the cable, so the cable's dip moves all of
       // it down — it is not a decoration on the top edge.
-      const y = topY - catenaryDip(u, W, sag) - v * H * paidOut;
+      // `v` runs 0 at the top of the artwork to 1 at its hem, so the height
+      // above the fixed hem is (1 - v), scaled by how far it has been hauled.
+      const y = baseY + (1 - v) * H * hauled - catenaryDip(u, W, sag) * hauled;
       let off = standoff;
       // A weighted hem hangs straight; without one the bottom scallops as
       // freely as the sides do.
@@ -439,5 +469,8 @@ export function surfaceUVs(): Float32Array {
  * unbounded and that is the bug.
  */
 export function maxOffsetM(wind: number): number {
-  return crowdSupportM(1) + SCALLOP_HANDS_M + WAVE_STILL_M + wind * WAVE_WIND_M + 0.05;
+  const amp = WAVE_STILL_M + wind * WAVE_WIND_M;
+  // The crowd term at its worst (a level surface), plus the amplitude twice:
+  // once to raise the base so the trough clears, once for the crest.
+  return crowdSupportM(1) + SCALLOP_HANDS_M + 2 * amp + 0.05;
 }

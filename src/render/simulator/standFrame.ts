@@ -376,26 +376,53 @@ export function buildStandFrame(map: SeatMap, stand: 0 | 1 | 2 | 3, roofRise = 9
     const dv = 0.02;
     const lo = pointAt(alongU, Math.max(0, heightV - dv));
     const hi = pointAt(alongU, Math.min(1, heightV + dv));
-    // Up the rake, and along the stand: their cross product is the face normal.
-    let ux = hi.x - lo.x;
-    let uy = hi.y - lo.y;
-    let uz = hi.z - lo.z;
-    const ul = Math.hypot(ux, uy, uz) || 1;
-    ux /= ul; uy /= ul; uz /= ul;
     const mid = pointAt(alongU, heightV);
-    // cross(upTheRake, alongTheStand), with `along` horizontal: (rx, 0, rz).
-    const nx = uy * mid.rz;
-    const ny = uz * mid.rx - ux * mid.rz;
-    const nz = -uy * mid.rx;
-    const nl = Math.hypot(nx, ny, nz) || 1;
-    let ox = nx / nl;
-    let oy = ny / nl;
-    let oz = nz / nl;
-    // Point it toward the pitch, not into the building.
-    if (ox * mid.ox + oz * mid.oz < 0) {
-      ox = -ox; oy = -oy; oz = -oz;
+
+    // Built in the vertical plane through the outward direction, rather than
+    // as a cross product that has to be flipped afterwards.
+    //
+    // The cross product was flipped by a horizontal test, which says nothing
+    // about its VERTICAL component — and on one ground in the catalogue that
+    // component came out at -0.6 for eighty of eight hundred sample points.
+    // A banner offset along a normal pointing DOWN goes down, so it sat three
+    // metres inside the seating, and no check could see it because every one
+    // of them was phrased in terms of the normal that put it there.
+    //
+    // Here it is a decomposition instead. The rake tangent has a vertical
+    // part and a part along the outward direction; the normal is that pair
+    // swapped, which is a rotation by a right angle in that plane. A vertical
+    // wall gives a horizontal normal, a flat floor gives a vertical one, and
+    // nothing in between can point into the ground.
+    const ux = hi.x - lo.x;
+    const uy = hi.y - lo.y;
+    const uz = hi.z - lo.z;
+    // How much of the rake runs along the outward direction. Negative on any
+    // real stand: going up the terracing takes you away from the pitch.
+    const outward = ux * mid.ox + uz * mid.oz;
+    let nx = mid.ox * uy;
+    let ny = -outward;
+    let nz = mid.oz * uy;
+    let nl = Math.hypot(nx, ny, nz);
+    if (nl < 1e-9) {
+      return { nx: mid.ox, ny: 0, nz: mid.oz };
     }
-    return { nx: ox, ny: oy, nz: oz };
+    nx /= nl; ny /= nl; nz /= nl;
+
+    // A surface a banner can lie on does not overhang. Where the seat map
+    // produces one — a corner where the column binning folds back on itself
+    // — the normal is tilted up until it does not, so the sheet is always
+    // laid ON the stand rather than under it.
+    const MIN_UP = 0.15;
+    if (ny < MIN_UP) {
+      ny = MIN_UP;
+      const h = Math.hypot(nx, nz) || 1;
+      const want = Math.sqrt(Math.max(0, 1 - MIN_UP * MIN_UP));
+      nx = (nx / h) * want;
+      nz = (nz / h) * want;
+      nl = Math.hypot(nx, ny, nz) || 1;
+      nx /= nl; ny /= nl; nz /= nl;
+    }
+    return { nx, ny, nz };
   };
 
   const surfaceGrid = (gc: number, gr: number): { positions: Float32Array; indices: Uint32Array } => {

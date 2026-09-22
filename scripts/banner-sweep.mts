@@ -26,7 +26,7 @@ import { generateSeatMap } from '../src/core/seatmap';
 import { templateById, STADIUM_CATALOG } from '../src/core/stadiumCatalog';
 import { buildStandFrame, type StandFrame } from '../src/render/simulator/standFrame';
 import {
-  resolveSlot, slotsOf, crowdSupportM, hangSpan, type ResolvedSlot,
+  resolveSlot, slotsOf, crowdSupportM, hangSpan, CROWD_TOP_M, type ResolvedSlot,
 } from '../src/render/simulator/bannerSlot';
 import {
   buildSurface, columnsU, maxOffsetM, SURF_VERTS, SURF_COLS, SURF_ROWS,
@@ -370,6 +370,31 @@ for (const gid of GROUNDS) {
             }
             if (worstIn > IN_STAND_MAX) fail(where, 'IN-STAND', `${worstIn.toFixed(3)} m inside`);
             if (worstOut > bound + 0.5) fail(where, 'OFFSET', `${worstOut.toFixed(2)} m out, bound ${bound.toFixed(2)} m`);
+
+            // CROWD — the sheet clears the PEOPLE, not merely the concrete.
+            //
+            // The gap every check here had. IN-STAND measures against the
+            // terracing, and a banner can be comfortably outside the
+            // terracing and still be through the chest of everyone holding
+            // it. Heads came through the fabric with every gate green.
+            //
+            // A person is a vertical segment, so what they occupy along the
+            // surface normal is their height times its vertical component —
+            // which is what the sheet has to stand off by.
+            let short = 0;
+            for (let j = 0; j < SURF_ROWS; j += 4) {
+              const frac = j / (SURF_ROWS - 1);
+              const sv = Math.max(0, Math.min(1, res.v1 + (res.vBottom - res.v1) * frac));
+              for (let i = 0; i < SURF_COLS; i += 5) {
+                const k = (j * SURF_COLS + i) * 3;
+                const p = frame.pointAt(COL_U[i], sv);
+                const nn = frame.normalAt(COL_U[i], sv);
+                const along = (a[k] - p.x) * nn.nx + (a[k + 1] - p.y) * nn.ny + (a[k + 2] - p.z) * nn.nz;
+                const need = CROWD_TOP_M * nn.ny;
+                if (need - along > short) short = need - along;
+              }
+            }
+            if (short > 0.02) fail(where, 'CROWD', `${short.toFixed(2)} m short of clearing the crowd`);
           }
          }
         }
