@@ -1,5 +1,5 @@
 import type { ToolId } from '../core/types';
-import type { BannerDoc, BannerItem, ImageItem, ShapeItem, TextItem } from '../core/banner';
+import type { BannerDoc, BannerItem, BannerSize, ImageItem, ShapeItem, TextItem } from '../core/banner';
 import { aspectOf, bannerFacts, isPlaced, makeStroke, PANEL_MAX_M, estimateSize } from '../core/banner';
 import type { BannerStore } from '../core/banner';
 import { drawBanner, hitTest, itemBounds, onBannerImageReady, strokePath } from './bannerRender';
@@ -72,6 +72,17 @@ export class BannerCanvas implements BannerCanvasHooks {
   showGuides = true;
   /** Snap placed items to the banner's own geometry. */
   snap = true;
+  /**
+   * How big this banner really is, in metres.
+   *
+   * The seams, the ruler, the legible-type band and the brush width are all
+   * facts about a physical sheet, so they have to come from the size the
+   * blocks actually give it on this ground. The view supplies that; the
+   * catalogue average is only the fallback for a surface with no stand.
+   */
+  sizeOf: (doc: BannerDoc) => BannerSize = estimateSize;
+  /** The words on the legible-type band, given its height in metres. */
+  capLabel: ((m: number) => string) | null = null;
 
   onColorPick: ((hex: string) => void) | null = null;
   onPlaceStamp: ((x: number, y: number) => void) | null = null;
@@ -160,20 +171,40 @@ export class BannerCanvas implements BannerCanvasHooks {
     if (typeof ResizeObserver === 'undefined') return;
     let w = 0;
     let h = 0;
+    let top = 0;
+    let left = 0;
     this.ro = new ResizeObserver(() => {
       const r = this.host.getBoundingClientRect();
       const nw = Math.round(r.width);
       const nh = Math.round(r.height);
       if (nw === w && nh === h) return;
       const first = w === 0 || h === 0;
+      // A jump, not a nudge: the stadium opening beside the artboard halves
+      // it, and a banner framed for the whole width hung off both sides.
+      const jump = !first && (Math.abs(nw - w) > w * 0.2 || Math.abs(nh - h) > h * 0.2);
+      // Where the box moved to on screen. The text, shape and import bars
+      // open ABOVE this canvas, which pushes its top edge down by the bar's
+      // height — and the banner, drawn from the canvas's own top, jumped
+      // down with it, then back up when the bar closed. Placing a word moved
+      // it half a bar away from where it had been clicked.
+      const dTop = first ? 0 : r.top - top;
+      const dLeft = first ? 0 : r.left - left;
       w = nw;
       h = nh;
+      top = r.top;
+      left = r.left;
       if (!nw || !nh) return; // hidden — nothing to size to
       this.resize();
-      // Refit only when arriving from nothing (first paint, or coming back from
-      // another view). A resize mid-session is not a request to re-frame.
-      if (first) this.fitToView();
-      else this.requestDraw();
+      // Refit when arriving from nothing (first paint, or coming back from
+      // another view) or when the box changed shape outright. A small resize
+      // mid-session is not a request to re-frame — and it is not a reason for
+      // the banner to move on screen either.
+      if (first || jump) this.fitToView();
+      else {
+        this.originX -= dLeft;
+        this.originY -= dTop;
+        this.requestDraw();
+      }
     });
     this.ro.observe(this.host);
   }
@@ -318,8 +349,11 @@ export class BannerCanvas implements BannerCanvasHooks {
     ctx.restore();
 
     if (doc.material === 'mesh') this.drawMeshHint(ctx, w, h);
-    if (this.showSeams) this.drawSeams(ctx, doc, w, h);
-    if (this.showGuides) this.drawGuides(ctx, doc, w, h);
+    // Guides drawn for a dark sheet vanish on a light one: pale yellow seams
+    // on white fabric were simply not there. So they take the fabric's side.
+    const ink = guideInk(doc.bg);
+    if (this.showSeams) this.drawSeams(ctx, doc, w, h, ink);
+    if (this.showGuides) this.drawGuides(ctx, doc, w, h, ink);
 
     // Fabric edge.
     ctx.strokeStyle = 'rgba(255,255,255,.34)';
@@ -381,11 +415,11 @@ export class BannerCanvas implements BannerCanvasHooks {
    * that is sewn from panels and every join is visible from the far stand. A
    * portrait whose nose lands on a seam is the classic mistake.
    */
-  private drawSeams(ctx: CanvasRenderingContext2D, doc: BannerDoc, w: number, h: number): void {
-    const panels = Math.max(1, Math.ceil(estimateSize(doc).widthM / PANEL_MAX_M - 1e-9));
+  private drawSeams(ctx: CanvasRenderingContext2D, doc: BannerDoc, w: number, h: number, ink: GuideInk): void {
+    const panels = Math.max(1, Math.ceil(this.sizeOf(doc).widthM / PANEL_MAX_M - 1e-9));
     if (panels < 2) return;
     ctx.save();
-    ctx.strokeStyle = 'rgba(255,214,102,.5)';
+    ctx.strokeStyle = ink.seam;
     ctx.lineWidth = 1;
     ctx.setLineDash([5, 5]);
     for (let k = 1; k < panels; k++) {
@@ -406,9 +440,9 @@ export class BannerCanvas implements BannerCanvasHooks {
    * D/40, and Kaiserslautern's 4 m lettering on a 40 m sheet is in that band).
    * Type drawn shorter than the band will not survive the broadcast.
    */
-  private drawGuides(ctx: CanvasRenderingContext2D, doc: BannerDoc, w: number, h: number): void {
+  private drawGuides(ctx: CanvasRenderingContext2D, doc: BannerDoc, w: number, h: number, ink: GuideInk): void {
     ctx.save();
-    ctx.strokeStyle = 'rgba(120,180,255,.28)';
+    ctx.strokeStyle = ink.third;
     ctx.lineWidth = 1;
     ctx.setLineDash([3, 6]);
     // thirds
@@ -420,25 +454,38 @@ export class BannerCanvas implements BannerCanvasHooks {
     }
     ctx.setLineDash([]);
     // centre
-    ctx.strokeStyle = 'rgba(120,180,255,.5)';
+    ctx.strokeStyle = ink.centre;
     const cx = Math.round(w / 2) + 0.5;
     const cy = Math.round(h / 2) + 0.5;
     ctx.beginPath(); ctx.moveTo(cx, 0); ctx.lineTo(cx, h); ctx.stroke();
     ctx.beginPath(); ctx.moveTo(0, cy); ctx.lineTo(w, cy); ctx.stroke();
 
     // legible cap-height band
-    const facts = bannerFacts(doc, estimateSize(doc));
+    const facts = bannerFacts(doc, this.sizeOf(doc));
     const capPx = facts.headlineCapFrac * w;
     if (capPx > 6 && capPx < h * 0.9) {
-      ctx.fillStyle = 'rgba(80,220,160,.09)';
+      ctx.fillStyle = ink.bandFill;
       ctx.fillRect(0, 0, w, capPx);
-      ctx.strokeStyle = 'rgba(80,220,160,.45)';
+      ctx.strokeStyle = ink.bandLine;
       ctx.setLineDash([4, 4]);
       ctx.beginPath();
       ctx.moveTo(0, Math.round(capPx) + 0.5);
       ctx.lineTo(w, Math.round(capPx) + 0.5);
       ctx.stroke();
       ctx.setLineDash([]);
+      // Say what it is. An unlabelled green band across the top of the sheet
+      // read as a selection, or as part of the design.
+      const label = this.capLabel?.(Math.round(facts.headlineCapM * 10) / 10);
+      if (label && capPx >= 16) {
+        ctx.font = `600 ${Math.min(12, Math.max(10, capPx * 0.34))}px system-ui, sans-serif`;
+        ctx.fillStyle = ink.bandText;
+        ctx.textBaseline = 'middle';
+        const rtl = document.documentElement.dir === 'rtl';
+        ctx.textAlign = rtl ? 'right' : 'left';
+        ctx.fillText(label, rtl ? w - 8 : 8, capPx / 2);
+        ctx.textAlign = 'start';
+        ctx.textBaseline = 'alphabetic';
+      }
     }
     ctx.restore();
   }
@@ -522,7 +569,8 @@ export class BannerCanvas implements BannerCanvasHooks {
 
   /** A metre scale along the bottom, because a banner is a physical object. */
   private drawRulers(ctx: CanvasRenderingContext2D, doc: BannerDoc): void {
-    const pxPerM = this.scale / estimateSize(doc).widthM;
+    const widthM = this.sizeOf(doc).widthM;
+    const pxPerM = this.scale / widthM;
     if (pxPerM < 1.5) return;
     // Pick a step that lands near 70 px.
     const steps = [0.1, 0.25, 0.5, 1, 2, 5, 10, 20, 50];
@@ -533,7 +581,7 @@ export class BannerCanvas implements BannerCanvasHooks {
     ctx.fillStyle = 'rgba(255,255,255,.55)';
     ctx.font = '11px ui-monospace, monospace';
     ctx.lineWidth = 1;
-    for (let m = 0; m <= estimateSize(doc).widthM + 1e-6; m += step) {
+    for (let m = 0; m <= widthM + 1e-6; m += step) {
       const x = Math.round(this.originX + m * pxPerM) + 0.5;
       if (x < -20 || x > this.cssW + 20) continue;
       ctx.beginPath();
@@ -559,7 +607,7 @@ export class BannerCanvas implements BannerCanvasHooks {
       { axis: 'x', at: 1 / 3, label: 'third' },
       { axis: 'x', at: 2 / 3, label: 'third' },
     ];
-    const panels = Math.max(1, Math.ceil(estimateSize(doc).widthM / PANEL_MAX_M - 1e-9));
+    const panels = Math.max(1, Math.ceil(this.sizeOf(doc).widthM / PANEL_MAX_M - 1e-9));
     for (let k = 1; k < panels; k++) xs.push({ axis: 'x', at: k / panels, label: 'seam' });
     const ys: Snap[] = [
       { axis: 'y', at: aspect / 2, label: 'centre' },
@@ -652,7 +700,7 @@ export class BannerCanvas implements BannerCanvasHooks {
       case 'brush':
       case 'eraser': {
         this.store.begin();
-        const item = makeStroke(this.color, this.brushM / estimateSize(doc).widthM, this.tool === 'eraser');
+        const item = makeStroke(this.color, this.brushM / this.sizeOf(doc).widthM, this.tool === 'eraser');
         item.pts.push(d.x, d.y);
         this.drawing = { item };
         this.requestDraw();
@@ -1095,6 +1143,11 @@ export class BannerCanvas implements BannerCanvasHooks {
     return it;
   }
 
+  /** CSS pixels at the current zoom, in banner units: what one arrow-key nudge is. */
+  pxToUnits(px: number): number {
+    return px / Math.max(1, this.scale);
+  }
+
   /** Centre of the current view, in banner units — where a stamp lands by default. */
   viewCentre(): { x: number; y: number } {
     return this.toDoc(this.cssW / 2, this.cssH / 2);
@@ -1118,6 +1171,42 @@ export class BannerCanvas implements BannerCanvasHooks {
 // ---------------------------------------------------------------------------
 // helpers
 // ---------------------------------------------------------------------------
+
+/** The colours the artboard's guides are drawn in, on a given fabric. */
+interface GuideInk {
+  seam: string;
+  third: string;
+  centre: string;
+  bandFill: string;
+  bandLine: string;
+  bandText: string;
+}
+const INK_ON_DARK: GuideInk = {
+  seam: 'rgba(255,214,102,.5)',
+  third: 'rgba(120,180,255,.28)',
+  centre: 'rgba(120,180,255,.5)',
+  bandFill: 'rgba(80,220,160,.09)',
+  bandLine: 'rgba(80,220,160,.45)',
+  bandText: 'rgba(120,235,185,.85)',
+};
+const INK_ON_LIGHT: GuideInk = {
+  seam: 'rgba(176,112,0,.6)',
+  third: 'rgba(24,72,150,.3)',
+  centre: 'rgba(24,72,150,.52)',
+  bandFill: 'rgba(16,150,96,.1)',
+  bandLine: 'rgba(10,122,78,.55)',
+  bandText: 'rgba(6,98,62,.92)',
+};
+function guideInk(bg: string | null): GuideInk {
+  const rgb = bg ? hexToRgb(bg) : null;
+  if (!rgb) return INK_ON_DARK; // see-through: drawn over the dark checkerboard
+  const lin = (c: number): number => {
+    const v = c / 255;
+    return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+  };
+  const y = 0.2126 * lin(rgb[0]) + 0.7152 * lin(rgb[1]) + 0.0722 * lin(rgb[2]);
+  return y > 0.36 ? INK_ON_LIGHT : INK_ON_DARK;
+}
 
 function cursorFor(h: Handle): string {
   switch (h) {

@@ -128,10 +128,61 @@ header {
    logic must never be the thing that shows it. It hides it on every tool
    change (data-panel="__menu_only__"); this outranks that inline style. */
 body.banner-view #ctx-banner { display:block !important; }
-/* Baking, mirroring and fill scope are questions about seats. In Banner view
-   they are answers to a question nobody asked. */
-body.banner-view #ctx-stadium,
+/* Baking, mirroring, fill scope, the seat brush, the card-flip reveal and the
+   card manifest are all questions about seats. In the Banner view they were
+   answers to a question nobody asked — including a second brush-size slider
+   under the banner's own, which did nothing to the banner at all. They come
+   back when a menu (Save, Animation) is opened on purpose. */
 body.banner-view #ctx-objects { display:none !important; }
+body.banner-view[data-panel-mode="design"] #ctx-stadium,
+body.banner-view[data-panel-mode="design"] #ctx-brush,
+body.banner-view[data-panel-mode="design"] #ctx-reveal,
+body.banner-view[data-panel-mode="design"] #ctx-production { display:none !important; }
+/* The seat minimap is a map of seats. */
+body.banner-view #minimap { display:none !important; }
+/* Controls in the shared tool bars that only mean anything on seats — "Height
+   18 seats", "click a stand to place" — and their banner counterparts. */
+body.banner-view .seat-only { display:none !important; }
+.bn-only { display:none; }
+body.banner-view .bn-only { display:inline; }
+/* The rail's flag lights up while a banner is the surface, without competing
+   with the tool in hand for the filled highlight. */
+.tool#banner-studio-btn.active { background:transparent; color:#9FC2F5; box-shadow:inset 0 0 0 2px var(--blue); }
+
+/* The banner beside the bowl. */
+.canvas-wrap.banner-split #banner-host { position:relative; inset:auto; flex:1 1 50%; min-width:0; height:100%; border-inline-end:2px solid var(--line-2); }
+
+/* The sheet bar: each label stays with what it labels when the bar wraps,
+   which the plain row did not do — "Fabric" ended one line and its weight
+   began the next. */
+#banner-bar .tb-field { display:inline-flex; align-items:center; gap:8px; flex-wrap:nowrap; }
+#banner-bar .tb-field > label { display:inline-flex; align-items:center; gap:6px; white-space:nowrap; }
+
+/* The panel: one column of labels, one of controls, so every row lines up
+   and a long option ("Two stands, round the corner") cannot squeeze its own
+   label down to a single letter — which is what "Across" had become. */
+#ctx-banner .bn-row { display:flex; align-items:center; gap:8px; flex-wrap:nowrap; margin:0 0 8px; }
+#ctx-banner .bn-row + .bn-row { margin-top:0; }
+#ctx-banner .bn-row > :first-child { flex:0 0 68px; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+#ctx-banner .bn-row > select { flex:1 1 0; min-width:0; width:0; }
+#ctx-banner .bn-measure { flex:1 1 auto; min-width:0; text-align:end; color:var(--text-1); line-height:1.35; }
+#ctx-banner .bn-slide { flex-wrap:nowrap; }
+#ctx-banner .bn-slide > input[type="range"] { min-width:0; }
+#ctx-banner .bn-block { padding-bottom:12px; margin-bottom:14px; border-bottom:1px solid var(--line-1); }
+#ctx-banner .bn-block[hidden] { display:none; }
+#ctx-banner .bn-item-chips .chip { display:inline-flex; align-items:center; gap:5px; padding:7px 11px; }
+#ctx-banner .bn-item-chips .chip:disabled { opacity:.45; cursor:default; }
+#ctx-banner .chip.bn-danger { color:#f3a39c; }
+#ctx-banner .chip.bn-danger:hover { border-color:#e5484d; color:#ffd1cc; }
+#ctx-banner .bn-beside { width:100%; margin:2px 0 10px; display:flex; align-items:center; justify-content:center; gap:7px; font-weight:600; }
+/* A phone has no room for two surfaces side by side; its Stadium tab is one tap away. */
+body.m-shell #ctx-banner .bn-beside { display:none; }
+#ctx-banner .bn-beside.active { border-color:var(--blue); color:#9FC2F5; background:rgba(28,111,224,.16); }
+#ctx-banner .bn-secs-out { min-width:46px; text-align:end; white-space:nowrap; }
+#ctx-banner .bn-subnote { font-size:11px; color:var(--text-3); margin:0 0 6px; display:flex; flex-wrap:wrap; gap:6px; align-items:baseline; }
+#ctx-banner .bn-subnote[hidden] { display:none; }
+#ctx-banner .bn-link { background:none; border:none; padding:0; min-height:0; font:inherit; font-size:11px; color:#9FC2F5; cursor:pointer; text-decoration:underline; text-underline-offset:2px; }
+#ctx-banner #bn-secs-block[hidden] { display:none; }
 .bn-notes { margin-top:10px; display:flex; flex-direction:column; gap:6px; }
 .bn-note {
   margin:0; font-size:11.5px; line-height:1.45; color:var(--text-3);
@@ -139,6 +190,9 @@ body.banner-view #ctx-objects { display:none !important; }
 }
 .bn-note.warn { color:var(--text-2); border-inline-start-color:#e0a13a; }
 #bn-facts { max-width:none; }
+#banner-bar #bn-name { background:var(--ink-2); border:1px solid var(--blue); border-radius:var(--r-md); color:var(--text-1); padding:8px 12px; font:inherit; font-size:13px; }
+#banner-bar #bn-name[hidden] { display:none; }
+#ctx-banner .bn-hidden { padding:8px 10px; border-radius:var(--r-md); background:rgba(224,161,58,.12); color:var(--text-2); margin-bottom:10px; }
 /* split view: 2D and 3D side by side, both live */
 .canvas-wrap.split { display:flex; }
 .canvas-wrap.split #canvas-host,

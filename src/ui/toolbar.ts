@@ -131,6 +131,9 @@ export function mountToolbar(
   };
 
   const applyContextPanel = (tool: ToolId): void => {
+    // Exposed for the stylesheet, which hides the seat-only sections in the
+    // Banner view while the panel is showing tools rather than a menu.
+    document.body.dataset.panelMode = panelMode;
     for (const sec of panelSections) {
       let show: boolean;
       if (panelMode === 'design') {
@@ -1890,12 +1893,53 @@ export function mountToolbar(
   // Keyboard shortcuts
   window.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
+      if (bannerActive() && bannerHost.current?.escape()) return;
       if (editor.tool === 'import') cancelImport();
       else if (editor.tool === 'text') setTool('brush');
       return;
     }
     const tag = (e.target as HTMLElement | null)?.tagName;
     if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
+    // In the Banner view the keys belong to the banner.
+    //
+    // They did not: Ctrl+Z undid the SEAT design — invisible behind the
+    // artboard, so a stroke disappeared from a surface nobody was looking at
+    // and nothing on screen changed — and Delete removed the seat editor's
+    // selection instead of the item picked on the banner.
+    if (bannerActive()) {
+      const b = bannerHost.current;
+      const mod = e.ctrlKey || e.metaKey;
+      const key = e.key.toLowerCase();
+      if (b && mod && (key === 'z' || key === 'y')) {
+        e.preventDefault();
+        if (key === 'y' || e.shiftKey) b.redo();
+        else b.undo();
+        refreshHistory();
+        return;
+      }
+      if (b && mod && key === 'd') {
+        e.preventDefault();
+        b.duplicateSelected();
+        refreshHistory();
+        return;
+      }
+      if (b && (key === 'delete' || key === 'backspace')) {
+        if (b.deleteSelected()) {
+          e.preventDefault();
+          refreshHistory();
+        }
+        return;
+      }
+      if (b && key.startsWith('arrow')) {
+        const step = e.shiftKey ? 10 : 1;
+        const dx = key === 'arrowleft' ? -step : key === 'arrowright' ? step : 0;
+        const dy = key === 'arrowup' ? -step : key === 'arrowdown' ? step : 0;
+        if (b.nudge(dx, dy)) e.preventDefault();
+        return;
+      }
+      // Mirror is a seat-editor idea; a banner has no stand axis to mirror on.
+      if (key === 'm') return;
+    }
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
       e.preventDefault();
       if (e.shiftKey) store.redo();

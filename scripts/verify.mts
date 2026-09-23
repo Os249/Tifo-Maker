@@ -427,6 +427,23 @@ import { buildStadium as siBuild } from '../src/core/stadiumFit';
   if (!hasGuess || !hasSolid) throw new Error('provenance is not distinguishing guesses from measurements');
 }
 
+// --- Every shipped stadium has a name in both languages ---------------------
+// The status bar and the share page print tl(template.id), and tl falls back to
+// what it was given — so a template with no label printed its raw id
+// ("community-jewel-jeddah-62k") at the user in English as well as Arabic. Ten
+// of the thirteen had none; nobody saw it while they sat on the Community tab.
+{
+  const { STADIUM_CATALOG: NC } = await import('../src/core/stadiumCatalog');
+  const src = siRead('src/ui/i18n.ts', 'utf8');
+  const esc = (x: string) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const unnamed = NC.filter((e) => {
+    const key = src.match(new RegExp(`^\\s*'${esc(e.id)}': '(stad\\.[a-zA-Z0-9]+)',`, 'm'))?.[1];
+    return !key || !new RegExp(`^\\s*'${esc(key)}': \\{ en: [^\\n]*\\bar: '`, 'm').test(src);
+  }).map((e) => e.id);
+  console.log('stadium names: templates', NC.length, '| without a name in both languages', unnamed.length);
+  if (unnamed.length) throw new Error(`stadiums with no translated name: ${unnamed.join(' ')}`);
+}
+
 // ---------------------------------------------------------------------------
 // Floodlights, the track and the facade: the three things that make one ground
 // look unlike another. Each one is checked against the rule that produced it,
@@ -1058,6 +1075,37 @@ import { buildStadium as siBuild } from '../src/core/stadiumFit';
     if (Math.abs(moved.aspect - 0.31) > 1e-9) throw new Error('a shape the user chose must survive a type change');
     if (moved.slot.stand !== custom.slot.stand) throw new Error('a type change must not move the banner to another stand');
     console.log('banners: a type change re-rigs without discarding a chosen shape');
+
+    // And a DEFAULT shape survives too. The two types started at different
+    // aspects, so switching a fresh two-block banner to hanging turned it
+    // from 2:1 into 5:3 and dropped the Size menu to "Custom" — on a banner
+    // nobody had touched.
+    const fresh = applyKind(newBanner('stand'), 'hanging');
+    if (Math.abs(fresh.aspect - newBanner('stand').aspect) > 1e-9) throw new Error('a type change must not re-proportion the sheet under the art');
+    if (presetOf(fresh) !== presetOf(newBanner('stand'))) throw new Error('a type change must not move the Size menu off its preset');
+    // "Already up" means the same for both types, and is kept.
+    const cut = applyKind({ ...newBanner('stand'), reveal: 'cut' }, 'hanging');
+    if (cut.reveal !== 'cut') throw new Error('"already up" must survive a type change');
+    console.log('banners: a type change keeps the shape and an "already up" reveal');
+  }
+
+  // 6b. A type only offers the reveal it can perform.
+  //
+  // The geometry has one motion per type, and picking the other type's motion
+  // changed nothing but the easing: "Haul up on ropes" on a stand banner still
+  // unrolled. So the menu, and anything stored, only carries real ones.
+  {
+    const { KIND_REVEALS, revealFor } = await import('../src/core/banner');
+    if (KIND_REVEALS.stand.includes('hoist')) throw new Error('a stand banner cannot be hauled up ropes');
+    if (KIND_REVEALS.hanging.includes('unroll')) throw new Error('a hanging banner does not unroll down the terracing');
+    for (const k of BANNER_KINDS) {
+      if (!KIND_REVEALS[k].includes('cut')) throw new Error(`a ${k} banner can always be already up`);
+      if (!KIND_REVEALS[k].includes(KIND_PROFILE[k].reveal)) throw new Error(`a ${k} banner must offer its own reveal`);
+    }
+    if (revealFor('stand', 'hoist') !== 'unroll') throw new Error('a stored hoist on a stand banner must come back as its unroll');
+    const stored = normalise({ ...newBanner('hanging'), reveal: 'unroll' } as Parameters<typeof normalise>[0]);
+    if (stored.reveal !== 'hoist') throw new Error('a stored unroll on a hanging banner must come back as its hoist');
+    console.log('banners: each type offers only the reveals it can perform');
   }
 
   // 7. Anything stored is filled in and clamped on the way back.
@@ -1074,6 +1122,21 @@ import { buildStadium as siBuild } from '../src/core/stadiumFit';
     if (n.slot.blockSpan < 1) throw new Error('a banner covers at least one block');
     if (n.wind < 0 || n.wind > 1) throw new Error('wind is a fraction');
     console.log('banners: a stored banner is filled in and clamped on the way back');
+
+    // A new banner is cloth. It used to start see-through, and a see-through
+    // sheet with nothing on it draws nothing: people made a banner, looked for
+    // it on the stand and found nothing there.
+    if (newBanner('stand').bg === null) throw new Error('a new banner must start as fabric, not as nothing');
+    const empty = normalise({ ...newBanner('stand'), bg: null } as Parameters<typeof normalise>[0]);
+    if (empty.bg === null) throw new Error('a stored see-through banner with nothing on it must come back as cloth');
+    const art = normalise({
+      ...newBanner('stand'), bg: null,
+      items: [{ id: 's1', kind: 'stroke', color: '#fff', width: 0.01, pts: [0, 0, 1, 1] }],
+    } as Parameters<typeof normalise>[0]);
+    if (art.bg !== null) throw new Error('a see-through banner WITH art is a real choice and must be kept');
+    const noted = bannerFacts({ ...newBanner('stand'), bg: null }, { widthM: 30, heightM: 15 });
+    if (!noted.notes.some((x) => x.key === 'empty')) throw new Error('an empty see-through banner must say there is nothing to see');
+    console.log('banners: a new banner is cloth, and an invisible one says so');
   }
 
   // 8. The reveal duration is a physical time, not a constant.
@@ -1083,8 +1146,8 @@ import { buildStadium as siBuild } from '../src/core/stadiumFit';
   // first version of this gave everything 4.2 seconds, which is why the very
   // first thing Osamah said about a reveal was that it was too fast.
   {
-    const small = physicalRevealMs('stand', { widthM: 10, heightM: 5 });
-    const big = physicalRevealMs('stand', { widthM: 80, heightM: 40 });
+    const small = physicalRevealMs('unroll', { widthM: 10, heightM: 5 });
+    const big = physicalRevealMs('unroll', { widthM: 80, heightM: 40 });
     if (!(big > small * 2)) throw new Error(`a 40 m drop (${big} ms) must take far longer than a 5 m one (${small} ms)`);
     const d = newBanner('stand');
     const s = estimateSize(d);
@@ -1092,6 +1155,20 @@ import { buildStadium as siBuild } from '../src/core/stadiumFit';
       throw new Error('a new banner is as wide as the blocks its profile covers');
     }
     console.log('banners: a reveal takes the time the physical thing takes');
+
+    // And it follows the banner until someone sets their own. A duration
+    // fixed at creation went stale as soon as the size changed, and the panel
+    // then reported the user as having chosen something slower than reality.
+    const { revealSeconds } = await import('../src/core/banner');
+    const auto = newBanner('stand');
+    if (!auto.revealAuto) throw new Error('a new banner takes as long as the real one');
+    const a1 = revealSeconds(auto, { widthM: 18, heightM: 9 });
+    const a2 = revealSeconds(auto, { widthM: 74, heightM: 37 });
+    if (!(a2 > a1)) throw new Error(`the real time must follow the size (${a1.toFixed(1)} s vs ${a2.toFixed(1)} s)`);
+    const manual = { ...auto, revealAuto: false, revealMs: 20000 };
+    if (Math.abs(revealSeconds(manual, { widthM: 74, heightM: 37 }) - 20) > 1e-6) throw new Error('a chosen length is the length');
+    if (revealSeconds({ ...auto, reveal: 'cut' }, { widthM: 74, heightM: 37 }) !== 0) throw new Error('a banner that is already up has no reveal to run');
+    console.log('banners: the reveal length follows the size until one is chosen, and "already up" has none');
   }
 
   // 9. The slot model, on real grounds.
@@ -1166,6 +1243,108 @@ import { buildStadium as siBuild } from '../src/core/stadiumFit';
       }
     }
     console.log('banners: every slot on four grounds resolves inside its stand, at a size the blocks decide');
+  }
+
+  // 9b. The shape a slot imposes, and the tiers a stand allows.
+  //
+  // A hanging banner between two tiers fills the gap, so its proportions are
+  // the band's. It used to keep the artwork's, and a 5:3 design was squashed
+  // onto an 11:1 strip in the bowl — letters to a smear. And a flown banner
+  // on a tier too thin to hang in was shown as "Whole stand" by the picker
+  // while the bowl drew a strip half a metre deep.
+  {
+    const { generateSeatMap } = await import('../src/core/seatmap');
+    const { STADIUM_CATALOG } = await import('../src/core/stadiumCatalog');
+    const { buildStandFrame } = await import('../src/render/simulator/standFrame');
+    const { resolveSlot, settleSlot, slotAspectFor, hangableTiers } = await import('../src/render/simulator/bannerSlot');
+    const { aspectOf, BannerStore } = await import('../src/core/banner');
+    let fascias = 0;
+    let thin = 0;
+    for (const entry of STADIUM_CATALOG) {
+      const map = generateSeatMap(entry.template);
+      const frame = buildStandFrame(map, 1);
+      if (!frame.ok || frame.tiers.length < 2) continue;
+      const ok = hangableTiers(frame);
+      for (let tier = 1; tier < frame.tiers.length; tier++) {
+        const doc = { ...newBanner('hanging'), slot: { ...newBanner('hanging').slot, stand: 1 as const, tier } };
+        if (!ok.includes(tier)) {
+          // Too thin to hang in: the tier goes, the whole stand is used.
+          settleSlot(doc, frame);
+          if (doc.slot.tier !== -1) throw new Error(`${entry.template.id}: a flown banner kept a tier with no gap to hang in`);
+          thin++;
+          continue;
+        }
+        const r = resolveSlot(doc, frame);
+        const want = r.size.heightM / r.size.widthM;
+        const got = slotAspectFor(doc, frame);
+        if (got === null || Math.abs(got - want) > 1e-6) throw new Error(`${entry.template.id}: the gap's shape is ${want.toFixed(3)}, not ${got}`);
+        settleSlot(doc, frame);
+        if (Math.abs(aspectOf(doc) - want) > 1e-3) throw new Error(`${entry.template.id}: the sheet does not take the gap's shape`);
+        if (Math.abs(doc.aspect - newBanner('hanging').aspect) > 1e-9) throw new Error('the gap must not overwrite the artwork\'s own shape');
+        // Out of the gap, and the user's shape is back untouched.
+        doc.slot = { ...doc.slot, tier: -1 };
+        settleSlot(doc, frame);
+        if (doc.slotAspect !== null || Math.abs(aspectOf(doc) - doc.aspect) > 1e-9) throw new Error('leaving the gap must give the artwork its shape back');
+        fascias++;
+      }
+      // A stand banner is never shaped by its slot.
+      const onFace = { ...newBanner('stand'), slot: { ...newBanner('stand').slot, stand: 1 as const, tier: 1 } };
+      if (slotAspectFor(onFace, frame) !== null) throw new Error('a stand banner takes its shape from its artwork');
+    }
+    if (fascias === 0) throw new Error('no fascia gap anywhere in the catalogue — the check is not reaching one');
+
+    // Through the store, which is where every panel's edits go.
+    const map = generateSeatMap(STADIUM_CATALOG[0].template);
+    const frame = buildStandFrame(map, 1);
+    const store = new BannerStore();
+    store.setSlotRules((d) => settleSlot(d, frame));
+    store.add(newBanner('hanging'));
+    const tier = hangableTiers(frame).find((i) => i >= 1);
+    if (tier !== undefined) {
+      store.begin();
+      store.patchSlot({ tier });
+      store.commit();
+      if (store.active?.slotAspect === null) throw new Error('moving into a gap through the store must shape the sheet');
+      store.undo();
+      if (store.active?.slotAspect !== null) throw new Error('undoing the move must undo the shape with it');
+    }
+    console.log(`banners: ${fascias} fascia gaps shape their sheet, ${thin} too-thin tiers fall back to the whole stand`);
+  }
+
+  // 9c. Everything on a banner can be picked up, copied, reordered and taken
+  // off again — none of which the Banner view could do: the only way to be rid
+  // of a word in the wrong place was to clear the whole banner.
+  {
+    const { BannerStore } = await import('../src/core/banner');
+    const store = new BannerStore();
+    store.add(newBanner('stand'));
+    store.begin();
+    store.addItem({ id: 't1', kind: 'text', text: 'ULTRAS', fontId: 'x', arcDeg: 0, color: '#fff', cx: 0.5, cy: 0.25, w: 0.4, h: 0.1, rot: 0 });
+    store.addItem({ id: 'h1', kind: 'shape', shape: 'star', color: '#fff', cx: 0.2, cy: 0.2, w: 0.1, h: 0.1, rot: 0 });
+    store.commit();
+    const copy = store.duplicateItem('t1');
+    const items = store.active!.items;
+    if (!copy || items.length !== 3) throw new Error('duplicate must add one item');
+    const c = items.find((i) => i.id === copy)!;
+    if (c.kind !== 'text' || c.text !== 'ULTRAS' || !(c.cx > 0.5)) throw new Error('a duplicate is a copy, laid beside the original');
+    if (store.selectedItemId_ !== copy) throw new Error('the copy is what is selected afterwards');
+    store.reorderItem(copy, 'back');
+    if (store.active!.items[0].id !== copy) throw new Error('send to back puts it first in the list');
+    store.removeItem(copy);
+    if (store.active!.items.some((i) => i.id === copy)) throw new Error('delete takes it off the banner');
+    store.undo();
+    if (!store.active!.items.some((i) => i.id === copy)) throw new Error('and undo puts it back');
+    console.log('banners: an item can be duplicated, reordered, deleted and restored');
+
+    // The banner the editor makes by itself cannot be undone away: nobody
+    // chose to make it, and undoing it left a view with nothing to draw on.
+    const fresh = new BannerStore();
+    fresh.add(newBanner('stand'));
+    fresh.clearHistory();
+    if (fresh.canUndo) throw new Error('the first banner must not be undoable');
+    fresh.undo();
+    if (fresh.count !== 1) throw new Error('undo took away the banner the editor made');
+    console.log('banners: the banner the editor makes for you stays put under Undo');
   }
 
   // 10. Every banner string carries both languages. The two original phone bug

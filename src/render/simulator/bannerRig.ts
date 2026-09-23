@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { BannerDoc, BannerStore, StandIndex } from '../../core/banner';
-import { revealEase, isOpaqueSheet } from '../../core/banner';
+import { revealEase, isOpaqueSheet, aspectOf, revealSeconds } from '../../core/banner';
 import { bannerToCanvas, onBannerImageReady } from '../bannerRender';
 import type { StandFrame } from './standFrame';
 import { resolveSlot, type ResolvedSlot } from './bannerSlot';
@@ -33,6 +33,8 @@ export interface BannerRigLayer {
   update(elapsed: number, dt: number): void;
   play(id?: string): void;
   setProgress(id: string, p: number): void;
+  /** Where a banner is in its reveal, for a scrub bar that follows it. */
+  revealState(id: string): { progress: number; playing: boolean } | null;
   /**
    * Bring the banners to a given time without drawing.
    *
@@ -102,9 +104,17 @@ interface Rig {
   durationS: number;
 }
 
+/**
+ * What the texture depends on.
+ *
+ * The SHAPE is in it. It was not, and the texture is drawn at the sheet's
+ * aspect — so changing the shape slider, or picking a size preset, kept
+ * mapping the old picture onto the new sheet until something about the art
+ * itself changed: every item in the bowl drawn at the wrong height.
+ */
 function textureKey(doc: BannerDoc): string {
   const art = JSON.stringify(doc.items);
-  return `${doc.id}|${doc.material}|${doc.bg ?? '-'}|${art.length}|${hash(art)}`;
+  return `${doc.id}|${doc.material}|${doc.bg ?? '-'}|${aspectOf(doc).toFixed(4)}|${art.length}|${hash(art)}`;
 }
 
 function hash(s: string): number {
@@ -116,8 +126,24 @@ function hash(s: string): number {
   return h >>> 0;
 }
 
-function revealSeconds(doc: BannerDoc): number {
-  return Math.max(0.2, doc.revealMs / 1000);
+/**
+ * How much of the artwork the sheet carries as its own light.
+ *
+ * Just over half keeps a design legible in any light — a tifo is the
+ * brightest thing in the ground and must never go to mud on the far side of a
+ * curve. But on a pale sheet that half, plus the floodlights, is more than
+ * white: every texel clipped to the same value, the folds the surface puts in
+ * the fabric had nothing left to shade, and a plain white banner read as a
+ * white hole cut in the stand. So the glow backs off as the fabric gets
+ * lighter, and a light sheet is lit mostly by the lights, like cloth.
+ */
+function glowFor(doc: BannerDoc): number {
+  const hex = doc.bg ?? '#303030';
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
+  if (!m) return 0.58;
+  const n = parseInt(m[1], 16);
+  const luma = (0.2126 * ((n >> 16) & 255) + 0.7152 * ((n >> 8) & 255) + 0.0722 * (n & 255)) / 255;
+  return 0.58 * (1 - 0.55 * luma);
 }
 
 /** Where a flown banner's ropes are tied: the roof steel, or the back rail. */
@@ -155,7 +181,7 @@ export function buildBannerRigs(
     const key = textureKey(doc);
     const hit = texCache.get(key);
     if (hit) return hit;
-    const canvas = bannerToCanvas(doc, { maxEdge: 1024, perforate: true });
+    const canvas = bannerToCanvas(doc, { maxEdge: 1024, perforate: true, minShortEdge: 192 });
     const tex = new THREE.CanvasTexture(canvas);
     tex.colorSpace = THREE.SRGBColorSpace;
     tex.anisotropy = 4;
@@ -225,7 +251,7 @@ export function buildBannerRigs(
       map: tex,
       emissive: 0xffffff,
       emissiveMap: tex,
-      emissiveIntensity: 0.58,
+      emissiveIntensity: glowFor(doc),
       roughness: 0.94,
       metalness: 0,
       side: THREE.DoubleSide,
@@ -285,7 +311,7 @@ export function buildBannerRigs(
       doc, standOf: doc.slot.stand, standsOf: doc.slot.stands, kindOf: doc.kind, barOf: doc.weightBar,
       slot, frame, group, mesh, geo, mat, pos, nrm,
       texKey: textureKey(doc), ropes, bar, outline,
-      prog: 1, playing: false, t0: 0, durationS: revealSeconds(doc),
+      prog: 1, playing: false, t0: 0, durationS: revealSeconds(doc, slot.size),
     };
     writeGeometry(rig);
     return rig;
@@ -429,8 +455,9 @@ export function buildBannerRigs(
       }
       existing.doc = doc;
       existing.slot = resolveSlot(doc, existing.frame);
-      existing.durationS = revealSeconds(doc);
+      existing.durationS = revealSeconds(doc, existing.slot.size);
       existing.group.visible = doc.visible !== false;
+      existing.mat.emissiveIntensity = glowFor(doc);
       const wantOpaque = isOpaqueSheet(doc);
       if (existing.mat.transparent === wantOpaque) {
         existing.mat.transparent = !wantOpaque;
@@ -493,11 +520,23 @@ export function buildBannerRigs(
     play(id) {
       for (const [rid, r] of rigs) {
         if (id && rid !== id) continue;
+        // A banner that is already up has no reveal. Playing one used to run
+        // a linear unroll over the default duration — an animation of a thing
+        // the panel had just said does not happen.
+        if (r.doc.reveal === 'cut' || r.durationS <= 0) {
+          r.playing = false;
+          r.prog = 1;
+          continue;
+        }
         r.playing = true;
         r.t0 = elapsed;
         r.prog = 0;
       }
       advance();
+    },
+    revealState(id) {
+      const r = rigs.get(id);
+      return r ? { progress: r.prog, playing: r.playing } : null;
     },
     setProgress(id, p) {
       const r = rigs.get(id);

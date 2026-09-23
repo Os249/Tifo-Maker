@@ -331,7 +331,8 @@ const MDS_T: Record<string, { en: string; ar: string }> = {
   hHelp: { en: 'Help', ar: 'مساعدة' },
   hClose: { en: 'Close', ar: 'إغلاق' },
   hYours: { en: 'Make it yours', ar: 'خلّه لك' },
-  hBanners: { en: 'Banners and flags', ar: 'اللافتات والأعلام' },
+  hBanners: { en: 'Flags and quick banners', ar: 'الأعلام واللافتات السريعة' },
+  hYourBanners: { en: 'Banners you drew', ar: 'اللافتات اللي رسمتها' },
   hTimeWeather: { en: 'Time, weather, effects', ar: 'الوقت والطقس والمؤثرات' },
   hAutoChoreo: { en: 'Auto choreography', ar: 'كوريغرافيا تلقائية' },
   gotIt: { en: 'Got it', ar: 'تمام' },
@@ -439,6 +440,7 @@ const MDS_T: Record<string, { en: string; ar: string }> = {
   acrossStands: { en: 'Across', ar: 'الامتداد' },
   acrossOne: { en: 'This stand', ar: 'هذا المدرج' },
   acrossTwo: { en: 'Two stands, round the corner', ar: 'مدرجان، حول الزاوية' },
+  acrossPair: { en: '{a} and {b}, round the corner', ar: '{a} و{b}، حول الزاوية' },
   firstBlock: { en: 'First block', ar: 'القطاع الأول' },
   howManyBlocks: { en: 'How many', ar: 'عدد القطاعات' },
   whichTier: { en: 'Tier', ar: 'الطابق' },
@@ -451,6 +453,7 @@ const MDS_T: Record<string, { en: string; ar: string }> = {
   centreIt: { en: 'Centre it', ar: 'وسّطها' },
   bannerWind: { en: 'Wind', ar: 'الهواء' },
   showBanner: { en: 'Show it', ar: 'أظهرها' },
+  alreadyUp: { en: 'This banner is already up — it has no reveal to play. Pick a reveal for it in the Banner view.', ar: 'هذي اللافتة موجودة من قبل — ما لها كشف يتشغّل. اختر لها طريقة كشف في عرض اللافتة.' },
   dragHint: { en: 'Drag the banner itself to move it on the stand.', ar: 'اسحب اللافتة نفسها عشان تحركها على المدرج.' },
   'snap.centre': { en: 'centre of the stand', ar: 'منتصف المدرج' },
   'snap.quarter': { en: 'quarter', ar: 'الربع' },
@@ -576,7 +579,7 @@ export function openMatchDaySimulator(
   store: DesignStore,
   template: StadiumTemplate,
   assetStore: AssetStore,
-  opts: { onClose?: () => void; bannerStore?: BannerStore } = {},
+  opts: { onClose?: () => void; bannerStore?: BannerStore; focusBanner?: string | null } = {},
 ): SimulatorHandle {
   const state: SimState = {
     camIdx: 0,
@@ -838,7 +841,9 @@ export function openMatchDaySimulator(
   const bnPlay = btn(L('playIt'), 'primary');
   const bnScrub = rng(0, 100, 100);
   const bnStand = sel();
-  for (const v of ['1', '3', '0', '2']) opt(bnStand, v, L('stand.' + v), v === '1');
+  // North, East, South, West — clockwise, and the same order as the Banner
+  // view's own picker, so the two lists never disagree about where East is.
+  for (const v of ['1', '0', '3', '2']) opt(bnStand, v, L('stand.' + v), v === '1');
   // Blocks and a tier, not sliders. The stand is divided into blocks by its
   // own aisles, a banner covers a run of them, and there is nothing in
   // between to land on — which is why a banner can no longer end up
@@ -969,6 +974,7 @@ export function openMatchDaySimulator(
         '</div>'
       : '') +
     '<div class="mds-help-grp"><h3>' + L('hYours') + '</h3>' +
+    kv(L('hYourBanners'), L('bannersTitle')) +
     kv(L('hBanners'), L('assets')) +
     kv(L('hTimeWeather'), L('atmo')) +
     kv(L('hAutoChoreo'), L('choreo')) +
@@ -1103,7 +1109,8 @@ export function openMatchDaySimulator(
     bnStand.value = String(a.slot.stand);
     bnAcross.replaceChildren();
     opt(bnAcross, '1', L('acrossOne'), false);
-    opt(bnAcross, '2', L('acrossTwo'), false);
+    // Which two: the run goes on from this stand into the next one round.
+    opt(bnAcross, '2', L('acrossPair').replace('{a}', L('stand.' + a.slot.stand)).replace('{b}', L('stand.' + ((a.slot.stand + 1) % 4))), false);
     bnAcross.value = String(a.slot.stands);
     const shape = sim.standSlots(a.slot.stand, a.id, a.slot.stands);
     const nb = Math.max(1, shape.blocks);
@@ -1273,6 +1280,24 @@ export function openMatchDaySimulator(
   failClose.addEventListener('click', () => close());
 
   mount();
+  // Opened from the Banner view to look at a banner: open ON it, with its
+  // section showing, rather than on the default gantry shot with the banner
+  // somewhere behind the camera and three clicks between you and it.
+  const openOnBanner = (id: string): void => {
+    if (!mounted || !bannerStore?.get(id)) return;
+    bannerStore.setActive(id);
+    secBanners.root.parentElement?.querySelectorAll('.mds-section').forEach((s) => {
+      s.classList.remove('open');
+      s.querySelector('.mds-shead')?.setAttribute('aria-expanded', 'false');
+    });
+    secBanners.root.classList.add('open');
+    secBanners.root.querySelector('.mds-shead')?.setAttribute('aria-expanded', 'true');
+    sim.selectBanner(id);
+    state.fly = false;
+    flyBtn.classList.remove('active');
+    sim.focusBanner(id);
+  };
+  if (opts.focusBanner) openOnBanner(opts.focusBanner);
   // Bound the panel height in pixels (inline style beats any CSS) so overflow
   // actually scrolls instead of the panel growing to fit its content.
   const fitPanel = (): void => {
@@ -1535,19 +1560,54 @@ export function openMatchDaySimulator(
   });
   bnLook.addEventListener('click', () => {
     const id = bannerStore?.activeId_;
-    if (id && !sim.focusBanner(id)) toast(L('noBanners'));
+    if (!id) return;
+    // Looking at a banner ends the flyover, and the button should say so.
+    state.fly = false;
+    flyBtn.classList.remove('active');
+    if (!sim.focusBanner(id)) toast(L('noBanners'));
   });
+  /**
+   * The scrub bar follows the reveal while it plays.
+   *
+   * It jumped to the end the moment Play was pressed and sat there while a
+   * hanging banner took a minute to come up its ropes, so the one control
+   * that says where a reveal has got to said it was over before it began.
+   */
+  let scrubRaf = 0;
+  const followReveal = (id: string): void => {
+    cancelAnimationFrame(scrubRaf);
+    const tick = (): void => {
+      const st = sim.bannerRevealState(id);
+      if (!st) return;
+      bnScrub.value = String(Math.round(st.progress * 100));
+      if (st.playing) scrubRaf = requestAnimationFrame(tick);
+    };
+    scrubRaf = requestAnimationFrame(tick);
+  };
   bnPlay.addEventListener('click', () => {
     const id = bannerStore?.activeId_;
     if (!id) return;
-    bnScrub.value = '100';
+    // A banner that is already up has nothing to play, and saying so beats a
+    // button that silently does nothing.
+    if (bannerStore?.get(id)?.reveal === 'cut') {
+      toast(L('alreadyUp'));
+      return;
+    }
     sim.playBannerReveal(id);
+    followReveal(id);
   });
   bnScrub.addEventListener('input', () => {
     const id = bannerStore?.activeId_;
+    cancelAnimationFrame(scrubRaf);
     if (id) sim.setBannerProgress(id, Number(bnScrub.value) / 100);
   });
-  bnStand.addEventListener('change', () => bnEdit(() => bannerStore?.patchSlot({ stand: (Number(bnStand.value) || 1) as 0 | 1 | 2 | 3 })));
+  // East is stand ZERO. `Number(v) || 1` turned it into North, so choosing
+  // East here moved the banner to the North stand instead.
+  bnStand.addEventListener('change', () => {
+    const v = Number(bnStand.value);
+    if (!(v >= 0 && v <= 3)) return;
+    bnEdit(() => bannerStore?.patchSlot({ stand: v as 0 | 1 | 2 | 3 }));
+  });
   bnAcross.addEventListener('change', () => bnEdit(() => bannerStore?.patchSlot({
     stands: Math.max(1, Number(bnAcross.value) || 1),
     // The block numbering changes with the window, so a run pinned to a block
@@ -1557,7 +1617,26 @@ export function openMatchDaySimulator(
   bnBlock.addEventListener('change', () => bnEdit(() => bannerStore?.patchSlot({ blockFrom: Number(bnBlock.value) })));
   bnSpan.addEventListener('change', () => bnEdit(() => bannerStore?.patchSlot({ blockSpan: Math.max(1, Number(bnSpan.value)) })));
   bnTier.addEventListener('change', () => bnEdit(() => bannerStore?.patchSlot({ tier: Number(bnTier.value) })));
-  bnWind.addEventListener('input', () => bnEdit(() => bannerStore?.patch({ wind: Number(bnWind.value) / 100 })));
+  // One undo step per drag of the wind slider, not one per pixel of it.
+  let windOpen = false;
+  let windTimer = 0;
+  const windClose = (): void => {
+    window.clearTimeout(windTimer);
+    if (!windOpen) return;
+    windOpen = false;
+    bannerStore?.commit();
+  };
+  bnWind.addEventListener('input', () => {
+    if (bnSyncing || !bannerStore) return;
+    if (!windOpen) {
+      windOpen = true;
+      bannerStore.begin();
+    }
+    bannerStore.patch({ wind: Number(bnWind.value) / 100 });
+    window.clearTimeout(windTimer);
+    windTimer = window.setTimeout(windClose, 500);
+  });
+  bnWind.addEventListener('change', windClose);
   bnShow.addEventListener('change', () => bnEdit(() => bannerStore?.patch({ visible: bnShow.checked })));
   bnCentre.addEventListener('click', () => {
     bnEdit(() => bannerStore?.patchSlot({ blockFrom: -1 }));

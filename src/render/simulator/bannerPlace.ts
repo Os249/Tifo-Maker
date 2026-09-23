@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { BannerStore, StandIndex } from '../../core/banner';
-import { buildSpanFrame, nearestOnFrame, type StandFrame } from './standFrame';
+import { spanFrameCache, nearestOnFrame, type StandFrame } from './standFrame';
 import type { SeatMap } from '../../core/types';
 
 /**
@@ -55,16 +55,7 @@ export function buildPlacement(map: SeatMap, bannerStore: BannerStore, _sections
 
   // Keyed by stand AND how many stands the window covers, because a banner
   // that carries on round the corner is drawn against a frame twice as wide.
-  const frames = new Map<number, StandFrame>();
-  const frameFor = (stand: StandIndex, stands = 1): StandFrame => {
-    const key = stand * 8 + Math.max(1, Math.min(2, Math.round(stands)));
-    let f = frames.get(key);
-    if (!f) {
-      f = buildSpanFrame(map, stand, key % 8);
-      frames.set(key, f);
-    }
-    return f;
-  };
+  const frameFor: (stand: StandIndex, stands?: number) => StandFrame = spanFrameCache(map);
 
   // An invisible copy of the stand's face, which is what a drag actually hits.
   // Raycasting the seats themselves would drop the pointer between two rows of
@@ -189,7 +180,6 @@ export function buildPlacement(map: SeatMap, bannerStore: BannerStore, _sections
       proxyMat.dispose();
       guideGeo.dispose();
       guideMat.dispose();
-      frames.clear();
     },
   };
 }

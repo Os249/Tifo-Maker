@@ -325,6 +325,13 @@ async function main(): Promise<void> {
   // toolbar, because saving a design has to be able to reach them: a banner
   // that only exists in this browser is not a banner anyone can be shown.
   const bannerStore = new BannerStore();
+  // What the stands allow a banner — which tiers a flown one can use, and the
+  // shape a gap between two tiers imposes — needs the stand geometry, which
+  // the seat editor never loads. It arrives on the side, after the first
+  // paint, and from then on every edit is settled against it, in any panel.
+  void import('./render/bannerShape')
+    .then(({ installSlotRules }) => installSlotRules(bannerStore, map))
+    .catch((err) => console.error('[tifo] banner slot rules failed to load', err));
   const assetStore = new AssetStore();
   editor.attachObjectLayer(objects);
 
@@ -369,6 +376,8 @@ async function main(): Promise<void> {
   // somebody actually presses Banner, the same bargain the 3D preview makes.
   let bannerView: BannerView | null = null;
   let bannerLoading: Promise<BannerView | null> | null = null;
+  /** A banner Match Day should open looking at, when it was asked from the Banner view. */
+  let focusOnOpen: string | null = null;
   const ensureBannerView = (): Promise<BannerView | null> => {
     if (bannerView) return Promise.resolve(bannerView);
     if (bannerLoading) return bannerLoading;
@@ -378,8 +387,14 @@ async function main(): Promise<void> {
           host: bannerHostEl,
           store,
           bannerStore,
+          map,
           message: document.getElementById('message'),
-          onOpenMatchDay: () => document.getElementById('match-day')?.click(),
+          // Straight onto the banner, not onto the default camera.
+          onOpenMatchDay: () => {
+            focusOnOpen = bannerStore.activeId_;
+            document.getElementById('match-day')?.click();
+          },
+          onToggleBeside: () => void setView(currentView === 'split' ? 'banner' : 'split'),
         });
         return bannerView;
       })
@@ -412,7 +427,15 @@ async function main(): Promise<void> {
       opt.textContent = p.name;
       sel.appendChild(opt);
     });
-    sel.addEventListener('change', () => preview!.applyPreset(CAMERA_PRESETS[Number(sel.value)]));
+    // And one camera that is not a fixed place: wherever the banner is.
+    const bannerCam = document.createElement('option');
+    bannerCam.value = 'banner';
+    bannerCam.textContent = t('ed.camera.banner');
+    sel.appendChild(bannerCam);
+    sel.addEventListener('change', () => {
+      if (sel.value === 'banner') preview!.focusBanner();
+      else preview!.applyPreset(CAMERA_PRESETS[Number(sel.value)]);
+    });
     // Default to the whole-bowl "Full view" so the entire tifo reads at a glance.
     const fullIdx = CAMERA_PRESETS.findIndex((p) => p.name === 'Full view');
     if (fullIdx >= 0) {
@@ -426,27 +449,47 @@ async function main(): Promise<void> {
   };
 
   type ViewMode = '2d' | 'banner' | '3d' | 'split';
+  /**
+   * The drawing surface Split puts beside the stadium: the one you were last
+   * drawing on.
+   *
+   * Split used to mean seats-and-stadium only, and a banner's placement was
+   * blind: its panel sits in the Banner view, the bowl sits in the Stadium
+   * view, and every "does it look right on the North stand" was a round trip
+   * between the two. Now Split from a banner is the banner beside the bowl,
+   * and the bowl turns to look at it whenever it moves.
+   */
+  let surface: '2d' | 'banner' = '2d';
+  let currentView: ViewMode = '2d';
+  const railFlag = document.getElementById('banner-studio-btn');
 
   const setView = async (next: ViewMode): Promise<void> => {
-    const show2d = next === '2d' || next === 'split';
+    if (next === '2d' || next === 'banner') surface = next;
+    const bannerSplit = next === 'split' && surface === 'banner';
+    const show2d = next === '2d' || (next === 'split' && !bannerSplit);
+    const showBanner = next === 'banner' || bannerSplit;
     const show3dView = next === '3d' || next === 'split';
+    currentView = next;
     if (show3dView) track('view_3d');
     if (next === 'banner') track('view_banner');
     host.hidden = !show2d;
     previewHost.hidden = !show3dView;
-    camBar.hidden = next === '2d' || next === 'banner';
+    camBar.hidden = !show3dView;
     canvasWrap.classList.toggle('split', next === 'split');
+    canvasWrap.classList.toggle('banner-split', bannerSplit);
     btn2d.classList.toggle('active', next === '2d');
     btnBanner?.classList.toggle('active', next === 'banner');
     btn3d.classList.toggle('active', next === '3d');
     btnSplit.classList.toggle('active', next === 'split');
+    railFlag?.classList.toggle('active', showBanner);
 
     // The Banner view owns the tool rail while it is up: the rail's buttons,
     // the palette, undo and the touch gestures all reach it through
     // `bannerHost` rather than through the seat editor.
-    if (next === 'banner') {
+    if (showBanner) {
       const bv = await ensureBannerView();
       bv?.show();
+      bv?.setBeside(bannerSplit);
     } else {
       bannerView?.hide();
     }
@@ -456,6 +499,10 @@ async function main(): Promise<void> {
       if (p) {
         p.recolorAll();
         p.start();
+        if (bannerSplit && p.focusBanner()) {
+          const sel = document.getElementById('camera-preset') as HTMLSelectElement | null;
+          if (sel) sel.value = 'banner';
+        }
       }
     } else {
       preview?.stop();
@@ -482,7 +529,23 @@ async function main(): Promise<void> {
   // The tool rail's flag button is the other door into the same room. It used
   // to open a modal with a brush and a stand picker; that studio is gone and
   // this is where its work continued.
-  document.getElementById('banner-studio-btn')?.addEventListener('click', () => void setView('banner'));
+  railFlag?.addEventListener('click', () => {
+    if (surface !== 'banner' || currentView === '3d') void setView('banner');
+  });
+  // Beside the bowl, the bowl follows the banner: move it to another stand
+  // and the camera goes with it, rather than leaving you to find it.
+  let lastPlace = '';
+  bannerStore.onChange(() => {
+    const a = bannerStore.active;
+    const s = a?.slot;
+    const key = a && s ? `${a.id}|${a.kind}|${s.stand}|${s.stands}|${s.blockFrom}|${s.blockSpan}|${s.tier}` : '';
+    if (key === lastPlace) return;
+    lastPlace = key;
+    const sel = document.getElementById('camera-preset') as HTMLSelectElement | null;
+    if (preview && !previewHost.hidden && (canvasWrap.classList.contains('banner-split') || sel?.value === 'banner')) {
+      preview.focusBanner();
+    }
+  });
 
   // One-time coaching hint on the design pane: a brush drawing a stroke, nudging
   // newcomers to paint and watch the 3D stadium fill live. Appended INSIDE
@@ -628,8 +691,11 @@ async function main(): Promise<void> {
     preview?.stop();
     try {
       const { openMatchDaySimulator } = await import('./render/simulator/overlay');
+      const focusBanner = focusOnOpen;
+      focusOnOpen = null;
       openMatchDaySimulator(map, store, template, assetStore, {
         bannerStore,
+        focusBanner,
         onClose: () => {
           simOpen = false;
           if (resumePreview) preview?.start();

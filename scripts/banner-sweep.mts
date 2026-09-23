@@ -26,7 +26,7 @@ import { generateSeatMap } from '../src/core/seatmap';
 import { templateById, STADIUM_CATALOG } from '../src/core/stadiumCatalog';
 import { buildSpanFrame, type StandFrame } from '../src/render/simulator/standFrame';
 import {
-  resolveSlot, slotsOf, crowdSupportM, hangSpan, CROWD_TOP_M, type ResolvedSlot,
+  resolveSlot, slotsOf, crowdSupportM, hangSpan, type ResolvedSlot,
 } from '../src/render/simulator/bannerSlot';
 import {
   buildSurface, columnsU, maxOffsetM, SURF_VERTS, SURF_COLS, SURF_ROWS,
@@ -45,7 +45,16 @@ const WINDS = [0, 0.5, 1];
  * going through the stand during its reveal.
  */
 const PROGRESS = [1, 0.37];
-const CROWD = 0.97;
+/**
+ * How full the stand is.
+ *
+ * BOTH, and the second one is the whole point. Every run of this swept a
+ * packed house, so the banner always had a crowd holding it up and the
+ * clearance was never tested without one — which is exactly the case the
+ * editor's own bowl renders, and exactly where the seats came through the
+ * fabric.
+ */
+const CROWDS = [0.97, 0];
 
 /** Metres of fabric allowed inside the terracing. None. */
 const IN_STAND_MAX = 0.001;
@@ -151,12 +160,13 @@ for (const gid of GROUNDS) {
         // whole matrix. That keeps the sweep inside a few minutes.
         for (const wind of stands === 1 ? WINDS : [1]) {
          for (const progress of stands === 1 ? PROGRESS : [1]) {
+          for (const CROWD of stands === 1 && wind === 1 ? CROWDS : [0.97]) {
           // The full battery only at rest; partway through, the checks that
           // matter for a sheet in motion.
           const full = progress === 1;
           const res = resolveSlot(doc, frame);
           const env = { frame, crowdFill: CROWD, wind, progress };
-          const where = `${gid}/${stand}${stands > 1 ? `+${stands}` : ''}/${kind}/b${slot.blockFrom}+${slot.blockSpan}/t${slot.tier}/w${wind}${full ? '' : `/p${progress}`}`;
+          const where = `${gid}/${stand}${stands > 1 ? `+${stands}` : ''}/${kind}/b${slot.blockFrom}+${slot.blockSpan}/t${slot.tier}/w${wind}${full ? '' : `/p${progress}`}${CROWD === 0.97 ? '' : `/empty`}`;
           checked++;
 
           buildSurface(doc, res, env, 3.0, a);
@@ -397,11 +407,12 @@ for (const gid of GROUNDS) {
                 const p = frame.pointAt(COL_U[i], sv);
                 const nn = frame.normalAt(COL_U[i], sv);
                 const along = (a[k] - p.x) * nn.nx + (a[k + 1] - p.y) * nn.ny + (a[k + 2] - p.z) * nn.nz;
-                const need = CROWD_TOP_M * nn.ny;
+                const need = crowdSupportM(CROWD) * nn.ny;
                 if (need - along > short) short = need - along;
               }
             }
-            if (short > 0.02) fail(where, 'CROWD', `${short.toFixed(2)} m short of clearing the crowd`);
+            if (short > 0.02) fail(where, 'CROWD', `${short.toFixed(2)} m short of clearing the stand at fill ${CROWD}`);
+          }
           }
          }
         }

@@ -78,7 +78,7 @@
         <button class="tool" data-tool="pan" title="Pan (Space)" aria-label="Pan" data-i18n-attr="title:ed.tool.panT,aria-label:ed.tool.pan"><i class="ti ti-arrows-move"></i></button>
         <span class="sep"></span>
         <button class="tool" data-tool="select" title="Select: drag a box to grab an area, or click a region · move objects (V)" aria-label="Select" data-i18n-attr="title:ed.tool.selectT,aria-label:ed.tool.select"><i class="ti ti-pointer"></i></button>
-        <button class="tool" id="banner-studio-btn" title="Banner Studio: design a banner &amp; place it on the stands" aria-label="Banner Studio" data-i18n-attr="title:ed.tool.bannerT,aria-label:ed.bannerStudio"><i class="ti ti-flag"></i></button>
+        <button class="tool" id="banner-studio-btn" title="Banners: draw a sheet and hang it on the stands" aria-label="Banners" data-i18n-attr="title:ed.tool.bannerT,aria-label:ed.bannerStudio"><i class="ti ti-flag"></i></button>
         <span class="rail-spacer"></span>
         <button class="tool rail-menu" id="rail-stadium" title="Stadium" aria-label="Stadium configuration" data-i18n-attr="title:ed.rail.stadiumT,aria-label:ed.rail.stadium"><i class="ti ti-building-stadium"></i></button>
         <button class="tool rail-menu" id="rail-ai" title="AI Designer" aria-label="AI tifo designer" data-i18n-attr="title:ed.rail.aiT,aria-label:ed.rail.ai"><i class="ti ti-sparkles"></i></button>
@@ -93,12 +93,12 @@
              and its menu starting the next. -->
         <div id="import-bar" class="tool-bar" hidden>
           <span id="import-name" style="font-weight:500;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-1);"></span>
-          <span class="tb-field">
+          <span class="tb-field seat-only">
             <label for="import-width" data-i18n="ed.import.width">Width</label>
             <input type="range" id="import-width" min="8" max="1250" step="2" value="120" style="width:150px;" />
             <span id="import-size-out" style="min-width:110px;">120 &times; ? seats</span>
           </span>
-          <span class="tb-field">
+          <span class="tb-field seat-only">
             <label for="import-tier" data-i18n="ed.tier">Tier</label>
             <select id="import-tier">
               <option value="both" data-i18n="ed.tier.both">Both</option>
@@ -107,8 +107,8 @@
             </select>
           </span>
           <span class="tb-field">
-            <label for="import-place" data-i18n="ed.import.place">Place</label>
-            <select id="import-place">
+            <label for="import-place" class="seat-only" data-i18n="ed.import.place">Place</label>
+            <select id="import-place" class="seat-only">
               <option value="click" data-i18n="ed.import.placeClick">Click on canvas</option>
               <option value="0.25" data-i18n="ed.import.north">North stand</option>
               <option value="0" data-i18n="ed.import.east">East end</option>
@@ -117,18 +117,19 @@
             </select>
             <button id="import-apply" class="primary" disabled data-i18n="ed.import.apply">Place</button>
           </span>
-          <span class="tb-field">
+          <span class="tb-field seat-only">
             <label title="Use the picture's own colours as the palette" data-i18n-attr="title:ed.import.realColorsT"><input type="checkbox" id="real-colors" checked /> <span data-i18n="ed.import.realColors">Real colours</span></label>
             <label><input type="checkbox" id="dither" /> <span data-i18n="ed.import.dither">Dither</span></label>
           </span>
-          <span class="tb-field">
+          <span class="tb-field seat-only">
             <label title="Flood the flat backdrop away so the design underneath shows through" data-i18n-attr="title:ed.import.cutoutT"><input type="checkbox" id="import-cutout" /> <span data-i18n="ed.import.cutout">Remove background</span></label>
           </span>
-          <span class="tb-field">
+          <span class="tb-field seat-only">
             <label for="import-alpha" data-i18n="ed.import.alpha">Alpha</label>
             <input type="range" id="import-alpha" min="1" max="254" step="1" value="128" style="width:90px;" />
             <span id="import-alpha-out">128</span>
           </span>
+          <span class="hint bn-only" data-i18n="bn.placeHint">click the banner to place it</span>
           <button id="import-cancel" data-i18n="ed.import.cancel">Cancel</button>
           <input type="file" id="import-file" accept="image/*" hidden />
         </div>
@@ -136,13 +137,14 @@
         <div id="text-bar" class="tool-bar" hidden>
           <input type="text" id="text-input" placeholder="YOUR TEXT" maxlength="48" data-i18n-attr="placeholder:ed.text.placeholder" />
           <select id="text-font"></select>
-          <label for="text-size"><span data-i18n="ed.height">Height</span> <span id="text-size-out">18</span> <span data-i18n="ed.seats">seats</span></label>
-          <input type="range" id="text-size" min="6" max="44" step="1" value="18" />
+          <label for="text-size" class="seat-only"><span data-i18n="ed.height">Height</span> <span id="text-size-out">18</span> <span data-i18n="ed.seats">seats</span></label>
+          <input type="range" id="text-size" class="seat-only" min="6" max="44" step="1" value="18" />
           <label for="text-arc"><span data-i18n="ed.text.arc">Arc</span> <span id="text-arc-out">0</span>&deg;</label>
           <input type="range" id="text-arc" min="-150" max="150" step="5" value="0" />
           <button id="text-font-upload" data-i18n="ed.text.fontFile">Font file&hellip;</button>
           <input type="file" id="text-font-file" accept=".ttf,.otf,.woff,.woff2,font/*" hidden />
-          <span class="hint" data-i18n="ed.text.hint">pick a color, then click a stand to place</span>
+          <span class="hint seat-only" data-i18n="ed.text.hint">pick a color, then click a stand to place</span>
+          <span class="hint bn-only" data-i18n="bn.placeTextHint">pick a colour, then click the banner — it lands at a size that reads across the pitch</span>
         </div>
 
         <div id="shape-bar" class="tool-bar" hidden>
@@ -165,9 +167,10 @@
             <option value="bolt" data-i18n="shape.bolt">Bolt</option>
             <option value="flame" data-i18n="shape.flame">Flame</option>
           </select>
-          <label for="shape-size"><span data-i18n="ed.height">Height</span> <span id="shape-size-out">40</span> <span data-i18n="ed.seats">seats</span></label>
-          <input type="range" id="shape-size" min="6" max="160" step="1" value="40" />
-          <span class="hint" data-i18n="ed.shape.hint">pick a colour, then click a stand to place</span>
+          <label for="shape-size" class="seat-only"><span data-i18n="ed.height">Height</span> <span id="shape-size-out">40</span> <span data-i18n="ed.seats">seats</span></label>
+          <input type="range" id="shape-size" class="seat-only" min="6" max="160" step="1" value="40" />
+          <span class="hint seat-only" data-i18n="ed.shape.hint">pick a colour, then click a stand to place</span>
+          <span class="hint bn-only" data-i18n="bn.placeHint">click the banner to place it</span>
         </div>
 
         <!-- Banner view. The identity of the sheet lives here, above the
@@ -177,6 +180,8 @@
         <div id="banner-bar" class="tool-bar" hidden>
           <span class="tb-field">
             <select id="bn-doc" aria-label="Banner" data-i18n-attr="aria-label:bn.banner"></select>
+            <input type="text" id="bn-name" maxlength="40" hidden aria-label="Banner name" data-i18n-attr="aria-label:bn.nameA" />
+            <button id="bn-rename" title="Rename this banner" aria-label="Rename this banner" data-i18n-attr="title:bn.renameT,aria-label:bn.renameT"><i class="ti ti-pencil"></i></button>
             <button id="bn-new" title="New banner" data-i18n-attr="title:bn.newT"><i class="ti ti-plus"></i></button>
             <button id="bn-del" title="Delete this banner" data-i18n-attr="title:bn.delT"><i class="ti ti-trash"></i></button>
           </span>
@@ -220,8 +225,8 @@
           </span>
           <span class="tb-field">
             <label for="bn-bg" data-i18n="bn.bg">Fabric colour</label>
-            <input type="color" id="bn-bg" value="#ffffff" />
-            <label title="No fabric behind the art — the stand shows through" data-i18n-attr="title:bn.clearT"><input type="checkbox" id="bn-bg-none" checked /> <span data-i18n="bn.clear">None</span></label>
+            <input type="color" id="bn-bg" value="#ffffff" aria-label="Fabric colour" data-i18n-attr="aria-label:bn.bg" />
+            <label title="No fabric behind the art — the stand shows through" data-i18n-attr="title:bn.clearT"><input type="checkbox" id="bn-bg-none" /> <span data-i18n="bn.clear">See-through</span></label>
           </span>
           <span class="hint" id="bn-facts"></span>
         </div>
@@ -384,72 +389,111 @@
           </div>
         </div>
 
-        <!-- Where the banner hangs, and how it arrives.
-             Separate from #banner-bar on purpose: that bar is about the sheet
-             itself (what type, how big, what fabric), this is about the
-             stadium. A banner's placement is the part you judge against the
-             bowl, so it belongs beside the 3D view's controls, not above the
-             artboard. Shown only in Banner view, via body.banner-view. -->
+        <!-- Everything about the banner that is not the art itself: the tool
+             in hand, the thing selected, where it hangs and how it arrives.
+             Shown only in Banner view, via body.banner-view. Where it hangs is
+             judged against the bowl, which is why "Stadium beside it" is here:
+             it puts the bowl next to the artboard and turns it to look at
+             wherever the banner goes. -->
         <div class="panel-section" id="ctx-banner" data-panel="__menu_only__" style="display:none">
+          <!-- The tool in hand. Only while the brush or the eraser is. -->
+          <div id="bn-brush-block" class="bn-block">
+            <h4><span data-i18n="bn.brush">Banner brush</span> <span class="h4-tag" data-i18n="ed.brush.activeTool">active tool</span></h4>
+            <div class="group">
+              <input type="range" id="bn-brush" min="2" max="300" step="1" value="35" class="grow" aria-label="Brush width in centimetres" data-i18n-attr="aria-label:bn.a11y.brush" />
+              <span id="bn-brush-out" class="val">35 cm</span>
+            </div>
+          </div>
+          <!-- The thing selected. Only while something on the banner is. -->
+          <div id="bn-item-block" class="bn-block" hidden>
+            <h4><span id="bn-item-name" data-i18n="bn.item">Selected</span> <span class="h4-tag" data-i18n="bn.item.tag">on the banner</span></h4>
+            <div class="chips bn-item-chips">
+              <button class="chip" id="bn-item-front" title="Bring to front" data-i18n-attr="title:bn.item.frontT"><i class="ti ti-stack-front"></i> <span data-i18n="bn.item.front">Front</span></button>
+              <button class="chip" id="bn-item-back" title="Send to back" data-i18n-attr="title:bn.item.backT"><i class="ti ti-stack-back"></i> <span data-i18n="bn.item.back">Back</span></button>
+              <button class="chip" id="bn-item-dup" title="Duplicate (Ctrl+D)" data-i18n-attr="title:bn.item.dupT"><i class="ti ti-copy"></i> <span data-i18n="bn.item.dup">Duplicate</span></button>
+              <button class="chip bn-danger" id="bn-item-del" title="Delete (Del)" data-i18n-attr="title:bn.item.delT"><i class="ti ti-trash"></i> <span data-i18n="bn.item.del">Delete</span></button>
+            </div>
+          </div>
+
           <h4><span data-i18n="bn.place">Placement</span> <span class="h4-tag" data-i18n="bn.place.tag">where it hangs</span></h4>
-          <div class="group" style="margin-bottom:8px;">
-            <label for="bn-stand" class="grow0" data-i18n="bn.stand">Stand</label>
-            <select id="bn-stand" class="grow">
+          <!-- Hidden from Match Day's panel, which is the only place that can
+               hide one — so this is where it says so, and undoes it. -->
+          <div id="bn-hidden" class="bn-subnote bn-hidden" hidden>
+            <span data-i18n="bn.hiddenNote">Hidden in the stadium.</span>
+            <button type="button" class="bn-link" id="bn-unhide" data-i18n="bn.unhide">Show it again</button>
+          </div>
+          <div class="group bn-row">
+            <label for="bn-stand" data-i18n="bn.stand">Stand</label>
+            <select id="bn-stand">
               <option value="1" data-i18n="dir.north">North</option>
               <option value="0" data-i18n="dir.east">East</option>
               <option value="3" data-i18n="dir.south">South</option>
               <option value="2" data-i18n="dir.west">West</option>
             </select>
           </div>
-          <!-- Blocks, not a slider. A stand is divided by its aisles into
-               blocks and a crew thinks in those; a continuous position gives a
-               banner no reason to line up with anything and lets it hang off
-               the end of the ground. -->
-          <div class="group" style="gap:8px;margin-bottom:8px;">
-            <label for="bn-across" class="grow0" data-i18n="bn.across">Across</label>
-            <select id="bn-across" class="grow">
+          <div class="group bn-row">
+            <label for="bn-across" data-i18n="bn.across">Across</label>
+            <select id="bn-across">
               <option value="1" data-i18n="bn.across.one">This stand</option>
               <option value="2" data-i18n="bn.across.two">Two stands, round the corner</option>
             </select>
           </div>
-          <div class="group" style="gap:8px;margin-bottom:8px;" id="bn-block-row">
-            <label for="bn-block" class="grow0" data-i18n="bn.block">Blocks</label>
-            <select id="bn-block" class="grow"></select>
-            <select id="bn-span" class="grow0"></select>
+          <!-- Blocks, not a slider. A stand is divided by its aisles into
+               blocks and a crew thinks in those; a continuous position gives a
+               banner no reason to line up with anything and lets it hang off
+               the end of the ground. -->
+          <div id="bn-block-row">
+            <div class="group bn-row">
+              <label for="bn-block" data-i18n="bn.block">Blocks</label>
+              <select id="bn-block"></select>
+            </div>
+            <div class="group bn-row">
+              <label for="bn-span" data-i18n="bn.howMany">How many</label>
+              <select id="bn-span"></select>
+            </div>
           </div>
-          <div class="group" style="gap:8px;margin-bottom:8px;" id="bn-tier-row">
-            <label for="bn-tier" class="grow0" data-i18n="bn.tier">Tier</label>
-            <select id="bn-tier" class="grow"></select>
+          <div class="group bn-row" id="bn-tier-row">
+            <label for="bn-tier" data-i18n="bn.tier">Tier</label>
+            <select id="bn-tier"></select>
           </div>
           <!-- What those blocks come to on this ground. A readout, because
                there is nothing here to type: the slot is the size. -->
-          <div class="group" style="gap:8px;margin-bottom:8px;">
-            <span class="grow0" data-i18n="bn.size">Size</span>
-            <span id="bn-size-out" class="val grow"></span>
+          <div class="group bn-row">
+            <span data-i18n="bn.measures">Measures</span>
+            <span id="bn-size-out" class="val bn-measure"></span>
           </div>
           <div id="bn-fit-note" class="bn-notes" style="display:none;margin-bottom:8px;"></div>
+          <!-- "Centred" is the first entry in Blocks, so a second control that
+               did the same thing is gone; what took its place is the one thing
+               the panel could not do — show the banner where it hangs. -->
+          <button id="bn-beside" class="bn-beside" title="Show the stadium next to the banner, looking at it" data-i18n-attr="title:bn.besideT" aria-pressed="false"><i class="ti ti-layout-columns"></i> <span data-i18n="bn.beside">Show it in the stadium</span></button>
+
+          <h4 style="margin-top:14px;"><span data-i18n="bn.rig">Rigging</span> <span class="h4-tag" data-i18n="bn.rig.tag">what holds it</span></h4>
           <div class="chips" style="margin-bottom:10px;">
-            <button class="chip" id="bn-centre" title="Put it dead centre on the stand" data-i18n-attr="title:bn.centreT" data-i18n="bn.centre">Centre it</button>
-          </div>
-          <div class="chips" style="margin-bottom:10px;">
-            <label><input type="checkbox" id="bn-net" /> <span data-i18n="bn.net">Rope net</span></label>
-            <label><input type="checkbox" id="bn-bar" /> <span data-i18n="bn.bar">Weight bar</span></label>
+            <label title="A rope net sewn behind the sheet takes the load on a big banner. It is behind the fabric, so you will not see it from the pitch." data-i18n-attr="title:bn.netT"><input type="checkbox" id="bn-net" /> <span data-i18n="bn.net">Rope net</span></label>
+            <label title="A weighted bar in the bottom hem, so it hangs straight" data-i18n-attr="title:bn.barT"><input type="checkbox" id="bn-bar" /> <span data-i18n="bn.bar">Weight bar</span></label>
           </div>
 
           <h4 style="margin-top:14px;"><span data-i18n="bn.reveal">Reveal</span> <span class="h4-tag" data-i18n="bn.reveal.tag">match day</span></h4>
           <div class="group" style="margin-bottom:8px;">
-            <select id="bn-reveal" class="grow">
+            <select id="bn-reveal" class="grow" aria-label="How it is revealed" data-i18n-attr="aria-label:bn.reveal">
               <option value="unroll" data-i18n="bn.rev.unroll">Unroll down the stand</option>
               <option value="hoist" data-i18n="bn.rev.hoist">Haul up on ropes</option>
               <option value="cut" data-i18n="bn.rev.cut">Already up</option>
             </select>
           </div>
-          <div class="group" style="gap:8px;margin-bottom:8px;">
-            <label for="bn-secs" style="white-space:nowrap;" data-i18n="bn.secs">Seconds</label>
-            <input type="range" id="bn-secs" min="0" max="100" step="1" value="20" class="grow" />
-            <span id="bn-secs-out" class="val">5.0s</span>
+          <div id="bn-secs-block">
+            <div class="group bn-slide" style="gap:8px;margin-bottom:4px;">
+              <label for="bn-secs" style="white-space:nowrap;" data-i18n="bn.secs">Seconds</label>
+              <input type="range" id="bn-secs" min="0" max="100" step="1" value="20" class="grow" />
+              <span id="bn-secs-out" class="val bn-secs-out">5.9 s</span>
+            </div>
+            <div id="bn-secs-real" class="bn-subnote" hidden>
+              <span id="bn-secs-real-text"></span>
+              <button type="button" class="bn-link" id="bn-secs-auto" data-i18n="bn.secs.useReal">Use the real time</button>
+            </div>
           </div>
-          <div class="group" style="gap:8px;margin-bottom:10px;">
+          <div class="group bn-slide" style="gap:8px;margin:6px 0 10px;">
             <label for="bn-wind" style="white-space:nowrap;" data-i18n="bn.wind">Wind</label>
             <input type="range" id="bn-wind" min="0" max="100" step="1" value="25" class="grow" />
             <span id="bn-wind-out" class="val">25</span>
@@ -457,13 +501,8 @@
           <button id="bn-matchday" class="primary" style="width:100%;"><i class="ti ti-building-stadium"></i> <span data-i18n="bn.seeIt">See it on match day</span></button>
           <div id="bn-notes" class="bn-notes"></div>
 
-          <h4 style="margin-top:14px;"><span data-i18n="bn.brush">Banner brush</span></h4>
-          <div class="group">
-            <input type="range" id="bn-brush" min="2" max="300" step="1" value="35" class="grow" aria-label="Brush width in centimetres" data-i18n-attr="aria-label:bn.a11y.brush" />
-            <span id="bn-brush-out" class="val">35 cm</span>
-          </div>
-          <div class="chips" style="margin-top:10px;">
-            <button class="chip" id="bn-clear-art" data-i18n="bn.clearArt">Clear the art</button>
+          <div class="chips" style="margin-top:14px;">
+            <button class="chip bn-danger" id="bn-clear-art" data-i18n="bn.clearArt">Clear the art</button>
           </div>
         </div>
 

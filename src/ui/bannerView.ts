@@ -1,11 +1,13 @@
 import type { DesignStore } from '../core/design';
-import type { ToolId } from '../core/types';
-import type { BannerDoc, BannerKind, BannerReveal, StandIndex } from '../core/banner';
+import type { SeatMap, ToolId } from '../core/types';
+import type { BannerDoc, BannerItem, BannerKind, BannerReveal, BannerSize, StandIndex } from '../core/banner';
 import {
   BannerStore, aspectOf, applyKind, bannerFacts, newBanner, estimateSize,
-  BANNER_PRESETS, presetOf,
-  physicalRevealMs, revealFloorSeconds,
+  BANNER_PRESETS, KIND_REVEALS, presetOf, isPlaced,
+  physicalRevealMs, revealSeconds,
 } from '../core/banner';
+import { spanFrameCache, type StandFrame } from '../render/simulator/standFrame';
+import { resolveSlot, maxUsefulSpan, hangableTiers, type ResolvedSlot } from '../render/simulator/bannerSlot';
 
 /**
  * The reveal-length slider, which now has to span half a second and two
@@ -32,14 +34,6 @@ function secsToSlider(secs: number): number {
 }
 
 /**
- * The number under the slider, with a note when it is not what the rig does.
- *
- * Nobody watching a preview knows that a 36 x 18 m Aufziehfahne takes forty
- * seconds to haul. Showing what the real one takes, next to what they have
- * chosen, is how they find out — and it is the same figure the 3D uses, so
- * "real" is not a claim here, it is the default.
- */
-/**
  * The shape of the sheet, as people describe banners.
  *
  * "2:1" rather than "0.50", because a tifo crew says "two to one" and because
@@ -51,12 +45,8 @@ function aspectLabel(a: number): string {
   return `1:${a.toFixed(a < 2 ? 1 : 0)}`;
 }
 
-function secsLabel(doc: BannerDoc): string {
-  const secs = Math.max(revealFloorSeconds(doc, estimateSize(doc)), doc.revealMs / 1000);
-  const real = physicalRevealMs(doc.kind, estimateSize(doc)) / 1000;
-  const shown = secs >= 20 ? secs.toFixed(0) : secs.toFixed(1);
-  if (Math.abs(secs - real) < Math.max(0.3, real * 0.06)) return `${shown}s`;
-  return `${shown}s (real ${real >= 20 ? real.toFixed(0) : real.toFixed(1)}s)`;
+function secsText(s: number): string {
+  return s >= 20 ? s.toFixed(0) : s.toFixed(1);
 }
 import { BannerCanvas } from '../render/bannerCanvas';
 import { invalidateBannerText } from '../render/bannerRender';
@@ -68,16 +58,16 @@ import { t, tv, onLangChange } from './i18n';
 /**
  * The Banner view — the fourth thing the view switcher can show.
  *
- * It owns the artboard, the bar above it and the placement panel beside it,
- * and it registers itself as the editor's `bannerHost` so the existing tool
- * rail, palette, undo buttons and touch gestures all drive it without the
+ * It owns the artboard, the bar above it and the panel beside it, and it
+ * registers itself as the editor's `bannerHost` so the existing tool rail,
+ * palette, undo buttons, keys and touch gestures all drive it without the
  * toolbar needing to know what a banner is.
  *
  * The split between the two sets of controls is deliberate. `#banner-bar`
  * above the canvas is the SHEET — type, size, fabric — because changing any of
- * those changes what you are drawing on. `#ctx-banner` in the side panel is the
- * STADIUM — which stand, how high, how it is revealed — because that is judged
- * against the bowl, not against the art.
+ * those changes what you are drawing on. `#ctx-banner` in the side panel is
+ * everything else: the tool in hand, the thing selected, and the STADIUM —
+ * which stand, which blocks, how it is revealed.
  */
 
 export interface BannerViewDeps {
@@ -86,8 +76,21 @@ export interface BannerViewDeps {
   /** The design's palette, shared with the seat editor: one set of swatches. */
   store: DesignStore;
   bannerStore: BannerStore;
+  /**
+   * The seat map, which is what a stand's blocks and tiers are measured from.
+   *
+   * The panel used to ASK Match Day for them — by an event only an open
+   * simulator answered — and Match Day covers the whole screen, so in
+   * practice nobody ever saw the block and tier pickers at all: the panel
+   * opened with Stand, Across and an estimated size, and nothing else. The
+   * frames are a pure function of the seat map, so the panel builds the same
+   * ones Match Day does, from the same map, and never has to ask.
+   */
+  map: SeatMap;
   /** Open the Match Day simulator (the banner is already in its scene). */
   onOpenMatchDay: () => void;
+  /** Put the stadium beside the artboard, or take it away. */
+  onToggleBeside?: () => void;
   /** Status line, shared with the rest of the editor. */
   message?: HTMLElement | null;
 }
@@ -99,16 +102,34 @@ export interface BannerView {
   readonly canvas: BannerCanvas;
   /** Re-read the store into every control (after a load, or an undo). */
   sync(): void;
+  /** Reflect whether the stadium is showing beside the artboard. */
+  setBeside(on: boolean): void;
 }
 
 const $ = <T extends HTMLElement>(id: string): T | null => document.getElementById(id) as T | null;
 
+/** What a stand offers a banner, measured from the seat map. */
+interface StandOffer {
+  frame: StandFrame;
+  blocks: number;
+  tiers: number;
+  /** The tiers this banner may use; a flown one cannot use a gap too thin to hang in. */
+  tierOptions: number[];
+  /** The widest run that still makes this banner bigger — see `maxUsefulSpan`. */
+  maxSpan: number;
+  fit: ResolvedSlot;
+}
+
 export function mountBannerView(deps: BannerViewDeps): BannerView {
   const { host, store, bannerStore } = deps;
+  const frameFor = spanFrameCache(deps.map);
 
   // Always have something to draw on. A Banner view whose first frame is an
   // empty-state card is a worse introduction than a blank sheet of fabric.
-  if (bannerStore.count === 0) bannerStore.add(newBanner('stand', t('bn.defaultName')));
+  if (bannerStore.count === 0) {
+    bannerStore.add(newBanner('stand', t('bn.defaultName')));
+    bannerStore.clearHistory();
+  }
 
   const canvas = BannerCanvas.create(host, bannerStore);
   let active = false;
@@ -120,6 +141,8 @@ export function mountBannerView(deps: BannerViewDeps): BannerView {
   const bar = $<HTMLElement>('banner-bar');
   const panel = $<HTMLElement>('ctx-banner');
   const docSel = $<HTMLSelectElement>('bn-doc');
+  const nameIn = $<HTMLInputElement>('bn-name');
+  const renameBtn = $<HTMLButtonElement>('bn-rename');
   const newBtn = $<HTMLButtonElement>('bn-new');
   const delBtn = $<HTMLButtonElement>('bn-del');
   const kindSel = $<HTMLSelectElement>('bn-kind');
@@ -135,6 +158,14 @@ export function mountBannerView(deps: BannerViewDeps): BannerView {
   const bgNone = $<HTMLInputElement>('bn-bg-none');
   const factsEl = $<HTMLElement>('bn-facts');
 
+  const brushBlock = $<HTMLElement>('bn-brush-block');
+  const itemBlock = $<HTMLElement>('bn-item-block');
+  const itemName = $<HTMLElement>('bn-item-name');
+  const itemFront = $<HTMLButtonElement>('bn-item-front');
+  const itemBack = $<HTMLButtonElement>('bn-item-back');
+  const itemDup = $<HTMLButtonElement>('bn-item-dup');
+  const itemDel = $<HTMLButtonElement>('bn-item-del');
+
   const standSel = $<HTMLSelectElement>('bn-stand');
   const acrossSel = $<HTMLSelectElement>('bn-across');
   const blockSel = $<HTMLSelectElement>('bn-block');
@@ -144,12 +175,18 @@ export function mountBannerView(deps: BannerViewDeps): BannerView {
   const tierRow = $<HTMLElement>('bn-tier-row');
   const fitNoteEl = $<HTMLElement>('bn-fit-note');
   const sizeOutEl = $<HTMLElement>('bn-size-out');
-  const centreBtn = $<HTMLButtonElement>('bn-centre');
+  const besideBtn = $<HTMLButtonElement>('bn-beside');
+  const hiddenNote = $<HTMLElement>('bn-hidden');
+  const unhideBtn = $<HTMLButtonElement>('bn-unhide');
   const netChk = $<HTMLInputElement>('bn-net');
   const barChk = $<HTMLInputElement>('bn-bar');
   const revSel = $<HTMLSelectElement>('bn-reveal');
+  const secsBlock = $<HTMLElement>('bn-secs-block');
   const secsIn = $<HTMLInputElement>('bn-secs');
   const secsOut = $<HTMLElement>('bn-secs-out');
+  const secsReal = $<HTMLElement>('bn-secs-real');
+  const secsRealText = $<HTMLElement>('bn-secs-real-text');
+  const secsAuto = $<HTMLButtonElement>('bn-secs-auto');
   const windIn = $<HTMLInputElement>('bn-wind');
   const windOut = $<HTMLElement>('bn-wind-out');
   const mdBtn = $<HTMLButtonElement>('bn-matchday');
@@ -162,33 +199,51 @@ export function mountBannerView(deps: BannerViewDeps): BannerView {
     if (deps.message) deps.message.textContent = text;
   };
 
-  /**
-   * Ask the simulator what this stand is actually made of.
-   *
-   * The editor holds the template; only the built bowl knows how many blocks
-   * a stand has, how long each tier's slope is, and therefore whether a
-   * banner fits. With no simulator open the answer is undefined and the panel
-   * falls back to the free sliders, which is the honest thing to show when
-   * nothing can be said about the ground.
-   */
-  const askSlots = (stand: number, bannerId?: string, stands = 1): {
-    blocks?: number[];
-    tiers?: number[];
-    maxSpan?: number;
-    tierOptions?: number[];
-    fit?: {
-      size: { widthM: number; heightM: number };
-      maxWidthM: number; maxHeightM: number; heightLimited: boolean;
-      blockFrom: number; blockSpan: number; tier: number;
+  // -------------------------------------------------------------------------
+  // What the stand offers, measured here
+  // -------------------------------------------------------------------------
+
+  /** The same frame Match Day and the editor's bowl build, from the same map. */
+  const frameOf = (doc: BannerDoc): StandFrame => frameFor(doc.slot.stand, doc.slot.stands);
+
+  const offerOf = (doc: BannerDoc): StandOffer | null => {
+    const f = frameOf(doc);
+    if (!f.ok) return null;
+    return {
+      frame: f,
+      blocks: f.blocks.length,
+      tiers: f.tiers.length,
+      tierOptions: doc.kind === 'hanging' ? hangableTiers(f) : f.tiers.map((_, i) => i),
+      maxSpan: maxUsefulSpan(doc, f),
+      fit: resolveSlot(doc, f),
     };
-  } => {
-    const ev = new CustomEvent<{ stand: number; bannerId?: string; blocks?: number[]; tiers?: number[]; fit?: unknown; maxSpan?: number; tierOptions?: number[]; stands?: number }>(
-      'tifo:stand-slots',
-      { detail: { stand, bannerId, stands } },
-    );
-    document.dispatchEvent(ev);
-    return ev.detail as ReturnType<typeof askSlots>;
   };
+
+  /**
+   * The size the blocks give this banner on this ground, remembered.
+   *
+   * The artboard asks on every frame it draws — the ruler, the seams, the
+   * type band and the brush are all in real metres — and a brush stroke draws
+   * sixty frames a second, so the answer is kept until something it depends
+   * on changes.
+   */
+  let sizeKey = '';
+  let sizeVal: BannerSize = { widthM: 1, heightM: 1 };
+  const realSize = (doc: BannerDoc): BannerSize => {
+    const s = doc.slot;
+    const key = `${doc.id}|${doc.kind}|${doc.aspect}|${s.stand}|${s.stands}|${s.blockFrom}|${s.blockSpan}|${s.tier}`;
+    if (key !== sizeKey) {
+      const f = frameOf(doc);
+      sizeVal = f.ok ? resolveSlot(doc, f).size : estimateSize(doc);
+      sizeKey = key;
+    }
+    return sizeVal;
+  };
+  canvas.sizeOf = realSize;
+  canvas.capLabel = (m) => tv('bn.capBand', { m });
+
+  /** A stand's name in the current language. */
+  const standName = (st: StandIndex): string => t(`dir.${['east', 'north', 'west', 'south'][st]}`);
 
   const opt = (sel: HTMLSelectElement, value: string, label: string): void => {
     const o = document.createElement('option');
@@ -199,26 +254,32 @@ export function mountBannerView(deps: BannerViewDeps): BannerView {
 
   /** Fill the block, span and tier pickers from the stand the banner is on. */
   function syncSlots(doc: BannerDoc): void {
-    const slots = askSlots(doc.slot.stand, doc.id, doc.slot.stands);
-    if (acrossSel) acrossSel.value = String(doc.slot.stands);
-    const nBlocks = slots.blocks?.length ?? 0;
-    const nTiers = slots.tiers?.length ?? 0;
+    const offer = offerOf(doc);
+    if (acrossSel) {
+      // Say WHICH two. "Two stands, round the corner" left you to find out
+      // which corner by looking: the run goes on from this stand into the
+      // next one round the bowl.
+      const two = acrossSel.querySelector<HTMLOptionElement>('option[value="2"]');
+      if (two) two.textContent = tv('bn.across.pair', { a: standName(doc.slot.stand), b: standName(((doc.slot.stand + 1) % 4) as StandIndex) });
+      acrossSel.value = String(doc.slot.stands);
+    }
+    const nBlocks = offer?.blocks ?? 0;
+    const nTiers = offer?.tiers ?? 0;
 
     if (blockRow) blockRow.style.display = nBlocks > 0 ? '' : 'none';
     if (tierRow) tierRow.style.display = nTiers > 1 ? '' : 'none';
 
-    if (blockSel && nBlocks > 0) {
-      const at = slots.fit?.blockFrom ?? doc.slot.blockFrom;
+    if (blockSel && offer && nBlocks > 0) {
       blockSel.replaceChildren();
       opt(blockSel, '-1', t('bn.block.centred'));
       for (let i = 0; i < nBlocks; i++) opt(blockSel, String(i), tv('bn.block.n', { n: i + 1 }));
-      blockSel.value = doc.slot.blockFrom < 0 ? '-1' : String(at);
+      blockSel.value = doc.slot.blockFrom < 0 ? '-1' : String(offer.fit.blockFrom);
     }
     // Only the runs that actually make the banner bigger. Past a point the
     // stand runs out of rake before the artwork's proportions are satisfied
     // and every wider run draws the identical sheet, which reads as the
     // control being broken rather than as the stand being full.
-    const nSpan = Math.max(1, Math.min(nBlocks, slots.maxSpan ?? nBlocks));
+    const nSpan = Math.max(1, Math.min(nBlocks, offer?.maxSpan ?? nBlocks));
     if (spanSel && nBlocks > 0) {
       spanSel.replaceChildren();
       for (let i = 1; i <= nSpan; i++) {
@@ -226,52 +287,92 @@ export function mountBannerView(deps: BannerViewDeps): BannerView {
       }
       spanSel.value = String(Math.max(1, Math.min(nSpan, doc.slot.blockSpan)));
     }
-    if (tierSel && nTiers > 0) {
-      // A flown banner can only use a tier with a fascia band deep enough to
-      // hang something in — on two grounds in the catalogue that band is
-      // under a metre, and on one the tiers overlap outright.
-      const tierOpts = slots.tierOptions ?? Array.from({ length: nTiers }, (_, i) => i);
+    if (tierSel && offer && nTiers > 0) {
       tierSel.replaceChildren();
       opt(tierSel, '-1', t('bn.tier.all'));
-      for (const i of tierOpts) opt(tierSel, String(i), tv('bn.tier.n', { n: i + 1 }));
-      tierSel.value = tierOpts.includes(doc.slot.tier) ? String(doc.slot.tier) : '-1';
+      for (const i of offer.tierOptions) opt(tierSel, String(i), tv('bn.tier.n', { n: i + 1 }));
+      tierSel.value = offer.tierOptions.includes(doc.slot.tier) ? String(doc.slot.tier) : '-1';
     }
 
     // The size the blocks give it. Not a field to fill in — the whole point of
     // the slot model is that there is no size to get wrong — so this is a
     // readout, in metres, of what those blocks come to on this ground.
     if (sizeOutEl) {
-      const f = slots.fit;
+      const f = offer?.fit;
       sizeOutEl.textContent = f
-        ? tv('bn.size.is', { w: Math.round(f.size.widthM), h: Math.round(f.size.heightM) })
+        ? tv('bn.size.is', { w: Math.round(f.size.widthM), h: round1(f.size.heightM) })
         : tv('bn.size.about', {
           w: Math.round(estimateSize(doc).widthM), h: Math.round(estimateSize(doc).heightM),
         });
     }
-    // Only one thing can overrule the blocks, and it is the stand running out
-    // of rake before the artwork's proportions are satisfied.
+    // What overrules the blocks and the shape, and why.
     if (fitNoteEl) {
-      const f = slots.fit;
-      if (f && f.heightLimited && nSpan < nBlocks) {
-        // Say WHY the list stops where it does, in the terms that would fix
-        // it: a wider design would use more of the stand.
-        fitNoteEl.textContent = tv('bn.fit.capped', { n: nSpan });
-        fitNoteEl.style.display = '';
-      } else if (f && f.heightLimited) {
-        fitNoteEl.textContent = tv('bn.fit.short', {
-          fw: Math.round(f.size.widthM), fh: Math.round(f.size.heightM),
-        });
-        fitNoteEl.style.display = '';
-      } else {
-        fitNoteEl.style.display = 'none';
+      const f = offer?.fit;
+      let note = '';
+      if (doc.slotAspect !== null) note = t('bn.fit.fascia');
+      else if (f && f.heightLimited && nSpan < nBlocks) note = tv('bn.fit.capped', { n: nSpan });
+      else if (f && f.heightLimited) {
+        note = tv('bn.fit.short', { fw: Math.round(f.size.widthM), fh: Math.round(f.size.heightM) });
       }
+      fitNoteEl.textContent = note;
+      fitNoteEl.style.display = note ? '' : 'none';
     }
+  }
+
+  /** The reveals this type can perform, and nothing else. */
+  function syncReveal(doc: BannerDoc): void {
+    if (revSel) {
+      const want = KIND_REVEALS[doc.kind];
+      const have = [...revSel.options].map((o) => o.value);
+      if (have.join() !== want.join()) {
+        revSel.replaceChildren();
+        for (const r of want) opt(revSel, r, t(`bn.rev.${r}`));
+      } else {
+        for (const o of revSel.options) o.textContent = t(`bn.rev.${o.value}`);
+      }
+      revSel.value = doc.reveal;
+    }
+    // "Already up" has no length. A seconds slider under it was a control for
+    // a thing the panel had just said does not happen.
+    const timed = doc.reveal !== 'cut';
+    if (secsBlock) secsBlock.hidden = !timed;
+    if (!timed) return;
+    const size = realSize(doc);
+    const shown = revealSeconds(doc, size);
+    const real = physicalRevealMs(doc.reveal, size) / 1000;
+    if (secsIn) secsIn.value = String(Math.round(secsToSlider(shown)));
+    if (secsOut) secsOut.textContent = tv('bn.secs.v', { s: secsText(shown) });
+    const off = !doc.revealAuto && Math.abs(shown - real) >= Math.max(0.3, real * 0.06);
+    if (secsReal) secsReal.hidden = !off;
+    if (secsRealText && off) secsRealText.textContent = tv('bn.secs.real', { s: secsText(real) });
+  }
+
+  /** What the selected item is, in words. */
+  function itemLabel(it: BannerItem): string {
+    if (it.kind === 'text') return tv('bn.item.text', { t: it.text.length > 18 ? `${it.text.slice(0, 17)}…` : it.text });
+    if (it.kind === 'fill') return t('bn.item.patch');
+    return t(`bn.item.${it.kind}`);
+  }
+
+  /** The panel's two contextual blocks: the tool in hand, and the thing selected. */
+  function syncContext(): void {
+    const tool = canvas.tool;
+    if (brushBlock) brushBlock.hidden = !(tool === 'brush' || tool === 'eraser');
+    const it = tool === 'select' ? bannerStore.selectedItem : null;
+    if (itemBlock) itemBlock.hidden = !it;
+    if (it && itemName) itemName.textContent = itemLabel(it);
+    const doc = bannerStore.active;
+    const i = it && doc ? doc.items.indexOf(it) : -1;
+    if (itemFront) itemFront.disabled = !doc || i < 0 || i === doc.items.length - 1;
+    if (itemBack) itemBack.disabled = !doc || i <= 0;
   }
 
   // -------------------------------------------------------------------------
   // Reading the store into the controls
   // -------------------------------------------------------------------------
 
+  let framedId = '';
+  let framedAspect = 0;
   function sync(): void {
     const doc = bannerStore.active;
     syncing = true;
@@ -288,32 +389,57 @@ export function mountBannerView(deps: BannerViewDeps): BannerView {
         docSel.disabled = bannerStore.count === 0;
       }
       if (delBtn) delBtn.disabled = bannerStore.count <= 1;
+      syncContext();
       if (!doc) return;
 
       if (kindSel) kindSel.value = doc.kind;
+      // The sheet changed shape under the artboard — a preset, the slider, or
+      // a strip between two tiers growing with its blocks — so frame it again
+      // rather than leave it hanging off the sides of the view.
+      const shape = aspectOf(doc);
+      if (doc.id === framedId && Math.abs(shape - framedAspect) > 1e-4) canvas.fitToView();
+      framedId = doc.id;
+      framedAspect = shape;
+      // Between two tiers the gap sets the shape, so the controls that set it
+      // are not the user's to move until the banner is somewhere else.
+      const shapeLocked = doc.slotAspect !== null;
       if (presetSel) {
         if (!presetSel.options.length) {
           opt(presetSel, '', t('bn.preset.custom'));
           for (const b of BANNER_PRESETS) opt(presetSel, b.id, t(`bn.preset.${b.id}`));
         }
         presetSel.value = presetOf(doc) ?? '';
+        presetSel.disabled = shapeLocked;
       }
-      if (aspIn) aspIn.value = String(Math.round(aspectOf(doc) * 100));
+      if (aspIn) {
+        aspIn.value = String(Math.round(aspectOf(doc) * 100));
+        aspIn.disabled = shapeLocked;
+      }
       if (aspOut) aspOut.textContent = aspectLabel(aspectOf(doc));
       if (matSel) matSel.value = doc.material;
       if (gsmSel) gsmSel.value = String(doc.fabricGsm);
       if (bgNone) bgNone.checked = doc.bg === null;
       if (bgIn) {
-        bgIn.value = doc.bg ?? '#ffffff';
+        if (doc.bg) bgIn.value = doc.bg;
         bgIn.disabled = doc.bg === null;
       }
-      if (standSel) standSel.value = String(doc.slot.stand);
+      if (standSel) {
+        // A stand this ground does not have is not somewhere to put a banner.
+        // Every ground in the catalogue has all four; an imported one may not,
+        // and choosing a stand that is not there made the banner vanish.
+        for (const o of standSel.options) {
+          const f = frameFor(Number(o.value) as StandIndex, doc.slot.stands);
+          o.disabled = !f.ok;
+          const name = standName(Number(o.value) as StandIndex);
+          o.textContent = f.ok ? name : tv('bn.stand.none', { name });
+        }
+        standSel.value = String(doc.slot.stand);
+      }
+      if (hiddenNote) hiddenNote.hidden = doc.visible !== false;
       syncSlots(doc);
       if (netChk) netChk.checked = doc.netBacked;
       if (barChk) barChk.checked = doc.weightBar;
-      if (revSel) revSel.value = doc.reveal;
-      if (secsIn) secsIn.value = String(Math.round(secsToSlider(doc.revealMs / 1000)));
-      if (secsOut) secsOut.textContent = secsLabel(doc);
+      syncReveal(doc);
       if (windIn) windIn.value = String(Math.round(doc.wind * 100));
       if (windOut) windOut.textContent = String(Math.round(doc.wind * 100));
       if (brushIn) brushIn.value = String(Math.round(canvas.brushM * 100));
@@ -333,11 +459,9 @@ export function mountBannerView(deps: BannerViewDeps): BannerView {
    * posture the stadium estimator takes: quote the rule, not an opinion.
    */
   function renderFacts(doc: BannerDoc): void {
-    // Measured on the real ground when one is open, and on a typical block
-    // when none is: a seam count is a fact about a physical sheet, so it has
-    // to come from the size the blocks actually give it.
-    const live = askSlots(doc.slot.stand, doc.id, doc.slot.stands).fit;
-    const f = bannerFacts(doc, live ? live.size : estimateSize(doc));
+    // Measured on this ground: a seam count is a fact about a physical sheet,
+    // so it has to come from the size the blocks actually give it.
+    const f = bannerFacts(doc, realSize(doc));
     if (factsEl) {
       factsEl.textContent = tv('bn.facts', {
         panels: f.panels,
@@ -368,10 +492,48 @@ export function mountBannerView(deps: BannerViewDeps): BannerView {
     bannerStore.commit();
   };
 
+  /**
+   * A slider as ONE undo step per drag, not one per pixel of it.
+   *
+   * The gesture opens on the first movement and closes when the slider is let
+   * go — or, for input that never sends a release (a keyboard, a script), a
+   * moment after the last movement, so an open gesture can never swallow the
+   * next edit into itself.
+   */
+  function sliderEdit(el: HTMLInputElement | null, apply: () => void): void {
+    if (!el) return;
+    let open = false;
+    let timer = 0;
+    const close = (): void => {
+      window.clearTimeout(timer);
+      if (!open) return;
+      open = false;
+      bannerStore.commit();
+    };
+    el.addEventListener('input', () => {
+      if (syncing || !bannerStore.active) return;
+      if (!open) {
+        open = true;
+        bannerStore.begin();
+      }
+      apply();
+      window.clearTimeout(timer);
+      timer = window.setTimeout(close, 500);
+    });
+    el.addEventListener('change', close);
+  }
+
   docSel?.addEventListener('change', () => bannerStore.setActive(docSel.value || null));
   newBtn?.addEventListener('click', () => {
     const n = bannerStore.count + 1;
-    bannerStore.add(newBanner('stand', tv('bn.nameN', { n })));
+    const doc = newBanner('stand', tv('bn.nameN', { n }));
+    // On a stand nobody has used yet. Every new banner used to land in the
+    // same centred slot on the North stand, exactly on top of the last one,
+    // so the second banner of a design was invisible under the first.
+    const used = new Set(bannerStore.list().map((b) => b.slot.stand));
+    const free = ([1, 3, 0, 2] as StandIndex[]).find((st) => !used.has(st) && frameFor(st, 1).ok);
+    if (free !== undefined) doc.slot = { ...doc.slot, stand: free };
+    bannerStore.add(doc);
     canvas.fitToView();
     say(t('bn.msg.added'));
   });
@@ -380,15 +542,41 @@ export function mountBannerView(deps: BannerViewDeps): BannerView {
     if (!doc || bannerStore.count <= 1) return;
     bannerStore.remove(doc.id);
     canvas.fitToView();
+    say(t('bn.msg.deletedBanner'));
   });
+  // Renaming happens in place: the menu turns into a field with the name in
+  // it, Enter or leaving it keeps the new one, Escape keeps the old.
+  const endRename = (keep: boolean): void => {
+    if (!nameIn || nameIn.hidden) return;
+    const name = nameIn.value.trim().slice(0, 40);
+    nameIn.hidden = true;
+    if (docSel) docSel.hidden = false;
+    if (keep && name && bannerStore.active && name !== bannerStore.active.name) {
+      edit(() => bannerStore.patch({ name }));
+    }
+    docSel?.focus();
+  };
+  renameBtn?.addEventListener('click', () => {
+    const doc = bannerStore.active;
+    if (!doc || !nameIn || !docSel) return;
+    nameIn.value = doc.name;
+    nameIn.style.width = `${Math.max(120, docSel.getBoundingClientRect().width)}px`;
+    docSel.hidden = true;
+    nameIn.hidden = false;
+    nameIn.focus();
+    nameIn.select();
+  });
+  nameIn?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); endRename(true); }
+    else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); endRename(false); }
+  });
+  nameIn?.addEventListener('blur', () => endRename(true));
+  unhideBtn?.addEventListener('click', () => edit(() => bannerStore.patch({ visible: true })));
 
   kindSel?.addEventListener('change', () => {
     const doc = bannerStore.active;
     if (!doc) return;
-    edit(() => {
-      const next = applyKind(doc, kindSel.value as BannerKind);
-      bannerStore.patch(next);
-    });
+    edit(() => bannerStore.patch(applyKind(doc, kindSel.value as BannerKind)));
     canvas.fitToView();
     say(tv('bn.msg.kind', { name: kindSel.selectedOptions[0]?.textContent?.trim() ?? '' }));
   });
@@ -409,10 +597,10 @@ export function mountBannerView(deps: BannerViewDeps): BannerView {
     canvas.fitToView();
     say(tv('bn.msg.preset', { name: presetSel.selectedOptions[0]?.textContent?.trim() ?? '' }));
   });
-  aspIn?.addEventListener('input', () => {
-    const a = clamp(Number(aspIn.value) / 100, 0.05, 6);
+  sliderEdit(aspIn, () => {
+    const a = clamp(Number(aspIn!.value) / 100, 0.05, 6);
     if (aspOut) aspOut.textContent = aspectLabel(a);
-    edit(() => bannerStore.patch({ aspect: a }));
+    bannerStore.patch({ aspect: a });
     canvas.fitToView();
   });
 
@@ -448,28 +636,25 @@ export function mountBannerView(deps: BannerViewDeps): BannerView {
   });
   tierSel?.addEventListener('change', () => {
     edit(() => bannerStore.patchSlot({ tier: Number(tierSel.value) }));
+    // The artboard changes shape when the banner moves into, or out of, the
+    // gap between two tiers.
+    canvas.fitToView();
   });
-  // Centring is a block choice now, not a coordinate: -1 means "the middle
-  // run of blocks", which is where a tifo goes and which stays the middle
-  // whatever ground the design is opened in.
-  centreBtn?.addEventListener('click', () => {
-    edit(() => bannerStore.patchSlot({ blockFrom: -1 }));
-    say(t('bn.msg.centred'));
-  });
-
+  besideBtn?.addEventListener('click', () => deps.onToggleBeside?.());
 
   netChk?.addEventListener('change', () => edit(() => bannerStore.patch({ netBacked: netChk.checked })));
   barChk?.addEventListener('change', () => edit(() => bannerStore.patch({ weightBar: barChk.checked })));
   revSel?.addEventListener('change', () => edit(() => bannerStore.patch({ reveal: revSel.value as BannerReveal })));
-  secsIn?.addEventListener('input', () => {
-    const ms = Math.round(sliderToSecs(Number(secsIn.value)) * 1000);
-    const doc = bannerStore.active;
-    if (secsOut && doc) secsOut.textContent = secsLabel({ ...doc, revealMs: ms });
-    edit(() => bannerStore.patch({ revealMs: ms }));
+  // Moving the slider is choosing a length; until then the reveal takes as
+  // long as the real one does, at whatever size the banner is now.
+  sliderEdit(secsIn, () => {
+    const ms = Math.round(sliderToSecs(Number(secsIn!.value)) * 1000);
+    bannerStore.patch({ revealMs: ms, revealAuto: false });
   });
-  windIn?.addEventListener('input', () => {
-    if (windOut) windOut.textContent = windIn.value;
-    edit(() => bannerStore.patch({ wind: Number(windIn.value) / 100 }));
+  secsAuto?.addEventListener('click', () => edit(() => bannerStore.patch({ revealAuto: true })));
+  sliderEdit(windIn, () => {
+    if (windOut) windOut.textContent = windIn!.value;
+    bannerStore.patch({ wind: Number(windIn!.value) / 100 });
   });
   mdBtn?.addEventListener('click', () => deps.onOpenMatchDay());
 
@@ -481,6 +666,72 @@ export function mountBannerView(deps: BannerViewDeps): BannerView {
     bannerStore.clearArt();
     say(t('bn.msg.cleared'));
   });
+
+  // -------------------------------------------------------------------------
+  // The selected item
+  // -------------------------------------------------------------------------
+
+  const deleteSelected = (): boolean => {
+    const it = bannerStore.selectedItem;
+    if (!it) return false;
+    bannerStore.removeItem(it.id);
+    say(t('bn.msg.deleted'));
+    historyMoved();
+    return true;
+  };
+  const duplicateSelected = (): boolean => {
+    const it = bannerStore.selectedItem;
+    if (!it) return false;
+    bannerStore.duplicateItem(it.id);
+    say(t('bn.msg.duplicated'));
+    historyMoved();
+    return true;
+  };
+  itemDel?.addEventListener('click', () => deleteSelected());
+  itemDup?.addEventListener('click', () => duplicateSelected());
+  itemFront?.addEventListener('click', () => {
+    const it = bannerStore.selectedItem;
+    if (it) bannerStore.reorderItem(it.id, 'front');
+    historyMoved();
+  });
+  itemBack?.addEventListener('click', () => {
+    const it = bannerStore.selectedItem;
+    if (it) bannerStore.reorderItem(it.id, 'back');
+    historyMoved();
+  });
+
+  /** Nudge the selected item, one undo step per burst of key presses. */
+  let nudgeTimer = 0;
+  let nudging = false;
+  const nudge = (dxPx: number, dyPx: number): boolean => {
+    const it = bannerStore.selectedItem;
+    if (!it) return false;
+    const dx = canvas.pxToUnits(dxPx);
+    const dy = canvas.pxToUnits(dyPx);
+    if (!nudging) {
+      nudging = true;
+      bannerStore.begin();
+    }
+    if (isPlaced(it)) {
+      bannerStore.patchItem(it.id, { cx: it.cx + dx, cy: it.cy + dy } as Partial<BannerItem>);
+    } else if (it.kind === 'stroke') {
+      const pts = it.pts.slice();
+      for (let i = 0; i < pts.length; i += 2) {
+        pts[i] += dx;
+        pts[i + 1] += dy;
+      }
+      bannerStore.patchItem(it.id, { pts } as Partial<BannerItem>);
+    } else if (it.kind === 'patch') {
+      bannerStore.patchItem(it.id, { x: it.x + dx, y: it.y + dy } as Partial<BannerItem>);
+    }
+    window.clearTimeout(nudgeTimer);
+    nudgeTimer = window.setTimeout(() => {
+      nudging = false;
+      bannerStore.commit();
+      historyMoved();
+    }, 450);
+    return true;
+  };
 
   // -------------------------------------------------------------------------
   // Canvas hooks
@@ -522,6 +773,7 @@ export function mountBannerView(deps: BannerViewDeps): BannerView {
     if (z && active) z.textContent = `${canvas.zoomPct}%`;
   };
   canvas.onHistory = historyMoved;
+  canvas.onSelect = () => syncContext();
   canvas.onTwoFingerTap = () => {
     if (!bannerStore.canUndo) return;
     bannerStore.undo();
@@ -535,6 +787,7 @@ export function mountBannerView(deps: BannerViewDeps): BannerView {
   // fallback-font text forever.
   onLangChange(() => {
     invalidateBannerText();
+    if (presetSel) presetSel.replaceChildren();
     sync();
     canvas.requestDraw();
   });
@@ -549,6 +802,7 @@ export function mountBannerView(deps: BannerViewDeps): BannerView {
     },
     setTool(tool: ToolId) {
       canvas.setTool(tool);
+      syncContext();
     },
     undo() {
       bannerStore.undo();
@@ -582,14 +836,17 @@ export function mountBannerView(deps: BannerViewDeps): BannerView {
       // artboard draws. Resize handles take it from there — which is how you
       // size type in a vector editor, and why the seat editor's seat-count
       // slider is not plumbed through to here.
-      const capFrac = bannerFacts(doc, estimateSize(doc)).headlineCapFrac;
+      const capFrac = bannerFacts(doc, realSize(doc)).headlineCapFrac;
       const h = clamp((capFrac * r.canvas.height) / r.glyphHeight, 0.05 * aspect, 0.8 * aspect);
-      const w = h * (r.canvas.width / r.canvas.height);
+      // And never wider than the sheet: on a strip between two tiers the cap
+      // band alone can ask for type a whole banner wide.
+      const w0 = h * (r.canvas.width / r.canvas.height);
+      const k = w0 > 0.94 ? 0.94 / w0 : 1;
       const c = spendPoint();
       canvas.placeText({
         text: o.text, fontId: o.fontId, arcDeg: o.arcDeg, color: o.color,
-        cx: inBanner(c.x, 0, 1), cy: inBanner(c.y, 0, aspect),
-        w, h, rot: 0,
+        cx: fitIn(c.x, w0 * k, 1), cy: fitIn(c.y, h * k, aspect),
+        w: w0 * k, h: h * k, rot: 0,
       });
       return true;
     },
@@ -597,12 +854,13 @@ export function mountBannerView(deps: BannerViewDeps): BannerView {
       const doc = bannerStore.active;
       if (!doc) return false;
       const aspect = aspectOf(doc);
-      const h = 0.3 * aspect;
-      const w = h * (SHAPE_ASPECT[o.shape] ?? 1);
+      const sa = SHAPE_ASPECT[o.shape] ?? 1;
+      const h = Math.min(0.3 * aspect, 0.6 / sa);
+      const w = h * sa;
       const c = spendPoint();
       canvas.placeShape({
         shape: o.shape, color: o.color,
-        cx: inBanner(c.x, 0, 1), cy: inBanner(c.y, 0, aspect),
+        cx: fitIn(c.x, w, 1), cy: fitIn(c.y, h, aspect),
         w, h, rot: 0,
       });
       return true;
@@ -613,14 +871,24 @@ export function mountBannerView(deps: BannerViewDeps): BannerView {
       const src = bitmapToDataUrl(o.bitmap);
       if (!src) return false;
       const aspect = aspectOf(doc);
-      const w = 0.6;
-      const h = w * (o.bitmap.height / Math.max(1, o.bitmap.width));
+      // Six tenths of the width, unless that would be taller than the sheet.
+      const ratio = o.bitmap.height / Math.max(1, o.bitmap.width);
+      const w = Math.min(0.6, (0.8 * aspect) / Math.max(1e-6, ratio));
+      const h = w * ratio;
       const c = spendPoint();
       canvas.placeImage({
         src, name: o.name,
-        cx: inBanner(c.x, 0, 1), cy: inBanner(c.y, 0, aspect),
+        cx: fitIn(c.x, w, 1), cy: fitIn(c.y, h, aspect),
         w, h, rot: 0, opacity: 1,
       });
+      return true;
+    },
+    deleteSelected,
+    duplicateSelected,
+    nudge,
+    escape() {
+      if (!bannerStore.selectedItem) return false;
+      bannerStore.selectItem(null);
       return true;
     },
   };
@@ -630,6 +898,11 @@ export function mountBannerView(deps: BannerViewDeps): BannerView {
   return {
     canvas,
     sync,
+    setBeside(on: boolean) {
+      if (!besideBtn) return;
+      besideBtn.classList.toggle('active', on);
+      besideBtn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    },
     show() {
       active = true;
       bannerHost.current = impl;
@@ -673,9 +946,19 @@ function clamp(v: number, lo: number, hi: number): number {
 function round1(n: number): number {
   return Math.round(n * 10) / 10;
 }
-/** Keep a stamp on the fabric even when the view is scrolled off it. */
-function inBanner(v: number, lo: number, hi: number): number {
-  return clamp(v, lo + (hi - lo) * 0.06, hi - (hi - lo) * 0.06);
+/**
+ * Where to centre something `size` long so all of it lands on a sheet `span`
+ * long, as near the click as that allows.
+ *
+ * The old rule kept the CENTRE six per cent in from the edge, which on a
+ * two-to-one sheet is plenty and on a fascia strip is not: a headline clicked
+ * onto the middle of a three-metre band hung a third of itself off the hem.
+ */
+function fitIn(v: number, size: number, span: number): number {
+  const half = size / 2;
+  if (half * 2 >= span) return span / 2;
+  const pad = Math.min(span * 0.02, (span - size) / 2);
+  return clamp(v, half + pad, span - half - pad);
 }
 
 /**

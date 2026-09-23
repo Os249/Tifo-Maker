@@ -28,6 +28,21 @@ export interface BannerHost {
   placeText(o: { text: string; fontId: string; arcDeg: number; color: string }): boolean;
   placeShape(o: { shape: string; color: string }): boolean;
   placeImage(o: { bitmap: ImageBitmap; name: string }): boolean;
+  /**
+   * The keys, which have to reach the banner too.
+   *
+   * They did not. Ctrl+Z in the Banner view undid the SEAT design — a
+   * surface that was not even on screen — and Delete deleted the seat
+   * editor's selection, so the one thing a user could not do to a banner by
+   * keyboard was the thing they were looking at. Each returns true when it
+   * did something, so the caller knows not to fall through to the seats.
+   */
+  deleteSelected(): boolean;
+  duplicateSelected(): boolean;
+  /** Move the selected item by this many CSS pixels at the current zoom. */
+  nudge(dxPx: number, dyPx: number): boolean;
+  /** Let go of whatever is selected. */
+  escape(): boolean;
 }
 
 /**

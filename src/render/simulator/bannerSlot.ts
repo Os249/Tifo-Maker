@@ -112,6 +112,21 @@ export function slotCount(frame: StandFrame): number {
 export const CROWD_TOP_M = 1.42;
 
 /**
+ * How tall a HELD-UP CARD stands above its seat, in metres.
+ *
+ * The floor under everything below, and its absence is why seats showed
+ * through the fabric in the editor's bowl. A card is drawn at every seat
+ * whether or not anyone is in it — 0.7 m tall, centred 0.9 m up, so its top
+ * is at 1.25 m — and the editor's preview has no crowd at all, so it asked
+ * for a crowd support of ZERO. The sheet then sat 0.4 m off the terracing
+ * with the cards reaching past a metre, and thirty thousand of them came
+ * through it.
+ *
+ * An empty stand is not a bare stand. There is always something on it.
+ */
+export const SEAT_CARD_TOP_M = 1.34;
+
+/**
  * How high the crowd holds a sheet off the terracing, measured STRAIGHT UP.
  *
  * A banner drawn over a full block does not lie on the terracing — it lies on
@@ -129,7 +144,8 @@ export const CROWD_TOP_M = 1.42;
 export function crowdSupportM(fill: number): number {
   const t = (fill - 0.15) / 0.45;
   const s = t <= 0 ? 0 : t >= 1 ? 1 : t * t * (3 - 2 * t);
-  return CROWD_TOP_M * s;
+  // From the cards to the heads, never from nothing.
+  return SEAT_CARD_TOP_M + (CROWD_TOP_M - SEAT_CARD_TOP_M) * s;
 }
 
 function clamp(v: number, lo: number, hi: number): number {
@@ -418,6 +434,63 @@ export function hangCentre(frame: StandFrame, slot: ResolvedSlot): { x: number; 
     y: hangAnchorY(frame, slot) - slot.size.heightM / 2,
     z: p.z + p.oz * off,
   };
+}
+
+/**
+ * The shape a slot imposes on a sheet, or null when the artwork decides.
+ *
+ * Only one slot imposes one: a hanging banner in the gap between two tiers,
+ * which fills that gap edge to edge and so is exactly as deep as the band is,
+ * whatever proportions the artwork was drawn at. Everywhere else the artwork's
+ * own shape sets the depth and a slot that cannot take it scales the whole
+ * sheet down — which keeps the shape — so there is nothing to impose.
+ *
+ * The store asks this after every change to a banner's slot or type, and the
+ * artboard and the texture then draw at the band's proportions: the design is
+ * drawn on the strip it will be printed on, instead of being drawn at 2:1 and
+ * squashed onto an 11:1 strip in the bowl.
+ */
+export function slotAspectFor(doc: BannerDoc, frame: StandFrame): number | null {
+  if (!frame.ok || doc.kind !== 'hanging') return null;
+  const r = resolveSlot(doc, frame);
+  if (!(r.tier >= 1 && r.tier < frame.tiers.length)) return null;
+  return r.size.heightM / Math.max(0.1, r.size.widthM);
+}
+
+/**
+ * Bring a banner into line with the stand it is now on.
+ *
+ * Two things can go stale when a banner moves — to another stand, round a
+ * corner, or into the air — and both used to be papered over in the panel
+ * while the bowl drew something else:
+ *
+ * - its TIER. A flown banner cannot use a tier whose fascia gap is too thin
+ *   to hang anything in, and a stand may have fewer tiers than the last one.
+ *   The picker showed "Whole stand" for such a tier while the bowl drew a
+ *   strip in a gap half a metre deep.
+ * - the SHAPE a gap imposes — `slotAspectFor`, above.
+ *
+ * Returns true if it changed anything.
+ */
+export function settleSlot(doc: BannerDoc, frame: StandFrame): boolean {
+  if (!frame.ok) return false;
+  let changed = false;
+  const tier = doc.slot.tier;
+  if (tier >= 0) {
+    const ok = tier < frame.tiers.length && (doc.kind !== 'hanging' || hangableTiers(frame).includes(tier));
+    if (!ok) {
+      doc.slot = { ...doc.slot, tier: -1 };
+      changed = true;
+    }
+  }
+  const next = slotAspectFor(doc, frame);
+  const was = doc.slotAspect ?? null;
+  const same = next === null ? was === null : was !== null && Math.abs(next - was) < 1e-4;
+  if (!same) {
+    doc.slotAspect = next;
+    changed = true;
+  }
+  return changed;
 }
 
 /**

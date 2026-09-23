@@ -1,8 +1,9 @@
-Tifo Maker — banners rebuild: run it, then commit it
-=====================================================
+Tifo Maker — banners review: run it, then commit it
+===================================================
 
 Everything is already in C:\Users\PCD\Desktop\tifo-maker. Nothing to bundle,
-nothing to download.
+nothing to download. Your main is at "Tifo Maker — banners rebuild"; all of
+this is uncommitted on top of it.
 
 
 PART 1 — LOOK AT IT (no commit, no build needed)
@@ -16,91 +17,95 @@ PART 1 — LOOK AT IT (no commit, no build needed)
 
        npm run dev
 
-3. Open http://localhost:5173/  — that is the editor.
+3. Open http://localhost:5173/ — that is the editor. Leave the terminal
+   running; it recompiles as you edit.
 
-   Leave this terminal running. It recompiles as you edit.
-
-4. OPTIONAL — only if you want save / account / community to work. In a
-   SECOND terminal:
+4. OPTIONAL — only for save / account / community. In a SECOND terminal:
 
        npm run server
-
-   (The editor, the 3D view and Match Day all work without it. Only the API
-   calls need it.)
-
-You do NOT need to delete anything for this. `npm run dev` does not
-typecheck, and nothing in the live app imports the five dead files.
 
 
 PART 2 — WHAT TO CHECK
 ----------------------
 
-In the Banner view:
-  - Size preset dropdown: one block / one block tall / two blocks /
-    two blocks tall / four blocks
-  - Shape slider (sits between the presets)
-  - Across: this stand, or two stands round the corner
-  - First block, how many, tier
-  - The size readout in metres under the pickers
+Banner view (the flag in the left rail):
+  - The right-hand panel shows Stand, Across, Blocks, How many and Tier, and
+    "Measures W × H m on this ground" — without opening Match Day.
+  - "Show it in the stadium": the bowl opens beside the artboard, looking at
+    the banner. Change the stand or the blocks and it follows.
+  - Add a text and click it: Front / Back / Duplicate / Delete appear in the
+    panel. Delete, Ctrl+Z, Ctrl+Y, Ctrl+D and the arrow keys act on the
+    banner — not on the seat design behind it.
+  - The pencil next to the banner's name in the top bar renames it.
+  - Type "Hanging banner", Tier 2 on a two-tier ground: the artboard becomes
+    the long strip between the tiers and the shape controls lock, saying why.
+    Set Tier back to "Whole stand" and your own shape comes back.
+  - Reveal: a stand banner offers "Unroll down the stand" or "Already up"; a
+    hanging banner offers "Haul up on ropes" or "Already up". The seconds
+    follow the size until you move the slider; "Use the real time" puts that
+    back.
+  - A brand-new banner is white cloth, not invisible.
 
-In the Stadium view (the 3D bowl in the editor):
-  - The banner should be there, solid, with visible folds
+Stadium view:
+  - Camera -> "Your banner".
+  - No seats coming through the fabric, on an empty stand as well.
 
-In Match Day:
-  - Change the stand (W/E/N/S) — the banner should move
-  - Wind to max — the fabric should move, slightly
-  - Play the reveal: a stand banner unrolls DOWN, a hanging banner is
-    hauled UP from its hem
-  - Hanging banner: whole stand / lower tier reach the grass; upper tier
-    sits in the gap between the tiers
+Match Day ("See it on match day" at the bottom of the banner panel):
+  - It opens looking at the banner, with the Banners section open.
+  - Stand East puts it on East (it used to go to North).
+  - Play: the scrub bar follows the reveal instead of jumping to the end.
+
+Stadium panel (Stadium in the left rail):
+  - The region filter says "Any region" and each stadium's details say
+    "Region". Before this they printed "sp.anyRegion" and "sp.region".
+  - Load The Jewel of Jeddah: the status bar at the bottom says "The Jewel of
+    Jeddah", not "community-jewel-jeddah-62k".
+  - Switch to Arabic: the stadium names, their details and the notice under
+    them are Arabic, and the dropdown arrows no longer sit on the words.
 
 
-PART 3 — COMMIT AND PUSH
-------------------------
+PART 3 — COMMIT
+---------------
 
 Only when you are happy with what you saw.
 
 1. Stop the dev server (Ctrl+C).
 
-2. Delete the five dead files. They are orphans — nothing imports them —
-   but `npm run build` typechecks the whole repo and will fail while they
-   are there:
+2. Delete the five retired banner files. I could not delete them from here,
+   so I emptied them — the build passes while they are there — but they
+   should go:
 
-       git rm scripts/banner-physics.mts src/core/bannerMigrate.ts src/render/simulator/bannerFit.ts src/render/simulator/cloth.ts src/render/simulator/standHeightfield.ts
+       Remove-Item scripts\banner-physics.mts
+       Remove-Item src\core\bannerMigrate.ts
+       Remove-Item src\render\simulator\bannerFit.ts
+       Remove-Item src\render\simulator\cloth.ts
+       Remove-Item src\render\simulator\standHeightfield.ts
+
+   Optional, the same kind of leftover (the old Banner Studio; nothing uses
+   it, it still compiles):
+
+       Remove-Item src\ui\bannerStudio.ts
+
+   GitHub Desktop lists them as deleted; they go in with the rest.
 
 3. Prove it builds:
 
        npm run build
        npm run verify
 
-   Optional but worth it once (about four minutes):
+   Optional, a few minutes:
 
        npm run sweep:banner
 
-4. Check which branch you are on:
+4. Commit. The message is in BANNERS-REBUILD-COMMIT.txt in this folder, with
+   the Summary and the Description labelled separately — paste them into
+   GitHub Desktop's two fields.
 
-       git status
-
-   If you are on main and want this on its own branch:
-
-       git checkout -b banners-rebuild
-
-5. Stage and commit. The message is in BANNERS-REBUILD-COMMIT.txt in this
-   folder — Summary and Description are labelled separately in it:
-
-       git add -A
-       git commit
-
-   (Or paste the two parts into GitHub Desktop's Summary and Description
-   fields.)
-
-6. Push:
-
-       git push -u origin banners-rebuild
+5. Pushing is yours. Pushing main runs CI, and Railway deploys main, so push
+   after step 3 passes.
 
 
 IF THE BUILD FAILS
 ------------------
 
-Send me the error. Most likely cause is one of the five files not deleted,
-or a file that did not copy across — I can check any file against my copy.
+Send me the error. I can check any file against my copy.

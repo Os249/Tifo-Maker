@@ -232,11 +232,17 @@ console.log('\n— canvas gestures —');
   await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: canvas.x - 40, y: canvas.y }, { x: canvas.x + 40, y: canvas.y }] });
   await p.waitForTimeout(60);
   await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
-  await p.waitForTimeout(900);
-  const toast = await p.evaluate(() => {
+  // Watched for rather than read after a fixed wait. The toast lives 900 ms
+  // (toolbar.ts) and a CDP touch pair takes ~285 ms to arrive here, so any fixed
+  // wait races it from one side or the other: this one read at 900 ms, and on a
+  // loaded machine failed with the toast's own text, "Undone", in hand.
+  const seenToast = () => p.waitForFunction(() => {
     const t = document.querySelector('.gesture-toast');
-    return { shown: !!t && t.classList.contains('show'), text: t?.textContent || '' };
-  });
+    return t && t.classList.contains('show') ? t.textContent || ' ' : null;
+  }, null, { timeout: 3000, polling: 25 })
+    .then((h) => h.jsonValue())
+    .then((text) => ({ shown: true, text }), () => ({ shown: false, text: '' }));
+  const toast = await seenToast();
   check('two-finger tap undoes and confirms', toast.shown, toast.text);
 
   // Double tap fits the view.
@@ -259,11 +265,7 @@ console.log('\n— canvas gestures —');
     await new Promise((r2) => setTimeout(r2, 120));
     ev('pointerdown', 42); ev('pointerup', 42);
   });
-  await p.waitForTimeout(700);
-  const toast2 = await p.evaluate(() => {
-    const t = document.querySelector('.gesture-toast');
-    return { shown: !!t && t.classList.contains('show'), text: t?.textContent || '' };
-  });
+  const toast2 = await seenToast();
   check('double tap fits the whole stadium', toast2.shown, toast2.text);
 
   // Pinch changes the zoom.

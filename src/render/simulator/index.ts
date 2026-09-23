@@ -21,7 +21,8 @@ import { buildAssetLayer, type AssetLayer } from './assetLayer';
 import { buildBannerRigs, type BannerRigLayer } from './bannerRig';
 import { standIsRoofed } from './roof';
 import { buildPlacement, type PlacementHelper } from './bannerPlace';
-import { resolveSlot, hangCentre, maxUsefulSpan, hangableTiers } from './bannerSlot';
+import { maxUsefulSpan, hangableTiers } from './bannerSlot';
+import { bannerShot } from './bannerCamera';
 import type { BannerStore, StandIndex } from '../../core/banner';
 import type { AssetStore, SceneAsset } from '../../core/sceneAssets';
 import { rasterize } from '../../core/importImage';
@@ -270,8 +271,6 @@ export class MatchDaySimulator {
       );
       this.scene.add(this.bannerRigs.object);
       this.bindBannerPointer();
-      document.addEventListener('tifo:stand-extent', this.onStandExtent as EventListener);
-      document.addEventListener('tifo:stand-slots', this.onStandSlots as EventListener);
     }
     // Silent until asked for. Sound that starts by itself is hostile, and a
     // browser will refuse to start it outside a gesture anyway.
@@ -1177,50 +1176,6 @@ export class MatchDaySimulator {
   private readonly ray = new THREE.Raycaster();
   private readonly ndc = new THREE.Vector2();
 
-  /**
-   * Answer the editor's "how big is that stand?" question.
-   *
-   * The Banner view's "Fit the stand" button needs the stand's real width and
-   * height in metres, and only the simulator has measured them. Rather than
-   * duplicate the measurement in the editor — where it would be a second
-   * opinion able to disagree — the editor asks by dispatching an event and
-   * this fills in the answer when a simulator is open. When none is, the
-   * button says so and falls back to the banner type's own default band,
-   * which is an honest guess rather than a confident wrong number.
-   */
-  /**
-   * What the editor can ask about a stand it cannot see.
-   *
-   * The editor has the template; only the simulator has the built bowl, and
-   * therefore the only honest answer to "how many blocks does the North stand
-   * have" or "will this banner fit". Answered through the same custom event
-   * the size button already used, so the editor stays able to run with no
-   * simulator open at all.
-   */
-  private readonly onStandSlots = (
-    e: CustomEvent<{ stand: number; blocks?: number[]; tiers?: number[]; fit?: unknown; maxSpan?: number; tierOptions?: number[]; stands?: number; bannerId?: string }>,
-  ): void => {
-    if (!this.placement) return;
-    const f = this.placement.frameFor(((e.detail?.stand ?? 1) % 4) as StandIndex, e.detail?.stands ?? 1);
-    if (!f.ok) return;
-    e.detail.blocks = f.blocks.map((b) => b.widthM);
-    e.detail.tiers = f.tiers.map((t) => t.slopeM);
-    const doc = e.detail.bannerId ? this.bannerStore?.get(e.detail.bannerId) : this.bannerStore?.active;
-    if (doc) {
-      e.detail.fit = resolveSlot(doc, f);
-      e.detail.maxSpan = maxUsefulSpan(doc, f);
-      e.detail.tierOptions = doc.kind === 'hanging' ? hangableTiers(f) : f.tiers.map((_, i) => i);
-    }
-  };
-
-  private readonly onStandExtent = (e: CustomEvent<{ stand: number; width?: number; height?: number }>): void => {
-    if (!this.placement) return;
-    const f = this.placement.frameFor(((e.detail?.stand ?? 1) % 4) as StandIndex);
-    if (!f.ok) return;
-    e.detail.width = f.widthM;
-    e.detail.height = f.heightM;
-  };
-
   private setNdc(ev: PointerEvent): void {
     const r = this.canvas.getBoundingClientRect();
     this.ndc.x = ((ev.clientX - r.left) / r.width) * 2 - 1;
@@ -1324,6 +1279,10 @@ export class MatchDaySimulator {
   setBannerProgress(id: string, p: number): void {
     this.bannerRigs?.setProgress(id, p);
   }
+  /** Where a banner has got to in its reveal, for a scrub bar that follows it. */
+  bannerRevealState(id: string): { progress: number; playing: boolean } | null {
+    return this.bannerRigs?.revealState(id) ?? null;
+  }
   selectBanner(id: string | null): void {
     this.bannerRigs?.select(id);
   }
@@ -1376,82 +1335,15 @@ export class MatchDaySimulator {
   focusBanner(id: string, elevationDeg?: number): boolean {
     const doc = this.bannerStore?.get(id);
     if (!doc || !this.placement) return false;
-    const f = this.placement.frameFor(doc.slot.stand, doc.slot.stands);
-    if (!f.ok) return false;
-    // Aim at the middle of the sheet, not at the rail it hangs from, and
-    // stand where the people it is aimed at stand: back across the pitch and
-    // LOW. A banner lying on a raked stand is a near-horizontal surface, so a
-    // camera parked above it sees an edge; the view that reads is the one from
-    // the opposite end, which is who a tifo is for.
-    // Framed on the RESOLVED slot, not on anything the editor asked for: the
-    // slot is where the banner is and how big it is, and it already knows
-    // where its own top and bottom edges sit on the stand.
-    const slot = resolveSlot(doc, f);
-    const alongU = (slot.u0 + slot.u1) / 2;
-    const onStand = f.pointAt(alongU, Math.max(0, (slot.v1 + slot.vBottom) / 2));
-    // A hanging banner is not ON the stand, so the stand's own coordinates say
-    // nothing about where it is: it hangs in the air, standing off its anchor
-    // far enough to clear everything below, and aiming at the terracing
-    // behind it pointed the camera at the seats while the sheet hung out of
-    // frame entirely.
-    const c = doc.kind === 'hanging' ? hangCentre(f, slot) : null;
-    const mid = c
-      ? { x: c.x, y: c.y, z: c.z, ox: onStand.ox, oz: onStand.oz }
-      : onStand;
-    const cy = c ? c.y : (f.pointAt(alongU, Math.min(1, slot.v1)).y + onStand.y) / 2;
-    // Elevation matters more than distance. A banner lying on a raked stand is
-    // a near-horizontal surface: from pitch level you see its edge, and the
-    // artwork disappears. Thirty-odd degrees up is roughly where the main
-    // camera gantry sits, and it is the angle every photograph of a kop tifo
-    // is taken from.
-    // Far enough back to hold the banner, and never outside the ground.
-    //
-    // A banner covering a whole stand is over a hundred metres wide, and
-    // stepping back far enough to frame it put the camera two hundred metres
-    // out — behind the stand it was aimed at, looking at the back of the
-    // building. Every one of those shots came out black.
-    const bowlR = Math.hypot(mid.x, mid.z) || 60;
-    // Far enough to hold BOTH dimensions. A flown banner can be taller than
-    // it is wide, and a distance chosen from the width alone put the camera
-    // inside a 23 m drop.
-    const reach = Math.max(slot.size.widthM, slot.size.heightM * 1.7);
-    const d = Math.min(bowlR * 1.85, Math.max(70, reach * 2.4));
-    // Overridable, because the flattering angle and the honest angle are not
-    // the same angle. From the gantry a sheet that has sunk into the seating
-    // looks identical to one resting on it; from pitch level, grazing along
-    // the terracing, it is unmistakable. The shot harness asks for the second
-    // one on purpose.
-    // The angle follows what the banner IS, not a constant.
-    //
-    // A sheet lying on a raked stand is a near-horizontal surface: from pitch
-    // level you see its edge, so it wants the thirty-odd degrees where the
-    // main camera gantry sits. A flown banner is a vertical plane and wants
-    // the opposite — look down at it and you see its top hem. Using the
-    // stand's angle for both framed a hanging banner nearly edge-on, with the
-    // sheet below the bottom of the picture and only its ropes in shot.
-    let el =
-      elevationDeg !== undefined
-        ? (elevationDeg * Math.PI) / 180
-        : doc.kind === 'hanging' ? 0.2 : 0.55;
-    // Under the roof.
-    //
-    // Thirty degrees up is roughly the main camera gantry and it is the angle
-    // every photograph of a kop tifo is taken from — in an open bowl. In a
-    // roofed arena it puts the camera in the rafters, looking at the dark
-    // underside of the roof, and the shot comes back black. It did, on the
-    // Kingdom Arena, for every banner on it.
-    if (elevationDeg === undefined) {
-      const headroom = f.roofY - 3 - cy;
-      if (headroom < d * Math.sin(el)) {
-        el = Math.max(0.12, Math.asin(Math.max(-1, Math.min(1, headroom / d))));
-      }
-    }
-    applyCameraShot(this.camera, this.controls, {
-      name: 'Banner',
-      position: [mid.x + mid.ox * d * Math.cos(el), cy + d * Math.sin(el), mid.z + mid.oz * d * Math.cos(el)],
-      target: [mid.x, Math.max(1.5, cy), mid.z],
-      fov: 44,
-    });
+    const shot = bannerShot(doc, this.placement.frameFor(doc.slot.stand, doc.slot.stands), { elevationDeg });
+    if (!shot) return false;
+    // Whatever glide was under way is over. Opening the simulator starts one
+    // towards the default camera, and it carried on for most of a second after
+    // this had pointed the camera at the banner — so the banner was framed,
+    // and then quietly un-framed, before anyone saw it.
+    this.camTween = null;
+    this.flyActive = false;
+    applyCameraShot(this.camera, this.controls, { name: 'Banner', ...shot });
     return true;
   }
 
@@ -1784,8 +1676,6 @@ export class MatchDaySimulator {
     this.banners.dispose();
     this.bannerRigs?.dispose();
     this.placement?.dispose();
-    document.removeEventListener('tifo:stand-extent', this.onStandExtent as EventListener);
-    document.removeEventListener('tifo:stand-slots', this.onStandSlots as EventListener);
     this.canvas.removeEventListener('pointerdown', this.onBannerDown);
     this.canvas.removeEventListener('pointermove', this.onBannerMove);
     this.canvas.removeEventListener('pointerup', this.onBannerUp);

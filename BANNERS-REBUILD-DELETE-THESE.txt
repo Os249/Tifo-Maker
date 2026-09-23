@@ -1,9 +1,9 @@
 Banners rebuild — five files to delete in C:\Users\PCD\Desktop\tifo-maker
 
-I could not delete them from here: the Linux workspace on your PC did not
-start this session, so I could only write files, not remove them. They all
-reference modules that no longer exist, so `npm run build` will fail until
-they are gone.
+Nothing imports them. I could not delete them from here, so I emptied them
+instead: each is now a comment and `export {}`. That means `npm run build`
+passes while they are there (before, it failed on them, and so would the
+Docker build Railway runs). They should still go.
 
 PowerShell, from the repo root:
 
@@ -13,21 +13,17 @@ PowerShell, from the repo root:
     Remove-Item src\render\simulator\cloth.ts
     Remove-Item src\render\simulator\standHeightfield.ts
 
-Or, if you prefer git to do it:
+Optional — the same kind of leftover, still compiling, nothing uses it:
 
-    git rm scripts/banner-physics.mts src/core/bannerMigrate.ts src/render/simulator/bannerFit.ts src/render/simulator/cloth.ts src/render/simulator/standHeightfield.ts
+    Remove-Item src\ui\bannerStudio.ts
+
+GitHub Desktop will list them as deleted; commit that with the rest.
 
 What they were:
 
-    cloth.ts              1,057 lines   the XPBD cloth solver
-    standHeightfield.ts     220 lines   the baked collider it checked against
-    bannerFit.ts            208 lines   sizing against a free position
-    bannerMigrate.ts         90 lines   the retired Banner Studio's importer
-    banner-physics.mts                  the old solver's test harness
-
-Then:
-
-    npm run build          # tsc + vite
-    npm run verify
-    npm run sweep:banner   # 26,964 configurations, about two minutes
-    npm run shots:banner   # 17 frames into preview-out/banners
+    cloth.ts              the XPBD cloth solver
+    standHeightfield.ts   the baked collider it checked against
+    bannerFit.ts          sizing against a free position
+    bannerMigrate.ts      the retired Banner Studio's importer
+    banner-physics.mts    the old solver's test harness
+    bannerStudio.ts       the retired Banner Studio itself

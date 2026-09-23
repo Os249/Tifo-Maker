@@ -312,6 +312,8 @@ export interface OffscreenOptions {
   perforate?: boolean;
   /** Force a background even on a transparent banner (thumbnails want one). */
   background?: string | null;
+  /** Grow the long edge until the short one has at least this many pixels. */
+  minShortEdge?: number;
 }
 
 /**
@@ -323,8 +325,14 @@ export interface OffscreenOptions {
  * and comfortably above what the fabric can hold.
  */
 export function bannerToCanvas(doc: BannerDoc, opts: OffscreenOptions = {}): HTMLCanvasElement {
-  const maxEdge = opts.maxEdge ?? 2048;
   const aspect = aspectOf(doc);
+  // A strip needs pixels across its SHORT side too. A fascia banner is fifteen
+  // or twenty times wider than it is deep, and at a fixed long edge its
+  // lettering came out forty pixels tall — a smear from anywhere in the
+  // ground. The long edge grows until the short one has enough, up to the
+  // largest texture every GPU takes.
+  const ratio = aspect >= 1 ? aspect : 1 / aspect;
+  const maxEdge = Math.min(4096, Math.max(opts.maxEdge ?? 2048, (opts.minShortEdge ?? 0) * ratio));
   const w = aspect >= 1 ? Math.round(maxEdge / aspect) : maxEdge;
   const h = aspect >= 1 ? maxEdge : Math.round(maxEdge * aspect);
   const canvas = document.createElement('canvas');

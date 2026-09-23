@@ -13,7 +13,12 @@ const errs=[]; page.on('pageerror',e=>errs.push(String(e.message).slice(0,200)))
 let pass=0,fail=0; const check=(n,ok,x='')=>{(ok?pass++:fail++);console.log(`  ${ok?'PASS':'FAIL'}  ${n}${x?'  '+x:''}`)};
 
 const U='ultra'+Date.now().toString(36);
-const reg=await page.request.post(B+'/api/auth/register',{data:{username:U,password:'hunter22pass',email:U+'@example.test',acceptedVersion:'2025-01-01'}});
+// A password the policy accepts. This was 'hunter22pass', which the password
+// policy now refuses as too common — so registration failed, no design was
+// ever created, and five checks below failed for a reason none of them named.
+const PW='harbor-kite-moss-31';
+const reg=await page.request.post(B+'/api/auth/register',{data:{username:U,password:PW,email:U+'@example.test',acceptedVersion:'2025-01-01'}});
+if(!reg.ok()) throw new Error(`could not register the test account: ${reg.status()} ${await reg.text()}`);
 const H={authorization:'Bearer '+(await reg.json()).token,'content-type':'application/json'};
 const tpl=(await (await page.request.get(B+'/api/templates')).json())[0];
 const cells=new Uint8Array(tpl.seatCount); for(let i=0;i<cells.length;i++) cells[i]=i%4;
@@ -66,7 +71,7 @@ await page.goto(B+'/app',{waitUntil:'domcontentloaded'});
 await page.waitForFunction(()=>{const s=document.getElementById('stat');return s&&/seats/.test(s.textContent||'');},null,{timeout:90000});
 await page.waitForTimeout(1200);
 // Sign in as the same account the designs belong to.
-await page.evaluate(([t])=>localStorage.setItem('tifo_token_v1',t), [ (await (await page.request.post(B+'/api/auth/login',{data:{username:U,password:'hunter22pass'}})).json()).token ]);
+await page.evaluate(([t])=>localStorage.setItem('tifo_token_v1',t), [ (await (await page.request.post(B+'/api/auth/login',{data:{username:U,password:PW}})).json()).token ]);
 await page.reload({waitUntil:'domcontentloaded'});
 await page.waitForFunction(()=>{const s=document.getElementById('stat');return s&&/seats/.test(s.textContent||'');},null,{timeout:90000});
 await page.waitForTimeout(1500);

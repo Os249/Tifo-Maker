@@ -266,6 +266,15 @@ console.log('\n— the banner shows in the editor bowl —');
   await page.waitForTimeout(1500);
   await page.click('#view-3d');
   await page.waitForTimeout(9000);
+  // The CLOSEST camera, not the default one.
+  //
+  // This gate passed while thirty thousand seat cards were coming through the
+  // fabric, because the default view is the whole bowl from 245 m up: the
+  // banner was 177 px wide there and everything poking through it was smaller
+  // than a pixel. A check that can only see gross faults is a check that
+  // reports gross faults.
+  await page.selectOption('#camera-preset', '0');
+  await page.waitForTimeout(2500);
   const solid = await page.evaluate(() => {
     const cv = document.querySelector('#preview-host canvas');
     if (!cv) return null;
@@ -308,6 +317,188 @@ console.log('\n— the banner shows in the editor bowl —');
     solid ? `${((solid.pct ?? 1) * 100).toFixed(1)}% of the middle is not the banner` : 'no reading',
   );
   check('no page errors in the editor bowl', errs.length === 0, errs.join(' | '));
+  await ctx.close();
+}
+
+// The panel, the keys and the things on the sheet — each of which was broken
+// in a way no screenshot of the default state could show.
+console.log('\n— the Banner view\'s own controls —');
+{
+  const { ctx, page, errs } = await openApp(1500, 900, 'en');
+
+  // A seat stroke first, so the SEAT editor has something to undo. Ctrl+Z in
+  // the Banner view used to spend it: the key went to the seats, which are
+  // not on screen, and a stroke vanished from a surface nobody was looking at.
+  const seat = await page.$eval('#canvas-host canvas', (c) => {
+    const r = c.getBoundingClientRect();
+    return { x: r.x + r.width * 0.5, y: r.y + r.height * 0.5 };
+  });
+  await page.mouse.move(seat.x - 60, seat.y);
+  await page.mouse.down();
+  for (let i = 0; i <= 8; i++) await page.mouse.move(seat.x - 60 + i * 15, seat.y + (i % 2) * 6);
+  await page.mouse.up();
+  await page.waitForTimeout(400);
+  const seatUndo = await page.$eval('#undo', (b) => !b.disabled);
+
+  await page.click('#view-banner');
+  await page.waitForTimeout(1000);
+
+  // The pickers are there without Match Day. They used to come from an event
+  // only an open simulator answered, and Match Day covers the whole screen —
+  // so in practice nobody ever saw the block or tier pickers at all.
+  const panel = await page.evaluate(() => {
+    const shown = (id) => {
+      const el = document.getElementById(id);
+      if (!el) return false;
+      const r = el.getBoundingClientRect();
+      return r.width > 0 && r.height > 0 && getComputedStyle(el).display !== 'none';
+    };
+    return {
+      blocks: shown('bn-block') && document.getElementById('bn-block').options.length > 2,
+      span: shown('bn-span') && document.getElementById('bn-span').options.length >= 1,
+      tier: shown('bn-tier-row'),
+      size: document.getElementById('bn-size-out')?.textContent ?? '',
+      fabric: document.getElementById('bn-bg-none')?.checked === false,
+      reveals: [...document.getElementById('bn-reveal').options].map((o) => o.value),
+      brush: shown('bn-brush-block'),
+      seatBrush: shown('ctx-brush'),
+    };
+  });
+  check('the block pickers are there without Match Day', panel.blocks && panel.span, JSON.stringify(panel));
+  check('the tier picker is there without Match Day', panel.tier);
+  check('the size is measured on this ground, not estimated', /ground|ملعب/.test(panel.size) && !/about|حوالي/.test(panel.size), panel.size);
+  check('a new banner is cloth, not see-through', panel.fabric);
+  check('a stand banner offers only what it can do: unroll, or already up', panel.reveals.join() === 'unroll,cut', panel.reveals.join());
+  check('the banner brush is shown for the brush, the seat brush is not', panel.brush && !panel.seatBrush);
+
+  // A hanging banner offers its own motion instead.
+  await page.selectOption('#bn-kind', 'hanging');
+  await page.waitForTimeout(400);
+  const hang = await page.evaluate(() => ({
+    reveals: [...document.getElementById('bn-reveal').options].map((o) => o.value),
+    preset: document.getElementById('bn-preset').value,
+    tiers: [...document.getElementById('bn-tier').options].map((o) => o.value),
+  }));
+  check('a hanging banner offers: haul up, or already up', hang.reveals.join() === 'hoist,cut', hang.reveals.join());
+  check('changing the type keeps the size preset', hang.preset === 'two', hang.preset);
+
+  // Between two tiers the gap sets the shape — the artboard becomes the strip
+  // the banner will be printed on, instead of a 2:1 sheet squashed in the bowl.
+  if (hang.tiers.includes('1')) {
+    const beforeStrip = await artboardHash(page);
+    await page.selectOption('#bn-tier', '1');
+    await page.waitForTimeout(600);
+    const strip = await page.evaluate(() => ({
+      locked: document.getElementById('bn-preset').disabled && document.getElementById('bn-aspect').disabled,
+      note: getComputedStyle(document.getElementById('bn-fit-note')).display !== 'none',
+      ratio: document.getElementById('bn-aspect-out').textContent,
+    }));
+    check('between two tiers the gap sets the shape', strip.locked && strip.note, JSON.stringify(strip));
+    check('the artboard becomes the strip', (await artboardHash(page)) !== beforeStrip && /^(\d+):1$/.test(strip.ratio) && Number(strip.ratio.split(':')[0]) >= 5, strip.ratio);
+    await page.selectOption('#bn-tier', '-1');
+    await page.waitForTimeout(400);
+    const back = await page.evaluate(() => ({ ratio: document.getElementById('bn-aspect-out').textContent, locked: document.getElementById('bn-preset').disabled }));
+    check('out of the gap, the shape is the user\'s again', back.ratio === '2:1' && !back.locked, JSON.stringify(back));
+  }
+  await page.selectOption('#bn-kind', 'stand');
+  await page.waitForTimeout(400);
+
+  // A word on the sheet, then pick it up, delete it, and bring it back.
+  await page.click('.tool-rail [data-tool="text"]');
+  await page.waitForTimeout(250);
+  await page.fill('#text-input', 'ULTRAS');
+  const mid = await page.$eval('#banner-host canvas', (c) => {
+    const r = c.getBoundingClientRect();
+    return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+  });
+  await page.mouse.click(mid.x, mid.y);
+  await page.waitForTimeout(1100);
+  const placed = await page.evaluate(() => ({
+    block: !document.getElementById('bn-item-block').hidden,
+    name: document.getElementById('bn-item-name').textContent,
+  }));
+  check('a placed word is selected, with its actions beside it', placed.block && /ULTRAS/.test(placed.name), JSON.stringify(placed));
+  // Clicked onto the middle, it lands on the middle — the text bar opening
+  // above the artboard used to shift the sheet half a bar out from under it.
+  await page.click('.tool-rail [data-tool="select"]');
+  await page.mouse.click(mid.x, mid.y);
+  await page.waitForTimeout(400);
+  check('clicking where it was placed picks it up', await page.evaluate(() => !document.getElementById('bn-item-block').hidden));
+  await page.mouse.move(5, 5);
+  await page.keyboard.press('Delete');
+  await page.waitForTimeout(900);
+  const gone = ((await storedBanner(page))?.banners?.[0]?.items ?? []).some((i) => i.kind === 'text');
+  check('Delete takes the selected word off the banner', !gone);
+  await page.keyboard.press('Control+z');
+  await page.waitForTimeout(900);
+  const back = ((await storedBanner(page))?.banners?.[0]?.items ?? []).some((i) => i.kind === 'text');
+  check('Ctrl+Z in the Banner view undoes the BANNER', back);
+  // Undo everything the banner has, and then some.
+  for (let i = 0; i < 12; i++) await page.keyboard.press('Control+z');
+  await page.waitForTimeout(500);
+  await page.click('#view-2d');
+  await page.waitForTimeout(600);
+  const seatStill = await page.$eval('#undo', (b) => !b.disabled);
+  check('Ctrl+Z in the Banner view never touches the seats', seatUndo && seatStill, `seat undo before ${seatUndo}, after ${seatStill}`);
+
+  // Beside the bowl: the banner and the stadium together, the camera on it.
+  await page.click('#view-banner');
+  await page.waitForTimeout(700);
+  await page.click('#bn-beside');
+  await page.waitForTimeout(9000);
+  const split = await page.evaluate(() => {
+    const r = (id) => document.getElementById(id).getBoundingClientRect();
+    const b = r('banner-host');
+    const p = r('preview-host');
+    return {
+      side: b.width > 200 && p.width > 200 && Math.abs(b.top - p.top) < 2 && !document.getElementById('banner-host').hidden && !document.getElementById('preview-host').hidden,
+      cam: document.getElementById('camera-preset').value,
+      pressed: document.getElementById('bn-beside').getAttribute('aria-pressed'),
+    };
+  });
+  check('"Show it in the stadium" puts the bowl beside the banner', split.side && split.pressed === 'true', JSON.stringify(split));
+  check('and points the bowl at the banner', split.cam === 'banner', split.cam);
+  // An untouched banner is visible there: it is cloth, so it draws.
+  const bright = await page.evaluate(() => {
+    const cv = document.querySelector('#preview-host canvas');
+    const c2 = document.createElement('canvas');
+    c2.width = cv.width;
+    c2.height = cv.height;
+    const g = c2.getContext('2d');
+    g.drawImage(cv, 0, 0);
+    const d = g.getImageData(0, 0, c2.width, c2.height).data;
+    let n = 0;
+    for (let i = 0; i < d.length; i += 4) if (d[i] > 190 && d[i + 1] > 190 && d[i + 2] > 180) n++;
+    return n / (d.length / 4);
+  });
+  check('a banner nobody has drawn on yet is still there to see', bright > 0.03, `${(bright * 100).toFixed(1)}% of the bowl is fabric`);
+  check('no page errors in the Banner view', errs.length === 0, errs.join(' | '));
+  await ctx.close();
+}
+
+// Match Day's own Banners section, where East used to mean North.
+console.log('\n— Match Day moves the banner where it is told —');
+{
+  const { ctx, page, errs } = await openApp(1400, 880, 'en');
+  await page.evaluate(() => localStorage.setItem('mds_seen_intro', '1'));
+  await page.click('#view-banner');
+  await page.waitForTimeout(900);
+  await page.click('#bn-matchday');
+  await page.waitForTimeout(13000);
+  const opened = await page.evaluate(() => document.querySelector('[data-sec="banners"]')?.classList.contains('open'));
+  check('opened from the Banner view, Match Day opens on the banner', !!opened);
+  const east = await page.evaluate(async () => {
+    const sec = document.querySelector('[data-sec="banners"]');
+    const stand = [...sec.querySelectorAll('select')].find((s) => [...s.options].some((o) => o.value === '0') && [...s.options].some((o) => o.value === '3'));
+    if (!stand) return 'no stand picker';
+    stand.value = '0';
+    stand.dispatchEvent(new Event('change', { bubbles: true }));
+    await new Promise((r) => setTimeout(r, 900));
+    const m = JSON.parse(localStorage.getItem('tifo_banners_v1') || 'null');
+    return m?.banners?.[0]?.slot?.stand;
+  });
+  check('choosing East puts it on the East stand', east === 0, String(east));
+  check('no page errors in Match Day', errs.length === 0, errs.join(' | '));
   await ctx.close();
 }
 

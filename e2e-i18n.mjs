@@ -157,6 +157,21 @@ console.log('\n— the editor and its panels —');
   await ctx.close();
 }
 
+// A ground built from a real venue. Its name in the status bar, its details and
+// its non-affiliation notice only appear once one is loaded, and ten of the
+// thirteen built-in grounds are like that — so the default ground above, which
+// is not, left all three unchecked. The status bar printed the template's raw
+// id and the notice was English.
+{
+  const [ctx, p] = await page('/app?template=community-jewel-jeddah-62k', { wait: 6000 });
+  await p.evaluate(() => { document.querySelector('.ob-skip')?.click(); });
+  await p.waitForTimeout(800);
+  await p.click('#rail-stadium', { timeout: 4000, force: true }).catch(() => {});
+  await p.waitForTimeout(1500);
+  report('stadium panel, a real-venue ground', await p.evaluate(scrapePage));
+  await ctx.close();
+}
+
 console.log('\n— first run (onboarding + cookie banner) —');
 {
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 960 },

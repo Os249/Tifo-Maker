@@ -4,7 +4,8 @@ import type { SeatMap } from '../core/types';
 import type { DesignStore } from '../core/design';
 import type { BannerStore, StandIndex } from '../core/banner';
 import { buildBannerRigs, type BannerRigLayer } from './simulator/bannerRig';
-import { buildSpanFrame, type StandFrame } from './simulator/standFrame';
+import { spanFrameCache, type StandFrame } from './simulator/standFrame';
+import { bannerShot } from './simulator/bannerCamera';
 import { standIsRoofed } from './simulator/roof';
 
 /**
@@ -52,7 +53,9 @@ export class Preview3D {
   private noShowsEnabled = false;
   private running = false;
   private banners: BannerRigLayer | null = null;
-  private bannerFrames = new Map<number, StandFrame>();
+  /** The same frames the panel and Match Day measure, one per stand window. */
+  private readonly frameFor: (stand: StandIndex, stands?: number) => StandFrame;
+  private bannerStore: BannerStore | null = null;
   private lastFrameAt = 0;
   private readonly resizeObserver: ResizeObserver;
 
@@ -62,6 +65,7 @@ export class Preview3D {
     private readonly store: DesignStore,
     options: { autoRotate?: boolean; transparent?: boolean } = {},
   ) {
+    this.frameFor = spanFrameCache(map);
     this.renderer = new THREE.WebGLRenderer({
       antialias: true,
       alpha: options.transparent ?? false,
@@ -213,15 +217,8 @@ export class Preview3D {
    */
   attachBanners(store: BannerStore, template: { roof?: unknown }): void {
     if (this.banners) return;
-    const frameFor = (stand: StandIndex, stands = 1): StandFrame => {
-      const key = stand * 8 + Math.max(1, Math.min(2, Math.round(stands)));
-      let f = this.bannerFrames.get(key);
-      if (!f) {
-        f = buildSpanFrame(this.map, stand, key % 8);
-        this.bannerFrames.set(key, f);
-      }
-      return f;
-    };
+    this.bannerStore = store;
+    const frameFor = this.frameFor;
     this.banners = buildBannerRigs(
       store,
       frameFor,
@@ -234,6 +231,26 @@ export class Preview3D {
       },
     );
     this.scene.add(this.banners.object);
+  }
+
+  /**
+   * Point the camera at a banner, the way Match Day's "Look at it" does.
+   *
+   * The same framing function, so the editor's bowl and the simulator agree
+   * on where a banner is and how to see it. This is what the Banner view's
+   * split uses: change the stand in the panel and the bowl beside it turns to
+   * look at where the banner went, instead of leaving you to find it.
+   */
+  focusBanner(id?: string | null): boolean {
+    const store = this.bannerStore;
+    const doc = store ? (id ? store.get(id) : store.active) : null;
+    if (!doc) return false;
+    const shot = bannerShot(doc, this.frameFor(doc.slot.stand, doc.slot.stands), { fov: this.camera.fov });
+    if (!shot) return false;
+    this.camera.position.set(...shot.position);
+    this.controls.target.set(...shot.target);
+    this.controls.update();
+    return true;
   }
 
   /**
@@ -358,7 +375,6 @@ export class Preview3D {
     this.controls.dispose();
     this.banners?.dispose();
     this.banners = null;
-    this.bannerFrames.clear();
     this.seats.geometry.dispose();
     const mat = this.seats.material;
     if (Array.isArray(mat)) mat.forEach((m) => m.dispose());

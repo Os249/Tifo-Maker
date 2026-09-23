@@ -265,8 +265,36 @@ export interface BannerDoc {
   bg: string | null;
   items: BannerItem[];
   slot: BannerSlot;
+  /**
+   * The shape the SLOT imposes on the sheet, when it imposes one.
+   *
+   * Null almost everywhere, because almost everywhere the artwork's own shape
+   * decides how deep the banner is. The exception is a hanging banner in the
+   * gap between two tiers: that one FILLS the gap, so its proportions are the
+   * band's — thirty-seven metres by three and a half, say — whatever shape the
+   * artwork was drawn at. Drawing the art at 2:1 and stretching it onto an
+   * 11:1 strip squashed every letter on it to a smear, in the bowl and
+   * nowhere else.
+   *
+   * So the sheet's shape while it is in such a slot lives here, next to the
+   * user's own `aspect` rather than over it: the artboard and the texture draw
+   * at this one, and moving the banner to any other tier gives the user their
+   * shape back untouched. Filled in by whoever can measure a stand — see
+   * `BannerStore.setSlotRules` — because this module cannot.
+   */
+  slotAspect: number | null;
   reveal: BannerReveal;
-  /** Reveal length in milliseconds. */
+  /**
+   * Run the reveal for as long as the real thing takes.
+   *
+   * On by default, and it is what the seconds slider shows until somebody
+   * moves it. A duration fixed when the banner was created went stale the
+   * first time its size changed: a sheet made two blocks wide and then set to
+   * one kept the two-block drop time, and the panel reported it as the user
+   * having chosen something slower than reality.
+   */
+  revealAuto: boolean;
+  /** Reveal length in milliseconds, when `revealAuto` is off. */
   revealMs: number;
   /** Wind 0..1. Above ~0.6 a large solid sheet stops behaving. */
   wind: number;
@@ -333,6 +361,27 @@ export const KIND_PROFILE: Record<BannerKind, KindProfile> = {
     occludesCrowd: false, roped: true,
   },
 };
+
+/**
+ * The reveals each type can actually perform.
+ *
+ * The geometry has ONE motion per type — a stand banner unrolls down the
+ * terracing from its top edge, a hanging banner is hauled up its ropes from a
+ * fixed hem — and "already up" for either. The panel used to offer all three
+ * reveals to both, and picking the other type's motion changed nothing but
+ * the easing curve: "Haul up on ropes" on a stand banner still unrolled. A
+ * menu entry that does something other than what it says is worse than one
+ * that is not there.
+ */
+export const KIND_REVEALS: Record<BannerKind, BannerReveal[]> = {
+  stand: ['unroll', 'cut'],
+  hanging: ['hoist', 'cut'],
+};
+
+/** A reveal this type can perform: the one asked for, or the type's own. */
+export function revealFor(kind: BannerKind, reveal: BannerReveal | undefined): BannerReveal {
+  return reveal && KIND_REVEALS[kind].includes(reveal) ? reveal : KIND_PROFILE[kind].reveal;
+}
 
 
 /**
@@ -516,6 +565,11 @@ export function bannerFacts(doc: BannerDoc, size: BannerSize, viewDistanceM = 10
   const headlineCapFrac = headlineCapM / w;
 
   const notes: BannerNote[] = [];
+  // First, because it decides whether there is anything to see at all.
+  if (doc.bg === null) {
+    const drawn = doc.items.some((it) => !it.hidden);
+    notes.push({ key: drawn ? 'clear' : 'empty', level: drawn ? 'info' : 'warn' });
+  }
   if (panels > 1) {
     notes.push({ key: 'seams', level: 'info', vals: { panels, panelM: PANEL_MAX_M } });
   }
@@ -559,8 +613,13 @@ export function newBanner(kind: BannerKind = 'stand', name = 'Banner'): BannerDo
     fabricGsm: p.fabricGsm,
     netBacked: p.netBacked,
     weightBar: p.weightBar,
-    bg: null,
+    // White fabric, not none. A new banner used to start see-through, and a
+    // see-through sheet with nothing drawn on it is invisible: the first thing
+    // anyone did was make a banner, look for it on the stand, and find
+    // nothing there. Every real banner starts as a bolt of coloured cloth.
+    bg: DEFAULT_FABRIC,
     items: [],
+    slotAspect: null,
     slot: {
       stand: 1,
       stands: 1,
@@ -572,7 +631,8 @@ export function newBanner(kind: BannerKind = 'stand', name = 'Banner'): BannerDo
       tier: p.tier,
     },
     reveal: p.reveal,
-    revealMs: physicalRevealMs(kind, {
+    revealAuto: true,
+    revealMs: physicalRevealMs(p.reveal, {
       widthM: p.blockSpan * TYPICAL_BLOCK_M,
       heightM: p.blockSpan * TYPICAL_BLOCK_M * p.aspect,
     }),
@@ -581,39 +641,51 @@ export function newBanner(kind: BannerKind = 'stand', name = 'Banner'): BannerDo
   };
 }
 
+/** The colour a new banner's fabric starts as. */
+export const DEFAULT_FABRIC = '#ffffff';
+
 /**
  * Re-profile a banner when its type changes.
  *
- * The artwork is kept and so is the slot — moving a banner from the terracing
- * into the air should not also move it to a different part of the ground. The
- * rig and the reveal follow the new type, because those are what the type IS.
+ * The artwork is kept, the slot is kept, and so is the SHAPE. Moving a banner
+ * from the terracing into the air should not also move it to another part of
+ * the ground — and it should not re-proportion the sheet under a design drawn
+ * for the old one, which it used to: the two types started at different
+ * aspects, so switching a fresh two-block banner to hanging turned it from
+ * 2:1 into 5:3, dropped the Size menu to "Custom" and slid every item on it
+ * up the artboard. The rig and the reveal follow the new type, because those
+ * are what the type IS.
  */
 export function applyKind(doc: BannerDoc, kind: BannerKind): BannerDoc {
   const from = KIND_PROFILE[doc.kind];
   const to = KIND_PROFILE[kind];
-  const next: BannerDoc = {
+  return {
     ...doc,
     kind,
-    aspect: doc.aspect === from.aspect ? to.aspect : doc.aspect,
     fabricGsm: doc.fabricGsm === from.fabricGsm ? to.fabricGsm : doc.fabricGsm,
     netBacked: to.netBacked,
     weightBar: to.weightBar,
-    reveal: to.reveal,
-    revealMs: doc.revealMs,
+    // "Already up" means the same thing for both types; anything else is the
+    // new type's own motion, because it is the only one it has.
+    reveal: doc.reveal === 'cut' ? 'cut' : to.reveal,
     slot: { ...doc.slot },
   };
-  // The duration follows the new rig unless the user moved the slider off the
-  // old rig's own physical figure: an unroll and a rope lower are not the same
-  // event at different speeds, they are seconds and a minute apart.
-  const wasDefault = doc.revealMs === physicalRevealMs(doc.kind, estimateSize(doc));
-  if (wasDefault) next.revealMs = physicalRevealMs(kind, estimateSize(next));
-  return next;
 }
 
-/** Aspect in banner units: y runs 0..aspect. */
+/**
+ * The sheet's shape in banner units: y runs 0..aspect.
+ *
+ * The slot's shape when the slot imposes one, the artwork's otherwise — see
+ * `slotAspect`. The floor is far below any shape a person would draw because
+ * a fascia strip across a whole stand really is fifty times wider than it is
+ * deep.
+ */
 export function aspectOf(doc: BannerDoc): number {
-  return clamp(doc.aspect, 0.05, 6);
+  return clamp(doc.slotAspect ?? doc.aspect, ASPECT_MIN, 6);
 }
+
+/** The narrowest sheet anything can be: a fascia strip right round a corner. */
+export const ASPECT_MIN = 0.005;
 
 export function makeStroke(color: string, width: number, erase = false): StrokeItem {
   return { id: newId('s'), kind: 'stroke', color, width, pts: [], erase };
@@ -643,8 +715,35 @@ export class BannerStore {
   private undoStack: BannerDoc[][] = [];
   private redoStack: BannerDoc[][] = [];
   private gestureOpen = false;
+  private slotRules: ((doc: BannerDoc) => boolean) | null = null;
 
   private static readonly MAX_UNDO = 120;
+
+  /**
+   * Teach the store what a stand allows.
+   *
+   * Only something holding the seat map can say how many tiers a stand has,
+   * which of them a flown banner can hang in, or how deep the gap between two
+   * of them is — and this module is pure data, so the rules are injected. The
+   * editor installs them once the stand geometry has loaded, and from then on
+   * every change that could move a banner somewhere new (its stand, its
+   * blocks, its tier, its type) is settled on the spot, inside the same undo
+   * step as the change that caused it — whichever panel made it.
+   *
+   * The function brings the banner into line (a tier this stand does not
+   * have, the shape a gap imposes) and says whether it changed anything.
+   */
+  setSlotRules(fn: ((doc: BannerDoc) => boolean) | null): void {
+    this.slotRules = fn;
+    let changed = false;
+    for (const b of this.banners) changed = this.reshape(b) || changed;
+    if (changed) this.emit();
+  }
+
+  /** Settle one banner against the rules. True if it changed. */
+  private reshape(doc: BannerDoc): boolean {
+    return this.slotRules ? this.slotRules(doc) : false;
+  }
 
   list(): readonly BannerDoc[] {
     return this.banners;
@@ -737,6 +836,7 @@ export class BannerStore {
    */
   add(doc: BannerDoc): BannerDoc {
     doc = normalise(doc);
+    this.reshape(doc);
     this.begin();
     this.banners.push(doc);
     this.activeId = doc.id;
@@ -773,6 +873,7 @@ export class BannerStore {
     const a = this.active;
     if (!a) return;
     Object.assign(a, p);
+    this.reshape(a);
     this.emit();
   }
 
@@ -780,6 +881,7 @@ export class BannerStore {
     const a = this.active;
     if (!a) return;
     a.slot = { ...a.slot, ...p };
+    this.reshape(a);
     this.emit();
   }
 
@@ -828,6 +930,38 @@ export class BannerStore {
     this.commit();
   }
 
+  /**
+   * A copy of an item, laid just below and to the right of the original, and
+   * selected — so pressing it twice makes a row, the way it does everywhere
+   * else a person has ever duplicated something.
+   */
+  duplicateItem(id: string): string | null {
+    const a = this.active;
+    if (!a) return null;
+    const src = a.items.find((it) => it.id === id);
+    if (!src) return null;
+    const copy = JSON.parse(JSON.stringify(src)) as BannerItem;
+    copy.id = newId(src.kind[0]);
+    const d = 0.025;
+    if (copy.kind === 'stroke') {
+      for (let i = 0; i < copy.pts.length; i += 2) {
+        copy.pts[i] += d;
+        copy.pts[i + 1] += d;
+      }
+    } else if (copy.kind === 'patch') {
+      copy.x += d;
+      copy.y += d;
+    } else if (isPlaced(copy)) {
+      copy.cx += d;
+      copy.cy += d;
+    }
+    this.begin();
+    a.items.splice(a.items.indexOf(src) + 1, 0, copy);
+    this.selectedItemId = copy.id;
+    this.commit();
+    return copy.id;
+  }
+
   clearArt(): void {
     const a = this.active;
     if (!a) return;
@@ -835,6 +969,19 @@ export class BannerStore {
     a.items = [];
     this.selectedItemId = null;
     this.commit();
+  }
+
+  /**
+   * Forget the undo history.
+   *
+   * For the banner the editor makes on its own the first time the Banner view
+   * opens. Nobody chose to make it, so Undo should not be able to take it
+   * away — which it could, leaving an empty view with nothing to draw on.
+   */
+  clearHistory(): void {
+    this.undoStack.length = 0;
+    this.redoStack.length = 0;
+    this.emitHistory();
   }
 
   get canUndo(): boolean {
@@ -872,6 +1019,7 @@ export class BannerStore {
 
   loadJSON(m: BannerSceneModel | null | undefined): void {
     this.banners = m && Array.isArray(m.banners) ? m.banners.map(normalise) : [];
+    for (const b of this.banners) this.reshape(b);
     this.activeId = this.banners[0]?.id ?? null;
     this.selectedItemId = null;
     this.undoStack.length = 0;
@@ -917,26 +1065,35 @@ export function normalise(raw: Partial<BannerDoc>): BannerDoc {
     : legacy.widthM && legacy.heightM
       ? clamp(legacy.heightM / legacy.widthM, 0.05, 6)
       : p.aspect;
+  const items = Array.isArray(raw.items) ? raw.items.filter(validItem) : [];
+  // 'lower' was this reveal's name while it descended from its rigging; it is
+  // hauled up from a fixed hem now, so anything stored under the old name
+  // means the new one. And a type only keeps a reveal it can perform.
+  const storedReveal = (raw.reveal as string | undefined) === 'lower' ? 'hoist' : raw.reveal;
+  const slotAspect = typeof raw.slotAspect === 'number' && Number.isFinite(raw.slotAspect)
+    ? clamp(raw.slotAspect, ASPECT_MIN, 6)
+    : null;
   return {
     ...base,
     ...raw,
     id: raw.id ?? base.id,
     kind,
     aspect,
+    slotAspect,
     fabricGsm: clamp(num(raw.fabricGsm, p.fabricGsm), 40, 600),
     material: raw.material === 'mesh' ? 'mesh' : 'solid',
     netBacked: raw.netBacked ?? p.netBacked,
     weightBar: raw.weightBar ?? p.weightBar,
-    bg: raw.bg ?? null,
-    items: Array.isArray(raw.items) ? raw.items.filter(validItem) : [],
+    // A see-through banner with nothing on it is not a design, it is an
+    // absence: in the bowl it draws nothing at all. That is what every new
+    // banner used to be, so one stored that way comes back as cloth. A
+    // see-through sheet WITH art on it is a real choice and is kept.
+    bg: typeof raw.bg === 'string' ? raw.bg : items.some((it) => !it.hidden) ? null : DEFAULT_FABRIC,
+    items,
     wind: clamp(num(raw.wind, 0.25), 0, 1),
+    revealAuto: raw.revealAuto !== false,
     revealMs: clamp(num(raw.revealMs, base.revealMs), 200, 180000),
-    // 'lower' was this reveal's name while it descended from its rigging; it
-    // is hauled up from a fixed hem now, so anything stored under the old
-    // name means the new one.
-    reveal: raw.reveal === 'unroll' || raw.reveal === 'cut' ? raw.reveal
-      : raw.reveal === 'hoist' || raw.reveal === 'lower' ? 'hoist'
-      : p.reveal,
+    reveal: revealFor(kind, storedReveal),
     visible: raw.visible !== false,
     slot: {
       stand: (((raw.slot?.stand ?? legacy.place?.stand ?? 1) % 4) + 4) % 4 as StandIndex,
@@ -1087,10 +1244,9 @@ export function settleSeconds(heightM: number): number {
  * Every branch is a distance over a speed, or gravity, rather than a number
  * chosen because it felt about right in a preview window.
  */
-export function physicalRevealMs(kind: BannerKind, size: BannerSize): number {
-  const p = KIND_PROFILE[kind];
+export function physicalRevealMs(reveal: BannerReveal, size: BannerSize): number {
   const H = Math.max(0.5, size.heightM);
-  switch (p.reveal) {
+  switch (reveal) {
     // Gravity on an unrolling sheet: it falls, then stops swinging. Big ones
     // are barely slower than small ones — quadrupling the drop only doubles
     // the fall.
@@ -1100,10 +1256,11 @@ export function physicalRevealMs(kind: BannerKind, size: BannerSize): number {
     // with nothing to steady it, and it takes as long as it takes.
     case 'hoist':
       return Math.round((H / DEPLOY_SPEED.hoist + settleSeconds(H)) * 1000);
-    // Not a deployment: a banner that was rigged before anyone walked in.
+    // Not a deployment: a banner that was rigged before anyone walked in, so
+    // there is nothing to time.
     case 'cut':
     default:
-      return 900;
+      return 0;
   }
 }
 
@@ -1120,7 +1277,15 @@ export function revealFloorSeconds(doc: BannerDoc, size: BannerSize): number {
   return 0.3;
 }
 
-/** The reveal duration the simulator should run, in seconds. */
+/**
+ * The reveal duration the simulator should run, in seconds.
+ *
+ * The real figure for the size the banner actually came out at, until the
+ * user sets one of their own. Zero for a banner that is already up: there is
+ * no reveal to run, and pressing Play should not invent one.
+ */
 export function revealSeconds(doc: BannerDoc, size: BannerSize): number {
+  if (doc.reveal === 'cut') return 0;
+  if (doc.revealAuto) return Math.max(revealFloorSeconds(doc, size), physicalRevealMs(doc.reveal, size) / 1000);
   return Math.max(revealFloorSeconds(doc, size), doc.revealMs / 1000);
 }

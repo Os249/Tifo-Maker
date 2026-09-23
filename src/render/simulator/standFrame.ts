@@ -230,6 +230,36 @@ export function buildStandFrame(map: SeatMap, stand: 0 | 1 | 2 | 3, roofRise = 9
 }
 
 /**
+ * One frame per (stand, window), built on first use and kept.
+ *
+ * Three places need the same frames — the editor's panel, its 3D bowl and
+ * Match Day — and each used to keep its own copy of this cache. It is here so
+ * they cannot drift: a frame is a pure function of the seat map, so one cache
+ * per map gives every one of them the same answer to "how many blocks".
+ * Building one costs 7 ms on average and 27 at worst across the catalogue.
+ */
+export function spanFrameCache(map: SeatMap): (stand: 0 | 1 | 2 | 3, stands?: number) => StandFrame {
+  const hit = FRAME_CACHES.get(map);
+  if (hit) return hit;
+  const frames = new Map<number, StandFrame>();
+  const frameFor = (stand: 0 | 1 | 2 | 3, stands = 1): StandFrame => {
+    const n = Math.max(1, Math.min(2, Math.round(stands)));
+    const key = stand * 8 + n;
+    let f = frames.get(key);
+    if (!f) {
+      f = buildSpanFrame(map, stand, n);
+      frames.set(key, f);
+    }
+    return f;
+  };
+  FRAME_CACHES.set(map, frameFor);
+  return frameFor;
+}
+
+/** Per seat map, so every caller holding the same map shares one set of frames. */
+const FRAME_CACHES = new WeakMap<SeatMap, (stand: 0 | 1 | 2 | 3, stands?: number) => StandFrame>();
+
+/**
  * A frame over `stands` consecutive stands, starting at `stand`.
  *
  * The geometry never cared that a stand was a quarter of the bowl — every

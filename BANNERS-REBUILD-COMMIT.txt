@@ -1,65 +1,66 @@
 === SUMMARY ===
 
-Banners: rebuild on a finite, provable model
+Banners: review the whole system, and fix what a user would hit
 
 
 === DESCRIPTION ===
 
-(This covers the WHOLE branch. Your repo is at c68eef3, so the commit you make
-contains all four of my commits at once, not just the last one.)
+Your main is at "Tifo Maker — banners rebuild". This commit is everything since: the review of the whole banner system, which is most of it; last round's fix for the seats showing through the fabric, which reached your folder after that commit; the stadium panel's lost strings put back, with three things the stadium changes had exposed; and the five retired banner files emptied, so that main builds again.
 
-The last four rounds all failed the same way: a banner was fine where I tested it and broken where you went. That is not a bug pattern, it is what an infinite configuration space looks like from the inside. A free position and a size in metres made the set of states a banner could be in continuous, so it could be sampled and never proved.
+THE REVIEW: EVERYTHING A USER WOULD HIT
 
-So the model changed rather than the code. A banner now has a SLOT — a stand, a run of the blocks that stand is divided into, and a tier — and no size at all: it is as wide as the blocks it covers, and as deep as its artwork's proportions make it. That set is finite, so `npm run sweep:banner` enumerates ALL of it — 86,528 configurations across the catalogue — and checks eleven properties of each. It runs in a few minutes without a browser.
+The whole system was driven the way a person drives it — desktop, laptop, Arabic, phone, the editor's bowl and Match Day — and every state photographed. Most of what that found was invisible to every existing test, because each thing was correct in the state the tests put it in and broken in the state a person arrives at.
 
-The shape is a pure function P(slot, u, v, t). For the sheet on the terracing every vertex is a point of the stand's own surface pushed out along that point's normal by a strictly positive amount, so it can no more be inside the seating than a decal can be inside a wall — for any size, any block, any tier, any ground, any frame. Nothing accumulates, so nothing resonates or explodes, and the same inputs give the same vertices to the bit. That deletes the cloth solver, the baked heightfield, the rope net and the lashing pass: 4,512 lines out, 2,908 in.
+Broken:
 
-Two types, both perfected: a stand banner over a run of blocks, and a hanging banner flown on ropes. A banner can stretch across two stands, carrying on round the corner into the next one. Banners show in the editor's own 3D bowl as well as in Match Day, because a sheet you can only see by opening another view is a sheet you design blind.
+- The block and tier pickers were never on screen. The panel asked Match Day for them by an event only an open simulator answered — and Match Day covers the whole screen, so nobody could ever have seen them. The panel builds the same stand frames Match Day does now, from the same seat map, through one cache every caller shares, and the size it shows is measured on the ground rather than "about".
+- Ctrl+Z in the Banner view undid the SEAT design, behind the artboard, where nothing on screen changed. Delete deleted the seat editor's selection. The keys go to the banner now: undo and redo, Delete, Ctrl+D, the arrows to nudge, Escape to let go.
+- There was no way to take one thing off a banner. A word in the wrong place meant Undo, or "Clear the art". A selected item gets Front, Back, Duplicate and Delete in the panel.
+- In Match Day, choosing East put the banner on the North stand: East is stand zero, and `Number('0') || 1` is one.
+- A new banner was see-through with nothing on it, which draws nothing — make a banner, look for it on the stand, find nothing. It starts as white cloth now; one stored empty and see-through comes back as cloth; one see-through with art on it is kept, and the panel says only the art will show.
+- A hanging banner between two tiers squashed its artwork about twelve times over, a 2:1 design stretched onto an 11:1 strip. That slot imposes the gap's shape, so the shape is kept beside the user's own: the artboard becomes the strip, the texture is drawn at it with enough pixels across its short side, the shape controls lock and say why, and moving the banner out of the gap gives the user's shape back untouched.
+- The texture ignored the sheet's shape, so after a shape change the bowl kept drawing the old picture on the new sheet.
+- "See it on match day" opened on the default camera with the banner behind it, and the camera glide that starts on opening then undid "Look at it". It opens on the banner now, with the Banners section open.
 
-MEASUREMENT BUGS THE SWEEP FOUND BEFORE ANYTHING WAS RENDERED
+Misleading:
 
-- Arc length along a stand DIVERGED with sampling. The same 48 m rake measured 48 m at 8 steps, 75 at 64 and 214 at 256, because the surface was threaded through every individual seat and picked up a seat's width of lateral jitter between consecutive points. Every "metres down the slope" figure depended on its step count. The "corner rake is four times the centre" fixed in the previous round was this artefact, not geometry. A column is now one point per ROW of seating, averaged, and it converges everywhere.
+- Every reveal was offered to both types, and the geometry has one motion each: "Haul up on ropes" on a stand banner unrolled it. Each type offers its own motion or "Already up", and "Already up" no longer runs an animation of a thing it says does not happen.
+- The reveal's length was fixed when the banner was made and went stale with every size change, then reported the user as having chosen it. It follows the real banner until the slider is moved, and "Use the real time" puts it back.
+- Changing type re-proportioned the sheet under the art and dropped the Size menu to Custom.
+- Seat-only controls were all over the Banner view: a second brush slider that did nothing to the banner, Stadium fills, the card-flip reveal, card logistics, the seat minimap, "Height 18 seats" and "click a stand to place".
+- Placement was blind — the panel in one view, the bowl in another. "Show it in the stadium", or Split from a banner, puts the bowl beside the artboard and turns it to look wherever the banner goes. The Stadium view gets a "Your banner" camera.
+- The artboard jumped half a tool bar whenever the text, shape or import bar opened, so a word landed away from where it was clicked. Things placed on a strip hung off its hem.
+- A second banner landed exactly on top of the first. Undo could delete the banner the editor made by itself. A banner hidden in Match Day could not be un-hidden anywhere else. Banners could not be renamed. Match Day's scrub bar sat at the end while a minute-long haul played.
 
-- Banner seams were spaced evenly in `u`, a fraction of the stand. On a ground whose end blocks are 3.7 m and middle blocks 29 m that put four columns across the tight corner and thirty across the straight, and the sheet cut 4.75 m inside the curve. They are spaced by metres of fabric now, which also stops the artwork being squashed at corners.
+And the smaller things: white fabric blew out to a flat white shape in the bowl; the guides vanished on white; the legible-type band was unlabelled; "Across" was clipped to "A"; the tool bar split "Fabric" from its weight; two different things were called "Size"; the two stands of a corner run were not named; Match Day listed stands in another order and its help sent banners to Tifo Assets.
 
-- A stand's ends double back on themselves in plan where a corner is cut hard, and the block detector was offering those four-metre curls as places to hang a banner. They are not blocks and are no longer offered.
+THE SEATS THROUGH THE FABRIC
 
-- Two adjacent columns filled from the same neighbour gave a zero tangent, and a 33 m hanging banner rendered as a 1.5 m sliver.
+A banner is held off the terracing by the crowd, and that support faded to zero as the stand emptied — but a card is drawn at every seat whether anyone is in it or not, and its top is 1.05 m out along the banner's normal. On an empty stand the sheet sat 0.4 m off the concrete and thirty thousand cards came straight through it. The editor's own bowl has no crowd at all, so it was the worst case in the product. The support runs from the cards to the heads now. The sweep runs empty stands as well as full ones (104,504 configurations), and the pixel gate uses the closest camera, because from 245 m up the whole defect was smaller than a pixel.
 
-- A height-limited banner reported 54 m and drew 103 m, because the size shrank and the mesh did not.
+THE STADIUM PANEL
 
-GEOMETRY BUGS THE RENDERED SHOTS FOUND AFTER
+Every banner delivery wrote the whole of src/ui/i18n.ts, and each one after the stadium session's put an older copy back. That dropped fourteen of its strings and the new wording of three more. On screen today it is the stadium panel's region filter reading "sp.anyRegion" and every stadium's details reading "sp.region"; the other fifteen belong to the Custom tab — the OpenStreetMap import and saving a stadium — and would have printed their keys at the user the moment Custom was switched back on. All seventeen are back word for word from your own history (commit 0b767f5), in both languages. `npm run verify` is what found it — it checks that every key the stadium fitter can emit has a string — and it reads one entry per line, so si.help is on one line now.
 
-- A hanging banner anchored at the back row and hung down through every seat in the stand, so it did not appear in a single frame.
+With the stadium work in the test pass for the first time, three more things showed, all from putting the ten real-venue grounds on the tab everyone opens ("Show all 13 stadiums"). Nobody saw them while those grounds sat on the Community tab:
 
-- A whole-stand banner pushed the camera 200 m out, behind the stand it was aimed at; in a roofed arena the default 31-degree elevation put it in the rafters. Both shots came back black.
+- Ten of the thirteen stadiums had no name in either language. The list printed their English names in Arabic, and the status bar and the share page — which print tl(template.id) — printed the raw id, "community-jewel-jeddah-62k", in both. They have names in both languages now, and `npm run verify` fails if a shipped stadium does not.
+- The notice under a ground built from a real venue was a hard-coded English string, so an Arabic user picking the Jewel of Jeddah, Al-Awwal Park or Kingdom Arena read the one legal line on the panel in English. It is translated now, with the same substance as the legal page's non-affiliation line. It also no longer opens with "Community-created", which stopped being true when those ten were retagged built-in — worth a look, since it is legal wording.
+- The dropdown chevron the stadium session brought back sat on top of the filter text: those selects had an even 6 px of padding, and in Arabic, where the text starts at the right, the arrow landed between the first two words. They leave it room now.
 
-- The stand's outward normal pointed DOWNWARD at eighty of eight hundred sample points on one ground — the cross product it was built from was flipped by a test on its horizontal component, which says nothing about its vertical one — so a banner offset along it sat three metres inside the seating. It is built by decomposing the rake tangent in the vertical plane now, which cannot point into the ground.
+e2e-i18n has a new surface for this — the panel with a real-venue ground loaded — because the default ground is not one, which is how the names and the notice went unchecked. Against the tree before these fixes it finds twelve English strings; after, none.
 
-- The wave is two-sided, so at full wind it subtracted a metre from the standoff and put the sheet through the people holding it. It sits on a base raised by its own amplitude now, so the trough still clears. The clearance itself was wrong too: a person is a VERTICAL segment, and what that occupies along a tilted normal is its height times the normal's vertical component.
+WHY MAIN DID NOT BUILD
 
-- A hanging banner floated 25 m out over the pitch: the geometry anchored it at the front rail while the standoff and the camera measured from the back row.
+The last commit included the five retired banner files — the cloth solver, its heightfield, bannerFit, bannerMigrate and banner-physics. They no longer compile, and `npm run build` typechecks everything, so main as committed fails it, and so does the Docker build Railway runs (`npm run build:prod` is the same command). They are emptied here — a comment and `export {}` — so it builds whether or not they are deleted; deleting them is still the right end state. `npm run probe:banner`, which ran one of them, is removed from package.json.
 
-- The ropes ran straight up in world Y to a point in empty air, crossing the terracing, and were one-pixel lines. They are tied to the roof's leading edge now — or to the back rail where that ground has no roof — and are thin cylinders that catch the light.
+TWO TESTS THAT FAILED FOR THE WRONG REASON
 
-WHAT CHANGED IN THE PANEL
+- e2e-seo failed on main as well as here: its test account used a password the strong-password rule rejects, so the registration failed and every check after it. It uses a strong one now.
+- e2e-mobile's two-finger-undo check read the toast exactly 900 ms after the gesture, and the toast lives exactly 900 ms. On a loaded machine it lost the race and failed with the toast's own text, "Undone", in hand. It watches for the toast now.
 
-Size presets named in blocks — one block, one block tall, two blocks, two blocks tall, four blocks — because a span and an aspect are the right things for the geometry to be built from and the wrong things to ask a person for. Each sets the run and the shape together, and they are gated against a built bowl rather than against their own numbers: a preset that draws the same sheet as the one above it is a menu entry that does nothing.
+TESTS
 
-Then blocks, a tier, a shape slider for sitting between the presets, and an across-stands choice, with the size as a readout in metres rather than a field to get wrong. "How many" stops where the banner stops growing, and says why. A tier is offered to a flown banner only when its fascia band is deep enough to hang anything in — measured across the catalogue that band is 3.3 to 3.5 m on most grounds, 0.8 m on two, and negative on one where the tiers overlap.
+build 0 · verify 0 · verify:stadiumfit all pass · sweep 104,504 configurations, 0 failures · server, email, security, SOC and deploy tests 0 · e2e 21/0 · e2e-banner 77/0 · e2e-mobile 310/0 · e2e-i18n 17 surfaces clean · e2e-theme 47/0 · e2e-sound 61/0 · e2e-seo 12/0 · e2e-gate 23/0 · e2e-feedback 9/0 · e2e-templates 32/0 · e2e-claim 9/0 · e2e-verify 21/0 · 31 banner shots.
 
-A hanging banner over the whole stand or the lower tier reaches the grass and is fixed there; over an upper tier it fills the gap between that tier and the one below. Its reveal is an Aufziehfahne — hauled UP its ropes from a fixed hem.
-
-The retired Banner Studio's work is not migrated: its placement no longer exists, and inventing a slot for it would put it somewhere nobody chose.
-
-THE GATES, AND WHAT EACH ONE'S ABSENCE COST
-
-IN-STAND, EXTENT, CHORD, OFFSET, FINITE, SAME, STILL — plus three added after you found what they missed:
-
-- MOVES — at full wind the fabric must travel at least 25 cm in a second. Every other check was an UPPER bound, so a banner that did not move at all passed them all.
-- CROWD — every vertex clears the PEOPLE, not merely the concrete. A banner can be comfortably outside the terracing and still be through the chest of everyone holding it.
-- HANG — a flown banner is inside the air it was given, and fixed at the end it is meant to be fixed at.
-
-Partial reveals are swept too, at 37% as well as at rest: a sheet gathered near its top edge is a configuration the finished one never visits.
-
-verify 0 · build 0 · sweep 86,528 configurations 0 failures · e2e-banner 52 passed 0 failed · 30 shots
+verify:osm needs the live OpenStreetMap service, which the sandbox these ran in cannot reach (it answers 403); it is outside the build on purpose. Run it after touching src/net/osm.ts.

@@ -47,8 +47,12 @@ export interface StadiumPanelDeps {
   refresh: () => void;
 }
 
-const DISCLAIMER =
-  'Community-created template inspired by a real-world venue. This template is not affiliated with, endorsed by, or officially connected to any club, stadium owner, or venue operator.';
+// The notice under a ground built from a real venue. It is looked up when it is
+// drawn, not held here: as a constant it was English in the Arabic panel, and
+// "Community-created" stopped being true when the ten built-in grounds that
+// carry it stopped being tagged community.
+const disclaimer = (): string => escapeHtml(t('sp.disclaimer'));
+const NOTE_CSS = 'font-size:10px;color:var(--text-3);line-height:1.4;border-inline-start:2px solid var(--line-1);padding-inline-start:8px;';
 
 const fmt = (n?: number): string => (typeof n === 'number' ? n.toLocaleString() : '-');
 // `--bg-1` does not exist. It is defined nowhere in the stylesheet, so
@@ -133,7 +137,10 @@ export function mountStadiumPanel(deps: StadiumPanelDeps): void {
 
   function mkSelect(opts: [string, string][]): HTMLSelectElement {
     const s = document.createElement('select');
-    s.style.cssText = INPUT_CSS;
+    // Room for the chevron the global select rule draws 12 px in from the right.
+    // INPUT_CSS's even 6 px padding put the text under it — in Arabic, where the
+    // text starts at the right, it sat between the first two words.
+    s.style.cssText = INPUT_CSS + 'padding-right:28px;';
     for (const [v, l] of opts) {
       const o = document.createElement('option');
       o.value = v;
@@ -297,7 +304,7 @@ export function mountStadiumPanel(deps: StadiumPanelDeps): void {
       // disclaimer.
       if (e.meta.inspiredBy) {
         discEl.style.display = '';
-        discEl.innerHTML = `<p class="hint" style="font-size:10px;color:var(--text-3);line-height:1.4;border-left:2px solid var(--line-1);padding-left:8px;margin:0;">${DISCLAIMER}</p>`;
+        discEl.innerHTML = `<p class="hint" style="${NOTE_CSS}margin:0;">${disclaimer()}</p>`;
       } else {
         discEl.style.display = 'none';
         discEl.innerHTML = '';
@@ -316,7 +323,7 @@ export function mountStadiumPanel(deps: StadiumPanelDeps): void {
       `<h3 style="margin:0 0 8px;font-size:15px;">${t('sp.changeQ')} “${escapeHtml(tl(e.id) === e.id ? e.meta.name : tl(e.id))}”?</h3>` +
       `<p style="font-size:12px;color:var(--text-2);line-height:1.5;margin:0 0 14px;">${t('sp.changeMsg')}</p>` +
       (e.meta.inspiredBy
-        ? `<p class="hint" style="font-size:10px;color:var(--text-3);line-height:1.4;margin:0 0 14px;border-left:2px solid var(--line-1);padding-left:8px;">${DISCLAIMER}</p>`
+        ? `<p class="hint" style="${NOTE_CSS}margin:0 0 14px;">${disclaimer()}</p>`
         : '') +
       `<div style="display:flex;gap:8px;justify-content:flex-end;"><button id="sw-cancel">${t('common.cancel')}</button><button id="sw-continue" class="primary">${t('sp.continue')}</button></div>`;
     overlay.appendChild(box);
@@ -500,7 +507,7 @@ export function mountStadiumPanel(deps: StadiumPanelDeps): void {
     const grid = document.createElement('div');
     grid.style.cssText = 'display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:6px;';
     const baseSel = document.createElement('select');
-    baseSel.style.cssText = INPUT_CSS;
+    baseSel.style.cssText = INPUT_CSS + 'padding-right:28px;';
     for (const e of [...queryCatalog({ source: 'builtin' }), ...queryCatalog({ source: 'community' })]) {
       const o = document.createElement('option');
       o.value = e.id;
@@ -508,7 +515,7 @@ export function mountStadiumPanel(deps: StadiumPanelDeps): void {
       baseSel.appendChild(o);
     }
     const sizeSel = document.createElement('select');
-    sizeSel.style.cssText = INPUT_CSS;
+    sizeSel.style.cssText = INPUT_CSS + 'padding-right:28px;';
     for (const [v, l] of [['standard', t('sp.standard')], ['compact', t('sp.compact')], ['large', t('sp.large')]] as [CustomSize, string][]) {
       const o = document.createElement('option');
       o.value = v;
