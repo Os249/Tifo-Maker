@@ -421,6 +421,11 @@ async function main(): Promise<void> {
     return bannerLoading;
   };
 
+  // "How banners work", in the Banner view's panel: its tour, again.
+  document.getElementById('bn-tour')?.addEventListener('click', () => {
+    void import('./ui/bannerTour').then(({ runBannerTour }) => runBannerTour());
+  });
+
   // Lazily create the 3D preview (Three.js loads only when first needed).
   const ensurePreview = async (): Promise<Preview3D | null> => {
     if (preview) return preview;
@@ -518,6 +523,13 @@ async function main(): Promise<void> {
       const bv = await ensureBannerView();
       bv?.show();
       bv?.setBeside(bannerSplit);
+      // Its own short tour, the first time. It explains a view that works
+      // differently from the rest of the editor at the moment somebody chose
+      // to open it — see bannerTour.ts for why this one is offered and the
+      // main tour is not.
+      if (next === 'banner' && bv) {
+        void import('./ui/bannerTour').then(({ offerBannerTour }) => offerBannerTour(() => currentView === 'banner'));
+      }
     } else {
       bannerView?.hide();
     }
@@ -885,6 +897,13 @@ async function main(): Promise<void> {
       }
     }
   }
+
+  // "Banners are here", once, to everyone who opens the editor — after the
+  // onboarding dialog and any tour, never on top of them. See whatsNew.ts.
+  void import('./ui/whatsNew').then(({ offerWhatsNew }) => offerWhatsNew({
+    onTry: () => void setView('banner'),
+    inBanner: () => currentView === 'banner',
+  }));
 
   window.addEventListener('keydown', (e) => {
     const tag = (e.target as HTMLElement | null)?.tagName;

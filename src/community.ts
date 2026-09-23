@@ -259,10 +259,15 @@ function renderCard(item: GalleryItem, onClick?: () => void): HTMLElement {
   // thumbnail, which was free while the card wasted half its height on
   // letterbox; once the thumbnail was tightened to the tifo's real shape the
   // pill covered the left end of the design.
+  // "With banners" rides on the tag rather than on a scene lookup per card: a
+  // feed page is sixty cards, and the card strip only ever shows the seats, so
+  // without it nothing on the card says there is a banner to open it for.
+  const withBanners = (item.tags ?? []).includes('banners');
   const badges =
-    item.isTemplate || item.hasPhoto
+    item.isTemplate || item.hasPhoto || withBanners
       ? `<div class="card-badges">` +
         (item.isTemplate ? `<span class="badge template">${escapeHtml(t('cm.badgeTemplate'))}</span>` : '') +
+        (withBanners ? `<span class="badge banners"><i class="ti ti-flag" aria-hidden="true"></i> ${escapeHtml(t('cm.badgeBanners'))}</span>` : '') +
         (item.hasPhoto ? `<span class="badge photo">${escapeHtml(t('cm.badgePhoto'))}</span>` : '') +
         `</div>`
       : '';
@@ -553,9 +558,54 @@ async function mountPreview3D(item: GalleryItem): Promise<void> {
         bar.appendChild(b);
       });
     }
+    // And its banners. This preview showed the seats only, so a design saved
+    // with a banner was shown here without it — the one place other people
+    // look at your tifo. Best-effort: a scene that will not load leaves the
+    // seats, which are the design.
+    void attachBanners(item, preview, map, tpl, bar);
   } catch {
     const host = document.getElementById('modal-3d-host');
     if (host) host.innerHTML = `<div class="grid-loading" style="color:#9aa3b5;padding-top:80px;">${t('cm.errRender')}</div>`;
+  }
+}
+
+/** Hang a design's banners in its preview, and offer a camera on each. */
+async function attachBanners(
+  item: GalleryItem,
+  preview: Preview3D,
+  map: Awaited<ReturnType<typeof generateSeatMapAsync>>,
+  tplId: string,
+  bar: HTMLElement | null,
+): Promise<void> {
+  try {
+    const { fetchScene } = await import('./net/api');
+    const scene = (await fetchScene(item.id)) as { banners?: { banners?: unknown[] } } | null;
+    if (!scene?.banners || !Array.isArray(scene.banners.banners) || scene.banners.banners.length === 0) return;
+    const [{ BannerStore }, { installSlotRules }] = await Promise.all([import('./core/banner'), import('./render/bannerShape')]);
+    if (activePreview !== preview) return; // closed while it loaded
+    const banners = new BannerStore();
+    installSlotRules(banners, map);
+    banners.loadJSON(scene.banners as Parameters<InstanceType<typeof BannerStore>['loadJSON']>[0]);
+    const shown = banners.list().filter((b) => b.visible !== false);
+    if (shown.length === 0) return;
+    const template = TEMPLATES.find((x) => x.id === tplId) ?? TEMPLATES[0];
+    preview.attachBanners(banners, template);
+    // Open on the banner. The default camera looks at one end, and a banner on
+    // any other stand was behind it — a card marked "With banners" opening on
+    // no banner at all. The bowl is still around it, and Full view is a click.
+    preview.focusBanner(shown[0].id);
+    if (!bar) return;
+    for (const b of shown) {
+      const btn = document.createElement('button');
+      btn.className = 'cam-btn cam-banner';
+      btn.innerHTML = `<i class="ti ti-flag" aria-hidden="true"></i> `;
+      btn.append(document.createTextNode(shown.length > 1 ? b.name : t('cm.camBanner')));
+      btn.title = t('cm.camBannerT');
+      btn.addEventListener('click', () => preview.focusBanner(b.id));
+      bar.appendChild(btn);
+    }
+  } catch {
+    /* the seats are shown; the banners are extra */
   }
 }
 

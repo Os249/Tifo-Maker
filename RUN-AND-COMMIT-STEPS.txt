@@ -2,55 +2,66 @@ Tifo Maker — banners: run it, then commit it
 ============================================
 
 Everything is already in C:\Users\PCD\Desktop\tifo-maker. Nothing to bundle,
-nothing to download. Your main is at "Banners: review the whole system, and
-fix what a user would hit"; all of this is uncommitted on top of it.
+nothing to download. Your main is at "Banners: a tifo starts with none, and
+each one has Show in stadium"; all of this is uncommitted on top of it.
 
 
-PART 1 — LOOK AT IT (no commit, no build needed)
-------------------------------------------------
+PART 1 — LOOK AT IT
+-------------------
 
-1. Open PowerShell in the repo:
+Two PowerShell windows, both in the repo:
 
-       cd C:\Users\PCD\Desktop\tifo-maker
+    cd C:\Users\PCD\Desktop\tifo-maker
 
-2. Start the dev server:
+Window 1, the server (it publishes the three showcase designs as it starts;
+its log says "banner showcase: +3 added"):
 
-       npm run dev
+    npm run server
 
-3. Open http://localhost:5173/ — that is the editor. Leave the terminal
-   running; it recompiles as you edit.
+Window 2, the editor:
+
+    npm run dev
+
+Then open http://localhost:5173/ for the editor and
+http://localhost:5173/community for the community. Leave both running.
 
 
 PART 2 — WHAT TO CHECK
 ----------------------
 
-The tifo you already have:
-  - The white sheet the Banner view used to put on your North stand by
-    itself is gone. A banner you drew on, coloured or moved is still there;
-    if you do not want it, open the Banner view and delete it with the bin.
+Do this in a private window, or clear the site's storage, so you are "new":
 
-A brand-new tifo (easiest: a private window, or another browser):
-  - Stadium view: no banner anywhere.
-  - Banner view: "No banner in this tifo", with Stand banner and Hanging
-    banner buttons. The Type / Size / Fabric bar is not there yet.
+1. "Banners are here"
+   - Open the editor. After a second a card appears just under the Banner
+     tab, pointing at it: "Banners are here", with "Not now" and
+     "Try banners".
+   - "Not now", then reload: it does not come back.
+   - In a fresh private window, press "Try banners": the Banner view opens
+     and its tour starts.
+   - On a first-ever visit, the start dialog comes first and the card
+     appears after you close it, never on top of it.
 
-Make one:
-  - Click Stand banner. The panel's Banners list shows it: its colour, its
-    name, "Stand banner · North" and a "Show in stadium" button.
-  - Click "Show in stadium": the Stadium view opens with the camera on it,
-    and the status line says so.
-  - Make a Hanging banner from the list's own button. Each row's
-    "Show in stadium" goes to its own banner.
-  - Delete both with the bin in the bar: back to "No banner in this tifo".
-    Ctrl+Z brings the last one back.
+2. The banner tour
+   - The first time the Banner view opens, the tour runs. With no banner it
+     has 4 steps; "Skip tour" or Escape ends it, and it does not come back.
+   - Make a banner, then press "How banners work" in the Banners panel: the
+     tour runs again and walks through the sheet, the tools, the list,
+     placement and match day.
+   - Arabic: the same, in Arabic, with the cards on the correct side.
 
-Also:
-  - Open a design from the Gallery: the banners of the tifo you were on do
-    not come with it.
-  - At 1366 or 1280 wide, after drawing anything: the header fits, and
-    "Sign up" stays on one line. (Community and Gallery are in the U menu.)
-  - On a phone (or a narrow window with ?editor=1): "Show in stadium" in the
-    Paint sheet closes the sheet and shows the whole banner.
+3. Match Day
+   - In the Banner view, press "See it on match day". It opens on the banner.
+   - Drag across the picture, including right over the banner: the camera
+     moves around, and the banner stays where it is. Scroll: it zooms.
+   - To move the banner: click it once (an outline appears), then drag it.
+
+4. The community
+   - /community opens on three "Template · With banners" cards by
+     @tifomaker.
+   - Open each one: the 3D preview opens on its banner, and the camera bar
+     has a flag button for each banner. The kop has two: "One club" (a
+     see-through mesh) and "12".
+   - Signed in, press Remix on one: the editor opens with its banners too.
 
 
 PART 3 — COMMIT
@@ -58,9 +69,9 @@ PART 3 — COMMIT
 
 Only when you are happy with what you saw.
 
-1. Stop the dev server (Ctrl+C).
+1. Stop both (Ctrl+C in each window).
 
-2. If you have not yet: delete the five retired banner files. They are
+2. Still to do from last time: delete the five retired banner files. They are
    empty placeholders, so nothing breaks while they are there, but they
    should go:
 
@@ -81,10 +92,14 @@ Only when you are happy with what you saw.
 
 4. Commit. The message is in BANNERS-REBUILD-COMMIT.txt in this folder, with
    the Summary and the Description labelled separately — paste them into
-   GitHub Desktop's two fields.
+   GitHub Desktop's two fields. There are four new files in this commit:
+   src\ui\bannerTour.ts, src\ui\whatsNew.ts, scripts\generate-showcase.mts
+   and server\data\showcase.jsonl — make sure all four are ticked.
 
 5. Pushing is yours. Pushing main runs CI, and Railway deploys main, so push
-   after step 3 passes.
+   after step 3 passes. On the first deploy the server publishes the three
+   showcase designs by itself (the log says "banner showcase: +3 added");
+   after that it finds them by title and adds nothing.
 
 
 IF THE BUILD FAILS

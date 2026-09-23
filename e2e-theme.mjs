@@ -24,7 +24,8 @@ import { chromium, devices } from 'playwright';
 
 const B = process.env.BASE ?? 'http://127.0.0.1:8911';
 const PAGES = ['/', '/community', '/clubs', '/legal'];
-const LS = [{ name: 'tifo_consent_v1', value: 'all' }, { name: 'tifo_onboarded_v1', value: '1' }];
+const LS = [{ name: 'tifo_consent_v1', value: 'all' }, { name: 'tifo_onboarded_v1', value: '1' },
+  { name: 'tifo_news_banners_v1', value: '1' }, { name: 'tifo_banner_tour_v1', value: '1' }];
 
 let pass = 0, fail = 0;
 const check = (name, cond, detail = '') => {

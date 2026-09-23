@@ -26,6 +26,9 @@ import { gunzipSync } from 'node:zlib';
 
 const B = process.env.BASE ?? 'http://127.0.0.1:8787';
 const LIB = 'server/data/templates.jsonl';
+// The banner showcase is published under the same account and flag, after the
+// library, so the live gallery holds both.
+const SHOWCASE = readFileSync('server/data/showcase.jsonl', 'utf8').split('\n').map((l) => l.trim()).filter(Boolean).map((l) => JSON.parse(l));
 const SEATS = { 'generic-bowl-60k': 60832, 'single-kop-40k': 39700, 'grand-oval-76k': 75984 };
 
 /** Total repo cost of the library. Generous against today's ~1.8 MB, tight
@@ -176,9 +179,20 @@ try {
     got += page.length;
     if (page.length < 60) break;
   }
-  ok('paging walks the whole library without repeats', dup === 0 && seen.size === recs.length,
-    `${seen.size} unique of ${got} returned, ${dup} repeats, library is ${recs.length}`);
+  ok('paging walks the whole library without repeats', dup === 0 && seen.size === recs.length + SHOWCASE.length,
+    `${seen.size} unique of ${got} returned, ${dup} repeats, library is ${recs.length} + ${SHOWCASE.length} showcase`);
   ok('the default page is capped', (await (await get('/api/gallery?templates=1')).json()).length === 60);
+
+  // The showcase leads: it is the newest of the library.
+  const showTitles = new Set(SHOWCASE.map((r) => r.titleEn));
+  ok('the feed opens on the banner showcase', p1.slice(0, SHOWCASE.length).every((d) => showTitles.has(d.title)),
+    p1.slice(0, SHOWCASE.length).map((d) => d.title).join(' | '));
+  let withScene = 0;
+  for (const d of p1.slice(0, SHOWCASE.length)) {
+    const sc = await (await get(`/api/designs/${d.id}/scene`)).json();
+    if (sc.sceneGzB64 && JSON.parse(gunzipSync(Buffer.from(sc.sceneGzB64, 'base64')).toString('utf8')).banners.banners.length) withScene++;
+  }
+  ok('every showcase design serves its banners', withScene === SHOWCASE.length, `${withScene}/${SHOWCASE.length}`);
 
   const archOf = new Map(recs.map((r) => [r.titleEn, r.archetype]));
   const firstLive = new Set(p1.map((d) => archOf.get(d.title)).filter(Boolean));

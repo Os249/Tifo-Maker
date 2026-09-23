@@ -1171,6 +1171,8 @@ export class MatchDaySimulator {
   private bannerRigs: BannerRigLayer | null = null;
   private placement: PlacementHelper | null = null;
   private bannerDrag = true;
+  /** The banner a press will take hold of: the one picked out, and only it. */
+  private heldBanner: string | null = null;
   private draggingBanner = false;
   private dragStartedAt = 0;
   private readonly ray = new THREE.Raycaster();
@@ -1191,22 +1193,34 @@ export class MatchDaySimulator {
   }
 
   /**
-   * Press on a banner to take hold of it.
+   * Press on a banner to pick it out; press on it again to take hold of it.
    *
    * There is no "move banners" mode to turn on, because a mode is a thing to
-   * forget you are in. Pressing ON a banner drags the banner; pressing
-   * anywhere else orbits the camera, which is what pressing anywhere else has
-   * always done. The camera is only given up for as long as the finger is on
-   * the fabric.
+   * forget you are in. The first press on a banner picks it out — the outline
+   * comes up and the panel follows — and leaves the camera alone. A press on
+   * the banner that is already picked out drags it. A press anywhere else
+   * orbits, and puts the banner down.
+   *
+   * It used to take hold on the first press. That was fine from the gantry,
+   * where a banner is a small part of the picture, and it was a trap from
+   * "See it on match day", which frames the banner to fill most of the
+   * screen: nearly every drag landed on the fabric and slid the banner along
+   * the stand instead of looking around, so the camera seemed stuck.
    */
   private readonly onBannerDown = (ev: PointerEvent): void => {
     if (!this.bannerRigs || !this.placement || !this.bannerDrag || ev.button !== 0) return;
     this.setNdc(ev);
     const id = this.bannerRigs.pick(this.ray);
-    if (!id) return;
-    this.bannerRigs.select(id);
+    if (!id) {
+      if (this.heldBanner) this.selectBanner(null);
+      return;
+    }
     this.bannerStore?.setActive(id);
     this.onBannerSelect?.(id);
+    if (id !== this.heldBanner) {
+      this.selectBanner(id);
+      return;
+    }
     if (!this.placement.begin(id, this.ray)) return;
     this.bannerStore?.begin();
     this.draggingBanner = true;
@@ -1284,6 +1298,7 @@ export class MatchDaySimulator {
     return this.bannerRigs?.revealState(id) ?? null;
   }
   selectBanner(id: string | null): void {
+    this.heldBanner = id;
     this.bannerRigs?.select(id);
   }
   /** What the banner layer actually contains. A screenshot cannot say this. */
@@ -1343,6 +1358,11 @@ export class MatchDaySimulator {
     // and then quietly un-framed, before anyone saw it.
     this.camTween = null;
     this.flyActive = false;
+    // And the controls come back. A glide switches them off until it lands,
+    // and cancelling it above meant it never landed: opened from "See it on
+    // match day", the camera was framed on the banner and then frozen there —
+    // no orbit, no zoom, no pan, for the rest of the visit.
+    this.controls.enabled = true;
     applyCameraShot(this.camera, this.controls, { name: 'Banner', ...shot });
     return true;
   }

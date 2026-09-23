@@ -23,6 +23,8 @@ const AR_LS = [
   { name: 'tifo_lang_v1', value: 'ar' },
   { name: 'tifo_consent_v1', value: 'all' },
   { name: 'tifo_onboarded_v1', value: '1' },
+  { name: 'tifo_news_banners_v1', value: '1' },
+  { name: 'tifo_banner_tour_v1', value: '1' },
 ];
 const state = (extra = []) => ({ cookies: [], origins: [{ origin: B, localStorage: [...AR_LS, ...extra] }] });
 
@@ -181,6 +183,35 @@ console.log('\n— first run (onboarding + cookie banner) —');
   await p.goto(B + '/app', { waitUntil: 'networkidle', timeout: 60000 });
   await p.waitForTimeout(5000);
   report('onboarding + consent', await p.evaluate(scrapePage));
+  await ctx.close();
+}
+
+// The banners news and the Banner view's tour: both are what an Arabic
+// reader sees first of banners, and both are built in code, not in the HTML
+// the rest of this suite reads.
+console.log('\n— the banners news and the banner tour —');
+{
+  const ls = AR_LS.filter((x) => !/news_banners|banner_tour/.test(x.name));
+  const ctx = await browser.newContext({ viewport: { width: 1440, height: 960 },
+    storageState: { cookies: [], origins: [{ origin: B, localStorage: ls }] } });
+  const p = await ctx.newPage();
+  p.on('pageerror', () => {});
+  await p.goto(B + '/app', { waitUntil: 'networkidle', timeout: 60000 });
+  const card = await p.waitForSelector('#news-card', { timeout: 20000 }).catch(() => null);
+  if (!card) { fail++; console.log('  FAIL  banners news — it never appeared'); }
+  else {
+    report('banners news', await p.evaluate(scrapePage));
+    await p.click('#news-try');
+    await p.waitForSelector('.tour-overlay', { timeout: 10000 }).catch(() => null);
+    let steps = 0;
+    for (let i = 0; i < 10 && (await p.$('.tour-overlay')); i++) {
+      await p.waitForTimeout(400);
+      steps++;
+      report(`banner tour, step ${steps}`, await p.evaluate(scrapePage));
+      await p.click('#tour-next');
+    }
+    if (steps === 0) { fail++; console.log('  FAIL  banner tour — it never started'); }
+  }
   await ctx.close();
 }
 

@@ -454,7 +454,7 @@ const MDS_T: Record<string, { en: string; ar: string }> = {
   bannerWind: { en: 'Wind', ar: 'الهواء' },
   showBanner: { en: 'Show it', ar: 'أظهرها' },
   alreadyUp: { en: 'This banner is already up — it has no reveal to play. Pick a reveal for it in the Banner view.', ar: 'هذي اللافتة موجودة من قبل — ما لها كشف يتشغّل. اختر لها طريقة كشف في عرض اللافتة.' },
-  dragHint: { en: 'Drag the banner itself to move it on the stand.', ar: 'اسحب اللافتة نفسها عشان تحركها على المدرج.' },
+  dragHint: { en: 'Click a banner to pick it out, then drag it to move it along the stand.', ar: 'اضغط على اللافتة عشان تختارها، وبعدين اسحبها عشان تحركها على المدرج.' },
   'snap.centre': { en: 'centre of the stand', ar: 'منتصف المدرج' },
   'snap.quarter': { en: 'quarter', ar: 'الربع' },
   'snap.end': { en: 'end of the stand', ar: 'طرف المدرج' },
@@ -1292,7 +1292,12 @@ export function openMatchDaySimulator(
     });
     secBanners.root.classList.add('open');
     secBanners.root.querySelector('.mds-shead')?.setAttribute('aria-expanded', 'true');
-    sim.selectBanner(id);
+    // Not picked out in the bowl. The camera opens filled with this banner,
+    // and a banner that is picked out takes hold of any drag that lands on
+    // it — so from here every attempt to look around slid the banner along
+    // the stand instead. The panel is on it; a click on the fabric picks it
+    // out when you want to move it.
+    sim.selectBanner(null);
     state.fly = false;
     flyBtn.classList.remove('active');
     sim.focusBanner(id);

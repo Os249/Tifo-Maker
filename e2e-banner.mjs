@@ -30,19 +30,25 @@ const check = (n, ok, x = '') => {
 };
 
 /** Open /app, get past the first-run bits, and hand back a live page. */
-async function openApp(width, height, lang) {
+async function openApp(width, height, lang, { fresh = false } = {}) {
   const ctx = await browser.newContext({ viewport: { width, height }, locale: lang === 'ar' ? 'ar' : 'en-US' });
   const page = await ctx.newPage();
   const errs = [];
   page.on('pageerror', (e) => errs.push(String(e.message).slice(0, 200)));
-  await page.addInitScript((l) => {
+  // "Fresh" is somebody who has not yet seen the banners news or the banner
+  // tour — set once, so a reload keeps whatever the page itself stored.
+  await page.addInitScript(({ l, fresh }) => {
     try {
       localStorage.setItem('tifo_lang_v1', l);
       localStorage.setItem('tifo_onboarded_v1', '1');
       localStorage.setItem('tifo_consent_v1', 'essential');
       localStorage.setItem('tifo_draw_hint_v1', '1');
+      if (!fresh) {
+        localStorage.setItem('tifo_news_banners_v1', '1');
+        localStorage.setItem('tifo_banner_tour_v1', '1');
+      }
     } catch { /* storage off */ }
-  }, lang);
+  }, { l: lang, fresh });
   await page.goto(B + '/app', { waitUntil: 'networkidle', timeout: 60000 });
   await page.waitForTimeout(1400);
   return { ctx, page, errs };
@@ -667,7 +673,12 @@ console.log('\n— banners belong to their tifo —');
     await page.waitForLoadState('networkidle').catch(() => {});
     await page.waitForTimeout(1200);
   }
-  check('a design opened from the gallery does not bring the last tifo\'s banner', hadOne && opened && (await listed()).length === 0, `made one: ${hadOne}, gallery opened: ${opened}`);
+  // Its own banners or none: the gallery opens on the banner showcase now, so
+  // the first design there has banners of its own. What must not be there is
+  // the one this tifo had.
+  const there = opened ? await listed() : [];
+  check('a design opened from the gallery does not bring the last tifo\'s banner', hadOne && opened && !there.includes('Banner 1'),
+    `made one: ${hadOne}, gallery opened: ${opened}, it has: ${there.join(', ') || 'none'}`);
   check('no page errors keeping banners with their tifo', errs.length === 0, errs.join(' | '));
   await ctx.close();
 }
@@ -798,6 +809,311 @@ console.log('\n— Arabic —');
   check('drawing works in Arabic too', (await artboardHash(page)) !== before);
   check('no page errors', errs.length === 0, errs.join(' | '));
   await ctx.close();
+}
+
+// ---------------------------------------------------------------------------
+// "Banners are here": told once, to everyone who opens the editor.
+
+/** Where the news card is, and what it points at. */
+const newsState = (page) =>
+  page.evaluate(() => {
+    const c = document.getElementById('news-card');
+    if (!c) return null;
+    const r = c.getBoundingClientRect();
+    const tab = [...document.querySelectorAll('.m-view-b[data-view="banner"], #view-banner')].find((e) => e.getBoundingClientRect().width > 0);
+    const t = tab?.getBoundingClientRect();
+    const a = c.querySelector('.news-arrow')?.getBoundingClientRect();
+    const buttons = [...c.querySelectorAll('button')].map((b) => { const q = b.getBoundingClientRect(); return Math.min(q.width, q.height); });
+    return {
+      box: { left: r.left, top: r.top, right: r.right, bottom: r.bottom },
+      under: t ? r.top >= t.bottom - 1 && r.top - t.bottom < 30 : false,
+      arrowOnTab: t && a ? a.left + a.width / 2 > t.left && a.left + a.width / 2 < t.right : false,
+      inView: r.left >= 0 && r.right <= innerWidth && r.bottom <= innerHeight,
+      smallest: Math.min(...buttons),
+      text: c.textContent.replace(/\s+/g, ' ').trim(),
+      focusInside: c.contains(document.activeElement),
+    };
+  });
+const flag = (page, k) => page.evaluate((key) => localStorage.getItem(key), k);
+
+console.log('\n— the banners news —');
+{
+  const { ctx, page, errs } = await openApp(1400, 880, 'en', { fresh: true });
+  await page.waitForSelector('#news-card', { timeout: 15000 }).catch(() => null);
+  const n = await newsState(page);
+  check('the news appears in the editor', !!n);
+  check('it says banners are here', !!n && /Banners are here/.test(n.text) && /Try banners/.test(n.text), n?.text);
+  check('it sits just under the Banner tab, pointing at it', !!n && n.under && n.arrowOnTab, JSON.stringify(n?.box));
+  check('it is on the screen, with 24 px targets', !!n && n.inView && n.smallest >= 24, `${n?.smallest}`);
+  check('it does not take focus from the page', !!n && !n.focusInside);
+  check('it is not remembered before it is answered', (await flag(page, 'tifo_news_banners_v1')) === null);
+  await page.click('#news-later');
+  check('"Not now" puts it away', await page.waitForSelector('#news-card', { state: 'detached', timeout: 5000 }).then(() => true, () => false));
+  check('and it is remembered', (await flag(page, 'tifo_news_banners_v1')) === '1');
+  await page.reload({ waitUntil: 'networkidle' });
+  await page.waitForTimeout(3500);
+  check('it does not come back', !(await page.$('#news-card')));
+  check('no page errors', errs.length === 0, errs.join(' | '));
+  await ctx.close();
+}
+{
+  // Waits its turn: after the onboarding dialog, never on top of it.
+  const ctx = await browser.newContext({ viewport: { width: 1400, height: 880 } });
+  const page = await ctx.newPage();
+  await page.addInitScript(() => { try { if (!sessionStorage.getItem('s')) { sessionStorage.setItem('s', '1'); localStorage.setItem('tifo_lang_v1', 'en'); localStorage.setItem('tifo_consent_v1', 'essential'); } } catch { /* */ } });
+  await page.goto(B + '/app', { waitUntil: 'networkidle', timeout: 60000 });
+  await page.waitForTimeout(4000);
+  const both = await page.evaluate(() => ({ ob: !!document.querySelector('.ob-backdrop'), news: !!document.getElementById('news-card') }));
+  check('a first visit gets the onboarding dialog, and no news on top of it', both.ob && !both.news, JSON.stringify(both));
+  await page.evaluate(() => (document.querySelector('.ob-skip') || document.querySelector('.ob-backdrop button'))?.click());
+  const after = await page.waitForSelector('#news-card', { timeout: 15000 }).catch(() => null);
+  check('the news follows once the dialog is closed', !!after);
+  await ctx.close();
+}
+{
+  const { ctx, page, errs } = await openApp(1400, 880, 'en', { fresh: true });
+  await page.waitForSelector('#news-card', { timeout: 15000 });
+  await page.click('#news-try');
+  await page.waitForTimeout(1500);
+  const st = await page.evaluate(() => ({
+    view: document.getElementById('view-banner')?.classList.contains('active'),
+    news: !!document.getElementById('news-card'),
+    tour: document.querySelector('.tour-overlay #tour-title')?.textContent,
+  }));
+  check('"Try banners" opens the Banner view', !!st.view);
+  check('and the news goes', !st.news);
+  check('and the Banner view\'s own tour starts', st.tour === 'This is the Banner view', st.tour);
+  check('no page errors', errs.length === 0, errs.join(' | '));
+  await ctx.close();
+}
+{
+  // Passed over: moving to another view ends it, rather than leaving it on
+  // top of the Stadium view's camera bar.
+  const { ctx, page } = await openApp(1400, 880, 'en', { fresh: true });
+  await page.waitForSelector('#news-card', { timeout: 15000 });
+  await page.click('#view-3d');
+  // Waited for rather than slept on: the Stadium view builds its bowl on the
+  // same thread, and the card's fade-out timer runs behind it.
+  const gone = await page.waitForSelector('#news-card', { state: 'detached', timeout: 8000 }).then(() => true, () => false);
+  check('switching view puts the news away', gone);
+  await ctx.close();
+}
+
+// ---------------------------------------------------------------------------
+// The Banner view's tour: the first time it opens, skippable, and again on ask.
+
+/** The tour as it stands: its step, and whether the spotlight is on the screen. */
+const tourState = (page) =>
+  page.evaluate(() => {
+    const o = document.querySelector('.tour-overlay');
+    if (!o) return null;
+    const spot = o.querySelector('#tour-spot').getBoundingClientRect();
+    const pop = o.querySelector('#tour-pop').getBoundingClientRect();
+    const overlap = pop.left < spot.right && pop.right > spot.left && pop.top < spot.bottom && pop.bottom > spot.top;
+    return {
+      step: o.querySelector('#tour-step').textContent,
+      title: o.querySelector('#tour-title').textContent,
+      spotOnScreen: spot.width > 0 && spot.left > -10 && spot.right < innerWidth + 10,
+      popOnScreen: pop.left >= 0 && pop.right <= innerWidth && pop.top >= 0 && pop.bottom <= innerHeight,
+      overlap,
+      scrolled: document.scrollingElement.scrollLeft + document.scrollingElement.scrollTop + document.body.scrollLeft,
+    };
+  });
+async function walkTour(page) {
+  const seen = [];
+  for (let i = 0; i < 12; i++) {
+    const s = await tourState(page);
+    if (!s) break;
+    seen.push(s);
+    await page.click('#tour-next');
+    await page.waitForTimeout(350);
+  }
+  return seen;
+}
+
+console.log('\n— the banner tour —');
+{
+  const { ctx, page, errs } = await openApp(1400, 880, 'en', { fresh: true });
+  await page.evaluate(() => localStorage.setItem('tifo_news_banners_v1', '1'));
+  await page.click('#view-banner');
+  await page.waitForTimeout(1300);
+  const first = await tourState(page);
+  check('opening the Banner view for the first time starts its tour', first?.title === 'This is the Banner view', first?.title);
+  const steps = await walkTour(page);
+  check('with no banner yet, it is about making one', steps.some((s) => s.title === 'Make your first one') && !steps.some((s) => s.title === 'The sheet'),
+    steps.map((s) => s.title).join(' → '));
+  check('every step points at something on the screen', steps.every((s) => s.spotOnScreen && s.popOnScreen));
+  check('the card never covers what it describes', steps.every((s) => !s.overlap), steps.filter((s) => s.overlap).map((s) => s.title).join(', '));
+  check('it never scrolls the page', steps.every((s) => s.scrolled === 0));
+  check('finishing it is remembered', (await flag(page, 'tifo_banner_tour_v1')) === '1');
+  await page.click('#view-2d');
+  await page.waitForTimeout(400);
+  await page.click('#view-banner');
+  await page.waitForTimeout(1300);
+  check('and it does not come back on the next open', !(await tourState(page)));
+
+  // Again on ask, and about the banner once there is one.
+  await page.click('#bn-empty button[data-kind="stand"]');
+  await page.waitForTimeout(800);
+  await page.click('#bn-tour');
+  await page.waitForTimeout(700);
+  const again = await walkTour(page);
+  const titles = again.map((s) => s.title);
+  check('"How banners work" runs it again', again.length > 0);
+  check('with a banner, it walks the sheet, the list, the placement and match day',
+    ['The sheet', 'Every banner in this tifo', 'Where it hangs', 'Match day'].every((t) => titles.includes(t)), titles.join(' → '));
+  check('every step is on the screen, and the card never covers its control',
+    again.every((s) => s.spotOnScreen && s.popOnScreen && !s.overlap), again.filter((s) => !s.spotOnScreen || !s.popOnScreen || s.overlap).map((s) => s.title).join(', '));
+  check('it never scrolls the page', again.every((s) => s.scrolled === 0));
+  check('no page errors', errs.length === 0, errs.join(' | '));
+  await ctx.close();
+}
+{
+  // Skippable: Escape, and Skip.
+  const { ctx, page } = await openApp(1400, 880, 'en', { fresh: true });
+  await page.evaluate(() => localStorage.setItem('tifo_news_banners_v1', '1'));
+  await page.click('#view-banner');
+  await page.waitForTimeout(1300);
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(300);
+  check('Escape ends the tour', !(await tourState(page)));
+  check('and that counts as seen', (await flag(page, 'tifo_banner_tour_v1')) === '1');
+  await page.click('#bn-tour');
+  await page.waitForTimeout(600);
+  await page.click('#tour-skip');
+  await page.waitForTimeout(300);
+  check('"Skip tour" ends it too', !(await tourState(page)));
+  // A tour that ended used to leave its Escape listener behind.
+  await page.click('#bn-tour');
+  await page.waitForTimeout(600);
+  const open1 = !!(await tourState(page));
+  await page.click('#tour-next');
+  await page.waitForTimeout(300);
+  check('a second run is not ended by the first one\'s leftovers', open1 && !!(await tourState(page)));
+  await ctx.close();
+}
+{
+  // A narrow laptop: the panel is a closed slide-over, so the tour leaves out
+  // the steps that live in it rather than pointing past the edge.
+  const { ctx, page } = await openApp(1024, 720, 'en', { fresh: true });
+  await page.evaluate(() => localStorage.setItem('tifo_news_banners_v1', '1'));
+  await page.click('#view-banner');
+  await page.waitForTimeout(1300);
+  const steps = await walkTour(page);
+  check('1024 wide: the tour skips the closed panel', steps.length >= 2 && steps.every((s) => s.spotOnScreen && s.popOnScreen && s.scrolled === 0),
+    steps.map((s) => `${s.title}${s.spotOnScreen ? '' : ' (off)'}`).join(' → '));
+  // And the closed panel is out of reach of focus, which is what scrolled
+  // the page sideways when anything focused it.
+  const hidden = await page.evaluate(() => getComputedStyle(document.getElementById('panel')).visibility);
+  check('1024 wide: the closed panel cannot take focus', hidden === 'hidden', hidden);
+  await ctx.close();
+}
+{
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  const page = await ctx.newPage();
+  const errs = [];
+  page.on('pageerror', (e) => errs.push(String(e.message).slice(0, 200)));
+  await page.addInitScript(() => { try { if (!sessionStorage.getItem('s')) { sessionStorage.setItem('s', '1'); for (const [k, v] of [['tifo_lang_v1', 'en'], ['tifo_onboarded_v1', '1'], ['tifo_consent_v1', 'essential'], ['tifo_draw_hint_v1', '1']]) localStorage.setItem(k, v); } } catch { /* */ } });
+  await page.goto(B + '/app?editor=1', { waitUntil: 'networkidle', timeout: 60000 });
+  await page.waitForSelector('#news-card', { timeout: 15000 }).catch(() => null);
+  const n = await newsState(page);
+  check('phone: the news points at the view pill\'s Banner', !!n && n.under && n.arrowOnTab && n.inView, JSON.stringify(n?.box));
+  await page.tap('#news-try');
+  await page.waitForTimeout(1500);
+  const steps = await walkTour(page);
+  check('phone: its own short tour', steps.length >= 2 && steps.length <= 4 && steps.every((s) => s.spotOnScreen && s.popOnScreen), steps.map((s) => s.title).join(' → '));
+  check('phone: no page errors', errs.length === 0, errs.join(' | '));
+  await ctx.close();
+}
+
+// ---------------------------------------------------------------------------
+// "See it on match day" opens on the banner, and then the camera is yours.
+
+console.log('\n— match day from the Banner view —');
+{
+  const { ctx, page, errs } = await openApp(1400, 880, 'en');
+  await page.evaluate(() => localStorage.setItem('mds_seen_intro', '1'));
+  await openBanner(page);
+  await page.click('#bn-matchday');
+  await page.waitForTimeout(14000);
+  const { PNG } = await import('pngjs');
+  const shot = async () => PNG.sync.read(await page.screenshot({ clip: { x: 320, y: 70, width: 1060, height: 780 } }));
+  const changed = (a, b) => { let n = 0; for (let i = 0; i < a.data.length; i += 16) { if (Math.abs(a.data[i] - b.data[i]) + Math.abs(a.data[i + 1] - b.data[i + 1]) + Math.abs(a.data[i + 2] - b.data[i + 2]) > 60) n++; } return n / (a.data.length / 16); };
+  const block = () => page.evaluate(() => {
+    const f = [...document.querySelectorAll('[data-sec="banners"] .mds-field, [data-sec="banners"] label')].find((l) => /First block/.test(l.textContent));
+    return (f?.querySelector('select') ?? f?.parentElement?.querySelector('select'))?.value ?? null;
+  });
+  const a0 = await shot();
+  const b0 = await block();
+  // Across the middle of the picture, which is the banner.
+  await page.mouse.move(700, 450);
+  await page.mouse.down();
+  for (let i = 1; i <= 12; i++) await page.mouse.move(700 + i * 15, 450 + i * 3);
+  await page.mouse.up();
+  await page.waitForTimeout(800);
+  const a1 = await shot();
+  check('a drag across the banner looks around', changed(a0, a1) > 0.2, changed(a0, a1).toFixed(2));
+  check('and leaves the banner where it was', (await block()) === b0, `${b0} → ${await block()}`);
+  await page.mouse.move(700, 450);
+  await page.mouse.wheel(0, -500);
+  await page.waitForTimeout(800);
+  check('the wheel zooms', changed(a1, await shot()) > 0.1);
+  // Moving the banner is still there, one deliberate click away: pick it out,
+  // then drag it.
+  // Clicked from inside the page: a real click waits for the WebGL frame the
+  // software renderer is still drawing, and times out here.
+  await page.evaluate(() => [...document.querySelectorAll('[data-sec="banners"] button')].find((b) => b.textContent.trim() === 'Look at it')?.click());
+  await page.waitForTimeout(1500);
+  await page.mouse.click(700, 450);
+  await page.waitForTimeout(500);
+  await page.mouse.move(700, 450);
+  await page.mouse.down();
+  for (let i = 1; i <= 14; i++) await page.mouse.move(700 + i * 22, 450);
+  await page.mouse.up();
+  await page.waitForTimeout(900);
+  check('a banner picked out with a click drags along the stand', (await block()) !== b0, `${b0} → ${await block()}`);
+  const hint = await page.evaluate(() => document.querySelector('.mds-hint')?.textContent || '');
+  check('the panel says how to move a banner now', /pick it out/.test(hint), hint);
+  check('no page errors', errs.length === 0, errs.join(' | '));
+  await ctx.close();
+}
+
+// ---------------------------------------------------------------------------
+// The showcase: designs whose banners come with them.
+
+console.log('\n— a design with banners, opened from the community —');
+{
+  const feed = await (await fetch(B + '/api/gallery?limit=3')).json();
+  const kop = feed.find((d) => (d.tags || []).includes('banners') && /two banners/.test(d.title));
+  check('the community opens on the banner showcase', feed.length === 3 && feed.every((d) => (d.tags || []).includes('banners')), feed.map((d) => d.title).join(' | '));
+  if (kop) {
+    const { ctx, page, errs } = await openApp(1400, 880, 'en');
+    await page.goto(`${B}/app?design=${kop.id}`, { waitUntil: 'networkidle', timeout: 60000 });
+    await page.waitForTimeout(2500);
+    await page.click('#view-banner');
+    await page.waitForTimeout(1200);
+    const rows = await page.$$eval('#bn-list .bn-li .bn-li-meta', (m) => m.map((x) => x.textContent));
+    check('its banners open with it', rows.length === 2 && rows.some((r) => /Stand banner/.test(r)) && rows.some((r) => /Hanging banner/.test(r)), rows.join(' | '));
+    const mesh = await page.evaluate(() => document.getElementById('bn-material')?.value);
+    check('as they were made: the stand banner is see-through mesh', mesh === 'mesh', mesh);
+    check('no page errors', errs.length === 0, errs.join(' | '));
+    await ctx.close();
+
+    const c2 = await browser.newContext({ viewport: { width: 1400, height: 880 } });
+    const p2 = await c2.newPage();
+    await p2.addInitScript(() => { localStorage.setItem('tifo_lang_v1', 'en'); localStorage.setItem('tifo_consent_v1', 'essential'); });
+    await p2.goto(B + '/community', { waitUntil: 'networkidle', timeout: 60000 });
+    await p2.waitForTimeout(2000);
+    const badge = await p2.$$eval('.tifo-card', (cs) => cs.slice(0, 3).map((c) => !!c.querySelector('.badge.banners')));
+    check('their cards say "With banners"', badge.length === 3 && badge.every(Boolean));
+    await p2.click('.tifo-card .card-title');
+    // The bowl is built in a worker and the banners follow it: waited for,
+    // not slept on, because under load that is well past ten seconds.
+    await p2.waitForSelector('#cam-bar .cam-banner', { timeout: 45000 }).catch(() => null);
+    const cams = await p2.$$eval('#cam-bar .cam-banner', (bs) => bs.length);
+    check('the preview offers a camera on each banner', cams >= 1, `${cams}`);
+    await c2.close();
+  }
 }
 
 await browser.close();

@@ -15,7 +15,7 @@ import { MemoryTrafficRepository, PgTrafficRepository, type TrafficRepository } 
 import { MemoryFeedbackRepository, PgFeedbackRepository, type FeedbackRepository } from './feedbackRepo';
 import { buildApp, type TemplateInfo } from './routes';
 import { createEmailSender } from './email';
-import { seedTemplates } from './seedTemplates';
+import { seedShowcase, seedTemplates } from './seedTemplates';
 import type { AuthRepository, DesignRepository } from './repo';
 import { envNum } from './env';
 import { logConfigWarnings, logProviderSetup } from './preflight';
@@ -262,6 +262,12 @@ async function main(): Promise<void> {
           console.log(`[tifo] templates: +${r.added} added, ${r.existing} already present` +
             (r.skipped.length ? `, ${r.skipped.length} skipped` : '') +
             ` (${((Date.now() - started) / 1000).toFixed(1)}s)`);
+        }
+        // The banner showcase, after the library so it is the newest of it.
+        const sc = await seedShowcase(designs, authRepo, join(__dirname, '../data/showcase.jsonl'));
+        if (sc.added || sc.skipped.length) {
+          console.log(`[tifo] banner showcase: +${sc.added} added, ${sc.existing} already present` +
+            (sc.skipped.length ? `, skipped ${sc.skipped.join(', ')}` : ''));
         }
         // AFTER the library lands, not before. Its batch insert does not set the
         // filter facets, so running the backfill first would sweep an empty

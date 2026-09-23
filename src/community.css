@@ -219,6 +219,9 @@ a { color: inherit; text-decoration: none; }
 }
 .badge.template { background: rgba(91, 42, 134, 0.92); }
 .badge.photo { background: rgba(15, 138, 77, 0.92); }
+.badge.banners { background: rgba(28, 95, 217, 0.92); display: inline-flex; align-items: center; gap: 4px; }
+.cam-btn.cam-banner { display: inline-flex; align-items: center; gap: 5px; background: rgba(28, 95, 217, 0.35); color: #fff; }
+.cam-btn.cam-banner:hover { background: rgba(28, 95, 217, 0.6); }
 .card-body { padding: 16px 18px; display: flex; flex-direction: column; gap: 10px; flex: 1; }
 .card-title { font-weight: 700; font-size: 17px; letter-spacing: -0.01em; line-height: 1.25; }
 .card-by { font-size: 13px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
@@ -274,7 +277,9 @@ a { color: inherit; text-decoration: none; }
 
 .modal-side { display: flex; flex-direction: column; min-height: 0; }
 .side-head { padding: 22px 24px 16px; border-bottom: 1px solid var(--line); }
-.side-title { font-size: 22px; font-weight: 800; letter-spacing: -0.02em; margin: 0 0 8px; }
+/* Clear of the close button, which sits over this corner: a long title ran
+   underneath it ("with a hangin[X]"). */
+.side-title { font-size: 22px; font-weight: 800; letter-spacing: -0.02em; margin: 0 0 8px; padding-right: 40px; }
 .side-author { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
 .side-avatar { width: 40px; height: 40px; border-radius: 50%; background: var(--grad-brand); color: #fff; display: grid; place-items: center; font-weight: 700; }
 .side-author-meta { flex: 1; min-width: 0; }

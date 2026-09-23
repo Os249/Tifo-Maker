@@ -1,3 +1,4 @@
+import { setSheetBox } from './bannerTour';
 import type { DesignStore } from '../core/design';
 import type { SeatMap, ToolId } from '../core/types';
 import type { BannerDoc, BannerItem, BannerKind, BannerReveal, BannerSize, StandIndex } from '../core/banner';
@@ -133,6 +134,8 @@ export function mountBannerView(deps: BannerViewDeps): BannerView {
   // from then on. Not everyone wants a banner. A tifo starts with none, and
   // the empty state below makes one in a click.
   const canvas = BannerCanvas.create(host, bannerStore);
+  // The tour's "draw on it" step lights the sheet, not the whole canvas.
+  setSheetBox(() => canvas.sheetRect());
 
   /** What the artboard shows while there is nothing to draw on. */
   const emptyCard = document.createElement('div');

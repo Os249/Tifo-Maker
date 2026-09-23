@@ -222,6 +222,12 @@ body.m-shell #ctx-banner .bn-beside { display:none; }
 }
 #ctx-banner .bn-li.active .bn-li-show { border-color:var(--blue); color:#cfe0fb; }
 #ctx-banner .bn-add-row { margin:0 0 14px; display:flex; flex-wrap:wrap; gap:6px; }
+/* "How banners work": the tour again. A link-sized control, but a full 24px
+   target (WCAG 2.5.8), and set apart from the list above it. */
+#ctx-banner .bn-tour-link { display:inline-flex; align-items:center; gap:5px; min-height:24px; margin:-6px 0 14px; padding:2px 0;
+  background:none; border:none; font:inherit; font-size:12px; font-weight:600; color:#9FC2F5; cursor:pointer; }
+#ctx-banner .bn-tour-link:hover { color:#fff; text-decoration:underline; text-underline-offset:2px; }
+#ctx-banner .bn-tour-link .ti { font-size:14px; }
 #ctx-banner .bn-add-row .chip { flex:1 1 auto; display:inline-flex; align-items:center; justify-content:center; gap:5px; }
 #ctx-banner #bn-detail { padding-top:12px; border-top:1px solid var(--line-1); }
 #ctx-banner #bn-detail[hidden] { display:none; }
@@ -608,12 +614,18 @@ body.zen .tool-rail, body.zen .panel, body.zen footer, body.zen .tool-bar { disp
 @media (max-width: 1099px) {
   .tool { width:42px; height:42px; }
   .tool-rail { width:54px; flex-basis:54px; }
+  /* Closed means gone, not only moved. Parked past the right edge it was
+     still in the tab order, and focusing anything in it — Tab, a tour, a
+     test's click — scrolled the whole page 312px sideways to show it, header
+     and all, with no way to scroll back. Hidden once it has slid out, and
+     visible the moment it starts sliding in. */
   .panel {
     position:absolute; right:0; top:0; bottom:0; z-index:20;
-    transform:translateX(100%); transition:transform .18s ease;
+    transform:translateX(100%); transition:transform .18s ease, visibility 0s linear .18s;
+    visibility:hidden;
     box-shadow:-8px 0 24px rgba(0,0,0,.4);
   }
-  .panel.open { transform:translateX(0); }
+  .panel.open { transform:translateX(0); visibility:visible; transition:transform .18s ease, visibility 0s; }
   /* tap-to-dismiss scrim behind the slide-over so taps don't reach the canvas */
   .panel-scrim { display:block; position:absolute; inset:0; z-index:19; background:rgba(4,6,12,.5); opacity:0; pointer-events:none; transition:opacity .18s ease; }
   .panel-scrim.show { opacity:1; pointer-events:auto; }
@@ -1296,6 +1308,45 @@ body.viewer { display:block; overflow-y:auto; background:var(--ink-0); }
 .tour-back:hover { background:var(--line-1); }
 .tour-next.primary { background:var(--blue); color:#fff; }
 .tour-next.primary:hover { background:#1860c4; }
+
+/* "Banners are here": the what's-new card under the Banner tab. Beside the
+   work, not in front of it: no backdrop, and under the tour (90). */
+.news-card {
+  position:fixed; z-index:60; width:320px; max-width:calc(100vw - 24px);
+  background:var(--ink-1); border:1px solid var(--line-2); border-radius:var(--r-md);
+  box-shadow:0 18px 50px rgba(0,0,0,.55), 0 0 0 1px rgba(28,111,224,.25);
+  padding:16px 16px 14px; color:var(--text-1); animation:newsIn .22s cubic-bezier(.2,.8,.2,1) both;
+}
+.news-card.out { animation:newsOut .15s ease both; }
+@keyframes newsIn { from { opacity:0; transform:translateY(-6px); } to { opacity:1; transform:none; } }
+@keyframes newsOut { to { opacity:0; transform:translateY(-4px); } }
+@media (prefers-reduced-motion: reduce) { .news-card, .news-card.out { animation:none; } }
+.news-arrow {
+  position:absolute; top:-7px; width:12px; height:12px; margin-left:-6px; transform:rotate(45deg);
+  background:var(--ink-1); border-left:1px solid var(--line-2); border-top:1px solid var(--line-2);
+}
+.news-x {
+  position:absolute; top:6px; inset-inline-end:6px; width:32px; height:32px; min-height:0; padding:0;
+  display:grid; place-items:center; background:none; border:none; border-radius:50%; color:var(--text-3); cursor:pointer;
+}
+.news-x:hover { background:var(--ink-3); color:var(--text-1); }
+.news-head { display:flex; align-items:center; gap:8px; margin-bottom:8px; }
+.news-tag {
+  font-size:11px; font-weight:800; letter-spacing:.06em; text-transform:uppercase;
+  color:#fff; background:var(--blue); border-radius:var(--r-pill); padding:3px 9px;
+}
+.news-icon { font-size:18px; color:#9FC2F5; }
+.news-title { margin:0 0 6px; font-size:17px; font-weight:800; }
+.news-body { margin:0 0 14px; font-size:14px; line-height:1.5; color:var(--text-2); }
+.news-actions { display:flex; justify-content:flex-end; gap:8px; }
+.news-later, .news-try {
+  border:none; border-radius:var(--r-pill); padding:9px 16px; min-height:40px; font:inherit; font-size:14px; font-weight:700; cursor:pointer;
+}
+.news-later { background:var(--ink-3); color:var(--text-1); }
+.news-later:hover { background:var(--line-1); }
+.news-try { background:var(--blue); color:#fff; display:inline-flex; align-items:center; gap:6px; }
+.news-try:hover { background:#1860c4; }
+[dir="rtl"] .news-go { transform:scaleX(-1); }
 
 /* themed confirm / choice dialogs (replace native confirm/alert) */
 .dlg-backdrop {

@@ -598,6 +598,14 @@ async function runSuite(name: string, repo: DesignRepository, auth: AuthReposito
   assert.equal(fork.json().isPublic, false);
   const forkRec = await app.inject({ method: 'GET', url: `/api/designs/${forkId}`, headers: bearer(bobTok) });
   assert.equal(forkRec.json().cellsGzB64, after25.json().cellsGzB64);
+  // and the fork carries the design's banners, not only its seats
+  const srcScene = (await app.inject({ method: 'GET', url: `/api/designs/${id}/scene`, headers: bearer(aliceTok) })).json().sceneGzB64;
+  assert.ok(srcScene, 'the forked design has a scene to carry');
+  assert.equal(
+    (await app.inject({ method: 'GET', url: `/api/designs/${forkId}/scene`, headers: bearer(bobTok) })).json().sceneGzB64,
+    srcScene,
+    'a fork takes the banners with it',
+  );
   // alice cannot see bob's private fork
   assert.equal((await app.inject({ method: 'GET', url: `/api/designs/${forkId}`, headers: bearer(aliceTok) })).statusCode, 404);
   // anonymous cannot fork
@@ -818,6 +826,10 @@ async function runSuite(name: string, repo: DesignRepository, auth: AuthReposito
   assert.ok(bobNotifs.items.some((n) => n.kind === 'follow_post' && n.designId === designId), 'follower notified of new public post');
   assert.ok(bobNotifs.unread >= 1, 'unread count reflects the notification');
 
+  // Her design has a banner.
+  const bannerScene = gzipSync(Buffer.from(JSON.stringify({ v: 1, banners: { version: 1, banners: [{ id: 'bn_c', kind: 'stand', name: 'Derby' }] } }))).toString('base64');
+  assert.equal((await app.inject({ method: 'PUT', url: `/api/designs/${designId}/scene`, headers: bearer(aliceTok), payload: { sceneGzB64: bannerScene } })).statusCode, 200);
+
   // Bob remixes Alice's design → new design owned by Bob, lineage stamped.
   const remixed = await app.inject({ method: 'POST', url: `/api/designs/${designId}/remix`, headers: bearer(bobTok), payload: { title: 'My Clasico remix' } });
   assert.equal(remixed.statusCode, 201);
@@ -825,6 +837,12 @@ async function runSuite(name: string, repo: DesignRepository, auth: AuthReposito
   assert.equal(remix.ownerId, bobId, 'remix owned by the remixer');
   assert.equal(remix.remixedFrom, designId, 'remixed_from points at the original');
   assert.notEqual(remix.id, designId, 'remix is a new design, original untouched');
+  // Remixing a tifo for its banner is the reason to remix one that has one.
+  assert.equal(
+    (await app.inject({ method: 'GET', url: `/api/designs/${remix.id}/scene`, headers: bearer(bobTok) })).json().sceneGzB64,
+    bannerScene,
+    'a remix takes the banners with it',
+  );
 
   // Alice gets a 'remix' notification.
   const aliceNotifs = (await app.inject({ method: 'GET', url: '/api/notifications', headers: bearer(aliceTok) })).json() as { items: { kind: string }[] };
@@ -1762,6 +1780,55 @@ if (process.env.DATABASE_URL) {
   await pool.end();
 } else {
   console.log('postgres repos: skipped (set DATABASE_URL to run)');
+}
+
+// ---------- the banner showcase ----------
+//
+// A few designs by the site's own account that show what a banner looks like
+// in a stadium. Asserted against the file that ships, through the real seeder
+// and the real routes: published, labelled as the library's, at the head of
+// the feed, and carrying banners anyone can open.
+{
+  const { seedShowcase, seedTemplates, TEMPLATE_OWNER } = await import('../src/seedTemplates');
+  const auth = new MemoryAuthRepository();
+  const designs = new MemoryDesignRepository((id) => auth.usernameOf(id));
+  const allTemplates: TemplateInfo[] = (await import('../../src/core/template')).TEMPLATES.map((t) => ({
+    id: t.id, version: t.version, name: t.name, seatCount: generateSeatMap(t).count,
+  }));
+  const app = await buildApp(designs, auth, allTemplates);
+  const file = join(import.meta.dirname, '../data/showcase.jsonl');
+  const lines = readFileSync(file, 'utf8').split('\n').filter((l) => l.trim());
+  assert.ok(lines.length >= 3, 'the showcase has a few designs');
+
+  const lib = await seedTemplates(designs, auth, join(import.meta.dirname, '../data/templates.jsonl'));
+  assert.ok(lib.added > 300, 'the library seeds first');
+  const first = await seedShowcase(designs, auth, file);
+  assert.equal(first.added, lines.length, `every showcase design is published (${first.skipped.join(', ')})`);
+  assert.equal((await seedShowcase(designs, auth, file)).added, 0, 'seeding again adds nothing');
+
+  const feed = (await app.inject({ method: 'GET', url: `/api/gallery?limit=${lines.length}` })).json() as { id: string; title: string; isTemplate: boolean; ownerName: string; tags: string[]; templateId: string }[];
+  const titles = new Set(lines.map((l) => (JSON.parse(l) as { titleEn: string }).titleEn));
+  assert.ok(feed.every((d) => titles.has(d.title)), 'the feed opens on the showcase');
+  assert.equal(new Set(feed.map((d) => d.templateId)).size, feed.length, 'each one is a different ground');
+  for (const d of feed) {
+    assert.equal(d.ownerName, TEMPLATE_OWNER, `${d.title}: published by the library account`);
+    assert.equal(d.isTemplate, true, `${d.title}: labelled as a template, not passed off as a post`);
+    assert.ok(d.tags.includes('banners'), `${d.title}: tagged, so its card says it has banners`);
+    const sc = (await app.inject({ method: 'GET', url: `/api/designs/${d.id}/scene` })).json().sceneGzB64 as string | null;
+    assert.ok(sc, `${d.title}: its scene is readable by anyone`);
+    const scene = JSON.parse(gunzipSync(Buffer.from(sc, 'base64')).toString('utf8')) as { banners: { banners: { kind: string; items: unknown[]; visible: boolean }[] } };
+    assert.ok(scene.banners.banners.length >= 1, `${d.title}: carries a banner`);
+    assert.ok(scene.banners.banners.every((b) => b.items.length > 0 && b.visible !== false), `${d.title}: every banner has art on it and is shown`);
+  }
+  const kinds = new Set<string>();
+  for (const l of lines) {
+    const j = JSON.parse(l) as { sceneGzB64: string };
+    for (const b of JSON.parse(gunzipSync(Buffer.from(j.sceneGzB64, 'base64')).toString('utf8')).banners.banners) kinds.add(`${b.kind}/${b.material}`);
+  }
+  assert.ok(kinds.has('stand/solid') && kinds.has('hanging/solid') && kinds.has('stand/mesh'), `different banners: ${[...kinds].join(', ')}`);
+  const people = (await app.inject({ method: 'GET', url: '/api/gallery?made=people&limit=60' })).json() as { title: string }[];
+  assert.ok(!people.some((d) => titles.has(d.title)), 'and never under "Made by people"');
+  console.log(`banner showcase: all assertions passed (${lines.length} designs, ${[...kinds].join(', ')})`);
 }
 
 // ---------- AI history ----------

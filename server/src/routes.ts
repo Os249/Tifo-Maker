@@ -2762,8 +2762,27 @@ export async function buildApp(
     if (!v) return;
     if (!v.userId) return reply.code(401).send({ error: 'authentication required' });
     const title = cleanTitle((req.body as { title?: string } | null)?.title, `${v.rec.title} (fork)`);
-    return reply.code(201).send(await repo.fork(v.rec.id, title, v.userId));
+    const created = await repo.fork(v.rec.id, title, v.userId);
+    if (created) await copyScene(v.rec.id, created.id);
+    return reply.code(201).send(created);
   });
+
+  /**
+   * A copy of a design takes its banners with it.
+   *
+   * Fork and remix copied the seats and nothing else, so remixing a tifo for
+   * its banner — the reason anyone remixes a design with one — opened a copy
+   * with no banner on it. Best-effort, like every scene write: a copy whose
+   * banners failed to come across is still the copy that was asked for.
+   */
+  async function copyScene(fromId: string, toId: string): Promise<void> {
+    try {
+      const scene = await repo.getScene(fromId);
+      if (scene) await repo.putScene(toId, scene);
+    } catch {
+      /* the seats are copied; that is the part that must not fail */
+    }
+  }
 
   // ============ SOCIAL ENDPOINTS ============
   const social = options.social;
@@ -2800,6 +2819,7 @@ export async function buildApp(
     const remixTitle = cleanTitle(title, `${rec?.title ?? 'Tifo'} (remix)`);
     const created = await social!.remix(id, userId, remixTitle);
     if (!created) return reply.code(403).send({ error: 'this design cannot be remixed' });
+    await copyScene(id, created.id);
     return reply.code(201).send(created);
   });
 

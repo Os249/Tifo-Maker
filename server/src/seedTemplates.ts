@@ -58,7 +58,7 @@ function expand(rle: [number, number][]): Uint8Array {
 
 /** Cells as the repo wants them: gzipped. The packed format is already gzipped,
  *  so that path is a base64 decode and nothing else. */
-function cellsGzOf(t: TemplateFile): Buffer {
+function cellsGzOf(t: Pick<TemplateFile, 'cellsGzB64' | 'cellsRle'>): Buffer {
   if (t.cellsGzB64) return Buffer.from(t.cellsGzB64, 'base64');
   if (t.cellsRle) return gzipSync(Buffer.from(expand(t.cellsRle)));
   throw new Error('template has no cell data');
@@ -151,5 +151,94 @@ export async function seedTemplates(
   // before it opened its port and Railway killed it on a thirty-second
   // healthcheck. Seeding now runs after listen, and takes about a second.
   result.added = await designs.seedDesigns(owner.id, pending);
+  return result;
+}
+
+/** One showcase design: a library entry plus the banners it carries. */
+interface ShowcaseFile extends Pick<TemplateFile, 'id' | 'titleEn' | 'titleAr' | 'stadiumId' | 'templateVersion' | 'palette' | 'cellsGzB64' | 'tags' | 'thumbnailPng'> {
+  /** The design's scene, gzipped JSON, base64 — exactly what PUT /scene stores. */
+  sceneGzB64: string;
+}
+
+/**
+ * Publish the banner showcase (server/data/showcase.jsonl, written by
+ * scripts/generate-showcase.mts): a few designs that show what a banner looks
+ * like in a stadium.
+ *
+ * The same account and the same rules as the library above — owned by
+ * @tifomaker, public, flagged as templates, idempotent by title — so they are
+ * never passed off as somebody's post. Run AFTER the library: the feed's
+ * default order is newest first, and these are what it should open on.
+ *
+ * One design at a time rather than the bulk path, because each has a scene
+ * to store and there are only a handful. It is published only once its scene
+ * is stored: a design is created private, and one whose banners failed to
+ * store stays that way rather than going out as a showcase with none.
+ */
+export async function seedShowcase(
+  designs: DesignRepository,
+  auth: AuthRepository,
+  file: string,
+): Promise<SeedResult> {
+  const result: SeedResult = { added: 0, existing: 0, skipped: [] };
+  if (!existsSync(file)) return result;
+  const entries: ShowcaseFile[] = [];
+  for (const line of readFileSync(file, 'utf8').split('\n')) {
+    const text = line.trim();
+    if (!text) continue;
+    try {
+      entries.push(JSON.parse(text) as ShowcaseFile);
+    } catch {
+      result.skipped.push(`line ${entries.length + result.skipped.length + 1}`);
+    }
+  }
+  if (entries.length === 0) return result;
+
+  let owner = await auth.getUserByName(TEMPLATE_OWNER);
+  if (!owner) {
+    owner = await auth.createUser(TEMPLATE_OWNER, unusablePassword(), { email: null });
+    if (!owner) {
+      result.skipped.push('could not create the template account');
+      return result;
+    }
+  }
+  const have = new Set(await designs.listTitlesByOwner(owner.id));
+  // The feed's "recent" is by last update, to the millisecond, and the
+  // library was written a moment ago in one go. A tie is broken by id — at
+  // random — so without a clear millisecond between them the showcase could
+  // land anywhere on the first page instead of at the top of it.
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  for (const s of entries) {
+    if (have.has(s.titleEn)) {
+      result.existing++;
+      continue;
+    }
+    have.add(s.titleEn);
+    try {
+      const meta = await designs.create({
+        title: s.titleEn,
+        titleAr: s.titleAr,
+        templateId: s.stadiumId,
+        templateVersion: s.templateVersion,
+        palette: s.palette,
+        cellsGz: cellsGzOf(s),
+        ownerId: owner.id,
+        thumbnailPng: s.thumbnailPng ? Buffer.from(s.thumbnailPng, 'base64') : null,
+      });
+      const scened = await designs.putScene(meta.id, Buffer.from(s.sceneGzB64, 'base64'));
+      if (!scened) {
+        // Left private: a showcase of banners with no banner on it is worse
+        // than one fewer showcase.
+        result.skipped.push(s.id);
+        continue;
+      }
+      await designs.patchMeta(meta.id, { isPublic: true });
+      await designs.setTemplate(meta.id, owner.id, true);
+      await designs.setTags(meta.id, owner.id, s.tags);
+      result.added++;
+    } catch {
+      result.skipped.push(s.id);
+    }
+  }
   return result;
 }

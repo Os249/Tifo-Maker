@@ -239,6 +239,20 @@ export class BannerCanvas implements BannerCanvasHooks {
     this.requestDraw();
   }
 
+  /**
+   * Where the sheet is on the screen, in client pixels — the part of the
+   * canvas that is the banner, rather than the whole canvas around it. Null
+   * with no banner.
+   */
+  sheetRect(): { left: number; top: number; right: number; bottom: number } | null {
+    const doc = this.store.active;
+    if (!doc) return null;
+    const c = this.canvas.getBoundingClientRect();
+    const left = c.left + this.originX;
+    const top = c.top + this.originY;
+    return { left, top, right: left + this.scale, bottom: top + this.scale * aspectOf(doc) };
+  }
+
   /** Zoom about the view's centre by a factor. */
   zoomBy(factor: number): void {
     this.zoomAt(factor, this.cssW / 2, this.cssH / 2);
