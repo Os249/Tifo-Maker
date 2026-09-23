@@ -974,7 +974,7 @@ import { buildStadium as siBuild } from '../src/core/stadiumFit';
   const {
     BANNER_KINDS, KIND_PROFILE, PANEL_MAX_M, KG_PER_CARRIER,
     applyKind, bannerFacts, newBanner, normalise, revealEase, occludesCrowd,
-    estimateSize, physicalRevealMs, TYPICAL_BLOCK_M, BANNER_PRESETS, presetOf,
+    estimateSize, physicalRevealMs, TYPICAL_BLOCK_M, BANNER_PRESETS, presetOf, isGhost,
   } = await import('../src/core/banner');
 
   // 1. A reveal runs from nothing to done. An easing that starts above zero
@@ -1127,8 +1127,11 @@ import { buildStadium as siBuild } from '../src/core/stadiumFit';
     // sheet with nothing on it draws nothing: people made a banner, looked for
     // it on the stand and found nothing there.
     if (newBanner('stand').bg === null) throw new Error('a new banner must start as fabric, not as nothing');
+    // But a STORED see-through banner stays see-through. Turning those into
+    // cloth put a white sheet on the North stand of every tifo that had ever
+    // opened the Banner view, because that view used to make one by itself.
     const empty = normalise({ ...newBanner('stand'), bg: null } as Parameters<typeof normalise>[0]);
-    if (empty.bg === null) throw new Error('a stored see-through banner with nothing on it must come back as cloth');
+    if (empty.bg !== null) throw new Error('a stored see-through banner must come back see-through, not as cloth');
     const art = normalise({
       ...newBanner('stand'), bg: null,
       items: [{ id: 's1', kind: 'stroke', color: '#fff', width: 0.01, pts: [0, 0, 1, 1] }],
@@ -1336,15 +1339,37 @@ import { buildStadium as siBuild } from '../src/core/stadiumFit';
     if (!store.active!.items.some((i) => i.id === copy)) throw new Error('and undo puts it back');
     console.log('banners: an item can be duplicated, reordered, deleted and restored');
 
-    // The banner the editor makes by itself cannot be undone away: nobody
-    // chose to make it, and undoing it left a view with nothing to draw on.
+    // A tifo starts with no banner, and one made is the user's to undo.
     const fresh = new BannerStore();
+    if (fresh.count !== 0) throw new Error('a tifo starts with no banner');
     fresh.add(newBanner('stand'));
-    fresh.clearHistory();
-    if (fresh.canUndo) throw new Error('the first banner must not be undoable');
+    if (!fresh.canUndo) throw new Error('making a banner is an edit, and Undo takes it back');
     fresh.undo();
-    if (fresh.count !== 1) throw new Error('undo took away the banner the editor made');
-    console.log('banners: the banner the editor makes for you stays put under Undo');
+    if (fresh.count !== 0) throw new Error('undo should take back the banner that was made');
+    console.log('banners: a tifo starts with none, and making one can be undone');
+
+    // The banner nobody made does not come back. The Banner view used to make
+    // one, see-through and empty, the first time it opened, and it was saved
+    // with the tifo; it is recognisable exactly and dropped on the way in.
+    // Anything anybody changed about it — its stand, its fabric, a stroke —
+    // makes it theirs, and it stays.
+    const ghostOf = (kind: 'stand' | 'hanging') => ({ ...newBanner(kind, 'Banner 1'), bg: null });
+    if (!isGhost(normalise(ghostOf('stand'))) || !isGhost(normalise(ghostOf('hanging')))) {
+      throw new Error('an untouched, empty, see-through banner of either type is the one nobody made');
+    }
+    if (isGhost(newBanner('stand'))) throw new Error('a new banner is cloth, so it is somebody\'s');
+    const kept = [
+      { ...ghostOf('stand'), slot: { ...ghostOf('stand').slot, stand: 3 as const } },
+      { ...ghostOf('stand'), bg: '#1c5fd9' },
+      { ...ghostOf('stand'), items: [{ id: 's1', kind: 'stroke', color: '#fff', width: 0.01, pts: [0, 0, 1, 1] }] },
+      { ...ghostOf('stand'), wind: 0.6 },
+      { ...ghostOf('hanging'), slot: { ...ghostOf('hanging').slot, blockSpan: 3 } },
+    ];
+    const loaded = new BannerStore();
+    loaded.loadJSON({ v: 1, banners: [ghostOf('stand'), ...kept, ghostOf('hanging')] } as unknown as Parameters<InstanceType<typeof BannerStore>['loadJSON']>[0]);
+    if (loaded.count !== kept.length) throw new Error(`the two ghosts should be dropped and the rest kept: ${loaded.count} of ${kept.length}`);
+    if (loaded.list().some((b) => b.slot.stand === 3 && b.bg !== null)) throw new Error('a see-through banner somebody moved stays see-through');
+    console.log('banners: a banner nobody made does not come back, and one somebody changed does');
   }
 
   // 10. Every banner string carries both languages. The two original phone bug

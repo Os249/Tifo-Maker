@@ -485,6 +485,17 @@ export function mountMobileShell(): MobileShell | null {
   mk2d.addEventListener('click', () => { proxy('#view-2d'); setView('2d'); });
   mkBn.addEventListener('click', () => { proxy('#view-banner'); setView('banner'); });
   mk3d.addEventListener('click', () => { proxy('#view-3d'); setView('3d'); });
+  // The view can change from inside a sheet too — a banner's "Show in
+  // stadium" — and then the pill has to follow, and the sheet has to get out
+  // of the way of the stadium it just opened.
+  const onEditorView = (e: Event): void => {
+    const v = (e as CustomEvent<{ view?: string }>).detail?.view;
+    const next: MView = v === 'banner' ? 'banner' : v === '3d' || v === 'split' ? '3d' : '2d';
+    if (next === mview) return;
+    if (openTab) closeSheet();
+    setView(next);
+  };
+  document.addEventListener('tifo:view', onEditorView);
   viewPill.append(mk2d, mkBn, mk3d);
   stage.appendChild(viewPill);
   stage.appendChild(mdPill);
@@ -606,6 +617,7 @@ export function mountMobileShell(): MobileShell | null {
       document.removeEventListener('tifo:sim-loading', onSimLoading);
       document.removeEventListener('tifo:sim-open', onSimOpen);
       document.removeEventListener('tifo:sim-failed', onSimFailed);
+      document.removeEventListener('tifo:view', onEditorView);
       window.clearTimeout(mdResetT);
       document.body.classList.remove('m-shell');
       ribbon.remove(); sheet.remove(); scrim.remove(); viewPill.remove(); mdPill.remove(); stands.remove(); histWrap.remove(); objBar.remove();

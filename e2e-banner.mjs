@@ -82,6 +82,39 @@ const storedBanner = (page) =>
     }
   });
 
+/**
+ * Into the Banner view, and — unless told not to — make a banner there.
+ *
+ * A tifo starts with no banner now, so every section that draws on one makes
+ * it first, through the same empty state a person would use.
+ */
+async function openBanner(page, { make = true, kind = 'stand', via = '#view-banner' } = {}) {
+  await page.click(via);
+  await page.waitForTimeout(900);
+  if (!make) return;
+  const btn = await page.$(`#bn-empty:not([hidden]) button[data-kind="${kind}"]`);
+  if (btn) {
+    await btn.click();
+    await page.waitForTimeout(700);
+  }
+}
+
+/**
+ * Change what is stored, from a page that is not the app.
+ *
+ * The app writes its banners with its draft on the way out of the page, so a
+ * change made underneath a running editor is put straight back by the reload
+ * that was meant to pick it up.
+ */
+async function editStorage(page, fn, arg) {
+  await page.goto(B + '/favicon.svg', { waitUntil: 'load' });
+  await page.evaluate(fn, arg);
+}
+async function backToApp(page) {
+  await page.goto(B + '/app', { waitUntil: 'networkidle', timeout: 60000 });
+  await page.waitForTimeout(1500);
+}
+
 // ---------------------------------------------------------------------------
 
 console.log('\n— desktop: the fourth view exists and draws —');
@@ -90,6 +123,35 @@ console.log('\n— desktop: the fourth view exists and draws —');
   check('Banner sits in the view switcher', !!(await page.$('#view-banner')));
   await page.click('#view-banner');
   await page.waitForTimeout(1000);
+
+  // Not everyone wants a banner. The view used to make one the first time it
+  // opened, and it was saved with the tifo like any other — so everybody who
+  // only LOOKED at this view had a banner on their North stand from then on.
+  const none = await page.evaluate(() => ({
+    card: (() => {
+      const c = document.getElementById('bn-empty');
+      if (!c || c.hidden) return false;
+      const r = c.getBoundingClientRect();
+      return r.width > 200 && r.height > 100;
+    })(),
+    rows: document.querySelectorAll('#bn-list .bn-li').length,
+    stored: (() => { try { return JSON.parse(localStorage.getItem('tifo_banners_v1') || 'null')?.banners?.length ?? 0; } catch { return -1; } })(),
+    bar: getComputedStyle(document.getElementById('banner-bar')).display === 'none',
+    detail: document.getElementById('bn-detail')?.hidden === true,
+    makers: document.querySelectorAll('#bn-empty button[data-kind], #bn-add-stand, #bn-add-hanging').length,
+  }));
+  check('a new tifo has no banner, and opening the Banner view does not make one', none.card && none.rows === 0 && none.stored === 0, JSON.stringify(none));
+  check('with no banner there is no sheet to set up', none.bar && none.detail);
+  check('the empty state offers both kinds', none.makers === 4, `${none.makers} buttons`);
+  await page.click('#bn-empty button[data-kind="stand"]');
+  await page.waitForTimeout(900);
+  const made = await page.evaluate(() => ({
+    rows: [...document.querySelectorAll('#bn-list .bn-li')].map((r) => r.textContent.trim().replace(/\s+/g, ' ')),
+    card: document.getElementById('bn-empty')?.hidden === true,
+    show: document.querySelectorAll('#bn-list .bn-li .bn-li-show').length,
+  }));
+  check('one click makes a banner, listed with its type and stand', made.rows.length === 1 && /Stand banner/.test(made.rows[0]) && made.card, JSON.stringify(made.rows));
+  check('each banner has its own "Show in stadium"', made.show === 1);
 
   const s = await page.evaluate(() => ({
     canvas: !!document.querySelector('#banner-host canvas'),
@@ -180,8 +242,7 @@ console.log('\n— desktop: the fourth view exists and draws —');
 console.log('\n— the banner reaches the bowl —');
 {
   const { ctx, page, errs } = await openApp(1400, 880, 'en');
-  await page.click('#view-banner');
-  await page.waitForTimeout(900);
+  await openBanner(page);
   await drawOn(page, [[0.2, 0.4], [0.5, 0.3], [0.8, 0.45]]);
   await page.waitForTimeout(400);
   await page.click('#bn-matchday');
@@ -209,8 +270,7 @@ console.log('\n— the banner reaches the bowl —');
 console.log('\n— the banner shows in the editor bowl —');
 {
   const { ctx, page, errs } = await openApp(1400, 880, 'en');
-  await page.click('#view-banner');
-  await page.waitForTimeout(900);
+  await openBanner(page);
   await drawOn(page, [[0.15, 0.35], [0.5, 0.2], [0.85, 0.4]]);
   await page.waitForTimeout(400);
   await page.click('#view-3d');
@@ -228,6 +288,7 @@ console.log('\n— the banner shows in the editor bowl —');
   check('the editor bowl renders', !!withBanner, JSON.stringify(withBanner));
   // Hide every banner through the store the app already exposes, so this does
   // not depend on a control's markup.
+  await editStorage(page, () => {});
   const hidden = await page.evaluate(() => {
     const raw = localStorage.getItem('tifo_banners_v1');
     if (!raw) return false;
@@ -237,8 +298,7 @@ console.log('\n— the banner shows in the editor bowl —');
     return (m.banners ?? []).length > 0;
   });
   check('a banner was stored to hide', hidden);
-  await page.reload({ waitUntil: 'networkidle' });
-  await page.waitForTimeout(1500);
+  await backToApp(page);
   await page.click('#view-3d');
   await page.waitForTimeout(9000);
   const withoutBanner = await shotOf();
@@ -256,14 +316,13 @@ console.log('\n— the banner shows in the editor bowl —');
   // symptom exists: give the banner a colour nothing else in the bowl uses,
   // find where it lands, and require the middle of it to be that colour and
   // nothing else.
-  await page.evaluate(() => {
+  await editStorage(page, () => {
     const raw = localStorage.getItem('tifo_banners_v1');
     const m = JSON.parse(raw);
     for (const b of m.banners ?? []) { b.visible = true; b.bg = '#ff00ff'; b.material = 'solid'; }
     localStorage.setItem('tifo_banners_v1', JSON.stringify(m));
   });
-  await page.reload({ waitUntil: 'networkidle' });
-  await page.waitForTimeout(1500);
+  await backToApp(page);
   await page.click('#view-3d');
   await page.waitForTimeout(9000);
   // The CLOSEST camera, not the default one.
@@ -340,8 +399,8 @@ console.log('\n— the Banner view\'s own controls —');
   await page.waitForTimeout(400);
   const seatUndo = await page.$eval('#undo', (b) => !b.disabled);
 
-  await page.click('#view-banner');
-  await page.waitForTimeout(1000);
+  await openBanner(page);
+  await page.waitForTimeout(300);
 
   // The pickers are there without Match Day. They used to come from an event
   // only an open simulator answered, and Match Day covers the whole screen —
@@ -442,8 +501,9 @@ console.log('\n— the Banner view\'s own controls —');
   check('Ctrl+Z in the Banner view never touches the seats', seatUndo && seatStill, `seat undo before ${seatUndo}, after ${seatStill}`);
 
   // Beside the bowl: the banner and the stadium together, the camera on it.
-  await page.click('#view-banner');
-  await page.waitForTimeout(700);
+  // Undo went back past the banner being made — it is the user's own edit,
+  // so it should — which leaves the empty state; make a fresh one.
+  await openBanner(page);
   await page.click('#bn-beside');
   await page.waitForTimeout(9000);
   const split = await page.evaluate(() => {
@@ -456,7 +516,7 @@ console.log('\n— the Banner view\'s own controls —');
       pressed: document.getElementById('bn-beside').getAttribute('aria-pressed'),
     };
   });
-  check('"Show it in the stadium" puts the bowl beside the banner', split.side && split.pressed === 'true', JSON.stringify(split));
+  check('"Split with the stadium" puts the bowl beside the banner', split.side && split.pressed === 'true', JSON.stringify(split));
   check('and points the bowl at the banner', split.cam === 'banner', split.cam);
   // An untouched banner is visible there: it is cloth, so it draws.
   const bright = await page.evaluate(() => {
@@ -476,13 +536,148 @@ console.log('\n— the Banner view\'s own controls —');
   await ctx.close();
 }
 
+// Every banner in the list has its own way into the stadium: the Stadium
+// view, the camera on that banner, and the banner actually in the picture.
+console.log('\n— "Show in stadium" —');
+{
+  const { ctx, page, errs } = await openApp(1400, 880, 'en');
+  await openBanner(page, { kind: 'stand' });
+  const fabricShare = () => page.evaluate(() => {
+    const cv = document.querySelector('#preview-host canvas');
+    if (!cv) return -1;
+    const c2 = document.createElement('canvas');
+    c2.width = cv.width;
+    c2.height = cv.height;
+    const g = c2.getContext('2d');
+    g.drawImage(cv, 0, 0);
+    const d = g.getImageData(0, 0, c2.width, c2.height).data;
+    let n = 0;
+    for (let i = 0; i < d.length; i += 4) if (d[i] > 190 && d[i + 1] > 190 && d[i + 2] > 180) n++;
+    return n / (d.length / 4);
+  });
+  const where = () => page.evaluate(() => ({
+    view: ['view-2d', 'view-banner', 'view-3d', 'view-split'].find((id) => document.getElementById(id)?.classList.contains('active')),
+    bowl: document.getElementById('preview-host')?.hidden === false && document.getElementById('banner-host')?.hidden === true,
+    cam: document.getElementById('camera-preset')?.value,
+    msg: document.getElementById('message')?.textContent ?? '',
+  }));
+  await page.click('#bn-list .bn-li .bn-li-show');
+  await page.waitForTimeout(9000);
+  const first = await where();
+  check('"Show in stadium" opens the Stadium view', first.view === 'view-3d' && first.bowl, JSON.stringify(first));
+  check('with the camera on that banner, and says so', first.cam === 'banner' && /Banner 1/.test(first.msg), first.msg);
+  const share1 = await fabricShare();
+  check('the banner is in the picture', share1 > 0.03, `${(share1 * 100).toFixed(1)}% of the bowl is fabric`);
+  const shot1 = await (await page.$('#preview-host canvas'))?.screenshot().catch(() => null);
+
+  // A second one, of the other kind, from the list's own button — and its own
+  // "Show in stadium" goes to IT, not to the first.
+  await openBanner(page, { make: false });
+  await page.click('#bn-add-hanging');
+  await page.waitForTimeout(900);
+  const rows = await page.$$('#bn-list .bn-li .bn-li-show');
+  check('the list has a row and a button per banner', rows.length === 2, `${rows.length} rows`);
+  await rows[1].click();
+  await page.waitForTimeout(3500);
+  const second = await where();
+  const shot2 = await (await page.$('#preview-host canvas'))?.screenshot().catch(() => null);
+  check('the second row shows the second banner', second.view === 'view-3d' && second.cam === 'banner' && /Banner 2/.test(second.msg), second.msg);
+  check('and the camera moved to it', !!shot1 && !!shot2 && Buffer.compare(shot1, shot2) !== 0);
+
+  // A tifo can go back to having none: the last one can be deleted, and the
+  // camera that looked at banners stops being offered.
+  await openBanner(page, { make: false });
+  await page.click('#bn-del');
+  await page.waitForTimeout(400);
+  await page.click('#bn-del');
+  await page.waitForTimeout(900);
+  const gone = await page.evaluate(() => ({
+    card: document.getElementById('bn-empty')?.hidden === false,
+    stored: JSON.parse(localStorage.getItem('tifo_banners_v1') || '{"banners":[]}').banners.length,
+    camOffered: !document.querySelector('#camera-preset option[value="banner"]')?.disabled,
+    cam: document.getElementById('camera-preset')?.value,
+  }));
+  check('the last banner can be deleted, back to the empty state', gone.card && gone.stored === 0, JSON.stringify(gone));
+  check('with no banner, the "Your banner" camera is not offered', !gone.camOffered && gone.cam !== 'banner', JSON.stringify(gone));
+  check('no page errors showing banners in the stadium', errs.length === 0, errs.join(' | '));
+  await ctx.close();
+}
+
+// A banner belongs to the tifo it was made in. Stored banners used to load
+// whatever the canvas held, so a new tifo — a first visit, another stadium, a
+// design from the gallery — opened with the last one's banners on it; and the
+// banner the old Banner view made by itself turned up on every tifo that had
+// ever looked at it.
+console.log('\n— banners belong to their tifo —');
+{
+  const { ctx, page, errs } = await openApp(1400, 880, 'en');
+  const banner = (over) => ({
+    id: 'bn_x', name: 'Banner 1', kind: 'stand', aspect: 0.5, material: 'solid', fabricGsm: 110,
+    netBacked: false, weightBar: true, bg: null, items: [],
+    slot: { stand: 1, stands: 1, blockFrom: -1, blockSpan: 2, tier: -1 },
+    reveal: 'unroll', revealMs: 5000, wind: 0.25, visible: true, ...over,
+  });
+  const listed = async () => {
+    await page.click('#view-banner');
+    await page.waitForTimeout(900);
+    const names = await page.$$eval('#bn-list .bn-li .bn-li-name', (els) => els.map((e) => e.textContent));
+    await page.click('#view-2d');
+    await page.waitForTimeout(300);
+    return names;
+  };
+  // A tifo with a draft: a stroke on the seats writes one.
+  const c = await page.$eval('#canvas-host canvas', (el) => { const r = el.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; });
+  await page.mouse.move(c.x - 50, c.y);
+  await page.mouse.down();
+  for (let i = 0; i < 10; i++) await page.mouse.move(c.x - 50 + i * 10, c.y + (i % 2) * 4);
+  await page.mouse.up();
+  await page.waitForTimeout(2200);
+
+  await editStorage(page, (v) => localStorage.setItem('tifo_banners_v1', JSON.stringify(v)), { v: 1, banners: [banner({ id: 'bn_ghost' })] });
+  await backToApp(page);
+  check('the banner nobody made does not come back', (await listed()).length === 0);
+
+  await editStorage(page, (v) => localStorage.setItem('tifo_banners_v1', JSON.stringify(v)), { v: 1, banners: [banner({ id: 'bn_mine', name: 'Mine', bg: '#ff0000' })] });
+  await backToApp(page);
+  check('a banner somebody made comes back with its tifo', JSON.stringify(await listed()) === '["Mine"]');
+
+  await editStorage(page, (v) => {
+    localStorage.setItem('tifo_banners_v1', JSON.stringify(v));
+    localStorage.removeItem('tifo_draft_v1');
+  }, { v: 1, banners: [banner({ id: 'bn_mine', name: 'Mine', bg: '#ff0000' })] });
+  await backToApp(page);
+  check('a brand-new tifo does not start with the last one\'s banners', (await listed()).length === 0);
+
+  // A design opened from the gallery is another tifo, and it has its own
+  // banners or none — never the ones that were on screen.
+  await openBanner(page);
+  const hadOne = (await page.$$('#bn-list .bn-li')).length === 1;
+  await page.click('#view-2d');
+  await page.waitForTimeout(300);
+  // Through the account menu: at this width the header folds Gallery into it.
+  if (await page.$eval('#gallery', (b) => b.getBoundingClientRect().width > 0)) await page.click('#gallery');
+  else {
+    await page.click('#avatar');
+    await page.click('#menu-gallery');
+  }
+  const opened = await page.waitForSelector('.feed-card .feed-open', { timeout: 20000 }).then(() => true, () => false);
+  if (opened) {
+    await page.click('.feed-card .feed-open');
+    await page.waitForTimeout(4000);
+    await page.waitForLoadState('networkidle').catch(() => {});
+    await page.waitForTimeout(1200);
+  }
+  check('a design opened from the gallery does not bring the last tifo\'s banner', hadOne && opened && (await listed()).length === 0, `made one: ${hadOne}, gallery opened: ${opened}`);
+  check('no page errors keeping banners with their tifo', errs.length === 0, errs.join(' | '));
+  await ctx.close();
+}
+
 // Match Day's own Banners section, where East used to mean North.
 console.log('\n— Match Day moves the banner where it is told —');
 {
   const { ctx, page, errs } = await openApp(1400, 880, 'en');
   await page.evaluate(() => localStorage.setItem('mds_seen_intro', '1'));
-  await page.click('#view-banner');
-  await page.waitForTimeout(900);
+  await openBanner(page);
   await page.click('#bn-matchday');
   await page.waitForTimeout(13000);
   const opened = await page.evaluate(() => document.querySelector('[data-sec="banners"]')?.classList.contains('open'));
@@ -516,6 +711,15 @@ for (const [w, h, label] of [[390, 844, 'phone upright'], [844, 390, 'phone on i
   if (entry.pill >= 3) await page.click('.m-view-b[data-view="banner"]');
   else await page.click('#view-banner');
   await page.waitForTimeout(1200);
+  const card = await page.evaluate(() => {
+    const c = document.getElementById('bn-empty');
+    if (!c || c.hidden) return null;
+    const r = c.getBoundingClientRect();
+    return { l: Math.round(r.left), r: Math.round(r.right), t: Math.round(r.top), b: Math.round(r.bottom), w: innerWidth, h: innerHeight };
+  });
+  check(`${label}: the empty state fits the screen`, !!card && card.l >= 0 && card.r <= card.w && card.t >= 0 && card.b <= card.h, JSON.stringify(card));
+  await page.click('#bn-empty button[data-kind="stand"]');
+  await page.waitForTimeout(800);
 
   const shown = await page.evaluate(() => {
     const c = document.querySelector('#banner-host canvas');
@@ -566,6 +770,11 @@ console.log('\n— Arabic —');
   check('the page is RTL', dir === 'rtl', String(dir));
   await page.click('#view-banner');
   await page.waitForTimeout(1000);
+  const emptyAr = await page.evaluate(() => [...document.querySelectorAll('#bn-empty h3, #bn-empty p, #bn-empty button, #bn-list, #bn-add-stand, #bn-add-hanging')]
+    .map((el) => (el.textContent || '').trim()).filter((x) => x && /^[\x00-\x7F]+$/.test(x)));
+  check('the empty state is Arabic', emptyAr.length === 0, emptyAr.join(' | '));
+  await page.click('#bn-empty button[data-kind="stand"]');
+  await page.waitForTimeout(900);
   const ar = await page.evaluate(() => {
     const latin = [];
     for (const el of document.querySelectorAll('#banner-bar label, #banner-bar option, #ctx-banner h4, #ctx-banner label, #ctx-banner option, #ctx-banner button, .bn-note')) {

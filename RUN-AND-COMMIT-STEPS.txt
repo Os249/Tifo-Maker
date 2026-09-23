@@ -1,9 +1,9 @@
-Tifo Maker — banners review: run it, then commit it
-===================================================
+Tifo Maker — banners: run it, then commit it
+============================================
 
 Everything is already in C:\Users\PCD\Desktop\tifo-maker. Nothing to bundle,
-nothing to download. Your main is at "Tifo Maker — banners rebuild"; all of
-this is uncommitted on top of it.
+nothing to download. Your main is at "Banners: review the whole system, and
+fix what a user would hit"; all of this is uncommitted on top of it.
 
 
 PART 1 — LOOK AT IT (no commit, no build needed)
@@ -20,48 +20,37 @@ PART 1 — LOOK AT IT (no commit, no build needed)
 3. Open http://localhost:5173/ — that is the editor. Leave the terminal
    running; it recompiles as you edit.
 
-4. OPTIONAL — only for save / account / community. In a SECOND terminal:
-
-       npm run server
-
 
 PART 2 — WHAT TO CHECK
 ----------------------
 
-Banner view (the flag in the left rail):
-  - The right-hand panel shows Stand, Across, Blocks, How many and Tier, and
-    "Measures W × H m on this ground" — without opening Match Day.
-  - "Show it in the stadium": the bowl opens beside the artboard, looking at
-    the banner. Change the stand or the blocks and it follows.
-  - Add a text and click it: Front / Back / Duplicate / Delete appear in the
-    panel. Delete, Ctrl+Z, Ctrl+Y, Ctrl+D and the arrow keys act on the
-    banner — not on the seat design behind it.
-  - The pencil next to the banner's name in the top bar renames it.
-  - Type "Hanging banner", Tier 2 on a two-tier ground: the artboard becomes
-    the long strip between the tiers and the shape controls lock, saying why.
-    Set Tier back to "Whole stand" and your own shape comes back.
-  - Reveal: a stand banner offers "Unroll down the stand" or "Already up"; a
-    hanging banner offers "Haul up on ropes" or "Already up". The seconds
-    follow the size until you move the slider; "Use the real time" puts that
-    back.
-  - A brand-new banner is white cloth, not invisible.
+The tifo you already have:
+  - The white sheet the Banner view used to put on your North stand by
+    itself is gone. A banner you drew on, coloured or moved is still there;
+    if you do not want it, open the Banner view and delete it with the bin.
 
-Stadium view:
-  - Camera -> "Your banner".
-  - No seats coming through the fabric, on an empty stand as well.
+A brand-new tifo (easiest: a private window, or another browser):
+  - Stadium view: no banner anywhere.
+  - Banner view: "No banner in this tifo", with Stand banner and Hanging
+    banner buttons. The Type / Size / Fabric bar is not there yet.
 
-Match Day ("See it on match day" at the bottom of the banner panel):
-  - It opens looking at the banner, with the Banners section open.
-  - Stand East puts it on East (it used to go to North).
-  - Play: the scrub bar follows the reveal instead of jumping to the end.
+Make one:
+  - Click Stand banner. The panel's Banners list shows it: its colour, its
+    name, "Stand banner · North" and a "Show in stadium" button.
+  - Click "Show in stadium": the Stadium view opens with the camera on it,
+    and the status line says so.
+  - Make a Hanging banner from the list's own button. Each row's
+    "Show in stadium" goes to its own banner.
+  - Delete both with the bin in the bar: back to "No banner in this tifo".
+    Ctrl+Z brings the last one back.
 
-Stadium panel (Stadium in the left rail):
-  - The region filter says "Any region" and each stadium's details say
-    "Region". Before this they printed "sp.anyRegion" and "sp.region".
-  - Load The Jewel of Jeddah: the status bar at the bottom says "The Jewel of
-    Jeddah", not "community-jewel-jeddah-62k".
-  - Switch to Arabic: the stadium names, their details and the notice under
-    them are Arabic, and the dropdown arrows no longer sit on the words.
+Also:
+  - Open a design from the Gallery: the banners of the tifo you were on do
+    not come with it.
+  - At 1366 or 1280 wide, after drawing anything: the header fits, and
+    "Sign up" stays on one line. (Community and Gallery are in the U menu.)
+  - On a phone (or a narrow window with ?editor=1): "Show in stadium" in the
+    Paint sheet closes the sheet and shows the whole banner.
 
 
 PART 3 — COMMIT
@@ -71,8 +60,8 @@ Only when you are happy with what you saw.
 
 1. Stop the dev server (Ctrl+C).
 
-2. Delete the five retired banner files. I could not delete them from here,
-   so I emptied them — the build passes while they are there — but they
+2. If you have not yet: delete the five retired banner files. They are
+   empty placeholders, so nothing breaks while they are there, but they
    should go:
 
        Remove-Item scripts\banner-physics.mts
@@ -81,21 +70,14 @@ Only when you are happy with what you saw.
        Remove-Item src\render\simulator\cloth.ts
        Remove-Item src\render\simulator\standHeightfield.ts
 
-   Optional, the same kind of leftover (the old Banner Studio; nothing uses
-   it, it still compiles):
+   Optional, the same kind of leftover:
 
        Remove-Item src\ui\bannerStudio.ts
-
-   GitHub Desktop lists them as deleted; they go in with the rest.
 
 3. Prove it builds:
 
        npm run build
        npm run verify
-
-   Optional, a few minutes:
-
-       npm run sweep:banner
 
 4. Commit. The message is in BANNERS-REBUILD-COMMIT.txt in this folder, with
    the Summary and the Description labelled separately — paste them into

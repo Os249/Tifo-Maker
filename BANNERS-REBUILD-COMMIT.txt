@@ -1,66 +1,52 @@
 === SUMMARY ===
 
-Banners: review the whole system, and fix what a user would hit
+Banners: a tifo starts with none, and each one has Show in stadium
 
 
 === DESCRIPTION ===
 
-Your main is at "Tifo Maker — banners rebuild". This commit is everything since: the review of the whole banner system, which is most of it; last round's fix for the seats showing through the fabric, which reached your folder after that commit; the stadium panel's lost strings put back, with three things the stadium changes had exposed; and the five retired banner files emptied, so that main builds again.
+A brand-new tifo opened with a banner already on it. There were three separate reasons, and one of them was my last commit.
 
-THE REVIEW: EVERYTHING A USER WOULD HIT
+1. THE BANNER VIEW MADE ONE BY ITSELF
 
-The whole system was driven the way a person drives it — desktop, laptop, Arabic, phone, the editor's bowl and Match Day — and every state photographed. Most of what that found was invisible to every existing test, because each thing was correct in the state the tests put it in and broken in the state a person arrives at.
+The first time the Banner view opened, it put a banner in the tifo, and that banner was saved like any other. So anyone who only LOOKED at the view had a banner on their North stand from then on. Not everyone wants a banner. The view no longer makes one. With none, the artboard says what a banner is and makes either kind in one click, and the sheet's controls stay out of the way until there is a banner to set up.
 
-Broken:
+2. MY LAST COMMIT TURNED THOSE INTO WHITE SHEETS
 
-- The block and tier pickers were never on screen. The panel asked Match Day for them by an event only an open simulator answered — and Match Day covers the whole screen, so nobody could ever have seen them. The panel builds the same stand frames Match Day does now, from the same seat map, through one cache every caller shares, and the size it shows is measured on the ground rather than "about".
-- Ctrl+Z in the Banner view undid the SEAT design, behind the artboard, where nothing on screen changed. Delete deleted the seat editor's selection. The keys go to the banner now: undo and redo, Delete, Ctrl+D, the arrows to nudge, Escape to let go.
-- There was no way to take one thing off a banner. A word in the wrong place meant Undo, or "Clear the art". A selected item gets Front, Back, Duplicate and Delete in the panel.
-- In Match Day, choosing East put the banner on the North stand: East is stand zero, and `Number('0') || 1` is one.
-- A new banner was see-through with nothing on it, which draws nothing — make a banner, look for it on the stand, find nothing. It starts as white cloth now; one stored empty and see-through comes back as cloth; one see-through with art on it is kept, and the panel says only the art will show.
-- A hanging banner between two tiers squashed its artwork about twelve times over, a 2:1 design stretched onto an 11:1 strip. That slot imposes the gap's shape, so the shape is kept beside the user's own: the artboard becomes the strip, the texture is drawn at it with enough pixels across its short side, the shape controls lock and say why, and moving the banner out of the gap gives the user's shape back untouched.
-- The texture ignored the sheet's shape, so after a shape change the bowl kept drawing the old picture on the new sheet.
-- "See it on match day" opened on the default camera with the banner behind it, and the camera glide that starts on opening then undid "Look at it". It opens on the banner now, with the Banners section open.
+Last round, a stored see-through banner with nothing on it came back as white cloth. The idea was to make an invisible banner findable. But nearly every banner like that was the one the view had made by itself, so the change put a white sheet on every tifo that had ever opened the Banner view. Stored banners now come back exactly as they were stored. The one nobody made (nothing drawn, no fabric, every setting still what a new banner starts with) is dropped when it loads. Change anything about it and it counts as somebody's banner, and it stays.
 
-Misleading:
+3. BANNERS WERE NOT TIED TO THEIR TIFO
 
-- Every reveal was offered to both types, and the geometry has one motion each: "Haul up on ropes" on a stand banner unrolled it. Each type offers its own motion or "Already up", and "Already up" no longer runs an animation of a thing it says does not happen.
-- The reveal's length was fixed when the banner was made and went stale with every size change, then reported the user as having chosen it. It follows the real banner until the slider is moved, and "Use the real time" puts it back.
-- Changing type re-proportioned the sheet under the art and dropped the Size menu to Custom.
-- Seat-only controls were all over the Banner view: a second brush slider that did nothing to the banner, Stadium fills, the card-flip reveal, card logistics, the seat minimap, "Height 18 seats" and "click a stand to place".
-- Placement was blind — the panel in one view, the bowl in another. "Show it in the stadium", or Split from a banner, puts the bowl beside the artboard and turns it to look wherever the banner goes. The Stadium view gets a "Your banner" camera.
-- The artboard jumped half a tool bar whenever the text, shape or import bar opened, so a word landed away from where it was clicked. Things placed on a strip hung off its hem.
-- A second banner landed exactly on top of the first. Undo could delete the banner the editor made by itself. A banner hidden in Match Day could not be un-hidden anywhere else. Banners could not be renamed. Match Day's scrub bar sat at the end while a minute-long haul played.
+Banners live in their own key in the browser, and they were loaded whatever the canvas held. A first visit, a link to another stadium, an imported file, a shared design and a design opened from the gallery all came up with the last tifo's banners. A gallery design also kept them on its next save.
 
-And the smaller things: white fabric blew out to a flat white shape in the bowl; the guides vanished on white; the legible-type band was unlabelled; "Across" was clipped to "A"; the tool bar split "Fabric" from its weight; two different things were called "Size"; the two stands of a corner run were not named; Match Day listed stands in another order and its help sent banners to Tifo Assets.
+Now:
+- Banners come back only with their own tifo: the draft being restored, or the same design moved to another stadium.
+- The banner key is written every time the draft is, so the two always describe the same tifo. A banner-only tifo is kept as a draft too.
+- A design opened from the gallery, or a .tifo file, gets its own banners or none.
+- If a design's banners fail to load, saving it no longer writes "none" over them.
 
-THE SEATS THROUGH THE FABRIC
+SHOW IN STADIUM
 
-A banner is held off the terracing by the crowd, and that support faded to zero as the stand emptied — but a card is drawn at every seat whether anyone is in it or not, and its top is 1.05 m out along the banner's normal. On an empty stand the sheet sat 0.4 m off the concrete and thirty thousand cards came straight through it. The editor's own bowl has no crowd at all, so it was the worst case in the product. The support runs from the cards to the heads now. The sweep runs empty stands as well as full ones (104,504 configurations), and the pixel gate uses the closest camera, because from 245 m up the whole defect was smaller than a pixel.
+The Banner view's panel lists every banner in the tifo, showing its fabric colour, name, type and stand. Each banner has its own "Show in stadium" button, which goes straight to the Stadium view with the camera on that banner, and says so. A banner Match Day had hidden is shown again first, with a note saying so.
 
-THE STADIUM PANEL
+The last banner can now be deleted; before, the view always wanted one. The "Your banner" camera is only offered when there is a banner. "Show it in the stadium", which puts the stadium beside the artboard, is renamed "Split with the stadium", which is what it does and what the view switcher calls it.
 
-Every banner delivery wrote the whole of src/ui/i18n.ts, and each one after the stadium session's put an older copy back. That dropped fourteen of its strings and the new wording of three more. On screen today it is the stadium panel's region filter reading "sp.anyRegion" and every stadium's details reading "sp.region"; the other fifteen belong to the Custom tab — the OpenStreetMap import and saving a stadium — and would have printed their keys at the user the moment Custom was switched back on. All seventeen are back word for word from your own history (commit 0b767f5), in both languages. `npm run verify` is what found it — it checks that every key the stadium fitter can emit has a string — and it reads one entry per line, so si.help is on one line now.
+On a phone, "Show in stadium" closes the sheet and the view pill follows it; the pill used to follow only its own buttons. The camera now also fits the banner's width on a screen taller than it is wide. The distance that framed a 41 m banner on a laptop cut off both ends on a phone held upright. Match Day's "Look at it" uses the same camera.
 
-With the stadium work in the test pass for the first time, three more things showed, all from putting the ten real-venue grounds on the tab everyone opens ("Show all 13 stadiums"). Nobody saw them while those grounds sat on the Community tab:
+THE HEADER ON LAPTOPS
 
-- Ten of the thirteen stadiums had no name in either language. The list printed their English names in Arabic, and the status bar and the share page — which print tl(template.id) — printed the raw id, "community-jewel-jeddah-62k", in both. They have names in both languages now, and `npm run verify` fails if a shipped stadium does not.
-- The notice under a ground built from a real venue was a hard-coded English string, so an Arabic user picking the Jewel of Jeddah, Al-Awwal Park or Kingdom Arena read the one legal line on the panel in English. It is translated now, with the same substance as the legal page's non-affiliation line. It also no longer opens with "Community-created", which stopped being true when those ten were retagged built-in — worth a look, since it is legal wording.
-- The dropdown chevron the stadium session brought back sat on top of the filter text: those selects had an even 6 px of padding, and in Arabic, where the text starts at the right, the arrow landed between the first two words. They leave it room now.
-
-e2e-i18n has a new surface for this — the panel with a real-venue ground loaded — because the default ground is not one, which is how the names and the notice went unchecked. Against the tree before these fixes it finds twelve English strings; after, none.
-
-WHY MAIN DID NOT BUILD
-
-The last commit included the five retired banner files — the cloth solver, its heightfield, bannerFit, bannerMigrate and banner-physics. They no longer compile, and `npm run build` typechecks everything, so main as committed fails it, and so does the Docker build Railway runs (`npm run build:prod` is the same command). They are emptied here — a comment and `export {}` — so it builds whether or not they are deleted; deleting them is still the right end state. `npm run probe:banner`, which ran one of them, is removed from package.json.
-
-TWO TESTS THAT FAILED FOR THE WRONG REASON
-
-- e2e-seo failed on main as well as here: its test account used a password the strong-password rule rejects, so the registration failed and every check after it. It uses a strong one now.
-- e2e-mobile's two-finger-undo check read the toast exactly 900 ms after the gesture, and the toast lives exactly 900 ms. On a loaded machine it lost the race and failed with the toast's own text, "Undone", in hand. It watches for the toast now.
+At 1366 x 768, the most common laptop screen, the header needed 1,369 px as soon as "Saved in this browser" appeared, which happens the moment anything is drawn. Sign up folded into a two-line circle, and Gallery and the account menu went off the edge of the page. Below 1400 px, Community and Gallery move into the account menu, which already has both. Below 1200 px the title narrows and the saved note goes.
 
 TESTS
 
-build 0 · verify 0 · verify:stadiumfit all pass · sweep 104,504 configurations, 0 failures · server, email, security, SOC and deploy tests 0 · e2e 21/0 · e2e-banner 77/0 · e2e-mobile 310/0 · e2e-i18n 17 surfaces clean · e2e-theme 47/0 · e2e-sound 61/0 · e2e-seo 12/0 · e2e-gate 23/0 · e2e-feedback 9/0 · e2e-templates 32/0 · e2e-claim 9/0 · e2e-verify 21/0 · 31 banner shots.
+e2e-banner has 100 checks, up from 77. The new ones cover:
+- a new tifo has no banner, and the empty state works
+- "Show in stadium" for each banner, with the banner actually in the picture, and the second row going to the second banner
+- deleting the last banner, and the "Your banner" camera going with it
+- the banner nobody made being dropped
+- a banner coming back with its own tifo and not with a new one
+- a gallery design opening without the last tifo's banner
 
-verify:osm needs the live OpenStreetMap service, which the sandbox these ran in cannot reach (it answers 403); it is outside the build on purpose. Run it after touching src/net/osm.ts.
+verify now checks that a stored see-through banner stays see-through, that a tifo starts with none, that making one can be undone, and that the unmade banner is dropped while a changed one is kept.
+
+Full pass, every suite, on exactly this tree: build 0 · verify 0 · verify:stadiumfit all pass · sweep 104,504 configurations, 0 failures · server, email, security, SOC and deploy tests 0 · e2e 21/0 · e2e-banner 100/0 · e2e-mobile 310/0 · e2e-i18n 17 surfaces clean · e2e-theme 47/0 · e2e-sound 61/0 · e2e-seo 12/0 · e2e-gate 23/0 · e2e-feedback 9/0 · e2e-templates 32/0 · e2e-claim 9/0 · e2e-verify 21/0 · 31 banner shots.

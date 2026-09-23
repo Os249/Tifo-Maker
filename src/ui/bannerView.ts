@@ -91,6 +91,8 @@ export interface BannerViewDeps {
   onOpenMatchDay: () => void;
   /** Put the stadium beside the artboard, or take it away. */
   onToggleBeside?: () => void;
+  /** Go to the Stadium view, looking at this banner. */
+  onShowInStadium?: (id: string) => void;
   /** Status line, shared with the rest of the editor. */
   message?: HTMLElement | null;
 }
@@ -124,14 +126,32 @@ export function mountBannerView(deps: BannerViewDeps): BannerView {
   const { host, store, bannerStore } = deps;
   const frameFor = spanFrameCache(deps.map);
 
-  // Always have something to draw on. A Banner view whose first frame is an
-  // empty-state card is a worse introduction than a blank sheet of fabric.
-  if (bannerStore.count === 0) {
-    bannerStore.add(newBanner('stand', t('bn.defaultName')));
-    bannerStore.clearHistory();
-  }
-
+  // No banner is made here. This used to put one in the tifo the first time
+  // the view opened, on the theory that a blank sheet is a better welcome
+  // than an empty state — and it was saved with the tifo like any other, so
+  // anyone who only LOOKED at this view found a banner on their North stand
+  // from then on. Not everyone wants a banner. A tifo starts with none, and
+  // the empty state below makes one in a click.
   const canvas = BannerCanvas.create(host, bannerStore);
+
+  /** What the artboard shows while there is nothing to draw on. */
+  const emptyCard = document.createElement('div');
+  emptyCard.id = 'bn-empty';
+  emptyCard.className = 'bn-empty';
+  emptyCard.hidden = true;
+  emptyCard.innerHTML =
+    '<i class="ti ti-flag bn-empty-icon" aria-hidden="true"></i>' +
+    '<h3 data-i18n="bn.none.title"></h3>' +
+    '<p data-i18n="bn.none.body"></p>' +
+    '<div class="bn-empty-actions">' +
+    '<button type="button" class="primary" data-kind="stand"><i class="ti ti-plus" aria-hidden="true"></i> <span data-i18n="bn.kind.stand"></span></button>' +
+    '<button type="button" data-kind="hanging"><i class="ti ti-plus" aria-hidden="true"></i> <span data-i18n="bn.kind.hanging"></span></button>' +
+    '</div>';
+  const paintEmpty = (): void => {
+    for (const el of emptyCard.querySelectorAll<HTMLElement>('[data-i18n]')) el.textContent = t(el.dataset.i18n!);
+  };
+  paintEmpty();
+  host.appendChild(emptyCard);
   let active = false;
   let syncing = false;
   const historyMoved = (): void => {
@@ -194,6 +214,10 @@ export function mountBannerView(deps: BannerViewDeps): BannerView {
   const brushIn = $<HTMLInputElement>('bn-brush');
   const brushOut = $<HTMLElement>('bn-brush-out');
   const clearArtBtn = $<HTMLButtonElement>('bn-clear-art');
+  const listEl = $<HTMLElement>('bn-list');
+  const addStandBtn = $<HTMLButtonElement>('bn-add-stand');
+  const addHangBtn = $<HTMLButtonElement>('bn-add-hanging');
+  const detailEl = $<HTMLElement>('bn-detail');
 
   const say = (text: string): void => {
     if (deps.message) deps.message.textContent = text;
@@ -368,6 +392,88 @@ export function mountBannerView(deps: BannerViewDeps): BannerView {
   }
 
   // -------------------------------------------------------------------------
+  // The list: every banner in this tifo, and the way to go and look at it
+  // -------------------------------------------------------------------------
+
+  /**
+   * One row per banner — its fabric, its name, its type and stand — and a
+   * "Show in stadium" that goes straight to the Stadium view looking at it.
+   *
+   * Rebuilt only when something it shows changes: `sync` runs on every store
+   * change, which is every point of a brush stroke, and a list that re-made
+   * its buttons sixty times a second would lose the pointer under a click.
+   */
+  let listKey = '';
+  function syncList(): void {
+    if (!listEl) return;
+    const activeId = bannerStore.activeId_;
+    const banners = bannerStore.list();
+    const key = `${activeId}#` + banners.map((b) => `${b.id}|${b.name}|${b.kind}|${b.slot.stand}|${b.slot.stands}|${b.bg}|${b.visible}`).join(';');
+    if (key === listKey) return;
+    listKey = key;
+    listEl.replaceChildren();
+    if (!banners.length) {
+      const none = document.createElement('p');
+      none.className = 'bn-list-none';
+      none.textContent = t('bn.none.short');
+      listEl.appendChild(none);
+      return;
+    }
+    for (const b of banners) {
+      const row = document.createElement('div');
+      row.className = b.id === activeId ? 'bn-li active' : 'bn-li';
+      row.dataset.id = b.id;
+
+      const pick = document.createElement('button');
+      pick.type = 'button';
+      pick.className = 'bn-li-pick';
+      pick.setAttribute('aria-pressed', b.id === activeId ? 'true' : 'false');
+      const sw = document.createElement('span');
+      sw.className = b.bg ? 'bn-li-sw' : 'bn-li-sw clear';
+      if (b.bg) sw.style.background = b.bg;
+      const txt = document.createElement('span');
+      txt.className = 'bn-li-txt';
+      const name = document.createElement('span');
+      name.className = 'bn-li-name';
+      name.textContent = b.name;
+      const meta = document.createElement('span');
+      meta.className = 'bn-li-meta';
+      const where = b.slot.stands > 1
+        ? tv('bn.across.pair', { a: standName(b.slot.stand), b: standName(((b.slot.stand + 1) % 4) as StandIndex) })
+        : standName(b.slot.stand);
+      meta.textContent = tv('bn.li.meta', { kind: t(`bn.kind.${b.kind}`), stand: where })
+        + (b.visible === false ? ` · ${t('bn.li.hidden')}` : '');
+      txt.append(name, meta);
+      pick.append(sw, txt);
+      pick.addEventListener('click', () => {
+        bannerStore.setActive(b.id);
+        canvas.fitToView();
+      });
+
+      const show = document.createElement('button');
+      show.type = 'button';
+      show.className = 'bn-li-show';
+      show.title = t('bn.showT');
+      show.innerHTML = '<i class="ti ti-building-stadium" aria-hidden="true"></i> ';
+      const label = document.createElement('span');
+      label.textContent = t('bn.show');
+      show.appendChild(label);
+      show.addEventListener('click', () => deps.onShowInStadium?.(b.id));
+
+      row.append(pick, show);
+      listEl.appendChild(row);
+    }
+  }
+
+  /** With no banner there is nothing to edit: the empty state, and the list's buttons. */
+  function syncEmpty(): void {
+    const none = bannerStore.count === 0;
+    document.body.classList.toggle('bn-none', none);
+    emptyCard.hidden = !none;
+    if (detailEl) detailEl.hidden = none;
+  }
+
+  // -------------------------------------------------------------------------
   // Reading the store into the controls
   // -------------------------------------------------------------------------
 
@@ -388,7 +494,10 @@ export function mountBannerView(deps: BannerViewDeps): BannerView {
         docSel.value = doc?.id ?? '';
         docSel.disabled = bannerStore.count === 0;
       }
-      if (delBtn) delBtn.disabled = bannerStore.count <= 1;
+      // The last one can go too: a tifo does not need a banner.
+      if (delBtn) delBtn.disabled = bannerStore.count === 0;
+      syncList();
+      syncEmpty();
       syncContext();
       if (!doc) return;
 
@@ -524,9 +633,15 @@ export function mountBannerView(deps: BannerViewDeps): BannerView {
   }
 
   docSel?.addEventListener('change', () => bannerStore.setActive(docSel.value || null));
-  newBtn?.addEventListener('click', () => {
-    const n = bannerStore.count + 1;
-    const doc = newBanner('stand', tv('bn.nameN', { n }));
+  /** The lowest "Banner n" nobody is called, so deleting one does not make two of another. */
+  const nextName = (): string => {
+    const taken = new Set(bannerStore.list().map((b) => b.name));
+    let n = 1;
+    while (taken.has(tv('bn.nameN', { n }))) n++;
+    return tv('bn.nameN', { n });
+  };
+  const createBanner = (kind: BannerKind): void => {
+    const doc = newBanner(kind, nextName());
     // On a stand nobody has used yet. Every new banner used to land in the
     // same centred slot on the North stand, exactly on top of the last one,
     // so the second banner of a design was invisible under the first.
@@ -534,12 +649,18 @@ export function mountBannerView(deps: BannerViewDeps): BannerView {
     const free = ([1, 3, 0, 2] as StandIndex[]).find((st) => !used.has(st) && frameFor(st, 1).ok);
     if (free !== undefined) doc.slot = { ...doc.slot, stand: free };
     bannerStore.add(doc);
-    canvas.fitToView();
+    requestAnimationFrame(() => canvas.fitToView());
     say(t('bn.msg.added'));
-  });
+  };
+  newBtn?.addEventListener('click', () => createBanner('stand'));
+  addStandBtn?.addEventListener('click', () => createBanner('stand'));
+  addHangBtn?.addEventListener('click', () => createBanner('hanging'));
+  for (const b of emptyCard.querySelectorAll<HTMLButtonElement>('button[data-kind]')) {
+    b.addEventListener('click', () => createBanner(b.dataset.kind as BannerKind));
+  }
   delBtn?.addEventListener('click', () => {
     const doc = bannerStore.active;
-    if (!doc || bannerStore.count <= 1) return;
+    if (!doc) return;
     bannerStore.remove(doc.id);
     canvas.fitToView();
     say(t('bn.msg.deletedBanner'));
@@ -788,6 +909,8 @@ export function mountBannerView(deps: BannerViewDeps): BannerView {
   onLangChange(() => {
     invalidateBannerText();
     if (presetSel) presetSel.replaceChildren();
+    paintEmpty();
+    listKey = '';
     sync();
     canvas.requestDraw();
   });

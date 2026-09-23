@@ -245,7 +245,12 @@ export class Preview3D {
     const store = this.bannerStore;
     const doc = store ? (id ? store.get(id) : store.active) : null;
     if (!doc) return false;
-    const shot = bannerShot(doc, this.frameFor(doc.slot.stand, doc.slot.stands), { fov: this.camera.fov });
+    // The shape of the picture as it is NOW: the host may have been hidden
+    // until a moment ago, so the camera's own aspect can still be stale.
+    const w = this.host.clientWidth;
+    const h = this.host.clientHeight;
+    const aspect = w > 0 && h > 0 ? w / h : this.camera.aspect;
+    const shot = bannerShot(doc, this.frameFor(doc.slot.stand, doc.slot.stands), { fov: this.camera.fov, aspect });
     if (!shot) return false;
     this.camera.position.set(...shot.position);
     this.controls.target.set(...shot.target);

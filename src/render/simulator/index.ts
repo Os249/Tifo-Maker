@@ -1335,7 +1335,7 @@ export class MatchDaySimulator {
   focusBanner(id: string, elevationDeg?: number): boolean {
     const doc = this.bannerStore?.get(id);
     if (!doc || !this.placement) return false;
-    const shot = bannerShot(doc, this.placement.frameFor(doc.slot.stand, doc.slot.stands), { elevationDeg });
+    const shot = bannerShot(doc, this.placement.frameFor(doc.slot.stand, doc.slot.stands), { elevationDeg, aspect: this.camera.aspect });
     if (!shot) return false;
     // Whatever glide was under way is over. Opening the simulator starts one
     // towards the default camera, and it carried on for most of a second after

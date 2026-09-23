@@ -396,6 +396,19 @@
              it puts the bowl next to the artboard and turns it to look at
              wherever the banner goes. -->
         <div class="panel-section" id="ctx-banner" data-panel="__menu_only__" style="display:none">
+          <!-- Every banner in this tifo, each with a way to go and look at it.
+               Banners are optional: a tifo starts with none, and this list is
+               where one is made. -->
+          <h4><span data-i18n="bn.list">Banners</span> <span class="h4-tag" data-i18n="bn.list.tag">in this tifo</span></h4>
+          <div id="bn-list" class="bn-list"></div>
+          <div class="chips bn-add-row">
+            <button class="chip" id="bn-add-stand" title="Make a banner that unrolls over the seats" data-i18n-attr="title:bn.add.standT"><i class="ti ti-plus"></i> <span data-i18n="bn.kind.stand">Stand banner</span></button>
+            <button class="chip" id="bn-add-hanging" title="Make a banner that is hauled up on ropes" data-i18n-attr="title:bn.add.hangingT"><i class="ti ti-plus"></i> <span data-i18n="bn.kind.hanging">Hanging banner</span></button>
+          </div>
+
+          <!-- Everything below is about the banner being edited, so it is only
+               here while there is one. -->
+          <div id="bn-detail">
           <!-- The tool in hand. Only while the brush or the eraser is. -->
           <div id="bn-brush-block" class="bn-block">
             <h4><span data-i18n="bn.brush">Banner brush</span> <span class="h4-tag" data-i18n="ed.brush.activeTool">active tool</span></h4>
@@ -466,7 +479,7 @@
           <!-- "Centred" is the first entry in Blocks, so a second control that
                did the same thing is gone; what took its place is the one thing
                the panel could not do — show the banner where it hangs. -->
-          <button id="bn-beside" class="bn-beside" title="Show the stadium next to the banner, looking at it" data-i18n-attr="title:bn.besideT" aria-pressed="false"><i class="ti ti-layout-columns"></i> <span data-i18n="bn.beside">Show it in the stadium</span></button>
+          <button id="bn-beside" class="bn-beside" title="Show the stadium next to the banner, looking at it" data-i18n-attr="title:bn.besideT" aria-pressed="false"><i class="ti ti-layout-columns"></i> <span data-i18n="bn.beside">Split with the stadium</span></button>
 
           <h4 style="margin-top:14px;"><span data-i18n="bn.rig">Rigging</span> <span class="h4-tag" data-i18n="bn.rig.tag">what holds it</span></h4>
           <div class="chips" style="margin-bottom:10px;">
@@ -503,6 +516,7 @@
 
           <div class="chips" style="margin-top:14px;">
             <button class="chip bn-danger" id="bn-clear-art" data-i18n="bn.clearArt">Clear the art</button>
+          </div>
           </div>
         </div>
 

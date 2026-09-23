@@ -78,7 +78,7 @@ export function mountToolbar(
    * knowing what a banner is: it hands the snapshot to the server and hands
    * whatever comes back to whoever does.
    */
-  sceneIO?: { snapshot(): unknown; restore(scene: unknown): void },
+  sceneIO?: { snapshot(): unknown; restore(scene: unknown): void; onChange?(fn: () => void): void },
 ): void {
   const $ = <T extends HTMLElement>(sel: string): T => {
     const el = root.querySelector<T>(sel);
@@ -1462,6 +1462,10 @@ export function mountToolbar(
       if (title) docTitle.value = title;
       designId = null; // an imported file is a fresh working copy
       publicChk.checked = false;
+      // A .tifo file carries seats, not banners, and the banners on screen
+      // belong to the tifo it just replaced.
+      sceneIO?.restore(null);
+      sceneUnread = false;
       editor.rebuildPalette();
       editor.repaintAll();
       renderPalette();
@@ -1542,11 +1546,32 @@ export function mountToolbar(
         textObjects: draftTextObjects(),
         designId,
       }),
-    (r) => { lastDraft = r; renderDraftState(); },
+    (r) => {
+      lastDraft = r;
+      renderDraftState();
+      // The banners are kept beside the draft, in a key of their own, and
+      // written with it so the two always describe the same tifo.
+      if (r.ok) document.dispatchEvent(new CustomEvent('tifo:draft-written'));
+    },
   );
+
+  /**
+   * True while this design's banners are unknown: its scene failed to load.
+   *
+   * Then the editor shows none, and a save must not write "none" over the
+   * ones still safe on the server. It clears the moment somebody changes a
+   * banner, because from then on what the editor holds is what they made.
+   */
+  let sceneUnread = false;
 
   store.onDirty(() => draftWriter.schedule());
   objects.onChange(() => draftWriter.schedule());
+  // A banner is part of the tifo: a design that is only a banner so far is
+  // still work to keep, and it is the draft that says which tifo this is.
+  sceneIO?.onChange?.(() => {
+    sceneUnread = false;
+    draftWriter.schedule();
+  });
   docTitle.addEventListener('input', () => draftWriter.schedule());
   // A closing tab gets no timer callback, so flush synchronously on the way out.
   window.addEventListener('pagehide', () => draftWriter.flush());
@@ -1572,7 +1597,7 @@ export function mountToolbar(
       // the design. The message says which happened rather than reporting a
       // success that was only half true.
       let sceneFailed = '';
-      if (sceneIO && meta.id) {
+      if (sceneIO && meta.id && !sceneUnread) {
         try {
           await saveScene(meta.id, sceneIO.snapshot());
         } catch (err) {
@@ -1795,19 +1820,25 @@ export function mountToolbar(
       editor.rebuildPalette();
       editor.repaintAll();
       renderPalette();
-      // The banners come back with it. Best-effort in the same direction as
-      // the save: a design whose scene will not load is still a design, and
-      // silently showing it without its banners is better than refusing to
-      // open it at all.
+      // The banners come back with it — and a design with none has none. This
+      // used to leave the editor's banners alone when the design had no
+      // scene, so opening a template or an older design put the last tifo's
+      // banners on it. Best-effort in the same direction as the save: a
+      // design whose scene will not load is still a design, shown without its
+      // banners rather than refused.
+      let unread = false;
       if (sceneIO) {
+        let scene: unknown = null;
         try {
-          const scene = await fetchScene(id);
-          if (scene) sceneIO.restore(scene);
+          scene = await fetchScene(id);
         } catch {
-          /* no scene, or unreadable — the tifo itself loaded fine */
+          unread = true;
         }
+        sceneIO.restore(scene);
+        sceneUnread = unread;
       }
       message.textContent = ownerIsMe ? `loaded "${title}"` : `loaded "${title}" (read-only copy - Save creates your own)`;
+      if (unread) message.textContent += ` — ${i18nT('bn.msg.sceneUnread')}`;
     } catch (err) {
       message.textContent = tv('ed.msg.loadFailed', { err: (err as Error).message });
     }

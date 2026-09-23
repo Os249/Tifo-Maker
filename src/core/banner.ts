@@ -971,19 +971,6 @@ export class BannerStore {
     this.commit();
   }
 
-  /**
-   * Forget the undo history.
-   *
-   * For the banner the editor makes on its own the first time the Banner view
-   * opens. Nobody chose to make it, so Undo should not be able to take it
-   * away — which it could, leaving an empty view with nothing to draw on.
-   */
-  clearHistory(): void {
-    this.undoStack.length = 0;
-    this.redoStack.length = 0;
-    this.emitHistory();
-  }
-
   get canUndo(): boolean {
     return this.undoStack.length > 0;
   }
@@ -1018,7 +1005,10 @@ export class BannerStore {
   }
 
   loadJSON(m: BannerSceneModel | null | undefined): void {
-    this.banners = m && Array.isArray(m.banners) ? m.banners.map(normalise) : [];
+    // A ghost is a banner nobody asked for — see `isGhost` — and it does not
+    // come back. Only here, on the way in from storage: in this session a
+    // banner is whatever the person made it, however empty.
+    this.banners = m && Array.isArray(m.banners) ? m.banners.map(normalise).filter((b) => !isGhost(b)) : [];
     for (const b of this.banners) this.reshape(b);
     this.activeId = this.banners[0]?.id ?? null;
     this.selectedItemId = null;
@@ -1084,11 +1074,15 @@ export function normalise(raw: Partial<BannerDoc>): BannerDoc {
     material: raw.material === 'mesh' ? 'mesh' : 'solid',
     netBacked: raw.netBacked ?? p.netBacked,
     weightBar: raw.weightBar ?? p.weightBar,
-    // A see-through banner with nothing on it is not a design, it is an
-    // absence: in the bowl it draws nothing at all. That is what every new
-    // banner used to be, so one stored that way comes back as cloth. A
-    // see-through sheet WITH art on it is a real choice and is kept.
-    bg: typeof raw.bg === 'string' ? raw.bg : items.some((it) => !it.hidden) ? null : DEFAULT_FABRIC,
+    // As it was stored. This used to turn a see-through banner with nothing on
+    // it into white cloth, on the theory that it was a banner someone had made
+    // and could not find — but nearly every one of those was the banner the
+    // Banner view used to make by itself the first time it opened, and turning
+    // them into cloth put a white sheet on the North stand of every tifo that
+    // had ever looked at the Banner view. The untouched ones are dropped on
+    // load (`isGhost`); one somebody did change stays see-through, and the
+    // panel says there is nothing on it to see.
+    bg: typeof raw.bg === 'string' ? raw.bg : null,
     items,
     wind: clamp(num(raw.wind, 0.25), 0, 1),
     revealAuto: raw.revealAuto !== false,
@@ -1105,6 +1099,31 @@ export function normalise(raw: Partial<BannerDoc>): BannerDoc {
   };
 }
 
+
+/**
+ * A banner nobody made.
+ *
+ * Until this round the Banner view made a banner by itself the first time it
+ * was opened, see-through and empty, and it was saved with the tifo like any
+ * other. So a tifo whose owner only ever LOOKED at the Banner view carries one,
+ * and not everyone wants a banner. It is recognisable exactly: nothing drawn,
+ * no fabric, and every setting still what a new one of its type starts with —
+ * the stand, the blocks, the tier, the shape, the cloth, the rig, the reveal
+ * and the wind. Change any of them and it is somebody's banner.
+ *
+ * The name is not part of the test: it is whatever language the editor was in.
+ */
+export function isGhost(b: BannerDoc): boolean {
+  const p = KIND_PROFILE[b.kind];
+  if (!p) return false;
+  return b.items.length === 0 && b.bg === null
+    && b.slot.stand === 1 && b.slot.stands === 1 && b.slot.blockFrom === -1
+    && b.slot.blockSpan === p.blockSpan && b.slot.tier === p.tier
+    && Math.abs(b.aspect - p.aspect) < 1e-6
+    && b.material === 'solid' && b.fabricGsm === p.fabricGsm
+    && b.netBacked === p.netBacked && b.weightBar === p.weightBar
+    && b.reveal === p.reveal && Math.abs(b.wind - 0.25) < 1e-6;
+}
 
 function validItem(it: BannerItem): boolean {
   if (!it || typeof it !== 'object' || typeof it.id !== 'string') return false;

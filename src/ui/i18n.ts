@@ -1423,7 +1423,6 @@ const STRINGS: Record<string, { en: string; ar: string }> = {
   // wrong in one of the two languages however carefully the fragments are
   // translated — the finding from the September editor audit.
   'bn.banner': { en: 'Banner', ar: 'لافتة' },
-  'bn.defaultName': { en: 'Banner 1', ar: 'لافتة ١' },
   'bn.nameN': { en: 'Banner {n}', ar: 'لافتة {n}' },
   'bn.newT': { en: 'New banner', ar: 'لافتة جديدة' },
   'bn.delT': { en: 'Delete this banner', ar: 'احذف هذي اللافتة' },
@@ -1432,6 +1431,24 @@ const STRINGS: Record<string, { en: string; ar: string }> = {
   'bn.msg.deletedBanner': { en: 'Banner deleted — Undo brings it back.', ar: 'انحذفت اللافتة — التراجع يرجّعها.' },
   'bn.hiddenNote': { en: 'Hidden in the stadium.', ar: 'مخفيّة في الملعب.' },
   'bn.unhide': { en: 'Show it again', ar: 'أظهرها مرة ثانية' },
+  // The list of this tifo's banners, and the empty state. A tifo starts with
+  // no banner: the Banner view used to make one the first time it opened, and
+  // everyone who only looked at it had one on their North stand from then on.
+  'bn.list': { en: 'Banners', ar: 'اللافتات' },
+  'bn.list.tag': { en: 'in this tifo', ar: 'في هذا التيفو' },
+  'bn.none.title': { en: 'No banner in this tifo', ar: 'ما في لافتة في هذا التيفو' },
+  'bn.none.body': { en: 'Banners are optional. Make one when you want one: a stand banner is unrolled over the seats, a hanging banner is hauled up on ropes.', ar: 'اللافتات اختيارية. سوّ وحدة إذا تبغى: لافتة المدرج تنفرد على المقاعد، واللافتة المعلّقة تنسحب للأعلى بالحبال.' },
+  'bn.none.short': { en: 'None yet — banners are optional.', ar: 'ما في ولا وحدة — اللافتات اختيارية.' },
+  'bn.add.standT': { en: 'Make a banner that unrolls over the seats', ar: 'سوّ لافتة تنفرد على المقاعد' },
+  'bn.add.hangingT': { en: 'Make a banner that is hauled up on ropes', ar: 'سوّ لافتة تنسحب للأعلى بالحبال' },
+  'bn.show': { en: 'Show in stadium', ar: 'اعرضها في الملعب' },
+  'bn.showT': { en: 'Open the Stadium view, looking at this banner', ar: 'افتح عرض الملعب والكاميرا على هذي اللافتة' },
+  'bn.li.meta': { en: '{kind} · {stand}', ar: '{kind} · {stand}' },
+  'bn.li.hidden': { en: 'hidden', ar: 'مخفيّة' },
+  'bn.msg.shown': { en: 'Looking at {name} in the stadium.', ar: 'تشوف {name} في الملعب.' },
+  'bn.msg.shownAgain': { en: '{name} was hidden in the stadium — it is showing again.', ar: '{name} كانت مخفيّة في الملعب — وصارت تبان الحين.' },
+  'bn.msg.noPlace': { en: '{name} has nowhere to hang on this stadium — pick another stand.', ar: '{name} ما لها مكان تتعلّق فيه بهذا الملعب — اختر مدرج ثاني.' },
+  'bn.msg.sceneUnread': { en: 'its banners could not be loaded. They are safe; reload to try again.', ar: 'ما قدرنا نحمّل لافتاته. هي محفوظة؛ حدّث الصفحة وجرّب مرة ثانية.' },
   'bn.stand.none': { en: '{name} (no stand here)', ar: '{name} (ما في مدرج هنا)' },
   'bn.type': { en: 'Type', ar: 'النوع' },
   'bn.size': { en: 'Size', ar: 'المقاس' },
@@ -1526,7 +1543,7 @@ const STRINGS: Record<string, { en: string; ar: string }> = {
     en: 'Between two tiers a banner fills the gap, so the gap sets its shape. Pick another tier to shape it yourself.',
     ar: 'بين طابقين اللافتة تعبّي الفراغ، فالفراغ هو اللي يحدّد شكلها. اختر طابق ثاني عشان تتحكّم بالشكل بنفسك.',
   },
-  'bn.beside': { en: 'Show it in the stadium', ar: 'اعرضها في الملعب' },
+  'bn.beside': { en: 'Split with the stadium', ar: 'قسّم الشاشة مع الملعب' },
   'bn.besideT': { en: 'Show the stadium next to the banner, looking at it', ar: 'اعرض الملعب جنب اللافتة، والكاميرا عليها' },
   'bn.rig': { en: 'Rigging', ar: 'التعليق' },
   'bn.rig.tag': { en: 'what holds it', ar: 'وش يمسكها' },

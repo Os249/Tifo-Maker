@@ -19,7 +19,7 @@ export interface BannerShot {
 export function bannerShot(
   doc: BannerDoc,
   f: StandFrame,
-  opts: { elevationDeg?: number; fov?: number } = {},
+  opts: { elevationDeg?: number; fov?: number; aspect?: number } = {},
 ): BannerShot | null {
   if (!f.ok) return null;
   const fov = opts.fov ?? 44;
@@ -51,7 +51,18 @@ export function bannerShot(
   // a distance chosen from the width alone put the camera inside a 23 m drop.
   const bowlR = Math.hypot(mid.x, mid.z) || 60;
   const reach = Math.max(slot.size.widthM, slot.size.heightM * 1.7);
-  const d = Math.min(bowlR * 1.85, Math.max(70, reach * 2.4 * (44 / fov)));
+  let d = Math.min(bowlR * 1.85, Math.max(70, reach * 2.4 * (44 / fov)));
+  // And far enough to hold its WIDTH in the picture it is going into. The
+  // field of view is vertical, so on a screen taller than it is wide — a
+  // phone held upright — the width runs out first: the same distance that
+  // framed a 41 m banner with room to spare on a laptop cut both its ends off
+  // on a phone.
+  if (opts.aspect && opts.aspect > 0) {
+    const vHalf = (fov * Math.PI) / 360;
+    const hHalf = Math.atan(Math.tan(vHalf) * opts.aspect);
+    const fitW = (slot.size.widthM / 2 / Math.tan(hHalf)) * 1.25;
+    d = Math.min(bowlR * 1.85, Math.max(d, fitW));
+  }
   // The angle follows what the banner IS, not a constant.
   //
   // A sheet lying on a raked stand is a near-horizontal surface: from pitch

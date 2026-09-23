@@ -1,7 +1,7 @@
 import './vendor/tabler-subset.css';
 import { loadTifoFonts } from './core/tifoFonts';
 import { installTheme } from './ui/theme';
-import { initLang, applyDom, toggleLang, t, tl } from './ui/i18n';
+import { initLang, applyDom, toggleLang, t, tl, tv } from './ui/i18n';
 import { installConsent } from './ui/consent';
 import { generateSeatMapAsync } from './workers/client';
 import { DEFAULT_PALETTE, DEFAULT_TEMPLATE, PALETTE_PRESETS, TEMPLATES } from './core/template';
@@ -338,11 +338,21 @@ async function main(): Promise<void> {
   /** What travels with the design, and how it comes back. */
   const sceneIO = {
     snapshot: (): unknown => ({ v: 1, banners: bannerStore.toJSON(), assets: assetStore.toJSON() }),
+    /**
+     * This design's scene — and a design without one has no banners.
+     *
+     * It used to return early on an empty scene, which kept whatever banners
+     * were already in the editor: open a template from the gallery, or a
+     * design saved before banners existed, and the last tifo's banners came
+     * along onto it — and into its next save.
+     */
     restore: (raw: unknown): void => {
-      const scene = raw as { banners?: BannerSceneModel; assets?: SceneModel } | null;
-      if (!scene || typeof scene !== 'object') return;
-      if (scene.banners) bannerStore.loadJSON(scene.banners);
-      if (scene.assets) assetStore.loadJSON(scene.assets);
+      const scene = raw && typeof raw === 'object' ? (raw as { banners?: BannerSceneModel; assets?: SceneModel }) : null;
+      bannerStore.loadJSON(scene?.banners ?? null);
+      if (scene?.assets) assetStore.loadJSON(scene.assets);
+    },
+    onChange: (fn: () => void): void => {
+      bannerStore.onChange(fn);
     },
   };
 
@@ -395,6 +405,7 @@ async function main(): Promise<void> {
             document.getElementById('match-day')?.click();
           },
           onToggleBeside: () => void setView(currentView === 'split' ? 'banner' : 'split'),
+          onShowInStadium: (id) => void showInStadium(id),
         });
         return bannerView;
       })
@@ -428,10 +439,24 @@ async function main(): Promise<void> {
       sel.appendChild(opt);
     });
     // And one camera that is not a fixed place: wherever the banner is.
+    // Only while there is a banner to be wherever: a tifo has none until
+    // somebody makes one, and a camera that goes nowhere reads as broken.
     const bannerCam = document.createElement('option');
     bannerCam.value = 'banner';
     bannerCam.textContent = t('ed.camera.banner');
     sel.appendChild(bannerCam);
+    const offerBannerCam = (): void => {
+      bannerCam.disabled = !bannerStore.list().some((b) => b.visible !== false);
+      // The last banner went while the camera was on it: back to the bowl,
+      // rather than a menu showing a camera that is no longer offered.
+      if (bannerCam.disabled && sel.value === 'banner') {
+        const full = CAMERA_PRESETS.findIndex((p) => p.name === 'Full view');
+        sel.value = String(Math.max(0, full));
+        preview?.applyPreset(CAMERA_PRESETS[Math.max(0, full)]);
+      }
+    };
+    offerBannerCam();
+    bannerStore.onChange(offerBannerCam);
     sel.addEventListener('change', () => {
       if (sel.value === 'banner') preview!.focusBanner();
       else preview!.applyPreset(CAMERA_PRESETS[Number(sel.value)]);
@@ -470,6 +495,9 @@ async function main(): Promise<void> {
     const showBanner = next === 'banner' || bannerSplit;
     const show3dView = next === '3d' || next === 'split';
     currentView = next;
+    // The phone shell draws its own view pill, and a view can change from
+    // inside a panel ("Show in stadium") as well as from the pill.
+    document.dispatchEvent(new CustomEvent('tifo:view', { detail: { view: next } }));
     if (show3dView) track('view_3d');
     if (next === 'banner') track('view_banner');
     host.hidden = !show2d;
@@ -520,6 +548,37 @@ async function main(): Promise<void> {
     }
     // In split, the 3D canvas shares the row — its ResizeObserver re-fits it
     // automatically when the layout changes to half width.
+  };
+
+  /**
+   * "Show in stadium", from a banner's row in the list: the Stadium view,
+   * looking straight at it.
+   *
+   * A banner Match Day had hidden is shown again first — asking to see a
+   * banner and being shown an empty stand is exactly the bug this exists to
+   * end — and that is said, so nobody wonders why it came back.
+   */
+  const showInStadium = async (id: string): Promise<void> => {
+    const doc = bannerStore.get(id);
+    if (!doc) return;
+    const msg = document.getElementById('message');
+    bannerStore.setActive(id);
+    const wasHidden = doc.visible === false;
+    if (wasHidden) {
+      bannerStore.begin();
+      bannerStore.patch({ visible: true });
+      bannerStore.commit();
+    }
+    await setView('3d');
+    const p = preview;
+    if (!p) return;
+    const sel = document.getElementById('camera-preset') as HTMLSelectElement | null;
+    if (p.focusBanner(id)) {
+      if (sel) sel.value = 'banner';
+      if (msg) msg.textContent = tv(wasHidden ? 'bn.msg.shownAgain' : 'bn.msg.shown', { name: doc.name });
+    } else if (msg) {
+      msg.textContent = tv('bn.msg.noPlace', { name: doc.name });
+    }
   };
 
   btn2d.addEventListener('click', () => void setView('2d'));
@@ -647,13 +706,30 @@ async function main(): Promise<void> {
   } catch {
     /* ignore corrupt/unavailable storage */
   }
-  // Banners live in their own key.
+  // Banners live in their own key, and they belong to the tifo they were made
+  // in — so they come back only when that tifo does: the draft this browser
+  // was working on, or the same design carried onto another stadium. A new
+  // tifo starts with none. It used to load them whatever the canvas held, so
+  // a first visit, a link to another stadium, an imported file or a shared
+  // design without banners all opened with the last tifo's banners on them.
+  const continuing = draftAge !== null || remappedFrom !== null;
   try {
-    const rawB = sharedScene ? null : localStorage.getItem('tifo_banners_v1');
+    const rawB = continuing ? localStorage.getItem('tifo_banners_v1') : null;
     if (rawB && bannerStore.count === 0) bannerStore.loadJSON(JSON.parse(rawB));
   } catch {
     /* ignore */
   }
+  const writeBanners = (): void => {
+    try {
+      localStorage.setItem('tifo_banners_v1', JSON.stringify(bannerStore.toJSON()));
+    } catch {
+      /* quota exceeded (a pasted photo) — the banner still lives for this session */
+    }
+  };
+  // And the key is written with every draft, so the two always describe the
+  // same tifo. A new tifo that never touches its banners would otherwise
+  // leave the last one's in the key, to be restored with the new one's draft.
+  document.addEventListener('tifo:draft-written', writeBanners);
   let sceneSaveTimer = 0;
   assetStore.onChange(() => {
     window.clearTimeout(sceneSaveTimer);
@@ -668,13 +744,7 @@ async function main(): Promise<void> {
   let bannerSaveTimer = 0;
   bannerStore.onChange(() => {
     window.clearTimeout(bannerSaveTimer);
-    bannerSaveTimer = window.setTimeout(() => {
-      try {
-        localStorage.setItem('tifo_banners_v1', JSON.stringify(bannerStore.toJSON()));
-      } catch {
-        /* quota exceeded (a pasted photo) — the banner still lives for this session */
-      }
-    }, 600);
+    bannerSaveTimer = window.setTimeout(writeBanners, 600);
   });
   const matchDayBtn = document.getElementById('match-day') as HTMLButtonElement | null;
   let simOpen = false;
