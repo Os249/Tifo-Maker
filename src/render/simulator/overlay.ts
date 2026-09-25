@@ -106,6 +106,7 @@ const CSS = `
 .mds-sbody{display:none;flex-direction:column;gap:11px;padding:13px 12px;}
 .mds-section.open .mds-sbody{display:flex;}
 .mds-field{display:flex;flex-direction:column;gap:5px;}
+.mds-field[hidden]{display:none;}
 .mds-flabel{font-size:11px;color:var(--text-dim);}
 .mds-flabel-row{display:flex;align-items:baseline;justify-content:space-between;gap:8px;}
 .mds-fval{font:600 11px ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--accent-soft);}
@@ -484,6 +485,15 @@ const MDS_T: Record<string, { en: string; ar: string }> = {
   'snap.end': { en: 'end of the stand', ar: 'طرف المدرج' },
   'snap.section': { en: 'section edge', ar: 'حد القطاع' },
   'snap.block': { en: 'a whole block', ar: 'قطاع كامل' },
+  'snap.row': { en: 'a row of fans', ar: 'صف من الجمهور' },
+  heldAt: { en: 'Held at', ar: 'وين تنرفع' },
+  along: { en: 'Along', ar: 'على امتداد' },
+  signFence: { en: 'Tied to the front fence', ar: 'مربوطة على السياج الأمامي' },
+  signBalcony: { en: 'Tied to the front of the tier', ar: 'مربوطة على حافة الطابق' },
+  signRowN: { en: 'Row {n}', ar: 'الصف {n}' },
+  signMiddle: { en: 'The middle of the stand', ar: 'نص المدرج' },
+  signBlock: { en: 'In front of block {n}', ar: 'قدام القطاع {n}' },
+  signAisle: { en: 'Between blocks {a} and {b}', ar: 'بين القطاع {a} والقطاع {b}' },
   'snap.halfway': { en: 'the halfway line', ar: 'خط المنتصف' },
   'snap.goal': { en: 'the goal centre line', ar: 'منتصف المرمى' },
   'snap.rail': { en: 'the front rail', ar: 'السور الأمامي' },
@@ -884,12 +894,20 @@ export function openMatchDaySimulator(
   const bnBlock = sel();
   const bnSpan = sel();
   const bnTier = sel();
+  // A sign's own place: a row, and a spot along the stand.
+  const bnRow = sel();
+  const bnAt = sel();
   const bnCentre = btn(L('centreIt'));
   const bnWind = rng(0, 100, 25);
   const bnShow = chk(true);
   const bnHint = document.createElement('div');
   bnHint.className = 'mds-hint';
   bnHint.textContent = L('dragHint');
+  const fAcross = field(L('acrossStands'), bnAcross);
+  const fBlock = field(L('firstBlock'), bnBlock);
+  const fSpan = field(L('howManyBlocks'), bnSpan);
+  const fRow = field(L('heldAt'), bnRow);
+  const fAt = field(L('along'), bnAt);
   const secBanners = section(ICONS.assets, L('bannersTitle'), false);
   secBanners.body.append(
     field(L('theBanner'), bnSel),
@@ -897,10 +915,12 @@ export function openMatchDaySimulator(
     field(L('scrub'), bnScrub),
     divider(),
     field(L('onStand'), bnStand),
-    field(L('acrossStands'), bnAcross),
-    field(L('firstBlock'), bnBlock),
-    field(L('howManyBlocks'), bnSpan),
+    fAcross,
+    fBlock,
+    fSpan,
     field(L('whichTier'), bnTier),
+    fRow,
+    fAt,
     row(bnCentre),
     field(L('bannerWind'), bnWind),
     checkField(L('showBanner'), bnShow),
@@ -1172,7 +1192,7 @@ export function openMatchDaySimulator(
     const off = !a;
     for (const el of [bnLook, bnPlay, bnCentre] as HTMLButtonElement[]) el.disabled = off;
     for (const el of [bnScrub, bnWind, bnShow] as HTMLInputElement[]) el.disabled = off;
-    for (const el of [bnStand, bnAcross, bnBlock, bnSpan, bnTier] as HTMLSelectElement[]) el.disabled = off;
+    for (const el of [bnStand, bnAcross, bnBlock, bnSpan, bnTier, bnRow, bnAt] as HTMLSelectElement[]) el.disabled = off;
     if (!a) return;
     // Every one of these assignments fires `input`/`change` in some browsers,
     // which would write the value straight back into the store mid-drag. The
@@ -1198,9 +1218,37 @@ export function openMatchDaySimulator(
     }
     bnSpan.value = String(Math.max(1, Math.min(nSpan, a.slot.blockSpan)));
     bnTier.replaceChildren();
-    opt(bnTier, '-1', L('tierAll'), false);
+    const sign = a.kind === 'sign';
+    // A sign is held in a row, not over a run of blocks — its own two fields
+    // stand in for the three that do not apply to it.
+    fAcross.hidden = sign;
+    fBlock.hidden = sign;
+    fSpan.hidden = sign;
+    fRow.hidden = !sign;
+    fAt.hidden = !sign;
+    if (!sign) opt(bnTier, '-1', L('tierAll'), false);
     for (const i of shape.tierOptions) opt(bnTier, String(i), L('tierN').replace('{n}', String(i + 1)), false);
-    bnTier.value = shape.tierOptions.includes(a.slot.tier) ? String(a.slot.tier) : '-1';
+    if (sign) {
+      const tier = Math.max(0, Math.min(shape.tierOptions.length - 1, a.slot.tier));
+      bnTier.value = String(tier);
+      const rows = shape.rows[tier] ?? 1;
+      bnRow.replaceChildren();
+      const fence = shape.fence?.[tier] ?? true;
+      if (fence) opt(bnRow, '-1', L(tier >= 1 ? 'signBalcony' : 'signFence'), false);
+      for (let r = 0; r < rows; r++) opt(bnRow, String(r), L('signRowN').replace('{n}', String(r + 1)), false);
+      bnRow.value = String(Math.max(fence ? -1 : 0, Math.min(rows - 1, a.slot.row ?? 0)));
+      bnAt.replaceChildren();
+      opt(bnAt, '-1', L('signMiddle'), false);
+      for (let k = 0; k < shape.places; k++) {
+        const b = (k >> 1) + 1;
+        opt(bnAt, String(k), k % 2 === 0
+          ? L('signBlock').replace('{n}', String(b))
+          : L('signAisle').replace('{a}', String(b)).replace('{b}', String(b + 1)), false);
+      }
+      bnAt.value = String(Math.max(-1, Math.min(shape.places - 1, a.slot.at ?? -1)));
+    } else {
+      bnTier.value = shape.tierOptions.includes(a.slot.tier) ? String(a.slot.tier) : '-1';
+    }
     bnWind.value = String(Math.round(a.wind * 100));
     bnShow.checked = a.visible !== false;
     bnSyncing = false;
@@ -1749,8 +1797,10 @@ export function openMatchDaySimulator(
   });
   bnWind.addEventListener('change', windClose);
   bnShow.addEventListener('change', () => bnEdit(() => bannerStore?.patch({ visible: bnShow.checked })));
+  bnRow.addEventListener('change', () => bnEdit(() => bannerStore?.patchSlot({ row: Number(bnRow.value) })));
+  bnAt.addEventListener('change', () => bnEdit(() => bannerStore?.patchSlot({ at: Number(bnAt.value) })));
   bnCentre.addEventListener('click', () => {
-    bnEdit(() => bannerStore?.patchSlot({ blockFrom: -1 }));
+    bnEdit(() => bannerStore?.patchSlot(bannerStore?.active?.kind === 'sign' ? { at: -1 } : { blockFrom: -1 }));
     toast(L('snapped').replace('{what}', L('snap.centre')));
   });
 

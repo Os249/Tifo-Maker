@@ -1,6 +1,7 @@
 import type { BannerDoc } from '../../core/banner';
 import type { StandFrame } from './standFrame';
-import { hangCentre, resolveSlot } from './bannerSlot';
+import { hangCentre, resolveSlot, signCentre } from './bannerSlot';
+import { signPlaceOf } from '../../core/banner';
 
 /**
  * Where to stand to look at a banner.
@@ -29,6 +30,7 @@ export function bannerShot(
   // the slot is where the banner is and how big it is, and it already knows
   // where its own top and bottom edges sit on the stand.
   const slot = resolveSlot(doc, f);
+  if (doc.kind === 'sign') return signShot(doc, f, slot, opts, fov);
   const alongU = (slot.u0 + slot.u1) / 2;
   const onStand = f.pointAt(alongU, Math.max(0, (slot.v1 + slot.vBottom) / 2));
   // A hanging banner is not ON the stand, so the stand's own coordinates say
@@ -87,6 +89,43 @@ export function bannerShot(
   return {
     position: [mid.x + mid.ox * d * Math.cos(el), cy + d * Math.sin(el), mid.z + mid.oz * d * Math.cos(el)],
     target: [mid.x, Math.max(1.5, cy), mid.z],
+    fov,
+  };
+}
+
+/**
+ * A sign, from where it is meant to be read: across the pitch, a little above
+ * it, and close enough that its words are the picture.
+ *
+ * A sign is a strip a metre tall. The distance that frames a forty-metre
+ * banner makes a twelve-metre sign a line of pixels, so this stands off by
+ * the sign's own length — and never so close that the stand it is in is lost:
+ * seeing WHERE it is held is half of what the camera is for.
+ */
+function signShot(
+  doc: BannerDoc,
+  f: StandFrame,
+  slot: ReturnType<typeof resolveSlot>,
+  opts: { elevationDeg?: number; fov?: number; aspect?: number },
+  fov: number,
+): BannerShot {
+  const c = signCentre(f, slot, signPlaceOf(doc.slot).row);
+  const bowlR = Math.hypot(c.x, c.z) || 60;
+  let d = Math.max(24, slot.size.widthM * 1.25);
+  if (opts.aspect && opts.aspect > 0) {
+    const vHalf = (fov * Math.PI) / 360;
+    const hHalf = Math.atan(Math.tan(vHalf) * opts.aspect);
+    d = Math.max(d, (slot.size.widthM / 2 / Math.tan(hHalf)) * 1.3);
+  }
+  d = Math.min(bowlR * 1.6, d);
+  let el = opts.elevationDeg !== undefined ? (opts.elevationDeg * Math.PI) / 180 : 0.16;
+  if (opts.elevationDeg === undefined) {
+    const headroom = f.roofY - 3 - c.y;
+    if (headroom < d * Math.sin(el)) el = Math.max(0.05, Math.asin(Math.max(-1, Math.min(1, headroom / d))));
+  }
+  return {
+    position: [c.x + c.ox * d * Math.cos(el), c.y + d * Math.sin(el), c.z + c.oz * d * Math.cos(el)],
+    target: [c.x, c.y, c.z],
     fov,
   };
 }

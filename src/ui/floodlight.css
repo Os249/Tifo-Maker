@@ -235,6 +235,17 @@ body.m-shell #ctx-banner .bn-beside { display:none; }
 /* With no banner there is no sheet to set up: the bar goes, and the artboard
    says what a banner is and makes one. */
 body.bn-none #banner-bar { display:none !important; }
+/* A sign has its own size (length and height) and its own place (a row and a
+   spot along the stand); a banner has blocks, a shape and rigging. Each hides
+   the other's controls rather than showing ones that do nothing. */
+body:not(.bn-sign) .bn-for-sign, body.bn-sign .bn-for-banner { display:none !important; }
+#ctx-banner .bn-msg {
+  width:100%; box-sizing:border-box; margin:0 0 8px; padding:10px 12px; min-height:44px;
+  font:inherit; font-size:15px; font-weight:800; letter-spacing:.02em; text-transform:none;
+  background:var(--ink-2); color:var(--text-1); border:1px solid var(--line-2); border-radius:var(--r-sm);
+}
+#ctx-banner .bn-msg:focus { outline:none; border-color:var(--blue); box-shadow:var(--ring-focus); }
+#ctx-banner #bn-msg-color { width:36px; min-width:36px; height:32px; padding:0 2px; margin-inline-start:6px; }
 .bn-empty {
   position:absolute; inset:0; margin:auto; width:min(420px, calc(100% - 32px)); height:max-content;
   display:flex; flex-direction:column; align-items:center; text-align:center; gap:10px;

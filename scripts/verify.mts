@@ -1095,7 +1095,7 @@ import { buildStadium as siBuild } from '../src/core/stadiumFit';
 // rather than sampled.
 {
   const {
-    BANNER_KINDS, KIND_PROFILE, PANEL_MAX_M, KG_PER_CARRIER,
+    BANNER_KINDS, BLOCK_KINDS, KIND_PROFILE, PANEL_MAX_M, KG_PER_CARRIER,
     applyKind, bannerFacts, newBanner, normalise, revealEase, occludesCrowd,
     estimateSize, physicalRevealMs, TYPICAL_BLOCK_M, BANNER_PRESETS, presetOf, isGhost,
   } = await import('../src/core/banner');
@@ -1151,12 +1151,14 @@ import { buildStadium as siBuild } from '../src/core/stadiumFit';
   // over the terracing hides the mosaic under it; one flown in the air does
   // not, and the panel says so before anyone spends a choreo on it.
   {
-    if (BANNER_KINDS.length !== 2) throw new Error(`there should be two banner kinds, not ${BANNER_KINDS.length}`);
+    if (BANNER_KINDS.length !== 3) throw new Error(`there should be three banner kinds, not ${BANNER_KINDS.length}`);
+    if (BLOCK_KINDS.includes('sign')) throw new Error('a sign is not placed on a run of blocks');
     for (const k of BANNER_KINDS) {
       if (!KIND_PROFILE[k]) throw new Error(`banner kind "${k}" has no profile`);
     }
     if (!occludesCrowd(newBanner('stand'))) throw new Error('a stand banner lies on the seats; that is what it IS');
     if (occludesCrowd(newBanner('hanging'))) throw new Error('a hanging banner is in the air — it must not hide the mosaic');
+    if (occludesCrowd(newBanner('sign'))) throw new Error('a sign hides the people holding it, not the mosaic');
     console.log('banners: two kinds, and the occlusion split holds');
   }
 
@@ -1229,6 +1231,109 @@ import { buildStadium as siBuild } from '../src/core/stadiumFit';
     const stored = normalise({ ...newBanner('hanging'), reveal: 'unroll' } as Parameters<typeof normalise>[0]);
     if (stored.reveal !== 'hoist') throw new Error('a stored unroll on a hanging banner must come back as its hoist');
     console.log('banners: each type offers only the reveals it can perform');
+  }
+
+  // 6b. Signs: a message held upright by a row of fans, sized in metres.
+  {
+    const B = await import('../src/core/banner');
+    const { generateSeatMap } = await import('../src/core/seatmap');
+    const { DEFAULT_TEMPLATE } = await import('../src/core/template');
+    const { buildSpanFrame } = await import('../src/render/simulator/standFrame');
+    const S = await import('../src/render/simulator/bannerSlot');
+    const sign = B.newBanner('sign');
+    if (sign.kind !== 'sign' || sign.reveal !== 'raise') throw new Error('a new sign is a sign, raised by the crowd');
+    if (sign.netBacked || sign.weightBar) throw new Error('a sign has no net and no bar: the hands are its rig');
+    const p0 = B.signPlaceOf(sign.slot);
+    if (p0.row !== 0 || p0.at !== -1 || p0.lengthM !== 12) throw new Error(`a new sign is 12 m, at the front, in the middle: ${JSON.stringify(p0)}`);
+    const est = B.estimateSize(sign);
+    if (Math.abs(est.widthM - 12) > 1e-6 || Math.abs(est.heightM - 1.2) > 1e-6) throw new Error(`a new sign is 12 x 1.2 m, not ${est.widthM} x ${est.heightM}`);
+    // A forty-metre sign is fifty times longer than it is tall, and survives it.
+    const long = B.normalise({ ...sign, aspect: 1 / 40, slot: { ...sign.slot, lengthM: 40 } });
+    if (Math.abs(B.signHeightM(long) - 1) > 1e-6) throw new Error(`a 40 m sign came back ${B.signHeightM(long).toFixed(2)} m tall`);
+    const junk = B.normalise({ ...sign, slot: { stand: 1, stands: 2, blockFrom: 3, blockSpan: 4, tier: -1, row: 999, at: -7, lengthM: -5 } });
+    if (junk.slot.stands !== 1 || junk.slot.tier !== 0 || junk.slot.row !== 199 || junk.slot.at !== -1 || junk.slot.lengthM !== 1) {
+      throw new Error(`a stored sign must come back in one stand, a real tier, a row and a length: ${JSON.stringify(junk.slot)}`);
+    }
+    if (B.isGhost({ ...sign, items: [] })) throw new Error('no sign was ever made that nobody asked for');
+    // Into a sign and back out: the type's own shape and place, both ways.
+    const asSign = B.applyKind(B.newBanner('stand'), 'sign');
+    if (Math.abs(asSign.aspect - 0.1) > 1e-6 || B.signPlaceOf(asSign.slot).lengthM !== 12) throw new Error('a banner made a sign takes a sign\'s shape and length');
+    const back = B.applyKind(sign, 'stand');
+    if (back.aspect !== B.KIND_PROFILE.stand.aspect || back.slot.blockSpan !== B.KIND_PROFILE.stand.blockSpan || back.slot.row !== undefined) {
+      throw new Error('a sign made a banner goes back to a banner\'s shape and blocks');
+    }
+    // Facts: no seams across it, a holder every step and a half, or cable ties.
+    const f = B.bannerFacts(sign, est);
+    if (f.panels !== 1 || f.seamsM.length) throw new Error('a sign is one bolt of fabric end to end');
+    if (f.carriers !== 9) throw new Error(`a 12 m sign is held by 9 people, not ${f.carriers}`);
+    if (!f.notes.some((n) => n.key === 'signHeld')) throw new Error('the panel says who holds it');
+    if (!f.notes.some((n) => n.key === 'signReads' || n.key === 'signShort')) throw new Error('the panel says how far its letters read');
+    const tied = B.bannerFacts({ ...sign, slot: { ...sign.slot, row: -1 } }, est);
+    if (tied.carriers !== 2 || !tied.notes.some((n) => n.key === 'signTied')) throw new Error('a sign on the fence is tied on, not held');
+    // The lift: quick, and done.
+    let prev = -1;
+    for (let k = 0; k <= 20; k++) {
+      const v = B.revealEase('raise', k / 20);
+      if (v < prev - 1e-9) throw new Error('raising a sign never goes back down');
+      prev = v;
+    }
+    if (Math.abs(B.revealEase('raise', 1) - 1) > 1e-9) throw new Error('a raised sign ends up');
+    for (const L of [4, 40]) {
+      const ms = B.physicalRevealMs('raise', { widthM: L, heightM: 1.2 });
+      if (ms < 1000 || ms > 4000) throw new Error(`lifting a ${L} m sign takes a second or three, not ${ms} ms`);
+    }
+    // The words fit the sheet, whatever its shape.
+    for (const [a, r] of [[0.1, 20], [0.1, 2], [0.025, 30], [0.5, 4]]) {
+      const box = B.fitMessage(a, r);
+      if (box.w > 0.94 + 1e-9 || box.h > a + 1e-9 || Math.abs(box.cy - a / 2) > 1e-9 || Math.abs(box.w / box.h - r) > 1e-6) {
+        throw new Error(`a message does not fit a ${a} sheet at ${r}:1 — ${JSON.stringify(box)}`);
+      }
+    }
+    // On a real ground: its own length, places between every block, the
+    // tier's rows, and never off its stand.
+    const map = generateSeatMap(DEFAULT_TEMPLATE);
+    const frame = buildSpanFrame(map, 1, 1);
+    if (S.signPlaces(frame) !== 2 * frame.blocks.length - 1) throw new Error('a sign goes in front of every block and every aisle');
+    if (S.signRows(frame, 0) !== DEFAULT_TEMPLATE.tiers[0].rows || S.signRows(frame, 1) !== DEFAULT_TEMPLATE.tiers[1].rows) {
+      throw new Error(`the rows a sign can be held in are the tier's rows: ${S.signRows(frame, 0)}, ${S.signRows(frame, 1)}`);
+    }
+    const r12 = S.resolveSlot(sign, frame);
+    if (Math.abs(r12.size.widthM - 12) > 0.1) throw new Error(`a 12 m sign came out ${r12.size.widthM.toFixed(2)} m`);
+    const endish = S.resolveSlot({ ...long, slot: { ...long.slot, at: 0 } }, frame);
+    if (endish.u0 < -1e-9 || Math.abs(endish.size.widthM - 40) > 0.2) throw new Error('a 40 m sign at the end of a stand slides back onto it, at its full length');
+    const d = { ...sign, slot: { ...sign.slot, tier: 5, row: 99 } };
+    S.settleSlot(d, frame);
+    if (d.slot.tier !== frame.tiers.length - 1 || d.slot.row !== S.signRows(frame, d.slot.tier) - 1) {
+      throw new Error(`a sign settles into a tier and a row the stand has: ${JSON.stringify(d.slot)}`);
+    }
+    // A balcony only where there is one. On the dome the tiers run straight on
+    // into each other, so there is nothing to tie a sheet to above the first.
+    if (!S.signFenceOk(frame, 0) || (frame.tiers.length > 1 && !S.signFenceOk(frame, 1))) {
+      throw new Error('the default ground has a fence at the front and a balcony above it');
+    }
+    const { templateById } = await import('../src/core/stadiumCatalog');
+    const dome = buildSpanFrame(generateSeatMap(templateById('community-cauldron-dome-62k')!), 0, 1);
+    if (S.signFenceOk(dome, 1)) throw new Error('the dome has no balcony between its first two tiers');
+    const onDome = { ...sign, slot: { ...sign.slot, tier: 1, row: -1 } };
+    S.settleSlot(onDome, dome);
+    if (onDome.slot.row !== 0) throw new Error(`a sign tied to a balcony that is not there goes to the front row: row ${onDome.slot.row}`);
+    // And a tall one on a short balcony is not squashed to fit it.
+    const steep = buildSpanFrame(generateSeatMap(templateById('community-steep-cauldron-55k')!), 0, 1);
+    const tall = { ...sign, aspect: 2 / 12, slot: { ...sign.slot, tier: 1, row: -1 } };
+    const rt = S.resolveSlot(tall, steep);
+    const ht = S.signHold(steep, rt, -1, (rt.u0 + rt.u1) / 2);
+    if (Math.abs(ht.topY - ht.bottomY - 2) > 1e-3) throw new Error(`a 2 m sign on a short balcony came out ${(ht.topY - ht.bottomY).toFixed(2)} m`);
+    // Under an overhang the back rows cannot hold a sheet up: the wide oval's
+    // upper tier juts out over the last few rows of its lower one.
+    const wide = buildSpanFrame(generateSeatMap(templateById('community-wide-oval-72k')!), 0, 1);
+    const allRows = S.signRows(wide, 0);
+    const fits = S.signUsableRows(wide, 0, 1.2);
+    if (!(fits < allRows && fits >= allRows - 4)) throw new Error(`the wide oval's overhung back rows are not offered: ${fits} of ${allRows}`);
+    if (S.signUsableRows(frame, 0, 2) !== S.signRows(frame, 0)) throw new Error('every row of an open tier can hold a sign');
+    const under = { ...sign, slot: { ...sign.slot, tier: 0, row: allRows - 1 } };
+    S.settleSlot(under, wide);
+    if (under.slot.row !== fits - 1) throw new Error(`a sign asked for under the overhang is held in the last row that takes it: row ${under.slot.row}`);
+    console.log('signs: sized in metres, held in a row or tied on, and they fit the stand they are on');
   }
 
   // 7. Anything stored is filled in and clamped on the way back.
@@ -1333,7 +1438,7 @@ import { buildStadium as siBuild } from '../src/core/stadiumFit';
           throw new Error(`${id}/${stand}: ${slots.length} slots enumerated, ${slotCount(frame)} counted`);
         }
 
-        for (const kind of BANNER_KINDS) {
+        for (const kind of BLOCK_KINDS) {
           for (const slot of slots) {
             const res = resolveSlot({ ...newBanner(kind), slot }, frame);
             if (!(res.size.widthM > 0) || !(res.size.heightM > 0)) {

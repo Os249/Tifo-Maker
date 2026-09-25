@@ -430,6 +430,8 @@ export class BannerCanvas implements BannerCanvasHooks {
    * portrait whose nose lands on a seam is the classic mistake.
    */
   private drawSeams(ctx: CanvasRenderingContext2D, doc: BannerDoc, w: number, h: number, ink: GuideInk): void {
+    // A sign's fabric runs along it: a metre-tall sheet is one bolt, end to end.
+    if (doc.kind === 'sign') return;
     const panels = Math.max(1, Math.ceil(this.sizeOf(doc).widthM / PANEL_MAX_M - 1e-9));
     if (panels < 2) return;
     ctx.save();
@@ -477,7 +479,10 @@ export class BannerCanvas implements BannerCanvasHooks {
     // legible cap-height band
     const facts = bannerFacts(doc, this.sizeOf(doc));
     const capPx = facts.headlineCapFrac * w;
-    if (capPx > 6 && capPx < h * 0.9) {
+    // Not on a sign: its words are as tall as the sheet lets them be, and the
+    // Message field fits them — a band saying "at least 2.5 m" on a sheet a
+    // metre tall would be a rule nobody can follow.
+    if (doc.kind !== 'sign' && capPx > 6 && capPx < h * 0.9) {
       ctx.fillStyle = ink.bandFill;
       ctx.fillRect(0, 0, w, capPx);
       ctx.strokeStyle = ink.bandLine;
@@ -621,7 +626,7 @@ export class BannerCanvas implements BannerCanvasHooks {
       { axis: 'x', at: 1 / 3, label: 'third' },
       { axis: 'x', at: 2 / 3, label: 'third' },
     ];
-    const panels = Math.max(1, Math.ceil(this.sizeOf(doc).widthM / PANEL_MAX_M - 1e-9));
+    const panels = doc.kind === 'sign' ? 1 : Math.max(1, Math.ceil(this.sizeOf(doc).widthM / PANEL_MAX_M - 1e-9));
     for (let k = 1; k < panels; k++) xs.push({ axis: 'x', at: k / panels, label: 'seam' });
     const ys: Snap[] = [
       { axis: 'y', at: aspect / 2, label: 'centre' },

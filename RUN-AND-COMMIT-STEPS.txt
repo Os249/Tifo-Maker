@@ -1,9 +1,9 @@
-Tifo Maker — banners: run it, then commit it
-============================================
+Tifo Maker — signs: run it, then commit it
+==========================================
 
-Everything is already in C:\Users\PCD\Desktop\tifo-maker. Nothing to bundle,
-nothing to download. Your main is at "Banners: a tifo starts with none, and
-each one has Show in stadium"; all of this is uncommitted on top of it.
+Everything is already in C:\Users\PCD\Desktop\tifo-maker, uncommitted on top of
+your main (76753f3). There are no new files this time: 21 changed files, all
+already tracked.
 
 
 PART 1 — LOOK AT IT
@@ -13,8 +13,8 @@ Two PowerShell windows, both in the repo:
 
     cd C:\Users\PCD\Desktop\tifo-maker
 
-Window 1, the server (it publishes the three showcase designs as it starts;
-its log says "banner showcase: +3 added"):
+Window 1, the server. As it starts, it publishes the new showcase design, and
+its log says "banner showcase: +1 added, 3 already present":
 
     npm run server
 
@@ -22,56 +22,56 @@ Window 2, the editor:
 
     npm run dev
 
-Then open http://localhost:5173/ for the editor and
-http://localhost:5173/community for the community. Leave both running.
+Open http://localhost:5173/ for the editor and http://localhost:5173/community
+for the community.
 
 
 PART 2 — WHAT TO CHECK
 ----------------------
 
-Do this in a private window, or clear the site's storage, so you are "new":
+1. Make a sign
+   - Open the Banner view and press "Sign" (in the empty card or the add row).
+   - The Message field is focused. Type something long, e.g.
+     IF YOU CAN'T SEE WHO IS THE LEADER EAT MORE CARROTS
+     The words stay fitted to the sheet as you type.
+   - Change Length to 25 m and the words refit. Change Height to 1.6 m.
+   - Press Enter to leave the field, then Ctrl+Z: the whole message goes
+     back in one step, not letter by letter.
+   - Font and colour next to the message change it.
 
-1. "Banners are here"
-   - Open the editor. After a second a card appears just under the Banner
-     tab, pointing at it: "Banners are here", with "Not now" and
-     "Try banners".
-   - "Not now", then reload: it does not come back.
-   - In a fresh private window, press "Try banners": the Banner view opens
-     and its tour starts.
-   - On a first-ever visit, the start dialog comes first and the card
-     appears after you close it, never on top of it.
-
-2. The banner tour
-   - The first time the Banner view opens, the tour runs. With no banner it
-     has 4 steps; "Skip tour" or Escape ends it, and it does not come back.
-   - Make a banner, then press "How banners work" in the Banners panel: the
-     tour runs again and walks through the sheet, the tools, the list,
-     placement and match day.
-   - Arabic: the same, in Arabic, with the cards on the correct side.
+2. Place it
+   - "Held at": Tied to the front fence, Row 1 — the front, Row 2 ... the
+     back. Pick Row 10.
+   - "Along": The middle of the stand, In front of block n, or Between
+     blocks n and n+1.
+   - The facts line says "held by N fans". On the fence it says it is tied on.
+   - Press "Show in stadium" on it in the list: the camera looks at it from
+     across the pitch, held up over the heads of row 9.
+   - Pick Tier 2 and "Tied to the front of the tier": it hangs off the upper
+     tier's balcony.
 
 3. Match Day
-   - In the Banner view, press "See it on match day". It opens on the banner.
-   - Drag across the picture, including right over the banner: the camera
-     moves around, and the banner stays where it is. Scroll: it zooms.
-   - To move the banner: click it once (an outline appears), then drag it.
+   - "See it on match day": it is raised by the crowd.
+   - In the Match Day banner panel, a sign has "Held at" and "Along" where
+     other banners have Across, Blocks and Span.
+   - Click it once, then drag it: it moves to the row and place under the
+     pointer.
 
-4. The community
-   - /community opens on three "Template · With banners" cards by
-     @tifomaker.
-   - Open each one: the 3D preview opens on its banner, and the camera bar
-     has a flag button for each banner. The kop has two: "One club" (a
-     see-through mesh) and "12".
-   - Signed in, press Remix on one: the editor opens with its banners too.
+4. Arabic
+   - Switch to Arabic: the type is "يافطة", every field is translated, and an
+     Arabic message reads right to left on the sheet.
+
+5. The community
+   - /community has a fourth card, "Red & white halves, with signs". Open it:
+     the preview shows three signs, one of them in Arabic on the balcony.
 
 
 PART 3 — COMMIT
 ---------------
 
-Only when you are happy with what you saw.
-
 1. Stop both (Ctrl+C in each window).
 
-2. Still to do from last time: delete the five retired banner files. They are
+2. Still to do from before: delete the five retired banner files. They are
    empty placeholders, so nothing breaks while they are there, but they
    should go:
 
@@ -85,21 +85,23 @@ Only when you are happy with what you saw.
 
        Remove-Item src\ui\bannerStudio.ts
 
+   There is also a stray, empty folder named "{core,render,ui}" inside src.
+   Delete it too (the quotes matter, because of the braces):
+
+       Remove-Item -LiteralPath 'src\{core,render,ui}'
+
 3. Prove it builds:
 
        npm run build
        npm run verify
 
 4. Commit. The message is in BANNERS-REBUILD-COMMIT.txt in this folder, with
-   the Summary and the Description labelled separately — paste them into
-   GitHub Desktop's two fields. There are four new files in this commit:
-   src\ui\bannerTour.ts, src\ui\whatsNew.ts, scripts\generate-showcase.mts
-   and server\data\showcase.jsonl — make sure all four are ticked.
+   the Summary and the Description labelled separately. Paste them into
+   GitHub Desktop's two fields.
 
 5. Pushing is yours. Pushing main runs CI, and Railway deploys main, so push
-   after step 3 passes. On the first deploy the server publishes the three
-   showcase designs by itself (the log says "banner showcase: +3 added");
-   after that it finds them by title and adds nothing.
+   after step 3 passes. On the deploy, the server adds the signs showcase by
+   itself.
 
 
 IF THE BUILD FAILS

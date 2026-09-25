@@ -1,12 +1,14 @@
 /**
- * Generate the banner showcase: three designs on three grounds, each with
- * banners of a different kind, for the community page.
+ * Generate the banner showcase: designs on each ground in the library, each
+ * with banners of a different kind, for the community page.
  *
  * Banners are new, and a feed of seat mosaics shows nobody what one looks
  * like in a stadium, or that a tifo can carry one. So the site's own account
  * publishes a few that do — a hanging banner flown from the roof, a four-block
- * stand banner unrolled over the North stand, and a pair on the kop: a
- * see-through mesh sheet and a tall one-block drop.
+ * stand banner unrolled over the North stand, a pair on the kop — a
+ * see-through mesh sheet and a tall one-block drop — and three signs on one
+ * end: one held at the front, one tied to the balcony, one held up ten rows
+ * back.
  *
  * They are published the way the starter library is: by @tifomaker, flagged as
  * templates, so they carry the Template badge, stay out of "Made by people"
@@ -46,7 +48,9 @@ interface ShapeSpec { kind: 'shape'; shape: string; color: string; cx: number; c
 type ItemSpec = TextSpec | ShapeSpec;
 interface BannerSpec {
   name: string;
-  kind: 'stand' | 'hanging';
+  kind: 'stand' | 'hanging' | 'sign';
+  /** A sign's place and its message, which is fitted to the sheet. */
+  sign?: { tier: number; row: number; at: number; lengthM: number; heightM: number; message: string; color: string; fontId: string };
   aspect: number;
   bg: string;
   material?: 'solid' | 'mesh';
@@ -103,6 +107,26 @@ const SHOWCASE: ShowcaseSpec[] = [
         { kind: 'shape', shape: 'chevron', color: '#5bc0eb', cx: 0.5, cy: 0.355, w: 0.16, h: 0.05 },
       ],
     }],
+  },
+  {
+    id: 'showcase-signs-red',
+    from: 'halves-red-white-434',
+    titleEn: 'Red & white halves, with signs',
+    titleAr: 'مقسوم أحمر وأبيض، مع يافطات',
+    banners: [
+      {
+        name: 'Our city', kind: 'sign', aspect: 1.4 / 20, bg: '#f4f1ea', slot: { stand: 3, blockSpan: 1 }, items: [],
+        sign: { tier: 0, row: 0, at: -1, lengthM: 20, heightM: 1.4, message: 'OUR CITY · OUR COLOURS', color: '#c8242c', fontId: 'condensed' },
+      },
+      {
+        name: 'معك لآخر دقيقة', kind: 'sign', aspect: 1.2 / 12, bg: '#f4f1ea', slot: { stand: 3, blockSpan: 1 }, items: [],
+        sign: { tier: 1, row: -1, at: 6, lengthM: 12, heightM: 1.2, message: 'معك لآخر دقيقة', color: '#16161a', fontId: 'kufi' },
+      },
+      {
+        name: 'Leaders', kind: 'sign', aspect: 1 / 10, bg: '#c8242c', slot: { stand: 3, blockSpan: 1 }, items: [],
+        sign: { tier: 0, row: 9, at: 10, lengthM: 10, heightM: 1, message: 'NO SURRENDER', color: '#f2f1ec', fontId: 'poster' },
+      },
+    ],
   },
   {
     id: 'showcase-kop-pair',
@@ -167,7 +191,7 @@ for (const spec of SHOWCASE) {
     const textUrl = '/src/core/text.ts';
     const bannerUrl = '/src/core/banner.ts';
     const { TIFO_FONTS, renderTextCanvas } = await import(textUrl);
-    const { newBanner, normalise, BannerStore } = await import(bannerUrl);
+    const { newBanner, normalise, BannerStore, fitMessage } = await import(bannerUrl);
     const seatmapUrl = '/src/core/seatmap.ts';
     const catalogUrl = '/src/core/stadiumCatalog.ts';
     const shapeUrl = '/src/render/bannerShape.ts';
@@ -183,6 +207,24 @@ for (const spec of SHOWCASE) {
     // quietly changes the first time anyone opens it.
     installSlotRules(store, generateSeatMap(templateById(ground)));
     for (const b of bs) {
+      if (b.kind === 'sign' && b.sign) {
+        const sg = b.sign;
+        await document.fonts.load(`bold 128px ${css(sg.fontId)}`, sg.message);
+        const r = renderTextCanvas(sg.message, css(sg.fontId), 0, 0);
+        if (!r) throw new Error(`could not render ${sg.message}`);
+        const aspect = sg.heightM / sg.lengthM;
+        const box = fitMessage(aspect, r.canvas.width / r.canvas.height);
+        n++;
+        const base = newBanner('sign', b.name);
+        store.add(normalise({
+          ...base,
+          aspect,
+          bg: b.bg,
+          items: [{ id: `it_show${n}`, kind: 'text', role: 'message', text: sg.message, fontId: sg.fontId, arcDeg: 0, color: sg.color, rot: 0, ...box }],
+          slot: { ...base.slot, stand: b.slot.stand, tier: sg.tier, row: sg.row, at: sg.at, lengthM: sg.lengthM },
+        }));
+        continue;
+      }
       const items = [];
       for (const it of b.items) {
         n++;

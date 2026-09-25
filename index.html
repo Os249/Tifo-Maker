@@ -190,16 +190,26 @@
             <select id="bn-kind">
               <option value="stand" data-i18n="bn.kind.stand">Stand banner</option>
               <option value="hanging" data-i18n="bn.kind.hanging">Hanging banner</option>
+              <option value="sign" data-i18n="bn.kind.sign">Sign</option>
             </select>
           </span>
           <!-- The SHAPE of the sheet, not its size. A banner is as wide as
                the blocks it covers, so a size typed in here would be a number
                the stadium immediately overrules. -->
-          <span class="tb-field">
+          <span class="tb-field bn-for-banner">
             <label for="bn-preset" data-i18n="bn.preset">Size</label>
             <select id="bn-preset"></select>
           </span>
-          <span class="tb-field">
+          <!-- A sign's size IS its own: the sheet its message was painted on. -->
+          <span class="tb-field bn-for-sign">
+            <label for="bn-length" data-i18n="bn.sign.length">Length</label>
+            <select id="bn-length"></select>
+          </span>
+          <span class="tb-field bn-for-sign">
+            <label for="bn-height" data-i18n="bn.sign.height">Height</label>
+            <select id="bn-height"></select>
+          </span>
+          <span class="tb-field bn-for-banner">
             <label for="bn-aspect" data-i18n="bn.shape">Shape</label>
             <input type="range" id="bn-aspect" min="15" max="300" step="1" value="50" style="width:110px;" aria-label="Shape of the banner" data-i18n-attr="aria-label:bn.a11y.shape" />
             <span id="bn-aspect-out" class="val">2:1</span>
@@ -219,7 +229,7 @@
             </select>
           </span>
           <span class="tb-field">
-            <label title="Show where the 3 m fabric panels are joined" data-i18n-attr="title:bn.seamsT"><input type="checkbox" id="bn-seams" checked /> <span data-i18n="bn.seams">Seams</span></label>
+            <label class="bn-for-banner" title="Show where the 3 m fabric panels are joined" data-i18n-attr="title:bn.seamsT"><input type="checkbox" id="bn-seams" checked /> <span data-i18n="bn.seams">Seams</span></label>
             <label title="Centre lines, thirds, and the smallest type that reads across the pitch" data-i18n-attr="title:bn.guidesT"><input type="checkbox" id="bn-guides" checked /> <span data-i18n="bn.guides">Guides</span></label>
             <label title="Snap what you place to the centre, the thirds and the seams" data-i18n-attr="title:bn.snapT"><input type="checkbox" id="bn-snap" checked /> <span data-i18n="bn.snap">Snap</span></label>
           </span>
@@ -404,12 +414,24 @@
           <div class="chips bn-add-row">
             <button class="chip" id="bn-add-stand" title="Make a banner that unrolls over the seats" data-i18n-attr="title:bn.add.standT"><i class="ti ti-plus"></i> <span data-i18n="bn.kind.stand">Stand banner</span></button>
             <button class="chip" id="bn-add-hanging" title="Make a banner that is hauled up on ropes" data-i18n-attr="title:bn.add.hangingT"><i class="ti ti-plus"></i> <span data-i18n="bn.kind.hanging">Hanging banner</span></button>
+            <button class="chip" id="bn-add-sign" title="Make a sign: a message held up by a row of fans" data-i18n-attr="title:bn.add.signT"><i class="ti ti-plus"></i> <span data-i18n="bn.kind.sign">Sign</span></button>
           </div>
           <button type="button" class="bn-tour-link" id="bn-tour" title="Show the banner tour again" data-i18n-attr="title:btour.replayT"><i class="ti ti-help-circle" aria-hidden="true"></i> <span data-i18n="btour.replay">How banners work</span></button>
 
           <!-- Everything below is about the banner being edited, so it is only
                here while there is one. -->
           <div id="bn-detail">
+          <!-- What a sign says. Written here rather than placed with the text
+               tool, and fitted to the sheet whenever either changes. -->
+          <div id="bn-msg-block" class="bn-block bn-for-sign">
+            <h4><span data-i18n="bn.sign.msg">Message</span> <span class="h4-tag" data-i18n="bn.sign.msgTag">painted on the sign</span></h4>
+            <input type="text" id="bn-msg" class="bn-msg" maxlength="80" autocomplete="off" spellcheck="false" placeholder="What does it say?" aria-label="The sign's message" data-i18n-attr="placeholder:bn.sign.msgPh,aria-label:bn.sign.msgA" />
+            <div class="group bn-row">
+              <label for="bn-msg-font" data-i18n="bn.sign.font">Letters</label>
+              <select id="bn-msg-font"></select>
+              <input type="color" id="bn-msg-color" value="#141414" aria-label="Colour of the letters" data-i18n-attr="aria-label:bn.sign.colorA" />
+            </div>
+          </div>
           <!-- The tool in hand. Only while the brush or the eraser is. -->
           <div id="bn-brush-block" class="bn-block">
             <h4><span data-i18n="bn.brush">Banner brush</span> <span class="h4-tag" data-i18n="ed.brush.activeTool">active tool</span></h4>
@@ -445,7 +467,7 @@
               <option value="2" data-i18n="dir.west">West</option>
             </select>
           </div>
-          <div class="group bn-row">
+          <div class="group bn-row bn-for-banner">
             <label for="bn-across" data-i18n="bn.across">Across</label>
             <select id="bn-across">
               <option value="1" data-i18n="bn.across.one">This stand</option>
@@ -456,7 +478,7 @@
                blocks and a crew thinks in those; a continuous position gives a
                banner no reason to line up with anything and lets it hang off
                the end of the ground. -->
-          <div id="bn-block-row">
+          <div id="bn-block-row" class="bn-for-banner">
             <div class="group bn-row">
               <label for="bn-block" data-i18n="bn.block">Blocks</label>
               <select id="bn-block"></select>
@@ -470,6 +492,16 @@
             <label for="bn-tier" data-i18n="bn.tier">Tier</label>
             <select id="bn-tier"></select>
           </div>
+          <!-- A sign goes where the people holding it are: a row, and a
+               place along the stand. -->
+          <div class="group bn-row bn-for-sign">
+            <label for="bn-row" data-i18n="bn.sign.row">Held at</label>
+            <select id="bn-row"></select>
+          </div>
+          <div class="group bn-row bn-for-sign">
+            <label for="bn-at" data-i18n="bn.sign.at">Along</label>
+            <select id="bn-at"></select>
+          </div>
           <!-- What those blocks come to on this ground. A readout, because
                there is nothing here to type: the slot is the size. -->
           <div class="group bn-row">
@@ -482,8 +514,8 @@
                the panel could not do — show the banner where it hangs. -->
           <button id="bn-beside" class="bn-beside" title="Show the stadium next to the banner, looking at it" data-i18n-attr="title:bn.besideT" aria-pressed="false"><i class="ti ti-layout-columns"></i> <span data-i18n="bn.beside">Split with the stadium</span></button>
 
-          <h4 style="margin-top:14px;"><span data-i18n="bn.rig">Rigging</span> <span class="h4-tag" data-i18n="bn.rig.tag">what holds it</span></h4>
-          <div class="chips" style="margin-bottom:10px;">
+          <h4 style="margin-top:14px;" class="bn-for-banner"><span data-i18n="bn.rig">Rigging</span> <span class="h4-tag" data-i18n="bn.rig.tag">what holds it</span></h4>
+          <div class="chips bn-for-banner" style="margin-bottom:10px;">
             <label title="A rope net sewn behind the sheet takes the load on a big banner. It is behind the fabric, so you will not see it from the pitch." data-i18n-attr="title:bn.netT"><input type="checkbox" id="bn-net" /> <span data-i18n="bn.net">Rope net</span></label>
             <label title="A weighted bar in the bottom hem, so it hangs straight" data-i18n-attr="title:bn.barT"><input type="checkbox" id="bn-bar" /> <span data-i18n="bn.bar">Weight bar</span></label>
           </div>

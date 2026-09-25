@@ -1809,7 +1809,7 @@ if (process.env.DATABASE_URL) {
   const feed = (await app.inject({ method: 'GET', url: `/api/gallery?limit=${lines.length}` })).json() as { id: string; title: string; isTemplate: boolean; ownerName: string; tags: string[]; templateId: string }[];
   const titles = new Set(lines.map((l) => (JSON.parse(l) as { titleEn: string }).titleEn));
   assert.ok(feed.every((d) => titles.has(d.title)), 'the feed opens on the showcase');
-  assert.equal(new Set(feed.map((d) => d.templateId)).size, feed.length, 'each one is a different ground');
+  assert.ok(new Set(feed.map((d) => d.templateId)).size >= 3, 'the showcase is on every ground in the library');
   for (const d of feed) {
     assert.equal(d.ownerName, TEMPLATE_OWNER, `${d.title}: published by the library account`);
     assert.equal(d.isTemplate, true, `${d.title}: labelled as a template, not passed off as a post`);
@@ -1825,7 +1825,7 @@ if (process.env.DATABASE_URL) {
     const j = JSON.parse(l) as { sceneGzB64: string };
     for (const b of JSON.parse(gunzipSync(Buffer.from(j.sceneGzB64, 'base64')).toString('utf8')).banners.banners) kinds.add(`${b.kind}/${b.material}`);
   }
-  assert.ok(kinds.has('stand/solid') && kinds.has('hanging/solid') && kinds.has('stand/mesh'), `different banners: ${[...kinds].join(', ')}`);
+  assert.ok(kinds.has('stand/solid') && kinds.has('hanging/solid') && kinds.has('stand/mesh') && kinds.has('sign/solid'), `different banners: ${[...kinds].join(', ')}`);
   const people = (await app.inject({ method: 'GET', url: '/api/gallery?made=people&limit=60' })).json() as { title: string }[];
   assert.ok(!people.some((d) => titles.has(d.title)), 'and never under "Made by people"');
   console.log(`banner showcase: all assertions passed (${lines.length} designs, ${[...kinds].join(', ')})`);

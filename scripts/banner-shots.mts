@@ -28,8 +28,12 @@ const filter = process.argv[2] ?? '';
 interface Spec {
   name: string;
   ground: string;
-  kind: 'stand' | 'hanging';
+  kind: 'stand' | 'hanging' | 'sign';
   stand: 0 | 1 | 2 | 3;
+  /** A sign's row (-1 the fence), place in half blocks and length in metres. */
+  row?: number;
+  at?: number;
+  lengthM?: number;
   from: number;
   span: number;
   tier: number;
@@ -105,6 +109,18 @@ const SHOTS: Spec[] = [
   { name: 'small-arena-low', ground: 'community-kingdom-arena-28k', kind: 'stand', stand: 0, from: 0, span: 4, tier: -1, elevationDeg: 14, label: 'RIYADH' },
   { name: 'small-arena-one', ground: 'community-kingdom-arena-28k', kind: 'stand', stand: 0, from: -1, span: 1, tier: -1, label: 'RIYADH' },
   { name: 'single-kop', ground: 'single-kop-40k', kind: 'stand', stand: 0, from: -1, span: 2, tier: -1, label: 'KOP' },
+  // Signs: held at the front, held ten rows back over the heads in front,
+  // tied to the fence, tied to an upper tier's balcony, the longest one at
+  // the end of a stand, and half raised.
+  { name: 'sign-front', ground: 'generic-bowl-60k', kind: 'sign', stand: 0, from: -1, span: 1, tier: 0, row: 0, at: -1, lengthM: 20, label: 'EAT MORE CARROTS' },
+  { name: 'sign-row10', ground: 'generic-bowl-60k', kind: 'sign', stand: 0, from: -1, span: 1, tier: 0, row: 9, at: 4, lengthM: 12, label: 'PASSION LIBRE' },
+  { name: 'sign-fence', ground: 'generic-bowl-60k', kind: 'sign', stand: 0, from: -1, span: 1, tier: 0, row: -1, at: 8, lengthM: 8, label: 'SB 2011' },
+  { name: 'sign-balcony', ground: 'grand-oval-76k', kind: 'sign', stand: 1, from: -1, span: 1, tier: 1, row: -1, at: -1, lengthM: 30, label: 'ON EXIGE UN RECRUTEMENT' },
+  // A tall sheet on a steep ground's balcony: the face under the lip leans
+  // out towards the pitch, and the sheet has to hang clear of it.
+  { name: 'sign-balcony-steep', ground: 'community-steep-cauldron-55k', kind: 'sign', stand: 0, from: -1, span: 1, tier: 1, row: -1, at: -1, lengthM: 12, aspect: 2 / 12, label: 'NO SURRENDER' },
+  { name: 'sign-end-40', ground: 'single-kop-40k', kind: 'sign', stand: 1, from: -1, span: 1, tier: 0, row: 3, at: 0, lengthM: 40, label: 'ULTRAS PRESENTS' },
+  { name: 'sign-raise-35', ground: 'generic-bowl-60k', kind: 'sign', stand: 0, from: -1, span: 1, tier: 0, row: 4, at: -1, lengthM: 12, progress: 0.35, label: 'RAISED' },
 ];
 
 interface Shot {
@@ -160,7 +176,8 @@ for (const s of wanted) {
   if (r.penetration > 0.001) flags.push(`IN-STAND ${r.penetration.toFixed(3)} m`);
   if (!r.focused) flags.push('NO-FOCUS');
   if (!b) flags.push('NO-BOUNDS');
-  else if (b.max[1] - b.min[1] < 1) flags.push('FLAT');
+  // A sign is a metre tall, and a third of the way up less than half that.
+  else if (b.max[1] - b.min[1] < (s.kind === 'sign' ? 0.3 : 1)) flags.push('FLAT');
   if (flags.length) bad++;
   console.log(
     s.name.padEnd(26) + String(r.census.banners).padStart(8) + String(r.census.bars).padStart(6) +

@@ -19,7 +19,8 @@
   import { templateById } from '/src/core/stadiumCatalog.ts';
   import { MatchDaySimulator } from '/src/render/simulator/index.ts';
   import { AssetStore } from '/src/core/sceneAssets.ts';
-  import { BannerStore, newBanner, aspectOf } from '/src/core/banner.ts';
+  import { BannerStore, newBanner, aspectOf, fitMessage } from '/src/core/banner.ts';
+  import { TIFO_FONTS, renderTextCanvas } from '/src/core/text.ts';
   import { installSlotRules } from '/src/render/bannerShape.ts';
 
   const HOST = document.createElement('div');
@@ -37,6 +38,22 @@
     // The same rules the editor installs, so a banner between two tiers
     // takes the gap's shape here exactly as it does in the product.
     installSlotRules(banners, map);
+    // A sign: a painted sheet with one line on it, fitted the way the
+    // Message field fits it.
+    if (spec.kind === 'sign') {
+      const L = spec.lengthM ?? 12;
+      const a = spec.aspect ?? 1.2 / L;
+      const css = TIFO_FONTS.find((f) => f.id === 'condensed').css;
+      await document.fonts.load(`bold 128px ${css}`, spec.label ?? 'SIGN');
+      const r = renderTextCanvas(spec.label ?? 'SIGN', css, 0);
+      const box = fitMessage(a, r.canvas.width / r.canvas.height);
+      const base = newBanner('sign', 'shot');
+      banners.add({
+        ...base, aspect: a, wind: spec.wind ?? 0.25,
+        slot: { ...base.slot, stand: spec.stand, tier: spec.tier, row: spec.row ?? 0, at: spec.at ?? -1, lengthM: L },
+        items: [{ id: 'm', kind: 'text', role: 'message', text: spec.label ?? 'SIGN', fontId: 'condensed', arcDeg: 0, color: '#141414', rot: 0, ...box }],
+      });
+    } else {
     const doc = {
       ...newBanner(spec.kind, 'shot'),
       wind: spec.wind ?? 0.25,
@@ -65,6 +82,7 @@
         { id: 't', kind: 'text', text: spec.label ?? 'TIFO', cx: 0.5, cy: strip ? a / 2 : a * 0.24,
           w: strip ? Math.min(0.8, th * 6) : 0.8, h: th, rot: 0, fontId: 'poster', arcDeg: 0, color: '#ffffff' },
       ] });
+    }
     }
 
     const sim = new MatchDaySimulator(HOST, map, store, template, new AssetStore(), {

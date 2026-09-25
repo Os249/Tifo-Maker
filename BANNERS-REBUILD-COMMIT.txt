@@ -1,81 +1,46 @@
 === SUMMARY ===
 
-Banners: announce them, add a tour and a showcase, and free Match Day's camera
+Banners: add signs, the ultras' message held up by a row of fans
 
 
 === DESCRIPTION ===
 
-Four things before banners go out: tell people they exist, teach the Banner view the first time it opens, put some in the community, and let Match Day's camera move again after "See it on match day".
+A third banner type, Sign. It is the long, narrow sheet with one line painted on it that a curva holds up to say something to the rest of the ground: "IF YOU CAN'T SEE WHO IS THE LEADER EAT MORE CARROTS", "ON EXIGE UN RECRUTEMENT", "12 سنة من سوء التدبير". Italians call it a striscione, the DFB glossary a Spruchband. It is not a stand banner or a hanging banner, so it gets its own placement and sizing, but it reuses everything else banners already have.
 
-1. MATCH DAY: THE CAMERA WAS STUCK
+1. WHAT A SIGN IS IN THE APP
 
-"See it on match day" opened on the banner, and then the camera would not move. There were two causes.
+- Type "Sign" in the Banner view, next to Stand banner and Hanging banner. The empty state and the add row both offer it.
+- It is sized in metres, like the real sheet. Length is 4 to 40 m and height 0.8 to 2 m. A new one is 12 x 1.2 m.
+- It is placed where the people holding it stand:
+  - Held at: the fence (lowest tier), the balcony (upper tiers), the front row, or any row further back.
+  - Along: the middle of the stand, the middle of any block, or any aisle.
+- In the front row it is held at chest height. Further back it is held up over the heads of the row in front, measured from the stand's real rake. On the fence or balcony it is tied on and hangs down in front.
+- A Message field sits at the top of the panel, with font and colour. The line is fitted to the sheet and refitted whenever the text, length or height changes. Typing is one undo step.
+- Facts: "held by 9 fans · 1.6 kg · letters up to 0.9 m", or "tied to the fence". The notes say how far its letters read (signage rule, about 90 m per metre of letter height) and suggest a taller sheet when it falls short of the far side. No seams across it, because the fabric runs along its length.
+- Reveal "Raised by the crowd": it goes up from its bottom edge in 1–3 s. It can also already be up (cut).
 
-- The controls were switched off. Opening the simulator starts a camera glide and turns the controls off until it lands. Pointing at the banner cancelled the glide, so it never landed and the controls never came back. No orbit, no zoom, no pan for the rest of the visit. They come back now.
-- Every drag landed on the banner. The shot frames the banner across most of the picture, and pressing on a banner took hold of it. So nearly every attempt to look around slid the banner along the stand instead.
+2. IN THE STADIUM
 
-Now the first click on a banner selects it (the outline comes up and the panel follows) and leaves the camera alone. Dragging moves the banner only once it is selected. Pressing anywhere else orbits the camera and deselects the banner. It opens from the Banner view with nothing selected. The panel hint says how it works: "Click a banner to pick it out, then drag it to move it along the stand."
+- An upright sheet along its row, standing in front of its holders. It sags a little between hands, the hands bob out of step, and the free bottom hem moves in the wind. A tied sign unrolls down from the fence.
+- Show in stadium and Match Day's "Look at it" frame it from across the pitch, close enough to read it.
+- Match Day: a sign shows Held at and Along in place of Across, Blocks and Span. Dragging it moves it to the row and place under the pointer.
+- Where the ground cannot take what was asked, the ground wins, never the sheet:
+  - The balcony is only offered where there is a drop to the tier below. On the cauldron dome the tiers run into each other, and its first-row signs are held over the heads of the tier below.
+  - A sheet deeper than a short balcony stands up above the rail. It is not squashed.
+  - A balcony sign stands clear of a fascia that leans out under the lip.
+  - Under an overhang, only the rows where a sheet that tall can be held up are offered. On the wide oval that removes the last two or three rows of the lower tier.
 
-2. "BANNERS ARE HERE"
+3. EVERYWHERE ELSE BANNERS ARE
 
-Everyone who opens the editor gets a short card just under the Banner tab, pointing at it: "Banners are here. Draw a stand banner or a hanging banner, put it on any stand, and watch it unroll on match day." It has two buttons, Try banners and Not now.
+- The phone Paint sheet, the banner tour (a new step for the message), English and Arabic (Sign = يافطة), and the community 3D preview.
+- The What's New card and the tour now mention signs.
+- A fourth community showcase design, "Red & white halves, with signs", has three signs: a front-row one, one tied to the upper balcony in Arabic, and one held at the back. The server adds it by itself on the next start ("banner showcase: +1 added"). The three existing designs are untouched.
 
-- It sits beside the work, not in front of it. There is no backdrop, and it does not take focus.
-- It waits its turn behind the first-visit dialog, a tour and Match Day, and never stacks on top of them.
-- It goes away on Try, Not now, the X or Escape, or when you switch view. Leaving it open would put it over the Stadium view's camera bar.
-- It is remembered once answered. A reload before that shows it again.
-- On a phone it points at the view pill's Banner button. English and Arabic.
+4. TESTS
 
-3. THE BANNER TOUR
+- verify: new section 6b covering defaults, a 40 m sign's shape surviving storage, junk clamped, type changes both ways, facts, the raise, message fitting, places and rows, the 40 m sign sliding back onto its stand, balconies and overhangs.
+- sweep:banner: every sign place on every catalogue ground. That is the fence and every usable row, every place along the stand, 4 m and 40 m, 1.2 m and 2 m tall, fully and part raised. It checks: nothing inside the stand, held above the concrete, clear of the heads in front, upright, tied at the fence, the right size, deterministic, and still. The sweep now counts every failure; before, it stopped listing at 40, and that hid two grounds' problems behind a third's.
+- shots:banner: seven sign shots.
+- e2e-banner: a signs section and an Arabic signs section.
 
-The first time anyone opens the Banner view, it runs its own short tour. Skip, Escape and Back work on every step. "How banners work" in the Banners panel runs it again. It follows the state of the tifo:
-
-- No banner yet: what a banner is, then making one, the list, and where to find the tour again.
-- With a banner: the sheet (type, size, fabric), the drawing tools, the list and Show in stadium, placement, the reveal and "See it on match day", and where to find the tour again.
-- Phone: three steps. The Banner view, the sheet (or making one), and where its settings are (Paint).
-
-Steps whose controls are not on the screen are left out. At 1024 wide the panel is a closed slide-over, and the tour no longer points past the edge of the window.
-
-This one is shown automatically and the main tour is not (see the note in main.ts). The difference is timing: it comes when someone has just opened a view that works differently from the rest of the editor.
-
-The tour code itself had four bugs, fixed here:
-- A tour that ended on a button left its Escape listener behind, so the next tour ended on its first Escape.
-- A step could point at a control past the edge of the window.
-- In Arabic, "beside the panel" put the card on the wrong side.
-- The card could land on top of the thing it was describing.
-
-4. THE COMMUNITY: THREE STADIUMS WITH DIFFERENT BANNERS
-
-The community feed now opens on three designs by @tifomaker, one per ground, each with different banners:
-- Generic 60k bowl: a hanging banner flown from the roof, green, with a crest and «دائماً معك».
-- Grand oval: a four-block stand banner unrolled over the North stand, "WE ARE THE NORTH".
-- Single-tier kop: two banners. A see-through mesh stand banner ("ONE CLUB / ONE CITY") and a tall one-block hanging "12".
-
-The seats are three of the library's own designs, which have already passed its quality gates. The banners use each design's palette.
-
-They are published the same way as the starter library: by @tifomaker, flagged as templates. So they carry the Template badge, stay out of "Made by people", can never be Tifo of the day, and are never passed off as someone's post. scripts/generate-showcase.mts writes server/data/showcase.jsonl. The server publishes it at boot after the library, once, by title.
-
-To make them worth opening, three things that had never worked with banners now do:
-- The community preview shows a design's banners. It showed the seats only, so any design saved with a banner appeared there without it. Designs with banners open on the banner, and the camera bar has a button for each one.
-- Cards say "With banners". The card strip only shows the seats.
-- Remix and fork take the banners with them. They copied the seats and nothing else, so remixing a tifo for its banner gave you a copy with no banner.
-
-SMALLER FIXES
-
-- At 768 to 1099 px the closed slide-over panel could still be focused. Tab, a tour or a click into it scrolled the whole page 312 px sideways, header and all, with no way back. It is hidden once it has slid out.
-- In the community preview, a long title ran under the close button.
-
-TESTS
-
-e2e-banner has 150 checks, up from 100. The new ones cover:
-- the news card: position, targets, focus, waiting behind the first-visit dialog, Not now, Try, switching view
-- the tour: empty and with-banner steps, never off screen, never covering its control, never scrolling the page, Escape, Skip, replay, 1024 wide, phone
-- Match Day: a drag across the banner looks around and leaves the banner where it was, the wheel zooms, a banner that is clicked first then drags along the stand
-- the showcase: it opens with its banners, as they were made, its cards are badged, and the preview has its cameras
-
-Elsewhere:
-- e2e-i18n reads the news and every tour step in Arabic.
-- The server tests seed the showcase through the real seeder and routes, and check that fork and remix carry the scene.
-- e2e-templates counts the showcase in the library and checks that it leads the feed with its banners.
-
-Full pass, every suite, on exactly this tree: build 0 · verify 0 · verify:stadiumfit all pass · sweep 104,504 configurations, 0 failures · server, email, security, SOC and deploy tests 0 · e2e 21/0 · e2e-banner 150/0 · e2e-mobile 310/0 · e2e-i18n 22 surfaces clean · e2e-theme 47/0 · e2e-sound 61/0 · e2e-seo 12/0 · e2e-gate 23/0 · e2e-feedback 9/0 · e2e-templates 34/0 · e2e-claim 9/0 · e2e-verify 21/0 · 31 banner shots.
+Full pass, every suite: build, verify, verify:stadiumfit, sweep:banner, test:server, test:email, test:security, test:soc, test:deploy, e2e, e2e-banner, e2e-mobile, e2e-i18n, e2e-theme, e2e-sound, e2e-drumcall, e2e-seo, e2e-gate, e2e-feedback, e2e-templates, e2e-claim, e2e-verify, shots:banner. All 23 green; the sweep checked every sign place on all 13 grounds with no failures.

@@ -29,9 +29,10 @@ import { buildAssetLayer, type AssetLayer } from './assetLayer';
 import { buildBannerRigs, type BannerRigLayer } from './bannerRig';
 import { standIsRoofed } from './roof';
 import { buildPlacement, type PlacementHelper } from './bannerPlace';
-import { maxUsefulSpan, hangableTiers } from './bannerSlot';
+import { maxUsefulSpan, hangableTiers, signPlaceNear, signRowNear, signRows, signPlaces, signFenceOk, signUsableRows } from './bannerSlot';
 import { bannerShot } from './bannerCamera';
 import type { BannerStore, StandIndex } from '../../core/banner';
+import { signHeightM } from '../../core/banner';
 import type { AssetStore, SceneAsset } from '../../core/sceneAssets';
 import { rasterize } from '../../core/importImage';
 import { printAssetPanels } from './printPanels';
@@ -1285,6 +1286,17 @@ export class MatchDaySimulator {
     // blocks, and is why it can never end up straddling an aisle with a
     // corner hanging off the end of the stand.
     const f = this.placement.frameFor(a.slot.stand, a.slot.stands);
+    // A sign goes where the people holding it would be: the nearest place
+    // along the stand, and the nearest row — or the fence, below the first.
+    if (a.kind === 'sign') {
+      const at = signPlaceNear(f, res.alongU);
+      const { tier, row } = signRowNear(f, a.slot.tier, res.heightV);
+      if (at !== a.slot.at || row !== a.slot.row || tier !== a.slot.tier) {
+        this.bannerStore.patchSlot({ at, row, tier });
+      }
+      this.onBannerSnap?.(['row']);
+      return;
+    }
     const span = Math.max(1, Math.min(f.blocks.length, a.slot.blockSpan));
     let hit = 0;
     for (let i = 0; i < f.blocks.length; i++) {
@@ -1414,9 +1426,13 @@ export class MatchDaySimulator {
    */
   standSlots(stand: StandIndex, bannerId?: string, stands = 1): {
     blocks: number; tiers: number; maxSpan: number; tierOptions: number[];
+    /** For a sign: the rows of each tier, and the places along the stand. */
+    rows: number[]; places: number;
+    /** For a sign: whether each tier has a fence or balcony to tie one to. */
+    fence: boolean[];
   } {
     const f = this.placement?.frameFor(((stand % 4) + 4) % 4 as StandIndex, stands);
-    if (!f || !f.ok) return { blocks: 1, tiers: 1, maxSpan: 1, tierOptions: [0] };
+    if (!f || !f.ok) return { blocks: 1, tiers: 1, maxSpan: 1, tierOptions: [0], rows: [1], places: 1, fence: [true] };
     const doc = bannerId ? this.bannerStore?.get(bannerId) : this.bannerStore?.active;
     // A flown banner can only use a tier whose fascia band is deep enough to
     // hang anything in; a banner on the terracing can use any of them.
@@ -1426,6 +1442,9 @@ export class MatchDaySimulator {
       tiers: f.tiers.length,
       maxSpan: doc ? maxUsefulSpan(doc, f) : f.blocks.length,
       tierOptions: doc?.kind === 'hanging' ? hangableTiers(f) : all,
+      rows: all.map((t) => (doc?.kind === 'sign' ? signUsableRows(f, t, signHeightM(doc)) : signRows(f, t))),
+      places: signPlaces(f),
+      fence: all.map((t) => signFenceOk(f, t)),
     };
   }
 

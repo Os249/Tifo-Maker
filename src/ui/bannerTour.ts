@@ -46,11 +46,13 @@ const sheet = (): { left: number; top: number; right: number; bottom: number } |
 
 const none = (): boolean => document.body.classList.contains('bn-none');
 const some = (): boolean => !none();
+const isSign = (): boolean => document.body.classList.contains('bn-sign');
 
 const STEPS: TourStep[] = [
   { selector: '#view-banner', titleKey: 'btour.intro', bodyKey: 'btour.intro.b', place: 'bottom' },
   { selector: '#bn-empty', when: none, titleKey: 'btour.make', bodyKey: 'btour.make.b', place: 'right' },
   { selector: '#banner-bar', when: some, titleKey: 'btour.sheet', bodyKey: 'btour.sheet.b', place: 'bottom' },
+  { selector: '#bn-msg-block', when: isSign, titleKey: 'btour.msg', bodyKey: 'btour.msg.b', place: 'left' },
   { selector: '.tool-rail', when: some, titleKey: 'btour.draw', bodyKey: 'btour.draw.b', place: 'right' },
   { selector: ['#ctx-banner > h4', '#bn-list', '.bn-add-row'], titleKey: 'btour.list', bodyKey: 'btour.list.b', place: 'left' },
   { selector: ['label[for="bn-stand"]', '#bn-stand', '#bn-size-out'], when: some, titleKey: 'btour.place', bodyKey: 'btour.place.b', place: 'left' },

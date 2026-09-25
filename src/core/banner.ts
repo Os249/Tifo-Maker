@@ -69,9 +69,36 @@ export type BannerKind =
    * terracing, which is why it reads completely differently: a taut printed
    * wall rather than fabric lying on a crowd.
    */
-  | 'hanging';
+  | 'hanging'
+  /**
+   * The message: a long, narrow sheet held UPRIGHT by a row of fans.
+   *
+   * What the Italians call a striscione and the DFB's glossary a Spruchband —
+   * "Spruchbänder dienen vor allem als Möglichkeit für Fußballfans,
+   * Botschaften an die übrige Stadionöffentlichkeit mitzuteilen": a sheet for
+   * saying something to the rest of the ground. It is painted with one line,
+   * shown for a few minutes and taken down, and it is the loudest thing a curva
+   * does without a single card: "IF YOU CAN'T SEE WHO IS THE LEADER, EAT MORE
+   * CARROTS", "12 سنة من سوء التدبير".
+   *
+   * It is the one kind that is not about blocks. It is a metre or so tall and
+   * as long as its message — four metres or forty — and it goes wherever the
+   * people holding it are standing: any row, anywhere along the stand. Or it is
+   * tied to the fence along the front of a tier, which is where the group
+   * banners (Zaunfahnen) live all match. Either way it stands vertical, facing
+   * the pitch, instead of lying over the crowd or hanging in the air.
+   */
+  | 'sign';
 
-export const BANNER_KINDS: BannerKind[] = ['stand', 'hanging'];
+/** Every kind, in the order the editor offers them. */
+export const BANNER_KINDS: BannerKind[] = ['stand', 'hanging', 'sign'];
+/**
+ * The kinds placed on a run of the stand's blocks — the slot model below.
+ *
+ * A sign is not: it is as long as its message and goes where the people
+ * holding it stand, so it has its own place (see `SignPlace`).
+ */
+export const BLOCK_KINDS: BannerKind[] = ['stand', 'hanging'];
 
 /**
  * Solid fabric or perforated mesh.
@@ -88,6 +115,7 @@ export type BannerMaterial = 'solid' | 'mesh';
 export type BannerReveal =
   | 'unroll' // the covered fraction advances behind a shrinking roll
   | 'hoist'  // the sheet is hauled UP its ropes from a fixed hem
+  | 'raise'  // a sign lifted into view by the people holding it
   | 'cut';   // already in place when the cameras find it
 
 /** Which stand: 0 East, 1 North, 2 West, 3 South — the app's existing order. */
@@ -129,9 +157,74 @@ export interface BannerSlot {
    *
    * For a stand banner: the tier whose face it covers, or -1 for the whole
    * stand. For a hanging banner: the tier over whose front it hangs, or -1 to
-   * fly it from the roof.
+   * fly it from the roof. For a sign: the tier it is held in (-1 is read as
+   * the lowest one — a sign is always in some tier).
    */
   tier: number;
+  /**
+   * A sign's row in its tier, counted from the front, or -1 for the fence.
+   *
+   * Signs only. Row 0 is the front row, held at chest height; further back it
+   * is held up over the heads of the row in front, or nobody would see it.
+   * -1 is tied to the fence along the front of the tier, where the group
+   * banners hang: the pitch-side fence of the lowest tier, the balcony of an
+   * upper one.
+   */
+  row?: number;
+  /**
+   * Where a sign is along the stand, in HALF blocks, or -1 for the middle.
+   *
+   * Signs only. Even numbers are the middle of a block (0 is the middle of
+   * block 1), odd ones the aisle between two. Finite for the same reason the
+   * banner slot is — there is a list of places to test, not a continuum — and
+   * fine enough that a sign can sit in front of any group in the stand.
+   */
+  at?: number;
+  /** A sign's length in metres: how long a sheet its message was painted on. */
+  lengthM?: number;
+}
+
+/**
+ * The lengths a sign comes in, in metres.
+ *
+ * Bedsheets sewn end to end: four is a couple of them, the kind two people
+ * hold; forty is a curva's whole front. The ones in the photographs of the
+ * Samba Boys and the Kings' curva run from about six to thirty.
+ */
+export const SIGN_LENGTHS_M = [4, 6, 8, 10, 12, 15, 20, 25, 30, 40] as const;
+/**
+ * The heights, in metres.
+ *
+ * A sheet's width: 0.8 m is a narrow strip, 1.4 m a double bedsheet, 2 m the
+ * most a row of people can hold up and still see over.
+ */
+export const SIGN_HEIGHTS_M = [0.8, 1, 1.2, 1.4, 1.6, 2] as const;
+/** What a new sign is: a 12 m sheet, 1.2 m tall, held at the front. */
+export const SIGN_DEFAULT = { lengthM: 12, heightM: 1.2, row: 0 } as const;
+/** How far apart the people holding a sign stand, in metres. */
+export const SIGN_HOLDER_SPACING_M = 1.5;
+/** A sign tied to a fence has a cable tie every this many metres. */
+export const SIGN_TIE_SPACING_M = 0.5;
+
+/** A sign's own placement, filled in: the fields a sign slot adds. */
+export interface SignPlace {
+  row: number;
+  at: number;
+  lengthM: number;
+}
+
+/** A sign's place, with the defaults a slot saved without one comes back with. */
+export function signPlaceOf(slot: BannerSlot): SignPlace {
+  return {
+    row: Math.round(clamp(num(slot.row, SIGN_DEFAULT.row), -1, 199)),
+    at: Math.round(clamp(num(slot.at, -1), -1, 255)),
+    lengthM: clamp(num(slot.lengthM, SIGN_DEFAULT.lengthM), 1, 120),
+  };
+}
+
+/** A sign's height in metres: its length times its shape. */
+export function signHeightM(doc: BannerDoc): number {
+  return signPlaceOf(doc.slot).lengthM * clamp(doc.aspect, ASPECT_MIN, 6);
 }
 
 // ---------------------------------------------------------------------------
@@ -184,6 +277,14 @@ export interface TextItem extends PlacedItem {
   /** Outline width in banner units; 0 = none. */
   outline?: number;
   outlineColor?: string;
+  /**
+   * A sign's message: the line the sign is FOR.
+   *
+   * Written in the panel's Message field rather than placed with the text
+   * tool, and fitted to the sheet whenever it or the sheet changes, so a
+   * longer sheet or a longer message never leaves it hanging off an edge.
+   */
+  role?: 'message';
 }
 
 export interface ShapeItem extends PlacedItem {
@@ -360,6 +461,18 @@ export const KIND_PROFILE: Record<BannerKind, KindProfile> = {
     netBacked: true, weightBar: true, fabricGsm: 110,
     occludesCrowd: false, roped: true,
   },
+  /**
+   * Twelve metres by one point two, held at the front of the lowest tier.
+   *
+   * A painted bedsheet: no net, no bar — the hands along its top edge are the
+   * rig. It hides the few people holding it and nobody else, so it is not a
+   * sheet over the mosaic.
+   */
+  sign: {
+    aspect: SIGN_DEFAULT.heightM / SIGN_DEFAULT.lengthM, reveal: 'raise', blockSpan: 1, tier: 0,
+    netBacked: false, weightBar: false, fabricGsm: 110,
+    occludesCrowd: false, roped: false,
+  },
 };
 
 /**
@@ -376,6 +489,8 @@ export const KIND_PROFILE: Record<BannerKind, KindProfile> = {
 export const KIND_REVEALS: Record<BannerKind, BannerReveal[]> = {
   stand: ['unroll', 'cut'],
   hanging: ['hoist', 'cut'],
+  // Lifted into view by the people holding it — or tied on before kickoff.
+  sign: ['raise', 'cut'],
 };
 
 /** A reveal this type can perform: the one asked for, or the type's own. */
@@ -420,6 +535,7 @@ export const BANNER_PRESETS: BannerPreset[] = [
 
 /** Which preset a banner currently matches, or null if it sits between them. */
 export function presetOf(doc: BannerDoc): string | null {
+  if (doc.kind === 'sign') return null;
   for (const p of BANNER_PRESETS) {
     if (p.blockSpan === doc.slot.blockSpan && Math.abs(p.aspect - doc.aspect) < 0.02) return p.id;
   }
@@ -515,6 +631,24 @@ const TIFO_CAP_DIVISOR = 40;
 
 /** Type below this fraction of the banner's width does not survive TV. */
 const MIN_TYPE_FRAC = 0.02;
+/**
+ * How much of a sign's height its letters can take.
+ *
+ * A painted line needs a margin above and below or the edges of the sheet
+ * eat it when it sags between the hands; three quarters is what the
+ * photographs show and what the Message field fits the words to.
+ */
+export const SIGN_LETTER_FRAC = 0.74;
+/**
+ * How far a sign's letters read, in metres per metre of letter height.
+ *
+ * Signage practice, not tifo practice. A tifo is glanced at across a moving
+ * crowd and downscaled by a broadcast, which is why its rule is D/40; a sign
+ * is one line of words read on purpose, the way a road sign is — one inch of
+ * cap height per ten feet at the limit (1:120), with comfortable reading
+ * about a quarter closer. Ninety is that comfortable figure.
+ */
+export const SIGN_READ_PER_M = 90;
 
 /**
  * A banner's real size, in metres.
@@ -541,6 +675,11 @@ export const TYPICAL_BLOCK_M = 18.5;
  * count and a weight — which are the only things the panel prints.
  */
 export function estimateSize(doc: BannerDoc): BannerSize {
+  // A sign's size is its own: the length it was painted at.
+  if (doc.kind === 'sign') {
+    const lengthM = signPlaceOf(doc.slot).lengthM;
+    return { widthM: lengthM, heightM: lengthM * clamp(doc.aspect, ASPECT_MIN, 6) };
+  }
   const widthM = Math.max(1, doc.slot.blockSpan) * TYPICAL_BLOCK_M;
   return { widthM, heightM: widthM * clamp(doc.aspect, 0.05, 6) };
 }
@@ -556,12 +695,26 @@ export function bannerFacts(doc: BannerDoc, size: BannerSize, viewDistanceM = 10
   const w = Math.max(0.1, size.widthM);
   const h = Math.max(0.1, size.heightM);
   const areaM2 = w * h;
-  const panels = Math.max(1, Math.ceil(w / PANEL_MAX_M - 1e-9));
+  const sign = doc.kind === 'sign';
+  // A sign's fabric runs along its length — a bolt is three metres wide and a
+  // sign is a metre or two tall — so it has no seams across it at all.
+  const panels = sign
+    ? Math.max(1, Math.ceil(h / PANEL_MAX_M - 1e-9))
+    : Math.max(1, Math.ceil(w / PANEL_MAX_M - 1e-9));
   const seamsM: number[] = [];
-  for (let k = 1; k < panels; k++) seamsM.push((k * w) / panels);
+  if (!sign) for (let k = 1; k < panels; k++) seamsM.push((k * w) / panels);
   const weightKg = (areaM2 * doc.fabricGsm) / 1000;
-  const carriers = Math.max(1, Math.ceil(weightKg / KG_PER_CARRIER));
-  const headlineCapM = viewDistanceM / TIFO_CAP_DIVISOR;
+  const fence = sign && signPlaceOf(doc.slot).row < 0;
+  // Nobody carries a sign in on their back: it is held by a row of people a
+  // step and a half apart, one at each end — or tied on, and then two people
+  // put it up.
+  const carriers = sign
+    ? (fence ? 2 : Math.max(2, Math.round(w / SIGN_HOLDER_SPACING_M) + 1))
+    : Math.max(1, Math.ceil(weightKg / KG_PER_CARRIER));
+  // The same reading rule, but a sign cannot have letters taller than it is:
+  // its type is as tall as the sheet allows, and the rule says how far away
+  // that reads.
+  const headlineCapM = sign ? Math.min(viewDistanceM / TIFO_CAP_DIVISOR, SIGN_LETTER_FRAC * h) : viewDistanceM / TIFO_CAP_DIVISOR;
   const headlineCapFrac = headlineCapM / w;
 
   const notes: BannerNote[] = [];
@@ -569,6 +722,19 @@ export function bannerFacts(doc: BannerDoc, size: BannerSize, viewDistanceM = 10
   if (doc.bg === null) {
     const drawn = doc.items.some((it) => !it.hidden);
     notes.push({ key: drawn ? 'clear' : 'empty', level: drawn ? 'info' : 'warn' });
+  }
+  if (sign) {
+    if (fence) {
+      notes.push({ key: 'signTied', level: 'info', vals: { ties: Math.max(4, Math.round(w / SIGN_TIE_SPACING_M) + 1) } });
+    } else {
+      notes.push({ key: 'signHeld', level: 'info', vals: { people: carriers, gap: SIGN_HOLDER_SPACING_M } });
+    }
+    const readsM = Math.round(headlineCapM * SIGN_READ_PER_M);
+    notes.push({
+      key: readsM < viewDistanceM ? 'signShort' : 'signReads',
+      level: readsM < viewDistanceM * 0.6 ? 'warn' : 'info',
+      vals: { cap: Math.round(headlineCapM * 100) / 100, m: readsM, far: viewDistanceM },
+    });
   }
   if (panels > 1) {
     notes.push({ key: 'seams', level: 'info', vals: { panels, panelM: PANEL_MAX_M } });
@@ -604,6 +770,7 @@ function newId(prefix: string): string {
 
 export function newBanner(kind: BannerKind = 'stand', name = 'Banner'): BannerDoc {
   const p = KIND_PROFILE[kind];
+  if (kind === 'sign') return newSign(name);
   return {
     id: newId('bn_'),
     name,
@@ -645,6 +812,89 @@ export function newBanner(kind: BannerKind = 'stand', name = 'Banner'): BannerDo
 export const DEFAULT_FABRIC = '#ffffff';
 
 /**
+ * A new sign: a white sheet, held at the front of the lowest tier.
+ *
+ * Off-white rather than paper white, because a sign is a bedsheet and not a
+ * printed banner — and because a pure white strip under floodlights clips to
+ * a hole in the picture before its letters can be read.
+ */
+export const SIGN_FABRIC = '#f4f1ea';
+
+function newSign(name: string): BannerDoc {
+  const p = KIND_PROFILE.sign;
+  const size = { widthM: SIGN_DEFAULT.lengthM, heightM: SIGN_DEFAULT.heightM };
+  return {
+    id: newId('bn_'),
+    name,
+    kind: 'sign',
+    aspect: SIGN_DEFAULT.heightM / SIGN_DEFAULT.lengthM,
+    material: 'solid',
+    fabricGsm: p.fabricGsm,
+    netBacked: false,
+    weightBar: false,
+    bg: SIGN_FABRIC,
+    items: [],
+    slotAspect: null,
+    slot: {
+      stand: 1,
+      stands: 1,
+      blockFrom: -1,
+      blockSpan: 1,
+      tier: 0,
+      row: SIGN_DEFAULT.row,
+      at: -1,
+      lengthM: SIGN_DEFAULT.lengthM,
+    },
+    reveal: 'raise',
+    revealAuto: true,
+    revealMs: physicalRevealMs('raise', size),
+    wind: 0.25,
+    visible: true,
+  };
+}
+
+/**
+ * The line a sign carries, as an item.
+ *
+ * Sized roughly here — this module has no fonts to measure with — and fitted
+ * properly by whoever can draw text (the Banner view, the showcase builder),
+ * which is also who refits it when the words or the sheet change.
+ */
+export function messageItem(text: string, color = '#141414', fontId = 'condensed'): TextItem {
+  return {
+    id: newId('t'), kind: 'text', role: 'message', text, fontId, arcDeg: 0, color,
+    cx: 0.5, cy: 0.05, w: 0.9, h: 0.07, rot: 0,
+  };
+}
+
+/** A sign's message, if it has one. */
+export function messageOf(doc: BannerDoc): TextItem | null {
+  for (const it of doc.items) if (it.kind === 'text' && it.role === 'message') return it;
+  return null;
+}
+
+/**
+ * Where a message sits on its sheet, given the shape its words come out at.
+ *
+ * `glyphRatio` is the rendered line's width over its height. The words take
+ * as much of the sheet as they can — up to `SIGN_LETTER_FRAC` of its height
+ * and 94% of its length — and sit in the middle of it: which is the whole of
+ * how a striscione is laid out.
+ */
+export function fitMessage(aspect: number, glyphRatio: number): { cx: number; cy: number; w: number; h: number } {
+  const a = clamp(aspect, ASPECT_MIN, 6);
+  const r = Math.max(0.05, glyphRatio);
+  let h = SIGN_LETTER_FRAC * a / 0.82; // the rendered box carries its own padding
+  let w = h * r;
+  if (w > 0.94) {
+    w = 0.94;
+    h = w / r;
+  }
+  h = Math.min(h, a * 0.98);
+  return { cx: 0.5, cy: a / 2, w, h };
+}
+
+/**
  * Re-profile a banner when its type changes.
  *
  * The artwork is kept, the slot is kept, and so is the SHAPE. Moving a banner
@@ -659,6 +909,26 @@ export const DEFAULT_FABRIC = '#ffffff';
 export function applyKind(doc: BannerDoc, kind: BannerKind): BannerDoc {
   const from = KIND_PROFILE[doc.kind];
   const to = KIND_PROFILE[kind];
+  // Into or out of a sign the shape cannot carry over: a sign is a strip ten
+  // times longer than it is tall, and a Blockfahne of that shape is a
+  // ribbon nobody would make. The type's own proportions, then, and its own
+  // place: a sign goes to the front of the tier, a banner back to its blocks.
+  if (kind === 'sign' || doc.kind === 'sign') {
+    const toSign = kind === 'sign';
+    return {
+      ...doc,
+      kind,
+      aspect: to.aspect,
+      fabricGsm: doc.fabricGsm === from.fabricGsm ? to.fabricGsm : doc.fabricGsm,
+      netBacked: to.netBacked,
+      weightBar: to.weightBar,
+      reveal: doc.reveal === 'cut' ? 'cut' : to.reveal,
+      slotAspect: null,
+      slot: toSign
+        ? { ...doc.slot, stands: 1, tier: Math.max(0, doc.slot.tier), row: SIGN_DEFAULT.row, at: -1, lengthM: SIGN_DEFAULT.lengthM }
+        : { stand: doc.slot.stand, stands: 1, blockFrom: -1, blockSpan: to.blockSpan, tier: to.tier },
+    };
+  }
   return {
     ...doc,
     kind,
@@ -1051,7 +1321,9 @@ export function normalise(raw: Partial<BannerDoc>): BannerDoc {
   // which is the clean break rather than a migration shim kept alive forever.
   const legacy = raw as unknown as { widthM?: number; heightM?: number; place?: { stand?: number } };
   const aspect = raw.aspect !== undefined
-    ? clamp(num(raw.aspect, p.aspect), 0.05, 6)
+    // A forty-metre sign is fifty times longer than it is tall, which no
+    // banner is; the floor under everything else would make it two metres.
+    ? clamp(num(raw.aspect, p.aspect), kind === 'sign' ? 0.01 : 0.05, 6)
     : legacy.widthM && legacy.heightM
       ? clamp(legacy.heightM / legacy.widthM, 0.05, 6)
       : p.aspect;
@@ -1089,13 +1361,24 @@ export function normalise(raw: Partial<BannerDoc>): BannerDoc {
     revealMs: clamp(num(raw.revealMs, base.revealMs), 200, 180000),
     reveal: revealFor(kind, storedReveal),
     visible: raw.visible !== false,
-    slot: {
-      stand: (((raw.slot?.stand ?? legacy.place?.stand ?? 1) % 4) + 4) % 4 as StandIndex,
-      stands: clamp(Math.round(raw.slot?.stands ?? 1), 1, 2),
-      blockFrom: Math.round(clamp(num(raw.slot?.blockFrom, -1), -1, 63)),
-      blockSpan: Math.round(clamp(num(raw.slot?.blockSpan, p.blockSpan), 1, 32)),
-      tier: Math.round(clamp(num(raw.slot?.tier, p.tier), -1, 7)),
-    },
+    slot: kind === 'sign'
+      // A sign is in one stand, in some tier, at a row, a place along it and
+      // a length — whatever else came in with it.
+      ? {
+        stand: (((raw.slot?.stand ?? 1) % 4) + 4) % 4 as StandIndex,
+        stands: 1,
+        blockFrom: -1,
+        blockSpan: 1,
+        tier: Math.round(clamp(num(raw.slot?.tier, 0), 0, 7)),
+        ...signPlaceOf(raw.slot ?? ({} as BannerSlot)),
+      }
+      : {
+        stand: (((raw.slot?.stand ?? legacy.place?.stand ?? 1) % 4) + 4) % 4 as StandIndex,
+        stands: clamp(Math.round(raw.slot?.stands ?? 1), 1, 2),
+        blockFrom: Math.round(clamp(num(raw.slot?.blockFrom, -1), -1, 63)),
+        blockSpan: Math.round(clamp(num(raw.slot?.blockSpan, p.blockSpan), 1, 32)),
+        tier: Math.round(clamp(num(raw.slot?.tier, p.tier), -1, 7)),
+      },
   };
 }
 
@@ -1115,7 +1398,9 @@ export function normalise(raw: Partial<BannerDoc>): BannerDoc {
  */
 export function isGhost(b: BannerDoc): boolean {
   const p = KIND_PROFILE[b.kind];
-  if (!p) return false;
+  // Signs came after the Banner view stopped making banners by itself, so no
+  // sign was ever made that nobody asked for.
+  if (!p || b.kind === 'sign') return false;
   return b.items.length === 0 && b.bg === null
     && b.slot.stand === 1 && b.slot.stands === 1 && b.slot.blockFrom === -1
     && b.slot.blockSpan === p.blockSpan && b.slot.tier === p.tier
@@ -1186,6 +1471,15 @@ export function revealEase(mode: BannerReveal, t: number): number {
         (u <= 0.75 ? 0 : Math.exp(-14 * (u - 0.75)) * Math.sin(16 * (u - 0.75)) * 0.09);
       return x + settle(x) - settle(1) * x;
     }
+    /**
+     * Arms up: quick off the ground, slowing into place.
+     *
+     * A row of people lifting a sheet together is fast — it is one movement —
+     * and the only thing that takes time is everyone arriving at the same
+     * height, which is the ease at the end.
+     */
+    case 'raise':
+      return 1 - Math.pow(1 - x, 3);
     case 'cut':
     default:
       return x;
@@ -1275,6 +1569,11 @@ export function physicalRevealMs(reveal: BannerReveal, size: BannerSize): number
     // with nothing to steady it, and it takes as long as it takes.
     case 'hoist':
       return Math.round((H / DEPLOY_SPEED.hoist + settleSeconds(H)) * 1000);
+    // Lifted by hand: about a second and a half to get it up, and a little
+    // longer for a long one, because forty people have to arrive at the same
+    // height together.
+    case 'raise':
+      return Math.round((1.2 + Math.max(1, size.widthM) / 25) * 1000);
     // Not a deployment: a banner that was rigged before anyone walked in, so
     // there is nothing to time.
     case 'cut':

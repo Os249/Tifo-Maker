@@ -144,11 +144,12 @@ console.log('\n— desktop: the fourth view exists and draws —');
     stored: (() => { try { return JSON.parse(localStorage.getItem('tifo_banners_v1') || 'null')?.banners?.length ?? 0; } catch { return -1; } })(),
     bar: getComputedStyle(document.getElementById('banner-bar')).display === 'none',
     detail: document.getElementById('bn-detail')?.hidden === true,
-    makers: document.querySelectorAll('#bn-empty button[data-kind], #bn-add-stand, #bn-add-hanging').length,
+    makers: document.querySelectorAll('#bn-empty button[data-kind]').length,
+    adders: document.querySelectorAll('#bn-add-stand, #bn-add-hanging, #bn-add-sign').length,
   }));
   check('a new tifo has no banner, and opening the Banner view does not make one', none.card && none.rows === 0 && none.stored === 0, JSON.stringify(none));
   check('with no banner there is no sheet to set up', none.bar && none.detail);
-  check('the empty state offers both kinds', none.makers === 4, `${none.makers} buttons`);
+  check('the empty state offers all three kinds, and so does the add row', none.makers === 3 && none.adders === 3, `${none.makers} + ${none.adders} buttons`);
   await page.click('#bn-empty button[data-kind="stand"]');
   await page.waitForTimeout(900);
   const made = await page.evaluate(() => ({
@@ -812,6 +813,144 @@ console.log('\n— Arabic —');
 }
 
 // ---------------------------------------------------------------------------
+// Signs: a message held upright by a row of fans.
+
+console.log('\n— signs —');
+{
+  const { ctx, page, errs } = await openApp(1400, 880, 'en');
+  await openBanner(page, { kind: 'sign' });
+  const ui = () => page.evaluate(() => {
+    const vis = (id) => { const e = document.getElementById(id); return !!e && e.getClientRects().length > 0; };
+    return {
+      sign: document.body.classList.contains('bn-sign'),
+      kind: document.getElementById('bn-kind')?.value,
+      focus: document.activeElement?.id,
+      name: document.querySelector('#bn-list .bn-li-name')?.textContent,
+      meta: document.querySelector('#bn-list .bn-li-meta')?.textContent,
+      signCtl: ['bn-length', 'bn-height', 'bn-row', 'bn-at', 'bn-msg'].every(vis),
+      bannerCtl: ['bn-preset', 'bn-aspect', 'bn-block', 'bn-span', 'bn-across', 'bn-net'].filter(vis),
+      facts: document.getElementById('bn-facts')?.textContent ?? '',
+      notes: [...document.querySelectorAll('#bn-notes .bn-note')].map((n) => n.textContent).join(' | '),
+      size: document.getElementById('bn-size-out')?.textContent ?? '',
+      rows: document.getElementById('bn-row')?.options.length ?? 0,
+      places: document.getElementById('bn-at')?.options.length ?? 0,
+    };
+  });
+  const a = await ui();
+  check('"Sign" makes a sign', a.sign && a.kind === 'sign' && a.name === 'Sign 1' && /^Sign · /.test(a.meta ?? ''), JSON.stringify(a));
+  check('with the Message field ready to type in', a.focus === 'bn-msg');
+  check('a sign shows its own controls — length, height, row, place, message', a.signCtl);
+  check('and none of a banner\'s — blocks, shape, rigging', a.bannerCtl.length === 0, a.bannerCtl.join(', '));
+  check('it is held at the front, 12 × 1.2 m, by a row of fans', /12 × 1\.2 m/.test(a.size) && /held by 9 fans/.test(a.facts), `${a.size} / ${a.facts}`);
+  check('it can be held in any row, or tied to the fence', a.rows >= 27, `${a.rows} options`);
+  check('and anywhere along the stand, block by block and aisle by aisle', a.places >= 15, `${a.places} options`);
+
+  const before = await artboardHash(page);
+  await page.fill('#bn-msg', 'EAT MORE CARROTS');
+  await page.waitForTimeout(1500);
+  const msgOf = async () => {
+    const st = await storedBanner(page);
+    const b = st?.banners?.[0];
+    const m = b?.items?.find((i) => i.role === 'message');
+    return { b, m };
+  };
+  const one = await msgOf();
+  check('the message is painted on the sheet', (await artboardHash(page)) !== before && one.m?.text === 'EAT MORE CARROTS', one.m?.text);
+  check('and fits it', !!one.m && one.m.w <= 0.941 && one.m.h <= one.b.aspect + 1e-6 && Math.abs(one.m.cy - one.b.aspect / 2) < 1e-6, JSON.stringify(one.m && { w: one.m.w, h: one.m.h, a: one.b.aspect }));
+
+  await page.selectOption('#bn-length', '25');
+  await page.waitForTimeout(1200);
+  const two = await msgOf();
+  check('a longer sheet keeps its height, and the words refit', two.b?.slot?.lengthM === 25 && Math.abs(two.b.aspect * 25 - 1.2) < 1e-6 && two.m.h <= two.b.aspect + 1e-6,
+    JSON.stringify({ L: two.b?.slot?.lengthM, a: two.b?.aspect, h: two.m?.h }));
+  await page.selectOption('#bn-height', '1.6');
+  await page.waitForTimeout(1200);
+  const three = await msgOf();
+  check('a taller one keeps its length', Math.abs(three.b.aspect * 25 - 1.6) < 1e-6, String(three.b.aspect));
+  // One undo per burst of typing, not per letter.
+  await page.click('#bn-msg');
+  await page.keyboard.press('End');
+  await page.keyboard.type('!!!', { delay: 40 });
+  await page.waitForTimeout(1300);
+  await page.evaluate(() => document.activeElement?.blur());
+  await page.keyboard.press('Control+z');
+  await page.waitForTimeout(1200);
+  check('undo takes back a burst of typing in one step', (await msgOf()).m?.text === 'EAT MORE CARROTS', (await msgOf()).m?.text);
+
+  await page.selectOption('#bn-row', '-1');
+  await page.waitForTimeout(900);
+  const tied = await ui();
+  check('tied to the fence, it says so', /tied to the fence/.test(tied.facts) && /cable ties/.test(tied.notes), `${tied.facts} / ${tied.notes}`);
+  await page.selectOption('#bn-row', '6');
+  await page.selectOption('#bn-at', '2');
+  await page.waitForTimeout(1200);
+  const four = await msgOf();
+  check('the row and the place are the sign\'s', four.b.slot.row === 6 && four.b.slot.at === 2, JSON.stringify(four.b.slot));
+
+  // In the stadium, where it was put.
+  await page.click('#bn-list .bn-li .bn-li-show');
+  await page.waitForTimeout(8000);
+  const light = await page.evaluate(() => {
+    const cv = document.querySelector('#preview-host canvas');
+    if (!cv) return -1;
+    const c2 = document.createElement('canvas');
+    c2.width = cv.width; c2.height = cv.height;
+    const g = c2.getContext('2d');
+    g.drawImage(cv, 0, 0);
+    const d = g.getImageData(0, 0, c2.width, c2.height).data;
+    let n = 0;
+    for (let i = 0; i < d.length; i += 4) if (d[i] > 170 && d[i + 1] > 170 && d[i + 2] > 160) n++;
+    return n / (d.length / 4);
+  });
+  const msg = await page.evaluate(() => document.getElementById('message')?.textContent ?? '');
+  check('"Show in stadium" looks at the sign, and it is in the picture', light > 0.01 && /Sign 1/.test(msg), `${(light * 100).toFixed(1)}% sheet · ${msg}`);
+
+  // Match Day's panel speaks sign, too.
+  await page.evaluate(() => localStorage.setItem('mds_seen_intro', '1'));
+  await openBanner(page, { make: false });
+  await page.click('#bn-matchday');
+  await page.waitForTimeout(14000);
+  const md = await page.evaluate(() => {
+    const sec = document.querySelector('[data-sec="banners"]');
+    const fields = [...(sec?.querySelectorAll('.mds-field') ?? [])].filter((f) => f.getClientRects().length > 0).map((f) => f.querySelector('.mds-flabel')?.textContent);
+    return { fields };
+  });
+  check('in Match Day a sign has a row and a place, not blocks', md.fields.includes('Held at') && md.fields.includes('Along') && !md.fields.includes('First block') && !md.fields.includes('How many'), md.fields.join(', '));
+  // Changing it type back to a banner gives a banner's controls back.
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(1500);
+  await openBanner(page, { make: false });
+  await page.selectOption('#bn-kind', 'stand');
+  await page.waitForTimeout(900);
+  const asBanner = await ui();
+  check('a sign made a banner has a banner\'s controls again', !asBanner.sign && asBanner.bannerCtl.includes('bn-preset') && !asBanner.signCtl, JSON.stringify(asBanner.bannerCtl));
+  check('no page errors with signs', errs.length === 0, errs.join(' | '));
+  await ctx.close();
+}
+{
+  // In Arabic: every label a sign adds is Arabic, and the words are too.
+  const { ctx, page, errs } = await openApp(1400, 880, 'ar');
+  await openBanner(page, { kind: 'sign' });
+  await page.fill('#bn-msg', '١٢ سنة من سوء التدبير');
+  await page.waitForTimeout(1200);
+  const ar = await page.evaluate(() => {
+    const latin = [];
+    for (const el of document.querySelectorAll('#banner-bar label, #banner-bar option, #ctx-banner h4, #ctx-banner label, #ctx-banner option, #bn-facts, .bn-note')) {
+      if (el.closest('#bn-msg-font')) continue; // font names are names
+      if (el.getClientRects().length === 0 && el.tagName !== 'OPTION') continue;
+      const txt = (el.textContent || '').trim();
+      if (!txt || /^[\d\s.,×x/²°%-]+$/.test(txt) || /g\/m²|EN 13501/.test(txt)) continue;
+      if (/^[\x00-\x7F]+$/.test(txt)) latin.push(txt.slice(0, 40));
+    }
+    return { latin, meta: document.querySelector('#bn-list .bn-li-meta')?.textContent };
+  });
+  check('Arabic: every sign label is translated', ar.latin.length === 0, ar.latin.slice(0, 6).join(' | '));
+  check('Arabic: it is a يافطة', /يافطة/.test(ar.meta ?? ''), ar.meta);
+  check('Arabic: no page errors', errs.length === 0, errs.join(' | '));
+  await ctx.close();
+}
+
+// ---------------------------------------------------------------------------
 // "Banners are here": told once, to everyone who opens the editor.
 
 /** Where the news card is, and what it points at. */
@@ -1083,9 +1222,9 @@ console.log('\n— match day from the Banner view —');
 
 console.log('\n— a design with banners, opened from the community —');
 {
-  const feed = await (await fetch(B + '/api/gallery?limit=3')).json();
+  const feed = await (await fetch(B + '/api/gallery?limit=4')).json();
   const kop = feed.find((d) => (d.tags || []).includes('banners') && /two banners/.test(d.title));
-  check('the community opens on the banner showcase', feed.length === 3 && feed.every((d) => (d.tags || []).includes('banners')), feed.map((d) => d.title).join(' | '));
+  check('the community opens on the banner showcase', feed.length === 4 && feed.every((d) => (d.tags || []).includes('banners')), feed.map((d) => d.title).join(' | '));
   if (kop) {
     const { ctx, page, errs } = await openApp(1400, 880, 'en');
     await page.goto(`${B}/app?design=${kop.id}`, { waitUntil: 'networkidle', timeout: 60000 });
@@ -1104,8 +1243,8 @@ console.log('\n— a design with banners, opened from the community —');
     await p2.addInitScript(() => { localStorage.setItem('tifo_lang_v1', 'en'); localStorage.setItem('tifo_consent_v1', 'essential'); });
     await p2.goto(B + '/community', { waitUntil: 'networkidle', timeout: 60000 });
     await p2.waitForTimeout(2000);
-    const badge = await p2.$$eval('.tifo-card', (cs) => cs.slice(0, 3).map((c) => !!c.querySelector('.badge.banners')));
-    check('their cards say "With banners"', badge.length === 3 && badge.every(Boolean));
+    const badge = await p2.$$eval('.tifo-card', (cs) => cs.slice(0, 4).map((c) => !!c.querySelector('.badge.banners')));
+    check('their cards say "With banners"', badge.length === 4 && badge.every(Boolean));
     await p2.click('.tifo-card .card-title');
     // The bowl is built in a worker and the banners follow it: waited for,
     // not slept on, because under load that is well past ten seconds.

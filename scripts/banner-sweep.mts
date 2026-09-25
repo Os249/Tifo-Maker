@@ -26,12 +26,14 @@ import { generateSeatMap } from '../src/core/seatmap';
 import { templateById, STADIUM_CATALOG } from '../src/core/stadiumCatalog';
 import { buildSpanFrame, type StandFrame } from '../src/render/simulator/standFrame';
 import {
-  resolveSlot, slotsOf, crowdSupportM, hangSpan, type ResolvedSlot,
+  resolveSlot, slotsOf, crowdSupportM, hangSpan, signHold, signPlaces, signRows, signFenceOk,
+  CROWD_TOP_M, SIGN_FENCE_TOP_M, type ResolvedSlot,
 } from '../src/render/simulator/bannerSlot';
+import { rowV } from '../src/render/simulator/standFrame';
 import {
   buildSurface, columnsU, maxOffsetM, SURF_VERTS, SURF_COLS, SURF_ROWS,
 } from '../src/render/simulator/bannerSurface';
-import { newBanner, BANNER_KINDS, type BannerDoc, type StandIndex } from '../src/core/banner';
+import { newBanner, BLOCK_KINDS, type BannerDoc, type StandIndex } from '../src/core/banner';
 
 const GROUNDS = process.env.GROUND ? [process.env.GROUND] : STADIUM_CATALOG.map((e) => e.template.id);
 const WINDS = [0, 0.5, 1];
@@ -85,6 +87,24 @@ const b = new Float32Array(SURF_VERTS * 3);
  * Measured the honest way: find the nearest point of the stand's own surface
  * and ask which side of its normal we are on. Positive means outside.
  */
+/**
+ * `clearanceAt`, for a sheet that can hang below the front of the stand.
+ *
+ * Below the front row there is no rake to be inside: there is the wall the
+ * front row stands on, going straight down, and the pitch in front of it. A
+ * point down there whose nearest bit of stand is the front edge is measured
+ * horizontally, out from that wall — extending the rake's own plane under
+ * the front edge called a sheet hanging in the air in front of the wall
+ * "half a metre into the stand".
+ */
+function signClearanceAt(frame: StandFrame, u: number, x: number, y: number, z: number): number {
+  const c = clearanceAt(frame, u, x, y, z);
+  if (c >= 0) return c;
+  const front = frame.pointAt(u, 0);
+  if (y >= front.y) return c;
+  return (x - front.x) * front.ox + (z - front.z) * front.oz;
+}
+
 function clearanceAt(frame: StandFrame, u: number, x: number, y: number, z: number): number {
   // Searched down the stand at the KNOWN u, not over the whole face.
   //
@@ -133,10 +153,20 @@ function standRowArc(frame: StandFrame, res: ResolvedSlot, v: number): number {
   return len;
 }
 
+// Every failure is counted; the first forty are printed in full, and the rest
+// are summed by ground, check and kind so a run that fails in two places does
+// not look like it fails in one.
+let failCount = 0;
+const failGroups = new Map<string, number>();
 function fail(where: string, what: string, detail: string): void {
+  failCount++;
+  const parts = where.split('/');
+  const key = `${what.padEnd(9)} ${parts[0]} ${parts[2] ?? ''}`;
+  failGroups.set(key, (failGroups.get(key) ?? 0) + 1);
   if (fails.length < 40) fails.push({ where, what, detail });
 }
 
+let signs = 0;
 for (const gid of GROUNDS) {
   const tpl = templateById(gid);
   if (!tpl) { console.error(`no template ${gid}`); continue; }
@@ -151,7 +181,7 @@ for (const gid of GROUNDS) {
    for (const stands of [1, 2]) {
     const frame = buildSpanFrame(map, stand, stands);
     if (!frame.ok) continue;
-    for (const kind of BANNER_KINDS) {
+    for (const kind of BLOCK_KINDS) {
       for (const slot of slotsOf(frame, stand, stands)) {
         slots++;
         const doc: BannerDoc = { ...newBanner(kind), slot };
@@ -421,12 +451,166 @@ for (const gid of GROUNDS) {
    }
   }
   console.log(`${gid.padEnd(32)} ${String(slots).padStart(5)} slots (one stand and two)`);
+  signs += sweepSigns(gid, map);
 }
 
+// ---------------------------------------------------------------------------
+// Signs
+// ---------------------------------------------------------------------------
+
+/**
+ * Every place a sign can be: every row of every tier and the fence in front of
+ * each, every place along the stand, on every stand — at a short, a middling
+ * and the longest length. The same kind of proof as the banners': the set is
+ * finite, so all of it is checked, not a sample of it.
+ *
+ *   UPRIGHT   it stands vertical, not leaning with the rake
+ *   IN-STAND  none of it is inside the terracing
+ *   HELD      it is off the concrete its holders stand on
+ *   OVER      held behind the front row, it clears the heads of the row in front
+ *   FENCE     tied on, its top is at the top of the fence
+ *   EXTENT    it is as long and as tall as it says it is, and on its stand
+ *   FINITE, SAME, STILL — as for the banners
+ */
+function sweepSigns(gid: string, map: ReturnType<typeof generateSeatMap>): number {
+  let n = 0;
+  // The shortest and the longest: a length in between is a sheet between
+  // those two, on the same row, in the same place.
+  const lengths = [4, 40];
+  for (const stand of [0, 1, 2, 3] as StandIndex[]) {
+    const frame = buildSpanFrame(map, stand, 1);
+    if (!frame.ok) continue;
+    const places = [-1];
+    for (let k = 0; k < signPlaces(frame); k++) places.push(k);
+    for (let tier = 0; tier < frame.tiers.length; tier++) {
+      const rows = signFenceOk(frame, tier) ? [-1] : [];
+      for (let r = 0; r < signRows(frame, tier); r++) rows.push(r);
+      for (const row of rows) {
+        for (const at of places) {
+          for (const lengthM of lengths) for (const heightM of row < 0 || row >= signRows(frame, tier) - 4 ? [1.2, 2] : [1.2]) {
+            // The tallest sheet too, where height is what decides whether it
+            // fits: hanging off a fence, and at the back of a tier, under
+            // whatever is above it.
+            // Part-raised is checked once per row, in the middle of the stand:
+            // how far up it has come does not depend on where along it is.
+            for (const progress of at === -1 ? [1, 0.37] : [1]) {
+              n++;
+              checked++;
+              const base = newBanner('sign');
+              const doc: BannerDoc = { ...base, aspect: heightM / lengthM, slot: { ...base.slot, stand, tier, row, at, lengthM } };
+              const res = resolveSlot(doc, frame);
+              // A row the stand cannot take for a sheet this tall is held in
+              // the nearest one it can — which is checked on its own turn.
+              if ((res.row ?? row) !== row) { n--; checked--; continue; }
+              const env = { frame, crowdFill: 0.97, wind: 1, progress };
+              const where = `${gid}/${stand}/sign/t${tier}/r${row}/at${at}/${lengthM}x${heightM}m${progress === 1 ? '' : `/p${progress}`}`;
+              buildSurface(doc, res, env, 3.0, a);
+              let bad = -1;
+              for (let k = 0; k < a.length; k++) if (!Number.isFinite(a[k])) { bad = k; break; }
+              if (bad >= 0) { fail(where, 'FINITE', `vertex ${(bad / 3) | 0}`); continue; }
+              if (res.u0 < -1e-9 || res.u1 > 1 + 1e-9 || res.u1 <= res.u0) fail(where, 'EXTENT', `off its stand: u ${res.u0.toFixed(3)}..${res.u1.toFixed(3)}`);
+
+              columnsU({ ...res, v1: res.vBottom }, frame, COL_U);
+              let worstIn = 0;
+              let lowest = Infinity;
+              let lean = 0;
+              let overShort = 0;
+              let heldShort = 0;
+              for (let i = 0; i < SURF_COLS; i += 8) {
+                const h = signHold(frame, res, row, COL_U[i]);
+                const top = (0 * SURF_COLS + i) * 3;
+                const bot = ((SURF_ROWS - 1) * SURF_COLS + i) * 3;
+                lean = Math.max(lean, Math.hypot(a[top] - a[bot], a[top + 2] - a[bot + 2]));
+                for (let j = 0; j < SURF_ROWS; j += 12) {
+                  const k = (j * SURF_COLS + i) * 3;
+                  const c = signClearanceAt(frame, COL_U[i], a[k], a[k + 1], a[k + 2]);
+                  if (-c > worstIn) worstIn = -c;
+                  if (a[k + 1] < lowest) lowest = a[k + 1];
+                }
+                const bottomY = a[bot + 1];
+                if (row >= 0 && h.base.y + 0.04 - bottomY > heldShort) heldShort = h.base.y + 0.04 - bottomY;
+                // The row in front: the one before it in its own tier — or, for
+                // the front row of a tier that runs straight on from the one
+                // below, that tier's back row.
+                const lowerBand = row === 0 && tier >= 1 && !signFenceOk(frame, tier) ? frame.tiers[tier - 1] : null;
+                if ((row >= 1 || lowerBand) && progress === 1) {
+                  const band = frame.tiers[tier];
+                  const front = lowerBand
+                    ? frame.pointAt(COL_U[i], rowV(lowerBand, lowerBand.rows - 1))
+                    : frame.pointAt(COL_U[i], rowV(band, row - 1));
+                  const need = front.y + CROWD_TOP_M;
+                  if (need - bottomY > overShort) overShort = need - bottomY;
+                }
+              }
+              if (worstIn > IN_STAND_MAX) fail(where, 'IN-STAND', `${worstIn.toFixed(3)} m inside`);
+              if (heldShort > 0.02) fail(where, 'HELD', `${heldShort.toFixed(2)} m into the concrete its holders stand on`);
+              if (overShort > 0.02) fail(where, 'OVER', `${overShort.toFixed(2)} m short of clearing the heads of the row in front`);
+              // Upright: the free hem swings with the wind, and that is all
+              // that separates a column's top from its bottom.
+              if (lean > 0.36) fail(where, 'UPRIGHT', `${lean.toFixed(2)} m between a column's top and its bottom`);
+              if (progress !== 1) continue;
+
+              if (row < 0) {
+                const mid = (SURF_COLS >> 1) * 3;
+                const h = signHold(frame, res, row, COL_U[SURF_COLS >> 1]);
+                // Tied at the top of the fence — or, where the tier below leaves
+                // no room to hang its full depth, standing up above it with
+                // its bottom hem on the floor. Never squashed and never lower.
+                const fenceY = h.base.y + SIGN_FENCE_TOP_M;
+                const lifted = h.topY - fenceY > 0.01;
+                const floorY = tier >= 1 ? hangSpan(frame, tier).bottomY + 0.1 : -Infinity;
+                if (h.topY < fenceY - 1e-6 || (lifted && Math.abs(h.bottomY - floorY) > 0.01)) {
+                  fail(where, 'FENCE', `held ${h.bottomY.toFixed(2)}..${h.topY.toFixed(2)} m, the fence is at ${fenceY.toFixed(2)} m`);
+                }
+                if (Math.abs(a[mid + 1] - h.topY) > 0.1) {
+                  fail(where, 'FENCE', `top at ${a[mid + 1].toFixed(2)} m, tied at ${h.topY.toFixed(2)} m`);
+                }
+              }
+              // EXTENT, along the bottom hem and down the middle.
+              let len = 0;
+              for (let i = 1; i < SURF_COLS; i++) {
+                const k = ((SURF_ROWS - 1) * SURF_COLS + i) * 3;
+                len += Math.hypot(a[k] - a[k - 3], a[k + 2] - a[k - 1]);
+              }
+              if (Math.abs(len - res.size.widthM) > 0.6 + res.size.widthM * 0.05) {
+                fail(where, 'EXTENT', `${len.toFixed(1)} m along it, the slot says ${res.size.widthM.toFixed(1)} m`);
+              }
+              if (Math.abs(res.size.widthM - Math.min(lengthM, res.maxWidthM * 0.98)) > 0.15) {
+                fail(where, 'EXTENT', `${res.size.widthM.toFixed(2)} m long, asked for ${lengthM} m`);
+              }
+              let tall = 0;
+              const ci = SURF_COLS >> 1;
+              for (let j = 1; j < SURF_ROWS; j++) {
+                const k = (j * SURF_COLS + ci) * 3;
+                const q = k - SURF_COLS * 3;
+                tall += Math.hypot(a[k] - a[q], a[k + 1] - a[q + 1], a[k + 2] - a[q + 2]);
+              }
+              if (Math.abs(tall - res.size.heightM) > 0.25) fail(where, 'EXTENT', `${tall.toFixed(2)} m tall, the slot says ${res.size.heightM.toFixed(2)} m`);
+
+              buildSurface(doc, res, env, 3.0, b);
+              for (let k = 0; k < a.length; k++) if (a[k] !== b[k]) { fail(where, 'SAME', `index ${k}`); break; }
+              buildSurface(doc, res, env, 3.0 + 1 / 60, b);
+              let move = 0;
+              for (let k = 0; k < a.length; k += 3) move = Math.max(move, Math.hypot(a[k] - b[k], a[k + 1] - b[k + 1], a[k + 2] - b[k + 2]));
+              if (move > STILL_MAX) fail(where, 'STILL', `${(move * 1000).toFixed(0)} mm in one frame`);
+              void lowest;
+            }
+          }
+        }
+      }
+    }
+  }
+  console.log(`${' '.repeat(2)}${gid.padEnd(30)} ${String(n).padStart(6)} sign places`);
+  return n;
+}
+void signs;
+
 console.log(`\n${checked} configurations checked`);
-if (fails.length) {
-  console.error(`\n${fails.length} failure(s):`);
+if (failCount) {
+  console.error(`\n${failCount} failure(s)${failCount > fails.length ? `, the first ${fails.length}` : ''}:`);
   for (const f of fails) console.error(`  ${f.what.padEnd(9)} ${f.where}\n            ${f.detail}`);
+  console.error('\nby ground and kind:');
+  for (const [k, n] of failGroups) console.error(`  ${String(n).padStart(6)}  ${k}`);
   process.exitCode = 1;
 } else {
   console.log('every slot on every ground: in the stand 0, extents right, still, deterministic');

@@ -160,6 +160,23 @@ export interface TierBand {
   v1: number;
   /** Length of this band measured UP THE SLOPE, in metres. */
   slopeM: number;
+  /**
+   * How many rows of seats the tier has on this stand.
+   *
+   * A sign is held in a ROW — the front one, the fifth — and a row is the unit
+   * people standing in a stand actually count in. The rows of a tier are
+   * evenly spaced in height (the seat map lays them out at a fixed rise), so
+   * row `r` is at `v0 + (v1 - v0) * r / (rows - 1)`: see `rowV`.
+   */
+  rows: number;
+}
+
+/** The `heightV` of a tier's row, counted from its front. */
+export function rowV(band: TierBand, row: number): number {
+  const n = Math.max(1, band.rows);
+  if (n <= 1) return band.v0;
+  const r = Math.max(0, Math.min(n - 1, row));
+  return band.v0 + ((band.v1 - band.v0) * r) / (n - 1);
 }
 
 /** Columns per quarter of the perimeter. A wider window gets proportionally more. */
@@ -326,7 +343,7 @@ export function buildSpanFrame(
       normalAt: () => ({ nx: 0, ny: 0, nz: 1 }),
       surfaceGrid: () => ({ positions: new Float32Array(0), indices: new Uint32Array(0) }),
       blocks: [{ u0: 0, u1: 1, centerU: 0.5, widthM: 40 }],
-      tiers: [{ v0: 0, v1: 1, slopeM: 24 }],
+      tiers: [{ v0: 0, v1: 1, slopeM: 24, rows: 30 }],
       widthAt: (a0, a1) => Math.abs(a1 - a0) * 40,
       slopeAt: (_a, _b, v0, v1) => Math.abs(v1 - v0) * 24,
     };
@@ -594,6 +611,8 @@ export function buildSpanFrame(
   // carries `tierOf`; there was never a reason to infer it.
   const tierLo: number[] = [];
   const tierHi: number[] = [];
+  const rowLo: number[] = [];
+  const rowHi: number[] = [];
   for (let i = 0; i < map.count; i++) {
     const u = map.uv[i * 2];
     const su = (((u - u0 + 1) % 1) / width);
@@ -602,14 +621,20 @@ export function buildSpanFrame(
     const v = (map.pos3[i * 3 + 1] - minY) / Math.max(0.001, heightM);
     if (tierLo[t] === undefined || v < tierLo[t]) tierLo[t] = v;
     if (tierHi[t] === undefined || v > tierHi[t]) tierHi[t] = v;
+    const r = map.rowOf[i];
+    if (rowLo[t] === undefined || r < rowLo[t]) rowLo[t] = r;
+    if (rowHi[t] === undefined || r > rowHi[t]) rowHi[t] = r;
   }
   const tiers: TierBand[] = [];
   for (let t = 0; t < tierLo.length; t++) {
     if (tierLo[t] === undefined) continue;
-    tiers.push({ v0: Math.max(0, tierLo[t]), v1: Math.min(1, tierHi[t]), slopeM: 0 });
+    tiers.push({
+      v0: Math.max(0, tierLo[t]), v1: Math.min(1, tierHi[t]), slopeM: 0,
+      rows: Math.max(1, rowHi[t] - rowLo[t] + 1),
+    });
   }
   tiers.sort((a, b) => a.v0 - b.v0);
-  if (tiers.length === 0) tiers.push({ v0: 0, v1: 1, slopeM: 0 });
+  if (tiers.length === 0) tiers.push({ v0: 0, v1: 1, slopeM: 0, rows: 1 });
 
   const widthAt = (a0: number, a1: number, heightV: number): number => {
     const lo = Math.min(a0, a1);

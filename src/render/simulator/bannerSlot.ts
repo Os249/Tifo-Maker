@@ -1,5 +1,6 @@
 import type { BannerDoc, BannerSlot, BannerSize, StandIndex } from '../../core/banner';
-import type { StandFrame } from './standFrame';
+import { signPlaceOf, signHeightM } from '../../core/banner';
+import { rowV, type StandFrame, type SurfacePoint } from './standFrame';
 
 /**
  * A slot, resolved against a real stand.
@@ -45,6 +46,11 @@ export interface ResolvedSlot {
   maxHeightM: number;
   /** True when the artwork's shape, not the blocks, decided the width. */
   heightLimited: boolean;
+  /**
+   * A sign's row as it is actually held: the one it asked for, or the
+   * nearest this stand can take (see `signRowFor`). Signs only.
+   */
+  row?: number;
 }
 
 /**
@@ -161,6 +167,7 @@ function clamp(v: number, lo: number, hi: number): number {
  * does not fit, because the slot IS the size.
  */
 export function resolveSlot(doc: BannerDoc, frame: StandFrame): ResolvedSlot {
+  if (doc.kind === 'sign') return resolveSign(doc, frame);
   const nb = Math.max(1, frame.blocks.length);
   const span = Math.round(clamp(doc.slot.blockSpan, 1, nb));
   // A negative first block means "centre the run", which is where a tifo goes
@@ -288,6 +295,364 @@ export function resolveSlot(doc: BannerDoc, frame: StandFrame): ResolvedSlot {
 
 /** Grass level. The pitch plane sits at zero; this is a boot's height above it. */
 const GROUND_Y = 0.25;
+
+// ---------------------------------------------------------------------------
+// Signs
+// ---------------------------------------------------------------------------
+
+/**
+ * How many places along a stand a sign can be, in half blocks.
+ *
+ * Every block's middle and every aisle between two: `2n - 1` for `n` blocks.
+ */
+export function signPlaces(frame: StandFrame): number {
+  return Math.max(1, 2 * Math.max(1, frame.blocks.length) - 1);
+}
+
+/** Where along the stand a sign's middle is, for a place in half blocks. */
+export function signCentreU(frame: StandFrame, at: number): number {
+  const b = frame.blocks;
+  const nb = b.length;
+  if (nb === 0) return 0.5;
+  if (at < 0) return (b[0].u0 + b[nb - 1].u1) / 2;
+  const k = Math.min(signPlaces(frame) - 1, Math.max(0, Math.round(at)));
+  const i = k >> 1;
+  return k % 2 === 0 ? b[i].centerU : (b[i].u1 + b[Math.min(nb - 1, i + 1)].u0) / 2;
+}
+
+/** The place in half blocks nearest to a point along the stand. */
+export function signPlaceNear(frame: StandFrame, alongU: number): number {
+  let best = 0;
+  let bestD = Infinity;
+  const n = signPlaces(frame);
+  for (let k = 0; k < n; k++) {
+    const d = Math.abs(signCentreU(frame, k) - alongU);
+    if (d < bestD) { bestD = d; best = k; }
+  }
+  return best;
+}
+
+/** The tier a sign is in, on this stand: always a real one. */
+export function signTier(frame: StandFrame, tier: number): number {
+  return Math.max(0, Math.min(Math.max(0, frame.tiers.length - 1), tier < 0 ? 0 : tier));
+}
+
+/** How many rows a sign can be held in, in a tier of this stand. */
+export function signRows(frame: StandFrame, tier: number): number {
+  const band = frame.tiers[signTier(frame, tier)];
+  return Math.max(1, band?.rows ?? 1);
+}
+
+/**
+ * The row nearest to a height up the stand, or -1 for the fence below it.
+ *
+ * What a drag in the bowl turns into: pointing at the concrete in front of a
+ * tier's first row means the fence along it.
+ */
+export function signRowNear(frame: StandFrame, tier: number, heightV: number): { tier: number; row: number } {
+  // The tier the pointer is in — or the one whose front it is just below.
+  let t = 0;
+  for (let i = 0; i < frame.tiers.length; i++) if (heightV >= frame.tiers[i].v0 - 0.02) t = i;
+  void tier;
+  const band = frame.tiers[t];
+  if (!band) return { tier: 0, row: 0 };
+  const n = Math.max(1, band.rows);
+  const step = n > 1 ? (band.v1 - band.v0) / (n - 1) : 0.05;
+  if (heightV < band.v0 - step * 0.6) return { tier: t, row: -1 };
+  const r = step > 0 ? Math.round((heightV - band.v0) / step) : 0;
+  return { tier: t, row: Math.max(0, Math.min(n - 1, r)) };
+}
+
+/**
+ * A sign, resolved against a stand.
+ *
+ * Its length is its own — the sheet it was painted on — so this finds the run
+ * of the stand that is that long at the row it is held in, centred on its
+ * place and slid back inside the stand if it would hang off an end. Only a
+ * sign longer than the whole stand is cut down, and then the whole sheet is
+ * scaled with it, like a banner the rake cannot hold: its letters keep their
+ * shape.
+ */
+export function resolveSign(doc: BannerDoc, frame: StandFrame): ResolvedSlot {
+  const place = signPlaceOf(doc.slot);
+  const tier = signTier(frame, doc.slot.tier);
+  const band = frame.tiers[tier] ?? { v0: 0, v1: 1, slopeM: frame.slopeM, rows: 1 };
+  const row = signRowFor(frame, tier, place.row, place.lengthM * Math.max(0.005, Math.min(6, doc.aspect)));
+  const vRow = row < 0 ? band.v0 : rowV(band, row);
+  const c = signCentreU(frame, place.at);
+  const whole = frame.widthAt(0, 1, vRow);
+  const want = Math.min(place.lengthM, whole * 0.98);
+  const run = (du: number): [number, number] => {
+    let lo = c - du;
+    let hi = c + du;
+    if (lo < 0) { hi -= lo; lo = 0; }
+    if (hi > 1) { lo -= hi - 1; hi = 1; }
+    return [Math.max(0, lo), Math.min(1, hi)];
+  };
+  let a = 0;
+  let b = 0.5;
+  for (let k = 0; k < 16; k++) {
+    const m = (a + b) / 2;
+    const [u0, u1] = run(m);
+    if (frame.widthAt(u0, u1, vRow) > want) b = m; else a = m;
+  }
+  const [u0, u1] = run(a);
+  const widthM = frame.widthAt(u0, u1, vRow);
+  const heightM = widthM * Math.max(0.005, Math.min(6, doc.aspect));
+  let blockFrom = 0;
+  for (let i = 0; i < frame.blocks.length; i++) if (c >= frame.blocks[i].u0 - 1e-9) blockFrom = i;
+  return {
+    stand: doc.slot.stand,
+    blockFrom,
+    blockSpan: 1,
+    u0,
+    u1,
+    tier,
+    v0: band.v0,
+    v1: band.v1,
+    vBottom: vRow,
+    size: { widthM, heightM },
+    maxWidthM: whole,
+    maxHeightM: 2.5,
+    heightLimited: place.lengthM > whole * 0.98 + 1e-6,
+    row,
+  };
+}
+
+/** Where a sign's top edge is held when it is at the front, above the tread. */
+export const SIGN_CHEST_M = 1.15;
+/** How far in front of the people holding it a sign is, in metres. */
+export const SIGN_HELD_OUT_M = 0.35;
+/** The top of the fence along the front of a tier, above that tier's first row. */
+export const SIGN_FENCE_TOP_M = 1.0;
+/** How far in front of a tier's first row its fence is. */
+export const SIGN_FENCE_OUT_M = 0.75;
+
+/**
+ * Where a sign is, at one point along it.
+ *
+ * `base` is the stand at the sign's row; the sheet stands `out` metres in
+ * front of it, between two heights.
+ *
+ * - **Tied to the fence**: its top edge at the top of the fence, hanging
+ *   down in front of it.
+ * - **Held in the front row**: at chest height, the top edge a little over a
+ *   metre up. Nobody is in front of it.
+ * - **Held further back**: up over the heads of the row in front, or all the
+ *   ground would see is the back of their heads. The row in front is lower by
+ *   the rake, so how high that is depends on the stand — and it is measured,
+ *   not assumed, from the row itself.
+ *
+ * A sheet too tall for its hands is held higher, never pushed into the stand:
+ * its bottom edge is always off the concrete.
+ */
+export function signHold(
+  frame: StandFrame,
+  slot: ResolvedSlot,
+  row: number,
+  u: number,
+): SignHold {
+  return holdAt(frame, slot.tier, slot.row ?? signRowFor(frame, slot.tier, row, slot.size.heightM), u, slot.vBottom, slot.size.heightM);
+}
+
+/** How a sign is held at one point along it: see `signHold`. */
+export interface SignHold { base: SurfacePoint; bottomY: number; topY: number; out: number; minOut: number }
+
+function holdAt(frame: StandFrame, tier: number, row: number, u: number, v: number, H: number): SignHold {
+  const slot = { tier }; // the one thing about the slot this needs
+  const base = frame.pointAt(u, v);
+  if (row < 0) {
+    const topY = base.y + SIGN_FENCE_TOP_M;
+    // Never below the floor it hangs over: the grass in front of the lowest
+    // tier, the bottom of the fascia under an upper one.
+    const floor = slot.tier >= 1 ? hangSpan(frame, slot.tier).bottomY + 0.1 : GROUND_Y;
+    // A sheet with no room to hang its full depth is not squashed to fit:
+    // it is tied along the rail and stands up above it instead, which is
+    // what a group does when the tier below comes right up to the balcony.
+    const bottomY = Math.max(floor, topY - H);
+    const lift = Math.max(0, bottomY - (topY - H));
+    // In front of the fascia it drops down, not just the fence it is tied to.
+    // A balcony's face is not always vertical: on a steep ground it leans out
+    // towards the pitch below the lip, and a sheet stood off the fence by the
+    // usual amount went a few centimetres into it at its bottom hem.
+    const protrude = slot.tier >= 1 ? fasciaProtrusion(frame, slot.tier, u, base, bottomY - 0.05) : 0;
+    return {
+      base, bottomY, topY: topY + lift,
+      out: Math.max(SIGN_FENCE_OUT_M, protrude + 0.4), minOut: protrude + 0.08,
+    };
+  }
+  // The front row of a tier that starts right behind the back of the one
+  // below it — no balcony, no gap — has people in front of it after all:
+  // the back row of the lower tier. It holds up over their heads like any
+  // row further back.
+  const band = frame.tiers[slot.tier];
+  const lower = slot.tier >= 1 && !signFenceOk(frame, slot.tier) ? frame.tiers[slot.tier - 1] : null;
+  if (row === 0 && !lower) {
+    const topY = base.y + Math.max(SIGN_CHEST_M, 0.08 + H);
+    return { base, bottomY: topY - H, topY, out: SIGN_HELD_OUT_M, minOut: -Infinity };
+  }
+  const front = row === 0 && lower
+    ? frame.pointAt(u, rowV(lower, lower.rows - 1))
+    : band ? frame.pointAt(u, rowV(band, row - 1)) : base;
+  // Signed: the back row of a lower tier can be HIGHER than the front row of
+  // the one behind it, and then the sheet has to go up by the difference.
+  const rise = base.y - front.y;
+  const bottomY = base.y + Math.max(0.08, CROWD_TOP_M - rise + 0.06);
+  return { base, bottomY, topY: bottomY + H, out: SIGN_HELD_OUT_M, minOut: -Infinity };
+}
+
+/**
+ * How far the face under a tier's lip reaches out past the lip, in metres,
+ * anywhere above `downToY`.
+ *
+ * Measured along the stand's outward direction at `u`, down the band between
+ * the tier and the one below it — which is all a sign tied to the balcony
+ * hangs in front of — and only as far down as the sheet itself goes. The
+ * band slopes out towards the pitch as it falls, to the back row of the tier
+ * below; standing the sheet clear of all of it would float a balcony sign
+ * metres out in the air, when all it has to clear is the face beside it.
+ */
+function fasciaProtrusion(frame: StandFrame, tier: number, u: number, base: SurfacePoint, downToY: number): number {
+  const t = frame.tiers;
+  if (tier < 1 || tier >= t.length) return 0;
+  const vLow = t[tier - 1].v1;
+  const vLip = t[tier].v0;
+  let most = 0;
+  let prev: { d: number; y: number } | null = null;
+  for (let k = 0; k <= 24; k++) {
+    const p = frame.pointAt(u, vLip + ((vLow - vLip) * k) / 24);
+    const cur = { d: (p.x - base.x) * base.ox + (p.z - base.z) * base.oz, y: p.y };
+    if (cur.y >= downToY) {
+      most = Math.max(most, cur.d);
+    } else {
+      // Where the face crosses the sheet's hem, and no further.
+      if (prev && prev.y > cur.y) {
+        const f = (prev.y - downToY) / (prev.y - cur.y);
+        most = Math.max(most, prev.d + (cur.d - prev.d) * f);
+      }
+      break;
+    }
+    prev = cur;
+  }
+  return most;
+}
+
+/**
+ * Whether a tier has a fence along its front to tie a sign to.
+ *
+ * The lowest tier always does: the one between the terrace and the pitch. An
+ * upper tier has one only where there is a balcony — a drop from its first
+ * row down to the tier below. On a ground whose tiers run straight on into
+ * each other there is nothing to tie a sheet to and nothing for it to hang
+ * down in front of: on one in the catalogue the lower tier's back rows are
+ * above the upper tier's front one, and a "balcony" sign went into them.
+ */
+export function signFenceOk(frame: StandFrame, tier: number): boolean {
+  if (!frame.ok || tier <= 0) return true;
+  if (tier >= frame.tiers.length) return false;
+  const { topY, bottomY } = hangSpan(frame, tier);
+  return topY - bottomY >= SIGN_BALCONY_MIN_M;
+}
+
+/** The deepest a drop can be and still not count as a balcony, in metres. */
+export const SIGN_BALCONY_MIN_M = 0.5;
+
+/**
+ * The row a sign `heightM` tall is actually held at, in a tier of this stand.
+ *
+ * The one it asks for, when the stand can take it. A fence that is not there
+ * is the front row; a row past the last one a sheet that tall can be held up
+ * in is that last one (see `signUsableRows`).
+ */
+export function signRowFor(frame: StandFrame, tier: number, row: number, heightM: number): number {
+  const t = signTier(frame, tier);
+  if (row < 0) return signFenceOk(frame, t) ? -1 : 0;
+  return Math.min(row, signUsableRows(frame, t, heightM) - 1);
+}
+
+/**
+ * How many rows, from the front, a sign `heightM` tall can be held up in.
+ *
+ * All of them, on most stands. Not under an overhang: where the tier above
+ * juts out over the back of this one, the last few rows have its underside a
+ * couple of metres over their heads, and a sheet held up over the row in
+ * front went straight into it — eighty centimetres into the concrete on the
+ * widest oval in the catalogue. A row is offered only if the top of a sheet
+ * that tall, held there, is clear of the stand.
+ */
+export function signUsableRows(frame: StandFrame, tier: number, heightM: number): number {
+  const t = signTier(frame, tier);
+  const band = frame.tiers[t];
+  if (!frame.ok || !band) return 1;
+  const H = Math.round(Math.max(0.1, heightM) * 100) / 100;
+  let memo = USABLE.get(frame);
+  if (!memo) { memo = new Map(); USABLE.set(frame, memo); }
+  const key = `${t}|${H}`;
+  const hit = memo.get(key);
+  if (hit !== undefined) return hit;
+  const rows = Math.max(1, band.rows);
+  let n = rows;
+  // Only a tier with another above it can be overhung.
+  if (t < frame.tiers.length - 1) {
+    for (let r = 0; r < rows; r++) {
+      if (!signRowFits(frame, t, r, H)) { n = Math.max(1, r); break; }
+    }
+  }
+  memo.set(key, n);
+  return n;
+}
+const USABLE = new WeakMap<StandFrame, Map<string, number>>();
+
+/** Whether the top of a sheet held in a row is clear of the stand, along its whole length. */
+function signRowFits(frame: StandFrame, tier: number, row: number, H: number): boolean {
+  const band = frame.tiers[tier];
+  const v = rowV(band, row);
+  for (const u of [0.05, 0.25, 0.5, 0.75, 0.95]) {
+    const h = holdAt(frame, tier, row, u, v, H);
+    // Its top edge, with room for the hands bobbing and the sheet swaying.
+    const x = h.base.x + h.base.ox * h.out;
+    const y = h.topY + 0.15;
+    const z = h.base.z + h.base.oz * h.out;
+    if (standClearance(frame, u, x, y, z) < 0.05) return false;
+  }
+  return true;
+}
+
+/**
+ * How far a point is outside the stand, measured along the stand's normal at
+ * its nearest point down the line at `u` — negative inside.
+ */
+function standClearance(frame: StandFrame, u: number, x: number, y: number, z: number): number {
+  let best = Infinity;
+  let bestV = 0.5;
+  for (let j = 0; j <= 48; j++) {
+    const p = frame.pointAt(u, j / 48);
+    const d = (p.x - x) ** 2 + (p.y - y) ** 2 + (p.z - z) ** 2;
+    if (d < best) { best = d; bestV = j / 48; }
+  }
+  for (let j = -3; j <= 3; j++) {
+    const vv = Math.max(0, Math.min(1, bestV + j / 480));
+    const p = frame.pointAt(u, vv);
+    const d = (p.x - x) ** 2 + (p.y - y) ** 2 + (p.z - z) ** 2;
+    if (d < best) { best = d; bestV = vv; }
+  }
+  const p = frame.pointAt(u, bestV);
+  const n = frame.normalAt(u, bestV);
+  return (x - p.x) * n.nx + (y - p.y) * n.ny + (z - p.z) * n.nz;
+}
+
+/** Where a sign's middle is, in the world. */
+export function signCentre(frame: StandFrame, slot: ResolvedSlot, row: number): { x: number; y: number; z: number; ox: number; oz: number } {
+  const u = (slot.u0 + slot.u1) / 2;
+  const h = signHold(frame, slot, row, u);
+  return {
+    x: h.base.x + h.base.ox * h.out,
+    y: (h.bottomY + h.topY) / 2,
+    z: h.base.z + h.base.oz * h.out,
+    ox: h.base.ox,
+    oz: h.base.oz,
+  };
+}
 
 /**
  * Where on the stand a flown banner is rigged from, in `heightV`.
@@ -475,6 +840,22 @@ export function slotAspectFor(doc: BannerDoc, frame: StandFrame): number | null 
 export function settleSlot(doc: BannerDoc, frame: StandFrame): boolean {
   if (!frame.ok) return false;
   let changed = false;
+  // A sign keeps to a tier this stand has, and a row that tier has.
+  if (doc.kind === 'sign') {
+    const tier = signTier(frame, doc.slot.tier);
+    const place = signPlaceOf(doc.slot);
+    const row = signRowFor(frame, tier, place.row, signHeightM(doc));
+    const at = place.at < 0 ? -1 : Math.min(signPlaces(frame) - 1, place.at);
+    if (tier !== doc.slot.tier || row !== doc.slot.row || at !== doc.slot.at) {
+      doc.slot = { ...doc.slot, tier, row, at };
+      changed = true;
+    }
+    if (doc.slotAspect !== null && doc.slotAspect !== undefined) {
+      doc.slotAspect = null;
+      changed = true;
+    }
+    return changed;
+  }
   const tier = doc.slot.tier;
   if (tier >= 0) {
     const ok = tier < frame.tiers.length && (doc.kind !== 'hanging' || hangableTiers(frame).includes(tier));

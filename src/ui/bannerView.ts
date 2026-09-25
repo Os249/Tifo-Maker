@@ -1,14 +1,17 @@
 import { setSheetBox } from './bannerTour';
 import type { DesignStore } from '../core/design';
 import type { SeatMap, ToolId } from '../core/types';
-import type { BannerDoc, BannerItem, BannerKind, BannerReveal, BannerSize, StandIndex } from '../core/banner';
+import type { BannerDoc, BannerItem, BannerKind, BannerReveal, BannerSize, StandIndex, TextItem } from '../core/banner';
 import {
   BannerStore, aspectOf, applyKind, bannerFacts, newBanner, estimateSize,
   BANNER_PRESETS, KIND_REVEALS, presetOf, isPlaced,
   physicalRevealMs, revealSeconds,
+  SIGN_LENGTHS_M, SIGN_HEIGHTS_M, signPlaceOf, signHeightM, messageItem, messageOf, fitMessage,
 } from '../core/banner';
 import { spanFrameCache, type StandFrame } from '../render/simulator/standFrame';
-import { resolveSlot, maxUsefulSpan, hangableTiers, type ResolvedSlot } from '../render/simulator/bannerSlot';
+import {
+  resolveSlot, maxUsefulSpan, hangableTiers, signPlaces, signUsableRows, signTier, signFenceOk, type ResolvedSlot,
+} from '../render/simulator/bannerSlot';
 
 /**
  * The reveal-length slider, which now has to span half a second and two
@@ -149,6 +152,7 @@ export function mountBannerView(deps: BannerViewDeps): BannerView {
     '<div class="bn-empty-actions">' +
     '<button type="button" class="primary" data-kind="stand"><i class="ti ti-plus" aria-hidden="true"></i> <span data-i18n="bn.kind.stand"></span></button>' +
     '<button type="button" data-kind="hanging"><i class="ti ti-plus" aria-hidden="true"></i> <span data-i18n="bn.kind.hanging"></span></button>' +
+    '<button type="button" data-kind="sign"><i class="ti ti-plus" aria-hidden="true"></i> <span data-i18n="bn.kind.sign"></span></button>' +
     '</div>';
   const paintEmpty = (): void => {
     for (const el of emptyCard.querySelectorAll<HTMLElement>('[data-i18n]')) el.textContent = t(el.dataset.i18n!);
@@ -221,6 +225,14 @@ export function mountBannerView(deps: BannerViewDeps): BannerView {
   const addStandBtn = $<HTMLButtonElement>('bn-add-stand');
   const addHangBtn = $<HTMLButtonElement>('bn-add-hanging');
   const detailEl = $<HTMLElement>('bn-detail');
+  const addSignBtn = $<HTMLButtonElement>('bn-add-sign');
+  const lengthSel = $<HTMLSelectElement>('bn-length');
+  const heightSel = $<HTMLSelectElement>('bn-height');
+  const rowSel = $<HTMLSelectElement>('bn-row');
+  const atSel = $<HTMLSelectElement>('bn-at');
+  const msgIn = $<HTMLInputElement>('bn-msg');
+  const msgFont = $<HTMLSelectElement>('bn-msg-font');
+  const msgColor = $<HTMLInputElement>('bn-msg-color');
 
   const say = (text: string): void => {
     if (deps.message) deps.message.textContent = text;
@@ -258,7 +270,7 @@ export function mountBannerView(deps: BannerViewDeps): BannerView {
   let sizeVal: BannerSize = { widthM: 1, heightM: 1 };
   const realSize = (doc: BannerDoc): BannerSize => {
     const s = doc.slot;
-    const key = `${doc.id}|${doc.kind}|${doc.aspect}|${s.stand}|${s.stands}|${s.blockFrom}|${s.blockSpan}|${s.tier}`;
+    const key = `${doc.id}|${doc.kind}|${doc.aspect}|${s.stand}|${s.stands}|${s.blockFrom}|${s.blockSpan}|${s.tier}|${s.row}|${s.at}|${s.lengthM}`;
     if (key !== sizeKey) {
       const f = frameOf(doc);
       sizeVal = f.ok ? resolveSlot(doc, f).size : estimateSize(doc);
@@ -279,8 +291,94 @@ export function mountBannerView(deps: BannerViewDeps): BannerView {
     sel.appendChild(o);
   };
 
+  /** A length or height in metres, as the pickers write it. */
+  const metres = (m: number): string => tv('bn.sign.m', { m: Number.isInteger(m) ? m : round1(m) });
+
+  /**
+   * A sign's pickers: its tier, the row it is held at, where along the stand,
+   * and its size in metres.
+   *
+   * The rows are counted from the front, which is how people in a stand count
+   * them, and the first entry is the fence along the tier's front, where a
+   * sign is tied rather than held.
+   */
+  function syncSign(doc: BannerDoc): void {
+    const f = frameOf(doc);
+    const place = signPlaceOf(doc.slot);
+    const tier = f.ok ? signTier(f, doc.slot.tier) : 0;
+    if (tierRow) tierRow.style.display = f.ok && f.tiers.length > 1 ? '' : 'none';
+    if (tierSel && f.ok) {
+      tierSel.replaceChildren();
+      for (let i = 0; i < f.tiers.length; i++) opt(tierSel, String(i), tv('bn.tier.n', { n: i + 1 }));
+      tierSel.value = String(tier);
+    }
+    if (rowSel) {
+      // Only the rows a sheet this tall can be held up in: not under an overhang.
+      const n = f.ok ? signUsableRows(f, tier, signHeightM(doc)) : 20;
+      rowSel.replaceChildren();
+      const fence = !f.ok || signFenceOk(f, tier);
+      if (fence) opt(rowSel, '-1', t(tier >= 1 ? 'bn.sign.balcony' : 'bn.sign.fence'));
+      for (let r = 0; r < n; r++) {
+        opt(rowSel, String(r), r === 0 ? t('bn.sign.rowFront') : r === n - 1 ? tv('bn.sign.rowBack', { n: r + 1 }) : tv('bn.sign.rowN', { n: r + 1 }));
+      }
+      rowSel.value = String(place.row < 0 ? (fence ? -1 : 0) : Math.min(n - 1, place.row));
+    }
+    if (atSel) {
+      const n = f.ok ? signPlaces(f) : 1;
+      atSel.replaceChildren();
+      opt(atSel, '-1', t('bn.sign.atMiddle'));
+      for (let k = 0; k < n; k++) {
+        const b = (k >> 1) + 1;
+        opt(atSel, String(k), k % 2 === 0 ? tv('bn.sign.atBlock', { n: b }) : tv('bn.sign.atAisle', { a: b, b: b + 1 }));
+      }
+      atSel.value = String(place.at < 0 ? -1 : Math.min(n - 1, place.at));
+    }
+    // The sizes a sheet comes in, and whatever this one is if it is not one.
+    const h = signHeightM(doc);
+    if (lengthSel) {
+      lengthSel.replaceChildren();
+      const lengths: number[] = [...SIGN_LENGTHS_M];
+      if (!lengths.some((m) => Math.abs(m - place.lengthM) < 0.05)) lengths.push(place.lengthM);
+      lengths.sort((a, b) => a - b);
+      for (const m of lengths) opt(lengthSel, String(m), metres(m));
+      lengthSel.value = String(lengths.find((m) => Math.abs(m - place.lengthM) < 0.05) ?? place.lengthM);
+    }
+    if (heightSel) {
+      heightSel.replaceChildren();
+      const heights: number[] = [...SIGN_HEIGHTS_M];
+      const hr = round1(h);
+      if (!heights.some((m) => Math.abs(m - hr) < 0.05)) heights.push(hr);
+      heights.sort((a, b) => a - b);
+      for (const m of heights) opt(heightSel, String(m), metres(m));
+      heightSel.value = String(heights.find((m) => Math.abs(m - hr) < 0.05) ?? hr);
+    }
+    const r = f.ok ? resolveSlot(doc, f) : null;
+    if (sizeOutEl) {
+      sizeOutEl.textContent = r
+        ? tv('bn.size.is', { w: round1(r.size.widthM), h: round1(r.size.heightM) })
+        : tv('bn.size.about', { w: Math.round(place.lengthM), h: round1(h) });
+    }
+    if (fitNoteEl) {
+      const note = r && r.heightLimited ? tv('bn.sign.long', { w: Math.round(r.size.widthM) }) : '';
+      fitNoteEl.textContent = note;
+      fitNoteEl.style.display = note ? '' : 'none';
+    }
+    // The message, its letters and their colour.
+    const m = messageOf(doc);
+    if (msgIn && document.activeElement !== msgIn) msgIn.value = m?.text ?? '';
+    if (msgFont) {
+      if (!msgFont.options.length) for (const ft of TIFO_FONTS) opt(msgFont, ft.id, ft.name);
+      msgFont.value = m?.fontId ?? 'condensed';
+    }
+    if (msgColor && m) msgColor.value = m.color;
+  }
+
   /** Fill the block, span and tier pickers from the stand the banner is on. */
   function syncSlots(doc: BannerDoc): void {
+    if (doc.kind === 'sign') {
+      syncSign(doc);
+      return;
+    }
     const offer = offerOf(doc);
     if (acrossSel) {
       // Say WHICH two. "Two stands, round the corner" left you to find out
@@ -502,6 +600,7 @@ export function mountBannerView(deps: BannerViewDeps): BannerView {
       syncList();
       syncEmpty();
       syncContext();
+      document.body.classList.toggle('bn-sign', doc?.kind === 'sign');
       if (!doc) return;
 
       if (kindSel) kindSel.value = doc.kind;
@@ -574,7 +673,13 @@ export function mountBannerView(deps: BannerViewDeps): BannerView {
     // Measured on this ground: a seam count is a fact about a physical sheet,
     // so it has to come from the size the blocks actually give it.
     const f = bannerFacts(doc, realSize(doc));
-    if (factsEl) {
+    if (factsEl && doc.kind === 'sign') {
+      factsEl.textContent = tv('bn.facts.sign', {
+        hold: signPlaceOf(doc.slot).row < 0 ? t('bn.sign.tied') : tv('bn.sign.heldBy', { n: f.carriers }),
+        kg: f.weightKg < 10 ? f.weightKg.toFixed(1) : String(Math.round(f.weightKg)),
+        cap: round1(f.headlineCapM),
+      });
+    } else if (factsEl) {
       factsEl.textContent = tv('bn.facts', {
         panels: f.panels,
         kg: f.weightKg < 10 ? f.weightKg.toFixed(1) : String(Math.round(f.weightKg)),
@@ -635,29 +740,153 @@ export function mountBannerView(deps: BannerViewDeps): BannerView {
     el.addEventListener('change', close);
   }
 
+  // -------------------------------------------------------------------------
+  // A sign's message
+  // -------------------------------------------------------------------------
+
+  /** Where a line of words sits on a sheet of this shape: as big as it fits. */
+  const boxFor = (text: string, fontId: string, aspect: number): { cx: number; cy: number; w: number; h: number } | null => {
+    const css = TIFO_FONTS.find((f) => f.id === fontId)?.css ?? TIFO_FONTS[0].css;
+    const r = renderTextCanvas(text, css, 0);
+    if (!r) return null;
+    return fitMessage(aspect, r.canvas.width / Math.max(1, r.canvas.height));
+  };
+  /** Fit a message item to its sheet, in place (for one not yet in the store). */
+  function fitItem(it: TextItem, aspect: number): void {
+    const box = boxFor(it.text, it.fontId, aspect);
+    if (box) Object.assign(it, box);
+  }
+  /** Fit the active sign's message to the sheet it is on now. */
+  function refitMessage(): void {
+    const doc = bannerStore.active;
+    if (!doc || doc.kind !== 'sign') return;
+    const m = messageOf(doc);
+    if (!m) return;
+    const box = boxFor(m.text, m.fontId, aspectOf(doc));
+    if (box) bannerStore.patchItem(m.id, box as Partial<BannerItem>);
+  }
+
+  // Typing is one undo step per burst, like a slider drag: the gesture opens
+  // on the first key and closes a moment after the last one, or on leaving.
+  let msgOpen = false;
+  let msgTimer = 0;
+  const msgClose = (): void => {
+    window.clearTimeout(msgTimer);
+    if (!msgOpen) return;
+    msgOpen = false;
+    bannerStore.commit();
+  };
+  msgIn?.addEventListener('input', () => {
+    const doc = bannerStore.active;
+    if (syncing || !doc || doc.kind !== 'sign') return;
+    if (!msgOpen) {
+      msgOpen = true;
+      bannerStore.begin();
+    }
+    const text = msgIn.value.slice(0, 80);
+    const m = messageOf(doc);
+    if (!m) {
+      const it = messageItem(text, msgColor?.value ?? '#141414', msgFont?.value ?? 'condensed');
+      fitItem(it, aspectOf(doc));
+      bannerStore.addItem(it);
+    } else {
+      const box = boxFor(text, m.fontId, aspectOf(doc));
+      bannerStore.patchItem(m.id, { text, ...(box ?? {}) } as Partial<BannerItem>);
+    }
+    window.clearTimeout(msgTimer);
+    msgTimer = window.setTimeout(msgClose, 700);
+  });
+  msgIn?.addEventListener('blur', msgClose);
+  msgIn?.addEventListener('keydown', (e) => {
+    // Enter is "done", not a new line: a sign is one line of words.
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      msgClose();
+      msgIn.blur();
+    }
+  });
+  msgFont?.addEventListener('change', () => {
+    const doc = bannerStore.active;
+    const m = doc ? messageOf(doc) : null;
+    if (!m) return;
+    edit(() => {
+      bannerStore.patchItem(m.id, { fontId: msgFont.value } as Partial<BannerItem>);
+      refitMessage();
+    });
+  });
+  sliderEdit(msgColor, () => {
+    const doc = bannerStore.active;
+    const m = doc ? messageOf(doc) : null;
+    if (m && msgColor) bannerStore.patchItem(m.id, { color: msgColor.value } as Partial<BannerItem>);
+  });
+
+  // Its size: the length it keeps its height through, and the height it
+  // keeps its length through. The words refit either way.
+  lengthSel?.addEventListener('change', () => {
+    const doc = bannerStore.active;
+    if (!doc || doc.kind !== 'sign') return;
+    const h = signHeightM(doc);
+    const L = Math.max(1, Number(lengthSel.value) || 12);
+    edit(() => {
+      bannerStore.patchSlot({ lengthM: L });
+      bannerStore.patch({ aspect: h / L });
+      refitMessage();
+    });
+    canvas.fitToView();
+  });
+  heightSel?.addEventListener('change', () => {
+    const doc = bannerStore.active;
+    if (!doc || doc.kind !== 'sign') return;
+    const H = Math.max(0.3, Number(heightSel.value) || 1.2);
+    edit(() => {
+      bannerStore.patch({ aspect: H / signPlaceOf(doc.slot).lengthM });
+      refitMessage();
+    });
+    canvas.fitToView();
+  });
+  rowSel?.addEventListener('change', () => edit(() => bannerStore.patchSlot({ row: Number(rowSel.value) })));
+  atSel?.addEventListener('change', () => edit(() => bannerStore.patchSlot({ at: Number(atSel.value) })));
+
   docSel?.addEventListener('change', () => bannerStore.setActive(docSel.value || null));
   /** The lowest "Banner n" nobody is called, so deleting one does not make two of another. */
-  const nextName = (): string => {
+  const nextName = (key = 'bn.nameN'): string => {
     const taken = new Set(bannerStore.list().map((b) => b.name));
     let n = 1;
-    while (taken.has(tv('bn.nameN', { n }))) n++;
-    return tv('bn.nameN', { n });
+    while (taken.has(tv(key, { n }))) n++;
+    return tv(key, { n });
   };
   const createBanner = (kind: BannerKind): void => {
-    const doc = newBanner(kind, nextName());
+    const doc = newBanner(kind, nextName(kind === 'sign' ? 'bn.signN' : 'bn.nameN'));
     // On a stand nobody has used yet. Every new banner used to land in the
     // same centred slot on the North stand, exactly on top of the last one,
     // so the second banner of a design was invisible under the first.
     const used = new Set(bannerStore.list().map((b) => b.slot.stand));
     const free = ([1, 3, 0, 2] as StandIndex[]).find((st) => !used.has(st) && frameFor(st, 1).ok);
     if (free !== undefined) doc.slot = { ...doc.slot, stand: free };
+    // A sign is made to say something, so it starts with a line to replace —
+    // and the Message field ready to type over it.
+    if (kind === 'sign') {
+      const m = messageItem(t('bn.sign.default'), '#141414', 'condensed');
+      fitItem(m, aspectOf(doc));
+      doc.items = [m];
+    }
     bannerStore.add(doc);
     requestAnimationFrame(() => canvas.fitToView());
-    say(t('bn.msg.added'));
+    if (kind === 'sign') {
+      say(t('bn.msg.signAdded'));
+      requestAnimationFrame(() => {
+        if (!msgIn || msgIn.getClientRects().length === 0) return;
+        msgIn.focus();
+        msgIn.select();
+      });
+    } else {
+      say(t('bn.msg.added'));
+    }
   };
   newBtn?.addEventListener('click', () => createBanner('stand'));
   addStandBtn?.addEventListener('click', () => createBanner('stand'));
   addHangBtn?.addEventListener('click', () => createBanner('hanging'));
+  addSignBtn?.addEventListener('click', () => createBanner('sign'));
   for (const b of emptyCard.querySelectorAll<HTMLButtonElement>('button[data-kind]')) {
     b.addEventListener('click', () => createBanner(b.dataset.kind as BannerKind));
   }
@@ -700,7 +929,10 @@ export function mountBannerView(deps: BannerViewDeps): BannerView {
   kindSel?.addEventListener('change', () => {
     const doc = bannerStore.active;
     if (!doc) return;
-    edit(() => bannerStore.patch(applyKind(doc, kindSel.value as BannerKind)));
+    edit(() => {
+      bannerStore.patch(applyKind(doc, kindSel.value as BannerKind));
+      refitMessage();
+    });
     canvas.fitToView();
     say(tv('bn.msg.kind', { name: kindSel.selectedOptions[0]?.textContent?.trim() ?? '' }));
   });

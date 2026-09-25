@@ -1,7 +1,8 @@
 import type { BannerDoc } from '../../core/banner';
+import { signPlaceOf, SIGN_HOLDER_SPACING_M, SIGN_TIE_SPACING_M } from '../../core/banner';
 import type { StandFrame } from './standFrame';
 import {
-  crowdSupportM, hangAnchorV, hangAnchorY, hangStandoff, type ResolvedSlot,
+  crowdSupportM, hangAnchorV, hangAnchorY, hangStandoff, signHold, signRowFor, type ResolvedSlot,
 } from './bannerSlot';
 
 /**
@@ -237,7 +238,92 @@ export function buildSurface(
   out: Float32Array,
 ): void {
   if (doc.kind === 'hanging') buildHanging(doc, slot, env, t, out);
+  else if (doc.kind === 'sign') buildSign(doc, slot, env, t, out);
   else buildStand(doc, slot, env, t, out);
+}
+
+/** How far a sign's top edge dips between two pairs of hands, in metres. */
+const SIGN_SAG_M = 0.05;
+/** How far the people holding a sign bob, in metres. */
+const SIGN_BOB_M = 0.035;
+/** How far a sign's free bottom edge can swing out, at rest and in a gale. */
+const SIGN_WAVE_STILL_M = 0.02;
+const SIGN_WAVE_WIND_M = 0.3;
+
+/**
+ * A sign: an upright sheet along a row of the stand.
+ *
+ * Every column is a point of the stand at the sign's own row — so the sheet
+ * follows the curve of the row it is held in — stood `out` metres in front of
+ * the people and raised between the heights `signHold` gives. Vertical, not
+ * along the rake: a sign is held up to be read, and a sheet leaning back with
+ * the terracing would be read edge-on from the pitch.
+ *
+ * Held, its top edge dips a little between each pair of hands and bobs as
+ * they do; tied, it is straight along the rail with a cable tie every half
+ * metre. The bottom edge is free either way, and that is the part the wind
+ * moves.
+ *
+ * Raised, it comes up from the bottom edge: the rows are laid out from the
+ * bottom upward, so at no point of the reveal is any of it lower than where
+ * it ends — which is what keeps a half-raised sign out of the concrete.
+ * Tied on, it unrolls down from the fence instead.
+ */
+const HOLDS: ReturnType<typeof signHold>[] = new Array(SURF_COLS);
+
+function buildSign(
+  doc: BannerDoc,
+  slot: ResolvedSlot,
+  env: SurfaceEnv,
+  t: number,
+  out: Float32Array,
+): void {
+  const { frame } = env;
+  const row = slot.row ?? signRowFor(frame, slot.tier, signPlaceOf(doc.slot).row, slot.size.heightM);
+  const tied = row < 0;
+  const W = slot.size.widthM;
+  const amp = SIGN_WAVE_STILL_M + env.wind * SIGN_WAVE_WIND_M;
+  const e = Math.max(0.0001, Math.min(1, env.progress));
+  const colU = COL_U;
+  // The row it is held in is the line the columns are spaced along.
+  columnsU({ ...slot, v1: slot.vBottom }, frame, colU);
+  const hands = Math.max(1, Math.round(W / (tied ? SIGN_TIE_SPACING_M : SIGN_HOLDER_SPACING_M)));
+
+  // Where it is held, once per column: it is the same all the way down one.
+  for (let i = 0; i < SURF_COLS; i++) HOLDS[i] = signHold(frame, slot, row, colU[i]);
+
+  let k = 0;
+  for (let j = 0; j < SURF_ROWS; j++) {
+    const v = j / (SURF_ROWS - 1);
+    for (let i = 0; i < SURF_COLS; i++) {
+      const u = i / (SURF_COLS - 1);
+      const h = HOLDS[i];
+      const Hs = h.topY - h.bottomY;
+      let y: number;
+      if (tied) {
+        // Down from the fence as it is unrolled.
+        y = h.topY - v * Hs * e - scallop(u, hands, 0.015) * (1 - v);
+      } else {
+        // The hands: a dip between each pair, and everyone bobbing a little,
+        // out of step with each other.
+        const s = u * hands;
+        const bay = s - Math.floor(s);
+        const dip = SIGN_SAG_M * Math.sin(Math.PI * bay);
+        const bob = SIGN_BOB_M * Math.sin(t * 2.3 + Math.floor(s) * 1.7) * (1 - bay)
+          + SIGN_BOB_M * Math.sin(t * 2.3 + (Math.floor(s) + 1) * 1.7) * bay;
+        // Up from the bottom edge: at e = 1 the top is where the hands are.
+        const top = h.bottomY + Hs * e;
+        y = top - v * (top - h.bottomY) - (dip + bob) * (1 - v * 0.6) * e;
+      }
+      // Out from the stand, horizontally. The bottom edge is the free one.
+      const free = Math.pow(v, 1.4) * Math.sin(Math.PI * Math.min(1, Math.max(0, u)) * 0.98 + 0.01);
+      // A tied sheet's hem can flap, but not back into the face it hangs over.
+      const off = Math.max(h.minOut, h.out + wave(u * W, v, t, amp) * free);
+      out[k++] = h.base.x + h.base.ox * off;
+      out[k++] = Math.max(h.bottomY - 0.02, y);
+      out[k++] = h.base.z + h.base.oz * off;
+    }
+  }
 }
 
 /**
