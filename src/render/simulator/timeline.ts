@@ -36,7 +36,10 @@ export type EffectName =
   // The drum call's tabl: one hit of a count, and the third — the one the
   // stand moves on — hit harder.
   | 'drum-hit'
-  | 'drum-hit-3';
+  | 'drum-hit-3'
+  // The stand's "Oooh" as its picture appears, and the one as it goes.
+  | 'ooh'
+  | 'ooh-drop';
 
 export interface RevealCue {
   kind: 'reveal';

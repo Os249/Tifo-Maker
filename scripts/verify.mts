@@ -337,8 +337,16 @@ console.log('sweep-lr tracks u:', mono);
   const idx = dcRead('src/render/simulator/index.ts', 'utf8');
   // Booked ahead on the audio clock, never fired on a frame: a slow frame
   // would land three hits of a count on top of each other.
-  if (!/this\.tlLoop = loop;[\s\S]{0,80}this\.bookDrumHits\(\)/.test(idx) || !/this\.atmosphere\.drumHit\(c\.effect === 'drum-hit-3', c\.start - now\)/.test(idx)) throw new Error('drum-hit cues must be booked on the audio clock, at their own time, when the show starts');
-  if (/e === 'drum-hit'/.test(idx)) throw new Error('drum hits must not also fire on the frame that crosses them');
+  if (!/this\.tlLoop = loop;[\s\S]{0,80}this\.bookDrumHits\(\)/.test(idx) || !/this\.atmosphere\.drumHit\(c\.effect === 'drum-hit-3', inSec, from\)/.test(idx)) throw new Error('drum-hit cues must be booked on the audio clock, at their own time, when the show starts');
+  if (!/BOOKED_EFFECTS = new Set<EffectName>\(\['drum-hit', 'drum-hit-3', 'ooh', 'ooh-drop'\]\)/.test(idx) || !/this\.atmosphere\.ooh\(inSec, c\.effect === 'ooh-drop', from\)/.test(idx)) throw new Error('the stand\'s "Oooh" must be booked on the audio clock like the drum');
+  if (/e === 'drum-hit'|e === 'ooh'/.test(idx)) throw new Error('booked sounds must not also fire on the frame that crosses them');
+  // The "Oooh" lands ON the beat the cards go up — not a roar a quarter of a
+  // second later — and the call has no applause (it sounded like a fault).
+  const cueSrc = idx.slice(idx.indexOf('  drumCallCues('), idx.indexOf('  private beginDrumShow('));
+  if (!/start: start \+ up, effect: 'ooh'/.test(cueSrc) || !/start: start \+ plan\.downs\[k\], effect: 'ooh-drop'/.test(cueSrc)) throw new Error('the Oooh is on the lift and the drop, exactly');
+  if (/'applause'|'roar'/.test(cueSrc)) throw new Error('the drum call has no roar-later and no applause');
+  // The terrace drum is handed back only once the call is over.
+  if (!/stopTimeline\(false, false\)/.test(idx) || !/this\.releaseDrumLoop\(\);\s*return;/.test(idx)) throw new Error('the terrace drum waits for the design to settle back');
   if (!/drumHit\([^)]*\)[^{]*\{[\s\S]{0,700}tablHit\(/.test(dcRead('src/render/simulator/atmosphere.ts', 'utf8'))) throw new Error('the Match Day drum hit is the tabl');
   const ov = dcRead('src/render/simulator/overlay.ts', 'utf8');
   for (const m of REVEAL_MODES) {
@@ -836,40 +844,42 @@ import { buildStadium as siBuild } from '../src/core/stadiumFit';
   const atmoSrc = roofRead('src/render/simulator/atmosphere.ts', 'utf8');
   const simSrc2 = roofRead('src/render/simulator/index.ts', 'utf8');
 
-  const offByDefault = /\n\s*sound:\s*false,/.test(overlaySrc2);
-  // The AudioContext must be built inside the toggle. One created at
-  // construction sits suspended and silently does nothing, which reads as a
-  // broken feature rather than a refused one.
+  // On by default for everybody (Osamah, September 2026), at the levels he
+  // picked, with the terrace drum off — and the browser's gesture rule still
+  // respected: nothing is forced, the first press starts it.
+  const onByDefault = /const base: SoundPrefs = \{\s*on: true,/.test(overlaySrc2) && /sound: p\.on/.test(overlaySrc2);
+  const drumOffByDefault = /\/\/ drum, and on its own it is the loudest thing in the mix\.\s*drum: false,/.test(overlaySrc2);
+  const armed = /function armSoundStart\(\)/.test(overlaySrc2) && /else armSoundStart\(\)/.test(overlaySrc2);
+  // The AudioContext must still be built lazily, and resume() must never be
+  // awaited unbounded: without a gesture it can stay pending for good.
   const lazyCtx = /if \(!ctx\) \{\s*\n\s*ctx = new AudioCtor\(\)/.test(atmoSrc);
+  const boundedResume = /Promise\.race\(\[ctx\.resume\(\)/.test(atmoSrc);
   const refused = /soundBlocked/.test(overlaySrc2);
-  // The mix is remembered; the on/off is not. Whether a page starts making
-  // noise is not a decision to make on someone's behalf a second time.
-  const mixKept = /localStorage\.setItem\(SOUND_KEY/.test(overlaySrc2);
+  // Mix and on/off are both remembered now, under a fresh key so the new
+  // defaults reach everyone once.
   const saved = /localStorage\.setItem\(SOUND_KEY, JSON\.stringify\(\{([\s\S]*?)\}\s*satisfies/.exec(overlaySrc2)?.[1] ?? '';
-  const onNotKept = saved !== '' && !/\bsound\s*:/.test(saved);
+  const onKept = /\bon:\s*state\.sound/.test(saved);
+  const freshKey = /const SOUND_KEY = 'mds_sound_v2'/.test(overlaySrc2);
   /**
-   * The regression that made this whole pass necessary.
-   *
-   * `Number(localStorage.getItem('mds_volume'))` is `0` when nothing is stored,
-   * and `0` satisfied `Number.isFinite(v) && v >= 0 && v <= 1` — so the master
-   * gain was set to zero for every visitor who had never dragged the slider,
-   * and the entire sound system was correctly wired and completely silent.
-   * Nothing may go from getItem straight into Number() again.
+   * The regression that made the first sound pass necessary: getItem straight
+   * into Number() is 0 when nothing is stored, and 0 passed every guard — so
+   * everyone who had never dragged a slider got master volume zero.
    */
   // Comments stripped first: the docblock that explains the bug quotes the
   // exact expression it is banning, and a guard that its own explanation trips
   // is a guard nobody can keep.
   const overlayCode = overlaySrc2.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/[^\n]*/g, '$1');
   const noRawNumber = !/Number\(\s*localStorage\.getItem/.test(overlayCode);
-  // And nothing may default to zero, either.
-  const defaults = /DEFAULT_LEVELS[\s\S]*?\};/.exec(atmoSrc)?.[0] ?? '';
+  // The defaults are exactly the ones asked for, and none of them is zero.
+  const defaults = /DEFAULT_LEVELS: SoundLevels = \{[\s\S]*?\};/.exec(atmoSrc)?.[0] ?? '';
+  const asked = /master: 0\.3,\s*crowd: 0\.35,\s*sfx: 0\.2,\s*amb: 0\.25,\s*drum: 0\.25,/.test(defaults);
   const loudDefaults = defaults !== '' && !/:\s*0\s*,/.test(defaults);
-  console.log('crowd sound: off by default', offByDefault, '| context built in the gesture', lazyCtx,
-    '| says so when the browser refuses', refused, '| mix remembered', mixKept,
-    '| on-state never remembered', onNotKept, '| no getItem straight into Number', noRawNumber,
-    '| no level defaults to zero', loudDefaults);
-  if (!offByDefault || !lazyCtx || !refused || !mixKept || !onNotKept || !noRawNumber || !loudDefaults) {
-    throw new Error('crowd sound must stay opt-in, gesture-started, honest when blocked, and audible out of the box');
+  console.log('crowd sound: on by default', onByDefault, '| terrace drum off by default', drumOffByDefault,
+    '| starts on the first gesture', armed, '| context built lazily', lazyCtx, '| resume never hangs', boundedResume,
+    '| says so when a toggle is refused', refused, '| on/off remembered', onKept, '| fresh prefs key', freshKey,
+    '| no getItem straight into Number', noRawNumber, '| defaults 30/35/20/25/25', asked, '| no level defaults to zero', loudDefaults);
+  if (!onByDefault || !drumOffByDefault || !armed || !lazyCtx || !boundedResume || !refused || !onKept || !freshKey || !noRawNumber || !asked || !loudDefaults) {
+    throw new Error('crowd sound must be on by default at the chosen levels, start on the first gesture, never hang, and stay audible out of the box');
   }
 
   // Four buses and a master, each reachable from the panel. "Louder" is several

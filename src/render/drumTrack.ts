@@ -171,14 +171,18 @@ export class DrumTrack {
     this.stop();
     const ctx = this.ensure();
     if (!ctx || !this.out) return;
-    const now = ctx.currentTime + 0.03;
+    // Started early by the output latency, so the hit leaves the speaker on
+    // the beat the picture moves on rather than a buffer (or a Bluetooth
+    // link) later. Capped, like the Match Day mix.
+    const lead = Math.min(0.25, Math.max(0, (ctx.outputLatency || 0) + (ctx.baseLatency || 0)));
+    const now = ctx.currentTime + 0.005 - lead;
     for (const h of hits) {
       // A hit a few ms in the past is the one the user pressed Play on top of;
       // play it rather than swallowing the first beat of the count.
       if (h.t < fromSec - 0.04) continue;
       // The last of the three is hit hardest — it is the one people move on.
       const gain = h.count === 3 ? 0.95 : 0.8;
-      this.live.push(...tablHit(ctx, this.out, now + Math.max(0, h.t - fromSec), gain));
+      this.live.push(...tablHit(ctx, this.out, Math.max(ctx.currentTime + 0.005, now + Math.max(0, h.t - fromSec)), gain));
     }
   }
 

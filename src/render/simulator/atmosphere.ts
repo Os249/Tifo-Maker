@@ -52,12 +52,18 @@ export interface SoundLevels {
   drum: number;
 }
 
+/**
+ * What everybody hears first. Chosen by ear by Osamah, September 2026: the
+ * old defaults (70 / 90 / 80 / 60 / 55) were a stadium at full cry before
+ * anything had happened, and the drum call's tabl and the crowd's "Oooh" have
+ * to have somewhere to go.
+ */
 export const DEFAULT_LEVELS: SoundLevels = {
-  master: 0.7,
-  crowd: 0.9,
-  sfx: 0.8,
-  amb: 0.6,
-  drum: 0.55,
+  master: 0.3,
+  crowd: 0.35,
+  sfx: 0.2,
+  amb: 0.25,
+  drum: 0.25,
 };
 
 export type WeatherSound = 'clear' | 'rain' | 'snow';
@@ -109,9 +115,21 @@ export interface Atmosphere {
    * frame land on top of each other — a count that is no longer a count. So
    * the simulator looks ahead and books each hit for the moment it is due.
    */
-  drumHit(accent?: boolean, inSec?: number): void;
-  /** Silence every booked tabl hit that has not sounded yet — a show stopped mid-count. */
-  cancelDrumHits(): void;
+  drumHit(accent?: boolean, inSec?: number, from?: number): void;
+  /**
+   * The stand's "Oooh" — booked `inSec` ahead exactly like a tabl hit, because
+   * it has to land ON the picture appearing, not a frame or a swell later.
+   * `drop` is the one for the picture going: lower, longer, falling.
+   */
+  ooh(inSec?: number, drop?: boolean, from?: number): void;
+  /**
+   * The audio clock now. A show books all its sounds from ONE reading of it:
+   * reading it afresh for each, on a busy main thread, lets the clock tick on
+   * between calls and the sounds drift apart by milliseconds.
+   */
+  audioNow(): number;
+  /** Silence everything booked (hits, oohs) that has not sounded yet — a show stopped mid-count. */
+  cancelBooked(): void;
   isDrumming(): boolean;
 
   // ---- everything else that happens ----
@@ -247,6 +265,79 @@ function crackleBuffer(ctx: BaseAudioContext, seconds = 1.8): AudioBuffer {
   return buf;
 }
 
+/**
+ * The "Oooh" a stand gives the moment its own tifo appears.
+ *
+ * A crowd's vowel, not a roar: the roar is a noise swell that takes a third of
+ * a second to arrive and reads as "something happened". This is thousands of
+ * voices on one long "oo" — eight saws scattered over a man's speaking range,
+ * through the two formants of /u/ (about 330 and 850 Hz), with breath under
+ * them — and it is IN within 40 ms, because people do not decide to go "Oooh",
+ * it comes out of them. The pitch lifts and then falls away, which is the
+ * shape of the sound more than anything else is. The drop gets a lower,
+ * longer, falling one.
+ */
+function crowdOoh(ctx: BaseAudioContext, out: AudioNode, breath: AudioBuffer, at: number, drop: boolean): AudioScheduledSourceNode[] {
+  const started: AudioScheduledSourceNode[] = [];
+  const len = drop ? 3.0 : 2.6;
+  const f1 = ctx.createBiquadFilter();
+  f1.type = 'bandpass';
+  // setValueAtTime rather than .value, so a test can find the moment it lands.
+  f1.frequency.setValueAtTime(330, at);
+  f1.Q.value = 2.4;
+  const f2 = ctx.createBiquadFilter();
+  f2.type = 'bandpass';
+  f2.frequency.value = 850;
+  f2.Q.value = 4;
+  const f2g = ctx.createGain();
+  f2g.gain.value = 0.45;
+  const body = ctx.createGain();
+  body.gain.setValueAtTime(0.0001, at);
+  const peak = drop ? 1.0 : 1.25;
+  body.gain.exponentialRampToValueAtTime(peak * 0.7, at + 0.04);
+  body.gain.exponentialRampToValueAtTime(peak, at + 0.3);
+  body.gain.setValueAtTime(peak, at + 0.7);
+  body.gain.exponentialRampToValueAtTime(0.0001, at + len);
+  f1.connect(body);
+  f2.connect(f2g).connect(body);
+  body.connect(out);
+
+  for (let v = 0; v < 8; v++) {
+    const o = ctx.createOscillator();
+    o.type = 'sawtooth';
+    const f = 105 + Math.random() * 80;
+    const lift = drop ? 1.0 : 1.07;
+    const fall = drop ? 0.82 : 0.9;
+    o.frequency.setValueAtTime(f * (drop ? 1.02 : 0.95), at);
+    o.frequency.exponentialRampToValueAtTime(f * lift, at + 0.35);
+    o.frequency.exponentialRampToValueAtTime(f * fall, at + len);
+    const g = ctx.createGain();
+    g.gain.value = 0.13;
+    o.connect(g);
+    g.connect(f1);
+    g.connect(f2);
+    o.start(at);
+    o.stop(at + len + 0.05);
+    started.push(o);
+  }
+
+  // Breath: the part of four thousand people that is not pitch at all.
+  const air = ctx.createBufferSource();
+  air.buffer = breath;
+  air.loop = true;
+  const af = ctx.createBiquadFilter();
+  af.type = 'bandpass';
+  af.frequency.value = 420;
+  af.Q.value = 0.9;
+  const ag = ctx.createGain();
+  ag.gain.value = 0.55;
+  air.connect(af).connect(ag).connect(body);
+  air.start(at, Math.random() * 2);
+  air.stop(at + len + 0.05);
+  started.push(air);
+  return started;
+}
+
 export function buildAtmosphere(): Atmosphere {
   let ctx: AudioContext | null = null;
   let master: GainNode | null = null;
@@ -260,8 +351,27 @@ export function buildAtmosphere(): Atmosphere {
   let weatherGain: GainNode | null = null;
   let swellTimer: number | undefined;
   let drumTimer: number | undefined;
-  /** Tabl hits booked ahead on the audio clock, so a stopped show can take them back. */
-  const booked: { end: number; nodes: AudioScheduledSourceNode[] }[] = [];
+  /** Tabl hits and oohs booked ahead on the audio clock, so a stopped show can take them back. */
+  const booked: { start: number; end: number; nodes: AudioScheduledSourceNode[] }[] = [];
+  /**
+   * Where on the audio clock something due `inSec` from now must be started.
+   *
+   * Sound leaves the speaker later than it is started — the output buffer, and
+   * on Bluetooth a good fifth of a second more — so it is started that much
+   * EARLY, which is the only way for the "Oooh" to arrive with the picture
+   * rather than after it. Capped: a figure a driver reports wildly is not
+   * worth moving a count by.
+   */
+  const bookAt = (inSec: number, from?: number): number => {
+    const c = ctx as AudioContext;
+    const lead = Math.min(0.25, Math.max(0, (c.outputLatency || 0) + (c.baseLatency || 0)));
+    // Tidy as we go: forget anything long finished.
+    for (let i = booked.length - 1; i >= 0; i--) if (booked[i].end < c.currentTime) booked.splice(i, 1);
+    const origin = from ?? c.currentTime;
+    return Math.max(c.currentTime + 0.005, origin + 0.005 + inSec - lead);
+  };
+  /** Terrace-drum hits already scheduled, so switching the drum off takes back the one still to come. */
+  let loopHits: { at: number; nodes: AudioScheduledSourceNode[] }[] = [];
 
   let noise: AudioBuffer | null = null;
   let white: AudioBuffer | null = null;
@@ -330,7 +440,13 @@ export function buildAtmosphere(): Atmosphere {
       claps = applauseBuffer(ctx);
       crackle = crackleBuffer(ctx);
     }
-    if (ctx.state === 'suspended' && !suspended) await ctx.resume().catch(() => undefined);
+    // resume() only settles once the browser lets the context run. Without a
+    // user gesture yet (sound is on by default now, so this can run on open)
+    // it can sit pending indefinitely — so it is given a moment, not forever,
+    // and the caller retries on the first gesture.
+    if (ctx.state === 'suspended' && !suspended) {
+      await Promise.race([ctx.resume().catch(() => undefined), new Promise((r) => setTimeout(r, 400))]);
+    }
     return ctx.state === 'running';
   };
 
@@ -453,6 +569,9 @@ export function buildAtmosphere(): Atmosphere {
     if (!ctx || !noise) return;
     const out = bus.drum;
     if (!out) return;
+    const nodes: AudioScheduledSourceNode[] = [];
+    loopHits = loopHits.filter((h) => h.at > ctx!.currentTime - 1);
+    loopHits.push({ at, nodes });
     const osc = ctx.createOscillator();
     osc.type = 'sine';
     osc.frequency.setValueAtTime(150, at);
@@ -464,6 +583,7 @@ export function buildAtmosphere(): Atmosphere {
     osc.connect(g).connect(out);
     osc.start(at);
     osc.stop(at + 0.5);
+    nodes.push(osc);
 
     const click = ctx.createBufferSource();
     click.buffer = noise;
@@ -477,6 +597,7 @@ export function buildAtmosphere(): Atmosphere {
     click.connect(cf).connect(cg).connect(out);
     click.start(at, Math.random() * 2);
     click.stop(at + 0.08);
+    nodes.push(click);
   };
 
   /** 60/96 s — where a terrace drum sits, slow enough to clap over. */
@@ -827,6 +948,16 @@ export function buildAtmosphere(): Atmosphere {
       drumming = on;
       window.clearInterval(drumTimer);
       drumTimer = undefined;
+      // The loop books its off-beat a third of a second ahead; switched off
+      // (say, for a drum call's count) that beat must not still land.
+      const t = ctx?.currentTime ?? 0;
+      for (const h of loopHits) {
+        if (h.at <= t) continue;
+        for (const n of h.nodes) {
+          try { n.stop(); } catch { /* already stopped */ }
+        }
+      }
+      loopHits = loopHits.filter((h) => h.at <= t);
       if (!on || !enabled || suspended || !ctx) return;
       // Scheduled a beat ahead on the audio clock rather than played from the
       // timer, because setInterval drifts and a drum that drifts is worse than
@@ -841,20 +972,26 @@ export function buildAtmosphere(): Atmosphere {
       drumTimer = window.setInterval(tick, BEAT * 1000);
     },
 
-    drumHit(accent = false, inSec = 0): void {
+    audioNow: () => ctx?.currentTime ?? 0,
+
+    drumHit(accent = false, inSec = 0, from?: number): void {
       if (!ctx || !enabled || suspended || !bus.drum) return;
-      const at = ctx.currentTime + 0.01 + Math.max(0, inSec);
-      // Forget hits that have long finished, so the list stays a few long.
-      const now = ctx.currentTime;
-      for (let i = booked.length - 1; i >= 0; i--) if (booked[i].end < now) booked.splice(i, 1);
-      booked.push({ end: at + 1.1, nodes: tablHit(ctx, bus.drum, at, accent ? 1.1 : 0.9) });
+      const at = bookAt(inSec, from);
+      booked.push({ start: at, end: at + 1.1, nodes: tablHit(ctx, bus.drum, at, accent ? 1.1 : 0.9) });
     },
 
-    cancelDrumHits(): void {
+    ooh(inSec = 0, drop = false, from?: number): void {
+      const out = live('crowd');
+      if (!ctx || !out || !noise) return;
+      const at = bookAt(inSec, from);
+      booked.push({ start: at, end: at + 3.4, nodes: crowdOoh(ctx, out, noise, at, drop) });
+    },
+
+    cancelBooked(): void {
       const now = ctx?.currentTime ?? 0;
       for (const b of booked) {
         // Only what has not started: a hit already ringing is left to ring.
-        if (b.end - 1.1 <= now) continue;
+        if (b.start <= now) continue;
         for (const n of b.nodes) {
           try {
             n.stop();

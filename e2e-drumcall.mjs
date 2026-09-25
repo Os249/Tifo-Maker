@@ -51,7 +51,7 @@ const LS = (lang = 'en', extra = []) => [
 
 /** Analyser in front of every destination, and a log of every tabl hit. */
 const TAP = () => {
-  window.__audio = { contexts: [], hits: [], recorders: [] };
+  window.__audio = { contexts: [], hits: [], oohs: [], terrace: [], applause: 0, recorders: [] };
   const AC = window.AudioContext;
   if (AC) {
     window.AudioContext = class extends AC {
@@ -68,7 +68,9 @@ const TAP = () => {
   }
   const svat = AudioParam.prototype.setValueAtTime;
   AudioParam.prototype.setValueAtTime = function (v, t) {
-    if (v === 104) window.__audio.hits.push(t);
+    if (v === 104) window.__audio.hits.push(t); // a tabl hit's body
+    if (v === 330) window.__audio.oohs.push(t); // the crowd's "Oooh" (its first formant)
+    if (v === 150) window.__audio.terrace.push(t); // a terrace-drum hit
     return svat.call(this, v, t);
   };
   // A frame recorder. Under software rendering a frame takes about a second
@@ -106,6 +108,12 @@ const TAP = () => {
     }
     window.__frames.push({ ts, at: performance.now(), hud, px, full });
   });
+  // Applause is a 3.2 s buffer of claps; the drum call should never start one.
+  const bst = AudioBufferSourceNode.prototype.start;
+  AudioBufferSourceNode.prototype.start = function (...a) {
+    if (this.buffer && Math.abs(this.buffer.duration - 3.2) < 0.01) window.__audio.applause++;
+    return bst.apply(this, a);
+  };
   const MR = window.MediaRecorder;
   if (MR) {
     window.MediaRecorder = class extends MR {
@@ -361,8 +369,12 @@ console.log('\n— Match Day —');
     const r = [...s.querySelectorAll('input[type="range"]')];
     // master, crowd, sfx, amb, drum
     [1, 0, 0, 0, 1].forEach((v, i) => { if (r[i]) { r[i].value = String(v); r[i].dispatchEvent(new Event('input', { bubbles: true })); } });
+    // The terrace drum on, to prove the call silences it and only hands it
+    // back once everything is over (it used to walk in on the drop's "Oooh").
+    const d = s.querySelectorAll('input[type="checkbox"]')[2];
+    if (!d.checked) d.click();
   });
-  await p.waitForTimeout(700);
+  await p.waitForTimeout(1500);
 
   // Every frame of the show, sampled as it is drawn (see TAP).
   const diffPx = (a, b) => { let n = 0; for (let i = 0; i < a.length; i += 3) if (Math.abs(a[i] - b[i]) + Math.abs(a[i + 1] - b[i + 1]) + Math.abs(a[i + 2] - b[i + 2]) > 50) n++; return n / (a.length / 3); };
@@ -372,7 +384,10 @@ console.log('\n— Match Day —');
   // as "after Play" while still showing the design as it stood.
   await p.evaluate(() => {
     window.__audio.hits.length = 0;
+    window.__audio.oohs.length = 0;
+    window.__audio.applause = 0;
     window.__playAt = performance.now();
+    window.__clickAudio = window.__audio.contexts[0]?.ctx.currentTime ?? 0;
     document.querySelector('.mds-overlay [data-k="play-reveal"]').click();
   });
   await p.waitForTimeout(13000);
@@ -411,12 +426,30 @@ console.log('\n— Match Day —');
   const wantMd = [0, BEAT, 2 * BEAT, 3 * BEAT + 4, 4 * BEAT + 4, 5 * BEAT + 4];
   check('the tabl is hit six times', hits.length === 6, String(hits.length));
   check('…on the beat on the audio clock, however slowly the frames come', rel.length === 6 && rel.every((t, i) => Math.abs(t - wantMd[i]) < 0.02), rel.map((t) => t.toFixed(2)).join(' '));
+  // The "Oooh" is ON the beat the cards go up — the one after the third hit —
+  // and on the beat they come down. Within 2 ms: one render quantum.
+  const au = await p.evaluate(() => ({ oohs: window.__audio.oohs.slice(), applause: window.__audio.applause, terrace: window.__audio.terrace.slice(), click: window.__clickAudio }));
+  const oohLift = au.oohs[0] - hits[2], oohDrop = au.oohs[1] - hits[5];
+  check('the crowd goes "Oooh" twice: as it appears, and as it goes', au.oohs.length === 2, String(au.oohs.length));
+  check('…the first exactly as the cards go up, not a moment after', Math.abs(oohLift - BEAT) < 0.002, `${((oohLift - BEAT) * 1000).toFixed(2)} ms from the lift`);
+  check('…the second exactly as they come down', Math.abs(oohDrop - BEAT) < 0.002, `${((oohDrop - BEAT) * 1000).toFixed(2)} ms from the drop`);
+  check('no applause in the drum call (it sounded like a fault)', au.applause === 0, String(au.applause));
+  const showEnd = au.click + FIXED + 4 + 0.4; // the call with its default 4 s hold, plus the show's closing 0.4 s
+  const during = au.terrace.filter((t) => t > au.click + 0.4 && t < showEnd + 2.4);
+  check('the terrace drum stays out of the call, and out of the drop\'s "Oooh"', during.length === 0, during.map((t) => (t - au.click).toFixed(2)).join(' '));
   // …and a few seconds later the design settles back.
   await p.evaluate(() => { window.__frames.length = 0; window.__rec = { full: false }; });
   await p.waitForTimeout(3000);
   const settledF = await p.evaluate(() => { window.__rec = null; return window.__frames.slice(-1)[0]; });
   const dS = settledF ? diffPx(base.px, settledF.px) : 1;
   check('a few seconds after, the design settles back', dS < 0.01, dS.toFixed(3));
+  await p.waitForTimeout(2500);
+  const back = await p.evaluate((end) => window.__audio.terrace.filter((t) => t > end).length, showEnd + 2.4);
+  check('…and only then does the terrace drum come back', back > 0, `${back} hits`);
+  await p.evaluate(() => {
+    const d = document.querySelector('.mds-section[data-sec="sound"]').querySelectorAll('input[type="checkbox"]')[2];
+    if (d.checked) d.click();
+  });
 
   // Twice round.
   await selectK('drum-times', '2');
@@ -440,7 +473,7 @@ console.log('\n— Match Day —');
   await clickK('add-cue');
   await p.waitForTimeout(200);
   const cueText = await p.$eval('.mds-section[data-sec="choreo"]', (s) => [...s.querySelectorAll('.mds-hint')].map((h) => h.textContent).join(' | '));
-  check('a drum-call cue brings its hits and its crowd', /\b1[0-9] cues/.test(cueText), cueText);
+  check('a drum-call cue brings its six hits and both Oohs', /\b9 cues/.test(cueText), cueText);
 
   // Auto choreo: the Saudi show, with its camera cuts.
   await p.evaluate(() => { window.__audio.hits.length = 0; });

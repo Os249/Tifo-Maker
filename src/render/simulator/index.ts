@@ -16,7 +16,14 @@ import { buildBanners, type BannerController } from './banners';
 import { buildEffects, type EffectsController } from './effects';
 import { bowlShots, seatShot, flyover, applyShot as applyCameraShot, type SimShot } from './cameras';
 import { revealVisibility, type RevealMode } from './choreo';
-import { evalTimeline, type Timeline, type Cue } from './timeline';
+import { evalTimeline, type Timeline, type Cue, type EffectName } from './timeline';
+
+/**
+ * Sounds that must land exactly on the show's clock, so they are booked on the
+ * audio clock when a show starts instead of fired by the frame that crosses
+ * them — a frame is 16 ms late on a good day and most of a second on a bad one.
+ */
+const BOOKED_EFFECTS = new Set<EffectName>(['drum-hit', 'drum-hit-3', 'ooh', 'ooh-drop']);
 import { drumCallBeat, drumCallPlan, type DrumCallOpts, type DrumCallPlan } from '../../core/drumCall';
 import { buildAssetLayer, type AssetLayer } from './assetLayer';
 import { buildBannerRigs, type BannerRigLayer } from './bannerRig';
@@ -166,8 +173,13 @@ export class MatchDaySimulator {
   private revealActiveLast = false;
   /** The drum call's settings, from the panel. */
   private drumCallOpts: DrumCallOpts = {};
-  /** Whether the terrace drum was going when a drum call silenced it for its count. */
-  private drumLoopWas = false;
+  /**
+   * The terrace drum is wanted but a drum call is holding it silent. It comes
+   * back only once the call is completely over — the design settled back, or
+   * the show stopped by hand — never straight after the drop, where it was a
+   * stray drum walking in on top of the crowd's "Oooh".
+   */
+  private drumLoopHeld = false;
   /** Bringing the design back after a drum call ended with the stand empty. */
   private restoreFade: { start: number; dur: number } | null = null;
   /** Tabl hits already booked on the audio clock this pass of the show. */
@@ -287,8 +299,8 @@ export class MatchDaySimulator {
       this.scene.add(this.bannerRigs.object);
       this.bindBannerPointer();
     }
-    // Silent until asked for. Sound that starts by itself is hostile, and a
-    // browser will refuse to start it outside a gesture anyway.
+    // Built silent; the overlay turns it on (on by default since September
+    // 2026), and the browser decides when a context may actually run.
     this.atmosphere = buildAtmosphere();
     this.weather = buildWeather(this.scene);
     // The city is placed relative to THIS bowl, not to a constant — see
@@ -686,7 +698,15 @@ export class MatchDaySimulator {
   soundLevels(): SoundLevels { return this.atmosphere.getLevels(); }
   setSoundMuted(m: boolean): void { this.atmosphere.setMuted(m); }
   soundMuted(): boolean { return this.atmosphere.isMuted(); }
-  setDrum(on: boolean): void { this.atmosphere.setDrum(on); }
+  setDrum(on: boolean): void {
+    // A fader moved mid-call re-applies the whole mix, drum included; while a
+    // drum call owns the stand that is remembered, not started.
+    if (this.drumCallOwnsSound()) {
+      this.drumLoopHeld = on;
+      return;
+    }
+    this.atmosphere.setDrum(on);
+  }
   drumOn(): boolean { return this.atmosphere.isDrumming(); }
 
   /**
@@ -1425,14 +1445,20 @@ export class MatchDaySimulator {
     // A drum call is a show with a soundtrack, not a wipe: it goes through the
     // timeline so its hits and its cards run on the one clock.
     if (mode === 'drum-call') {
-      if (this.timeline) this.stopTimeline(); // a show already running hands back what it silenced
+      // Straight into the next call: nothing is handed back in between, or the
+      // terrace drum gets one stray beat in on the changeover.
+      if (this.timeline) this.stopTimeline(false, false);
       const cues = this.drumCallCues(0, false);
       const plan = this.drumCallPlan();
       this.playTimeline({ duration: plan.duration + 0.4, cues });
       return;
     }
     if (this.timeline) this.stopTimeline();
-    this.restoreFade = null;
+    if (this.restoreFade) {
+      this.restoreFade = null;
+      this.recolorAll();
+      this.releaseDrumLoop();
+    }
     this.reveal = { mode, start: this.elapsed, dur: Math.max(0.5, durationMs / 1000) };
   }
 
@@ -1446,8 +1472,10 @@ export class MatchDaySimulator {
   }
   /**
    * The drum call as cues starting at `start`: the reveal itself, every hit of
-   * the tabl, and the crowd — a roar as the picture lands and again as it
-   * vanishes, which gets the bigger reaction of the two. With `cameras`, the
+   * the tabl, and the stand's "Oooh" — ON the beat the cards go up, and on the
+   * beat they come down. Not a roar a quarter of a second later, and no
+   * applause: the applause was a burst of synthetic claps landing on the tail
+   * of the drop's reaction, and it sounded like a fault. With `cameras`, the
    * cuts too: wide for each count so the whole stand is seen moving, and in
    * close while it is held.
    */
@@ -1456,10 +1484,8 @@ export class MatchDaySimulator {
     const cues: Cue[] = [{ kind: 'reveal', start, dur: plan.duration, mode: 'drum-call', drum: plan }];
     for (const h of plan.hits) cues.push({ kind: 'effect', start: start + h.t, effect: h.count === 3 ? 'drum-hit-3' : 'drum-hit' });
     plan.ups.forEach((up, k) => {
-      cues.push({ kind: 'effect', start: start + up + 0.25, effect: 'roar' });
-      const down = plan.downs[k];
-      cues.push({ kind: 'effect', start: start + down + 0.3, effect: 'roar' });
-      cues.push({ kind: 'effect', start: start + down + 0.9, effect: 'applause' });
+      cues.push({ kind: 'effect', start: start + up, effect: 'ooh' });
+      cues.push({ kind: 'effect', start: start + plan.downs[k], effect: 'ooh-drop' });
       if (cameras) {
         const countIn = plan.hits.find((h) => h.cycle === k && h.phase === 'up')?.t ?? up;
         cues.push({ kind: 'camera', start: start + Math.max(0, countIn - 0.3), shot: 'TV Broadcast' });
@@ -1474,8 +1500,20 @@ export class MatchDaySimulator {
   }
   /** The terrace drum stops for the count — the tabl has to be heard on its own. */
   private beginDrumShow(): void {
-    this.drumLoopWas = this.atmosphere.isDrumming();
-    if (this.drumLoopWas) this.atmosphere.setDrum(false);
+    if (this.atmosphere.isDrumming()) {
+      this.drumLoopHeld = true;
+      this.atmosphere.setDrum(false);
+    }
+  }
+  /** Give the terrace drum back, if a call was holding it. */
+  private releaseDrumLoop(): void {
+    if (!this.drumLoopHeld) return;
+    this.drumLoopHeld = false;
+    this.atmosphere.setDrum(true);
+  }
+  /** A drum call is playing, or its empty stand is still being held. */
+  private drumCallOwnsSound(): boolean {
+    return this.timelineHasDrumCall || this.restoreFade !== null;
   }
   /** Seconds the auto choreography runs for, so a recording can be long enough to hold it. */
   autoChoreoSeconds(): number {
@@ -1508,11 +1546,15 @@ export class MatchDaySimulator {
   private bookDrumHits(): void {
     if (!this.timeline) return;
     const now = this.elapsed + this.sinceFrame() - this.tlStart;
+    // One reading of the audio clock for the whole show — see Atmosphere.audioNow.
+    const from = this.atmosphere.audioNow();
     for (const c of this.timeline.cues) {
-      if (c.kind !== 'effect' || (c.effect !== 'drum-hit' && c.effect !== 'drum-hit-3')) continue;
+      if (c.kind !== 'effect' || !BOOKED_EFFECTS.has(c.effect)) continue;
       if (this.bookedHits.has(c) || c.start < now - 0.05) continue;
       this.bookedHits.add(c);
-      this.atmosphere.drumHit(c.effect === 'drum-hit-3', c.start - now);
+      const inSec = c.start - now;
+      if (c.effect === 'ooh' || c.effect === 'ooh-drop') this.atmosphere.ooh(inSec, c.effect === 'ooh-drop', from);
+      else this.atmosphere.drumHit(c.effect === 'drum-hit-3', inSec, from);
     }
   }
   private stepRestore(): void {
@@ -1522,6 +1564,7 @@ export class MatchDaySimulator {
     if (p >= 1) {
       this.restoreFade = null;
       this.recolorAll();
+      this.releaseDrumLoop();
       return;
     }
     const a = p * p * (3 - 2 * p);
@@ -1530,18 +1573,17 @@ export class MatchDaySimulator {
 
   // ---- choreography timeline (Wave C) ----
   playTimeline(tl: Timeline, loop = false): void {
-    // Replacing a drum call mid-show hands the terrace drum back first.
-    if (this.timelineHasDrumCall && this.drumLoopWas && tl !== this.timeline) {
-      this.atmosphere.setDrum(true);
-      this.drumLoopWas = false;
-      this.onDrumBeat?.({ count: 0, phase: null, pulse: 0 });
-    }
+    const nextIsDrumCall = tl.cues.some((c) => c.kind === 'reveal' && c.mode === 'drum-call');
+    if (this.timelineHasDrumCall && tl !== this.timeline) this.onDrumBeat?.({ count: 0, phase: null, pulse: 0 });
+    // A show that is not a drum call gets the terrace drum back; one that is
+    // keeps it held — handing it back only to take it away again is one stray
+    // beat on the changeover.
+    if (!nextIsDrumCall && this.drumCallOwnsSound()) this.releaseDrumLoop();
     this.reveal = null;
     this.restoreFade = null;
-    this.atmosphere.cancelDrumHits();
+    this.atmosphere.cancelBooked();
     this.bookedHits.clear();
-    // A show with a drum call in it silences the terrace drum for its counts.
-    if (tl.cues.some((c) => c.kind === 'reveal' && c.mode === 'drum-call')) this.beginDrumShow();
+    if (nextIsDrumCall) this.beginDrumShow();
     this.flyActive = false;
     this.camTween = null;
     this.controls.enabled = true;
@@ -1560,22 +1602,25 @@ export class MatchDaySimulator {
    * stand empty, and that is held for a moment — it is the ending — before the
    * design settles back. Stopped by hand, everything comes back at once.
    */
-  stopTimeline(ended = false): void {
+  stopTimeline(ended = false, handBack = true): void {
     const drumShow = this.timelineHasDrumCall;
     // Stopped by hand mid-count, the hits still to come must not sound.
-    if (!ended) this.atmosphere.cancelDrumHits();
+    if (!ended) this.atmosphere.cancelBooked();
     this.bookedHits.clear();
     this.timeline = null;
     this.revealActiveLast = false;
     if (drumShow) {
       this.onDrumBeat?.({ count: 0, phase: null, pulse: 0 });
-      if (this.drumLoopWas) this.atmosphere.setDrum(true);
-      this.drumLoopWas = false;
+      // Ended by itself, the drum waits for the design to settle back (stepRestore).
+      if (!ended && handBack) this.releaseDrumLoop();
     }
     if (drumShow && ended) this.restoreFade = { start: this.elapsed + 2.5, dur: 1 };
     else {
+      // Stop pressed while an ended call's empty stand was still being held.
+      const wasHolding = this.restoreFade !== null;
       this.restoreFade = null;
       this.recolorAll();
+      if (wasHolding && handBack) this.releaseDrumLoop();
     }
     for (const a of this.assetStore.list()) this.assetLayer.setOpacity(a.id, 1);
     // Stopping a show should leave the tifo up, not half-unrolled: the state
@@ -1652,8 +1697,31 @@ export class MatchDaySimulator {
     // replayed twice opens with the tifo already up.
     for (const b of this.bannerStore?.list() ?? []) this.bannerRigs?.setProgress(b.id, 0);
     const tl = this.buildAutoChoreo();
-    if (this.autoReveal === 'drum-call' && this.timeline) this.stopTimeline();
+    if (this.autoReveal === 'drum-call' && this.timeline) this.stopTimeline(false, false);
     this.playTimeline(tl, false);
+  }
+  private fireEffects(list: EffectName[]): void {
+    for (const e of list) {
+      // Through the wrappers, not straight at `this.effects` — the wrappers are
+      // where the sound of each of these lives, and a cue that fires the
+      // particles without the noise is the bug this whole pass is about.
+      if (e === 'confetti') this.burstConfetti();
+      else if (e === 'pyro') this.burstPyro();
+      else if (e === 'smoke-on') this.effects.setSmoke(true);
+      else if (e === 'smoke-off') this.effects.setSmoke(false);
+      else if (e === 'floods-on') this.setFloodlights(true);
+      else if (e === 'floods-off') this.setFloodlights(false);
+      else if (e === 'roar') this.atmosphere.roar(1);
+      else if (e === 'whistle') this.atmosphere.whistle(false);
+      else if (e === 'whistle-long') this.atmosphere.whistle(true);
+      else if (e === 'applause') this.atmosphere.applause(1);
+      else if (e === 'chant') this.atmosphere.chant();
+      else if (e === 'airhorn') this.atmosphere.airhorn();
+      else if (e === 'drum-on') this.atmosphere.setDrum(true);
+      else if (e === 'drum-off') this.atmosphere.setDrum(false);
+      // The tabl hits and the oohs are BOOKED_EFFECTS: booked on the audio
+      // clock when the show starts (bookDrumHits), never fired on a frame.
+    }
   }
   private stepTimeline(): void {
     if (!this.timeline) return;
@@ -1671,10 +1739,12 @@ export class MatchDaySimulator {
         // managing a few frames a second the frame before this one can be a
         // second back — for a drum call that is still inside the hold, and
         // stopping here would skip the drop, which is the whole ending.
-        if (this.timelineHasDrumCall) {
-          const end = evalTimeline(this.timeline, this.timeline.duration, this.tlPrev);
-          if (end.reveal) this.applyReveal(revealVisibility(this.map, end.reveal.mode, end.reveal.progress, end.reveal.drum));
+        // The same frame can also have crossed the last cues; they still fire.
+        const end = evalTimeline(this.timeline, this.timeline.duration, this.tlPrev);
+        if (this.timelineHasDrumCall && end.reveal) {
+          this.applyReveal(revealVisibility(this.map, end.reveal.mode, end.reveal.progress, end.reveal.drum));
         }
+        this.fireEffects(end.firedEffects);
         this.stopTimeline(true);
         return;
       }
@@ -1696,26 +1766,7 @@ export class MatchDaySimulator {
     for (const id of Object.keys(st.bannerProgress)) {
       this.bannerRigs?.setProgress(id, st.bannerProgress[id]);
     }
-    for (const e of st.firedEffects) {
-      // Through the wrappers, not straight at `this.effects` — the wrappers are
-      // where the sound of each of these lives, and a cue that fires the
-      // particles without the noise is the bug this whole pass is about.
-      if (e === 'confetti') this.burstConfetti();
-      else if (e === 'pyro') this.burstPyro();
-      else if (e === 'smoke-on') this.effects.setSmoke(true);
-      else if (e === 'smoke-off') this.effects.setSmoke(false);
-      else if (e === 'floods-on') this.setFloodlights(true);
-      else if (e === 'floods-off') this.setFloodlights(false);
-      else if (e === 'roar') this.atmosphere.roar(1);
-      else if (e === 'whistle') this.atmosphere.whistle(false);
-      else if (e === 'whistle-long') this.atmosphere.whistle(true);
-      else if (e === 'applause') this.atmosphere.applause(1);
-      else if (e === 'chant') this.atmosphere.chant();
-      else if (e === 'airhorn') this.atmosphere.airhorn();
-      else if (e === 'drum-on') this.atmosphere.setDrum(true);
-      else if (e === 'drum-off') this.atmosphere.setDrum(false);
-      // 'drum-hit' / 'drum-hit-3' are booked ahead by bookDrumHits, not fired here.
-    }
+    this.fireEffects(st.firedEffects);
     if (st.camera && st.camera !== this.lastCamName) {
       const shot = this.shots().find((s) => s.name === st.camera);
       if (shot) applyCameraShot(this.camera, this.controls, shot);

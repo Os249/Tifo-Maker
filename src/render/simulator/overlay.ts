@@ -542,6 +542,8 @@ interface SimState {
  * below reaches `Number()` without a `typeof` check first.
  */
 interface SoundPrefs {
+  /** Stadium sound on or off. On unless someone has turned it off. */
+  on: boolean;
   levels: SoundLevels;
   muted: boolean;
   drum: boolean;
@@ -549,15 +551,21 @@ interface SoundPrefs {
   weather: boolean;
 }
 
-const SOUND_KEY = 'mds_sound_v1';
-/** The shape before this: a bare 0..1 master volume. Honoured once, then migrated. */
-const LEGACY_VOLUME_KEY = 'mds_volume';
+/**
+ * v2 (September 2026): new defaults for everybody — sound on, quieter levels,
+ * the terrace drum off. A v1 mix is not carried over on purpose: most of them
+ * were the old loud defaults, saved the first time someone touched anything.
+ */
+const SOUND_KEY = 'mds_sound_v2';
 
 function readSoundPrefs(): SoundPrefs {
   const base: SoundPrefs = {
+    on: true,
     levels: { ...DEFAULT_LEVELS },
     muted: false,
-    drum: true,
+    // The terrace drum is off until asked for: under a drum call it is a second
+    // drum, and on its own it is the loudest thing in the mix.
+    drum: false,
     reactive: true,
     weather: true,
   };
@@ -567,15 +575,7 @@ function readSoundPrefs(): SoundPrefs {
   let raw: string | null = null;
   try {
     raw = localStorage.getItem(SOUND_KEY);
-    if (raw === null) {
-      // Somebody who did move the old slider keeps where they put it.
-      const legacy = localStorage.getItem(LEGACY_VOLUME_KEY);
-      if (legacy !== null && legacy !== '') {
-        const v = Number(legacy);
-        if (Number.isFinite(v) && v > 0 && v <= 1) base.levels.master = v;
-      }
-      return base;
-    }
+    if (raw === null) return base;
   } catch {
     return base; // private mode: the defaults are the point
   }
@@ -584,6 +584,7 @@ function readSoundPrefs(): SoundPrefs {
     if (!p || typeof p !== 'object') return base;
     const lv = p.levels as Partial<SoundLevels> | undefined;
     return {
+      on: bool(p.on, base.on),
       levels: {
         master: num(lv?.master, base.levels.master),
         crowd: num(lv?.crowd, base.levels.crowd),
@@ -635,18 +636,20 @@ export function openMatchDaySimulator(
     // Always off when the simulator opens, every time. This is a deliberate
     // default, not a remembered preference — nothing persists it.
     sparkles: false,
-    // Off, like the phone flashes. Sound that starts by itself is hostile, and
-    // the browser will refuse it outside a gesture anyway.
-    sound: false,
+    // On by default (Osamah's call, September 2026): a tifo show is half
+    // sound, and a switch nobody finds is a show nobody hears. Remembered if
+    // someone turns it off. The browser still wants a gesture before audio
+    // can start — see armSoundStart.
     ...(() => {
       const p = readSoundPrefs();
-      return { muted: p.muted, levels: p.levels, drum: p.drum, reactive: p.reactive, weatherSound: p.weather };
+      return { sound: p.on, muted: p.muted, levels: p.levels, drum: p.drum, reactive: p.reactive, weatherSound: p.weather };
     })(),
   };
 
   const saveSound = (): void => {
     try {
       localStorage.setItem(SOUND_KEY, JSON.stringify({
+        on: state.sound,
         levels: state.levels, muted: state.muted, drum: state.drum,
         reactive: state.reactive, weather: state.weatherSound,
       } satisfies SoundPrefs));
@@ -1250,8 +1253,35 @@ export function openMatchDaySimulator(
     // and left the checkbox saying it was on.
     applySound();
     if (state.sound && !sim.soundOn()) {
-      void sim.setSound(true).then(() => { if (sim.soundOn()) applySound(); });
+      void sim.setSound(true).then(() => {
+        if (sim.soundOn()) applySound();
+        else armSoundStart();
+      });
     }
+  }
+  /**
+   * Sound is on by default, but a browser will not start audio until the
+   * person has done something on the page. Opened from the editor they have
+   * (the click that opened it counts); opened straight from a shared link they
+   * have not. So the first press, tap or key anywhere starts it — the checkbox
+   * already says on, and now it is.
+   */
+  function armSoundStart(): void {
+    if (soundArmed) return;
+    soundArmed = true;
+    const go = (): void => {
+      disarmSoundStart();
+      if (!state.sound || !mountedNow() || sim.soundOn()) return;
+      void sim.setSound(true).then(() => { if (sim.soundOn()) applySound(); });
+    };
+    soundStartFn = go;
+    for (const ev of ['pointerdown', 'keydown', 'touchstart']) window.addEventListener(ev, go, { capture: true, passive: true });
+  }
+  function disarmSoundStart(): void {
+    if (!soundArmed || !soundStartFn) return;
+    for (const ev of ['pointerdown', 'keydown', 'touchstart']) window.removeEventListener(ev, soundStartFn, { capture: true });
+    soundArmed = false;
+    soundStartFn = null;
   }
   /**
    * True once a simulator instance exists and is safe to talk to.
@@ -1264,6 +1294,9 @@ export function openMatchDaySimulator(
    * happened.
    */
   let mounted = false;
+  let soundArmed = false;
+  let soundStartFn: (() => void) | null = null;
+  const mountedNow = (): boolean => mounted;
   /**
    * An instance exists and has not been disposed.
    *
@@ -1478,6 +1511,7 @@ export function openMatchDaySimulator(
   soundChk.addEventListener('change', () => {
     void (async () => {
       state.sound = soundChk.checked;
+      disarmSoundStart();
       await sim.setSound(state.sound);
       if (state.sound && !sim.soundOn()) {
         soundChk.checked = false;
@@ -1486,6 +1520,9 @@ export function openMatchDaySimulator(
         return;
       }
       applySound();
+      // Remembered now that it is on by default: someone who turns it off
+      // should not have it come back on every time they open Match Day.
+      saveSound();
     })();
   });
   muteChk.addEventListener('change', () => {
@@ -1497,9 +1534,7 @@ export function openMatchDaySimulator(
     lvl[k].addEventListener('input', () => {
       state.levels[k] = Number(lvl[k].value);
       sim.setSoundLevel(k, state.levels[k]);
-      // Remembered, unlike the on/off. How loud someone wants it is a
-      // preference; whether a page starts making noise is not a decision to
-      // make for them on their behalf a second time.
+      // Remembered, like the on/off: how loud someone wants it is theirs.
       saveSound();
     });
   }
@@ -1895,6 +1930,7 @@ export function openMatchDaySimulator(
   const close = (): void => {
     if (closed) return;
     closed = true;
+    disarmSoundStart();
     document.removeEventListener('keydown', onKey);
     document.removeEventListener('fullscreenchange', onFsChange);
     window.removeEventListener('resize', fitPanel);

@@ -104,6 +104,13 @@ const inSec = (p, key, fn, arg) => p.evaluate(({ k, f, a }) => {
 }, { k: key, f: fn, a: arg });
 
 const toggle = (p, i) => inSec(p, 'sound', 'sec.querySelectorAll(\'input[type="checkbox"]\')[arg].click();', i);
+/** Set a checkbox to a state, whatever it started as — the defaults moved (sound on, terrace drum off). */
+const setCheck = (p, i, on) => inSec(p, 'sound',
+  'const c = sec.querySelectorAll(\'input[type="checkbox"]\')[arg.i]; if (c.checked !== arg.on) c.click();', { i, on });
+/** Chosen by Osamah, September 2026: overall, crowd, effects, weather, drum. */
+const DEFAULTS = [0.3, 0.35, 0.2, 0.25, 0.25];
+/** Stored prefs with the stadium sound turned off. */
+const SOUND_OFF = [{ name: 'mds_sound_v2', value: JSON.stringify({ on: false }) }];
 const press = (p, label) => inSec(p, 'sound',
   '[...sec.querySelectorAll(".mds-btn")].find(b=>b.textContent.trim()===arg).click();', label);
 const setFader = async (p, i, v) => {
@@ -127,10 +134,14 @@ async function peak(p, n = 20, gap = 70) {
     xs.push(await p.evaluate(() => {
       const a = window.__audio?.contexts?.[0];
       if (!a) return -1;
-      const b = new Uint8Array(a.an.fftSize);
-      a.an.getByteTimeDomainData(b);
+      // Float, not bytes: at the quieter defaults (September 2026) the crowd
+      // bed sits under one 8-bit step, and every byte reading was the same
+      // quantisation noise — the overall fader "did nothing" to a number that
+      // could not move.
+      const b = new Float32Array(a.an.fftSize);
+      a.an.getFloatTimeDomainData(b);
       let s = 0;
-      for (let i = 0; i < b.length; i++) { const v = (b[i] - 128) / 128; s += v * v; }
+      for (let i = 0; i < b.length; i++) s += b[i] * b[i];
       return Math.sqrt(s / b.length);
     }));
     await new Promise((r) => setTimeout(r, gap));
@@ -139,29 +150,70 @@ async function peak(p, n = 20, gap = 70) {
 }
 /** Stop the render loop so the sampler is not competing with swiftshader. */
 const freeze = (p) => p.evaluate(() => { window.requestAnimationFrame = () => 0; });
-const AUDIBLE = 0.004;
-const SILENT = 0.0015;
+// Measured in float now, so these can sit where the signal actually is: the
+// default bed is about 0.002 RMS at the destination, silence is 0.
+const AUDIBLE = 0.0008;
+const SILENT = 0.0001;
 
-console.log('\n— nothing plays until it is asked to —');
+console.log('\n— on by default, at the chosen levels —');
 {
   const [ctx, p, errs] = await sim();
-  check('no audio context exists on open', await p.evaluate(() => window.__audio.contexts.length === 0));
   await openSound(p);
   const ui = await p.evaluate(() => {
     const s = document.querySelector('.mds-section[data-sec="sound"]');
+    const boxes = [...s.querySelectorAll('.mds-checkrow')].map((r) => [r.textContent.trim(), r.querySelector('input').checked]);
     return {
       checks: [...s.querySelectorAll('.mds-checkrow span')].map((e) => e.textContent.trim()),
+      boxes,
       faders: [...s.querySelectorAll('.mds-flabel-row')].map((e) => e.textContent.trim()),
+      levels: [...s.querySelectorAll('input[type="range"]')].map((r) => Number(r.value)),
       buttons: [...s.querySelectorAll('.mds-btn')].map((e) => e.textContent.trim()),
-      firstChecked: s.querySelector('input[type="checkbox"]').checked,
+      state: window.__audio.contexts[0]?.ctx.state ?? 'none',
     };
   });
-  check('the rig is off by default', ui.firstChecked === false);
+  const box = (re) => ui.boxes.find(([t]) => re.test(t))?.[1];
+  check('Stadium sound is on when Match Day opens', box(/Stadium sound/) === true, JSON.stringify(ui.boxes));
+  check('…and actually running, with nobody touching it', ui.state === 'running', ui.state);
+  check('the levels are 30 / 35 / 20 / 25 / 25', JSON.stringify(ui.levels) === JSON.stringify(DEFAULTS), JSON.stringify(ui.levels));
+  check('the faders read those levels', ui.faders.map((f) => f.match(/(\d+)%$/)?.[1]).join() === '30,35,20,25,25', ui.faders.join(' · '));
+  check('the terrace drum starts off, mute off', box(/Ultras drum/) === false && box(/^Mute/) === false);
+  check('crowd follows the fill and weather you can hear start on', box(/stadium fill/) === true && box(/Weather you can hear/) === true);
   check('there are five faders, not one', ui.faders.length === 5, ui.faders.join(' · '));
-  check('every bus is named and shows its level', ui.faders.every((f) => /\d+%$/.test(f)), ui.faders.join(' · '));
   check('the test row covers crowd and effects', ui.buttons.length >= 5, ui.buttons.join(','));
+  await freeze(p);
+  const heard = await peak(p);
+  check('it is audible out of the box', heard > AUDIBLE, `rms ${heard.toFixed(4)}`);
   check('no page errors', errs.length === 0, errs.join(' | '));
   await ctx.close();
+}
+
+// A browser that insists on a gesture first (the normal policy, and a shared
+// ?sim=1 link has had none): on stays on, and the first press starts it.
+{
+  const strict = await chromium.launch({
+    executablePath: '/opt/pw-browsers/chromium',
+    args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader', '--autoplay-policy=document-user-activation-required'],
+  }).catch(() => chromium.launch({ args: ['--autoplay-policy=document-user-activation-required'] }));
+  const c = await strict.newContext({ viewport: { width: 1280, height: 900 }, storageState: { cookies: [], origins: [{ origin: B, localStorage: LS('en') }] } });
+  const p = await c.newPage();
+  const errs = [];
+  p.on('pageerror', (e) => errs.push(e.message.slice(0, 160)));
+  await p.addInitScript(TAP);
+  await p.goto(B + '/app?sim=1', { waitUntil: 'networkidle', timeout: 120000 });
+  await p.waitForSelector('.mds-overlay canvas', { timeout: 120000 });
+  await p.waitForTimeout(4000);
+  const before = await p.evaluate(() => ({
+    state: window.__audio.contexts[0]?.ctx.state ?? 'none',
+    on: document.querySelector('.mds-section[data-sec="sound"] input[type="checkbox"]').checked,
+  }));
+  check('without a gesture yet, the switch still says on', before.on === true, JSON.stringify(before));
+  check('…and nothing hangs waiting for the browser', errs.length === 0, errs.join(' | '));
+  await p.mouse.click(640, 450);
+  await p.waitForTimeout(2500);
+  const after = await p.evaluate(() => window.__audio.contexts.map((a) => a.ctx.state));
+  check('the first press starts the sound', after.includes('running'), JSON.stringify({ before: before.state, after }));
+  await c.close();
+  await strict.close();
 }
 
 console.log('\n— a browser that has never been here is not muted —');
@@ -174,12 +226,12 @@ console.log('\n— a browser that has never been here is not muted —');
     return [...s.querySelectorAll('input[type="range"]')].map((r) => Number(r.value));
   });
   check('no fader starts at zero on a clean profile', defaults.every((v) => v > 0), JSON.stringify(defaults));
-  check('the faders are not all pinned at 1 either', defaults.some((v) => v < 1), JSON.stringify(defaults));
-  await toggle(p, 0);
+  check('a clean profile gets the chosen levels', JSON.stringify(defaults) === JSON.stringify(DEFAULTS), JSON.stringify(defaults));
+  await setCheck(p, 0, true);
   await p.waitForTimeout(2200);
   await freeze(p);
   const heard = await peak(p);
-  check('turning it on is audible, from empty storage', heard > AUDIBLE, `rms ${heard.toFixed(4)}`);
+  check('it is audible from empty storage', heard > AUDIBLE, `rms ${heard.toFixed(4)}`);
   check('no page errors', errs.length === 0, errs.join(' | '));
   await ctx.close();
 }
@@ -188,7 +240,7 @@ console.log('\n— every sound in the section makes one —');
 {
   const [ctx, p, errs] = await sim();
   await openSound(p);
-  await toggle(p, 0);
+  await setCheck(p, 0, true);
   await p.waitForTimeout(2200);
   await freeze(p);
   const bed = await peak(p);
@@ -206,7 +258,7 @@ console.log('\n— the faders are wired to the mix —');
 {
   const [ctx, p, errs] = await sim();
   await openSound(p);
-  await toggle(p, 0);
+  await setCheck(p, 0, true);
   await p.waitForTimeout(2200);
   await freeze(p);
   const loud = await peak(p);
@@ -236,7 +288,7 @@ console.log('\n— mute, and what it does not forget —');
 {
   const [ctx, p, errs] = await sim();
   await openSound(p);
-  await toggle(p, 0);
+  await setCheck(p, 0, true);
   await p.waitForTimeout(2200);
   await freeze(p);
   const on = await peak(p);
@@ -257,7 +309,7 @@ console.log('\n— mute, and what it does not forget —');
   await ctx.close();
 }
 
-console.log('\n— the mix is remembered, the noise is not —');
+console.log('\n— the mix is remembered, and so is turning it off —');
 {
   const [ctx, p, errs] = await sim();
   await openSound(p);
@@ -282,8 +334,17 @@ console.log('\n— the mix is remembered, the noise is not —');
     };
   });
   check('the faders come back where they were left', after.faders[1] === 0.25 && after.faders[4] === 0.1, JSON.stringify(after.faders));
-  check('but the sound is still off on arrival', after.on === false);
-  check('no audio context on a reload either', await p.evaluate(() => window.__audio.contexts.length === 0));
+  check('and the sound is on again on arrival', after.on === true);
+  // Turned off, it stays off.
+  await setCheck(p, 0, false);
+  await p.waitForTimeout(500);
+  await p.reload({ waitUntil: 'networkidle', timeout: 120000 });
+  await p.waitForSelector('.mds-overlay canvas', { timeout: 120000 });
+  await p.waitForTimeout(3500);
+  await openSound(p);
+  const off = await inSec(p, 'sound', 'return sec.querySelector(\'input[type="checkbox"]\').checked;');
+  check('someone who turned it off does not get it back on the next visit', off === false);
+  check('…and no audio context is running for them', await p.evaluate(() => !window.__audio.contexts.some((a) => a.ctx.state === 'running')));
   check('no page errors', errs.length === 0, errs.join(' | '));
   await ctx.close();
 }
@@ -292,12 +353,12 @@ console.log('\n— an empty stadium is a quiet one —');
 {
   const [ctx, p, errs] = await sim();
   await openSound(p);
-  await toggle(p, 0);
+  await setCheck(p, 0, true);
   await p.waitForTimeout(2200);
   // Drum off: it does not care how many people are in, and it dominates the bed.
   await p.evaluate(() => {
     const s = document.querySelector('.mds-section[data-sec="sound"]');
-    [...s.querySelectorAll('input[type="checkbox"]')][2].click();
+    const d = [...s.querySelectorAll('input[type="checkbox"]')][2]; if (d.checked) d.click();
   });
   await freeze(p);
   await p.waitForTimeout(600);
@@ -331,7 +392,7 @@ console.log('\n— weather you can hear —');
 {
   const [ctx, p, errs] = await sim();
   await openSound(p);
-  await toggle(p, 0);
+  await setCheck(p, 0, true);
   await p.waitForTimeout(2200);
   // Silence everything but the weather bus, so what is measured is the rain.
   await p.evaluate(() => {
@@ -339,7 +400,7 @@ console.log('\n— weather you can hear —');
     const rs = [...s.querySelectorAll('input[type="range"]')];
     for (const i of [1, 2, 4]) { rs[i].value = '0'; rs[i].dispatchEvent(new Event('input', { bubbles: true })); }
     rs[3].value = '1'; rs[3].dispatchEvent(new Event('input', { bubbles: true }));
-    [...s.querySelectorAll('input[type="checkbox"]')][2].click(); // drum off
+    const d = [...s.querySelectorAll('input[type="checkbox"]')][2]; if (d.checked) d.click(); // drum off
   });
   await freeze(p);
   await p.waitForTimeout(900);
@@ -373,13 +434,13 @@ console.log('\n— the effects that used to be silent —');
 {
   const [ctx, p, errs] = await sim();
   await openSound(p);
-  await toggle(p, 0);
+  await setCheck(p, 0, true);
   await p.waitForTimeout(2200);
   await p.evaluate(() => {
     const s = document.querySelector('.mds-section[data-sec="sound"]');
     const rs = [...s.querySelectorAll('input[type="range"]')];
     for (const i of [1, 3, 4]) { rs[i].value = '0'; rs[i].dispatchEvent(new Event('input', { bubbles: true })); }
-    [...s.querySelectorAll('input[type="checkbox"]')][2].click(); // drum off
+    const d = [...s.querySelectorAll('input[type="checkbox"]')][2]; if (d.checked) d.click(); // drum off
   });
   await freeze(p);
   await p.waitForTimeout(900);
@@ -400,7 +461,7 @@ console.log('\n— the tab going away takes the sound with it —');
 {
   const [ctx, p, errs] = await sim();
   await openSound(p);
-  await toggle(p, 0);
+  await setCheck(p, 0, true);
   await p.waitForTimeout(2200);
   await freeze(p);
   const heard = await peak(p);
@@ -429,7 +490,7 @@ console.log('\n— the clip carries the crowd —');
 {
   const [ctx, p, errs] = await sim();
   await openSound(p);
-  await toggle(p, 0);
+  await setCheck(p, 0, true);
   await p.waitForTimeout(2200);
   // Shortest clip on offer, so the suite is not sitting here for 15 seconds.
   await open(p, 'record');
@@ -462,7 +523,7 @@ console.log('\n— the clip carries the crowd —');
 
 console.log('\n— with the sound off, the clip is still a clip —');
 {
-  const [ctx, p, errs] = await sim();
+  const [ctx, p, errs] = await sim({ extra: SOUND_OFF });
   await open(p, 'record');
   await p.evaluate(() => {
     const s = document.querySelector('.mds-section[data-sec="record"]');
