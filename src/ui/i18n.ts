@@ -594,6 +594,10 @@ const STRINGS: Record<string, { en: string; ar: string }> = {
   // ---- editor: reveal panel ----
   'ed.reveal': { en: 'Animate reveal', ar: 'حركة الكشف' },
   'ed.reveal.play': { en: 'Play', ar: 'شغّل' },
+  'ed.reveal.pause': { en: 'Pause', ar: 'إيقاف مؤقت' },
+  'ed.reveal.drum.hint': { en: 'Three hits of the drum and every card in the stand goes up at once. It holds, then three more hits and every card comes down, and the picture vanishes. Length sets how long it holds.', ar: 'ثلاث ضربات طبل وترتفع كل الكروت بالمدرج مرة وحدة. تثبت شوي، وبعدها ثلاث ضربات ثانية وتنزل كل الكروت ويختفي التيفو. المدة تحدد كم يثبت.' },
+  'ed.reveal.drum.sound': { en: 'Drum sound', ar: 'صوت الطبل' },
+  'ed.reveal.drum.beats': { en: 'Drum count', ar: 'عدّ الطبل' },
   'ed.reveal.length': { en: 'Length', ar: 'المدة' },
   'ed.reveal.gif': { en: 'Export GIF (flat)', ar: 'صدّر GIF (مسطّح)' },
 
@@ -1143,6 +1147,7 @@ const STRINGS: Record<string, { en: string; ar: string }> = {
   'rev.rows': { en: 'Row by row', ar: 'صف ورا صف' },
   'rev.random': { en: 'Sparkle (random)', ar: 'تلألؤ (عشوائي)' },
   'rev.instant': { en: 'Instant', ar: 'فوري' },
+  'rev.drum': { en: 'Drum call (Saudi style)', ar: 'على الطبل (الطريقة السعودية)' },
   'ed.colors.editT': { en: 'hold to edit or remove', ar: 'استمر بالضغط عشان تعدّله أو تشيله' },
   'ed.colors.swatch': { en: 'Swatch', ar: 'لون' },
 
@@ -1887,6 +1892,7 @@ const LABEL_KEYS: Record<string, string> = {
   rows: 'rev.rows',
   random: 'rev.random',
   instant: 'rev.instant',
+  'drum-call': 'rev.drum',
   // stands, by the English name the seat map groups on
   North: 'dir.north',
   East: 'dir.east',

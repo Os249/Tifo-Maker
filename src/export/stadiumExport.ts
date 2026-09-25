@@ -1,9 +1,11 @@
 import type { SeatMap } from '../core/types';
 import type { DesignStore } from '../core/design';
-import { buildReveal, type RevealId } from '../core/reveal';
+import { buildReveal, revealEndsHidden, revealVisibilityAt, type RevealId } from '../core/reveal';
 import { encodeGif } from '../core/gif';
 import type { Preview3D } from '../render/preview3d';
 import { describeRecording, pickRecordingFormat } from '../render/simulator/recordPlan';
+import { drumCallPlanForLength } from '../core/drumCall';
+import type { DrumTrack } from '../render/drumTrack';
 
 /**
  * Stadium animation export (Phase: video/GIF of the 3D bowl).
@@ -33,14 +35,28 @@ export interface StadiumExportOpts {
   watermark: string;
   /** GIF only: cap output width (height derives from the canvas aspect). */
   gifWidth?: number;
+  /**
+   * The drum call's drum. When set and the reveal is the drum call, the
+   * preview plays it and the video carries it — a drum call you cannot hear
+   * is only half of one. Ignored by the GIF, which has no sound.
+   */
+  drum?: DrumTrack | null;
 }
 
-/** Per-seat visibility at a clock value — identical math to RevealPlayer. */
-function visAt(delays: Float32Array, clock: number): (seat: number) => number {
-  return (seat: number) => {
-    const t = (clock - delays[seat]) / FADE;
-    return t <= 0 ? 0 : t >= 1 ? 1 : t;
-  };
+/** The hits to play for this export, or none. */
+function drumHitsFor(opts: StadiumExportOpts): ReturnType<typeof drumCallPlanForLength>['hits'] | null {
+  if (opts.reveal !== 'drum-call' || !opts.drum) return null;
+  return drumCallPlanForLength(opts.durationSec).hits;
+}
+
+/**
+ * Per-seat visibility at a clock value — the same function RevealPlayer uses,
+ * or null for "just draw the design". Only a reveal that ends on the finished
+ * tifo may take that shortcut at the end; the drum call ends with it gone.
+ */
+function visAt(opts: StadiumExportOpts, delays: Float32Array, clock: number): ((seat: number) => number) | null {
+  if (clock >= 1 && !revealEndsHidden(opts.reveal)) return null;
+  return revealVisibilityAt(opts.reveal, delays, clock, FADE, opts.durationSec);
 }
 
 function drawWatermark(ctx: CanvasRenderingContext2D, w: number, h: number, text: string): void {
@@ -120,7 +136,7 @@ function buildPlayback(
   preview.setNoShows(opts.noShows);
 
   const renderFrameAt = (clock: number): void => {
-    preview.applyReveal(clock >= 1 ? null : visAt(delays, clock));
+    preview.applyReveal(visAt(opts, delays, clock));
     preview.renderOnce();
     ctx.drawImage(src, 0, 0, W, H);
     drawWatermark(ctx, W, H, opts.watermark);
@@ -138,6 +154,8 @@ function buildPlayback(
       };
       // Prime frame 0 immediately so the preview canvas is never blank.
       renderFrameAt(0);
+      const hits = drumHitsFor(opts);
+      if (hits) opts.drum?.play(hits, 0);
       requestAnimationFrame(tick);
     });
 
@@ -188,8 +206,13 @@ export async function exportStadiumVideo(
     throw new Error('Video capture is not supported in this browser. Try GIF instead.');
   }
   const play = buildPlayback(preview, map, opts, 1);
-  const asked = pickRecordingFormat() ?? { mimeType: 'video/webm', extension: 'webm' as const, universal: false };
   const stream = (play.canvas as CapturableCanvas).captureStream(opts.fps);
+  // The drum goes in the file. Its tracks belong to the drum's own output and
+  // are detached afterwards, never stopped — a stopped track is dead for good,
+  // and the next export (and the speakers) would be silent.
+  const audioTracks = drumHitsFor(opts) ? (opts.drum?.captureStream()?.getAudioTracks() ?? []) : [];
+  for (const t of audioTracks) stream.addTrack(t);
+  const asked = pickRecordingFormat(undefined, audioTracks.length > 0) ?? { mimeType: 'video/webm', extension: 'webm' as const, universal: false };
   const rec = new MediaRecorder(stream, { mimeType: asked.mimeType, videoBitsPerSecond: 8_000_000 });
   const chunks: BlobPart[] = [];
   rec.ondataavailable = (e: BlobEvent): void => {
@@ -205,6 +228,7 @@ export async function exportStadiumVideo(
     await stopped;
   } finally {
     play.finish();
+    for (const t of audioTracks) stream.removeTrack(t);
     stream.getTracks().forEach((t) => t.stop());
   }
   // Read what it negotiated at the END: Chromium leaves `mimeType` as whatever
@@ -297,7 +321,7 @@ export async function exportStadiumGif(
   try {
     for (let f = 0; f < frameCount; f++) {
       const clock = frameCount === 1 ? 1 : f / (frameCount - 1);
-      preview.applyReveal(clock >= 1 ? null : visAt(delays, clock));
+      preview.applyReveal(visAt(opts, delays, clock));
       preview.renderOnce();
       ctx.drawImage(src, 0, 0, W, H);
       drawWatermark(ctx, W, H, opts.watermark);

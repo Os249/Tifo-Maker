@@ -12,7 +12,9 @@ import { renderTextCanvas, TIFO_FONTS, type RenderedText } from '../core/text';
 import { loadTifoFonts } from '../core/tifoFonts';
 import type { ObjectLayer } from '../core/objects';
 import { MIN_LEGIBLE_RUN, findFragileSeats } from '../core/analysis';
-import { RevealPlayer, REVEAL_PRESETS, type RevealId } from '../core/reveal';
+import { RevealPlayer, REVEAL_PRESETS, revealEndsHidden, type RevealId } from '../core/reveal';
+import { drumCallBeat, DRUM_CALL_MIN_LENGTH } from '../core/drumCall';
+import { DrumTrack } from '../render/drumTrack';
 import { fetchMe, fetchScene, isSignedIn, loadDesign, registrationEmailWasSent, saveDesign, saveScene, setPublic, setDesignTitle, exportMyData, deleteAccount } from '../net/api';
 import { t as i18nT, tErr, tl, tv } from './i18n';
 import { track, setAnalyticsSignedIn } from '../net/analytics';
@@ -2315,21 +2317,68 @@ export function mountToolbar(
   const scrub = $('#reveal-scrub') as unknown as HTMLInputElement;
   const durSlider = $('#reveal-dur') as unknown as HTMLInputElement;
   const durOut = $('#reveal-dur-out');
+  // The drum call's own row: what it is, its drum, and a count you can see.
+  const drumRow = root.querySelector<HTMLElement>('#reveal-drum');
+  const drumSound = root.querySelector<HTMLInputElement>('#reveal-drum-sound');
+  const beatDots = Array.from(root.querySelectorAll<HTMLElement>('#reveal-beats i'));
+  const drum = new DrumTrack();
+  const drumOn = (): boolean => player.revealId === 'drum-call' && (drumSound?.checked ?? true);
+
+  const showBeat = (): void => {
+    const plan = player.drumPlan();
+    const b = plan ? drumCallBeat(plan, player.seconds) : { count: 0, phase: null, pulse: 0 };
+    beatDots.forEach((d, i) => {
+      d.classList.toggle('on', i < b.count);
+      d.classList.toggle('hit', i === b.count - 1 && b.pulse > 0.55);
+      d.dataset.phase = b.phase ?? '';
+    });
+  };
+
+  const setPlayLabel = (playing: boolean): void => {
+    playBtn.innerHTML = playing
+      ? `<i class="ti ti-player-pause"></i> <span>${i18nT('ed.reveal.pause')}</span>`
+      : `<i class="ti ti-player-play"></i> <span>${i18nT('ed.reveal.play')}</span>`;
+  };
 
   const player = new RevealPlayer(map, revealSel.value as RevealId, (clock, playing) => {
-    const vis = clock >= 1 ? null : (seat: number) => player.visibilityAt(seat);
+    // Clock 1 used to mean "done, just draw the design". The drum call ends
+    // with every card back down, so its last frame is drawn like the rest.
+    const vis = clock >= 1 && !revealEndsHidden(player.revealId) ? null : (seat: number) => player.visibilityAt(seat);
     editor.applyReveal(vis);
     // Drive the 3D stadium too, so the reveal plays in whichever view is open.
     getPreview?.()?.applyReveal(vis);
     scrub.value = String(Math.round(clock * 100));
-    playBtn.innerHTML = playing
-      ? '<i class="ti ti-player-pause"></i> Pause'
-      : '<i class="ti ti-player-play"></i> Play';
+    setPlayLabel(playing);
+    showBeat();
   });
+
+  /**
+   * The length control means something different for the drum call. Its hits
+   * land on a real beat, so it cannot be squeezed into two seconds; what the
+   * length buys is how long the picture is held up between the two counts.
+   */
+  const syncRevealKind = (): void => {
+    const isDrum = player.revealId === 'drum-call';
+    if (drumRow) drumRow.hidden = !isDrum;
+    const [min, max] = isDrum ? [DRUM_CALL_MIN_LENGTH, 16] : [2, 10];
+    // Read before narrowing the range: the browser clamps the value to a new
+    // min on the spot, so a 4 s wipe would come back as exactly the minimum.
+    let v = Number(durSlider.value);
+    durSlider.min = String(min);
+    durSlider.max = String(max);
+    if (isDrum && v < min) v = 9;
+    v = Math.max(min, Math.min(max, v));
+    durSlider.value = String(v);
+    player.durationSec = v;
+    durOut.textContent = `${v}s`;
+    if (!isDrum) drum.stop();
+    showBeat();
+  };
 
   // A partial reveal is a transient preview — any edit snaps back to the full
   // design so painting/filling never fights the dim overlay.
   editor.onEditWhileRevealed = () => {
+    drum.stop();
     player.reset();
     editor.applyReveal(null);
     getPreview?.()?.applyReveal(null);
@@ -2337,26 +2386,50 @@ export function mountToolbar(
   };
 
   revealSel.addEventListener('change', () => {
+    drum.stop();
+    if (player.isPlaying) player.pause();
     player.setReveal(map, revealSel.value as RevealId);
+    syncRevealKind();
     player.seek(Number(scrub.value) / 100);
   });
   playBtn.addEventListener('click', () => {
-    if (player.isPlaying) player.pause();
-    else player.play();
+    if (player.isPlaying) {
+      drum.stop();
+      player.pause();
+      return;
+    }
+    // Played from the end, the player starts over — so does the drum.
+    const plan = player.drumPlan();
+    const from = player.currentClock >= 1 ? 0 : player.seconds;
+    if (plan && drumOn()) drum.play(plan.hits, from);
+    player.play();
+  });
+  drumSound?.addEventListener('change', () => {
+    if (!drumSound.checked) drum.stop();
+    else if (player.isPlaying) {
+      const plan = player.drumPlan();
+      if (plan) drum.play(plan.hits, player.seconds);
+    }
   });
   $('#reveal-reset').addEventListener('click', () => {
+    drum.stop();
     player.reset();
     editor.applyReveal(null);
     getPreview?.()?.applyReveal(null);
   });
   scrub.addEventListener('input', () => {
+    drum.stop();
     if (player.isPlaying) player.pause();
     player.seek(Number(scrub.value) / 100);
   });
   durSlider.addEventListener('input', () => {
+    drum.stop();
+    if (player.isPlaying) player.pause();
     player.durationSec = Number(durSlider.value);
     durOut.textContent = `${durSlider.value}s`;
+    player.seek(Number(scrub.value) / 100);
   });
+  syncRevealKind();
 
   const gifBtn = $('#reveal-gif') as unknown as HTMLButtonElement;
   gifBtn.addEventListener('click', async () => {
@@ -2366,10 +2439,14 @@ export function mountToolbar(
       // Bake any floating objects first so they appear in the export.
       if (objects.list().length > 0) objects.bakeAll(store, map, EDITOR_UNITS.width);
       const { exportRevealGifAsync } = await import('../workers/client');
+      // The drum call is on a real beat, so its GIF plays in real time; the
+      // others have always played at double speed, and still do.
+      const isDrum = player.revealId === 'drum-call';
       const blob = await exportRevealGifAsync(map, store, {
         reveal: revealSel.value as RevealId,
-        frames: Math.round(player.durationSec * 9),
-        fps: 18,
+        frames: Math.round(player.durationSec * (isDrum ? 12 : 9)),
+        fps: isDrum ? 12 : 18,
+        lengthSec: player.durationSec,
       });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -2410,6 +2487,7 @@ export function mountToolbar(
     noShows: sxNoshow.checked,
     watermark: 'tifomaker.org',
     gifWidth: forGif ? Number(sxGifWidth.value) : undefined,
+    drum: !forGif && drumOn() ? drum : null,
   });
 
   // The 3D bowl only renders inside a visible, sized host, so switch to the

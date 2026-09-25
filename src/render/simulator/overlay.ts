@@ -4,6 +4,7 @@ import { MatchDaySimulator, type TimeOfDay } from './index';
 import { probeQuality, type QualityTier } from './quality';
 import { DEFAULT_LEVELS, type SoundBus, type SoundLevels } from './atmosphere';
 import { REVEAL_MODES, type RevealMode } from './choreo';
+import { DRUM_CALL } from '../../core/drumCall';
 import type { CrowdPreset } from './crowd';
 import type { AssetStore } from '../../core/sceneAssets';
 import type { BannerStore } from '../../core/banner';
@@ -113,6 +114,12 @@ const CSS = `
 .mds-divider{height:1px;background:var(--border-soft);margin:1px 0;}
 .mds-checkrow{display:flex;align-items:center;gap:9px;font-size:12.5px;line-height:1.3;color:#cfd6df;cursor:pointer;margin:0;}
 .mds-hint{font-size:11px;color:var(--text-faint);}
+.mds-beats{position:absolute;top:14px;left:50%;transform:translateX(-50%);z-index:6;display:flex;gap:10px;align-items:center;padding:8px 13px;border-radius:999px;background:rgba(6,10,18,.55);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);opacity:0;transition:opacity .2s;pointer-events:none;}
+.mds-beats.show{opacity:1;}
+.mds-beats i{width:14px;height:14px;border-radius:50%;background:rgba(255,255,255,.22);transition:transform .1s,background .08s;}
+.mds-beats i.on{background:#0FBF6B;}
+.mds-beats[data-phase=down] i.on{background:#F5B43C;}
+.mds-beats i.hit{transform:scale(1.45);}
 input[type=range].mds-range{width:100%;accent-color:var(--accent);}
 input[type=checkbox].mds-check{appearance:none;-webkit-appearance:none;position:relative;width:16px;height:16px;min-width:16px;margin:0;flex:0 0 auto;cursor:pointer;border:1.5px solid var(--border-strong);border-radius:var(--r-sm);background:var(--surface);transition:background .15s,border-color .15s;}
 input[type=checkbox].mds-check:checked{background:var(--accent);border-color:var(--accent);}
@@ -298,6 +305,23 @@ const MDS_T: Record<string, { en: string; ar: string }> = {
   autoChoreo: { en: 'Auto choreo', ar: 'كوريغرافيا تلقائية' },
   stop: { en: 'Stop', ar: 'إيقاف' },
   revealStyle: { en: 'Reveal style', ar: 'نمط الكشف' },
+  'rm.wipe-lr': { en: 'Wipe across', ar: 'مسح بالعرض' },
+  'rm.wipe-up': { en: 'Wipe upward', ar: 'مسح للأعلى' },
+  'rm.center-out': { en: 'Center out', ar: 'من النص للأطراف' },
+  'rm.sparkle': { en: 'Sparkle in', ar: 'يتلألأ' },
+  'rm.drum-call': { en: 'Drum call (Saudi style)', ar: 'على الطبل (الطريقة السعودية)' },
+  drumHold: { en: 'Hold it up for', ar: 'يثبت مرفوع لمدة' },
+  drumTimes: { en: 'How many times', ar: 'كم مرة' },
+  'drumTimes.1': { en: 'Once', ar: 'مرة وحدة' },
+  'drumTimes.2': { en: 'Twice', ar: 'مرتين' },
+  'drumTimes.3': { en: 'Three times', ar: 'ثلاث مرات' },
+  drumHint: { en: 'Three hits of the drum and the whole stand lifts its cards at once. Three more and they all come down, and the picture vanishes.', ar: 'ثلاث ضربات طبل ويرفع المدرج كله الكروت مرة وحدة. ثلاث ضربات ثانية وتنزل كلها ويختفي التيفو.' },
+  drumSoundHint: { en: 'Turn on Sound to hear the drum', ar: 'شغّل الصوت عشان تسمع الطبل' },
+  drumBeats: { en: 'Drum count', ar: 'عدّ الطبل' },
+  cueDrumCall: { en: 'Drum call added', ar: 'انضافت ضربات الطبل' },
+  secs: { en: '{n}s', ar: '{n} ث' },
+  cueCount: { en: '{n} cues in sequence', ar: 'عدد اللقطات في التسلسل: {n}' },
+  cueCountOne: { en: '1 cue in sequence', ar: 'لقطة وحدة في التسلسل' },
   playReveal: { en: 'Play reveal', ar: 'شغّل الكشف' },
   cueTime: { en: 'Cue time (seconds)', ar: 'وقت اللقطة (ثواني)' },
   cueType: { en: 'Cue type', ar: 'نوع اللقطة' },
@@ -491,6 +515,9 @@ interface SimState {
   smoke: boolean;
   fly: boolean;
   reveal: RevealMode;
+  /** The drum call: seconds held up, and how many times round. */
+  drumHold: number;
+  drumTimes: number;
   tod: TimeOfDay;
   weather: Weather;
   wet: boolean;
@@ -600,6 +627,8 @@ export function openMatchDaySimulator(
     smoke: false,
     fly: false,
     reveal: 'wipe-lr',
+    drumHold: DRUM_CALL.hold,
+    drumTimes: DRUM_CALL.times,
     tod: 'dusk',
     weather: 'clear',
     wet: true,
@@ -879,8 +908,26 @@ export function openMatchDaySimulator(
   const autoBtn = btn(L('autoChoreo'), 'primary');
   const stopBtn = btn(L('stop'));
   const revealSel = sel();
-  for (const m of REVEAL_MODES) opt(revealSel, m.id, m.label, false);
+  for (const m of REVEAL_MODES) opt(revealSel, m.id, L(m.labelKey), false);
   const revealBtn = btn(L('playReveal'));
+  // The drum call's own controls, shown only while it is the chosen style.
+  const drumHold = rng(2, 10, state.drumHold, 0.5);
+  const secs = (n: number): string => L('secs').replace('{n}', String(n));
+  const drumHoldField = field(L('drumHold') + ' · ' + secs(state.drumHold), drumHold);
+  const drumTimes = sel();
+  for (const n of [1, 2, 3]) opt(drumTimes, String(n), L('drumTimes.' + n), n === state.drumTimes);
+  const drumHint = document.createElement('div');
+  drumHint.className = 'mds-hint';
+  drumHint.textContent = L('drumHint');
+  const drumBox = document.createElement('div');
+  drumBox.className = 'mds-drumcall';
+  drumBox.style.cssText = 'flex-direction:column;gap:10px;';
+  drumBox.append(drumHint, drumHoldField, field(L('drumTimes'), drumTimes));
+  // style.display, not `hidden`: an inline display beats the [hidden] rule.
+  const showDrumBox = (): void => {
+    drumBox.style.display = state.reveal === 'drum-call' ? 'flex' : 'none';
+  };
+  showDrumBox();
   const cueTime = document.createElement('input');
   cueTime.type = 'number';
   cueTime.min = '0';
@@ -895,12 +942,16 @@ export function openMatchDaySimulator(
   const clearSeqBtn = btn(L('clearSeq'));
   const cueCount = document.createElement('div');
   cueCount.className = 'mds-hint';
-  cueCount.textContent = '0 cues';
+  cueCount.textContent = L('cueCount').replace('{n}', '0');
+  // Stable handles for tests, which cannot go by the translated labels.
+  for (const [el, k] of [[autoBtn, 'auto'], [stopBtn, 'stop'], [revealSel, 'reveal'], [revealBtn, 'play-reveal'],
+    [drumHold, 'drum-hold'], [drumTimes, 'drum-times'], [cueKind, 'cue-kind'], [addCueBtn, 'add-cue'], [playSeqBtn, 'play-seq']] as [HTMLElement, string][]) el.dataset.k = k;
   const secChoreo = section(ICONS.choreo, L('choreo'), false);
   secChoreo.body.append(
     row(autoBtn, stopBtn),
     divider(),
     field(L('revealStyle'), revealSel),
+    drumBox,
     revealBtn,
     divider(),
     document.createTextNode(''),
@@ -913,7 +964,9 @@ export function openMatchDaySimulator(
   // Recording — configurable reveal capture (duration / fps / resolution) with a
   // Preview that plays exactly what will be recorded.
   const recDur = sel();
-  for (const [v, l] of [['6', '6s'], ['9', '9s'], ['12', '12s'], ['15', '15s']]) opt(recDur, v, l, v === '9');
+  recDur.dataset.k = 'rec-length';
+  // 20 and 30 are for the drum call: twice round is about twenty seconds.
+  for (const [v, l] of [['6', '6s'], ['9', '9s'], ['12', '12s'], ['15', '15s'], ['20', '20s'], ['30', '30s']]) opt(recDur, v, l, v === '9');
   const recFps = sel();
   for (const f of ['24', '30', '60']) opt(recFps, f, f + ' fps', f === '30');
   const recRes = sel();
@@ -988,6 +1041,22 @@ export function openMatchDaySimulator(
   const flash = document.createElement('div'); // snapshot capture flash
   flash.className = 'mds-flash';
   overlay.append(help, flash);
+  // The drum call's count, on the picture — so it reads with the sound off.
+  const beats = document.createElement('div');
+  beats.className = 'mds-beats';
+  beats.setAttribute('role', 'img');
+  beats.setAttribute('aria-label', L('drumBeats'));
+  const beatDots = [0, 1, 2].map(() => document.createElement('i'));
+  beats.append(...beatDots);
+  host.appendChild(beats);
+  const renderBeat = (b: { count: number; phase: 'up' | 'down' | null; pulse: number }): void => {
+    beats.classList.toggle('show', b.count > 0);
+    beats.dataset.phase = b.phase ?? '';
+    beatDots.forEach((d, i) => {
+      d.classList.toggle('on', i < b.count);
+      d.classList.toggle('hit', i === b.count - 1 && b.pulse > 0.55);
+    });
+  };
 
   const showHelp = (): void => help.classList.add('show');
   const hideHelp = (): void => help.classList.remove('show');
@@ -1172,6 +1241,8 @@ export function openMatchDaySimulator(
     sim.setWetPitch(state.wet);
     sim.setSparkles(state.sparkles);
     sim.setAutoReveal(state.reveal);
+    sim.setDrumCall({ hold: state.drumHold, times: state.drumTimes });
+    sim.onDrumBeat = renderBeat;
     if (!state.fly) sim.applyShot(shots[state.camIdx] ?? shots[0]);
     // Changing the quality tier disposes the simulator and builds a new one,
     // and the new one's atmosphere starts silent and at its defaults. Without
@@ -1648,21 +1719,60 @@ export function openMatchDaySimulator(
     toast(L('snapped').replace('{what}', L('snap.centre')));
   });
 
-  revealBtn.addEventListener('click', () => sim.playReveal(state.reveal));
+  /** The drum is half of the drum call; say so once if the sound is off. */
+  let drumHintShown = false;
+  const nudgeDrumSound = (): void => {
+    if (state.reveal !== 'drum-call' || state.sound || drumHintShown) return;
+    drumHintShown = true;
+    toast(L('drumSoundHint'));
+  };
+  /** A clip of a drum call has to be long enough to reach the drop. */
+  const fitRecordLength = (): void => {
+    if (state.reveal !== 'drum-call') return;
+    const need = sim.autoChoreoSeconds();
+    if (Number(recDur.value) >= need) return;
+    const fit = Array.from(recDur.options).map((o) => Number(o.value)).find((v) => v >= need);
+    recDur.value = String(fit ?? recDur.options[recDur.options.length - 1].value);
+  };
+  revealBtn.addEventListener('click', () => {
+    nudgeDrumSound();
+    sim.playReveal(state.reveal);
+  });
   revealSel.addEventListener('change', () => {
     state.reveal = revealSel.value as RevealMode;
     sim.setAutoReveal(state.reveal);
+    showDrumBox();
+    fitRecordLength();
+  });
+  const drumHoldLabel = drumHoldField.querySelector<HTMLElement>('.mds-flabel');
+  drumHold.addEventListener('input', () => {
+    state.drumHold = Number(drumHold.value);
+    if (drumHoldLabel) drumHoldLabel.textContent = L('drumHold') + ' · ' + secs(state.drumHold);
+    sim.setDrumCall({ hold: state.drumHold });
+    fitRecordLength();
+  });
+  drumTimes.addEventListener('change', () => {
+    state.drumTimes = Number(drumTimes.value);
+    sim.setDrumCall({ times: state.drumTimes });
+    fitRecordLength();
   });
   const cues: Cue[] = [];
   const updateCueCount = (): void => {
-    cueCount.textContent = cues.length + ' cue' + (cues.length === 1 ? '' : 's') + ' in sequence';
+    cueCount.textContent = cues.length === 1 ? L('cueCountOne') : L('cueCount').replace('{n}', String(cues.length));
   };
-  autoBtn.addEventListener('click', () => sim.playAutoChoreo());
+  autoBtn.addEventListener('click', () => {
+    nudgeDrumSound();
+    sim.playAutoChoreo();
+  });
   stopBtn.addEventListener('click', () => sim.stopTimeline());
   addCueBtn.addEventListener('click', () => {
     const t = Number(cueTime.value) || 0;
     const k = cueKind.value;
-    if (k === 'reveal') cues.push({ kind: 'reveal', start: t, dur: 4, mode: state.reveal });
+    if (k === 'reveal' && state.reveal === 'drum-call') {
+      // A drum call is its hits and its crowd as well as its cards.
+      cues.push(...sim.drumCallCues(t, false));
+      toast(L('cueDrumCall'));
+    } else if (k === 'reveal') cues.push({ kind: 'reveal', start: t, dur: 4, mode: state.reveal });
     else if (k === 'camera') {
       const shot = sim.shots()[Number(camSel.value)] ?? sim.shots()[0];
       cues.push({ kind: 'camera', start: t, shot: shot.name });
@@ -1674,7 +1784,9 @@ export function openMatchDaySimulator(
       sim.playAutoChoreo();
       return;
     }
-    const dur = Math.max(5, ...cues.map((c) => c.start)) + 5;
+    // Long enough for the longest cue to finish, not only to start.
+    const dur = Math.max(5, ...cues.map((c) => c.start + ('dur' in c ? c.dur : 0))) + 5;
+    if (cues.some((c) => c.kind === 'reveal' && c.mode === 'drum-call')) nudgeDrumSound();
     sim.playTimeline({ duration: dur, cues: cues.slice() });
   });
   clearSeqBtn.addEventListener('click', () => {
@@ -1727,6 +1839,7 @@ export function openMatchDaySimulator(
   };
   // Preview plays the exact reveal (with the selected style) without recording.
   previewBtn.addEventListener('click', () => {
+    nudgeDrumSound();
     sim.playAutoChoreo();
     toast(L('previewing'));
   });

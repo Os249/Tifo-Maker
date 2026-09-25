@@ -1,4 +1,5 @@
 import type { SeatMap } from './types';
+import { drumCallPlanForLength, drumCallVisibility, type DrumCallPlan } from './drumCall';
 
 /**
  * Reveal animation.
@@ -19,7 +20,8 @@ export type RevealId =
   | 'sections'
   | 'rows'
   | 'random'
-  | 'instant';
+  | 'instant'
+  | 'drum-call';
 
 export interface RevealPreset {
   id: RevealId;
@@ -35,7 +37,47 @@ export const REVEAL_PRESETS: RevealPreset[] = [
   { id: 'rows', name: 'Row by row' },
   { id: 'random', name: 'Sparkle (random)' },
   { id: 'instant', name: 'Instant' },
+  { id: 'drum-call', name: 'Drum call (Saudi style)' },
 ];
+
+/**
+ * Reveals that finish with the picture gone rather than up.
+ *
+ * Every other reveal ends on the finished tifo, so "the clock is at 1" has
+ * always been allowed to mean "just show the design". The drum call ends with
+ * every card back down — that disappearance is the point of it — so its last
+ * frame has to be drawn like any other frame.
+ */
+export function revealEndsHidden(id: RevealId): boolean {
+  return id === 'drum-call';
+}
+
+/**
+ * Per-seat visibility at a clock value, for any reveal — the one place the
+ * editor preview, the flat GIF and the 3D export all get it from, so the three
+ * cannot drift apart.
+ *
+ * `lengthSec` only matters to the drum call, whose hits land on a real beat
+ * and so cannot be stretched with the clock: the length decides how long the
+ * picture is held, not how fast the drum is.
+ */
+export function revealVisibilityAt(
+  id: RevealId,
+  delays: Float32Array,
+  clock: number,
+  fade: number,
+  lengthSec: number,
+): (seat: number) => number {
+  if (id === 'drum-call') {
+    const plan = drumCallPlanForLength(lengthSec);
+    const t = clock * plan.duration;
+    return (seat: number) => drumCallVisibility(plan, seat, t);
+  }
+  return (seat: number) => {
+    const t = (clock - delays[seat]) / fade;
+    return t <= 0 ? 0 : t >= 1 ? 1 : t;
+  };
+}
 
 /** Deterministic hash → [0,1) for the sparkle ordering. */
 function hash01(n: number): number {
@@ -48,7 +90,9 @@ function hash01(n: number): number {
 /** Build the per-seat delay array (length = map.count) for a reveal preset. */
 export function buildReveal(map: SeatMap, id: RevealId): Float32Array {
   const delay = new Float32Array(map.count);
-  if (id === 'instant') return delay; // all zero
+  // The drum call has no ordering — everybody moves on the same beat — so it
+  // has no delays either; its timing lives in core/drumCall.
+  if (id === 'instant' || id === 'drum-call') return delay; // all zero
 
   const sectionCount = (Math.max(...Array.from(map.sectionOf)) || 0) + 1;
   let maxRow = 0;
@@ -100,7 +144,9 @@ export interface PlaybackState {
  */
 export class RevealPlayer {
   private delay: Float32Array;
+  private id: RevealId;
   private clock = 0;
+  private plan: { len: number; plan: DrumCallPlan } | null = null;
   private raf = 0;
   private last = 0;
 
@@ -114,17 +160,40 @@ export class RevealPlayer {
     id: RevealId,
     private readonly onFrame: (clock: number, playing: boolean) => void,
   ) {
+    this.id = id;
     this.delay = buildReveal(map, id);
   }
 
   setReveal(map: SeatMap, id: RevealId): void {
+    this.id = id;
     this.delay = buildReveal(map, id);
+  }
+
+  get revealId(): RevealId {
+    return this.id;
+  }
+
+  /** The drum call this player is running, for the current length. Null for any other reveal. */
+  drumPlan(): DrumCallPlan | null {
+    if (this.id !== 'drum-call') return null;
+    if (!this.plan || this.plan.len !== this.durationSec) {
+      this.plan = { len: this.durationSec, plan: drumCallPlanForLength(this.durationSec) };
+    }
+    return this.plan.plan;
   }
 
   /** Per-seat visibility 0..1 at the current clock (1 = fully up). */
   visibilityAt(seat: number): number {
+    const plan = this.drumPlan();
+    if (plan) return drumCallVisibility(plan, seat, this.clock * plan.duration);
     const t = (this.clock - this.delay[seat]) / this.fade;
     return t <= 0 ? 0 : t >= 1 ? 1 : t;
+  }
+
+  /** Seconds into the animation — what a drum track has to line up with. */
+  get seconds(): number {
+    const plan = this.drumPlan();
+    return this.clock * (plan ? plan.duration : this.durationSec);
   }
 
   get delays(): Float32Array {
@@ -142,7 +211,8 @@ export class RevealPlayer {
       const dt = (now - this.last) / 1000;
       this.last = now;
       // Reveal occupies the first (1 - fade) of the clock so the last seats finish at 1.
-      this.clock = Math.min(1, this.clock + dt / this.durationSec);
+      const plan = this.drumPlan();
+      this.clock = Math.min(1, this.clock + dt / (plan ? plan.duration : this.durationSec));
       this.onFrame(this.clock, this.clock < 1);
       if (this.clock < 1) this.raf = requestAnimationFrame(tick);
       else this.raf = 0;

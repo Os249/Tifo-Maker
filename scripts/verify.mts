@@ -236,7 +236,7 @@ for (const preset of REVEAL_PRESETS) {
   const d = buildReveal(map, preset.id);
   let lo = Infinity, hi = -Infinity;
   for (const v of d) { if (v < lo) lo = v; if (v > hi) hi = v; }
-  if (preset.id !== 'instant' && (lo < 0 || hi > 1 || hi - lo < 0.5))
+  if (preset.id !== 'instant' && preset.id !== 'drum-call' && (lo < 0 || hi > 1 || hi - lo < 0.5))
     throw new Error(`reveal ${preset.id} bad range ${lo}..${hi}`);
 }
 console.log('reveals:', REVEAL_PRESETS.length, 'orderings span [0,1]');
@@ -248,6 +248,110 @@ for (let i = 1; i < map.count; i++) {
   if (map.uv[i*2] > map.uv[(i-1)*2] + 0.01 && dl[i] < dl[i-1] - 0.01) { mono = false; break; }
 }
 console.log('sweep-lr tracks u:', mono);
+
+// --- The drum call (Saudi style): 3 hits → every card up; 3 hits → every card down ---
+{
+  const { drumCallPlan, drumCallPlanForLength, drumCallVisibility, drumCallBeat, DRUM_CALL, DRUM_CALL_MIN_LENGTH } = await import('../src/core/drumCall');
+  const { revealVisibilityAt, revealEndsHidden } = await import('../src/core/reveal');
+  const { evalTimeline } = await import('../src/render/simulator/timeline');
+  const { revealVisibility, REVEAL_MODES } = await import('../src/render/simulator/choreo');
+  const near = (a: number, b: number): boolean => Math.abs(a - b) < 1e-6;
+  const p1 = drumCallPlan();
+  if (p1.hits.length !== 6) throw new Error(`a one-cycle call is six hits, got ${p1.hits.length}`);
+  const upHits = p1.hits.filter((h) => h.phase === 'up');
+  if (upHits.map((h) => h.count).join() !== '1,2,3') throw new Error('the lift is counted 1, 2, 3');
+  for (let k = 1; k < p1.hits.length; k++) {
+    const gap = p1.hits[k].t - p1.hits[k - 1].t;
+    if (p1.hits[k].phase === p1.hits[k - 1].phase && !near(gap, p1.beat)) throw new Error(`hits in a count are a beat apart, got ${gap}`);
+  }
+  if (!near(p1.ups[0], upHits[2].t + p1.beat)) throw new Error('the cards go up on the beat after the third hit');
+  const downHits = p1.hits.filter((h) => h.phase === 'down');
+  if (!near(downHits[0].t, p1.ups[0] + p1.hold)) throw new Error('the drop count starts when the hold ends');
+  if (!near(p1.downs[0], downHits[2].t + p1.beat)) throw new Error('the cards come down on the beat after the third hit');
+  if (p1.hits[0].t <= 0) throw new Error('there is a moment of quiet before the first hit');
+
+  // Every seat: down before the lift, up through the hold, down after the drop.
+  const allAt = (plan: typeof p1, t: number): { up: number; down: number } => {
+    let up = 0, down = 0;
+    for (let i = 0; i < map.count; i++) {
+      const v = drumCallVisibility(plan, i, t);
+      if (v >= 1) up++; else if (v <= 0) down++;
+    }
+    return { up, down };
+  };
+  const settle = p1.jitter + p1.lift + 1e-3;
+  if (allAt(p1, upHits[2].t + 0.01).down !== map.count) throw new Error('nobody lifts on the third hit itself');
+  if (allAt(p1, p1.ups[0] + settle).up !== map.count) throw new Error('the whole stand is up once the slowest fan has lifted');
+  if (allAt(p1, p1.ups[0] + p1.hold * 0.5).up !== map.count) throw new Error('every card stays up through the hold');
+  if (allAt(p1, p1.downs[0] - 0.01).up !== map.count) throw new Error('nobody drops before the beat');
+  if (allAt(p1, p1.downs[0] + settle).down !== map.count) throw new Error('every card is down after the drop');
+  if (allAt(p1, p1.duration).down !== map.count) throw new Error('the call ends on an empty stand');
+  // "At once" is a crowd: most of the stand inside a tenth of a second, a few late.
+  const early = allAt(p1, p1.ups[0] + p1.lift + 0.1).up / map.count;
+  const mid = allAt(p1, p1.ups[0] + 0.02);
+  if (early < 0.6) throw new Error(`most of the stand should be up within 0.1 s of the beat, got ${(early * 100).toFixed(0)}%`);
+  if (mid.up === map.count) throw new Error('the lift should be a crowd, not a switch: someone is always a little late');
+  if (settle > 0.5) throw new Error('the whole stand is up within half a second');
+
+  // More than once round: down between cycles, and never overlapping.
+  const p2 = drumCallPlan({ times: 2, hold: 3 });
+  if (p2.hits.length !== 12 || p2.ups.length !== 2) throw new Error('twice round is twelve hits and two lifts');
+  if (p2.hits.filter((h) => h.cycle === 1)[0].t <= p2.downs[0] + p2.jitter + p2.lift) throw new Error('the second count starts after the first drop has settled');
+  if (allAt(p2, (p2.downs[0] + settle + p2.hits[6].t) / 2).down !== map.count) throw new Error('the stand is empty between cycles');
+  if (allAt(p2, p2.ups[1] + settle).up !== map.count) throw new Error('the second lift brings it all back');
+  // Clamping, not throwing.
+  const wild = drumCallPlan({ hold: -5, times: 99, beat: Number.NaN });
+  if (wild.hold !== DRUM_CALL.minHold || wild.times !== DRUM_CALL.maxTimes || wild.beat !== DRUM_CALL.beat) throw new Error('out-of-range settings clamp');
+  // The editor's length control: the length is the whole call.
+  for (const len of [DRUM_CALL_MIN_LENGTH, 9, 16]) {
+    const pl = drumCallPlanForLength(len);
+    if (Math.abs(pl.duration - len) > 1e-6) throw new Error(`a ${len}s drum call lasts ${pl.duration}s`);
+  }
+  // The beat indicator counts 1, 2, 3 and empties after the cards move.
+  const b2 = drumCallBeat(p1, p1.hits[1].t + 0.01);
+  if (b2.count !== 2 || b2.phase !== 'up') throw new Error('two hits in, the count reads 2');
+  if (drumCallBeat(p1, p1.ups[0] + 1).count !== 0) throw new Error('the count empties once the cards are up');
+  if (drumCallBeat(p1, downHits[2].t + 0.01).phase !== 'down') throw new Error('the drop count reads as the drop');
+  // The shared reveal function: the editor, the GIF and the 3D export agree.
+  const zero = new Float32Array(map.count);
+  if (!revealEndsHidden('drum-call') || revealEndsHidden('sweep-lr')) throw new Error('only the drum call ends with the picture gone');
+  const len = 9, pl9 = drumCallPlanForLength(len);
+  const at = (clock: number): number => { const f = revealVisibilityAt('drum-call', zero, clock, 0.08, len); let n = 0; for (let i = 0; i < map.count; i++) n += f(i); return n / map.count; };
+  if (at(0) !== 0 || at(1) !== 0 || at((pl9.ups[0] + pl9.hold / 2) / pl9.duration) !== 1) throw new Error('the drum-call reveal is down, up, down');
+  // Match Day: the same model, held on either side of its cue in a show.
+  const mdVis = revealVisibility(map, 'drum-call', (p1.ups[0] + 1) / p1.duration, p1);
+  if (mdVis(0) !== 1) throw new Error('Match Day draws the same call');
+  const tl = { duration: 20, cues: [{ kind: 'reveal' as const, start: 2, dur: p1.duration, mode: 'drum-call' as const, drum: p1 }] };
+  const before = evalTimeline(tl, 1, 0.9).reveal, after = evalTimeline(tl, 2 + p1.duration + 3, 2 + p1.duration + 2.9).reveal;
+  if (!before || before.progress !== 0 || !after || after.progress !== 1) throw new Error('a show holds the stand empty before its drum call and after it');
+  if (!REVEAL_MODES.some((m) => m.id === 'drum-call')) throw new Error('Match Day offers the drum call');
+  // The flat GIF: empty, then the picture, then empty again.
+  const dstore = new DS2(map, ['#262a33','#1c5fd9','#f2f1ec','#e8b73a']);
+  dstore.cells.fill(1);
+  const dg = renderRevealFrames(map, dstore, { reveal: 'drum-call', width: 120, frames: 30, fps: 3, fade: 0.08, lengthSec: 10 });
+  const gray = (f: Uint8Array): number => f.filter((x) => x === 0).length / f.length;
+  const midFrame = dg.frames[Math.round(((drumCallPlanForLength(10).ups[0] + 2) / 10) * 29)];
+  if (!(gray(dg.frames[0]) > gray(midFrame) && gray(dg.frames[29]) > gray(midFrame))) throw new Error('the drum-call GIF goes empty → picture → empty');
+  // Wiring: every hit reaches the tabl, and both panels name it in both languages.
+  const { readFileSync: dcRead } = await import('node:fs');
+  const idx = dcRead('src/render/simulator/index.ts', 'utf8');
+  // Booked ahead on the audio clock, never fired on a frame: a slow frame
+  // would land three hits of a count on top of each other.
+  if (!/this\.tlLoop = loop;[\s\S]{0,80}this\.bookDrumHits\(\)/.test(idx) || !/this\.atmosphere\.drumHit\(c\.effect === 'drum-hit-3', c\.start - now\)/.test(idx)) throw new Error('drum-hit cues must be booked on the audio clock, at their own time, when the show starts');
+  if (/e === 'drum-hit'/.test(idx)) throw new Error('drum hits must not also fire on the frame that crosses them');
+  if (!/drumHit\([^)]*\)[^{]*\{[\s\S]{0,700}tablHit\(/.test(dcRead('src/render/simulator/atmosphere.ts', 'utf8'))) throw new Error('the Match Day drum hit is the tabl');
+  const ov = dcRead('src/render/simulator/overlay.ts', 'utf8');
+  for (const m of REVEAL_MODES) {
+    const i = ov.indexOf(`'${m.labelKey}':`);
+    if (i < 0 || !/\ben:[\s\S]*\bar:/.test(ov.slice(i, i + 300))) throw new Error(`Match Day reveal "${m.id}" needs en + ar`);
+  }
+  const i18nDc = dcRead('src/ui/i18n.ts', 'utf8');
+  for (const k of ['rev.drum', 'ed.reveal.drum.hint', 'ed.reveal.drum.sound', 'ed.reveal.pause']) {
+    const i = i18nDc.indexOf(`'${k}':`);
+    if (i < 0 || !/\ben:[\s\S]*\bar:/.test(i18nDc.slice(i, i + 600))) throw new Error(`"${k}" needs en + ar`);
+  }
+  console.log(`drum call: 3 hits → up on the 4th beat, ${(early * 100).toFixed(0)}% of the stand inside 0.1 s, all up by ${settle.toFixed(2)} s; held, dropped, repeated; editor = GIF = 3D = Match Day`);
+}
 
 // GIF: encode a few frames, check header/trailer and non-trivial size
 const gstore = new DS2(map, ['#262a33','#1c5fd9','#f2f1ec','#e8b73a']);

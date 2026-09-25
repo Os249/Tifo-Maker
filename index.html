@@ -587,6 +587,13 @@
           <div class="group">
             <select id="reveal-preset" class="grow0"></select>
           </div>
+          <div id="reveal-drum" class="reveal-drum" hidden>
+            <p class="hint" data-i18n="ed.reveal.drum.hint">Three hits of the drum and every card in the stand goes up at once. It holds, then three more hits and every card comes down, and the picture vanishes. Length sets how long it holds.</p>
+            <div class="group">
+              <label class="chips grow"><input type="checkbox" id="reveal-drum-sound" checked /> <span data-i18n="ed.reveal.drum.sound">Drum sound</span></label>
+              <span id="reveal-beats" class="reveal-beats" role="img" aria-label="Drum count" data-i18n-attr="aria-label:ed.reveal.drum.beats"><i></i><i></i><i></i></span>
+            </div>
+          </div>
           <div class="group" style="margin-top:10px;">
             <button id="reveal-play" class="primary grow"><i class="ti ti-player-play"></i> <span data-i18n="ed.reveal.play">Play</span></button>
             <button id="reveal-reset" title="Reset" data-i18n-attr="title:common.reset"><i class="ti ti-refresh"></i></button>

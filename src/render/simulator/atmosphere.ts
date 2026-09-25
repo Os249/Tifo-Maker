@@ -37,6 +37,8 @@
  * synthesised audio sound broken rather than cheap.
  */
 
+import { tablHit } from '../drumTrack';
+
 /** How loud the crowd bed sits under everything else, before the bus gain. */
 const BED_GAIN = 0.34;
 
@@ -96,6 +98,20 @@ export interface Atmosphere {
   chant(): void;
   /** Start/stop the ultras' drum, about 96 BPM. */
   setDrum(on: boolean): void;
+  /**
+   * One hit of the tabl — the drum that calls a card display. Not the terrace
+   * drum above: deeper, longer, and far louder, because a whole stand is
+   * waiting on it. `accent` for the third of a count, the one people move on.
+   *
+   * `inSec` schedules it that far ahead on the audio clock. The show runs on
+   * rendered frames, and a slow phone renders a few a second: a hit fired on
+   * the frame that crossed it lands late, and three hits crossed by one long
+   * frame land on top of each other — a count that is no longer a count. So
+   * the simulator looks ahead and books each hit for the moment it is due.
+   */
+  drumHit(accent?: boolean, inSec?: number): void;
+  /** Silence every booked tabl hit that has not sounded yet — a show stopped mid-count. */
+  cancelDrumHits(): void;
   isDrumming(): boolean;
 
   // ---- everything else that happens ----
@@ -244,6 +260,8 @@ export function buildAtmosphere(): Atmosphere {
   let weatherGain: GainNode | null = null;
   let swellTimer: number | undefined;
   let drumTimer: number | undefined;
+  /** Tabl hits booked ahead on the audio clock, so a stopped show can take them back. */
+  const booked: { end: number; nodes: AudioScheduledSourceNode[] }[] = [];
 
   let noise: AudioBuffer | null = null;
   let white: AudioBuffer | null = null;
@@ -821,6 +839,31 @@ export function buildAtmosphere(): Atmosphere {
       };
       tick();
       drumTimer = window.setInterval(tick, BEAT * 1000);
+    },
+
+    drumHit(accent = false, inSec = 0): void {
+      if (!ctx || !enabled || suspended || !bus.drum) return;
+      const at = ctx.currentTime + 0.01 + Math.max(0, inSec);
+      // Forget hits that have long finished, so the list stays a few long.
+      const now = ctx.currentTime;
+      for (let i = booked.length - 1; i >= 0; i--) if (booked[i].end < now) booked.splice(i, 1);
+      booked.push({ end: at + 1.1, nodes: tablHit(ctx, bus.drum, at, accent ? 1.1 : 0.9) });
+    },
+
+    cancelDrumHits(): void {
+      const now = ctx?.currentTime ?? 0;
+      for (const b of booked) {
+        // Only what has not started: a hit already ringing is left to ring.
+        if (b.end - 1.1 <= now) continue;
+        for (const n of b.nodes) {
+          try {
+            n.stop();
+          } catch {
+            /* already stopped */
+          }
+        }
+      }
+      booked.length = 0;
     },
 
     setWeatherBed(w: WeatherSound, intensity = 1): void {

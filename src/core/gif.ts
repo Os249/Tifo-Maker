@@ -1,6 +1,6 @@
 import type { SeatMap } from './types';
 import type { DesignStore } from './design';
-import { buildReveal, type RevealId } from './reveal';
+import { buildReveal, revealVisibilityAt, type RevealId } from './reveal';
 import { EMPTY_SEAT_COLOR } from './template';
 
 /**
@@ -22,6 +22,11 @@ export interface GifOptions {
   frames: number;
   fps: number;
   fade: number; // per-seat fade as a fraction of the clock
+  /**
+   * The animation's real length in seconds. Only the drum call reads it: its
+   * hits are on a real beat, so the length sets how long the picture is held.
+   */
+  lengthSec?: number;
 }
 
 const DEFAULTS: GifOptions = { reveal: 'sweep-lr', width: 480, frames: 36, fps: 18, fade: 0.08 };
@@ -82,10 +87,9 @@ export function renderRevealFrames(
   for (let f = 0; f < opts.frames; f++) {
     const clock = opts.frames === 1 ? 1 : f / (opts.frames - 1);
     const buf = new Uint8Array(w * h); // defaults to 0 = stand-gray
+    const vis = revealVisibilityAt(opts.reveal, delays, clock, opts.fade, opts.lengthSec ?? opts.frames / opts.fps);
     for (let i = 0; i < map.count; i++) {
-      const t = (clock - delays[i]) / opts.fade;
-      const vis = t <= 0 ? 0 : t >= 1 ? 1 : t;
-      buf[px[i]] = index(store.cells[i], vis);
+      buf[px[i]] = index(store.cells[i], vis(i));
     }
     frames.push(buf);
   }

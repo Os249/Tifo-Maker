@@ -1,4 +1,5 @@
 import type { SeatMap } from '../../core/types';
+import { drumCallPlan, drumCallVisibility, type DrumCallPlan } from '../../core/drumCall';
 
 /**
  * Match Day Simulator — choreography reveal (Phase 7).
@@ -9,13 +10,18 @@ import type { SeatMap } from '../../core/types';
  * the same way it would in the editor preview and in an exported clip.
  */
 
-export type RevealMode = 'wipe-lr' | 'wipe-up' | 'center-out' | 'sparkle';
+export type RevealMode = 'wipe-lr' | 'wipe-up' | 'center-out' | 'sparkle' | 'drum-call';
 
-export const REVEAL_MODES: { id: RevealMode; label: string }[] = [
-  { id: 'wipe-lr', label: 'Wipe across' },
-  { id: 'wipe-up', label: 'Wipe upward' },
-  { id: 'center-out', label: 'Center out' },
-  { id: 'sparkle', label: 'Sparkle in' },
+/**
+ * `label` is the English name; the panel shows `labelKey` from its own
+ * dictionary, so the list reads in Arabic too — it was English-only before.
+ */
+export const REVEAL_MODES: { id: RevealMode; label: string; labelKey: string }[] = [
+  { id: 'wipe-lr', label: 'Wipe across', labelKey: 'rm.wipe-lr' },
+  { id: 'wipe-up', label: 'Wipe upward', labelKey: 'rm.wipe-up' },
+  { id: 'center-out', label: 'Center out', labelKey: 'rm.center-out' },
+  { id: 'sparkle', label: 'Sparkle in', labelKey: 'rm.sparkle' },
+  { id: 'drum-call', label: 'Drum call (Saudi style)', labelKey: 'rm.drum-call' },
 ];
 
 const EDGE = 0.12; // soft transition width
@@ -33,9 +39,25 @@ function ramp(threshold: number, value: number): number {
   return Math.max(0, Math.min(1, 1 - t));
 }
 
-/** Build a visibility function for `mode` at `progress` (0..1). */
-export function revealVisibility(map: SeatMap, mode: RevealMode, progress: number): (seat: number) => number {
+/**
+ * Build a visibility function for `mode` at `progress` (0..1).
+ *
+ * The drum call is a show, not a wipe: its progress is a position in time
+ * across the whole call (both counts, the hold, the drop), and `drum` is the
+ * call being played — the default one-cycle call when none is given.
+ */
+export function revealVisibility(
+  map: SeatMap,
+  mode: RevealMode,
+  progress: number,
+  drum?: DrumCallPlan,
+): (seat: number) => number {
   const p = Math.max(0, Math.min(1, progress));
+  if (mode === 'drum-call') {
+    const plan = drum ?? drumCallPlan();
+    const t = p * plan.duration;
+    return (i: number): number => drumCallVisibility(plan, i, t);
+  }
   return (i: number): number => {
     const u = map.uv[i * 2];
     const v = map.uv[i * 2 + 1];

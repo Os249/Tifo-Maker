@@ -1953,3 +1953,16 @@ body.gate { display:block; overflow-y:auto; background:var(--ink-0); }
 @media (prefers-reduced-motion: reduce) {
   .ai-state { transition: none; }
 }
+
+/* ---- Animate panel: the drum call ----
+   Three dots that light with the drum, so the count reads with the sound off.
+   Green while it counts up to the lift, amber while it counts down to the drop. */
+.reveal-drum { margin-top:10px; }
+.reveal-drum .hint { font-size:11px; color:var(--text-3); margin:0 0 8px; line-height:1.45; }
+.reveal-drum .chips { align-items:center; }
+.reveal-beats { display:inline-flex; gap:6px; align-items:center; flex:0 0 auto; }
+.reveal-beats i { width:10px; height:10px; border-radius:50%; background:var(--line-2); box-shadow:none; transition:background .08s, transform .12s; }
+.reveal-beats i.on { background:var(--ok); box-shadow:none; }
+.reveal-beats i.on[data-phase="down"] { background:var(--warn); }
+.reveal-beats i.hit { transform:scale(1.35); }
+@media (prefers-reduced-motion: reduce) { .reveal-beats i { transition:none; } .reveal-beats i.hit { transform:none; } }

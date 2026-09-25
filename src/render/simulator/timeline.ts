@@ -1,4 +1,5 @@
 import type { RevealMode } from './choreo';
+import type { DrumCallPlan } from '../../core/drumCall';
 
 /**
  * Timeline / choreography engine (Wave F4).
@@ -31,13 +32,19 @@ export type EffectName =
   | 'chant'
   | 'airhorn'
   | 'drum-on'
-  | 'drum-off';
+  | 'drum-off'
+  // The drum call's tabl: one hit of a count, and the third — the one the
+  // stand moves on — hit harder.
+  | 'drum-hit'
+  | 'drum-hit-3';
 
 export interface RevealCue {
   kind: 'reveal';
   start: number;
   dur: number;
   mode: RevealMode;
+  /** The drum call this cue plays, fixed when the cue was made (drum-call only). */
+  drum?: DrumCallPlan;
 }
 export interface AssetShowCue {
   kind: 'assetShow';
@@ -84,7 +91,7 @@ export function emptyTimeline(): Timeline {
 }
 
 export interface TimelineState {
-  reveal: { mode: RevealMode; progress: number } | null;
+  reveal: { mode: RevealMode; progress: number; drum?: DrumCallPlan } | null;
   assetOpacity: Record<string, number>;
   /** Banner id → reveal progress 0..1 for this instant. */
   bannerProgress: Record<string, number>;
@@ -99,6 +106,12 @@ export interface TimelineState {
  */
 export function evalTimeline(tl: Timeline, t: number, prevT: number): TimelineState {
   let reveal: TimelineState['reveal'] = null;
+  // A drum call owns the stand for the whole show, not only its own window:
+  // before its first count the cards are down (that is the stand it starts
+  // from), and after its last drop they stay down — the picture going is the
+  // ending, and a design popping back the frame after it would undo it. A
+  // reveal that is actually running always wins over one being held.
+  let held: TimelineState['reveal'] = null;
   const assetOpacity: Record<string, number> = {};
   const bannerProgress: Record<string, number> = {};
   const firedEffects: EffectName[] = [];
@@ -107,7 +120,10 @@ export function evalTimeline(tl: Timeline, t: number, prevT: number): TimelineSt
   for (const c of tl.cues) {
     if (c.kind === 'reveal') {
       if (t >= c.start && t <= c.start + c.dur) {
-        reveal = { mode: c.mode, progress: c.dur > 0 ? (t - c.start) / c.dur : 1 };
+        reveal = { mode: c.mode, progress: c.dur > 0 ? (t - c.start) / c.dur : 1, drum: c.drum };
+      } else if (c.mode === 'drum-call') {
+        // After an earlier call, or before the first one: whichever is nearest.
+        if (t > c.start + c.dur || !held) held = { mode: c.mode, progress: t < c.start ? 0 : 1, drum: c.drum };
       }
     } else if (c.kind === 'assetShow') {
       if (t <= c.start) assetOpacity[c.assetId] = c.from;
@@ -123,5 +139,5 @@ export function evalTimeline(tl: Timeline, t: number, prevT: number): TimelineSt
     }
   }
 
-  return { reveal, assetOpacity, bannerProgress, firedEffects, camera };
+  return { reveal: reveal ?? held, assetOpacity, bannerProgress, firedEffects, camera };
 }

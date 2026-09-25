@@ -17,6 +17,7 @@ import { buildEffects, type EffectsController } from './effects';
 import { bowlShots, seatShot, flyover, applyShot as applyCameraShot, type SimShot } from './cameras';
 import { revealVisibility, type RevealMode } from './choreo';
 import { evalTimeline, type Timeline, type Cue } from './timeline';
+import { drumCallBeat, drumCallPlan, type DrumCallOpts, type DrumCallPlan } from '../../core/drumCall';
 import { buildAssetLayer, type AssetLayer } from './assetLayer';
 import { buildBannerRigs, type BannerRigLayer } from './bannerRig';
 import { standIsRoofed } from './roof';
@@ -163,6 +164,20 @@ export class MatchDaySimulator {
   private tlLoop = false;
   private lastCamName: string | null = null;
   private revealActiveLast = false;
+  /** The drum call's settings, from the panel. */
+  private drumCallOpts: DrumCallOpts = {};
+  /** Whether the terrace drum was going when a drum call silenced it for its count. */
+  private drumLoopWas = false;
+  /** Bringing the design back after a drum call ended with the stand empty. */
+  private restoreFade: { start: number; dur: number } | null = null;
+  /** Tabl hits already booked on the audio clock this pass of the show. */
+  private bookedHits = new Set<Cue>();
+  /**
+   * Told where the drum call's count is, every frame a call is playing, and
+   * once with a zero count when it stops — for an on-screen count that reads
+   * with the sound off.
+   */
+  onDrumBeat: ((b: { count: number; phase: 'up' | 'down' | null; pulse: number }) => void) | null = null;
   private camTween: {
     t0: number;
     dur: number;
@@ -781,7 +796,10 @@ export class MatchDaySimulator {
     if (this.recording) return null;
     if (typeof MediaRecorder === 'undefined' || typeof this.canvas.captureStream !== 'function') return null;
     this.recording = true;
-    const seconds = Math.max(1, Math.round(opts.seconds ?? 9));
+    let seconds = Math.max(1, Math.round(opts.seconds ?? 9));
+    // A drum call cut off before the drop is a clip of a tifo going up — the
+    // disappearance is the half people share. It gets the length it needs.
+    if (this.autoReveal === 'drum-call') seconds = Math.max(seconds, Math.ceil(this.autoChoreoSeconds()));
     // Everything about the clip's weight is decided here, in one pure function
     // that a test can call without a browser. See ./recordPlan.ts.
     const plan = recordingPlan({ seconds, fps: opts.fps, maxBytes: opts.maxBytes });
@@ -1404,26 +1422,161 @@ export class MatchDaySimulator {
     this.autoReveal = mode;
   }
   playReveal(mode: RevealMode, durationMs = 4500): void {
-    this.timeline = null;
+    // A drum call is a show with a soundtrack, not a wipe: it goes through the
+    // timeline so its hits and its cards run on the one clock.
+    if (mode === 'drum-call') {
+      if (this.timeline) this.stopTimeline(); // a show already running hands back what it silenced
+      const cues = this.drumCallCues(0, false);
+      const plan = this.drumCallPlan();
+      this.playTimeline({ duration: plan.duration + 0.4, cues });
+      return;
+    }
+    if (this.timeline) this.stopTimeline();
+    this.restoreFade = null;
     this.reveal = { mode, start: this.elapsed, dur: Math.max(0.5, durationMs / 1000) };
+  }
+
+  // ---- the drum call ----
+  /** Hold (seconds) and how many times, from the panel. Takes effect on the next show. */
+  setDrumCall(opts: DrumCallOpts): void {
+    this.drumCallOpts = { ...this.drumCallOpts, ...opts };
+  }
+  drumCallPlan(): DrumCallPlan {
+    return drumCallPlan(this.drumCallOpts);
+  }
+  /**
+   * The drum call as cues starting at `start`: the reveal itself, every hit of
+   * the tabl, and the crowd — a roar as the picture lands and again as it
+   * vanishes, which gets the bigger reaction of the two. With `cameras`, the
+   * cuts too: wide for each count so the whole stand is seen moving, and in
+   * close while it is held.
+   */
+  drumCallCues(start: number, cameras: boolean): Cue[] {
+    const plan = this.drumCallPlan();
+    const cues: Cue[] = [{ kind: 'reveal', start, dur: plan.duration, mode: 'drum-call', drum: plan }];
+    for (const h of plan.hits) cues.push({ kind: 'effect', start: start + h.t, effect: h.count === 3 ? 'drum-hit-3' : 'drum-hit' });
+    plan.ups.forEach((up, k) => {
+      cues.push({ kind: 'effect', start: start + up + 0.25, effect: 'roar' });
+      const down = plan.downs[k];
+      cues.push({ kind: 'effect', start: start + down + 0.3, effect: 'roar' });
+      cues.push({ kind: 'effect', start: start + down + 0.9, effect: 'applause' });
+      if (cameras) {
+        const countIn = plan.hits.find((h) => h.cycle === k && h.phase === 'up')?.t ?? up;
+        cues.push({ kind: 'camera', start: start + Math.max(0, countIn - 0.3), shot: 'TV Broadcast' });
+        // Only cut in if there is time to look before cutting back out for the drop.
+        if (plan.hold >= 2.2) {
+          cues.push({ kind: 'camera', start: start + up + 1.1, shot: 'Ultra View' });
+          cues.push({ kind: 'camera', start: start + up + plan.hold - 0.3, shot: 'TV Broadcast' });
+        }
+      }
+    });
+    return cues;
+  }
+  /** The terrace drum stops for the count — the tabl has to be heard on its own. */
+  private beginDrumShow(): void {
+    this.drumLoopWas = this.atmosphere.isDrumming();
+    if (this.drumLoopWas) this.atmosphere.setDrum(false);
+  }
+  /** Seconds the auto choreography runs for, so a recording can be long enough to hold it. */
+  autoChoreoSeconds(): number {
+    return this.buildAutoChoreo().duration;
+  }
+  private get timelineHasDrumCall(): boolean {
+    return !!this.timeline?.cues.some((c) => c.kind === 'reveal' && c.mode === 'drum-call');
+  }
+  private emitDrumBeat(t: number): void {
+    if (!this.onDrumBeat || !this.timeline) return;
+    let best: { count: number; phase: 'up' | 'down' | null; pulse: number } = { count: 0, phase: null, pulse: 0 };
+    for (const c of this.timeline.cues) {
+      if (c.kind !== 'reveal' || c.mode !== 'drum-call' || !c.drum) continue;
+      const b = drumCallBeat(c.drum, t - c.start);
+      if (b.count > best.count) best = b;
+    }
+    this.onDrumBeat(best);
+  }
+  /** Wall-clock seconds since the last rendered frame — how stale `elapsed` is right now. */
+  private sinceFrame(): number {
+    return this.running ? Math.max(0, (performance.now() - this.clock.oldTime) / 1000) : 0;
+  }
+  /**
+   * Book every tabl hit in the show on the audio clock, at the instant it is
+   * due — once, when the show starts — rather than firing each on whichever
+   * frame happens to cross it. See Atmosphere.drumHit for why a count needs
+   * this. Both clocks are wall time, so the only thing to allow for is how far
+   * past the last rendered frame "now" already is.
+   */
+  private bookDrumHits(): void {
+    if (!this.timeline) return;
+    const now = this.elapsed + this.sinceFrame() - this.tlStart;
+    for (const c of this.timeline.cues) {
+      if (c.kind !== 'effect' || (c.effect !== 'drum-hit' && c.effect !== 'drum-hit-3')) continue;
+      if (this.bookedHits.has(c) || c.start < now - 0.05) continue;
+      this.bookedHits.add(c);
+      this.atmosphere.drumHit(c.effect === 'drum-hit-3', c.start - now);
+    }
+  }
+  private stepRestore(): void {
+    if (!this.restoreFade) return;
+    const p = (this.elapsed - this.restoreFade.start) / this.restoreFade.dur;
+    if (p < 0) return; // still holding the empty stand
+    if (p >= 1) {
+      this.restoreFade = null;
+      this.recolorAll();
+      return;
+    }
+    const a = p * p * (3 - 2 * p);
+    this.applyReveal(() => a);
   }
 
   // ---- choreography timeline (Wave C) ----
   playTimeline(tl: Timeline, loop = false): void {
+    // Replacing a drum call mid-show hands the terrace drum back first.
+    if (this.timelineHasDrumCall && this.drumLoopWas && tl !== this.timeline) {
+      this.atmosphere.setDrum(true);
+      this.drumLoopWas = false;
+      this.onDrumBeat?.({ count: 0, phase: null, pulse: 0 });
+    }
     this.reveal = null;
+    this.restoreFade = null;
+    this.atmosphere.cancelDrumHits();
+    this.bookedHits.clear();
+    // A show with a drum call in it silences the terrace drum for its counts.
+    if (tl.cues.some((c) => c.kind === 'reveal' && c.mode === 'drum-call')) this.beginDrumShow();
     this.flyActive = false;
     this.camTween = null;
     this.controls.enabled = true;
     this.timeline = tl;
-    this.tlStart = this.elapsed;
+    // From now, not from the last frame: on a slow device the last frame can
+    // be a good fraction of a second ago, and the show — and the drum booked
+    // against it — would start that far into itself.
+    this.tlStart = this.elapsed + this.sinceFrame();
     this.tlPrev = 0;
     this.tlLoop = loop;
     this.lastCamName = null;
+    this.bookDrumHits();
   }
-  stopTimeline(): void {
+  /**
+   * `ended` is the show reaching its end by itself. A drum call ends with the
+   * stand empty, and that is held for a moment — it is the ending — before the
+   * design settles back. Stopped by hand, everything comes back at once.
+   */
+  stopTimeline(ended = false): void {
+    const drumShow = this.timelineHasDrumCall;
+    // Stopped by hand mid-count, the hits still to come must not sound.
+    if (!ended) this.atmosphere.cancelDrumHits();
+    this.bookedHits.clear();
     this.timeline = null;
     this.revealActiveLast = false;
-    this.recolorAll();
+    if (drumShow) {
+      this.onDrumBeat?.({ count: 0, phase: null, pulse: 0 });
+      if (this.drumLoopWas) this.atmosphere.setDrum(true);
+      this.drumLoopWas = false;
+    }
+    if (drumShow && ended) this.restoreFade = { start: this.elapsed + 2.5, dur: 1 };
+    else {
+      this.restoreFade = null;
+      this.recolorAll();
+    }
     for (const a of this.assetStore.list()) this.assetLayer.setOpacity(a.id, 1);
     // Stopping a show should leave the tifo up, not half-unrolled: the state
     // people want to look at afterwards is the finished one.
@@ -1431,6 +1584,7 @@ export class MatchDaySimulator {
   }
   /** A ready-made show: broadcast view -> tifo wipes in -> smoke -> ultra view -> pyro -> confetti -> drone. */
   buildAutoChoreo(): Timeline {
+    if (this.autoReveal === 'drum-call') return this.buildDrumCallChoreo();
     const cues: Cue[] = [
       { kind: 'camera', start: 0, shot: 'TV Broadcast' },
       // The referee's whistle opens it. Before this the show started on a drum
@@ -1477,12 +1631,29 @@ export class MatchDaySimulator {
     }
     return { duration: 15, cues };
   }
+  /**
+   * The Saudi show. No whistle and no terrace drum — the silence before the
+   * first hit is the tension — then the counts, the picture, and the picture
+   * going. Banners are rigged exactly as in the other show.
+   */
+  private buildDrumCallChoreo(): Timeline {
+    const cues = this.drumCallCues(0, true);
+    for (const b of this.bannerStore?.list() ?? []) {
+      if (b.visible === false) continue;
+      const dur = Math.max(0.4, b.revealMs / 1000);
+      cues.push({ kind: 'banner', start: b.kind === 'hanging' ? 0 : 0.5, dur, bannerId: b.id });
+    }
+    // The applause after the last drop wants a second and a half to be heard.
+    return { duration: this.drumCallPlan().duration + 1.6, cues };
+  }
   playAutoChoreo(): void {
     for (const a of this.assetStore.list()) if (a.type === 'surface') this.assetLayer.unfurl(a.id, 3000);
     // Take every banner back to nothing before the clock starts, or a show
     // replayed twice opens with the tifo already up.
     for (const b of this.bannerStore?.list() ?? []) this.bannerRigs?.setProgress(b.id, 0);
-    this.playTimeline(this.buildAutoChoreo(), false);
+    const tl = this.buildAutoChoreo();
+    if (this.autoReveal === 'drum-call' && this.timeline) this.stopTimeline();
+    this.playTimeline(tl, false);
   }
   private stepTimeline(): void {
     if (!this.timeline) return;
@@ -1492,16 +1663,27 @@ export class MatchDaySimulator {
         this.tlStart = this.elapsed;
         this.tlPrev = 0;
         this.lastCamName = null;
+        this.bookedHits.clear();
+        this.bookDrumHits();
         t = 0;
       } else {
-        this.stopTimeline();
+        // Draw the show's last instant before letting go of it. On a device
+        // managing a few frames a second the frame before this one can be a
+        // second back — for a drum call that is still inside the hold, and
+        // stopping here would skip the drop, which is the whole ending.
+        if (this.timelineHasDrumCall) {
+          const end = evalTimeline(this.timeline, this.timeline.duration, this.tlPrev);
+          if (end.reveal) this.applyReveal(revealVisibility(this.map, end.reveal.mode, end.reveal.progress, end.reveal.drum));
+        }
+        this.stopTimeline(true);
         return;
       }
     }
     const st = evalTimeline(this.timeline, t, this.tlPrev);
     this.tlPrev = t;
+    if (this.onDrumBeat) this.emitDrumBeat(t);
     if (st.reveal) {
-      this.applyReveal(revealVisibility(this.map, st.reveal.mode, st.reveal.progress));
+      this.applyReveal(revealVisibility(this.map, st.reveal.mode, st.reveal.progress, st.reveal.drum));
       this.revealActiveLast = true;
     } else if (this.revealActiveLast) {
       this.recolorAll();
@@ -1532,6 +1714,7 @@ export class MatchDaySimulator {
       else if (e === 'airhorn') this.atmosphere.airhorn();
       else if (e === 'drum-on') this.atmosphere.setDrum(true);
       else if (e === 'drum-off') this.atmosphere.setDrum(false);
+      // 'drum-hit' / 'drum-hit-3' are booked ahead by bookDrumHits, not fired here.
     }
     if (st.camera && st.camera !== this.lastCamName) {
       const shot = this.shots().find((s) => s.name === st.camera);
@@ -1658,6 +1841,7 @@ export class MatchDaySimulator {
       this.weather.update(dt);
       if (this.reveal) this.stepReveal();
       if (this.timeline) this.stepTimeline();
+      if (this.restoreFade) this.stepRestore();
       if (this.camTween) this.stepCamTween();
       this.controls.update();
       this.adaptPerf(dt);
