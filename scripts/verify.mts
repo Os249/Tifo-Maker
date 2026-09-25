@@ -340,6 +340,15 @@ console.log('sweep-lr tracks u:', mono);
   if (!/this\.tlLoop = loop;[\s\S]{0,80}this\.bookDrumHits\(\)/.test(idx) || !/this\.atmosphere\.drumHit\(c\.effect === 'drum-hit-3', inSec, from\)/.test(idx)) throw new Error('drum-hit cues must be booked on the audio clock, at their own time, when the show starts');
   if (!/BOOKED_EFFECTS = new Set<EffectName>\(\['drum-hit', 'drum-hit-3', 'ooh', 'ooh-drop'\]\)/.test(idx) || !/this\.atmosphere\.ooh\(inSec, c\.effect === 'ooh-drop', from\)/.test(idx)) throw new Error('the stand\'s "Oooh" must be booked on the audio clock like the drum');
   if (/e === 'drum-hit'|e === 'ooh'/.test(idx)) throw new Error('booked sounds must not also fire on the frame that crosses them');
+  // The Oooh is "Full stadium" (Osamah's pick, option D): choir + wash across
+  // five positions with an echo, about a second long — not the buzzy 8-saw one.
+  {
+    const atmo = dcRead('src/render/simulator/atmosphere.ts', 'utf8');
+    const ooh = atmo.slice(atmo.indexOf('function crowdOoh('), atmo.indexOf('export function buildAtmosphere('));
+    const ok = /for \(const pan of \[-0\.9, -0\.45, 0, 0\.45, 0\.9\]\)/.test(ooh) && /for \(let v = 0; v < 9; v\+\+\)/.test(ooh)
+      && /const dur = drop \? 1\.5 : 1\.3;/.test(ooh) && /p\.connect\(send\)\.connect\(echo\)/.test(ooh) && /stadiumImpulse\(ctx\)/.test(atmo);
+    if (!ok) throw new Error('the Oooh must be the chosen "Full stadium" sound: five positions, choir + wash, echo, 1.3 s');
+  }
   // The "Oooh" lands ON the beat the cards go up — not a roar a quarter of a
   // second later — and the call has no applause (it sounded like a fault).
   const cueSrc = idx.slice(idx.indexOf('  drumCallCues('), idx.indexOf('  private beginDrumShow('));

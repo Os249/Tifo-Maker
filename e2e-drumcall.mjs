@@ -69,7 +69,10 @@ const TAP = () => {
   const svat = AudioParam.prototype.setValueAtTime;
   AudioParam.prototype.setValueAtTime = function (v, t) {
     if (v === 104) window.__audio.hits.push(t); // a tabl hit's body
-    if (v === 330) window.__audio.oohs.push(t); // the crowd's "Oooh" (its first formant)
+    // The crowd's "Oooh": its wash's first formant starts at 330 Hz for the
+    // lift and 560 Hz for the drop, set once at the moment it lands (and again
+    // where the vowel starts to open, which the clustering below folds away).
+    if (v === 330 || v === 560) window.__audio.oohs.push(t);
     if (v === 150) window.__audio.terrace.push(t); // a terrace-drum hit
     return svat.call(this, v, t);
   };
@@ -429,6 +432,9 @@ console.log('\n— Match Day —');
   // The "Oooh" is ON the beat the cards go up — the one after the third hit —
   // and on the beat they come down. Within 2 ms: one render quantum.
   const au = await p.evaluate(() => ({ oohs: window.__audio.oohs.slice(), applause: window.__audio.applause, terrace: window.__audio.terrace.slice(), click: window.__clickAudio }));
+  // One Oooh is several marks (five positions, and the vowel's glide): fold
+  // marks within 0.3 s together and keep the first — the moment it lands.
+  au.oohs = [...au.oohs].sort((x, y) => x - y).filter((t, i, xs) => i === 0 || t - xs[i - 1] > 0.3);
   const oohLift = au.oohs[0] - hits[2], oohDrop = au.oohs[1] - hits[5];
   check('the crowd goes "Oooh" twice: as it appears, and as it goes', au.oohs.length === 2, String(au.oohs.length));
   check('…the first exactly as the cards go up, not a moment after', Math.abs(oohLift - BEAT) < 0.002, `${((oohLift - BEAT) * 1000).toFixed(2)} ms from the lift`);

@@ -266,75 +266,146 @@ function crackleBuffer(ctx: BaseAudioContext, seconds = 1.8): AudioBuffer {
 }
 
 /**
- * The "Oooh" a stand gives the moment its own tifo appears.
- *
- * A crowd's vowel, not a roar: the roar is a noise swell that takes a third of
- * a second to arrive and reads as "something happened". This is thousands of
- * voices on one long "oo" — eight saws scattered over a man's speaking range,
- * through the two formants of /u/ (about 330 and 850 Hz), with breath under
- * them — and it is IN within 40 ms, because people do not decide to go "Oooh",
- * it comes out of them. The pitch lifts and then falls away, which is the
- * shape of the sound more than anything else is. The drop gets a lower,
- * longer, falling one.
+ * The stadium's air, for the "Oooh": a stereo impulse of decaying noise that
+ * darkens as it dies. 1.5 s — long enough to put the voices in a bowl, short
+ * enough that the Oooh stays about a second long (Osamah: "should be shorter").
  */
-function crowdOoh(ctx: BaseAudioContext, out: AudioNode, breath: AudioBuffer, at: number, drop: boolean): AudioScheduledSourceNode[] {
-  const started: AudioScheduledSourceNode[] = [];
-  const len = drop ? 3.0 : 2.6;
-  const f1 = ctx.createBiquadFilter();
-  f1.type = 'bandpass';
-  // setValueAtTime rather than .value, so a test can find the moment it lands.
-  f1.frequency.setValueAtTime(330, at);
-  f1.Q.value = 2.4;
-  const f2 = ctx.createBiquadFilter();
-  f2.type = 'bandpass';
-  f2.frequency.value = 850;
-  f2.Q.value = 4;
-  const f2g = ctx.createGain();
-  f2g.gain.value = 0.45;
-  const body = ctx.createGain();
-  body.gain.setValueAtTime(0.0001, at);
-  const peak = drop ? 1.0 : 1.25;
-  body.gain.exponentialRampToValueAtTime(peak * 0.7, at + 0.04);
-  body.gain.exponentialRampToValueAtTime(peak, at + 0.3);
-  body.gain.setValueAtTime(peak, at + 0.7);
-  body.gain.exponentialRampToValueAtTime(0.0001, at + len);
-  f1.connect(body);
-  f2.connect(f2g).connect(body);
-  body.connect(out);
-
-  for (let v = 0; v < 8; v++) {
-    const o = ctx.createOscillator();
-    o.type = 'sawtooth';
-    const f = 105 + Math.random() * 80;
-    const lift = drop ? 1.0 : 1.07;
-    const fall = drop ? 0.82 : 0.9;
-    o.frequency.setValueAtTime(f * (drop ? 1.02 : 0.95), at);
-    o.frequency.exponentialRampToValueAtTime(f * lift, at + 0.35);
-    o.frequency.exponentialRampToValueAtTime(f * fall, at + len);
-    const g = ctx.createGain();
-    g.gain.value = 0.13;
-    o.connect(g);
-    g.connect(f1);
-    g.connect(f2);
-    o.start(at);
-    o.stop(at + len + 0.05);
-    started.push(o);
+function stadiumImpulse(ctx: BaseAudioContext, seconds = 1.5): AudioBuffer {
+  const sr = ctx.sampleRate;
+  const n = Math.floor(sr * seconds);
+  const b = ctx.createBuffer(2, n, sr);
+  for (let c = 0; c < 2; c++) {
+    const d = b.getChannelData(c);
+    let lp = 0;
+    for (let i = 0; i < n; i++) {
+      const t = i / n;
+      const k = 0.35 + 0.6 * t; // darker as it decays
+      lp += (Math.random() * 2 - 1 - lp) * (1 - k);
+      d[i] = lp * Math.pow(1 - t, 2.6) * (i < sr * 0.012 ? i / (sr * 0.012) : 1);
+    }
   }
+  return b;
+}
 
-  // Breath: the part of four thousand people that is not pitch at all.
-  const air = ctx.createBufferSource();
-  air.buffer = breath;
-  air.loop = true;
-  const af = ctx.createBiquadFilter();
-  af.type = 'bandpass';
-  af.frequency.value = 420;
-  af.Q.value = 0.9;
-  const ag = ctx.createGain();
-  ag.gain.value = 0.55;
-  air.connect(af).connect(ag).connect(body);
-  air.start(at, Math.random() * 2);
-  air.stop(at + len + 0.05);
-  started.push(air);
+/**
+ * The "Oooh" a stand gives the moment its own tifo appears — "Full stadium",
+ * the one Osamah picked out of four auditions (September 2026).
+ *
+ * Two layers across five positions left to right, so it comes from the whole
+ * stand rather than from a point:
+ *  - a choir: nine saws per position, scattered log-uniformly over 95–240 Hz
+ *    (a man's range, some higher), each coming in up to 80 ms after the beat —
+ *    most within 20 — through the /u/ formants, lifting and then falling away;
+ *  - a wash: crowd noise through the same vowel opening towards "oh", with a
+ *    7–12 Hz flutter, because four thousand people are never quite together;
+ * plus a low rumble under it, and the stadium's echo behind all of it.
+ *
+ * In within 40 ms and about a second long; the drop's is lower, falling, and a
+ * little longer. Everything is scheduled at `at`, on the audio clock.
+ */
+function crowdOoh(ctx: BaseAudioContext, out: AudioNode, echo: AudioNode, pink: AudioBuffer, at: number, drop: boolean): AudioScheduledSourceNode[] {
+  const started: AudioScheduledSourceNode[] = [];
+  const dur = drop ? 1.5 : 1.3;
+  /** Balanced by ear against the rest of the crowd bus. */
+  const LEVEL = 1.5;
+  const logRand = (lo: number, hi: number): number => Math.exp(Math.log(lo) + Math.random() * (Math.log(hi) - Math.log(lo)));
+
+  /** Envelope → pan → dry out + echo send. In within 40 ms, peak at 160 ms, gone by `dur`. */
+  const chain = (peak: number, wet: number, pan: number): GainNode => {
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, at);
+    g.gain.exponentialRampToValueAtTime(peak * 0.7, at + 0.04);
+    g.gain.exponentialRampToValueAtTime(peak, at + 0.16);
+    g.gain.setValueAtTime(peak, at + 0.3);
+    g.gain.exponentialRampToValueAtTime(0.0001, at + dur);
+    const p = ctx.createStereoPanner();
+    p.pan.value = pan;
+    g.connect(p);
+    p.connect(out);
+    const send = ctx.createGain();
+    send.gain.value = wet;
+    p.connect(send).connect(echo);
+    return g;
+  };
+  /** Vowel formants: [from Hz, to Hz, glide start, glide end, Q, gain]. */
+  const vowel = (list: [number, number, number, number, number, number][], into: AudioNode): GainNode => {
+    const inp = ctx.createGain();
+    for (const [f0, f1, g0, g1, q, gain] of list) {
+      const bp = ctx.createBiquadFilter();
+      bp.type = 'bandpass';
+      // setValueAtTime, not .value: a test finds the moment the Oooh lands by it.
+      bp.frequency.setValueAtTime(f0, at);
+      bp.frequency.setValueAtTime(f0, at + g0);
+      bp.frequency.linearRampToValueAtTime(f1, at + g1);
+      bp.Q.value = q;
+      const gg = ctx.createGain();
+      gg.gain.value = gain;
+      inp.connect(bp).connect(gg).connect(into);
+    }
+    return inp;
+  };
+  const loop = (level: number, into: AudioNode): AudioBufferSourceNode => {
+    const s = ctx.createBufferSource();
+    s.buffer = pink;
+    s.loop = true;
+    const g = ctx.createGain();
+    g.gain.value = level;
+    s.connect(g).connect(into);
+    s.start(at, Math.random() * 2);
+    s.stop(at + dur + 0.1);
+    started.push(s);
+    return s;
+  };
+
+  const contour: [number, number][] = drop ? [[0, 1.02], [0.15, 1.03], [dur, 0.82]] : [[0, 0.94], [0.2, 1.06], [dur, 0.88]];
+  const choirF: [number, number, number, number, number, number][] = drop
+    ? [[450, 380, 0.12, 0.8, 3, 1], [820, 760, 0.12, 0.8, 5, 0.5]]
+    : [[300, 360, 0.12, 0.7, 3, 1], [870, 820, 0.12, 0.7, 5, 0.5]];
+  const washF: [number, number, number, number, number, number][] = drop
+    ? [[560, 360, 0.1, 0.9, 2.5, 1], [950, 720, 0.1, 0.9, 3.5, 0.6]]
+    : [[330, 480, 0.1, 0.6, 2.5, 1], [800, 1000, 0.1, 0.6, 3.5, 0.6]];
+
+  for (const pan of [-0.9, -0.45, 0, 0.45, 0.9]) {
+    const g = chain(LEVEL * (drop ? 1.1 : 1.25), 0.5, pan);
+    // The choir.
+    const choir = vowel(choirF, g);
+    for (let v = 0; v < 9; v++) {
+      const f = logRand(95, 240);
+      const j = Math.pow(Math.random(), 2) * 0.08;
+      const o = ctx.createOscillator();
+      o.type = 'sawtooth';
+      o.detune.value = (Math.random() - 0.5) * 30;
+      o.frequency.setValueAtTime(f * contour[0][1], at + j);
+      for (let k = 1; k < contour.length; k++) o.frequency.exponentialRampToValueAtTime(f * contour[k][1], at + j + contour[k][0]);
+      const vg = ctx.createGain();
+      vg.gain.setValueAtTime(0, at);
+      vg.gain.setValueAtTime(0, at + j);
+      vg.gain.linearRampToValueAtTime(0.09 * (0.6 + Math.random() * 0.4), at + j + 0.03);
+      o.connect(vg).connect(choir);
+      o.start(at);
+      o.stop(at + dur + 0.1);
+      started.push(o);
+    }
+    // The wash, with its flutter.
+    const flutter = ctx.createGain();
+    flutter.gain.value = 1;
+    const lfo = ctx.createOscillator();
+    lfo.frequency.value = 7 + Math.random() * 5;
+    const depth = ctx.createGain();
+    depth.gain.value = 0.15;
+    lfo.connect(depth).connect(flutter.gain);
+    lfo.start(at);
+    lfo.stop(at + dur + 0.1);
+    started.push(lfo);
+    flutter.connect(vowel(washF, g));
+    loop(0.8, flutter);
+  }
+  // The rumble: the stand itself.
+  const lp = ctx.createBiquadFilter();
+  lp.type = 'lowpass';
+  lp.frequency.value = 170;
+  lp.connect(chain(LEVEL * 0.6, 0.3, 0));
+  loop(0.9, lp);
   return started;
 }
 
@@ -374,6 +445,7 @@ export function buildAtmosphere(): Atmosphere {
   let loopHits: { at: number; nodes: AudioScheduledSourceNode[] }[] = [];
 
   let noise: AudioBuffer | null = null;
+  let oohEcho: GainNode | null = null;
   let white: AudioBuffer | null = null;
   let claps: AudioBuffer | null = null;
   let crackle: AudioBuffer | null = null;
@@ -436,6 +508,11 @@ export function buildAtmosphere(): Atmosphere {
       }
 
       noise = pinkNoise(ctx);
+      // The Oooh's echo returns into the crowd bus, so the Crowd fader owns it too.
+      const conv = ctx.createConvolver();
+      conv.buffer = stadiumImpulse(ctx);
+      oohEcho = ctx.createGain();
+      oohEcho.connect(conv).connect(bus.crowd as GainNode);
       white = whiteNoise(ctx);
       claps = applauseBuffer(ctx);
       crackle = crackleBuffer(ctx);
@@ -982,9 +1059,9 @@ export function buildAtmosphere(): Atmosphere {
 
     ooh(inSec = 0, drop = false, from?: number): void {
       const out = live('crowd');
-      if (!ctx || !out || !noise) return;
+      if (!ctx || !out || !noise || !oohEcho) return;
       const at = bookAt(inSec, from);
-      booked.push({ start: at, end: at + 3.4, nodes: crowdOoh(ctx, out, noise, at, drop) });
+      booked.push({ start: at, end: at + 1.8, nodes: crowdOoh(ctx, out, oohEcho, noise, at, drop) });
     },
 
     cancelBooked(): void {
@@ -1029,6 +1106,7 @@ export function buildAtmosphere(): Atmosphere {
       limiter = null;
       streamDest = null;
       noise = null;
+      oohEcho = null;
       white = null;
       claps = null;
       crackle = null;
