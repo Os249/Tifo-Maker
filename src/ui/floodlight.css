@@ -843,6 +843,9 @@ body.viewer { display:block; overflow-y:auto; background:var(--ink-0); }
 .ob-backdrop {
   position:fixed; inset:0; z-index:250; display:flex; align-items:center; justify-content:center;
   background:rgba(7,8,10,.82); backdrop-filter:blur(4px);
+  /* Room for the cookie banner (consent.ts publishes its height) so the
+     dialog's Start button is never underneath it. */
+  box-sizing:border-box; padding:0 0 var(--consent-h, 0px);
 }
 .ob-modal {
   width:min(520px, 94vw); max-height:90vh; overflow-y:auto;
@@ -905,8 +908,8 @@ body.viewer { display:block; overflow-y:auto; background:var(--ink-0); }
 .ob-tour:hover { color:var(--text-1); border-color:var(--blue); background:transparent; }
 /* The dialog can outgrow a 900px-tall window; keep the actions reachable
    without the primary button being clipped at the bottom edge. */
-.ob-modal { max-height:calc(100dvh - 48px); display:flex; flex-direction:column; }
-.ob-modal > *:not(.ob-actions) { flex:0 1 auto; overflow-y:auto; }
+.ob-modal { max-height:calc(100dvh - 48px - var(--consent-h, 0px)); display:flex; flex-direction:column; }
+.ob-body { flex:1 1 auto; min-height:0; overflow-y:auto; overscroll-behavior:contain; }
 .ob-actions { flex:0 0 auto; position:sticky; bottom:0; background:var(--ink-1); border-top:1px solid var(--line); }
 @media (max-width:520px){ .ob-actions { flex-wrap:wrap; } .ob-tour { flex:1; } }
 
@@ -1363,6 +1366,7 @@ body.viewer { display:block; overflow-y:auto; background:var(--ink-0); }
 .dlg-backdrop {
   position:fixed; inset:0; z-index:100; display:grid; place-items:center;
   background:rgba(7,10,18,.72); backdrop-filter:blur(6px); padding:24px;
+  padding-bottom:calc(24px + var(--consent-h, 0px));
   animation:dlgFade .14s ease both;
 }
 @keyframes dlgFade { from { opacity:0; } to { opacity:1; } }

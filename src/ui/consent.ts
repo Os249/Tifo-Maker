@@ -56,6 +56,9 @@ export function installConsent(onChange?: (c: Consent) => void): void {
   bar.className = 'consent-bar';
   bar.setAttribute('role', 'dialog');
   bar.setAttribute('aria-label', t('consent.aria'));
+  // Stays clickable when a modal makes the rest of the page inert (the
+  // first-visit Start dialog does exactly that, on exactly this visit).
+  bar.setAttribute('data-stays-live', '');
 
   const msg = document.createElement('span');
   msg.className = 'consent-msg';
@@ -81,9 +84,21 @@ export function installConsent(onChange?: (c: Consent) => void): void {
       /* storage blocked — choice is session-only */
     }
     bar.remove();
+    measure.disconnect();
+    document.documentElement.style.removeProperty('--consent-h');
     onChange?.(c);
   };
   ess.addEventListener('click', () => choose('essential'));
   all.addEventListener('click', () => choose('all'));
   document.body.appendChild(bar);
+
+  // Publish how much of the bottom of the screen the banner takes, so a
+  // dialog opened underneath it can stop short of it instead of hiding its
+  // own buttons behind the banner. It wraps to two or three lines on a
+  // phone, so it is measured, not assumed.
+  const measure = new ResizeObserver(() => {
+    const h = Math.ceil(window.innerHeight - bar.getBoundingClientRect().top);
+    document.documentElement.style.setProperty('--consent-h', Math.max(0, h) + 'px');
+  });
+  measure.observe(bar);
 }

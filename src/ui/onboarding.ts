@@ -74,6 +74,10 @@ export function openOnboarding(patterns: PatternPreset[]): Promise<QuickStart | 
     backdrop.className = 'ob-backdrop';
     backdrop.innerHTML = `
       <div class="ob-modal" role="dialog" aria-modal="true" aria-label="${t('ob.aria')}">
+        <!-- One scrolling body above the actions. Each section used to scroll
+             on its own when the window was short, which stacked four
+             scrollbars down the dialog's edge. -->
+        <div class="ob-body">
         <div class="ob-hero">
           <div class="ob-brand">TIFO<b>MAKER</b></div>
           <h2 class="ob-h2">${t('ob.title')}</h2>
@@ -118,6 +122,7 @@ export function openOnboarding(patterns: PatternPreset[]): Promise<QuickStart | 
               .join('')}
           </div>
         </div>
+        </div>
         <div class="ob-actions">
           <button class="ob-start primary">${t('ob.go')}</button>
           <!-- The tour used to launch itself on top of everything else. Offered
@@ -143,9 +148,15 @@ export function openOnboarding(patterns: PatternPreset[]): Promise<QuickStart | 
      * `inert` also removes the background from the screen reader's virtual
      * cursor, which a focus trap alone would not do.
      */
+    //
+    // Except the cookie banner. It is a question of its own that the law says
+    // must be answerable, it is shown on the same first visit, and it was
+    // appended to <body> before this dialog — so it was made inert with the
+    // rest, and "Accept all" and "Essential only" did nothing at all when
+    // pressed, while the banner sat on top covering this dialog's own buttons.
     const shell = document.getElementById('app') ?? document.body.firstElementChild;
     const inertTargets = Array.from(document.body.children).filter(
-      (el) => el !== backdrop && el instanceof HTMLElement,
+      (el) => el !== backdrop && el instanceof HTMLElement && !el.hasAttribute('data-stays-live'),
     ) as HTMLElement[];
     for (const el of inertTargets) el.inert = true;
     void shell;
@@ -176,11 +187,13 @@ export function openOnboarding(patterns: PatternPreset[]): Promise<QuickStart | 
      */
     const trapTab = (e: KeyboardEvent): void => {
       if (e.key !== 'Tab') return;
-      const focusable = Array.from(
-        backdrop.querySelectorAll<HTMLElement>(
-          'a[href],button:not([disabled]),input:not([disabled]),select,textarea,[tabindex]:not([tabindex="-1"])',
-        ),
-      ).filter((el) => el.offsetParent !== null || el === document.activeElement);
+      // The cookie banner's buttons are part of the loop while it is up, after
+      // the dialog's own: a keyboard user has to be able to answer it too.
+      const sel = 'a[href],button:not([disabled]),input:not([disabled]),select,textarea,[tabindex]:not([tabindex="-1"])';
+      const live = Array.from(document.querySelectorAll<HTMLElement>('[data-stays-live]'));
+      const focusable = [backdrop, ...live]
+        .flatMap((root) => Array.from(root.querySelectorAll<HTMLElement>(sel)))
+        .filter((el) => el.offsetParent !== null || el === document.activeElement);
       if (!focusable.length) return;
       const first = focusable[0]!;
       const last = focusable[focusable.length - 1]!;
