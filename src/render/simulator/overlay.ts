@@ -10,6 +10,8 @@ import type { AssetStore } from '../../core/sceneAssets';
 import type { BannerStore } from '../../core/banner';
 import type { Cue, EffectName } from './timeline';
 import type { Weather } from './weather';
+import type { ScreenMode } from './screenPicture';
+import { tlBoth } from '../../ui/i18n';
 import { dbg } from './debug';
 import { getLang } from '../../ui/i18n';
 import {
@@ -281,6 +283,17 @@ const MDS_T: Record<string, { en: string; ar: string }> = {
   exposure: { en: 'Exposure', ar: 'السطوع' },
   sunIntensity: { en: 'Sun intensity', ar: 'شدة الشمس' },
   floodlights: { en: 'Floodlights', ar: 'الكشافات' },
+  secStadium: { en: 'Stadium screens', ar: 'شاشات الملعب' },
+  screenShows: { en: 'Big screens show', ar: 'الشاشات تعرض' },
+  'screen.stadium': { en: 'Stadium name', ar: 'اسم الملعب' },
+  'screen.tifo': { en: 'Your tifo (live)', ar: 'التيفو حقك (مباشر)' },
+  'screen.image': { en: 'An image you choose', ar: 'صورة تختارها' },
+  screenImage: { en: 'Image for the screens', ar: 'صورة الشاشات' },
+  screenBad: { en: 'That file could not be read as an image.', ar: 'ما قدرنا نقرأ هذا الملف كصورة.' },
+  screenHint: {
+    en: 'Put your club\u2019s badge on the screens. The image stays on your device, it is never uploaded, and it is not saved with the design.',
+    ar: 'حط شعار ناديك على الشاشات. الصورة تبقى في جهازك، ما تنرفع ولا تنحفظ مع التصميم.',
+  },
   railBanners: { en: 'Rail banners', ar: 'لافتات الفواصل' },
   coverStairs: { en: 'Cover stairs', ar: 'تغطية الدرج' },
   cornerFlags: { en: 'Corner flags', ar: 'أعلام الأركان' },
@@ -625,6 +638,10 @@ interface SimState {
   drum: boolean;
   reactive: boolean;
   weatherSound: boolean;
+  /** What the big screens show, on grounds that have them. */
+  screen: ScreenMode;
+  /** The user's picture for the screens. Held in memory only, never uploaded. */
+  screenImage: ImageBitmap | HTMLImageElement | null;
 }
 
 /**
@@ -738,6 +755,8 @@ export function openMatchDaySimulator(
     accWhere: 'north',
     flareColour: 'red',
     smokeColour: 'club',
+    screen: 'stadium',
+    screenImage: null,
     // On by default (Osamah's call, September 2026): a tifo show is half
     // sound, and a switch nobody finds is a show nobody hears. Remembered if
     // someone turns it off. The browser still wants a gesture before audio
@@ -960,6 +979,24 @@ export function openMatchDaySimulator(
     row(hornBtn, whistleBtn),
   );
 
+  // Stadium screens — only on grounds that have them (see VenueDetails).
+  const screenSel = sel();
+  for (const m of ['stadium', 'tifo', 'image'] as ScreenMode[]) opt(screenSel, m, L('screen.' + m), m === state.screen);
+  const screenFile = fileInput();
+  const screenFileField = field(L('screenImage'), screenFile);
+  const screenHint = document.createElement('div');
+  screenHint.className = 'mds-hint';
+  screenHint.textContent = L('screenHint');
+  const secScreens = section(ICONS.assets, L('secStadium'), false);
+  secScreens.body.append(field(L('screenShows'), screenSel), screenFileField, screenHint);
+  screenSel.dataset.k = 'screen-mode';
+  screenFile.dataset.k = 'screen-image';
+  const syncScreenUi = (): void => {
+    screenFileField.style.display = state.screen === 'image' ? '' : 'none';
+    screenHint.style.display = state.screen === 'image' ? '' : 'none';
+  };
+  syncScreenUi();
+
   // Tifo Assets
   const standSel = sel();
   for (const v of ['1', '3', '0', '2']) opt(standSel, v, L('stand.' + v), false);
@@ -1144,10 +1181,10 @@ export function openMatchDaySimulator(
   // without matching its heading — which is translated, and which is exactly
   // the kind of coupling that makes an Arabic run fail for no real reason.
   for (const [key, sec] of [
-    ['camera', secCam], ['crowd', secCrowd], ['accessories', secAcc], ['atmosphere', secAtmo], ['sound', secSound],
+    ['camera', secCam], ['crowd', secCrowd], ['accessories', secAcc], ['atmosphere', secAtmo], ['screens', secScreens], ['sound', secSound],
     ['assets', secAssets], ['banners', secBanners], ['choreo', secChoreo], ['record', secRecord],
   ] as [string, { root: HTMLElement }][]) sec.root.dataset.sec = key;
-  panel.append(actionsHost, secCam.root, secCrowd.root, secAcc.root, secAtmo.root, secSound.root, secAssets.root, secBanners.root, secChoreo.root, secRecord.root);
+  panel.append(actionsHost, secCam.root, secCrowd.root, secAcc.root, secAtmo.root, secScreens.root, secSound.root, secAssets.root, secBanners.root, secChoreo.root, secRecord.root);
   overlay.append(bar, panel, host);
   document.body.appendChild(overlay);
   const prevOverflow = document.body.style.overflow;
@@ -1457,6 +1494,7 @@ export function openMatchDaySimulator(
     sim.setAutoReveal(state.reveal);
     sim.setDrumCall({ hold: state.drumHold, times: state.drumTimes });
     sim.onDrumBeat = renderBeat;
+    applyScreen();
     if (!state.fly) sim.applyShot(shots[state.camIdx] ?? shots[0]);
     // Changing the quality tier disposes the simulator and builds a new one,
     // and the new one's atmosphere starts silent and at its defaults. Without
@@ -1469,6 +1507,15 @@ export function openMatchDaySimulator(
         else armSoundStart();
       });
     }
+  }
+  /** Screens: the section only shows on a ground that has them. */
+  function applyScreen(): void {
+    secScreens.root.style.display = sim.hasScreens() ? '' : 'none';
+    if (!sim.hasScreens()) return;
+    const names = tlBoth(template.id);
+    // "An image" with no image yet shows the name until one is chosen.
+    const mode: ScreenMode = state.screen === 'image' && !state.screenImage ? 'stadium' : state.screen;
+    sim.setScreen(mode, names, state.screenImage ?? undefined);
   }
   /**
    * Sound is on by default, but a browser will not start audio until the
@@ -1692,6 +1739,28 @@ export function openMatchDaySimulator(
   floods.addEventListener('change', () => {
     state.floods = floods.checked;
     sim.setFloodlights(state.floods);
+  });
+  screenSel.addEventListener('change', () => {
+    state.screen = screenSel.value as ScreenMode;
+    syncScreenUi();
+    // Picking "an image" opens the file picker straight away: there is
+    // nothing to show until there is a picture.
+    if (state.screen === 'image' && !state.screenImage) screenFile.click();
+    applyScreen();
+  });
+  screenFile.addEventListener('change', () => {
+    const f = screenFile.files?.[0];
+    if (!f) return;
+    // Read in the browser; it never leaves this device.
+    createImageBitmap(f)
+      .then((bmp) => {
+        state.screenImage = bmp;
+        state.screen = 'image';
+        screenSel.value = 'image';
+        syncScreenUi();
+        applyScreen();
+      })
+      .catch(() => toast(L('screenBad')));
   });
   bannersChk.addEventListener('change', () => {
     state.banners = bannersChk.checked;

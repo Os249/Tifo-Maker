@@ -1126,7 +1126,7 @@ const STRINGS: Record<string, { en: string; ar: string }> = {
   'si.note.capacity': { en: '{built} built against {stated} stated — {pct}% out', ar: '{built} مقعد مبني مقابل {stated} معلنة — فرق {pct}%' },
   'si.note.aisles': { en: 'a stadium-sized default; the imagery could count the real ones', ar: 'رقم افتراضي لملعب بهذا الحجم؛ الصور الجوية تقدر تعدّ الحقيقية' },
   'si.note.pitch': { en: '~0.5 m is the regulated working figure', ar: '~٠٫٥ م هو الرقم المعتمد نظاماً' },
-  'si.note.tiers': { en: 'right on 10 of our 13 stadiums; a photo settles it', ar: 'صح في ١٠ من ١٣ ملعب عندنا؛ صورة وحدة تحسمها' },
+  'si.note.tiers': { en: 'right on 11 of our 13 stadiums; a photo settles it', ar: 'صح في ١١ من ١٣ ملعب عندنا؛ صورة وحدة تحسمها' },
   'si.note.lighting': { en: 'guessed from the roof shape; right on 8 of our 13 stadiums, and a photo settles it', ar: 'مخمّن من شكل السقف؛ صح في ٨ من ١٣ ملعب عندنا، وصورة وحدة تحسمها' },
   'si.note.facade': { en: 'nothing public records what a stadium is clad in — one photo settles this', ar: 'ما فيه مصدر عام يسجّل مواد واجهة الملعب — صورة وحدة تحسمها' },
   'si.warn.noRing': { en: 'No seating ring measured, so the plan curve is the building outline pulled in by a guess. Measuring the imagery replaces that guess.', ar: 'ما انقاس شريط المدرجات، فخط الخطة هو حدود المبنى مسحوبة بتخمين. قياس الصور الجوية يشيل هذا التخمين.' },
@@ -1397,6 +1397,20 @@ const STRINGS: Record<string, { en: string; ar: string }> = {
   'stad.cauldronDome': { en: 'Cauldron Dome', ar: 'قبة المرجل' },
   'stad.wideOval': { en: 'Wide Athletics Oval', ar: 'بيضاوي ألعاب القوى العريض' },
   'stad.jewelJeddah': { en: 'The Jewel of Jeddah', ar: 'جوهرة جدة' },
+  'sp.lanes': { en: 'Ambulance ramps', ar: 'ممرات الإسعاف' },
+  'sp.vipSeats': { en: 'Royal box seats', ar: 'مقاعد المقصورة الرئيسية' },
+  'sp.boxes': { en: 'Hospitality boxes', ar: 'مقصورات الضيافة' },
+  'sp.screens': { en: 'Big screens', ar: 'الشاشات الكبيرة' },
+  'sp.superseded': {
+    en: 'This design is on an earlier version of this stadium. A more accurate one is available, with the ambulance ramps, the gold and silver platforms, the boxes and the screens. Your design stays exactly as it is unless you move it.',
+    ar: 'هذا التصميم على نسخة سابقة من الملعب. فيه نسخة أدق فيها ممرات الإسعاف والمنصة الذهبية والفضية والمقصورات والشاشات. تصميمك يبقى مثل ما هو إلا إذا نقلته.',
+  },
+  'sp.useNewer': { en: 'Move it to the new version', ar: 'انقله للنسخة الجديدة' },
+  'venue.gold': { en: 'Gold platform', ar: 'المنصة الذهبية' },
+  'venue.silver': { en: 'Silver platform', ar: 'المنصة الفضية' },
+  'venue.vip': { en: 'Royal box (no tifo)', ar: 'المقصورة الرئيسية (بدون تيفو)' },
+  'venue.lane': { en: 'Ambulance ramp', ar: 'ممر الإسعاف' },
+  'stad.jewelJeddahOld': { en: 'The Jewel of Jeddah (earlier layout)', ar: 'جوهرة جدة (التصميم السابق)' },
   'stad.alAwwal': { en: 'Al-Awwal Park (Riyadh)', ar: 'الأول بارك (الرياض)' },
   'stad.kingdomArena': { en: 'Kingdom Arena (Riyadh)', ar: 'المملكة أرينا (الرياض)' },
   'cam.tv': { en: 'TV gantry', ar: 'كاميرا النقل' },
@@ -1894,7 +1908,8 @@ const LABEL_KEYS: Record<string, string> = {
   'community-roaring-terraces-48k': 'stad.roaringTerraces',
   'community-cauldron-dome-62k': 'stad.cauldronDome',
   'community-wide-oval-72k': 'stad.wideOval',
-  'community-jewel-jeddah-62k': 'stad.jewelJeddah',
+  'community-jewel-jeddah-62k': 'stad.jewelJeddahOld',
+  'jewel-jeddah-60k': 'stad.jewelJeddah',
   'community-alawwal-park-25k': 'stad.alAwwal',
   'community-kingdom-arena-28k': 'stad.kingdomArena',
   'Grand National Bowl': 'stad.grandNational',
@@ -1951,6 +1966,17 @@ const LABEL_KEYS: Record<string, string> = {
 export function tl(value: string): string {
   const key = LABEL_KEYS[value];
   return key ? t(key) : value;
+}
+
+/**
+ * A label in BOTH languages at once, whatever the page is in — for things that
+ * show both side by side, like a stadium's big screen. Falls back to the value
+ * itself in both slots when it has no translation.
+ */
+export function tlBoth(value: string): { en: string; ar: string } {
+  const key = LABEL_KEYS[value];
+  const e = key ? STRINGS[key] : undefined;
+  return e ? { en: e.en, ar: e.ar } : { en: value, ar: value };
 }
 
 /**

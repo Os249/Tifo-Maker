@@ -1,0 +1,70 @@
+<!doctype html>
+<!-- Dev-only harness for scripts/jewel-shots.mts. Boots the REAL
+     MatchDaySimulator on a stadium and takes the same named views every time,
+     so a before/after of a ground's details is a like-for-like comparison. -->
+<html lang="en"><head><meta charset="UTF-8"/><title>stadium detail shots</title></head>
+<body style="margin:0;background:#05070c"><div id="out">loading…</div>
+<script type="module">
+  import { generateSeatMap } from '/src/core/seatmap.ts';
+  import { DesignStore } from '/src/core/design.ts';
+  import { templateById } from '/src/core/stadiumCatalog.ts';
+  import { MatchDaySimulator } from '/src/render/simulator/index.ts';
+  import { AssetStore } from '/src/core/sceneAssets.ts';
+
+  const W = 1280, H = 720;
+  const HOST = document.createElement('div');
+  HOST.style.cssText = `position:fixed;left:0;top:0;width:${W}px;height:${H}px;`;
+  document.body.appendChild(HOST);
+
+  let sim = null, map = null, curId = null, curKey = null;
+  window.__open = async (id, opts) => {
+    if (sim) { sim.dispose(); sim = null; }
+    HOST.replaceChildren();
+    const template = templateById(id);
+    map = generateSeatMap(template);
+    // opts.design 'stripes': a two-colour card display on the north stand
+    // (the Ittihad colours), so a shot can show a tifo in the ground.
+    const palette = opts.design === 'stripes' ? ['#262a33', '#f9d616', '#16161a'] : ['#0b1d4d', '#ffffff', '#16a34a'];
+    const store = new DesignStore(map, palette);
+    if (opts.design === 'stripes') {
+      store.transform((i) => {
+        const u = map.uv[i * 2];
+        if (u < 0.16 || u > 0.34 || map.tierOf[i] > 1) return 0;
+        return Math.floor(u * 120) % 2 === 0 ? 1 : 2;
+      });
+    }
+    sim = new MatchDaySimulator(HOST, map, store, template, new AssetStore(), { quality: opts.quality ?? 'high' });
+    sim.setTimeOfDay(opts.time ?? 'night');
+    sim.setFloodlights(true);
+    sim.setCrowdPreset(opts.crowd ?? 'sellout');
+    if (sim.hasScreens && sim.hasScreens()) {
+      let img;
+      if (opts.screen === 'image') img = await createImageBitmap(await (await fetch('/scripts/data/test-badge.png')).blob());
+      sim.setScreen(opts.screen ?? 'stadium', { en: template.name, ar: 'جوهرة جدة' }, img);
+    }
+    if (opts.floods === false) sim.setFloodlights(false);
+    curId = id;
+    return { seats: map.count };
+  };
+  window.__views = () => {
+    let ax = 1, bz = 1, ty = 1;
+    for (let k = 0; k < map.count; k++) {
+      ax = Math.max(ax, Math.abs(map.pos3[k * 3]));
+      ty = Math.max(ty, map.pos3[k * 3 + 1]);
+      bz = Math.max(bz, Math.abs(map.pos3[k * 3 + 2]));
+    }
+    return { ax, bz, ty };
+  };
+  window.__shoot = async (view, settleMs) => {
+    sim.camera.fov = view.fov ?? 55;
+    sim.camera.updateProjectionMatrix();
+    sim.applyPreset({ name: view.name, position: view.position, target: view.target });
+    sim.start();
+    await new Promise((r) => setTimeout(r, settleMs ?? 700));
+    sim.stop();
+    return sim.canvas.toDataURL('image/png');
+  };
+  window.__census = () => sim.sceneCensus();
+  document.getElementById('out').textContent = 'ready';
+  window.__ready = true;
+</script></body></html>

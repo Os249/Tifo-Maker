@@ -41,6 +41,13 @@ import { buildSurroundings, type Surroundings } from './surroundings';
 import { buildAccessories, type AccessoriesController, type AccessoriesCensus } from './accessories';
 import { pyroLoudness, type AccessoryKind, type AccessoryLevel, type AccessoryLevels, type AccessoryWhere } from '../../core/accessories';
 import { buildJewelCrown } from './jewelCrown';
+import { buildJewel } from './jewel';
+import { buildVenueDetails, type VenueBuild } from './venue';
+import { paintScreen, type ScreenMode } from './screenPicture';
+import { curveSampler, laneLines, noTifoMask, seatZones } from '../../core/venueDetails';
+
+/** The rebuilt Jewel (King Abdullah Sports City). The earlier one keeps its own look. */
+const JEWEL_ID = 'jewel-jeddah-60k';
 import { buildAlAwwalExtras, buildKingdomArenaExtras } from './stadiumExtras';
 import { buildPitchDetail, pitchStripeTexture } from './pitchDetail';
 import { dbg } from './debug';
@@ -142,6 +149,25 @@ export class MatchDaySimulator {
   /** Flags, flares, smoke, strobes, paper and phone lights — see ./accessories. */
   private readonly accessories: AccessoriesController;
   private manassaMask: Uint8Array | null = null;
+  /** Premium zone per seat (see core/venueDetails) and the seats that never take the tifo. */
+  private zoneCodes: Uint8Array | null = null;
+  private noTifo: Uint8Array | null = null;
+  private readonly zoneColors = [
+    [], // 0: none
+    [new THREE.Color(0xc9a13a), new THREE.Color(0xd6b04a), new THREE.Color(0xb88f2c)], // gold platform
+    [new THREE.Color(0x9ea4ad), new THREE.Color(0x8e959f), new THREE.Color(0xaeb4bc)], // silver platform
+    [new THREE.Color(0xe7d6b0), new THREE.Color(0xdcc89c)], // VIP: cream leather
+  ];
+  /** The rebuilt Jewel's seats, by tier: red below, orange, then salmon and peach at the top. */
+  private readonly jewelTierColors = [
+    [0xb3261e, 0xc8322a, 0x9e1f1a, 0xd04a2a, 0xbf2f24, 0xe0622e].map((c) => new THREE.Color(c)),
+    [0xd4502a, 0xe0662e, 0xc9442a, 0xe8834a, 0xd95c30].map((c) => new THREE.Color(c)),
+    [0xe8804a, 0xf09a60, 0xe36f3a, 0xf2b07a, 0xeb8e55].map((c) => new THREE.Color(c)),
+  ];
+  private venue: VenueBuild | null = null;
+  private screen: { mode: ScreenMode; nameEn: string; nameAr: string; image?: CanvasImageSource & { width: number; height: number } } = { mode: 'stadium', nameEn: '', nameAr: '' };
+  private screenDirty = false;
+  private lastScreenPaint = -1;
   private readonly manassaColor = new THREE.Color(0xc69a3a);
   private readonly jewelSeatColors = [new THREE.Color(0x8f2d2d), new THREE.Color(0xb14a2a), new THREE.Color(0xc98a4b), new THREE.Color(0x6f2222), new THREE.Color(0xd8b98a), new THREE.Color(0xa33b2b)];
   private readonly alawwalSeatColors = [new THREE.Color(0xf2c40f), new THREE.Color(0xe8bd10), new THREE.Color(0xf5cd2a), new THREE.Color(0xd9ae0c), new THREE.Color(0xf7d43a), new THREE.Color(0xf2c40f), new THREE.Color(0xefc200)];
@@ -258,6 +284,10 @@ export class MatchDaySimulator {
 
     this.rebuildPalette();
     this.manassaMask = this.computeManassaMask();
+    if (this.template.details?.zones?.length) {
+      this.zoneCodes = seatZones(this.map, this.template);
+      this.noTifo = noTifoMask(this.map, this.template);
+    }
     this.seats = this.buildSeats();
     this.scene.add(this.seats);
 
@@ -324,6 +354,19 @@ export class MatchDaySimulator {
       this.scene.add(crown.object);
       this.disposables.push(...crown.disposables);
     }
+    if (this.template.details) {
+      // Lanes, boxes, the royal box and the screens — any ground with details.
+      this.venue = buildVenueDetails(this.template, this.map, this.settings.shadows);
+      this.scene.add(this.venue.object);
+      this.disposables.push(...this.venue.disposables);
+      this.screen.nameEn = this.template.name;
+      this.paintScreens();
+    }
+    if (this.template.id === JEWEL_ID) {
+      const jewel = buildJewel(this.template, this.settings.shadows);
+      this.scene.add(jewel.object);
+      this.disposables.push(...jewel.disposables);
+    }
     if (this.template.id === 'community-alawwal-park-25k') {
       let mx = 1;
       let mz = 1;
@@ -356,11 +399,13 @@ export class MatchDaySimulator {
       if (indices === 'all') this.recolorAll();
       else for (const i of indices) this.recolor(i);
       this.seats.instanceColor!.needsUpdate = true;
+      if (this.screen.mode === 'tifo') this.screenDirty = true;
     };
     this.onPaletteCb = (): void => {
       if (this.disposed) return;
       this.rebuildPalette();
       this.recolorAll();
+      this.screenDirty = true;
       // Flags and "club colours" smoke follow the design's palette.
       this.accessories.setPalette(this.store.palette);
     };
@@ -380,6 +425,16 @@ export class MatchDaySimulator {
   private colorFor(i: number): THREE.Color {
     if (this.manassaMask && this.manassaMask[i] === 1) return this.manassaColor;
     const cell = this.store.cells[i];
+    const zone = this.zoneCodes ? this.zoneCodes[i] : 0;
+    if (zone && (cell === 0 || (this.noTifo && this.noTifo[i] === 1))) {
+      // Premium seats read as what they are: gold, silver, cream leather.
+      const zc = this.zoneColors[zone];
+      return zc[(Math.imul(i, 2654435761) >>> 0) % zc.length];
+    }
+    if (cell === 0 && this.template.id === JEWEL_ID) {
+      const tc = this.jewelTierColors[Math.min(this.map.tierOf[i], this.jewelTierColors.length - 1)];
+      return tc[(Math.imul(i, 2654435761) >>> 0) % tc.length];
+    }
     if (cell === 0 && this.template.id === 'community-jewel-jeddah-62k') {
       return this.jewelSeatColors[(Math.imul(i, 2654435761) >>> 0) % this.jewelSeatColors.length];
     }
@@ -564,7 +619,23 @@ export class MatchDaySimulator {
     }
     // Every other ground: shots derived from ITS bowl, so the cameras always sit
     // on the seating looking in (absolute SIM_SHOTS only fit the default 92x70).
-    return [...bowlShots(this.seatBounds()), seatShot(this.map, 'crowd'), seatShot(this.map, 'ultra')];
+    return [...bowlShots(this.seatBounds()), seatShot(this.map, 'crowd'), seatShot(this.map, 'ultra'), ...this.detailShots()];
+  }
+  /** A ground with details gets a look at them: the royal box, a vehicle ramp. */
+  private detailShots(): SimShot[] {
+    const d = this.template.details;
+    if (!d) return [];
+    const out: SimShot[] = [];
+    const vip = d.zones?.find((z) => z.kind === 'vip');
+    if (vip) {
+      const p = curveSampler(this.template)(vip.centerU, 0);
+      out.push({ name: 'Royal Box', position: [-p.nx * 40, 9, -p.nz * 40 + 0.01], target: [p.x, 20, p.z], fov: 50 });
+    }
+    const lane = laneLines(this.template)[0];
+    if (lane) {
+      out.push({ name: 'Vehicle Ramp', position: [lane.x * 0.35, 3.5, lane.z * 0.3], target: [lane.x + lane.dx * 6, 4, lane.z + lane.dz * 6], fov: 55 });
+    }
+    return out;
   }
   /** Smoothly glide to a shot (eased), instead of snapping. */
   applyShot(s: SimShot): void {
@@ -654,6 +725,42 @@ export class MatchDaySimulator {
   }
 
   // ---- effects (Phase 5) ----
+  /** Does this ground have big screens? (The overlay only offers the control if so.) */
+  hasScreens(): boolean {
+    return (this.venue?.screens.length ?? 0) > 0;
+  }
+  /**
+   * What the big screens show. `names` is the ground's name in both languages
+   * (the simulator has no i18n of its own); `image` is only read for 'image'.
+   */
+  setScreen(mode: ScreenMode, names?: { en: string; ar: string }, image?: CanvasImageSource & { width: number; height: number }): void {
+    this.screen.mode = mode;
+    if (names) {
+      this.screen.nameEn = names.en;
+      this.screen.nameAr = names.ar;
+    }
+    if (image) this.screen.image = image;
+    this.paintScreens();
+  }
+  screenMode(): ScreenMode {
+    return this.screen.mode;
+  }
+  private paintScreens(): void {
+    if (!this.venue || this.venue.screens.length === 0) return;
+    this.screenDirty = false;
+    const src = {
+      mode: this.screen.mode,
+      nameEn: this.screen.nameEn || this.template.name,
+      nameAr: this.screen.nameAr || this.screen.nameEn || this.template.name,
+      palette: this.store.palette,
+      map: this.map,
+      cells: this.store.cells,
+      image: this.screen.image,
+    };
+    for (const sc of this.venue.screens) paintScreen(sc.canvas, src);
+    this.venue.screensChanged();
+  }
+
   setFloodlights(b: boolean): void {
     this.effects.setFloodlights(b);
     // The contactor. Stadium lights are one of the few things on this panel
@@ -2001,6 +2108,12 @@ export class MatchDaySimulator {
       if (this.timeline) this.stepTimeline();
       if (this.restoreFade) this.stepRestore();
       if (this.camTween) this.stepCamTween();
+      // A live tifo on the screens, repainted at most four times a second —
+      // a brush stroke fires dozens of dirty events and the screen is a picture.
+      if (this.screenDirty && this.elapsed - this.lastScreenPaint > 0.25) {
+        this.lastScreenPaint = this.elapsed;
+        this.paintScreens();
+      }
       this.controls.update();
       this.adaptPerf(dt);
       this.effects.render(this.renderer, this.scene, this.camera);

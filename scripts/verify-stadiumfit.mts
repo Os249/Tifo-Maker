@@ -138,9 +138,10 @@ console.log('\n--- tier split --------------------------------------------------
     if (got === s.template.tiers.length) right++;
     else misses.push(`${s.meta?.name ?? s.id} (${rows} rows: said ${got}, is ${s.template.tiers.length})`);
   }
-  // Locked at 10, not ">= 8": this number is quoted in the provenance note the
-  // user reads, so it must not drift without someone noticing.
-  check(right === 10, 'tier-count rule scores 10 of 13', `misses: ${misses.join('; ')}`);
+  // Locked at 11, not ">= 8": this number is quoted in the provenance note the
+  // user reads, so it must not drift without someone noticing. (It was 10 until
+  // the Jewel was rebuilt to the real stadium's 66 rows in three tiers.)
+  check(right === 11, 'tier-count rule scores 11 of 13', `misses: ${misses.join('; ')}`);
 
   const st = stackTiers(50, 2);
   const stacked = st[1].baseOffset > st[0].baseOffset + st[0].rows * st[0].rowDepth

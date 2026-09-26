@@ -1759,3 +1759,131 @@ import { buildStadium as siBuild } from '../src/core/stadiumFit';
   }
   console.log(`accessories: ${want.length} strings in en + ar, 9 cues wired, ignite / smoke / burn sounds wired`);
 }
+
+// ---------------------------------------------------------------------------
+// The rebuilt Jewel of Jeddah and venue details (September 2026)
+// ---------------------------------------------------------------------------
+// Vehicle lanes remove real seats, so the Jewel became a NEW template
+// (jewel-jeddah-60k) and the old one lives on as a legacy ground. Every other
+// seat map must be byte-for-byte what it was: saved designs index into them.
+{
+  const { createHash } = await import('node:crypto');
+  const { readFileSync: vdRead } = await import('node:fs');
+  const cat = await import('../src/core/stadiumCatalog');
+  const vd = await import('../src/core/venueDetails');
+  const fp = (m: ReturnType<typeof generateSeatMap>): string => {
+    const h = createHash('sha1');
+    for (const a of [m.xy, m.uv, m.pos3, m.tierOf, m.rowOf, m.sectionOf, m.neighbors, m.mirrorOf]) h.update(Buffer.from(a.buffer, a.byteOffset, a.byteLength));
+    return `${m.count}:${h.digest('hex').slice(0, 16)}`;
+  };
+  // Frozen before the change. A new entry here is fine; a changed one is a
+  // moved seat under somebody's saved design.
+  const FROZEN: Record<string, string> = {
+    'generic-bowl-60k': '60832:f19fde6d0a61c887',
+    'single-kop-40k': '39700:7604f17ba657390c',
+    'grand-oval-76k': '75984:c7f0d7568d2dfb8e',
+    'community-grand-national-80k': '90990:94bad1660b5a9f4a',
+    'community-steep-cauldron-55k': '60834:bf73697d1fa551b1',
+    'community-compact-wall-30k': '38756:b4ef4380e9a92608',
+    'community-desert-arena-68k': '74008:f3ab27502a84423c',
+    'community-roaring-terraces-48k': '48044:a76a0a79dd6eed3c',
+    'community-cauldron-dome-62k': '78648:15ec4eacce46a1d9',
+    'community-wide-oval-72k': '91284:e930362d7e0a6df1',
+    'community-jewel-jeddah-62k': '61572:b55f75b35990fa36',
+    'community-alawwal-park-25k': '24652:7d18fef57e0a55ff',
+    'community-kingdom-arena-28k': '26052:69d3936f64f81ebb',
+  };
+  for (const [id, want] of Object.entries(FROZEN)) {
+    const tpl = cat.templateById(id);
+    if (!tpl) throw new Error(`venue: ${id} no longer resolves — designs saved on it cannot open`);
+    const got = fp(generateSeatMap(tpl));
+    if (got !== want) throw new Error(`venue: ${id} seat map changed (${want} -> ${got}) — saved designs would shift`);
+  }
+
+  // The legacy Jewel resolves but is not offered for new designs.
+  if (cat.STADIUM_CATALOG.some((e) => e.id === 'community-jewel-jeddah-62k')) throw new Error('venue: the legacy Jewel is still in the catalogue');
+  if (cat.entryById('community-jewel-jeddah-62k')?.meta.supersededBy !== 'jewel-jeddah-60k') throw new Error('venue: the legacy Jewel does not point at its replacement');
+  const shipped = cat.shippedTemplates();
+  const shippedIds = shipped.map((t) => t.id);
+  if (new Set(shippedIds).size !== shippedIds.length) throw new Error('venue: a ground ships twice');
+  for (const e of cat.STADIUM_CATALOG.filter((x) => x.meta.source === 'builtin')) {
+    if (!shippedIds.includes(e.id)) throw new Error(`venue: ${e.id} is not in shippedTemplates — the server would refuse designs on it`);
+  }
+  // The server and the share pages use them — not the three generic bowls.
+  const srv = vdRead('server/src/server.ts', 'utf8');
+  if (!/shippedTemplateInfo\(\)/.test(srv)) throw new Error('venue: the server does not know the shipped grounds');
+  for (const f of ['src/share.ts', 'src/seat.ts', 'src/community.ts']) {
+    if (/TEMPLATES\.find\(/.test(vdRead(f, 'utf8'))) throw new Error(`venue: ${f} still resolves only the generic bowls`);
+  }
+
+  // The new Jewel against the real stadium (StadiumDB): 23,473 / 22,244 / 14,038.
+  const jt = cat.templateById('jewel-jeddah-60k')!;
+  const jm = generateSeatMap(jt);
+  if (fp(generateSeatMap(jt)) !== fp(jm)) throw new Error('venue: the Jewel is not deterministic');
+  const perTier = [0, 0, 0];
+  for (let i = 0; i < jm.count; i++) perTier[jm.tierOf[i]]++;
+  const REAL = [23473, 22244, 14038];
+  REAL.forEach((r, k) => {
+    if (Math.abs(perTier[k] - r) / r > 0.02) throw new Error(`venue: Jewel tier ${k} has ${perTier[k]} seats, the real one ${r}`);
+  });
+  if (Math.abs(jm.count - 60241) / 60241 > 0.02) throw new Error(`venue: Jewel total ${jm.count} vs 60,241`);
+
+  // Lanes: a real gap in the lower tier at each corner, nothing cut above it.
+  const lines = vd.laneLines(jt);
+  if (lines.length !== 4) throw new Error('venue: the Jewel should have four vehicle lanes');
+  for (let i = 0; i < jm.count; i++) {
+    if (vd.inLane(lines, jm.tierOf[i], jm.pos3[i * 3], jm.pos3[i * 3 + 2])) throw new Error('venue: a seat was generated inside a vehicle lane');
+  }
+  const noLanes = generateSeatMap({ ...jt, details: { ...jt.details, lanes: [] } });
+  const tierCount = (m: typeof jm, k: number): number => { let n = 0; for (let i = 0; i < m.count; i++) if (m.tierOf[i] === k) n++; return n; };
+  const removed = noLanes.count - jm.count;
+  if (removed < 4 * 300) throw new Error(`venue: the lanes only removed ${removed} seats`);
+  if (tierCount(noLanes, 1) !== tierCount(jm, 1) || tierCount(noLanes, 2) !== tierCount(jm, 2)) throw new Error('venue: a lower-tier lane cut the tiers above it');
+  // A lane is one corner's, never the opposite one's.
+  for (const l of lines) {
+    const opp = { ...l, x: -l.x, z: -l.z };
+    if (vd.inLane([l], 0, opp.x + l.dx * -5, opp.z + l.dz * -5)) throw new Error('venue: a lane reaches across the pitch');
+  }
+
+  // Premium zones: gold and silver on the main stand, the royal box above.
+  const zc = vd.zoneCounts(jm, jt);
+  if (!(zc.gold > 500 && zc.silver > 500)) throw new Error(`venue: gold/silver platforms too small ${JSON.stringify(zc)}`);
+  if (Math.abs(zc.vip - 486) / 486 > 0.2) throw new Error(`venue: royal box has ${zc.vip} seats; the real one 486`);
+  const nt = vd.noTifoMask(jm, jt)!;
+  const codes = vd.seatZones(jm, jt);
+  for (let i = 0; i < jm.count; i++) {
+    if (nt[i] && codes[i] !== vd.ZONE_CODE.vip) throw new Error('venue: a seat outside the royal box is barred from the tifo');
+  }
+  // The lamps hang from the crown they claim to: just under its opening edge.
+  const { jewelFrame } = await import('../src/render/simulator/jewel');
+  const jf = jewelFrame(jt);
+  const mount = jt.lighting?.mount;
+  if (!mount || mount.y > jf.Y_IN - 1.5 || mount.y < jf.Y_IN - 6 || mount.offset < jf.R_IN || mount.offset > jf.R_IN + 6) {
+    throw new Error(`venue: the Jewel's lamps are not on its crown (mount ${JSON.stringify(mount)}, opening ${jf.R_IN} m at ${jf.Y_IN.toFixed(1)} m)`);
+  }
+  const marks = vd.venueMarks(jm, jt);
+  if (marks.filter((m) => m.kind === 'lane').length !== 4 || marks.filter((m) => m.kind !== 'lane').length !== 3) throw new Error('venue: the design view marks are wrong');
+  // Grounds without details are untouched by all of it.
+  if (vd.seatZones(map, DEFAULT_TEMPLATE).some((c) => c !== 0) || vd.laneLines(DEFAULT_TEMPLATE).length) throw new Error('venue: a ground without details got some');
+
+  // Strings, in both languages.
+  const i18nSrc = vdRead('src/ui/i18n.ts', 'utf8');
+  for (const k of ['venue.gold', 'venue.silver', 'venue.vip', 'venue.lane', 'sp.lanes', 'sp.vipSeats', 'sp.boxes', 'sp.screens', 'sp.superseded', 'sp.useNewer', 'stad.jewelJeddahOld']) {
+    const i = i18nSrc.indexOf(`'${k}': {`);
+    if (i < 0) throw new Error(`venue: no string for ${k}`);
+    const body = i18nSrc.slice(i, i + 700);
+    if (!/\ben:/.test(body) || !/\bar:/.test(body)) throw new Error(`venue: ${k} is missing en or ar`);
+  }
+  const ovSrc = vdRead('src/render/simulator/overlay.ts', 'utf8');
+  for (const k of ['secStadium', 'screenShows', 'screen.stadium', 'screen.tifo', 'screen.image', 'screenImage', 'screenHint', 'screenBad']) {
+    const i = ovSrc.indexOf(`'${k}': {`) >= 0 ? ovSrc.indexOf(`'${k}': {`) : ovSrc.indexOf(`  ${k}: {`);
+    if (i < 0) throw new Error(`venue: no overlay string for ${k}`);
+    const body = ovSrc.slice(i, i + 500);
+    if (!/\ben:/.test(body) || !/\bar:/.test(body)) throw new Error(`venue: overlay ${k} is missing en or ar`);
+  }
+  console.log(
+    `venue: 13 seat maps frozen and unchanged | Jewel ${perTier.join(' / ')} (real 23,473 / 22,244 / 14,038) = ${jm.count}` +
+      ` | 4 lanes, ${removed} seats removed, tiers above untouched | gold ${zc.gold}, silver ${zc.silver}, royal box ${zc.vip}` +
+      ` | ${shipped.length} grounds the server can save against`,
+  );
+}

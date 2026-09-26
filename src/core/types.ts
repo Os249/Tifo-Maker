@@ -62,6 +62,87 @@ export interface StadiumTemplate {
    * untouched; a style here replaces that skirt.
    */
   facade?: FacadeSpec;
+  /**
+   * The things that make a real ground that ground rather than a bowl of its
+   * size: the vehicle lanes through the stands, the premium seating, the box
+   * band and the big screens. All optional — a template without it is
+   * untouched — and only `lanes` moves seats (it removes them, exactly as a
+   * real ramp does). See VenueDetails.
+   */
+  details?: VenueDetails;
+}
+
+/**
+ * Where a quarter of the bowl is, as the tifo vocabulary names it. Matches
+ * STAND_GEOMETRY in tifoSpec: east is centred on u = 0 (the +x end), north on
+ * 0.25, west on 0.5, south on 0.75. Corners sit between two of them.
+ */
+export type BowlCorner = 'north-east' | 'north-west' | 'south-west' | 'south-east';
+
+/**
+ * A ramp for ambulances and service vehicles, cut through a tier down to pitch
+ * level. It is a real gap in the seating — the seats inside it are not
+ * generated — which is why it shows in the design view as well as the 3D one.
+ */
+export interface VehicleLane {
+  /** Which corner of the bowl it comes in at. */
+  corner: BowlCorner;
+  /** Clear width of the ramp, in metres, measured along each row. */
+  widthM: number;
+  /** The tier it cuts through (0 = lower). Tiers above it run unbroken. */
+  tier: number;
+}
+
+/**
+ * A kind of premium seating, as Saudi ticketing names them: the gold platform
+ * (المنصة الذهبية) at the centre of the main stand, the silver platform either
+ * side of it, and a general VIP block.
+ */
+export type SeatZoneKind = 'gold' | 'silver' | 'vip';
+
+/**
+ * A block of premium seating. Never moves or removes a seat — it says which
+ * seats are which, so the renderer can draw them as what they are and the
+ * editor can show where they are.
+ */
+export interface SeatZone {
+  kind: SeatZoneKind;
+  /** Perimeter centre (0..1, same u as the seat map) and half-width in u. */
+  centerU: number;
+  halfU: number;
+  /** Which tiers it covers (0 = lower). */
+  tiers: number[];
+  /**
+   * Premium seats do not take part in a card display: they are sold to people
+   * who are not going to hold up a card. When true the renderer draws the
+   * zone's own seat colour whatever the design says.
+   */
+  noTifo?: boolean;
+}
+
+/** A run of glass-fronted hospitality boxes between two tiers. */
+export interface BoxBand {
+  centerU: number;
+  halfU: number;
+  /** Sits under the front of this tier (1 = between the lower and middle tier). */
+  underTier: number;
+  /** Number of boxes along the run. */
+  count: number;
+}
+
+/** A big video screen. */
+export interface ScreenSpec {
+  /** Perimeter position of its centre, same u as the seat map. */
+  centerU: number;
+  widthM: number;
+  heightM: number;
+}
+
+export interface VenueDetails {
+  lanes?: VehicleLane[];
+  zones?: SeatZone[];
+  boxes?: BoxBand[];
+  screens?: ScreenSpec[];
 }
 
 /**
@@ -84,6 +165,13 @@ export interface LightingSpec {
    * 2010 has, runs 4000-5600 K and reads visibly warmer. Default 5700.
    */
   kelvin?: number;
+  /**
+   * Where a hand-built roof carries its rim array: metres out from the plan
+   * curve, and height above the pitch. Only for grounds whose roof is not the
+   * generated one (the Jewel's lamps ride the inner edge of its crown, over
+   * the seats, not the back of the top tier). The angle rules still apply.
+   */
+  mount?: { offset: number; y: number };
 }
 
 /**

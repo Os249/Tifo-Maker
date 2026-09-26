@@ -1,6 +1,7 @@
 import './vendor/tabler-subset.css';
 import { generateSeatMapAsync } from './workers/client';
 import { TEMPLATES, DEFAULT_PALETTE } from './core/template';
+import { templateById } from './core/stadiumCatalog';
 import { DesignStore } from './core/design';
 import { fetchDesignTemplate, loadPublicDesign, recordView } from './net/api';
 import { paint2D } from './ui/viewer';
@@ -57,7 +58,8 @@ async function main(): Promise<void> {
     unavailable(app, t('sh.gone'));
     return;
   }
-  const template = TEMPLATES.find((t) => t.id === ref.templateId) ?? TEMPLATES[0];
+  // Any shipped ground, legacy ones included — not only the three generic bowls.
+  const template = templateById(ref.templateId) ?? TEMPLATES[0];
   const map = await generateSeatMapAsync(template.id);
   const store = new DesignStore(map, DEFAULT_PALETTE.slice());
 

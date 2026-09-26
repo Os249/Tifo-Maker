@@ -30,6 +30,7 @@ import {
   type CatalogQuery,
 } from '../core/stadiumCatalog';
 import { requestStadiumSwitch } from './stadiumSwitch';
+import { zoneCounts } from '../core/venueDetails';
 import { loadFavorites, toggleFavorite } from './stadiumFavorites';
 import { ACTIVE_AREAS, getActiveArea, setActiveArea } from '../core/activeArea';
 import { orientCells, type OrientOp } from '../core/orientation';
@@ -288,6 +289,18 @@ export function mountStadiumPanel(deps: StadiumPanelDeps): void {
       [t('sp.tiersLabel'), String(tierCount(e.template))],
       [t('sp.type'), e.meta.type ? tl(e.meta.type) : '-'],
     ];
+    // A real ground's details: how many ramps, and how many premium seats —
+    // counted off the actual seat map when it is the ground that is open.
+    const det = e.template.details;
+    if (det?.lanes?.length) rows.push([t('sp.lanes'), String(det.lanes.length)]);
+    if (det?.zones?.length && e.id === currentId) {
+      const zc = zoneCounts(map, e.template);
+      if (zc.gold) rows.push([t('venue.gold'), fmt(zc.gold)]);
+      if (zc.silver) rows.push([t('venue.silver'), fmt(zc.silver)]);
+      if (zc.vip) rows.push([t('sp.vipSeats'), fmt(zc.vip)]);
+    }
+    if (det?.boxes?.length) rows.push([t('sp.boxes'), fmt(det.boxes.reduce((n, b) => n + b.count, 0))]);
+    if (det?.screens?.length) rows.push([t('sp.screens'), String(det.screens.length)]);
     infoEl.innerHTML =
       `<h4 style="margin:0 0 6px;">${escapeHtml(tl(e.id) === e.id ? e.meta.name : tl(e.id))}</h4>` +
       rows
@@ -297,6 +310,22 @@ export function mountStadiumPanel(deps: StadiumPanelDeps): void {
             `<span style="color:var(--text-3);">${k}</span><span style="color:var(--text-1);">${escapeHtml(v)}</span></div>`,
         )
         .join('');
+    // A design on a ground that has since been rebuilt: say so, and offer the
+    // new one. Never automatic — switching moves the design onto a different
+    // seat map, which is the owner's call.
+    const newer = e.id === currentId && e.meta.supersededBy ? entryById(e.meta.supersededBy) : undefined;
+    if (newer) {
+      const note = document.createElement('div');
+      note.style.cssText = NOTE_CSS + 'margin-top:8px;color:var(--text-2);';
+      note.textContent = t('sp.superseded');
+      const go = document.createElement('button');
+      go.className = 'primary';
+      go.style.cssText = 'margin-top:6px;width:100%;';
+      go.textContent = t('sp.useNewer');
+      go.addEventListener('click', () => confirmSwitch(newer));
+      note.appendChild(go);
+      infoEl.appendChild(note);
+    }
     if (discEl) {
       // Driven by `inspiredBy`, not by source. A template resembles a real venue
       // or it does not; who wrote it is a different question, and tying the

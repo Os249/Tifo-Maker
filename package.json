@@ -40,7 +40,8 @@
     "audit:editor": "tsx scripts/editor-audit.mts",
     "shots:banner": "tsx scripts/banner-shots.mts",
     "sweep:banner": "tsx scripts/banner-sweep.mts",
-    "shots:accessories": "tsx scripts/accessories-shots.mts"
+    "shots:accessories": "tsx scripts/accessories-shots.mts",
+    "shots:jewel": "tsx scripts/jewel-shots.mts"
   },
   "dependencies": {
     "@fastify/helmet": "^13.0.2",

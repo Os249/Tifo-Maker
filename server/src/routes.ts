@@ -8,7 +8,7 @@ import fastifyStatic from '@fastify/static';
 import { dummyHash, hashPassword, hashToken, issueToken, TOKEN_TTL_MS, verifyPassword } from './auth';
 import { gunzipBytes, gzipBytes, u32FromB64, u8FromB64 } from './codec';
 import { generateSeatMap } from '../../src/core/seatmap';
-import { TEMPLATES } from '../../src/core/template';
+import { shippedTemplates } from '../../src/core/stadiumCatalog';
 import { validateTifo, TIFO_SCHEMA_VERSION } from '../../src/core/tifoFormat';
 import { renderDistributionPdf } from '../../src/export/distributionPdf';
 
@@ -562,7 +562,7 @@ export async function buildApp(
   const seatCountFor = (templateId: string, version: number): number | null => {
     const key = `${templateId}@${version}`;
     if (seatCountCache.has(key)) return seatCountCache.get(key) ?? null;
-    const tpl = TEMPLATES.find((t) => t.id === templateId && t.version === version);
+    const tpl = shippedTemplates().find((t) => t.id === templateId && t.version === version);
     const count = tpl ? generateSeatMap(tpl).count : null;
     seatCountCache.set(key, count);
     return count;
@@ -2623,7 +2623,7 @@ export async function buildApp(
       cardsPerBag?: number;
       colorNames?: string[];
     };
-    const tpl = TEMPLATES.find((t) => t.id === body.templateId && t.version === (body.templateVersion ?? t.version));
+    const tpl = shippedTemplates().find((t) => t.id === body.templateId && t.version === (body.templateVersion ?? t.version));
     if (!tpl) return reply.code(400).send({ error: 'unknown templateId/version' });
     if (!validPalette(body.palette) || !body.cellsGzB64) {
       return reply.code(400).send({ error: 'palette and cellsGzB64 required' });

@@ -3,6 +3,7 @@ import './seat.css';
 import { initLang, t } from './ui/i18n';
 import { generateSeatMapAsync } from './workers/client';
 import { TEMPLATES } from './core/template';
+import { templateById } from './core/stadiumCatalog';
 import { DesignStore } from './core/design';
 import { loadDesign, fetchDesignTemplate } from './net/api';
 import {
@@ -65,7 +66,7 @@ async function main(): Promise<void> {
   let title = 'the display';
   try {
     const info = await fetchDesignTemplate(id);
-    const tpl = TEMPLATES.find((t) => t.id === info.templateId) ?? TEMPLATES[0];
+    const tpl = templateById(info.templateId) ?? TEMPLATES[0];
     map = await generateSeatMapAsync(tpl.id);
     store = new DesignStore(map, ['#262a33', '#1c5fd9']);
     const loaded = await loadDesign(store, id);

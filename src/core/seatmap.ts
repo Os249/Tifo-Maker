@@ -1,4 +1,5 @@
 import type { SeatMap, StadiumTemplate } from './types';
+import { inLane, laneLines } from './venueDetails';
 
 /**
  * Deterministic seat-map generation.
@@ -151,6 +152,8 @@ export function generateSeatMap(template: StadiumTemplate): SeatMap {
   const curve = samplePlanCurve(template.plan.a, template.plan.b, template.plan.exponent);
   const cornerCut = template.cornerCut ?? 0;
   const evenRows = template.evenRows === true;
+  // Empty for every template without vehicle lanes, so their maps are untouched.
+  const lanes = laneLines(template);
 
   // Aisle bands as [uStart, uEnd) fractions; computed per row since row length varies,
   // but anchored at fixed u positions so aisles are radial.
@@ -220,6 +223,8 @@ export function generateSeatMap(template: StadiumTemplate): SeatMap {
           const nyp = Math.abs(wy) / (template.plan.b + radial);
           if (nxp > cornerCut && nyp > cornerCut) continue;
         }
+        // A vehicle lane is a real gap: the ramp is where these seats would be.
+        if (lanes.length > 0 && inLane(lanes, tierIdx, wx, wy)) continue;
         xs.push(u * EDITOR_WIDTH);
         ys.push(editorY);
         us.push(u);

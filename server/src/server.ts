@@ -2,8 +2,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import pg from 'pg';
-import { generateSeatMap } from '../../src/core/seatmap';
-import { TEMPLATES } from '../../src/core/template';
+import { shippedTemplateInfo } from './templates';
 import { MemoryAiEventsRepository, MemoryAiUsageRepository, MemoryAuthRepository, MemoryDesignRepository, MemoryEventsRepository, MemoryLeadsRepository } from './memoryRepo';
 import { PgAiEventsRepository, PgAiUsageRepository, PgAuthRepository, PgDesignRepository, PgEventsRepository, PgLeadsRepository } from './pgRepo';
 import { PgSocialRepository } from './pgSocial';
@@ -41,12 +40,8 @@ import { MemorySocRepository, PgSocRepository } from './socRepo';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const isProd = process.env.NODE_ENV === 'production';
 
-const templates: TemplateInfo[] = TEMPLATES.map((t) => ({
-  id: t.id,
-  version: t.version,
-  name: t.name,
-  seatCount: generateSeatMap(t).count,
-}));
+// Every ground that ships, not only the three generic bowls — see templates.ts.
+const templates: TemplateInfo[] = shippedTemplateInfo();
 
 // Locate the built frontend. In the container the layout is /app/dist next to
 // /app/server; DIST_DIR overrides for other layouts.

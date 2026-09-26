@@ -186,9 +186,18 @@ export function buildEffects(
 
     if (i % spotEvery !== 0 || spots.length >= MAX_SPOTS) return;
     const dist = Math.hypot(x, y, z);
-    const spot = new THREE.SpotLight(lampHex, 0, dist * 3, Math.PI / 6, 0.4, 1.2);
+    // A rim array hung from a hand-built roof sits right over the touchline.
+    // Four of its lamps all aimed at the centre spot pile up into one white
+    // disc on the grass (and a mirror of it on a wet pitch), so each aims at
+    // the pitch in front of it instead, wider and softer — a wash, which is
+    // what an array that size gives a real pitch.
+    const mounted = !!opts.template.lighting?.mount;
+    const spot = mounted
+      ? new THREE.SpotLight(lampHex, 0, dist * 3, Math.PI / 4, 1, 1.2)
+      : new THREE.SpotLight(lampHex, 0, dist * 3, Math.PI / 6, 0.4, 1.2);
     spot.position.set(x, y, z);
-    spot.target.position.set(0, 0, 0);
+    if (mounted) spot.target.position.set(Math.max(-40, Math.min(40, x * 0.45)), 0, Math.max(-24, Math.min(24, z * 0.45)));
+    else spot.target.position.set(0, 0, 0);
     floodGroup.add(spot);
     floodGroup.add(spot.target);
     spots.push(spot);
@@ -201,11 +210,15 @@ export function buildEffects(
     // Visible volumetric-ish beam toward the pitch (glows at night + bloom).
     // Its width scales with the throw: a cone tuned for a 155 m mast is a
     // searchlight when it starts 60 m away on a roof rim.
-    const beamGeo = new THREE.ConeGeometry(dist * 0.22, dist, 40, 1, true);
+    const throwTo = spot.target.position.clone();
+    const throwLen = throwTo.distanceTo(spot.position);
+    const beamGeo = new THREE.ConeGeometry(throwLen * 0.22, throwLen, 40, 1, true);
     const beamMat = new THREE.MeshBasicMaterial({
       color: lampHex,
       transparent: true,
-      opacity: lum.mast ? 0.05 : 0.035,
+      // A rim array bolted to a hand-built roof hangs right over the stands,
+      // so its haze would wash over the seats rather than hang over the pitch.
+      opacity: lum.mast ? 0.05 : opts.template.lighting?.mount ? 0.014 : 0.035,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
       side: THREE.DoubleSide,
@@ -213,8 +226,8 @@ export function buildEffects(
     });
     const beam = new THREE.Mesh(beamGeo, beamMat);
     const lampPos = new THREE.Vector3(x, y, z);
-    const dir = lampPos.clone().negate().normalize(); // lamp -> pitch centre
-    beam.position.copy(lampPos).addScaledVector(dir, dist / 2);
+    const dir = throwTo.clone().sub(lampPos).normalize(); // lamp -> where it is aimed
+    beam.position.copy(lampPos).addScaledVector(dir, throwLen / 2);
     beam.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.clone().negate());
     floodGroup.add(beam);
     trash.push(beamGeo, beamMat);

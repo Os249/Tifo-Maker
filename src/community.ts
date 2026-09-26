@@ -16,6 +16,7 @@ import { installConsent } from './ui/consent';
 import { ensureUsernameChosen } from './ui/chooseUsernameModal';
 import { generateSeatMapAsync } from './workers/client';
 import { TEMPLATES } from './core/template';
+import { templateById } from './core/stadiumCatalog';
 import { DesignStore } from './core/design';
 import { Preview3D, CAMERA_PRESETS } from './render/preview3d';
 import { openAuthModal } from './ui/authModal';
@@ -588,7 +589,7 @@ async function attachBanners(
     banners.loadJSON(scene.banners as Parameters<InstanceType<typeof BannerStore>['loadJSON']>[0]);
     const shown = banners.list().filter((b) => b.visible !== false);
     if (shown.length === 0) return;
-    const template = TEMPLATES.find((x) => x.id === tplId) ?? TEMPLATES[0];
+    const template = templateById(tplId) ?? TEMPLATES[0];
     preview.attachBanners(banners, template);
     // Open on the banner. The default camera looks at one end, and a banner on
     // any other stand was behind it — a card marked "With banners" opening on
@@ -613,7 +614,7 @@ async function attachBanners(
 async function resolveTemplate(designId: string): Promise<string> {
   const { fetchDesignTemplate } = await import('./net/api');
   const info = await fetchDesignTemplate(designId);
-  const tpl = TEMPLATES.find((x) => x.id === info.templateId) ?? TEMPLATES[0];
+  const tpl = templateById(info.templateId) ?? TEMPLATES[0];
   return tpl.id;
 }
 

@@ -41,6 +41,11 @@ export interface StadiumMeta {
    * the panel makes the non-affiliation explicit.
    */
   inspiredBy?: string;
+  /**
+   * Set on a legacy ground: the id of the stadium that replaced it, so a design
+   * still on the old one can be offered the new one.
+   */
+  supersededBy?: string;
 }
 
 export interface StadiumEntry {
@@ -217,29 +222,72 @@ const COMMUNITY: StadiumEntry[] = [
     meta: { name: 'Wide Athletics Oval', source: 'builtin', country: 'International', capacity: 72000, type: 'Oval', inspiredBy: 'a wide running-track oval', tags: ['oval', 'athletics', 'two-tier', 'large'] },
   },
   {
-    // Tribute to King Abdullah Sports City (Alinma Stadium), Jeddah - "The Shining Jewel".
-    // A near-circular, enclosed bowl with THREE very compact tiers (Lower ~24k, Middle
-    // ~24k, Upper ~14k) matching the real venue's L/M/U configuration; full ~62,241.
-    id: 'community-jewel-jeddah-62k',
+    // King Abdullah Sports City (Alinma Stadium), Jeddah — "The Shining Jewel".
+    //
+    // Rebuilt September 2026 from StadiumDB's photo set and the Saudi ticket
+    // maps, and fitted to the real seat counts: 23,473 lower / 22,244 middle /
+    // 14,038 upper, plus 486 VIP (60,241 in all). The lower tier hugs the pitch
+    // and is angular; the offset curves round off towards the top, which is what
+    // Arup describes ("the angled layout on the lower levels becomes rounded at
+    // the top").
+    //
+    // A NEW ID, not a version bump: the vehicle lanes remove real seats, and
+    // every design saved on the earlier Jewel indexes its seats by position. The
+    // earlier one lives on in LEGACY below, byte-identical, so those designs
+    // still open exactly as they were saved.
+    id: 'jewel-jeddah-60k',
     template: {
-      id: 'community-jewel-jeddah-62k',
+      id: 'jewel-jeddah-60k',
       name: 'The Jewel of Jeddah',
       version: 1,
-      plan: { a: 83, b: 73, exponent: 2.15 },
+      plan: { a: 64, b: 44.5, exponent: 2.7 },
       evenRows: true,
       tiers: [
-        { rows: 20, rowDepth: 0.8, rakeDeg: 28, baseElevation: 1.5, baseOffset: 0, seatPitch: 0.48 },
-        { rows: 18, rowDepth: 0.78, rakeDeg: 35, baseElevation: 11, baseOffset: 18, seatPitch: 0.48 },
-        { rows: 12, rowDepth: 0.76, rakeDeg: 42, baseElevation: 20, baseOffset: 32, seatPitch: 0.48 },
+        { rows: 32, rowDepth: 0.8, rakeDeg: 26, baseElevation: 1.2, baseOffset: 0, seatPitch: 0.5 },
+        { rows: 22, rowDepth: 0.8, rakeDeg: 32, baseElevation: 17.5, baseOffset: 20.8, seatPitch: 0.5 },
+        { rows: 12, rowDepth: 0.78, rakeDeg: 36, baseElevation: 32.6, baseOffset: 34.6, seatPitch: 0.48 },
       ],
-      aisles: { count: 32, widthMeters: 1.1 },
-      sectionsPerTier: 32,
-      // The Jewel's crown is hand-built (simulator/jewelCrown.ts), and so is
-      // its outer skin, so no generic facade here — it would be a second one.
+      aisles: { count: 40, widthMeters: 1.1 },
+      sectionsPerTier: 40,
+      // The crown, the trusses and the skin are hand-built (simulator/jewel.ts).
       roof: { coverage: 'none' },
-      lighting: { style: 'roof-rim' },
+      // The lamps ride the inner edge of the crown, which reaches out over the
+      // front of the lower tier — see the StadiumDB photo looking up through
+      // the opening.
+      lighting: { style: 'roof-rim', kelvin: 5700, mount: { offset: 7, y: 51.6 } },
+      details: {
+        // One ramp at each corner of the lower tier, down to pitch level; the
+        // middle tier runs unbroken over it.
+        lanes: [
+          { corner: 'north-east', widthM: 8, tier: 0 },
+          { corner: 'north-west', widthM: 8, tier: 0 },
+          { corner: 'south-west', widthM: 8, tier: 0 },
+          { corner: 'south-east', widthM: 8, tier: 0 },
+        ],
+        // The main stand is the south side (u = 0.75), where the broadcast
+        // cameras are. Listed innermost first: a seat takes the first zone
+        // that claims it.
+        zones: [
+          // The royal box: the VIP seats, front of the middle tier, centre.
+          { kind: 'vip', centerU: 0.75, halfU: 0.0115, tiers: [1], noTifo: true },
+          // The gold platform (المنصة الذهبية): lower tier, centre of the main stand.
+          { kind: 'gold', centerU: 0.75, halfU: 0.034, tiers: [0] },
+          // The silver platform (المنصة الفضية) either side of it.
+          { kind: 'silver', centerU: 0.75, halfU: 0.075, tiers: [0] },
+        ],
+        // Glass-fronted boxes between the lower and middle tiers, both long sides.
+        boxes: [
+          { centerU: 0.75, halfU: 0.1, underTier: 1, count: 22 },
+          { centerU: 0.25, halfU: 0.1, underTier: 1, count: 22 },
+        ],
+        // One big screen at the top of each end stand, under the roof.
+        screens: [
+          { centerU: 0, widthM: 26, heightM: 9.5 },
+          { centerU: 0.5, widthM: 26, heightM: 9.5 },
+        ],
+      },
     },
-    meta: { name: 'The Jewel of Jeddah', source: 'builtin', country: 'Middle East', capacity: 62241, type: 'Bowl', inspiredBy: 'King Abdullah Sports City (Alinma Stadium), Jeddah - nicknamed "The Shining Jewel"', tags: ['jewel', 'jeddah', 'saudi', 'three-tier', 'circular', 'bowl', 'large', 'world-cup-2034'] },
+    meta: { name: 'The Jewel of Jeddah', source: 'builtin', country: 'Middle East', capacity: 60241, type: 'Bowl', inspiredBy: 'King Abdullah Sports City (Alinma Stadium), Jeddah - nicknamed "The Shining Jewel"', tags: ['jewel', 'jeddah', 'alinma', 'saudi', 'three-tier', 'bowl', 'large', 'world-cup-2034'] },
   },
   {
     // Tribute to Al-Awwal Park (King Saud University Stadium), Riyadh - Al-Nassr's
@@ -299,6 +347,51 @@ const COMMUNITY: StadiumEntry[] = [
 /** The full catalog. Order: built-ins first, then community, then custom. */
 export const STADIUM_CATALOG: StadiumEntry[] = [...BUILTINS, ...COMMUNITY];
 
+/**
+ * Stadiums that have been replaced by a more accurate one but that saved
+ * designs still point at.
+ *
+ * A saved design is one byte per seat, indexed by position, so the seat map it
+ * was drawn on has to stay exactly as it was. These resolve through
+ * templateById like anything else — so a design opens, renders, saves and
+ * shares exactly as before — but they are not in the catalogue, so nobody
+ * starts a NEW design on them.
+ */
+export const LEGACY_STADIUMS: StadiumEntry[] = [
+  {
+    // The Jewel as it was until September 2026 — replaced by jewel-jeddah-60k.
+    // Keep byte-identical: every design saved on it indexes into this map.
+    id: 'community-jewel-jeddah-62k',
+    template: {
+      id: 'community-jewel-jeddah-62k',
+      name: 'The Jewel of Jeddah',
+      version: 1,
+      plan: { a: 83, b: 73, exponent: 2.15 },
+      evenRows: true,
+      tiers: [
+        { rows: 20, rowDepth: 0.8, rakeDeg: 28, baseElevation: 1.5, baseOffset: 0, seatPitch: 0.48 },
+        { rows: 18, rowDepth: 0.78, rakeDeg: 35, baseElevation: 11, baseOffset: 18, seatPitch: 0.48 },
+        { rows: 12, rowDepth: 0.76, rakeDeg: 42, baseElevation: 20, baseOffset: 32, seatPitch: 0.48 },
+      ],
+      aisles: { count: 32, widthMeters: 1.1 },
+      sectionsPerTier: 32,
+      roof: { coverage: 'none' },
+      lighting: { style: 'roof-rim' },
+    },
+    meta: { name: 'The Jewel of Jeddah', source: 'builtin', country: 'Middle East', capacity: 62241, type: 'Bowl', inspiredBy: 'King Abdullah Sports City (Alinma Stadium), Jeddah - nicknamed "The Shining Jewel"', tags: ['jewel', 'jeddah', 'saudi', 'legacy'], supersededBy: 'jewel-jeddah-60k' },
+  },
+];
+
+/**
+ * Every template that ships in the bundle and can be saved against: the
+ * built-in catalogue plus the legacy grounds. What the server validates seat
+ * counts against — it used to know only the three generic bowls, so a design
+ * on any real-venue ground could not be saved at all.
+ */
+export function shippedTemplates(): StadiumTemplate[] {
+  return [...BUILTINS, ...COMMUNITY, ...LEGACY_STADIUMS].map((e) => e.template);
+}
+
 /** Every template the generator might be asked for (built-in + community + custom). */
 export function allTemplates(): StadiumTemplate[] {
   return STADIUM_CATALOG.map((e) => e.template);
@@ -337,12 +430,12 @@ export function registerServerCommunity(entries: StadiumEntry[]): void {
 
 /** Resolve an id to its template (used by the seat-map worker + loaders). */
 export function templateById(id: string): StadiumTemplate | undefined {
-  return STADIUM_CATALOG.find((e) => e.id === id)?.template;
+  return (STADIUM_CATALOG.find((e) => e.id === id) ?? LEGACY_STADIUMS.find((e) => e.id === id))?.template;
 }
 
 /** Resolve an id to its full catalog entry (template + metadata). */
 export function entryById(id: string): StadiumEntry | undefined {
-  return STADIUM_CATALOG.find((e) => e.id === id);
+  return STADIUM_CATALOG.find((e) => e.id === id) ?? LEGACY_STADIUMS.find((e) => e.id === id);
 }
 
 export interface CatalogQuery {

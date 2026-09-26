@@ -1874,3 +1874,43 @@ if (process.env.DATABASE_URL) {
 
   console.log('ai history: all assertions passed (outcomes, cap attribution, mode split, meter-vs-history)');
 }
+
+// ---------- designs on real-venue grounds ----------
+//
+// The server used to be told only about the three generic bowls, so a design
+// on the Jewel, Al-Awwal, Kingdom Arena — any ground a Saudi fan would pick —
+// was refused with "known templateRef required". This builds the app with the
+// SAME list server.ts uses and saves on the rebuilt Jewel and on the legacy one
+// that older designs still point at.
+{
+  const { shippedTemplateInfo } = await import('../src/templates');
+  const { templateById } = await import('../../src/core/stadiumCatalog');
+  const list = shippedTemplateInfo();
+  for (const id of ['jewel-jeddah-60k', 'community-jewel-jeddah-62k', 'community-alawwal-park-25k', 'community-kingdom-arena-28k', DEFAULT_TEMPLATE.id]) {
+    assert.ok(list.some((t) => t.id === id), `the server knows ${id}`);
+  }
+  const auth = new MemoryAuthRepository();
+  const designs = new MemoryDesignRepository((id) => auth.usernameOf(id));
+  const app = await buildApp(designs, auth, list);
+  const tok = await registerUser(app, 'jeddawi');
+  for (const id of ['jewel-jeddah-60k', 'community-jewel-jeddah-62k']) {
+    const n = generateSeatMap(templateById(id)!).count;
+    assert.equal(list.find((t) => t.id === id)!.seatCount, n, `${id}: the server's seat count is the generator's`);
+    const cellsGzB64 = gzipSync(new Uint8Array(n).fill(1)).toString('base64');
+    const ok = await app.inject({
+      method: 'POST', url: '/api/designs', headers: bearer(tok),
+      payload: { title: `On ${id}`, templateId: id, templateVersion: 1, palette: PALETTE, cellsGzB64 },
+    });
+    assert.equal(ok.statusCode, 201, `${id}: a design saves (${ok.body})`);
+    const back = (await app.inject({ method: 'GET', url: `/api/designs/${(ok.json() as { id: string }).id}`, headers: bearer(tok) })).json() as { templateId: string };
+    assert.equal(back.templateId, id, `${id}: and comes back on the same ground`);
+    // One seat short is someone else's seat map: refused.
+    const short = await app.inject({
+      method: 'POST', url: '/api/designs', headers: bearer(tok),
+      payload: { title: 'Short', templateId: id, templateVersion: 1, palette: PALETTE, cellsGzB64: gzipSync(new Uint8Array(n - 1).fill(1)).toString('base64') },
+    });
+    assert.equal(short.statusCode, 400, `${id}: a design with the wrong seat count is refused`);
+  }
+  await app.close();
+  console.log('real-venue grounds: designs save on the rebuilt Jewel and on the legacy one; wrong seat counts refused');
+}

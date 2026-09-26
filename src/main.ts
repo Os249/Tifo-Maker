@@ -1,7 +1,7 @@
 import './vendor/tabler-subset.css';
 import { loadTifoFonts } from './core/tifoFonts';
 import { installTheme } from './ui/theme';
-import { initLang, applyDom, toggleLang, t, tl, tv } from './ui/i18n';
+import { initLang, applyDom, toggleLang, t, tl, tv, onLangChange } from './ui/i18n';
 import { installConsent } from './ui/consent';
 import { generateSeatMapAsync } from './workers/client';
 import { DEFAULT_PALETTE, DEFAULT_TEMPLATE, PALETTE_PRESETS, TEMPLATES } from './core/template';
@@ -320,6 +320,15 @@ async function main(): Promise<void> {
   const editor = await Editor.create(host, map, store);
   editor.aisleCount = template.aisles.count;
   editor.drawGrid(true);
+  // A real ground's premium zones and vehicle lanes, marked on the flat view.
+  if (template.details) {
+    const { venueMarks } = await import('./core/venueDetails');
+    const marks = venueMarks(map, template);
+    const paint = (): void =>
+      editor.setVenueMarks(marks, { gold: t('venue.gold'), silver: t('venue.silver'), vip: t('venue.vip'), lane: t('venue.lane') });
+    paint();
+    onLangChange(paint);
+  }
   const objects = new ObjectLayer();
   // Banners and the older overlay assets. Both are created here, before the
   // toolbar, because saving a design has to be able to reach them: a banner

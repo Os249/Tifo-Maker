@@ -5,6 +5,7 @@ import {
   Particle,
   ParticleContainer,
   Sprite,
+  Text,
   Texture,
 } from 'pixi.js';
 import type { SeatMap, ToolId } from '../core/types';
@@ -15,6 +16,7 @@ import type { DesignStore } from '../core/design';
 import { SpatialHash } from '../core/spatialHash';
 import { brushSegment, brushStamp, floodFill, collectRegion } from '../core/tools';
 import { EMPTY_SEAT_COLOR } from '../core/template';
+import type { VenueMark } from '../core/venueDetails';
 
 /**
  * The 2D editor surface.
@@ -30,6 +32,9 @@ export class Editor {
   private readonly seats: ParticleContainer;
   private readonly particles: Particle[] = [];
   private readonly gridOverlay = new Graphics();
+  /** The ground's premium zones and vehicle lanes, outlined over the seats. */
+  private readonly venueLayer = new Container();
+  private venueLabels: Text[] = [];
   objectOverlay: ObjectOverlay | null = null;
   private readonly hash: SpatialHash;
   private paletteRGB: number[] = [];
@@ -115,6 +120,7 @@ export class Editor {
 
     this.world.addChild(this.seats);
     this.world.addChild(this.gridOverlay);
+    this.world.addChild(this.venueLayer);
     app.stage.addChild(this.world);
 
     this.drawGrid(true);
@@ -376,7 +382,60 @@ export class Editor {
   }
 
   /** Aisle (section boundary) and tier walkway guides. */
+  /**
+   * Outline a ground's premium zones and mark its vehicle lanes (see
+   * core/venueDetails). Drawn with the grid, so the same switch hides both.
+   * `labels` are already translated.
+   */
+  setVenueMarks(marks: VenueMark[], labels: Record<VenueMark['kind'], string>): void {
+    this.venueLayer.removeChildren().forEach((c) => c.destroy());
+    this.venueLabels = [];
+    if (marks.length === 0) return;
+    const COLOURS: Record<VenueMark['kind'], number> = { gold: 0xe6bd4c, silver: 0xcfd4dc, vip: 0xf4e4bf, lane: 0xff5a4f };
+    const g = new Graphics();
+    for (const m of marks) {
+      const c = COLOURS[m.kind];
+      if (m.kind === 'lane') {
+        // A dashed line down the middle of the gap, top to bottom of the tier.
+        for (let y = m.y0 - 6; y < m.y1 + 6; y += 10) g.moveTo(m.x0, y).lineTo(m.x0, Math.min(y + 5, m.y1 + 6));
+        g.stroke({ color: c, alpha: 1, width: 1, pixelLine: true });
+      } else {
+        g.roundRect(m.x0 - 3, m.y0 - 5, m.x1 - m.x0 + 6, m.y1 - m.y0 + 10, 3);
+        g.stroke({ color: c, alpha: 1, width: 1, pixelLine: true });
+      }
+      const label = new Text({
+        text: labels[m.kind],
+        style: { fontFamily: 'Cairo, system-ui, sans-serif', fontSize: 11, fontWeight: '700', fill: c, stroke: { color: 0x0e1016, width: 3 } },
+        resolution: 3,
+      });
+      this.venueLabels.push(label);
+      // The silver platform surrounds the gold one, so its label hangs off its
+      // own outer corner rather than sitting on top of gold's.
+      if (m.kind === 'silver') {
+        label.anchor.set(1, 1);
+        label.position.set(m.x0 - 4, m.y0 - 7);
+      } else {
+        label.anchor.set(0.5, 1);
+        label.position.set((m.x0 + m.x1) / 2, m.y0 - 7);
+      }
+      this.venueLayer.addChild(label);
+    }
+    this.venueLayer.addChildAt(g, 0);
+    this.scaleVenueLabels();
+  }
+
+  /**
+   * Keep the zone labels a readable size on screen at any zoom: the whole
+   * bowl fits at about a quarter scale, where world-sized text is 3 px tall.
+   */
+  private scaleVenueLabels(): void {
+    const z = this.world.scale.x || 1;
+    const k = Math.min(4, Math.max(1, 1 / z));
+    for (const l of this.venueLabels) l.scale.set(k);
+  }
+
   drawGrid(visible: boolean): void {
+    this.venueLayer.visible = visible;
     const g = this.gridOverlay;
     g.clear();
     g.visible = visible;
@@ -418,6 +477,7 @@ export class Editor {
 
   /** Push the current viewport to onViewChange as normalized (u,v) bounds. */
   emitView(): void {
+    this.scaleVenueLabels();
     if (!this.onViewChange) return;
     const r = this.getViewportRect();
     const { minX, minY, maxX, maxY } = this.map.bounds;

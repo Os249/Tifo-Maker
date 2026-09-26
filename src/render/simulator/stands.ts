@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { StadiumTemplate } from '../../core/types';
 import { buildRoof } from './roof';
 import { buildFacade } from './facade';
+import { inLane, laneLines } from '../../core/venueDetails';
 
 /**
  * Match Day Simulator — extruded stand architecture (Phase 1).
@@ -120,6 +121,12 @@ export function buildStands(template: StadiumTemplate, shadows: boolean): THREE.
   let topBackY = 0;
   let topTierDepth = 0;
 
+  // Vehicle lanes: the concrete of the tier a ramp runs through is cut open
+  // where its seats were removed (core/seatmap drops them by the same test),
+  // so the ramp is a real slot in the stand rather than a hole in the seats
+  // with a floor still under it. Templates without lanes are untouched.
+  const lanes = laneLines(template);
+
   tiers.forEach((tier, idx) => {
     const rakeTan = Math.tan((tier.rakeDeg * Math.PI) / 180);
     const lastRow = Math.max(1, tier.rows - 1);
@@ -129,14 +136,21 @@ export function buildStands(template: StadiumTemplate, shadows: boolean): THREE.
     const frontY = tier.baseElevation - tier.rowDepth * rakeTan * 0.5;
     const backY = tier.baseElevation + lastRow * tier.rowDepth * rakeTan + tier.rowDepth * rakeTan * 0.5;
 
+    let tierKeep = keep;
+    if (lanes.some((l) => l.lane.tier === idx)) {
+      const mid = ring(a, b, p, (frontRadial + backRadial) / 2, 0);
+      const front = ring(a, b, p, frontRadial, 0);
+      tierKeep = mid.map((pt, i) => (keep ? keep[i] : true) && !inLane(lanes, idx, pt[0], pt[2]) && !inLane(lanes, idx, front[i][0], front[i][2]));
+    }
+
     // Sloped seating deck.
-    add(strip(ring(a, b, p, frontRadial, frontY), ring(a, b, p, backRadial, backY), keep), concrete, true, true);
+    add(strip(ring(a, b, p, frontRadial, frontY), ring(a, b, p, backRadial, backY), tierKeep), concrete, true, true);
 
     // Vertical riser under the front of this tier, down to the previous tier's
     // top (tier 0 goes to ground). Closes the step between tiers.
     const floor = idx === 0 ? 0 : Math.max(0, topBackY - 0.2);
     if (frontY - floor > 0.4) {
-      add(strip(ring(a, b, p, frontRadial, floor), ring(a, b, p, frontRadial, frontY), keep), structure, false, true);
+      add(strip(ring(a, b, p, frontRadial, floor), ring(a, b, p, frontRadial, frontY), tierKeep), structure, false, true);
     }
 
     rowsBefore += tier.rows;

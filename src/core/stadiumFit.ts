@@ -274,11 +274,12 @@ export function fitRing(points: Pt[]): { a: number; b: number; exponent: number;
  * raked tier much past forty-odd rows stops working for sightlines and exits, so
  * a deep bowl is stacked out of necessity.
  *
- * Scored against all thirteen shipped templates this is right 10 times. The
- * three it misses are instructive rather than fixable: Al-Awwal and Kingdom
+ * Scored against all thirteen shipped templates this is right 11 times. The
+ * two it misses are instructive rather than fixable: Al-Awwal and Kingdom
  * Arena are shallow (28 rows) and still two-tier, because modern builds put a
- * hospitality level in regardless, and the Jewel splits 50 rows three ways where
- * every other 50-row ground splits them two. So this is emitted as `suggested`
+ * hospitality level in regardless. (The Jewel used to be a third miss — it split
+ * 50 rows three ways. Rebuilt to the real stadium's counts in September 2026 it
+ * has 66 rows, and the rule gets it right.) So this is emitted as `suggested`
  * and belongs in the list a human is asked to confirm.
  */
 export function suggestTierCount(totalRows: number): number {
@@ -760,7 +761,7 @@ export function buildStadium(input: FitInput): FitResult {
   let tierCount = k.tiers ?? suggestTierCount(totalRows);
   prov['tiers.length'] = k.tiers
     ? { source: 'user', confidence: 'given' }
-    : { source: 'row-count-rule', confidence: 'suggested', note: 'right on 10 of 13 shipped templates; a photo settles it', noteKey: 'si.note.tiers' };
+    : { source: 'row-count-rule', confidence: 'suggested', note: 'right on 11 of 13 shipped templates; a photo settles it', noteKey: 'si.note.tiers' };
   if (!k.tiers) confirm.push('tiers.length');
 
   const mkBase = (

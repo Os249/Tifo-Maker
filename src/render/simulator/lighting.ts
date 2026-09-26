@@ -124,6 +124,10 @@ export function bowlBack(template: StadiumTemplate): { radial: number; y: number
 export function structureTop(template: StadiumTemplate): number {
   const { y } = bowlBack(template);
   const roof = template.roof ?? {};
+  // A hand-built roof (roof 'none' here, drawn elsewhere) that carries its own
+  // array says where it carries it; the structure is just above that. The
+  // checks hold the mount to the roof it names (see verify: venue).
+  if (roof.coverage === 'none' && template.lighting?.mount) return Math.max(y, template.lighting.mount.y + 2.5);
   if (roof.coverage === 'none') return y;
   return y + (roof.rise ?? ROOF_DEFAULTS.rise);
 }
@@ -199,9 +203,9 @@ export function layOutLights(template: StadiumTemplate): LightingPlan {
   // therefore not a free variable — it is wherever the roof is, and the only
   // question is whether that is high enough. Which is the same shape of check
   // as trackFits(): a template may not claim a fitting its geometry cannot hold.
-  const y = top + 2.5;
+  const y = spec.mount ? spec.mount.y : top + 2.5;
   const N = requested === 'roof-rim' ? 72 : 40;
-  const off = back.radial + (template.roof?.overhang ?? ROOF_DEFAULTS.overhang) * 0.4;
+  const off = spec.mount ? spec.mount.offset : back.radial + (template.roof?.overhang ?? ROOF_DEFAULTS.overhang) * 0.4;
   const out: Luminaire[] = [];
   for (let i = 0; i < N; i++) {
     const t = (i / N) * Math.PI * 2;

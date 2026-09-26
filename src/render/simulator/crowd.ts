@@ -45,10 +45,18 @@ function personTexture(): THREE.Texture {
   c.height = 64;
   const g = c.getContext('2d')!;
   g.clearRect(0, 0, 32, 64);
-  g.fillStyle = '#ffffff';
+  // Head in skin and hair, body in white. The shader tints only the white:
+  // a crowd whose faces are the colour of its shirts reads as a colour field,
+  // not as people — which is the difference between a stand and a crowd.
+  g.fillStyle = '#c49774';
   g.beginPath();
   g.arc(16, 13, 7, 0, Math.PI * 2);
-  g.fill(); // head
+  g.fill(); // face
+  g.fillStyle = '#2a1d16';
+  g.beginPath();
+  g.arc(16, 11, 7, Math.PI, Math.PI * 2);
+  g.fill(); // hair
+  g.fillStyle = '#ffffff';
   g.beginPath();
   g.moveTo(5, 64);
   g.lineTo(7, 29);
@@ -69,6 +77,17 @@ export function buildCrowd(map: SeatMap, store: DesignStore): CrowdController {
   const tex = personTexture();
   const geo = new THREE.PlaneGeometry(0.62, 1.25);
   const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, alphaTest: 0.45, side: THREE.DoubleSide });
+  // Tint the shirt, not the head: the head is the only part of the texture
+  // with a low blue channel (skin and hair), so it keeps its own colour.
+  mat.onBeforeCompile = (shader) => {
+    shader.fragmentShader = shader.fragmentShader.replace(
+      '#include <color_fragment>',
+      `#if defined( USE_COLOR ) || defined( USE_INSTANCING_COLOR )
+        float isHead = step( texture2D( map, vMapUv ).b, 0.8 );
+        diffuseColor.rgb *= mix( vColor, vec3( 0.55 + 0.45 * vColor.g ), isHead );
+      #endif`,
+    );
+  };
   const mesh = new THREE.InstancedMesh(geo, mat, map.count);
   mesh.frustumCulled = false;
 
