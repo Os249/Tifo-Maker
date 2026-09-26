@@ -468,27 +468,29 @@ import { arcU, coverageMask, ROOF_DEFAULTS } from '../src/render/simulator/roof'
   console.log('roofs moved no seats:', moved === 0, `(${Object.keys(EXPECT).length} templates)`);
   if (moved) throw new Error(`${moved} template(s) changed seat count after the roof change`);
 
-  // Phone flashes must start OFF, every time. Three separate places have to agree,
-  // and any one of them drifting quietly turns the default back on.
+  // Phone lights (and every other accessory) must start OFF, every time. They
+  // moved from a checkbox in Atmosphere to a level in Accessories; the promise
+  // did not move: several places have to agree, and any one of them drifting
+  // quietly turns something on for every visitor.
   const overlaySrc = roofRead('src/render/simulator/overlay.ts', 'utf8');
   const simSrc = roofRead('src/render/simulator/index.ts', 'utf8');
-  const offByDefault = /\n\s*sparkles:\s*false,/.test(overlaySrc);
-  const hiddenAtBuild = /this\.sparkles\.object\.visible\s*=\s*false/.test(simSrc);
-  const applied = /sim\.setSparkles\(state\.sparkles\)/.test(overlaySrc);
-  const toggleable = /setSparkles\(b: boolean\)/.test(simSrc);
-  const noPersist = !/sparkles[^\n]*localStorage|localStorage[^\n]*sparkles/.test(overlaySrc);
-  console.log('phone flashes: default off', offByDefault, '| hidden at build', hiddenAtBuild,
-    '| applied', applied, '| toggle', toggleable, '| never persisted', noPersist);
-  if (!offByDefault || !hiddenAtBuild || !applied || !toggleable || !noPersist) {
-    throw new Error('phone-flash sparkles must start off and stay toggleable');
+  const offByDefault = /\n\s*acc:\s*noAccessories\(\),/.test(overlaySrc);
+  const applied = /sim\.setAccessories\(state\.acc\)/.test(overlaySrc);
+  const toggleable = /setAccessory\(kind: AccessoryKind, level: AccessoryLevel\)/.test(simSrc);
+  const noPersist = !/\bacc\b[^\n]*localStorage|localStorage[^\n]*\bacc\b|accessor[^\n]*localStorage/.test(overlaySrc);
+  const oldSwitchGone = !/setSparkles\(state\.sparkles\)|sparklesChk/.test(overlaySrc);
+  console.log('phone lights: default off', offByDefault, '| applied on rebuild', applied,
+    '| settable', toggleable, '| never persisted', noPersist, '| old switch gone', oldSwitchGone);
+  if (!offByDefault || !applied || !toggleable || !noPersist || !oldSwitchGone) {
+    throw new Error('accessories (phone lights included) must start off, be re-applied on rebuild, and never persist');
   }
 
   // Both languages, like every other label in that panel.
-  for (const k of ['phoneFlashes', 'tip.sparkles']) {
-    const row = new RegExp(`'?${k.replace('.', '\\.')}'?\\s*:\\s*\\{[^}]*\\}`).exec(overlaySrc)?.[0] ?? '';
+  for (const k of ['acc.phones', 'tip.acc.phones']) {
+    const row = new RegExp(`'?${k.replace(/\./g, '\\.')}'?\\s*:\\s*\\{[^}]*\\}`).exec(overlaySrc)?.[0] ?? '';
     if (!/en:/.test(row) || !/ar:/.test(row)) throw new Error(`${k} is missing an en/ar translation`);
   }
-  console.log('sparkle strings carry en + ar: true | roof defaults reach', ROOF_DEFAULTS.reach);
+  console.log('phone light strings carry en + ar: true | roof defaults reach', ROOF_DEFAULTS.reach);
 }
 
 // --- The stadium import panel -----------------------------------------------
@@ -1621,4 +1623,139 @@ import { buildStadium as siBuild } from '../src/core/stadiumFit';
     }
     console.log(`banners: ${keys.length} strings, all with en + ar`);
   }
+}
+
+// --- Match Day accessories: flags, flares, smoke, strobes, paper, phones ------
+// A user asked for "flags, flares, pyro, smoke bombs, strobe lights" each at a
+// level of their choosing. What a level promises is checked here, on every
+// ground in the catalogue: Off is nothing, every step up ADDS fans (never
+// reshuffles the ones already holding one), everything stays in the stand that
+// was asked for, and a front line is actually at the front.
+{
+  const acc = await import('../src/core/accessories');
+  const { STADIUM_CATALOG: ACC_CATALOG } = await import('../src/core/stadiumCatalog');
+  const { readFileSync: accRead } = await import('node:fs');
+  const tAcc = performance.now();
+  let grounds = 0, checks = 0;
+  for (const s of ACC_CATALOG) {
+    const m = generateSeatMap(s.template);
+    const stands = acc.indexStands(m);
+    grounds++;
+    // The index covers every seat exactly once, and across/depth are 0..1.
+    const total = stands.reduce((n, st) => n + st.idx.length, 0);
+    if (total !== m.count) throw new Error(`${s.id}: accessory stand index covers ${total} of ${m.count} seats`);
+    for (const st of stands) {
+      for (let k = 0; k < st.idx.length; k++) {
+        if (!(st.across[k] >= 0 && st.across[k] <= 1 && st.depth[k] >= 0 && st.depth[k] <= 1)) {
+          throw new Error(`${s.id}: a seat's place in its stand is outside 0..1`);
+        }
+      }
+    }
+    for (let sIdx = 0; sIdx < 4; sIdx++) {
+      const st = stands[sIdx];
+      const where = (['east', 'north', 'west', 'south'] as const)[sIdx];
+      for (const kind of acc.ACCESSORY_KINDS) {
+        let prev: number[] = [];
+        if (acc.planHolders(stands, kind, 0, where).length) throw new Error(`${s.id}: ${kind} at Off still has holders`);
+        for (let lv = 1; lv <= 4; lv++) {
+          const got = acc.planHolders(stands, kind, lv as 1 | 2 | 3 | 4, where);
+          checks++;
+          if (!got.length) throw new Error(`${s.id} ${where}: ${kind} level ${lv} holds nothing`);
+          if (got.length <= prev.length) throw new Error(`${s.id} ${where}: ${kind} level ${lv} (${got.length}) is not more than level ${lv - 1} (${prev.length})`);
+          const set = new Set(got);
+          if (set.size !== got.length) throw new Error(`${s.id} ${where}: ${kind} level ${lv} gives one seat two`);
+          for (const i of prev) if (!set.has(i)) throw new Error(`${s.id} ${where}: ${kind} level ${lv} dropped a fan level ${lv - 1} had — levels must nest`);
+          for (const i of got) if (acc.standOfSeatU(m.uv[i * 2]) !== sIdx) throw new Error(`${s.id}: ${kind} put a holder outside the ${where} stand`);
+          prev = got;
+        }
+      }
+      // A flare line is ON the front; a full stand reaches the back.
+      const depthOf = new Map<number, number>();
+      for (let k = 0; k < st.idx.length; k++) depthOf.set(st.idx[k], st.depth[k]);
+      const line = acc.planStand(st, 'flares', 2);
+      const lineDepth = line.reduce((a, i) => a + (depthOf.get(i) ?? 1), 0) / line.length;
+      const full = acc.planStand(st, 'flares', 4);
+      const fullBack = Math.max(...full.map((i) => depthOf.get(i) ?? 0));
+      if (lineDepth > 0.14) throw new Error(`${s.id}: a Medium flare line sits ${lineDepth.toFixed(2)} of the way back — not at the front`);
+      if (fullBack < 0.75) throw new Error(`${s.id}: Full flares only reach ${fullBack.toFixed(2)} of the way back`);
+      // The quality budget trims, and never empties a level.
+      const lo = acc.planStand(st, 'flares', 4, acc.ACCESSORY_BUDGET.low).length;
+      const hi = acc.planStand(st, 'flares', 4, acc.ACCESSORY_BUDGET.high).length;
+      if (!(lo > 0 && lo < hi)) throw new Error(`${s.id}: the low-tier budget does not trim Full flares (${lo} vs ${hi})`);
+      if (!acc.planStand(st, 'smoke', 1, acc.ACCESSORY_BUDGET.low).length) throw new Error(`${s.id}: Light smoke is empty on the low tier`);
+    }
+    // Same inputs, same seats: a quality rebuild must not move anyone.
+    const a1 = acc.planHolders(stands, 'flags', 3, 'all').join(',');
+    const a2 = acc.planHolders(acc.indexStands(m), 'flags', 3, 'all').join(',');
+    if (a1 !== a2) throw new Error(`${s.id}: accessory planning is not deterministic`);
+  }
+  const accMs = performance.now() - tAcc;
+  console.log(`accessories: ${grounds} grounds x 4 stands x 6 kinds x 4 levels = ${checks} plans, all nested, all in their stand (${accMs.toFixed(0)} ms)`);
+
+  // Where: the pairs are the right pairs, and the whole ground is all four.
+  const eq = (a: number[], b: number[]): boolean => a.slice().sort().join() === b.slice().sort().join();
+  if (!eq(acc.standsFor('all'), [0, 1, 2, 3]) || !eq(acc.standsFor('north-south'), [1, 3]) || !eq(acc.standsFor('east-west'), [0, 2]) ||
+    !eq(acc.standsFor('north'), [1]) || !eq(acc.standsFor('east'), [0])) throw new Error('standsFor maps a choice to the wrong stands');
+
+  // Levels and presets.
+  if (acc.clampLevel(9) !== 4 || acc.clampLevel(-3) !== 0 || acc.clampLevel('x') !== 0 || acc.clampLevel(2.4) !== 2 || acc.clampLevel(NaN) !== 0) {
+    throw new Error('clampLevel lets a bad level through');
+  }
+  const sum = (lv: Record<string, number>): number => Object.values(lv).reduce((a, b) => a + b, 0);
+  const P = acc.ACCESSORY_PRESETS;
+  if (sum(P.off) !== 0) throw new Error('the Off preset leaves something on');
+  if (!(sum(P.terrace) < sum(P.ultras) && sum(P.ultras) < sum(P.inferno))) throw new Error('presets do not rise Terrace < Ultras < Inferno');
+  for (const p of acc.PRESET_ORDER) for (const k of acc.ACCESSORY_KINDS) {
+    const v = P[p][k];
+    if (!(Number.isInteger(v) && v >= 0 && v <= 4)) throw new Error(`preset ${p} sets ${k} to ${v}`);
+  }
+  // Loudness: silent when nothing burns, louder with more, never past 1.
+  if (acc.pyroLoudness(acc.noAccessories()) !== 0) throw new Error('pyro bed is not silent with everything off');
+  if (!(acc.pyroLoudness(P.terrace) < acc.pyroLoudness(P.ultras) && acc.pyroLoudness(P.ultras) < acc.pyroLoudness(P.inferno)) || acc.pyroLoudness(P.inferno) > 1) {
+    throw new Error('pyro loudness does not follow the levels');
+  }
+  if (acc.pyroLoudness({ ...acc.noAccessories(), flags: 4, paper: 4, phones: 4 }) !== 0) throw new Error('silent accessories make the pyro bed sound');
+
+  // Colours: real hex, every choice drawable, club colours skip "empty seat".
+  for (const [id, hex] of [...Object.entries(acc.FLARE_COLOURS), ...Object.entries(acc.SMOKE_COLOURS)]) {
+    if (!/^#[0-9a-f]{6}$/i.test(hex)) throw new Error(`colour ${id} is not a hex colour`);
+  }
+  for (const c of acc.FLARE_COLOUR_IDS) if (c !== 'club' && !acc.FLARE_COLOURS[c]) throw new Error(`flare colour ${c} has no value`);
+  for (const c of acc.SMOKE_COLOUR_IDS) if (c !== 'club' && !acc.SMOKE_COLOURS[c]) throw new Error(`smoke colour ${c} has no value`);
+  const club = acc.clubColours(['#000000', '#c8102e', '#ffffff']);
+  if (club.join() !== '#c8102e,#ffffff') throw new Error('club colours include the empty-seat colour');
+  if (acc.clubColours(['#000000']).length < 2) throw new Error('an empty palette leaves the club with no colours');
+
+  // Every label the section shows, in both languages — and one for every
+  // choice the tables offer, so a new colour cannot ship as a raw key.
+  const ov = accRead('src/render/simulator/overlay.ts', 'utf8');
+  const want = [
+    'accTitle', 'accWhere', 'accQuick', 'flareColour', 'smokeColour', 'accBursts', 'confettiCannon', 'fireJets', 'accSafety', 'hAccessories',
+    'tip.acc.where', 'tip.flareColour', 'tip.smokeColour',
+    ...acc.ACCESSORY_KINDS.flatMap((k) => ['acc.' + k, 'tip.acc.' + k]),
+    ...acc.LEVEL_KEYS,
+    ...acc.ACCESSORY_WHERE.map((w) => 'where.' + w),
+    ...acc.PRESET_ORDER.flatMap((p) => ['preset.' + p, 'tip.preset.' + p]),
+    ...[...new Set([...acc.FLARE_COLOUR_IDS, ...acc.SMOKE_COLOUR_IDS])].map((c) => 'col.' + c),
+    'cue.flares-on', 'cue.strobes-on', 'cue.flags-on', 'cue.accessories-off', 'cue.smoke-on',
+  ];
+  for (const k of want) {
+    const i = ov.indexOf(`'${k}': {`) >= 0 ? ov.indexOf(`'${k}': {`) : ov.indexOf(`  ${k}: {`);
+    if (i < 0) throw new Error(`accessories: no string for "${k}"`);
+    const body = ov.slice(i, i + 400);
+    if (!/\ben:/.test(body) || !/\bar:/.test(body)) throw new Error(`accessories: "${k}" is missing en or ar`);
+  }
+  // The cues the builder offers are the ones the simulator acts on.
+  const simSrcA = accRead('src/render/simulator/index.ts', 'utf8');
+  for (const cue of ['flares-on', 'flares-off', 'strobes-on', 'strobes-off', 'flags-on', 'flags-off', 'accessories-off', 'smoke-on', 'smoke-off']) {
+    if (!simSrcA.includes(`e === '${cue}'`)) throw new Error(`the ${cue} cue does nothing in the simulator`);
+  }
+  for (const cue of ['flares-on', 'strobes-on', 'flags-on', 'accessories-off']) {
+    if (!new RegExp(`\\[[^\\]]*'${cue}'[^\\]]*\\]\\) opt\\(cueKind`).test(ov)) throw new Error(`the ${cue} cue is not offered in the sequence builder`);
+  }
+  // Lighting them makes a noise; burning them keeps making one.
+  for (const call of ['atmosphere.flareIgnite', 'atmosphere.smokePot', 'atmosphere.setPyroBed']) {
+    if (!simSrcA.includes(call)) throw new Error(`accessories: ${call} is never called`);
+  }
+  console.log(`accessories: ${want.length} strings in en + ar, 9 cues wired, ignite / smoke / burn sounds wired`);
 }

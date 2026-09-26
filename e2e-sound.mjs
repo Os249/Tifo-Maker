@@ -445,14 +445,35 @@ console.log('\n— the effects that used to be silent —');
   await freeze(p);
   await p.waitForTimeout(900);
   const quiet = await peak(p, 12, 60);
-  for (const [label, name] of [['Confetti', 'confetti'], ['Pyro', 'pyro']]) {
-    await p.evaluate((l) => {
-        const s = document.querySelector('.mds-section[data-sec="atmosphere"]');
-      [...s.querySelectorAll('.mds-btn')].find((b) => new RegExp(l, 'i').test(b.textContent)).click();
-    }, name);
+  // The one-off bursts moved into Accessories with the rest of the fans' kit;
+  // found by their stable handles, not their (translated) labels.
+  for (const [label, k] of [['Confetti cannon', 'acc-cannon'], ['Fire jets', 'acc-jets']]) {
+    await p.evaluate((key) => document.querySelector(`[data-k="${key}"]`).click(), k);
     const v = await peak(p, 14, 55);
     check(`${label} makes a noise`, v > quiet * 1.6 && v > AUDIBLE, `${quiet.toFixed(4)} -> ${v.toFixed(4)}`);
   }
+  // Flares: struck with a hiss, then they keep burning — the crackle stays for
+  // as long as the level is up, and goes when they are put out.
+  await p.waitForTimeout(2600);
+  const before = await peak(p, 10, 60);
+  const setLevel = (k, v) => p.evaluate(({ key, val }) => {
+    const r = document.querySelector(`[data-k="${key}"]`);
+    r.value = String(val);
+    r.dispatchEvent(new Event('input', { bubbles: true }));
+  }, { key: k, val: v });
+  await setLevel('acc-flares', 3);
+  const struck = await peak(p, 10, 55);
+  check('lighting the flares makes a noise', struck > before * 1.6 && struck > AUDIBLE, `${before.toFixed(4)} -> ${struck.toFixed(4)}`);
+  await p.waitForTimeout(3500);
+  const burning = await peak(p, 12, 60);
+  check('and they keep crackling while they burn', burning > before * 1.3 && burning > AUDIBLE, `${before.toFixed(4)} -> ${burning.toFixed(4)}`);
+  await setLevel('acc-flares', 0);
+  await p.waitForTimeout(3200);
+  const out = await peak(p, 12, 60);
+  check('and fall quiet when they are put out', out < burning * 0.75, `${burning.toFixed(4)} -> ${out.toFixed(4)}`);
+  await setLevel('acc-smoke', 2);
+  const pot = await peak(p, 10, 55);
+  check('a smoke pot going off makes a noise', pot > out * 1.4 && pot > AUDIBLE, `${out.toFixed(4)} -> ${pot.toFixed(4)}`);
   check('no page errors', errs.length === 0, errs.join(' | '));
   await ctx.close();
 }

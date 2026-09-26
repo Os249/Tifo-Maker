@@ -141,6 +141,18 @@ export interface Atmosphere {
   pyro(): void;
   /** Paper in the air. */
   confetti(): void;
+  /**
+   * Flares being struck: a hiss that catches and settles into the burn.
+   * `strength` 0..1 is how many at once (a Light level is a handful of them).
+   */
+  flareIgnite(strength?: number): void;
+  /** A smoke pot going off: a soft chuff and the pour. */
+  smokePot(strength?: number): void;
+  /**
+   * The sound of pyro burning, for as long as it burns: bengals seethe, strobe
+   * pots crackle. 0 is silence; it follows the Accessories levels.
+   */
+  setPyroBed(amount: number): void;
   /** The contactor closing, and the tubes coming up to temperature. */
   floodlights(on: boolean): void;
 
@@ -262,6 +274,27 @@ function crackleBuffer(ctx: BaseAudioContext, seconds = 1.8): AudioBuffer {
     const amp = 0.1 + Math.random() * 0.4;
     for (let i = 0; i < n; i++) out[at + i] += (Math.random() * 2 - 1) * amp * Math.exp(-i / (n * 0.2));
   }
+  return buf;
+}
+
+/**
+ * Burning pyro, for a loop: pops spread evenly through the buffer (the one-shot
+ * crackle above is front-loaded, which loops as a pulse), and the ends faded so
+ * the seam does not click.
+ */
+function sizzleBuffer(ctx: BaseAudioContext, seconds = 3): AudioBuffer {
+  const sr = ctx.sampleRate;
+  const len = Math.floor(sr * seconds);
+  const buf = ctx.createBuffer(1, len, sr);
+  const out = buf.getChannelData(0);
+  const pops = Math.floor(seconds * 170);
+  for (let c = 0; c < pops; c++) {
+    const at = Math.floor(Math.random() * (len - 600));
+    const n = 40 + Math.floor(Math.random() * 220);
+    const amp = 0.06 + Math.random() ** 3 * 0.55;
+    for (let i = 0; i < n; i++) out[at + i] += (Math.random() * 2 - 1) * amp * Math.exp(-i / (n * 0.22));
+  }
+  loopSeam(out);
   return buf;
 }
 
@@ -449,6 +482,10 @@ export function buildAtmosphere(): Atmosphere {
   let white: AudioBuffer | null = null;
   let claps: AudioBuffer | null = null;
   let crackle: AudioBuffer | null = null;
+  let sizzle: AudioBuffer | null = null;
+  /** The pyro bed: a seething hiss and a crackle, both looped. */
+  let pyroNodes: { hiss: AudioBufferSourceNode; pops: AudioBufferSourceNode; gain: GainNode } | null = null;
+  let pyroAmount = 0;
 
   const levels: SoundLevels = { ...DEFAULT_LEVELS };
   let muted = false;
@@ -516,6 +553,7 @@ export function buildAtmosphere(): Atmosphere {
       white = whiteNoise(ctx);
       claps = applauseBuffer(ctx);
       crackle = crackleBuffer(ctx);
+      sizzle = sizzleBuffer(ctx);
     }
     // resume() only settles once the browser lets the context run. Without a
     // user gesture yet (sound is on by default now, so this can run on open)
@@ -639,6 +677,74 @@ export function buildAtmosphere(): Atmosphere {
     weatherSrc.start(0, Math.random() * 2);
   };
 
+  // ---- burning pyro -------------------------------------------------------
+
+  const stopPyro = (): void => {
+    if (!pyroNodes) return;
+    for (const n of [pyroNodes.hiss, pyroNodes.pops]) {
+      try { n.stop(); } catch { /* already stopped */ }
+      n.disconnect();
+    }
+    pyroNodes.gain.disconnect();
+    pyroNodes = null;
+  };
+
+  /**
+   * Start the bed if there is anything burning, and set how loud it is. Level
+   * is a square root of the amount: a stand of 300 flares is not 300 times as
+   * loud as one, it is a stand of flares.
+   */
+  const syncPyro = (): void => {
+    if (!ctx || !white || !sizzle) return;
+    const out = bus.sfx;
+    if (!out) return;
+    if (pyroAmount <= 0.001) {
+      if (pyroNodes) {
+        pyroNodes.gain.gain.setTargetAtTime(0, ctx.currentTime, 0.4);
+        const dead = pyroNodes;
+        window.setTimeout(() => { if (pyroNodes === dead) stopPyro(); }, 2500);
+      }
+      return;
+    }
+    if (!pyroNodes) {
+      const gain = ctx.createGain();
+      gain.gain.value = 0;
+      gain.connect(out);
+      // The hiss: a bengal is a jet of burning gas, bright and airy.
+      const hiss = ctx.createBufferSource();
+      hiss.buffer = white;
+      hiss.loop = true;
+      const bp = ctx.createBiquadFilter();
+      bp.type = 'bandpass';
+      bp.frequency.value = 2600;
+      bp.Q.value = 0.6;
+      const hg = ctx.createGain();
+      hg.gain.value = 0.11;
+      // Seething, not steady: a slow wobble on the filter.
+      const lfo = ctx.createOscillator();
+      lfo.frequency.value = 0.9;
+      const lg = ctx.createGain();
+      lg.gain.value = 700;
+      lfo.connect(lg).connect(bp.frequency);
+      lfo.start();
+      hiss.connect(bp).connect(hg).connect(gain);
+      hiss.start(0, Math.random() * 2);
+      // The crackle: burning slag and strobe pots.
+      const pops = ctx.createBufferSource();
+      pops.buffer = sizzle;
+      pops.loop = true;
+      const hp = ctx.createBiquadFilter();
+      hp.type = 'highpass';
+      hp.frequency.value = 900;
+      const pg = ctx.createGain();
+      pg.gain.value = 0.32;
+      pops.connect(hp).connect(pg).connect(gain);
+      pops.start(0, Math.random() * 2);
+      pyroNodes = { hiss, pops, gain };
+    }
+    pyroNodes.gain.gain.setTargetAtTime(0.9 * Math.sqrt(pyroAmount), ctx.currentTime, 0.35);
+  };
+
   // ---- the drum -----------------------------------------------------------
 
   /** One drum hit: a pitch-dropping sine with a noise transient for the skin. */
@@ -693,11 +799,13 @@ export function buildAtmosphere(): Atmosphere {
         suspended = false;
         startBed();
         startWeather();
+        syncPyro();
         if (drumming) this.setDrum(true);
       } else {
         enabled = false;
         stopBed();
         stopWeather();
+        stopPyro();
         window.clearInterval(drumTimer);
         drumTimer = undefined;
         void ctx?.suspend().catch(() => undefined);
@@ -940,6 +1048,71 @@ export function buildAtmosphere(): Atmosphere {
       cr.stop(now + 0.45 + crackle.duration);
     },
 
+    flareIgnite(strength = 1): void {
+      const out = live('sfx');
+      if (!out || !ctx || !white) return;
+      const now = ctx.currentTime;
+      const k = Math.max(0.15, Math.min(1, strength));
+      // The strike: a sharp, rising hiss as the head catches…
+      const src = ctx.createBufferSource();
+      src.buffer = white;
+      const bp = ctx.createBiquadFilter();
+      bp.type = 'bandpass';
+      bp.Q.value = 0.9;
+      bp.frequency.setValueAtTime(1200, now);
+      bp.frequency.exponentialRampToValueAtTime(3400, now + 0.35);
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, now);
+      g.gain.exponentialRampToValueAtTime(0.34 * k, now + 0.06);
+      g.gain.setTargetAtTime(0.12 * k, now + 0.3, 0.3);
+      g.gain.setTargetAtTime(0.0001, now + 1.3, 0.25);
+      src.connect(bp).connect(g).connect(out);
+      src.start(now, Math.random() * 2);
+      src.stop(now + 2.4);
+      // …and a thump of air: the first flame going up.
+      const o = ctx.createOscillator();
+      o.type = 'sine';
+      o.frequency.setValueAtTime(120, now);
+      o.frequency.exponentialRampToValueAtTime(55, now + 0.25);
+      const og = ctx.createGain();
+      og.gain.setValueAtTime(0.0001, now);
+      og.gain.exponentialRampToValueAtTime(0.22 * k, now + 0.02);
+      og.gain.exponentialRampToValueAtTime(0.0001, now + 0.32);
+      o.connect(og).connect(out);
+      o.start(now);
+      o.stop(now + 0.36);
+    },
+
+    smokePot(strength = 1): void {
+      const out = live('sfx');
+      if (!out || !ctx || !noise) return;
+      const now = ctx.currentTime;
+      const k = Math.max(0.2, Math.min(1, strength));
+      // Darker than a flare: a chuff of pink noise through a falling low-pass,
+      // then the rush of the pour fading under the crowd.
+      const src = ctx.createBufferSource();
+      src.buffer = noise;
+      src.loop = true;
+      const lp = ctx.createBiquadFilter();
+      lp.type = 'lowpass';
+      lp.frequency.setValueAtTime(2400, now);
+      lp.frequency.exponentialRampToValueAtTime(700, now + 0.8);
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, now);
+      g.gain.exponentialRampToValueAtTime(0.5 * k, now + 0.05);
+      g.gain.setTargetAtTime(0.16 * k, now + 0.25, 0.4);
+      g.gain.setTargetAtTime(0.0001, now + 1.8, 0.5);
+      src.connect(lp).connect(g).connect(out);
+      src.start(now, Math.random() * 2);
+      src.stop(now + 3.6);
+    },
+
+    setPyroBed(amount: number): void {
+      pyroAmount = Math.max(0, Math.min(1, Number.isFinite(amount) ? amount : 0));
+      if (!ctx || !enabled) return;
+      syncPyro();
+    },
+
     /** Paper in the air: bright, weightless, and gone. */
     confetti(): void {
       const out = live('sfx');
@@ -1099,6 +1272,7 @@ export function buildAtmosphere(): Atmosphere {
     dispose(): void {
       stopBed();
       stopWeather();
+      stopPyro();
       window.clearInterval(drumTimer);
       void ctx?.close().catch(() => undefined);
       ctx = null;
@@ -1110,6 +1284,7 @@ export function buildAtmosphere(): Atmosphere {
       white = null;
       claps = null;
       crackle = null;
+      sizzle = null;
       enabled = false;
       suspended = false;
     },

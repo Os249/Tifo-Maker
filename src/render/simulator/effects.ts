@@ -29,7 +29,8 @@ function beamGradient(): THREE.Texture {
 /**
  * Match Day Simulator — effects & atmosphere (Phase 5).
  *
- * Floodlight masts, drifting (colourable) smoke, a confetti burst, a pyro burst,
+ * Floodlight masts, a confetti burst, a pyro burst (the club's pitchside fire
+ * jets — the fans' own smoke, flares and strobes are ./accessories.ts),
  * and optional bloom post-processing (ULTRA). Particle systems are THREE.Points
  * recycled on the CPU — cheap and self-contained. Bloom is wrapped in try/catch
  * so a failure degrades to a normal render rather than breaking the simulator.
@@ -37,7 +38,6 @@ function beamGradient(): THREE.Texture {
 
 export interface EffectsController {
   setFloodlights(on: boolean): void;
-  setSmoke(on: boolean, color?: THREE.ColorRepresentation): void;
   burstConfetti(): void;
   burstPyro(): void;
   update(dt: number): void;
@@ -221,24 +221,6 @@ export function buildEffects(
   });
   scene.add(floodGroup);
 
-  // ---- Smoke ----
-  const smoke = new Particles(240, tex, 6, 0xcfd6df, false);
-  smoke.mat.opacity = 0.2;
-  smoke.points.visible = false;
-  scene.add(smoke.points);
-  trash.push(smoke);
-  let smokeOn = false;
-  const seedSmoke = (i: number): void => {
-    const side = i % 2 === 0 ? 60 : -60;
-    smoke.pos[i * 3] = (Math.random() - 0.5) * 60;
-    smoke.pos[i * 3 + 1] = Math.random() * 6;
-    smoke.pos[i * 3 + 2] = side + (Math.random() - 0.5) * 30;
-    smoke.vel[i * 3] = (Math.random() - 0.5) * 1.2;
-    smoke.vel[i * 3 + 1] = 3 + Math.random() * 3;
-    smoke.vel[i * 3 + 2] = (Math.random() - 0.5) * 1.2;
-    smoke.life[i] = 1;
-  };
-
   // ---- Confetti ----
   const confetti = new Particles(600, tex, 1.6, 0xffffff, false);
   confetti.mat.opacity = 0.95;
@@ -270,12 +252,6 @@ export function buildEffects(
       floodGroup.visible = on;
       spots.forEach((s, i) => { s.intensity = on ? spotPower[i] : 0; });
     },
-    setSmoke(on, color) {
-      smokeOn = on;
-      smoke.points.visible = on;
-      if (color !== undefined) smoke.setColor(color);
-      if (on) for (let i = 0; i < smoke.n; i++) seedSmoke(i);
-    },
     burstConfetti() {
       for (let i = 0; i < confetti.n; i++) {
         confetti.pos[i * 3] = (Math.random() - 0.5) * 150;
@@ -302,15 +278,6 @@ export function buildEffects(
     },
     update(dt) {
       const d = Math.min(0.05, dt);
-      if (smokeOn) {
-        for (let i = 0; i < smoke.n; i++) {
-          smoke.pos[i * 3] += smoke.vel[i * 3] * d;
-          smoke.pos[i * 3 + 1] += smoke.vel[i * 3 + 1] * d;
-          smoke.pos[i * 3 + 2] += smoke.vel[i * 3 + 2] * d;
-          if (smoke.pos[i * 3 + 1] > 45) seedSmoke(i);
-        }
-        smoke.flush();
-      }
       for (let i = 0; i < confetti.n; i++) {
         if (confetti.life[i] <= 0) continue;
         confetti.vel[i * 3 + 1] -= 2.2 * d; // gravity
@@ -359,7 +326,6 @@ export function buildEffects(
     },
     dispose() {
       scene.remove(floodGroup);
-      scene.remove(smoke.points);
       scene.remove(confetti.points);
       scene.remove(pyro.points);
       for (const t of trash) t.dispose();

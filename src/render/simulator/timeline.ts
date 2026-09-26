@@ -21,6 +21,15 @@ export type EffectName =
   | 'pyro'
   | 'smoke-on'
   | 'smoke-off'
+  // Accessories the fans hold (see core/accessories). A cue turns one on at the
+  // level set in the panel — or Medium when it is Off — and off again.
+  | 'flares-on'
+  | 'flares-off'
+  | 'strobes-on'
+  | 'strobes-off'
+  | 'flags-on'
+  | 'flags-off'
+  | 'accessories-off'
   | 'floods-on'
   | 'floods-off'
   // Sound. Cues, not settings: the crowd reacts to the choreography, and a roar

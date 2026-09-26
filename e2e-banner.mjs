@@ -1211,7 +1211,9 @@ console.log('\n— match day from the Banner view —');
   await page.mouse.up();
   await page.waitForTimeout(900);
   check('a banner picked out with a click drags along the stand', (await block()) !== b0, `${b0} → ${await block()}`);
-  const hint = await page.evaluate(() => document.querySelector('.mds-hint')?.textContent || '');
+  // The Banners section's own hint: the panel has more than one now (the
+  // Accessories section above it carries a safety line).
+  const hint = await page.evaluate(() => document.querySelector('[data-sec="banners"] .mds-hint')?.textContent || '');
   check('the panel says how to move a banner now', /pick it out/.test(hint), hint);
   check('no page errors', errs.length === 0, errs.join(' | '));
   await ctx.close();

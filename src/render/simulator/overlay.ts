@@ -12,12 +12,28 @@ import type { Cue, EffectName } from './timeline';
 import type { Weather } from './weather';
 import { dbg } from './debug';
 import { getLang } from '../../ui/i18n';
+import {
+  ACCESSORY_KINDS,
+  ACCESSORY_PRESETS,
+  ACCESSORY_WHERE,
+  FLARE_COLOUR_IDS,
+  LEVEL_KEYS,
+  PRESET_ORDER,
+  SMOKE_COLOUR_IDS,
+  clampLevel,
+  noAccessories,
+  type AccessoryKind,
+  type AccessoryLevels,
+  type AccessoryPreset,
+  type AccessoryWhere,
+} from '../../core/accessories';
 
 /**
  * Fullscreen Match Day Simulator overlay — the lazy-loaded entry point.
  *
  * UI: a slim top bar (global actions) plus a collapsible left "glass" panel with
- * five accordion sections (Camera, Crowd, Atmosphere, Tifo Assets, Choreography),
+ * accordion sections (Camera, Crowd, Accessories, Atmosphere, Sound, Tifo
+ * Assets, Banners, Choreography, Recording),
  * so the controls are organized and discoverable rather than a wall of buttons.
  * All controls drive the same MatchDaySimulator API; state is re-applied when
  * quality changes (which rebuilds the scene), and everything disposes on close.
@@ -110,6 +126,9 @@ const CSS = `
 .mds-flabel{font-size:11px;color:var(--text-dim);}
 .mds-flabel-row{display:flex;align-items:baseline;justify-content:space-between;gap:8px;}
 .mds-fval{font:600 11px ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--accent-soft);}
+.mds-step .mds-fval{font:600 11px system-ui,sans-serif;color:var(--text-faint);}
+.mds-step.on .mds-fval{color:var(--accent-soft);}
+.mds-step.on .mds-flabel>span:first-child{color:var(--text);}
 .mds-row{display:flex;flex-wrap:wrap;gap:6px;align-items:center;}
 .mds-row .mds-btn{flex:1 1 auto;text-align:center;}
 .mds-divider{height:1px;background:var(--border-soft);margin:1px 0;}
@@ -210,6 +229,8 @@ const ICONS = {
   help: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9.2"/><path d="M9.3 9.2a2.7 2.7 0 1 1 3.9 2.5c-.8.4-1.2.9-1.2 1.8"/><path d="M12 17h.01"/></svg>',
   sound: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9v6h3.5L12 19V5L7.5 9H4Z"/><path d="M16 9.2a4 4 0 0 1 0 5.6"/><path d="M18.6 6.6a7.6 7.6 0 0 1 0 10.8"/></svg>',
   record: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="13" height="12" rx="2"/><path d="M15 10.5l6-3.5v10l-6-3.5Z"/><circle cx="8.5" cy="12" r="2.4" fill="currentColor" stroke="none"/></svg>',
+  // A flare held up: the stick, and the flame off the top of it.
+  flare: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22v-9"/><path d="M12 13c-2.6 0-4-1.8-4-4 0-2.6 2.2-3.6 2.4-6.6C12.6 3.6 16 6 16 9c0 2.2-1.4 4-4 4Z"/><path d="M12 13c-1 0-1.6-.8-1.6-1.7 0-1 .8-1.5 1.1-2.6.9.6 2.1 1.4 2.1 2.6 0 .9-.6 1.7-1.6 1.7Z"/></svg>',
 } as const;
 
 /**
@@ -260,14 +281,10 @@ const MDS_T: Record<string, { en: string; ar: string }> = {
   exposure: { en: 'Exposure', ar: 'السطوع' },
   sunIntensity: { en: 'Sun intensity', ar: 'شدة الشمس' },
   floodlights: { en: 'Floodlights', ar: 'الكشافات' },
-  smoke: { en: 'Smoke', ar: 'الدخان' },
   railBanners: { en: 'Rail banners', ar: 'لافتات الفواصل' },
   coverStairs: { en: 'Cover stairs', ar: 'تغطية الدرج' },
   cornerFlags: { en: 'Corner flags', ar: 'أعلام الأركان' },
   wetPitch: { en: 'Wet pitch (reflections)', ar: 'أرضية مبلّلة (انعكاسات)' },
-  phoneFlashes: { en: 'Phone flashes in the stands', ar: 'أضواء الجوالات في المدرجات' },
-  confetti: { en: 'Confetti', ar: 'قصاصات' },
-  pyro: { en: 'Pyro', ar: 'شماريخ' },
   'tod.day': { en: 'Day', ar: 'نهار' },
   'tod.dusk': { en: 'Dusk', ar: 'غروب' },
   'tod.night': { en: 'Night', ar: 'ليل' },
@@ -331,9 +348,9 @@ const MDS_T: Record<string, { en: string; ar: string }> = {
   clearSeq: { en: 'Clear', ar: 'مسح' },
   'cue.reveal': { en: 'Reveal', ar: 'كشف' },
   'cue.camera': { en: 'Camera (current)', ar: 'كاميرا (الحالية)' },
-  'cue.confetti': { en: 'Confetti', ar: 'قصاصات' },
-  'cue.pyro': { en: 'Pyro', ar: 'شماريخ' },
-  'cue.smoke-on': { en: 'Smoke on', ar: 'تشغيل الدخان' },
+  'cue.confetti': { en: 'Confetti cannon', ar: 'مدفع القصاصات' },
+  'cue.pyro': { en: 'Fire jets', ar: 'نوافير النار' },
+  'cue.smoke-on': { en: 'Smoke bombs on', ar: 'تشغيل قنابل الدخان' },
   'cue.floods-on': { en: 'Floodlights on', ar: 'تشغيل الكشافات' },
   noAssets: { en: '(no assets yet)', ar: '(ما في عناصر بعد)' },
   selectDash: { en: '(select)', ar: '(اختر)' },
@@ -372,13 +389,11 @@ const MDS_T: Record<string, { en: string; ar: string }> = {
   'tip.exp': { en: 'Overall brightness', ar: 'السطوع العام' },
   'tip.sun': { en: 'Sun / key light strength', ar: 'قوة ضوء الشمس الرئيسي' },
   'tip.floods': { en: 'Floodlight towers + light beams', ar: 'أبراج الكشافات وأشعة الضوء' },
-  'tip.smoke': { en: 'Drifting smoke', ar: 'دخان منساب' },
   'tip.banners': { en: 'Fill the dark walkway gap between tiers with your design', ar: 'عبّي الفراغ المعتم بين الطوابق بتصميمك' },
   'tip.stairs': { en: 'Also fill the aisles / stairs between sections (unorthodox, off by default)', ar: 'عبّي كمان الممرات/الدرج بين القطاعات (غير معتاد، مطفأ افتراضياً)' },
   'tip.wet': { en: 'Reflective wet-look pitch (heavier on GPU)', ar: 'أرضية مبلّلة عاكسة (أثقل على المعالج الرسومي)' },
-  'tip.sparkles': { en: 'Twinkling phone lights across the crowd — off by default, so a still tifo reads still', ar: 'أضواء جوالات تتلألأ بين الجمهور — مطفأة افتراضياً ليبقى التيفو الثابت ثابتاً' },
-  'tip.confetti': { en: 'Burst of confetti', ar: 'انفجار قصاصات' },
-  'tip.pyro': { en: 'Burst of pyro flares', ar: 'انفجار شماريخ' },
+  'tip.confetti': { en: 'One burst of confetti over the whole pitch', ar: 'دفعة قصاصات وحدة فوق الملعب كله' },
+  'tip.pyro': { en: 'One burst of the fire jets along the pitchside', ar: 'دفعة وحدة من نوافير النار على جانب الملعب' },
   'tip.bigBanner': { en: 'Big 3D banner that drapes the whole stand', ar: 'لافتة ثلاثية الأبعاد كبيرة تغطي المدرج كامل' },
   'tip.smallBanner': { en: 'Small banner covering the dark front wall / infrastructure', ar: 'لافتة صغيرة تغطي الجدار الأمامي المعتم' },
   'tip.text': { en: 'Text banner using the text box above', ar: 'لافتة نص باستخدام مربع النص فوق' },
@@ -506,6 +521,72 @@ const MDS_T: Record<string, { en: string; ar: string }> = {
   'tip.scrub': { en: 'Hold the reveal anywhere in the middle, to line up a shot', ar: 'وقّف الكشف بأي لحظة، عشان تظبط اللقطة' },
   'tip.centreIt': { en: 'Put it dead centre on the stand', ar: 'حطها بالضبط في منتصف المدرج' },
   'tip.snapOn': { en: 'Catch the stand centre, the tier tops and the section edges', ar: 'تمسك منتصف المدرج وأعلى الطوابق وحدود القطاعات' },
+
+  // ---- accessories ----
+  accTitle: { en: 'Accessories', ar: 'الإكسسوارات' },
+  accWhere: { en: 'Where', ar: 'المكان' },
+  'where.north': { en: 'North stand', ar: 'المدرج الشمالي' },
+  'where.south': { en: 'South stand', ar: 'المدرج الجنوبي' },
+  'where.east': { en: 'East stand', ar: 'المدرج الشرقي' },
+  'where.west': { en: 'West stand', ar: 'المدرج الغربي' },
+  'where.north-south': { en: 'North and South', ar: 'الشمالي والجنوبي' },
+  'where.east-west': { en: 'East and West', ar: 'الشرقي والغربي' },
+  'where.all': { en: 'The whole ground', ar: 'الملعب كامل' },
+  accQuick: { en: 'Quick set', ar: 'ضبط سريع' },
+  'preset.off': { en: 'All off', ar: 'طفّ الكل' },
+  'preset.terrace': { en: 'Terrace', ar: 'مدرج عادي' },
+  'preset.ultras': { en: 'Ultras', ar: 'ألتراس' },
+  'preset.inferno': { en: 'Inferno', ar: 'جحيم' },
+  'preset.lightshow': { en: 'Light show', ar: 'عرض أضواء' },
+  'acc.flags': { en: 'Flags', ar: 'الأعلام' },
+  'acc.flares': { en: 'Flares', ar: 'الشماريخ' },
+  'acc.smoke': { en: 'Smoke bombs', ar: 'قنابل الدخان' },
+  'acc.strobes': { en: 'Strobes', ar: 'أضواء الستروب' },
+  'acc.paper': { en: 'Paper & confetti', ar: 'الورق والقصاصات' },
+  'acc.phones': { en: 'Phone lights', ar: 'أضواء الجوالات' },
+  'lvl.off': { en: 'Off', ar: 'مطفأ' },
+  'lvl.light': { en: 'Light', ar: 'خفيف' },
+  'lvl.medium': { en: 'Medium', ar: 'متوسط' },
+  'lvl.heavy': { en: 'Heavy', ar: 'كثيف' },
+  'lvl.full': { en: 'Full', ar: 'كامل' },
+  flareColour: { en: 'Flare colour', ar: 'لون الشماريخ' },
+  smokeColour: { en: 'Smoke colour', ar: 'لون الدخان' },
+  'col.club': { en: 'Club colours', ar: 'ألوان النادي' },
+  'col.red': { en: 'Red', ar: 'أحمر' },
+  'col.orange': { en: 'Orange', ar: 'برتقالي' },
+  'col.yellow': { en: 'Yellow', ar: 'أصفر' },
+  'col.green': { en: 'Green', ar: 'أخضر' },
+  'col.blue': { en: 'Blue', ar: 'أزرق' },
+  'col.purple': { en: 'Purple', ar: 'بنفسجي' },
+  'col.white': { en: 'White', ar: 'أبيض' },
+  'col.black': { en: 'Black', ar: 'أسود' },
+  'col.pink': { en: 'Pink', ar: 'وردي' },
+  accBursts: { en: 'One-off bursts', ar: 'دفعات لمرة وحدة' },
+  confettiCannon: { en: 'Confetti cannon', ar: 'مدفع القصاصات' },
+  fireJets: { en: 'Fire jets', ar: 'نوافير النار' },
+  accSafety: {
+    en: 'For the picture only. Flares, smoke bombs and strobes are banned in most stadiums — they burn at over 1,600 °C.',
+    ar: 'للعرض فقط. الشماريخ وقنابل الدخان والستروب ممنوعة في أغلب الملاعب — حرارتها تتجاوز ١٦٠٠ درجة مئوية.',
+  },
+  'tip.acc.where': { en: 'Which stand the fans with them are standing in', ar: 'أي مدرج فيه الجماهير اللي معهم' },
+  'tip.acc.flags': { en: 'Hand flags waving over the crowd, and big flags on long poles', ar: 'أعلام يد ترفرف فوق الجمهور، وأعلام كبيرة على عصي طويلة' },
+  'tip.acc.flares': { en: 'Bengal flares held overhead. Light is a handful at the front, Medium a line along it, Full the whole stand', ar: 'شماريخ مرفوعة فوق الرؤوس. الخفيف كم واحد قدام، والمتوسط صف على طول المقدمة، والكامل المدرج كله' },
+  'tip.acc.smoke': { en: 'Coloured smoke pots: it rolls out low, then lifts and hangs over the stand', ar: 'قنابل دخان ملوّن: ينتشر تحت، وبعدين يرتفع ويغطي المدرج' },
+  'tip.acc.strobes': { en: 'White strobe pots, each flashing on its own beat', ar: 'أضواء ستروب بيضاء، كل وحدة تومض على إيقاعها' },
+  'tip.acc.paper': { en: 'Handfuls of paper thrown up over the heads in front', ar: 'حفنات ورق تنرمى فوق رؤوس اللي قدام' },
+  'tip.acc.phones': { en: 'Phone torches held up across the stand — best at night', ar: 'أنوار الجوالات مرفوعة في المدرج — أحلى في الليل' },
+  'tip.preset.off': { en: 'Put everything out', ar: 'طفّ كل شي' },
+  'tip.preset.terrace': { en: 'An ordinary big game: flags going, a few flares and a little smoke', ar: 'مباراة كبيرة عادية: أعلام، وكم شمروخ، وشوية دخان' },
+  'tip.preset.ultras': { en: "The curva's own show: flags, a stand of flares, smoke, strobes and paper", ar: 'عرض الكورفا: أعلام، ومدرج شماريخ، ودخان، وستروب، وورق' },
+  'tip.preset.inferno': { en: 'Everything, all at once — the one where the referee stops the match', ar: 'كل شي مرة وحدة — اللي يوقف فيها الحكم المباراة' },
+  'tip.preset.lightshow': { en: 'Phone torches and a few strobes — the legal one, best at night', ar: 'أنوار الجوالات وكم ستروب — النسخة القانونية، أحلى في الليل' },
+  'tip.flareColour': { en: 'The colour a flare burns. Red is by far the most common', ar: 'لون اشتعال الشمروخ. الأحمر هو الأكثر بفرق كبير' },
+  'tip.smokeColour': { en: "The smoke's colour. Club colours alternates yours pot by pot", ar: 'لون الدخان. ألوان النادي تبدّل ألوانك قنبلة بعد قنبلة' },
+  'cue.flares-on': { en: 'Flares on', ar: 'تشغيل الشماريخ' },
+  'cue.strobes-on': { en: 'Strobes on', ar: 'تشغيل الستروب' },
+  'cue.flags-on': { en: 'Flags up', ar: 'رفع الأعلام' },
+  'cue.accessories-off': { en: 'Accessories off', ar: 'إطفاء الإكسسوارات' },
+  hAccessories: { en: 'Flags, flares, smoke', ar: 'الأعلام والشماريخ والدخان' },
 };
 const L = (k: string): string => {
   const e = MDS_T[k];
@@ -522,7 +603,6 @@ interface SimState {
   stairs: boolean;
   flags: boolean;
   floods: boolean;
-  smoke: boolean;
   fly: boolean;
   reveal: RevealMode;
   /** The drum call: seconds held up, and how many times round. */
@@ -531,7 +611,14 @@ interface SimState {
   tod: TimeOfDay;
   weather: Weather;
   wet: boolean;
-  sparkles: boolean;
+  /**
+   * Accessories: every one starts Off, every time the simulator opens — a
+   * still tifo should read still until someone asks for smoke. Not persisted.
+   */
+  acc: AccessoryLevels;
+  accWhere: AccessoryWhere;
+  flareColour: string;
+  smokeColour: string;
   sound: boolean;
   muted: boolean;
   levels: SoundLevels;
@@ -635,7 +722,6 @@ export function openMatchDaySimulator(
     stairs: false,
     flags: true,
     floods: true,
-    smoke: false,
     fly: false,
     reveal: 'wipe-lr',
     drumHold: DRUM_CALL.hold,
@@ -643,9 +729,15 @@ export function openMatchDaySimulator(
     tod: 'dusk',
     weather: 'clear',
     wet: true,
-    // Always off when the simulator opens, every time. This is a deliberate
-    // default, not a remembered preference — nothing persists it.
-    sparkles: false,
+    // Always off when the simulator opens, every time — phone lights, flares,
+    // smoke, all of it. A deliberate default, not a remembered preference:
+    // nothing persists these.
+    acc: noAccessories(),
+    // The stand the default camera faces, so the first thing you turn on is
+    // in the picture.
+    accWhere: 'north',
+    flareColour: 'red',
+    smokeColour: 'club',
     // On by default (Osamah's call, September 2026): a tifo show is half
     // sound, and a switch nobody finds is a show nobody hears. Remembered if
     // someone turns it off. The browser still wants a gesture before audio
@@ -760,14 +852,10 @@ export function openMatchDaySimulator(
   const expRange = rng(0.4, 2, 1.05, 0.05);
   const sunRange = rng(0, 3, 1.25, 0.05);
   const floods = chk(state.floods);
-  const smoke = chk(state.smoke);
   const bannersChk = chk(state.banners);
   const stairsChk = chk(state.stairs);
   const flagsChk = chk(state.flags);
   const wetChk = chk(state.wet);
-  const sparklesChk = chk(state.sparkles);
-  const confettiBtn = btn(L('confetti'));
-  const pyroBtn = btn(L('pyro'));
   const soundChk = chk(state.sound);
   const muteChk = chk(state.muted);
   const reactChk = chk(state.reactive);
@@ -792,14 +880,60 @@ export function openMatchDaySimulator(
     field(L('exposure'), expRange),
     field(L('sunIntensity'), sunRange),
     checkField(L('floodlights'), floods),
-    checkField(L('smoke'), smoke),
     checkField(L('railBanners'), bannersChk),
     checkField(L('coverStairs'), stairsChk),
     checkField(L('cornerFlags'), flagsChk),
     checkField(L('wetPitch'), wetChk),
-    checkField(L('phoneFlashes'), sparklesChk),
-    row(confettiBtn, pyroBtn),
   );
+
+  // Accessories: what the fans bring. Smoke, phone lights, confetti and the
+  // pyro burst used to be switches and buttons in Atmosphere; each is now a
+  // LEVEL here, because "a bit of smoke" and "the stand disappears" are both
+  // things people ask for, and a checkbox can only say one of them.
+  const accWhere = sel();
+  for (const w of ACCESSORY_WHERE) opt(accWhere, w, L('where.' + w), w === state.accWhere);
+  const presetBtns = new Map<AccessoryPreset, HTMLButtonElement>();
+  for (const p of PRESET_ORDER) presetBtns.set(p, btn(L('preset.' + p)));
+  const accRange = {} as Record<AccessoryKind, HTMLInputElement>;
+  const accField = {} as Record<AccessoryKind, HTMLElement>;
+  for (const k of ACCESSORY_KINDS) {
+    accRange[k] = rng(0, 4, state.acc[k], 1);
+    accField[k] = stepField(L('acc.' + k), accRange[k], (v) => L(LEVEL_KEYS[clampLevel(v)]));
+  }
+  const flareCol = sel();
+  for (const c of FLARE_COLOUR_IDS) opt(flareCol, c, L('col.' + c), c === state.flareColour);
+  const smokeCol = sel();
+  for (const c of SMOKE_COLOUR_IDS) opt(smokeCol, c, L('col.' + c), c === state.smokeColour);
+  const confettiBtn = btn(L('confettiCannon'));
+  const pyroBtn = btn(L('fireJets'));
+  const accHint = document.createElement('div');
+  accHint.className = 'mds-hint';
+  accHint.textContent = L('accSafety');
+  const secAcc = section(ICONS.flare, L('accTitle'), false);
+  secAcc.body.append(
+    field(L('accWhere'), accWhere),
+    field(L('accQuick'), row(...presetBtns.values())),
+    divider(),
+    accField.flags,
+    accField.flares,
+    field(L('flareColour'), flareCol),
+    accField.smoke,
+    field(L('smokeColour'), smokeCol),
+    accField.strobes,
+    accField.paper,
+    accField.phones,
+    divider(),
+    field(L('accBursts'), row(confettiBtn, pyroBtn)),
+    accHint,
+  );
+  // Stable handles for tests, which cannot go by the translated labels.
+  accWhere.dataset.k = 'acc-where';
+  flareCol.dataset.k = 'acc-flare-colour';
+  smokeCol.dataset.k = 'acc-smoke-colour';
+  confettiBtn.dataset.k = 'acc-cannon';
+  pyroBtn.dataset.k = 'acc-jets';
+  for (const [p, b] of presetBtns) b.dataset.k = 'acc-preset-' + p;
+  for (const k of ACCESSORY_KINDS) accRange[k].dataset.k = 'acc-' + k;
 
   // Sound gets its own section rather than a line in Atmosphere: it is the one
   // control on this panel that makes a noise in a room, so it should be easy to
@@ -959,7 +1093,7 @@ export function openMatchDaySimulator(
   cueTime.value = '0';
   cueTime.className = 'mds-input';
   const cueKind = sel();
-  for (const v of ['reveal', 'camera', 'confetti', 'pyro', 'smoke-on', 'floods-on']) opt(cueKind, v, L('cue.' + v), false);
+  for (const v of ['reveal', 'camera', 'flares-on', 'smoke-on', 'strobes-on', 'flags-on', 'confetti', 'pyro', 'floods-on', 'accessories-off']) opt(cueKind, v, L('cue.' + v), false);
   const addCueBtn = btn(L('addCue'));
   const playSeqBtn = btn(L('playSeq'), 'primary');
   const clearSeqBtn = btn(L('clearSeq'));
@@ -1010,10 +1144,10 @@ export function openMatchDaySimulator(
   // without matching its heading — which is translated, and which is exactly
   // the kind of coupling that makes an Arabic run fail for no real reason.
   for (const [key, sec] of [
-    ['camera', secCam], ['crowd', secCrowd], ['atmosphere', secAtmo], ['sound', secSound],
+    ['camera', secCam], ['crowd', secCrowd], ['accessories', secAcc], ['atmosphere', secAtmo], ['sound', secSound],
     ['assets', secAssets], ['banners', secBanners], ['choreo', secChoreo], ['record', secRecord],
   ] as [string, { root: HTMLElement }][]) sec.root.dataset.sec = key;
-  panel.append(actionsHost, secCam.root, secCrowd.root, secAtmo.root, secSound.root, secAssets.root, secBanners.root, secChoreo.root, secRecord.root);
+  panel.append(actionsHost, secCam.root, secCrowd.root, secAcc.root, secAtmo.root, secSound.root, secAssets.root, secBanners.root, secChoreo.root, secRecord.root);
   overlay.append(bar, panel, host);
   document.body.appendChild(overlay);
   const prevOverflow = document.body.style.overflow;
@@ -1052,6 +1186,7 @@ export function openMatchDaySimulator(
     '<div class="mds-help-grp"><h3>' + L('hYours') + '</h3>' +
     kv(L('hYourBanners'), L('bannersTitle')) +
     kv(L('hBanners'), L('assets')) +
+    kv(L('hAccessories'), L('accTitle')) +
     kv(L('hTimeWeather'), L('atmo')) +
     kv(L('hAutoChoreo'), L('choreo')) +
     '</div>';
@@ -1125,11 +1260,14 @@ export function openMatchDaySimulator(
     [expRange, 'tip.exp'],
     [sunRange, 'tip.sun'],
     [floods, 'tip.floods'],
-    [smoke, 'tip.smoke'],
     [bannersChk, 'tip.banners'],
     [stairsChk, 'tip.stairs'],
     [wetChk, 'tip.wet'],
-    [sparklesChk, 'tip.sparkles'],
+    [accWhere, 'tip.acc.where'],
+    ...ACCESSORY_KINDS.map((k) => [accRange[k], 'tip.acc.' + k] as [HTMLElement, string]),
+    ...[...presetBtns].map(([p, b]) => [b, 'tip.preset.' + p] as [HTMLElement, string]),
+    [flareCol, 'tip.flareColour'],
+    [smokeCol, 'tip.smokeColour'],
     [soundChk, 'tip.soundOn'],
     [muteChk, 'tip.mute'],
     [lvl.master, 'tip.volMaster'],
@@ -1271,6 +1409,22 @@ export function openMatchDaySimulator(
     sim.setDrum(state.sound && state.drum);
   }
 
+  /**
+   * The sliders and the preset buttons, from state. A declaration, like
+   * applySound, because applyState runs from mount() before the wiring below.
+   * Assigning a range's value fires no `input`, so this cannot loop.
+   */
+  function syncAccessories(): void {
+    for (const k of ACCESSORY_KINDS) {
+      accRange[k].value = String(state.acc[k]);
+      accRange[k].dispatchEvent(new Event('mds-sync'));
+    }
+    for (const [p, b] of presetBtns) {
+      const want = ACCESSORY_PRESETS[p];
+      b.classList.toggle('active', ACCESSORY_KINDS.every((k) => want[k] === state.acc[k]));
+    }
+  }
+
   function applyState(): void {
     const shots = sim.shots();
     if (camSel.options.length !== shots.length) {
@@ -1285,12 +1439,21 @@ export function openMatchDaySimulator(
     sim.setStairsVisible(state.stairs);
     sim.setFlagsVisible(state.flags);
     sim.setFloodlights(state.floods);
-    sim.setSmoke(state.smoke);
     sim.setFlyover(state.fly);
     sim.setTimeOfDay(state.tod);
     sim.setWeather(state.weather);
     sim.setWetPitch(state.wet);
-    sim.setSparkles(state.sparkles);
+    // A quality change builds a new bowl with nothing in it; put back what
+    // the fans were holding, where they were holding it.
+    sim.setAccessoryWhere(state.accWhere);
+    sim.setFlareColour(state.flareColour);
+    sim.setSmokeColour(state.smokeColour);
+    sim.setAccessories(state.acc);
+    sim.onAccessoriesChange = (lv) => {
+      state.acc = lv;
+      syncAccessories();
+    };
+    syncAccessories();
     sim.setAutoReveal(state.reveal);
     sim.setDrumCall({ hold: state.drumHold, times: state.drumTimes });
     sim.onDrumBeat = renderBeat;
@@ -1530,10 +1693,6 @@ export function openMatchDaySimulator(
     state.floods = floods.checked;
     sim.setFloodlights(state.floods);
   });
-  smoke.addEventListener('change', () => {
-    state.smoke = smoke.checked;
-    sim.setSmoke(state.smoke);
-  });
   bannersChk.addEventListener('change', () => {
     state.banners = bannersChk.checked;
     sim.setBannersVisible(state.banners);
@@ -1607,12 +1766,31 @@ export function openMatchDaySimulator(
   hornBtn.addEventListener('click', () => sim.airhorn());
   chantBtn.addEventListener('click', () => sim.chant());
 
-  sparklesChk.addEventListener('change', () => {
-    state.sparkles = sparklesChk.checked;
-    sim.setSparkles(state.sparkles);
-  });
   confettiBtn.addEventListener('click', () => sim.burstConfetti());
   pyroBtn.addEventListener('click', () => sim.burstPyro());
+
+  // ---------- accessories ----------
+  for (const k of ACCESSORY_KINDS) {
+    accRange[k].addEventListener('input', () => {
+      // setAccessory reports back through onAccessoriesChange, which is what
+      // updates state and the preset highlight — one path for the panel and
+      // for a show's cues alike.
+      sim.setAccessory(k, clampLevel(Number(accRange[k].value)));
+    });
+  }
+  for (const [p, b] of presetBtns) b.addEventListener('click', () => sim.setAccessories({ ...ACCESSORY_PRESETS[p] }));
+  accWhere.addEventListener('change', () => {
+    state.accWhere = accWhere.value as AccessoryWhere;
+    sim.setAccessoryWhere(state.accWhere);
+  });
+  flareCol.addEventListener('change', () => {
+    state.flareColour = flareCol.value;
+    sim.setFlareColour(state.flareColour);
+  });
+  smokeCol.addEventListener('change', () => {
+    state.smokeColour = smokeCol.value;
+    sim.setSmokeColour(state.smokeColour);
+  });
 
   const stand = (): 0 | 1 | 2 | 3 => (Number(standSel.value) || 1) as 0 | 1 | 2 | 3;
   addBannerBtn.addEventListener('click', () => {
@@ -2126,6 +2304,35 @@ function levelField(label: string, ctrl: HTMLInputElement): HTMLElement {
   const show = (): void => { val.textContent = Math.round(Number(ctrl.value) * 100) + '%'; };
   show();
   ctrl.addEventListener('input', show);
+  l.append(name, val);
+  d.append(l, ctrl);
+  return d;
+}
+/**
+ * A stepped slider whose readout is a word, not a number: Off, Light, Medium,
+ * Heavy, Full. "Flares 3" means nothing; "Flares · Heavy" is the request. The
+ * readout follows `input` while dragging and `mds-sync` when the level was set
+ * from elsewhere (a preset, a cue), and screen readers get the same word.
+ */
+function stepField(label: string, ctrl: HTMLInputElement, word: (v: number) => string): HTMLElement {
+  const d = document.createElement('div');
+  d.className = 'mds-field mds-step';
+  const l = document.createElement('div');
+  l.className = 'mds-flabel mds-flabel-row';
+  const name = document.createElement('span');
+  name.textContent = label;
+  const val = document.createElement('span');
+  val.className = 'mds-fval';
+  const show = (): void => {
+    const v = Number(ctrl.value);
+    val.textContent = word(v);
+    ctrl.setAttribute('aria-valuetext', word(v));
+    d.classList.toggle('on', v > 0);
+  };
+  ctrl.setAttribute('aria-label', label);
+  show();
+  ctrl.addEventListener('input', show);
+  ctrl.addEventListener('mds-sync', show);
   l.append(name, val);
   d.append(l, ctrl);
   return d;

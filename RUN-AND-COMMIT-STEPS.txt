@@ -1,9 +1,17 @@
-Tifo Maker — signs: run it, then commit it
-==========================================
+Tifo Maker — Match Day accessories: run it, then commit it
+==========================================================
 
 Everything is already in C:\Users\PCD\Desktop\tifo-maker, uncommitted on top of
-your main (76753f3). There are no new files this time: 21 changed files, all
-already tracked.
+your main (e4e0010, "Banners: add signs").
+
+Changed (10): src/render/simulator/index.ts, overlay.ts, atmosphere.ts,
+              effects.ts, timeline.ts, sparkles.ts, scripts/verify.mts,
+              e2e-sound.mjs, e2e-banner.mjs, package.json (and this file)
+New (5):      src/core/accessories.ts
+              src/render/simulator/accessories.ts
+              e2e-accessories.mjs
+              scripts/accessories-shots.mts
+              scripts/accessories-shots.html
 
 
 PART 1 — LOOK AT IT
@@ -13,98 +21,67 @@ Two PowerShell windows, both in the repo:
 
     cd C:\Users\PCD\Desktop\tifo-maker
 
-Window 1, the server. As it starts, it publishes the new showcase design, and
-its log says "banner showcase: +1 added, 3 already present":
+Window 1:   npm run server
+Window 2:   npm run dev
 
-    npm run server
-
-Window 2, the editor:
-
-    npm run dev
-
-Open http://localhost:5173/ for the editor and http://localhost:5173/community
-for the community.
+Open http://localhost:5173/ and press Match Day.
 
 
 PART 2 — WHAT TO CHECK
 ----------------------
 
-1. Make a sign
-   - Open the Banner view and press "Sign" (in the empty card or the add row).
-   - The Message field is focused. Type something long, e.g.
-     IF YOU CAN'T SEE WHO IS THE LEADER EAT MORE CARROTS
-     The words stay fitted to the sheet as you type.
-   - Change Length to 25 m and the words refit. Change Height to 1.6 m.
-   - Press Enter to leave the field, then Ctrl+Z: the whole message goes
-     back in one step, not letter by letter.
-   - Font and colour next to the message change it.
+1. The section
+   - The panel has a new "Accessories" section, right under Crowd.
+   - Everything in it says Off. Nothing is burning when Match Day opens.
 
-2. Place it
-   - "Held at": Tied to the front fence, Row 1 — the front, Row 2 ... the
-     back. Pick Row 10.
-   - "Along": The middle of the stand, In front of block n, or Between
-     blocks n and n+1.
-   - The facts line says "held by N fans". On the fence it says it is tied on.
-   - Press "Show in stadium" on it in the list: the camera looks at it from
-     across the pitch, held up over the heads of row 9.
-   - Pick Tier 2 and "Tied to the front of the tier": it hangs off the upper
-     tier's balcony.
+2. Levels
+   - Drag Flares: Light (a handful at the front) -> Medium (a line along the
+     front) -> Heavy (the lower half) -> Full (the whole stand). Each step
+     adds fans. The ones already holding flares stay where they are.
+   - Try Flags, Smoke bombs, Strobes, Paper & confetti and Phone lights the
+     same way. Phone lights look best with Atmosphere -> Night.
 
-3. Match Day
-   - "See it on match day": it is raised by the crowd.
-   - In the Match Day banner panel, a sign has "Held at" and "Along" where
-     other banners have Across, Blocks and Span.
-   - Click it once, then drag it: it moves to the row and place under the
-     pointer.
+3. Presets
+   - Terrace, Ultras, Inferno and Light show set every slider at once, and
+     the one in use is highlighted. All off puts everything out.
 
-4. Arabic
-   - Switch to Arabic: the type is "يافطة", every field is translated, and an
-     Arabic message reads right to left on the sheet.
+4. Where and colour
+   - Where: North stand is the one the default camera faces. Try "The whole
+     ground".
+   - Flare colour Green, or Club colours. Smoke colour Red, Black, etc.
 
-5. The community
-   - /community has a fourth card, "Red & white halves, with signs". Open it:
-     the preview shows three signs, one of them in Arabic on the balcony.
+5. Sound (Sound section on)
+   - Lighting flares hisses, and the crowd roars once. While they burn, a
+     crackle stays under everything on the Effects fader. Put them out and it
+     fades away.
+
+6. Choreography
+   - Cue type now has Flares on, Smoke bombs on, Strobes on, Flags up and
+     Accessories off. Add "Flares on" at 0 s and press Play sequence. The
+     flares light, and the Accessories slider moves to Medium by itself.
+   - Also fixed: a cue at 0 s used to never fire (the auto show's opening
+     whistle and drum had never sounded). They do now.
+
+7. Arabic and phone
+   - Switch to Arabic: الإكسسوارات, every label and level in Arabic.
+   - On a phone the section fits the bottom sheet, with big sliders.
 
 
 PART 3 — COMMIT
 ---------------
 
-1. Stop both (Ctrl+C in each window).
+1. Stop both (Ctrl+C).
 
-2. Still to do from before: delete the five retired banner files. They are
-   empty placeholders, so nothing breaks while they are there, but they
-   should go:
-
-       Remove-Item scripts\banner-physics.mts
-       Remove-Item src\core\bannerMigrate.ts
-       Remove-Item src\render\simulator\bannerFit.ts
-       Remove-Item src\render\simulator\cloth.ts
-       Remove-Item src\render\simulator\standHeightfield.ts
-
-   Optional, the same kind of leftover:
-
-       Remove-Item src\ui\bannerStudio.ts
-
-   There is also a stray, empty folder named "{core,render,ui}" inside src.
-   Delete it too (the quotes matter, because of the braces):
-
-       Remove-Item -LiteralPath 'src\{core,render,ui}'
-
-3. Prove it builds:
+2. Prove it builds and passes:
 
        npm run build
        npm run verify
 
-4. Commit. The message is in BANNERS-REBUILD-COMMIT.txt in this folder, with
-   the Summary and the Description labelled separately. Paste them into
-   GitHub Desktop's two fields.
+   The new browser suite needs the built app on port 8911:
 
-5. Pushing is yours. Pushing main runs CI, and Railway deploys main, so push
-   after step 3 passes. On the deploy, the server adds the signs showcase by
-   itself.
+       $env:PORT=8911; npm run server      (window 1)
+       npm run test:accessories            (window 2)
 
+3. Commit with the Summary and Description from the chat.
 
-IF THE BUILD FAILS
-------------------
-
-Send me the error. I can check any file against my copy.
+4. Pushing is yours. Railway deploys main.

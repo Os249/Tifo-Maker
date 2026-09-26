@@ -38,7 +38,8 @@ import { rasterize } from '../../core/importImage';
 import { printAssetPanels } from './printPanels';
 import { buildWeather, type WeatherController, type Weather } from './weather';
 import { buildSurroundings, type Surroundings } from './surroundings';
-import { buildPhoneFlash, type PhoneFlash } from './sparkles';
+import { buildAccessories, type AccessoriesController, type AccessoriesCensus } from './accessories';
+import { pyroLoudness, type AccessoryKind, type AccessoryLevel, type AccessoryLevels, type AccessoryWhere } from '../../core/accessories';
 import { buildJewelCrown } from './jewelCrown';
 import { buildAlAwwalExtras, buildKingdomArenaExtras } from './stadiumExtras';
 import { buildPitchDetail, pitchStripeTexture } from './pitchDetail';
@@ -138,7 +139,8 @@ export class MatchDaySimulator {
   private fill!: THREE.DirectionalLight;
   private readonly weather: WeatherController;
   private readonly surroundings: Surroundings;
-  private readonly sparkles: PhoneFlash;
+  /** Flags, flares, smoke, strobes, paper and phone lights — see ./accessories. */
+  private readonly accessories: AccessoriesController;
   private manassaMask: Uint8Array | null = null;
   private readonly manassaColor = new THREE.Color(0xc69a3a);
   private readonly jewelSeatColors = [new THREE.Color(0x8f2d2d), new THREE.Color(0xb14a2a), new THREE.Color(0xc98a4b), new THREE.Color(0x6f2222), new THREE.Color(0xd8b98a), new THREE.Color(0xa33b2b)];
@@ -312,11 +314,11 @@ export class MatchDaySimulator {
       this.template.tiers.reduce((m, tr) => Math.max(m, (tr.baseOffset ?? 0) + tr.rows * tr.rowDepth), 0),
     );
     this.scene.add(this.surroundings.object);
-    this.sparkles = buildPhoneFlash(this.map);
-    // Off until asked for: a bowl that twinkles by itself misreads a still tifo
-    // as motion, and it is the first thing to distract from the artwork.
-    this.sparkles.object.visible = false;
-    this.scene.add(this.sparkles.object);
+    // Everything starts at Off: a bowl that twinkles, smokes or waves by
+    // itself misreads a still tifo as motion, and it is the first thing to
+    // distract from the artwork. Phone lights are one of these now.
+    this.accessories = buildAccessories(this.map, { tier: this.settings.tier, palette: this.store.palette });
+    this.scene.add(this.accessories.object);
     if (this.template.id === 'community-jewel-jeddah-62k') {
       const crown = buildJewelCrown();
       this.scene.add(crown.object);
@@ -359,6 +361,8 @@ export class MatchDaySimulator {
       if (this.disposed) return;
       this.rebuildPalette();
       this.recolorAll();
+      // Flags and "club colours" smoke follow the design's palette.
+      this.accessories.setPalette(this.store.palette);
     };
     store.onDirty(this.onDirtyCb);
     store.onPaletteChange(this.onPaletteCb);
@@ -692,6 +696,7 @@ export class MatchDaySimulator {
       // anybody turned the sound on.
       this.atmosphere.setCrowdFill(this.crowdFill);
       this.atmosphere.setWeatherBed(this.weatherSound ? this.weatherNow : 'clear');
+      this.atmosphere.setPyroBed(pyroLoudness(this.accessories.levels()));
     }
   }
   soundOn(): boolean { return this.atmosphere.isEnabled(); }
@@ -741,8 +746,9 @@ export class MatchDaySimulator {
   airhorn(): void { this.atmosphere.airhorn(); }
 
   /** Phone-flash twinkle across the stands. Starts off; see the constructor. */
+  /** Phone lights on or off — kept for callers that only know the old switch. */
   setSparkles(b: boolean): void {
-    this.sparkles.object.visible = b;
+    this.setAccessory('phones', b ? 2 : 0);
   }
 
   // ---- environment (Wave D) ----
@@ -912,8 +918,13 @@ export class MatchDaySimulator {
     return { blob, ...format };
   }
 
-  setSmoke(b: boolean, color?: THREE.ColorRepresentation): void {
-    this.effects.setSmoke(b, color);
+  /**
+   * Smoke on or off. It used to be a field of grey puffs drifting over the
+   * whole bowl from nowhere in particular; it is now the smoke pots in the
+   * Accessories section, at the level set there — or Light, when that is Off.
+   */
+  setSmoke(b: boolean): void {
+    this.setAccessory('smoke', b ? (this.accessories.levels().smoke || 1) : 0);
   }
   burstConfetti(): void {
     this.effects.burstConfetti();
@@ -925,6 +936,69 @@ export class MatchDaySimulator {
   burstPyro(): void {
     this.effects.burstPyro();
     this.atmosphere.pyro();
+  }
+
+  // ---- accessories: flags, flares, smoke, strobes, paper, phones ----
+  /**
+   * Told whenever a level changes — from the panel, or from a show's cue — so
+   * the panel's sliders can never say Off over a stand full of flares.
+   */
+  onAccessoriesChange: ((lv: AccessoryLevels) => void) | null = null;
+  accessoryLevels(): AccessoryLevels {
+    return this.accessories.levels();
+  }
+  setAccessory(kind: AccessoryKind, level: AccessoryLevel): void {
+    const before = this.accessories.levels();
+    if (before[kind] === level) return;
+    this.accessories.setLevel(kind, level);
+    const after = this.accessories.levels();
+    // What you hear when it goes up. Only on the way UP: taking the flares
+    // down is people putting them out, which makes no sound worth making.
+    if (level > before[kind]) {
+      if (kind === 'flares') this.atmosphere.flareIgnite(level / 4);
+      else if (kind === 'smoke') this.atmosphere.smokePot(level / 4);
+      else if (kind === 'strobes') this.atmosphere.flareIgnite(level / 8);
+      else if (kind === 'paper') this.atmosphere.confetti();
+      // The stand answers its own pyro — once, as it is lit, not on every step.
+      if ((kind === 'flares' || kind === 'strobes') && before[kind] === 0) this.atmosphere.roar(0.45 + level * 0.1);
+    }
+    this.atmosphere.setPyroBed(pyroLoudness(after));
+    this.logAccessories();
+    this.onAccessoriesChange?.(after);
+  }
+  /** One line per change, so a test (or a person in the console) can see what is in the stand. */
+  private logAccessories(): void {
+    const c = this.accessories.census();
+    dbg('accessories ' + JSON.stringify({ levels: this.accessories.levels(), where: this.accessories.where(), holders: c.holders, tier: this.settings.tier }));
+  }
+  setAccessories(levels: AccessoryLevels): void {
+    for (const k of Object.keys(levels) as AccessoryKind[]) this.setAccessory(k, levels[k]);
+  }
+  setAccessoryWhere(w: AccessoryWhere): void {
+    if (w === this.accessories.where()) return;
+    this.accessories.setWhere(w);
+    this.logAccessories();
+  }
+  setFlareColour(id: string): void {
+    this.accessories.setFlareColour(id);
+  }
+  setSmokeColour(id: string): void {
+    this.accessories.setSmokeColour(id);
+  }
+  /** What is actually in the bowl — for tests and the shot harness. */
+  accessoriesCensus(): AccessoriesCensus {
+    return this.accessories.census();
+  }
+  /**
+   * Run the accessories on for `seconds` without drawing, so smoke that takes
+   * ten seconds to fill a stand is there in the first frame of a still. For
+   * the shot harness and tests: software rendering manages a frame or two a
+   * second, and a smoke pot a frame at a time never gets going.
+   */
+  prewarmAccessories(seconds: number): void {
+    const step = 1 / 30;
+    const view = { fov: this.camera.fov, height: this.host.clientHeight };
+    for (let t = 0; t < seconds; t += step) this.accessories.update(step, view);
   }
 
   // ---- tifo assets: banners / text / floor (Wave A) ----
@@ -1611,7 +1685,11 @@ export class MatchDaySimulator {
     // be a good fraction of a second ago, and the show — and the drum booked
     // against it — would start that far into itself.
     this.tlStart = this.elapsed + this.sinceFrame();
-    this.tlPrev = 0;
+    // Just BEFORE zero, not zero. An effect fires when the clock crosses its
+    // start (prevT < start <= t), and a cue at 0 s was never crossed from 0 —
+    // so the auto show's opening whistle and drum never sounded, and any cue
+    // added at the builder's default time of 0 did nothing at all.
+    this.tlPrev = -1e-6;
     this.tlLoop = loop;
     this.lastCamName = null;
     this.bookDrumHits();
@@ -1726,8 +1804,18 @@ export class MatchDaySimulator {
       // particles without the noise is the bug this whole pass is about.
       if (e === 'confetti') this.burstConfetti();
       else if (e === 'pyro') this.burstPyro();
-      else if (e === 'smoke-on') this.effects.setSmoke(true);
-      else if (e === 'smoke-off') this.effects.setSmoke(false);
+      else if (e === 'smoke-on') this.setSmoke(true);
+      else if (e === 'smoke-off') this.setSmoke(false);
+      // A cue for something already on leaves it at the level it was set to;
+      // one for something that is Off brings it up to Medium, a line of them
+      // along the front — enough to read, not so much it buries the tifo.
+      else if (e === 'flares-on') this.setAccessory('flares', this.accessories.levels().flares || 2);
+      else if (e === 'flares-off') this.setAccessory('flares', 0);
+      else if (e === 'strobes-on') this.setAccessory('strobes', this.accessories.levels().strobes || 2);
+      else if (e === 'strobes-off') this.setAccessory('strobes', 0);
+      else if (e === 'flags-on') this.setAccessory('flags', this.accessories.levels().flags || 2);
+      else if (e === 'flags-off') this.setAccessory('flags', 0);
+      else if (e === 'accessories-off') for (const k of Object.keys(this.accessories.levels()) as AccessoryKind[]) this.setAccessory(k, 0);
       else if (e === 'floods-on') this.setFloodlights(true);
       else if (e === 'floods-off') this.setFloodlights(false);
       else if (e === 'roar') this.atmosphere.roar(1);
@@ -1748,7 +1836,7 @@ export class MatchDaySimulator {
     if (t > this.timeline.duration) {
       if (this.tlLoop) {
         this.tlStart = this.elapsed;
-        this.tlPrev = 0;
+        this.tlPrev = -1e-6;
         this.lastCamName = null;
         this.bookedHits.clear();
         this.bookDrumHits();
@@ -1907,7 +1995,7 @@ export class MatchDaySimulator {
       this.bannerRigs?.update(this.elapsed, dt);
       this.effects.update(dt);
       this.surroundings.update(dt);
-      if (this.sparkles.object.visible) this.sparkles.update(dt);
+      this.accessories.update(dt, { fov: this.camera.fov, height: this.host.clientHeight });
       this.weather.update(dt);
       if (this.reveal) this.stepReveal();
       if (this.timeline) this.stepTimeline();
@@ -1958,7 +2046,7 @@ export class MatchDaySimulator {
     this.assetLayer.dispose();
     this.weather.dispose();
     this.surroundings.dispose();
-    this.sparkles.dispose();
+    this.accessories.dispose();
     for (const d of this.disposables) d.dispose();
     this.skyTex.dispose();
     this.renderer.dispose();

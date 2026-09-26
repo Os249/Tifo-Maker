@@ -1,0 +1,78 @@
+<!doctype html>
+<!-- Dev-only harness for scripts/accessories-shots.mts. Boots the REAL
+     MatchDaySimulator and sets the Accessories exactly as the panel does, so a
+     flare that the product never lights, or smoke that ends up under the
+     seats, shows up here. Returns the accessories' own census with the
+     picture: a screenshot cannot say how many fans are holding a flare. -->
+<html lang="en"><head><meta charset="UTF-8"/><title>accessories shots</title></head>
+<body style="margin:0;background:#05070c"><div id="out">loading…</div>
+<script type="module">
+  import { generateSeatMap } from '/src/core/seatmap.ts';
+  import { DesignStore } from '/src/core/design.ts';
+  import { templateById } from '/src/core/stadiumCatalog.ts';
+  import { MatchDaySimulator } from '/src/render/simulator/index.ts';
+  import { AssetStore } from '/src/core/sceneAssets.ts';
+  import { standsFor } from '/src/core/accessories.ts';
+
+  const HOST = document.createElement('div');
+  HOST.style.cssText = 'position:fixed;left:0;top:0;width:1280px;height:720px;';
+  document.body.appendChild(HOST);
+
+  /** The middle of a stand's seats, from the seat map itself. */
+  function standCentre(map, stands) {
+    let x = 0, y = 0, z = 0, n = 0;
+    for (let i = 0; i < map.count; i++) {
+      const s = Math.floor(((map.uv[i * 2] + 0.125) % 1) * 4);
+      if (!stands.includes(s)) continue;
+      x += map.pos3[i * 3]; y += map.pos3[i * 3 + 1]; z += map.pos3[i * 3 + 2]; n++;
+    }
+    return n ? [x / n, y / n, z / n] : [0, 10, 60];
+  }
+
+  window.__shoot = async (spec) => {
+    HOST.replaceChildren();
+    const template = templateById(spec.ground);
+    const map = generateSeatMap(template);
+    const store = new DesignStore(map, spec.palette ?? ['#0b1d4d', '#1b2a5c', '#c8102e']);
+    // A plain two-colour bowl, so the accessories are what you look at.
+    store.transform((i) => 1 + (i % 2));
+    const sim = new MatchDaySimulator(HOST, map, store, template, new AssetStore(), { quality: spec.quality ?? 'high' });
+    sim.setTimeOfDay(spec.tod ?? 'dusk');
+    sim.setFloodlights(spec.floods ?? true);
+    sim.setAccessoryWhere(spec.where ?? 'north');
+    if (spec.flare) sim.setFlareColour(spec.flare);
+    if (spec.smoke) sim.setSmokeColour(spec.smoke);
+    sim.setAccessories({ flags: 0, flares: 0, smoke: 0, strobes: 0, paper: 0, phones: 0, ...(spec.levels ?? {}) });
+    sim.prewarmAccessories(spec.warm ?? 9);
+
+    const c = standCentre(map, spec.aim ?? standsFor(spec.where ?? 'north'));
+    const d = Math.hypot(c[0], c[2]) || 1;
+    const ux = c[0] / d, uz = c[2] / d;
+    let pos, tgt, fov;
+    if (spec.cam === 'wide') {
+      pos = [-ux * d * 0.55, 26, -uz * d * 0.55]; tgt = [c[0], c[1] + 4, c[2]]; fov = 55;
+    } else if (spec.cam === 'close') {
+      pos = [ux * (d - 30), c[1] * 0.35 + 3, uz * (d - 30)]; tgt = [c[0], c[1] + 2, c[2]]; fov = 60;
+    } else if (spec.cam === 'aerial') {
+      pos = [-ux * 40, 150, -uz * 40 + 1]; tgt = [0, 0, 0]; fov = 60;
+    } else if (spec.cam === 'across') {
+      pos = [-ux * d * 0.2, 16, -uz * d * 0.2]; tgt = [c[0], c[1] + 3, c[2]]; fov = 50;
+    } else {
+      // From the penalty spot's side of the pitch, looking up into the stand:
+      // where a supporter on the pitch would stand to film it.
+      pos = [ux * (d - 75), 10, uz * (d - 75)]; tgt = [c[0], c[1] + 2, c[2]]; fov = 55;
+    }
+    const named = spec.shot ? sim.shots().find((x) => x.name === spec.shot) : null;
+    if (named) sim.applyShot(named);
+    else sim.applyPreset({ name: 'shot', position: pos, target: tgt, fov });
+    sim.start();
+    await new Promise((r) => setTimeout(r, spec.wait ?? 500));
+    sim.stop();
+    const png = sim.snapshot();
+    const out = { png, census: sim.accessoriesCensus(), levels: sim.accessoryLevels() };
+    sim.dispose();
+    return out;
+  };
+  document.getElementById('out').textContent = 'ready';
+  window.__ready = true;
+</script></body></html>
