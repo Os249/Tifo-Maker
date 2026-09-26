@@ -102,10 +102,47 @@ export function buildJewel(template: StadiumTemplate, shadows: boolean): JewelBu
   const group = new THREE.Group();
   group.name = 'jewel';
   const trash: Trash[] = [];
-  const at = curveSampler(template);
+  const atBase = curveSampler(template);
 
   const { R_BACK, Y_BACK, R_IN, R_OUT, R_SKIN, Y_OUT, Y_IN, SH_R, SH_Y, CHORD_END_Y } = jewelFrame(template);
   const N = 24; // bays
+
+  // Walk the building by distance round ITS outline (the back of the upper
+  // tier), not by the plan curve's. On a squarish bowl the plan's corners are
+  // tight while the building's are wide arcs, so equal steps along the plan
+  // crowded the bays onto the straights and left a few huge ones at the
+  // corners. `f` is a fraction of the building's perimeter; uAt(f) turns it
+  // back into the seat map's u; fOf(u) goes the other way.
+  const TABLE = 4096;
+  const fs = new Float64Array(TABLE + 1);
+  {
+    let prev = atBase(0, R_BACK);
+    for (let i = 1; i <= TABLE; i++) {
+      const q = atBase(i / TABLE, R_BACK);
+      fs[i] = fs[i - 1] + Math.hypot(q.x - prev.x, q.z - prev.z);
+      prev = q;
+    }
+    const tot = fs[TABLE];
+    for (let i = 0; i <= TABLE; i++) fs[i] /= tot;
+  }
+  const uAt = (f: number): number => {
+    const t = ((f % 1) + 1) % 1;
+    let lo = 0;
+    let hi = TABLE;
+    while (lo < hi - 1) {
+      const mid = (lo + hi) >> 1;
+      if (fs[mid] <= t) lo = mid;
+      else hi = mid;
+    }
+    const span = fs[hi] - fs[lo] || 1e-9;
+    return (lo + (t - fs[lo]) / span) / TABLE;
+  };
+  const fOf = (u: number): number => {
+    const x = (((u % 1) + 1) % 1) * TABLE;
+    const i = Math.floor(x);
+    return fs[i] + (fs[Math.min(TABLE, i + 1)] - fs[i]) * (x - i);
+  };
+  const at = (f: number, off: number): ReturnType<typeof atBase> => atBase(uAt(f), off);
 
   // ---- materials --------------------------------------------------------
   const membrane = new THREE.MeshStandardMaterial({
@@ -224,7 +261,7 @@ export function buildJewel(template: StadiumTemplate, shadows: boolean): JewelBu
     const b = P((i + 1) / 256, R_BACK, 0);
     perim += a.distanceTo(b);
   }
-  const screenGaps: [number, number][] = (template.details?.screens ?? []).map((sc) => [sc.centerU, (sc.widthM / 2 + 4) / perim]);
+  const screenGaps: [number, number][] = (template.details?.screens ?? []).map((sc) => [fOf(sc.centerU), (sc.widthM / 2 + 4) / perim]);
   const PANELS = 9;
   for (let i = 0; i < TRUSSES; i++) {
     const u = i / TRUSSES;
@@ -289,6 +326,7 @@ export function buildJewel(template: StadiumTemplate, shadows: boolean): JewelBu
   steelMesh.castShadow = shadows;
   steelMesh.frustumCulled = false;
   group.add(steelMesh);
+  trash.push({ dispose: () => steelMesh.dispose() }); // its instance buffer
 
   // ---- the skin -------------------------------------------------------------
   const lat = latticeTexture();

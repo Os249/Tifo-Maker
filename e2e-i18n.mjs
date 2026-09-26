@@ -164,13 +164,18 @@ console.log('\n— the editor and its panels —');
 // thirteen built-in grounds are like that — so the default ground above, which
 // is not, left all three unchecked. The status bar printed the template's raw
 // id and the notice was English.
-{
-  const [ctx, p] = await page('/app?template=community-jewel-jeddah-62k', { wait: 6000 });
+// The rebuilt Jewel adds its ramps, platforms, boxes and screens to the panel;
+// the earlier Jewel adds the "a newer version exists" note and its button.
+for (const [id, label] of [
+  ['jewel-jeddah-60k', 'stadium panel, a real-venue ground with details'],
+  ['community-jewel-jeddah-62k', 'stadium panel, a ground that has been rebuilt'],
+]) {
+  const [ctx, p] = await page(`/app?template=${id}`, { wait: 6000 });
   await p.evaluate(() => { document.querySelector('.ob-skip')?.click(); });
   await p.waitForTimeout(800);
   await p.click('#rail-stadium', { timeout: 4000, force: true }).catch(() => {});
   await p.waitForTimeout(1500);
-  report('stadium panel, a real-venue ground', await p.evaluate(scrapePage));
+  report(label, await p.evaluate(scrapePage));
   await ctx.close();
 }
 

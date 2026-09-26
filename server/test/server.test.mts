@@ -1885,6 +1885,7 @@ if (process.env.DATABASE_URL) {
 {
   const { shippedTemplateInfo } = await import('../src/templates');
   const { templateById } = await import('../../src/core/stadiumCatalog');
+  const { noTifoMask } = await import('../../src/core/venueDetails');
   const list = shippedTemplateInfo();
   for (const id of ['jewel-jeddah-60k', 'community-jewel-jeddah-62k', 'community-alawwal-park-25k', 'community-kingdom-arena-28k', DEFAULT_TEMPLATE.id]) {
     assert.ok(list.some((t) => t.id === id), `the server knows ${id}`);
@@ -1902,8 +1903,22 @@ if (process.env.DATABASE_URL) {
       payload: { title: `On ${id}`, templateId: id, templateVersion: 1, palette: PALETTE, cellsGzB64 },
     });
     assert.equal(ok.statusCode, 201, `${id}: a design saves (${ok.body})`);
-    const back = (await app.inject({ method: 'GET', url: `/api/designs/${(ok.json() as { id: string }).id}`, headers: bearer(tok) })).json() as { templateId: string };
+    const back = (await app.inject({ method: 'GET', url: `/api/designs/${(ok.json() as { id: string }).id}`, headers: bearer(tok) })).json() as { templateId: string; cellsGzB64: string };
     assert.equal(back.templateId, id, `${id}: and comes back on the same ground`);
+    // The royal box never takes the tifo, whoever sent the design.
+    const tpl = templateById(id)!;
+    const mask = noTifoMask(generateSeatMap(tpl), tpl);
+    const stored = gunzipSync(Buffer.from(back.cellsGzB64, 'base64'));
+    if (mask) {
+      let locked = 0;
+      let painted = 0;
+      for (let i = 0; i < n; i++) {
+        if (mask[i]) { locked++; assert.equal(stored[i], 0, `${id}: royal-box seat ${i} was stored painted`); } else if (stored[i] === 1) painted++;
+      }
+      assert.ok(locked > 400 && painted === n - locked, `${id}: ${locked} royal-box seats cleared, every other seat kept`);
+    } else {
+      assert.ok(stored.every((c) => c === 1), `${id}: a ground without a royal box keeps every seat`);
+    }
     // One seat short is someone else's seat map: refused.
     const short = await app.inject({
       method: 'POST', url: '/api/designs', headers: bearer(tok),
@@ -1912,5 +1927,5 @@ if (process.env.DATABASE_URL) {
     assert.equal(short.statusCode, 400, `${id}: a design with the wrong seat count is refused`);
   }
   await app.close();
-  console.log('real-venue grounds: designs save on the rebuilt Jewel and on the legacy one; wrong seat counts refused');
+  console.log('real-venue grounds: designs save on the rebuilt Jewel and on the legacy one; wrong seat counts refused; the royal box is cleared server-side');
 }

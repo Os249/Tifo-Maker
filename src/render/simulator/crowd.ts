@@ -72,8 +72,14 @@ function personTexture(): THREE.Texture {
 const HOME = new THREE.Color(0x9a1f2b);
 const AWAY = new THREE.Color(0x16386e);
 const NEUTRAL = new THREE.Color(0x8a8f98);
+const THOBE = new THREE.Color(0xf4f1ea);
+const BISHT = new THREE.Color(0x1c1814);
 
-export function buildCrowd(map: SeatMap, store: DesignStore): CrowdController {
+/**
+ * `dressed`: seats whose occupants wear their own clothes rather than the
+ * club's colours — the royal box, in white thobes with the odd black bisht.
+ */
+export function buildCrowd(map: SeatMap, store: DesignStore, dressed: Uint8Array | null = null): CrowdController {
   const tex = personTexture();
   const geo = new THREE.PlaneGeometry(0.62, 1.25);
   const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, alphaTest: 0.45, side: THREE.DoubleSide });
@@ -82,9 +88,13 @@ export function buildCrowd(map: SeatMap, store: DesignStore): CrowdController {
   mat.onBeforeCompile = (shader) => {
     shader.fragmentShader = shader.fragmentShader.replace(
       '#include <color_fragment>',
-      `#if defined( USE_COLOR ) || defined( USE_INSTANCING_COLOR )
+      // vColor is a vec4 in three r184 (color_pars_fragment), so take .rgb:
+      // mixing a vec4 with a vec3 fails to compile and the crowd vanishes.
+      `#if defined( USE_COLOR ) || defined( USE_COLOR_ALPHA )
         float isHead = step( texture2D( map, vMapUv ).b, 0.8 );
-        diffuseColor.rgb *= mix( vColor, vec3( 0.55 + 0.45 * vColor.g ), isHead );
+        vec3 shirt = vColor.rgb;
+        diffuseColor.rgb *= mix( shirt, vec3( 0.55 + 0.45 * shirt.g ), isHead );
+        diffuseColor.a *= vColor.a;
       #endif`,
     );
   };
@@ -103,6 +113,11 @@ export function buildCrowd(map: SeatMap, store: DesignStore): CrowdController {
   const standOf = (u: number): number => Math.floor(((u + 0.125) % 1) * 4); // 0 E,1 N,2 W,3 S
 
   const colorFor = (i: number): THREE.Color => {
+    if (dressed && dressed[i]) {
+      tmp.copy(hash(i * 13) < 0.12 ? BISHT : THOBE);
+      tmp.multiplyScalar(0.9 + hash(i * 5) * 0.15);
+      return tmp;
+    }
     const stand = standOf(map.uv[i * 2]);
     let base: THREE.Color;
     if (preset === 'away-end') base = stand === 3 ? away : home;

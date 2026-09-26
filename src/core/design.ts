@@ -18,6 +18,7 @@ export class DesignStore {
   readonly seatMapRef: DesignState['seatMapRef'];
 
   private strokeOld: Map<number, number> | null = null;
+  private locked: Uint8Array | null = null;
   private undoStack: SparseDiff[] = [];
   private redoStack: SparseDiff[] = [];
   private listeners: DirtyListener[] = [];
@@ -150,6 +151,7 @@ export class DesignStore {
     const remap = this.palette.map((oldHex) => nearestColorIndex(oldHex, next));
     const old = new Map<number, number>();
     for (let i = 0; i < this.cells.length; i++) {
+      if (this.locked && this.locked[i] === 1) continue;
       const oldIdx = this.cells[i];
       const newIdx = remap[oldIdx] ?? 0;
       if (newIdx !== oldIdx) {
@@ -173,6 +175,31 @@ export class DesignStore {
     this.notify('all');
   }
 
+  /**
+   * Seats that never take the tifo — a royal box, where nobody holds up a
+   * card (see SeatZone.noTifo). Locked seats are cleared now and every write
+   * path leaves them empty, so the design itself says so: the editor, the AI,
+   * an import, the card-distribution PDF and the seat lookup all agree with
+   * the 3D view without each needing to know about zones.
+   */
+  setLockedSeats(mask: Uint8Array | null): void {
+    this.locked = mask && mask.length === this.cells.length ? mask : null;
+    if (!this.locked) return;
+    const dirty: number[] = [];
+    for (let i = 0; i < this.cells.length; i++) {
+      if (this.locked[i] && this.cells[i] !== 0) {
+        this.cells[i] = 0;
+        dirty.push(i);
+      }
+    }
+    if (dirty.length) this.notify(dirty);
+  }
+
+  /** Is this seat locked out of the tifo? */
+  isLocked(index: number): boolean {
+    return !!this.locked && this.locked[index] === 1;
+  }
+
   private notify(indices: number[] | 'all'): void {
     for (const fn of this.listeners) fn(indices);
   }
@@ -184,6 +211,7 @@ export class DesignStore {
   /** Paint one cell inside an active stroke. No-ops if the value is unchanged. */
   paint(index: number, value: number): boolean {
     if (this.cells[index] === value) return false;
+    if (this.locked && this.locked[index] === 1) return false;
     if (this.strokeOld && !this.strokeOld.has(index)) {
       this.strokeOld.set(index, this.cells[index]);
     }
@@ -261,7 +289,7 @@ export class DesignStore {
   private applyValues(indices: Uint32Array, values: Uint8Array): void {
     const dirty: number[] = new Array(indices.length);
     for (let k = 0; k < indices.length; k++) {
-      this.cells[indices[k]] = values[k];
+      this.cells[indices[k]] = this.locked && this.locked[indices[k]] === 1 ? 0 : values[k];
       dirty[k] = indices[k];
     }
     this.notify(dirty);
@@ -292,6 +320,7 @@ export class DesignStore {
 
   loadCells(cells: Uint8Array): void {
     this.cells.set(cells.subarray(0, this.cells.length));
+    if (this.locked) for (let i = 0; i < this.cells.length; i++) if (this.locked[i]) this.cells[i] = 0;
     this.undoStack.length = 0;
     this.redoStack.length = 0;
     this.notifyHistory();

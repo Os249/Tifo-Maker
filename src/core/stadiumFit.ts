@@ -234,6 +234,13 @@ export function measureRing(probes: RadialProbe[], opts: { minHits?: number; min
  * the 95th percentile rather than the maximum, so one bad read cannot set the
  * size of the stadium.
  */
+/**
+ * The squarest plan the ring fitter searches. Measured rings never come near it
+ * (and the suggestion is clamped to 3.0 downstream), but a hand-built template
+ * can: the Jewel's bowl is drawn at p=7 to hug its rectangular pitch.
+ */
+export const RING_FIT_MAX_EXPONENT = 1.6 + 39 * 0.08;
+
 export function fitRing(points: Pt[]): { a: number; b: number; exponent: number; angleDeg: number; rms: number } {
   if (points.length < 12) return { a: 0, b: 0, exponent: 2, angleDeg: 0, rms: Infinity };
   let best = { a: 0, b: 0, p: 2, err: Infinity, deg: 0 };

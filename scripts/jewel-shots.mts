@@ -27,8 +27,15 @@ const browser = await chromium.launch({
   args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'],
 }).catch(() => chromium.launch());
 const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
-page.on('pageerror', (e) => console.error('  page error:', e.message.slice(0, 300)));
-page.on('console', (m) => { if (m.type() === 'error') console.error('  console:', m.text().slice(0, 300)); });
+// Any page error or console error fails the run: a shader that does not
+// compile only ever says so on the console, and the picture just loses the
+// thing it was drawing — which is how a broken crowd once got through.
+const errors: string[] = [];
+page.on('pageerror', (e) => errors.push('page error: ' + e.message.slice(0, 300)));
+page.on('console', (m) => {
+  const t = m.text();
+  if (m.type() === 'error' || /Shader Error|Program Info Log|WebGL: INVALID/.test(t)) errors.push('console: ' + t.slice(0, 300));
+});
 await page.goto('http://127.0.0.1:5233/scripts/jewel-shots.html', { waitUntil: 'networkidle', timeout: 240000 });
 await page.waitForFunction(() => (window as never as { __ready?: boolean }).__ready === true, { timeout: 240000 });
 mkdirSync(OUT, { recursive: true });
@@ -39,12 +46,21 @@ console.log(id, opened, { ax: ax.toFixed(1), bz: bz.toFixed(1), ty: ty.toFixed(1
 
 type V = { name: string; position: [number, number, number]; target: [number, number, number]; fov?: number };
 const views: V[] = [
+  // Looking down the pitch at one end from high over the halfway line: both
+  // corner ramps, the end screen and the run-off in one frame.
+  { name: '0-end-high', position: [-ax * 0.05, ty * 1.3, -bz * 0.1], target: [ax * 0.62, 0, 0], fov: 60 },
   // The reference angle: high in a corner of the upper tier, across the bowl.
   { name: '1-broadcast', position: [ax * 0.62, ty * 0.95, bz * 0.72], target: [-ax * 0.25, ty * 0.25, -bz * 0.25], fov: 62 },
   // The main stand (VIP tribune + boxes) straight on, from the far touchline.
   { name: '2-main-stand', position: [0, 6, bz * 0.45], target: [0, ty * 0.45, -bz], fov: 55 },
   // A corner: where the vehicle lanes come in.
   { name: '3-corner-lane', position: [ax * 0.12, 3.5, bz * 0.08], target: [ax * 0.5, 4, bz * 0.42], fov: 55 },
+  // The main stand from the opposite stand, level with the boxes.
+  { name: '2b-boxes', position: [0, 18, bz * 0.5], target: [0, 15, -bz * 0.8], fov: 45 },
+  // The royal box, close.
+  { name: '3c-royal-close', position: [0, 21, -bz * 0.42], target: [0, 22, -bz * 0.86], fov: 42 },
+  // The gold platform's front, close.
+  { name: '3d-gold-close', position: [9, 4.5, -bz * 0.3], target: [-4, 4, -bz * 0.62], fov: 45 },
   // The royal box and the gold platform, from the halfway line.
   { name: '3b-royal-box', position: [0, 9, 4], target: [0, 20, -bz * 0.8], fov: 50 },
   // Behind a goal: the end-stand screen.
@@ -70,3 +86,7 @@ for (const v of views) {
 console.log('census', await page.evaluate(() => (window as never as { __census: () => unknown }).__census()));
 await browser.close();
 await vite.close();
+if (errors.length) {
+  console.error(`\n${errors.length} error(s):\n  ` + [...new Set(errors)].join('\n  '));
+  process.exitCode = 1;
+}

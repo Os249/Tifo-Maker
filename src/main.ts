@@ -322,7 +322,9 @@ async function main(): Promise<void> {
   editor.drawGrid(true);
   // A real ground's premium zones and vehicle lanes, marked on the flat view.
   if (template.details) {
-    const { venueMarks } = await import('./core/venueDetails');
+    const { venueMarks, noTifoMask } = await import('./core/venueDetails');
+    // The royal box never takes the tifo — locked in the design itself.
+    store.setLockedSeats(noTifoMask(map, template));
     const marks = venueMarks(map, template);
     const paint = (): void =>
       editor.setVenueMarks(marks, { gold: t('venue.gold'), silver: t('venue.silver'), vip: t('venue.vip'), lane: t('venue.lane') });

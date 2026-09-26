@@ -26,7 +26,10 @@ export interface ScreenSource {
 
 /** Palette colours that are actual colours (index 0 is "empty seat"). */
 function inks(palette: string[]): string[] {
-  const out = palette.slice(1).filter((c) => /^#[0-9a-f]{6}$/i.test(c));
+  const out = palette
+    .slice(1)
+    .map((c) => (/^#[0-9a-f]{3}$/i.test(c) ? '#' + [...c.slice(1)].map((d) => d + d).join('') : c))
+    .filter((c) => /^#[0-9a-f]{6}$/i.test(c));
   return out.length ? out : ['#0b1d4d', '#ffffff'];
 }
 
@@ -40,6 +43,30 @@ function ledGrid(g: CanvasRenderingContext2D, w: number, h: number): void {
   g.fillStyle = 'rgba(0,0,0,0.18)';
   for (let x = 0; x < w; x += 4) g.fillRect(x, 0, 1, h);
   for (let y = 0; y < h; y += 4) g.fillRect(0, y, w, 1);
+}
+
+/** Each seat's pixel rectangle on a w x h screen, cached per seat map. */
+const rectCache = new WeakMap<SeatMap, { w: number; h: number; rects: Int32Array }>();
+function seatRects(m: SeatMap, w: number, h: number): Int32Array {
+  const hit = rectCache.get(m);
+  if (hit && hit.w === w && hit.h === h) return hit.rects;
+  const b = m.bounds;
+  const sx = w / (b.maxX - b.minX || 1);
+  const sy = h / (b.maxY - b.minY || 1);
+  const pw = Math.max(1, Math.ceil(3.2 * sx));
+  const ph = Math.max(1, Math.ceil(6.4 * sy));
+  const rects = new Int32Array(m.count * 4);
+  const clamp = (v: number, hi: number): number => Math.max(0, Math.min(hi, Math.round(v)));
+  for (let i = 0; i < m.count; i++) {
+    const cx = (m.xy[i * 2] - b.minX) * sx;
+    const cy = (m.xy[i * 2 + 1] - b.minY) * sy;
+    rects[i * 4] = clamp(cx - pw / 2, w);
+    rects[i * 4 + 1] = clamp(cy - ph / 2, h);
+    rects[i * 4 + 2] = clamp(cx + pw / 2, w);
+    rects[i * 4 + 3] = clamp(cy + ph / 2, h);
+  }
+  rectCache.set(m, { w, h, rects });
+  return rects;
 }
 
 export function paintScreen(canvas: HTMLCanvasElement, src: ScreenSource): void {
@@ -63,21 +90,30 @@ export function paintScreen(canvas: HTMLCanvasElement, src: ScreenSource): void 
     const ih = src.image.height * s;
     g.drawImage(src.image, (w - iw) / 2, (h - ih) / 2, iw, ih);
   } else if (src.mode === 'tifo' && src.map && src.cells) {
-    // The unrolled bowl, exactly as the design view shows it.
-    const m = src.map;
-    const b = m.bounds;
-    const sx = w / (b.maxX - b.minX || 1);
-    const sy = h / (b.maxY - b.minY || 1);
-    g.fillStyle = '#1b1e25';
-    g.fillRect(0, 0, w, h);
-    const pw = Math.max(1, Math.ceil(3.2 * sx));
-    const ph = Math.max(1, Math.ceil(6.4 * sy));
-    for (let i = 0; i < m.count; i++) {
+    // The unrolled bowl, exactly as the design view shows it. Written straight
+    // into pixels: this runs up to four times a second while someone paints,
+    // and 60k fillRect calls a go was the whole frame budget.
+    const rects = seatRects(src.map, w, h);
+    const img = g.createImageData(w, h);
+    const px = new Uint32Array(img.data.buffer);
+    px.fill(0xff251e1b); // #1b1e25, ABGR
+    const abgr = src.palette.map((raw) => {
+      // Palettes may carry #rgb as well as #rrggbb (tifoFormat accepts both).
+      const hex = /^#[0-9a-f]{3}$/i.test(raw) ? '#' + [...raw.slice(1)].map((c) => c + c).join('') : raw;
+      const n = parseInt(hex.slice(1), 16) || 0;
+      return (0xff000000 | ((n & 0xff) << 16) | (n & 0xff00) | ((n >> 16) & 0xff)) >>> 0;
+    });
+    for (let i = 0; i < src.map.count; i++) {
       const c = src.cells[i];
       if (!c) continue;
-      g.fillStyle = src.palette[c] ?? '#1b1e25';
-      g.fillRect((m.xy[i * 2] - b.minX) * sx - pw / 2, (m.xy[i * 2 + 1] - b.minY) * sy - ph / 2, pw, ph);
+      const col = abgr[c] ?? 0xff251e1b;
+      const x0 = rects[i * 4];
+      const y0 = rects[i * 4 + 1];
+      const x1 = rects[i * 4 + 2];
+      const y1 = rects[i * 4 + 3];
+      for (let y = y0; y < y1; y++) px.fill(col, y * w + x0, y * w + x1);
     }
+    g.putImageData(img, 0, 0);
   } else {
     // Stadium name, in the design's colours, with a band of the accent colour.
     const grad = g.createLinearGradient(0, 0, 0, h);

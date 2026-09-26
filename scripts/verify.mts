@@ -1816,6 +1816,10 @@ import { buildStadium as siBuild } from '../src/core/stadiumFit';
     if (/TEMPLATES\.find\(/.test(vdRead(f, 'utf8'))) throw new Error(`venue: ${f} still resolves only the generic bowls`);
   }
 
+  // The design-view marks use the editor's width; they must agree.
+  const { EDITOR_UNITS } = await import('../src/core/seatmap');
+  if (!vdRead('src/core/venueDetails.ts', 'utf8').includes(`const EDITOR_W = ${EDITOR_UNITS.width};`)) throw new Error('venue: EDITOR_W drifted from the seat map editor width');
+
   // The new Jewel against the real stadium (StadiumDB): 23,473 / 22,244 / 14,038.
   const jt = cat.templateById('jewel-jeddah-60k')!;
   const jm = generateSeatMap(jt);
@@ -1827,6 +1831,17 @@ import { buildStadium as siBuild } from '../src/core/stadiumFit';
     if (Math.abs(perTier[k] - r) / r > 0.02) throw new Error(`venue: Jewel tier ${k} has ${perTier[k]} seats, the real one ${r}`);
   });
   if (Math.abs(jm.count - 60241) / 60241 > 0.02) throw new Error(`venue: Jewel total ${jm.count} vs 60,241`);
+
+  // No seat on the pitch, and room round it: the first cut put the corner
+  // seats 0.4 m from the corner flag. Sides, ends and corners all clear 7 m.
+  let nearest = Infinity;
+  for (let i = 0; i < jm.count; i++) {
+    const x = Math.abs(jm.pos3[i * 3]);
+    const z = Math.abs(jm.pos3[i * 3 + 2]);
+    const dist = x <= 52.5 && z <= 34 ? -1 : Math.hypot(Math.max(0, x - 52.5), Math.max(0, z - 34));
+    if (dist < nearest) nearest = dist;
+  }
+  if (nearest < 7) throw new Error(`venue: a Jewel seat is ${nearest.toFixed(2)} m from the pitch`);
 
   // Lanes: a real gap in the lower tier at each corner, nothing cut above it.
   const lines = vd.laneLines(jt);
@@ -1861,6 +1876,24 @@ import { buildStadium as siBuild } from '../src/core/stadiumFit';
   if (!mount || mount.y > jf.Y_IN - 1.5 || mount.y < jf.Y_IN - 6 || mount.offset < jf.R_IN || mount.offset > jf.R_IN + 6) {
     throw new Error(`venue: the Jewel's lamps are not on its crown (mount ${JSON.stringify(mount)}, opening ${jf.R_IN} m at ${jf.Y_IN.toFixed(1)} m)`);
   }
+  // The royal box is locked in the design itself: nothing can paint it.
+  {
+    const { DesignStore: DSL } = await import('../src/core/design');
+    const st = new DSL(jm, ['#000000', '#ff0000']);
+    st.fillAll(1);
+    st.setLockedSeats(nt);
+    const lockedIdx = [...nt.keys()].filter((i) => nt[i]);
+    if (lockedIdx.some((i) => st.cells[i] !== 0)) throw new Error('venue: locking did not clear the royal box');
+    st.beginStroke();
+    if (st.paint(lockedIdx[0], 1)) throw new Error('venue: a locked seat took paint');
+    st.commitStroke();
+    st.transform(() => 1);
+    st.loadCells(new Uint8Array(jm.count).fill(1));
+    if (lockedIdx.some((i) => st.cells[i] !== 0)) throw new Error('venue: fill or load painted the royal box');
+    st.undo();
+    if (lockedIdx.some((i) => st.cells[i] !== 0)) throw new Error('venue: undo painted the royal box');
+    if (st.cells.filter((c, i) => c === 1 && !nt[i]).length === 0) throw new Error('venue: locking stopped ordinary seats taking paint');
+  }
   const marks = vd.venueMarks(jm, jt);
   if (marks.filter((m) => m.kind === 'lane').length !== 4 || marks.filter((m) => m.kind !== 'lane').length !== 3) throw new Error('venue: the design view marks are wrong');
   // Grounds without details are untouched by all of it.
@@ -1882,7 +1915,7 @@ import { buildStadium as siBuild } from '../src/core/stadiumFit';
     if (!/\ben:/.test(body) || !/\bar:/.test(body)) throw new Error(`venue: overlay ${k} is missing en or ar`);
   }
   console.log(
-    `venue: 13 seat maps frozen and unchanged | Jewel ${perTier.join(' / ')} (real 23,473 / 22,244 / 14,038) = ${jm.count}` +
+    `venue: 13 seat maps frozen and unchanged | Jewel ${perTier.join(' / ')} (real 23,473 / 22,244 / 14,038) = ${jm.count}, ${nearest.toFixed(1)} m clear of the pitch` +
       ` | 4 lanes, ${removed} seats removed, tiers above untouched | gold ${zc.gold}, silver ${zc.silver}, royal box ${zc.vip}` +
       ` | ${shipped.length} grounds the server can save against`,
   );

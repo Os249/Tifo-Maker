@@ -19,6 +19,7 @@ import {
   planFromOuter,
   solveRows,
   fitRing,
+  RING_FIT_MAX_EXPONENT,
   measureRing,
   stackTiers,
   suggestFacade,
@@ -72,7 +73,10 @@ console.log('--- ring fitting -------------------------------------------------'
   for (const s of STADIUM_CATALOG) {
     const { a, b, exponent } = s.template.plan;
     const f = fitRing(trueRing(s.template));
-    const e = Math.max(Math.abs(f.a - a) / a, Math.abs(f.b - b) / b, Math.abs(f.exponent - exponent) / exponent);
+    // A plan squarer than the fitter searches should come back pinned at the
+    // ceiling, with its extents still right.
+    const want = Math.min(exponent, RING_FIT_MAX_EXPONENT);
+    const e = Math.max(Math.abs(f.a - a) / a, Math.abs(f.b - b) / b, Math.abs(f.exponent - want) / want);
     worst = Math.max(worst, e);
   }
   check(worst < 0.05, 'clean rings refit to their own geometry', `worst ${(worst * 100).toFixed(1)}%`);

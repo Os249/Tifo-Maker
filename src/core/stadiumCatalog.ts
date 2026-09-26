@@ -240,12 +240,17 @@ const COMMUNITY: StadiumEntry[] = [
       id: 'jewel-jeddah-60k',
       name: 'The Jewel of Jeddah',
       version: 1,
-      plan: { a: 64, b: 44.5, exponent: 2.7 },
+      // A near-rectangle (p = 7) for the lower tier: square to the touchlines
+      // with a tight chamfer at the corners, where the ramps come in. Clears
+      // the pitch by about 9.4 m on the sides, 9.8 m behind the goals and
+      // 7.6 m at the corner flags. (The first cut, p = 2.7, put the corner
+      // seats 0.4 m from the corner flag.) Offset outward, the tiers round off.
+      plan: { a: 62.5, b: 44, exponent: 7 },
       evenRows: true,
       tiers: [
-        { rows: 32, rowDepth: 0.8, rakeDeg: 26, baseElevation: 1.2, baseOffset: 0, seatPitch: 0.5 },
-        { rows: 22, rowDepth: 0.8, rakeDeg: 32, baseElevation: 17.5, baseOffset: 20.8, seatPitch: 0.5 },
-        { rows: 12, rowDepth: 0.78, rakeDeg: 36, baseElevation: 32.6, baseOffset: 34.6, seatPitch: 0.48 },
+        { rows: 30, rowDepth: 0.8, rakeDeg: 26, baseElevation: 1.2, baseOffset: 0, seatPitch: 0.5 },
+        { rows: 21, rowDepth: 0.8, rakeDeg: 32, baseElevation: 16.7, baseOffset: 19.2, seatPitch: 0.5 },
+        { rows: 12, rowDepth: 0.78, rakeDeg: 36, baseElevation: 31.3, baseOffset: 32.2, seatPitch: 0.5 },
       ],
       aisles: { count: 40, widthMeters: 1.1 },
       sectionsPerTier: 40,
@@ -354,8 +359,9 @@ export const STADIUM_CATALOG: StadiumEntry[] = [...BUILTINS, ...COMMUNITY];
  * A saved design is one byte per seat, indexed by position, so the seat map it
  * was drawn on has to stay exactly as it was. These resolve through
  * templateById like anything else — so a design opens, renders, saves and
- * shares exactly as before — but they are not in the catalogue, so nobody
- * starts a NEW design on them.
+ * shares exactly as before — but they are not in the catalogue, so they are
+ * never offered. (A hand-typed ?template= link still opens one; that is the
+ * same path an old share link takes, and it is harmless.)
  */
 export const LEGACY_STADIUMS: StadiumEntry[] = [
   {

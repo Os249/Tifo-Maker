@@ -43,6 +43,9 @@
       sim.setScreen(opts.screen ?? 'stadium', { en: template.name, ar: 'جوهرة جدة' }, img);
     }
     if (opts.floods === false) sim.setFloodlights(false);
+    if (opts.wet) sim.setWetPitch(true);
+    // As the app opens it: rail banners off (overlay state.banners = false).
+    sim.setBannersVisible(!!opts.railBanners);
     curId = id;
     return { seats: map.count };
   };

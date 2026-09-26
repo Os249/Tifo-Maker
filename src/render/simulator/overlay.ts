@@ -284,6 +284,18 @@ const MDS_T: Record<string, { en: string; ar: string }> = {
   sunIntensity: { en: 'Sun intensity', ar: 'شدة الشمس' },
   floodlights: { en: 'Floodlights', ar: 'الكشافات' },
   secStadium: { en: 'Stadium screens', ar: 'شاشات الملعب' },
+  'shot.TV Broadcast': { en: 'TV Broadcast', ar: 'البث التلفزيوني' },
+  'shot.Main Camera': { en: 'Main Camera', ar: 'الكاميرا الرئيسية' },
+  'shot.Behind Goal': { en: 'Behind Goal', ar: 'خلف المرمى' },
+  'shot.Pitch Level': { en: 'Pitch Level', ar: 'مستوى الملعب' },
+  'shot.Tunnel': { en: 'Tunnel', ar: 'النفق' },
+  'shot.Drone': { en: 'Drone', ar: 'درون' },
+  'shot.High Corner': { en: 'High Corner', ar: 'زاوية عالية' },
+  'shot.Centre': { en: 'Centre', ar: 'المنتصف' },
+  'shot.Crowd View': { en: 'Crowd View', ar: 'من الجمهور' },
+  'shot.Ultra View': { en: 'Ultra View', ar: 'من الألتراس' },
+  'shot.Royal Box': { en: 'Royal Box', ar: 'المقصورة الرئيسية' },
+  'shot.Vehicle Ramp': { en: 'Vehicle Ramp', ar: 'ممر الإسعاف' },
   screenShows: { en: 'Big screens show', ar: 'الشاشات تعرض' },
   'screen.stadium': { en: 'Stadium name', ar: 'اسم الملعب' },
   'screen.tifo': { en: 'Your tifo (live)', ar: 'التيفو حقك (مباشر)' },
@@ -601,6 +613,8 @@ const MDS_T: Record<string, { en: string; ar: string }> = {
   'cue.accessories-off': { en: 'Accessories off', ar: 'إطفاء الإكسسوارات' },
   hAccessories: { en: 'Flags, flares, smoke', ar: 'الأعلام والشماريخ والدخان' },
 };
+/** A camera shot's name in the panel's language; unknown names pass through. */
+const shotLabel = (name: string): string => (MDS_T['shot.' + name] ? L('shot.' + name) : name);
 const L = (k: string): string => {
   const e = MDS_T[k];
   return e ? (getLang() === 'ar' ? e.ar : e.en) : k;
@@ -1466,7 +1480,7 @@ export function openMatchDaySimulator(
     const shots = sim.shots();
     if (camSel.options.length !== shots.length) {
       camSel.replaceChildren();
-      shots.forEach((s, i) => opt(camSel, String(i), s.name, false));
+      shots.forEach((s, i) => opt(camSel, String(i), shotLabel(s.name), false));
     }
     camSel.value = String(state.camIdx);
     sim.setCrowdPreset(state.crowd);
@@ -1512,7 +1526,7 @@ export function openMatchDaySimulator(
   function applyScreen(): void {
     secScreens.root.style.display = sim.hasScreens() ? '' : 'none';
     if (!sim.hasScreens()) return;
-    const names = tlBoth(template.id);
+    const names = tlBoth(template.id, template.name);
     // "An image" with no image yet shows the name until one is chosen.
     const mode: ScreenMode = state.screen === 'image' && !state.screenImage ? 'stadium' : state.screen;
     sim.setScreen(mode, names, state.screenImage ?? undefined);
@@ -1748,13 +1762,22 @@ export function openMatchDaySimulator(
     if (state.screen === 'image' && !state.screenImage) screenFile.click();
     applyScreen();
   });
+  let screenLoad = 0;
   screenFile.addEventListener('change', () => {
     const f = screenFile.files?.[0];
     if (!f) return;
-    // Read in the browser; it never leaves this device.
+    // Read in the browser; it never leaves this device. The last file picked
+    // wins even if an earlier one finishes decoding after it.
+    const ticket = ++screenLoad;
     createImageBitmap(f)
       .then((bmp) => {
+        if (ticket !== screenLoad || !mounted) {
+          bmp.close();
+          return;
+        }
+        const old = state.screenImage;
         state.screenImage = bmp;
+        if (old && 'close' in old) old.close();
         state.screen = 'image';
         screenSel.value = 'image';
         syncScreenUi();
@@ -2238,6 +2261,9 @@ export function openMatchDaySimulator(
     unsubBanners?.();
     if (document.fullscreenElement) void document.exitFullscreen();
     disposeSim();
+    // The screens' picture was the user's own file; let the browser have it back.
+    if (state.screenImage && 'close' in state.screenImage) state.screenImage.close();
+    state.screenImage = null;
     document.body.style.overflow = prevOverflow;
     overlay.remove();
     if (pushed) {

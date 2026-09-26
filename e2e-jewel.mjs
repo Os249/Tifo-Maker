@@ -45,6 +45,12 @@ async function open(path, { lang = 'en', w = 1440, h = 900 } = {}) {
   const p = await ctx.newPage();
   const errs = [];
   p.on('pageerror', (e) => errs.push(e.message.slice(0, 200)));
+  // A shader that does not compile only says so on the console, and the
+  // picture silently loses whatever it drew — the crowd, once. Count it.
+  p.on('console', (m) => {
+    const t = m.text();
+    if (/Shader Error|Program Info Log|WebGL: INVALID|THREE\.WebGLProgram/.test(t)) errs.push('GL: ' + t.slice(0, 200));
+  });
   await p.goto(B + path, { waitUntil: 'networkidle', timeout: 120000 });
   return { ctx, p, errs };
 }
@@ -61,7 +67,7 @@ console.log('\n— the new Jewel in the design view —');
   await waitReady(p);
   await p.waitForTimeout(1500);
   const s = await stat(p);
-  check('opens with the real seat count', seatsIn(s) === 59708, s);
+  check('opens with the real seat count', seatsIn(s) === 59436, s);
   await p.screenshot({ path: `${OUT}/editor.png` });
   // The stadium panel lists what the ground has.
   await p.click('#rail-stadium');
@@ -101,7 +107,7 @@ console.log('\n— a design on the earlier Jewel —');
   await Promise.all([p.waitForNavigation({ timeout: 60000 }), p.click('#sw-continue')]);
   await waitReady(p);
   await p.waitForTimeout(1500);
-  check('it moves to the new Jewel', /template=jewel-jeddah-60k/.test(p.url()) && seatsIn(await stat(p)) === 59708, p.url());
+  check('it moves to the new Jewel', /template=jewel-jeddah-60k/.test(p.url()) && seatsIn(await stat(p)) === 59436, p.url());
   check('no page errors', errs.length === 0, errs.join(' | '));
   await ctx.close();
 }

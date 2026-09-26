@@ -9,6 +9,7 @@ import { dummyHash, hashPassword, hashToken, issueToken, TOKEN_TTL_MS, verifyPas
 import { gunzipBytes, gzipBytes, u32FromB64, u8FromB64 } from './codec';
 import { generateSeatMap } from '../../src/core/seatmap';
 import { shippedTemplates } from '../../src/core/stadiumCatalog';
+import { noTifoMask } from '../../src/core/venueDetails';
 import { validateTifo, TIFO_SCHEMA_VERSION } from '../../src/core/tifoFormat';
 import { renderDistributionPdf } from '../../src/export/distributionPdf';
 
@@ -406,6 +407,43 @@ export async function buildApp(
 
   const seatCount = (id: string, version: number): number | null =>
     templates.find((t) => t.id === id && t.version === version)?.seatCount ?? null;
+  // Seat maps for the PDF export, generated once per ground rather than per
+  // request (a 91k-seat map is 100-170 ms). Bounded by the shipped grounds.
+  const seatMaps = new Map<string, ReturnType<typeof generateSeatMap>>();
+  const seatMapFor = (tpl: Parameters<typeof generateSeatMap>[0]): ReturnType<typeof generateSeatMap> => {
+    const key = `${tpl.id}@${tpl.version}`;
+    let m = seatMaps.get(key);
+    if (!m) {
+      m = generateSeatMap(tpl);
+      seatMaps.set(key, m);
+    }
+    return m;
+  };
+  /**
+   * Seats that never take the tifo (a royal box — see SeatZone.noTifo). The
+   * editor locks them, and the server enforces the same rule, so a design from
+   * an old client or an outside generator cannot print cards for them. Returns
+   * true if any cell had to be cleared.
+   */
+  const lockMasks = new Map<string, Uint8Array | null>();
+  const clearLocked = (templateId: string, version: number, cells: Uint8Array): boolean => {
+    const key = `${templateId}@${version}`;
+    let mask = lockMasks.get(key);
+    if (mask === undefined) {
+      const tpl = shippedTemplates().find((t) => t.id === templateId && t.version === version);
+      mask = tpl ? noTifoMask(seatMapFor(tpl), tpl) : null;
+      lockMasks.set(key, mask);
+    }
+    if (!mask) return false;
+    let changed = false;
+    for (let i = 0; i < cells.length && i < mask.length; i++) {
+      if (mask[i] && cells[i] !== 0) {
+        cells[i] = 0;
+        changed = true;
+      }
+    }
+    return changed;
+  };
 
   // Palette ceiling matches the client (DesignStore.MAX_COLORS) and the .tifo
   // format: one byte per seat ⇒ up to 256 distinct colours. (It used to cap at 8,
@@ -558,15 +596,11 @@ export async function buildApp(
   // back { valid, errors[] } WITHOUT saving anything — the tight write→validate→
   // fix loop that lets external systems hit 100% data integrity. Seat counts are
   // memoized so repeated validations don't regenerate maps.
-  const seatCountCache = new Map<string, number | null>();
-  const seatCountFor = (templateId: string, version: number): number | null => {
-    const key = `${templateId}@${version}`;
-    if (seatCountCache.has(key)) return seatCountCache.get(key) ?? null;
-    const tpl = shippedTemplates().find((t) => t.id === templateId && t.version === version);
-    const count = tpl ? generateSeatMap(tpl).count : null;
-    seatCountCache.set(key, count);
-    return count;
-  };
+  // The same list saving checks against, so validate and save can never
+  // disagree — and already counted at boot, so nothing is regenerated here.
+  // (This used to memoise into a map keyed by whatever id the client sent,
+  // which a client could grow without limit.)
+  const seatCountFor = (templateId: string, version: number): number | null => seatCount(templateId, version);
 
   app.post('/api/tifo/validate', async (req, reply) => {
     const result = validateTifo(req.body, seatCountFor);
@@ -2384,7 +2418,7 @@ export async function buildApp(
     if (!body.title || count === null || !validPalette(body.palette) || !body.cellsGzB64) {
       return reply.code(400).send({ error: 'title, known templateRef, palette (2-256 hex), cellsGzB64 required' });
     }
-    const cellsGz = Buffer.from(body.cellsGzB64, 'base64');
+    let cellsGz: Buffer = Buffer.from(body.cellsGzB64, 'base64');
     let cells: Buffer;
     try {
       cells = gunzipBytes(cellsGz);
@@ -2394,6 +2428,7 @@ export async function buildApp(
     if (cells.byteLength !== count) {
       return reply.code(400).send({ error: `cells must have ${count} bytes for this template` });
     }
+    if (clearLocked(body.templateId!, body.templateVersion!, cells)) cellsGz = gzipBytes(cells);
     const thumb = decodeThumb(body.thumbnailPngB64, reply);
     if (thumb === undefined) return;
     return reply.code(201).send(
@@ -2624,7 +2659,9 @@ export async function buildApp(
       colorNames?: string[];
     };
     const tpl = shippedTemplates().find((t) => t.id === body.templateId && t.version === (body.templateVersion ?? t.version));
-    if (!tpl) return reply.code(400).send({ error: 'unknown templateId/version' });
+    if (!tpl || !templates.some((t) => t.id === tpl.id && t.version === tpl.version)) {
+      return reply.code(400).send({ error: 'unknown templateId/version' });
+    }
     if (!validPalette(body.palette) || !body.cellsGzB64) {
       return reply.code(400).send({ error: 'palette and cellsGzB64 required' });
     }
@@ -2634,10 +2671,11 @@ export async function buildApp(
     } catch {
       return reply.code(400).send({ error: 'cells not gzip' });
     }
-    const map = generateSeatMap(tpl);
+    const map = seatMapFor(tpl);
     if (cells.length !== map.count) {
       return reply.code(400).send({ error: `cells must have ${map.count} bytes for this template` });
     }
+    clearLocked(tpl.id, tpl.version, cells); // no cards are printed for a royal box
     const outPath = join(tmpdir(), `tifo-${Date.now()}-${Math.random().toString(36).slice(2)}.pdf`);
     await renderDistributionPdf(
       { cells: new Uint8Array(cells), palette: body.palette as string[], seatMapRef: { id: tpl.id, version: tpl.version } },
@@ -2675,7 +2713,7 @@ export async function buildApp(
       return reply.code(400).send({ error: 'palette and cellsGzB64 required' });
     }
     const count = seatCount(rec.templateId, rec.templateVersion)!;
-    const cellsGz = Buffer.from(body.cellsGzB64, 'base64');
+    let cellsGz: Buffer = Buffer.from(body.cellsGzB64, 'base64');
     let cells: Buffer;
     try {
       cells = gunzipBytes(cellsGz);
@@ -2685,6 +2723,7 @@ export async function buildApp(
     if (cells.byteLength !== count) {
       return reply.code(400).send({ error: `cells must have ${count} bytes for this template` });
     }
+    if (clearLocked(rec.templateId, rec.templateVersion, cells)) cellsGz = gzipBytes(cells);
     const thumb = decodeThumb(body.thumbnailPngB64, reply);
     if (thumb === undefined) return;
     return repo.updateCells(rec.id, cellsGz, body.palette, thumb);
@@ -2734,6 +2773,10 @@ export async function buildApp(
       if (indices[k] >= count) return reply.code(400).send({ error: `index ${indices[k]} out of range` });
     }
     for (let k = 0; k < indices.length; k++) cells[indices[k]] = after[k];
+    if (clearLocked(rec.templateId, rec.templateVersion, cells)) {
+      // Keep the revision honest too: it records what the seats now hold.
+      for (let k = 0; k < indices.length; k++) after[k] = cells[indices[k]];
+    }
 
     const newGz = gzipBytes(cells);
     const willSnapshot = (rec.revisionCount + 1) % SNAPSHOT_EVERY === 0;

@@ -1973,10 +1973,10 @@ export function tl(value: string): string {
  * show both side by side, like a stadium's big screen. Falls back to the value
  * itself in both slots when it has no translation.
  */
-export function tlBoth(value: string): { en: string; ar: string } {
+export function tlBoth(value: string, fallback = value): { en: string; ar: string } {
   const key = LABEL_KEYS[value];
   const e = key ? STRINGS[key] : undefined;
-  return e ? { en: e.en, ar: e.ar } : { en: value, ar: value };
+  return e ? { en: e.en, ar: e.ar } : { en: fallback, ar: fallback };
 }
 
 /**

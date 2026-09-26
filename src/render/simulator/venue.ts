@@ -21,8 +21,13 @@ type Trash = { dispose(): void };
 export interface VenueBuild {
   object: THREE.Group;
   disposables: Trash[];
-  /** One canvas per screen, painted by the caller; call `screensChanged` after. */
-  screens: { canvas: HTMLCanvasElement; texture: THREE.CanvasTexture }[];
+  /**
+   * The screens' picture: ONE canvas and one texture shared by every screen —
+   * they show the same thing, so painting it once is the whole cost. Null on a
+   * ground without screens. Call `screensChanged` after painting.
+   */
+  screen: { canvas: HTMLCanvasElement; texture: THREE.CanvasTexture } | null;
+  screenCount: number;
   screensChanged(): void;
 }
 
@@ -66,36 +71,61 @@ function curtain(
   return g;
 }
 
-/** One hospitality box's glazing: lit interior, mullions, a dark spandrel. */
-function boxTexture(): THREE.CanvasTexture {
+/**
+ * The inside of one hospitality box, seen through its glass: a lit back wall,
+ * a TV, a framed print, people at the bar. Repeated once per box.
+ */
+function boxInteriorTexture(): THREE.CanvasTexture {
   const c = document.createElement('canvas');
-  c.width = 64;
-  c.height = 32;
+  c.width = 128;
+  c.height = 64;
   const g = c.getContext('2d')!;
-  g.fillStyle = '#1b1712';
-  g.fillRect(0, 0, 64, 32);
-  const grad = g.createLinearGradient(0, 6, 0, 30);
-  grad.addColorStop(0, '#f6d9a0');
-  grad.addColorStop(1, '#b77a3e');
-  g.fillStyle = grad;
-  g.fillRect(3, 6, 58, 24);
-  g.fillStyle = 'rgba(40,30,20,0.9)';
-  for (const x of [22, 42]) g.fillRect(x, 6, 2, 24);
-  g.fillStyle = '#e9e2d2';
-  g.fillRect(0, 0, 64, 4); // white fascia above the glass
-  g.fillRect(0, 0, 2, 32);
-  g.fillRect(62, 0, 2, 32);
-  // Silhouettes of people at the glass, so a lit box reads as a room.
-  g.fillStyle = 'rgba(60,35,20,0.55)';
-  for (const [x, h] of [[9, 10], [15, 12], [30, 11], [50, 12]] as const) {
+  const wall = g.createLinearGradient(0, 0, 0, 64);
+  wall.addColorStop(0, '#f3d9a6');
+  wall.addColorStop(1, '#b98247');
+  g.fillStyle = wall;
+  g.fillRect(0, 0, 128, 64);
+  g.fillStyle = '#1b1d22'; // the TV
+  g.fillRect(18, 14, 30, 18);
+  g.fillStyle = '#3f6fb5';
+  g.fillRect(20, 16, 26, 14);
+  g.fillStyle = '#6b4a2b'; // a framed print
+  g.fillRect(78, 12, 22, 16);
+  g.fillStyle = '#e9d7b0';
+  g.fillRect(80, 14, 18, 12);
+  g.fillStyle = '#4a2f1d'; // the bar counter
+  g.fillRect(0, 46, 128, 18);
+  g.fillStyle = 'rgba(40,24,14,0.75)'; // people
+  for (const [x, h] of [[12, 22], [30, 25], [60, 23], [94, 24], [112, 21]] as const) {
     g.beginPath();
-    g.arc(x, 30 - h, 2.2, 0, Math.PI * 2);
+    g.arc(x, 64 - h - 4, 4, 0, Math.PI * 2);
     g.fill();
-    g.fillRect(x - 3, 30 - h + 2, 6, h - 2);
+    g.fillRect(x - 5, 64 - h, 10, h);
   }
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.SRGBColorSpace;
   t.wrapS = THREE.RepeatWrapping;
+  return t;
+}
+
+/** Hazard hatching for the keep-clear box in front of a ramp. */
+function hatchTexture(): THREE.CanvasTexture {
+  const c = document.createElement('canvas');
+  c.width = 64;
+  c.height = 64;
+  const g = c.getContext('2d')!;
+  g.clearRect(0, 0, 64, 64);
+  g.strokeStyle = 'rgba(242,196,15,0.95)';
+  g.lineWidth = 6;
+  for (let k = -64; k < 128; k += 16) {
+    g.beginPath();
+    g.moveTo(k, 64);
+    g.lineTo(k + 64, 0);
+    g.stroke();
+  }
+  g.strokeRect(2, 2, 60, 60);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
   return t;
 }
 
@@ -184,53 +214,104 @@ export function buildVenueDetails(template: StadiumTemplate, map: SeatMap, shado
   const trash: Trash[] = [];
   const details = template.details ?? {};
   const at = curveSampler(template);
+  // Distance of a ground-plane point from the plan curve (outward positive):
+  // the offset the seat map and the concrete are laid out by.
+  const planPts: { x: number; z: number }[] = [];
+  for (let i = 0; i < 2048; i++) planPts.push(at(i / 2048, 0));
+  const offsetFromPlan = (x: number, z: number): number => {
+    let best = Infinity;
+    for (const q of planPts) {
+      const d = (q.x - x) ** 2 + (q.z - z) ** 2;
+      if (d < best) best = d;
+    }
+    const inside = Math.abs(x / template.plan.a) ** template.plan.exponent + Math.abs(z / template.plan.b) ** template.plan.exponent < 1;
+    return inside ? -Math.sqrt(best) : Math.sqrt(best);
+  };
 
   const concrete = new THREE.MeshStandardMaterial({ color: 0x77736c, roughness: 0.95, side: THREE.DoubleSide });
+  const soffitMat = new THREE.MeshStandardMaterial({ color: 0x2c2926, roughness: 0.95, side: THREE.DoubleSide });
+  const floorMat = new THREE.MeshStandardMaterial({ color: 0x4a4540, roughness: 0.9, side: THREE.DoubleSide });
   const asphalt = new THREE.MeshStandardMaterial({ color: 0x2b2b2e, roughness: 0.92 });
   const tunnelDark = new THREE.MeshStandardMaterial({ color: 0x07080b, roughness: 1 });
   const fasciaWhite = new THREE.MeshStandardMaterial({ color: 0xe8e2d4, roughness: 0.55, metalness: 0.1 });
-  trash.push(concrete, asphalt, tunnelDark, fasciaWhite);
+  const yellow = new THREE.MeshStandardMaterial({ color: 0xf2c40f, roughness: 0.5 });
+  trash.push(concrete, soffitMat, floorMat, asphalt, tunnelDark, fasciaWhite, yellow);
 
   // ---- vehicle lanes ------------------------------------------------------
+  // Local frame per lane: +z runs outward along the lane, z = 0 is the front
+  // edge of the tier it cuts. Everything stays behind z = -1.5 — the ramp is
+  // in the stand, the ambulance waits in the stand, and the only thing on the
+  // run-off is the painted keep-clear box.
   const lanes = laneLines(template);
   const chev = lanes.length ? chevronTexture() : null;
   const sign = lanes.length ? emergencySign() : null;
+  const hatch = lanes.length ? hatchTexture() : null;
   if (chev) trash.push(chev);
   if (sign) trash.push(sign);
+  if (hatch) trash.push(hatch);
   lanes.forEach((l: LaneLine, k) => {
     const e = tierEdges(template, l.lane.tier);
     const w = l.lane.widthM;
-    const len = e.back - e.front + 6; // from the pitch-side edge to the portal
-    const ang = Math.atan2(l.dx, l.dz); // yaw so local +z runs outward
+    const depth = e.back - e.front; // how deep the cut is
     const lane = new THREE.Group();
-    lane.position.set(l.x + l.dx * (e.front - 2), 0, l.z + l.dz * (e.front - 2));
-    lane.rotation.y = ang;
+    lane.name = 'vehicle-lane';
+    lane.position.set(l.x + l.dx * e.front, 0, l.z + l.dz * e.front);
+    lane.rotation.y = Math.atan2(l.dx, l.dz);
 
-    // Road surface, with a white edge line either side.
-    const road = box(w, 0.08, len, asphalt, trash);
-    road.position.set(0, 0.04, len / 2);
+    // Road from the run-off's edge to inside the tunnel, with edge lines.
+    const roadLen = depth + 4.5;
+    const road = box(w, 0.08, roadLen, asphalt, trash);
+    road.position.set(0, 0.04, roadLen / 2);
     road.receiveShadow = shadows;
     lane.add(road);
     const lineMat = new THREE.MeshBasicMaterial({ color: 0xdadada });
     trash.push(lineMat);
     for (const sx of [-1, 1]) {
-      const ln = box(0.15, 0.02, len, lineMat, trash);
-      ln.position.set(sx * (w / 2 - 0.4), 0.09, len / 2);
+      const ln = box(0.15, 0.02, roadLen, lineMat, trash);
+      ln.position.set(sx * (w / 2 - 0.4), 0.09, roadLen / 2);
       lane.add(ln);
     }
+    // Keep-clear hatching on the run-off in front of the ramp.
+    const hatchMat = new THREE.MeshBasicMaterial({ map: hatch, transparent: true, depthWrite: false });
+    const hatchGeo = new THREE.PlaneGeometry(w, 1.4);
+    trash.push(hatchMat, hatchGeo);
+    const hb = new THREE.Mesh(hatchGeo, hatchMat);
+    hb.rotation.x = -Math.PI / 2;
+    hb.position.set(0, 0.03, -0.75);
+    lane.add(hb);
 
-    // The cut faces of the stand: a wall either side, rising with the rake.
-    const rise = e.backY;
+    // The cut faces of the stand, built along the concrete's real edge: each
+    // point up the lane's side line gets the deck height for its actual
+    // distance from the plan curve — the same test the concrete was clipped
+    // with — so wall and deck meet with no slit and no notch at the front.
+    const rakeTan = Math.tan((template.tiers[l.lane.tier].rakeDeg * Math.PI) / 180);
+    const deckY = (r: number): number => e.frontY + (Math.min(e.back, Math.max(e.front, r)) - e.front) * rakeTan;
+    const bx = l.x + l.dx * e.front;
+    const bz = l.z + l.dz * e.front;
     for (const sx of [-1, 1]) {
+      const x = sx * (w / 2);
+      const pts: { z: number; top: number }[] = [];
+      for (let z = -3; z <= depth + 3; z += 0.25) {
+        // Lane-local (x, z) to world: +z along the lane, +x = (dz, -dx).
+        const wx = bx + l.dx * z + l.dz * x;
+        const wz = bz + l.dz * z - l.dx * x;
+        const r = offsetFromPlan(wx, wz);
+        if (r < e.front - 0.02 || r > e.back + 0.02) continue;
+        pts.push({ z, top: deckY(r) + 0.02 });
+      }
+      if (pts.length < 2) continue;
+      const pos: number[] = [];
+      const idx: number[] = [];
+      pts.forEach((q, i) => {
+        pos.push(x, 0, q.z, x, q.top, q.z);
+        if (i > 0) {
+          const k = (i - 1) * 2;
+          idx.push(k, k + 1, k + 2, k + 1, k + 3, k + 2);
+        }
+      });
       const wallGeo = new THREE.BufferGeometry();
-      const z0 = 2;
-      const z1 = 2 + (e.back - e.front);
-      const x = sx * (w / 2 + 0.15);
-      wallGeo.setAttribute(
-        'position',
-        new THREE.Float32BufferAttribute([x, 0, z0, x, Math.max(0.6, e.frontY), z0, x, 0, z1, x, rise, z1], 3),
-      );
-      wallGeo.setIndex([0, 1, 2, 1, 3, 2]);
+      wallGeo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+      wallGeo.setIndex(idx);
       wallGeo.computeVertexNormals();
       trash.push(wallGeo);
       const wall = new THREE.Mesh(wallGeo, concrete);
@@ -238,130 +319,155 @@ export function buildVenueDetails(template: StadiumTemplate, map: SeatMap, shado
       wall.receiveShadow = shadows;
       lane.add(wall);
       // Handrail along the top of the cut, where spectators stand beside it.
-      const rail = box(0.08, 0.08, z1 - z0, fasciaWhite, trash);
-      rail.position.set(x, 0, (z0 + z1) / 2);
-      rail.position.y = (Math.max(0.6, e.frontY) + rise) / 2 + 1.0;
-      rail.rotation.x = -Math.atan2(rise - Math.max(0.6, e.frontY), z1 - z0);
-      lane.add(rail);
+      const railPath = new THREE.CurvePath<THREE.Vector3>();
+      const rp = pts.filter((_, i) => i % 4 === 0 || i === pts.length - 1).map((q) => new THREE.Vector3(x, q.top + 1.05, q.z));
+      for (let i = 0; i < rp.length - 1; i++) railPath.add(new THREE.LineCurve3(rp[i], rp[i + 1]));
+      if (rp.length > 1) {
+        const railGeo = new THREE.TubeGeometry(railPath, rp.length * 2, 0.04, 6, false);
+        trash.push(railGeo);
+        lane.add(new THREE.Mesh(railGeo, fasciaWhite));
+      }
+      // A yellow bollard either side of the mouth.
+      const bol = box(0.35, 1.0, 0.35, yellow, trash);
+      bol.position.set(sx * (w / 2 - 0.6), 0.5, 0.2);
+      lane.add(bol);
     }
+    // The barrier arm, raised (it is a matchday: the ramp is kept open).
+    const arm = box(0.12, w - 1.6, 0.12, yellow, trash);
+    arm.position.set(-(w / 2 - 0.6), 1.0 + (w - 1.6) / 2, 0.2);
+    lane.add(arm);
 
     // Tunnel portal at the back of the tier: a dark mouth, a lintel with the
     // hazard band and the sign, and the concourse above it.
-    const portalZ = 2 + (e.back - e.front);
     const mouthH = 5.2;
-    const mouth = box(w, mouthH, 3, tunnelDark, trash);
-    mouth.position.set(0, mouthH / 2, portalZ + 1.4);
+    const mouth = box(w, mouthH, 3.4, tunnelDark, trash);
+    mouth.position.set(0, mouthH / 2, depth + 1.7);
     lane.add(mouth);
     const lintelMat = new THREE.MeshStandardMaterial({ map: chev, roughness: 0.6 });
     trash.push(lintelMat);
     const lintel = box(w + 0.6, 0.55, 0.4, lintelMat, trash);
-    lintel.position.set(0, mouthH + 0.28, portalZ - 0.1);
+    lintel.position.set(0, mouthH + 0.28, depth - 0.1);
     lane.add(lintel);
     const signMat = new THREE.MeshBasicMaterial({ map: sign, side: THREE.DoubleSide });
-    trash.push(signMat);
     const signGeo = new THREE.PlaneGeometry(w * 0.8, w * 0.8 * (48 / 256));
-    trash.push(signGeo);
+    trash.push(signMat, signGeo);
     const sg = new THREE.Mesh(signGeo, signMat);
-    sg.position.set(0, mouthH + 1.05, portalZ - 0.35);
+    sg.position.set(0, mouthH + 1.05, depth - 0.35);
     sg.rotation.y = Math.PI; // face the pitch
     lane.add(sg);
-    const above = box(w + 0.6, Math.max(0.5, rise - mouthH - 0.6), 0.6, concrete, trash);
-    above.position.set(0, mouthH + 0.55 + Math.max(0.5, rise - mouthH - 0.6) / 2, portalZ);
+    const aboveH = Math.max(0.5, e.backY - mouthH - 0.6);
+    const above = box(w + 0.6, aboveH, 0.6, concrete, trash);
+    above.position.set(0, mouthH + 0.55 + aboveH / 2, depth);
     lane.add(above);
 
-    // One ambulance on standby, parked in the mouth of the first lane —
-    // which is where they wait on a matchday, facing out onto the pitch.
+    // One ambulance on standby, parked inside the first ramp — in the stand,
+    // not on the grass — nose out, ready to go.
     if (k === 0) {
       const amb = ambulance(trash);
       amb.rotation.y = Math.PI / 2; // nose toward the pitch (local -z)
-      amb.position.set(0, 0.08, 6);
+      amb.position.set(0, 0.08, Math.min(depth - 3.8, 7.5));
       lane.add(amb);
     }
     group.add(lane);
   });
 
-  // ---- the concourse wall between tiers ------------------------------------
-  // The back of each tier up to the underside of the one above it. Without it
-  // the gap under an overhanging tier looks straight through the building.
+  // ---- between the tiers: concourse floor, soffit and back wall -----------
+  // Under an overhanging tier there is a concourse: a floor, the underside of
+  // the tier above, and a wall at the back of it. Without them the gap looks
+  // straight through the building. The hospitality boxes live in here.
+  const CONCOURSE = 5;
   for (let t = 1; t < template.tiers.length; t++) {
     const below = tierEdges(template, t - 1);
     const above = tierEdges(template, t);
-    const top = above.frontY + (below.back + 0.3 - above.front) * Math.tan((template.tiers[t].rakeDeg * Math.PI) / 180) - 0.4;
-    if (top - below.backY < 0.8) continue;
-    const g = curtain(at, 0, 1, below.back + 0.3, below.backY - 0.2, top, 360);
-    trash.push(g);
-    const m = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: 0x3a3733, roughness: 0.95, side: THREE.DoubleSide }));
-    trash.push(m.material as THREE.Material);
-    group.add(m);
+    const rakeT = Math.tan((template.tiers[t].rakeDeg * Math.PI) / 180);
+    const under = (r: number): number => above.frontY + (r - above.front) * rakeT - 0.45;
+    const r0 = below.back + 0.2;
+    const r1 = below.back + CONCOURSE;
+    if (under(r0) - below.backY < 1) continue;
+    const floor = new THREE.Mesh(flatRing(at, r0, r1, below.backY - 0.05, below.backY - 0.05), floorMat);
+    const soffit = new THREE.Mesh(flatRing(at, above.front + 0.3, r1, under(above.front + 0.3), under(r1)), soffitMat);
+    const back = new THREE.Mesh(curtain(at, 0, 1, r1, below.backY - 0.1, under(r1) + 0.1, 360), soffitMat);
+    for (const m of [floor, soffit, back]) {
+      trash.push(m.geometry);
+      group.add(m);
+    }
   }
 
-  // ---- hospitality boxes -------------------------------------------------
+  // ---- hospitality boxes ---------------------------------------------------
+  // Real rooms: a glass front, white mullions and party walls, a lit interior
+  // four metres deep with a downlight strip, under the tier above.
+  const unit = new THREE.BoxGeometry(1, 1, 1);
+  trash.push(unit);
+  const posts: { x: number; y: number; z: number; sx: number; sy: number; sz: number; ry: number }[] = [];
   for (const band of details.boxes ?? []) {
     const t = band.underTier;
     if (t < 1 || t >= template.tiers.length) continue;
     const below = tierEdges(template, t - 1);
     const above = tierEdges(template, t);
-    const top = above.frontY + (below.back + 0.5 - above.front) * Math.tan((template.tiers[t].rakeDeg * Math.PI) / 180) - 0.5;
-    const y0 = below.backY + 0.1;
-    const y1 = Math.max(y0 + 2.2, top);
-    const tex = boxTexture();
-    tex.repeat.set(band.count, 1);
-    const mat = new THREE.MeshStandardMaterial({
-      map: tex,
-      emissive: 0xffffff,
-      emissiveMap: tex,
-      emissiveIntensity: 0.55,
-      roughness: 0.35,
-      metalness: 0.2,
-      side: THREE.DoubleSide,
-    });
-    const g = curtain(at, band.centerU - band.halfU, band.centerU + band.halfU, below.back + 0.25, y0, y1, 96);
-    trash.push(tex, mat, g);
-    group.add(new THREE.Mesh(g, mat));
-    // White fascia band running the length of the boxes, above the glass.
-    const fg = curtain(at, band.centerU - band.halfU - 0.004, band.centerU + band.halfU + 0.004, below.back - 0.05, y1, y1 + 0.7, 96);
+    const rakeT = Math.tan((template.tiers[t].rakeDeg * Math.PI) / 180);
+    const under = (r: number): number => above.frontY + (r - above.front) * rakeT - 0.45;
+    const gl = below.back + 0.3; // the glass line
+    const inner = gl + 4.2; // the back wall of the rooms
+    const y0 = below.backY;
+    const y1 = Math.min(y0 + 2.9, under(gl) - 0.05);
+    if (y1 - y0 < 2) continue;
+    const u0 = band.centerU - band.halfU;
+    const u1 = band.centerU + band.halfU;
+
+    const interior = boxInteriorTexture();
+    interior.repeat.set(band.count, 1);
+    const intMat = new THREE.MeshStandardMaterial({ map: interior, emissive: 0xffffff, emissiveMap: interior, emissiveIntensity: 0.7, roughness: 0.8, side: THREE.DoubleSide });
+    const glassMat = new THREE.MeshStandardMaterial({ color: 0xa9c9da, roughness: 0.04, metalness: 0.5, transparent: true, opacity: 0.28, side: THREE.DoubleSide, depthWrite: false });
+    const ceilMat = new THREE.MeshStandardMaterial({ color: 0xfff3dc, emissive: 0xffe6b8, emissiveIntensity: 0.6, side: THREE.DoubleSide });
+    trash.push(interior, intMat, glassMat, ceilMat);
+    const backWall = curtain(at, u0, u1, inner, y0, y1, 96);
+    const glassFront = curtain(at, u0, u1, gl, y0 + 0.02, y1, 96);
+    const ceiling = flatRing(at, gl, inner, y1, y1, u0, u1);
+    const floorG = flatRing(at, gl, inner, y0 + 0.01, y0 + 0.01, u0, u1);
+    trash.push(backWall, glassFront, ceiling, floorG);
+    group.add(new THREE.Mesh(backWall, intMat), new THREE.Mesh(ceiling, ceilMat), new THREE.Mesh(floorG, floorMat), new THREE.Mesh(glassFront, glassMat));
+    // White fascia band above the glass, running the length of the boxes.
+    // Up to the soffit, so there is no slot of sky between the two.
+    const fg = curtain(at, u0 - 0.003, u1 + 0.003, gl - 0.05, y1, Math.max(y1 + 0.6, under(gl - 0.05) + 0.05), 96);
     trash.push(fg);
     group.add(new THREE.Mesh(fg, fasciaWhite));
-  }
-
-  // ---- the royal box around the VIP zone ----------------------------------
-  for (const z of details.zones ?? []) {
-    if (z.kind !== 'vip') continue;
-    const tier = z.tiers[0] ?? 1;
-    const e = tierEdges(template, tier);
-    const gold = new THREE.MeshStandardMaterial({ color: 0xc9a13a, roughness: 0.35, metalness: 0.7, emissive: 0x3a2a08, emissiveIntensity: 0.4 });
-    const glass = new THREE.MeshStandardMaterial({ color: 0xbfd8e6, roughness: 0.05, metalness: 0.2, transparent: true, opacity: 0.28, side: THREE.DoubleSide });
-    trash.push(gold, glass);
-    // Glass screen along the front of the box, with a gold rail on top.
-    const gg = curtain(at, z.centerU - z.halfU, z.centerU + z.halfU, e.front - 0.35, e.frontY - 0.2, e.frontY + 1.25, 24);
-    trash.push(gg);
-    group.add(new THREE.Mesh(gg, glass));
-    const rg = curtain(at, z.centerU - z.halfU, z.centerU + z.halfU, e.front - 0.4, e.frontY + 1.25, e.frontY + 1.45, 24);
-    trash.push(rg);
-    group.add(new THREE.Mesh(rg, gold));
-    // Gold side fins framing the box, and a canopy over the back rows.
-    for (const s of [-1, 1]) {
-      const p0 = at(z.centerU + s * z.halfU, e.front);
-      const p1 = at(z.centerU + s * z.halfU, e.back);
-      const len = Math.hypot(p1.x - p0.x, p1.z - p0.z);
-      // Low gold partitions, not walls: the box is open to the pitch, and the
-      // broadcast camera sits right beside it.
-      const fin = box(0.12, 1.1, len, gold, trash);
-      fin.position.set((p0.x + p1.x) / 2, (e.frontY + e.backY) / 2 + 0.55, (p0.z + p1.z) / 2);
-      fin.rotation.y = Math.atan2(p1.x - p0.x, p1.z - p0.z);
-      fin.rotation.x = -Math.atan2(e.backY - e.frontY, len);
-      group.add(fin);
+    // Mullions at every box boundary, and a party wall back from each.
+    for (let b = 0; b <= band.count; b++) {
+      const u = u0 + ((u1 - u0) * b) / band.count;
+      const pf = at(u, gl);
+      const pb = at(u, inner);
+      const ry = Math.atan2(pb.x - pf.x, pb.z - pf.z);
+      const mid = at(u, (gl + inner) / 2);
+      posts.push({ x: pf.x, y: (y0 + y1) / 2, z: pf.z, sx: 0.14, sy: y1 - y0, sz: 0.14, ry });
+      posts.push({ x: mid.x, y: (y0 + y1) / 2, z: mid.z, sx: 0.12, sy: y1 - y0, sz: inner - gl, ry });
+      // A slimmer mullion in the middle of each pane.
+      if (b < band.count) {
+        const um = u + (u1 - u0) / band.count / 2;
+        const pm = at(um, gl);
+        posts.push({ x: pm.x, y: (y0 + y1) / 2, z: pm.z, sx: 0.06, sy: y1 - y0, sz: 0.06, ry });
+      }
     }
-    const cg = curtain(at, z.centerU - z.halfU, z.centerU + z.halfU, e.back - 4, e.backY + 3.2, e.backY + 3.4, 24);
-    trash.push(cg);
-    group.add(new THREE.Mesh(cg, gold));
+  }
+  if (posts.length) {
+    const postMesh = new THREE.InstancedMesh(unit, fasciaWhite, posts.length);
+    const d = new THREE.Object3D();
+    posts.forEach((q, i) => {
+      d.position.set(q.x, q.y, q.z);
+      d.rotation.set(0, q.ry, 0);
+      d.scale.set(q.sx, q.sy, q.sz);
+      d.updateMatrix();
+      postMesh.setMatrixAt(i, d.matrix);
+    });
+    postMesh.instanceMatrix.needsUpdate = true;
+    postMesh.frustumCulled = false;
+    trash.push({ dispose: () => postMesh.dispose() });
+    group.add(postMesh);
   }
 
   // ---- big screens --------------------------------------------------------
-  const screens: VenueBuild['screens'] = [];
-  const topTier = template.tiers.length - 1;
-  const te = tierEdges(template, topTier);
-  for (const sc of details.screens ?? []) {
+  const screens = details.screens ?? [];
+  let screen: VenueBuild['screen'] = null;
+  if (screens.length) {
     const canvas = document.createElement('canvas');
     canvas.width = SCREEN_PX.w;
     canvas.height = SCREEN_PX.h;
@@ -372,30 +478,67 @@ export function buildVenueDetails(template: StadiumTemplate, map: SeatMap, shado
     // picture should read the same at noon and at midnight.
     const face = new THREE.MeshBasicMaterial({ map: texture, toneMapped: false });
     const frame = new THREE.MeshStandardMaterial({ color: 0x15171c, roughness: 0.6, metalness: 0.4 });
-    const faceGeo = new THREE.PlaneGeometry(sc.widthM, sc.heightM);
-    trash.push(texture, face, frame, faceGeo);
-    // On the back of the top tier, just over the last row's heads, under the roof.
-    const p = at(sc.centerU, te.back + 0.2);
-    const holder = new THREE.Group();
-    holder.position.set(p.x, te.backY + 0.7 + sc.heightM / 2, p.z);
-    holder.rotation.y = Math.atan2(-p.nx, -p.nz); // face the pitch
-    const back = box(sc.widthM + 0.8, sc.heightM + 0.8, 0.9, frame, trash);
-    back.position.z = -0.5;
-    holder.add(back);
-    const faceMesh = new THREE.Mesh(faceGeo, face);
-    faceMesh.position.z = 0.0;
-    holder.add(faceMesh);
-    group.add(holder);
-    screens.push({ canvas, texture });
+    trash.push(texture, face, frame);
+    screen = { canvas, texture };
+    const topTier = template.tiers.length - 1;
+    const te = tierEdges(template, topTier);
+    for (const sc of screens) {
+      const faceGeo = new THREE.PlaneGeometry(sc.widthM, sc.heightM);
+      trash.push(faceGeo);
+      // On the back of the top tier, just over the last row's heads, under the roof.
+      const p = at(sc.centerU, te.back + 0.2);
+      const holder = new THREE.Group();
+      holder.position.set(p.x, te.backY + 0.7 + sc.heightM / 2, p.z);
+      holder.rotation.y = Math.atan2(-p.nx, -p.nz); // face the pitch
+      const back = box(sc.widthM + 0.8, sc.heightM + 0.8, 0.9, frame, trash);
+      back.position.z = -0.5;
+      holder.add(back, new THREE.Mesh(faceGeo, face));
+      group.add(holder);
+    }
   }
 
   void map;
   return {
     object: group,
     disposables: trash,
-    screens,
+    screen,
+    screenCount: screens.length,
     screensChanged() {
-      for (const s of screens) s.texture.needsUpdate = true;
+      if (screen) screen.texture.needsUpdate = true;
     },
   };
+}
+
+/**
+ * A horizontal-ish band between two offsets of the plan curve (optionally only
+ * between u0 and u1), with its own height at each edge — a floor, a ceiling,
+ * or a sloping soffit.
+ */
+function flatRing(
+  at: (u: number, off: number) => { x: number; z: number },
+  rIn: number,
+  rOut: number,
+  yIn: number,
+  yOut: number,
+  u0 = 0,
+  u1 = 1,
+  segs = 240,
+): THREE.BufferGeometry {
+  const pos: number[] = [];
+  const idx: number[] = [];
+  for (let i = 0; i <= segs; i++) {
+    const u = u0 + ((u1 - u0) * i) / segs;
+    const a = at(u, rIn);
+    const b = at(u, rOut);
+    pos.push(a.x, yIn, a.z, b.x, yOut, b.z);
+  }
+  for (let i = 0; i < segs; i++) {
+    const k = i * 2;
+    idx.push(k, k + 1, k + 2, k + 1, k + 3, k + 2);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setIndex(idx);
+  g.computeVertexNormals();
+  return g;
 }

@@ -43,8 +43,12 @@ import { pyroLoudness, type AccessoryKind, type AccessoryLevel, type AccessoryLe
 import { buildJewelCrown } from './jewelCrown';
 import { buildJewel } from './jewel';
 import { buildVenueDetails, type VenueBuild } from './venue';
+import { buildPremium } from './premium';
 import { paintScreen, type ScreenMode } from './screenPicture';
 import { curveSampler, laneLines, noTifoMask, seatZones } from '../../core/venueDetails';
+
+/** A card that is not there: premium seats show their chair instead. */
+const ZERO_MATRIX = new THREE.Matrix4().makeScale(0, 0, 0);
 
 /** The rebuilt Jewel (King Abdullah Sports City). The earlier one keeps its own look. */
 const JEWEL_ID = 'jewel-jeddah-60k';
@@ -165,6 +169,12 @@ export class MatchDaySimulator {
     [0xe8804a, 0xf09a60, 0xe36f3a, 0xf2b07a, 0xeb8e55].map((c) => new THREE.Color(c)),
   ];
   private venue: VenueBuild | null = null;
+  private readonly cardDummy = new THREE.Object3D();
+  private seatMatrixDirty = false;
+  private dirtyLo = Infinity;
+  private dirtyHi = -Infinity;
+  /** 1 where a premium seat's card is currently shown (see setCardShown). */
+  private cardState: Uint8Array | null = null;
   private screen: { mode: ScreenMode; nameEn: string; nameAr: string; image?: CanvasImageSource & { width: number; height: number } } = { mode: 'stadium', nameEn: '', nameAr: '' };
   private screenDirty = false;
   private lastScreenPaint = -1;
@@ -292,7 +302,7 @@ export class MatchDaySimulator {
     this.scene.add(this.seats);
 
     // Subsystems (Phases 2-7). Each is independently toggleable from the overlay.
-    this.crowd = buildCrowd(this.map, this.store);
+    this.crowd = buildCrowd(this.map, this.store, this.noTifo);
     this.scene.add(this.crowd.object);
     this.pitchside = buildPitchside(this.settings.shadows);
     this.scene.add(this.pitchside.object);
@@ -359,6 +369,10 @@ export class MatchDaySimulator {
       this.venue = buildVenueDetails(this.template, this.map, this.settings.shadows);
       this.scene.add(this.venue.object);
       this.disposables.push(...this.venue.disposables);
+      // Premium seats are chairs, with their balustrades, partitions and the royal box.
+      const premium = buildPremium(this.template, this.map, this.settings.shadows);
+      this.scene.add(premium.object);
+      this.disposables.push(...premium.disposables);
       this.screen.nameEn = this.template.name;
       this.paintScreens();
     }
@@ -399,6 +413,7 @@ export class MatchDaySimulator {
       if (indices === 'all') this.recolorAll();
       else for (const i of indices) this.recolor(i);
       this.seats.instanceColor!.needsUpdate = true;
+      this.flushSeatMatrix();
       if (this.screen.mode === 'tifo') this.screenDirty = true;
     };
     this.onPaletteCb = (): void => {
@@ -467,10 +482,53 @@ export class MatchDaySimulator {
   }
   private recolor(i: number): void {
     this.seats.setColorAt(i, this.colorFor(i));
+    // A premium seat is a chair (see premium.ts). Its card only appears when
+    // it is part of the tifo; empty, the chair is what you see.
+    if (this.zoneCodes && this.zoneCodes[i]) this.setCardShown(i, this.cardShown(i));
+  }
+  /**
+   * Show or hide one premium seat's card. Only a real change touches the
+   * matrix buffer, and only the span that changed is uploaded — a palette
+   * change or the end of a reveal used to re-send all 60k matrices.
+   */
+  private setCardShown(i: number, show: boolean): void {
+    const st = this.cardState!;
+    const want = show ? 1 : 0;
+    if (st[i] === want) return;
+    st[i] = want;
+    this.seats.setMatrixAt(i, show ? this.cardMatrix(i) : ZERO_MATRIX);
+    if (i < this.dirtyLo) this.dirtyLo = i;
+    if (i > this.dirtyHi) this.dirtyHi = i;
+    this.seatMatrixDirty = true;
   }
   recolorAll(): void {
     for (let i = 0; i < this.map.count; i++) this.recolor(i);
     if (this.seats.instanceColor) this.seats.instanceColor.needsUpdate = true;
+    this.flushSeatMatrix();
+  }
+  private cardShown(i: number): boolean {
+    return this.store.cells[i] !== 0 && !(this.noTifo && this.noTifo[i] === 1);
+  }
+  /** Where a seat's card sits: 0.9 m up, facing the pitch, tilted back a touch. */
+  private cardMatrix(i: number): THREE.Matrix4 {
+    const d = this.cardDummy;
+    const yy = this.map.pos3[i * 3 + 1] + 0.9;
+    d.position.set(this.map.pos3[i * 3], yy, this.map.pos3[i * 3 + 2]);
+    d.rotation.set(0, 0, 0);
+    d.lookAt(0, yy, 0);
+    d.rotateX(-0.22);
+    d.updateMatrix();
+    return d.matrix;
+  }
+  private flushSeatMatrix(): void {
+    if (!this.seatMatrixDirty) return;
+    this.seatMatrixDirty = false;
+    const m = this.seats.instanceMatrix;
+    m.clearUpdateRanges();
+    m.addUpdateRange(this.dirtyLo * 16, (this.dirtyHi - this.dirtyLo + 1) * 16);
+    m.needsUpdate = true;
+    this.dirtyLo = Infinity;
+    this.dirtyHi = -Infinity;
   }
 
   private buildLights(): void {
@@ -575,7 +633,10 @@ export class MatchDaySimulator {
       dummy.lookAt(0, yy, 0);
       dummy.rotateX(-0.22);
       dummy.updateMatrix();
-      mesh.setMatrixAt(i, dummy.matrix);
+      const premium = this.zoneCodes !== null && this.zoneCodes[i] !== 0;
+      const chair = premium && !this.cardShown(i);
+      if (premium) (this.cardState ??= new Uint8Array(this.map.count))[i] = chair ? 0 : 1;
+      mesh.setMatrixAt(i, chair ? ZERO_MATRIX : dummy.matrix);
       mesh.setColorAt(i, this.colorFor(i));
     }
     mesh.instanceMatrix.needsUpdate = true;
@@ -727,13 +788,14 @@ export class MatchDaySimulator {
   // ---- effects (Phase 5) ----
   /** Does this ground have big screens? (The overlay only offers the control if so.) */
   hasScreens(): boolean {
-    return (this.venue?.screens.length ?? 0) > 0;
+    return !!this.venue?.screen;
   }
   /**
    * What the big screens show. `names` is the ground's name in both languages
    * (the simulator has no i18n of its own); `image` is only read for 'image'.
    */
   setScreen(mode: ScreenMode, names?: { en: string; ar: string }, image?: CanvasImageSource & { width: number; height: number }): void {
+    if (this.disposed) return; // an image that finished loading after Match Day closed
     this.screen.mode = mode;
     if (names) {
       this.screen.nameEn = names.en;
@@ -746,7 +808,7 @@ export class MatchDaySimulator {
     return this.screen.mode;
   }
   private paintScreens(): void {
-    if (!this.venue || this.venue.screens.length === 0) return;
+    if (!this.venue?.screen) return;
     this.screenDirty = false;
     const src = {
       mode: this.screen.mode,
@@ -757,7 +819,7 @@ export class MatchDaySimulator {
       cells: this.store.cells,
       image: this.screen.image,
     };
-    for (const sc of this.venue.screens) paintScreen(sc.canvas, src);
+    paintScreen(this.venue.screen.canvas, src);
     this.venue.screensChanged();
   }
 
@@ -889,11 +951,16 @@ export class MatchDaySimulator {
   /** Wet-look pitch: drop the turf roughness so the sun + floodlights glint off it. */
   setWetPitch(on: boolean): void {
     if (!this.pitchMat) return;
-    this.pitchMat.roughness = on ? 0.1 : 0.92;
+    // A rim array hung from a hand-built roof sits close over the grass, and
+    // four representative spotlights standing in for 150 lamps mirror in a
+    // near-glass pitch as four blinding discs. A wet pitch there is glossy,
+    // not a mirror: the sheen spreads across the grass instead.
+    const gloss = this.template.lighting?.mount ? 0.4 : undefined;
+    this.pitchMat.roughness = on ? (gloss ?? 0.1) : 0.92;
     this.pitchMat.metalness = on ? 0.5 : 0;
     this.pitchMat.color.set(on ? 0x123018 : 0x1f7a3a);
     this.pitchMat.needsUpdate = true;
-    this.pitchside.setWet(on); // the visible mown-stripe layer must go glossy too
+    this.pitchside.setWet(on, gloss); // the visible mown-stripe layer must go glossy too
     dbg('setWetPitch', on, '-> pitch roughness', this.pitchMat.roughness, 'metalness', this.pitchMat.metalness);
   }
 
@@ -2011,8 +2078,12 @@ export class MatchDaySimulator {
         tmp.copy(EMPTY_COLOR).lerp(full, a);
         this.seats.setColorAt(i, tmp);
       }
+      // A premium seat's card is held up or put down; in between it is the
+      // chair — never a dark card floating over one.
+      if (this.zoneCodes && this.zoneCodes[i]) this.setCardShown(i, a >= 0.5 && this.cardShown(i));
     }
     if (this.seats.instanceColor) this.seats.instanceColor.needsUpdate = true;
+    this.flushSeatMatrix();
   }
 
   private resize(): void {

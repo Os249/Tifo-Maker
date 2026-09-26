@@ -217,6 +217,9 @@ export function tierEdges(template: StadiumTemplate, tier: number): { front: num
   };
 }
 
+/** Editor units across the whole unrolled bowl (core/seatmap EDITOR_WIDTH): x = u * this. */
+const EDITOR_W = 4000;
+
 /** Something to mark on the flat design view: a zone's box, or a lane's gap. */
 export interface VenueMark {
   kind: SeatZoneKind | 'lane';
@@ -235,31 +238,55 @@ export interface VenueMark {
  */
 export function venueMarks(map: SeatMap, template: StadiumTemplate): VenueMark[] {
   const out: VenueMark[] = [];
+  const W = EDITOR_W;
+  /** A box in "u relative to a centre" space, split in two if it crosses the seam. */
+  const push = (kind: VenueMark['kind'], centerU: number, r0: number, r1: number, y0: number, y1: number): void => {
+    const a = (centerU + r0) * W;
+    const b = (centerU + r1) * W;
+    if (a < 0) {
+      out.push({ kind, x0: a + W, y0, x1: W, y1 });
+      out.push({ kind, x0: 0, y0, x1: b, y1 });
+    } else if (b > W) {
+      out.push({ kind, x0: a, y0, x1: W, y1 });
+      out.push({ kind, x0: 0, y0, x1: b - W, y1 });
+    } else {
+      out.push({ kind, x0: a, y0, x1: b, y1 });
+    }
+  };
+  const rel = (u: number, c: number): number => {
+    let v = u - c;
+    if (v > 0.5) v -= 1;
+    if (v < -0.5) v += 1;
+    return v;
+  };
   const zones = template.details?.zones ?? [];
   if (zones.length) {
     const codes = seatZones(map, template);
     for (const kind of ZONE_KINDS) {
+      const zone = zones.find((z) => z.kind === kind);
+      if (!zone) continue;
       const code = ZONE_CODE[kind];
-      let x0 = Infinity;
+      let r0 = Infinity;
+      let r1 = -Infinity;
       let y0 = Infinity;
-      let x1 = -Infinity;
       let y1 = -Infinity;
       for (let i = 0; i < map.count; i++) {
         if (codes[i] !== code) continue;
-        const x = map.xy[i * 2];
+        const r = rel(map.uv[i * 2], zone.centerU);
+        if (r < r0) r0 = r;
+        if (r > r1) r1 = r;
         const y = map.xy[i * 2 + 1];
-        if (x < x0) x0 = x;
-        if (x > x1) x1 = x;
         if (y < y0) y0 = y;
         if (y > y1) y1 = y;
       }
-      if (x0 <= x1) out.push({ kind, x0, y0, x1, y1 });
+      if (r0 <= r1) push(kind, zone.centerU, r0, r1, y0, y1);
     }
   }
   for (const l of laneLines(template)) {
     const w = l.lane.widthM / 2;
     let sum = 0;
     let n = 0;
+    let ref = -1;
     let y0 = Infinity;
     let y1 = -Infinity;
     for (let i = 0; i < map.count; i++) {
@@ -269,7 +296,11 @@ export function venueMarks(map: SeatMap, template: StadiumTemplate): VenueMark[]
       if (rx * l.dx + rz * l.dz < -2) continue;
       const across = Math.abs(rx * -l.dz + rz * l.dx);
       if (across > w + 1.5) continue;
-      sum += map.xy[i * 2];
+      const u = map.uv[i * 2];
+      if (ref < 0) ref = u;
+      // Averaged relative to the first seat found, so a lane at the seam
+      // does not average to the middle of the stadium.
+      sum += rel(u, ref);
       n++;
       const y = map.xy[i * 2 + 1];
       if (y < y0) y0 = y;
@@ -277,8 +308,8 @@ export function venueMarks(map: SeatMap, template: StadiumTemplate): VenueMark[]
     }
     if (n === 0) continue;
     // The seats either side are symmetric about the gap, so their mean is its middle.
-    const cx = sum / n;
-    out.push({ kind: 'lane', x0: cx, y0, x1: cx, y1 });
+    const cu = (((ref + sum / n) % 1) + 1) % 1;
+    out.push({ kind: 'lane', x0: cu * W, y0, x1: cu * W, y1 });
   }
   return out;
 }

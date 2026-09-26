@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import type { StadiumTemplate } from '../../core/types';
 import { buildRoof } from './roof';
 import { buildFacade } from './facade';
-import { inLane, laneLines } from '../../core/venueDetails';
+import { inLane, laneLines, type LaneLine } from '../../core/venueDetails';
 
 /**
  * Match Day Simulator — extruded stand architecture (Phase 1).
@@ -88,6 +88,61 @@ function strip(inner: Pt[], outer: Pt[], keep?: boolean[]): THREE.BufferGeometry
   return g;
 }
 
+/**
+ * Like strip(), but with vehicle lanes cut out exactly: every quad is clipped
+ * against the side line of the lane it straddles (Sutherland-Hodgman against
+ * one plane), so the cut edge is the lane's own edge whatever the ring spacing.
+ * Only used on a tier a lane runs through.
+ */
+function clippedStrip(inner: Pt[], outer: Pt[], lanes: LaneLine[], keep?: boolean[]): THREE.BufferGeometry {
+  const n = inner.length;
+  const out: number[] = [];
+  // Signed distance past the lane's side line (positive = outside the lane).
+  const sideDist = (l: LaneLine, q: Pt, side: number): number => {
+    const rx = q[0] - l.x;
+    const rz = q[2] - l.z;
+    return side * (rx * -l.dz + rz * l.dx) - l.lane.widthM / 2;
+  };
+  const inAny = (q: Pt): LaneLine | null => {
+    for (const l of lanes) if (inLane([l], l.lane.tier, q[0], q[2])) return l;
+    return null;
+  };
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n;
+    if (keep && (!keep[i] || !keep[j])) continue;
+    let poly: Pt[] = [inner[i], outer[i], outer[j], inner[j]];
+    const hit = poly.map(inAny);
+    const lane = hit.find((h) => h) ?? null;
+    if (lane) {
+      if (hit.every((h) => h)) continue; // wholly inside the lane
+      // Which side of the lane this quad is on: the side its outside corners are.
+      const outsideCorner = poly[hit.findIndex((h) => !h)];
+      const across = (outsideCorner[0] - lane.x) * -lane.dz + (outsideCorner[2] - lane.z) * lane.dx;
+      const side = across >= 0 ? 1 : -1;
+      const next: Pt[] = [];
+      for (let k = 0; k < poly.length; k++) {
+        const P = poly[k];
+        const Q = poly[(k + 1) % poly.length];
+        const dp = sideDist(lane, P, side);
+        const dq = sideDist(lane, Q, side);
+        if (dp >= 0) next.push(P);
+        if ((dp >= 0) !== (dq >= 0)) {
+          const t = dp / (dp - dq);
+          next.push([P[0] + (Q[0] - P[0]) * t, P[1] + (Q[1] - P[1]) * t, P[2] + (Q[2] - P[2]) * t]);
+        }
+      }
+      poly = next;
+      if (poly.length < 3) continue;
+    }
+    // Fan-triangulate with the same winding as strip(): a, c, d / a, d, b.
+    for (let k = 1; k < poly.length - 1; k++) out.push(...poly[0], ...poly[k], ...poly[k + 1]);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(out, 3));
+  g.computeVertexNormals();
+  return g;
+}
+
 export function buildStands(template: StadiumTemplate, shadows: boolean): THREE.Group {
   const group = new THREE.Group();
   const { a, b, exponent: p } = template.plan;
@@ -136,21 +191,23 @@ export function buildStands(template: StadiumTemplate, shadows: boolean): THREE.
     const frontY = tier.baseElevation - tier.rowDepth * rakeTan * 0.5;
     const backY = tier.baseElevation + lastRow * tier.rowDepth * rakeTan + tier.rowDepth * rakeTan * 0.5;
 
-    let tierKeep = keep;
-    if (lanes.some((l) => l.lane.tier === idx)) {
-      const mid = ring(a, b, p, (frontRadial + backRadial) / 2, 0);
-      const front = ring(a, b, p, frontRadial, 0);
-      tierKeep = mid.map((pt, i) => (keep ? keep[i] : true) && !inLane(lanes, idx, pt[0], pt[2]) && !inLane(lanes, idx, front[i][0], front[i][2]));
+    const laneHere = lanes.filter((l) => l.lane.tier === idx);
+    if (laneHere.length) {
+      // Cut exactly along the lane's side lines, so the concrete stops where
+      // the seats stop and meets the ramp's walls — not a ring sample or two
+      // either side of them, which left back-row seats floating over nothing.
+      add(clippedStrip(ring(a, b, p, frontRadial, frontY), ring(a, b, p, backRadial, backY), laneHere, keep), concrete, true, true);
+    } else {
+      add(strip(ring(a, b, p, frontRadial, frontY), ring(a, b, p, backRadial, backY), keep), concrete, true, true);
     }
-
-    // Sloped seating deck.
-    add(strip(ring(a, b, p, frontRadial, frontY), ring(a, b, p, backRadial, backY), tierKeep), concrete, true, true);
 
     // Vertical riser under the front of this tier, down to the previous tier's
     // top (tier 0 goes to ground). Closes the step between tiers.
     const floor = idx === 0 ? 0 : Math.max(0, topBackY - 0.2);
     if (frontY - floor > 0.4) {
-      add(strip(ring(a, b, p, frontRadial, floor), ring(a, b, p, frontRadial, frontY), tierKeep), structure, false, true);
+      const lo = ring(a, b, p, frontRadial, floor);
+      const hi = ring(a, b, p, frontRadial, frontY);
+      add(laneHere.length ? clippedStrip(lo, hi, laneHere, keep) : strip(lo, hi, keep), structure, false, true);
     }
 
     rowsBefore += tier.rows;
