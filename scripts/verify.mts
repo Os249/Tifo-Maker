@@ -778,6 +778,34 @@ import { buildStadium as siBuild } from '../src/core/stadiumFit';
 }
 
 // ---------------------------------------------------------------------------
+// Recording in the cinematic flyover: the camera move a clip gets.
+{
+  const { flyover, flyoverPeriodFor, FLY_DURATION } = await import('../src/render/simulator/cameras');
+  const b = { ax: 92, bz: 70, ty: 30 };
+  // How far out, as a share of the bowl: the orbit is an ellipse on the
+  // stadium's own footprint, so metres alone would compare a sideline with an end.
+  const dist = (s: { position: number[] }) => Math.hypot(s.position[0] / b.ax, s.position[2] / b.bz);
+  // Short clips keep the live pace; long ones get exactly one orbit.
+  const periods = [6, 9, 15, 18, 20, 30].map((sec) => flyoverPeriodFor(sec));
+  console.log(`flyover clip: pass length for 6/9/15/18/20/30 s clips = ${periods.join('/')} s`);
+  if (periods.join() !== [18, 18, 18, 18, 20, 30].join()) throw new Error('a clip must never orbit faster than the live flyover, and a long one gets one full orbit');
+  // A clip starts at the top of the pass: wide and high, sweeping in.
+  for (const P of [FLY_DURATION, 30]) {
+    const start = flyover(0, b, P), mid = flyover(P / 2, b, P), end = flyover(P, b, P);
+    if (!(dist(start) > dist(mid) && start.position[1] > mid.position[1])) throw new Error(`the flyover must start wide and high and sweep in (period ${P})`);
+    // One full orbit ends where it began, so a long clip loops cleanly.
+    if (start.position.some((v, i) => Math.abs(v - end.position[i]) > 1e-6)) throw new Error(`one pass must end where it began (period ${P})`);
+  }
+  // A 9 s clip ends at its closest to the stands: the half the reveal lands in.
+  const nine = flyoverPeriodFor(9);
+  const closeAtEnd = dist(flyover(9, b, nine)) < dist(flyover(4.5, b, nine)) && dist(flyover(4.5, b, nine)) < dist(flyover(0, b, nine));
+  console.log('flyover clip: a 9 s clip closes in all the way to its last frame', closeAtEnd);
+  if (!closeAtEnd) throw new Error('a 9 s flyover clip must keep closing in');
+  // Time before the pass started (a frame drawn a moment early) is still a camera, not NaN.
+  if (flyover(-0.5, b, nine).position.some((v) => !Number.isFinite(v))) throw new Error('flyover before its start must not produce NaN');
+}
+
+// ---------------------------------------------------------------------------
 // Community filters: what a design "is", derived rather than typed.
 {
   const { COLOUR_FAMILIES, clubFilterOptions, clubId, colourSlug, designFacets, paletteColours } =

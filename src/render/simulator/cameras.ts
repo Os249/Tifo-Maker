@@ -95,7 +95,23 @@ export function seatShot(map: SeatMap, which: 'crowd' | 'ultra'): SimShot {
   };
 }
 
-const FLY_DURATION = 18; // seconds per loop
+/** Seconds per loop of the live flyover. */
+export const FLY_DURATION = 18;
+
+/**
+ * How long one pass of the flyover takes in a clip of `seconds`.
+ *
+ * A clip starts at the top of the pass: wide and high, sweeping in towards the
+ * tifo. Up to 18 s that is the live flyover's own pace, so a 9 s clip is the
+ * first half of a pass and ends closest to the stands, which is where a reveal
+ * is best seen. A longer clip gets exactly one full orbit, so a 20 or 30 s
+ * drum call ends where it began and loops cleanly when posted. It never goes
+ * faster than the live pace: a camera whipping round a bowl in six seconds is
+ * a ride, not a shot.
+ */
+export function flyoverPeriodFor(seconds: number): number {
+  return Math.max(FLY_DURATION, seconds);
+}
 
 /**
  * Camera state for the cinematic flyover at a given elapsed time (loops).
@@ -103,9 +119,11 @@ const FLY_DURATION = 18; // seconds per loop
  * Pass `bounds` so the orbit is sized to the actual bowl — a fixed 165 m radius
  * flies ~100 m outside a compact 25k ground and shows only its back wall. The
  * orbit is elliptical (ax/bz) so it tracks the stadium's real footprint.
+ * `period` is the seconds per loop (a recorded clip sets its own).
  */
-export function flyover(elapsed: number, bounds?: BowlBounds): SimShot {
-  const t = (elapsed % FLY_DURATION) / FLY_DURATION;
+export function flyover(elapsed: number, bounds?: BowlBounds, period = FLY_DURATION): SimShot {
+  const P = Math.max(1, period);
+  const t = (((elapsed % P) + P) % P) / P;
   const ang = t * Math.PI * 2;
   const ease = Math.sin(t * Math.PI); // 0 -> 1 -> 0
   if (bounds) {

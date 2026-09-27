@@ -1,6 +1,6 @@
 import type { SeatMap, StadiumTemplate } from '../../core/types';
 import type { DesignStore } from '../../core/design';
-import { MatchDaySimulator, type TimeOfDay } from './index';
+import { MatchDaySimulator, type RecordCamera, type TimeOfDay } from './index';
 import { probeQuality, type QualityTier } from './quality';
 import { DEFAULT_LEVELS, type SoundBus, type SoundLevels } from './atmosphere';
 import { REVEAL_MODES, type RevealMode } from './choreo';
@@ -503,6 +503,15 @@ const MDS_T: Record<string, { en: string; ar: string }> = {
   recPreview: { en: 'Preview', ar: 'معاينة' },
   recordVideo: { en: 'Record video', ar: 'سجّل فيديو' },
   previewing: { en: 'Previewing the reveal…', ar: 'معاينة الكشف…' },
+  recCamera: { en: 'Camera', ar: 'الكاميرا' },
+  recCamShow: { en: 'Show cameras', ar: 'كاميرات العرض' },
+  recCamFly: { en: 'Cinematic flyover', ar: 'تحليق سينمائي' },
+  'tip.recCamera': {
+    en: 'Show cameras cut between the TV gantry, the ultras\' end and the drone. Cinematic flyover films the whole clip in one move: it starts wide and high and sweeps in on the stands.',
+    ar: 'كاميرات العرض تنتقل بين منصة التلفزيون ومدرج الألتراس والدرون. التحليق السينمائي يصوّر المقطع كله بحركة وحدة: يبدأ بعيد وعالي ويقرّب على المدرجات.',
+  },
+  previewingFly: { en: 'Previewing the flyover clip…', ar: 'معاينة مقطع التحليق…' },
+  recordSavedFly: { en: 'Flyover video saved', ar: 'تم حفظ فيديو التحليق' },
 
   // ---- banners ----
   bannersTitle: { en: 'Banners', ar: 'اللافتات' },
@@ -887,7 +896,10 @@ export function openMatchDaySimulator(
 
   // Camera & Views
   const camSel = sel();
+  camSel.dataset.k = 'camera';
   const flyBtn = btn(L('flyover'));
+  flyBtn.dataset.k = 'flyover';
+  flyBtn.setAttribute('aria-pressed', 'false');
   const secCam = section(ICONS.camera, L('camCam'), true);
   secCam.body.append(field(L('view'), camSel), flyBtn);
 
@@ -1205,13 +1217,23 @@ export function openMatchDaySimulator(
   for (const f of ['24', '30', '60']) opt(recFps, f, f + ' fps', f === '30');
   const recRes = sel();
   for (const [v, l] of [['720', '720p'], ['1080', '1080p'], ['source', L('resSource')]]) opt(recRes, v, l, v === '720');
+  // What the camera does in the clip. It follows the live Flyover button, so
+  // someone watching the flyover and pressing Record gets what they are
+  // watching, and it can be set here on its own for a clip.
+  const recCam = sel();
+  recCam.dataset.k = 'rec-camera';
+  opt(recCam, 'show', L('recCamShow'), !state.fly);
+  opt(recCam, 'flyover', L('recCamFly'), state.fly);
   const previewBtn = btn(L('recPreview'));
   const recordBtn2 = btn(L('recordVideo'), 'primary');
+  recordBtn2.dataset.k = 'record-video';
+  previewBtn.dataset.k = 'rec-preview';
   const secRecord = section(ICONS.record, L('recTitle'), false);
   secRecord.body.append(
     field(L('recLength'), recDur),
     field(L('frameRate'), recFps),
     field(L('resolution'), recRes),
+    field(L('recCamera'), recCam),
     row(previewBtn, recordBtn2),
   );
 
@@ -1332,6 +1354,7 @@ export function openMatchDaySimulator(
     [fullBtn, 'tip.full'],
     [linkBtn, 'tip.link'],
     [flyBtn, 'tip.fly'],
+    [recCam, 'tip.recCamera'],
     [density, 'tip.density'],
     [todSel, 'tip.tod'],
     [weatherSel, 'tip.weather'],
@@ -1534,6 +1557,13 @@ export function openMatchDaySimulator(
       if (!hidden) toast(L('tifoBack'));
     };
     sim.setFlyover(state.fly);
+    // Whatever ends or starts the flyover (a camera picked, a banner looked
+    // at, a clip finishing), the button says so.
+    sim.onFlyover = (on) => {
+      state.fly = on;
+      flyBtn.classList.toggle('active', on);
+      flyBtn.setAttribute('aria-pressed', String(on));
+    };
     sim.setTimeOfDay(state.tod);
     sim.setWeather(state.weather);
     sim.setWetPitch(state.wet);
@@ -1766,7 +1796,10 @@ export function openMatchDaySimulator(
   flyBtn.addEventListener('click', () => {
     state.fly = !state.fly;
     flyBtn.classList.toggle('active', state.fly);
+    flyBtn.setAttribute('aria-pressed', String(state.fly));
     sim.setFlyover(state.fly);
+    // A clip films what is on screen.
+    recCam.value = state.fly ? 'flyover' : 'show';
   });
   crowdSel.addEventListener('change', () => {
     state.crowd = crowdSel.value as CrowdPreset;
@@ -2214,10 +2247,11 @@ export function openMatchDaySimulator(
     toast(L('toast.snapSaved'));
   });
   // Record the choreography reveal as a shareable WebM (the growth artifact).
-  const recOpts = (): { seconds: number; fps: number; height?: number } => ({
+  const recOpts = (): { seconds: number; fps: number; height?: number; camera: RecordCamera } => ({
     seconds: Number(recDur.value),
     fps: Number(recFps.value),
     height: recRes.value === 'source' ? undefined : Number(recRes.value),
+    camera: recCam.value === 'flyover' ? 'flyover' : 'show',
   });
   const doRecord = async (): Promise<void> => {
     if (sim.isRecording()) return;
@@ -2236,7 +2270,8 @@ export function openMatchDaySimulator(
     // The extension follows what the recorder actually produced. Naming a WebM
     // .mp4 because that is what we asked for would be the one outcome worse than
     // handing over a WebM.
-    a.download = `tifo-matchday.${clip.extension}`;
+    const flew = recOpts().camera === 'flyover';
+    a.download = `tifo-matchday${flew ? '-flyover' : ''}.${clip.extension}`;
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 3000);
     // Say how big it came out — the clip is sized to a budget rather than to a
@@ -2244,13 +2279,21 @@ export function openMatchDaySimulator(
     // and, when the browser could not give us H.264, that this one may not open
     // everywhere, rather than letting them find out when they try to post it.
     const size = `${(clip.blob.size / (1024 * 1024)).toFixed(1)} ${L('recordSize')}`;
-    toast(clip.universal ? `${L('recordSaved')} — ${size}` : `${L('recordSaved')} — ${size}. ${L('recordNotUniversal')}`);
+    const saved = L(flew ? 'recordSavedFly' : 'recordSaved');
+    toast(clip.universal ? `${saved} — ${size}` : `${saved} — ${size}. ${L('recordNotUniversal')}`);
   };
   // Preview plays the exact reveal (with the selected style) without recording.
   previewBtn.addEventListener('click', () => {
     nudgeDrumSound();
+    const o = recOpts();
+    // The same camera the clip will have: the flyover from the top of its
+    // pass, at the clip's pace, or the show's own cuts.
+    if (o.camera === 'flyover') {
+      const secs = state.reveal === 'drum-call' ? Math.max(o.seconds, Math.ceil(sim.autoChoreoSeconds())) : o.seconds;
+      sim.startClipFlyover(secs);
+    } else sim.setFlyover(false);
     sim.playAutoChoreo();
-    toast(L('previewing'));
+    toast(L(o.camera === 'flyover' ? 'previewingFly' : 'previewing'));
   });
   recordBtn2.addEventListener('click', () => void doRecord());
   recBtn.addEventListener('click', () => void doRecord());
