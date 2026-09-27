@@ -334,7 +334,7 @@ export function sameState(a: string, b: string): boolean {
  * URL that a browser treats as another origin, and it is the classic way this
  * check gets walked through.
  */
-const RETURN_ALLOW = /^\/(app|account|community|clubs)?(\/[A-Za-z0-9._~\-/]*)?$/;
+const RETURN_ALLOW = /^\/(app|account|community|clubs|projects)?(\/[A-Za-z0-9._~\-/]*)?$/;
 
 export function safeReturnTo(raw: unknown): string {
   const path = typeof raw === 'string' ? raw : '';

@@ -577,6 +577,7 @@ function chartCard(title, points, color){
    person, and you had to remember which was which. */
 var FUNNEL_STEP = {
   landed:         ['Opened the editor',      'arrived on /app'],
+  project_created:['Created a project',      'named it and picked a stadium'],
   paint_first:    ['Painted something',      'first brush stroke'],
   view_3d:        ['Looked at it in 3D',     'opened the stadium or split view'],
   draft_restored: ['Came back to their work','their draft was still here on a later visit'],

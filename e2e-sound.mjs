@@ -77,7 +77,7 @@ async function sim({ lang = 'en', w = 1280, h = 900, extra = [] } = {}) {
   const errs = [];
   p.on('pageerror', (e) => errs.push(e.message.slice(0, 160)));
   await p.addInitScript(TAP);
-  await p.goto(B + '/app?sim=1', { waitUntil: 'networkidle', timeout: 120000 });
+  await p.goto(B + '/app?new=1&sim=1', { waitUntil: 'networkidle', timeout: 120000 });
   await p.waitForSelector('.mds-overlay canvas', { timeout: 120000 });
   await p.waitForTimeout(4000);
   return [ctx, p, errs];
@@ -199,7 +199,7 @@ console.log('\n— on by default, at the chosen levels —');
   const errs = [];
   p.on('pageerror', (e) => errs.push(e.message.slice(0, 160)));
   await p.addInitScript(TAP);
-  await p.goto(B + '/app?sim=1', { waitUntil: 'networkidle', timeout: 120000 });
+  await p.goto(B + '/app?new=1&sim=1', { waitUntil: 'networkidle', timeout: 120000 });
   await p.waitForSelector('.mds-overlay canvas', { timeout: 120000 });
   await p.waitForTimeout(4000);
   const before = await p.evaluate(() => ({
@@ -594,7 +594,7 @@ console.log('\n— on a phone —');
   const errs = [];
   p.on('pageerror', (e) => errs.push(e.message.slice(0, 160)));
   await p.addInitScript(TAP);
-  await p.goto(B + '/app?sim=1', { waitUntil: 'networkidle', timeout: 120000 });
+  await p.goto(B + '/app?new=1&sim=1', { waitUntil: 'networkidle', timeout: 120000 });
   await p.waitForSelector('.mds-overlay canvas', { timeout: 120000 });
   await p.waitForTimeout(4500);
   await p.evaluate(() => document.querySelector('.mds-overlay .mds-bar .mds-icon').click());

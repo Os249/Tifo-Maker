@@ -617,9 +617,103 @@ async function runSuite(name: string, repo: DesignRepository, auth: AuthReposito
   assert.ok(aliceList.some((d) => d.id === id) && !aliceList.some((d) => d.id === forkId));
   assert.ok(bobList.some((d) => d.id === forkId) && !bobList.some((d) => d.id === id));
 
+  // ---- projects: the owner's own list, pinning, the Trash ----
+  {
+    const pjTok = await registerUser(app, 'projcarol');
+    const make = async (title: string, extra: Record<string, unknown> = {}): Promise<string> => {
+      const r = await app.inject({
+        method: 'POST', url: '/api/designs', headers: bearer(pjTok),
+        payload: { title, templateId: DEFAULT_TEMPLATE.id, templateVersion: DEFAULT_TEMPLATE.version, palette: PALETTE, cellsGzB64, thumbnailPngB64: PNG_1PX.toString('base64'), ...extra },
+      });
+      assert.equal(r.statusCode, 201, r.body);
+      return r.json().id as string;
+    };
+    type P = { id: string; title: string; pinned: boolean; deletedAt: string | null; origin: string | null; isPublic: boolean; hasThumbnail: boolean; updatedAt: string };
+    const list = async (): Promise<P[]> => {
+      const r = await app.inject({ method: 'GET', url: '/api/projects', headers: bearer(pjTok) });
+      assert.equal(r.statusCode, 200, r.body);
+      assert.equal(r.json().trashDays, 30, 'the page is told how long the Trash keeps things');
+      return r.json().projects as P[];
+    };
+    assert.equal((await app.inject({ method: 'GET', url: '/api/projects' })).statusCode, 401, 'projects are private: signed out gets nothing');
+
+    const plain = await make('Derby day');
+    const ai = await make('Blue wave', { origin: 'ai' });
+    const junk = await make('Odd one', { origin: '<script>' });
+    let ps = await list();
+    assert.equal(ps.length, 3);
+    assert.equal(ps.find((p) => p.id === ai)!.origin, 'ai', 'an AI project is badged');
+    assert.equal(ps.find((p) => p.id === junk)!.origin, null, 'origin is a closed set, not free text');
+    assert.ok(ps.every((p) => p.hasThumbnail && p.pinned === false && p.deletedAt === null));
+    assert.ok(!(await app.inject({ method: 'GET', url: '/api/projects', headers: bearer(aliceTok) })).json().projects.some((p: P) => p.id === plain),
+      "someone else's projects never appear in your list");
+
+    // Pinning is not an edit: "last edited" must not move.
+    const before = ps.find((p) => p.id === plain)!.updatedAt;
+    await new Promise((r) => setTimeout(r, 15));
+    const pin = await app.inject({ method: 'PATCH', url: `/api/designs/${plain}`, headers: bearer(pjTok), payload: { pinned: true } });
+    assert.equal(pin.statusCode, 200, pin.body);
+    assert.equal(pin.json().pinned, true);
+    ps = await list();
+    assert.equal(ps.find((p) => p.id === plain)!.pinned, true);
+    assert.equal(ps.find((p) => p.id === plain)!.updatedAt, before, 'pinning leaves the edit time alone');
+    assert.equal((await app.inject({ method: 'PATCH', url: `/api/designs/${plain}`, headers: bearer(pjTok), payload: { pinned: 'yes' } })).statusCode, 400);
+    assert.equal((await app.inject({ method: 'PATCH', url: `/api/designs/${plain}`, headers: bearer(aliceTok), payload: { pinned: false } })).statusCode, 404,
+      "a private project cannot even be found by someone else, let alone pinned");
+
+    // Rename.
+    const ren = await app.inject({ method: 'PATCH', url: `/api/designs/${plain}`, headers: bearer(pjTok), payload: { title: 'Derby day 2' } });
+    assert.equal(ren.json().title, 'Derby day 2');
+
+    // Publish, then trash: it leaves the feed while it is in the Trash.
+    await app.inject({ method: 'PATCH', url: `/api/designs/${ai}`, headers: bearer(pjTok), payload: { isPublic: true } });
+    const inFeed = async (): Promise<boolean> =>
+      ((await app.inject({ method: 'GET', url: '/api/gallery?sort=recent&limit=200' })).json() as { id: string }[]).some((d) => d.id === ai);
+    assert.equal(await inFeed(), true);
+    const tr = await app.inject({ method: 'DELETE', url: `/api/designs/${ai}`, headers: bearer(pjTok) });
+    assert.equal(tr.statusCode, 200, tr.body);
+    assert.ok(tr.json().deletedAt, 'trashed with a date');
+    assert.equal(tr.json().isPublic, false, 'a trashed project is private');
+    assert.equal(await inFeed(), false, 'and gone from the community feed');
+    assert.equal((await app.inject({ method: 'GET', url: `/api/designs/${ai}` })).statusCode, 404, 'its public link stops working');
+    assert.equal((await app.inject({ method: 'GET', url: `/api/designs/${ai}`, headers: bearer(pjTok) })).statusCode, 200, 'but its owner can still open it');
+    // A second trash must not forget it was published.
+    await app.inject({ method: 'DELETE', url: `/api/designs/${ai}`, headers: bearer(pjTok) });
+    assert.equal((await app.inject({ method: 'PATCH', url: `/api/designs/${ai}`, headers: bearer(pjTok), payload: { isPublic: true } })).statusCode, 409,
+      'something in the Trash cannot be published');
+    assert.equal((await app.inject({ method: 'DELETE', url: `/api/designs/${ai}`, headers: bearer(aliceTok) })).statusCode, 404, 'nobody else can delete it');
+    ps = await list();
+    assert.ok(ps.find((p) => p.id === ai)!.deletedAt, 'the Trash is listed, so the page can show it');
+
+    // Restore puts it back exactly as it was: published again.
+    const rs = await app.inject({ method: 'POST', url: `/api/designs/${ai}/restore`, headers: bearer(pjTok) });
+    assert.equal(rs.statusCode, 200, rs.body);
+    assert.equal(rs.json().deletedAt, null);
+    assert.equal(rs.json().isPublic, true, 'restored as published, because it was');
+    assert.equal(await inFeed(), true);
+
+    // Permanent delete only from the Trash.
+    assert.equal((await app.inject({ method: 'DELETE', url: `/api/designs/${junk}?permanent=1`, headers: bearer(pjTok) })).statusCode, 409,
+      'nothing is deleted for good without passing through the Trash');
+    await app.inject({ method: 'DELETE', url: `/api/designs/${junk}`, headers: bearer(pjTok) });
+    assert.equal((await app.inject({ method: 'DELETE', url: `/api/designs/${junk}?permanent=1`, headers: bearer(pjTok) })).statusCode, 204);
+    assert.equal((await app.inject({ method: 'GET', url: `/api/designs/${junk}`, headers: bearer(pjTok) })).statusCode, 404, 'gone for good');
+    assert.ok(!(await list()).some((p) => p.id === junk));
+    assert.equal((await app.inject({ method: 'DELETE', url: '/api/designs/not-a-uuid', headers: bearer(pjTok) })).statusCode, 400);
+
+    // The sweep: only what has sat in the Trash past the cutoff.
+    await app.inject({ method: 'DELETE', url: `/api/designs/${plain}`, headers: bearer(pjTok) });
+    assert.equal(await repo.purgeTrashed(new Date(Date.now() - 60_000)), 0, 'a project trashed a moment ago is kept');
+    assert.ok((await list()).some((p) => p.id === plain));
+    assert.ok((await repo.purgeTrashed(new Date(Date.now() + 60_000))) >= 1, 'past the cutoff it is deleted');
+    ps = await list();
+    assert.ok(!ps.some((p) => p.id === plain), 'the swept project is gone');
+    assert.ok(ps.some((p) => p.id === ai), 'and nothing outside the Trash was touched');
+  }
+
   await app.close();
   console.log(
-    `${name}: all assertions passed (auth, 401/403/404/409, visibility, round-trip, thumbnail, gallery, 25 revisions, snapshots, fork, per-owner lists)`,
+    `${name}: all assertions passed (auth, 401/403/404/409, visibility, round-trip, thumbnail, gallery, 25 revisions, snapshots, fork, per-owner lists, projects + trash)`,
   );
 }
 
@@ -1017,7 +1111,7 @@ async function runSuite(name: string, repo: DesignRepository, auth: AuthReposito
 
   const aliceTok = await registerUser(app, 'alice');
   const bobTok = await registerUser(app, 'bob');
-  const carolTok = await registerUser(app, 'carol');
+  const carolTok = await registerUser(app, 'projcarol');
   const idOf = async (token: string): Promise<string> =>
     (await app.inject({ method: 'GET', url: '/api/me', headers: bearer(token) })).json().id as string;
   const aliceId = await idOf(aliceTok);

@@ -43,6 +43,20 @@ header {
 }
 .brand { font-weight:800; letter-spacing:.02em; font-size:17px; color:var(--text-1); }
 .brand b { color:var(--blue); font-weight:800; }
+/* Back to every project. Icon and word on wide screens; the word is the first
+   thing to go, because the laptop header has no pixels to spare. */
+.to-projects {
+  display:inline-flex; align-items:center; justify-content:center; gap:6px; flex:0 0 auto;
+  height:34px; padding:0 11px; border-radius:8px; border:1px solid var(--line-1);
+  color:var(--text-2); text-decoration:none; font-size:13px; font-weight:600; white-space:nowrap;
+}
+.to-projects:hover { color:var(--text-1); border-color:var(--line-2); background:var(--ink-3); }
+.to-projects:focus-visible { outline:none; box-shadow:var(--ring-focus); }
+.to-projects .ti { font-size:16px; }
+@media (max-width: 1400px) {
+  .to-projects { width:34px; padding:0; }
+  .to-projects span { display:none; }
+}
 .doc-title {
   background:var(--ink-2); border:1px solid transparent; border-radius:var(--r-pill);
   color:var(--text-2); font:inherit; padding:7px 14px; max-width:240px; transition:border-color .14s, color .14s, background .14s;
@@ -877,11 +891,6 @@ body.viewer { display:block; overflow-y:auto; background:var(--ink-0); }
 .ob-swatch { width:16px; height:22px; border-radius:3px; display:inline-block; }
 .ob-palette-name { font-size:12px; }
 .ob-starters { display:grid; grid-template-columns:repeat(2,1fr); gap:10px; }
-.ob-name-input {
-  width:100%; padding:13px 15px; border:1.5px solid var(--line-1); border-radius:var(--r-md);
-  background:var(--ink-2); color:var(--text-1); font-size:16px; font-family:inherit; font-weight:600;
-}
-.ob-name-input:focus { outline:none; border-color:var(--blue); box-shadow:0 0 0 3px rgba(28,111,224,.18); }
 .ob-starter {
   display:flex; flex-direction:column; align-items:flex-start; gap:4px; text-align:left;
   padding:16px; border:1.5px solid var(--line-1); border-radius:var(--r-md); background:var(--ink-2);
@@ -1054,6 +1063,9 @@ body.viewer { display:block; overflow-y:auto; background:var(--ink-0); }
 .draft-state.ok { color:var(--text-3); }
 .draft-state.ok::before { content:"✓ "; color:var(--ok, #3fb950); }
 .draft-state.warn { color:var(--warn, #d29922); }
+/* In this browser, not yet in the account: a fact, not a fault. */
+.draft-state.pending { color:var(--text-2); }
+.draft-state.pending::before { content:"● "; color:var(--warn, #d29922); }
 
 /* The account offer, shown only after a save already succeeded. A popover
    anchored to whichever Save was pressed, never a modal: it must be ignorable
@@ -1121,6 +1133,7 @@ body.viewer { display:block; overflow-y:auto; background:var(--ink-0); }
 .save-state-top { font-size:11.5px; color:var(--text-3); white-space:nowrap; }
 .save-state-top.ok { color:var(--ok, #0fbf6b); }
 .save-state-top.warn { color:var(--warn, #e0a63a); }
+.save-state-top.pending { color:var(--text-2); }
 /* Laptop widths. 1366 x 768 is the commonest laptop screen there is, and at it
    the header needed 1,369 px the moment "Saved in this browser" appeared —
    which is the moment anything is drawn: Sign up folded into a two-line
@@ -1293,6 +1306,7 @@ body.viewer { display:block; overflow-y:auto; background:var(--ink-0); }
   padding:10px 12px; border-radius:var(--r-sm); font-size:14px; font-weight:600; color:var(--text-1); cursor:pointer;
 }
 .avatar-menu-item:hover { background:var(--ink-3); }
+a.avatar-menu-item { text-decoration:none; }
 .avatar-menu-item.danger { color:#ff6b7a; }
 .avatar-menu-item.danger:hover { background:rgba(255,107,122,.12); }
 .avatar-menu-item i { font-size:17px; opacity:.85; }

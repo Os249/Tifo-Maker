@@ -63,7 +63,7 @@ const save = (name, dataUrl) => writeFileSync(`${OUT}/${name}.png`, Buffer.from(
 // ---------------------------------------------------------------------------
 console.log('\n— the new Jewel in the design view —');
 {
-  const { ctx, p, errs } = await open('/app?template=jewel-jeddah-60k');
+  const { ctx, p, errs } = await open('/app?new=1&template=jewel-jeddah-60k');
   await waitReady(p);
   await p.waitForTimeout(1500);
   const s = await stat(p);
@@ -88,7 +88,7 @@ console.log('\n— the new Jewel in the design view —');
 // ---------------------------------------------------------------------------
 console.log('\n— a design on the earlier Jewel —');
 {
-  const { ctx, p, errs } = await open('/app?template=community-jewel-jeddah-62k');
+  const { ctx, p, errs } = await open('/app?new=1&template=community-jewel-jeddah-62k');
   await waitReady(p);
   await p.waitForTimeout(1200);
   const s = await stat(p);
@@ -107,7 +107,14 @@ console.log('\n— a design on the earlier Jewel —');
   await Promise.all([p.waitForNavigation({ timeout: 60000 }), p.click('#sw-continue')]);
   await waitReady(p);
   await p.waitForTimeout(1500);
-  check('it moves to the new Jewel', /template=jewel-jeddah-60k/.test(p.url()) && seatsIn(await stat(p)) === 59436, p.url());
+  // A project keeps its stadium, so "moving" makes a copy on the new Jewel
+  // and leaves the one on the earlier layout exactly as it was.
+  await p.waitForFunction(() => /[?&]local=/.test(location.search), null, { timeout: 60000 }).catch(() => {});
+  check('it moves to the new Jewel', seatsIn(await stat(p)) === 59436, p.url());
+  check('as a copy, with the original kept', await p.evaluate(() => {
+    const idx = JSON.parse(localStorage.getItem('tifo_projects_v1') || '[]');
+    return idx.length === 2 && idx.some((x) => x.templateId === 'community-jewel-jeddah-62k') && idx.some((x) => x.templateId === 'jewel-jeddah-60k');
+  }));
   check('no page errors', errs.length === 0, errs.join(' | '));
   await ctx.close();
 }
@@ -115,7 +122,7 @@ console.log('\n— a design on the earlier Jewel —');
 // ---------------------------------------------------------------------------
 console.log('\n— Match Day on the Jewel: the screens —');
 {
-  const { ctx, p, errs } = await open('/app?template=jewel-jeddah-60k&sim=1');
+  const { ctx, p, errs } = await open('/app?new=1&template=jewel-jeddah-60k&sim=1');
   await p.waitForSelector('.mds-overlay canvas', { timeout: 120000 });
   await p.waitForTimeout(4000);
   const sec = await p.$('.mds-section[data-sec="screens"]');
@@ -153,7 +160,7 @@ console.log('\n— Match Day on the Jewel: the screens —');
 // ---------------------------------------------------------------------------
 console.log('\n— Match Day in Arabic, and on a ground without screens —');
 {
-  const { ctx, p, errs } = await open('/app?template=jewel-jeddah-60k&sim=1', { lang: 'ar' });
+  const { ctx, p, errs } = await open('/app?new=1&template=jewel-jeddah-60k&sim=1', { lang: 'ar' });
   await p.waitForSelector('.mds-overlay canvas', { timeout: 120000 });
   await p.waitForTimeout(3000);
   const heading = await p.$eval('.mds-section[data-sec="screens"] .mds-shead', (h) => h.textContent.trim());
@@ -162,7 +169,7 @@ console.log('\n— Match Day in Arabic, and on a ground without screens —');
   await ctx.close();
 }
 {
-  const { ctx, p, errs } = await open('/app?sim=1');
+  const { ctx, p, errs } = await open('/app?new=1&sim=1');
   await p.waitForSelector('.mds-overlay canvas', { timeout: 120000 });
   await p.waitForTimeout(3000);
   const hidden = await p.$eval('.mds-section[data-sec="screens"]', (s) => getComputedStyle(s).display === 'none');

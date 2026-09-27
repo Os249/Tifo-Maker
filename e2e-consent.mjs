@@ -31,7 +31,7 @@ async function firstVisit(w, h, lang = 'en', phone = false) {
   const p = await ctx.newPage();
   const errs = [];
   p.on('pageerror', (e) => errs.push(e.message.slice(0, 160)));
-  await p.goto(B + '/app', { waitUntil: 'networkidle', timeout: 120000 });
+  await p.goto(B + '/app?new=1', { waitUntil: 'networkidle', timeout: 120000 });
   await p.waitForSelector('.ob-backdrop', { timeout: 60000 });
   await p.waitForSelector('#consent-bar', { timeout: 60000 });
   await p.waitForTimeout(800);

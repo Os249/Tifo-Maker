@@ -19,7 +19,7 @@ const browser = await chromium.launch({
 let pass = 0, fail = 0;
 const check = (n, ok, x = '') => { (ok ? pass++ : fail++); console.log(`  ${ok ? 'PASS' : 'FAIL'}  ${n}${x ? '  ' + x : ''}`); };
 
-async function probe(width, height, path = '/app', opts = {}) {
+async function probe(width, height, path = '/app?new=1', opts = {}) {
   const ctx = await browser.newContext({ viewport: { width, height }, ...opts });
   const page = await ctx.newPage();
   const errs = [];
@@ -67,13 +67,13 @@ for (const [w, h, label] of [[320, 568, 'iPhone SE'], [360, 680, 'Android 360'],
 }
 
 console.log('\n— the escape hatches —');
-let r = await probe(300, 640, '/app?editor=1');
+let r = await probe(300, 640, '/app?new=1&editor=1');
 check('?editor=1 still opens the editor below the floor', !r.gate && r.header);
 r = await probe(300, 640, '/d/does-not-exist');
 check('a shared link below the floor still gets the read-only viewer', r.viewer && !r.gate, `viewer=${r.viewer}`);
 
 console.log('\n— Arabic (both bug reports were written in Arabic) —');
-r = await probe(300, 640, '/app', {
+r = await probe(300, 640, '/app?new=1', {
   storageState: { cookies: [], origins: [{ origin: B, localStorage: [{ name: 'tifo_lang_v1', value: 'ar' }] }] },
 });
 check('the gate renders RTL with Arabic copy', r.dir === 'rtl' && /[؀-ۿ]/.test(r.h1), `dir=${r.dir} "${r.h1}"`);
@@ -83,7 +83,7 @@ console.log('\n— resizing —');
 {
   const ctx = await browser.newContext({ viewport: { width: 300, height: 700 } });
   const page = await ctx.newPage();
-  await page.goto(B + '/app', { waitUntil: 'networkidle' });
+  await page.goto(B + '/app?new=1', { waitUntil: 'networkidle' });
   const gated = await page.evaluate(() => !!document.querySelector('.gate-root'));
   await page.setViewportSize({ width: 1200, height: 800 });
   await page.waitForTimeout(4000);
@@ -93,7 +93,7 @@ console.log('\n— resizing —');
   // The reverse must NOT happen: tearing down a running editor because someone
   // dragged the window narrow would destroy their unsaved work. Entry-only.
   await page.setViewportSize({ width: 1400, height: 900 });
-  await page.goto(B + '/app', { waitUntil: 'networkidle' });
+  await page.goto(B + '/app?new=1', { waitUntil: 'networkidle' });
   await page.waitForTimeout(2500);
   await page.setViewportSize({ width: 300, height: 700 });
   await page.waitForTimeout(3000);

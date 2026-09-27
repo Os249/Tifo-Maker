@@ -381,7 +381,7 @@ $('ac-delete-go')?.addEventListener('click', async () => {
 
 $('ac-signout')?.addEventListener('click', () => {
   signOut();
-  window.location.href = '/app';
+  window.location.href = '/projects';
 });
 
 // Every standalone page has to do this: `current` starts at 'en' and only

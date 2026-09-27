@@ -22,6 +22,20 @@ export interface DesignMeta {
   remixedFrom?: string | null;
   /** Public view count (sharing system). */
   viewCount?: number;
+  /** Pinned to the top of its owner's Projects page. Private to the owner. */
+  pinned?: boolean;
+  /**
+   * When the owner moved it to the Trash, or null. A trashed design is private
+   * while it sits there and is deleted for good 30 days later.
+   */
+  deletedAt?: string | null;
+  /** How the project began, when that is worth a badge: 'ai' for now. */
+  origin?: string | null;
+}
+
+/** One card on the owner's Projects page. */
+export interface ProjectItem extends DesignMeta {
+  hasThumbnail: boolean;
 }
 
 export interface GalleryItem extends DesignMeta {
@@ -89,6 +103,8 @@ export interface NewDesign {
   cellsGz: Buffer;
   ownerId: string;
   thumbnailPng: Buffer | null;
+  /** See DesignMeta.origin. */
+  origin?: string | null;
 }
 
 /** One design for the bulk seeding path. */
@@ -124,6 +140,25 @@ export interface DesignRepository {
    * against a database across a network. Returns how many were written.
    */
   seedDesigns(ownerId: string, items: SeedDesign[]): Promise<number>;
+  /**
+   * Every design an owner has, trashed ones included, newest edit first, for
+   * the Projects page. Uncapped on purpose: listByOwner stops at 200, and a
+   * project that silently drops off the end of your own list is a lost project.
+   */
+  listProjects(ownerId: string): Promise<ProjectItem[]>;
+  /** Pin or unpin. Deliberately leaves updated_at alone: pinning is not an edit. */
+  setPinned(id: string, pinned: boolean): Promise<DesignMeta | null>;
+  /**
+   * Move to the Trash. The design goes private while it is there, and
+   * remembers whether it was published so a restore can put that back.
+   */
+  trash(id: string): Promise<DesignMeta | null>;
+  /** Take it back out of the Trash, published again if it was before. */
+  restore(id: string): Promise<DesignMeta | null>;
+  /** Delete one design for good. */
+  purge(id: string): Promise<boolean>;
+  /** Delete for good everything trashed before `cutoff`. Returns how many. */
+  purgeTrashed(cutoff: Date): Promise<number>;
   /** Delete all of an owner's designs (used by account deletion). */
   deleteByOwner(ownerId: string): Promise<void>;
   listPublic(query: GalleryQuery): Promise<GalleryItem[]>;

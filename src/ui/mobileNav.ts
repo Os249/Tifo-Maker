@@ -35,10 +35,12 @@ img, svg, video, canvas { max-width: 100%; }
   transform: translateX(100%); transition: transform .24s ease; z-index: 999;
   display: flex; flex-direction: column; gap: 4px;
   padding: calc(18px + env(safe-area-inset-top)) 16px calc(18px + env(safe-area-inset-bottom));
-  box-shadow: -14px 0 44px rgba(0,0,0,.45); overflow-y: auto;
+  overflow-y: auto;
   font-family: 'Inter', system-ui, -apple-system, sans-serif;
 }
-.mnav-drawer.open { transform: none; }
+/* The shadow only while open: parked off-screen it still cast one, a grey
+   band down the right edge of every public page on a desktop. */
+.mnav-drawer.open { transform: none; box-shadow: -14px 0 44px rgba(0,0,0,.45); }
 .mnav-title { font-weight: 800; font-size: 18px; letter-spacing: .04em; padding: 4px 14px 14px; color: #fff; }
 .mnav-drawer a, .mnav-drawer button {
   display: block; width: 100%; text-align: start; box-sizing: border-box;
@@ -70,7 +72,7 @@ img, svg, video, canvas { max-width: 100%; }
   header.nav { padding-top: calc(14px + env(safe-area-inset-top)); }
 }
 [dir="rtl"] .mnav-drawer { right: auto; left: 0; transform: translateX(-100%); }
-[dir="rtl"] .mnav-drawer.open { transform: none; }
+[dir="rtl"] .mnav-drawer.open { transform: none; box-shadow: 14px 0 44px rgba(0,0,0,.45); }
 [dir="rtl"] .mnav-drawer a, [dir="rtl"] .mnav-drawer button { text-align: start; }
 @media (prefers-reduced-motion: reduce) {
   .mnav-drawer, .mnav-scrim { transition: none; }

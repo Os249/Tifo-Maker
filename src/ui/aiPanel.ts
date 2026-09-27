@@ -43,6 +43,13 @@ export interface AiPanelDeps {
   getPreview?: () => Preview3D | null;
   /** Refresh swatch UI + 3D after the palette/cells change (from the toolbar). */
   refresh: () => void;
+  /**
+   * Told whenever a generated design has been applied to the canvas, by any
+   * route: straight from Generate, or later, from a choice card ("Use the
+   * Quick Designer") or Regenerate. A project made with "Generate with AI"
+   * takes its name from the first one.
+   */
+  onApplied?: (spec: TifoSpec) => void;
 }
 
 /** Decode a data: URL into an ImageBitmap via an <img> (CSP allows img-src data:). */
@@ -53,7 +60,18 @@ async function dataUrlToBitmap(dataUrl: string): Promise<ImageBitmap> {
   return createImageBitmap(img);
 }
 
-export function mountAiPanel(deps: AiPanelDeps): void {
+/** What the rest of the editor may ask of the panel. */
+export interface AiPanelHandle {
+  /**
+   * Generate from a brief, exactly as if it had been typed into the panel and
+   * Generate pressed: same progress, same cards, same quota handling. Resolves
+   * with the applied spec, or null when nothing was applied (refused, failed,
+   * stopped). Used by a project created with "Generate with AI".
+   */
+  generate(prompt: string): Promise<TifoSpec | null>;
+}
+
+export function mountAiPanel(deps: AiPanelDeps): AiPanelHandle {
   const { root, store, editor, map, objects, getPreview, refresh } = deps;
   const $ = <T extends HTMLElement>(sel: string): T | null => root.querySelector<T>(sel);
 
@@ -74,7 +92,7 @@ export function mountAiPanel(deps: AiPanelDeps): void {
   const quotaEl = $('#ai-quota');
   const stateEl = $('#ai-state');
   const cancelBtn = $<HTMLButtonElement>('#ai-cancel');
-  if (!promptEl || !genBtn) return; // panel not present (e.g. phone build)
+  if (!promptEl || !genBtn) return { generate: async () => null }; // panel not present (e.g. phone build)
 
   // Snapshot of the canvas before the first AI apply (for revert / clean regen).
   let baselineCells: Uint8Array | null = null;
@@ -409,6 +427,7 @@ export function mountAiPanel(deps: AiPanelDeps): void {
     }
     lastSpec = working; // the live design — input for AI critique/polish
     if (resultEl) resultEl.style.display = '';
+    deps.onApplied?.(working);
   };
 
   const revert = (): void => {
@@ -750,4 +769,13 @@ export function mountAiPanel(deps: AiPanelDeps): void {
       }
     });
   void getPreview; // reserved: future per-layer live preview in the 3D view
+
+  return {
+    async generate(prompt: string): Promise<TifoSpec | null> {
+      promptEl.value = prompt;
+      const before = lastSpec;
+      await run(prompt);
+      return lastSpec !== before ? lastSpec : null;
+    },
+  };
 }

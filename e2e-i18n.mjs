@@ -127,16 +127,44 @@ for (const [path, name] of [['/', 'landing'], ['/community', 'community'], ['/cl
   await ctx.close();
 }
 
+console.log('\n— projects in Arabic —');
+{
+  const [ctx, p] = await page('/projects');
+  report('projects page (empty)', await p.evaluate(scrapePage));
+  await p.click('#pj-empty-new');
+  await p.waitForTimeout(700);
+  report('create panel', await p.evaluate(scrapePage));
+  await p.click('#np-to-ai');
+  await p.waitForTimeout(1500);
+  report('create panel: the AI side, signed out', await p.evaluate(scrapePage));
+  await ctx.close();
+}
+{
+  const now = Date.now();
+  const one = [{ id: 'la1b2c3d4e5f6a7b', title: 'تيفو الديربي', templateId: 'jewel-jeddah-60k', templateVersion: 1, createdAt: now, updatedAt: now, pinned: true, deletedAt: null, origin: 'ai' },
+               { id: 'lb1b2c3d4e5f6a7b', title: 'قديم', templateId: 'generic-bowl-60k', templateVersion: 1, createdAt: now, updatedAt: now, pinned: false, deletedAt: now, origin: null }];
+  const [ctx, p] = await page('/projects', { extraLs: [{ name: 'tifo_projects_v1', value: JSON.stringify(one) }] });
+  report('projects page (a project, a pin, the trash button)', await p.evaluate(scrapePage));
+  await p.click('.pj-card .pj-more');
+  await p.waitForTimeout(400);
+  report('project menu', await p.evaluate(scrapePage));
+  await p.keyboard.press('Escape');
+  await p.click('#pj-trash-btn');
+  await p.waitForTimeout(400);
+  report('the trash', await p.evaluate(scrapePage));
+  await ctx.close();
+}
+
 console.log('\n— the phone gate —');
 {
-  const [ctx, p] = await page('/app', { width: 360, height: 680, wait: 1500 });
+  const [ctx, p] = await page('/app?new=1', { width: 360, height: 680, wait: 1500 });
   report('phone gate', await p.evaluate(scrapePage));
   await ctx.close();
 }
 
 console.log('\n— the editor and its panels —');
 {
-  const [ctx, p] = await page('/app', { wait: 6000 });
+  const [ctx, p] = await page('/app?new=1', { wait: 6000 });
   await p.evaluate(() => { document.querySelector('.ob-skip')?.click(); });
   await p.waitForTimeout(1200);
   report('editor', await p.evaluate(scrapePage));
@@ -170,7 +198,7 @@ for (const [id, label] of [
   ['jewel-jeddah-60k', 'stadium panel, a real-venue ground with details'],
   ['community-jewel-jeddah-62k', 'stadium panel, a ground that has been rebuilt'],
 ]) {
-  const [ctx, p] = await page(`/app?template=${id}`, { wait: 6000 });
+  const [ctx, p] = await page(`/app?new=1&template=${id}`, { wait: 6000 });
   await p.evaluate(() => { document.querySelector('.ob-skip')?.click(); });
   await p.waitForTimeout(800);
   await p.click('#rail-stadium', { timeout: 4000, force: true }).catch(() => {});
@@ -185,7 +213,7 @@ console.log('\n— first run (onboarding + cookie banner) —');
     storageState: { cookies: [], origins: [{ origin: B, localStorage: [{ name: 'tifo_lang_v1', value: 'ar' }] }] } });
   const p = await ctx.newPage();
   p.on('pageerror', () => {});
-  await p.goto(B + '/app', { waitUntil: 'networkidle', timeout: 60000 });
+  await p.goto(B + '/app?new=1', { waitUntil: 'networkidle', timeout: 60000 });
   await p.waitForTimeout(5000);
   report('onboarding + consent', await p.evaluate(scrapePage));
   await ctx.close();
@@ -201,7 +229,7 @@ console.log('\n— the banners news and the banner tour —');
     storageState: { cookies: [], origins: [{ origin: B, localStorage: ls }] } });
   const p = await ctx.newPage();
   p.on('pageerror', () => {});
-  await p.goto(B + '/app', { waitUntil: 'networkidle', timeout: 60000 });
+  await p.goto(B + '/app?new=1', { waitUntil: 'networkidle', timeout: 60000 });
   const card = await p.waitForSelector('#news-card', { timeout: 20000 }).catch(() => null);
   if (!card) { fail++; console.log('  FAIL  banners news — it never appeared'); }
   else {

@@ -82,7 +82,7 @@ try {
     const body = await res.json();
     await route.fulfill({ response: res, json: { ...body, emailSent: false } });
   });
-  await page.goto(B + '/app', { waitUntil: 'domcontentloaded' });
+  await page.goto(B + '/app?new=1', { waitUntil: 'domcontentloaded' });
   await waitFor(() => { const s = document.getElementById('stat'); return s && /seats/.test(s.textContent || ''); }, null, 90000);
   await page.evaluate(() => document.getElementById('signin')?.click());
   await waitFor(() => !!document.querySelector('.auth-backdrop .auth-form'));
@@ -162,7 +162,7 @@ try {
     el.dispatchEvent(new Event('input', { bubbles: true }));
   }, [sel, v]);
   const EMAIL2 = `fan${Date.now()}b@example.test`;
-  await p2.goto(B + '/app', { waitUntil: 'domcontentloaded' });
+  await p2.goto(B + '/app?new=1', { waitUntil: 'domcontentloaded' });
   await wait2(() => { const s = document.getElementById('stat'); return s && /\d/.test(s.textContent || ''); }, null, 90000);
   await p2.evaluate(() => document.getElementById('signin')?.click());
   await wait2(() => !!document.querySelector('.auth-backdrop .auth-form'));

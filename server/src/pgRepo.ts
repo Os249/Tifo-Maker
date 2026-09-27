@@ -5,6 +5,7 @@ import type {
   AiUsage,
   AiUsageRepository,
   DesignMeta,
+  ProjectItem,
   DesignRecord,
   DesignRepository,
   DiffBytes,
@@ -30,7 +31,7 @@ import { normalizeTags } from './memoryRepo';
 import { designFacets } from '../../src/core/facets';
 
 const META_COLS =
-  'id, title, title_ar, template_id, template_version, palette, revision_count, is_public, owner_id, created_at, updated_at, description, allow_remix, remixed_from, view_count';
+  'id, title, title_ar, template_id, template_version, palette, revision_count, is_public, owner_id, created_at, updated_at, description, allow_remix, remixed_from, view_count, pinned, deleted_at, origin';
 
 function rowToMeta(r: Record<string, unknown>): DesignMeta {
   return {
@@ -49,6 +50,9 @@ function rowToMeta(r: Record<string, unknown>): DesignMeta {
     allowRemix: r.allow_remix === undefined ? true : r.allow_remix !== false,
     remixedFrom: r.remixed_from ? String(r.remixed_from) : null,
     viewCount: r.view_count == null ? 0 : Number(r.view_count),
+    pinned: r.pinned === true,
+    deletedAt: r.deleted_at ? new Date(r.deleted_at as string).toISOString() : null,
+    origin: (r.origin as string) ?? null,
   };
 }
 
@@ -220,9 +224,9 @@ export class PgDesignRepository implements DesignRepository {
 
   async create(d: NewDesign): Promise<DesignMeta> {
     const res = await this.pool.query(
-      `INSERT INTO designs (title, title_ar, template_id, template_version, palette, cells, owner_id, thumbnail)
-       VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8) RETURNING ${META_COLS}`,
-      [d.title, d.titleAr ?? null, d.templateId, d.templateVersion, JSON.stringify(d.palette), d.cellsGz, d.ownerId, d.thumbnailPng],
+      `INSERT INTO designs (title, title_ar, template_id, template_version, palette, cells, owner_id, thumbnail, origin)
+       VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9) RETURNING ${META_COLS}`,
+      [d.title, d.titleAr ?? null, d.templateId, d.templateVersion, JSON.stringify(d.palette), d.cellsGz, d.ownerId, d.thumbnailPng, d.origin ?? null],
     );
     await this.syncFacets(res.rows[0].id as string, { title: d.title, titleAr: d.titleAr, palette: d.palette });
     return rowToMeta(res.rows[0]);
@@ -230,7 +234,7 @@ export class PgDesignRepository implements DesignRepository {
 
   async listByOwner(ownerId: string): Promise<DesignMeta[]> {
     const res = await this.pool.query(
-      `SELECT ${META_COLS} FROM designs WHERE owner_id = $1 ORDER BY updated_at DESC LIMIT 200`,
+      `SELECT ${META_COLS} FROM designs WHERE owner_id = $1 AND deleted_at IS NULL ORDER BY updated_at DESC LIMIT 200`,
       [ownerId],
     );
     return res.rows.map(rowToMeta);
@@ -316,6 +320,61 @@ export class PgDesignRepository implements DesignRepository {
     } finally {
       client.release();
     }
+  }
+
+  async listProjects(ownerId: string): Promise<ProjectItem[]> {
+    const res = await this.pool.query(
+      `SELECT ${META_COLS}, thumbnail IS NOT NULL AS has_thumbnail FROM designs
+       WHERE owner_id = $1 ORDER BY updated_at DESC, id`,
+      [ownerId],
+    );
+    return res.rows.map((r) => ({ ...rowToMeta(r), hasThumbnail: Boolean(r.has_thumbnail) }));
+  }
+
+  async setPinned(id: string, pinned: boolean): Promise<DesignMeta | null> {
+    const res = await this.pool.query(
+      `UPDATE designs SET pinned = $2 WHERE id = $1 RETURNING ${META_COLS}`,
+      [id, pinned],
+    );
+    return res.rowCount ? rowToMeta(res.rows[0]) : null;
+  }
+
+  async trash(id: string): Promise<DesignMeta | null> {
+    // One statement, so a design can never be half in the Trash: private and
+    // dated together, with what it was remembered for the restore. The CASE
+    // keeps a second trash of the same design from overwriting that memory
+    // with the "private" it was given the first time.
+    const res = await this.pool.query(
+      `UPDATE designs SET
+         trashed_public = CASE WHEN deleted_at IS NULL THEN is_public ELSE trashed_public END,
+         is_public = false,
+         deleted_at = coalesce(deleted_at, now())
+       WHERE id = $1 RETURNING ${META_COLS}`,
+      [id],
+    );
+    return res.rowCount ? rowToMeta(res.rows[0]) : null;
+  }
+
+  async restore(id: string): Promise<DesignMeta | null> {
+    const res = await this.pool.query(
+      `UPDATE designs SET
+         is_public = CASE WHEN deleted_at IS NULL THEN is_public ELSE trashed_public END,
+         trashed_public = false,
+         deleted_at = NULL
+       WHERE id = $1 RETURNING ${META_COLS}`,
+      [id],
+    );
+    return res.rowCount ? rowToMeta(res.rows[0]) : null;
+  }
+
+  async purge(id: string): Promise<boolean> {
+    const res = await this.pool.query('DELETE FROM designs WHERE id = $1', [id]);
+    return (res.rowCount ?? 0) > 0;
+  }
+
+  async purgeTrashed(cutoff: Date): Promise<number> {
+    const res = await this.pool.query('DELETE FROM designs WHERE deleted_at IS NOT NULL AND deleted_at < $1', [cutoff]);
+    return res.rowCount ?? 0;
   }
 
   async deleteByOwner(ownerId: string): Promise<void> {

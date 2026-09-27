@@ -15,7 +15,7 @@ import { MIN_LEGIBLE_RUN, findFragileSeats } from '../core/analysis';
 import { RevealPlayer, REVEAL_PRESETS, revealEndsHidden, type RevealId } from '../core/reveal';
 import { drumCallBeat, DRUM_CALL_MIN_LENGTH } from '../core/drumCall';
 import { DrumTrack } from '../render/drumTrack';
-import { fetchMe, fetchScene, isSignedIn, loadDesign, registrationEmailWasSent, saveDesign, saveScene, setPublic, setDesignTitle, exportMyData, deleteAccount } from '../net/api';
+import { fetchMe, isSignedIn, registrationEmailWasSent, saveDesign, saveScene, setPublic, setDesignTitle, exportMyData, deleteAccount } from '../net/api';
 import { t as i18nT, tErr, tl, tv } from './i18n';
 import { track, setAnalyticsSignedIn } from '../net/analytics';
 import { buildTifoV2 } from '../core/tifoFormat';
@@ -28,6 +28,10 @@ import { BANNER_HISTORY_EVENT, bannerActive, bannerHost } from './bannerHost';
 import { openAuthModal } from './authModal';
 import { openGallery } from './gallery';
 import { mountAiPanel } from './aiPanel';
+import {
+  createLocal, getLocal, keysFor, makeStripDataUrl, openUrl, purgeLocal, stashNewProject,
+  newProjectUrl, thumbKey, updateLocal, writeEnvelope, writeRaw, type ProjectRef,
+} from '../core/projects';
 import { mountStadiumPanel } from './stadiumPanel';
 import { openShareModal } from './shareModal';
 import { EDITOR_UNITS } from '../core/seatmap';
@@ -64,6 +68,34 @@ function gestureToast(text: string): void {
   gestureToastTimer = window.setTimeout(() => gestureToastEl?.classList.remove('show'), 900);
 }
 
+/**
+ * The project the editor has open.
+ *
+ * `ref` is null for a design that is not yet anyone's project here: someone
+ * else's tifo opened from a share link. The first edit makes it one (see
+ * ensureProject). `pending` is set while main.ts is still laying out a brand-new
+ * project (starter, first-run guide) and will call createProject itself, so the
+ * first edit must not race it into existence.
+ */
+export interface ProjectCtx {
+  ref: ProjectRef | null;
+  pending?: boolean;
+  /** Set when the copy in this browser holds changes the account has not got. */
+  unsynced?: boolean;
+}
+
+/** What main.ts may ask of the toolbar once it is up. */
+export interface ToolbarApi {
+  /** Bring the laid-out canvas into existence as a project, in the account or this browser. */
+  createProject(opts: { title: string; origin: 'ai' | null }): Promise<ProjectRef | null>;
+  /** Generate from a prompt in the AI panel; name the project from the result if `autoName`. */
+  generate(prompt: string, autoName: boolean): Promise<boolean>;
+  /** Open the Publish flow, as if its button had been pressed. */
+  publish(): void;
+  /** The key this project's banners are kept under in this browser, if any. */
+  bannersKey(): string | null;
+}
+
 export function mountToolbar(
   root: HTMLElement,
   editor: Editor,
@@ -81,7 +113,9 @@ export function mountToolbar(
    * whatever comes back to whoever does.
    */
   sceneIO?: { snapshot(): unknown; restore(scene: unknown): void; onChange?(fn: () => void): void },
-): void {
+  /** Which project is open. See ProjectCtx. */
+  projectCtx?: ProjectCtx,
+): ToolbarApi {
   const $ = <T extends HTMLElement>(sel: string): T => {
     const el = root.querySelector<T>(sel);
     if (!el) throw new Error(`missing element ${sel}`);
@@ -295,7 +329,27 @@ export function mountToolbar(
     try { getPreview?.()?.recolorAll(); } catch { /* preview not yet created */ }
   };
 
-  mountAiPanel({ root, store, editor, map, objects, getPreview, refresh: panelRefresh });
+  /**
+   * A project made with "Generate with AI" is named by the first design the
+   * AI applies — whether that comes straight back, or after a choice card
+   * (busy, out of premium) and the Quick Designer. Then it is kept.
+   */
+  let aiNaming: { autoName: boolean } | null = null;
+  const aiPanel = mountAiPanel({
+    root, store, editor, map, objects, getPreview, refresh: panelRefresh,
+    onApplied: (spec) => {
+      if (!aiNaming) return;
+      const { autoName } = aiNaming;
+      aiNaming = null;
+      // 'AI tifo' is what the validator puts in when the model gave no title.
+      const named = spec.title?.trim();
+      if (autoName && named && named !== 'AI tifo') docTitle.value = named.slice(0, 80);
+      void (async () => {
+        if (ref?.kind === 'account') await saveToAccount(false);
+        else draftWriter.flush();
+      })();
+    },
+  });
 
   // ---- Stadium panel (rail "stadium" button → panelMode 'stadium') ----
   mountStadiumPanel({ root, map, store, refresh: panelRefresh });
@@ -1133,7 +1187,37 @@ export function mountToolbar(
   };
 
   // Account + persistence (run `npm run server` alongside `npm run dev`).
-  let designId: string | null = restoredDesignId ?? null;
+  //
+  // `ref` is the open project; `designId` stays as the account id the save
+  // path has always used, and the two are only ever changed together, in
+  // bindProject.
+  let ref: ProjectRef | null = projectCtx?.ref ?? (restoredDesignId ? { kind: 'account', id: restoredDesignId } : null);
+  let designId: string | null = ref?.kind === 'account' ? ref.id : null;
+  let creationPending = projectCtx?.pending === true;
+  /** The copy in this browser has changes the account does not have yet. */
+  let unsynced = projectCtx?.unsynced === true;
+  /** The title the account last saw, so a rename in the header reaches it on Save. */
+  let serverTitle: string | null = ref?.kind === 'account' ? null : null;
+
+  /** Point the page, the autosave and the save path at a project. */
+  const bindProject = (next: ProjectRef): void => {
+    ref = next;
+    designId = next.kind === 'account' ? next.id : null;
+    const keep: Record<string, string> = {};
+    const now = new URLSearchParams(location.search);
+    for (const k of ['sim', 'editor']) {
+      const v = now.get(k);
+      if (v) keep[k] = v;
+    }
+    const url = openUrl(next, keep);
+    history.replaceState(null, '', url);
+    try {
+      sessionStorage.setItem('tifo_open_project', JSON.stringify({ url, banners: keysFor(next).banners }));
+    } catch {
+      /* only a sign-in round trip needs this */
+    }
+  };
+  if (ref) bindProject(ref);
   const publicChk = $('#public') as unknown as HTMLInputElement;
   const signinBtn = $('#signin') as unknown as HTMLButtonElement;
   let myUserId: string | null = null;
@@ -1191,9 +1275,15 @@ export function mountToolbar(
     if (menuName) menuName.textContent = `@${name}`;
     // A registration whose verification email was refused still signs you in,
     // so without this the only clue is an inbox nothing is coming to.
-    message.textContent = registrationEmailWasSent()
-      ? tv('ed.msg.signedInAs', { name })
-      : i18nT('ac.verify.noEmailSent');
+    //
+    // A session merely restored on load is not news, and must not write over
+    // what the page just said about the project ("restored your unsaved
+    // changes", "imported as a new project").
+    if (fresh || !message.textContent) {
+      message.textContent = registrationEmailWasSent()
+        ? tv('ed.msg.signedInAs', { name })
+        : i18nT('ac.verify.noEmailSent');
+    }
     setAnalyticsSignedIn(true);
     if (fresh) track('signed_up'); // genuine auth this session, not a reload-restore
   };
@@ -1359,6 +1449,13 @@ export function mountToolbar(
     const photoRow2 = document.getElementById('photo-row');
     if (photoRow2) photoRow2.hidden = true;
     message.textContent = i18nT('ed.msg.signedOut');
+    // An account project is not something to go on editing signed out: its
+    // Save would have nowhere to go. Back to the list, which now shows this
+    // browser's projects.
+    if (ref?.kind === 'account') {
+      draftWriter.flush();
+      location.assign('/projects');
+    }
   });
 
   // Restore session on load: if a token is present, show the name (no shine).
@@ -1435,18 +1532,24 @@ export function mountToolbar(
         return;
       }
       const { validateTifo } = await import('../core/tifoFormat');
-      // Different stadium → reload with the right template first (validate there).
+      // A file is a project of its own, on its own stadium. Opening it used to
+      // replace whatever was on the canvas; with projects that would overwrite
+      // the open one, so it opens as a new project instead and this one stays
+      // exactly as it was. The new project validates it against its seat map.
       const stadiumId =
         (parsed as { stadium?: { templateId?: string } })?.stadium?.templateId ??
         (parsed as { templateId?: string })?.templateId;
-      if (typeof stadiumId === 'string' && stadiumId !== map.templateRef.id) {
+      if (typeof stadiumId === 'string') {
         try {
           sessionStorage.setItem('tifo_pending_import', text);
         } catch {
           /* ignore quota */
         }
+        draftWriter.flush();
+        const fileTitle = (parsed as { meta?: { title?: string } })?.meta?.title || file.name.replace(/\.tifo$/i, '');
+        stashNewProject({ title: fileTitle.slice(0, 80) || i18nT('ed.docTitlePlaceholder'), templateId: stadiumId });
         message.textContent = i18nT('ed.msg.openingStadium');
-        location.search = `?template=${encodeURIComponent(stadiumId)}`;
+        location.assign(newProjectUrl(stadiumId, { import: '1' }));
         return;
       }
       const result = validateTifo(parsed, (id, v) =>
@@ -1526,7 +1629,14 @@ export function mountToolbar(
     };
     if (!lastDraft) { show('draft-state', ''); return; }
     if (lastDraft.ok) {
-      show('draft-state ok', isSignedIn() ? i18nT('draft.savedAccount') : i18nT('draft.savedLocal'));
+      // Say where the work actually is. An account project with edits the
+      // account has not got is NOT "saved to your account", however signed
+      // in its owner is: those edits are in this browser until Save.
+      if (ref?.kind === 'account') {
+        show(unsynced ? 'draft-state pending' : 'draft-state ok', i18nT(unsynced ? 'draft.unsynced' : 'draft.savedAccount'));
+      } else {
+        show('draft-state ok', i18nT('draft.savedLocal'));
+      }
       return;
     }
     show(
@@ -1537,25 +1647,82 @@ export function mountToolbar(
     );
   };
 
+  /**
+   * The card picture of a local project, redrawn a few seconds after the last
+   * change. It is the only picture a project in this browser has, and a
+   * Projects page of grey rectangles is a page nobody can find anything on.
+   */
+  let thumbTimer = 0;
+  const scheduleThumb = (): void => {
+    if (ref?.kind !== 'local') return;
+    window.clearTimeout(thumbTimer);
+    const id = ref.id;
+    thumbTimer = window.setTimeout(() => {
+      if (ref?.kind !== 'local' || ref.id !== id) return;
+      const url = makeStripDataUrl(map, store);
+      if (url) writeRaw(thumbKey(id), url);
+    }, 2500);
+  };
+
   const draftWriter = createDraftWriter(
     () =>
-      buildDraft({
-        title: docTitle.value.trim() || i18nT('ed.docTitlePlaceholder'),
-        templateId: map.templateRef.id,
-        templateVersion: map.templateRef.version,
-        palette: store.palette,
-        cells: store.cells,
-        textObjects: draftTextObjects(),
-        designId,
-      }),
+      // No project, nowhere to write: an unbound canvas is made a project by
+      // its first edit (ensureProject), never silently autosaved into a key
+      // that belongs to nothing.
+      ref
+        ? buildDraft({
+            title: docTitle.value.trim() || i18nT('ed.docTitlePlaceholder'),
+            templateId: map.templateRef.id,
+            templateVersion: map.templateRef.version,
+            palette: store.palette,
+            cells: store.cells,
+            textObjects: draftTextObjects(),
+            designId,
+            projectId: ref.kind === 'local' ? ref.id : null,
+            dirty: ref.kind === 'account' && unsynced,
+          })
+        : null,
     (r) => {
       lastDraft = r;
+      if (r.ok && ref?.kind === 'local') {
+        updateLocal(ref.id, { title: docTitle.value.trim() || i18nT('ed.docTitlePlaceholder'), updatedAt: Date.now() });
+        scheduleThumb();
+      }
       renderDraftState();
       // The banners are kept beside the draft, in a key of their own, and
       // written with it so the two always describe the same tifo.
       if (r.ok) document.dispatchEvent(new CustomEvent('tifo:draft-written'));
     },
+    1200,
+    (env) => writeEnvelope(keysFor(ref!).doc, env),
   );
+
+  /**
+   * Make the open canvas a project, if it is not one yet.
+   *
+   * Only an unbound canvas gets here: someone else's tifo from a share link,
+   * edited for the first time. Editing it is making it yours, so it becomes
+   * a project named after where it came from, in the account when there is
+   * one and in this browser when there is not.
+   */
+  let ensuring: Promise<void> | null = null;
+  const ensureProject = (): Promise<void> => {
+    if (ref || creationPending) return Promise.resolve();
+    if (!ensuring) {
+      ensuring = api.createProject({ title: docTitle.value.trim() || i18nT('ed.docTitlePlaceholder'), origin: null })
+        .then(() => undefined)
+        .finally(() => { ensuring = null; });
+    }
+    return ensuring;
+  };
+  const edited = (): void => {
+    unsynced = true;
+    if (!ref) {
+      void ensureProject().then(() => draftWriter.schedule());
+      return;
+    }
+    draftWriter.schedule();
+  };
 
   /**
    * True while this design's banners are unknown: its scene failed to load.
@@ -1566,15 +1733,15 @@ export function mountToolbar(
    */
   let sceneUnread = false;
 
-  store.onDirty(() => draftWriter.schedule());
-  objects.onChange(() => draftWriter.schedule());
+  store.onDirty(edited);
+  objects.onChange(edited);
   // A banner is part of the tifo: a design that is only a banner so far is
   // still work to keep, and it is the draft that says which tifo this is.
   sceneIO?.onChange?.(() => {
     sceneUnread = false;
-    draftWriter.schedule();
+    edited();
   });
-  docTitle.addEventListener('input', () => draftWriter.schedule());
+  docTitle.addEventListener('input', edited);
   // A closing tab gets no timer callback, so flush synchronously on the way out.
   window.addEventListener('pagehide', () => draftWriter.flush());
   document.addEventListener('visibilitychange', () => {
@@ -1592,8 +1759,18 @@ export function mountToolbar(
     setSaveBusy(true);
     try {
       const isNew = designId === null;
-      const title = isNew ? docTitle.value.trim() || i18nT('ed.docTitlePlaceholder') : '';
-      const meta = await saveDesign(store, map, map.templateRef.id, map.templateRef.version, title, designId);
+      const current = docTitle.value.trim() || i18nT('ed.docTitlePlaceholder');
+      const title = isNew ? current : '';
+      const movingLocal = ref?.kind === 'local' ? ref.id : null;
+      const localMeta = movingLocal ? getLocal(movingLocal) : null;
+      const meta = await saveDesign(store, map, map.templateRef.id, map.templateRef.version, title, designId, localMeta?.origin ?? null);
+      // A name changed in the header reaches the account with the save. It
+      // used to be sent only on the first save and on publishing, so a
+      // project renamed later kept its old name everywhere else.
+      if (!isNew && meta.id && current !== (serverTitle ?? meta.title)) {
+        await setDesignTitle(meta.id, current).catch(() => {});
+      }
+      serverTitle = current;
       // Best-effort, and AFTER the design: the tifo is the thing that must not
       // be lost, and a banner too big for the cap should cost the banner, not
       // the design. The message says which happened rather than reporting a
@@ -1606,7 +1783,21 @@ export function mountToolbar(
           sceneFailed = (err as Error).message;
         }
       }
+      if (meta.id && (isNew || ref?.kind !== 'account')) {
+        // Saved into the account for the first time: from here on this is an
+        // account project. A local one it replaces is removed from the
+        // browser, AFTER the account has it, never before.
+        bindProject({ kind: 'account', id: meta.id });
+        if (movingLocal) {
+          purgeLocal(movingLocal);
+          if (localMeta?.pinned) {
+            const { setProjectPinned } = await import('../net/api');
+            await setProjectPinned(meta.id, true).catch(() => {});
+          }
+        }
+      }
       designId = meta.id ?? designId;
+      unsynced = false;
       refreshPhotoRow();
       // Flush rather than schedule: the debounce would leave a ~1s window in
       // which the draft still says designId=null, and a tab closed inside it
@@ -1714,6 +1905,11 @@ export function mountToolbar(
       message.textContent = i18nT('save.claimed');
     }
     renderDraftState();
+    // Everything else this browser was holding goes into the account too, so
+    // the Projects page they return to is complete. Quietly, in the
+    // background: the tifo on screen is the one they are thinking about.
+    const { claimAllLocal } = await import('../net/claimProjects');
+    void claimAllLocal(ref?.kind === 'local' ? ref.id : undefined).catch(() => {});
   };
 
   // One action, reachable from two places. It always succeeds, and it never
@@ -1723,6 +1919,7 @@ export function mountToolbar(
     lastSaveTrigger = trigger === saveTopBtn ? 'top' : 'panel';
     track('save_clicked');
     if (!isSignedIn()) {
+      await ensureProject();
       draftWriter.flush(); // forces a write, so lastDraft reflects reality
       track('save_local');
       if (!lastDraft || !lastDraft.ok) {
@@ -1812,38 +2009,17 @@ export function mountToolbar(
   // The durable escape hatch, no longer buried inside a modal.
   ($('#download-tifo') as unknown as HTMLButtonElement).addEventListener('click', () => downloadLocal());
 
+  /**
+   * Open another design: from the gallery, or from a profile.
+   *
+   * It used to be loaded into the canvas in place, over whatever was there.
+   * With projects that would overwrite the open project, so it opens as a
+   * project of its own: your own design opens as itself, anybody else's as a
+   * new project named after it (main.ts decides which, on `from`).
+   */
   const doLoad = async (id: string): Promise<void> => {
-    try {
-      const { title, isPublic, ownerIsMe } = await loadDesign(store, id);
-      docTitle.value = title;
-      designId = ownerIsMe ? id : null; // loading someone else's design = working copy
-      publicChk.checked = isPublic && ownerIsMe;
-      refreshPhotoRow();
-      editor.rebuildPalette();
-      editor.repaintAll();
-      renderPalette();
-      // The banners come back with it — and a design with none has none. This
-      // used to leave the editor's banners alone when the design had no
-      // scene, so opening a template or an older design put the last tifo's
-      // banners on it. Best-effort in the same direction as the save: a
-      // design whose scene will not load is still a design, shown without its
-      // banners rather than refused.
-      let unread = false;
-      if (sceneIO) {
-        let scene: unknown = null;
-        try {
-          scene = await fetchScene(id);
-        } catch {
-          unread = true;
-        }
-        sceneIO.restore(scene);
-        sceneUnread = unread;
-      }
-      message.textContent = ownerIsMe ? `loaded "${title}"` : `loaded "${title}" (read-only copy - Save creates your own)`;
-      if (unread) message.textContent += ` — ${i18nT('bn.msg.sceneUnread')}`;
-    } catch (err) {
-      message.textContent = tv('ed.msg.loadFailed', { err: (err as Error).message });
-    }
+    draftWriter.flush();
+    location.assign(`/app?${new URLSearchParams({ new: '1', from: id }).toString()}`);
   };
   // Hidden input for opening .tifo files.
   const tifoInput = document.createElement('input');
@@ -2723,4 +2899,66 @@ export function mountToolbar(
     });
   }
 
+
+  // ================= the project, for main.ts =================
+  const publishBtnEl = document.getElementById('publish-design') as HTMLButtonElement | null;
+  const api: ToolbarApi = {
+    async createProject({ title, origin }) {
+      creationPending = false;
+      docTitle.value = title;
+      if (isSignedIn()) {
+        try {
+          const meta = await saveDesign(store, map, map.templateRef.id, map.templateRef.version, title, null, origin);
+          if (sceneIO && !sceneUnread) {
+            // Banners carried in (a copy onto another stadium, a template
+            // with banners) go with it. Best-effort, like every scene write.
+            await saveScene(meta.id, sceneIO.snapshot()).catch(() => {});
+          }
+          serverTitle = title;
+          unsynced = false;
+          bindProject({ kind: 'account', id: meta.id });
+          refreshPhotoRow();
+          draftWriter.flush();
+          track('project_created');
+          return ref;
+        } catch {
+          // The account could not be reached. The work is not lost for that:
+          // it becomes a project in this browser, and the next Save moves it.
+          message.textContent = i18nT('ed.proj.localOnly');
+        }
+      }
+      const lp = createLocal({ title, templateId: map.templateRef.id, templateVersion: map.templateRef.version, origin });
+      unsynced = false;
+      bindProject({ kind: 'local', id: lp.id });
+      draftWriter.flush();
+      const thumb = makeStripDataUrl(map, store);
+      if (thumb) writeRaw(thumbKey(lp.id), thumb);
+      if (lastDraft && !lastDraft.ok) message.textContent = i18nT('pj.t.full');
+      track('project_created');
+      return ref;
+    },
+
+    async generate(prompt, autoName) {
+      setPanelMode('ai');
+      openOptionsSheet();
+      message.textContent = i18nT('ed.proj.aiRunning');
+      aiNaming = { autoName };
+      // Naming and keeping happen in onApplied, above, so a design that
+      // arrives later (after a choice card) is named and kept the same way.
+      const ok = (await aiPanel.generate(prompt)) !== null;
+      // Not drawn (yet): the AI panel's own card says why and what to do, so
+      // the status line stops claiming it is designing.
+      if (!ok && message.textContent === i18nT('ed.proj.aiRunning')) message.textContent = '';
+      return ok;
+    },
+
+    publish() {
+      publishBtnEl?.click();
+    },
+
+    bannersKey() {
+      return ref ? keysFor(ref).banners : null;
+    },
+  };
+  return api;
 }

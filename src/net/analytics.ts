@@ -10,6 +10,7 @@
 
 export type FunnelEvent =
   | 'landed'
+  | 'project_created'  // named a project and picked its stadium (or had the AI do it)
   | 'paint_first'
   | 'view_3d'
   | 'view_banner'      // opened the Banner view

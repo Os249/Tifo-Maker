@@ -106,7 +106,7 @@ async function refreshAuthUI(): Promise<void> {
     authBtn.removeAttribute('data-i18n');
     authBtn.textContent = `@${me.username}`;
     authBtn.onclick = () => {
-      window.location.href = '/app';
+      window.location.href = '/projects';
     };
     notifBtn.hidden = false;
     void refreshNotifications();

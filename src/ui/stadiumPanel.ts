@@ -370,7 +370,7 @@ export function mountStadiumPanel(deps: StadiumPanelDeps): void {
     (box.querySelector('#sw-cancel') as HTMLButtonElement).addEventListener('click', close);
     (box.querySelector('#sw-continue') as HTMLButtonElement).addEventListener('click', () => {
       close();
-      requestStadiumSwitch(e.id, { fromId: currentId, palette: store.palette, cells: store.cells, title: docTitle() });
+      void requestStadiumSwitch(e.id, { fromId: currentId, palette: store.palette, cells: store.cells, title: docTitle(), confirmed: true });
     });
     (box.querySelector('#sw-continue') as HTMLButtonElement).focus();
   }

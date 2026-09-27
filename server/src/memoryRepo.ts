@@ -4,6 +4,7 @@ import type {
   AiUsage,
   AiUsageRepository,
   DesignMeta,
+  ProjectItem,
   DesignRecord,
   DesignRepository,
   DiffBytes,
@@ -39,6 +40,8 @@ interface Row extends DesignRecord {
   views: number;
   shareLog: { platform: string; kind: string; at: number }[];
   ogImage: Buffer | null;
+  /** Whether it was published when it went into the Trash. */
+  trashedPublic?: boolean;
 }
 
 /** In-memory AI quota store: dev mode and route tests. Same contract as Postgres. */
@@ -145,7 +148,7 @@ export class MemoryDesignRepository implements DesignRepository {
 
   private meta(r: Row): DesignMeta {
     const { id, title, titleAr, templateId, templateVersion, palette, revisionCount, isPublic, ownerId, createdAt, updatedAt, description, allowRemix, remixedFrom } = r;
-    return { id, title, titleAr: titleAr ?? null, templateId, templateVersion, palette: [...palette], revisionCount, isPublic, ownerId, createdAt, updatedAt, description: description ?? null, allowRemix: allowRemix !== false, remixedFrom: remixedFrom ?? null, viewCount: r.views };
+    return { id, title, titleAr: titleAr ?? null, templateId, templateVersion, palette: [...palette], revisionCount, isPublic, ownerId, createdAt, updatedAt, description: description ?? null, allowRemix: allowRemix !== false, remixedFrom: remixedFrom ?? null, viewCount: r.views, pinned: r.pinned === true, deletedAt: r.deletedAt ?? null, origin: r.origin ?? null };
   }
 
   async create(d: NewDesign): Promise<DesignMeta> {
@@ -172,6 +175,9 @@ export class MemoryDesignRepository implements DesignRepository {
       views: 0,
       shareLog: [],
       ogImage: null,
+      pinned: false,
+      deletedAt: null,
+      origin: d.origin ?? null,
     };
     this.rows.set(row.id, row);
     return this.meta(row);
@@ -179,7 +185,7 @@ export class MemoryDesignRepository implements DesignRepository {
 
   async listByOwner(ownerId: string): Promise<DesignMeta[]> {
     return [...this.rows.values()]
-      .filter((r) => r.ownerId === ownerId)
+      .filter((r) => r.ownerId === ownerId && !r.deletedAt)
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
       .map((r) => this.meta(r));
   }
@@ -201,6 +207,60 @@ export class MemoryDesignRepository implements DesignRepository {
       row.tags = normalizeTags(d.tags);
     }
     return items.length;
+  }
+
+  async listProjects(ownerId: string): Promise<ProjectItem[]> {
+    return [...this.rows.values()]
+      .filter((r) => r.ownerId === ownerId)
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || a.id.localeCompare(b.id))
+      .map((r) => ({ ...this.meta(r), hasThumbnail: r.thumbnail !== null }));
+  }
+
+  async setPinned(id: string, pinned: boolean): Promise<DesignMeta | null> {
+    const r = this.rows.get(id);
+    if (!r) return null;
+    r.pinned = pinned;
+    return this.meta(r);
+  }
+
+  async trash(id: string): Promise<DesignMeta | null> {
+    const r = this.rows.get(id);
+    if (!r) return null;
+    if (!r.deletedAt) {
+      r.trashedPublic = r.isPublic;
+      r.isPublic = false;
+      r.deletedAt = new Date().toISOString();
+    }
+    return this.meta(r);
+  }
+
+  async restore(id: string): Promise<DesignMeta | null> {
+    const r = this.rows.get(id);
+    if (!r) return null;
+    if (r.deletedAt) {
+      r.isPublic = r.trashedPublic === true;
+      r.trashedPublic = false;
+      r.deletedAt = null;
+    }
+    return this.meta(r);
+  }
+
+  async purge(id: string): Promise<boolean> {
+    this.scenes.delete(id);
+    return this.rows.delete(id);
+  }
+
+  async purgeTrashed(cutoff: Date): Promise<number> {
+    let n = 0;
+    const at = cutoff.toISOString();
+    for (const [id, r] of this.rows) {
+      if (r.deletedAt && r.deletedAt < at) {
+        this.rows.delete(id);
+        this.scenes.delete(id);
+        n++;
+      }
+    }
+    return n;
   }
 
   async deleteByOwner(ownerId: string): Promise<void> {

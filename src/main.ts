@@ -18,6 +18,10 @@ import type { BannerView } from './ui/bannerView';
 import type { Preview3D } from './render/preview3d';
 import { track } from './net/analytics';
 import { hasOnboarded } from './ui/onboarding';
+import {
+  accountBannersKey, accountDraftKey, bannersKey, docKey, getLocal, migrateLegacyDraft, openUrl,
+  readEnvelope, readRaw, takeNewProject, writeRaw, type ProjectRef,
+} from './core/projects';
 // Narrow viewports (under EDITOR_MIN_WIDTH) get the read-only viewer for a
 // shared link and the desktop-only gate for /app; ?editor=1 opts out of both,
 // so a draft started on a phone is never permanently stranded.
@@ -33,19 +37,30 @@ else setTimeout(() => void loadTifoFonts(), 2000);
 // and a phone that is about to be told "come back on a laptop" should not pay
 // to download them. Vite splits them into their own chunks.
 
-/** Parse a /d/:id share path OR a ?design=:id query param. Returns the id, or null. */
+/**
+ * The design the URL names: a /d/:id share path, ?design=:id, or ?project=:id
+ * (an account project, from the Projects page). Returns the id, or null.
+ */
 function sharedDesignId(): string | null {
   const m = location.pathname.match(/^\/d\/([A-Za-z0-9-]+)\/?$/);
   if (m) return m[1];
-  const q = new URLSearchParams(location.search).get('design');
+  const params = new URLSearchParams(location.search);
+  const q = params.get('project') ?? params.get('design');
   return q && /^[A-Za-z0-9-]+$/.test(q) ? q : null;
 }
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 async function main(): Promise<void> {
   installTheme();
   initLang();
   applyDom(document);
   installConsent();
+
+  // Read before anything strips it: a provider sign-in comes back to /app
+  // with ?signedin=, and the server can only send it to a bare path.
+  const bootParams = new URLSearchParams(location.search);
+  const returningFromProvider = bootParams.has('signedin');
 
   // Back from a provider's consent screen. This trades the one-time cookie the
   // callback left for the session token, and strips the marker out of the URL.
@@ -71,6 +86,49 @@ async function main(): Promise<void> {
   }
 
   const sharedId = sharedDesignId();
+
+  // ---- which project ----
+  //
+  // The editor always has a project open, and the Projects page is the way
+  // in. So the editor is reached as one of:
+  //   ?project=<id> / ?design=<id> / /d/<id>   a design (yours opens as your project)
+  //   ?local=<id>                              a project kept in this browser
+  //   ?new=1[&from=<id>|&import=1|&ai=1]       a project being created right now
+  // and a bare /app goes to the Projects page. ?admin= deep links from the
+  // dashboard still open the editor as they did.
+  migrateLegacyDraft();
+  const localId = bootParams.get('local');
+  const isNew = bootParams.get('new') === '1';
+  const fromRaw = isNew ? bootParams.get('from') : null;
+  const fromId = fromRaw && UUID_RE.test(fromRaw) ? fromRaw : null;
+  if (!sharedId && !localId && !isNew && !bootParams.get('admin')) {
+    // Back from a provider's sign-in: return to the project that was open in
+    // this tab, where the half of the save flow the redirect interrupted waits.
+    let back: string | null = null;
+    if (returningFromProvider) {
+      try {
+        back = (JSON.parse(sessionStorage.getItem('tifo_open_project') ?? 'null') as { url?: string } | null)?.url ?? null;
+      } catch {
+        back = null;
+      }
+    }
+    if (back && back.startsWith('/app?')) {
+      location.replace(back);
+      return;
+    }
+    const q = new URLSearchParams(location.search);
+    q.set('start', '1');
+    location.replace(`/projects?${q.toString()}`);
+    return;
+  }
+  const intent = isNew ? takeNewProject() : null;
+  const localProject = localId ? getLocal(localId) : null;
+  if (localId && (!localProject || localProject.deletedAt)) {
+    location.replace('/projects?missing=1');
+    return;
+  }
+  const localEnv = localProject ? readEnvelope(docKey(localProject.id)) : null;
+
   // The editor is desktop-only for now. Two phone bug reports were both people
   // hitting walls inside an editor that had let them in; this stops them at the
   // door instead, and stops here so the seat map, Pixi, Three and the toolbar
@@ -131,16 +189,26 @@ async function main(): Promise<void> {
   // A shared design may live on any template, so resolve its template BEFORE
   // generating the seat map (the map must match the saved cell count).
   let template = DEFAULT_TEMPLATE;
-  if (sharedId) {
+  const sourceId = sharedId ?? fromId;
+  if (sourceId) {
     try {
       const { fetchDesignTemplate } = await import('./net/api');
-      const ref = await fetchDesignTemplate(sharedId);
+      const ref = await fetchDesignTemplate(sourceId);
       template = templateById(ref.templateId) ?? DEFAULT_TEMPLATE;
     } catch {
-      // Fall back to the default template; the load below will surface errors.
+      // A project link that does not open (deleted, or someone else's private
+      // design) goes back to the list with a reason, rather than opening an
+      // empty canvas that looks like the project lost its seats. A share link
+      // falls back to the default template; the load below surfaces the error.
+      if (bootParams.has('project') || fromId) {
+        location.replace('/projects?missing=1');
+        return;
+      }
     }
+  } else if (localProject) {
+    template = templateById(localEnv?.templateId ?? localProject.templateId) ?? DEFAULT_TEMPLATE;
   } else {
-    const wanted = new URLSearchParams(location.search).get('template');
+    const wanted = bootParams.get('template') ?? intent?.templateId;
     template = templateById(wanted ?? '') ?? DEFAULT_TEMPLATE;
   }
 
@@ -177,12 +245,15 @@ async function main(): Promise<void> {
   }
   stadiumSel.value = template.id;
   stadiumSel.addEventListener('change', () => {
-    // Shared switch path (also used by the Stadium panel): stash → reload → remap.
-    requestStadiumSwitch(stadiumSel.value, {
+    // Shared switch path (also used by the Stadium panel): a copy of this
+    // project on the other stadium, after asking. Declined, the select goes back.
+    void requestStadiumSwitch(stadiumSel.value, {
       fromId: template.id,
       palette: store.palette,
       cells: store.cells,
       title: docTitleValue(),
+    }).then((went) => {
+      if (!went) stadiumSel.value = template.id;
     });
   });
 
@@ -195,16 +266,17 @@ async function main(): Promise<void> {
   let sharedLoadedEarly = false;
   const store = new DesignStore(map, DEFAULT_PALETTE.slice());
 
-  // Cross-stadium remap pickup: if we arrived from a stadium switch, regenerate
-  // the SOURCE map, remap the saved cells onto THIS bowl by relative position,
-  // and load the result — the design's look is preserved across the size change.
+  // A copy onto another stadium (see stadiumSwitch.ts): regenerate the SOURCE
+  // map, remap the saved cells onto THIS bowl by relative position, and load
+  // the result. Only ever into a new project; the original is left alone.
   let remapTitle: string | null = null;
   let remappedFrom: string | null = null;
+  let remapBanners: string | null = null;
   try {
-    const raw = sessionStorage.getItem('tifo_stadium_remap');
+    const raw = isNew ? sessionStorage.getItem('tifo_stadium_remap') : null;
     if (raw) {
       sessionStorage.removeItem('tifo_stadium_remap');
-      const data = JSON.parse(raw) as { fromTemplate: string; palette: string[]; cells: number[]; title?: string; prevTemplate?: string };
+      const data = JSON.parse(raw) as { fromTemplate: string; palette: string[]; cells: number[]; title?: string; prevTemplate?: string; banners?: string | null };
       const fromTpl = templateById(data.fromTemplate);
       if (fromTpl && Array.isArray(data.cells)) {
         const oldMap = await generateSeatMapAsync(fromTpl.id);
@@ -213,8 +285,9 @@ async function main(): Promise<void> {
           const remapped = remapDesignAcrossStadiums(Uint8Array.from(data.cells), oldMap, map);
           store.setPalette((data.palette ?? DEFAULT_PALETTE).slice(0, 256));
           store.loadCells(remapped);
-          remapTitle = data.title ?? null;
+          remapTitle = tv('ed.proj.copyOn', { name: data.title || t('np.nameDefault'), stadium: tl(template.id) }).slice(0, 80);
           remappedFrom = data.prevTemplate ?? data.fromTemplate;
+          remapBanners = typeof data.banners === 'string' ? data.banners : null;
           sharedLoadedEarly = true;
         }
       }
@@ -223,38 +296,76 @@ async function main(): Promise<void> {
     /* fall through to normal seed/load */
   }
 
-  // Either load a shared design, or seed a starter so the canvas never opens
-  // blank (the border preset is template-agnostic — derives tier edges from the map).
+  // A design named by the URL: an account project, a share link, or the source
+  // of a new project (?from=).
   let sharedTitle: string | null = null;
   let sharedLoaded = sharedLoadedEarly;
+  /** The design is the viewer's own: it opens as their project. */
+  let ownedProject = false;
+  /** This browser held edits to it that the account never got. */
+  let restoredUnsaved = false;
   /** A shared design's banners, restored once the stores exist further down. */
   let sharedScene: unknown = null;
-  if (sharedId && !sharedLoaded) {
+  if (sourceId && !sharedLoaded) {
     try {
       const { loadDesign } = await import('./net/api');
-      const r = await loadDesign(store, sharedId);
+      const r = await loadDesign(store, sourceId);
       sharedTitle = r.title;
       sharedLoaded = true;
+      if (r.ownerIsMe && fromId) {
+        // "Open" on one of your own designs from the gallery or your profile
+        // opens it as itself, not as a copy of itself.
+        location.replace(openUrl({ kind: 'account', id: fromId }));
+        return;
+      }
+      ownedProject = r.ownerIsMe && !!sharedId;
     } catch {
       sharedLoaded = false;
+      if (fromId) {
+        location.replace('/projects?missing=1');
+        return;
+      }
     }
   }
-  if (sharedId && sharedLoaded) {
+  if (sourceId && sharedLoaded) {
     // Separate request, and a failure here costs the banners rather than the
     // tifo: an old design simply has no scene, and that is not an error.
     try {
       const { fetchScene } = await import('./net/api');
-      sharedScene = await fetchScene(sharedId);
+      sharedScene = await fetchScene(sourceId);
     } catch {
       sharedScene = null;
     }
   }
 
-  // A .tifo file for a different stadium reloads with ?template= and stashes the
-  // design here; pick it up now that this template's seat map matches its cells.
+  // Edits this browser kept for an account project and never saved to it come
+  // back, rather than being quietly replaced by the older copy on the server.
+  let draftAge: string | null = null;
+  const { describeAge } = await import('./core/draft');
+  if (ownedProject && sharedId) {
+    const env = readEnvelope(accountDraftKey(sharedId));
+    if (env?.dirty && env.templateId === template.id && env.templateVersion === template.version) {
+      try {
+        const { validateTifo, flattenLayers } = await import('./core/tifoFormat');
+        const result = validateTifo(env.doc, (id, v) => (id === template.id && v === template.version ? map.count : null));
+        if (result.valid && result.doc) {
+          store.setPalette(result.doc.palette.slice(0, 256));
+          store.loadCells(flattenLayers(result.doc));
+          sharedTitle = env.title || sharedTitle;
+          restoredUnsaved = true;
+          draftAge = describeAge(env.savedAt);
+        }
+      } catch {
+        /* the server copy stands */
+      }
+    }
+  }
+
+  // A .tifo file opened as a new project (from the Projects page or the
+  // editor's Open file), validated against this stadium's seat map.
   let pendingTitle: string | null = null;
-  let draftAge: string | null = null; // set when a local draft was restored
-  if (!sharedLoaded) {
+  let imported = false;
+  if (isNew && bootParams.get('import') === '1' && !sharedLoaded) {
     let pending: string | null = null;
     try {
       pending = sessionStorage.getItem('tifo_pending_import');
@@ -262,50 +373,41 @@ async function main(): Promise<void> {
     } catch {
       pending = null;
     }
-    if (pending) {
-      try {
-        const parsed = JSON.parse(pending);
-        const { validateTifo, flattenLayers } = await import('./core/tifoFormat');
-        const result = validateTifo(parsed, (id, v) =>
-          id === template.id && v === template.version ? map.count : null,
-        );
-        if (result.valid && result.doc) {
-          store.setPalette(result.doc.palette.slice(0, 256));
-          store.loadCells(flattenLayers(result.doc));
-          pendingTitle = result.doc.meta?.title ?? 'Imported tifo';
-          sharedLoaded = true; // suppress the starter seed + onboarding
-        }
-      } catch {
-        /* fall through to seed */
-      }
+    try {
+      const parsed = pending ? JSON.parse(pending) : null;
+      const { validateTifo, flattenLayers } = await import('./core/tifoFormat');
+      const result = validateTifo(parsed, (id, v) =>
+        id === template.id && v === template.version ? map.count : null,
+      );
+      if (!result.valid || !result.doc) throw new Error('invalid');
+      store.setPalette(result.doc.palette.slice(0, 256));
+      store.loadCells(flattenLayers(result.doc));
+      pendingTitle = result.doc.meta?.title ?? null;
+      sharedLoaded = true;
+      imported = true;
+    } catch {
+      // Never a new project with nothing in it where a file was promised.
+      location.replace('/projects?importfail=1');
+      return;
     }
   }
 
-  // Nothing else claimed the canvas, so restore whatever this browser was last
-  // working on. This is the whole point of the draft: someone who painted a tifo
-  // and closed the tab gets it back instead of starting from nothing.
-  let restoredDesignId: string | null = null;
-  if (!sharedLoaded) {
-    const { readDraft, describeAge } = await import('./core/draft');
-    const draft = readDraft();
-    // Only restore into the stadium it was drawn for; seat counts differ per
-    // template and cells are positional.
-    if (draft && draft.templateId === template.id && draft.templateVersion === template.version) {
+  // A project kept in this browser.
+  if (localProject && !sharedLoaded) {
+    pendingTitle = localProject.title;
+    if (localEnv) {
       try {
         const { validateTifo, flattenLayers } = await import('./core/tifoFormat');
-        const result = validateTifo(draft.doc, (id, v) =>
+        const result = validateTifo(localEnv.doc, (id, v) =>
           id === template.id && v === template.version ? map.count : null,
         );
         if (result.valid && result.doc) {
           store.setPalette(result.doc.palette.slice(0, 256));
           store.loadCells(flattenLayers(result.doc));
-          pendingTitle = draft.title || result.doc.meta?.title || t('ed.docTitlePlaceholder');
-          restoredDesignId = draft.designId;
-          sharedLoaded = true; // suppress the starter seed + onboarding
-          draftAge = describeAge(draft.savedAt);
+          sharedLoaded = true;
         }
       } catch {
-        /* a corrupt draft must never block the editor from opening */
+        /* a corrupt copy must never block the editor from opening */
       }
     }
   }
@@ -367,9 +469,18 @@ async function main(): Promise<void> {
     },
   };
 
-  if (sharedScene) sceneIO.restore(sharedScene);
+  // The account's banners, unless this browser has newer ones for it (below).
+  if (sharedScene && !restoredUnsaved) sceneIO.restore(sharedScene);
 
-  mountToolbar(document.body, editor, store, map, objects, () => preview, restoredDesignId, sceneIO);
+  const projectRef: ProjectRef | null =
+    ownedProject && sharedId ? { kind: 'account', id: sharedId }
+      : localProject ? { kind: 'local', id: localProject.id }
+        : null;
+  const tb = mountToolbar(document.body, editor, store, map, objects, () => preview, null, sceneIO, {
+    ref: projectRef,
+    pending: isNew,
+    unsynced: restoredUnsaved,
+  });
 
   // A sign-in that did not finish says why, in the same place every other
   // outcome is reported. Reasons are a fixed set from the callback; nothing the
@@ -735,19 +846,23 @@ async function main(): Promise<void> {
   // tifo starts with none. It used to load them whatever the canvas held, so
   // a first visit, a link to another stadium, an imported file or a shared
   // design without banners all opened with the last tifo's banners on them.
-  const continuing = draftAge !== null || remappedFrom !== null;
+  // Each project keeps its own, so they come back with that project and no
+  // other: a local project's, an account project's unsaved ones, or the ones a
+  // copy onto another stadium carried with it.
   try {
-    const rawB = continuing ? localStorage.getItem('tifo_banners_v1') : null;
+    const rawB = localProject
+      ? readRaw(bannersKey(localProject.id))
+      : restoredUnsaved && sharedId
+        ? readRaw(accountBannersKey(sharedId))
+        : remapBanners;
     if (rawB && bannerStore.count === 0) bannerStore.loadJSON(JSON.parse(rawB));
   } catch {
     /* ignore */
   }
   const writeBanners = (): void => {
-    try {
-      localStorage.setItem('tifo_banners_v1', JSON.stringify(bannerStore.toJSON()));
-    } catch {
-      /* quota exceeded (a pasted photo) — the banner still lives for this session */
-    }
+    const key = tb.bannersKey();
+    // Quota exceeded (a pasted photo): the banner still lives for this session.
+    if (key) writeRaw(key, JSON.stringify(bannerStore.toJSON()));
   };
   // And the key is written with every draft, so the two always describe the
   // same tifo. A new tifo that never touches its banners would otherwise
@@ -813,11 +928,15 @@ async function main(): Promise<void> {
   if (draftAge) {
     track('draft_restored');
     const msg = document.getElementById('message');
-    if (msg) msg.textContent = `restored your tifo from ${draftAge}`;
+    if (msg) msg.textContent = tv('ed.proj.unsaved', { age: draftAge });
+  }
+  if (imported) {
+    const msg = document.getElementById('message');
+    if (msg) msg.textContent = t('ed.proj.imported');
   }
 
   // If we loaded a shared design or an imported file, reflect title + repaint.
-  const loadedTitle = sharedTitle ?? pendingTitle ?? remapTitle;
+  const loadedTitle = remapTitle ?? sharedTitle ?? pendingTitle;
   if (sharedLoaded && loadedTitle) {
     const docTitle = document.getElementById('doc-title') as HTMLInputElement | null;
     if (docTitle) docTitle.value = loadedTitle;
@@ -825,37 +944,22 @@ async function main(): Promise<void> {
     editor.repaintAll();
   }
 
-  // Reversible stadium switch: after a remap, offer a one-click switch back to
-  // the previous stadium (which remaps the current design back).
+  // A copy onto another stadium: say what happened. The original project is
+  // untouched and still on the Projects page, so there is nothing to undo.
   if (remappedFrom) {
     editor.rebuildPalette();
     editor.repaintAll();
     const msg = document.getElementById('message');
-    const prevTpl = TEMPLATES.find((t) => t.id === remappedFrom);
-    if (msg && prevTpl) {
-      // Built from nodes: a custom stadium's name is whatever its author typed.
-      msg.textContent = `design fitted to ${template.name}. `;
-      const undo = document.createElement('button');
-      undo.id = 'undo-stadium';
-      undo.style.cssText = 'all:unset;color:var(--flare);cursor:pointer;text-decoration:underline;';
-      undo.textContent = `Switch back to ${prevTpl.name}`;
-      msg.appendChild(undo);
-      undo.addEventListener('click', () => {
-        stadiumSel.value = remappedFrom!;
-        stadiumSel.dispatchEvent(new Event('change'));
-      });
-    }
+    if (msg) msg.textContent = `design fitted to ${tl(template.id)}.`;
   }
 
-  // First-run onboarding: only for a fresh visitor on a normal boot (never via
-  // a share link or a file import — those already have content/context).
-  if (!sharedId && !sharedLoaded && !hasOnboarded()) {
+  // The first-run guide: someone's very first project, started blank. Never
+  // for a project that already has content (a file, a copy, a design from the
+  // gallery) or one the AI is about to draw, and never again after the first.
+  if (isNew && !sharedLoaded && !intent?.prompt && !hasOnboarded()) {
     const { openOnboarding } = await import('./ui/onboarding');
     const choice = await openOnboarding(PATTERN_PRESETS);
     if (choice) {
-      // Set the project name the user chose.
-      const docTitleEl = document.getElementById('doc-title') as HTMLInputElement | null;
-      if (docTitleEl && choice.projectName) docTitleEl.value = choice.projectName;
       const palette = PALETTE_PRESETS[choice.paletteName];
       if (palette) store.setPalette(palette.slice());
       // Apply the chosen starting point.
@@ -907,6 +1011,33 @@ async function main(): Promise<void> {
         setTimeout(() => void startTour(), 400);
       }
     }
+  }
+
+  // A project being created: it exists from here on, in the account when
+  // there is one and in this browser when there is not. Created AFTER the
+  // guide, so the saved copy is the starting point they chose.
+  if (isNew) {
+    const title = (
+      intent?.title?.trim() ||
+      remapTitle ||
+      sharedTitle ||
+      pendingTitle ||
+      t('np.nameDefault')
+    ).slice(0, 80);
+    await tb.createProject({ title, origin: intent?.prompt ? 'ai' : null });
+    if (fromId) {
+      const msg = document.getElementById('message');
+      if (msg && !msg.textContent) msg.textContent = t('ed.proj.fromPick');
+    }
+    if (intent?.prompt) await tb.generate(intent.prompt, intent.autoName !== false);
+  }
+  // "Publish to the community" on the Projects page opens the project here,
+  // where the publish dialog and its name, tags and remix choices live.
+  if (bootParams.get('publish') === '1') {
+    const u = new URL(location.href);
+    u.searchParams.delete('publish');
+    history.replaceState(null, '', u.pathname + u.search);
+    tb.publish();
   }
 
   // "Banners are here", once, to everyone who opens the editor — after the

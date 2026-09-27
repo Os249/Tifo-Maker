@@ -51,6 +51,13 @@ export interface DraftEnvelope {
    * save would fork a duplicate instead of updating the original.
    */
   designId: string | null;
+  /** The local project this belongs to, when it is one (see core/projects). */
+  projectId?: string | null;
+  /**
+   * True when this copy holds changes the account has not got yet. Only
+   * meaningful for an account project: a local project's copy is the only one.
+   */
+  dirty?: boolean;
   doc: TifoDocV2;
 }
 
@@ -84,6 +91,8 @@ export function buildDraft(args: {
   cells: Uint8Array;
   textObjects: DraftTextObject[];
   designId: string | null;
+  projectId?: string | null;
+  dirty?: boolean;
 }): DraftEnvelope {
   const doc = buildTifoV2({
     title: args.title,
@@ -101,6 +110,8 @@ export function buildDraft(args: {
     templateVersion: args.templateVersion,
     title: args.title,
     designId: args.designId,
+    projectId: args.projectId ?? null,
+    dirty: args.dirty ?? false,
     doc,
   };
 }
@@ -182,6 +193,8 @@ export function createDraftWriter(
   build: () => DraftEnvelope | null,
   onResult: (r: DraftWriteResult) => void,
   delayMs = 1200,
+  /** Where it goes. Projects pass their own key (see core/projects). */
+  write: (env: DraftEnvelope) => DraftWriteResult = writeDraft,
 ): { schedule: () => void; flush: () => void; stop: () => void } {
   let timer: ReturnType<typeof setTimeout> | null = null;
   let pending = false;
@@ -192,7 +205,7 @@ export function createDraftWriter(
     pending = false;
     const env = build();
     if (!env) return;
-    onResult(writeDraft(env));
+    onResult(write(env));
   };
 
   return {

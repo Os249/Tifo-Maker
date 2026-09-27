@@ -60,7 +60,7 @@ async function sim({ lang = 'en', w = 1280, h = 900, phone = false } = {}) {
     const i = t.indexOf('accessories {');
     if (i >= 0) { try { log.push(JSON.parse(t.slice(i + 'accessories '.length))); } catch { /* not ours */ } }
   });
-  await p.goto(B + '/app?sim=1', { waitUntil: 'networkidle', timeout: 120000 });
+  await p.goto(B + '/app?new=1&sim=1', { waitUntil: 'networkidle', timeout: 120000 });
   await p.waitForSelector('.mds-overlay canvas', { timeout: 120000 });
   await p.waitForTimeout(3000);
   return { ctx, p, errs, log, last: () => log[log.length - 1] };

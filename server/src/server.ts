@@ -12,7 +12,7 @@ import { MemoryDailyFeatureRepository, PgDailyFeatureRepository, type DailyFeatu
 import { MemoryAdminStatsRepository, PgAdminStatsRepository } from './statsRepo';
 import { MemoryTrafficRepository, PgTrafficRepository, type TrafficRepository } from './trafficRepo';
 import { MemoryFeedbackRepository, PgFeedbackRepository, type FeedbackRepository } from './feedbackRepo';
-import { buildApp, type TemplateInfo } from './routes';
+import { buildApp, TRASH_DAYS, type TemplateInfo } from './routes';
 import { createEmailSender } from './email';
 import { seedShowcase, seedTemplates } from './seedTemplates';
 import type { AuthRepository, DesignRepository } from './repo';
@@ -237,6 +237,23 @@ async function main(): Promise<void> {
       `${staticDir ? 'serving app + api' : 'api only'}, ` +
       `${templates.map((t) => `${t.id}=${t.seatCount}`).join(', ')})`,
   );
+
+  // Empty the Trash of anything that has sat there for TRASH_DAYS. After
+  // listen, not awaited, and best-effort: a slow delete must never hold the
+  // port shut, and one that fails simply runs again at the next sweep.
+  if (seedRepos) {
+    const { designs } = seedRepos;
+    const sweep = async (): Promise<void> => {
+      try {
+        const n = await designs.purgeTrashed(new Date(Date.now() - TRASH_DAYS * 24 * 60 * 60 * 1000));
+        if (n) console.log(`[tifo] trash: deleted ${n} project(s) past ${TRASH_DAYS} days`);
+      } catch (e) {
+        console.warn('[tifo] trash sweep failed:', (e as Error).message);
+      }
+    };
+    void sweep();
+    setInterval(() => void sweep(), 6 * 60 * 60 * 1000).unref();
+  }
 
   // Load the starter-template library — AFTER listen, and not awaited.
   //

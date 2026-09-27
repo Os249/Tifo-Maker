@@ -18,6 +18,7 @@ export default defineConfig({
         legal: resolve(__dirname, 'legal.html'),
         reset: resolve(__dirname, 'reset.html'),
         account: resolve(__dirname, 'account.html'),
+        projects: resolve(__dirname, 'projects.html'),
       },
     },
   },

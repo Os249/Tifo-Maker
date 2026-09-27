@@ -477,11 +477,31 @@ function fromB64(b64: string): Uint8Array {
 
 // ---------- thumbnail ----------
 
-/** Render the design to a small PNG strip (the gallery card image). */
+/** The server refuses a thumbnail over 128 KB; keep well inside it. */
+const THUMB_BUDGET = 120 * 1024;
+
+/**
+ * Render the design to a small PNG strip (the gallery card image).
+ *
+ * Kept under the server's size cap. A busy design on a deep bowl (the Jewel's
+ * three tiers) came out over 128 KB at 800 px, and the server's refusal took
+ * the whole Save down with it: "thumbnailPngB64 must decode to 1..131072
+ * bytes", and the tifo was not saved. Seats are drawn on whole pixels, which
+ * stops every edge antialiasing into a new colour (the main cost in a PNG),
+ * and if it is still too big it is drawn narrower until it fits.
+ */
 export function makeThumbnailB64(map: SeatMap, store: DesignStore): string {
+  let out = '';
+  for (const W of [800, 640, 480, 320]) {
+    out = renderThumbnailB64(map, store, W);
+    if (out.length * 0.75 <= THUMB_BUDGET) return out;
+  }
+  return out;
+}
+
+function renderThumbnailB64(map: SeatMap, store: DesignStore, W: number): string {
   // Wider source than it displays at, so the gallery banner stays crisp (the
   // card shows the whole unrolled tifo at its true aspect via .card-thumb-img).
-  const W = 800;
   const bw = map.bounds.maxX - map.bounds.minX;
   const bh = map.bounds.maxY - map.bounds.minY;
   const scale = W / bw;
@@ -493,13 +513,15 @@ export function makeThumbnailB64(map: SeatMap, store: DesignStore): string {
   ctx.fillStyle = '#14171f';
   ctx.fillRect(0, 0, W, H);
   const colors = store.palette.map((hex, i) => (i === 0 ? '#262a33' : hex));
+  const sw = Math.max(1, Math.round(3.2 * scale));
+  const sh = Math.max(1, Math.round(8 * scale * 0.85));
   for (let c = 0; c < colors.length; c++) {
     ctx.fillStyle = colors[c];
     for (let i = 0; i < map.count; i++) {
       if (store.cells[i] !== c) continue;
-      const x = (map.xy[i * 2] - map.bounds.minX) * scale;
-      const y = (map.xy[i * 2 + 1] - map.bounds.minY) * scale + 2;
-      ctx.fillRect(x, y, Math.max(0.6, 3.2 * scale), Math.max(1, 8 * scale * 0.85));
+      const x = Math.round((map.xy[i * 2] - map.bounds.minX) * scale);
+      const y = Math.round((map.xy[i * 2 + 1] - map.bounds.minY) * scale + 2);
+      ctx.fillRect(x, y, sw, sh);
     }
   }
   return canvas.toDataURL('image/png').split(',')[1];
@@ -522,12 +544,14 @@ export async function saveDesign(
   templateVersion: number,
   title: string,
   id: string | null,
+  /** For a new design only: how the project began ('ai' earns a badge). */
+  origin: 'ai' | null = null,
 ): Promise<SavedMeta> {
   const cellsGzB64 = toB64(await gzip(store.cells));
   const thumbnailPngB64 = makeThumbnailB64(map, store);
   const payload = id
     ? { palette: store.palette, cellsGzB64, thumbnailPngB64 }
-    : { title, templateId, templateVersion, palette: store.palette, cellsGzB64, thumbnailPngB64 };
+    : { title, templateId, templateVersion, palette: store.palette, cellsGzB64, thumbnailPngB64, ...(origin ? { origin } : {}) };
   const res = await fetch(id ? `${API}/designs/${id}` : `${API}/designs`, {
     method: id ? 'PUT' : 'POST',
     headers: authHeaders(true),
@@ -542,6 +566,117 @@ export async function saveDesign(
     /* ignore */
   }
   return meta;
+}
+
+// ---------- projects ----------
+
+/** One account project, as the Projects page shows it. */
+export interface AccountProject {
+  id: string;
+  title: string;
+  templateId: string;
+  templateVersion: number;
+  isPublic: boolean;
+  pinned: boolean;
+  deletedAt: string | null;
+  origin: string | null;
+  hasThumbnail: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * A private design's card picture, as an object URL.
+ *
+ * An <img> cannot send the Authorization header, so a private design's
+ * thumbnail route answers it 404. The Projects page fetches its own pictures
+ * instead. Null when there is none.
+ */
+export async function fetchThumbnailObjectUrl(id: string): Promise<string | null> {
+  const res = await fetch(`${API}/designs/${id}/thumbnail.png`, { headers: authHeaders(false) });
+  if (!res.ok) return null;
+  // A data: URL, not a blob: one. The Content-Security-Policy allows images
+  // from 'self' and data: only, so a blob: URL is refused and the card shows
+  // nothing at all.
+  const blob = await res.blob();
+  return new Promise((resolve) => {
+    const r = new FileReader();
+    r.onload = () => resolve(typeof r.result === 'string' ? r.result : null);
+    r.onerror = () => resolve(null);
+    r.readAsDataURL(blob);
+  });
+}
+
+/** Every project on the signed-in account, trashed ones included. */
+export async function listProjects(): Promise<{ projects: AccountProject[]; trashDays: number }> {
+  const res = await fetch(`${API}/projects`, { headers: authHeaders(false), cache: 'no-store' });
+  return (await expectOk(res)) as { projects: AccountProject[]; trashDays: number };
+}
+
+/**
+ * Create an account project from seats that already exist somewhere else: a
+ * local project being moved in, or a brand-new one the editor just laid out.
+ */
+export async function createDesignFromCells(d: {
+  title: string;
+  templateId: string;
+  templateVersion: number;
+  palette: string[];
+  cells: Uint8Array;
+  thumbnailPngB64?: string | null;
+  origin?: 'ai' | null;
+}): Promise<SavedMeta> {
+  const cellsGzB64 = toB64(await gzip(d.cells));
+  const res = await fetch(`${API}/designs`, {
+    method: 'POST',
+    headers: authHeaders(true),
+    body: JSON.stringify({
+      title: d.title,
+      templateId: d.templateId,
+      templateVersion: d.templateVersion,
+      palette: d.palette,
+      cellsGzB64,
+      ...(d.thumbnailPngB64 ? { thumbnailPngB64: d.thumbnailPngB64 } : {}),
+      ...(d.origin ? { origin: d.origin } : {}),
+    }),
+  });
+  return (await expectOk(res)) as SavedMeta;
+}
+
+export async function setProjectPinned(id: string, pinned: boolean): Promise<void> {
+  await expectOk(await fetch(`${API}/designs/${id}`, {
+    method: 'PATCH', headers: authHeaders(true), body: JSON.stringify({ pinned }),
+  }));
+}
+
+/** Into the Trash (permanent=false), or out of existence from there. */
+export async function deleteProject(id: string, permanent = false): Promise<void> {
+  const res = await fetch(`${API}/designs/${id}${permanent ? '?permanent=1' : ''}`, {
+    method: 'DELETE', headers: authHeaders(false),
+  });
+  if (res.status === 204) return;
+  await expectOk(res);
+}
+
+export async function restoreProject(id: string): Promise<void> {
+  await expectOk(await fetch(`${API}/designs/${id}/restore`, { method: 'POST', headers: authHeaders(false) }));
+}
+
+/** A private copy on the same stadium, banners included. */
+export async function duplicateProject(id: string, title: string): Promise<SavedMeta> {
+  return (await expectOk(await fetch(`${API}/designs/${id}/fork`, {
+    method: 'POST', headers: authHeaders(true), body: JSON.stringify({ title }),
+  }))) as SavedMeta;
+}
+
+/** The raw seats and palette of a design, without a store to load them into. */
+export async function fetchDesignCells(id: string): Promise<{
+  title: string; palette: string[]; cells: Uint8Array; templateId: string; templateVersion: number;
+}> {
+  const data = (await expectOk(await fetch(`${API}/designs/${id}`, { headers: authHeaders(false) }))) as {
+    title: string; palette: string[]; cellsGzB64: string; templateId: string; templateVersion: number;
+  };
+  return { title: data.title, palette: data.palette, cells: await gunzip(fromB64(data.cellsGzB64)), templateId: data.templateId, templateVersion: data.templateVersion };
 }
 
 /**

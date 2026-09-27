@@ -150,7 +150,7 @@ for (const lang of ['en', 'ar']) {
     { name: 'tifo_lang_v1', value: lang }, { name: 'tifo_consent_v1', value: 'essential' }, { name: 'tifo_onboarded_v1', value: '1' }] }] } });
   const p = await ctx.newPage();
   await p.route('**/api/auth/providers', (r) => r.fulfill({ contentType: 'application/json', body: '{"providers":["google"]}' }));
-  await p.goto(B + '/app', { waitUntil: 'networkidle', timeout: 120000 });
+  await p.goto(B + '/app?new=1', { waitUntil: 'networkidle', timeout: 120000 });
   await p.waitForFunction(() => document.getElementById('signin'), null, { timeout: 60000 });
   await p.evaluate(() => document.getElementById('signin').click());
   await p.waitForSelector('.auth-providers:not([hidden])', { timeout: 10000 }).catch(() => {});

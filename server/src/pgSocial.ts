@@ -33,7 +33,7 @@ export class PgSocialRepository implements SocialRepository {
       await client.query('BEGIN');
       // Only public + remixable designs can be remixed. Lock the source row.
       const src = await client.query(
-        `SELECT id, template_id, template_version, palette, cells, owner_id, allow_remix, is_public
+        `SELECT id, template_id, template_version, palette, cells, owner_id, allow_remix, is_public, thumbnail
          FROM designs WHERE id = $1 FOR SHARE`,
         [sourceId],
       );
@@ -49,14 +49,14 @@ export class PgSocialRepository implements SocialRepository {
       // Duplicate the data into a brand-new private design owned by the remixer,
       // stamping remixed_from for attribution. The original is never mutated.
       const ins = await client.query(
-        `INSERT INTO designs (title, template_id, template_version, palette, cells, owner_id, is_public, remixed_from)
-         VALUES ($1, $2, $3, $4, $5, $6, false, $7)
+        `INSERT INTO designs (title, template_id, template_version, palette, cells, owner_id, is_public, remixed_from, thumbnail)
+         VALUES ($1, $2, $3, $4, $5, $6, false, $7, $8)
          RETURNING id, title, template_id, template_version, palette, revision_count,
                    is_public, owner_id, created_at, updated_at, description, allow_remix, remixed_from`,
         // palette is JSONB: it comes back from SELECT as a parsed JS array, so it
         // must be re-serialized on the way back in (node-pg would otherwise send a
         // JS array as a Postgres array literal, which JSONB rejects → 500).
-        [title, s.template_id, s.template_version, typeof s.palette === 'string' ? s.palette : JSON.stringify(s.palette), s.cells, newOwnerId, sourceId],
+        [title, s.template_id, s.template_version, typeof s.palette === 'string' ? s.palette : JSON.stringify(s.palette), s.cells, newOwnerId, sourceId, s.thumbnail ?? null],
       );
       // Notify the original creator that their work was remixed.
       if (s.owner_id && s.owner_id !== newOwnerId) {

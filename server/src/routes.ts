@@ -88,6 +88,8 @@ const USERNAME = /^[a-zA-Z0-9_]{3,24}$/;
  *  remix did not, so a title could be as large as the 1MB body allowed - and it
  *  is echoed into page <title> and OG tags on every share page. */
 const MAX_TITLE = 120;
+/** How long a project stays in the Trash before it is deleted for good. */
+export const TRASH_DAYS = 30;
 const cleanTitle = (v: unknown, fallback: string): string => {
   const t = typeof v === 'string' ? v.trim() : '';
   return (t || fallback).slice(0, MAX_TITLE);
@@ -618,6 +620,7 @@ export async function buildApp(
   // can't be polluted with arbitrary names.
   const FUNNEL_STEPS = [
     'landed',          // arrived in the editor
+    'project_created', // named a project and picked its stadium
     'paint_first',     // first brush stroke
     'view_3d',         // opened the stadium / split view
     'draft_restored',  // returned and their local draft was still there
@@ -1288,7 +1291,7 @@ export async function buildApp(
     return reply
       .header('cache-control', 'no-store')
       .header('referrer-policy', 'no-referrer')
-      .redirect(`/app?verified=${userId ? 1 : 0}`);
+      .redirect(`/projects?verified=${userId ? 1 : 0}`);
   });
 
   // Re-send the verification email to the signed-in user. The cooldown and its
@@ -2410,6 +2413,7 @@ export async function buildApp(
       palette?: unknown;
       cellsGzB64?: string;
       thumbnailPngB64?: string;
+      origin?: unknown;
     };
     const count = seatCount(body.templateId ?? '', body.templateVersion ?? -1);
     if (typeof body.title === 'string' && body.title.length > MAX_TITLE) {
@@ -2440,8 +2444,22 @@ export async function buildApp(
         cellsGz,
         ownerId: userId,
         thumbnailPng: thumb,
+        // A closed set: this is a badge on the owner's own card, not free text.
+        origin: body.origin === 'ai' ? 'ai' : null,
       }),
     );
+  });
+
+  // ---------- projects ----------
+  //
+  // Every design someone owns is one of their projects. The page lists them
+  // all, trashed ones included (the client shows those under Trash), with
+  // nothing capped: listByOwner is the profile query and stops at 200.
+  app.get('/api/projects', async (req, reply) => {
+    const userId = await requireUser(req, reply);
+    if (!userId) return;
+    reply.header('cache-control', 'no-store');
+    return { projects: await repo.listProjects(userId), trashDays: TRASH_DAYS };
   });
 
   /** Load + visibility check. Sends 404 itself when not visible. */
@@ -2732,7 +2750,14 @@ export async function buildApp(
   app.patch('/api/designs/:id', async (req, reply) => {
     const rec = await getOwned(req, reply);
     if (!rec) return;
-    const body = (req.body ?? {}) as { title?: unknown; isPublic?: unknown };
+    const body = (req.body ?? {}) as { title?: unknown; isPublic?: unknown; pinned?: unknown };
+    // Pinning is the owner's own ordering, not an edit to the design, so it
+    // takes a path of its own that leaves "last edited" alone.
+    if (body.pinned !== undefined) {
+      if (typeof body.pinned !== 'boolean') return reply.code(400).send({ error: 'pinned must be boolean' });
+      if (body.title === undefined && body.isPublic === undefined) return repo.setPinned(rec.id, body.pinned);
+      await repo.setPinned(rec.id, body.pinned);
+    }
     const patch: { title?: string; isPublic?: boolean } = {};
     if (body.title !== undefined) {
       if (typeof body.title !== 'string' || body.title.length === 0 || body.title.length > 120) {
@@ -2745,6 +2770,11 @@ export async function buildApp(
       patch.isPublic = body.isPublic;
     }
     if (Object.keys(patch).length === 0) return reply.code(400).send({ error: 'nothing to patch' });
+    // Something in the Trash is on its way out. Publishing it would put a
+    // design in the community feed that deletes itself within the month.
+    if (patch.isPublic === true && rec.deletedAt) {
+      return reply.code(409).send({ error: 'restore this project from the trash before publishing it' });
+    }
     const wasPublic = rec.isPublic;
     const result = await repo.patchMeta(rec.id, patch);
     // Newly published → notify the owner's followers (best-effort, non-blocking).
@@ -2752,6 +2782,33 @@ export async function buildApp(
       options.social.notifyFollowersOfPost(rec.ownerId, rec.id).catch(() => {});
     }
     return result;
+  });
+
+  /**
+   * Delete a project: into the Trash first, for good from there.
+   *
+   * Two steps because a delete is the one action on this page that cannot be
+   * taken back by the person who did it, and a mis-click on a menu is common.
+   * `?permanent=1` only works on something already in the Trash.
+   */
+  app.delete('/api/designs/:id', async (req, reply) => {
+    if (badId((req.params as { id: string }).id, reply)) return;
+    const rec = await getOwned(req, reply);
+    if (!rec) return;
+    const permanent = (req.query as { permanent?: string }).permanent === '1';
+    if (permanent) {
+      if (!rec.deletedAt) return reply.code(409).send({ error: 'move it to the trash first' });
+      await repo.purge(rec.id);
+      return reply.code(204).send();
+    }
+    return repo.trash(rec.id);
+  });
+
+  app.post('/api/designs/:id/restore', async (req, reply) => {
+    if (badId((req.params as { id: string }).id, reply)) return;
+    const rec = await getOwned(req, reply);
+    if (!rec) return;
+    return repo.restore(rec.id);
   });
 
   app.post('/api/designs/:id/revisions', async (req, reply) => {
@@ -3423,6 +3480,15 @@ export async function buildApp(
       app.get('/account', async (_req, reply) => reply.header('cache-control', 'no-cache').type('text/html').send(accountHtml));
     } catch {
       /* account page optional in API-only builds */
+    }
+
+    // Projects: a person's own tifos. Private by nature, so noindex in its own
+    // <head> and never in the sitemap. The list itself is fetched by the page.
+    try {
+      const projectsHtml = readFileSync(join(staticDir, 'projects.html'), 'utf8');
+      app.get('/projects', async (_req, reply) => reply.header('cache-control', 'no-cache').type('text/html').send(projectsHtml));
+    } catch {
+      /* projects page optional in API-only builds */
     }
 
     // sitemap.xml: generated per request rather than shipped as a static file, so

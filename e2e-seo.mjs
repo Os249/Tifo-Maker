@@ -67,7 +67,7 @@ check('the interactive grid took over', after.cards>=2, `${after.cards} cards`);
 check('no design is shown twice', after.titlesOnScreen===1, `"${NAME_A}" x${after.titlesOnScreen}`);
 
 // --- the publish dialog must ask for a name, so nothing ships as "Untitled tifo" ---
-await page.goto(B+'/app',{waitUntil:'domcontentloaded'});
+await page.goto(B+'/app?new=1',{waitUntil:'domcontentloaded'});
 await page.waitForFunction(()=>{const s=document.getElementById('stat');return s&&/seats/.test(s.textContent||'');},null,{timeout:90000});
 await page.waitForTimeout(1200);
 // Sign in as the same account the designs belong to.

@@ -45,7 +45,7 @@ async function sim({ lang = 'en', w = 1440, h = 900, template = 'jewel-jeddah-60
   const p = await ctx.newPage();
   const errs = [];
   p.on('pageerror', (e) => errs.push(e.message.slice(0, 160)));
-  await p.goto(`${B}/app?template=${template}&sim=1`, { waitUntil: 'networkidle', timeout: 120000 });
+  await p.goto(`${B}/app?new=1&template=${template}&sim=1`, { waitUntil: 'networkidle', timeout: 120000 });
   await p.waitForSelector('.mds-overlay canvas', { timeout: 120000 });
   await p.waitForTimeout(3500);
   return { ctx, p, errs };
@@ -217,7 +217,7 @@ console.log('\n— the design is untouched —');
 {
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, storageState: { cookies: [], origins: [{ origin: B, localStorage: LS() }] } });
   const p = await ctx.newPage();
-  await p.goto(`${B}/app?template=jewel-jeddah-60k`, { waitUntil: 'networkidle', timeout: 120000 });
+  await p.goto(`${B}/app?new=1&template=jewel-jeddah-60k`, { waitUntil: 'networkidle', timeout: 120000 });
   await p.waitForTimeout(3000);
   const counts = () => p.evaluate(() => [...document.querySelectorAll('.swatch-count, .sw-count, [class*="count"]')].map((e) => e.textContent.trim()).filter((t) => /\d/.test(t)).join(','));
   const before = await counts();

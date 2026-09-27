@@ -33,7 +33,7 @@ async function editor({ w = 360, h = 680, lang = 'en' } = {}) {
   const p = await ctx.newPage();
   const errs = [];
   p.on('pageerror', (e) => errs.push(e.message.slice(0, 140)));
-  await p.goto(B + '/app', { waitUntil: 'networkidle', timeout: 120000 });
+  await p.goto(B + '/app?new=1', { waitUntil: 'networkidle', timeout: 120000 });
   await p.waitForSelector('#canvas-host canvas', { timeout: 120000 });
   await p.waitForTimeout(3500);
   return [ctx, p, errs];
@@ -212,7 +212,8 @@ console.log('\n— canvas gestures —');
 
   // One finger paints.
   const painted = async () => p.evaluate(() => {
-    const raw = localStorage.getItem('tifo_draft_v1');
+    const id = new URLSearchParams(location.search).get('local');
+    const raw = id && localStorage.getItem('tifo_proj_' + id);
     if (!raw) return 0;
     try { return (JSON.parse(raw).doc?.layers?.[0]?.cellsRle ?? []).length; } catch { return 0; }
   });
@@ -619,7 +620,7 @@ console.log('\n— Match Day: the way out is on every screen —');
     const p = await ctx.newPage();
     const errs = [];
     p.on('pageerror', (e) => errs.push(e.message.slice(0, 140)));
-    await p.goto(B + '/app?sim=1', { waitUntil: 'networkidle', timeout: 120000 });
+    await p.goto(B + '/app?new=1&sim=1', { waitUntil: 'networkidle', timeout: 120000 });
     await p.waitForSelector('.mds-overlay canvas', { timeout: 120000 });
     await p.waitForTimeout(5000);
     await dismissIntro(p);
@@ -662,7 +663,7 @@ console.log('\n— Match Day: driving it with a finger —');
   const p = await ctx.newPage();
   const errs = [];
   p.on('pageerror', (e) => errs.push(e.message.slice(0, 140)));
-  await p.goto(B + '/app?sim=1', { waitUntil: 'networkidle', timeout: 120000 });
+  await p.goto(B + '/app?new=1&sim=1', { waitUntil: 'networkidle', timeout: 120000 });
   await p.waitForSelector('.mds-overlay canvas', { timeout: 120000 });
   await p.waitForTimeout(5000);
 
@@ -770,7 +771,7 @@ console.log('\n— Match Day: when the phone says no —');
   const p = await ctx.newPage();
   const errs = [];
   p.on('pageerror', (e) => errs.push(e.message.slice(0, 140)));
-  await p.goto(B + '/app?sim=1', { waitUntil: 'networkidle', timeout: 120000 });
+  await p.goto(B + '/app?new=1&sim=1', { waitUntil: 'networkidle', timeout: 120000 });
   await p.waitForSelector('.mds-overlay canvas', { timeout: 120000 });
   await p.waitForTimeout(5000);
   await dismissIntro(p);
@@ -926,7 +927,7 @@ console.log('\n— rotating across the breakpoint swaps front ends —');
   const p = await ctx.newPage();
   const errs = [];
   p.on('pageerror', (e) => errs.push(e.message.slice(0, 140)));
-  await p.goto(B + '/app', { waitUntil: 'networkidle', timeout: 120000 });
+  await p.goto(B + '/app?new=1', { waitUntil: 'networkidle', timeout: 120000 });
   await p.waitForSelector('#canvas-host canvas', { timeout: 120000 });
   await p.waitForTimeout(3500);
   check('phone starts with the mobile shell', await p.evaluate(() => document.body.classList.contains('m-shell')));

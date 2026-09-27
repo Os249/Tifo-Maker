@@ -9,6 +9,8 @@ Allow: /
 Disallow: /api/
 Disallow: /admin
 Disallow: /reset
+# Someone's own project list. It says noindex too; this saves the fetch.
+Disallow: /projects
 
 # Per-design QR landing pages — one per seat lookup, no standalone value.
 Disallow: /s/

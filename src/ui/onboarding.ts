@@ -37,7 +37,6 @@ export interface QuickStart {
   kind: StarterKind;
   paletteName: string;
   patternId: string | null;
-  projectName: string;
   /** True when the user asked for the guided tour here, rather than it launching itself. */
   wantsTour: boolean;
 }
@@ -83,10 +82,7 @@ export function openOnboarding(patterns: PatternPreset[]): Promise<QuickStart | 
           <h2 class="ob-h2">${t('ob.title')}</h2>
           <p class="ob-lead">${t('ob.lead')}</p>
         </div>
-        <div class="ob-section">
-          <label class="ob-label" for="ob-name">${t('ob.name')}</label>
-          <input type="text" id="ob-name" class="ob-name-input" maxlength="80" placeholder="${t('ob.namePh')}" value="${t('ob.nameDefault')}" />
-        </div>
+        <!-- No name field: the project was named when it was created. -->
         <div class="ob-section">
           <div class="ob-label">${t('ob.start')}</div>
           <div class="ob-starters" id="ob-starters">
@@ -161,8 +157,8 @@ export function openOnboarding(patterns: PatternPreset[]): Promise<QuickStart | 
     for (const el of inertTargets) el.inert = true;
     void shell;
 
-    // The name field is the first thing the copy asks for, so start there.
-    const firstField = backdrop.querySelector('#ob-name') as HTMLElement | null;
+    // The first starter card is the first thing the copy asks about.
+    const firstField = backdrop.querySelector('.ob-starter') as HTMLElement | null;
     const dialog = backdrop.querySelector('.ob-modal') as HTMLElement | null;
     requestAnimationFrame(() => (firstField ?? dialog)?.focus());
     if (dialog && !dialog.hasAttribute('tabindex')) dialog.tabIndex = -1;
@@ -249,9 +245,7 @@ export function openOnboarding(patterns: PatternPreset[]): Promise<QuickStart | 
     });
 
     const start = (wantsTour: boolean): void => {
-      const nameInput = backdrop.querySelector('#ob-name') as HTMLInputElement | null;
-      const projectName = (nameInput?.value.trim() || t('ob.nameDefault')).slice(0, 80);
-      finish({ kind: chosenKind, paletteName: chosenPalette, patternId: chosenPattern, projectName, wantsTour });
+      finish({ kind: chosenKind, paletteName: chosenPalette, patternId: chosenPattern, wantsTour });
     };
     backdrop.querySelector('.ob-start')!.addEventListener('click', () => start(false));
     backdrop.querySelector('.ob-tour')!.addEventListener('click', () => start(true));

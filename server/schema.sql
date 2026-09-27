@@ -369,3 +369,19 @@ CREATE TABLE IF NOT EXISTS design_scenes (
   scene      BYTEA NOT NULL,              -- gzipped JSON: { banners, assets }
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Projects (September 2026). Every design a person owns is one of their
+-- projects, listed on /projects. Three things the page needs that a design
+-- did not carry:
+--   pinned          held at the top of the owner's list; private to them.
+--   deleted_at      in the Trash since then; purged 30 days later. A trashed
+--                   design is made private while it is there, and
+--   trashed_public  remembers whether it was published, so a restore puts it
+--                   back exactly as it was.
+--   origin          how it began, when that deserves a badge ('ai').
+ALTER TABLE designs ADD COLUMN IF NOT EXISTS pinned         BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE designs ADD COLUMN IF NOT EXISTS deleted_at     TIMESTAMPTZ;
+ALTER TABLE designs ADD COLUMN IF NOT EXISTS trashed_public BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE designs ADD COLUMN IF NOT EXISTS origin         TEXT;
+CREATE INDEX IF NOT EXISTS designs_owner_updated_idx ON designs (owner_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS designs_trash_idx ON designs (deleted_at) WHERE deleted_at IS NOT NULL;

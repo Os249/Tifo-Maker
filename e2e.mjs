@@ -4,7 +4,8 @@ const browser=await chromium.launch({executablePath:'/opt/pw-browsers/chromium',
 const page=await (await browser.newContext({viewport:{width:1400,height:900}})).newPage();
 const errs=[]; page.on('pageerror',e=>errs.push(String(e.message).slice(0,200)));
 const ready=()=>page.waitForFunction(()=>{const s=document.getElementById('stat');return s&&/seats/.test(s.textContent||'');},{timeout:45000});
-const sig=()=>page.evaluate(()=>{const r=localStorage.getItem('tifo_draft_v1');if(!r)return null;const d=JSON.parse(r);
+// The open project's copy in this browser (see src/core/projects.ts).
+const sig=()=>page.evaluate(()=>{const id=new URLSearchParams(location.search).get('local');const r=id&&localStorage.getItem('tifo_proj_'+id);if(!r)return null;const d=JSON.parse(r);
   const rle=d.doc?.layers?.[0]?.cellsRle??[];
   return {runs:rle.length, head:JSON.stringify(rle.slice(0,3)), title:d.title, designId:d.designId, kb:Math.round(r.length*2/1024)};});
 
@@ -25,8 +26,9 @@ const dismissOnboarding = async () => {
   await page.waitForTimeout(1500);
 };
 
-await page.goto(B+'/app',{waitUntil:'domcontentloaded'}); await ready(); await page.waitForTimeout(1000);
-check('no draft on a first visit', await page.evaluate(()=>!localStorage.getItem('tifo_draft_v1')));
+// A new project: the editor is always opened on one now (see e2e-projects.mjs).
+await page.goto(B+'/app?new=1',{waitUntil:'domcontentloaded'}); await ready(); await page.waitForTimeout(1000);
+check('nothing is kept before the project exists', await page.evaluate(()=>!localStorage.getItem('tifo_projects_v1') && !localStorage.getItem('tifo_draft_v1')));
 await dismissOnboarding();
 check('the first-run dialog makes the app behind it inert',
   await page.evaluate(()=>document.querySelectorAll('[inert]').length===0), 'cleared on dismiss');
@@ -68,8 +70,7 @@ check('saved-state says "this browser", not "saved"', /this browser/i.test(state
 await page.reload({waitUntil:'domcontentloaded'}); await ready(); await page.waitForTimeout(1500); await dismissOnboarding();
 const b = await sig();
 check('draft survives a reload', !!b && b.head===a.head, b?`${b.runs} runs`:'');
-const msg = await page.evaluate(()=>document.getElementById('message')?.textContent||'');
-check('user is told their work came back', /restored/i.test(msg), JSON.stringify(msg));
+check('the reload reopens the same project, not a new one', await page.evaluate(()=>/[?&]local=/.test(location.search) && JSON.parse(localStorage.getItem('tifo_projects_v1')||'[]').length===1));
 
 // The bug that starved every number below it: Save sat ~580px under the fold in
 // a side panel, so most people who painted never saw it. Check the sizes real

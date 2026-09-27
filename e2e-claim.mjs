@@ -50,11 +50,16 @@ const paint=()=>page.evaluate(()=>{
 });
 
 const EMAIL = `fan${Date.now()}@example.test`;
-await page.goto(B+'/app',{waitUntil:'domcontentloaded'}); await ready(); await page.waitForTimeout(900);
+// A new project, first-run guide skipped: the editor is always on a project now.
+await page.goto(B+'/app?new=1',{waitUntil:'domcontentloaded'}); await ready(); await page.waitForTimeout(900);
+await page.evaluate(()=>document.querySelector('.ob-skip')?.click());
+await waitFor(()=>/[?&]local=/.test(location.search));
 await paint();
 
-// Wait for the debounced draft to actually hit localStorage.
-await waitFor(()=>!!localStorage.getItem('tifo_draft_v1'));
+// Wait for the debounced autosave to actually hit localStorage.
+const localKey = () => 'tifo_proj_' + new URLSearchParams(location.search).get('local');
+await waitFor(()=>{const id=new URLSearchParams(location.search).get('local');return !!id&&!!localStorage.getItem('tifo_proj_'+id);});
+void localKey;
 await page.evaluate(()=>document.getElementById('doc-title').value='Derby night');
 await page.evaluate(()=>document.getElementById('save').click());
 
@@ -94,9 +99,11 @@ const claimed = await waitFor(()=>/now in your account/i.test(document.getElemen
 check('draft was claimed onto the account', claimed,
   JSON.stringify(await page.evaluate(()=>document.getElementById('message')?.textContent)));
 
-const gotId = await waitFor(()=>!!JSON.parse(localStorage.getItem('tifo_draft_v1')||'{}').designId);
-check('draft now carries the account design id', gotId,
-  String(await page.evaluate(()=>JSON.parse(localStorage.getItem('tifo_draft_v1')||'{}').designId)).slice(0,8));
+// The local project became an account project: the page is on it, and this
+// browser no longer holds the local copy.
+const gotId = await waitFor(()=>/[?&]project=/.test(location.search) && JSON.parse(localStorage.getItem('tifo_projects_v1')||'[]').length===0);
+check('the project is now an account project', gotId,
+  String(await page.evaluate(()=>new URLSearchParams(location.search).get('project'))).slice(0,8));
 
 // The design really is on the server.
 const mine = await page.evaluate(async ()=>{

@@ -49,9 +49,21 @@ async function openApp(width, height, lang, { fresh = false } = {}) {
       }
     } catch { /* storage off */ }
   }, { l: lang, fresh });
-  await page.goto(B + '/app', { waitUntil: 'networkidle', timeout: 60000 });
+  await page.goto(B + '/app?new=1', { waitUntil: 'networkidle', timeout: 60000 });
   await page.waitForTimeout(1400);
+  await rememberProject(page);
   return { ctx, page, errs };
+}
+
+/**
+ * Every tifo is a project now, and its banners live under that project's own
+ * key. Remember which project this tab is on, in sessionStorage, so storage
+ * can be read and changed from a page that is not the app (editStorage) and
+ * the app can be reopened on the same project (backToApp).
+ */
+async function rememberProject(page) {
+  await page.waitForFunction(() => /[?&]local=/.test(location.search), null, { timeout: 60000 }).catch(() => {});
+  await page.evaluate(() => sessionStorage.setItem('e2e_local', new URLSearchParams(location.search).get('local') || ''));
 }
 
 /** A cheap, stable fingerprint of what is actually painted on the artboard. */
@@ -82,7 +94,7 @@ async function drawOn(page, pts) {
 const storedBanner = (page) =>
   page.evaluate(() => {
     try {
-      return JSON.parse(localStorage.getItem('tifo_banners_v1') || 'null');
+      return JSON.parse(localStorage.getItem('tifo_proj_' + sessionStorage.getItem('e2e_local') + '_banners') || 'null');
     } catch {
       return null;
     }
@@ -116,9 +128,11 @@ async function editStorage(page, fn, arg) {
   await page.goto(B + '/favicon.svg', { waitUntil: 'load' });
   await page.evaluate(fn, arg);
 }
-async function backToApp(page) {
-  await page.goto(B + '/app', { waitUntil: 'networkidle', timeout: 60000 });
+async function backToApp(page, { fresh = false } = {}) {
+  const id = await page.evaluate(() => sessionStorage.getItem('e2e_local'));
+  await page.goto(B + (fresh || !id ? '/app?new=1' : `/app?local=${id}`), { waitUntil: 'networkidle', timeout: 60000 });
   await page.waitForTimeout(1500);
+  await rememberProject(page);
 }
 
 // ---------------------------------------------------------------------------
@@ -141,7 +155,7 @@ console.log('\n— desktop: the fourth view exists and draws —');
       return r.width > 200 && r.height > 100;
     })(),
     rows: document.querySelectorAll('#bn-list .bn-li').length,
-    stored: (() => { try { return JSON.parse(localStorage.getItem('tifo_banners_v1') || 'null')?.banners?.length ?? 0; } catch { return -1; } })(),
+    stored: (() => { try { return JSON.parse(localStorage.getItem('tifo_proj_' + sessionStorage.getItem('e2e_local') + '_banners') || 'null')?.banners?.length ?? 0; } catch { return -1; } })(),
     bar: getComputedStyle(document.getElementById('banner-bar')).display === 'none',
     detail: document.getElementById('bn-detail')?.hidden === true,
     makers: document.querySelectorAll('#bn-empty button[data-kind]').length,
@@ -297,11 +311,11 @@ console.log('\n— the banner shows in the editor bowl —');
   // not depend on a control's markup.
   await editStorage(page, () => {});
   const hidden = await page.evaluate(() => {
-    const raw = localStorage.getItem('tifo_banners_v1');
+    const raw = localStorage.getItem('tifo_proj_' + sessionStorage.getItem('e2e_local') + '_banners');
     if (!raw) return false;
     const m = JSON.parse(raw);
     for (const b of m.banners ?? []) b.visible = false;
-    localStorage.setItem('tifo_banners_v1', JSON.stringify(m));
+    localStorage.setItem('tifo_proj_' + sessionStorage.getItem('e2e_local') + '_banners', JSON.stringify(m));
     return (m.banners ?? []).length > 0;
   });
   check('a banner was stored to hide', hidden);
@@ -324,10 +338,10 @@ console.log('\n— the banner shows in the editor bowl —');
   // find where it lands, and require the middle of it to be that colour and
   // nothing else.
   await editStorage(page, () => {
-    const raw = localStorage.getItem('tifo_banners_v1');
+    const raw = localStorage.getItem('tifo_proj_' + sessionStorage.getItem('e2e_local') + '_banners');
     const m = JSON.parse(raw);
     for (const b of m.banners ?? []) { b.visible = true; b.bg = '#ff00ff'; b.material = 'solid'; }
-    localStorage.setItem('tifo_banners_v1', JSON.stringify(m));
+    localStorage.setItem('tifo_proj_' + sessionStorage.getItem('e2e_local') + '_banners', JSON.stringify(m));
   });
   await backToApp(page);
   await page.click('#view-3d');
@@ -600,7 +614,7 @@ console.log('\n— "Show in stadium" —');
   await page.waitForTimeout(900);
   const gone = await page.evaluate(() => ({
     card: document.getElementById('bn-empty')?.hidden === false,
-    stored: JSON.parse(localStorage.getItem('tifo_banners_v1') || '{"banners":[]}').banners.length,
+    stored: JSON.parse(localStorage.getItem('tifo_proj_' + sessionStorage.getItem('e2e_local') + '_banners') || '{"banners":[]}').banners.length,
     camOffered: !document.querySelector('#camera-preset option[value="banner"]')?.disabled,
     cam: document.getElementById('camera-preset')?.value,
   }));
@@ -640,19 +654,18 @@ console.log('\n— banners belong to their tifo —');
   await page.mouse.up();
   await page.waitForTimeout(2200);
 
-  await editStorage(page, (v) => localStorage.setItem('tifo_banners_v1', JSON.stringify(v)), { v: 1, banners: [banner({ id: 'bn_ghost' })] });
+  await editStorage(page, (v) => localStorage.setItem('tifo_proj_' + sessionStorage.getItem('e2e_local') + '_banners', JSON.stringify(v)), { v: 1, banners: [banner({ id: 'bn_ghost' })] });
   await backToApp(page);
   check('the banner nobody made does not come back', (await listed()).length === 0);
 
-  await editStorage(page, (v) => localStorage.setItem('tifo_banners_v1', JSON.stringify(v)), { v: 1, banners: [banner({ id: 'bn_mine', name: 'Mine', bg: '#ff0000' })] });
+  await editStorage(page, (v) => localStorage.setItem('tifo_proj_' + sessionStorage.getItem('e2e_local') + '_banners', JSON.stringify(v)), { v: 1, banners: [banner({ id: 'bn_mine', name: 'Mine', bg: '#ff0000' })] });
   await backToApp(page);
   check('a banner somebody made comes back with its tifo', JSON.stringify(await listed()) === '["Mine"]');
 
   await editStorage(page, (v) => {
-    localStorage.setItem('tifo_banners_v1', JSON.stringify(v));
-    localStorage.removeItem('tifo_draft_v1');
+    localStorage.setItem('tifo_proj_' + sessionStorage.getItem('e2e_local') + '_banners', JSON.stringify(v));
   }, { v: 1, banners: [banner({ id: 'bn_mine', name: 'Mine', bg: '#ff0000' })] });
-  await backToApp(page);
+  await backToApp(page, { fresh: true });
   check('a brand-new tifo does not start with the last one\'s banners', (await listed()).length === 0);
 
   // A design opened from the gallery is another tifo, and it has its own
@@ -701,7 +714,7 @@ console.log('\n— Match Day moves the banner where it is told —');
     stand.value = '0';
     stand.dispatchEvent(new Event('change', { bubbles: true }));
     await new Promise((r) => setTimeout(r, 900));
-    const m = JSON.parse(localStorage.getItem('tifo_banners_v1') || 'null');
+    const m = JSON.parse(localStorage.getItem('tifo_proj_' + sessionStorage.getItem('e2e_local') + '_banners') || 'null');
     return m?.banners?.[0]?.slot?.stand;
   });
   check('choosing East puts it on the East stand', east === 0, String(east));
@@ -1000,7 +1013,7 @@ console.log('\n— the banners news —');
   const ctx = await browser.newContext({ viewport: { width: 1400, height: 880 } });
   const page = await ctx.newPage();
   await page.addInitScript(() => { try { if (!sessionStorage.getItem('s')) { sessionStorage.setItem('s', '1'); localStorage.setItem('tifo_lang_v1', 'en'); localStorage.setItem('tifo_consent_v1', 'essential'); } } catch { /* */ } });
-  await page.goto(B + '/app', { waitUntil: 'networkidle', timeout: 60000 });
+  await page.goto(B + '/app?new=1', { waitUntil: 'networkidle', timeout: 60000 });
   await page.waitForTimeout(4000);
   const both = await page.evaluate(() => ({ ob: !!document.querySelector('.ob-backdrop'), news: !!document.getElementById('news-card') }));
   check('a first visit gets the onboarding dialog, and no news on top of it', both.ob && !both.news, JSON.stringify(both));
@@ -1153,7 +1166,7 @@ console.log('\n— the banner tour —');
   const errs = [];
   page.on('pageerror', (e) => errs.push(String(e.message).slice(0, 200)));
   await page.addInitScript(() => { try { if (!sessionStorage.getItem('s')) { sessionStorage.setItem('s', '1'); for (const [k, v] of [['tifo_lang_v1', 'en'], ['tifo_onboarded_v1', '1'], ['tifo_consent_v1', 'essential'], ['tifo_draw_hint_v1', '1']]) localStorage.setItem(k, v); } } catch { /* */ } });
-  await page.goto(B + '/app?editor=1', { waitUntil: 'networkidle', timeout: 60000 });
+  await page.goto(B + '/app?new=1&editor=1', { waitUntil: 'networkidle', timeout: 60000 });
   await page.waitForSelector('#news-card', { timeout: 15000 }).catch(() => null);
   const n = await newsState(page);
   check('phone: the news points at the view pill\'s Banner', !!n && n.under && n.arrowOnTab && n.inView, JSON.stringify(n?.box));
