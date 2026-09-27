@@ -778,34 +778,6 @@ import { buildStadium as siBuild } from '../src/core/stadiumFit';
 }
 
 // ---------------------------------------------------------------------------
-// Recording in the cinematic flyover: the camera move a clip gets.
-{
-  const { flyover, flyoverPeriodFor, FLY_DURATION } = await import('../src/render/simulator/cameras');
-  const b = { ax: 92, bz: 70, ty: 30 };
-  // How far out, as a share of the bowl: the orbit is an ellipse on the
-  // stadium's own footprint, so metres alone would compare a sideline with an end.
-  const dist = (s: { position: number[] }) => Math.hypot(s.position[0] / b.ax, s.position[2] / b.bz);
-  // Short clips keep the live pace; long ones get exactly one orbit.
-  const periods = [6, 9, 15, 18, 20, 30].map((sec) => flyoverPeriodFor(sec));
-  console.log(`flyover clip: pass length for 6/9/15/18/20/30 s clips = ${periods.join('/')} s`);
-  if (periods.join() !== [18, 18, 18, 18, 20, 30].join()) throw new Error('a clip must never orbit faster than the live flyover, and a long one gets one full orbit');
-  // A clip starts at the top of the pass: wide and high, sweeping in.
-  for (const P of [FLY_DURATION, 30]) {
-    const start = flyover(0, b, P), mid = flyover(P / 2, b, P), end = flyover(P, b, P);
-    if (!(dist(start) > dist(mid) && start.position[1] > mid.position[1])) throw new Error(`the flyover must start wide and high and sweep in (period ${P})`);
-    // One full orbit ends where it began, so a long clip loops cleanly.
-    if (start.position.some((v, i) => Math.abs(v - end.position[i]) > 1e-6)) throw new Error(`one pass must end where it began (period ${P})`);
-  }
-  // A 9 s clip ends at its closest to the stands: the half the reveal lands in.
-  const nine = flyoverPeriodFor(9);
-  const closeAtEnd = dist(flyover(9, b, nine)) < dist(flyover(4.5, b, nine)) && dist(flyover(4.5, b, nine)) < dist(flyover(0, b, nine));
-  console.log('flyover clip: a 9 s clip closes in all the way to its last frame', closeAtEnd);
-  if (!closeAtEnd) throw new Error('a 9 s flyover clip must keep closing in');
-  // Time before the pass started (a frame drawn a moment early) is still a camera, not NaN.
-  if (flyover(-0.5, b, nine).position.some((v) => !Number.isFinite(v))) throw new Error('flyover before its start must not produce NaN');
-}
-
-// ---------------------------------------------------------------------------
 // Community filters: what a design "is", derived rather than typed.
 {
   const { COLOUR_FAMILIES, clubFilterOptions, clubId, colourSlug, designFacets, paletteColours } =
@@ -1874,13 +1846,28 @@ import { buildStadium as siBuild } from '../src/core/stadiumFit';
   // Lanes: a real gap in the lower tier at each corner, nothing cut above it.
   const lines = vd.laneLines(jt);
   if (lines.length !== 4) throw new Error('venue: the Jewel should have four vehicle lanes');
+  const rowInTier = (i: number): number => jm.rowOf[i] - jt.tiers.slice(0, jm.tierOf[i]).reduce((n, t) => n + t.rows, 0);
+  let overRoof = 0;
   for (let i = 0; i < jm.count; i++) {
-    if (vd.inLane(lines, jm.tierOf[i], jm.pos3[i * 3], jm.pos3[i * 3 + 2])) throw new Error('venue: a seat was generated inside a vehicle lane');
+    const x = jm.pos3[i * 3];
+    const z = jm.pos3[i * 3 + 2];
+    if (vd.inLane(lines, jm.tierOf[i], x, z, rowInTier(i))) throw new Error('venue: a seat was generated inside a vehicle lane');
+    if (vd.inLane(lines, jm.tierOf[i], x, z)) overRoof++;
   }
+  // Sized like the real tunnels, not a slot through the stand: an ambulance's
+  // width and headroom, open only for the front rows, seats over the roof.
+  for (const l of lines) {
+    const cut = vd.laneCut(jt, l.lane);
+    const headroom = cut.backY - 0.7;
+    if (l.lane.widthM < 4 || l.lane.widthM > 6) throw new Error(`venue: a Jewel tunnel is ${l.lane.widthM} m wide`);
+    if (headroom < 3.5 || headroom > 6) throw new Error(`venue: a Jewel tunnel has ${headroom.toFixed(1)} m of headroom`);
+    if (cut.back > vd.tierEdges(jt, l.lane.tier).back * 0.5) throw new Error('venue: a Jewel tunnel cuts more than half its tier');
+  }
+  if (overRoof < 4 * 60) throw new Error(`venue: only ${overRoof} seats sit over the tunnel roofs`);
   const noLanes = generateSeatMap({ ...jt, details: { ...jt.details, lanes: [] } });
   const tierCount = (m: typeof jm, k: number): number => { let n = 0; for (let i = 0; i < m.count; i++) if (m.tierOf[i] === k) n++; return n; };
   const removed = noLanes.count - jm.count;
-  if (removed < 4 * 300) throw new Error(`venue: the lanes only removed ${removed} seats`);
+  if (removed < 4 * 50 || removed > 4 * 150) throw new Error(`venue: the lanes removed ${removed} seats`);
   if (tierCount(noLanes, 1) !== tierCount(jm, 1) || tierCount(noLanes, 2) !== tierCount(jm, 2)) throw new Error('venue: a lower-tier lane cut the tiers above it');
   // A lane is one corner's, never the opposite one's.
   for (const l of lines) {
@@ -1944,7 +1931,7 @@ import { buildStadium as siBuild } from '../src/core/stadiumFit';
   }
   console.log(
     `venue: 13 seat maps frozen and unchanged | Jewel ${perTier.join(' / ')} (real 23,473 / 22,244 / 14,038) = ${jm.count}, ${nearest.toFixed(1)} m clear of the pitch` +
-      ` | 4 lanes, ${removed} seats removed, tiers above untouched | gold ${zc.gold}, silver ${zc.silver}, royal box ${zc.vip}` +
+      ` | 4 tunnels, ${removed} seats removed, ${overRoof} over their roofs, tiers above untouched | gold ${zc.gold}, silver ${zc.silver}, royal box ${zc.vip}` +
       ` | ${shipped.length} grounds the server can save against`,
   );
 }

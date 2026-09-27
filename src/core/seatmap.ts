@@ -224,7 +224,7 @@ export function generateSeatMap(template: StadiumTemplate): SeatMap {
           if (nxp > cornerCut && nyp > cornerCut) continue;
         }
         // A vehicle lane is a real gap: the ramp is where these seats would be.
-        if (lanes.length > 0 && inLane(lanes, tierIdx, wx, wy)) continue;
+        if (lanes.length > 0 && inLane(lanes, tierIdx, wx, wy, r)) continue;
         xs.push(u * EDITOR_WIDTH);
         ys.push(editorY);
         us.push(u);

@@ -243,12 +243,12 @@ const COMMUNITY: StadiumEntry[] = [
       // A near-rectangle (p = 7) for the lower tier: square to the touchlines
       // with a tight chamfer at the corners, where the ramps come in. Clears
       // the pitch by about 9.4 m on the sides, 9.8 m behind the goals and
-      // 7.6 m at the corner flags. (The first cut, p = 2.7, put the corner
+      // 7.4 m at the corner flags. (The first cut, p = 2.7, put the corner
       // seats 0.4 m from the corner flag.) Offset outward, the tiers round off.
       plan: { a: 62.5, b: 44, exponent: 7 },
       evenRows: true,
       tiers: [
-        { rows: 30, rowDepth: 0.8, rakeDeg: 26, baseElevation: 1.2, baseOffset: 0, seatPitch: 0.5 },
+        { rows: 29, rowDepth: 0.8, rakeDeg: 26, baseElevation: 1.2, baseOffset: 0, seatPitch: 0.51 },
         { rows: 21, rowDepth: 0.8, rakeDeg: 32, baseElevation: 16.7, baseOffset: 19.2, seatPitch: 0.5 },
         { rows: 12, rowDepth: 0.78, rakeDeg: 36, baseElevation: 31.3, baseOffset: 32.2, seatPitch: 0.5 },
       ],
@@ -263,11 +263,15 @@ const COMMUNITY: StadiumEntry[] = [
       details: {
         // One ramp at each corner of the lower tier, down to pitch level; the
         // middle tier runs unbroken over it.
+        // Tunnels, not slots: 5 m wide (an ambulance is 2.1 m) and open for
+        // the first nine rows, where the deck is 4.5 m up — enough headroom
+        // for the van. The rows behind run on over the roof, as they do at
+        // the real ground.
         lanes: [
-          { corner: 'north-east', widthM: 8, tier: 0 },
-          { corner: 'north-west', widthM: 8, tier: 0 },
-          { corner: 'south-west', widthM: 8, tier: 0 },
-          { corner: 'south-east', widthM: 8, tier: 0 },
+          { corner: 'north-east', widthM: 5, tier: 0, rows: 9 },
+          { corner: 'north-west', widthM: 5, tier: 0, rows: 9 },
+          { corner: 'south-west', widthM: 5, tier: 0, rows: 9 },
+          { corner: 'south-east', widthM: 5, tier: 0, rows: 9 },
         ],
         // The main stand is the south side (u = 0.75), where the broadcast
         // cameras are. Listed innermost first: a seat takes the first zone

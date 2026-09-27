@@ -1,12 +1,14 @@
 import * as THREE from 'three';
 import type { StadiumTemplate, SeatMap } from '../../core/types';
-import { curveSampler, laneLines, tierEdges, type LaneLine } from '../../core/venueDetails';
+import { curveSampler, laneCut, laneLines, tierEdges, type LaneLine } from '../../core/venueDetails';
 
 /**
  * A real ground's details, drawn from its template (VenueDetails in types.ts):
  *
  *   - vehicle lanes: the ramp floor, the cut faces of the stand either side,
- *     a tunnel portal at the back, and an ambulance on standby at one of them
+ *     and the tunnel mouth under the rows that run over its roof (or a portal
+ *     at the back, for a lane cut the full depth of its tier), with an
+ *     ambulance on standby in one of them
  *   - the box band: glass-fronted hospitality boxes between two tiers
  *   - the royal box around the VIP zone
  *   - the big screens, whose picture the caller supplies (see ScreenPicture)
@@ -154,16 +156,17 @@ function chevronTexture(): THREE.CanvasTexture {
 /** A sign reading "EMERGENCY" in Arabic and English, for the portal lintel. */
 function emergencySign(): THREE.CanvasTexture {
   const c = document.createElement('canvas');
-  c.width = 256;
-  c.height = 48;
+  c.width = 512;
+  c.height = 96;
   const g = c.getContext('2d')!;
   g.fillStyle = '#0f5132';
-  g.fillRect(0, 0, 256, 48);
+  g.fillRect(0, 0, 512, 96);
   g.fillStyle = '#ffffff';
-  g.font = 'bold 22px system-ui, sans-serif';
+  g.font = 'bold 42px system-ui, sans-serif';
   g.textAlign = 'center';
   g.textBaseline = 'middle';
-  g.fillText('طوارئ  •  EMERGENCY', 128, 25);
+  // Held to the sign's width: fonts differ, and a wide one ran off the end.
+  g.fillText('طوارئ  •  EMERGENCY', 256, 50, 480);
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.SRGBColorSpace;
   return t;
@@ -235,7 +238,12 @@ export function buildVenueDetails(template: StadiumTemplate, map: SeatMap, shado
   const tunnelDark = new THREE.MeshStandardMaterial({ color: 0x07080b, roughness: 1 });
   const fasciaWhite = new THREE.MeshStandardMaterial({ color: 0xe8e2d4, roughness: 0.55, metalness: 0.1 });
   const yellow = new THREE.MeshStandardMaterial({ color: 0xf2c40f, roughness: 0.5 });
-  trash.push(concrete, soffitMat, floorMat, asphalt, tunnelDark, fasciaWhite, yellow);
+  const cladding = new THREE.MeshStandardMaterial({ color: 0xd6d2c9, roughness: 0.7, side: THREE.DoubleSide, emissive: 0x3d3a35 });
+  const tunnelWall = new THREE.MeshStandardMaterial({ color: 0x8a867e, roughness: 0.9, side: THREE.BackSide, emissive: 0x2a2620 });
+  const tunnelGate = new THREE.MeshStandardMaterial({ color: 0x1a1c1f, roughness: 0.8, side: THREE.BackSide });
+  const tunnelLight = new THREE.MeshBasicMaterial({ color: 0xfff1d8 });
+  const railGlass = new THREE.MeshStandardMaterial({ color: 0xbfd6e0, roughness: 0.1, metalness: 0.2, transparent: true, opacity: 0.22, side: THREE.DoubleSide, depthWrite: false });
+  trash.push(concrete, soffitMat, floorMat, asphalt, tunnelDark, fasciaWhite, yellow, cladding, tunnelWall, tunnelGate, tunnelLight, railGlass);
 
   // ---- vehicle lanes ------------------------------------------------------
   // Local frame per lane: +z runs outward along the lane, z = 0 is the front
@@ -251,15 +259,25 @@ export function buildVenueDetails(template: StadiumTemplate, map: SeatMap, shado
   if (hatch) trash.push(hatch);
   lanes.forEach((l: LaneLine, k) => {
     const e = tierEdges(template, l.lane.tier);
+    const cut = laneCut(template, l.lane);
     const w = l.lane.widthM;
-    const depth = e.back - e.front; // how deep the cut is
+    const depth = cut.back - e.front; // how far the open cut runs into the stand
+    // A tunnel when the lane stops short of the back of the tier: the rows
+    // behind it sit on the tunnel roof. Otherwise the cut runs the full depth
+    // and the portal is at the back of the tier.
+    const tunnel = cut.back < e.back - 1e-6;
     const lane = new THREE.Group();
     lane.name = 'vehicle-lane';
     lane.position.set(l.x + l.dx * e.front, 0, l.z + l.dz * e.front);
     lane.rotation.y = Math.atan2(l.dx, l.dz);
 
-    // Road from the run-off's edge to inside the tunnel, with edge lines.
-    const roadLen = depth + 4.5;
+    // Clear height of the mouth, and the lintel over it up to the deck.
+    const mouthH = tunnel ? Math.max(3.2, cut.backY - 0.7) : 5.2;
+    const lintelH = tunnel ? Math.max(0.35, cut.backY - mouthH) : 0.55;
+    const tunnelLen = 12;
+
+    // Road from the run-off's edge to the back of the tunnel, with edge lines.
+    const roadLen = depth + (tunnel ? tunnelLen : 4.5);
     const road = box(w, 0.08, roadLen, asphalt, trash);
     road.position.set(0, 0.04, roadLen / 2);
     road.receiveShadow = shadows;
@@ -267,8 +285,8 @@ export function buildVenueDetails(template: StadiumTemplate, map: SeatMap, shado
     const lineMat = new THREE.MeshBasicMaterial({ color: 0xdadada });
     trash.push(lineMat);
     for (const sx of [-1, 1]) {
-      const ln = box(0.15, 0.02, roadLen, lineMat, trash);
-      ln.position.set(sx * (w / 2 - 0.4), 0.09, roadLen / 2);
+      const ln = box(0.12, 0.02, roadLen, lineMat, trash);
+      ln.position.set(sx * (w / 2 - 0.35), 0.09, roadLen / 2);
       lane.add(ln);
     }
     // Keep-clear hatching on the run-off in front of the ramp.
@@ -280,12 +298,13 @@ export function buildVenueDetails(template: StadiumTemplate, map: SeatMap, shado
     hb.position.set(0, 0.03, -0.75);
     lane.add(hb);
 
-    // The cut faces of the stand, built along the concrete's real edge: each
-    // point up the lane's side line gets the deck height for its actual
-    // distance from the plan curve — the same test the concrete was clipped
-    // with — so wall and deck meet with no slit and no notch at the front.
+    // The cut faces of the stand, clad in white like the real portals, built
+    // along the concrete's real edge: each point up the lane's side line gets
+    // the deck height for its actual distance from the plan curve — the same
+    // test the concrete was clipped with — so wall and deck meet with no slit
+    // and no notch at the front.
     const rakeTan = Math.tan((template.tiers[l.lane.tier].rakeDeg * Math.PI) / 180);
-    const deckY = (r: number): number => e.frontY + (Math.min(e.back, Math.max(e.front, r)) - e.front) * rakeTan;
+    const deckY = (r: number): number => e.frontY + (Math.min(cut.back, Math.max(e.front, r)) - e.front) * rakeTan;
     const bx = l.x + l.dx * e.front;
     const bz = l.z + l.dz * e.front;
     for (const sx of [-1, 1]) {
@@ -296,7 +315,7 @@ export function buildVenueDetails(template: StadiumTemplate, map: SeatMap, shado
         const wx = bx + l.dx * z + l.dz * x;
         const wz = bz + l.dz * z - l.dx * x;
         const r = offsetFromPlan(wx, wz);
-        if (r < e.front - 0.02 || r > e.back + 0.02) continue;
+        if (r < e.front - 0.02 || r > cut.back + 0.02) continue;
         pts.push({ z, top: deckY(r) + 0.02 });
       }
       if (pts.length < 2) continue;
@@ -305,8 +324,8 @@ export function buildVenueDetails(template: StadiumTemplate, map: SeatMap, shado
       pts.forEach((q, i) => {
         pos.push(x, 0, q.z, x, q.top, q.z);
         if (i > 0) {
-          const k = (i - 1) * 2;
-          idx.push(k, k + 1, k + 2, k + 1, k + 3, k + 2);
+          const k2 = (i - 1) * 2;
+          idx.push(k2, k2 + 1, k2 + 2, k2 + 1, k2 + 3, k2 + 2);
         }
       });
       const wallGeo = new THREE.BufferGeometry();
@@ -314,7 +333,7 @@ export function buildVenueDetails(template: StadiumTemplate, map: SeatMap, shado
       wallGeo.setIndex(idx);
       wallGeo.computeVertexNormals();
       trash.push(wallGeo);
-      const wall = new THREE.Mesh(wallGeo, concrete);
+      const wall = new THREE.Mesh(wallGeo, cladding);
       wall.castShadow = shadows;
       wall.receiveShadow = shadows;
       lane.add(wall);
@@ -328,44 +347,87 @@ export function buildVenueDetails(template: StadiumTemplate, map: SeatMap, shado
         lane.add(new THREE.Mesh(railGeo, fasciaWhite));
       }
       // A yellow bollard either side of the mouth.
-      const bol = box(0.35, 1.0, 0.35, yellow, trash);
-      bol.position.set(sx * (w / 2 - 0.6), 0.5, 0.2);
+      const bol = box(0.3, 0.9, 0.3, yellow, trash);
+      bol.position.set(sx * (w / 2 - 0.45), 0.45, 0.2);
       lane.add(bol);
     }
-    // The barrier arm, raised (it is a matchday: the ramp is kept open).
-    const arm = box(0.12, w - 1.6, 0.12, yellow, trash);
-    arm.position.set(-(w / 2 - 0.6), 1.0 + (w - 1.6) / 2, 0.2);
-    lane.add(arm);
 
-    // Tunnel portal at the back of the tier: a dark mouth, a lintel with the
-    // hazard band and the sign, and the concourse above it.
-    const mouthH = 5.2;
-    const mouth = box(w, mouthH, 3.4, tunnelDark, trash);
-    mouth.position.set(0, mouthH / 2, depth + 1.7);
-    lane.add(mouth);
-    const lintelMat = new THREE.MeshStandardMaterial({ map: chev, roughness: 0.6 });
-    trash.push(lintelMat);
-    const lintel = box(w + 0.6, 0.55, 0.4, lintelMat, trash);
-    lintel.position.set(0, mouthH + 0.28, depth - 0.1);
-    lane.add(lintel);
-    const signMat = new THREE.MeshBasicMaterial({ map: sign, side: THREE.DoubleSide });
-    const signGeo = new THREE.PlaneGeometry(w * 0.8, w * 0.8 * (48 / 256));
-    trash.push(signMat, signGeo);
-    const sg = new THREE.Mesh(signGeo, signMat);
-    sg.position.set(0, mouthH + 1.05, depth - 0.35);
-    sg.rotation.y = Math.PI; // face the pitch
-    lane.add(sg);
-    const aboveH = Math.max(0.5, e.backY - mouthH - 0.6);
-    const above = box(w + 0.6, aboveH, 0.6, concrete, trash);
-    above.position.set(0, mouthH + 0.55 + aboveH / 2, depth);
-    lane.add(above);
+    if (tunnel) {
+      // The tunnel itself: a lit concrete box running on under the stand, open
+      // to the pitch, with a gate at the far end — seen from the stands as a
+      // doorway in the front rows, which is what the real one is.
+      const inner = new THREE.BoxGeometry(w, mouthH, tunnelLen);
+      trash.push(inner);
+      const hidden = new THREE.MeshBasicMaterial({ visible: false });
+      trash.push(hidden);
+      // BoxGeometry face order: +x, -x, +y, -y, +z (far end), -z (the mouth).
+      const tube = new THREE.Mesh(inner, [tunnelWall, tunnelWall, tunnelWall, hidden, tunnelGate, hidden]);
+      tube.position.set(0, mouthH / 2, depth + tunnelLen / 2);
+      lane.add(tube);
+      const strip = box(0.35, 0.04, tunnelLen - 1, tunnelLight, trash);
+      strip.position.set(0, mouthH - 0.03, depth + tunnelLen / 2);
+      lane.add(strip);
+      // The lintel: white, under the first row that runs over the roof, with
+      // the sign on its face and a hazard band along its underside.
+      const lintel = box(w, lintelH, 0.5, fasciaWhite, trash);
+      lintel.position.set(0, mouthH + lintelH / 2, depth + 0.25);
+      lane.add(lintel);
+      const bandMat = new THREE.MeshStandardMaterial({ map: chev, roughness: 0.6 });
+      trash.push(bandMat);
+      const band = box(w, 0.12, 0.52, bandMat, trash);
+      band.position.set(0, mouthH + 0.06, depth + 0.25);
+      lane.add(band);
+      const signMat = new THREE.MeshBasicMaterial({ map: sign, side: THREE.DoubleSide });
+      const sh = Math.min(0.42, lintelH - 0.2);
+      const signGeo = new THREE.PlaneGeometry(sh * (256 / 48), sh);
+      trash.push(signMat, signGeo);
+      const sg = new THREE.Mesh(signGeo, signMat);
+      sg.position.set(0, mouthH + 0.12 + (lintelH - 0.12) / 2, depth - 0.01);
+      sg.rotation.y = Math.PI; // face the pitch
+      lane.add(sg);
+      // Glass and a rail along the edge of the row above the mouth.
+      const glass = new THREE.Mesh(new THREE.PlaneGeometry(w, 1.0), railGlass);
+      trash.push(glass.geometry);
+      glass.position.set(0, cut.backY + 0.5, depth + 0.02);
+      lane.add(glass);
+      const topRail = box(w, 0.06, 0.06, fasciaWhite, trash);
+      topRail.position.set(0, cut.backY + 1.05, depth + 0.02);
+      lane.add(topRail);
+    } else {
+      // The barrier arm, raised (it is a matchday: the ramp is kept open).
+      const arm = box(0.12, w - 1.6, 0.12, yellow, trash);
+      arm.position.set(-(w / 2 - 0.6), 1.0 + (w - 1.6) / 2, 0.2);
+      lane.add(arm);
+      // Tunnel portal at the back of the tier: a dark mouth, a lintel with the
+      // hazard band and the sign, and the concourse above it.
+      const mouth = box(w, mouthH, 3.4, tunnelDark, trash);
+      mouth.position.set(0, mouthH / 2, depth + 1.7);
+      lane.add(mouth);
+      const lintelMat = new THREE.MeshStandardMaterial({ map: chev, roughness: 0.6 });
+      trash.push(lintelMat);
+      const lintel = box(w + 0.6, lintelH, 0.4, lintelMat, trash);
+      lintel.position.set(0, mouthH + 0.28, depth - 0.1);
+      lane.add(lintel);
+      const signMat = new THREE.MeshBasicMaterial({ map: sign, side: THREE.DoubleSide });
+      const signGeo = new THREE.PlaneGeometry(w * 0.8, w * 0.8 * (48 / 256));
+      trash.push(signMat, signGeo);
+      const sg = new THREE.Mesh(signGeo, signMat);
+      sg.position.set(0, mouthH + 1.05, depth - 0.35);
+      sg.rotation.y = Math.PI; // face the pitch
+      lane.add(sg);
+      const aboveH = Math.max(0.5, e.backY - mouthH - 0.6);
+      const above = box(w + 0.6, aboveH, 0.6, concrete, trash);
+      above.position.set(0, mouthH + 0.55 + aboveH / 2, depth);
+      lane.add(above);
+    }
 
-    // One ambulance on standby, parked inside the first ramp — in the stand,
-    // not on the grass — nose out, ready to go.
+    // One ambulance on standby, parked in the first lane — in the stand, not
+    // on the grass — nose out, its tail just inside the tunnel.
     if (k === 0) {
       const amb = ambulance(trash);
       amb.rotation.y = Math.PI / 2; // nose toward the pitch (local -z)
-      amb.position.set(0, 0.08, Math.min(depth - 3.8, 7.5));
+      // The van runs 4.1 m ahead of its origin and 2.8 m behind it.
+      amb.position.set(0, 0.08, tunnel ? Math.max(4.4, depth - 1.4) : Math.min(depth - 3.8, 7.5));
       lane.add(amb);
     }
     group.add(lane);

@@ -68,9 +68,11 @@ export function laneLines(template: StadiumTemplate): LaneLine[] {
  * lane's centre line, on the lane's own side of the bowl, so a lane at one
  * corner can never reach across the pitch to the opposite one.
  */
-export function inLane(lines: LaneLine[], tier: number, x: number, z: number): boolean {
+export function inLane(lines: LaneLine[], tier: number, x: number, z: number, row?: number): boolean {
   for (const l of lines) {
     if (l.lane.tier !== tier) continue;
+    // Behind the tunnel mouth the seats run on over its roof.
+    if (row !== undefined && l.lane.rows !== undefined && row >= l.lane.rows) continue;
     const rx = x - l.x;
     const rz = z - l.z;
     const along = rx * l.dx + rz * l.dz;
@@ -205,6 +207,20 @@ export function curveSampler(template: StadiumTemplate, samples = 2048): (u: num
 }
 
 /** Radial offset and height of a tier's front and back edges (mirrors stands.ts). */
+/**
+ * Where a lane's open cut ends: the radial offset of the tunnel mouth (the
+ * seam between its last open row and the first row over the roof) and the
+ * deck height there. For a lane without `rows`, the back of the tier.
+ */
+export function laneCut(template: StadiumTemplate, lane: VehicleLane): { back: number; backY: number } {
+  const t = template.tiers[lane.tier];
+  const e = tierEdges(template, lane.tier);
+  if (lane.rows === undefined || lane.rows >= t.rows) return { back: e.back, backY: e.backY };
+  const rakeTan = Math.tan((t.rakeDeg * Math.PI) / 180);
+  const back = t.baseOffset + (lane.rows - 0.5) * t.rowDepth;
+  return { back, backY: e.frontY + (back - e.front) * rakeTan };
+}
+
 export function tierEdges(template: StadiumTemplate, tier: number): { front: number; back: number; frontY: number; backY: number } {
   const t = template.tiers[tier];
   const rakeTan = Math.tan((t.rakeDeg * Math.PI) / 180);
@@ -282,6 +298,7 @@ export function venueMarks(map: SeatMap, template: StadiumTemplate): VenueMark[]
       if (r0 <= r1) push(kind, zone.centerU, r0, r1, y0, y1);
     }
   }
+  const rowsBefore = (tier: number): number => template.tiers.slice(0, tier).reduce((s, t) => s + t.rows, 0);
   for (const l of laneLines(template)) {
     const w = l.lane.widthM / 2;
     let sum = 0;
@@ -291,6 +308,7 @@ export function venueMarks(map: SeatMap, template: StadiumTemplate): VenueMark[]
     let y1 = -Infinity;
     for (let i = 0; i < map.count; i++) {
       if (map.tierOf[i] !== l.lane.tier) continue;
+      if (l.lane.rows !== undefined && map.rowOf[i] - rowsBefore(l.lane.tier) >= l.lane.rows) continue;
       const rx = map.pos3[i * 3] - l.x;
       const rz = map.pos3[i * 3 + 2] - l.z;
       if (rx * l.dx + rz * l.dz < -2) continue;

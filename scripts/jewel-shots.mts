@@ -13,6 +13,8 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createServer, type ViteDevServer } from 'vite';
 import { chromium } from 'playwright';
+import { templateById } from '../src/core/stadiumCatalog';
+import { laneLines } from '../src/core/venueDetails';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const id = process.argv[2] ?? 'jewel-jeddah-62k';
@@ -55,6 +57,15 @@ const views: V[] = [
   { name: '2-main-stand', position: [0, 6, bz * 0.45], target: [0, ty * 0.45, -bz], fov: 55 },
   // A corner: where the vehicle lanes come in.
   { name: '3-corner-lane', position: [ax * 0.12, 3.5, bz * 0.08], target: [ax * 0.5, 4, bz * 0.42], fov: 55 },
+  ...(() => {
+    // The ambulance tunnel, close, from the grass in front of it: the size check.
+    const tpl = templateById(id);
+    const l = tpl ? laneLines(tpl)[0] : undefined;
+    if (!l) return [];
+    const px = l.x - l.dx * 16 + l.dz * 5;
+    const pz = l.z - l.dz * 16 - l.dx * 5;
+    return [{ name: '3e-tunnel-close', position: [px, 2.2, pz], target: [l.x + l.dx * 5, 2.6, l.z + l.dz * 5], fov: 50 } as V];
+  })(),
   // The main stand from the opposite stand, level with the boxes.
   { name: '2b-boxes', position: [0, 18, bz * 0.5], target: [0, 15, -bz * 0.8], fov: 45 },
   // The royal box, close.

@@ -67,7 +67,7 @@ console.log('\n— the new Jewel in the design view —');
   await waitReady(p);
   await p.waitForTimeout(1500);
   const s = await stat(p);
-  check('opens with the real seat count', seatsIn(s) === 59436, s);
+  check('opens with the real seat count', seatsIn(s) === 59548, s);
   await p.screenshot({ path: `${OUT}/editor.png` });
   // The stadium panel lists what the ground has.
   await p.click('#rail-stadium');
@@ -110,7 +110,7 @@ console.log('\n— a design on the earlier Jewel —');
   // A project keeps its stadium, so "moving" makes a copy on the new Jewel
   // and leaves the one on the earlier layout exactly as it was.
   await p.waitForFunction(() => /[?&]local=/.test(location.search), null, { timeout: 60000 }).catch(() => {});
-  check('it moves to the new Jewel', seatsIn(await stat(p)) === 59436, p.url());
+  check('it moves to the new Jewel', seatsIn(await stat(p)) === 59548, p.url());
   check('as a copy, with the original kept', await p.evaluate(() => {
     const idx = JSON.parse(localStorage.getItem('tifo_projects_v1') || '[]');
     return idx.length === 2 && idx.some((x) => x.templateId === 'community-jewel-jeddah-62k') && idx.some((x) => x.templateId === 'jewel-jeddah-60k');

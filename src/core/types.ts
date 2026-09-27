@@ -80,9 +80,10 @@ export interface StadiumTemplate {
 export type BowlCorner = 'north-east' | 'north-west' | 'south-west' | 'south-east';
 
 /**
- * A ramp for ambulances and service vehicles, cut through a tier down to pitch
- * level. It is a real gap in the seating — the seats inside it are not
- * generated — which is why it shows in the design view as well as the 3D one.
+ * A vehicle tunnel for ambulances and service vehicles, coming out at pitch
+ * level through the front of a tier. It is a real gap in the seating — the
+ * seats inside it are not generated — which is why it shows in the design view
+ * as well as the 3D one.
  */
 export interface VehicleLane {
   /** Which corner of the bowl it comes in at. */
@@ -91,6 +92,13 @@ export interface VehicleLane {
   widthM: number;
   /** The tier it cuts through (0 = lower). Tiers above it run unbroken. */
   tier: number;
+  /**
+   * How many rows, from the front of the tier, the open cut takes. The rows
+   * behind it run on over the tunnel's roof, the way a real one is built: an
+   * ambulance needs about 4 m of headroom, not a slot through the whole stand.
+   * Omitted means the cut runs the full depth of the tier.
+   */
+  rows?: number;
 }
 
 /**

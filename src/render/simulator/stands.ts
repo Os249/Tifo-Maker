@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import type { StadiumTemplate } from '../../core/types';
 import { buildRoof } from './roof';
 import { buildFacade } from './facade';
-import { inLane, laneLines, type LaneLine } from '../../core/venueDetails';
+import { inLane, laneCut, laneLines, type LaneLine } from '../../core/venueDetails';
 
 /**
  * Match Day Simulator — extruded stand architecture (Phase 1).
@@ -196,7 +196,18 @@ export function buildStands(template: StadiumTemplate, shadows: boolean): THREE.
       // Cut exactly along the lane's side lines, so the concrete stops where
       // the seats stop and meets the ramp's walls — not a ring sample or two
       // either side of them, which left back-row seats floating over nothing.
-      add(clippedStrip(ring(a, b, p, frontRadial, frontY), ring(a, b, p, backRadial, backY), laneHere, keep), concrete, true, true);
+      // Only as deep as each lane's open cut: behind it the deck runs on
+      // unbroken over the tunnel roof.
+      const yAt = (r: number): number => frontY + (r - frontRadial) * rakeTan;
+      const cutOf = (l: LaneLine): number => Math.min(backRadial, laneCut(template, l.lane).back);
+      const cuts = [...new Set(laneHere.map(cutOf))].sort((m, n) => m - n);
+      let r0 = frontRadial;
+      for (const c of cuts) {
+        const open = laneHere.filter((l) => cutOf(l) >= c - 1e-6);
+        if (c > r0 + 1e-6) add(clippedStrip(ring(a, b, p, r0, yAt(r0)), ring(a, b, p, c, yAt(c)), open, keep), concrete, true, true);
+        r0 = Math.max(r0, c);
+      }
+      if (backRadial > r0 + 1e-6) add(strip(ring(a, b, p, r0, yAt(r0)), ring(a, b, p, backRadial, backY), keep), concrete, true, true);
     } else {
       add(strip(ring(a, b, p, frontRadial, frontY), ring(a, b, p, backRadial, backY), keep), concrete, true, true);
     }
