@@ -14,7 +14,7 @@ import { buildCrowd, type CrowdController, type CrowdPreset } from './crowd';
 import { buildPitchside, type PitchsideController } from './pitchside';
 import { buildBanners, type BannerController } from './banners';
 import { buildEffects, type EffectsController } from './effects';
-import { bowlShots, seatShot, flyover, applyShot as applyCameraShot, type SimShot } from './cameras';
+import { bowlShots, seatShot, flyover, flyoverPeriodFor, FLY_DURATION, applyShot as applyCameraShot, type SimShot } from './cameras';
 import { revealVisibility, type RevealMode } from './choreo';
 import { evalTimeline, type Timeline, type Cue, type EffectName } from './timeline';
 
@@ -134,6 +134,16 @@ export interface RecordedClip extends RecordingFormat {
   blob: Blob;
 }
 
+/**
+ * What the camera does in a recorded clip.
+ *
+ * `show`: the show's own cuts (TV gantry, the ultras' end, the drone), as the
+ * clip has always been. `flyover`: the cinematic flyover for the whole clip,
+ * starting wide and high and sweeping in on the stands; the show's camera cuts
+ * are skipped so nothing cuts away from the move.
+ */
+export type RecordCamera = 'show' | 'flyover';
+
 export class MatchDaySimulator {
   readonly canvas: HTMLCanvasElement;
   private readonly renderer: THREE.WebGLRenderer;
@@ -210,6 +220,20 @@ export class MatchDaySimulator {
   private readonly clock = new THREE.Clock();
   private elapsed = 0;
   private flyActive = false;
+  /** When the current pass of the flyover began, and how long one pass takes. */
+  private flyStart = 0;
+  private flyPeriod = FLY_DURATION;
+  /**
+   * Told whenever the flyover starts or stops, from anywhere: a camera being
+   * picked, a banner being looked at, a clip ending. The panel's Flyover button
+   * used to stay lit after all of those had quietly ended it.
+   */
+  onFlyover?: (on: boolean) => void;
+  private setFly(on: boolean): void {
+    if (this.flyActive === on) return;
+    this.flyActive = on;
+    this.onFlyover?.(on);
+  }
   private reveal: { mode: RevealMode; start: number; dur: number } | null = null;
   private readonly assetLayer: AssetLayer;
   private timeline: Timeline | null = null;
@@ -715,7 +739,7 @@ export class MatchDaySimulator {
   }
   /** Smoothly glide to a shot (eased), instead of snapping. */
   applyShot(s: SimShot): void {
-    this.flyActive = false;
+    this.setFly(false);
     this.camTween = {
       t0: this.elapsed,
       dur: 0.8,
@@ -743,8 +767,18 @@ export class MatchDaySimulator {
       this.controls.enabled = true;
     }
   }
-  setFlyover(on: boolean): void {
-    this.flyActive = on;
+  /**
+   * The cinematic flyover, on or off.
+   *
+   * `restart` begins a fresh pass from its wide, high start (a clip, or its
+   * preview, wants the whole move, not whatever part of the loop was on screen);
+   * `period` is how long one pass takes. Without them it carries on as it was,
+   * at the live pace.
+   */
+  setFlyover(on: boolean, opts: { restart?: boolean; period?: number } = {}): void {
+    if (opts.restart) this.flyStart = this.elapsed + this.sinceFrame();
+    this.flyPeriod = opts.period ?? FLY_DURATION;
+    this.setFly(on);
     if (on) {
       this.camTween = null;
       this.controls.enabled = true;
@@ -1010,7 +1044,7 @@ export class MatchDaySimulator {
    * Resolution is never what gives way. See the fps note below for what does.
    */
   async recordReveal(
-    opts: { seconds?: number; fps?: number; height?: number; maxBytes?: number } = {},
+    opts: { seconds?: number; fps?: number; height?: number; maxBytes?: number; camera?: RecordCamera } = {},
     onTick?: (remaining: number) => void,
   ): Promise<RecordedClip | null> {
     if (this.recording) return null;
@@ -1094,6 +1128,12 @@ export class MatchDaySimulator {
         resolve(new Blob(chunks, { type: format.mimeType }));
       };
     });
+    // The camera for this clip, put back as it was afterwards. Undefined keeps
+    // whatever is live: the flyover if it is on, the show's cuts if not.
+    const flyingBefore = this.flyActive;
+    const periodBefore = this.flyPeriod;
+    if (opts.camera === 'flyover') this.startClipFlyover(seconds);
+    else if (opts.camera === 'show') this.setFly(false);
     recorder.start();
     this.playAutoChoreo();
     for (let s = seconds; s > 0; s--) {
@@ -1102,6 +1142,14 @@ export class MatchDaySimulator {
     }
     recorder.stop();
     cancelAnimationFrame(raf);
+    if (opts.camera) {
+      this.flyPeriod = periodBefore;
+      this.setFly(flyingBefore);
+      if (flyingBefore) {
+        this.camTween = null;
+        this.controls.enabled = true;
+      }
+    }
     const blob = await finished;
     // Detach, never stop: these tracks belong to the atmosphere's live output.
     // `track.stop()` here would end them for good and leave every later
@@ -1674,7 +1722,7 @@ export class MatchDaySimulator {
     // this had pointed the camera at the banner — so the banner was framed,
     // and then quietly un-framed, before anyone saw it.
     this.camTween = null;
-    this.flyActive = false;
+    this.setFly(false);
     // And the controls come back. A glide switches them off until it lands,
     // and cancelling it above meant it never landed: opened from "See it on
     // match day", the camera was framed on the banner and then frozen there —
@@ -1891,7 +1939,10 @@ export class MatchDaySimulator {
     this.atmosphere.cancelBooked();
     this.bookedHits.clear();
     if (nextIsDrumCall) this.beginDrumShow();
-    this.flyActive = false;
+    // The flyover is left running. A show played under it keeps the move and
+    // skips its own camera cuts (see stepTimeline): someone who turned the
+    // cinematic camera on and pressed Play wants the show filmed that way. It
+    // used to be switched off here while its button stayed lit.
     this.camTween = null;
     this.controls.enabled = true;
     this.timeline = tl;
@@ -2002,6 +2053,18 @@ export class MatchDaySimulator {
     // The applause after the last drop wants a second and a half to be heard.
     return { duration: this.drumCallPlan().duration + 1.6, cues };
   }
+  /**
+   * Start the flyover as a clip of `seconds` wants it: a fresh pass from the
+   * wide, high start, paced for the clip (see flyoverPeriodFor). Preview and
+   * Record both go through here, so the preview is the clip.
+   */
+  startClipFlyover(seconds: number): void {
+    this.setFlyover(true, { restart: true, period: flyoverPeriodFor(seconds) });
+  }
+  /** The flyover is on right now. */
+  isFlying(): boolean {
+    return this.flyActive;
+  }
   playAutoChoreo(): void {
     for (const a of this.assetStore.list()) if (a.type === 'surface') this.assetLayer.unfurl(a.id, 3000);
     // Take every banner back to nothing before the clock starts, or a show
@@ -2088,7 +2151,7 @@ export class MatchDaySimulator {
       this.bannerRigs?.setProgress(id, st.bannerProgress[id]);
     }
     this.fireEffects(st.firedEffects);
-    if (st.camera && st.camera !== this.lastCamName) {
+    if (st.camera && st.camera !== this.lastCamName && !this.flyActive) {
       const shot = this.shots().find((s) => s.name === st.camera);
       if (shot) applyCameraShot(this.camera, this.controls, shot);
       this.lastCamName = st.camera;
@@ -2200,12 +2263,16 @@ export class MatchDaySimulator {
       const dt = this.clock.getDelta();
       this.elapsed += dt;
       if (this.flyActive) {
+      // Time into the current pass: a clip starts its own pass at 0.
+      const ft = this.elapsed - this.flyStart;
       if (this.template.id === 'community-kingdom-arena-28k') {
+        // Under the roof: a level orbit inside the bowl, a little slower.
         const { ax, bz, ty } = this.seatBounds();
-        const a = ((this.elapsed % 22) / 22) * Math.PI * 2;
+        const P = this.flyPeriod * (22 / FLY_DURATION);
+        const a = ((((ft % P) + P) % P) / P) * Math.PI * 2;
         applyCameraShot(this.camera, this.controls, { name: 'Flyover', position: [Math.cos(a) * ax * 0.95, ty + 8, Math.sin(a) * bz * 0.95], target: [0, 1, 0], fov: 60 });
       } else {
-        applyCameraShot(this.camera, this.controls, flyover(this.elapsed, this.seatBounds()));
+        applyCameraShot(this.camera, this.controls, flyover(ft, this.seatBounds(), this.flyPeriod));
       }
     }
       this.banners.update(this.elapsed);

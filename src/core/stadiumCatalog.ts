@@ -243,7 +243,7 @@ const COMMUNITY: StadiumEntry[] = [
       // A near-rectangle (p = 7) for the lower tier: square to the touchlines
       // with a tight chamfer at the corners, where the ramps come in. Clears
       // the pitch by about 9.4 m on the sides, 9.8 m behind the goals and
-      // 7.4 m at the corner flags. (The first cut, p = 2.7, put the corner
+      // 7.1 m at the corner flags. (The first cut, p = 2.7, put the corner
       // seats 0.4 m from the corner flag.) Offset outward, the tiers round off.
       plan: { a: 62.5, b: 44, exponent: 7 },
       evenRows: true,
@@ -261,15 +261,13 @@ const COMMUNITY: StadiumEntry[] = [
       // the opening.
       lighting: { style: 'roof-rim', kelvin: 5700, mount: { offset: 7, y: 51.6 } },
       details: {
-        // One ramp at each corner of the lower tier, down to pitch level; the
-        // middle tier runs unbroken over it.
-        // Tunnels, not slots: 5 m wide (an ambulance is 2.1 m) and open for
-        // the first nine rows, where the deck is 4.5 m up — enough headroom
-        // for the van. The rows behind run on over the roof, as they do at
-        // the real ground.
+        // Two vehicle tunnels, both at the corners of the main stand (south,
+        // under the royal box side), as at the real ground; the north corners
+        // are seats all the way down. Tunnels, not slots: 5 m wide (an
+        // ambulance is 2.1 m) and open for the first nine rows, where the deck
+        // is 4.5 m up — enough headroom for the van. The rows behind run on
+        // over the roof.
         lanes: [
-          { corner: 'north-east', widthM: 5, tier: 0, rows: 9 },
-          { corner: 'north-west', widthM: 5, tier: 0, rows: 9 },
           { corner: 'south-west', widthM: 5, tier: 0, rows: 9 },
           { corner: 'south-east', widthM: 5, tier: 0, rows: 9 },
         ],

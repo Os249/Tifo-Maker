@@ -56,7 +56,7 @@ const views: V[] = [
   // The main stand (VIP tribune + boxes) straight on, from the far touchline.
   { name: '2-main-stand', position: [0, 6, bz * 0.45], target: [0, ty * 0.45, -bz], fov: 55 },
   // A corner: where the vehicle lanes come in.
-  { name: '3-corner-lane', position: [ax * 0.12, 3.5, bz * 0.08], target: [ax * 0.5, 4, bz * 0.42], fov: 55 },
+  { name: '3-corner-lane', position: [ax * 0.12, 3.5, -bz * 0.08], target: [ax * 0.5, 4, -bz * 0.42], fov: 55 },
   ...(() => {
     // The ambulance tunnel, close, from the grass in front of it: the size check.
     const tpl = templateById(id);
