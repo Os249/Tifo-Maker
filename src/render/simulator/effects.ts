@@ -38,6 +38,12 @@ function beamGradient(): THREE.Texture {
 
 export interface EffectsController {
   setFloodlights(on: boolean): void;
+  /**
+   * How bright the floodlights burn, 0.1..1.5 (1 = as designed). Scales what
+   * they cast on the pitch, the lamps' own glow and the haze of their beams
+   * together, so a dimmed rig looks dimmed rather than just casting less.
+   */
+  setFloodlightLevel(level: number): void;
   burstConfetti(): void;
   burstPyro(): void;
   update(dt: number): void;
@@ -151,8 +157,13 @@ export function buildEffects(
   floodGroup.visible = false;
   const lampHex = kelvinToRgb(plan.kelvin);
   const mastMat = new THREE.MeshStandardMaterial({ color: 0x2a2e36, roughness: 0.5, metalness: 0.5 });
-  const lampMat = new THREE.MeshStandardMaterial({ color: lampHex, emissive: lampHex, emissiveIntensity: 1.15 });
+  const LAMP_GLOW = 1.15;
+  const lampMat = new THREE.MeshStandardMaterial({ color: lampHex, emissive: lampHex, emissiveIntensity: LAMP_GLOW });
   trash.push(mastMat, lampMat);
+  /** Every beam's haze material, with the opacity it has at level 1. */
+  const beams: { mat: THREE.MeshBasicMaterial; base: number }[] = [];
+  let floodOn = false;
+  let floodLevel = 1;
   const spots: THREE.SpotLight[] = [];
   /** Per-spot "on" intensity, so a near light is not brighter than a far one. */
   const spotPower: number[] = [];
@@ -224,6 +235,7 @@ export function buildEffects(
       side: THREE.DoubleSide,
       alphaMap: beamGradient(),
     });
+    beams.push({ mat: beamMat, base: beamMat.opacity });
     const beam = new THREE.Mesh(beamGeo, beamMat);
     const lampPos = new THREE.Vector3(x, y, z);
     const dir = throwTo.clone().sub(lampPos).normalize(); // lamp -> where it is aimed
@@ -262,8 +274,19 @@ export function buildEffects(
 
   return {
     setFloodlights(on) {
+      floodOn = on;
       floodGroup.visible = on;
-      spots.forEach((s, i) => { s.intensity = on ? spotPower[i] : 0; });
+      spots.forEach((s, i) => { s.intensity = on ? spotPower[i] * floodLevel : 0; });
+    },
+    setFloodlightLevel(level) {
+      floodLevel = Math.max(0.1, Math.min(1.5, Number.isFinite(level) ? level : 1));
+      spots.forEach((s, i) => { s.intensity = floodOn ? spotPower[i] * floodLevel : 0; });
+      // The lamp faces glow with it, but never go fully dark while the rig is
+      // on — a dimmed LED array is still visibly lit.
+      lampMat.emissiveIntensity = LAMP_GLOW * Math.max(0.35, floodLevel);
+      // Haze is light scattered by the air, so it tracks the output — a touch
+      // less than linearly, or a 150% rig turns the bowl into fog.
+      for (const b of beams) b.mat.opacity = b.base * Math.pow(floodLevel, 0.8);
     },
     burstConfetti() {
       for (let i = 0; i < confetti.n; i++) {

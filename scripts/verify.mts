@@ -1920,3 +1920,34 @@ import { buildStadium as siBuild } from '../src/core/stadiumFit';
       ` | ${shipped.length} grounds the server can save against`,
   );
 }
+
+// --- Match Day: floodlight brightness and Hide tifo --------------------------
+// Both are views of the same match, not settings of the design: the floodlight
+// level starts at the rig as designed, the tifo starts on the seats, neither
+// is remembered between visits, and both survive a quality rebuild because
+// applyState puts them back.
+{
+  const { readFileSync: vRead } = await import('node:fs');
+  const ov = vRead('src/render/simulator/overlay.ts', 'utf8');
+  const sim = vRead('src/render/simulator/index.ts', 'utf8');
+  const fx = vRead('src/render/simulator/effects.ts', 'utf8');
+  const need: [string, boolean][] = [
+    ['floodLevel starts at 1', /\n\s*floodLevel:\s*1,/.test(ov)],
+    ['tifoHidden starts false', /\n\s*tifoHidden:\s*false,/.test(ov)],
+    ['both re-applied on rebuild', /sim\.setFloodlightLevel\(state\.floodLevel\)/.test(ov) && /sim\.setTifoHidden\(state\.tifoHidden\)/.test(ov)],
+    ['neither is persisted', !/(floodLevel|tifoHidden)[^\n]*localStorage|localStorage[^\n]*(floodLevel|tifoHidden)/.test(ov)],
+    ['the slider is 10%..150%', /rng\(0\.1, 1\.5, state\.floodLevel, 0\.05\)/.test(ov)],
+    ['effects clamp the level to 0.1..1.5', /Math\.max\(0\.1, Math\.min\(1\.5,/.test(fx)],
+    ['hidden seats show the ground\'s colour, not the design', /const cell = this\.tifoHidden \? 0 : this\.store\.cells\[i\]/.test(sim)],
+    ['no card is held up while hidden', /if \(this\.tifoHidden\) return false;/.test(sim)],
+    ['a show puts the tifo back', /playReveal\(mode: RevealMode, durationMs = 4500\): void \{\n\s*this\.showTifoForShow\(\);/.test(sim) && /playTimeline\(tl: Timeline, loop = false\): void \{\n\s*this\.showTifoForShow\(\);/.test(sim)],
+  ];
+  const bad = need.filter(([, ok]) => !ok).map(([n]) => n);
+  if (bad.length) throw new Error('match day view: ' + bad.join('; '));
+  for (const k of ['floodLevel', 'tip.floodLevel', 'hideTifo', 'showTifo', 'tip.hideTifo', 'tifoBack', 'hTifo']) {
+    const i = ov.indexOf(`'${k}': {`) >= 0 ? ov.indexOf(`'${k}': {`) : ov.indexOf(`  ${k}: {`);
+    const body = i < 0 ? '' : ov.slice(i, i + 300);
+    if (!/\ben:/.test(body) || !/\bar:/.test(body)) throw new Error(`match day view: "${k}" is missing en or ar`);
+  }
+  console.log(`match day view: floodlight level and Hide tifo start as designed, survive a rebuild, never persist, 7 strings in en + ar`);
+}

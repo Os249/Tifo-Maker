@@ -411,32 +411,114 @@ a { color: inherit; text-decoration: none; }
 [dir="rtl"] .card-stats { flex-direction: row-reverse; }
 [dir="rtl"] .notif-panel { right: auto; left: 6vw; }
 
-/* ---- auth modal (light theme for the community page) ---- */
+/* ---- auth modal (the community's own look, both themes) ----
+   The dialog's markup lives in ui/authModal.ts and is shared with the editor,
+   which styles it in floodlight.css. This block used to cover only the first
+   version of it — no Google button, no "or" rule, no Forgot password, no
+   terms or note — so everything added since rendered as bare browser widgets,
+   and `.auth-field { display:flex }` beat the [hidden] on the confirm row, so
+   "Confirm password" sat on the Sign in tab. Every piece is styled here now. */
 .auth-backdrop {
-  position: fixed; inset: 0; z-index: 70; display: grid; place-items: center;
-  background: rgba(14, 10, 26, 0.5); backdrop-filter: blur(6px); padding: 24px;
+  position: fixed; inset: 0; z-index: 70; display: flex; align-items: flex-start; justify-content: center;
+  overflow-y: auto; overscroll-behavior: contain; padding: 24px 16px;
+  background: rgba(14, 10, 26, 0.55); backdrop-filter: blur(6px);
 }
 .auth-modal {
-  position: relative; background: var(--card); border-radius: var(--r-lg); width: min(420px, 94vw);
-  padding: 32px 28px; box-shadow: var(--shadow-lg);
+  /* The password field (ui/passwordField.ts) reads the editor's token names;
+     give it this page's colours under those names. */
+  --text-1: var(--ink); --text-3: var(--muted); --line-2: var(--line); --flare: var(--blue);
+  position: relative; margin: auto; width: min(400px, 100%);
+  background: var(--card); color: var(--ink); border: 1px solid var(--line); border-radius: var(--r-lg);
+  padding: 28px 28px 22px; box-shadow: var(--shadow-lg);
+  font-family: var(--font); font-size: 14px; line-height: 1.45;
 }
-.auth-close { position: absolute; top: 16px; right: 16px; background: none; border: none; font-size: 26px; color: var(--muted); line-height: 1; }
-.auth-brand { font-weight: 800; font-size: 22px; text-align: center; margin-bottom: 20px; }
-.auth-brand b { color: var(--blue); }
-.auth-tabs { display: flex; gap: 4px; background: var(--paper); border: 1px solid var(--line); border-radius: var(--r-pill); padding: 4px; margin-bottom: 22px; }
-.auth-tab { flex: 1; background: transparent; border: none; padding: 10px; border-radius: var(--r-pill); font-weight: 600; color: var(--muted); }
+/* Anything the dialog hides stays hidden, whatever display a rule gives it. */
+.auth-modal [hidden] { display: none !important; }
+.auth-close {
+  position: absolute; top: 14px; inset-inline-end: 14px; width: 34px; height: 34px; padding: 0;
+  display: grid; place-items: center; border: none; border-radius: var(--r-pill);
+  background: transparent; color: var(--muted); font-size: 24px; line-height: 1;
+}
+.auth-close:hover { background: var(--raise-2); color: var(--ink); }
+.auth-close:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+.auth-brand { font-weight: 800; font-size: 22px; letter-spacing: -0.02em; text-align: center; margin: 2px 0 20px; }
+.auth-brand b { color: var(--blue); font-weight: 800; }
+.auth-tabs {
+  display: flex; gap: 4px; background: var(--raise-2); border: 1px solid var(--line);
+  border-radius: var(--r-pill); padding: 4px; margin-bottom: 20px;
+}
+.auth-tab {
+  flex: 1; background: transparent; border: none; padding: 9px 10px; border-radius: var(--r-pill);
+  font-size: 14px; font-weight: 600; color: var(--muted); transition: background .15s, color .15s;
+}
+.auth-tab:hover { color: var(--ink); }
 .auth-tab.active { background: var(--invert); color: var(--invert-ink); }
-.auth-form { display: flex; flex-direction: column; gap: 14px; }
-.auth-field { display: flex; flex-direction: column; gap: 6px; }
-.auth-field span { font-size: 13px; font-weight: 600; color: var(--ink); }
-.auth-field input {
-  border: 1px solid var(--line); border-radius: var(--r-md); padding: 12px 14px; font-size: 15px; font-family: inherit;
+.auth-tab:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+
+/* Continue with Google, then a rule with "or" in it. */
+.auth-providers { display: flex; flex-direction: column; gap: 14px; margin-bottom: 16px; }
+.auth-provider {
+  display: flex; align-items: center; justify-content: center; gap: 10px; width: 100%;
+  padding: 12px 16px; font-size: 15px; font-weight: 600; color: var(--ink);
+  background: var(--raise); border: 1px solid var(--line); border-radius: var(--r-pill);
+  box-shadow: var(--shadow-sm); transition: border-color .15s, background .15s;
 }
-.auth-field input:focus { outline: none; border-color: var(--blue); box-shadow: 0 0 0 3px rgba(28, 111, 224, 0.12); }
-.auth-submit { background: var(--blue-solid); color: #fff; border: none; border-radius: var(--r-pill); padding: 13px; font-weight: 700; font-size: 15px; margin-top: 4px; }
-.auth-submit:hover { background: #1860c4; }
-.auth-error { color: #ef4444; font-size: 13px; min-height: 18px; }
+.auth-provider svg { flex: 0 0 auto; }
+.auth-provider:hover:not(:disabled) { border-color: var(--muted); background: var(--raise-2); }
+.auth-provider:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+.auth-provider:disabled { opacity: .5; cursor: default; }
+.auth-inapp { margin: 0; font-size: 12px; line-height: 1.5; color: var(--muted); text-align: center; }
+.auth-or {
+  display: flex; align-items: center; gap: 12px; color: var(--muted);
+  font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em;
+}
+.auth-or::before, .auth-or::after { content: ''; flex: 1; height: 1px; background: var(--line); }
+
+.auth-form, .auth-forgot { display: flex; flex-direction: column; gap: 14px; }
+.auth-field { display: flex; flex-direction: column; align-items: stretch; gap: 6px; margin: 0; }
+.auth-field > span { font-size: 13px; font-weight: 600; color: var(--ink); }
+.auth-field input {
+  width: 100%; border: 1px solid var(--line); border-radius: var(--r-md); padding: 12px 14px;
+  font-size: 15px; font-family: inherit; background: var(--raise); color: var(--ink);
+  transition: border-color .15s, box-shadow .15s;
+}
+.auth-field input::placeholder { color: var(--muted); opacity: .8; }
+.auth-field input:focus { outline: none; border-color: var(--blue); box-shadow: 0 0 0 3px rgba(28, 111, 224, 0.18); }
+.auth-error {
+  margin: 0; padding: 10px 12px; font-size: 13px; line-height: 1.45;
+  color: #c0343f; background: rgba(224, 72, 84, 0.08); border: 1px solid rgba(224, 72, 84, 0.35); border-radius: var(--r-md);
+}
+:root[data-theme="dark"] .auth-error { color: #ff9aa2; background: rgba(224, 72, 84, 0.12); }
+.auth-submit {
+  width: 100%; background: var(--blue-solid); color: #fff; border: none; border-radius: var(--r-pill);
+  padding: 13px; font-weight: 700; font-size: 15px; margin-top: 4px; transition: background .15s;
+}
+.auth-submit:hover:not(:disabled) { background: var(--blue-solid-hover); }
+.auth-submit:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+.auth-submit:disabled { opacity: .6; cursor: default; }
+.auth-terms { margin: 2px 0 0; font-size: 12px; line-height: 1.6; color: var(--muted); text-align: center; }
+.auth-terms a { color: var(--ink); text-decoration: underline; text-underline-offset: 2px; }
+
+/* Forgot password, and the way back: links, not grey system buttons. */
+.auth-forgot-link, .auth-back {
+  display: block; width: 100%; margin: 10px 0 0; padding: 6px 0; border: none; background: none;
+  font-size: 14px; font-weight: 600; color: var(--blue); text-align: center;
+}
+.auth-back { margin: 0; }
+.auth-forgot-link:hover, .auth-back:hover { text-decoration: underline; text-underline-offset: 3px; }
+.auth-forgot-link:focus-visible, .auth-back:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; border-radius: 6px; }
+.auth-forgot-msg {
+  font-size: 13px; line-height: 1.5; color: var(--ink); background: var(--raise-2);
+  border: 1px solid var(--line); border-radius: var(--r-md); padding: 10px 12px;
+}
+.auth-note {
+  margin: 16px 0 0; padding-top: 14px; border-top: 1px solid var(--line);
+  font-size: 12px; line-height: 1.55; color: var(--muted); text-align: center;
+}
 .auth-hint { font-size: 13px; color: var(--muted); text-align: center; }
+@media (max-width: 420px) {
+  .auth-modal { padding: 24px 18px 18px; }
+}
 
 /* ---- creator profile modal ---- */
 .profile-modal { display: block; max-width: 860px; padding: 0; overflow-y: auto; }

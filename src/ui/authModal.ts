@@ -154,9 +154,13 @@ export function openAuthModal(claimOnReturn = false): Promise<string | null> {
     // The provider row appears only once the server has confirmed it has
     // credentials for something. A button that cannot work is worse than no
     // button, and that is also why an in-app browser gets the note instead.
+    let providersOn = false;
     void availableProviders().then((list) => {
       if (!list.includes('google') || !document.contains(backdrop)) return;
-      providersRow.hidden = false;
+      providersOn = true;
+      // Not over the reset-link form: "Continue with Google" there reads as a
+      // second way to reset a password, which it is not.
+      providersRow.hidden = !forgotForm.hidden;
       if (inAppBrowser()) {
         inAppNote.hidden = false;
         (providersRow.querySelector('.auth-provider') as HTMLButtonElement).disabled = true;
@@ -233,6 +237,7 @@ export function openAuthModal(claimOnReturn = false): Promise<string | null> {
       form.hidden = on;
       tabsRow.hidden = on;
       note.hidden = on;
+      providersRow.hidden = on || !providersOn;
       forgotLink.hidden = on || mode !== 'signin';
       if (on) setTimeout(() => femailInput.focus(), 0);
     };

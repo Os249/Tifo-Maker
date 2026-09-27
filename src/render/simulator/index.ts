@@ -156,6 +156,14 @@ export class MatchDaySimulator {
   /** Premium zone per seat (see core/venueDetails) and the seats that never take the tifo. */
   private zoneCodes: Uint8Array | null = null;
   private noTifo: Uint8Array | null = null;
+  /**
+   * The tifo taken off the seats for a look at the ground itself: every seat
+   * shows the stadium's own colour (the Jewel's orange tiers, Al-Awwal's gold,
+   * the premium leather). The design is untouched; this is a view.
+   */
+  private tifoHidden = false;
+  /** Told when the tifo comes back by itself — a show was started — so the button can say so. */
+  onTifoHidden: ((hidden: boolean) => void) | null = null;
   private readonly zoneColors = [
     [], // 0: none
     [new THREE.Color(0xc9a13a), new THREE.Color(0xd6b04a), new THREE.Color(0xb88f2c)], // gold platform
@@ -439,7 +447,7 @@ export class MatchDaySimulator {
   }
   private colorFor(i: number): THREE.Color {
     if (this.manassaMask && this.manassaMask[i] === 1) return this.manassaColor;
-    const cell = this.store.cells[i];
+    const cell = this.tifoHidden ? 0 : this.store.cells[i];
     const zone = this.zoneCodes ? this.zoneCodes[i] : 0;
     if (zone && (cell === 0 || (this.noTifo && this.noTifo[i] === 1))) {
       // Premium seats read as what they are: gold, silver, cream leather.
@@ -507,6 +515,7 @@ export class MatchDaySimulator {
     this.flushSeatMatrix();
   }
   private cardShown(i: number): boolean {
+    if (this.tifoHidden) return false;
     return this.store.cells[i] !== 0 && !(this.noTifo && this.noTifo[i] === 1);
   }
   /** Where a seat's card sits: 0.9 m up, facing the pitch, tilted back a touch. */
@@ -823,6 +832,10 @@ export class MatchDaySimulator {
     this.venue.screensChanged();
   }
 
+  /** How bright the floodlights burn: 0.1..1.5, 1 as designed. */
+  setFloodlightLevel(level: number): void {
+    this.effects.setFloodlightLevel(level);
+  }
   setFloodlights(b: boolean): void {
     this.effects.setFloodlights(b);
     // The contactor. Stadium lights are one of the few things on this panel
@@ -1708,7 +1721,27 @@ export class MatchDaySimulator {
   setAutoReveal(mode: RevealMode): void {
     this.autoReveal = mode;
   }
+  /** Take the tifo off the seats (or put it back), to see the ground's own seat colours. */
+  setTifoHidden(hidden: boolean): void {
+    if (hidden === this.tifoHidden) return;
+    this.tifoHidden = hidden;
+    this.recolorAll();
+  }
+  tifoIsHidden(): boolean {
+    return this.tifoHidden;
+  }
+  /**
+   * A reveal of a tifo nobody can see is a reveal of nothing, so starting any
+   * show puts the tifo back first, and says so.
+   */
+  private showTifoForShow(): void {
+    if (!this.tifoHidden) return;
+    this.tifoHidden = false;
+    this.recolorAll();
+    this.onTifoHidden?.(false);
+  }
   playReveal(mode: RevealMode, durationMs = 4500): void {
+    this.showTifoForShow();
     // A drum call is a show with a soundtrack, not a wipe: it goes through the
     // timeline so its hits and its cards run on the one clock.
     if (mode === 'drum-call') {
@@ -1840,6 +1873,7 @@ export class MatchDaySimulator {
 
   // ---- choreography timeline (Wave C) ----
   playTimeline(tl: Timeline, loop = false): void {
+    this.showTifoForShow();
     const nextIsDrumCall = tl.cues.some((c) => c.kind === 'reveal' && c.mode === 'drum-call');
     if (this.timelineHasDrumCall && tl !== this.timeline) this.onDrumBeat?.({ count: 0, phase: null, pulse: 0 });
     // A show that is not a drum call gets the terrace drum back; one that is

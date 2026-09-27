@@ -89,7 +89,10 @@ const CSS = `
   --focus:0 0 0 2px rgba(63,185,80,.6);
   position:fixed;inset:0;z-index:10000;background:var(--bg);display:flex;flex-direction:column;font:13px/1.4 system-ui,-apple-system,sans-serif;color:var(--text);}
 .mds-bar{display:flex;align-items:center;gap:10px;padding:10px 16px;background:var(--bar);backdrop-filter:blur(8px);border-bottom:1px solid var(--elev);flex:0 0 auto;z-index:3;}
-.mds-brand{font-weight:700;font-size:15px;letter-spacing:.2px;display:flex;align-items:center;gap:8px;}
+.mds-brand{font-weight:700;font-size:15px;letter-spacing:.2px;display:flex;align-items:center;gap:8px;min-width:0;flex:0 1 auto;}
+/* The title gives way first: at 900px the bar holds Quality, Hide tifo, four
+   actions, Help and Close, and "Match Day Simulator" in full pushed Close off
+   the right edge. It shortens to "Match Day…"; the controls never move. */
 .mds-brand .dot{width:9px;height:9px;border-radius:50%;background:var(--accent);box-shadow:0 0 9px var(--accent);}
 .mds-spacer{margin-left:auto;}
 .mds-status{font-size:12px;color:var(--accent-soft);min-width:6px;transition:opacity .3s;}
@@ -242,7 +245,7 @@ const ICONS = {
 const MDS_T: Record<string, { en: string; ar: string }> = {
   brand: { en: 'Match Day Simulator', ar: 'محاكي يوم المباراة' },
   showHide: { en: 'Show/hide controls', ar: 'إظهار/إخفاء الأدوات' },
-  shortcuts: { en: 'Shortcuts: 1-9 camera views · H hide panel · F fullscreen · Space play show', ar: 'اختصارات: ١-٩ لقطات الكاميرا · H إخفاء اللوحة · F ملء الشاشة · مسافة لتشغيل العرض' },
+  shortcuts: { en: 'Shortcuts: 1-9 camera views · H hide panel · T hide tifo · F fullscreen · Space play show', ar: 'اختصارات: ١-٩ لقطات الكاميرا · H إخفاء اللوحة · T إخفاء التيفو · F ملء الشاشة · مسافة لتشغيل العرض' },
   quality: { en: 'Quality', ar: 'الجودة' },
   snapshot: { en: 'Snapshot', ar: 'لقطة' },
   fullscreen: { en: 'Fullscreen', ar: 'ملء الشاشة' },
@@ -396,6 +399,13 @@ const MDS_T: Record<string, { en: string; ar: string }> = {
   hFull: { en: 'Fullscreen', ar: 'ملء الشاشة' },
   hHide: { en: 'Hide panel', ar: 'إخفاء اللوحة' },
   hHelp: { en: 'Help', ar: 'مساعدة' },
+  hTifo: { en: 'Hide / show the tifo', ar: 'إخفاء / إظهار التيفو' },
+  hideTifo: { en: 'Hide tifo', ar: 'إخفاء التيفو' },
+  showTifo: { en: 'Show tifo', ar: 'إظهار التيفو' },
+  'tip.hideTifo': { en: "Take the tifo off the seats to see the stadium's own seat colours (T)", ar: 'شيل التيفو عن المقاعد عشان تشوف ألوان مقاعد الملعب الأصلية (T)' },
+  tifoBack: { en: 'Tifo back on for the show', ar: 'رجع التيفو عشان العرض' },
+  floodLevel: { en: 'Floodlight brightness', ar: 'سطوع الكشافات' },
+  'tip.floodLevel': { en: 'How bright the floodlights burn: dim them for a light show, push them for a night final', ar: 'قوة إضاءة الكشافات: خففها لعرض الأضواء، وارفعها لنهائي ليلي' },
   hClose: { en: 'Close', ar: 'إغلاق' },
   hYours: { en: 'Make it yours', ar: 'خلّه لك' },
   hBanners: { en: 'Flags and quick banners', ar: 'الأعلام واللافتات السريعة' },
@@ -630,6 +640,10 @@ interface SimState {
   stairs: boolean;
   flags: boolean;
   floods: boolean;
+  /** Floodlight output, 0.1..1.5 — 1 is the rig as designed. */
+  floodLevel: number;
+  /** The tifo taken off the seats, to look at the ground's own seat colours. Not remembered. */
+  tifoHidden: boolean;
   fly: boolean;
   reveal: RevealMode;
   /** The drum call: seconds held up, and how many times round. */
@@ -753,6 +767,8 @@ export function openMatchDaySimulator(
     stairs: false,
     flags: true,
     floods: true,
+    floodLevel: 1,
+    tifoHidden: false,
     fly: false,
     reveal: 'wipe-lr',
     drumHold: DRUM_CALL.hold,
@@ -833,6 +849,12 @@ export function openMatchDaySimulator(
   status.className = 'mds-status';
   const qSel = sel();
   for (const [tier] of TIER_LABELS) opt(qSel, tier, L('tier.' + tier), tier === state.tier);
+  // A view, not an edit: the seats show the stadium's own colours until it is
+  // pressed again. In the bar rather than a section, because it is the thing
+  // you reach for between two looks at the same ground.
+  const tifoBtn = btn(L('hideTifo'));
+  tifoBtn.dataset.k = 'hide-tifo';
+  tifoBtn.setAttribute('aria-pressed', 'false');
   const snapBtn = btn(L('snapshot'));
   const recBtn = btn(L('record'));
   const fullBtn = btn(L('fullscreen'));
@@ -846,7 +868,7 @@ export function openMatchDaySimulator(
   // panel on mobile (keeps the top bar from overflowing on small screens).
   const barActions = document.createElement('div');
   barActions.className = 'mds-baracts';
-  barActions.append(barField(L('quality'), qSel), snapBtn, recBtn, fullBtn, linkBtn);
+  barActions.append(barField(L('quality'), qSel), tifoBtn, snapBtn, recBtn, fullBtn, linkBtn);
   bar.append(panelToggle, brand, spacer, status, barActions, helpBtn, closeBtn);
 
   let toastT = 0;
@@ -885,6 +907,9 @@ export function openMatchDaySimulator(
   const expRange = rng(0.4, 2, 1.05, 0.05);
   const sunRange = rng(0, 3, 1.25, 0.05);
   const floods = chk(state.floods);
+  const floodLevel = rng(0.1, 1.5, state.floodLevel, 0.05);
+  floodLevel.dataset.k = 'flood-level';
+  floodLevel.disabled = !state.floods;
   const bannersChk = chk(state.banners);
   const stairsChk = chk(state.stairs);
   const flagsChk = chk(state.flags);
@@ -913,6 +938,7 @@ export function openMatchDaySimulator(
     field(L('exposure'), expRange),
     field(L('sunIntensity'), sunRange),
     checkField(L('floodlights'), floods),
+    levelField(L('floodLevel'), floodLevel),
     checkField(L('railBanners'), bannersChk),
     checkField(L('coverStairs'), stairsChk),
     checkField(L('cornerFlags'), flagsChk),
@@ -1229,6 +1255,7 @@ export function openMatchDaySimulator(
         kv(L('hCamViews'), key('1') + ' to ' + key('9')) +
         kv(L('hPlayReveal'), key('Space')) +
         kv(L('hFull'), key('F')) +
+        kv(L('hTifo'), key('T')) +
         kv(L('hHide'), key('H')) +
         kv(L('hHelp'), key('?')) +
         kv(L('hClose'), key('Esc')) +
@@ -1311,6 +1338,8 @@ export function openMatchDaySimulator(
     [expRange, 'tip.exp'],
     [sunRange, 'tip.sun'],
     [floods, 'tip.floods'],
+    [floodLevel, 'tip.floodLevel'],
+    [tifoBtn, 'tip.hideTifo'],
     [bannersChk, 'tip.banners'],
     [stairsChk, 'tip.stairs'],
     [wetChk, 'tip.wet'],
@@ -1465,6 +1494,13 @@ export function openMatchDaySimulator(
    * applySound, because applyState runs from mount() before the wiring below.
    * Assigning a range's value fires no `input`, so this cannot loop.
    */
+  /** The Hide/Show tifo button, from state. A declaration: applyState runs before the wiring. */
+  function syncTifoBtn(): void {
+    tifoBtn.textContent = L(state.tifoHidden ? 'showTifo' : 'hideTifo');
+    tifoBtn.classList.toggle('active', state.tifoHidden);
+    tifoBtn.setAttribute('aria-pressed', String(state.tifoHidden));
+  }
+
   function syncAccessories(): void {
     for (const k of ACCESSORY_KINDS) {
       accRange[k].value = String(state.acc[k]);
@@ -1489,7 +1525,14 @@ export function openMatchDaySimulator(
     sim.setBannersVisible(state.banners);
     sim.setStairsVisible(state.stairs);
     sim.setFlagsVisible(state.flags);
+    sim.setFloodlightLevel(state.floodLevel);
     sim.setFloodlights(state.floods);
+    sim.setTifoHidden(state.tifoHidden);
+    sim.onTifoHidden = (hidden) => {
+      state.tifoHidden = hidden;
+      syncTifoBtn();
+      if (!hidden) toast(L('tifoBack'));
+    };
     sim.setFlyover(state.fly);
     sim.setTimeOfDay(state.tod);
     sim.setWeather(state.weather);
@@ -1752,8 +1795,19 @@ export function openMatchDaySimulator(
   sunRange.addEventListener('input', () => sim.setSunIntensity(Number(sunRange.value)));
   floods.addEventListener('change', () => {
     state.floods = floods.checked;
+    floodLevel.disabled = !state.floods;
     sim.setFloodlights(state.floods);
   });
+  floodLevel.addEventListener('input', () => {
+    state.floodLevel = Number(floodLevel.value);
+    sim.setFloodlightLevel(state.floodLevel);
+  });
+  const toggleTifo = (): void => {
+    state.tifoHidden = !state.tifoHidden;
+    sim.setTifoHidden(state.tifoHidden);
+    syncTifoBtn();
+  };
+  tifoBtn.addEventListener('click', toggleTifo);
   screenSel.addEventListener('change', () => {
     state.screen = screenSel.value as ScreenMode;
     syncScreenUi();
@@ -2306,6 +2360,8 @@ export function openMatchDaySimulator(
       }
     } else if ((e.key === 'f' || e.key === 'F') && canFullscreen) {
       fullBtn.click();
+    } else if (e.key === 't' || e.key === 'T') {
+      toggleTifo();
     } else if (e.key === 'h' || e.key === 'H') {
       panel.classList.toggle('collapsed');
     } else if (e.key === ' ') {
