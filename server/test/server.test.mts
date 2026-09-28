@@ -1885,6 +1885,35 @@ if (process.env.DATABASE_URL) {
 
     console.log('postgres: deploy migration + federated identities passed (NOT NULL dropped, idempotent, link/unlink/conflict/cascade)');
   }
+
+  // AI failure reasons on real Postgres: the new columns, the per-reason
+  // breakdown and the recent-failures table the admin AI tab reads.
+  {
+    const { PgAiEventsRepository } = await import('../src/pgRepo');
+    const pAuth = new PgAuthRepository(pool);
+    const ev = new PgAiEventsRepository(pool);
+    await pool.query('TRUNCATE ai_events');
+    const who = await pAuth.createUser(`aifail_${Math.random().toString(36).slice(2, 8)}`, 'x'.repeat(40), {});
+    await ev.record({ userId: who!.id, mode: 'std', outcome: 'model' });
+    await ev.record({ userId: who!.id, mode: 'super', outcome: 'busy', reason: 'overloaded', detail: 'gemini "m": HTTP 503: high demand' });
+    await ev.record({ userId: who!.id, mode: 'std', outcome: 'busy', reason: 'overloaded', detail: 'gemini "m": HTTP 503: high demand' });
+    await ev.record({ userId: null, mode: 'polish', outcome: 'busy', reason: 'timeout', detail: 'gemini: timed out', via: 'password' });
+    await ev.record({ userId: who!.id, mode: 'super', outcome: 'model', reason: 'picture_failed', detail: 'x'.repeat(900) });
+    const st = await ev.stats(30);
+    assert.deepEqual(Object.fromEntries(st.failures.map((f) => [f.reason, f.count])), { overloaded: 2, picture_failed: 1, timeout: 1 });
+    assert.equal(st.failures[0].reason, 'overloaded');
+    assert.equal(st.failures.reduce((n, f) => n + f.count, 0), 4, 'a success without a reason is not a failure');
+    assert.equal(st.recentFailures.length, 4);
+    assert.equal(st.recentFailures[0].reason, 'picture_failed', 'newest first');
+    assert.equal(st.recentFailures[0].detail.length, 400, 'detail is capped on the way in');
+    assert.equal(st.recentFailures[0].username, who!.username, 'the account is named');
+    const pw = st.recentFailures.find((f) => f.mode === 'polish')!;
+    assert.equal(pw.username, 'admin password (signed out)', 'a signed-out admin-password run says which door');
+    assert.equal(pw.via, 'password');
+    assert.deepEqual(st.modes, { std: 2, super: 2, polish: 1, photo: 0 }, 'modes are counted exactly, polish apart');
+    assert.equal(st.window.busy, 3);
+    console.log('postgres: ai failure reasons passed (columns, breakdown, recent table, cap, door, modes)');
+  }
   await pool.end();
 } else {
   console.log('postgres repos: skipped (set DATABASE_URL to run)');

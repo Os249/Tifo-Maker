@@ -17,6 +17,7 @@ import { tmpdir } from 'node:os';
 import { readFile, unlink } from 'node:fs/promises';
 import type { AiEventsRepository, AiUsageRepository, AuthRepository, DesignRepository, EventsRepository, LeadsRepository, SocialRepository } from './repo';
 import { registerAiRoutes, verifyUnlock } from './aiRoutes';
+import { stadiumPlan } from './stadiumPlan';
 import { emailHealth, type EmailSender } from './email';
 import { button, codeBox, layoutEmail, para, smallPrint, textFooter } from './emailLayout';
 import { proxyModeFrom, trustProxyFor, viaCloudflare } from './proxyTrust';
@@ -580,6 +581,31 @@ export async function buildApp(
     return name !== null;
   };
 
+  /**
+   * Gate for the review queues: reports, match photos and stadium submissions.
+   *
+   * These used to demand an ADMIN_USERNAMES account and nothing else, while
+   * the dashboard that counts them is opened with the admin PASSWORD. So the
+   * operator saw "4 pending stadiums", followed the card, and was refused
+   * with 403: the password session and the account allow-list were two
+   * different doors, and the queues were only behind one of them.
+   *
+   * The unlock token is accepted here exactly as it is for the analytics and
+   * the test-alert/test-email actions: in a header, so no cross-site page can
+   * make a browser send it (the tm_admin cookie is NOT accepted), and every
+   * action is still written to the security audit under the session's id.
+   * Without a token this falls through to requireAdmin unchanged, so an
+   * anonymous caller still gets 401 and an ordinary account 403.
+   */
+  const requireModerator = async (req: FastifyRequest, reply: FastifyReply): Promise<boolean> => {
+    const tok = req.headers['x-ai-unlock'];
+    if (typeof tok === 'string' && aiAdminPassword && verifyUnlock(aiAdminPassword, tok)) {
+      req.socActor = `admin password (session ${tok.split('.')[2]?.slice(0, 6) ?? '?'})`;
+      return true;
+    }
+    return (await requireAdmin(req, reply)) !== null;
+  };
+
   /** undefined = invalid (reply sent); null = none provided; Buffer = decoded. */
   const decodeThumb = (b64: string | undefined, reply: FastifyReply): Buffer | null | undefined => {
     if (b64 === undefined) return null;
@@ -916,11 +942,11 @@ export async function buildApp(
     });
     // Admin: review queue + decision.
     app.get('/api/stadiums/pending', async (req, reply) => {
-      if (!(await requireAdmin(req, reply))) return;
+      if (!(await requireModerator(req, reply))) return;
       return reply.send({ stadiums: await stadiums.listPending() });
     });
     app.post('/api/stadiums/:id/review', async (req, reply) => {
-      if (!(await requireAdmin(req, reply))) return;
+      if (!(await requireModerator(req, reply))) return;
       const id = (req.params as { id: string }).id;
       const approve = (req.body as { approve?: unknown } | null)?.approve === true;
       const ok = await stadiums.review(id, approve);
@@ -2193,8 +2219,7 @@ export async function buildApp(
   // ---------- moderation & trust review (admin only) ----------
   // The review queue: open reports with target context.
   app.get('/api/admin/reports', async (req, reply) => {
-    const adminId = await requireAdmin(req, reply);
-    if (!adminId) return;
+    if (!(await requireModerator(req, reply))) return;
     const q = req.query as { status?: string };
     const status = ['open', 'reviewed', 'actioned'].includes(q.status ?? '') ? q.status! : 'open';
     return repo.listReports(status, 100);
@@ -2202,8 +2227,7 @@ export async function buildApp(
 
   // Dismiss a report (no action needed) → reviewed.
   app.post('/api/admin/reports/:id/dismiss', async (req, reply) => {
-    const adminId = await requireAdmin(req, reply);
-    if (!adminId) return;
+    if (!(await requireModerator(req, reply))) return;
     const { id } = req.params as { id: string };
     const ok = await repo.setReportStatus(id, 'reviewed');
     if (!ok) return reply.code(404).send({ error: 'report not found' });
@@ -2212,8 +2236,7 @@ export async function buildApp(
 
   // Take a reported design down: make it private + mark its open reports actioned.
   app.post('/api/admin/designs/:id/takedown', async (req, reply) => {
-    const adminId = await requireAdmin(req, reply);
-    if (!adminId) return;
+    if (!(await requireModerator(req, reply))) return;
     const { id } = req.params as { id: string };
     const ok = await repo.takedownDesign(id);
     if (!ok) return reply.code(404).send({ error: 'design not found' });
@@ -2332,15 +2355,13 @@ export async function buildApp(
 
   // Photo verification queue.
   app.get('/api/admin/photos/unverified', async (req, reply) => {
-    const adminId = await requireAdmin(req, reply);
-    if (!adminId) return;
+    if (!(await requireModerator(req, reply))) return;
     return repo.listUnverifiedPhotos(100);
   });
 
   // Confirm (or un-confirm) a photo as a genuine match.
   app.post('/api/admin/photos/:photoId/verify', async (req, reply) => {
-    const adminId = await requireAdmin(req, reply);
-    if (!adminId) return;
+    if (!(await requireModerator(req, reply))) return;
     const { photoId } = req.params as { photoId: string };
     const verified = (req.body as { verified?: unknown } | null)?.verified !== false; // default true
     const ok = await repo.setPhotoVerified(photoId, verified);
@@ -2350,12 +2371,80 @@ export async function buildApp(
 
   // A moderator can remove any photo outright (not just its owner).
   app.delete('/api/admin/photos/:photoId', async (req, reply) => {
-    const adminId = await requireAdmin(req, reply);
-    if (!adminId) return;
+    if (!(await requireModerator(req, reply))) return;
     const { photoId } = req.params as { photoId: string };
     const ok = await repo.deletePhotoAsModerator(photoId);
     if (!ok) return reply.code(404).send({ error: 'photo not found' });
     return { deleted: true };
+  });
+
+  // ---------- review queues, for the /admin dashboard ----------
+  // Everything waiting for a decision, in one call, so the dashboard can show
+  // the work where the count is instead of sending the operator to an editor
+  // panel. Stadium submissions carry a top-down seat plan drawn from their real
+  // geometry (stadiumPlan.ts) and the submitter's handle; plans are cached by
+  // id, since a submission never changes while it waits.
+  const planCache = new Map<string, ReturnType<typeof stadiumPlan>>();
+  app.get('/api/admin/queue', async (req, reply) => {
+    if (!(await requireModerator(req, reply))) return;
+    const [reports, photos, pending] = await Promise.all([
+      repo.listReports('open', 100),
+      repo.listUnverifiedPhotos(100),
+      options.stadiums ? options.stadiums.listPending(100) : Promise.resolve([]),
+    ]);
+    const handles = new Map<string, string | null>();
+    for (const p of pending) {
+      if (p.submitterId && !handles.has(p.submitterId)) {
+        handles.set(p.submitterId, (await auth.getUserById(p.submitterId).catch(() => null))?.username ?? null);
+      }
+    }
+    const stadiums = pending.map((p) => {
+      let plan = planCache.get(p.id);
+      if (plan === undefined) {
+        plan = stadiumPlan(p.template);
+        planCache.set(p.id, plan);
+        if (planCache.size > 500) planCache.delete(planCache.keys().next().value as string);
+      }
+      return {
+        id: p.id,
+        name: p.name,
+        country: p.country,
+        createdAt: p.createdAt,
+        submitter: p.submitterId ? handles.get(p.submitterId) ?? null : null,
+        tiers: plan?.tiers ?? (Array.isArray(p.template?.tiers) ? p.template.tiers.length : 0),
+        seats: plan?.seats ?? null,
+        planSvg: plan?.svg ?? null,
+      };
+    });
+    return { reports, photos, stadiums, stadiumsEnabled: !!options.stadiums };
+  });
+
+  // The images a reviewer has to see. The public routes rightly hide a photo on
+  // a private design and a taken-down design's thumbnail — which are exactly
+  // the ones a moderator may need to look at. Header-gated like the queue, so
+  // the dashboard fetches them with the token rather than an <img> URL.
+  app.get('/api/admin/photos/:photoId/image', async (req, reply) => {
+    if (!(await requireModerator(req, reply))) return;
+    const { photoId } = req.params as { photoId: string };
+    const photo = await repo.getPhoto(photoId).catch(() => null);
+    if (!photo) return reply.code(404).send({ error: 'not found' });
+    const b = photo.image;
+    const type =
+      b[0] === 0xff && b[1] === 0xd8 ? 'image/jpeg' :
+      b[0] === 0x89 && b[1] === 0x50 ? 'image/png' :
+      b[0] === 0x52 && b[1] === 0x49 ? 'image/webp' : 'application/octet-stream';
+    return reply
+      .header('content-type', type)
+      .header('x-content-type-options', 'nosniff')
+      .header('cache-control', 'private, no-store')
+      .send(b);
+  });
+  app.get('/api/admin/designs/:id/thumbnail.png', async (req, reply) => {
+    if (!(await requireModerator(req, reply))) return;
+    const { id } = req.params as { id: string };
+    const png = await repo.getThumbnail(id).catch(() => null);
+    if (!png) return reply.code(404).send({ error: 'no thumbnail' });
+    return reply.header('content-type', 'image/png').header('cache-control', 'private, no-store').send(png);
   });
 
   // Like / dislike / clear. value: 1, -1, or 0.

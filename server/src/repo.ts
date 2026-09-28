@@ -1,5 +1,8 @@
 /** Storage layer contracts. Routes own gzip/diff/auth logic; repos own rows. */
 
+import type { AiFailReason } from './aiFailure';
+export type { AiFailReason } from './aiFailure';
+
 export interface DesignMeta {
   id: string;
   title: string;
@@ -528,10 +531,39 @@ export interface AiUsageRepository {
  */
 export type AiOutcome = 'model' | 'cache' | 'quick' | 'quota' | 'busy' | 'blocked' | 'invalid';
 
+/** std/super are generations; polish (the vision critic) and photo (reading a
+ *  ground photo) are recorded only when they FAIL, so their counts are failures. */
+export type AiMode = 'std' | 'super' | 'polish' | 'photo';
+
+export interface AiEventInput {
+  /** The signed-in account. With the admin password this is still the account
+   *  the operator was signed into, when there is one — "by which user". */
+  userId: string | null;
+  mode: AiMode;
+  outcome: AiOutcome;
+  /** Why it failed (see aiFailure.ts). Null for a request that succeeded. */
+  reason?: AiFailReason | null;
+  /** Sanitized provider text for the operator. Never the prompt. */
+  detail?: string | null;
+  /** 'password' when the admin unlock token made the call. */
+  via?: 'password' | null;
+}
+
 export interface AiEventsRepository {
   /** Best-effort: telemetry must never fail a generation. */
-  record(e: { userId: string | null; mode: 'std' | 'super'; outcome: AiOutcome }): Promise<void>;
+  record(e: AiEventInput): Promise<void>;
   stats(days: number): Promise<AiStats>;
+}
+
+/** One failed (or partly failed) request, for the admin "why" table. */
+export interface AiFailureRow {
+  at: string;
+  username: string;
+  via: 'password' | null;
+  mode: AiMode;
+  outcome: AiOutcome;
+  reason: AiFailReason;
+  detail: string;
 }
 
 export interface AiStats {
@@ -546,9 +578,13 @@ export interface AiStats {
   topUsers: { username: string; model: number; quick: number; quota: number; total: number; last: string }[];
   /** Everyone who has ever been turned away by the hourly cap. */
   hitCap: { username: string; times: number; last: string }[];
-  modes: { std: number; super: number };
+  modes: { std: number; super: number; polish: number; photo: number };
   /** Accounts that have ever had a row in ai_usage (the meter), for contrast. */
   meteredAccounts: number;
+  /** Failures in the window by reason, most frequent first. */
+  failures: { reason: AiFailReason; count: number; last: string }[];
+  /** The latest failures in the window, newest first (at most 50). */
+  recentFailures: AiFailureRow[];
 }
 
 /** Current hourly metering period, e.g. "2026-06-28T14" (UTC). Usage resets each hour. */

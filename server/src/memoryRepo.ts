@@ -13,7 +13,11 @@ import type {
   Lead,
   LeadsRepository,
   NewDesign,
+  AiEventInput,
   AiEventsRepository,
+  AiFailReason,
+  AiFailureRow,
+  AiMode,
   AiOutcome,
   AiStats,
   RevisionRow,
@@ -73,11 +77,18 @@ const zeroOutcomes = (): Record<AiOutcome, number> & { all: number } => ({
 
 /** In-memory AI history. Same shape as Postgres, so the dashboard behaves in dev. */
 export class MemoryAiEventsRepository implements AiEventsRepository {
-  private rows: { userId: string | null; at: number; mode: 'std' | 'super'; outcome: AiOutcome }[] = [];
+  private rows: {
+    userId: string | null; at: number; mode: AiMode; outcome: AiOutcome;
+    reason: AiFailReason | null; detail: string | null; via: 'password' | null;
+  }[] = [];
   constructor(private readonly usernames: (id: string | null) => string = () => 'unknown') {}
 
-  async record(e: { userId: string | null; mode: 'std' | 'super'; outcome: AiOutcome }): Promise<void> {
-    this.rows.push({ ...e, at: Date.now() });
+  async record(e: AiEventInput): Promise<void> {
+    this.rows.push({
+      userId: e.userId, mode: e.mode, outcome: e.outcome,
+      reason: e.reason ?? null, detail: e.detail ? e.detail.slice(0, 400) : null, via: e.via ?? null,
+      at: Date.now(),
+    });
     if (this.rows.length > 20000) this.rows.splice(0, this.rows.length - 20000);
   }
 
@@ -113,6 +124,17 @@ export class MemoryAiEventsRepository implements AiEventsRepository {
       byUser.set(k, u);
     }
 
+    // Signed out behind the admin password is still somebody: say which door.
+    const failName = (id: string | null, via: 'password' | null): string =>
+      id ? this.usernames(id) : via === 'password' ? 'admin password (signed out)' : 'deleted account';
+    const failed = new Map<AiFailReason, { count: number; last: number }>();
+    for (const r of win) {
+      if (!r.reason) continue;
+      const f = failed.get(r.reason) ?? { count: 0, last: 0 };
+      f.count++; f.last = Math.max(f.last, r.at);
+      failed.set(r.reason, f);
+    }
+
     const caps = new Map<string, { times: number; last: number }>();
     for (const r of this.rows.filter((x) => x.outcome === 'quota')) {
       const k = name(r.userId);
@@ -133,8 +155,29 @@ export class MemoryAiEventsRepository implements AiEventsRepository {
       hitCap: [...caps.entries()]
         .map(([username, c]) => ({ username, times: c.times, last: new Date(c.last).toISOString() }))
         .sort((a, b) => b.times - a.times).slice(0, 20),
-      modes: { std: win.filter((r) => r.mode !== 'super').length, super: win.filter((r) => r.mode === 'super').length },
+      modes: {
+        std: win.filter((r) => r.mode === 'std').length,
+        super: win.filter((r) => r.mode === 'super').length,
+        polish: win.filter((r) => r.mode === 'polish').length,
+        photo: win.filter((r) => r.mode === 'photo').length,
+      },
       meteredAccounts: 0,
+      failures: [...failed.entries()]
+        .map(([reason, f]) => ({ reason, count: f.count, last: new Date(f.last).toISOString() }))
+        .sort((a, b) => b.count - a.count || b.last.localeCompare(a.last)),
+      recentFailures: win
+        .filter((r) => r.reason)
+        .slice(-50)
+        .reverse()
+        .map((r): AiFailureRow => ({
+          at: new Date(r.at).toISOString(),
+          username: failName(r.userId, r.via),
+          via: r.via,
+          mode: r.mode,
+          outcome: r.outcome,
+          reason: r.reason as AiFailReason,
+          detail: r.detail ?? '',
+        })),
     };
   }
 }

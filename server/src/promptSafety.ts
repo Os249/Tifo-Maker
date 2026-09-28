@@ -7,7 +7,8 @@
  * with. Tune the lists as needed.
  */
 
-export type PromptScreen = { ok: true } | { ok: false; message: string };
+/** `rule` names which list matched, for the admin AI tab; the user only ever sees `message`. */
+export type PromptScreen = { ok: true } | { ok: false; message: string; rule: 'minors' | 'extremism' | 'violence' | 'weapons' };
 
 const BLOCK_MESSAGE =
   'This request was blocked because it may break the Acceptable Use rules. Try a different design idea.';
@@ -34,10 +35,10 @@ const WEAPONS =
 /** Returns ok:false with a user-facing message when a prompt should be blocked. */
 export function screenPrompt(prompt: string): PromptScreen {
   const t = prompt.toLowerCase();
-  if (CSAM_TOKENS.test(t)) return { ok: false, message: BLOCK_MESSAGE };
-  if (MINOR_WORDS.test(t) && SEXUAL_WORDS.test(t)) return { ok: false, message: BLOCK_MESSAGE };
-  if (EXTREMISM.test(t)) return { ok: false, message: BLOCK_MESSAGE };
-  if (VIOLENCE.test(t)) return { ok: false, message: BLOCK_MESSAGE };
-  if (WEAPONS.test(t)) return { ok: false, message: BLOCK_MESSAGE };
+  if (CSAM_TOKENS.test(t)) return { ok: false, message: BLOCK_MESSAGE, rule: 'minors' };
+  if (MINOR_WORDS.test(t) && SEXUAL_WORDS.test(t)) return { ok: false, message: BLOCK_MESSAGE, rule: 'minors' };
+  if (EXTREMISM.test(t)) return { ok: false, message: BLOCK_MESSAGE, rule: 'extremism' };
+  if (VIOLENCE.test(t)) return { ok: false, message: BLOCK_MESSAGE, rule: 'violence' };
+  if (WEAPONS.test(t)) return { ok: false, message: BLOCK_MESSAGE, rule: 'weapons' };
   return { ok: true };
 }

@@ -280,12 +280,23 @@ CREATE TABLE IF NOT EXISTS ai_events (
   id      BIGSERIAL PRIMARY KEY,
   user_id UUID REFERENCES users(id) ON DELETE SET NULL,  -- null = admin/unlocked
   at      TIMESTAMPTZ NOT NULL DEFAULT now(),
-  mode    TEXT NOT NULL,     -- 'std' | 'super'
+  mode    TEXT NOT NULL,     -- 'std' | 'super' | 'polish' | 'photo' (the last two: failures only)
   outcome TEXT NOT NULL      -- model | cache | quick | quota | busy | blocked | invalid
 );
 CREATE INDEX IF NOT EXISTS ai_events_at_idx      ON ai_events (at DESC);
 CREATE INDEX IF NOT EXISTS ai_events_user_idx    ON ai_events (user_id, at DESC);
 CREATE INDEX IF NOT EXISTS ai_events_outcome_idx ON ai_events (outcome, at DESC);
+-- WHY a request failed, for the admin AI tab. "Busy" alone could not tell a
+-- provider capacity spike from a wrong model id from an exhausted key, and the
+-- operator had to read deploy logs to find out. reason is a category from
+-- server/src/aiFailure.ts; detail is the provider's answer with anything
+-- credential-shaped masked, capped at 400 characters (still never the prompt).
+-- via = 'password' when the admin unlock token made the call; user_id is then
+-- the account the operator was signed into, if any.
+ALTER TABLE ai_events ADD COLUMN IF NOT EXISTS reason TEXT;
+ALTER TABLE ai_events ADD COLUMN IF NOT EXISTS detail TEXT;
+ALTER TABLE ai_events ADD COLUMN IF NOT EXISTS via TEXT;
+CREATE INDEX IF NOT EXISTS ai_events_reason_idx ON ai_events (at DESC) WHERE reason IS NOT NULL;
 
 -- Sharing system: a public view counter on each design, a branded social-card
 -- image, and a per-platform share/open log for analytics.

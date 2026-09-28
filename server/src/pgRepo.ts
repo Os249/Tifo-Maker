@@ -14,7 +14,10 @@ import type {
   Lead,
   LeadsRepository,
   NewDesign,
+  AiEventInput,
   AiEventsRepository,
+  AiFailReason,
+  AiMode,
   AiOutcome,
   AiStats,
   RevisionRow,
@@ -140,16 +143,16 @@ const zero = (): Record<AiOutcome, number> & { all: number } => ({
 export class PgAiEventsRepository implements AiEventsRepository {
   constructor(private readonly pool: pg.Pool) {}
 
-  async record(e: { userId: string | null; mode: 'std' | 'super'; outcome: AiOutcome }): Promise<void> {
+  async record(e: AiEventInput): Promise<void> {
     await this.pool.query(
-      'INSERT INTO ai_events (user_id, mode, outcome) VALUES ($1, $2, $3)',
-      [e.userId, e.mode, e.outcome],
+      'INSERT INTO ai_events (user_id, mode, outcome, reason, detail, via) VALUES ($1, $2, $3, $4, $5, $6)',
+      [e.userId, e.mode, e.outcome, e.reason ?? null, e.detail ? e.detail.slice(0, 400) : null, e.via ?? null],
     );
   }
 
   async stats(days: number): Promise<AiStats> {
     const since = `${days} days`;
-    const [tot, win, perDay, top, cap, modes, metered, first] = await Promise.all([
+    const [tot, win, perDay, top, cap, modes, metered, first, fails, recent] = await Promise.all([
       this.pool.query('SELECT outcome, count(*)::int AS n FROM ai_events GROUP BY outcome'),
       this.pool.query(
         `SELECT outcome, count(*)::int AS n FROM ai_events WHERE at > now() - $1::interval GROUP BY outcome`,
@@ -187,6 +190,19 @@ export class PgAiEventsRepository implements AiEventsRepository {
       ),
       this.pool.query('SELECT count(*)::int AS n FROM ai_usage WHERE used > 0'),
       this.pool.query('SELECT min(at) AS first FROM ai_events'),
+      this.pool.query(
+        `SELECT reason, count(*)::int AS n, max(at) AS last FROM ai_events
+         WHERE reason IS NOT NULL AND at > now() - $1::interval
+         GROUP BY reason ORDER BY n DESC, last DESC`,
+        [since],
+      ),
+      this.pool.query(
+        `SELECT e.at, e.user_id, u.username, e.via, e.mode, e.outcome, e.reason, e.detail
+         FROM ai_events e LEFT JOIN users u ON u.id = e.user_id
+         WHERE e.reason IS NOT NULL AND e.at > now() - $1::interval
+         ORDER BY e.at DESC, e.id DESC LIMIT 50`,
+        [since],
+      ),
     ]);
 
     const fold = (rows: { outcome: string; n: number }[]) => {
@@ -197,9 +213,10 @@ export class PgAiEventsRepository implements AiEventsRepository {
       }
       return out;
     };
-    const m = { std: 0, super: 0 };
+    const m = { std: 0, super: 0, polish: 0, photo: 0 };
     for (const r of modes.rows) {
-      if (r.mode === 'super') m.super = Number(r.n); else m.std += Number(r.n);
+      const k = r.mode as AiMode;
+      if (k in m) m[k] += Number(r.n);
     }
     return {
       days,
@@ -214,6 +231,17 @@ export class PgAiEventsRepository implements AiEventsRepository {
       hitCap: cap.rows.map((r) => ({ username: String(r.username), times: Number(r.times), last: new Date(r.last).toISOString() })),
       modes: m,
       meteredAccounts: Number(metered.rows[0]?.n ?? 0),
+      failures: fails.rows.map((r) => ({ reason: String(r.reason) as AiFailReason, count: Number(r.n), last: new Date(r.last).toISOString() })),
+      recentFailures: recent.rows.map((r) => ({
+        at: new Date(r.at).toISOString(),
+        // Signed out behind the admin password is still somebody: say which door.
+        username: r.username ? String(r.username) : r.via === 'password' ? 'admin password (signed out)' : 'deleted account',
+        via: r.via === 'password' ? 'password' : null,
+        mode: String(r.mode) as AiMode,
+        outcome: String(r.outcome) as AiOutcome,
+        reason: String(r.reason) as AiFailReason,
+        detail: r.detail ? String(r.detail) : '',
+      })),
     };
   }
 }

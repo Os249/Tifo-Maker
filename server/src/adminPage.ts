@@ -197,6 +197,35 @@ const ADMIN_HTML_HEAD = `<!doctype html>
   .posture-row:last-child{ border-bottom:none; }
   .posture-row .pd{ color:var(--mut); line-height:1.55; }
   @media (max-width:640px){ .posture-row{ grid-template-columns:70px 1fr; } .posture-row .pd{ grid-column:1 / -1; } }
+  /* Review queues: the work shown where the count is. Each item is a card with
+     what a decision needs (a picture, who sent it, when) and its two actions. */
+  .qgrid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(250px,1fr)); gap:10px; }
+  .qitem{ display:flex; flex-direction:column; gap:8px; background:var(--bg2); border:1px solid var(--line); border-radius:12px; padding:12px; min-width:0; }
+  .qitem.busy{ opacity:.55; pointer-events:none; }
+  .qpic{ aspect-ratio:16/10; border-radius:8px; background:var(--bg); border:1px solid var(--line); display:flex; align-items:center; justify-content:center; overflow:hidden; color:var(--dim); font-size:11px; }
+  .qpic img{ width:100%; height:100%; object-fit:cover; display:block; }
+  .qpic svg{ width:100%; height:100%; display:block; padding:6px; }
+  .qname{ font-weight:600; font-size:13.5px; line-height:1.3; overflow-wrap:anywhere; }
+  .qmeta{ font-size:11.5px; color:var(--mut); line-height:1.55; overflow-wrap:anywhere; }
+  .qmeta b{ color:var(--tx); font-weight:600; }
+  .qacts{ display:flex; gap:6px; flex-wrap:wrap; margin-top:auto; }
+  .qacts button{ flex:1 1 auto; min-height:34px; }
+  button.danger{ color:var(--red); border-color:#5a1d1d; }
+  button.danger:hover{ background:#2a0f0f; border-color:var(--red); }
+  .qerr{ font-size:11.5px; color:var(--red); min-height:0; }
+  .qerr:empty{ display:none; }
+  .qhead{ display:flex; align-items:center; gap:8px; margin:20px 0 9px; font-size:12.5px; font-weight:600; }
+  .qhead .badge{ font-weight:500; }
+  /* AI failures: the reason in words, what to do about it, and the evidence. */
+  .why{ display:grid; grid-template-columns:minmax(150px,230px) 1fr auto; gap:4px 14px; align-items:baseline; padding:9px 0; border-bottom:1px solid var(--line); }
+  .why:last-child{ border-bottom:none; }
+  .why .wl{ font-weight:600; font-size:13px; }
+  .why .wf{ color:var(--mut); font-size:12px; line-height:1.5; }
+  .why .wn{ font-variant-numeric:tabular-nums; font-size:13px; text-align:right; white-space:nowrap; }
+  .why .wn span{ display:block; color:var(--dim); font-size:10.5px; }
+  @media (max-width:640px){ .why{ grid-template-columns:1fr auto; } .why .wf{ grid-column:1 / -1; } }
+  td.detail{ font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:11.5px; color:var(--mut); white-space:normal; word-break:break-word; min-width:220px; }
+  .via{ display:inline-block; margin-inline-start:6px; font-size:10px; padding:1px 6px; border-radius:999px; border:1px solid #4a3c1d; color:var(--gold); }
 </style>
 </head>
 <body>
@@ -339,6 +368,20 @@ async function post(path, body){
   return { ok: res.ok, status: res.status, data: data };
 }
 
+/* DELETE with the token and no body: a JSON content-type with an empty body is
+   refused by the server's parser, so this sends neither. */
+async function del(path){
+  var headers = {};
+  var t = getUnlock();
+  if (t) headers['x-ai-unlock'] = t;
+  var res;
+  try { res = await fetch(path, { method:'DELETE', headers: headers }); }
+  catch(e){ return { ok:false, status:0, data:null }; }
+  var data = null;
+  try { data = await res.json(); } catch(e){ data = null; }
+  return { ok: res.ok, status: res.status, data: data };
+}
+
 function hideTabs(){ var n = el('tabs'); if (n) n.style.display = 'none'; }
 
 function showLogin(message){
@@ -392,9 +435,11 @@ async function loadAll(){
     api('/api/admin/feedback?limit=50'),
     api('/api/admin/ai?days=' + currentDays),
     api('/api/admin/email'),
-    api('/api/admin/soc')
+    api('/api/admin/soc'),
+    api('/api/admin/queue')
   ]);
   var ov = results[0], tr = results[1], fn = results[2], sh = results[3], fb = results[4], ai = results[5], em = results[6], sc = results[7];
+  QUEUE = results[8].ok && results[8].data ? results[8].data : { error: results[8].status };
   if (!ov.ok){
     if (ov.status === 403){ clearUnlock(); showLogin('Wrong or expired password. Sign in again.'); return; }
     setStatus('Failed to load (' + ov.status + ').');
@@ -454,11 +499,12 @@ function periodCompare(daily, key, n){
 /* ---------- components ---------- */
 
 /**
- * A review-queue count that links to the panel that actually handles it.
+ * A review-queue count that links to where the work is done.
  *
- * The three queues live in two different places - reports and photos in the
- * Moderation panel, stadium submissions in the Stadium panel - which no count
- * on a dashboard can convey. So each card carries its own destination.
+ * These used to open the editor's Moderation and Stadium panels, which only an
+ * ADMIN_USERNAMES account can use, from a dashboard opened with the admin
+ * password: the operator followed "4 pending stadiums" and was refused. The
+ * queues are reviewed in the Library tab now, with this same session.
  */
 function queueKpi(label, value, where, href){
   var n = Number(value) || 0;
@@ -868,8 +914,8 @@ function headerStrip(ov, tr, sh){
     + '<div class="strip-lab">new accounts</div>'
     + '<div class="strip-sub dim">last 7 days</div></div>';
 
-  var mod = (ov && ov.moderation) || {};
-  var queue = (Number(mod.openReports)||0) + (Number(mod.unverifiedPhotos)||0) + (Number(mod.pendingStadiums)||0);
+  var qc = queueCounts();
+  var queue = qc.reports + qc.photos + qc.stadiums;
   html += '<div class="strip-cell"><div class="strip-val">' + fmt(queue) + '</div>'
     + '<div class="strip-lab">needs review</div>'
     + '<div class="strip-sub">' + (queue
@@ -984,7 +1030,8 @@ function tabBadge(id){
     return n ? '<span class="pill">' + fmt(n) + '</span>' : '';
   }
   if (id === 'library'){
-    var queue = (Number(mod.openReports)||0) + (Number(mod.unverifiedPhotos)||0) + (Number(mod.pendingStadiums)||0);
+    var qc = queueCounts();
+    var queue = qc.reports + qc.photos + qc.stadiums;
     return queue ? '<span class="pill warn">' + fmt(queue) + '</span>' : '';
   }
   if (id === 'traffic'){
@@ -1037,15 +1084,15 @@ function boardSection(){
   html += kpi('B2B leads', t.leads, fmt(r7.leads) + ' in the last 7 days', true);
   html += '</div>';
 
-  var mod = ov.moderation || {};
-  var queue = (Number(mod.openReports)||0) + (Number(mod.unverifiedPhotos)||0) + (Number(mod.pendingStadiums)||0);
+  var qc = queueCounts();
+  var queue = qc.reports + qc.photos + qc.stadiums;
   var firingNow = socFiring().length;
   if (queue || firingNow){
     html += '<h2 class="sec">Waiting for you</h2><div class="grid">';
     if (firingNow) html += queueKpi('Security alerts firing', firingNow, 'Security tab', '#security');
-    html += queueKpi('Open reports', mod.openReports, 'Moderation panel', '/app?admin=reports');
-    html += queueKpi('Unverified photos', mod.unverifiedPhotos, 'Moderation panel', '/app?admin=photos');
-    html += queueKpi('Pending stadiums', mod.pendingStadiums, 'Stadium panel', '/app?admin=stadiums');
+    html += queueKpi('Open reports', qc.reports, 'Review in Library', '#library');
+    html += queueKpi('Unverified photos', qc.photos, 'Review in Library', '#library');
+    html += queueKpi('Pending stadiums', qc.stadiums, 'Review in Library', '#library');
     html += '</div>';
   }
 
@@ -1095,15 +1142,7 @@ function libraryTab(){
   html += kpi('Approved stadiums', mod.approvedStadiums, 'live in the picker', true);
   html += '</div>';
 
-  var queue = (Number(mod.openReports)||0) + (Number(mod.unverifiedPhotos)||0) + (Number(mod.pendingStadiums)||0);
-  if (queue){
-    html += '<h2 class="sec">Moderation queue <span class="badge warn">' + fmt(queue) + ' waiting</span></h2><div class="grid">';
-    html += queueKpi('Open reports', mod.openReports, 'Moderation panel', '/app?admin=reports');
-    html += queueKpi('Unverified photos', mod.unverifiedPhotos, 'Moderation panel', '/app?admin=photos');
-    html += queueKpi('Pending stadiums', mod.pendingStadiums, 'Stadium panel', '/app?admin=stadiums');
-    html += '</div>';
-    html += '<p class="note">Each of these opens the editor with the right panel already up. You need to be signed in as an admin \u2014 the Moderation button only appears once the server confirms it.</p>';
-  }
+  html += reviewQueues();
 
   html += '<h2 class="sec">Leaderboards</h2><div class="grid two">';
   html += tableCard(['Most-viewed designs','Views','Likes'], ov.topDesigns,
@@ -1112,6 +1151,188 @@ function libraryTab(){
     [function(d){ return d.templateId; }, function(d){ return d.count; }]);
   html += '</div>';
   return html;
+}
+
+
+/* ---- review queues (Library tab) ----
+
+   The work is shown where the count is. Everything a decision needs is on the
+   card: a picture (the seat plan for a stadium, the photo, the design's
+   thumbnail), who sent it and when, and the two actions. Every request carries
+   the unlock token in a header; the server writes each decision to the
+   security audit under this session's id. */
+var QUEUE = null;
+var IMG_CACHE = {};
+
+/* How much is waiting. The queue itself is the truth once it has loaded — the
+   overview's counts are a separate query and, in memory mode, not kept at all —
+   and after each decision only the queue is updated. */
+function queueCounts(){
+  var mod = (DATA && DATA.ov && DATA.ov.moderation) || {};
+  if (QUEUE && !QUEUE.error){
+    return { reports: (QUEUE.reports || []).length, photos: (QUEUE.photos || []).length, stadiums: (QUEUE.stadiums || []).length };
+  }
+  return { reports: Number(mod.openReports)||0, photos: Number(mod.unverifiedPhotos)||0, stadiums: Number(mod.pendingStadiums)||0 };
+}
+
+function whenLabel(iso){ try { return timeAgo(iso); } catch(e){ return ''; } }
+
+function stadiumItem(st){
+  var meta = [];
+  meta.push(esc(st.country || 'no country given'));
+  if (st.seats) meta.push('<b>' + fmt(st.seats) + '</b> seats');
+  meta.push(fmt(st.tiers) + (st.tiers === 1 ? ' tier' : ' tiers'));
+  return '<div class="qitem" data-kind="stadium" data-id="' + esc(st.id) + '">'
+    + '<div class="qpic">' + (st.planSvg ? st.planSvg : 'no preview: the seat map could not be built') + '</div>'
+    + '<div class="qname">' + esc(st.name) + '</div>'
+    + '<div class="qmeta">' + meta.join(' &middot; ') + '<br>sent by <b>' + esc(st.submitter ? '@' + st.submitter : 'a signed-out visitor') + '</b> &middot; ' + esc(whenLabel(st.createdAt)) + '</div>'
+    + '<div class="qerr"></div>'
+    + '<div class="qacts"><button type="button" class="primary" data-act="approve">Approve</button>'
+    + '<button type="button" class="danger" data-act="reject">Reject</button></div></div>';
+}
+
+function photoItem(ph){
+  var src = '/api/admin/photos/' + encodeURIComponent(ph.id) + '/image';
+  return '<div class="qitem" data-kind="photo" data-id="' + esc(ph.id) + '">'
+    + '<div class="qpic" data-img="' + esc(src) + '">' + (IMG_CACHE[src] ? '<img alt="" src="' + IMG_CACHE[src] + '">' : 'loading...') + '</div>'
+    + '<div class="qname">' + esc(ph.caption || 'No caption') + '</div>'
+    + '<div class="qmeta">on <a href="/d/' + encodeURIComponent(ph.designId) + '" target="_blank" rel="noopener">' + esc(ph.designTitle || 'a deleted design') + '</a> &middot; ' + esc(whenLabel(ph.createdAt)) + '</div>'
+    + '<div class="qerr"></div>'
+    + '<div class="qacts"><button type="button" class="primary" data-act="verify">Verify as genuine</button>'
+    + '<button type="button" class="danger" data-act="delete">Delete</button></div></div>';
+}
+
+function reportItem(r){
+  var gone = r.targetTitle === null;
+  var src = '/api/admin/designs/' + encodeURIComponent(r.targetId) + '/thumbnail.png';
+  var pic = (!gone && r.targetHasThumbnail)
+    ? '<div class="qpic" data-img="' + esc(src) + '">' + (IMG_CACHE[src] ? '<img alt="" src="' + IMG_CACHE[src] + '">' : 'loading...') + '</div>'
+    : '<div class="qpic">' + (gone ? 'design deleted' : 'no thumbnail') + '</div>';
+  return '<div class="qitem" data-kind="report" data-id="' + esc(r.id) + '" data-target="' + esc(r.targetId) + '">'
+    + pic
+    + '<div class="qname">' + (gone ? '<em>(design deleted)</em>' : '<a href="/d/' + encodeURIComponent(r.targetId) + '" target="_blank" rel="noopener">' + esc(r.targetTitle) + '</a>')
+    + (r.targetIsPublic === false ? ' <span class="badge">already hidden</span>' : '') + '</div>'
+    + '<div class="qmeta">reported for <b>' + esc(r.reason) + '</b>' + (gone ? '' : ' &middot; by @' + esc(r.targetOwner || 'unknown')) + ' &middot; ' + esc(whenLabel(r.createdAt)) + '</div>'
+    + '<div class="qerr"></div>'
+    + '<div class="qacts"><button type="button" data-act="dismiss">Dismiss</button>'
+    + (gone ? '' : '<button type="button" class="danger" data-act="takedown">Take down</button>') + '</div></div>';
+}
+
+function queueGroup(id, title, items, render, empty){
+  var html = '<div class="qhead" id="q-' + id + '">' + esc(title) + ' <span class="badge' + (items.length ? ' warn' : '') + '">' + fmt(items.length) + '</span></div>';
+  if (!items.length) return html + '<div class="card"><p class="empty">' + esc(empty) + '</p></div>';
+  html += '<div class="qgrid">';
+  for (var i = 0; i < items.length; i++) html += render(items[i]);
+  return html + '</div>';
+}
+
+function reviewQueues(){
+  var qc = queueCounts();
+  var queue = qc.reports + qc.photos + qc.stadiums;
+  var html = '<h2 class="sec">Waiting for review ' + (queue ? '<span class="badge warn">' + fmt(queue) + ' waiting</span>' : '<span class="badge good">all clear</span>') + '</h2>';
+  if (!QUEUE || QUEUE.error){
+    var why = QUEUE && (QUEUE.error === 401 || QUEUE.error === 403)
+      ? 'This admin session was refused. Sign out and sign in again with the admin password.'
+      : 'The review queue could not be loaded' + (QUEUE && QUEUE.error ? ' (HTTP ' + QUEUE.error + ')' : '') + '. Try Refresh.';
+    return html + '<div class="callout bad"><b>Could not load the queue.</b> ' + esc(why) + '</div>';
+  }
+  html += queueGroup('stadiums', 'Stadium submissions', QUEUE.stadiums || [], stadiumItem,
+    QUEUE.stadiumsEnabled === false ? 'Community stadium submissions are switched off on this server.' : 'No stadium is waiting for review.');
+  html += queueGroup('photos', 'Match photos to verify', QUEUE.photos || [], photoItem, 'No photo is waiting to be verified.');
+  html += queueGroup('reports', 'Reported designs', QUEUE.reports || [], reportItem, 'No open reports.');
+  html += '<p class="note">Approving a stadium puts it in everyone&#39;s stadium picker. Verifying a photo marks it as a genuine match-day photo on its design. Taking a design down makes it private and closes its reports; the owner keeps it. Every decision is written to the Security tab&#39;s audit log.</p>';
+  return html;
+}
+
+/* Images need the token, so they are fetched rather than linked, and kept as
+   data: URLs (the page's CSP allows data:, not blob:) so a repaint after a
+   decision does not download them again. */
+function loadQueueImages(){
+  var nodes = document.querySelectorAll('.qpic[data-img]');
+  for (var i = 0; i < nodes.length; i++){
+    (function(node){
+      var src = node.getAttribute('data-img');
+      if (IMG_CACHE[src] || node.getAttribute('data-loading')) return;
+      node.setAttribute('data-loading', '1');
+      var headers = {}; var t = getUnlock(); if (t) headers['x-ai-unlock'] = t;
+      fetch(src, { headers: headers }).then(function(res){
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        return res.blob();
+      }).then(function(blob){
+        return new Promise(function(resolve){
+          var fr = new FileReader();
+          fr.onload = function(){ resolve(String(fr.result)); };
+          fr.readAsDataURL(blob);
+        });
+      }).then(function(url){
+        IMG_CACHE[src] = url;
+        node.innerHTML = '<img alt="" src="' + url + '">';
+      }).catch(function(){ node.textContent = 'image unavailable'; });
+    })(nodes[i]);
+  }
+}
+
+var QUEUE_ACTIONS = {
+  approve:  { kind:'stadium', run: function(id){ return post('/api/stadiums/' + encodeURIComponent(id) + '/review', { approve: true }); } },
+  reject:   { kind:'stadium', ask:'Reject this stadium submission? It will not appear in the picker.',
+              run: function(id){ return post('/api/stadiums/' + encodeURIComponent(id) + '/review', { approve: false }); } },
+  verify:   { kind:'photo', run: function(id){ return post('/api/admin/photos/' + encodeURIComponent(id) + '/verify', { verified: true }); } },
+  'delete': { kind:'photo', ask:'Delete this photo for good? This cannot be undone.',
+              run: function(id){ return del('/api/admin/photos/' + encodeURIComponent(id)); } },
+  dismiss:  { kind:'report', run: function(id){ return post('/api/admin/reports/' + encodeURIComponent(id) + '/dismiss', {}); } },
+  takedown: { kind:'report', ask:'Take this design down? It becomes private and its open reports are closed.',
+              run: function(id, item){ return post('/api/admin/designs/' + encodeURIComponent(item.getAttribute('data-target')) + '/takedown', {}); } }
+};
+
+/* After a decision the item leaves the queue and every count that mentions it
+   drops with it: the section, the tab badge and the Board's cards. */
+function settleQueueItem(kind, id, item){
+  if (kind === 'stadium'){
+    QUEUE.stadiums = (QUEUE.stadiums || []).filter(function(x){ return x.id !== id; });
+  } else if (kind === 'photo'){
+    QUEUE.photos = (QUEUE.photos || []).filter(function(x){ return x.id !== id; });
+  } else {
+    /* A takedown closes every open report on that design, not just this one. */
+    var target = item.getAttribute('data-target');
+    QUEUE.reports = (QUEUE.reports || []).filter(function(x){ return x.id !== id && !(item.__takedown && x.targetId === target); });
+  }
+  var y = window.scrollY;
+  renderTabs();
+  paintSection();
+  window.scrollTo(0, y);
+}
+
+function wireLibrary(){
+  loadQueueImages();
+  var body = el('dash-body');
+  if (!body || body.__queueWired) return;
+  body.__queueWired = true;
+  body.addEventListener('click', async function(e){
+    var btn = e.target && e.target.closest ? e.target.closest('button[data-act]') : null;
+    if (!btn || currentTab !== 'library') return;
+    var item = btn.closest('.qitem');
+    var act = QUEUE_ACTIONS[btn.getAttribute('data-act')];
+    if (!item || !act) return;
+    if (act.ask && !window.confirm(act.ask)) return;
+    var id = item.getAttribute('data-id');
+    var err = item.querySelector('.qerr');
+    item.classList.add('busy');
+    if (err) err.textContent = '';
+    var r = await act.run(id, item);
+    if (r.ok || r.status === 404){
+      /* 404: someone (another tab, the editor panel) already decided it. */
+      item.__takedown = btn.getAttribute('data-act') === 'takedown';
+      if (btn.getAttribute('data-act') === 'approve' && r.ok && DATA.ov && DATA.ov.moderation){
+        DATA.ov.moderation.approvedStadiums = (Number(DATA.ov.moderation.approvedStadiums)||0) + 1;
+      }
+      settleQueueItem(act.kind, id, item);
+      return;
+    }
+    item.classList.remove('busy');
+    if (err) err.textContent = (r.status === 401 || r.status === 403)
+      ? 'Refused: this admin session has expired. Sign out and sign in again.'
+      : 'Did not go through' + (r.status ? ' (HTTP ' + r.status + ')' : ': no connection') + '. Try again.';
+  });
 }
 
 function feedbackTab(){ return feedbackSection(DATA.fb); }
@@ -1139,7 +1360,8 @@ function aiTab(){
   html += kpi('Quick Designer', W.quick, 'free offline engine', true);
   html += kpi('Served from cache', W.cache, 'free, no model call', true);
   html += kpi('Hit the hourly cap', W.quota, fmt(T.quota) + ' all time', true);
-  html += kpi('Model busy or failed', W.busy, 'fell back to the choice', true);
+  var fails = a.failures || [];
+  html += kpi('Model busy or failed', W.busy, fails.length ? 'mostly: ' + reasonLabel(fails[0].reason) : 'fell back to the choice', true);
   html += kpi('Blocked by safety', W.blocked, fmt(T.blocked) + ' all time', true);
   html += '</div>';
 
@@ -1153,6 +1375,8 @@ function aiTab(){
       [function(d){ return d.username; }, function(d){ return d.times; }, function(d){ return new Date(d.last).toLocaleString(); }]);
   }
 
+  html += aiFailuresSection(a);
+
   html += '<h2 class="sec">Per day <span class="hint">last ' + a.days + ' days</span></h2>';
   html += '<div class="grid two">';
   html += chartCard('Premium generations', seriesOf(a.perDay, 'model'), '#a371f7');
@@ -1164,7 +1388,7 @@ function aiTab(){
     [function(d){ return d.username; }, function(d){ return d.model; }, function(d){ return d.quick; },
      function(d){ return d.quota; }, function(d){ return new Date(d.last).toLocaleDateString(); }]);
 
-  var modes = a.modes || { std:0, super:0 };
+  var modes = a.modes || { std:0, super:0, polish:0, photo:0 };
   html += '<h2 class="sec">Reference</h2><div class="grid">';
   html += kpi('Whole-bowl (Super)', modes.super, 'director prompt', true);
   html += kpi('Single design', modes.std, 'standard mode', true);
@@ -1172,6 +1396,65 @@ function aiTab(){
   html += kpi('All requests', W.all, fmt(T.all) + ' all time', true);
   html += '</div>';
   html += '<p class="note">Prompt text is deliberately not stored \u2014 only what happened to each request. The outcome is what pricing and capacity need; the text is the part that would put this table at odds with the privacy page.</p>';
+  return html;
+}
+
+
+/* ---- why the AI failed ----
+
+   The editor now tells a person only what they can act on ("the AI is busy,
+   try again in a minute"). Everything else lands here: the precise reason, what
+   to do about it, the account that hit it and what the provider actually said
+   (credential-shaped text masked on the server). Categories come from
+   server/src/aiFailure.ts. */
+var REASON_INFO = {
+  overloaded:      ['Provider overloaded', 'The model provider is short of capacity (HTTP 503, "high demand"). Nothing to fix on our side and it passes; if it keeps happening, point AI_MODEL_PREMIUM / AI_MODEL_FAST at a less busy model.'],
+  rate_limited:    ['Rate limit or quota', 'Our API key hit the provider&#39;s quota (HTTP 429). Raise the quota or billing tier in the provider&#39;s console.'],
+  budget:          ['Daily budget spent', 'Our own AI_DAILY_BUDGET breaker tripped. Raise it, or wait for 00:00 UTC.'],
+  timeout:         ['Timed out', 'No answer inside AI_TIMEOUT_MS / AI_TIMEOUT_PREMIUM_MS. Raise the limit or use a faster model.'],
+  network:         ['Could not reach the provider', 'The server&#39;s request never got an answer: DNS, egress or an outage.'],
+  auth:            ['Key refused', 'HTTP 401/403: the API key is wrong, expired, or has no access to this model.'],
+  model_not_found: ['Model not found', 'HTTP 404: the model id in AI_MODEL_* does not exist (or was retired). Fix the env var.'],
+  bad_request:     ['Request refused', 'HTTP 400: the provider rejected the request itself. The detail says which field.'],
+  safety:          ['Provider safety filter', 'The model refused the brief or its own answer. Usually a name or phrase in the brief.'],
+  prompt_screen:   ['Blocked by our prompt screen', 'promptSafety.ts refused the brief before any model saw it. The detail names the list that matched.'],
+  truncated:       ['Answer cut off', 'The model ran out of output tokens mid-design. Raise AI_MAX_OUTPUT_TOKENS.'],
+  bad_output:      ['Unreadable answer', 'The model replied, but not with JSON we could read.'],
+  invalid_design:  ['Design failed validation', 'JSON arrived but the spec validator rejected it. The detail lists the first problems.'],
+  picture_failed:  ['Picture not generated', 'The design was delivered without its picture and was not charged. The image provider refused or failed.'],
+  no_provider:     ['No AI provider configured', 'Set GEMINI_API_KEY, ANTHROPIC_API_KEY or OPENAI_API_KEY on the server.'],
+  upstream_error:  ['Provider error', 'The provider answered with a server error (5xx).'],
+  unknown:         ['Unclassified', 'Read the detail; if it recurs, it deserves its own category in aiFailure.ts.']
+};
+var MODE_LABEL = { std:'Premium', 'super':'Super AI', polish:'Polish', photo:'Photo reading' };
+function reasonLabel(r){ return (REASON_INFO[r] || [labelize(r)])[0]; }
+
+function aiFailuresSection(a){
+  var fails = a.failures || [], recent = a.recentFailures || [];
+  var html = '<h2 class="sec">Why it failed <span class="hint">last ' + a.days + ' days</span></h2>';
+  if (!fails.length){
+    return html + '<div class="card"><p class="empty">No failures recorded in this window.</p>'
+      + '<p class="note">Reasons are recorded from this release on; older "busy" rows above have no reason attached.</p></div>';
+  }
+  html += '<div class="card">';
+  for (var i = 0; i < fails.length; i++){
+    var f = fails[i], info = REASON_INFO[f.reason] || [labelize(f.reason), ''];
+    html += '<div class="why"><div class="wl">' + esc(info[0]) + '</div><div class="wf">' + info[1] + '</div>'
+      + '<div class="wn">' + fmt(f.count) + '<span>last ' + esc(timeAgo(f.last)) + '</span></div></div>';
+  }
+  html += '</div>';
+  html += '<h3 class="sub">Recent failures <span class="hint">newest first &middot; up to 50</span></h3>';
+  html += '<div class="card scroll"><table><thead><tr><th>When</th><th class="name">Account</th><th>Mode</th><th>Reason</th><th>What the provider said</th></tr></thead><tbody>';
+  for (var j = 0; j < recent.length; j++){
+    var r = recent[j];
+    html += '<tr><td class="when" title="' + esc(new Date(r.at).toLocaleString()) + '">' + esc(timeAgo(r.at)) + '</td>'
+      + '<td class="name" title="' + esc(r.username) + '">' + esc(r.username) + (r.via === 'password' && r.username.indexOf('admin password') !== 0 ? '<span class="via">admin password</span>' : '') + '</td>'
+      + '<td>' + esc(MODE_LABEL[r.mode] || r.mode) + '</td>'
+      + '<td>' + esc(reasonLabel(r.reason)) + '</td>'
+      + '<td class="detail">' + esc(r.detail || '—') + '</td></tr>';
+  }
+  html += '</tbody></table></div>';
+  html += '<p class="note">People only ever see a short, translated sentence (busy, resting, too slow, declined, incomplete, unavailable) with a way forward. The provider&#39;s text is kept here and never sent to the editor. Prompts are still not stored.</p>';
   return html;
 }
 
@@ -1195,6 +1478,7 @@ function paintSection(){
   el('dash-body').innerHTML = html;
   if (currentTab === 'email') wireEmailTest();
   if (currentTab === 'security') wireSecurity();
+  if (currentTab === 'library') wireLibrary();
 }
 
 /* ---- security: is anyone attacking the site, and is it set up to cope ----

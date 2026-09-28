@@ -1342,3 +1342,172 @@ async function makeDesign(app: FastifyInstance, token: string, isPublic = false)
   await app.close();
   console.log('audit round three: all assertions passed (PDF title DoS, 500 bodies, tokens in logs + console mail, reset timing + mail bomb, change-email mail bomb + lookup cost, code-guess cap, photo metadata, $& injection, feedback mailto, local escapers, AI budget, Cloudflare hop trust, asset caching, inline scripts)');
 }
+
+// ---------- 2026-09: AI failures and the review queues ----------
+// Three things the operator reported, each reproduced here before it was fixed:
+//  1. a model failure put the provider's raw reply — vendor, model id, HTTP
+//     503, the JSON body — into the editor's Arabic card and status line;
+//  2. /admin → AI said "busy or failed" and nothing about why, or whose;
+//  3. the dashboard is opened with the admin PASSWORD, but the review queues
+//     it counts only accepted an ADMIN_USERNAMES account, so following
+//     "4 pending stadiums" ended in a 403.
+{
+  const { classifyAiFailure, publicCause, sanitizeDetail } = await import('../src/aiFailure');
+  const { MemoryAiUsageRepository, MemoryAiEventsRepository } = await import('../src/memoryRepo');
+  const { MemoryStadiumRepository } = await import('../src/stadiumRepo');
+  const { KOP_TEMPLATE } = await import('../../src/core/template');
+
+  // ---- the classifier, on the exact text from the screenshot ----
+  const shot = 'gemini "gemini-3.5-flash": HTTP 503: { "error": { "code": 503, "message": "This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.", "status": "UNAVAILABLE" } }';
+  assert.equal(classifyAiFailure(shot, 503).reason, 'overloaded');
+  assert.equal(classifyAiFailure(shot).reason, 'overloaded', 'the status is read out of the text when none is passed');
+  assert.equal(publicCause('overloaded'), 'busy');
+  assert.equal(classifyAiFailure('gemini "x": HTTP 429: RESOURCE_EXHAUSTED', 429).reason, 'rate_limited');
+  assert.equal(publicCause('budget'), 'resting');
+  assert.equal(classifyAiFailure('gemini: timed out').reason, 'timeout');
+  assert.equal(classifyAiFailure('openai: network error').reason, 'network');
+  assert.equal(classifyAiFailure('gemini "nope-1": HTTP 404: models/nope-1 is not found', 404).reason, 'model_not_found');
+  assert.equal(classifyAiFailure('claude: HTTP 401: invalid x-api-key', 401).reason, 'auth');
+  assert.equal(classifyAiFailure('gemini "m": prompt blocked by the safety filter (blockReason SAFETY)').reason, 'safety');
+  assert.equal(classifyAiFailure('gemini "m": ran out of output tokens before finishing the JSON (finishReason MAX_TOKENS, limit 4096)').reason, 'truncated');
+  assert.equal(classifyAiFailure('claude: response was not valid JSON').reason, 'bad_output');
+  assert.equal(classifyAiFailure('something new entirely').reason, 'unknown');
+  assert.equal(publicCause('unknown'), 'unavailable');
+  const masked = sanitizeDetail('GET https://x.test/v1?key=AIzaSyA1234567890abcdef&alt=json Bearer abc.def.ghi sk-ant-api03-SECRETSECRET');
+  assert.ok(!masked.includes('AIzaSyA1234567890') && !masked.includes('abc.def.ghi') && !masked.includes('SECRETSECRET'), `credential-shaped text is masked: ${masked}`);
+  assert.ok(sanitizeDetail('x'.repeat(2000)).length <= 400, 'and the detail is bounded');
+
+  // ---- a real generation against a provider that answers 503 ----
+  const realFetch = globalThis.fetch;
+  const saved = { key: process.env.GEMINI_API_KEY, pw: process.env.AI_ADMIN_PASSWORD, delay: process.env.AI_RETRY_DELAY_MS, prov: process.env.AI_PROVIDER };
+  process.env.GEMINI_API_KEY = 'AIzaSyTESTKEY0000000000';
+  process.env.AI_PROVIDER = 'gemini';
+  process.env.AI_RETRY_DELAY_MS = '100';
+  process.env.AI_ADMIN_PASSWORD = 'correct horse battery staple';
+  let providerCalls = 0;
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = String(input instanceof Request ? input.url : input);
+    if (url.includes('generativelanguage.googleapis.com')) {
+      providerCalls++;
+      return new Response('{ "error": { "code": 503, "message": "This model is currently experiencing high demand. Spikes in demand are usually temporary.", "status": "UNAVAILABLE" } }', { status: 503 });
+    }
+    return realFetch(input as RequestInfo);
+  }) as typeof fetch;
+  try {
+    const auth = new MemoryAuthRepository();
+    const designs = new MemoryDesignRepository((id) => auth.usernameOf(id));
+    const social = new MemorySocialRepository(designs, auth);
+    const events = new MemoryAiEventsRepository((id) => auth.usernameOf(id));
+    const stadiums = new MemoryStadiumRepository();
+    const app = await buildApp(designs, auth, templates, {
+      social, leads: new MemoryLeadsRepository(), aiUsage: new MemoryAiUsageRepository(), aiEvents: events, stadiums, adminUsernames: ['boss'],
+    });
+    const fan = await reg(app, 'fan_ahlawy');
+    await auth.markEmailVerified(fan.id);
+    const op = await reg(app, 'osamah_op'); // an ordinary account: NOT in ADMIN_USERNAMES
+    const unlock = (await app.inject({ method: 'POST', url: '/api/ai/unlock', payload: { password: 'correct horse battery staple' } })).json().token as string;
+    const asAdmin = { 'x-ai-unlock': unlock };
+
+    // 1. What the editor receives: one vendor-free word, nothing else.
+    for (const headers of [bearer(fan.token), { ...asAdmin, ...bearer(op.token) }]) {
+      const r = await app.inject({ method: 'POST', url: '/api/ai/generate', headers, payload: { prompt: 'red and white stripes' } });
+      assert.equal(r.statusCode, 200);
+      const j = r.json() as Record<string, unknown>;
+      assert.equal(j.needsChoice, true);
+      assert.equal(j.cause, 'busy', 'a 503 reads as "busy" to the person designing');
+      assert.equal(j.detail, undefined, 'no raw detail, admins included');
+      assert.ok(!/gemini|HTTP|503|high demand|AIza/i.test(r.body), `nothing of the provider's reply reaches the editor: ${r.body}`);
+    }
+    assert.equal(providerCalls, 4, 'each generation tried the model and retried the 503 once');
+
+    // A refused picture used to put the provider's error in the notes too.
+    const src = (await import('node:fs')).readFileSync('server/src/aiRoutes.ts', 'utf8');
+    assert.ok(!/notes\.push\(`Picture not generated: \$\{/.test(src), 'picture failures are not echoed into notes');
+    assert.ok(!/Critique unavailable: \$\{/.test(src), 'nor critique failures');
+
+    // The critic, the same way.
+    const quick = (await app.inject({ method: 'POST', url: '/api/ai/generate', headers: bearer(fan.token), payload: { prompt: 'red and white stripes', engine: 'offline' } })).json();
+    const crit = await app.inject({ method: 'POST', url: '/api/ai/critique', headers: bearer(fan.token), payload: { spec: quick.spec } });
+    assert.equal(crit.statusCode, 200);
+    assert.equal(crit.json().cause, 'busy', 'a failed critique says why in one word');
+    assert.ok(!/gemini|HTTP|503/i.test(crit.body), 'and nothing more');
+
+    // Blocked briefs: which list matched is recorded, the brief never is.
+    await app.inject({ method: 'POST', url: '/api/ai/generate', headers: bearer(fan.token), payload: { prompt: 'neo-nazi banner' } });
+
+    // 2. What the operator sees: reason, account, door, provider text.
+    await new Promise((r) => setTimeout(r, 20)); // note() is fire-and-forget
+    // (/api/admin/ai serves exactly this; it is registered only with a stats repo.)
+    const ai = await events.stats(30);
+    const by = Object.fromEntries(ai.failures.map((f) => [f.reason, f.count]));
+    assert.equal(by.overloaded, 3, 'two generations and one critique failed as overloaded');
+    assert.equal(by.prompt_screen, 1, 'the blocked brief is on file with its reason');
+    const fanRow = ai.recentFailures.find((f) => f.username === 'fan_ahlawy' && f.mode === 'std' && f.reason === 'overloaded')!;
+    assert.ok(fanRow, 'the account that hit the failure is named');
+    assert.match(fanRow.detail, /HTTP 503/, 'the provider text is kept for the operator');
+    assert.match(fanRow.detail, /high demand/);
+    assert.ok(!fanRow.detail.includes('AIzaSyTESTKEY'), 'the API key never lands in the row');
+    const opRow = ai.recentFailures.find((f) => f.username === 'osamah_op')!;
+    assert.ok(opRow, 'an admin-password run is attributed to the account it was signed into');
+    assert.equal(opRow.via, 'password', 'and says which door it came through');
+    assert.ok(ai.recentFailures.some((f) => f.mode === 'polish' && f.reason === 'overloaded'), 'critique failures are recorded as polish');
+    const blockedRow = ai.recentFailures.find((f) => f.reason === 'prompt_screen')!;
+    assert.match(blockedRow.detail, /extremism/, 'the matched list is named');
+    assert.ok(!/nazi|banner/i.test(blockedRow.detail), 'the brief itself is not stored');
+
+    // 3. The review queues, from the password session.
+    await stadiums.submit({ template: KOP_TEMPLATE, name: '<img src=x onerror=alert(1)> Park', country: 'EG', submitterId: fan.id });
+    const pub = await makeDesign(app, fan.token, false); // private: the public photo route hides it
+    await designs.report('design', pub, op.id, 'spam');
+    const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
+    const photoId = (await designs.addPhoto(pub, fan.id, png, 1, 1, 'north stand'))!;
+
+    assert.equal((await app.inject({ method: 'GET', url: '/api/admin/queue' })).statusCode, 401, 'anonymous: sign in');
+    assert.equal((await app.inject({ method: 'GET', url: '/api/admin/queue', headers: bearer(op.token) })).statusCode, 403, 'an ordinary account alone: refused');
+    assert.equal((await app.inject({ method: 'GET', url: '/api/admin/queue', headers: { 'x-ai-unlock': 'v2.1.abc.def', ...bearer(op.token) } })).statusCode, 403, 'a forged token does not help');
+    assert.equal((await app.inject({ method: 'GET', url: '/api/admin/queue', headers: { cookie: `tm_admin=${encodeURIComponent(unlock)}` } })).statusCode, 401, 'the tm_admin cookie is not accepted: only the header is');
+    const q = await app.inject({ method: 'GET', url: '/api/admin/queue', headers: asAdmin });
+    assert.equal(q.statusCode, 200, 'the admin password opens the queue');
+    const queue = q.json() as { stadiums: { id: string; submitter: string; seats: number; planSvg: string }[]; photos: { id: string }[]; reports: { id: string }[] };
+    assert.equal(queue.stadiums.length, 1);
+    assert.equal(queue.stadiums[0].submitter, 'fan_ahlawy', 'the submitter is named');
+    assert.ok(queue.stadiums[0].seats > 1000, 'with its real seat count');
+    assert.match(queue.stadiums[0].planSvg, /^<svg [^>]*>(<rect [^>]*\/>)+<\/svg>$/, 'and a seat plan made only of numbers');
+    assert.ok(queue.stadiums[0].planSvg.length < 60_000, `the plan stays small (${queue.stadiums[0].planSvg.length} bytes)`);
+    assert.ok(!queue.stadiums[0].planSvg.includes('onerror'), 'no submitted text inside the SVG');
+    assert.equal(queue.photos.length, 1);
+    assert.equal(queue.reports.length, 1);
+
+    // Every legacy endpoint accepts the same session…
+    for (const [method, url] of [['GET', '/api/stadiums/pending'], ['GET', '/api/admin/reports'], ['GET', '/api/admin/photos/unverified']] as const) {
+      assert.equal((await app.inject({ method, url, headers: asAdmin })).statusCode, 200, `${url} opens with the admin password`);
+    }
+    // …and the pictures a reviewer has to see, even on a private design.
+    assert.equal((await app.inject({ method: 'GET', url: `/api/photos/${photoId}` })).statusCode, 404, 'the public route still hides it');
+    const img = await app.inject({ method: 'GET', url: `/api/admin/photos/${photoId}/image`, headers: asAdmin });
+    assert.equal(img.statusCode, 200);
+    assert.equal(img.headers['content-type'], 'image/png');
+    assert.equal(img.headers['x-content-type-options'], 'nosniff');
+    assert.equal((await app.inject({ method: 'GET', url: `/api/admin/photos/${photoId}/image` })).statusCode, 401);
+    assert.equal((await app.inject({ method: 'GET', url: `/api/admin/designs/${pub}/thumbnail.png`, headers: bearer(op.token) })).statusCode, 403);
+
+    // Decisions.
+    assert.equal((await app.inject({ method: 'POST', url: `/api/stadiums/${queue.stadiums[0].id}/review`, headers: asAdmin, payload: { approve: true } })).statusCode, 200, 'approve');
+    assert.equal((await app.inject({ method: 'POST', url: `/api/admin/photos/${photoId}/verify`, headers: asAdmin, payload: { verified: true } })).statusCode, 200, 'verify');
+    assert.equal((await app.inject({ method: 'POST', url: `/api/admin/reports/${queue.reports[0].id}/dismiss`, headers: asAdmin })).statusCode, 200, 'dismiss');
+    assert.equal((await app.inject({ method: 'DELETE', url: `/api/admin/photos/${photoId}`, headers: asAdmin })).statusCode, 200, 'delete');
+    const after = (await app.inject({ method: 'GET', url: '/api/admin/queue', headers: asAdmin })).json() as typeof queue;
+    assert.equal(after.stadiums.length + after.photos.length + after.reports.length, 0, 'and the queue is empty afterwards');
+    assert.equal(((await app.inject({ method: 'GET', url: '/api/stadiums/community' })).json() as { stadiums: unknown[] }).stadiums.length, 1, 'the approved stadium is live');
+    // An ordinary account still cannot decide anything.
+    assert.equal((await app.inject({ method: 'POST', url: `/api/stadiums/${queue.stadiums[0].id}/review`, headers: bearer(op.token), payload: { approve: false } })).statusCode, 403);
+
+    await app.close();
+    console.log('ai failures + review queues: all assertions passed (classifier, masking, vendor-free editor replies, reason + account + door on file, password session opens the queues, cookie refused, private photo visible to reviewers only)');
+  } finally {
+    globalThis.fetch = realFetch;
+    for (const [k, v] of [['GEMINI_API_KEY', saved.key], ['AI_ADMIN_PASSWORD', saved.pw], ['AI_RETRY_DELAY_MS', saved.delay], ['AI_PROVIDER', saved.prov]] as const) {
+      if (v === undefined) delete process.env[k]; else process.env[k] = v;
+    }
+  }
+}

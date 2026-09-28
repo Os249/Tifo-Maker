@@ -1503,16 +1503,25 @@ export interface AiOutcome {
   missingCount?: number;
   of?: number;
   charged: boolean;
-  detail?: string;
 }
+
+/**
+ * Why premium could not deliver, as the one vendor-free word the server sends
+ * (server/src/aiFailure.ts → publicCause). The panel turns it into a
+ * translated sentence with a next step; the provider's own text is recorded
+ * for /admin → AI and never reaches the editor.
+ */
+export type AiCause = 'busy' | 'resting' | 'slow' | 'content' | 'garbled' | 'unavailable';
+const AI_CAUSES: readonly AiCause[] = ['busy', 'resting', 'slow', 'content', 'garbled', 'unavailable'];
+const asCause = (v: unknown): AiCause | undefined => (AI_CAUSES as readonly unknown[]).includes(v) ? (v as AiCause) : undefined;
 
 export interface AiChoice {
   needsChoice: true;
   reason: 'busy' | 'quota' | 'premium_off';
   retryAfterSec: number;
   quota: AiQuota;
-  /** The real reason behind "busy". Sent by the server to ADMINS only. */
-  detail?: string;
+  /** Present when reason is 'busy'. */
+  cause?: AiCause;
 }
 
 /** Error thrown by the AI calls; `status` 403 with `locked` = admin-only. */
@@ -1545,7 +1554,7 @@ export async function generateAiTifo(
     }),
   });
   const data = (await res.json().catch(() => null)) as
-    | ({ needsChoice?: boolean; reason?: string; retryAfterSec?: number; quota?: AiQuota; error?: string; locked?: boolean; detail?: string } & Partial<AiGenerateResult>)
+    | ({ needsChoice?: boolean; reason?: string; retryAfterSec?: number; quota?: AiQuota; error?: string; locked?: boolean; cause?: unknown } & Partial<AiGenerateResult>)
     | null;
   if (!res.ok) {
     const err = new Error(data?.error ? tErr(data.error) : `generation failed (${res.status})`) as AiError;
@@ -1561,7 +1570,7 @@ export async function generateAiTifo(
       reason: (data.reason ?? 'busy') as AiChoice['reason'],
       retryAfterSec: data.retryAfterSec ?? 90,
       quota: data.quota as AiQuota,
-      ...(typeof data.detail === 'string' ? { detail: data.detail } : {}),
+      ...(asCause(data.cause) ? { cause: asCause(data.cause) } : {}),
     };
   }
   return data as AiGenerateResult;
@@ -1571,6 +1580,8 @@ export interface AiCritiqueResult {
   spec: TifoSpec;
   source: 'model' | 'original';
   notes?: string[];
+  /** Set when the critic could not run; the design came back unchanged. */
+  cause?: AiCause;
 }
 
 /** Phase 4b: send the current design + a low-res render to the vision critic; get an improved spec back. */
@@ -1586,7 +1597,8 @@ export async function critiqueAiTifo(spec: TifoSpec, image?: string, stadium?: s
     err.status = res.status;
     throw err;
   }
-  return data as AiCritiqueResult;
+  const out = data as AiCritiqueResult;
+  return { ...out, cause: asCause(out.cause) };
 }
 
 /** Read AI access/quota. Throws an AiError (status 403, locked) when admin-only. */

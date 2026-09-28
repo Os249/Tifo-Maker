@@ -21,6 +21,7 @@
     "test:matchday-view": "node e2e-matchday-view.mjs",
     "test:community-auth": "node e2e-community-auth.mjs",
     "test:projects": "node e2e-projects.mjs",
+    "test:admin-review": "node e2e-admin-review.mjs",
     "test:flyover": "node e2e-flyover.mjs",
     "test:layers": "node e2e-layers.mjs",
     "server": "tsx server/src/server.ts",

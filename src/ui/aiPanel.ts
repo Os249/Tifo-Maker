@@ -25,7 +25,7 @@ import { buildStadiumContext, describeStadiumContext } from '../core/stadiumCont
 import { critiqueDesign, repairSpec } from '../core/critique';
 import { designShuffle } from '../core/promptDesigner';
 import { describeActiveArea } from '../core/activeArea';
-import { generateAiTifo, critiqueAiTifo, fetchAiQuota, unlockAi, aiUnlockToken, type AiError, type AiQuota, type AiChoice } from '../net/api';
+import { generateAiTifo, critiqueAiTifo, fetchAiQuota, unlockAi, aiUnlockToken, type AiError, type AiQuota, type AiChoice, type AiCause } from '../net/api';
 import { isSignedIn, fetchMe, resendVerification } from '../net/api';
 import { openAuthModal } from './authModal';
 import { openAddEmailModal } from './openAddEmailModal';
@@ -280,6 +280,19 @@ export function mountAiPanel(deps: AiPanelDeps): AiPanelHandle {
   // model and a parsing bug all read identically. Each reason now gets its own
   // words and its own next step.
   const hideChoice = clearCard;
+  /** Title and body for a failure cause, in the reader's language. */
+  const causeTitle = (c: AiCause | undefined): string => (c ? t(`ai.cause.${c}.title`) : t('ai.card.busyTitle'));
+  const causeBody = (c: AiCause | undefined): string => (c ? t(`ai.cause.${c}.body`) : t('ai.card.busyBody'));
+  /**
+   * With the admin password unlocked, one extra button: the reason, the
+   * provider's words and the account are in /admin → AI. The card itself says
+   * the same thing to an admin as to anyone else — it used to print the
+   * provider's raw JSON, in English, inside the Arabic card.
+   */
+  const adminWhy = (): CardAction[] =>
+    aiUnlockToken()
+      ? [{ label: t('ai.card.adminWhy'), run: () => { window.open('/admin#ai', '_blank', 'noopener'); } }]
+      : [];
   const showChoice = (choice: AiChoice, prompt: string, useSuper: boolean): void => {
     const quick: CardAction = {
       label: t('ai.card.useQuick'),
@@ -304,9 +317,9 @@ export function mountAiPanel(deps: AiPanelDeps): AiPanelHandle {
           }
         : {
             tone: 'warn',
-            title: t('ai.card.busyTitle'),
-            body: choice.detail ? tv('ai.card.reason', { detail: choice.detail }) : t('ai.card.busyBody'),
-            actions: [quick, retry],
+            title: causeTitle(choice.cause),
+            body: causeBody(choice.cause),
+            actions: [quick, retry, ...adminWhy()],
           },
     );
   };
@@ -481,7 +494,7 @@ export function mountAiPanel(deps: AiPanelDeps): AiPanelHandle {
     }
     const useSuper = !!opts.super;
     lastSuper = useSuper;
-    const label = useSuper ? 'Super AI' : 'AI';
+    const label = t(useSuper ? 'ai.label.super' : 'ai.label.plain');
     busy = true;
     setError(null);
     hideChoice();
@@ -507,13 +520,12 @@ export function mountAiPanel(deps: AiPanelDeps): AiPanelHandle {
       if ('needsChoice' in res) {
         stopProgress();
         setQuota(res.quota);
-        // The admin detail (when the server sends it) becomes the card's body
-        // rather than a second, competing message elsewhere in the panel.
         showChoice(res, text, useSuper);
-        const detail = (res as { detail?: string }).detail;
-        if (detail) {
+        // The status line gives the gist, translated, and leaves the reason to
+        // the card — never the provider's reply.
+        if (res.reason === 'busy') {
           const bar = document.getElementById('message');
-          if (bar) bar.textContent = `${label}: ${detail}`;
+          if (bar) bar.textContent = tv('ai.bar.notNow', { label });
         }
         return;
       }
@@ -532,26 +544,25 @@ export function mountAiPanel(deps: AiPanelDeps): AiPanelHandle {
           tone: 'warn',
           title: tv('ai.card.degraded', { what }),
           body:
-            (outcome.charged ? t('ai.card.degradedPaid') : t('ai.card.degradedFree')) +
-            ' ' +
-            (outcome.detail ? tv('ai.card.reason', { detail: outcome.detail }) : t('ai.card.degradedWhy')),
+            (outcome.charged ? t('ai.card.degradedPaid') : t('ai.card.degradedFree')) + ' ' + t('ai.card.degradedWhy'),
           actions: [
             { label: t('ai.card.tryAgain'), primary: true, run: () => { clearCard(); void run(text, { super: useSuper }); } },
             { label: t('ai.card.keep'), run: clearCard },
+            ...adminWhy(),
           ],
         });
         if (bar) bar.textContent = `${label}: ${tv('ai.card.degraded', { what })}`;
       } else {
-        const notes = (res.notes ?? []).filter((n) => !/^Served instantly/.test(n));
+        // Server notes are English diagnostics; a success says so in the
+        // reader's language and nothing more.
         showCard({
           tone: 'good',
           title:
             res.source === 'model'
               ? t(useSuper ? 'ai.card.doneSuper' : 'ai.card.donePremium')
               : t('ai.card.doneQuick'),
-          body: notes.length ? notes.join(' · ') : undefined,
         });
-        if (bar) bar.textContent = res.source === 'model' ? `${label}: designed ✓` : '';
+        if (bar) bar.textContent = res.source === 'model' ? tv('ai.bar.designed', { label }) : '';
       }
       // Phone: complete the cycle — close the AI sheet, drop the user onto their
       // 3D result (Stadium view), and pulse Match Day so they open the full show.
@@ -640,7 +651,9 @@ export function mountAiPanel(deps: AiPanelDeps): AiPanelHandle {
         showCard({
           tone: 'bad',
           title: t('ai.card.failed'),
-          body: err.message || t('ai.card.failedBody'),
+          // Only a message the server wrote for people (translated by tErr) is
+          // shown; a browser's "Failed to fetch" or a bare status is not one.
+          body: err.status && err.message && !/^generation failed/.test(err.message) ? err.message : t('ai.card.failedBody'),
           actions: [tryAgain, useQuick],
         });
       }
@@ -698,22 +711,33 @@ export function mountAiPanel(deps: AiPanelDeps): AiPanelHandle {
     startProgress(POLISH_STAGES);
     try {
       const res = await critiqueAiTifo(spec, captureRender(), lastStadium);
-      await applySpec(res.spec);
       const bar = document.getElementById('message');
       stopProgress();
+      if (res.cause) {
+        // The critic could not run. The design is exactly as it was, so there
+        // is nothing to apply — say why, in words, and leave it.
+        showCard({
+          tone: 'warn',
+          title: t('ai.card.polishFailed'),
+          body: tv('ai.card.polishCause', { why: causeTitle(res.cause) + '.' }),
+          actions: adminWhy(),
+        });
+        if (bar) bar.textContent = '';
+        return;
+      }
+      await applySpec(res.spec);
       showCard({
         tone: 'good',
         title: t(res.source === 'model' ? 'ai.card.polished' : 'ai.card.polishKept'),
-        body: (res.notes ?? []).join(' · ') || undefined,
       });
-      if (bar) bar.textContent = res.source === 'model' ? 'AI: polished ✓' : '';
+      if (bar) bar.textContent = res.source === 'model' ? t('ai.bar.polished') : '';
 
     } catch (e) {
       const err = e as AiError;
       showCard({
         tone: 'bad',
         title: t('ai.card.polishFailed'),
-        body: err.message || t('ai.card.polishFailedBody'),
+        body: err.status && err.message && !/^critique failed/.test(err.message) ? err.message : t('ai.card.polishFailedBody'),
       });
     } finally {
       // Whatever happened — success, the "busy" choice panel, a thrown error —

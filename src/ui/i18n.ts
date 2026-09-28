@@ -859,7 +859,6 @@ const STRINGS: Record<string, { en: string; ar: string }> = {
   },
   'ai.card.degradedPaid': { en: 'The stand it was meant to fill is bare.', ar: 'المدرج المخصص لها ظهر فارغًا.' },
   'ai.card.degradedWhy': { en: 'The image service turned the request down.', ar: 'رفضت خدمة الصور الطلب.' },
-  'ai.card.reason': { en: 'Reason: {detail}', ar: 'السبب: {detail}' },
   'ai.card.tryAgain': { en: 'Try again', ar: 'حاول مرة أخرى' },
   'ai.card.keep': { en: 'Keep this design', ar: 'احتفظ بالتصميم' },
   'ai.card.useQuick': { en: 'Use the Quick Designer', ar: 'استخدم المصمّم السريع' },
@@ -902,6 +901,46 @@ const STRINGS: Record<string, { en: string; ar: string }> = {
   'ai.card.polishKept': { en: 'Kept your design — the critique suggested no change', ar: 'أبقينا تصميمك — المراجعة لم تقترح أي تغيير' },
   'ai.card.polishFailed': { en: 'Polish could not run', ar: 'تعذّر تشغيل التحسين' },
   'ai.card.polishFailedBody': { en: 'Your design is untouched. Try again in a moment.', ar: 'تصميمك لم يتغيّر. جرّب بعد قليل.' },
+  // Why premium could not deliver, one entry per server `cause`
+  // (server/src/aiFailure.ts → publicCause). The provider's own words never
+  // reach the editor; these are what a person can act on.
+  'ai.cause.busy.title': { en: 'The AI is very busy right now', ar: 'الذكاء الاصطناعي مزدحم جدًا الآن' },
+  'ai.cause.busy.body': {
+    en: 'Lots of people are designing at once. It usually passes within a couple of minutes — try again when the timer ends, or use the Quick Designer now. Nothing was charged.',
+    ar: 'كثيرون يصمّمون في الوقت نفسه. عادةً ما يزول الازدحام خلال دقيقة أو دقيقتين — حاول مجددًا عند انتهاء العدّاد، أو استخدم المصمّم السريع الآن. لم يُخصم شيء من رصيدك.',
+  },
+  'ai.cause.resting.title': { en: 'Premium AI is resting for now', ar: 'الذكاء المتقدم في استراحة حاليًا' },
+  'ai.cause.resting.body': {
+    en: 'It has reached its limit for the moment. The Quick Designer is free and instant in the meantime. Nothing was charged.',
+    ar: 'بلغ حدّه في الوقت الحالي. المصمّم السريع مجاني وفوري في هذه الأثناء. لم يُخصم شيء من رصيدك.',
+  },
+  'ai.cause.slow.title': { en: 'The AI took too long to answer', ar: 'تأخّر الذكاء الاصطناعي في الرد' },
+  'ai.cause.slow.body': {
+    en: 'The request timed out before a design came back. Trying again usually works. Nothing was charged.',
+    ar: 'انتهت مهلة الطلب قبل وصول التصميم. عادةً ما تنجح المحاولة مجددًا. لم يُخصم شيء من رصيدك.',
+  },
+  'ai.cause.content.title': { en: 'The AI declined this brief', ar: 'رفض الذكاء الاصطناعي هذا الوصف' },
+  'ai.cause.content.body': {
+    en: 'Try rewording it — for example, describe the idea without the names of real people. Nothing was charged.',
+    ar: 'جرّب إعادة صياغته — مثلًا صِف الفكرة دون أسماء أشخاص حقيقيين. لم يُخصم شيء من رصيدك.',
+  },
+  'ai.cause.garbled.title': { en: "The AI's answer came back incomplete", ar: 'وصل رد الذكاء الاصطناعي ناقصًا' },
+  'ai.cause.garbled.body': {
+    en: 'This happens now and then. Trying again usually works. Nothing was charged.',
+    ar: 'يحدث هذا أحيانًا. عادةً ما تنجح المحاولة مجددًا. لم يُخصم شيء من رصيدك.',
+  },
+  'ai.cause.unavailable.title': { en: 'Premium AI is unavailable right now', ar: 'الذكاء المتقدم غير متاح الآن' },
+  'ai.cause.unavailable.body': {
+    en: 'We have logged the problem. The Quick Designer works in the meantime. Nothing was charged.',
+    ar: 'سجّلنا المشكلة. المصمّم السريع يعمل في هذه الأثناء. لم يُخصم شيء من رصيدك.',
+  },
+  'ai.card.adminWhy': { en: 'See why (admin)', ar: 'عرض السبب (للمشرف)' },
+  'ai.card.polishCause': { en: '{why} Your design is untouched.', ar: '{why} تصميمك لم يتغيّر.' },
+  'ai.label.super': { en: 'Super AI', ar: 'الذكاء الخارق' },
+  'ai.label.plain': { en: 'AI', ar: 'الذكاء الاصطناعي' },
+  'ai.bar.designed': { en: '{label}: designed ✓', ar: '{label}: تم التصميم ✓' },
+  'ai.bar.notNow': { en: '{label}: could not deliver just now', ar: '{label}: تعذّر التنفيذ الآن' },
+  'ai.bar.polished': { en: 'AI: polished ✓', ar: 'الذكاء الاصطناعي: تم التحسين ✓' },
   'ai.card.describeFirst': { en: 'Describe the tifo you want first', ar: 'اكتب وصف التيفو أولًا' },
   'ed.import.cutoutT': { en: 'Flood the flat backdrop away so the design underneath shows through', ar: 'يزيل الخلفية المسطحة ليظهر التصميم خلف الصورة' },
   'ed.import.alpha': { en: 'Alpha', ar: 'الشفافية' },
@@ -1390,6 +1429,10 @@ const STRINGS: Record<string, { en: string; ar: string }> = {
   'err.needEmail': { en: 'A valid email is required.', ar: 'لازم بريد إلكتروني صحيح.' },
   'err.noEmail': { en: 'There is no email on file for this account.', ar: 'ما فيه بريد مسجّل على هذا الحساب.' },
   'err.needPrompt': { en: 'Write what you want first.', ar: 'اكتب وش تبي أول.' },
+  'err.aiBlocked': {
+    en: 'This request was blocked because it may break the Acceptable Use rules. Try a different design idea.',
+    ar: 'تم حظر هذا الطلب لأنه قد يخالف قواعد الاستخدام المقبول. جرّب فكرة تصميم مختلفة.',
+  },
   'err.aiFailed': { en: 'The AI could not produce a valid design. Try rewording it.', ar: 'الذكاء الاصطناعي ما قدر يطلع تصميم صالح. جرّب تعيد صياغة الوصف.' },
   'err.aiOff': { en: 'The AI Designer is not available right now.', ar: 'مصمّم الذكاء الاصطناعي مو متاح حاليًا.' },
   'err.badStadium': { en: 'That stadium template is not valid.', ar: 'قالب الملعب هذا غير صالح.' },
@@ -2216,6 +2259,7 @@ const ERROR_KEYS: Record<string, string> = {
   'no email on file': 'err.noEmail',
   'a prompt is required': 'err.needPrompt',
   'could not produce a valid design': 'err.aiFailed',
+  'This request was blocked because it may break the Acceptable Use rules. Try a different design idea.': 'err.aiBlocked',
   'no AI provider configured': 'err.aiOff',
   'invalid stadium template': 'err.badStadium',
   'photo not found': 'err.photoNotFound',

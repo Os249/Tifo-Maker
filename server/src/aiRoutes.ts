@@ -22,7 +22,8 @@
 
 import { createHmac, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
-import type { AiEventsRepository, AiOutcome, AiUsageRepository } from './repo';
+import type { AiEventsRepository, AiMode, AiOutcome, AiUsageRepository } from './repo';
+import { classifyAiFailure, publicCause, sanitizeDetail, type AiFailure } from './aiFailure';
 import { secondsToNextPeriod } from './repo';
 import { validateSpec, narrowToSingleStand, regionAspectHint, regionRowsHint, type TifoSpec } from '../../src/core/tifoSpec';
 import { refineSpec } from '../../src/core/specRefine';
@@ -59,7 +60,8 @@ export interface GenOutcome {
   of?: number;
   /** Whether this consumed one of the caller's premium designs. */
   charged: boolean;
-  /** The provider's reason. Admins only. */
+  /** Retired: the provider's reason is recorded for /admin → AI instead of
+   *  being sent to the editor, admins included. Kept optional for old clients. */
   detail?: string;
 }
 const PREMIUM_RETRY_SEC = 90; // "wait and retry" countdown when premium is busy
@@ -217,7 +219,7 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
   const adminPassword = deps.adminPassword;
 
   type Access =
-    | { kind: 'admin' }
+    | { kind: 'admin'; actorId: string | null }
     | { kind: 'user'; userId: string; pro: boolean }
     | { kind: 'deny'; status: number; error: string; reason: 'signin' | 'verify' };
 
@@ -230,7 +232,11 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
    */
   const baseAccess = async (req: FastifyRequest): Promise<Access> => {
     const tok = req.headers['x-ai-unlock'];
-    if (typeof tok === 'string' && adminPassword && verifyUnlock(adminPassword, tok)) return { kind: 'admin' };
+    if (typeof tok === 'string' && adminPassword && verifyUnlock(adminPassword, tok)) {
+      // Unlimited either way; the account behind it is looked up only so the
+      // admin AI tab can say WHO ran a request, not "admin / unlocked".
+      return { kind: 'admin', actorId: await deps.userOf(req).catch(() => null) };
+    }
     const userId = await deps.userOf(req);
     if (!userId) return { kind: 'deny', status: 401, error: 'Sign in to use the AI Designer.', reason: 'signin' };
     // Admins are metered like everyone for now (no auto-unlimited AI); the /admin
@@ -249,9 +255,28 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
    * failure must never turn into a failed generation, so this is never awaited
    * and never throws.
    */
-  const note = (userId: string | null, mode: 'std' | 'super', outcome: AiOutcome): void => {
-    void deps.aiEvents?.record({ userId, mode, outcome }).catch(() => {});
+  const note = (a: Access, mode: AiMode, outcome: AiOutcome, fail?: AiFailure): void => {
+    const userId = a.kind === 'user' ? a.userId : a.kind === 'admin' ? a.actorId : null;
+    void deps.aiEvents
+      ?.record({
+        userId,
+        mode,
+        outcome,
+        via: a.kind === 'admin' ? 'password' : null,
+        ...(fail ? { reason: fail.reason, detail: fail.status && !fail.detail.includes(String(fail.status)) ? `HTTP ${fail.status}: ${fail.detail}` : fail.detail } : {}),
+      })
+      .catch(() => {});
   };
+  /** The model id a tier resolves to, for the operator's failure detail. */
+  const modelOf = (isSuper: boolean): string =>
+    isSuper ? (process.env.AI_MODEL_PREMIUM ?? process.env.AI_MODEL ?? 'default') : (process.env.AI_MODEL_FAST ?? process.env.AI_MODEL ?? 'default');
+  /** Name the model in the operator's detail when the provider's text did not. */
+  const withModel = (err: string, model: string): string =>
+    model === 'default' || err.includes(model) ? err : `${err} (model ${model})`;
+  const budgetFailure = (): AiFailure => ({
+    reason: 'budget',
+    detail: `AI_DAILY_BUDGET spent: ${DAILY_BUDGET} premium calls today; resets at 00:00 UTC`,
+  });
 
   const isUnlimited = (a: Access): boolean => a.kind === 'admin' || (a.kind === 'user' && a.pro);
   /** May the caller use the premium model at all? freeForAll is the kill-switch. */
@@ -318,15 +343,18 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
     const body = (req.body ?? {}) as { prompt?: unknown; mode?: unknown; stadium?: unknown; engine?: unknown };
     const prompt = typeof body.prompt === 'string' ? body.prompt.trim() : '';
     const mode0: 'std' | 'super' = body.mode === 'super' ? 'super' : 'std';
-    const who0 = access.kind === 'user' ? access.userId : null;
-    if (!prompt) { note(who0, mode0, 'invalid'); return reply.code(400).send({ error: 'a prompt is required' }); }
+    if (!prompt) { note(access, mode0, 'invalid'); return reply.code(400).send({ error: 'a prompt is required' }); }
     if (prompt.length > MAX_PROMPT) {
-      note(who0, mode0, 'invalid');
+      note(access, mode0, 'invalid');
       return reply.code(400).send({ error: `prompt too long (max ${MAX_PROMPT} characters)` });
     }
     // First-line safety screen — block clearly-harmful prompts before the model.
     const safe = screenPrompt(prompt);
-    if (!safe.ok) { note(who0, mode0, 'blocked'); return reply.code(400).send({ error: safe.message, reason: 'blocked' }); }
+    if (!safe.ok) {
+      // Which list matched, never the prompt itself (see the ai_events note in schema.sql).
+      note(access, mode0, 'blocked', { reason: 'prompt_screen', detail: `matched the "${safe.rule}" list of the prompt screen` });
+      return reply.code(400).send({ error: safe.message, reason: 'blocked' });
+    }
 
     // Mode 3 (Super AI): whole-bowl director prompt + the client's stadium context.
     const isSuper = body.mode === 'super';
@@ -344,10 +372,13 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
     if (engine === 'offline' || !premiumAllowed(access)) {
       const q = quickDesign(prompt, isSuper);
       if (!q.valid || !q.spec) {
-        note(userId, mode0, 'invalid');
-        return reply.code(502).send({ error: 'could not produce a valid design', errors: q.errors });
+        note(access, mode0, 'invalid', {
+          reason: 'invalid_design',
+          detail: sanitizeDetail(`Quick Designer spec failed validation: ${(q.errors ?? []).slice(0, 3).map((e) => `${e.path} ${e.message}`).join('; ')}`),
+        });
+        return reply.code(502).send({ error: 'could not produce a valid design' });
       }
-      note(userId, mode0, 'quick');
+      note(access, mode0, 'quick');
       return reply.code(200).send({ spec: refineSpec(q.spec), quota: quotaInfo, source: 'quick', notes: [], outcome: { kind: 'full', charged: false } satisfies GenOutcome });
     }
 
@@ -355,21 +386,21 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
     const key = cacheKey('gen', isSuper ? 'super' : 'std', prompt, stadium, activeProvider());
     const hit = genCache.get(key);
     if (hit) {
-      note(userId, mode0, 'cache');
+      note(access, mode0, 'cache');
       return reply.code(200).send({ spec: hit.spec, quota: quotaInfo, source: hit.source, notes: ['Served instantly from cache.'], outcome: { kind: 'full', charged: false } satisfies GenOutcome });
     }
 
     // Hourly cap reached → offer the choice (Quick Designer now, or wait for reset).
     if (usage && usage.remaining <= 0) {
-      note(userId, mode0, 'quota');
+      note(access, mode0, 'quota');
       return reply.code(200).send({ needsChoice: true, reason: 'quota', retryAfterSec: secondsToNextPeriod(), quota: quotaInfo });
     }
 
     // Daily circuit breaker: budget spent → route to the Quick Designer instead of
     // burning the provider's daily quota. Same "choice" UX, no error shown.
     if (premiumExhausted()) {
-      note(userId, mode0, 'busy');
-      return reply.code(200).send({ needsChoice: true, reason: 'busy', retryAfterSec: busyRetrySec(), quota: quotaInfo });
+      note(access, mode0, 'busy', budgetFailure());
+      return reply.code(200).send({ needsChoice: true, reason: 'busy', cause: publicCause('budget'), retryAfterSec: busyRetrySec(), quota: quotaInfo });
     }
 
     // Try the premium model (counts against the daily budget).
@@ -401,29 +432,31 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
       // id, a key without access to that model, a timeout and a spec the
       // validator rejected all look identical from the outside, and this error
       // used to be computed and thrown away.
+      const fail: AiFailure = modelResult.spec
+        ? {
+            reason: 'invalid_design',
+            detail: sanitizeDetail(`${modelOf(isSuper)}: spec failed validation: ${(r.errors ?? []).slice(0, 3).map((e) => `${e.path} ${e.message}`).join('; ')}`),
+          }
+        : classifyAiFailure(withModel(modelResult.error ?? 'the model did not answer', modelOf(isSuper)), modelResult.status);
       app.log.warn(
         {
-          reason: modelResult.error ?? 'spec failed validation',
-          errors: modelResult.spec ? r.errors : undefined,
+          reason: fail.reason,
+          detail: fail.detail,
           mode: mode0,
-          model: isSuper ? (process.env.AI_MODEL_PREMIUM ?? process.env.AI_MODEL ?? 'default') : (process.env.AI_MODEL_FAST ?? process.env.AI_MODEL ?? 'default'),
+          model: modelOf(isSuper),
           provider: activeProvider(),
         },
         'ai generate: premium could not deliver',
       );
-      note(userId, mode0, 'busy');
-      // An ADMIN gets the real reason in the reply. "Busy" is the right message
-      // for a visitor — it is honest about what they should do and gives nothing
-      // away — but it is useless to the person who has to fix it, who would
-      // otherwise be reading deploy logs to find out that a model id is wrong or
-      // an env var is quoted. Never sent to a normal user.
-      const detail = access.kind === 'admin'
-        ? (modelResult.error ?? `spec failed validation: ${(r.errors ?? []).slice(0, 3).map((e) => `${e.path} ${e.message}`).join('; ')}`)
-        : undefined;
-      return reply.code(200).send({ needsChoice: true, reason: 'busy', retryAfterSec: busyRetrySec(), quota: quotaInfo, ...(detail ? { detail } : {}) });
+      note(access, mode0, 'busy', fail);
+      // The editor gets ONE vendor-free word it turns into a translated
+      // sentence (busy / resting / slow / content / garbled / unavailable).
+      // It used to get the provider's raw reply when the caller was an admin,
+      // which is how "gemini \"gemini-3.5-flash\": HTTP 503: {...}" ended up in
+      // the Arabic card and on the status line. The whole story — reason,
+      // provider text, model, account — is in /admin → AI now, for everyone.
+      return reply.code(200).send({ needsChoice: true, reason: 'busy', cause: publicCause(fail.reason), retryAfterSec: busyRetrySec(), quota: quotaInfo });
     }
-
-    note(userId, mode0, 'model');
 
     // Phase 4: deterministic art-director pass — fix legibility/contrast/field.
     let spec = refineSpec(r.spec);
@@ -476,7 +509,8 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
         else {
           missed++;
           firstFailure = firstFailure ?? error ?? 'unknown error';
-          notes.push(`Picture not generated: ${error ?? 'unknown error'}`);
+          // The provider's words go to /admin → AI, not into the design's notes.
+          notes.push('Picture not generated.');
         }
       }
     }
@@ -488,6 +522,9 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
     // meant a failed picture still cost a Super AI use and the user was told
     // nothing beyond a line of small grey text.
     const degraded = missed > 0;
+    // Recorded here rather than when the spec validated, so a design whose
+    // picture never came is on file WITH the reason it did not.
+    note(access, mode0, 'model', degraded ? { reason: 'picture_failed', detail: sanitizeDetail(`${missed} of ${wanted}: ${firstFailure ?? 'unknown error'}`) } : undefined);
     const charged = !!(usage && userId) && !degraded;
     let quota = quotaInfo;
     if (charged && userId) {
@@ -505,7 +542,6 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
           missingCount: missed,
           of: wanted,
           charged,
-          ...(access.kind === 'admin' && firstFailure ? { detail: firstFailure } : {}),
         }
       : { kind: 'full', charged };
     return reply.code(200).send({ spec, quota, source: 'model', notes, outcome });
@@ -530,12 +566,14 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
     const notes: string[] = [];
     let spec = incoming.spec;
     let source: 'model' | 'original' = 'original';
+    // Set when the critic could not run; the client says so in its own words.
+    let failed: AiFailure | null = null;
     if (activeProvider() === 'none') {
-      notes.push('No AI provider configured: design left unchanged.');
+      failed = { reason: 'no_provider', detail: 'no AI provider configured' };
     } else if (premiumExhausted()) {
       // The critic is a premium call like any other. It used to skip the daily
       // budget entirely, so it kept spending once generation had stopped.
-      notes.push('Critique resting: the daily AI budget is spent. Design left unchanged.');
+      failed = budgetFailure();
     } else {
       notePremiumCall();
       // Portrait assetRefs are huge base64 data URLs; the critic sees the rendered
@@ -559,8 +597,16 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
         spec = refineSpec(improved.spec);
         source = 'model';
       } else {
-        notes.push(`Critique unavailable: ${res.error ?? 'invalid response'}: design left unchanged.`);
+        failed = res.spec
+          ? { reason: 'invalid_design', detail: sanitizeDetail(`critique spec failed validation: ${(improved?.errors ?? []).slice(0, 3).map((e) => `${e.path} ${e.message}`).join('; ')}`) }
+          : classifyAiFailure(withModel(res.error ?? 'invalid response', modelOf(true)), res.status);
       }
+    }
+    if (failed) {
+      // Only failures of the critic are recorded (mode 'polish'): the design is
+      // left exactly as it was, and the provider's words stay on the server.
+      note(access, 'polish', 'busy', failed);
+      return reply.code(200).send({ spec, source, notes, cause: publicCause(failed.reason) });
     }
     return reply.code(200).send({ spec, source, notes });
   });
@@ -585,6 +631,7 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
       return reply.code(400).send({ error: 'image must be a png/jpeg/webp data URL' });
     }
     if (activeProvider() === 'none') {
+      note(access, 'photo', 'busy', { reason: 'no_provider', detail: 'no AI provider configured' });
       return reply.code(503).send({ error: 'no AI provider configured' });
     }
     const samples = Math.max(1, Math.min(PHOTO_SAMPLE_MAX, Number(b.samples) || PHOTO_SAMPLE_DEFAULT));
@@ -592,14 +639,20 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
     // count against AI_DAILY_BUDGET: the breaker that stops generation did not
     // stop this. Every reading now counts.
     if (premiumExhausted()) {
+      note(access, 'photo', 'busy', budgetFailure());
       return reply.code(503).send({ error: 'premium AI is resting for today, try again tomorrow', reason: 'busy', retryAfterSec: busyRetrySec() });
     }
     notePremiumCall(samples);
     const out = await readGroundPhoto(image, samples);
     // Every reading failed: that is an upstream problem, not an empty photo.
     if (!out.vote.samples) {
-      return reply.code(502).send({ error: out.errors[0] ?? 'the model did not answer', errors: out.errors });
+      const fail = classifyAiFailure(out.errors[0] ?? 'the model did not answer');
+      if (out.errors.length > 1) fail.detail = sanitizeDetail(`${fail.detail} (${out.errors.length} readings failed)`);
+      note(access, 'photo', 'busy', fail);
+      // The provider's text used to ride back in `error` and `errors`.
+      return reply.code(502).send({ error: 'the model did not answer', reason: 'busy', cause: publicCause(fail.reason) });
     }
-    return reply.code(200).send(out);
+    // Readings that failed while others succeeded are the operator's business.
+    return reply.code(200).send({ ...out, errors: [] });
   });
 }
