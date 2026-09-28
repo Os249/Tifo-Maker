@@ -35,10 +35,21 @@ export async function claimLocalProject(p: LocalProject): Promise<string | null>
     origin: p.origin,
   });
   // The seats are what must not be lost; everything after is best-effort.
+  // Its banners, and its layers — kept beside the draft in this browser, and
+  // only when they are still the layers of these seats.
   const banners = readRaw(bannersKey(p.id));
-  if (banners) {
+  let layers: unknown = null;
+  try {
+    const { readLayers } = await import('../core/layerStore');
+    const { fingerprint } = await import('../core/layers');
+    const doc = await readLayers(docKey(p.id));
+    if (doc && doc.hash === fingerprint(flattenLayers(env.doc))) layers = doc;
+  } catch {
+    layers = null;
+  }
+  if (banners || layers) {
     try {
-      await saveScene(meta.id, { v: 1, banners: JSON.parse(banners) });
+      await saveScene(meta.id, { v: 1, banners: banners ? JSON.parse(banners) : undefined, ...(layers ? { layers } : {}) });
     } catch {
       /* the project moved; its banners did not, and the seats matter more */
     }

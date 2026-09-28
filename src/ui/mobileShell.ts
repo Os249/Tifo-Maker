@@ -43,7 +43,7 @@ import { t } from './i18n';
  */
 export const PHONE_MAX = 899;
 
-type TabId = 'paint' | 'colors' | 'add' | 'ai' | 'more';
+type TabId = 'paint' | 'colors' | 'add' | 'layers' | 'ai' | 'more';
 
 interface Tab {
   id: TabId;
@@ -55,6 +55,7 @@ const TABS: Tab[] = [
   { id: 'paint', icon: 'ti-brush', labelKey: 'mb.paint' },
   { id: 'colors', icon: 'ti-palette', labelKey: 'ed.colors' },
   { id: 'add', icon: 'ti-plus', labelKey: 'mb.add' },
+  { id: 'layers', icon: 'ti-stack-2', labelKey: 'mb.layers' },
   { id: 'ai', icon: 'ti-sparkles', labelKey: 'mb.ai' },
   { id: 'more', icon: 'ti-dots', labelKey: 'mb.more' },
 ];
@@ -411,8 +412,14 @@ export function mountMobileShell(): MobileShell | null {
     lend('ctx-stadium');
   };
 
+  /** The Layers list: every text, picture and shape, top of the list in front. */
+  const buildLayers = (): void => {
+    title.textContent = t('ly.title');
+    bodyEl.textContent = '';
+    lend('ctx-layers');
+  };
   const BUILD: Record<TabId, () => void> = {
-    paint: buildPaint, colors: buildColors, add: buildAdd, ai: buildAi, more: buildMore,
+    paint: buildPaint, colors: buildColors, add: buildAdd, layers: buildLayers, ai: buildAi, more: buildMore,
   };
 
   function open(tab: TabId): void {
@@ -553,8 +560,11 @@ export function mountMobileShell(): MobileShell | null {
     objBar.appendChild(b);
     return b;
   };
-  objBtn('primary', 'ti-stamp', t('mb.bake'), () => { closeSheet(); proxy('#obj-bake'); }, true);
-  objBtn('', 'ti-adjustments-horizontal', t('mb.objOptions'), () => openView('paint', t('ed.obj'), ['ctx-objects']), true);
+  // Nothing needs baking any more — a layer stays movable — so the bar is
+  // about the layer itself: its options, a copy, where it sits in the stack.
+  objBtn('primary', 'ti-adjustments-horizontal', t('mb.objOptions'), () => openView('paint', t('ed.obj'), ['ctx-objects']), true);
+  objBtn('', 'ti-copy', t('ly.duplicate'), () => proxy('#obj-dup'), false);
+  objBtn('', 'ti-stack-2', t('ly.title'), () => { if (openTab !== 'layers') open('layers'); }, true);
   objBtn('danger', 'ti-trash', t('ed.obj.deleteT'), () => proxy('#obj-delete'), false);
   stage.appendChild(objBar);
 

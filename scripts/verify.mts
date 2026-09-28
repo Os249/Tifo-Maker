@@ -1022,8 +1022,8 @@ import { buildStadium as siBuild } from '../src/core/stadiumFit';
   // The status line is what the user reads after every step of this flow, and
   // it was the one part still hard-coded in English inside an Arabic editor.
   for (const k of ['ed.import.size', 'ed.import.reading', 'ed.import.armed', 'ed.import.failed',
-    'ed.import.placed', 'ed.obj.added', 'ed.obj.shapeAdded', 'ed.obj.baked', 'ed.obj.bakedAll',
-    'mb.bake', 'mb.objOptions']) {
+    'ed.import.placed', 'ed.obj.added', 'ed.obj.shapeAdded', 'ly.msg.merged', 'ly.msg.pictureLimit',
+    'mb.layers', 'mb.objOptions']) {
     const row3 = new RegExp(`'${k.replace(/\./g, '\\.')}':\\s*\\{.*$`, 'm').exec(i18nSrc3)?.[0] ?? '';
     if (!/\ben:/.test(row3) || !/\bar:/.test(row3)) throw new Error(`image-flow string "${k}" is missing a translation`);
   }
@@ -1043,7 +1043,6 @@ import { buildStadium as siBuild } from '../src/core/stadiumFit';
 {
   const designSrc = roofRead('src/core/design.ts', 'utf8');
   const editorSrc2 = roofRead('src/render/editor.ts', 'utf8');
-  const objectsSrc = roofRead('src/core/objects.ts', 'utf8');
   const toolbarSrc2 = roofRead('src/ui/toolbar.ts', 'utf8');
   const i18nSrc4 = roofRead('src/ui/i18n.ts', 'utf8');
 
@@ -1054,7 +1053,9 @@ import { buildStadium as siBuild } from '../src/core/stadiumFit';
   // during the next one — always exactly one behind.
   const historyHook = /onHistoryChange\(fn: \(\) => void\)/.test(designSrc)
     && /store\.onHistoryChange\(refreshHistory\)/.test(toolbarSrc2);
-  const firesOnCommit = /this\.notifyHistory\(\);\n\s*return diff;/.test(designSrc);
+  // (commitStroke hands the step to push(), which is what announces it.)
+  const firesOnCommit = /this\.push\(\{ t: 'paint', diff, objs \}\);\n\s*return diff;/.test(designSrc)
+    && /private push\(entry: HistoryEntry\): void \{[\s\S]*?this\.notifyHistory\(\);\n  \}/.test(designSrc);
   console.log('painting: undo button tracks the stacks', historyHook, '| commitStroke announces it', firesOnCommit);
   if (!historyHook || !firesOnCommit) throw new Error('the Undo button must follow the undo stack, not the dirty set');
 
@@ -1068,13 +1069,13 @@ import { buildStadium as siBuild } from '../src/core/stadiumFit';
   console.log('painting: the canvas follows its container', watches);
   if (!watches) throw new Error('the editor canvas must be resized by a ResizeObserver, not only by window resize');
 
-  // 3. A bake has to reach the screen. Eight of the nine bake call sites never
-  // flushed, so "Bake all" — and the implicit bake before every save and export
-  // — wrote the art into the cells and left the bowl showing the old design.
-  const bakeFlushes = /store\.commitStroke\(\);\n\s*store\.flush\(dirty\);\n\s*return dirty;/.test(objectsSrc);
-  const noDoubleFlush = !/objects\.bake\(sel[^\n]*\n\s*store\.flush\(dirty\)/.test(toolbarSrc2);
-  console.log('painting: bake() flushes its own dirty set', bakeFlushes, '| callers no longer have to', noDoubleFlush);
-  if (!bakeFlushes) throw new Error('ObjectLayer.bake must flush — nine call sites cannot each be trusted to');
+  // 3. Nothing is baked behind anyone's back any more. Nine call sites used to
+  // bake every floating object before a save or an export — the reason a
+  // picture could never be moved again. Layers stay layers; the exports read
+  // the flattened seats. See the "Layers" block below for the engine itself.
+  const silentBakes = (toolbarSrc2.match(/bakeAll\(/g) ?? []).length + (toolbarSrc2.match(/objects\.bake\(/g) ?? []).length;
+  console.log('painting: silent bakes left in the toolbar', silentBakes);
+  if (silentBakes) throw new Error('an export or save must not bake the layers — they read store.cells, which is already flattened');
 
   // 4. The first finger of a two-finger gesture has always already painted a
   // dab. Committing it meant the two-finger-tap undo spent itself undoing the
@@ -2002,3 +2003,176 @@ import { buildStadium as siBuild } from '../src/core/stadiumFit';
   }
   console.log(`match day view: floodlight level and Hide tifo start as designed, survive a rebuild, never persist, 7 strings in en + ar`);
 }
+
+// ---------------------------------------------------------------------------
+// Layers.
+//
+// Text, pictures and shapes stay movable layers above one Paint layer for the
+// life of a project; `store.cells` is the stack flattened. These are the rules
+// the editor, the saves and every export depend on, checked on a real bowl
+// with raster-free "moved area" layers (the browser half is e2e-layers.mjs).
+await (async () => {
+  const { ObjectLayer: LyObjects } = await import('../src/core/objects');
+  const { Composer: LyComposer } = await import('../src/core/composer');
+  const { fingerprint, HOLE: _HOLE } = await import('../src/core/layers');
+  const { brushStamp, floodFill: lyFlood } = await import('../src/core/tools');
+  const { SpatialHash } = await import('../src/core/spatialHash');
+  const { TIFO_FONTS } = await import('../src/core/text');
+  const { EDITOR_UNITS: LU } = await import('../src/core/seatmap');
+  const { DesignStore: LyStore } = await import('../src/core/design');
+  void _HOLE;
+  const DesignStore = LyStore;
+  const ObjectLayer = LyObjects;
+  const Composer = LyComposer;
+  const floodFill = lyFlood;
+  const EDITOR_UNITS = LU;
+  const map = generateSeatMap(DEFAULT_TEMPLATE);
+  const W = EDITOR_UNITS.width;
+  let fails = 0;
+  const ok = (name: string, cond: boolean, extra = ''): void => { console.log(`layers: ${name}`, cond ? 'ok' : `FAILED${extra ? ' — ' + extra : ''}`); if (!cond) fails++; };
+
+  const store = new DesignStore(map, ['#000000', '#ffffff', '#ff0000', '#00ff00', '#0000ff']);
+  const layer = new ObjectLayer();
+  const comp = new Composer(map, store, layer, { wrapWidth: W });
+  const hash = new SpatialHash(map);
+
+  // A flat design: paint 1 everywhere, a stripe of 2.
+  store.fillAll(1);
+  ok('no layers: cells are the paint', fingerprint(store.cells) === fingerprint(store.base));
+
+  // A seat roughly in the middle of the bowl.
+  const mid = hash.nearest(W * 0.25, (map.bounds.minY + map.bounds.maxY) / 2, 40);
+  const mx = map.xy[mid * 2], my = map.xy[mid * 2 + 1];
+  // A 3x3 grid cells object of colour 2 around it.
+  const g = { cols: 4, rows: 4, data: new Int16Array(16).fill(2) };
+  const o = layer.addCells({ cx: mx, cy: my, width: 60, height: 60, colorIndex: 0, tier: null, grid: g, gridKey: 'c' });
+  ok('an object shows on the seats', store.cells[mid] === 2 && store.base[mid] === 1);
+  const covered = [...store.cells].filter((v) => v === 2).length;
+  ok('it covers a patch', covered > 20, `${covered} seats`);
+
+  // Move it: the old place shows paint again.
+  layer.beginGesture();
+  layer.mutate(o.id, { cx: mx + 200 });
+  layer.endGesture();
+  ok('moving it uncovers the paint', store.cells[mid] === 1);
+  ok('and covers the new place', store.cells[hash.nearest(mx + 200, my, 40)] === 2);
+  store.undo();
+  ok('one undo puts it back', store.cells[mid] === 2);
+  store.redo();
+  ok('redo moves it again', store.cells[mid] === 1);
+  store.undo();
+
+  // Touch up: brush colour 3 over the object.
+  store.beginStroke();
+  brushStamp(store, hash, mx, my, 4, 3, 8);
+  store.commitStroke();
+  ok('a stroke over the object touches it up', store.cells[mid] === 3 && store.base[mid] === 1 && !!layer.get(o.id)!.touch);
+  layer.beginGesture(); layer.mutate(o.id, { cx: mx + 200 }); layer.endGesture();
+  const newSeat = hash.nearest(mx + 200, my, 40);
+  ok('the touch-up moves with it', store.cells[newSeat] === 3, `got ${store.cells[newSeat]}`);
+  ok('and the paint under the old place is untouched', store.cells[mid] === 1);
+  store.undo(); // move back
+  store.undo(); // touch-up
+  ok('undo removes the touch-up', store.cells[mid] === 2 && !layer.get(o.id)!.touch);
+
+  // Eraser over the object cuts a hole to the paint.
+  store.beginStroke();
+  brushStamp(store, hash, mx, my, 2, 0, 8);
+  store.commitStroke();
+  ok('the eraser on an object cuts a hole to the paint', store.cells[mid] === 1, `got ${store.cells[mid]}`);
+  store.undo();
+  store.beginStroke();
+  for (let k = 0; k < 4; k++) brushStamp(store, hash, mx + k * 0.3, my, 4, 0, 8);
+  store.commitStroke();
+  ok('an eraser stroke going back over its hole leaves the paint alone', store.cells[mid] === 1 && store.base[mid] === 1, `shown ${store.cells[mid]} paint ${store.base[mid]}`);
+  store.undo();
+  ok('undo fills the hole', store.cells[mid] === 2);
+
+  // Fill base paints behind, never over.
+  store.fillAll(4);
+  ok('fill base paints the paint layer only', store.cells[mid] === 2 && store.base[mid] === 4);
+  store.undo();
+
+  // Hide.
+  layer.update(o.id, { hidden: true });
+  ok('a hidden layer is left out of the seats', store.cells[mid] === 1);
+  store.undo();
+  ok('undo shows it', store.cells[mid] === 2);
+
+  // Lock: brush refused.
+  layer.update(o.id, { locked: true });
+  store.beginStroke(); brushStamp(store, hash, mx, my, 4, 3, 8); store.commitStroke();
+  ok('a locked layer cannot be painted on', store.cells[mid] === 2 && comp.lockedHit?.id === o.id);
+  layer.update(o.id, { locked: false });
+
+  // Merge into paint.
+  const n = comp.merge(o.id);
+  ok('merge writes it into the paint', store.base[mid] === 2 && store.cells[mid] === 2 && layer.list().length === 0, `${n} seats`);
+  store.undo();
+  ok('one undo un-merges', layer.list().length === 1 && store.base[mid] === 1 && store.cells[mid] === 2);
+
+  // Flood fill over an object touches it up (region by what you see).
+  store.beginStroke(); floodFill(store, map, mid, 4, 'section'); store.commitStroke();
+  ok('fill over a picture fills the picture', store.cells[mid] === 4 && store.base[mid] === 1);
+  store.undo();
+
+  // Save and reload the stack.
+  const doc = comp.toDoc()!;
+  const cellsBefore = store.cells.slice();
+  const store2 = new DesignStore(map, store.palette);
+  store2.loadCells(cellsBefore);
+  const layer2 = new ObjectLayer();
+  const comp2 = new Composer(map, store2, layer2, { wrapWidth: W });
+  const restored = comp2.loadDoc(JSON.parse(JSON.stringify(doc)), TIFO_FONTS);
+  ok('a saved stack comes back', restored && layer2.list().length === 1 && store2.base[mid] === 1 && store2.cells[mid] === 2);
+  ok('the restored seats are the saved seats', fingerprint(store2.cells) === fingerprint(cellsBefore));
+  const store3 = new DesignStore(map, store.palette);
+  const other = cellsBefore.slice(); other[mid] = 4;
+  store3.loadCells(other);
+  const comp3 = new Composer(map, store3, new ObjectLayer(), { wrapWidth: W });
+  ok('a stack is refused for seats it was not saved with', !comp3.loadDoc(doc, TIFO_FONTS) && store3.cells[mid] === 4);
+
+  // Lift a painted region into a layer.
+  store.undo(); store.undo(); // (get a clean-ish base)
+  layer.clear(false);
+  store.paintBaseOnly(() => { store.beginStroke(); for (let i = 0; i < map.count; i++) store.paint(i, 1); store.commitStroke(); });
+  const region: number[] = [];
+  const hs: number[] = []; hash.queryDisc(mx, my, 20, hs); for (const i of hs) region.push(i);
+  store.beginStroke(); for (const i of region) store.paint(i, 3); store.commitStroke();
+  const snap = store.cells.slice();
+  const lifted = comp.lift(region);
+  ok('make movable lifts the region into a layer', !!lifted && layer.list().length === 1);
+  ok('lifting changes nothing you can see', fingerprint(store.cells) === fingerprint(snap));
+  ok('the gap under it takes the surrounding colour', region.every((i) => store.base[i] === 1));
+  layer.beginGesture(); layer.mutate(lifted!.id, { cx: lifted!.cx + 300 }); layer.endGesture();
+  const moved = region.filter((i) => store.cells[i] === 3).length;
+  const landed = [...store.cells].filter((v) => v === 3).length;
+  ok('moving it moves the art', moved === 0 && Math.abs(landed - region.length) <= region.length * 0.25, `${landed} seats vs ${region.length}`);
+  store.undo(); store.undo();
+  ok('undo lift in one step (after undoing the move)', layer.list().length === 0 && fingerprint(store.cells) === fingerprint(snap));
+
+  // Rotation: 90 degrees swaps width and height coverage.
+  layer.clear(false);
+  const tall = layer.addCells({ cx: mx, cy: my, width: 200, height: 20, colorIndex: 0, tier: null, grid: { cols: 2, rows: 2, data: new Int16Array(4).fill(2) }, gridKey: 'c' });
+  const wide0 = [...store.cells].reduce((n, v) => n + (v === 2 ? 1 : 0), 0);
+  layer.update(tall.id, { rotation: 90 });
+  const probeUp = hash.nearest(mx, my - 60, 10);
+  ok('rotation turns the footprint', store.cells[probeUp] === 2 && store.cells[hash.nearest(mx + 80, my, 10)] !== 2, `${wide0} seats before`);
+
+  // Seam: an object across u=0 covers both ends.
+  layer.update(tall.id, { rotation: 0, cx: 2, width: 60 });
+  const east = hash.nearest(W - 10, my, 20), west = hash.nearest(15, my, 20);
+  ok('an object across the seam covers both ends', store.cells[east] === 2 && store.cells[west] === 2);
+
+  // Palette remap keeps objects and paint in step.
+  store.remapToPalette(['#000000', '#fefefe', '#ee0000', '#00ee00', '#0000ee']);
+  ok('a palette remap keeps objects', store.cells[east] === 2);
+  // The AI's pictures arrive as layers, kept to their stand, not baked.
+  const aiSrc = roofRead('src/ui/aiPanel.ts', 'utf8');
+  ok('AI pictures are layers kept inside their region', !/objects\.bake\(/.test(aiSrc) && /keep: region/.test(aiSrc));
+  // Only the owner is sent a design's layers; a copy for anyone else is flat.
+  const routesSrc = roofRead('server/src/routes.ts', 'utf8');
+  ok('the scene route keeps the layers to the owner', /v\.rec\.ownerId === v\.userId \? gz : withoutLayers\(gz\)/.test(routesSrc));
+  ok('a remix copies the scene without the layers', /copyScene\(id, created\.id, false\)/.test(routesSrc));
+  if (fails) throw new Error(`${fails} layer rule(s) broken`);
+})();

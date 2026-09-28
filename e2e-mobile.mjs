@@ -96,7 +96,7 @@ console.log('\n— the shell replaces the desktop rail —');
     vh: innerHeight,
   }));
   check('mobile shell mounts', r.shell);
-  check('five tabs, all present', r.tabs === 5, `${r.tabs} tabs`);
+  check('six tabs, all present (Layers is one)', r.tabs === 6, `${r.tabs} tabs`);
   check('the 752px desktop rail is out of the layout', r.railHidden);
   check('header is one row', r.header <= 60, `${r.header}px`);
   check('canvas gets most of the screen', r.canvas / r.vh > 0.7, `${r.canvas}/${r.vh} = ${Math.round(r.canvas / r.vh * 100)}%`);
@@ -114,7 +114,7 @@ console.log('\n— every tab opens a sheet, and every tool has a home —');
     paint: ['brush', 'fill', 'eraser', 'eyedropper', 'select', 'pan'],
     add: ['text', 'import', 'shape'],
   };
-  for (const tab of ['paint', 'colors', 'add', 'ai', 'more']) {
+  for (const tab of ['paint', 'colors', 'add', 'layers', 'ai', 'more']) {
     await p.tap(`.m-tab[data-tab="${tab}"]`);
     await p.waitForTimeout(700);
     const r = await p.evaluate(() => {
@@ -906,7 +906,7 @@ console.log('\n— Arabic: the shell is translated and mirrored —');
     return t[0].getBoundingClientRect().x > t[4].getBoundingClientRect().x;
   });
   check('the ribbon mirrors in RTL', mirrored);
-  for (const tab of ['paint', 'colors', 'add', 'ai', 'more']) {
+  for (const tab of ['paint', 'colors', 'add', 'layers', 'ai', 'more']) {
     await p.tap(`.m-tab[data-tab="${tab}"]`);
     await p.waitForTimeout(600);
     const title = await p.evaluate(() => document.querySelector('.m-sheet-title')?.textContent?.trim() || '');
@@ -945,7 +945,7 @@ console.log('\n— rotating across the breakpoint swaps front ends —');
     shell: document.body.classList.contains('m-shell'),
     tabs: document.querySelectorAll('.m-tab').length,
   }));
-  check('narrowing brings the ribbon back', narrow.shell && narrow.tabs === 5, JSON.stringify(narrow));
+  check('narrowing brings the ribbon back', narrow.shell && narrow.tabs === 6, JSON.stringify(narrow));
   check('no errors while rotating', errs.length === 0, errs.join(' | '));
   await ctx.close();
 }

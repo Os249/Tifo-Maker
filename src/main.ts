@@ -13,7 +13,11 @@ import { PATTERN_PRESETS } from './core/patterns';
 import { DesignStore } from './core/design';
 import { AssetStore, type SceneModel } from './core/sceneAssets';
 import { BannerStore, type BannerSceneModel } from './core/banner';
-import { ObjectLayer } from './core/objects';
+import { ObjectLayer, decodePictures } from './core/objects';
+import { Composer } from './core/composer';
+import { readLayers } from './core/layerStore';
+import { TIFO_FONTS } from './core/text';
+import { EDITOR_UNITS } from './core/seatmap';
 import type { BannerView } from './ui/bannerView';
 import type { Preview3D } from './render/preview3d';
 import { track } from './net/analytics';
@@ -365,6 +369,8 @@ async function main(): Promise<void> {
   // editor's Open file), validated against this stadium's seat map.
   let pendingTitle: string | null = null;
   let imported = false;
+  /** The layers a .tifo file carried, put back once the stack exists. */
+  let importedLayers: unknown = null;
   if (isNew && bootParams.get('import') === '1' && !sharedLoaded) {
     let pending: string | null = null;
     try {
@@ -382,6 +388,7 @@ async function main(): Promise<void> {
       if (!result.valid || !result.doc) throw new Error('invalid');
       store.setPalette(result.doc.palette.slice(0, 256));
       store.loadCells(flattenLayers(result.doc));
+      importedLayers = result.doc.editor?.layers ?? null;
       pendingTitle = result.doc.meta?.title ?? null;
       sharedLoaded = true;
       imported = true;
@@ -414,7 +421,9 @@ async function main(): Promise<void> {
 
   if (!sharedLoaded) {
     const seed = PATTERN_PRESETS.find((p) => p.id === 'border')!.cellAt(map);
-    for (let i = 0; i < map.count; i++) store.cells[i] = seed(i);
+    const seeded = new Uint8Array(map.count);
+    for (let i = 0; i < map.count; i++) seeded[i] = seed(i);
+    store.loadCells(seeded);
   }
 
   const host = document.getElementById('canvas-host')!;
@@ -434,6 +443,17 @@ async function main(): Promise<void> {
     onLangChange(paint);
   }
   const objects = new ObjectLayer();
+  // The layer stack: text, pictures and shapes stay movable layers above the
+  // Paint layer, flattened into the seats. A "keep inside" region (the AI's
+  // portraits keep to their stand) needs the spec compiler's region test.
+  const { regionPredicate } = await import('./core/specCompiler');
+  const composer = new Composer(map, store, objects, {
+    wrapWidth: EDITOR_UNITS.width,
+    clipFor: (region) => regionPredicate(region, map),
+  });
+  editor.composer = composer;
+  // The browser suites (e2e-layers.mjs) read the stack directly. Opt-in by URL only.
+  if (bootParams.has('e2e')) (window as unknown as { __tifo: unknown }).__tifo = { store, objects, composer, editor, map };
   // Banners and the older overlay assets. Both are created here, before the
   // toolbar, because saving a design has to be able to reach them: a banner
   // that only exists in this browser is not a banner anyone can be shown.
@@ -446,11 +466,16 @@ async function main(): Promise<void> {
     .then(({ installSlotRules }) => installSlotRules(bannerStore, map))
     .catch((err) => console.error('[tifo] banner slot rules failed to load', err));
   const assetStore = new AssetStore();
-  editor.attachObjectLayer(objects);
+  editor.attachObjectLayer(objects, EDITOR_UNITS.width);
 
   /** What travels with the design, and how it comes back. */
   const sceneIO = {
-    snapshot: (): unknown => ({ v: 1, banners: bannerStore.toJSON(), assets: assetStore.toJSON() }),
+    snapshot: (): unknown => {
+      // The layers travel with the design, so an account project opens with
+      // its pictures still movable. Only the owner is ever sent them back.
+      const layers = composer.toDoc();
+      return { v: 1, banners: bannerStore.toJSON(), assets: assetStore.toJSON(), ...(layers ? { layers } : {}) };
+    },
     /**
      * This design's scene — and a design without one has no banners.
      *
@@ -467,10 +492,38 @@ async function main(): Promise<void> {
     onChange: (fn: () => void): void => {
       bannerStore.onChange(fn);
     },
+    bannerCount: (): number => bannerStore.count,
   };
 
   // The account's banners, unless this browser has newer ones for it (below).
   if (sharedScene && !restoredUnsaved) sceneIO.restore(sharedScene);
+
+  // The project's layers: the saved stack goes back on top of its seats, but
+  // only onto the seats it was saved with (see Composer.loadDoc). An account
+  // project's come from the account, or from this browser when it holds
+  // edits the account has not got; a local project's from this browser; an
+  // opened .tifo file's from the file. Anyone else's design opens flat.
+  {
+    const candidates: unknown[] = [];
+    if (ownedProject && sharedId) {
+      const fromScene = (sharedScene as { layers?: unknown } | null)?.layers ?? null;
+      const fromBrowser = await readLayers(accountDraftKey(sharedId));
+      if (restoredUnsaved) candidates.push(fromBrowser, fromScene);
+      else candidates.push(fromScene, fromBrowser);
+    } else if (localProject) {
+      candidates.push(await readLayers(docKey(localProject.id)));
+    } else if (imported) {
+      candidates.push(importedLayers);
+    }
+    for (const doc of candidates) {
+      if (doc && composer.loadDoc(doc, TIFO_FONTS)) {
+        // Grids were saved, so nothing needs decoding to show the design; the
+        // pictures are decoded in the background for when one is resized.
+        void decodePictures(objects.list());
+        break;
+      }
+    }
+  }
 
   const projectRef: ProjectRef | null =
     ownedProject && sharedId ? { kind: 'account', id: sharedId }
@@ -480,7 +533,7 @@ async function main(): Promise<void> {
     ref: projectRef,
     pending: isNew,
     unsynced: restoredUnsaved,
-  });
+  }, composer);
 
   // A sign-in that did not finish says why, in the same place every other
   // outcome is reported. Reasons are a fixed set from the callback; nothing the

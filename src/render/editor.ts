@@ -9,9 +9,10 @@ import {
   Texture,
 } from 'pixi.js';
 import type { SeatMap, ToolId } from '../core/types';
-import { ObjectOverlay } from './objectOverlay';
+import { ObjectOverlay, cursorFor } from './objectOverlay';
 import { ownTexture } from './ownTexture';
-import type { ObjectLayer } from '../core/objects';
+import type { ObjectLayer, TifoObject } from '../core/objects';
+import type { Composer } from '../core/composer';
 import type { DesignStore } from '../core/design';
 import { SpatialHash } from '../core/spatialHash';
 import { brushSegment, brushStamp, floodFill, collectRegion } from '../core/tools';
@@ -36,6 +37,14 @@ export class Editor {
   private readonly venueLayer = new Container();
   private venueLabels: Text[] = [];
   objectOverlay: ObjectOverlay | null = null;
+  /** The layer stack: which layer a seat is showing (the brush's hover label reads it). */
+  composer: Composer | null = null;
+  /**
+   * Fired while a painting tool hovers: the layer it would paint on (null when
+   * it is the paint). "Tools edit what is on top", so the UI names it.
+   */
+  onHoverLayer: ((obj: TifoObject | null, clientX: number, clientY: number) => void) | null = null;
+  private viewListeners: (() => void)[] = [];
   private readonly hash: SpatialHash;
   private paletteRGB: number[] = [];
 
@@ -478,6 +487,8 @@ export class Editor {
   /** Push the current viewport to onViewChange as normalized (u,v) bounds. */
   emitView(): void {
     this.scaleVenueLabels();
+    this.objectOverlay?.sync();
+    for (const fn of this.viewListeners) fn();
     if (!this.onViewChange) return;
     const r = this.getViewportRect();
     const { minX, minY, maxX, maxY } = this.map.bounds;
@@ -530,12 +541,57 @@ export class Editor {
   }
 
   /** Mount the floating object layer's overlay into the world container. */
-  attachObjectLayer(layer: ObjectLayer): ObjectOverlay {
-    const overlay = new ObjectOverlay(layer, () => this.world.scale.x);
+  attachObjectLayer(layer: ObjectLayer, wrapWidth: number): ObjectOverlay {
+    const overlay = new ObjectOverlay(layer, () => this.world.scale.x, wrapWidth, () => this.snapTargets(wrapWidth), this.map.bounds);
     this.objectOverlay = overlay;
+    this.layerRef = layer;
     this.world.addChild(overlay.root);
     overlay.sync();
     return overlay;
+  }
+
+  /** Another listener for pan/zoom (the floating action bar follows the selection). */
+  addViewListener(fn: () => void): void {
+    this.viewListeners.push(fn);
+  }
+
+  /** Editor units to CSS pixels, relative to the viewport. */
+  worldToClient(x: number, y: number): [number, number] {
+    const rect = this.app.canvas.getBoundingClientRect();
+    return [rect.left + this.world.position.x + x * this.world.scale.x, rect.top + this.world.position.y + y * this.world.scale.y];
+  }
+
+  /** Centre the view on a world point, keeping the zoom (a layer picked in the list). */
+  centerOnWorld(x: number, y: number): void {
+    this.world.position.x = this.app.screen.width / 2 - x * this.world.scale.x;
+    this.world.position.y = this.app.screen.height / 2 - y * this.world.scale.y;
+    this.emitView();
+  }
+
+  /** Is a world point on screen? */
+  isWorldVisible(x: number, y: number): boolean {
+    const r = this.getViewportRect();
+    return x >= r.x && x <= r.x + r.width && y >= r.y && y <= r.y + r.height;
+  }
+
+  /** Where a moving layer snaps: the stand edges and centres, the middle of the bowl, the tier walkway. */
+  private snapCache: { xs: number[]; ys: number[] } | null = null;
+  private snapTargets(wrapWidth: number): { xs: number[]; ys: number[] } {
+    if (this.snapCache) return this.snapCache;
+    const xs: number[] = [];
+    for (let i = 0; i <= 8; i++) xs.push((i / 8) * wrapWidth); // stand edges and centres (four stands)
+    const { minY, maxY } = this.map.bounds;
+    const ys = [minY, maxY, (minY + maxY) / 2];
+    let tier0Top = Infinity;
+    let tier1Bottom = -Infinity;
+    for (let i = 0; i < this.map.count; i++) {
+      const y = this.map.xy[i * 2 + 1];
+      if (this.map.tierOf[i] === 0 && y < tier0Top) tier0Top = y;
+      if (this.map.tierOf[i] === 1 && y > tier1Bottom) tier1Bottom = y;
+    }
+    if (isFinite(tier0Top) && isFinite(tier1Bottom)) ys.push(tier0Top, tier1Bottom);
+    this.snapCache = { xs, ys };
+    return this.snapCache;
   }
 
   /** World-space rect currently visible — the import target ("zoom to place"). */
@@ -546,6 +602,11 @@ export class Editor {
       width: this.app.screen.width / this.world.scale.x,
       height: this.app.screen.height / this.world.scale.y,
     };
+  }
+
+  private layerRef: ObjectLayer | null = null;
+  private rotationOf(id: string): number {
+    return this.layerRef?.get(id)?.rotation ?? 0;
   }
 
   private toWorld(e: PointerEvent): [number, number] {
@@ -665,10 +726,12 @@ export class Editor {
         return;
       }
       if (this.tool === 'select' && this.objectOverlay) {
-        const hit = this.objectOverlay.hitTest(wx, wy);
+        const hit = this.objectOverlay.hitTest(wx, wy, e.pointerType !== 'mouse');
         if (hit) {
           this.clearSelection();
-          this.objectOverlay.beginDrag(hit.id, hit.onHandle, wx, wy);
+          // Alt-drag leaves the original where it was and drags a copy.
+          const copy = hit.handle === 'move' && e.altKey ? this.layerRef?.duplicate(hit.id, 0) : null;
+          this.objectOverlay.beginDrag(copy?.id ?? hit.id, hit.handle, wx, wy);
         } else {
           // Begin a box-select. If the pointer doesn't move, end() falls back to
           // magic-wand. Shift adds to the current selection.
@@ -761,9 +824,17 @@ export class Editor {
       }
       if (this.objectOverlay?.isDragging) {
         const [dx, dy] = this.toWorld(e);
-        const r = this.objectOverlay.updateDrag(dx, dy);
+        const r = this.objectOverlay.updateDrag(dx, dy, { shift: e.shiftKey, alt: e.altKey, ctrl: e.ctrlKey || e.metaKey });
         if (r && this.onObjectResize) this.onObjectResize(r.resizedToHeight);
         return;
+      }
+      // Hovering with Select: outline the layer under the pointer, and show
+      // what a press would do there (move, resize, turn).
+      if (this.tool === 'select' && this.objectOverlay && !marq && e.pointerType === 'mouse') {
+        const [hx, hy] = this.toWorld(e);
+        const hit = this.objectOverlay.hover(hx, hy);
+        const rot = hit ? this.rotationOf(hit.id) : 0;
+        canvas.style.cursor = hit ? cursorFor(hit.handle, rot) : 'crosshair';
       }
       if (marq) {
         marq.ex = e.clientX;
@@ -792,6 +863,11 @@ export class Editor {
       if (this.onHoverSeat && !this.painting) {
         const [hx, hy] = this.toWorld(e);
         this.onHoverSeat(this.hash.nearest(hx, hy, 18));
+      }
+      if (this.onHoverLayer && this.composer && (this.tool === 'brush' || this.tool === 'eraser' || this.tool === 'fill')) {
+        const [hx, hy] = this.toWorld(e);
+        const seat = this.hash.nearest(hx, hy, 12);
+        this.onHoverLayer(seat >= 0 ? this.composer.objectAtSeat(seat) : null, e.clientX, e.clientY);
       }
       if (!this.painting) return;
       const [wx, wy] = this.toWorld(e);
@@ -856,7 +932,11 @@ export class Editor {
     };
     canvas.addEventListener('pointerup', end);
     canvas.addEventListener('pointercancel', end);
-    canvas.addEventListener('pointerleave', () => this.hideStampPreview());
+    canvas.addEventListener('pointerleave', () => {
+      this.hideStampPreview();
+      this.objectOverlay?.clearHover();
+      this.onHoverLayer?.(null, 0, 0);
+    });
     canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 
     // Wheel zoom around the cursor.

@@ -3,6 +3,45 @@ import type { DesignState, SeatMap, SparseDiff } from './types';
 type DirtyListener = (indices: number[] | 'all') => void;
 
 /**
+ * What the layer stack lends the store (see core/composer.ts).
+ *
+ * The store owns the Paint layer (`base`) and the flattened seats (`cells`);
+ * the stack owns the objects above the paint. A stroke asks `route(i)` which
+ * layer is showing at a seat — "tools edit what is on top" — and a stroke over
+ * a picture becomes a touch-up on that picture through `touch`.
+ */
+export interface LayerHooks {
+  /** Index of the object showing at seat i, or -1 for the Paint layer. */
+  route(i: number): number;
+  /** The top object's value at seat i, or -1 when the paint is showing. */
+  top(i: number): number;
+  /** Touch up object `owner` at seat i. Returns the seat's new flattened value, or -1 if nothing changed. */
+  touch(owner: number, i: number, value: number): number;
+  strokeBegin(): void;
+  /** The objects before and after the stroke, when it touched any. */
+  strokeEnd(): ObjectsChange | null;
+  /** Put every object the stroke touched back. */
+  strokeCancel(): void;
+  /** Replace the objects with a snapshot (undo/redo) and flatten again. */
+  restore(snapshot: unknown): void;
+  /** Recompute `cells` at these seats from the paint and the objects. */
+  recompose(indices: ArrayLike<number> | 'all'): void;
+  /** Re-index the objects' colours after a palette remap. */
+  remap(remap: number[]): ObjectsChange | null;
+}
+
+export interface ObjectsChange {
+  before: unknown;
+  after: unknown;
+}
+
+/** One undo step. A paint stroke can also have touched objects; a group is several steps as one. */
+type HistoryEntry =
+  | { t: 'paint'; diff: SparseDiff; objs: ObjectsChange | null }
+  | { t: 'objs'; change: ObjectsChange }
+  | { t: 'group'; list: HistoryEntry[] };
+
+/**
  * Owns the design's cell buffer and its history.
  *
  * Lives OUTSIDE any UI framework — the renderer reads `cells` directly and
@@ -13,14 +52,28 @@ type DirtyListener = (indices: number[] | 'all') => void;
  * the same format used for autosave payloads, revision history, and future realtime sync.
  */
 export class DesignStore {
+  /**
+   * The seats as everyone sees them: the Paint layer with every visible object
+   * flattened on top. Every reader in the app — the editor, Match Day, the
+   * exports, the thumbnails — reads this, so none of them needs to know that
+   * layers exist.
+   */
   readonly cells: Uint8Array;
+  /** The Paint layer: the bottom of the stack, and the only layer a design without objects has. */
+  readonly base: Uint8Array;
   palette: string[];
   readonly seatMapRef: DesignState['seatMapRef'];
 
+  /** Before-values of the Paint layer, for the stroke in progress. */
   private strokeOld: Map<number, number> | null = null;
   private locked: Uint8Array | null = null;
-  private undoStack: SparseDiff[] = [];
-  private redoStack: SparseDiff[] = [];
+  private undoStack: HistoryEntry[] = [];
+  private redoStack: HistoryEntry[] = [];
+  private layers: LayerHooks | null = null;
+  /** >0 while a stroke may only write the Paint layer (patterns, fill base, orientation). */
+  private baseOnly = 0;
+  /** Open groups: steps pushed while one is open become one undo step. */
+  private groups: HistoryEntry[][] = [];
   private listeners: DirtyListener[] = [];
   private paletteListeners: (() => void)[] = [];
   private historyListeners: (() => void)[] = [];
@@ -34,6 +87,7 @@ export class DesignStore {
 
   constructor(map: SeatMap, palette: string[]) {
     this.cells = new Uint8Array(map.count);
+    this.base = new Uint8Array(map.count);
     this.palette = palette.slice(0, DesignStore.MAX_COLORS);
     this.seatMapRef = map.templateRef;
   }
@@ -142,7 +196,8 @@ export class DesignStore {
    * Replace the palette with a new one AND remap every seat so the design keeps
    * its appearance as closely as possible: each old color is matched to the
    * nearest color in the new palette. This is the "remap design onto this
-   * palette" choice — an explicit, undoable recolor.
+   * palette" choice — an explicit, undoable recolor. The Paint layer and every
+   * object on it are remapped together, as one step.
    */
   remapToPalette(newPalette: string[]): void {
     const next = newPalette.slice(0, DesignStore.MAX_COLORS);
@@ -150,28 +205,31 @@ export class DesignStore {
     // Build old-index → new-index by nearest color.
     const remap = this.palette.map((oldHex) => nearestColorIndex(oldHex, next));
     const old = new Map<number, number>();
-    for (let i = 0; i < this.cells.length; i++) {
+    for (let i = 0; i < this.base.length; i++) {
       if (this.locked && this.locked[i] === 1) continue;
-      const oldIdx = this.cells[i];
+      const oldIdx = this.base[i];
       const newIdx = remap[oldIdx] ?? 0;
       if (newIdx !== oldIdx) {
         if (!old.has(i)) old.set(i, oldIdx);
-        this.cells[i] = newIdx;
+        this.base[i] = newIdx;
       }
     }
     this.palette = next;
-    if (old.size > 0) {
+    const objs = this.layers ? this.layers.remap(remap) : null;
+    if (old.size > 0 || objs) {
       const entries = [...old.entries()];
-      this.undoStack.push({
-        indices: new Uint32Array(entries.map(([i]) => i)),
-        before: new Uint8Array(entries.map(([, v]) => v)),
-        after: new Uint8Array(entries.map(([i]) => this.cells[i])),
+      this.push({
+        t: 'paint',
+        diff: {
+          indices: new Uint32Array(entries.map(([i]) => i)),
+          before: new Uint8Array(entries.map(([, v]) => v)),
+          after: new Uint8Array(entries.map(([i]) => this.base[i])),
+        },
+        objs,
       });
-      if (this.undoStack.length > DesignStore.MAX_UNDO) this.undoStack.shift();
-      this.redoStack = [];
-      this.notifyHistory();
     }
     for (const fn of this.paletteListeners) fn();
+    this.recompose('all');
     this.notify('all');
   }
 
@@ -187,9 +245,12 @@ export class DesignStore {
     if (!this.locked) return;
     const dirty: number[] = [];
     for (let i = 0; i < this.cells.length; i++) {
-      if (this.locked[i] && this.cells[i] !== 0) {
-        this.cells[i] = 0;
-        dirty.push(i);
+      if (this.locked[i]) {
+        this.base[i] = 0;
+        if (this.cells[i] !== 0) {
+          this.cells[i] = 0;
+          dirty.push(i);
+        }
       }
     }
     if (dirty.length) this.notify(dirty);
@@ -200,22 +261,131 @@ export class DesignStore {
     return !!this.locked && this.locked[index] === 1;
   }
 
+  /** The locked-seat mask, for the layer stack (a stamp never covers one). */
+  lockedMask(): Uint8Array | null {
+    return this.locked;
+  }
+
   private notify(indices: number[] | 'all'): void {
     for (const fn of this.listeners) fn(indices);
   }
 
-  beginStroke(): void {
-    this.strokeOld = new Map();
+  // ---- layers -------------------------------------------------------------
+
+  /** Plug the layer stack in. Until then the store is exactly the flat store it always was. */
+  attachLayers(hooks: LayerHooks | null): void {
+    this.layers = hooks;
   }
 
-  /** Paint one cell inside an active stroke. No-ops if the value is unchanged. */
-  paint(index: number, value: number): boolean {
-    if (this.cells[index] === value) return false;
-    if (this.locked && this.locked[index] === 1) return false;
-    if (this.strokeOld && !this.strokeOld.has(index)) {
-      this.strokeOld.set(index, this.cells[index]);
+  /** Recompute flattened seats (no notification; callers notify). */
+  private recompose(indices: ArrayLike<number> | 'all'): void {
+    if (this.layers) this.layers.recompose(indices);
+    else if (indices === 'all') this.cells.set(this.base);
+    else for (let k = 0; k < indices.length; k++) this.cells[indices[k]] = this.base[indices[k]];
+  }
+
+  /**
+   * Record an object change as one undo step (add, move, rename, reorder…).
+   * The layer stack calls this; nothing else should need to.
+   */
+  pushObjects(change: ObjectsChange): void {
+    this.push({ t: 'objs', change });
+  }
+
+  /**
+   * Run `fn` so every step it records becomes ONE undo step — merging a
+   * picture into the paint, lifting a region into a layer, applying an AI
+   * design. Nested groups fold into the outermost.
+   */
+  group<T>(fn: () => T): T {
+    this.groups.push([]);
+    let out: T;
+    try {
+      out = fn();
+    } finally {
+      const list = this.groups.pop()!;
+      if (list.length === 1) this.push(list[0]);
+      else if (list.length > 1) this.push({ t: 'group', list });
     }
-    this.cells[index] = value;
+    return out;
+  }
+
+  private push(entry: HistoryEntry): void {
+    const open = this.groups[this.groups.length - 1];
+    if (open) {
+      open.push(entry);
+      return;
+    }
+    this.undoStack.push(entry);
+    if (this.undoStack.length > DesignStore.MAX_UNDO) this.undoStack.shift();
+    this.redoStack.length = 0;
+    this.notifyHistory();
+  }
+
+  /**
+   * Run a stroke that writes the Paint layer only, whatever is on top — a
+   * whole-bowl pattern, Fill base, re-orienting the design. A background is
+   * painted behind the pictures, not over them.
+   */
+  paintBaseOnly(fn: () => void): void {
+    this.baseOnly++;
+    try {
+      fn();
+    } finally {
+      this.baseOnly--;
+    }
+  }
+
+  /**
+   * Replace the Paint layer without history — restoring a saved stack, whose
+   * objects are then put back on top of it.
+   */
+  setBase(base: Uint8Array): void {
+    this.base.set(base.subarray(0, this.base.length));
+    if (this.locked) for (let i = 0; i < this.base.length; i++) if (this.locked[i]) this.base[i] = 0;
+    this.recompose('all');
+    this.notify('all');
+  }
+
+  // ---- strokes --------------------------------------------------------------
+
+  beginStroke(): void {
+    this.strokeOld = new Map();
+    this.layers?.strokeBegin();
+  }
+
+  /**
+   * Paint one cell inside an active stroke. No-ops if the value is unchanged.
+   *
+   * The seat goes to whatever is showing there: the Paint layer, or — when a
+   * picture, text or shape is on top — that object, as a touch-up that moves
+   * with it. Painting never disappears under a picture.
+   */
+  paint(index: number, value: number): boolean {
+    if (this.locked && this.locked[index] === 1) return false;
+    const L = this.layers;
+    if (L && this.baseOnly === 0) {
+      const owner = L.route(index);
+      if (owner >= 0) {
+        const nv = L.touch(owner, index, value);
+        if (nv < 0 || nv === this.cells[index]) return false;
+        this.cells[index] = nv;
+        return true;
+      }
+    }
+    if (this.base[index] === value) return false;
+    if (this.strokeOld && !this.strokeOld.has(index)) {
+      this.strokeOld.set(index, this.base[index]);
+    }
+    this.base[index] = value;
+    if (L) {
+      const t = L.top(index);
+      const shown = t >= 0 ? t : value;
+      if (this.cells[index] === shown) return false;
+      this.cells[index] = shown;
+    } else {
+      this.cells[index] = value;
+    }
     return true;
   }
 
@@ -232,33 +402,32 @@ export class DesignStore {
   cancelStroke(): number[] {
     const old = this.strokeOld;
     this.strokeOld = null;
+    this.layers?.strokeCancel();
     if (!old || old.size === 0) return [];
     const dirty: number[] = [];
     for (const [i, before] of old) {
-      this.cells[i] = before;
+      this.base[i] = before;
       dirty.push(i);
     }
+    this.recompose(dirty);
     this.notify(dirty);
     return dirty;
   }
 
-  /** Close the stroke into a single undoable SparseDiff. */
+  /** Close the stroke into a single undoable step. */
   commitStroke(): SparseDiff | null {
     const old = this.strokeOld;
     this.strokeOld = null;
-    if (!old || old.size === 0) return null;
+    const objs = this.layers ? this.layers.strokeEnd() : null;
     // Drop entries that ended up back at their original value (e.g. paint then erase).
-    const entries = [...old.entries()].filter(([i, before]) => this.cells[i] !== before);
-    if (entries.length === 0) return null;
+    const entries = old ? [...old.entries()].filter(([i, before]) => this.base[i] !== before) : [];
+    if (entries.length === 0 && !objs) return null;
     const diff: SparseDiff = {
       indices: new Uint32Array(entries.map(([i]) => i)),
       before: new Uint8Array(entries.map(([, v]) => v)),
-      after: new Uint8Array(entries.map(([i]) => this.cells[i])),
+      after: new Uint8Array(entries.map(([i]) => this.base[i])),
     };
-    this.undoStack.push(diff);
-    if (this.undoStack.length > DesignStore.MAX_UNDO) this.undoStack.shift();
-    this.redoStack.length = 0;
-    this.notifyHistory();
+    this.push({ t: 'paint', diff, objs });
     return diff;
   }
 
@@ -271,44 +440,63 @@ export class DesignStore {
   }
 
   undo(): void {
-    const diff = this.undoStack.pop();
-    if (!diff) return;
-    this.applyValues(diff.indices, diff.before);
-    this.redoStack.push(diff);
+    const entry = this.undoStack.pop();
+    if (!entry) return;
+    this.apply(entry, 'before');
+    this.redoStack.push(entry);
     this.notifyHistory();
   }
 
   redo(): void {
-    const diff = this.redoStack.pop();
-    if (!diff) return;
-    this.applyValues(diff.indices, diff.after);
-    this.undoStack.push(diff);
+    const entry = this.redoStack.pop();
+    if (!entry) return;
+    this.apply(entry, 'after');
+    this.undoStack.push(entry);
     this.notifyHistory();
+  }
+
+  private apply(entry: HistoryEntry, side: 'before' | 'after'): void {
+    if (entry.t === 'group') {
+      const list = side === 'before' ? [...entry.list].reverse() : entry.list;
+      for (const e of list) this.apply(e, side);
+      return;
+    }
+    if (entry.t === 'objs') {
+      this.layers?.restore(entry.change[side]);
+      return;
+    }
+    const { diff, objs } = entry;
+    this.applyValues(diff.indices, side === 'before' ? diff.before : diff.after);
+    // The objects the stroke touched come back after the paint under them.
+    if (objs) this.layers?.restore(objs[side]);
   }
 
   private applyValues(indices: Uint32Array, values: Uint8Array): void {
     const dirty: number[] = new Array(indices.length);
     for (let k = 0; k < indices.length; k++) {
-      this.cells[indices[k]] = this.locked && this.locked[indices[k]] === 1 ? 0 : values[k];
+      this.base[indices[k]] = this.locked && this.locked[indices[k]] === 1 ? 0 : values[k];
       dirty[k] = indices[k];
     }
-    this.notify(dirty);
+    this.recompose(dirty);
+    if (dirty.length) this.notify(dirty);
   }
 
-  /** Notify the renderer after tool code mutates cells via paint(). */
-  flush(indices: number[]): void {
-    if (indices.length) this.notify(indices);
+  /** Notify the renderer after tool code mutates cells via paint() (or the layer stack re-flattens). */
+  flush(indices: number[] | 'all'): void {
+    if (indices === 'all' || indices.length) this.notify(indices);
   }
 
-  /** Rewrite every cell via a pure function (one undo step). */
+  /** Rewrite every Paint-layer cell via a pure function (one undo step). */
   transform(next: (index: number) => number): void {
-    this.beginStroke();
-    for (let i = 0; i < this.cells.length; i++) this.paint(i, next(i));
-    this.commitStroke();
+    this.paintBaseOnly(() => {
+      this.beginStroke();
+      for (let i = 0; i < this.cells.length; i++) this.paint(i, next(i));
+      this.commitStroke();
+    });
     this.notify('all');
   }
 
-  /** Reset every cell to one palette index (undoable). */
+  /** Reset every Paint-layer cell to one palette index (undoable). */
   fillAll(value: number): void {
     this.transform(() => value);
   }
@@ -318,9 +506,14 @@ export class DesignStore {
     return { seatMapRef: this.seatMapRef, palette: this.palette, cells: this.cells.slice() };
   }
 
+  /**
+   * Load a flat design: it becomes the Paint layer, and the history starts
+   * over. Whoever loads objects on top does that afterwards.
+   */
   loadCells(cells: Uint8Array): void {
-    this.cells.set(cells.subarray(0, this.cells.length));
-    if (this.locked) for (let i = 0; i < this.cells.length; i++) if (this.locked[i]) this.cells[i] = 0;
+    this.base.set(cells.subarray(0, this.base.length));
+    if (this.locked) for (let i = 0; i < this.base.length; i++) if (this.locked[i]) this.base[i] = 0;
+    this.recompose('all');
     this.undoStack.length = 0;
     this.redoStack.length = 0;
     this.notifyHistory();

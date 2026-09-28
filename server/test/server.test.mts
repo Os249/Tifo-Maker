@@ -591,6 +591,20 @@ async function runSuite(name: string, repo: DesignRepository, auth: AuthReposito
     assert.equal(row.hasSnapshot, row.seq % SNAPSHOT_EVERY === 0, `seq ${row.seq}`);
   }
 
+  // The design has layers as well as banners: its owner's pictures, which are
+  // hers. Anyone else — a viewer, a fork, a remix — gets the design flat.
+  const unzipScene = (b64: string): Record<string, unknown> => JSON.parse(gunzipSync(Buffer.from(b64, 'base64')).toString('utf8'));
+  const layered = { v: 1, banners: { version: 1, banners: [{ id: 'bn_f', kind: 'stand' }] }, layers: { v: 1, hash: 'h', paint: '', objects: [{ id: 'i1', kind: 'image' }] } };
+  assert.equal((await app.inject({
+    method: 'PUT', url: `/api/designs/${id}/scene`, headers: bearer(aliceTok),
+    payload: { sceneGzB64: gzipSync(Buffer.from(JSON.stringify(layered))).toString('base64') },
+  })).statusCode, 200);
+  assert.ok('layers' in unzipScene((await app.inject({ method: 'GET', url: `/api/designs/${id}/scene`, headers: bearer(aliceTok) })).json().sceneGzB64), 'the owner gets her layers back');
+  const bobSees = unzipScene((await app.inject({ method: 'GET', url: `/api/designs/${id}/scene`, headers: bearer(bobTok) })).json().sceneGzB64);
+  assert.ok(!('layers' in bobSees), 'someone else is never sent the layers');
+  assert.deepEqual(bobSees.banners, layered.banners, '…but still sees the banners');
+  assert.ok(!('layers' in unzipScene((await app.inject({ method: 'GET', url: `/api/designs/${id}/scene` })).json().sceneGzB64)), 'nor is anyone signed out');
+
   // ---- fork: bob forks the PUBLIC design; fork is bob's and private ----
   const fork = await app.inject({ method: 'POST', url: `/api/designs/${id}/fork`, headers: bearer(bobTok), payload: { title: 'GLORY remix' } });
   assert.equal(fork.statusCode, 201, fork.body);
@@ -601,11 +615,13 @@ async function runSuite(name: string, repo: DesignRepository, auth: AuthReposito
   // and the fork carries the design's banners, not only its seats
   const srcScene = (await app.inject({ method: 'GET', url: `/api/designs/${id}/scene`, headers: bearer(aliceTok) })).json().sceneGzB64;
   assert.ok(srcScene, 'the forked design has a scene to carry');
-  assert.equal(
-    (await app.inject({ method: 'GET', url: `/api/designs/${forkId}/scene`, headers: bearer(bobTok) })).json().sceneGzB64,
-    srcScene,
-    'a fork takes the banners with it',
-  );
+  const forkScene = unzipScene((await app.inject({ method: 'GET', url: `/api/designs/${forkId}/scene`, headers: bearer(bobTok) })).json().sceneGzB64);
+  assert.deepEqual(forkScene.banners, layered.banners, 'a fork takes the banners with it');
+  assert.ok(!('layers' in forkScene), '…but not someone else\'s layers');
+  // Her own copy of her own design keeps them.
+  const own = await app.inject({ method: 'POST', url: `/api/designs/${id}/fork`, headers: bearer(aliceTok), payload: { title: 'GLORY copy' } });
+  assert.equal(own.statusCode, 201, own.body);
+  assert.ok('layers' in unzipScene((await app.inject({ method: 'GET', url: `/api/designs/${own.json().id}/scene`, headers: bearer(aliceTok) })).json().sceneGzB64), 'her own copy keeps her layers');
   // alice cannot see bob's private fork
   assert.equal((await app.inject({ method: 'GET', url: `/api/designs/${forkId}`, headers: bearer(aliceTok) })).statusCode, 404);
   // anonymous cannot fork
@@ -921,7 +937,7 @@ async function runSuite(name: string, repo: DesignRepository, auth: AuthReposito
   assert.ok(bobNotifs.unread >= 1, 'unread count reflects the notification');
 
   // Her design has a banner.
-  const bannerScene = gzipSync(Buffer.from(JSON.stringify({ v: 1, banners: { version: 1, banners: [{ id: 'bn_c', kind: 'stand', name: 'Derby' }] } }))).toString('base64');
+  const bannerScene = gzipSync(Buffer.from(JSON.stringify({ v: 1, banners: { version: 1, banners: [{ id: 'bn_c', kind: 'stand', name: 'Derby' }] }, layers: { v: 1, hash: 'h', paint: '', objects: [] } }))).toString('base64');
   assert.equal((await app.inject({ method: 'PUT', url: `/api/designs/${designId}/scene`, headers: bearer(aliceTok), payload: { sceneGzB64: bannerScene } })).statusCode, 200);
 
   // Bob remixes Alice's design → new design owned by Bob, lineage stamped.
@@ -932,11 +948,9 @@ async function runSuite(name: string, repo: DesignRepository, auth: AuthReposito
   assert.equal(remix.remixedFrom, designId, 'remixed_from points at the original');
   assert.notEqual(remix.id, designId, 'remix is a new design, original untouched');
   // Remixing a tifo for its banner is the reason to remix one that has one.
-  assert.equal(
-    (await app.inject({ method: 'GET', url: `/api/designs/${remix.id}/scene`, headers: bearer(bobTok) })).json().sceneGzB64,
-    bannerScene,
-    'a remix takes the banners with it',
-  );
+  const remixScene = JSON.parse(gunzipSync(Buffer.from((await app.inject({ method: 'GET', url: `/api/designs/${remix.id}/scene`, headers: bearer(bobTok) })).json().sceneGzB64 as string, 'base64')).toString('utf8'));
+  assert.deepEqual(remixScene.banners, { version: 1, banners: [{ id: 'bn_c', kind: 'stand', name: 'Derby' }] }, 'a remix takes the banners with it');
+  assert.ok(!('layers' in remixScene), 'a remix is the design flat: no layers come with it');
 
   // Alice gets a 'remix' notification.
   const aliceNotifs = (await app.inject({ method: 'GET', url: '/api/notifications', headers: bearer(aliceTok) })).json() as { items: { kind: string }[] };

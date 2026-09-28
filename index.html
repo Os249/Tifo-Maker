@@ -349,60 +349,6 @@
           <p id="ai-quota" class="ai-quota"></p>
         </div>
 
-        <div class="panel-section ctx-hidden" id="ctx-objects" data-panel="select" style="display:none">
-          <h4><span data-i18n="ed.obj">Object</span> <span id="obj-kind" style="color:var(--text-3);"></span></h4>
-          <div id="region-actions" hidden>
-            <p class="hint" style="font-size:12px;color:var(--text-2);margin:0 0 10px;"><b id="region-count">0</b> <span data-i18n="ed.region.hint">seats selected. Recolor with the active swatch, or clear them.</span></p>
-            <div class="group">
-              <button class="primary grow" id="region-recolor" data-i18n="ed.obj.recolor">Recolor</button>
-              <button class="danger" id="region-delete" title="Clear selected seats" data-i18n-attr="title:ed.region.deleteT"><i class="ti ti-eraser"></i></button>
-            </div>
-            <button id="region-clear" style="width:100%;margin-top:8px;" data-i18n="ed.obj.deselect">Deselect</button>
-          </div>
-          <div id="obj-empty" class="hint empty" data-i18n="ed.obj.empty">No object selected. Click a painted area to select it, or use Text/Image.</div>
-          <div id="obj-controls" hidden>
-            <div class="group" style="margin-bottom:8px;">
-              <!-- Position, as numbers.
-               Everything else about a placed object could already be changed
-               without dragging - height by the slider, depth by the buttons,
-               tier by the select - but moving one could only be done by press,
-               hold and drag. WCAG 2.5.7 asks that anything done by dragging can
-               also be done with a single pointer that does not drag, for people
-               using a head pointer, an eye tracker or a hand that shakes. Two
-               fields discharge it, and they give everyone precision that a
-               finger on a 60,000-seat bowl cannot. -->
-          <div class="group" style="gap:8px;">
-            <label for="obj-x" style="white-space:nowrap;" data-i18n="ed.obj.x">Across</label>
-            <input type="number" id="obj-x" class="grow0" step="1" aria-label="Position across the bowl, in seats" style="width:74px;"  data-i18n-attr="aria-label:ed.a11y.objX" />
-            <label for="obj-y" style="white-space:nowrap;" data-i18n="ed.obj.y">Up</label>
-            <input type="number" id="obj-y" class="grow0" step="1" aria-label="Position up the bowl, in rows" style="width:74px;"  data-i18n-attr="aria-label:ed.a11y.objY" />
-          </div>
-          <label for="obj-height" style="white-space:nowrap;" data-i18n="ed.height">Height</label>
-              <input type="range" id="obj-height" min="6" max="60" step="1" value="18" class="grow" />
-              <span id="obj-height-out" class="val">18</span>
-            </div>
-            <div class="group" style="margin-bottom:8px;">
-              <label for="obj-tier" data-i18n="ed.tier">Tier</label>
-              <select id="obj-tier" class="grow0">
-                <option value="both" data-i18n="ed.tier.both">Both</option>
-                <option value="0" data-i18n="ed.tier.lower">Lower</option>
-                <option value="1" data-i18n="ed.tier.upper">Upper</option>
-              </select>
-            </div>
-            <div class="chips" style="margin-bottom:8px;">
-              <button class="chip" id="obj-back" data-i18n="ed.obj.sendBack">Send back</button>
-              <button class="chip" id="obj-front" data-i18n="ed.obj.bringFront">Bring front</button>
-            </div>
-            <div class="group">
-              <button class="primary grow" id="obj-bake" data-i18n="ed.obj.bake">Bake to seats</button>
-              <button class="danger" id="obj-delete" title="Delete object" data-i18n-attr="title:ed.obj.deleteT"><i class="ti ti-trash"></i></button>
-            </div>
-          </div>
-          <div class="group" style="margin-top:10px;">
-            <button id="obj-bake-all" class="grow" data-i18n="ed.obj.bakeAll">Bake all</button>
-          </div>
-        </div>
-
         <!-- Everything about the banner that is not the art itself: the tool
              in hand, the thing selected, where it hangs and how it arrives.
              Shown only in Banner view, via body.banner-view. Where it hangs is
@@ -597,6 +543,109 @@
               <button id="palette-save" class="grow" title="Save your current swatches as a reusable palette" data-i18n="ed.colors.save" data-i18n-attr="title:ed.colors.saveT">Save palette</button>
             </div>
             <select id="my-palettes" style="margin-top:8px;width:100%;" title="Your saved palettes" data-i18n-attr="title:ed.colors.mineT"></select>
+          </div>
+        </div>
+
+        <!-- Every text, picture and shape is a layer of its own, above the
+             paint, for the life of the project. The list is the stack: top
+             of the list is in front. See src/ui/layersPanel.ts. -->
+        <div class="panel-section" id="ctx-layers" data-panel="brush eraser fill eyedropper text import shape select pan">
+          <h4><span data-i18n="ly.title">Layers</span> <span class="h4-tag" id="layers-tag"></span></h4>
+          <div id="layers-list" class="ly-list" role="listbox" aria-label="Layers" data-i18n-attr="aria-label:ly.title"></div>
+          <p id="layers-empty" class="hint ly-empty" data-i18n="ly.empty">Add text, a picture or a shape — each becomes a layer you can move.</p>
+        </div>
+
+        <div class="panel-section ctx-hidden" id="ctx-objects" data-panel="select" style="display:none">
+          <h4><span data-i18n="ed.obj">Object</span> <span id="obj-kind" style="color:var(--text-3);"></span></h4>
+          <div id="region-actions" hidden>
+            <p class="hint" style="font-size:12px;color:var(--text-2);margin:0 0 10px;"><b id="region-count">0</b> <span data-i18n="ed.region.hint">seats selected. Recolor with the active swatch, or clear them.</span></p>
+            <div class="group">
+              <button class="primary grow" id="region-lift" title="Turn these painted seats into a layer you can move" data-i18n-attr="title:ly.liftT"><i class="ti ti-arrows-move"></i> <span data-i18n="ly.lift">Make movable</span></button>
+            </div>
+            <div class="group" style="margin-top:8px;">
+              <button class="grow" id="region-recolor" data-i18n="ed.obj.recolor">Recolor</button>
+              <button class="danger" id="region-delete" title="Clear selected seats" data-i18n-attr="title:ed.region.deleteT"><i class="ti ti-eraser"></i></button>
+            </div>
+            <button id="region-clear" style="width:100%;margin-top:8px;" data-i18n="ed.obj.deselect">Deselect</button>
+          </div>
+          <div id="obj-empty" class="hint empty" data-i18n="ed.obj.empty">No object selected. Click a painted area to select it, or use Text/Image.</div>
+          <div id="obj-controls" hidden>
+            <!-- What the layer says (text), what colour it is (text, shapes), and
+                 how a picture is drawn — all editable after it has landed. -->
+            <div class="group" id="obj-text-row" style="margin-bottom:8px;gap:6px;" hidden>
+              <input type="text" id="obj-text" class="grow" maxlength="48" aria-label="What the text says" data-i18n-attr="aria-label:ly.textA" />
+              <select id="obj-font" class="grow0" aria-label="Font" data-i18n-attr="aria-label:ly.fontA"></select>
+            </div>
+            <div id="obj-color-row" style="margin-bottom:8px;" hidden>
+              <div class="hint" style="font-size:11px;color:var(--text-3);margin:0 0 4px;" data-i18n="ly.colour">Colour</div>
+              <div id="obj-colors" class="ly-swatches" role="radiogroup" aria-label="Colour" data-i18n-attr="aria-label:ly.colour"></div>
+            </div>
+            <div class="chips" id="obj-pic-row" style="margin-bottom:8px;" hidden>
+              <label title="Flood the flat backdrop away so the design underneath shows through" data-i18n-attr="title:ed.import.cutoutT"><input type="checkbox" id="obj-cutout" /> <span data-i18n="ed.import.cutout">Remove background</span></label>
+              <label><input type="checkbox" id="obj-dither" /> <span data-i18n="ed.import.dither">Dither</span></label>
+            </div>
+            <div class="group" style="margin-bottom:8px;">
+              <!-- Position, as numbers.
+               Everything else about a placed object could already be changed
+               without dragging - height by the slider, depth by the buttons,
+               tier by the select - but moving one could only be done by press,
+               hold and drag. WCAG 2.5.7 asks that anything done by dragging can
+               also be done with a single pointer that does not drag, for people
+               using a head pointer, an eye tracker or a hand that shakes. Two
+               fields discharge it, and they give everyone precision that a
+               finger on a 60,000-seat bowl cannot. -->
+          <div class="group" style="gap:8px;">
+            <label for="obj-x" style="white-space:nowrap;" data-i18n="ed.obj.x">Across</label>
+            <input type="number" id="obj-x" class="grow0" step="1" aria-label="Position across the bowl, in seats" style="width:74px;"  data-i18n-attr="aria-label:ed.a11y.objX" />
+            <label for="obj-y" style="white-space:nowrap;" data-i18n="ed.obj.y">Up</label>
+            <input type="number" id="obj-y" class="grow0" step="1" aria-label="Position up the bowl, in rows" style="width:74px;"  data-i18n-attr="aria-label:ed.a11y.objY" />
+          </div>
+          <label for="obj-height" style="white-space:nowrap;" data-i18n="ed.height">Height</label>
+              <input type="range" id="obj-height" min="4" max="120" step="1" value="18" class="grow" />
+              <span id="obj-height-out" class="val">18</span>
+            </div>
+            <!-- Turning, as a number: the same non-drag path as the position. -->
+            <div class="group" style="margin-bottom:8px;gap:8px;">
+              <label for="obj-rot" style="white-space:nowrap;" data-i18n="ly.rotation">Rotation</label>
+              <input type="number" id="obj-rot" class="grow0" min="-180" max="180" step="1" value="0" style="width:74px;" aria-label="Rotation in degrees" data-i18n-attr="aria-label:ly.a11y.rotation" />
+              <span class="val">&deg;</span>
+              <button type="button" class="chip" id="obj-rot-reset" title="Straighten" data-i18n="ly.straighten" data-i18n-attr="title:ly.straightenT">Straighten</button>
+            </div>
+            <div class="group" style="margin-bottom:8px;">
+              <label for="obj-tier" data-i18n="ed.tier">Tier</label>
+              <select id="obj-tier" class="grow0">
+                <option value="both" data-i18n="ed.tier.both">Both</option>
+                <option value="0" data-i18n="ed.tier.lower">Lower</option>
+                <option value="1" data-i18n="ed.tier.upper">Upper</option>
+              </select>
+            </div>
+            <!-- A layer can be kept to one stand: whatever part of it is moved
+                 past the stand's edge is simply not drawn. The AI's portraits
+                 arrive kept to their stand; this is where that is visible. -->
+            <div class="group" style="margin-bottom:8px;">
+              <label for="obj-keep" data-i18n="ly.keep">Keep inside</label>
+              <select id="obj-keep" class="grow0">
+                <option value="all" data-i18n="ly.keep.all">Whole bowl</option>
+                <option value="north" data-i18n="dir.north">North</option>
+                <option value="east" data-i18n="dir.east">East</option>
+                <option value="south" data-i18n="dir.south">South</option>
+                <option value="west" data-i18n="dir.west">West</option>
+                <option value="custom" hidden data-i18n="ly.keep.custom">Its own area</option>
+              </select>
+            </div>
+            <div class="chips" style="margin-bottom:8px;">
+              <button class="chip" id="obj-back" data-i18n="ed.obj.sendBack">Send back</button>
+              <button class="chip" id="obj-front" data-i18n="ed.obj.bringFront">Bring front</button>
+              <button class="chip" id="obj-dup" title="Duplicate (Ctrl+D)" data-i18n="ly.duplicate" data-i18n-attr="title:ly.duplicateT">Duplicate</button>
+            </div>
+            <p id="obj-touched" class="hint" hidden style="font-size:12px;margin:0 0 8px;">
+              <span data-i18n="ly.touched">Touched up by hand.</span>
+              <button type="button" class="linklike" id="obj-clear-touch" data-i18n="ly.clearTouch">Clear touch-ups</button>
+            </p>
+            <div class="group">
+              <button class="grow" id="obj-merge" title="Write this layer into the paint. It stops being movable." data-i18n="ly.merge" data-i18n-attr="title:ly.mergeT">Merge into paint</button>
+              <button class="danger" id="obj-delete" title="Delete object" data-i18n-attr="title:ed.obj.deleteT"><i class="ti ti-trash"></i></button>
+            </div>
           </div>
         </div>
 

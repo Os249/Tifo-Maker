@@ -10,7 +10,10 @@ import {
 } from '../net/api';
 import { renderTextCanvas, TIFO_FONTS, type RenderedText } from '../core/text';
 import { loadTifoFonts } from '../core/tifoFonts';
-import type { ObjectLayer } from '../core/objects';
+import { MAX_PICTURES, encodePictureSrc, rememberPicture, type ObjectLayer } from '../core/objects';
+import type { Composer } from '../core/composer';
+import { writeLayers } from '../core/layerStore';
+import { mountLayersPanel, layerName } from './layersPanel';
 import { MIN_LEGIBLE_RUN, findFragileSeats } from '../core/analysis';
 import { RevealPlayer, REVEAL_PRESETS, revealEndsHidden, type RevealId } from '../core/reveal';
 import { drumCallBeat, DRUM_CALL_MIN_LENGTH } from '../core/drumCall';
@@ -21,7 +24,7 @@ import { track, setAnalyticsSignedIn } from '../net/analytics';
 import { buildTifoV2 } from '../core/tifoFormat';
 import {
   buildDraft, createDraftWriter,
-  type DraftTextObject, type DraftWriteResult,
+  type DraftWriteResult,
 } from '../core/draft';
 import { decodeImportBitmap, extractPhotoPalette, rasterize } from '../core/importImage';
 import { BANNER_HISTORY_EVENT, bannerActive, bannerHost } from './bannerHost';
@@ -112,9 +115,11 @@ export function mountToolbar(
    * knowing what a banner is: it hands the snapshot to the server and hands
    * whatever comes back to whoever does.
    */
-  sceneIO?: { snapshot(): unknown; restore(scene: unknown): void; onChange?(fn: () => void): void },
+  sceneIO?: { snapshot(): unknown; restore(scene: unknown): void; onChange?(fn: () => void): void; bannerCount?(): number },
   /** Which project is open. See ProjectCtx. */
   projectCtx?: ProjectCtx,
+  /** The layer stack (see core/composer.ts). */
+  composer?: Composer,
 ): ToolbarApi {
   const $ = <T extends HTMLElement>(sel: string): T => {
     const el = root.querySelector<T>(sel);
@@ -336,7 +341,7 @@ export function mountToolbar(
    */
   let aiNaming: { autoName: boolean } | null = null;
   const aiPanel = mountAiPanel({
-    root, store, editor, map, objects, getPreview, refresh: panelRefresh,
+    root, store, editor, map, objects, composer, getPreview, refresh: panelRefresh,
     onApplied: (spec) => {
       if (!aiNaming) return;
       const { autoName } = aiNaming;
@@ -352,7 +357,7 @@ export function mountToolbar(
   });
 
   // ---- Stadium panel (rail "stadium" button → panelMode 'stadium') ----
-  mountStadiumPanel({ root, map, store, refresh: panelRefresh });
+  mountStadiumPanel({ root, map, store, objects, refresh: panelRefresh });
 
   /**
    * Put a real <input type="color"> over a control, so the user's own tap is
@@ -1021,6 +1026,14 @@ export function mountToolbar(
         presetSel.value = ''; // palette extended — no longer a named preset
       }
     }
+    if (objects.pictureCount() >= MAX_PICTURES) {
+      message.textContent = tv('ly.msg.pictureLimit', { n: MAX_PICTURES });
+      return;
+    }
+    // The picture as it will be saved with the project: small enough that
+    // twelve fit beside the banners, decoded again only to re-draw at a new size.
+    const src = encodePictureSrc(pendingImport.bitmap);
+    rememberPicture(src, pendingImport.bitmap);
     objects.addImage({
       cx,
       cy,
@@ -1030,6 +1043,7 @@ export function mountToolbar(
       tier: importTier.value === 'both' ? null : Number(importTier.value),
       bitmap: pendingImport.bitmap,
       name: pendingImport.name,
+      src,
       dither: ditherChk.checked,
       cutout: cutoutChk?.checked === true,
       alphaThreshold: Number(importAlpha.value),
@@ -1060,6 +1074,11 @@ export function mountToolbar(
     const file = fileInput.files?.[0];
     fileInput.value = '';
     if (!file) return;
+    if (!bannerActive() && objects.pictureCount() >= MAX_PICTURES) {
+      message.textContent = tv('ly.msg.pictureLimit', { n: MAX_PICTURES });
+      if (editor.tool === 'import') setTool('select');
+      return;
+    }
     message.textContent = i18nT('ed.import.reading');
     try {
       pendingImport?.bitmap.close();
@@ -1481,11 +1500,9 @@ export function mountToolbar(
   // Download the current design as a portable .tifo file (JSON: template + palette + cells).
   const downloadLocal = (): void => {
     const title = docTitle.value.trim() || i18nT('ed.docTitlePlaceholder');
-    // Bake image objects into cells (they're pixels); text objects serialize as
-    // first-class v2 objects so they reopen editable.
-    const imageObjs = objects.list().filter((o) => o.kind === 'image');
-    if (imageObjs.length > 0) objects.bakeAll(store, map, EDITOR_UNITS.width);
-    const textObjs = objects.list().filter((o) => o.kind === 'text');
+    // The seats as they are, flattened, for any reader of the format; and the
+    // layers beside them, so this editor opens the file with everything still
+    // movable.
     const v2 = buildTifoV2({
       title,
       generator: 'tifomaker-editor',
@@ -1493,19 +1510,7 @@ export function mountToolbar(
       templateVersion: map.templateRef.version,
       palette: store.palette,
       cells: store.cells,
-      objects: textObjs.map((o) => ({
-        id: o.id,
-        kind: 'text' as const,
-        text: (o as { text: string }).text,
-        fontId: (o as { fontId: string }).fontId,
-        arcDeg: (o as { arcDeg: number }).arcDeg,
-        colorIndex: o.colorIndex,
-        tier: o.tier,
-        cx: o.cx,
-        cy: o.cy,
-        width: o.width,
-        height: o.height,
-      })),
+      editorLayers: composer?.toDoc() ?? null,
     });
     const blob = new Blob([JSON.stringify(v2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -1561,8 +1566,14 @@ export function mountToolbar(
         return;
       }
       const { flattenLayers } = await import('../core/tifoFormat');
+      // The file replaces the design, layers and all.
+      objects.clear(false);
       store.setPalette(result.doc.palette.slice(0, 256));
       store.loadCells(flattenLayers(result.doc));
+      if (result.doc.editor?.layers && composer?.loadDoc(result.doc.editor.layers, TIFO_FONTS)) {
+        const { decodePictures } = await import('../core/objects');
+        void decodePictures(objects.list());
+      }
       const title = result.doc.meta?.title;
       if (title) docTitle.value = title;
       designId = null; // an imported file is a fresh working copy
@@ -1587,18 +1598,6 @@ export function mountToolbar(
   const draftState = $('#draft-state') as unknown as HTMLElement;
   const accountOffer = $('#account-offer') as unknown as HTMLElement;
   let lastDraft: DraftWriteResult | null = null;
-
-  const draftTextObjects = (): DraftTextObject[] =>
-    objects
-      .list()
-      .filter((o) => o.kind === 'text')
-      .map((o) => {
-        const t = o as unknown as DraftTextObject;
-        return {
-          id: t.id, kind: 'text' as const, text: t.text, fontId: t.fontId, arcDeg: t.arcDeg,
-          colorIndex: t.colorIndex, tier: t.tier, cx: t.cx, cy: t.cy, width: t.width, height: t.height,
-        };
-      });
 
   // The header Save. The panel one stays for anyone already down there, but this
   // is the one almost everybody will use, because it is the only one on screen.
@@ -1664,6 +1663,19 @@ export function mountToolbar(
     }, 2500);
   };
 
+  /**
+   * The layer stack, beside the draft. It carries the fingerprint of the
+   * seats it flattens to, so a stack that did not get written before the tab
+   * closed is never put on top of a newer draft (see core/layerStore.ts).
+   */
+  let layersWriting: Promise<unknown> = Promise.resolve();
+  const writeLayersSoon = (): void => {
+    if (!ref || !composer) return;
+    const key = keysFor(ref).doc;
+    const doc = composer.toDoc();
+    layersWriting = layersWriting.then(() => writeLayers(key, doc));
+  };
+
   const draftWriter = createDraftWriter(
     () =>
       // No project, nowhere to write: an unbound canvas is made a project by
@@ -1676,7 +1688,9 @@ export function mountToolbar(
             templateVersion: map.templateRef.version,
             palette: store.palette,
             cells: store.cells,
-            textObjects: draftTextObjects(),
+            // The layers are kept beside the draft, in IndexedDB (see
+            // core/layerStore.ts); the draft itself holds the flattened seats.
+            textObjects: [],
             designId,
             projectId: ref.kind === 'local' ? ref.id : null,
             dirty: ref.kind === 'account' && unsynced,
@@ -1691,7 +1705,10 @@ export function mountToolbar(
       renderDraftState();
       // The banners are kept beside the draft, in a key of their own, and
       // written with it so the two always describe the same tifo.
-      if (r.ok) document.dispatchEvent(new CustomEvent('tifo:draft-written'));
+      if (r.ok) {
+        document.dispatchEvent(new CustomEvent('tifo:draft-written'));
+        writeLayersSoon();
+      }
     },
     1200,
     (env) => writeEnvelope(keysFor(ref!).doc, env),
@@ -1734,7 +1751,7 @@ export function mountToolbar(
   let sceneUnread = false;
 
   store.onDirty(edited);
-  objects.onChange(edited);
+  objects.onChange((why) => { if (why !== 'select') edited(); }); // picking a layer is not an edit
   // A banner is part of the tifo: a design that is only a banner so far is
   // still work to keep, and it is the draft that says which tifo this is.
   sceneIO?.onChange?.(() => {
@@ -2105,6 +2122,7 @@ export function mountToolbar(
       if (bannerActive() && bannerHost.current?.escape()) return;
       if (editor.tool === 'import') cancelImport();
       else if (editor.tool === 'text') setTool('brush');
+      else if (objects.selected && !bannerActive()) objects.select(null);
       return;
     }
     const tag = (e.target as HTMLElement | null)?.tagName;
@@ -2155,6 +2173,47 @@ export function mountToolbar(
       else store.undo();
       refreshHistory();
       return;
+    }
+    // The selected layer's keys — the ones Figma and Canva taught everyone.
+    const layerSel = objects.selected;
+    if (layerSel && !bannerActive()) {
+      const mod = e.ctrlKey || e.metaKey;
+      const key = e.key.toLowerCase();
+      if (mod && key === 'd') {
+        e.preventDefault();
+        duplicateLayer(layerSel.id);
+        return;
+      }
+      if (mod && (e.key === ']' || e.key === '[' || e.code === 'BracketRight' || e.code === 'BracketLeft')) {
+        e.preventDefault();
+        const up = e.key === ']' || e.code === 'BracketRight';
+        objects.reorder(layerSel.id, e.altKey ? (up ? 'front' : 'back') : up ? 'forward' : 'backward');
+        return;
+      }
+      if (mod && e.shiftKey && key === 'h') {
+        e.preventDefault();
+        objects.update(layerSel.id, { hidden: !layerSel.hidden });
+        return;
+      }
+      if (mod && e.shiftKey && key === 'l') {
+        e.preventDefault();
+        objects.update(layerSel.id, { locked: !layerSel.locked });
+        return;
+      }
+      if (e.key === 'F2') {
+        e.preventDefault();
+        layersPanel?.startRename(layerSel.id);
+        return;
+      }
+      if (editor.tool === 'select' && key.startsWith('arrow') && editor.selectedRegion.size === 0 && !layerSel.locked) {
+        e.preventDefault();
+        // One seat a press; ten with Shift.
+        const step = e.shiftKey ? 10 : 1;
+        const dx = key === 'arrowleft' ? -step : key === 'arrowright' ? step : 0;
+        const dy = key === 'arrowup' ? -step : key === 'arrowdown' ? step : 0;
+        objects.update(layerSel.id, { cx: layerSel.cx + dx * EDITOR_UNITS.colPx, cy: layerSel.cy + dy * EDITOR_UNITS.rowPx });
+        return;
+      }
     }
     const k = e.key.toLowerCase();
     if (k === 'm') {
@@ -2318,7 +2377,7 @@ export function mountToolbar(
 
   editor.emitView();
 
-  // ---- Object layer (floating text/image until baked) ----
+  // ---- Layers: the selected layer's properties, the Layers list, the action bar ----
   const overlay = editor.objectOverlay!;
   const objEmpty = $('#obj-empty');
   const objControls = $('#obj-controls');
@@ -2328,6 +2387,23 @@ export function mountToolbar(
   const objHeight = $('#obj-height') as unknown as HTMLInputElement;
   const objHeightOut = $('#obj-height-out');
   const objTier = $('#obj-tier') as unknown as HTMLSelectElement;
+  const objRot = $('#obj-rot') as unknown as HTMLInputElement;
+  const objKeep = $('#obj-keep') as unknown as HTMLSelectElement;
+  const objTouched = $('#obj-touched');
+  const objTextRow = $('#obj-text-row');
+  const objText = $('#obj-text') as unknown as HTMLInputElement;
+  const objFont = $('#obj-font') as unknown as HTMLSelectElement;
+  const objColorRow = $('#obj-color-row');
+  const objColors = $('#obj-colors');
+  const objPicRow = $('#obj-pic-row');
+  const objCutout = $('#obj-cutout') as unknown as HTMLInputElement;
+  const objDither = $('#obj-dither') as unknown as HTMLInputElement;
+  for (const f of TIFO_FONTS) {
+    const opt = document.createElement('option');
+    opt.value = f.id;
+    opt.textContent = f.name;
+    objFont.appendChild(opt);
+  }
 
   // Visibility of ctx-objects / ctx-brush is now driven by the contextual panel
   // controller (data-panel). This hook is retained only as a no-op anchor so the
@@ -2357,6 +2433,23 @@ export function mountToolbar(
   document.getElementById('region-clear')?.addEventListener('click', () => {
     editor.clearSelection();
   });
+  // Make movable: painted seats become a layer — the way out for a design
+  // that was baked before layers existed, and for the AI's lettering.
+  document.getElementById('region-lift')?.addEventListener('click', () => {
+    if (!composer || editor.selectedRegion.size === 0) return;
+    const lifted = composer.lift(editor.selectedRegion);
+    if (!lifted) {
+      message.textContent = i18nT('ly.msg.liftNone');
+      return;
+    }
+    editor.clearSelection();
+    setTool('select');
+    objects.select(lifted.id);
+    message.textContent = i18nT('ly.msg.lifted');
+  });
+
+  const keepValue = (o: { keep?: { stand: string; stands?: string[] } | null }): string =>
+    !o.keep ? 'all' : o.keep.stands?.length ? 'custom' : o.keep.stand;
 
   const refreshObjectPanel = (): void => {
     const sel = objects.selected;
@@ -2366,16 +2459,105 @@ export function mountToolbar(
       objKind.textContent = '';
       return;
     }
-    objKind.textContent = sel.kind === 'text' ? `"${sel.text}"` : sel.kind === 'shape' ? sel.shape : sel.name;
+    objKind.textContent = layerName(sel);
     // Height shown in seats: derive from current footprint.
     const heightSeats = Math.round(sel.height / EDITOR_UNITS.rowPx);
-    objHeight.value = String(Math.max(6, Math.min(60, heightSeats)));
-    objHeightOut.textContent = objHeight.value;
+    objHeight.value = String(Math.max(4, Math.min(120, heightSeats)));
+    objHeightOut.textContent = String(heightSeats);
     // Shown in seats and rows, the units the rest of the panel already uses.
     objX.value = String(Math.round(sel.cx / EDITOR_UNITS.colPx));
     objY.value = String(Math.round(sel.cy / EDITOR_UNITS.rowPx));
     objTier.value = sel.tier === null ? 'both' : String(sel.tier);
+    if (document.activeElement !== objRot) objRot.value = String(Math.round(sel.rotation));
+    const kv = keepValue(sel);
+    const custom = objKeep.querySelector<HTMLOptionElement>('option[value="custom"]');
+    if (custom) custom.hidden = kv !== 'custom';
+    objKeep.value = kv;
+    objTouched.hidden = !sel.touch;
+    objTextRow.hidden = sel.kind !== 'text';
+    if (sel.kind === 'text') {
+      if (document.activeElement !== objText) objText.value = sel.text;
+      if (![...objFont.options].some((o) => o.value === sel.fontId)) {
+        const opt = document.createElement('option');
+        opt.value = sel.fontId;
+        opt.textContent = sel.fontId;
+        objFont.appendChild(opt);
+      }
+      objFont.value = sel.fontId;
+    }
+    objColorRow.hidden = sel.kind !== 'text' && sel.kind !== 'shape';
+    if (!objColorRow.hidden) renderObjColors(sel.colorIndex);
+    objPicRow.hidden = sel.kind !== 'image';
+    if (sel.kind === 'image') {
+      objCutout.checked = !!sel.cutout;
+      objDither.checked = !!sel.dither;
+    }
+    for (const id of ['obj-x', 'obj-y', 'obj-height', 'obj-rot', 'obj-rot-reset', 'obj-tier', 'obj-keep', 'obj-back', 'obj-front', 'obj-merge', 'obj-text', 'obj-font', 'obj-cutout', 'obj-dither']) {
+      const el = document.getElementById(id) as HTMLButtonElement | null;
+      if (el) el.disabled = !!sel.locked;
+    }
   };
+
+  /** The design's colours, for a text or shape layer to be recoloured with. */
+  function renderObjColors(active: number): void {
+    objColors.textContent = '';
+    store.palette.forEach((hex, idx) => {
+      if (idx === 0) return;
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = `ly-swatch${idx === active ? ' on' : ''}`;
+      b.style.background = hex;
+      b.setAttribute('role', 'radio');
+      b.setAttribute('aria-checked', String(idx === active));
+      b.setAttribute('aria-label', hex);
+      b.addEventListener('click', () => {
+        const sel = objects.selected;
+        if (sel && !sel.locked) objects.update(sel.id, { colorIndex: idx });
+      });
+      objColors.appendChild(b);
+    });
+  }
+  store.onPaletteChange(() => refreshObjectPanel());
+
+  // Editing what a text layer says: it re-draws as you type, keeps its height,
+  // and the whole edit is one undo step.
+  let textEditing = false;
+  objText.addEventListener('input', () => {
+    const sel = objects.selected;
+    if (!sel || sel.kind !== 'text' || sel.locked) return;
+    const words = objText.value;
+    if (!words.trim()) return;
+    if (!textEditing) {
+      textEditing = true;
+      objects.beginGesture(false);
+    }
+    const r = renderTextCanvas(words, sel.fontCss, sel.arcDeg);
+    if (!r) return;
+    objects.mutate(sel.id, { text: words, width: sel.height * (r.canvas.width / r.canvas.height) } as Partial<typeof sel>);
+  });
+  objText.addEventListener('change', () => {
+    if (!textEditing) return;
+    textEditing = false;
+    objects.endGesture();
+  });
+  objFont.addEventListener('change', async () => {
+    const sel = objects.selected;
+    if (!sel || sel.kind !== 'text') return;
+    await loadTifoFonts();
+    const fontCss = TIFO_FONTS.find((f) => f.id === objFont.value)?.css ?? sel.fontCss;
+    const r = renderTextCanvas(sel.text, fontCss, sel.arcDeg);
+    const patch: Record<string, unknown> = { fontId: objFont.value, fontCss };
+    if (r) patch.width = sel.height * (r.canvas.width / r.canvas.height);
+    objects.update(sel.id, patch as Partial<typeof sel>);
+  });
+  objCutout.addEventListener('change', () => {
+    const sel = objects.selected;
+    if (sel?.kind === 'image') objects.update(sel.id, { cutout: objCutout.checked } as Partial<typeof sel>);
+  });
+  objDither.addEventListener('change', () => {
+    const sel = objects.selected;
+    if (sel?.kind === 'image') objects.update(sel.id, { dither: objDither.checked } as Partial<typeof sel>);
+  });
 
   objects.onChange(() => {
     refreshObjectPanel();
@@ -2383,52 +2565,242 @@ export function mountToolbar(
   });
   overlay.sync();
   refreshObjectPanel();
+  // Double-clicking a text layer goes straight to its words.
+  editor.app.canvas.addEventListener('dblclick', () => {
+    const sel = objects.selected;
+    if (editor.tool !== 'select' || sel?.kind !== 'text' || sel.locked) return;
+    objText.focus();
+    objText.select();
+  });
 
-  // Resize via the corner handle pushes height back into the panel slider.
+  // Resize via a handle pushes height back into the panel slider.
   editor.onObjectResize = (heightEditor) => {
     objHeightOut.textContent = String(Math.round(heightEditor / EDITOR_UNITS.rowPx));
   };
 
-  // Height slider rescales the selected object about its center, preserving aspect.
+  // The height slider rescales the selected layer about its centre, keeping its
+  // shape. One undo step per slide, not one per notch.
+  let sliding = false;
   objHeight.addEventListener('input', () => {
     const sel = objects.selected;
-    if (!sel) return;
+    if (!sel || sel.locked) return;
+    if (!sliding) {
+      sliding = true;
+      objects.beginGesture();
+    }
     objHeightOut.textContent = objHeight.value;
     const newH = Number(objHeight.value) * EDITOR_UNITS.rowPx;
     const aspect = sel.width / sel.height;
     objects.mutateSelected({ height: newH, width: newH * aspect });
   });
+  objHeight.addEventListener('change', () => {
+    if (!sliding) return;
+    sliding = false;
+    objects.endGesture();
+  });
   /** Move the selection to the typed position - the non-drag path required by 2.5.7. */
   const applyObjectPosition = (): void => {
-    if (!objects.selected) return;
+    const sel = objects.selected;
+    if (!sel) return;
     const x = Number(objX.value), y = Number(objY.value);
     if (!Number.isFinite(x) || !Number.isFinite(y)) return;
-    objects.mutateSelected({ cx: x * EDITOR_UNITS.colPx, cy: y * EDITOR_UNITS.rowPx });
+    objects.update(sel.id, { cx: x * EDITOR_UNITS.colPx, cy: y * EDITOR_UNITS.rowPx });
   };
   objX.addEventListener('change', applyObjectPosition);
   objY.addEventListener('change', applyObjectPosition);
+  objRot.addEventListener('change', () => {
+    const sel = objects.selected;
+    const v = Number(objRot.value);
+    if (!sel || !Number.isFinite(v)) return;
+    objects.update(sel.id, { rotation: ((((v + 180) % 360) + 360) % 360) - 180 });
+  });
+  $('#obj-rot-reset').addEventListener('click', () => {
+    const sel = objects.selected;
+    if (sel) objects.update(sel.id, { rotation: 0 });
+  });
 
   objTier.addEventListener('change', () => {
-    objects.mutateSelected({ tier: objTier.value === 'both' ? null : Number(objTier.value) });
+    const sel = objects.selected;
+    if (sel) objects.update(sel.id, { tier: objTier.value === 'both' ? null : Number(objTier.value) });
+  });
+  objKeep.addEventListener('change', () => {
+    const sel = objects.selected;
+    if (!sel || objKeep.value === 'custom') return;
+    objects.update(sel.id, {
+      keep: objKeep.value === 'all' ? null : { stand: objKeep.value as 'north' | 'south' | 'east' | 'west', tier: 'all' },
+    });
   });
   $('#obj-back').addEventListener('click', () => objects.reorderSelected('back'));
   $('#obj-front').addEventListener('click', () => objects.reorderSelected('front'));
-  $('#obj-delete').addEventListener('click', () => objects.deleteSelected());
-
-  const bakeSelected = (): void => {
+  $('#obj-dup').addEventListener('click', () => {
     const sel = objects.selected;
-    if (!sel) return;
-    const dirty = objects.bake(sel, store, map, EDITOR_UNITS.width); // bake() flushes
-    objects.deleteSelected();
-    refreshHistory();
-    message.textContent = i18nT('ed.obj.baked').replace('{n}', dirty.length.toLocaleString());
+    if (sel) duplicateLayer(sel.id);
+  });
+  $('#obj-delete').addEventListener('click', () => objects.deleteSelected());
+  $('#obj-clear-touch').addEventListener('click', () => {
+    const sel = objects.selected;
+    if (sel) objects.update(sel.id, { touch: null });
+  });
+
+  const duplicateLayer = (id: string): void => {
+    const o = objects.get(id);
+    if (o?.kind === 'image' && objects.pictureCount() >= MAX_PICTURES) {
+      message.textContent = tv('ly.msg.pictureLimit', { n: MAX_PICTURES });
+      return;
+    }
+    objects.duplicate(id);
   };
-  $('#obj-bake').addEventListener('click', bakeSelected);
-  $('#obj-bake-all').addEventListener('click', () => {
-    const n = objects.bakeAll(store, map, EDITOR_UNITS.width);
-    overlay.sync();
+
+  /** Merge a layer into the paint: the old Bake, now a choice rather than a toll. */
+  const mergeLayer = (id: string): void => {
+    if (!composer) return;
+    const o = objects.get(id);
+    if (!o) return;
+    const name = layerName(o);
+    const n = composer.merge(id);
     refreshHistory();
-    message.textContent = i18nT('ed.obj.bakedAll').replace('{n}', n.toLocaleString());
+    message.textContent = tv('ly.msg.merged', { name, n: n.toLocaleString() });
+  };
+  $('#obj-merge').addEventListener('click', () => {
+    const sel = objects.selected;
+    if (sel) mergeLayer(sel.id);
+  });
+
+  // The Layers list.
+  const layersPanel = composer
+    ? mountLayersPanel({
+      objects,
+      composer,
+      store,
+      editor,
+      list: $('#layers-list'),
+      empty: $('#layers-empty'),
+      tag: $('#layers-tag'),
+      bannerCount: () => sceneIO?.bannerCount?.() ?? 0,
+      onOpenBanners: () => document.getElementById('view-banner')?.click(),
+      onPick: (id) => {
+        if (bannerActive()) document.getElementById('view-2d')?.click();
+        if (editor.tool !== 'select') setTool('select');
+        objects.select(id);
+        // A layer picked in the list is brought into view if it is off screen.
+        const o = objects.get(id);
+        if (o && !editor.isWorldVisible(o.cx, o.cy)) editor.centerOnWorld(o.cx, o.cy);
+      },
+      onMerge: mergeLayer,
+    })
+    : null;
+  sceneIO?.onChange?.(() => layersPanel?.render());
+
+  // ---- the floating action bar: the selected layer's common actions, above it ----
+  const actionBar = document.createElement('div');
+  actionBar.className = 'ly-actionbar';
+  actionBar.setAttribute('role', 'toolbar');
+  actionBar.setAttribute('aria-label', i18nT('ly.actionsA'));
+  actionBar.hidden = true;
+  const barBtn = (icon: string, key: string, run: () => void, cls = ''): HTMLButtonElement => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = cls;
+    b.innerHTML = `<i class="ti ${icon}" aria-hidden="true"></i>`;
+    b.dataset.key = key;
+    b.addEventListener('pointerdown', (e) => e.stopPropagation());
+    b.addEventListener('click', (e) => {
+      e.stopPropagation();
+      run();
+    });
+    actionBar.appendChild(b);
+    return b;
+  };
+  const withSel = (fn: (id: string) => void) => (): void => {
+    const sel = objects.selected;
+    if (sel) fn(sel.id);
+  };
+  barBtn('ti-copy', 'ly.duplicateT', withSel(duplicateLayer));
+  barBtn('ti-stack-front', 'ly.forwardT', withSel((id) => objects.reorder(id, 'forward')));
+  barBtn('ti-stack-back', 'ly.backwardT', withSel((id) => objects.reorder(id, 'backward')));
+  const lockBtn = barBtn('ti-lock-open', 'ly.lockT', withSel((id) => objects.update(id, { locked: !objects.get(id)?.locked })));
+  barBtn('ti-arrow-merge', 'ly.mergeT', withSel(mergeLayer));
+  barBtn('ti-trash', 'ed.obj.deleteT', withSel((id) => objects.remove(id)), 'danger');
+  const labelActionBar = (): void => {
+    for (const b of actionBar.querySelectorAll<HTMLButtonElement>('button')) {
+      const text = i18nT(b.dataset.key!);
+      b.title = text;
+      b.setAttribute('aria-label', text);
+    }
+  };
+  labelActionBar();
+  document.querySelector('.canvas-wrap')?.appendChild(actionBar);
+  let gestureActive = false;
+  const placeActionBar = (): void => {
+    const sel = objects.selected;
+    const show = !!sel && !sel.hidden && editor.tool === 'select' && !gestureActive && !bannerActive() && !document.body.classList.contains('m-shell');
+    if (!show || !sel) {
+      actionBar.hidden = true;
+      return;
+    }
+    const locked = !!sel.locked;
+    lockBtn.innerHTML = `<i class="ti ${locked ? 'ti-lock' : 'ti-lock-open'}" aria-hidden="true"></i>`;
+    lockBtn.dataset.key = locked ? 'ly.unlockT' : 'ly.lockT';
+    lockBtn.classList.toggle('on', locked);
+    labelActionBar();
+    for (const b of actionBar.querySelectorAll<HTMLButtonElement>('button')) {
+      if (b !== lockBtn && b.dataset.key !== 'ly.duplicateT') b.disabled = locked;
+    }
+    const bounds = overlay.boundsOf(sel.id);
+    const wrap = actionBar.parentElement?.getBoundingClientRect();
+    if (!bounds || !wrap) {
+      actionBar.hidden = true;
+      return;
+    }
+    const [lx, ty] = editor.worldToClient(bounds.minX, bounds.minY);
+    const [rx] = editor.worldToClient(bounds.maxX, bounds.minY);
+    actionBar.hidden = false;
+    const bw = actionBar.offsetWidth;
+    const bh = actionBar.offsetHeight;
+    let x = (lx + rx) / 2 - wrap.left - bw / 2;
+    let y = ty - wrap.top - bh - 12;
+    const [, by] = editor.worldToClient(bounds.minX, bounds.maxY);
+    if (y < 8) y = by - wrap.top + 12; // no room above: under it
+    x = Math.max(8, Math.min(wrap.width - bw - 8, x));
+    y = Math.max(8, Math.min(wrap.height - bh - 8, y));
+    actionBar.style.transform = `translate(${Math.round(x)}px, ${Math.round(y)}px)`;
+  };
+  overlay.onGesture = (active) => {
+    gestureActive = active;
+    placeActionBar();
+  };
+  objectPanelHook = placeActionBar; // a tool change shows or hides it
+  objects.onChange(placeActionBar);
+  editor.addViewListener(placeActionBar);
+  document.addEventListener('tifo:view', placeActionBar);
+  window.addEventListener('resize', placeActionBar);
+
+  // ---- painting names what it paints on ----
+  // "Tools edit what is on top": a stroke over a picture touches up the
+  // picture. The label beside the cursor says so before the stroke lands.
+  const paintTarget = document.createElement('div');
+  paintTarget.className = 'ly-paint-target';
+  paintTarget.hidden = true;
+  paintTarget.setAttribute('aria-hidden', 'true');
+  document.body.appendChild(paintTarget);
+  editor.onHoverLayer = (obj, x, y) => {
+    if (!obj || document.body.classList.contains('m-shell')) {
+      paintTarget.hidden = true;
+      return;
+    }
+    const key = obj.locked ? 'ly.target.locked' : editor.tool === 'eraser' ? 'ly.target.erase' : 'ly.target.touch';
+    paintTarget.textContent = tv(key, { name: layerName(obj) });
+    paintTarget.classList.toggle('locked', !!obj.locked);
+    paintTarget.hidden = false;
+    paintTarget.style.transform = `translate(${Math.round(x + 16)}px, ${Math.round(y + 18)}px)`;
+  };
+  editor.app.canvas.addEventListener('pointerup', () => {
+    // A stroke that met a locked layer says why nothing happened.
+    const hit = composer?.lockedHit;
+    if (hit) {
+      message.textContent = tv('ly.msg.lockedStroke', { name: layerName(hit) });
+      composer!.lockedHit = null;
+    }
   });
 
   syncObjectPanelVisibility();
@@ -2612,8 +2984,6 @@ export function mountToolbar(
     gifBtn.disabled = true;
     gifBtn.textContent = 'Encoding…';
     try {
-      // Bake any floating objects first so they appear in the export.
-      if (objects.list().length > 0) objects.bakeAll(store, map, EDITOR_UNITS.width);
       const { exportRevealGifAsync } = await import('../workers/client');
       // The drum call is on a real beat, so its GIF plays in real time; the
       // others have always played at double speed, and still do.
@@ -2713,7 +3083,6 @@ export function mountToolbar(
     sxPreviewBtn.disabled = true;
     sxSay('Preparing the stadium…');
     try {
-      if (objects.list().length > 0) objects.bakeAll(store, map, EDITOR_UNITS.width);
       const preview = await ensureStadiumPreview();
       if (!preview) {
         sxSay('Could not start the 3D stadium preview.');
@@ -2771,7 +3140,6 @@ export function mountToolbar(
   sxExportBtn.addEventListener('click', async () => {
     sxExportBtn.disabled = true;
     try {
-      if (objects.list().length > 0) objects.bakeAll(store, map, EDITOR_UNITS.width);
       const preview = await ensureStadiumPreview();
       if (!preview) {
         sxSay('Could not start the 3D stadium preview.');
@@ -2798,8 +3166,6 @@ export function mountToolbar(
     const original = pdfBtn.innerHTML;
     pdfBtn.textContent = 'Generating…';
     try {
-      // Bake any floating objects so they appear in the export.
-      if (objects.list().length > 0) objects.bakeAll(store, map, EDITOR_UNITS.width);
       const { exportDistributionPdf } = await import('../net/api');
       const blob = await exportDistributionPdf(store, map, {
         title: docTitle.value.trim() || 'Tifo',
@@ -2826,7 +3192,6 @@ export function mountToolbar(
 
   const csvBtn = $('#export-csv') as unknown as HTMLButtonElement;
   csvBtn.addEventListener('click', async () => {
-    if (objects.list().length > 0) objects.bakeAll(store, map, EDITOR_UNITS.width);
     const { seatManifestCsv } = await import('../core/production');
     const csv = seatManifestCsv(store.cells, store.palette, map, {
       colorNames: colorNamesFor(),

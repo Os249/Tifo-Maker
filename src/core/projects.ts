@@ -242,6 +242,7 @@ function dropLocalData(id: string): void {
 /** Delete a local project for good. */
 export function purgeLocal(id: string): void {
   dropLocalData(id);
+  void import('./layerStore').then(({ writeLayers }) => writeLayers(docKey(id), null));
   writeIndex(readIndex().filter((p) => p.id !== id));
 }
 
@@ -260,6 +261,8 @@ export function duplicateLocal(id: string, title: string): LocalProject | null {
   if (b) writeRaw(bannersKey(copy.id), b);
   const th = readRaw(thumbKey(id));
   if (th) writeRaw(thumbKey(copy.id), th);
+  // Its layers too: a copy should open as movable as the original.
+  void import('./layerStore').then(({ copyLayers }) => copyLayers(docKey(id), docKey(copy.id)));
   return copy;
 }
 

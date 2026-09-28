@@ -17,6 +17,8 @@
  */
 
 import type { DesignStore } from '../core/design';
+import type { ObjectLayer } from '../core/objects';
+import { EDITOR_UNITS } from '../core/seatmap';
 import type { SeatMap, StadiumTemplate } from '../core/types';
 import {
   entryById,
@@ -44,6 +46,8 @@ export interface StadiumPanelDeps {
   root: HTMLElement;
   map: SeatMap;
   store: DesignStore;
+  /** The layers: re-orienting the design carries them round the bowl too. */
+  objects?: ObjectLayer;
   /** Repaint 2D + 3D after the cells change (orientation). */
   refresh: () => void;
 }
@@ -395,10 +399,25 @@ export function mountStadiumPanel(deps: StadiumPanelDeps): void {
 
   // ---- Section 4: Stadium Orientation (re-orient the design; undoable) ----
   function applyOrient(op: OrientOp): void {
-    store.beginStroke();
-    const next = orientCells(store.cells, map, op);
-    for (let i = 0; i < map.count; i++) store.paint(i, next[i]);
-    store.commitStroke();
+    // The paint turns seat by seat; each layer is carried to the matching
+    // place round the bowl, still upright and still readable (a mirrored
+    // picture or slogan would read backwards). One undo step.
+    const W = EDITOR_UNITS.width;
+    const wrap = (x: number): number => ((x % W) + W) % W;
+    const moveX = (x: number): number =>
+      op === 'rotate' ? wrap(x + W / 4) : op === 'flip-ns' ? wrap(W - x) : wrap(W / 2 - x);
+    store.group(() => {
+      store.paintBaseOnly(() => {
+        store.beginStroke();
+        const next = orientCells(store.base, map, op);
+        for (let i = 0; i < map.count; i++) store.paint(i, next[i]);
+        store.commitStroke();
+      });
+      const objects = deps.objects;
+      if (objects && objects.list().length) {
+        objects.replaceAll(objects.list().map((o) => ({ ...o, cx: moveX(o.cx) })));
+      }
+    });
     refresh();
   }
   function renderOrient(): void {

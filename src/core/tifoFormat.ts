@@ -76,6 +76,12 @@ export interface TifoDocV2 {
   palette: string[];
   layers: TifoLayer[];
   objects?: TifoObject[];
+  /**
+   * Tifo Maker's own layer stack (see core/composer.ts), so this editor opens
+   * the file with its pictures, text and shapes still movable. Optional and
+   * ignored by anything else: `layers` above is always the design, flattened.
+   */
+  editor?: { layers?: unknown };
 }
 
 // ---- validation ----
@@ -339,6 +345,8 @@ export function buildTifoV2(args: {
   palette: string[];
   cells: Uint8Array;
   objects?: TifoObject[];
+  /** The editor's layer stack, carried beside the flattened seats. */
+  editorLayers?: unknown;
 }): TifoDocV2 {
   return {
     format: 'tifo',
@@ -352,6 +360,7 @@ export function buildTifoV2(args: {
     palette: args.palette,
     layers: [{ id: 'base', kind: 'cells', cellsRle: encodeCellsRle(args.cells) }],
     objects: args.objects && args.objects.length > 0 ? args.objects : undefined,
+    ...(args.editorLayers ? { editor: { layers: args.editorLayers } } : {}),
   };
 }
 

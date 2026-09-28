@@ -92,7 +92,7 @@ async function open(
       errs.push('console: ' + t.slice(0, 180));
     }
   });
-  await page.goto(B + '/app', { waitUntil: 'networkidle', timeout: 90000 });
+  await page.goto(B + '/app?new=1', { waitUntil: 'networkidle', timeout: 90000 });
   await page.waitForSelector('#canvas-host canvas', { timeout: 60000 });
   await page.waitForFunction(() => document.querySelectorAll('#palette .swatch').length > 0, { timeout: 60000 });
   await page.waitForTimeout(1200);
@@ -489,14 +489,16 @@ await run('objects', async () => {
   // lands just under any line you pick, which is how "the text is invisible"
   // and "my metric is wrong" look identical.
   const moved = pixelsChanged(beforeShot, afterShot);
-  check('THE TEXT IS ON SCREEN before baking', moved > 2000, `${moved} pixels changed`);
+  check('THE TEXT IS ON SCREEN as soon as it is placed', moved > 2000, `${moved} pixels changed`);
 
-  const beforeBake = await counts(page);
-  await tryClick(page, '#obj-bake');
+  // A layer is already seats; merging it into the paint changes nothing you
+  // can see, and the layer goes.
+  const beforeMerge = await counts(page);
+  await tryClick(page, '#obj-merge');
   await page.waitForTimeout(700);
-  check('baking the text paints seats', changed(beforeBake, await counts(page)) > 0,
-    `${changed(beforeBake, await counts(page))} seats`);
-  check('the object is gone after baking', await page.evaluate(() =>
+  check('merging the text into the paint keeps its seats', changed(beforeMerge, await counts(page)) === 0,
+    `${changed(beforeMerge, await counts(page))} seats changed`);
+  check('the layer is gone after merging', await page.evaluate(() =>
     (document.getElementById('obj-controls') as HTMLElement).hidden));
 
   await pick(page, 'shape');
@@ -510,7 +512,7 @@ await run('objects', async () => {
   check('placing a shape creates an object', await page.evaluate(() =>
     !(document.getElementById('obj-controls') as HTMLElement).hidden));
   const starMoved = pixelsChanged(beforeStar, afterStar);
-  check('THE SHAPE IS ON SCREEN before baking', starMoved > 2000, `${starMoved} pixels changed`);
+  check('THE SHAPE IS ON SCREEN as soon as it is placed', starMoved > 2000, `${starMoved} pixels changed`);
 
   // Move and resize through the panel, the non-drag path.
   await page.evaluate(() => {
@@ -524,11 +526,8 @@ await run('objects', async () => {
 
   await pick(page, 'select'); // ctx-objects is the select tool's panel
   const objsBefore = await page.evaluate(() => document.getElementById('obj-kind')?.textContent ?? '');
-  const beforeAll = await counts(page);
-  await tryClick(page, '#obj-bake-all');
-  await page.waitForTimeout(700);
-  check('bake all commits everything', changed(beforeAll, await counts(page)) > 0,
-    `was "${objsBefore}" → ${await msg(page)}`);
+  const layers = await page.evaluate(() => document.querySelectorAll('#layers-list .ly-row[data-id]').length);
+  check('the shape is a layer in the Layers list, nothing to bake', layers >= 1, `"${objsBefore}", ${layers} layer(s)`);
   // The tool bars sit ABOVE the canvas and shorten it. If the drawing surface
   // does not follow, its bottom hangs past the window and every click lands
   // higher than you aimed — which is how placed text ended up off the bowl.

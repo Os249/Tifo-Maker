@@ -6,7 +6,7 @@ import rateLimit from '@fastify/rate-limit';
 import helmet from '@fastify/helmet';
 import fastifyStatic from '@fastify/static';
 import { dummyHash, hashPassword, hashToken, issueToken, TOKEN_TTL_MS, verifyPassword } from './auth';
-import { gunzipBytes, gzipBytes, u32FromB64, u8FromB64 } from './codec';
+import { MAX_SCENE_GUNZIP_BYTES, gunzipBytes, gzipBytes, u32FromB64, u8FromB64 } from './codec';
 import { generateSeatMap } from '../../src/core/seatmap';
 import { shippedTemplates } from '../../src/core/stadiumCatalog';
 import { noTifoMask } from '../../src/core/venueDetails';
@@ -2531,8 +2531,25 @@ export async function buildApp(
     const v = await getVisible(req, reply);
     if (!v) return;
     const gz = await repo.getScene(v.rec.id);
-    return { sceneGzB64: gz ? gz.toString('base64') : null };
+    if (!gz) return { sceneGzB64: null };
+    // The layer stack — the owner's own pictures, as uploaded — is the
+    // owner's. Everyone else sees the design as its seats: the banners come
+    // with it, the layers do not.
+    const out = v.rec.ownerId === v.userId ? gz : withoutLayers(gz);
+    return { sceneGzB64: out.toString('base64') };
   });
+
+  /** A scene without its layer stack (for anyone but the design's owner). */
+  function withoutLayers(gz: Buffer): Buffer {
+    try {
+      const scene = JSON.parse(gunzipBytes(gz, MAX_SCENE_GUNZIP_BYTES).toString('utf8')) as Record<string, unknown>;
+      if (!scene || typeof scene !== 'object' || !('layers' in scene)) return gz;
+      delete scene.layers;
+      return gzipBytes(Buffer.from(JSON.stringify(scene), 'utf8'));
+    } catch {
+      return gz;
+    }
+  }
 
   app.put('/api/designs/:id/scene', async (req, reply) => {
     const rec = await getOwned(req, reply);
@@ -2547,7 +2564,7 @@ export async function buildApp(
     }
     let json: string;
     try {
-      json = gunzipBytes(gz).toString('utf8');
+      json = gunzipBytes(gz, MAX_SCENE_GUNZIP_BYTES).toString('utf8');
     } catch {
       return reply.code(400).send({ error: 'sceneGzB64 is not valid gzip' });
     }
@@ -2863,7 +2880,7 @@ export async function buildApp(
     if (!v.userId) return reply.code(401).send({ error: 'authentication required' });
     const title = cleanTitle((req.body as { title?: string } | null)?.title, `${v.rec.title} (fork)`);
     const created = await repo.fork(v.rec.id, title, v.userId);
-    if (created) await copyScene(v.rec.id, created.id);
+    if (created) await copyScene(v.rec.id, created.id, v.rec.ownerId === v.userId);
     return reply.code(201).send(created);
   });
 
@@ -2875,10 +2892,12 @@ export async function buildApp(
    * with no banner on it. Best-effort, like every scene write: a copy whose
    * banners failed to come across is still the copy that was asked for.
    */
-  async function copyScene(fromId: string, toId: string): Promise<void> {
+  async function copyScene(fromId: string, toId: string, keepLayers: boolean): Promise<void> {
     try {
       const scene = await repo.getScene(fromId);
-      if (scene) await repo.putScene(toId, scene);
+      // A copy for someone else is the design as its seats: its banners, not
+      // its owner's layers (and pictures). The owner's own copy keeps them.
+      if (scene) await repo.putScene(toId, keepLayers ? scene : withoutLayers(scene));
     } catch {
       /* the seats are copied; that is the part that must not fail */
     }
@@ -2919,7 +2938,8 @@ export async function buildApp(
     const remixTitle = cleanTitle(title, `${rec?.title ?? 'Tifo'} (remix)`);
     const created = await social!.remix(id, userId, remixTitle);
     if (!created) return reply.code(403).send({ error: 'this design cannot be remixed' });
-    await copyScene(id, created.id);
+    // A remix is the design as its seats: whoever remixes gets them flat.
+    await copyScene(id, created.id, false);
     return reply.code(201).send(created);
   });
 

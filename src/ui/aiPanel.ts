@@ -15,12 +15,12 @@
 import type { Editor } from '../render/editor';
 import type { DesignStore } from '../core/design';
 import type { SeatMap } from '../core/types';
-import type { ObjectLayer } from '../core/objects';
+import { encodePictureSrc, rememberPicture, type ObjectLayer, type TifoObject } from '../core/objects';
+import type { Composer } from '../core/composer';
 import type { Preview3D } from '../render/preview3d';
 import { type TifoSpec, narrowToSingleStand } from '../core/tifoSpec';
-import { compileSpec, regionRect, regionPredicate } from '../core/specCompiler';
+import { compileSpec, regionRect } from '../core/specCompiler';
 import { loadTifoFonts } from '../core/tifoFonts';
-import { EDITOR_UNITS } from '../core/seatmap';
 import { buildStadiumContext, describeStadiumContext } from '../core/stadiumContext';
 import { critiqueDesign, repairSpec } from '../core/critique';
 import { designShuffle } from '../core/promptDesigner';
@@ -40,6 +40,8 @@ export interface AiPanelDeps {
   editor: Editor;
   map: SeatMap;
   objects: ObjectLayer;
+  /** The layer stack: the AI's pictures arrive as layers, kept to their stand. */
+  composer?: Composer;
   getPreview?: () => Preview3D | null;
   /** Refresh swatch UI + 3D after the palette/cells change (from the toolbar). */
   refresh: () => void;
@@ -97,6 +99,8 @@ export function mountAiPanel(deps: AiPanelDeps): AiPanelHandle {
   // Snapshot of the canvas before the first AI apply (for revert / clean regen).
   let baselineCells: Uint8Array | null = null;
   let baselinePalette: string[] | null = null;
+  /** The layers the canvas had before the first generation, for Revert. */
+  let baselineObjects: TifoObject[] | null = null;
   let busy = false;
   let lastSuper = false; // so Regenerate repeats the same mode
   let lastSpec: TifoSpec | null = null; // the applied design (for AI critique/polish)
@@ -336,38 +340,52 @@ export function mountAiPanel(deps: AiPanelDeps): AiPanelHandle {
 
   const captureBaseline = (): void => {
     if (baselineCells === null) {
-      baselineCells = store.cells.slice();
+      baselineCells = store.base.slice();
       baselinePalette = [...store.palette];
+      baselineObjects = objects.snapshot();
     }
   };
 
   const applySpec = async (spec: TifoSpec): Promise<void> => {
     captureBaseline();
-    objects.clear(); // floating (unbaked) objects don't belong to a fresh generation
     let working = spec;
     await loadTifoFonts();
-    compileSpec(working, map, store);
-
-    // Phase 4: deterministic critique of the rendered seats, with ONE bounded
-    // repair pass (enlarge fragile text/symbols) when fine detail won't read.
-    let critique = critiqueDesign(store.cells, map, working);
-    if (critique.paintedSeats > 0 && critique.fragileSeats > critique.paintedSeats * 0.2) {
-      const repaired = repairSpec(working, critique);
-      if (repaired.changed) {
-        working = repaired.spec;
-        await loadTifoFonts();
-    compileSpec(working, map, store);
-        critique = critiqueDesign(store.cells, map, working);
-      }
-    }
-
-    // Image layers (portraits/figures): place each in its region and BAKE into
-    // the seats (reusing the Image-tool quantizer) so it shows in 2D AND 3D and
-    // becomes part of the design — not an unbaked floating object.
+    // The pictures are decoded first, so that the whole design — the cleared
+    // bowl, the painted layers and the pictures — lands as ONE undo step.
+    const decoded = new Map<string, ImageBitmap>();
     for (const layer of working.layers) {
       if (layer.kind !== 'image' || !layer.assetRef) continue;
       try {
-        const bmp = await dataUrlToBitmap(layer.assetRef);
+        decoded.set(layer.id, await dataUrlToBitmap(layer.assetRef));
+      } catch {
+        /* decode failed → skip this image */
+      }
+    }
+
+    let critique = null as ReturnType<typeof critiqueDesign> | null;
+    store.group(() => {
+      objects.clear(); // the last design's layers don't belong to a fresh generation
+      compileSpec(working, map, store);
+
+      // Phase 4: deterministic critique of the rendered seats, with ONE bounded
+      // repair pass (enlarge fragile text/symbols) when fine detail won't read.
+      critique = critiqueDesign(store.cells, map, working);
+      if (critique.paintedSeats > 0 && critique.fragileSeats > critique.paintedSeats * 0.2) {
+        const repaired = repairSpec(working, critique);
+        if (repaired.changed) {
+          working = repaired.spec;
+          compileSpec(working, map, store);
+          critique = critiqueDesign(store.cells, map, working);
+        }
+      }
+
+      // Image layers (portraits/figures): each arrives as a LAYER of its own,
+      // kept inside its region, so it shows in 2D and 3D straight away and can
+      // still be moved, resized or turned afterwards.
+      for (const layer of working.layers) {
+        if (layer.kind !== 'image' || !layer.assetRef) continue;
+        const bmp = decoded.get(layer.id);
+        if (!bmp) continue;
         // A picture needs one continuous surface. A run of adjacent stands is
         // one; a SPLIT set ('sides', 'ends') is not, so that collapses to a
         // single stand. 'all' collapses too — a lazy whole-bowl region on a
@@ -380,7 +398,7 @@ export function mountAiPanel(deps: AiPanelDeps): AiPanelHandle {
         // stand, which only ever shrank: a square portrait in a ~2.4:1 stand
         // came out filling barely a third of its width, which is what made
         // every AI hero look small. 'cover' fills the region and lets the
-        // region clip the overflow — the bake is masked by regionPredicate, so
+        // region clip the overflow — the layer is kept inside its region, so
         // it still cannot touch a neighbouring stand.
         //
         // Cover is BOUNDED. If the asset's shape and the region's diverge far
@@ -395,35 +413,33 @@ export function mountAiPanel(deps: AiPanelDeps): AiPanelHandle {
         const sy = rect.height / bmp.height;
         const contain = Math.min(sx, sy);
         const s = (layer.fit === 'contain' ? contain : Math.min(Math.max(sx, sy), contain * MAX_CROP)) * layer.scaleFrac;
-        const w = bmp.width * s;
-        const h = bmp.height * s;
-        const created = objects.addImage({
+        const src = encodePictureSrc(bmp);
+        rememberPicture(src, bmp);
+        objects.addImage({
           cx: rect.cx,
           cy: rect.cy,
-          width: w,
-          height: h,
+          width: bmp.width * s,
+          height: bmp.height * s,
           colorIndex: 0,
-          tier: typeof region.tier === 'number' ? region.tier : null,
+          tier: null,
+          keep: region,
           bitmap: bmp,
           name: 'AI image',
+          src,
           dither: layer.dither,
           halftone: layer.halftone,
           cutout: layer.cutout !== false,
           alphaThreshold: 128,
         });
-        // Clip the bake to the stand so the portrait can't bleed into neighbours.
-        objects.bake(created, store, map, EDITOR_UNITS.width, regionPredicate(region, map));
-      } catch {
-        /* decode/bake failed → skip this image */
       }
-    }
-    objects.clear(); // floating copies are now baked into the cells
+      objects.select(null);
+    });
 
     refresh();
     editor.fitToView();
     if (summaryEl) {
       const base = working.summary ?? working.title;
-      summaryEl.textContent = critique.issues.length ? `${base}  ·  ${critique.issues[0]}` : base;
+      summaryEl.textContent = critique?.issues.length ? `${base}  ·  ${critique.issues[0]}` : base;
     }
     lastSpec = working; // the live design — input for AI critique/polish
     if (resultEl) resultEl.style.display = '';
@@ -433,11 +449,21 @@ export function mountAiPanel(deps: AiPanelDeps): AiPanelHandle {
   const revert = (): void => {
     if (baselineCells === null || baselinePalette === null) return;
     store.setPalette(baselinePalette);
-    store.beginStroke();
-    for (let i = 0; i < map.count && i < baselineCells.length; i++) store.paint(i, baselineCells[i]);
-    store.commitStroke();
+    const base = baselineCells;
+    const before = baselineObjects ?? [];
+    // The canvas as it was — its paint and its layers — as one undo step.
+    store.group(() => {
+      objects.clear();
+      store.paintBaseOnly(() => {
+        store.beginStroke();
+        for (let i = 0; i < map.count && i < base.length; i++) store.paint(i, base[i]);
+        store.commitStroke();
+      });
+      if (before.length) objects.replaceAll(before);
+    });
     baselineCells = null;
     baselinePalette = null;
+    baselineObjects = null;
     refresh();
     if (resultEl) resultEl.style.display = 'none';
     setStatus('Reverted to your previous canvas.');

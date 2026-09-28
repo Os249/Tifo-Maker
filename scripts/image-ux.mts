@@ -105,7 +105,7 @@ async function run(label: string, imgW: number, imgH: number, lang: 'en' | 'ar' 
       errs.push('console: ' + txt.slice(0, 200));
     }
   });
-  await page.goto(B + '/app', { waitUntil: 'networkidle', timeout: 90000 });
+  await page.goto(B + '/app?new=1', { waitUntil: 'networkidle', timeout: 90000 });
   await page.waitForSelector('#canvas-host canvas', { timeout: 60000 });
   await page.waitForTimeout(2500);
 
@@ -185,9 +185,12 @@ async function run(label: string, imgW: number, imgH: number, lang: 'en' | 'ar' 
   const bowlBefore = seatInk(await page.screenshot({ clip }));
   const bowlAfter = seatInk(shot);
   check('THE BOWL IS STILL DRAWN', bowlAfter > bowlBefore * 0.5 && bowlAfter > 20000, `${bowlBefore} → ${bowlAfter} seat pixels`);
+  // The picture is a layer now, drawn AS SEATS at full strength rather than a
+  // 65% ghost over them, so it covers the bowl's own cyan seats where it
+  // lands: magenta, which the bowl does not have, is the colour that proves it.
   check(
     'THE PICTURE IS ON SCREEN',
-    after.magenta - before.magenta > 2000 && after.cyan - before.cyan > 400,
+    after.magenta - before.magenta > 2000,
     `magenta ${before.magenta}→${after.magenta}  cyan ${before.cyan}→${after.cyan}`,
   );
   check('no page errors', errs.length === 0, errs.join(' | '));
@@ -223,7 +226,7 @@ async function timings(): Promise<void> {
     } catch { /* ignore */ }
   });
   const page = await ctx.newPage();
-  await page.goto(B + '/app', { waitUntil: 'networkidle', timeout: 90000 });
+  await page.goto(B + '/app?new=1', { waitUntil: 'networkidle', timeout: 90000 });
   await page.waitForSelector('#canvas-host canvas', { timeout: 60000 });
   await page.waitForTimeout(2500);
   const decode = await page.evaluate(async () => {
@@ -290,7 +293,7 @@ async function phone(): Promise<void> {
   const page = await ctx.newPage();
   const errs: string[] = [];
   page.on('pageerror', (e) => errs.push(String(e.message).slice(0, 200)));
-  await page.goto(B + '/app', { waitUntil: 'networkidle', timeout: 90000 });
+  await page.goto(B + '/app?new=1', { waitUntil: 'networkidle', timeout: 90000 });
   await page.waitForSelector('#canvas-host canvas', { timeout: 60000 });
   await page.waitForTimeout(2500);
   check('the phone shell mounted', await page.evaluate(() => document.body.classList.contains('m-shell')));
@@ -375,16 +378,20 @@ async function phone(): Promise<void> {
     return hit;
   });
   check('...without sitting on top of another control', clash.length === 0, clash.join(','));
-  check('every action is a 44px target', bar.buttons.length === 3 && bar.buttons.every((x) => x.h >= 44 && x.w >= 44), JSON.stringify(bar.buttons));
+  check('every action is a 44px target', bar.buttons.length === 4 && bar.buttons.every((x) => x.h >= 44 && x.w >= 44), JSON.stringify(bar.buttons));
 
+  // Nothing needs baking: the picture is a layer, and already seats. Merging
+  // it into the paint is a choice, two taps away (Options, then Merge).
   await page.tap('.m-objbar-b.primary');
+  await page.waitForTimeout(600);
+  await page.tap('#obj-merge');
   await page.waitForTimeout(800);
-  writeFileSync(`${OUT}/phone-4-baked.png`, await page.screenshot());
-  const baked = await page.evaluate(() => ({
+  writeFileSync(`${OUT}/phone-4-merged.png`, await page.screenshot());
+  const merged = await page.evaluate(() => ({
     msg: document.getElementById('message')?.textContent ?? '',
     barGone: (document.querySelector('.m-objbar') as HTMLElement).hidden,
   }));
-  check('one tap bakes it', /\d/.test(baked.msg) && baked.barGone, JSON.stringify(baked));
+  check('Options → Merge into paint merges it', /\d/.test(merged.msg) && merged.barGone, JSON.stringify(merged));
 
   // Backing out of the sheet must back out of import mode too, or the editor is
   // left in a mode whose only controls are off-screen — the same dead end by a
