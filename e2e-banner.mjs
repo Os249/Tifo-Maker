@@ -988,6 +988,69 @@ const newsState = (page) =>
   });
 const flag = (page, k) => page.evaluate((key) => localStorage.getItem(key), k);
 
+console.log('\n— banner text is redrawn in the display face when it lands —');
+{
+  // A banner opened before the display faces arrive is first drawn in the
+  // fallback face. When they land it has to be drawn again in the real one.
+  // It used to stay in the fallback for good, while anything edited after
+  // they landed was drawn in the real face — so two copies of one line,
+  // stacked for an outline or a shadow, came out in two different typefaces
+  // and no longer lined up.
+  const ctx = await browser.newContext({ viewport: { width: 1400, height: 880 } });
+  const page = await ctx.newPage();
+  const errs = [];
+  page.on('pageerror', (e) => errs.push(String(e.message).slice(0, 200)));
+  let hold = false;
+  let release = () => {};
+  let gate = Promise.resolve();
+  await page.route('**/*.woff2', async (route) => {
+    if (hold) await gate;
+    await route.continue().catch(() => {});
+  });
+  await page.addInitScript(() => {
+    for (const [k, v] of [['tifo_lang_v1', 'en'], ['tifo_onboarded_v1', '1'], ['tifo_consent_v1', 'essential'], ['tifo_draw_hint_v1', '1'], ['tifo_news_banners_v1', '1'], ['tifo_banner_tour_v1', '1']]) {
+      try { localStorage.setItem(k, v); } catch { /* storage off */ }
+    }
+  });
+  // First visit: faces arrive normally, and a line goes on a banner.
+  await page.goto(B + '/app?new=1', { waitUntil: 'networkidle', timeout: 60000 });
+  await rememberProject(page);
+  await page.waitForTimeout(1400);
+  await openBanner(page);
+  await page.click('.tool-rail [data-tool="text"]');
+  await page.waitForTimeout(250);
+  await page.fill('#text-input', 'CURVA SUD MUANGTHONG');
+  const mid = await page.$eval('#banner-host canvas', (c) => {
+    const r = c.getBoundingClientRect();
+    return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+  });
+  await page.mouse.click(mid.x, mid.y);
+  await page.waitForTimeout(1200);
+  await page.click('.tool-rail [data-tool="select"]');
+  await page.mouse.move(5, 5);
+  await page.waitForTimeout(600);
+  const placed = ((await storedBanner(page))?.banners?.[0]?.items ?? []).some((i) => i.kind === 'text');
+  // Come back on a slow connection: the faces are held until the banner is on screen.
+  hold = true;
+  gate = new Promise((r) => { release = r; });
+  const id = await page.evaluate(() => sessionStorage.getItem('e2e_local'));
+  await page.goto(B + `/app?local=${id}`, { waitUntil: 'domcontentloaded', timeout: 60000 });
+  await page.waitForSelector('#view-banner', { timeout: 60000 });
+  await page.waitForTimeout(1500);
+  await openBanner(page, { make: false });
+  await page.waitForTimeout(1200);
+  const early = await page.evaluate(() => [...document.fonts].filter((f) => /^"?Tifo/.test(f.family) && f.status === 'loaded').length);
+  const before = await artboardHash(page);
+  release();
+  await page.waitForFunction(() => [...document.fonts].some((f) => /^"?Tifo/.test(f.family) && f.status === 'loaded'), null, { timeout: 30000 }).catch(() => {});
+  await page.waitForTimeout(3000);
+  const after = await artboardHash(page);
+  check('a banner opened before the faces land is drawn in the fallback', placed && early === 0 && before !== -1, `text ${placed}, faces ${early}`);
+  check('when they land, its words are drawn again in the real face', after !== before, `${before} -> ${after}`);
+  check('no page errors while the faces arrive', errs.length === 0, errs.join(' | '));
+  await ctx.close();
+}
+
 console.log('\n— the banners news —');
 {
   const { ctx, page, errs } = await openApp(1400, 880, 'en', { fresh: true });

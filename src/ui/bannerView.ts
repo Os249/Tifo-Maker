@@ -1138,9 +1138,9 @@ export function mountBannerView(deps: BannerViewDeps): BannerView {
 
   bannerStore.onChange(sync);
   bannerStore.onHistoryChange(historyMoved);
-  // A banner's type is drawn with the display faces, so the glyph cache has to
-  // be dropped when they land or a banner opened during the download keeps its
-  // fallback-font text forever.
+  // A language change can change which glyphs a line needs, so its cached
+  // lettering is dropped and drawn again. (The display faces landing is handled
+  // in the renderer itself — see `askForFaces` in bannerRender.ts.)
   onLangChange(() => {
     invalidateBannerText();
     if (presetSel) presetSel.replaceChildren();

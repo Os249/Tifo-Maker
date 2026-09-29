@@ -558,7 +558,10 @@ function sweepSigns(gid: string, map: ReturnType<typeof generateSeatMap>): numbe
                 // its bottom hem on the floor. Never squashed and never lower.
                 const fenceY = h.base.y + SIGN_FENCE_TOP_M;
                 const lifted = h.topY - fenceY > 0.01;
-                const floorY = tier >= 1 ? hangSpan(frame, tier).bottomY + 0.1 : -Infinity;
+                // The grass in front of the lowest tier — on a ground whose front row is
+                // barely above the pitch a two-metre sheet reaches it and stands up
+                // above the rail — or the bottom of the fascia under an upper one.
+                const floorY = tier >= 1 ? hangSpan(frame, tier).bottomY + 0.1 : hangSpan(frame, 0).bottomY;
                 if (h.topY < fenceY - 1e-6 || (lifted && Math.abs(h.bottomY - floorY) > 0.01)) {
                   fail(where, 'FENCE', `held ${h.bottomY.toFixed(2)}..${h.topY.toFixed(2)} m, the fence is at ${fenceY.toFixed(2)} m`);
                 }

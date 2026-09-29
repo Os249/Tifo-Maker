@@ -1,6 +1,7 @@
 import type { BannerDoc, BannerItem, ImageItem, PatchItem, ShapeItem, StrokeItem, TextItem } from '../core/banner';
 import { aspectOf, isPlaced } from '../core/banner';
 import { TIFO_FONTS, renderTextCanvas } from '../core/text';
+import { loadTifoFonts } from '../core/tifoFonts';
 import { drawSymbol } from '../core/symbols';
 
 /**
@@ -68,13 +69,51 @@ function image(src: string): HTMLImageElement | null {
  */
 const textCache = new Map<string, HTMLCanvasElement>();
 
+/**
+ * Whether the display faces have landed.
+ *
+ * Until they have, text is drawn in whatever the browser falls back to —
+ * Impact, Arial Black, a system sans — and none of it may be cached. It used
+ * to be, forever: a banner opened before the faces arrived kept its fallback
+ * glyphs, while any item edited AFTER they arrived was drawn in the real face.
+ * Two copies of the same line — the classic outline-over-shadow stack — then
+ * came out in two different typefaces, one on top of the other, and the
+ * outline no longer followed the letters it was drawn for.
+ *
+ * So the first text draw asks for the faces itself (every page that shows a
+ * banner, not only the editor, which is the only one that ever loaded them),
+ * draws provisionally until they land, and then drops everything drawn
+ * before and asks every surface showing a banner to draw again.
+ */
+let facesReady = false;
+let facesAsked = false;
+const provisional = new Map<string, HTMLCanvasElement>();
+
+function askForFaces(): void {
+  if (facesAsked) return;
+  facesAsked = true;
+  const landed = (): void => {
+    facesReady = true;
+    provisional.clear();
+    textCache.clear();
+    for (const fn of readyListeners) fn();
+  };
+  if (typeof document === 'undefined' || !document.fonts) {
+    landed();
+    return;
+  }
+  void loadTifoFonts().then(landed, landed);
+}
+
 function fontCss(fontId: string): string {
   return TIFO_FONTS.find((f) => f.id === fontId)?.css ?? TIFO_FONTS[0].css;
 }
 
 function textCanvas(it: TextItem): HTMLCanvasElement | null {
   const key = `${it.text}|${it.fontId}|${it.arcDeg}|${it.color}|${it.outline ?? 0}|${it.outlineColor ?? ''}`;
-  const hit = textCache.get(key);
+  if (!facesReady) askForFaces();
+  const cache = facesReady ? textCache : provisional;
+  const hit = cache.get(key);
   if (hit) return hit;
   const r = renderTextCanvas(it.text, fontCss(it.fontId), it.arcDeg, 0);
   if (!r) return null;
@@ -112,14 +151,15 @@ function textCanvas(it: TextItem): HTMLCanvasElement | null {
   sctx.fillRect(0, 0, solid.width, solid.height);
   ctx.drawImage(solid, pad, pad);
 
-  if (textCache.size > 240) textCache.clear();
-  textCache.set(key, out);
+  if (cache.size > 240) cache.clear();
+  cache.set(key, out);
   return out;
 }
 
 /** Drop cached glyph bitmaps — call when the display faces finish loading. */
 export function invalidateBannerText(): void {
   textCache.clear();
+  provisional.clear();
 }
 
 // ---------------------------------------------------------------------------

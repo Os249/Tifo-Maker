@@ -1,0 +1,35 @@
+=== SUMMARY ===
+
+Banners: redraw banner text in the real typeface once it loads
+
+
+=== DESCRIPTION ===
+
+A user reported that on their banner "the yellow outlines should align with the black text", and they didn't (tifomaker.org/t/27250de9-8017-4be5-92b5-2732d49a543f). Banner text has no outline control, so the look is built the usual way: the same line stacked two or three times in different colours, for an outline and a drop shadow. The copies came out in two different typefaces, so the letters no longer lined up.
+
+THE CAUSE
+
+Banner lettering is drawn once and then cached. The display typefaces (Poster, Kufi, Condensed, Slab, Signage, Grotesk) download after the page opens. A banner already open when they arrive was drawn in the fallback (Impact, Arial Black or a system sans), and that fallback lettering stayed cached for good. Any copy changed after the typefaces arrived (a new colour, new words) was drawn in the real typeface. The result was two typefaces stacked on each other: different letter widths, so the outline drifts further from its letters along the line. The same happened in the stadium, because its banner texture uses the same cache.
+
+A comment in the Banner view said the cache was cleared "when they land", but the code was only wired to language changes. The community page never loaded the typefaces at all, so every banner in its 3D previews was drawn in the fallback.
+
+THE FIX
+
+- The banner renderer loads the display typefaces itself, the first time it draws any text, on every page that shows a banner.
+- Until they arrive, lettering is drawn and cached only provisionally.
+- When they arrive, everything drawn before is dropped and every surface showing a banner is asked to draw again: the artboard, the stadium bowl, Match Day and the community preview. The stadium rebuilds its banner textures.
+- The Banner view's comment now says what its language-change clear is actually for.
+
+No saved design changes. A banner that was mismatched shows correctly the next time it is opened.
+
+ALSO: A SIGN CHECK FOR THE NEW JEWEL
+
+The banner sweep flagged a false alarm on the rebuilt Jewel (jewel-jeddah-60k), which is new in main. Its front row is barely above the pitch, so a 2 m sign tied to the pitch-side fence reaches the grass and stands 5 cm up above the rail instead of being squashed. That is the intended behaviour. The sweep's check expected the floor of the lowest tier to be unreachable. It now uses the grass level. The app code is unchanged.
+
+TEST
+
+e2e-banner has a new section. It puts a line on a banner, then reopens the tifo with the font downloads held back. It checks that the line is first drawn in the fallback and is drawn again in the real typeface once the fonts arrive. Without this fix, the artboard stays the same when the fonts arrive (the check fails). With it, the artboard is redrawn in the real typeface.
+
+Full pass, every suite, on top of main 0873882: build, verify, verify:stadiumfit, sweep:banner (205k configurations, 0 failures), test:server, test:email, test:security, test:soc, test:deploy, e2e, e2e-banner (174 checks), e2e-mobile, e2e-i18n, e2e-theme, e2e-sound, e2e-seo, e2e-gate, e2e-feedback, e2e-accessories, e2e-community-auth, e2e-consent, e2e-flyover, e2e-jewel, e2e-layers, e2e-matchday-view, e2e-templates, e2e-claim, e2e-verify, e2e-projects, e2e-admin-review, shots:banner: all green.
+
+The one exception is e2e-drumcall. Its three frame-sampling checks ("caught a frame of every phase") fail in my test machine on main without this change too: only 4–5 frames get recorded through the whole show there. Nothing in this change touches Match Day's count.
