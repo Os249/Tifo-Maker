@@ -590,7 +590,12 @@ async function attachBanners(
     const banners = new BannerStore();
     installSlotRules(banners, map);
     banners.loadJSON(scene.banners as Parameters<InstanceType<typeof BannerStore>['loadJSON']>[0]);
-    const shown = banners.list().filter((b) => b.visible !== false);
+    // In name order ("Sign 1, Sign 2 …"), not the order they were made in:
+    // seven buttons reading 4, 2, 7, 6, 5, 3, 1 look like a mistake.
+    const shown = banners
+      .list()
+      .filter((b) => b.visible !== false)
+      .sort((a, b) => (a.name ?? '').localeCompare(b.name ?? '', undefined, { numeric: true, sensitivity: 'base' }));
     if (shown.length === 0) return;
     const template = templateById(tplId) ?? TEMPLATES[0];
     preview.attachBanners(banners, template);

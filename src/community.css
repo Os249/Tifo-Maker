@@ -257,8 +257,15 @@ a { color: inherit; text-decoration: none; }
 }
 .modal-root[hidden], .notif-panel[hidden], .search-results[hidden], .notif-dot[hidden], #notif-btn[hidden], .grid-empty[hidden], .grid-loading[hidden] { display: none !important; }
 .modal {
-  background: var(--paper); border-radius: var(--r-lg); width: min(1100px, 96vw); max-height: 92vh;
-  overflow: hidden; box-shadow: var(--shadow-lg); display: grid; grid-template-columns: 1.4fr 1fr;
+  background: var(--paper); border-radius: var(--r-lg); width: min(1100px, 100%); max-height: 92vh;
+  overflow: hidden; box-shadow: var(--shadow-lg); display: grid;
+  /* minmax(0, …), not bare fr: a bare fr column cannot shrink below its
+     content's min width, and the camera row (one button per camera, one more
+     per banner) made that 1044px on a design with seven signs. The 3D side
+     took the whole modal and pushed the title, the creator's note and the
+     comments out of the window: off the left edge in Arabic, the right in
+     English. The side keeps at least 320px to read and comment in. */
+  grid-template-columns: minmax(0, 1.4fr) minmax(320px, 1fr);
   animation: modalIn 0.18s ease both;
 }
 @keyframes modalIn { from { opacity: 0; transform: scale(0.97) translateY(8px); } to { opacity: 1; transform: none; } }
@@ -266,16 +273,20 @@ a { color: inherit; text-decoration: none; }
   position: absolute; top: 18px; right: 18px; z-index: 5; width: 40px; height: 40px; border-radius: 50%;
   background: rgba(255,255,255,0.9); border: none; font-size: 20px; display: grid; place-items: center; box-shadow: var(--shadow-md);
 }
-.modal-3d { position: relative; background: #0a0c11; min-height: 420px; display: flex; flex-direction: column; }
-.modal-3d-host { flex: 1; position: relative; min-height: 360px; }
+.modal-3d { position: relative; background: #0a0c11; min-height: 420px; display: flex; flex-direction: column; min-width: 0; }
+.modal-3d-host { flex: 1; position: relative; min-height: 360px; min-width: 0; overflow: hidden; }
+/* One row that scrolls sideways when there are more cameras than room, rather
+   than a row that widens the modal (see .modal above) or wraps into three
+   rows eating the stadium. */
 .modal-3d-bar {
   display: flex; align-items: center; gap: 10px; padding: 12px 16px; background: #0a0c11;
   border-top: 1px solid rgba(255,255,255,0.08);
+  min-width: 0; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.25) transparent;
 }
-.cam-btn { background: rgba(255,255,255,0.08); color: #cdd3e0; border: none; border-radius: var(--r-pill); padding: 7px 14px; font-size: 13px; font-weight: 600; }
+.cam-btn { background: rgba(255,255,255,0.08); color: #cdd3e0; border: none; border-radius: var(--r-pill); padding: 7px 14px; font-size: 13px; font-weight: 600; flex: 0 0 auto; white-space: nowrap; }
 .cam-btn:hover { background: rgba(255,255,255,0.16); color: #fff; }
 
-.modal-side { display: flex; flex-direction: column; min-height: 0; }
+.modal-side { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
 .side-head { padding: 22px 24px 16px; border-bottom: 1px solid var(--line); }
 /* Clear of the close button, which sits over this corner: a long title ran
    underneath it ("with a hangin[X]"). */
@@ -394,7 +405,9 @@ a { color: inherit; text-decoration: none; }
 
 /* ---- responsive ---- */
 @media (max-width: 860px) {
-  .modal { grid-template-columns: 1fr; max-height: 94vh; }
+  .modal { grid-template-columns: minmax(0, 1fr); max-height: 94vh; overflow-y: auto; }
+  /* 96vw inside 24px of padding was 8px wider than the room on a 390px phone. */
+  .modal-root { padding: 12px; }
   .modal-3d { min-height: 300px; }
   .modal-3d-host { min-height: 260px; }
   .nav-links > a[href="/app"] { display: none; }
