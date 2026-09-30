@@ -1,3 +1,4 @@
+import { cleanAddressBar } from './core/utm';
 import './vendor/tabler-subset.css';
 import { loadTifoFonts } from './core/tifoFonts';
 import { installTheme } from './ui/theme';
@@ -58,6 +59,8 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 async function main(): Promise<void> {
   installTheme();
   initLang();
+  // The visit was counted when the page was sent; see core/utm.ts.
+  cleanAddressBar();
   applyDom(document);
   installConsent();
 
@@ -668,6 +671,42 @@ async function main(): Promise<void> {
   let currentView: ViewMode = '2d';
   const railFlag = document.getElementById('banner-studio-btn');
 
+  // ---------- Post it: a picture of the tifo in the stadium (ui/postMoment.ts) ----------
+  // The Stadium view, rendered fresh, is the picture. Asked for from 2D, the
+  // view switches first: the post is of the bowl, and the person sees that it
+  // is, rather than a picture of something they were not looking at.
+  const capturePreview = async (): Promise<HTMLCanvasElement | null> => {
+    if (currentView !== '3d' && currentView !== 'split') await setView('3d');
+    let p = preview;
+    for (let i = 0; !p && i < 60; i++) {
+      await new Promise((r) => setTimeout(r, 100));
+      p = preview;
+    }
+    if (!p) return null;
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    return p.captureStill(1080);
+  };
+  const postDeps = {
+    capture: capturePreview,
+    title: () => tb.postTarget().title,
+    publicDesignId: () => tb.postTarget().publicId,
+  };
+  /**
+   * The one-time "Post it?" card. Someone who opened an existing project has
+   * something to post; on a new one, only after they have made something (the
+   * seeded border pattern is ours, not theirs). A short wait, so it arrives
+   * after the bowl has, and not at all if they have already moved on.
+   */
+  let madeSomething = !isNew;
+  store.onDirty(() => { madeSomething = true; });
+  const offerPostSoon = (): void => {
+    if (!madeSomething) return;
+    window.setTimeout(() => {
+      if (currentView !== '3d' && currentView !== 'split') return;
+      void import('./ui/postMoment').then(({ maybeOfferPost }) => maybeOfferPost(postDeps));
+    }, 1800);
+  };
+
   const setView = async (next: ViewMode): Promise<void> => {
     if (next === '2d' || next === 'banner') surface = next;
     const bannerSplit = next === 'split' && surface === 'banner';
@@ -719,6 +758,7 @@ async function main(): Promise<void> {
           if (sel) sel.value = 'banner';
         }
       }
+      offerPostSoon();
     } else {
       preview?.stop();
     }
@@ -937,6 +977,9 @@ async function main(): Promise<void> {
     window.clearTimeout(bannerSaveTimer);
     bannerSaveTimer = window.setTimeout(writeBanners, 600);
   });
+  document.getElementById('post-tifo')?.addEventListener('click', () => {
+    void import('./ui/postMoment').then(({ openPostSheet }) => openPostSheet(postDeps));
+  });
   const matchDayBtn = document.getElementById('match-day') as HTMLButtonElement | null;
   let simOpen = false;
   matchDayBtn?.addEventListener('click', async () => {
@@ -1006,13 +1049,27 @@ async function main(): Promise<void> {
     if (msg) msg.textContent = `design fitted to ${tl(template.id)}.`;
   }
 
+  let clubStart = false;
+  let clubPrompt = '';
   // The first-run guide: someone's very first project, started blank. Never
   // for a project that already has content (a file, a copy, a design from the
   // gallery) or one the AI is about to draw, and never again after the first.
   if (isNew && !sharedLoaded && !intent?.prompt && !hasOnboarded()) {
     const { openOnboarding } = await import('./ui/onboarding');
     const choice = await openOnboarding(PATTERN_PRESETS);
-    if (choice) {
+    if (choice?.kind === 'club' && choice.prompt) {
+      // Start from your club: the free offline designer draws the whole bowl
+      // now, before the project is created, so the saved starting point is
+      // this design. The Stadium view follows once the project exists.
+      const msg = document.getElementById('message');
+      if (msg) msg.textContent = t('ob.clubMaking');
+      clubPrompt = choice.prompt;
+      clubStart = await tb.quickDesign(choice.prompt);
+      // A whole design lands as one grouped change, which does not come
+      // through onDirty the way a brush stroke does; say so directly.
+      if (clubStart) madeSomething = true;
+      if (msg && msg.textContent === t('ob.clubMaking')) msg.textContent = '';
+    } else if (choice) {
       const palette = PALETTE_PRESETS[choice.paletteName];
       if (palette) store.setPalette(palette.slice());
       // Apply the chosen starting point.
@@ -1070,7 +1127,12 @@ async function main(): Promise<void> {
   // there is one and in this browser when there is not. Created AFTER the
   // guide, so the saved copy is the starting point they chose.
   if (isNew) {
+    // A project started from a club is named after it, unless it already has a
+    // name of its own (the default one does not count).
+    const given = intent?.title?.trim();
+    const clubTitle = clubStart && clubPrompt && (!given || given === t('np.nameDefault')) ? clubPrompt : '';
     const title = (
+      clubTitle ||
       intent?.title?.trim() ||
       remapTitle ||
       sharedTitle ||
@@ -1083,6 +1145,9 @@ async function main(): Promise<void> {
       if (msg && !msg.textContent) msg.textContent = t('ed.proj.fromPick');
     }
     if (intent?.prompt) await tb.generate(intent.prompt, intent.autoName !== false);
+    // Their club's tifo, in their stadium: the moment to show it off (and
+    // where the one-time "Post it?" card comes in).
+    if (clubStart) void setView('3d');
   }
   // "Publish to the community" on the Projects page opens the project here,
   // where the publish dialog and its name, tags and remix choices live.

@@ -365,6 +365,52 @@ export class Preview3D {
     this.running = false;
   }
 
+  /**
+   * A square still of the whole bowl, for "Post it" (ui/postMoment.ts).
+   *
+   * Rendered at its own size and from the whole-bowl camera, not cropped out of
+   * whatever the editor happens to show: on a phone the preview is tall and
+   * narrow, and a square cut from its middle was mostly pitch, with the tifo
+   * reduced to a strip along the top edge. Everything is put back afterwards,
+   * so the view on screen does not move.
+   */
+  captureStill(size = 1080): HTMLCanvasElement {
+    const pos = this.camera.position.clone();
+    const target = this.controls.target.clone();
+    const aspect = this.camera.aspect;
+    const ratio = this.renderer.getPixelRatio();
+    const was = new THREE.Vector2();
+    this.renderer.getSize(was);
+    const out = document.createElement('canvas');
+    out.width = size;
+    out.height = size;
+    try {
+      this.renderer.setPixelRatio(1);
+      // false: leave the canvas's CSS size alone, so nothing on screen jumps.
+      this.renderer.setSize(size, size, false);
+      this.camera.aspect = 1;
+      const full = CAMERA_PRESETS.find((p) => p.name === 'Full view') ?? CAMERA_PRESETS[0];
+      // A little further back than the preset: a square is narrower than the
+      // editor's landscape view, and the side stands are the tifo too.
+      this.camera.position.set(full.position[0] * 1.12, full.position[1] * 1.06, full.position[2] * 1.12);
+      this.controls.target.set(...full.target);
+      this.camera.lookAt(this.controls.target);
+      this.camera.updateProjectionMatrix();
+      this.renderer.render(this.scene, this.camera);
+      out.getContext('2d')?.drawImage(this.canvas, 0, 0, size, size);
+    } finally {
+      this.renderer.setPixelRatio(ratio);
+      this.renderer.setSize(was.x, was.y, false);
+      this.camera.position.copy(pos);
+      this.controls.target.copy(target);
+      this.camera.aspect = aspect;
+      this.camera.updateProjectionMatrix();
+      this.controls.update();
+      this.renderer.render(this.scene, this.camera);
+    }
+    return out;
+  }
+
   /** Render a single frame on demand (used by the video/GIF exporter, which
    * pauses the internal loop and steps the reveal clock deterministically). */
   renderOnce(): void {

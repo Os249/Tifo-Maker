@@ -13,6 +13,8 @@
  */
 
 import { shareUrl, ogImageUrl, recordShare } from '../net/api';
+import { tagShareUrl, type ShareSource } from '../core/utm';
+import { track } from '../net/analytics';
 
 import { t } from './i18n';
 export interface ShareTarget {
@@ -76,21 +78,24 @@ function toast(msg: string): void {
 /** Open the share modal for a public tifo. */
 export function openShareModal(target: ShareTarget): void {
   ensureCss();
-  const url = target.url ?? shareUrl(target.id);
+  const base = target.url ?? shareUrl(target.id);
+  // Each platform gets its own tagged copy of the link, so an opened link is
+  // counted by where it was shared, WhatsApp and Discord included.
+  const url = (source: ShareSource): string => tagShareUrl(base, source);
   const text = `${target.title}: made with TifoMaker`;
   const enc = encodeURIComponent;
 
   // Platforms with a real web share-intent.
-  const intents: { id: string; label: string; icon: string; href: string }[] = [
-    { id: 'whatsapp', label: 'WhatsApp', icon: 'ti-brand-whatsapp', href: `https://wa.me/?text=${enc(`${text} ${url}`)}` },
-    { id: 'x', label: 'X', icon: 'ti-brand-x', href: `https://twitter.com/intent/tweet?text=${enc(text)}&url=${enc(url)}` },
-    { id: 'telegram', label: 'Telegram', icon: 'ti-brand-telegram', href: `https://t.me/share/url?url=${enc(url)}&text=${enc(text)}` },
-    { id: 'facebook', label: 'Facebook', icon: 'ti-brand-facebook', href: `https://www.facebook.com/sharer/sharer.php?u=${enc(url)}` },
-    { id: 'reddit', label: 'Reddit', icon: 'ti-brand-reddit', href: `https://www.reddit.com/submit?url=${enc(url)}&title=${enc(target.title)}` },
-    { id: 'email', label: 'Email', icon: 'ti-mail', href: `mailto:?subject=${enc(target.title)}&body=${enc(`${text}\n\n${url}`)}` },
+  const intents: { id: ShareSource; label: string; icon: string; href: string }[] = [
+    { id: 'whatsapp', label: 'WhatsApp', icon: 'ti-brand-whatsapp', href: `https://wa.me/?text=${enc(`${text} ${url('whatsapp')}`)}` },
+    { id: 'x', label: 'X', icon: 'ti-brand-x', href: `https://twitter.com/intent/tweet?text=${enc(text)}&url=${enc(url('x'))}` },
+    { id: 'telegram', label: 'Telegram', icon: 'ti-brand-telegram', href: `https://t.me/share/url?url=${enc(url('telegram'))}&text=${enc(text)}` },
+    { id: 'facebook', label: 'Facebook', icon: 'ti-brand-facebook', href: `https://www.facebook.com/sharer/sharer.php?u=${enc(url('facebook'))}` },
+    { id: 'reddit', label: 'Reddit', icon: 'ti-brand-reddit', href: `https://www.reddit.com/submit?url=${enc(url('reddit'))}&title=${enc(target.title)}` },
+    { id: 'email', label: 'Email', icon: 'ti-mail', href: `mailto:?subject=${enc(target.title)}&body=${enc(`${text}\n\n${url('email')}`)}` },
   ];
   // Platforms that can't take a prefilled web link → copy + hint.
-  const copyOnly: { id: string; label: string; icon: string }[] = [
+  const copyOnly: { id: ShareSource; label: string; icon: string }[] = [
     { id: 'instagram', label: 'Instagram', icon: 'ti-brand-instagram' },
     { id: 'tiktok', label: 'TikTok', icon: 'ti-brand-tiktok' },
     { id: 'discord', label: 'Discord', icon: 'ti-brand-discord' },
@@ -105,11 +110,11 @@ export function openShareModal(target: ShareTarget): void {
       ${'share' in navigator ? `<button class="sm-native"><i class="ti ti-share"></i> Share…</button>` : ''}
       <div class="sm-grid"></div>
       <div class="sm-row">
-        <input class="sm-link" readonly value="${url}" />
+        <input class="sm-link" readonly value="${url('copy')}" />
         <button class="sm-copy"><i class="ti ti-copy"></i> Copy</button>
       </div>
       <div class="sm-foot">
-        <a class="sm-open" href="${url}" target="_blank" rel="noopener">${t('sm.openPublic')} ↗</a>
+        <a class="sm-open" href="${base}" target="_blank" rel="noopener">${t('sm.openPublic')} ↗</a>
         <button class="sm-qrbtn"><i class="ti ti-qrcode"></i> QR code</button>
       </div>
       <div class="sm-qr" hidden></div>
@@ -131,8 +136,9 @@ export function openShareModal(target: ShareTarget): void {
   // Native share sheet (mobile).
   overlay.querySelector('.sm-native')?.addEventListener('click', async () => {
     try {
-      await navigator.share({ title: target.title, text, url });
+      await navigator.share({ title: target.title, text, url: url('webshare') });
       recordShare(target.id, 'webshare');
+      track('shared');
     } catch {
       /* user cancelled */
     }
@@ -147,6 +153,7 @@ export function openShareModal(target: ShareTarget): void {
     b.addEventListener('click', () => {
       window.open(p.href, '_blank', 'noopener,noreferrer');
       recordShare(target.id, p.id);
+      track('shared');
     });
     grid.appendChild(b);
   }
@@ -155,8 +162,9 @@ export function openShareModal(target: ShareTarget): void {
     b.className = 'sm-btn';
     b.innerHTML = `<i class="ti ${p.icon}"></i><span>${p.label}</span>`;
     b.addEventListener('click', async () => {
-      await navigator.clipboard.writeText(url).catch(() => {});
+      await navigator.clipboard.writeText(url(p.id)).catch(() => {});
       recordShare(target.id, p.id);
+      track('shared');
       toast(`${t('sm.copiedFor')} ${p.label}`);
     });
     grid.appendChild(b);
@@ -164,8 +172,9 @@ export function openShareModal(target: ShareTarget): void {
 
   // Copy link.
   overlay.querySelector('.sm-copy')!.addEventListener('click', async () => {
-    await navigator.clipboard.writeText(url).catch(() => {});
+    await navigator.clipboard.writeText(url('copy')).catch(() => {});
     recordShare(target.id, 'copy');
+    track('shared');
     toast(t('sm.copied'));
   });
 
@@ -180,7 +189,8 @@ export function openShareModal(target: ShareTarget): void {
     if (!qrWrap.querySelector('img')) {
       try {
         const QRCode = (await import('qrcode')).default;
-        const dataUrl = await QRCode.toDataURL(url, { width: 360, margin: 1 });
+        const dataUrl = await QRCode.toDataURL(url('qr'), { width: 360, margin: 1 });
+        recordShare(target.id, 'qr');
         const img = document.createElement('img');
         img.src = dataUrl;
         img.alt = t('sm.qrAlt');

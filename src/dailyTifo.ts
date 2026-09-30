@@ -52,7 +52,7 @@ export async function mountDailyTifo(): Promise<void> {
       <a class="fd-card" href="/t/${encodeURIComponent(item.id)}">
         <span class="fd-shot-wrap">
           <img class="fd-shot" src="/api/designs/${encodeURIComponent(item.id)}/thumbnail.png"
-               alt="${escapeHtml(name)}, a stadium tifo by @${escapeHtml(by)}" width="800" height="84" />
+               alt="${escapeHtml(name)}, a stadium tifo by @${escapeHtml(by)}" width="800" height="84" loading="lazy" decoding="async" />
         </span>
         <span class="fd-body">
           <span class="fd-main">

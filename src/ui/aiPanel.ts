@@ -71,6 +71,11 @@ export interface AiPanelHandle {
    * stopped). Used by a project created with "Generate with AI".
    */
   generate(prompt: string): Promise<TifoSpec | null>;
+  /**
+   * The free offline designer, applied at once: no sign-in, no model, no
+   * quota. Resolves with the applied spec, or null when busy or empty.
+   */
+  quickDesign(prompt: string): Promise<TifoSpec | null>;
 }
 
 export function mountAiPanel(deps: AiPanelDeps): AiPanelHandle {
@@ -94,7 +99,7 @@ export function mountAiPanel(deps: AiPanelDeps): AiPanelHandle {
   const quotaEl = $('#ai-quota');
   const stateEl = $('#ai-state');
   const cancelBtn = $<HTMLButtonElement>('#ai-cancel');
-  if (!promptEl || !genBtn) return { generate: async () => null }; // panel not present (e.g. phone build)
+  if (!promptEl || !genBtn) return { generate: async () => null, quickDesign: async () => null }; // panel not present (e.g. phone build)
 
   // Snapshot of the canvas before the first AI apply (for revert / clean regen).
   let baselineCells: Uint8Array | null = null;
@@ -826,6 +831,19 @@ export function mountAiPanel(deps: AiPanelDeps): AiPanelHandle {
       const before = lastSpec;
       await run(prompt);
       return lastSpec !== before ? lastSpec : null;
+    },
+    async quickDesign(prompt: string): Promise<TifoSpec | null> {
+      const text = prompt.trim();
+      if (busy || !text) return null;
+      busy = true;
+      try {
+        promptEl.value = text;
+        const spec = designShuffle(text, 1);
+        await applySpec(spec);
+        return spec;
+      } finally {
+        busy = false;
+      }
     },
   };
 }

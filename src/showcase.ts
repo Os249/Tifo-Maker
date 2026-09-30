@@ -34,6 +34,10 @@ export async function mountShowcase(): Promise<void> {
   const grid = document.getElementById(GRID_ID);
   const section = document.getElementById(SECTION_ID);
   if (!grid || !section) return;
+  // Not until it is nearly on screen. The eight thumbnails were ~350 KB, and
+  // they were downloaded on page load, below the fold, before a phone
+  // visitor could tap "Start designing".
+  await nearViewport(section);
 
   try {
     const { listGallery, thumbnailUrl } = await import('./net/api');
@@ -50,7 +54,7 @@ export async function mountShowcase(): Promise<void> {
       .map(
         (item) => `
         <a class="showcase-card" href="/community" aria-label="${escapeHtml(t('cm.cardBy').replace('{title}', tTitle(item)).replace('{name}', item.ownerName))}">
-          <div class="showcase-thumb" style="background-image:url('${thumbnailUrl(item.id)}')"></div>
+          <div class="showcase-thumb"><img src="${thumbnailUrl(item.id)}" alt="" loading="lazy" decoding="async" /></div>
           <div class="showcase-meta">
             <span class="showcase-title">${escapeHtml(tTitle(item))}</span>
             <span class="showcase-by">@${escapeHtml(item.ownerName)}</span>
@@ -64,3 +68,19 @@ export async function mountShowcase(): Promise<void> {
   }
 }
 
+/** Resolves when `el` comes within a screen of the viewport (at once without IntersectionObserver). */
+function nearViewport(el: Element): Promise<void> {
+  if (typeof IntersectionObserver === 'undefined') return Promise.resolve();
+  return new Promise((resolve) => {
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) {
+          io.disconnect();
+          resolve();
+        }
+      },
+      { rootMargin: '100% 0px' },
+    );
+    io.observe(el);
+  });
+}

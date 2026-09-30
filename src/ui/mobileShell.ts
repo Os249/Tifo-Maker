@@ -337,6 +337,30 @@ export function mountMobileShell(): MobileShell | null {
    * pruned rather than two fixed references.
    */
   const mdButtons = new Set<HTMLButtonElement>();
+  /**
+   * "Post it" (ui/postMoment.ts), beside Match Day. The desktop button sits in
+   * #cam-bar with Match Day, which the shell hides, so this proxies to it the
+   * same way Match Day does. A phone is where the share sheet can attach the
+   * picture straight to X or WhatsApp, so this is the control that matters most.
+   */
+  const postBtn = (cls: string, iconOnly = false): HTMLButtonElement => {
+    const b = el('button', cls) as HTMLButtonElement;
+    b.type = 'button';
+    b.dataset.post = '1';
+    // On the canvas it is a round icon beside Match Day: with its label the
+    // pair ran into the zoom control on a 390px screen. The More sheet and
+    // the first-time card both say "Post it" in words.
+    b.innerHTML = iconOnly
+      ? '<i class="ti ti-share" aria-hidden="true"></i>'
+      : `<i class="ti ti-share" aria-hidden="true"></i> <span>${t('post.btn')}</span>`;
+    if (iconOnly) b.setAttribute('aria-label', t('post.btn'));
+    b.title = t('post.btnT');
+    b.addEventListener('click', () => {
+      if (openTab) closeSheet();
+      proxy('#post-tifo');
+    });
+    return b;
+  };
   const matchDayBtn = (cls: string, icon = 'ti-building-stadium'): HTMLButtonElement => {
     const b = el('button', cls) as HTMLButtonElement;
     b.type = 'button';
@@ -383,6 +407,7 @@ export function mountMobileShell(): MobileShell | null {
     // First and full width: of everything behind More, this is the one people
     // came for, and a 74px tile in a grid of four does not say so.
     bodyEl.appendChild(matchDayBtn('m-wide primary'));
+    bodyEl.appendChild(postBtn('m-wide'));
     const grid = el('div', 'm-tools');
     for (const [icon, key, sel] of [
       ['ti-building-stadium', 'ed.rail.stadiumT', '#rail-stadium'],
@@ -477,6 +502,7 @@ export function mountMobileShell(): MobileShell | null {
   const mdPill = el('div', 'm-md');
   mdPill.hidden = true;
   mdPill.appendChild(matchDayBtn('m-md-b'));
+  mdPill.appendChild(postBtn('m-md-b m-post', true));
   type MView = '2d' | 'banner' | '3d';
   let mview: MView = '2d';
   const setView = (next: MView): void => {
@@ -485,6 +511,9 @@ export function mountMobileShell(): MobileShell | null {
     mkBn.classList.toggle('on', next === 'banner');
     mk3d.classList.toggle('on', next === '3d');
     mdPill.hidden = next !== '3d';
+    // The zoom pill zooms the SEAT canvas; on the bowl it does nothing, and it
+    // sat under Match Day (and now Post it) at the same height on a 390px screen.
+    document.body.classList.toggle('m-view-3d', next === '3d');
     // The stand chips jump the SEAT canvas to a stand; on a banner they have
     // nothing to jump to, and on the bowl the camera presets do the job.
     stands.hidden = next !== '2d';

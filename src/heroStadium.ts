@@ -12,6 +12,17 @@
 
 const HOST_ID = 'hero-3d';
 const MOCK_SELECTOR = '.stadium-mock';
+/**
+ * Phones get a picture of the same stadium instead of the live renderer.
+ *
+ * The renderer is 154 KB of Three.js (589 KB unpacked) plus a seat map built on
+ * the main thread, spent before a phone visitor can tap "Start designing",
+ * and in the late-September spike 80% of visitors were on phones, most inside
+ * X's in-app browser. The still is rendered from this module
+ * (scripts/hero-still.mts) and a tap on it starts the live one.
+ */
+const PHONE_QUERY = '(max-width: 860px)';
+export const HERO_STILL = '/hero-stadium.webp';
 
 function webglAvailable(): boolean {
   try {
@@ -45,12 +56,42 @@ async function paintShowpiece(map: import('./core/types').SeatMap): Promise<impo
   return store;
 }
 
+/** Show the pre-rendered stadium; a tap on it swaps in the live one. */
+function mountStill(host: HTMLElement, live: () => Promise<void>): void {
+  // "Drag to rotate · a live, interactive 3D preview" is not true of a picture,
+  // and its (invisible) space was a blank gap under the headline.
+  document.getElementById('hero-3d-wrap')?.classList.add('still');
+  const img = new Image();
+  img.className = 'hero-still';
+  img.alt = '';
+  img.decoding = 'async';
+  img.width = 960;
+  img.height = 720;
+  img.addEventListener('load', () => {
+    const mock = document.querySelector(MOCK_SELECTOR);
+    if (mock) (mock as HTMLElement).style.display = 'none';
+    host.classList.add('ready');
+  });
+  // No picture (offline, blocked): the CSS mock stays, exactly as before.
+  img.addEventListener('error', () => img.remove());
+  img.addEventListener('click', () => {
+    img.style.cursor = 'progress';
+    void live().then(() => {
+      img.remove();
+      document.getElementById('hero-3d-wrap')?.classList.remove('still');
+    });
+  }, { once: true });
+  img.src = HERO_STILL;
+  host.appendChild(img);
+}
+
 export async function mountHeroStadium(): Promise<void> {
   const host = document.getElementById(HOST_ID);
   if (!host) return;
 
   const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
   if (!webglAvailable()) return; // keep the CSS mock fallback
+  const phone = window.matchMedia?.(PHONE_QUERY).matches ?? false;
 
   // Defer the heavy work until the browser is idle / hero is visible.
   const start = async (): Promise<void> => {
@@ -85,6 +126,10 @@ export async function mountHeroStadium(): Promise<void> {
     }
   };
 
+  if (phone && !new URLSearchParams(location.search).has('hero3d')) {
+    mountStill(host, start);
+    return;
+  }
   const idle = (cb: () => void): void => {
     const ric = (window as Window & { requestIdleCallback?: (cb: () => void) => void }).requestIdleCallback;
     if (ric) ric(cb);

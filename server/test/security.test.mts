@@ -388,7 +388,7 @@ async function makeDesign(app: FastifyInstance, token: string, isPublic = false)
   const prodBare = configWarnings({ NODE_ENV: 'production' } as NodeJS.ProcessEnv).map((w) => w.key);
   assert.deepEqual(
     prodBare.sort(),
-    ['AI_ADMIN_PASSWORD', 'PUBLIC_URL', 'RESEND_API_KEY', 'SECURITY_ALERT_TO', 'TRUST_PROXY'],
+    ['AI_ADMIN_PASSWORD', 'AI_POLLINATIONS_KEY', 'PUBLIC_URL', 'RESEND_API_KEY', 'SECURITY_ALERT_TO', 'TRUST_PROXY'],
     'production names what it was not told',
   );
   const silentPortraits = configWarnings({ AI_IMAGE_PROVIDER: 'gemini', AI_ADMIN_PASSWORD: 'x' } as NodeJS.ProcessEnv);

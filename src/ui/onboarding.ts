@@ -1,6 +1,7 @@
 import type { PatternPreset } from '../core/patterns';
 import { PALETTE_PRESETS as PALETTES } from '../core/template';
-import { t, tl } from './i18n';
+import { matchClub } from '../core/clubs';
+import { getLang, t, tl } from './i18n';
 
 /**
  * First-run onboarding. Shown once (gated by a localStorage flag) on a normal
@@ -31,7 +32,7 @@ export function markOnboarded(): void {
   }
 }
 
-export type StarterKind = 'blank' | 'patterns' | 'crest' | 'text';
+export type StarterKind = 'blank' | 'patterns' | 'crest' | 'text' | 'club';
 
 export interface QuickStart {
   kind: StarterKind;
@@ -39,6 +40,35 @@ export interface QuickStart {
   patternId: string | null;
   /** True when the user asked for the guided tour here, rather than it launching itself. */
   wantsTour: boolean;
+  /** kind 'club': the brief for the offline designer (a club, colours, a word). */
+  prompt?: string;
+}
+
+/**
+ * "Start from your club": one tap, and the free offline designer
+ * (core/promptDesigner, no account, no model) fills the whole bowl in the
+ * club's real colours. The plan for phones (MOBILE_DESIGN_PLAN.md, M5) called
+ * this the biggest conversion lever: a finished tifo inside a minute, instead
+ * of an empty bowl and a brush. Saudi clubs first; they are most of the
+ * audience. Every name here is one core/clubs.ts knows, in both languages.
+ */
+export const CLUB_STARTS: { en: string; ar: string }[] = [
+  { en: 'Al Hilal', ar: 'الهلال' },
+  { en: 'Al Nassr', ar: 'النصر' },
+  { en: 'Al Ittihad', ar: 'الاتحاد' },
+  { en: 'Al Ahli', ar: 'الأهلي' },
+  { en: 'Al Shabab', ar: 'الشباب' },
+  { en: 'Al Ettifaq', ar: 'الاتفاق' },
+  { en: 'Real Madrid', ar: 'ريال مدريد' },
+  { en: 'Barcelona', ar: 'برشلونة' },
+];
+
+function clubDots(name: string): string {
+  const club = matchClub(name.toLowerCase());
+  return (club?.palette ?? [])
+    .slice(0, 2)
+    .map((c) => `<span class="ob-club-dot" style="background:${c}"></span>`)
+    .join('');
 }
 
 // Intent-first starter templates — framed as outcomes, not features. Each maps
@@ -82,9 +112,23 @@ export function openOnboarding(patterns: PatternPreset[]): Promise<QuickStart | 
           <h2 class="ob-h2">${t('ob.title')}</h2>
           <p class="ob-lead">${t('ob.lead')}</p>
         </div>
+        <div class="ob-section ob-club">
+          <div class="ob-label">${t('ob.club')}</div>
+          <p class="ob-club-lead">${t('ob.clubLead')}</p>
+          <div class="ob-clubs" id="ob-clubs">
+            ${CLUB_STARTS.map((c) => {
+              const name = getLang() === 'ar' ? c.ar : c.en;
+              return `<button type="button" class="ob-club-chip" data-club="${name}">${clubDots(c.en)}<span>${name}</span></button>`;
+            }).join('')}
+          </div>
+          <form class="ob-club-own" id="ob-club-own">
+            <input id="ob-club-input" type="text" maxlength="80" autocomplete="off" placeholder="${t('ob.clubOr')}" aria-label="${t('ob.clubOr')}" />
+            <button type="submit" class="primary">${t('ob.clubGo')}</button>
+          </form>
+        </div>
         <!-- No name field: the project was named when it was created. -->
         <div class="ob-section">
-          <div class="ob-label">${t('ob.start')}</div>
+          <div class="ob-label">${t('ob.orBuild')}</div>
           <div class="ob-starters" id="ob-starters">
             ${STARTERS.map(
               (s, i) => `
@@ -157,8 +201,8 @@ export function openOnboarding(patterns: PatternPreset[]): Promise<QuickStart | 
     for (const el of inertTargets) el.inert = true;
     void shell;
 
-    // The first starter card is the first thing the copy asks about.
-    const firstField = backdrop.querySelector('.ob-starter') as HTMLElement | null;
+    // The club row is the first thing on the dialog, so it gets focus.
+    const firstField = backdrop.querySelector('.ob-club-chip') as HTMLElement | null;
     const dialog = backdrop.querySelector('.ob-modal') as HTMLElement | null;
     requestAnimationFrame(() => (firstField ?? dialog)?.focus());
     if (dialog && !dialog.hasAttribute('tabindex')) dialog.tabIndex = -1;
@@ -242,6 +286,23 @@ export function openOnboarding(patterns: PatternPreset[]): Promise<QuickStart | 
         btn.classList.add('active');
         chosenPalette = (btn as HTMLElement).dataset.palette!;
       });
+    });
+
+    // A club (or anything typed): straight to the design, no second button.
+    const club = (prompt: string): void => {
+      const text = prompt.trim();
+      if (!text) return;
+      finish({ kind: 'club', paletteName: chosenPalette, patternId: null, wantsTour: false, prompt: text.slice(0, 80) });
+    };
+    backdrop.querySelectorAll<HTMLButtonElement>('.ob-club-chip').forEach((btn) => {
+      btn.addEventListener('click', () => club(btn.dataset.club ?? ''));
+    });
+    const own = backdrop.querySelector('#ob-club-own') as HTMLFormElement;
+    own.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const input = backdrop.querySelector('#ob-club-input') as HTMLInputElement;
+      if (input.value.trim()) club(input.value);
+      else input.focus();
     });
 
     const start = (wantsTour: boolean): void => {

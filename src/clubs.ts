@@ -1,3 +1,4 @@
+import { cleanAddressBar } from './core/utm';
 import { escapeHtml } from './core/escape';
 import './clubs.css';
 import { initLang, applyDom, toggleLang, t } from './ui/i18n';
@@ -7,6 +8,8 @@ import { installMobileNav } from './ui/mobileNav';
 import { installConsent } from './ui/consent';
 
 initLang();
+// The visit was counted when the page was sent; see core/utm.ts.
+cleanAddressBar();
 // Light / dark. The scheme is already on the <html> element (the inline head
 // script settles it before first paint); this wires the header toggle and the
 // translated labels.

@@ -22,7 +22,9 @@ export type FunnelEvent =
   | 'signed_up'
   | 'draft_claimed'    // their local draft was attached to the new account
   | 'published'
-  | 'exported';
+  | 'exported'
+  | 'post_opened'      // opened "Post it" (the picture of their tifo, ready to post)
+  | 'shared';          // sent a tifo or its picture to a platform (any share button)
 
 const SESSION_KEY = 'tifo_session_v1';
 const fired = new Set<FunnelEvent>();

@@ -6,6 +6,7 @@
 // whole job is browsing images, made before the consent bar is answered, and
 // when it failed all thirteen icons on the page rendered as nothing: the like
 // and comment counts became a bare "0  0".
+import { cleanAddressBar } from './core/utm';
 import { escapeHtml } from './core/escape';
 import './vendor/tabler-subset.css';
 import './community.css';
@@ -53,6 +54,8 @@ import {
 
 // ---------- bootstrap ----------
 initLang();
+// The visit was counted when the page was sent; see core/utm.ts.
+cleanAddressBar();
 // Light / dark. The scheme is already on the <html> element (the inline head
 // script settles it before first paint); this wires the header toggle and the
 // translated labels.

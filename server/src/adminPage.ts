@@ -182,6 +182,17 @@ const ADMIN_HTML_HEAD = `<!doctype html>
 
   /* Security tab. State chips carry a word as well as a colour, so the verdict
      survives colour-blindness and a greyscale screenshot. */
+  /* Link builder (Where from). */
+  .lb-grid{ display:grid; grid-template-columns:1fr 1fr; gap:9px 12px; margin:10px 0 0; }
+  .lb-grid label{ display:flex; flex-direction:column; gap:4px; font-size:12px; color:var(--mut); }
+  .lb-grid .lb-wide{ grid-column:1 / -1; }
+  .lb-grid select, .lb-grid input, .lb-out input{ padding:8px 10px; border-radius:8px; border:1px solid var(--line); background:var(--bg); color:var(--tx); font:inherit; font-size:13px; min-width:0; }
+  .lb-out{ display:flex; gap:8px; margin-top:12px; }
+  .lb-out input{ flex:1; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12px; }
+  .lb-r{ display:flex; align-items:center; justify-content:space-between; gap:10px; padding:5px 0; border-bottom:1px solid var(--line); font-size:12.5px; }
+  .lb-r:last-child{ border-bottom:none; }
+  .lb-rn{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  @media (max-width:560px){ .lb-grid{ grid-template-columns:1fr; } }
   .callout.bad{ border-left-color:var(--red); }
   .callout.bad b{ color:var(--red); }
   .st{ display:inline-block; min-width:52px; text-align:center; font-size:10.5px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; padding:2px 7px; border-radius:999px; border:1px solid var(--line); color:var(--mut); white-space:nowrap; }
@@ -522,11 +533,11 @@ function kpi(label, value, sub, subDim){
 
 var SOURCE_LABEL = {
   search:'Search engines', social:'Social media', ai:'AI assistants',
-  referral:'Other websites', campaign:'Tagged campaigns', direct:'Direct / QR / app', internal:'Internal'
+  referral:'Other websites', campaign:'Your tagged links', shared:'Shared by visitors', direct:'Direct / QR / app', internal:'Internal'
 };
 var SOURCE_COLOR = {
   search:'#3fb950', social:'#a371f7', ai:'#39c5cf',
-  referral:'#58a6ff', campaign:'#d29922', direct:'#8b949e', internal:'#6b7480'
+  referral:'#58a6ff', campaign:'#d29922', shared:'#f778ba', direct:'#8b949e', internal:'#6b7480'
 };
 
 /* Horizontal bar list. items: [{key, visits, visitors}] */
@@ -635,6 +646,9 @@ var FUNNEL_STEP = {
   draft_claimed:  ['Moved it to the account','the work survived the sign-up'],
   published:      ['Published it',           'visible in the community'],
   exported:       ['Exported a PDF or CSV',  'the production files'],
+  view_banner:    ['Opened the Banner view', ''],
+  post_opened:    ['Opened Post it',         'the picture of their tifo, ready to post'],
+  shared:         ['Shared it',              'a share button, the phone share sheet or copy link'],
 };
 
 /* Only these are a sequence everyone passes through in order, so only these get
@@ -802,7 +816,7 @@ function sharesSection(sh, days){
     }
   }
 
-  html += '<div class="callout"><b>A share is a button press, not a delivered message.</b> Once the platform takes over, nothing on this site can see whether it was sent, so treat <em>Shared</em> as intent and <em>Links opened</em> as the result. The two do not have to match, and opens can exceed shares when one link is passed on repeatedly.<br><br><b>The social row below is a floor.</b> WhatsApp, Telegram, Discord and most messaging apps strip the referrer, so links passed around there arrive looking like direct traffic. Real reach from sharing is higher than that row shows, never lower.</div>';
+  html += '<div class="callout"><b>A share is a button press, not a delivered message.</b> Once the platform takes over, nothing on this site can see whether it was sent, so treat <em>Shared</em> as intent and <em>Links opened</em> as the result. The two do not have to match, and opens can exceed shares when one link is passed on repeatedly.<br><br><b>Links opened is counted from the link itself.</b> Every share button tags its link with the platform (utm_medium=share), so an opened link is counted even from WhatsApp, Telegram and Discord, which send no referrer. Links shared before 30 Sep 2026 carried no tag and are not in it. The social row below is referrer-based and remains a floor.</div>';
   return html;
 }
 
@@ -894,7 +908,7 @@ function headerStrip(ov, tr, sh){
   var html = '<div class="strip">';
 
   html += '<div class="strip-cell"><div class="strip-val">' + fmt(visitors) + '</div>'
-    + '<div class="strip-lab">people</div>'
+    + '<div class="strip-lab">people <span class="dim" title="Visitors cannot be followed from one day to the next, so a person who comes back tomorrow counts again.">(per day, added up)</span></div>'
     + '<div class="strip-sub">' + (span
         ? (span.count === 1 ? 'on ' + niceDay(span.first) : niceDay(span.first) + ' to ' + niceDay(span.last))
         : 'nothing recorded yet') + '</div></div>';
@@ -925,6 +939,87 @@ function headerStrip(ov, tr, sh){
   return html + '</div>';
 }
 
+/* ---------- link builder ----------
+
+   Tagged links, so a post shows up by name under "Your tagged links" instead of
+   disappearing into "Social media" (or, from WhatsApp, "Direct"). Built on this
+   page only: nothing is sent anywhere, and the last few are kept in this
+   browser so a link used in a bio can be found again. */
+var SHARE_PLATFORM_LABEL = { x:'X', twitter:'X', whatsapp:'WhatsApp', telegram:'Telegram', facebook:'Facebook', reddit:'Reddit',
+  email:'Email', instagram:'Instagram', tiktok:'TikTok', discord:'Discord', snapchat:'Snapchat', copy:'Copied link', webshare:'Phone share sheet', qr:'QR code', link:'Link' };
+var LB_PLATFORMS = [['x','X'],['tiktok','TikTok'],['instagram','Instagram'],['snapchat','Snapchat'],['youtube','YouTube'],['whatsapp','WhatsApp'],['telegram','Telegram'],['reddit','Reddit'],['discord','Discord']];
+var LB_SPOTS = [['post','A post'],['bio','Profile bio'],['story','Story'],['ad','Paid ad'],['message','Message or group']];
+var LB_PAGES = [['/','Home page'],['/projects?new=1','Start designing'],['/community','Community'],['/clubs','For clubs']];
+var LB_KEY = 'tifo_admin_links_v1';
+function lbSlug(s){ return String(s || '').toLowerCase().trim().replace(/[^a-z0-9\u0600-\u06ff]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40); }
+function lbRecent(){ try { return JSON.parse(localStorage.getItem(LB_KEY) || '[]').slice(0, 8); } catch(e){ return []; } }
+function lbOpts(list){ var h=''; for (var i=0;i<list.length;i++) h += '<option value="' + esc(list[i][0]) + '">' + esc(list[i][1]) + '</option>'; return h; }
+function buildTaggedLink(base, page, platform, spot, name){
+  var u = new URL(page, base);
+  u.searchParams.set('utm_source', platform);
+  u.searchParams.set('utm_medium', spot);
+  var slug = lbSlug(name);
+  if (slug) u.searchParams.set('utm_campaign', slug);
+  return u.toString();
+}
+function linkBuilderCard(){
+  var recent = lbRecent(), rh = '';
+  for (var i=0;i<recent.length;i++){
+    rh += '<div class="lb-r"><span class="lb-rn">' + esc(recent[i].label) + '</span><button type="button" class="ghost lb-rc" data-url="' + esc(recent[i].url) + '">Copy</button></div>';
+  }
+  return '<div class="card" id="link-builder"><p class="lt">Make a tagged link</p>'
+    + '<p class="lc">Use it wherever you post. Its visits show up above as <b>platform / name</b>.</p>'
+    + '<div class="lb-grid">'
+    + '<label>Where<select id="lb-platform">' + lbOpts(LB_PLATFORMS) + '</select></label>'
+    + '<label>As<select id="lb-spot">' + lbOpts(LB_SPOTS) + '</select></label>'
+    + '<label>Opens<select id="lb-page">' + lbOpts(LB_PAGES) + '<option value="custom">A tifo link&hellip;</option></select></label>'
+    + '<label>Name<input id="lb-name" type="text" maxlength="40" placeholder="e.g. reveal-video-1" /></label>'
+    + '<label id="lb-custom-wrap" hidden class="lb-wide">Tifo link<input id="lb-custom" type="url" placeholder="https://tifomaker.org/t/..." /></label>'
+    + '</div>'
+    + '<div class="lb-out"><input id="lb-url" readonly aria-label="Tagged link" /><button type="button" id="lb-copy">Copy</button></div>'
+    + '<p class="note" id="lb-msg"></p>'
+    + (rh ? '<p class="lt" style="margin-top:12px">Recent links <span class="dim">(this browser)</span></p>' + rh : '')
+    + '</div>';
+}
+function wireLinkBuilder(){
+  var root = document.getElementById('link-builder');
+  if (!root || root.dataset.wired) return;
+  root.dataset.wired = '1';
+  var get = function(id){ return document.getElementById(id); };
+  var base = location.origin;
+  var update = function(){
+    var page = get('lb-page').value;
+    get('lb-custom-wrap').hidden = page !== 'custom';
+    var target = page;
+    if (page === 'custom'){
+      var raw = String(get('lb-custom').value || '').trim();
+      try { var cu = new URL(raw, base); target = cu.origin === base ? cu.pathname + cu.search : '/'; } catch(e){ target = '/'; }
+    }
+    get('lb-url').value = buildTaggedLink(base, target, get('lb-platform').value, get('lb-spot').value, get('lb-name').value);
+  };
+  ['lb-platform','lb-spot','lb-page','lb-name','lb-custom'].forEach(function(id){
+    get(id).addEventListener('input', update);
+    get(id).addEventListener('change', update);
+  });
+  var copy = async function(url, msg){
+    try { await navigator.clipboard.writeText(url); msg.textContent = 'Copied.'; }
+    catch(e){ msg.textContent = 'Select the link and copy it.'; }
+  };
+  get('lb-copy').addEventListener('click', function(){
+    var url = get('lb-url').value, msg = get('lb-msg');
+    void copy(url, msg);
+    var name = lbSlug(get('lb-name').value);
+    var label = get('lb-platform').value + ' / ' + (name || '-') + ' (' + get('lb-spot').value + ')';
+    var list = lbRecent().filter(function(r){ return r.url !== url; });
+    list.unshift({ url: url, label: label });
+    try { localStorage.setItem(LB_KEY, JSON.stringify(list.slice(0, 8))); } catch(e){}
+  });
+  root.querySelectorAll('.lb-rc').forEach(function(b){
+    b.addEventListener('click', function(){ void copy(b.getAttribute('data-url'), get('lb-msg')); });
+  });
+  update();
+}
+
 /* ---------- render ---------- */
 
 function trafficSection(tr, days){
@@ -950,8 +1045,8 @@ function trafficSection(tr, days){
   // "people arrive and leave" from "people arrive and look around".
   var perVisitor = t.visitors ? Math.round((t.visits / t.visitors) * 10) / 10 : 0;
   html += '<div class="grid">';
-  html += kpi('Page views', t.visits, fmt(t.visitors) + ' people', true);
-  html += kpi('Pages per person', perVisitor, 'higher means they looked around', true);
+  html += kpi('Page views', t.visits, fmt(t.visitors) + ' people (each counted once a day)', true);
+  html += kpi('Pages per person', perVisitor, 'per person per day; higher means they looked around', true);
   html += kpi('Bot requests filtered', t.botVisits, 'excluded from every number here', true);
   html += '</div>';
 
@@ -962,7 +1057,7 @@ function trafficSection(tr, days){
 
   html += '<div class="grid two" style="margin-top:10px">';
   html += barList('Referrers', 'which site or search engine sent them', tr.referrers, '#58a6ff');
-  html += barList('Landing pages', 'the first page they opened', tr.pages, '#3fb950');
+  html += barList('Pages viewed', 'every page view, by page', tr.pages, '#3fb950');
   html += '</div>';
 
   // Countries only fills in behind an edge that sets CF-IPCountry. Rather than
@@ -981,7 +1076,11 @@ function trafficSection(tr, days){
 
   html += '<div class="grid two" style="margin-top:10px">';
   html += barList('Browsers & in-app webviews', 'a TikTok or Instagram webview here means the link was opened inside that app', tr.browsers, '#58a6ff');
-  html += barList('Tagged campaigns', 'links you tagged with ?utm_source=..., nothing here means no tagged link was used', tr.campaigns, '#d29922');
+  html += barList('Your tagged links', 'platform / name, from links made with the builder below', tr.campaigns, '#d29922');
+  html += '</div>';
+  html += '<div class="grid two" style="margin-top:10px">';
+  html += barList('Shared by visitors', 'links passed on from the share buttons on the site, by platform (WhatsApp included)', tr.shared || [], '#f778ba', SHARE_PLATFORM_LABEL);
+  html += linkBuilderCard();
   html += '</div>';
 
   html += '<div class="callout ok"><b>How this is measured.</b> Recorded on the server, after each page is sent, so it counts every visitor rather than only those who accept analytics. No cookie is set. Your IP address is never stored: it is hashed once in memory with a secret that is regenerated every day and never written to disk, so visitors cannot be identified or followed from one day to the next. Referring URLs are reduced to a hostname before storage.</div>';
@@ -1035,7 +1134,7 @@ function tabBadge(id){
     return queue ? '<span class="pill warn">' + fmt(queue) + '</span>' : '';
   }
   if (id === 'traffic'){
-    var v = DATA.tr && DATA.tr.totals ? DATA.tr.totals.views : null;
+    var v = DATA.tr && DATA.tr.totals ? DATA.tr.totals.visits : null;
     return v ? '<span class="pill">' + fmt(v) + '</span>' : '';
   }
   if (id === 'security'){
@@ -1365,6 +1464,8 @@ function aiTab(){
   html += kpi('Blocked by safety', W.blocked, fmt(T.blocked) + ' all time', true);
   html += '</div>';
 
+  html += picturesSection(a.pictures);
+
   /* The question that started this: has anyone actually been turned away? */
   html += '<h2 class="sec">Has anyone hit the limit? <span class="hint">all time, not the window</span></h2>';
   if (!a.hitCap || !a.hitCap.length){
@@ -1421,7 +1522,7 @@ var REASON_INFO = {
   truncated:       ['Answer cut off', 'The model ran out of output tokens mid-design. Raise AI_MAX_OUTPUT_TOKENS.'],
   bad_output:      ['Unreadable answer', 'The model replied, but not with JSON we could read.'],
   invalid_design:  ['Design failed validation', 'JSON arrived but the spec validator rejected it. The detail lists the first problems.'],
-  picture_failed:  ['Picture not generated', 'The design was delivered without its picture and was not charged. The image provider refused or failed.'],
+  picture_failed:  ['Picture not generated', 'The design was delivered without its picture and was not charged. Every picture provider was tried (main, then backup) and none delivered. The Pictures section above says which one is failing and why.'],
   no_provider:     ['No AI provider configured', 'Set GEMINI_API_KEY, ANTHROPIC_API_KEY or OPENAI_API_KEY on the server.'],
   upstream_error:  ['Provider error', 'The provider answered with a server error (5xx).'],
   unknown:         ['Unclassified', 'Read the detail; if it recurs, it deserves its own category in aiFailure.ts.']
@@ -1458,6 +1559,71 @@ function aiFailuresSection(a){
   return html;
 }
 
+/* ---- pictures: which provider is making them, and is it working ----
+
+   Live state since the last restart (server/src/imageHealth.ts), not history.
+   Built after the Pollinations credit ran out on 28 Sep 2026 and every Super AI
+   design shipped with a bare stand for a day before anyone noticed. */
+var PIC_KIND = { credit:'out of credit', auth:'key refused', rate:'rate limited', down:'not answering', refused:'refused the prompt', other:'failed' };
+function picChip(cls, word){ return '<span class="st ' + cls + '">' + esc(word) + '</span>'; }
+function inMinutes(iso){
+  var m = Math.max(1, Math.round((new Date(iso).getTime() - Date.now())/60000));
+  return m + ' min';
+}
+function picturesSection(p){
+  if (!p) return '';
+  var list = p.providers || [];
+  var html = '<h2 class="sec">Pictures <span class="hint">since the server started ' + esc(timeAgo(p.since)) + '</span></h2>';
+  if (!list.length){
+    return html + '<div class="card"><p class="empty">No picture provider has a key, so AI designs arrive without pictures.</p>'
+      + '<p class="note">Set AI_POLLINATIONS_KEY (from enter.pollinations.ai) or GEMINI_API_KEY in Railway.</p></div>';
+  }
+  var mainRow = null, backupRow = null;
+  html += '<div class="card">';
+  for (var i = 0; i < list.length; i++){
+    var r = list[i], chip, bits = [];
+    if (r.provider === p.main) mainRow = r;
+    if (r.provider === p.backup) backupRow = r;
+    var lastFailAt = r.lastFailure ? new Date(r.lastFailure.at).getTime() : 0;
+    var lastOkAt = r.lastOk ? new Date(r.lastOk).getTime() : 0;
+    if (r.pausedUntil) chip = picChip('bad', 'paused');
+    else if (lastFailAt && lastFailAt > lastOkAt) chip = picChip('warn', 'failing');
+    else if (lastOkAt) chip = picChip('good', 'working');
+    else chip = picChip('info', 'not used yet');
+    bits.push(fmt(r.delivered) + ' delivered, ' + fmt(r.failed) + ' failed');
+    if (r.pausedUntil) bits.push('<b>' + esc(PIC_KIND[r.pausedFor] || 'paused') + '</b>: skipped while the other provider works, tried again in ' + esc(inMinutes(r.pausedUntil)));
+    if (r.lastFailure) bits.push('last problem ' + esc(timeAgo(r.lastFailure.at)) + ': ' + esc(PIC_KIND[r.lastFailure.kind] || r.lastFailure.kind)
+      + (r.lastFailure.detail ? ' <span class="dim">(' + esc(r.lastFailure.detail) + ')</span>' : ''));
+    var role = r.provider === p.main ? 'main' : (r.provider === p.backup ? 'backup' : 'not in use');
+    html += '<div class="posture-row"><div>' + chip + '</div><div><b>' + esc(r.label) + '</b> <span class="dim">' + role + '</span></div><div class="pd">' + bits.join(' &middot; ') + '</div></div>';
+  }
+  html += '</div>';
+
+  if (mainRow && mainRow.pausedUntil){
+    html += backupRow && !backupRow.pausedUntil
+      ? '<div class="callout"><b>' + esc(backupRow.label) + ' is making the pictures</b> because ' + esc(mainRow.label) + ' is ' + esc(PIC_KIND[mainRow.pausedFor] || 'paused') + '. People are not affected' + (backupRow.provider === 'gemini' ? ', but Gemini pictures cost more.' : '.') + '</div>'
+      : '<div class="callout bad"><b>No provider can make pictures right now.</b> ' + esc(mainRow.label) + ' is ' + esc(PIC_KIND[mainRow.pausedFor] || 'paused') + (backupRow ? ' and the backup is failing too' : ' and there is no backup') + '. AI designs arrive without their picture (and are not charged).</div>';
+  }
+  if (!p.backup){
+    html += '<p class="note">No backup provider: when ' + esc(mainRow ? mainRow.label : 'the main provider') + ' fails, pictures are lost. Setting both AI_POLLINATIONS_KEY and GEMINI_API_KEY gives each a backup (AI_IMAGE_FALLBACK=none turns that off).</p>';
+  }
+  var sums = [];
+  sums.push(fmt(p.servedByBackup) + ' picture' + (p.servedByBackup === 1 ? '' : 's') + ' made by the backup');
+  sums.push(fmt(p.failedEverywhere) + ' lost (no provider delivered)');
+  html += '<p class="note">' + sums.join(' &middot; ') + '. '
+    + (p.alerts && p.alerts.to
+      ? 'Problems are emailed to ' + esc(p.alerts.to) + ': when a provider runs out of credit or its key is refused, and when pictures fail everywhere.'
+      : '<b>Nobody is emailed about picture problems.</b> Set AI_ALERT_TO (or SECURITY_ALERT_TO) in Railway.')
+    + '</p>';
+  var sent = (p.alerts && p.alerts.sent) || [];
+  if (sent.length){
+    html += '<h3 class="sub">Picture alerts <span class="hint">newest first &middot; since the server started</span></h3>';
+    html += tableCard(['When','Alert','Emailed'], sent,
+      [function(d){ return timeAgo(d.at); }, function(d){ return d.subject; }, function(d){ return d.delivered ? 'yes' : (d.error || 'sending'); }]);
+  }
+  return html;
+}
+
 /* chartCard wants a plain {day,count} series. */
 function seriesOf(perDay, key){
   var out = [];
@@ -1479,6 +1645,7 @@ function paintSection(){
   if (currentTab === 'email') wireEmailTest();
   if (currentTab === 'security') wireSecurity();
   if (currentTab === 'library') wireLibrary();
+  if (currentTab === 'traffic') wireLinkBuilder();
 }
 
 /* ---- security: is anyone attacking the site, and is it set up to cope ----

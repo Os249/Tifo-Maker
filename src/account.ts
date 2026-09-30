@@ -10,6 +10,7 @@
  * Each section saves on its own and reports its own result. One page-level Save
  * would make a single failure look like five.
  */
+import { cleanAddressBar } from './core/utm';
 import {
   fetchMe,
   isSignedIn,
@@ -388,6 +389,8 @@ $('ac-signout')?.addEventListener('click', () => {
 // initLang() reads the saved choice. Without it the page renders in English
 // with an Arabic document direction, which is worse than either alone.
 initLang();
+// The visit was counted when the page was sent; see core/utm.ts.
+cleanAddressBar();
 document.documentElement.lang = getLang();
 applyDom(document);
 

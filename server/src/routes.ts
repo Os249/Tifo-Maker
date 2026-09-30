@@ -16,6 +16,8 @@ import { renderDistributionPdf } from '../../src/export/distributionPdf';
 import { tmpdir } from 'node:os';
 import { readFile, unlink } from 'node:fs/promises';
 import type { AiEventsRepository, AiUsageRepository, AuthRepository, DesignRepository, EventsRepository, LeadsRepository, SocialRepository } from './repo';
+import { picturesStatus } from './imageAssets';
+import { imageHealth } from './imageHealth';
 import { registerAiRoutes, verifyUnlock } from './aiRoutes';
 import { stadiumPlan } from './stadiumPlan';
 import { emailHealth, type EmailSender } from './email';
@@ -30,7 +32,7 @@ import type { StadiumSubmissionRepository } from './stadiumRepo';
 import type { DailyFeatureRepository } from './featureRepo';
 import { DailyFeaturePicker, utcDay, type FeaturedTifo } from './featured';
 import type { AdminStatsRepository } from './statsRepo';
-import { buildVisit, isSocialHost, type TrafficRepository } from './trafficRepo';
+import { buildVisit, isSocialReferrer, type TrafficRepository } from './trafficRepo';
 import { isFeedbackKind, type FeedbackContext, type FeedbackRepository } from './feedbackRepo';
 import { adminHtml, ADMIN_JS, ADMIN_UNLOCK_JS } from './adminPage';
 import { isValidTemplate } from '../../src/core/customStadiums';
@@ -234,6 +236,11 @@ export interface AppOptions {
   emailSender?: EmailSender;
   /** Where in-product feedback is emailed. Unset means store-only. */
   feedbackTo?: string;
+  /**
+   * Where AI picture alerts go (a provider out of credit or refusing its key,
+   * pictures failing everywhere). Unset: recorded on /admin → AI, not emailed.
+   */
+  aiAlertTo?: string;
   /** Public base URL for links in emails. Defaults to the request's own origin. */
   publicUrl?: string;
   /**
@@ -658,6 +665,9 @@ export async function buildApp(
     'draft_claimed',   // the local draft was attached to that new account
     'published',       // published to the community
     'exported',        // exported a production PDF/CSV
+    'view_banner',     // opened the Banner view (sent since the banners release, dropped until now)
+    'post_opened',     // opened "Post it": the picture of their tifo, ready to post
+    'shared',          // pressed a share: a platform, the phone's share sheet, copy
   ];
   const FUNNEL_SET = new Set(FUNNEL_STEPS);
 
@@ -750,10 +760,12 @@ export async function buildApp(
     // history instead — the difference is the whole point of the section.
     app.get('/api/admin/ai', async (req, reply) => {
       if (!(await adminAccess(req))) return reply.code(403).send({ error: 'admin access required' });
-      if (!options.aiEvents) return { days: 0, since: null, unavailable: true };
+      if (!options.aiEvents) return { days: 0, since: null, unavailable: true, pictures: picturesStatus() };
       const q = req.query as { days?: string };
       const days = Math.min(365, Math.max(1, Number(q.days) || 30));
-      return options.aiEvents.stats(days);
+      // Pictures are live state since the last restart, not history, so they
+      // sit beside the stats rather than in ai_events.
+      return { ...(await options.aiEvents.stats(days)), pictures: picturesStatus() };
     });
 
     app.get('/api/admin/shares', async (req, reply) => {
@@ -776,6 +788,7 @@ export async function buildApp(
         pages: { key: string; visits: number; visitors: number }[];
         social: { key: string; visits: number; visitors: number }[];
       } | null = null;
+      let opened: { key: string; visits: number; visitors: number }[] = [];
       if (options.traffic) {
         const t = await options.traffic.summary(days);
         const shared = t.pages.filter((p) => /^\/(d|t)\//.test(p.key));
@@ -785,8 +798,25 @@ export async function buildApp(
           pages: shared.slice(0, 10),
           // A floor, not a count: most messaging apps send no referrer at all,
           // so links passed round WhatsApp or Discord arrive looking direct.
-          social: t.referrers.filter((r) => isSocialHost(r.key)).slice(0, 10),
+          // Stored referrers are labels ("X / Twitter"), so they are matched as
+          // labels; matching them as hostnames left this row always empty.
+          social: t.referrers.filter((r) => isSocialReferrer(r.key)).slice(0, 10),
         };
+        opened = t.shared;
+      }
+      // "Links opened" used to count design_shares rows of kind 'open', which
+      // nothing ever wrote, so it read 0 forever. The share buttons now tag
+      // their links (utm_medium=share, utm_source=<platform>), and the visits
+      // table already counts everyone who arrives on one, WhatsApp included.
+      if (options.traffic) {
+        const byKey = new Map(summary.platforms.map((p) => [p.key, { ...p }]));
+        for (const o of opened) {
+          const row = byKey.get(o.key) ?? { key: o.key, shares: 0, opens: 0 };
+          row.opens = o.visits;
+          byKey.set(o.key, row);
+        }
+        summary.platforms = [...byKey.values()].sort((a, b) => b.shares - a.shares || b.opens - a.opens);
+        summary.opens = opened.reduce((n, o) => n + o.visits, 0);
       }
       return reply.send({ ...summary, inbound });
     });
@@ -900,6 +930,9 @@ export async function buildApp(
   // Auth-gated with a per-account free quota; the spec is validated server-side
   // with the same validator the client uses before a credit is spent.
   if (options.aiUsage) {
+    // Picture alerts use the same sender as account mail, so the Email tab's
+    // delivery counts cover them too.
+    imageHealth.configure({ sender: options.emailSender, to: options.aiAlertTo, publicUrl: options.publicUrl });
     registerAiRoutes(app, {
       aiUsage: options.aiUsage,
       aiEvents: options.aiEvents,
@@ -3423,7 +3456,7 @@ export async function buildApp(
         `<a class="fd-card" href="/t/${esc(d.id)}">` +
         `<span class="fd-shot-wrap">` +
         `<img class="fd-shot" src="${base}/api/designs/${esc(d.id)}/thumbnail.png"` +
-        ` alt="${esc(name)}, a stadium tifo by @${esc(by)}" width="800" height="84" /></span>` +
+        ` alt="${esc(name)}, a stadium tifo by @${esc(by)}" width="800" height="84" loading="lazy" decoding="async" /></span>` +
         `<span class="fd-body"><span class="fd-main">` +
         `<span class="fd-title" data-title-en="${esc(name)}"${nameAr ? ` data-title-ar="${esc(nameAr)}"` : ''}>${esc(name)}</span>` +
         `<span class="fd-by">@${esc(by)}</span></span>` +

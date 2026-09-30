@@ -24,6 +24,7 @@
     "test:admin-review": "node e2e-admin-review.mjs",
     "test:flyover": "node e2e-flyover.mjs",
     "test:layers": "node e2e-layers.mjs",
+    "test:growth": "node e2e-growth.mjs",
     "server": "tsx server/src/server.ts",
     "server:watch": "tsx watch server/src/server.ts",
     "server:local": "node --env-file=.env --import tsx server/src/server.ts",
@@ -32,6 +33,8 @@
     "test:security": "tsx server/test/security.test.mts",
     "test:soc": "tsx server/test/soc.test.mts",
     "test:deploy": "tsx server/test/deploy.test.mts",
+    "test:images": "tsx server/test/images.test.mts",
+    "test:growth-server": "tsx server/test/growth.test.mts",
     "security:check": "npm run test:security && npm run test:soc && npm run test:deploy && node scripts/secret-scan.mjs && npm audit --omit=dev --audit-level=high",
     "test:verify": "npm run build && node e2e-verify.mjs",
     "build:prod": "tsc --noEmit && vite build",
@@ -47,7 +50,8 @@
     "shots:banner": "tsx scripts/banner-shots.mts",
     "sweep:banner": "tsx scripts/banner-sweep.mts",
     "shots:accessories": "tsx scripts/accessories-shots.mts",
-    "shots:jewel": "tsx scripts/jewel-shots.mts"
+    "shots:jewel": "tsx scripts/jewel-shots.mts",
+    "hero:still": "tsx scripts/hero-still.mts"
   },
   "dependencies": {
     "@fastify/helmet": "^13.0.2",

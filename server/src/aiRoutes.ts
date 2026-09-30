@@ -32,7 +32,7 @@ import { ensureHeroImage } from '../../src/core/heroImage';
 import { matchClub } from '../../src/core/clubs';
 import { generateSpecViaProvider, buildDirectorPrompt, critiqueSpecViaProvider, activeProvider, clubHintLine, writeCopy, copyLine } from './aiProvider';
 import { readGroundPhoto, PHOTO_SAMPLE_DEFAULT, PHOTO_SAMPLE_MAX } from './photoRead';
-import { generateImage } from './imageAssets';
+import { generateImage, type ImageResult } from './imageAssets';
 import { envNum } from './env';
 import { TtlCache, cacheKey } from './aiCache';
 import { screenPrompt } from './promptSafety';
@@ -490,11 +490,14 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
           palette: spec.palette,
           rows: regionRowsHint(region),
         };
-        const draw = (p: string): Promise<{ url: string | null; error?: string }> =>
+        const draw = (p: string): Promise<ImageResult> =>
           generateImage(p, style).catch((e) => ({ url: null, error: String(e) }));
 
-        let { url, error } = await draw(layer.prompt);
-        if (!url) {
+        let { url, error, kind } = await draw(layer.prompt);
+        // An account that is out of credit, a refused key or a rate limit say
+        // nothing about the prompt, so a second prompt only doubles the wait
+        // and the bill for a picture that cannot come.
+        if (!url && kind !== 'credit' && kind !== 'auth' && kind !== 'rate') {
           // A refused prompt is usually the BRIEF, not the subject: a player's
           // name, a club, a phrase some provider filter dislikes. Try the bare
           // subject once before giving up on the hero — a generic eagle beats an

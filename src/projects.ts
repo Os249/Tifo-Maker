@@ -11,6 +11,7 @@
  * search and pins find anything faster than a tree would.
  */
 
+import { cleanAddressBar } from './core/utm';
 import './vendor/tabler-subset.css';
 import './community.css';
 import './projects.css';
@@ -706,6 +707,8 @@ async function refreshAuth(): Promise<void> {
 // ------------------------------------------------------------------ boot ---
 
 initLang();
+// The visit was counted when the page was sent; see core/utm.ts.
+cleanAddressBar();
 initScheme();
 setSchemeLabels({ dark: t('theme.dark'), light: t('theme.light') });
 applyDom(document);

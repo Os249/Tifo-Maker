@@ -95,6 +95,13 @@ export interface ToolbarApi {
   generate(prompt: string, autoName: boolean): Promise<boolean>;
   /** Open the Publish flow, as if its button had been pressed. */
   publish(): void;
+  /**
+   * Draw a design from a brief with the free offline designer: no account, no
+   * model, no quota. The first-run "Start from your club" uses it.
+   */
+  quickDesign(prompt: string): Promise<boolean>;
+  /** What "Post it" needs: the name to print, and the public page if there is one. */
+  postTarget(): { title: string; publicId: string | null };
   /** The key this project's banners are kept under in this browser, if any. */
   bannersKey(): string | null;
 }
@@ -2016,6 +2023,10 @@ export function mountToolbar(
       }
       track('published');
       message.textContent = i18nT('publish.done');
+      // The moment it is public is the moment it can be shared: offer it now,
+      // with the links already tagged, rather than leaving Share as a separate
+      // button to find later (sharing ran at three presses a month).
+      openShareModal({ id: designId, title: docTitle.value.trim() || i18nT('ed.docTitlePlaceholder') });
     } catch (err) {
       message.textContent = `${i18nT('publish.failed')}: ${(err as Error).message}`;
     } finally {
@@ -3319,6 +3330,17 @@ export function mountToolbar(
 
     publish() {
       publishBtnEl?.click();
+    },
+
+    async quickDesign(prompt) {
+      return (await aiPanel.quickDesign(prompt)) !== null;
+    },
+
+    postTarget() {
+      return {
+        title: docTitle.value.trim() || i18nT('ed.docTitlePlaceholder'),
+        publicId: publicChk.checked ? designId : null,
+      };
     },
 
     bannersKey() {

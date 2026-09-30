@@ -138,6 +138,8 @@ a { color: inherit; text-decoration: none; }
 }
 .hero-3d.ready { opacity: 1; }
 .hero-3d canvas { width: 100% !important; height: 100% !important; display: block; border-radius: 18px; }
+/* Phones: the pre-rendered stadium (heroStadium.ts). A tap starts the live one. */
+.hero-3d .hero-still { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; display: block; cursor: pointer; }
 /* Interactive-preview header — only revealed once the real 3D is up. */
 .hero-3d-wrap { width: 100%; max-width: 560px; display: flex; flex-direction: column; align-items: center; }
 .hero-3d-header { opacity: 0; transition: opacity 0.5s ease 0.2s; text-align: center; margin-bottom: 10px; }
@@ -386,18 +388,20 @@ a { color: inherit; text-decoration: none; }
 /* ============ RESPONSIVE ============ */
 @media (max-width: 860px) {
   .hero { grid-template-columns: 1fr; gap: 40px; padding-top: 48px; }
-  /* The 3D stadium stays first - it is the best thing on the page - but the
-     eyebrow and headline move above it, so the first screenful says what this
-     is before it shows what it looks like. It used to open with a button
-     labelled "Preview Tifos" and a render, with the sentence that explains
-     them below the fold. */
+  /* The eyebrow and headline come first, so the first screenful says what
+     this is before it shows what it looks like (it used to open on a render
+     with the explaining sentence below the fold). Then the button, THEN the
+     stadium: with the stadium and the lead paragraph above it, "Start
+     designing" sat below the fold on a 390px phone, and 80% of the
+     late-September visitors were on phones. */
   .hero-copy { display: contents; }
-  .eyebrow { order: -3; }
-  .hero-copy h1 { order: -2; }
+  .eyebrow { order: -5; }
+  .hero-copy h1 { order: -4; }
+  .cta-row { order: -3; }
+  .trust-line { order: -2; }
   .hero-visual { order: -1; }
   .lead { order: 1; }
-  .cta-row { order: 2; }
-  .trust-line { order: 3; }
+  .hero-3d-wrap.still .hero-3d-header { display: none; }
   .stadium-mock { max-width: 340px; }
   .trio { grid-template-columns: 1fr; }
   .clubs-inner { grid-template-columns: 1fr; gap: 36px; padding: 40px 28px; }
@@ -457,7 +461,8 @@ a { color: inherit; text-decoration: none; }
   text-decoration: none; color: inherit; transition: transform 0.16s ease, box-shadow 0.16s ease;
 }
 .showcase-card:hover { transform: translateY(-4px); box-shadow: 0 20px 50px rgba(20,12,40,0.16); }
-.showcase-thumb { aspect-ratio: 16 / 10; background: #11121a center/cover no-repeat; }
+.showcase-thumb { aspect-ratio: 16 / 10; background: #11121a center/cover no-repeat; overflow: hidden; }
+.showcase-thumb img { display: block; width: 100%; height: 100%; object-fit: cover; }
 .showcase-meta { padding: 12px 14px; display: flex; flex-direction: column; gap: 2px; }
 .showcase-title { font-weight: 700; font-size: 15px; line-height: 1.25; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .showcase-by { font-size: 13px; color: var(--blue); font-weight: 600; }

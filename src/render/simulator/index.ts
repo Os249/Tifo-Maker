@@ -1017,10 +1017,34 @@ export class MatchDaySimulator {
     dbg('setWetPitch', on, '-> pitch roughness', this.pitchMat.roughness, 'metalness', this.pitchMat.metalness);
   }
 
-  /** Capture the current frame as a PNG data URL (Wave G — poster export). */
+  /**
+   * Capture the current frame as a PNG data URL (Wave G — poster export).
+   *
+   * Marked "tifomaker.org" in the corner, the same mark and size every
+   * recording carries. The snapshot was the one export that went out bare,
+   * and it is the one most likely to be posted as it is.
+   */
   snapshot(): string {
     this.effects.render(this.renderer, this.scene, this.camera);
-    return this.renderer.domElement.toDataURL('image/png');
+    const src = this.renderer.domElement;
+    const w = src.width;
+    const h = src.height;
+    const comp = document.createElement('canvas');
+    comp.width = w;
+    comp.height = h;
+    const ctx = comp.getContext('2d');
+    if (!ctx || !w || !h) return src.toDataURL('image/png');
+    ctx.drawImage(src, 0, 0);
+    const fs = Math.max(14, Math.round(h * 0.026));
+    const txt = 'tifomaker.org';
+    ctx.font = `600 ${fs}px system-ui, -apple-system, sans-serif`;
+    const tw = ctx.measureText(txt).width;
+    const pad = Math.round(fs * 0.5);
+    ctx.fillStyle = 'rgba(0,0,0,0.4)';
+    ctx.fillRect(w - tw - pad * 3, h - fs - pad * 2, tw + pad * 2, fs + pad);
+    ctx.fillStyle = 'rgba(255,255,255,0.92)';
+    ctx.fillText(txt, w - tw - pad * 2, h - Math.round(pad * 1.5));
+    return comp.toDataURL('image/png');
   }
 
   private recording = false;

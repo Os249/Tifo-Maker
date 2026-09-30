@@ -1,3 +1,4 @@
+import { tagShareUrl } from '../core/utm';
 import type { SeatMap, DesignState } from '../core/types';
 import { DesignStore } from '../core/design';
 import { EMPTY_SEAT_COLOR } from '../core/template';
@@ -126,11 +127,13 @@ export async function mountViewer(ctx: ViewerContext): Promise<void> {
   });
 
   document.getElementById('v-share')!.addEventListener('click', async () => {
-    const url = ctx.designId ? `${location.origin}/d/${ctx.designId}` : location.href;
+    // The public page, tagged, like every other share button: /t/ is the page
+    // with the link card, and the tag is what lets an opened link be counted.
+    const plain = ctx.designId ? `${location.origin}/t/${ctx.designId}` : location.href;
     if (navigator.share) {
-      await navigator.share({ title: ctx.title, url }).catch(() => {});
+      await navigator.share({ title: ctx.title, url: tagShareUrl(plain, 'webshare') }).catch(() => {});
     } else {
-      await navigator.clipboard.writeText(url).catch(() => {});
+      await navigator.clipboard.writeText(tagShareUrl(plain, 'copy')).catch(() => {});
     }
   });
   document.getElementById('v-open')!.addEventListener('click', () => {

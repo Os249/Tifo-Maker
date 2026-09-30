@@ -1,13 +1,18 @@
 /**
  * Server-side image generation for the AI Tifo Designer (Phase 5).
  *
- * Provider-agnostic. Defaults to Pollinations.ai — FREE, no API key, FLUX-based —
- * so portraits work at zero cost during the MVP. Switch to Gemini's paid image
- * model (higher quality) later with AI_IMAGE_PROVIDER=gemini.
+ * Provider-agnostic. Defaults to Pollinations.ai (FLUX, cheap, paid from a pollen
+ * balance with AI_POLLINATIONS_KEY). Gemini's image model (higher quality, more
+ * per picture) is the main one with AI_IMAGE_PROVIDER=gemini, and the backup by
+ * default whenever GEMINI_API_KEY is set.
  *
- * Robust + best-effort: one retry on transient 429/503; on any other failure it
- * returns the reason (surfaced in the UI) and the caller drops the image layer so
- * the rest of the tifo still renders.
+ * Robust + best-effort: one retry on transient 429/503, then the BACKUP provider
+ * (the other one, when it has a key; AI_IMAGE_FALLBACK=none turns that off). A
+ * provider that is out of credit or has its key refused is paused for a few
+ * minutes so every picture does not pay a doomed round trip first, and the
+ * operator is emailed (imageHealth.ts). When nothing produces a picture, the
+ * reason goes back to the caller, which drops the image layer so the rest of the
+ * tifo still renders.
  *
  * The picture is quantized to the DESIGN'S palette client-side, which is why
  * every request now carries an ImageStyle: a generator told nothing returns a
@@ -18,6 +23,7 @@
  */
 
 import { envNum } from './env';
+import { classifyImageFailure, imageHealth, type ImageFailureKind, type PictureProvider } from './imageHealth';
 
 export type ImageProvider = 'pollinations' | 'gemini' | 'none';
 
@@ -41,6 +47,12 @@ export interface ImageResult {
   url: string | null;
   /** Human-readable reason when url is null (surfaced to the UI for debugging). */
   error?: string;
+  /** Which provider made the picture. */
+  provider?: PictureProvider;
+  /** True when the main provider could not and the backup did. */
+  viaBackup?: boolean;
+  /** When url is null: what kind of failure the last provider tried reported. */
+  kind?: ImageFailureKind;
 }
 
 // ---- describing the target to a diffusion model ----
@@ -211,7 +223,11 @@ function geminiKey(): string | undefined {
   return process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || undefined;
 }
 
-/** Free Pollinations by default (no key, no cost). Gemini only if forced + keyed. */
+function pollinationsKey(): string | undefined {
+  return process.env.AI_POLLINATIONS_KEY || process.env.POLLINATIONS_KEY || undefined;
+}
+
+/** Pollinations by default (needs AI_POLLINATIONS_KEY). Gemini only if forced + keyed. */
 export function activeImageProvider(): ImageProvider {
   const forced = (process.env.AI_IMAGE_PROVIDER ?? '').toLowerCase();
   if (forced === 'none') return 'none';
@@ -219,8 +235,53 @@ export function activeImageProvider(): ImageProvider {
   return 'pollinations';
 }
 
+/**
+ * The provider tried when the main one cannot deliver.
+ *
+ * AI_IMAGE_FALLBACK:
+ *   unset / auto   the other provider, if its key is set
+ *   gemini | pollinations   that one, if its key is set (and it is not the main)
+ *   none           no backup
+ *
+ * On by default because the alternative is worse: on 28 Sep 2026 the
+ * Pollinations credit ran out and every Super AI design shipped with a bare
+ * stand while a working Gemini key sat unused in the same environment. Gemini
+ * pictures cost more, so the backup only runs when the main provider fails,
+ * and the operator is emailed when it starts doing so.
+ */
+export function fallbackImageProvider(): PictureProvider | null {
+  // "none" means no pictures at all, not "no main provider".
+  if ((process.env.AI_IMAGE_PROVIDER ?? '').trim().toLowerCase() === 'none') return null;
+  const main = activeImageProvider();
+  const pref = (process.env.AI_IMAGE_FALLBACK ?? 'auto').trim().toLowerCase();
+  if (pref === 'none' || pref === 'off' || pref === 'false') return null;
+  const keyed = (p: PictureProvider): boolean => (p === 'gemini' ? !!geminiKey() : !!pollinationsKey());
+  const pick = (p: PictureProvider): PictureProvider | null => (p !== main && keyed(p) ? p : null);
+  if (pref === 'gemini' || pref === 'pollinations') return pick(pref);
+  return pick(main === 'gemini' ? 'pollinations' : 'gemini');
+}
+
+/**
+ * The providers to try, in order. AI_IMAGE_PROVIDER=gemini without a key
+ * resolves to "none" as the main, which the backup can still cover.
+ */
+export function imageProviderChain(): PictureProvider[] {
+  const main = activeImageProvider();
+  const backup = fallbackImageProvider();
+  const chain: PictureProvider[] = [];
+  if (main !== 'none') chain.push(main);
+  if (backup && !chain.includes(backup)) chain.push(backup);
+  return chain;
+}
+
 export function imageGenAvailable(): boolean {
-  return activeImageProvider() !== 'none';
+  return imageProviderChain().length > 0;
+}
+
+/** What /admin → AI → Pictures shows. */
+export function picturesStatus(): ReturnType<typeof imageHealth.snapshot> {
+  const main = activeImageProvider();
+  return imageHealth.snapshot(main === 'none' ? null : main, fallbackImageProvider());
 }
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
@@ -231,11 +292,15 @@ interface Attempt {
   status?: number;
 }
 
-/** Pollinations.ai — free, no key. Prompt goes in the URL path; returns image bytes. */
+/**
+ * Pollinations.ai, FLUX. Paid per picture from the account's pollen balance
+ * (about 0.002 pollen each), with a key from enter.pollinations.ai. Prompt goes
+ * in the URL path; returns image bytes.
+ */
 async function callPollinations(prompt: string, timeoutMs: number, style: ImageStyle): Promise<Attempt> {
-  const key = process.env.AI_POLLINATIONS_KEY || process.env.POLLINATIONS_KEY;
+  const key = pollinationsKey();
   if (!key) {
-    return { url: null, error: 'pollinations needs a free key, create one at enter.pollinations.ai and set AI_POLLINATIONS_KEY' };
+    return { url: null, error: 'pollinations needs a key, create one at enter.pollinations.ai and set AI_POLLINATIONS_KEY' };
   }
   const base = process.env.AI_POLLINATIONS_URL || 'https://gen.pollinations.ai/image/';
   const model = process.env.AI_POLLINATIONS_MODEL || 'flux';
@@ -309,16 +374,60 @@ async function callGemini(prompt: string, timeoutMs: number, style: ImageStyle, 
   }
 }
 
-/** Generate one image (free Pollinations by default), one retry on rate limits. */
+/**
+ * Generate one image: the main provider, then the backup.
+ *
+ * Each provider gets one retry on a busy answer (429/503) that is not a credit
+ * problem. A provider the breaker has paused (out of credit, key refused) goes
+ * to the back of the queue: it is not asked while another provider delivers,
+ * and it is still asked when none did, so a top-up heals the very next picture
+ * rather than ten minutes later.
+ */
 export async function generateImage(prompt: string, style: ImageStyle = {}): Promise<ImageResult> {
-  const provider = activeImageProvider();
-  if (provider === 'none') return { url: null, error: 'image generation disabled (AI_IMAGE_PROVIDER=none)' };
-  const timeoutMs = envNum('AI_IMAGE_TIMEOUT_MS', 45000, 1000);
-  const call = provider === 'gemini' ? callGemini : callPollinations;
-  let r = await call(prompt, timeoutMs, style);
-  if (!r.url && (r.status === 429 || r.status === 503)) {
-    await sleep(1500);
-    r = await call(prompt, timeoutMs, style);
+  const chain = imageProviderChain();
+  if (chain.length === 0) {
+    return { url: null, kind: 'other', error: (process.env.AI_IMAGE_PROVIDER ?? '').toLowerCase() === 'none'
+      ? 'image generation disabled (AI_IMAGE_PROVIDER=none)'
+      : 'no image provider has a key (AI_POLLINATIONS_KEY or GEMINI_API_KEY)' };
   }
-  return { url: r.url, error: r.error };
+  const timeoutMs = envNum('AI_IMAGE_TIMEOUT_MS', 45000, 1000);
+  const breakerMs = envNum('AI_IMAGE_BREAKER_MS', 10 * 60_000, 0);
+  const retryMs = envNum('AI_IMAGE_RETRY_MS', 1500, 0);
+  const main = chain[0];
+  const backup = chain[1] ?? null;
+  // Paused providers go last: skipped while another can deliver, still asked
+  // when nothing else did, so a top-up heals on the next picture.
+  const order = [...chain.filter((p) => !imageHealth.isPaused(p)), ...chain.filter((p) => imageHealth.isPaused(p))];
+
+  const started = Date.now();
+  const problems: { provider: PictureProvider; kind: ImageFailureKind; detail: string }[] = [];
+  const errors: string[] = [];
+  let lastKind: ImageFailureKind = 'other';
+  for (let i = 0; i < order.length; i++) {
+    const p = order[i];
+    // The backup gets what is left of the budget, but never less than 15 s:
+    // a main provider that timed out must not leave the backup no time at all.
+    const budget = i === 0 ? timeoutMs : Math.max(Math.min(15_000, timeoutMs), timeoutMs - (Date.now() - started));
+    const call = p === 'gemini' ? callGemini : callPollinations;
+    let r = await call(prompt, budget, style);
+    // A busy answer is worth one more try; a 429 that really means "no credit"
+    // (Gemini without billing says limit: 0) will not pass in 1.5 s.
+    if (!r.url && (r.status === 429 || r.status === 503) && ['rate', 'down'].includes(classifyImageFailure(r.status, r.error))) {
+      await sleep(retryMs);
+      r = await call(prompt, budget, style);
+    }
+    if (r.url) {
+      const viaBackup = p !== main;
+      imageHealth.recordOk(p, viaBackup);
+      imageHealth.finish({ deliveredBy: p, main, backup, problems, breakerMs });
+      return { url: r.url, provider: p, viaBackup };
+    }
+    lastKind = imageHealth.recordFailure(p, r.status, r.error, breakerMs);
+    const detail = r.error ?? 'unknown error';
+    problems.push({ provider: p, kind: lastKind, detail });
+    errors.push(detail);
+  }
+  const error = errors.join('; then ');
+  imageHealth.finish({ deliveredBy: null, main, backup, problems, breakerMs, lastError: error });
+  return { url: null, error, kind: lastKind };
 }

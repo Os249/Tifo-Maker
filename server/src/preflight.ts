@@ -125,12 +125,25 @@ export function configWarnings(env: NodeJS.ProcessEnv): ConfigWarning[] {
   // the face missing and a note, which looks like a model that had a bad day.
   const img = (env.AI_IMAGE_PROVIDER ?? '').toLowerCase();
   const geminiKey = env.GEMINI_API_KEY || env.GOOGLE_API_KEY;
+  const pollKey = env.AI_POLLINATIONS_KEY || env.POLLINATIONS_KEY;
+  const noBackup = /^(none|off|false)$/i.test((env.AI_IMAGE_FALLBACK ?? '').trim());
   if (img === 'none') {
     out.push({ key: 'AI_IMAGE_PROVIDER', effect: 'set to "none": every AI design with a portrait will ship with the face missing.' });
   } else if (img === 'gemini' && !geminiKey) {
     out.push({
       key: 'AI_IMAGE_PROVIDER',
-      effect: 'set to "gemini" with no GEMINI_API_KEY or GOOGLE_API_KEY, which silently means "none" — every AI design with a portrait ships with the face missing.',
+      effect: pollKey && !noBackup
+        ? 'set to "gemini" with no GEMINI_API_KEY or GOOGLE_API_KEY, so every picture comes from the backup, Pollinations.'
+        : 'set to "gemini" with no GEMINI_API_KEY or GOOGLE_API_KEY, which silently means "none" — every AI design with a portrait ships with the face missing.',
+    });
+  } else if (prod && img !== 'gemini' && !pollKey) {
+    // Pollinations is the main picture provider and refuses every request
+    // without a key. Said only in production: a dev box without one is normal.
+    out.push({
+      key: 'AI_POLLINATIONS_KEY',
+      effect: geminiKey && !noBackup
+        ? 'Pollinations is the picture provider but has no key, so every picture comes from the backup, Gemini, which costs more per picture.'
+        : 'Pollinations is the picture provider but has no key, and there is no backup: every AI design with a portrait ships with the face missing.',
     });
   }
 

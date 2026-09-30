@@ -1,3 +1,4 @@
+import { cleanAddressBar } from './core/utm';
 import { initLang, applyDom, toggleLang, t } from './ui/i18n';
 import { initScheme, setSchemeLabels } from './ui/colorScheme';
 import { mountHeroStadium } from './heroStadium';
@@ -8,6 +9,8 @@ import { installConsent } from './ui/consent';
 
 // Apply saved language on load, then translate the static page.
 initLang();
+// The visit was counted when the page was sent; see core/utm.ts.
+cleanAddressBar();
 // Light / dark. The scheme is already on the <html> element (the inline head
 // script settles it before first paint); this wires the header toggle and the
 // translated labels.

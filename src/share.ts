@@ -1,3 +1,4 @@
+import { cleanAddressBar } from './core/utm';
 import './vendor/tabler-subset.css';
 import { generateSeatMapAsync } from './workers/client';
 import { TEMPLATES, DEFAULT_PALETTE } from './core/template';
@@ -44,6 +45,8 @@ function fmtDate(iso: string): string {
 
 async function main(): Promise<void> {
   initLang();
+  // The visit was counted when the page was sent; see core/utm.ts.
+  cleanAddressBar();
   applyDom(document);
   const app = document.getElementById('share-app')!;
   const id = designIdFromLocation();

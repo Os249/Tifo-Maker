@@ -333,7 +333,7 @@ CREATE INDEX IF NOT EXISTS design_shares_design_idx ON design_shares (design_id,
 CREATE TABLE IF NOT EXISTS visits (
   id            BIGSERIAL PRIMARY KEY,
   visitor_key   TEXT,                          -- daily-rotating salted hash; NULLed after 2 days
-  source        TEXT NOT NULL,                 -- search|social|ai|referral|campaign|direct|internal
+  source        TEXT NOT NULL,                 -- search|social|ai|referral|campaign|shared|direct|internal
   referrer_host TEXT,                          -- hostname or friendly label, never a full URL
   utm_source    TEXT,
   utm_medium    TEXT,
@@ -349,6 +349,12 @@ CREATE TABLE IF NOT EXISTS visits (
 );
 CREATE INDEX IF NOT EXISTS visits_created_idx ON visits (created_at DESC);
 CREATE INDEX IF NOT EXISTS visits_source_idx ON visits (source, created_at DESC);
+-- Distinct visitors per UTC day, kept before a day's visitor keys are stripped
+-- (see trafficRepo.purge). A date and a count, nothing else.
+CREATE TABLE IF NOT EXISTS visits_daily (
+  day      DATE PRIMARY KEY,
+  visitors INTEGER NOT NULL
+);
 CREATE INDEX IF NOT EXISTS visits_human_idx ON visits (created_at DESC) WHERE NOT is_bot;
 
 -- ---------------------------------------------------------------------------

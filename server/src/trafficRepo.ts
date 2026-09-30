@@ -28,7 +28,10 @@
  *     database. Because the salt changes daily, the same person on two days produces
  *     two unrelated keys — there is no cross-day profile to build, by construction.
  *   - purge() then strips visitor_key entirely after ANONYMIZE_AFTER_DAYS, so older
- *     rows are irreversibly aggregate.
+ *     rows are irreversibly aggregate. Before a day's keys go, the number of
+ *     distinct keys that day is kept as one integer in visits_daily. Without it
+ *     every "people" figure on the dashboard only ever covered the last two days
+ *     (the 29 Sep review read "1,296 people, 9 to 29 Sep" when it meant three).
  *
  * That is the CNIL-endorsed "audience measurement" shape: aggregate reach statistics,
  * no identifiers, no profiling, no cross-site tracking, no data sold or shared. It is
@@ -48,7 +51,12 @@ const ANONYMIZE_AFTER_DAYS = 2;
 /** How long aggregate rows are kept at all. */
 const RETAIN_DAYS = 180;
 
-export type SourceKind = 'search' | 'social' | 'ai' | 'referral' | 'campaign' | 'direct' | 'internal';
+/**
+ * `shared` is a link someone passed on from the site's own share buttons: they
+ * are tagged utm_medium=share, which is the only way to see the ones sent over
+ * WhatsApp, Telegram or Discord, since those apps send no referrer at all.
+ */
+export type SourceKind = 'search' | 'social' | 'ai' | 'referral' | 'campaign' | 'shared' | 'direct' | 'internal';
 
 /** One recorded page view, already stripped of everything identifying. */
 export interface VisitInput {
@@ -85,6 +93,8 @@ export interface TrafficSummary {
   sources: Bucket[];
   referrers: Bucket[];
   campaigns: Bucket[];
+  /** Visits that arrived on a link from the site's share buttons, by utm_source (the platform). */
+  shared: Bucket[];
   pages: Bucket[];
   devices: Bucket[];
   browsers: Bucket[];
@@ -147,6 +157,18 @@ export function isSocialHost(host: string): boolean {
   return SOCIAL.some(([re]) => re.test(host.toLowerCase()));
 }
 
+/**
+ * True for a stored referrer that names a social or messaging platform.
+ *
+ * Stored referrers are the friendly LABEL for social sources ("X / Twitter"),
+ * not the hostname, so isSocialHost never matched a single one of them and the
+ * shares dashboard's "arrived from a social site" row was always empty.
+ */
+const SOCIAL_LABELS = new Set(SOCIAL.map(([, label]) => label));
+export function isSocialReferrer(key: string): boolean {
+  return SOCIAL_LABELS.has(key) || isSocialHost(key);
+}
+
 const AI_REFERRERS: [RegExp, string][] = [
   [/(^|\.)chatgpt\.com$|(^|\.)openai\.com$/, 'ChatGPT'],
   [/(^|\.)perplexity\.ai$/, 'Perplexity'],
@@ -196,6 +218,9 @@ export function classifySource(
   // referrer was being filed under "campaign" - a bucket that reads as "my own
   // marketing" - and was invisible as a result. Classify the utm_source by WHO
   // it names first; fall back to "campaign" only for a genuine campaign tag.
+  // A link from the site's own share buttons. Checked first: "whatsapp" with
+  // utm_medium=share is a visitor passing a tifo on, not a campaign of ours.
+  if (utmMedium === 'share') return { kind: 'shared', label: (utmSource || 'link').slice(0, 60) };
   if (utmSource) {
     const claimed = utmSource.replace(/^https?:\/\//, '').replace(/\/.*$/, '');
     for (const [re, label] of AI_REFERRERS) if (re.test(claimed)) return { kind: 'ai', label };
@@ -319,7 +344,9 @@ export function buildVisit(raw: {
     visitorKey: visitorKeyFor(raw.ip, raw.ua),
     source: kind,
     // For search/social/ai we store the friendly label; for referral it IS the host.
-    referrerHost: kind === 'referral' ? host : host ? label : null,
+    // A shared link keeps the label of wherever it was opened from (t.co → X),
+    // not the utm_source, which already has its own column.
+    referrerHost: kind === 'referral' ? host : kind === 'shared' ? (host ? classifySource(host, null, null, true).label : null) : host ? label : null,
     utmSource,
     utmMedium,
     utmCampaign,
@@ -342,6 +369,7 @@ const EMPTY = (days: number, enabled: boolean): TrafficSummary => ({
   sources: [],
   referrers: [],
   campaigns: [],
+  shared: [],
   pages: [],
   devices: [],
   browsers: [],
@@ -401,6 +429,7 @@ export class MemoryTrafficRepository implements TrafficRepository {
           ? `${r.utmSource ?? '-'} / ${r.utmCampaign ?? '-'}`
           : null,
       ),
+      shared: bucket((r) => (r.source === 'shared' ? r.utmSource ?? 'link' : null)),
       pages: bucket((r) => r.path),
       devices: bucket((r) => r.device),
       browsers: bucket((r) => r.browser),
@@ -445,6 +474,12 @@ export class PgTrafficRepository implements TrafficRepository {
     await this.pool.query('CREATE INDEX IF NOT EXISTS visits_created_idx ON visits (created_at DESC)');
     await this.pool.query('CREATE INDEX IF NOT EXISTS visits_source_idx ON visits (source, created_at DESC)');
     await this.pool.query('CREATE INDEX IF NOT EXISTS visits_human_idx ON visits (created_at DESC) WHERE NOT is_bot');
+    // One row per UTC day: how many distinct visitors it had. Written before
+    // that day's keys are stripped, and holds nothing but a date and a count.
+    await this.pool.query(`CREATE TABLE IF NOT EXISTS visits_daily (
+        day      DATE PRIMARY KEY,
+        visitors INTEGER NOT NULL
+      )`);
   }
 
   async record(v: VisitInput): Promise<void> {
@@ -501,6 +536,7 @@ export class PgTrafficRepository implements TrafficRepository {
       days,
       "AND source = 'campaign' AND (utm_source IS NOT NULL OR utm_campaign IS NOT NULL)",
     );
+    out.shared = await this.bucket("coalesce(utm_source,'link')", days, "AND source = 'shared'");
     out.pages = await this.bucket('path', days);
     out.devices = await this.bucket('device', days);
     out.browsers = await this.bucket('browser', days);
@@ -520,6 +556,21 @@ export class PgTrafficRepository implements TrafficRepository {
     } catch {
       out.daily = [];
     }
+    // Days whose keys are already gone: the count kept before they went.
+    try {
+      const r = await this.pool.query(
+        `SELECT to_char(day,'YYYY-MM-DD') AS day, visitors FROM visits_daily
+          WHERE day >= (now() - ($1::int * interval '1 day'))::date`,
+        [days],
+      );
+      const kept = new Map(r.rows.map((x) => [String(x.day).slice(0, 10), Number(x.visitors) || 0]));
+      out.daily = out.daily.map((d) => (kept.has(d.day) ? { ...d, visitors: Math.max(d.visitors, kept.get(d.day)!) } : d));
+    } catch {
+      /* no rollup yet: live counts only */
+    }
+    // The salt rotates daily, so one person on two days is two keys either
+    // way: the window's people are the sum of each day's.
+    if (out.daily.length) out.totals.visitors = out.daily.reduce((n, d) => n + d.visitors, 0);
     return out;
   }
 
@@ -529,12 +580,30 @@ export class PgTrafficRepository implements TrafficRepository {
    */
   async purge(): Promise<void> {
     try {
+      // Yesterday is complete and every one of its keys is still present (keys
+      // live two days), and purge runs at boot and every 24 h, so every day is
+      // "yesterday" for at least one run. Kept first, stripped after.
+      await this.pool.query(
+        `INSERT INTO visits_daily (day, visitors)
+         SELECT created_at::date, count(DISTINCT visitor_key)::int
+           FROM visits
+          WHERE NOT is_bot AND visitor_key IS NOT NULL
+            AND created_at >= date_trunc('day', now()) - interval '1 day'
+            AND created_at <  date_trunc('day', now())
+          GROUP BY 1
+         ON CONFLICT (day) DO UPDATE SET visitors = GREATEST(visits_daily.visitors, EXCLUDED.visitors)`,
+      );
+    } catch {
+      /* best-effort, like the rest of purge */
+    }
+    try {
       await this.pool.query(
         `UPDATE visits SET visitor_key = NULL
           WHERE visitor_key IS NOT NULL AND created_at < now() - ($1::int * interval '1 day')`,
         [ANONYMIZE_AFTER_DAYS],
       );
       await this.pool.query(`DELETE FROM visits WHERE created_at < now() - ($1::int * interval '1 day')`, [RETAIN_DAYS]);
+      await this.pool.query(`DELETE FROM visits_daily WHERE day < (now() - ($1::int * interval '1 day'))::date`, [RETAIN_DAYS]);
     } catch {
       /* purge is best-effort; never block the app */
     }

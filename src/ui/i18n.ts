@@ -2041,6 +2041,40 @@ const STRINGS: Record<string, { en: string; ar: string }> = {
   'ed.proj.aiRunning': { en: 'Designing your tifo…', ar: 'جاري تصميم تيفوك…' },
   'ed.proj.localOnly': { en: 'Could not reach your account, so this project is kept in this browser for now.', ar: 'ما قدرنا نوصل لحسابك، فالمشروع محفوظ في هذا المتصفح حالياً.' },
 
+  // ---- Post it: a picture of the tifo in the stadium, ready to post ----
+  'post.btn': { en: 'Post it', ar: 'انشره' },
+  'post.btnT': { en: 'Make a picture of your tifo in the stadium to post', ar: 'سوّ صورة لتيفوك في الملعب عشان تنشرها' },
+  'post.head': { en: 'Post your tifo', ar: 'انشر تيفوك' },
+  'post.making': { en: 'Making the picture…', ar: 'جاري تجهيز الصورة…' },
+  'post.share': { en: 'Post it…', ar: 'انشرها…' },
+  'post.copyImg': { en: 'Copy image', ar: 'انسخ الصورة' },
+  'post.download': { en: 'Download', ar: 'حمّلها' },
+  'post.x': { en: 'Post on X', ar: 'انشر في X' },
+  'post.copyLink': { en: 'Copy link', ar: 'انسخ الرابط' },
+  'post.copiedImg': { en: 'Image copied. Paste it into your post.', ar: 'تم نسخ الصورة، الصقها في منشورك.' },
+  'post.copiedLink': { en: 'Link copied.', ar: 'تم نسخ الرابط.' },
+  'post.saved': { en: 'Image saved.', ar: 'انحفظت الصورة.' },
+  'post.xHint': { en: 'X opens in a new tab. Attach the picture you copied or downloaded.', ar: 'بيفتح X في تبويب جديد. أرفق الصورة اللي نسختها أو حمّلتها.' },
+  'post.pressHold': { en: 'Press and hold the picture to save it.', ar: 'اضغط مطولاً على الصورة عشان تحفظها.' },
+  'post.foot': { en: 'The link in your post opens TifoMaker, so your friends can make theirs.', ar: 'الرابط في منشورك يفتح TifoMaker عشان أصحابك يسوون تيفوهم.' },
+  'post.text': { en: 'I designed this tifo on TifoMaker. Make one for your club:', ar: 'صممت هذا التيفو على TifoMaker. صمّم تيفو فريقك:' },
+  'post.designedOn': { en: 'Designed on', ar: 'صُمّم على' },
+  'post.fail': { en: 'Could not make the picture. Open the Stadium view and try again.', ar: 'ما قدرنا نسوي الصورة. افتح عرض الملعب وجرّب مرة ثانية.' },
+  'post.nudgeTitle': { en: 'Your tifo is in the stadium.', ar: 'تيفوك صار في الملعب.' },
+  'post.nudgeBody': { en: 'Post a picture of it and show your group.', ar: 'انشر صورته وورّها لقروبك.' },
+  'post.later': { en: 'Not now', ar: 'مو الحين' },
+  'post.shareVideo': { en: 'Share the video', ar: 'شارك الفيديو' },
+  'post.sharePic': { en: 'Share the picture', ar: 'شارك الصورة' },
+  'post.close': { en: 'Close', ar: 'إغلاق' },
+
+  // ---- Onboarding: start from your club (offline designer, no sign-in) ----
+  'ob.club': { en: 'Start from your club', ar: 'ابدأ من فريقك' },
+  'ob.clubLead': { en: 'One tap and your club\'s tifo fills the stadium. You can change anything after.', ar: 'بضغطة وحدة يعبّي تيفو فريقك الملعب، وتقدر تعدّل كل شي بعدين.' },
+  'ob.clubOr': { en: 'Or describe it: a club, colours, a word', ar: 'أو اكتب فكرتك: فريق، ألوان، كلمة' },
+  'ob.clubGo': { en: 'Make it', ar: 'سوّه' },
+  'ob.orBuild': { en: 'Or build it yourself', ar: 'أو ابنِه بنفسك' },
+  'ob.clubMaking': { en: 'Designing your tifo…', ar: 'جاري تصميم تيفوك…' },
+
   'common.language': { en: 'العربية', ar: 'English' }, // toggle shows the OTHER language
 };
 
@@ -2048,12 +2082,35 @@ const LS_KEY = 'tifo_lang_v1';
 let current: Lang = 'en';
 const listeners: ((lang: Lang) => void)[] = [];
 
+/**
+ * Arabic for a browser that asks for it first.
+ *
+ * Only the FIRST preferred language counts: a Saudi phone set to Arabic lists
+ * ar-SA first, while an English browser that merely has Arabic further down the
+ * list keeps English. Before this, everyone got English until they found the
+ * toggle, and 63% of the visitors in the late-September spike had Arabic
+ * browsers. A choice made with the toggle is saved and always wins.
+ */
+export function preferredLang(langs: readonly string[] | undefined): Lang {
+  const first = (langs ?? [])[0] ?? '';
+  return /^ar\b/i.test(first) ? 'ar' : 'en';
+}
+
 export function initLang(): Lang {
+  let saved: Lang | null = null;
   try {
-    const saved = localStorage.getItem(LS_KEY) as Lang | null;
-    if (saved === 'en' || saved === 'ar') current = saved;
+    const v = localStorage.getItem(LS_KEY);
+    if (v === 'en' || v === 'ar') saved = v;
   } catch {
     /* ignore */
+  }
+  if (saved) current = saved;
+  else {
+    try {
+      current = preferredLang(navigator.languages?.length ? navigator.languages : [navigator.language]);
+    } catch {
+      /* keep English */
+    }
   }
   applyDir();
   return current;

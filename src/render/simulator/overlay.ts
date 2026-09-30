@@ -2237,14 +2237,23 @@ export function openMatchDaySimulator(
   });
 
   snapBtn.addEventListener('click', () => {
+    const shot = sim.snapshot();
     const a = document.createElement('a');
-    a.href = sim.snapshot();
+    a.href = shot;
     a.download = 'tifo-matchday.png';
     a.click();
     flash.classList.remove('go');
     void flash.offsetWidth; // reflow so the flash animation restarts each time
     flash.classList.add('go');
     toast(L('toast.snapSaved'));
+    // On a phone, the saved picture is one tap from X or WhatsApp.
+    // (Decoded here rather than fetched: the page's CSP does not allow
+    // fetch() of data: URLs.)
+    void Promise.all([import('../../ui/postMoment'), import('../../ui/i18n')])
+      .then(([{ offerFileShare, dataUrlToBlob }, { t }]) => {
+        offerFileShare(new File([dataUrlToBlob(shot)], 'tifo-matchday.png', { type: 'image/png' }), t('post.sharePic'));
+      })
+      .catch(() => {});
   });
   // Record the choreography reveal as a shareable WebM (the growth artifact).
   const recOpts = (): { seconds: number; fps: number; height?: number; camera: RecordCamera } => ({
@@ -2281,6 +2290,11 @@ export function openMatchDaySimulator(
     const size = `${(clip.blob.size / (1024 * 1024)).toFixed(1)} ${L('recordSize')}`;
     const saved = L(flew ? 'recordSavedFly' : 'recordSaved');
     toast(clip.universal ? `${saved} — ${size}` : `${saved} — ${size}. ${L('recordNotUniversal')}`);
+    // On a phone, the finished clip goes straight to the share sheet (X,
+    // TikTok, WhatsApp), which is where a Match Day video is meant to end up.
+    // A button, because the tap that started the recording expired long ago.
+    const [{ offerFileShare }, { t }] = await Promise.all([import('../../ui/postMoment'), import('../../ui/i18n')]);
+    offerFileShare(new File([clip.blob], a.download, { type: clip.blob.type || 'video/mp4' }), t('post.shareVideo'));
   };
   // Preview plays the exact reveal (with the selected style) without recording.
   previewBtn.addEventListener('click', () => {
