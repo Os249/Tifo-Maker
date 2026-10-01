@@ -299,6 +299,12 @@ const MDS_T: Record<string, { en: string; ar: string }> = {
   'shot.Ultra View': { en: 'Ultra View', ar: 'من الألتراس' },
   'shot.Royal Box': { en: 'Royal Box', ar: 'المقصورة الرئيسية' },
   'shot.Vehicle Ramp': { en: 'Vehicle Ramp', ar: 'ممر الإسعاف' },
+  'shot.Centre Screen': { en: 'Centre Screen', ar: 'الشاشة المعلقة' },
+  'shot.Hospitality': { en: 'Hospitality', ar: 'مقصورات الضيافة' },
+  indoorHint: {
+    en: 'An indoor arena: the hall is lit by its floodlights at any hour, and it never rains on the pitch. Time of day only changes the sky outside.',
+    ar: 'ملعب مغطى: الإضاءة داخله من الكشافات في أي وقت، وما ينزل مطر على الأرضية. وقت اليوم يغيّر السماء برا بس.',
+  },
   screenShows: { en: 'Big screens show', ar: 'الشاشات تعرض' },
   'screen.stadium': { en: 'Stadium name', ar: 'اسم الملعب' },
   'screen.tifo': { en: 'Your tifo (live)', ar: 'التيفو حقك (مباشر)' },
@@ -956,6 +962,17 @@ export function openMatchDaySimulator(
     checkField(L('cornerFlags'), flagsChk),
     checkField(L('wetPitch'), wetChk),
   );
+  todSel.dataset.k = 'tod';
+  weatherSel.dataset.k = 'weather';
+  if (template.indoor) {
+    // Nothing falls on an indoor pitch: the weather has nothing to change.
+    weatherSel.disabled = true;
+    const indoorHint = document.createElement('div');
+    indoorHint.className = 'mds-hint';
+    indoorHint.dataset.k = 'indoor-hint';
+    indoorHint.textContent = L('indoorHint');
+    secAtmo.body.insertBefore(indoorHint, secAtmo.body.firstChild);
+  }
 
   // Accessories: what the fans bring. Smoke, phone lights, confetti and the
   // pyro burst used to be switches and buttons in Atmosphere; each is now a

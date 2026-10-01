@@ -65,12 +65,19 @@ function trueRing(t: StadiumTemplate, n = 160): Pt[] {
   return out;
 }
 
+// A ground of separate straight stands (TierSpec.stands — Kingdom Arena) is
+// not a ring: its plan is drawn near-rectangular by hand (p = 16), far squarer
+// than any measured outline, and the fitter is not meant to recover it. The
+// plan checks below are about rings; such grounds still go through the
+// capacity and tier checks.
+const RING_GROUNDS = STADIUM_CATALOG.filter((s) => !s.template.tiers.some((t) => t.stands));
+
 console.log('--- ring fitting -------------------------------------------------');
 {
   // Clean rings first: if this cannot recover geometry it generated itself,
   // nothing downstream is worth reading.
   let worst = 0;
-  for (const s of STADIUM_CATALOG) {
+  for (const s of RING_GROUNDS) {
     const { a, b, exponent } = s.template.plan;
     const f = fitRing(trueRing(s.template));
     // A plan squarer than the fitter searches should come back pinned at the
@@ -86,7 +93,7 @@ console.log('--- ring fitting -------------------------------------------------'
   let worstNoisy = 0;
   let rng = 12345;
   const rand = (): number => ((rng = (rng * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff);
-  for (const s of STADIUM_CATALOG) {
+  for (const s of RING_GROUNDS) {
     const { a, b } = s.template.plan;
     const noisy = trueRing(s.template, 360)
       .filter(() => rand() > 0.5)
@@ -142,10 +149,11 @@ console.log('\n--- tier split --------------------------------------------------
     if (got === s.template.tiers.length) right++;
     else misses.push(`${s.meta?.name ?? s.id} (${rows} rows: said ${got}, is ${s.template.tiers.length})`);
   }
-  // Locked at 11, not ">= 8": this number is quoted in the provenance note the
+  // Locked at 12, not ">= 8": this number is quoted in the provenance note the
   // user reads, so it must not drift without someone noticing. (It was 10 until
-  // the Jewel was rebuilt to the real stadium's 66 rows in three tiers.)
-  check(right === 11, 'tier-count rule scores 11 of 13', `misses: ${misses.join('; ')}`);
+  // the Jewel was rebuilt to the real stadium's 66 rows in three tiers, and 11
+  // until Kingdom Arena was rebuilt with its 2024 upper tier: 58 rows, two tiers.)
+  check(right === 12, 'tier-count rule scores 12 of 13', `misses: ${misses.join('; ')}`);
 
   const st = stackTiers(50, 2);
   const stacked = st[1].baseOffset > st[0].baseOffset + st[0].rows * st[0].rowDepth
@@ -178,7 +186,7 @@ console.log('\n--- the whole estimator, round-tripped --------------------------
       Math.abs(r.template.plan.b - truth.plan.b) / truth.plan.b,
     );
     worstCap = Math.max(worstCap, capErr);
-    worstPlan = Math.max(worstPlan, planErr);
+    if (RING_GROUNDS.includes(s)) worstPlan = Math.max(worstPlan, planErr);
     if (r.template.tiers.length === truth.tiers.length) tiersRight++;
     console.log(
       String(s.meta?.name ?? s.id).slice(0, 24).padEnd(25) +
@@ -189,7 +197,7 @@ console.log('\n--- the whole estimator, round-tripped --------------------------
     );
   }
   console.log();
-  check(worstPlan < 0.05, 'plan curve recovered', `worst ${(worstPlan * 100).toFixed(1)}%`);
+  check(worstPlan < 0.05, 'plan curve recovered (ring grounds)', `worst ${(worstPlan * 100).toFixed(1)}%`);
   check(worstCap < 0.05, 'capacity recovered', `worst ${(worstCap * 100).toFixed(1)}%`);
   check(tiersRight === STADIUM_CATALOG.length, 'a told tier count is honoured', `${tiersRight}/${STADIUM_CATALOG.length}`);
 }

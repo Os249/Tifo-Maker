@@ -46,7 +46,7 @@ const opened = await page.evaluate((i) => (window as never as { __open: (a: stri
 const { ax, bz, ty } = (await page.evaluate(() => (window as never as { __views: () => unknown }).__views())) as { ax: number; bz: number; ty: number };
 console.log(id, opened, { ax: ax.toFixed(1), bz: bz.toFixed(1), ty: ty.toFixed(1) });
 
-type V = { name: string; position: [number, number, number]; target: [number, number, number]; fov?: number };
+type V = { name: string; position: [number, number, number]; target: [number, number, number]; fov?: number; time?: 'day' | 'dusk' | 'night' };
 const views: V[] = [
   // Looking down the pitch at one end from high over the halfway line: both
   // corner ramps, the end screen and the run-off in one frame.
@@ -87,7 +87,34 @@ const views: V[] = [
   // The full bowl from above.
   { name: '7-aerial', position: [0, ty * 7, bz * 2.1], target: [0, 0, 0], fov: 50 },
 ];
-for (const v of views) {
+// An indoor ground gets views from inside the hall (under the roof), and the
+// building from outside in daylight, matched to the photographs.
+const tplNow = templateById(id);
+const B = tplNow?.plan.b ?? 41.5;
+const indoorViews: V[] = [
+  // The broadcast gantry: on top of the main stand's hospitality at halfway.
+  { name: 'k0-broadcast', position: [0, 23.5, -(B + 9)], target: [0, 3, 8], fov: 58 },
+  // The main stand from the far touchline: lower tier, two floors of boxes, the lounge.
+  { name: 'k1-main-stand', position: [4, 7, B - 3], target: [0, 11, -(B + 12)], fov: 60 },
+  // High in the corner by the main stand, across to the north end and the two-tier stand (photo 12).
+  { name: 'k2-corner-high', position: [-56, 18, -(B + 6)], target: [30, 6, 25], fov: 66 },
+  // Pitch level on the halfway line, looking at the two-tier north stand (photo 9).
+  { name: 'k3-north-stand', position: [0, 1.3, -6], target: [0, 15, B + 30], fov: 62 },
+  // Over the west end, up the length to the east end (photo 5).
+  { name: 'k4-end-view', position: [-57, 20, 10], target: [40, 8, 0], fov: 64 },
+  // The centre-hung screen, level with it.
+  { name: 'k5-centre-screen', position: [-44, 27, -32], target: [0, 26, 0], fov: 50 },
+  // The hospitality floors, close: terraces, boxes, the lounge.
+  { name: 'k6-hospitality', position: [-18, 9, -(B - 12)], target: [-4, 12, -(B + 12)], fov: 55 },
+  // A card display on the north stand, from the main stand.
+  { name: 'k7-tifo', position: [10, 16, -(B + 8)], target: [0, 12, B + 18], fov: 60 },
+  // The building from outside, at night.
+  { name: 'k8-outside', position: [-170, 55, -200], target: [0, 18, 0], fov: 45 },
+  // From above, by day.
+  { name: 'k9-aerial', position: [0, 280, -190], target: [0, 0, 0], fov: 45, time: 'day' },
+];
+const list = tplNow?.indoor ? indoorViews : views;
+for (const v of list) {
   if (only && !v.name.includes(only)) continue;
   const t0 = Date.now();
   const png = (await page.evaluate(([vv]) => (window as never as { __shoot: (a: unknown) => Promise<string> }).__shoot(vv), [v])) as string;

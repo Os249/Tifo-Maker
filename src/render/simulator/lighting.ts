@@ -1,5 +1,6 @@
 import type { LightingSpec, LightingStyle, StadiumTemplate } from '../../core/types';
 import { ROOF_DEFAULTS } from './roof';
+import { curveSampler } from '../../core/venueDetails';
 
 /**
  * Where a stadium's floodlights go, and how high.
@@ -207,15 +208,29 @@ export function layOutLights(template: StadiumTemplate): LightingPlan {
   const N = requested === 'roof-rim' ? 72 : 40;
   const off = spec.mount ? spec.mount.offset : back.radial + (template.roof?.overhang ?? ROOF_DEFAULTS.overhang) * 0.4;
   const out: Luminaire[] = [];
+  // A near-rectangular plan (Kingdom Arena, p = 16) puts almost every equal
+  // step of the angle into the four corners, so its lamps are spaced by
+  // distance round the plan instead and stand square off it: rows down the
+  // sides and across the ends, which is what that building has. Rounder
+  // grounds keep the layout they have always had.
+  const along = p >= 10 ? curveSampler(template) : null;
   for (let i = 0; i < N; i++) {
     const t = (i / N) * Math.PI * 2;
-    const [ex, ez] = se(a, b, p, t);
-    const L = Math.hypot(ex, ez) || 1;
-    const x = ex + (ex / L) * off;
-    const z = ez + (ez / L) * off;
+    let x: number;
+    let z: number;
+    if (along) {
+      const q = along(i / N, off);
+      x = q.x;
+      z = q.z;
+    } else {
+      const [ex, ez] = se(a, b, p, t);
+      const L = Math.hypot(ex, ez) || 1;
+      x = ex + (ex / L) * off;
+      z = ez + (ez / L) * off;
+    }
     // The two long sides only, which is what a ground with two covered sides
     // and open ends actually has.
-    if (requested === 'side-banks' && Math.abs(Math.cos(t)) > 0.62) continue;
+    if (requested === 'side-banks' && Math.abs(along ? x / (a + off) : Math.cos(t)) > 0.62) continue;
     // UEFA's rim guidance wants more than 20 degrees to the pitch edge and puts
     // the optimum at 25-30. Behind the goal the geometry is worst, which is why
     // the guide talks about a second run of luminaires there — a real ground

@@ -303,8 +303,11 @@ export function mountStadiumPanel(deps: StadiumPanelDeps): void {
       if (zc.silver) rows.push([t('venue.silver'), fmt(zc.silver)]);
       if (zc.vip) rows.push([t('sp.vipSeats'), fmt(zc.vip)]);
     }
-    if (det?.boxes?.length) rows.push([t('sp.boxes'), fmt(det.boxes.reduce((n, b) => n + b.count, 0))]);
-    if (det?.screens?.length) rows.push([t('sp.screens'), String(det.screens.length)]);
+    const boxCount = (det?.boxes ?? []).reduce((n, b) => n + b.count, 0) + (det?.hospitality ? det.hospitality.boxFloors * det.hospitality.boxesPerFloor : 0);
+    if (boxCount) rows.push([t('sp.boxes'), fmt(boxCount)]);
+    // A centre-hung board is one screen with four faces; the corner columns carry one each.
+    const screenCount = (det?.screens?.length ?? 0) + (det?.centreScreen ? 1 : 0) + (det?.cornerScreens ? 4 : 0);
+    if (screenCount) rows.push([t('sp.screens'), String(screenCount)]);
     infoEl.innerHTML =
       `<h4 style="margin:0 0 6px;">${escapeHtml(tl(e.id) === e.id ? e.meta.name : tl(e.id))}</h4>` +
       rows

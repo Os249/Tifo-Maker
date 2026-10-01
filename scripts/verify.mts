@@ -1821,6 +1821,11 @@ import { buildStadium as siBuild } from '../src/core/stadiumFit';
     'community-jewel-jeddah-62k': '61572:b55f75b35990fa36',
     'community-alawwal-park-25k': '24652:7d18fef57e0a55ff',
     'community-kingdom-arena-28k': '26052:69d3936f64f81ebb',
+    // Live since the push of 27 September 2026: designs are being saved on it.
+    'jewel-jeddah-60k': '59718:1a7c1b36aacd9a57',
+    // Frozen at its first release (October 2026). If it has to change before
+    // that is pushed, re-take this; after, it is a new id like the Jewel.
+    'kingdom-arena-26k': '26580:880aff98a07e615b',
   };
   for (const [id, want] of Object.entries(FROZEN)) {
     const tpl = cat.templateById(id);
@@ -1967,9 +1972,118 @@ import { buildStadium as siBuild } from '../src/core/stadiumFit';
     if (!/\ben:/.test(body) || !/\bar:/.test(body)) throw new Error(`venue: overlay ${k} is missing en or ar`);
   }
   console.log(
-    `venue: 13 seat maps frozen and unchanged | Jewel ${perTier.join(' / ')} (real 23,473 / 22,244 / 14,038) = ${jm.count}, ${nearest.toFixed(1)} m clear of the pitch` +
+    `venue: 15 seat maps frozen and unchanged | Jewel ${perTier.join(' / ')} (real 23,473 / 22,244 / 14,038) = ${jm.count}, ${nearest.toFixed(1)} m clear of the pitch` +
       ` | 2 tunnels (main-stand corners), ${removed} seats removed, ${overRoof} over their roofs, tiers above untouched | gold ${zc.gold}, silver ${zc.silver}, royal box ${zc.vip}` +
       ` | ${shipped.length} grounds the server can save against`,
+  );
+}
+
+// --- Kingdom Arena: four separate stands, an enclosed hall ------------------
+// Rebuilt October 2026 as a NEW template (kingdom-arena-26k); the earlier one
+// is a legacy ground. Checked against the published figures and against the
+// building it has to fit in.
+{
+  const cat = await import('../src/core/stadiumCatalog');
+  const ss = await import('../src/core/standSpans');
+  const { kingdomFrame } = await import('../src/render/simulator/kingdom');
+  const { readFileSync: kRead } = await import('node:fs');
+  const OLD = 'community-kingdom-arena-28k';
+  const NEW = 'kingdom-arena-26k';
+  if (cat.STADIUM_CATALOG.some((e) => e.id === OLD)) throw new Error('kingdom: the earlier Kingdom Arena is still offered');
+  if (cat.entryById(OLD)?.meta.supersededBy !== NEW) throw new Error('kingdom: the earlier Kingdom Arena does not point at its replacement');
+  if (!cat.shippedTemplates().some((t) => t.id === OLD) || !cat.shippedTemplates().some((t) => t.id === NEW)) throw new Error('kingdom: both Kingdom Arenas must be saveable');
+  const kt = cat.templateById(NEW)!;
+  const km = generateSeatMap(kt);
+  if (!kt.indoor) throw new Error('kingdom: the arena is not marked indoor');
+
+  // 26,700 seats for the public after the December 2024 expansion (Turki Al-Sheikh).
+  if (Math.abs(km.count - 26700) / 26700 > 0.02) throw new Error(`kingdom: ${km.count} seats, the real ground 26,700`);
+  // Every seat is in one of its tier's stands, on the right side, within its length and rows.
+  const per: Record<string, number> = {};
+  const rowsBefore = (t: number): number => kt.tiers.slice(0, t).reduce((n, x) => n + x.rows, 0);
+  for (let i = 0; i < km.count; i++) {
+    const t = km.tierOf[i];
+    const tier = kt.tiers[t];
+    const x = km.pos3[i * 3];
+    const z = km.pos3[i * 3 + 2];
+    const row = km.rowOf[i] - rowsBefore(t);
+    const radial = tier.baseOffset + row * tier.rowDepth;
+    const span = ss.spanAt(tier, kt.plan, radial, x, z);
+    if (!span || row >= (span.rows ?? tier.rows)) throw new Error(`kingdom: seat ${i} is outside its tier's stands`);
+    per[`${t}:${span.side}`] = (per[`${t}:${span.side}`] ?? 0) + 1;
+  }
+  // The shape of the ground: two equal ends, the north stand the biggest side,
+  // an upper tier on the north stand only, the main stand the smallest.
+  if (per['0:east'] !== per['0:west']) throw new Error(`kingdom: the two ends differ ${JSON.stringify(per)}`);
+  if (Object.keys(per).some((k) => k.startsWith('1:') && k !== '1:north')) throw new Error('kingdom: an upper tier outside the north stand');
+  if (!(per['0:south'] < per['0:north'] && per['0:south'] < per['0:east'])) throw new Error(`kingdom: the main stand should be the low one ${JSON.stringify(per)}`);
+  // Room round the pitch, and open corners: nothing within 7 m of the pitch,
+  // and no seat in a corner (|x| past the side stands and |z| past the ends at once).
+  let nearest = Infinity;
+  let cornerSeats = 0;
+  for (let i = 0; i < km.count; i++) {
+    const x = Math.abs(km.pos3[i * 3]);
+    const z = Math.abs(km.pos3[i * 3 + 2]);
+    const d = x <= 52.5 && z <= 34 ? -1 : Math.hypot(Math.max(0, x - 52.5), Math.max(0, z - 34));
+    nearest = Math.min(nearest, d);
+    if (x > 58.5 && z > 41.6) cornerSeats++;
+  }
+  if (nearest < 7) throw new Error(`kingdom: a seat ${nearest.toFixed(2)} m from the pitch`);
+  if (cornerSeats) throw new Error(`kingdom: ${cornerSeats} seats in the corners, which are open at the real ground`);
+  // ...and the concrete leaves them open too: no part of any stand in a corner.
+  // (It used to follow the plan curve round the corner, past its seats.)
+  const { buildStands } = await import('../src/render/simulator/stands');
+  const THREEk = await import('three');
+  let cornerVerts = 0;
+  const xMax = Math.max(...kt.tiers.flatMap((t) => (t.stands ?? []).filter((s) => s.side === 'north' || s.side === 'south').map((s) => s.halfLength))) + 0.6;
+  const zMax = Math.max(...kt.tiers.flatMap((t) => (t.stands ?? []).filter((s) => s.side === 'east' || s.side === 'west').map((s) => s.halfLength))) + 0.6;
+  buildStands(kt, false).traverse((o) => {
+    const m = o as InstanceType<typeof THREEk.Mesh>;
+    if (!m.isMesh) return;
+    const pa = m.geometry.attributes.position;
+    for (let i = 0; i < pa.count; i++) if (Math.abs(pa.getX(i)) > xMax && Math.abs(pa.getZ(i)) > zMax) cornerVerts++;
+  });
+  if (cornerVerts) throw new Error(`kingdom: ${cornerVerts} points of the stands' concrete are in the open corners`);
+  // The building: 220 x 150 m and 47 m high, every seat inside it and under its roof.
+  const F = kingdomFrame(kt);
+  const len = 2 * (F.X + F.WALL);
+  const wid = F.Z_N - F.Z_S + 2 * F.WALL;
+  if (Math.abs(len - 220) > 10 || Math.abs(wid - 150) > 10 || F.ROOF_HIGH !== 47) throw new Error(`kingdom: the building is ${len.toFixed(0)} x ${wid.toFixed(0)} m, the real one 220 x 150`);
+  for (let i = 0; i < km.count; i++) {
+    const x = Math.abs(km.pos3[i * 3]);
+    const y = km.pos3[i * 3 + 1];
+    const z = km.pos3[i * 3 + 2];
+    if (x > F.X - 2 || z < F.Z_S + 2 || z > F.Z_N - 2) throw new Error(`kingdom: seat ${i} is outside the hall`);
+    const ceiling = x > F.HIGH_X ? F.CEIL_LOW : F.TRUSS_LO;
+    if (y + 3 > ceiling) throw new Error(`kingdom: seat ${i} has no headroom under the roof`);
+  }
+  // Boxes: 20 on the main stand and 14 opposite (34). Screens: the centre-hung
+  // board, one over each end, one on each corner column.
+  const d = kt.details!;
+  const boxes = (d.boxes ?? []).reduce((n, b) => n + b.count, 0) + (d.hospitality ? d.hospitality.boxFloors * d.hospitality.boxesPerFloor : 0);
+  if (boxes !== 34) throw new Error(`kingdom: ${boxes} boxes, the real ground 34`);
+  if (!d.centreScreen || !d.cornerScreens || (d.screens ?? []).length !== 2) throw new Error('kingdom: the screens are not the real ones');
+  // The cameras stay inside the hall, under the roof, and out of the hospitality block.
+  const simSrc = kRead('src/render/simulator/index.ts', 'utf8');
+  const shotsSrc = simSrc.slice(simSrc.indexOf('if (this.template.id === KINGDOM_ID) {\n      // Under the roof: every camera'), simSrc.indexOf("seatShot(this.map, 'crowd'),"));
+  const b = kt.plan.b;
+  const shotPos = [...shotsSrc.matchAll(/position: \[([^\]]+)\]/g)].map((mm) => mm[1].split(',').map((v) => Function('b', `return ${v}`)(b) as number));
+  if (shotPos.length < 6) throw new Error('kingdom: could not read the camera shots');
+  const hosp = { x: F.HOSP_HALF, z0: F.Z_S, z1: -(b + F.HOSP_FRONT), y: F.HOSP_FLOORS[F.HOSP_FLOORS.length - 1].y + F.HOSP_FLOORS[F.HOSP_FLOORS.length - 1].h + 1.6 };
+  for (const [x, y, z] of shotPos) {
+    const ceiling = Math.abs(x) > F.HIGH_X ? F.CEIL_LOW : F.TRUSS_LO;
+    if (Math.abs(x) > F.X || z < F.Z_S || z > F.Z_N || y > ceiling - 1) throw new Error(`kingdom: a camera shot at ${x},${y},${z} is outside the hall`);
+    if (Math.abs(x) < hosp.x && z > hosp.z0 && z < hosp.z1 && y < hosp.y) throw new Error(`kingdom: a camera shot at ${x},${y},${z} is inside the hospitality block`);
+  }
+  // Indoors: no rain on the pitch, the hall lit by its floods at any hour.
+  if (!/const here: Weather = this\.template\.indoor \? 'clear' : w;/.test(simSrc)) throw new Error('kingdom: it can rain indoors');
+  if (!/this\.template\.indoor \? SKIES\.night/.test(simSrc)) throw new Error('kingdom: daylight inside the hall');
+  // Strings, in both languages.
+  const ks = kRead('src/ui/i18n.ts', 'utf8');
+  if (!/'stad\.kingdomArenaOld': \{ en: '[^']+', ar: '[^']+' \}/.test(ks) || !/'kingdom-arena-26k': 'stad\.kingdomArena'/.test(ks)) throw new Error('kingdom: the names are missing');
+  console.log(
+    `kingdom: ${km.count} seats (real 26,700) | ends ${per['0:east']} + ${per['0:west']}, north ${per['0:north']} + ${per['1:north']} upper, main ${per['0:south']}` +
+      ` | ${nearest.toFixed(1)} m clear of the pitch, corners open (seats and concrete) | hall ${len.toFixed(0)} x ${wid.toFixed(0)} x ${F.ROOF_HIGH} m | ${boxes} boxes | ${shotPos.length} cameras inside`,
   );
 }
 

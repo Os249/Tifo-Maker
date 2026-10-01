@@ -33,7 +33,12 @@ function stripeTexture(): THREE.Texture {
   return t;
 }
 
-export function buildPitchside(shadows: boolean): PitchsideController {
+/**
+ * `benches: false` leaves out the generic dugouts and tunnel, for a ground
+ * whose own builder puts its real ones where they are (Kingdom Arena's are in
+ * front of the main stand, on the other touchline).
+ */
+export function buildPitchside(shadows: boolean, opts: { benches?: boolean } = {}): PitchsideController {
   const group = new THREE.Group();
   const trash: { dispose(): void }[] = [];
 
@@ -76,17 +81,19 @@ export function buildPitchside(shadows: boolean): PitchsideController {
     group.add(d);
     trash.push(g);
   };
-  dugout(-9);
-  dugout(9);
   trash.push(dugMat);
+  if (opts.benches !== false) {
+    dugout(-9);
+    dugout(9);
 
-  // Players' tunnel mouth behind the dugouts.
-  const tunMat = new THREE.MeshStandardMaterial({ color: 0x0a0d14, emissive: 0x1a1408, emissiveIntensity: 0.5, roughness: 1 });
-  const tunGeo = new THREE.BoxGeometry(4, 3, 3);
-  const tunnel = new THREE.Mesh(tunGeo, tunMat);
-  tunnel.position.set(0, 1.5, HALF_Z + m + 5.5);
-  group.add(tunnel);
-  trash.push(tunGeo, tunMat);
+    // Players' tunnel mouth behind the dugouts.
+    const tunMat = new THREE.MeshStandardMaterial({ color: 0x0a0d14, emissive: 0x1a1408, emissiveIntensity: 0.5, roughness: 1 });
+    const tunGeo = new THREE.BoxGeometry(4, 3, 3);
+    const tunnel = new THREE.Mesh(tunGeo, tunMat);
+    tunnel.position.set(0, 1.5, HALF_Z + m + 5.5);
+    group.add(tunnel);
+    trash.push(tunGeo, tunMat);
+  }
 
   return {
     object: group,

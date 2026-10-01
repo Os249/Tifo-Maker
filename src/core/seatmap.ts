@@ -1,5 +1,6 @@
 import type { SeatMap, StadiumTemplate } from './types';
 import { inLane, laneLines } from './venueDetails';
+import { inStands } from './standSpans';
 
 /**
  * Deterministic seat-map generation.
@@ -223,6 +224,8 @@ export function generateSeatMap(template: StadiumTemplate): SeatMap {
           const nyp = Math.abs(wy) / (template.plan.b + radial);
           if (nxp > cornerCut && nyp > cornerCut) continue;
         }
+        // A tier that is only some stands (TierSpec.stands) has no seats elsewhere.
+        if (tier.stands && !inStands(tier, template.plan, r, radial, wx, wy)) continue;
         // A vehicle lane is a real gap: the ramp is where these seats would be.
         if (lanes.length > 0 && inLane(lanes, tierIdx, wx, wy, r)) continue;
         xs.push(u * EDITOR_WIDTH);

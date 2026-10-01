@@ -10,13 +10,14 @@
   import { templateById } from '/src/core/stadiumCatalog.ts';
   import { MatchDaySimulator } from '/src/render/simulator/index.ts';
   import { AssetStore } from '/src/core/sceneAssets.ts';
+  import { tlBoth } from '/src/ui/i18n.ts';
 
   const W = 1280, H = 720;
   const HOST = document.createElement('div');
   HOST.style.cssText = `position:fixed;left:0;top:0;width:${W}px;height:${H}px;`;
   document.body.appendChild(HOST);
 
-  let sim = null, map = null, curId = null, curKey = null;
+  let sim = null, map = null, curId = null, curKey = null, curTime = 'night';
   window.__open = async (id, opts) => {
     if (sim) { sim.dispose(); sim = null; }
     HOST.replaceChildren();
@@ -34,13 +35,14 @@
       });
     }
     sim = new MatchDaySimulator(HOST, map, store, template, new AssetStore(), { quality: opts.quality ?? 'high' });
-    sim.setTimeOfDay(opts.time ?? 'night');
+    curTime = opts.time ?? 'night';
+    sim.setTimeOfDay(curTime);
     sim.setFloodlights(true);
     sim.setCrowdPreset(opts.crowd ?? 'sellout');
     if (sim.hasScreens && sim.hasScreens()) {
       let img;
       if (opts.screen === 'image') img = await createImageBitmap(await (await fetch('/scripts/data/test-badge.png')).blob());
-      sim.setScreen(opts.screen ?? 'stadium', { en: template.name, ar: 'جوهرة جدة' }, img);
+      sim.setScreen(opts.screen ?? 'stadium', tlBoth(template.id, template.name), img);
     }
     if (opts.floods === false) sim.setFloodlights(false);
     if (opts.wet) sim.setWetPitch(true);
@@ -59,6 +61,7 @@
     return { ax, bz, ty };
   };
   window.__shoot = async (view, settleMs) => {
+    sim.setTimeOfDay(view.time ?? curTime);
     sim.camera.fov = view.fov ?? 55;
     sim.camera.updateProjectionMatrix();
     sim.applyPreset({ name: view.name, position: view.position, target: view.target });

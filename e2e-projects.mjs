@@ -177,7 +177,7 @@ check('the Projects page lists it, with a picture, stadium and badge', cs.length
 check('a guest is told the projects live in this browser only', await g.evaluate(() => /this browser only/.test(document.getElementById('pj-where').textContent)));
 await g.click('#pj-new');
 await waitFor(g, () => !!document.querySelector('.np-modal'));
-await g.click('.np-stadium[data-id="community-kingdom-arena-28k"]');
+await g.click('.np-stadium[data-id="kingdom-arena-26k"]');
 await g.click('#np-create');
 await waitFor(g, () => location.pathname === '/app');
 await editorReady(g);

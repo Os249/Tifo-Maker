@@ -2024,14 +2024,14 @@ if (process.env.DATABASE_URL) {
   const { templateById } = await import('../../src/core/stadiumCatalog');
   const { noTifoMask } = await import('../../src/core/venueDetails');
   const list = shippedTemplateInfo();
-  for (const id of ['jewel-jeddah-60k', 'community-jewel-jeddah-62k', 'community-alawwal-park-25k', 'community-kingdom-arena-28k', DEFAULT_TEMPLATE.id]) {
+  for (const id of ['jewel-jeddah-60k', 'community-jewel-jeddah-62k', 'community-alawwal-park-25k', 'kingdom-arena-26k', 'community-kingdom-arena-28k', DEFAULT_TEMPLATE.id]) {
     assert.ok(list.some((t) => t.id === id), `the server knows ${id}`);
   }
   const auth = new MemoryAuthRepository();
   const designs = new MemoryDesignRepository((id) => auth.usernameOf(id));
   const app = await buildApp(designs, auth, list);
   const tok = await registerUser(app, 'jeddawi');
-  for (const id of ['jewel-jeddah-60k', 'community-jewel-jeddah-62k']) {
+  for (const id of ['jewel-jeddah-60k', 'community-jewel-jeddah-62k', 'kingdom-arena-26k', 'community-kingdom-arena-28k']) {
     const n = generateSeatMap(templateById(id)!).count;
     assert.equal(list.find((t) => t.id === id)!.seatCount, n, `${id}: the server's seat count is the generator's`);
     const cellsGzB64 = gzipSync(new Uint8Array(n).fill(1)).toString('base64');
@@ -2064,5 +2064,5 @@ if (process.env.DATABASE_URL) {
     assert.equal(short.statusCode, 400, `${id}: a design with the wrong seat count is refused`);
   }
   await app.close();
-  console.log('real-venue grounds: designs save on the rebuilt Jewel and on the legacy one; wrong seat counts refused; the royal box is cleared server-side');
+  console.log('real-venue grounds: designs save on the rebuilt Jewel and Kingdom Arena and on their legacy ones; wrong seat counts refused; the royal box is cleared server-side');
 }

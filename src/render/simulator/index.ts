@@ -42,6 +42,7 @@ import { buildAccessories, type AccessoriesController, type AccessoriesCensus } 
 import { pyroLoudness, type AccessoryKind, type AccessoryLevel, type AccessoryLevels, type AccessoryWhere } from '../../core/accessories';
 import { buildJewelCrown } from './jewelCrown';
 import { buildJewel } from './jewel';
+import { buildKingdom } from './kingdom';
 import { buildVenueDetails, type VenueBuild } from './venue';
 import { buildPremium } from './premium';
 import { paintScreen, type ScreenMode } from './screenPicture';
@@ -52,6 +53,8 @@ const ZERO_MATRIX = new THREE.Matrix4().makeScale(0, 0, 0);
 
 /** The rebuilt Jewel (King Abdullah Sports City). The earlier one keeps its own look. */
 const JEWEL_ID = 'jewel-jeddah-60k';
+/** The rebuilt Kingdom Arena. The earlier one keeps its own look. */
+const KINGDOM_ID = 'kingdom-arena-26k';
 import { buildAlAwwalExtras, buildKingdomArenaExtras } from './stadiumExtras';
 import { buildPitchDetail, pitchStripeTexture } from './pitchDetail';
 import { dbg } from './debug';
@@ -200,6 +203,7 @@ export class MatchDaySimulator {
   private readonly jewelSeatColors = [new THREE.Color(0x8f2d2d), new THREE.Color(0xb14a2a), new THREE.Color(0xc98a4b), new THREE.Color(0x6f2222), new THREE.Color(0xd8b98a), new THREE.Color(0xa33b2b)];
   private readonly alawwalSeatColors = [new THREE.Color(0xf2c40f), new THREE.Color(0xe8bd10), new THREE.Color(0xf5cd2a), new THREE.Color(0xd9ae0c), new THREE.Color(0xf7d43a), new THREE.Color(0xf2c40f), new THREE.Color(0xefc200)];
   private readonly alawwalBlue = new THREE.Color(0x15245e);
+  private readonly kingdomNavy = [new THREE.Color(0x172046), new THREE.Color(0x1b264f), new THREE.Color(0x141c3e), new THREE.Color(0x1f2d62), new THREE.Color(0x182349), new THREE.Color(0x24346f)];
   private readonly kingdomSeatColors = [new THREE.Color(0x1c2a5e), new THREE.Color(0x2b4a9c), new THREE.Color(0xe8ecf6), new THREE.Color(0x24377a), new THREE.Color(0xd8deea), new THREE.Color(0x1c3a8a), new THREE.Color(0x203a72)];
   private pitchMat!: THREE.MeshStandardMaterial;
   private paletteColors: THREE.Color[] = [];
@@ -336,7 +340,7 @@ export class MatchDaySimulator {
     // Subsystems (Phases 2-7). Each is independently toggleable from the overlay.
     this.crowd = buildCrowd(this.map, this.store, this.noTifo);
     this.scene.add(this.crowd.object);
-    this.pitchside = buildPitchside(this.settings.shadows);
+    this.pitchside = buildPitchside(this.settings.shadows, { benches: this.template.id !== KINGDOM_ID });
     this.scene.add(this.pitchside.object);
     this.banners = buildBanners(this.map, this.store);
     this.scene.add(this.banners.object);
@@ -412,6 +416,11 @@ export class MatchDaySimulator {
       const jewel = buildJewel(this.template, this.settings.shadows);
       this.scene.add(jewel.object);
       this.disposables.push(...jewel.disposables);
+    }
+    if (this.template.id === KINGDOM_ID) {
+      const kingdom = buildKingdom(this.template, this.settings.shadows);
+      this.scene.add(kingdom.object);
+      this.disposables.push(...kingdom.disposables);
     }
     if (this.template.id === 'community-alawwal-park-25k') {
       let mx = 1;
@@ -489,6 +498,10 @@ export class MatchDaySimulator {
       // Two-tone Al-Nassr: blue pitch-side front rail, gold body (matches the ground).
       if (this.map.rowOf[i] < 4) return this.alawwalBlue;
       return this.alawwalSeatColors[(Math.imul(i, 2654435761) >>> 0) % this.alawwalSeatColors.length];
+    }
+    if (cell === 0 && this.template.id === KINGDOM_ID) {
+      // Navy seats, a little lighter in places, as at the ground.
+      return this.kingdomNavy[(Math.imul(i, 2654435761) >>> 0) % this.kingdomNavy.length];
     }
     if (cell === 0 && this.template.id === 'community-kingdom-arena-28k') {
       return this.kingdomSeatColors[(Math.imul(i, 2654435761) >>> 0) % this.kingdomSeatColors.length];
@@ -700,6 +713,21 @@ export class MatchDaySimulator {
     return this.seatBoundsCache;
   }
   shots(): SimShot[] {
+    if (this.template.id === KINGDOM_ID) {
+      // Under the roof: every camera stays inside the hall, below the trusses.
+      const { b } = this.template.plan;
+      return [
+        { name: 'TV Broadcast', position: [0, 23.5, -(b + 9)], target: [0, 2, 8], fov: 55 },
+        { name: 'Main Camera', position: [0, 9, -(b + 5)], target: [0, 1.5, 0], fov: 55 },
+        { name: 'Behind Goal', position: [-80, 20, 0], target: [20, 4, 0], fov: 62 },
+        { name: 'Pitch Level', position: [10, 2.2, -(b - 12)], target: [0, 14, b + 20], fov: 62 },
+        { name: 'High Corner', position: [-56, 18, -(b + 6)], target: [12, 5, 12], fov: 66 },
+        { name: 'Centre Screen', position: [-44, 27, -32], target: [0, 26, 0], fov: 50 },
+        { name: 'Hospitality', position: [6, 7, b - 4], target: [0, 12, -(b + 12)], fov: 55 },
+        seatShot(this.map, 'crowd'),
+        seatShot(this.map, 'ultra'),
+      ];
+    }
     if (this.template.id === 'community-kingdom-arena-28k') {
       const { ax, bz, ty } = this.seatBounds();
       return [
@@ -979,21 +1007,26 @@ export class MatchDaySimulator {
     this.skyTex.dispose();
     this.skyTex = skyTexture(p.sky);
     this.scene.background = this.skyTex;
-    if (this.scene.fog) (this.scene.fog as THREE.Fog).color.set(p.fog);
-    this.hemi.color.set(p.hemiSky);
-    this.hemi.groundColor.set(p.hemiGround);
-    this.hemi.intensity = p.hemiInt;
-    this.sun.color.set(p.sunColor);
-    this.sun.intensity = p.sunInt;
-    this.sun.position.set(p.sunPos[0], p.sunPos[1], p.sunPos[2]);
-    this.fill.color.set(p.fillColor);
-    this.fill.intensity = p.fillInt;
-    this.renderer.toneMappingExposure = p.exposure;
+    // Indoors the sky is outside: the hall is lit by its floodlights whatever
+    // the time of day, so the lights — and the haze in the air — are the night's.
+    const l = this.template.indoor ? SKIES.night ?? p : p;
+    if (this.scene.fog) (this.scene.fog as THREE.Fog).color.set(l.fog);
+    this.hemi.color.set(l.hemiSky);
+    this.hemi.groundColor.set(l.hemiGround);
+    this.hemi.intensity = l.hemiInt;
+    this.sun.color.set(l.sunColor);
+    this.sun.intensity = l.sunInt;
+    this.sun.position.set(l.sunPos[0], l.sunPos[1], l.sunPos[2]);
+    this.fill.color.set(l.fillColor);
+    this.fill.intensity = l.fillInt;
+    this.renderer.toneMappingExposure = l.exposure;
   }
   setWeather(w: Weather): void {
-    this.weather.setWeather(w);
-    this.weatherNow = w;
-    this.atmosphere.setWeatherBed(this.weatherSound ? w : 'clear');
+    // Indoors it does not rain on the pitch, and the crowd does not hear it.
+    const here: Weather = this.template.indoor ? 'clear' : w;
+    this.weather.setWeather(here);
+    this.weatherNow = here;
+    this.atmosphere.setWeatherBed(this.weatherSound ? here : 'clear');
   }
   setExposure(v: number): void {
     this.renderer.toneMappingExposure = v;
@@ -2289,7 +2322,14 @@ export class MatchDaySimulator {
       if (this.flyActive) {
       // Time into the current pass: a clip starts its own pass at 0.
       const ft = this.elapsed - this.flyStart;
-      if (this.template.id === 'community-kingdom-arena-28k') {
+      if (this.template.id === KINGDOM_ID) {
+        // Under the roof: an orbit over the pitch, below the trusses, that
+        // dips towards the stands and rises again.
+        const P = this.flyPeriod * (22 / FLY_DURATION);
+        const a = ((((ft % P) + P) % P) / P) * Math.PI * 2;
+        const r = 0.82 + 0.12 * Math.cos(a * 2);
+        applyCameraShot(this.camera, this.controls, { name: 'Flyover', position: [Math.cos(a) * 55 * r, 22 + 4 * Math.cos(a * 2), Math.sin(a) * 38 * r], target: [0, 4, 0], fov: 62 });
+      } else if (this.template.id === 'community-kingdom-arena-28k') {
         // Under the roof: a level orbit inside the bowl, a little slower.
         const { ax, bz, ty } = this.seatBounds();
         const P = this.flyPeriod * (22 / FLY_DURATION);

@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { StadiumTemplate, SeatMap } from '../../core/types';
 import { curveSampler, laneCut, laneLines, tierEdges, type LaneLine } from '../../core/venueDetails';
+import { sideOfU, spanGeometry, spanOn } from '../../core/standSpans';
 
 /**
  * A real ground's details, drawn from its template (VenueDetails in types.ts):
@@ -173,7 +174,7 @@ function emergencySign(): THREE.CanvasTexture {
 }
 
 /** A Saudi Red Crescent-style ambulance: white van, red band, light bar. Generic. */
-function ambulance(trash: Trash[]): THREE.Group {
+export function ambulance(trash: Trash[]): THREE.Group {
   const g = new THREE.Group();
   const white = new THREE.MeshStandardMaterial({ color: 0xf4f4f0, roughness: 0.45, metalness: 0.1 });
   const red = new THREE.MeshStandardMaterial({ color: 0xc8102e, roughness: 0.5 });
@@ -439,19 +440,34 @@ export function buildVenueDetails(template: StadiumTemplate, map: SeatMap, shado
   // straight through the building. The hospitality boxes live in here.
   const CONCOURSE = 5;
   for (let t = 1; t < template.tiers.length; t++) {
-    const below = tierEdges(template, t - 1);
-    const above = tierEdges(template, t);
+    // A ring tier has one concourse all the way round; a tier made of stands
+    // (TierSpec.stands) has one behind each of its stands only.
+    const runs: { below: ReturnType<typeof tierEdges>; above: ReturnType<typeof tierEdges>; u0: number; u1: number }[] = [];
+    if (template.tiers[t].stands) {
+      for (const sg of spanGeometry(template)[t]) {
+        const lo = template.tiers[t - 1].stands ? spanOn(template, t - 1, sg.side) : null;
+        const below = lo ?? tierEdges(template, t - 1);
+        runs.push({ below, above: sg, u0: sg.u0, u1: sg.u1 });
+      }
+    } else {
+      runs.push({ below: tierEdges(template, t - 1), above: tierEdges(template, t), u0: 0, u1: 1 });
+    }
     const rakeT = Math.tan((template.tiers[t].rakeDeg * Math.PI) / 180);
-    const under = (r: number): number => above.frontY + (r - above.front) * rakeT - 0.45;
-    const r0 = below.back + 0.2;
-    const r1 = below.back + CONCOURSE;
-    if (under(r0) - below.backY < 1) continue;
-    const floor = new THREE.Mesh(flatRing(at, r0, r1, below.backY - 0.05, below.backY - 0.05), floorMat);
-    const soffit = new THREE.Mesh(flatRing(at, above.front + 0.3, r1, under(above.front + 0.3), under(r1)), soffitMat);
-    const back = new THREE.Mesh(curtain(at, 0, 1, r1, below.backY - 0.1, under(r1) + 0.1, 360), soffitMat);
-    for (const m of [floor, soffit, back]) {
-      trash.push(m.geometry);
-      group.add(m);
+    for (const { below, above, u0, u1 } of runs) {
+      const under = (r: number): number => above.frontY + (r - above.front) * rakeT - 0.45;
+      const r0 = below.back + 0.2;
+      const r1 = below.back + CONCOURSE;
+      if (under(r0) - below.backY < 1) continue;
+      // A full ring keeps the resolution it always had; a stand's run gets its share.
+      const ring = u0 === 0 && u1 === 1;
+      const segs = ring ? 240 : Math.max(24, Math.round((u1 - u0) * 360));
+      const floor = new THREE.Mesh(flatRing(at, r0, r1, below.backY - 0.05, below.backY - 0.05, u0, u1, segs), floorMat);
+      const soffit = new THREE.Mesh(flatRing(at, above.front + 0.3, r1, under(above.front + 0.3), under(r1), u0, u1, segs), soffitMat);
+      const back = new THREE.Mesh(curtain(at, u0, u1, r1, below.backY - 0.1, under(r1) + 0.1, ring ? 360 : segs), soffitMat);
+      for (const m of [floor, soffit, back]) {
+        trash.push(m.geometry);
+        group.add(m);
+      }
     }
   }
 
@@ -464,8 +480,10 @@ export function buildVenueDetails(template: StadiumTemplate, map: SeatMap, shado
   for (const band of details.boxes ?? []) {
     const t = band.underTier;
     if (t < 1 || t >= template.tiers.length) continue;
-    const below = tierEdges(template, t - 1);
-    const above = tierEdges(template, t);
+    // On a ground of separate stands, the stand on the band's side.
+    const side = sideOfU(band.centerU);
+    const below = (template.tiers[t - 1].stands ? spanOn(template, t - 1, side) : null) ?? tierEdges(template, t - 1);
+    const above = (template.tiers[t].stands ? spanOn(template, t, side) : null) ?? tierEdges(template, t);
     const rakeT = Math.tan((template.tiers[t].rakeDeg * Math.PI) / 180);
     const under = (r: number): number => above.frontY + (r - above.front) * rakeT - 0.45;
     const gl = below.back + 0.3; // the glass line
@@ -527,9 +545,15 @@ export function buildVenueDetails(template: StadiumTemplate, map: SeatMap, shado
   }
 
   // ---- big screens --------------------------------------------------------
+  // Every screen shows the same picture (one canvas, one texture): the ones on
+  // the stands, the ones hung from the roof, a centre-hung board and the
+  // portrait screens on the corner columns.
   const screens = details.screens ?? [];
+  const centre = details.centreScreen;
+  const corners = details.cornerScreens;
   let screen: VenueBuild['screen'] = null;
-  if (screens.length) {
+  let screenCount = 0;
+  if (screens.length || centre || corners) {
     const canvas = document.createElement('canvas');
     canvas.width = SCREEN_PX.w;
     canvas.height = SCREEN_PX.h;
@@ -540,22 +564,114 @@ export function buildVenueDetails(template: StadiumTemplate, map: SeatMap, shado
     // picture should read the same at noon and at midnight.
     const face = new THREE.MeshBasicMaterial({ map: texture, toneMapped: false });
     const frame = new THREE.MeshStandardMaterial({ color: 0x15171c, roughness: 0.6, metalness: 0.4 });
-    trash.push(texture, face, frame);
+    const steel = new THREE.MeshStandardMaterial({ color: 0x23262c, roughness: 0.7, metalness: 0.5 });
+    trash.push(texture, face, frame, steel);
     screen = { canvas, texture };
-    const topTier = template.tiers.length - 1;
-    const te = tierEdges(template, topTier);
+    const rod = new THREE.CylinderGeometry(0.06, 0.06, 1, 6);
+    trash.push(rod);
+    const hangers = (holder: THREE.Object3D, xs: [number, number][], top: number, len: number): void => {
+      for (const [x, z] of xs) {
+        const r = new THREE.Mesh(rod, steel);
+        r.scale.y = len;
+        r.position.set(x, top + len / 2, z);
+        holder.add(r);
+      }
+    };
+    // Where a screen on the back of a stand stands: the highest tier with a
+    // stand on that side, or the top tier of a ring bowl.
+    const backOf = (u: number): ReturnType<typeof tierEdges> => {
+      const side = sideOfU(u);
+      for (let t = template.tiers.length - 1; t >= 0; t--) {
+        if (!template.tiers[t].stands) return tierEdges(template, t);
+        const sg = spanOn(template, t, side);
+        if (sg) return sg;
+      }
+      return tierEdges(template, template.tiers.length - 1);
+    };
     for (const sc of screens) {
       const faceGeo = new THREE.PlaneGeometry(sc.widthM, sc.heightM);
       trash.push(faceGeo);
-      // On the back of the top tier, just over the last row's heads, under the roof.
-      const p = at(sc.centerU, te.back + 0.2);
       const holder = new THREE.Group();
-      holder.position.set(p.x, te.backY + 0.7 + sc.heightM / 2, p.z);
-      holder.rotation.y = Math.atan2(-p.nx, -p.nz); // face the pitch
+      if (sc.hang) {
+        // Hung from the roof over the stand, facing the pitch.
+        const p = at(sc.centerU, sc.hang.offset);
+        holder.position.set(p.x, sc.hang.y, p.z);
+        holder.rotation.y = Math.atan2(-p.nx, -p.nz);
+        const topY = sc.hang.y + sc.heightM / 2 + 0.4;
+        hangers(holder, [[-sc.widthM * 0.35, -0.4], [sc.widthM * 0.35, -0.4]], sc.heightM / 2 + 0.4, Math.max(0.5, (sc.hang.ceiling ?? topY + 14) - topY));
+      } else {
+        // On the back of the top tier, just over the last row's heads, under the roof.
+        const te = backOf(sc.centerU);
+        const p = at(sc.centerU, te.back + 0.2);
+        holder.position.set(p.x, te.backY + 0.7 + sc.heightM / 2, p.z);
+        holder.rotation.y = Math.atan2(-p.nx, -p.nz); // face the pitch
+      }
       const back = box(sc.widthM + 0.8, sc.heightM + 0.8, 0.9, frame, trash);
       back.position.z = -0.5;
       holder.add(back, new THREE.Mesh(faceGeo, face));
       group.add(holder);
+      screenCount++;
+    }
+    if (centre) {
+      // Four faces round a dark box, hung on cables over the centre spot.
+      const board = new THREE.Group();
+      board.name = 'centre-screen';
+      board.position.set(0, centre.y, 0);
+      // Footprint: widthM along x, depthM along z. The long faces sit at ±z
+      // looking at the side stands; the short ones at ±x looking at the ends.
+      const body = box(centre.widthM, centre.heightM + 0.6, centre.depthM, frame, trash);
+      board.add(body);
+      const longFace = new THREE.PlaneGeometry(centre.widthM, centre.heightM);
+      const shortFace = new THREE.PlaneGeometry(centre.depthM, centre.heightM);
+      trash.push(longFace, shortFace);
+      for (const [geo, x, z, ry] of [
+        [longFace, 0, centre.depthM / 2 + 0.02, 0],
+        [longFace, 0, -centre.depthM / 2 - 0.02, Math.PI],
+        [shortFace, centre.widthM / 2 + 0.02, 0, Math.PI / 2],
+        [shortFace, -centre.widthM / 2 - 0.02, 0, -Math.PI / 2],
+      ] as [THREE.PlaneGeometry, number, number, number][]) {
+        const m = new THREE.Mesh(geo, face);
+        m.position.set(x, 0, z);
+        m.rotation.y = ry;
+        board.add(m);
+      }
+      const hx = centre.widthM / 2 - 0.5;
+      const hz = centre.depthM / 2 - 0.5;
+      const top = centre.y + centre.heightM / 2 + 0.3;
+      hangers(board, [[-hx, -hz], [hx, -hz], [-hx, hz], [hx, hz]], centre.heightM / 2 + 0.3, Math.max(0.5, (centre.ceiling ?? top + 16) - top));
+      group.add(board);
+      screenCount += 4;
+    }
+    if (corners) {
+      // A steel column at each corner of the pitch, where the stands do not
+      // meet, carrying a portrait screen that faces the centre spot. The
+      // picture is the same landscape one, turned on its side.
+      const { a, b } = template.plan;
+      const portrait = new THREE.PlaneGeometry(corners.widthM, corners.heightM);
+      const uv = portrait.attributes.uv as THREE.BufferAttribute;
+      for (let i = 0; i < uv.count; i++) {
+        const u = uv.getX(i);
+        const v = uv.getY(i);
+        uv.setXY(i, v, 1 - u);
+      }
+      uv.needsUpdate = true;
+      trash.push(portrait);
+      const colTop = corners.columnTop ?? Math.max(corners.y + corners.heightM / 2 + 18, 30);
+      for (const [sx, sz] of [[1, 1], [-1, 1], [-1, -1], [1, -1]] as [number, number][]) {
+        const x = sx * (a + 1.2);
+        const z = sz * (b + 1.2);
+        const col = box(1.1, colTop, 1.1, steel, trash);
+        col.position.set(x, colTop / 2, z);
+        group.add(col);
+        const holder = new THREE.Group();
+        holder.position.set(x - sx * 0.9, corners.y, z - sz * 0.9);
+        holder.rotation.y = Math.atan2(-x, -z);
+        const back = box(corners.widthM + 0.4, corners.heightM + 0.4, 0.5, frame, trash);
+        back.position.z = -0.3;
+        holder.add(back, new THREE.Mesh(portrait, face));
+        group.add(holder);
+        screenCount++;
+      }
     }
   }
 
@@ -564,7 +680,7 @@ export function buildVenueDetails(template: StadiumTemplate, map: SeatMap, shado
     object: group,
     disposables: trash,
     screen,
-    screenCount: screens.length,
+    screenCount,
     screensChanged() {
       if (screen) screen.texture.needsUpdate = true;
     },

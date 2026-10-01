@@ -281,13 +281,14 @@ export function fitRing(points: Pt[]): { a: number; b: number; exponent: number;
  * raked tier much past forty-odd rows stops working for sightlines and exits, so
  * a deep bowl is stacked out of necessity.
  *
- * Scored against all thirteen shipped templates this is right 11 times. The
- * two it misses are instructive rather than fixable: Al-Awwal and Kingdom
- * Arena are shallow (28 rows) and still two-tier, because modern builds put a
- * hospitality level in regardless. (The Jewel used to be a third miss — it split
- * 50 rows three ways. Rebuilt to the real stadium's counts in September 2026 it
- * has 66 rows, and the rule gets it right.) So this is emitted as `suggested`
- * and belongs in the list a human is asked to confirm.
+ * Scored against all thirteen shipped templates this is right 12 times. The
+ * one it misses is instructive rather than fixable: Al-Awwal is shallow (28
+ * rows) and still two-tier, because modern builds put a hospitality level in
+ * regardless. (The Jewel used to be a miss — it split 50 rows three ways;
+ * rebuilt to the real stadium's counts in September 2026 it has 66 rows. Kingdom
+ * Arena was one too at 28 rows in two tiers; rebuilt in October 2026 with its
+ * 2024 upper tier it has 58, and the rule gets both right.) So this is emitted
+ * as `suggested` and belongs in the list a human is asked to confirm.
  */
 export function suggestTierCount(totalRows: number): number {
   if (totalRows > 58) return 3;
@@ -768,7 +769,7 @@ export function buildStadium(input: FitInput): FitResult {
   let tierCount = k.tiers ?? suggestTierCount(totalRows);
   prov['tiers.length'] = k.tiers
     ? { source: 'user', confidence: 'given' }
-    : { source: 'row-count-rule', confidence: 'suggested', note: 'right on 11 of 13 shipped templates; a photo settles it', noteKey: 'si.note.tiers' };
+    : { source: 'row-count-rule', confidence: 'suggested', note: 'right on 12 of 13 shipped templates; a photo settles it', noteKey: 'si.note.tiers' };
   if (!k.tiers) confirm.push('tiers.length');
 
   const mkBase = (

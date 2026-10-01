@@ -70,6 +70,11 @@ export interface StadiumTemplate {
    * real ramp does). See VenueDetails.
    */
   details?: VenueDetails;
+  /**
+   * A fully enclosed building: no sky, no weather inside, and the cameras stay
+   * under the roof. Shell only — never moves a seat.
+   */
+  indoor?: boolean;
 }
 
 /**
@@ -144,6 +149,52 @@ export interface ScreenSpec {
   centerU: number;
   widthM: number;
   heightM: number;
+  /**
+   * Hung from the roof instead of standing on the back of the top tier: the
+   * centre of the screen is `offset` metres out from the plan curve and `y`
+   * metres up (Kingdom Arena's end screens hang over the front rows), on
+   * cables up to the ceiling at `ceiling` metres.
+   */
+  hang?: { offset: number; y: number; ceiling?: number };
+}
+
+/** A four-sided screen hung over the centre spot — an arena's centre-hung board. */
+export interface CentreScreen {
+  /** Width of the two faces that look at the side stands. */
+  widthM: number;
+  /** Width of the two faces that look at the ends. */
+  depthM: number;
+  heightM: number;
+  /** Height of its centre above the pitch. */
+  y: number;
+  /** Height of the ceiling its cables go up to. */
+  ceiling?: number;
+}
+
+/** Portrait screens on columns at the four corners of the pitch, facing the centre spot. */
+export interface CornerScreens {
+  widthM: number;
+  heightM: number;
+  /** Height of the screen's centre. */
+  y: number;
+  /** Height the columns run up to (the roof trusses). */
+  columnTop?: number;
+}
+
+/**
+ * Floors of glass hospitality stacked behind a stand's last row, instead of a
+ * tier above it (Kingdom Arena's main stand): boxes with seats out on a
+ * terrace, and a lounge on top.
+ */
+export interface Hospitality {
+  side: StandSide;
+  /** Half its length along the stand, metres. */
+  halfLength: number;
+  /** Floors of boxes, and how many boxes on each. */
+  boxFloors: number;
+  boxesPerFloor: number;
+  /** A glazed lounge across the top, with no terrace. */
+  lounge: boolean;
 }
 
 export interface VenueDetails {
@@ -151,6 +202,9 @@ export interface VenueDetails {
   zones?: SeatZone[];
   boxes?: BoxBand[];
   screens?: ScreenSpec[];
+  centreScreen?: CentreScreen;
+  cornerScreens?: CornerScreens;
+  hospitality?: Hospitality;
 }
 
 /**
@@ -264,6 +318,35 @@ export interface TierSpec {
   baseOffset: number;
   /** Seat spacing along the row arc, metres. */
   seatPitch: number;
+  /**
+   * Where this tier exists, for a ground whose four stands are not the same
+   * (Kingdom Arena: a low main stand under three floors of hospitality, a
+   * two-tier stand opposite, deep single-tier ends). Omitted: the full ring, as
+   * every bowl has always been.
+   *
+   * Each entry is one stand: the side it is on, how far it runs either side of
+   * the centre line in metres, and how many of the tier's rows it has. A seat
+   * is in a stand when it is on that side of the bowl and within the length.
+   */
+  stands?: StandSpan[];
+}
+
+/**
+ * The four sides of the bowl, in the tifo vocabulary (STAND_GEOMETRY in
+ * tifoSpec): north is +z (u = 0.25), south -z (u = 0.75, the main stand),
+ * east +x (u = 0, an end), west -x (u = 0.5, the other end).
+ */
+export type StandSide = 'north' | 'south' | 'east' | 'west';
+
+export interface StandSpan {
+  side: StandSide;
+  /**
+   * Half its length in metres, along the axis the stand runs: x for the north
+   * and south stands, z for the ends.
+   */
+  halfLength: number;
+  /** How many of the tier's rows this stand has. Default: all of them. */
+  rows?: number;
 }
 
 /**

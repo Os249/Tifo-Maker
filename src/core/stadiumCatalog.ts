@@ -321,33 +321,78 @@ const COMMUNITY: StadiumEntry[] = [
     meta: { name: 'Al-Awwal Park (Riyadh)', source: 'builtin', country: 'Middle East', capacity: 25000, type: 'Two-tier', inspiredBy: 'Al-Awwal Park (King Saud University Stadium), Riyadh - home of Al-Nassr', tags: ['al-nassr', 'riyadh', 'saudi', 'two-tier', 'gold', 'open'] },
   },
   {
-    // Tribute to Kingdom Arena, Riyadh - Al-Hilal's fully covered indoor arena, the
-    // largest covered football stadium. Enclosed rectangular box, closed roof, a
-    // four-sided screen hung over the centre. ~28,000.
-    id: 'community-kingdom-arena-28k',
+    // Kingdom Arena, Riyadh — Al-Hilal's fully enclosed home, the largest
+    // covered football stadium by area (Guinness, February 2024).
+    //
+    // Rebuilt October 2026 from the photographs (StadiumDB's set of the ground
+    // after the December 2024 expansion) and the published figures: a box
+    // 220 x 150 m and 47 m high, four separate straight stands with open
+    // corners, 26,700 seats for the public after the expansion (from 18,800),
+    // 20 boxes on the main stand and 14 more opposite (34), a four-sided screen
+    // hung over the centre and a screen over each end.
+    //
+    // In the tifo vocabulary: the main stand is south (u = 0.75) — a low lower
+    // tier under three floors of glass hospitality; north is the stand the
+    // expansion doubled, a deep lower tier, a band of 14 boxes and an upper
+    // tier; east and west are the ends, one deep tier each. Nobody publishes a
+    // per-stand split, so the rows are fitted to the photographs and to the
+    // total.
+    //
+    // A NEW ID, not a version bump: every design saved on the earlier Kingdom
+    // Arena indexes its seats by position. That one lives on in LEGACY below.
+    id: 'kingdom-arena-26k',
     template: {
-      id: 'community-kingdom-arena-28k',
+      id: 'kingdom-arena-26k',
       name: 'Kingdom Arena (Riyadh)',
       version: 1,
-      plan: { a: 66, b: 50, exponent: 4.6 },
-      // Box arena: open the four corners so the bowl reads as four straight
-      // stands (sidelines reach the goal lines, ends cover the pitch width).
-      cornerCut: 0.8,
+      // A 105 x 68 m pitch with 7.5 m of run-off all round; the plan is all but
+      // a rectangle so the four stands are straight.
+      plan: { a: 60, b: 41.5, exponent: 16 },
       evenRows: true,
       tiers: [
-        { rows: 16, rowDepth: 0.76, rakeDeg: 34, baseElevation: 1.5, baseOffset: 0, seatPitch: 0.47 },
-        { rows: 12, rowDepth: 0.74, rakeDeg: 40, baseElevation: 10, baseOffset: 14, seatPitch: 0.47 },
+        {
+          // One rake for the lower tier of all four stands; each stand has its own depth.
+          rows: 42, rowDepth: 0.8, rakeDeg: 30, baseElevation: 1.0, baseOffset: 0, seatPitch: 0.45,
+          stands: [
+            { side: 'east', halfLength: 41, rows: 42 },
+            { side: 'west', halfLength: 41, rows: 42 },
+            { side: 'north', halfLength: 58, rows: 28 },
+            { side: 'south', halfLength: 58, rows: 12 },
+          ],
+        },
+        {
+          // The 2024 upper tier, over the band of boxes on the north stand.
+          rows: 16, rowDepth: 0.8, rakeDeg: 34, baseElevation: 18.2, baseOffset: 20.6, seatPitch: 0.45,
+          stands: [{ side: 'north', halfLength: 54 }],
+        },
       ],
-      aisles: { count: 20, widthMeters: 1.0 },
-      sectionsPerTier: 20,
-      // Indoor arena: walls and ceiling are hand-built (simulator/stadiumExtras.ts).
-      // Fully covered: the lights are on the roof structure, which is what a
-      // rim array is. The hand-built shell (simulator/stadiumExtras.ts) is the
-      // facade here.
+      aisles: { count: 40, widthMeters: 1.2 },
+      sectionsPerTier: 40,
+      // The building is hand-built (simulator/kingdom.ts): no generated roof or facade.
       roof: { coverage: 'none' },
-      lighting: { style: 'roof-rim' },
+      indoor: true,
+      // Rows of LED floodlights hang under the roof trusses over the front of
+      // the stands, 28 m up.
+      lighting: { style: 'roof-rim', kelvin: 5700, mount: { offset: 3, y: 28 } },
+      details: {
+        // The 14 boxes the expansion added opposite the main stand, ten seats
+        // each, between the lower and upper tier.
+        boxes: [{ centerU: 0.25, halfU: 0.0891, underTier: 1, count: 14 }],
+        // The main stand's 20 boxes on two floors, each with seats out on a
+        // terrace, and the sky lounge across the top.
+        hospitality: { side: 'south', halfLength: 50, boxFloors: 2, boxesPerFloor: 10, lounge: true },
+        // A screen hung from the roof over the front of each end.
+        screens: [
+          { centerU: 0, widthM: 12, heightM: 5, hang: { offset: 7, y: 21, ceiling: 26 } },
+          { centerU: 0.5, widthM: 12, heightM: 5, hang: { offset: 7, y: 21, ceiling: 26 } },
+        ],
+        // The four-sided screen over the centre spot.
+        centreScreen: { widthM: 14, depthM: 11, heightM: 8, y: 27, ceiling: 34 },
+        // Portrait screens on the four corner columns.
+        cornerScreens: { widthM: 4, heightM: 9, y: 8, columnTop: 29 },
+      },
     },
-    meta: { name: 'Kingdom Arena (Riyadh)', source: 'builtin', country: 'Middle East', capacity: 28000, type: 'Arena', inspiredBy: "Kingdom Arena, Riyadh - Al-Hilal's fully covered indoor arena", tags: ['al-hilal', 'riyadh', 'saudi', 'arena', 'covered', 'indoor'] },
+    meta: { name: 'Kingdom Arena (Riyadh)', source: 'builtin', country: 'Middle East', capacity: 26700, type: 'Arena', inspiredBy: "Kingdom Arena, Riyadh - Al-Hilal's fully covered indoor arena", tags: ['al-hilal', 'riyadh', 'saudi', 'arena', 'covered', 'indoor', 'kingdom'] },
   },
 ];
 
@@ -387,6 +432,34 @@ export const LEGACY_STADIUMS: StadiumEntry[] = [
       lighting: { style: 'roof-rim' },
     },
     meta: { name: 'The Jewel of Jeddah', source: 'builtin', country: 'Middle East', capacity: 62241, type: 'Bowl', inspiredBy: 'King Abdullah Sports City (Alinma Stadium), Jeddah - nicknamed "The Shining Jewel"', tags: ['jewel', 'jeddah', 'saudi', 'legacy'], supersededBy: 'jewel-jeddah-60k' },
+  },
+  {
+    // Kingdom Arena as it was until October 2026 — replaced by kingdom-arena-26k.
+    // Keep byte-identical: every design saved on it indexes into this map.
+    id: 'community-kingdom-arena-28k',
+    template: {
+      id: 'community-kingdom-arena-28k',
+      name: 'Kingdom Arena (Riyadh)',
+      version: 1,
+      plan: { a: 66, b: 50, exponent: 4.6 },
+      // Box arena: open the four corners so the bowl reads as four straight
+      // stands (sidelines reach the goal lines, ends cover the pitch width).
+      cornerCut: 0.8,
+      evenRows: true,
+      tiers: [
+        { rows: 16, rowDepth: 0.76, rakeDeg: 34, baseElevation: 1.5, baseOffset: 0, seatPitch: 0.47 },
+        { rows: 12, rowDepth: 0.74, rakeDeg: 40, baseElevation: 10, baseOffset: 14, seatPitch: 0.47 },
+      ],
+      aisles: { count: 20, widthMeters: 1.0 },
+      sectionsPerTier: 20,
+      // Indoor arena: walls and ceiling are hand-built (simulator/stadiumExtras.ts).
+      // Fully covered: the lights are on the roof structure, which is what a
+      // rim array is. The hand-built shell (simulator/stadiumExtras.ts) is the
+      // facade here.
+      roof: { coverage: 'none' },
+      lighting: { style: 'roof-rim' },
+    },
+    meta: { name: 'Kingdom Arena (Riyadh)', source: 'builtin', country: 'Middle East', capacity: 28000, type: 'Arena', inspiredBy: "Kingdom Arena, Riyadh - Al-Hilal's fully covered indoor arena", tags: ['al-hilal', 'riyadh', 'saudi', 'arena', 'legacy'], supersededBy: 'kingdom-arena-26k' },
   },
 ];
 

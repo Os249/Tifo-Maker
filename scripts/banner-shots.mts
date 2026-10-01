@@ -105,9 +105,9 @@ const SHOTS: Spec[] = [
   { name: 'reveal-hanging-35', ground: 'generic-bowl-60k', kind: 'hanging', stand: 0, from: -1, span: 2, tier: -1, progress: 0.35, label: 'CURVA' },
   { name: 'night', ground: 'generic-bowl-60k', kind: 'stand', stand: 0, from: -1, span: 3, tier: -1, tod: 'night', label: 'ALWAYS' },
   { name: 'steep-cauldron', ground: 'community-steep-cauldron-55k', kind: 'stand', stand: 0, from: -1, span: 3, tier: -1, label: 'CAULDRON' },
-  { name: 'small-arena', ground: 'community-kingdom-arena-28k', kind: 'stand', stand: 0, from: 0, span: 4, tier: -1, label: 'RIYADH' },
-  { name: 'small-arena-low', ground: 'community-kingdom-arena-28k', kind: 'stand', stand: 0, from: 0, span: 4, tier: -1, elevationDeg: 14, label: 'RIYADH' },
-  { name: 'small-arena-one', ground: 'community-kingdom-arena-28k', kind: 'stand', stand: 0, from: -1, span: 1, tier: -1, label: 'RIYADH' },
+  { name: 'small-arena', ground: 'kingdom-arena-26k', kind: 'stand', stand: 0, from: 0, span: 4, tier: -1, label: 'RIYADH' },
+  { name: 'small-arena-low', ground: 'kingdom-arena-26k', kind: 'stand', stand: 0, from: 0, span: 4, tier: -1, elevationDeg: 14, label: 'RIYADH' },
+  { name: 'small-arena-one', ground: 'kingdom-arena-26k', kind: 'stand', stand: 0, from: -1, span: 1, tier: -1, label: 'RIYADH' },
   { name: 'single-kop', ground: 'single-kop-40k', kind: 'stand', stand: 0, from: -1, span: 2, tier: -1, label: 'KOP' },
   // Signs: held at the front, held ten rows back over the heads in front,
   // tied to the fence, tied to an upper tier's balcony, the longest one at

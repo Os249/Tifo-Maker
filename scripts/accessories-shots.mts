@@ -49,7 +49,7 @@ specs.push(
   { name: 'ns-flares-3-drone', levels: { flares: 3 }, where: 'north-south', shot: 'Drone' },
   { name: 'low-tier-inferno', levels: { flags: 4, flares: 4, smoke: 4, strobes: 3, paper: 3 }, quality: 'low' },
   { name: 'jewel-ultras', ground: 'community-jewel-jeddah-62k', levels: { flags: 3, flares: 3, smoke: 2, strobes: 2, paper: 2 } },
-  { name: 'kingdom-ultras-dusk', ground: 'community-kingdom-arena-28k', levels: { flags: 3, flares: 3, smoke: 2 }, tod: 'dusk' },
+  { name: 'kingdom-ultras-dusk', ground: 'kingdom-arena-26k', levels: { flags: 3, flares: 3, smoke: 2 }, tod: 'dusk' },
 );
 const wanted = specs.filter((s) => !filter || filter.split(',').some((f) => s.name.includes(f)));
 
