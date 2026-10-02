@@ -75,6 +75,127 @@ export interface StadiumTemplate {
    * under the roof. Shell only — never moves a seat.
    */
   indoor?: boolean;
+  /**
+   * Roofs a real ground has, stand by stand, in place of the one generated
+   * cantilever (set `roof: { coverage: 'none' }` alongside): a white fabric
+   * vault over a U of stands, a steel truss round a ring, a sheet roof over a
+   * main stand only. Shell only — never moves a seat.
+   */
+  roofs?: RoofRun[];
+  /**
+   * What the empty seats look like: the club's colour, a mosaic, a block of
+   * another colour, letters picked out in the seats. Shell only — the seat
+   * map is untouched; a tifo paints over it as it always has.
+   */
+  seatLook?: SeatLook;
+  /**
+   * The colour of the stands' concrete (the steps between the seats) and of
+   * their walls, where a ground's is not the default grey: the pale finish of
+   * the Saudi grounds reads very differently from weathered European concrete.
+   */
+  finish?: { concrete?: number; walls?: number };
+  /**
+   * What lies between the pitch and the stands: grass run to the front row,
+   * a covered-over track, sand. A superellipse (default p = 8) of this colour
+   * under the pitch. Omitted: the dark apron every ground has had.
+   */
+  runoff?: { color: number; a: number; b: number; exponent?: number };
+  /**
+   * How many tiers a fan would say the ground has, where that is not the
+   * number of entries in `tiers`: a separate main stand or the back rows of a
+   * horseshoe are their own entries here, but still one tier to the eye.
+   */
+  levels?: number;
+}
+
+/** A seat colour mix: plain hex colours, or weighted ones for a mosaic. */
+export type SeatPaint = (string | { c: string; w: number })[];
+
+/** A part of the bowl whose empty seats have their own colours (SeatLook.regions). */
+export interface SeatRegion {
+  /** Which tiers (0 = lower). Omitted: all. */
+  tiers?: number[];
+  /** A run along one side (x for north/south, z for the ends)… */
+  side?: StandSide;
+  from?: number;
+  to?: number;
+  /** …and/or a perimeter range in u. */
+  centerU?: number;
+  halfU?: number;
+  /** Rows within the tier, [first, last] inclusive, 0 = front row. */
+  rows?: [number, number];
+  colors: SeatPaint;
+  /** Colour whole sections (between aisles) in turn instead of mixing seat by seat. */
+  alternate?: boolean;
+}
+
+/** Letters picked out in the seats, the way grounds write a club's name. */
+export interface SeatText {
+  text: string;
+  color: string;
+  /** Background colour of the block it sits in (omitted: the seats keep theirs). */
+  ground?: string;
+  tier: number;
+  /** Perimeter centre and half-width in u. */
+  centerU: number;
+  halfU: number;
+  /** Rows within the tier it fills, [first, last]. */
+  rows: [number, number];
+  /** CSS font (bold sans by default). */
+  font?: string;
+  /** Write it the other way round (for a stand you read from the far side). */
+  mirror?: boolean;
+  /** A shape instead of letters (`text` is then just its name). */
+  shape?: 'heart';
+}
+
+export interface SeatLook {
+  colors: SeatPaint;
+  regions?: SeatRegion[];
+  text?: SeatText[];
+}
+
+/** What a roof run is made of, as you would tell it apart from the pitch. */
+export type RoofRunStyle =
+  | 'membrane' // white fabric stretched in vaulted bays between steel ribs
+  | 'truss' // a deep steel space-truss, lamps on top
+  | 'sheet' // profiled metal sheet on cantilever beams
+  | 'slab'; // a plain flat cantilever
+
+/**
+ * One roof over one run of stands. The run is either one side (a straight
+ * stand, between `from` and `to` along it) or the whole ring less its gaps.
+ * Offsets are metres out from the plan curve, like everything else.
+ */
+export interface RoofRun {
+  style: RoofRunStyle;
+  /** A run over one side only. Omitted: the ring. */
+  side?: StandSide;
+  /** Over a straight stand (TierSpec.straight): offsets are out from the plan's side line, not its curve. */
+  straight?: boolean;
+  /** Along that side (x for north/south, z for the ends). */
+  from?: number;
+  to?: number;
+  /** Stretches of the ring with no roof (a ring run only). */
+  omit?: StandGap[];
+  /** Offset of the back (where the columns are) and of the leading edge. */
+  back: number;
+  front: number;
+  /** Height of the roof's underside at the back and at the leading edge. */
+  backY: number;
+  frontY: number;
+  /** Metres between ribs (bays). */
+  bay?: number;
+  /** Structural depth at the back (a truss is deep, fabric is thin). */
+  depth?: number;
+  color?: number;
+  underColor?: number;
+  /** Columns at the back from the ground up to the roof, and their colour. */
+  columns?: { every?: number; color?: number; shape?: 'post' | 'y' | 'raking'; offset?: number };
+  /** Floodlights along the top of the leading edge (a truss ring carries them). */
+  lights?: { every: number; y: number };
+  /** A run that rises over the middle of one side (Al-Awwal's main stand): extra height peaking at along = 0, over `halfLength`. */
+  arch?: { side: StandSide; rise: number; halfLength: number };
 }
 
 /**
@@ -156,6 +277,12 @@ export interface ScreenSpec {
    * cables up to the ceiling at `ceiling` metres.
    */
   hang?: { offset: number; y: number; ceiling?: number };
+  /**
+   * Standing on its own frame instead (a screen in an open corner, or behind
+   * a stand): centre `offset` metres out from the plan curve and `y` up, on
+   * legs to the ground.
+   */
+  post?: { offset: number; y: number };
 }
 
 /** A four-sided screen hung over the centre spot — an arena's centre-hung board. */
@@ -205,6 +332,53 @@ export interface VenueDetails {
   centreScreen?: CentreScreen;
   cornerScreens?: CornerScreens;
   hospitality?: Hospitality;
+  /** Buildings behind the stands: a main stand's glazed VIP block, a media tower. */
+  buildings?: StandBuilding[];
+  /** Walls and skins round the bowl: a perforated metal skin, the panels behind the top row. */
+  skins?: Skin[];
+}
+
+/** A wall round the outside of the bowl (or along one side), at a plan offset. */
+export interface Skin {
+  offset: number;
+  y0: number;
+  y1: number;
+  color: number;
+  pattern?: 'perforated' | 'slats' | 'panels' | 'solid';
+  /** One side only, between `from` and `to` along it. Omitted: the ring. */
+  side?: StandSide;
+  from?: number;
+  to?: number;
+  /** Along the plan's side line rather than its curve. */
+  straight?: boolean;
+  /** Stretches of the ring without it. */
+  omit?: StandGap[];
+  /** Glows a little after dark (a lit skin). */
+  glow?: number;
+}
+
+/**
+ * A building behind (or over the back of) one stand: the glazed VIP and media
+ * block a Saudi main stand has, the presidential suite on top of it.
+ */
+export interface StandBuilding {
+  side: StandSide;
+  /** Behind a straight stand: `front` is out from the plan's side line, not its curve. */
+  straight?: boolean;
+  /** Centre along the side (x for north/south, z for the ends) and half its length. */
+  center?: number;
+  halfLength: number;
+  /** Plan offset of its pitch-side face, and its depth back from that. */
+  front: number;
+  depth: number;
+  /** Height of its ground floor and of its top. */
+  y0: number;
+  y1: number;
+  /** Floors of glass on the pitch side (each 3.6 m), counted down from the top; the rest is solid. */
+  glassFloors?: number;
+  color?: number;
+  /** A strip of colour along the top (a fascia), hex. */
+  fascia?: number;
 }
 
 /**
@@ -234,6 +408,12 @@ export interface LightingSpec {
    * the seats, not the back of the top tier). The angle rules still apply.
    */
   mount?: { offset: number; y: number };
+  /**
+   * Corner masts as built: where they stand (plan x, z — mirrored into all four
+   * corners unless all four are given), how tall, and what they look like.
+   * Drawn as structure whether or not the lamps are on.
+   */
+  masts?: { at: [number, number][]; height: number; style?: 'lattice' | 'pole'; head?: 'rect' | 'tilted' };
 }
 
 /**
@@ -329,6 +509,37 @@ export interface TierSpec {
    * is in a stand when it is on that side of the bowl and within the length.
    */
   stands?: StandSpan[];
+  /**
+   * The tier's stands are straight blocks on lines square to the pitch —
+   * north and south at z = ±(b + offset), the ends at x = ±(a + offset), each
+   * as long as its halfLength — instead of runs of the offset plan curve. For
+   * a ground of four separate rectangular stands whose sides run on past the
+   * ends (the Al-Shabab ground), which no single curve can describe. Needs
+   * `stands`; each stand may then sit at its own `offset` and `elevation`.
+   */
+  straight?: boolean;
+  /**
+   * Stretches of a RING tier with no seats: the open side of a horseshoe, or
+   * the gap a separate main stand stands in (Buraidah, Abha, the Ettifaq
+   * ground). Each is a run along one side, `from` to `to` metres along it (x
+   * for the north and south sides, z for the ends), within that side's sector
+   * of the bowl. Omitted: the ring is unbroken, as every bowl has always been.
+   */
+  omit?: StandGap[];
+}
+
+/** A stretch of one side of a ring tier with no seats (TierSpec.omit). */
+export interface StandGap {
+  side: StandSide;
+  /** Along the side: x for north and south, z for east and west. from < to. */
+  from: number;
+  to: number;
+  /**
+   * Only the rows from this one back (0 = the front row): the front of the
+   * stand runs on and the back of it opens, for a box band or a set-back
+   * upper section over the middle of a main stand. Straight sides only.
+   */
+  fromRow?: number;
 }
 
 /**
@@ -347,6 +558,9 @@ export interface StandSpan {
   halfLength: number;
   /** How many of the tier's rows this stand has. Default: all of them. */
   rows?: number;
+  /** A straight tier only: metres further out than the tier's baseOffset, and higher than its baseElevation. */
+  offset?: number;
+  elevation?: number;
 }
 
 /**

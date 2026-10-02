@@ -62,6 +62,8 @@
   };
   window.__shoot = async (view, settleMs) => {
     sim.setTimeOfDay(view.time ?? curTime);
+    if (view.floods !== undefined) sim.setFloodlights(view.floods);
+    if (view.wet !== undefined) sim.setWetPitch(view.wet);
     sim.camera.fov = view.fov ?? 55;
     sim.camera.updateProjectionMatrix();
     sim.applyPreset({ name: view.name, position: view.position, target: view.target });
@@ -71,6 +73,7 @@
     return sim.canvas.toDataURL('image/png');
   };
   window.__census = () => sim.sceneCensus();
+  window.__appShots = () => sim.shots();
   document.getElementById('out').textContent = 'ready';
   window.__ready = true;
 </script></body></html>

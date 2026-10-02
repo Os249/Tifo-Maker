@@ -24,6 +24,7 @@
     "test:admin-review": "node e2e-admin-review.mjs",
     "test:flyover": "node e2e-flyover.mjs",
     "test:kingdom": "node e2e-kingdom.mjs",
+    "test:saudi": "node e2e-saudi.mjs",
     "test:layers": "node e2e-layers.mjs",
     "test:growth": "node e2e-growth.mjs",
     "test:preview": "node e2e-preview.mjs",

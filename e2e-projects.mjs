@@ -122,7 +122,7 @@ const panel = await g.evaluate(() => ({
   inertBehind: [...document.body.children].filter((el) => el.inert).length > 0,
 }));
 check('the name is filled in and focused', panel.name === 'My tifo' && panel.focused === 'np-name', JSON.stringify(panel.name));
-check('every built stadium is offered', panel.stadiums === 13, String(panel.stadiums));
+check('every built stadium is offered', panel.stadiums === 24, String(panel.stadiums));
 check('one is chosen, and what it means is spelled out', !!panel.picked && /seats · \d+ tiers? · \d+ sections/.test(panel.facts || '') || /1 tier/.test(panel.facts || ''), panel.facts);
 check('two actions and no clutter: Generate with AI and Create project', panel.buttons.length === 2 && /Generate with AI/.test(panel.buttons[0]) && /Create project/.test(panel.buttons[1]), JSON.stringify(panel.buttons));
 check('the page behind the panel is inert', panel.inertBehind);
@@ -141,7 +141,7 @@ check('…and the prompt replaces the name (the AI names it)', aiOut.nameHidden 
 await g.click('#np-back');
 
 // Search narrows the stadiums; Create.
-await setInput(g, '#np-search', 'jeddah');
+await setInput(g, '#np-search', 'jewel');
 check('stadium search narrows the list', await g.evaluate(() => document.querySelectorAll('.np-stadium').length) === 1);
 await g.click('.np-stadium[data-id="jewel-jeddah-60k"]');
 await setInput(g, '#np-search', '');

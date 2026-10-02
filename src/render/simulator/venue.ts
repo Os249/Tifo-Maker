@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { StadiumTemplate, SeatMap } from '../../core/types';
 import { curveSampler, laneCut, laneLines, tierEdges, type LaneLine } from '../../core/venueDetails';
-import { sideOfU, spanGeometry, spanOn } from '../../core/standSpans';
+import { edgesOn, sideOfU, spanGeometry, spanOn } from '../../core/standSpans';
 
 /**
  * A real ground's details, drawn from its template (VenueDetails in types.ts):
@@ -445,8 +445,7 @@ export function buildVenueDetails(template: StadiumTemplate, map: SeatMap, shado
     const runs: { below: ReturnType<typeof tierEdges>; above: ReturnType<typeof tierEdges>; u0: number; u1: number }[] = [];
     if (template.tiers[t].stands) {
       for (const sg of spanGeometry(template)[t]) {
-        const lo = template.tiers[t - 1].stands ? spanOn(template, t - 1, sg.side) : null;
-        const below = lo ?? tierEdges(template, t - 1);
+        const below = edgesOn(template, t - 1, sg.side);
         runs.push({ below, above: sg, u0: sg.u0, u1: sg.u1 });
       }
     } else {
@@ -482,8 +481,8 @@ export function buildVenueDetails(template: StadiumTemplate, map: SeatMap, shado
     if (t < 1 || t >= template.tiers.length) continue;
     // On a ground of separate stands, the stand on the band's side.
     const side = sideOfU(band.centerU);
-    const below = (template.tiers[t - 1].stands ? spanOn(template, t - 1, side) : null) ?? tierEdges(template, t - 1);
-    const above = (template.tiers[t].stands ? spanOn(template, t, side) : null) ?? tierEdges(template, t);
+    const below = edgesOn(template, t - 1, side);
+    const above = edgesOn(template, t, side);
     const rakeT = Math.tan((template.tiers[t].rakeDeg * Math.PI) / 180);
     const under = (r: number): number => above.frontY + (r - above.front) * rakeT - 0.45;
     const gl = below.back + 0.3; // the glass line
@@ -599,6 +598,22 @@ export function buildVenueDetails(template: StadiumTemplate, map: SeatMap, shado
         holder.rotation.y = Math.atan2(-p.nx, -p.nz);
         const topY = sc.hang.y + sc.heightM / 2 + 0.4;
         hangers(holder, [[-sc.widthM * 0.35, -0.4], [sc.widthM * 0.35, -0.4]], sc.heightM / 2 + 0.4, Math.max(0.5, (sc.hang.ceiling ?? topY + 14) - topY));
+      } else if (sc.post) {
+        // On its own frame (an open corner, behind a stand), turned to the centre spot.
+        const p = at(sc.centerU, sc.post.offset);
+        holder.position.set(p.x, sc.post.y, p.z);
+        holder.rotation.y = Math.atan2(-p.x, -p.z);
+        const legH = sc.post.y - sc.heightM / 2;
+        if (legH > 0.3) {
+          for (const sx of [-1, 1]) {
+            const leg = box(0.45, legH, 0.45, steel, trash);
+            leg.position.set(sx * sc.widthM * 0.32, -sc.heightM / 2 - legH / 2, -0.6);
+            holder.add(leg);
+          }
+          const brace = box(sc.widthM * 0.64, 0.3, 0.3, steel, trash);
+          brace.position.set(0, -sc.heightM / 2 - legH * 0.45, -0.6);
+          holder.add(brace);
+        }
       } else {
         // On the back of the top tier, just over the last row's heads, under the roof.
         const te = backOf(sc.centerU);

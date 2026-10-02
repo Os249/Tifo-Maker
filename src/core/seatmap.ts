@@ -1,6 +1,6 @@
 import type { SeatMap, StadiumTemplate } from './types';
 import { inLane, laneLines } from './venueDetails';
-import { inStands } from './standSpans';
+import { inGap, inStands } from './standSpans';
 
 /**
  * Deterministic seat-map generation.
@@ -149,6 +149,56 @@ function pointOnOffset(oc: OffsetCurve, u: number): [number, number] {
   return [oc.x[i] + (oc.x[i1] - oc.x[i]) * f, oc.z[i] + (oc.z[i1] - oc.z[i]) * f];
 }
 
+/** A point on a straight stand's row line (TierSpec.straight): `radial` out from the plan's side, `along` it. */
+export function straightPoint(template: StadiumTemplate, side: string, radial: number, along: number): [number, number] {
+  const { a, b } = template.plan;
+  if (side === 'north') return [along, b + radial];
+  if (side === 'south') return [along, -(b + radial)];
+  if (side === 'east') return [a + radial, along];
+  return [-(a + radial), along];
+}
+
+/** Perimeter fraction u of the plan-curve point nearest (x, z). */
+function uOnCurve(curve: Curve, template: StadiumTemplate, x: number, z: number): number {
+  const { a, b, exponent: p } = template.plan;
+  const n = CURVE_SAMPLES;
+  // Start from the superellipse parameter whose point points the same way.
+  const h = p / 2;
+  const t0 = Math.atan2(Math.sign(z) * Math.abs(z / b) ** h, Math.sign(x) * Math.abs(x / a) ** h);
+  const i0 = Math.round((((t0 / (Math.PI * 2)) % 1) + 1) % 1 * n);
+  let best = i0;
+  let bd = Infinity;
+  for (let d = -160; d <= 160; d++) {
+    const i = (((i0 + d) % n) + n) % n;
+    const dd = (curve.px[i] - x) ** 2 + (curve.py[i] - z) ** 2;
+    if (dd < bd) {
+      bd = dd;
+      best = i;
+    }
+  }
+  // The samples are even in the superellipse's angle, not in arc length — on
+  // a near-rectangular plan two of them can be 20 m apart along a side — so
+  // project onto the segment either side of the nearest and interpolate.
+  let bu = curve.s[best];
+  let bdd = Infinity;
+  for (const [i0, i1] of [[(best - 1 + n) % n, best], [best, (best + 1) % n]]) {
+    const ax = curve.px[i0];
+    const az = curve.py[i0];
+    const ex = curve.px[i1] - ax;
+    const ez = curve.py[i1] - az;
+    const L2 = ex * ex + ez * ez || 1e-12;
+    const t = Math.max(0, Math.min(1, ((x - ax) * ex + (z - az) * ez) / L2));
+    const dd = (ax + ex * t - x) ** 2 + (az + ez * t - z) ** 2;
+    if (dd < bdd) {
+      bdd = dd;
+      const s0 = curve.s[i0];
+      const s1 = i1 === 0 ? curve.total : curve.s[i1];
+      bu = s0 + (s1 - s0) * t;
+    }
+  }
+  return (bu % curve.total) / curve.total;
+}
+
 export function generateSeatMap(template: StadiumTemplate): SeatMap {
   const curve = samplePlanCurve(template.plan.a, template.plan.b, template.plan.exponent);
   const cornerCut = template.cornerCut ?? 0;
@@ -185,6 +235,60 @@ export function generateSeatMap(template: StadiumTemplate): SeatMap {
 
   template.tiers.forEach((tier, tierIdx) => {
     const rake = Math.tan((tier.rakeDeg * Math.PI) / 180);
+    if (tier.straight && tier.stands) {
+      // Straight stands (TierSpec.straight): each row of each stand is a line
+      // square to the pitch, its seats evenly spaced along it. A seat's u is
+      // where it projects onto the plan curve, so sections, aisles, the
+      // editor's unrolled view and the mirror all work as on any other tier.
+      for (let r = 0; r < tier.rows; r++) {
+        const globalRow = totalRowsBefore[tierIdx] + r;
+        rowStart[globalRow] = xs.length;
+        const editorY =
+          (totalRows - 1 - globalRow) * ROW_PX + (tierIdx === 0 ? TIER_GAP_PX * (template.tiers.length - 1) : 0);
+        const row: { u: number; x: number; z: number; y: number }[] = [];
+        for (const st of tier.stands) {
+          if (r >= (st.rows ?? tier.rows)) continue;
+          const radial = tier.baseOffset + (st.offset ?? 0) + r * tier.rowDepth;
+          const y = tier.baseElevation + (st.elevation ?? 0) + r * tier.rowDepth * rake;
+          const H = st.halfLength;
+          let n = Math.floor((2 * H) / tier.seatPitch);
+          if (n % 2 === 1) n--;
+          for (let k = 0; k < n; k++) {
+            const along = -H + ((k + 0.5) * 2 * H) / n;
+            const [x, z] = straightPoint(template, st.side, radial, along);
+            row.push({ u: uOnCurve(curve, template, x, z), x, z, y });
+          }
+        }
+        row.sort((p, q) => p.u - q.u);
+        const rowLen = row.length * tier.seatPitch || 1;
+        const aisleHalfU = template.aisles.widthMeters / 2 / Math.max(rowLen, curve.total);
+        for (const q of row) {
+          let inAisle = false;
+          for (const au of aisleU) {
+            let du = Math.abs(q.u - au);
+            if (du > 0.5) du = 1 - du;
+            if (du < aisleHalfU) {
+              inAisle = true;
+              break;
+            }
+          }
+          if (inAisle) continue;
+          xs.push(q.u * EDITOR_WIDTH);
+          ys.push(editorY);
+          us.push(q.u);
+          vs.push(globalRow / (totalRows - 1));
+          wxs.push(q.x);
+          wys.push(q.y);
+          wzs.push(q.z);
+          tiers.push(tierIdx);
+          rows.push(globalRow);
+          sections.push(
+            Math.min(template.sectionsPerTier - 1, Math.floor(q.u * template.sectionsPerTier)) + tierIdx * template.sectionsPerTier,
+          );
+        }
+      }
+      return;
+    }
     for (let r = 0; r < tier.rows; r++) {
       const globalRow = totalRowsBefore[tierIdx] + r;
       rowStart[globalRow] = xs.length;
@@ -226,6 +330,8 @@ export function generateSeatMap(template: StadiumTemplate): SeatMap {
         }
         // A tier that is only some stands (TierSpec.stands) has no seats elsewhere.
         if (tier.stands && !inStands(tier, template.plan, r, radial, wx, wy)) continue;
+        // A ring tier with gaps (TierSpec.omit) has no seats in them.
+        if (tier.omit && inGap(tier, template.plan, r, radial, wx, wy)) continue;
         // A vehicle lane is a real gap: the ramp is where these seats would be.
         if (lanes.length > 0 && inLane(lanes, tierIdx, wx, wy, r)) continue;
         xs.push(u * EDITOR_WIDTH);

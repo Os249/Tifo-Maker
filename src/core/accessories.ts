@@ -261,6 +261,28 @@ export function indexStands(map: SeatMap): StandSeats[] {
       across[k] = (us[k] - uMin) / uw;
       depth[k] = (map.uv[ids[k] * 2 + 1] - vMin) / vw;
     }
+    // A stand whose front is not the bowl's front everywhere — a main stand
+    // standing on its own between the ends of a horseshoe, whose first row is
+    // the 28th row of the seat map — measures depth from its own front at each
+    // place along it, or "the front rows" would be empty there.
+    const BINS = 24;
+    const lo = new Float32Array(BINS).fill(Infinity);
+    const hi = new Float32Array(BINS).fill(-Infinity);
+    const bin = (k: number): number => Math.min(BINS - 1, Math.floor(across[k] * BINS));
+    for (let k = 0; k < n; k++) {
+      const v = map.uv[ids[k] * 2 + 1];
+      const b = bin(k);
+      if (v < lo[b]) lo[b] = v;
+      if (v > hi[b]) hi[b] = v;
+    }
+    let ragged = false;
+    for (let b = 0; b < BINS; b++) if (Number.isFinite(lo[b]) && lo[b] - vMin > 0.05 * vw) ragged = true;
+    if (ragged) {
+      for (let k = 0; k < n; k++) {
+        const b = bin(k);
+        depth[k] = (map.uv[ids[k] * 2 + 1] - lo[b]) / Math.max(1e-6, hi[b] - lo[b]);
+      }
+    }
     return { idx, across, depth };
   });
 }

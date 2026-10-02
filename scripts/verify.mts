@@ -654,7 +654,7 @@ import { buildStadium as siBuild } from '../src/core/stadiumFit';
   // has no room for one and must not be allowed to claim it.
   const ext = trackExtent(8);
   const okOval = trackFits(LT[2], 8);
-  const small = LC.find((s) => s.id === 'community-alawwal-park-25k')!.template;
+  const small = LC.find((s) => s.id === 'alawwal-park-26k')!.template;
   const badFit = trackFits(small, 8);
   console.log(`track: 8 lanes need ${(ext.halfLength * 2).toFixed(1)} x ${(ext.halfWidth * 2).toFixed(1)} m | oval fits`, okOval, '| 25k football ground refused', !badFit);
   if (!okOval || badFit) throw new Error('trackFits is not gating on the real oval size');
@@ -1683,6 +1683,13 @@ import { buildStadium as siBuild } from '../src/core/stadiumFit';
     for (let sIdx = 0; sIdx < 4; sIdx++) {
       const st = stands[sIdx];
       const where = (['east', 'north', 'west', 'south'] as const)[sIdx];
+      // A ground with no stand on this side (Al-Hazem has nothing opposite
+      // its main stand, Al-Majma'ah nothing behind the goals) has nobody to
+      // hold anything there — and must not invent anybody.
+      if (!st.idx.length) {
+        for (const kind of acc.ACCESSORY_KINDS) if (acc.planHolders(stands, kind, 4, where).length) throw new Error(`${s.id}: ${kind} found holders in an empty ${where} stand`);
+        continue;
+      }
       for (const kind of acc.ACCESSORY_KINDS) {
         let prev: number[] = [];
         if (acc.planHolders(stands, kind, 0, where).length) throw new Error(`${s.id}: ${kind} at Off still has holders`);
@@ -1690,7 +1697,8 @@ import { buildStadium as siBuild } from '../src/core/stadiumFit';
           const got = acc.planHolders(stands, kind, lv as 1 | 2 | 3 | 4, where);
           checks++;
           if (!got.length) throw new Error(`${s.id} ${where}: ${kind} level ${lv} holds nothing`);
-          if (got.length <= prev.length) throw new Error(`${s.id} ${where}: ${kind} level ${lv} (${got.length}) is not more than level ${lv - 1} (${prev.length})`);
+          // More each level — unless the level below already filled a small stand.
+          if (got.length <= prev.length && prev.length < st.idx.length) throw new Error(`${s.id} ${where}: ${kind} level ${lv} (${got.length}) is not more than level ${lv - 1} (${prev.length})`);
           const set = new Set(got);
           if (set.size !== got.length) throw new Error(`${s.id} ${where}: ${kind} level ${lv} gives one seat two`);
           for (const i of prev) if (!set.has(i)) throw new Error(`${s.id} ${where}: ${kind} level ${lv} dropped a fan level ${lv - 1} had — levels must nest`);
@@ -1826,6 +1834,20 @@ import { buildStadium as siBuild } from '../src/core/stadiumFit';
     // Frozen at its first release (October 2026). If it has to change before
     // that is pushed, re-take this; after, it is a new id like the Jewel.
     'kingdom-arena-26k': '26580:880aff98a07e615b',
+    // The Saudi league's grounds, October 2026. Frozen at first release, like
+    // Kingdom Arena: re-take these only before that push.
+    'alawwal-park-26k': '26142:b3c69dc5ac1f9c0b',
+    'shg-arena-14k': '13636:049b11ac88308a6c',
+    'ego-stadium-13k': '12740:d3c392f416aebe11',
+    'alfateh-stadium-12k': '11836:72edda8b34c95c71',
+    'pmbf-stadium-22k': '21920:ab7396dcf54e9c0f',
+    'alfaisal-stadium-27k': '26606:17221a47893d4121',
+    'buraidah-stadium-25k': '24316:90e786a35c7453bb',
+    'abha-stadium-20k': '16430:3462445f1cb76af5',
+    'tabuk-stadium-12k': '11992:131f84df1583209c',
+    'alhazem-stadium-8k': '6191:2ac5acce474ca14b',
+    'majmaah-stadium-7k': '6838:3e283c8ae9696650',
+    'pfbf-stadium-22k': '22768:6afea62fe1fe48a2',
   };
   for (const [id, want] of Object.entries(FROZEN)) {
     const tpl = cat.templateById(id);
@@ -1833,6 +1855,10 @@ import { buildStadium as siBuild } from '../src/core/stadiumFit';
     const got = fp(generateSeatMap(tpl));
     if (got !== want) throw new Error(`venue: ${id} seat map changed (${want} -> ${got}) — saved designs would shift`);
   }
+
+  // The earlier Al-Awwal resolves, unchanged, but is not offered, and points at the new one.
+  if (cat.STADIUM_CATALOG.some((e) => e.id === 'community-alawwal-park-25k')) throw new Error('venue: the legacy Al-Awwal is still in the catalogue');
+  if (cat.entryById('community-alawwal-park-25k')?.meta.supersededBy !== 'alawwal-park-26k') throw new Error('venue: the legacy Al-Awwal does not point at its replacement');
 
   // The legacy Jewel resolves but is not offered for new designs.
   if (cat.STADIUM_CATALOG.some((e) => e.id === 'community-jewel-jeddah-62k')) throw new Error('venue: the legacy Jewel is still in the catalogue');
@@ -2289,4 +2315,124 @@ await (async () => {
   ok('the scene route keeps the layers to the owner', /v\.rec\.ownerId === v\.userId \? gz : withoutLayers\(gz\)/.test(routesSrc));
   ok('a remix copies the scene without the layers', /copyScene\(id, created\.id, false\)/.test(routesSrc));
   if (fails) throw new Error(`${fails} layer rule(s) broken`);
+})();
+
+// --- The Saudi league's grounds (2026-27) ------------------------------------
+// Every club's home ground, built from the satellite picture and photographs
+// (see the comments in stadiumCatalog). What can be checked without a picture
+// is checked here: each is in the catalogue with its name in both languages,
+// holds the seats the published figures say, keeps every seat clear of the
+// pitch and of every other seat, has no seat inside a gap it declares, and
+// keeps its roofs over its seats' heads.
+await (async () => {
+  const cat = await import('../src/core/stadiumCatalog');
+  const spans = await import('../src/core/standSpans');
+  const { curveSampler } = await import('../src/core/venueDetails');
+  const { readFileSync: spRead } = await import('node:fs');
+  const i18nSrc = spRead('src/ui/i18n.ts', 'utf8');
+  // Home grounds and their clubs, with the seat count each is built to: the
+  // official figure, or the one the ground really holds where they differ.
+  const GROUNDS: { id: string; clubs: string; seats: number; tol: number }[] = [
+    { id: 'alawwal-park-26k', clubs: 'Al-Nassr, Al-Diriyah', seats: 26004, tol: 0.02 },
+    { id: 'kingdom-arena-26k', clubs: 'Al-Hilal', seats: 26700, tol: 0.02 },
+    { id: 'jewel-jeddah-60k', clubs: 'Al-Ittihad, Al-Ahli', seats: 60241, tol: 0.02 },
+    { id: 'alfaisal-stadium-27k', clubs: 'Al-Ahli, Al-Ittihad', seats: 27000, tol: 0.02 },
+    { id: 'shg-arena-14k', clubs: 'Al-Shabab', seats: 13537, tol: 0.02 },
+    { id: 'pfbf-stadium-22k', clubs: 'Al-Riyadh', seats: 22500, tol: 0.02 },
+    { id: 'ego-stadium-13k', clubs: 'Al-Ettifaq', seats: 12984, tol: 0.02 },
+    { id: 'pmbf-stadium-22k', clubs: 'Al-Qadsiah, Al-Khaleej', seats: 22042, tol: 0.02 },
+    { id: 'alfateh-stadium-12k', clubs: 'Al-Fateh', seats: 11851, tol: 0.02 },
+    { id: 'buraidah-stadium-25k', clubs: 'Al-Taawoun', seats: 25000, tol: 0.03 },
+    // 20,000 by the book; 14,357 at the 2024 Super Cup final, "does not exceed 17,000".
+    { id: 'abha-stadium-20k', clubs: 'Abha', seats: 17000, tol: 0.04 },
+    { id: 'tabuk-stadium-12k', clubs: 'NEOM', seats: 12000, tol: 0.02 },
+    // 8,000 by the book; 6,200 numbered seats since 2019.
+    { id: 'alhazem-stadium-8k', clubs: 'Al-Hazem, Al-Kholood', seats: 6200, tol: 0.02 },
+    { id: 'majmaah-stadium-7k', clubs: 'Al-Fayha, Al-Faisaly', seats: 6844, tol: 0.01 },
+  ];
+  const fails: string[] = [];
+  const report: string[] = [];
+  for (const g of GROUNDS) {
+    const e = cat.STADIUM_CATALOG.find((x) => x.id === g.id);
+    if (!e) {
+      fails.push(`${g.id} is not offered`);
+      continue;
+    }
+    const t = e.template;
+    const m = generateSeatMap(t);
+    if (Math.abs(m.count - g.seats) / g.seats > g.tol) fails.push(`${g.id}: ${m.count} seats, built to ${g.seats}`);
+    if (!new RegExp(`'${g.id}': 'stad\\.\\w+'`).test(i18nSrc)) fails.push(`${g.id} has no name to show`);
+    if (!e.meta.tags?.includes('saudi-pro-league')) fails.push(`${g.id} is not tagged for the league`);
+    // Clear of the pitch, and of each other.
+    const grid = new Map<string, number[]>();
+    let minPitch = Infinity;
+    for (let i = 0; i < m.count; i++) {
+      const x = m.pos3[i * 3];
+      const z = m.pos3[i * 3 + 2];
+      minPitch = Math.min(minPitch, Math.hypot(Math.max(0, Math.abs(x) - 52.5), Math.max(0, Math.abs(z) - 34)));
+      const k = `${Math.floor(x / 0.5)},${Math.floor(z / 0.5)}`;
+      (grid.get(k) ?? grid.set(k, []).get(k)!).push(i);
+    }
+    let clash = 0;
+    for (const [k, list] of grid) {
+      const [gx, gz] = k.split(',').map(Number);
+      for (let dx = -1; dx <= 1; dx++) for (let dz = -1; dz <= 1; dz++) {
+        for (const j of grid.get(`${gx + dx},${gz + dz}`) ?? []) for (const i of list) {
+          if (j <= i) continue;
+          if (Math.hypot(m.pos3[j * 3] - m.pos3[i * 3], m.pos3[j * 3 + 2] - m.pos3[i * 3 + 2]) < 0.3 && Math.abs(m.pos3[j * 3 + 1] - m.pos3[i * 3 + 1]) < 1.5) clash++;
+        }
+      }
+    }
+    if (minPitch < 5) fails.push(`${g.id}: a seat ${minPitch.toFixed(1)} m from the pitch`);
+    if (clash) fails.push(`${g.id}: ${clash} pairs of seats on top of each other`);
+    // Nothing in a gap.
+    let inGaps = 0;
+    const before: number[] = [];
+    t.tiers.reduce((n, tr) => (before.push(n), n + tr.rows), 0);
+    for (let i = 0; i < m.count; i++) {
+      const tr = t.tiers[m.tierOf[i]];
+      if (!tr.omit) continue;
+      const row = m.rowOf[i] - before[m.tierOf[i]];
+      if (spans.inGap(tr, t.plan, row, tr.baseOffset + row * tr.rowDepth, m.pos3[i * 3], m.pos3[i * 3 + 2])) inGaps++;
+    }
+    if (inGaps) fails.push(`${g.id}: ${inGaps} seats inside its own gaps`);
+    // Roofs over heads: every seat under a run has 2 m of headroom.
+    let bumped = 0;
+    if (t.roofs?.length) {
+      const at = curveSampler(t);
+      const plan: { x: number; z: number }[] = [];
+      for (let q = 0; q < 1024; q++) plan.push(at(q / 1024, 0));
+      for (let i = 0; i < m.count; i += 5) {
+        const x = m.pos3[i * 3];
+        const y = m.pos3[i * 3 + 1];
+        const z = m.pos3[i * 3 + 2];
+        for (const run of t.roofs) {
+          let r: number;
+          if (run.straight && run.side) {
+            const al = run.side === 'north' || run.side === 'south' ? x : z;
+            if (al < (run.from ?? -1e9) || al > (run.to ?? 1e9)) continue;
+            r = run.side === 'north' ? z - t.plan.b : run.side === 'south' ? -z - t.plan.b : run.side === 'east' ? x - t.plan.a : -x - t.plan.a;
+            if (Math.abs(run.side === 'north' || run.side === 'south' ? z : x) < 1) continue;
+          } else {
+            const side = spans.sideAt(t.plan, 0, x, z);
+            if (run.side && side !== run.side) continue;
+            if (!run.side && (run.omit ?? []).some((gp) => gp.side === side && spans.alongOf(side, x, z) >= gp.from && spans.alongOf(side, x, z) <= gp.to)) continue;
+            let best = Infinity;
+            for (const p of plan) best = Math.min(best, (p.x - x) ** 2 + (p.z - z) ** 2);
+            r = Math.sqrt(best);
+          }
+          if (r < run.front || r > run.back) continue;
+          const f = (r - run.back) / (run.front - run.back);
+          const under = run.backY + (run.frontY - run.backY) * f;
+          if (under < y + 2) bumped++;
+        }
+      }
+    }
+    if (bumped) fails.push(`${g.id}: ${bumped} seats with a roof less than 2 m over them`);
+    report.push(`${g.id} ${m.count} (${g.seats})`);
+  }
+  // The earlier Al-Awwal is still there for designs saved on it, and named as such.
+  if (!/'community-alawwal-park-25k': 'stad\.alAwwalOld'/.test(i18nSrc)) fails.push('the earlier Al-Awwal is not named as the earlier layout');
+  console.log(`saudi league: ${GROUNDS.length} home grounds | ${report.join(' | ')}`);
+  if (fails.length) throw new Error(`saudi league grounds: ${fails.join('; ')}`);
 })();

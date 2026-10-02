@@ -595,7 +595,7 @@ export interface FitWarning {
  * pylons. That is genuinely how it works, and it is still only a guess, because
  * the real predictor is the decade the ground was built in and nothing public
  * tells us that. Measured against the shipped catalogue, this rule
- * agrees with the hand-set answer 8 times out of 13.
+ * agrees with the hand-set answer 17 times out of 24.
  * scripts/verify-stadiumfit.mts reads that sentence back out of this comment and
  * fails if it has drifted from what the rule actually scores, because a stale
  * accuracy figure is worse than none: it is the number the panel hedges by. The
@@ -769,7 +769,7 @@ export function buildStadium(input: FitInput): FitResult {
   let tierCount = k.tiers ?? suggestTierCount(totalRows);
   prov['tiers.length'] = k.tiers
     ? { source: 'user', confidence: 'given' }
-    : { source: 'row-count-rule', confidence: 'suggested', note: 'right on 12 of 13 shipped templates; a photo settles it', noteKey: 'si.note.tiers' };
+    : { source: 'row-count-rule', confidence: 'suggested', note: 'right on 20 of 24 shipped templates; a photo settles it', noteKey: 'si.note.tiers' };
   if (!k.tiers) confirm.push('tiers.length');
 
   const mkBase = (

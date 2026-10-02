@@ -43,6 +43,8 @@ import { pyroLoudness, type AccessoryKind, type AccessoryLevel, type AccessoryLe
 import { buildJewelCrown } from './jewelCrown';
 import { buildJewel } from './jewel';
 import { buildKingdom } from './kingdom';
+import { buildGround } from './grounds';
+import { seatLookMap, type SeatLookMap } from './seatLook';
 import { buildVenueDetails, type VenueBuild } from './venue';
 import { buildPremium } from './premium';
 import { paintScreen, type ScreenMode } from './screenPicture';
@@ -203,6 +205,9 @@ export class MatchDaySimulator {
   private readonly jewelSeatColors = [new THREE.Color(0x8f2d2d), new THREE.Color(0xb14a2a), new THREE.Color(0xc98a4b), new THREE.Color(0x6f2222), new THREE.Color(0xd8b98a), new THREE.Color(0xa33b2b)];
   private readonly alawwalSeatColors = [new THREE.Color(0xf2c40f), new THREE.Color(0xe8bd10), new THREE.Color(0xf5cd2a), new THREE.Color(0xd9ae0c), new THREE.Color(0xf7d43a), new THREE.Color(0xf2c40f), new THREE.Color(0xefc200)];
   private readonly alawwalBlue = new THREE.Color(0x15245e);
+  /** A ground's own empty-seat colours (StadiumTemplate.seatLook), worked out once. */
+  private lookMap: SeatLookMap | null = null;
+  private lookColors: THREE.Color[] = [];
   private readonly kingdomNavy = [new THREE.Color(0x172046), new THREE.Color(0x1b264f), new THREE.Color(0x141c3e), new THREE.Color(0x1f2d62), new THREE.Color(0x182349), new THREE.Color(0x24346f)];
   private readonly kingdomSeatColors = [new THREE.Color(0x1c2a5e), new THREE.Color(0x2b4a9c), new THREE.Color(0xe8ecf6), new THREE.Color(0x24377a), new THREE.Color(0xd8deea), new THREE.Color(0x1c3a8a), new THREE.Color(0x203a72)];
   private pitchMat!: THREE.MeshStandardMaterial;
@@ -334,6 +339,8 @@ export class MatchDaySimulator {
       this.zoneCodes = seatZones(this.map, this.template);
       this.noTifo = noTifoMask(this.map, this.template);
     }
+    this.lookMap = seatLookMap(this.template, this.map);
+    this.lookColors = (this.lookMap?.colors ?? []).map((h) => new THREE.Color(h));
     this.seats = this.buildSeats();
     this.scene.add(this.seats);
 
@@ -408,9 +415,17 @@ export class MatchDaySimulator {
       // Premium seats are chairs, with their balustrades, partitions and the royal box.
       const premium = buildPremium(this.template, this.map, this.settings.shadows);
       this.scene.add(premium.object);
+      this.premiumObject = premium.object;
       this.disposables.push(...premium.disposables);
       this.screen.nameEn = this.template.name;
       this.paintScreens();
+    }
+    if (this.template.roofs?.length || this.template.lighting?.masts?.style || this.template.details?.buildings?.length || this.template.details?.skins?.length) {
+      // A real ground's roofs, masts and buildings (see grounds.ts).
+      const ground = buildGround(this.template, this.settings.shadows);
+      this.scene.add(ground.object);
+      this.groundObject = ground.object;
+      this.disposables.push(...ground.disposables);
     }
     if (this.template.id === JEWEL_ID) {
       const jewel = buildJewel(this.template, this.settings.shadows);
@@ -487,6 +502,7 @@ export class MatchDaySimulator {
       const zc = this.zoneColors[zone];
       return zc[(Math.imul(i, 2654435761) >>> 0) % zc.length];
     }
+    if (cell === 0 && this.lookMap) return this.lookColors[this.lookMap.index[i]];
     if (cell === 0 && this.template.id === JEWEL_ID) {
       const tc = this.jewelTierColors[Math.min(this.map.tierOf[i], this.jewelTierColors.length - 1)];
       return tc[(Math.imul(i, 2654435761) >>> 0) % tc.length];
@@ -627,6 +643,30 @@ export class MatchDaySimulator {
       this.disposables.push(roGeo, roMat);
     }
 
+    if (this.template.runoff) {
+      // Grass (or whatever it is) from the pitch to the front row.
+      const ro = this.template.runoff;
+      const e = 2 / (ro.exponent ?? 8);
+      const shape = new THREE.Shape();
+      for (let k = 0; k <= 128; k++) {
+        const t = (k / 128) * Math.PI * 2;
+        const c = Math.cos(t);
+        const sn = Math.sin(t);
+        const x = ro.a * Math.sign(c) * Math.abs(c) ** e;
+        const z = ro.b * Math.sign(sn) * Math.abs(sn) ** e;
+        if (k === 0) shape.moveTo(x, z);
+        else shape.lineTo(x, z);
+      }
+      const roGeo = new THREE.ShapeGeometry(shape, 1);
+      const roMat = new THREE.MeshStandardMaterial({ color: ro.color, roughness: 0.85, metalness: 0, envMapIntensity: 0.8 });
+      const mesh = new THREE.Mesh(roGeo, roMat);
+      mesh.rotation.x = -Math.PI / 2; // symmetric, so the mirror in z does not matter
+      mesh.position.y = -0.02;
+      mesh.receiveShadow = this.settings.shadows;
+      this.scene.add(mesh);
+      this.disposables.push(roGeo, roMat);
+    }
+
     // Pitch (lit grass).
     const pitchGeo = new THREE.PlaneGeometry(105, 68);
     this.pitchMat = new THREE.MeshStandardMaterial({ color: 0x1f7a3a, map: pitchStripeTexture(), roughness: 0.72, metalness: 0, envMapIntensity: 1.1 });
@@ -698,6 +738,10 @@ export class MatchDaySimulator {
 
   // ---- camera director (Phase 6) ----
   private seatBoundsCache: { ax: number; bz: number; ty: number } | null = null;
+  /** A real ground's roofs, masts and buildings (grounds.ts), which the cameras keep clear of. */
+  private groundObject: THREE.Object3D | null = null;
+  /** The royal box and premium seating (premium.ts): its fascia must not fill a camera's foreground. */
+  private premiumObject: THREE.Object3D | null = null;
   /** Bowl extent from the seat map. Memoised — the flyover asks for it per frame. */
   private seatBounds(): { ax: number; bz: number; ty: number } {
     if (this.seatBoundsCache) return this.seatBoundsCache;
@@ -741,7 +785,90 @@ export class MatchDaySimulator {
     }
     // Every other ground: shots derived from ITS bowl, so the cameras always sit
     // on the seating looking in (absolute SIM_SHOTS only fit the default 92x70).
-    return [...bowlShots(this.seatBounds()), seatShot(this.map, 'crowd'), seatShot(this.map, 'ultra'), ...this.detailShots()];
+    return [...bowlShots(this.seatBounds()).map((sh) => this.clearOfSeats(this.clearOfStructure(sh))), seatShot(this.map, 'crowd'), seatShot(this.map, 'ultra'), ...this.detailShots()];
+  }
+  /**
+   * A shot framed from the bowl's extent can land inside a deep stand — under
+   * its deck, looking at concrete. Lift it to just over the seats there.
+   */
+  private clearOfSeats(sh: SimShot): SimShot {
+    const [x, y, z] = sh.position;
+    let top = -Infinity;
+    for (let k = 0; k < this.map.count; k++) {
+      const dx = this.map.pos3[k * 3] - x;
+      const dz = this.map.pos3[k * 3 + 2] - z;
+      if (dx * dx + dz * dz < 6.25) top = Math.max(top, this.map.pos3[k * 3 + 1]);
+    }
+    if (top === -Infinity || y > top + 1.4) return sh;
+    return { ...sh, position: [x, top + 1.8, z] };
+  }
+  /**
+   * A shot framed from the bowl's extent knows nothing of a ground's own
+   * roofs, columns and buildings (grounds.ts): on a ground whose main stand is
+   * a building of its own, the gantry position can be inside it, on top of its
+   * roof, or behind a column. Look back from the target to the camera and,
+   * if anything solid is in the way, bring the camera in to just this side of
+   * it. The drone is above it all by design and is left alone.
+   */
+  private clearOfStructure(sh: SimShot): SimShot {
+    const obj = this.groundObject;
+    if (!obj || sh.name === 'Drone') return sh;
+    obj.updateMatrixWorld(true);
+    const tgt = new THREE.Vector3(...sh.target);
+    const cam = new THREE.Vector3(...sh.position);
+    const dir = cam.clone().sub(tgt);
+    const len = dir.length();
+    dir.normalize();
+    const solid = (h: THREE.Intersection): boolean => {
+      const m = h.object as THREE.Mesh;
+      if (!m.isMesh || !m.visible) return false;
+      const mat = (Array.isArray(m.material) ? m.material[0] : m.material) as THREE.Material;
+      return mat.blending !== THREE.AdditiveBlending;
+    };
+    // (A Raycaster keeps the vectors it is given, so give it copies.)
+    const ray = new THREE.Raycaster(tgt.clone(), dir.clone(), 0, len + 1);
+    const hit = ray.intersectObject(obj, true).find(solid);
+    const above = new THREE.Raycaster(new THREE.Vector3(), new THREE.Vector3(0, 1, 0), 0, 7);
+    let d = hit ? Math.max(4, hit.distance - 2.5) : len;
+    // Tucked deep under a roof, the roof fills half the picture: come forward
+    // along the same line until it is a band across the top, as from a gantry.
+    // (Tested a few metres ahead, so it stays just in under the leading edge.)
+    for (let k = 0; k < 16 && d > 12; k++) {
+      above.ray.origin.copy(tgt).addScaledVector(dir, d - 7);
+      if (!above.intersectObject(obj, true).some(solid)) break;
+      d -= 2;
+    }
+    const p = tgt.clone().addScaledVector(dir, d);
+    // From up in a stand, the near touchline should be in view, not hidden
+    // behind the fascia of the royal box or a balcony just below the lens.
+    if (p.y > 4) {
+      const blockers = [obj, ...(this.venue ? [this.venue.object] : []), ...(this.premiumObject ? [this.premiumObject] : [])];
+      for (const o of blockers) o.updateMatrixWorld(true);
+      const { a: pa, b: pb } = this.template.plan;
+      const endOn = Math.abs(p.x) / pa > Math.abs(p.z) / pb;
+      const near = endOn
+        ? new THREE.Vector3(Math.sign(p.x) * 52, 0.2, Math.max(-20, Math.min(20, p.z)))
+        : new THREE.Vector3(Math.max(-40, Math.min(40, p.x)), 0.2, Math.sign(p.z) * 34);
+      const look = new THREE.Raycaster();
+      const fovDown = ((sh.fov / 2) * 0.9 * Math.PI) / 180;
+      const blocked = (): boolean => {
+        // The touchline itself…
+        const to = near.clone().sub(p);
+        const dist = to.length();
+        look.set(p, to.normalize());
+        look.far = dist - 1;
+        if (look.intersectObjects(blockers, true).some(solid)) return true;
+        // …and the bottom of the picture: nothing right under the lens.
+        const fwd = tgt.clone().sub(p).normalize();
+        const side = new THREE.Vector3().crossVectors(fwd, new THREE.Vector3(0, 1, 0)).normalize();
+        look.set(p, fwd.applyAxisAngle(side, -fovDown));
+        look.far = 14;
+        return look.intersectObjects(blockers, true).some(solid);
+      };
+      for (let k = 0; k < 8 && blocked(); k++) p.y += 1.5;
+    }
+    if (p.distanceTo(cam) < 0.01) return sh;
+    return { ...sh, position: [p.x, p.y, p.z] };
   }
   /** A ground with details gets a look at them: the royal box, a vehicle ramp. */
   private detailShots(): SimShot[] {
@@ -1041,7 +1168,14 @@ export class MatchDaySimulator {
     // four representative spotlights standing in for 150 lamps mirror in a
     // near-glass pitch as four blinding discs. A wet pitch there is glossy,
     // not a mirror: the sheen spreads across the grass instead.
-    const gloss = this.template.lighting?.mount ? 0.4 : undefined;
+    // The lower the array hangs, the closer the discs come and the brighter
+    // they are: a rim under 25 m (Al-Faisal's, 21 m) wants a rougher sheen
+    // than the Jewel's or Kingdom Arena's. Corner masts that a real ground
+    // stands close to the pitch (lighting.masts) mirror the same way.
+    const mount = this.template.lighting?.mount;
+    const gloss = mount
+      ? Math.min(0.6, 0.4 + Math.max(0, 25 - mount.y) * 0.04)
+      : this.template.lighting?.masts?.style ? 0.7 : undefined;
     this.pitchMat.roughness = on ? (gloss ?? 0.1) : 0.92;
     this.pitchMat.metalness = on ? 0.5 : 0;
     this.pitchMat.color.set(on ? 0x123018 : 0x1f7a3a);

@@ -178,7 +178,9 @@ export function buildEffects(
   plan.luminaires.forEach((lum, i) => {
     const [x, y, z] = lum.pos;
 
-    if (lum.mast) {
+    // A ground whose masts are drawn as structure (lighting.masts.style) has
+    // them standing day and night; only the lamps belong to the rig.
+    if (lum.mast && !opts.template.lighting?.masts?.style) {
       // A tower under the lamp, reaching the ground — and sized to this lamp's
       // own height rather than a fixed 55 m box that floats or buries itself.
       const mastGeo = new THREE.BoxGeometry(1.4, y, 1.4);
@@ -229,7 +231,7 @@ export function buildEffects(
       transparent: true,
       // A rim array bolted to a hand-built roof hangs right over the stands,
       // so its haze would wash over the seats rather than hang over the pitch.
-      opacity: lum.mast ? 0.05 : opts.template.lighting?.mount ? 0.014 : 0.035,
+      opacity: lum.mast ? (opts.template.lighting?.masts?.style ? 0.014 : 0.05) : opts.template.lighting?.mount ? 0.014 : 0.035,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
       side: THREE.DoubleSide,

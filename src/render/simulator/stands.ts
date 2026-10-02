@@ -3,7 +3,8 @@ import type { StadiumTemplate } from '../../core/types';
 import { buildRoof } from './roof';
 import { buildFacade } from './facade';
 import { curveSampler, inLane, laneCut, laneLines, type LaneLine } from '../../core/venueDetails';
-import { hasStands, spanGeometry, spanOn, type SpanGeometry } from '../../core/standSpans';
+import { gapCut, gapHalfPlanes, hasStands, spanGeometry, spanOn, SIDE_U, type SpanGeometry } from '../../core/standSpans';
+import type { StandGap } from '../../core/types';
 
 /**
  * Match Day Simulator — extruded stand architecture (Phase 1).
@@ -162,8 +163,8 @@ export function buildStands(template: StadiumTemplate, shadows: boolean): THREE.
   }
 
   // An indoor arena's stands are dark steel and black cladding, not daylit concrete.
-  const concrete = new THREE.MeshStandardMaterial({ color: template.indoor ? 0x2b2f37 : 0x6b7178, roughness: 0.96, metalness: 0, envMapIntensity: 0.8 });
-  const structure = new THREE.MeshStandardMaterial({ color: template.indoor ? 0x15181d : 0x4c515a, roughness: 0.95, metalness: 0, envMapIntensity: 0.8 });
+  const concrete = new THREE.MeshStandardMaterial({ color: template.finish?.concrete ?? (template.indoor ? 0x2b2f37 : 0x6b7178), roughness: 0.96, metalness: 0, envMapIntensity: 0.8 });
+  const structure = new THREE.MeshStandardMaterial({ color: template.finish?.walls ?? (template.indoor ? 0x15181d : 0x4c515a), roughness: 0.95, metalness: 0, envMapIntensity: 0.8 });
 
   const add = (geo: THREE.BufferGeometry, mat: THREE.Material, cast: boolean, receive: boolean): void => {
     const m = new THREE.Mesh(geo, mat);
@@ -189,7 +190,8 @@ export function buildStands(template: StadiumTemplate, shadows: boolean): THREE.
   // there is no neighbouring stand to close it.
   const spans = hasStands(template) ? spanGeometry(template) : null;
   const at = spans ? curveSampler(template) : null;
-  if (spans) {
+  const gapped = template.tiers.some((t) => !!t.omit?.length);
+  if (spans || gapped) {
     // Separate stands are seen from every side — round their ends, from the
     // corners, from under an upper tier — so their faces are double-sided.
     concrete.side = THREE.DoubleSide;
@@ -198,11 +200,21 @@ export function buildStands(template: StadiumTemplate, shadows: boolean): THREE.
 
   tiers.forEach((tier, idx) => {
     if (spans && at && tier.stands) {
-      for (const sg of spans[idx]) buildSpanBlock(template, idx, sg, at, concrete, structure, add);
+      for (const sg of spans[idx]) {
+        if (sg.straight) buildStraightBlock(template, idx, sg, concrete, structure, add);
+        else buildSpanBlock(template, idx, sg, at, concrete, structure, add);
+      }
       return;
     }
     const rakeTan = Math.tan((tier.rakeDeg * Math.PI) / 180);
     const lastRow = Math.max(1, tier.rows - 1);
+    // A ring tier with gaps (TierSpec.omit): every piece of its concrete is cut
+    // where the seats stop, and the cut ends get walls.
+    const gaps = tier.omit?.length ? tier.omit : null;
+    const midR = tier.baseOffset + (tier.rows * tier.rowDepth) / 2;
+    const addT = gaps
+      ? (geo: THREE.BufferGeometry, mat: THREE.Material, cast: boolean, receive: boolean): void => add(subtractGaps(geo, gaps.map((g) => gapHalfPlanes(g, template.plan, midR, gapCut(tier, g)))), mat, cast, receive)
+      : add;
     // Extend the deck a little past the seats so seats sit on it, not at the lip.
     const frontRadial = tier.baseOffset - tier.rowDepth * 0.5;
     const backRadial = tier.baseOffset + lastRow * tier.rowDepth + tier.rowDepth * 0.5;
@@ -222,12 +234,12 @@ export function buildStands(template: StadiumTemplate, shadows: boolean): THREE.
       let r0 = frontRadial;
       for (const c of cuts) {
         const open = laneHere.filter((l) => cutOf(l) >= c - 1e-6);
-        if (c > r0 + 1e-6) add(clippedStrip(ring(a, b, p, r0, yAt(r0)), ring(a, b, p, c, yAt(c)), open, keep), concrete, true, true);
+        if (c > r0 + 1e-6) addT(clippedStrip(ring(a, b, p, r0, yAt(r0)), ring(a, b, p, c, yAt(c)), open, keep), concrete, true, true);
         r0 = Math.max(r0, c);
       }
-      if (backRadial > r0 + 1e-6) add(strip(ring(a, b, p, r0, yAt(r0)), ring(a, b, p, backRadial, backY), keep), concrete, true, true);
+      if (backRadial > r0 + 1e-6) addT(strip(ring(a, b, p, r0, yAt(r0)), ring(a, b, p, backRadial, backY), keep), concrete, true, true);
     } else {
-      add(strip(ring(a, b, p, frontRadial, frontY), ring(a, b, p, backRadial, backY), keep), concrete, true, true);
+      addT(strip(ring(a, b, p, frontRadial, frontY), ring(a, b, p, backRadial, backY), keep), concrete, true, true);
     }
 
     // Vertical riser under the front of this tier, down to the previous tier's
@@ -236,9 +248,22 @@ export function buildStands(template: StadiumTemplate, shadows: boolean): THREE.
     if (frontY - floor > 0.4) {
       const lo = ring(a, b, p, frontRadial, floor);
       const hi = ring(a, b, p, frontRadial, frontY);
-      add(laneHere.length ? clippedStrip(lo, hi, laneHere, keep) : strip(lo, hi, keep), structure, false, true);
+      addT(laneHere.length ? clippedStrip(lo, hi, laneHere, keep) : strip(lo, hi, keep), structure, false, true);
     }
 
+    if (gaps) {
+      const prev = idx > 0 ? template.tiers[idx - 1] : null;
+      const prevEdges = prev ? edgesOf(prev) : null;
+      const floorAt = (r: number): number => {
+        if (!prevEdges || idx === 0) return 0;
+        if (r > prevEdges.back) return 0;
+        const rr = Math.max(prevEdges.front, r);
+        return prevEdges.frontY + (rr - prevEdges.front) * Math.tan((prev!.rakeDeg * Math.PI) / 180);
+      };
+      // The back wall, cut to the same gaps (a ring tier with gaps has no skirt).
+      addT(strip(ring(a, b, p, backRadial, floorAt(backRadial)), ring(a, b, p, backRadial, backY + 1.1)), structure, false, true);
+      for (const g of gapEndWalls(template, tier, gaps, frontRadial, backRadial, (r) => frontY + (r - frontRadial) * rakeTan, floorAt, midR)) add(g, structure, false, true);
+    }
     rowsBefore += tier.rows;
     topBackRadial = backRadial;
     topBackY = backY;
@@ -249,7 +274,7 @@ export function buildStands(template: StadiumTemplate, shadows: boolean): THREE.
   // skirt this has always drawn, byte for byte — buildFacade's 'plain' is that
   // strip and that material. A template that names a style gets a real facade
   // instead, and the skirt is not drawn twice.
-  if (spans) {
+  if (spans || gapped) {
     // Every stand already has its own back wall; there is no ring to skirt.
   } else if (template.facade?.style && template.facade.style !== 'plain') {
     group.add(buildFacade(template, topBackRadial, topBackY, shadows, keep).object);
@@ -447,4 +472,234 @@ function perimeterOf(at: Sampler): number {
   }
   perimeterCache.set(at, L);
   return L;
+}
+
+
+/** Edges of a tier's deck (mirrors core tierEdges). */
+function edgesOf(t: StadiumTemplate['tiers'][number]): { front: number; back: number; frontY: number; backY: number } {
+  const rakeTan = Math.tan((t.rakeDeg * Math.PI) / 180);
+  const lastRow = Math.max(1, t.rows - 1);
+  return {
+    front: t.baseOffset - t.rowDepth * 0.5,
+    back: t.baseOffset + lastRow * t.rowDepth + t.rowDepth * 0.5,
+    frontY: t.baseElevation - t.rowDepth * rakeTan * 0.5,
+    backY: t.baseElevation + lastRow * t.rowDepth * rakeTan + t.rowDepth * rakeTan * 0.5,
+  };
+}
+
+type HalfPlane = [number, number, number];
+
+/** Clip a convex polygon to nx*x + nz*z + d >= 0 (sgn 1) or <= 0 (sgn -1). */
+function clipHalf(poly: Pt[], h: HalfPlane, sgn: number): Pt[] {
+  const res: Pt[] = [];
+  const f = (q: Pt): number => sgn * (h[0] * q[0] + h[1] * q[2] + h[2]);
+  for (let k = 0; k < poly.length; k++) {
+    const A = poly[k];
+    const B = poly[(k + 1) % poly.length];
+    const fa = f(A);
+    const fb = f(B);
+    if (fa >= 0) res.push(A);
+    if ((fa >= 0) !== (fb >= 0)) {
+      const t = fa / (fa - fb);
+      res.push([A[0] + (B[0] - A[0]) * t, A[1] + (B[1] - A[1]) * t, A[2] + (B[2] - A[2]) * t]);
+    }
+  }
+  return res;
+}
+
+/**
+ * Remove every gap (a convex region given by its half-planes) from a mesh:
+ * each triangle minus each region, as convex pieces. Exact at the cut, so
+ * the concrete stops on the same line the seats do.
+ */
+export function subtractGaps(g: THREE.BufferGeometry, regions: HalfPlane[][]): THREE.BufferGeometry {
+  const pos = g.attributes.position as THREE.BufferAttribute;
+  const index = g.index ? Array.from(g.index.array) : [...Array(pos.count).keys()];
+  const P = (i: number): Pt => [pos.getX(i), pos.getY(i), pos.getZ(i)];
+  const out: number[] = [];
+  for (let k = 0; k < index.length; k += 3) {
+    let pieces: Pt[][] = [[P(index[k]), P(index[k + 1]), P(index[k + 2])]];
+    for (const region of regions) {
+      const next: Pt[][] = [];
+      for (const piece of pieces) {
+        let rem = piece;
+        for (const h of region) {
+          const outside = clipHalf(rem, h, -1);
+          if (outside.length >= 3) next.push(outside);
+          rem = clipHalf(rem, h, 1);
+          if (rem.length < 3) break;
+        }
+      }
+      pieces = next;
+    }
+    for (const poly of pieces) for (let j = 1; j < poly.length - 1; j++) out.push(...poly[0], ...poly[j], ...poly[j + 1]);
+  }
+  g.dispose();
+  const r = new THREE.BufferGeometry();
+  r.setAttribute('position', new THREE.Float32BufferAttribute(out, 3));
+  r.computeVertexNormals();
+  return r;
+}
+
+/**
+ * The walls at the cut ends of a gapped ring tier: one in each line where a
+ * gap's edge crosses the deck, from what the tier stands on up to the deck.
+ * A line only gets a wall where it really is an edge of the gap (inside the
+ * gap's other lines) and where there are seats on the other side of it.
+ */
+function gapEndWalls(
+  template: StadiumTemplate,
+  tier: StadiumTemplate['tiers'][number],
+  gaps: StandGap[],
+  front: number,
+  back: number,
+  deckY: (r: number) => number,
+  floorY: (r: number) => number,
+  midR: number,
+): THREE.BufferGeometry[] {
+  const at = curveSampler(template);
+  const out: THREE.BufferGeometry[] = [];
+  const N = 20;
+  const regions = gaps.map((g) => gapHalfPlanes(g, template.plan, midR, gapCut(tier, g)));
+  const inside = (reg: HalfPlane[], x: number, z: number, skip: number, tol: number): boolean =>
+    reg.every((h, i) => i === skip || h[0] * x + h[1] * z + h[2] >= -tol);
+  gaps.forEach((g, gi) => {
+    const reg = regions[gi];
+    const c = SIDE_U[g.side];
+    const rc = gapCut(tier, g);
+    if (rc !== undefined) {
+      // The back of the rows that run on in front of the gap: a wall along the
+      // side at the cut, from the ground to a parapet over the deck.
+      const pos: number[] = [];
+      const idx: number[] = [];
+      const lo = c - 0.16;
+      const steps = 400;
+      let n = 0;
+      for (let k = 0; k <= steps; k++) {
+        const q = at(lo + (0.32 * k) / steps, rc);
+        const along = g.side === 'north' || g.side === 'south' ? q.x : q.z;
+        if (along < g.from || along > g.to) continue;
+        pos.push(q.x, floorY(rc), q.z, q.x, deckY(rc) + 1.1, q.z);
+        if (n > 0) {
+          const k2 = (n - 1) * 2;
+          idx.push(k2, k2 + 1, k2 + 2, k2 + 1, k2 + 3, k2 + 2);
+        }
+        n++;
+      }
+      if (n > 1) {
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+        geo.setIndex(idx);
+        geo.computeVertexNormals();
+        out.push(geo);
+      }
+    }
+    reg.forEach((h, hi) => {
+      if (hi === 4) return; // the cut line, done above
+      const pts: { x: number; z: number; r: number }[] = [];
+      for (let i = 0; i <= N; i++) {
+        const r = front + ((back - front) * i) / N;
+        const f = (u: number): number => {
+          const q = at(u, r);
+          return h[0] * q.x + h[1] * q.z + h[2];
+        };
+        // Scan the side's quarter (and a little either side) for the crossing.
+        const lo = c - 0.16;
+        const hiU = c + 0.16;
+        const steps = 160;
+        let found: { x: number; z: number } | null = null;
+        let pu = lo;
+        let pf = f(lo);
+        for (let s2 = 1; s2 <= steps && !found; s2++) {
+          const u = lo + ((hiU - lo) * s2) / steps;
+          const fu = f(u);
+          if ((fu >= 0) !== (pf >= 0)) {
+            let a0 = pu;
+            let a1 = u;
+            let f0 = pf;
+            for (let it = 0; it < 40; it++) {
+              const m = (a0 + a1) / 2;
+              const fm = f(m);
+              if ((fm >= 0) === (f0 >= 0)) {
+                a0 = m;
+                f0 = fm;
+              } else a1 = m;
+            }
+            const q = at((a0 + a1) / 2, r);
+            // Only where it really is an edge of the gap: inside its other lines.
+            if (inside(reg, q.x, q.z, hi, 0.05)) found = { x: q.x, z: q.z };
+          }
+          pu = u;
+          pf = fu;
+        }
+        if (!found) continue;
+        // Seats on the far side of the line: a point just across it is in no gap.
+        const ox = found.x + h[0] * -0.6;
+        const oz = found.z + h[1] * -0.6;
+        if (regions.some((rg) => rg.every((hh) => hh[0] * ox + hh[1] * oz + hh[2] >= 0))) continue;
+        pts.push({ x: found.x, z: found.z, r });
+      }
+      if (pts.length < 2) return;
+      const pos: number[] = [];
+      const idx: number[] = [];
+      pts.forEach((q, i) => {
+        pos.push(q.x, floorY(q.r), q.z, q.x, deckY(q.r) + (i === pts.length - 1 ? 1.1 : 0), q.z);
+        if (i > 0) {
+          const k2 = (i - 1) * 2;
+          idx.push(k2, k2 + 1, k2 + 2, k2 + 1, k2 + 3, k2 + 2);
+        }
+      });
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+      geo.setIndex(idx);
+      geo.computeVertexNormals();
+      out.push(geo);
+    });
+  });
+  return out;
+}
+
+/**
+ * A straight stand (TierSpec.straight): a sloping deck, the wall at its
+ * front, a back wall and two end walls, all on lines square to the pitch.
+ */
+function buildStraightBlock(
+  template: StadiumTemplate,
+  tierIdx: number,
+  sg: SpanGeometry,
+  concrete: THREE.Material,
+  structure: THREE.Material,
+  add: (geo: THREE.BufferGeometry, mat: THREE.Material, cast: boolean, receive: boolean) => void,
+): void {
+  const tier = template.tiers[tierIdx];
+  const { a, b } = template.plan;
+  const H = sg.halfLength + tier.seatPitch * 0.6;
+  const P = (along: number, r: number, y: number): Pt => {
+    if (sg.side === 'north') return [along, y, b + r];
+    if (sg.side === 'south') return [along, y, -(b + r)];
+    if (sg.side === 'east') return [a + r, y, along];
+    return [-(a + r), y, along];
+  };
+  const quad = (p0: Pt, p1: Pt, p2: Pt, p3: Pt): THREE.BufferGeometry => {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute([...p0, ...p1, ...p2, ...p3], 3));
+    g.setIndex([0, 1, 2, 0, 2, 3]);
+    g.computeVertexNormals();
+    return g;
+  };
+  const PARAPET = 1.1;
+  // The deck, front to back.
+  add(quad(P(-H, sg.front, sg.frontY), P(H, sg.front, sg.frontY), P(H, sg.back, sg.backY), P(-H, sg.back, sg.backY)), concrete, true, true);
+  // The wall at the front, down to the ground.
+  if (sg.frontY > 0.3) add(quad(P(-H, sg.front, 0), P(H, sg.front, 0), P(H, sg.front, sg.frontY), P(-H, sg.front, sg.frontY)), structure, false, true);
+  // The back wall, up to a parapet over the last row.
+  add(quad(P(-H, sg.back, 0), P(H, sg.back, 0), P(H, sg.back, sg.backY + PARAPET), P(-H, sg.back, sg.backY + PARAPET)), structure, false, true);
+  // The end walls.
+  for (const e of [-H, H]) {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute([...P(e, sg.front, 0), ...P(e, sg.front, sg.frontY), ...P(e, sg.back, sg.backY + PARAPET), ...P(e, sg.back, 0)], 3));
+    g.setIndex([0, 1, 2, 0, 2, 3]);
+    g.computeVertexNormals();
+    add(g, structure, false, true);
+  }
 }

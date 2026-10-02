@@ -2024,14 +2024,14 @@ if (process.env.DATABASE_URL) {
   const { templateById } = await import('../../src/core/stadiumCatalog');
   const { noTifoMask } = await import('../../src/core/venueDetails');
   const list = shippedTemplateInfo();
-  for (const id of ['jewel-jeddah-60k', 'community-jewel-jeddah-62k', 'community-alawwal-park-25k', 'kingdom-arena-26k', 'community-kingdom-arena-28k', DEFAULT_TEMPLATE.id]) {
+  for (const id of ['jewel-jeddah-60k', 'community-jewel-jeddah-62k', 'community-alawwal-park-25k', 'kingdom-arena-26k', 'community-kingdom-arena-28k', 'alawwal-park-26k', 'shg-arena-14k', 'ego-stadium-13k', 'alfateh-stadium-12k', 'pmbf-stadium-22k', 'alfaisal-stadium-27k', 'buraidah-stadium-25k', 'abha-stadium-20k', 'tabuk-stadium-12k', 'alhazem-stadium-8k', 'majmaah-stadium-7k', 'pfbf-stadium-22k', DEFAULT_TEMPLATE.id]) {
     assert.ok(list.some((t) => t.id === id), `the server knows ${id}`);
   }
   const auth = new MemoryAuthRepository();
   const designs = new MemoryDesignRepository((id) => auth.usernameOf(id));
   const app = await buildApp(designs, auth, list);
   const tok = await registerUser(app, 'jeddawi');
-  for (const id of ['jewel-jeddah-60k', 'community-jewel-jeddah-62k', 'kingdom-arena-26k', 'community-kingdom-arena-28k']) {
+  for (const id of ['jewel-jeddah-60k', 'community-jewel-jeddah-62k', 'kingdom-arena-26k', 'community-kingdom-arena-28k', 'community-alawwal-park-25k', 'alawwal-park-26k', 'shg-arena-14k', 'ego-stadium-13k', 'alfateh-stadium-12k', 'pmbf-stadium-22k', 'alfaisal-stadium-27k', 'buraidah-stadium-25k', 'abha-stadium-20k', 'tabuk-stadium-12k', 'alhazem-stadium-8k', 'majmaah-stadium-7k', 'pfbf-stadium-22k']) {
     const n = generateSeatMap(templateById(id)!).count;
     assert.equal(list.find((t) => t.id === id)!.seatCount, n, `${id}: the server's seat count is the generator's`);
     const cellsGzB64 = gzipSync(new Uint8Array(n).fill(1)).toString('base64');
@@ -2052,7 +2052,7 @@ if (process.env.DATABASE_URL) {
       for (let i = 0; i < n; i++) {
         if (mask[i]) { locked++; assert.equal(stored[i], 0, `${id}: royal-box seat ${i} was stored painted`); } else if (stored[i] === 1) painted++;
       }
-      assert.ok(locked > 400 && painted === n - locked, `${id}: ${locked} royal-box seats cleared, every other seat kept`);
+      assert.ok(locked > 50 && painted === n - locked, `${id}: ${locked} royal-box seats cleared, every other seat kept`);
     } else {
       assert.ok(stored.every((c) => c === 1), `${id}: a ground without a royal box keeps every seat`);
     }
@@ -2064,5 +2064,5 @@ if (process.env.DATABASE_URL) {
     assert.equal(short.statusCode, 400, `${id}: a design with the wrong seat count is refused`);
   }
   await app.close();
-  console.log('real-venue grounds: designs save on the rebuilt Jewel and Kingdom Arena and on their legacy ones; wrong seat counts refused; the royal box is cleared server-side');
+  console.log('real-venue grounds: designs save on the rebuilt Jewel and Kingdom Arena, every Saudi league ground, and the legacy layouts; wrong seat counts refused; the royal box is cleared server-side');
 }

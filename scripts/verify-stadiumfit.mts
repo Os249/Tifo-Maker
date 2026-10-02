@@ -11,7 +11,7 @@
  * self-consistent, which is the necessary half, and it is the same test that
  * caught the vertex-centroid bug in the footprint fitter.
  */
-import { STADIUM_CATALOG } from '../src/core/stadiumCatalog';
+import { STADIUM_CATALOG, tierCount } from '../src/core/stadiumCatalog';
 import { generateSeatMap } from '../src/core/seatmap';
 import {
   buildStadium,
@@ -70,7 +70,11 @@ function trueRing(t: StadiumTemplate, n = 160): Pt[] {
 // than any measured outline, and the fitter is not meant to recover it. The
 // plan checks below are about rings; such grounds still go through the
 // capacity and tier checks.
-const RING_GROUNDS = STADIUM_CATALOG.filter((s) => !s.template.tiers.some((t) => t.stands));
+// The same goes for a ground with gaps in its ring (TierSpec.omit): a
+// horseshoe round a track, a U with a main stand of its own. Its outline is a
+// ring but its seats are not, so neither its plan nor its capacity can come
+// back from the outline alone.
+const RING_GROUNDS = STADIUM_CATALOG.filter((s) => !s.template.tiers.some((t) => t.stands || t.omit));
 
 console.log('--- ring fitting -------------------------------------------------');
 {
@@ -146,14 +150,20 @@ console.log('\n--- tier split --------------------------------------------------
   for (const s of STADIUM_CATALOG) {
     const rows = s.template.tiers.reduce((n, t) => n + t.rows, 0);
     const got = suggestTierCount(rows);
-    if (got === s.template.tiers.length) right++;
-    else misses.push(`${s.meta?.name ?? s.id} (${rows} rows: said ${got}, is ${s.template.tiers.length})`);
+    // Tiers as a fan counts them (StadiumTemplate.levels): a separate main
+    // stand is its own entry in `tiers` but not a second tier.
+    if (got === tierCount(s.template)) right++;
+    else misses.push(`${s.meta?.name ?? s.id} (${rows} rows: said ${got}, is ${tierCount(s.template)})`);
   }
   // Locked at 12, not ">= 8": this number is quoted in the provenance note the
   // user reads, so it must not drift without someone noticing. (It was 10 until
   // the Jewel was rebuilt to the real stadium's 66 rows in three tiers, and 11
-  // until Kingdom Arena was rebuilt with its 2024 upper tier: 58 rows, two tiers.)
-  check(right === 12, 'tier-count rule scores 12 of 13', `misses: ${misses.join('; ')}`);
+  // until Kingdom Arena was rebuilt with its 2024 upper tier: 58 rows, two tiers.
+  // 20 of 24 since the Saudi league's grounds came in, October 2026: Al-Awwal,
+  // Al-Faisal and Prince Faisal bin Fahd have a short second tier over one
+  // stand that the row count does not see, and Abha's one tier is 50 rows deep
+  // along one side.)
+  check(right === 20, 'tier-count rule scores 20 of 24', `misses: ${misses.join('; ')}`);
 
   const st = stackTiers(50, 2);
   const stacked = st[1].baseOffset > st[0].baseOffset + st[0].rows * st[0].rowDepth
@@ -185,8 +195,10 @@ console.log('\n--- the whole estimator, round-tripped --------------------------
       Math.abs(r.template.plan.a - truth.plan.a) / truth.plan.a,
       Math.abs(r.template.plan.b - truth.plan.b) / truth.plan.b,
     );
-    worstCap = Math.max(worstCap, capErr);
-    if (RING_GROUNDS.includes(s)) worstPlan = Math.max(worstPlan, planErr);
+    if (RING_GROUNDS.includes(s)) {
+      worstPlan = Math.max(worstPlan, planErr);
+      worstCap = Math.max(worstCap, capErr);
+    }
     if (r.template.tiers.length === truth.tiers.length) tiersRight++;
     console.log(
       String(s.meta?.name ?? s.id).slice(0, 24).padEnd(25) +
@@ -198,7 +210,7 @@ console.log('\n--- the whole estimator, round-tripped --------------------------
   }
   console.log();
   check(worstPlan < 0.05, 'plan curve recovered (ring grounds)', `worst ${(worstPlan * 100).toFixed(1)}%`);
-  check(worstCap < 0.05, 'capacity recovered', `worst ${(worstCap * 100).toFixed(1)}%`);
+  check(worstCap < 0.05, 'capacity recovered (ring grounds)', `worst ${(worstCap * 100).toFixed(1)}%`);
   check(tiersRight === STADIUM_CATALOG.length, 'a told tier count is honoured', `${tiersRight}/${STADIUM_CATALOG.length}`);
 }
 
@@ -281,7 +293,7 @@ console.log('\n--- the two rules with no data behind them ----------------------
   let tierHits = 0;
   for (const tpl of all) {
     const rows = tpl.tiers.reduce((n, t2) => n + t2.rows, 0);
-    if (suggestTierCount(rows) === tpl.tiers.length) tierHits++;
+    if (suggestTierCount(rows) === tierCount(tpl)) tierHits++;
   }
   console.log(`      tier-count rule agrees with the shipped split ${tierHits}/${all.length}`);
   const tierLine = /'si\.note\.tiers':.*$/m.exec(i18nSrc)?.[0] ?? '';

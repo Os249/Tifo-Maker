@@ -164,6 +164,25 @@ export function layOutLights(template: StadiumTemplate): LightingPlan {
 
   const masts = (note?: string): LightingPlan => {
     const out: Luminaire[] = [];
+    if (spec.masts?.at.length) {
+      // Masts as built at this ground: where they stand is a fact about the
+      // ground, so it is the template's to say. Their height still has to
+      // clear the 25-degree rule; a real one does.
+      const at = spec.masts.at.length >= 4 ? spec.masts.at : spec.masts.at.flatMap(([x, z]) => [[x, z], [-x, z], [x, -z], [-x, -z]] as [number, number][]);
+      for (const [x, z] of at) {
+        const h = Math.max(spec.masts.height, minMastHeight(Math.hypot(x, z)) + 0.5);
+        out.push({ pos: [x, h, z], width: 11, mast: true });
+      }
+      return {
+        requested,
+        style: 'corner-masts',
+        kelvin,
+        luminaires: out,
+        angleRef: 'centre',
+        minAngleDeg: Math.min(...out.map((l) => centreAngleDeg(l.pos))),
+        ...(note ? { note } : {}),
+      };
+    }
     // On the diagonal and clear of the building. The diagonal is also what puts
     // a mast well outside the 15-degree wedge behind each goal, which is the
     // whole reason real pylons stand there rather than squared off at the ends.

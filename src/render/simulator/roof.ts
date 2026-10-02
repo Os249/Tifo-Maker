@@ -273,7 +273,14 @@ export function buildRoof(
  * The stand order is the renderer's own — 0 east, 1 north, 2 west, 3 south —
  * the same one `coverageMask` indexes.
  */
-export function standIsRoofed(template: { roof?: RoofSpec }, stand: 0 | 1 | 2 | 3): boolean {
+export function standIsRoofed(template: { roof?: RoofSpec; roofs?: StadiumTemplate['roofs'] }, stand: 0 | 1 | 2 | 3): boolean {
+  // A ground with its roofs stand by stand (StadiumTemplate.roofs): this stand
+  // is roofed if a run is over it — a run on its side, or a ring run that does
+  // not leave its middle open.
+  if (template.roofs?.length) {
+    const side = (['east', 'north', 'west', 'south'] as const)[stand];
+    return template.roofs.some((r) => (r.side ? r.side === side : !(r.omit ?? []).some((g) => g.side === side && g.from <= -10 && g.to >= 10)));
+  }
   const c = template.roof?.coverage ?? 'ring';
   if (c === 'ring') return true;
   if (c === 'none') return false;
