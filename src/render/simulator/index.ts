@@ -830,6 +830,17 @@ export class MatchDaySimulator {
     const hit = ray.intersectObject(obj, true).find(solid);
     const above = new THREE.Raycaster(new THREE.Vector3(), new THREE.Vector3(0, 1, 0), 0, 7);
     let d = hit ? Math.max(4, hit.distance - 2.5) : len;
+    // Not tucked up inside a vault or against a column either: nothing solid
+    // within a few metres above or beside the lens.
+    const probe = new THREE.Raycaster();
+    const around = [[0, 1, 0], [1, 1, 0], [-1, 1, 0], [0, 1, 1], [0, 1, -1], [1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1]].map((v) => new THREE.Vector3(...(v as [number, number, number])).normalize());
+    const crowded = (at: THREE.Vector3): boolean =>
+      around.some((v) => {
+        probe.set(at, v);
+        probe.far = 3;
+        return probe.intersectObject(obj, true).some(solid);
+      });
+    for (let k = 0; k < 30 && d > 6 && crowded(tgt.clone().addScaledVector(dir, d)); k++) d -= 1.5;
     // Tucked deep under a roof, the roof fills half the picture: come forward
     // along the same line until it is a band across the top, as from a gantry.
     // (Tested a few metres ahead, so it stays just in under the leading edge.)
@@ -865,7 +876,13 @@ export class MatchDaySimulator {
         look.far = 14;
         return look.intersectObjects(blockers, true).some(solid);
       };
-      for (let k = 0; k < 8 && blocked(); k++) p.y += 1.5;
+      // …but never up into a roof: stop with a couple of metres under it.
+      const roomAbove = (): boolean => {
+        above.ray.origin.copy(p);
+        above.far = 3.5;
+        return !above.intersectObject(obj, true).some(solid);
+      };
+      for (let k = 0; k < 8 && blocked() && roomAbove(); k++) p.y += 1.5;
     }
     if (p.distanceTo(cam) < 0.01) return sh;
     return { ...sh, position: [p.x, p.y, p.z] };

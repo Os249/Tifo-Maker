@@ -75,6 +75,7 @@ const views: V[] = appShots ? appShots : viewsFile
         { name: 'h-night', position: [0, 2.5, b * 0.75], target: [0, 9, -(b + 12)], fov: 70, time: 'night' },
       ] as V[];
     })();
+if (appShots) for (const v of appShots) console.log(v.name, v.position.map((n) => n.toFixed(1)).join(','), '->', v.target.map((n) => n.toFixed(1)).join(','));
 const shot: string[] = [];
 for (const v of views) {
   if (only && !v.name.includes(only)) continue;

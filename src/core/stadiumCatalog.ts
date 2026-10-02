@@ -343,8 +343,9 @@ const COMMUNITY: StadiumEntry[] = [
           // From its outer edge, 14 m behind the back row, to a leading edge
           // 12 m in from the front row; lifted 11 m over the main stand.
           back: 37, front: 12, backY: 22.5, frontY: 26.5, depth: 3.4, bay: 6.5,
-          color: 0xa9aaa8, underColor: 0xeee5cf,
-          columns: { shape: 'y', color: 0x1f4f9e, every: 6.5, offset: 24.2 },
+          // Grey sheeting on top; the space truss under it painted gold.
+          color: 0xa9aaa8, underColor: 0xd2ae5e,
+          columns: { shape: 'y', color: 0x1f3f8a, every: 6.5, offset: 24.2 },
           lights: { every: 3.5, y: 31 },
           arch: { side: 'south', rise: 11, halfLength: 72 },
         },
@@ -359,11 +360,17 @@ const COMMUNITY: StadiumEntry[] = [
         colors: [{ c: '#f4c200', w: 6 }, { c: '#e9b800', w: 3 }, { c: '#f7cf1c', w: 2 }],
         regions: [
           // The main stand's middle: navy below the boxes, blue above them.
-          { tiers: [0], side: 'south', from: -38, to: 38, colors: ['#18265e', '#1c2d6b', '#162257'] },
-          { tiers: [1], colors: ['#1d3c91', '#2045a0'] },
+          { tiers: [0], side: 'south', from: -38, to: 38, colors: ['#1d3479', '#213a86', '#1a2f6e'] },
+          { tiers: [1], colors: ['#1f409a', '#2348a6'] },
         ],
-        // The grey heart opposite the main stand, from its Mrsool Park years.
-        text: [{ text: 'heart', shape: 'heart', color: '#6d6f74', tier: 0, centerU: 0.25, halfU: 0.03, rows: [13, 29] }],
+        text: [
+          // The heart opposite the main stand, a shade darker than the gold
+          // round it, from its Mrsool Park years.
+          { text: 'heart', shape: 'heart', color: '#8f8862', tier: 0, centerU: 0.25, halfU: 0.03, rows: [13, 29] },
+          // "ALNASSR FC" in navy across the end to the right of the main
+          // stand (north in reality), plain in the satellite picture.
+          { text: 'ALNASSR FC', color: '#1d2b66', tier: 0, centerU: 0, halfU: 0.085, rows: [7, 28], font: '900 {px}px Arial, sans-serif' },
+        ],
       },
       details: {
         zones: [
@@ -379,7 +386,8 @@ const COMMUNITY: StadiumEntry[] = [
         ],
         buildings: [
           // Two glazed floors of hospitality behind the upper section, with the presidential suite above.
-          { side: 'south', halfLength: 40, front: 23.0, depth: 11, y0: 0, y1: 24.5, glassFloors: 2, color: 0xe7dfcc, fascia: 0x1b2b6e },
+          // Navy panels and glass, ALAWWAL PARK across the top.
+          { side: 'south', halfLength: 40, front: 23.0, depth: 11, y0: 0, y1: 24.5, glassFloors: 2, color: 0x24336a, fascia: 0x1b2b6e },
         ],
         skins: [
           // The beige panels between the columns, from the top row up to the roof.
@@ -387,7 +395,9 @@ const COMMUNITY: StadiumEntry[] = [
           // The blue band along the top of the seating.
           { offset: 24.0, y0: 14.0, y1: 15.2, color: 0x1f4f9e, pattern: 'solid', omit: [{ side: 'south', from: -40, to: 40 }] },
           // The gold perforated skin round the outside.
+          // It wraps the main stand too, rising to the top of its building.
           { offset: 34, y0: 0, y1: 15.5, color: 0xc79a52, pattern: 'perforated', glow: 0.15, omit: [{ side: 'south', from: -42, to: 42 }] },
+          { offset: 34.4, y0: 0, y1: 24.5, color: 0xc79a52, pattern: 'perforated', glow: 0.15, side: 'south', from: -42, to: 42 },
         ],
       },
     },
@@ -442,17 +452,22 @@ const COMMUNITY: StadiumEntry[] = [
         // White fabric vaults over every stand, leaving the front rows open.
         // The roofs over the ends run the full width, over the corners, and
         // overhang the concourses behind; the side roofs fill in between.
-        { style: 'membrane', side: 'north', straight: true, from: -66, to: 66, back: 18.5, front: 2.0, backY: 14.5, frontY: 12.4, bay: 7.2, columns: { every: 7.2, color: 0xeeeeea, offset: 16.6 } },
-        { style: 'membrane', side: 'south', straight: true, from: -66, to: 66, back: 21.5, front: 7.4, backY: 15.2, frontY: 12.8, bay: 7.2, columns: { every: 7.2, color: 0xeeeeea, offset: 20.4 } },
-        { style: 'membrane', side: 'east', straight: true, from: -68, to: 68, back: 21, front: 2.0, backY: 14.5, frontY: 11.8, bay: 7.2, columns: { every: 7.2, color: 0xeeeeea, offset: 13.4 } },
-        { style: 'membrane', side: 'west', straight: true, from: -68, to: 68, back: 21.5, front: 2.6, backY: 14.5, frontY: 11.8, bay: 7.2, columns: { every: 7.2, color: 0xeeeeea, offset: 14.0 } },
+        // Low over the stands: the underside a couple of metres above the back
+        // row, dipping towards the front; cream fabric on white tube arches.
+        { style: 'membrane', side: 'north', straight: true, from: -66, to: 66, back: 18.5, front: 2.0, backY: 13.2, frontY: 10.0, bay: 7.2, underColor: 0xeee2c8, columns: { every: 7.2, color: 0xeeeeea, offset: 16.6 } },
+        { style: 'membrane', side: 'south', straight: true, from: -66, to: 66, back: 21.5, front: 7.4, backY: 12.6, frontY: 10.4, bay: 7.2, underColor: 0xeee2c8, columns: { every: 7.2, color: 0xeeeeea, offset: 20.4 } },
+        // The ends' roofs stop at the corners, where the side roofs, higher, run on over the long stands' ends.
+        { style: 'membrane', side: 'east', straight: true, from: -47, to: 47, back: 21, front: 2.0, backY: 11.6, frontY: 9.2, bay: 7.2, underColor: 0xeee2c8, columns: { every: 7.2, color: 0xeeeeea, offset: 13.4 } },
+        { style: 'membrane', side: 'west', straight: true, from: -47, to: 47, back: 21.5, front: 2.6, backY: 11.6, frontY: 9.2, bay: 7.2, underColor: 0xeee2c8, columns: { every: 7.2, color: 0xeeeeea, offset: 14.0 } },
       ],
       lighting: { style: 'corner-masts', kelvin: 5700, masts: { at: [[78, 64]], height: 44, style: 'lattice' } },
       finish: { concrete: 0xbdb9b2, walls: 0xeeeeea },
       // Grass to the ends; in front of the main stand, the apron where the track was.
       runoff: { color: 0x1f6f37, a: 61, b: 50, exponent: 16 },
       seatLook: {
-        colors: [{ c: '#1a1b1f', w: 1 }, { c: '#f2f2ef', w: 1 }],
+        // Black, white and a little grey, laid in clumps of a few seats.
+        colors: [{ c: '#1a1b1f', w: 5 }, { c: '#f2f2ef', w: 4 }, { c: '#8d8f93', w: 1 }],
+        grain: { along: 1.5, rows: 2 },
         // The main stand in whole sections of black and white.
         regions: [{ tiers: [0], side: 'south', colors: ['#f2f2ef', '#1a1b1f'], alternate: true }],
       },
@@ -527,6 +542,8 @@ const COMMUNITY: StadiumEntry[] = [
       runoff: { color: 0x1f6f37, a: 60.3, b: 53, exponent: 8 },
       seatLook: {
         colors: [{ c: '#f1f0ec', w: 6 }, { c: '#cf2027', w: 2.2 }, { c: '#0f7a3b', w: 1.8 }],
+        // In little clumps, not seat by seat.
+        grain: { along: 1.1, rows: 2 },
       },
       details: {
         zones: [{ kind: 'vip', centerU: 0.75, halfU: 0.018, tiers: [1], noTifo: true }],
@@ -565,13 +582,17 @@ const COMMUNITY: StadiumEntry[] = [
       sectionsPerTier: 52,
       roof: { coverage: 'none' },
       roofs: [
-        { style: 'membrane', back: 15.6, front: 1.2, backY: 12.8, frontY: 10.8, bay: 6.6, columns: { every: 6.6, color: 0xeeeeea, offset: 15.0, shape: 'raking' } },
+        // White fabric round the ends and the far side, peaked between its ribs…
+        { style: 'membrane', back: 15.6, front: 1.2, backY: 12.8, frontY: 10.8, bay: 6.6, columns: { every: 6.6, color: 0xeeeeea, offset: 15.0, shape: 'raking' }, omit: [{ side: 'south', from: -50, to: 50 }] },
+        // …and over the old main stand a straight, flat cantilever of its own.
+        { style: 'sheet', side: 'south', from: -50, to: 50, back: 15.6, front: 0.6, backY: 13.4, frontY: 12.6, bay: 8, color: 0xf2f2ee, underColor: 0xe8e8e4, columns: { every: 8, color: 0xeeeeea, offset: 15.2 } },
       ],
       lighting: { style: 'corner-masts', kelvin: 5700, masts: { at: [[80, 67]], height: 44, style: 'lattice' } },
       finish: { concrete: 0xc4c0b8, walls: 0xeeeeea },
       runoff: { color: 0x1f6f37, a: 61.5, b: 47, exponent: 7 },
       seatLook: {
         colors: [{ c: '#1f5fae', w: 5 }, { c: '#f2f2ef', w: 3.4 }, { c: '#1d8a4a', w: 1.6 }],
+        grain: { along: 1.2, rows: 2 },
       },
       details: {
         zones: [{ kind: 'vip', centerU: 0.75, halfU: 0.014, tiers: [0], noTifo: true }],
@@ -580,6 +601,8 @@ const COMMUNITY: StadiumEntry[] = [
           // The VIP box in the middle of the main stand.
           { side: 'south', halfLength: 13, front: 13.6, depth: 7, y0: 0, y1: 12.0, glassFloors: 1, color: 0xf0eee8, fascia: 0x1f5fae },
         ],
+        // The white wall of pointed arches round the outside, one to a bay.
+        skins: [{ offset: 15.3, y0: 0, y1: 11.6, color: 0xf2f1ec, pattern: 'arcade', tile: [6.6, 11.6], omit: [{ side: 'south', from: -50, to: 50 }] }],
       },
     },
     meta: { name: 'Al-Fateh Stadium (Al-Ahsa)', source: 'builtin', country: 'Middle East', capacity: 11851, type: 'Single-tier', inspiredBy: 'Maydan Tamweel Aloula (Al-Fateh Club Stadium), Al-Mubarraz, Al-Ahsa - home of Al-Fateh', tags: ['al-fateh', 'fateh', 'al-ahsa', 'hofuf', 'mubarraz', 'saudi', 'roshn', 'saudi-pro-league', 'membrane'] },
@@ -609,14 +632,15 @@ const COMMUNITY: StadiumEntry[] = [
       track: { lanes: 8, surface: 0x2f5fb3 },
       roof: { coverage: 'none' },
       roofs: [
-        { style: 'truss', back: 23, front: 1.5, backY: 17, frontY: 16, depth: 2.4, bay: 8, color: 0xd7d8d3, underColor: 0xd9dbd6, columns: { every: 8, color: 0xc9c9c4, offset: 18.4, shape: 'raking' } },
+        // Pale translucent panels on a space frame painted sea-green.
+        { style: 'truss', back: 23, front: 1.5, backY: 17, frontY: 16, depth: 2.4, bay: 8, color: 0xe6e9e3, underColor: 0xb4ccb2, columns: { every: 8, color: 0xc9d6c6, offset: 18.4, shape: 'raking' } },
       ],
       lighting: { style: 'corner-masts', kelvin: 4800, masts: { at: [[122, 92]], height: 52, style: 'pole' } },
       finish: { concrete: 0xb4b0a8, walls: 0x9b968c },
-      runoff: { color: 0x5e8f4c, a: 97.6, b: 57.3, exponent: 2.4 },
+      // The ends inside the track and the strip outside it: pale sea-green.
+      runoff: { color: 0x8db49a, a: 97.6, b: 57.3, exponent: 2.4 },
       seatLook: {
         colors: [{ c: '#1e4f9f', w: 5 }, { c: '#2a5fb2', w: 3 }, { c: '#183f86', w: 2 }],
-        regions: [{ tiers: [0], side: 'south', from: -20, to: 20, rows: [4, 21], colors: ['#d9772f', '#cf6d27'] }],
       },
       details: {
         zones: [{ kind: 'vip', centerU: 0.75, halfU: 0.01, tiers: [0], noTifo: true }],
@@ -628,6 +652,8 @@ const COMMUNITY: StadiumEntry[] = [
           // The VIP and media building in the main stand.
           { side: 'south', halfLength: 22, front: 18.2, depth: 9, y0: 0, y1: 15.5, glassFloors: 1, color: 0xd8cbb4, fascia: 0x1e4f9f },
         ],
+        // The 1970s arcade round the outside, under the roof's back edge.
+        skins: [{ offset: 18.8, y0: 0, y1: 9.5, color: 0xe9e5dc, pattern: 'arcade', tile: [8, 9.5], omit: [{ side: 'south', from: -24, to: 24 }] }],
       },
     },
     meta: { name: 'Prince Mohamed bin Fahd Stadium (Dammam)', source: 'builtin', country: 'Middle East', capacity: 22042, type: 'Oval', inspiredBy: 'Prince Mohamed bin Fahd Stadium, Dammam - home of Al-Qadsiah and Al-Khaleej', tags: ['al-qadsiah', 'qadsiah', 'al-khaleej', 'khaleej', 'dammam', 'saudi', 'roshn', 'saudi-pro-league', 'track', 'oval'] },
@@ -725,17 +751,22 @@ const COMMUNITY: StadiumEntry[] = [
       ],
       aisles: { count: 64, widthMeters: 1.1 },
       sectionsPerTier: 32,
-      track: { lanes: 8 },
+      // A clay-red track; the ends inside it the same.
+      track: { lanes: 8, surface: 0xa5603f },
       roof: { coverage: 'none' },
       roofs: [
+        // A long grey canopy over the back rows of the side opposite the main stand.
+        { style: 'sheet', side: 'north', from: -56, to: 56, back: 21.4, front: 12.5, backY: 15.6, frontY: 14.6, bay: 9, color: 0xb8bcbf, underColor: 0xa9adb0, columns: { every: 9, color: 0xc9c9c4, offset: 21 } },
         // The main stand's high flat roof.
         { style: 'slab', side: 'south', straight: true, from: -58, to: 58, back: 16, front: -0.5, backY: 20, frontY: 19.5, depth: 1.6, bay: 9.5, color: 0xd8c6a2, underColor: 0xcdbb98, columns: { every: 9.5, color: 0xd4c19c, offset: 15 } },
       ],
       lighting: { style: 'corner-masts', kelvin: 4600, masts: { at: [[118, 82]], height: 48, style: 'pole' } },
       finish: { concrete: 0xc8b89c, walls: 0xcbb995 },
-      runoff: { color: 0x6f8a54, a: 96, b: 52, exponent: 2.3 },
+      runoff: { color: 0x9e6447, a: 96, b: 52, exponent: 2.3 },
       seatLook: {
-        colors: [{ c: '#2d5fa8', w: 5 }, { c: '#3a6db5', w: 3 }, { c: '#24508f', w: 2 }],
+        // Navy, the sun-faded sections a lighter blue.
+        colors: [{ c: '#1f3f78', w: 5 }, { c: '#264a8a', w: 3 }, { c: '#3563a8', w: 1.4 }],
+        grain: { along: 7, rows: 40 },
         regions: [{ tiers: [1], colors: ['#2f8a4e', '#287a44', '#36955a'] }],
       },
       details: {
@@ -799,17 +830,25 @@ const COMMUNITY: StadiumEntry[] = [
       ],
       lighting: { style: 'corner-masts', kelvin: 4800, masts: { at: [[112, 78]], height: 46, style: 'pole' } },
       finish: { concrete: 0xc7b597, walls: 0xd2c1a2 },
-      runoff: { color: 0x7d9a62, a: 93, b: 49, exponent: 2.3 },
+      // Green artificial grass inside and outside the track.
+      runoff: { color: 0x3f8f62, a: 93, b: 49, exponent: 2.3 },
       seatLook: {
         colors: [{ c: '#1d2f6b', w: 5 }, { c: '#22377a', w: 3 }, { c: '#18275a', w: 2 }],
-        regions: [{ tiers: [2], colors: ['#2e8a52', '#d79a2b'], alternate: true }],
+        grain: { along: 6, rows: 40 },
+        regions: [
+          // The main stand: a green block in the middle at the front…
+          { tiers: [2], side: 'south', from: -20, to: 20, rows: [0, 9], colors: ['#2e8a52', '#2a7f4b'] },
+          // …terracotta-orange round it, and the back rows dark brown.
+          { tiers: [2], rows: [0, 9], colors: ['#c8692c', '#bd6127', '#d0763a'] },
+          { tiers: [2], colors: ['#3b302b', '#45372f', '#332a26'] },
+        ],
       },
       details: {
         zones: [{ kind: 'vip', centerU: 0.75, halfU: 0.01, tiers: [2], noTifo: true }],
         screens: [{ centerU: 0.13, widthM: 10, heightM: 4.5, post: { offset: 14, y: 8 } }],
         buildings: [
           // The white blocks of the main stand building, under and behind its roof.
-          { side: 'south', straight: true, halfLength: 76, front: 20, depth: 10, y0: 0, y1: 14.5, glassFloors: 1, color: 0xf1eee6, fascia: 0xd2c1a2 },
+          { side: 'south', straight: true, halfLength: 76, front: 20, depth: 10, y0: 0, y1: 14.5, glassFloors: 1, color: 0xcdb08a, fascia: 0xd9c7a8 },
         ],
       },
     },
@@ -852,7 +891,8 @@ const COMMUNITY: StadiumEntry[] = [
       ],
       aisles: { count: 56, widthMeters: 1.1 },
       sectionsPerTier: 28,
-      track: { lanes: 8 },
+      // A faded red track; the ends inside it the same.
+      track: { lanes: 8, surface: 0xc0644c },
       roof: { coverage: 'none' },
       roofs: [
         {
@@ -867,7 +907,7 @@ const COMMUNITY: StadiumEntry[] = [
       ],
       lighting: { style: 'corner-masts', kelvin: 4800, masts: { at: [[108, 80]], height: 46, style: 'pole' } },
       finish: { concrete: 0xc9bea9, walls: 0xd3c7ae },
-      runoff: { color: 0x76905a, a: 90.5, b: 50, exponent: 2.3 },
+      runoff: { color: 0xb8634d, a: 90.5, b: 50, exponent: 2.3 },
       seatLook: {
         colors: [{ c: '#2f6b3f', w: 4 }, { c: '#4f8a3a', w: 3 }, { c: '#8aa83c', w: 1.5 }, { c: '#26552f', w: 2 }],
         regions: [{ tiers: [1], colors: ['#2b5fae', '#2352a0', '#3368b8'] }],
@@ -922,14 +962,14 @@ const COMMUNITY: StadiumEntry[] = [
       ],
       aisles: { count: 48, widthMeters: 1.1 },
       sectionsPerTier: 24,
-      track: { lanes: 8 },
+      track: { lanes: 8, surface: 0xc0644c },
       roof: { coverage: 'none' },
       roofs: [
         { style: 'sheet', side: 'south', straight: true, from: -49, to: 49, back: 16.5, front: 1.5, backY: 13.5, frontY: 12.5, depth: 1.0, bay: 8, color: 0xe9e7e2, underColor: 0xcfcfcc, columns: { every: 16, color: 0xdedbd4, offset: 15.5 } },
       ],
       lighting: { style: 'corner-masts', kelvin: 4600, masts: { at: [[104, 74]], height: 44, style: 'pole' } },
       finish: { concrete: 0xc9bca4, walls: 0xd6cab2 },
-      runoff: { color: 0x6f8c55, a: 90, b: 49, exponent: 2.3 },
+      runoff: { color: 0xb8634d, a: 90, b: 49, exponent: 2.3 },
       seatLook: {
         colors: [{ c: '#24366e', w: 5 }, { c: '#2c4282', w: 3 }],
         regions: [{ tiers: [1], colors: [{ c: '#9a9a96', w: 3 }, { c: '#c8312b', w: 2 }, { c: '#e2b51f', w: 2 }, { c: '#2c4f9a', w: 1 }] }],
@@ -970,14 +1010,16 @@ const COMMUNITY: StadiumEntry[] = [
       ],
       aisles: { count: 48, widthMeters: 1.1 },
       sectionsPerTier: 24,
-      track: { lanes: 8 },
+      track: { lanes: 8, surface: 0xc0644c },
       roof: { coverage: 'none' },
       roofs: [
         { style: 'sheet', side: 'south', straight: true, from: -51, to: 51, back: 23, front: 8, backY: 13.5, frontY: 12.5, depth: 1.0, bay: 8, color: 0xf2f1ee, underColor: 0xd4d3cf, columns: { every: 16, color: 0xdedbd4, offset: 22 } },
+        // A light teal canopy along the back of the long stand opposite.
+        { style: 'sheet', side: 'north', straight: true, from: -62, to: 62, back: 11.2, front: 5.5, backY: 9.0, frontY: 8.6, depth: 0.5, bay: 8, color: 0x9fd0cc, underColor: 0x8fc0bc, columns: { every: 16, color: 0xdedbd4, offset: 10.8 } },
       ],
       lighting: { style: 'corner-masts', kelvin: 4600, masts: { at: [[104, 72]], height: 44, style: 'pole' } },
       finish: { concrete: 0xc4b9a3, walls: 0xd2c7b0 },
-      runoff: { color: 0x6c8a52, a: 90, b: 47.5, exponent: 2.3 },
+      runoff: { color: 0xb8634d, a: 90, b: 47.5, exponent: 2.3 },
       seatLook: {
         colors: [{ c: '#2f6aa8', w: 4 }, { c: '#e3e5e6', w: 2 }, { c: '#3b7bb8', w: 2 }],
         regions: [{ side: 'south', colors: ['#f0a12b', '#e48f1d', { c: '#2f6aa8', w: 0.6 }] }],

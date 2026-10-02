@@ -127,6 +127,19 @@ export interface SeatRegion {
   colors: SeatPaint;
   /** Colour whole sections (between aisles) in turn instead of mixing seat by seat. */
   alternate?: boolean;
+  /** Mix in clumps this size instead of seat by seat (see SeatLook.grain). */
+  grain?: SeatGrain;
+}
+
+/**
+ * The size of the patches a mixed colour comes in: a mosaic laid in blocks of
+ * a few seats and rows, as most are, rather than seat by seat.
+ */
+export interface SeatGrain {
+  /** Metres along the row. */
+  along: number;
+  /** Rows. */
+  rows: number;
 }
 
 /** Letters picked out in the seats, the way grounds write a club's name. */
@@ -151,6 +164,8 @@ export interface SeatText {
 
 export interface SeatLook {
   colors: SeatPaint;
+  /** Mix `colors` in clumps instead of seat by seat. */
+  grain?: SeatGrain;
   regions?: SeatRegion[];
   text?: SeatText[];
 }
@@ -344,7 +359,10 @@ export interface Skin {
   y0: number;
   y1: number;
   color: number;
-  pattern?: 'perforated' | 'slats' | 'panels' | 'solid';
+  /** `arcade`: a wall of tall pointed arches, one per `tile` width. */
+  pattern?: 'perforated' | 'slats' | 'panels' | 'solid' | 'arcade';
+  /** Metres along and up per repeat of the pattern (default 4 x 4; an arcade's bay). */
+  tile?: [number, number];
   /** One side only, between `from` and `to` along it. Omitted: the ring. */
   side?: StandSide;
   from?: number;

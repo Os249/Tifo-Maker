@@ -299,7 +299,7 @@ function buildRun(template: StadiumTemplate, run: RoofRun, at: Sampler, shadows:
     grp.add(m);
     return m;
   };
-  const steel = new THREE.MeshStandardMaterial({ color: run.style === 'truss' ? (run.underColor ?? 0xe8e0cc) : 0xe9e9e6, roughness: 0.45, metalness: 0.2, emissive: run.style === 'truss' ? 0x5a5446 : 0x000000 });
+  const steel = new THREE.MeshStandardMaterial({ color: run.style === 'truss' ? (run.underColor ?? 0xe8e0cc) : 0xe9e9e6, roughness: 0.45, metalness: 0.2, emissive: run.style === 'truss' ? new THREE.Color(run.underColor ?? 0xe8e0cc).multiplyScalar(0.4) : 0x000000 });
   trash.push(steel);
   const memberList: { p: V3; q: V3; w: number; h?: number }[] = [];
   const depth = run.depth ?? (run.style === 'truss' ? 3.2 : run.style === 'membrane' ? 0.6 : 1.0);
@@ -348,17 +348,20 @@ function buildRun(template: StadiumTemplate, run: RoofRun, at: Sampler, shadows:
     // A deep space truss: a dark deck on top, the truss grid seen from below,
     // a lattice fascia along the leading edge, and a truss on every bay line.
     // Roof sheeting on the truss: seen from below, through the truss, it is the lit ceiling.
-    const deckMat = new THREE.MeshStandardMaterial({ color: run.color ?? 0x8f9196, roughness: 0.6, metalness: 0.25, emissive: run.underColor ?? 0xe6dfcf, emissiveIntensity: 0.28, side: THREE.DoubleSide });
+    // Grey sheeting seen from above; from below, the lit ceiling in the truss's colour.
+    const deckMat = new THREE.MeshStandardMaterial({ color: run.color ?? 0x8f9196, roughness: 0.6, metalness: 0.25, side: THREE.BackSide });
+    const ceilMat = new THREE.MeshStandardMaterial({ color: run.color ?? 0x8f9196, roughness: 0.6, metalness: 0.25, emissive: run.underColor ?? 0xe6dfcf, emissiveIntensity: 0.28, side: THREE.FrontSide });
     const tt = trussTexture();
     tt.repeat.set(1 / 4, 3);
-    const gridMat = new THREE.MeshStandardMaterial({ color: run.underColor ?? 0xe6dfcf, map: tt, alphaTest: 0.35, transparent: false, roughness: 0.5, metalness: 0.2, emissive: 0x6a6252, emissiveIntensity: 0.6, emissiveMap: tt, side: THREE.DoubleSide });
+    const gridMat = new THREE.MeshStandardMaterial({ color: run.underColor ?? 0xe6dfcf, map: tt, alphaTest: 0.35, transparent: false, roughness: 0.5, metalness: 0.2, emissive: new THREE.Color(run.underColor ?? 0xe6dfcf).multiplyScalar(0.46), emissiveIntensity: 0.6, emissiveMap: tt, side: THREE.DoubleSide });
     const ft = trussTexture();
     ft.repeat.set(1 / 4, 1);
-    const faceMat = new THREE.MeshStandardMaterial({ color: run.underColor ?? 0xe6dfcf, map: ft, alphaTest: 0.35, roughness: 0.5, metalness: 0.2, emissive: 0x6a6252, emissiveIntensity: 0.5, emissiveMap: ft, side: THREE.DoubleSide });
-    trash.push(deckMat, tt, gridMat, ft, faceMat);
+    const faceMat = new THREE.MeshStandardMaterial({ color: run.underColor ?? 0xe6dfcf, map: ft, alphaTest: 0.35, roughness: 0.5, metalness: 0.2, emissive: new THREE.Color(run.underColor ?? 0xe6dfcf).multiplyScalar(0.46), emissiveIntensity: 0.5, emissiveMap: ft, side: THREE.DoubleSide });
+    trash.push(deckMat, ceilMat, tt, gridMat, ft, faceMat);
     // The deck sits `depth` above the underside, a little lower at the front.
-    const deck = sheet(st, 2, (_i, t) => depth * (1 - 0.35 * t), ring);
-    add(cut(deck), deckMat, true);
+    const deck = cut(sheet(st, 2, (_i, t) => depth * (1 - 0.35 * t), ring));
+    add(deck, deckMat, true);
+    add(deck, ceilMat);
     add(cut(sheet(st, 6, () => 0, ring)), gridMat);
     // Leading-edge face: from the underside up to the deck along the front line.
     const face: Station[] = st.map((q) => ({ ...q, bx: q.fx, bz: q.fz, by: q.fy, fy: q.fy + depth * 0.65 }));
@@ -687,6 +690,17 @@ function skinTexture(pattern: Skin['pattern']): THREE.CanvasTexture | null {
     g.fillRect(0, 0, 2, 64);
     g.fillStyle = 'rgba(70,60,48,0.55)';
     for (let y = 2; y < 64; y += 4) for (let x = (y / 4) % 2 ? 2 : 4; x < 64; x += 4) g.fillRect(x, y, 1.6, 1.6);
+  } else if (pattern === 'arcade') {
+    // A pointed arch, dark inside, filling most of the bay.
+    g.fillStyle = '#1e2a44';
+    g.beginPath();
+    g.moveTo(10, 64);
+    g.lineTo(10, 26);
+    g.quadraticCurveTo(10, 10, 32, 6);
+    g.quadraticCurveTo(54, 10, 54, 26);
+    g.lineTo(54, 64);
+    g.closePath();
+    g.fill();
   } else if (pattern === 'slats') {
     for (let x = 0; x < 64; x += 8) {
       g.fillStyle = '#9a948a';
@@ -721,7 +735,8 @@ function buildSkin(template: StadiumTemplate, sk: Skin, at: Sampler, trash: Tras
     sAcc += Math.hypot(q.x - prev.x, q.z - prev.z);
     prev = q;
     pos.push(q.x, sk.y0, q.z, q.x, sk.y1, q.z);
-    uv.push(sAcc / 4, 0, sAcc / 4, (sk.y1 - sk.y0) / 4);
+    const [tw, th] = sk.tile ?? [4, 4];
+    uv.push(sAcc / tw, 0, sAcc / tw, (sk.y1 - sk.y0) / th);
     // A ring skin stops where its gaps are (a main stand's own building, say).
     keep.push(sk.side ? true : !inAnyGap(template, sk.omit, sk.offset, q.x, q.z));
     if (i > 0 && keep[i] && keep[i - 1]) {

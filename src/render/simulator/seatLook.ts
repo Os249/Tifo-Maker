@@ -1,4 +1,4 @@
-import type { SeatMap, SeatPaint, SeatRegion, StadiumTemplate } from '../../core/types';
+import type { SeatGrain, SeatMap, SeatPaint, SeatRegion, StadiumTemplate } from '../../core/types';
 import { alongOf, seatSide } from '../../core/standSpans';
 
 /**
@@ -74,6 +74,14 @@ export function seatLookMap(template: StadiumTemplate, map: SeatMap): SeatLookMa
     }
     return true;
   };
+  // A clump: the cell of a grid laid over the plan, a few metres by a few rows.
+  const clump = (g: SeatGrain | undefined, i: number, tier: number, row: number): number => {
+    if (!g) return i;
+    const gx = Math.floor(map.pos3[i * 3] / g.along);
+    const gz = Math.floor(map.pos3[i * 3 + 2] / g.along);
+    const gr = Math.floor(row / Math.max(1, g.rows));
+    return (Math.imul(gx, 73856093) ^ Math.imul(gz, 19349663) ^ Math.imul(gr * 8 + tier, 83492791)) >>> 0;
+  };
   for (let i = 0; i < map.count; i++) {
     const tier = map.tierOf[i];
     const row = map.rowOf[i] - before[tier];
@@ -81,7 +89,8 @@ export function seatLookMap(template: StadiumTemplate, map: SeatMap): SeatLookMa
     if (reg?.alternate) {
       const c = reg.colors[map.sectionOf[i] % reg.colors.length];
       index[i] = idOf(typeof c === 'string' ? c : c.c);
-    } else index[i] = idOf(pick(reg ? reg.colors : look.colors, i));
+    } else if (reg) index[i] = idOf(pick(reg.colors, clump(reg.grain, i, tier, row)));
+    else index[i] = idOf(pick(look.colors, clump(look.grain, i, tier, row)));
   }
   // Letters in the seats: drawn on a canvas the shape of the block, in metres,
   // and read back at each seat's place in it.
