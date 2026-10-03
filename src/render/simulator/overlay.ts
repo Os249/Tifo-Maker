@@ -14,6 +14,7 @@ import type { ScreenMode } from './screenPicture';
 import { tlBoth } from '../../ui/i18n';
 import { dbg } from './debug';
 import { getLang } from '../../ui/i18n';
+import { OSM_ATTRIBUTION } from '../../net/osm';
 import {
   ACCESSORY_KINDS,
   ACCESSORY_PRESETS,
@@ -141,6 +142,8 @@ const CSS = `
 .mds-hint{font-size:11px;color:var(--text-faint);}
 .mds-beats{position:absolute;top:14px;left:50%;transform:translateX(-50%);z-index:6;display:flex;gap:10px;align-items:center;padding:8px 13px;border-radius:999px;background:rgba(6,10,18,.55);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);opacity:0;transition:opacity .2s;pointer-events:none;}
 .mds-beats.show{opacity:1;}
+.mds-osm{position:absolute;bottom:6px;inset-inline-end:8px;z-index:5;font-size:10px;line-height:1.3;color:rgba(255,255,255,.78);text-decoration:none;text-shadow:0 1px 2px rgba(0,0,0,.7);padding:2px 6px;border-radius:4px;background:rgba(6,10,18,.28);}
+.mds-osm:hover{color:#fff;text-decoration:underline;}
 .mds-beats i{width:14px;height:14px;border-radius:50%;background:rgba(255,255,255,.22);transition:transform .1s,background .08s;}
 .mds-beats i.on{background:#0FBF6B;}
 .mds-beats[data-phase=down] i.on{background:#F5B43C;}
@@ -301,6 +304,8 @@ const MDS_T: Record<string, { en: string; ar: string }> = {
   'shot.Vehicle Ramp': { en: 'Vehicle Ramp', ar: 'ممر الإسعاف' },
   'shot.Centre Screen': { en: 'Centre Screen', ar: 'الشاشة المعلقة' },
   'shot.Hospitality': { en: 'Hospitality', ar: 'مقصورات الضيافة' },
+  'shot.Aerial': { en: 'Aerial', ar: 'من الجو' },
+  'shot.Outside': { en: 'Outside', ar: 'خارج الملعب' },
   indoorHint: {
     en: 'An indoor arena: the hall is lit by its floodlights at any hour, and it never rains on the pitch. Time of day only changes the sky outside.',
     ar: 'ملعب مغطى: الإضاءة داخله من الكشافات في أي وقت، وما ينزل مطر على الأرضية. وقت اليوم يغيّر السماء برا بس.',
@@ -1324,6 +1329,19 @@ export function openMatchDaySimulator(
   const beatDots = [0, 1, 2].map(() => document.createElement('i'));
   beats.append(...beatDots);
   host.appendChild(beats);
+  // A real ground's neighbourhood is drawn from OpenStreetMap; the ODbL asks
+  // for the credit wherever the map's data is shown, so it sits on the picture.
+  if (template.site) {
+    const osm = document.createElement('a');
+    osm.className = 'mds-osm';
+    osm.dataset.k = 'osm-credit';
+    osm.href = 'https://www.openstreetmap.org/copyright';
+    osm.target = '_blank';
+    osm.rel = 'noopener noreferrer';
+    // Isolated as left-to-right, so the © stays in front of the name in Arabic.
+    osm.textContent = '\u2066' + OSM_ATTRIBUTION + '\u2069';
+    host.appendChild(osm);
+  }
   const renderBeat = (b: { count: number; phase: 'up' | 'down' | null; pulse: number }): void => {
     beats.classList.toggle('show', b.count > 0);
     beats.dataset.phase = b.phase ?? '';

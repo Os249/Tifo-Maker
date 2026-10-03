@@ -293,6 +293,8 @@ const COMMUNITY: StadiumEntry[] = [
           { centerU: 0.5, widthM: 26, heightM: 9.5 },
         ],
       },
+      // King Abdullah Sports City's car parks and pitches north of Jeddah, from OpenStreetMap.
+      site: { key: 'jewel', horizon: 'desert', ground: 0xcdbb95 },
     },
     meta: { name: 'The Jewel of Jeddah', source: 'builtin', country: 'Middle East', capacity: 60241, type: 'Bowl', inspiredBy: 'King Abdullah Sports City (Alinma Stadium), Jeddah - nicknamed "The Shining Jewel"', tags: ['jewel', 'jeddah', 'alinma', 'saudi', 'three-tier', 'bowl', 'large', 'world-cup-2034', 'al-ittihad', 'ittihad', 'al-ahli', 'ahli', 'roshn', 'saudi-pro-league'] },
   },
@@ -400,6 +402,8 @@ const COMMUNITY: StadiumEntry[] = [
           { offset: 34.4, y0: 0, y1: 24.5, color: 0xc79a52, pattern: 'perforated', glow: 0.15, side: 'south', from: -42, to: 42 },
         ],
       },
+      // The King Saud University campus round it, from OpenStreetMap.
+      site: { key: 'awwal', horizon: 'city-towers', ground: 0xcbbd9f },
     },
     meta: { name: 'Al-Awwal Park (Riyadh)', source: 'builtin', country: 'Middle East', capacity: 26004, type: 'Bowl', inspiredBy: 'Al-Awwal Park (King Saud University Stadium), Riyadh - home of Al-Nassr', tags: ['al-nassr', 'riyadh', 'saudi', 'bowl', 'roshn', 'saudi-pro-league', 'al-diriyah', 'awwal'] },
   },
@@ -480,6 +484,8 @@ const COMMUNITY: StadiumEntry[] = [
           { side: 'south', straight: true, halfLength: 22, front: 19.4, depth: 9, y0: 0, y1: 13.8, glassFloors: 1, color: 0xf1efe9, fascia: 0x1a1b1f },
         ],
       },
+      // Its neighbourhood in north Riyadh, from OpenStreetMap.
+      site: { key: 'shg', horizon: 'city', ground: 0xcdbf9f },
     },
     meta: { name: 'SHG Arena (Riyadh)', source: 'builtin', country: 'Middle East', capacity: 13537, type: 'Single-tier', inspiredBy: 'SHG Arena (Al-Shabab Club Stadium), Riyadh - home of Al-Shabab and Al-Riyadh', tags: ['al-shabab', 'al-riyadh', 'riyadh', 'saudi', 'roshn', 'saudi-pro-league', 'shg', 'membrane'] },
   },
@@ -554,6 +560,8 @@ const COMMUNITY: StadiumEntry[] = [
           { side: 'south', straight: true, halfLength: 20, front: 18.8, depth: 8, y0: 0, y1: 13.0, glassFloors: 1, color: 0xf0eee8, fascia: 0x0f7a3b },
         ],
       },
+      // The Al-Ettifaq club grounds and the Dammam streets round them, from OpenStreetMap.
+      site: { key: 'ego', horizon: 'city', ground: 0xcfc3a6 },
     },
     meta: { name: 'EGO Stadium (Dammam)', source: 'builtin', country: 'Middle East', capacity: 12984, type: 'Single-tier', inspiredBy: 'EGO Stadium (Al-Ettifaq Club Stadium), Dammam - home of Al-Ettifaq', tags: ['al-ettifaq', 'ettifaq', 'dammam', 'saudi', 'roshn', 'saudi-pro-league', 'ego', 'membrane'] },
   },
@@ -604,6 +612,8 @@ const COMMUNITY: StadiumEntry[] = [
         // The white wall of pointed arches round the outside, one to a bay.
         skins: [{ offset: 15.3, y0: 0, y1: 11.6, color: 0xf2f1ec, pattern: 'arcade', tile: [6.6, 11.6], omit: [{ side: 'south', from: -50, to: 50 }] }],
       },
+      // Al-Mubarraz round it, from OpenStreetMap; the Al-Ahsa oasis's palm groves beyond.
+      site: { key: 'fateh', horizon: 'oasis', ground: 0xc8b896 },
     },
     meta: { name: 'Al-Fateh Stadium (Al-Ahsa)', source: 'builtin', country: 'Middle East', capacity: 11851, type: 'Single-tier', inspiredBy: 'Maydan Tamweel Aloula (Al-Fateh Club Stadium), Al-Mubarraz, Al-Ahsa - home of Al-Fateh', tags: ['al-fateh', 'fateh', 'al-ahsa', 'hofuf', 'mubarraz', 'saudi', 'roshn', 'saudi-pro-league', 'membrane'] },
   },
@@ -655,6 +665,8 @@ const COMMUNITY: StadiumEntry[] = [
         // The 1970s arcade round the outside, under the roof's back edge.
         skins: [{ offset: 18.8, y0: 0, y1: 9.5, color: 0xe9e5dc, pattern: 'arcade', tile: [8, 9.5], omit: [{ side: 'south', from: -24, to: 24 }] }],
       },
+      // Dammam round it, from OpenStreetMap. The map's centre spot is 54 m west and 24 m south of the search point.
+      site: { key: 'pmbf', horizon: 'city', ground: 0xcfc3a6 },
     },
     meta: { name: 'Prince Mohamed bin Fahd Stadium (Dammam)', source: 'builtin', country: 'Middle East', capacity: 22042, type: 'Oval', inspiredBy: 'Prince Mohamed bin Fahd Stadium, Dammam - home of Al-Qadsiah and Al-Khaleej', tags: ['al-qadsiah', 'qadsiah', 'al-khaleej', 'khaleej', 'dammam', 'saudi', 'roshn', 'saudi-pro-league', 'track', 'oval'] },
   },
@@ -716,6 +728,8 @@ const COMMUNITY: StadiumEntry[] = [
           { side: 'south', halfLength: 42, front: 14.8, depth: 12, y0: 0, y1: 21, glassFloors: 2, color: 0xeee9df, fascia: 0x6b5a8e },
         ],
       },
+      // Its car parks, sports halls and the Jeddah streets round it, from OpenStreetMap.
+      site: { key: 'faisal', horizon: 'city', ground: 0xc9b896 },
     },
     meta: { name: 'Prince Abdullah Al-Faisal Stadium (Jeddah)', source: 'builtin', country: 'Middle East', capacity: 27000, type: 'Two-tier', inspiredBy: 'Prince Abdullah Al-Faisal Stadium, Jeddah - home of Al-Ahli and Al-Ittihad', tags: ['al-ahli', 'ahli', 'al-ittihad', 'ittihad', 'jeddah', 'saudi', 'roshn', 'saudi-pro-league', 'faisal', 'asian-cup-2027'] },
   },
@@ -777,6 +791,8 @@ const COMMUNITY: StadiumEntry[] = [
           { side: 'south', straight: true, halfLength: 52, front: 11, depth: 9, y0: 0, y1: 13.5, glassFloors: 1, color: 0xd9c8a6, fascia: 0xcbb995 },
         ],
       },
+      // King Abdullah Sport City and Buraidah round it, from OpenStreetMap.
+      site: { key: 'buraidah', horizon: 'city', ground: 0xccb894 },
     },
     meta: { name: 'King Abdullah Sport City Stadium (Buraidah)', source: 'builtin', country: 'Middle East', capacity: 25000, type: 'Oval', inspiredBy: 'King Abdullah Sport City Stadium, Buraidah - home of Al-Taawoun', tags: ['al-taawoun', 'taawoun', 'buraidah', 'qassim', 'saudi', 'roshn', 'saudi-pro-league', 'track', 'horseshoe'] },
   },
@@ -851,6 +867,8 @@ const COMMUNITY: StadiumEntry[] = [
           { side: 'south', straight: true, halfLength: 76, front: 20, depth: 10, y0: 0, y1: 14.5, glassFloors: 1, color: 0xcdb08a, fascia: 0xd9c7a8 },
         ],
       },
+      // Prince Sultan Sport City under the Asir mountains, from OpenStreetMap.
+      site: { key: 'abha', horizon: 'mountains', ground: 0xa99a7c },
     },
     meta: { name: 'Prince Sultan Sport City Stadium (Abha)', source: 'builtin', country: 'Middle East', capacity: 20000, type: 'Oval', inspiredBy: 'Prince Sultan bin Abdulaziz Sport City Stadium, Al-Mahalah, Abha - home of Abha Club', tags: ['abha', 'mahalah', 'asir', 'saudi', 'roshn', 'saudi-pro-league', 'track', 'horseshoe', 'mountains'] },
   },
@@ -920,6 +938,8 @@ const COMMUNITY: StadiumEntry[] = [
           { side: 'south', halfLength: 24, front: 18.6, depth: 7, y0: 0, y1: 15.5, glassFloors: 1, color: 0xd9cdb4, fascia: 0x2f6b3f },
         ],
       },
+      // King Khalid Sport City, the desert and the hills round Tabuk, from OpenStreetMap.
+      site: { key: 'tabuk', horizon: 'hills', ground: 0xc8b28c },
     },
     meta: { name: 'King Khalid Sport City Stadium (Tabuk)', source: 'builtin', country: 'Middle East', capacity: 12000, type: 'Oval', inspiredBy: 'King Khalid Sport City Stadium, Tabuk - home of NEOM SC', tags: ['neom', 'tabuk', 'saudi', 'roshn', 'saudi-pro-league', 'track'] },
   },
@@ -944,13 +964,15 @@ const COMMUNITY: StadiumEntry[] = [
       evenRows: true,
       tiers: [
         {
-          // The curved terraces: the south-west corner, and the south-east
-          // corner on round the east end to its middle.
+          // The curved terraces: seen from the pitch facing the main stand,
+          // a short one round the right-hand (south-east) corner, and the long
+          // one round the left-hand (south-west) corner on along the west
+          // end to its middle.
           rows: 14, rowDepth: 0.8, rakeDeg: 27, baseElevation: 1.4, baseOffset: 0, seatPitch: 0.5,
           omit: [
             { side: 'north', from: -99, to: 99 },
-            { side: 'west', from: -22, to: 99 },
-            { side: 'east', from: 2, to: 99 },
+            { side: 'east', from: -22, to: 99 },
+            { side: 'west', from: 2, to: 99 },
             { side: 'south', from: -49, to: 49 },
           ],
         },
@@ -978,6 +1000,8 @@ const COMMUNITY: StadiumEntry[] = [
         zones: [{ kind: 'vip', centerU: 0.75, halfU: 0.012, tiers: [1], noTifo: true }],
         buildings: [{ side: 'south', straight: true, halfLength: 18, front: 15, depth: 6, y0: 0, y1: 11.5, glassFloors: 1, color: 0xe2d8c4, fascia: 0xc8312b }],
       },
+      // Ar Rass round the club, from OpenStreetMap.
+      site: { key: 'hazem', horizon: 'city', ground: 0xccb894 },
     },
     meta: { name: 'Al-Hazem Club Stadium (Ar Rass)', source: 'builtin', country: 'Middle East', capacity: 8000, type: 'Single-tier', inspiredBy: 'Al-Hazem Club Stadium, Ar Rass - home of Al-Hazem and Al-Kholood', tags: ['al-hazem', 'hazem', 'al-kholood', 'kholood', 'ar-rass', 'qassim', 'saudi', 'roshn', 'saudi-pro-league', 'track'] },
   },
@@ -1028,6 +1052,8 @@ const COMMUNITY: StadiumEntry[] = [
         zones: [{ kind: 'vip', centerU: 0.75, halfU: 0.01, tiers: [0], noTifo: true }],
         buildings: [{ side: 'south', straight: true, halfLength: 22, front: 20.5, depth: 7, y0: 0, y1: 12.5, glassFloors: 1, color: 0xe6e0d4, fascia: 0xf0a12b }],
       },
+      // The sports city on the edge of town, from OpenStreetMap.
+      site: { key: 'majmaah', horizon: 'hills', ground: 0xcbb38d },
     },
     meta: { name: "Al-Majma'ah Sports City Stadium", source: 'builtin', country: 'Middle East', capacity: 6844, type: 'Single-tier', inspiredBy: "Al-Majma'ah Sports City Stadium - home of Al-Fayha and Al-Faisaly", tags: ['al-fayha', 'fayha', 'al-faisaly', 'faisaly', 'majmaah', 'saudi', 'roshn', 'saudi-pro-league', 'track'] },
   },
@@ -1070,6 +1096,8 @@ const COMMUNITY: StadiumEntry[] = [
         screens: [{ centerU: 0.5, widthM: 12, heightM: 5 }],
         buildings: [{ side: 'south', halfLength: 26, front: 16.6, depth: 8, y0: 0, y1: 14, glassFloors: 1, color: 0xd8cdb6, fascia: 0x2f69b3 }],
       },
+      // Al-Malaz in central Riyadh, from OpenStreetMap.
+      site: { key: 'pfbf', horizon: 'city-towers', ground: 0xcbbd9f },
     },
     meta: { name: 'Prince Faisal bin Fahd Stadium (Riyadh)', source: 'builtin', country: 'Middle East', capacity: 22500, type: 'Oval', inspiredBy: 'Prince Faisal bin Fahd Stadium (Al-Malaz), Riyadh - home of Al-Riyadh', tags: ['al-riyadh', 'riyadh', 'malaz', 'saudi', 'roshn', 'saudi-pro-league', 'track'] },
   },
@@ -1144,6 +1172,8 @@ const COMMUNITY: StadiumEntry[] = [
         // Portrait screens on the four corner columns.
         cornerScreens: { widthM: 4, heightM: 9, y: 8, columnTop: 29 },
       },
+      // Riyadh Boulevard round the hall, from OpenStreetMap.
+      site: { key: 'kingdom', horizon: 'city-towers', ground: 0xcbbd9f },
     },
     meta: { name: 'Kingdom Arena (Riyadh)', source: 'builtin', country: 'Middle East', capacity: 26700, type: 'Arena', inspiredBy: "Kingdom Arena, Riyadh - Al-Hilal's fully covered indoor arena", tags: ['al-hilal', 'riyadh', 'saudi', 'arena', 'covered', 'indoor', 'kingdom', 'hilal', 'roshn', 'saudi-pro-league'] },
   },

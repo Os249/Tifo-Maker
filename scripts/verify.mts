@@ -1845,7 +1845,7 @@ import { buildStadium as siBuild } from '../src/core/stadiumFit';
     'buraidah-stadium-25k': '24316:90e786a35c7453bb',
     'abha-stadium-20k': '16430:3462445f1cb76af5',
     'tabuk-stadium-12k': '11992:131f84df1583209c',
-    'alhazem-stadium-8k': '6191:2ac5acce474ca14b',
+    'alhazem-stadium-8k': '6191:30cb00e43900805c',
     'majmaah-stadium-7k': '6838:3e283c8ae9696650',
     'pfbf-stadium-22k': '22768:6afea62fe1fe48a2',
   };
@@ -2435,4 +2435,47 @@ await (async () => {
   if (!/'community-alawwal-park-25k': 'stad\.alAwwalOld'/.test(i18nSrc)) fails.push('the earlier Al-Awwal is not named as the earlier layout');
   console.log(`saudi league: ${GROUNDS.length} home grounds | ${report.join(' | ')}`);
   if (fails.length) throw new Error(`saudi league grounds: ${fails.join('; ')}`);
+})();
+
+// --- The real grounds' neighbourhoods (OpenStreetMap, October 2026) ----------
+// Each Saudi ground with a site has its file, built for it, credited to
+// OpenStreetMap (ODbL), with roads and buildings in it and none of them
+// standing inside the ground's own footprint; and Match Day shows the credit.
+await (async () => {
+  const cat = await import('../src/core/stadiumCatalog');
+  const { readFileSync: stRead, existsSync: stExists } = await import('node:fs');
+  const fails: string[] = [];
+  const report: string[] = [];
+  const keys = new Set<string>();
+  for (const e of cat.STADIUM_CATALOG) {
+    const t = e.template;
+    if (!t.site) continue;
+    const key = t.site.key;
+    if (keys.has(key)) fails.push(`${t.id}: site ${key} used twice`);
+    keys.add(key);
+    const file = `src/render/simulator/sites/${key}.json`;
+    if (!stExists(file)) {
+      fails.push(`${t.id}: no ${file}`);
+      continue;
+    }
+    const d = JSON.parse(stRead(file, 'utf8'));
+    if (d.key !== key || d.template !== t.id) fails.push(`${key}: built for ${d.template}, not ${t.id}`);
+    if (!/OpenStreetMap/.test(d.attribution ?? '')) fails.push(`${key}: no OpenStreetMap credit`);
+    if (!d.roads?.length || !d.bld?.length) fails.push(`${key}: ${d.roads?.length ?? 0} roads, ${d.bld?.length ?? 0} buildings`);
+    let reach = 0;
+    for (const tr of t.tiers) reach = Math.max(reach, (tr.baseOffset ?? 0) + tr.rows * tr.rowDepth);
+    const A = t.plan.a + reach;
+    const B = t.plan.b + reach;
+    const pp = Math.max(2, Math.min(t.plan.exponent, 8));
+    let inside = 0;
+    for (const b of d.bld as number[][])
+      for (let i = 2; i + 1 < b.length; i += 2) if (Math.abs(b[i] / 10 / A) ** pp + Math.abs(b[i + 1] / 10 / B) ** pp < 1) inside++;
+    if (inside) fails.push(`${key}: ${inside} building corners inside the stands`);
+    report.push(`${key} ${d.roads.length}r/${d.bld.length}b`);
+  }
+  if (keys.size < 14) fails.push(`only ${keys.size} grounds have a neighbourhood`);
+  const ov = stRead('src/render/simulator/overlay.ts', 'utf8');
+  if (!/mds-osm/.test(ov) || !/OSM_ATTRIBUTION/.test(ov)) fails.push('Match Day does not credit OpenStreetMap');
+  console.log(`neighbourhoods: ${keys.size} grounds | ${report.join(' | ')}`);
+  if (fails.length) throw new Error(`neighbourhoods: ${fails.join('; ')}`);
 })();

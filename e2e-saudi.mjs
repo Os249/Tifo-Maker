@@ -172,6 +172,12 @@ for (const [id] of GROUNDS) {
   const names = await p.$$eval('[data-k="camera"] option', (o) => o.map((x) => x.textContent));
   const values = await p.$$eval('[data-k="camera"] option', (o) => o.map((x) => x.value));
   check(`${id}: Match Day has its cameras`, values.length >= 6, String(values.length));
+  // Its neighbourhood comes from OpenStreetMap: credited on the picture, and
+  // seen from the air and on foot (not Kingdom Arena: an indoor hall stays inside).
+  const credit = await p.$eval('[data-k="osm-credit"]', (a) => ({ t: a.textContent, h: a.href })).catch(() => null);
+  check(`${id}: credits OpenStreetMap on the picture`, !!credit && /OpenStreetMap/.test(credit.t) && /openstreetmap\.org\/copyright/.test(credit.h), JSON.stringify(credit));
+  if (id !== 'kingdom-arena-26k')
+    check(`${id}: has the Aerial and Outside views`, names.includes('Aerial') && names.includes('Outside'), names.join(', '));
   let flat = [];
   for (let k = 0; k < values.length; k++) {
     await pick(p, 'camera', values[k]);

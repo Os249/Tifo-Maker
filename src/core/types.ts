@@ -106,6 +106,31 @@ export interface StadiumTemplate {
    * horseshoe are their own entries here, but still one tier to the eye.
    */
   levels?: number;
+  /**
+   * The real ground's neighbourhood: its streets, car parks, buildings and
+   * palms (render/simulator/site.ts). Omitted: the generic night-time city.
+   */
+  site?: SiteSpec;
+}
+
+/**
+ * Where a real ground stands. The streets, buildings and open spaces round it
+ * come from OpenStreetMap (© OpenStreetMap contributors, ODbL), turned into the
+ * template's frame by scripts/site-import.mts and stored as
+ * src/render/simulator/sites/<key>.json.
+ */
+export interface SiteSpec {
+  key: string;
+  /**
+   * What lies beyond the mapped streets: a low-rise city, one with towers in
+   * it, mountains (Abha), low hills (Tabuk, Majma'ah), palm groves (the Al-Ahsa
+   * oasis) or open desert.
+   */
+  horizon: 'city' | 'city-towers' | 'mountains' | 'hills' | 'oasis' | 'desert';
+  /** Colour of the open ground between things (sand, gravel, paving). */
+  ground?: number;
+  /** Colour of the paved forecourt round the ground itself. */
+  forecourt?: number;
 }
 
 /** A seat colour mix: plain hex colours, or weighted ones for a mosaic. */

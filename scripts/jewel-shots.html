@@ -48,6 +48,8 @@
     if (opts.wet) sim.setWetPitch(true);
     // As the app opens it: rail banners off (overlay state.banners = false).
     sim.setBannersVisible(!!opts.railBanners);
+    // A real ground's neighbourhood loads on its own; shots wait for it.
+    if (sim.whenSurroundingsReady) await sim.whenSurroundingsReady();
     curId = id;
     return { seats: map.count };
   };

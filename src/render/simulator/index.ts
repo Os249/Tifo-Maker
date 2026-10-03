@@ -37,7 +37,7 @@ import type { AssetStore, SceneAsset } from '../../core/sceneAssets';
 import { rasterize } from '../../core/importImage';
 import { printAssetPanels } from './printPanels';
 import { buildWeather, type WeatherController, type Weather } from './weather';
-import { buildSurroundings, type Surroundings } from './surroundings';
+import { buildSurroundings, type Sightlines, type Surroundings } from './surroundings';
 import { buildAccessories, type AccessoriesController, type AccessoriesCensus } from './accessories';
 import { pyroLoudness, type AccessoryKind, type AccessoryLevel, type AccessoryLevels, type AccessoryWhere } from '../../core/accessories';
 import { buildJewelCrown } from './jewelCrown';
@@ -315,7 +315,9 @@ export class MatchDaySimulator {
 
     this.skyTex = skyTexture(SKIES.dusk.sky);
     this.scene.background = this.skyTex;
-    if (this.settings.fog) this.scene.fog = new THREE.Fog(SKIES.dusk.fog, 260, 620);
+    // A real ground's neighbourhood is modelled out to ~520 m, so its haze starts
+    // further out: the streets round it stay clear and the horizon still fades.
+    if (this.settings.fog) this.scene.fog = this.template.site ? new THREE.Fog(SKIES.dusk.fog, 480, 1500) : new THREE.Fog(SKIES.dusk.fog, 260, 620);
     // P1: image-based lighting — real ambient + reflections on every PBR surface.
     if (this.settings.ibl) applyNightIBL(this.renderer, this.scene, this.settings.envIntensity);
 
@@ -332,6 +334,7 @@ export class MatchDaySimulator {
     this.buildEnvironment();
     this.standsGroup = buildStands(this.template, this.settings.shadows);
     this.scene.add(this.standsGroup);
+    this.structureObjects.push(this.standsGroup);
 
     this.rebuildPalette();
     this.manassaMask = this.computeManassaMask();
@@ -392,10 +395,19 @@ export class MatchDaySimulator {
     // The city is placed relative to THIS bowl, not to a constant — see
     // buildSurroundings. The radius is the plan curve plus the deepest tier,
     // which is the outside of the building.
-    this.surroundings = buildSurroundings(
-      Math.max(this.template.plan.a, this.template.plan.b) +
-      this.template.tiers.reduce((m, tr) => Math.max(m, (tr.baseOffset ?? 0) + tr.rows * tr.rowDepth), 0),
-    );
+    {
+      const t = this.template;
+      const reach = this.outerReach();
+      // The generic city keeps the radius it has always had (tiers only), so
+      // every ground without a neighbourhood looks exactly as before.
+      const tiers = t.tiers.reduce((m, tr) => Math.max(m, (tr.baseOffset ?? 0) + tr.rows * tr.rowDepth), 0);
+      this.surroundings = buildSurroundings(Math.max(t.plan.a, t.plan.b) + (t.site ? reach : tiers), {
+        template: t,
+        reach,
+        shadows: this.settings.shadows,
+        detail: this.settings.tier === 'low' ? 'low' : 'full',
+      });
+    }
     this.scene.add(this.surroundings.object);
     // Everything starts at Off: a bowl that twinkles, smokes or waves by
     // itself misreads a still tifo as motion, and it is the first thing to
@@ -411,10 +423,12 @@ export class MatchDaySimulator {
       // Lanes, boxes, the royal box and the screens — any ground with details.
       this.venue = buildVenueDetails(this.template, this.map, this.settings.shadows);
       this.scene.add(this.venue.object);
+      this.structureObjects.push(this.venue.object);
       this.disposables.push(...this.venue.disposables);
       // Premium seats are chairs, with their balustrades, partitions and the royal box.
       const premium = buildPremium(this.template, this.map, this.settings.shadows);
       this.scene.add(premium.object);
+      this.structureObjects.push(premium.object);
       this.premiumObject = premium.object;
       this.disposables.push(...premium.disposables);
       this.screen.nameEn = this.template.name;
@@ -424,17 +438,20 @@ export class MatchDaySimulator {
       // A real ground's roofs, masts and buildings (see grounds.ts).
       const ground = buildGround(this.template, this.settings.shadows);
       this.scene.add(ground.object);
+      this.structureObjects.push(ground.object);
       this.groundObject = ground.object;
       this.disposables.push(...ground.disposables);
     }
     if (this.template.id === JEWEL_ID) {
       const jewel = buildJewel(this.template, this.settings.shadows);
       this.scene.add(jewel.object);
+      this.structureObjects.push(jewel.object);
       this.disposables.push(...jewel.disposables);
     }
     if (this.template.id === KINGDOM_ID) {
       const kingdom = buildKingdom(this.template, this.settings.shadows);
       this.scene.add(kingdom.object);
+      this.structureObjects.push(kingdom.object);
       this.disposables.push(...kingdom.disposables);
     }
     if (this.template.id === 'community-alawwal-park-25k') {
@@ -627,6 +644,8 @@ export class MatchDaySimulator {
     const apron = new THREE.Mesh(apronGeo, apronMat);
     apron.rotation.x = -Math.PI / 2;
     apron.position.y = -0.06;
+    // A real ground has its own forecourt and streets (surroundings / site.ts).
+    apron.visible = !this.template.site;
     apron.receiveShadow = this.settings.shadows;
     this.scene.add(apron);
     this.disposables.push(apronGeo, apronMat);
@@ -740,6 +759,10 @@ export class MatchDaySimulator {
   private seatBoundsCache: { ax: number; bz: number; ty: number } | null = null;
   /** A real ground's roofs, masts and buildings (grounds.ts), which the cameras keep clear of. */
   private groundObject: THREE.Object3D | null = null;
+  /** The ground's own structure (stands, roofs, buildings, skins, halls): what the Outside shot stands clear of. */
+  private structureObjects: THREE.Object3D[] = [];
+  private facadeDistCache = new Map<number, number>();
+  private siteShotCache: SimShot[] | null = null;
   /** The royal box and premium seating (premium.ts): its fascia must not fill a camera's foreground. */
   private premiumObject: THREE.Object3D | null = null;
   /** Bowl extent from the seat map. Memoised — the flyover asks for it per frame. */
@@ -755,6 +778,98 @@ export class MatchDaySimulator {
     }
     this.seatBoundsCache = { ax, bz, ty };
     return this.seatBoundsCache;
+  }
+  /** How far out from the plan curve the ground's own building reaches: its stands, roofs, buildings and skins. */
+  private outerReach(): number {
+    const t = this.template;
+    let reach = t.tiers.reduce((m, tr) => Math.max(m, (tr.baseOffset ?? 0) + tr.rows * tr.rowDepth), 0);
+    for (const run of t.roofs ?? []) reach = Math.max(reach, run.back);
+    for (const b of t.details?.buildings ?? []) reach = Math.max(reach, b.front + b.depth);
+    for (const sk of t.details?.skins ?? []) reach = Math.max(reach, sk.offset);
+    return reach;
+  }
+  /**
+   * A real ground (template.site) also gets two views of its neighbourhood: from
+   * the air behind the main stand, and on foot outside, where the fans walk in.
+   */
+  private siteShots(): SimShot[] {
+    // An indoor hall keeps its night lighting at any hour, so its outside is
+    // left to the free camera rather than given shots of its own.
+    if (!this.template.site || this.template.indoor) return [];
+    if (this.siteShotCache) return this.siteShotCache;
+    const { a } = this.template.plan;
+    const r = this.outerReach();
+    const d = this.facadeDistance(0);
+    const sight = this.surroundings.sightlines();
+    const shots: SimShot[] = [
+      { name: 'Aerial', position: [-(a + r + 140), 170, -(d + 230)], target: [0, 0, 0], fov: 50 },
+      this.outsideShot(sight),
+    ];
+    // Until the neighbourhood has loaded there is nothing to stand clear of;
+    // ask again next time rather than keep a spot that may be inside a building.
+    if (sight) this.siteShotCache = shots;
+    return shots;
+  }
+  /**
+   * On foot outside: behind the main stand first, then round the ground, at the
+   * first spot that is open ground with nothing the neighbourhood built (a
+   * building, a hall, a wall) between it and the stand. Far enough out that the
+   * stand reads as a building in its street rather than a wall filling the frame.
+   */
+  private outsideShot(sight: Sightlines | null): SimShot {
+    const shot = (x: number, z: number): SimShot => ({ name: 'Outside', position: [x, 1.7, z], target: [0, 12, 0], fov: 62 });
+    const bearings = [0, 18, -18, 36, -36, 55, -55, 180, 162, -162, 90, -90, 125, -125];
+    const steps = [70, 95, 125];
+    const eye = new THREE.Vector3();
+    const aim = new THREE.Vector3();
+    let first: SimShot | null = null;
+    for (const deg of bearings) {
+      const th = (deg * Math.PI) / 180;
+      const ux = Math.sin(th);
+      const uz = -Math.cos(th);
+      const f = this.facadeDistance(deg);
+      for (const out of steps) {
+        const x = ux * (f + out);
+        const z = uz * (f + out);
+        first ??= shot(x, z);
+        if (!sight) return first;
+        if (!sight.walkable(x, z)) continue;
+        eye.set(x, 1.7, z);
+        // The stand's face, part way up, and a little either side of straight on.
+        let clear = true;
+        for (const side of [-0.18, 0, 0.18]) {
+          aim.set(ux * f - uz * f * side, 9, uz * f + ux * f * side);
+          if (sight.blocked(eye, aim)) {
+            clear = false;
+            break;
+          }
+        }
+        if (clear) return shot(x, z);
+      }
+    }
+    return first!;
+  }
+  /**
+   * How far the outside of the ground is from the centre spot along a bearing
+   * (degrees from the main stand, 0 straight behind it): a ray in from far out,
+   * 6 m up, to the first thing it meets. Measured rather than taken from the
+   * template, because some outsides (the Jewel's skin, Kingdom Arena's hall) are
+   * drawn by their own code.
+   */
+  private facadeDistance(deg: number): number {
+    const hit0 = this.facadeDistCache.get(deg);
+    if (hit0 !== undefined) return hit0;
+    const { b } = this.template.plan;
+    const far = Math.max(this.template.plan.a, b) + this.outerReach() + 400;
+    const th = (deg * Math.PI) / 180;
+    const ux = Math.sin(th);
+    const uz = -Math.cos(th);
+    const ray = new THREE.Raycaster(new THREE.Vector3(ux * far, 6, uz * far), new THREE.Vector3(-ux, 0, -uz), 0, far);
+    for (const o of this.structureObjects) o.updateMatrixWorld(true);
+    const hit = ray.intersectObjects(this.structureObjects, true)[0];
+    const d = Math.max(b + 5, hit ? far - hit.distance : b + this.outerReach());
+    this.facadeDistCache.set(deg, d);
+    return d;
   }
   shots(): SimShot[] {
     if (this.template.id === KINGDOM_ID) {
@@ -785,7 +900,7 @@ export class MatchDaySimulator {
     }
     // Every other ground: shots derived from ITS bowl, so the cameras always sit
     // on the seating looking in (absolute SIM_SHOTS only fit the default 92x70).
-    return [...bowlShots(this.seatBounds()).map((sh) => this.clearOfSeats(this.clearOfStructure(sh))), seatShot(this.map, 'crowd'), seatShot(this.map, 'ultra'), ...this.detailShots()];
+    return [...bowlShots(this.seatBounds()).map((sh) => this.clearOfSeats(this.clearOfStructure(sh))), seatShot(this.map, 'crowd'), seatShot(this.map, 'ultra'), ...this.detailShots(), ...this.siteShots()];
   }
   /**
    * A shot framed from the bowl's extent can land inside a deep stand — under
@@ -1164,6 +1279,11 @@ export class MatchDaySimulator {
     this.fill.color.set(l.fillColor);
     this.fill.intensity = l.fillInt;
     this.renderer.toneMappingExposure = l.exposure;
+    this.surroundings?.setTimeOfDay(tod);
+  }
+  /** Resolves once the ground's surroundings (a real neighbourhood loads on its own) are in the scene. */
+  whenSurroundingsReady(): Promise<void> {
+    return this.surroundings.ready;
   }
   setWeather(w: Weather): void {
     // Indoors it does not rain on the pitch, and the crowd does not hear it.

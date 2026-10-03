@@ -78,7 +78,7 @@ const views: V[] = appShots ? appShots : viewsFile
 if (appShots) for (const v of appShots) console.log(v.name, v.position.map((n) => n.toFixed(1)).join(','), '->', v.target.map((n) => n.toFixed(1)).join(','));
 const shot: string[] = [];
 for (const v of views) {
-  if (only && !v.name.includes(only)) continue;
+  if (only && !only.split(',').some((o) => v.name.includes(o))) continue;
   const png = (await page.evaluate(([vv]) => (window as never as { __shoot: (a: unknown) => Promise<string> }).__shoot(vv), [{ time: 'day', floods: (v.time ?? 'day') !== 'day', ...v }])) as string;
   writeFileSync(`${OUT}/${v.name}.png`, Buffer.from(png.split(',')[1], 'base64'));
   shot.push(v.name);
