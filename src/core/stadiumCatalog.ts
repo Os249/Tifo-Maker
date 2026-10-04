@@ -20,6 +20,7 @@
 
 import type { StadiumTemplate } from './types';
 import { DEFAULT_TEMPLATE, KOP_TEMPLATE, OVAL_TEMPLATE } from './template';
+import { PREMIER_LEAGUE } from './premierLeague';
 
 export type StadiumSource = 'builtin' | 'community' | 'custom';
 export type StadiumType = 'Bowl' | 'Single-tier' | 'Two-tier' | 'Oval' | 'Arena';
@@ -1180,7 +1181,7 @@ const COMMUNITY: StadiumEntry[] = [
 ];
 
 /** The full catalog. Order: built-ins first, then community, then custom. */
-export const STADIUM_CATALOG: StadiumEntry[] = [...BUILTINS, ...COMMUNITY];
+export const STADIUM_CATALOG: StadiumEntry[] = [...BUILTINS, ...COMMUNITY, ...PREMIER_LEAGUE];
 
 /**
  * Stadiums that have been replaced by a more accurate one but that saved
@@ -1276,7 +1277,7 @@ export const LEGACY_STADIUMS: StadiumEntry[] = [
  * on any real-venue ground could not be saved at all.
  */
 export function shippedTemplates(): StadiumTemplate[] {
-  return [...BUILTINS, ...COMMUNITY, ...LEGACY_STADIUMS].map((e) => e.template);
+  return [...BUILTINS, ...COMMUNITY, ...PREMIER_LEAGUE, ...LEGACY_STADIUMS].map((e) => e.template);
 }
 
 /** Every template the generator might be asked for (built-in + community + custom). */

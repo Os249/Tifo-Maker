@@ -301,6 +301,8 @@ const TIER_SHARES: Record<number, number[]> = {
   1: [1],
   2: [0.56, 0.44],
   3: [0.4, 0.34, 0.26],
+  // Four: a big lower tier, two shallow ones (the premium levels), and the upper.
+  4: [0.34, 0.16, 0.12, 0.38],
 };
 
 /**
@@ -313,7 +315,7 @@ const TIER_SHARES: Record<number, number[]> = {
  * a spectator at the back has to see over everyone in front.
  */
 export function stackTiers(totalRows: number, tierCount: number, seatPitch = 0.5): TierSpec[] {
-  const shares = TIER_SHARES[Math.max(1, Math.min(3, tierCount))] ?? TIER_SHARES[1];
+  const shares = TIER_SHARES[Math.max(1, Math.min(4, tierCount))] ?? TIER_SHARES[1];
   const RAKES = [24, 32, 38];
   const ROW_DEPTH = [0.85, 0.8, 0.78];
   const CONCOURSE_M = 2.5; // walkway between the back of one tier and the front of the next
@@ -595,11 +597,12 @@ export interface FitWarning {
  * pylons. That is genuinely how it works, and it is still only a guess, because
  * the real predictor is the decade the ground was built in and nothing public
  * tells us that. Measured against the shipped catalogue, this rule
- * agrees with the hand-set answer 17 times out of 24.
+ * agrees with the hand-set answer 31 times out of 44.
  * scripts/verify-stadiumfit.mts reads that sentence back out of this comment and
  * fails if it has drifted from what the rule actually scores, because a stale
  * accuracy figure is worse than none: it is the number the panel hedges by. The
- * five it misses are all grounds whose age, not whose roof, decided the answer.
+ * thirteen it misses are mostly grounds whose age, not whose roof, decided the
+ * answer: pylons kept under a later roof, or a roof added round an older rig.
  */
 export function suggestLighting(roof: RoofCoverage | undefined): LightingStyle {
   if (roof === 'ring') return 'roof-rim';
@@ -769,7 +772,7 @@ export function buildStadium(input: FitInput): FitResult {
   let tierCount = k.tiers ?? suggestTierCount(totalRows);
   prov['tiers.length'] = k.tiers
     ? { source: 'user', confidence: 'given' }
-    : { source: 'row-count-rule', confidence: 'suggested', note: 'right on 20 of 24 shipped templates; a photo settles it', noteKey: 'si.note.tiers' };
+    : { source: 'row-count-rule', confidence: 'suggested', note: 'right on 30 of 44 shipped templates; a photo settles it', noteKey: 'si.note.tiers' };
   if (!k.tiers) confirm.push('tiers.length');
 
   const mkBase = (

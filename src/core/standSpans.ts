@@ -127,6 +127,8 @@ export interface SpanGeometry {
   backY: number;
   /** A straight stand (TierSpec.straight): front and back are out from the plan's side line, not its curve. */
   straight?: boolean;
+  /** A straight stand: where along its side its middle is (StandSpan.center). */
+  center?: number;
 }
 
 /** Centre u of each side on the plan curve. */
@@ -180,14 +182,16 @@ export function spanGeometry(template: StadiumTemplate): SpanGeometry[][] {
           }
           return best;
         };
-        let u0 = end(-s.halfLength - pad);
-        let u1 = end(s.halfLength + pad);
+        const c = s.center ?? 0;
+        let u0 = end(c - s.halfLength - pad);
+        let u1 = end(c + s.halfLength + pad);
         if (u0 > u1) [u0, u1] = [u1, u0];
         if (s.side === 'east' && u1 - u0 > 0.5) [u0, u1] = [u1 - 1, u0];
         const e = s.elevation ?? 0;
         return {
           side: s.side,
           halfLength: s.halfLength,
+          center: c,
           rows,
           u0,
           u1,
@@ -251,7 +255,7 @@ export function seatSide(template: StadiumTemplate, tierIdx: number, radial: num
       const ns = s.side === 'north' || s.side === 'south';
       const along = ns ? x : z;
       const cross = s.side === 'north' ? z - b : s.side === 'south' ? -z - b : s.side === 'east' ? x - a : -x - a;
-      if (Math.abs(along) <= s.halfLength + 0.5 && cross >= t.baseOffset + (s.offset ?? 0) - 1) return s.side;
+      if (Math.abs(along - (s.center ?? 0)) <= s.halfLength + 0.5 && cross >= t.baseOffset + (s.offset ?? 0) - 1) return s.side;
     }
   }
   return sideAt(template.plan, radial, x, z);

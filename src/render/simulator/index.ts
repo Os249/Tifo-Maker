@@ -434,7 +434,7 @@ export class MatchDaySimulator {
       this.screen.nameEn = this.template.name;
       this.paintScreens();
     }
-    if (this.template.roofs?.length || this.template.lighting?.masts?.style || this.template.details?.buildings?.length || this.template.details?.skins?.length) {
+    if (this.template.roofs?.length || this.template.lighting?.masts?.style || this.template.details?.buildings?.length || this.template.details?.skins?.length || this.template.details?.ribbons || this.template.details?.girders?.length || this.template.details?.cranes?.length) {
       // A real ground's roofs, masts and buildings (see grounds.ts).
       const ground = buildGround(this.template, this.settings.shadows);
       this.scene.add(ground.object);

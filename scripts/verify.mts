@@ -1848,6 +1848,28 @@ import { buildStadium as siBuild } from '../src/core/stadiumFit';
     'alhazem-stadium-8k': '6191:30cb00e43900805c',
     'majmaah-stadium-7k': '6838:3e283c8ae9696650',
     'pfbf-stadium-22k': '22768:6afea62fe1fe48a2',
+    // The Premier League's grounds, October 2026. Frozen at first release:
+    // re-take these only before that push.
+    'anfield-61k': '60814:b3614ab06de02adb',
+    'old-trafford-74k': '74798:e609b13e2740318b',
+    'etihad-61k': '61854:830512a19f1b37b8',
+    'emirates-60k': '61444:0f4ba4d7484500b7',
+    'tottenham-62k': '62486:35547c55b6ea1f52',
+    'stamford-bridge-40k': '40114:f3067d790420eac6',
+    'craven-cottage-29k': '27848:e18ada137c9915d5',
+    'selhurst-park-25k': '25382:454857a557d5bb20',
+    'brentford-17k': '17084:381390a2052ad80d',
+    'amex-32k': '32654:b102640b398c3405',
+    'vitality-11k': '11388:6475642c6e9cdef0',
+    'villa-park-37k': '36548:e83f32bb2252300a',
+    'st-james-park-52k': '53182:0bfa4747e89f0a7c',
+    'stadium-of-light-48k': '48909:aff1bb0ddc52d54e',
+    'elland-road-37k': '37152:a36e0eb2f4d88f5c',
+    'city-ground-31k': '30692:e190716d0491204a',
+    'cbs-arena-32k': '32808:6dc79147a4750d09',
+    'mkm-25k': '24952:2ee2446006a23a0f',
+    'portman-road-30k': '30390:24b0181f58db5c1f',
+    'hill-dickinson-52k': '52028:4d8be1b2717467e1',
   };
   for (const [id, want] of Object.entries(FROZEN)) {
     const tpl = cat.templateById(id);
@@ -2317,39 +2339,13 @@ await (async () => {
   if (fails) throw new Error(`${fails} layer rule(s) broken`);
 })();
 
-// --- The Saudi league's grounds (2026-27) ------------------------------------
-// Every club's home ground, built from the satellite picture and photographs
-// (see the comments in stadiumCatalog). What can be checked without a picture
-// is checked here: each is in the catalogue with its name in both languages,
-// holds the seats the published figures say, keeps every seat clear of the
-// pitch and of every other seat, has no seat inside a gap it declares, and
-// keeps its roofs over its seats' heads.
-await (async () => {
+type LeagueGround = { id: string; clubs: string; seats: number; tol: number };
+const leagueGrounds = async (label: string, tag: string, GROUNDS: LeagueGround[], extra?: (i18nSrc: string, fails: string[]) => void, pitchGap = 5): Promise<void> => {
   const cat = await import('../src/core/stadiumCatalog');
   const spans = await import('../src/core/standSpans');
   const { curveSampler } = await import('../src/core/venueDetails');
   const { readFileSync: spRead } = await import('node:fs');
   const i18nSrc = spRead('src/ui/i18n.ts', 'utf8');
-  // Home grounds and their clubs, with the seat count each is built to: the
-  // official figure, or the one the ground really holds where they differ.
-  const GROUNDS: { id: string; clubs: string; seats: number; tol: number }[] = [
-    { id: 'alawwal-park-26k', clubs: 'Al-Nassr, Al-Diriyah', seats: 26004, tol: 0.02 },
-    { id: 'kingdom-arena-26k', clubs: 'Al-Hilal', seats: 26700, tol: 0.02 },
-    { id: 'jewel-jeddah-60k', clubs: 'Al-Ittihad, Al-Ahli', seats: 60241, tol: 0.02 },
-    { id: 'alfaisal-stadium-27k', clubs: 'Al-Ahli, Al-Ittihad', seats: 27000, tol: 0.02 },
-    { id: 'shg-arena-14k', clubs: 'Al-Shabab', seats: 13537, tol: 0.02 },
-    { id: 'pfbf-stadium-22k', clubs: 'Al-Riyadh', seats: 22500, tol: 0.02 },
-    { id: 'ego-stadium-13k', clubs: 'Al-Ettifaq', seats: 12984, tol: 0.02 },
-    { id: 'pmbf-stadium-22k', clubs: 'Al-Qadsiah, Al-Khaleej', seats: 22042, tol: 0.02 },
-    { id: 'alfateh-stadium-12k', clubs: 'Al-Fateh', seats: 11851, tol: 0.02 },
-    { id: 'buraidah-stadium-25k', clubs: 'Al-Taawoun', seats: 25000, tol: 0.03 },
-    // 20,000 by the book; 14,357 at the 2024 Super Cup final, "does not exceed 17,000".
-    { id: 'abha-stadium-20k', clubs: 'Abha', seats: 17000, tol: 0.04 },
-    { id: 'tabuk-stadium-12k', clubs: 'NEOM', seats: 12000, tol: 0.02 },
-    // 8,000 by the book; 6,200 numbered seats since 2019.
-    { id: 'alhazem-stadium-8k', clubs: 'Al-Hazem, Al-Kholood', seats: 6200, tol: 0.02 },
-    { id: 'majmaah-stadium-7k', clubs: 'Al-Fayha, Al-Faisaly', seats: 6844, tol: 0.01 },
-  ];
   const fails: string[] = [];
   const report: string[] = [];
   for (const g of GROUNDS) {
@@ -2362,7 +2358,7 @@ await (async () => {
     const m = generateSeatMap(t);
     if (Math.abs(m.count - g.seats) / g.seats > g.tol) fails.push(`${g.id}: ${m.count} seats, built to ${g.seats}`);
     if (!new RegExp(`'${g.id}': 'stad\\.\\w+'`).test(i18nSrc)) fails.push(`${g.id} has no name to show`);
-    if (!e.meta.tags?.includes('saudi-pro-league')) fails.push(`${g.id} is not tagged for the league`);
+    if (!e.meta.tags?.includes(tag)) fails.push(`${g.id} is not tagged for the league`);
     // Clear of the pitch, and of each other.
     const grid = new Map<string, number[]>();
     let minPitch = Infinity;
@@ -2383,7 +2379,7 @@ await (async () => {
         }
       }
     }
-    if (minPitch < 5) fails.push(`${g.id}: a seat ${minPitch.toFixed(1)} m from the pitch`);
+    if (minPitch < pitchGap) fails.push(`${g.id}: a seat ${minPitch.toFixed(1)} m from the pitch`);
     if (clash) fails.push(`${g.id}: ${clash} pairs of seats on top of each other`);
     // Nothing in a gap.
     let inGaps = 0;
@@ -2416,6 +2412,8 @@ await (async () => {
           } else {
             const side = spans.sideAt(t.plan, 0, x, z);
             if (run.side && side !== run.side) continue;
+            // A side run stops where it says along its side (grounds.ts sideRange).
+            if (run.side && (spans.alongOf(side, x, z) < (run.from ?? -1e9) || spans.alongOf(side, x, z) > (run.to ?? 1e9))) continue;
             if (!run.side && (run.omit ?? []).some((gp) => gp.side === side && spans.alongOf(side, x, z) >= gp.from && spans.alongOf(side, x, z) <= gp.to)) continue;
             let best = Infinity;
             for (const p of plan) best = Math.min(best, (p.x - x) ** 2 + (p.z - z) ** 2);
@@ -2431,11 +2429,72 @@ await (async () => {
     if (bumped) fails.push(`${g.id}: ${bumped} seats with a roof less than 2 m over them`);
     report.push(`${g.id} ${m.count} (${g.seats})`);
   }
-  // The earlier Al-Awwal is still there for designs saved on it, and named as such.
-  if (!/'community-alawwal-park-25k': 'stad\.alAwwalOld'/.test(i18nSrc)) fails.push('the earlier Al-Awwal is not named as the earlier layout');
-  console.log(`saudi league: ${GROUNDS.length} home grounds | ${report.join(' | ')}`);
-  if (fails.length) throw new Error(`saudi league grounds: ${fails.join('; ')}`);
+  extra?.(i18nSrc, fails);
+  console.log(`${label}: ${GROUNDS.length} home grounds | ${report.join(' | ')}`);
+  if (fails.length) throw new Error(`${label} grounds: ${fails.join('; ')}`);
+};
+
+// --- The Saudi league's grounds (2026-27) ------------------------------------
+// Every club's home ground, built from the satellite picture and photographs
+// (see the comments in stadiumCatalog). What can be checked without a picture
+// is checked here: each is in the catalogue with its name in both languages,
+// holds the seats the published figures say, keeps every seat clear of the
+// pitch and of every other seat, has no seat inside a gap it declares, and
+// keeps its roofs over its seats' heads.
+await (async () => {
+  // Home grounds and their clubs, with the seat count each is built to: the
+  // official figure, or the one the ground really holds where they differ.
+  const GROUNDS: LeagueGround[] = [
+    { id: 'alawwal-park-26k', clubs: 'Al-Nassr, Al-Diriyah', seats: 26004, tol: 0.02 },
+    { id: 'kingdom-arena-26k', clubs: 'Al-Hilal', seats: 26700, tol: 0.02 },
+    { id: 'jewel-jeddah-60k', clubs: 'Al-Ittihad, Al-Ahli', seats: 60241, tol: 0.02 },
+    { id: 'alfaisal-stadium-27k', clubs: 'Al-Ahli, Al-Ittihad', seats: 27000, tol: 0.02 },
+    { id: 'shg-arena-14k', clubs: 'Al-Shabab', seats: 13537, tol: 0.02 },
+    { id: 'pfbf-stadium-22k', clubs: 'Al-Riyadh', seats: 22500, tol: 0.02 },
+    { id: 'ego-stadium-13k', clubs: 'Al-Ettifaq', seats: 12984, tol: 0.02 },
+    { id: 'pmbf-stadium-22k', clubs: 'Al-Qadsiah, Al-Khaleej', seats: 22042, tol: 0.02 },
+    { id: 'alfateh-stadium-12k', clubs: 'Al-Fateh', seats: 11851, tol: 0.02 },
+    { id: 'buraidah-stadium-25k', clubs: 'Al-Taawoun', seats: 25000, tol: 0.03 },
+    // 20,000 by the book; 14,357 at the 2024 Super Cup final, "does not exceed 17,000".
+    { id: 'abha-stadium-20k', clubs: 'Abha', seats: 17000, tol: 0.04 },
+    { id: 'tabuk-stadium-12k', clubs: 'NEOM', seats: 12000, tol: 0.02 },
+    // 8,000 by the book; 6,200 numbered seats since 2019.
+    { id: 'alhazem-stadium-8k', clubs: 'Al-Hazem, Al-Kholood', seats: 6200, tol: 0.02 },
+    { id: 'majmaah-stadium-7k', clubs: 'Al-Fayha, Al-Faisaly', seats: 6844, tol: 0.01 },
+  ];
+  await leagueGrounds('saudi league', 'saudi-pro-league', GROUNDS, (i18nSrc, fails) => {
+    // The earlier Al-Awwal is still there for designs saved on it, and named as such.
+    if (!/'community-alawwal-park-25k': 'stad\.alAwwalOld'/.test(i18nSrc)) fails.push('the earlier Al-Awwal is not named as the earlier layout');
+  });
 })();
+
+// --- The Premier League's grounds (2026-27) ---------------------------------
+// All twenty, built from satellite pictures, OpenStreetMap footprints and
+// photographs (see the comments in premierLeague.ts), each to its published
+// capacity, with the same checks as the Saudi grounds.
+await leagueGrounds('premier league', 'premier-league', [
+  { id: 'anfield-61k', clubs: "Liverpool", seats: 61276, tol: 0.025 },
+  { id: 'old-trafford-74k', clubs: "Manchester United", seats: 74158, tol: 0.025 },
+  { id: 'etihad-61k', clubs: "Manchester City", seats: 61470, tol: 0.025 },
+  { id: 'emirates-60k', clubs: "Arsenal", seats: 60704, tol: 0.025 },
+  { id: 'tottenham-62k', clubs: "Tottenham Hotspur", seats: 62850, tol: 0.025 },
+  { id: 'stamford-bridge-40k', clubs: "Chelsea", seats: 40044, tol: 0.025 },
+  { id: 'craven-cottage-29k', clubs: "Fulham", seats: 28107, tol: 0.025 },
+  { id: 'selhurst-park-25k', clubs: "Crystal Palace", seats: 25194, tol: 0.025 },
+  { id: 'brentford-17k', clubs: "Brentford", seats: 17250, tol: 0.025 },
+  { id: 'amex-32k', clubs: "Brighton & Hove Albion", seats: 32176, tol: 0.025 },
+  { id: 'vitality-11k', clubs: "Bournemouth", seats: 11307, tol: 0.025 },
+  { id: 'villa-park-37k', clubs: "Aston Villa", seats: 36887, tol: 0.025 },
+  { id: 'st-james-park-52k', clubs: "Newcastle United", seats: 52719, tol: 0.025 },
+  { id: 'stadium-of-light-48k', clubs: "Sunderland", seats: 48095, tol: 0.025 },
+  { id: 'elland-road-37k', clubs: "Leeds United", seats: 37645, tol: 0.025 },
+  { id: 'city-ground-31k', clubs: "Nottingham Forest", seats: 31212, tol: 0.025 },
+  { id: 'cbs-arena-32k', clubs: "Coventry City", seats: 32609, tol: 0.025 },
+  { id: 'mkm-25k', clubs: "Hull City", seats: 24983, tol: 0.025 },
+  { id: 'portman-road-30k', clubs: "Ipswich Town", seats: 30056, tol: 0.025 },
+  { id: 'hill-dickinson-52k', clubs: "Everton", seats: 52769, tol: 0.025 },
+// English grounds sit closer to the touchline than the Saudi ones: 3 m.
+], undefined, 3);
 
 // --- The real grounds' neighbourhoods (OpenStreetMap, October 2026) ----------
 // Each Saudi ground with a site has its file, built for it, credited to

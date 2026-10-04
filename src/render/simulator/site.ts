@@ -525,8 +525,13 @@ const AREA_COLOUR: number[] = [
 
 const WALL_TINTS = [0xe7dcc3, 0xddcba7, 0xefe8da, 0xd8c4a3, 0xe3d6bf, 0xcfc2a8, 0xf2eee4, 0xd9c2a5];
 const OFFICE_TINTS = [0xdfe3e6, 0xc7d2da, 0xe9e6df];
+/** English streets: red and brown brick, a few rendered or pebble-dashed fronts. */
+const UK_BRICK = [0x8f4a36, 0x9c5a43, 0x7f4433, 0xa86a50, 0x8a5240, 0x995e47, 0xb57b5f, 0x7a4b3c];
+const UK_RENDER = [0xddd6c8, 0xe8e2d4, 0xcfc8b8];
+/** Welsh slate and brown concrete tile. */
+const UK_ROOF = [0x4b5058, 0x545960, 0x5e5650, 0x6a4c40, 0x43474e];
 
-export function buildSite(_template: StadiumTemplate, _spec: SiteSpec, data: SiteData, opts: { shadows: boolean; detail: 'low' | 'full' }): SiteBuild {
+export function buildSite(_template: StadiumTemplate, spec: SiteSpec, data: SiteData, opts: { shadows: boolean; detail: 'low' | 'full' }): SiteBuild {
   const group = new THREE.Group();
   group.name = 'site';
   const trash: Trash[] = [];
@@ -545,6 +550,7 @@ export function buildSite(_template: StadiumTemplate, _spec: SiteSpec, data: Sit
   };
   const C = (hex: number) => new THREE.Color(hex);
   const full = opts.detail === 'full';
+  const uk = spec.style === 'uk';
 
   // ---- Open ground: grass, pitches, courts, water, sand, plazas ----
   {
@@ -555,7 +561,8 @@ export function buildSite(_template: StadiumTemplate, _spec: SiteSpec, data: Sit
       const kind = a[0];
       const p = unflat(a, 1);
       const y = kind === 0 || kind === 5 || kind === 7 ? 0.012 : 0.03;
-      m.flat(p, y, C(AREA_COLOUR[kind] ?? AREA_COLOUR[0]));
+      // Waste ground in an English city is weeds and gravel, not sand.
+      m.flat(p, y, C(uk && kind === 5 ? 0x8b8b70 : AREA_COLOUR[kind] ?? AREA_COLOUR[0]));
       if (kind === 1) pitchDetail(m, lines, p, y, white);
       if (kind === 1 || kind === 2 || kind === 9) {
         // Its white boundary line.
@@ -700,6 +707,7 @@ export function buildSite(_template: StadiumTemplate, _spec: SiteSpec, data: Sit
   const occupied: XZ[][] = [];
   const clutter: { x: number; z: number; y: number; s: number }[] = [];
   const domes: { x: number; z: number; y: number; r: number; mx: number; mz: number; mh: number }[] = [];
+  const spires: { x: number; z: number; y: number; w: number; u: XZ; k: number }[] = [];
   {
     const walls = new Mesher();
     const halls = new Mesher();
@@ -714,9 +722,31 @@ export function buildSite(_template: StadiumTemplate, _spec: SiteSpec, data: Sit
       const cx = p.reduce((s, q) => s + q[0], 0) / p.length;
       const cz = p.reduce((s, q) => s + q[1], 0) / p.length;
       const k = hash(cx, cz);
-      const tint = C(kind === 4 ? OFFICE_TINTS[Math.floor(k * OFFICE_TINTS.length)] : WALL_TINTS[Math.floor(k * WALL_TINTS.length)]);
+      const area = Math.abs(signedArea(p));
+      let tint: THREE.Color;
+      if (!uk) tint = C(kind === 4 ? OFFICE_TINTS[Math.floor(k * OFFICE_TINTS.length)] : WALL_TINTS[Math.floor(k * WALL_TINTS.length)]);
+      else if (kind === 4 || (kind === 5 && h > 14)) tint = C(OFFICE_TINTS[Math.floor(k * OFFICE_TINTS.length)]);
+      else if (kind === 0 && area > 900 && hash(cx, cz, 2) < 0.5) tint = C(UK_RENDER[Math.floor(k * UK_RENDER.length)]);
+      else tint = C(UK_BRICK[Math.floor(k * UK_BRICK.length)]);
+      if (uk && (kind === 2 || kind === 7)) tint = C([0x9aa0a6, 0x8d9399, 0xa9adb1, 0x7e868c][Math.floor(k * 4)]);
       const plain = kind === 2 || kind === 7;
       const m = plain ? halls : walls;
+      // An English house, terrace or chapel: walls to the eaves and a pitched
+      // roof along its long axis, ridge at the building's height.
+      let gable: { u: XZ; v: XZ; u0: number; u1: number; v0: number; v1: number; eave: number } | null = null;
+      if (uk && !plain && (kind === 3 || kind === 6 || kind === 8 || (kind === 0 && area < 420 && h <= 13))) {
+        const u = axisOf(p);
+        const v: XZ = [-u[1], u[0]];
+        let u0 = Infinity, u1 = -Infinity, v0 = Infinity, v1 = -Infinity;
+        for (const [x, z] of p) {
+          const a1 = x * u[0] + z * u[1];
+          const b1 = x * v[0] + z * v[1];
+          u0 = Math.min(u0, a1); u1 = Math.max(u1, a1); v0 = Math.min(v0, b1); v1 = Math.max(v1, b1);
+        }
+        const wide = v1 - v0;
+        if (wide > 2.5 && wide < 18) gable = { u, v, u0, u1, v0, v1, eave: Math.max(2.6, h - Math.min(4.2, wide * 0.36)) };
+      }
+      const wallTop = gable ? gable.eave : h;
       // Walls, outward-facing (the polygon is counter-clockwise in x/z, so
       // the outward normal of edge a→b is (dz, −dx)). The roof sits 0.9 m
       // below the top: the parapet every flat roof here has.
@@ -732,13 +762,49 @@ export function buildSite(_template: StadiumTemplate, _spec: SiteSpec, data: Sit
         const vs = plain ? 8 : 14; // 4 floors of 3.5 m a tile
         const a = m.vert(x0, 0, z0, nx, 0, nz, acc / us, 0, tint);
         m.vert(x1, 0, z1, nx, 0, nz, (acc + L) / us, 0, tint);
-        m.vert(x1, h, z1, nx, 0, nz, (acc + L) / us, h / vs, tint);
-        m.vert(x0, h, z0, nx, 0, nz, acc / us, h / vs, tint);
+        m.vert(x1, wallTop, z1, nx, 0, nz, (acc + L) / us, wallTop / vs, tint);
+        m.vert(x0, wallTop, z0, nx, 0, nz, acc / us, wallTop / vs, tint);
         m.quad(a, a + 1, a + 2, a + 3);
         acc += L;
       }
-      const roofC = tint.clone().multiplyScalar(plain ? 0.92 : 0.86);
-      roofs.flat(p, plain ? h : h - 0.9, roofC);
+      if (gable) {
+        // Two slopes from the eaves to the ridge, a little overhang, and the
+        // gable triangles at the ends in the wall's brick.
+        const { u, v, u0, u1, v0, v1, eave } = gable;
+        const W = (a1: number, b1: number, y: number): [number, number, number] => [u[0] * a1 + v[0] * b1, y, u[1] * a1 + v[1] * b1];
+        const o = 0.3;
+        const vm = (v0 + v1) / 2;
+        const rc = C(UK_ROOF[Math.floor(hash(cx, cz, 3) * UK_ROOF.length)]);
+        const slope = (vEdge: number): void => {
+          const e0 = W(u0 - o, vEdge, eave - 0.15);
+          const e1 = W(u1 + o, vEdge, eave - 0.15);
+          const r1 = W(u1 + o, vm, h);
+          const r0 = W(u0 - o, vm, h);
+          const nx = (e0[0] + e1[0]) / 2 - (r0[0] + r1[0]) / 2;
+          const nz = (e0[2] + e1[2]) / 2 - (r0[2] + r1[2]) / 2;
+          const nl = Math.hypot(nx, h - eave, nz) || 1;
+          const ny = Math.abs(vEdge - vm) / nl;
+          const a = roofs.vert(...e0, nx / nl, ny, nz / nl, 0, 0, rc);
+          roofs.vert(...e1, nx / nl, ny, nz / nl, 1, 0, rc);
+          roofs.vert(...r1, nx / nl, ny, nz / nl, 1, 1, rc);
+          roofs.vert(...r0, nx / nl, ny, nz / nl, 0, 1, rc);
+          roofs.quad(a, a + 1, a + 2, a + 3);
+          roofs.quad(a, a + 3, a + 2, a + 1);
+        };
+        slope(v0 - o);
+        slope(v1 + o);
+        for (const ue of [u0, u1]) {
+          const a = m.vert(...W(ue, v0, eave), 0, 1, 0, 0, eave / 14, tint);
+          m.vert(...W(ue, v1, eave), 0, 1, 0, 1, eave / 14, tint);
+          m.vert(...W(ue, vm, h), 0, 1, 0, 0.5, h / 14, tint);
+          m.tri(a, a + 1, a + 2);
+          m.tri(a, a + 2, a + 1);
+        }
+        if (kind === 8 && full) spires.push({ x: u[0] * u1 + v[0] * vm, z: u[1] * u1 + v[1] * vm, y: h, w: Math.min(7, (v1 - v0) * 0.7), u, k });
+      } else {
+        const roofC = uk && !plain ? C(0x5d5f63).lerp(tint, 0.15) : tint.clone().multiplyScalar(plain ? 0.92 : 0.86);
+        roofs.flat(p, plain ? h : h - (uk ? 0.4 : 0.9), roofC);
+      }
       // Mosque: a dome and a minaret.
       if (kind === 1) {
         let r = Infinity;
@@ -751,7 +817,7 @@ export function buildSite(_template: StadiumTemplate, _spec: SiteSpec, data: Sit
         const [mx0, mz0] = p[0];
         const toC = Math.hypot(cx - mx0, cz - mz0) || 1;
         domes.push({ x: cx, z: cz, y: h - 0.9, r: Math.max(2.5, Math.min(9, r * 0.75)), mx: mx0 + ((cx - mx0) / toC) * 2.2, mz: mz0 + ((cz - mz0) / toC) * 2.2, mh: h + 12 + k * 8 });
-      } else if (full && !plain && h < 20) {
+      } else if (full && !plain && h < 20 && !uk) {
         // Air-conditioning units and water tanks on the roof.
         const n = 1 + Math.floor(k * 3);
         for (let i = 0; i < n; i++) {
@@ -786,6 +852,28 @@ export function buildSite(_template: StadiumTemplate, _spec: SiteSpec, data: Sit
     for (const p of parts) p.dispose();
     add(g, own(new THREE.MeshStandardMaterial({ color: 0xf1ede2, roughness: 0.6, vertexColors: true })), 'site-mosques', true);
   }
+  if (spires.length) {
+    // A church tower at the end of the nave, with a short spire on most.
+    const parts: THREE.BufferGeometry[] = [];
+    for (const t of spires) {
+      const w = Math.max(3.5, t.w);
+      const th = t.y + 8 + t.k * 10;
+      const tower = new THREE.BoxGeometry(w, th, w);
+      tower.translate(0, th / 2, 0);
+      tower.rotateY(-Math.atan2(t.u[1], t.u[0]));
+      tower.translate(t.x, 0, t.z);
+      parts.push(tower);
+      if (t.k > 0.35) {
+        const sp = new THREE.ConeGeometry(w * 0.62, 6 + t.k * 12, 4);
+        sp.rotateY(Math.PI / 4 - Math.atan2(t.u[1], t.u[0]));
+        sp.translate(t.x, th + (6 + t.k * 12) / 2, t.z);
+        parts.push(sp);
+      }
+    }
+    const g = mergeGeometries(parts);
+    for (const p of parts) p.dispose();
+    add(g, own(new THREE.MeshStandardMaterial({ color: 0x8b8378, roughness: 0.9, vertexColors: true })), 'site-mosques', true);
+  }
   if (clutter.length) {
     const geo = own(new THREE.BoxGeometry(1.4, 1.1, 1.1));
     geo.translate(0, 0.55, 0);
@@ -806,7 +894,7 @@ export function buildSite(_template: StadiumTemplate, _spec: SiteSpec, data: Sit
   // ---- Boundary walls ----
   {
     const m = new Mesher();
-    const c = C(0xd9cbb0);
+    const c = C(uk ? 0x8a5543 : 0xd9cbb0);
     for (const w of data.walls) {
       const p = unflat(w);
       for (let i = 0; i + 1 < p.length; i++) {
@@ -816,7 +904,7 @@ export function buildSite(_template: StadiumTemplate, _spec: SiteSpec, data: Sit
         if (L < 0.2) continue;
         const nx = (z1 - z0) / L;
         const nz = -(x1 - x0) / L;
-        const h = 2.8;
+        const h = uk ? 1.6 : 2.8;
         const a = m.vert(x0, 0, z0, nx, 0, nz, 0, 0, c);
         m.vert(x1, 0, z1, nx, 0, nz, L / 4, 0, c);
         m.vert(x1, h, z1, nx, 0, nz, L / 4, h / 4, c);
@@ -831,7 +919,49 @@ export function buildSite(_template: StadiumTemplate, _spec: SiteSpec, data: Sit
   const palms: XZ[] = [];
   for (let i = 0; i + 1 < data.trees.length; i += 2) palms.push([data.trees[i] / 10, data.trees[i + 1] / 10]);
   const shown = full ? palms : palms.filter((_, i) => i % 3 === 0);
-  if (shown.length) {
+  if (shown.length && uk) {
+    // Broadleaf trees: a short trunk and a full, slightly lumpy crown, every
+    // one a different size and shade of an early-autumn green.
+    const trunkGeo = own(new THREE.CylinderGeometry(0.22, 0.34, 1, 6));
+    trunkGeo.translate(0, 0.5, 0);
+    const crownGeo = own(new THREE.IcosahedronGeometry(1, 1));
+    {
+      const pa = crownGeo.getAttribute('position');
+      for (let i = 0; i < pa.count; i++) {
+        const x = pa.getX(i), y = pa.getY(i), z = pa.getZ(i);
+        const f = 0.86 + 0.28 * hash(x * 9, z * 9 + y * 5, 3);
+        pa.setXYZ(i, x * f, y * f * 0.86, z * f);
+      }
+      crownGeo.computeVertexNormals();
+    }
+    const trunks = new THREE.InstancedMesh(trunkGeo, own(new THREE.MeshStandardMaterial({ color: 0x5b4a3c, roughness: 0.95 })), shown.length);
+    const crowns = new THREE.InstancedMesh(crownGeo, own(new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9, flatShading: true })), shown.length);
+    trunks.name = 'site-palm-trunks';
+    crowns.name = 'site-palm-crowns';
+    const d = new THREE.Object3D();
+    const col = new THREE.Color();
+    const SHADES = [0x4f6e34, 0x5b7a3a, 0x46652f, 0x6a8340, 0x587236, 0x7f8a3f, 0x8c7a3c];
+    shown.forEach(([x, z], i) => {
+      const h = 7 + hash(x, z, 7) * 9;
+      const rad = 2.6 + hash(x, z, 9) * 2.6;
+      d.position.set(x, 0, z);
+      d.rotation.set(0, 0, 0);
+      d.scale.set(1, h * 0.55, 1);
+      d.updateMatrix();
+      trunks.setMatrixAt(i, d.matrix);
+      d.position.set(x, h * 0.55 + rad * 0.75, z);
+      d.rotation.set(0, hash(x, z, 8) * Math.PI * 2, 0);
+      d.scale.set(rad, rad * (1.05 + hash(x, z, 5) * 0.3), rad);
+      d.updateMatrix();
+      crowns.setMatrixAt(i, d.matrix);
+      crowns.setColorAt(i, col.set(SHADES[Math.floor(hash(x, z, 4) * SHADES.length)]));
+    });
+    trunks.instanceMatrix.needsUpdate = true;
+    crowns.instanceMatrix.needsUpdate = true;
+    if (crowns.instanceColor) crowns.instanceColor.needsUpdate = true;
+    trunks.castShadow = crowns.castShadow = opts.shadows;
+    group.add(trunks, crowns);
+  } else if (shown.length) {
     const trunkGeo = own(new THREE.CylinderGeometry(0.2, 0.32, 1, 6));
     trunkGeo.translate(0, 0.5, 0);
     const trunks = new THREE.InstancedMesh(trunkGeo, own(new THREE.MeshStandardMaterial({ color: 0x8a7155, roughness: 0.95 })), shown.length);
@@ -994,6 +1124,7 @@ export function buildSite(_template: StadiumTemplate, _spec: SiteSpec, data: Sit
 // The horizon beyond the mapped neighbourhood.
 
 export function buildHorizon(spec: SiteSpec, inner: number, tex: { facade: THREE.Texture; lit: THREE.Texture }): { object: THREE.Group; setNight(l: number): void; dispose(): void } {
+  const uk = spec.style === 'uk';
   const group = new THREE.Group();
   group.name = 'site-horizon';
   const C = (hex: number) => new THREE.Color(hex);
@@ -1015,20 +1146,45 @@ export function buildHorizon(spec: SiteSpec, inner: number, tex: { facade: THREE
     const ang = r() * Math.PI * 2;
     const rad = inner + 20 + Math.pow(r(), 0.7) * (kind === 'desert' ? 260 : 520);
     const tall = r() < towers;
-    const h = tall ? 40 + r() * 70 : 6 + r() * (kind === 'desert' ? 6 : 13);
-    const w = tall ? 16 + r() * 14 : 12 + r() * 30;
-    const dd = tall ? 16 + r() * 14 : 12 + r() * 30;
+    const h = tall ? 40 + r() * 70 : uk ? 7 + r() * 8 : 6 + r() * (kind === 'desert' ? 6 : 13);
+    const w = tall ? 16 + r() * 14 : uk ? 8 + r() * 14 : 12 + r() * 30;
+    const dd = tall ? 16 + r() * 14 : uk ? 30 + r() * 50 : 12 + r() * 30;
     d.position.set(Math.cos(ang) * rad, 0, Math.sin(ang) * rad);
     d.rotation.set(0, r() * Math.PI, 0);
     d.scale.set(w, h, dd);
     d.updateMatrix();
     city.setMatrixAt(i, d.matrix);
-    city.setColorAt(i, col.set(WALL_TINTS[Math.floor(r() * WALL_TINTS.length)]));
+    city.setColorAt(i, col.set(uk ? (tall ? OFFICE_TINTS[Math.floor(r() * 3)] : UK_BRICK[Math.floor(r() * UK_BRICK.length)]) : WALL_TINTS[Math.floor(r() * WALL_TINTS.length)]));
   }
   city.instanceMatrix.needsUpdate = true;
   if (city.instanceColor) city.instanceColor.needsUpdate = true;
   group.add(city);
   trash.push(geo, mat);
+
+  // An English skyline is half trees: clumps of them between the rooftops.
+  if (uk) {
+    const N = 700;
+    const tg = new THREE.IcosahedronGeometry(1, 0);
+    const tm = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.95, flatShading: true });
+    const trees = new THREE.InstancedMesh(tg, tm, N);
+    const SH = [0x4a6432, 0x56703a, 0x41592c, 0x667a3c];
+    for (let i = 0; i < N; i++) {
+      const ang = r() * Math.PI * 2;
+      const rad = inner + 15 + Math.pow(r(), 0.8) * 560;
+      const s1 = 4 + r() * 5;
+      d.position.set(Math.cos(ang) * rad, s1 * 1.2, Math.sin(ang) * rad);
+      d.rotation.set(0, r() * 6.28, 0);
+      d.scale.set(s1 * (1 + r()), s1, s1 * (1 + r()));
+      d.updateMatrix();
+      trees.setMatrixAt(i, d.matrix);
+      trees.setColorAt(i, col.set(SH[Math.floor(r() * SH.length)]));
+    }
+    trees.instanceMatrix.needsUpdate = true;
+    if (trees.instanceColor) trees.instanceColor.needsUpdate = true;
+    trees.name = 'site-horizon-trees';
+    group.add(trees);
+    trash.push(tg, tm);
+  }
 
   // Mountains (Abha's Asir highlands) or low hills (Tabuk, Majma'ah): a ring of
   // ridges far out. At two kilometres a ridge is mostly haze, so it is drawn

@@ -48,6 +48,11 @@ interface Raw {
   date: string;
   /** [kind, tags, flat east/north coordinates in decimetres] */
   f: [string, Record<string, string>, number[]][];
+  /**
+   * 'uk': an English ground. Its streets are mapped house by house, so no
+   * villas are invented; churches are churches, not mosques.
+   */
+  style?: 'uk';
 }
 
 // ---------------------------------------------------------------------------
@@ -178,7 +183,7 @@ function buildingHeight(tags: Record<string, string>, a: number): number {
   const lv = parseFloat(tags['building:levels'] ?? '');
   if (lv > 0 && lv < 80) return lv * 3.6 + 1.2;
   const b = tags.building;
-  if (b === 'house' || b === 'detached' || b === 'villa' || b === 'residential') return 8.5;
+  if (b === 'house' || b === 'detached' || b === 'villa' || b === 'residential' || b === 'terrace' || b === 'semidetached_house') return 8.5;
   if (b === 'garage' || b === 'shed' || b === 'roof' || b === 'kiosk') return 3.5;
   if (b === 'mosque') return 9;
   if (a > 6000) return 16;
@@ -187,12 +192,13 @@ function buildingHeight(tags: Record<string, string>, a: number): number {
   return 7;
 }
 
-/** 0 generic, 1 mosque, 2 hall, 3 house, 4 office/commercial, 5 school/civic, 6 villa (infill), 7 shed/canopy */
+/** 0 generic, 1 mosque, 2 hall, 3 house, 4 office/commercial, 5 school/civic, 6 villa (infill), 7 shed/canopy, 8 church */
 function buildingKind(tags: Record<string, string>, a: number): number {
   const b = tags.building;
+  if (b === 'church' || b === 'chapel' || b === 'cathedral' || (tags.amenity === 'place_of_worship' && tags.religion === 'christian')) return 8;
   if (b === 'mosque' || tags.amenity === 'place_of_worship' || tags.religion === 'muslim') return 1;
   if (b === 'sports_hall' || b === 'sports_centre' || b === 'hangar' || b === 'warehouse' || b === 'industrial' || tags.leisure === 'sports_centre') return 2;
-  if (b === 'house' || b === 'detached' || b === 'villa' || b === 'residential' || b === 'apartments') return 3;
+  if (b === 'house' || b === 'detached' || b === 'villa' || b === 'residential' || b === 'apartments' || b === 'terrace' || b === 'semidetached_house') return 3;
   if (b === 'commercial' || b === 'office' || b === 'retail' || b === 'hotel') return 4;
   if (b === 'school' || b === 'university' || b === 'college' || b === 'hospital' || b === 'public' || b === 'government' || b === 'civic') return 5;
   if (b === 'roof' || b === 'garage' || b === 'shed' || b === 'kiosk' || b === 'carport') return 7;
@@ -324,6 +330,9 @@ function run(file: string): void {
       continue;
     }
     if (kind === 'm') {
+      // A place of worship mapped only as a point: in the Gulf a mosque; in an
+      // English street most are churches, and those are drawn as buildings.
+      if (raw.style === 'uk' && tags.religion !== 'muslim') continue;
       const [p] = pts(flat);
       if (within(p) && !inside(p[0], p[1])) mosquePoints.push(p);
       continue;
@@ -367,7 +376,10 @@ function run(file: string): void {
       residential.push(ring);
       continue;
     }
-    if (touches || !within([cx, cz])) continue;
+    // A river runs right past some grounds (the Thames behind Craven Cottage's
+    // Riverside Stand): its bank may touch the footprint; the stand covers it.
+    const river = kind === 'a' && areaKind(tags) === 4 && a > 20000;
+    if ((touches && !river) || !within([cx, cz])) continue;
     if (kind === 'b') {
       if (tags.building === 'stadium' || tags.building === 'grandstand' || a < 12) continue;
       const k = buildingKind(tags, a);
@@ -410,7 +422,7 @@ function run(file: string): void {
   let villas = 0;
   // Saudi residential streets are lined with villas whether or not the map
   // draws a residential area round them; the map's areas only add certainty.
-  const inRes = (_x: number, _z: number) => true;
+  const inRes = (_x: number, _z: number) => raw.style !== 'uk';
   const free = (rect: XZ[]) => {
     let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
     for (const [x, z] of rect) {

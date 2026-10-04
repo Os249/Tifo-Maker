@@ -129,6 +129,12 @@ export interface SiteSpec {
   horizon: 'city' | 'city-towers' | 'mountains' | 'hills' | 'oasis' | 'desert';
   /** Colour of the open ground between things (sand, gravel, paving). */
   ground?: number;
+  /**
+   * What the neighbourhood is built like: 'gulf' (the default) is pale render,
+   * flat roofs and palms; 'uk' is brick terraces under slate, churches with
+   * towers and broadleaf trees, round an English ground.
+   */
+  style?: 'gulf' | 'uk';
   /** Colour of the paved forecourt round the ground itself. */
   forecourt?: number;
 }
@@ -236,6 +242,19 @@ export interface RoofRun {
   lights?: { every: number; y: number };
   /** A run that rises over the middle of one side (Al-Awwal's main stand): extra height peaking at along = 0, over `halfLength`. */
   arch?: { side: StandSide; rise: number; halfLength: number };
+  /**
+   * How much of the roof, from its leading edge back, is clear polycarbonate
+   * (0..1): the light band most English roofs have at the front, seen from
+   * the pitch as the bright strip over the back rows.
+   */
+  glazing?: number;
+  /**
+   * A steel girder standing on top of the roof along its whole length, the
+   * way Anfield's main stand and Old Trafford hang their roofs: `offset` out
+   * from the plan line (between back and front), `height` from the roof deck
+   * to its top chord.
+   */
+  girder?: { offset: number; height: number; color?: number };
 }
 
 /**
@@ -364,7 +383,52 @@ export interface Hospitality {
   lounge: boolean;
 }
 
+/**
+ * The LED boards along the front of the tiers above the lowest (the "ribbon"
+ * every Premier League ground has between its tiers), in the club's colour.
+ */
+export interface RibbonBoards {
+  color: number;
+  /** Which tiers' fronts carry one (0 = lower). Omitted: every tier whose front is above head height. */
+  tiers?: number[];
+  /** Height of the band, metres. Default 0.9. */
+  height?: number;
+}
+
+/**
+ * A free-standing steel girder over the stands, from one point to another in
+ * plan (the Emirates' two great roof trusses, the Etihad's or Old Trafford's
+ * cantilever trusses): a lattice `height` deep with its bottom chord `y` up.
+ */
+export interface Girder {
+  from: [number, number];
+  to: [number, number];
+  y: number;
+  height: number;
+  /** Bottom chord height at `to`, when it slopes. Default `y`. */
+  yTo?: number;
+  /** Metres between its verticals. Default 6. */
+  bay?: number;
+  color?: number;
+}
+
+/**
+ * A tower crane over a stand being rebuilt: its mast at `at` (plan x, z),
+ * `height` metres to the jib, which reaches `jib` metres out towards `angle`
+ * (degrees from +x towards +z), its counter-jib and ballast the other way.
+ */
+export interface Crane {
+  at: [number, number];
+  height: number;
+  jib: number;
+  angle: number;
+  color?: number;
+}
+
 export interface VenueDetails {
+  ribbons?: RibbonBoards;
+  girders?: Girder[];
+  cranes?: Crane[];
   lanes?: VehicleLane[];
   zones?: SeatZone[];
   boxes?: BoxBand[];
@@ -384,8 +448,12 @@ export interface Skin {
   y0: number;
   y1: number;
   color: number;
-  /** `arcade`: a wall of tall pointed arches, one per `tile` width. */
-  pattern?: 'perforated' | 'slats' | 'panels' | 'solid' | 'arcade';
+  /**
+   * `arcade`: a wall of tall pointed arches, one per `tile` width. `brick`:
+   * coursed brickwork (a tile is a panel of it). `glass`: a curtain wall of
+   * glazing with mullions and floors (a tile is one pane).
+   */
+  pattern?: 'perforated' | 'slats' | 'panels' | 'solid' | 'arcade' | 'brick' | 'glass';
   /** Metres along and up per repeat of the pattern (default 4 x 4; an arcade's bay). */
   tile?: [number, number];
   /** One side only, between `from` and `to` along it. Omitted: the ring. */
@@ -456,7 +524,14 @@ export interface LightingSpec {
    * corners unless all four are given), how tall, and what they look like.
    * Drawn as structure whether or not the lamps are on.
    */
-  masts?: { at: [number, number][]; height: number; style?: 'lattice' | 'pole'; head?: 'rect' | 'tilted' };
+  masts?: {
+    at: [number, number][];
+    height: number;
+    style?: 'lattice' | 'pole';
+    head?: 'rect' | 'tilted' | 'none';
+    /** A roof's masts: a cable from the top in to the roof (`reach` metres from the centre spot, `y` up) and a stay out to the ground. */
+    cables?: { reach: number; y: number };
+  };
 }
 
 /**
@@ -604,6 +679,12 @@ export interface StandSpan {
   /** A straight tier only: metres further out than the tier's baseOffset, and higher than its baseElevation. */
   offset?: number;
   elevation?: number;
+  /**
+   * A straight tier only: where along the side its middle is (x for the sides,
+   * z for the ends). Default 0, the centre line — an upper tier over one half
+   * of a stand (the City Ground's Bridgford Stand) sits off it.
+   */
+  center?: number;
 }
 
 /**

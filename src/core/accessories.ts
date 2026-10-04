@@ -309,7 +309,11 @@ export function planStand(stand: StandSeats, kind: AccessoryKind, level: Accesso
     for (let k = 0; k < n; k++) {
       if (stand.depth[k] <= spec.vMax + 1e-6 && stand.across[k] >= a0 - 1e-6 && stand.across[k] <= a1 + 1e-6) zone.push(k);
     }
-    if (!zone.length) continue;
+    // An end with nothing in the middle (Villa Park's North Stand is a
+    // building site; only the corners of the stands beside it reach round)
+    // still has fans to hold things: take them from wherever it has seats.
+    if (!zone.length) for (let k = 0; k < n; k++) if (stand.depth[k] <= spec.vMax + 1e-6) zone.push(k);
+    if (!zone.length) for (let k = 0; k < n; k++) zone.push(k);
     const want = Math.round(Math.min(spec.max, Math.max(spec.min, zone.length * spec.density)) * budget);
     const target = Math.max(chosen.length, Math.max(lv === 1 ? 1 : 0, want));
     const add = target - chosen.length;

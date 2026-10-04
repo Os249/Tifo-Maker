@@ -37,7 +37,7 @@ import {
   PHOTO_FACTS_PROMPT,
   type PhotoFacts,
 } from '../src/core/photoFacts';
-import type { StadiumTemplate } from '../src/core/types';
+import type { RoofCoverage, StadiumTemplate } from '../src/core/types';
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -162,8 +162,10 @@ console.log('\n--- tier split --------------------------------------------------
   // 20 of 24 since the Saudi league's grounds came in, October 2026: Al-Awwal,
   // Al-Faisal and Prince Faisal bin Fahd have a short second tier over one
   // stand that the row count does not see, and Abha's one tier is 50 rows deep
-  // along one side.)
-  check(right === 20, 'tier-count rule scores 20 of 24', `misses: ${misses.join('; ')}`);
+  // along one side. 30 of 44 since the Premier League's grounds came in,
+  // October 2026: English grounds put a deep single tier where the rule
+  // expects two, and the other way round, as often as not.)
+  check(right === 30, 'tier-count rule scores 30 of 44', `misses: ${misses.join('; ')}`);
 
   const st = stackTiers(50, 2);
   const stacked = st[1].baseOffset > st[0].baseOffset + st[0].rows * st[0].rowDepth
@@ -188,7 +190,9 @@ console.log('\n--- the whole estimator, round-tripped --------------------------
       name: s.meta?.name,
       innerRing: trueRing(truth),
       capacity: cap,
-      known: { aisles: truth.aisles.count, seatPitch: truth.tiers[0].seatPitch, tiers: truth.tiers.length },
+      // The tier count a fan would tell it (StadiumTemplate.levels), not how many
+      // entries the template happens to split its stands into.
+      known: { aisles: truth.aisles.count, seatPitch: truth.tiers[0].seatPitch, tiers: tierCount(truth) },
     });
     const capErr = Math.abs(r.built - cap) / cap;
     const planErr = Math.max(
@@ -199,7 +203,7 @@ console.log('\n--- the whole estimator, round-tripped --------------------------
       worstPlan = Math.max(worstPlan, planErr);
       worstCap = Math.max(worstCap, capErr);
     }
-    if (r.template.tiers.length === truth.tiers.length) tiersRight++;
+    if (r.template.tiers.length === tierCount(truth)) tiersRight++;
     console.log(
       String(s.meta?.name ?? s.id).slice(0, 24).padEnd(25) +
       String(cap).padStart(8) + String(r.built).padStart(9) +
@@ -241,6 +245,26 @@ console.log('\n--- provenance --------------------------------------------------
   check(threw, 'nothing in, nothing out — it refuses rather than inventing a stadium');
 }
 
+/**
+ * The roof a ground really has, in the rule's terms. A ground whose roofs are
+ * drawn stand by stand (StadiumTemplate.roofs) says coverage 'none' on its
+ * single-roof field, and judging the rule on that would be judging it on a
+ * wrong input: a stand is roofed when a run is over it (render/simulator/roof
+ * standIsRoofed), and the four stands together give the coverage.
+ */
+function coverageOf(t: StadiumTemplate): RoofCoverage | undefined {
+  if (!t.roofs?.length) return t.roof?.coverage;
+  const sides = (['east', 'north', 'west', 'south'] as const).map((side) =>
+    t.roofs!.some((r) => (r.side ? r.side === side : !(r.omit ?? []).some((g) => g.side === side && g.from <= -10 && g.to >= 10))));
+  const n = sides.filter(Boolean).length;
+  if (n === 4) return 'ring';
+  if (n === 0) return 'none';
+  if (n === 2 && sides[0] && sides[2]) return 'sides';
+  if (n === 2 && sides[1] && sides[3]) return 'ends';
+  if (n === 1) return (['east', 'north', 'west', 'south'] as const)[sides.indexOf(true)];
+  return 'sides';
+}
+
 console.log('\n--- the two rules with no data behind them ------------------------');
 {
   // suggestLighting claims a hit rate in its own doc comment. Print the real one
@@ -254,7 +278,7 @@ console.log('\n--- the two rules with no data behind them ----------------------
   const misses: string[] = [];
   for (const tpl of all) {
     const want = tpl.lighting?.style ?? 'corner-masts';
-    const got = suggestLighting(tpl.roof?.coverage);
+    const got = suggestLighting(coverageOf(tpl));
     if (got === want) hits++;
     else misses.push(`${tpl.id} wanted ${want}, rule said ${got}`);
   }

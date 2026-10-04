@@ -251,10 +251,11 @@ export function generateSeatMap(template: StadiumTemplate): SeatMap {
           const radial = tier.baseOffset + (st.offset ?? 0) + r * tier.rowDepth;
           const y = tier.baseElevation + (st.elevation ?? 0) + r * tier.rowDepth * rake;
           const H = st.halfLength;
+          const C = st.center ?? 0;
           let n = Math.floor((2 * H) / tier.seatPitch);
           if (n % 2 === 1) n--;
           for (let k = 0; k < n; k++) {
-            const along = -H + ((k + 0.5) * 2 * H) / n;
+            const along = C - H + ((k + 0.5) * 2 * H) / n;
             const [x, z] = straightPoint(template, st.side, radial, along);
             row.push({ u: uOnCurve(curve, template, x, z), x, z, y });
           }

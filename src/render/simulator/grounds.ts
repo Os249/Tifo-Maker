@@ -1,7 +1,7 @@
 import * as THREE from 'three';
-import type { RoofRun, Skin, StadiumTemplate, StandBuilding, StandGap, StandSide } from '../../core/types';
+import type { Crane, RoofRun, Skin, StadiumTemplate, StandBuilding, StandGap, StandSide } from '../../core/types';
 import { curveSampler } from '../../core/venueDetails';
-import { alongOf, gapHalfPlanes, SIDE_U } from '../../core/standSpans';
+import { alongOf, gapHalfPlanes, SIDE_U, spanGeometry } from '../../core/standSpans';
 import { subtractGaps } from './stands';
 
 /**
@@ -439,6 +439,52 @@ function buildRun(template: StadiumTemplate, run: RoofRun, at: Sampler, shadows:
     });
   }
 
+  // Clear polycarbonate along the leading edge: a bright band seen from below,
+  // and a paler one from above, over the opaque deck.
+  if (run.glazing && run.glazing > 0 && run.style !== 'membrane') {
+    const g0 = 1 - Math.min(1, run.glazing);
+    const glass = new THREE.MeshStandardMaterial({ color: 0xe9eef2, roughness: 0.35, metalness: 0.05, emissive: 0xd9e2ea, emissiveIntensity: 0.55, transparent: true, opacity: 0.9, side: THREE.DoubleSide });
+    const glassTop = new THREE.MeshStandardMaterial({ color: 0xdfe6ea, roughness: 0.25, metalness: 0.1, transparent: true, opacity: 0.85, side: THREE.DoubleSide });
+    trash.push(glass, glassTop);
+    const band = (lift: number): THREE.BufferGeometry => {
+      const sub2: Station[] = st.map((q) => ({
+        ...q,
+        bx: q.bx + (q.fx - q.bx) * g0,
+        bz: q.bz + (q.fz - q.bz) * g0,
+        by: q.by + (q.fy - q.by) * g0,
+      }));
+      return sheet(sub2, 2, () => lift, ring);
+    };
+    add(cut(band(-0.06)), glass);
+    add(cut(band(depth + 0.05)), glassTop);
+    // The glazing bars across it, one per bay.
+    st.forEach((q, i) => {
+      if (!ribAt(i)) return;
+      const P = (t: number): V3 => [q.bx + (q.fx - q.bx) * t, q.by + (q.fy - q.by) * t - 0.1, q.bz + (q.fz - q.bz) * t];
+      memberList.push({ p: P(g0), q: P(1), w: 0.18, h: 0.25 });
+    });
+  }
+
+  // A girder standing on the roof along its length.
+  if (run.girder) {
+    const gm = new THREE.MeshStandardMaterial({ color: run.girder.color ?? 0xd6d9dd, roughness: 0.5, metalness: 0.35 });
+    trash.push(gm);
+    const f = (run.girder.offset - run.back) / (run.front - run.back);
+    const base = st.map((q): V3 => [q.bx + (q.fx - q.bx) * f, q.by + (q.fy - q.by) * f + depth, q.bz + (q.fz - q.bz) * f]);
+    const top = base.map((p): V3 => [p[0], p[1] + run.girder!.height, p[2]]);
+    const gl: { p: V3; q: V3; w: number; h?: number }[] = [];
+    for (let i = 0; i + 1 < st.length; i++) {
+      if (!keepAt(st[i]) || !keepAt(st[i + 1])) continue;
+      gl.push({ p: base[i], q: base[i + 1], w: 0.6, h: 0.6 });
+      gl.push({ p: top[i], q: top[i + 1], w: 0.7, h: 0.7 });
+      gl.push({ p: base[i], q: top[i + 1], w: 0.35 });
+      gl.push({ p: base[i], q: top[i], w: 0.4 });
+    }
+    const last = st.length - 1;
+    if (last >= 0 && keepAt(st[last])) gl.push({ p: base[last], q: top[last], w: 0.4 });
+    grp.add(members(gl, gm, trash, shadows));
+  }
+
   // Columns at the back, from the ground to the roof.
   if (run.columns) {
     const colMat = new THREE.MeshStandardMaterial({ color: run.columns.color ?? 0xe8e6e0, roughness: 0.55, metalness: 0.2 });
@@ -543,6 +589,15 @@ function buildMasts(template: StadiumTemplate, trash: Trash[], shadows: boolean)
     } else {
       list.push({ p: [x, 0, z], q: [x, H - 2, z], w: 1.2 });
     }
+    // A roof's masts (the Etihad's) carry cables, not lamps.
+    if (spec.cables) {
+      const L0 = Math.hypot(x, z) || 1;
+      const ux = x / L0;
+      const uz = z / L0;
+      list.push({ p: [x, H - 1, z], q: [ux * spec.cables.reach, spec.cables.y, uz * spec.cables.reach], w: 0.16 });
+      list.push({ p: [x, H - 1, z], q: [x + ux * 22, 0, z + uz * 22], w: 0.14 });
+    }
+    if (spec.head === 'none') continue;
     // The head: a frame of lamps tilted toward the pitch, facing the centre spot.
     const L = Math.hypot(x, z) || 1;
     const ix = -x / L;
@@ -701,6 +756,30 @@ function skinTexture(pattern: Skin['pattern']): THREE.CanvasTexture | null {
     g.lineTo(54, 64);
     g.closePath();
     g.fill();
+  } else if (pattern === 'brick') {
+    // Courses of brick, each a little different, with pale mortar between.
+    g.fillStyle = '#d9d2c7';
+    g.fillRect(0, 0, 64, 64);
+    for (let row = 0; row < 16; row++) {
+      const off = row % 2 ? 4 : 0;
+      for (let x = -off; x < 64; x += 8) {
+        const v = 0.86 + ((x * 7 + row * 13) % 11) / 55;
+        g.fillStyle = `rgb(${Math.round(255 * v)},${Math.round(255 * v * 0.98)},${Math.round(255 * v * 0.96)})`;
+        g.fillRect(x + 0.5, row * 4 + 0.5, 7, 3);
+      }
+    }
+  } else if (pattern === 'glass') {
+    // A pane of dark glazing with its mullion and transom.
+    g.fillStyle = '#3d4c5c';
+    g.fillRect(0, 0, 64, 64);
+    const grd = g.createLinearGradient(0, 0, 64, 64);
+    grd.addColorStop(0, 'rgba(255,255,255,0.18)');
+    grd.addColorStop(1, 'rgba(255,255,255,0)');
+    g.fillStyle = grd;
+    g.fillRect(0, 0, 64, 64);
+    g.fillStyle = '#c9cdd2';
+    g.fillRect(0, 0, 3, 64);
+    g.fillRect(0, 0, 64, 4);
   } else if (pattern === 'slats') {
     for (let x = 0; x < 64; x += 8) {
       g.fillStyle = '#9a948a';
@@ -769,6 +848,91 @@ function buildSkin(template: StadiumTemplate, sk: Skin, at: Sampler, trash: Tras
   return m;
 }
 
+/** The LED ribbon along the fronts of the tiers: a lit band with darker panel joints. */
+function buildRibbons(template: StadiumTemplate, at: Sampler, trash: Trash[]): THREE.Mesh | null {
+  const spec = template.details?.ribbons;
+  if (!spec) return null;
+  const H = spec.height ?? 0.9;
+  const c = document.createElement('canvas');
+  c.width = 64;
+  c.height = 8;
+  const g2 = c.getContext('2d')!;
+  g2.fillStyle = '#ffffff';
+  g2.fillRect(0, 0, 64, 8);
+  g2.fillStyle = 'rgba(0,0,0,0.35)';
+  g2.fillRect(0, 0, 1, 8);
+  g2.fillStyle = 'rgba(255,255,255,0.5)';
+  for (let x = 8; x < 60; x += 14) g2.fillRect(x, 3, 8, 2);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.wrapS = THREE.RepeatWrapping;
+  const mat = new THREE.MeshStandardMaterial({ color: spec.color, map: tex, emissive: spec.color, emissiveIntensity: 0.55, emissiveMap: tex, roughness: 0.6, metalness: 0.1, side: THREE.DoubleSide });
+  trash.push(tex, mat);
+  const pos: number[] = [];
+  const uv: number[] = [];
+  const idx: number[] = [];
+  const quadStrip = (pts: { x: number; z: number }[], y: number): void => {
+    let s0 = 0;
+    const base = pos.length / 3;
+    pts.forEach((p, i) => {
+      if (i > 0) s0 += Math.hypot(p.x - pts[i - 1].x, p.z - pts[i - 1].z);
+      pos.push(p.x, y - H, p.z, p.x, y, p.z);
+      uv.push(s0 / 8, 0, s0 / 8, 1);
+      if (i > 0) {
+        const k = base + (i - 1) * 2;
+        idx.push(k, k + 2, k + 1, k + 1, k + 2, k + 3);
+      }
+    });
+  };
+  const { a, b } = template.plan;
+  const spans = spanGeometry(template);
+  template.tiers.forEach((tier, ti) => {
+    if (spec.tiers ? !spec.tiers.includes(ti) : ti === 0) return;
+    const rake = Math.tan((tier.rakeDeg * Math.PI) / 180);
+    const frontY0 = tier.baseElevation - tier.rowDepth * rake * 0.5;
+    if (!spec.tiers && frontY0 < 2.5) return;
+    if (tier.stands) {
+      for (const sg of spans[ti]) {
+        const r = sg.front - 0.06;
+        if (sg.straight) {
+          const P = (along: number): { x: number; z: number } =>
+            sg.side === 'north' ? { x: along, z: b + r } : sg.side === 'south' ? { x: along, z: -(b + r) } : sg.side === 'east' ? { x: a + r, z: along } : { x: -(a + r), z: along };
+          const c = sg.center ?? 0;
+          quadStrip([P(c - sg.halfLength), P(c + sg.halfLength)], sg.frontY + 0.15);
+        } else {
+          const pts: { x: number; z: number }[] = [];
+          const n = Math.max(8, Math.ceil((sg.u1 - sg.u0) * 600));
+          for (let i = 0; i <= n; i++) pts.push(at(sg.u0 + ((sg.u1 - sg.u0) * i) / n, r));
+          quadStrip(pts, sg.frontY + 0.15);
+        }
+      }
+      return;
+    }
+    // A ring tier: all the way round, broken where the tier has gaps.
+    const r = tier.baseOffset - tier.rowDepth * 0.5 - 0.06;
+    let run: { x: number; z: number }[] = [];
+    const n = 900;
+    for (let i = 0; i <= n; i++) {
+      const p = at(i / n, r);
+      if (inAnyGap(template, tier.omit, r, p.x, p.z)) {
+        if (run.length > 1) quadStrip(run, frontY0 + 0.15);
+        run = [];
+      } else run.push(p);
+    }
+    if (run.length > 1) quadStrip(run, frontY0 + 0.15);
+  });
+  if (!idx.length) return null;
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  geo.setIndex(idx);
+  geo.computeVertexNormals();
+  trash.push(geo);
+  const m = new THREE.Mesh(geo, mat);
+  m.name = 'ribbons';
+  return m;
+}
+
 /** Everything this file draws for one ground; an empty group for a ground without any of it. */
 export function buildGround(template: StadiumTemplate, shadows: boolean): GroundBuild {
   const group = new THREE.Group();
@@ -780,6 +944,86 @@ export function buildGround(template: StadiumTemplate, shadows: boolean): Ground
   if (masts) group.add(masts);
   for (const b of template.details?.buildings ?? []) group.add(buildBuilding(template, b, at, trash, shadows));
   for (const sk of template.details?.skins ?? []) group.add(buildSkin(template, sk, at, trash, shadows));
+  for (const gd of template.details?.girders ?? []) {
+    const mat = new THREE.MeshStandardMaterial({ color: gd.color ?? 0xe9ebec, roughness: 0.45, metalness: 0.3 });
+    trash.push(mat);
+    const [x0, z0] = gd.from;
+    const [x1, z1] = gd.to;
+    const L = Math.hypot(x1 - x0, z1 - z0);
+    const n = Math.max(2, Math.round(L / (gd.bay ?? 6)));
+    const y1 = gd.yTo ?? gd.y;
+    const P = (t: number, top: boolean): V3 => [x0 + (x1 - x0) * t, gd.y + (y1 - gd.y) * t + (top ? gd.height : 0), z0 + (z1 - z0) * t];
+    const list: { p: V3; q: V3; w: number; h?: number }[] = [];
+    // A triangular truss seen from the side: two chords and the zig-zag between.
+    for (let i = 0; i < n; i++) {
+      const t0 = i / n;
+      const t1 = (i + 1) / n;
+      list.push({ p: P(t0, false), q: P(t1, false), w: 0.9, h: 0.9 });
+      list.push({ p: P(t0, true), q: P(t1, true), w: 1.1, h: 1.1 });
+      list.push({ p: P(t0, false), q: P((t0 + t1) / 2, true), w: 0.45 });
+      list.push({ p: P((t0 + t1) / 2, true), q: P(t1, false), w: 0.45 });
+    }
+    const m = members(list, mat, trash, shadows);
+    m.name = 'girder';
+    group.add(m);
+  }
+  for (const cr of template.details?.cranes ?? []) group.add(buildCrane(cr, trash, shadows));
+  const ribbons = buildRibbons(template, at, trash);
+  if (ribbons) group.add(ribbons);
   return { object: group, disposables: trash };
 }
 
+
+/** A tower crane: a square lattice mast, the jib and counter-jib across its top, the cab and the ballast. */
+function buildCrane(cr: Crane, trash: Trash[], shadows: boolean): THREE.Group {
+  const g = new THREE.Group();
+  g.name = 'crane';
+  const mat = new THREE.MeshStandardMaterial({ color: cr.color ?? 0xf0c419, roughness: 0.55, metalness: 0.25 });
+  const dark = new THREE.MeshStandardMaterial({ color: 0x3a3d42, roughness: 0.7 });
+  trash.push(mat, dark);
+  const [cx, cz] = cr.at;
+  const H = cr.height;
+  const s = 0.9; // half the mast's width
+  const list: { p: V3; q: V3; w: number; h?: number }[] = [];
+  const corners: [number, number][] = [[-s, -s], [s, -s], [s, s], [-s, s]];
+  for (const [dx, dz] of corners) list.push({ p: [cx + dx, 0, cz + dz], q: [cx + dx, H, cz + dz], w: 0.22 });
+  const bay = 2.4;
+  for (let y = 0; y + bay <= H + 0.01; y += bay) {
+    for (let k = 0; k < 4; k++) {
+      const [ax, az] = corners[k];
+      const [bx, bz] = corners[(k + 1) % 4];
+      const flip = (Math.round(y / bay) + k) % 2 === 0;
+      list.push({ p: [cx + ax, flip ? y : y + bay, cz + az], q: [cx + bx, flip ? y + bay : y, cz + bz], w: 0.1 });
+    }
+  }
+  // The jib: a triangular truss out along `angle`, the counter-jib behind.
+  const a = (cr.angle * Math.PI) / 180;
+  const ux = Math.cos(a);
+  const uz = Math.sin(a);
+  const px = -uz;
+  const pz = ux;
+  const jy = H + 0.4;
+  const tip = cr.jib;
+  const back = -cr.jib * 0.3;
+  const P = (t: number, side: number, up: number): V3 => [cx + ux * t + px * side * 0.8, jy + up, cz + uz * t + pz * side * 0.8];
+  for (const side of [-1, 1]) list.push({ p: P(back, side, 0), q: P(tip, side, 0), w: 0.16 });
+  list.push({ p: P(0, 0, 1.6), q: P(tip, 0, 0.9), w: 0.14 });
+  const n = Math.max(2, Math.round((tip - back) / 3));
+  for (let i = 0; i < n; i++) {
+    const t0 = back + ((tip - back) * i) / n;
+    const t1 = back + ((tip - back) * (i + 1)) / n;
+    for (const side of [-1, 1]) list.push({ p: P(t0, side, 0), q: P(t1, 0, t1 > 0 ? 1.6 - (0.7 * t1) / tip : 1.6), w: 0.08 });
+  }
+  // The A-frame over the mast and its ties out to both ends.
+  list.push({ p: P(0, 0, 0), q: P(0, 0, 7), w: 0.3 });
+  list.push({ p: P(0, 0, 7), q: P(tip * 0.6, 0, 1.2), w: 0.06 });
+  list.push({ p: P(0, 0, 7), q: P(back, 0, 0.4), w: 0.06 });
+  g.add(members(list, mat, trash, shadows));
+  const blocks: { p: V3; q: V3; w: number; h?: number }[] = [
+    // Ballast on the counter-jib, and the cab just under the jib.
+    { p: P(back + 0.5, 0, -1.6), q: P(back + 3.5, 0, -1.6), w: 2.4, h: 3 },
+    { p: [cx + ux * 1.2, H - 1.5, cz + uz * 1.2], q: [cx + ux * 3.2, H - 1.5, cz + uz * 3.2], w: 2, h: 2.4 },
+  ];
+  g.add(members(blocks, dark, trash, shadows));
+  return g;
+}

@@ -674,7 +674,9 @@ function buildStraightBlock(
   const tier = template.tiers[tierIdx];
   const { a, b } = template.plan;
   const H = sg.halfLength + tier.seatPitch * 0.6;
-  const P = (along: number, r: number, y: number): Pt => {
+  const C = sg.center ?? 0;
+  const P = (at: number, r: number, y: number): Pt => {
+    const along = C + at;
     if (sg.side === 'north') return [along, y, b + r];
     if (sg.side === 'south') return [along, y, -(b + r)];
     if (sg.side === 'east') return [a + r, y, along];

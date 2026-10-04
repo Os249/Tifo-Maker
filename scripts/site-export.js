@@ -11,7 +11,7 @@
  * and north of the centre spot, in decimetres. The data is © OpenStreetMap
  * contributors, under the ODbL.
  */
-window.SITE_EXPORT = async ({ key, template, lat, lon, main, radius = 520, twist, shift }) => {
+window.SITE_EXPORT = async ({ key, template, lat, lon, main, radius = 520, twist, shift, style }) => {
   const R = radius + 40;
   const q = `[out:json][timeout:120];(
     way["highway"](around:${R},${lat},${lon});
@@ -47,7 +47,25 @@ window.SITE_EXPORT = async ({ key, template, lat, lon, main, radius = 520, twist
       continue;
     }
     if (!e.geometry) continue;
-    const flat = e.geometry.flatMap(en);
+    // Dense English streets: drop the vertices a building does not need
+    // (closer than 0.4 m to the line through its neighbours), which halves
+    // the file without moving a wall.
+    let geom = e.geometry;
+    if (style === 'uk' && geom.length > 4) {
+      const pts = geom.map(en);
+      const keep = [pts[0]];
+      for (let i = 1; i < pts.length - 1; i++) {
+        const [ax, ay] = keep[keep.length - 1];
+        const [bx, by] = pts[i + 1];
+        const [px, py] = pts[i];
+        const L = Math.hypot(bx - ax, by - ay) || 1;
+        if (Math.abs((bx - ax) * (ay - py) - (ax - px) * (by - ay)) / L > 4) keep.push(pts[i]);
+      }
+      keep.push(pts[pts.length - 1]);
+      f.push([e.tags.highway && !e.tags.building ? 'h' : e.tags.building ? 'b' : e.tags.amenity === 'parking' ? 'p' : e.tags.landuse === 'residential' ? 'lr' : e.tags.barrier || e.tags.natural === 'tree_row' ? (e.tags.natural === 'tree_row' ? 'tr' : 'w') : 'a', Object.fromEntries(KEEP.filter((k) => e.tags[k] !== undefined).map((k) => [k, e.tags[k]])), keep.flat()]);
+      continue;
+    }
+    const flat = geom.flatMap(en);
     const t = e.tags;
     const kind = t.highway && !t.building ? 'h'
       : t.building ? 'b'
@@ -57,5 +75,5 @@ window.SITE_EXPORT = async ({ key, template, lat, lon, main, radius = 520, twist
       : 'a';
     f.push([kind, tags, flat]);
   }
-  return { key, template, main, twist, shift, radius, date: new Date().toISOString().slice(0, 10), f };
+  return { key, template, main, twist, shift, radius, ...(style ? { style } : {}), date: new Date().toISOString().slice(0, 10), f };
 };
