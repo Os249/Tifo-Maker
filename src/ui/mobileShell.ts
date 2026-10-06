@@ -462,6 +462,15 @@ export function mountMobileShell(): MobileShell | null {
     sync(); // mark whichever tool is already active, not just after a tap
   }
 
+  // Opened from elsewhere (the new-stadiums card): the More sheet, then its
+  // Stadium tile, exactly as a tap on each would.
+  const onOpenStadium = (): void => {
+    if (openTab !== 'more' || subView) open('more');
+    const tile = [...bodyEl.querySelectorAll<HTMLButtonElement>('.m-tool')].find((b) => b.querySelector('.ti-building-stadium'));
+    tile?.click();
+  };
+  document.addEventListener('tifo:open-stadium', onOpenStadium);
+
   // ---------- ribbon ----------
   const ribbon = el('nav', 'm-ribbon');
   ribbon.setAttribute('aria-label', t('ed.a11y.tools'));
@@ -656,6 +665,7 @@ export function mountMobileShell(): MobileShell | null {
       document.removeEventListener('tifo:sim-loading', onSimLoading);
       document.removeEventListener('tifo:sim-open', onSimOpen);
       document.removeEventListener('tifo:sim-failed', onSimFailed);
+      document.removeEventListener('tifo:open-stadium', onOpenStadium);
       document.removeEventListener('tifo:view', onEditorView);
       window.clearTimeout(mdResetT);
       document.body.classList.remove('m-shell');

@@ -91,7 +91,7 @@ const errs = [];
 const newPage = async (ls, viewport = { width: 1440, height: 900 }) => {
   const ctx = await browser.newContext({ viewport });
   await ctx.addInitScript((pairs) => { try { for (const [k, v] of pairs) localStorage.setItem(k, v); } catch { /* */ } }, [
-    ['tifo_consent_v1', 'essential'], ['tifo_onboarded_v1', '1'], ['tifo_news_banners_v1', '1'], ['tifo_banner_tour_v1', '1'], ...ls,
+    ['tifo_consent_v1', 'essential'], ['tifo_onboarded_v1', '1'], ['tifo_news_banners_v1', '1'], ['tifo_news_leagues_v1', '1'], ['tifo_banner_tour_v1', '1'], ...ls,
   ]);
   const p = await ctx.newPage();
   p.on('pageerror', (e) => errs.push(String(e.message).slice(0, 200)));

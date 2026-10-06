@@ -130,7 +130,7 @@ console.log('\n— 2. what the visit log makes of tagged links —');
 // ---------------------------------------------------------------------------
 console.log('\n— 3. first run: start from your club, then post it —');
 for (const [label, opts] of [['desktop', WIDE], ['phone', PHONE]]) {
-  const p = await open(opts, [['tifo_news_banners_v1', '1']]);
+  const p = await open(opts, [['tifo_news_banners_v1', '1'], ['tifo_news_leagues_v1', '1']]);
   await p.goto(`${B}/app?new=1&e2e`, { waitUntil: 'domcontentloaded' });
   const dialog = await until(p, () => document.querySelectorAll('.ob-club-chip').length >= 8, null, 90000);
   check(`${label}: the welcome dialog opens on "Start from your club"`, dialog);
@@ -202,7 +202,7 @@ console.log('\n— 4. publishing opens the share window, with tagged links —')
 {
   const stamp = Date.now().toString(36).slice(-5);
   const reg = await api('/api/auth/register', null, { username: `pub${stamp}`, password: 'harbor-kite-moss-31', email: `pub${stamp}@example.test`, acceptedVersion: 'test' });
-  const p = await open(WIDE, [['tifo_token_v1', reg.token], ['tifo_onboarded_v1', '1'], ['tifo_news_banners_v1', '1'], ['tifo_post_nudge_v1', '1']]);
+  const p = await open(WIDE, [['tifo_token_v1', reg.token], ['tifo_onboarded_v1', '1'], ['tifo_news_banners_v1', '1'], ['tifo_news_leagues_v1', '1'], ['tifo_post_nudge_v1', '1']]);
   await p.goto(`${B}/app?new=1`, { waitUntil: 'domcontentloaded' });
   await until(p, () => /[?&]project=/.test(location.search), null, 90000);
   await p.evaluate(() => document.getElementById('publish-design')?.click());

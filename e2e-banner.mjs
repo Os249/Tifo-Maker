@@ -43,6 +43,9 @@ async function openApp(width, height, lang, { fresh = false } = {}) {
       localStorage.setItem('tifo_onboarded_v1', '1');
       localStorage.setItem('tifo_consent_v1', 'essential');
       localStorage.setItem('tifo_draw_hint_v1', '1');
+      // The league stadiums card goes first on a fresh visit (leaguesNews.ts);
+      // these tests are about the banners card, which comes after it.
+      localStorage.setItem('tifo_news_leagues_v1', '1');
       if (!fresh) {
         localStorage.setItem('tifo_news_banners_v1', '1');
         localStorage.setItem('tifo_banner_tour_v1', '1');
@@ -1008,7 +1011,7 @@ console.log('\n— banner text is redrawn in the display face when it lands —'
     await route.continue().catch(() => {});
   });
   await page.addInitScript(() => {
-    for (const [k, v] of [['tifo_lang_v1', 'en'], ['tifo_onboarded_v1', '1'], ['tifo_consent_v1', 'essential'], ['tifo_draw_hint_v1', '1'], ['tifo_news_banners_v1', '1'], ['tifo_banner_tour_v1', '1']]) {
+    for (const [k, v] of [['tifo_lang_v1', 'en'], ['tifo_onboarded_v1', '1'], ['tifo_consent_v1', 'essential'], ['tifo_draw_hint_v1', '1'], ['tifo_news_banners_v1', '1'], ['tifo_news_leagues_v1', '1'], ['tifo_banner_tour_v1', '1']]) {
       try { localStorage.setItem(k, v); } catch { /* storage off */ }
     }
   });
@@ -1228,7 +1231,7 @@ console.log('\n— the banner tour —');
   const page = await ctx.newPage();
   const errs = [];
   page.on('pageerror', (e) => errs.push(String(e.message).slice(0, 200)));
-  await page.addInitScript(() => { try { if (!sessionStorage.getItem('s')) { sessionStorage.setItem('s', '1'); for (const [k, v] of [['tifo_lang_v1', 'en'], ['tifo_onboarded_v1', '1'], ['tifo_consent_v1', 'essential'], ['tifo_draw_hint_v1', '1']]) localStorage.setItem(k, v); } } catch { /* */ } });
+  await page.addInitScript(() => { try { if (!sessionStorage.getItem('s')) { sessionStorage.setItem('s', '1'); for (const [k, v] of [['tifo_lang_v1', 'en'], ['tifo_onboarded_v1', '1'], ['tifo_consent_v1', 'essential'], ['tifo_draw_hint_v1', '1'], ['tifo_news_leagues_v1', '1']]) localStorage.setItem(k, v); } } catch { /* */ } });
   await page.goto(B + '/app?new=1&editor=1', { waitUntil: 'networkidle', timeout: 60000 });
   await page.waitForSelector('#news-card', { timeout: 15000 }).catch(() => null);
   const n = await newsState(page);

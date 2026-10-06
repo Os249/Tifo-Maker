@@ -1158,12 +1158,32 @@ async function main(): Promise<void> {
     tb.publish();
   }
 
-  // "Banners are here", once, to everyone who opens the editor — after the
-  // onboarding dialog and any tour, never on top of them. See whatsNew.ts.
-  void import('./ui/whatsNew').then(({ offerWhatsNew }) => offerWhatsNew({
-    onTry: () => void setView('banner'),
-    inBanner: () => currentView === 'banner',
-  }));
+  // News, once each, to everyone who opens the editor — after the onboarding
+  // dialog and any tour, never on top of them, and one card per visit: the
+  // league stadiums first (leaguesNews.ts), "Banners are here" on a later
+  // visit for whoever has not seen it (whatsNew.ts).
+  void import('./ui/leaguesNews').then(({ leaguesNewsSeen, offerLeaguesNews }) => {
+    if (!leaguesNewsSeen()) {
+      offerLeaguesNews({
+        openStadiums: (league) => {
+          // The stadium list lives with the seat view's panel.
+          if (currentView === 'banner') void setView('2d');
+          if (document.body.classList.contains('m-shell')) {
+            document.dispatchEvent(new CustomEvent('tifo:open-stadium'));
+          } else {
+            const rail = document.getElementById('rail-stadium');
+            if (rail && !rail.classList.contains('menu-active')) rail.click();
+          }
+          requestAnimationFrame(() => document.dispatchEvent(new CustomEvent('tifo:stadium-league', { detail: league ?? '' })));
+        },
+      });
+      return;
+    }
+    void import('./ui/whatsNew').then(({ offerWhatsNew }) => offerWhatsNew({
+      onTry: () => void setView('banner'),
+      inBanner: () => currentView === 'banner',
+    }));
+  });
 
   window.addEventListener('keydown', (e) => {
     const tag = (e.target as HTMLElement | null)?.tagName;

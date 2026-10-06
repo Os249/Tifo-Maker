@@ -1406,6 +1406,29 @@ a.avatar-menu-item { text-decoration:none; }
 .news-try:hover { background:#1860c4; }
 [dir="rtl"] .news-go { transform:scaleX(-1); }
 
+/* "Your club's real stadium is here": the league tiles card. Centred under the
+   header rather than pointing at a tab: it is about a list, not a control. */
+.news-card.news-leagues { width:560px; left:0; right:0; margin:0 auto; top:72px; }
+.news-leagues .news-body { margin-bottom:12px; }
+.news-leagues-row { display:grid; grid-template-columns:repeat(3, 1fr); gap:10px; margin:0 0 14px; }
+.news-league {
+  display:flex; flex-direction:column; align-items:stretch; gap:2px; padding:0; min-height:0;
+  background:var(--ink-2); border:1px solid var(--line-1); border-radius:var(--r-md); overflow:hidden;
+  color:var(--text-1); font:inherit; text-align:start; cursor:pointer;
+  transition:border-color .15s ease, transform .15s ease;
+}
+.news-league:hover, .news-league:focus-visible { border-color:var(--blue); transform:translateY(-1px); }
+.news-league img { display:block; width:100%; height:auto; aspect-ratio:16 / 10; object-fit:cover; background:var(--ink-3); }
+.news-league-name { padding:8px 10px 0; font-size:13px; font-weight:700; line-height:1.3; }
+.news-league-count { padding:0 10px 9px; font-size:12px; color:var(--text-3); }
+@media (max-width: 640px) {
+  .news-card.news-leagues { top:60px; }
+  .news-leagues-row { gap:6px; }
+  .news-league-name { padding:6px 7px 0; font-size:12px; }
+  .news-league-count { padding:0 7px 7px; font-size:11px; }
+}
+@media (prefers-reduced-motion: reduce) { .news-league { transition:none; } .news-league:hover { transform:none; } }
+
 /* themed confirm / choice dialogs (replace native confirm/alert) */
 .dlg-backdrop {
   position:fixed; inset:0; z-index:100; display:grid; place-items:center;

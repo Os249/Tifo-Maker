@@ -1338,7 +1338,19 @@ export interface CatalogQuery {
   tiers?: number;
   /** Only entries whose id is in this set (e.g. favourites). */
   ids?: Set<string>;
+  /** Only one league's grounds, by its tag (see LEAGUES). */
+  league?: string;
 }
+
+/**
+ * The leagues whose every home ground is in the catalogue, by the tag their
+ * grounds carry. Order is the order the stadium panel lists them in.
+ */
+export const LEAGUES: { tag: string; key: string }[] = [
+  { tag: 'saudi-pro-league', key: 'sp.league.saudi' },
+  { tag: 'premier-league', key: 'sp.league.premier' },
+  { tag: 'laliga', key: 'sp.league.laliga' },
+];
 
 /** Filter + search the catalog. Foundation for the panel's search/filter (Wave B). */
 export function queryCatalog(q: CatalogQuery = {}, catalog: StadiumEntry[] = STADIUM_CATALOG): StadiumEntry[] {
@@ -1346,6 +1358,7 @@ export function queryCatalog(q: CatalogQuery = {}, catalog: StadiumEntry[] = STA
   return catalog.filter((e) => {
     if (q.source && e.meta.source !== q.source) return false;
     if (q.ids && !q.ids.has(e.id)) return false;
+    if (q.league && !(e.meta.tags ?? []).includes(q.league)) return false;
     if (q.country && (e.meta.country ?? '').toLowerCase() !== q.country.toLowerCase()) return false;
     if (q.type && e.meta.type !== q.type) return false;
     if (q.tiers !== undefined && tierCount(e.template) !== q.tiers) return false;

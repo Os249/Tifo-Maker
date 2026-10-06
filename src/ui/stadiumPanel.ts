@@ -26,6 +26,7 @@ import {
   catalogCountries,
   tierCount,
   sectionCount,
+  LEAGUES,
   type StadiumEntry,
   type StadiumSource,
   type StadiumType,
@@ -130,6 +131,7 @@ export function mountStadiumPanel(deps: StadiumPanelDeps): void {
   let tiersEl: HTMLSelectElement | null = null;
   let countryEl: HTMLSelectElement | null = null;
   let capEl: HTMLSelectElement | null = null;
+  let leagueEl: HTMLSelectElement | null = null;
 
   const docTitle = (): string => (document.getElementById('doc-title') as HTMLInputElement | null)?.value ?? '';
 
@@ -175,9 +177,14 @@ export function mountStadiumPanel(deps: StadiumPanelDeps): void {
     const regions = catalogCountries(queryCatalog({}).filter(isVisible));
     countryEl = mkSelect([['', t('sp.anyRegion')], ...regions.map((c) => [c, tl(c)] as [string, string])]);
     capEl = mkSelect([['', t('sp.anySize')], ['20000', '20k+'], ['40000', '40k+'], ['60000', '60k+'], ['80000', '80k+']]);
+    // Every club's home ground, a league at a time: the quickest way to your
+    // own team's stadium among sixty-odd.
+    leagueEl = mkSelect([['', t('sp.anyLeague')], ...LEAGUES.map((l) => [l.tag, t(l.key)] as [string, string])]);
+    leagueEl.id = 'stadium-league';
+    leagueEl.style.marginTop = '6px';
     grid.append(typeEl, tiersEl, countryEl, capEl);
-    filtersEl.append(searchEl, grid);
-    for (const el of [searchEl, typeEl, tiersEl, countryEl, capEl]) el.addEventListener('input', () => renderList());
+    filtersEl.append(searchEl, leagueEl, grid);
+    for (const el of [searchEl, leagueEl, typeEl, tiersEl, countryEl, capEl]) el.addEventListener('input', () => renderList());
   }
 
   function buildQuery(): CatalogQuery {
@@ -187,6 +194,7 @@ export function mountStadiumPanel(deps: StadiumPanelDeps): void {
     if (tiersEl?.value) q.tiers = Number(tiersEl.value);
     if (countryEl?.value) q.country = countryEl.value;
     if (capEl?.value) q.minCapacity = Number(capEl.value);
+    if (leagueEl?.value) q.league = leagueEl.value;
     if (activeTab === 'favorites') q.ids = favorites;
     else q.source = activeTab;
     return q;
@@ -634,6 +642,19 @@ export function mountStadiumPanel(deps: StadiumPanelDeps): void {
   render();
   void renderReviewQueue(); // one admin-gated probe; hides itself for non-admins
 
+  // "Show me a league" from elsewhere (the new-stadiums card): the built-in tab,
+  // that league's grounds, every other filter cleared so none of them hides one.
+  document.addEventListener('tifo:stadium-league', (ev) => {
+    const tag = (ev as CustomEvent<string>).detail;
+    buildFilters();
+    activeTab = 'builtin';
+    if (searchEl) searchEl.value = '';
+    for (const el of [typeEl, tiersEl, countryEl, capEl]) if (el) el.value = '';
+    if (leagueEl) leagueEl.value = LEAGUES.some((l) => l.tag === tag) ? tag : '';
+    render();
+    leagueEl?.scrollIntoView({ block: 'nearest' });
+  });
+
   // Switching language left this panel in English.
   //
   // setLang re-applies every [data-i18n] element in the document, which covers
@@ -653,6 +674,7 @@ export function mountStadiumPanel(deps: StadiumPanelDeps): void {
     const keptTiers = tiersEl?.value ?? '';
     const keptCountry = countryEl?.value ?? '';
     const keptCap = capEl?.value ?? '';
+    const keptLeague = leagueEl?.value ?? '';
     if (filtersEl) { delete filtersEl.dataset.built; filtersEl.innerHTML = ''; }
     if (orientEl) { delete orientEl.dataset.built; orientEl.innerHTML = ''; }
     activeTab = keptTab;
@@ -662,6 +684,7 @@ export function mountStadiumPanel(deps: StadiumPanelDeps): void {
     if (tiersEl) tiersEl.value = keptTiers;
     if (countryEl) countryEl.value = keptCountry;
     if (capEl) capEl.value = keptCap;
+    if (leagueEl) leagueEl.value = keptLeague;
     renderList();
   });
 }

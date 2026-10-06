@@ -40,7 +40,7 @@ const LS = (lang = 'en') => [
   { name: 'tifo_lang_v1', value: lang },
   { name: 'tifo_consent_v1', value: 'essential' },
   { name: 'tifo_onboarded_v1', value: '1' },
-  { name: 'tifo_news_banners_v1', value: '1' },
+  { name: 'tifo_news_banners_v1', value: '1' }, { name: 'tifo_news_leagues_v1', value: '1' },
   { name: 'tifo_banner_tour_v1', value: '1' },
   { name: 'mds_seen_intro', value: '1' },
   { name: 'mds_sound_v2', value: JSON.stringify({ on: false }) },

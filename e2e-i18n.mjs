@@ -23,7 +23,7 @@ const AR_LS = [
   { name: 'tifo_lang_v1', value: 'ar' },
   { name: 'tifo_consent_v1', value: 'all' },
   { name: 'tifo_onboarded_v1', value: '1' },
-  { name: 'tifo_news_banners_v1', value: '1' },
+  { name: 'tifo_news_banners_v1', value: '1' }, { name: 'tifo_news_leagues_v1', value: '1' },
   { name: 'tifo_banner_tour_v1', value: '1' },
 ];
 const state = (extra = []) => ({ cookies: [], origins: [{ origin: B, localStorage: [...AR_LS, ...extra] }] });
