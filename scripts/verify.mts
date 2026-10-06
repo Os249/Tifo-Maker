@@ -2600,3 +2600,70 @@ await (async () => {
   console.log(`neighbourhoods: ${keys.size} grounds | ${report.join(' | ')}`);
   if (fails.length) throw new Error(`neighbourhoods: ${fails.join('; ')}`);
 })();
+
+// --- The Stadium view's seats (October 2026) --------------------------------
+// The editor's 3D view is the real stadium: a chair on every seat in the
+// ground's own colour, the tifo's cards held up above them. So every ground —
+// real or one of the ten made-up ones — has seat colours of its own (a
+// seatLook, or the scheme Match Day sets by hand for the Jewel, Kingdom Arena
+// and the legacy grounds), and every chair faces the pitch.
+await (async () => {
+  const cat = await import('../src/core/stadiumCatalog');
+  const { emptySeatColours } = await import('../src/render/seatColours');
+  const { seatFacing, buildChairs } = await import('../src/render/seatChairs');
+  const HAND = new Set(['jewel-jeddah-60k', 'kingdom-arena-26k', 'community-jewel-jeddah-62k', 'community-alawwal-park-25k', 'community-kingdom-arena-28k']);
+  const FALLBACK = new Set(['3d424a', '434851', '393e45', '4a5059']);
+  const fails: string[] = [];
+  let grounds = 0;
+  let worstFacing = '';
+  let worstShare = 1;
+  for (const e of [...cat.STADIUM_CATALOG, ...cat.LEGACY_STADIUMS]) {
+    const t = e.template;
+    grounds++;
+    if (!t.seatLook && !HAND.has(t.id)) fails.push(`${t.id}: no seat colours of its own`);
+    const m = generateSeatMap(t);
+    const rgb = emptySeatColours(t, m);
+    let fallback = 0;
+    for (let i = 0; i < m.count; i++) {
+      const hex = ((rgb[i * 3] << 16) | (rgb[i * 3 + 1] << 8) | rgb[i * 3 + 2]).toString(16).padStart(6, '0');
+      if (FALLBACK.has(hex)) fallback++;
+    }
+    if (fallback > m.count * 0.5) fails.push(`${t.id}: ${fallback} seats in the no-colour fallback`);
+    // Facing: a unit vector, within 60 degrees of the way to the nearest point of the pitch.
+    const f = seatFacing(m);
+    let off = 0;
+    for (let i = 0; i < m.count; i++) {
+      const fx = f[i * 2];
+      const fz = f[i * 2 + 1];
+      if (Math.abs(Math.hypot(fx, fz) - 1) > 1e-3) { fails.push(`${t.id}: seat ${i} faces nowhere`); break; }
+      const x = m.pos3[i * 3];
+      const z = m.pos3[i * 3 + 2];
+      const dx = Math.max(-52.5, Math.min(52.5, x)) - x;
+      const dz = Math.max(-34, Math.min(34, z)) - z;
+      const d = Math.hypot(dx, dz) || 1;
+      if ((fx * dx + fz * dz) / d < Math.cos(Math.PI / 3)) off++;
+    }
+    const share = 1 - off / m.count;
+    if (share < worstShare) { worstShare = share; worstFacing = t.id; }
+    if (share < 0.97) fails.push(`${t.id}: only ${(share * 100).toFixed(1)}% of seats face the pitch`);
+  }
+  // The chairs themselves: one per seat, 4 triangles (2 on the low tier), in
+  // 16-bit index chunks.
+  const m = generateSeatMap(DEFAULT_TEMPLATE);
+  const rgb = emptySeatColours(DEFAULT_TEMPLATE, m);
+  const f = seatFacing(m);
+  for (const detail of ['full', 'low'] as const) {
+    const c = buildChairs(m, rgb, f, { detail });
+    const per = detail === 'full' ? 4 : 2;
+    if (c.triangles !== m.count * per) fails.push(`chairs (${detail}): ${c.triangles} triangles for ${m.count} seats`);
+    let big = 0;
+    c.object.traverse((o) => {
+      const g = (o as unknown as { geometry?: { index?: { array: ArrayLike<number> } } }).geometry;
+      if (g?.index && !(g.index.array instanceof Uint16Array)) big++;
+    });
+    if (big) fails.push(`chairs (${detail}): ${big} chunks need 32-bit indices`);
+    c.dispose();
+  }
+  console.log(`stadium view seats: ${grounds} grounds with their own colours | worst facing ${worstFacing} ${(worstShare * 100).toFixed(1)}%`);
+  if (fails.length) throw new Error(`stadium view seats: ${fails.join('; ')}`);
+})();

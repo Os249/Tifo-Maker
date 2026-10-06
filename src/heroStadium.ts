@@ -103,13 +103,15 @@ export async function mountHeroStadium(): Promise<void> {
       ]);
       const map = generateSeatMap(DEFAULT_TEMPLATE);
       const store = await paintShowpiece(map);
-      const preview = new Preview3D(host, map, store, { autoRotate: !reduceMotion, transparent: true });
+      const preview = new Preview3D(host, map, store, { autoRotate: !reduceMotion, transparent: true, template: DEFAULT_TEMPLATE });
       // Hide the CSS mock now that the real thing is up.
       const mock = document.querySelector(MOCK_SELECTOR);
       if (mock) (mock as HTMLElement).style.display = 'none';
       host.classList.add('ready');
       document.getElementById('hero-3d-wrap')?.classList.add('ready');
       preview.start();
+      // Said once the building is in: what the still-picture script waits for.
+      void preview.ready.then(() => (host.dataset.stadium = 'ready'));
       // Pause the spin when the hero scrolls out of view (saves battery/GPU).
       const io = new IntersectionObserver(
         (entries) => {

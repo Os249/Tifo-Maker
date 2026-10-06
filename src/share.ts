@@ -113,7 +113,7 @@ async function main(): Promise<void> {
   // 3D hero: reuse the editor's Preview3D, defaulting to the Full view camera.
   const host = document.getElementById('s-preview-host')!;
   const { Preview3D, CAMERA_PRESETS } = await import('./render/preview3d');
-  const preview = new Preview3D(host, map, store);
+  const preview = new Preview3D(host, map, store, { template });
   const fullIdx = Math.max(0, CAMERA_PRESETS.findIndex((p) => p.name === 'Full view'));
   preview.applyPreset(CAMERA_PRESETS[fullIdx]);
   preview.start();

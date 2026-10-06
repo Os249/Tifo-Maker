@@ -30,8 +30,10 @@ try {
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 }, deviceScaleFactor: 2, colorScheme: 'dark' });
   page.on('pageerror', (e) => console.error('  page error:', e.message.slice(0, 200)));
   // ?hero3d forces the live renderer even where the page would show this still.
-  await page.goto('http://127.0.0.1:5241/landing.html?hero3d', { waitUntil: 'networkidle', timeout: 240_000 });
+  await page.goto('http://127.0.0.1:5241/landing.html?hero3d&quality=high', { waitUntil: 'networkidle', timeout: 240_000 });
   await page.waitForSelector('#hero-3d.ready canvas', { timeout: 240_000 });
+  // The stadium itself streams in after the first frame (render/stadiumShell.ts).
+  await page.waitForSelector('#hero-3d[data-stadium="ready"]', { timeout: 240_000 });
   // Let it turn a little: the first frame faces the pitch square-on.
   await page.waitForTimeout(6000);
   const dataUrl = await page.evaluate(

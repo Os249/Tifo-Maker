@@ -131,7 +131,8 @@ export function seatLookMap(template: StadiumTemplate, map: SeatMap): SeatLookMa
       const cv = document.createElement('canvas');
       cv.width = Math.max(8, Math.round(Wm * PX));
       cv.height = Math.max(8, Math.round(Hm * PX));
-      const g = cv.getContext('2d');
+      // Read back below: a CPU canvas, so the read does not wait on the GPU.
+      const g = cv.getContext('2d', { willReadFrequently: true });
       if (!g) continue;
       g.fillStyle = '#000';
       g.fillRect(0, 0, cv.width, cv.height);

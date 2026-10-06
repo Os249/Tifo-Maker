@@ -104,6 +104,8 @@ const COMMUNITY: StadiumEntry[] = [
       roof: { coverage: 'ring', reach: 0.5, rise: 9, slope: 2.5 },
       facade: { style: 'cladding' },
       lighting: { style: 'roof-rim' },
+      // A national stadium in the flag's colours: red below, white above.
+      seatLook: { colors: ['#c8202a', '#b81b24'], regions: [{ tiers: [1], colors: [{ c: '#eceae4', w: 5 }, { c: '#dcdad4', w: 2 }] }] },
     },
     meta: { name: 'Grand National Bowl', source: 'builtin', country: 'International', capacity: 80000, type: 'Two-tier', inspiredBy: 'a large national stadium', tags: ['large', 'national', 'two-tier'] },
   },
@@ -125,6 +127,8 @@ const COMMUNITY: StadiumEntry[] = [
       roof: { coverage: 'ring', reach: 0.68, rise: 4.5, slope: 2.8 },
       facade: { style: 'concrete' },
       lighting: { style: 'roof-rim', kelvin: 5200 },
+      // Gold below, black above: a cauldron in its club's colours.
+      seatLook: { colors: [{ c: '#f0b400', w: 5 }, { c: '#e2a800', w: 2 }], regions: [{ tiers: [1], colors: [{ c: '#1b1c20', w: 5 }, { c: '#2a2b30', w: 2 }] }] },
     },
     meta: { name: 'Steep Cauldron', source: 'builtin', country: 'Europe', capacity: 55000, type: 'Two-tier', inspiredBy: 'a steep atmospheric club ground', tags: ['steep', 'atmosphere', 'compact'] },
   },
@@ -141,6 +145,8 @@ const COMMUNITY: StadiumEntry[] = [
       roof: { coverage: 'ring', reach: 0.55, rise: 5, slope: 2.4 },
       facade: { style: 'brick' },
       lighting: { style: 'corner-masts', kelvin: 4200 },
+      // Claret, with a sky-blue band along the front rows.
+      seatLook: { colors: [{ c: '#7a1d3c', w: 5 }, { c: '#6a1834', w: 2 }], regions: [{ rows: [0, 3], colors: ['#7fb2e0', '#71a6d6'] }] },
     },
     meta: { name: 'Compact Wall', source: 'builtin', country: 'Europe', capacity: 30000, type: 'Single-tier', inspiredBy: 'a single-tier terrace wall', tags: ['single-tier', 'wall', 'compact'] },
   },
@@ -161,6 +167,8 @@ const COMMUNITY: StadiumEntry[] = [
       roof: { coverage: 'ring', reach: 0.6, rise: 9, slope: 1.2, thickness: 1.6, underColor: 0xd7d2c4 },
       facade: { style: 'membrane' },
       lighting: { style: 'roof-rim' },
+      // The colours of the sand: terracotta and ochre in clumps.
+      seatLook: { colors: [{ c: '#c46a32', w: 5 }, { c: '#d98a48', w: 3 }, { c: '#a85628', w: 2 }, { c: '#e3b26a', w: 1 }], grain: { along: 1.5, rows: 2 } },
     },
     meta: { name: 'Desert Arena', source: 'builtin', country: 'Middle East', capacity: 68000, type: 'Two-tier', inspiredBy: 'a modern desert-region arena', tags: ['modern', 'two-tier', 'large'] },
   },
@@ -180,6 +188,8 @@ const COMMUNITY: StadiumEntry[] = [
       // ground this is drawn from would have pylons, not a rim array.
       facade: { style: 'concrete' },
       lighting: { style: 'corner-masts', kelvin: 4400 },
+      // Green, with whole sections of white between them.
+      seatLook: { colors: ['#0f7a3b'], regions: [{ colors: ['#0f7a3b', '#0f7a3b', '#eeeeea'], alternate: true }] },
     },
     meta: { name: 'Roaring Terraces', source: 'builtin', country: 'South America', capacity: 48000, type: 'Single-tier', inspiredBy: 'a single-tier terraced ground', tags: ['single-tier', 'steep', 'atmosphere'] },
   },
@@ -200,6 +210,8 @@ const COMMUNITY: StadiumEntry[] = [
       roof: { coverage: 'ring', reach: 0.72, rise: 5, slope: 1.6 },
       facade: { style: 'cladding' },
       lighting: { style: 'roof-rim' },
+      // Dark grey with the middle tier picked out in red.
+      seatLook: { colors: [{ c: '#33373e', w: 5 }, { c: '#3d424a', w: 2 }], regions: [{ tiers: [1], colors: [{ c: '#c0262d', w: 5 }, { c: '#a91f26', w: 2 }] }] },
     },
     meta: { name: 'Cauldron Dome', source: 'builtin', country: 'Europe', capacity: 62000, type: 'Bowl', inspiredBy: 'a steep three-tier cauldron', tags: ['steep', 'three-tier', 'enclosed', 'atmosphere'] },
   },
@@ -220,6 +232,8 @@ const COMMUNITY: StadiumEntry[] = [
       track: {},
       facade: { style: 'truss' },
       lighting: { style: 'corner-masts', kelvin: 4600 },
+      // The rainbow mix big athletics ovals were built with.
+      seatLook: { colors: [{ c: '#d9382f', w: 2 }, { c: '#f2a01c', w: 2 }, { c: '#2f86d6', w: 2 }, { c: '#26a65b', w: 2 }, { c: '#e4e4e0', w: 1 }], grain: { along: 3, rows: 3 } },
     },
     meta: { name: 'Wide Athletics Oval', source: 'builtin', country: 'International', capacity: 72000, type: 'Oval', inspiredBy: 'a wide running-track oval', tags: ['oval', 'athletics', 'two-tier', 'large'] },
   },

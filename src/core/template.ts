@@ -25,6 +25,8 @@ export const DEFAULT_TEMPLATE: StadiumTemplate = {
   // of this size and age would not have them.
   facade: { style: 'cladding' },
   lighting: { style: 'roof-rim' },
+  // Royal blue, laid in a mosaic of three shades as most modern bowls are.
+  seatLook: { colors: [{ c: '#1d4f9f', w: 6 }, { c: '#2a63b9', w: 3 }, { c: '#163f80', w: 1.5 }], grain: { along: 1.5, rows: 2 } },
 };
 
 /** Steep single-tier kop bowl — the Tottenham-style high-resolution wall. */
@@ -42,6 +44,8 @@ export const KOP_TEMPLATE: StadiumTemplate = {
   // that came with it. 4200 K is metal halide, which is what it would still have.
   facade: { style: 'brick' },
   lighting: { style: 'corner-masts', kelvin: 4200 },
+  // Red, a little faded where the sun has had them, as an old club ground's are.
+  seatLook: { colors: [{ c: '#b51a20', w: 6 }, { c: '#c42a2c', w: 3 }, { c: '#9b161b', w: 1.5 }] },
 };
 
 /**
@@ -67,6 +71,8 @@ export const OVAL_TEMPLATE: StadiumTemplate = {
   lighting: { style: 'side-banks', kelvin: 4800 },
   // An athletics oval: 118 x 92 m of plan comfortably holds a 400 m track.
   track: {},
+  // A municipal oval's multicoloured mix: greys with flecks of blue and orange.
+  seatLook: { colors: [{ c: '#c9ccd0', w: 4 }, { c: '#8e949b', w: 3 }, { c: '#2c6db3', w: 2 }, { c: '#e8912f', w: 1 }], grain: { along: 2, rows: 2 } },
 };
 
 /** All known stadiums. New bowls are data entries here — no code changes. */

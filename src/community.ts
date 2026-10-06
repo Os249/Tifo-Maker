@@ -548,7 +548,7 @@ async function mountPreview3D(item: GalleryItem): Promise<void> {
     const host = document.getElementById('modal-3d-host');
     if (!host) return;
     host.innerHTML = '';
-    const preview = new Preview3D(host, map, store);
+    const preview = new Preview3D(host, map, store, { template: templateById(tpl) ?? null });
     activePreview = preview;
     preview.start();
     // camera preset buttons

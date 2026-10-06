@@ -236,13 +236,16 @@ export function buildJewel(template: StadiumTemplate, shadows: boolean): JewelBu
   crownGeo.setIndex(idx);
   crownGeo.computeVertexNormals();
   const crown = new THREE.Mesh(crownGeo, membrane);
+  crown.name = 'roof-crown';
   crown.castShadow = shadows;
   group.add(crown);
   const deckGeo = new THREE.BufferGeometry();
   deckGeo.setAttribute('position', new THREE.Float32BufferAttribute(deckPos, 3));
   deckGeo.setIndex(deckIdx);
   deckGeo.computeVertexNormals();
-  group.add(new THREE.Mesh(deckGeo, deck));
+  const deckMesh = new THREE.Mesh(deckGeo, deck);
+  deckMesh.name = 'roof-deck';
+  group.add(deckMesh);
   trash.push(crownGeo, deckGeo);
 
   // ---- steel: trusses, compression ring, arches and legs -----------------

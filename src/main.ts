@@ -610,7 +610,10 @@ async function main(): Promise<void> {
     if (loading) return null;
     loading = true;
     const { Preview3D, CAMERA_PRESETS } = await import('./render/preview3d');
-    preview = new Preview3D(previewHost, map, store);
+    const q = bootParams.get('quality');
+    preview = new Preview3D(previewHost, map, store, { template, quality: q === 'low' || q === 'medium' || q === 'high' ? q : undefined });
+    // The tests and the perf harness read the view's census through this.
+    if (bootParams.has('e2e')) (window as unknown as { __tifoPreview: unknown }).__tifoPreview = preview;
     // Banners belong in the editor's own bowl, not only in Match Day. A sheet
     // you can only see by opening another view is a sheet you design blind.
     preview.attachBanners(bannerStore, template);
@@ -683,6 +686,9 @@ async function main(): Promise<void> {
       p = preview;
     }
     if (!p) return null;
+    // The building streams in after the view opens: wait for it (briefly), so
+    // the picture is of the stadium and not of cards on a pitch.
+    await Promise.race([p.ready, new Promise((r) => setTimeout(r, 8000))]);
     await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
     return p.captureStill(1080);
   };
