@@ -399,6 +399,18 @@ CREATE TABLE IF NOT EXISTS design_scenes (
 ALTER TABLE designs ADD COLUMN IF NOT EXISTS pinned         BOOLEAN NOT NULL DEFAULT false;
 ALTER TABLE designs ADD COLUMN IF NOT EXISTS deleted_at     TIMESTAMPTZ;
 ALTER TABLE designs ADD COLUMN IF NOT EXISTS trashed_public BOOLEAN NOT NULL DEFAULT false;
+-- Taken down by a moderator (audit round four). Until this column, a takedown
+-- only made a design private, and its owner could publish it again in one
+-- request. Set once, never cleared by the owner; every path that can publish
+-- (patch, restore) refuses while it is set.
+ALTER TABLE designs ADD COLUMN IF NOT EXISTS taken_down_at TIMESTAMPTZ;
 ALTER TABLE designs ADD COLUMN IF NOT EXISTS origin         TEXT;
 CREATE INDEX IF NOT EXISTS designs_owner_updated_idx ON designs (owner_id, updated_at DESC);
 CREATE INDEX IF NOT EXISTS designs_trash_idx ON designs (deleted_at) WHERE deleted_at IS NOT NULL;
+
+-- Usernames are unique ignoring case (audit round four): the column's UNIQUE
+-- is case-sensitive, so "Alice" could be registered next to "alice". The
+-- repository refuses a case variant on every write; this index makes it a
+-- fact of the table. If an existing database already holds a pair, this one
+-- statement is skipped at boot (logged) and the repository check still holds.
+CREATE UNIQUE INDEX IF NOT EXISTS users_username_lower_idx ON users (lower(username));

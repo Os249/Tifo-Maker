@@ -47,11 +47,11 @@ window.SITE_EXPORT = async ({ key, template, lat, lon, main, radius = 520, twist
       continue;
     }
     if (!e.geometry) continue;
-    // Dense English streets: drop the vertices a building does not need
+    // Dense English and Spanish streets: drop the vertices a building does not need
     // (closer than 0.4 m to the line through its neighbours), which halves
     // the file without moving a wall.
     let geom = e.geometry;
-    if (style === 'uk' && geom.length > 4) {
+    if ((style === 'uk' || style === 'es') && geom.length > 4) {
       const pts = geom.map(en);
       const keep = [pts[0]];
       for (let i = 1; i < pts.length - 1; i++) {

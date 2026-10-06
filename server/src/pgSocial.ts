@@ -86,8 +86,13 @@ export class PgSocialRepository implements SocialRepository {
       [followerId, followeeId],
     );
     if ((res.rowCount ?? 0) > 0) {
+      // Once per follower, ever: unfollow-follow in a loop used to put a new
+      // notification in the victim's bell every time (audit round four).
       await this.pool.query(
-        `INSERT INTO notifications (user_id, actor_id, kind) VALUES ($1, $2, 'new_follower')`,
+        `INSERT INTO notifications (user_id, actor_id, kind)
+         SELECT $1, $2, 'new_follower'
+         WHERE NOT EXISTS (SELECT 1 FROM notifications
+                           WHERE user_id = $1 AND actor_id = $2 AND kind = 'new_follower')`,
         [followeeId, followerId],
       );
     }
@@ -131,9 +136,12 @@ export class PgSocialRepository implements SocialRepository {
               (SELECT count(*)::int FROM follows WHERE follower_id = u.id) AS following,
               (SELECT count(*)::int FROM designs WHERE owner_id = u.id AND is_public) AS designs
        FROM users u
-       WHERE lower(u.username) LIKE $1 OR lower(coalesce(u.handle,'')) LIKE $1
+       -- A name we invented from an email is not public until its owner picks
+       -- one (audit round four), and the search text is a prefix, not a pattern.
+       WHERE u.username_chosen IS NOT FALSE
+         AND (lower(u.username) LIKE $1 ESCAPE '\\' OR lower(coalesce(u.handle,'')) LIKE $1 ESCAPE '\\')
        ORDER BY followers DESC LIMIT $2`,
-      [`${q}%`, limit],
+      [`${q.replace(/[\\%_]/g, (c) => `\\${c}`)}%`, limit],
     );
     return res.rows.map((r) => ({
       id: String(r.id),
@@ -255,8 +263,13 @@ export class PgSocialRepository implements SocialRepository {
    */
   async notifyFollowersOfPost(authorId: string, designId: string): Promise<void> {
     await this.pool.query(
+      // Once per design per follower: publishing, unpublishing and publishing
+      // again does not tell everyone again (audit round four).
       `INSERT INTO notifications (user_id, actor_id, kind, design_id)
-       SELECT f.follower_id, $1, 'follow_post', $2 FROM follows f WHERE f.followee_id = $1`,
+       SELECT f.follower_id, $1, 'follow_post', $2 FROM follows f
+       WHERE f.followee_id = $1
+         AND NOT EXISTS (SELECT 1 FROM notifications n
+                         WHERE n.user_id = f.follower_id AND n.kind = 'follow_post' AND n.design_id = $2)`,
       [authorId, designId],
     );
   }
@@ -280,7 +293,7 @@ export class PgSocialRepository implements SocialRepository {
               a.username AS actor_name, d.title AS design_title
        FROM notifications n
        LEFT JOIN users a ON a.id = n.actor_id
-       LEFT JOIN designs d ON d.id = n.design_id
+       LEFT JOIN designs d ON d.id = n.design_id AND (d.is_public OR d.owner_id = n.user_id)
        WHERE n.user_id = $1 ORDER BY n.created_at DESC LIMIT $2`,
       [userId, limit],
     );

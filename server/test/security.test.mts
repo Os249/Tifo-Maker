@@ -536,7 +536,7 @@ async function makeDesign(app: FastifyInstance, token: string, isPublic = false)
     const statuses: number[] = [];
     for (let i = 0; i < 6; i++) {
       const target = i % 2 === 0 ? 'victim@example.test' : `decoy${i}@example.test`;
-      statuses.push((await app.inject({ method: 'POST', url: '/api/account/email', headers: bearer(attacker.token), payload: { email: target } })).statusCode);
+      statuses.push((await app.inject({ method: 'POST', url: '/api/account/email', headers: bearer(attacker.token), payload: { email: target, password: 'quartz-lantern-echo7' } })).statusCode);
     }
     const toVictim = sent.filter((m) => m.to === 'victim@example.test').length - before;
     assert.equal(toVictim, 1, `alternating addresses still reaches the victim once a minute at most (got ${toVictim})`);
@@ -549,7 +549,7 @@ async function makeDesign(app: FastifyInstance, token: string, isPublic = false)
     const prober = await reg(app, 'email_prober'); // the signup email is one of the ten
     const probes: number[] = [];
     for (let i = 0; i < 12; i++) {
-      probes.push((await app.inject({ method: 'POST', url: '/api/account/email', headers: bearer(prober.token), payload: { email: 'listed@example.test' } })).statusCode);
+      probes.push((await app.inject({ method: 'POST', url: '/api/account/email', headers: bearer(prober.token), payload: { email: 'listed@example.test', password: 'quartz-lantern-echo7' } })).statusCode);
     }
     assert.equal(probes.filter((c) => c === 409).length, 9, `nine lookups, then the account is out of allowance (${probes.join(',')})`);
     assert.equal(probes.at(-1), 429);
@@ -959,13 +959,14 @@ async function makeDesign(app: FastifyInstance, token: string, isPublic = false)
       /** Walk the whole flow and return the final redirect plus its cookies. */
       const signInWith = async (
         profile: Record<string, unknown>,
-        opts: { returnTo?: string; claim?: boolean; bearer?: string; link?: boolean } = {},
+        opts: { returnTo?: string; claim?: boolean; bearer?: string; link?: boolean; password?: string } = {},
       ) => {
         const start = opts.link
           ? await gApp.inject({
               method: 'POST',
               url: `/api/account/link/google?returnTo=${encodeURIComponent(opts.returnTo ?? '/account')}`,
               headers: bearer(opts.bearer!),
+              payload: opts.password ? { password: opts.password } : {},
             })
           : await gApp.inject({
               method: 'GET',
@@ -1306,6 +1307,7 @@ async function makeDesign(app: FastifyInstance, token: string, isPublic = false)
         method: 'POST',
         url: '/api/account/link/google?returnTo=%2Faccount',
         headers: bearer(afterSet),
+        payload: { password: 'quartz-lantern-echo7' },
       });
       assert.equal(linkStart.statusCode, 200);
       const linkState = new URL((linkStart.json() as { url: string }).url).searchParams.get('state')!;
@@ -1322,6 +1324,7 @@ async function makeDesign(app: FastifyInstance, token: string, isPublic = false)
         method: 'POST',
         url: '/api/account/link/google?returnTo=%2Faccount',
         headers: bearer(linkedTok.token),
+        payload: { password: 'thistle-anchor-92x' },
       });
       nextProfile = { sub: 'g-relink', email: 'newfan@example.test', email_verified: true };
       const stealBack = await gApp.inject({
@@ -1510,4 +1513,419 @@ async function makeDesign(app: FastifyInstance, token: string, isPublic = false)
       if (v === undefined) delete process.env[k]; else process.env[k] = v;
     }
   }
+}
+
+// ============================================================================
+// Audit round four (October 2026). Every block below is an exploit that worked
+// against commit fc8ddd7, now asserted to fail. See SECURITY-AUDIT.md.
+// ============================================================================
+{
+  const { MemoryAiUsageRepository, MemoryAiEventsRepository } = await import('../src/memoryRepo');
+  const { MemoryDailyFeatureRepository } = await import('../src/featureRepo');
+  const { issueToken, TOKEN_TTL_MS } = await import('../src/auth');
+  const { existsSync } = await import('node:fs');
+  const PW = 'quartz-lantern-echo7';
+  const PNG_B64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+
+  // A fake Google, the way the round-three OAuth test does it.
+  let nextProfile: Record<string, unknown> | null = null;
+  let geminiCalls = 0;
+  const realFetch = globalThis.fetch;
+  const asJson = (body: unknown, status = 200): Response => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input instanceof Request ? input.url : input);
+    if (url.startsWith('https://oauth2.googleapis.com/token')) return asJson({ access_token: 'stub' });
+    if (url.startsWith('https://openidconnect.googleapis.com/v1/userinfo')) return nextProfile ? asJson(nextProfile) : asJson({ error: 'x' }, 500);
+    if (url.includes('generativelanguage.googleapis.com')) {
+      geminiCalls++;
+      const text = JSON.stringify({ tiers: 2, roof: 'partial', track: false, floodlights: 'roof', facade: 'concrete' });
+      return asJson({ candidates: [{ content: { parts: [{ text }] }, finishReason: 'STOP' }] });
+    }
+    return realFetch(input as RequestInfo, init);
+  }) as typeof fetch;
+  const savedEnv = { key: process.env.GEMINI_API_KEY, prov: process.env.AI_PROVIDER, budget: process.env.AI_DAILY_BUDGET };
+  process.env.GEMINI_API_KEY = 'AIzaSyTESTKEY0000000000';
+  process.env.AI_PROVIDER = 'gemini';
+  process.env.AI_DAILY_BUDGET = '1000';
+
+  try {
+    const mail: { to: string; subject: string; text: string }[] = [];
+    const auth = new MemoryAuthRepository();
+    const designs = new MemoryDesignRepository((id) => auth.usernameOf(id));
+    const social = new MemorySocialRepository(designs, auth);
+    const leads = new MemoryLeadsRepository();
+    const featured = new MemoryDailyFeatureRepository();
+    const app = await buildApp(designs, auth, templates, {
+      social, leads, featured,
+      adminUsernames: ['mod_r4'],
+      oauth: { google: { id: 'cid', secret: 'csecret' } },
+      emailSender: { async send(m: { to: string; subject: string; text?: string }) { mail.push({ to: m.to, subject: m.subject, text: m.text ?? '' }); } },
+      verifyResendCooldownMs: 0,
+      aiUsage: new MemoryAiUsageRepository(),
+      aiEvents: new MemoryAiEventsRepository((id) => auth.usernameOf(id)),
+      ...(existsSync('dist/index.html') ? { staticDir: (await import('node:path')).resolve('dist') } : {}),
+    } as Parameters<typeof buildApp>[3]);
+    const r4 = async (u: string, email = `${u}@example.test`): Promise<{ token: string; id: string }> => {
+      const r = await app.inject({ method: 'POST', url: '/api/auth/register', payload: { username: u, password: PW, email, acceptedVersion: 'test' } });
+      assert.equal(r.statusCode, 201, r.body);
+      const token = (r.json() as { token: string }).token;
+      return { token, id: (await app.inject({ method: 'GET', url: '/api/me', headers: bearer(token) })).json().id as string };
+    };
+    const design = async (token: string, pub: boolean, title = 'D'): Promise<string> => {
+      const d = await app.inject({ method: 'POST', url: '/api/designs', headers: bearer(token), payload: { title, templateId: DEFAULT_TEMPLATE.id, templateVersion: 1, palette: PALETTE, cellsGzB64, thumbnailPngB64: PNG_B64 } });
+      const id = (d.json() as { id: string }).id;
+      if (pub) assert.equal((await app.inject({ method: 'PATCH', url: `/api/designs/${id}`, headers: bearer(token), payload: { isPublic: true } })).statusCode, 200);
+      return id;
+    };
+    const jar = (res: { headers: Record<string, unknown> }): Map<string, string> => {
+      const raw = res.headers['set-cookie'];
+      const lines = Array.isArray(raw) ? (raw as string[]) : raw ? [String(raw)] : [];
+      const out = new Map<string, string>();
+      for (const line of lines) { const [pair] = line.split(';'); const eq = pair!.indexOf('='); out.set(pair!.slice(0, eq), decodeURIComponent(pair!.slice(eq + 1))); }
+      return out;
+    };
+    const cookie = (j: Map<string, string>): string => [...j].map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join('; ');
+    /** Finish a Google round trip that was started by `start`. */
+    const finish = async (start: { headers: Record<string, unknown>; json: () => unknown }, profile: Record<string, unknown>, link: boolean) => {
+      const authorize = link ? (start.json() as { url: string }).url : String(start.headers.location);
+      nextProfile = profile;
+      return app.inject({ method: 'GET', url: `/api/auth/google/callback?code=c&state=${encodeURIComponent(new URL(authorize).searchParams.get('state')!)}`, headers: { cookie: cookie(jar(start)) } });
+    };
+    const linkStart = (token: string, password?: string) =>
+      app.inject({ method: 'POST', url: '/api/account/link/google?returnTo=%2Faccount', headers: bearer(token), payload: password ? { password } : {} });
+    const verifyNow = async (id: string): Promise<void> => { await auth.markEmailVerified(id); };
+
+    // ---- HIGH: pre-sign-up takeover by linking Google to an unverified account ----
+    const squat = await r4('v_fan_r4', 'victim.r4@example.test');
+    const early = await linkStart(squat.token, PW);
+    assert.equal(early.statusCode, 403, 'an account whose email is unverified cannot connect another sign-in');
+    assert.equal((early.json() as { code: string }).code, 'verify_first');
+    // …and a reset (how the real owner takes the account back) removes any link already there.
+    await verifyNow(squat.id);
+    const linked = await finish(await linkStart(squat.token, PW), { sub: 'g-squatter', email: 'someone@gmail.test', email_verified: true }, true);
+    assert.match(String(linked.headers.location), /linked=google/);
+    assert.deepEqual(await auth.identitiesFor(squat.id), ['google']);
+    await app.inject({ method: 'POST', url: '/api/auth/forgot', payload: { email: 'victim.r4@example.test' } });
+    await app.drainBackground();
+    const resetTok = /reset\?token=([a-f0-9]+)/.exec(mail.filter((m) => m.to === 'victim.r4@example.test').at(-1)!.text)![1];
+    assert.equal((await app.inject({ method: 'POST', url: '/api/auth/reset', payload: { token: resetTok, newPassword: 'owner-takes-it-back-9' } })).statusCode, 200);
+    assert.deepEqual(await auth.identitiesFor(squat.id), [], 'a reset removes every connected sign-in');
+    const squatterBack = await finish(await app.inject({ method: 'GET', url: '/api/auth/google?returnTo=%2Fapp' }), { sub: 'g-squatter', email: 'someone@gmail.test', email_verified: true }, false);
+    const squatterSession = jar(squatterBack).get('tm_handoff');
+    if (squatterSession) {
+      const h = await app.inject({ method: 'POST', url: '/api/auth/handoff', headers: { cookie: `tm_handoff=${encodeURIComponent(squatterSession)}` } });
+      const meNow = (await app.inject({ method: 'GET', url: '/api/me', headers: bearer((h.json() as { token: string }).token) })).json() as { id: string };
+      assert.notEqual(meNow.id, squat.id, 'the old Google sign-in no longer opens the account');
+    }
+
+    // ---- MEDIUM: a stolen session alone could cut a permanent second key ----
+    const alice = await r4('alice_r4');
+    await verifyNow(alice.id);
+    assert.equal((await linkStart(alice.token)).statusCode, 401, 'connecting needs the current password');
+    assert.equal((await linkStart(alice.token, 'wrong-password-here')).statusCode, 401);
+    // A link started before the owner changed the password cannot finish afterwards.
+    const started = await linkStart(alice.token, PW);
+    assert.equal(started.statusCode, 200);
+    const changed = await app.inject({ method: 'POST', url: '/api/account/password', headers: bearer(alice.token), payload: { currentPassword: PW, newPassword: 'fresh-harbor-lantern-4' } });
+    assert.equal(changed.statusCode, 200);
+    const late = await finish(started, { sub: 'g-thief', email: 'thief@gmail.test', email_verified: true }, true);
+    assert.match(String(late.headers.location), /reason=state/, 'the link died with the session that started it');
+    assert.deepEqual(await auth.identitiesFor(alice.id), []);
+    // The owner hears about a link that does go through.
+    const aliceTok2 = (changed.json() as { token: string }).token;
+    const before = mail.length;
+    await finish(await linkStart(aliceTok2, 'fresh-harbor-lantern-4'), { sub: 'g-alice', email: 'alice.g@gmail.test', email_verified: true }, true);
+    await app.drainBackground();
+    assert.ok(mail.slice(before).some((m) => m.to === 'alice_r4@example.test' && /security notice/i.test(m.subject) && /Google sign-in was connected/.test(m.text)), 'a security notice goes to the account');
+
+    // ---- LOW: the handoff cookie was a 30-day session, and could be traded twice ----
+    const fresh = await finish(await app.inject({ method: 'GET', url: '/api/auth/google?returnTo=%2Fapp' }), { sub: 'g-newcomer-r4', email: 'newcomer.r4@gmail.test', email_verified: true }, false);
+    const ticket = jar(fresh).get('tm_handoff')!;
+    assert.ok(ticket);
+    assert.equal((await app.inject({ method: 'GET', url: '/api/me', headers: bearer(ticket) })).statusCode, 401, 'the ticket is not a session');
+    const trades = await Promise.all([1, 2].map(() => app.inject({ method: 'POST', url: '/api/auth/handoff', headers: { cookie: `tm_handoff=${encodeURIComponent(ticket)}` } })));
+    assert.deepEqual(trades.map((t) => t.statusCode).sort(), [200, 401], 'only one trade of a ticket gets a session');
+
+    // ---- LOW: a forged line in the log through the provider's error parameter ----
+    {
+      const lines: string[] = [];
+      const realError = console.error;
+      console.error = (...a: unknown[]) => { lines.push(a.map(String).join(' ')); };
+      try {
+        const start = await app.inject({ method: 'GET', url: '/api/auth/google?returnTo=%2Fapp' });
+        const state = new URL(String(start.headers.location)).searchParams.get('state')!;
+        await app.inject({ method: 'GET', url: `/api/auth/google/callback?error=x%0A[tifo]%20admin%20login%20ok&state=${state}`, headers: { cookie: cookie(jar(start)) } });
+      } finally {
+        console.error = realError;
+      }
+      assert.ok(lines.length > 0 && lines.every((l) => !l.includes('\n')), `no newline reaches the log (${JSON.stringify(lines)})`);
+    }
+
+    // ---- MEDIUM: verifying the account, not the address the mail went to ----
+    {
+      const sly = await r4('sly_r4', 'sly.own@example.test');
+      const firstMail = mail.filter((m) => m.to === 'sly.own@example.test').at(-1)!;
+      const heldLink = /verify\?token=([a-f0-9]+)/.exec(firstMail.text)![1];
+      const heldCode = /: (\d{6})/.exec(firstMail.text)![1];
+      assert.equal((await app.inject({ method: 'POST', url: '/api/account/email', headers: bearer(sly.token), payload: { email: 'not.mine.r4@example.test', password: PW } })).statusCode, 200);
+      const viaLink = await app.inject({ method: 'GET', url: `/api/auth/verify?token=${heldLink}` });
+      assert.match(String(viaLink.headers.location), /verified=0/, "a link for the old address does not verify the new one");
+      const viaCode = await app.inject({ method: 'POST', url: '/api/auth/verify/code', headers: bearer(sly.token), payload: { code: heldCode } });
+      assert.equal(viaCode.statusCode, 400, 'nor does its code');
+      assert.equal((await app.inject({ method: 'GET', url: '/api/me', headers: bearer(sly.token) })).json().emailVerified, false);
+      // A real link for the current address still works.
+      const current = mail.filter((m) => m.to === 'not.mine.r4@example.test').at(-1)!;
+      const okLink = /verify\?token=([a-f0-9]+)/.exec(current.text)![1];
+      assert.match(String((await app.inject({ method: 'GET', url: `/api/auth/verify?token=${okLink}` })).headers.location), /verified=1/);
+    }
+
+    // ---- LOW: change email with a session alone, silently, and a reset link outliving it ----
+    {
+      const carol = await r4('carol_r4');
+      await verifyNow(carol.id); // only a verified address is told about a change
+      await app.inject({ method: 'POST', url: '/api/auth/forgot', payload: { email: 'carol_r4@example.test' } });
+      await app.drainBackground();
+      const oldReset = /reset\?token=([a-f0-9]+)/.exec(mail.filter((m) => m.to === 'carol_r4@example.test').at(-1)!.text)![1];
+      assert.equal((await app.inject({ method: 'POST', url: '/api/account/email', headers: bearer(carol.token), payload: { email: 'carol.thief@example.test' } })).statusCode, 401, 'moving the address needs the password');
+      const n = mail.length;
+      assert.equal((await app.inject({ method: 'POST', url: '/api/account/email', headers: bearer(carol.token), payload: { email: 'carol.new@example.test', password: PW } })).statusCode, 200);
+      await app.drainBackground();
+      assert.ok(mail.slice(n).some((m) => m.to === 'carol_r4@example.test' && /c•••@example\.test/.test(m.text)), `the old address is told where the account went ${JSON.stringify(mail.slice(n).map((m) => [m.to, m.subject, m.text.slice(0, 200)]))}`);
+      assert.equal((await app.inject({ method: 'POST', url: '/api/auth/reset', payload: { token: oldReset, newPassword: 'some-new-lantern-77' } })).statusCode, 400, 'a reset link sent before the move is dead');
+    }
+
+    // ---- MEDIUM: the Host allow-list checked only the part before the colon ----
+    {
+      const dave = await r4('dave_r4');
+      void dave;
+      const n = mail.length;
+      await app.inject({ method: 'POST', url: '/api/auth/forgot', payload: { email: 'dave_r4@example.test' }, headers: { host: 'tifomaker.org:@evil.example' } });
+      await app.drainBackground();
+      const link = /(\S+\/reset\?token=)/.exec(mail.slice(n).find((m) => m.to === 'dave_r4@example.test')!.text)![1];
+      assert.ok(!link.includes('evil'), `a forged Host does not reach the reset link (${link})`);
+      assert.ok(link.startsWith('https://tifomaker.org/'), link);
+      if (existsSync('dist/index.html')) {
+        const page = await app.inject({ method: 'GET', url: '/community', headers: { host: 'localhost:"><img src=x onerror=alert(1)>' } });
+        assert.ok(!page.body.includes('<img src=x'), 'nor the page HTML');
+      }
+    }
+
+    // ---- HIGH: a moderator's takedown undone by its owner ----
+    {
+      const troll = await r4('troll_r4');
+      const mod = await r4('mod_r4');
+      const bad = await design(troll.token, true, 'Offensive');
+      assert.equal((await app.inject({ method: 'POST', url: `/api/admin/designs/${bad}/takedown`, headers: bearer(mod.token) })).statusCode, 200);
+      const again = await app.inject({ method: 'PATCH', url: `/api/designs/${bad}`, headers: bearer(troll.token), payload: { isPublic: true } });
+      assert.equal(again.statusCode, 403, 'publishing it again is refused');
+      assert.equal((await app.inject({ method: 'GET', url: `/api/gallery/${bad}` })).statusCode, 404);
+      // Through the Trash.
+      const bad2 = await design(troll.token, true, 'Offensive 2');
+      await app.inject({ method: 'DELETE', url: `/api/designs/${bad2}`, headers: bearer(troll.token) });
+      await app.inject({ method: 'POST', url: `/api/admin/designs/${bad2}/takedown`, headers: bearer(mod.token) });
+      const restored = (await app.inject({ method: 'POST', url: `/api/designs/${bad2}/restore`, headers: bearer(troll.token) })).json() as { isPublic: boolean };
+      assert.equal(restored.isPublic, false, 'restoring it from the Trash leaves it private');
+      // Through a copy.
+      const copy = (await app.inject({ method: 'POST', url: `/api/designs/${bad}/fork`, headers: bearer(troll.token) })).json() as { id: string };
+      assert.equal((await app.inject({ method: 'PATCH', url: `/api/designs/${copy.id}`, headers: bearer(troll.token), payload: { isPublic: true } })).statusCode, 403, 'publishing a copy is refused too');
+      // And the repository refuses even if a route forgot to.
+      await designs.patchMeta(bad, { isPublic: true });
+      assert.equal((await designs.get(bad))!.isPublic, false);
+
+      // ---- MEDIUM: Tifo of the day kept showing it until midnight ----
+      const star = await r4('star_r4');
+      const starred = await design(star.token, true, 'Featured then gone');
+      const today = (await app.inject({ method: 'GET', url: '/api/featured/today' })).json() as { item: { id: string } | null };
+      if (today.item?.id === starred) {
+        await app.inject({ method: 'POST', url: `/api/admin/designs/${starred}/takedown`, headers: bearer(mod.token) });
+        const after = (await app.inject({ method: 'GET', url: '/api/featured/today' })).json() as { item: { id: string } | null };
+        assert.notEqual(after.item?.id, starred, 'a taken-down design leaves the home page at once');
+      } else {
+        // Whatever was picked, taking it down removes it.
+        const picked = today.item!.id;
+        await app.inject({ method: 'POST', url: `/api/admin/designs/${picked}/takedown`, headers: bearer(mod.token) });
+        const after = (await app.inject({ method: 'GET', url: '/api/featured/today' })).json() as { item: { id: string } | null };
+        assert.notEqual(after.item?.id, picked, 'a taken-down design leaves the home page at once');
+      }
+
+      // ---- MEDIUM: admin rights followed a name its owner could give up ----
+      const renamed = await app.inject({ method: 'POST', url: '/api/account/username', headers: bearer(mod.token), payload: { username: 'mod_r4_old' } });
+      assert.equal(renamed.statusCode, 403, 'an admin account keeps its name');
+      assert.equal((await app.inject({ method: 'DELETE', url: '/api/account', headers: bearer(mod.token) })).statusCode, 403, 'and is not deleted from the account page');
+    }
+
+    // ---- MEDIUM: a private source's title on a public remix card ----
+    {
+      const src = await r4('src_r4');
+      const rem = await r4('rem_r4');
+      const original = await design(src.token, true, 'Original');
+      const remix = (await app.inject({ method: 'POST', url: `/api/designs/${original}/remix`, headers: bearer(rem.token), payload: {} })).json() as { id: string };
+      await app.inject({ method: 'PATCH', url: `/api/designs/${remix.id}`, headers: bearer(rem.token), payload: { isPublic: true } });
+      await app.inject({ method: 'PATCH', url: `/api/designs/${original}`, headers: bearer(src.token), payload: { isPublic: false, title: 'SECRET: surprise for block C' } });
+      const card = (await app.inject({ method: 'GET', url: `/api/gallery/${remix.id}` })).json() as { remixedFromTitle: string | null };
+      assert.equal(card.remixedFromTitle, null, "a private source's title is not shown");
+
+      // ---- LOW: fork ignored "no remixes" ----
+      const closed = await design(src.token, true, 'Mine alone');
+      await app.inject({ method: 'PUT', url: `/api/designs/${closed}/publish-meta`, headers: bearer(src.token), payload: { allowRemix: false } });
+      assert.equal((await app.inject({ method: 'POST', url: `/api/designs/${closed}/fork`, headers: bearer(rem.token) })).statusCode, 403, 'fork honours allowRemix');
+      assert.equal((await app.inject({ method: 'POST', url: `/api/designs/${closed}/fork`, headers: bearer(src.token) })).statusCode, 201, 'the owner can still copy their own');
+    }
+
+    // ---- MEDIUM: unverified throwaway accounts deciding the likes ----
+    {
+      const sock = await r4('sock_r4');
+      const fan = await r4('fan_r4');
+      const target = await design(fan.token, true, 'Something');
+      assert.equal((await app.inject({ method: 'POST', url: `/api/designs/${target}/vote`, headers: bearer(sock.token), payload: { value: 1 } })).statusCode, 403, 'an unverified account cannot vote');
+      assert.equal((await app.inject({ method: 'POST', url: `/api/designs/${target}/vote`, headers: bearer(sock.token), payload: { value: 0 } })).statusCode, 200, 'but can take a vote back');
+      await verifyNow(sock.id);
+      assert.equal((await app.inject({ method: 'POST', url: `/api/designs/${target}/vote`, headers: bearer(sock.token), payload: { value: 1 } })).statusCode, 200, 'a verified account votes');
+
+      // ---- LOW: notification spam ----
+      for (let i = 0; i < 5; i++) {
+        await app.inject({ method: 'POST', url: `/api/users/${fan.id}/follow`, headers: bearer(sock.token) });
+        await app.inject({ method: 'DELETE', url: `/api/users/${fan.id}/follow`, headers: bearer(sock.token) });
+      }
+      const fanNotes = (await app.inject({ method: 'GET', url: '/api/notifications', headers: bearer(fan.token) })).json() as { items: { kind: string }[] };
+      assert.equal(fanNotes.items.filter((n) => n.kind === 'new_follower').length, 1, 'following five times tells them once');
+      await app.inject({ method: 'POST', url: `/api/users/${fan.id}/follow`, headers: bearer(sock.token) });
+      for (let i = 0; i < 3; i++) {
+        await app.inject({ method: 'PATCH', url: `/api/designs/${target}`, headers: bearer(fan.token), payload: { isPublic: false } });
+        await app.inject({ method: 'PATCH', url: `/api/designs/${target}`, headers: bearer(fan.token), payload: { isPublic: true } });
+      }
+      const sockNotes = (await app.inject({ method: 'GET', url: '/api/notifications', headers: bearer(sock.token) })).json() as { items: { kind: string }[] };
+      assert.equal(sockNotes.items.filter((n) => n.kind === 'follow_post').length, 1, 'republishing does not tell followers again');
+
+      // ---- LOW: anonymous view and share inflation ----
+      for (let i = 0; i < 10; i++) await app.inject({ method: 'POST', url: `/api/designs/${target}/view` });
+      for (let i = 0; i < 10; i++) await app.inject({ method: 'POST', url: `/api/designs/${target}/share`, payload: { platform: 'whatsapp' } });
+      const stats = (await app.inject({ method: 'GET', url: `/api/designs/${target}/stats` })).json() as { views: number; shares: number };
+      assert.equal(stats.views, 1, 'ten views from one visitor count once a day');
+      assert.equal(stats.shares, 1, 'and so do ten shares');
+
+      // ---- LOW: flooding the moderation queue ----
+      const { randomUUID } = await import('node:crypto');
+      assert.equal((await app.inject({ method: 'POST', url: '/api/report', payload: { targetType: 'design', targetId: randomUUID(), reason: 'spam' } })).statusCode, 404, 'a report on nothing is refused');
+      for (let i = 0; i < 5; i++) await app.inject({ method: 'POST', url: '/api/report', headers: bearer(sock.token), payload: { targetType: 'design', targetId: target, reason: 'spam' } });
+      const mod = await auth.getUserByName('mod_r4');
+      const modTok = issueToken();
+      await auth.createToken(mod!.id, modTok.tokenHash, new Date(Date.now() + TOKEN_TTL_MS));
+      const reports = (await app.inject({ method: 'GET', url: '/api/admin/reports', headers: bearer(modTok.token) })).json() as { targetId: string }[];
+      assert.equal(reports.filter((r) => r.targetId === target).length, 1, 'one reporter, one report');
+    }
+
+    // ---- LOW: a placeholder handle published through routes outside requireUser ----
+    {
+      const { deriveUsername } = await import('../../src/core/handle');
+      const u = (await auth.createUser(deriveUsername('jane.private.r4@gmail.test', 0), null, { email: 'jane.private.r4@gmail.test', emailVerified: true, usernameChosen: false }))!;
+      const t = issueToken();
+      await auth.createToken(u.id, t.tokenHash, new Date(Date.now() + TOKEN_TTL_MS));
+      const someone = await r4('pub_r4');
+      const pub = await design(someone.token, true, 'Public one');
+      assert.equal((await app.inject({ method: 'POST', url: `/api/designs/${pub}/fork`, headers: bearer(t.token) })).statusCode, 428, 'fork is behind the wall');
+      const search = (await app.inject({ method: 'GET', url: `/api/users/search?q=${u.username.slice(0, 4)}`, headers: bearer(someone.token) })).json() as { username: string }[];
+      assert.ok(!search.some((x) => x.username === u.username), 'and the placeholder is not searchable');
+    }
+
+    // ---- MEDIUM: one account draining the site-wide premium AI budget ----
+    {
+      const reader = await r4('reader_r4');
+      await verifyNow(reader.id);
+      const img = 'data:image/jpeg;base64,' + Buffer.alloc(3000, 7).toString('base64');
+      const statuses: number[] = [];
+      for (let i = 0; i < 6; i++) {
+        statuses.push((await app.inject({ method: 'POST', url: '/api/stadium/photo', headers: bearer(reader.token), payload: { image: img, samples: 8 } })).statusCode);
+      }
+      assert.ok(geminiCalls <= 24, `one free account gets 24 photo readings a day, not the whole budget (${geminiCalls} calls, ${statuses.join(',')})`);
+      assert.equal(statuses.at(-1), 503);
+    }
+
+    // ---- MEDIUM: scene stripping on every anonymous view; revisions without end ----
+    {
+      const owner = await r4('scene_r4');
+      const pub = await design(owner.token, true, 'Fat scene');
+      const layers = Array.from({ length: 40000 }, (_, i) => ({ id: `l${i}`, kind: 'text', text: `layer ${i} ${Math.random()}` }));
+      const sceneGzB64 = gzipSync(Buffer.from(JSON.stringify({ v: 1, banners: [{ text: 'hi' }], layers }))).toString('base64');
+      assert.equal((await app.inject({ method: 'PUT', url: `/api/designs/${pub}/scene`, headers: bearer(owner.token), payload: { sceneGzB64 } })).statusCode, 200);
+      // A second design with its own scene warms the stripping path first, so
+      // the comparison below is cold-cache against warm-cache, not JIT warm-up.
+      const warm = await design(owner.token, true, 'Warm-up');
+      const warmScene = gzipSync(Buffer.from(JSON.stringify({ v: 1, banners: [], layers: layers.slice(0, 20000).map((l) => ({ ...l, text: l.text + 'w' })) }))).toString('base64');
+      await app.inject({ method: 'PUT', url: `/api/designs/${warm}/scene`, headers: bearer(owner.token), payload: { sceneGzB64: warmScene } });
+      for (let i = 0; i < 2; i++) await app.inject({ method: 'GET', url: `/api/designs/${warm}/scene` });
+      const timeGet = async (): Promise<number> => {
+        const t0 = process.hrtime.bigint();
+        const r = await app.inject({ method: 'GET', url: `/api/designs/${pub}/scene` });
+        assert.equal(r.statusCode, 200);
+        return Number(process.hrtime.bigint() - t0) / 1e6;
+      };
+      const firstMs = await timeGet();
+      const laterMs = Math.min(await timeGet(), await timeGet(), await timeGet());
+      assert.ok(laterMs < firstMs / 4, `a stripped scene is computed once (first ${firstMs.toFixed(1)} ms, then ${laterMs.toFixed(1)} ms)`);
+
+      const seats = generateSeatMap(DEFAULT_TEMPLATE).count;
+      const huge = new Uint32Array(seats + 1);
+      const b = (a: ArrayBufferView): string => Buffer.from(a.buffer, a.byteOffset, a.byteLength).toString('base64');
+      const tooLong = await app.inject({ method: 'POST', url: `/api/designs/${pub}/revisions`, headers: bearer(owner.token), payload: { indicesB64: b(huge), beforeB64: b(new Uint8Array(seats + 1)), afterB64: b(new Uint8Array(seats + 1)) } });
+      assert.equal(tooLong.statusCode, 400, 'a diff larger than the stadium is refused');
+      const one = { indicesB64: b(new Uint32Array([1])), beforeB64: b(new Uint8Array([0])), afterB64: b(new Uint8Array([1])) };
+      for (let i = 0; i < 205; i++) await app.inject({ method: 'POST', url: `/api/designs/${pub}/revisions`, headers: bearer(owner.token), payload: one });
+      const kept = (await app.inject({ method: 'GET', url: `/api/designs/${pub}/revisions?limit=500`, headers: bearer(owner.token) })).json() as unknown[];
+      assert.ok(kept.length <= 200, `revisions are capped (${kept.length})`);
+      const stored = ((designs as unknown as { rows: Map<string, { revisions: unknown[] }> }).rows.get(pub)!.revisions.length);
+      assert.ok(stored <= 200, `and so is what is stored (${stored})`);
+
+      // ---- LOW: anything stored as a thumbnail ----
+      const notPng = await app.inject({ method: 'POST', url: '/api/designs', headers: bearer(owner.token), payload: { title: 'x', templateId: DEFAULT_TEMPLATE.id, templateVersion: 1, palette: PALETTE, cellsGzB64, thumbnailPngB64: Buffer.from('<html>not a png</html>').toString('base64') } });
+      assert.equal(notPng.statusCode, 400, 'a thumbnail must be a PNG');
+      assert.equal((await app.inject({ method: 'POST', url: `/api/designs/${pub}/og-image`, headers: bearer(owner.token), payload: { ogPngB64: Buffer.from('GIF89a').toString('base64') } })).statusCode, 400, 'and so must a share card');
+
+      // ---- LOW: leads with no caps ----
+      await app.inject({ method: 'POST', url: '/api/leads', payload: { name: 'n'.repeat(5000), email: 'club@example.test', message: 'm'.repeat(50_000) } });
+      const lead = leads.leads.at(-1)!;
+      assert.ok(lead.name.length <= 120 && (lead.message ?? '').length <= 2000, 'lead fields are capped');
+    }
+
+    await app.close();
+  } finally {
+    globalThis.fetch = realFetch;
+    for (const [k, v] of [['GEMINI_API_KEY', savedEnv.key], ['AI_PROVIDER', savedEnv.prov], ['AI_DAILY_BUDGET', savedEnv.budget]] as const) {
+      if (v === undefined) delete process.env[k]; else process.env[k] = v;
+    }
+  }
+
+  // ---- Postgres only: names that differ only in case ----
+  if (process.env.DATABASE_URL) {
+    const pg = (await import('pg')).default;
+    const { readFileSync } = await import('node:fs');
+    const { PgAuthRepository, PgDesignRepository } = await import('../src/pgRepo');
+    const { PgSocialRepository } = await import('../src/pgSocial');
+    const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
+    try {
+      await pool.query(readFileSync(new URL('../schema.sql', import.meta.url), 'utf8'));
+      const pAuth = new PgAuthRepository(pool);
+      const pDesigns = new PgDesignRepository(pool);
+      const papp = await buildApp(pDesigns, pAuth, templates, { social: new PgSocialRepository(pool) });
+      const s = Math.random().toString(36).slice(2, 7);
+      const reg2 = (u: string, e: string) => papp.inject({ method: 'POST', url: '/api/auth/register', payload: { username: u, password: PW, email: e, acceptedVersion: 'test' } });
+      assert.equal((await reg2(`casey${s}`, `one${s}@example.test`)).statusCode, 201);
+      assert.equal((await reg2(`Casey${s}`, `two${s}@example.test`)).statusCode, 409, 'Postgres: a case variant of a name cannot be registered');
+      const other = (await reg2(`other${s}`, `three${s}@example.test`)).json() as { token: string };
+      assert.equal((await papp.inject({ method: 'POST', url: '/api/account/username', headers: bearer(other.token), payload: { username: `CASEY${s}` } })).statusCode, 409, 'Postgres: nor taken by a rename');
+      // A takedown holds in the database itself.
+      const d = await papp.inject({ method: 'POST', url: '/api/designs', headers: bearer(other.token), payload: { title: 'pg', templateId: DEFAULT_TEMPLATE.id, templateVersion: 1, palette: PALETTE, cellsGzB64 } });
+      const id = (d.json() as { id: string }).id;
+      await pDesigns.patchMeta(id, { isPublic: true });
+      await pDesigns.takedownDesign(id);
+      await pDesigns.patchMeta(id, { isPublic: true });
+      assert.equal((await pDesigns.get(id))!.isPublic, false, 'Postgres: a taken-down design stays private');
+      assert.equal((await pDesigns.get(id))!.takenDown, true);
+      await papp.close();
+    } finally {
+      await pool.end();
+    }
+  }
+
+  console.log('audit round four: all assertions passed (pre-signup link takeover, re-auth for links and email changes, links bound to their session, reset clears links, handoff ticket, oauth log line, verification bound to the address, reset links outliving changes, Host port bypass, permanent takedowns, featured re-check, remix source titles, admin names, verified votes, notification + counter + report spam, unnamed wall, fork allowRemix, per-account premium AI share, cached scene stripping, revision caps, PNG-only thumbnails, lead caps, case-insensitive names on Postgres)');
 }

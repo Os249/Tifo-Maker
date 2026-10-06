@@ -249,6 +249,29 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
     return { kind: 'user', userId, pro: st.isPro };
   };
 
+  /**
+   * Each free account's own daily share of the premium calls that are not
+   * charged to its hourly design quota: photo readings and the critic.
+   *
+   * Both spend the site-wide AI_DAILY_BUDGET, and nothing stopped one account
+   * from spending all of it: one verified free account at the route's 12 a
+   * minute made 1,000 paid vision calls in about eleven minutes, and premium
+   * AI then rested for everyone until midnight (audit round four). Admin
+   * sessions and paid accounts are not counted. In memory, by UTC day.
+   */
+  const PREMIUM_SIDE_PER_DAY = { photo: 24, polish: 30 } as const;
+  const sideUse = new Map<string, number>();
+  const takeSide = (a: Access, kind: keyof typeof PREMIUM_SIDE_PER_DAY, n: number): boolean => {
+    if (a.kind !== 'user' || a.pro) return true;
+    const day = new Date().toISOString().slice(0, 10);
+    const key = `${day}|${kind}|${a.userId}`;
+    const used = sideUse.get(key) ?? 0;
+    if (used + n > PREMIUM_SIDE_PER_DAY[kind]) return false;
+    if (sideUse.size > 20_000) for (const k of sideUse.keys()) if (!k.startsWith(day)) sideUse.delete(k);
+    sideUse.set(key, used + n);
+    return true;
+  };
+
   /** Unlimited use: admins and paid accounts. Everyone else is metered hourly. */
   /**
    * Write down what happened. Best-effort in the strongest sense: a telemetry
@@ -573,9 +596,10 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
     let failed: AiFailure | null = null;
     if (activeProvider() === 'none') {
       failed = { reason: 'no_provider', detail: 'no AI provider configured' };
-    } else if (premiumExhausted()) {
+    } else if (premiumExhausted() || !takeSide(access, 'polish', 1)) {
       // The critic is a premium call like any other. It used to skip the daily
-      // budget entirely, so it kept spending once generation had stopped.
+      // budget entirely, so it kept spending once generation had stopped; and
+      // each account has its own daily share of it (takeSide).
       failed = budgetFailure();
     } else {
       notePremiumCall();
@@ -641,7 +665,7 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
     // Up to eight premium vision calls per request, and none of them used to
     // count against AI_DAILY_BUDGET: the breaker that stops generation did not
     // stop this. Every reading now counts.
-    if (premiumExhausted()) {
+    if (premiumExhausted() || !takeSide(access, 'photo', samples)) {
       note(access, 'photo', 'busy', budgetFailure());
       return reply.code(503).send({ error: 'premium AI is resting for today, try again tomorrow', reason: 'busy', retryAfterSec: busyRetrySec() });
     }

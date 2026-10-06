@@ -346,7 +346,7 @@ function clearUnlock(){ try { localStorage.removeItem(UNLOCK_KEY); } catch(e){} 
 function fmt(n){ n = Number(n)||0; return n.toLocaleString(); }
 function pct(a, b){ if (!b) return '0%'; return (Math.round((a/b)*1000)/10) + '%'; }
 function labelize(s){ return String(s==null?'':s).replace(/_/g,' '); }
-function esc(s){ s = String(s==null?'':s); return s.replace(/[&<>"]/g, function(c){ return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[c]; }); }
+function esc(s){ s = String(s==null?'':s); return s.replace(/[&<>"']/g, function(c){ return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]; }); }
 function sum(arr){ var t=0; for (var i=0;i<arr.length;i++){ t += Number(arr[i].count)||0; } return t; }
 
 async function api(path){
@@ -910,7 +910,7 @@ function headerStrip(ov, tr, sh){
   html += '<div class="strip-cell"><div class="strip-val">' + fmt(visitors) + '</div>'
     + '<div class="strip-lab">people <span class="dim" title="Visitors cannot be followed from one day to the next, so a person who comes back tomorrow counts again.">(per day, added up)</span></div>'
     + '<div class="strip-sub">' + (span
-        ? (span.count === 1 ? 'on ' + niceDay(span.first) : niceDay(span.first) + ' to ' + niceDay(span.last))
+        ? esc(span.count === 1 ? 'on ' + niceDay(span.first) : niceDay(span.first) + ' to ' + niceDay(span.last))
         : 'nothing recorded yet') + '</div></div>';
 
   html += '<div class="strip-cell"><div class="strip-val">' + (cmp ? fmt(cmp.now) : '&mdash;') + '</div>'
@@ -918,7 +918,7 @@ function headerStrip(ov, tr, sh){
     + '<div class="strip-sub">' + (cmp ? deltaChip(cmp) : 'needs a few more days before a trend means anything') + '</div></div>';
 
   html += '<div class="strip-cell"><div class="strip-val">' + (topSource ? fmt(topSource.visits) : '&mdash;') + '</div>'
-    + '<div class="strip-lab">' + (topSource ? (SOURCE_LABEL[topSource.key] || labelize(topSource.key)) : 'top channel') + '</div>'
+    + '<div class="strip-lab">' + (topSource ? esc(SOURCE_LABEL[topSource.key] || labelize(topSource.key)) : 'top channel') + '</div>'
     + '<div class="strip-sub">' + (topSource && externalVisits
         ? pct(topSource.visits, externalVisits) + ' of arrivals'
         : 'no external arrivals yet') + '</div></div>';

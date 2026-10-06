@@ -58,7 +58,8 @@ export class MemorySocialRepository implements SocialRepository {
     const k = this.key(followerId, followeeId);
     if (!this.followsSet.has(k)) {
       this.followsSet.add(k);
-      this.notify(followeeId, { kind: 'new_follower', actorId: followerId, actorName: this.name(followerId), designId: null, designTitle: null, commentId: null });
+      const told = this.notifs.some((n) => n.userId === followeeId && n.actorId === followerId && n.kind === 'new_follower');
+      if (!told) this.notify(followeeId, { kind: 'new_follower', actorId: followerId, actorName: this.name(followerId), designId: null, designTitle: null, commentId: null });
     }
     return true;
   }
@@ -103,7 +104,8 @@ export class MemorySocialRepository implements SocialRepository {
     const q = query.trim().replace(/^@/, '').toLowerCase();
     if (!q) return [];
     const out: PublicProfile[] = [];
-    for (const { id, username } of this.auth.allUsers()) {
+    for (const { id, username, usernameChosen } of this.auth.allUsers()) {
+      if (!usernameChosen) continue; // a placeholder name is not public (see pgSocial)
       const handle = this.auth.handleOf(id);
       if (username.toLowerCase().startsWith(q) || (handle && handle.toLowerCase().startsWith(q))) {
         const p = await this.getProfile(id);
@@ -167,6 +169,7 @@ export class MemorySocialRepository implements SocialRepository {
   async notifyFollowersOfPost(authorId: string, designId: string): Promise<void> {
     const title = (await this.designs.getMeta?.(designId))?.title ?? null;
     for (const f of this.followers(authorId)) {
+      if (this.notifs.some((n) => n.userId === f && n.kind === 'follow_post' && n.designId === designId)) continue;
       this.notify(f, { kind: 'follow_post', actorId: authorId, actorName: this.name(authorId), designId, designTitle: title, commentId: null });
     }
   }

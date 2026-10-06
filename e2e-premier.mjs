@@ -80,6 +80,20 @@ const seatsIn = (s) => Number((s.match(/([\d,٬٠-٩]+)\s*(seats|مقعد)/) || 
 const waitReady = (p) => p.waitForFunction(() => /\d/.test(document.getElementById('stat')?.textContent || '') && !/generating/i.test(document.getElementById('stat')?.textContent || ''), null, { timeout: 120000 });
 const simPng = (p) => p.$eval('.mds-overlay canvas', (c) => c.toDataURL('image/png'));
 const save = (name, dataUrl) => writeFileSync(`${OUT}/${name}.png`, Buffer.from(dataUrl.split(',')[1], 'base64'));
+/**
+ * The spread of a settled picture. Software GL draws a big ground at well under
+ * one frame a second, so a read can land on a frame still being drawn (near 0)
+ * when the next one is fine: read again, a frame or two later, before calling
+ * it blank.
+ */
+const settled = async (p, min) => {
+  let sd = await spread(p);
+  for (let k = 0; k < 3 && sd < min; k++) {
+    await p.waitForTimeout(2500);
+    sd = await spread(p);
+  }
+  return sd;
+};
 /** Brightness spread of the 3D view: a blank or single-colour frame is near 0. */
 const spread = (p) =>
   p.evaluate(async () => {
@@ -154,7 +168,7 @@ for (const [id] of GROUNDS) {
   for (let k = 0; k < values.length; k++) {
     await pick(p, 'camera', values[k]);
     await p.waitForTimeout(1600);
-    const sd = await spread(p);
+    const sd = await settled(p, 8);
     if (sd < 8) flat.push(`${names[k]} (${sd.toFixed(1)})`);
     if (k === 0 || k === 2) save(`md-${id}-${names[k].replace(/\W+/g, '-').toLowerCase()}`, await simPng(p));
   }
@@ -162,7 +176,7 @@ for (const [id] of GROUNDS) {
   await pick(p, 'camera', values[0]);
   await pick(p, 'tod', 'night');
   await p.waitForTimeout(2200);
-  const night = await spread(p);
+  const night = await settled(p, 6);
   check(`${id}: renders at night`, night >= 6, night.toFixed(1));
   save(`md-${id}-night`, await simPng(p));
   check(`${id}: no page or WebGL errors`, errs.length === 0, errs.join(' | '));

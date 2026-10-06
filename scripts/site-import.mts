@@ -49,10 +49,11 @@ interface Raw {
   /** [kind, tags, flat east/north coordinates in decimetres] */
   f: [string, Record<string, string>, number[]][];
   /**
-   * 'uk': an English ground. Its streets are mapped house by house, so no
-   * villas are invented; churches are churches, not mosques.
+   * 'uk' or 'es': an English or Spanish ground. Its streets are mapped
+   * building by building, so no villas are invented; churches are churches,
+   * not mosques.
    */
-  style?: 'uk';
+  style?: 'uk' | 'es';
 }
 
 // ---------------------------------------------------------------------------
@@ -331,8 +332,9 @@ function run(file: string): void {
     }
     if (kind === 'm') {
       // A place of worship mapped only as a point: in the Gulf a mosque; in an
-      // English street most are churches, and those are drawn as buildings.
-      if (raw.style === 'uk' && tags.religion !== 'muslim') continue;
+      // English or Spanish street most are churches, and those are drawn as
+      // buildings.
+      if ((raw.style === 'uk' || raw.style === 'es') && tags.religion !== 'muslim') continue;
       const [p] = pts(flat);
       if (within(p) && !inside(p[0], p[1])) mosquePoints.push(p);
       continue;
@@ -422,7 +424,7 @@ function run(file: string): void {
   let villas = 0;
   // Saudi residential streets are lined with villas whether or not the map
   // draws a residential area round them; the map's areas only add certainty.
-  const inRes = (_x: number, _z: number) => raw.style !== 'uk';
+  const inRes = (_x: number, _z: number) => raw.style !== 'uk' && raw.style !== 'es';
   const free = (rect: XZ[]) => {
     let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
     for (const [x, z] of rect) {

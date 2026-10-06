@@ -165,6 +165,9 @@ export function buildStands(template: StadiumTemplate, shadows: boolean): THREE.
   // An indoor arena's stands are dark steel and black cladding, not daylit concrete.
   const concrete = new THREE.MeshStandardMaterial({ color: template.finish?.concrete ?? (template.indoor ? 0x2b2f37 : 0x6b7178), roughness: 0.96, metalness: 0, envMapIntensity: 0.8 });
   const structure = new THREE.MeshStandardMaterial({ color: template.finish?.walls ?? (template.indoor ? 0x15181d : 0x4c515a), roughness: 0.95, metalness: 0, envMapIntensity: 0.8 });
+  // A tier still being built (TierSpec.building): bare, pale new concrete,
+  // made only when a template has one.
+  const raw = template.tiers.some((t) => t.building) ? new THREE.MeshStandardMaterial({ color: 0xa8a39a, roughness: 1, metalness: 0, envMapIntensity: 0.6 }) : concrete;
 
   const add = (geo: THREE.BufferGeometry, mat: THREE.Material, cast: boolean, receive: boolean): void => {
     const m = new THREE.Mesh(geo, mat);
@@ -197,12 +200,14 @@ export function buildStands(template: StadiumTemplate, shadows: boolean): THREE.
     concrete.side = THREE.DoubleSide;
     structure.side = THREE.DoubleSide;
   }
+  raw.side = concrete.side;
 
   tiers.forEach((tier, idx) => {
     if (spans && at && tier.stands) {
       for (const sg of spans[idx]) {
-        if (sg.straight) buildStraightBlock(template, idx, sg, concrete, structure, add);
-        else buildSpanBlock(template, idx, sg, at, concrete, structure, add);
+        const deck = tier.building ? raw : concrete;
+        if (sg.straight) buildStraightBlock(template, idx, sg, deck, structure, add);
+        else buildSpanBlock(template, idx, sg, at, deck, structure, add);
       }
       return;
     }
@@ -222,7 +227,19 @@ export function buildStands(template: StadiumTemplate, shadows: boolean): THREE.
     const backY = tier.baseElevation + lastRow * tier.rowDepth * rakeTan + tier.rowDepth * rakeTan * 0.5;
 
     const laneHere = lanes.filter((l) => l.lane.tier === idx);
-    if (laneHere.length) {
+    if (tier.building && !laneHere.length) {
+      // No seats yet: the bare steps, a tread and a riser for every row, so it
+      // reads as a terrace waiting for its seats rather than a smooth slab.
+      for (let k = 0; k < tier.rows; k++) {
+        const r0 = frontRadial + k * tier.rowDepth;
+        const r1 = Math.min(backRadial, r0 + tier.rowDepth);
+        const y0 = frontY + k * tier.rowDepth * rakeTan;
+        const y1 = y0 + tier.rowDepth * rakeTan;
+        // Wound to face the pitch and the sky (a flat strip inner -> outer faces down).
+        addT(strip(ring(a, b, p, r0, y1), ring(a, b, p, r0, y0), keep), raw, false, true);
+        addT(strip(ring(a, b, p, r1, y1), ring(a, b, p, r0, y1), keep), raw, true, true);
+      }
+    } else if (laneHere.length) {
       // Cut exactly along the lane's side lines, so the concrete stops where
       // the seats stop and meets the ramp's walls — not a ring sample or two
       // either side of them, which left back-row seats floating over nothing.
@@ -690,8 +707,19 @@ function buildStraightBlock(
     return g;
   };
   const PARAPET = 1.1;
-  // The deck, front to back.
-  add(quad(P(-H, sg.front, sg.frontY), P(H, sg.front, sg.frontY), P(H, sg.back, sg.backY), P(-H, sg.back, sg.backY)), concrete, true, true);
+  // The deck, front to back: a smooth slab under seats, the bare steps on a
+  // tier still being built (TierSpec.building).
+  if (tier.building) {
+    const n = Math.max(1, Math.round((sg.back - sg.front) / tier.rowDepth));
+    const dr = (sg.back - sg.front) / n;
+    const dy = (sg.backY - sg.frontY) / n;
+    for (let k = 0; k < n; k++) {
+      const r0 = sg.front + k * dr;
+      const y0 = sg.frontY + k * dy;
+      add(quad(P(-H, r0, y0), P(H, r0, y0), P(H, r0, y0 + dy), P(-H, r0, y0 + dy)), concrete, false, true);
+      add(quad(P(-H, r0, y0 + dy), P(H, r0, y0 + dy), P(H, r0 + dr, y0 + dy), P(-H, r0 + dr, y0 + dy)), concrete, true, true);
+    }
+  } else add(quad(P(-H, sg.front, sg.frontY), P(H, sg.front, sg.frontY), P(H, sg.back, sg.backY), P(-H, sg.back, sg.backY)), concrete, true, true);
   // The wall at the front, down to the ground.
   if (sg.frontY > 0.3) add(quad(P(-H, sg.front, 0), P(H, sg.front, 0), P(H, sg.front, sg.frontY), P(-H, sg.front, sg.frontY)), structure, false, true);
   // The back wall, up to a parapet over the last row.

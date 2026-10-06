@@ -132,9 +132,13 @@ export interface SiteSpec {
   /**
    * What the neighbourhood is built like: 'gulf' (the default) is pale render,
    * flat roofs and palms; 'uk' is brick terraces under slate, churches with
-   * towers and broadleaf trees, round an English ground.
+   * towers and broadleaf trees, round an English ground; 'es' is a Spanish
+   * city: rendered blocks of flats with flat roofs, houses under terracotta
+   * and plane trees.
    */
-  style?: 'gulf' | 'uk';
+  style?: 'gulf' | 'uk' | 'es';
+  /** 'es' only: the share of the trees that are palms (Seville, Valencia, Elche). Default 0. */
+  palms?: number;
   /** Colour of the paved forecourt round the ground itself. */
   forecourt?: number;
 }
@@ -644,6 +648,13 @@ export interface TierSpec {
    * of the bowl. Omitted: the ring is unbroken, as every bowl has always been.
    */
   omit?: StandGap[];
+  /**
+   * A tier still being built: its concrete is there and is drawn, but it has
+   * no seats yet and nobody sits in it (Camp Nou's third tier in 2026-27).
+   * Such tiers come after every seated tier, so no seat's tier index changes
+   * when one is finished and seated; that is a new seat map, and a new id.
+   */
+  building?: boolean;
 }
 
 /** A stretch of one side of a ring tier with no seats (TierSpec.omit). */

@@ -130,7 +130,7 @@ async function runSuite(name: string, repo: DesignRepository, auth: AuthReposito
   assert.equal(meAlice.json().email, 'alice@example.test');
   assert.equal(meAlice.json().emailVerified, false);
   assert.equal(
-    (await app.inject({ method: 'POST', url: '/api/account/email', headers: bearer(aliceTok), payload: { email: 'alice.new@example.test' } })).statusCode,
+    (await app.inject({ method: 'POST', url: '/api/account/email', headers: bearer(aliceTok), payload: { email: 'alice.new@example.test', password: 'harbor-kite-moss-31' } })).statusCode,
     200,
   );
   assert.equal(
@@ -138,12 +138,12 @@ async function runSuite(name: string, repo: DesignRepository, auth: AuthReposito
     'alice.new@example.test',
   );
   assert.equal(
-    (await app.inject({ method: 'POST', url: '/api/account/email', headers: bearer(aliceTok), payload: { email: 'bob@example.test' } })).statusCode,
+    (await app.inject({ method: 'POST', url: '/api/account/email', headers: bearer(aliceTok), payload: { email: 'bob@example.test', password: 'harbor-kite-moss-31' } })).statusCode,
     409,
     'cannot take another account\'s email',
   );
   assert.equal(
-    (await app.inject({ method: 'POST', url: '/api/account/email', headers: bearer(aliceTok), payload: { email: 'nope' } })).statusCode,
+    (await app.inject({ method: 'POST', url: '/api/account/email', headers: bearer(aliceTok), payload: { email: 'nope', password: 'harbor-kite-moss-31' } })).statusCode,
     400,
     'invalid email rejected',
   );
@@ -1063,6 +1063,8 @@ async function runSuite(name: string, repo: DesignRepository, auth: AuthReposito
   // A second instance on the same day inherits the SAME pick from the store,
   // even though its own pool now favours a newer, more-liked design.
   const hyped = await publish(bobTok, 'Tifo with all the likes', true);
+  // Voting needs a verified email (audit round four).
+  await auth.markEmailVerified((await app.inject({ method: 'GET', url: '/api/me', headers: bearer(aliceTok) })).json().id as string);
   await app.inject({ method: 'POST', url: `/api/designs/${hyped}/vote`, headers: bearer(aliceTok), payload: { value: 1 } });
   const second = await buildApp(designs, auth, templates, { social, featured });
   const stable = (await second.inject({ method: 'GET', url: '/api/featured/today' })).json() as { item: { id: string } | null };
@@ -1130,6 +1132,7 @@ async function runSuite(name: string, repo: DesignRepository, auth: AuthReposito
     (await app.inject({ method: 'GET', url: '/api/me', headers: bearer(token) })).json().id as string;
   const aliceId = await idOf(aliceTok);
   const bobId = await idOf(bobTok);
+  await auth.markEmailVerified(bobId); // voting needs a verified email (audit round four)
   const notifs = async (token: string): Promise<{ kind: string; commentId: string | null; designId: string | null }[]> =>
     ((await app.inject({ method: 'GET', url: '/api/notifications', headers: bearer(token) })).json() as {
       items: { kind: string; commentId: string | null; designId: string | null }[];

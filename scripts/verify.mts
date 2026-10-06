@@ -1,5 +1,6 @@
 import { generateSeatMap } from '../src/core/seatmap';
 import { DEFAULT_TEMPLATE } from '../src/core/template';
+import { LA_LIGA } from '../src/core/laLiga';
 import { DesignStore } from '../src/core/design';
 import { floodFill } from '../src/core/tools';
 
@@ -1870,6 +1871,27 @@ import { buildStadium as siBuild } from '../src/core/stadiumFit';
     'mkm-25k': '24952:2ee2446006a23a0f',
     'portman-road-30k': '30390:24b0181f58db5c1f',
     'hill-dickinson-52k': '52028:4d8be1b2717467e1',
+    // LaLiga (2026-27)
+    'mendizorrotza-20k': '19988:d5d8b487d322494b',
+    'san-mames-53k': '53380:8ce5bd7dac4cfe33',
+    'metropolitano-71k': '70168:f84a1acf7f51ab2a',
+    'camp-nou-63k': '62224:6b0dd26600603b7b',
+    'balaidos-24k': '23460:296f09eeed2aab13',
+    'riazor-33k': '32576:b9f60545f8d2a581',
+    'martinez-valero-31k': '31436:93a04bdf38fa6aaf',
+    'cornella-38k': '37636:49ba05d02a1df6da',
+    'coliseum-11k': '10756:3a7e35d4b9cef5cb',
+    'ciutat-de-valencia-26k': '26316:24e971961956ad06',
+    'la-rosaleda-30k': '30164:dbb286f89efec564',
+    'el-sadar-24k': '23504:8786a5e314c2682b',
+    'el-sardinero-22k': '22116:7aa6555cc6e5b14e',
+    'vallecas-15k': '14600:fb818c9e25d8477d',
+    'la-cartuja-69k': '68876:84f24d2077cd5f3b',
+    'bernabeu-83k': '83040:831612bd38a2d374',
+    'anoeta-42k': '42576:9b9a9c801dce743b',
+    'sanchez-pizjuan-44k': '43532:4a1bfee3b8a8bc85',
+    'mestalla-49k': '49776:728d2177d0ac3a6c',
+    'la-ceramica-23k': '22788:4abba22e3730641d',
   };
   for (const [id, want] of Object.entries(FROZEN)) {
     const tpl = cat.templateById(id);
@@ -2495,6 +2517,46 @@ await leagueGrounds('premier league', 'premier-league', [
   { id: 'hill-dickinson-52k', clubs: "Everton", seats: 52769, tol: 0.025 },
 // English grounds sit closer to the touchline than the Saudi ones: 3 m.
 ], undefined, 3);
+
+// --- LaLiga's grounds (2026-27) ---------------------------------------------
+// All twenty, built from satellite pictures, OpenStreetMap footprints and
+// photographs (see the comments in laLiga.ts), each to its published capacity,
+// with the same checks. Three are building sites this season: their unseated
+// concrete (`building` tiers) holds no seats, so is not counted.
+await leagueGrounds('laliga', 'laliga', [
+  { id: 'mendizorrotza-20k', clubs: 'Deportivo Alavés', seats: 19840, tol: 0.025 },
+  { id: 'san-mames-53k', clubs: 'Athletic Club', seats: 53331, tol: 0.025 },
+  { id: 'metropolitano-71k', clubs: 'Atlético de Madrid', seats: 70813, tol: 0.025 },
+  { id: 'camp-nou-63k', clubs: 'FC Barcelona', seats: 62652, tol: 0.025 },
+  { id: 'balaidos-24k', clubs: 'RC Celta', seats: 23700, tol: 0.025 },
+  { id: 'riazor-33k', clubs: 'RC Deportivo', seats: 32660, tol: 0.025 },
+  { id: 'martinez-valero-31k', clubs: 'Elche CF', seats: 31388, tol: 0.025 },
+  { id: 'cornella-38k', clubs: 'RCD Espanyol', seats: 37776, tol: 0.025 },
+  // Mid-rebuild: about 11,000 while the main stand's upper tier is down.
+  { id: 'coliseum-11k', clubs: 'Getafe CF', seats: 11000, tol: 0.03 },
+  { id: 'ciutat-de-valencia-26k', clubs: 'Levante UD', seats: 26354, tol: 0.025 },
+  { id: 'la-rosaleda-30k', clubs: 'Málaga CF', seats: 30044, tol: 0.025 },
+  { id: 'el-sadar-24k', clubs: 'CA Osasuna', seats: 23576, tol: 0.025 },
+  { id: 'el-sardinero-22k', clubs: 'Real Racing Club', seats: 22308, tol: 0.025 },
+  { id: 'vallecas-15k', clubs: 'Rayo Vallecano', seats: 14708, tol: 0.025 },
+  { id: 'la-cartuja-69k', clubs: 'Real Betis', seats: 68887, tol: 0.025 },
+  { id: 'bernabeu-83k', clubs: 'Real Madrid', seats: 83186, tol: 0.025 },
+  { id: 'anoeta-42k', clubs: 'Real Sociedad', seats: 42247, tol: 0.025 },
+  { id: 'sanchez-pizjuan-44k', clubs: 'Sevilla FC', seats: 43883, tol: 0.025 },
+  { id: 'mestalla-49k', clubs: 'Valencia CF', seats: 49430, tol: 0.025 },
+  { id: 'la-ceramica-23k', clubs: 'Villarreal CF', seats: 23008, tol: 0.025 },
+], (_i18n, fails) => {
+  // A building tier is concrete only, after every seated tier, and holds no seat.
+  for (const e of LA_LIGA) {
+    const t = e.template;
+    const firstBuilt = t.tiers.findIndex((x) => x.building);
+    if (firstBuilt >= 0 && t.tiers.slice(firstBuilt).some((x) => !x.building)) fails.push(`${e.id}: a seated tier after a building tier`);
+    const m = generateSeatMap(t);
+    for (let i = 0; i < m.count; i++) if (t.tiers[m.tierOf[i]]?.building) { fails.push(`${e.id}: a seat on a building tier`); break; }
+  }
+  if (!LA_LIGA.some((e) => e.template.tiers.some((x) => x.building))) fails.push('no ground is a building site');
+// The pitch is clear of every seat by 3 m, as in England.
+}, 3);
 
 // --- The real grounds' neighbourhoods (OpenStreetMap, October 2026) ----------
 // Each Saudi ground with a site has its file, built for it, credited to

@@ -199,7 +199,22 @@ function uOnCurve(curve: Curve, template: StadiumTemplate, x: number, z: number)
   return (bu % curve.total) / curve.total;
 }
 
-export function generateSeatMap(template: StadiumTemplate): SeatMap {
+/**
+ * The template as the seat map sees it: without its tiers still being built.
+ * Those must be the last tiers, so a seat's tier index means the same in both.
+ */
+export function seatedTemplate(template: StadiumTemplate): StadiumTemplate {
+  const n = template.tiers.findIndex((t) => t.building);
+  if (n < 0) return template;
+  if (template.tiers.slice(n).some((t) => !t.building)) throw new Error(`${template.id}: a tier still being built must come after every seated tier`);
+  return { ...template, tiers: template.tiers.slice(0, n) };
+}
+
+export function generateSeatMap(full: StadiumTemplate): SeatMap {
+  // Tiers still being built (TierSpec.building) have their concrete but no
+  // seats. They come after every seated tier, so dropping them here leaves
+  // every other tier's index — and every other template's map — as it was.
+  const template = seatedTemplate(full);
   const curve = samplePlanCurve(template.plan.a, template.plan.b, template.plan.exponent);
   const cornerCut = template.cornerCut ?? 0;
   const evenRows = template.evenRows === true;

@@ -1,5 +1,5 @@
 import pg from 'pg';
-import { aiPeriod } from './repo';
+import { aiPeriod, REVISIONS_KEPT } from './repo';
 import type {
   AuthRepository,
   AiUsage,
@@ -34,7 +34,7 @@ import { normalizeTags } from './memoryRepo';
 import { designFacets } from '../../src/core/facets';
 
 const META_COLS =
-  'id, title, title_ar, template_id, template_version, palette, revision_count, is_public, owner_id, created_at, updated_at, description, allow_remix, remixed_from, view_count, pinned, deleted_at, origin';
+  'id, title, title_ar, template_id, template_version, palette, revision_count, is_public, owner_id, created_at, updated_at, description, allow_remix, remixed_from, view_count, pinned, deleted_at, origin, taken_down_at';
 
 function rowToMeta(r: Record<string, unknown>): DesignMeta {
   return {
@@ -56,6 +56,7 @@ function rowToMeta(r: Record<string, unknown>): DesignMeta {
     pinned: r.pinned === true,
     deletedAt: r.deleted_at ? new Date(r.deleted_at as string).toISOString() : null,
     origin: (r.origin as string) ?? null,
+    takenDown: r.taken_down_at != null,
   };
 }
 
@@ -83,8 +84,12 @@ const GALLERY_COLS =
 const GALLERY_JOINS =
   `FROM designs d
    LEFT JOIN users u ON u.id = d.owner_id
-   LEFT JOIN designs rd ON rd.id = d.remixed_from
+   LEFT JOIN designs rd ON rd.id = d.remixed_from AND rd.is_public
    LEFT JOIN users ru ON ru.id = rd.owner_id`;
+// The source's title and creator only while the source is public: a remix card
+// showed the source's CURRENT title after it was made private or taken down,
+// so anyone could read a private design's title through it (audit round four).
+// \`remixed_from\` (the id) stays, so the lineage is not lost.
 
 function rowToGalleryItem(r: Record<string, unknown>): GalleryItem {
   return {
@@ -386,7 +391,7 @@ export class PgDesignRepository implements DesignRepository {
   async restore(id: string): Promise<DesignMeta | null> {
     const res = await this.pool.query(
       `UPDATE designs SET
-         is_public = CASE WHEN deleted_at IS NULL THEN is_public ELSE trashed_public END,
+         is_public = CASE WHEN taken_down_at IS NOT NULL THEN false WHEN deleted_at IS NULL THEN is_public ELSE trashed_public END,
          trashed_public = false,
          deleted_at = NULL
        WHERE id = $1 RETURNING ${META_COLS}`,
@@ -644,7 +649,9 @@ export class PgDesignRepository implements DesignRepository {
 
   async patchMeta(id: string, patch: { title?: string; isPublic?: boolean }): Promise<DesignMeta | null> {
     const res = await this.pool.query(
-      `UPDATE designs SET title = coalesce($2, title), is_public = coalesce($3, is_public), updated_at = now()
+      `UPDATE designs SET title = coalesce($2, title),
+         is_public = CASE WHEN taken_down_at IS NOT NULL THEN false ELSE coalesce($3, is_public) END,
+         updated_at = now()
        WHERE id = $1 RETURNING ${META_COLS}`,
       [id, patch.title ?? null, patch.isPublic ?? null],
     );
@@ -685,6 +692,7 @@ export class PgDesignRepository implements DesignRepository {
          VALUES ($1, $2, $3, $4, $5, $6)`,
         [id, meta.revisionCount, diff.indices, diff.before, diff.after, snapshot],
       );
+      await client.query('DELETE FROM design_revisions WHERE design_id = $1 AND seq <= $2', [id, meta.revisionCount - REVISIONS_KEPT]);
       await client.query('COMMIT');
       return meta;
     } catch (err) {
@@ -869,7 +877,10 @@ export class PgDesignRepository implements DesignRepository {
     const client = await this.pool.connect();
     try {
       await client.query('BEGIN');
-      const upd = await client.query('UPDATE designs SET is_public = false WHERE id = $1', [designId]);
+      const upd = await client.query(
+        'UPDATE designs SET is_public = false, trashed_public = false, taken_down_at = coalesce(taken_down_at, now()) WHERE id = $1',
+        [designId],
+      );
       await client.query(
         `UPDATE moderation_reports SET status = 'actioned'
          WHERE target_type = 'design' AND target_id = $1 AND status = 'open'`,
@@ -998,12 +1009,15 @@ export class PgAuthRepository implements AuthRepository {
     const verifiedAt = opts.email && opts.emailVerified ? new Date() : null;
     try {
       const res = await this.pool.query(
+        // Names are unique ignoring case, as in the memory store: "Alice" next to
+        // "alice" is an impersonation, not a second person (audit round four).
         `INSERT INTO users (username, password_hash, email, accepted_terms_version, accepted_terms_at, email_verified_at, username_chosen)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)
+         SELECT $1, $2, $3, $4, $5, $6, $7
+         WHERE NOT EXISTS (SELECT 1 FROM users WHERE lower(username) = lower($1))
          RETURNING id, username, password_hash, email, email_verified_at, username_chosen`,
         [username, passwordHash, opts.email ?? null, acceptedVersion, acceptedAt, verifiedAt, opts.usernameChosen !== false],
       );
-      return mapUserRow(res.rows[0]);
+      return res.rowCount ? mapUserRow(res.rows[0]) : null;
     } catch (err) {
       if ((err as { code?: string }).code === '23505') return null; // username or email taken
       throw err;
@@ -1052,8 +1066,11 @@ export class PgAuthRepository implements AuthRepository {
     }
   }
 
-  async markEmailVerified(userId: string): Promise<void> {
-    await this.pool.query('UPDATE users SET email_verified_at = now() WHERE id = $1', [userId]);
+  async markEmailVerified(userId: string, email?: string): Promise<boolean> {
+    const res = email === undefined
+      ? await this.pool.query('UPDATE users SET email_verified_at = now() WHERE id = $1', [userId])
+      : await this.pool.query('UPDATE users SET email_verified_at = now() WHERE id = $1 AND lower(email) = lower($2)', [userId, email]);
+    return (res.rowCount ?? 0) > 0;
   }
 
   async setUsername(userId: string, username: string): Promise<boolean> {
@@ -1061,7 +1078,9 @@ export class PgAuthRepository implements AuthRepository {
       // Settling on a name is what clears the flag — including confirming the
       // one we suggested, which is still the owner choosing it.
       const res = await this.pool.query(
-        'UPDATE users SET username = $2, username_chosen = true WHERE id = $1',
+        `UPDATE users SET username = $2, username_chosen = true
+         WHERE id = $1
+           AND NOT EXISTS (SELECT 1 FROM users o WHERE lower(o.username) = lower($2) AND o.id <> $1)`,
         [userId, username],
       );
       return (res.rowCount ?? 0) > 0;

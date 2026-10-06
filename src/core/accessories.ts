@@ -277,6 +277,12 @@ export function indexStands(map: SeatMap): StandSeats[] {
     }
     let ragged = false;
     for (let b = 0; b < BINS; b++) if (Number.isFinite(lo[b]) && lo[b] - vMin > 0.05 * vw) ragged = true;
+    // And at the back: an end that is one shallow tier across its whole middle,
+    // while its corners carry the side stands' upper tier round (Mendizorrotza,
+    // Vallecas), has its back row well short of the stand's deepest seat.
+    let middleBack = -Infinity;
+    for (let b = BINS / 4; b < (BINS * 3) / 4; b++) if (Number.isFinite(hi[b])) middleBack = Math.max(middleBack, hi[b]);
+    if (Number.isFinite(middleBack) && vMax - middleBack > 0.25 * vw) ragged = true;
     if (ragged) {
       for (let k = 0; k < n; k++) {
         const b = bin(k);

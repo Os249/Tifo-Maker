@@ -1,4 +1,4 @@
-import { randomInt } from 'node:crypto';
+import { createHash, randomInt } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join, sep } from 'node:path';
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
@@ -47,6 +47,7 @@ import {
   type PasswordVerdict,
 } from '../../src/core/password';
 import { deriveUsername } from '../../src/core/handle';
+import { escapeHtml } from '../../src/core/escape';
 import {
   describeProviderError,
   newChallenge,
@@ -468,12 +469,25 @@ export async function buildApp(
    */
   const CANONICAL_ORIGIN = 'https://tifomaker.org';
   const ALLOWED_EMAIL_HOSTS = new Set(['tifomaker.org', 'www.tifomaker.org', 'localhost', '127.0.0.1']);
+  /**
+   * The request's Host, only when it is exactly one of ours: a name from the
+   * allow-list and at most a port. Checking only the part before the first
+   * colon and then echoing the whole header back let `tifomaker.org:@evil.example`
+   * through, which a browser reads as user info followed by the attacker's host,
+   * so a reset link sent its token to evil.example (audit round four). The
+   * value returned is rebuilt from what was parsed, never the raw header.
+   */
+  const knownHost = (req: FastifyRequest): { bare: string; host: string } | null => {
+    const m = /^([a-z0-9.-]+)(?::(\d{1,5}))?$/i.exec(String(req.headers.host ?? ''));
+    if (!m) return null;
+    const bare = m[1].toLowerCase();
+    if (!ALLOWED_EMAIL_HOSTS.has(bare)) return null;
+    return { bare, host: m[2] ? `${bare}:${Number(m[2])}` : bare };
+  };
   const emailBase = (req: FastifyRequest): string => {
     if (options.publicUrl) return options.publicUrl.replace(/\/+$/, '');
-    const host = String(req.headers.host ?? '');
-    const bare = host.split(':')[0]?.toLowerCase() ?? '';
-    if (ALLOWED_EMAIL_HOSTS.has(bare)) return `${req.protocol}://${host}`;
-    return CANONICAL_ORIGIN;
+    const known = knownHost(req);
+    return known ? `${req.protocol === 'https' ? 'https' : 'http'}://${known.host}` : CANONICAL_ORIGIN;
   };
 
   const validPalette = (p: unknown): p is string[] =>
@@ -546,6 +560,19 @@ export async function buildApp(
     return user && adminSet.has(user.username) ? user.username : null;
   };
   const isAdminUser = async (userId: string): Promise<boolean> => (await adminNameOf(userId)) !== null;
+  /**
+   * Posture: every allow-listed admin name should belong to an account. One
+   * that does not is moderator rights waiting for whoever registers it first.
+   */
+  const adminNamesClaimed = async (): Promise<{ id: string; label: string; state: 'good' | 'warn' | 'bad' | 'info'; detail: string }> => {
+    const names = [...adminSet];
+    if (names.length === 0) return { id: 'admins', label: 'Admin accounts', state: 'info', detail: 'ADMIN_USERNAMES is empty: moderation uses the admin password only.' };
+    const missing: string[] = [];
+    for (const n of names) if (!(await auth.getUserByName(n).catch(() => null))) missing.push(n);
+    return missing.length
+      ? { id: 'admins', label: 'Admin accounts', state: 'bad', detail: `Not registered: ${missing.map((m) => '@' + m).join(', ')}. Anyone who registers that name becomes a moderator. Register it now, or remove it from ADMIN_USERNAMES.` }
+      : { id: 'admins', label: 'Admin accounts', state: 'good', detail: `Every allow-listed name belongs to an account (${names.length}).` };
+  };
   const requireAdmin = async (req: FastifyRequest, reply: FastifyReply): Promise<string | null> => {
     const userId = await requireUser(req, reply);
     if (!userId) return null;
@@ -613,12 +640,23 @@ export async function buildApp(
     return (await requireAdmin(req, reply)) !== null;
   };
 
+  /**
+   * Thumbnails and share cards are served as image/png from our own origin, so
+   * they must be PNGs: anything else was stored as given (audit round four).
+   */
+  const isPng = (b: Buffer): boolean =>
+    b.byteLength >= 8 && b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47 && b[4] === 0x0d && b[5] === 0x0a && b[6] === 0x1a && b[7] === 0x0a;
+
   /** undefined = invalid (reply sent); null = none provided; Buffer = decoded. */
   const decodeThumb = (b64: string | undefined, reply: FastifyReply): Buffer | null | undefined => {
     if (b64 === undefined) return null;
     const buf = Buffer.from(b64, 'base64');
     if (buf.byteLength === 0 || buf.byteLength > MAX_THUMB_BYTES) {
       void reply.code(400).send({ error: `thumbnailPngB64 must decode to 1..${MAX_THUMB_BYTES} bytes` });
+      return undefined;
+    }
+    if (!isPng(buf)) {
+      void reply.code(400).send({ error: 'thumbnailPngB64 must be a PNG' });
       return undefined;
     }
     return buf;
@@ -1041,6 +1079,31 @@ export async function buildApp(
   // Tighter limit on credential endpoints: 10 attempts/minute/IP. Only takes
   // effect when the rate-limit plugin is registered (production), ignored in tests.
   const authLimit = { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } };
+  /** Writes that store something each time (revisions, reports): a person's pace. */
+  const writeLimit = { config: { rateLimit: { max: 60, timeWindow: '1 minute' } } };
+  const reportLimit = { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } };
+
+  /**
+   * "Once per visitor per day" for counters anyone can bump.
+   *
+   * Views and shares were counted on every request, so 500 anonymous POSTs
+   * made a design read 500 views (audit round four). The visitor is the
+   * account when signed in, else the address as the rate limiter sees it.
+   * In memory and bounded: a restart forgets, which errs towards counting.
+   */
+  const seenToday = new Map<string, number>();
+  const SEEN_MAX = 50_000;
+  const firstToday = (req: FastifyRequest, who: string | null, what: string): boolean => {
+    const key = `${utcDay()}|${what}|${who ?? `ip:${req.ip}`}`;
+    if (seenToday.has(key)) return false;
+    if (seenToday.size >= SEEN_MAX) {
+      const today = utcDay();
+      for (const k of seenToday.keys()) if (!k.startsWith(today)) seenToday.delete(k);
+      if (seenToday.size >= SEEN_MAX) seenToday.delete(seenToday.keys().next().value as string);
+    }
+    seenToday.set(key, 1);
+    return true;
+  };
 
   const VERIFY_TTL_MS = 24 * 60 * 60 * 1000;
   /**
@@ -1113,7 +1176,19 @@ export async function buildApp(
   const newVerifyCode = (): string => String(randomInt(0, 1_000_000)).padStart(6, '0');
   /** Salted with the user id, so two people can hold the same digits and one
    *  person can never consume — or destroy — another's code. */
-  const codeHash = (userId: string, code: string): string => hashToken(`verify:${userId}:${code}`);
+  const codeHash = (userId: string, email: string, code: string): string =>
+    hashToken(`verify:${userId}:${email.trim().toLowerCase()}:${code}`);
+  /**
+   * Which address a verification was sent to, carried inside what proves it.
+   *
+   * Verifying used to mark the ACCOUNT verified, whatever its address had become
+   * by then: hold the link sent to your own inbox, change the account's email
+   * to someone else's, click, and their address was "verified" on your account,
+   * ready to catch their first Google sign-in (audit round four). Now the code's
+   * hash includes the address and the link's last 16 characters name it, and
+   * the account is marked verified only while its address is still that one.
+   */
+  const addressTag = (email: string): string => hashToken(`addr:${email.trim().toLowerCase()}`).slice(0, 16);
   // Issue a fresh verification token and email the link. Best-effort: a mail
   // failure never blocks the API response (the user can request a resend).
   const sendVerifyEmail = async (req: FastifyRequest, user: { id: string; email: string }): Promise<boolean> => {
@@ -1122,13 +1197,13 @@ export async function buildApp(
       await auth.deleteEmailTokens(user.id, 'verify_email');
       await auth.deleteEmailTokens(user.id, 'verify_code');
       codeTries.delete(user.id);
-      const { token, tokenHash } = issueToken();
-      await auth.createEmailToken(user.id, tokenHash, 'verify_email', new Date(Date.now() + VERIFY_TTL_MS));
+      const token = `${issueToken().token.slice(0, 48)}${addressTag(user.email)}`;
+      await auth.createEmailToken(user.id, hashToken(token), 'verify_email', new Date(Date.now() + VERIFY_TTL_MS));
       // The same message carries both: a code to type where the person already
       // is, and a link for whoever would rather just click. On a phone, leaving
       // for a mail app and finding the way back is where people give up.
       const code = newVerifyCode();
-      await auth.createEmailToken(user.id, codeHash(user.id, code), 'verify_code', new Date(Date.now() + VERIFY_CODE_TTL_MS));
+      await auth.createEmailToken(user.id, codeHash(user.id, user.email, code), 'verify_code', new Date(Date.now() + VERIFY_CODE_TTL_MS));
       const base = emailBase(req);
       const link = `${base}/api/auth/verify?token=${token}`;
       // Bilingual: the server does not know which language the person picked
@@ -1230,6 +1305,69 @@ export async function buildApp(
       // log and /api/admin/email are the ONLY places a refused send can show up.
       app.log.error({ err: String((err as Error)?.message ?? err) }, 'password-reset email was NOT sent');
     }
+  };
+
+  /**
+   * A short security notice to the account's own address: a new way in was
+   * added, or the address itself changed. The one signal an owner gets that
+   * something happened on their account that they did not do. Sent after the
+   * reply (it must not slow the request or change its timing), best-effort.
+   */
+  const securityNotice = (req: FastifyRequest, to: string, en: string, ar: string): void => {
+    if (!options.emailSender) return;
+    // The same per-recipient pace as verification mail: a notice is still mail
+    // to an address, and must never become a way to flood one.
+    if (mailBudget.take(addressKey('notice-to', to), VERIFY_TO_ADDRESS) > 0) return;
+    const sender = options.emailSender;
+    const base = emailBase(req);
+    const subject = 'تنبيه أمان من تيفو ميكر · TifoMaker security notice';
+    const tailEn = 'If this was you, there is nothing to do. If it was not, reset your password now and remove anything you do not recognise on your account page.';
+    const tailAr = 'إذا كان هذا أنت فلا تسوِّ شيء. وإذا ما كان أنت، غيّر كلمة المرور الآن واحذف أي شيء ما تعرفه من صفحة حسابك.';
+    inBackground(
+      sender
+        .send({
+          to,
+          subject,
+          html: layoutEmail({
+            title: subject,
+            siteUrl: base,
+            blocks: [
+              { lang: 'ar', html: para(escapeHtml(ar)) + para(tailAr) + button(`${base}/account`, 'صفحة حسابي') },
+              { lang: 'en', html: para(escapeHtml(en)) + para(tailEn) + button(`${base}/account`, 'My account') },
+            ],
+          }),
+          text: `${ar}\n${tailAr}\n\n${en}\n${tailEn}\n${base}/account` + textFooter(base),
+        })
+        .catch((err: unknown) => app.log.error({ err: String((err as Error)?.message ?? err) }, 'security notice was NOT sent')),
+    );
+  };
+  const PROVIDER_NAMES: Record<string, string> = { google: 'Google', x: 'X' };
+  const noticeLinked = (req: FastifyRequest, userId: string, provider: string): void => {
+    inBackground((async () => {
+      const user = await auth.getUserById(userId).catch(() => null);
+      if (!user?.email) return;
+      const name = PROVIDER_NAMES[provider] ?? provider;
+      securityNotice(req, user.email, `A ${name} sign-in was connected to your TifoMaker account (@${user.username}).`, `تم ربط تسجيل دخول ${name} بحسابك في تيفو ميكر (@${user.username}).`);
+    })());
+  };
+
+  /**
+   * The account's current password, for the changes that hand out a lasting
+   * way in: connecting another sign-in, or moving the account to another email
+   * address (from which a reset link would then work). A session token alone is
+   * not enough for those, because a stolen one would become a permanent key
+   * that survives the owner changing the password (audit round four). Accounts
+   * with no password (made with a provider) have nothing to confirm with, and
+   * pass. Sends the reply and returns false when it fails.
+   */
+  const reauthenticated = async (req: FastifyRequest, reply: FastifyReply, user: { username: string; passwordHash: string | null }): Promise<boolean> => {
+    if (user.passwordHash === null) return true;
+    const given = (req.body as { password?: unknown } | null)?.password;
+    const ok = typeof given === 'string' && given.length > 0 && given.length <= 1024 && (await verifyPassword(given, user.passwordHash)).ok;
+    if (ok) return true;
+    req.socNote = { kind: 'password_change_failed', subject: user.username };
+    await reply.code(401).send({ error: 'current password is incorrect', code: 'reauth' });
+    return false;
   };
 
   /**
@@ -1344,13 +1482,21 @@ export async function buildApp(
   app.get('/api/auth/verify', async (req, reply) => {
     const q = req.query as { token?: string };
     const token = typeof q.token === 'string' ? q.token : '';
-    const userId = token ? await auth.consumeEmailToken(hashToken(token), 'verify_email') : null;
-    if (userId) await auth.markEmailVerified(userId);
+    const userId = /^[a-f0-9]{64}$/.test(token) ? await auth.consumeEmailToken(hashToken(token), 'verify_email') : null;
+    let verified = false;
+    if (userId) {
+      // Only for the address this link was sent to, and only while the account
+      // still has it: the mark is conditional on the address in one statement.
+      const user = await auth.getUserById(userId).catch(() => null);
+      if (user?.email && addressTag(user.email) === token.slice(-16)) {
+        verified = await auth.markEmailVerified(userId, user.email);
+      }
+    }
     // The token is in the URL: don't cache it and don't leak it via the Referer header.
     return reply
       .header('cache-control', 'no-store')
       .header('referrer-policy', 'no-referrer')
-      .redirect(`/projects?verified=${userId ? 1 : 0}`);
+      .redirect(`/projects?verified=${verified ? 1 : 0}`);
   });
 
   // Re-send the verification email to the signed-in user. The cooldown and its
@@ -1414,7 +1560,8 @@ export async function buildApp(
       req.socNote = { kind: 'code_exhausted' };
       return reply.code(429).send({ error: 'too many attempts, request a new code', exhausted: true });
     }
-    const ok = await auth.consumeEmailToken(codeHash(userId, code), 'verify_code');
+    const sentTo = user?.email ?? '';
+    const ok = sentTo ? await auth.consumeEmailToken(codeHash(userId, sentTo, code), 'verify_code') : null;
     if (ok !== userId) {
       const next = tries + 1;
       noteCodeTry(userId, next);
@@ -1428,7 +1575,11 @@ export async function buildApp(
     }
     codeTries.delete(userId);
     await auth.deleteEmailTokens(userId, 'verify_email');
-    await auth.markEmailVerified(userId);
+    // Conditional on the address the code was sent to: if the account's email
+    // changed while the code was being typed, nothing is verified.
+    if (!(await auth.markEmailVerified(userId, sentTo))) {
+      return reply.code(400).send({ error: 'that code is not right or has expired', triesLeft: 0 });
+    }
     return reply.code(200).send({ ok: true });
   });
 
@@ -1455,6 +1606,12 @@ export async function buildApp(
     // hand the caller moderator rights, and uniqueness would not stop it.
     if (adminFolded.has(username.toLowerCase())) {
       return reply.code(409).send({ error: 'that name is taken' });
+    }
+    // And never AWAY from one. Admin rights follow the name, so an admin who
+    // renamed (or deleted) their account freed it, and whoever registered it
+    // next was a moderator (audit round four). Change ADMIN_USERNAMES first.
+    if (await adminNameOf(userId)) {
+      return reply.code(403).send({ error: 'an admin account keeps its name; change ADMIN_USERNAMES first', code: 'admin_name' });
     }
     const ok = await auth.setUsername(userId, username);
     if (!ok) return reply.code(409).send({ error: 'that name is taken' });
@@ -1486,6 +1643,8 @@ export async function buildApp(
     const next = gradePassword(reply, newPassword, { email: user.email ?? undefined, username: user.username });
     if (next === null) return;
     await auth.setPasswordHash(userId, await hashPassword(next));
+    // An outstanding reset link would undo this from the mailbox it went to.
+    await auth.deleteEmailTokens(userId, 'reset_password').catch(() => {});
     // Changing a password is what someone does when they think a session is
     // compromised. It has to end the other sessions, or it is theatre: tokens
     // live 30 days, so a stolen one otherwise outlived the "fix" by a month.
@@ -1539,6 +1698,16 @@ export async function buildApp(
     if (!userId) return reply.code(400).send({ error: 'invalid or expired reset link' });
     await auth.setPasswordHash(userId, await hashPassword(next));
     await auth.deleteUserTokens(userId);
+    await auth.deleteEmailTokens(userId, 'reset_password').catch(() => {});
+    // A reset is how an account is taken back. It proves who owns the mailbox,
+    // not who connected the Google or X sign-ins already on the account, so
+    // those are removed too: one connected by whoever had the account before
+    // would otherwise still open it (audit round four). The owner's own comes
+    // back by itself the next time they sign in with it, because the account's
+    // verified address matches.
+    for (const provider of await auth.identitiesFor(userId).catch(() => [] as string[])) {
+      await auth.unlinkIdentity(provider, userId).catch(() => false);
+    }
     return reply.code(200).send({ ok: true });
   });
 
@@ -1711,7 +1880,9 @@ export async function buildApp(
     // deserves depends on why — pressing cancel and Google refusing to run at
     // all inside an app's browser are very different things to be told.
     if (typeof q.error === 'string') {
-      console.error(`[tifo] oauth ${provider} returned error=${q.error.slice(0, 64)}`);
+      // JSON-quoted and printable only: the value is whatever was in the URL, and
+      // a raw newline in it wrote a second, forged line into the log.
+      console.error(`[tifo] oauth ${provider} returned error=${JSON.stringify(q.error.slice(0, 64).replace(/[^\x20-\x7e]/g, '?'))}`);
       return bail(describeProviderError(q.error), pending.r);
     }
     if (typeof q.code !== 'string' || typeof q.state !== 'string') return bail('state', pending.r);
@@ -1736,10 +1907,15 @@ export async function buildApp(
     // Safe by construction: `pending.u` was written by us, in a request that
     // carried a bearer token, and the cookie carrying it is signed.
     if (pending.u) {
+      // The session that started the link must still be the account's: one
+      // revoked since (password changed, signed out everywhere) cannot finish it.
+      const live = pending.t ? await auth.getUserIdByToken(pending.t).catch(() => null) : null;
+      if (live !== pending.u) return bail('state', pending.r);
       if (owner && owner !== pending.u) return bail('linked_elsewhere', pending.r);
       if (!owner && !(await auth.linkIdentity(provider, profile.id, pending.u).catch(() => false))) {
         return bail('provider', pending.r);
       }
+      if (!owner) noticeLinked(req, pending.u, provider);
       req.socNote = { kind: 'oauth_linked', subject: provider };
       return reply
         .header('set-cookie', [cleared])
@@ -1822,8 +1998,12 @@ export async function buildApp(
       userId = created.id;
     }
 
+    // A one-time ticket, not a session: it lives two minutes, is not accepted
+    // as a bearer anywhere, and is spent atomically when traded. It used to be
+    // a full 30-day session token, so the cookie itself was a session, and two
+    // concurrent trades of one cookie both succeeded (audit round four).
     const { token, tokenHash } = issueToken();
-    await auth.createToken(userId, tokenHash, new Date(Date.now() + TOKEN_TTL_MS));
+    await auth.createEmailToken(userId, tokenHash, 'oauth_handoff', new Date(Date.now() + HANDOFF_TTL_MS));
     req.socNote = { subject: (await auth.getUserById(userId).catch(() => null))?.username };
 
     // The session must not travel in the URL. This site's own logger redacts
@@ -1852,22 +2032,41 @@ export async function buildApp(
     const handed = readCookie(req, HANDOFF_COOKIE);
     void reply.header('set-cookie', [clearLine(req, HANDOFF_COOKIE, '/api/auth/handoff')]);
     if (!handed) return reply.code(401).send({ error: 'no session to adopt' });
-    const userId = await auth.getUserIdByToken(hashToken(handed)).catch(() => null);
+    // Spent in one statement: only the first trade of a ticket gets a session.
+    const userId = await auth.consumeEmailToken(hashToken(handed), 'oauth_handoff').catch(() => null);
     if (!userId) return reply.code(401).send({ error: 'no session to adopt' });
     const fresh = issueToken();
     await auth.createToken(userId, fresh.tokenHash, new Date(Date.now() + TOKEN_TTL_MS));
-    await auth.deleteToken(hashToken(handed)).catch(() => {});
     const user = await auth.getUserById(userId).catch(() => null);
     return { token: fresh.token, username: user?.username ?? null };
   });
 
-  /** Start a link from the account page. Authenticated, so the callback can trust `u`. */
+  /**
+   * Start a link from the account page. Authenticated, so the callback can trust `u`.
+   *
+   * Three conditions, each closing a way in found in audit round four:
+   *  - the account's email must be verified. Otherwise an attacker registers a
+   *    victim's address with a password, links their own Google, and keeps that
+   *    way in after the victim recovers the account by resetting the password;
+   *  - the account's current password, when it has one. A link is a permanent
+   *    second key, and a stolen session alone must not be enough to cut one;
+   *  - the link is tied to the session that started it (`t`), checked again at
+   *    the callback.
+   * And the owner is emailed whenever a sign-in method is added.
+   */
   app.post('/api/account/link/:provider', authLimit, async (req, reply) => {
     const userId = await requireUser(req, reply);
     if (!userId) return;
     const { provider } = req.params as { provider: string };
     if (!providerReady(provider)) return reply.code(404).send({ error: 'not found' });
-    const url = startFlow(req, reply, provider, { u: userId });
+    const user = await auth.getUserById(userId).catch(() => null);
+    if (!user) return reply.code(401).send({ error: 'authentication required' });
+    if (user.email && !user.emailVerifiedAt) {
+      return reply.code(403).send({ error: 'verify your email before connecting another sign-in', code: 'verify_first' });
+    }
+    if (!(await reauthenticated(req, reply, user))) return;
+    const header = String(req.headers.authorization ?? '');
+    const url = startFlow(req, reply, provider, { u: userId, t: hashToken(header.slice(7)) });
     return { url };
   });
 
@@ -1921,6 +2120,16 @@ export async function buildApp(
       return reply.code(400).send({ error: 'a valid email is required' });
     }
     const version = typeof acceptedVersion === 'string' ? acceptedVersion.slice(0, 32) : null;
+    const before = await auth.getUserById(userId).catch(() => null);
+    if (!before) return reply.code(401).send({ error: 'authentication required' });
+    // Copied out: a repository may hand back a live object that setEmail changes.
+    const oldEmail = before.email;
+    const oldVerified = !!before.emailVerifiedAt;
+    const handle = before.username;
+    // Moving an account to another address hands that address the reset link.
+    // Adding a first address to an account that never had one changes nothing
+    // anyone else relied on, so only a change asks for the password.
+    if (oldEmail && oldEmail.toLowerCase() !== mail.toLowerCase() && !(await reauthenticated(req, reply, before))) return;
     // Every call here mails a code to whatever address it names, so without
     // limits one signed-in account could mail any stranger over and over. And an
     // address that already has an account answers 409, which a person changing
@@ -1950,9 +2159,22 @@ export async function buildApp(
       mailBudget.refund(addressKey('verify-to', mail));
       return reply.code(409).send({ error: 'email already in use' });
     }
+    // A reset link already sent to the old address must not outlive the move.
+    await auth.deleteEmailTokens(userId, 'reset_password').catch(() => {});
     // Send the verification link for the newly added/changed email, server-side,
     // so it never depends on a separate client call.
     await sendVerifyEmail(req, { id: userId, email: mail });
+    // Only an address that was proven to be the owner's hears about it: telling
+    // an unverified one would let anyone flip their own account's email to and
+    // from a stranger's to mail them (the round-three mail-bomb test).
+    if (oldEmail && oldVerified && oldEmail.toLowerCase() !== mail.toLowerCase()) {
+      securityNotice(
+        req,
+        oldEmail,
+        `The email on your TifoMaker account (@${handle}) was changed to ${maskEmail(mail)}.`,
+        `تم تغيير البريد في حسابك في تيفو ميكر (@${handle}) إلى ${maskEmail(mail)}.`,
+      );
+    }
     return reply.code(200).send({ email: mail, emailVerified: false });
   });
 
@@ -1975,6 +2197,11 @@ export async function buildApp(
   app.delete('/api/account', authLimit, async (req, reply) => {
     const userId = await requireUser(req, reply);
     if (!userId) return;
+    // Deleting an allow-listed account would free its name for anyone to
+    // register, with moderator rights attached (see the rename route).
+    if (await adminNameOf(userId)) {
+      return reply.code(403).send({ error: 'an admin account cannot be deleted here; remove it from ADMIN_USERNAMES first', code: 'admin_name' });
+    }
     await repo.deleteByOwner(userId).catch(() => {});
     await auth.deleteUser(userId);
     return reply.code(204).send();
@@ -2147,7 +2374,7 @@ export async function buildApp(
   });
 
   // Report a public item for moderation. Signed-in optional but recorded if present.
-  app.post('/api/report', async (req, reply) => {
+  app.post('/api/report', reportLimit, async (req, reply) => {
     const reporterId = await userOf(req);
     const body = (req.body ?? {}) as { targetType?: string; targetId?: string; reason?: string };
     const type = body.targetType === 'comment' ? 'comment' : 'design';
@@ -2155,7 +2382,16 @@ export async function buildApp(
       return reply.code(400).send({ error: 'targetId and reason required' });
     }
     if (badId(body.targetId, reply)) return;
-    const reportId = await repo.report(type, body.targetId, reporterId, body.reason.trim());
+    // Reports on things that do not exist, and the same reporter reporting the
+    // same thing again, used to land in the queue every time: 120 anonymous
+    // reports on random ids pushed a real one out of the moderators' view
+    // (audit round four). A design must be one the reporter can see.
+    if (type === 'design') {
+      const target = await repo.get(body.targetId).catch(() => null);
+      if (!target || (!target.isPublic && target.ownerId !== reporterId)) return reply.code(404).send({ error: 'not found' });
+    }
+    if (!firstToday(req, reporterId, `report:${type}:${body.targetId}`)) return { reportId: null, status: 'received' };
+    const reportId = await repo.report(type, body.targetId, reporterId, body.reason.trim().slice(0, 500));
     return { reportId, status: 'received' };
   });
 
@@ -2235,7 +2471,10 @@ export async function buildApp(
       .header('content-type', type)
       .header('x-content-type-options', 'nosniff')
       .header('content-disposition', `inline; filename="photo-${photoId}.img"`)
-      .header('cache-control', 'public, max-age=86400')
+      // Only a public design's photo may sit in a shared cache. A private one
+      // was sent `public` too, so an edge could keep serving it after the owner
+      // hid it (audit round four).
+      .header('cache-control', parent.isPublic ? 'public, max-age=86400' : 'private, no-store')
       .send(b);
   });
 
@@ -2271,8 +2510,10 @@ export async function buildApp(
   app.post('/api/admin/designs/:id/takedown', async (req, reply) => {
     if (!(await requireModerator(req, reply))) return;
     const { id } = req.params as { id: string };
+    if (badId(id, reply)) return;
     const ok = await repo.takedownDesign(id);
     if (!ok) return reply.code(404).send({ error: 'design not found' });
+    daily?.forget(id);
     return { takendown: true };
   });
 
@@ -2364,15 +2605,18 @@ export async function buildApp(
         alertsTo: soc.alertTo ? maskEmail(soc.alertTo) : null,
         retentionDays: RETENTION_DAYS,
         keyStable: soc.keyInfo.stable,
-        posture: securityPosture({
-          env: process.env,
-          nodeVersion: process.version,
-          uid: typeof process.getuid === 'function' ? process.getuid() : null,
-          rateLimit: !!options.rateLimit,
-          database: options.database ?? 'memory',
-          email: options.emailSender ? emailHealth() : null,
-          soc: { alertTo: soc.alertTo, keyStable: soc.keyInfo.stable, lastWriteError: soc.lastWriteError },
-        }),
+        posture: [
+          ...securityPosture({
+            env: process.env,
+            nodeVersion: process.version,
+            uid: typeof process.getuid === 'function' ? process.getuid() : null,
+            rateLimit: !!options.rateLimit,
+            database: options.database ?? 'memory',
+            email: options.emailSender ? emailHealth() : null,
+            soc: { alertTo: soc.alertTo, keyStable: soc.keyInfo.stable, lastWriteError: soc.lastWriteError },
+          }),
+          await adminNamesClaimed(),
+        ],
       });
     });
     // Proves the address and the provider before an attack does. Answers 200
@@ -2488,6 +2732,14 @@ export async function buildApp(
     const raw = (req.body as { value?: unknown } | null)?.value;
     const value = raw === 1 || raw === -1 || raw === 0 ? raw : null;
     if (value === null) return reply.code(400).send({ error: 'value must be 1, -1, or 0' });
+    // Likes decide the ranking and the home page's Tifo of the day, so a vote
+    // needs an account with a verified email. Five throwaway sign-ups with
+    // made-up addresses used to be enough to put any design on the home page
+    // (audit round four). Taking a vote back is always allowed.
+    if (value !== 0) {
+      const voter = await auth.getUserById(userId).catch(() => null);
+      if (!voter?.emailVerifiedAt) return reply.code(403).send({ error: 'verify your email to vote', code: 'verify_first' });
+    }
     const result = await repo.vote(id, userId, value as -1 | 0 | 1);
     if (!result) return reply.code(404).send({ error: 'not found' });
     return result;
@@ -2600,6 +2852,20 @@ export async function buildApp(
     return true;
   };
 
+  /**
+   * The choose-a-username wall for routes that load a design themselves rather
+   * than through `requireUser`. Fork, publish, scene writes, revisions and the
+   * rest all went through here and skipped it, so an account still wearing the
+   * handle we derived from its email could publish under it (audit round four).
+   * Reads stay open; anything that changes something is held at the door.
+   */
+  const unnamedWall = async (req: FastifyRequest, reply: FastifyReply, userId: string | null): Promise<boolean> => {
+    if (!userId || req.method === 'GET' || req.method === 'HEAD') return false;
+    if (await auth.hasChosenUsername(userId).catch(() => true)) return false;
+    await reply.code(428).send({ error: 'choose a username first', code: 'needs_username' });
+    return true;
+  };
+
   const getVisible = async (req: FastifyRequest, reply: FastifyReply) => {
     const { id } = req.params as { id: string };
     const rec = await repo.get(id).catch(() => null);
@@ -2608,6 +2874,7 @@ export async function buildApp(
       await reply.code(404).send({ error: 'not found' });
       return null;
     }
+    if (await unnamedWall(req, reply, userId)) return null;
     return { rec, userId };
   };
 
@@ -2628,6 +2895,7 @@ export async function buildApp(
       await reply.code(403).send({ error: 'not your design' });
       return null;
     }
+    if (await unnamedWall(req, reply, userId)) return null;
     return rec;
   };
 
@@ -2661,8 +2929,39 @@ export async function buildApp(
     return { sceneGzB64: out.toString('base64') };
   });
 
-  /** A scene without its layer stack (for anyone but the design's owner). */
+  /**
+   * Stripped scenes, remembered by the stored bytes' hash.
+   *
+   * Stripping is gunzip, parse, stringify and gzip, all synchronous, on the one
+   * event loop, for every anonymous view of a public design: one fat published
+   * scene took ~290 ms per request, so a few addresses at the general rate limit
+   * could stall the whole server (audit round four). The result depends only on
+   * the stored bytes, so it is computed once per version and served from here,
+   * capped at 32 MB.
+   */
+  const strippedCache = new Map<string, Buffer>();
+  let strippedBytes = 0;
+  const STRIPPED_CACHE_MAX = 32 * 1024 * 1024;
   function withoutLayers(gz: Buffer): Buffer {
+    const key = createHash('sha1').update(gz).digest('hex');
+    const hit = strippedCache.get(key);
+    if (hit) {
+      strippedCache.delete(key); // refresh: most recently used goes last
+      strippedCache.set(key, hit);
+      return hit;
+    }
+    const out = stripLayers(gz);
+    strippedCache.set(key, out);
+    strippedBytes += out.byteLength;
+    for (const [k, v] of strippedCache) {
+      if (strippedBytes <= STRIPPED_CACHE_MAX) break;
+      strippedCache.delete(k);
+      strippedBytes -= v.byteLength;
+    }
+    return out;
+  }
+  /** A scene without its layer stack (for anyone but the design's owner). */
+  function stripLayers(gz: Buffer): Buffer {
     try {
       const scene = JSON.parse(gunzipBytes(gz, MAX_SCENE_GUNZIP_BYTES).toString('utf8')) as Record<string, unknown>;
       if (!scene || typeof scene !== 'object' || !('layers' in scene)) return gz;
@@ -2763,6 +3062,7 @@ export async function buildApp(
     if (buf.byteLength === 0 || buf.byteLength > MAX_PHOTO_BYTES) {
       return reply.code(400).send({ error: 'image must be 1..2MB' });
     }
+    if (!isPng(buf)) return reply.code(400).send({ error: 'ogPngB64 must be a PNG' });
     const ok = await repo.setOgImage(rec.id, rec.ownerId!, buf);
     return ok ? { ok: true } : reply.code(404).send({ error: 'not found' });
   });
@@ -2773,6 +3073,7 @@ export async function buildApp(
     const v = await getVisible(req, reply);
     if (!v) return;
     if (!v.rec.isPublic) return reply.code(403).send({ error: 'not public' });
+    if (!firstToday(req, v.userId, `view:${v.rec.id}`)) return { views: v.rec.viewCount ?? 0 };
     const views = await repo.incrementView(v.rec.id);
     return { views };
   });
@@ -2786,7 +3087,9 @@ export async function buildApp(
     const platform = typeof body.platform === 'string' ? body.platform.toLowerCase() : '';
     if (!SHARE_PLATFORMS.has(platform)) return reply.code(400).send({ error: 'unknown platform' });
     const kind = body.kind === 'open' ? 'open' : 'share';
-    await repo.recordShare(v.rec.id, platform, kind).catch(() => {});
+    if (firstToday(req, v.userId, `share:${kind}:${platform}:${v.rec.id}`)) {
+      await repo.recordShare(v.rec.id, platform, kind).catch(() => {});
+    }
     return reply.code(204).send();
   });
 
@@ -2909,6 +3212,11 @@ export async function buildApp(
       patch.isPublic = body.isPublic;
     }
     if (Object.keys(patch).length === 0) return reply.code(400).send({ error: 'nothing to patch' });
+    // A moderator's takedown is final for its owner (the repositories refuse
+    // too; this is the answer the person reads).
+    if (patch.isPublic === true && rec.takenDown) {
+      return reply.code(403).send({ error: 'this design was taken down by a moderator', code: 'taken_down' });
+    }
     // Something in the Trash is on its way out. Publishing it would put a
     // design in the community feed that deletes itself within the month.
     if (patch.isPublic === true && rec.deletedAt) {
@@ -2916,6 +3224,7 @@ export async function buildApp(
     }
     const wasPublic = rec.isPublic;
     const result = await repo.patchMeta(rec.id, patch);
+    if (patch.isPublic === false) daily?.forget(rec.id);
     // Newly published → notify the owner's followers (best-effort, non-blocking).
     if (options.social && patch.isPublic === true && !wasPublic && rec.ownerId) {
       options.social.notifyFollowersOfPost(rec.ownerId, rec.id).catch(() => {});
@@ -2935,6 +3244,7 @@ export async function buildApp(
     const rec = await getOwned(req, reply);
     if (!rec) return;
     const permanent = (req.query as { permanent?: string }).permanent === '1';
+    daily?.forget(rec.id);
     if (permanent) {
       if (!rec.deletedAt) return reply.code(409).send({ error: 'move it to the trash first' });
       await repo.purge(rec.id);
@@ -2950,7 +3260,7 @@ export async function buildApp(
     return repo.restore(rec.id);
   });
 
-  app.post('/api/designs/:id/revisions', async (req, reply) => {
+  app.post('/api/designs/:id/revisions', writeLimit, async (req, reply) => {
     const rec = await getOwned(req, reply);
     if (!rec) return;
     const body = req.body as { indicesB64?: string; beforeB64?: string; afterB64?: string };
@@ -2964,6 +3274,8 @@ export async function buildApp(
       return reply.code(400).send({ error: 'diff arrays must be non-empty and equal length' });
     }
     const count = seatCount(rec.templateId, rec.templateVersion)!;
+    // A change can touch each seat once at most; longer diffs only add bytes.
+    if (indices.length > count) return reply.code(400).send({ error: 'diff is larger than the stadium' });
     const cells = new Uint8Array(gunzipBytes(rec.cellsGz));
     for (let k = 0; k < indices.length; k++) {
       if (indices[k] >= count) return reply.code(400).send({ error: `index ${indices[k]} out of range` });
@@ -3000,9 +3312,20 @@ export async function buildApp(
     const v = await getVisible(req, reply);
     if (!v) return;
     if (!v.userId) return reply.code(401).send({ error: 'authentication required' });
+    const own = v.rec.ownerId === v.userId;
+    // Someone else's design: the creator's "no remixes" holds here too. Fork
+    // used to copy it anyway, banners included and without the credit a remix
+    // carries (audit round four).
+    if (!own && v.rec.allowRemix === false) return reply.code(403).send({ error: 'this design cannot be remixed' });
     const title = cleanTitle((req.body as { title?: string } | null)?.title, `${v.rec.title} (fork)`);
     const created = await repo.fork(v.rec.id, title, v.userId);
-    if (created) await copyScene(v.rec.id, created.id, v.rec.ownerId === v.userId);
+    if (created) await copyScene(v.rec.id, created.id, own);
+    // A copy of a design a moderator took down is taken down with it, or
+    // publishing the copy would undo the takedown.
+    if (created && v.rec.takenDown) {
+      await repo.takedownDesign(created.id).catch(() => false);
+      return reply.code(201).send({ ...created, isPublic: false, takenDown: true });
+    }
     return reply.code(201).send(created);
   });
 
@@ -3157,20 +3480,24 @@ export async function buildApp(
   });
 
   // B2B lead capture from the For Clubs page. Public + lightly validated.
-  app.post('/api/leads', async (req, reply) => {
+  // The For Clubs form. Same pace as feedback (five in ten minutes from one
+  // address) and every field capped: it had neither, and one address could
+  // file hundreds of 4 KB leads a minute (audit round four).
+  app.post('/api/leads', { config: { rateLimit: { max: 5, timeWindow: '10 minutes' } } }, async (req, reply) => {
     if (!options.leads) return reply.code(503).send({ error: 'lead capture not enabled' });
     const body = (req.body ?? {}) as Record<string, unknown>;
-    const name = typeof body.name === 'string' ? body.name.trim() : '';
+    const field = (v: unknown, max: number): string | null => (typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : null);
+    const name = field(body.name, 120) ?? '';
     const email = typeof body.email === 'string' ? body.email.trim() : '';
-    if (!name || !email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+    if (!name || !email || email.length > MAX_EMAIL || !EMAIL.test(email)) {
       return reply.code(400).send({ error: 'a name and a valid email are required' });
     }
     const lead = await options.leads.createLead({
       name,
       email,
-      organization: typeof body.organization === 'string' ? body.organization.trim() : null,
-      orgType: typeof body.orgType === 'string' ? body.orgType.trim() : null,
-      message: typeof body.message === 'string' ? body.message.trim() : null,
+      organization: field(body.organization, 120),
+      orgType: field(body.orgType, 40),
+      message: field(body.message, 2000),
     });
     return reply.code(201).send({ ok: true, id: lead.id });
   });
@@ -3190,9 +3517,9 @@ export async function buildApp(
      */
     const origin = (req: FastifyRequest): string => {
       if (options.publicUrl) return options.publicUrl.replace(/\/+$/, '');
-      const host = String(req.headers.host ?? '');
-      const bare = host.split(':')[0]?.toLowerCase() ?? '';
-      if (!ALLOWED_EMAIL_HOSTS.has(bare)) return CANONICAL_ORIGIN;
+      const known = knownHost(req);
+      if (!known) return CANONICAL_ORIGIN;
+      const { bare, host } = known;
       // https unless this is plainly a dev host. An http:// og:image is a
       // documented way to lose the card entirely: an edge rule that upgrades
       // http to https answers the crawler with a 301 the origin never sees,
@@ -3294,8 +3621,8 @@ export async function buildApp(
     const injectOnce = (haystack: string, pattern: RegExp, insert: (match: string) => string): string =>
       haystack.replace(pattern, (m) => insert(m));
 
-    const esc = (s: string): string =>
-      s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    // The one escaper (src/core/escape.ts): quotes included, single as well.
+    const esc = (s: string): string => escapeHtml(s);
 
     /**
      * The meta description for one design page.
@@ -3455,7 +3782,7 @@ export async function buildApp(
         `<span data-i18n="daily.badge">Tifo of the day</span></div>` +
         `<a class="fd-card" href="/t/${esc(d.id)}">` +
         `<span class="fd-shot-wrap">` +
-        `<img class="fd-shot" src="${base}/api/designs/${esc(d.id)}/thumbnail.png"` +
+        `<img class="fd-shot" src="${esc(base)}/api/designs/${esc(d.id)}/thumbnail.png"` +
         ` alt="${esc(name)}, a stadium tifo by @${esc(by)}" width="800" height="84" loading="lazy" decoding="async" /></span>` +
         `<span class="fd-body"><span class="fd-main">` +
         `<span class="fd-title" data-title-en="${esc(name)}"${nameAr ? ` data-title-ar="${esc(nameAr)}"` : ''}>${esc(name)}</span>` +
@@ -3541,7 +3868,7 @@ export async function buildApp(
           .map((d) => {
             const name = d.title?.trim() || 'Untitled tifo';
             const thumb = d.hasThumbnail
-              ? `<img src="${base}/api/designs/${esc(d.id)}/thumbnail.png" alt="${esc(name)}" width="320" height="200" loading="lazy" />`
+              ? `<img src="${esc(base)}/api/designs/${esc(d.id)}/thumbnail.png" alt="${esc(name)}" width="320" height="200" loading="lazy" />`
               : '';
             // /t/:id is the canonical URL for a design, so link that, not /d/:id.
             return `<li><a href="/t/${esc(d.id)}">${thumb}<span>${esc(name)}</span></a>`

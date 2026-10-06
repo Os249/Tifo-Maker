@@ -74,6 +74,13 @@ function renderEmail(): void {
   const needsCode = !!me?.email && !me.emailVerified;
   if (verify) verify.hidden = !needsCode;
   if (note && needsCode) note.textContent = tv('ac.verify.sentTo', { email: me?.email ?? '' });
+  // Moving an existing address needs the current password (see the server's
+  // `reauthenticated`); a first address, or an account without a password, does not.
+  const askPw = !!me?.email && me.hasPassword !== false;
+  const pw = $<HTMLInputElement>('ac-email-pw');
+  const pwLabel = $('ac-email-pw-label');
+  if (pw) pw.hidden = !askPw;
+  if (pwLabel) pwLabel.hidden = !askPw;
   const emailInput = $<HTMLInputElement>('ac-email');
   if (emailInput && !emailInput.value) emailInput.value = me?.email ?? '';
   dirtyGate(emailInput, $<HTMLButtonElement>('ac-email-save'), () => me?.email ?? '');
@@ -143,6 +150,10 @@ async function renderConnections(): Promise<void> {
   if (!offered.length) return; // nothing configured: no section at all
   section.hidden = false;
   const linked = me?.providers ?? [];
+  // Connecting another sign-in asks for the current password when there is one.
+  const pwForm = $('ac-link-pw-form');
+  const canAdd = offered.some((id) => !linked.includes(id));
+  if (pwForm) pwForm.hidden = !(canAdd && me?.hasPassword !== false);
   list.replaceChildren();
   for (const id of offered) {
     const row = document.createElement('div');
@@ -165,7 +176,15 @@ async function renderConnections(): Promise<void> {
           void renderConnections();
         } else {
           // Leaves the page for the consent screen and comes back to /account.
-          await beginLinkProvider(id, '/account');
+          const pwInput = $<HTMLInputElement>('ac-link-pw');
+          const password = me?.hasPassword !== false ? (pwInput?.value ?? '') : '';
+          if (me?.hasPassword !== false && !password) {
+            say(msg, t('ac.link.needPw'), 'bad');
+            button.disabled = false;
+            pwInput?.focus();
+            return;
+          }
+          await beginLinkProvider(id, '/account', password || undefined);
         }
       } catch (err) {
         say(msg, tErr((err as Error).message), 'bad');
@@ -185,9 +204,13 @@ $('ac-email-form')?.addEventListener('submit', async (e) => {
   const msg = $('ac-email-msg');
   const email = (input?.value ?? '').trim();
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return say(msg, t('ac.email.invalid'), 'bad');
+  const pwInput = $<HTMLInputElement>('ac-email-pw');
+  const password = pwInput && !pwInput.hidden ? pwInput.value : '';
+  if (pwInput && !pwInput.hidden && !password) return say(msg, t('ac.email.needPw'), 'bad');
   say(msg, t('ac.saving'), 'info');
   try {
-    await setAccountEmail(email, POLICY_VERSION);
+    await setAccountEmail(email, POLICY_VERSION, password || undefined);
+    if (pwInput) pwInput.value = '';
     me = await fetchMe().catch(() => me);
     renderEmail();
     say(msg, t('ac.email.saved'), 'ok');

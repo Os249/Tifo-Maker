@@ -253,12 +253,15 @@ export function providerFailure(): string | null {
 }
 
 /** Begin attaching a provider to the account we are already signed into. */
-export async function beginLinkProvider(provider: string, returnTo: string): Promise<void> {
+export async function beginLinkProvider(provider: string, returnTo: string, password?: string): Promise<void> {
+  // The current password, when the account has one: a connected sign-in is a
+  // lasting key, so the server asks for more than the session to add one.
   const data = (await expectOk(
     await fetch(`${API}/account/link/${provider}?returnTo=${encodeURIComponent(returnTo)}`, {
       method: 'POST',
-      headers: authHeaders(false),
+      headers: authHeaders(true),
       credentials: 'same-origin',
+      body: JSON.stringify(password ? { password } : {}),
     }),
   )) as { url: string };
   location.assign(data.url);
@@ -324,12 +327,14 @@ export async function register(
 }
 
 /** Attach or change the signed-in user's email (resets verification). */
-export async function setAccountEmail(email: string, acceptedVersion?: string): Promise<void> {
+export async function setAccountEmail(email: string, acceptedVersion?: string, password?: string): Promise<void> {
+  // Changing an address that is already on the account needs the current
+  // password (when there is one); adding a first address does not.
   await expectOk(
     await fetch(`${API}/account/email`, {
       method: 'POST',
       headers: authHeaders(true),
-      body: JSON.stringify({ email, acceptedVersion }),
+      body: JSON.stringify({ email, acceptedVersion, ...(password ? { password } : {}) }),
     }),
   );
 }

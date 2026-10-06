@@ -30,6 +30,13 @@ export function utcDay(now: Date = new Date()): string {
 const POOL_SIZE = 400;
 /** How long an empty answer is remembered before the pool is read again. */
 const MISS_TTL_MS = 60_000;
+/**
+ * How long the day's pick is trusted before it is checked again. The pick is
+ * the day's, but whether it may still be SHOWN is not: a design taken down,
+ * made private or trashed at 09:00 stayed on the home page until midnight
+ * (audit round four). One indexed lookup a minute is the price.
+ */
+const RECHECK_MS = 60_000;
 
 export interface FeaturedTifo {
   /** UTC day this pick belongs to. */
@@ -39,6 +46,7 @@ export interface FeaturedTifo {
 
 export class DailyFeaturePicker {
   private hit: FeaturedTifo | null = null;
+  private checkedAt = 0;
   private miss: { day: string; at: number } | null = null;
   private inFlight: Promise<FeaturedTifo | null> | null = null;
 
@@ -56,7 +64,16 @@ export class DailyFeaturePicker {
    */
   async today(now: Date = new Date()): Promise<FeaturedTifo | null> {
     const day = utcDay(now);
-    if (this.hit?.day === day) return this.hit;
+    if (this.hit?.day === day) {
+      if (Date.now() - this.checkedAt < RECHECK_MS) return this.hit;
+      const still = await this.designs.getPublicItem(this.hit.item.id).catch(() => undefined);
+      if (still === undefined) return this.hit; // could not ask: keep what we have
+      if (still) {
+        this.checkedAt = Date.now();
+        return this.hit;
+      }
+      this.hit = null; // no longer showable: pick again (resolve replaces the day)
+    }
     if (this.miss?.day === day && Date.now() - this.miss.at < MISS_TTL_MS) return null;
     // One resolve at a time. A cold cache under load would otherwise run the
     // pick once per in-flight request, and they would all be the same pick.
@@ -103,9 +120,21 @@ export class DailyFeaturePicker {
       }
       this.miss = null;
       this.hit = { day, item };
+      this.checkedAt = Date.now();
       return this.hit;
     } catch {
       return this.nothing(day);
+    }
+  }
+
+  /**
+   * A design stopped being showable (taken down, unpublished, trashed, deleted):
+   * if it is today's pick, stop serving it now rather than at the next check.
+   */
+  forget(designId: string): void {
+    if (this.hit?.item.id === designId) {
+      this.hit = null;
+      this.miss = null;
     }
   }
 

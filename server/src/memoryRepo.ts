@@ -30,7 +30,7 @@ import type {
   PhotoReviewItem,
   FunnelStep,
 } from './repo';
-import { aiPeriod } from './repo';
+import { aiPeriod, REVISIONS_KEPT } from './repo';
 import { designFacets, paletteColours } from '../../src/core/facets';
 
 interface Row extends DesignRecord {
@@ -46,6 +46,8 @@ interface Row extends DesignRecord {
   ogImage: Buffer | null;
   /** Whether it was published when it went into the Trash. */
   trashedPublic?: boolean;
+  /** Taken down by a moderator: stays private for good. */
+  takenDown?: boolean;
 }
 
 /** In-memory AI quota store: dev mode and route tests. Same contract as Postgres. */
@@ -191,7 +193,7 @@ export class MemoryDesignRepository implements DesignRepository {
 
   private meta(r: Row): DesignMeta {
     const { id, title, titleAr, templateId, templateVersion, palette, revisionCount, isPublic, ownerId, createdAt, updatedAt, description, allowRemix, remixedFrom } = r;
-    return { id, title, titleAr: titleAr ?? null, templateId, templateVersion, palette: [...palette], revisionCount, isPublic, ownerId, createdAt, updatedAt, description: description ?? null, allowRemix: allowRemix !== false, remixedFrom: remixedFrom ?? null, viewCount: r.views, pinned: r.pinned === true, deletedAt: r.deletedAt ?? null, origin: r.origin ?? null };
+    return { id, title, titleAr: titleAr ?? null, templateId, templateVersion, palette: [...palette], revisionCount, isPublic, ownerId, createdAt, updatedAt, description: description ?? null, allowRemix: allowRemix !== false, remixedFrom: remixedFrom ?? null, viewCount: r.views, pinned: r.pinned === true, deletedAt: r.deletedAt ?? null, origin: r.origin ?? null, takenDown: r.takenDown === true };
   }
 
   async create(d: NewDesign): Promise<DesignMeta> {
@@ -281,7 +283,7 @@ export class MemoryDesignRepository implements DesignRepository {
     const r = this.rows.get(id);
     if (!r) return null;
     if (r.deletedAt) {
-      r.isPublic = r.trashedPublic === true;
+      r.isPublic = r.trashedPublic === true && r.takenDown !== true;
       r.trashedPublic = false;
       r.deletedAt = null;
     }
@@ -317,7 +319,9 @@ export class MemoryDesignRepository implements DesignRepository {
   }
 
   private galleryItem(r: Row, viewerId?: string | null): GalleryItem {
-    const source = r.remixedFrom ? this.rows.get(r.remixedFrom) : null;
+    // Only a public source is named (see GALLERY_JOINS in pgRepo).
+    const found = r.remixedFrom ? this.rows.get(r.remixedFrom) : null;
+    const source = found?.isPublic ? found : null;
     return {
       ...this.meta(r),
       ownerName: this.usernames(r.ownerId),
@@ -415,7 +419,7 @@ export class MemoryDesignRepository implements DesignRepository {
     const r = this.rows.get(id);
     if (!r) return null;
     if (patch.title !== undefined) r.title = patch.title;
-    if (patch.isPublic !== undefined) r.isPublic = patch.isPublic;
+    if (patch.isPublic !== undefined) r.isPublic = patch.isPublic && r.takenDown !== true;
     r.updatedAt = new Date().toISOString();
     return this.meta(r);
   }
@@ -439,6 +443,7 @@ export class MemoryDesignRepository implements DesignRepository {
     if (!r) return null;
     r.revisionCount += 1;
     r.revisions.push({ seq: r.revisionCount, diff, snapshot, createdAt: new Date().toISOString() });
+    if (r.revisions.length > REVISIONS_KEPT) r.revisions.splice(0, r.revisions.length - REVISIONS_KEPT);
     r.cellsGz = newCellsGz;
     r.updatedAt = new Date().toISOString();
     return this.meta(r);
@@ -599,6 +604,8 @@ export class MemoryDesignRepository implements DesignRepository {
     const d = this.rows.get(designId);
     if (!d) return false;
     d.isPublic = false;
+    d.trashedPublic = false;
+    d.takenDown = true;
     for (const r of this.reports) {
       if (r.targetType === 'design' && r.targetId === designId && r.status === 'open') r.status = 'actioned';
     }
@@ -765,9 +772,12 @@ export class MemoryAuthRepository implements AuthRepository {
     return true;
   }
 
-  async markEmailVerified(userId: string): Promise<void> {
+  async markEmailVerified(userId: string, email?: string): Promise<boolean> {
     const u = await this.getUserById(userId);
-    if (u) u.emailVerifiedAt = new Date().toISOString();
+    if (!u) return false;
+    if (email !== undefined && (u.email ?? '').toLowerCase() !== email.toLowerCase()) return false;
+    u.emailVerifiedAt = new Date().toISOString();
+    return true;
   }
 
   async setUsername(userId: string, username: string): Promise<boolean> {
@@ -902,8 +912,8 @@ export class MemoryAuthRepository implements AuthRepository {
   setHandle(id: string, handle: string): void {
     this.handles.set(id, handle);
   }
-  allUsers(): { id: string; username: string }[] {
-    return [...this.users.values()].map((u) => ({ id: u.id, username: u.username }));
+  allUsers(): { id: string; username: string; usernameChosen: boolean }[] {
+    return [...this.users.values()].map((u) => ({ id: u.id, username: u.username, usernameChosen: u.usernameChosen !== false }));
   }
 }
 

@@ -50,6 +50,10 @@
         <form class="ac-form" id="ac-email-form">
           <label for="ac-email" data-i18n="ac.email.change">Change email</label>
           <input id="ac-email" type="email" autocomplete="email" />
+          <!-- Asked only when an address is already on the account and the
+               account has a password: moving it hands out the reset link. -->
+          <label for="ac-email-pw" id="ac-email-pw-label" data-i18n="ac.pw.current" hidden>Current password</label>
+          <input id="ac-email-pw" type="password" autocomplete="current-password" hidden />
           <button class="ac-btn" type="submit" id="ac-email-save" data-i18n="ac.save">Save</button>
         </form>
         <p class="ac-msg" id="ac-email-msg" role="status" aria-live="polite"></p>
@@ -86,6 +90,10 @@
       <section class="ac-card" id="sec-connected" hidden>
         <h2 data-i18n="ac.link.title">Connected accounts</h2>
         <p class="ac-note" data-i18n="ac.link.note">Another way to sign in, alongside your password. Removing the last one is refused, so an account can never be left with no way in.</p>
+        <form class="ac-form" id="ac-link-pw-form" hidden>
+          <label for="ac-link-pw" data-i18n="ac.link.pw">Your current password, to connect another sign-in</label>
+          <input id="ac-link-pw" type="password" autocomplete="current-password" />
+        </form>
         <div id="ac-link-list"></div>
         <p class="ac-msg" id="ac-link-msg" role="status" aria-live="polite"></p>
       </section>

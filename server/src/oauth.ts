@@ -248,6 +248,13 @@ export interface PendingAuth {
    * a user id here means *we* put it here.
    */
   u?: string;
+  /**
+   * Linking: the hash of the session that started it. The callback finishes the
+   * link only while that session is still live, so a link begun with a token
+   * that was then revoked (a password change signs everyone else out) cannot
+   * complete afterwards (audit round four).
+   */
+  t?: string;
   /** The Terms version accepted at sign-up, recorded like the password path does. */
   a?: string;
 }

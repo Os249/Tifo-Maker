@@ -1,7 +1,7 @@
 # Security checks
 
 How TifoMaker's security is checked, how often, and what to do with what the
-checks find. Written after the September 2026 audit, whose three rounds found
+checks find. Written after the September 2026 audit (rounds one to three; round four in October 2026), whose rounds found
 and fixed every issue listed in the regression suite (`server/test/security.test.mts`).
 
 The rule behind all of it: **a finding is only real once it has been reproduced,

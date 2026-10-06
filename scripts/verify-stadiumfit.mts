@@ -74,7 +74,12 @@ function trueRing(t: StadiumTemplate, n = 160): Pt[] {
 // horseshoe round a track, a U with a main stand of its own. Its outline is a
 // ring but its seats are not, so neither its plan nor its capacity can come
 // back from the outline alone.
-const RING_GROUNDS = STADIUM_CATALOG.filter((s) => !s.template.tiers.some((t) => t.stands || t.omit));
+// Nor is a plan drawn squarer than exponent 8: the new four-sided Spanish
+// grounds (El Sadar, the Bernabéu's bowl, Ciutat de València, El Sardinero)
+// are rectangles with tight corners, the shape the imagery fitter, which
+// searches ovals, is not built to recover. They too go through the capacity and
+// tier checks.
+const RING_GROUNDS = STADIUM_CATALOG.filter((s) => !s.template.tiers.some((t) => t.stands || t.omit) && s.template.plan.exponent <= 8);
 
 console.log('--- ring fitting -------------------------------------------------');
 {
@@ -164,8 +169,9 @@ console.log('\n--- tier split --------------------------------------------------
   // stand that the row count does not see, and Abha's one tier is 50 rows deep
   // along one side. 30 of 44 since the Premier League's grounds came in,
   // October 2026: English grounds put a deep single tier where the rule
-  // expects two, and the other way round, as often as not.)
-  check(right === 30, 'tier-count rule scores 30 of 44', `misses: ${misses.join('; ')}`);
+  // expects two, and the other way round, as often as not. 36 of 64 with
+  // LaLiga's: Spanish grounds put two shallow tiers where it expects one.)
+  check(right === 36, 'tier-count rule scores 36 of 64', `misses: ${misses.join('; ')}`);
 
   const st = stackTiers(50, 2);
   const stacked = st[1].baseOffset > st[0].baseOffset + st[0].rows * st[0].rowDepth

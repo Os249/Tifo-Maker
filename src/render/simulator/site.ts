@@ -530,6 +530,10 @@ const UK_BRICK = [0x8f4a36, 0x9c5a43, 0x7f4433, 0xa86a50, 0x8a5240, 0x995e47, 0x
 const UK_RENDER = [0xddd6c8, 0xe8e2d4, 0xcfc8b8];
 /** Welsh slate and brown concrete tile. */
 const UK_ROOF = [0x4b5058, 0x545960, 0x5e5650, 0x6a4c40, 0x43474e];
+/** Spanish blocks: cream and ochre render, white, salmon, and the brick of a Madrid barrio. */
+const ES_WALLS = [0xe8dcc0, 0xdcc49a, 0xf0ebe0, 0xe2b99a, 0xd6cdbd, 0xc98f6c, 0xe6d3a8, 0xb5765a, 0xefe3cc, 0xa86650];
+/** Terracotta tile, from new orange to weathered brown. */
+const ES_ROOF = [0xa4553a, 0xb4643f, 0x96503a, 0x8a4a36, 0xb87050];
 
 export function buildSite(_template: StadiumTemplate, spec: SiteSpec, data: SiteData, opts: { shadows: boolean; detail: 'low' | 'full' }): SiteBuild {
   const group = new THREE.Group();
@@ -551,6 +555,7 @@ export function buildSite(_template: StadiumTemplate, spec: SiteSpec, data: Site
   const C = (hex: number) => new THREE.Color(hex);
   const full = opts.detail === 'full';
   const uk = spec.style === 'uk';
+  const es = spec.style === 'es';
 
   // ---- Open ground: grass, pitches, courts, water, sand, plazas ----
   {
@@ -562,7 +567,7 @@ export function buildSite(_template: StadiumTemplate, spec: SiteSpec, data: Site
       const p = unflat(a, 1);
       const y = kind === 0 || kind === 5 || kind === 7 ? 0.012 : 0.03;
       // Waste ground in an English city is weeds and gravel, not sand.
-      m.flat(p, y, C(uk && kind === 5 ? 0x8b8b70 : AREA_COLOUR[kind] ?? AREA_COLOUR[0]));
+      m.flat(p, y, C(uk && kind === 5 ? 0x8b8b70 : es && kind === 5 ? 0xa89c7e : AREA_COLOUR[kind] ?? AREA_COLOUR[0]));
       if (kind === 1) pitchDetail(m, lines, p, y, white);
       if (kind === 1 || kind === 2 || kind === 9) {
         // Its white boundary line.
@@ -724,17 +729,22 @@ export function buildSite(_template: StadiumTemplate, spec: SiteSpec, data: Site
       const k = hash(cx, cz);
       const area = Math.abs(signedArea(p));
       let tint: THREE.Color;
-      if (!uk) tint = C(kind === 4 ? OFFICE_TINTS[Math.floor(k * OFFICE_TINTS.length)] : WALL_TINTS[Math.floor(k * WALL_TINTS.length)]);
+      if (es) tint = C(kind === 4 ? OFFICE_TINTS[Math.floor(k * OFFICE_TINTS.length)] : ES_WALLS[Math.floor(k * ES_WALLS.length)]);
+      else if (!uk) tint = C(kind === 4 ? OFFICE_TINTS[Math.floor(k * OFFICE_TINTS.length)] : WALL_TINTS[Math.floor(k * WALL_TINTS.length)]);
       else if (kind === 4 || (kind === 5 && h > 14)) tint = C(OFFICE_TINTS[Math.floor(k * OFFICE_TINTS.length)]);
       else if (kind === 0 && area > 900 && hash(cx, cz, 2) < 0.5) tint = C(UK_RENDER[Math.floor(k * UK_RENDER.length)]);
       else tint = C(UK_BRICK[Math.floor(k * UK_BRICK.length)]);
-      if (uk && (kind === 2 || kind === 7)) tint = C([0x9aa0a6, 0x8d9399, 0xa9adb1, 0x7e868c][Math.floor(k * 4)]);
+      if ((uk || es) && (kind === 2 || kind === 7)) tint = C([0x9aa0a6, 0x8d9399, 0xa9adb1, 0x7e868c][Math.floor(k * 4)]);
       const plain = kind === 2 || kind === 7;
       const m = plain ? halls : walls;
       // An English house, terrace or chapel: walls to the eaves and a pitched
-      // roof along its long axis, ridge at the building's height.
+      // roof along its long axis, ridge at the building's height. In Spain only
+      // the houses and churches have one (tiled); the blocks of flats are flat-roofed.
       let gable: { u: XZ; v: XZ; u0: number; u1: number; v0: number; v1: number; eave: number } | null = null;
-      if (uk && !plain && (kind === 3 || kind === 6 || kind === 8 || (kind === 0 && area < 420 && h <= 13))) {
+      if (
+        (uk && !plain && (kind === 3 || kind === 6 || kind === 8 || (kind === 0 && area < 420 && h <= 13))) ||
+        (es && !plain && (kind === 8 || ((kind === 3 || kind === 0 || kind === 6) && area < 260 && h <= 11)))
+      ) {
         const u = axisOf(p);
         const v: XZ = [-u[1], u[0]];
         let u0 = Infinity, u1 = -Infinity, v0 = Infinity, v1 = -Infinity;
@@ -774,7 +784,7 @@ export function buildSite(_template: StadiumTemplate, spec: SiteSpec, data: Site
         const W = (a1: number, b1: number, y: number): [number, number, number] => [u[0] * a1 + v[0] * b1, y, u[1] * a1 + v[1] * b1];
         const o = 0.3;
         const vm = (v0 + v1) / 2;
-        const rc = C(UK_ROOF[Math.floor(hash(cx, cz, 3) * UK_ROOF.length)]);
+        const rc = C(es ? ES_ROOF[Math.floor(hash(cx, cz, 3) * ES_ROOF.length)] : UK_ROOF[Math.floor(hash(cx, cz, 3) * UK_ROOF.length)]);
         const slope = (vEdge: number): void => {
           const e0 = W(u0 - o, vEdge, eave - 0.15);
           const e1 = W(u1 + o, vEdge, eave - 0.15);
@@ -802,7 +812,7 @@ export function buildSite(_template: StadiumTemplate, spec: SiteSpec, data: Site
         }
         if (kind === 8 && full) spires.push({ x: u[0] * u1 + v[0] * vm, z: u[1] * u1 + v[1] * vm, y: h, w: Math.min(7, (v1 - v0) * 0.7), u, k });
       } else {
-        const roofC = uk && !plain ? C(0x5d5f63).lerp(tint, 0.15) : tint.clone().multiplyScalar(plain ? 0.92 : 0.86);
+        const roofC = uk && !plain ? C(0x5d5f63).lerp(tint, 0.15) : es && !plain ? C(0xb3aca0).lerp(tint, 0.2) : tint.clone().multiplyScalar(plain ? 0.92 : 0.86);
         roofs.flat(p, plain ? h : h - (uk ? 0.4 : 0.9), roofC);
       }
       // Mosque: a dome and a minaret.
@@ -894,7 +904,7 @@ export function buildSite(_template: StadiumTemplate, spec: SiteSpec, data: Site
   // ---- Boundary walls ----
   {
     const m = new Mesher();
-    const c = C(uk ? 0x8a5543 : 0xd9cbb0);
+    const c = C(uk ? 0x8a5543 : es ? 0xd2c6b0 : 0xd9cbb0);
     for (const w of data.walls) {
       const p = unflat(w);
       for (let i = 0; i + 1 < p.length; i++) {
@@ -904,7 +914,7 @@ export function buildSite(_template: StadiumTemplate, spec: SiteSpec, data: Site
         if (L < 0.2) continue;
         const nx = (z1 - z0) / L;
         const nz = -(x1 - x0) / L;
-        const h = uk ? 1.6 : 2.8;
+        const h = uk ? 1.6 : es ? 2.2 : 2.8;
         const a = m.vert(x0, 0, z0, nx, 0, nz, 0, 0, c);
         m.vert(x1, 0, z1, nx, 0, nz, L / 4, 0, c);
         m.vert(x1, h, z1, nx, 0, nz, L / 4, h / 4, c);
@@ -916,10 +926,17 @@ export function buildSite(_template: StadiumTemplate, spec: SiteSpec, data: Site
   }
 
   // ---- Palms ----
-  const palms: XZ[] = [];
-  for (let i = 0; i + 1 < data.trees.length; i += 2) palms.push([data.trees[i] / 10, data.trees[i + 1] / 10]);
-  const shown = full ? palms : palms.filter((_, i) => i % 3 === 0);
-  if (shown.length && uk) {
+  const allTrees: XZ[] = [];
+  for (let i = 0; i + 1 < data.trees.length; i += 2) allTrees.push([data.trees[i] / 10, data.trees[i + 1] / 10]);
+  const thinned = full ? allTrees : allTrees.filter((_, i) => i % 3 === 0);
+  // An English or Spanish street has broadleaf trees (planes, mostly); a
+  // Spanish one in the south mixes in palms (SiteSpec.palms of them).
+  const palmShare = uk ? 0 : es ? spec.palms ?? 0 : 1;
+  const isPalm = ([x, z]: XZ) => palmShare >= 1 || (palmShare > 0 && hash(x, z, 11) < palmShare);
+  const broad = thinned.filter((t) => !isPalm(t));
+  const palms = thinned.filter(isPalm);
+  if (broad.length) {
+    const shown = broad;
     // Broadleaf trees: a short trunk and a full, slightly lumpy crown, every
     // one a different size and shade of an early-autumn green.
     const trunkGeo = own(new THREE.CylinderGeometry(0.22, 0.34, 1, 6));
@@ -961,7 +978,9 @@ export function buildSite(_template: StadiumTemplate, spec: SiteSpec, data: Site
     if (crowns.instanceColor) crowns.instanceColor.needsUpdate = true;
     trunks.castShadow = crowns.castShadow = opts.shadows;
     group.add(trunks, crowns);
-  } else if (shown.length) {
+  }
+  if (palms.length) {
+    const shown = palms;
     const trunkGeo = own(new THREE.CylinderGeometry(0.2, 0.32, 1, 6));
     trunkGeo.translate(0, 0.5, 0);
     const trunks = new THREE.InstancedMesh(trunkGeo, own(new THREE.MeshStandardMaterial({ color: 0x8a7155, roughness: 0.95 })), shown.length);
@@ -1125,6 +1144,7 @@ export function buildSite(_template: StadiumTemplate, spec: SiteSpec, data: Site
 
 export function buildHorizon(spec: SiteSpec, inner: number, tex: { facade: THREE.Texture; lit: THREE.Texture }): { object: THREE.Group; setNight(l: number): void; dispose(): void } {
   const uk = spec.style === 'uk';
+  const es = spec.style === 'es';
   const group = new THREE.Group();
   group.name = 'site-horizon';
   const C = (hex: number) => new THREE.Color(hex);
@@ -1146,24 +1166,26 @@ export function buildHorizon(spec: SiteSpec, inner: number, tex: { facade: THREE
     const ang = r() * Math.PI * 2;
     const rad = inner + 20 + Math.pow(r(), 0.7) * (kind === 'desert' ? 260 : 520);
     const tall = r() < towers;
-    const h = tall ? 40 + r() * 70 : uk ? 7 + r() * 8 : 6 + r() * (kind === 'desert' ? 6 : 13);
-    const w = tall ? 16 + r() * 14 : uk ? 8 + r() * 14 : 12 + r() * 30;
-    const dd = tall ? 16 + r() * 14 : uk ? 30 + r() * 50 : 12 + r() * 30;
+    // A Spanish city is blocks of flats, five to nine floors, round courtyards.
+    const h = tall ? 40 + r() * 70 : uk ? 7 + r() * 8 : es ? 14 + r() * 18 : 6 + r() * (kind === 'desert' ? 6 : 13);
+    const w = tall ? 16 + r() * 14 : uk ? 8 + r() * 14 : es ? 14 + r() * 26 : 12 + r() * 30;
+    const dd = tall ? 16 + r() * 14 : uk ? 30 + r() * 50 : es ? 20 + r() * 40 : 12 + r() * 30;
     d.position.set(Math.cos(ang) * rad, 0, Math.sin(ang) * rad);
     d.rotation.set(0, r() * Math.PI, 0);
     d.scale.set(w, h, dd);
     d.updateMatrix();
     city.setMatrixAt(i, d.matrix);
-    city.setColorAt(i, col.set(uk ? (tall ? OFFICE_TINTS[Math.floor(r() * 3)] : UK_BRICK[Math.floor(r() * UK_BRICK.length)]) : WALL_TINTS[Math.floor(r() * WALL_TINTS.length)]));
+    city.setColorAt(i, col.set(uk ? (tall ? OFFICE_TINTS[Math.floor(r() * 3)] : UK_BRICK[Math.floor(r() * UK_BRICK.length)]) : es ? (tall ? OFFICE_TINTS[Math.floor(r() * 3)] : ES_WALLS[Math.floor(r() * ES_WALLS.length)]) : WALL_TINTS[Math.floor(r() * WALL_TINTS.length)]));
   }
   city.instanceMatrix.needsUpdate = true;
   if (city.instanceColor) city.instanceColor.needsUpdate = true;
   group.add(city);
   trash.push(geo, mat);
 
-  // An English skyline is half trees: clumps of them between the rooftops.
-  if (uk) {
-    const N = 700;
+  // An English skyline is half trees: clumps of them between the rooftops. A
+  // Spanish one has fewer, in the parks and down the avenues.
+  if (uk || es) {
+    const N = uk ? 700 : 260;
     const tg = new THREE.IcosahedronGeometry(1, 0);
     const tm = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.95, flatShading: true });
     const trees = new THREE.InstancedMesh(tg, tm, N);

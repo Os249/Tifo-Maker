@@ -640,8 +640,10 @@ function wirePreviewActions(item: GalleryItem): void {
       if (countEl) countEl.textContent = String(r.likeScore);
       likeBtn.classList.toggle('on', r.myVote === 1);
       likeBtn.querySelector('i')!.className = `ti ti-heart${r.myVote === 1 ? '-filled' : ''}`;
-    } catch {
-      toast(t('cm.errVote'));
+    } catch (e) {
+      // An unverified account is told what to do; anything else is generic.
+      const m = (e as Error)?.message ?? '';
+      toast(m === t('err.verifyToVote') ? m : t('cm.errVote'));
     }
   });
 

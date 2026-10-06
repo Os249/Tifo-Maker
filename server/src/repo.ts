@@ -34,6 +34,11 @@ export interface DesignMeta {
   deletedAt?: string | null;
   /** How the project began, when that is worth a badge: 'ai' for now. */
   origin?: string | null;
+  /**
+   * A moderator took it down. Permanent: it can never be made public again by
+   * its owner, from the editor, the Trash or a copy (audit round four).
+   */
+  takenDown?: boolean;
 }
 
 /** One card on the owner's Projects page. */
@@ -89,6 +94,13 @@ export interface DesignRecord extends DesignMeta {
   /** Gzipped cell buffer. */
   cellsGz: Buffer;
 }
+
+/**
+ * How many revisions a design keeps. The history list shows at most 200, and
+ * nothing replays older ones, so anything past this is storage without a use:
+ * one owner could otherwise append without limit (audit round four).
+ */
+export const REVISIONS_KEPT = 200;
 
 export interface RevisionRow {
   seq: number;
@@ -418,7 +430,11 @@ export interface AuthRepository {
    */
   setEmail(userId: string, email: string, acceptedVersion?: string | null): Promise<boolean>;
   /** Mark the user's current email as verified now. */
-  markEmailVerified(userId: string): Promise<void>;
+  /**
+   * Mark the email verified. With `email`, only while the account's address is
+   * still that one (case-insensitive), in one statement; true when marked.
+   */
+  markEmailVerified(userId: string, email?: string): Promise<boolean>;
   /**
    * Rename the caller. Returns false if the name belongs to someone else.
    *
