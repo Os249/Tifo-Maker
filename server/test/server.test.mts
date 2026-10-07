@@ -15,6 +15,7 @@ import { MemoryFeedbackRepository } from '../src/feedbackRepo';
 import { PgAuthRepository, PgDesignRepository } from '../src/pgRepo';
 import { PgSocialRepository } from '../src/pgSocial';
 import { buildApp, SNAPSHOT_EVERY, type TemplateInfo } from '../src/routes';
+import { mintUnlock } from '../src/aiRoutes';
 import { schemaStatements } from '../src/schema';
 import { toB64 } from '../src/codec';
 import type { AuthRepository, DesignRepository } from '../src/repo';
@@ -40,10 +41,13 @@ function sampleCells(): Uint8Array {
   return cells;
 }
 
+/** An allow-listed admin name can only be claimed from an admin-password session. */
+const ADMIN_PW = 'test admin password';
 async function registerUser(app: FastifyInstance, username: string): Promise<string> {
   const res = await app.inject({
     method: 'POST',
     url: '/api/auth/register',
+    headers: { 'x-ai-unlock': mintUnlock(ADMIN_PW) },
     payload: { username, password: 'harbor-kite-moss-31', email: `${username}@example.test`, acceptedVersion: 'test' },
   });
   assert.equal(res.statusCode, 201, res.body);
@@ -827,7 +831,7 @@ async function runSuite(name: string, repo: DesignRepository, auth: AuthReposito
   const auth = new MemoryAuthRepository();
   // "chief" is the only designated admin.
   const app = await buildApp(new MemoryDesignRepository((id) => auth.usernameOf(id)), auth, templates, {
-    adminUsernames: ['chief'],
+    adminUsernames: ['chief'], aiAdminPassword: ADMIN_PW,
   });
   const cellsGzB64 = gzipSync(sampleCells()).toString('base64');
   const adminTok = await registerUser(app, 'chief');
@@ -1337,7 +1341,7 @@ async function runSuite(name: string, repo: DesignRepository, auth: AuthReposito
   const events = new MemoryEventsRepository();
   const app = await buildApp(new MemoryDesignRepository((id) => auth.usernameOf(id)), auth, templates, {
     events,
-    adminUsernames: ['boss'],
+    adminUsernames: ['boss'], aiAdminPassword: ADMIN_PW,
   });
   const bossTok = await registerUser(app, 'boss');
 
@@ -1510,7 +1514,7 @@ async function runSuite(name: string, repo: DesignRepository, auth: AuthReposito
   const app = await buildApp(designs, auth, templates, {
     stats: new MemoryAdminStatsRepository(),
     traffic: new MemoryTrafficRepository(),
-    adminUsernames: ['boss'],
+    adminUsernames: ['boss'], aiAdminPassword: ADMIN_PW,
   });
   const bossTok = await registerUser(app, 'boss');
   const fanTok = await registerUser(app, 'fan');
@@ -1587,7 +1591,7 @@ async function runSuite(name: string, repo: DesignRepository, auth: AuthReposito
     feedback,
     feedbackTo: 'dev@example.test',
     emailSender: { async send(msg) { sent.push({ to: msg.to, subject: msg.subject }); } },
-    adminUsernames: ['boss'],
+    adminUsernames: ['boss'], aiAdminPassword: ADMIN_PW,
   });
   const bossTok = await registerUser(app, 'boss');
   // Registering sends a verification mail through this same sender, so start

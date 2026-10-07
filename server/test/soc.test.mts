@@ -21,6 +21,7 @@ import { MemoryAiUsageRepository, MemoryAuthRepository, MemoryDesignRepository }
 import { MemoryFeedbackRepository } from '../src/feedbackRepo';
 import { MemoryAdminStatsRepository } from '../src/statsRepo';
 import { buildApp, type TemplateInfo } from '../src/routes';
+import { mintUnlock } from '../src/aiRoutes';
 import { ALERT_DAILY_CAP, ALERT_RULES, SocMonitor, maskEmail, socKeyFrom } from '../src/soc';
 import { MemorySocRepository, PgSocRepository, RETENTION_DAYS, type SocRepository } from '../src/socRepo';
 import { securityPosture } from '../src/posture';
@@ -36,8 +37,10 @@ const ADMIN_PASSWORD = 'soc test admin password, long enough';
 
 type Mail = { to: string; subject: string; html: string; text?: string };
 
+/** An allow-listed admin name can only be claimed from an admin-password session. */
+const ADMIN_PW = ADMIN_PASSWORD;
 async function reg(app: FastifyInstance, u: string, ip = '198.51.100.1'): Promise<string> {
-  const r = await app.inject({ method: 'POST', url: '/api/auth/register', remoteAddress: ip, payload: { username: u, password: 'quartz-lantern-echo7', email: `${u}@example.test`, acceptedVersion: 'test' } });
+  const r = await app.inject({ method: 'POST', url: '/api/auth/register', remoteAddress: ip, headers: { 'x-ai-unlock': mintUnlock(ADMIN_PW) }, payload: { username: u, password: 'quartz-lantern-echo7', email: `${u}@example.test`, acceptedVersion: 'test' } });
   return (r.json() as { token: string }).token;
 }
 
@@ -147,7 +150,16 @@ console.log('— through the real app —');
   for (let i = 0; i < 3; i++) {
     assert.equal((await app.inject({ method: 'GET', url: '/api/admin/overview', remoteAddress: '198.51.100.9', headers: { 'x-ai-unlock': unlockToken } })).statusCode, 200);
   }
+  // An allow-listed name nobody holds is reserved, and the posture says so.
+  const adminsRow = async () => ((await app.inject({ method: 'GET', url: '/api/admin/soc', headers: { 'x-ai-unlock': unlockToken } })).json() as { posture: { id: string; state: string; detail: string }[] }).posture.find((p) => p.id === 'admins');
+  const unclaimed = await adminsRow();
+  assert.equal(unclaimed?.state, 'warn', JSON.stringify(unclaimed));
+  assert.match(unclaimed?.detail ?? '', /@boss/);
+  assert.match(unclaimed?.detail ?? '', /reserved/);
+  const squat = await app.inject({ method: 'POST', url: '/api/auth/register', remoteAddress: '203.0.113.66', payload: { username: 'boss', password: 'quartz-lantern-echo7', email: 'squat@example.test', acceptedVersion: 'test' } });
+  assert.equal(squat.statusCode, 409, 'sign-up without the admin password cannot take it');
   const boss = await reg(app, 'boss');
+  assert.equal((await adminsRow())?.state, 'good', 'claimed, the row is green');
   assert.equal((await app.inject({ method: 'POST', url: `/api/admin/designs/${designId}/takedown`, remoteAddress: '198.51.100.10', headers: bearer(boss) })).statusCode, 200);
   assert.equal((await app.inject({ method: 'POST', url: `/api/admin/designs/${designId}/takedown`, headers: bearer(photoOwner) })).statusCode, 403);
   const testAlert = await app.inject({ method: 'POST', url: '/api/admin/soc/test-alert', headers: { 'x-ai-unlock': unlockToken }, payload: {} });

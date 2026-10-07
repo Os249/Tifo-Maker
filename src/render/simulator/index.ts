@@ -1110,15 +1110,12 @@ export class MatchDaySimulator {
     this.pitchside.object.visible = b;
   }
 
-  // ---- banners & flags (Phase 4) ----
+  // ---- banners (Phase 4) ----
   setBannersVisible(b: boolean): void {
     this.banners.setVisible(b);
   }
   setStairsVisible(b: boolean): void {
     this.banners.setStairsVisible(b);
-  }
-  setFlagsVisible(b: boolean): void {
-    this.banners.setFlagsVisible(b);
   }
 
   // ---- effects (Phase 5) ----

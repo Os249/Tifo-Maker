@@ -53,9 +53,13 @@ async function registerWithDerivedName(email: string, password: string): Promise
     } catch (err) {
       lastErr = err;
       const m = (err as Error).message;
-      // Only a username collision is worth retrying. A taken EMAIL means this
-      // person already has an account and needs to be told, not looped.
-      if (/email/i.test(m)) throw err;
+      // Only a collision is worth retrying. The server answers one generic
+      // "username or email taken" for both (telling them apart would reveal
+      // which addresses have accounts), so that one is retried with another
+      // handle: a taken email fails every attempt and is reported at the end.
+      // It used to stop at the word "email", so a derived handle that was
+      // taken, or reserved for an admin, ended sign-up with no second try.
+      if (/email/i.test(m) && !/username/i.test(m)) throw err;
       if (!/taken|exists|409/i.test(m)) throw err;
     }
   }

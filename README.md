@@ -64,8 +64,10 @@ Three tiers keyed to capability, not just width:
   "Verified match" badge in the Before/After slider, so verification is visible
   social proof. Every admin endpoint is gated server-side regardless of UI.
 
-  Deploy note: set `ADMIN_USERNAMES=yourname` in the environment, or the
-  moderation queue stays inaccessible to everyone.
+  Deploy note: set `ADMIN_USERNAMES=yourname` (your existing account) in the
+  environment, or the moderation queue stays inaccessible to everyone. A listed
+  name nobody has registered is reserved: sign-up refuses it unless the admin
+  password is unlocked in that browser, so a typo grants no one anything.
 
 
 - **Before/After real photos** — the social-proof feature. Creators attach a

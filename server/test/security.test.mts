@@ -16,6 +16,7 @@ import { DEFAULT_TEMPLATE } from '../../src/core/template';
 import { MemoryAuthRepository, MemoryDesignRepository, MemoryLeadsRepository } from '../src/memoryRepo';
 import { MemorySocialRepository } from '../src/memorySocial';
 import { buildApp, type TemplateInfo } from '../src/routes';
+import { mintUnlock } from '../src/aiRoutes';
 import { hashPassword, hashToken } from '../src/auth';
 import { checkPassword, suggestPassphrase, PASSWORD_MAX, PASSWORD_MIN } from '../../src/core/password';
 
@@ -130,14 +131,46 @@ async function makeDesign(app: FastifyInstance, token: string, isPublic = false)
   const auth = new MemoryAuthRepository();
   const designs = new MemoryDesignRepository((id) => auth.usernameOf(id));
   // A real allow-list, which is what made the case-collision reachable.
-  const app = await buildApp(designs, auth, templates, { staticDir: process.cwd(), adminUsernames: ['admin'] });
+  const app = await buildApp(designs, auth, templates, { staticDir: process.cwd(), adminUsernames: ['admin', 'chief_r'], aiAdminPassword: 'case admin password' });
+  const signUp = (username: string, unlock?: string) => app.inject({
+    method: 'POST', url: '/api/auth/register',
+    ...(unlock ? { headers: { 'x-ai-unlock': unlock } } : {}),
+    payload: { username, password: 'quartz-lantern-echo7', email: `${username.toLowerCase()}-${Math.random().toString(36).slice(2, 8)}@example.test`, acceptedVersion: 'test' },
+  });
+
+  // 0. HIGH was (October 2026, live): ADMIN_USERNAMES named an account nobody
+  //    had registered, and admin rights follow the name, so whoever signed up
+  //    with it first was a moderator. An allow-listed name is now reserved:
+  //    sign-up refuses it like a taken name unless the request carries a valid
+  //    admin-password session.
+  assert.equal((await signUp('admin')).statusCode, 409, 'an unclaimed admin name cannot be signed up for');
+  assert.equal((await signUp('admin', 'v2.9999999999999.0123456789abcdef01.deadbeef')).statusCode, 409, 'nor with a forged session');
+  assert.equal((await signUp('admin', mintUnlock('some other password'))).statusCode, 409, 'nor with a session for another password');
+  assert.equal(await auth.getUserByName('admin'), null, 'and nothing was created');
+  const claimed = await signUp('admin', mintUnlock('case admin password'));
+  assert.equal(claimed.statusCode, 201, `the admin-password session claims it (${claimed.body})`);
+  const adminTok = (claimed.json() as { token: string }).token;
+  assert.equal(((await app.inject({ method: 'GET', url: '/api/me', headers: bearer(adminTok) })).json() as { isAdmin: boolean }).isAdmin, true, 'and it is the admin');
+  // Renaming onto it is claiming it too, and takes the same proof. In practice
+  // it is the operator's way in: sign-up derives the name from the email.
+  const renamer = await reg(app, 'renamer');
+  const rename = (unlock?: string) => app.inject({ method: 'POST', url: '/api/account/username', headers: { ...bearer(renamer.token), ...(unlock ? { 'x-ai-unlock': unlock } : {}) }, payload: { username: 'chief_r' } });
+  assert.equal((await rename()).statusCode, 409, 'an account cannot rename onto an unclaimed admin name');
+  assert.equal((await rename(mintUnlock('some other password'))).statusCode, 409, 'nor with a session for another password');
+  assert.equal((await app.inject({ method: 'POST', url: '/api/account/username', headers: { ...bearer(renamer.token), 'x-ai-unlock': mintUnlock('case admin password') }, payload: { username: 'Chief_R' } })).statusCode, 409, 'nor onto a lookalike with one');
+  assert.equal((await rename(mintUnlock('case admin password'))).statusCode, 200, 'the admin-password session can');
+  assert.equal(((await app.inject({ method: 'GET', url: '/api/me', headers: bearer(renamer.token) })).json() as { isAdmin: boolean }).isAdmin, true, 'and the renamed account is the admin');
+  const noPwApp = await buildApp(new MemoryDesignRepository((id) => auth.usernameOf(id)), new MemoryAuthRepository(), templates, { staticDir: process.cwd(), adminUsernames: ['admin'], aiAdminPassword: '' });
+  const noPw = await noPwApp.inject({ method: 'POST', url: '/api/auth/register', headers: { 'x-ai-unlock': mintUnlock('') }, payload: { username: 'admin', password: 'quartz-lantern-echo7', email: 'x@example.test', acceptedVersion: 'test' } });
+  assert.equal(noPw.statusCode, 409, 'with no admin password configured, the name stays reserved outright');
+  await noPwApp.close();
 
   // 1. CRITICAL was: usernames are unique case-SENSITIVELY, but the admin
   //    allow-list matched case-INSENSITIVELY, so "Admin" registered beside the
   //    real "admin" and inherited moderator in one unauthenticated request.
-  await reg(app, 'admin');
-  const lookalike = await app.inject({ method: 'POST', url: '/api/auth/register', payload: { username: 'Admin', password: 'quartz-lantern-echo7', email: 'evil@example.test', acceptedVersion: 'test' } });
+  const lookalike = await signUp('Admin');
   assert.equal(lookalike.statusCode, 409, 'a username that case-folds onto an admin name is refused');
+  assert.equal((await signUp('ADMIN', mintUnlock('case admin password'))).statusCode, 409, 'even from an admin-password session');
   const plain = await reg(app, 'nobody');
   assert.equal(
     ((await app.inject({ method: 'GET', url: '/api/me', headers: bearer(plain.token) })).json() as { isAdmin: boolean }).isAdmin,
@@ -1557,7 +1590,7 @@ async function makeDesign(app: FastifyInstance, token: string, isPublic = false)
     const featured = new MemoryDailyFeatureRepository();
     const app = await buildApp(designs, auth, templates, {
       social, leads, featured,
-      adminUsernames: ['mod_r4'],
+      adminUsernames: ['mod_r4'], aiAdminPassword: 'r4 admin password',
       oauth: { google: { id: 'cid', secret: 'csecret' } },
       emailSender: { async send(m: { to: string; subject: string; text?: string }) { mail.push({ to: m.to, subject: m.subject, text: m.text ?? '' }); } },
       verifyResendCooldownMs: 0,
@@ -1566,7 +1599,7 @@ async function makeDesign(app: FastifyInstance, token: string, isPublic = false)
       ...(existsSync('dist/index.html') ? { staticDir: (await import('node:path')).resolve('dist') } : {}),
     } as Parameters<typeof buildApp>[3]);
     const r4 = async (u: string, email = `${u}@example.test`): Promise<{ token: string; id: string }> => {
-      const r = await app.inject({ method: 'POST', url: '/api/auth/register', payload: { username: u, password: PW, email, acceptedVersion: 'test' } });
+      const r = await app.inject({ method: 'POST', url: '/api/auth/register', headers: { 'x-ai-unlock': mintUnlock('r4 admin password') }, payload: { username: u, password: PW, email, acceptedVersion: 'test' } });
       assert.equal(r.statusCode, 201, r.body);
       const token = (r.json() as { token: string }).token;
       return { token, id: (await app.inject({ method: 'GET', url: '/api/me', headers: bearer(token) })).json().id as string };

@@ -193,6 +193,11 @@ function signUnlock(secret: string, exp: number, jti = randomBytes(9).toString('
   return `v2.${exp}.${jti}.${sig}`;
 }
 
+/** A fresh admin-password session token, exactly as /api/ai/unlock issues one. */
+export function mintUnlock(secret: string): string {
+  return signUnlock(secret, Date.now() + UNLOCK_TTL_MS);
+}
+
 /**
  * Verify an unlock token against the current password (and its expiry).
  *

@@ -208,8 +208,10 @@ export interface AppOptions {
   logStream?: { write(line: string): void };
   /** Optional anonymous-analytics sink. When absent, event endpoints no-op. */
   events?: EventsRepository;
-  /** Usernames with moderator privileges (from ADMIN_USERNAMES). Case-insensitive. */
+  /** Usernames with moderator privileges (from ADMIN_USERNAMES). Matched exactly. */
   adminUsernames?: string[];
+  /** The admin password (default: AI_ADMIN_PASSWORD). Tests pass it here rather than through the environment. */
+  aiAdminPassword?: string;
   /** Optional social layer (follows, comments, remix lineage, notifications). */
   social?: SocialRepository;
   /** Optional B2B leads store (For Clubs enterprise form). */
@@ -569,8 +571,11 @@ export async function buildApp(
     if (names.length === 0) return { id: 'admins', label: 'Admin accounts', state: 'info', detail: 'ADMIN_USERNAMES is empty: moderation uses the admin password only.' };
     const missing: string[] = [];
     for (const n of names) if (!(await auth.getUserByName(n).catch(() => null))) missing.push(n);
+    // Not a hole any more (sign-up refuses the name without the admin
+    // password), but still worth a line: an allow-list entry nobody holds is
+    // either a typo or an account that was never made.
     return missing.length
-      ? { id: 'admins', label: 'Admin accounts', state: 'bad', detail: `Not registered: ${missing.map((m) => '@' + m).join(', ')}. Anyone who registers that name becomes a moderator. Register it now, or remove it from ADMIN_USERNAMES.` }
+      ? { id: 'admins', label: 'Admin accounts', state: 'warn', detail: `Not registered: ${missing.map((m) => '@' + m).join(', ')}. The name is reserved: nobody can sign up with it or rename onto it without the admin password, so it gives no one moderator rights. To make it yours, unlock the AI panel with the admin password, then rename your account to it in Account; otherwise remove it from ADMIN_USERNAMES.` }
       : { id: 'admins', label: 'Admin accounts', state: 'good', detail: `Every allow-listed name belongs to an account (${names.length}).` };
   };
   const requireAdmin = async (req: FastifyRequest, reply: FastifyReply): Promise<string | null> => {
@@ -601,7 +606,20 @@ export async function buildApp(
     return null;
   };
 
-  const aiAdminPassword = process.env.AI_ADMIN_PASSWORD;
+  const aiAdminPassword = options.aiAdminPassword ?? process.env.AI_ADMIN_PASSWORD;
+  /**
+   * May this request take an allow-listed admin name? Only the exact name (a
+   * case-folded lookalike never), and only with a valid admin-password session
+   * in the x-ai-unlock header. That session already opens every moderation
+   * queue, so accepting it here grants nothing it did not have. Recorded in the
+   * audit trail under the session's id.
+   */
+  const adminClaim = (req: FastifyRequest, username: string): boolean => {
+    const tok = req.headers['x-ai-unlock'];
+    if (!adminSet.has(username) || typeof tok !== 'string' || !aiAdminPassword || !verifyUnlock(aiAdminPassword, tok)) return false;
+    req.socActor = `admin password (session ${tok.split('.')[2]?.slice(0, 6) ?? '?'}) claiming @${username}`;
+    return true;
+  };
   const adminAccess = async (req: FastifyRequest): Promise<boolean> => {
     const tok = req.headers['x-ai-unlock'];
     if (typeof tok === 'string' && aiAdminPassword && verifyUnlock(aiAdminPassword, tok)) {
@@ -976,7 +994,7 @@ export async function buildApp(
       aiEvents: options.aiEvents,
       userOf,
       isAdmin: isAdminUser,
-      adminPassword: process.env.AI_ADMIN_PASSWORD,
+      adminPassword: aiAdminPassword,
       freeLimit: options.aiFreeLimit ?? 10,
       // Launch: AI is free for any signed-in, email-verified user. Set
       // AI_FREE_FOR_ALL=false later to enforce the per-account free limit
@@ -1423,10 +1441,15 @@ export async function buildApp(
       email?: string;
       acceptedVersion?: string;
     };
-    // Reject any username that case-folds onto an admin name, whether or not that
-    // account exists yet: it closes the impersonation angle as well as the
-    // escalation one, and it keeps the allow-list unambiguous.
-    if (typeof username === 'string' && adminFolded.has(username.toLowerCase()) && !adminSet.has(username)) {
+    // An allow-listed name is RESERVED. Admin rights follow the name, so an
+    // allow-listed name with no account behind it used to be moderator rights
+    // for whoever signed up with it first: one unauthenticated request. Now
+    // public sign-up refuses it exactly as it refuses a taken name, and the only
+    // way to claim it is from a browser holding a valid admin-password session
+    // (the x-ai-unlock header the editor sends once the AI panel is unlocked).
+    // A name that merely case-folds onto an admin name is refused outright, as
+    // before: it closes the impersonation angle and keeps the list unambiguous.
+    if (typeof username === 'string' && adminFolded.has(username.toLowerCase()) && !adminClaim(req, username)) {
       return reply.code(409).send({ error: 'username or email taken' });
     }
     if (!username || !USERNAME.test(username)) {
@@ -1600,11 +1623,13 @@ export async function buildApp(
     if (!USERNAME.test(username)) {
       return reply.code(400).send({ error: '3-24 characters: letters, numbers or underscore' });
     }
-    // Stricter than registration, deliberately. Registration allows the exact
-    // admin name through (that is how an admin bootstraps); a RENAME never can
-    // — if the allow-listed name is not yet registered, renaming onto it would
-    // hand the caller moderator rights, and uniqueness would not stop it.
-    if (adminFolded.has(username.toLowerCase())) {
+    // Renaming onto an admin name is claiming it, so it takes the same proof as
+    // signing up with one: an admin-password session in this browser. Without
+    // it, an allow-listed name nobody holds would be moderator rights for the
+    // first account to rename onto it, and uniqueness would not stop that. This
+    // is also how the operator claims it in practice, because sign-up derives
+    // the name from the email: unlock the AI panel, then rename in Account.
+    if (adminFolded.has(username.toLowerCase()) && !adminClaim(req, username)) {
       return reply.code(409).send({ error: 'that name is taken' });
     }
     // And never AWAY from one. Admin rights follow the name, so an admin who
@@ -1981,10 +2006,11 @@ export async function buildApp(
             .catch(() => null)) ?? null;
         // A taken EMAIL fails every attempt, so stop rewriting the name and try
         // once without it rather than burning all five tries on the same clash.
-        if (!created && mail && attempt === 1) {
+        const bare = deriveUsername(seed, attempt + 1, () => randomInt(0, 1_000_000) / 1_000_000);
+        if (!created && mail && attempt === 1 && !adminFolded.has(bare.toLowerCase())) {
           created =
             (await auth
-              .createUser(deriveUsername(seed, attempt + 1, () => randomInt(0, 1_000_000) / 1_000_000), null, {
+              .createUser(bare, null, {
                 acceptedVersion: pending.a ?? null,
                 usernameChosen: false,
               })

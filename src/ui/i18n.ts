@@ -2459,6 +2459,7 @@ const ERROR_KEYS: Record<string, string> = {
   'this design was taken down by a moderator': 'err.takenDown',
   'this design cannot be remixed': 'err.noRemix',
   'email already in use': 'err.emailTaken',
+  'that name is taken': 'ac.name.taken',
   'too many emails to that address, try again later': 'err.addressMailCap',
   'too many verification emails today': 'err.verifyDailyCap',
   'photo must be a JPEG, PNG or WebP image': 'err.photoType',

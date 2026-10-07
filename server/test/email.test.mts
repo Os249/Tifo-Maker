@@ -23,6 +23,7 @@ import { generateSeatMap } from '../../src/core/seatmap';
 import { DEFAULT_TEMPLATE } from '../../src/core/template';
 import { MemoryAuthRepository, MemoryDesignRepository } from '../src/memoryRepo';
 import { buildApp, type AppOptions, type TemplateInfo } from '../src/routes';
+import { mintUnlock } from '../src/aiRoutes';
 import { configWarnings, logConfigWarnings } from '../src/preflight';
 import { ADMIN_JS, ADMIN_UNLOCK_JS } from '../src/adminPage';
 import { createEmailSender, DEFAULT_FROM, emailHealth, isNoReplyAddress, ResendEmailSender, type EmailSender, type EmailMessage } from '../src/email';
@@ -56,8 +57,10 @@ async function makeApp(opts: AppOptions = {}) {
   return { app, mail };
 }
 
+/** An allow-listed admin name can only be claimed from an admin-password session. */
+const ADMIN_PW = 'test admin password';
 const reg = async (app: FastifyInstance, n: string) => app.inject({
-  method: 'POST', url: '/api/auth/register',
+  method: 'POST', url: '/api/auth/register', headers: { 'x-ai-unlock': mintUnlock(ADMIN_PW) },
   payload: { username: n, password: 'correct-horse-battery-9', email: `${n}@example.com`, acceptedVersion: '1' },
 });
 
@@ -160,7 +163,7 @@ const codeIn = (m: EmailMessage | undefined): string => /code: (\d{6})/.exec(m?.
 // ---------------------------------------------------------------------------
 {
   console.log('\n— every other bodiless call the client makes reaches its route —');
-  const { app } = await makeApp({ adminUsernames: ['boss1'] });
+  const { app } = await makeApp({ adminUsernames: ['boss1'], aiAdminPassword: ADMIN_PW });
   const bearer = (t: string) => ({ authorization: `Bearer ${t}` });
   const boss = (await reg(app, 'boss1')).json().token as string;
   const fan = (await reg(app, 'fan1')).json().token as string;

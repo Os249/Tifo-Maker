@@ -313,7 +313,9 @@ export async function register(
   const data = (await expectOk(
     await fetch(`${API}/auth/register`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      // With the admin password unlocked, the session goes along: it is the only
+      // thing that lets sign-up claim a name reserved by ADMIN_USERNAMES.
+      headers: { 'content-type': 'application/json', ...(aiUnlockToken() ? { 'x-ai-unlock': aiUnlockToken()! } : {}) },
       body: JSON.stringify({ username, password, email, acceptedVersion }),
     }),
   )) as { token: string; username: string; emailSent?: boolean };
@@ -394,7 +396,9 @@ export async function changeUsername(username: string): Promise<string> {
   const data = (await expectOk(
     await fetch(`${API}/account/username`, {
       method: 'POST',
-      headers: authHeaders(true),
+      // The admin-password session, when there is one: renaming onto a name
+      // reserved by ADMIN_USERNAMES is how the operator claims it.
+      headers: { ...authHeaders(true), ...(aiUnlockToken() ? { 'x-ai-unlock': aiUnlockToken()! } : {}) },
       body: JSON.stringify({ username }),
     }),
   )) as { username: string };

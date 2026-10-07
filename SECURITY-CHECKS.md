@@ -157,7 +157,7 @@ each one in more detail.
 | `NODE_ENV` | `production` | request logs, `Secure` admin cookie, refuses to start without a database |
 | `DATABASE_URL` | Railway's Postgres | required in production |
 | `AI_ADMIN_PASSWORD` | 20+ random characters | guards `/admin` and the AI budget bypass |
-| `ADMIN_USERNAMES` | your account's username | moderation actions |
+| `ADMIN_USERNAMES` | your account's username | moderation actions; a listed name with no account is reserved, claimable only with the admin password unlocked |
 | `PUBLIC_URL` | `https://tifomaker.org` | links in emails never depend on a request header |
 | `RESEND_API_KEY` | from Resend | without it no email, including alerts, is delivered |
 | `EMAIL_FROM` | unset, or `TifoMaker <hello@tifomaker.org>` | a no-reply sender lands in spam |

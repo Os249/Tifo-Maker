@@ -322,7 +322,6 @@ const MDS_T: Record<string, { en: string; ar: string }> = {
   },
   railBanners: { en: 'Rail banners', ar: 'لافتات الفواصل' },
   coverStairs: { en: 'Cover stairs', ar: 'تغطية الدرج' },
-  cornerFlags: { en: 'Corner flags', ar: 'أعلام الأركان' },
   wetPitch: { en: 'Wet pitch (reflections)', ar: 'أرضية مبلّلة (انعكاسات)' },
   'tod.day': { en: 'Day', ar: 'نهار' },
   'tod.dusk': { en: 'Dusk', ar: 'غروب' },
@@ -658,7 +657,6 @@ interface SimState {
   showOnTifo: boolean;
   banners: boolean;
   stairs: boolean;
-  flags: boolean;
   floods: boolean;
   /** Floodlight output, 0.1..1.5 — 1 is the rig as designed. */
   floodLevel: number;
@@ -785,7 +783,6 @@ export function openMatchDaySimulator(
     showOnTifo: false,
     banners: false,
     stairs: false,
-    flags: true,
     floods: true,
     floodLevel: 1,
     tifoHidden: false,
@@ -935,7 +932,6 @@ export function openMatchDaySimulator(
   floodLevel.disabled = !state.floods;
   const bannersChk = chk(state.banners);
   const stairsChk = chk(state.stairs);
-  const flagsChk = chk(state.flags);
   const wetChk = chk(state.wet);
   const soundChk = chk(state.sound);
   const muteChk = chk(state.muted);
@@ -964,7 +960,6 @@ export function openMatchDaySimulator(
     levelField(L('floodLevel'), floodLevel),
     checkField(L('railBanners'), bannersChk),
     checkField(L('coverStairs'), stairsChk),
-    checkField(L('cornerFlags'), flagsChk),
     checkField(L('wetPitch'), wetChk),
   );
   todSel.dataset.k = 'tod';
@@ -1582,7 +1577,6 @@ export function openMatchDaySimulator(
     sim.setCrowdShowOnTifo(state.showOnTifo);
     sim.setBannersVisible(state.banners);
     sim.setStairsVisible(state.stairs);
-    sim.setFlagsVisible(state.flags);
     sim.setFloodlightLevel(state.floodLevel);
     sim.setFloodlights(state.floods);
     sim.setTifoHidden(state.tifoHidden);
@@ -1915,10 +1909,6 @@ export function openMatchDaySimulator(
     state.stairs = stairsChk.checked;
     dbg('cover stairs ->', state.stairs);
     sim.setStairsVisible(state.stairs);
-  });
-  flagsChk.addEventListener('change', () => {
-    state.flags = flagsChk.checked;
-    sim.setFlagsVisible(state.flags);
   });
   wetChk.addEventListener('change', () => {
     state.wet = wetChk.checked;
