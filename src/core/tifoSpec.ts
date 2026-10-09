@@ -656,3 +656,163 @@ export function expandHex(hex: string): string {
   if (hex.length === 4) return '#' + hex[1] + hex[1] + hex[2] + hex[2] + hex[3] + hex[3];
   return hex;
 }
+
+// ---- model output: repair before judging ----
+
+/**
+ * What a model writes is not always what the contract says, and the strict
+ * validator rejects the WHOLE design for one field. Every failure in the admin
+ * queue of October 2026 was one of these:
+ *
+ *   - `colors` given as hex strings, or as a single index, or one index past the
+ *     palette (the critic recoloured a layer without touching the palette);
+ *   - `orientation` missing on a stripes layer, or written as `direction` —
+ *     the name a gradient uses for the same idea.
+ *
+ * Each costs the user the whole run ("premium is busy") over a detail with one
+ * obvious reading. This repairs what has one reading, says what it did, and
+ * leaves the rest to validateSpec. Pure; the input is not modified.
+ */
+export function coerceModelSpec(input: unknown): { spec: unknown; repairs: string[] } {
+  const repairs: string[] = [];
+  if (!isObj(input)) return { spec: input, repairs };
+  const out: Record<string, unknown> = { ...input };
+
+  // Palette: "#abc" and "aabbcc" are colours too.
+  const palette: string[] = Array.isArray(input.palette)
+    ? input.palette.map((c) => {
+        if (typeof c !== 'string') return c as string;
+        const t = c.trim();
+        return /^[0-9a-fA-F]{6}$|^[0-9a-fA-F]{3}$/.test(t) ? `#${t}` : t;
+      })
+    : [];
+  if (Array.isArray(input.palette)) out.palette = palette;
+  const n = palette.length;
+  const rgb = (h: string): [number, number, number] | null => {
+    if (typeof h !== 'string' || !HEX.test(h)) return null;
+    const v = parseInt(expandHex(h).slice(1), 16);
+    return [(v >> 16) & 255, (v >> 8) & 255, v & 255];
+  };
+  /** A palette index from a number, a numeric string or a colour (nearest card). */
+  const toIndex = (x: unknown): number | null => {
+    if (typeof x === 'number' && Number.isInteger(x)) return x >= 0 && x < n ? x : null;
+    if (typeof x !== 'string') return null;
+    const s = x.trim();
+    if (/^\d+$/.test(s)) { const k = Number(s); return k < n ? k : null; }
+    const want = rgb(s.startsWith('#') ? s : `#${s}`);
+    if (!want) return null;
+    let best = -1;
+    let bestD = Infinity;
+    for (let i = 1; i < n; i++) {
+      const c = rgb(palette[i]);
+      if (!c) continue;
+      const d = (c[0] - want[0]) ** 2 + (c[1] - want[1]) ** 2 + (c[2] - want[2]) ** 2;
+      if (d < bestD) { bestD = d; best = i; }
+    }
+    return best >= 0 ? best : null;
+  };
+
+  if (input.background !== undefined && input.background !== null && !Number.isInteger(input.background)) {
+    const b = toIndex(input.background);
+    if (b !== null) { out.background = b; repairs.push(`background → ${b}`); }
+  }
+
+  if (!Array.isArray(input.layers)) return { spec: out, repairs };
+  out.layers = input.layers.map((raw, li) => {
+    if (!isObj(raw)) return raw;
+    const l: Record<string, unknown> = { ...raw };
+    const p = `layers[${li}]`;
+    if (typeof l.kind === 'string') l.kind = l.kind.trim().toLowerCase();
+    if (typeof l.align === 'string') l.align = l.align.trim().toLowerCase();
+
+    if ('colorIndex' in l && !Number.isInteger(l.colorIndex)) {
+      const k = toIndex(l.colorIndex);
+      if (k !== null) { l.colorIndex = k; repairs.push(`${p}.colorIndex → ${k}`); }
+    }
+
+    if (l.kind === 'stripes' || l.kind === 'gradient' || l.kind === 'pattern') {
+      const rawColors = l.colors ?? l.colours ?? l.colorIndices ?? l.colorIndex;
+      const list = Array.isArray(rawColors) ? rawColors : rawColors !== undefined ? [rawColors] : [];
+      const colors = list.map(toIndex).filter((k): k is number => k !== null);
+      const same = Array.isArray(l.colors) && colors.length === l.colors.length && colors.every((k, i) => k === (l.colors as unknown[])[i]);
+      if (!same && colors.length) repairs.push(`${p}.colors → [${colors.join(',')}]`);
+      l.colors = colors;
+      delete l.colours;
+      delete l.colorIndices;
+      // One colour is not stripes or a gradient: it is a fill.
+      if (colors.length === 1) {
+        repairs.push(`${p}: one colour, drawn as a fill`);
+        return { kind: 'fill', id: l.id, region: l.region, colorIndex: colors[0] };
+      }
+    }
+
+    if (l.kind === 'stripes') {
+      const o = String(l.orientation ?? l.direction ?? '').trim().toLowerCase();
+      const fixed = ORIENTATIONS.has(o) ? o
+        : /diag|sash|slant|angle/.test(o) ? 'diagonal'
+        : /^h|horiz|hoop|row|across|band|landscape/.test(o) ? 'horizontal'
+        : 'vertical'; // missing or unreadable: the stripes default
+      if (fixed !== l.orientation) repairs.push(`${p}.orientation → ${fixed}`);
+      l.orientation = fixed;
+      delete l.direction;
+    }
+    if (l.kind === 'gradient' && typeof l.direction === 'string') {
+      const d = l.direction.trim().toLowerCase();
+      l.direction = /radial|circ|centre|center/.test(d) ? 'radial' : /^h|horiz|across|left|right/.test(d) ? 'horizontal' : 'vertical';
+    }
+    if (l.kind === 'pattern' && typeof l.pattern === 'string') {
+      const pt = l.pattern.trim().toLowerCase();
+      const fixed = (PATTERN_NAMES as readonly string[]).includes(pt) ? pt
+        : /check|chess/.test(pt) ? 'checker'
+        : /chevron|zig/.test(pt) ? 'chevron'
+        : /hoop|stripe|band/.test(pt) ? 'hoops'
+        : /grid|lattice|tartan|plaid/.test(pt) ? 'grid'
+        : /flag/.test(pt) ? 'flag'
+        : pt;
+      if (fixed !== l.pattern) repairs.push(`${p}.pattern → ${fixed}`);
+      l.pattern = fixed;
+    }
+    if (l.kind === 'symbol' && typeof l.symbol === 'string') l.symbol = l.symbol.trim().toLowerCase();
+    return l;
+  });
+  return { spec: out, repairs };
+}
+
+/**
+ * Validate a MODEL's design: repair what has one reading (coerceModelSpec), and
+ * if a few layers are still broken, leave those layers out rather than throwing
+ * away the design — at most a quarter of them, and never all. Anything worse is
+ * a failed design, as before. `repairs` lists every change for the operator.
+ */
+export function validateModelSpec(input: unknown, fallback?: TifoSpec): SpecValidationResult & { repairs: string[] } {
+  const { spec, repairs } = coerceModelSpec(input);
+  const first = validateSpec(spec);
+  if (first.valid || !isObj(spec) || !Array.isArray(spec.layers)) return { ...first, repairs };
+  const bad = new Set<number>();
+  for (const e of first.errors) {
+    const m = /^layers\[(\d+)\]/.exec(e.path);
+    if (!m) return { ...first, repairs }; // a palette or whole-spec problem: no salvage
+    bad.add(Number(m[1]));
+  }
+  const total = spec.layers.length;
+  if (bad.size === 0 || bad.size >= total || bad.size > Math.max(1, Math.floor(total / 4))) return { ...first, repairs };
+  // A critic rewriting a design echoes its layer ids: a broken layer that has
+  // a twin in the design it was given gets that layer back instead of vanishing
+  // (losing the field under everything is worse than keeping the old one).
+  const paletteLen = Array.isArray(spec.palette) ? spec.palette.length : 0;
+  const fits = (l: SpecLayer): boolean => {
+    const idx = 'colorIndex' in l ? [l.colorIndex] : 'colors' in l ? l.colors : [];
+    return idx.every((k) => k >= 0 && k < paletteLen);
+  };
+  const restored: string[] = [];
+  const kept = spec.layers.flatMap((raw, i) => {
+    if (!bad.has(i)) return [raw];
+    const id = isObj(raw) && typeof raw.id === 'string' ? raw.id : `L${i}`;
+    const twin = fallback?.layers.find((l) => l.id === id);
+    if (twin && fits(twin)) { restored.push(id); return [twin]; }
+    return [];
+  });
+  const second = validateSpec({ ...spec, layers: kept });
+  if (!second.valid) return { ...first, repairs };
+  return { ...second, repairs: [...repairs, ...restored.map((id) => `kept the original layer ${id}`), ...first.errors.map((e) => `${restored.length ? 'replaced or left out' : 'left out'} ${e.path}: ${e.message}`)] };
+}

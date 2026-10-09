@@ -25,7 +25,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { AiEventsRepository, AiMode, AiOutcome, AiUsageRepository } from './repo';
 import { classifyAiFailure, publicCause, sanitizeDetail, type AiFailure } from './aiFailure';
 import { secondsToNextPeriod } from './repo';
-import { validateSpec, narrowToSingleStand, regionAspectHint, regionRowsHint, type TifoSpec } from '../../src/core/tifoSpec';
+import { validateSpec, validateModelSpec, narrowToSingleStand, regionAspectHint, regionRowsHint, type TifoSpec } from '../../src/core/tifoSpec';
 import { refineSpec } from '../../src/core/specRefine';
 import { designFromPrompt, composeSuperOffline } from '../../src/core/promptDesigner';
 import { ensureHeroImage } from '../../src/core/heroImage';
@@ -453,7 +453,11 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
       brief,
       isSuper ? { system: buildDirectorPrompt(), context: stadium, tier: 'premium', hint } : { context: stadium, tier: 'fast', hint },
     );
-    const r = modelResult.spec ? validateSpec(modelResult.spec) : ({ valid: false } as ReturnType<typeof validateSpec>);
+    // Repaired before it is judged: a stripes layer that says `direction` for
+    // `orientation`, or colours as hex, has one obvious reading and used to cost
+    // the user the whole design.
+    const r = modelResult.spec ? validateModelSpec(modelResult.spec) : ({ valid: false, errors: [], repairs: [] } as ReturnType<typeof validateModelSpec>);
+    if (r.repairs.length) app.log.info({ mode: mode0, repairs: r.repairs.slice(0, 12) }, 'ai: model design repaired');
     if (!r.valid || !r.spec) {
       // Premium couldn't deliver — we don't admit failure; the client offers a choice
       // (use the free Quick Designer now, or wait out a short timer and retry).
@@ -619,7 +623,8 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
         layers: incoming.spec.layers.map((l) => (l.kind === 'image' ? { ...l, assetRef: undefined } : l)),
       };
       const res = await critiqueSpecViaProvider(slim, image, stadium);
-      const improved = res.spec ? validateSpec(res.spec) : null;
+      const improved = res.spec ? validateModelSpec(res.spec, incoming.spec) : null;
+      if (improved?.repairs.length) app.log.info({ mode: 'polish', repairs: improved.repairs.slice(0, 12) }, 'ai: critic design repaired');
       if (improved && improved.valid && improved.spec) {
         let k = 0;
         for (const l of improved.spec.layers) {

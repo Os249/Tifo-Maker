@@ -1962,3 +1962,128 @@ async function makeDesign(app: FastifyInstance, token: string, isPublic = false)
 
   console.log('audit round four: all assertions passed (pre-signup link takeover, re-auth for links and email changes, links bound to their session, reset clears links, handoff ticket, oauth log line, verification bound to the address, reset links outliving changes, Host port bypass, permanent takedowns, featured re-check, remix source titles, admin names, verified votes, notification + counter + report spam, unnamed wall, fork allowRemix, per-account premium AI share, cached scene stripping, revision caps, PNG-only thumbnails, lead caps, case-insensitive names on Postgres)');
 }
+
+// ---------- 2026-10: the AI failures queue ----------
+// Four failures from /admin → AI, reproduced against a stubbed provider:
+//  - Polish ×3: "critique spec failed validation: layers[1].colors colors must be
+//    2+ palette indices in range 0..10" and "layers[6].orientation orientation
+//    must be vertical|horizontal|diagonal" — the critic's rewrite was thrown away
+//    whole over one field;
+//  - Premium: "gemini: timed out (model gemini-3.1-flash-lite)" — the fast tier's
+//    slow calls land right on the old 20 s limit, and there was no second try.
+{
+  const { validateModelSpec, coerceModelSpec, validateSpec } = await import('../../src/core/tifoSpec');
+  const { MemoryAiUsageRepository, MemoryAiEventsRepository } = await import('../src/memoryRepo');
+
+  // ---- the repairs, on their own ----
+  const PAL = ['#262a33', '#0033a0', '#ffffff', '#d4af37'];
+  const broken = {
+    palette: PAL,
+    layers: [
+      { id: 'L0', kind: 'fill', region: 'all', colorIndex: 1 },
+      { id: 'L1', kind: 'gradient', region: 'north', colors: ['#0033a0', '#FFFFFF'], direction: 'Vertical' },
+      { id: 'L2', kind: 'stripes', region: 'sides', colors: [1, 2], direction: 'horizontal' },
+      { id: 'L3', kind: 'stripes', region: 'south', colors: ['1', '3'] },
+      { id: 'L4', kind: 'Pattern', region: 'east', colors: [1, 2], pattern: 'Checkerboard', scale: 10 },
+      { id: 'L5', kind: 'stripes', region: 'west', colors: [2], orientation: 'vertical' },
+      { id: 'L6', kind: 'text', region: 'south', text: 'ZAEEM', colorIndex: '#fefefe', fontId: 'poster', heightFrac: 0.6 },
+    ],
+  };
+  assert.equal(validateSpec(broken).valid, false, 'the strict validator still refuses it');
+  const fixed = validateModelSpec(broken);
+  assert.equal(fixed.valid, true, `repaired: ${JSON.stringify(fixed.errors)}`);
+  const L = fixed.spec!.layers;
+  assert.deepEqual((L[1] as { colors: number[] }).colors, [1, 2], 'hex colours become their palette cards');
+  assert.equal((L[2] as { orientation: string }).orientation, 'horizontal', 'a stripes "direction" is its orientation');
+  assert.equal((L[3] as { orientation: string }).orientation, 'vertical', 'a missing orientation takes the default');
+  assert.deepEqual((L[3] as { colors: number[] }).colors, [1, 3], 'numeric strings are indices');
+  assert.equal((L[4] as { pattern: string }).pattern, 'checker', 'pattern names are read loosely');
+  assert.equal(L[5].kind, 'fill', 'one-colour stripes are a fill');
+  assert.equal((L[6] as { colorIndex: number }).colorIndex, 2, 'a hex colorIndex is the nearest card');
+  assert.ok(fixed.repairs.length >= 6, 'and every repair is reported');
+  assert.deepEqual(coerceModelSpec(broken).spec !== broken && broken.layers[2].direction, 'horizontal', 'the input is not modified');
+
+  // A layer with no reading at all is left out — or, for the critic, replaced by
+  // the layer it was rewriting.
+  const hopeless = { ...broken, layers: [...broken.layers.slice(0, 1), { id: 'L1', kind: 'gradient', region: 'north', colors: [99, 98] }, ...broken.layers.slice(2)] };
+  const dropped = validateModelSpec(hopeless);
+  assert.equal(dropped.valid, true);
+  assert.ok(!dropped.spec!.layers.some((l) => l.id === 'L1'), 'without a twin, the broken layer is left out');
+  const original = validateSpec({ palette: PAL, layers: [{ id: 'L0', kind: 'fill', region: 'all', colorIndex: 1 }, { id: 'L1', kind: 'gradient', region: 'north', colors: [1, 3] }] }).spec!;
+  const twin = validateModelSpec(hopeless, original);
+  assert.deepEqual((twin.spec!.layers.find((l) => l.id === 'L1') as { colors: number[] }).colors, [1, 3], 'with one, the original layer comes back');
+  const mostlyBroken = { palette: PAL, layers: [0, 1, 2, 3].map((i) => ({ id: `L${i}`, kind: 'stripes', region: 'all', colors: [77, 78] })) };
+  assert.equal(validateModelSpec(mostlyBroken).valid, false, 'a design that is mostly broken is still a failure');
+
+  // ---- through the routes, against a stubbed Gemini ----
+  const realFetch = globalThis.fetch;
+  const saved = { key: process.env.GEMINI_API_KEY, prov: process.env.AI_PROVIDER, t: process.env.AI_TIMEOUT_MS, tp: process.env.AI_TIMEOUT_PREMIUM_MS };
+  process.env.GEMINI_API_KEY = 'AIzaSyTESTKEY0000000000';
+  process.env.AI_PROVIDER = 'gemini';
+  process.env.AI_TIMEOUT_MS = '1200';
+  process.env.AI_TIMEOUT_PREMIUM_MS = '1200';
+  const reply = (spec: unknown) => new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: JSON.stringify(spec) }] }, finishReason: 'STOP' }] }), { status: 200, headers: { 'content-type': 'application/json' } });
+  let plan: Array<'hang' | unknown> = [];
+  let calls = 0;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input instanceof Request ? input.url : input);
+    if (!url.includes('generativelanguage.googleapis.com')) return realFetch(input as RequestInfo, init);
+    calls++;
+    const step = plan.shift();
+    if (step === 'hang') {
+      // Answer only when aborted, like a call that runs past the deadline.
+      return new Promise<Response>((_, reject) => init?.signal?.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' }))));
+    }
+    return reply(step);
+  }) as typeof fetch;
+  try {
+    const auth = new MemoryAuthRepository();
+    const designs = new MemoryDesignRepository((id) => auth.usernameOf(id));
+    const app = await buildApp(designs, auth, templates, {
+      social: new MemorySocialRepository(designs, auth), aiUsage: new MemoryAiUsageRepository(), aiEvents: new MemoryAiEventsRepository((id) => auth.usernameOf(id)),
+    });
+    const fan = await reg(app, 'fan_q4');
+    await auth.markEmailVerified(fan.id);
+    const good = { title: 'Zaeem', palette: PAL, layers: [{ kind: 'fill', region: 'all', colorIndex: 1 }, { kind: 'text', region: 'south', text: 'ZAEEM', colorIndex: 2, fontId: 'poster', heightFrac: 0.7 }] };
+
+    // 1. A timed-out call is tried once more.
+    plan = ['hang', good];
+    calls = 0;
+    const gen = await app.inject({ method: 'POST', url: '/api/ai/generate', headers: bearer(fan.token), payload: { prompt: 'Al Hilal zaeem' } });
+    const g = gen.json() as { spec?: { layers: unknown[] }; source?: string; needsChoice?: boolean };
+    assert.equal(calls, 2, 'the timed-out call was retried once');
+    assert.equal(g.source, 'model', `and the second answer is the design: ${gen.body.slice(0, 200)}`);
+
+    // Twice timed out is still a failure, and only two tries are spent.
+    plan = ['hang', 'hang'];
+    calls = 0;
+    const gen2 = (await app.inject({ method: 'POST', url: '/api/ai/generate', headers: bearer(fan.token), payload: { prompt: 'Ittihad tigers' } })).json() as { needsChoice?: boolean };
+    assert.equal(calls, 2);
+    assert.equal(gen2.needsChoice, true, 'two timeouts offer the Quick Designer, as before');
+
+    // 2. The critic's rewrite with the three faults from the queue is used.
+    const current = (await app.inject({ method: 'POST', url: '/api/ai/generate', headers: bearer(fan.token), payload: { prompt: 'blue and white stripes ZAEEM', engine: 'offline' } })).json().spec;
+    plan = [{
+      ...current,
+      layers: [
+        ...current.layers.slice(0, 1),
+        { id: 'NEW1', kind: 'gradient', region: 'north', colors: [current.palette.length, 1] }, // one past the palette
+        { id: 'NEW2', kind: 'stripes', region: 'sides', colors: [1, 2], direction: 'horizontal' }, // "direction"
+        ...current.layers.slice(1),
+      ],
+    }];
+    const crit = await app.inject({ method: 'POST', url: '/api/ai/critique', headers: bearer(fan.token), payload: { spec: current } });
+    const c = crit.json() as { source?: string; cause?: string; spec?: { layers: Array<{ id: string; kind: string; orientation?: string }> } };
+    assert.equal(c.cause, undefined, `the polish no longer fails: ${crit.body.slice(0, 200)}`);
+    assert.equal(c.source, 'model', 'the critic\'s design is the one returned');
+    assert.equal(c.spec!.layers.find((l) => l.id === 'NEW2')?.orientation, 'horizontal');
+    assert.equal(c.spec!.layers.find((l) => l.id === 'NEW1')?.kind, 'fill', 'one usable colour left: drawn as a fill');
+    await app.close();
+  } finally {
+    globalThis.fetch = realFetch;
+    for (const [k, v] of [['GEMINI_API_KEY', saved.key], ['AI_PROVIDER', saved.prov], ['AI_TIMEOUT_MS', saved.t], ['AI_TIMEOUT_PREMIUM_MS', saved.tp]] as const) {
+      if (v === undefined) delete process.env[k]; else process.env[k] = v;
+    }
+  }
+  console.log('ai failures queue (October): all assertions passed (model output repaired, broken layers left out or restored, a timed-out call retried once, polish survives the critic\'s faults)');
+}

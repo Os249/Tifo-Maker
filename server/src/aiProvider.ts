@@ -338,6 +338,9 @@ export function buildCriticPrompt(): string {
     'each layer with a "region": "all"|"lower"|"upper"|"north"|"south"|"east"|"west"|',
     '"sides"|"ends" or { "stand","tier","rows":[from,to],"stands":[...] }.',
     'Text layers also take "outline", "stretch", "dx", "dy"; symbols take "wide".',
+    'stripes: "colors" + "orientation" vertical|horizontal|diagonal (not "direction");',
+    'gradient: "colors" + "direction". Every colour is a palette INDEX that exists —',
+    'add a hex to "palette" before using it, never write hex in a layer.',
     `Symbols: ${SYMBOL_NAMES.join(', ')}. Patterns: ${PATTERN_NAMES.join(', ')}.`,
     voiceLine(false),
     'Output STRICT JSON ONLY (no prose, no code fences).',
@@ -680,14 +683,23 @@ const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms
  *
  * Never on 429. A quota error is not transient, and retrying it spends another
  * request against the limit that just refused you.
+ *
+ * And once on a TIMEOUT. The fast tier runs gemini-3.1-flash-lite, whose latency
+ * is spiky — most calls answer in a couple of seconds, about one in four takes
+ * 15-20 s (reported publicly, and seen here as "timed out" on a standard design
+ * in October 2026). A second attempt is very likely to be one of the fast ones,
+ * and the alternative is the user getting no design at all. AI_TIMEOUT_RETRY=0
+ * turns it off.
  */
 export async function generateSpecViaProvider(
   prompt: string,
   opts: { system?: string; context?: string; image?: string; tier?: 'fast' | 'premium'; hint?: string; raw?: boolean } = {},
 ): Promise<ProviderResult> {
   const r = await callProvider(prompt, opts);
-  if (r.spec || r.status !== 503) return r;
-  await sleep(envNum('AI_RETRY_DELAY_MS', 1200, 100, 10000));
+  if (r.spec) return r;
+  const timedOut = /timed out$/.test(r.error ?? '') && process.env.AI_TIMEOUT_RETRY !== '0';
+  if (r.status !== 503 && !timedOut) return r;
+  if (!timedOut) await sleep(envNum('AI_RETRY_DELAY_MS', 1200, 100, 10000));
   const again = await callProvider(prompt, opts);
   // Report the SECOND failure: if it is still down, that is the current truth.
   return again;
@@ -704,7 +716,9 @@ async function callProvider(
   // A quoted value here used to abort every call on the next tick — see envNum.
   const timeoutMs = opts.tier === 'premium'
     ? envNum('AI_TIMEOUT_PREMIUM_MS', 45000, 1000)
-    : envNum('AI_TIMEOUT_MS', 20000, 1000);
+    // 30 s, not 20: the fast tier's slow calls land at 15-20 s, right on the old
+    // limit, so they were cut off just before they answered.
+    : envNum('AI_TIMEOUT_MS', 30000, 1000);
   const system = opts.system ?? buildSystemPrompt();
   // Built ONCE. Three separate userMessage() calls meant a new argument had to
   // be threaded through three bodies, and forgetting one would silently drop it
