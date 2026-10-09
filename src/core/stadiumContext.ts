@@ -32,6 +32,12 @@ export interface StandSummary {
   aspect: number;
   /** Fraction of the whole bowl's seats (0..1). */
   share: number;
+  /**
+   * Rows in the MIDDLE of the stand, where centred art lands — the height a
+   * word or crest really gets. Lower than `rows` when the stand's quarter
+   * only catches its neighbours' corners in some rows.
+   */
+  artRows: number;
 }
 
 export interface StadiumContext {
@@ -52,8 +58,10 @@ export function buildStadiumContext(map: SeatMap): StadiumContext {
     seats: 0,
     tiers: new Set<number>(),
     rowSet: new Set<number>(),
+    coreRows: new Set<number>(),
     rowCounts: new Map<number, number>(),
   }));
+  const CENTRE = [0, 0.25, 0.5, 0.75];
 
   let maxTier = 0;
   for (let i = 0; i < map.count; i++) {
@@ -66,6 +74,9 @@ export function buildStadiumContext(map: SeatMap): StadiumContext {
     s.tiers.add(t);
     const r = map.rowOf[i];
     s.rowSet.add(r);
+    let d = u - CENTRE[si];
+    d -= Math.round(d);
+    if (Math.abs(d) <= 0.08) s.coreRows.add(r);
     s.rowCounts.set(r, (s.rowCounts.get(r) ?? 0) + 1);
   }
 
@@ -83,6 +94,7 @@ export function buildStadiumContext(map: SeatMap): StadiumContext {
       cols,
       aspect: Math.round((cols / rows) * 100) / 100,
       share: Math.round((s.seats / denom) * 1000) / 1000,
+      artRows: s.coreRows.size,
     };
   });
 
@@ -98,20 +110,39 @@ export function buildStadiumContext(map: SeatMap): StadiumContext {
 const cap = (s: string): string => s.charAt(0).toUpperCase() + s.slice(1);
 
 /**
+ * What one stand can hold, in the terms the art is judged in: rows of seats.
+ * A word needs about 8 rows of glyph to read (Arabic 12), a crest about 12
+ * (measured: scripts/ai-text-rows.mts); a stand is a missing one or a sliver
+ * when it has next to no seats compared with the biggest.
+ */
+export function standCapacity(s: StandSummary, biggest: number): string {
+  if (s.seats === 0) return 'NO SEATS: place nothing here';
+  if (s.seats < Math.max(150, biggest * 0.15) || s.artRows < 5) return 'a SLIVER: colour only, no words or symbols';
+  const r = s.artRows;
+  if (r < 12) return `SHALLOW (${r} rows): ONE short Latin word at heightFrac 0.9, no row bands, no Arabic`;
+  if (r < 21) return `SHALLOW (${r} rows): ONE element (a word OR a symbol) at heightFrac/scaleFrac 0.9, no row bands`;
+  if (r < 34) return `${r} rows: a symbol over a word fits; keep each in its own row band`;
+  return `${r} rows: room for a hero and a supporting line`;
+}
+
+/**
  * Render the context as a compact text block for the director's prompt. Kept
  * terse (few tokens) but complete enough to plan a coherent multi-stand scene.
  */
 export function describeStadiumContext(ctx: StadiumContext): string {
   const lines: string[] = [];
-  lines.push(`Stadium: ${ctx.total.toLocaleString()} seats, ${ctx.tiers} tier(s), 4 stands.`);
+  const real = ctx.stands.filter((s) => s.seats > 0).length;
+  const biggest = Math.max(1, ...ctx.stands.map((s) => s.seats));
+  lines.push(`Stadium: ${ctx.total.toLocaleString()} seats, ${ctx.tiers} tier(s), ${real} stand(s) with seats.`);
   for (const s of ctx.stands) {
     const pct = Math.round(s.share * 100);
     const shape = s.aspect >= 1.6 ? 'wide' : s.aspect <= 0.8 ? 'tall' : 'squarish';
     lines.push(
       `- ${cap(s.stand)}: ${s.seats.toLocaleString()} seats (${pct}%), ~${s.rows} rows x ~${s.cols} cols, ` +
-        `aspect ${s.aspect} (${shape}), tier(s) [${s.tiers.join(', ')}].`,
+        `aspect ${s.aspect} (${shape}), tier(s) [${s.tiers.join(', ')}]. Holds: ${standCapacity(s, biggest)}.`,
     );
   }
+  lines.push('Rows are the limit: glyph rows = heightFrac x the stand\'s rows. A word must reach 8 rows (Arabic 12), a symbol 12.');
   for (const note of ctx.notes) lines.push(`Note: ${note}`);
   return lines.join('\n');
 }

@@ -270,31 +270,40 @@ export function designFromPrompt(prompt: string): TifoSpec {
     if (last.kind === 'stripes' && stripeKind === 'stripes') last.bands = 9;
   }
 
-  // 3) symbol (centred, bold)
+  // 3 + 4) symbol and words. They never share rows: a symbol centred behind a
+  // bottom-aligned headline lost its lower half to the headline's outline, and on
+  // a shallow stand the two became one blot. On the whole bowl each gets an END
+  // of its own (the camera sees the ends head-on); one word wrapped right round
+  // the bowl cannot be read from any one seat or camera.
   const symbol = pickSymbol(p) ?? club?.crest ?? null;
+  const { head: headline, sub } = pickText(original, p);
+  const textStand: RegionInput = scopeAll ? 'south' : region;
+  const symbolStand: RegionInput = scopeAll ? (headline ? 'north' : 'south') : region;
+  const stacked = !scopeAll && !!symbol && !!headline; // both in one stand → bands
   if (symbol) {
     layers.push({
-      kind: 'symbol', id: 'symbol', region: regionObj(region),
+      kind: 'symbol', id: 'symbol', region: stacked ? rowsObj(symbolStand, sub ? [0.7, 1] : [0.44, 1]) : regionObj(symbolStand),
       symbol, colorIndex: head,
-      scaleFrac: 0.8,
+      scaleFrac: stacked ? 0.92 : 0.85,
       align: 'center',
+      ...(scopeAll ? { wide: WIDE_MARKS.has(symbol) ? 2.4 : 1.4 } : {}),
     });
   }
 
-  // 4) text: headline + optional number, stacked when both present
-  const { head: headline, sub } = pickText(original, p);
   if (headline) {
     let seq = 0;
     const nid = (): string => `t${seq++}`;
     const voice = pickVoice(headline, 'generic');
     const fill = symbol ? accent : head;
+    const band = (lo: number, hi: number): Region => (stacked ? rowsObj(textStand, [lo, hi]) : rowsObj(textStand, [lo, hi]));
     if (sub) {
       // surname on top, number below
-      layers.push(...headlinePair(nid, rowsObj(region, [0.42, 1]), headline, palette, fill, voice, 0.5, { stretch: stretchFor(headline) }));
-      layers.push({ kind: 'text', id: nid(), region: rowsObj(region, [0, 0.38]), text: sub, colorIndex: accent, fontId: voice, arcDeg: 0, heightFrac: 0.34, align: 'center', stretch: stretchFor(sub) });
+      const [h0, h1, s1] = stacked ? [0.3, 0.66, 0.26] : [0.42, 1, 0.38];
+      layers.push(...headlinePair(nid, band(h0, h1), headline, palette, fill, voice, 0.8, { stretch: stretchFor(headline) }));
+      layers.push({ kind: 'text', id: nid(), region: band(0, s1), text: sub, colorIndex: accent, fontId: voice, arcDeg: 0, heightFrac: 0.8, align: 'center', stretch: stretchFor(sub) });
     } else {
-      layers.push(...headlinePair(nid, regionObj(region), headline, palette, fill, voice, symbol ? 0.34 : 0.62, {
-        align: symbol ? 'bottom' : 'center',
+      layers.push(...headlinePair(nid, stacked ? band(0, 0.4) : regionObj(textStand), headline, palette, fill, voice, stacked ? 0.85 : 0.62, {
+        align: 'center',
         stretch: stretchFor(headline),
       }));
     }
@@ -315,6 +324,9 @@ export function designFromPrompt(prompt: string): TifoSpec {
   const res = validateSpec(spec);
   return res.spec ?? spec;
 }
+
+/** Marks that keep their shape when widened a lot. */
+const WIDE_MARKS = new Set<SymbolName>(['eagle', 'wings', 'chevron', 'bolt']);
 
 function hasKnownPlayer(lower: string): boolean {
   return Object.keys(PLAYERS).some((k) => lower.includes(k));

@@ -20,6 +20,8 @@ import type { Composer } from '../core/composer';
 import type { Preview3D } from '../render/preview3d';
 import { type TifoSpec, narrowToSingleStand } from '../core/tifoSpec';
 import { compileSpec, regionRect } from '../core/specCompiler';
+import { fitSpecToStadium, type MeasureText } from '../core/specFit';
+import { renderTextCanvas, TIFO_FONTS } from '../core/text';
 import { loadTifoFonts } from '../core/tifoFonts';
 import { buildStadiumContext, describeStadiumContext } from '../core/stadiumContext';
 import { critiqueDesign, repairSpec } from '../core/critique';
@@ -77,6 +79,12 @@ export interface AiPanelHandle {
    */
   quickDesign(prompt: string): Promise<TifoSpec | null>;
 }
+
+/** A text run's rendered size in glyph heights, measured with the real font. */
+const measureText: MeasureText = (text, fontId, arc, outline) => {
+  const rt = renderTextCanvas(text, (TIFO_FONTS.find((f) => f.id === fontId) ?? TIFO_FONTS[0]).css, arc, outline);
+  return rt ? { width: rt.canvas.width / rt.glyphHeight, height: rt.canvas.height / rt.glyphHeight } : null;
+};
 
 export function mountAiPanel(deps: AiPanelDeps): AiPanelHandle {
   const { root, store, editor, map, objects, getPreview, refresh } = deps;
@@ -366,8 +374,14 @@ export function mountAiPanel(deps: AiPanelDeps): AiPanelHandle {
 
   const applySpec = async (spec: TifoSpec): Promise<void> => {
     captureBaseline();
-    let working = spec;
     await loadTifoFonts();
+    // Every generator plans in fractions of a stand; this ground decides how
+    // many seats that is. Fitting works in seat rows, on this seat map: art on a
+    // stand with no seats moves, words too small to read get the room they need,
+    // and a design that already reads is left alone.
+    const fitted = fitSpecToStadium(spec, map, measureText);
+    if (fitted.changes.length) console.info('[ai] fitted to this stadium:', fitted.changes);
+    let working = fitted.spec;
     // The pictures are decoded first, so that the whole design — the cleared
     // bowl, the painted layers and the pictures — lands as ONE undo step.
     const decoded = new Map<string, ImageBitmap>();
@@ -510,8 +524,9 @@ export function mountAiPanel(deps: AiPanelDeps): AiPanelHandle {
     setStatus('');
     startProgress(useSuper ? SUPER_STAGES : PLAIN_STAGES);
     try {
-      // Mode 3 sends the bowl geometry so the director can plan per-stand.
-      const stadium = useSuper ? describeStadiumContext(buildStadiumContext(map)) : undefined;
+      // The bowl geometry goes with every request: Super plans per stand from it,
+      // and both need to know how many rows each stand really has.
+      const stadium = describeStadiumContext(buildStadiumContext(map));
       lastStadium = stadium;
       // Section 3: focus the design on the chosen active area, if any.
       const focus = describeActiveArea();

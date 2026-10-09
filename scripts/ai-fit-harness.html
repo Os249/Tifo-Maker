@@ -1,0 +1,144 @@
+<!doctype html>
+<!-- Dev-only harness for scripts/ai-fit.mts. Not a Vite build input. -->
+<html lang="en"><head><meta charset="UTF-8" /><title>ai fit</title></head>
+<body><div id="out">loading…</div>
+<script type="module">
+  import { compileSpec } from '/src/core/specCompiler.ts';
+  import { DesignStore } from '/src/core/design.ts';
+  import { generateSeatMap } from '/src/core/seatmap.ts';
+  import { templateById } from '/src/core/stadiumCatalog.ts';
+  import { validateSpec } from '/src/core/tifoSpec.ts';
+  import { refineSpec } from '/src/core/specRefine.ts';
+  import { loadTifoFonts } from '/src/core/tifoFonts.ts';
+  import { findFragileSeats } from '/src/core/analysis.ts';
+  import { critiqueDesign, repairSpec } from '/src/core/critique.ts';
+  import { designFromPrompt, composeSuperOffline, designShuffle } from '/src/core/promptDesigner.ts';
+  import { SUPER_AI_EXEMPLARS } from '/src/core/exemplars.ts';
+  import * as fitMod from '/src/core/specFit.ts';
+  import { renderTextCanvas, TIFO_FONTS } from '/src/core/text.ts';
+  const measure = (text, fontId, arc, outline) => {
+    const rt = renderTextCanvas(text, (TIFO_FONTS.find((f) => f.id === fontId) ?? TIFO_FONTS[0]).css, arc, outline);
+    return rt ? { width: rt.canvas.width / rt.glyphHeight, height: rt.canvas.height / rt.glyphHeight } : null;
+  };
+
+  const maps = new Map();
+  const mapFor = (id) => { if (!maps.has(id)) maps.set(id, generateSeatMap(templateById(id))); return maps.get(id); };
+
+  const specFor = (mode, prompt) => {
+    if (mode === 'quick') return designFromPrompt(prompt);
+    if (mode === 'super') return composeSuperOffline(prompt);
+    if (mode.startsWith('shuffle')) return designShuffle(prompt, Number(mode.slice(7)) || 1);
+    if (mode.startsWith('ex')) {
+      const v = validateSpec(SUPER_AI_EXEMPLARS[Number(mode.slice(2))].spec);
+      return v.spec;
+    }
+    throw new Error('mode ' + mode);
+  };
+
+  // Exactly the client's path (aiPanel.applySpec): refine (server) → [fit] →
+  // compile → critique → one repair.
+  const pipeline = (spec, map, store) => {
+    let working = refineSpec(spec);
+    let changes = [];
+    if (window.__useFit) { const f = fitMod.fitSpecToStadium(working, map, measure); working = f.spec; changes = f.changes; }
+    compileSpec(working, map, store);
+    let critique = critiqueDesign(store.cells, map, working);
+    if (critique.paintedSeats > 0 && critique.fragileSeats > critique.paintedSeats * 0.2) {
+      const rep = repairSpec(working, critique);
+      if (rep.changed) { working = rep.spec; compileSpec(working, map, store); critique = critiqueDesign(store.cells, map, working); }
+    }
+    return { working, critique, changes };
+  };
+
+  // How each text layer came out ON ITS OWN: seats, rows it spans (glyph height),
+  // and how much of it is in strokes too thin to hold up.
+  const textReport = (working, map) => {
+    const out = [];
+    working.layers.forEach((l, idx) => {
+      if (l.kind !== 'text' && l.kind !== 'symbol') return;
+      const solo = { ...working, background: undefined, layers: [{ ...l, colorIndex: 1 }] };
+      const pal = ['#262a33', '#ffffff'];
+      const store = new DesignStore(map, pal);
+      const res = compileSpec({ ...solo, palette: pal }, map, store);
+      const rows = new Set(); let seats = 0; let minU = 1, maxU = 0;
+      for (let i = 0; i < map.count; i++) if (store.cells[i] === 1) { seats++; rows.add(map.rowOf[i]); }
+      const fragile = findFragileSeats(store.cells, map).length;
+      out.push({ idx, kind: l.kind, text: l.text ?? l.symbol, region: l.region, rows: rows.size, seats, fragile: seats ? fragile / seats : 0, warn: res.warnings.length });
+    });
+    return out;
+  };
+
+  // The seats as fans hold them: one block per seat, x by perimeter fraction at
+  // the stadium's widest row, y by row (front at the bottom). Wrapped into two
+  // strips (east+north, west+south) so a whole bowl fits a screen.
+  const draw = (map, store, px = 2) => {
+    const per = new Map(); let rows = 0;
+    for (let i = 0; i < map.count; i++) { const r = map.rowOf[i]; per.set(r, (per.get(r) ?? 0) + 1); rows = Math.max(rows, r + 1); }
+    let cols = 0; for (const n of per.values()) cols = Math.max(cols, n);
+    const half = Math.ceil(cols / 2) + 1;
+    const stripH = rows * px + 6;
+    const c = document.createElement('canvas'); c.width = half * px + 4; c.height = stripH * 2 + 4;
+    const g = c.getContext('2d'); g.fillStyle = '#0b0b0d'; g.fillRect(0, 0, c.width, c.height);
+    for (let i = 0; i < map.count; i++) {
+      const u = (map.uv[i * 2] + 0.125) % 1; // start the strip at the E/N corner
+      let x = Math.floor(u * cols); const strip = x >= half ? 1 : 0; if (strip) x -= half;
+      const y = strip * stripH + (rows - 1 - map.rowOf[i]) * px;
+      g.fillStyle = store.palette[store.cells[i]] ?? '#f0f';
+      g.fillRect(2 + x * px, 2 + y, px, px);
+    }
+    return c.toDataURL('image/png');
+  };
+
+  // One text layer alone on one stand, drawn as seats: for finding how many rows
+  // a script needs before it reads.
+  window.__textTest = async (stadiumId, text, fontId, heightFrac, stand, px = 4, outline = 0) => {
+    await loadTifoFonts();
+    const map = mapFor(stadiumId);
+    const v = validateSpec({ palette: ['#262a33', '#10233f', '#f2f1ec'], layers: [
+      { kind: 'fill', region: stand, colorIndex: 1 },
+      { kind: 'text', region: stand, text, colorIndex: 2, fontId, arcDeg: 0, heightFrac, align: 'center', outline }] });
+    const store = new DesignStore(map, v.spec.palette);
+    compileSpec(v.spec, map, store);
+    const sel = []; const rows = new Set();
+    for (let i = 0; i < map.count; i++) if (store.cells[i] === 2) rows.add(map.rowOf[i]);
+    const acc = (await import('/src/core/specCompiler.ts')).regionPredicate(v.spec.layers[0].region, map);
+    const per = new Map(); let r0 = 1e9, r1 = 0; let u0 = 1, u1 = 0;
+    for (let i = 0; i < map.count; i++) if (acc(i)) { sel.push(i); const r = map.rowOf[i]; per.set(r, (per.get(r) ?? 0) + 1); r0 = Math.min(r0, r); r1 = Math.max(r1, r); }
+    let cols = 0; for (const n of per.values()) cols = Math.max(cols, n);
+    // stand-local u
+    const us = sel.map((i) => map.uv[i * 2]); const cu = { east: 0, north: 0.25, west: 0.5, south: 0.75 }[stand.stand ?? stand] ?? 0.5;
+    const loc = (u) => { let d = u - cu; d -= Math.round(d); return d; };
+    let lo = 1, hi = -1; for (const u of us) { const d = loc(u); lo = Math.min(lo, d); hi = Math.max(hi, d); }
+    const c = document.createElement('canvas'); c.width = cols * px + 4; c.height = (r1 - r0 + 1) * px + 4;
+    const g = c.getContext('2d'); g.fillStyle = '#000'; g.fillRect(0, 0, c.width, c.height);
+    for (const i of sel) {
+      const x = Math.floor(((loc(map.uv[i * 2]) - lo) / (hi - lo + 1e-9)) * (cols - 1));
+      g.fillStyle = store.palette[store.cells[i]];
+      g.fillRect(2 + x * px, 2 + (r1 - map.rowOf[i]) * px, px - (px > 2 ? 1 : 0), px - (px > 2 ? 1 : 0));
+    }
+    return { rows: rows.size, standRows: r1 - r0 + 1, cols, png: c.toDataURL('image/png') };
+  };
+
+  window.__compile = async (stadiumId, spec) => {
+    await loadTifoFonts();
+    const map = mapFor(stadiumId);
+    const v = validateSpec(spec);
+    const store = new DesignStore(map, v.spec.palette);
+    const res = compileSpec(v.spec, map, store);
+    const counts = {}; for (let i = 0; i < map.count; i++) counts[store.cells[i]] = (counts[store.cells[i]] ?? 0) + 1;
+    return { res, counts, errors: v.errors };
+  };
+
+  window.__run = async (stadiumId, mode, prompt, opts = {}) => {
+    await loadTifoFonts();
+    window.__useFit = !!opts.fit;
+    const map = mapFor(stadiumId);
+    const spec = specFor(mode, prompt);
+    const store = new DesignStore(map, spec.palette);
+    const { working, critique, changes } = pipeline(spec, map, store);
+    const texts = textReport(working, map);
+    return { seats: map.count, critique: { score: critique.score, issues: critique.issues, fragile: critique.paintedSeats ? critique.fragileSeats / critique.paintedSeats : 0 }, texts, png: opts.png ? draw(map, store, opts.px ?? 2) : null, spec: working, changes };
+  };
+  document.getElementById('out').textContent = 'ready';
+  window.__ready = true;
+</script></body></html>

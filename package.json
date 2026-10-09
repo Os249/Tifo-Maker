@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "verify": "tsx scripts/verify.mts",
     "verify:superai": "tsx scripts/verify-superai.mts",
+    "verify:aifit": "tsx scripts/ai-fit.mts --fit --modes quick,super,ex0,ex2 --max-bad 6",
     "export:sample": "tsx scripts/export-sample.mts",
     "templates:generate": "tsx scripts/generate-templates.mts",
     "templates:pack": "tsx scripts/pack-templates.mts",

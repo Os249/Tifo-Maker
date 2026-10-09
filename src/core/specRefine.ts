@@ -92,11 +92,6 @@ export function contrastRatio(a: string, b: string): number {
   return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
 }
 
-/** True when two palette entries are far enough apart to read as different. */
-function separates(palette: string[], a: number, b: number): boolean {
-  return contrastRatio(palette[a] ?? '#262a33', palette[b] ?? '#262a33') >= MIN_CONTRAST;
-}
-
 /** Darkest non-empty palette index — the natural "field" for an ultras display. */
 function darkestIndex(palette: string[]): number {
   let best = 1;
@@ -138,25 +133,114 @@ function isBacking(layers: SpecLayer[], i: number): boolean {
   return (a.outline ?? 0) > 0 || (a.dx ?? 0) !== 0 || (a.dy ?? 0) !== 0;
 }
 
+/** The stands a region covers (all four for a whole-bowl region). */
+function standsOf(r: Region): Stand[] {
+  if (r.stands && r.stands.length > 0) return r.stands;
+  return r.stand === 'all' ? [...STAND_ORDER] : [r.stand as Stand];
+}
+
 function sameStand(a: Region, b: Region): boolean {
-  return a.stand === 'all' || b.stand === 'all' || a.stand === b.stand;
+  const sa = standsOf(a);
+  return standsOf(b).some((s) => sa.includes(s));
 }
 
 /**
- * The palette index of the field a layer sits on: the last fill/gradient/pattern/
- * stripes layer below it that covers the same stand, else the background, else
- * empty (0). Approximate, but enough to catch "same colour on same colour".
+ * The palette indices of the field a layer sits on: the colours of the last
+ * fill/gradient/pattern/stripes layer below it that covers the same stand, else
+ * the background, else empty (0).
+ *
+ * ALL the colours, not the first. Text over a red-to-white gradient sits on red
+ * at one end and white at the other, and over red-and-black stripes it sits on
+ * both: checking only colors[0] passed white text on a gradient that ends in
+ * white, and red text on stripes that are half red — words that vanish into
+ * their own field, on the biggest stadium as much as the smallest.
  */
-function fieldUnder(layers: SpecLayer[], idx: number, background: number | undefined): number {
-  let field = background ?? 0;
+function fieldColorsUnder(layers: SpecLayer[], idx: number, background: number | undefined): number[] {
+  let field = [background ?? 0];
   const here = layers[idx].region;
+  const want = here.rows ?? [0, 1];
   for (let j = 0; j < idx; j++) {
     const L = layers[j];
     if (L.kind === 'fill' || L.kind === 'gradient' || L.kind === 'pattern' || L.kind === 'stripes') {
-      if (sameStand(L.region, here)) field = L.kind === 'fill' ? L.colorIndex : L.colors[0];
+      if (!sameStand(L.region, here)) continue;
+      const colours = L.kind === 'fill' ? [L.colorIndex] : [...new Set(L.colors)];
+      const has = L.region.rows ?? [0, 1];
+      if (has[1] < want[0] || has[0] > want[1]) continue; // a band elsewhere in the stand
+      // A band covering only part of the art's rows adds to what is under it.
+      const covers = has[0] <= want[0] + 1e-6 && has[1] >= want[1] - 1e-6;
+      field = covers ? colours : [...new Set([...field, ...colours])];
     }
   }
   return field;
+}
+
+/** Worst contrast of one colour against every colour of a field. */
+function worstAgainst(palette: string[], c: number, field: number[]): number {
+  let worst = Infinity;
+  for (const f of field) worst = Math.min(worst, contrastRatio(palette[c] ?? '#262a33', palette[f] ?? '#262a33'));
+  return worst;
+}
+
+/**
+ * Make a text or symbol layer separate from everything under it: recolour it to
+ * the card that reads against every colour of its field, and when no card does
+ * (two-colour palettes over a two-colour gradient), lay a solid panel of the
+ * field colour that reads best behind it. Returns the panel to insert, if any.
+ */
+function separate(palette: string[], l: SpecLayer & { colorIndex: number }, field: number[]): SpecLayer | null {
+  if (worstAgainst(palette, l.colorIndex, field) >= MIN_CONTRAST) return null;
+  let best = l.colorIndex;
+  let bestR = -1;
+  for (let i = 1; i < palette.length; i++) {
+    const r = worstAgainst(palette, i, field);
+    if (r > bestR) { bestR = r; best = i; }
+  }
+  if (bestR >= MIN_CONTRAST) { l.colorIndex = best; return null; }
+  // (The panel's id is the art's id + "-panel": fitting to a stadium strips
+  // these and lays them again under wherever the art ends up.)
+  // No card reads against the whole field: give it a ground of its own. The
+  // panel is the field colour the art reads best on, so the stand keeps its
+  // colours; the art takes the card that reads best on the panel.
+  let panel = field[0];
+  let panelR = -1;
+  for (const f of field) {
+    if (f === 0) continue;
+    const r = contrastRatio(palette[f], palette[mostContrasting(palette, f)]);
+    if (r > panelR) { panelR = r; panel = f; }
+  }
+  l.colorIndex = mostContrasting(palette, panel);
+  return { kind: 'fill', id: `${l.id}-panel`, region: { ...l.region }, colorIndex: panel } as SpecLayer;
+}
+
+/**
+ * The contrast half of the refiner, on its own: also run after a design is
+ * fitted to a stadium, because fitting moves art onto other fields and drops
+ * outlines that were doing the separating.
+ */
+export function repairContrast(spec: TifoSpec): TifoSpec {
+  const palette = spec.palette;
+  const layers = spec.layers.map((l) => ({ ...l })) as SpecLayer[];
+  for (let i = 0; i < layers.length; i++) {
+    const l = layers[i];
+    if (l.kind !== 'text' && l.kind !== 'symbol') continue;
+    if (l.kind === 'text' && isBacking(layers, i)) continue;
+    // An outlined headline is separated by its own edge, as long as the edge
+    // reads against the letters.
+    // On a flat field only: over a gradient or stripes the edge is a seat or two
+    // of colour in a field that already changes colour under it, and it is lost.
+    const prev = layers[i - 1];
+    const field = fieldColorsUnder(layers, i, spec.background);
+    if (l.kind === 'text' && field.length === 1 && prev && isBacking(layers, i - 1) && prev.kind === 'text' &&
+      contrastRatio(palette[prev.colorIndex] ?? '#262a33', palette[l.colorIndex] ?? '#262a33') >= MIN_CONTRAST) continue;
+    const panel = separate(palette, l, field);
+    if (panel) {
+      // Below the art and below its outline copy, if it has one.
+      const at = l.kind === 'text' && prev && isBacking(layers, i - 1) ? i - 1 : i;
+      layers.splice(at, 0, panel);
+      i++;
+    }
+  }
+  return { ...spec, layers };
 }
 
 /** Deterministically improve a validated spec's legibility before rendering. */
@@ -173,25 +257,20 @@ export function refineSpec(spec: TifoSpec): TifoSpec {
     background = darkestIndex(palette);
   }
 
-  // 2 + 3) Per-layer minimum size + contrast repair.
-  for (let i = 0; i < layers.length; i++) {
-    const l = layers[i];
+  // 2) Per-layer minimum size.
+  for (const l of layers) {
     if (l.kind === 'text') {
       const floor = minHeightFor(l.text, l.region);
       if (l.heightFrac < floor) l.heightFrac = floor;
-      if (isBacking(layers, i)) continue;
-      const field = fieldUnder(layers, i, background);
-      if (!separates(palette, l.colorIndex, field)) l.colorIndex = mostContrasting(palette, field);
     } else if (l.kind === 'symbol') {
       if (l.scaleFrac < MIN_SYMBOL_SCALE) l.scaleFrac = MIN_SYMBOL_SCALE;
-      const field = fieldUnder(layers, i, background);
-      if (!separates(palette, l.colorIndex, field)) l.colorIndex = mostContrasting(palette, field);
     }
   }
 
   unletterbox(layers);
 
-  return { ...spec, background, layers };
+  // 3) Contrast against every colour of the field underneath.
+  return repairContrast({ ...spec, background, layers });
 }
 
 const FIELD_KINDS = new Set(['fill', 'stripes', 'gradient', 'pattern']);

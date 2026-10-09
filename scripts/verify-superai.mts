@@ -313,7 +313,8 @@ for (const b of OFFLINE_BRIEFS) {
       // An outline nobody can see is worse than no outline at all.
       if (contrastRatio(sp.palette[l.colorIndex], sp.palette[plain.colorIndex]) < 3) offBad++;
       // refineSpec must not "repair" the backing half back into the fill colour.
-      if ((refined.layers[i] as { colorIndex: number }).colorIndex !== l.colorIndex) offBad++;
+      // (By id: the refiner may slip a panel in underneath, which shifts indices.)
+      if ((refined.layers.find((r) => r.id === l.id) as { colorIndex: number } | undefined)?.colorIndex !== l.colorIndex) offBad++;
     }
   }
 }
@@ -881,4 +882,81 @@ check('a prompt is produced even with nothing to go on', heroPrompt(undefined, {
 check('the brief is carried into the subject', /nihai|final/i.test(heroPrompt('eagle', { brief: 'the final' })));
 
 console.log(`\n${failures === 0 ? 'ALL PASS' : failures + ' FAILED'}`);
+
+// ---- fitting a design to the stadium's seats (specFit) ----
+{
+  const { fitSpecToStadium, focalRows } = await import('../src/core/specFit');
+  const { templateById } = await import('../src/core/stadiumCatalog');
+  const mapOf = (id: string) => generateSeatMap(templateById(id)!);
+  const BRIEFS = ['CHAMPIONS in red and white', 'الهلال الزعيم', 'eagle in green and white with FALCONS', 'MESSI 10 farewell', 'red and black stripes FORZA ULTRAS'];
+  const designs = (b: string) => [designFromPrompt(b), composeSuperOffline(b), designShuffle(b, 2)].map((d) => refineSpec(d));
+
+  // 1. Small and odd grounds: every word and mark reaches its row floor, and
+  //    nothing is aimed at a stand without seats.
+  let short = 0;
+  let onEmpty = 0;
+  let total = 0;
+  for (const id of ['majmaah-stadium-7k', 'alhazem-stadium-8k', 'coliseum-11k', 'tabuk-stadium-12k', 'shg-arena-14k']) {
+    const m = mapOf(id);
+    const ctxS = buildStadiumContext(m);
+    const empty = new Set(ctxS.stands.filter((s) => s.seats === 0).map((s) => s.stand));
+    for (const b of BRIEFS) for (const d of designs(b)) {
+      const f = fitSpecToStadium(d, m).spec;
+      if (!validateSpec(f).valid) short++;
+      for (const r of focalRows(f, m)) {
+        total++;
+        // As big as the floor asks, or as the stand is deep — whichever is less.
+        const deep = r.stand.split('+').map((s) => ctxS.stands.find((x) => x.stand === s)?.artRows ?? 0).reduce((a2, c) => Math.max(a2, c), 0);
+        if (r.rows < Math.min(r.need, deep - 1) - 1.5) { short++; console.log(`   short: ${id} "${b}" ${r.kind} ${r.id} on ${r.stand}: ${r.rows.toFixed(1)} of ${r.need} rows`); }
+        if (r.stand.split('+').some((s) => empty.has(s as never))) onEmpty++;
+      }
+    }
+  }
+  check('fit: on small grounds every word and symbol reaches its row floor', short === 0, `${short} of ${total} short`);
+  check('fit: nothing is aimed at a stand without seats', onEmpty === 0, `${onEmpty}`);
+
+  // 2. A big bowl: nothing moves stand and nothing is left out — at most a
+  //    small line is drawn bigger.
+  const big = mapOf('generic-bowl-60k');
+  let touched = 0;
+  for (const b of BRIEFS) for (const d of designs(b)) {
+    const f = fitSpecToStadium(d, big);
+    if (f.changes.some((c) => /moved|left out|stacked|two lines|whole of/.test(c))) { touched++; console.log('   touched:', b, f.changes); }
+  }
+  check('fit: on a 60k bowl nothing moves or is left out', touched === 0, `${touched} designs rearranged`);
+
+  // 3. 'ends'/'sides' art is one copy per stand (it used to paint nothing on 'ends').
+  const ends = validateSpec({ palette: ['#262a33', '#0033a0', '#ffffff'], layers: [
+    { kind: 'fill', region: 'all', colorIndex: 1 },
+    { kind: 'symbol', region: 'ends', symbol: 'star', colorIndex: 2, scaleFrac: 0.8, align: 'center' },
+  ] }).spec!;
+  const endsFit = fitSpecToStadium(ends, big).spec;
+  const stars = endsFit.layers.filter((l) => l.kind === 'symbol').map((l) => l.region.stand).sort();
+  check('fit: a symbol on the ends becomes one on each end', JSON.stringify(stars) === JSON.stringify(['north', 'south']), JSON.stringify(stars));
+
+  // 4. A vertical gradient on a shallow ground is posterised, not dithered.
+  const grad = validateSpec({ palette: ['#262a33', '#c8242c', '#f2f1ec'], layers: [
+    { kind: 'gradient', region: 'all', colors: [1, 2], direction: 'vertical' },
+  ] }).spec!;
+  const gFit = fitSpecToStadium(grad, mapOf('majmaah-stadium-7k')).spec;
+  check('fit: a gradient over 18 rows becomes bands', gFit.layers[0].kind === 'stripes', gFit.layers[0].kind);
+  check('fit: …but stays a gradient on a deep bowl', fitSpecToStadium(grad, big).spec.layers[0].kind === 'gradient');
+
+  // 5. Contrast against the WHOLE field: white words on a red-to-white gradient
+  //    get a ground of their own.
+  const onGrad = refineSpec(validateSpec({ palette: ['#262a33', '#c8242c', '#f2f1ec'], layers: [
+    { kind: 'gradient', region: 'all', colors: [1, 2], direction: 'vertical' },
+    { kind: 'text', region: 'south', text: 'GLORY', colorIndex: 2, fontId: 'poster', arcDeg: 0, heightFrac: 0.6, align: 'center' },
+  ] }).spec!);
+  const panel = onGrad.layers.find((l) => l.kind === 'fill' && l.id.endsWith('-panel'));
+  const word = onGrad.layers.find((l) => l.kind === 'text') as { colorIndex: number };
+  check('refine: a word on a two-colour gradient gets a panel', !!panel && contrastRatio(onGrad.palette[(panel as { colorIndex: number }).colorIndex], onGrad.palette[word.colorIndex]) >= 3);
+
+  // 6. The stadium context says what each stand can hold.
+  const hz = describeStadiumContext(buildStadiumContext(mapOf('alhazem-stadium-8k')));
+  check('context: a stand without seats is called out', /North: 0 seats.*NO SEATS/.test(hz), hz.split('\n').find((l) => l.includes('North')) ?? '');
+  const mj = describeStadiumContext(buildStadiumContext(mapOf('majmaah-stadium-7k')));
+  check('context: a shallow stand says one element only', /SHALLOW/.test(mj) && /SLIVER/.test(mj));
+}
+
 if (failures > 0) process.exit(1);

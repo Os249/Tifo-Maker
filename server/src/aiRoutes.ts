@@ -384,9 +384,11 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
       return reply.code(400).send({ error: safe.message, reason: 'blocked' });
     }
 
-    // Mode 3 (Super AI): whole-bowl director prompt + the client's stadium context.
+    // The client's stadium context: Super AI plans the whole bowl from it, and
+    // the standard designer needs it too — on a 13-row ground "hero in the top
+    // 60%, support below" is two words nobody can read.
     const isSuper = body.mode === 'super';
-    const stadium = isSuper && typeof body.stadium === 'string' ? body.stadium.slice(0, 2000) : undefined;
+    const stadium = typeof body.stadium === 'string' ? body.stadium.slice(0, 2000) : undefined;
     const engine = body.engine === 'offline' ? 'offline' : 'auto';
     const userId = access.kind === 'user' ? access.userId : null;
     const unlimited = isUnlimited(access);
@@ -449,7 +451,7 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
 
     const modelResult = await generateSpecViaProvider(
       brief,
-      isSuper ? { system: buildDirectorPrompt(), context: stadium, tier: 'premium', hint } : { tier: 'fast', hint },
+      isSuper ? { system: buildDirectorPrompt(), context: stadium, tier: 'premium', hint } : { context: stadium, tier: 'fast', hint },
     );
     const r = modelResult.spec ? validateSpec(modelResult.spec) : ({ valid: false } as ReturnType<typeof validateSpec>);
     if (!r.valid || !r.spec) {

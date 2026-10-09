@@ -20,7 +20,7 @@ import type { DesignStore } from './design';
 import type { TifoSpec, SpecLayer, Region, Stand } from './tifoSpec';
 import { STAND_GEOMETRY, standIndexOfU, standRun } from './tifoSpec';
 import { EDITOR_UNITS } from './seatmap';
-import { rasterize, maskFromAlpha, applyGridToSeats } from './importImage';
+import { rasterize, maskFromAlpha } from './importImage';
 import { renderTextCanvas, TIFO_FONTS } from './text';
 import { drawSymbol } from './symbols';
 import { findFragileSeats } from './analysis';
@@ -92,6 +92,39 @@ function standExtent(region: Region): { centerX: number; width: number } {
   return { centerX: (run.start + (run.len - 1) / 2) * 0.25 * W, width: run.len * 0.25 * W };
 }
 
+/**
+ * Where a single stand's seats ACTUALLY are, horizontally. A stand owns a
+ * quarter of the perimeter, but on a small or odd-shaped ground its seats may
+ * fill only part of it (Al-Majmaah's main stand covers about two thirds of its
+ * quarter): centred on the quarter and sized to it, a headline ran off the end
+ * of the seats and lost its first letters. Null for multi-stand and whole-bowl
+ * regions, which keep the quarter maths.
+ */
+export function seatExtent(region: Region, map: SeatMap, accept: (i: number) => boolean): { centerX: number; width: number } | null {
+  if (region.stand === 'all' || (region.stands && region.stands.length > 0)) return null;
+  const c = STAND_GEOMETRY[region.stand as Stand].centerU;
+  let lo = Infinity;
+  let hi = -Infinity;
+  for (let i = 0; i < map.count; i++) {
+    if (!accept(i)) continue;
+    const d = wrapDelta(map.uv[i * 2], c);
+    if (d < lo) lo = d;
+    if (d > hi) hi = d;
+  }
+  if (!isFinite(lo)) return null;
+  const quarter = STAND_GEOMETRY[region.stand as Stand].halfU * 2;
+  // Only ever narrows: a full stand is its quarter, as before.
+  if (hi - lo >= quarter * 0.97) return null;
+  return { centerX: (c + (lo + hi) / 2) * W, width: Math.max(EDITOR_UNITS.rowPx * 4, (hi - lo) * W) };
+}
+
+/** The seats of a single-stand region within the middle of its quarter (null otherwise). */
+function coreOf(region: Region, map: SeatMap, accept: (i: number) => boolean): ((i: number) => boolean) | null {
+  if (region.stand === 'all' || (region.stands && region.stands.length > 0)) return null;
+  const c = STAND_GEOMETRY[region.stand as Stand].centerU;
+  return (i) => accept(i) && Math.abs(wrapDelta(map.uv[i * 2], c)) <= 0.08;
+}
+
 /** Editor-space box (centre + size) of a region — used to place image objects. */
 export function regionRect(region: Region, map: SeatMap): { cx: number; cy: number; width: number; height: number } {
   const { centerX, width } = standExtent(region);
@@ -121,6 +154,31 @@ function fontCssFor(id: string): string {
   return TIFO_FONTS.find((f) => f.id === id)?.css ?? TIFO_FONTS[0].css;
 }
 
+/**
+ * How many seats one row holds across a rect: the widest row inside it. Used to
+ * size the raster grid to the seats themselves, so each grid cell averages the
+ * artwork over one seat's width instead of point-sampling a grid that is finer
+ * on a small stadium's sparse rows and coarser on a big one's.
+ */
+function seatsAcross(map: SeatMap, rect: { x: number; y: number; width: number; height: number }, accept: (i: number) => boolean, yOf: (i: number) => number): number {
+  const per = new Map<number, number>();
+  const x0 = rect.x;
+  const x1 = rect.x + rect.width;
+  for (let i = 0; i < map.count; i++) {
+    if (!accept(i)) continue;
+    const y = yOf(i);
+    if (y < rect.y || y >= rect.y + rect.height || !accept(i)) continue;
+    let x = map.xy[i * 2];
+    if (x < x0) x += W;
+    else if (x >= x1) x -= W;
+    if (x < x0 || x >= x1) continue;
+    per.set(map.rowOf[i], (per.get(map.rowOf[i]) ?? 0) + 1);
+  }
+  let best = 0;
+  for (const n of per.values()) if (n > best) best = n;
+  return best;
+}
+
 /** Stamp a white-on-transparent source canvas as a single-colour mask into seats. */
 function stampMask(
   store: DesignStore,
@@ -129,12 +187,37 @@ function stampMask(
   rect: { x: number; y: number; width: number; height: number },
   colorIndex: number,
   accept: (i: number) => boolean,
+  yOf: (i: number) => number,
 ): number {
-  const cols = Math.max(2, Math.min(2400, Math.round(rect.width / 3)));
+  // One grid cell per seat across, one per row down: each seat then takes the
+  // artwork's coverage over its own footprint. A fixed 3-unit grid was finer than
+  // a small ground's seats (point-sampled, so strokes came and went) and coarser
+  // than a big one's.
+  const seatCols = seatsAcross(map, rect, accept, yOf);
+  const cols = Math.max(2, Math.min(2400, seatCols > 0 ? seatCols : Math.round(rect.width / 3)));
   const rows = Math.max(2, Math.min(400, Math.round(rect.height / 8)));
   const pixels = rasterize(source, cols, rows);
   const grid = maskFromAlpha(pixels, cols, rows, colorIndex);
-  return applyGridToSeats(store, map, grid, cols, rows, rect, W, accept).length;
+  // applyGridToSeats, but with each seat at its local row (see localRows).
+  let painted = 0;
+  const x0 = rect.x;
+  const x1 = rect.x + rect.width;
+  for (let i = 0; i < map.count; i++) {
+    if (!accept(i)) continue;
+    const y = yOf(i);
+    if (y < rect.y || y >= rect.y + rect.height) continue;
+    let x = map.xy[i * 2];
+    if (x < x0 || x >= x1) {
+      if (x + W >= x0 && x + W < x1) x += W;
+      else if (x - W >= x0 && x - W < x1) x -= W;
+      else continue;
+    }
+    const ix = Math.min(cols - 1, Math.floor(((x - x0) / rect.width) * cols));
+    const iy = Math.min(rows - 1, Math.floor(((y - rect.y) / rect.height) * rows));
+    const idx = grid[iy * cols + ix];
+    if (idx >= 0 && store.paint(i, idx)) painted++;
+  }
+  return painted;
 }
 
 /**
@@ -278,9 +361,21 @@ function applyLayer(layer: SpecLayer, map: SeatMap, store: DesignStore): number 
   if (layer.kind === 'image') return 0;
 
   // text / symbol → build a target rect, then stamp a mask.
-  const { centerX, width: standW } = standExtent(layer.region);
-  const { minY, maxY, count } = yBounds(accept, map);
-  if (count === 0 || !isFinite(minY)) return 0;
+  const { centerX, width: standW } = seatExtent(layer.region, map, accept) ?? standExtent(layer.region);
+  // Height from the seats in the MIDDLE of a stand, where the art is centred: a
+  // stand's quarter can pick up the corners of its neighbours, whose rows are
+  // not under the word (specFit counts rows the same way).
+  const core = coreOf(layer.region, map, accept);
+  // Lay the art out in the region's OWN rows, one after another. The editor
+  // stacks every tier of the bowl, so a stand that has seats in only some tiers
+  // (Anfield's Kop, Etihad's south end) spans the editor rows of tiers it does
+  // not have: centred on that span, a crest landed in a gap with no seats and
+  // painted nothing. Counting only rows that exist also stops a tier walkway
+  // swallowing the middle rows of a word.
+  const yOf = localRows(map, accept, core);
+  if (!yOf) return 0;
+  const minY = 0;
+  const maxY = yOf.span;
   const regionH = Math.max(EDITOR_UNITS.rowPx, maxY - minY);
   const centerY = (minY + maxY) / 2;
 
@@ -311,7 +406,7 @@ function applyLayer(layer: SpecLayer, map: SeatMap, store: DesignStore): number 
     const dx = ((layer.dx ?? 0) / 100) * standW;
     const dy = ((layer.dy ?? 0) / 100) * regionH;
     const rect = { x: centerX - rectW / 2 + dx, y: cy - rectH / 2 + dy, width: rectW, height: rectH };
-    return stampMask(store, map, rt.canvas, rect, layer.colorIndex, accept);
+    return stampMask(store, map, rt.canvas, rect, layer.colorIndex, accept, yOf.y);
   }
 
   // symbol — square box sized to a fraction of the region's smaller side.
@@ -330,5 +425,36 @@ function applyLayer(layer: SpecLayer, map: SeatMap, store: DesignStore): number 
   ctx.fillStyle = '#ffffff';
   drawSymbol(ctx, layer.symbol, canvas.width, canvas.height);
   const rect = { x: centerX - sideW / 2, y: cy - side / 2, width: sideW, height: side };
-  return stampMask(store, map, canvas, rect, layer.colorIndex, accept);
+  return stampMask(store, map, canvas, rect, layer.colorIndex, accept, yOf.y);
+}
+
+/**
+ * A region's rows renumbered 0..n-1 (as editor units, ROW apart), front at the
+ * bottom like the editor. Rows are taken from the middle of the stand when it
+ * has any there; a seat in a row only its corners hold takes the nearest one.
+ */
+function localRows(map: SeatMap, accept: (i: number) => boolean, core: ((i: number) => boolean) | null): { y: (i: number) => number; span: number } | null {
+  const pick = (f: (i: number) => boolean): number[] => {
+    const set = new Set<number>();
+    for (let i = 0; i < map.count; i++) if (f(i)) set.add(map.xy[i * 2 + 1]);
+    return [...set].sort((a, b) => a - b);
+  };
+  let ys = core ? pick(core) : [];
+  if (ys.length === 0) ys = pick(accept);
+  if (ys.length === 0) return null;
+  const R = EDITOR_UNITS.rowPx;
+  const rank = new Map<number, number>();
+  ys.forEach((y, k) => rank.set(y, k * R));
+  const nearest = (y: number): number => {
+    let lo = 0;
+    let hi = ys.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (ys[mid] < y) lo = mid + 1;
+      else hi = mid;
+    }
+    if (lo > 0 && Math.abs(ys[lo - 1] - y) < Math.abs(ys[lo] - y)) lo--;
+    return lo * R;
+  };
+  return { y: (i) => rank.get(map.xy[i * 2 + 1]) ?? nearest(map.xy[i * 2 + 1]), span: (ys.length - 1) * R };
 }
