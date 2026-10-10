@@ -1,6 +1,8 @@
 import type { SeatMap, StadiumTemplate } from './types';
 import { inLane, laneLines } from './venueDetails';
 import { inGap, inStands } from './standSpans';
+import { CURVE_SAMPLES, buildOffsetCurve, offsetLength, pointAt, pointOnOffset, samplePlanCurve, type Curve } from './planCurve';
+import { arcAtIndex, compileBlocks, hasBlocks, indexAtArc, walkCovers, widestAisle, type BlockLine, type WalkLine } from './blocks';
 
 /**
  * Deterministic seat-map generation.
@@ -16,138 +18,9 @@ import { inGap, inStands } from './standSpans';
  * No randomness anywhere: same template version ⇒ byte-identical output.
  */
 
-const CURVE_SAMPLES = 4096;
 const EDITOR_WIDTH = 4000; // editor units across the full unrolled perimeter
 const ROW_PX = 8; // editor units per row
 const TIER_GAP_PX = 24; // walkway gap between tiers in the editor view
-
-interface Curve {
-  /** Sampled closed polyline: points and outward unit normals. */
-  px: Float64Array;
-  py: Float64Array;
-  nx: Float64Array;
-  ny: Float64Array;
-  /** Cumulative arc length at each sample (s[0]=0), plus total length. */
-  s: Float64Array;
-  total: number;
-}
-
-/** Sample the superellipse |x/a|^p + |y/b|^p = 1 as a closed polyline with normals. */
-function samplePlanCurve(a: number, b: number, p: number): Curve {
-  const n = CURVE_SAMPLES;
-  const px = new Float64Array(n);
-  const py = new Float64Array(n);
-  const e = 2 / p;
-  for (let i = 0; i < n; i++) {
-    const t = (i / n) * Math.PI * 2;
-    const c = Math.cos(t);
-    const s = Math.sin(t);
-    px[i] = a * Math.sign(c) * Math.abs(c) ** e;
-    py[i] = b * Math.sign(s) * Math.abs(s) ** e;
-  }
-  const nx = new Float64Array(n);
-  const ny = new Float64Array(n);
-  const s = new Float64Array(n);
-  let total = 0;
-  for (let i = 0; i < n; i++) {
-    const i0 = (i - 1 + n) % n;
-    const i1 = (i + 1) % n;
-    // Central-difference tangent → outward normal (curve is CCW, so normal = (ty, -tx) flipped).
-    const tx = px[i1] - px[i0];
-    const ty = py[i1] - py[i0];
-    const len = Math.hypot(tx, ty) || 1;
-    nx[i] = ty / len;
-    ny[i] = -tx / len;
-    // Ensure the normal points outward (away from origin).
-    if (nx[i] * px[i] + ny[i] * py[i] < 0) {
-      nx[i] = -nx[i];
-      ny[i] = -ny[i];
-    }
-    s[i] = total;
-    total += Math.hypot(px[i1] - px[i], py[i1] - py[i]);
-  }
-  return { px, py, nx, ny, s, total };
-}
-
-/** Point + normal on the offset curve at arc-length fraction u ∈ [0,1). */
-function pointAt(curve: Curve, u: number, offset: number): [number, number] {
-  const target = u * curve.total;
-  // Binary search the cumulative-length table.
-  let lo = 0;
-  let hi = CURVE_SAMPLES - 1;
-  while (lo < hi) {
-    const mid = (lo + hi + 1) >> 1;
-    if (curve.s[mid] <= target) lo = mid;
-    else hi = mid - 1;
-  }
-  const i = lo;
-  const i1 = (i + 1) % CURVE_SAMPLES;
-  const segLen =
-    (i1 === 0 ? curve.total : curve.s[i1]) - curve.s[i] || 1e-9;
-  const f = (target - curve.s[i]) / segLen;
-  const x = curve.px[i] + (curve.px[i1] - curve.px[i]) * f + (curve.nx[i] + (curve.nx[i1] - curve.nx[i]) * f) * offset;
-  const y = curve.py[i] + (curve.py[i1] - curve.py[i]) * f + (curve.ny[i] + (curve.ny[i1] - curve.ny[i]) * f) * offset;
-  return [x, y];
-}
-
-/** Approximate length of the curve offset outward by `d` (perimeter grows ~2πd for convex curves). */
-function offsetLength(curve: Curve, d: number): number {
-  return curve.total + 2 * Math.PI * d;
-}
-
-/** The plan curve pushed outward by `d`, with its OWN cumulative arc-length table. */
-interface OffsetCurve {
-  x: Float64Array;
-  z: Float64Array;
-  s: Float64Array;
-  total: number;
-}
-
-/**
- * Build the offset curve for a row so seats can be spaced evenly along the row
- * the spectator actually sits on.
- *
- * Why this exists: pointAt() walks `u` along the BASE curve then pushes outward,
- * but a row's seat count comes from the OFFSET perimeter. Local spacing on the
- * offset curve scales by (1 + curvature*d), so sampling the base curve bunches
- * seats on the straights and stretches them round the corners — and the error
- * grows with every row back. Sampling this table instead gives a genuinely
- * uniform seat pitch all the way round.
- */
-function buildOffsetCurve(curve: Curve, d: number): OffsetCurve {
-  const n = CURVE_SAMPLES;
-  const x = new Float64Array(n);
-  const z = new Float64Array(n);
-  const s = new Float64Array(n);
-  for (let i = 0; i < n; i++) {
-    x[i] = curve.px[i] + curve.nx[i] * d;
-    z[i] = curve.py[i] + curve.ny[i] * d;
-  }
-  let total = 0;
-  for (let i = 0; i < n; i++) {
-    s[i] = total;
-    const j = (i + 1) % n;
-    total += Math.hypot(x[j] - x[i], z[j] - z[i]);
-  }
-  return { x, z, s, total };
-}
-
-/** Point at arc-length fraction u along the offset curve (uniform seat spacing). */
-function pointOnOffset(oc: OffsetCurve, u: number): [number, number] {
-  const target = u * oc.total;
-  let lo = 0;
-  let hi = CURVE_SAMPLES - 1;
-  while (lo < hi) {
-    const mid = (lo + hi + 1) >> 1;
-    if (oc.s[mid] <= target) lo = mid;
-    else hi = mid - 1;
-  }
-  const i = lo;
-  const i1 = (i + 1) % CURVE_SAMPLES;
-  const segLen = (i1 === 0 ? oc.total : oc.s[i1]) - oc.s[i] || 1e-9;
-  const f = (target - oc.s[i]) / segLen;
-  return [oc.x[i] + (oc.x[i1] - oc.x[i]) * f, oc.z[i] + (oc.z[i1] - oc.z[i]) * f];
-}
 
 /** A point on a straight stand's row line (TierSpec.straight): `radial` out from the plan's side, `along` it. */
 export function straightPoint(template: StadiumTemplate, side: string, radial: number, along: number): [number, number] {
@@ -210,6 +83,57 @@ export function seatedTemplate(template: StadiumTemplate): StadiumTemplate {
   return { ...template, tiers: template.tiers.slice(0, n) };
 }
 
+/**
+ * Number a real layout's blocks (TierSpec.blocks) into `sections`, in place.
+ *
+ * A block is the seats with the same key — tier, band and the stairway on
+ * their left — that are also together round the bowl: where a tier stops
+ * (the open side of a horseshoe, the main stand an upper tier does not run
+ * over) the seats either side are two blocks, even with the same stairway on
+ * their left. Numbered tier by tier, band by band, in perimeter order from
+ * u = 0; the block astride the seam at u = 0 starts last.
+ */
+function numberBlocks(keys: string[], us: number[], tiers: number[], sections: number[]): void {
+  /** More than this much of the perimeter with none of a block's seats is two blocks. */
+  const SPLIT_U = 0.05;
+  const byKey = new Map<string, number[]>();
+  keys.forEach((k, i) => (byKey.get(k) ?? byKey.set(k, []).get(k)!).push(i));
+  const pieces: { seats: number[]; tier: number; band: number; start: number }[] = [];
+  for (const [k, seats] of byKey) {
+    const band = Number(k.split(':')[1]);
+    const sorted = [...new Set(seats.map((i) => us[i]))].sort((p, q) => p - q);
+    // Gaps round the circle, including the one across u = 0.
+    const cuts: number[] = [];
+    for (let j = 0; j < sorted.length; j++) {
+      const next = j + 1 < sorted.length ? sorted[j + 1] : sorted[0] + 1;
+      if (next - sorted[j] > SPLIT_U) cuts.push(next % 1);
+    }
+    if (cuts.length <= 1) {
+      // One piece: it starts after its one gap (or at its first seat, if it is a full ring).
+      const start = cuts.length ? cuts[0] : sorted[0];
+      pieces.push({ seats, tier: tiers[seats[0]], band, start });
+      continue;
+    }
+    cuts.sort((p, q) => p - q);
+    const pieceOf = (u: number): number => {
+      // The last cut at or before u, circularly.
+      let c = cuts.length - 1;
+      for (let j = 0; j < cuts.length; j++) if (cuts[j] <= u) c = j;
+      return c;
+    };
+    const split = new Map<number, number[]>();
+    for (const i of seats) {
+      const c = pieceOf(us[i]);
+      (split.get(c) ?? split.set(c, []).get(c)!).push(i);
+    }
+    for (const [c, list] of split) pieces.push({ seats: list, tier: tiers[list[0]], band, start: cuts[c] });
+  }
+  pieces.sort((p, q) => p.tier - q.tier || p.band - q.band || p.start - q.start);
+  pieces.forEach((pc, id) => {
+    for (const i of pc.seats) sections[i] = id;
+  });
+}
+
 export function generateSeatMap(full: StadiumTemplate): SeatMap {
   // Tiers still being built (TierSpec.building) have their concrete but no
   // seats. They come after every seated tier, so dropping them here leaves
@@ -220,6 +144,17 @@ export function generateSeatMap(full: StadiumTemplate): SeatMap {
   const evenRows = template.evenRows === true;
   // Empty for every template without vehicle lanes, so their maps are untouched.
   const lanes = laneLines(template);
+  // Real block layouts (TierSpec.blocks). Null for every tier of every
+  // template without one, which then runs exactly the code it always has.
+  const blocks = compileBlocks(template, curve);
+  const anyBlocks = hasBlocks(template);
+  /**
+   * With blocks, a seat's section is its block, keyed here and numbered once
+   * every seat is placed: tier, band (how many walkways are in front of it)
+   * and the stairway on its left. `numberBlocks` splits any key whose seats
+   * fall in two pieces and numbers the blocks round the bowl.
+   */
+  const blockKeys: string[] = [];
 
   // Aisle bands as [uStart, uEnd) fractions; computed per row since row length varies,
   // but anchored at fixed u positions so aisles are radial.
@@ -320,20 +255,67 @@ export function generateSeatMap(full: StadiumTemplate): SeatMap {
       const aisleHalfU = template.aisles.widthMeters / 2 / rowLen;
       const editorY =
         (totalRows - 1 - globalRow) * ROW_PX + (tierIdx === 0 ? TIER_GAP_PX * (template.tiers.length - 1) : 0);
+      // This row's stairways and openings, where they cross it (metres along it).
+      const cb = blocks[tierIdx];
+      let stairs: BlockLine[] = [];
+      let stairArc: number[] = [];
+      let holes: { arc: number; halfW: number }[] = [];
+      let walkHere = false;
+      let walkPartial: WalkLine[] = [];
+      let walksBehind: WalkLine[] = [];
+      if (cb && oc) {
+        stairs = cb.aisles.filter((l) => r >= l.r0 && r <= l.r1);
+        stairArc = stairs.map((l) => arcAtIndex(oc, l.idx));
+        holes = cb.openings.filter((l) => r >= l.r0 && r <= l.r1).map((l) => ({ arc: arcAtIndex(oc, l.idx), halfW: l.halfW }));
+        const here = cb.walkways.filter((w) => w.row === r);
+        walkHere = here.some((w) => w.i0 === undefined);
+        walkPartial = here.filter((w) => w.i0 !== undefined);
+        walksBehind = cb.walkways.filter((w) => w.row < r);
+      }
 
       for (let k = 0; k < nSeats; k++) {
         const u = (k + 0.5) / nSeats;
-        // Skip seats inside any radial aisle band.
-        let inAisle = false;
-        for (const au of aisleU) {
-          let du = Math.abs(u - au);
-          if (du > 0.5) du = 1 - du;
-          if (du < aisleHalfU) {
-            inAisle = true;
-            break;
+        let blockKey = '';
+        if (cb && oc) {
+          // A real tier: its own stairways, walkways and openings, in metres
+          // along this row, instead of the template's even aisle fractions.
+          if (walkHere) break;
+          const arc = u * oc.total;
+          const near = (at: number, halfW: number): boolean => {
+            let d = Math.abs(arc - at);
+            if (d > oc.total / 2) d = oc.total - d;
+            return d < halfW;
+          };
+          // Stairways crossing the row, nearest first: binary search, then the neighbours either side.
+          let lo = 0;
+          let hi = stairArc.length;
+          while (lo < hi) {
+            const mid = (lo + hi) >> 1;
+            if (stairArc[mid] < arc) lo = mid + 1;
+            else hi = mid;
           }
+          const A = stairArc.length;
+          if (A > 0 && (near(stairArc[lo % A], stairs[lo % A].halfW) || near(stairArc[(lo - 1 + A) % A], stairs[(lo - 1 + A) % A].halfW))) continue;
+          if (holes.some((h) => near(h.arc, h.halfW))) continue;
+          let idx = -1;
+          if (walkPartial.length > 0 || walksBehind.some((w) => w.i0 !== undefined)) idx = indexAtArc(oc, arc);
+          if (walkPartial.some((w) => walkCovers(w, idx))) continue;
+          const band = walksBehind.filter((w) => w.i0 === undefined || walkCovers(w, idx)).length;
+          const left = A > 0 ? stairs[(lo - 1 + A) % A] : null;
+          blockKey = `${tierIdx}:${band}:${left ? left.id : -1}`;
+        } else {
+          // Skip seats inside any radial aisle band.
+          let inAisle = false;
+          for (const au of aisleU) {
+            let du = Math.abs(u - au);
+            if (du > 0.5) du = 1 - du;
+            if (du < aisleHalfU) {
+              inAisle = true;
+              break;
+            }
+          }
+          if (inAisle) continue;
         }
-        if (inAisle) continue;
 
         const [wx, wy] = oc ? pointOnOffset(oc, u) : pointAt(curve, u, radial);
         // Box-arena corner cut: drop seats where BOTH plan axes are near their
@@ -363,10 +345,19 @@ export function generateSeatMap(full: StadiumTemplate): SeatMap {
           Math.min(template.sectionsPerTier - 1, Math.floor(u * template.sectionsPerTier)) +
             tierIdx * template.sectionsPerTier,
         );
+        if (anyBlocks) {
+          // A tier without blocks in a template with some keeps its even slices, numbered in with the rest.
+          if (!blockKey) blockKey = `${tierIdx}:0:s${Math.min(template.sectionsPerTier - 1, Math.floor(u * template.sectionsPerTier))}`;
+          blockKeys.push(blockKey);
+        }
       }
     }
   });
   rowStart[totalRows] = xs.length;
+  if (anyBlocks) {
+    if (blockKeys.length !== xs.length) throw new Error(`${template.id}: blocks need every tier to be a ring tier`);
+    numberBlocks(blockKeys, us, tiers, sections);
+  }
 
   const count = xs.length;
   const xy = new Float32Array(count * 2);
@@ -395,7 +386,9 @@ export function generateSeatMap(full: StadiumTemplate): SeatMap {
   // walkways still hard-stop everything via the tier check below.
   const neighbors = new Int32Array(count * 4).fill(-1);
   const pitch = template.tiers[0].seatPitch;
-  const maxGapU = (template.aisles.widthMeters + 2 * pitch) / curve.total;
+  // A real tier's stairways can be wider than the template-wide default; a
+  // fill bridges the widest of them, as it bridges any aisle.
+  const maxGapU = ((anyBlocks ? widestAisle(template) : template.aisles.widthMeters) + 2 * pitch) / curve.total;
 
   const rowOfGlobal = (g: number): { start: number; end: number } => ({
     start: rowStart[g],
@@ -442,11 +435,15 @@ export function generateSeatMap(full: StadiumTemplate): SeatMap {
     // Down / up: nearest-u seat in the adjacent row of the SAME tier
     // (tier boundaries are walkways — flood fill must not cross them).
     if (g > 0) {
-      const j = nearestInRow(g - 1, u);
+      let j = nearestInRow(g - 1, u);
+      // A lateral walkway inside a tier is one empty row: a colour region runs
+      // on across it, as it runs across a stairway (TierBlocks.walkways).
+      if (j < 0 && anyBlocks && g > 1) j = nearestInRow(g - 2, u);
       if (j >= 0 && tierOf[j] === tierOf[i]) neighbors[i * 4 + 2] = j;
     }
     if (g < totalRows - 1) {
-      const j = nearestInRow(g + 1, u);
+      let j = nearestInRow(g + 1, u);
+      if (j < 0 && anyBlocks && g < totalRows - 2) j = nearestInRow(g + 2, u);
       if (j >= 0 && tierOf[j] === tierOf[i]) neighbors[i * 4 + 3] = j;
     }
   }

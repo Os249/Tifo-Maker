@@ -1843,6 +1843,8 @@ import { buildStadium as siBuild } from '../src/core/stadiumFit';
     'alfateh-stadium-12k': '11836:72edda8b34c95c71',
     'pmbf-stadium-22k': '21920:ab7396dcf54e9c0f',
     'alfaisal-stadium-27k': '26606:17221a47893d4121',
+    // Rebuilt in its real blocks, October 2026 (the one above is now legacy).
+    'alfaisal-jeddah-27k': '26873:42a482421efbeefc',
     'buraidah-stadium-25k': '24316:90e786a35c7453bb',
     'abha-stadium-20k': '16430:3462445f1cb76af5',
     'tabuk-stadium-12k': '11992:131f84df1583209c',
@@ -1903,6 +1905,10 @@ import { buildStadium as siBuild } from '../src/core/stadiumFit';
   // The earlier Al-Awwal resolves, unchanged, but is not offered, and points at the new one.
   if (cat.STADIUM_CATALOG.some((e) => e.id === 'community-alawwal-park-25k')) throw new Error('venue: the legacy Al-Awwal is still in the catalogue');
   if (cat.entryById('community-alawwal-park-25k')?.meta.supersededBy !== 'alawwal-park-26k') throw new Error('venue: the legacy Al-Awwal does not point at its replacement');
+
+  // So does the earlier Al-Faisal, from before it had its real blocks.
+  if (cat.STADIUM_CATALOG.some((e) => e.id === 'alfaisal-stadium-27k')) throw new Error('venue: the legacy Al-Faisal is still in the catalogue');
+  if (cat.entryById('alfaisal-stadium-27k')?.meta.supersededBy !== 'alfaisal-jeddah-27k') throw new Error('venue: the legacy Al-Faisal does not point at its replacement');
 
   // The legacy Jewel resolves but is not offered for new designs.
   if (cat.STADIUM_CATALOG.some((e) => e.id === 'community-jewel-jeddah-62k')) throw new Error('venue: the legacy Jewel is still in the catalogue');
@@ -2470,7 +2476,7 @@ await (async () => {
     { id: 'alawwal-park-26k', clubs: 'Al-Nassr, Al-Diriyah', seats: 26004, tol: 0.02 },
     { id: 'kingdom-arena-26k', clubs: 'Al-Hilal', seats: 26700, tol: 0.02 },
     { id: 'jewel-jeddah-60k', clubs: 'Al-Ittihad, Al-Ahli', seats: 60241, tol: 0.02 },
-    { id: 'alfaisal-stadium-27k', clubs: 'Al-Ahli, Al-Ittihad', seats: 27000, tol: 0.02 },
+    { id: 'alfaisal-jeddah-27k', clubs: 'Al-Ahli, Al-Ittihad', seats: 27000, tol: 0.02 },
     { id: 'shg-arena-14k', clubs: 'Al-Shabab', seats: 13537, tol: 0.02 },
     { id: 'pfbf-stadium-22k', clubs: 'Al-Riyadh', seats: 22500, tol: 0.02 },
     { id: 'ego-stadium-13k', clubs: 'Al-Ettifaq', seats: 12984, tol: 0.02 },
@@ -2487,7 +2493,190 @@ await (async () => {
   await leagueGrounds('saudi league', 'saudi-pro-league', GROUNDS, (i18nSrc, fails) => {
     // The earlier Al-Awwal is still there for designs saved on it, and named as such.
     if (!/'community-alawwal-park-25k': 'stad\.alAwwalOld'/.test(i18nSrc)) fails.push('the earlier Al-Awwal is not named as the earlier layout');
+    if (!/'alfaisal-stadium-27k': 'stad\.alFaisalOld'/.test(i18nSrc)) fails.push('the earlier Al-Faisal is not named as the earlier layout');
   });
+})();
+
+// --- Real block layouts (TierSpec.blocks), October 2026 ---------------------
+// Every ground used to get its stairs at even perimeter fractions, the same in
+// every tier, and its blocks as equal slices of the bowl. A real ground's
+// stairs are laid out stand by stand; the band behind a walkway, and the tier
+// above, each have their own. Prince Abdullah Al-Faisal is the first ground
+// built that way. Checked on the seats themselves, not on the template.
+await (async () => {
+  const cat = await import('../src/core/stadiumCatalog');
+  const bl = await import('../src/core/blocks');
+  const { isValidTemplate } = await import('../src/core/customStadiums');
+  const { sectionLabeller } = await import('../src/core/seatLocator');
+  const fails: string[] = [];
+  const t = cat.templateById('alfaisal-jeddah-27k')!;
+  const m = generateSeatMap(t);
+  const before: number[] = [];
+  t.tiers.reduce((n, tr) => (before.push(n), n + tr.rows), 0);
+  const rowIn = (i: number): number => m.rowOf[i] - before[m.tierOf[i]];
+  const X = (i: number): number => m.pos3[i * 3];
+  const Z = (i: number): number => m.pos3[i * 3 + 2];
+
+  /** Seats of one tier row on the stand opposite the main stand (z > 0, |x| < lim), left to right in x. */
+  const northRow = (tier: number, row: number, lim = 60): number[] => {
+    const out: number[] = [];
+    for (let i = 0; i < m.count; i++) if (m.tierOf[i] === tier && rowIn(i) === row && Z(i) > 0 && Math.abs(X(i)) < lim) out.push(i);
+    return out.sort((p, q) => X(p) - X(q));
+  };
+  /** Where a row's gaps are (the middle of each), from the seats: a stair, the tunnel, a vomitory. */
+  const gapsOf = (seats: number[]): { at: number; w: number }[] => {
+    const out: { at: number; w: number }[] = [];
+    for (let k = 1; k < seats.length; k++) {
+      const d = X(seats[k]) - X(seats[k - 1]);
+      if (d > 0.9) out.push({ at: (X(seats[k]) + X(seats[k - 1])) / 2, w: d });
+    }
+    return out;
+  };
+  const near = (list: number[], x: number, tol: number): boolean => list.some((v) => Math.abs(v - x) <= tol);
+  // A stairway is square to the plan curve, so out in the rows behind it
+  // fans out with the curve: where a north-side station meets a given row.
+  const { samplePlanCurve, buildOffsetCurve } = await import('../src/core/planCurve');
+  const curve = samplePlanCurve(t.plan.a, t.plan.b, t.plan.exponent);
+  const xAt = (tier: number, station: number, row: number): number => {
+    const tr = t.tiers[tier];
+    const idx = bl.stationIndex(buildOffsetCurve(curve, tr.baseOffset), 'north', station);
+    const i = Math.round(idx) % curve.px.length;
+    return curve.px[i] + curve.nx[i] * (tr.baseOffset + row * tr.rowDepth);
+  };
+
+  // The front band: the players' tunnel on the centre line, 13 m wide, then
+  // stairs where the photographs put them, mirrored either side.
+  const front = gapsOf(northRow(0, 0));
+  const tunnel = front.find((g) => Math.abs(g.at) < 1);
+  if (!tunnel || tunnel.w < 12 || tunnel.w > 14.5) fails.push(`the tunnel is not a 13 m gap on the centre line (${JSON.stringify(tunnel)})`);
+  const frontStairs = front.filter((g) => g !== tunnel).map((g) => g.at);
+  for (const x of [22, 33, 49]) for (const sgn of [-1, 1]) if (!near(frontStairs, sgn * x, 0.6)) fails.push(`no front-band stair at x = ${sgn * x}`);
+  // …and the band behind the walkway has its own, with one on the centre line.
+  const middle = gapsOf(northRow(0, 12)).map((g) => g.at);
+  for (const x of [0, 15, 28, 38.5, 51]) for (const sgn of [-1, 1]) if (!near(middle, xAt(0, sgn * x, 12), 0.4)) fails.push(`no middle-band stair at station ${sgn * x}`);
+  // None of the bands' stairs line up, and the upper tier is on a third rhythm.
+  const upper = gapsOf(northRow(1, 6)).map((g) => g.at);
+  for (const x of frontStairs) if (near(middle, x, 1.5)) fails.push(`a middle-band stair lines up with the front band's at x = ${x.toFixed(1)}`);
+  const upperSteps = upper.slice(1).map((x, k) => x - upper[k]).filter((d) => d > 6);
+  if (upperSteps.length < 6 || upperSteps.some((d) => Math.abs(d - 12.8) > 1.6)) fails.push(`the upper tier's stairs are not every 12.8 m (${upperSteps.map((d) => d.toFixed(1)).join(', ')})`);
+  // The blocks are not all the same: the front band's run 20 to 30 seats.
+  const runs: number[] = [];
+  const fr = northRow(0, 0, 52);
+  let run = 1;
+  for (let k = 1; k < fr.length; k++) {
+    if (m.sectionOf[fr[k]] === m.sectionOf[fr[k - 1]] && X(fr[k]) - X(fr[k - 1]) < 0.9) run++;
+    else (runs.push(run), (run = 1));
+  }
+  runs.push(run);
+  const inner = runs.slice(1, -1);
+  if (Math.max(...inner) - Math.min(...inner) < 8) fails.push(`the front band's blocks are all one width (${inner.join(', ')})`);
+
+  // Walkways: tier 0's row 7 is empty all the way round; row 14 everywhere but
+  // the main stand, which has seats there.
+  let row7 = 0;
+  let row14North = 0;
+  let row14Main = 0;
+  for (let i = 0; i < m.count; i++) {
+    if (m.tierOf[i] !== 0) continue;
+    if (rowIn(i) === 7) row7++;
+    if (rowIn(i) === 14 && Z(i) > 0 && Math.abs(X(i)) < 60) row14North++;
+    if (rowIn(i) === 14 && Z(i) < 0 && Math.abs(X(i)) < 40) row14Main++;
+  }
+  if (row7 || row14North) fails.push(`seats on a walkway (${row7} in row 7, ${row14North} in row 14 opposite the main stand)`);
+  if (row14Main < 100) fails.push(`the main stand has no 15th row (${row14Main})`);
+
+  // Vomitories: nothing in the first two rows of the middle band where one
+  // comes up, and seats again in the row behind.
+  for (const st of [-45, -22.3, 22.3, 45]) {
+    const hole = (row: number): boolean => !northRow(0, row).some((i) => Math.abs(X(i) - xAt(0, st, row)) < 0.6);
+    if (!hole(8) || !hole(9)) fails.push(`no vomitory at station ${st}`);
+    if (hole(10)) fails.push(`the vomitory at station ${st} runs past its rows`);
+  }
+
+  // Every block is one tier, one piece; the blocks are numbered 0..n-1; each
+  // has its own label.
+  const sections = new Map<number, number[]>();
+  for (let i = 0; i < m.count; i++) (sections.get(m.sectionOf[i]) ?? sections.set(m.sectionOf[i], []).get(m.sectionOf[i])!).push(i);
+  const n = sections.size;
+  for (let k = 0; k < n; k++) if (!sections.has(k)) fails.push(`block ${k} is missing from the numbering`);
+  for (const [id, seats] of sections) {
+    if (new Set(seats.map((i) => m.tierOf[i])).size !== 1) fails.push(`block ${id} spans tiers`);
+    const us = [...new Set(seats.map((i) => m.uv[i * 2]))].sort((p, q) => p - q);
+    let widest = 0;
+    for (let k = 0; k < us.length; k++) widest = Math.max(widest, (k + 1 < us.length ? us[k + 1] : us[0] + 1) - us[k]);
+    if (1 - widest > 0.08) fails.push(`block ${id} is in more than one place round the bowl (it spans ${(1 - widest).toFixed(3)} of it)`);
+  }
+  const label = sectionLabeller(m, t);
+  const labels = [...sections.keys()].map(label);
+  if (new Set(labels).size !== labels.length) fails.push('two blocks have the same label');
+  if (!labels.includes('North 1') || !labels.includes('East upper 1')) fails.push(`labels are not by stand (${labels.slice(0, 4).join(', ')})`);
+  if (cat.sectionCount(t) !== n) fails.push(`the panel would say ${cat.sectionCount(t)} sections, the map has ${n}`);
+
+  // A fill still runs across a stair and across a walkway inside the tier,
+  // as it always ran across an aisle; it never runs onto the next tier.
+  const lastFront = northRow(0, 6, 15).filter((i) => Math.abs(X(i) - 10) < 0.6)[0];
+  const up = m.neighbors[lastFront * 4 + 3];
+  if (up < 0 || rowIn(up) !== 8) fails.push('a fill stops at the walkway between the front and middle bands');
+  // (Along a row u runs from east to west, so on this stand +x is to the seat's left.)
+  const besideStair = northRow(0, 0).filter((i) => X(i) < 22 && X(i) > 20.5).pop()!;
+  const over = m.neighbors[besideStair * 4];
+  if (over < 0 || X(over) < 22) fails.push('a fill stops at a stairway');
+  let crossTier = 0;
+  for (let i = 0; i < m.count; i++) for (const d of [2, 3]) { const j = m.neighbors[i * 4 + d]; if (j >= 0 && m.tierOf[j] !== m.tierOf[i]) crossTier++; }
+  if (crossTier) fails.push(`${crossTier} neighbours across a tier`);
+  // Laid out symmetrically, so nearly every seat still has its mirror.
+  let mirrored = 0;
+  for (let i = 0; i < m.count; i++) if (m.mirrorOf[i] >= 0) mirrored++;
+  if (mirrored / m.count < 0.9) fails.push(`only ${((100 * mirrored) / m.count).toFixed(1)}% of seats have a mirror`);
+
+  // The openings the renderer draws: one per opening, each a real quad up the rake.
+  const quads = bl.openingQuads(t);
+  const declared = t.tiers.reduce((k, tr) => k + (tr.blocks?.openings ?? []).reduce((q, o) => q + o.at.length * (o.mirror ? 2 : 1) - (o.mirror && o.at.includes(0) ? 1 : 0), 0), 0);
+  if (quads.length !== declared) fails.push(`${quads.length} openings drawn, ${declared} declared`);
+  if (quads.some((q) => q.corners.length !== 4 || !(q.backY > q.frontY))) fails.push('an opening is not a quad up the rake');
+
+  // Positions are what the template says, on a plain test bowl too: stations
+  // on the north side are x on its front row, square to the curve.
+  const plain: Parameters<typeof generateSeatMap>[0] = {
+    id: 'blocks-probe', name: 'probe', version: 1, plan: { a: 80, b: 50, exponent: 3 }, evenRows: true,
+    tiers: [{ rows: 10, rowDepth: 0.8, rakeDeg: 25, baseElevation: 1, baseOffset: 0, seatPitch: 0.5, blocks: { width: 1.2, aisles: [{ side: 'north', at: [10, 30], mirror: true }, { side: 'east', at: [0] }] } }],
+    aisles: { count: 20, widthMeters: 1.2 }, sectionsPerTier: 20,
+  };
+  const pm = generateSeatMap(plain);
+  const probeGaps: number[] = [];
+  const pr: number[] = [];
+  for (let i = 0; i < pm.count; i++) if (pm.rowOf[i] === 0 && pm.pos3[i * 3 + 2] > 40 && Math.abs(pm.pos3[i * 3]) < 40) pr.push(i);
+  pr.sort((p, q) => pm.pos3[p * 3] - pm.pos3[q * 3]);
+  for (let k = 1; k < pr.length; k++) if (pm.pos3[pr[k] * 3] - pm.pos3[pr[k - 1] * 3] > 0.9) probeGaps.push((pm.pos3[pr[k] * 3] + pm.pos3[pr[k - 1] * 3]) / 2);
+  if (probeGaps.length !== 4 || [-30, -10, 10, 30].some((x) => !near(probeGaps, x, 0.3))) fails.push(`probe stairs at ${probeGaps.map((x) => x.toFixed(2)).join(', ')}, not ±10 and ±30`);
+  if (new Set(pm.sectionOf).size !== 5) fails.push(`the probe bowl has ${new Set(pm.sectionOf).size} blocks, not 5`);
+
+  // A seat plan's blocks become stations: 20 then 28 seats from a stairway at
+  // 0 put the next two stairs 11.2 and 26.4 m along (seats, plus a stair each).
+  const fromPlan = bl.stationsFromSeats(0, [20, 28], 0.5, 1.2);
+  if (fromPlan.join() !== '11.2,26.4') fails.push(`stationsFromSeats gave ${fromPlan.join(', ')}`);
+  if (bl.stationsFromSeats(0, [20], 0.5, 1.2, -1).join() !== '-11.2') fails.push('stationsFromSeats ignores its direction');
+
+  // A layout from a user is held to bounds before the server places seats by it.
+  const json = (): Record<string, unknown> => JSON.parse(JSON.stringify(t)) as Record<string, unknown>;
+  const tiersOf = (o: Record<string, unknown>): Record<string, Record<string, unknown[]>>[] => o.tiers as Record<string, Record<string, unknown[]>>[];
+  if (!isValidTemplate(json())) fails.push('Al-Faisal is not a valid template');
+  const bad: [string, (o: Record<string, unknown>) => void][] = [
+    ['too many stairs', (o) => ((tiersOf(o)[0].blocks.aisles[0] as Record<string, unknown>).at = Array(401).fill(1))],
+    ['no evenRows', (o) => delete o.evenRows],
+    ['a walkway off the tier', (o) => ((tiersOf(o)[0].blocks.walkways[0] as Record<string, unknown>).row = 99)],
+    ['a station that is not a number', (o) => ((tiersOf(o)[0].blocks.aisles[0] as Record<string, unknown>).at = [NaN])],
+    ['an opening with no width', (o) => delete (tiersOf(o)[0].blocks.openings[0] as Record<string, unknown>).width],
+    ['blocks on a straight tier', (o) => ((tiersOf(o)[0] as Record<string, unknown>).straight = true)],
+  ];
+  for (const [what, spoil] of bad) {
+    const o = json();
+    spoil(o);
+    if (isValidTemplate(o)) fails.push(`a template with ${what} is accepted`);
+  }
+
+  console.log(`real blocks: Al-Faisal ${m.count} seats in ${n} blocks | front band stairs ${frontStairs.map((x) => x.toFixed(1)).join(' ')} | middle ${middle.map((x) => x.toFixed(1)).join(' ')} | upper every ${upperSteps.map((d) => d.toFixed(1)).join('/')} m | ${quads.length} openings`);
+  if (fails.length) throw new Error(`real blocks: ${fails.join('; ')}`);
 })();
 
 // --- The Premier League's grounds (2026-27) ---------------------------------

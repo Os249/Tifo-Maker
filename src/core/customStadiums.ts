@@ -14,6 +14,7 @@
 
 import type { StadiumTemplate } from './types';
 import { LIMITS, inRange } from './templateLimits';
+import { validBlocks } from './blocks';
 import { registerCustomStadiums, type StadiumEntry, type StadiumType } from './stadiumCatalog';
 import { templateById } from './stadiumCatalog';
 
@@ -46,6 +47,9 @@ export function isValidTemplate(t: unknown): t is StadiumTemplate {
     if (!num(tier.rakeDeg) || !inRange(tier.rakeDeg, LIMITS.rakeDeg)) return false;
     if (!num(tier.baseElevation) || !num(tier.baseOffset)) return false;
     if (!num(tier.seatPitch) || !inRange(tier.seatPitch, LIMITS.seatPitch)) return false;
+    // A real block layout reaches the server's seat generator, so it is held
+    // to bounds (core/blocks), on an even-rows ring tier as the generator needs.
+    if (tier.blocks !== undefined && (o.evenRows !== true || tier.straight || !validBlocks(tier.blocks, tier.rows))) return false;
   }
   const aisles = o.aisles as Record<string, unknown> | undefined;
   if (!aisles || !num(aisles.count) || !inRange(aisles.count, LIMITS.aisleCount) || !num(aisles.widthMeters) || !inRange(aisles.widthMeters, LIMITS.aisleWidth)) return false;

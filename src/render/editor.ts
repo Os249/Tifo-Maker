@@ -69,6 +69,12 @@ export class Editor {
   onEditWhileRevealed: (() => void) | null = null;
   /** Aisle count for the section-guide overlay (template-dependent). */
   aisleCount = 28;
+  /**
+   * The ground is laid out in its real blocks (TierSpec.blocks): draw each
+   * block's edges where they really are, row by row, instead of one even
+   * guide per aisle — which on such a ground would cross the blocks.
+   */
+  blockGuides = false;
   /** Fired on hover with the seat index under the cursor (-1 if none). */
   onHoverSeat: ((seat: number) => void) | null = null;
   /**
@@ -450,12 +456,33 @@ export class Editor {
     g.visible = visible;
     if (!visible) return;
     const { minY, maxY } = this.map.bounds;
-    // Section boundaries: one vertical guide per aisle u position.
-    for (let i = 0; i < this.aisleCount; i++) {
-      const x = (i / this.aisleCount) * 4000;
-      g.moveTo(x, minY - 8).lineTo(x, maxY + 8);
+    if (this.blockGuides) {
+      // Block edges, row by row: a tick across each row wherever the seat
+      // beside it is in another block. Rows run contiguous and left to right
+      // in u, so the edges are where sectionOf changes along the row.
+      const m = this.map;
+      const half = 4; // half a row (EDITOR_UNITS.rowPx / 2)
+      let i = 0;
+      while (i < m.count) {
+        let j = i;
+        while (j + 1 < m.count && m.rowOf[j + 1] === m.rowOf[i]) j++;
+        const y = m.xy[i * 2 + 1];
+        for (let k = i; k < j; k++) {
+          if (m.sectionOf[k] === m.sectionOf[k + 1]) continue;
+          const x = (m.xy[k * 2] + m.xy[(k + 1) * 2]) / 2;
+          g.moveTo(x, y - half).lineTo(x, y + half);
+        }
+        i = j + 1;
+      }
+      g.stroke({ color: 0xffffff, alpha: 0.28, width: 1, pixelLine: true });
+    } else {
+      // Section boundaries: one vertical guide per aisle u position.
+      for (let i = 0; i < this.aisleCount; i++) {
+        const x = (i / this.aisleCount) * 4000;
+        g.moveTo(x, minY - 8).lineTo(x, maxY + 8);
+      }
+      g.stroke({ color: 0xffffff, alpha: 0.1, width: 1, pixelLine: true });
     }
-    g.stroke({ color: 0xffffff, alpha: 0.1, width: 1, pixelLine: true });
     // Tier walkway: find the y gap between tier 0 and tier 1.
     let tier0Top = Infinity;
     let tier1Bottom = -Infinity;

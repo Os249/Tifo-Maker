@@ -655,6 +655,81 @@ export interface TierSpec {
    * when one is finished and seated; that is a new seat map, and a new id.
    */
   building?: boolean;
+  /**
+   * The tier's real blocks: where its stairways are, where its walkways and
+   * vomitories cut through it, and so which seats make up each block.
+   * Omitted: the template-wide `aisles`, evenly spaced, and `sectionsPerTier`
+   * equal slices — which is what every ground had before, and what no real
+   * ground looks like. A real stand's stairs are laid out stand by stand, a
+   * tier above has its own, and a front band, a walkway and a band behind it
+   * each have theirs (see core/blocks.ts).
+   *
+   * Needs `evenRows`, a ring tier (not `straight`), and moves seats — so a
+   * ground that gains it is a new template id.
+   */
+  blocks?: TierBlocks;
+}
+
+/**
+ * A real tier's stairways, walkways and openings. Every position is a
+ * STATION: metres along the tier's front row from the centre line of one side
+ * of the bowl, signed the way that side's along-axis runs (x for north and
+ * south, z for the ends). It is the distance a person would pace out along the
+ * front row, so it is what a photo or a seat plan gives you; a station past
+ * the end of a side simply carries on round the curve.
+ *
+ * Each line runs square to the plan curve from its station, out through every
+ * row of the tier, exactly as a radial stairway does — so in the corners the
+ * blocks open out into wedges.
+ */
+export interface TierBlocks {
+  /** The stairways. A block is the seats between two of them. */
+  aisles: AisleRun[];
+  /** Stairway width, metres. Default: the template's `aisles.widthMeters`. */
+  width?: number;
+  /** Lateral gangways: a row with no seats across the tier, splitting it into a front and a back band. */
+  walkways?: Walkway[];
+  /** Openings through the seats: vomitories, the players' tunnel, a gate down to the pitch. */
+  openings?: SeatOpening[];
+}
+
+/** Stairways on one side of the bowl (TierBlocks.aisles). */
+export interface AisleRun {
+  side: StandSide;
+  /** Stations (see TierBlocks). */
+  at: number[];
+  /** Also at minus each station: a stand laid out symmetrically about its centre line. */
+  mirror?: boolean;
+  /** Only in these rows of the tier, [first, last], 0 = its front row: the stairs of one band. Default: every row. */
+  rows?: [number, number];
+  /** Width, metres. Default: TierBlocks.width. */
+  width?: number;
+}
+
+/** A row of a tier with no seats in it: a lateral gangway (TierBlocks.walkways). */
+export interface Walkway {
+  /** The row (0 = the tier's front row). */
+  row: number;
+  /** Only along part of the bowl: one side, between two stations. Omitted: all the way round. */
+  side?: StandSide;
+  from?: number;
+  to?: number;
+}
+
+/**
+ * An opening through a tier's seats, square to the plan curve like a stairway
+ * but wider and only some rows deep: a vomitory coming up into the front of a
+ * band, the players' tunnel, a gate down to the pitch.
+ */
+export interface SeatOpening {
+  side: StandSide;
+  at: number[];
+  mirror?: boolean;
+  /** Clear width along the row, metres. */
+  width: number;
+  /** The rows it takes, [first, last], 0 = the tier's front row. */
+  rows: [number, number];
+  kind?: 'vomitory' | 'tunnel' | 'gate';
 }
 
 /** A stretch of one side of a ring tier with no seats (TierSpec.omit). */

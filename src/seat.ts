@@ -4,6 +4,7 @@ import { initLang, t } from './ui/i18n';
 import { generateSeatMapAsync } from './workers/client';
 import { TEMPLATES } from './core/template';
 import { templateById } from './core/stadiumCatalog';
+import { hasBlocks } from './core/blocks';
 import { DesignStore } from './core/design';
 import { loadDesign, fetchDesignTemplate } from './net/api';
 import {
@@ -11,7 +12,7 @@ import {
   listRows,
   seatCountInRow,
   resolveSeat,
-  sectionLabel,
+  sectionLabeller,
   type SeatChoice,
 } from './core/seatLocator';
 import type { SeatMap } from './core/types';
@@ -64,9 +65,10 @@ async function main(): Promise<void> {
   let map: SeatMap;
   let store: DesignStore;
   let title = 'the display';
+  let tpl: ReturnType<typeof templateById> = undefined;
   try {
     const info = await fetchDesignTemplate(id);
-    const tpl = templateById(info.templateId) ?? TEMPLATES[0];
+    tpl = templateById(info.templateId) ?? TEMPLATES[0];
     map = await generateSeatMapAsync(tpl.id);
     store = new DesignStore(map, ['#262a33', '#1c5fd9']);
     const loaded = await loadDesign(store, id);
@@ -76,7 +78,12 @@ async function main(): Promise<void> {
     return;
   }
 
-  const sections = listSections(map);
+  const sectionLabel = sectionLabeller(map, tpl);
+  // A ground in its real blocks lists them in stand order, numbered along each
+  // stand ("East 1", "East 2", … "North 1"): what a fan scans the list for.
+  // Its ids run round the bowl, which is not that.
+  const ids = listSections(map);
+  const sections = tpl && hasBlocks(tpl) ? ids.sort((a, b) => sectionLabel(a).localeCompare(sectionLabel(b), 'en', { numeric: true })) : ids;
   const choice: Partial<SeatChoice> = {};
 
   renderPicker();
@@ -94,7 +101,7 @@ async function main(): Promise<void> {
           <span>${t('seat.section')}</span>
           <select id="sel-section">
             <option value="">${t('seat.sectionPick')}</option>
-            ${sections.map((s) => `<option value="${s}">${sectionLabel(s, sections.length)}</option>`).join('')}
+            ${sections.map((s) => `<option value="${s}">${sectionLabel(s)}</option>`).join('')}
           </select>
         </label>
         <label class="seat-field" id="row-field" hidden>
@@ -175,7 +182,7 @@ async function main(): Promise<void> {
 
   function renderCard(hex: string, isEmpty: boolean): void {
     const ink = contrastInk(hex);
-    const where = `${sectionLabel(choice.section!, sections.length)} · ${t('seat.rowLabel')} ${(document.getElementById('sel-row') as HTMLSelectElement | null)?.selectedOptions[0]?.textContent ?? ''} · ${t('seat.seatN')} ${choice.seatInRow}`;
+    const where = `${sectionLabel(choice.section!)} · ${t('seat.rowLabel')} ${(document.getElementById('sel-row') as HTMLSelectElement | null)?.selectedOptions[0]?.textContent ?? ''} · ${t('seat.seatN')} ${choice.seatInRow}`;
     app.innerHTML = `
       <div class="card-screen" style="background:${hex};color:${ink}">
         <button class="card-back" id="card-back" style="color:${ink};border-color:${ink}">${t('seat.changeSeat')}</button>

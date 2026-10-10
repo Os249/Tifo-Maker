@@ -27,6 +27,9 @@
     // (the Ittihad colours), so a shot can show a tifo in the ground.
     const palette = opts.design === 'stripes' ? ['#262a33', '#f9d616', '#16161a'] : ['#0b1d4d', '#ffffff', '#16a34a'];
     const store = new DesignStore(map, palette);
+    // opts.design 'blocks': every block a card colour, alternating green and
+    // white, so a shot shows where the ground's blocks are.
+    if (opts.design === 'blocks') store.transform((i) => (map.sectionOf[i] % 2 === 0 ? 2 : 1));
     if (opts.design === 'stripes') {
       store.transform((i) => {
         const u = map.uv[i * 2];
@@ -34,7 +37,7 @@
         return Math.floor(u * 120) % 2 === 0 ? 1 : 2;
       });
     }
-    sim = new MatchDaySimulator(HOST, map, store, template, new AssetStore(), { quality: opts.quality ?? 'high' });
+    sim = new MatchDaySimulator(HOST, map, store, template, new AssetStore(), { quality: opts.quality ?? 'high', glow: !!opts.glow });
     curTime = opts.time ?? 'night';
     sim.setTimeOfDay(curTime);
     sim.setFloodlights(true);

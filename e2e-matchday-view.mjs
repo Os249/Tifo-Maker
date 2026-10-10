@@ -1,9 +1,13 @@
 /**
- * Match Day: the floodlight brightness slider and the Hide tifo button.
+ * Match Day: the floodlight brightness slider, the Glow switch and the Hide
+ * tifo button.
  *
  * - Floodlight brightness (Atmosphere). The pitch at night gets measurably
  *   brighter from 10% to 100% to 150%. The slider rests while the floodlights
  *   are off, and keeps its level through a quality change.
+ * - Glow (Atmosphere). Off when Match Day opens, so white cards are not wrapped
+ *   in a halo. Turning it on visibly lights the frame up; off again, it goes.
+ *   Low and Medium have no post pass, so the switch rests there.
  * - Hide tifo (top bar, or T). On the Jewel of Jeddah, taking the tifo off
  *   the seats shows the ground's own orange tiers. The frame is measured, not
  *   the button's label. The design itself is untouched. Starting a show puts
@@ -36,7 +40,7 @@ const LS = (lang = 'en') => [
   { name: 'mds_sound_v2', value: JSON.stringify({ on: false }) },
 ];
 
-async function sim({ lang = 'en', w = 1440, h = 900, template = 'jewel-jeddah-60k', phone = false } = {}) {
+async function sim({ lang = 'en', w = 1440, h = 900, template = 'jewel-jeddah-60k', design = '', phone = false } = {}) {
   const ctx = await browser.newContext({
     viewport: { width: w, height: h },
     ...(phone ? { deviceScaleFactor: 2, isMobile: true, hasTouch: true } : {}),
@@ -45,7 +49,7 @@ async function sim({ lang = 'en', w = 1440, h = 900, template = 'jewel-jeddah-60
   const p = await ctx.newPage();
   const errs = [];
   p.on('pageerror', (e) => errs.push(e.message.slice(0, 160)));
-  await p.goto(`${B}/app?new=1&template=${template}&sim=1`, { waitUntil: 'networkidle', timeout: 120000 });
+  await p.goto(design ? `${B}/app?sim=1&design=${design}` : `${B}/app?new=1&template=${template}&sim=1`, { waitUntil: 'networkidle', timeout: 120000 });
   await p.waitForSelector('.mds-overlay canvas', { timeout: 120000 });
   await p.waitForTimeout(3500);
   return { ctx, p, errs };
@@ -163,6 +167,50 @@ console.log('\n— floodlight brightness —');
   await ctx.close();
 }
 
+console.log('\n— no glow unless asked for —');
+{
+  // A design with white cards in it: white is what the glow caught.
+  const gallery = await (await fetch(B + '/api/gallery?templates=1&limit=10')).json();
+  const white = gallery.find((g) => /white/i.test(g.title ?? '')) ?? gallery[0];
+  const { ctx, p, errs } = await sim({ design: white.id });
+  await openSec(p, 'atmosphere');
+  await p.waitForTimeout(300);
+  const ui = await p.evaluate(() => {
+    const c = document.querySelector('[data-k="glow"]');
+    return { row: c?.closest('.mds-checkrow')?.textContent.trim(), checked: c?.checked, disabled: c?.disabled, tip: c?.closest('.mds-checkrow')?.title || c?.title || '' };
+  });
+  check('Atmosphere has a Glow switch', ui.row === 'Glow', JSON.stringify(ui));
+  check('it is off when Match Day opens', ui.checked === false);
+  check('and live on High', ui.disabled === false);
+  const whole = [0, 0, 1, 1];
+  const glow = () => p.click('[data-k="glow"]');
+  // Software rendering can lag a frame or two behind a click: wait for it.
+  const settle = async (want) => {
+    let f = await frame(p, 1500);
+    for (let k = 0; k < 12 && !want(bright(f, whole)); k++) f = await frame(p, 1500);
+    return f;
+  };
+  const off = await frame(p, 3000);
+  save('glow-off', off);
+  await glow();
+  const on = await settle((b) => b > bright(off, whole) * 1.12);
+  save('glow-on', on);
+  check('turned on, the frame glows', bright(on, whole) > bright(off, whole) * 1.12, `${bright(off, whole).toFixed(1)} -> ${bright(on, whole).toFixed(1)}`);
+  await glow();
+  const off2 = await settle((b) => b < bright(on, whole) * 0.92);
+  check('and off again, the glow goes', Math.abs(bright(off2, whole) - bright(off, whole)) < bright(off, whole) * 0.05, `${bright(off, whole).toFixed(1)} vs ${bright(off2, whole).toFixed(1)}`);
+  await p.evaluate(() => {
+    const q = document.querySelector('.mds-bar select, .mds-panel-acts select');
+    q.value = 'medium';
+    q.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  await p.waitForSelector('.mds-overlay canvas', { timeout: 60000 });
+  await p.waitForTimeout(2000);
+  check('on Medium, which has no glow to give, the switch rests', await p.$eval('[data-k="glow"]', (c) => c.disabled));
+  check('no page errors', errs.length === 0, errs.join(' | '));
+  await ctx.close();
+}
+
 console.log('\n— Hide tifo, on the Jewel of Jeddah —');
 {
   const { ctx, p, errs } = await sim();
@@ -271,9 +319,11 @@ console.log('\n— in Arabic —');
   const t = await p.evaluate(() => ({
     btn: document.querySelector('[data-k="hide-tifo"]').textContent,
     label: document.querySelector('[data-k="flood-level"]').closest('.mds-field').querySelector('.mds-flabel span').textContent,
+    glow: document.querySelector('[data-k="glow"]').closest('.mds-checkrow').textContent.trim(),
   }));
   check('the button is إخفاء التيفو', t.btn === 'إخفاء التيفو', t.btn);
   check('the slider is سطوع الكشافات', t.label === 'سطوع الكشافات', t.label);
+  check('the glow switch is توهّج', t.glow === 'توهّج', t.glow);
   await p.click('[data-k="hide-tifo"]');
   check('and pressed it says إظهار التيفو', (await p.$eval('[data-k="hide-tifo"]', (b) => b.textContent)) === 'إظهار التيفو');
   await ctx.close();

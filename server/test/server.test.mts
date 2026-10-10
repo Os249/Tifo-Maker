@@ -2031,14 +2031,14 @@ if (process.env.DATABASE_URL) {
   const { templateById } = await import('../../src/core/stadiumCatalog');
   const { noTifoMask } = await import('../../src/core/venueDetails');
   const list = shippedTemplateInfo();
-  for (const id of ['jewel-jeddah-60k', 'community-jewel-jeddah-62k', 'community-alawwal-park-25k', 'kingdom-arena-26k', 'community-kingdom-arena-28k', 'alawwal-park-26k', 'shg-arena-14k', 'ego-stadium-13k', 'alfateh-stadium-12k', 'pmbf-stadium-22k', 'alfaisal-stadium-27k', 'buraidah-stadium-25k', 'abha-stadium-20k', 'tabuk-stadium-12k', 'alhazem-stadium-8k', 'majmaah-stadium-7k', 'pfbf-stadium-22k', DEFAULT_TEMPLATE.id]) {
+  for (const id of ['jewel-jeddah-60k', 'community-jewel-jeddah-62k', 'community-alawwal-park-25k', 'kingdom-arena-26k', 'community-kingdom-arena-28k', 'alawwal-park-26k', 'shg-arena-14k', 'ego-stadium-13k', 'alfateh-stadium-12k', 'pmbf-stadium-22k', 'alfaisal-jeddah-27k', 'alfaisal-stadium-27k', 'buraidah-stadium-25k', 'abha-stadium-20k', 'tabuk-stadium-12k', 'alhazem-stadium-8k', 'majmaah-stadium-7k', 'pfbf-stadium-22k', DEFAULT_TEMPLATE.id]) {
     assert.ok(list.some((t) => t.id === id), `the server knows ${id}`);
   }
   const auth = new MemoryAuthRepository();
   const designs = new MemoryDesignRepository((id) => auth.usernameOf(id));
   const app = await buildApp(designs, auth, list);
   const tok = await registerUser(app, 'jeddawi');
-  for (const id of ['jewel-jeddah-60k', 'community-jewel-jeddah-62k', 'kingdom-arena-26k', 'community-kingdom-arena-28k', 'community-alawwal-park-25k', 'alawwal-park-26k', 'shg-arena-14k', 'ego-stadium-13k', 'alfateh-stadium-12k', 'pmbf-stadium-22k', 'alfaisal-stadium-27k', 'buraidah-stadium-25k', 'abha-stadium-20k', 'tabuk-stadium-12k', 'alhazem-stadium-8k', 'majmaah-stadium-7k', 'pfbf-stadium-22k']) {
+  for (const id of ['jewel-jeddah-60k', 'community-jewel-jeddah-62k', 'kingdom-arena-26k', 'community-kingdom-arena-28k', 'community-alawwal-park-25k', 'alawwal-park-26k', 'shg-arena-14k', 'ego-stadium-13k', 'alfateh-stadium-12k', 'pmbf-stadium-22k', 'alfaisal-jeddah-27k', 'alfaisal-stadium-27k', 'buraidah-stadium-25k', 'abha-stadium-20k', 'tabuk-stadium-12k', 'alhazem-stadium-8k', 'majmaah-stadium-7k', 'pfbf-stadium-22k']) {
     const n = generateSeatMap(templateById(id)!).count;
     assert.equal(list.find((t) => t.id === id)!.seatCount, n, `${id}: the server's seat count is the generator's`);
     const cellsGzB64 = gzipSync(new Uint8Array(n).fill(1)).toString('base64');

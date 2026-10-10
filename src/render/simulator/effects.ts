@@ -31,9 +31,11 @@ function beamGradient(): THREE.Texture {
  *
  * Floodlight masts, a confetti burst, a pyro burst (the club's pitchside fire
  * jets — the fans' own smoke, flares and strobes are ./accessories.ts),
- * and optional bloom post-processing (ULTRA). Particle systems are THREE.Points
- * recycled on the CPU — cheap and self-contained. Bloom is wrapped in try/catch
- * so a failure degrades to a normal render rather than breaking the simulator.
+ * and the post-processing pass on HIGH and ULTRA: a colour grade, and a glow
+ * (bloom) that is off unless someone turns it on. Particle systems are
+ * THREE.Points recycled on the CPU — cheap and self-contained. The post pass is
+ * wrapped in try/catch so a failure degrades to a normal render rather than
+ * breaking the simulator.
  */
 
 export interface EffectsController {
@@ -44,6 +46,12 @@ export interface EffectsController {
    * together, so a dimmed rig looks dimmed rather than just casting less.
    */
   setFloodlightLevel(level: number): void;
+  /**
+   * The soft glow round the brightest things in the picture: white cards,
+   * the floodlights. Off by default (Osamah's call, October 2026): it read as
+   * the seats glowing. Only HIGH and ULTRA have the post pass it runs in.
+   */
+  setGlow(on: boolean): void;
   burstConfetti(): void;
   burstPyro(): void;
   update(dt: number): void;
@@ -140,7 +148,7 @@ export function buildEffects(
   scene: THREE.Scene,
   renderer: THREE.WebGLRenderer,
   camera: THREE.Camera,
-  opts: { bloom: boolean; template: StadiumTemplate },
+  opts: { post: boolean; glow: boolean; template: StadiumTemplate },
 ): EffectsController {
   const tex = dotTexture();
   const trash: { dispose(): void }[] = [tex];
@@ -260,17 +268,24 @@ export function buildEffects(
   scene.add(pyro.points);
   trash.push(pyro);
 
-  // ---- Bloom composer (optional, guarded) ----
+  // ---- Post pass: the grade, and the glow (optional, guarded) ----
   let composer: EffectComposer | null = null;
-  if (opts.bloom) {
+  let glowPass: UnrealBloomPass | null = null;
+  if (opts.post) {
     try {
       composer = new EffectComposer(renderer);
       composer.addPass(new RenderPass(scene, camera));
-      composer.addPass(new UnrealBloomPass(new THREE.Vector2(1, 1), 0.32, 0.6, 0.95));
+      // Built either way, so the switch is instant; a disabled pass is skipped.
+      // Its threshold sits just under a white card, so with it on every white
+      // card wore a halo.
+      glowPass = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.32, 0.6, 0.95);
+      glowPass.enabled = opts.glow;
+      composer.addPass(glowPass);
       composer.addPass(new OutputPass());
       composer.addPass(new ShaderPass(GRADE_SHADER));
     } catch {
       composer = null;
+      glowPass = null;
     }
   }
 
@@ -289,6 +304,9 @@ export function buildEffects(
       // Haze is light scattered by the air, so it tracks the output — a touch
       // less than linearly, or a 150% rig turns the bowl into fog.
       for (const b of beams) b.mat.opacity = b.base * Math.pow(floodLevel, 0.8);
+    },
+    setGlow(on) {
+      if (glowPass) glowPass.enabled = on;
     },
     burstConfetti() {
       for (let i = 0; i < confetti.n; i++) {
@@ -352,6 +370,7 @@ export function buildEffects(
           // a black frame, and stop trying the broken composer.
           composer.dispose();
           composer = null;
+          glowPass = null;
         }
       }
       r.render(s, cam);

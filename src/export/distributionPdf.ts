@@ -2,6 +2,8 @@ import { createWriteStream } from 'node:fs';
 import PDFDocument from 'pdfkit';
 import type { DesignState, SeatMap } from '../core/types';
 import { productionSummary, colorFamily } from '../core/production';
+import { templateById } from '../core/stadiumCatalog';
+import { hasBlocks, sectionInfo } from '../core/blocks';
 
 /**
  * Phase 4 export: the per-section distribution plan.
@@ -252,9 +254,16 @@ export async function renderDistributionPdf(
 
   // ---------- One page per section ----------
   const tierName = (t: number): string => (t === 0 ? 'Lower tier' : 'Upper tier');
+  // A ground in its real blocks numbers each along its own stand (core/blocks
+  // sectionInfo), and knows which stand a block astride the east end's seam is in.
+  const tpl = templateById(map.templateRef.id);
+  const blockInfo = tpl && hasBlocks(tpl) ? sectionInfo(map) : null;
+  const STAND_NAME = { north: 'North', east: 'East', south: 'South', west: 'West' } as const;
   for (const s of sections) {
     doc.addPage();
-    const within = s.id % 28;
+    const bi = blockInfo?.get(s.id);
+    if (bi) s.stand = STAND_NAME[bi.stand];
+    const within = bi ? bi.number - 1 : s.id % 28;
     doc
       .font('Helvetica-Bold')
       .fontSize(20)

@@ -323,6 +323,7 @@ const MDS_T: Record<string, { en: string; ar: string }> = {
   railBanners: { en: 'Rail banners', ar: 'لافتات الفواصل' },
   coverStairs: { en: 'Cover stairs', ar: 'تغطية الدرج' },
   wetPitch: { en: 'Wet pitch (reflections)', ar: 'أرضية مبلّلة (انعكاسات)' },
+  glow: { en: 'Glow', ar: 'توهّج' },
   'tod.day': { en: 'Day', ar: 'نهار' },
   'tod.dusk': { en: 'Dusk', ar: 'غروب' },
   'tod.night': { en: 'Night', ar: 'ليل' },
@@ -437,6 +438,7 @@ const MDS_T: Record<string, { en: string; ar: string }> = {
   'tip.banners': { en: 'Fill the dark walkway gap between tiers with your design', ar: 'عبّي الفراغ المعتم بين الطوابق بتصميمك' },
   'tip.stairs': { en: 'Also fill the aisles / stairs between sections (unorthodox, off by default)', ar: 'عبّي كمان الممرات/الدرج بين القطاعات (غير معتاد، مطفأ افتراضياً)' },
   'tip.wet': { en: 'Reflective wet-look pitch (heavier on GPU)', ar: 'أرضية مبلّلة عاكسة (أثقل على المعالج الرسومي)' },
+  'tip.glow': { en: 'A soft glow round white cards and the floodlights. Off by default; High and Ultra quality only', ar: 'هالة ضوء خفيفة حول الكروت البيضاء والكشافات. مطفأة افتراضياً، وللجودة العالية والفائقة بس' },
   'tip.confetti': { en: 'One burst of confetti over the whole pitch', ar: 'دفعة قصاصات وحدة فوق الملعب كله' },
   'tip.pyro': { en: 'One burst of the fire jets along the pitchside', ar: 'دفعة وحدة من نوافير النار على جانب الملعب' },
   'tip.bigBanner': { en: 'Big 3D banner that drapes the whole stand', ar: 'لافتة ثلاثية الأبعاد كبيرة تغطي المدرج كامل' },
@@ -670,6 +672,8 @@ interface SimState {
   tod: TimeOfDay;
   weather: Weather;
   wet: boolean;
+  /** The glow round white cards and the floodlights. Off every time the simulator opens. */
+  glow: boolean;
   /**
    * Accessories: every one starts Off, every time the simulator opens — a
    * still tifo should read still until someone asks for smoke. Not persisted.
@@ -793,6 +797,9 @@ export function openMatchDaySimulator(
     tod: 'dusk',
     weather: 'clear',
     wet: true,
+    // No glow (Osamah's call, October 2026): with it, every white card wore a
+    // halo and the stands looked lit from inside.
+    glow: false,
     // Always off when the simulator opens, every time — phone lights, flares,
     // smoke, all of it. A deliberate default, not a remembered preference:
     // nothing persists these.
@@ -933,6 +940,8 @@ export function openMatchDaySimulator(
   const bannersChk = chk(state.banners);
   const stairsChk = chk(state.stairs);
   const wetChk = chk(state.wet);
+  const glowChk = chk(state.glow);
+  glowChk.dataset.k = 'glow';
   const soundChk = chk(state.sound);
   const muteChk = chk(state.muted);
   const reactChk = chk(state.reactive);
@@ -961,6 +970,7 @@ export function openMatchDaySimulator(
     checkField(L('railBanners'), bannersChk),
     checkField(L('coverStairs'), stairsChk),
     checkField(L('wetPitch'), wetChk),
+    checkField(L('glow'), glowChk),
   );
   todSel.dataset.k = 'tod';
   weatherSel.dataset.k = 'weather';
@@ -1396,6 +1406,7 @@ export function openMatchDaySimulator(
     [bannersChk, 'tip.banners'],
     [stairsChk, 'tip.stairs'],
     [wetChk, 'tip.wet'],
+    [glowChk, 'tip.glow'],
     [accWhere, 'tip.acc.where'],
     ...ACCESSORY_KINDS.map((k) => [accRange[k], 'tip.acc.' + k] as [HTMLElement, string]),
     ...[...presetBtns].map(([p, b]) => [b, 'tip.preset.' + p] as [HTMLElement, string]),
@@ -1596,6 +1607,9 @@ export function openMatchDaySimulator(
     sim.setTimeOfDay(state.tod);
     sim.setWeather(state.weather);
     sim.setWetPitch(state.wet);
+    sim.setGlow(state.glow);
+    // Low and Medium have no post pass to glow in.
+    glowChk.disabled = !sim.canGlow;
     // A quality change builds a new bowl with nothing in it; put back what
     // the fans were holding, where they were holding it.
     sim.setAccessoryWhere(state.accWhere);
@@ -1914,6 +1928,10 @@ export function openMatchDaySimulator(
     state.wet = wetChk.checked;
     dbg('wet toggle ->', state.wet, '(turn Floodlights on + Night to see it best)');
     sim.setWetPitch(state.wet);
+  });
+  glowChk.addEventListener('change', () => {
+    state.glow = glowChk.checked;
+    sim.setGlow(state.glow);
   });
   // Sound. The checkbox IS the user gesture the browser demands, so the
   // AudioContext is created inside this handler and nowhere earlier — one

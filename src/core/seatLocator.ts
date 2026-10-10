@@ -17,7 +17,8 @@
  *   Seat     = 1-based position within that (section,row), left→right.
  */
 
-import type { SeatMap } from './types';
+import type { SeatMap, StadiumTemplate } from './types';
+import { hasBlocks, sectionInfo } from './blocks';
 
 export interface SeatChoice {
   section: number; // sectionOf value
@@ -34,6 +35,25 @@ export function sectionLabel(section: number, sectionCount: number): string {
   const stand = STANDS[Math.min(STANDS.length - 1, Math.floor(section / perStand))];
   const within = (section % perStand) + 1;
   return `${stand} ${within}`;
+}
+
+/**
+ * The labeller for a stadium's sections. A ground laid out in its real blocks
+ * (TierSpec.blocks) names each by the stand it is in and its number along
+ * that stand from the left as you face it — "North 5", "East upper 3" — so
+ * the label points at the right place however many blocks each stand has.
+ * Any other ground keeps the labels it has always had.
+ */
+export function sectionLabeller(map: SeatMap, template?: StadiumTemplate | null): (section: number) => string {
+  const count = listSections(map).length;
+  if (!template || !hasBlocks(template)) return (s) => sectionLabel(s, count);
+  const info = sectionInfo(map);
+  const stand = { north: 'North', east: 'East', south: 'South', west: 'West' } as const;
+  return (s) => {
+    const i = info.get(s);
+    if (!i) return sectionLabel(s, count);
+    return `${stand[i.stand]}${i.tier > 0 ? ' upper' : ''} ${i.number}`;
+  };
 }
 
 /** All section ids present in the map, ascending. */

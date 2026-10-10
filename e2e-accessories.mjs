@@ -7,7 +7,7 @@
  * notice: the section is there and starts with everything off; every slider
  * says its level in words; each step up puts MORE fans in the stand holding
  * one; the presets set every slider; Where moves them; the picture actually
- * changes (a stand of red flares at night makes the frame redder); a quality
+ * changes (a stand of red flares at night turns that stand red); a quality
  * change keeps them; a show's cue moves the slider it owns; and it all reads in
  * Arabic and fits a phone.
  *
@@ -96,24 +96,28 @@ const choose = (p, key, value) => p.evaluate(({ k, v }) => {
 }, { k: key, v: value });
 
 /**
- * How far red (or green) leads the other two channels, averaged over the
- * frame. A tone-mapped flare glow is a pinkish red, not a pure one, so this
- * measures the lead rather than counting "pure red" pixels.
+ * How far red (or green) leads the other two channels, averaged over a box of
+ * the frame (fractions of its size; the whole frame by default). A tone-mapped
+ * flare is a pinkish red, not a pure one, so this measures the lead rather than
+ * counting "pure red" pixels.
  */
-async function redness(p) {
+async function redness(p, [x0, y0, x1, y1] = [0, 0, 1, 1]) {
   // Straight off the canvas (it keeps its drawing buffer for snapshots): an
   // element screenshot waits for a "stable" element, and under software
   // rendering a canvas that redraws every frame never is.
   const url = await p.$eval('.mds-overlay canvas', (c) => c.toDataURL('image/png'));
   const buf = Buffer.from(url.split(',')[1], 'base64');
   const png = PNG.sync.read(buf);
-  let red = 0, green = 0;
-  for (let i = 0; i < png.data.length; i += 4) {
-    const r = png.data[i], g = png.data[i + 1], b = png.data[i + 2];
-    red += Math.max(0, r - Math.max(g, b));
-    green += Math.max(0, g - Math.max(r, b));
+  let red = 0, green = 0, n = 0;
+  for (let y = Math.floor(y0 * png.height); y < y1 * png.height; y++) {
+    for (let x = Math.floor(x0 * png.width); x < x1 * png.width; x++) {
+      const i = (y * png.width + x) * 4;
+      const r = png.data[i], g = png.data[i + 1], b = png.data[i + 2];
+      red += Math.max(0, r - Math.max(g, b));
+      green += Math.max(0, g - Math.max(r, b));
+      n++;
+    }
   }
-  const n = png.width * png.height;
   return { red: red / n, green: green / n, buf };
 }
 
@@ -214,7 +218,10 @@ console.log('\n— the section, in English, on a desktop —');
   await choose(p, 'acc-where', 'north');
   await setLevel(p, 'flares', 0);
 
-  // The picture: a stand of red flares at night makes the bowl redder.
+  // The picture: a stand of red flares at night turns that stand red. Measured
+  // on the stand itself (the default camera faces it): with no glow, a flare's
+  // light stays near the flare instead of washing over the whole frame.
+  const STAND = [0.1, 0.2, 0.9, 0.45];
   await openSec(p, 'atmosphere');
   await p.evaluate(() => {
     const s = document.querySelector('.mds-section[data-sec="atmosphere"] select');
@@ -223,17 +230,17 @@ console.log('\n— the section, in English, on a desktop —');
   });
   await openSec(p, 'accessories');
   await p.waitForTimeout(1500);
-  const dark = await redness(p);
+  const dark = await redness(p, STAND);
   await setLevel(p, 'flares', 4);
   await p.waitForTimeout(3500);
-  const lit = await redness(p);
-  check('a stand of red flares turns the picture red', lit.red > dark.red * 2.5, `red lead ${dark.red.toFixed(2)} -> ${lit.red.toFixed(2)}`);
+  const lit = await redness(p, STAND);
+  check('a stand of red flares turns it red', lit.red > dark.red * 2.5, `red lead ${dark.red.toFixed(2)} -> ${lit.red.toFixed(2)}`);
   await choose(p, 'acc-flare-colour', 'green');
   await p.waitForTimeout(2500);
-  const green = await redness(p);
+  const green = await redness(p, STAND);
   // Green is dimmed to red's apparent brightness (it carries three times the
   // luminance), so it leads by less in raw channel terms — but it must lead.
-  check('and green flares turn it green instead', green.red < lit.red * 0.4 && green.green > dark.green * 1.8,
+  check('and green flares turn it green instead', green.red < lit.red * 0.4 && green.green > Math.max(dark.green * 1.8, 2),
     `red lead ${lit.red.toFixed(2)} -> ${green.red.toFixed(2)}, green lead ${dark.green.toFixed(2)} -> ${green.green.toFixed(2)}`);
   if (SHOTS) {
     writeFileSync(`${SHOTS}/night-off.png`, dark.buf);

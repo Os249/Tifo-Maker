@@ -10,7 +10,9 @@
  * ground; a JSON file of { name, position, target, fov, time } overrides them
  * (to match a particular photograph). APP_SHOTS=1 renders the app's own
  * camera shots instead, by day or at APP_TIME (day | dusk | night), on a
- * wet pitch (the app's default) with APP_WET=1.
+ * wet pitch (the app's default) with APP_WET=1. SHOT_DESIGN=blocks paints
+ * every block a card colour in turn; SHOT_CROWD=empty empties the stands;
+ * SHOT_GLOW=1 turns the glow on (it is off by default, as in the app).
  */
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
@@ -44,7 +46,7 @@ await page.goto('http://127.0.0.1:5234/scripts/jewel-shots.html', { waitUntil: '
 await page.waitForFunction(() => (window as never as { __ready?: boolean }).__ready === true, { timeout: 240000 });
 mkdirSync(OUT, { recursive: true });
 
-const opened = await page.evaluate((i) => (window as never as { __open: (a: string, b: unknown) => Promise<unknown> }).__open(i, { time: 'day', screen: 'stadium' }), id);
+const opened = await page.evaluate(([i, design, crowd, glow]) => (window as never as { __open: (a: string, b: unknown) => Promise<unknown> }).__open(i, { time: 'day', screen: 'stadium', ...(design ? { design } : {}), ...(crowd ? { crowd } : {}), glow: glow === '1' }), [id, process.env.SHOT_DESIGN ?? '', process.env.SHOT_CROWD ?? '', process.env.SHOT_GLOW ?? ''] as const);
 const { ax, bz, ty } = (await page.evaluate(() => (window as never as { __views: () => unknown }).__views())) as { ax: number; bz: number; ty: number };
 console.log(id, opened, { ax: ax.toFixed(1), bz: bz.toFixed(1), ty: ty.toFixed(1) });
 

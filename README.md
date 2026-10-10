@@ -36,6 +36,20 @@ Three tiers keyed to capability, not just width:
 
 ## Recent additions
 
+- **Real block layouts** — a tier can carry its real stairways, walkways and
+  openings (`TierSpec.blocks`, `src/core/blocks.ts`) instead of the template-wide
+  even aisles: stairs placed stand by stand as metres along the front row, a
+  band behind a walkway with stairs of its own, vomitories and the players'
+  tunnel cut through the seats. Each block between two stairs is a section, so
+  section fill, the section strip, the seat locator and the steward sheets all
+  work in real blocks, named by stand ("North 5", "East upper 3"). Prince
+  Abdullah Al-Faisal (`alfaisal-jeddah-27k`) is the first ground built this way;
+  its earlier even layout stays as a legacy ground for designs saved on it.
+- **No glow by default in Match Day** — the bloom pass on High and Ultra put a
+  halo round every white card and washed the stands out. It is now off when
+  Match Day opens; Atmosphere → Glow turns it back on (High and Ultra only).
+  The colour grade on those tiers is unchanged.
+
 - **Contextual properties panel** — the right sidebar now renders only the
   sections relevant to the active tool (Brush → brush+colors+stadium; Select →
   object+selection+reveal; Text → colors; etc.), with History/Save/Production
@@ -348,6 +362,9 @@ src/
     template.ts    default 60k bowl + club palette presets
     seatmap.ts     deterministic generator: superellipse → offset rows → arc-length
                    seats → aisles/walkways → sections → neighbor graph
+    planCurve.ts   the plan curve and its offset rows, sampled with normals
+    blocks.ts      real block layouts: stairs, walkways and openings as lines square
+                   to the plan curve; block labels by stand
     spatialHash.ts O(1) pointer→seat resolution (disc + nearest queries)
     design.ts      DesignStore: cells buffer, stroke recording, sparse-diff undo/redo
     tools.ts       brush stamp/segment, BFS flood fill over the neighbor graph

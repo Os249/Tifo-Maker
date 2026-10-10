@@ -38,6 +38,8 @@ import {
 import { mountStadiumPanel } from './stadiumPanel';
 import { openShareModal } from './shareModal';
 import { EDITOR_UNITS } from '../core/seatmap';
+import { templateById } from '../core/stadiumCatalog';
+import { hasBlocks, sectionInfo } from '../core/blocks';
 import { drawSymbol, SHAPE_ASPECT } from '../core/symbols';
 import type { Preview3D } from '../render/preview3d';
 import {
@@ -2317,9 +2319,19 @@ export function mountToolbar(
   // Live cursor coordinates in stadium language (stand · section · row · seat).
   const coords = $('#coords');
   const STANDS = ['East', 'North', 'West', 'South'];
+  // A ground in its real blocks says which block you are over, numbered along
+  // its stand as the seat locator and the steward's sheets number it.
+  const tplHere = templateById(map.templateRef.id);
+  const blockInfo = tplHere && hasBlocks(tplHere) ? sectionInfo(map) : null;
+  const BLOCK_STAND = { north: 'North', east: 'East', south: 'South', west: 'West' } as const;
   editor.onHoverSeat = (seat) => {
     if (seat < 0) {
       coords.textContent = '-';
+      return;
+    }
+    const bi = blockInfo?.get(map.sectionOf[seat]);
+    if (bi) {
+      coords.textContent = `${BLOCK_STAND[bi.stand]}${bi.tier > 0 ? ' upper' : ''} · Block ${bi.number} · Row ${map.rowOf[seat] + 1} · Seat ${seat}`;
       return;
     }
     const u = map.uv[seat * 2];
@@ -2830,6 +2842,13 @@ export function mountToolbar(
     const stands: Record<string, { id: number; seats: number[]; u: number }[]> = { North: [], East: [], South: [], West: [] };
     const standName = (u: number): string => ['East', 'North', 'West', 'South'][Math.floor(((u + 0.125) % 1) * 4)];
     for (const [id, seats] of bySection) {
+      // A ground in its real blocks: the stand and number every other label
+      // gives the block (lower tier first, then upper, left to right).
+      const bi = blockInfo?.get(id);
+      if (bi) {
+        stands[BLOCK_STAND[bi.stand]].push({ id, seats, u: bi.tier * 1000 + bi.number });
+        continue;
+      }
       let uSum = 0;
       for (const i of seats) uSum += map.uv[i * 2];
       const u = uSum / seats.length;
@@ -2849,11 +2868,14 @@ export function mountToolbar(
       group.forEach((sec, n) => {
         const c = document.createElement('button');
         c.className = 'section-cell';
-        c.textContent = String(n + 1);
-        c.title = `${tl(stand)} ${i18nT('ed.section')} ${n + 1} · ${sec.seats.length.toLocaleString()} ${i18nT('ed.seats')}`;
+        // A real block keeps its own number; an upper-tier one is marked U.
+        const bi = blockInfo?.get(sec.id);
+        const num = bi ? `${bi.tier > 0 ? 'U' : ''}${bi.number}` : String(n + 1);
+        c.textContent = num;
+        c.title = `${tl(stand)} ${i18nT('ed.section')} ${num} · ${sec.seats.length.toLocaleString()} ${i18nT('ed.seats')}`;
         c.addEventListener('click', () => {
           editor.zoomToSeats(sec.seats);
-          message.textContent = `${tl(stand)} ${i18nT('ed.section')} ${n + 1}: ${sec.seats.length.toLocaleString()} ${i18nT('ed.seats')}`;
+          message.textContent = `${tl(stand)} ${i18nT('ed.section')} ${num}: ${sec.seats.length.toLocaleString()} ${i18nT('ed.seats')}`;
         });
         cells.appendChild(c);
       });

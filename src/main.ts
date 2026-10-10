@@ -433,6 +433,7 @@ async function main(): Promise<void> {
   const [{ Editor }, { mountToolbar }] = await editorChunks!;
   const editor = await Editor.create(host, map, store);
   editor.aisleCount = template.aisles.count;
+  editor.blockGuides = template.tiers.some((t) => !!t.blocks);
   editor.drawGrid(true);
   // A real ground's premium zones and vehicle lanes, marked on the flat view.
   if (template.details) {

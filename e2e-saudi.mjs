@@ -5,6 +5,9 @@
  *     names it; each is offered once, in English and in Arabic
  *   - a design still on the earlier Al-Awwal Park opens exactly as it was
  *     saved, is told a newer one exists, and moves across only when asked
+ *   - so does one on the earlier Al-Faisal, told the new one has the real
+ *     blocks; on the new one the blocks are named by stand, as the hover,
+ *     the section strip and the panel's count say
  *   - Match Day opens on every ground, every camera renders a picture (not a
  *     blank frame), by day and at night, with no WebGL or page errors
  *
@@ -25,7 +28,7 @@ const GROUNDS = [
   ['ego-stadium-13k', 12740, 'EGO Stadium (Dammam)', 'ملعب إيجو (الدمام)'],
   ['alfateh-stadium-12k', 11836, 'Al-Fateh Stadium (Al-Ahsa)', 'ملعب نادي الفتح (الأحساء)'],
   ['pmbf-stadium-22k', 21920, 'Prince Mohamed bin Fahd Stadium (Dammam)', 'استاد الأمير محمد بن فهد (الدمام)'],
-  ['alfaisal-stadium-27k', 26606, 'Prince Abdullah Al-Faisal Stadium (Jeddah)', 'ملعب الأمير عبدالله الفيصل (جدة)'],
+  ['alfaisal-jeddah-27k', 26873, 'Prince Abdullah Al-Faisal Stadium (Jeddah)', 'ملعب الأمير عبدالله الفيصل (جدة)'],
   ['buraidah-stadium-25k', 24316, 'King Abdullah Sport City Stadium (Buraidah)', 'ملعب مدينة الملك عبدالله الرياضية (بريدة)'],
   ['abha-stadium-20k', 16430, 'Prince Sultan Sport City Stadium (Abha)', 'ملعب مدينة الأمير سلطان الرياضية (أبها)'],
   ['tabuk-stadium-12k', 11992, 'King Khalid Sport City Stadium (Tabuk)', 'ملعب مدينة الملك خالد الرياضية (تبوك)'],
@@ -160,6 +163,69 @@ if (!only || 'alawwal'.includes(only)) {
   }
   check('no page errors', errs.length === 0, errs.join(' | '));
   await ctx.close();
+}
+
+// ---------------------------------------------------------------------------
+// Prince Abdullah Al-Faisal in its real blocks (TierSpec.blocks), and the
+// earlier layout with evenly spaced stairs that designs saved on it keep.
+const FAISAL = GROUNDS.find(([id]) => id === 'alfaisal-jeddah-27k');
+if (!only || 'alfaisal'.includes(only) || only.includes('faisal')) {
+  console.log('\n— Al-Faisal in its real blocks —');
+  {
+    const { ctx, p, errs } = await open(`/app?new=1&template=${FAISAL[0]}`);
+    await waitReady(p);
+    await p.waitForTimeout(800);
+    const groups = await p.$$eval('#section-nav .section-stand', (gs) => gs.map((g) => ({ stand: g.querySelector('.section-stand-label')?.textContent || '', cells: [...g.querySelectorAll('.section-cell')].map((c) => c.textContent || '') })));
+    const count = groups.reduce((n, g) => n + g.cells.length, 0);
+    check('the section strip lists every block, by stand', groups.length === 4 && count > 140, groups.map((g) => `${g.stand} ${g.cells.length}`).join(', '));
+    check('upper-tier blocks are marked U, numbered from 1', groups.some((g) => g.cells.includes('U1')) && !groups.find((g) => /South/.test(g.stand))?.cells.some((c) => c.startsWith('U')));
+    check('lower-tier blocks are numbered 1, 2, 3… along each stand', groups.every((g) => g.cells.filter((c) => !c.startsWith('U')).every((c, k) => c === String(k + 1))));
+    const box = await p.$eval('#canvas-host', (e) => { const r = e.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height }; });
+    let hover = '';
+    for (const fx of [0.3, 0.35, 0.4, 0.45]) {
+      for (const fy of [0.45, 0.5, 0.55]) {
+        await p.mouse.move(box.x + box.w * fx, box.y + box.h * fy);
+        await p.waitForTimeout(120);
+        const t = await p.$eval('#coords', (e) => e.textContent || '');
+        if (/Block/.test(t)) { hover = t; break; }
+      }
+      if (hover) break;
+    }
+    check('hovering a seat names its stand and block', /^(North|East|South|West)( upper)? · Block \d+ · Row \d+/.test(hover), hover);
+    await p.click('#rail-stadium');
+    await p.waitForTimeout(600);
+    const info = await p.$eval('#stadium-info', (e) => e.textContent || '');
+    check('the panel counts the real blocks', /Sections\s*1[45]\d/.test(info), info.slice(0, 160));
+    await p.screenshot({ path: `${OUT}/alfaisal-blocks.png` });
+    check('no page errors', errs.length === 0, errs.join(' | '));
+    await ctx.close();
+  }
+  {
+    const OLD = 'alfaisal-stadium-27k';
+    const { ctx, p, errs } = await open(`/app?new=1&template=${OLD}`);
+    await waitReady(p);
+    await p.waitForTimeout(1200);
+    check('the earlier Al-Faisal opens on its own seat map, unchanged', seatsIn(await stat(p)) === 26606, await stat(p));
+    await p.click('#rail-stadium');
+    await p.waitForTimeout(800);
+    const info = await p.$eval('#stadium-info', (e) => e.textContent || '');
+    check('says it is the earlier layout', /earlier layout/.test(info), info.slice(0, 80));
+    check('and that the new one has the real blocks', /real blocks/.test(info) && /tunnel/.test(info));
+    const listed = await p.$$eval('#stadium-list > *', (rows) => rows.map((r) => r.textContent || ''));
+    check('the earlier Al-Faisal is not offered', !listed.some((t) => /earlier layout/.test(t) && /Al-Faisal/.test(t)));
+    const btn = await p.$('#stadium-info button.primary');
+    check('with a button to move it', !!btn);
+    if (btn) {
+      await btn.click();
+      await p.waitForSelector('#sw-continue', { timeout: 5000 });
+      await Promise.all([p.waitForNavigation({ timeout: 60000 }), p.click('#sw-continue')]);
+      await waitReady(p);
+      await p.waitForTimeout(1500);
+      check('it moves to Al-Faisal in its real blocks', seatsIn(await stat(p)) === FAISAL[1], p.url());
+    }
+    check('no page errors', errs.length === 0, errs.join(' | '));
+    await ctx.close();
+  }
 }
 
 // ---------------------------------------------------------------------------

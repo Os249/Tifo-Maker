@@ -332,7 +332,7 @@ export function mountStadiumPanel(deps: StadiumPanelDeps): void {
     if (newer) {
       const note = document.createElement('div');
       note.style.cssText = NOTE_CSS + 'margin-top:8px;color:var(--text-2);';
-      note.textContent = t('sp.superseded');
+      note.textContent = t(e.meta.supersededNote ?? 'sp.superseded');
       const go = document.createElement('button');
       go.className = 'primary';
       go.style.cssText = 'margin-top:6px;width:100%;';

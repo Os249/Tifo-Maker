@@ -5,6 +5,7 @@ import { buildFacade } from './facade';
 import { curveSampler, inLane, laneCut, laneLines, type LaneLine } from '../../core/venueDetails';
 import { gapCut, gapHalfPlanes, hasStands, spanGeometry, spanOn, SIDE_U, type SpanGeometry } from '../../core/standSpans';
 import type { StandGap } from '../../core/types';
+import { openingQuads } from '../../core/blocks';
 
 /**
  * Match Day Simulator — extruded stand architecture (Phase 1).
@@ -286,6 +287,41 @@ export function buildStands(template: StadiumTemplate, shadows: boolean): THREE.
     topBackY = backY;
     topTierDepth = backRadial - frontRadial;
   });
+
+  // A real tier's openings (TierBlocks.openings): the vomitories coming up
+  // into the front of a band, the players' tunnel, the gates down to the
+  // pitch. The seats are not there (core/seatmap drops them); here each gets
+  // a dark mouth on the deck and a parapet down each side and across the
+  // back, so it reads as the hole it is rather than a bare patch of concrete.
+  const openings = openingQuads(template);
+  if (openings.length) {
+    const mouth = new THREE.MeshStandardMaterial({ color: 0x14161a, roughness: 1, metalness: 0, envMapIntensity: 0.2, side: THREE.DoubleSide });
+    const parapetMat = structure.side === THREE.DoubleSide ? structure : structure.clone();
+    parapetMat.side = THREE.DoubleSide;
+    const pos: number[] = [];
+    const wall: number[] = [];
+    const quad = (out: number[], q: Pt[]): void => {
+      for (const k of [0, 1, 2, 0, 2, 3]) out.push(q[k][0], q[k][1], q[k][2]);
+    };
+    for (const o of openings) {
+      const [fl, fr, br, bl] = o.corners;
+      const lift = 0.04;
+      const P = (c: [number, number], y: number): Pt => [c[0], y, c[1]];
+      // The mouth, just above the deck so it is never z-fought away.
+      quad(pos, [P(fl, o.frontY + lift), P(fr, o.frontY + lift), P(br, o.backY + lift), P(bl, o.backY + lift)]);
+      // Parapets: down both sides (following the rake) and across the back.
+      const h = 1.05;
+      quad(wall, [P(fl, o.frontY), P(bl, o.backY), P(bl, o.backY + h), P(fl, o.frontY + h)]);
+      quad(wall, [P(fr, o.frontY), P(br, o.backY), P(br, o.backY + h), P(fr, o.frontY + h)]);
+      quad(wall, [P(bl, o.backY), P(br, o.backY), P(br, o.backY + h), P(bl, o.backY + h)]);
+    }
+    for (const [arr, mat, cast] of [[pos, mouth, false], [wall, parapetMat, true]] as const) {
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.Float32BufferAttribute(arr, 3));
+      g.computeVertexNormals();
+      add(g, mat, cast, true);
+    }
+  }
 
   // The outside of the bowl. A template that says nothing gets the flat grey
   // skirt this has always drawn, byte for byte — buildFacade's 'plain' is that

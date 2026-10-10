@@ -287,7 +287,7 @@ export class MatchDaySimulator {
     private readonly store: DesignStore,
     private readonly template: StadiumTemplate,
     private readonly assetStore: AssetStore,
-    options: { quality?: QualityTier; onContextLost?: () => void; bannerStore?: BannerStore } = {},
+    options: { quality?: QualityTier; onContextLost?: () => void; bannerStore?: BannerStore; glow?: boolean } = {},
   ) {
     this.bannerStore = options.bannerStore ?? null;
     this.settings = settingsFor(options.quality ?? probeQuality());
@@ -354,7 +354,12 @@ export class MatchDaySimulator {
     this.scene.add(this.pitchside.object);
     this.banners = buildBanners(this.map, this.store);
     this.scene.add(this.banners.object);
-    this.effects = buildEffects(this.scene, this.renderer, this.camera, { bloom: this.settings.tier === 'high' || this.settings.tier === 'ultra', template: this.template });
+    this.effects = buildEffects(this.scene, this.renderer, this.camera, {
+      post: this.settings.tier === 'high' || this.settings.tier === 'ultra',
+      // No glow unless asked for: with it, every white card wore a halo.
+      glow: options.glow ?? false,
+      template: this.template,
+    });
     this.assetLayer = buildAssetLayer(this.assetStore, () => this.store.palette);
     this.scene.add(this.assetLayer.object);
     this.resolveEditorBanners();
@@ -1159,6 +1164,14 @@ export class MatchDaySimulator {
   /** How bright the floodlights burn: 0.1..1.5, 1 as designed. */
   setFloodlightLevel(level: number): void {
     this.effects.setFloodlightLevel(level);
+  }
+  /** The glow round white cards and the floodlights. Off by default; HIGH and ULTRA only. */
+  setGlow(on: boolean): void {
+    this.effects.setGlow(on);
+  }
+  /** Whether this quality tier can glow at all (it needs the post pass). */
+  get canGlow(): boolean {
+    return this.settings.tier === 'high' || this.settings.tier === 'ultra';
   }
   setFloodlights(b: boolean): void {
     this.effects.setFloodlights(b);

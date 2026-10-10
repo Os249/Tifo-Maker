@@ -22,6 +22,8 @@ import type { StadiumTemplate } from './types';
 import { DEFAULT_TEMPLATE, KOP_TEMPLATE, OVAL_TEMPLATE } from './template';
 import { PREMIER_LEAGUE } from './premierLeague';
 import { LA_LIGA } from './laLiga';
+import { hasBlocks } from './blocks';
+import { generateSeatMap } from './seatmap';
 
 export type StadiumSource = 'builtin' | 'community' | 'custom';
 export type StadiumType = 'Bowl' | 'Single-tier' | 'Two-tier' | 'Oval' | 'Arena';
@@ -48,6 +50,11 @@ export interface StadiumMeta {
    * still on the old one can be offered the new one.
    */
   supersededBy?: string;
+  /**
+   * What changed, for the note offering the newer ground (an i18n key).
+   * Omitted: the general note about the rebuilt Saudi grounds.
+   */
+  supersededNote?: string;
 }
 
 export interface StadiumEntry {
@@ -60,7 +67,20 @@ export interface StadiumEntry {
 export function tierCount(t: StadiumTemplate): number {
   return t.levels ?? t.tiers.length;
 }
+const blockCounts = new WeakMap<StadiumTemplate, number>();
 export function sectionCount(t: StadiumTemplate): number {
+  // A ground in its real blocks has as many as its stairs, walkways and
+  // stands make, which only placing the seats tells you. Counted once.
+  if (hasBlocks(t)) {
+    let n = blockCounts.get(t);
+    if (n === undefined) {
+      const m = generateSeatMap(t);
+      n = 0;
+      for (let i = 0; i < m.count; i++) n = Math.max(n, m.sectionOf[i] + 1);
+      blockCounts.set(t, n);
+    }
+    return n;
+  }
   return t.sectionsPerTier * t.tiers.length;
 }
 
@@ -691,32 +711,107 @@ const COMMUNITY: StadiumEntry[] = [
     // second home (both split their 2026-27 games between it and the Jewel),
     // and an Asian Cup 2027 venue.
     //
-    // Built October 2026 from the satellite picture (Esri, January 2025), the
-    // SPA photographs of the 2021 reopening (StadiumDB), a Club World Cup
-    // photograph from December 2023 (Wikimedia Commons) and the published
-    // figures: opened 1970, rebuilt 2013-21 to 27,000. An oval two-tier bowl
-    // round the old track, which since 2023 is covered in artificial grass;
-    // the 1970 main stand (real west, `south`) kept as one tier under its
-    // three floors of VIP and media; a cream fabric roof on steel ribs and
-    // cable trusses round the whole bowl, floodlights along its inner edge.
-    // Seats from the 2023 refit: tan, charcoal, and white in the main stand.
-    id: 'alfaisal-stadium-27k',
+    // The ground as its stairs and blocks really are (October 2026). The
+    // first build (alfaisal-stadium-27k, kept in LEGACY below for designs
+    // saved on it) had 60 aisles at perfectly even spacing and every tier cut
+    // into 30 equal blocks; the real ground is laid out stand by stand.
+    //
+    // Measured off the SPA photographs of the 2021 reopening — the aerial
+    // looking square at the stand opposite the main stand, and the drone
+    // views over the corners and ends (StadiumDB) — scaled to metres along
+    // the front row from the stand's centre line and the corner gates, and
+    // checked against the Club World Cup photograph of December 2023, whose
+    // reseating kept every stair where it was. The plan, roof and site are
+    // the first build's (Esri satellite, January 2025).
+    //
+    // The lower tier is three bands with a walkway between each: a front band
+    // of 7 rows on a podium, with the players' tunnel through it on the
+    // centre line opposite the main stand and a gate down to the pitch at
+    // each corner; then 6 rows fed by vomitories coming up at the first
+    // walkway; then 7 more. The front band's stairs are its own (blocks of
+    // 28, 20 and 29 seats either side of the tunnel); the two bands behind
+    // share theirs, with one on the centre line. Then a band of boxes, and
+    // the upper tier, 12 rows on a third rhythm — a stair every 12.8 m — with
+    // vomitories in its front rows. The 1970 main stand (real west, `south`)
+    // is one tier: a front band, a walkway, and the royal box's band of
+    // narrower blocks under its three floors of VIP and media.
+    id: 'alfaisal-jeddah-27k',
     template: {
-      id: 'alfaisal-stadium-27k',
+      id: 'alfaisal-jeddah-27k',
       name: 'Prince Abdullah Al-Faisal Stadium (Jeddah)',
       version: 1,
       // The front row just outside the old track.
       plan: { a: 90.5, b: 48.3, exponent: 2.5 },
       evenRows: true,
       tiers: [
-        { rows: 18, rowDepth: 0.8, rakeDeg: 27, baseElevation: 1.5, baseOffset: 0, seatPitch: 0.5 },
         {
-          // The upper tier added 2013-21, everywhere but the old main stand.
-          rows: 14, rowDepth: 0.8, rakeDeg: 33, baseElevation: 10.5, baseOffset: 17.5, seatPitch: 0.5,
+          rows: 22, rowDepth: 0.8, rakeDeg: 27, baseElevation: 1.5, baseOffset: 0, seatPitch: 0.5,
+          // The old main stand stops at its VIP building after 17 rows.
+          omit: [{ side: 'south', from: -46, to: 46, fromRow: 17 }],
+          blocks: {
+            width: 1.2,
+            aisles: [
+              // Front band (rows 0-6). Opposite the main stand: blocks of 28,
+              // 20 and 29 seats out from the tunnel, then one into each corner.
+              { side: 'north', at: [22, 33, 49, 62.5], mirror: true, rows: [0, 6] },
+              { side: 'east', at: [0, 11, 22, 33], mirror: true, rows: [0, 6] },
+              { side: 'west', at: [0, 11, 22, 33], mirror: true, rows: [0, 6] },
+              { side: 'south', at: [6, 17.5, 29, 40.5, 52, 63], mirror: true, rows: [0, 6] },
+              // The two bands behind (rows 8-21): a stair on the centre line,
+              // then 15, 13, 10.5 and 12.5 m on, none of them over a front-band stair.
+              { side: 'north', at: [0, 15, 28, 38.5, 51, 61.5], mirror: true, rows: [8, 21] },
+              { side: 'east', at: [6, 18, 30, 42], mirror: true, rows: [8, 21] },
+              { side: 'west', at: [6, 18, 30, 42], mirror: true, rows: [8, 21] },
+              // The main stand's royal-box band: narrower blocks, 8 m apart.
+              { side: 'south', at: [0, 8, 16, 24, 32, 40, 51, 62], mirror: true, rows: [8, 21] },
+            ],
+            walkways: [
+              // The walkway along the top of the podium, all the way round.
+              { row: 7 },
+              // The second, everywhere but the main stand, which has none.
+              { row: 14, side: 'north', from: -71, to: 71 },
+              { row: 14, side: 'east', from: -46, to: 46 },
+              { row: 14, side: 'west', from: -46, to: 46 },
+              { row: 14, side: 'south', from: 46, to: 71 },
+              { row: 14, side: 'south', from: -71, to: -46 },
+            ],
+            openings: [
+              // The players' tunnel, through the front band opposite the main stand.
+              { side: 'north', at: [0], width: 13, rows: [0, 6], kind: 'tunnel' },
+              // A gate down to the pitch at each corner.
+              { side: 'north', at: [72], mirror: true, width: 3.5, rows: [0, 6], kind: 'gate' },
+              { side: 'south', at: [72], mirror: true, width: 3.5, rows: [0, 6], kind: 'gate' },
+              // Vomitories coming up into the front of the middle band, mid-block.
+              { side: 'north', at: [22.3, 45, 67], mirror: true, width: 2.4, rows: [8, 9], kind: 'vomitory' },
+              { side: 'east', at: [12, 36], mirror: true, width: 2.4, rows: [8, 9], kind: 'vomitory' },
+              { side: 'west', at: [12, 36], mirror: true, width: 2.4, rows: [8, 9], kind: 'vomitory' },
+              { side: 'south', at: [67], mirror: true, width: 2.4, rows: [8, 9], kind: 'vomitory' },
+            ],
+          },
+        },
+        {
+          // The upper tier added 2013-21, everywhere but the old main stand,
+          // over the band of boxes behind the lower tier.
+          rows: 12, rowDepth: 0.8, rakeDeg: 33, baseElevation: 15, baseOffset: 21, seatPitch: 0.5,
           omit: [{ side: 'south', from: -99, to: 99 }],
+          blocks: {
+            width: 1.2,
+            aisles: [
+              { side: 'north', at: [0, 12.8, 25.9, 38.3, 51, 63.8, 76.6], mirror: true },
+              { side: 'east', at: [0, 12, 24, 36, 48, 60], mirror: true },
+              { side: 'west', at: [0, 12, 24, 36, 48, 60], mirror: true },
+            ],
+            openings: [
+              // Two wide openings either side of the centre, and vomitories at stairs.
+              { side: 'north', at: [16.6], mirror: true, width: 6.4, rows: [0, 3], kind: 'vomitory' },
+              { side: 'north', at: [38.3, 84], mirror: true, width: 2.6, rows: [0, 3], kind: 'vomitory' },
+              { side: 'east', at: [30], mirror: true, width: 2.6, rows: [0, 3], kind: 'vomitory' },
+              { side: 'west', at: [30], mirror: true, width: 2.6, rows: [0, 3], kind: 'vomitory' },
+            ],
+          },
         },
       ],
-      aisles: { count: 60, widthMeters: 1.1 },
+      aisles: { count: 60, widthMeters: 1.2 },
       sectionsPerTier: 30,
       roof: { coverage: 'none' },
       roofs: [
@@ -735,9 +830,16 @@ const COMMUNITY: StadiumEntry[] = [
       },
       details: {
         zones: [{ kind: 'vip', centerU: 0.75, halfU: 0.012, tiers: [0], noTifo: true }],
+        // The boxes between the lower and upper tiers, opposite the main stand and round both ends.
+        boxes: [
+          { centerU: 0.25, halfU: 0.115, underTier: 1, count: 18 },
+          { centerU: 0, halfU: 0.06, underTier: 1, count: 8 },
+          { centerU: 0.5, halfU: 0.06, underTier: 1, count: 8 },
+        ],
         screens: [
-          { centerU: 0, widthM: 11, heightM: 5, hang: { offset: 21, y: 19, ceiling: 24 } },
-          { centerU: 0.5, widthM: 11, heightM: 5, hang: { offset: 21, y: 19, ceiling: 24 } },
+          // Hung from the roof over the back rows of each end's upper tier.
+          { centerU: 0, widthM: 11, heightM: 5, hang: { offset: 31.2, y: 22.4, ceiling: 25 } },
+          { centerU: 0.5, widthM: 11, heightM: 5, hang: { offset: 31.2, y: 22.4, ceiling: 25 } },
         ],
         buildings: [
           // The royal box and media floors over the back of the old main stand.
@@ -1282,6 +1384,70 @@ export const LEGACY_STADIUMS: StadiumEntry[] = [
       lighting: { style: 'roof-rim' },
     },
     meta: { name: 'Kingdom Arena (Riyadh)', source: 'builtin', country: 'Middle East', capacity: 28000, type: 'Arena', inspiredBy: "Kingdom Arena, Riyadh - Al-Hilal's fully covered indoor arena", tags: ['al-hilal', 'riyadh', 'saudi', 'arena', 'legacy'], supersededBy: 'kingdom-arena-26k' },
+  },
+  {
+    // Prince Abdullah Al-Faisal Stadium as it was until October 2026 —
+    // replaced by alfaisal-jeddah-27k, which has the ground's real stairs,
+    // walkways and blocks. Keep byte-identical: every design saved on it
+    // indexes into this map.
+    //
+    // Built October 2026 from the satellite picture (Esri, January 2025), the
+    // SPA photographs of the 2021 reopening (StadiumDB), a Club World Cup
+    // photograph from December 2023 (Wikimedia Commons) and the published
+    // figures: opened 1970, rebuilt 2013-21 to 27,000. An oval two-tier bowl
+    // round the old track, which since 2023 is covered in artificial grass;
+    // the 1970 main stand (real west, `south`) kept as one tier under its
+    // three floors of VIP and media; a cream fabric roof on steel ribs and
+    // cable trusses round the whole bowl, floodlights along its inner edge.
+    // Seats from the 2023 refit: tan, charcoal, and white in the main stand.
+    id: 'alfaisal-stadium-27k',
+    template: {
+      id: 'alfaisal-stadium-27k',
+      name: 'Prince Abdullah Al-Faisal Stadium (Jeddah)',
+      version: 1,
+      // The front row just outside the old track.
+      plan: { a: 90.5, b: 48.3, exponent: 2.5 },
+      evenRows: true,
+      tiers: [
+        { rows: 18, rowDepth: 0.8, rakeDeg: 27, baseElevation: 1.5, baseOffset: 0, seatPitch: 0.5 },
+        {
+          // The upper tier added 2013-21, everywhere but the old main stand.
+          rows: 14, rowDepth: 0.8, rakeDeg: 33, baseElevation: 10.5, baseOffset: 17.5, seatPitch: 0.5,
+          omit: [{ side: 'south', from: -99, to: 99 }],
+        },
+      ],
+      aisles: { count: 60, widthMeters: 1.1 },
+      sectionsPerTier: 30,
+      roof: { coverage: 'none' },
+      roofs: [
+        { style: 'membrane', back: 32, front: 6, backY: 25, frontY: 21.5, bay: 11, color: 0xe9dfc9, underColor: 0xe6dcc6, columns: { every: 11, color: 0xd7d7d2, offset: 30.5, shape: 'raking' } },
+      ],
+      lighting: { style: 'roof-rim', kelvin: 5700, mount: { offset: 6.5, y: 21 } },
+      finish: { concrete: 0xbfbab0, walls: 0xd8d4cb },
+      // The old track and its D zones, covered in artificial grass since 2023.
+      runoff: { color: 0x2f7a3f, a: 90.5, b: 48.3, exponent: 2.5 },
+      seatLook: {
+        colors: [{ c: '#b9824a', w: 4 }, { c: '#a8733f', w: 3 }, { c: '#c4925a', w: 2 }],
+        regions: [
+          { side: 'west', colors: ['#3a3d42', '#2f3236', '#44474c'] },
+          { tiers: [0], side: 'south', colors: ['#e8e8e4', '#d9dcdc', { c: '#2c8a8e', w: 0.6 }, { c: '#3a3d42', w: 0.8 }] },
+        ],
+      },
+      details: {
+        zones: [{ kind: 'vip', centerU: 0.75, halfU: 0.012, tiers: [0], noTifo: true }],
+        screens: [
+          { centerU: 0, widthM: 11, heightM: 5, hang: { offset: 21, y: 19, ceiling: 24 } },
+          { centerU: 0.5, widthM: 11, heightM: 5, hang: { offset: 21, y: 19, ceiling: 24 } },
+        ],
+        buildings: [
+          // The royal box and media floors over the back of the old main stand.
+          { side: 'south', halfLength: 42, front: 14.8, depth: 12, y0: 0, y1: 21, glassFloors: 2, color: 0xeee9df, fascia: 0x6b5a8e },
+        ],
+      },
+      // Its car parks, sports halls and the Jeddah streets round it, from OpenStreetMap.
+      site: { key: 'faisal', horizon: 'city', ground: 0xc9b896 },
+    },
+    meta: { name: 'Prince Abdullah Al-Faisal Stadium (Jeddah)', source: 'builtin', country: 'Middle East', capacity: 27000, type: 'Two-tier', inspiredBy: 'Prince Abdullah Al-Faisal Stadium, Jeddah - home of Al-Ahli and Al-Ittihad', tags: ['al-ahli', 'al-ittihad', 'jeddah', 'saudi', 'legacy'], supersededBy: 'alfaisal-jeddah-27k', supersededNote: 'sp.supersededBlocks' },
   },
 ];
 
