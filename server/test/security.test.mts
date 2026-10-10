@@ -2015,6 +2015,42 @@ async function makeDesign(app: FastifyInstance, token: string, isPublic = false)
   const mostlyBroken = { palette: PAL, layers: [0, 1, 2, 3].map((i) => ({ id: `L${i}`, kind: 'stripes', region: 'all', colors: [77, 78] })) };
   assert.equal(validateModelSpec(mostlyBroken).valid, false, 'a design that is mostly broken is still a failure');
 
+  // ---- regions written loosely (the std "region must be a stand" failures) ----
+  const { coerceRegion, normalizeRegion } = await import('../../src/core/tifoSpec');
+  const reads: Array<[unknown, unknown]> = [
+    ['North', 'north'], ['north stand', 'north'], ['South End', 'south'], [' WEST ', 'west'], ['N', 'north'],
+    ['lower north', { stand: 'north', tier: 0 }], ['North - Upper Tier', { stand: 'north', tier: 1 }],
+    ['both ends', { stand: 'all', tier: 'all', stands: ['north', 'south'] }], ['Sides', { stand: 'all', tier: 'all', stands: ['east', 'west'] }],
+    ['whole stadium', 'all'], ['upper tier', 'upper'], ['north and south', { stand: 'all', tier: 'all', stands: ['north', 'south'] }],
+    [{ stand: 'North', tier: 'upper' }, { stand: 'north', tier: 1 }], [{ stand: 'north', tier: [0, 1] }, 'north'], [{ stand: 'north', tier: '0' }, { stand: 'north', tier: 0 }],
+    [{ stand: 'east', tier: 'all tiers' }, 'east'], [{ stand: 'ends', tier: 0 }, { stand: 'all', tier: 0, stands: ['north', 'south'] }],
+    [{ stand: 'all', stands: [] }, 'all'], [{ stands: 'north, south' }, { stand: 'all', tier: 'all', stands: ['north', 'south'] }],
+    [{ stand: 'all', stands: ['North', 'South'] }, { stand: 'all', tier: 'all', stands: ['north', 'south'] }],
+    [{ stand: 'north', rows: { from: 0, to: 0.5 } }, { stand: 'north', tier: 'all', rows: [0, 0.5] }],
+    [['north', 'east'], { stand: 'all', tier: 'all', stands: ['north', 'east'] }],
+  ];
+  for (const [raw, want] of reads) {
+    const got = coerceRegion(raw);
+    assert.deepEqual(got, want, `region ${JSON.stringify(raw)} reads as ${JSON.stringify(want)}, got ${JSON.stringify(got)}`);
+    assert.ok(normalizeRegion(got), `and the result is a valid region: ${JSON.stringify(got)}`);
+  }
+  for (const raw of ['the kop', { stand: 'kop' }, { stand: 'north', tier: -1 }, 42]) assert.equal(coerceRegion(raw), null, `no single reading: ${JSON.stringify(raw)}`);
+  assert.equal(coerceRegion('north'), 'north', 'a valid region is returned as it is');
+  // A design the std model wrote against the new stadium context: every layer
+  // used a capitalised stand or a tier word. It used to fail whole.
+  const loose = validateModelSpec({ palette: PAL, layers: [
+    { kind: 'fill', region: 'All', colorIndex: 1 },
+    { kind: 'stripes', region: { stand: 'East', tier: 'lower' }, colors: [1, 2], orientation: 'vertical' },
+    { kind: 'text', region: 'South Stand', text: 'ZAEEM', colorIndex: 2, fontId: 'poster', heightFrac: 0.8 },
+    { kind: 'symbol', region: { stand: 'North', tier: [0, 1] }, symbol: 'star', colorIndex: 2, scaleFrac: 0.9 },
+  ] });
+  assert.equal(loose.valid, true, `loosely written regions are read: ${JSON.stringify(loose.errors)}`);
+  assert.deepEqual(loose.spec!.layers.map((l) => [l.region.stand, l.region.tier]), [['all', 'all'], ['east', 0], ['south', 'all'], ['north', 'all']]);
+  assert.ok(loose.repairs.some((r) => r.includes('"South Stand" → "south"')), 'and each repair is logged');
+  // What still cannot be read says what it got, so the admin queue shows it.
+  const unread = validateSpec({ palette: PAL, layers: [{ kind: 'fill', region: 'the kop', colorIndex: 1 }] });
+  assert.ok(unread.errors[0].message.includes('"the kop"'), unread.errors[0].message);
+
   // ---- through the routes, against a stubbed Gemini ----
   const realFetch = globalThis.fetch;
   const saved = { key: process.env.GEMINI_API_KEY, prov: process.env.AI_PROVIDER, t: process.env.AI_TIMEOUT_MS, tp: process.env.AI_TIMEOUT_PREMIUM_MS };
@@ -2061,6 +2097,19 @@ async function makeDesign(app: FastifyInstance, token: string, isPublic = false)
     assert.equal(calls, 2);
     assert.equal(gen2.needsChoice, true, 'two timeouts offer the Quick Designer, as before');
 
+    // 1b. A standard design with a stadium context and capitalised regions is
+    //     delivered, not reported as "spec failed validation".
+    plan = [{ title: 'Zaeem', palette: PAL, layers: [
+      { kind: 'fill', region: 'All', colorIndex: 1 },
+      { kind: 'text', region: { stand: 'South', tier: 'all' }, text: 'ZAEEM', colorIndex: 2, fontId: 'poster', heightFrac: 0.8 },
+      { kind: 'symbol', region: 'North Stand', symbol: 'star', colorIndex: 2, scaleFrac: 0.9 },
+    ] }];
+    calls = 0;
+    const genR = await app.inject({ method: 'POST', url: '/api/ai/generate', headers: bearer(fan.token), payload: { prompt: 'Al Hilal star', stadium: '- north: 900 seats, tiers 0 and 1. Holds: ...' } });
+    const gr = genR.json() as { spec?: { layers: Array<{ region: { stand: string } }> }; source?: string };
+    assert.equal(gr.source, 'model', `loose regions no longer fail the design: ${genR.body.slice(0, 200)}`);
+    assert.deepEqual(gr.spec!.layers.slice(0, 3).map((l) => l.region.stand), ['all', 'south', 'north']);
+
     // 2. The critic's rewrite with the three faults from the queue is used.
     const current = (await app.inject({ method: 'POST', url: '/api/ai/generate', headers: bearer(fan.token), payload: { prompt: 'blue and white stripes ZAEEM', engine: 'offline' } })).json().spec;
     plan = [{
@@ -2085,5 +2134,5 @@ async function makeDesign(app: FastifyInstance, token: string, isPublic = false)
       if (v === undefined) delete process.env[k]; else process.env[k] = v;
     }
   }
-  console.log('ai failures queue (October): all assertions passed (model output repaired, broken layers left out or restored, a timed-out call retried once, polish survives the critic\'s faults)');
+  console.log('ai failures queue (October): all assertions passed (model output repaired, broken layers left out or restored, a timed-out call retried once, polish survives the critic\'s faults, loose regions read)');
 }

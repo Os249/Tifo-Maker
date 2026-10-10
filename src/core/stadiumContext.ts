@@ -107,7 +107,6 @@ export function buildStadiumContext(map: SeatMap): StadiumContext {
   return { total, tiers: maxTier + 1, stands, notes };
 }
 
-const cap = (s: string): string => s.charAt(0).toUpperCase() + s.slice(1);
 
 /**
  * What one stand can hold, in the terms the art is judged in: rows of seats.
@@ -138,11 +137,12 @@ export function describeStadiumContext(ctx: StadiumContext): string {
     const pct = Math.round(s.share * 100);
     const shape = s.aspect >= 1.6 ? 'wide' : s.aspect <= 0.8 ? 'tall' : 'squarish';
     lines.push(
-      `- ${cap(s.stand)}: ${s.seats.toLocaleString()} seats (${pct}%), ~${s.rows} rows x ~${s.cols} cols, ` +
-        `aspect ${s.aspect} (${shape}), tier(s) [${s.tiers.join(', ')}]. Holds: ${standCapacity(s, biggest)}.`,
+      `- ${s.stand}: ${s.seats.toLocaleString()} seats (${pct}%), ~${s.rows} rows x ~${s.cols} cols, ` +
+        `aspect ${s.aspect} (${shape}), ${s.tiers.length === 1 ? 'tier' : 'tiers'} ${s.tiers.join(' and ') || 'none'}. Holds: ${standCapacity(s, biggest)}.`,
     );
   }
   lines.push('Rows are the limit: glyph rows = heightFrac x the stand\'s rows. A word must reach 8 rows (Arabic 12), a symbol 12.');
+  lines.push('Write regions exactly as the names above: "north", or {"stand":"north","tier":0} (one tier number, or "all").');
   for (const note of ctx.notes) lines.push(`Note: ${note}`);
   return lines.join('\n');
 }

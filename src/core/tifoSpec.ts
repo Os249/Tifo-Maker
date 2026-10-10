@@ -485,6 +485,118 @@ export function normalizeRegion(input: unknown): Region | null {
 }
 
 /**
+ * Read a region a model wrote loosely — "North", "north stand", "lower north",
+ * "both ends", { stand: "North", tier: "upper" }, { tier: [0, 1] },
+ * { stands: "north, south" }, { rows: { from: 0, to: 0.5 } } — as the region it
+ * plainly means. Returns something normalizeRegion accepts, or null when there
+ * is no single reading (the caller then leaves the layer to the validator).
+ */
+export function coerceRegion(input: unknown): unknown {
+  const looseRows = isObj(input) && input.rows !== undefined && input.rows !== null && !Array.isArray(input.rows);
+  if (normalizeRegion(input) !== null && !looseRows) return input;
+  type Parsed = { stands: Stand[]; tier: number | 'all' | null; whole: boolean };
+  /** Stands and a tier named in free text. */
+  const parseText = (raw: string): Parsed | null => {
+    const s = raw.toLowerCase().replace(/[_\-+/&,|]+/g, ' ').replace(/\s+/g, ' ').trim();
+    if (!s) return null;
+    const words = s.split(' ');
+    const stands: Stand[] = [];
+    const add = (x: Stand): void => { if (!stands.includes(x)) stands.push(x); };
+    for (const st of STANDS) if (words.some((w) => w === st || w === `${st}ern`)) add(st);
+    // A single letter only when it is the whole name ("N", "S tier 1").
+    const letter: Record<string, Stand> = { n: 'north', s: 'south', e: 'east', w: 'west' };
+    if (!stands.length && letter[words[0]] && (words.length === 1 || /^(stand|end|side|tier|lower|upper)$/.test(words[1]))) add(letter[words[0]]);
+    if (!stands.length && /\b(sides|both sides|long sides|touchlines?|main and opposite)\b/.test(s)) STAND_GROUPS.sides.forEach(add);
+    if (!stands.length && /\b(ends|both ends|goal ends|behind (the )?goals?)\b/.test(s)) STAND_GROUPS.ends.forEach(add);
+    let tier: number | 'all' | null = null;
+    const tn = /\b(?:tier|level|deck|ring)\s*(\d)\b|\bt(\d)\b/.exec(s);
+    if (tn) tier = Number(tn[1] ?? tn[2]);
+    else if (/\b(lower|bottom|first|ground)\b/.test(s)) tier = 0;
+    else if (/\b(upper|top|second)\b/.test(s)) tier = 1;
+    else if (/\b(all|both|every) (tiers|levels|decks)\b/.test(s)) tier = 'all';
+    const whole = /\b(all|whole|entire|everywhere|full|bowl|stadium|everything|around)\b/.test(s);
+    if (!stands.length && tier === null && !whole) return null;
+    return { stands, tier, whole };
+  };
+  const tierOf = (t: unknown): number | 'all' | null => {
+    if (t === undefined || t === null) return 'all';
+    if (typeof t === 'number' && Number.isFinite(t) && t >= 0) return Math.round(t);
+    if (typeof t === 'string') {
+      if (/^\s*\d+\s*$/.test(t)) return Number(t);
+      const p = parseText(t);
+      return p ? (p.tier ?? 'all') : null;
+    }
+    if (Array.isArray(t)) {
+      const ks = [...new Set(t.map(tierOf).filter((k): k is number | 'all' => k !== null))];
+      if (ks.length === 1) return ks[0];
+      return ks.length ? 'all' : null; // several tiers: the region cannot list them, so all
+    }
+    return null;
+  };
+  const build = (stands: Stand[], tier: number | 'all', rows?: unknown): Region | string => {
+    const r: Region = { stand: 'all', tier };
+    if (stands.length === 1) r.stand = stands[0];
+    else if (stands.length > 1 && stands.length < STANDS.length) r.stands = [...stands];
+    if (rows) r.rows = rows as [number, number];
+    if (!rows && tier === 'all' && !r.stands) return r.stand; // keep it a shorthand
+    if (!rows && r.stand === 'all' && !r.stands && tier === 0) return 'lower';
+    if (!rows && r.stand === 'all' && !r.stands && tier === 1) return 'upper';
+    return r;
+  };
+
+  if (typeof input === 'string') {
+    const p = parseText(input);
+    if (!p) return null;
+    return build(p.stands, p.tier ?? 'all');
+  }
+  if (Array.isArray(input)) {
+    // ["north", "south"]: several stands.
+    const p = parseText(input.filter((x) => typeof x === 'string').join(' '));
+    return p ? build(p.stands, p.tier ?? 'all') : null;
+  }
+  if (!isObj(input)) return null;
+
+  const stands: Stand[] = [];
+  let tier: number | 'all' | null = null;
+  const standVal = input.stand ?? input.stands ?? input.area ?? input.side;
+  const standList = Array.isArray(standVal) ? standVal : standVal === undefined ? [] : [standVal];
+  for (const v of standList) {
+    if (typeof v !== 'string') return null;
+    const p = parseText(v);
+    if (!p) return null;
+    for (const st of p.stands) if (!stands.includes(st)) stands.push(st);
+    if (p.tier !== null) tier = p.tier;
+  }
+  if (input.stand !== undefined && input.stands !== undefined && input.stand !== input.stands) {
+    // Both given: { stand: "all", stands: [...] } or { stand: "north", stands: [] }.
+    const extra = Array.isArray(input.stands) ? input.stands : [input.stands];
+    for (const v of extra) {
+      const p = typeof v === 'string' ? parseText(v) : null;
+      if (p) for (const st of p.stands) if (!stands.includes(st)) stands.push(st);
+    }
+  }
+  if (input.tier !== undefined && input.tier !== null) {
+    const t = tierOf(input.tier);
+    if (t === null) return null;
+    tier = t;
+  }
+  let rows: [number, number] | undefined;
+  const rr = input.rows ?? input.row;
+  if (rr !== undefined && rr !== null) {
+    const pair = Array.isArray(rr) ? rr
+      : isObj(rr) ? [rr.from ?? rr.start ?? rr.min ?? rr[0], rr.to ?? rr.end ?? rr.max ?? rr[1]]
+      : typeof rr === 'string' ? rr.split(/\s*(?:-|–|to|,)\s*/) : [];
+    const nums = pair.slice(0, 2).map((x) => (typeof x === 'string' ? parseFloat(x.replace('%', '')) : x));
+    if (nums.length === 2 && nums.every((x) => typeof x === 'number' && Number.isFinite(x))) {
+      let [a, b] = nums as [number, number];
+      if (Math.max(a, b) > 1 && Math.max(a, b) <= 100) { a /= 100; b /= 100; } // percentages
+      if (Math.max(a, b) <= 1) rows = [Math.max(0, Math.min(a, b)), Math.min(1, Math.max(a, b))];
+    }
+  }
+  return build(stands, tier ?? 'all', rows);
+}
+
+/**
  * Validate (and normalize) an AI-authored spec against a palette-size ceiling.
  * Strict and all-or-nothing: returns every problem so a generator can fix them
  * in one pass, and on success a normalized TifoSpec with defaults filled in.
@@ -540,7 +652,9 @@ export function validateSpec(input: unknown): SpecValidationResult {
       }
       const region = normalizeRegion(raw.region);
       if (region === null) {
-        err(`${p}.region`, 'region must be a stand ("north"/"south"/"east"/"west"), "all"/"lower"/"upper"/"sides"/"ends", or { stand, tier, rows, stands }');
+        let got = '';
+        try { got = JSON.stringify(raw.region) ?? ''; } catch { /* circular: leave it out */ }
+        err(`${p}.region`, `region ${got.length > 70 ? got.slice(0, 67) + '...' : got} is not a stand ("north"/"south"/"east"/"west"), "all"/"lower"/"upper"/"sides"/"ends", or { stand, tier, rows, stands }`);
         return;
       }
       const id = typeof raw.id === 'string' && raw.id ? raw.id : `L${li}`;
@@ -724,6 +838,13 @@ export function coerceModelSpec(input: unknown): { spec: unknown; repairs: strin
     const p = `layers[${li}]`;
     if (typeof l.kind === 'string') l.kind = l.kind.trim().toLowerCase();
     if (typeof l.align === 'string') l.align = l.align.trim().toLowerCase();
+    if (l.region !== undefined && (normalizeRegion(l.region) === null || (isObj(l.region) && l.region.rows != null && !Array.isArray(l.region.rows)))) {
+      const r = coerceRegion(l.region);
+      if (r !== null && normalizeRegion(r) !== null) {
+        repairs.push(`${p}.region ${JSON.stringify(l.region).slice(0, 60)} → ${JSON.stringify(r)}`);
+        l.region = r;
+      }
+    }
 
     if ('colorIndex' in l && !Number.isInteger(l.colorIndex)) {
       const k = toIndex(l.colorIndex);

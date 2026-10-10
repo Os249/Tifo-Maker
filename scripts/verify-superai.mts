@@ -954,7 +954,7 @@ console.log(`\n${failures === 0 ? 'ALL PASS' : failures + ' FAILED'}`);
 
   // 6. The stadium context says what each stand can hold.
   const hz = describeStadiumContext(buildStadiumContext(mapOf('alhazem-stadium-8k')));
-  check('context: a stand without seats is called out', /North: 0 seats.*NO SEATS/.test(hz), hz.split('\n').find((l) => l.includes('North')) ?? '');
+  check('context: a stand without seats is called out', /- north: 0 seats.*NO SEATS/.test(hz), hz.split('\n').find((l) => l.includes('- north')) ?? '');
   const mj = describeStadiumContext(buildStadiumContext(mapOf('majmaah-stadium-7k')));
   check('context: a shallow stand says one element only', /SHALLOW/.test(mj) && /SLIVER/.test(mj));
 }
