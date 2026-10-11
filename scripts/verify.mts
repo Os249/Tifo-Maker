@@ -558,10 +558,12 @@ import { buildStadium as siBuild } from '../src/core/stadiumFit';
 // of the thirteen had none; nobody saw it while they sat on the Community tab.
 {
   const { STADIUM_CATALOG: NC } = await import('../src/core/stadiumCatalog');
+  // A ground rebuilt in its real blocks takes the name of the ground it is a layout of (i18n tl).
+  const { baseGroundId } = await import('../src/core/realBlocks');
   const src = siRead('src/ui/i18n.ts', 'utf8');
   const esc = (x: string) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const unnamed = NC.filter((e) => {
-    const key = src.match(new RegExp(`^\\s*'${esc(e.id)}': '(stad\\.[a-zA-Z0-9]+)',`, 'm'))?.[1];
+    const key = src.match(new RegExp(`^\\s*'${esc(baseGroundId(e.id))}': '(stad\\.[a-zA-Z0-9]+)',`, 'm'))?.[1];
     return !key || !new RegExp(`^\\s*'${esc(key)}': \\{ en: [^\\n]*\\bar: '`, 'm').test(src);
   }).map((e) => e.id);
   console.log('stadium names: templates', NC.length, '| without a name in both languages', unnamed.length);
@@ -655,7 +657,7 @@ import { buildStadium as siBuild } from '../src/core/stadiumFit';
   // has no room for one and must not be allowed to claim it.
   const ext = trackExtent(8);
   const okOval = trackFits(LT[2], 8);
-  const small = LC.find((s) => s.id === 'alawwal-park-26k')!.template;
+  const small = LC.find((s) => s.id === 'alawwal-park-26k-rb')!.template;
   const badFit = trackFits(small, 8);
   console.log(`track: 8 lanes need ${(ext.halfLength * 2).toFixed(1)} x ${(ext.halfWidth * 2).toFixed(1)} m | oval fits`, okOval, '| 25k football ground refused', !badFit);
   if (!okOval || badFit) throw new Error('trackFits is not gating on the real oval size');
@@ -1851,6 +1853,20 @@ import { buildStadium as siBuild } from '../src/core/stadiumFit';
     'alhazem-stadium-8k': '6191:30cb00e43900805c',
     'majmaah-stadium-7k': '6838:3e283c8ae9696650',
     'pfbf-stadium-22k': '22768:6afea62fe1fe48a2',
+    // The Saudi grounds in their real blocks, October 2026 (core/realBlocksSaudi.ts).
+    'jewel-jeddah-60k-rb': '59732:91b775d55c16c2de',
+    'alawwal-park-26k-rb': '26118:ba8c19af9216807f',
+    'kingdom-arena-26k-rb': '22318:5e7bff0fcd956148',
+    'pmbf-stadium-22k-rb': '22361:079b3f572811de54',
+    'pfbf-stadium-22k-rb': '22790:8ab70ef70939d8f3',
+    'buraidah-stadium-25k-rb': '28496:24865ee95530f151',
+    'shg-arena-14k-rb': '13786:4e67b7f745fd1e05',
+    'ego-stadium-13k-rb': '13096:3ae091403778b605',
+    'alfateh-stadium-12k-rb': '11876:551712d62441b106',
+    'abha-stadium-20k-rb': '16160:81b318e4467ace4b',
+    'tabuk-stadium-12k-rb': '11876:98fd4abb77dddb48',
+    'alhazem-stadium-8k-rb': '6129:9a2535b5d2c5a331',
+    'majmaah-stadium-7k-rb': '6822:7e7f279577705f89',
     // The Premier League's grounds, October 2026. Frozen at first release:
     // re-take these only before that push.
     'anfield-61k': '60814:b3614ab06de02adb',
@@ -1913,6 +1929,11 @@ import { buildStadium as siBuild } from '../src/core/stadiumFit';
   // The legacy Jewel resolves but is not offered for new designs.
   if (cat.STADIUM_CATALOG.some((e) => e.id === 'community-jewel-jeddah-62k')) throw new Error('venue: the legacy Jewel is still in the catalogue');
   if (cat.entryById('community-jewel-jeddah-62k')?.meta.supersededBy !== 'jewel-jeddah-60k') throw new Error('venue: the legacy Jewel does not point at its replacement');
+  // A design on a layout rebuilt twice is offered the newest, not the one in between.
+  for (const [from, to] of [['community-jewel-jeddah-62k', 'jewel-jeddah-60k-rb'], ['community-alawwal-park-25k', 'alawwal-park-26k-rb'], ['community-kingdom-arena-28k', 'kingdom-arena-26k-rb'], ['jewel-jeddah-60k', 'jewel-jeddah-60k-rb'], ['alfaisal-stadium-27k', 'alfaisal-jeddah-27k']]) {
+    if (cat.newestLayout(from)?.id !== to) throw new Error(`venue: a design on ${from} is offered ${cat.newestLayout(from)?.id}, not ${to}`);
+  }
+  if (cat.newestLayout('jewel-jeddah-60k-rb') !== undefined) throw new Error('venue: the Jewel in its real blocks is offered a newer layout');
   const shipped = cat.shippedTemplates();
   const shippedIds = shipped.map((t) => t.id);
   if (new Set(shippedIds).size !== shippedIds.length) throw new Error('venue: a ground ships twice');
@@ -1930,8 +1951,10 @@ import { buildStadium as siBuild } from '../src/core/stadiumFit';
   const { EDITOR_UNITS } = await import('../src/core/seatmap');
   if (!vdRead('src/core/venueDetails.ts', 'utf8').includes(`const EDITOR_W = ${EDITOR_UNITS.width};`)) throw new Error('venue: EDITOR_W drifted from the seat map editor width');
 
-  // The new Jewel against the real stadium (StadiumDB): 23,473 / 22,244 / 14,038.
-  const jt = cat.templateById('jewel-jeddah-60k')!;
+  // The Jewel as offered (in its real blocks since October 2026, jewel-jeddah-60k-rb;
+  // the layout before is frozen above) against the real stadium (StadiumDB):
+  // 23,473 / 22,244 / 14,038.
+  const jt = cat.templateById('jewel-jeddah-60k-rb')!;
   const jm = generateSeatMap(jt);
   if (fp(generateSeatMap(jt)) !== fp(jm)) throw new Error('venue: the Jewel is not deterministic');
   const perTier = [0, 0, 0];
@@ -2055,8 +2078,9 @@ import { buildStadium as siBuild } from '../src/core/stadiumFit';
 }
 
 // --- Kingdom Arena: four separate stands, an enclosed hall ------------------
-// Rebuilt October 2026 as a NEW template (kingdom-arena-26k); the earlier one
-// is a legacy ground. Checked against the published figures and against the
+// Rebuilt October 2026 as a NEW template (kingdom-arena-26k), and laid out in
+// its real blocks later that month (kingdom-arena-26k-rb); the earlier ones
+// are legacy grounds. Checked against the photographs and against the
 // building it has to fit in.
 {
   const cat = await import('../src/core/stadiumCatalog');
@@ -2064,16 +2088,18 @@ import { buildStadium as siBuild } from '../src/core/stadiumFit';
   const { kingdomFrame } = await import('../src/render/simulator/kingdom');
   const { readFileSync: kRead } = await import('node:fs');
   const OLD = 'community-kingdom-arena-28k';
-  const NEW = 'kingdom-arena-26k';
-  if (cat.STADIUM_CATALOG.some((e) => e.id === OLD)) throw new Error('kingdom: the earlier Kingdom Arena is still offered');
-  if (cat.entryById(OLD)?.meta.supersededBy !== NEW) throw new Error('kingdom: the earlier Kingdom Arena does not point at its replacement');
+  const NEW = 'kingdom-arena-26k-rb';
+  if (cat.STADIUM_CATALOG.some((e) => e.id === OLD || e.id === 'kingdom-arena-26k')) throw new Error('kingdom: an earlier Kingdom Arena is still offered');
+  if (cat.newestLayout(OLD)?.id !== NEW) throw new Error('kingdom: the earlier Kingdom Arena does not lead to its replacement');
   if (!cat.shippedTemplates().some((t) => t.id === OLD) || !cat.shippedTemplates().some((t) => t.id === NEW)) throw new Error('kingdom: both Kingdom Arenas must be saveable');
   const kt = cat.templateById(NEW)!;
   const km = generateSeatMap(kt);
   if (!kt.indoor) throw new Error('kingdom: the arena is not marked indoor');
 
-  // 26,700 seats for the public after the December 2024 expansion (Turki Al-Sheikh).
-  if (Math.abs(km.count - 26700) / 26700 > 0.02) throw new Error(`kingdom: ${km.count} seats, the real ground 26,700`);
+  // 26,700 was announced for the public after the December 2024 expansion
+  // (Turki Al-Sheikh), before it was built; the photographs show the stands
+  // holding about 22,300 numbered seats, the rest in the boxes and lounges.
+  if (Math.abs(km.count - 22300) / 22300 > 0.02) throw new Error(`kingdom: ${km.count} seats, the photographs' 22,300`);
   // Every seat is in one of its tier's stands, on the right side, within its length and rows.
   const per: Record<string, number> = {};
   const rowsBefore = (t: number): number => kt.tiers.slice(0, t).reduce((n, x) => n + x.rows, 0);
@@ -2141,7 +2167,7 @@ import { buildStadium as siBuild } from '../src/core/stadiumFit';
   if (!d.centreScreen || !d.cornerScreens || (d.screens ?? []).length !== 2) throw new Error('kingdom: the screens are not the real ones');
   // The cameras stay inside the hall, under the roof, and out of the hospitality block.
   const simSrc = kRead('src/render/simulator/index.ts', 'utf8');
-  const shotsSrc = simSrc.slice(simSrc.indexOf('if (this.template.id === KINGDOM_ID) {\n      // Under the roof: every camera'), simSrc.indexOf("seatShot(this.map, 'crowd'),"));
+  const shotsSrc = simSrc.slice(simSrc.indexOf('if (baseGroundId(this.template.id) === KINGDOM_ID) {\n      // Under the roof: every camera'), simSrc.indexOf("seatShot(this.map, 'crowd'),"));
   const b = kt.plan.b;
   const shotPos = [...shotsSrc.matchAll(/position: \[([^\]]+)\]/g)].map((mm) => mm[1].split(',').map((v) => Function('b', `return ${v}`)(b) as number));
   if (shotPos.length < 6) throw new Error('kingdom: could not read the camera shots');
@@ -2158,7 +2184,7 @@ import { buildStadium as siBuild } from '../src/core/stadiumFit';
   const ks = kRead('src/ui/i18n.ts', 'utf8');
   if (!/'stad\.kingdomArenaOld': \{ en: '[^']+', ar: '[^']+' \}/.test(ks) || !/'kingdom-arena-26k': 'stad\.kingdomArena'/.test(ks)) throw new Error('kingdom: the names are missing');
   console.log(
-    `kingdom: ${km.count} seats (real 26,700) | ends ${per['0:east']} + ${per['0:west']}, north ${per['0:north']} + ${per['1:north']} upper, main ${per['0:south']}` +
+    `kingdom: ${km.count} seats (22,300 in the photographs) | ends ${per['0:east']} + ${per['0:west']}, north ${per['0:north']} + ${per['1:north']} upper, main ${per['0:south']}` +
       ` | ${nearest.toFixed(1)} m clear of the pitch, corners open (seats and concrete) | hall ${len.toFixed(0)} x ${wid.toFixed(0)} x ${F.ROOF_HIGH} m | ${boxes} boxes | ${shotPos.length} cameras inside`,
   );
 }
@@ -2370,6 +2396,7 @@ await (async () => {
 type LeagueGround = { id: string; clubs: string; seats: number; tol: number };
 const leagueGrounds = async (label: string, tag: string, GROUNDS: LeagueGround[], extra?: (i18nSrc: string, fails: string[]) => void, pitchGap = 5): Promise<void> => {
   const cat = await import('../src/core/stadiumCatalog');
+  const { baseGroundId } = await import('../src/core/realBlocks');
   const spans = await import('../src/core/standSpans');
   const { curveSampler } = await import('../src/core/venueDetails');
   const { readFileSync: spRead } = await import('node:fs');
@@ -2385,7 +2412,7 @@ const leagueGrounds = async (label: string, tag: string, GROUNDS: LeagueGround[]
     const t = e.template;
     const m = generateSeatMap(t);
     if (Math.abs(m.count - g.seats) / g.seats > g.tol) fails.push(`${g.id}: ${m.count} seats, built to ${g.seats}`);
-    if (!new RegExp(`'${g.id}': 'stad\\.\\w+'`).test(i18nSrc)) fails.push(`${g.id} has no name to show`);
+    if (!new RegExp(`'${baseGroundId(g.id)}': 'stad\\.\\w+'`).test(i18nSrc)) fails.push(`${g.id} has no name to show`);
     if (!e.meta.tags?.includes(tag)) fails.push(`${g.id} is not tagged for the league`);
     // Clear of the pitch, and of each other.
     const grid = new Map<string, number[]>();
@@ -2473,22 +2500,26 @@ await (async () => {
   // Home grounds and their clubs, with the seat count each is built to: the
   // official figure, or the one the ground really holds where they differ.
   const GROUNDS: LeagueGround[] = [
-    { id: 'alawwal-park-26k', clubs: 'Al-Nassr, Al-Diriyah', seats: 26004, tol: 0.02 },
-    { id: 'kingdom-arena-26k', clubs: 'Al-Hilal', seats: 26700, tol: 0.02 },
-    { id: 'jewel-jeddah-60k', clubs: 'Al-Ittihad, Al-Ahli', seats: 60241, tol: 0.02 },
+    { id: 'alawwal-park-26k-rb', clubs: 'Al-Nassr, Al-Diriyah', seats: 26004, tol: 0.02 },
+    // 26,700 announced before the 2024 expansion was built; 22,300 numbered seats in the photographs.
+    { id: 'kingdom-arena-26k-rb', clubs: 'Al-Hilal', seats: 22300, tol: 0.02 },
+    { id: 'jewel-jeddah-60k-rb', clubs: 'Al-Ittihad, Al-Ahli', seats: 60241, tol: 0.02 },
     { id: 'alfaisal-jeddah-27k', clubs: 'Al-Ahli, Al-Ittihad', seats: 27000, tol: 0.02 },
-    { id: 'shg-arena-14k', clubs: 'Al-Shabab', seats: 13537, tol: 0.02 },
-    { id: 'pfbf-stadium-22k', clubs: 'Al-Riyadh', seats: 22500, tol: 0.02 },
-    { id: 'ego-stadium-13k', clubs: 'Al-Ettifaq', seats: 12984, tol: 0.02 },
-    { id: 'pmbf-stadium-22k', clubs: 'Al-Qadsiah, Al-Khaleej', seats: 22042, tol: 0.02 },
-    { id: 'alfateh-stadium-12k', clubs: 'Al-Fateh', seats: 11851, tol: 0.02 },
-    { id: 'buraidah-stadium-25k', clubs: 'Al-Taawoun', seats: 25000, tol: 0.03 },
-    // 20,000 by the book; 14,357 at the 2024 Super Cup final, "does not exceed 17,000".
-    { id: 'abha-stadium-20k', clubs: 'Abha', seats: 17000, tol: 0.04 },
-    { id: 'tabuk-stadium-12k', clubs: 'NEOM', seats: 12000, tol: 0.02 },
+    { id: 'shg-arena-14k-rb', clubs: 'Al-Shabab', seats: 13537, tol: 0.02 },
+    { id: 'pfbf-stadium-22k-rb', clubs: 'Al-Riyadh', seats: 22500, tol: 0.02 },
+    { id: 'ego-stadium-13k-rb', clubs: 'Al-Ettifaq', seats: 12984, tol: 0.02 },
+    { id: 'pmbf-stadium-22k-rb', clubs: 'Al-Qadsiah, Al-Khaleej', seats: 22042, tol: 0.02 },
+    { id: 'alfateh-stadium-12k-rb', clubs: 'Al-Fateh', seats: 11851, tol: 0.02 },
+    // "About 25,000" by the book; the stands the drone photograph shows (the side
+    // opposite the main stand 27 m deep) hold 28,500 at half-metre seats.
+    { id: 'buraidah-stadium-25k-rb', clubs: 'Al-Taawoun', seats: 28500, tol: 0.02 },
+    // 20,000 by the book; 14,357 at the 2024 Super Cup final, "does not exceed 17,000";
+    // its real blocks hold 16,160.
+    { id: 'abha-stadium-20k-rb', clubs: 'Abha', seats: 16500, tol: 0.03 },
+    { id: 'tabuk-stadium-12k-rb', clubs: 'NEOM', seats: 12000, tol: 0.02 },
     // 8,000 by the book; 6,200 numbered seats since 2019.
-    { id: 'alhazem-stadium-8k', clubs: 'Al-Hazem, Al-Kholood', seats: 6200, tol: 0.02 },
-    { id: 'majmaah-stadium-7k', clubs: 'Al-Fayha, Al-Faisaly', seats: 6844, tol: 0.01 },
+    { id: 'alhazem-stadium-8k-rb', clubs: 'Al-Hazem, Al-Kholood', seats: 6200, tol: 0.02 },
+    { id: 'majmaah-stadium-7k-rb', clubs: 'Al-Fayha, Al-Faisaly', seats: 6844, tol: 0.01 },
   ];
   await leagueGrounds('saudi league', 'saudi-pro-league', GROUNDS, (i18nSrc, fails) => {
     // The earlier Al-Awwal is still there for designs saved on it, and named as such.
@@ -2651,6 +2682,68 @@ await (async () => {
   if (probeGaps.length !== 4 || [-30, -10, 10, 30].some((x) => !near(probeGaps, x, 0.3))) fails.push(`probe stairs at ${probeGaps.map((x) => x.toFixed(2)).join(', ')}, not ±10 and ±30`);
   if (new Set(pm.sectionOf).size !== 5) fails.push(`the probe bowl has ${new Set(pm.sectionOf).size} blocks, not 5`);
 
+  // A straight tier (four separate stands) in its real blocks: a stairway is
+  // the same `along` in every row, a walkway empties a row, the tunnel and a
+  // press box empty their rows and stretch, and the blocks take their names.
+  const vit = cat.templateById('vitality-11k')!;
+  const st: typeof vit = JSON.parse(JSON.stringify(vit));
+  st.id = 'blocks-straight-probe';
+  st.tiers[0].blocks = {
+    width: 1.2,
+    aisles: [{ side: 'north', at: [0, 10, 20], mirror: true }, { side: 'south', at: [12], mirror: true }, { side: 'east', at: [0] }],
+    walkways: [{ row: 8 }],
+    openings: [{ side: 'south', at: [0], width: 6, rows: [0, 4], kind: 'tunnel' }],
+    areas: [{ side: 'east', from: -3, to: 3, rows: [10, 15], kind: 'press' }],
+    names: [{ side: 'north', first: 101 }, { side: 'north', band: 1, prefix: 'N', first: 201 }],
+  };
+  const sm = generateSeatMap(st);
+  const sb = (st.tiers[0].stands ?? []).find((x) => x.side === 'north')!;
+  const sPlan = st.plan;
+  const sIn = (i: number, side: 'north' | 'south' | 'east' | 'west'): boolean =>
+    side === 'north' ? sm.pos3[i * 3 + 2] > sPlan.b : side === 'south' ? sm.pos3[i * 3 + 2] < -sPlan.b : side === 'east' ? sm.pos3[i * 3] > sPlan.a : sm.pos3[i * 3] < -sPlan.a;
+  const rowSeats = (row: number, side: 'north' | 'south' | 'east' | 'west'): number[] => {
+    const out: number[] = [];
+    for (let i = 0; i < sm.count; i++) if (sm.rowOf[i] === row && sIn(i, side)) out.push(i);
+    return out;
+  };
+  const north3 = rowSeats(3, 'north').map((i) => sm.pos3[i * 3]).sort((p, q) => p - q);
+  const sGaps: number[] = [];
+  for (let k = 1; k < north3.length; k++) if (north3[k] - north3[k - 1] > 0.9) sGaps.push((north3[k] + north3[k - 1]) / 2);
+  const wantGaps = [-20, -10, 0, 10, 20].filter((x) => Math.abs(x) < sb.halfLength - 1);
+  if (sGaps.length !== wantGaps.length || wantGaps.some((x) => !near(sGaps, x, 0.3))) fails.push(`straight probe stairs at ${sGaps.map((x) => x.toFixed(2)).join(', ')}, not ${wantGaps.join(', ')}`);
+  if ([...sm.rowOf].some((r, i) => r === 8 && sm.tierOf[i] === 0)) fails.push('the straight probe has seats in its walkway row');
+  for (let i = 0; i < sm.count; i++) {
+    const r = sm.rowOf[i];
+    if (sIn(i, 'south') && r <= 4 && Math.abs(sm.pos3[i * 3]) < 3) { fails.push('a seat in the straight probe\'s tunnel'); break; }
+    if (sIn(i, 'east') && r >= 10 && r <= 15 && Math.abs(sm.pos3[i * 3 + 2]) < 3) { fails.push('a seat in the straight probe\'s press box'); break; }
+  }
+  if (!rowSeats(9, 'east').some((i) => Math.abs(sm.pos3[i * 3 + 2]) < 1)) fails.push('the row in front of the press box is empty too');
+  const sInfo = bl.sectionInfo(sm, st);
+  const named = (n: string): number => {
+    const e = [...sInfo].find(([, v]) => v.name === n);
+    if (!e) return NaN;
+    let x = 0, k = 0;
+    for (let i = 0; i < sm.count; i++) if (sm.sectionOf[i] === e[0]) { x += sm.pos3[i * 3]; k++; }
+    return x / k;
+  };
+  // Left to right from the pitch, the north stand runs towards +x.
+  if (!(named('101') < named('102') && named('102') < named('103'))) fails.push(`the north stand's front blocks are not named 101, 102, 103 left to right (${named('101')}, ${named('102')}, ${named('103')})`);
+  if (!Number.isFinite(named('N201'))) fails.push('the band behind the walkway has no N201');
+  if ([...sInfo.values()].some((v) => v.stand === 'north' && v.band === 0 && !v.name)) fails.push('a north front block has no name');
+  if (new Set([...sInfo.values()].map((v) => v.label)).size !== sInfo.size) fails.push('two straight-probe blocks share a label');
+  // Every block one piece of one stand, one tier and one band.
+  for (const [id] of sInfo) {
+    const rowsOf = new Set<number>();
+    for (let i = 0; i < sm.count; i++) if (sm.sectionOf[i] === id) rowsOf.add(sm.rowOf[i]);
+    const rs = [...rowsOf].sort((p, q) => p - q);
+    if (rs.some((r, k) => k > 0 && r - rs[k - 1] > 1 && !(rs[k - 1] < 8 && r > 8))) { fails.push(`straight probe block ${id} skips rows`); break; }
+    if (rs[0] < 8 && rs[rs.length - 1] > 8) { fails.push(`straight probe block ${id} runs across the walkway`); break; }
+  }
+  const sq = bl.openingQuads(st);
+  if (sq.length !== 1 || Math.abs(Math.abs(sq[0].corners[0][0] - sq[0].corners[1][0]) - 6) > 0.01) fails.push(`the straight probe draws ${sq.length} openings, not its 6 m tunnel`);
+  // (Its near-rectangular plan is a shipped ground's, beyond what a user may submit; its blocks are what is checked.)
+  if (!bl.validBlocks(JSON.parse(JSON.stringify(st.tiers[0].blocks)), st.tiers[0].rows)) fails.push('the straight probe\'s blocks are not valid');
+
   // A seat plan's blocks become stations: 20 then 28 seats from a stairway at
   // 0 put the next two stairs 11.2 and 26.4 m along (seats, plus a stair each).
   const fromPlan = bl.stationsFromSeats(0, [20, 28], 0.5, 1.2);
@@ -2667,7 +2760,10 @@ await (async () => {
     ['a walkway off the tier', (o) => ((tiersOf(o)[0].blocks.walkways[0] as Record<string, unknown>).row = 99)],
     ['a station that is not a number', (o) => ((tiersOf(o)[0].blocks.aisles[0] as Record<string, unknown>).at = [NaN])],
     ['an opening with no width', (o) => delete (tiersOf(o)[0].blocks.openings[0] as Record<string, unknown>).width],
-    ['blocks on a straight tier', (o) => ((tiersOf(o)[0] as Record<string, unknown>).straight = true)],
+    ['blocks on a straight tier with no stands', (o) => ((tiersOf(o)[0] as Record<string, unknown>).straight = true)],
+    ['a seat-free area of no known kind', (o) => ((tiersOf(o)[0].blocks as Record<string, unknown>).areas = [{ side: 'north', from: 0, to: 2, rows: [0, 1], kind: 'bar' }])],
+    ['a block name too long', (o) => ((tiersOf(o)[0].blocks as Record<string, unknown>).names = [{ side: 'north', names: ['x'.repeat(60)] }])],
+    ['a numbered name with no first number', (o) => ((tiersOf(o)[0].blocks as Record<string, unknown>).names = [{ side: 'north', prefix: 'N' }])],
   ];
   for (const [what, spoil] of bad) {
     const o = json();
@@ -2677,6 +2773,67 @@ await (async () => {
 
   console.log(`real blocks: Al-Faisal ${m.count} seats in ${n} blocks | front band stairs ${frontStairs.map((x) => x.toFixed(1)).join(' ')} | middle ${middle.map((x) => x.toFixed(1)).join(' ')} | upper every ${upperSteps.map((d) => d.toFixed(1)).join('/')} m | ${quads.length} openings`);
   if (fails.length) throw new Error(`real blocks: ${fails.join('; ')}`);
+})();
+
+// --- Every ground in its real blocks ------------------------------------------
+// The same checks on every ground laid out in its real blocks (and every one
+// rebuilt that way later), on the seats themselves: each block is one piece
+// of one tier and one band, with a label of its own; none is a sliver left
+// between a stairway and the end of a stand; no block's front row is wider
+// than the rule-book allows between two stairs (28 seats, FIFA 2022 §5.2.1 and
+// the Green Guide §12.15, with a little slack for rounding); every opening the
+// template declares is drawn; every earlier layout is kept, byte-identical,
+// and points at its replacement.
+await (async () => {
+  const cat = await import('../src/core/stadiumCatalog');
+  const bl = await import('../src/core/blocks');
+  const fails: string[] = [];
+  const lines: string[] = [];
+  // Al-Faisal shipped with two slivers at the ends of its upper tier, where it
+  // stops short of the main stand; it is kept as it shipped (FROZEN).
+  const SLIVER_OK = new Set(['alfaisal-jeddah-27k']);
+  // Two grounds really are wider than the rule-book, as measured: Buraidah's
+  // 1983 front band along the side opposite the main stand, and SHG Arena's
+  // long sides, whose painted block names put nine blocks in 144 m.
+  const WIDE_OK: Record<string, number> = { 'buraidah-stadium-25k-rb': 33, 'shg-arena-14k-rb': 38 };
+  for (const e of cat.STADIUM_CATALOG) {
+    const t = e.template;
+    if (!bl.hasBlocks(t)) continue;
+    const m = generateSeatMap(t);
+    const info = bl.sectionInfo(m, t);
+    const before: number[] = [];
+    t.tiers.reduce((n, tr) => (before.push(n), n + tr.rows), 0);
+    const byBlock = new Map<number, number[]>();
+    for (let i = 0; i < m.count; i++) {
+      const a = byBlock.get(m.sectionOf[i]);
+      if (a) a.push(i);
+      else byBlock.set(m.sectionOf[i], [i]);
+    }
+    let widest = 0;
+    let smallest = Infinity;
+    for (const [id, seats] of byBlock) {
+      const tiersOf = new Set(seats.map((i) => m.tierOf[i]));
+      if (tiersOf.size !== 1) fails.push(`${e.id}: block ${info.get(id)?.label} spans tiers`);
+      const rows = [...new Set(seats.map((i) => m.rowOf[i]))].sort((p, q) => p - q);
+      if (rows.some((r, k) => k > 0 && r - rows[k - 1] > 2)) fails.push(`${e.id}: block ${info.get(id)?.label} skips rows ${rows.join(',')}`);
+      const front = seats.filter((i) => m.rowOf[i] === rows[0]).length;
+      widest = Math.max(widest, front);
+      if (front > (WIDE_OK[e.id] ?? 32)) fails.push(`${e.id}: block ${info.get(id)?.label} is ${front} seats across its front row`);
+      smallest = Math.min(smallest, seats.length);
+      if (seats.length < 12 && !SLIVER_OK.has(e.id)) fails.push(`${e.id}: block ${info.get(id)?.label} is a sliver of ${seats.length} seats`);
+    }
+    const labels = [...info.values()].map((v) => v.label);
+    if (new Set(labels).size !== labels.length) fails.push(`${e.id}: two blocks share a label`);
+    const named = [...info.values()].filter((v) => v.name).map((v) => v.name!);
+    if (new Set(named).size !== named.length) fails.push(`${e.id}: two blocks share a real name`);
+    const quads = bl.openingQuads(t);
+    if (quads.some((q) => q.corners.length !== 4 || !(q.backY > q.frontY))) fails.push(`${e.id}: an opening is not a quad up the rake`);
+    const legacy = cat.LEGACY_STADIUMS.filter((l) => l.meta.supersededBy === e.id);
+    for (const l of legacy) if (cat.STADIUM_CATALOG.some((c) => c.id === l.id)) fails.push(`${e.id}: its earlier layout ${l.id} is still offered`);
+    lines.push(`${e.id} ${m.count}/${info.size} blocks, widest front ${widest}, smallest ${smallest}, ${named.length} named, ${quads.length} openings`);
+  }
+  console.log(`real blocks, every ground: ${lines.join(' | ')}`);
+  if (fails.length) throw new Error(`real blocks, every ground: ${fails.join('; ')}`);
 })();
 
 // --- The Premier League's grounds (2026-27) ---------------------------------
@@ -2753,6 +2910,7 @@ await leagueGrounds('laliga', 'laliga', [
 // standing inside the ground's own footprint; and Match Day shows the credit.
 await (async () => {
   const cat = await import('../src/core/stadiumCatalog');
+  const { baseGroundId } = await import('../src/core/realBlocks');
   const { readFileSync: stRead, existsSync: stExists } = await import('node:fs');
   const fails: string[] = [];
   const report: string[] = [];
@@ -2769,7 +2927,8 @@ await (async () => {
       continue;
     }
     const d = JSON.parse(stRead(file, 'utf8'));
-    if (d.key !== key || d.template !== t.id) fails.push(`${key}: built for ${d.template}, not ${t.id}`);
+    // A ground rebuilt in its real blocks keeps its neighbourhood: the file names the ground it was built for.
+    if (d.key !== key || (d.template !== t.id && d.template !== baseGroundId(t.id))) fails.push(`${key}: built for ${d.template}, not ${t.id}`);
     if (!/OpenStreetMap/.test(d.attribution ?? '')) fails.push(`${key}: no OpenStreetMap credit`);
     if (!d.roads?.length || !d.bld?.length) fails.push(`${key}: ${d.roads?.length ?? 0} roads, ${d.bld?.length ?? 0} buildings`);
     let reach = 0;
@@ -2799,6 +2958,7 @@ await (async () => {
 await (async () => {
   const cat = await import('../src/core/stadiumCatalog');
   const { emptySeatColours } = await import('../src/render/seatColours');
+  const { baseGroundId } = await import('../src/core/realBlocks');
   const { seatFacing, buildChairs } = await import('../src/render/seatChairs');
   const HAND = new Set(['jewel-jeddah-60k', 'kingdom-arena-26k', 'community-jewel-jeddah-62k', 'community-alawwal-park-25k', 'community-kingdom-arena-28k']);
   const FALLBACK = new Set(['3d424a', '434851', '393e45', '4a5059']);
@@ -2809,7 +2969,7 @@ await (async () => {
   for (const e of [...cat.STADIUM_CATALOG, ...cat.LEGACY_STADIUMS]) {
     const t = e.template;
     grounds++;
-    if (!t.seatLook && !HAND.has(t.id)) fails.push(`${t.id}: no seat colours of its own`);
+    if (!t.seatLook && !HAND.has(t.id) && !HAND.has(baseGroundId(t.id))) fails.push(`${t.id}: no seat colours of its own`);
     const m = generateSeatMap(t);
     const rgb = emptySeatColours(t, m);
     let fallback = 0;

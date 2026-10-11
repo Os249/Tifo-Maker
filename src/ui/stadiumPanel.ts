@@ -22,6 +22,7 @@ import { EDITOR_UNITS } from '../core/seatmap';
 import type { SeatMap, StadiumTemplate } from '../core/types';
 import {
   entryById,
+  newestLayout,
   queryCatalog,
   catalogCountries,
   tierCount,
@@ -328,7 +329,7 @@ export function mountStadiumPanel(deps: StadiumPanelDeps): void {
     // A design on a ground that has since been rebuilt: say so, and offer the
     // new one. Never automatic — switching moves the design onto a different
     // seat map, which is the owner's call.
-    const newer = e.id === currentId && e.meta.supersededBy ? entryById(e.meta.supersededBy) : undefined;
+    const newer = e.id === currentId ? newestLayout(e.id) : undefined;
     if (newer) {
       const note = document.createElement('div');
       note.style.cssText = NOTE_CSS + 'margin-top:8px;color:var(--text-2);';

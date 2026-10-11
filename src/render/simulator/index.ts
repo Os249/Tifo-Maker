@@ -61,6 +61,7 @@ import { buildAlAwwalExtras, buildKingdomArenaExtras } from './stadiumExtras';
 import { buildPitchDetail, pitchStripeTexture } from './pitchDetail';
 import { dbg } from './debug';
 import { buildAtmosphere, type Atmosphere, type SoundBus, type SoundLevels } from './atmosphere';
+import { baseGroundId } from '../../core/realBlocks';
 
 /**
  * How full each crowd preset leaves the ground, for the mixer.
@@ -350,9 +351,9 @@ export class MatchDaySimulator {
     // Subsystems (Phases 2-7). Each is independently toggleable from the overlay.
     this.crowd = buildCrowd(this.map, this.store, this.noTifo);
     this.scene.add(this.crowd.object);
-    this.pitchside = buildPitchside(this.settings.shadows, { benches: this.template.id !== KINGDOM_ID });
+    this.pitchside = buildPitchside(this.settings.shadows, { benches: baseGroundId(this.template.id) !== KINGDOM_ID });
     this.scene.add(this.pitchside.object);
-    this.banners = buildBanners(this.map, this.store);
+    this.banners = buildBanners(this.map, this.store, this.template);
     this.scene.add(this.banners.object);
     this.effects = buildEffects(this.scene, this.renderer, this.camera, {
       post: this.settings.tier === 'high' || this.settings.tier === 'ultra',
@@ -447,13 +448,13 @@ export class MatchDaySimulator {
       this.groundObject = ground.object;
       this.disposables.push(...ground.disposables);
     }
-    if (this.template.id === JEWEL_ID) {
+    if (baseGroundId(this.template.id) === JEWEL_ID) {
       const jewel = buildJewel(this.template, this.settings.shadows);
       this.scene.add(jewel.object);
       this.structureObjects.push(jewel.object);
       this.disposables.push(...jewel.disposables);
     }
-    if (this.template.id === KINGDOM_ID) {
+    if (baseGroundId(this.template.id) === KINGDOM_ID) {
       const kingdom = buildKingdom(this.template, this.settings.shadows);
       this.scene.add(kingdom.object);
       this.structureObjects.push(kingdom.object);
@@ -525,7 +526,7 @@ export class MatchDaySimulator {
       return zc[(Math.imul(i, 2654435761) >>> 0) % zc.length];
     }
     if (cell === 0 && this.lookMap) return this.lookColors[this.lookMap.index[i]];
-    if (cell === 0 && this.template.id === JEWEL_ID) {
+    if (cell === 0 && baseGroundId(this.template.id) === JEWEL_ID) {
       const tc = this.jewelTierColors[Math.min(this.map.tierOf[i], this.jewelTierColors.length - 1)];
       return tc[(Math.imul(i, 2654435761) >>> 0) % tc.length];
     }
@@ -537,7 +538,7 @@ export class MatchDaySimulator {
       if (this.map.rowOf[i] < 4) return this.alawwalBlue;
       return this.alawwalSeatColors[(Math.imul(i, 2654435761) >>> 0) % this.alawwalSeatColors.length];
     }
-    if (cell === 0 && this.template.id === KINGDOM_ID) {
+    if (cell === 0 && baseGroundId(this.template.id) === KINGDOM_ID) {
       // Navy seats, a little lighter in places, as at the ground.
       return this.kingdomNavy[(Math.imul(i, 2654435761) >>> 0) % this.kingdomNavy.length];
     }
@@ -877,7 +878,7 @@ export class MatchDaySimulator {
     return d;
   }
   shots(): SimShot[] {
-    if (this.template.id === KINGDOM_ID) {
+    if (baseGroundId(this.template.id) === KINGDOM_ID) {
       // Under the roof: every camera stays inside the hall, below the trusses.
       const { b } = this.template.plan;
       return [
@@ -2603,7 +2604,7 @@ export class MatchDaySimulator {
       if (this.flyActive) {
       // Time into the current pass: a clip starts its own pass at 0.
       const ft = this.elapsed - this.flyStart;
-      if (this.template.id === KINGDOM_ID) {
+      if (baseGroundId(this.template.id) === KINGDOM_ID) {
         // Under the roof: an orbit over the pitch, below the trusses, that
         // dips towards the stands and rises again.
         const P = this.flyPeriod * (22 / FLY_DURATION);

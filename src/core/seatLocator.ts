@@ -40,20 +40,16 @@ export function sectionLabel(section: number, sectionCount: number): string {
 /**
  * The labeller for a stadium's sections. A ground laid out in its real blocks
  * (TierSpec.blocks) names each by the stand it is in and its number along
- * that stand from the left as you face it — "North 5", "East upper 3" — so
- * the label points at the right place however many blocks each stand has.
+ * that stand from the left as you face it — "North 5", "East upper 3" — or by
+ * its real name where the ground publishes it (TierBlocks.names), so the label
+ * points at the right place however many blocks each stand has.
  * Any other ground keeps the labels it has always had.
  */
 export function sectionLabeller(map: SeatMap, template?: StadiumTemplate | null): (section: number) => string {
   const count = listSections(map).length;
   if (!template || !hasBlocks(template)) return (s) => sectionLabel(s, count);
-  const info = sectionInfo(map);
-  const stand = { north: 'North', east: 'East', south: 'South', west: 'West' } as const;
-  return (s) => {
-    const i = info.get(s);
-    if (!i) return sectionLabel(s, count);
-    return `${stand[i.stand]}${i.tier > 0 ? ' upper' : ''} ${i.number}`;
-  };
+  const info = sectionInfo(map, template);
+  return (s) => info.get(s)?.label ?? sectionLabel(s, count);
 }
 
 /** All section ids present in the map, ascending. */

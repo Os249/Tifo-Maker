@@ -137,3 +137,17 @@ export function pointOnOffset(oc: OffsetCurve, u: number): [number, number] {
   const f = (target - oc.s[i]) / segLen;
   return [oc.x[i] + (oc.x[i1] - oc.x[i]) * f, oc.z[i] + (oc.z[i1] - oc.z[i]) * f];
 }
+
+/**
+ * A point on a straight stand's row line (TierSpec.straight): `radial` out
+ * from the plan's side, `along` it (x for the north and south stands, z for
+ * the ends). Moved here unchanged from seatmap.ts so the block layouts can
+ * place a straight stand's openings exactly where its seats are.
+ */
+export function straightPoint(plan: { a: number; b: number }, side: string, radial: number, along: number): [number, number] {
+  const { a, b } = plan;
+  if (side === 'north') return [along, b + radial];
+  if (side === 'south') return [along, -(b + radial)];
+  if (side === 'east') return [a + radial, along];
+  return [-(a + radial), along];
+}

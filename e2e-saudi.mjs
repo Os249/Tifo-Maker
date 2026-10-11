@@ -8,6 +8,8 @@
  *   - so does one on the earlier Al-Faisal, told the new one has the real
  *     blocks; on the new one the blocks are named by stand, as the hover,
  *     the section strip and the panel's count say
+ *   - every other ground is in its real blocks too (October 2026), and the
+ *     layout each had before opens unchanged and offers the move
  *   - Match Day opens on every ground, every camera renders a picture (not a
  *     blank frame), by day and at night, with no WebGL or page errors
  *
@@ -22,19 +24,20 @@ const OUT = 'preview-out/e2e-saudi';
 mkdirSync(OUT, { recursive: true });
 
 // id, seats (the generator's count, frozen in scripts/verify.mts), English and Arabic names.
+// Every ground but Al-Faisal (which had them first) in its real blocks, October 2026.
 const GROUNDS = [
-  ['alawwal-park-26k', 26142, 'Al-Awwal Park (Riyadh)', 'الأول بارك (الرياض)'],
-  ['shg-arena-14k', 13636, 'SHG Arena (Riyadh)', 'إس إتش جي أرينا (الرياض)'],
-  ['ego-stadium-13k', 12740, 'EGO Stadium (Dammam)', 'ملعب إيجو (الدمام)'],
-  ['alfateh-stadium-12k', 11836, 'Al-Fateh Stadium (Al-Ahsa)', 'ملعب نادي الفتح (الأحساء)'],
-  ['pmbf-stadium-22k', 21920, 'Prince Mohamed bin Fahd Stadium (Dammam)', 'استاد الأمير محمد بن فهد (الدمام)'],
+  ['alawwal-park-26k-rb', 26118, 'Al-Awwal Park (Riyadh)', 'الأول بارك (الرياض)'],
+  ['shg-arena-14k-rb', 13786, 'SHG Arena (Riyadh)', 'إس إتش جي أرينا (الرياض)'],
+  ['ego-stadium-13k-rb', 13096, 'EGO Stadium (Dammam)', 'ملعب إيجو (الدمام)'],
+  ['alfateh-stadium-12k-rb', 11876, 'Al-Fateh Stadium (Al-Ahsa)', 'ملعب نادي الفتح (الأحساء)'],
+  ['pmbf-stadium-22k-rb', 22361, 'Prince Mohamed bin Fahd Stadium (Dammam)', 'استاد الأمير محمد بن فهد (الدمام)'],
   ['alfaisal-jeddah-27k', 26873, 'Prince Abdullah Al-Faisal Stadium (Jeddah)', 'ملعب الأمير عبدالله الفيصل (جدة)'],
-  ['buraidah-stadium-25k', 24316, 'King Abdullah Sport City Stadium (Buraidah)', 'ملعب مدينة الملك عبدالله الرياضية (بريدة)'],
-  ['abha-stadium-20k', 16430, 'Prince Sultan Sport City Stadium (Abha)', 'ملعب مدينة الأمير سلطان الرياضية (أبها)'],
-  ['tabuk-stadium-12k', 11992, 'King Khalid Sport City Stadium (Tabuk)', 'ملعب مدينة الملك خالد الرياضية (تبوك)'],
-  ['alhazem-stadium-8k', 6191, 'Al-Hazem Club Stadium (Ar Rass)', 'ملعب نادي الحزم (الرس)'],
-  ['majmaah-stadium-7k', 6838, "Al-Majma'ah Sports City Stadium", 'ملعب مدينة المجمعة الرياضية'],
-  ['pfbf-stadium-22k', 22768, 'Prince Faisal bin Fahd Stadium (Riyadh)', 'ملعب الأمير فيصل بن فهد (الرياض)'],
+  ['buraidah-stadium-25k-rb', 28496, 'King Abdullah Sport City Stadium (Buraidah)', 'ملعب مدينة الملك عبدالله الرياضية (بريدة)'],
+  ['abha-stadium-20k-rb', 16160, 'Prince Sultan Sport City Stadium (Abha)', 'ملعب مدينة الأمير سلطان الرياضية (أبها)'],
+  ['tabuk-stadium-12k-rb', 11876, 'King Khalid Sport City Stadium (Tabuk)', 'ملعب مدينة الملك خالد الرياضية (تبوك)'],
+  ['alhazem-stadium-8k-rb', 6129, 'Al-Hazem Club Stadium (Ar Rass)', 'ملعب نادي الحزم (الرس)'],
+  ['majmaah-stadium-7k-rb', 6822, "Al-Majma'ah Sports City Stadium", 'ملعب مدينة المجمعة الرياضية'],
+  ['pfbf-stadium-22k-rb', 22790, 'Prince Faisal bin Fahd Stadium (Riyadh)', 'ملعب الأمير فيصل بن فهد (الرياض)'],
 ];
 const OLD_ID = 'community-alawwal-park-25k';
 const OLD_SEATS = 24652;
@@ -123,7 +126,7 @@ for (const [id, seats, en] of GROUNDS) {
   const info = await p.$eval('#stadium-info', (e) => e.textContent || '');
   check(`${id}: the panel names it`, info.includes(en), info.slice(0, 80));
   check(`${id}: no "move to the new version" on it`, !(await p.$('#stadium-info button.primary')));
-  if (id === 'alawwal-park-26k') {
+  if (id === 'alawwal-park-26k-rb') {
     const listed = await p.$$eval('#stadium-list > *', (rows) => rows.map((r) => r.textContent || ''));
     for (const [, , name] of GROUNDS) check(`the list offers ${name} once`, listed.filter((t) => t.includes(name)).length === 1);
     check('the earlier Al-Awwal is not offered', !listed.some((t) => /earlier layout/.test(t) && /Al-Awwal/.test(t)));
@@ -163,6 +166,26 @@ if (!only || 'alawwal'.includes(only)) {
   }
   check('no page errors', errs.length === 0, errs.join(' | '));
   await ctx.close();
+}
+
+// ---------------------------------------------------------------------------
+// The layout each ground had before its real blocks: designs saved on one keep
+// it, seat for seat, and are told the real blocks are there to move to.
+const BEFORE_BLOCKS = {"alawwal-park-26k": 26142, "shg-arena-14k": 13636, "ego-stadium-13k": 12740, "alfateh-stadium-12k": 11836, "pmbf-stadium-22k": 21920, "buraidah-stadium-25k": 24316, "abha-stadium-20k": 16430, "tabuk-stadium-12k": 11992, "alhazem-stadium-8k": 6191, "majmaah-stadium-7k": 6838, "pfbf-stadium-22k": 22768};
+if (!only || only === 'earlier') {
+  console.log('\n— the layouts before the real blocks —');
+  for (const [id, seats] of Object.entries(BEFORE_BLOCKS)) {
+    const { ctx, p, errs } = await open(`/app?new=1&template=${id}`);
+    await waitReady(p);
+    await p.waitForTimeout(600);
+    check(`${id}: opens on its own seat map, unchanged`, seatsIn(await stat(p)) === seats, await stat(p));
+    await p.click('#rail-stadium');
+    await p.waitForTimeout(600);
+    const info = await p.$eval('#stadium-info', (e) => e.textContent || '');
+    check(`${id}: named as the earlier layout, the real blocks offered`, /earlier layout/.test(info) && /real blocks/.test(info) && !!(await p.$('#stadium-info button.primary')), info.slice(0, 80));
+    check(`${id}: no page errors`, errs.length === 0, errs.join(' | '));
+    await ctx.close();
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -242,7 +265,7 @@ for (const [id] of GROUNDS) {
   // seen from the air and on foot (not Kingdom Arena: an indoor hall stays inside).
   const credit = await p.$eval('[data-k="osm-credit"]', (a) => ({ t: a.textContent, h: a.href })).catch(() => null);
   check(`${id}: credits OpenStreetMap on the picture`, !!credit && /OpenStreetMap/.test(credit.t) && /openstreetmap\.org\/copyright/.test(credit.h), JSON.stringify(credit));
-  if (id !== 'kingdom-arena-26k')
+  if (!id.startsWith('kingdom-arena'))
     check(`${id}: has the Aerial and Outside views`, names.includes('Aerial') && names.includes('Outside'), names.join(', '));
   let flat = [];
   for (let k = 0; k < values.length; k++) {

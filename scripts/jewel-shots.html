@@ -51,6 +51,8 @@
     if (opts.wet) sim.setWetPitch(true);
     // As the app opens it: rail banners off (overlay state.banners = false).
     sim.setBannersVisible(!!opts.railBanners);
+    // opts.stairs: Cover stairs on, to check the fill follows the stairways.
+    if (opts.stairs) sim.setStairsVisible(true);
     // A real ground's neighbourhood loads on its own; shots wait for it.
     if (sim.whenSurroundingsReady) await sim.whenSurroundingsReady();
     curId = id;

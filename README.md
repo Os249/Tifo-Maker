@@ -45,6 +45,21 @@ Three tiers keyed to capability, not just width:
   work in real blocks, named by stand ("North 5", "East upper 3"). Prince
   Abdullah Al-Faisal (`alfaisal-jeddah-27k`) is the first ground built this way;
   its earlier even layout stays as a legacy ground for designs saved on it.
+- **Every Saudi ground in its real blocks** — the other thirteen Saudi league
+  grounds are re-laid stand by stand, each measured from photographs of it
+  (the camera solved from the pitch markings, the stands unrolled square on
+  and the stairs and vomitories read off in metres): `src/core/realBlocksSaudi.ts`.
+  Each is a new template id (`<old id>-rb`) built from the old one, which stays
+  byte-identical for the designs saved on it and offers to move them
+  (`src/core/realBlocks.ts`, `newestLayout`). The block engine gained straight
+  stands, seat-free areas (press boxes, platforms), real block names (SHG
+  Arena's painted E1–E9, W1–W9…), gangways along one stand only, and Cover
+  stairs that follows each real stairway. Kingdom Arena's lower stands are
+  now straight, and Buraidah's horseshoe has the depth the drone photograph
+  shows along the side opposite the main stand. Dev tools:
+  `npx tsx scripts/block-plan.mts <id> [--side north]` draws a ground's blocks
+  from above, labelled as the app labels them; `scripts/station-picker.html`
+  (from the dev server) turns clicks on a photograph into stations.
 - **No glow by default in Match Day** — the bloom pass on High and Ultra put a
   halo round every white card and washed the stands out. It is now off when
   Match Day opens; Atmosphere → Glow turns it back on (High and Ultra only).
@@ -363,8 +378,12 @@ src/
     seatmap.ts     deterministic generator: superellipse → offset rows → arc-length
                    seats → aisles/walkways → sections → neighbor graph
     planCurve.ts   the plan curve and its offset rows, sampled with normals
-    blocks.ts      real block layouts: stairs, walkways and openings as lines square
-                   to the plan curve; block labels by stand
+    blocks.ts      real block layouts: stairs, walkways, openings and seat-free areas
+                   as lines square to the plan curve (or along a straight stand);
+                   block labels and real names by stand and tier
+    realBlocks.ts  grounds re-laid in their real blocks: the registry, baseGroundId,
+                   and the helpers a layout is written with (ringStairs, atStairs)
+    realBlocksSaudi.ts  the Saudi grounds' real blocks, each measured from photographs
     spatialHash.ts O(1) pointer→seat resolution (disc + nearest queries)
     design.ts      DesignStore: cells buffer, stroke recording, sparse-diff undo/redo
     tools.ts       brush stamp/segment, BFS flood fill over the neighbor graph

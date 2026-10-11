@@ -896,7 +896,7 @@ console.log(`\n${failures === 0 ? 'ALL PASS' : failures + ' FAILED'}`);
   let short = 0;
   let onEmpty = 0;
   let total = 0;
-  for (const id of ['majmaah-stadium-7k', 'alhazem-stadium-8k', 'coliseum-11k', 'tabuk-stadium-12k', 'shg-arena-14k']) {
+  for (const id of ['majmaah-stadium-7k-rb', 'alhazem-stadium-8k-rb', 'coliseum-11k', 'tabuk-stadium-12k-rb', 'shg-arena-14k-rb']) {
     const m = mapOf(id);
     const ctxS = buildStadiumContext(m);
     const empty = new Set(ctxS.stands.filter((s) => s.seats === 0).map((s) => s.stand));
@@ -938,7 +938,7 @@ console.log(`\n${failures === 0 ? 'ALL PASS' : failures + ' FAILED'}`);
   const grad = validateSpec({ palette: ['#262a33', '#c8242c', '#f2f1ec'], layers: [
     { kind: 'gradient', region: 'all', colors: [1, 2], direction: 'vertical' },
   ] }).spec!;
-  const gFit = fitSpecToStadium(grad, mapOf('majmaah-stadium-7k')).spec;
+  const gFit = fitSpecToStadium(grad, mapOf('majmaah-stadium-7k-rb')).spec;
   check('fit: a gradient over 18 rows becomes bands', gFit.layers[0].kind === 'stripes', gFit.layers[0].kind);
   check('fit: …but stays a gradient on a deep bowl', fitSpecToStadium(grad, big).spec.layers[0].kind === 'gradient');
 
@@ -953,9 +953,9 @@ console.log(`\n${failures === 0 ? 'ALL PASS' : failures + ' FAILED'}`);
   check('refine: a word on a two-colour gradient gets a panel', !!panel && contrastRatio(onGrad.palette[(panel as { colorIndex: number }).colorIndex], onGrad.palette[word.colorIndex]) >= 3);
 
   // 6. The stadium context says what each stand can hold.
-  const hz = describeStadiumContext(buildStadiumContext(mapOf('alhazem-stadium-8k')));
+  const hz = describeStadiumContext(buildStadiumContext(mapOf('alhazem-stadium-8k-rb')));
   check('context: a stand without seats is called out', /- north: 0 seats.*NO SEATS/.test(hz), hz.split('\n').find((l) => l.includes('- north')) ?? '');
-  const mj = describeStadiumContext(buildStadiumContext(mapOf('majmaah-stadium-7k')));
+  const mj = describeStadiumContext(buildStadiumContext(mapOf('majmaah-stadium-7k-rb')));
   check('context: a shallow stand says one element only', /SHALLOW/.test(mj) && /SLIVER/.test(mj));
 }
 

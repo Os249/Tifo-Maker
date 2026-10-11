@@ -664,8 +664,10 @@ export interface TierSpec {
    * tier above has its own, and a front band, a walkway and a band behind it
    * each have theirs (see core/blocks.ts).
    *
-   * Needs `evenRows`, a ring tier (not `straight`), and moves seats — so a
-   * ground that gains it is a new template id.
+   * Needs `evenRows`, and moves seats — so a ground that gains it is a new
+   * template id. On a straight tier (`straight`) a station is simply metres
+   * along the stand from the side's centre line, and a stairway runs square
+   * to the stand.
    */
   blocks?: TierBlocks;
 }
@@ -691,6 +693,46 @@ export interface TierBlocks {
   walkways?: Walkway[];
   /** Openings through the seats: vomitories, the players' tunnel, a gate down to the pitch. */
   openings?: SeatOpening[];
+  /**
+   * Stretches of the stand with no seats that are not a way through: a press
+   * box, a wheelchair platform, a camera gantry, the gap that segregates the
+   * away fans. The bare deck shows there, as on a walkway.
+   */
+  areas?: SeatFreeArea[];
+  /**
+   * The blocks' real names, stand by stand and band by band, where the ground
+   * publishes them ("Kop 105", "N1401", "Sector 214"). A block without one
+   * keeps the label it would have had: its stand and number along it.
+   */
+  names?: BlockNames[];
+}
+
+/** A seat-free stretch of a tier (TierBlocks.areas). */
+export interface SeatFreeArea {
+  side: StandSide;
+  /** Stations (see TierBlocks), from < to. */
+  from: number;
+  to: number;
+  /** The rows it takes, [first, last], 0 = the tier's front row. */
+  rows: [number, number];
+  kind: 'press' | 'platform' | 'gantry' | 'segregation';
+}
+
+/**
+ * The names of one stand's blocks in one band of a tier, left to right as you
+ * face the stand from the pitch — the order every other label numbers them in.
+ * Either a list, or a number sequence with an optional prefix and suffix.
+ */
+export interface BlockNames {
+  side: StandSide;
+  /** The band, 0 = in front of the tier's first walkway. Default 0. */
+  band?: number;
+  names?: string[];
+  /** The first block's number, and the step to the next (default 1). */
+  first?: number;
+  step?: number;
+  prefix?: string;
+  suffix?: string;
 }
 
 /** Stairways on one side of the bowl (TierBlocks.aisles). */
@@ -710,7 +752,10 @@ export interface AisleRun {
 export interface Walkway {
   /** The row (0 = the tier's front row). */
   row: number;
-  /** Only along part of the bowl: one side, between two stations. Omitted: all the way round. */
+  /**
+   * Only along part of the bowl: one side — the whole of it, corner to corner,
+   * or between two stations (`from`, `to`). Omitted: all the way round.
+   */
   side?: StandSide;
   from?: number;
   to?: number;

@@ -11,6 +11,7 @@
  */
 
 import { PASSWORD_MAX, PASSWORD_MIN } from '../core/password';
+import { SAUDI_REAL_BLOCKS } from '../core/realBlocksSaudi';
 
 export type Lang = 'en' | 'ar';
 
@@ -1238,7 +1239,7 @@ const STRINGS: Record<string, { en: string; ar: string }> = {
   'si.note.capacity': { en: '{built} built against {stated} stated — {pct}% out', ar: '{built} مقعد مبني مقابل {stated} معلنة — فرق {pct}%' },
   'si.note.aisles': { en: 'a stadium-sized default; the imagery could count the real ones', ar: 'رقم افتراضي لملعب بهذا الحجم؛ الصور الجوية تقدر تعدّ الحقيقية' },
   'si.note.pitch': { en: '~0.5 m is the regulated working figure', ar: '~٠٫٥ م هو الرقم المعتمد نظاماً' },
-  'si.note.tiers': { en: 'right on 36 of our 64 stadiums; a photo settles it', ar: 'صح في ٣٦ من ٦٤ ملعب عندنا؛ صورة وحدة تحسمها' },
+  'si.note.tiers': { en: 'right on 35 of our 64 stadiums; a photo settles it', ar: 'صح في ٣٥ من ٦٤ ملعب عندنا؛ صورة وحدة تحسمها' },
   'si.note.lighting': { en: 'guessed from the roof shape; right on 44 of our 64 stadiums, and a photo settles it', ar: 'مخمّن من شكل السقف؛ صح في ٤٤ من ٦٤ ملعب عندنا، وصورة وحدة تحسمها' },
   'si.note.facade': { en: 'nothing public records what a stadium is clad in — one photo settles this', ar: 'ما فيه مصدر عام يسجّل مواد واجهة الملعب — صورة وحدة تحسمها' },
   'si.warn.noRing': { en: 'No seating ring measured, so the plan curve is the building outline pulled in by a guess. Measuring the imagery replaces that guess.', ar: 'ما انقاس شريط المدرجات، فخط الخطة هو حدود المبنى مسحوبة بتخمين. قياس الصور الجوية يشيل هذا التخمين.' },
@@ -1531,6 +1532,7 @@ const STRINGS: Record<string, { en: string; ar: string }> = {
   'venue.vip': { en: 'Royal box (no tifo)', ar: 'المقصورة الرئيسية (بدون تيفو)' },
   'venue.lane': { en: 'Ambulance ramp', ar: 'ممر الإسعاف' },
   'stad.jewelJeddahOld': { en: 'The Jewel of Jeddah (earlier layout)', ar: 'جوهرة جدة (التصميم السابق)' },
+  'sp.earlierLayout': { en: 'earlier layout', ar: 'التصميم السابق' },
   'stad.alAwwal': { en: 'Al-Awwal Park (Riyadh)', ar: 'الأول بارك (الرياض)' },
   'stad.kingdomArena': { en: 'Kingdom Arena (Riyadh)', ar: 'المملكة أرينا (الرياض)' },
   'stad.kingdomArenaOld': { en: 'Kingdom Arena (earlier layout)', ar: 'المملكة أرينا (التصميم السابق)' },
@@ -2431,9 +2433,21 @@ const LABEL_KEYS: Record<string, string> = {
   West: 'dir.west',
 };
 
+/**
+ * Grounds rebuilt in their real blocks (core/realBlocks*.ts): the new layout
+ * has the ground's name, and the layout it replaced — kept for the designs
+ * saved on it — is that name marked as the earlier layout.
+ */
+const EARLIER_LAYOUT = new Set<string>();
+for (const [oldId, l] of Object.entries(SAUDI_REAL_BLOCKS)) {
+  if (LABEL_KEYS[oldId] && !LABEL_KEYS[l.id]) LABEL_KEYS[l.id] = LABEL_KEYS[oldId];
+  EARLIER_LAYOUT.add(oldId);
+}
+
 export function tl(value: string): string {
   const key = LABEL_KEYS[value];
-  return key ? t(key) : value;
+  if (!key) return value;
+  return EARLIER_LAYOUT.has(value) ? `${t(key)} (${t('sp.earlierLayout')})` : t(key);
 }
 
 /**
@@ -2444,6 +2458,7 @@ export function tl(value: string): string {
 export function tlBoth(value: string, fallback = value): { en: string; ar: string } {
   const key = LABEL_KEYS[value];
   const e = key ? STRINGS[key] : undefined;
+  if (e && EARLIER_LAYOUT.has(value)) return { en: `${e.en} (${STRINGS['sp.earlierLayout'].en})`, ar: `${e.ar} (${STRINGS['sp.earlierLayout'].ar})` };
   return e ? { en: e.en, ar: e.ar } : { en: fallback, ar: fallback };
 }
 

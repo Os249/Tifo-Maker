@@ -170,8 +170,10 @@ console.log('\n--- tier split --------------------------------------------------
   // along one side. 30 of 44 since the Premier League's grounds came in,
   // October 2026: English grounds put a deep single tier where the rule
   // expects two, and the other way round, as often as not. 36 of 64 with
-  // LaLiga's: Spanish grounds put two shallow tiers where it expects one.)
-  check(right === 36, 'tier-count rule scores 36 of 64', `misses: ${misses.join('; ')}`);
+  // LaLiga's: Spanish grounds put two shallow tiers where it expects one. 35
+  // since Buraidah's horseshoe got the depth the drone photograph shows: one
+  // tier, 51 rows with its main stand.)
+  check(right === 35, 'tier-count rule scores 35 of 64', `misses: ${misses.join('; ')}`);
 
   const st = stackTiers(50, 2);
   const stacked = st[1].baseOffset > st[0].baseOffset + st[0].rows * st[0].rowDepth

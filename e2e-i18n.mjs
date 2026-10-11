@@ -141,7 +141,7 @@ console.log('\n— projects in Arabic —');
 }
 {
   const now = Date.now();
-  const one = [{ id: 'la1b2c3d4e5f6a7b', title: 'تيفو الديربي', templateId: 'jewel-jeddah-60k', templateVersion: 1, createdAt: now, updatedAt: now, pinned: true, deletedAt: null, origin: 'ai' },
+  const one = [{ id: 'la1b2c3d4e5f6a7b', title: 'تيفو الديربي', templateId: 'jewel-jeddah-60k-rb', templateVersion: 1, createdAt: now, updatedAt: now, pinned: true, deletedAt: null, origin: 'ai' },
                { id: 'lb1b2c3d4e5f6a7b', title: 'قديم', templateId: 'generic-bowl-60k', templateVersion: 1, createdAt: now, updatedAt: now, pinned: false, deletedAt: now, origin: null }];
   const [ctx, p] = await page('/projects', { extraLs: [{ name: 'tifo_projects_v1', value: JSON.stringify(one) }] });
   report('projects page (a project, a pin, the trash button)', await p.evaluate(scrapePage));
@@ -195,8 +195,10 @@ console.log('\n— the editor and its panels —');
 // The rebuilt Jewel adds its ramps, platforms, boxes and screens to the panel;
 // the earlier Jewel adds the "a newer version exists" note and its button.
 for (const [id, label] of [
-  ['jewel-jeddah-60k', 'stadium panel, a real-venue ground with details'],
+  ['jewel-jeddah-60k-rb', 'stadium panel, a real-venue ground with details'],
   ['community-jewel-jeddah-62k', 'stadium panel, a ground that has been rebuilt'],
+  // The Jewel before its real blocks: the "earlier layout" name and its note.
+  ['jewel-jeddah-60k', 'stadium panel, a ground re-laid in its real blocks'],
 ]) {
   const [ctx, p] = await page(`/app?new=1&template=${id}`, { wait: 6000 });
   await p.evaluate(() => { document.querySelector('.ob-skip')?.click(); });

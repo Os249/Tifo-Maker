@@ -1,8 +1,8 @@
 import type { SeatMap, StadiumTemplate } from './types';
 import { inLane, laneLines } from './venueDetails';
-import { inGap, inStands } from './standSpans';
-import { CURVE_SAMPLES, buildOffsetCurve, offsetLength, pointAt, pointOnOffset, samplePlanCurve, type Curve } from './planCurve';
-import { arcAtIndex, compileBlocks, hasBlocks, indexAtArc, walkCovers, widestAisle, type BlockLine, type WalkLine } from './blocks';
+import { inGap, inStands, sideAt } from './standSpans';
+import { CURVE_SAMPLES, buildOffsetCurve, offsetLength, pointAt, pointOnOffset, samplePlanCurve, straightPoint as planStraightPoint, type Curve } from './planCurve';
+import { arcAtIndex, compileBlocks, hasBlocks, inStraightArea, indexAtArc, straightWalkCovers, walkCovers, widestAisle, type AreaLine, type BlockLine, type StraightLine, type WalkLine } from './blocks';
 
 /**
  * Deterministic seat-map generation.
@@ -24,11 +24,7 @@ const TIER_GAP_PX = 24; // walkway gap between tiers in the editor view
 
 /** A point on a straight stand's row line (TierSpec.straight): `radial` out from the plan's side, `along` it. */
 export function straightPoint(template: StadiumTemplate, side: string, radial: number, along: number): [number, number] {
-  const { a, b } = template.plan;
-  if (side === 'north') return [along, b + radial];
-  if (side === 'south') return [along, -(b + radial)];
-  if (side === 'east') return [a + radial, along];
-  return [-(a + radial), along];
+  return planStraightPoint(template.plan, side, radial, along);
 }
 
 /** Perimeter fraction u of the plan-curve point nearest (x, z). */
@@ -105,8 +101,11 @@ function numberBlocks(keys: string[], us: number[], tiers: number[], sections: n
     // Gaps round the circle, including the one across u = 0.
     const cuts: number[] = [];
     for (let j = 0; j < sorted.length; j++) {
-      const next = j + 1 < sorted.length ? sorted[j + 1] : sorted[0] + 1;
-      if (next - sorted[j] > SPLIT_U) cuts.push(next % 1);
+      const wrap = j + 1 === sorted.length;
+      const next = wrap ? sorted[0] + 1 : sorted[j + 1];
+      // The cut is the u of the piece's first seat itself: (u + 1) % 1 can
+      // round to just above u, and that seat would fall in the other piece.
+      if (next - sorted[j] > SPLIT_U) cuts.push(wrap ? sorted[0] : sorted[j + 1]);
     }
     if (cuts.length <= 1) {
       // One piece: it starts after its one gap (or at its first seat, if it is a full ring).
@@ -195,8 +194,9 @@ export function generateSeatMap(full: StadiumTemplate): SeatMap {
         rowStart[globalRow] = xs.length;
         const editorY =
           (totalRows - 1 - globalRow) * ROW_PX + (tierIdx === 0 ? TIER_GAP_PX * (template.tiers.length - 1) : 0);
-        const row: { u: number; x: number; z: number; y: number }[] = [];
-        for (const st of tier.stands) {
+        const row: { u: number; x: number; z: number; y: number; along: number; si: number }[] = [];
+        for (let si = 0; si < tier.stands.length; si++) {
+          const st = tier.stands[si];
           if (r >= (st.rows ?? tier.rows)) continue;
           const radial = tier.baseOffset + (st.offset ?? 0) + r * tier.rowDepth;
           const y = tier.baseElevation + (st.elevation ?? 0) + r * tier.rowDepth * rake;
@@ -207,23 +207,54 @@ export function generateSeatMap(full: StadiumTemplate): SeatMap {
           for (let k = 0; k < n; k++) {
             const along = C - H + ((k + 0.5) * 2 * H) / n;
             const [x, z] = straightPoint(template, st.side, radial, along);
-            row.push({ u: uOnCurve(curve, template, x, z), x, z, y });
+            row.push({ u: uOnCurve(curve, template, x, z), x, z, y, along, si });
           }
         }
         row.sort((p, q) => p.u - q.u);
         const rowLen = row.length * tier.seatPitch || 1;
         const aisleHalfU = template.aisles.widthMeters / 2 / Math.max(rowLen, curve.total);
+        // A straight tier in its real blocks: stairways at their `along` on
+        // their side, in every row they run through (blocks.compileStraightBlocks).
+        const cs = blocks[tierIdx];
+        const sb = cs && cs.straight ? cs : null;
+        let sStairs: StraightLine[] = [];
+        let sHoles: StraightLine[] = [];
+        if (sb) {
+          sStairs = sb.aisles.filter((l) => r >= l.r0 && r <= l.r1);
+          sHoles = sb.openings.filter((l) => r >= l.r0 && r <= l.r1);
+        }
         for (const q of row) {
-          let inAisle = false;
-          for (const au of aisleU) {
-            let du = Math.abs(q.u - au);
-            if (du > 0.5) du = 1 - du;
-            if (du < aisleHalfU) {
-              inAisle = true;
-              break;
+          let blockKey = '';
+          if (sb) {
+            const side = tier.stands[q.si].side;
+            if (sb.walkways.some((w) => w.row === r && straightWalkCovers(w, side, q.along))) continue;
+            let left: StraightLine | null = null;
+            let inStair = false;
+            for (const l of sStairs) {
+              if (l.side !== side) continue;
+              if (Math.abs(q.along - l.along) < l.halfW) {
+                inStair = true;
+                break;
+              }
+              if (l.along < q.along && (!left || l.along > left.along)) left = l;
             }
+            if (inStair) continue;
+            if (sHoles.some((h) => h.side === side && Math.abs(q.along - h.along) < h.halfW)) continue;
+            if (inStraightArea(sb, side, q.along, r)) continue;
+            const band = sb.walkways.filter((w) => w.row < r && straightWalkCovers(w, side, q.along)).length;
+            blockKey = `${tierIdx}:${band}:${q.si}:${left ? left.id : -1}`;
+          } else {
+            let inAisle = false;
+            for (const au of aisleU) {
+              let du = Math.abs(q.u - au);
+              if (du > 0.5) du = 1 - du;
+              if (du < aisleHalfU) {
+                inAisle = true;
+                break;
+              }
+            }
+            if (inAisle) continue;
           }
-          if (inAisle) continue;
           xs.push(q.u * EDITOR_WIDTH);
           ys.push(editorY);
           us.push(q.u);
@@ -236,6 +267,10 @@ export function generateSeatMap(full: StadiumTemplate): SeatMap {
           sections.push(
             Math.min(template.sectionsPerTier - 1, Math.floor(q.u * template.sectionsPerTier)) + tierIdx * template.sectionsPerTier,
           );
+          if (anyBlocks) {
+            if (!blockKey) blockKey = `${tierIdx}:0:s${Math.min(template.sectionsPerTier - 1, Math.floor(q.u * template.sectionsPerTier))}`;
+            blockKeys.push(blockKey);
+          }
         }
       }
       return;
@@ -256,13 +291,15 @@ export function generateSeatMap(full: StadiumTemplate): SeatMap {
       const editorY =
         (totalRows - 1 - globalRow) * ROW_PX + (tierIdx === 0 ? TIER_GAP_PX * (template.tiers.length - 1) : 0);
       // This row's stairways and openings, where they cross it (metres along it).
-      const cb = blocks[tierIdx];
+      const cbAny = blocks[tierIdx];
+      const cb = cbAny && !cbAny.straight ? cbAny : null;
       let stairs: BlockLine[] = [];
       let stairArc: number[] = [];
       let holes: { arc: number; halfW: number }[] = [];
       let walkHere = false;
       let walkPartial: WalkLine[] = [];
       let walksBehind: WalkLine[] = [];
+      let areasHere: AreaLine[] = [];
       if (cb && oc) {
         stairs = cb.aisles.filter((l) => r >= l.r0 && r <= l.r1);
         stairArc = stairs.map((l) => arcAtIndex(oc, l.idx));
@@ -271,6 +308,7 @@ export function generateSeatMap(full: StadiumTemplate): SeatMap {
         walkHere = here.some((w) => w.i0 === undefined);
         walkPartial = here.filter((w) => w.i0 !== undefined);
         walksBehind = cb.walkways.filter((w) => w.row < r);
+        areasHere = cb.areas.filter((a) => r >= a.r0 && r <= a.r1);
       }
 
       for (let k = 0; k < nSeats; k++) {
@@ -298,11 +336,23 @@ export function generateSeatMap(full: StadiumTemplate): SeatMap {
           if (A > 0 && (near(stairArc[lo % A], stairs[lo % A].halfW) || near(stairArc[(lo - 1 + A) % A], stairs[(lo - 1 + A) % A].halfW))) continue;
           if (holes.some((h) => near(h.arc, h.halfW))) continue;
           let idx = -1;
-          if (walkPartial.length > 0 || walksBehind.some((w) => w.i0 !== undefined)) idx = indexAtArc(oc, arc);
-          if (walkPartial.some((w) => walkCovers(w, idx))) continue;
-          const band = walksBehind.filter((w) => w.i0 === undefined || walkCovers(w, idx)).length;
+          if (walkPartial.length > 0 || areasHere.length > 0 || walksBehind.some((w) => w.i0 !== undefined)) idx = indexAtArc(oc, arc);
+          // A tier of separate stands (TierSpec.stands): each stand is blocks
+          // of its own, and a walkway along one side is that stand's alone —
+          // near an open corner a seat of the next stand can lie within the
+          // walkway's run along the front row.
+          let stand = '';
+          if (tier.stands) {
+            const [px, pz] = pointOnOffset(oc, u);
+            stand = sideAt(template.plan, radial, px, pz);
+          }
+          const mine = (w: WalkLine): boolean => !stand || !w.side || w.side === stand;
+          if (walkPartial.some((w) => mine(w) && walkCovers(w, idx))) continue;
+          // A press box, a platform, a gantry or a segregation gap: no seats, and not the end of a block.
+          if (areasHere.some((a) => walkCovers({ row: r, i0: a.i0, i1: a.i1 }, idx))) continue;
+          const band = walksBehind.filter((w) => mine(w) && (w.i0 === undefined || walkCovers(w, idx))).length;
           const left = A > 0 ? stairs[(lo - 1 + A) % A] : null;
-          blockKey = `${tierIdx}:${band}:${left ? left.id : -1}`;
+          blockKey = `${tierIdx}:${band}:${left ? left.id : -1}${stand ? ':' + stand : ''}`;
         } else {
           // Skip seats inside any radial aisle band.
           let inAisle = false;
@@ -355,7 +405,7 @@ export function generateSeatMap(full: StadiumTemplate): SeatMap {
   });
   rowStart[totalRows] = xs.length;
   if (anyBlocks) {
-    if (blockKeys.length !== xs.length) throw new Error(`${template.id}: blocks need every tier to be a ring tier`);
+    if (blockKeys.length !== xs.length) throw new Error(`${template.id}: a block key for every seat`);
     numberBlocks(blockKeys, us, tiers, sections);
   }
 

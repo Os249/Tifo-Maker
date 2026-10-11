@@ -143,12 +143,12 @@ await g.click('#np-back');
 // Search narrows the stadiums; Create.
 await setInput(g, '#np-search', 'jewel');
 check('stadium search narrows the list', await g.evaluate(() => document.querySelectorAll('.np-stadium').length) === 1);
-await g.click('.np-stadium[data-id="jewel-jeddah-60k"]');
+await g.click('.np-stadium[data-id="jewel-jeddah-60k-rb"]');
 await setInput(g, '#np-search', '');
 await setInput(g, '#np-name', 'Derby wall');
 await g.click('#np-create');
 await waitFor(g, () => location.pathname === '/app');
-check('Create goes to the editor on a new project', /[?&]new=1/.test(g.url()) && /template=jewel-jeddah-60k/.test(g.url()), g.url());
+check('Create goes to the editor on a new project', /[?&]new=1/.test(g.url()) && /template=jewel-jeddah-60k-rb/.test(g.url()), g.url());
 await editorReady(g);
 check('a first project gets the first-run guide', await waitFor(g, () => !!document.querySelector('.ob-modal')));
 check('…which no longer asks for a name', await g.evaluate(() => !document.getElementById('ob-name')));
@@ -156,15 +156,19 @@ await g.evaluate(() => document.querySelector('.ob-start')?.click());
 check('the project exists as soon as the guide closes', await waitFor(g, () => /[?&]local=l[a-z0-9]+/.test(location.search)), g.url());
 let idx = await index(g);
 const derby = idx.find((p) => p.title === 'Derby wall');
-check('it is in this browser, with its stadium', !!derby && derby.templateId === 'jewel-jeddah-60k' && idx.length === 1, JSON.stringify(idx));
+check('it is in this browser, with its stadium', !!derby && derby.templateId === 'jewel-jeddah-60k-rb' && idx.length === 1, JSON.stringify(idx));
 check('the header carries its name', await g.evaluate(() => document.getElementById('doc-title').value) === 'Derby wall');
 check('there is a way back to all projects', await g.evaluate(() => document.getElementById('to-projects')?.getAttribute('href')) === '/projects');
 
 await g.waitForTimeout(400);
+// The project is written once already, when the guide closes; wait for the
+// save that carries the paint, not that one (reading the seats off the first
+// would race the autosave).
+const paintedAt = await g.evaluate(() => Date.now());
 await paint(g);
-check('painting autosaves into the project', await waitFor(g, (id) => {
-  const e = JSON.parse(localStorage.getItem('tifo_proj_' + id) || 'null'); return !!e && e.projectId === id;
-}, derby.id));
+check('painting autosaves into the project', await waitFor(g, ([id, t]) => {
+  const e = JSON.parse(localStorage.getItem('tifo_proj_' + id) || 'null'); return !!e && e.projectId === id && e.savedAt >= t;
+}, [derby.id, paintedAt]));
 check('and draws its card picture', await waitFor(g, (id) => (localStorage.getItem(`tifo_proj_${id}_thumb`) || '').startsWith('data:image/png'), derby.id, 20000));
 check('the old single-draft key is not used any more', await g.evaluate(() => localStorage.getItem('tifo_draft_v1') === null));
 const cellsA = await g.evaluate((id) => JSON.stringify(JSON.parse(localStorage.getItem('tifo_proj_' + id)).doc.layers[0].cellsRle.slice(0, 40)), derby.id);
@@ -177,7 +181,7 @@ check('the Projects page lists it, with a picture, stadium and badge', cs.length
 check('a guest is told the projects live in this browser only', await g.evaluate(() => /this browser only/.test(document.getElementById('pj-where').textContent)));
 await g.click('#pj-new');
 await waitFor(g, () => !!document.querySelector('.np-modal'));
-await g.click('.np-stadium[data-id="kingdom-arena-26k"]');
+await g.click('.np-stadium[data-id="kingdom-arena-26k-rb"]');
 await g.click('#np-create');
 await waitFor(g, () => location.pathname === '/app');
 await editorReady(g);
@@ -277,7 +281,7 @@ await editorReady(g);
 await waitFor(g, () => /[?&]local=/.test(location.search));
 const copyTitle = await g.evaluate(() => document.getElementById('doc-title').value);
 check('confirming makes a new project on the other stadium', /Derby wall \(Generic 60k bowl\)/.test(copyTitle) && /Generic 60k/.test(await g.evaluate(() => document.getElementById('stat').textContent)), copyTitle);
-check('…and the original is untouched', (await index(g)).find((p) => p.id === derby.id)?.templateId === 'jewel-jeddah-60k');
+check('…and the original is untouched', (await index(g)).find((p) => p.id === derby.id)?.templateId === 'jewel-jeddah-60k-rb');
 
 // A dead local link.
 await g.goto(B + '/app?local=lnotarealproject1', { waitUntil: 'domcontentloaded' });
@@ -335,7 +339,7 @@ const v = await api('/api/auth/verify/code', token, { method: 'POST', body: JSON
 check('(email verified for the AI checks)', v.status === 200, String(v.status));
 
 // Open an account project, change it, reload: the unsaved change comes back.
-const derbyAcct = acct.find((p) => p.title === 'Derby wall' && p.templateId === 'jewel-jeddah-60k');
+const derbyAcct = acct.find((p) => p.title === 'Derby wall' && p.templateId === 'jewel-jeddah-60k-rb');
 await g.goto(B + '/app?project=' + derbyAcct.id, { waitUntil: 'domcontentloaded' });
 await editorReady(g);
 check('an account project opens as itself', await g.evaluate(() => document.getElementById('doc-title').value) === 'Derby wall');

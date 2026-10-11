@@ -253,17 +253,21 @@ export async function renderDistributionPdf(
   );
 
   // ---------- One page per section ----------
-  const tierName = (t: number): string => (t === 0 ? 'Lower tier' : 'Upper tier');
+  // Three-tier grounds have a middle tier; any other ground is lower and upper, as it always was.
+  let seatedTiers = 0;
+  for (let i = 0; i < map.count; i++) if (map.tierOf[i] + 1 > seatedTiers) seatedTiers = map.tierOf[i] + 1;
+  const tierName = (t: number): string => (t === 0 ? 'Lower tier' : seatedTiers === 3 && t === 1 ? 'Middle tier' : 'Upper tier');
   // A ground in its real blocks numbers each along its own stand (core/blocks
   // sectionInfo), and knows which stand a block astride the east end's seam is in.
   const tpl = templateById(map.templateRef.id);
-  const blockInfo = tpl && hasBlocks(tpl) ? sectionInfo(map) : null;
+  const blockInfo = tpl && hasBlocks(tpl) ? sectionInfo(map, tpl) : null;
   const STAND_NAME = { north: 'North', east: 'East', south: 'South', west: 'West' } as const;
   for (const s of sections) {
     doc.addPage();
     const bi = blockInfo?.get(s.id);
     if (bi) s.stand = STAND_NAME[bi.stand];
     const within = bi ? bi.number - 1 : s.id % 28;
+    const blockName = bi?.name ?? String(within + 1);
     doc
       .font('Helvetica-Bold')
       .fontSize(20)
@@ -274,7 +278,7 @@ export async function renderDistributionPdf(
       .fontSize(11)
       .fillColor('#444444')
       .text(
-        `${s.stand} stand  ·  ${tierName(s.tier)}  ·  block ${within + 1}  ·  ${s.seats.length.toLocaleString()} seats`,
+        `${s.stand} stand  ·  ${tierName(s.tier)}  ·  block ${blockName}  ·  ${s.seats.length.toLocaleString()} seats`,
         MARGIN,
         70,
       );

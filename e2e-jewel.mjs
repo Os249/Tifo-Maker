@@ -63,11 +63,11 @@ const save = (name, dataUrl) => writeFileSync(`${OUT}/${name}.png`, Buffer.from(
 // ---------------------------------------------------------------------------
 console.log('\n— the new Jewel in the design view —');
 {
-  const { ctx, p, errs } = await open('/app?new=1&template=jewel-jeddah-60k');
+  const { ctx, p, errs } = await open('/app?new=1&template=jewel-jeddah-60k-rb');
   await waitReady(p);
   await p.waitForTimeout(1500);
   const s = await stat(p);
-  check('opens with the real seat count', seatsIn(s) === 59718, s);
+  check('opens with the real seat count', seatsIn(s) === 59732, s);
   await p.screenshot({ path: `${OUT}/editor.png` });
   // The stadium panel lists what the ground has.
   await p.click('#rail-stadium');
@@ -110,11 +110,36 @@ console.log('\n— a design on the earlier Jewel —');
   // A project keeps its stadium, so "moving" makes a copy on the new Jewel
   // and leaves the one on the earlier layout exactly as it was.
   await p.waitForFunction(() => /[?&]local=/.test(location.search), null, { timeout: 60000 }).catch(() => {});
-  check('it moves to the new Jewel', seatsIn(await stat(p)) === 59718, p.url());
+  // To the newest layout, past the September one, which has itself been re-laid in its real blocks.
+  check('it moves to the new Jewel', seatsIn(await stat(p)) === 59732, p.url());
   check('as a copy, with the original kept', await p.evaluate(() => {
     const idx = JSON.parse(localStorage.getItem('tifo_projects_v1') || '[]');
-    return idx.length === 2 && idx.some((x) => x.templateId === 'community-jewel-jeddah-62k') && idx.some((x) => x.templateId === 'jewel-jeddah-60k');
+    return idx.length === 2 && idx.some((x) => x.templateId === 'community-jewel-jeddah-62k') && idx.some((x) => x.templateId === 'jewel-jeddah-60k-rb');
   }));
+  check('no page errors', errs.length === 0, errs.join(' | '));
+  await ctx.close();
+}
+
+// ---------------------------------------------------------------------------
+console.log('\n— a design on the Jewel before its real blocks —');
+{
+  const { ctx, p, errs } = await open('/app?new=1&template=jewel-jeddah-60k');
+  await waitReady(p);
+  await p.waitForTimeout(1200);
+  check('opens on its own seat map, unchanged', seatsIn(await stat(p)) === 59718, await stat(p));
+  await p.click('#rail-stadium');
+  await p.waitForTimeout(800);
+  const info = await p.$eval('#stadium-info', (e) => e.textContent || '');
+  check('is named as the earlier layout', /earlier layout/.test(info), info.slice(0, 80));
+  check('and says the new one has the real blocks', /real blocks/.test(info));
+  const btn = await p.$('#stadium-info button.primary');
+  check('with a button to move it', !!btn);
+  await btn.click();
+  await p.waitForSelector('#sw-continue', { timeout: 5000 });
+  await Promise.all([p.waitForNavigation({ timeout: 60000 }), p.click('#sw-continue')]);
+  await waitReady(p);
+  await p.waitForTimeout(1500);
+  check('it moves to the Jewel in its real blocks', seatsIn(await stat(p)) === 59732, p.url());
   check('no page errors', errs.length === 0, errs.join(' | '));
   await ctx.close();
 }
@@ -122,7 +147,7 @@ console.log('\n— a design on the earlier Jewel —');
 // ---------------------------------------------------------------------------
 console.log('\n— Match Day on the Jewel: the screens —');
 {
-  const { ctx, p, errs } = await open('/app?new=1&template=jewel-jeddah-60k&sim=1');
+  const { ctx, p, errs } = await open('/app?new=1&template=jewel-jeddah-60k-rb&sim=1');
   await p.waitForSelector('.mds-overlay canvas', { timeout: 120000 });
   await p.waitForTimeout(4000);
   const sec = await p.$('.mds-section[data-sec="screens"]');
@@ -160,7 +185,7 @@ console.log('\n— Match Day on the Jewel: the screens —');
 // ---------------------------------------------------------------------------
 console.log('\n— Match Day in Arabic, and on a ground without screens —');
 {
-  const { ctx, p, errs } = await open('/app?new=1&template=jewel-jeddah-60k&sim=1', { lang: 'ar' });
+  const { ctx, p, errs } = await open('/app?new=1&template=jewel-jeddah-60k-rb&sim=1', { lang: 'ar' });
   await p.waitForSelector('.mds-overlay canvas', { timeout: 120000 });
   await p.waitForTimeout(3000);
   const heading = await p.$eval('.mds-section[data-sec="screens"] .mds-shead', (h) => h.textContent.trim());

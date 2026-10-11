@@ -155,6 +155,18 @@ for (const id of grounds) {
   await p.waitForTimeout(1200);
   const f1 = (await census(p)).frames;
   check(`${id}: draws nothing while nothing moves`, f1 === f0, `${f1 - f0} frames in 1.2 s`);
+  // The seat to paint: the painted one nearest the middle. The design leaves
+  // the seats that hold no tifo (a royal box, say) empty, and one of those
+  // raising nothing is right, not a failure.
+  const seat = await p.evaluate(() => {
+    const was = window.__tifo.store.cells;
+    const mid = Math.floor(was.length / 2);
+    for (let d = 0; d < was.length; d++) {
+      if (was[mid + d]) return mid + d;
+      if (was[mid - d]) return mid - d;
+    }
+    return mid;
+  });
   await p.evaluate(() => {
     const s = window.__tifo.store;
     s.loadCells(new Uint8Array(s.cells.length));
@@ -164,12 +176,12 @@ for (const id of grounds) {
   const empty = await census(p);
   check(`${id}: an empty design holds up no cards`, empty.cardsUp === 0, String(empty.cardsUp));
   check(`${id}: and the change was drawn`, empty.frames > f1, `${empty.frames} after ${f1}`);
-  await p.evaluate(() => {
+  await p.evaluate((seat) => {
     const s = window.__tifo.store;
     const cells = new Uint8Array(s.cells.length);
-    cells[Math.floor(cells.length / 2)] = 1;
+    cells[seat] = 1;
     s.loadCells(cells);
-  });
+  }, seat);
   await p.waitForTimeout(300);
   check(`${id}: painting a seat raises its card`, (await census(p)).cardsUp === 1);
   check(`${id}: no page or WebGL errors`, errs.length === 0, errs.join(' | '));
@@ -205,7 +217,7 @@ if (!only) {
     await ctx.close();
   }
   {
-    const { p, ctx } = await stadium('kingdom-arena-26k', 'low');
+    const { p, ctx } = await stadium('kingdom-arena-26k-rb', 'low');
     await p.selectOption('#camera-preset', '4');
     await p.waitForTimeout(800);
     // The hall is cut open from above: the pitch shows in the middle of the picture.
@@ -244,7 +256,7 @@ if (!only) {
     };
     const stamp = Date.now().toString(36).slice(-6);
     const reg = await api('/api/auth/register', null, { username: `sv${stamp}`, password: 'harbor-kite-moss-31', email: `sv${stamp}@example.test`, acceptedVersion: 'test' });
-    const tpl = (await (await fetch(`${B}/api/templates`)).json()).find((t) => t.id === 'alawwal-park-26k') ?? (await (await fetch(`${B}/api/templates`)).json())[0];
+    const tpl = (await (await fetch(`${B}/api/templates`)).json()).find((t) => t.id === 'alawwal-park-26k-rb') ?? (await (await fetch(`${B}/api/templates`)).json())[0];
     const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
     const cells = Buffer.alloc(tpl.seatCount, 0);
     for (let i = 0; i < cells.length; i += 3) cells[i] = 1;

@@ -1,6 +1,7 @@
 import type { SeatMap, StadiumTemplate } from '../core/types';
 import { seatZones } from '../core/venueDetails';
 import { seatLookMap } from './simulator/seatLook';
+import { baseGroundId } from '../core/realBlocks';
 
 /**
  * What every seat looks like with nobody's card on it: the ground's own seat
@@ -94,12 +95,12 @@ export function emptySeatColours(template: StadiumTemplate | null, map: SeatMap)
       continue;
     }
     let hex: number;
-    if (id === JEWEL_ID) {
+    if (baseGroundId(id) === JEWEL_ID) {
       const tc = JEWEL_TIERS[Math.min(map.tierOf[i], JEWEL_TIERS.length - 1)];
       hex = tc[pickOf(i, tc.length)];
     } else if (id === OLD_JEWEL_ID) hex = OLD_JEWEL[pickOf(i, OLD_JEWEL.length)];
     else if (id === OLD_ALAWWAL_ID) hex = map.rowOf[i] < 4 ? OLD_ALAWWAL_BLUE : OLD_ALAWWAL[pickOf(i, OLD_ALAWWAL.length)];
-    else if (id === KINGDOM_ID) hex = KINGDOM_NAVY[pickOf(i, KINGDOM_NAVY.length)];
+    else if (baseGroundId(id) === KINGDOM_ID) hex = KINGDOM_NAVY[pickOf(i, KINGDOM_NAVY.length)];
     else if (id === OLD_KINGDOM_ID) hex = OLD_KINGDOM[pickOf(i, OLD_KINGDOM.length)];
     else hex = FALLBACK[pickOf(i, FALLBACK.length)];
     put(out, i, hex);

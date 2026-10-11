@@ -24,6 +24,8 @@ import { PREMIER_LEAGUE } from './premierLeague';
 import { LA_LIGA } from './laLiga';
 import { hasBlocks } from './blocks';
 import { generateSeatMap } from './seatmap';
+import { realBlocksFor, registerRealBlocks } from './realBlocks';
+import { SAUDI_REAL_BLOCKS } from './realBlocksSaudi';
 
 export type StadiumSource = 'builtin' | 'community' | 'custom';
 export type StadiumType = 'Bowl' | 'Single-tier' | 'Two-tier' | 'Oval' | 'Arena';
@@ -1297,8 +1299,38 @@ const COMMUNITY: StadiumEntry[] = [
   },
 ];
 
+// Grounds rebuilt in their real blocks (core/realBlocks*.ts).
+registerRealBlocks(SAUDI_REAL_BLOCKS);
+/** The old layouts of the grounds rebuilt in their real blocks, for LEGACY_STADIUMS. */
+const REBUILT_LEGACY: StadiumEntry[] = [];
+
+/**
+ * A list of grounds with each rebuilt one swapped for its real-blocks layout,
+ * in the same place, and the old entry — its template the very same object, so
+ * its seat map is byte-identical — kept aside as a legacy ground pointing at
+ * the new one, which is what lets the stadium panel offer to move a design.
+ */
+function realLayouts(list: StadiumEntry[]): StadiumEntry[] {
+  return list.map((e) => {
+    const r = realBlocksFor(e.id);
+    if (!r) return e;
+    REBUILT_LEGACY.push({
+      id: e.id,
+      template: e.template,
+      meta: { ...e.meta, tags: [...(e.meta.tags ?? []), 'legacy'], supersededBy: r.id, supersededNote: 'sp.supersededBlocks' },
+    });
+    const template = r.build(e.template);
+    if (template.id !== r.id) throw new Error(`${e.id}: its real-blocks layout must have the id ${r.id}`);
+    return { id: r.id, template, meta: { ...e.meta, capacity: r.capacity ?? e.meta.capacity } };
+  });
+}
+const BUILTINS_LIVE = realLayouts(BUILTINS);
+const COMMUNITY_LIVE = realLayouts(COMMUNITY);
+const PREMIER_LEAGUE_LIVE = realLayouts(PREMIER_LEAGUE);
+const LA_LIGA_LIVE = realLayouts(LA_LIGA);
+
 /** The full catalog. Order: built-ins first, then community, then custom. */
-export const STADIUM_CATALOG: StadiumEntry[] = [...BUILTINS, ...COMMUNITY, ...PREMIER_LEAGUE, ...LA_LIGA];
+export const STADIUM_CATALOG: StadiumEntry[] = [...BUILTINS_LIVE, ...COMMUNITY_LIVE, ...PREMIER_LEAGUE_LIVE, ...LA_LIGA_LIVE];
 
 /**
  * Stadiums that have been replaced by a more accurate one but that saved
@@ -1449,6 +1481,9 @@ export const LEGACY_STADIUMS: StadiumEntry[] = [
     },
     meta: { name: 'Prince Abdullah Al-Faisal Stadium (Jeddah)', source: 'builtin', country: 'Middle East', capacity: 27000, type: 'Two-tier', inspiredBy: 'Prince Abdullah Al-Faisal Stadium, Jeddah - home of Al-Ahli and Al-Ittihad', tags: ['al-ahli', 'al-ittihad', 'jeddah', 'saudi', 'legacy'], supersededBy: 'alfaisal-jeddah-27k', supersededNote: 'sp.supersededBlocks' },
   },
+  // The earlier layouts of every ground rebuilt in its real blocks since
+  // (core/realBlocks*.ts), each the very template it was.
+  ...REBUILT_LEGACY,
 ];
 
 /**
@@ -1458,7 +1493,7 @@ export const LEGACY_STADIUMS: StadiumEntry[] = [
  * on any real-venue ground could not be saved at all.
  */
 export function shippedTemplates(): StadiumTemplate[] {
-  return [...BUILTINS, ...COMMUNITY, ...PREMIER_LEAGUE, ...LA_LIGA, ...LEGACY_STADIUMS].map((e) => e.template);
+  return [...BUILTINS_LIVE, ...COMMUNITY_LIVE, ...PREMIER_LEAGUE_LIVE, ...LA_LIGA_LIVE, ...LEGACY_STADIUMS].map((e) => e.template);
 }
 
 /** Every template the generator might be asked for (built-in + community + custom). */
@@ -1505,6 +1540,27 @@ export function templateById(id: string): StadiumTemplate | undefined {
 /** Resolve an id to its full catalog entry (template + metadata). */
 export function entryById(id: string): StadiumEntry | undefined {
   return STADIUM_CATALOG.find((e) => e.id === id) ?? LEGACY_STADIUMS.find((e) => e.id === id);
+}
+
+/**
+ * The layout a design on this ground would move to: the ground's newest,
+ * following `supersededBy` on through every rebuild (the Jewel's 2025 build was
+ * replaced in September 2026, and that one by its real blocks in October), so
+ * a design is never offered a layout that is itself superseded. Undefined for
+ * a ground that is current.
+ */
+export function newestLayout(id: string): StadiumEntry | undefined {
+  let e = entryById(id);
+  const seen = new Set<string>();
+  let newest: StadiumEntry | undefined;
+  while (e?.meta.supersededBy && !seen.has(e.id)) {
+    seen.add(e.id);
+    const next = entryById(e.meta.supersededBy);
+    if (!next) break;
+    newest = next;
+    e = next;
+  }
+  return newest;
 }
 
 export interface CatalogQuery {

@@ -11,7 +11,7 @@ import { createServer } from 'vite';
 import { chromium } from 'playwright';
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const OUT = process.argv[2] ?? 'preview-out/ai-text-rows';
-const STAD = process.argv[3] ?? 'jewel-jeddah-60k';
+const STAD = process.argv[3] ?? 'jewel-jeddah-60k-rb';
 const STAND = JSON.parse(process.argv[4] ?? '"north"');
 mkdirSync(OUT, { recursive: true });
 const vite = await createServer({ root: ROOT, server: { port: 5242 }, logLevel: 'error' });

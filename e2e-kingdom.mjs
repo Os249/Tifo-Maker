@@ -18,7 +18,9 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 
 const B = 'http://127.0.0.1:8911';
 const OUT = 'preview-out/e2e-kingdom';
-const SEATS = 26580;
+// The Kingdom Arena in its real blocks (October 2026), and the September one before them.
+const SEATS = 22318;
+const SEPT_SEATS = 26580;
 const OLD_SEATS = 26052;
 mkdirSync(OUT, { recursive: true });
 const browser = await chromium
@@ -86,7 +88,7 @@ const pick = (p, k, v) =>
 // ---------------------------------------------------------------------------
 console.log('\n— the new Kingdom Arena in the design view —');
 {
-  const { ctx, p, errs } = await open('/app?new=1&template=kingdom-arena-26k');
+  const { ctx, p, errs } = await open('/app?new=1&template=kingdom-arena-26k-rb');
   await waitReady(p);
   await p.waitForTimeout(1500);
   const s = await stat(p);
@@ -129,8 +131,25 @@ console.log('\n— a design on the earlier Kingdom Arena —');
   check('it moves to the new Kingdom Arena', seatsIn(await stat(p)) === SEATS, p.url());
   check('as a copy, with the original kept', await p.evaluate(() => {
     const idx = JSON.parse(localStorage.getItem('tifo_projects_v1') || '[]');
-    return idx.length === 2 && idx.some((x) => x.templateId === 'community-kingdom-arena-28k') && idx.some((x) => x.templateId === 'kingdom-arena-26k');
+    return idx.length === 2 && idx.some((x) => x.templateId === 'community-kingdom-arena-28k') && idx.some((x) => x.templateId === 'kingdom-arena-26k-rb');
   }));
+  check('no page errors', errs.length === 0, errs.join(' | '));
+  await ctx.close();
+}
+
+// ---------------------------------------------------------------------------
+console.log('\n— a design on the Kingdom Arena before its real blocks —');
+{
+  const { ctx, p, errs } = await open('/app?new=1&template=kingdom-arena-26k');
+  await waitReady(p);
+  await p.waitForTimeout(1200);
+  check('opens on its own seat map, unchanged', seatsIn(await stat(p)) === SEPT_SEATS, await stat(p));
+  await p.click('#rail-stadium');
+  await p.waitForTimeout(800);
+  const info = await p.$eval('#stadium-info', (e) => e.textContent || '');
+  check('is named as the earlier layout', /earlier layout/.test(info), info.slice(0, 80));
+  check('and says the new one has the real blocks', /real blocks/.test(info));
+  check('with a button to move it', !!(await p.$('#stadium-info button.primary')));
   check('no page errors', errs.length === 0, errs.join(' | '));
   await ctx.close();
 }
@@ -138,7 +157,7 @@ console.log('\n— a design on the earlier Kingdom Arena —');
 // ---------------------------------------------------------------------------
 console.log('\n— Match Day in the Kingdom Arena —');
 {
-  const { ctx, p, errs } = await open('/app?new=1&template=kingdom-arena-26k&sim=1');
+  const { ctx, p, errs } = await open('/app?new=1&template=kingdom-arena-26k-rb&sim=1');
   await p.waitForSelector('.mds-overlay canvas', { timeout: 120000 });
   await p.waitForTimeout(4000);
   const sec = await p.$('.mds-section[data-sec="screens"]');
@@ -182,7 +201,7 @@ console.log('\n— Match Day in the Kingdom Arena —');
 // ---------------------------------------------------------------------------
 console.log('\n— in Arabic —');
 {
-  const { ctx, p, errs } = await open('/app?new=1&template=kingdom-arena-26k&sim=1', { lang: 'ar' });
+  const { ctx, p, errs } = await open('/app?new=1&template=kingdom-arena-26k-rb&sim=1', { lang: 'ar' });
   await p.waitForSelector('.mds-overlay canvas', { timeout: 120000 });
   await p.waitForTimeout(3000);
   const shots = await p.$$eval('[data-k="camera"] option', (o) => o.map((x) => x.textContent));

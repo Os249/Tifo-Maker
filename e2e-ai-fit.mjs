@@ -60,8 +60,8 @@ async function clubStart(template, club) {
 }
 
 const GROUNDS = [
-  { id: 'majmaah-stadium-7k', small: true },
-  { id: 'alhazem-stadium-8k', small: true },
+  { id: 'majmaah-stadium-7k-rb', small: true },
+  { id: 'alhazem-stadium-8k-rb', small: true },
   { id: 'coliseum-11k', small: true },
   { id: 'generic-bowl-60k', small: false },
 ];

@@ -2025,20 +2025,21 @@ if (process.env.DATABASE_URL) {
 // on the Jewel, Al-Awwal, Kingdom Arena — any ground a Saudi fan would pick —
 // was refused with "known templateRef required". This builds the app with the
 // SAME list server.ts uses and saves on the rebuilt Jewel and on the legacy one
-// that older designs still point at.
+// that older designs still point at — and on every Saudi ground in its real
+// blocks (the -rb layouts, October 2026) and the layout each replaced.
 {
   const { shippedTemplateInfo } = await import('../src/templates');
   const { templateById } = await import('../../src/core/stadiumCatalog');
   const { noTifoMask } = await import('../../src/core/venueDetails');
   const list = shippedTemplateInfo();
-  for (const id of ['jewel-jeddah-60k', 'community-jewel-jeddah-62k', 'community-alawwal-park-25k', 'kingdom-arena-26k', 'community-kingdom-arena-28k', 'alawwal-park-26k', 'shg-arena-14k', 'ego-stadium-13k', 'alfateh-stadium-12k', 'pmbf-stadium-22k', 'alfaisal-jeddah-27k', 'alfaisal-stadium-27k', 'buraidah-stadium-25k', 'abha-stadium-20k', 'tabuk-stadium-12k', 'alhazem-stadium-8k', 'majmaah-stadium-7k', 'pfbf-stadium-22k', DEFAULT_TEMPLATE.id]) {
+  for (const id of ['jewel-jeddah-60k', 'community-jewel-jeddah-62k', 'community-alawwal-park-25k', 'kingdom-arena-26k', 'community-kingdom-arena-28k', 'alawwal-park-26k', 'shg-arena-14k', 'ego-stadium-13k', 'alfateh-stadium-12k', 'pmbf-stadium-22k', 'alfaisal-jeddah-27k', 'alfaisal-stadium-27k', 'buraidah-stadium-25k', 'abha-stadium-20k', 'tabuk-stadium-12k', 'alhazem-stadium-8k', 'majmaah-stadium-7k', 'pfbf-stadium-22k', 'jewel-jeddah-60k-rb', 'alawwal-park-26k-rb', 'kingdom-arena-26k-rb', 'pmbf-stadium-22k-rb', 'pfbf-stadium-22k-rb', 'buraidah-stadium-25k-rb', 'shg-arena-14k-rb', 'ego-stadium-13k-rb', 'alfateh-stadium-12k-rb', 'abha-stadium-20k-rb', 'tabuk-stadium-12k-rb', 'alhazem-stadium-8k-rb', 'majmaah-stadium-7k-rb', DEFAULT_TEMPLATE.id]) {
     assert.ok(list.some((t) => t.id === id), `the server knows ${id}`);
   }
   const auth = new MemoryAuthRepository();
   const designs = new MemoryDesignRepository((id) => auth.usernameOf(id));
   const app = await buildApp(designs, auth, list);
   const tok = await registerUser(app, 'jeddawi');
-  for (const id of ['jewel-jeddah-60k', 'community-jewel-jeddah-62k', 'kingdom-arena-26k', 'community-kingdom-arena-28k', 'community-alawwal-park-25k', 'alawwal-park-26k', 'shg-arena-14k', 'ego-stadium-13k', 'alfateh-stadium-12k', 'pmbf-stadium-22k', 'alfaisal-jeddah-27k', 'alfaisal-stadium-27k', 'buraidah-stadium-25k', 'abha-stadium-20k', 'tabuk-stadium-12k', 'alhazem-stadium-8k', 'majmaah-stadium-7k', 'pfbf-stadium-22k']) {
+  for (const id of ['jewel-jeddah-60k', 'community-jewel-jeddah-62k', 'kingdom-arena-26k', 'community-kingdom-arena-28k', 'community-alawwal-park-25k', 'alawwal-park-26k', 'shg-arena-14k', 'ego-stadium-13k', 'alfateh-stadium-12k', 'pmbf-stadium-22k', 'alfaisal-jeddah-27k', 'alfaisal-stadium-27k', 'buraidah-stadium-25k', 'abha-stadium-20k', 'tabuk-stadium-12k', 'alhazem-stadium-8k', 'majmaah-stadium-7k', 'pfbf-stadium-22k', 'jewel-jeddah-60k-rb', 'alawwal-park-26k-rb', 'kingdom-arena-26k-rb', 'pmbf-stadium-22k-rb', 'pfbf-stadium-22k-rb', 'buraidah-stadium-25k-rb', 'shg-arena-14k-rb', 'ego-stadium-13k-rb', 'alfateh-stadium-12k-rb', 'abha-stadium-20k-rb', 'tabuk-stadium-12k-rb', 'alhazem-stadium-8k-rb', 'majmaah-stadium-7k-rb']) {
     const n = generateSeatMap(templateById(id)!).count;
     assert.equal(list.find((t) => t.id === id)!.seatCount, n, `${id}: the server's seat count is the generator's`);
     const cellsGzB64 = gzipSync(new Uint8Array(n).fill(1)).toString('base64');

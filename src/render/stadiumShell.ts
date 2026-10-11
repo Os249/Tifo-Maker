@@ -13,6 +13,7 @@ import { buildTrack } from './simulator/track';
 import { buildPitchDetail } from './simulator/pitchDetail';
 import { kelvinToRgb, layOutLights } from './simulator/lighting';
 import { paintScreen } from './simulator/screenPicture';
+import { baseGroundId } from '../core/realBlocks';
 
 /**
  * The building, for the Stadium view: the ground's real stands, roofs,
@@ -127,7 +128,7 @@ function buildPitch(template: StadiumTemplate, group: THREE.Group, extent: { ax:
     m.rotation.x = -Math.PI / 2;
     m.position.y = -0.03;
     group.add(m);
-  } else if (!template.indoor && template.id !== JEWEL_ID) {
+  } else if (!template.indoor && baseGroundId(template.id) !== JEWEL_ID) {
     // Grass from the pitch to the front of the stands, as almost every ground
     // has: the plan curve itself, which is where the front row starts.
     const { a, b, exponent: p } = template.plan;
@@ -431,8 +432,8 @@ export function buildStadiumShell(template: StadiumTemplate, map: SeatMap, opts:
     raw.add(buildGround(template, false).object);
   }
   lap('ground');
-  if (template.id === JEWEL_ID) raw.add(buildJewel(template, false).object);
-  if (template.id === KINGDOM_ID) {
+  if (baseGroundId(template.id) === JEWEL_ID) raw.add(buildJewel(template, false).object);
+  if (baseGroundId(template.id) === KINGDOM_ID) {
     const k = buildKingdom(template, false).object;
     raw.add(k);
   }

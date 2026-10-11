@@ -2322,7 +2322,7 @@ export function mountToolbar(
   // A ground in its real blocks says which block you are over, numbered along
   // its stand as the seat locator and the steward's sheets number it.
   const tplHere = templateById(map.templateRef.id);
-  const blockInfo = tplHere && hasBlocks(tplHere) ? sectionInfo(map) : null;
+  const blockInfo = tplHere && hasBlocks(tplHere) ? sectionInfo(map, tplHere) : null;
   const BLOCK_STAND = { north: 'North', east: 'East', south: 'South', west: 'West' } as const;
   editor.onHoverSeat = (seat) => {
     if (seat < 0) {
@@ -2331,7 +2331,7 @@ export function mountToolbar(
     }
     const bi = blockInfo?.get(map.sectionOf[seat]);
     if (bi) {
-      coords.textContent = `${BLOCK_STAND[bi.stand]}${bi.tier > 0 ? ' upper' : ''} · Block ${bi.number} · Row ${map.rowOf[seat] + 1} · Seat ${seat}`;
+      coords.textContent = `${bi.where} · Block ${bi.name ?? bi.number} · Row ${map.rowOf[seat] + 1} · Seat ${seat}`;
       return;
     }
     const u = map.uv[seat * 2];
@@ -2868,9 +2868,9 @@ export function mountToolbar(
       group.forEach((sec, n) => {
         const c = document.createElement('button');
         c.className = 'section-cell';
-        // A real block keeps its own number; an upper-tier one is marked U.
+        // A real block keeps its own name, or its number marked by tier (U5, M5).
         const bi = blockInfo?.get(sec.id);
-        const num = bi ? `${bi.tier > 0 ? 'U' : ''}${bi.number}` : String(n + 1);
+        const num = bi ? bi.short : String(n + 1);
         c.textContent = num;
         c.title = `${tl(stand)} ${i18nT('ed.section')} ${num} · ${sec.seats.length.toLocaleString()} ${i18nT('ed.seats')}`;
         c.addEventListener('click', () => {

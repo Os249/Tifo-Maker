@@ -13,6 +13,7 @@ import { emptySeatColours } from './seatColours';
 import { buildChairs, seatFacing, seatStateTexture, KEY_LIGHT_DIR, type ChairBuild } from './seatChairs';
 import { viewTierSettings, type ViewTier, type ViewTierSettings } from './viewTier';
 import type { ShellBuild } from './stadiumShell';
+import { baseGroundId } from '../core/realBlocks';
 
 /**
  * The Stadium view: the design in the real stadium.
@@ -724,7 +725,7 @@ export class Preview3D {
     };
     // Kingdom Arena is a hall: its cameras are the ones Match Day keeps
     // under the roof (simulator/index.ts), not ones fitted to the seats.
-    if (this.template?.id === 'kingdom-arena-26k' && name !== 'Full view' && name !== 'Aerial') {
+    if (this.template && baseGroundId(this.template.id) === 'kingdom-arena-26k' && name !== 'Full view' && name !== 'Aerial') {
       const b = this.template.plan.b;
       const shot: Record<string, [number[], number[]]> = {
         'TV gantry': [[0, 23.5, -(b + 9)], [0, 2, 8]],

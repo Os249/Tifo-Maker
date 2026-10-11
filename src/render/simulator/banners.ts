@@ -1,6 +1,9 @@
 import * as THREE from 'three';
-import type { SeatMap } from '../../core/types';
+import type { SeatMap, StadiumTemplate } from '../../core/types';
 import type { DesignStore } from '../../core/design';
+import { arcAtIndex, compileBlocks, hasBlocks } from '../../core/blocks';
+import { buildOffsetCurve, samplePlanCurve } from '../../core/planCurve';
+import { alongOf, sideAt } from '../../core/standSpans';
 
 /**
  * Match Day Simulator — gap-fill "rail banners".
@@ -18,6 +21,12 @@ import type { DesignStore } from '../../core/design';
  *
  * Anchors come from the seat map, so everything adapts to any bowl. Rail banners
  * and stair cover toggle independently.
+ *
+ * A ground in its real blocks (TierSpec.blocks) has stairs that do not line up
+ * from one band to the next, and walkways inside its tiers. There the stair
+ * cover follows each real stairway through exactly the rows it runs through,
+ * and the rail banners also fill each walkway inside a tier — never the
+ * tunnel, a vomitory or a press box.
  */
 /* gap-fill rail banners v2 */
 
@@ -51,7 +60,8 @@ function nearestInSet(map: SeatMap, set: number[], targetU: number): number {
   return best;
 }
 
-export function buildBanners(map: SeatMap, store: DesignStore): BannerController {
+export function buildBanners(map: SeatMap, store: DesignStore, template?: StadiumTemplate | null): BannerController {
+  const real = template && hasBlocks(template) ? template : null;
   const group = new THREE.Group(); // container, always visible
   const bannerGroup = new THREE.Group(); // inter-tier walkway fill ("Rail banners")
   const stairGroup = new THREE.Group(); // aisle / stair fill ("Cover stairs")
@@ -122,8 +132,48 @@ export function buildBanners(map: SeatMap, store: DesignStore): BannerController
     }
   }
 
+  // 1b) A real ground's walkways inside a tier: bridge the row in front of the
+  //     walkway to the row behind it, wherever the walkway row itself is empty.
+  if (real) {
+    const before: number[] = [];
+    real.tiers.reduce((n, tr) => (before.push(n), n + tr.rows), 0);
+    const rowSeats = new Map<number, number[]>();
+    for (let i = 0; i < map.count; i++) {
+      const arr = rowSeats.get(map.rowOf[i]);
+      if (arr) arr.push(i);
+      else rowSeats.set(map.rowOf[i], [i]);
+    }
+    real.tiers.forEach((tier, t) => {
+      const rowsW = [...new Set((tier.blocks?.walkways ?? []).map((w) => w.row))].filter((r) => r > 0 && r < tier.rows - 1);
+      for (const w of rowsW) {
+        const backSet = rowSeats.get(before[t] + w - 1) ?? [];
+        const frontSet = rowSeats.get(before[t] + w + 1) ?? [];
+        const here = rowSeats.get(before[t] + w) ?? [];
+        if (!backSet.length || !frontSet.length) continue;
+        const N = 360;
+        let prev: { Pb: number[]; Pf: number[]; cb: RGB; cf: RGB } | null = null;
+        for (let k = 0; k <= N; k++) {
+          const u = k / N;
+          const bi = nearestInSet(map, backSet, u);
+          const fi = nearestInSet(map, frontSet, u);
+          const hi = here.length ? nearestInSet(map, here, u) : -1;
+          // Where the walkway row has seats (a walkway along only part of the
+          // bowl), there is nothing to fill.
+          if (bi < 0 || fi < 0 || uDist(map.uv[bi * 2], u) > 0.01 || uDist(map.uv[fi * 2], u) > 0.01 || (hi >= 0 && uDist(map.uv[hi * 2], u) < 0.006)) {
+            prev = null;
+            continue;
+          }
+          const cur = { Pb: P(bi, 0.3), Pf: P(fi, 0.3), cb: seatColor(bi), cf: seatColor(fi) };
+          if (prev) pushQuad(wPos, wCol, prev.Pb, cur.Pb, cur.Pf, prev.Pf, prev.cb, cur.cb, cur.cf, prev.cf);
+          prev = cur;
+        }
+      }
+    });
+  }
+
   // 2) Vertical strips filling the aisles between sections, tier by tier.
-  for (const t of tiers) {
+  //    A real ground's stairways are followed line by line instead (2b).
+  for (const t of real ? [] : tiers) {
     const byRow = new Map<number, number[]>();
     for (let i = 0; i < map.count; i++) {
       if (map.tierOf[i] !== t) continue;
@@ -170,6 +220,77 @@ export function buildBanners(map: SeatMap, store: DesignStore): BannerController
         prev = cur;
       }
     }
+  }
+
+  // 2b) A real ground's stairways, each through the rows it runs through: in
+  //     every such row, the seats either side of where the stairway crosses.
+  if (real) {
+    const curve = samplePlanCurve(real.plan.a, real.plan.b, real.plan.exponent);
+    const compiled = compileBlocks(real, curve);
+    const before: number[] = [];
+    real.tiers.reduce((n, tr) => (before.push(n), n + tr.rows), 0);
+    const rowSeats = new Map<number, number[]>();
+    for (let i = 0; i < map.count; i++) {
+      const arr = rowSeats.get(map.rowOf[i]);
+      if (arr) arr.push(i);
+      else rowSeats.set(map.rowOf[i], [i]);
+    }
+    for (const arr of rowSeats.values()) arr.sort((a, b) => map.uv[a * 2] - map.uv[b * 2]);
+    real.tiers.forEach((tier, t) => {
+      const cb = compiled[t];
+      if (!cb) return;
+      const pitch = tier.seatPitch;
+      for (const l of cb.aisles) {
+        // The tunnel and a gate end blocks as a stairway does, but are not stairs.
+        if (l.kind) continue;
+        let prev: { L: number[]; R: number[]; cL: RGB; cR: RGB } | null = null;
+        for (let r = l.r0; r <= l.r1; r++) {
+          const arr = rowSeats.get(before[t] + r) ?? [];
+          let li = -1;
+          let ri = -1;
+          if (cb.straight) {
+            // A straight stand: the seats of that side either side of `along`.
+            const st = cb.aisles.find((x) => x.id === l.id)!;
+            const radial = tier.baseOffset + r * tier.rowDepth;
+            let bestL = -Infinity;
+            let bestR = Infinity;
+            for (const i of arr) {
+              const x = map.pos3[i * 3];
+              const z = map.pos3[i * 3 + 2];
+              if (sideAt(real.plan, radial, x, z) !== st.side) continue;
+              const a = alongOf(st.side, x, z);
+              if (a < st.along && a > bestL) { bestL = a; li = i; }
+              if (a > st.along && a < bestR) { bestR = a; ri = i; }
+            }
+            if (li < 0 || ri < 0 || bestR - bestL > 2 * st.halfW + 2 * pitch) li = ri = -1;
+          } else {
+            const oc = buildOffsetCurve(curve, tier.baseOffset + r * tier.rowDepth);
+            const line = l as { idx: number; halfW: number };
+            const uT = arcAtIndex(oc, line.idx) / oc.total;
+            const gapU = (2 * line.halfW + 2 * pitch) / oc.total;
+            for (let j = 0; j < arr.length; j++) {
+              const a = arr[j];
+              const b = arr[(j + 1) % arr.length];
+              const ua = map.uv[a * 2];
+              let ub = map.uv[b * 2];
+              if (j + 1 === arr.length) ub += 1;
+              const ut = uT < ua ? uT + 1 : uT;
+              if (ua <= ut && ut <= ub) {
+                if (ub - ua <= gapU) { li = a; ri = b; }
+                break;
+              }
+            }
+          }
+          if (li < 0 || ri < 0) {
+            prev = null;
+            continue;
+          }
+          const cur = { L: P(li, 0.25), R: P(ri, 0.25), cL: seatColor(li), cR: seatColor(ri) };
+          if (prev) pushQuad(sPos, sCol, prev.L, prev.R, cur.R, cur.L, prev.cL, prev.cR, cur.cR, cur.cL);
+          prev = cur;
+        }
+      }
+    });
   }
 
   const buildFill = (pos: number[], col: number[], parent: THREE.Group): void => {

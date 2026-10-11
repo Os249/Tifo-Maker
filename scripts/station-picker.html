@@ -1,0 +1,138 @@
+<!doctype html>
+<!--
+  Dev-only: measure a stand's stairways off a photograph, as STATIONS
+  (TierBlocks: metres along a side from its centre line).
+
+  Open it from the dev server (npm run dev → /scripts/station-picker.html),
+  choose a photo of one stand taken as square-on as you can get, then:
+   1. Reference: click points on the stand's front edge whose station you
+      know (the halfway line is 0; a stand's ends, a pitch corner or a
+      vomitory you have measured elsewhere) and type each one's station.
+      Two references give a straight scale; three or more also correct the
+      perspective along the stand (a 1-D projective fit), which a photo
+      that is not square-on needs.
+   2. Stairs: click where each stairway meets the same front edge. Its
+      station appears in the list; copy the list into the template.
+  Every point is projected onto the line through the first two references,
+  so click along the front row, not the back.
+-->
+<html lang="en"><head><meta charset="UTF-8"/><title>Station picker</title>
+<style>
+  body { margin: 0; font: 14px system-ui, sans-serif; background: #111; color: #eee; display: flex; height: 100vh; }
+  #side { width: 320px; padding: 12px; box-sizing: border-box; overflow: auto; background: #1b1d22; }
+  #view { flex: 1; overflow: auto; position: relative; }
+  canvas { display: block; cursor: crosshair; }
+  button, input, select { font: inherit; }
+  .row { margin: 8px 0; }
+  ol { padding-left: 20px; }
+  li { margin: 2px 0; }
+  textarea { width: 100%; height: 90px; background: #0d0e11; color: #bfe; border: 1px solid #333; }
+  .muted { color: #9aa; font-size: 12px; }
+</style></head>
+<body>
+<div id="side">
+  <div class="row"><input type="file" id="file" accept="image/*"/></div>
+  <div class="row">
+    <label><input type="radio" name="mode" value="ref" checked/> Reference</label>
+    <label><input type="radio" name="mode" value="stair"/> Stairs</label>
+  </div>
+  <div class="row">Next reference's station: <input id="refS" type="number" step="0.1" value="0" style="width:80px"/> m</div>
+  <div class="row">Zoom <input id="zoom" type="range" min="0.25" max="3" step="0.05" value="1"/></div>
+  <div class="row"><b>References</b><ol id="refs"></ol></div>
+  <div class="row"><b>Stairs</b> <span class="muted" id="fit"></span><ol id="stairs"></ol></div>
+  <div class="row"><textarea id="out" readonly></textarea></div>
+  <div class="row"><button id="undo">Undo last</button> <button id="clear">Clear</button></div>
+  <p class="muted">Stations are rounded to 0.1 m. A good measurement puts mirrored stairs at mirrored stations: check +x against −x.</p>
+</div>
+<div id="view"><canvas id="c"></canvas></div>
+<script type="module">
+  const c = document.getElementById('c');
+  const g = c.getContext('2d');
+  const img = new Image();
+  const refs = [];
+  const stairs = [];
+  let zoom = 1;
+  const $ = (id) => document.getElementById(id);
+
+  $('file').addEventListener('change', (e) => {
+    const f = e.target.files[0];
+    if (!f) return;
+    img.onload = draw;
+    img.src = URL.createObjectURL(f);
+  });
+  $('zoom').addEventListener('input', (e) => { zoom = Number(e.target.value); draw(); });
+  $('undo').addEventListener('click', () => { (stairs.length ? stairs : refs).pop(); draw(); });
+  $('clear').addEventListener('click', () => { refs.length = 0; stairs.length = 0; draw(); });
+  c.addEventListener('click', (e) => {
+    const r = c.getBoundingClientRect();
+    const p = { x: (e.clientX - r.left) / zoom, y: (e.clientY - r.top) / zoom };
+    const mode = document.querySelector('input[name=mode]:checked').value;
+    if (mode === 'ref') refs.push({ ...p, s: Number($('refS').value) });
+    else stairs.push(p);
+    draw();
+  });
+
+  /** Position along the line through the first two references, in pixels. */
+  function along(p) {
+    const [a, b] = refs;
+    const dx = b.x - a.x, dy = b.y - a.y;
+    const L = Math.hypot(dx, dy) || 1;
+    return ((p.x - a.x) * dx + (p.y - a.y) * dy) / L;
+  }
+  /**
+   * Station from position along the line: a straight scale from two
+   * references, and from three or more the 1-D projective map
+   * s = (a t + b) / (c t + 1), least squares on s (1 + c t) = a t + b.
+   */
+  function fitMap() {
+    if (refs.length < 2) return null;
+    const pts = refs.map((r) => [along(r), r.s]);
+    if (pts.length === 2) {
+      const [[t0, s0], [t1, s1]] = pts;
+      const k = (s1 - s0) / ((t1 - t0) || 1);
+      return { f: (t) => s0 + (t - t0) * k, kind: 'straight scale' };
+    }
+    // Normal equations for [a, b, c]: a t + b - c t s = s.
+    const A = [[0, 0, 0], [0, 0, 0], [0, 0, 0]];
+    const y = [0, 0, 0];
+    for (const [t, s] of pts) {
+      const row = [t, 1, -t * s];
+      for (let i = 0; i < 3; i++) {
+        y[i] += row[i] * s;
+        for (let j = 0; j < 3; j++) A[i][j] += row[i] * row[j];
+      }
+    }
+    const det = (m) => m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1]) - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0]) + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
+    const D = det(A);
+    if (Math.abs(D) < 1e-12) return null;
+    const sol = [0, 1, 2].map((k) => det(A.map((row, i) => row.map((v, j) => (j === k ? y[i] : v)))) / D);
+    const [a, b, cc] = sol;
+    const resid = Math.sqrt(pts.reduce((q, [t, s]) => q + ((a * t + b) / (cc * t + 1) - s) ** 2, 0) / pts.length);
+    return { f: (t) => (a * t + b) / (cc * t + 1), kind: `perspective fit, ${resid.toFixed(2)} m rms at the references` };
+  }
+
+  function draw() {
+    if (!img.naturalWidth) return;
+    c.width = img.naturalWidth * zoom;
+    c.height = img.naturalHeight * zoom;
+    g.drawImage(img, 0, 0, c.width, c.height);
+    const map = fitMap();
+    const dot = (p, col, label) => {
+      g.fillStyle = col; g.beginPath(); g.arc(p.x * zoom, p.y * zoom, 5, 0, Math.PI * 2); g.fill();
+      g.fillStyle = '#fff'; g.strokeStyle = '#000'; g.lineWidth = 3; g.font = 'bold 13px sans-serif';
+      g.strokeText(label, p.x * zoom + 7, p.y * zoom - 7); g.fillText(label, p.x * zoom + 7, p.y * zoom - 7);
+    };
+    if (refs.length >= 2) {
+      g.strokeStyle = 'rgba(255,255,0,.6)'; g.lineWidth = 1;
+      g.beginPath(); g.moveTo(refs[0].x * zoom, refs[0].y * zoom); g.lineTo(refs[1].x * zoom, refs[1].y * zoom); g.stroke();
+    }
+    $('refs').innerHTML = refs.map((r) => `<li>${r.s} m</li>`).join('');
+    refs.forEach((r) => dot(r, '#ff0', `${r.s}`));
+    const st = map ? stairs.map((p) => Math.round(map.f(along(p)) * 10) / 10) : [];
+    stairs.forEach((p, i) => dot(p, '#0ef', map ? `${st[i]}` : '?'));
+    $('stairs').innerHTML = st.map((s) => `<li>${s} m</li>`).join('');
+    $('fit').textContent = map ? `(${map.kind})` : '(needs two references)';
+    $('out').value = JSON.stringify([...st].sort((p, q) => p - q));
+  }
+</script>
+</body></html>
