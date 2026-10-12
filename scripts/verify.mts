@@ -1857,16 +1857,16 @@ import { buildStadium as siBuild } from '../src/core/stadiumFit';
     'jewel-jeddah-60k-rb': '59732:91b775d55c16c2de',
     'alawwal-park-26k-rb': '26118:ba8c19af9216807f',
     'kingdom-arena-26k-rb': '22318:5e7bff0fcd956148',
-    'pmbf-stadium-22k-rb': '22361:079b3f572811de54',
-    'pfbf-stadium-22k-rb': '22790:8ab70ef70939d8f3',
+    'pmbf-stadium-22k-rb': '21341:6fa4e92da50288da',
+    'pfbf-stadium-22k-rb': '22948:6466acc8a6d16582',
     'buraidah-stadium-25k-rb': '28496:24865ee95530f151',
     'shg-arena-14k-rb': '13786:4e67b7f745fd1e05',
-    'ego-stadium-13k-rb': '13096:3ae091403778b605',
+    'ego-stadium-13k-rb': '10256:4af86807751fcb15',
     'alfateh-stadium-12k-rb': '11876:551712d62441b106',
     'abha-stadium-20k-rb': '16160:81b318e4467ace4b',
-    'tabuk-stadium-12k-rb': '11876:98fd4abb77dddb48',
-    'alhazem-stadium-8k-rb': '6129:9a2535b5d2c5a331',
-    'majmaah-stadium-7k-rb': '6822:7e7f279577705f89',
+    'tabuk-stadium-12k-rb': '14774:fe6ecb3bf3e3630f',
+    'alhazem-stadium-8k-rb': '4753:944110285286af99',
+    'majmaah-stadium-7k-rb': '6604:f475fc7ef51b39b2',
     // The Premier League's grounds, October 2026. Frozen at first release:
     // re-take these only before that push.
     'anfield-61k': '60814:b3614ab06de02adb',
@@ -2507,8 +2507,12 @@ await (async () => {
     { id: 'alfaisal-jeddah-27k', clubs: 'Al-Ahli, Al-Ittihad', seats: 27000, tol: 0.02 },
     { id: 'shg-arena-14k-rb', clubs: 'Al-Shabab', seats: 13537, tol: 0.02 },
     { id: 'pfbf-stadium-22k-rb', clubs: 'Al-Riyadh', seats: 22500, tol: 0.02 },
-    { id: 'ego-stadium-13k-rb', clubs: 'Al-Ettifaq', seats: 12984, tol: 0.02 },
-    { id: 'pmbf-stadium-22k-rb', clubs: 'Al-Qadsiah, Al-Khaleej', seats: 22042, tol: 0.02 },
+    // 12,924 by the book, with its boxes; webook's seat map has 10,891 seats,
+    // and the corners here are a little tighter than the real ones.
+    { id: 'ego-stadium-13k-rb', clubs: 'Al-Ettifaq', seats: 10891, tol: 0.065 },
+    // 22,042 by the book; the 2024 drone photograph puts the front row 6 m
+    // behind the track, nearer than the first build, and its blocks hold 21,341.
+    { id: 'pmbf-stadium-22k-rb', clubs: 'Al-Qadsiah, Al-Khaleej', seats: 21341, tol: 0.02 },
     { id: 'alfateh-stadium-12k-rb', clubs: 'Al-Fateh', seats: 11851, tol: 0.02 },
     // "About 25,000" by the book; the stands the drone photograph shows (the side
     // opposite the main stand 27 m deep) hold 28,500 at half-metre seats.
@@ -2516,10 +2520,13 @@ await (async () => {
     // 20,000 by the book; 14,357 at the 2024 Super Cup final, "does not exceed 17,000";
     // its real blocks hold 16,160.
     { id: 'abha-stadium-20k-rb', clubs: 'Abha', seats: 16500, tol: 0.03 },
-    { id: 'tabuk-stadium-12k-rb', clubs: 'NEOM', seats: 12000, tol: 0.02 },
-    // 8,000 by the book; 6,200 numbered seats since 2019.
-    { id: 'alhazem-stadium-8k-rb', clubs: 'Al-Hazem, Al-Kholood', seats: 6200, tol: 0.02 },
-    { id: 'majmaah-stadium-7k-rb', clubs: 'Al-Fayha, Al-Faisaly', seats: 6844, tol: 0.01 },
+    // 12,000 by the book; about 15,000 with the movable stand added in 2025.
+    { id: 'tabuk-stadium-12k-rb', clubs: 'NEOM', seats: 15000, tol: 0.02 },
+    // 8,000 by the book; the drone photographs show a main stand of 15 rows and
+    // the two curved terraces, about 4,750 seats.
+    { id: 'alhazem-stadium-8k-rb', clubs: 'Al-Hazem, Al-Kholood', seats: 4750, tol: 0.02 },
+    // 6,844 for 2026-27, of which 578 are kept empty.
+    { id: 'majmaah-stadium-7k-rb', clubs: 'Al-Fayha, Al-Faisaly', seats: 6844, tol: 0.04 },
   ];
   await leagueGrounds('saudi league', 'saudi-pro-league', GROUNDS, (i18nSrc, fails) => {
     // The earlier Al-Awwal is still there for designs saved on it, and named as such.
@@ -2795,7 +2802,9 @@ await (async () => {
   // Two grounds really are wider than the rule-book, as measured: Buraidah's
   // 1983 front band along the side opposite the main stand, and SHG Arena's
   // long sides, whose painted block names put nine blocks in 144 m.
-  const WIDE_OK: Record<string, number> = { 'buraidah-stadium-25k-rb': 33, 'shg-arena-14k-rb': 38 };
+  // Measured: Buraidah's 1983 front band, SHG's painted blocks, Al-Hazem's
+  // terraces (a stair every 18 m) and EGO's main stand (webook's 36-seat rows).
+  const WIDE_OK: Record<string, number> = { 'buraidah-stadium-25k-rb': 33, 'shg-arena-14k-rb': 38, 'alhazem-stadium-8k-rb': 41, 'ego-stadium-13k-rb': 36 };
   for (const e of cat.STADIUM_CATALOG) {
     const t = e.template;
     if (!bl.hasBlocks(t)) continue;

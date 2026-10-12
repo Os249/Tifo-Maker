@@ -1,5 +1,5 @@
 import type { AisleRun, SeatOpening, StadiumTemplate, StandSide, TierSpec } from './types';
-import { arcAtIndex, cornerStation, rhythm, stationIndex } from './blocks';
+import { arcAtIndex, cornerStation, rhythm, SIDE_INDEX, stationIndex } from './blocks';
 import { buildOffsetCurve, samplePlanCurve } from './planCurve';
 
 /**
@@ -135,6 +135,24 @@ export function ringStairs(
 export function endCornerStation(t: StadiumTemplate, tier: TierSpec): number {
   const front = buildOffsetCurve(samplePlanCurve(t.plan.a, t.plan.b, t.plan.exponent), tier.baseOffset);
   return front.total / 4 - cornerStation(t, tier, 'north');
+}
+
+/**
+ * A station measured on one front row (`from`, a tier's baseOffset) as a
+ * station on another tier's front row, along the same line out from the
+ * pitch: round a bend a tier further back is longer, so a stairway that
+ * runs straight up through two tiers is at a larger station on the upper.
+ */
+export function radialStation(t: StadiumTemplate, from: number, to: number, side: StandSide, at: number): number {
+  const curve = samplePlanCurve(t.plan.a, t.plan.b, t.plan.exponent);
+  const a = buildOffsetCurve(curve, from);
+  const b = buildOffsetCurve(curve, to);
+  const idx = stationIndex(a, side, at);
+  let d = arcAtIndex(b, idx) - b.s[SIDE_INDEX[side]];
+  if (d > b.total / 2) d -= b.total;
+  if (d < -b.total / 2) d += b.total;
+  const sign = side === 'north' || side === 'west' ? -1 : 1;
+  return Math.round(sign * d * 100) / 100;
 }
 
 /** Openings at every stairway of a set of runs (a vomitory at the foot of each stair, say). */

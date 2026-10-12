@@ -1239,7 +1239,7 @@ const STRINGS: Record<string, { en: string; ar: string }> = {
   'si.note.capacity': { en: '{built} built against {stated} stated — {pct}% out', ar: '{built} مقعد مبني مقابل {stated} معلنة — فرق {pct}%' },
   'si.note.aisles': { en: 'a stadium-sized default; the imagery could count the real ones', ar: 'رقم افتراضي لملعب بهذا الحجم؛ الصور الجوية تقدر تعدّ الحقيقية' },
   'si.note.pitch': { en: '~0.5 m is the regulated working figure', ar: '~٠٫٥ م هو الرقم المعتمد نظاماً' },
-  'si.note.tiers': { en: 'right on 35 of our 64 stadiums; a photo settles it', ar: 'صح في ٣٥ من ٦٤ ملعب عندنا؛ صورة وحدة تحسمها' },
+  'si.note.tiers': { en: 'right on 34 of our 64 stadiums; a photo settles it', ar: 'صح في ٣٤ من ٦٤ ملعب عندنا؛ صورة وحدة تحسمها' },
   'si.note.lighting': { en: 'guessed from the roof shape; right on 44 of our 64 stadiums, and a photo settles it', ar: 'مخمّن من شكل السقف؛ صح في ٤٤ من ٦٤ ملعب عندنا، وصورة وحدة تحسمها' },
   'si.note.facade': { en: 'nothing public records what a stadium is clad in — one photo settles this', ar: 'ما فيه مصدر عام يسجّل مواد واجهة الملعب — صورة وحدة تحسمها' },
   'si.warn.noRing': { en: 'No seating ring measured, so the plan curve is the building outline pulled in by a guess. Measuring the imagery replaces that guess.', ar: 'ما انقاس شريط المدرجات، فخط الخطة هو حدود المبنى مسحوبة بتخمين. قياس الصور الجوية يشيل هذا التخمين.' },

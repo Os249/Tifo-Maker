@@ -1,6 +1,6 @@
 import type { RealBlocksLayout } from './realBlocks';
 import type { SeatOpening, StandSide } from './types';
-import { atStairs, endCornerStation, rebuilt, ringStairs } from './realBlocks';
+import { atStairs, endCornerStation, radialStation, rebuilt, ringStairs } from './realBlocks';
 import { cornerStation, rhythm } from './blocks';
 
 /**
@@ -236,9 +236,26 @@ export const SAUDI_REAL_BLOCKS: Record<string, RealBlocksLayout> = {
     build: (old) =>
       rebuilt(old, 'pmbf-stadium-22k-rb', (t) => {
         const [bowl] = t.tiers;
+        // The front row, 6 m behind the track: 3.8 m nearer the pitch than
+        // the earlier plan on the long sides and 2 m behind the goals. The
+        // roof, the buildings and the arcade stay where they were.
+        const plan = { a: 95.6, b: 53.5, exponent: 2.95 };
+        const db = t.plan.b - plan.b;
         const sideVoms = [20.5, 35.2, 45.7, 62.3, 72.6];
-        const oppVoms = [5.25, ...sideVoms];
-        const endVoms = [6.4, 16.9, 32.4, 39.2];
+        // The stand opposite (real east), from the Ministry of Sport's
+        // square-on photograph across the pitch: in the middle the media box,
+        // 8.6 m wide, through the front two of webook's three rings of
+        // sections; then a vomitory 12.4 m out and two pairs beyond, each with
+        // a stair through it, and stairs beside the box and between the pairs.
+        const oppVoms = [12.4, 24.2, 34.5, 51, 63];
+        // The ends (the 2024 drone photograph, over one end looking at the
+        // other, and webook's seat map): stairs 7.2 and 16.4 m either side of
+        // the centre line and vomitories 26 and 37.2 m out. Behind the camera
+        // (east) the players' tunnel comes out under the scoreboard, a gap
+        // through the whole stand; the end it looks at has two gates at the
+        // front either side of the middle and a camera platform at the back.
+        const endVoms = [26, 37.2];
+        const endStairs = [7.2, 16.4, ...endVoms, 44.5];
         const voms = (side: StandSide, at: number[]): SeatOpening => ({ side, at, mirror: true, width: 2.4, rows: [8, 11], kind: 'vomitory' });
         return {
           tiers: [
@@ -248,45 +265,82 @@ export const SAUDI_REAL_BLOCKS: Record<string, RealBlocksLayout> = {
                 width: 1.1,
                 aisles: [
                   { side: 'south', at: [0, 14, ...sideVoms], mirror: true },
-                  { side: 'north', at: oppVoms, mirror: true },
-                  { side: 'east', at: endVoms, mirror: true },
-                  { side: 'west', at: endVoms, mirror: true },
+                  { side: 'north', at: [4.5, 12.4, 24.2, 34.5, 42.8, 51, 63, 70], mirror: true },
+                  // The tunnel's sides are the stairs either side of it.
+                  { side: 'east', at: endStairs.slice(1), mirror: true },
+                  { side: 'west', at: endStairs, mirror: true },
                 ],
-                openings: [voms('south', sideVoms), voms('north', oppVoms), voms('east', endVoms), voms('west', endVoms)],
+                openings: [
+                  voms('south', sideVoms),
+                  voms('north', oppVoms),
+                  voms('east', endVoms),
+                  voms('west', endVoms),
+                  { side: 'east', at: [0], width: 9, rows: [0, 21], kind: 'tunnel' },
+                  { side: 'west', at: [-4.75, 7.75], width: 4.5, rows: [0, 5], kind: 'gate' },
+                ],
+                areas: [
+                  { side: 'north', from: -4.3, to: 4.3, rows: [0, 13], kind: 'press' },
+                  { side: 'west', from: -2, to: 2, rows: [12, 15], kind: 'gantry' },
+                ],
               },
             },
           ],
+          plan,
+          ...(t.runoff ? { runoff: { ...t.runoff, ...plan } } : {}),
+          roofs: (t.roofs ?? []).map((r) => ({ ...r, back: r.back + db, front: r.front + db, columns: r.columns ? { ...r.columns, offset: (r.columns.offset ?? r.back) + db } : r.columns })),
+          details: {
+            ...t.details,
+            buildings: (t.details?.buildings ?? []).map((bd) => ({ ...bd, front: bd.front + db })),
+            skins: (t.details?.skins ?? []).map((sk) => ({ ...sk, offset: sk.offset + db })),
+          },
         };
       }),
   },
 
-  // Prince Faisal bin Fahd Stadium. Only four small photographs of it are to
-  // be had (StadiumDB, 575 px wide), too small to solve a camera from, so its
-  // rhythm is counted off them rather than measured: in the end under the
-  // screen (no. 2) a stair on the centre line and every 14 m out from it, and
-  // a lit vomitory half way up in the middle of each block between them; the
-  // long sides the same (nos. 1 and 3). The upper tier over the stand
-  // opposite has its stairs over the lower tier's and is entered from the
-  // front, between them.
+  // Prince Faisal bin Fahd Stadium. Measured from a drone photograph from high
+  // over the main stand (on X, March 2024, with the club's ticket prices), the
+  // camera solved from the pitch markings, the stand opposite and both ends
+  // unrolled from it; StadiumDB's four small photographs for the rest.
+  //
+  // - Opposite the main stand the lower tier has a stair on the centre line,
+  //   over the media box at its front, and every 16.5 m out from ±17 m; a
+  //   vomitory two thirds of the way up (rows 10 to 13) half way between
+  //   each pair of stairs past the middle block.
+  // - The ends: a stair every 14 m at 11, 25 and 39 m out, a vomitory on
+  //   the centre line with a stair through it, and others half way between
+  //   the stairs.
+  // - The main stand is out of the photograph and keeps the 14 m rhythm of
+  //   StadiumDB's photographs; so does the upper tier, entered from the front.
   'pfbf-stadium-22k': {
     id: 'pfbf-stadium-22k-rb',
     build: (old) =>
       rebuilt(old, 'pfbf-stadium-22k-rb', (t) => {
         const [bowl, upper] = t.tiers;
-        const sides = ['north', 'south', 'east', 'west'] as const;
         const corner = (side: StandSide): number => cornerStation(t, bowl, side) - 2;
-        const full = (side: StandSide): number[] => rhythm(14, false, corner(side));
-        const half = (side: StandSide): number[] => rhythm(14, true, corner(side));
+        const mainStairs = rhythm(14, false, corner('south'));
+        const mainVoms = rhythm(14, true, corner('south'));
+        // (The last, 81 m round, is the end's stair 39 m out.)
+        const opp = [0, 17, 33.5, 50, 66.3];
+        const oppVoms = [25.3, 41.7, 58.1, 73.6];
+        const ends = [0, 11, 25, 39];
+        const endVoms = [0, 18, 32];
         const upStairs = rhythm(14, false, (upper.stands?.[0]?.halfLength ?? 75) - 3);
+        const vom = (side: StandSide, at: number[]): SeatOpening => ({ side, at, mirror: true, width: 2.4, rows: [10, 13], kind: 'vomitory' });
         return {
           tiers: [
             {
               ...bowl,
               blocks: {
                 width: 1.2,
-                aisles: sides.map((side) => ({ side, at: full(side), mirror: true })),
-                // Five rows: the headroom of a passage coming up under a 26° rake.
-                openings: sides.map((side) => ({ side, at: half(side), mirror: true, width: 2.4, rows: [7, 11] as [number, number], kind: 'vomitory' as const })),
+                aisles: [
+                  { side: 'south', at: mainStairs, mirror: true },
+                  { side: 'north', at: opp, mirror: true },
+                  { side: 'east', at: ends, mirror: true },
+                  { side: 'west', at: ends, mirror: true },
+                ],
+                openings: [{ ...vom('south', mainVoms), rows: [7, 11] }, vom('north', oppVoms), vom('east', endVoms), vom('west', endVoms)],
+                // The media box at the front of the middle of the stand opposite.
+                areas: [{ side: 'north', from: -5, to: 5, rows: [0, 7], kind: 'press' }],
               },
             },
             {
@@ -529,44 +583,135 @@ export const SAUDI_REAL_BLOCKS: Record<string, RealBlocksLayout> = {
       }),
   },
 
-  // EGO Stadium. Only two photographs of the rebuilt ground are to be had
-  // (StadiumDB nos. 1 and 2, the club's drone views), both from far off, and
-  // under the fabric vaults the stairs barely show. What does show, in the end
-  // seen from behind the main stand's far corner at dusk (no. 2, scaled from
-  // the goal), is a vomitory in the front half of the rake 7.7 m to the main
-  // stand's side of the goal and another 25.7 m on: so a vomitory every
-  // 25.7 m, each with a stair through it, and a stair half way between. The
-  // stand opposite and the corners are given the same rhythm, centred on the
-  // middle; the 1983 main stand a stair every 12.85 m from its centre line.
+  // EGO Stadium. From the ground's seat map on webook (2026-27), which draws
+  // every seat and names every block, checked against the club's two drone
+  // photographs (StadiumDB nos. 1 and 2).
+  //
+  // - The U is 14 rows deep. The stand opposite (`north`) is D1 to D11 from
+  //   the west corner round to the east: D6 in the middle, 12 seats wide over
+  //   a box at the front, then blocks of 22, 26, 21 and 21 seats either side,
+  //   and D1 and D11 round the corners to the diagonal. The ends are C1 to C7
+  //   (west, from the open corner by the main stand round to the far corner)
+  //   and E1 to E7 (east, the other way round): blocks of 23, 23, 28, 28, 20 and 19 seats, then
+  //   the corner block. Scaled onto the ends as the photographs place them —
+  //   the openings at the front the dusk photograph shows 7.7 m to the main
+  //   stand's side of the goal and 18 m beyond it are the ones the map has
+  //   between C2 and C3 and between C4 and C5.
+  // - Every block has a vomitory half way up its middle (rows 5 to 7); at
+  //   the stairs between C2 and C3, C4 and C5 and C6 and C7 (and their twins in
+  //   the west end), and between D1 and D2, D3 and D4 and their twins, the
+  //   front rows open onto the walkway round the pitch.
+  // - The 1983 main stand is 19 rows: B4, B3, B2, B1, the VIP block, A4, A3,
+  //   A2 and A1 (west to east), blocks of 13, 25, 36 and 38 seats either side
+  //   of a VIP block of 31; a vomitory half way up each (rows 9 to 11), and the
+  //   players' tunnel and the VIP entrance across the front five rows of the
+  //   middle.
+  //
+  // About 11,000 seats: the map's count (10,900), against the published
+  // 12,924 that includes the boxes.
   'ego-stadium-13k': {
     id: 'ego-stadium-13k-rb',
     build: (old) =>
       rebuilt(old, 'ego-stadium-13k-rb', (t) => {
         const [u, main] = t.tiers;
-        const step = 12.85;
-        // The ends: from -20.55 (the first stair past the open corner) on round to the far corner.
-        const ends = [-20.55, -7.7, 5.15, 18, 30.85, 37, 41.5];
-        const endVoms = [-7.7, 18];
-        // The corners are tight on the front row and fan out behind: a stair on
-        // the diagonal and one either side of it.
-        const opp = [0, 12.85, 25.7, 38.55, 49.5, 52.8];
-        const oppVoms = [12.85, 38.55];
-        const vom = (side: StandSide, at: number[], mirror: boolean): SeatOpening => ({ side, at, mirror, width: 2.4, rows: [4, 7], kind: 'vomitory' });
+        const P = 0.47;
+        // The stand opposite: stairs out from D6, block by block.
+        const dWidths = [22, 26, 21, 21];
+        const dStairs: number[] = [];
+        let x = (12 * P) / 2 + 0.55;
+        dStairs.push(x);
+        for (const w of dWidths) {
+          x += 0.55 + w * P + 0.55;
+          dStairs.push(Math.round(x * 100) / 100);
+        }
+        const dMid = dStairs.slice(0, -1).map((a, k) => Math.round(((a + dStairs[k + 1]) / 2) * 100) / 100);
+        // The diagonal at the corner, between D1 and C7.
+        const diag = cornerStation(t, u, 'north') - 0.6;
+        // The ends, from the open corner (z = -27) round to the diagonal:
+        // the map's blocks (and the corner block's front row, 25 seats)
+        // shared out over the end's length.
+        const z0 = -27;
+        const endLen = cornerStation(t, u, 'east') - z0;
+        const seats = [23, 23, 28, 28, 20, 19, 25];
+        const stairU = 1.1 / P;
+        const unit = endLen / (seats.reduce((a, b) => a + b, 0) + (seats.length - 1) * stairU);
+        const endStairs: number[] = [];
+        const endMid: number[] = [];
+        let c = 0;
+        for (let k = 0; k < seats.length; k++) {
+          endMid.push(Math.round((z0 + (c + seats[k] / 2) * unit) * 100) / 100);
+          c += seats[k];
+          if (k < seats.length - 1) {
+            endStairs.push(Math.round((z0 + (c + stairU / 2) * unit) * 100) / 100);
+            c += stairU;
+          }
+        }
+        const endFront = [endStairs[1], endStairs[3], endStairs[5]];
+        // The main stand: out from the VIP block.
+        const mWidths = [38, 36, 25, 13];
+        const mStairs: number[] = [];
+        let m = (31 * P) / 2 + 0.55;
+        mStairs.push(Math.round(m * 100) / 100);
+        for (const w of mWidths.slice(0, -1)) {
+          m += 0.55 + w * P + 0.55;
+          mStairs.push(Math.round(m * 100) / 100);
+        }
+        const mEnd = Math.round((m + 0.55 + mWidths[mWidths.length - 1] * P) * 10) / 10;
+        const mMid = [...mStairs, mEnd].slice(0, -1).map((a, k) => Math.round(((a + [...mStairs, mEnd][k + 1]) / 2) * 100) / 100);
+        const vom = (side: StandSide, at: number[], mirror: boolean, width: number, rows: [number, number]): SeatOpening => ({ side, at, mirror, width, rows, kind: 'vomitory' });
+        // The openings from the walkway round the pitch into the front rows.
+        const front = (side: StandSide, at: number[], mirror: boolean, width: number, rows: [number, number]): SeatOpening => ({ side, at, mirror, width, rows, kind: 'vomitory' });
+        const names = (side: StandSide, letter: string, n: number) => ({ side, names: Array.from({ length: n }, (_, k) => `${letter}${k + 1}`) });
         return {
           tiers: [
             {
               ...u,
+              rows: 14,
               blocks: {
                 width: 1.1,
                 aisles: [
-                  { side: 'east', at: ends },
-                  { side: 'west', at: ends },
-                  { side: 'north', at: opp, mirror: true },
+                  { side: 'north', at: [...dStairs, diag], mirror: true },
+                  { side: 'east', at: endStairs },
+                  { side: 'west', at: endStairs },
                 ],
-                openings: [vom('east', endVoms, false), vom('west', endVoms, false), vom('north', oppVoms, true)],
+                openings: [
+                  vom('north', dMid, true, 3.6, [5, 7]),
+                  vom('east', endMid.slice(0, -1), false, 3, [5, 7]),
+                  vom('west', endMid.slice(0, -1), false, 3, [5, 7]),
+                  front('north', [dStairs[2], dStairs[4]], true, 4.9, [0, 4]),
+                  front('east', endFront, false, 4.6, [0, 5]),
+                  front('west', endFront, false, 4.6, [0, 5]),
+                ],
+                areas: [
+                  // The box at the front of D6, and the camera gantry at its back.
+                  { side: 'north', from: -2.8, to: 2.8, rows: [0, 4], kind: 'platform' },
+                  { side: 'north', from: -1.6, to: 1.6, rows: [9, 13], kind: 'gantry' },
+                  // The camera platform in E2.
+                  { side: 'east', from: endMid[5] - 1.2, to: endMid[5] + 1.2, rows: [0, 9], kind: 'platform' },
+                ],
+                // Named as the map names them, left to right facing each stand
+                // from the pitch: D1 at the west corner, the C blocks the west
+                // end, the E blocks the east.
+                names: [names('north', 'D', 11), names('west', 'C', 7), names('east', 'E', 7)],
               },
             },
-            { ...main, blocks: { width: 1.1, aisles: [{ side: 'south', at: rhythm(step, false, (main.stands?.[0]?.halfLength ?? 72) - 6), mirror: true }] } },
+            {
+              ...main,
+              rows: 19,
+              stands: (main.stands ?? []).map((st) => ({ ...st, halfLength: mEnd })),
+              blocks: {
+                width: 1.1,
+                aisles: [{ side: 'south', at: mStairs, mirror: true }],
+                openings: [vom('south', mMid, true, 3.3, [9, 11])],
+                areas: [
+                  // The players' tunnel and the VIP entrance, across the front of the middle.
+                  { side: 'south', from: -(mStairs[0] + 3.8), to: mStairs[0] + 3.8, rows: [0, 4], kind: 'platform' },
+                  // The VIP boxes over it; the VIP block's seats are its five back rows.
+                  { side: 'south', from: -(mStairs[0] - 0.55), to: mStairs[0] - 0.55, rows: [5, 13], kind: 'press' },
+                ],
+                names: [{ side: 'south', names: ['A1', 'A2', 'A3', 'A4', 'VIP', 'B1', 'B2', 'B3', 'B4'] }],
+              },
+            },
           ],
         };
       }),
@@ -673,41 +818,79 @@ export const SAUDI_REAL_BLOCKS: Record<string, RealBlocksLayout> = {
       }),
   },
 
-  // Al-Hazem Club Stadium. One photograph of it on Wikimedia Commons ("Al-Hazm
-  // Club Stadium", from behind a goal along the main stand), from before the
-  // 2019 reseating, which kept the stand: the VIP box in the middle of its
-  // upper rows, and two stairs either side of it, the outer blocks the width
-  // of the inner. The curved terraces round the corners are seen in the
-  // satellite picture only, a stair every 12 m along them.
+  // Al-Hazem Club Stadium. Measured from three drone photographs: the
+  // Ministry of Sport's daytime one along the ground from behind the east goal
+  // (2023-24, with the long roof over the main stand), and two at night in
+  // 2020 (Arriyadiyah, July 2020), one high over the north-east corner and
+  // one square on to the main stand from over the empty side, each camera
+  // solved from the pitch markings and each stand unrolled onto its rows.
+  //
+  // - The long curved terrace round the west end starts at the end's centre
+  //   line and runs round the bend to a flank wall short of the main stand;
+  //   its stairs are 18 m apart (blocks of 34-36 seats, the front row
+  //   following the track), and a gangway crosses it half way up, at row 6.
+  // - The short terrace round the south-east corner: two blocks either side
+  //   of one stair, from its own flank wall round to the corner.
+  // - The main stand: 92 m long and centred 1.7 m east of the halfway line,
+  //   fifteen rows, a stair every 14-15 m; in the middle, 16 m wide, the
+  //   players' tunnel and the raised VIP box in front of the rows behind it,
+  //   which have a stair down their middle.
+  //
+  // About 4,900 seats: what the photographs hold, against the 8,000 the
+  // ground is usually given (and the 6,129 of the earlier layout, which
+  // guessed at the terraces from the satellite picture).
   'alhazem-stadium-8k': {
     id: 'alhazem-stadium-8k-rb',
     build: (old) =>
       rebuilt(old, 'alhazem-stadium-8k-rb', (t) => {
         const [terraces, main] = t.tiers;
+        // The terraces' front row follows the track round the bends, 49.5 m
+        // from the bends' centres; the main stand stays where it was.
+        const plan = { a: 90.1, b: 50.6, exponent: 3 };
+        const db = plan.b - t.plan.b;
+        const C = 1.7;
+        const at = (offs: number[]) => offs.map((o) => Math.round((C + o) * 10) / 10);
         return {
+          plan,
+          ...(t.runoff ? { runoff: { ...t.runoff, ...plan } } : {}),
+          roofs: (t.roofs ?? []).map((r) => (r.straight ? { ...r, back: r.back - db, front: r.front - db, columns: r.columns ? { ...r.columns, offset: (r.columns.offset ?? r.back) - db } : r.columns } : r)),
+          details: { ...t.details, buildings: (t.details?.buildings ?? []).map((bd) => (bd.straight ? { ...bd, front: bd.front - db } : bd)) },
           tiers: [
             {
               ...terraces,
+              // From the west end's centre line round to x = -56.8, and from
+              // x = 60.5 round the south-east corner to z = -36.
+              omit: [
+                { side: 'north', from: -99, to: 99 },
+                { side: 'east', from: -36, to: 99 },
+                { side: 'west', from: -1.5, to: 99 },
+                { side: 'south', from: -56.8, to: 60.5 },
+              ],
               blocks: {
                 width: 1.1,
                 aisles: [
-                  { side: 'west', at: [-34, -22, -10, 0] },
-                  { side: 'east', at: [-34] },
-                  { side: 'south', at: [57, 66], mirror: true },
+                  { side: 'west', at: [-10.2, -28.2, -46.8] },
+                  { side: 'east', at: [-46.6] },
                 ],
+                walkways: [{ row: 6 }],
               },
             },
             {
               ...main,
+              // Fifteen rows: in both night photographs the seats stop at the
+              // fifteenth, under a walkway along the back.
+              rows: 15,
+              baseOffset: main.baseOffset - db,
+              stands: (main.stands ?? []).map((st) => ({ ...st, halfLength: 46, center: C })),
               blocks: {
                 width: 1.1,
                 aisles: [
-                  { side: 'south', at: [9, 23.5, 37], mirror: true },
-                  // Down the middle of the rows below the box, to the tunnel.
-                  { side: 'south', at: [0], rows: [0, 8] },
+                  { side: 'south', at: at([-36.8, -21.9, -8, 8, 21.9, 36.8]) },
+                  // Down the middle of the rows behind the box.
+                  { side: 'south', at: [C], rows: [8, 14] },
                 ],
-                // The VIP box, in the middle of the upper rows.
-                areas: [{ side: 'south', from: -9, to: 9, rows: [9, main.rows - 1], kind: 'platform' }],
+                // The tunnel and the VIP box, in the middle of the front rows.
+                areas: [{ side: 'south', from: C - 8, to: C + 8, rows: [0, 7], kind: 'platform' }],
               },
             },
           ],
@@ -715,63 +898,191 @@ export const SAUDI_REAL_BLOCKS: Record<string, RealBlocksLayout> = {
       }),
   },
 
-  // King Khalid Sport City Stadium, Tabuk. No photograph of its stands near
-  // enough to read is to be had (the August 2025 ones of the works are from
-  // the far side of the track); the main stand curving round from bend to
-  // bend is laid out on the rhythm its roof bays keep in the satellite
-  // picture, a stair every 13 m from the centre line, and the movable stand
-  // opposite in its four sections, a stair between each.
+  // King Khalid Sport City Stadium, Tabuk. From the ground's seat map on
+  // webook (2026-27: sections 101-114, 201-218 and 301-313, three levels)
+  // and the photographs of the 2025 works: the Slaati drone photograph square
+  // on to the main stand (August 2025) and NEOM SC's own photograph from the
+  // corner flag, the cameras solved from the track and the pitch markings.
+  //
+  // The main stand curves from bend to bend (to 96 m either side along its
+  // front row) in three bands, each its own tier, steeper as they go up:
+  // - the front band, 10 rows (sections 101-114): one stair down from each
+  //   vomitory above it, the players' tunnel in the middle, and a wide gate
+  //   at the front of each bend;
+  // - a walkway, then the middle band, 12 rows, entered by vomitories at its
+  //   foot every 15 m (the stand is centred 3.2 m off the halfway line), a
+  //   stair up either side of each; the VIP seats and the glass lounge in the
+  //   middle;
+  // - a second walkway and the top band, 12 rows under the roof, entered the
+  //   same way above, with the press box in the middle.
   'tabuk-stadium-12k': {
     id: 'tabuk-stadium-12k-rb',
     build: (old) =>
       rebuilt(old, 'tabuk-stadium-12k-rb', (t) => {
         const [main, opp] = t.tiers;
         const half = opp.stands?.[0]?.halfLength ?? 56;
+        const C = 3.2;
+        const d = [9.9, 24.9, 39.7, 54.9, 70, 84.9];
+        const voms = [...d.map((x) => Math.round((C - x) * 10) / 10), ...d.map((x) => Math.round((C + x) * 10) / 10)].sort((p, q) => p - q);
+        // Measured along the front row; the bands behind it have their
+        // vomitories on the same lines out, a stair either side of each (and
+        // one more in the long block at the stand's west end).
+        const on = (offset: number, at: number[]) => at.map((s) => radialStation(t, 0, offset, 'south', s));
+        const either = (offset: number) => [...on(offset, voms).flatMap((v) => [Math.round((v - 2.8) * 10) / 10, Math.round((v + 2.8) * 10) / 10]), ...on(offset, [-90.2])];
+        // The main stand stops 96 m round from its centre along the front row,
+        // at z = -18.6; the bands behind stop on the same line out.
+        const omit = (z: number) => [
+          { side: 'north' as const, from: -99, to: 99 },
+          { side: 'east' as const, from: z, to: 99 },
+          { side: 'west' as const, from: z, to: 99 },
+        ];
+        const front = { ...main, rows: 10, rakeDeg: 27, omit: omit(-18.6) };
+        const middle = { ...main, rows: 12, rowDepth: 0.8, rakeDeg: 35, baseOffset: 9.6, baseElevation: 5.8, omit: omit(-23.1) };
+        const top = { ...main, rows: 12, rowDepth: 0.8, rakeDeg: 37, baseOffset: 20.8, baseElevation: 12.6, omit: omit(-28.4) };
+        // As wide as the gap between the stairs either side of it.
+        const vom = (offset: number, rows: [number, number]): SeatOpening => ({ side: 'south', at: on(offset, voms), width: 4.6, rows, kind: 'vomitory' });
         return {
+          // Three levels, as webook sells them (101-114, 201-218, 301-313).
+          levels: 3,
           tiers: [
             {
-              ...main,
+              ...front,
               blocks: {
                 width: 1.2,
-                aisles: [
-                  { side: 'south', at: [0, 13, 26, 39, 52, 61, 68], mirror: true },
-                  { side: 'east', at: [-40, -31, -22] },
-                  { side: 'west', at: [-40, -31, -22] },
+                aisles: [{ side: 'south', at: voms.map((v) => Math.round((v - 1.8) * 10) / 10) }],
+                openings: [
+                  { side: 'south', at: [C], width: 4.5, rows: [0, 9], kind: 'tunnel' },
+                  // The gates at the front of the bends.
+                  { side: 'south', at: [C - 67.5, C + 66.1], width: 4, rows: [1, 9], kind: 'vomitory' },
                 ],
-                walkways: [{ row: 12 }],
-                openings: [{ side: 'south', at: [6.5, 19.5, 32.5, 45.5], mirror: true, width: 2.4, rows: [13, 15], kind: 'vomitory' }],
+                // Round the bends the blocks are the ends' (east and west) in the app's terms.
+                names: [
+                  { side: 'east', names: ['101', '102'] },
+                  { side: 'south', names: ['103', '104', '105', '106', '107', '108', '109', '110', '111', '112'] },
+                  { side: 'west', names: ['113', '114'] },
+                ],
+              },
+            },
+            {
+              ...middle,
+              blocks: {
+                width: 1.2,
+                aisles: [{ side: 'south', at: either(middle.baseOffset) }],
+                openings: [vom(middle.baseOffset, [0, 3])],
+                // The VIP seats in front of the glass lounge.
+                areas: [{ side: 'south', from: C - 7.5, to: C + 7.5, rows: [4, 11], kind: 'press' }],
+              },
+            },
+            {
+              ...top,
+              blocks: {
+                width: 1.2,
+                aisles: [{ side: 'south', at: either(top.baseOffset) }],
+                openings: [vom(top.baseOffset, [0, 2])],
+                // The press box.
+                areas: [{ side: 'south', from: C - 7.5, to: C + 7.5, rows: [0, 11], kind: 'press' }],
               },
             },
             { ...opp, blocks: { width: 1.2, aisles: [{ side: 'north', at: [0, half / 2], mirror: true }, { side: 'north', at: [half / 4, (3 * half) / 4], mirror: true }] } },
           ],
+          roofs: (t.roofs ?? []).map((r) => ({ ...r, back: 31.5, front: 15, backY: 22.5, frontY: 21, columns: r.columns ? { ...r.columns, offset: 30.5 } : r.columns, omit: omit(-16) })),
+          seatLook: {
+            colors: t.seatLook?.colors ?? ['#2f6b3f'],
+            // The front band beige, the two above green; the movable stand blue.
+            regions: [
+              { tiers: [0], colors: [{ c: '#d9c58f', w: 4 }, { c: '#cdb67c', w: 3 }] },
+              { tiers: [3], colors: ['#2b5fae', '#2352a0', '#3368b8'] },
+            ],
+          },
+          details: {
+            ...t.details,
+            zones: (t.details?.zones ?? []).map((z) => ({ ...z, tiers: [1] })),
+            buildings: (t.details?.buildings ?? []).map((bd) => ({ ...bd, front: 31, y1: 23 })),
+          },
         };
       }),
   },
 
-  // Al-Majma'ah Sports City Stadium. From the satellite pictures (Bing), in
-  // which the stairs show as pale lines across both stands: the main stand a
-  // stair every 12 m either side of the VIP seats in its middle, the long low
-  // stand opposite every 12 m from the centre line.
+  // Al-Majma'ah Sports City Stadium, as rebuilt for 2026: from the ground's
+  // seat map on webook (2026-27) and the stadium photographs of May 2026
+  // (@stadiumscorner on X: a drone square on to the main stand and one over
+  // the corner, the cameras solved from the pitch markings).
+  //
+  // - The main stand is new: 93.5 m long, two bands of 14 rows with a
+  //   walkway between, in eleven columns 8.5 m wide — the map's Blocks 1-4,
+  //   Silver A-C and 5-8 at the front, 9-19 behind — each band a stair
+  //   between each column. The upper band is entered from the walkway by
+  //   vomitories either side of the stairs 21.25 and 38.25 m out, and one
+  //   beside each stair 12.75 m out. In the middle of the front band the
+  //   players' tunnel and the glass VIP lounge.
+  // - The stand opposite is ten rows: Blocks 20-27, six of 12.4 m and one of
+  //   half that at either end, and a wheelchair platform beyond each.
+  //
+  // About 6,800 seats, as published (6,844, of which 578 are kept empty).
   'majmaah-stadium-7k': {
     id: 'majmaah-stadium-7k-rb',
     build: (old) =>
       rebuilt(old, 'majmaah-stadium-7k-rb', (t) => {
         const [tier] = t.tiers;
+        const mainHalf = 46.75;
+        const oppHalf = 57;
+        const mainStairs = [4.25, 12.75, 21.25, 29.75, 38.25];
+        const oppStairs = [0, 14.1, 28.2, 42.3, 50.1];
+        const pair = (at: number) => [at - 1.7, at + 1.7];
+        const upVoms = [...pair(21.25), ...pair(38.25), 11.05];
+        // Left to right facing each stand from the pitch.
+        const front = ['Block 8', 'Block 7', 'Block 6', 'Block 5', 'Silver C', 'Silver B', 'Silver A', 'Block 4', 'Block 3', 'Block 2', 'Block 1'];
+        const back = Array.from({ length: 11 }, (_, k) => `Block ${19 - k}`);
+        const opp = Array.from({ length: 8 }, (_, k) => `Block ${27 - k}`);
         return {
           tiers: [
             {
               ...tier,
-              // The published 6,844 with these stairs: seats 0.478 m apart.
-              seatPitch: 0.478,
+              rows: 29,
+              stands: (tier.stands ?? []).map((st) => (st.side === 'north' ? { ...st, halfLength: oppHalf, rows: 10 } : { ...st, halfLength: mainHalf })),
               blocks: {
                 width: 1.2,
                 aisles: [
-                  { side: 'south', at: [6, 18, 30, 42], mirror: true },
-                  { side: 'north', at: rhythm(12, false, 66), mirror: true },
+                  { side: 'south', at: mainStairs, mirror: true },
+                  { side: 'north', at: oppStairs, mirror: true },
+                ],
+                walkways: [{ row: 14, side: 'south' }],
+                openings: [{ side: 'south', at: upVoms, mirror: true, width: 2.0, rows: [15, 18], kind: 'vomitory' }],
+                areas: [
+                  // The players' tunnel at the front, and the glass VIP lounge over it.
+                  { side: 'south', from: -2.2, to: 2.2, rows: [0, 3], kind: 'platform' },
+                  { side: 'south', from: -5.5, to: 5.5, rows: [9, 13], kind: 'press' },
+                  // The wheelchair platforms at the ends of the stand opposite.
+                  { side: 'north', from: -oppHalf, to: -50.7, rows: [0, 9], kind: 'platform' },
+                  { side: 'north', from: 50.7, to: oppHalf, rows: [0, 9], kind: 'platform' },
+                ],
+                names: [
+                  { side: 'south', band: 0, names: front },
+                  { side: 'south', band: 1, names: back },
+                  { side: 'north', names: opp },
                 ],
               },
             },
           ],
+          // The new main stand is 23 m deep: its roof and the building behind it go back with it.
+          roofs: (t.roofs ?? []).map((r) =>
+            r.side === 'south'
+              ? { ...r, from: -mainHalf - 1, to: mainHalf + 1, back: 32, front: 19, backY: 16.8, frontY: 16.0, columns: r.columns ? { ...r.columns, offset: 31.5 } : r.columns }
+              : { ...r, from: -oppHalf + 2, to: oppHalf - 2, back: 8.6, front: 3.5, backY: 7.6, frontY: 7.2, columns: r.columns ? { ...r.columns, offset: 8.2 } : r.columns },
+          ),
+          seatLook: {
+            colors: [{ c: '#e8e2d4', w: 5 }, { c: '#d8d0bf', w: 3 }],
+            regions: [
+              // The silver seats in the middle of the main stand's front band.
+              { side: 'south', from: -12.75, to: 12.75, rows: [0, 13], colors: ['#8fc7cf', '#7fb9c3'] },
+              // Red, pink and white in clumps across the stand opposite.
+              { side: 'north', colors: [{ c: '#c8242f', w: 4 }, { c: '#f2f2f0', w: 4 }, { c: '#e27a96', w: 2 }], grain: { along: 1.5, rows: 2 } },
+            ],
+          },
+          details: {
+            ...t.details,
+            buildings: (t.details?.buildings ?? []).map((bd) => (bd.side === 'south' ? { ...bd, front: 32 } : bd)),
+          },
         };
       }),
   },

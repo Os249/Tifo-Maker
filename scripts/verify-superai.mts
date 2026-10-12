@@ -938,7 +938,9 @@ console.log(`\n${failures === 0 ? 'ALL PASS' : failures + ' FAILED'}`);
   const grad = validateSpec({ palette: ['#262a33', '#c8242c', '#f2f1ec'], layers: [
     { kind: 'gradient', region: 'all', colors: [1, 2], direction: 'vertical' },
   ] }).spec!;
-  const gFit = fitSpecToStadium(grad, mapOf('majmaah-stadium-7k-rb')).spec;
+  // The earlier Majma'ah layout (an 18-row main stand), kept unchanged for the
+  // designs saved on it: the rebuilt main stand is 29 rows deep.
+  const gFit = fitSpecToStadium(grad, mapOf('majmaah-stadium-7k')).spec;
   check('fit: a gradient over 18 rows becomes bands', gFit.layers[0].kind === 'stripes', gFit.layers[0].kind);
   check('fit: …but stays a gradient on a deep bowl', fitSpecToStadium(grad, big).spec.layers[0].kind === 'gradient');
 
@@ -955,7 +957,7 @@ console.log(`\n${failures === 0 ? 'ALL PASS' : failures + ' FAILED'}`);
   // 6. The stadium context says what each stand can hold.
   const hz = describeStadiumContext(buildStadiumContext(mapOf('alhazem-stadium-8k-rb')));
   check('context: a stand without seats is called out', /- north: 0 seats.*NO SEATS/.test(hz), hz.split('\n').find((l) => l.includes('- north')) ?? '');
-  const mj = describeStadiumContext(buildStadiumContext(mapOf('majmaah-stadium-7k-rb')));
+  const mj = describeStadiumContext(buildStadiumContext(mapOf('majmaah-stadium-7k')));
   check('context: a shallow stand says one element only', /SHALLOW/.test(mj) && /SLIVER/.test(mj));
 }
 

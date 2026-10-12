@@ -28,16 +28,16 @@ mkdirSync(OUT, { recursive: true });
 const GROUNDS = [
   ['alawwal-park-26k-rb', 26118, 'Al-Awwal Park (Riyadh)', 'الأول بارك (الرياض)'],
   ['shg-arena-14k-rb', 13786, 'SHG Arena (Riyadh)', 'إس إتش جي أرينا (الرياض)'],
-  ['ego-stadium-13k-rb', 13096, 'EGO Stadium (Dammam)', 'ملعب إيجو (الدمام)'],
+  ['ego-stadium-13k-rb', 10256, 'EGO Stadium (Dammam)', 'ملعب إيجو (الدمام)'],
   ['alfateh-stadium-12k-rb', 11876, 'Al-Fateh Stadium (Al-Ahsa)', 'ملعب نادي الفتح (الأحساء)'],
-  ['pmbf-stadium-22k-rb', 22361, 'Prince Mohamed bin Fahd Stadium (Dammam)', 'استاد الأمير محمد بن فهد (الدمام)'],
+  ['pmbf-stadium-22k-rb', 21341, 'Prince Mohamed bin Fahd Stadium (Dammam)', 'استاد الأمير محمد بن فهد (الدمام)'],
   ['alfaisal-jeddah-27k', 26873, 'Prince Abdullah Al-Faisal Stadium (Jeddah)', 'ملعب الأمير عبدالله الفيصل (جدة)'],
   ['buraidah-stadium-25k-rb', 28496, 'King Abdullah Sport City Stadium (Buraidah)', 'ملعب مدينة الملك عبدالله الرياضية (بريدة)'],
   ['abha-stadium-20k-rb', 16160, 'Prince Sultan Sport City Stadium (Abha)', 'ملعب مدينة الأمير سلطان الرياضية (أبها)'],
-  ['tabuk-stadium-12k-rb', 11876, 'King Khalid Sport City Stadium (Tabuk)', 'ملعب مدينة الملك خالد الرياضية (تبوك)'],
-  ['alhazem-stadium-8k-rb', 6129, 'Al-Hazem Club Stadium (Ar Rass)', 'ملعب نادي الحزم (الرس)'],
-  ['majmaah-stadium-7k-rb', 6822, "Al-Majma'ah Sports City Stadium", 'ملعب مدينة المجمعة الرياضية'],
-  ['pfbf-stadium-22k-rb', 22790, 'Prince Faisal bin Fahd Stadium (Riyadh)', 'ملعب الأمير فيصل بن فهد (الرياض)'],
+  ['tabuk-stadium-12k-rb', 14774, 'King Khalid Sport City Stadium (Tabuk)', 'ملعب مدينة الملك خالد الرياضية (تبوك)'],
+  ['alhazem-stadium-8k-rb', 4753, 'Al-Hazem Club Stadium (Ar Rass)', 'ملعب نادي الحزم (الرس)'],
+  ['majmaah-stadium-7k-rb', 6604, "Al-Majma'ah Sports City Stadium", 'ملعب مدينة المجمعة الرياضية'],
+  ['pfbf-stadium-22k-rb', 22948, 'Prince Faisal bin Fahd Stadium (Riyadh)', 'ملعب الأمير فيصل بن فهد (الرياض)'],
 ];
 const OLD_ID = 'community-alawwal-park-25k';
 const OLD_SEATS = 24652;

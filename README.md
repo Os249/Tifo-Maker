@@ -56,7 +56,11 @@ Three tiers keyed to capability, not just width:
   Arena's painted E1–E9, W1–W9…), gangways along one stand only, and Cover
   stairs that follows each real stairway. Kingdom Arena's lower stands are
   now straight, and Buraidah's horseshoe has the depth the drone photograph
-  shows along the side opposite the main stand. Dev tools:
+  shows along the side opposite the main stand. Where the ground's webook
+  seat map names its blocks, the app uses those names (EGO's A1–A4, B1–B4,
+  C1–C7, D1–D11 and E1–E7; Majma'ah's Blocks 1–27 and Silver A–C; Tabuk's
+  101–114), and Tabuk's main stand is the three levels webook sells it in.
+  Dev tools:
   `npx tsx scripts/block-plan.mts <id> [--side north]` draws a ground's blocks
   from above, labelled as the app labels them; `scripts/station-picker.html`
   (from the dev server) turns clicks on a photograph into stations.
@@ -382,7 +386,8 @@ src/
                    as lines square to the plan curve (or along a straight stand);
                    block labels and real names by stand and tier
     realBlocks.ts  grounds re-laid in their real blocks: the registry, baseGroundId,
-                   and the helpers a layout is written with (ringStairs, atStairs)
+                   and the helpers a layout is written with (ringStairs, atStairs,
+                   endCornerStation, radialStation)
     realBlocksSaudi.ts  the Saudi grounds' real blocks, each measured from photographs
     spatialHash.ts O(1) pointer→seat resolution (disc + nearest queries)
     design.ts      DesignStore: cells buffer, stroke recording, sparse-diff undo/redo

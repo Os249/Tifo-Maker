@@ -172,8 +172,9 @@ console.log('\n--- tier split --------------------------------------------------
   // expects two, and the other way round, as often as not. 36 of 64 with
   // LaLiga's: Spanish grounds put two shallow tiers where it expects one. 35
   // since Buraidah's horseshoe got the depth the drone photograph shows: one
-  // tier, 51 rows with its main stand.)
-  check(right === 35, 'tier-count rule scores 35 of 64', `misses: ${misses.join('; ')}`);
+  // tier, 51 rows with its main stand. 34 since Tabuk's main stand was rebuilt
+  // as the three levels webook sells it in, 46 rows with the movable stand.)
+  check(right === 34, 'tier-count rule scores 34 of 64', `misses: ${misses.join('; ')}`);
 
   const st = stackTiers(50, 2);
   const stacked = st[1].baseOffset > st[0].baseOffset + st[0].rows * st[0].rowDepth
