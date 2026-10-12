@@ -327,25 +327,41 @@ export interface BoxBand {
   count: number;
 }
 
-/** A big video screen. */
+/**
+ * A big video screen. Where it stands is worked out in one place,
+ * core/screens.ts `screenPlacements`, which the renderer draws from and
+ * `npm run verify` holds clear of every seat.
+ */
 export interface ScreenSpec {
-  /** Perimeter position of its centre, same u as the seat map. */
+  /**
+   * Perimeter position of its centre, same u as the seat map. With `at`, the
+   * share of the perimeter nearest it (the checks hold the two together).
+   */
   centerU: number;
   widthM: number;
   heightM: number;
+  /**
+   * Where it stands on the plan, metres: [x, z], the pitch's corner flags at
+   * (±52.5, ±34). For a screen in a corner. u is a share of the perimeter,
+   * not an angle, so on a ground longer than it is wide u = 0.375 is not the
+   * corner but well along the north side: every corner screen once placed by
+   * u stood in a side stand's front rows. With `at`, a `post` or `hang`
+   * screen stands here turned to the centre spot, and `offset` is not used.
+   */
+  at?: [number, number];
   /**
    * Hung from the roof instead of standing on the back of the top tier: the
    * centre of the screen is `offset` metres out from the plan curve and `y`
    * metres up (Kingdom Arena's end screens hang over the front rows), on
    * cables up to the ceiling at `ceiling` metres.
    */
-  hang?: { offset: number; y: number; ceiling?: number };
+  hang?: { offset?: number; y: number; ceiling?: number };
   /**
    * Standing on its own frame instead (a screen in an open corner, or behind
    * a stand): centre `offset` metres out from the plan curve and `y` up, on
-   * legs to the ground.
+   * two legs to the ground, or on one column in the middle with `pole`.
    */
-  post?: { offset: number; y: number };
+  post?: { offset?: number; y: number; pole?: boolean };
 }
 
 /** A four-sided screen hung over the centre spot — an arena's centre-hung board. */

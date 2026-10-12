@@ -515,8 +515,10 @@ const COMMUNITY: StadiumEntry[] = [
       },
       details: {
         zones: [{ kind: 'vip', centerU: 0.75, halfU: 0.016, tiers: [0], noTifo: true }],
-        // In the open corner by the main stand and the south-east end.
-        screens: [{ centerU: 0.875, widthM: 9, heightM: 4.6, post: { offset: 9, y: 10.5 } }],
+        // On one column in the open corner between the main stand and the
+        // south-east end, its foot in the gap between the two stands' ends
+        // (StadiumDB photographs 01, 02 and 08).
+        screens: [{ centerU: 0.898, widthM: 7.5, heightM: 4.8, at: [66.5, -45.5], post: { y: 8.5, pole: true } }],
         buildings: [
           // The VIP lounges and the presidential box behind the middle of the main stand.
           { side: 'south', straight: true, halfLength: 22, front: 19.4, depth: 9, y0: 0, y1: 13.8, glassFloors: 1, color: 0xf1efe9, fascia: 0x1a1b1f },
@@ -591,8 +593,10 @@ const COMMUNITY: StadiumEntry[] = [
       },
       details: {
         zones: [{ kind: 'vip', centerU: 0.75, halfU: 0.018, tiers: [1], noTifo: true }],
-        // On a frame in the open corner between the main stand and the east end.
-        screens: [{ centerU: 0.885, widthM: 8.5, heightM: 4.5, post: { offset: 13, y: 10 } }],
+        // On one column in the open corner between the main stand and the east
+        // end of the U, half way between the two stands' front rows (StadiumDB
+        // photograph 02, the floodlit aerial).
+        screens: [{ centerU: 0.901, widthM: 8.5, heightM: 4.5, at: [58.5, -39.5], post: { y: 9.5, pole: true } }],
         buildings: [
           // The VIP boxes and the presidential box behind the middle of the main stand.
           { side: 'south', straight: true, halfLength: 20, front: 18.8, depth: 8, y0: 0, y1: 13.0, glassFloors: 1, color: 0xf0eee8, fascia: 0x0f7a3b },
@@ -642,7 +646,11 @@ const COMMUNITY: StadiumEntry[] = [
       },
       details: {
         zones: [{ kind: 'vip', centerU: 0.75, halfU: 0.014, tiers: [0], noTifo: true }],
-        screens: [{ centerU: 0.62, widthM: 8.5, heightM: 4.5, post: { offset: 15, y: 11 } }],
+        // The real screen stands on one column in the open corner at the main
+        // stand's west end (StadiumDB 10 and 12), where the real-blocks layout
+        // puts it. This earlier layout runs the bowl on round that corner, so
+        // here it stands behind the corner, clear of the roof and seen over it.
+        screens: [{ centerU: 0.605, widthM: 8.5, heightM: 4.5, at: [-72, -55.5], post: { y: 17.5, pole: true } }],
         buildings: [
           // The VIP box in the middle of the main stand.
           { side: 'south', halfLength: 13, front: 13.6, depth: 7, y0: 0, y1: 12.0, glassFloors: 1, color: 0xf0eee8, fascia: 0x1f5fae },
@@ -817,7 +825,9 @@ const COMMUNITY: StadiumEntry[] = [
       sectionsPerTier: 30,
       roof: { coverage: 'none' },
       roofs: [
-        { style: 'membrane', back: 32, front: 6, backY: 25, frontY: 21.5, bay: 11, color: 0xe9dfc9, underColor: 0xe6dcc6, columns: { every: 11, color: 0xd7d7d2, offset: 30.5, shape: 'raking' } },
+        // The membrane rises to the back, high enough for the end screens to
+        // hang under it over the upper tier's back rows (SPA photograph 07).
+        { style: 'membrane', back: 32, front: 6, backY: 29, frontY: 21.5, bay: 11, color: 0xe9dfc9, underColor: 0xe6dcc6, columns: { every: 11, color: 0xd7d7d2, offset: 30.5, shape: 'raking' } },
       ],
       lighting: { style: 'roof-rim', kelvin: 5700, mount: { offset: 6.5, y: 21 } },
       finish: { concrete: 0xbfbab0, walls: 0xd8d4cb },
@@ -839,9 +849,11 @@ const COMMUNITY: StadiumEntry[] = [
           { centerU: 0.5, halfU: 0.06, underTier: 1, count: 8 },
         ],
         screens: [
-          // Hung from the roof over the back rows of each end's upper tier.
-          { centerU: 0, widthM: 11, heightM: 5, hang: { offset: 31.2, y: 22.4, ceiling: 25 } },
-          { centerU: 0.5, widthM: 11, heightM: 5, hang: { offset: 31.2, y: 22.4, ceiling: 25 } },
+          // Hung from the membrane over the back rows of each end's upper tier,
+          // clear over the heads (SPA photographs 06 and 07). Behind the last
+          // row, where they were, the back rows hid their lower third from the pitch.
+          { centerU: 0, widthM: 11, heightM: 5, hang: { offset: 27, y: 24.4, ceiling: 27.6 } },
+          { centerU: 0.5, widthM: 11, heightM: 5, hang: { offset: 27, y: 24.4, ceiling: 27.6 } },
         ],
         buildings: [
           // The royal box and media floors over the back of the old main stand.
@@ -981,7 +993,10 @@ const COMMUNITY: StadiumEntry[] = [
       },
       details: {
         zones: [{ kind: 'vip', centerU: 0.75, halfU: 0.01, tiers: [2], noTifo: true }],
-        screens: [{ centerU: 0.13, widthM: 10, heightM: 4.5, post: { offset: 14, y: 8 } }],
+        // The scoreboard behind the low terrace at the east end, a little to the
+        // main stand's side of the centre line, on its own base (StadiumDB 04,
+        // from the dugout, and 12, straight down).
+        screens: [{ centerU: 0.99, widthM: 12, heightM: 5, at: [104, -6], post: { y: 10.5 } }],
         buildings: [
           // The white blocks of the main stand building, under and behind its roof.
           { side: 'south', straight: true, halfLength: 76, front: 20, depth: 10, y0: 0, y1: 14.5, glassFloors: 1, color: 0xcdb08a, fascia: 0xd9c7a8 },
@@ -1052,7 +1067,13 @@ const COMMUNITY: StadiumEntry[] = [
       },
       details: {
         zones: [{ kind: 'vip', centerU: 0.75, halfU: 0.012, tiers: [0], noTifo: true }],
-        screens: [{ centerU: 0.62, widthM: 9, heightM: 4.5, post: { offset: 10, y: 9 } }],
+        // The new screen of 2025: a portrait board on two legs just behind the
+        // perimeter wall in the real south-east corner, the blue stand behind
+        // the south goal to its right as seen from the pitch (Slaati, 4 August
+        // 2025, photographs 2 and 4; Asharq Al-Awsat: a new electronic board
+        // opposite the old one). The main stand curves round both of the west
+        // corners, so they are full of seats.
+        screens: [{ centerU: 0.403, widthM: 4.2, heightM: 6.4, at: [-71, 40], post: { y: 10 } }],
         buildings: [
           // The VIP lounge and the press floor at the top of the main stand.
           { side: 'south', halfLength: 24, front: 18.6, depth: 7, y0: 0, y1: 15.5, glassFloors: 1, color: 0xd9cdb4, fascia: 0x2f6b3f },

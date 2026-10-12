@@ -64,6 +64,22 @@ Three tiers keyed to capability, not just width:
   `npx tsx scripts/block-plan.mts <id> [--side north]` draws a ground's blocks
   from above, labelled as the app labels them; `scripts/station-picker.html`
   (from the dev server) turns clicks on a photograph into stations.
+- **Every big screen where the real one is** — a screen placed by perimeter
+  share (`centerU`) stands where that share of the plan curve is, and on a
+  ground longer than it is wide u = 0.375 is well along a side, not the corner:
+  every "corner" screen placed that way stood in a side stand's front rows
+  (EGO and Tabuk, reported; then Anfield, Stamford Bridge, Villa Park, Elland
+  Road, Portman Road, SHG Arena, Abha, Balaídos and more). A corner screen now
+  gives its plan position (`ScreenSpec.at`), a screen on one column says so
+  (`post.pole`), and a portrait board shows the picture on its side. Where a
+  screen stands is worked out once, in `src/core/screens.ts`, which Match Day
+  draws from and `npm run verify` holds every screen of every ground to: no
+  seat under it, a hung one 2 m over the heads, and the stands hiding no more
+  than a quarter of it from the centre spot. Each ground was checked against
+  its photographs; Anfield has no big screens, so it has none now. Dev tools:
+  `npx tsx scripts/screen-audit.mts [id …]` prints each screen's clearance,
+  `npx tsx scripts/screen-shots.mts [id …]` renders each one from the pitch
+  and from across the bowl.
 - **No glow by default in Match Day** — the bloom pass on High and Ultra put a
   halo round every white card and washed the stands out. It is now off when
   Match Day opens; Atmosphere → Glow turns it back on (High and Ultra only).
@@ -389,6 +405,8 @@ src/
                    and the helpers a layout is written with (ringStairs, atStairs,
                    endCornerStation, radialStation)
     realBlocksSaudi.ts  the Saudi grounds' real blocks, each measured from photographs
+    screens.ts     where each big screen stands (on the back of a stand, hung from the
+                   roof, on its own frame) and how clear it is of the seats
     spatialHash.ts O(1) pointer→seat resolution (disc + nearest queries)
     design.ts      DesignStore: cells buffer, stroke recording, sparse-diff undo/redo
     tools.ts       brush stamp/segment, BFS flood fill over the neighbor graph

@@ -131,10 +131,10 @@ export const PREMIER_LEAGUE: StadiumEntry[] = [
           { side: 'west', straight: true, from: -54, to: 54, offset: 48, y0: 0, y1: 34, color: 0x9a4a37, pattern: 'brick', tile: [3, 3] },
           { side: 'north', straight: true, from: -57, to: 57, offset: 46, y0: 0, y1: 30, color: 0x9a4a37, pattern: 'brick', tile: [3, 3] },
         ],
-        screens: [
-          { centerU: 0.375, widthM: 12, heightM: 6.5, post: { offset: 6, y: 18 } },
-          { centerU: 0.875, widthM: 12, heightM: 6.5, post: { offset: 6, y: 18 } },
-        ],
+        // No big screens: StadiumDB's photographs of all four corners, from the
+        // pitch and from the air (2016 to 2024), show none. The two that stood
+        // here were placed by perimeter share and landed in the front rows of
+        // the Dalglish and the main stand.
       },
       // Anfield's terraced streets, Stanley Park behind the Anfield Road end, from OpenStreetMap.
       site: { key: 'anfield', horizon: 'city', ground: 0x6f7f55, forecourt: 0x9b9a94, style: 'uk' },
@@ -276,10 +276,14 @@ export const PREMIER_LEAGUE: StadiumEntry[] = [
       details: {
         ribbons: { color: 0x2f8bd0 },
         screens: [
-          // Either side of the north stand, and the big one hung in the south end.
-          { centerU: 0.12, widthM: 11, heightM: 6, hang: { offset: 14, y: 30 } },
-          { centerU: 0.88, widthM: 11, heightM: 6, hang: { offset: 14, y: 30 } },
-          { centerU: 0.5, widthM: 18, heightM: 8, hang: { offset: 22, y: 34 } },
+          // Hung from the roof in the two corners either side of the north
+          // stand, over the corner seats (at u = 0.12 and 0.88 they hung over
+          // the side stands: u is a share of the perimeter, not an angle)…
+          { centerU: 0.098, widthM: 11, heightM: 6, at: [66.2, 45.4], hang: { y: 30 } },
+          { centerU: 0.902, widthM: 11, heightM: 6, at: [66.2, -45.4], hang: { y: 30 } },
+          // …and the giant one at the top of the South Stand, above its back
+          // row and under the roof.
+          { centerU: 0.5, widthM: 18, heightM: 8, hang: { offset: 55, y: 39.4, ceiling: 45.9 } },
         ],
         skins: [
           // Silver cladding and glass round the outside of the bowl.
@@ -337,9 +341,10 @@ export const PREMIER_LEAGUE: StadiumEntry[] = [
         ribbons: { color: 0xd8141d, tiers: [1, 2] },
         boxes: [{ centerU: 0, halfU: 0.5, underTier: 2, count: 150 }],
         screens: [
-          // Hung from the roof in the north-west and south-east corners.
-          { centerU: 0.875, widthM: 13, heightM: 7, hang: { offset: 30, y: 34, ceiling: 42 } },
-          { centerU: 0.375, widthM: 13, heightM: 7, hang: { offset: 30, y: 34, ceiling: 42 } },
+          // Hung from the roof in the north-west and south-east corners
+          // (Wikipedia), over the corner seats.
+          { centerU: 0.904, widthM: 13, heightM: 7, at: [78.8, -54.1], hang: { y: 34, ceiling: 42 } },
+          { centerU: 0.404, widthM: 13, heightM: 7, at: [-78.8, 54.1], hang: { y: 34, ceiling: 42 } },
         ],
         skins: [
           // Glass and steel round the outside, between concrete cores.
@@ -410,11 +415,13 @@ export const PREMIER_LEAGUE: StadiumEntry[] = [
           { centerU: 0.25, halfU: 0.11, underTier: 3, count: 28 },
         ],
         screens: [
-          // Two big ones at the south end's corners, two smaller at the north's.
+          // Two big ones at the south end's corners, two smaller at the
+          // north's, all under the roof above the back rows (the north pair
+          // hung lower, in front of the upper tier, with seats above them).
           { centerU: 0.43, widthM: 22, heightM: 11, hang: { offset: 34, y: 34, ceiling: 46 } },
           { centerU: 0.57, widthM: 22, heightM: 11, hang: { offset: 34, y: 34, ceiling: 46 } },
-          { centerU: 0.08, widthM: 16, heightM: 9, hang: { offset: 30, y: 36, ceiling: 46 } },
-          { centerU: 0.92, widthM: 16, heightM: 9, hang: { offset: 30, y: 36, ceiling: 46 } },
+          { centerU: 0.08, widthM: 16, heightM: 8, hang: { offset: 63, y: 42.5, ceiling: 47.3 } },
+          { centerU: 0.92, widthM: 16, heightM: 8, hang: { offset: 63, y: 42.5, ceiling: 47.3 } },
         ],
         skins: [
           // Glass and silver aluminium round the outside.
@@ -486,8 +493,11 @@ export const PREMIER_LEAGUE: StadiumEntry[] = [
         ribbons: { color: 0x1f4ea8 },
         boxes: [{ centerU: 0.25, halfU: 0.1, underTier: 2, count: 51 }],
         screens: [
-          { centerU: 0.375, widthM: 10, heightM: 5.5, post: { offset: 6, y: 18 } },
-          { centerU: 0.875, widthM: 10, heightM: 5.5, post: { offset: 6, y: 18 } },
+          // High in two corners at roof level, over the corner seats: the
+          // West Stand and the Matthew Harding, the East Stand and the Shed
+          // (StadiumDB 06 to 08).
+          { centerU: 0.4, widthM: 10, heightM: 5.5, at: [-70, 52], hang: { y: 21, ceiling: 25 } },
+          { centerU: 0.9, widthM: 10, heightM: 5.5, at: [70, -52], hang: { y: 21, ceiling: 25 } },
         ],
         skins: [
           { side: 'south', straight: true, from: -62, to: 62, offset: 57, y0: 0, y1: 36, color: 0x9a9fa6, pattern: 'panels', tile: [5, 3.5] },
@@ -569,7 +579,12 @@ export const PREMIER_LEAGUE: StadiumEntry[] = [
           { side: 'east', straight: true, from: -40, to: 40, offset: 29, y0: 0, y1: 17, color: 0x9aa0a6, pattern: 'panels', tile: [5, 3.5] },
           { side: 'west', straight: true, from: -53, to: 53, offset: 29, y0: 0, y1: 17, color: 0x9aa0a6, pattern: 'panels', tile: [5, 3.5] },
         ],
-        screens: [{ centerU: 0, widthM: 9, heightM: 4.5, post: { offset: 4, y: 15 } }],
+        // A long board hung under the front of the Hammersmith End's roof over
+        // its centre (StadiumDB 40, FULHAM in the seats below it, the Thames to
+        // the left); the Putney End's roof has none (41, the Cottage in its
+        // corner). Wikipedia's Putney End scoreboard is the one before it. It
+        // stood on legs in the Putney End's front rows.
+        screens: [{ centerU: 0.5, widthM: 9, heightM: 2.6, hang: { offset: 12, y: 13.5, ceiling: 15.9 } }],
       },
       site: { key: 'craven-cottage', horizon: 'city', ground: 0x6f7f55, forecourt: 0x9b9a94, style: 'uk' },
     },
@@ -939,7 +954,9 @@ export const PREMIER_LEAGUE: StadiumEntry[] = [
           { at: [86, -22], height: 52, jib: 50, angle: 165 },
           { at: [92, 28], height: 46, jib: 44, angle: 200, color: 0xe8b416 },
         ],
-        screens: [{ centerU: 0.625, widthM: 10, heightM: 5.5, post: { offset: 10, y: 19 } }],
+        // On top of the three-storey pavilion in the open corner between the
+        // Holte End and the Trinity Road Stand (Wikipedia; StadiumDB 23).
+        screens: [{ centerU: 0.602, widthM: 10, heightM: 5.5, at: [-63, -54], post: { y: 19 } }],
         skins: [
           // Red brick and glass: the Trinity Road's and the Holte End's facades.
           { side: 'south', straight: true, from: -59, to: 59, offset: 59, y0: 0, y1: 40, color: 0x9a4b38, pattern: 'brick', tile: [3, 3] },
@@ -1000,10 +1017,14 @@ export const PREMIER_LEAGUE: StadiumEntry[] = [
         ribbons: { color: 0x1d1f23, tiers: [1] },
         boxes: [{ centerU: 0.875, halfU: 0.2, underTier: 1, count: 80 }],
         screens: [
+          // Hung from the great cantilever over the Leazes and the Milburn.
           { centerU: 0.95, widthM: 12, heightM: 6.5, hang: { offset: 28, y: 38, ceiling: 46 } },
           { centerU: 0.75, widthM: 10, heightM: 5.5, hang: { offset: 28, y: 38, ceiling: 46 } },
-          // Strawberry Corner, the Gallowgate End and the East Stand.
-          { centerU: 0.375, widthM: 9, heightM: 5, post: { offset: 16, y: 18 } },
+          // The giant LED screen on the glass panelling in the north-east
+          // corner, at the end of the Leazes upper tier by the East Stand
+          // (club announcement; StadiumDB 21 and 22), high enough to be seen
+          // over the East Stand's roof. It stood in the East Stand's seats.
+          { centerU: 0.084, widthM: 12, heightM: 6.5, at: [96, 36], hang: { y: 29.5, ceiling: 35 } },
         ],
         skins: [
           // The Milburn's glass front on Barrack Road; white steel and grey cladding round the rest.
@@ -1084,8 +1105,11 @@ export const PREMIER_LEAGUE: StadiumEntry[] = [
         ribbons: { color: 0xd2232a, tiers: [1] },
         boxes: [{ centerU: 0.8, halfU: 0.15, underTier: 1, count: 50 }],
         screens: [
-          { centerU: 0.375, widthM: 10, heightM: 5.5, hang: { offset: 24, y: 19, ceiling: 24 } },
-          { centerU: 0.875, widthM: 10, heightM: 5.5, hang: { offset: 38, y: 32, ceiling: 37 } },
+          // At the back of each end under the roof, over the centre (StadiumDB
+          // 10, 11 and 14). The two that stood here hung over the side
+          // stands' seats: u = 0.375 is a share of the perimeter, not the corner.
+          { centerU: 0, widthM: 8, heightM: 3.7, hang: { offset: 51.5, y: 35.05, ceiling: 37.5 } },
+          { centerU: 0.5, widthM: 9, heightM: 4.3, hang: { offset: 39.7, y: 22.95, ceiling: 25.7 } },
         ],
         skins: [
           { side: 'south', offset: 57, y0: 0, y1: 38.5, color: 0xc9ccd0, pattern: 'panels', tile: [5, 3.5] },
@@ -1161,7 +1185,9 @@ export const PREMIER_LEAGUE: StadiumEntry[] = [
           { at: [-30, -98], height: 58, jib: 55, angle: 70 },
           { at: [38, -104], height: 50, jib: 48, angle: 110, color: 0xe8b416 },
         ],
-        screens: [{ centerU: 0.625, widthM: 10, heightM: 5.5, post: { offset: 12, y: 15 } }],
+        // On a frame in the open south-west corner, between the John Charles
+        // Stand and the South Stand (StadiumDB 08 and 13).
+        screens: [{ centerU: 0.599, widthM: 10, heightM: 5.5, at: [-67, -54], post: { y: 13 } }],
         skins: [
           { side: 'north', straight: true, from: -58, to: 58, offset: 58, y0: 0, y1: 41, color: 0x3b4048, pattern: 'panels', tile: [5, 3.5] },
           { side: 'east', straight: true, from: -57, to: 57, offset: 44, y0: 0, y1: 24, color: 0x9aa0a6, pattern: 'panels', tile: [5, 3.5] },
@@ -1234,8 +1260,12 @@ export const PREMIER_LEAGUE: StadiumEntry[] = [
           { side: 'north', straight: true, center: 61, halfLength: 6.5, front: 2, depth: 14, y0: 0, y1: 8.5, glassFloors: 2, color: 0x2b2d31 },
         ],
         screens: [
-          { centerU: 0.5, widthM: 14, heightM: 4.5, hang: { offset: 24, y: 15, ceiling: 17.5 } },
-          { centerU: 0.09, widthM: 9, heightM: 5, post: { offset: 8, y: 13 } },
+          // Wikipedia: "one between the Trent End and the Brian Clough Stand,
+          // the other to the rear of the Lower Bridgford Stand". The first
+          // stands over the Corner Box (StadiumDB 12); the second is a long
+          // low board behind the last row, under the low half of the roof.
+          { centerU: 0.556, widthM: 12, heightM: 2.6, at: [-82, -20], hang: { y: 14.3, ceiling: 16 } },
+          { centerU: 0.098, widthM: 9, heightM: 5, at: [64, 44], post: { y: 12 } },
         ],
         skins: [
           { side: 'north', straight: true, from: -57, to: 57, offset: 38, y0: 0, y1: 27, color: 0x9aa0a6, pattern: 'panels', tile: [5, 3.5] },
@@ -1430,7 +1460,10 @@ export const PREMIER_LEAGUE: StadiumEntry[] = [
           { centerU: 0.75, halfU: 0.13, underTier: 2, count: 22 },
           { centerU: 0.25, halfU: 0.13, underTier: 1, count: 18 },
         ],
-        screens: [{ centerU: 0.375, widthM: 10, heightM: 5.5, post: { offset: 9, y: 11 } }],
+        // On a frame in the open corner between the Cobbold Stand and the Sir
+        // Alf Ramsey Stand (real south-east; Wikipedia), just in front of the
+        // corner's floodlight pylon.
+        screens: [{ centerU: 0.4, widthM: 10, heightM: 5.5, at: [-61, 45.5], post: { y: 11 } }],
         skins: [
           { side: 'south', straight: true, from: -58, to: 58, offset: 37, y0: 0, y1: 28.5, color: 0x9aa0a6, pattern: 'panels', tile: [5, 3.5] },
           { side: 'north', straight: true, from: -58, to: 58, offset: 31, y0: 0, y1: 21, color: 0x8e5a44, pattern: 'brick', tile: [3, 3] },

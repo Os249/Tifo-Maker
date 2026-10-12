@@ -726,15 +726,24 @@ export const SAUDI_REAL_BLOCKS: Record<string, RealBlocksLayout> = {
   // every photograph and is given the same. Along the sides the vomitories
   // the photograph shows (the middle, and -30) put them every 29 m, a stair
   // through each and between.
+  //
+  // The two corners on the main stand's side are open (October 2026, found
+  // checking the screen): in the same photograph the far one is a paved
+  // apron under the fabric roof, the main stand stopping at ±50 m and the
+  // end's seats at z = -42 m; the near one, under the roof there, is where
+  // the screen stands on its column, beside the main stand's end (StadiumDB
+  // 10, from the pitch, and 12). The even layout carried the bowl's rows
+  // round both. Without them the bowl holds 11,004, StadiumDB's 11,000.
   'alfateh-stadium-12k': {
     id: 'alfateh-stadium-12k-rb',
     build: (old) =>
       rebuilt(old, 'alfateh-stadium-12k-rb', (t) => {
         const [bowl] = t.tiers;
         const endVoms = [-19.5, 9.5, 29.5];
-        const ends = [-42, -34, -19.5, -5, 9.5, 19.5, 29.5, 39];
+        const ends = [-34, -19.5, -5, 9.5, 19.5, 29.5, 39];
         const sideVoms = [0, 29];
         const sides = [0, 14.5, 29, 43.5, 52.5];
+        const mainSides = sides.filter((x) => x < 50);
         const vom = (side: StandSide, at: number[], mirror: boolean): SeatOpening => ({ side, at, mirror, width: 2.4, rows: [2, 5], kind: 'vomitory' });
         return {
           tiers: [
@@ -743,18 +752,28 @@ export const SAUDI_REAL_BLOCKS: Record<string, RealBlocksLayout> = {
               // Half-metre seats: with its real stairs, the even layout's 0.48 m
               // would put 500 more seats in it than it has.
               seatPitch: 0.5,
+              omit: [
+                ...(bowl.omit ?? []),
+                { side: 'south', from: 50, to: 99 },
+                { side: 'south', from: -99, to: -50 },
+                { side: 'east', from: -99, to: -42 },
+                { side: 'west', from: -99, to: -42 },
+              ],
               blocks: {
                 width: 1.1,
                 aisles: [
                   { side: 'east', at: ends },
                   { side: 'west', at: ends },
                   { side: 'north', at: sides, mirror: true },
-                  { side: 'south', at: sides, mirror: true },
+                  { side: 'south', at: mainSides, mirror: true },
                 ],
                 openings: [vom('east', endVoms, false), vom('west', endVoms, false), vom('north', sideVoms, true), vom('south', sideVoms.filter((x) => x > 0), true)],
               },
             },
           ],
+          // The screen on its column in the open west corner, a few metres
+          // from the end of the main stand.
+          details: { ...t.details, screens: [{ centerU: 0.611, widthM: 8.5, heightM: 4.5, at: [-60, -50], post: { y: 9.5, pole: true } }] },
         };
       }),
   },

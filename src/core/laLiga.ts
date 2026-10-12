@@ -93,7 +93,9 @@ export const LA_LIGA: StadiumEntry[] = [
       },
       details: {
         ribbons: { color: 0x1e4fa8, tiers: [1] },
-        screens: [{ centerU: 0.5, widthM: 9, heightM: 5, hang: { offset: 14, y: 14, ceiling: 17 } }],
+        // Hung under the roof just behind the end's back row, clear of the
+        // heads (it hung over the back rows, in among them).
+        screens: [{ centerU: 0.5, widthM: 9, heightM: 5, hang: { offset: 14.9, y: 12.5, ceiling: 16.5 } }],
         skins: [{ offset: 26.5, y0: 0, y1: 16.5, color: 0xb9bdc2, pattern: 'panels', tile: [4, 3] }],
       },
       site: { key: 'mendizorrotza', horizon: 'city', ground: 0x7e8462, forecourt: 0xa8a59c, style: 'es' },
@@ -207,8 +209,13 @@ export const LA_LIGA: StadiumEntry[] = [
         // Bare concrete with its slots, the white roof over it.
         skins: [{ offset: 70, y0: 0, y1: 43, color: 0xd9d0bf, pattern: 'panels', tile: [6, 3.2] }],
         screens: [
-          { centerU: 0, widthM: 16, heightM: 8, hang: { offset: 36, y: 38, ceiling: 50 } },
-          { centerU: 0.5, widthM: 16, heightM: 8, hang: { offset: 36, y: 38, ceiling: 50 } },
+          // One at each end and one on the Lateral Este (the club, 2017: 84 m²
+          // at the ends, 56 m² on the side), at the top of the upper tier
+          // under the roof, above the back row. They hung half way up the
+          // upper tier, with seats above them.
+          { centerU: 0, widthM: 16, heightM: 5, hang: { offset: 68.6, y: 46.4, ceiling: 49.4 } },
+          { centerU: 0.5, widthM: 16, heightM: 5, hang: { offset: 68.6, y: 46.4, ceiling: 49.4 } },
+          { centerU: 0.25, widthM: 12, heightM: 4.6, hang: { offset: 68.6, y: 46.2, ceiling: 49.4 } },
         ],
       },
       site: { key: 'metropolitano', horizon: 'city', ground: 0xb7a07c, forecourt: 0xc2bdb2, style: 'es' },
@@ -319,8 +326,9 @@ export const LA_LIGA: StadiumEntry[] = [
           { side: 'north', straight: true, from: -64, to: 64, offset: 40, y0: 0, y1: 27, color: 0x6d9bd0, pattern: 'panels', tile: [7, 27] },
           { side: 'east', straight: true, from: -48, to: 48, offset: 36, y0: 0, y1: 25, color: 0x6d9bd0, pattern: 'panels', tile: [7, 25] },
         ],
-        // The temporary screen in the Tribuna-Gol corner.
-        screens: [{ centerU: 0.62, widthM: 8, heightM: 4.5, post: { offset: 8, y: 6 } }],
+        // The temporary screen in the open Tribuna-Gol corner (it stood in the
+        // Tribuna's front rows: u = 0.62 is well along the side, not the corner).
+        screens: [{ centerU: 0.6, widthM: 8, heightM: 4.5, at: [-64, -44.5], post: { y: 6.5 } }],
         cranes: [CRANE(-92, 30, 52, 45, 0), CRANE(-90, -36, 46, 38, 20)],
       },
       site: { key: 'balaidos', horizon: 'hills', ground: 0x77805e, forecourt: 0xa9a69e, style: 'es' },
@@ -366,7 +374,10 @@ export const LA_LIGA: StadiumEntry[] = [
         ribbons: { color: 0x1b55b0, tiers: [1] },
         // The Torre de Marathón behind the west end.
         buildings: [{ side: 'west', straight: true, center: 0, halfLength: 3, front: 42, depth: 6, y0: 0, y1: 45, color: 0xd8dcdf }],
-        screens: [{ centerU: 0.5, widthM: 10, heightM: 5.5, hang: { offset: 26, y: 20, ceiling: 26 } }, { centerU: 0, widthM: 10, heightM: 5.5, hang: { offset: 26, y: 20, ceiling: 26 } }],
+        // At the top of each end, under the roof's front edge and above the
+        // upper tier's back row (StadiumDB 02 and 04); they hung half way up
+        // the upper tier, in among the seats.
+        screens: [{ centerU: 0.5, widthM: 10, heightM: 5, hang: { offset: 33, y: 23.2, ceiling: 26.2 } }, { centerU: 0, widthM: 10, heightM: 5, hang: { offset: 33, y: 23.2, ceiling: 26.2 } }],
       },
       site: { key: 'riazor', horizon: 'city', ground: 0x8f8b7a, forecourt: 0xaaa79f, style: 'es' },
     },
@@ -399,8 +410,9 @@ export const LA_LIGA: StadiumEntry[] = [
       seatLook: { colors: [{ c: '#0b7a3c', w: 4 }, { c: '#178a4a', w: 1 }], grain: { along: 2, rows: 1 } },
       details: {
         screens: [
-          { centerU: 0, widthM: 10, heightM: 5, post: { offset: 32, y: 22 } },
-          { centerU: 0.5, widthM: 10, heightM: 5, post: { offset: 32, y: 22 } },
+          // Behind each end, high enough to be seen over its back row.
+          { centerU: 0, widthM: 10, heightM: 5, post: { offset: 32, y: 25.3 } },
+          { centerU: 0.5, widthM: 10, heightM: 5, post: { offset: 32, y: 25.3 } },
         ],
       },
       site: { key: 'martinez-valero', horizon: 'city', ground: 0xb9a582, forecourt: 0xc4bcae, style: 'es', palms: 0.5 },
@@ -530,8 +542,9 @@ export const LA_LIGA: StadiumEntry[] = [
       },
       details: {
         screens: [
-          { centerU: 0, widthM: 11, heightM: 6, hang: { offset: 18, y: 20, ceiling: 25 } },
-          { centerU: 0.5, widthM: 11, heightM: 6, hang: { offset: 18, y: 20, ceiling: 25 } },
+          // Under the roof just behind each end's back row, clear of the heads.
+          { centerU: 0, widthM: 11, heightM: 5.8, hang: { offset: 24.5, y: 20, ceiling: 23.6 } },
+          { centerU: 0.5, widthM: 11, heightM: 5.8, hang: { offset: 24.5, y: 20, ceiling: 23.6 } },
         ],
       },
       site: { key: 'ciutat-de-valencia', horizon: 'city-towers', ground: 0xb3a27e, forecourt: 0xc0baad, style: 'es', palms: 0.35 },
@@ -583,7 +596,8 @@ export const LA_LIGA: StadiumEntry[] = [
       },
       details: {
         ribbons: { color: 0x2f86c8, tiers: [1] },
-        screens: [{ centerU: 0, widthM: 10, heightM: 5, post: { offset: 40, y: 26 } }, { centerU: 0.5, widthM: 10, heightM: 5, post: { offset: 40, y: 26 } }],
+        // Behind each end, high enough to be seen over its back wall.
+        screens: [{ centerU: 0, widthM: 10, heightM: 5, post: { offset: 40, y: 29.8 } }, { centerU: 0.5, widthM: 10, heightM: 5, post: { offset: 40, y: 29.8 } }],
         // White concrete fins round the outside.
         skins: [{ offset: 39, y0: 0, y1: 26, color: 0xe9e7e1, pattern: 'slats', tile: [4.5, 26] }],
       },
@@ -612,7 +626,7 @@ export const LA_LIGA: StadiumEntry[] = [
       sectionsPerTier: 36,
       roof: { coverage: 'none' },
       roofs: [
-        { style: 'truss', back: 27, front: 1, backY: 22, frontY: 20.5, depth: 2.6, bay: 6, color: 0xd11a2a, underColor: 0x9fa4a9, glazing: 0.35, lights: { every: 5, y: 27 } },
+        { style: 'truss', back: 27, front: 1, backY: 26, frontY: 20.5, depth: 2.6, bay: 6, color: 0xd11a2a, underColor: 0x9fa4a9, glazing: 0.35, lights: { every: 5, y: 27 } },
       ],
       lighting: { style: 'roof-rim', kelvin: 5700 },
       finish: { concrete: 0x8a8d91, walls: 0x9aa0a6 },
@@ -625,8 +639,12 @@ export const LA_LIGA: StadiumEntry[] = [
       details: {
         ribbons: { color: 0xd11a2a, tiers: [1] },
         screens: [
-          { centerU: 0, widthM: 14.4, heightM: 6, hang: { offset: 16, y: 16, ceiling: 21 } },
-          { centerU: 0.5, widthM: 14.4, heightM: 6, hang: { offset: 16, y: 16, ceiling: 21 } },
+          // Four, one hung from the roof trusses over each corner, above the
+          // upper tier (StadiumDB 19, 21 and 24); not two over the ends' seats.
+          { centerU: 0.098, widthM: 8.5, heightM: 5, at: [71.3, 48.5], hang: { y: 21.6, ceiling: 24.5 } },
+          { centerU: 0.402, widthM: 8.5, heightM: 5, at: [-71.3, 48.5], hang: { y: 21.6, ceiling: 24.5 } },
+          { centerU: 0.598, widthM: 8.5, heightM: 5, at: [-71.3, -48.5], hang: { y: 21.6, ceiling: 24.5 } },
+          { centerU: 0.902, widthM: 8.5, heightM: 5, at: [71.3, -48.5], hang: { y: 21.6, ceiling: 24.5 } },
         ],
       },
       site: { key: 'el-sadar', horizon: 'hills', ground: 0x8e8a6a, forecourt: 0xaaa69c, style: 'es' },
@@ -667,8 +685,9 @@ export const LA_LIGA: StadiumEntry[] = [
       },
       details: {
         screens: [
-          { centerU: 0, widthM: 9, heightM: 5, post: { offset: 25, y: 18 } },
-          { centerU: 0.5, widthM: 9, heightM: 5, post: { offset: 25, y: 18 } },
+          // Behind each end, high enough to be seen over its back wall.
+          { centerU: 0, widthM: 9, heightM: 5, post: { offset: 25, y: 21.2 } },
+          { centerU: 0.5, widthM: 9, heightM: 5, post: { offset: 25, y: 21.2 } },
         ],
       },
       site: { key: 'el-sardinero', horizon: 'hills', ground: 0x7c875f, forecourt: 0xa9a69c, style: 'es' },
@@ -915,8 +934,9 @@ export const LA_LIGA: StadiumEntry[] = [
       details: {
         ribbons: { color: 0xd4202b, tiers: [1] },
         screens: [
-          { centerU: 0, widthM: 10, heightM: 5.5, post: { offset: 44, y: 28 } },
-          { centerU: 0.5, widthM: 10, heightM: 5.5, post: { offset: 44, y: 28 } },
+          // Behind each end, high enough to be seen over its back row.
+          { centerU: 0, widthM: 10, heightM: 5.5, post: { offset: 44, y: 32.5 } },
+          { centerU: 0.5, widthM: 10, heightM: 5.5, post: { offset: 44, y: 32.5 } },
         ],
         skins: [{ offset: 44, y0: 0, y1: 5, color: 0xc8102e, pattern: 'solid' }],
       },
@@ -1006,8 +1026,10 @@ export const LA_LIGA: StadiumEntry[] = [
       details: {
         ribbons: { color: 0xffd400, tiers: [1] },
         screens: [
-          { centerU: 0, widthM: 21, heightM: 7, hang: { offset: 20, y: 21, ceiling: 28 } },
-          { centerU: 0.5, widthM: 21, heightM: 7, hang: { offset: 14, y: 14, ceiling: 19 } },
+          // Under the roof just behind each end's back row, clear of the heads
+          // (the south one hung low over its rows, in among the seats).
+          { centerU: 0, widthM: 21, heightM: 4.9, hang: { offset: 36.4, y: 26.55, ceiling: 29.6 } },
+          { centerU: 0.5, widthM: 21, heightM: 6, hang: { offset: 17.7, y: 15.1, ceiling: 18.9 } },
         ],
       },
       site: { key: 'la-ceramica', horizon: 'city', ground: 0xb3a27e, forecourt: 0xc0baad, style: 'es', palms: 0.25 },

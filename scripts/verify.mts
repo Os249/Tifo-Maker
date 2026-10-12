@@ -1862,7 +1862,8 @@ import { buildStadium as siBuild } from '../src/core/stadiumFit';
     'buraidah-stadium-25k-rb': '28496:24865ee95530f151',
     'shg-arena-14k-rb': '13786:4e67b7f745fd1e05',
     'ego-stadium-13k-rb': '10256:4af86807751fcb15',
-    'alfateh-stadium-12k-rb': '11876:551712d62441b106',
+    // Its two corners on the main stand's side opened (the screen review, October 2026).
+    'alfateh-stadium-12k-rb': '11014:193ebb26222c0c88',
     'abha-stadium-20k-rb': '16160:81b318e4467ace4b',
     'tabuk-stadium-12k-rb': '14774:fe6ecb3bf3e3630f',
     'alhazem-stadium-8k-rb': '4753:944110285286af99',
@@ -2513,7 +2514,9 @@ await (async () => {
     // 22,042 by the book; the 2024 drone photograph puts the front row 6 m
     // behind the track, nearer than the first build, and its blocks hold 21,341.
     { id: 'pmbf-stadium-22k-rb', clubs: 'Al-Qadsiah, Al-Khaleej', seats: 21341, tol: 0.02 },
-    { id: 'alfateh-stadium-12k-rb', clubs: 'Al-Fateh', seats: 11851, tol: 0.02 },
+    // 11,851 listed, 12,000 numbered at the opening; StadiumDB's 11,000 is what
+    // the bowl holds with its two open corners by the main stand.
+    { id: 'alfateh-stadium-12k-rb', clubs: 'Al-Fateh', seats: 11000, tol: 0.02 },
     // "About 25,000" by the book; the stands the drone photograph shows (the side
     // opposite the main stand 27 m deep) hold 28,500 at half-metre seats.
     { id: 'buraidah-stadium-25k-rb', clubs: 'Al-Taawoun', seats: 28500, tol: 0.02 },
@@ -3024,4 +3027,61 @@ await (async () => {
   }
   console.log(`stadium view seats: ${grounds} grounds with their own colours | worst facing ${worstFacing} ${(worstShare * 100).toFixed(1)}%`);
   if (fails.length) throw new Error(`stadium view seats: ${fails.join('; ')}`);
+})();
+
+// --- Big screens clear of the seats (October 2026) -------------------------
+// Osamah's report: EGO's and Tabuk's screens stood in the stands. A screen
+// placed by perimeter share (centerU) lands where that share of the plan
+// curve is, which on a ground longer than it is wide is not the corner:
+// u = 0.375 is well along a side, so every "corner" screen placed that way
+// stood in a side stand's front rows (Anfield, Stamford Bridge, Villa Park,
+// Elland Road, Portman Road, Balaídos and more). A screen in a corner now
+// gives its plan position (`at`), and every screen of every ground, the
+// earlier layouts too, is held here to what core/screens.ts says the renderer
+// draws:
+//   - no seat under its footprint (its picture, frame and the metre behind
+//     them): a screen on a frame stands on legs to the ground, and a hung one
+//     keeps 2 m over the heads under it;
+//   - the stands hide no more than a quarter of its picture from the centre spot;
+//   - a corner screen's centerU names the share of the perimeter it is nearest.
+await (async () => {
+  const cat = await import('../src/core/stadiumCatalog');
+  const { screenPlacements, screenClearance, nearestU } = await import('../src/core/screens');
+  const fails: string[] = [];
+  let screens = 0;
+  let grounds = 0;
+  let closest = { id: '', d: Infinity };
+  for (const e of [...cat.STADIUM_CATALOG, ...cat.LEGACY_STADIUMS]) {
+    const t = e.template;
+    const placed = screenPlacements(t);
+    if (!placed.length) continue;
+    grounds++;
+    const m = generateSeatMap(t);
+    for (const [k, p] of placed.entries()) {
+      screens++;
+      const c = screenClearance(t, m, p);
+      if (c.clash) fails.push(`${t.id} screen ${k}: ${c.clash} seats under it`);
+      if (c.hidden > 0.25) fails.push(`${t.id} screen ${k}: ${(c.hidden * 100).toFixed(0)}% hidden from the centre spot`);
+      if (p.kind === 'post' && c.nearest < closest.d) closest = { id: `${t.id} #${k}`, d: c.nearest };
+      // Nor through a floodlight mast (a corner screen shares its corner with one).
+      const L = t.lighting?.masts?.at ?? [];
+      const masts = L.length >= 4 ? L : L.flatMap(([x, z]) => [[x, z], [-x, z], [x, -z], [-x, -z]] as [number, number][]);
+      for (const [mx, mz] of masts) {
+        const along = (mx - p.x) * Math.cos(p.ry) - (mz - p.z) * Math.sin(p.ry);
+        const across = (mx - p.x) * Math.sin(p.ry) + (mz - p.z) * Math.cos(p.ry);
+        if (Math.abs(along) < p.w / 2 + 1 && across > -1.5 && across < 0.8) fails.push(`${t.id} screen ${k}: a floodlight mast at (${mx}, ${mz}) stands in it`);
+      }
+      if (p.spec.at) {
+        const u = nearestU(t, p.x, p.z);
+        const du = Math.abs(((u - p.spec.centerU + 1.5) % 1) - 0.5);
+        if (du > 0.01) fails.push(`${t.id} screen ${k}: centerU ${p.spec.centerU} but it stands at u ${u.toFixed(3)}`);
+      }
+    }
+  }
+  // The check itself: EGO's screen as it was reported stands in the main stand.
+  const ego = cat.templateById('ego-stadium-13k-rb')!;
+  const was = { ...ego, details: { ...ego.details, screens: [{ centerU: 0.885, widthM: 8.5, heightM: 4.5, post: { offset: 13, y: 10 } }] } };
+  if (!screenClearance(was, generateSeatMap(ego), screenPlacements(was)[0]).clash) fails.push('the check no longer sees the screen EGO had in its main stand');
+  console.log(`big screens: ${screens} on ${grounds} grounds, none over a seat or hidden by a stand | the closest on a frame stands ${closest.d.toFixed(1)} m from a seat (${closest.id})`);
+  if (fails.length) throw new Error(`big screens: ${fails.join('; ')}`);
 })();

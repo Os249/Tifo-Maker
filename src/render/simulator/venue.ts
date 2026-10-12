@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import type { StadiumTemplate, SeatMap } from '../../core/types';
 import { curveSampler, laneCut, laneLines, tierEdges, type LaneLine } from '../../core/venueDetails';
-import { edgesOn, sideOfU, spanGeometry, spanOn } from '../../core/standSpans';
+import { edgesOn, sideOfU, spanGeometry } from '../../core/standSpans';
+import { screenPlacements } from '../../core/screens';
 
 /**
  * A real ground's details, drawn from its template (VenueDetails in types.ts):
@@ -576,35 +577,40 @@ export function buildVenueDetails(template: StadiumTemplate, map: SeatMap, shado
         holder.add(r);
       }
     };
-    // Where a screen on the back of a stand stands: the highest tier with a
-    // stand on that side, or the top tier of a ring bowl.
-    const backOf = (u: number): ReturnType<typeof tierEdges> => {
-      const side = sideOfU(u);
-      for (let t = template.tiers.length - 1; t >= 0; t--) {
-        if (!template.tiers[t].stands) return tierEdges(template, t);
-        const sg = spanOn(template, t, side);
-        if (sg) return sg;
-      }
-      return tierEdges(template, template.tiers.length - 1);
-    };
-    for (const sc of screens) {
+    // Where each screen stands, and which way it faces, is core/screens.ts's
+    // to say: the same placement `npm run verify` holds clear of the seats.
+    for (const pl of screenPlacements(template)) {
+      const sc = pl.spec;
       const faceGeo = new THREE.PlaneGeometry(sc.widthM, sc.heightM);
+      if (sc.heightM > sc.widthM) {
+        // A portrait board (Tabuk's): the landscape picture turned on its
+        // side, as on the corner columns, rather than squashed.
+        const uv = faceGeo.attributes.uv as THREE.BufferAttribute;
+        for (let i = 0; i < uv.count; i++) {
+          const u = uv.getX(i);
+          const v = uv.getY(i);
+          uv.setXY(i, v, 1 - u);
+        }
+        uv.needsUpdate = true;
+      }
       trash.push(faceGeo);
       const holder = new THREE.Group();
+      holder.position.set(pl.x, pl.y, pl.z);
+      holder.rotation.y = pl.ry;
       if (sc.hang) {
-        // Hung from the roof over the stand, facing the pitch.
-        const p = at(sc.centerU, sc.hang.offset);
-        holder.position.set(p.x, sc.hang.y, p.z);
-        holder.rotation.y = Math.atan2(-p.nx, -p.nz);
+        // Hung from the roof, on cables up to the ceiling.
         const topY = sc.hang.y + sc.heightM / 2 + 0.4;
         hangers(holder, [[-sc.widthM * 0.35, -0.4], [sc.widthM * 0.35, -0.4]], sc.heightM / 2 + 0.4, Math.max(0.5, (sc.hang.ceiling ?? topY + 14) - topY));
       } else if (sc.post) {
-        // On its own frame (an open corner, behind a stand), turned to the centre spot.
-        const p = at(sc.centerU, sc.post.offset);
-        holder.position.set(p.x, sc.post.y, p.z);
-        holder.rotation.y = Math.atan2(-p.x, -p.z);
+        // On its own frame (an open corner, behind a stand), on legs to the ground.
         const legH = sc.post.y - sc.heightM / 2;
-        if (legH > 0.3) {
+        if (legH > 0.3 && sc.post.pole) {
+          // One column in the middle (EGO, SHG Arena, Al-Fateh).
+          const col = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.55, legH, 12), steel);
+          trash.push(col.geometry);
+          col.position.set(0, -sc.heightM / 2 - legH / 2, -0.6);
+          holder.add(col);
+        } else if (legH > 0.3) {
           for (const sx of [-1, 1]) {
             const leg = box(0.45, legH, 0.45, steel, trash);
             leg.position.set(sx * sc.widthM * 0.32, -sc.heightM / 2 - legH / 2, -0.6);
@@ -614,13 +620,8 @@ export function buildVenueDetails(template: StadiumTemplate, map: SeatMap, shado
           brace.position.set(0, -sc.heightM / 2 - legH * 0.45, -0.6);
           holder.add(brace);
         }
-      } else {
-        // On the back of the top tier, just over the last row's heads, under the roof.
-        const te = backOf(sc.centerU);
-        const p = at(sc.centerU, te.back + 0.2);
-        holder.position.set(p.x, te.backY + 0.7 + sc.heightM / 2, p.z);
-        holder.rotation.y = Math.atan2(-p.nx, -p.nz); // face the pitch
       }
+      // (Neither: on the back of the top tier, just over the last row's heads, under the roof.)
       const back = box(sc.widthM + 0.8, sc.heightM + 0.8, 0.9, frame, trash);
       back.position.z = -0.5;
       holder.add(back, new THREE.Mesh(faceGeo, face));
