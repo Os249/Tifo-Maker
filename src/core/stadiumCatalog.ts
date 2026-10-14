@@ -22,6 +22,11 @@ import type { StadiumTemplate } from './types';
 import { DEFAULT_TEMPLATE, KOP_TEMPLATE, OVAL_TEMPLATE } from './template';
 import { PREMIER_LEAGUE } from './premierLeague';
 import { LA_LIGA } from './laLiga';
+import { LIGUE_1 } from './ligue1';
+import { SUPER_LIG } from './superLig';
+import { BOTOLA } from './botola';
+import { ALGERIA_LIGUE_1 } from './algeriaLigue1';
+import { THAI_LEAGUE } from './thaiLeague';
 import { hasBlocks } from './blocks';
 import { generateSeatMap } from './seatmap';
 import { realBlocksFor, registerRealBlocks } from './realBlocks';
@@ -1349,9 +1354,12 @@ const BUILTINS_LIVE = realLayouts(BUILTINS);
 const COMMUNITY_LIVE = realLayouts(COMMUNITY);
 const PREMIER_LEAGUE_LIVE = realLayouts(PREMIER_LEAGUE);
 const LA_LIGA_LIVE = realLayouts(LA_LIGA);
+// The ultras' grounds of five more countries (October 2026), each laid out in
+// its real blocks from the start, so none has an earlier layout.
+const WORLD_LIVE = realLayouts([...LIGUE_1, ...SUPER_LIG, ...BOTOLA, ...ALGERIA_LIGUE_1, ...THAI_LEAGUE]);
 
 /** The full catalog. Order: built-ins first, then community, then custom. */
-export const STADIUM_CATALOG: StadiumEntry[] = [...BUILTINS_LIVE, ...COMMUNITY_LIVE, ...PREMIER_LEAGUE_LIVE, ...LA_LIGA_LIVE];
+export const STADIUM_CATALOG: StadiumEntry[] = [...BUILTINS_LIVE, ...COMMUNITY_LIVE, ...PREMIER_LEAGUE_LIVE, ...LA_LIGA_LIVE, ...WORLD_LIVE];
 
 /**
  * Stadiums that have been replaced by a more accurate one but that saved
@@ -1514,7 +1522,7 @@ export const LEGACY_STADIUMS: StadiumEntry[] = [
  * on any real-venue ground could not be saved at all.
  */
 export function shippedTemplates(): StadiumTemplate[] {
-  return [...BUILTINS_LIVE, ...COMMUNITY_LIVE, ...PREMIER_LEAGUE_LIVE, ...LA_LIGA_LIVE, ...LEGACY_STADIUMS].map((e) => e.template);
+  return [...BUILTINS_LIVE, ...COMMUNITY_LIVE, ...PREMIER_LEAGUE_LIVE, ...LA_LIGA_LIVE, ...WORLD_LIVE, ...LEGACY_STADIUMS].map((e) => e.template);
 }
 
 /** Every template the generator might be asked for (built-in + community + custom). */
@@ -1607,6 +1615,11 @@ export const LEAGUES: { tag: string; key: string }[] = [
   { tag: 'saudi-pro-league', key: 'sp.league.saudi' },
   { tag: 'premier-league', key: 'sp.league.premier' },
   { tag: 'laliga', key: 'sp.league.laliga' },
+  { tag: 'ligue-1', key: 'sp.league.ligue1' },
+  { tag: 'super-lig', key: 'sp.league.superLig' },
+  { tag: 'botola', key: 'sp.league.botola' },
+  { tag: 'algeria-ligue-1', key: 'sp.league.algeria' },
+  { tag: 'thai-league', key: 'sp.league.thai' },
 ];
 
 /** Filter + search the catalog. Foundation for the panel's search/filter (Wave B). */

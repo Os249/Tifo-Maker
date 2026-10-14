@@ -108,9 +108,12 @@ function show(opts: LeaguesNewsOptions): void {
     opts.openStadiums(league);
   };
 
-  // One tile per league: its picture, its name, how many grounds.
+  // One tile per league it announced: its picture, its name, how many grounds.
+  // (The countries added since are in the stadium list's league filter, not
+  // in this card: it has said what it says to everyone who answered it.)
   const row = q('.news-leagues-row');
   for (const l of LEAGUES) {
+    if (!PICTURE[l.tag]) continue;
     const n = queryCatalog({ league: l.tag, source: 'builtin' }).length;
     if (!n) continue;
     const tile = document.createElement('button');

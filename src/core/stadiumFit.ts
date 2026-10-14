@@ -597,11 +597,11 @@ export interface FitWarning {
  * pylons. That is genuinely how it works, and it is still only a guess, because
  * the real predictor is the decade the ground was built in and nothing public
  * tells us that. Measured against the shipped catalogue, this rule
- * agrees with the hand-set answer 44 times out of 64.
+ * agrees with the hand-set answer 66 times out of 87.
  * scripts/verify-stadiumfit.mts reads that sentence back out of this comment and
  * fails if it has drifted from what the rule actually scores, because a stale
  * accuracy figure is worse than none: it is the number the panel hedges by. The
- * thirteen it misses are mostly grounds whose age, not whose roof, decided the
+ * twenty-one it misses are mostly grounds whose age, not whose roof, decided the
  * answer: pylons kept under a later roof, or a roof added round an older rig.
  */
 export function suggestLighting(roof: RoofCoverage | undefined): LightingStyle {

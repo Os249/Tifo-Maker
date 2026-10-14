@@ -173,8 +173,11 @@ console.log('\n--- tier split --------------------------------------------------
   // LaLiga's: Spanish grounds put two shallow tiers where it expects one. 35
   // since Buraidah's horseshoe got the depth the drone photograph shows: one
   // tier, 51 rows with its main stand. 34 since Tabuk's main stand was rebuilt
-  // as the three levels webook sells it in, 46 rows with the movable stand.)
-  check(right === 34, 'tier-count rule scores 34 of 64', `misses: ${misses.join('; ')}`);
+  // as the three levels webook sells it in, 46 rows with the movable stand.
+  // 47 of 87 with the ultras' grounds of France, Turkey, Morocco, Algeria and
+  // Thailand, October 2026: their track ovals put two shallow tiers where the
+  // rule expects one, and Tizi Ouzou's narrow middle tier makes three of two.)
+  check(right === 47, 'tier-count rule scores 47 of 87', `misses: ${misses.join('; ')}`);
 
   const st = stackTiers(50, 2);
   const stacked = st[1].baseOffset > st[0].baseOffset + st[0].rows * st[0].rowDepth

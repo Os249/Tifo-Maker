@@ -1911,6 +1911,30 @@ import { buildStadium as siBuild } from '../src/core/stadiumFit';
     'sanchez-pizjuan-44k': '43532:4a1bfee3b8a8bc85',
     'mestalla-49k': '49776:728d2177d0ac3a6c',
     'la-ceramica-23k': '22788:4abba22e3730641d',
+    // The ultras' grounds of five more countries (October 2026).
+    'velodrome-67k': '66459:574d788810d2e5e1',
+    'parc-des-princes-48k': '47514:3d50c10a4615da49',
+    'bollaert-38k': '37632:33598f4af7b827d3',
+    'groupama-stadium-59k': '58277:41da5da0c27424ce',
+    'pierre-mauroy-50k': '49874:0ac807f7773106c6',
+    'roazhon-park-30k': '29722:22d9a2d8426fb371',
+    'rams-park-53k': '53323:2a8d924f2a7d47ce',
+    'sukru-saracoglu-47k': '47262:1980e199bd39c446',
+    'tupras-stadyumu-42k': '43154:db1e96ebcc0e50eb',
+    'papara-park-41k': '41783:0943bb4275d68969',
+    'gursel-aksel-23k': '23509:353a1c2ba3dbedcf',
+    'mohammed-v-45k': '46114:9e9419b0d3ccbab0',
+    'moulay-abdellah-69k': '68453:abcee75625647ec6',
+    'grand-stade-tanger-75k': '74730:d3263def09837009',
+    'fes-stadium-35k': '35818:da3e317c8ad1c6d6',
+    'stade-5-juillet-64k': '64706:de808bf14f7a2152',
+    'hocine-ait-ahmed-51k': '49722:7bdf3764d9386b83',
+    'miloud-hadefi-40k': '40000:0997257d00dffac4',
+    'nelson-mandela-41k': '40004:78c46cb1d2bc1686',
+    'ali-la-pointe-40k': '39692:dd58a3e9a7e4461e',
+    'chang-arena-33k': '32203:c70fd7cc672622fa',
+    'pat-stadium-12k': '12176:7c5fc8a990db26dd',
+    'thunderdome-15k': '14920:571a6352492de060',
   };
   for (const [id, want] of Object.entries(FROZEN)) {
     const tpl = cat.templateById(id);
@@ -2915,6 +2939,47 @@ await leagueGrounds('laliga', 'laliga', [
   if (!LA_LIGA.some((e) => e.template.tiers.some((x) => x.building))) fails.push('no ground is a building site');
 // The pitch is clear of every seat by 3 m, as in England.
 }, 3);
+
+// --- The ultras' grounds of five more countries (2026-27) -------------------
+// France, Turkey, Morocco, Algeria and Thailand: the grounds with the loudest
+// supporters' groups, built from OpenStreetMap footprints, satellite pictures
+// and photographs (see the comments in ligue1.ts, superLig.ts, botola.ts,
+// algeriaLigue1.ts and thaiLeague.ts), each to its published capacity and in
+// its real blocks from the start, with the same checks as the other leagues.
+await leagueGrounds('ligue 1', 'ligue-1', [
+  { id: 'velodrome-67k', clubs: 'Olympique de Marseille', seats: 67394, tol: 0.025 },
+  { id: 'parc-des-princes-48k', clubs: 'Paris Saint-Germain', seats: 47929, tol: 0.025 },
+  { id: 'bollaert-38k', clubs: 'RC Lens', seats: 38223, tol: 0.025 },
+  { id: 'groupama-stadium-59k', clubs: 'Olympique Lyonnais', seats: 59186, tol: 0.025 },
+  { id: 'pierre-mauroy-50k', clubs: 'LOSC Lille', seats: 50186, tol: 0.025 },
+  { id: 'roazhon-park-30k', clubs: 'Stade Rennais', seats: 29778, tol: 0.025 },
+], undefined, 3);
+await leagueGrounds('super lig', 'super-lig', [
+  { id: 'rams-park-53k', clubs: 'Galatasaray', seats: 53387, tol: 0.025 },
+  { id: 'sukru-saracoglu-47k', clubs: 'Fenerbahçe', seats: 47430, tol: 0.025 },
+  { id: 'tupras-stadyumu-42k', clubs: 'Beşiktaş', seats: 42684, tol: 0.025 },
+  { id: 'papara-park-41k', clubs: 'Trabzonspor', seats: 41061, tol: 0.025 },
+  { id: 'gursel-aksel-23k', clubs: 'Göztepe', seats: 23376, tol: 0.025 },
+], undefined, 3);
+await leagueGrounds('botola', 'botola', [
+  { id: 'mohammed-v-45k', clubs: 'Raja CA, Wydad AC', seats: 45891, tol: 0.025 },
+  { id: 'moulay-abdellah-69k', clubs: 'AS FAR', seats: 68700, tol: 0.025 },
+  { id: 'grand-stade-tanger-75k', clubs: 'IR Tanger', seats: 75500, tol: 0.025 },
+  { id: 'fes-stadium-35k', clubs: 'MAS Fès', seats: 35468, tol: 0.025 },
+], undefined, 3);
+await leagueGrounds('algeria ligue 1', 'algeria-ligue-1', [
+  { id: 'stade-5-juillet-64k', clubs: 'USM Alger', seats: 64000, tol: 0.025 },
+  { id: 'hocine-ait-ahmed-51k', clubs: 'JS Kabylie', seats: 50766, tol: 0.025 },
+  { id: 'miloud-hadefi-40k', clubs: 'MC Oran', seats: 40143, tol: 0.025 },
+  { id: 'nelson-mandela-41k', clubs: 'CR Belouizdad', seats: 40784, tol: 0.025 },
+  { id: 'ali-la-pointe-40k', clubs: 'MC Alger', seats: 40000, tol: 0.025 },
+], undefined, 3);
+// PAT Stadium's stands hold 12,308; the league's licence admits about 6,250.
+await leagueGrounds('thai league', 'thai-league', [
+  { id: 'chang-arena-33k', clubs: 'Buriram United', seats: 32600, tol: 0.025 },
+  { id: 'pat-stadium-12k', clubs: 'Port FC', seats: 12308, tol: 0.025 },
+  { id: 'thunderdome-15k', clubs: 'Muangthong United', seats: 15000, tol: 0.025 },
+], undefined, 3);
 
 // --- The real grounds' neighbourhoods (OpenStreetMap, October 2026) ----------
 // Each Saudi ground with a site has its file, built for it, credited to
