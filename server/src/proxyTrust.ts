@@ -1,4 +1,5 @@
 import { BlockList, isIP } from 'node:net';
+import { normalizeIP } from '@fastify/rate-limit';
 
 /**
  * Which proxy hops to believe when working out who a request came from.
@@ -94,4 +95,30 @@ export function viaCloudflare(mode: ProxyMode, xForwardedFor: string | string[] 
   const header = Array.isArray(xForwardedFor) ? xForwardedFor.join(',') : xForwardedFor ?? '';
   const last = header.split(',').map((s) => s.trim()).filter(Boolean).pop();
   return isCloudflareAddress(last);
+}
+
+/**
+ * The "one client" an address stands for, for every per-address count.
+ *
+ * An IPv6 connection does not come from one address but from a block of them:
+ * a home line or a cheap server is handed a whole /64, 18 quintillion
+ * addresses, and can send each request from a new one. Counted address by
+ * address, that made every per-address limit unlimited: 199 of 200 sign-in
+ * attempts from one /64 got past a limit of 10 a minute, and one address
+ * written five ways (2001:db8::99, 2001:0db8:0:0::99, ...) counted as five
+ * people (audit round five; CVE-2026-15144 in @fastify/rate-limit before
+ * 11.2.0). So an IPv6 address counts as its /64, written one way, and an
+ * IPv4 address mapped into IPv6 counts as the IPv4 address.
+ *
+ * The rate limiter applies exactly this since 11.2.0; the view and share
+ * counters and the security log use it too, so all of them agree on who one
+ * visitor is.
+ */
+export function clientKey(ip: string | undefined): string {
+  if (!ip) return '';
+  try {
+    return normalizeIP(ip.trim());
+  } catch {
+    return ip;
+  }
 }

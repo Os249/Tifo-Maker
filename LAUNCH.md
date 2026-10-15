@@ -14,7 +14,7 @@ Copy `server/.env.example` to your host's env. Required / recommended:
 - `DATABASE_URL` — Postgres (required in production).
 - `PUBLIC_URL` — e.g. `https://tifomaker.org` (used in email links; no trailing slash).
 - `RESEND_API_KEY` + `EMAIL_FROM` — for verification + password‑reset email.
-- `ADMIN_USERNAMES` — your existing account's username(s); these get unlimited AI + the /admin dashboard. A listed name with no account is reserved: only a browser with the admin password unlocked can sign up with it.
+- `ADMIN_USERNAMES` — your existing account's username(s); these get unlimited AI + the /admin dashboard. A listed name with no account is reserved: to claim it, unlock the AI panel, then rename your account to it in Account and type the admin password when asked.
 - `AI_ADMIN_PASSWORD` — optional unlock for AI without an account.
 - AI provider key (`GEMINI_API_KEY` / `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`).
 - `AI_FREE_FOR_ALL` — leave `true` for now (AI free for any verified account).

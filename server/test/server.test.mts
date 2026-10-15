@@ -15,7 +15,6 @@ import { MemoryFeedbackRepository } from '../src/feedbackRepo';
 import { PgAuthRepository, PgDesignRepository } from '../src/pgRepo';
 import { PgSocialRepository } from '../src/pgSocial';
 import { buildApp, SNAPSHOT_EVERY, type TemplateInfo } from '../src/routes';
-import { mintUnlock } from '../src/aiRoutes';
 import { schemaStatements } from '../src/schema';
 import { toB64 } from '../src/codec';
 import type { AuthRepository, DesignRepository } from '../src/repo';
@@ -41,14 +40,13 @@ function sampleCells(): Uint8Array {
   return cells;
 }
 
-/** An allow-listed admin name can only be claimed from an admin-password session. */
+/** An allow-listed admin name can only be claimed with the admin password. */
 const ADMIN_PW = 'test admin password';
 async function registerUser(app: FastifyInstance, username: string): Promise<string> {
   const res = await app.inject({
     method: 'POST',
     url: '/api/auth/register',
-    headers: { 'x-ai-unlock': mintUnlock(ADMIN_PW) },
-    payload: { username, password: 'harbor-kite-moss-31', email: `${username}@example.test`, acceptedVersion: 'test' },
+    payload: { username, password: 'harbor-kite-moss-31', email: `${username}@example.test`, acceptedVersion: 'test', adminPassword: ADMIN_PW },
   });
   assert.equal(res.statusCode, 201, res.body);
   return res.json().token as string;
@@ -786,6 +784,8 @@ async function runSuite(name: string, repo: DesignRepository, auth: AuthReposito
   const designId = (created.json() as { id: string }).id;
   await app.inject({ method: 'PATCH', url: `/api/designs/${designId}`, headers: { authorization: `Bearer ${tok}` }, payload: { isPublic: true } });
 
+  // Photos need a verified email (audit round five).
+  await auth.markEmailVerified(((await app.inject({ method: 'GET', url: '/api/me', headers: { authorization: `Bearer ${tok}` } })).json() as { id: string }).id);
   const g0 = (await app.inject({ method: 'GET', url: '/api/gallery' })).json() as { id: string; hasPhoto: boolean }[];
   assert.equal(g0.find((d) => d.id === designId)?.hasPhoto, false, 'hasPhoto false before upload');
 
@@ -881,6 +881,8 @@ async function runSuite(name: string, repo: DesignRepository, auth: AuthReposito
   });
   const did2 = (created2.json() as { id: string }).id;
   await app.inject({ method: 'PATCH', url: `/api/designs/${did2}`, headers: { authorization: `Bearer ${userTok}` }, payload: { isPublic: true } });
+  // Photos need a verified email (audit round five).
+  await auth.markEmailVerified(((await app.inject({ method: 'GET', url: '/api/me', headers: { authorization: `Bearer ${userTok}` } })).json() as { id: string }).id);
   const up = await app.inject({
     method: 'POST',
     url: `/api/designs/${did2}/photos`,

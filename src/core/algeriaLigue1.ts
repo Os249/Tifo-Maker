@@ -79,7 +79,9 @@ export const ALGERIA_LIGUE_1: StadiumEntry[] = [
   })(),
   (() => {
     // Stade Hocine Aït Ahmed, Boukhalfa, Tizi Ouzou — JS Kabylie's since
-    // 2024, under the Djurdjura. The main stand is -z here. A football ground
+    // 2024, under the Djurdjura. The main stand, on the west-north-west with
+    // the helipad and the VIP car parks behind it, is -z here; the auxiliary
+    // athletics stadium is behind the stand opposite. A football ground
     // of three tiers the same height all round — a lower one, a narrow middle
     // one of boxes and an upper one — with rounded, filled corners, all of it
     // under a roof of green glass in parabolic segments on white steel
@@ -181,14 +183,19 @@ export const ALGERIA_LIGUE_1: StadiumEntry[] = [
           { style: 'truss', back: 43, front: 0, backY: 28, frontY: 24, depth: 4.5, bay: 7, color: 0xc9ccd0, underColor: 0xe6e8ea, lights: { every: 5, y: 24.3 } },
         ],
         lighting: { style: 'roof-rim', kelvin: 5700 },
-        track: { lanes: 8, surface: 0xb5462f },
+        track: { lanes: 8, surface: 0x2f6db3 },
         finish: { concrete: 0xb3afa6, walls: 0xd8d4cb },
-        facade: { style: 'truss', color: 0xc9ccd0, accent: 0xe6e8ea },
-        runoff: { color: 0xb5462f, a: 93, b: 63, exponent: 2.6 },
+        // The steel braid that wraps the bowl, standing clear of it.
+        facade: { style: 'lattice', color: 0xe9ebed, accent: 0xc9ccd0 },
+        runoff: { color: 0x2f6db3, a: 93, b: 63, exponent: 2.6 },
         seatLook: {
-          colors: [{ c: '#c8202c', w: 0.6 }, { c: '#f2f2f0', w: 0.4 }],
+          colors: [{ c: '#d0202e', w: 0.78 }, { c: '#eef0f0', w: 0.22 }],
           grain: { along: 3, rows: 2 },
-          regions: [{ tiers: [1], colors: [{ c: '#f2f2f0', w: 0.6 }, { c: '#c8202c', w: 0.4 }], grain: { along: 3, rows: 2 } }],
+          regions: [
+            { tiers: [1], colors: [{ c: '#d0202e', w: 0.7 }, { c: '#eef0f0', w: 0.3 }], grain: { along: 3, rows: 2 } },
+            // The tribune officielle's seats, brown, in the middle of the upper tier.
+            { tiers: [1], side: 'south', from: -30, to: 30, colors: ['#7a5236'] },
+          ],
         },
         details: {
           // A screen hung under the roof over each open corner on the far side.
@@ -209,8 +216,13 @@ export const ALGERIA_LIGUE_1: StadiumEntry[] = [
     // A football oval of two tiers right round, the corners filled, under
     // one roof carried by two great trusses that span the length of the
     // ground and rest on four pillars behind the goals, a band of open sky
-    // between the roof and the last row. A screen behind each goal; the
-    // floodlights under the roof; outside, white bands of facade and glass.
+    // between the roof and the last row; its underside bronze. Seats in a
+    // grey mosaic, white, silver and charcoal. A screen behind each goal
+    // between the red pillars; the floodlights under the roof; outside,
+    // white bands of facade and glass.
+    // Each truss rises from its pillars behind the goals to its crown over the halfway line: four straight bays.
+    const ARCH: [number, number][] = [[-112, 38], [-56, 48], [0, 51], [56, 48], [112, 38]];
+    const arch = (z: number) => ARCH.slice(1).map(([x, y], i) => ({ from: [ARCH[i][0], z] as [number, number], to: [x, z] as [number, number], y: ARCH[i][1], yTo: y, height: 7, color: 0xeef0f1 }));
     const lower: TierSpec = { rows: 22, rowDepth: 0.8, rakeDeg: 26, baseElevation: 1.6, baseOffset: 2, seatPitch: 0.5 };
     const upper: TierSpec = { rows: 22, rowDepth: 0.85, rakeDeg: 33, baseElevation: 14.5, baseOffset: 24, seatPitch: 0.5 };
     const t = { plan: { a: 63, b: 45, exponent: 4 }, tiers: [lower, upper] } as Parameters<typeof ringStairs>[0];
@@ -234,21 +246,23 @@ export const ALGERIA_LIGUE_1: StadiumEntry[] = [
         roof: { coverage: 'none' },
         roofs: [
           // High over the bowl, open sky between it and the back row.
-          { style: 'truss', back: 47, front: -2, backY: 38, frontY: 35, depth: 3, bay: 8, color: 0xe8eaec, underColor: 0xcfd3d6, lights: { every: 5, y: 35.3 } },
+          { style: 'truss', back: 47, front: -2, backY: 38, frontY: 35, depth: 3, bay: 8, color: 0xe8eaec, underColor: 0x6b5644, lights: { every: 5, y: 35.3 } },
         ],
         lighting: { style: 'roof-rim', kelvin: 5700, masts: { at: [[112, 52]], height: 50, style: 'lattice', head: 'none' } },
         finish: { concrete: 0xa7a59f, walls: 0xdcdad4 },
-        facade: { style: 'cladding', color: 0xf2f2f0, accent: 0x9fb4c4 },
+        facade: { style: 'concrete', color: 0xf2f2f0, accent: 0xdcdcd8, bayMeters: 10 },
         runoff: { color: 0x2f7a3a, a: 62, b: 44, exponent: 4 },
         seatLook: {
-          colors: [{ c: '#c8202c', w: 0.55 }, { c: '#f2f2f0', w: 0.3 }, { c: '#9aa1a8', w: 0.15 }],
+          colors: [{ c: '#eceeef', w: 0.35 }, { c: '#a7acb1', w: 0.35 }, { c: '#4b5056', w: 0.3 }],
           grain: { along: 3, rows: 2 },
         },
         details: {
-          // The two trusses that carry the roof, end to end over the side stands.
-          girders: [
-            { from: [-112, -52], to: [112, -52], y: 44, height: 8, color: 0xe8eaec },
-            { from: [-112, 52], to: [112, 52], y: 44, height: 8, color: 0xe8eaec },
+          // The two arched trusses that carry the roof, end to end over the side stands.
+          girders: arch(-52).concat(arch(52)),
+          // The facade: white bands round the bowl, glazing between them.
+          skins: [
+            { offset: 44.6, y0: 0, y1: 33, color: 0xf4f4f2, pattern: 'glass', tile: [6, 3.3] },
+            ...[[0, 4], [9, 11.5], [16.5, 19], [24, 26.5], [31, 33]].map(([y0, y1]) => ({ offset: 45, y0, y1, color: 0xf2f2ef, pattern: 'solid' as const })),
           ],
           // A screen behind each goal, hung under the roof over the back rows.
           screens: [

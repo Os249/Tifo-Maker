@@ -41,8 +41,8 @@ const GROUNDS = [
   ['nelson-mandela-41k', 40004, 'Stade Nelson Mandela (Baraki)', 'ملعب نيلسون مانديلا (براقي)'],
   ['ali-la-pointe-40k', 39692, 'Stade Ali La Pointe (Douéra)', 'ملعب علي لابوانت (الدويرة)'],
   ['chang-arena-33k', 32203, 'Chang Arena (Buriram)', 'تشانغ أرينا (بوريرام)'],
-  ['pat-stadium-12k', 12176, 'PAT Stadium (Bangkok)', 'ملعب هيئة موانئ تايلاند (بانكوك)'],
-  ['thunderdome-15k', 14920, 'Thunderdome Stadium (Nonthaburi)', 'ملعب ثندردوم (نونثابوري)'],
+  ['pat-stadium-12k', 12028, 'PAT Stadium (Bangkok)', 'ملعب هيئة موانئ تايلاند (بانكوك)'],
+  ['thunderdome-15k', 14786, 'Thunderdome Stadium (Nonthaburi)', 'ملعب ثندردوم (نونثابوري)'],
 ];
 const only = process.argv[2] ?? '';
 
@@ -60,7 +60,7 @@ const check = (name, ok, extra = '') => {
 const LS = (lang = 'en') => [
   { name: 'tifo_lang_v1', value: lang },
   { name: 'tifo_onboarded_v1', value: '1' },
-  { name: 'tifo_news_banners_v1', value: '1' }, { name: 'tifo_news_leagues_v1', value: '1' },
+  { name: 'tifo_news_banners_v1', value: '1' }, { name: 'tifo_news_leagues_v2', value: '1' },
   { name: 'tifo_banner_tour_v1', value: '1' },
   { name: 'mds_seen_intro', value: '1' },
   { name: 'mds_sound_v2', value: JSON.stringify({ on: false }) },

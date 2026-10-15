@@ -8,6 +8,8 @@
  *     opens it on every league; the answer is remembered, and the Banners news
  *     waits for the next visit rather than stacking on top
  *   - in Arabic, and on a phone, where the tile opens the Stadium sheet
+ *   - a fan who answered the first, three-league card is told once more, now
+ *     that the card has eight leagues
  *
  * Needs the server on :8911 with a built dist (npm run build; PORT=8911 npm run server).
  * Screenshots land in preview-out/e2e-leagues-news/.
@@ -47,6 +49,13 @@ async function open({ lang = 'en', w = 1400, h = 880, extra = [] } = {}) {
   return { ctx, page, errs };
 }
 const flag = (page, k) => page.evaluate((key) => localStorage.getItem(key), k);
+// The eight leagues, in the card's order, with their names and grounds.
+const LEAGUE_ORDER = 'saudi-pro-league,premier-league,laliga,ligue-1,super-lig,botola,algeria-ligue-1,thai-league';
+const TILES_EN = [
+  ['Roshn Saudi League', '14 stadiums'], ['Premier League', '20 stadiums'], ['LaLiga', '20 stadiums'],
+  ['Ligue 1', '6 stadiums'], ['Süper Lig', '5 stadiums'], ['Botola Pro', '4 stadiums'],
+  ['Ligue 1 Mobilis (Algeria)', '5 stadiums'], ['Thai League', '3 stadiums'],
+];
 const cardState = (page) =>
   page.evaluate(() => {
     const card = document.querySelector('#news-card.news-leagues');
@@ -83,19 +92,19 @@ console.log('\n— on a computer, in English —');
   const s = await cardState(page);
   check('a fresh editor shows the league stadiums news', !!s);
   check('it says your club’s real stadium is here', !!s && /real stadium is here/.test(s.title), s?.title);
-  check('one tile per league, in order', !!s && s.tiles.map((t) => t.league).join() === 'saudi-pro-league,premier-league,laliga', JSON.stringify(s?.tiles.map((t) => t.league)));
+  check('one tile per league, in order', !!s && s.tiles.map((t) => t.league).join() === LEAGUE_ORDER, JSON.stringify(s?.tiles.map((t) => t.league)));
   check('each tile names its league and counts its grounds',
-    !!s && s.tiles[0].name === 'Roshn Saudi League' && s.tiles[0].count === '14 stadiums' && s.tiles[1].name === 'Premier League' && s.tiles[1].count === '20 stadiums' && s.tiles[2].name === 'LaLiga' && s.tiles[2].count === '20 stadiums',
+    !!s && JSON.stringify(s.tiles.map((t) => [t.name, t.count])) === JSON.stringify(TILES_EN),
     JSON.stringify(s?.tiles.map((t) => [t.name, t.count])));
   check('every picture loads', !!s && s.tiles.every((t) => t.loaded));
   check('it is on screen, with 24 px targets and no sideways scroll', !!s && s.inView && s.smallest >= 24 && !s.overflow, `${s?.smallest}`);
   check('it does not take focus from the page', !!s && !s.focusInside);
-  check('it is not remembered before it is answered', (await flag(page, 'tifo_news_leagues_v1')) === null);
+  check('it is not remembered before it is answered', (await flag(page, 'tifo_news_leagues_v2')) === null);
   await page.screenshot({ path: `${OUT}/desktop-en.png` });
 
   await page.click('.news-league[data-league="laliga"]');
   check('a tile puts the news away', await page.waitForSelector('#news-card', { state: 'detached', timeout: 5000 }).then(() => true, () => false));
-  check('and it is remembered', (await flag(page, 'tifo_news_leagues_v1')) === '1');
+  check('and it is remembered', (await flag(page, 'tifo_news_leagues_v2')) === '1');
   await page.waitForTimeout(800);
   const league = await page.$eval('#stadium-league', (e) => e.value).catch(() => null);
   const rows = await listed(page);
@@ -111,6 +120,23 @@ console.log('\n— on a computer, in English —');
   const next = await page.evaluate(() => { const c = document.querySelector('#news-card'); return c ? { leagues: c.classList.contains('news-leagues'), text: c.textContent } : null; });
   check('it does not come back', !next?.leagues);
   check('and the Banners news shows on the next visit instead', !!next && /Banners are here/.test(next.text ?? ''), next?.text?.slice(0, 60));
+  check('no page errors', errs.length === 0, errs.join(' | '));
+  await ctx.close();
+}
+
+// ---------------------------------------------------------------------------
+console.log('\n— told again, once, to those who answered the first card —');
+{
+  const { ctx, page, errs } = await open({ extra: [['tifo_news_banners_v1', '1'], ['tifo_news_leagues_v1', '1']] });
+  const shown = await page.waitForSelector('#news-card.news-leagues', { timeout: 20000 }).then(() => true, () => false);
+  check('a fan who answered the three-league card sees the eight-league one', shown);
+  await page.click('.news-league[data-league="botola"]');
+  await page.waitForTimeout(800);
+  const rows = await listed(page);
+  check('the Botola tile lists the four Moroccan grounds', (await page.$eval('#stadium-league', (e) => e.value).catch(() => null)) === 'botola' && rows.length === 4 && rows.some((r) => r.includes('Tanger')), `${rows.length} rows`);
+  await page.reload({ waitUntil: 'networkidle' });
+  await page.waitForTimeout(3000);
+  check('and it does not come back', !(await page.$('#news-card.news-leagues')));
   check('no page errors', errs.length === 0, errs.join(' | '));
   await ctx.close();
 }
@@ -135,7 +161,7 @@ console.log('\n— in Arabic —');
   await page.waitForFunction(() => [...document.querySelectorAll('.news-league img')].every((i) => i.complete), null, { timeout: 10000 }).catch(() => {});
   const s = await cardState(page);
   check('the title is Arabic', !!s && s.title === 'ملعب ناديك الحقيقي صار هنا', s?.title);
-  check('so are the league names and counts', !!s && s.tiles[0].name === 'دوري روشن السعودي' && s.tiles[2].name === 'الدوري الإسباني' && s.tiles[1].count === '20 ملعب', JSON.stringify(s?.tiles.map((t) => [t.name, t.count])));
+  check('so are the league names and counts', !!s && s.tiles[0].name === 'دوري روشن السعودي' && s.tiles[2].name === 'الدوري الإسباني' && s.tiles[1].count === '20 ملعب' && s.tiles[5].name === 'البطولة الاحترافية المغربية' && s.tiles[7].name === 'الدوري التايلاندي', JSON.stringify(s?.tiles.map((t) => [t.name, t.count])));
   check('on screen, no sideways scroll', !!s && s.inView && !s.overflow);
   await page.screenshot({ path: `${OUT}/desktop-ar.png` });
   await page.click('.news-league[data-league="saudi-pro-league"]');

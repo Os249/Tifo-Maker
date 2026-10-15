@@ -115,8 +115,9 @@ Three tiers keyed to capability, not just width:
 
   Deploy note: set `ADMIN_USERNAMES=yourname` (your existing account) in the
   environment, or the moderation queue stays inaccessible to everyone. A listed
-  name nobody has registered is reserved: sign-up refuses it unless the admin
-  password is unlocked in that browser, so a typo grants no one anything.
+  name nobody has registered is reserved: sign-up and rename refuse it unless
+  the request carries the admin password itself (Account asks for it, in a
+  browser where the AI panel is unlocked), so a typo grants no one anything.
 
 
 - **Before/After real photos** — the social-proof feature. Creators attach a

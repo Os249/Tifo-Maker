@@ -692,6 +692,17 @@ const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms
  * and the alternative is the user getting no design at all. AI_TIMEOUT_RETRY=0
  * turns it off.
  */
+let retryMeter: (() => void) | null = null;
+/**
+ * Called for every second attempt the retry below makes. The route counts one
+ * AI_DAILY_BUDGET call per request, and a retried request is two real calls
+ * to the provider: during a slow spell the budget under-counted by up to half
+ * (audit round five). aiRoutes hands in the budget counter.
+ */
+export function meterRetries(fn: (() => void) | null): void {
+  retryMeter = fn;
+}
+
 export async function generateSpecViaProvider(
   prompt: string,
   opts: { system?: string; context?: string; image?: string; tier?: 'fast' | 'premium'; hint?: string; raw?: boolean } = {},
@@ -701,6 +712,7 @@ export async function generateSpecViaProvider(
   const timedOut = /timed out$/.test(r.error ?? '') && process.env.AI_TIMEOUT_RETRY !== '0';
   if (r.status !== 503 && !timedOut) return r;
   if (!timedOut) await sleep(envNum('AI_RETRY_DELAY_MS', 1200, 100, 10000));
+  retryMeter?.();
   const again = await callProvider(prompt, opts);
   // Report the SECOND failure: if it is still down, that is the current truth.
   return again;

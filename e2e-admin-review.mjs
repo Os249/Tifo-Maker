@@ -68,6 +68,17 @@ const stamp = Date.now().toString(36).slice(-5);
 const reg = async (u) => (await api('/api/auth/register', null, { username: u, password: 'harbor-kite-moss-31', email: `${u}@example.test`, acceptedVersion: 'test' })).token;
 const fanName = `fan${stamp}`;
 const fan = await reg(fanName);
+// Photos need a verified email (audit round five). The development server
+// prints each message, code included, so the fan types it like a person would.
+{
+  let code = null;
+  for (let i = 0; i < 40 && !code; i++) {
+    for (const m of out.join('').matchAll(/\[email:dev\] to=(\S+) \|[\s\S]*?Your TifoMaker code: (\d{6})/g)) if (m[1] === `${fanName}@example.test`) code = m[2];
+    if (!code) await new Promise((r) => setTimeout(r, 100));
+  }
+  const v = await api('/api/auth/verify/code', fan, { code });
+  check('the fan verifies their email', !!v?.ok, JSON.stringify(v));
+}
 const templates = await (await fetch(`${B}/api/templates`)).json();
 const tpl = templates[0];
 // The shipped templates are TypeScript; read two of them through tsx.
@@ -91,7 +102,7 @@ const errs = [];
 const newPage = async (ls, viewport = { width: 1440, height: 900 }) => {
   const ctx = await browser.newContext({ viewport });
   await ctx.addInitScript((pairs) => { try { for (const [k, v] of pairs) localStorage.setItem(k, v); } catch { /* */ } }, [
-    ['tifo_consent_v1', 'essential'], ['tifo_onboarded_v1', '1'], ['tifo_news_banners_v1', '1'], ['tifo_news_leagues_v1', '1'], ['tifo_banner_tour_v1', '1'], ...ls,
+    ['tifo_consent_v1', 'essential'], ['tifo_onboarded_v1', '1'], ['tifo_news_banners_v1', '1'], ['tifo_news_leagues_v2', '1'], ['tifo_banner_tour_v1', '1'], ...ls,
   ]);
   const p = await ctx.newPage();
   p.on('pageerror', (e) => errs.push(String(e.message).slice(0, 200)));

@@ -44,6 +44,7 @@
 import { createHash, createHmac, randomBytes } from 'node:crypto';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { EmailSender } from './email';
+import { clientKey } from './proxyTrust';
 import {
   type SocAlertRow,
   type SocAuditInput,
@@ -286,7 +287,10 @@ export class SocMonitor {
   /** The tag for an address. Same key, same address, same tag. */
   tag(ip: string | undefined): string {
     if (!ip) return '';
-    return createHmac('sha256', this.key).update(ip).digest('hex').slice(0, 12);
+    // By the client an address stands for (an IPv6 /64), the way the rate
+    // limiter counts: otherwise one machine walking its /64 is a new "address"
+    // on every request and no per-address alert ever fires.
+    return createHmac('sha256', this.key).update(clientKey(ip)).digest('hex').slice(0, 12);
   }
 
   record(kind: SocKind, ctx: { ip?: string; route?: string; subject?: string; status?: number; reqId?: string } = {}): void {
@@ -629,6 +633,10 @@ function routeOf(req: FastifyRequest, kind: SocKind): string {
 /** Admin actions that go in the audit trail when they succeed. */
 const ADMIN_ACTIONS: Record<string, (req: FastifyRequest) => { action: string; target: string | null; detail: SocAuditInput['detail'] }> = {
   'POST /api/ai/unlock': () => ({ action: 'signed in with the admin password', target: null, detail: null }),
+  // Only a successful claim of an ADMIN_USERNAMES name sets an actor on these
+  // two (adminClaim), so ordinary sign-ups and renames are not written down.
+  'POST /api/auth/register': (req) => ({ action: 'claimed an admin name at sign-up', target: bodyName(req), detail: null }),
+  'POST /api/account/username': (req) => ({ action: 'claimed an admin name', target: bodyName(req), detail: null }),
   'POST /api/admin/reports/:id/dismiss': (req) => ({ action: 'dismissed a report', target: param(req, 'id'), detail: null }),
   'POST /api/admin/designs/:id/takedown': (req) => ({ action: 'took down a design', target: param(req, 'id'), detail: null }),
   'POST /api/admin/photos/:photoId/verify': (req) => ({
@@ -649,6 +657,11 @@ const ADMIN_ACTIONS: Record<string, (req: FastifyRequest) => { action: string; t
   }),
   'POST /api/admin/soc/test-alert': () => ({ action: 'sent a test security alert', target: null, detail: null }),
 };
+
+function bodyName(req: FastifyRequest): string | null {
+  const v = (req.body as { username?: unknown } | null)?.username;
+  return typeof v === 'string' ? `@${v.slice(0, 32)}` : null;
+}
 
 function param(req: FastifyRequest, name: string): string | null {
   const v = (req.params as Record<string, unknown> | undefined)?.[name];

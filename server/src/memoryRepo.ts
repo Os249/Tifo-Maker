@@ -322,8 +322,11 @@ export class MemoryDesignRepository implements DesignRepository {
     // Only a public source is named (see GALLERY_JOINS in pgRepo).
     const found = r.remixedFrom ? this.rows.get(r.remixedFrom) : null;
     const source = found?.isPublic ? found : null;
+    // A gallery card is public: no owner-only fields (pinned, Trash, takedown,
+    // origin), as the Postgres gallery query never selects them.
+    const { pinned: _p, deletedAt: _d, origin: _o, takenDown: _t, ...shared } = this.meta(r);
     return {
-      ...this.meta(r),
+      ...shared,
       ownerName: this.usernames(r.ownerId),
       hasThumbnail: r.thumbnail !== null,
       likeScore: this.score(r),
@@ -723,7 +726,11 @@ export class MemoryAuthRepository implements AuthRepository {
     passwordHash: string | null,
     opts: { email?: string | null; acceptedVersion?: string | null; emailVerified?: boolean; usernameChosen?: boolean } = {},
   ): Promise<UserRow | null> {
-    if (this.users.has(username)) return null;
+    // Unique ignoring case, as Postgres enforces it: the memory store let
+    // "Alice" in next to "alice", so the suites that run on memory could not
+    // see a regression of the round-four fix (audit round five).
+    const lower = username.toLowerCase();
+    for (const name of this.users.keys()) if (name.toLowerCase() === lower) return null;
     const email = opts.email ?? null;
     if (email && this.emailTaken(email)) return null;
     const row: UserRow = {
@@ -923,6 +930,12 @@ export class MemoryEventsRepository implements EventsRepository {
 
   async record(sessionId: string, name: string, signedIn: boolean): Promise<void> {
     this.events.push({ sessionId, name, signedIn, at: Date.now() });
+  }
+
+  async purge(before: Date): Promise<number> {
+    const n = this.events.length;
+    this.events = this.events.filter((e) => e.at >= before.getTime());
+    return n - this.events.length;
   }
 
   async funnel(steps: string[], days: number): Promise<FunnelStep[]> {

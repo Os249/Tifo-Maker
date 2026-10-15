@@ -157,6 +157,10 @@ export class MemorySocialRepository implements SocialRepository {
     return this.comments.filter((c) => c.designId === designId).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   }
 
+  async commentDesign(commentId: string): Promise<string | null> {
+    return this.comments.find((x) => x.id === commentId)?.designId ?? null;
+  }
+
   async deleteComment(commentId: string, requesterId: string): Promise<boolean> {
     const c = this.comments.find((x) => x.id === commentId);
     if (!c) return false;

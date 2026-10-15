@@ -327,6 +327,13 @@ export interface SocialRepository {
   // ---- comments ----
   addComment(designId: string, authorId: string, body: string, parentId: string | null): Promise<CommentItem | null>;
   listComments(designId: string): Promise<CommentItem[]>;
+  /** The design a comment is on, or null when there is no such comment. */
+  commentDesign(commentId: string): Promise<string | null>;
+  /**
+   * Delete a comment (its author or the design's owner). Replies to it stay,
+   * with no parent: they are other people's words, and the thread shows them
+   * at the top level.
+   */
   deleteComment(commentId: string, requesterId: string): Promise<boolean>;
 
   // ---- notifications ----
@@ -495,7 +502,17 @@ export interface EventsRepository {
    * the caller can render drop-off between consecutive stages.
    */
   funnel(steps: string[], days: number): Promise<FunnelStep[]>;
+  /** Delete events older than `before`; returns how many went. */
+  purge(before: Date): Promise<number>;
 }
+
+/**
+ * How long raw funnel events are kept. They were never deleted: anyone may
+ * post one, at about 200 bytes a row, so the table only ever grew (audit round
+ * five). The funnel reads at most 365 days back and the admin overview 30, so
+ * a little over a year loses nothing either of them shows.
+ */
+export const EVENTS_RETENTION_DAYS = 400;
 
 // ============ B2B leads ============
 

@@ -1,7 +1,7 @@
 # Security checks
 
 How TifoMaker's security is checked, how often, and what to do with what the
-checks find. Written after the September 2026 audit (rounds one to three; round four in October 2026), whose rounds found
+checks find. Written after the September 2026 audit (rounds one to three; rounds four and five in October 2026), whose rounds found
 and fixed every issue listed in the regression suite (`server/test/security.test.mts`).
 
 The rule behind all of it: **a finding is only real once it has been reproduced,
@@ -78,6 +78,11 @@ Railway logs at the time the event shows (the log line has the address).
 
 - [ ] `npm run security:check` locally, on an up-to-date `main`.
 - [ ] Merge or close open Dependabot pull requests (npm and GitHub Actions).
+- [ ] `npm outdated` for the server's own packages (`fastify`, `@fastify/*`,
+      `pg`, `pdfkit`): read the release notes of any newer patch. `npm audit`
+      said 0 while `@fastify/rate-limit` 11.0.0 had CVE-2026-15144 (every
+      per-address limit open over IPv6); round five found it by looking the
+      packages up by hand.
 - [ ] Security posture on `/admin#security` has nothing marked **fix**.
 - [ ] Railway variables are as in section 6. Nothing there that is no longer used.
 - [ ] Resend: domain still verified (SPF, DKIM), no rise in bounces or complaints.
@@ -157,7 +162,7 @@ each one in more detail.
 | `NODE_ENV` | `production` | request logs, `Secure` admin cookie, refuses to start without a database |
 | `DATABASE_URL` | Railway's Postgres | required in production |
 | `AI_ADMIN_PASSWORD` | 20+ random characters | guards `/admin` and the AI budget bypass |
-| `ADMIN_USERNAMES` | your account's username | moderation actions; a listed name with no account is reserved, claimable only with the admin password unlocked |
+| `ADMIN_USERNAMES` | your account's username | moderation actions; a listed name with no account is reserved, claimable only with the admin password itself (Account → rename) |
 | `PUBLIC_URL` | `https://tifomaker.org` | links in emails never depend on a request header |
 | `RESEND_API_KEY` | from Resend | without it no email, including alerts, is delivered |
 | `EMAIL_FROM` | unset, or `TifoMaker <hello@tifomaker.org>` | a no-reply sender lands in spam |

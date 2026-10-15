@@ -243,15 +243,41 @@ export class PgSocialRepository implements SocialRepository {
     }));
   }
 
+  async commentDesign(commentId: string): Promise<string | null> {
+    const res = await this.pool.query('SELECT design_id FROM comments WHERE id = $1', [commentId]);
+    return res.rowCount ? String(res.rows[0].design_id) : null;
+  }
+
   async deleteComment(commentId: string, requesterId: string): Promise<boolean> {
-    // Author OR the design owner may delete a comment.
-    const res = await this.pool.query(
-      `DELETE FROM comments c USING designs d
-       WHERE c.id = $1 AND c.design_id = d.id
-         AND (c.author_id = $2 OR d.owner_id = $2)`,
-      [commentId, requesterId],
-    );
-    return (res.rowCount ?? 0) > 0;
+    // Author OR the design owner may delete a comment. The replies to it stay:
+    // `parent_id` cascades, so deleting your own comment used to delete every
+    // answer other people had written under it, the reply that proved you
+    // wrong included, which the memory store and the thread view never did
+    // (audit round five). They are let go of their parent first, and the
+    // thread shows them at the top level.
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+      const mine = await client.query(
+        `SELECT c.id FROM comments c JOIN designs d ON d.id = c.design_id
+         WHERE c.id = $1 AND (c.author_id = $2 OR d.owner_id = $2)
+         FOR UPDATE OF c`,
+        [commentId, requesterId],
+      );
+      if (!mine.rowCount) {
+        await client.query('ROLLBACK');
+        return false;
+      }
+      await client.query('UPDATE comments SET parent_id = NULL WHERE parent_id = $1', [commentId]);
+      await client.query('DELETE FROM comments WHERE id = $1', [commentId]);
+      await client.query('COMMIT');
+      return true;
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw err;
+    } finally {
+      client.release();
+    }
   }
 
   // ---- notifications ----

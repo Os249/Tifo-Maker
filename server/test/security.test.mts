@@ -132,36 +132,37 @@ async function makeDesign(app: FastifyInstance, token: string, isPublic = false)
   const designs = new MemoryDesignRepository((id) => auth.usernameOf(id));
   // A real allow-list, which is what made the case-collision reachable.
   const app = await buildApp(designs, auth, templates, { staticDir: process.cwd(), adminUsernames: ['admin', 'chief_r'], aiAdminPassword: 'case admin password' });
-  const signUp = (username: string, unlock?: string) => app.inject({
+  const signUp = (username: string, adminPassword?: string, unlock?: string) => app.inject({
     method: 'POST', url: '/api/auth/register',
     ...(unlock ? { headers: { 'x-ai-unlock': unlock } } : {}),
-    payload: { username, password: 'quartz-lantern-echo7', email: `${username.toLowerCase()}-${Math.random().toString(36).slice(2, 8)}@example.test`, acceptedVersion: 'test' },
+    payload: { username, password: 'quartz-lantern-echo7', email: `${username.toLowerCase()}-${Math.random().toString(36).slice(2, 8)}@example.test`, acceptedVersion: 'test', ...(adminPassword !== undefined ? { adminPassword } : {}) },
   });
 
   // 0. HIGH was (October 2026, live): ADMIN_USERNAMES named an account nobody
   //    had registered, and admin rights follow the name, so whoever signed up
   //    with it first was a moderator. An allow-listed name is now reserved:
-  //    sign-up refuses it like a taken name unless the request carries a valid
-  //    admin-password session.
+  //    sign-up refuses it like a taken name unless the request carries the
+  //    admin password (round five: the admin-password SESSION is not enough).
   assert.equal((await signUp('admin')).statusCode, 409, 'an unclaimed admin name cannot be signed up for');
-  assert.equal((await signUp('admin', 'v2.9999999999999.0123456789abcdef01.deadbeef')).statusCode, 409, 'nor with a forged session');
-  assert.equal((await signUp('admin', mintUnlock('some other password'))).statusCode, 409, 'nor with a session for another password');
+  assert.equal((await signUp('admin', 'some other password')).statusCode, 409, 'nor with another password');
+  assert.equal((await signUp('admin', undefined, mintUnlock('case admin password'))).statusCode, 409, 'nor with a valid admin-password session alone');
   assert.equal(await auth.getUserByName('admin'), null, 'and nothing was created');
-  const claimed = await signUp('admin', mintUnlock('case admin password'));
-  assert.equal(claimed.statusCode, 201, `the admin-password session claims it (${claimed.body})`);
+  const claimed = await signUp('admin', 'case admin password');
+  assert.equal(claimed.statusCode, 201, `the admin password claims it (${claimed.body})`);
   const adminTok = (claimed.json() as { token: string }).token;
   assert.equal(((await app.inject({ method: 'GET', url: '/api/me', headers: bearer(adminTok) })).json() as { isAdmin: boolean }).isAdmin, true, 'and it is the admin');
   // Renaming onto it is claiming it too, and takes the same proof. In practice
   // it is the operator's way in: sign-up derives the name from the email.
   const renamer = await reg(app, 'renamer');
-  const rename = (unlock?: string) => app.inject({ method: 'POST', url: '/api/account/username', headers: { ...bearer(renamer.token), ...(unlock ? { 'x-ai-unlock': unlock } : {}) }, payload: { username: 'chief_r' } });
+  const rename = (adminPassword?: string, unlock?: string) => app.inject({ method: 'POST', url: '/api/account/username', headers: { ...bearer(renamer.token), ...(unlock ? { 'x-ai-unlock': unlock } : {}) }, payload: { username: 'chief_r', ...(adminPassword !== undefined ? { adminPassword } : {}) } });
   assert.equal((await rename()).statusCode, 409, 'an account cannot rename onto an unclaimed admin name');
-  assert.equal((await rename(mintUnlock('some other password'))).statusCode, 409, 'nor with a session for another password');
-  assert.equal((await app.inject({ method: 'POST', url: '/api/account/username', headers: { ...bearer(renamer.token), 'x-ai-unlock': mintUnlock('case admin password') }, payload: { username: 'Chief_R' } })).statusCode, 409, 'nor onto a lookalike with one');
-  assert.equal((await rename(mintUnlock('case admin password'))).statusCode, 200, 'the admin-password session can');
+  assert.equal((await rename('some other password')).statusCode, 409, 'nor with another password');
+  assert.equal((await rename(undefined, mintUnlock('case admin password'))).statusCode, 409, 'nor with a valid admin-password session alone');
+  assert.equal((await app.inject({ method: 'POST', url: '/api/account/username', headers: bearer(renamer.token), payload: { username: 'Chief_R', adminPassword: 'case admin password' } })).statusCode, 409, 'nor onto a lookalike with the password');
+  assert.equal((await rename('case admin password')).statusCode, 200, 'the admin password can');
   assert.equal(((await app.inject({ method: 'GET', url: '/api/me', headers: bearer(renamer.token) })).json() as { isAdmin: boolean }).isAdmin, true, 'and the renamed account is the admin');
   const noPwApp = await buildApp(new MemoryDesignRepository((id) => auth.usernameOf(id)), new MemoryAuthRepository(), templates, { staticDir: process.cwd(), adminUsernames: ['admin'], aiAdminPassword: '' });
-  const noPw = await noPwApp.inject({ method: 'POST', url: '/api/auth/register', headers: { 'x-ai-unlock': mintUnlock('') }, payload: { username: 'admin', password: 'quartz-lantern-echo7', email: 'x@example.test', acceptedVersion: 'test' } });
+  const noPw = await noPwApp.inject({ method: 'POST', url: '/api/auth/register', payload: { username: 'admin', password: 'quartz-lantern-echo7', email: 'x@example.test', acceptedVersion: 'test', adminPassword: '' } });
   assert.equal(noPw.statusCode, 409, 'with no admin password configured, the name stays reserved outright');
   await noPwApp.close();
 
@@ -207,6 +208,7 @@ async function makeDesign(app: FastifyInstance, token: string, isPublic = false)
     Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]), Buffer.from('JFIF\0', 'latin1'), Buffer.from([1, 1, 0, 0, 1, 0, 1, 0, 0]),
     Buffer.from([0xff, 0xda, 0x00, 0x08, 1, 1, 0, 0, 0x3f, 0]), Buffer.alloc(1024, 3), Buffer.from([0xff, 0xd9]),
   ]).toString('base64');
+  await auth.markEmailVerified(owner.id); // photos need a verified email (round five)
   const up = await app.inject({ method: 'POST', url: `/api/designs/${secret}/photos`, headers: bearer(owner.token), payload: { imageB64: jpeg, caption: 'venue, date, opponent' } });
   assert.equal(up.statusCode, 200, 'the owner can still attach a photo');
   assert.equal((await app.inject({ method: 'GET', url: `/api/designs/${secret}` })).statusCode, 404, 'the design is hidden');
@@ -670,6 +672,7 @@ async function makeDesign(app: FastifyInstance, token: string, isPublic = false)
 
     // Through the real route: what anyone can download is the clean copy.
     const owner = await reg(app, 'photo_owner');
+    await auth.markEmailVerified(owner.id); // photos need a verified email (round five)
     const designId = await makeDesign(app, owner.token, true);
     const html = await app.inject({ method: 'POST', url: `/api/designs/${designId}/photos`, headers: bearer(owner.token), payload: { imageB64: Buffer.from('<html><script>x</script></html>').toString('base64') } });
     assert.equal(html.statusCode, 400, 'a file that is not an image is refused');
@@ -1599,7 +1602,7 @@ async function makeDesign(app: FastifyInstance, token: string, isPublic = false)
       ...(existsSync('dist/index.html') ? { staticDir: (await import('node:path')).resolve('dist') } : {}),
     } as Parameters<typeof buildApp>[3]);
     const r4 = async (u: string, email = `${u}@example.test`): Promise<{ token: string; id: string }> => {
-      const r = await app.inject({ method: 'POST', url: '/api/auth/register', headers: { 'x-ai-unlock': mintUnlock('r4 admin password') }, payload: { username: u, password: PW, email, acceptedVersion: 'test' } });
+      const r = await app.inject({ method: 'POST', url: '/api/auth/register', payload: { username: u, password: PW, email, acceptedVersion: 'test', adminPassword: 'r4 admin password' } });
       assert.equal(r.statusCode, 201, r.body);
       const token = (r.json() as { token: string }).token;
       return { token, id: (await app.inject({ method: 'GET', url: '/api/me', headers: bearer(token) })).json().id as string };
@@ -2135,4 +2138,427 @@ async function makeDesign(app: FastifyInstance, token: string, isPublic = false)
     }
   }
   console.log('ai failures queue (October): all assertions passed (model output repaired, broken layers left out or restored, a timed-out call retried once, polish survives the critic\'s faults, loose regions read)');
+}
+
+// ---------- 2026-10: audit round five ----------
+// Every exploit below worked against the code before it (commit 9084903 plus
+// the ultras grounds): run this block there and its checks fail. See
+// claude/security-audit-2026-10-round5.md in the project notes.
+{
+  const { clientKey } = await import('../src/proxyTrust');
+  const { SocMonitor } = await import('../src/soc');
+  const { MemorySocRepository } = await import('../src/socRepo');
+  const { MemoryAiUsageRepository, MemoryAiEventsRepository, MemoryEventsRepository } = await import('../src/memoryRepo');
+  const { premiumCallsToday } = await import('../src/aiRoutes');
+  const { printAssetPanels } = await import('../../src/render/simulator/printPanels');
+  const { AssetStore } = await import('../../src/core/sceneAssets');
+  const { readFileSync } = await import('node:fs');
+  const R5PW = 'quartz-lantern-echo7';
+  const fresh = () => {
+    const auth = new MemoryAuthRepository();
+    const designs = new MemoryDesignRepository((id) => auth.usernameOf(id));
+    const social = new MemorySocialRepository(designs, auth);
+    return { auth, designs, social };
+  };
+  const JPEG = Buffer.concat([
+    Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]), Buffer.from('JFIF\0', 'latin1'), Buffer.from([1, 1, 0, 0, 1, 0, 1, 0, 0]),
+    Buffer.from([0xff, 0xda, 0x00, 0x08, 1, 1, 0, 0, 0x3f, 0]), Buffer.alloc(256, 3), Buffer.from([0xff, 0xd9]),
+  ]).toString('base64');
+
+  // ---- HIGH: every per-address limit was unlimited over IPv6 ----
+  // @fastify/rate-limit before 11.2.0 (CVE-2026-15144) counted the raw address
+  // string: 199 of 200 sign-in attempts from one /64 got past a limit of 10 a
+  // minute, and one address written five ways was five clients.
+  {
+    const { auth, designs } = fresh();
+    const app = await buildApp(designs, auth, templates, { rateLimit: true });
+    // /api/report: 10 a minute, and a bad body answers at once.
+    const probe = (ip: string) => app.inject({ method: 'POST', url: '/api/report', remoteAddress: ip, payload: {} });
+    let through = 0;
+    for (let i = 1; i <= 40; i++) if ((await probe(`2001:db8:abcd:1234::${i.toString(16)}`)).statusCode !== 429) through++;
+    assert.equal(through, 10, `one /64 is one client (${through} of 40 got through)`);
+    through = 0;
+    const spellings = ['2001:db8:0:99::1', '2001:0db8:0000:0099:0000:0000:0000:0001', '2001:DB8:0:99::1', '2001:db8:0:99:0:0:0:1', '2001:db8::99:0:0:0:1'];
+    for (let i = 0; i < 20; i++) if ((await probe(spellings[i % 5])).statusCode !== 429) through++;
+    assert.equal(through, 10, `one address written five ways is one client (${through} of 20 got through)`);
+    assert.notEqual((await probe('2001:db8:abcd:9999::1')).statusCode, 429, 'another /64 is someone else');
+    assert.notEqual((await probe('198.51.100.7')).statusCode, 429, 'and IPv4 is counted as before');
+    await app.close();
+    assert.equal(clientKey('::ffff:198.51.100.7'), '198.51.100.7', 'an IPv4-mapped address is the IPv4 address');
+    assert.equal(clientKey('2001:db8:abcd:1234::1'), clientKey('2001:DB8:ABCD:1234:ffff::9'));
+    assert.notEqual(clientKey('198.51.100.7'), clientKey('198.51.100.8'));
+    // The security log and the view counters count the same way, or one
+    // machine walking its /64 never sets off a per-address alert.
+    const soc = new SocMonitor({ repo: new MemorySocRepository(), flushMs: 0 });
+    assert.equal(soc.tag('2001:db8:abcd:1234::1'), soc.tag('2001:db8:abcd:1234:9::2'), 'the security log counts a /64 as one source');
+    assert.notEqual(soc.tag('2001:db8:abcd:1234::1'), soc.tag('2001:db8:abcd:1235::1'));
+    // The lockfile carries the fixed plugin.
+    const lock = JSON.parse(readFileSync(new URL('../../package-lock.json', import.meta.url), 'utf8')) as { packages: Record<string, { version: string }> };
+    const [maj, min] = lock.packages['node_modules/@fastify/rate-limit'].version.split('.').map(Number);
+    assert.ok(maj > 11 || (maj === 11 && min >= 2), `@fastify/rate-limit is 11.2.0 or later (${lock.packages['node_modules/@fastify/rate-limit'].version})`);
+  }
+
+  // ---- MEDIUM: a copied admin session became a lasting moderator account ----
+  {
+    const { auth, designs, social } = fresh();
+    const app = await buildApp(designs, auth, templates, { social, adminUsernames: ['chief_r5'], aiAdminPassword: 'r5 admin password' });
+    const body = (username: string, extra: Record<string, unknown> = {}) => ({ username, password: R5PW, email: `${username}-${Math.random().toString(36).slice(2, 7)}@example.test`, acceptedVersion: 'test', ...extra });
+    const viaSession = await app.inject({ method: 'POST', url: '/api/auth/register', headers: { 'x-ai-unlock': mintUnlock('r5 admin password') }, payload: body('chief_r5') });
+    assert.equal(viaSession.statusCode, 409, 'a valid admin-password session alone no longer claims an admin name');
+    // A claim survives changing AI_ADMIN_PASSWORD, so it must take the password.
+    assert.equal((await app.inject({ method: 'POST', url: '/api/auth/register', payload: body('chief_r5', { adminPassword: 'r5 admin password' }) })).statusCode, 201, 'the admin password does');
+    // And sign-up no longer lists the admin names: a bare probe gets the same
+    // answer for one as for any other name.
+    const { auth: a2, designs: d2 } = fresh();
+    const app2 = await buildApp(d2, a2, templates, { adminUsernames: ['boss_r5'], aiAdminPassword: 'x admin password' });
+    const bare = async (username: string) => (await app2.inject({ method: 'POST', url: '/api/auth/register', payload: { username } })).statusCode;
+    assert.equal(await bare('boss_r5'), await bare('nobody_r5'), 'an admin name and an ordinary one answer a bare probe alike');
+    assert.equal(await bare('BOSS_R5'), 400);
+    await app2.close();
+    await app.close();
+  }
+
+  // ---- MEDIUM: guesses sent together got past the 5-try limit on the code ----
+  {
+    class SlowAuth extends MemoryAuthRepository {
+      override async consumeEmailToken(tokenHash: string, purpose: string): Promise<string | null> {
+        await new Promise((r) => setTimeout(r, 15)); // a database round trip
+        return super.consumeEmailToken(tokenHash, purpose);
+      }
+    }
+    const auth = new SlowAuth();
+    const designs = new MemoryDesignRepository((id) => auth.usernameOf(id));
+    const sent: { text?: string; html: string }[] = [];
+    const app = await buildApp(designs, auth, templates, { emailSender: { send: async (m: { text?: string; html: string }) => { sent.push(m); } } as never });
+    const r = await app.inject({ method: 'POST', url: '/api/auth/register', payload: { username: 'racer_r5', password: R5PW, email: 'not-mine@example.test', acceptedVersion: 'test' } });
+    const tok = (r.json() as { token: string }).token;
+    const code = /Your TifoMaker code: (\d{6})/.exec(sent.at(-1)?.text ?? '')?.[1];
+    assert.ok(code, 'the code was mailed');
+    const wrong = [...Array(12).keys()].map((i) => String((Number(code) + 1 + i) % 1_000_000).padStart(6, '0'));
+    const all = await Promise.all([...wrong, code!].map((c) => app.inject({ method: 'POST', url: '/api/auth/verify/code', headers: bearer(tok), payload: { code: c } })));
+    const checked = all.filter((x) => x.statusCode === 400).length;
+    assert.equal(checked, 5, `at most five guesses are checked, however they are sent (${checked} were)`);
+    assert.equal(all.at(-1)!.statusCode, 429, 'the right code after them does not get in');
+    const me = (await app.inject({ method: 'GET', url: '/api/me', headers: bearer(tok) })).json() as { id: string };
+    assert.equal((await auth.getUserById(me.id))!.emailVerifiedAt, null, 'and the address is not verified');
+    await app.close();
+  }
+
+  // ---- MEDIUM: Super AI pictures had no per-account or per-design limit ----
+  {
+    const realFetch = globalThis.fetch;
+    const saved = { key: process.env.GEMINI_API_KEY, prov: process.env.AI_PROVIDER, poll: process.env.AI_POLLINATIONS_KEY, fb: process.env.AI_IMAGE_FALLBACK, cw: process.env.AI_COPYWRITER, t: process.env.AI_TIMEOUT_MS, tp: process.env.AI_TIMEOUT_PREMIUM_MS };
+    process.env.GEMINI_API_KEY = 'AIzaSyTESTKEY0000000000';
+    process.env.AI_PROVIDER = 'gemini';
+    process.env.AI_POLLINATIONS_KEY = 'poll-test-key';
+    process.env.AI_IMAGE_FALLBACK = 'none';
+    process.env.AI_COPYWRITER = '0';
+    process.env.AI_TIMEOUT_MS = '1200';
+    process.env.AI_TIMEOUT_PREMIUM_MS = '1200';
+    const PAL = ['#000000', '#1c5fd9', '#f2f1ec', '#e8b73a'];
+    let images = 0;
+    let n = 0;
+    let pictureLayers = 2;
+    let pictureFails = false;
+    let hangNext = false;
+    const regions = ['north', 'south', 'east', 'west', 'north', 'south'];
+    const spec = () => ({ title: 'T', palette: PAL, layers: [
+      { kind: 'fill', id: 'bg', region: 'all', colorIndex: 1 },
+      ...regions.slice(0, pictureLayers).map((region, i) => ({ kind: 'image', id: `img${i}`, region, prompt: `eagle ${n} ${i}`, scaleFrac: 0.9 })),
+    ] });
+    const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(200, 1)]);
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input instanceof Request ? input.url : input);
+      if (url.includes('generativelanguage.googleapis.com')) {
+        if (hangNext) {
+          hangNext = false;
+          return new Promise<Response>((_, reject) => init?.signal?.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' }))));
+        }
+        n++;
+        return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: JSON.stringify(spec()) }] }, finishReason: 'STOP' }] }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      if (url.includes('pollinations')) {
+        images++;
+        return pictureFails ? new Response('down', { status: 500 }) : new Response(png, { status: 200, headers: { 'content-type': 'image/png' } });
+      }
+      return realFetch(input as RequestInfo, init);
+    }) as typeof fetch;
+    try {
+      const { auth, designs, social } = fresh();
+      const app = await buildApp(designs, auth, templates, { social, aiUsage: new MemoryAiUsageRepository(), aiEvents: new MemoryAiEventsRepository((id) => auth.usernameOf(id)), aiFreeLimit: 1000 });
+      const fan = await reg(app, 'picture_fan_r5');
+      await auth.markEmailVerified(fan.id);
+      let brief = 0;
+      const superRun = async () => (await app.inject({ method: 'POST', url: '/api/ai/generate', headers: bearer(fan.token), payload: { prompt: `club brief ${brief++}`, mode: 'super' } })).json() as { spec?: { layers: { kind: string }[] }; outcome?: { kind: string; charged: boolean } };
+
+      // One run asked for six pictures and got six (and up to twelve requests).
+      pictureLayers = 6;
+      let before = images;
+      const six = await superRun();
+      assert.equal(images - before, 4, `one design asks for at most four pictures (${images - before})`);
+      assert.equal(six.spec!.layers.filter((l) => l.kind === 'image').length, 4, 'the extra picture layers are left out');
+
+      // Each account has a daily share of picture requests (60): 4 used above.
+      pictureLayers = 2;
+      for (let i = 0; i < 28; i++) await superRun();
+      assert.equal(images, 60, `the share is spent (${images} picture requests)`);
+      before = images;
+      const over = await superRun();
+      assert.equal(images - before, 0, 'past the share no picture is requested');
+      assert.equal(over.outcome?.kind, 'degraded');
+
+      // And a run without its picture is free only so often. Before, 50 of
+      // them from one account cost 50 model calls and none of its quota.
+      const chargedRuns: boolean[] = [over.outcome!.charged];
+      for (let i = 0; i < 20; i++) chargedRuns.push(!!(await superRun()).outcome?.charged);
+      assert.deepEqual(chargedRuns.slice(0, 20), Array(20).fill(false), 'the first twenty incomplete runs of the day are not charged');
+      assert.equal(chargedRuns[20], true, 'the twenty-first is');
+
+      // A retried call is two calls to the provider, and two of the budget.
+      const fan2 = await reg(app, 'retry_fan_r5');
+      await auth.markEmailVerified(fan2.id);
+      pictureLayers = 0;
+      hangNext = true;
+      const b0 = premiumCallsToday();
+      const timed = (await app.inject({ method: 'POST', url: '/api/ai/generate', headers: bearer(fan2.token), payload: { prompt: 'a brief that times out once' } })).json() as { source?: string };
+      assert.equal(timed.source, 'model', 'the retry delivered the design');
+      assert.equal(premiumCallsToday() - b0, 2, `a retried call counts twice against AI_DAILY_BUDGET (${premiumCallsToday() - b0})`);
+      void pictureFails;
+      await app.close();
+    } finally {
+      globalThis.fetch = realFetch;
+      for (const [k, v] of [['GEMINI_API_KEY', saved.key], ['AI_PROVIDER', saved.prov], ['AI_POLLINATIONS_KEY', saved.poll], ['AI_IMAGE_FALLBACK', saved.fb], ['AI_COPYWRITER', saved.cw], ['AI_TIMEOUT_MS', saved.t], ['AI_TIMEOUT_PREMIUM_MS', saved.tp]] as const) {
+        if (v === undefined) delete process.env[k]; else process.env[k] = v;
+      }
+    }
+  }
+
+  // ---- MEDIUM: one account could fill the database ----
+  {
+    const { auth, designs, social } = fresh();
+    const app = await buildApp(designs, auth, templates, { social });
+    const owner = await reg(app, 'hoarder_r5');
+    const pub = await makeDesign(app, owner.token, true);
+    const photo = (id: string) => app.inject({ method: 'POST', url: `/api/designs/${id}/photos`, headers: bearer(owner.token), payload: { imageB64: JPEG } });
+    assert.equal((await photo(pub)).statusCode, 403, 'a photo needs a verified email, like a vote');
+    await auth.markEmailVerified(owner.id);
+    for (let i = 0; i < 20; i++) assert.equal((await photo(pub)).statusCode, 200);
+    assert.equal((await photo(pub)).statusCode, 403, 'twenty photos to a design');
+    const second = await makeDesign(app, owner.token, true);
+    for (let i = 0; i < 10; i++) assert.equal((await photo(second)).statusCode, 200);
+    assert.equal((await photo(second)).statusCode, 429, 'thirty photos a day');
+    // New designs: 100 a day (two made above).
+    let made = 2;
+    while (made < 100) { await makeDesign(app, owner.token); made++; }
+    const extra = await app.inject({ method: 'POST', url: '/api/designs', headers: bearer(owner.token), payload: { title: 'D', templateId: DEFAULT_TEMPLATE.id, templateVersion: 1, palette: PALETTE, cellsGzB64 } });
+    assert.equal(extra.statusCode, 429, 'a hundred new designs a day');
+    // And a thousand in all, whichever way they are made.
+    const full = await reg(app, 'full_r5');
+    for (let i = 0; i < 1000; i++) await designs.create({ title: `old ${i}`, templateId: DEFAULT_TEMPLATE.id, templateVersion: 1, palette: PALETTE, cellsGz: gzipSync(new Uint8Array(map.count)), ownerId: full.id, thumbnailPng: null });
+    assert.equal((await app.inject({ method: 'POST', url: '/api/designs', headers: bearer(full.token), payload: { title: 'D', templateId: DEFAULT_TEMPLATE.id, templateVersion: 1, palette: PALETTE, cellsGzB64 } })).statusCode, 403, 'a thousand designs to an account');
+    assert.equal((await app.inject({ method: 'POST', url: `/api/designs/${pub}/fork`, headers: bearer(full.token), payload: {} })).statusCode, 403, 'a copy counts too');
+    await app.close();
+  }
+
+  // ---- LOW: comment reports flooded the moderators' queue ----
+  // ---- LOW: an ownerless private design was readable by anonymous visitors ----
+  // ---- LOW: owner-only fields in public JSON ----
+  {
+    const { auth, designs, social } = fresh();
+    const app = await buildApp(designs, auth, templates, { social });
+    const owner = await reg(app, 'owner_r5');
+    const pub = await makeDesign(app, owner.token, true);
+    const c = (await app.inject({ method: 'POST', url: `/api/designs/${pub}/comments`, headers: bearer(owner.token), payload: { body: 'hello' } })).json() as { id: string };
+    const report = (targetId: string) => app.inject({ method: 'POST', url: '/api/report', payload: { targetType: 'comment', targetId, reason: 'spam' } });
+    assert.equal((await report('7f000000-0000-4000-8000-000000000001')).statusCode, 404, 'a report on a comment that does not exist is refused');
+    assert.ok(((await report(c.id)).json() as { reportId: string | null }).reportId, 'a real one is filed');
+
+    const orphan = await designs.create({ title: 'before accounts', templateId: DEFAULT_TEMPLATE.id, templateVersion: 1, palette: PALETTE, cellsGz: gzipSync(new Uint8Array(map.count)), ownerId: null as unknown as string, thumbnailPng: null });
+    for (const url of [`/api/designs/${orphan.id}`, `/api/designs/${orphan.id}/scene`, `/api/designs/${orphan.id}/photos`, `/og/t/${orphan.id}.png`]) {
+      assert.equal((await app.inject({ method: 'GET', url })).statusCode, 404, `a private design with no owner is private to anonymous visitors too: ${url}`);
+    }
+
+    await designs.setPinned(pub, true);
+    const anon = (await app.inject({ method: 'GET', url: `/api/designs/${pub}` })).json() as Record<string, unknown>;
+    for (const k of ['pinned', 'deletedAt', 'takenDown', 'origin']) assert.ok(!(k in anon), `anonymous visitors do not get "${k}"`);
+    assert.equal(((await app.inject({ method: 'GET', url: `/api/designs/${pub}`, headers: bearer(owner.token) })).json() as { pinned: boolean }).pinned, true, 'the owner still does');
+    const card = ((await app.inject({ method: 'GET', url: '/api/gallery' })).json() as Record<string, unknown>[]).find((g) => g.id === pub)!;
+    assert.ok(card && !('pinned' in card), 'nor does a gallery card');
+    await app.close();
+  }
+
+  // ---- LOW: funnel events: no route limit, kept forever ----
+  {
+    const { auth, designs } = fresh();
+    const events = new MemoryEventsRepository();
+    const app = await buildApp(designs, auth, templates, { rateLimit: true, events });
+    let ok = 0;
+    for (let i = 0; i < 70; i++) if ((await app.inject({ method: 'POST', url: '/api/events', remoteAddress: '198.51.100.40', payload: { session: `s${i}`, name: 'landed' } })).statusCode === 204) ok++;
+    assert.equal(ok, 60, `sixty events a minute from one address (${ok})`);
+    assert.equal(await events.purge(new Date(Date.now() + 1000)), 60, 'and they can be purged');
+    assert.equal((await events.funnel(['landed'], 30))[0].sessions, 0);
+    await app.close();
+  }
+
+  // ---- LOW: markup in a print-panels popup, from someone else's scene ----
+  {
+    const hostile = '"></div><b id=PWN>x</b><img src=x onerror=alert(1)>';
+    assert.equal(printAssetPanels(hostile, 2, 2), false, 'print panels refuse anything but an image data URL');
+    const store = new AssetStore();
+    store.loadJSON({ version: 1, assets: [
+      { id: 'a', type: 'banner', imageRef: hostile },
+      { id: 'b', type: 'banner', imageRef: 'data:image/png;base64,iVBORw0KGgo=' },
+    ] } as never);
+    const refs = (store.toJSON() as { assets: { imageRef: string | null }[] }).assets.map((a) => a.imageRef);
+    assert.deepEqual(refs, [null, 'data:image/png;base64,iVBORw0KGgo='], 'a loaded scene keeps only image data URLs');
+  }
+
+  // ---- parity: the memory store let "Alice" in next to "alice" ----
+  {
+    const { auth, designs } = fresh();
+    const app = await buildApp(designs, auth, templates, {});
+    const r = (u: string) => app.inject({ method: 'POST', url: '/api/auth/register', payload: { username: u, password: R5PW, email: `${u.toLowerCase()}${Math.random().toString(36).slice(2, 6)}@example.test`, acceptedVersion: 'test' } });
+    assert.equal((await r('CaseR5')).statusCode, 201);
+    assert.equal((await r('caser5')).statusCode, 409, 'memory: a case variant of a name cannot be registered');
+    await app.close();
+  }
+
+  // ---- found by the independent check of these fixes ----
+  {
+    // Sign-up refused an admin name before hashing the password, so it
+    // answered in 1 ms where any other taken name took ~390: a moderator test.
+    const socRepo = new MemorySocRepository();
+    const soc = new SocMonitor({ repo: socRepo, flushMs: 0 });
+    const { auth, designs } = fresh();
+    class RacySocial extends MemorySocialRepository {
+      override async addComment(): Promise<never> { throw Object.assign(new Error('insert or update on table "comments" violates foreign key constraint'), { code: '23503' }); }
+    }
+    const social = new RacySocial(designs, auth);
+    const app = await buildApp(designs, auth, templates, { social, soc, adminUsernames: ['mod_t5'], aiAdminPassword: 't5 admin password' });
+    await reg(app, 'taken_t5');
+    const timed = async (username: string) => {
+      const t0 = performance.now();
+      const r = await app.inject({ method: 'POST', url: '/api/auth/register', payload: { username, password: R5PW, email: `${username}-${Math.random().toString(36).slice(2, 7)}@example.test`, acceptedVersion: 'test' } });
+      return { status: r.statusCode, ms: performance.now() - t0 };
+    };
+    const admin = await timed('mod_t5');
+    const taken = await timed('taken_t5');
+    assert.equal(admin.status, 409);
+    assert.equal(taken.status, 409);
+    assert.ok(admin.ms > taken.ms / 3, `an admin name is refused as slowly as a taken one (${admin.ms.toFixed(0)} ms vs ${taken.ms.toFixed(0)} ms)`);
+    // A claim is in the audit trail.
+    const claimer = await reg(app, 'claimer_t5');
+    assert.equal((await app.inject({ method: 'POST', url: '/api/account/username', headers: bearer(claimer.token), payload: { username: 'mod_t5', adminPassword: 't5 admin password' } })).statusCode, 200);
+    await soc.flush();
+    const trail = await socRepo.listAudit(20);
+    assert.ok(trail.some((a) => a.action === 'claimed an admin name' && a.target === '@mod_t5'), `the claim is in the audit trail: ${JSON.stringify(trail.map((a) => a.action))}`);
+    // A row that changed under the request is a 409, not a 500 for the alert.
+    const pub = await makeDesign(app, claimer.token, true);
+    const raced = await app.inject({ method: 'POST', url: `/api/designs/${pub}/comments`, headers: bearer(claimer.token), payload: { body: 'reply', parentId: '7f000000-0000-4000-8000-000000000002' } });
+    assert.equal(raced.statusCode, 409, `a foreign-key race answers 409 (${raced.statusCode})`);
+    await app.close();
+    await soc.close();
+  }
+  {
+    // A refused copy does not use up the day's designs.
+    const { auth, designs, social } = fresh();
+    const app = await buildApp(designs, auth, templates, { social });
+    const owner = await reg(app, 'noremix_t5');
+    const closed = await makeDesign(app, owner.token, true);
+    await app.inject({ method: 'PUT', url: `/api/designs/${closed}/publish-meta`, headers: bearer(owner.token), payload: { description: 'mine', allowRemix: false } });
+    const fan = await reg(app, 'remixer_t5');
+    for (let i = 0; i < 101; i++) await app.inject({ method: 'POST', url: `/api/designs/${closed}/remix`, headers: bearer(fan.token), payload: {} });
+    assert.equal((await app.inject({ method: 'POST', url: '/api/designs', headers: bearer(fan.token), payload: { title: 'D', templateId: DEFAULT_TEMPLATE.id, templateVersion: 1, palette: PALETTE, cellsGzB64 } })).statusCode, 201, 'refused remixes do not count against the day');
+    // And many accounts from one client share one daily allowance (300).
+    let made = 2; // the closed design and the one just above, from the same client
+    let refused = 0;
+    for (let a = 0; a < 4 && !refused; a++) {
+      const acc = await reg(app, `rot${a}_t5`);
+      for (let i = 0; i < 100; i++) {
+        const r = await app.inject({ method: 'POST', url: '/api/designs', headers: bearer(acc.token), payload: { title: 'D', templateId: DEFAULT_TEMPLATE.id, templateVersion: 1, palette: PALETTE, cellsGzB64 } });
+        if (r.statusCode === 201) made++; else { refused = r.statusCode; break; }
+      }
+    }
+    assert.equal(made, 300, `one client makes at most 300 designs a day across accounts (${made})`);
+    assert.equal(refused, 429);
+    await app.close();
+  }
+
+  // ---- hardening: no local escaper left in the server ----
+  {
+    const src = readFileSync(new URL('../src/routes.ts', import.meta.url), 'utf8');
+    assert.ok(!/\.replace\(\/<\/g, '&lt;'\)/.test(src), 'routes.ts uses the shared escaper, not a local one');
+  }
+
+  // ---- Postgres only ----
+  if (process.env.DATABASE_URL) {
+    const pg = (await import('pg')).default;
+    const { PgAuthRepository, PgDesignRepository } = await import('../src/pgRepo');
+    const { PgSocialRepository } = await import('../src/pgSocial');
+    const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
+    try {
+      await pool.query(readFileSync(new URL('../schema.sql', import.meta.url), 'utf8'));
+      const pAuth = new PgAuthRepository(pool);
+      const pDesigns = new PgDesignRepository(pool);
+      const sent: { text?: string; html: string }[] = [];
+      const papp = await buildApp(pDesigns, pAuth, templates, { social: new PgSocialRepository(pool), emailSender: { send: async (m: { text?: string; html: string }) => { sent.push(m); } } as never });
+      const s = Math.random().toString(36).slice(2, 7);
+      const preg = async (u: string): Promise<{ token: string; id: string }> => {
+        const r = await papp.inject({ method: 'POST', url: '/api/auth/register', payload: { username: `${u}${s}`, password: R5PW, email: `${u}${s}@example.test`, acceptedVersion: 'test' } });
+        assert.equal(r.statusCode, 201, r.body);
+        const token = (r.json() as { token: string }).token;
+        return { token, id: ((await papp.inject({ method: 'GET', url: '/api/me', headers: bearer(token) })).json() as { id: string }).id };
+      };
+
+      // The verification race, on a real database.
+      const racer = await preg('racer');
+      const code = /Your TifoMaker code: (\d{6})/.exec(sent.at(-1)?.text ?? '')?.[1]!;
+      const wrong = [...Array(30).keys()].map((i) => String((Number(code) + 1 + i) % 1_000_000).padStart(6, '0'));
+      const all = await Promise.all([...wrong, code].map((c) => papp.inject({ method: 'POST', url: '/api/auth/verify/code', headers: bearer(racer.token), payload: { code: c } })));
+      assert.equal(all.filter((x) => x.statusCode === 400).length, 5, 'Postgres: at most five guesses are checked');
+      assert.equal((await pAuth.getUserById(racer.id))!.emailVerifiedAt, null, 'Postgres: and the address is not verified');
+
+      // Replies survive their parent: deleting a comment, or the account.
+      const x = await preg('xr');
+      const y = await preg('yr');
+      const d = (await papp.inject({ method: 'POST', url: '/api/designs', headers: bearer(x.token), payload: { title: 'pg', templateId: DEFAULT_TEMPLATE.id, templateVersion: 1, palette: PALETTE, cellsGzB64 } })).json() as { id: string };
+      await papp.inject({ method: 'PATCH', url: `/api/designs/${d.id}`, headers: bearer(x.token), payload: { isPublic: true } });
+      const say = async (who: { token: string }, body: string, parentId?: string) => ((await papp.inject({ method: 'POST', url: `/api/designs/${d.id}/comments`, headers: bearer(who.token), payload: { body, ...(parentId ? { parentId } : {}) } })).json() as { id: string }).id;
+      const c1 = await say(x, 'X says something wrong');
+      await say(y, 'Y: here is the proof', c1);
+      assert.equal((await papp.inject({ method: 'DELETE', url: `/api/comments/${c1}`, headers: bearer(x.token) })).statusCode, 200);
+      const left = (await papp.inject({ method: 'GET', url: `/api/designs/${d.id}/comments` })).json() as { body: string; parentId: string | null }[];
+      assert.deepEqual(left.map((c) => [c.body, c.parentId]), [['Y: here is the proof', null]], 'Postgres: deleting your comment leaves the replies to it');
+      // Another design of Y's, where X comments and Y answers; then X goes.
+      const dy = (await papp.inject({ method: 'POST', url: '/api/designs', headers: bearer(y.token), payload: { title: 'pg2', templateId: DEFAULT_TEMPLATE.id, templateVersion: 1, palette: PALETTE, cellsGzB64 } })).json() as { id: string };
+      await papp.inject({ method: 'PATCH', url: `/api/designs/${dy.id}`, headers: bearer(y.token), payload: { isPublic: true } });
+      const cx = ((await papp.inject({ method: 'POST', url: `/api/designs/${dy.id}/comments`, headers: bearer(x.token), payload: { body: 'X again' } })).json() as { id: string }).id;
+      await papp.inject({ method: 'POST', url: `/api/designs/${dy.id}/comments`, headers: bearer(y.token), payload: { body: 'Y answers', parentId: cx } });
+      assert.equal((await papp.inject({ method: 'DELETE', url: '/api/account', headers: bearer(x.token) })).statusCode, 204);
+      const after = (await papp.inject({ method: 'GET', url: `/api/designs/${dy.id}/comments` })).json() as { body: string }[];
+      assert.deepEqual(after.map((c) => c.body), ['Y answers'], 'Postgres: deleting an account leaves the replies to its comments');
+
+      // A bad id is a 400 on every route, not a 500.
+      const anyone = await preg('anyone');
+      for (const [method, url, payload] of [
+        ['GET', '/api/gallery/not-a-uuid', undefined],
+        ['POST', '/api/users/not-a-uuid/follow', {}],
+        ['DELETE', '/api/comments/not-a-uuid', undefined],
+        ['POST', `/api/designs/${dy.id}/comments`, { body: 'hi', parentId: 'not-a-uuid' }],
+        ['POST', '/api/notifications/read', { ids: ['not-a-uuid'] }],
+      ] as const) {
+        const r = await papp.inject({ method, url, headers: bearer(anyone.token), ...(payload ? { payload } : {}) });
+        assert.ok(r.statusCode < 500, `Postgres: ${method} ${url} with a bad id is not a server error (${r.statusCode})`);
+      }
+
+      // Pro reaches the account on Postgres (functional; it failed closed).
+      await pAuth.setPro(anyone.id, true);
+      assert.equal((await pAuth.getUserById(anyone.id))!.isPro, true, 'Postgres: a Pro account reads as Pro');
+      await papp.close();
+    } finally {
+      await pool.end();
+    }
+  }
+
+  console.log('audit round five: all assertions passed (IPv6 rate limits, admin names need the password and take as long as a taken name, claims audited, verification race, AI picture limits, storage caps per account and per client, refused copies refunded, foreign-key races are 409, comment reports, ownerless designs, owner-only fields, event limits, print-panel markup, memory name case, shared escaper, Postgres reply cascade, bad ids, Pro on Postgres)');
 }

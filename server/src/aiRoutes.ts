@@ -30,7 +30,7 @@ import { refineSpec } from '../../src/core/specRefine';
 import { designFromPrompt, composeSuperOffline } from '../../src/core/promptDesigner';
 import { ensureHeroImage } from '../../src/core/heroImage';
 import { matchClub } from '../../src/core/clubs';
-import { generateSpecViaProvider, buildDirectorPrompt, critiqueSpecViaProvider, activeProvider, clubHintLine, writeCopy, copyLine } from './aiProvider';
+import { generateSpecViaProvider, buildDirectorPrompt, critiqueSpecViaProvider, activeProvider, clubHintLine, writeCopy, copyLine, meterRetries } from './aiProvider';
 import { readGroundPhoto, PHOTO_SAMPLE_DEFAULT, PHOTO_SAMPLE_MAX } from './photoRead';
 import { generateImage, type ImageResult } from './imageAssets';
 import { envNum } from './env';
@@ -87,6 +87,8 @@ const genCache = new TtlCache<{ spec: TifoSpec; source: 'model' }>(80, 30 * 60 *
 // free Quick Designer ("premium resting") until midnight UTC. <=0 disables the cap.
 // In-memory (fine for a single instance); a multi-instance deploy would share this.
 const DAILY_BUDGET = envNum('AI_DAILY_BUDGET', 1000, 0);
+/** Pictures one Super AI design may ask for: one per stand. */
+const MAX_PICTURES_PER_DESIGN = 4;
 let premiumDay = '';
 let premiumCount = 0;
 function rollPremiumDay(): void {
@@ -105,6 +107,13 @@ function premiumExhausted(): boolean {
 function notePremiumCall(calls = 1): void {
   rollPremiumDay();
   premiumCount += calls;
+}
+// A retried provider call is a real second call, and counts as one.
+meterRetries(() => notePremiumCall(1));
+/** Premium calls counted today (for tests and the record; read-only). */
+export function premiumCallsToday(): number {
+  rollPremiumDay();
+  return premiumCount;
 }
 /** Busy-retry countdown with a little jitter so retries don't stampede the same second. */
 function busyRetrySec(): number {
@@ -136,7 +145,7 @@ export interface AiRouteDeps {
 }
 
 /** Constant-time string compare that never throws on length mismatch. */
-function safeEqual(a: string, b: string): boolean {
+export function safeEqual(a: string, b: string): boolean {
   const ba = Buffer.from(a);
   const bb = Buffer.from(b);
   if (ba.length !== bb.length) return false;
@@ -264,7 +273,20 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
    * AI then rested for everyone until midnight (audit round four). Admin
    * sessions and paid accounts are not counted. In memory, by UTC day.
    */
-  const PREMIUM_SIDE_PER_DAY = { photo: 24, polish: 30 } as const;
+  //
+  // Two more since round five, for Super AI's pictures:
+  //  - picture: each picture asked of the image service (the second,
+  //    bare-subject attempt included; one ask may try the backup provider
+  //    too). They were metered by nothing but the provider's own credit
+  //    breaker, so one account could spend the image credit the owner tops
+  //    up himself.
+  //  - uncharged: Super AI runs that come back without a picture are not
+  //    charged to the hourly quota, by design (the user did not get what Super
+  //    promises). With no limit on that, a run whose picture failed was free:
+  //    50 runs from one free account cost 50 paid pictures and 50 model calls
+  //    against AI_DAILY_BUDGET and used 0 of its 10 an hour (audit round five).
+  //    After this many in a day, an incomplete run is charged like any other.
+  const PREMIUM_SIDE_PER_DAY = { photo: 24, polish: 30, picture: 60, uncharged: 20 } as const;
   const sideUse = new Map<string, number>();
   const takeSide = (a: Access, kind: keyof typeof PREMIUM_SIDE_PER_DAY, n: number): boolean => {
     if (a.kind !== 'user' || a.pro) return true;
@@ -506,6 +528,16 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
         app.log.info({ via: hero.via, mode: mode0 }, 'ai generate: hero picture guaranteed');
       }
     }
+    // A design gets at most one picture per stand. The director is asked for a
+    // hero picture on its own stand; a brief written to get twenty image layers
+    // got twenty (and up to forty paid picture requests) from one run (audit
+    // round five). Any beyond that are left out of the design.
+    const pictures = spec.layers.filter((l) => l.kind === 'image' && !l.assetRef);
+    if (pictures.length > MAX_PICTURES_PER_DESIGN) {
+      const drop = new Set(pictures.slice(MAX_PICTURES_PER_DESIGN));
+      spec = { ...spec, layers: spec.layers.filter((l) => !drop.has(l)) };
+      app.log.info({ mode: mode0, asked: pictures.length, kept: MAX_PICTURES_PER_DESIGN }, 'ai generate: extra picture layers left out');
+    }
     // Phase 5: best-effort picture for each image layer; failures just skip the layer.
     const notes: string[] = [];
     let wanted = 0;
@@ -524,8 +556,13 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
           palette: spec.palette,
           rows: regionRowsHint(region),
         };
+        // Each request to the image provider is one of the account's daily
+        // pictures. A spent share is reported like a rate limit, so the
+        // bare-subject second attempt is not made either.
         const draw = (p: string): Promise<ImageResult> =>
-          generateImage(p, style).catch((e) => ({ url: null, error: String(e) }));
+          takeSide(access, 'picture', 1)
+            ? generateImage(p, style).catch((e) => ({ url: null, error: String(e) }))
+            : Promise.resolve({ url: null, error: "this account's pictures for today are used up", kind: 'rate' as const });
 
         let { url, error, kind } = await draw(layer.prompt);
         // An account that is out of credit, a refused key or a rate limit say
@@ -562,7 +599,9 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
     // Recorded here rather than when the spec validated, so a design whose
     // picture never came is on file WITH the reason it did not.
     note(access, mode0, 'model', degraded ? { reason: 'picture_failed', detail: sanitizeDetail(`${missed} of ${wanted}: ${firstFailure ?? 'unknown error'}`) } : undefined);
-    const charged = !!(usage && userId) && !degraded;
+    // An incomplete run is free only while the account's daily allowance of
+    // free incomplete runs lasts (see PREMIUM_SIDE_PER_DAY.uncharged).
+    const charged = !!(usage && userId) && (!degraded || !takeSide(access, 'uncharged', 1));
     let quota = quotaInfo;
     if (charged && userId) {
       const c = await deps.aiUsage.consume(userId, deps.freeLimit);

@@ -8,9 +8,13 @@
  *
  *   - signing up with osamah@… now gets another handle (the client retries, as
  *     it does for any taken one) and no admin rights
- *   - renaming onto it in Account is refused
- *   - with the admin password unlocked in the same browser (the AI panel's
- *     unlock token), the rename claims it and the account is the admin
+ *   - renaming onto it in Account is refused, and an ordinary visitor is never
+ *     asked for an admin password
+ *   - the operator (admin tools unlocked in this browser) is asked for the
+ *     admin password itself; the unlock session alone no longer claims it
+ *     (audit round five: a copied session became a lasting moderator account)
+ *   - a wrong admin password is refused, the right one claims the name and the
+ *     account is the admin
  *
  * Starts its own server on :8914 (in memory) from the built dist.
  */
@@ -92,12 +96,13 @@ console.log('\n— a visitor whose email starts with the admin name —');
   const msg = await rename(p, 'osamah');
   check('renaming onto it in Account is refused, in words', msg === 'That name is taken.', msg);
   check('…and the name did not change', (await me(p))?.username !== 'osamah');
+  check('…and nobody asks this visitor for an admin password', await p.$eval('#ac-name-adminpw', (e) => e.hidden));
   await p.screenshot({ path: `${OUT}/refused.png` });
   check('no page errors', errs.length === 0, errs.join(' | '));
   await ctx.close();
 }
 
-console.log('\n— the operator, with the admin password unlocked in this browser —');
+console.log('\n— the operator: admin tools unlocked in this browser, claiming with the admin password —');
 {
   const { ctx, p, errs } = await context();
   await signUp(p, 'owner@example.test');
@@ -111,8 +116,30 @@ console.log('\n— the operator, with the admin password unlocked in this browse
     return !!j.token;
   }, PW);
   check('the admin password unlocks', unlocked);
-  const msg = await rename(p, 'osamah');
-  check('the rename claims the reserved name', /osamah/.test(msg) && !/taken/i.test(msg), msg);
+  // The unlock session on its own, straight at the API, the way it used to work.
+  const sessionOnly = await p.evaluate(async () => {
+    const r = await fetch('/api/account/username', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${localStorage.getItem('tifo_token_v1')}`, 'x-ai-unlock': localStorage.getItem('tifo_ai_unlock_v1') ?? '' },
+      body: JSON.stringify({ username: 'osamah' }),
+    });
+    return r.status;
+  });
+  check('the unlock session alone no longer claims the name', sessionOnly === 409, String(sessionOnly));
+  const asked = await rename(p, 'osamah');
+  check('the Account page asks for the admin password', /admin password/i.test(asked) && await p.$eval('#ac-name-adminpw', (e) => !e.hidden), asked);
+  await p.fill('#ac-name-adminpw', 'not-the-password');
+  await p.click('#ac-name-save');
+  await p.waitForFunction(() => /not the admin password/i.test(document.getElementById('ac-name-msg')?.textContent ?? ''), null, { timeout: 15000 }).catch(() => {});
+  const wrong = await p.$eval('#ac-name-msg', (e) => e.textContent ?? '');
+  check('a wrong admin password is refused, in words', /not the admin password/i.test(wrong), wrong);
+  check('…and the name did not change', (await me(p))?.username === 'owner');
+  await p.fill('#ac-name-adminpw', PW);
+  await p.click('#ac-name-save');
+  await p.waitForFunction(() => /now @osamah/i.test(document.getElementById('ac-name-msg')?.textContent ?? ''), null, { timeout: 15000 }).catch(() => {});
+  const msg = await p.$eval('#ac-name-msg', (e) => e.textContent ?? '');
+  check('the admin password claims the reserved name', /osamah/.test(msg) && !/taken|password/i.test(msg), msg);
+  check('…and the password field is put away again', await p.$eval('#ac-name-adminpw', (e) => e.hidden && e.value === ''));
   const after = await me(p);
   check('and the account is the admin', after?.username === 'osamah' && after?.isAdmin === true, JSON.stringify(after));
   await p.screenshot({ path: `${OUT}/claimed.png` });

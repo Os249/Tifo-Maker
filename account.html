@@ -67,6 +67,12 @@
           <input id="ac-name" autocomplete="username" maxlength="24" />
           <button class="ac-btn" type="submit" id="ac-name-save" data-i18n="ac.save">Save</button>
         </form>
+        <!-- Its own form, so a password manager does not pair it with the name
+             above and offer to save the admin password as this account's. -->
+        <form class="ac-form" id="ac-name-admin-form" hidden>
+          <label for="ac-name-adminpw" id="ac-name-adminpw-label" data-i18n="ac.name.adminPw">Admin password</label>
+          <input id="ac-name-adminpw" type="password" autocomplete="off" maxlength="1024" hidden />
+        </form>
         <p class="ac-msg" id="ac-name-msg" role="status" aria-live="polite"></p>
       </section>
 

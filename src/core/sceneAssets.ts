@@ -12,6 +12,9 @@
  * a blind change to the live save path could break every existing design.
  */
 
+/** The only picture an asset may carry: an image data URL, as the editor makes. */
+export const SAFE_IMAGE_REF = /^data:image\/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=]+$/i;
+
 export type AssetType = 'banner' | 'surface' | 'flag' | 'scarf' | 'floor';
 
 export interface Vec3 {
@@ -154,7 +157,12 @@ export class AssetStore {
     return { version: 1, assets: this.assets.map((a) => ({ ...a })) };
   }
   loadJSON(m: SceneModel | null | undefined): void {
-    this.assets = m && Array.isArray(m.assets) ? m.assets.map((a) => ({ ...a })) : [];
+    // A scene can come from someone else's public design, so the picture is
+    // kept only when it is what this editor itself would have stored: an image
+    // data URL (audit round five).
+    this.assets = m && Array.isArray(m.assets)
+      ? m.assets.map((a) => ({ ...a, imageRef: typeof a.imageRef === 'string' && SAFE_IMAGE_REF.test(a.imageRef) ? a.imageRef : null }))
+      : [];
     this.selectedId = null;
     this.emit();
   }

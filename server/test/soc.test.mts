@@ -21,7 +21,6 @@ import { MemoryAiUsageRepository, MemoryAuthRepository, MemoryDesignRepository }
 import { MemoryFeedbackRepository } from '../src/feedbackRepo';
 import { MemoryAdminStatsRepository } from '../src/statsRepo';
 import { buildApp, type TemplateInfo } from '../src/routes';
-import { mintUnlock } from '../src/aiRoutes';
 import { ALERT_DAILY_CAP, ALERT_RULES, SocMonitor, maskEmail, socKeyFrom } from '../src/soc';
 import { MemorySocRepository, PgSocRepository, RETENTION_DAYS, type SocRepository } from '../src/socRepo';
 import { securityPosture } from '../src/posture';
@@ -37,10 +36,10 @@ const ADMIN_PASSWORD = 'soc test admin password, long enough';
 
 type Mail = { to: string; subject: string; html: string; text?: string };
 
-/** An allow-listed admin name can only be claimed from an admin-password session. */
+/** An allow-listed admin name can only be claimed with the admin password. */
 const ADMIN_PW = ADMIN_PASSWORD;
 async function reg(app: FastifyInstance, u: string, ip = '198.51.100.1'): Promise<string> {
-  const r = await app.inject({ method: 'POST', url: '/api/auth/register', remoteAddress: ip, headers: { 'x-ai-unlock': mintUnlock(ADMIN_PW) }, payload: { username: u, password: 'quartz-lantern-echo7', email: `${u}@example.test`, acceptedVersion: 'test' } });
+  const r = await app.inject({ method: 'POST', url: '/api/auth/register', remoteAddress: ip, payload: { username: u, password: 'quartz-lantern-echo7', email: `${u}@example.test`, acceptedVersion: 'test', adminPassword: ADMIN_PW } });
   return (r.json() as { token: string }).token;
 }
 

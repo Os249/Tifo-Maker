@@ -31,8 +31,10 @@ export const THAI_LEAGUE: StadiumEntry[] = [
   (() => {
     // Chang Arena (Thunder Castle), Buriram — Buriram United's, built in 256
     // days in 2011. The main stand, its dark blue facade and Thai-gabled
-    // entrance outside, is on the east, -z here; the opposite stand west, the
-    // north end -x and the south end +x, the away end. One single tier close
+    // entrance outside, is on the east, -z here — the club megastore and the
+    // formal forecourt are on that side (OpenStreetMap, the satellite
+    // picture); the opposite stand west, the north end -x and the south end
+    // +x, the away end, its screen over it and Khao Kradong behind it. One single tier close
     // to the pitch right round, its corners filled when it grew to 32,600,
     // with roofs over the two sides only, the main stand's the taller. Blue
     // seats, THUNDER CASTLE in white across the west stand and BURIRAM
@@ -84,57 +86,54 @@ export const THAI_LEAGUE: StadiumEntry[] = [
 
   (() => {
     // PAT Stadium (Port Authority of Thailand), Khlong Toei, Bangkok — Port
-    // FC's. Zone A, the 1967 concrete grandstand and the only one with a
-    // roof, is the main stand, on the south, -z here; Zone C opposite, with
-    // its upper section over the road that runs underneath; Zones B (east,
-    // -x) and D (west, +x) behind the goals, steel and tube, the corners open
-    // between them and the four masts in them. The stands as built hold
-    // 12,308; the league's licence admits about 6,250. Blue and orange.
-    const lower: TierSpec = {
-      rows: 20, rowDepth: 0.75, rakeDeg: 26, baseElevation: 1.2, baseOffset: 1, seatPitch: 0.48, straight: true,
+    // FC's. Zone A, the 1967 grandstand and the only one with a roof, is the
+    // main stand, on the south, -z here; Zone C opposite, the deepest, over
+    // the road that runs underneath; Zones B (east, -x) and D (west, +x)
+    // behind the goals, shallow steel stands, the corners open between them
+    // with a floodlight pole in each. As the satellite picture shows them:
+    // blue seats striped with orange blocks, PORT FC 1967 across Zone C. The
+    // stands as built hold 12,308; the league's licence admits about 6,250.
+    const bowl: TierSpec = {
+      rows: 25, rowDepth: 0.72, rakeDeg: 27, baseElevation: 1.1, baseOffset: 0.5, seatPitch: 0.43, straight: true,
       stands: [
-        { side: 'south', halfLength: 44, rows: 16 },
-        { side: 'north', halfLength: 50, rows: 20 },
-        { side: 'east', halfLength: 30, rows: 15, offset: 1 },
-        { side: 'west', halfLength: 32, rows: 19, offset: 1 },
+        { side: 'south', halfLength: 50, rows: 14 },
+        { side: 'north', halfLength: 52, rows: 25 },
+        { side: 'east', halfLength: 36, rows: 12 },
+        { side: 'west', halfLength: 38, rows: 11 },
       ],
     };
-    const upper: TierSpec = {
-      rows: 10, rowDepth: 0.8, rakeDeg: 30, baseElevation: 10.5, baseOffset: 17, seatPitch: 0.48, straight: true,
-      stands: [{ side: 'north', halfLength: 44, rows: 10 }],
+    const s = [st('south', 50, 10), st('north', 52, 10), st('east', 36, 9), st('west', 38, 9)];
+    // Orange blocks every ten metres along the open stands.
+    const stripes = (side: Side, hl: number) => {
+      const r: { tiers: number[]; side: Side; from: number; to: number; colors: string[] }[] = [];
+      for (let x = -hl + 4; x < hl - 3; x += 10) r.push({ tiers: [0], side, from: x, to: x + 3.5, colors: ['#f0801e'] });
+      return r;
     };
-    const lowS = [st('south', 44, 11), st('north', 50, 11), st('east', 30, 11), st('west', 32, 11)];
-    const upS = [st('north', 44, 11)];
     return {
       id: 'pat-stadium-12k',
       template: {
         id: 'pat-stadium-12k',
         name: 'PAT Stadium (Bangkok)',
         version: 1,
-        levels: 2,
-        plan: { a: 57.5, b: 39.5, exponent: 14 },
+        levels: 1,
+        plan: { a: 56, b: 38.5, exponent: 14 },
         evenRows: true,
-        tiers: [
-          { ...lower, blocks: { width: 1.0, aisles: lowS } },
-          { ...upper, blocks: { width: 1.0, aisles: upS } },
-        ],
-        aisles: { count: 36, widthMeters: 1.0 },
+        tiers: [{ ...bowl, blocks: { width: 0.9, aisles: s } }],
+        aisles: { count: 36, widthMeters: 0.9 },
         sectionsPerTier: 28,
         roof: { coverage: 'none' },
         roofs: [
-          // Zone A's concrete canopy, the only roof in the ground.
-          { style: 'slab', side: 'south', straight: true, from: -44, to: 44, back: 15, front: 3, backY: 10.5, frontY: 9.5, depth: 0.8, bay: 6, color: 0xc9c5bd, underColor: 0xa29e96, columns: { every: 11, offset: 14, color: 0xc9c5bd } },
+          // Zone A's roof, the only one in the ground.
+          { style: 'sheet', side: 'south', straight: true, from: -50, to: 50, back: 11.5, front: 0, backY: 10.5, frontY: 9.5, depth: 0.9, bay: 6, color: 0x9db4c6, underColor: 0x3e4752, columns: { every: 10, offset: 11, color: 0x5d6670 } },
         ],
-        lighting: { style: 'corner-masts', kelvin: 5200, masts: { at: [[62, 50]], height: 38, style: 'lattice', head: 'rect' } },
+        lighting: { style: 'corner-masts', kelvin: 5200, masts: { at: [[60, 46]], height: 40, style: 'pole', head: 'rect' } },
         finish: { concrete: 0x9d9a94, walls: 0xbcb8b0 },
         facade: { style: 'truss', color: 0x7d838a, accent: 0xa9aeb3 },
-        runoff: { color: 0x2f7a3a, a: 57, b: 39, exponent: 14 },
+        runoff: { color: 0x2f7a3a, a: 55.5, b: 38, exponent: 14 },
         seatLook: {
-          colors: [{ c: '#1b4fa0', w: 0.75 }, { c: '#f07c1b', w: 0.25 }],
-          grain: { along: 3, rows: 2 },
-          regions: [
-            { tiers: [0], side: 'west', from: -40, to: 40, colors: [{ c: '#f07c1b', w: 0.7 }, { c: '#1b4fa0', w: 0.3 }], grain: { along: 3, rows: 2 } },
-          ],
+          colors: ['#2747a8'],
+          regions: [...stripes('north', 52), ...stripes('east', 36), ...stripes('west', 38)],
+          text: [{ text: 'PORT FC 1967', color: '#f4f1ea', tier: 0, centerU: 0.25, halfU: 0.09, rows: [4, 20] }],
         },
         site: { key: 'pat-stadium', horizon: 'city-towers', ground: 0x8e8c84, forecourt: 0xaaa69c, style: 'es', palms: 0.4 },
       },
@@ -145,20 +144,23 @@ export const THAI_LEAGUE: StadiumEntry[] = [
   (() => {
     // Thunderdome Stadium, Muang Thong Thani, Nonthaburi — Muangthong
     // United's (the Kirins), rebuilt in 2010 from one grandstand into four
-    // steel stands close to the pitch. The West (main) stand is -z here, the
-    // East opposite, the north end +x and the south end -x; the two sides
-    // roofed, the ends open, the corners open with a mast in each. Red seats,
-    // white in the ends, MUANGTHONG across the East.
-    const lower: TierSpec = {
-      rows: 26, rowDepth: 0.78, rakeDeg: 27, baseElevation: 1.3, baseOffset: 1, seatPitch: 0.48, straight: true,
+    // steel stands. As the satellite picture shows them: the West (main)
+    // stand -z here, the deepest, with MTUTD across its front rows; the East
+    // opposite; the north end +x, MUANGTHONG across it; the shallower south
+    // end -x. Red seats, a wide grass margin round the pitch, and a white
+    // roof over the back of every stand, the front rows open to the sky.
+    const bowl: TierSpec = {
+      rows: 27, rowDepth: 0.8, rakeDeg: 27, baseElevation: 1.3, baseOffset: 0.8, seatPitch: 0.48, straight: true,
       stands: [
-        { side: 'south', halfLength: 52, rows: 23 },
-        { side: 'north', halfLength: 52, rows: 26 },
-        { side: 'east', halfLength: 34, rows: 20, offset: 1 },
-        { side: 'west', halfLength: 34, rows: 20, offset: 1 },
+        { side: 'south', halfLength: 55, rows: 27 },
+        { side: 'north', halfLength: 53, rows: 21 },
+        { side: 'east', halfLength: 37, rows: 21 },
+        { side: 'west', halfLength: 37, rows: 14 },
       ],
     };
-    const lowS = [st('south', 52, 11), st('north', 52, 11), st('east', 34, 11), st('west', 34, 11)];
+    const s = [st('south', 55, 11), st('north', 53, 11), st('east', 37, 11), st('west', 37, 11)];
+    const roof = (side: Side, hl: number, front: number, back: number, frontY: number, backY: number) =>
+      ({ style: 'sheet' as const, side, straight: true, from: -hl, to: hl, back, front, backY, frontY, depth: 1.1, bay: 7, color: 0xe9ebec, underColor: 0x7d838a, columns: { every: 12, offset: back - 0.8, color: 0xd9dbdd } });
     return {
       id: 'thunderdome-15k',
       template: {
@@ -166,27 +168,28 @@ export const THAI_LEAGUE: StadiumEntry[] = [
         name: 'Thunderdome Stadium (Nonthaburi)',
         version: 1,
         levels: 1,
-        plan: { a: 57.5, b: 39.5, exponent: 14 },
+        plan: { a: 60.5, b: 43, exponent: 14 },
         evenRows: true,
-        tiers: [{ ...lower, blocks: { width: 1.0, aisles: lowS } }],
+        tiers: [{ ...bowl, blocks: { width: 1.0, aisles: s } }],
         aisles: { count: 34, widthMeters: 1.0 },
         sectionsPerTier: 28,
         roof: { coverage: 'none' },
         roofs: [
-          { style: 'sheet', side: 'south', straight: true, from: -52, to: 52, back: 21, front: 2, backY: 14, frontY: 12.5, depth: 1.2, bay: 7, color: 0xe2e4e6, underColor: 0x8e1d22, columns: { every: 13, offset: 19.8, color: 0xd9dbdd } },
-          { style: 'sheet', side: 'north', straight: true, from: -52, to: 52, back: 23, front: 2, backY: 15.5, frontY: 13.5, depth: 1.2, bay: 7, color: 0xe2e4e6, underColor: 0x8e1d22, columns: { every: 13, offset: 22.2, color: 0xd9dbdd } },
+          roof('south', 55, 9, 23, 13, 14.5),
+          roof('north', 53, 8, 18.5, 11.5, 12.5),
+          roof('east', 37, 7, 18, 11, 12),
+          roof('west', 37, 5, 12.5, 9, 9.5),
         ],
-        lighting: { style: 'corner-masts', kelvin: 5600, masts: { at: [[62, 48]], height: 40, style: 'lattice', head: 'rect' } },
+        lighting: { style: 'corner-masts', kelvin: 5600, masts: { at: [[70, 56]], height: 40, style: 'lattice', head: 'rect' } },
         finish: { concrete: 0x9a9893, walls: 0xb9b6ae },
         facade: { style: 'truss', color: 0x6f7378, accent: 0x9ea2a6 },
-        runoff: { color: 0x2f7a3a, a: 57, b: 39, exponent: 14 },
+        runoff: { color: 0x2f7a3a, a: 60, b: 42.5, exponent: 14 },
         seatLook: {
           colors: ['#c4161c'],
-          regions: [
-            { tiers: [0], side: 'east', from: -40, to: 40, colors: [{ c: '#f2f2f0', w: 0.7 }, { c: '#c4161c', w: 0.3 }], grain: { along: 3, rows: 2 } },
-            { tiers: [0], side: 'west', from: -40, to: 40, colors: [{ c: '#f2f2f0', w: 0.7 }, { c: '#c4161c', w: 0.3 }], grain: { along: 3, rows: 2 } },
+          text: [
+            { text: 'MTUTD', color: '#f4f4f2', tier: 0, centerU: 0.75, halfU: 0.066, rows: [1, 9] },
+            { text: 'MUANGTHONG', color: '#f4f4f2', tier: 0, centerU: 0, halfU: 0.078, rows: [2, 9] },
           ],
-          text: [{ text: 'MUANGTHONG', color: '#f4f4f2', tier: 0, centerU: 0.25, halfU: 0.1, rows: [5, 21] }],
         },
         site: { key: 'thunderdome', horizon: 'city-towers', ground: 0x8e8c84, forecourt: 0xaaa69c, style: 'es', palms: 0.4 },
       },

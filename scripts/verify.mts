@@ -1933,8 +1933,8 @@ import { buildStadium as siBuild } from '../src/core/stadiumFit';
     'nelson-mandela-41k': '40004:78c46cb1d2bc1686',
     'ali-la-pointe-40k': '39692:dd58a3e9a7e4461e',
     'chang-arena-33k': '32203:c70fd7cc672622fa',
-    'pat-stadium-12k': '12176:7c5fc8a990db26dd',
-    'thunderdome-15k': '14920:571a6352492de060',
+    'pat-stadium-12k': '12028:c4cb79e9f49caafb',
+    'thunderdome-15k': '14786:2cd7b82907da4f62',
   };
   for (const [id, want] of Object.entries(FROZEN)) {
     const tpl = cat.templateById(id);

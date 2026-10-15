@@ -9,7 +9,19 @@
  * URL, allowed by img-src data:), then the opener calls print().
  */
 
+import { escapeHtml } from '../../core/escape';
+
+/** A picture the editor made from a file: a base64 data URL and nothing else. */
+const IMAGE_DATA_URL = /^data:image\/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=]+$/i;
+
 export function printAssetPanels(imageUrl: string, widthM: number, heightM: number, panelM = 2.5): boolean {
+  // The picture comes with the scene, and a scene can be someone else's: open
+  // their public design as a base and this was their text, written into a
+  // same-origin window unescaped. A crafted imageRef closed the src attribute
+  // and wrote its own markup there (audit round five; the CSP kept script out).
+  // Only a real image data URL is used, and it is escaped anyway.
+  if (!IMAGE_DATA_URL.test(imageUrl)) return false;
+  const src = escapeHtml(imageUrl);
   const cols = Math.max(1, Math.min(10, Math.ceil(Math.max(0.5, widthM) / panelM)));
   const rows = Math.max(1, Math.min(10, Math.ceil(Math.max(0.5, heightM) / panelM)));
   const w = window.open('', '_blank');
@@ -21,7 +33,7 @@ export function printAssetPanels(imageUrl: string, widthM: number, heightM: numb
       panels +=
         '<div class="panel">' +
         '<div class="crop"><img alt="" src="' +
-        imageUrl +
+        src +
         '" style="width:' +
         cols * 100 +
         '%;height:' +

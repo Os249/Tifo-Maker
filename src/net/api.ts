@@ -313,9 +313,9 @@ export async function register(
   const data = (await expectOk(
     await fetch(`${API}/auth/register`, {
       method: 'POST',
-      // With the admin password unlocked, the session goes along: it is the only
-      // thing that lets sign-up claim a name reserved by ADMIN_USERNAMES.
-      headers: { 'content-type': 'application/json', ...(aiUnlockToken() ? { 'x-ai-unlock': aiUnlockToken()! } : {}) },
+      // No admin session goes along any more: claiming a name reserved by
+      // ADMIN_USERNAMES takes the admin password, on the Account page.
+      headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ username, password, email, acceptedVersion }),
     }),
   )) as { token: string; username: string; emailSent?: boolean };
@@ -391,17 +391,25 @@ export async function verifyEmailCode(code: string): Promise<{ ok: boolean; trie
   return { ok: false, triesLeft: data?.triesLeft, error: data?.error ?? 'could not verify' };
 }
 
-/** Rename the signed-in account. Throws with the server's reason on 400/409. */
-export async function changeUsername(username: string): Promise<string> {
-  const data = (await expectOk(
-    await fetch(`${API}/account/username`, {
-      method: 'POST',
-      // The admin-password session, when there is one: renaming onto a name
-      // reserved by ADMIN_USERNAMES is how the operator claims it.
-      headers: { ...authHeaders(true), ...(aiUnlockToken() ? { 'x-ai-unlock': aiUnlockToken()! } : {}) },
-      body: JSON.stringify({ username }),
-    }),
-  )) as { username: string };
+/**
+ * Rename the signed-in account. Throws with the server's reason on 400/409;
+ * a 409 error carries `taken: true`.
+ *
+ * `adminPassword` only when claiming a name reserved by ADMIN_USERNAMES: that
+ * takes the admin password itself, not the AI panel's unlock session, which
+ * used to be enough (audit round five).
+ */
+export async function changeUsername(username: string, adminPassword?: string): Promise<string> {
+  const res = await fetch(`${API}/account/username`, {
+    method: 'POST',
+    headers: authHeaders(true),
+    body: JSON.stringify(adminPassword ? { username, adminPassword } : { username }),
+  });
+  if (res.status === 409) {
+    const body = (await res.json().catch(() => null)) as { error?: string } | null;
+    throw Object.assign(new Error(tErr(body?.error ?? 'that name is taken')), { taken: true });
+  }
+  const data = (await expectOk(res)) as { username: string };
   return data.username;
 }
 

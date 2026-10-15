@@ -92,8 +92,11 @@ const GALLERY_JOINS =
 // \`remixed_from\` (the id) stays, so the lineage is not lost.
 
 function rowToGalleryItem(r: Record<string, unknown>): GalleryItem {
+  // A gallery card is public: no owner-only fields (they would only ever hold
+  // defaults here, but the memory store leaves the keys out, and so does this).
+  const { pinned: _p, deletedAt: _d, origin: _o, takenDown: _t, ...shared } = rowToMeta(r);
   return {
-    ...rowToMeta(r),
+    ...shared,
     ownerName: String(r.owner_name),
     hasThumbnail: Boolean(r.has_thumbnail),
     likeScore: Number(r.like_score ?? 0),
@@ -1014,7 +1017,7 @@ export class PgAuthRepository implements AuthRepository {
         `INSERT INTO users (username, password_hash, email, accepted_terms_version, accepted_terms_at, email_verified_at, username_chosen)
          SELECT $1, $2, $3, $4, $5, $6, $7
          WHERE NOT EXISTS (SELECT 1 FROM users WHERE lower(username) = lower($1))
-         RETURNING id, username, password_hash, email, email_verified_at, username_chosen`,
+         RETURNING id, username, password_hash, email, email_verified_at, username_chosen, is_pro`,
         [username, passwordHash, opts.email ?? null, acceptedVersion, acceptedAt, verifiedAt, opts.usernameChosen !== false],
       );
       return res.rowCount ? mapUserRow(res.rows[0]) : null;
@@ -1026,7 +1029,7 @@ export class PgAuthRepository implements AuthRepository {
 
   async getUserByName(username: string): Promise<UserRow | null> {
     const res = await this.pool.query(
-      'SELECT id, username, password_hash, email, email_verified_at, username_chosen FROM users WHERE username = $1',
+      'SELECT id, username, password_hash, email, email_verified_at, username_chosen, is_pro FROM users WHERE username = $1',
       [username],
     );
     return res.rowCount ? mapUserRow(res.rows[0]) : null;
@@ -1034,7 +1037,7 @@ export class PgAuthRepository implements AuthRepository {
 
   async getUserById(id: string): Promise<UserRow | null> {
     const res = await this.pool.query(
-      'SELECT id, username, password_hash, email, email_verified_at, username_chosen FROM users WHERE id = $1',
+      'SELECT id, username, password_hash, email, email_verified_at, username_chosen, is_pro FROM users WHERE id = $1',
       [id],
     );
     return res.rowCount ? mapUserRow(res.rows[0]) : null;
@@ -1042,7 +1045,7 @@ export class PgAuthRepository implements AuthRepository {
 
   async getUserByEmail(email: string): Promise<UserRow | null> {
     const res = await this.pool.query(
-      'SELECT id, username, password_hash, email, email_verified_at, username_chosen FROM users WHERE lower(email) = lower($1)',
+      'SELECT id, username, password_hash, email, email_verified_at, username_chosen, is_pro FROM users WHERE lower(email) = lower($1)',
       [email],
     );
     return res.rowCount ? mapUserRow(res.rows[0]) : null;
@@ -1149,7 +1152,28 @@ export class PgAuthRepository implements AuthRepository {
   }
 
   async deleteUser(userId: string): Promise<void> {
-    await this.pool.query('DELETE FROM users WHERE id = $1', [userId]);
+    // The account's comments go with it (by cascade), but other people's
+    // replies to them stay, at the top of their thread. Without this the
+    // cascade on comments.parent_id took them too (audit round five).
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+      // Locked first, so a reply arriving meanwhile waits and then fails
+      // cleanly (409) instead of being accepted and then cascaded away.
+      await client.query('SELECT id FROM comments WHERE author_id = $1 FOR UPDATE', [userId]);
+      await client.query(
+        `UPDATE comments SET parent_id = NULL
+         WHERE author_id <> $1 AND parent_id IN (SELECT id FROM comments WHERE author_id = $1)`,
+        [userId],
+      );
+      await client.query('DELETE FROM users WHERE id = $1', [userId]);
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw err;
+    } finally {
+      client.release();
+    }
   }
 
   // ---- federated identities ----
@@ -1204,6 +1228,11 @@ export class PgEventsRepository implements EventsRepository {
       'INSERT INTO events (session_id, name, signed_in) VALUES ($1, $2, $3)',
       [sessionId.slice(0, 64), name.slice(0, 40), signedIn],
     );
+  }
+
+  async purge(before: Date): Promise<number> {
+    const res = await this.pool.query('DELETE FROM events WHERE created_at < $1', [before]);
+    return res.rowCount ?? 0;
   }
 
   async funnel(steps: string[], days: number): Promise<FunnelStep[]> {

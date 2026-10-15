@@ -18,11 +18,11 @@ import { readFile, unlink } from 'node:fs/promises';
 import type { AiEventsRepository, AiUsageRepository, AuthRepository, DesignRepository, EventsRepository, LeadsRepository, SocialRepository } from './repo';
 import { picturesStatus } from './imageAssets';
 import { imageHealth } from './imageHealth';
-import { registerAiRoutes, verifyUnlock } from './aiRoutes';
+import { registerAiRoutes, safeEqual, verifyUnlock } from './aiRoutes';
 import { stadiumPlan } from './stadiumPlan';
 import { emailHealth, type EmailSender } from './email';
 import { button, codeBox, layoutEmail, para, smallPrint, textFooter } from './emailLayout';
-import { proxyModeFrom, trustProxyFor, viaCloudflare } from './proxyTrust';
+import { clientKey, proxyModeFrom, trustProxyFor, viaCloudflare } from './proxyTrust';
 import { RESET_TO_ADDRESS, SendBudget, VERIFY_BY_ACCOUNT, VERIFY_TO_ADDRESS } from './sendBudget';
 import { stripImageMetadata } from './imageMeta';
 import { attachSecurityMonitor, maskEmail, type SocMonitor } from './soc';
@@ -318,7 +318,21 @@ export async function buildApp(
   // person's email address. Deliberate client errors (4xx: bad JSON, body too
   // large, rate limited) keep their message, because it is written for them.
   app.setErrorHandler((err, req, reply) => {
-    const e = err as { statusCode?: number };
+    const e = err as { statusCode?: number; code?: unknown };
+    // Postgres refusing a value as the wrong type ("invalid input syntax for
+    // type uuid"): the caller sent a bad id, which is a 400, not the server
+    // breaking. Several routes still passed ids straight through, so `abc` as
+    // a comment, follow or notification id answered 500 on Postgres only, was
+    // logged as a server fault, and twenty of them set off the server-error
+    // alert email for anyone who wanted it to (audit round five). Answered
+    // here so a route added later cannot reopen it.
+    if (e.code === '22P02') return reply.code(400).send({ error: 'invalid id' });
+    // And a row that went away under the request: a reply to a comment
+    // deleted a moment before fails its foreign key. That is the caller's
+    // race, not a fault, and it could be set off at will to fill the error log
+    // and trip the alert. (A unique violation stays a 500: when one gets this
+    // far it is a bug to see, not a race.)
+    if (e.code === '23503') return reply.code(409).send({ error: 'that changed while you were doing it, please try again' });
     const status = typeof e.statusCode === 'number' && e.statusCode >= 400 && e.statusCode < 600 ? e.statusCode : 500;
     if (status >= 500) {
       req.log.error({ err }, 'request failed');
@@ -415,7 +429,14 @@ export async function buildApp(
   // brute-force and spam. Generous global ceiling; auth routes add a tighter
   // per-route limit below.
   if (options.rateLimit) {
-    await app.register(rateLimit, { global: true, max: 300, timeWindow: '1 minute' });
+    // Counted per client, not per address string: an IPv6 address counts as
+    // its /64 and is written one way first. Before @fastify/rate-limit 11.2.0
+    // the bucket was the raw req.ip, so a caller walking its own /64 (or
+    // writing one address five ways) was a new client on every request and
+    // every limit in this file was unlimited for it (audit round five,
+    // CVE-2026-15144). 64 is the plugin's default; it is spelled out so a
+    // downgrade or a changed default cannot quietly undo it.
+    await app.register(rateLimit, { global: true, max: 300, timeWindow: '1 minute', ipv6Subnet: 64 });
   }
 
   const seatCount = (id: string, version: number): number | null =>
@@ -575,7 +596,7 @@ export async function buildApp(
     // password), but still worth a line: an allow-list entry nobody holds is
     // either a typo or an account that was never made.
     return missing.length
-      ? { id: 'admins', label: 'Admin accounts', state: 'warn', detail: `Not registered: ${missing.map((m) => '@' + m).join(', ')}. The name is reserved: nobody can sign up with it or rename onto it without the admin password, so it gives no one moderator rights. To make it yours, unlock the AI panel with the admin password, then rename your account to it in Account; otherwise remove it from ADMIN_USERNAMES.` }
+      ? { id: 'admins', label: 'Admin accounts', state: 'warn', detail: `Not registered: ${missing.map((m) => '@' + m).join(', ')}. The name is reserved: nobody can sign up with it or rename onto it without the admin password, so it gives no one moderator rights. To make it yours, rename your account to it in Account and give the admin password when the page asks for it (the page asks in a browser where the AI panel is unlocked); otherwise remove it from ADMIN_USERNAMES.` }
       : { id: 'admins', label: 'Admin accounts', state: 'good', detail: `Every allow-listed name belongs to an account (${names.length}).` };
   };
   const requireAdmin = async (req: FastifyRequest, reply: FastifyReply): Promise<string | null> => {
@@ -609,15 +630,27 @@ export async function buildApp(
   const aiAdminPassword = options.aiAdminPassword ?? process.env.AI_ADMIN_PASSWORD;
   /**
    * May this request take an allow-listed admin name? Only the exact name (a
-   * case-folded lookalike never), and only with a valid admin-password session
-   * in the x-ai-unlock header. That session already opens every moderation
-   * queue, so accepting it here grants nothing it did not have. Recorded in the
-   * audit trail under the session's id.
+   * case-folded lookalike never), and only with the admin password itself in
+   * the body, as `adminPassword`. Recorded in the audit trail.
+   *
+   * It used to accept the x-ai-unlock session instead, on the grounds that the
+   * session already opens every queue. But a session is meant to be small: it
+   * ends after 12 hours, and changing AI_ADMIN_PASSWORD ends all of them at
+   * once. A name claimed with one is neither. A token copied out of a browser
+   * became a moderator ACCOUNT that outlived the password change made to shut
+   * it out, could not be renamed or deleted from the account page, and opened
+   * routes the session alone never did, such as granting Pro (audit round
+   * five). A wrong password counts as a wrong admin password, for the alert.
    */
   const adminClaim = (req: FastifyRequest, username: string): boolean => {
-    const tok = req.headers['x-ai-unlock'];
-    if (!adminSet.has(username) || typeof tok !== 'string' || !aiAdminPassword || !verifyUnlock(aiAdminPassword, tok)) return false;
-    req.socActor = `admin password (session ${tok.split('.')[2]?.slice(0, 6) ?? '?'}) claiming @${username}`;
+    if (!adminSet.has(username) || !aiAdminPassword) return false;
+    const given = (req.body as { adminPassword?: unknown } | null)?.adminPassword;
+    if (typeof given !== 'string' || !given) return false;
+    if (given.length > 1024 || !safeEqual(given, aiAdminPassword)) {
+      req.socNote = { kind: 'admin_unlock_failed' };
+      return false;
+    }
+    req.socActor = `admin password claiming @${username}`;
     return true;
   };
   const adminAccess = async (req: FastifyRequest): Promise<boolean> => {
@@ -729,7 +762,9 @@ export async function buildApp(
 
   // Record one anonymous event. No auth required; best-effort (never errors the
   // client over analytics). Ignores unknown names and missing sink.
-  app.post('/api/events', async (req, reply) => {
+  // A few events per visit is normal; the global 300 a minute was the only
+  // limit, and every row is kept for a year (audit round five).
+  app.post('/api/events', { config: { rateLimit: { max: 60, timeWindow: '1 minute' } } }, async (req, reply) => {
     const body = (req.body ?? {}) as { session?: unknown; name?: unknown; signedIn?: unknown };
     const session = typeof body.session === 'string' ? body.session : '';
     const name = typeof body.name === 'string' ? body.name : '';
@@ -949,8 +984,10 @@ export async function buildApp(
       // worth far more than one sitting in a dashboard nobody opened. Never let
       // a mail failure lose the report, which is already stored by this point.
       if (options.emailSender && options.feedbackTo) {
-        const esc2 = (x: string): string =>
-          x.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        // The shared escaper (quotes included), not a local one that left them
+        // alone: harmless while every value lands in element text, one
+        // attribute away from not being (audit round five).
+        const esc2 = escapeHtml;
         const ctxLine = context
           ? `${context.path ?? '?'} · ${context.browser ?? '?'} on ${context.os ?? '?'} · ${context.device ?? '?'} · ${context.viewport ?? '?'}`
           : 'no diagnostics attached';
@@ -1109,10 +1146,63 @@ export async function buildApp(
    * account when signed in, else the address as the rate limiter sees it.
    * In memory and bounded: a restart forgets, which errs towards counting.
    */
+  /**
+   * How much one account may store. Nothing capped it: one account that had
+   * only chosen a username (no verified email) created 300 designs and put 50
+   * photos on one of them, every photo up to 2 MB, all of it in the Postgres
+   * the site runs on (audit round five). A full database is the whole site
+   * down. Admin accounts are not counted; everyone else gets far more than a
+   * person uses, and a photo now needs a verified email, as a vote does.
+   */
+  const DESIGNS_PER_ACCOUNT = 1000;
+  const NEW_DESIGNS_PER_DAY = 100;
+  // And per client (an address, or an IPv6 /64), whichever accounts it uses:
+  // sign-up is open, so a cap per account alone was a cap per sign-up.
+  const NEW_DESIGNS_PER_CLIENT_DAY = 300;
+  const PHOTOS_PER_DESIGN = 20;
+  const PHOTOS_PER_DAY = 30;
+  const dailyUse = new Map<string, number>();
+  const takeDaily = (userId: string, what: string, max: number): boolean => {
+    const day = utcDay();
+    const key = `${day}|${what}|${userId}`;
+    const used = dailyUse.get(key) ?? 0;
+    if (used >= max) return false;
+    if (dailyUse.size > 20_000) for (const k of dailyUse.keys()) if (!k.startsWith(day)) dailyUse.delete(k);
+    dailyUse.set(key, used + 1);
+    return true;
+  };
+  /** Room for one more design on this account? Sends the refusal itself. */
+  const roomForDesign = async (req: FastifyRequest, userId: string, reply: FastifyReply): Promise<boolean> => {
+    if (await adminNameOf(userId)) return true;
+    const owned = (await repo.listTitlesByOwner(userId).catch(() => [])).length;
+    if (owned >= DESIGNS_PER_ACCOUNT) {
+      await reply.code(403).send({ error: 'this account has reached its limit of designs', code: 'design_limit', limit: DESIGNS_PER_ACCOUNT });
+      return false;
+    }
+    if (!takeDaily(userId, 'design', NEW_DESIGNS_PER_DAY)) {
+      await reply.code(429).send({ error: 'too many new designs today, try again tomorrow', code: 'design_limit' });
+      return false;
+    }
+    if (!takeDaily(`ip:${clientKey(req.ip)}`, 'design', NEW_DESIGNS_PER_CLIENT_DAY)) {
+      refundDesign(req, userId, false);
+      await reply.code(429).send({ error: 'too many new designs today, try again tomorrow', code: 'design_limit' });
+      return false;
+    }
+    return true;
+  };
+  /** Give back the day's design that a refused copy did not make. */
+  const refundDesign = (req: FastifyRequest, userId: string, client = true): void => {
+    for (const who of client ? [userId, `ip:${clientKey(req.ip)}`] : [userId]) {
+      const key = `${utcDay()}|design|${who}`;
+      const used = dailyUse.get(key) ?? 0;
+      if (used > 0) dailyUse.set(key, used - 1);
+    }
+  };
+
   const seenToday = new Map<string, number>();
   const SEEN_MAX = 50_000;
   const firstToday = (req: FastifyRequest, who: string | null, what: string): boolean => {
-    const key = `${utcDay()}|${what}|${who ?? `ip:${req.ip}`}`;
+    const key = `${utcDay()}|${what}|${who ?? `ip:${clientKey(req.ip)}`}`;
     if (seenToday.has(key)) return false;
     if (seenToday.size >= SEEN_MAX) {
       const today = utcDay();
@@ -1441,17 +1531,6 @@ export async function buildApp(
       email?: string;
       acceptedVersion?: string;
     };
-    // An allow-listed name is RESERVED. Admin rights follow the name, so an
-    // allow-listed name with no account behind it used to be moderator rights
-    // for whoever signed up with it first: one unauthenticated request. Now
-    // public sign-up refuses it exactly as it refuses a taken name, and the only
-    // way to claim it is from a browser holding a valid admin-password session
-    // (the x-ai-unlock header the editor sends once the AI panel is unlocked).
-    // A name that merely case-folds onto an admin name is refused outright, as
-    // before: it closes the impersonation angle and keeps the list unambiguous.
-    if (typeof username === 'string' && adminFolded.has(username.toLowerCase()) && !adminClaim(req, username)) {
-      return reply.code(409).send({ error: 'username or email taken' });
-    }
     if (!username || !USERNAME.test(username)) {
       return reply.code(400).send({ error: 'username 3-24 [a-zA-Z0-9_]' });
     }
@@ -1464,6 +1543,25 @@ export async function buildApp(
     // terrible password for the person who owns it.
     const secret = gradePassword(reply, password, { email: mail, username });
     if (secret === null) return;
+    // An allow-listed name is RESERVED. Admin rights follow the name, so an
+    // allow-listed name with no account behind it used to be moderator rights
+    // for whoever signed up with it first: one unauthenticated request. Public
+    // sign-up refuses it exactly as it refuses a taken name; claiming it takes
+    // the admin password (adminClaim). A name that merely case-folds onto an
+    // admin name is refused outright: it closes the impersonation angle and
+    // keeps the list unambiguous.
+    //
+    // Checked here, after the body is otherwise valid, and not first: first,
+    // `{"username":"x"}` alone answered 409 for an admin name and 400 for any
+    // other, which listed the moderators' names, claimed or not, to anyone who
+    // asked (audit round five). Now it is the same 409 a taken name gets,
+    // and it takes as long: a taken name is refused only after the password
+    // is hashed, so a refusal that skipped the hash answered in 1 ms instead
+    // of ~390, and said "moderator" just as clearly.
+    if (adminFolded.has(username.toLowerCase()) && !adminClaim(req, username)) {
+      await hashPassword(secret);
+      return reply.code(409).send({ error: 'username or email taken' });
+    }
     // Clear message for duplicates; the unique index is the real race guard.
     // One generic 409 for BOTH cases. A distinct "email already in use" turned
     // registration into an oracle: pick a username you know exists, vary the
@@ -1583,11 +1681,17 @@ export async function buildApp(
       req.socNote = { kind: 'code_exhausted' };
       return reply.code(429).send({ error: 'too many attempts, request a new code', exhausted: true });
     }
+    // The try is taken BEFORE the code is looked up, not after. Counted after
+    // the await, every request sent at the same moment read the same count:
+    // 30 guesses fired together on Postgres were all checked against one code,
+    // and the right one among them verified an address the account never
+    // proved it owned (audit round five) — the first step of the pre-sign-up
+    // takeover round four closed. A right code clears the count below.
+    noteCodeTry(userId, tries + 1);
     const sentTo = user?.email ?? '';
     const ok = sentTo ? await auth.consumeEmailToken(codeHash(userId, sentTo, code), 'verify_code') : null;
     if (ok !== userId) {
-      const next = tries + 1;
-      noteCodeTry(userId, next);
+      const next = Math.max(tries + 1, codeTries.get(userId) ?? 0);
       // Burn the code once the budget is spent, so a new one must be requested.
       if (next >= VERIFY_CODE_MAX_TRIES) await auth.deleteEmailTokens(userId, 'verify_code').catch(() => {});
       req.socNote = { kind: next >= VERIFY_CODE_MAX_TRIES ? 'code_exhausted' : 'code_failed' };
@@ -1624,11 +1728,12 @@ export async function buildApp(
       return reply.code(400).send({ error: '3-24 characters: letters, numbers or underscore' });
     }
     // Renaming onto an admin name is claiming it, so it takes the same proof as
-    // signing up with one: an admin-password session in this browser. Without
-    // it, an allow-listed name nobody holds would be moderator rights for the
-    // first account to rename onto it, and uniqueness would not stop that. This
-    // is also how the operator claims it in practice, because sign-up derives
-    // the name from the email: unlock the AI panel, then rename in Account.
+    // signing up with one: the admin password (adminClaim). Without it, an
+    // allow-listed name nobody holds would be moderator rights for the first
+    // account to rename onto it, and uniqueness would not stop that. This is
+    // also how the operator claims it in practice, because sign-up derives the
+    // name from the email: rename in Account, and give the admin password when
+    // the page asks for it.
     if (adminFolded.has(username.toLowerCase()) && !adminClaim(req, username)) {
       return reply.code(409).send({ error: 'that name is taken' });
     }
@@ -2412,10 +2517,12 @@ export async function buildApp(
     // same thing again, used to land in the queue every time: 120 anonymous
     // reports on random ids pushed a real one out of the moderators' view
     // (audit round four). A design must be one the reporter can see.
-    if (type === 'design') {
-      const target = await repo.get(body.targetId).catch(() => null);
-      if (!target || (!target.isPublic && target.ownerId !== reporterId)) return reply.code(404).send({ error: 'not found' });
-    }
+    // And a comment must be on one: comment reports were never checked, so the
+    // same flood came back through `targetType: "comment"` with random ids,
+    // and 100 of them hid the real report (audit round five).
+    const designId = type === 'design' ? body.targetId : ((await options.social?.commentDesign(body.targetId).catch(() => null)) ?? null);
+    const target = designId ? await repo.get(designId).catch(() => null) : null;
+    if (!target || (!target.isPublic && !(reporterId && target.ownerId === reporterId))) return reply.code(404).send({ error: 'not found' });
     if (!firstToday(req, reporterId, `report:${type}:${body.targetId}`)) return { reportId: null, status: 'received' };
     const reportId = await repo.report(type, body.targetId, reporterId, body.reason.trim().slice(0, 500));
     return { reportId, status: 'received' };
@@ -2461,6 +2568,24 @@ export async function buildApp(
       if (!clean) {
         req.socNote = { kind: 'upload_refused' };
         return reply.code(400).send({ error: 'photo must be a JPEG, PNG or WebP image' });
+      }
+      // Photos are shown to everyone who can see the design, so like a vote
+      // they need a verified email, and there is a ceiling per design and per
+      // day (see DESIGNS_PER_ACCOUNT above).
+      if (badId(id, reply)) return;
+      // Someone else's design is a 404 before anything else, as it always was.
+      const target = await repo.get(id).catch(() => null);
+      if (!target || !ownsDesign(target, userId)) return reply.code(404).send({ error: 'not found or not yours' });
+      const uploader = await auth.getUserById(userId).catch(() => null);
+      const admin = !!(await adminNameOf(userId));
+      if (!uploader?.emailVerifiedAt && !admin) {
+        return reply.code(403).send({ error: 'verify your email to add photos', code: 'verify' });
+      }
+      if ((await repo.listPhotos(id).catch(() => [])).length >= PHOTOS_PER_DESIGN) {
+        return reply.code(403).send({ error: 'this design has as many photos as it can hold', code: 'photo_limit', limit: PHOTOS_PER_DESIGN });
+      }
+      if (!admin && !takeDaily(userId, 'photo', PHOTOS_PER_DAY)) {
+        return reply.code(429).send({ error: 'too many photos today, try again tomorrow', code: 'photo_limit' });
       }
       const w = Number(body.width) || 0;
       const h = Number(body.height) || 0;
@@ -2835,6 +2960,7 @@ export async function buildApp(
     if (clearLocked(body.templateId!, body.templateVersion!, cells)) cellsGz = gzipBytes(cells);
     const thumb = decodeThumb(body.thumbnailPngB64, reply);
     if (thumb === undefined) return;
+    if (!(await roomForDesign(req, userId, reply))) return;
     return reply.code(201).send(
       await repo.create({
         title: body.title,
@@ -2892,11 +3018,23 @@ export async function buildApp(
     return true;
   };
 
+  /**
+   * Is this person the design's owner? Never for a design with no owner.
+   *
+   * The checks used to read `rec.ownerId !== userId`, and for a row with no
+   * owner (owner_id is nullable: designs saved before accounts existed) and a
+   * visitor with no session that is `null !== null`, false: the anonymous
+   * visitor WAS the owner. A private ownerless design answered 200 to
+   * strangers who were not signed in, layers and all, while signed-in ones got
+   * 404 (audit round five).
+   */
+  const ownsDesign = (rec: { ownerId: string | null }, userId: string | null): boolean => !!userId && rec.ownerId === userId;
+
   const getVisible = async (req: FastifyRequest, reply: FastifyReply) => {
     const { id } = req.params as { id: string };
     const rec = await repo.get(id).catch(() => null);
     const userId = await userOf(req);
-    if (!rec || (!rec.isPublic && rec.ownerId !== userId)) {
+    if (!rec || (!rec.isPublic && !ownsDesign(rec, userId))) {
       await reply.code(404).send({ error: 'not found' });
       return null;
     }
@@ -2909,7 +3047,7 @@ export async function buildApp(
     const { id } = req.params as { id: string };
     const rec = await repo.get(id).catch(() => null);
     const userId = await userOf(req);
-    if (!rec || (!rec.isPublic && rec.ownerId !== userId)) {
+    if (!rec || (!rec.isPublic && !ownsDesign(rec, userId))) {
       await reply.code(404).send({ error: 'not found' });
       return null;
     }
@@ -2928,7 +3066,12 @@ export async function buildApp(
   app.get('/api/designs/:id', async (req, reply) => {
     const v = await getVisible(req, reply);
     if (!v) return;
-    const { cellsGz, ...meta } = v.rec;
+    const { cellsGz, ...all } = v.rec;
+    // Whether it is pinned, in the Trash, taken down or began as an AI design
+    // is the owner's business: those fields describe their Projects page, and
+    // they were in every anonymous answer (audit round five).
+    const { pinned: _p, deletedAt: _d, takenDown: _t, origin: _o, ...shared } = all;
+    const meta = ownsDesign(v.rec, v.userId) ? all : shared;
     // Creator name is needed by the public share page; resolve it from the owner id.
     const owner = meta.ownerId ? await auth.getUserById(meta.ownerId).catch(() => null) : null;
     return { ...meta, ownerName: owner?.username ?? null, cellsGzB64: cellsGz.toString('base64') };
@@ -2951,7 +3094,7 @@ export async function buildApp(
     // The layer stack — the owner's own pictures, as uploaded — is the
     // owner's. Everyone else sees the design as its seats: the banners come
     // with it, the layers do not.
-    const out = v.rec.ownerId === v.userId ? gz : withoutLayers(gz);
+    const out = ownsDesign(v.rec, v.userId) ? gz : withoutLayers(gz);
     return { sceneGzB64: out.toString('base64') };
   });
 
@@ -3338,13 +3481,15 @@ export async function buildApp(
     const v = await getVisible(req, reply);
     if (!v) return;
     if (!v.userId) return reply.code(401).send({ error: 'authentication required' });
-    const own = v.rec.ownerId === v.userId;
+    const own = ownsDesign(v.rec, v.userId);
     // Someone else's design: the creator's "no remixes" holds here too. Fork
     // used to copy it anyway, banners included and without the credit a remix
     // carries (audit round four).
     if (!own && v.rec.allowRemix === false) return reply.code(403).send({ error: 'this design cannot be remixed' });
     const title = cleanTitle((req.body as { title?: string } | null)?.title, `${v.rec.title} (fork)`);
+    if (!(await roomForDesign(req, v.userId, reply))) return;
     const created = await repo.fork(v.rec.id, title, v.userId);
+    if (!created) refundDesign(req, v.userId);
     if (created) await copyScene(v.rec.id, created.id, own);
     // A copy of a design a moderator took down is taken down with it, or
     // publishing the copy would undo the takedown.
@@ -3407,8 +3552,12 @@ export async function buildApp(
     const title = (req.body as { title?: string } | null)?.title;
     const rec = await repo.get(id).catch(() => null);
     const remixTitle = cleanTitle(title, `${rec?.title ?? 'Tifo'} (remix)`);
+    if (!(await roomForDesign(req, userId, reply))) return;
     const created = await social!.remix(id, userId, remixTitle);
-    if (!created) return reply.code(403).send({ error: 'this design cannot be remixed' });
+    if (!created) {
+      refundDesign(req, userId);
+      return reply.code(403).send({ error: 'this design cannot be remixed' });
+    }
     // A remix is the design as its seats: whoever remixes gets them flat.
     await copyScene(id, created.id, false);
     return reply.code(201).send(created);

@@ -15,7 +15,7 @@ import { MemoryFeedbackRepository, PgFeedbackRepository, type FeedbackRepository
 import { buildApp, TRASH_DAYS, type TemplateInfo } from './routes';
 import { createEmailSender } from './email';
 import { seedShowcase, seedTemplates } from './seedTemplates';
-import type { AuthRepository, DesignRepository } from './repo';
+import { EVENTS_RETENTION_DAYS, type AuthRepository, type DesignRepository } from './repo';
 import { envNum } from './env';
 import { logConfigWarnings, logProviderSetup } from './preflight';
 import { schemaStatements } from './schema';
@@ -151,6 +151,13 @@ async function main(): Promise<void> {
       console.error('[tifo] security log init failed: history will not be kept:', e);
     }
     const soc = new SocMonitor({ ...socOptions, repo: socRepo });
+    // Funnel events are kept for EVENTS_RETENTION_DAYS (repo.ts), then deleted,
+    // once at boot and daily, like the visits and the security log.
+    const events = new PgEventsRepository(pool);
+    const pruneEvents = (): Promise<unknown> =>
+      events.purge(new Date(Date.now() - EVENTS_RETENTION_DAYS * 24 * 60 * 60 * 1000)).catch((e) => console.error('[tifo] events purge failed:', e));
+    await pruneEvents();
+    setInterval(() => void pruneEvents(), 24 * 60 * 60 * 1000).unref();
     const pgDesigns = new PgDesignRepository(pool);
     const pgAuth = new PgAuthRepository(pool);
     seedRepos = { designs: pgDesigns, auth: pgAuth };
@@ -158,7 +165,7 @@ async function main(): Promise<void> {
       staticDir,
       rateLimit: true,
       logger: isProd,
-      events: new PgEventsRepository(pool),
+      events,
       adminUsernames: adminUsernames,
       social: new PgSocialRepository(pool),
       leads: new PgLeadsRepository(pool),

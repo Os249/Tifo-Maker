@@ -27,6 +27,7 @@ import {
   unlinkProvider,
   adoptProviderSession,
   providerFailure,
+  aiUnlockToken,
 } from './net/api';
 import type { Me } from './net/api';
 import { applyDom, getLang, initLang, t, tErr, tv } from './ui/i18n';
@@ -300,15 +301,38 @@ $('ac-name-form')?.addEventListener('submit', async (e) => {
   const msg = $('ac-name-msg');
   const name = (input?.value ?? '').trim();
   if (!/^[a-zA-Z0-9_]{3,24}$/.test(name)) return say(msg, t('ac.name.rules'), 'bad');
+  // Claiming a name reserved for an admin takes the admin password. The field
+  // appears only in a browser that has unlocked the admin tools, and only after
+  // the name was refused, so nobody else is ever asked for a password they
+  // could not have.
+  const adminPw = $<HTMLInputElement>('ac-name-adminpw');
+  const adminPwLabel = $('ac-name-admin-form');
+  const claimPw = adminPw && !adminPw.hidden ? adminPw.value : '';
   say(msg, t('ac.saving'), 'info');
   try {
-    const saved = await changeUsername(name);
+    const saved = await changeUsername(name, claimPw || undefined);
     if (me) me.username = saved;
+    if (adminPw) { adminPw.value = ''; adminPw.hidden = true; }
+    if (adminPwLabel) adminPwLabel.hidden = true;
     renderName();
     say(msg, tv('ac.name.saved', { name: saved }), 'ok');
   } catch (err) {
+    if ((err as { taken?: boolean }).taken && aiUnlockToken() && adminPw) {
+      adminPw.hidden = false;
+      if (adminPwLabel) adminPwLabel.hidden = false;
+      adminPw.value = '';
+      adminPw.focus();
+      say(msg, t(claimPw ? 'ac.name.adminWrong' : 'ac.name.adminAsk'), 'bad');
+      return;
+    }
     say(msg, (err as Error).message || t('ac.name.taken'), 'bad');
   }
+});
+
+// Enter in the admin password field saves the name, as in the name field.
+$('ac-name-admin-form')?.addEventListener('submit', (e) => {
+  e.preventDefault();
+  $<HTMLButtonElement>('ac-name-save')?.click();
 });
 
 // ---- password --------------------------------------------------------------

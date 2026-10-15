@@ -4,7 +4,8 @@ import { LEAGUES, queryCatalog } from '../core/stadiumCatalog';
 /**
  * "Your club's real stadium is here": told once, to everyone who opens the
  * editor, after the 2026-27 Roshn Saudi League, Premier League and LaLiga
- * grounds went in.
+ * grounds went in — and once more (the flag's _v2) when the ultras' grounds of
+ * France, Turkey, Morocco, Algeria and Thailand joined them, October 2026.
  *
  * The same manners as the Banners card (whatsNew.ts): a card beside the work,
  * not a dialog in front of it; it waits behind the onboarding dialog, the tour
@@ -17,13 +18,18 @@ import { LEAGUES, queryCatalog } from '../core/stadiumCatalog';
  * waits for a later visit (main.ts).
  */
 
-const FLAG = 'tifo_news_leagues_v1';
+const FLAG = 'tifo_news_leagues_v2';
 
 /** The picture for each league: one of its grounds, rendered in Match Day. */
 const PICTURE: Record<string, string> = {
   'saudi-pro-league': '/news/leagues-saudi.webp',
   'premier-league': '/news/leagues-premier.webp',
   laliga: '/news/leagues-laliga.webp',
+  'ligue-1': '/news/leagues-ligue1.webp',
+  'super-lig': '/news/leagues-superlig.webp',
+  botola: '/news/leagues-botola.webp',
+  'algeria-ligue-1': '/news/leagues-algeria.webp',
+  'thai-league': '/news/leagues-thai.webp',
 };
 
 export function leaguesNewsSeen(): boolean {
@@ -108,9 +114,7 @@ function show(opts: LeaguesNewsOptions): void {
     opts.openStadiums(league);
   };
 
-  // One tile per league it announced: its picture, its name, how many grounds.
-  // (The countries added since are in the stadium list's league filter, not
-  // in this card: it has said what it says to everyone who answered it.)
+  // One tile per league: its picture, its name, how many grounds.
   const row = q('.news-leagues-row');
   for (const l of LEAGUES) {
     if (!PICTURE[l.tag]) continue;
