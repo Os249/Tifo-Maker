@@ -417,7 +417,23 @@ console.log('\n— the palette works by touch —');
   }
 
   // Removing a colour that is painted on seats would silently repaint them.
+  // A new project starts with every seat empty now, so put the first colour
+  // on the seats first (a whole-stand fill, as Fill would).
+  await p.evaluate(() => {
+    const cells = [...document.querySelectorAll('#palette .swatch')];
+    cells[0]?.click();
+  });
+  await p.evaluate(() => document.querySelector('[data-tool="fill"]')?.click());
+  await p.waitForTimeout(200);
+  await p.evaluate(() => {
+    const c = document.querySelector('#canvas-host canvas');
+    const r = c.getBoundingClientRect();
+    const fire = (t) => c.dispatchEvent(new PointerEvent(t, { pointerId: 7, isPrimary: true, bubbles: true, cancelable: true, composed: true, clientX: r.left + r.width / 2, clientY: r.top + r.height / 2, buttons: t === 'pointerup' ? 0 : 1, pointerType: 'mouse' }));
+    fire('pointerdown'); fire('pointerup');
+  });
+  await p.waitForTimeout(500);
   const used = (await p.$$('#palette .swatch'))[0];
+  check('(the first colour is on the seats)', await p.$eval('#palette .swatch', (e) => !/, 0 /.test(e.getAttribute('aria-label') || '')), await p.$eval('#palette .swatch', (e) => e.getAttribute('aria-label')));
   const ub = await used.boundingBox();
   await p.evaluate(({ x, y }) => document.elementFromPoint(x, y)
     .dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerType: 'touch', pointerId: 1 })),

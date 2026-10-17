@@ -152,25 +152,37 @@ const NOT_FOUND_HTML = `<!doctype html>
 <meta name="robots" content="noindex">
 <title>الصفحة غير موجودة · Page not found · TifoMaker</title>
 <style>
+  /* Floodlight (src/ui/tokens.css), written out by hand: this page carries no
+     asset references, so it cannot import the stylesheet. Night ground, the
+     card-mosaic texture, one blue action, the scarf under the number. */
   :root{ color-scheme: dark; }
   body{ margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center;
-        background:#0d1117; color:#e6edf3; text-align:center; padding:24px;
-        font:16px/1.6 -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif; }
-  .n{ font-size:64px; font-weight:800; letter-spacing:-.03em; margin:0; color:#3fb950; }
-  h1{ font-size:20px; margin:12px 0 8px; font-weight:600; }
-  p{ margin:0 0 24px; color:#8b949e; max-width:32rem; }
-  a{ display:inline-block; margin:0 6px; padding:10px 18px; border-radius:8px;
-     border:1px solid #2a323d; color:#e6edf3; text-decoration:none; font-size:14px; }
-  a.p{ background:#3fb950; border-color:#3fb950; color:#04220e; font-weight:600; }
-  a:hover{ border-color:#3d4754; }
-  .c{ margin:28px 0 0; font-size:13px; color:#7b8592; } /* #6b7480 was 4.00:1 on this ground */
-  .c a{ display:inline; margin:0; padding:0; border:0; color:#58a6ff; text-decoration:underline; }
-  .c a:hover{ color:#79b8ff; }
+        background:#0B1120 radial-gradient(circle at 50% 50%, rgba(255,255,255,.06) 0 1.4px, transparent 1.6px) 0 0/14px 14px;
+        color:#F1F4FB; text-align:center; padding:24px;
+        font:16px/1.6 Inter,Almarai,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; }
+  main{ background:#0B1120; border:1px solid #243049; border-radius:22px; padding:32px 28px; max-width:34rem; box-shadow:0 20px 60px rgba(0,0,0,.5); }
+  .w{ font-weight:800; letter-spacing:.02em; font-size:15px; margin:0 0 18px; }
+  .w b{ color:#4A92F2; }
+  .n{ font-size:72px; font-weight:800; letter-spacing:-.02em; line-height:1; margin:0; color:#F1F4FB; }
+  .s{ height:6px; width:120px; margin:14px auto 6px; border-radius:2px;
+      background:repeating-linear-gradient(90deg,#1C6FE0 0 22px,#F1F4FB 22px 30px,#0B1120 30px 52px,#F1F4FB 52px 60px); }
+  h1{ font-size:20px; margin:14px 0 6px; font-weight:700; }
+  p{ margin:0 0 20px; color:#A6B0C8; }
+  a{ display:inline-block; margin:4px; padding:10px 18px; border-radius:999px;
+     border:1px solid #33415C; color:#F1F4FB; text-decoration:none; font-size:14px; font-weight:600; }
+  a.p{ background:#1C6FE0; border-color:#1C6FE0; color:#fff; }
+  a:hover{ border-color:#7FB0FF; }
+  a.p:hover{ background:#155EC4; border-color:#155EC4; }
+  .c{ margin:24px 0 0; font-size:13px; color:#A6B0C8; }
+  .c a{ display:inline; margin:0; padding:0; border:0; border-radius:0; color:#7FB0FF; text-decoration:underline; font-weight:500; }
+  .c a:hover{ color:#A9CAFF; }
 </style>
 </head>
 <body>
   <main>
+    <p class="w">TIFO<b>MAKER</b></p>
     <p class="n">404</p>
+    <div class="s" aria-hidden="true"></div>
     <!-- Server-rendered, so there is no client i18n here and no way to know the
          visitor's language. Both languages ship, Arabic first. -->
     <h1 dir="rtl" lang="ar">هذي الصفحة ما هي موجودة</h1>

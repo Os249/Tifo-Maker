@@ -122,7 +122,8 @@ const readCard = (p) => p.evaluate(() => ({
   await p.goto(`${B}/app?new=1`, { waitUntil: 'networkidle' });
   await p.click('#rail-ai');
   await p.fill('#ai-prompt', 'نسر ذهبي على المدرج الجنوبي');
-  await p.click('#ai-generate-super');
+  await p.check('#ai-whole');
+  await p.click('#ai-generate');
   await p.waitForSelector('#ai-state:not([hidden])', { timeout: 60000 });
   const c = await readCard(p);
   check('Arabic card: a sentence, not the provider reply', !RAW.test(c.title + c.body), JSON.stringify(c));

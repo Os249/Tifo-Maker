@@ -7,6 +7,7 @@
 // when it failed all thirteen icons on the page rendered as nothing: the like
 // and comment counts became a bare "0  0".
 import { cleanAddressBar } from './core/utm';
+import { hydrateBowls } from './ui/bowlPicture';
 import { escapeHtml } from './core/escape';
 import './vendor/tabler-subset.css';
 import './community.css';
@@ -256,8 +257,10 @@ function initPaging(): void {
 function renderCard(item: GalleryItem, onClick?: () => void): HTMLElement {
   const card = document.createElement('article');
   card.className = 'tifo-card';
+  // The tifo in the bowl (ui/bowlPicture.ts), drawn from the strip thumbnail
+  // once the card is near the screen.
   const thumb = item.hasThumbnail
-    ? `<div class="card-thumb"><img class="card-thumb-img" src="${thumbnailUrl(item.id)}" alt="" loading="lazy" />`
+    ? `<div class="card-thumb is-bowl"><img class="card-thumb-img" data-bowl="${thumbnailUrl(item.id)}" alt="" />`
     : `<div class="card-thumb card-thumb-empty">`;
   // Badges sit in the body, not over the art. They used to float on the
   // thumbnail, which was free while the card wasted half its height on
@@ -293,6 +296,7 @@ function renderCard(item: GalleryItem, onClick?: () => void): HTMLElement {
         <button class="card-stat card-share" title="${escapeHtml(t('cm.shareThis'))}"><i class="ti ti-share"></i></button>
       </div>
     </div>`;
+  queueMicrotask(() => hydrateBowls(card));
   card.addEventListener('click', () => (onClick ? onClick() : openPreview(item)));
   // Share button — opens the share modal without triggering the card's open.
   const shareBtn = card.querySelector('.card-share') as HTMLElement | null;
@@ -443,7 +447,7 @@ async function openPreview(item: GalleryItem, focusCommentId?: string | null): P
             <button class="follow-btn" id="follow-btn" ${!item.ownerId || (me && me.id === item.ownerId) ? 'hidden' : ''}>Follow</button>
           </div>
           <div class="side-stats">
-            <span class="side-stat"><i class="ti ti-eye"></i> <span id="view-count">${item.viewCount ?? 0}</span> <span id="view-word">${escapeHtml(t('cm.viewsWord'))}</span></span>
+            <span class="side-stat"><i class="ti ti-eye"></i> <span id="view-count">${item.viewCount ?? 0}</span> <span id="view-word">${escapeHtml(t((item.viewCount ?? 0) === 1 ? 'cm.viewWord' : 'cm.viewsWord'))}</span></span>
           </div>
           ${
             item.description
@@ -503,6 +507,8 @@ async function countView(item: GalleryItem): Promise<void> {
     item.viewCount = views;
     const inModal = document.getElementById('view-count');
     if (inModal) inModal.textContent = String(views);
+    const word = document.getElementById('view-word');
+    if (word) word.textContent = t(views === 1 ? 'cm.viewWord' : 'cm.viewsWord');
     // The card behind the modal, so the number is right when it closes.
     const onCard = document.querySelector(`.view-count[data-id="${cssId(item.id)}"]`);
     if (onCard) onCard.textContent = String(views);

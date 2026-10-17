@@ -131,24 +131,29 @@ console.log('\n— 2. what the visit log makes of tagged links —');
 console.log('\n— 3. first run: start from your club, then post it —');
 for (const [label, opts] of [['desktop', WIDE], ['phone', PHONE]]) {
   const p = await open(opts, [['tifo_news_banners_v1', '1'], ['tifo_news_leagues_v2', '1']]);
-  await p.goto(`${B}/app?new=1&e2e`, { waitUntil: 'domcontentloaded' });
-  const dialog = await until(p, () => document.querySelectorAll('.ob-club-chip').length >= 8, null, 90000);
-  check(`${label}: the welcome dialog opens on "Start from your club"`, dialog);
-  const first = await p.evaluate(() => document.activeElement?.classList.contains('ob-club-chip'));
-  check(`${label}: and a club has the focus`, !!first);
-  await p.evaluate(() => [...document.querySelectorAll('.ob-club-chip')].find((b) => b.dataset.club === 'Al Hilal')?.click());
+  await p.goto(`${B}/projects?new=1&e2e`, { waitUntil: 'domcontentloaded' });
+  const dialog = await until(p, () => document.querySelectorAll('.st-club').length >= 8, null, 90000);
+  check(`${label}: the start flow asks "Who do you support?"`, dialog && await p.evaluate(() => document.getElementById('np-h')?.textContent === 'Who do you support?'));
+  const first = await p.evaluate(() => document.activeElement?.id === 'np-h');
+  check(`${label}: and the question has the focus (no keyboard popping up on a phone)`, !!first);
+  await p.evaluate(() => document.querySelector('.st-club[data-club="hilal"]')?.click());
+  await until(p, () => document.querySelector('.st-opt.on')?.dataset.start === 'club', null, 10000);
+  await p.evaluate(() => document.getElementById('st-go')?.click());
   const inStadium = await until(p, () => { const h = document.getElementById('preview-host'); return !!h && !h.hidden && !!h.querySelector('canvas'); }, null, 90000);
-  check(`${label}: one tap draws the bowl and opens the stadium`, inStadium);
+  check(`${label}: two taps draw the bowl and open the stadium`, inStadium);
   await until(p, () => /[?&]local=/.test(location.search), null, 30000);
+  // Read off the swatches ("Swatch #0033A0, 9,700 seats"): the editor was
+  // opened by the start flow, so the page has no test hook to read the store.
   const design = await p.evaluate(() => {
-    const { store } = window.__tifo;
-    let painted = 0;
-    for (let i = 0; i < store.cells.length; i++) if (store.cells[i]) painted++;
-    return { pal: store.palette.join(' ').toLowerCase(), painted: painted / store.cells.length, local: /[?&]local=/.test(location.search) };
+    const labels = [...document.querySelectorAll('#palette .swatch')].map((b) => b.getAttribute('aria-label') || '');
+    const seats = labels.reduce((n, l) => n + Number((l.match(/, ([\d,]+) /) || [, '0'])[1].replace(/,/g, '')), 0);
+    const total = Number(((document.getElementById('stat')?.textContent || '').match(/· ([\d,]+) /) || [, '1'])[1].replace(/,/g, ''));
+    return { pal: labels.join(' ').toLowerCase(), painted: seats / total, local: /[?&]local=/.test(location.search) };
   });
   check(`${label}: in the club's colours, kept as a project`, design.pal.includes('#0033a0') && design.painted > 0.5 && design.local, JSON.stringify(design).slice(0, 200));
   const nudge = await until(p, () => !!document.querySelector('.pm-nudge'), null, 15000);
   check(`${label}: the one-time "Post it?" card appears`, nudge);
+  check(`${label}: offering "Paint it" beside "Post it"`, await p.evaluate(() => document.querySelector('.pm-nudge .pm-b')?.textContent.trim() === 'Paint it'));
   if (label === 'phone') {
     check('phone: Post it sits beside Match Day', await p.evaluate(() => { const b = document.querySelector('.m-md .m-post'); return !!b && b.getBoundingClientRect().width > 0; }));
     const clash = await p.evaluate(() => {

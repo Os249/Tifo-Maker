@@ -81,6 +81,8 @@ export interface Preview3DOptions {
   quality?: ViewTier;
   /** Leave the building out (cards and chairs only). */
   structure?: boolean;
+  /** The landing hero's 3/4 view, turning or not (reduced motion). */
+  hero?: boolean;
 }
 
 function skyTexture(): THREE.Texture {
@@ -259,7 +261,7 @@ export class Preview3D {
     // Hero showcase: a high, pulled-back 3/4 view that always frames the WHOLE
     // bowl as it slowly spins (and stays that, not a preset, when the
     // building arrives).
-    if (options.autoRotate) {
+    if (options.autoRotate || options.hero) {
       this.onPreset = null;
       this.heroCamera();
     }
@@ -481,7 +483,7 @@ export class Preview3D {
       if (this.onPreset) {
         const p = CAMERA_PRESETS.find((c) => c.name === this.onPreset);
         if (p) this.applyPreset(p);
-      } else if (this.options.autoRotate) this.heroCamera();
+      } else if (this.options.autoRotate || this.options.hero) this.heroCamera();
       this.requestRender();
     } catch (err) {
       // Never take the view down with it: the cards and the pitch are the design.
@@ -806,11 +808,14 @@ export class Preview3D {
   }
 
   private heroCamera(): void {
-    // The hero's long-standing 3/4 view of the default bowl, scaled to this one.
+    // The hero's 3/4 view of the default bowl, scaled to this one, and far
+    // enough back that the whole ground (roof and facade included) sits in
+    // the landing's 16:10 frame with room to turn, instead of being cut off
+    // at the frame's edges.
     const { ax, bz } = this.extent();
     const k = Math.max(ax, bz) / 133;
-    this.camera.position.set(115 * k, 130 * k, 175 * k);
-    this.controls.target.set(0, -4, 0);
+    this.camera.position.set(132 * k, 158 * k, 204 * k);
+    this.controls.target.set(0, -10 * k, 0);
     this.controls.update();
     this.requestRender();
   }

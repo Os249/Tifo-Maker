@@ -31,7 +31,7 @@ const CSS = `
   display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px;
   background: #0F172A; color: #F1F4FB; border: 1px solid #243049; border-radius: 14px;
   padding: 14px 16px; box-shadow: 0 12px 40px rgba(0,0,0,.45);
-  font: 14px/1.5 'Inter', system-ui, -apple-system, sans-serif;
+  font: 14px/1.5 var(--font-ui, 'Inter', 'Almarai', system-ui, -apple-system, sans-serif);
 }
 .consent-msg { flex: 1 1 260px; }
 .consent-msg a { color: #6fa8f0; }
@@ -41,7 +41,13 @@ const CSS = `
   padding: 9px 16px; border: 1px solid #33415c; background: transparent; color: #f1f4fb; min-height: 40px;
 }
 .consent-bar .consent-all { background: #1c6fe0; border-color: #1c6fe0; color: #fff; }
-@media (max-width: 560px) { .consent-actions { width: 100%; } .consent-actions button { flex: 1; } }
+/* On a phone it is a slim strip, not a third of the screen: it sits on top
+   of whatever a first visit came to see. */
+@media (max-width: 560px) {
+  .consent-bar { left: 8px; right: 8px; bottom: 8px; gap: 8px; padding: 10px 12px; font-size: 13px; line-height: 1.4; border-radius: 12px; }
+  .consent-actions { width: 100%; }
+  .consent-actions button { flex: 1; min-height: 38px; padding: 7px 12px; }
+}
 `;
 
 /** Show the consent banner once, if no choice has been made yet. */

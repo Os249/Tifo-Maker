@@ -72,17 +72,17 @@
 .pj-card:hover { box-shadow: var(--shadow-md); transform: translateY(-2px); }
 .pj-card.pinned { border-color: rgba(232, 183, 58, 0.55); }
 
-/* The picture is the unrolled bowl, about 9:1. On a card that is a sliver,
-   so it is shown as two halves stacked: the whole tifo, at a readable size. */
+/* The tifo in the bowl (ui/bowlPicture.ts), drawn from the strip picture the
+   project already keeps: 16:10, the same as every other card on the site. */
 .pj-thumb {
-  display: flex; flex-direction: column; justify-content: center; gap: 5px;
-  aspect-ratio: 2.35 / 1; padding: 14px 14px; background: #14171f; color: #9aa3b5; text-decoration: none;
+  display: flex; flex-direction: column; justify-content: center; align-items: center;
+  aspect-ratio: 16 / 10; background: var(--mosaic-dot) 0 0 / 10px 10px, radial-gradient(ellipse at 50% 50%, #16213a, #070B14 70%);
+  color: var(--mist); text-decoration: none; overflow: hidden;
 }
 .pj-thumb:focus-visible { outline: 3px solid var(--blue); outline-offset: -3px; }
-.pj-half { display: block; overflow: hidden; border-radius: 3px; line-height: 0; direction: ltr; }
-.pj-half img { display: block; width: 200%; height: auto; max-width: none; }
-.pj-half + .pj-half img { margin-left: -100%; }
-.pj-half img:not([src]) { height: 0; padding-bottom: 10%; background: #1d212b; }
+.pj-thumb.is-bowl img { display: block; width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity var(--t-med) var(--ease); }
+.pj-thumb.is-bowl img[data-bowl-state="ready"], .pj-thumb.is-bowl img[data-bowl-state="strip"] { opacity: 1; }
+.pj-thumb.is-bowl.bowl-failed img { object-fit: contain; image-rendering: pixelated; }
 .pj-thumb-empty { font-size: 13px; font-weight: 600; text-align: center; opacity: .8; }
 .pj-card.trashed .pj-thumb { filter: grayscale(1); opacity: .6; }
 
@@ -114,7 +114,7 @@ a.pj-name::after { content: ''; position: absolute; inset: 0; z-index: 0; }
   font-size: 11.5px; font-weight: 700; letter-spacing: .02em; color: var(--muted); background: var(--raise-2);
 }
 .pj-badge.pub { color: var(--emerald); background: rgba(15, 138, 77, 0.12); }
-.pj-badge.ai { color: var(--purple); background: rgba(91, 42, 134, 0.1); }
+.pj-badge.ai { color: var(--blue); background: rgba(28, 111, 224, 0.1); }
 
 /* ---- the card menu ---- */
 .pj-menu {
@@ -144,7 +144,7 @@ a.pj-name::after { content: ''; position: absolute; inset: 0; z-index: 0; }
 .pj-empty-art span { border-radius: 3px; }
 .pj-empty-art span:nth-child(odd) { background: var(--blue-solid); }
 .pj-empty-art span:nth-child(even) { background: #F2F1EC; }
-.pj-ai span[aria-hidden] { color: var(--purple); }
+.pj-ai span[aria-hidden] { color: var(--blue); }
 
 /* ---- toast with an action ---- */
 .pj-toast { display: flex; align-items: center; gap: 14px; max-width: calc(100vw - 32px); }
@@ -160,7 +160,7 @@ a.pj-name::after { content: ''; position: absolute; inset: 0; z-index: 0; }
   position: fixed; inset: 0; z-index: 70; display: flex; align-items: flex-start; justify-content: center;
   overflow-y: auto; overscroll-behavior: contain; padding: 6vh 16px 24px;
   padding-bottom: calc(24px + var(--consent-h, 0px));
-  background: rgba(14, 10, 26, 0.55); backdrop-filter: blur(6px);
+  background: rgba(7, 11, 20, 0.6); backdrop-filter: blur(6px);
   font-family: var(--font);
 }
 .np-modal {
@@ -189,8 +189,7 @@ a.pj-name::after { content: ''; position: absolute; inset: 0; z-index: 0; }
 .np-input:focus { outline: none; border-color: var(--blue); box-shadow: 0 0 0 3px rgba(28, 111, 224, 0.18); }
 .np-prompt { resize: vertical; min-height: 88px; line-height: 1.45; }
 .np-prompt::placeholder { color: var(--muted); opacity: .85; }
-.np-err { margin: 0; font-size: 13px; font-weight: 600; color: #c0343f; }
-:root[data-theme="dark"] .np-err { color: #ff9aa2; }
+.np-err { margin: 0; font-size: 13px; font-weight: 600; color: var(--danger); }
 .np-hint { margin: 0; font-size: 12.5px; line-height: 1.5; color: var(--muted); }
 .np-examples { display: flex; flex-wrap: wrap; gap: 6px; }
 .np-example {
@@ -200,32 +199,8 @@ a.pj-name::after { content: ''; position: absolute; inset: 0; z-index: 0; }
 .np-example:hover { border-color: var(--blue); color: var(--blue); }
 .np-example:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
 
-.np-sec-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-.np-search {
-  width: 180px; max-width: 55%; border: 1px solid var(--line); border-radius: var(--r-pill); padding: 7px 12px;
-  font: inherit; font-size: 13px; background: var(--raise); color: var(--ink);
-}
-.np-search:focus { outline: none; border-color: var(--blue); }
-.np-stadiums {
-  display: grid; grid-template-columns: repeat(auto-fill, minmax(165px, 1fr)); gap: 8px;
-  max-height: 212px; overflow-y: auto; padding: 3px; margin: -3px;
-}
-.np-stadium {
-  display: flex; flex-direction: column; align-items: flex-start; gap: 2px; min-width: 0;
-  padding: 10px 12px; text-align: start; border: 1px solid var(--line); border-radius: 12px;
-  background: var(--raise); color: var(--ink); font: inherit; transition: border-color .12s, background .12s;
-}
-.np-stadium:hover { border-color: var(--muted); }
-.np-stadium:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
-.np-stadium.on { border-color: var(--blue); box-shadow: inset 0 0 0 1px var(--blue); background: rgba(28, 111, 224, 0.07); }
-.np-stadium-name {
-  font-size: 14px; font-weight: 700; line-height: 1.3; max-width: 100%; overflow: hidden;
-  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
-}
-.np-stadium-seats { font-size: 12.5px; color: var(--muted); }
-.np-fav { color: #D9A21B; margin-inline-end: 4px; }
 .np-none { grid-column: 1 / -1; margin: 6px 0; font-size: 13px; color: var(--muted); }
-.np-facts { margin: 2px 0 0; font-size: 13.5px; color: var(--ink); }
+.np-fav { color: #D9A21B; margin-inline-end: 4px; }
 
 .np-foot { margin-top: 22px; padding-top: 16px; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 12px; }
 .np-gate { margin: 0; font-size: 13px; color: var(--muted); display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
@@ -246,8 +221,185 @@ a.pj-name::after { content: ''; position: absolute; inset: 0; z-index: 0; }
 .np-btn.primary { background: var(--blue-solid); border-color: var(--blue-solid); color: #fff; }
 .np-btn.primary:hover:not(:disabled) { background: var(--blue-solid-hover); }
 .np-btn:disabled { opacity: .5; cursor: default; }
-.np-spark { color: var(--purple); font-size: 14px; }
+.np-spark { color: var(--blue); font-size: 14px; }
 .np-btn.primary .np-spark { color: #fff; }
+
+
+/* ---- the start flow: club → ground → start (ui/createProject.ts) ----
+   One card with a fixed head and foot and a body that scrolls between them,
+   so the buttons are always on screen however long the club list is. */
+.st-modal {
+  width: min(760px, 100%); padding: 0; display: flex; flex-direction: column;
+  max-height: calc(100dvh - 6vh - 24px - var(--consent-h, 0px));
+}
+/* The two list steps keep one height, so the card does not jump about as a
+   search narrows the list. */
+.st-modal[data-step="club"], .st-modal[data-step="ground"] { height: min(820px, calc(100dvh - 6vh - 24px - var(--consent-h, 0px))); }
+.st-head { position: relative; padding: 20px 26px 6px; }
+.st-head .np-h { margin: 0; outline: none; font-family: var(--font-display); font-size: 26px; letter-spacing: -0.01em; }
+.st-lead { margin: 6px 0 0; font-size: 14.5px; line-height: 1.5; color: var(--muted); padding-inline-end: 40px; }
+.st-lead:empty { display: none; }
+.st-steps { display: flex; gap: 4px; margin: 0 0 14px; padding: 0; list-style: none; }
+.st-steps li { width: 28px; height: 4px; border-radius: 2px; background: var(--line); transition: background var(--t-med); }
+.st-steps li.on { background: var(--blue-solid); }
+/* No ground step for someone who picked a listed club: two dots, not three. */
+.st-modal:not([data-step="ground"]) .st-steps li[data-s="ground"]:not(.on) { display: none; }
+.st-body {
+  flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
+  padding: 12px 26px 18px; display: flex; flex-direction: column; gap: 16px;
+}
+.st-foot { margin: 0; padding: 14px 26px 18px; }
+.st-modal[data-step="club"] .np-actions { justify-content: space-between; }
+.st-search {
+  position: sticky; top: -12px; z-index: 1; padding: 11px 14px; font-size: 15px;
+  box-shadow: 0 -12px 0 var(--card), 0 6px 10px -8px rgba(11, 20, 36, .18);
+}
+.st-results { display: flex; flex-direction: column; gap: 6px; }
+.st-group {
+  margin: 10px 0 4px; font-family: var(--font-ui); font-size: 12px; font-weight: 700;
+  letter-spacing: .06em; text-transform: uppercase; color: var(--muted);
+}
+:root[dir="rtl"] .st-group { letter-spacing: 0; text-transform: none; font-size: 13px; }
+.st-results > .st-group:first-child { margin-top: 0; }
+
+/* The scarf: a club's two colours in stripes. A club we have no colours for
+   gets a grey one, and the start step asks for its colours instead. */
+.st-scarf {
+  display: block; height: 14px; flex: none;
+  background: repeating-linear-gradient(90deg, var(--c1, #8a93a6) 0 16px, var(--c2, #d5dae3) 16px 24px);
+  box-shadow: inset 0 -1px 0 rgba(11, 20, 36, .1);
+}
+.st-scarf.none { background: repeating-linear-gradient(90deg, var(--line-strong) 0 16px, var(--raise-2) 16px 24px); }
+
+.st-clubs { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+.st-club {
+  display: flex; flex-direction: column; align-items: stretch; gap: 2px; min-width: 0; padding: 0 0 10px;
+  border: 1px solid var(--line); border-radius: var(--r-md); overflow: hidden; text-align: start;
+  background: var(--raise); color: var(--ink); font: inherit; cursor: pointer;
+  transition: border-color var(--t-fast), transform var(--t-fast) var(--ease), box-shadow var(--t-fast);
+}
+.st-club .st-scarf { margin-bottom: 7px; }
+.st-club:hover { border-color: var(--blue); transform: translateY(-1px); box-shadow: var(--shadow-sm); }
+.st-club:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+.st-club.yours { border-color: var(--blue); box-shadow: inset 0 0 0 1px var(--blue); }
+.st-club-name { padding: 0 12px; font-size: 14.5px; font-weight: 700; line-height: 1.3; overflow-wrap: anywhere; }
+.st-club-ground { padding: 0 12px; font-size: 12.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.st-custom {
+  display: flex; align-items: center; gap: 12px; width: 100%; padding: 12px 14px; margin-top: 4px;
+  border: 1px dashed var(--line-strong); border-radius: var(--r-md); background: transparent;
+  color: var(--ink); font: inherit; font-size: 14.5px; font-weight: 700; text-align: start; cursor: pointer;
+}
+.st-custom .st-scarf { width: 40px; height: 22px; border-radius: 4px; }
+.st-custom span:nth-child(2) { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.st-custom i { font-style: normal; color: var(--blue); }
+:root[dir="rtl"] .st-custom i { transform: scaleX(-1); }
+.st-custom:hover { border-color: var(--blue); color: var(--blue); }
+.st-custom:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+
+.st-grounds { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 8px; }
+.st-ground {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px; min-width: 0;
+  padding: 10px 12px; text-align: start; border: 1px solid var(--line); border-radius: var(--r-md);
+  background: var(--raise); color: var(--ink); font: inherit; cursor: pointer;
+  transition: border-color var(--t-fast), background var(--t-fast);
+}
+.st-ground:hover { border-color: var(--blue); }
+.st-ground:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+.st-ground.on { border-color: var(--blue); box-shadow: inset 0 0 0 1px var(--blue); background: color-mix(in srgb, var(--blue-solid) 7%, var(--raise)); }
+.st-ground-name {
+  font-size: 14px; font-weight: 700; line-height: 1.3; max-width: 100%; overflow: hidden;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+}
+.st-ground-meta { font-size: 12.5px; color: var(--muted); }
+
+/* Step 3: who and where, then how. */
+.st-summary {
+  display: flex; align-items: center; gap: 12px; padding: 10px 12px;
+  border: 1px solid var(--line); border-radius: var(--r-md); background: var(--raise-2);
+}
+.st-summary .st-scarf { width: 46px; height: 34px; border-radius: 6px; }
+.st-summary-text { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.st-summary-text b { font-size: 15.5px; line-height: 1.3; overflow-wrap: anywhere; }
+.st-summary-text span { font-size: 13px; color: var(--muted); }
+.st-summary-acts { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 2px 12px; }
+.st-link {
+  border: none; background: none; padding: 4px 0; color: var(--blue); font: inherit; font-size: 13.5px; font-weight: 600;
+  cursor: pointer; text-decoration: underline; text-decoration-color: transparent; text-underline-offset: 3px;
+}
+.st-link:hover { text-decoration-color: currentColor; }
+.st-link:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; border-radius: 4px; }
+.st-sub { font-weight: 500; color: var(--muted); }
+
+.st-colours { display: flex; flex-wrap: wrap; gap: 8px; }
+.st-colour {
+  position: relative; width: 34px; height: 34px; border-radius: 50%; padding: 0; cursor: pointer;
+  background: var(--sw); border: 2px solid var(--card); box-shadow: 0 0 0 1px var(--line-strong);
+  transition: box-shadow var(--t-fast), transform var(--t-fast) var(--ease);
+}
+.st-colour:hover { transform: scale(1.08); }
+.st-colour.on { box-shadow: 0 0 0 2px var(--blue); }
+.st-colour:focus-visible { outline: 2px solid var(--blue); outline-offset: 3px; }
+.st-colour b {
+  position: absolute; top: -6px; inset-inline-end: -6px; min-width: 17px; height: 17px; border-radius: 9px;
+  display: grid; place-items: center; background: var(--blue-solid); color: #fff; font-size: 10.5px; font-weight: 800;
+  border: 2px solid var(--card);
+}
+
+.st-options { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.st-opt {
+  display: flex; flex-direction: column; align-items: stretch; gap: 3px; min-width: 0; padding: 8px 8px 12px;
+  border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--raise); color: var(--ink);
+  font: inherit; text-align: start; cursor: pointer; transition: border-color var(--t-fast), background var(--t-fast);
+}
+.st-opt:hover { border-color: var(--blue); }
+.st-opt:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+.st-opt.on { border-color: var(--blue); box-shadow: inset 0 0 0 1px var(--blue); background: color-mix(in srgb, var(--blue-solid) 7%, var(--raise)); }
+.st-opt-t { padding: 0 4px; font-size: 15px; font-weight: 800; }
+.st-opt-b { padding: 0 4px; font-size: 12.5px; line-height: 1.4; color: var(--muted); }
+
+/* The little stand on each start card: a stand seen from the pitch, in the
+   tifo's colours, with a grid of seats laid over it. */
+.st-art {
+  position: relative; display: grid; place-items: center; height: 62px; margin-bottom: 6px; border-radius: 8px;
+  clip-path: polygon(0 100%, 7% 0, 93% 0, 100% 100%); background: var(--c1);
+}
+.st-art::after {
+  content: ''; position: absolute; inset: 0;
+  background: radial-gradient(circle, rgba(0, 0, 0, .2) 0 1.1px, transparent 1.4px) 0 0 / 6px 6px;
+}
+.st-art-club {
+  background:
+    linear-gradient(var(--c1), var(--c1)) center / 52% 5px no-repeat,
+    linear-gradient(var(--c2), var(--c2)) center / 100% 22px no-repeat,
+    var(--c1);
+}
+.st-art-hoops { background: repeating-linear-gradient(180deg, var(--c1) 0 8px, var(--c2) 8px 16px); }
+.st-art-split { background: linear-gradient(90deg, var(--c1) 50%, var(--c2) 50%); }
+.st-art-sash { background: linear-gradient(120deg, var(--c1) 0 38%, var(--c2) 38% 62%, var(--c1) 62%); }
+.st-art-columns { background: repeating-linear-gradient(90deg, var(--c1) 0 12px, var(--c2) 12px 24px); }
+.st-art-gradient { background: linear-gradient(180deg, var(--c2), var(--c1)); }
+.st-art-blank { background: #262a33; }
+.st-art-blank::after { background: radial-gradient(circle, rgba(255, 255, 255, .16) 0 1.1px, transparent 1.4px) 0 0 / 6px 6px; }
+.st-art-ai {
+  background:
+    radial-gradient(circle at 30% 70%, color-mix(in srgb, var(--c1) 80%, transparent), transparent 55%),
+    radial-gradient(circle at 72% 30%, color-mix(in srgb, var(--c2) 70%, transparent), transparent 55%),
+    var(--night-800);
+}
+.st-art i { position: relative; z-index: 1; font-style: normal; font-size: 22px; color: #fff; text-shadow: 0 1px 6px rgba(0, 0, 0, .5); }
+
+.st-patterns { display: flex; flex-wrap: wrap; gap: 6px; }
+.st-pat {
+  border: 1px solid var(--line); background: var(--raise); color: var(--ink); border-radius: var(--r-pill);
+  padding: 7px 14px; font: inherit; font-size: 13.5px; font-weight: 600; cursor: pointer;
+}
+.st-pat:hover { border-color: var(--blue); }
+.st-pat.on { background: var(--invert); border-color: var(--invert); color: var(--invert-ink); }
+.st-pat:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+.st-quiet { border-color: transparent; background: transparent; color: var(--blue); padding-inline: 4px; }
+.st-quiet:hover:not(:disabled) { border-color: transparent; text-decoration: underline; text-underline-offset: 3px; }
+a.np-btn { text-decoration: none; }
 
 @media (max-width: 600px) {
   .pj-head { padding-top: 28px; }
@@ -255,10 +407,23 @@ a.pj-name::after { content: ''; position: absolute; inset: 0; z-index: 0; }
   .pj-search { max-width: none; flex-basis: 100%; }
   .pj-spacer { display: none; }
   .pj-grid { grid-template-columns: 1fr; }
-  .np-backdrop { align-items: flex-end; padding: 0; }
+  /* The sheet sits on the cookie bar, not under it. */
+  .np-backdrop { align-items: flex-end; padding: 0 0 var(--consent-h, 0px); }
   .np-modal { border-radius: var(--r-lg) var(--r-lg) 0 0; padding: 22px 18px calc(16px + env(safe-area-inset-bottom)); width: 100%; }
-  .np-stadiums { grid-template-columns: 1fr 1fr; max-height: 200px; }
   .np-actions .np-btn { flex: 1 1 auto; }
+  /* A sheet from the bottom, nearly full height, whose foot clears the home bar. */
+  .st-modal { padding: 0; max-height: calc(94dvh - var(--consent-h, 0px)); }
+  .st-head { padding: 18px 18px 4px; }
+  .st-head .np-h { font-size: 23px; }
+  .st-body { padding: 10px 18px 16px; }
+  .st-foot { padding: 12px 18px calc(14px + env(safe-area-inset-bottom)); }
+  .st-clubs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .st-grounds { grid-template-columns: 1fr; }
+  .st-options { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .st-summary { flex-wrap: wrap; }
+  .st-summary-acts { width: 100%; justify-content: flex-start; padding-inline-start: 58px; }
+  .st-modal[data-step="club"] .np-actions .np-btn { flex: 0 1 auto; }
+  .st-colour { width: 36px; height: 36px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .pj-card, .pj-new { transition: none; }

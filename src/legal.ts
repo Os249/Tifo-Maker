@@ -6,6 +6,7 @@
  * So the page carries both languages as complete blocks and this swaps which
  * one is shown, along with <html lang/dir> and the in-page anchors.
  */
+import './ui/colorScheme.css';
 import { initLang, applyDom, getLang, toggleLang, t } from './ui/i18n';
 import { initScheme, setSchemeLabels } from './ui/colorScheme';
 

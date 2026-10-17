@@ -3,6 +3,7 @@
  * token, validates the new password client-side, and POSTs to /api/auth/reset.
  * On success the user's other sessions are invalidated server-side.
  */
+import './ui/colorScheme.css';
 import { resetPassword } from './net/api';
 import { PASSWORD_MIN } from './core/password';
 import { enhancePasswordField } from './ui/passwordField';

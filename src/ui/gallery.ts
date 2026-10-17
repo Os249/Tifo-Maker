@@ -5,6 +5,7 @@ import {
 } from '../net/api';
 
 import { t, tTag, tTitle } from './i18n';
+import { hydrateBowls } from './bowlPicture';
 /**
  * Community feed: a full-screen overlay of published tifos. The heart of the
  * sharing loop. Browse what others made, search by name, sort by recent or most
@@ -24,7 +25,7 @@ export async function openGallery(
     <div class="feed-panel" role="dialog" aria-modal="true" aria-label="${t('gal.title')}">
       <div class="feed-head">
         <div class="feed-title">${t('gal.title')}</div>
-        <div class="feed-sub">${t('gal.sub')}</div>
+        <div class="feed-sub">${t('gal.sub')} <a class="feed-full" href="/community" target="_blank" rel="noopener">${t('gal.openCommunity')} ↗</a></div>
         <button class="feed-close" aria-label="${t('common.close')}">&times;</button>
         <div class="feed-controls">
           <input type="search" class="feed-search" id="feed-search" placeholder="${t('gal.search')}" />
@@ -81,7 +82,7 @@ export async function openGallery(
       const card = document.createElement('div');
       card.className = 'feed-card';
       const thumb = item.hasThumbnail
-        ? `<img class="feed-thumb" src="${thumbnailUrl(item.id)}" alt="${escapeHtml(tTitle(item))}" loading="lazy" />`
+        ? `<img class="feed-thumb" data-bowl="${thumbnailUrl(item.id)}" alt="" />`
         : '<div class="feed-thumb feed-thumb-empty"></div>';
       const tagline =
         item.tags.length > 0
@@ -182,6 +183,7 @@ export async function openGallery(
       });
 
       grid.appendChild(card);
+      hydrateBowls(card);
     }
   };
 

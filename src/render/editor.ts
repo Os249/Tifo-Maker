@@ -36,6 +36,9 @@ export class Editor {
   /** The ground's premium zones and vehicle lanes, outlined over the seats. */
   private readonly venueLayer = new Container();
   private venueLabels: Text[] = [];
+  /** Each stand's name under the strip, with a bracket the width of the stand. */
+  private readonly standLayer = new Container();
+  private standLabels: Text[] = [];
   objectOverlay: ObjectOverlay | null = null;
   /** The layer stack: which layer a seat is showing (the brush's hover label reads it). */
   composer: Composer | null = null;
@@ -136,6 +139,7 @@ export class Editor {
     this.world.addChild(this.seats);
     this.world.addChild(this.gridOverlay);
     this.world.addChild(this.venueLayer);
+    this.world.addChild(this.standLayer);
     app.stage.addChild(this.world);
 
     this.drawGrid(true);
@@ -440,6 +444,44 @@ export class Editor {
   }
 
   /**
+   * Name each stand under the strip.
+   *
+   * The strip is the bowl unrolled, and nothing on it said where North ended
+   * and East began. Each mark is a run of x in world units (a stand cut in two
+   * by the ends of the strip arrives as two marks); `text` is translated.
+   */
+  setStandLabels(marks: { x0: number; x1: number; text: string }[]): void {
+    this.standLayer.removeChildren().forEach((c) => c.destroy());
+    this.standLabels = [];
+    if (marks.length === 0) return;
+    const y = this.map.bounds.maxY + 10;
+    const g = new Graphics();
+    for (const m of marks) {
+      // A bracket: the stand's width, with short ticks at its ends.
+      g.moveTo(m.x0, y - 4).lineTo(m.x0, y).lineTo(m.x1, y).lineTo(m.x1, y - 4);
+      // Letter-spacing makes Pixi draw a word one glyph at a time, which
+      // breaks Arabic joining (and, glyph by glyph, its order): spaced
+      // capitals are a Latin look, so Arabic gets none.
+      const arabic = /[\u0600-\u06ff]/.test(m.text);
+      const label = new Text({
+        text: arabic ? m.text : m.text.toUpperCase(),
+        style: {
+          fontFamily: 'Inter, Almarai, system-ui, sans-serif', fontSize: arabic ? 12 : 11, fontWeight: '700',
+          letterSpacing: arabic ? 0 : 1.2, fill: 0xa6b0c8, stroke: { color: 0x070b14, width: 4 },
+        },
+        resolution: 3,
+      });
+      label.anchor.set(0.5, 0);
+      label.position.set((m.x0 + m.x1) / 2, y + 3);
+      this.standLabels.push(label);
+      this.standLayer.addChild(label);
+    }
+    g.stroke({ color: 0x55627e, alpha: 1, width: 1, pixelLine: true });
+    this.standLayer.addChildAt(g, 0);
+    this.scaleVenueLabels();
+  }
+
+  /**
    * Keep the zone labels a readable size on screen at any zoom: the whole
    * bowl fits at about a quarter scale, where world-sized text is 3 px tall.
    */
@@ -447,6 +489,7 @@ export class Editor {
     const z = this.world.scale.x || 1;
     const k = Math.min(4, Math.max(1, 1 / z));
     for (const l of this.venueLabels) l.scale.set(k);
+    for (const l of this.standLabels) l.scale.set(k);
   }
 
   drawGrid(visible: boolean): void {

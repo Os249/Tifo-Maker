@@ -18,33 +18,26 @@
   <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
   <title>Legal · TifoMaker</title>
   <meta name="robots" content="index,follow" />
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;800&display=swap" rel="stylesheet" />
   <style>
     /* Skip link: first focusable element, invisible until focused. */
     .skip-link { position:absolute; inset-inline-start:0; top:0; z-index:1000;
       width:1px; height:1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap;
-      background:#0e1424; color:#fff; border-radius:0 0 8px 0; padding:10px 16px;
+      background:var(--night-900); color:#fff; border-radius:0 0 8px 0; padding:10px 16px;
       font-weight:600; text-decoration:none; }
     [dir="rtl"] .skip-link { border-radius:0 0 0 8px; }
     .skip-link:focus { width:auto; height:auto; overflow:visible; clip-path:none;
       outline:2px solid #1c6fe0; outline-offset:2px; }
-    /* Legal carries its own small palette rather than one of the page
-       stylesheets. Both schemes, same contract as src/ui/colorScheme.css. */
-    :root { --ink:#0e1426; --muted:#5b6473; --line:#e6e8ee; --blue:#1c6fe0; --bg:#fbfbfd;
-            --card:#fff; --bar:rgba(251,251,253,.9); color-scheme:light; }
-    :root[data-theme="dark"] {
-      --ink:#f3f1fa; --muted:#a49cb8; --line:#292336; --blue:#7fb0ff; --bg:#0e0c16;
-      --card:#17141f; --bar:rgba(14,12,22,.9); color-scheme:dark;
-    }
+    /* The palette is the site's (src/ui/colorScheme.css, imported by legal.ts);
+       --bg is this page's name for the ground. */
+    :root { --bg:var(--paper); }
     * { box-sizing:border-box; }
-    body { margin:0; background:var(--bg); color:var(--ink); font:16px/1.65 'Inter',system-ui,-apple-system,sans-serif; -webkit-font-smoothing:antialiased; }
+    body { margin:0; background:var(--bg); color:var(--ink); font:16px/1.65 var(--font-ui); -webkit-font-smoothing:antialiased; }
     a { color:var(--blue); }
     .wrap { max-width:840px; margin:0 auto; padding:0 20px calc(64px + env(safe-area-inset-bottom)); }
     header.bar { position:sticky; top:0; z-index:5; background:var(--bar); backdrop-filter:blur(8px); border-bottom:1px solid var(--line);
       display:flex; align-items:center; gap:16px; padding:14px 20px calc(14px); padding-top:calc(14px + env(safe-area-inset-top)); }
-    .brand { font-weight:800; letter-spacing:.03em; color:var(--ink); text-decoration:none; }
-    .brand b { color:var(--blue); }
+    .brand { font-weight:800; letter-spacing:.02em; color:var(--ink); text-decoration:none; }
+    .brand b { color:var(--maker); }
     .bar .home { font-weight:600; font-size:14px; }
     .bar .lang-toggle { background:none; border:1px solid var(--line);
       border-radius:999px; padding:6px 14px; font:inherit; font-weight:600; font-size:14px;

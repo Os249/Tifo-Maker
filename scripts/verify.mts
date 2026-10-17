@@ -2413,7 +2413,10 @@ await (async () => {
   ok('AI pictures are layers kept inside their region', !/objects\.bake\(/.test(aiSrc) && /keep: region/.test(aiSrc));
   // Only the owner is sent a design's layers; a copy for anyone else is flat.
   const routesSrc = roofRead('server/src/routes.ts', 'utf8');
-  ok('the scene route keeps the layers to the owner', /v\.rec\.ownerId === v\.userId \? gz : withoutLayers\(gz\)/.test(routesSrc));
+  // ownsDesign (audit round five) is the owner check, signed in only.
+  ok('the scene route keeps the layers to the owner',
+    /ownsDesign\(v\.rec, v\.userId\) \? gz : withoutLayers\(gz\)/.test(routesSrc) &&
+    /const ownsDesign = \(rec: \{ ownerId: string \| null \}, userId: string \| null\): boolean => !!userId && rec\.ownerId === userId;/.test(routesSrc));
   ok('a remix copies the scene without the layers', /copyScene\(id, created\.id, false\)/.test(routesSrc));
   if (fails) throw new Error(`${fails} layer rule(s) broken`);
 })();

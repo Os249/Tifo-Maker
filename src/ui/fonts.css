@@ -1,0 +1,36 @@
+/*
+ * The site's own type, served from this origin.
+ *
+ * Every page used to pull Inter from fonts.googleapis.com, which is a request
+ * to a third party before the consent bar has been answered, and a font that
+ * arrives late enough to move text. These come from the bundle instead.
+ *
+ * Three families, each with one job:
+ *
+ *  - Inter: the interface, in Latin script.
+ *  - Almarai: the interface, in Arabic. Inter has no Arabic letters, so before
+ *    this every Arabic word on the site was drawn in whatever the device had
+ *    (Tahoma on Windows, something different on every phone). Almarai is
+ *    listed after Inter in every stack, so the browser takes Latin from Inter
+ *    and Arabic from Almarai, glyph by glyph, with no script detection.
+ *  - Changa: headlines, in both scripts. One face with a Latin and an Arabic
+ *    half, so an English and an Arabic headline look like the same brand.
+ *
+ * JetBrains Mono is the editor's data face (hex codes, seat coordinates).
+ *
+ * Only the weights the CSS actually uses are imported; each file carries
+ * unicode-range subsets, so a browser downloads only the scripts on the page.
+ */
+@import '@fontsource/inter/400.css';
+@import '@fontsource/inter/500.css';
+@import '@fontsource/inter/600.css';
+@import '@fontsource/inter/700.css';
+@import '@fontsource/inter/800.css';
+@import '@fontsource/almarai/arabic-400.css';
+@import '@fontsource/almarai/arabic-700.css';
+@import '@fontsource/almarai/arabic-800.css';
+@import '@fontsource/changa/600.css';
+@import '@fontsource/changa/700.css';
+@import '@fontsource/changa/800.css';
+@import '@fontsource/jetbrains-mono/latin-400.css';
+@import '@fontsource/jetbrains-mono/latin-500.css';

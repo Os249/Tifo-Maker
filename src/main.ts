@@ -5,7 +5,7 @@ import { installTheme } from './ui/theme';
 import { initLang, applyDom, toggleLang, t, tl, tv, onLangChange } from './ui/i18n';
 import { installConsent } from './ui/consent';
 import { generateSeatMapAsync } from './workers/client';
-import { DEFAULT_PALETTE, DEFAULT_TEMPLATE, PALETTE_PRESETS, TEMPLATES } from './core/template';
+import { DEFAULT_PALETTE, DEFAULT_TEMPLATE, TEMPLATES } from './core/template';
 import { templateById, registerServerCommunity, type StadiumEntry } from './core/stadiumCatalog';
 import { adoptProviderSession, fetchCommunityStadiums, providerFailure } from './net/api';
 import { requestStadiumSwitch } from './ui/stadiumSwitch';
@@ -22,7 +22,6 @@ import { EDITOR_UNITS } from './core/seatmap';
 import type { BannerView } from './ui/bannerView';
 import type { Preview3D } from './render/preview3d';
 import { track } from './net/analytics';
-import { hasOnboarded } from './ui/onboarding';
 import {
   accountBannersKey, accountDraftKey, bannersKey, docKey, getLocal, migrateLegacyDraft, openUrl,
   readEnvelope, readRaw, takeNewProject, writeRaw, type ProjectRef,
@@ -178,6 +177,12 @@ async function main(): Promise<void> {
     toggleLang();
     applyDom(document);
     if (langToggle) langToggle.textContent = t('common.language');
+  });
+  // The header no longer has room for the language; the account menu has it.
+  document.getElementById('menu-lang')?.addEventListener('click', () => {
+    document.getElementById('avatar-menu')?.setAttribute('hidden', '');
+    document.getElementById('avatar')?.setAttribute('aria-expanded', 'false');
+    langToggle?.click();
   });
   registerCustom(); // make user-authored custom stadiums resolvable before we pick one
   // Best-effort: pull approved community stadiums into the catalog (non-blocking).
@@ -423,9 +428,17 @@ async function main(): Promise<void> {
   }
 
   if (!sharedLoaded) {
-    const seed = PATTERN_PRESETS.find((p) => p.id === 'border')!.cellAt(map);
+    // A new project with nothing to bring starts truly empty: every seat the
+    // empty-seat colour. It used to start with a border pattern of ours, which
+    // looked exactly like painted seats, counted in the seat totals and went
+    // out in the exports. (The start flow usually replaces this anyway; this
+    // is what a bare /app?new=1 gets.) Anything else that failed to load keeps
+    // the border, so it is plain that the bowl is a stand-in.
     const seeded = new Uint8Array(map.count);
-    for (let i = 0; i < map.count; i++) seeded[i] = seed(i);
+    if (!isNew) {
+      const seed = PATTERN_PRESETS.find((p) => p.id === 'border')!.cellAt(map);
+      for (let i = 0; i < map.count; i++) seeded[i] = seed(i);
+    }
     store.loadCells(seeded);
   }
 
@@ -693,10 +706,17 @@ async function main(): Promise<void> {
     await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
     return p.captureStill(1080);
   };
+  /** The start flow drew this stand (a club tifo, stripes): it is ours until they make it theirs. */
+  let drewStart = isNew && !intent?.prompt && !!intent?.start && intent.start.kind !== 'blank';
   const postDeps = {
     capture: capturePreview,
     title: () => tb.postTarget().title,
     publicDesignId: () => tb.postTarget().publicId,
+    // A tifo the app drew gets "Paint it" beside "Post it"; one they painted
+    // themselves, or the AI drew to their words, does not.
+    get paint(): (() => void) | undefined {
+      return drewStart ? () => void setView('2d') : undefined;
+    },
   };
   /**
    * The one-time "Post it?" card. Someone who opened an existing project has
@@ -706,12 +726,19 @@ async function main(): Promise<void> {
    */
   let madeSomething = !isNew;
   store.onDirty(() => { madeSomething = true; });
+  /** When a reveal that is playing ends: nothing else arrives on top of it. */
+  let revealUntil = 0;
   const offerPostSoon = (): void => {
     if (!madeSomething) return;
-    window.setTimeout(() => {
+    const wait = (): void => {
+      if (Date.now() < revealUntil) {
+        window.setTimeout(wait, revealUntil - Date.now() + 600);
+        return;
+      }
       if (currentView !== '3d' && currentView !== 'split') return;
       void import('./ui/postMoment').then(({ maybeOfferPost }) => maybeOfferPost(postDeps));
-    }, 1800);
+    };
+    window.setTimeout(wait, 1800);
   };
 
   const setView = async (next: ViewMode): Promise<void> => {
@@ -844,6 +871,10 @@ async function main(): Promise<void> {
   // newcomers to paint and watch the 3D stadium fill live. Appended INSIDE
   // #canvas-host so it overlays the design half correctly in both LTR and RTL.
   function showDrawHint(): void {
+    // A tifo the start flow drew (a club tifo, stripes) opens in the stadium
+    // with its own next step ("Paint it" or "Post it"); a "draw here" beat and
+    // a Match Day beat on top of that would be three things at once.
+    if (drewStart) return;
     try {
       if (localStorage.getItem('tifo_draw_hint_v1') === '1') return;
     } catch {
@@ -1057,89 +1088,55 @@ async function main(): Promise<void> {
   }
 
   let clubStart = false;
-  let clubPrompt = '';
-  // The first-run guide: someone's very first project, started blank. Never
-  // for a project that already has content (a file, a copy, a design from the
-  // gallery) or one the AI is about to draw, and never again after the first.
-  if (isNew && !sharedLoaded && !intent?.prompt && !hasOnboarded()) {
-    const { openOnboarding } = await import('./ui/onboarding');
-    const choice = await openOnboarding(PATTERN_PRESETS);
-    if (choice?.kind === 'club' && choice.prompt) {
-      // Start from your club: the free offline designer draws the whole bowl
-      // now, before the project is created, so the saved starting point is
-      // this design. The Stadium view follows once the project exists.
-      const msg = document.getElementById('message');
-      if (msg) msg.textContent = t('ob.clubMaking');
-      clubPrompt = choice.prompt;
-      clubStart = await tb.quickDesign(choice.prompt);
-      // A whole design lands as one grouped change, which does not come
-      // through onDirty the way a brush stroke does; say so directly.
-      if (clubStart) madeSomething = true;
-      if (msg && msg.textContent === t('ob.clubMaking')) msg.textContent = '';
-    } else if (choice) {
-      const palette = PALETTE_PRESETS[choice.paletteName];
-      if (palette) store.setPalette(palette.slice());
-      // Apply the chosen starting point.
-      if (choice.kind === 'patterns' && choice.patternId) {
-        const pattern = PATTERN_PRESETS.find((p) => p.id === choice.patternId);
-        if (pattern) store.transform(pattern.cellAt(map));
-      } else if (choice.kind === 'crest') {
-        // Fill the bowl with the base color so a centered logo reads against it,
-        // then the user drops an image via the Image tool.
-        store.fillAll(1);
-      }
-      editor.rebuildPalette();
-      editor.repaintAll();
-      // Reflect the chosen palette in the dropdown so the UI stays consistent.
-      const presetSel = document.getElementById('preset') as HTMLSelectElement | null;
-      if (presetSel) presetSel.value = choice.paletteName;
-      // For text/crest starters, drop the user straight into the right tool.
-      if (choice.kind === 'text') document.querySelector<HTMLButtonElement>('[data-tool="text"]')?.click();
-      else if (choice.kind === 'crest') document.querySelector<HTMLButtonElement>('[data-tool="import"]')?.click();
-
-      // The guided tour is no longer started for them.
-      //
-      // It used to launch itself here, which put a nine-step spotlight on top of
-      // a first-time user at the same moment the account offer and the consent
-      // bar were also on screen — three things competing for attention in the
-      // first thirty seconds. Tutorials pushed at people interrupt, do not
-      // reliably improve task performance, and are forgotten quickly; the same
-      // content works far better pulled at the moment it is needed, which the
-      // tool tooltips and the "B brush · F fill · T text" hint strip already do.
-      //
-      // It is still one click away: the onboarding dialog offers it up front,
-      // and "Replay tutorial" in the avatar menu starts it any time.
-      /*
-       * Re-fit once the dialog is gone.
-       *
-       * The initial fit happens while the onboarding dialog is still up, so it
-       * measures a layout that is about to change; applying a starter then
-       * repaints without re-fitting, and the design ended up rendered outside
-       * the visible canvas - a black pane on the screen a first-time user sees
-       * immediately after saying what they wanted to make.
-       */
-      requestAnimationFrame(() => {
-        editor.app.resize();
-        editor.fitToView();
-      });
-
-      if (choice.wantsTour) {
-        const { startTour } = await import('./ui/tour');
-        setTimeout(() => void startTour(), 400);
-      }
+  // How the stand looks on the way in: the start flow's last step (see
+  // ui/createProject.ts). Applied before the project is created, so the saved
+  // starting point is the one they chose. Never for a project that already
+  // has content (a file, a copy, a design from the gallery) or one the AI is
+  // about to draw; those keep what they bring.
+  const start = isNew && !sharedLoaded && !intent?.prompt ? intent?.start : undefined;
+  if (start?.kind === 'club' && start.brief) {
+    // The club's tifo: the free offline designer draws the whole bowl now.
+    const msg = document.getElementById('message');
+    if (msg) msg.textContent = t('ob.clubMaking');
+    clubStart = await tb.quickDesign(start.brief);
+    // A whole design lands as one grouped change, which does not come
+    // through onDirty the way a brush stroke does; say so directly.
+    if (clubStart) madeSomething = true;
+    if (msg && msg.textContent === t('ob.clubMaking')) msg.textContent = '';
+  }
+  // Stripes, an empty stand, or a club tifo the designer could not draw: the
+  // club's colours on the swatches, and the seats as asked (or empty).
+  if (start && !clubStart) {
+    const palette = start.palette?.filter((c) => /^#[0-9a-f]{6}$/i.test(c)).slice(0, 16);
+    if (palette && palette.length >= 3) store.setPalette(palette);
+    const pattern = start.kind === 'pattern' ? PATTERN_PRESETS.find((p) => p.id === start.patternId) : undefined;
+    const cells = new Uint8Array(map.count);
+    if (pattern) {
+      const at = pattern.cellAt(map);
+      for (let i = 0; i < map.count; i++) cells[i] = at(i);
     }
+    // loadCells, not transform: Undo should not lead back to a border the
+    // fan never asked for.
+    store.loadCells(cells);
+    editor.rebuildPalette();
+    editor.repaintAll();
+    // An empty stand is not something made yet; stripes they picked are.
+    madeSomething = !!pattern;
+    if (!pattern && drewStart) {
+      // The club tifo did not come: an empty stand after all, so the
+      // first-run hints that an empty stand gets are back on.
+      drewStart = false;
+      showDrawHint();
+    }
+    // An empty stand opens on its biggest stand, framed to paint.
+    if (!pattern) setTimeout(() => requestAnimationFrame(() => document.dispatchEvent(new CustomEvent('tifo:stand-home'))), 0);
   }
 
   // A project being created: it exists from here on, in the account when
   // there is one and in this browser when there is not. Created AFTER the
   // guide, so the saved copy is the starting point they chose.
   if (isNew) {
-    // A project started from a club is named after it, unless it already has a
-    // name of its own (the default one does not count).
-    const given = intent?.title?.trim();
-    const clubTitle = clubStart && clubPrompt && (!given || given === t('np.nameDefault')) ? clubPrompt : '';
     const title = (
-      clubTitle ||
       intent?.title?.trim() ||
       remapTitle ||
       sharedTitle ||
@@ -1152,9 +1149,27 @@ async function main(): Promise<void> {
       if (msg && !msg.textContent) msg.textContent = t('ed.proj.fromPick');
     }
     if (intent?.prompt) await tb.generate(intent.prompt, intent.autoName !== false);
-    // Their club's tifo, in their stadium: the moment to show it off (and
-    // where the one-time "Post it?" card comes in).
-    if (clubStart) void setView('3d');
+    // Their tifo, in their stadium: the moment to show it off (and where the
+    // one-time "Post it?" card comes in). An empty stand stays on the seats,
+    // where the painting happens.
+    if (clubStart || start?.kind === 'pattern') {
+      // The signature moment: the tifo goes up the way a real one does, card
+      // by card across the stand, the first time it is in the stadium. Once
+      // the building is in, so it is cards going up in a ground and not on an
+      // empty pitch; never for someone who has asked for less motion.
+      void setView('3d').then(async () => {
+        if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+        revealUntil = Date.now() + 12000; // held until the reveal says how long it takes
+        let p = preview;
+        for (let i = 0; !p && i < 60; i++) {
+          await new Promise((r) => setTimeout(r, 100));
+          p = preview;
+        }
+        if (p) await Promise.race([p.ready, new Promise((r) => setTimeout(r, 6000))]);
+        const seconds = currentView === '3d' ? tb.playReveal() : 0;
+        revealUntil = Date.now() + seconds * 1000;
+      });
+    }
   }
   // "Publish to the community" on the Projects page opens the project here,
   // where the publish dialog and its name, tags and remix choices live.
@@ -1165,11 +1180,24 @@ async function main(): Promise<void> {
     tb.publish();
   }
 
-  // News, once each, to everyone who opens the editor — after the onboarding
-  // dialog and any tour, never on top of them, and one card per visit: the
+  // News, once each, to everyone who opens the editor — after any tour, never
+  // on top of one, and one card per visit: the
   // league stadiums first (leaguesNews.ts), "Banners are here" on a later
   // visit for whoever has not seen it (whatsNew.ts).
-  void import('./ui/leaguesNews').then(({ leaguesNewsSeen, offerLeaguesNews }) => {
+  //
+  // Not on someone's first visit, and not while a project is being started:
+  // news is what changed since last time, and a first-timer has no last time
+  // (theirs is marked read, so it never arrives later as "news" either), and
+  // someone who has just answered "Who do you support?" is looking at their
+  // tifo, not at a card about something else.
+  let firstVisit = false;
+  try {
+    firstVisit = localStorage.getItem('tifo_onboarded_v1') !== '1';
+    if (firstVisit) for (const k of ['tifo_onboarded_v1', 'tifo_news_leagues_v2', 'tifo_news_banners_v1']) localStorage.setItem(k, '1');
+  } catch {
+    /* storage blocked: the news modules treat that as seen too */
+  }
+  if (!isNew && !firstVisit) void import('./ui/leaguesNews').then(({ leaguesNewsSeen, offerLeaguesNews }) => {
     if (!leaguesNewsSeen()) {
       offerLeaguesNews({
         openStadiums: (league) => {

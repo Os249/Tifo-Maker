@@ -42,10 +42,11 @@ export async function mountShowcase(): Promise<void> {
   try {
     const { listGallery, thumbnailUrl } = await import('./net/api');
     const { t, tTitle } = await import('./ui/i18n');
-    // Prefer the most-liked designs; they're the best social proof.
-    let items = await listGallery({ sort: 'likes' });
-    // Only show ones with a real thumbnail to avoid empty tiles.
-    items = items.filter((d) => d.hasThumbnail).slice(0, 8);
+    // Prefer the most-liked designs; they're the best social proof. The band
+    // says "designed by supporters", so people's own designs come first and
+    // the starter templates only fill the rows people have not yet.
+    const all = (await listGallery({ sort: 'likes' })).filter((d) => d.hasThumbnail);
+    const items = [...all.filter((d) => !d.isTemplate), ...all.filter((d) => d.isTemplate)].slice(0, 8);
     if (items.length === 0) {
       hideGrid(section);
       return;
@@ -53,8 +54,8 @@ export async function mountShowcase(): Promise<void> {
     grid.innerHTML = items
       .map(
         (item) => `
-        <a class="showcase-card" href="/community" aria-label="${escapeHtml(t('cm.cardBy').replace('{title}', tTitle(item)).replace('{name}', item.ownerName))}">
-          <div class="showcase-thumb"><img src="${thumbnailUrl(item.id)}" alt="" loading="lazy" decoding="async" /></div>
+        <a class="showcase-card" href="/community?t=${encodeURIComponent(item.id)}" aria-label="${escapeHtml(t('cm.cardBy').replace('{title}', tTitle(item)).replace('{name}', item.ownerName))}">
+          <div class="showcase-thumb is-bowl"><img data-bowl="${thumbnailUrl(item.id)}" alt="" /></div>
           <div class="showcase-meta">
             <span class="showcase-title">${escapeHtml(tTitle(item))}</span>
             <span class="showcase-by">@${escapeHtml(item.ownerName)}</span>
@@ -63,12 +64,16 @@ export async function mountShowcase(): Promise<void> {
       )
       .join('');
     grid.setAttribute('aria-busy', 'false');
+    // Each strip drawn as the tifo in the bowl (ui/bowlPicture.ts): the old
+    // 16:10 tile cropped a 10:1 strip to a magnified sliver of it.
+    const { hydrateBowls } = await import('./ui/bowlPicture');
+    hydrateBowls(grid);
   } catch {
     hideGrid(section);
   }
 }
 
-/** Resolves when `el` comes within a screen of the viewport (at once without IntersectionObserver). */
+/** Resolves when `el` comes within half a screen of the viewport (at once without IntersectionObserver). */
 function nearViewport(el: Element): Promise<void> {
   if (typeof IntersectionObserver === 'undefined') return Promise.resolve();
   return new Promise((resolve) => {
@@ -79,7 +84,9 @@ function nearViewport(el: Element): Promise<void> {
           resolve();
         }
       },
-      { rootMargin: '100% 0px' },
+      // Half a screen ahead: early enough that the cards are there when the
+      // section is, late enough that a visitor who never scrolls never pays.
+      { rootMargin: '50% 0px' },
     );
     io.observe(el);
   });

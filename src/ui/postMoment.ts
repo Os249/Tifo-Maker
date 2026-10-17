@@ -37,6 +37,12 @@ export interface PostDeps {
   title(): string;
   /** The design's id when it is public, so the link can be its own page. */
   publicDesignId(): string | null;
+  /**
+   * Back to the seats, to make it their own. When given, the nudge offers it
+   * beside Post it: a tifo the app drew is a starting point, and the next
+   * step is as likely to be "change the words" as "show the group".
+   */
+  paint?(): void;
 }
 
 export const CARD_W = 1080;
@@ -196,10 +202,15 @@ const CSS = `
 .pm-note{margin:10px 2px 0;font-size:12px;line-height:1.5;color:#9aa3b2;}
 .pm-msg{min-height:18px;margin:8px 2px 0;font-size:12.5px;color:#9cc0ff;}
 .pm-nudge{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(24px + env(safe-area-inset-bottom));z-index:60;
-  width:min(380px,calc(100vw - 24px));background:#11141b;color:#f2f1ec;border:1px solid #2a3344;border-radius:14px;
-  box-shadow:0 18px 48px rgba(0,0,0,.45);padding:14px 14px 12px;font-family:Inter,system-ui,Arial,sans-serif;animation:pm-in .22s ease-out;}
+  width:min(380px,calc(100vw - 24px));background:var(--night-850,#0F172A);color:var(--snow,#F1F4FB);border:1px solid var(--night-600,#243049);border-radius:14px;
+  box-shadow:0 18px 48px rgba(0,0,0,.45);padding:14px 14px 12px;font-family:var(--font-ui,Inter,system-ui,sans-serif);animation:pm-in .22s ease-out;}
+.pm-nudge .pm-x{position:absolute;top:6px;inset-inline-end:6px;width:30px;height:30px;padding:0;border:none;border-radius:50%;
+  background:transparent;color:var(--mist,#A6B0C8);font-size:20px;line-height:1;cursor:pointer;}
+.pm-nudge .pm-x:hover{background:rgba(255,255,255,.08);color:var(--snow,#F1F4FB);}
+.pm-nudge .pm-x[hidden]{display:none;}
+.pm-nudge:has(.pm-x:not([hidden])) b{padding-inline-end:28px;}
 body.m-shell .pm-nudge{bottom:calc(132px + env(safe-area-inset-bottom));}
-.pm-nudge b{display:block;font-size:15px;margin-bottom:3px;} .pm-nudge p{margin:0 0 11px;font-size:13px;color:#aab3c2;line-height:1.45;}
+.pm-nudge b{display:block;font-size:15px;margin-bottom:3px;} .pm-nudge p{margin:0 0 11px;font-size:13px;color:var(--mist,#A6B0C8);line-height:1.45;}
 .pm-nudge .pm-acts{display:flex;gap:8px;} .pm-nudge .pm-main{margin:0;padding:10px;font-size:14px;flex:1;}
 .pm-nudge .pm-b{flex:0 0 auto;padding:10px 12px;}
 @keyframes pm-in{from{opacity:0;transform:translate(-50%,8px);}to{opacity:1;transform:translate(-50%,0);}}
@@ -359,22 +370,28 @@ export function maybeOfferPost(deps: PostDeps): void {
     return; // no storage: no way to show it only once, so not at all
   }
   // Never on top of another first-run layer.
-  if (document.querySelector('.ob-backdrop, .tour-overlay, .news-card, .mds-overlay, [data-post-sheet], .pm-nudge')) return;
+  if (document.querySelector('.tour-overlay, .news-card, .mds-overlay, [data-post-sheet], .pm-nudge')) return;
   try { localStorage.setItem(NUDGE_KEY, String(Date.now())); } catch { /* shown once per page at worst */ }
   ensureCss();
   const card = document.createElement('div');
   card.className = 'pm-nudge';
   card.setAttribute('role', 'status');
   card.dir = getLang() === 'ar' ? 'rtl' : 'ltr';
-  card.innerHTML = `<b></b><p></p><div class="pm-acts"><button type="button" class="pm-main"><i class="ti ti-share" aria-hidden="true"></i> <span></span></button><button type="button" class="pm-b"></button></div>`;
+  card.innerHTML = `<button type="button" class="pm-x"></button><b></b><p></p><div class="pm-acts"><button type="button" class="pm-main"><i class="ti ti-share" aria-hidden="true"></i> <span></span></button><button type="button" class="pm-b"></button></div>`;
   (card.querySelector('b') as HTMLElement).textContent = t('post.nudgeTitle');
-  (card.querySelector('p') as HTMLElement).textContent = t('post.nudgeBody');
+  (card.querySelector('p') as HTMLElement).textContent = t(deps.paint ? 'post.nudgeBodyPaint' : 'post.nudgeBody');
   (card.querySelector('.pm-main span') as HTMLElement).textContent = t('post.btn');
-  (card.querySelector('.pm-b') as HTMLElement).textContent = t('post.later');
+  const second = card.querySelector('.pm-b') as HTMLElement;
+  second.textContent = t(deps.paint ? 'post.paint' : 'post.later');
+  const x = card.querySelector('.pm-x') as HTMLElement;
+  x.textContent = '×';
+  x.setAttribute('aria-label', t('post.close'));
+  x.hidden = !deps.paint;
   const done = (): void => { card.remove(); clearTimeout(timer); };
-  const timer = window.setTimeout(done, 14000);
+  const timer = window.setTimeout(done, deps.paint ? 20000 : 14000);
   card.querySelector('.pm-main')!.addEventListener('click', () => { done(); void openPostSheet(deps); });
-  card.querySelector('.pm-b')!.addEventListener('click', done);
+  second.addEventListener('click', () => { done(); deps.paint?.(); });
+  x.addEventListener('click', done);
   document.body.appendChild(card);
 }
 

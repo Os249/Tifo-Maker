@@ -14,6 +14,7 @@
 import { cleanAddressBar } from './core/utm';
 import './vendor/tabler-subset.css';
 import './community.css';
+import { hydrateBowls } from './ui/bowlPicture';
 import './projects.css';
 import { initLang, applyDom, onLangChange, toggleLang, t, tv, tl, getLang } from './ui/i18n';
 import { initScheme, setSchemeLabels } from './ui/colorScheme';
@@ -183,12 +184,11 @@ function cardHtml(it: Item): string {
   // Account pictures are fetched with the session (see hydrateThumbs); local
   // ones are data URLs already.
   const cached = it.thumb?.startsWith('acct:') ? thumbCache.get(it.thumb) : it.thumb;
+  // The tifo in the bowl (ui/bowlPicture.ts), drawn from the strip picture.
   const img = it.thumb
-    ? `<img ${cached ? `src="${escapeHtml(cached)}"` : `data-thumb="${escapeHtml(it.thumb)}"`} alt="" decoding="async" />`
+    ? `<img ${cached ? `data-bowl="${escapeHtml(cached)}"` : `data-thumb="${escapeHtml(it.thumb)}"`} alt="" />`
     : '';
-  const thumb = img
-    ? `<span class="pj-half">${img}</span><span class="pj-half">${img}</span>`
-    : `<span class="pj-thumb-empty">${escapeHtml(t('pj.noThumb'))}</span>`;
+  const thumb = img || `<span class="pj-thumb-empty">${escapeHtml(t('pj.noThumb'))}</span>`;
   const left = inTrash ? Math.ceil((it.deletedAt! + trashDays * DAY - Date.now()) / DAY) : 0;
   const meta = inTrash
     ? left <= 1 ? t('pj.deletesSoon') : tv('pj.deletesIn', { n: left })
@@ -208,7 +208,7 @@ function cardHtml(it: Item): string {
   const open = (inner: string, cls: string): string =>
     href ? `<a class="${cls}" href="${escapeHtml(href)}">${inner}</a>` : `<span class="${cls}">${inner}</span>`;
   return `<article class="pj-card${inTrash ? ' trashed' : ''}${it.pinned && !inTrash ? ' pinned' : ''}" data-key="${it.kind}:${escapeHtml(it.id)}">
-    <span class="pj-thumb" dir="ltr">${thumb}</span>
+    <span class="pj-thumb${img ? ' is-bowl' : ''}" dir="ltr">${thumb}</span>
     <div class="pj-body">
       <div class="pj-row">
         ${open(name, 'pj-name')}
@@ -257,6 +257,7 @@ function render(): void {
     return;
   }
   grid.innerHTML = list.map(cardHtml).join('');
+  hydrateBowls(grid);
   void hydrateThumbs();
   status.textContent = list.length
     ? ''
@@ -280,9 +281,10 @@ async function hydrateThumbs(): Promise<void> {
       if (!url) continue;
       thumbCache.set(k, url);
       grid.querySelectorAll<HTMLImageElement>(`img[data-thumb="${CSS.escape(k)}"]`).forEach((img) => {
-        img.src = url;
+        img.dataset.bowl = url;
         img.removeAttribute('data-thumb');
       });
+      hydrateBowls(grid);
     }
   };
   await Promise.all([work(), work(), work(), work()]);
@@ -337,9 +339,9 @@ function patchItem(it: Item, patch: Partial<Item>): void {
 
 // -------------------------------------------------------------- actions ---
 
-async function signIn(): Promise<boolean> {
+async function signIn(startOn: 'signin' | 'signup' = 'signin'): Promise<boolean> {
   const { openAuthModal } = await import('./ui/authModal');
-  const name = await openAuthModal(true);
+  const name = await openAuthModal(true, startOn);
   if (!name) return false;
   await refreshAuth();
   await load();
@@ -624,11 +626,15 @@ function takenNames(): string[] {
   return items.filter((it) => it.deletedAt === null).map((it) => it.title);
 }
 
-async function openCreate(ai = false): Promise<void> {
+async function openCreate(ai = false, link: { club?: string | null; ground?: string | null; league?: string | null } = {}): Promise<void> {
   const { openCreateProject } = await import('./ui/createProject');
   openCreateProject({
     ai,
     defaultName: nextDefaultName(t('np.nameDefault'), takenNames()),
+    takenNames: takenNames(),
+    club: link.club,
+    ground: link.ground,
+    league: link.league,
     signIn,
   });
 }
@@ -751,6 +757,10 @@ void (async () => {
   const wantsNew = flag('new');
   const wantsAi = flag('ai');
   const start = flag('start');
+  // A link straight to a club or a ground (the landing page's ground search).
+  const club = flag('club');
+  const ground = flag('ground');
+  const league = flag('league');
   const rest = params.toString();
   history.replaceState(null, '', `${location.pathname}${rest ? `?${rest}` : ''}`);
 
@@ -765,5 +775,7 @@ void (async () => {
   const live = items.filter((it) => it.deletedAt === null).length;
   // The landing page's "Start designing" and a first visit to the editor both
   // arrive here wanting to begin: give them the panel, not an empty page.
-  if (wantsNew === '1' || wantsAi === '1' || (start === '1' && live === 0)) void openCreate(wantsAi === '1');
+  if (wantsNew === '1' || wantsAi === '1' || club || ground || league || (start === '1' && live === 0)) {
+    void openCreate(wantsAi === '1', { club, ground, league });
+  }
 })();

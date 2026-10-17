@@ -11,15 +11,15 @@ button { font-family: inherit; cursor: pointer; }
   position: sticky; top: 0; z-index: 30; display: flex; align-items: center; justify-content: space-between;
   padding: 16px 6vw; background: var(--bar); backdrop-filter: saturate(140%) blur(12px); border-bottom: 1px solid var(--line);
 }
-.brand { font-weight: 800; font-size: 22px; letter-spacing: -0.02em; }
-.brand b { color: var(--blue); }
+.brand { font-weight: 800; font-size: 20px; letter-spacing: .02em; color: var(--ink); }
+.brand b { color: var(--maker); }
 .nav-links { display: flex; align-items: center; gap: 22px; }
 .nav-links > a { font-weight: 600; font-size: 15px; opacity: 0.82; }
 .nav-links > a:hover { opacity: 1; }
 .nav-cta { background: var(--invert); color: var(--invert-ink); border-radius: var(--r-pill); padding: 10px 20px; font-weight: 600; }
 .nav-cta:hover { box-shadow: var(--shadow-md); }
-.lang-toggle { background: transparent; border: 1px solid rgba(14,10,26,0.18); color: var(--ink); font-weight: 600; font-size: 14px; padding: 7px 14px; border-radius: var(--r-pill); }
-.lang-toggle:hover { background: rgba(14,10,26,0.06); }
+.lang-toggle { background: transparent; border: 1px solid rgba(11, 20, 36, 0.18); color: var(--ink); font-weight: 600; font-size: 14px; padding: 7px 14px; border-radius: var(--r-pill); }
+.lang-toggle:hover { background: rgba(11, 20, 36, 0.06); }
 
 .btn { display: inline-block; border: none; border-radius: var(--r-pill); padding: 15px 28px; font-weight: 700; font-size: 16px; }
 .btn-primary { background: var(--blue-solid); color: #fff; box-shadow: var(--shadow-md); }
@@ -28,9 +28,9 @@ button { font-family: inherit; cursor: pointer; }
 .btn-ghost:hover { border-color: var(--ink); }
 
 /* hero */
-.b-hero { padding: 90px 6vw 70px; background: radial-gradient(120% 90% at 80% -10%, rgba(91,42,134,0.1), transparent 60%); }
+.b-hero { padding: 90px 6vw 70px; background: radial-gradient(120% 90% at 80% -10%, rgba(28, 111, 224, 0.1), transparent 60%); }
 .b-hero-inner { max-width: 820px; }
-.b-eyebrow { font-weight: 700; font-size: 14px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--purple); }
+.b-eyebrow { font-weight: 700; font-size: 14px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--blue); }
 .b-hero h1 { font-size: clamp(38px, 6vw, 68px); font-weight: 900; letter-spacing: -0.035em; line-height: 1.04; margin: 18px 0 22px; }
 .b-lead { font-size: 20px; line-height: 1.55; color: var(--muted); max-width: 660px; }
 .b-hero-cta { display: flex; flex-wrap: wrap; gap: 14px; margin: 32px 0 18px; }
@@ -92,7 +92,7 @@ button { font-family: inherit; cursor: pointer; }
 .b-foot { padding: 36px 6vw; border-top: 1px solid var(--line); display: flex; flex-wrap: wrap;
   align-items: center; justify-content: space-between; gap: 16px; }
 .b-foot-brand { font-weight: 800; }
-.b-foot-brand b { color: var(--blue); }
+.b-foot-brand b { color: var(--maker); }
 .b-foot-links { display: flex; flex-wrap: wrap; gap: 12px 22px; }
 .b-foot-links a { color: var(--muted); font-weight: 600; font-size: 15px; }
 .b-foot-links a:hover { color: var(--ink); }

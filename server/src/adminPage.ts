@@ -44,8 +44,10 @@ const ADMIN_HTML_HEAD = `<!doctype html>
 <title>TifoMaker: Admin</title>
 <style>
   :root{
-    --bg:#0d1117; --bg2:#151b23; --bg3:#1c232c; --line:#2a323d; --line2:#374151;
-    --tx:#e6edf3; --mut:#8b949e; --dim:#6b7480;
+    /* The site's night palette (src/ui/tokens.css), written out: this page is
+       served on its own and imports nothing. */
+    --bg:#0B1120; --bg2:#131B2D; --bg3:#1E2942; --line:#243049; --line2:#33415C;
+    --tx:#F1F4FB; --mut:#A6B0C8; --dim:#8690A7;
     --green:#3fb950; --blue:#58a6ff; --gold:#d29922; --red:#f85149; --violet:#a371f7; --teal:#39c5cf;
   }
   *{ box-sizing:border-box; }
@@ -53,21 +55,21 @@ const ADMIN_HTML_HEAD = `<!doctype html>
   body{ margin:0; background:var(--bg); color:var(--tx); font:14px/1.55 -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif; -webkit-font-smoothing:antialiased; }
 
   header{ position:sticky; top:0; z-index:20; display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;
-          padding:11px 20px; background:rgba(13,17,23,.88); backdrop-filter:blur(10px); border-bottom:1px solid var(--line); }
+          padding:11px 20px; background:rgba(11,17,32,.9); backdrop-filter:blur(10px); border-bottom:1px solid var(--line); }
   .brand{ font-weight:700; font-size:15px; letter-spacing:.2px; white-space:nowrap; }
   .brand span{ font-weight:400; color:var(--mut); }
   .ctrls{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
   .muted{ color:var(--mut); } .dim{ color:var(--dim); }
   select,button{ font:inherit; font-size:13px; color:var(--tx); background:var(--bg3); border:1px solid var(--line); border-radius:8px; padding:6px 11px; cursor:pointer; transition:border-color .12s,background .12s; }
-  button:hover,select:hover{ border-color:var(--line2); background:#222b36; }
-  button.primary{ background:var(--green); color:#04220e; border-color:var(--green); font-weight:600; }
-  button.primary:hover{ background:#4ac95c; }
+  button:hover,select:hover{ border-color:var(--line2); background:#243049; }
+  button.primary{ background:#1C6FE0; color:#fff; border-color:#1C6FE0; font-weight:600; }
+  button.primary:hover{ background:#155EC4; }
 
   /* Section tabs. The dashboard used to be one long scroll of nine peer
      panels — everything visible, nothing findable. Each tab is now one
      question, and the URL hash names it so a section can be linked to. */
   .tabs{ position:sticky; top:49px; z-index:19; display:flex; gap:4px; overflow-x:auto; scrollbar-width:none;
-         padding:8px 20px; background:rgba(13,17,23,.94); backdrop-filter:blur(10px); border-bottom:1px solid var(--line); }
+         padding:8px 20px; background:rgba(11,17,32,.95); backdrop-filter:blur(10px); border-bottom:1px solid var(--line); }
   .tabs::-webkit-scrollbar{ display:none; }
   .tab{ flex:0 0 auto; display:inline-flex; align-items:center; gap:7px; padding:7px 14px; border-radius:999px;
         border:1px solid transparent; background:transparent; color:var(--mut); font-size:13px; font-weight:600;

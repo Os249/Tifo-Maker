@@ -1,118 +1,123 @@
 /*
- * The public pages' colour tokens, in both themes.
+ * The public pages' colour roles, in both themes, built on tokens.css.
  *
- * Landing, community and clubs each used to carry their own copy of this
- * block, which is how they stayed identical right up until they wouldn't. One
- * file now, imported by all three, with the dark values as overrides on
- * :root[data-theme="dark"] — set before first paint by the inline script in
- * every page head, so a phone in dark mode never gets a white flash.
+ * Landing, community, projects, clubs, account, the seat finder and legal all
+ * import this one file, so they stay identical. The dark values are overrides
+ * on :root[data-theme="dark"], set before first paint by public/theme-boot.js,
+ * so a phone in dark mode never gets a white flash.
  *
- * The editor and the tifo viewer are not themed: a canvas tool is dark the way
- * a darkroom is dark, and the whole point of the viewer is the artwork.
+ * The dark theme IS the editor's palette: night-900 ground, night-800 cards,
+ * night-600 lines. Going from the site into the editor no longer changes the
+ * colour of night.
  *
  * Two rules this palette follows, because they are what usually goes wrong:
  *
  *  - a brand colour that TEXT sits on is not the same value as a brand colour
- *    that sits ON the page. --blue lightens in dark mode so a link is readable
- *    against the ground; --blue-solid stays put, because it is the surface
- *    white text is printed on and lightening it would strand that text.
+ *    that sits ON the page. --blue changes with the theme so a link reads on
+ *    either ground; --blue-solid stays put, because it is the surface white
+ *    text is printed on and moving it would strand that text.
  *  - shadows do not work in the dark. Depth comes from a lighter surface and a
  *    visible border instead, so the shadow tokens flatten out and --line and
  *    --card carry the separation.
+ *
+ * The older role names (--purple, --emerald, --neon, --grad-brand) are kept so
+ * nothing that still names them breaks, but they now resolve to the new system:
+ * purple was a second brand colour and is retired.
  */
+@import './tokens.css';
 
 :root {
   color-scheme: light;
 
-  /* brand — as TEXT on the page ground. These lighten in dark mode. */
-  --purple: #5B2A86;
-  --emerald: #0F8A4D;
-  --blue: #1C6FE0;
-  --neon: #D9F000;
-  /* brand — as a SURFACE, with light text printed on it. Fixed in both themes,
-     because lightening the ground under white text strands the text. Every
-     brand gradient is built from these, not from the text colours above. */
-  --purple-solid: #5B2A86;
-  --purple-deep: #3D1A5E;
-  --emerald-solid: #0F8A4D;
-  --blue-solid: #1C6FE0;
-  --blue-solid-hover: #155EC4;
-  /* Ink for text sitting on a fixed bright surface — the neon pill, a white
-     chip. It cannot be --ink: that goes light in dark mode, which put pale
-     text on neon yellow at 1.14:1. */
-  --on-bright: #0E0A1A;
+  /* brand as TEXT on the page */
+  --blue: var(--blue-700);
+  --emerald: var(--green-600);
+  --neon: var(--flare);
+  --purple: var(--ink);               /* retired: headings and labels take the ink */
+  /* brand as a SURFACE, with light text printed on it */
+  --blue-solid: var(--blue-600);
+  --blue-solid-hover: var(--blue-700);
+  --emerald-solid: var(--green-600);
+  --purple-solid: var(--blue-600);    /* retired */
+  --purple-deep: var(--night-900);    /* retired: dark bands are night */
+  --on-bright: var(--on-flare);
+  --maker: var(--maker-on-light);
 
   /* ground and ink */
-  --ink: #0E0A1A;
-  --paper: #FBFAFF;
+  --ink: var(--ink-strong);
+  --paper: var(--day-50);
   --card: #FFFFFF;
-  --muted: #767188;   /* 4.5:1 on --paper; the floor for body text */
-  --line: #ECE9F5;
-  /* A surface one step off the page: chips, inputs, hovers. */
-  --raise: #FFFFFF;
-  --raise-2: #F4F1FB;
-  /* The high-contrast pill — an active tab, a Follow button. Inverted against
-     the page, so it has to swap with the theme: `background: var(--ink);
-     color: #fff` reads as white on near-white the moment the ink goes light. */
-  --invert: #0E0A1A;
+  --muted: var(--ink-soft);          /* 5.9:1 on --paper; the floor for body text */
+  --line: var(--day-200);
+  --line-strong: var(--day-300);
+  --raise: #FFFFFF;                  /* chips, inputs, hovers */
+  --raise-2: var(--day-100);
+  /* The high-contrast pill (an active tab, a Follow button), inverted against
+     the page, so it swaps with the theme. */
+  --invert: var(--ink-strong);
   --invert-ink: #FFFFFF;
-  /* The translucent sticky header. It was a literal rgba of the light ground,
-     so in dark mode the page scrolled underneath a pale grey bar. */
-  --bar: rgba(251, 250, 255, 0.85);
-  /* A band that is deliberately dark even on the light page — the CTA strip,
-     the stat strip, the "how it works" section. In dark mode it cannot simply
-     invert (it would become a white slab); it lifts off the ground instead, so
-     it still reads as a distinct band. */
-  --panel-dark: #0E0A1A;
-  --panel-dark-ink: #FBFAFF;
+  --bar: rgba(246, 248, 251, 0.86);
+  /* A band that is deliberately dark even on the light page. In dark mode it
+     lifts off the ground instead of inverting into a white slab. */
+  --panel-dark: var(--night-900);
+  --panel-dark-ink: var(--snow);
+  --panel-dark-muted: var(--mist);
 
-  --grad-brand: linear-gradient(135deg, var(--purple-solid), var(--blue-solid) 55%, var(--emerald-solid));
-  --shadow-sm: 0 2px 8px rgba(20, 12, 40, 0.06);
-  --shadow-md: 0 10px 30px rgba(20, 12, 40, 0.1);
-  --shadow-lg: 0 24px 60px rgba(20, 12, 40, 0.18);
+  --ok: var(--green-600);
+  --warn: var(--amber-600);
+  --danger: var(--red-600);
 
-  --font: 'Inter', system-ui, -apple-system, sans-serif;
-  --r-md: 14px;
-  --r-lg: 20px;
-  --r-pill: 999px;
+  /* Gradients are retired; the name resolves to the action colour so anything
+     still painted with it is simply blue. */
+  --grad-brand: linear-gradient(0deg, var(--blue-600), var(--blue-600));
+  --shadow-sm: 0 1px 2px rgba(11, 20, 36, 0.05), 0 2px 8px rgba(11, 20, 36, 0.04);
+  --shadow-md: 0 8px 24px rgba(11, 20, 36, 0.08);
+  --shadow-lg: 0 20px 50px rgba(11, 20, 36, 0.14);
+
+  --font: var(--font-ui);
 }
 
 :root[data-theme="dark"] {
   color-scheme: dark;
 
-  /* Lifted so they read as text on a dark ground. Measured against --paper:
-     blue 7.4:1, purple 6.2:1, emerald 7.1:1 — all clear of 4.5:1 body text. */
-  --purple: #B98BE8;
-  --emerald: #3FC77F;
-  --blue: #7FB0FF;
-  --neon: #D9F000;
-  /* Surfaces stay put — white still has to be legible on them. --purple-deep
-     shifts only enough to lift the band off a darker page. */
-  --purple-solid: #5B2A86;
-  --purple-deep: #2C1C49;
-  --emerald-solid: #0F8A4D;
-  --blue-solid: #1C6FE0;
-  --blue-solid-hover: #2F7EEB;
-  --on-bright: #0E0A1A;
+  --blue: var(--blue-300);
+  --emerald: var(--green-400);
+  --neon: var(--flare);
+  --purple: var(--ink);
+  --blue-solid: var(--blue-600);
+  --blue-solid-hover: var(--blue-500);
+  --emerald-solid: var(--green-600);
+  --purple-solid: var(--blue-600);
+  --purple-deep: var(--night-800);
+  --on-bright: var(--on-flare);
+  --maker: var(--maker-on-dark);
 
-  --ink: #F3F1FA;
-  --paper: #0E0C16;
-  --card: #17141F;
-  --muted: #A49CB8;   /* 6.6:1 on --paper */
-  --line: #292336;
-  --raise: #1E1A29;
-  --raise-2: #232032;
-  --invert: #F3F1FA;
-  --invert-ink: #0E0C16;
-  --bar: rgba(14, 12, 22, 0.85);
-  --panel-dark: #1B1728;
-  --panel-dark-ink: #F3F1FA;
+  --ink: var(--snow);
+  --paper: var(--night-900);
+  --card: var(--night-800);
+  --muted: var(--mist);              /* 8.7:1 on --paper */
+  --line: var(--night-600);
+  --line-strong: var(--night-500);
+  --raise: var(--night-750);
+  --raise-2: var(--night-700);
+  --invert: var(--snow);
+  --invert-ink: var(--night-900);
+  --bar: rgba(11, 17, 32, 0.86);
+  --panel-dark: var(--night-800);
+  --panel-dark-ink: var(--snow);
+  --panel-dark-muted: var(--mist);
 
-  /* Flattened on purpose — see the note above. */
+  --ok: var(--green-400);
+  --warn: var(--amber-400);
+  --danger: var(--red-400);
+
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
   --shadow-md: 0 6px 20px rgba(0, 0, 0, 0.45);
   --shadow-lg: 0 20px 48px rgba(0, 0, 0, 0.55);
 }
+
+/* Headlines: the display face, on every public page. */
+h1, h2, .display { font-family: var(--font-display); }
 
 /* The toggle itself, next to the language toggle in every public header. */
 .theme-toggle {
@@ -120,7 +125,7 @@
   width: 40px; height: 40px; min-width: 40px; padding: 0;
   border: 1px solid var(--line); border-radius: var(--r-pill);
   background: var(--card); color: var(--ink); cursor: pointer;
-  font-size: 17px; line-height: 1; transition: border-color .14s, color .14s;
+  font-size: 17px; line-height: 1; transition: border-color var(--t-fast), color var(--t-fast);
 }
 .theme-toggle:hover { border-color: var(--blue); color: var(--blue); }
 .theme-toggle:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
@@ -132,3 +137,6 @@
 .theme-toggle .ic-sun { display: none; }
 :root[data-theme="dark"] .theme-toggle .ic-moon { display: none; }
 :root[data-theme="dark"] .theme-toggle .ic-sun { display: block; }
+
+/* The scarf: a supporters' stripe used as a rule. */
+.scarf { height: 6px; background: var(--scarf); border-radius: 2px; }

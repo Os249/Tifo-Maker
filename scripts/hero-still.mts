@@ -2,11 +2,12 @@
  * Render public/hero-stadium.webp: the picture phones see in the landing hero.
  *   npx tsx scripts/hero-still.mts
  *
- * It is the live hero (src/heroStadium.ts), rendered by the same code on the
- * same design, captured from its own canvas once the bowl has turned to a good
- * angle, and encoded as WebP with the background left transparent so it sits
- * on both the light and the dark theme. Re-run it whenever the showpiece
- * design or the stadium look changes, or the phone picture falls out of step.
+ * It is the live hero (src/heroStadium.ts): the first club in
+ * src/data/heroTifos.json, on its own ground, rendered by the same code,
+ * captured from its own canvas once the bowl has turned to a good angle, and
+ * encoded as WebP. The frame it sits in has its own night ground, so the
+ * transparent background shows that. Re-run it whenever data/heroTifos.json
+ * or the stadium look changes, or the phone picture falls out of step.
  */
 import { writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
@@ -19,7 +20,7 @@ const OUT = resolve(ROOT, 'public/hero-stadium.webp');
 // Phones only: the hero box is at most ~360 CSS px wide there, so 960 covers
 // a 2.7× screen, and every step up costs more bytes than it shows.
 const W = 960;
-const H = 720;
+const H = 600; // the hero frame is 16:10
 
 const vite: ViteDevServer = await createServer({ root: ROOT, server: { port: 5241 }, logLevel: 'error' });
 await vite.listen(5241);
@@ -46,7 +47,7 @@ try {
       // Smoothed on the way down, which keeps the seat rows from aliasing as badly.
       ctx.imageSmoothingEnabled = true;
       ctx.imageSmoothingQuality = 'high';
-      // Cover-fit the renderer's canvas into the 4:3 box.
+      // Cover-fit the renderer's canvas into the 16:10 box.
       const s = Math.max(w / src.width, h / src.height);
       const cw = w / s;
       const ch = h / s;

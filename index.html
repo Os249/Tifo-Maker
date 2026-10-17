@@ -1,12 +1,8 @@
 <!doctype html>
 <html lang="en">
   <head>
-  <!-- Declared here, not appended from JavaScript: a font link added after the
-       bundle runs blocks text late instead of early, and the stylesheet it
-       pairs with is now a real <link> too (see src/ui/theme.ts). -->
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap" />
+  <!-- Fonts are bundled (src/ui/fonts.css, via src/ui/theme.ts): nothing on
+       this page is fetched from a third party before consent. -->
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <link rel="icon" href="/favicon.ico" sizes="32x32" />
@@ -30,6 +26,14 @@
         </div>
       </div>
       <div class="topbar-right">
+        <!-- Undo and redo where a painter looks for them. They used to live in
+             a "History" card, the seventh card down the panel, about 1,660 px
+             down its scroll. The phone shell draws its own pair (mobileShell.ts),
+             so these hide there. -->
+        <div class="hdr-hist" role="group" aria-label="History" data-i18n-attr="aria-label:ed.history">
+          <button id="undo" class="hist-b" type="button" title="Undo (Ctrl+Z)" aria-label="Undo" data-i18n-attr="title:ed.undoT,aria-label:ed.undo"><i class="ti ti-arrow-back-up" aria-hidden="true"></i></button>
+          <button id="redo" class="hist-b" type="button" title="Redo (Ctrl+Shift+Z)" aria-label="Redo" data-i18n-attr="title:ed.redoT,aria-label:ed.redo"><i class="ti ti-arrow-forward-up" aria-hidden="true"></i></button>
+        </div>
         <!-- Save lives here because the panel's Save button sits ~580px below the
              fold: of 116 people who painted a tifo, 12 ever pressed it. The dot
              that used to sit here was decorative and always green, which said
@@ -38,22 +42,24 @@
           <i class="ti ti-device-floppy"></i><span data-i18n="ed.save">Save</span>
         </button>
         <span class="save-state-top" id="save-state-top" hidden></span>
-        <button id="lang-toggle" class="lang-toggle" data-i18n="common.language">العربية</button>
-        <button id="signin" class="signup-shine" data-i18n="ed.signup">Sign up</button>
-        <a href="/community" id="community-link" class="topbar-link" data-i18n="nav.community">Community</a>
-        <button id="gallery" data-i18n="ed.gallery">Gallery</button>
+        <!-- The language, the community feed and the gallery live in the
+             account menu now: twelve controls in a 56px bar was how "Sign up"
+             ended up folded onto two lines at 1440 px. These two stay in the
+             page, hidden, because the menu and the phone shell press them. -->
+        <button id="lang-toggle" class="lang-toggle proxy-only" type="button" data-i18n="common.language">العربية</button>
+        <button id="gallery" class="proxy-only" type="button" data-i18n="ed.gallery">Gallery</button>
+        <button id="signin" class="signup-shine" type="button" data-i18n="ed.signup">Sign up</button>
         <button id="moderation" hidden title="Moderation queue" data-i18n-attr="title:ed.moderationQueue"><i class="ti ti-shield-check"></i> <span data-i18n="ed.moderate">Moderate</span></button>
         <div class="avatar-wrap">
-          <button class="avatar" id="avatar" type="button" aria-expanded="false" aria-controls="avatar-menu">U</button>
+          <button class="avatar" id="avatar" type="button" aria-expanded="false" aria-controls="avatar-menu" aria-label="Account menu" data-i18n-attr="aria-label:ed.a11y.avatar"><i class="ti ti-user" aria-hidden="true"></i></button>
           <div class="avatar-menu" id="avatar-menu" hidden>
             <div class="avatar-menu-name" id="avatar-menu-name"></div>
             <button class="avatar-menu-item m-only" id="menu-signup"><i class="ti ti-user-plus"></i> <span data-i18n="ed.signup">Sign up</span></button>
-            <button class="avatar-menu-item m-only" id="menu-lang"><i class="ti ti-language"></i> <span data-i18n="common.language">العربية</span></button>
             <a class="avatar-menu-item" id="menu-projects" href="/projects"><i class="ti ti-layout-grid"></i> <span data-i18n="nav.projects">My projects</span></a>
             <a class="avatar-menu-item" id="menu-new-project" href="/projects?new=1"><i class="ti ti-plus"></i> <span data-i18n="ed.proj.new">New project</span></a>
             <button class="avatar-menu-item" id="menu-profile"><i class="ti ti-user"></i> <span data-i18n="ed.viewProfile">View profile</span></button>
-            <button class="avatar-menu-item" id="menu-community"><i class="ti ti-users"></i> <span data-i18n="nav.community">Community</span></button>
-            <button class="avatar-menu-item" id="menu-gallery"><i class="ti ti-photo"></i> <span data-i18n="ed.gallery">Gallery</span></button>
+            <button class="avatar-menu-item" id="menu-gallery"><i class="ti ti-photo"></i> <span data-i18n="ed.menu.browse">Browse community tifos</span></button>
+            <button class="avatar-menu-item" id="menu-lang"><i class="ti ti-language"></i> <span data-i18n="common.language">العربية</span></button>
             <button class="avatar-menu-item" id="menu-tutorial"><i class="ti ti-help-circle"></i> <span data-i18n="ed.replayTour">Replay tutorial</span></button>
             <button class="avatar-menu-item" id="menu-feedback"><i class="ti ti-message-report"></i> <span data-i18n="fb.entry">Feedback</span></button>
             <!-- One row instead of three. Email, name, password, export and
@@ -69,25 +75,22 @@
     <main id="main" tabindex="-1">
 
     <div class="workspace">
+      <!-- Tools, and only tools. The four buttons that opened panel menus
+           (Stadium, AI, Animation, Save) are tabs on the panel they open now,
+           and the flag that opened the Banner view is the Banner tab above.
+           Nine tools fit a 1366 x 657 laptop window; fourteen did not. -->
       <nav class="tool-rail" aria-label="Tools" data-i18n-attr="aria-label:ed.a11y.tools">
-        <button class="tool active" data-tool="brush" title="Brush (B)" aria-label="Brush" data-i18n-attr="title:ed.tool.brushT,aria-label:ed.brush"><i class="ti ti-brush"></i></button>
-        <button class="tool" data-tool="eraser" title="Eraser (E)" aria-label="Eraser" data-i18n-attr="title:ed.tool.eraserT,aria-label:ed.tool.eraser"><i class="ti ti-eraser"></i></button>
-        <button class="tool" data-tool="fill" title="Fill (F)" aria-label="Fill" data-i18n-attr="title:ed.tool.fillT,aria-label:ed.tool.fill"><i class="ti ti-bucket-droplet"></i></button>
-        <button class="tool" data-tool="eyedropper" title="Eyedropper: pick a colour (I)" aria-label="Eyedropper" data-i18n-attr="title:ed.tool.eyedropT,aria-label:ed.tool.eyedrop"><i class="ti ti-color-picker"></i></button>
+        <button class="tool active" data-tool="brush" title="Brush (B)" aria-label="Brush" data-i18n-attr="title:ed.tool.brushT,aria-label:ed.brush"><i class="ti ti-brush"></i><span class="tool-l" data-i18n="ed.rail.brush">Brush</span></button>
+        <button class="tool" data-tool="eraser" title="Eraser (E)" aria-label="Eraser" data-i18n-attr="title:ed.tool.eraserT,aria-label:ed.tool.eraser"><i class="ti ti-eraser"></i><span class="tool-l" data-i18n="ed.rail.erase">Erase</span></button>
+        <button class="tool" data-tool="fill" title="Fill (F)" aria-label="Fill" data-i18n-attr="title:ed.tool.fillT,aria-label:ed.tool.fill"><i class="ti ti-bucket-droplet"></i><span class="tool-l" data-i18n="ed.rail.fill">Fill</span></button>
+        <button class="tool" data-tool="eyedropper" title="Eyedropper: pick a colour (I)" aria-label="Eyedropper" data-i18n-attr="title:ed.tool.eyedropT,aria-label:ed.tool.eyedrop"><i class="ti ti-color-picker"></i><span class="tool-l" data-i18n="ed.rail.pick">Pick</span></button>
         <span class="sep"></span>
-        <button class="tool" data-tool="text" title="Text (T)" aria-label="Text" data-i18n-attr="title:ed.tool.textT,aria-label:ed.tool.text"><i class="ti ti-typography"></i></button>
-        <button class="tool" data-tool="import" title="Import image" aria-label="Import image" data-i18n-attr="title:ed.tool.importT,aria-label:ed.tool.import"><i class="ti ti-photo"></i></button>
-        <button class="tool" data-tool="shape" title="Shapes (S)" aria-label="Shapes" data-i18n-attr="title:ed.tool.shapesT,aria-label:ed.tool.shapes"><i class="ti ti-shape"></i></button>
+        <button class="tool" data-tool="text" title="Text (T)" aria-label="Text" data-i18n-attr="title:ed.tool.textT,aria-label:ed.tool.text"><i class="ti ti-typography"></i><span class="tool-l" data-i18n="ed.rail.text">Text</span></button>
+        <button class="tool" data-tool="import" title="Import image" aria-label="Import image" data-i18n-attr="title:ed.tool.importT,aria-label:ed.tool.import"><i class="ti ti-photo"></i><span class="tool-l" data-i18n="ed.rail.image">Image</span></button>
+        <button class="tool" data-tool="shape" title="Shapes (S)" aria-label="Shapes" data-i18n-attr="title:ed.tool.shapesT,aria-label:ed.tool.shapes"><i class="ti ti-shape"></i><span class="tool-l" data-i18n="ed.rail.shape">Shape</span></button>
         <span class="sep"></span>
-        <button class="tool" data-tool="pan" title="Pan (Space)" aria-label="Pan" data-i18n-attr="title:ed.tool.panT,aria-label:ed.tool.pan"><i class="ti ti-arrows-move"></i></button>
-        <span class="sep"></span>
-        <button class="tool" data-tool="select" title="Select: drag a box to grab an area, or click a region · move objects (V)" aria-label="Select" data-i18n-attr="title:ed.tool.selectT,aria-label:ed.tool.select"><i class="ti ti-pointer"></i></button>
-        <button class="tool" id="banner-studio-btn" title="Banners: draw a sheet and hang it on the stands" aria-label="Banners" data-i18n-attr="title:ed.tool.bannerT,aria-label:ed.bannerStudio"><i class="ti ti-flag"></i></button>
-        <span class="rail-spacer"></span>
-        <button class="tool rail-menu" id="rail-stadium" title="Stadium" aria-label="Stadium configuration" data-i18n-attr="title:ed.rail.stadiumT,aria-label:ed.rail.stadium"><i class="ti ti-building-stadium"></i></button>
-        <button class="tool rail-menu" id="rail-ai" title="AI Designer" aria-label="AI tifo designer" data-i18n-attr="title:ed.rail.aiT,aria-label:ed.rail.ai"><i class="ti ti-sparkles"></i></button>
-        <button class="tool rail-menu" id="rail-anim" title="Animation" aria-label="Animation preferences" data-i18n-attr="title:ed.rail.animT,aria-label:ed.rail.anim"><i class="ti ti-movie"></i></button>
-        <button class="tool rail-menu" id="rail-save" title="Save &amp; export" aria-label="Save and export" data-i18n-attr="title:ed.rail.saveT,aria-label:ed.rail.save"><i class="ti ti-device-floppy"></i></button>
+        <button class="tool" data-tool="select" title="Select: drag a box to grab an area, or click a region · move objects (V)" aria-label="Select" data-i18n-attr="title:ed.tool.selectT,aria-label:ed.tool.select"><i class="ti ti-pointer"></i><span class="tool-l" data-i18n="ed.rail.select">Select</span></button>
+        <button class="tool" data-tool="pan" title="Pan (Space)" aria-label="Pan" data-i18n-attr="title:ed.tool.panT,aria-label:ed.tool.pan"><i class="ti ti-arrows-move"></i><span class="tool-l" data-i18n="ed.rail.pan">Pan</span></button>
       </nav>
 
       <div class="stage">
@@ -258,6 +261,17 @@
             <button id="post-tifo" type="button" class="primary" title="Make a picture of your tifo in the stadium to post" data-i18n-attr="title:post.btnT"><i class="ti ti-share"></i> <span data-i18n="post.btn">Post it</span></button>
           </div>
 
+          <!-- Jump to a stand: the whole stand fills the canvas. The phone shell
+               has always had these; the desktop had them only as 56 small
+               buttons in a panel card, 1,240 px down its scroll. -->
+          <div class="stand-chips" id="stand-chips" role="group" aria-label="Jump to a stand" data-i18n-attr="aria-label:mb.jump">
+            <button type="button" class="stand-chip on" data-stand="all" data-i18n="mb.all">All</button>
+            <button type="button" class="stand-chip" data-stand="north" data-i18n="dir.north">North</button>
+            <button type="button" class="stand-chip" data-stand="east" data-i18n="dir.east">East</button>
+            <button type="button" class="stand-chip" data-stand="south" data-i18n="dir.south">South</button>
+            <button type="button" class="stand-chip" data-stand="west" data-i18n="dir.west">West</button>
+          </div>
+
           <div class="zoom-pill">
             <button id="zoom-out" aria-label="Zoom out" data-i18n-attr="aria-label:ed.a11y.zoomOut"><i class="ti ti-minus"></i></button>
             <span id="zoom-level" data-i18n="ed.fit">Fit</span>
@@ -275,11 +289,21 @@
       </div>
 
       <aside class="panel" id="panel" aria-label="Properties" data-i18n-attr="aria-label:ed.a11y.panel">
+        <!-- One tab per job. Each shows its own cards and nothing else: the
+             Layers, History and Save cards used to come back under almost
+             every tool, so the panel was one long scroll that reordered
+             itself. The ids are the old rail buttons', so the phone shell and
+             the tour find them where they always did. -->
         <div class="panel-head">
-          <span data-i18n="ed.props">Properties</span>
-          <button id="panel-toggle" aria-label="Collapse panel" style="padding:2px 6px;border:none;" data-i18n-attr="aria-label:ed.a11y.panelToggle"><i class="ti ti-layout-sidebar-right-collapse"></i></button>
+          <div class="panel-tabs" role="tablist" aria-label="Panel" data-i18n-attr="aria-label:ed.a11y.panel">
+            <button class="ptab menu-active" id="panel-tab-paint" type="button" role="tab" aria-selected="true" title="Paint: the tool in your hand, colours and layers" data-i18n-attr="title:ed.tab.paintT"><i class="ti ti-brush" aria-hidden="true"></i><span data-i18n="ed.tab.paint">Paint</span></button>
+            <button class="ptab rail-menu" id="rail-stadium" type="button" role="tab" aria-selected="false" title="Stadium: the ground, its stands and whole-bowl fills" data-i18n-attr="title:ed.rail.stadiumT"><i class="ti ti-building-stadium" aria-hidden="true"></i><span data-i18n="ed.tab.stadium">Stadium</span></button>
+            <button class="ptab rail-menu" id="rail-anim" type="button" role="tab" aria-selected="false" title="Reveal: how the cards go up, and a video of it" data-i18n-attr="title:ed.rail.animT"><i class="ti ti-movie" aria-hidden="true"></i><span data-i18n="ed.tab.reveal">Reveal</span></button>
+            <button class="ptab rail-menu" id="rail-ai" type="button" role="tab" aria-selected="false" title="AI Designer" data-i18n-attr="title:ed.rail.aiT"><i class="ti ti-sparkles" aria-hidden="true"></i><span data-i18n="ed.tab.ai">AI</span></button>
+            <button class="ptab rail-menu" id="rail-save" type="button" role="tab" aria-selected="false" title="Share: save, publish and the match-day pack" data-i18n-attr="title:ed.rail.saveT"><i class="ti ti-share" aria-hidden="true"></i><span data-i18n="ed.tab.share">Share</span></button>
+          </div>
+          <button id="panel-toggle" class="panel-toggle" aria-label="Collapse panel" data-i18n-attr="aria-label:ed.a11y.panelToggle"><i class="ti ti-layout-sidebar-right-collapse"></i></button>
         </div>
-        <p class="panel-orient" data-i18n="ed.props.hint"></p>
 
         <div class="panel-section ctx-hidden" id="ctx-stadium-config" data-panel="__menu_only__" data-menu="stadium" style="display:none">
           <h4><span data-i18n="ed.stadium">Stadium</span> <span class="h4-tag" data-i18n="ed.cfg.tag">choose &amp; configure the bowl</span></h4>
@@ -319,10 +343,16 @@
             <button class="chip" data-club="A giant Al Ahli tifo filling the whole stadium in the club's colours" data-i18n="club.ahli">Al Ahli</button>
             <button class="chip" data-club="A giant Al Shabab tifo filling the whole stadium in the club's colours" data-i18n="club.shabab">Al Shabab</button>
           </div>
-          <button id="ai-generate" class="primary" style="width:100%;margin-top:10px;"><i class="ti ti-sparkles"></i> <span data-i18n="ed.ai.generate">Generate tifo</span></button>
-          <button id="ai-generate-super" class="primary" style="width:100%;margin-top:8px;"><i class="ti ti-building-stadium"></i> <span data-i18n="ed.ai.super">Super AI: design full stadium</span></button>
-          <p class="hint" style="font-size:10px;color:var(--text-3);margin:4px 0 0;" data-i18n="ed.ai.superHint">Plans every stand together: portraits, text and colour blocking across the whole bowl.</p>
-          <button id="ai-shuffle" style="width:100%;margin-top:8px;" title="Compose a multi-stand design instantly, offline: no tokens, no quota" data-i18n-attr="title:ed.ai.shuffleT"><i class="ti ti-arrows-shuffle"></i> <span data-i18n="ed.ai.shuffle">Shuffle: free offline variation</span></button>
+          <!-- One main button. "Super AI" used to be a second, equal blue button,
+               which made the choice look like two products; it is an option of
+               the one Generate now. Signed out, the button says what it will do
+               (create an account) instead of failing into a dialog. -->
+          <label class="ai-whole" for="ai-whole" title="Plans every stand together: portraits, text and colour blocking across the whole bowl." data-i18n-attr="title:ed.ai.superHint">
+            <input type="checkbox" id="ai-whole" />
+            <span><b data-i18n="ed.ai.whole">Whole stadium</b> <span class="ai-whole-sub" data-i18n="ed.ai.wholeSub">plans every stand together</span></span>
+          </label>
+          <button id="ai-generate" class="primary" style="width:100%;margin-top:8px;"><i class="ti ti-sparkles"></i> <span id="ai-generate-label">Generate tifo</span></button>
+          <button id="ai-shuffle" class="ai-quiet" style="width:100%;margin-top:8px;" title="Compose a multi-stand design instantly, offline: no tokens, no quota" data-i18n-attr="title:ed.ai.shuffleT"><i class="ti ti-arrows-shuffle"></i> <span data-i18n="ed.ai.shuffle">Shuffle: free offline variation</span></button>
           <div id="ai-progress" class="ai-progress" hidden aria-live="polite">
             <div class="ai-progress-bar"><span></span></div>
             <p class="ai-progress-label"><span id="ai-progress-stage"></span><span id="ai-progress-elapsed"></span></p>
@@ -522,7 +552,7 @@
           </div>
         </div>
 
-        <div class="panel-section" id="ctx-colors" data-panel="brush eraser fill text">
+        <div class="panel-section" id="ctx-colors" data-panel="brush eraser fill eyedropper text shape">
           <h4><span data-i18n="ed.colors">Colors</span> <span class="h4-tag" data-i18n="ed.colors.yourSwatches">your swatches</span></h4>
           <div class="color-well-row">
             <button id="fg-well" class="fg-well" title="Active paint color: click to change" data-i18n-attr="title:ed.colors.wellT"></button>
@@ -650,7 +680,7 @@
           </div>
         </div>
 
-        <div class="panel-section" id="ctx-stadium" data-panel="brush fill">
+        <div class="panel-section" id="ctx-stadium" data-panel="fill" data-menu="stadium">
           <h4><span data-i18n="ed.stadium">Stadium</span> <span class="h4-tag" data-i18n="ed.stadium.tag">shape &amp; whole-bowl fills</span></h4>
           <div class="group">
             <select id="stadium" class="grow0" aria-label="Stadium" data-i18n-attr="aria-label:ed.a11y.stadium"></select>
@@ -668,7 +698,7 @@
           </div>
         </div>
 
-        <div class="panel-section ctx-hidden" id="ctx-reveal" data-panel="pan select" data-menu="animation" style="display:none">
+        <div class="panel-section ctx-hidden" id="ctx-reveal" data-panel="__menu_only__" data-menu="animation" style="display:none">
           <h4 data-i18n="ed.reveal">Animate reveal</h4>
           <div class="group">
             <select id="reveal-preset" class="grow0"></select>
@@ -695,7 +725,7 @@
           <button id="reveal-gif" style="width:100%;margin-top:10px;"><i class="ti ti-gif"></i> <span data-i18n="ed.reveal.gif">Export GIF (flat)</span></button>
         </div>
 
-        <div class="panel-section ctx-hidden" id="ctx-stadium-export" data-panel="__menu_only__" data-menu="save animation" style="display:none">
+        <div class="panel-section ctx-hidden" id="ctx-stadium-export" data-panel="__menu_only__" data-menu="animation" style="display:none">
           <h4><span data-i18n="ed.sx">Stadium animation</span> <span class="h4-tag" data-i18n="ed.sx.tag">video / GIF (3D)</span></h4>
           <p class="hint" style="font-size:11px;color:var(--text-3);margin:0 0 10px;" data-i18n="ed.sx.hint">Renders the 3D bowl lighting up with your chosen reveal. Style &amp; length come from the Animation panel.</p>
           <div class="group">
@@ -721,15 +751,8 @@
           <p id="sx-status" class="hint" style="font-size:11px;color:var(--text-3);margin:8px 0 0;min-height:14px;"></p>
         </div>
 
-        <div class="panel-section" id="ctx-history" data-panel="*">
-          <h4 data-i18n="ed.history">History</h4>
-          <div class="group">
-            <button id="undo" class="grow"><i class="ti ti-arrow-back-up" style="font-size:14px;vertical-align:-2px"></i> <span data-i18n="ed.undo">Undo</span></button>
-            <button id="redo" class="grow"><i class="ti ti-arrow-forward-up" style="font-size:14px;vertical-align:-2px"></i> <span data-i18n="ed.redo">Redo</span></button>
-          </div>
-        </div>
 
-        <div class="panel-section" id="ctx-save" data-panel="*" data-menu="save">
+        <div class="panel-section ctx-hidden" id="ctx-save" data-panel="__menu_only__" data-menu="save" style="display:none">
           <h4><span data-i18n="ed.save">Save</span> <span data-i18n="ed.save.tag">&amp; share</span></h4>
           <div class="group">
             <button id="save" class="primary grow" data-i18n="ed.save">Save</button>
@@ -749,8 +772,8 @@
           </div>
         </div>
 
-        <div class="panel-section" id="ctx-production" data-panel="*" data-menu="save">
-          <h4><span data-i18n="ed.prod">Production export</span> <span class="h4-tag" data-i18n="ed.prod.tag">match-day logistics</span></h4>
+        <div class="panel-section ctx-hidden" id="ctx-production" data-panel="__menu_only__" data-menu="save" style="display:none">
+          <h4><span data-i18n="ed.prod">Match-day pack</span> <span class="h4-tag" data-i18n="ed.prod.tag">for the volunteers</span></h4>
           <div class="group" style="margin-bottom:8px;">
             <label for="bag-size" style="white-space:nowrap;" data-i18n="ed.prod.bag">Cards / bag</label>
             <input type="number" id="bag-size" min="10" max="1000" step="10" value="100" class="grow0" />
@@ -769,7 +792,7 @@
       <span id="stat" data-i18n="ed.stat.generating">generating seat map&hellip;</span>
       <span class="spacer"></span>
       <span class="legible-chip ok" id="message"></span>
-      <span><kbd>B</kbd> <span data-i18n="ed.hint.brush">brush</span> &middot; <kbd>F</kbd> <span data-i18n="ed.hint.fill">fill</span> &middot; <kbd>T</kbd> <span data-i18n="ed.hint.text">text</span> &middot; <kbd>I</kbd> <span data-i18n="ed.hint.image">image</span> &middot; <kbd>Z</kbd> <span data-i18n="ed.hint.zen">zen</span></span>
+      <span class="kbd-hints"><kbd>Ctrl</kbd>+<kbd>Z</kbd> <span data-i18n="ed.hint.undo">undo</span> &middot; <kbd>B</kbd> <span data-i18n="ed.hint.brush">brush</span> &middot; <kbd>F</kbd> <span data-i18n="ed.hint.fill">fill</span> &middot; <kbd>T</kbd> <span data-i18n="ed.hint.text">text</span> &middot; <kbd>I</kbd> <span data-i18n="ed.hint.image">image</span> &middot; <kbd>Z</kbd> <span data-i18n="ed.hint.zen">zen</span></span>
     </footer>
 
     <script type="module" src="/src/main.ts"></script>

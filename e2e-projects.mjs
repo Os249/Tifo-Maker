@@ -70,7 +70,7 @@ const paint = (p, fx = 0.4) => p.evaluate((fx) => {
 }, fx);
 const cards = (p) => p.evaluate(() => [...document.querySelectorAll('.pj-card')].map((c) => ({
   key: c.dataset.key, name: c.querySelector('.pj-name')?.textContent?.trim(), pinned: c.classList.contains('pinned'),
-  badges: [...c.querySelectorAll('.pj-badge')].map((b) => b.textContent.trim()), img: c.querySelector('.pj-thumb img')?.getAttribute('src') || null,
+  badges: [...c.querySelectorAll('.pj-badge')].map((b) => b.textContent.trim()), img: c.querySelector('.pj-thumb img')?.dataset.bowl || c.querySelector('.pj-thumb img')?.getAttribute('src') || null,
   meta: c.querySelector('.pj-meta')?.textContent?.replace(/\s+/g, ' ').trim(),
 })));
 const menu = async (p, name, label) => {
@@ -111,49 +111,58 @@ const g = await newPage();
 await g.goto(B + '/app', { waitUntil: 'domcontentloaded' });
 await waitFor(g, () => location.pathname === '/projects');
 check('a bare /app goes to the Projects page', new URL(g.url()).pathname === '/projects', g.url());
-check('with nothing yet, the Create panel opens by itself', await waitFor(g, () => !!document.querySelector('.np-modal')));
+check('with nothing yet, the start flow opens by itself', await waitFor(g, () => !!document.querySelector('.st-modal .st-club')));
 const panel = await g.evaluate(() => ({
-  name: document.getElementById('np-name')?.value,
+  heading: document.getElementById('np-h')?.textContent,
   focused: document.activeElement?.id,
-  stadiums: document.querySelectorAll('.np-stadium').length,
-  picked: document.querySelector('.np-stadium.on')?.dataset.id,
-  facts: document.getElementById('np-facts')?.textContent,
-  buttons: [...document.querySelectorAll('#np-actions button')].map((b) => b.textContent.trim()),
+  clubs: document.querySelectorAll('.st-club').length,
+  saudiFirst: document.querySelector('.st-club')?.dataset.club,
+  scarves: [...document.querySelectorAll('.st-club .st-scarf')].filter((s) => !s.classList.contains('none')).length,
   inertBehind: [...document.body.children].filter((el) => el.inert).length > 0,
 }));
-check('the name is filled in and focused', panel.name === 'My tifo' && panel.focused === 'np-name', JSON.stringify(panel.name));
-check('every built stadium is offered', panel.stadiums === 87, String(panel.stadiums));
-check('one is chosen, and what it means is spelled out', !!panel.picked && /seats · \d+ tiers? · \d+ sections/.test(panel.facts || '') || /1 tier/.test(panel.facts || ''), panel.facts);
-check('two actions and no clutter: Generate with AI and Create project', panel.buttons.length === 2 && /Generate with AI/.test(panel.buttons[0]) && /Create project/.test(panel.buttons[1]), JSON.stringify(panel.buttons));
+check('it asks who you support, with focus on the question', panel.heading === 'Who do you support?' && panel.focused === 'np-h', JSON.stringify(panel));
+check('every listed club is offered, Saudi clubs first, each in its colours', panel.clubs === 29 && panel.saudiFirst === 'hilal' && panel.scarves === 29, JSON.stringify(panel));
 check('the page behind the panel is inert', panel.inertBehind);
 
-// The AI side, signed out: still reachable, says what is needed, cannot generate.
-await g.click('#np-to-ai');
-await waitFor(g, () => !document.getElementById('np-gate')?.hidden);
-const aiOut = await g.evaluate(() => ({
-  gate: document.getElementById('np-gate')?.textContent, fix: document.querySelector('.np-gate-fix')?.textContent,
-  gen: document.getElementById('np-generate')?.disabled, nameHidden: document.getElementById('np-name-sec')?.hidden,
-  heading: document.getElementById('np-h')?.textContent,
-}));
-check('AI, signed out: the panel says an account with a verified email is needed', /verified email/i.test(aiOut.gate || ''), aiOut.gate);
-check('…offers the one fix, and Generate stays off', aiOut.fix === 'Sign in' && aiOut.gen === true);
-check('…and the prompt replaces the name (the AI names it)', aiOut.nameHidden === true && /Generate a tifo/.test(aiOut.heading || ''));
-await g.click('#np-back');
+// Search finds clubs and grounds, and offers a club that is not listed.
+await setInput(g, '#st-search', 'jewel');
+const found = await g.evaluate(() => ({ clubs: [...document.querySelectorAll('.st-club')].map((b) => b.dataset.club), grounds: document.querySelectorAll('.st-ground').length, custom: !!document.getElementById('st-custom') }));
+check('search finds the clubs that play at a ground, and the ground', found.clubs.join() === 'ittihad,ahli' && found.grounds === 1 && found.custom, JSON.stringify(found));
+await setInput(g, '#st-search', '');
 
-// Search narrows the stadiums; Create.
-await setInput(g, '#np-search', 'jewel');
-check('stadium search narrows the list', await g.evaluate(() => document.querySelectorAll('.np-stadium').length) === 1);
-await g.click('.np-stadium[data-id="jewel-jeddah-60k-rb"]');
-await setInput(g, '#np-search', '');
+// No club: straight to the grounds, every built one offered.
+await g.click('#st-no-club');
+await waitFor(g, () => document.querySelector('.st-modal')?.dataset.step === 'ground');
+check('"No club" goes to the grounds, every built one offered', await g.evaluate(() => document.querySelectorAll('.st-ground').length) === 87);
+await setInput(g, '#st-search', 'jewel');
+check('ground search narrows the list', await g.evaluate(() => document.querySelectorAll('.st-ground').length) === 1);
+await g.click('.st-ground[data-id="jewel-jeddah-60k-rb"]');
+await waitFor(g, () => document.querySelector('.st-modal')?.dataset.step === 'start');
+const startStep = await g.evaluate(() => ({
+  opts: [...document.querySelectorAll('.st-opt')].map((b) => b.dataset.start),
+  colours: document.querySelectorAll('.st-colour').length,
+  name: document.getElementById('np-name')?.value,
+  summary: document.querySelector('.st-summary')?.textContent.replace(/\s+/g, ' '),
+}));
+check('with no club there is no club tifo, and the fan picks colours', startStep.opts.join() === 'pattern,blank,ai' && startStep.colours === 12, JSON.stringify(startStep));
+check('the name is filled in, and the ground and its seats are spelled out', startStep.name === 'My tifo' && /Jewel of Jeddah · 60,241 seats/.test(startStep.summary || ''), JSON.stringify(startStep));
+
+// The AI, signed out: still reachable, says what is needed, and its button is the fix.
+await g.click('.st-opt[data-start="ai"]');
+await waitFor(g, () => !document.getElementById('np-gate')?.hidden);
+const aiOut = await g.evaluate(() => ({ gate: document.getElementById('np-gate')?.textContent, go: document.getElementById('st-go')?.textContent.trim() }));
+check('AI, signed out: the panel says a free account with a verified email is needed', /free account with a verified email/i.test(aiOut.gate || ''), aiOut.gate);
+check('…and its button creates one (the prompt waits)', aiOut.go === 'Create a free account', aiOut.go);
+
+// An empty stand, named.
+await g.click('.st-opt[data-start="blank"]');
 await setInput(g, '#np-name', 'Derby wall');
-await g.click('#np-create');
+await g.click('#st-go');
 await waitFor(g, () => location.pathname === '/app');
-check('Create goes to the editor on a new project', /[?&]new=1/.test(g.url()) && /template=jewel-jeddah-60k-rb/.test(g.url()), g.url());
+check('Start goes to the editor on a new project', /[?&]new=1/.test(g.url()) && /template=jewel-jeddah-60k-rb/.test(g.url()), g.url());
 await editorReady(g);
-check('a first project gets the first-run guide', await waitFor(g, () => !!document.querySelector('.ob-modal')));
-check('…which no longer asks for a name', await g.evaluate(() => !document.getElementById('ob-name')));
-await g.evaluate(() => document.querySelector('.ob-start')?.click());
-check('the project exists as soon as the guide closes', await waitFor(g, () => /[?&]local=l[a-z0-9]+/.test(location.search)), g.url());
+check('the project exists straight away, with no second dialog', await waitFor(g, () => /[?&]local=l[a-z0-9]+/.test(location.search)) && await g.evaluate(() => !document.querySelector('.ob-modal, .ob-backdrop')), g.url());
+check('…and no news card on top of a first project', await g.evaluate(() => !document.getElementById('news-card')));
 let idx = await index(g);
 const derby = idx.find((p) => p.title === 'Derby wall');
 check('it is in this browser, with its stadium', !!derby && derby.templateId === 'jewel-jeddah-60k-rb' && idx.length === 1, JSON.stringify(idx));
@@ -161,7 +170,7 @@ check('the header carries its name', await g.evaluate(() => document.getElementB
 check('there is a way back to all projects', await g.evaluate(() => document.getElementById('to-projects')?.getAttribute('href')) === '/projects');
 
 await g.waitForTimeout(400);
-// The project is written once already, when the guide closes; wait for the
+// The project is written once already, when it is created; wait for the
 // save that carries the paint, not that one (reading the seats off the first
 // would race the autosave).
 const paintedAt = await g.evaluate(() => Date.now());
@@ -171,22 +180,42 @@ check('painting autosaves into the project', await waitFor(g, ([id, t]) => {
 }, [derby.id, paintedAt]));
 check('and draws its card picture', await waitFor(g, (id) => (localStorage.getItem(`tifo_proj_${id}_thumb`) || '').startsWith('data:image/png'), derby.id, 20000));
 check('the old single-draft key is not used any more', await g.evaluate(() => localStorage.getItem('tifo_draft_v1') === null));
-const cellsA = await g.evaluate((id) => JSON.stringify(JSON.parse(localStorage.getItem('tifo_proj_' + id)).doc.layers[0].cellsRle.slice(0, 40)), derby.id);
+// The strokes can land in more than one autosave; read the seats once they
+// have stopped changing, not off whichever save came first.
+const savedCells = () => g.evaluate((id) => JSON.stringify(JSON.parse(localStorage.getItem('tifo_proj_' + id)).doc.layers[0].cellsRle.slice(0, 40)), derby.id);
+let cellsA = await savedCells();
+for (let i = 0; i < 10; i++) {
+  await g.waitForTimeout(800);
+  const again = await savedCells();
+  if (again === cellsA) break;
+  cellsA = again;
+}
 
-// A second project: no guide the second time.
+// A second project, from a club: its home ground, its colours, its name.
 await g.goto(B + '/projects', { waitUntil: 'domcontentloaded' });
 await projectsReady(g);
 let cs = await cards(g);
 check('the Projects page lists it, with a picture, stadium and badge', cs.length === 1 && cs[0].name === 'Derby wall' && /^data:image/.test(cs[0].img || '') && /Jewel of Jeddah/.test(cs[0].meta) && cs[0].badges.includes('Private'), JSON.stringify(cs[0]));
 check('a guest is told the projects live in this browser only', await g.evaluate(() => /this browser only/.test(document.getElementById('pj-where').textContent)));
 await g.click('#pj-new');
-await waitFor(g, () => !!document.querySelector('.np-modal'));
-await g.click('.np-stadium[data-id="kingdom-arena-26k-rb"]');
-await g.click('#np-create');
+await waitFor(g, () => !!document.querySelector('.st-club'));
+await g.click('.st-club[data-club="hilal"]');
+await waitFor(g, () => document.querySelector('.st-modal')?.dataset.step === 'start');
+const hilal = await g.evaluate(() => ({
+  opts: [...document.querySelectorAll('.st-opt')].map((b) => b.dataset.start),
+  picked: document.querySelector('.st-opt.on')?.dataset.start,
+  colours: document.querySelectorAll('.st-colour').length,
+  name: document.getElementById('np-name')?.value,
+}));
+check('a club goes straight to "how do you want to start", club tifo first', hilal.opts.join() === 'club,pattern,blank,ai' && hilal.picked === 'club', JSON.stringify(hilal));
+check('…in its own colours (no colour picker) and named after it', hilal.colours === 0 && hilal.name === 'Al Hilal at Kingdom Arena', JSON.stringify(hilal));
+await g.click('.st-opt[data-start="blank"]');
+await g.click('#st-go');
 await waitFor(g, () => location.pathname === '/app');
 await editorReady(g);
-check('a second project skips the guide', await waitFor(g, () => /[?&]local=/.test(location.search)) && await g.evaluate(() => !document.querySelector('.ob-modal')));
-check('and got the default name', await g.evaluate(() => document.getElementById('doc-title').value) === 'My tifo');
+check('it opens on its home ground', /template=kingdom-arena-26k-rb/.test(g.url()) || await waitFor(g, () => /[?&]local=/.test(location.search)), g.url());
+check('and carries the club name', await waitFor(g, () => document.getElementById('doc-title').value === 'Al Hilal at Kingdom Arena'));
+check("an empty stand has the club's colours on the swatches", await g.evaluate(() => [...document.querySelectorAll('#palette .swatch')].some((el) => /0033a0/i.test(el.getAttribute('aria-label') || ''))));
 await paint(g, 0.3);
 await waitFor(g, () => { const i = JSON.parse(localStorage.getItem('tifo_projects_v1') || '[]'); return i.length === 2; });
 
@@ -195,7 +224,7 @@ await g.goto(B + '/app?local=' + derby.id, { waitUntil: 'domcontentloaded' });
 await editorReady(g);
 const reopened = await g.evaluate(() => document.getElementById('doc-title').value);
 const cellsB = await g.evaluate((id) => JSON.stringify(JSON.parse(localStorage.getItem('tifo_proj_' + id)).doc.layers[0].cellsRle.slice(0, 40)), derby.id);
-check('opening a project brings back its name and its seats', reopened === 'Derby wall' && cellsA === cellsB);
+check('opening a project brings back its name and its seats', reopened === 'Derby wall' && cellsA === cellsB, `${reopened} | ${cellsA} | ${cellsB}`);
 
 // Page actions.
 await g.goto(B + '/projects', { waitUntil: 'domcontentloaded' });
@@ -203,7 +232,7 @@ await projectsReady(g);
 await g.evaluate(() => [...document.querySelectorAll('.pj-card')].find((c) => c.querySelector('.pj-name').textContent.trim() === 'Derby wall').querySelector('.pj-pin').click());
 cs = await cards(g);
 check('pinning puts it first, and it stays pinned', cs[0].name === 'Derby wall' && cs[0].pinned && (await index(g)).find((p) => p.id === derby.id).pinned);
-await menu(g, 'My tifo', 'Rename');
+await menu(g, 'Al Hilal at Kingdom Arena', 'Rename');
 await waitFor(g, () => !!document.querySelector('.dlg-input'));
 await setInput(g, '.dlg-input', 'Final countdown');
 await g.evaluate(() => document.querySelector('.dlg-confirm').click());
@@ -326,10 +355,12 @@ check('…the pin came with it', acct.find((p) => p.title === 'Derby wall' && p.
 check('the page now says they are in the account', await waitFor(g, () => /Saved in your account/.test(document.getElementById('pj-where').textContent)));
 // A private design's picture cannot be an <img src> to the API (no session on
 // an image request), and the CSP refuses blob: images, so it arrives as data:.
-check('account cards load their pictures with the session', await waitFor(g, () => {
+// Each one is then drawn as the tifo in the bowl (ui/bowlPicture.ts), also a
+// data: URL.
+check('account cards load their pictures with the session, drawn in the bowl', await waitFor(g, () => {
   const imgs = [...document.querySelectorAll('.pj-thumb img')];
-  return imgs.length > 0 && imgs.every((i) => (i.getAttribute('src') || '').startsWith('data:image/png') && i.naturalWidth > 0);
-}), JSON.stringify(await g.evaluate(() => [...document.querySelectorAll('.pj-card')].map((c) => {
+  return imgs.length > 0 && imgs.every((i) => (i.dataset.bowl || '').startsWith('data:image/png') && (i.getAttribute('src') || '').startsWith('data:image/') && i.dataset.bowlState === 'ready' && i.naturalWidth > 0);
+}, null, 30000), JSON.stringify(await g.evaluate(() => [...document.querySelectorAll('.pj-card')].map((c) => {
   const i = c.querySelector('.pj-thumb img'); return [c.querySelector('.pj-name').textContent, i ? (i.getAttribute('src') || 'pending').slice(0, 22) : 'none', i?.naturalWidth];
 }))));
 
@@ -361,16 +392,19 @@ console.log('\n— the AI —');
 await g.goto(B + '/projects', { waitUntil: 'domcontentloaded' });
 await projectsReady(g);
 await g.click('#pj-new');
-await waitFor(g, () => !!document.querySelector('.np-modal'));
-await g.click('#np-to-ai');
-check('verified: the AI side is open for business', await waitFor(g, () => document.getElementById('np-generate') && !document.getElementById('np-generate').disabled));
-await g.evaluate(() => document.getElementById('np-generate').click());
+await waitFor(g, () => !!document.querySelector('.st-club'));
+check('the club from last time is offered first', await g.evaluate(() => document.querySelector('.st-club')?.classList.contains('yours') && document.querySelector('.st-club')?.dataset.club === 'hilal'));
+await g.click('#st-no-club');
+await waitFor(g, () => !!document.querySelector('.st-ground[data-id="generic-bowl-60k"]'));
+await g.click('.st-ground[data-id="generic-bowl-60k"]');
+await g.click('.st-opt[data-start="ai"]');
+check('verified: the AI side is open for business', await waitFor(g, () => document.getElementById('st-go') && !document.getElementById('st-go').disabled && /Generate/.test(document.getElementById('st-go').textContent)));
+await g.evaluate(() => document.getElementById('st-go').click());
 check('an empty prompt is caught in the panel', await g.evaluate(() => /Say what you want/.test(document.getElementById('np-prompt-err').textContent)));
 await g.evaluate(() => document.querySelector('.np-example').click());
 check('an example fills the prompt', await g.evaluate(() => document.getElementById('np-prompt').value.length > 10));
 await setInput(g, '#np-prompt', 'Blue and white hoops for Al Hilal with a crescent');
-await g.click('.np-stadium[data-id="generic-bowl-60k"]');
-await g.evaluate(() => document.getElementById('np-generate').click());
+await g.evaluate(() => document.getElementById('st-go').click());
 await waitFor(g, () => location.pathname === '/app');
 await editorReady(g);
 // With no premium model configured (as here) the AI answers "busy" and the
@@ -398,7 +432,7 @@ const u2 = await api('/api/auth/register', null, { method: 'POST', body: JSON.st
 const un = await newPage();
 await un.addInitScript((t) => { try { localStorage.setItem('tifo_token_v1', t); } catch {} }, u2.json.token);
 await un.goto(B + '/projects?ai=1', { waitUntil: 'domcontentloaded' });
-check('unverified: the AI side says to verify, and links to where that is done', await waitFor(un, () => /Verify your email/.test(document.getElementById('np-gate')?.textContent || '') && document.querySelector('.np-gate-fix')?.getAttribute('href') === '/account'));
+check('unverified: the AI side says to verify, and its button goes where that is done', await waitFor(un, () => /Verify your email/.test(document.getElementById('np-gate')?.textContent || '') && document.getElementById('st-go')?.getAttribute('href') === '/account'));
 
 // =====================================================================
 console.log('\n— publishing and the Trash —');
@@ -448,15 +482,15 @@ console.log('\n— phone and Arabic —');
 const ph = await newPage({ width: 390, height: 844 });
 await ph.addInitScript(() => { try { localStorage.setItem('tifo_lang_v1', 'ar'); } catch {} });
 await ph.goto(B + '/projects?new=1', { waitUntil: 'domcontentloaded' });
-await waitFor(ph, () => !!document.querySelector('.np-modal'));
+await waitFor(ph, () => !!document.querySelector('.st-club'));
 const phone = await ph.evaluate(() => ({
   dir: document.documentElement.dir, over: document.documentElement.scrollWidth - innerWidth,
-  h: document.getElementById('np-h').textContent, create: document.getElementById('np-create').textContent,
+  h: document.getElementById('np-h').textContent, club: document.querySelector('.st-club-name')?.textContent,
   // offsetWidth, not the box: the panel scales in, and a box read mid-animation is 97% of it.
   modalW: document.querySelector('.np-modal').offsetWidth,
   room: document.querySelector('.np-backdrop').clientWidth,
 }));
-check('the panel is in Arabic, right to left', phone.dir === 'rtl' && phone.h === 'مشروع جديد' && /سوّ المشروع/.test(phone.create), JSON.stringify(phone));
+check('the panel is in Arabic, right to left', phone.dir === 'rtl' && phone.h === 'تشجّع مين؟' && phone.club === 'الهلال', JSON.stringify(phone));
 check('on a phone it fills the width, nothing scrolls sideways', phone.modalW >= phone.room - 1 && phone.over <= 0, `${phone.modalW} of ${phone.room} / ${phone.over}`);
 
 console.log(`\n  ${pass} passed, ${fail} failed`);

@@ -78,17 +78,20 @@ const CROWD_PRESETS: [CrowdPreset, string, number][] = [
 
 const CSS = `
 .mds-overlay{
-  --bg:#05070a;--surface:#0d1117;--surface-2:#10151c;--surface-3:#161b22;
-  --panel:rgba(13,17,23,.92);--bar:rgba(10,13,18,.92);--head:#141a22;--head-hover:#1a212b;
-  --elev:#1c232c;--elev-hover:#283340;
-  --border:#2c3742;--border-soft:#1e2630;--border-strong:#3a4554;
-  --text:#e6e9ee;--text-dim:#8a93a0;--text-faint:#6b7480;
-  --accent:#3fb950;--accent-hover:#4ad063;--accent-weak:#225338;--accent-ink:#06210f;--accent-soft:#7fcf96;
+  /* The site's night palette and its one action colour (src/ui/tokens.css).
+     Match Day used to be a palette of its own: a GitHub-style green that
+     nothing else on the site used. */
+  --bg:#070B14;--surface:#0B1120;--surface-2:#0F172A;--surface-3:#131B2D;
+  --panel:rgba(11,17,32,.93);--bar:rgba(11,17,32,.93);--head:#131B2D;--head-hover:#161E31;
+  --elev:#1E2942;--elev-hover:#243049;
+  --border:#243049;--border-soft:#1E2942;--border-strong:#33415C;
+  --text:#F1F4FB;--text-dim:#A6B0C8;--text-faint:#8690A7;
+  --accent:#1C6FE0;--accent-hover:#3B86EE;--accent-weak:#16305C;--accent-ink:#FFFFFF;--accent-soft:#7FB0FF;
   --r:8px;--r-lg:14px;--r-sm:5px;
   --shadow:0 12px 44px rgba(0,0,0,.55);
   --t-fast:.12s;--t-med:.22s;
-  --focus:0 0 0 2px rgba(63,185,80,.6);
-  position:fixed;inset:0;z-index:10000;background:var(--bg);display:flex;flex-direction:column;font:13px/1.4 system-ui,-apple-system,sans-serif;color:var(--text);}
+  --focus:0 0 0 2px rgba(28,111,224,.7);
+  position:fixed;inset:0;z-index:10000;background:var(--bg);display:flex;flex-direction:column;font:13px/1.4 var(--font-ui,system-ui),sans-serif;color:var(--text);}
 .mds-bar{display:flex;align-items:center;gap:10px;padding:10px 16px;background:var(--bar);backdrop-filter:blur(8px);border-bottom:1px solid var(--elev);flex:0 0 auto;z-index:3;}
 .mds-brand{font-weight:700;font-size:15px;letter-spacing:.2px;display:flex;align-items:center;gap:8px;min-width:0;flex:0 1 auto;}
 /* The title gives way first: at 900px the bar holds Quality, Hide tifo, four
@@ -98,16 +101,16 @@ const CSS = `
 .mds-spacer{margin-left:auto;}
 .mds-status{font-size:12px;color:var(--accent-soft);min-width:6px;transition:opacity .3s;}
 .mds-bf{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-dim);}
-.mds-btn{font:13px system-ui,sans-serif;color:var(--text);background:var(--elev);border:1px solid var(--border);border-radius:var(--r);padding:7px 12px;cursor:pointer;transition:background var(--t-fast),border-color var(--t-fast),transform .05s,box-shadow var(--t-fast);white-space:nowrap;display:inline-flex;align-items:center;justify-content:center;gap:6px;}
+.mds-btn{font:13px var(--font-ui,system-ui),sans-serif;color:var(--text);background:var(--elev);border:1px solid var(--border);border-radius:var(--r);padding:7px 12px;cursor:pointer;transition:background var(--t-fast),border-color var(--t-fast),transform .05s,box-shadow var(--t-fast);white-space:nowrap;display:inline-flex;align-items:center;justify-content:center;gap:6px;}
 .mds-btn:hover{background:var(--elev-hover);border-color:var(--border-strong);}
 .mds-btn:active{transform:translateY(1px);}
-.mds-btn.active{background:var(--accent-weak);border-color:var(--accent);color:#eafff0;}
+.mds-btn.active{background:var(--accent-weak);border-color:var(--accent);color:#EAF2FF;}
 .mds-btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);font-weight:600;}
 .mds-btn.primary:hover{background:var(--accent-hover);}
 .mds-btn[hidden]{display:none;}
 .mds-icon{padding:7px 10px;}
 .mds-icon svg{width:16px;height:16px;display:block;}
-.mds-sel,.mds-input{font:13px system-ui,sans-serif;color:var(--text);background:var(--surface-3);border:1px solid var(--border);border-radius:var(--r);padding:6px 9px;cursor:pointer;width:100%;box-sizing:border-box;transition:border-color var(--t-fast),box-shadow var(--t-fast);}
+.mds-sel,.mds-input{font:13px var(--font-ui,system-ui),sans-serif;color:var(--text);background:var(--surface-3);border:1px solid var(--border);border-radius:var(--r);padding:6px 9px;cursor:pointer;width:100%;box-sizing:border-box;transition:border-color var(--t-fast),box-shadow var(--t-fast);}
 .mds-input{cursor:text;}
 .mds-input[type=file]{font-size:11px;color:#aab2bd;padding:5px;cursor:pointer;}
 .mds-input[type=number]{width:80px;}
@@ -118,7 +121,7 @@ const CSS = `
 .mds-panel::-webkit-scrollbar{width:8px;}
 .mds-panel::-webkit-scrollbar-thumb{background:var(--border);border-radius:8px;}
 .mds-section{border:1px solid var(--border-soft);border-radius:10px;overflow:hidden;background:var(--surface-2);margin-bottom:7px;}
-.mds-shead{display:flex;align-items:center;gap:9px;width:100%;padding:11px 12px;background:var(--head);border:none;color:var(--text);font:600 13px system-ui,sans-serif;cursor:pointer;text-align:left;transition:background var(--t-fast);}
+.mds-shead{display:flex;align-items:center;gap:9px;width:100%;padding:11px 12px;background:var(--head);border:none;color:var(--text);font:600 13px var(--font-ui,system-ui),sans-serif;cursor:pointer;text-align:left;transition:background var(--t-fast);}
 .mds-shead:hover{background:var(--head-hover);}
 .mds-shead .ico{display:flex;align-items:center;color:var(--accent);}
 .mds-shead .ico svg{width:16px;height:16px;display:block;}
@@ -131,8 +134,8 @@ const CSS = `
 .mds-field[hidden]{display:none;}
 .mds-flabel{font-size:11px;color:var(--text-dim);}
 .mds-flabel-row{display:flex;align-items:baseline;justify-content:space-between;gap:8px;}
-.mds-fval{font:600 11px ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--accent-soft);}
-.mds-step .mds-fval{font:600 11px system-ui,sans-serif;color:var(--text-faint);}
+.mds-fval{font:600 11px var(--font-data,ui-monospace),monospace;color:var(--accent-soft);}
+.mds-step .mds-fval{font:600 11px var(--font-ui,system-ui),sans-serif;color:var(--text-faint);}
 .mds-step.on .mds-fval{color:var(--accent-soft);}
 .mds-step.on .mds-flabel>span:first-child{color:var(--text);}
 .mds-row{display:flex;flex-wrap:wrap;gap:6px;align-items:center;}
@@ -161,11 +164,11 @@ input[type=checkbox].mds-check:checked::after{transform:rotate(45deg) scale(1);}
 .mds-help-card h2{margin:0 0 4px;font-size:18px;}
 .mds-help-card .sub{margin:0 0 16px;color:var(--text-dim);font-size:13px;}
 .mds-help-grp{margin:0 0 14px;}
-.mds-help-grp h3{margin:0 0 6px;font-size:11px;text-transform:uppercase;letter-spacing:.6px;color:var(--accent);}
+.mds-help-grp h3{margin:0 0 6px;font-size:11px;text-transform:uppercase;letter-spacing:.6px;color:var(--accent-soft);}
 .mds-kv{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:5px 0;border-bottom:1px solid var(--border-soft);font-size:13px;}
 .mds-kv:last-child{border-bottom:none;}
 .mds-kv .k{color:var(--text-dim);}
-.mds-key{display:inline-block;min-width:16px;text-align:center;padding:1px 6px;border:1px solid var(--border-strong);border-bottom-width:2px;border-radius:5px;background:var(--surface-3);font:600 11px ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--text);}
+.mds-key{display:inline-block;min-width:16px;text-align:center;padding:1px 6px;border:1px solid var(--border-strong);border-bottom-width:2px;border-radius:5px;background:var(--surface-3);font:600 11px var(--font-data,ui-monospace),monospace;color:var(--text);}
 .mds-help-actions{display:flex;justify-content:flex-end;margin-top:8px;}
 .mds-fail{position:absolute;inset:0;z-index:8;display:none;align-items:center;justify-content:center;padding:18px;background:rgba(3,5,8,.82);backdrop-filter:blur(3px);}
 .mds-fail.show{display:flex;}

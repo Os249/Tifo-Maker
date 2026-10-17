@@ -1,8 +1,8 @@
 /**
  * The free designer on grounds of every size, in the real editor.
  *
- * A first visit that starts "from your club" draws the whole bowl with the
- * Quick Designer. Before October 2026 that design was planned for a 60-row bowl
+ * A project started as a "club tifo" (the start flow's last step) draws the
+ * whole bowl with the Quick Designer. Before October 2026 that design was planned for a 60-row bowl
  * and painted as-is: on Al-Majmaah (13-row stands) and Al-Hazem (a stand with no
  * seats at all) the words came out a few seats tall or not at all. Now every
  * design is fitted to the stadium's seats before it is painted.
@@ -41,7 +41,10 @@ const LS = [
   { name: 'mds_sound_v2', value: JSON.stringify({ on: false }) },
 ];
 
-/** Start a first project on `template` from a club typed into the guide. */
+/**
+ * Start a first project from a club in the start flow ("Who do you support?"),
+ * moved onto `template` with "Change ground", and drawn as a club tifo.
+ */
 async function clubStart(template, club) {
   const ctx = await browser.newContext({ viewport: { width: 1400, height: 880 }, storageState: { cookies: [], origins: [{ origin: B, localStorage: LS }] } });
   const p = await ctx.newPage();
@@ -49,12 +52,15 @@ async function clubStart(template, club) {
   const fitted = [];
   p.on('pageerror', (e) => errs.push(e.message.slice(0, 200)));
   p.on('console', (m) => { if (/\[ai\] fitted/.test(m.text())) fitted.push(m.text()); });
-  await p.goto(`${B}/app?new=1&template=${template}`, { waitUntil: 'networkidle', timeout: 120000 });
-  await p.waitForSelector('#ob-club-input', { timeout: 60000 });
-  await p.fill('#ob-club-input', club);
-  await p.evaluate(() => document.getElementById('ob-club-own').requestSubmit());
+  await p.goto(`${B}/projects?new=1`, { waitUntil: 'networkidle', timeout: 120000 });
+  await p.waitForSelector(`.st-club[data-club="${club}"]`, { timeout: 60000 });
+  await p.click(`.st-club[data-club="${club}"]`);
+  await p.click('#st-change-ground');
+  await p.click(`.st-ground[data-id="${template}"]`);
+  await p.click('.st-opt[data-start="club"]');
+  await p.click('#st-go');
   // The design lands, then the project is created and the URL becomes its own.
-  await p.waitForFunction(() => /[?&](project|local)=/.test(location.search), null, { timeout: 60000 }).catch(() => {});
+  await p.waitForFunction(() => /[?&](project|local)=/.test(location.search), null, { timeout: 90000 }).catch(() => {});
   await p.waitForTimeout(1500);
   return { ctx, p, errs, fitted };
 }
@@ -68,7 +74,7 @@ const GROUNDS = [
 
 for (const g of GROUNDS) {
   console.log(`\n— ${g.id} —`);
-  const { ctx, p, errs, fitted } = await clubStart(g.id, 'Al Hilal الزعيم');
+  const { ctx, p, errs, fitted } = await clubStart(g.id, 'hilal');
   const url = await p.evaluate(() => location.pathname + location.search);
   check('the club start made a project', /[?&](project|local)=/.test(url), url);
   await p.screenshot({ path: `${OUT}/${g.id}-editor.png` });

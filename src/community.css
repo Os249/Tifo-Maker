@@ -1,5 +1,6 @@
 
 @import './ui/colorScheme.css';
+@import './ui/authPublic.css';
 
 * { box-sizing: border-box; }
 html { scroll-behavior: smooth; }
@@ -20,8 +21,8 @@ a { color: inherit; text-decoration: none; }
   padding: 16px 6vw; background: var(--bar);
   backdrop-filter: saturate(140%) blur(12px); border-bottom: 1px solid var(--line);
 }
-.brand { font-weight: 800; font-size: 22px; letter-spacing: -0.02em; }
-.brand b { color: var(--blue); font-weight: 800; }
+.brand { font-weight: 800; font-size: 20px; letter-spacing: .02em; color: var(--ink); }
+.brand b { color: var(--maker); font-weight: 800; }
 .nav-links { display: flex; align-items: center; gap: 22px; }
 .nav-links > a { font-weight: 600; font-size: 15px; color: var(--ink); opacity: 0.8; }
 .nav-links > a:hover { opacity: 1; }
@@ -32,10 +33,10 @@ a { color: inherit; text-decoration: none; }
 }
 .nav-cta:hover { transform: translateY(-1px); box-shadow: var(--shadow-md); }
 .lang-toggle {
-  background: transparent; border: 1px solid rgba(14, 10, 26, 0.18); color: var(--ink);
+  background: transparent; border: 1px solid rgba(11, 20, 36, 0.18); color: var(--ink);
   font-weight: 600; font-size: 14px; padding: 7px 14px; border-radius: var(--r-pill);
 }
-.lang-toggle:hover { background: rgba(14, 10, 26, 0.06); }
+.lang-toggle:hover { background: rgba(11, 20, 36, 0.06); }
 .icon-btn {
   position: relative; background: transparent; border: 1px solid var(--line);
   width: 40px; height: 40px; border-radius: var(--r-pill); display: grid; place-items: center;
@@ -213,12 +214,23 @@ a { color: inherit; text-decoration: none; }
 }
 /* Show the FULL tifo (contain = never crop/zoom) at a uniform banner size. */
 .card-thumb-img { display: block; width: 100%; height: 100%; object-fit: contain; image-rendering: pixelated; }
+/* The tifo in the bowl (ui/bowlPicture.ts): a 16:10 picture on a night
+   ground with a grid of seats while it is drawn. If it cannot be drawn the
+   strip shows instead, still whole. */
+.card-thumb.is-bowl {
+  aspect-ratio: 16 / 10;
+  background: var(--mosaic-dot) 0 0 / 10px 10px, radial-gradient(ellipse at 50% 50%, #16213a, #070B14 70%);
+}
+.card-thumb.is-bowl .card-thumb-img { object-fit: cover; image-rendering: auto; opacity: 0; transition: opacity var(--t-med) var(--ease); }
+.card-thumb.is-bowl .card-thumb-img[data-bowl-state="ready"],
+.card-thumb.is-bowl .card-thumb-img[data-bowl-state="strip"] { opacity: 1; }
+.card-thumb.is-bowl.bowl-failed .card-thumb-img { object-fit: contain; image-rendering: pixelated; }
 .card-badges { display: flex; flex-wrap: wrap; gap: 6px; }
 .card-badges .badge {
   font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: var(--r-pill); color: #fff;
 }
-.badge.template { background: rgba(91, 42, 134, 0.92); }
-.badge.photo { background: rgba(15, 138, 77, 0.92); }
+.badge.template { background: rgba(11, 20, 36, 0.86); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18); }
+.badge.photo { background: rgba(14, 124, 70, 0.92); }
 .badge.banners { background: rgba(28, 95, 217, 0.92); display: inline-flex; align-items: center; gap: 4px; }
 .cam-btn.cam-banner { display: inline-flex; align-items: center; gap: 5px; background: rgba(28, 95, 217, 0.35); color: #fff; }
 .cam-btn.cam-banner:hover { background: rgba(28, 95, 217, 0.6); }
@@ -227,7 +239,7 @@ a { color: inherit; text-decoration: none; }
 .card-by { font-size: 13px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
 .card-by .at { color: var(--blue); font-weight: 600; }
 .card-remixed { font-size: 12px; color: var(--muted); }
-.card-remixed .at { color: var(--purple); font-weight: 600; }
+.card-remixed .at { color: var(--blue); font-weight: 600; }
 .card-stats { display: flex; align-items: center; gap: 16px; margin-top: auto; padding-top: 8px; border-top: 1px solid var(--line); color: var(--muted); font-size: 13px; font-weight: 600; }
 .card-stat { display: inline-flex; align-items: center; gap: 5px; }
 .card-stat.like.on { color: var(--blue); }
@@ -253,7 +265,7 @@ a { color: inherit; text-decoration: none; }
 /* ---- 3D preview modal ---- */
 .modal-root {
   position: fixed; inset: 0; z-index: 50; display: grid; place-items: center;
-  background: rgba(14, 10, 26, 0.55); backdrop-filter: blur(6px); padding: 24px;
+  background: rgba(11, 20, 36, 0.55); backdrop-filter: blur(6px); padding: 24px;
 }
 .modal-root[hidden], .notif-panel[hidden], .search-results[hidden], .notif-dot[hidden], #notif-btn[hidden], .grid-empty[hidden], .grid-loading[hidden] { display: none !important; }
 .modal {
@@ -306,10 +318,10 @@ a { color: inherit; text-decoration: none; }
 .side-stat { display: inline-flex; align-items: center; gap: 6px; }
 
 .explanation {
-  background: linear-gradient(135deg, rgba(91, 42, 134, 0.06), rgba(28, 111, 224, 0.06));
+  background: linear-gradient(135deg, rgba(28, 111, 224, 0.06), rgba(28, 111, 224, 0.06));
   border: 1px solid var(--line); border-radius: var(--r-md); padding: 14px 16px; margin-top: 4px;
 }
-.explanation-label { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--purple); margin-bottom: 6px; }
+.explanation-label { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--blue); margin-bottom: 6px; }
 .explanation-body { font-size: 14px; line-height: 1.55; color: var(--ink); white-space: pre-wrap; }
 .side-actions { display: flex; gap: 10px; margin-top: 16px; }
 .act-btn { flex: 1; border: 1px solid var(--line); background: var(--card); border-radius: var(--r-pill); padding: 10px; font-weight: 600; font-size: 14px; display: inline-flex; align-items: center; justify-content: center; gap: 7px; }
@@ -412,9 +424,27 @@ a { color: inherit; text-decoration: none; }
   .modal-3d-host { min-height: 260px; }
   .nav-links > a[href="/app"] { display: none; }
 }
+/* A phone: the first tifo on the first screen. The heading, the intro, the
+   search, four sort tabs (wrapping to "Most / liked") and Filters used to put
+   the first card 540px down. Now: a smaller heading, a two-line intro, search
+   and Filters on one row, and the sort tabs in one row that scrolls. */
 @media (max-width: 560px) {
-  .hub-controls { flex-direction: column; align-items: stretch; }
-  .sort-tabs { justify-content: center; }
+  .hub-head { padding: 20px 0 14px; }
+  .hub-head h1 { font-size: 30px; margin-bottom: 6px; }
+  .hub-sub {
+    font-size: 15px; margin-bottom: 14px;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  }
+  .hub-controls { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: center; }
+  .search-wrap { min-width: 0; max-width: none; grid-column: 1; grid-row: 1; }
+  .search-wrap input { padding-block: 11px; }
+  .filter-wrap { grid-column: 2; grid-row: 1; }
+  .sort-tabs {
+    grid-column: 1 / -1; justify-content: flex-start; overflow-x: auto; flex-wrap: nowrap;
+    scrollbar-width: none; box-shadow: none;
+  }
+  .sort-tabs::-webkit-scrollbar { display: none; }
+  .sort-tab { flex: none; white-space: nowrap; padding: 8px 14px; }
 }
 
 /* ---- RTL ---- */
@@ -424,114 +454,8 @@ a { color: inherit; text-decoration: none; }
 [dir="rtl"] .card-stats { flex-direction: row-reverse; }
 [dir="rtl"] .notif-panel { right: auto; left: 6vw; }
 
-/* ---- auth modal (the community's own look, both themes) ----
-   The dialog's markup lives in ui/authModal.ts and is shared with the editor,
-   which styles it in floodlight.css. This block used to cover only the first
-   version of it — no Google button, no "or" rule, no Forgot password, no
-   terms or note — so everything added since rendered as bare browser widgets,
-   and `.auth-field { display:flex }` beat the [hidden] on the confirm row, so
-   "Confirm password" sat on the Sign in tab. Every piece is styled here now. */
-.auth-backdrop {
-  position: fixed; inset: 0; z-index: 70; display: flex; align-items: flex-start; justify-content: center;
-  overflow-y: auto; overscroll-behavior: contain; padding: 24px 16px;
-  background: rgba(14, 10, 26, 0.55); backdrop-filter: blur(6px);
-}
-.auth-modal {
-  /* The password field (ui/passwordField.ts) reads the editor's token names;
-     give it this page's colours under those names. */
-  --text-1: var(--ink); --text-3: var(--muted); --line-2: var(--line); --flare: var(--blue);
-  position: relative; margin: auto; width: min(400px, 100%);
-  background: var(--card); color: var(--ink); border: 1px solid var(--line); border-radius: var(--r-lg);
-  padding: 28px 28px 22px; box-shadow: var(--shadow-lg);
-  font-family: var(--font); font-size: 14px; line-height: 1.45;
-}
-/* Anything the dialog hides stays hidden, whatever display a rule gives it. */
-.auth-modal [hidden] { display: none !important; }
-.auth-close {
-  position: absolute; top: 14px; inset-inline-end: 14px; width: 34px; height: 34px; padding: 0;
-  display: grid; place-items: center; border: none; border-radius: var(--r-pill);
-  background: transparent; color: var(--muted); font-size: 24px; line-height: 1;
-}
-.auth-close:hover { background: var(--raise-2); color: var(--ink); }
-.auth-close:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
-.auth-brand { font-weight: 800; font-size: 22px; letter-spacing: -0.02em; text-align: center; margin: 2px 0 20px; }
-.auth-brand b { color: var(--blue); font-weight: 800; }
-.auth-tabs {
-  display: flex; gap: 4px; background: var(--raise-2); border: 1px solid var(--line);
-  border-radius: var(--r-pill); padding: 4px; margin-bottom: 20px;
-}
-.auth-tab {
-  flex: 1; background: transparent; border: none; padding: 9px 10px; border-radius: var(--r-pill);
-  font-size: 14px; font-weight: 600; color: var(--muted); transition: background .15s, color .15s;
-}
-.auth-tab:hover { color: var(--ink); }
-.auth-tab.active { background: var(--invert); color: var(--invert-ink); }
-.auth-tab:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
-
-/* Continue with Google, then a rule with "or" in it. */
-.auth-providers { display: flex; flex-direction: column; gap: 14px; margin-bottom: 16px; }
-.auth-provider {
-  display: flex; align-items: center; justify-content: center; gap: 10px; width: 100%;
-  padding: 12px 16px; font-size: 15px; font-weight: 600; color: var(--ink);
-  background: var(--raise); border: 1px solid var(--line); border-radius: var(--r-pill);
-  box-shadow: var(--shadow-sm); transition: border-color .15s, background .15s;
-}
-.auth-provider svg { flex: 0 0 auto; }
-.auth-provider:hover:not(:disabled) { border-color: var(--muted); background: var(--raise-2); }
-.auth-provider:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
-.auth-provider:disabled { opacity: .5; cursor: default; }
-.auth-inapp { margin: 0; font-size: 12px; line-height: 1.5; color: var(--muted); text-align: center; }
-.auth-or {
-  display: flex; align-items: center; gap: 12px; color: var(--muted);
-  font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em;
-}
-.auth-or::before, .auth-or::after { content: ''; flex: 1; height: 1px; background: var(--line); }
-
-.auth-form, .auth-forgot { display: flex; flex-direction: column; gap: 14px; }
-.auth-field { display: flex; flex-direction: column; align-items: stretch; gap: 6px; margin: 0; }
-.auth-field > span { font-size: 13px; font-weight: 600; color: var(--ink); }
-.auth-field input {
-  width: 100%; border: 1px solid var(--line); border-radius: var(--r-md); padding: 12px 14px;
-  font-size: 15px; font-family: inherit; background: var(--raise); color: var(--ink);
-  transition: border-color .15s, box-shadow .15s;
-}
-.auth-field input::placeholder { color: var(--muted); opacity: .8; }
-.auth-field input:focus { outline: none; border-color: var(--blue); box-shadow: 0 0 0 3px rgba(28, 111, 224, 0.18); }
-.auth-error {
-  margin: 0; padding: 10px 12px; font-size: 13px; line-height: 1.45;
-  color: #c0343f; background: rgba(224, 72, 84, 0.08); border: 1px solid rgba(224, 72, 84, 0.35); border-radius: var(--r-md);
-}
-:root[data-theme="dark"] .auth-error { color: #ff9aa2; background: rgba(224, 72, 84, 0.12); }
-.auth-submit {
-  width: 100%; background: var(--blue-solid); color: #fff; border: none; border-radius: var(--r-pill);
-  padding: 13px; font-weight: 700; font-size: 15px; margin-top: 4px; transition: background .15s;
-}
-.auth-submit:hover:not(:disabled) { background: var(--blue-solid-hover); }
-.auth-submit:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
-.auth-submit:disabled { opacity: .6; cursor: default; }
-.auth-terms { margin: 2px 0 0; font-size: 12px; line-height: 1.6; color: var(--muted); text-align: center; }
-.auth-terms a { color: var(--ink); text-decoration: underline; text-underline-offset: 2px; }
-
-/* Forgot password, and the way back: links, not grey system buttons. */
-.auth-forgot-link, .auth-back {
-  display: block; width: 100%; margin: 10px 0 0; padding: 6px 0; border: none; background: none;
-  font-size: 14px; font-weight: 600; color: var(--blue); text-align: center;
-}
-.auth-back { margin: 0; }
-.auth-forgot-link:hover, .auth-back:hover { text-decoration: underline; text-underline-offset: 3px; }
-.auth-forgot-link:focus-visible, .auth-back:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; border-radius: 6px; }
-.auth-forgot-msg {
-  font-size: 13px; line-height: 1.5; color: var(--ink); background: var(--raise-2);
-  border: 1px solid var(--line); border-radius: var(--r-md); padding: 10px 12px;
-}
-.auth-note {
-  margin: 16px 0 0; padding-top: 14px; border-top: 1px solid var(--line);
-  font-size: 12px; line-height: 1.55; color: var(--muted); text-align: center;
-}
-.auth-hint { font-size: 13px; color: var(--muted); text-align: center; }
-@media (max-width: 420px) {
-  .auth-modal { padding: 24px 18px 18px; }
-}
+/* The auth modal's styles live in ui/authPublic.css (imported above), shared
+   with the account page. */
 
 /* ---- creator profile modal ---- */
 .profile-modal { display: block; max-width: 860px; padding: 0; overflow-y: auto; }
@@ -539,7 +463,7 @@ a { color: inherit; text-decoration: none; }
 .profile-head {
   display: flex; align-items: center; gap: 18px; padding: 32px 32px 24px;
   border-bottom: 1px solid var(--line);
-  background: linear-gradient(135deg, rgba(91, 42, 134, 0.06), rgba(28, 111, 224, 0.05));
+  background: linear-gradient(135deg, rgba(28, 111, 224, 0.06), rgba(28, 111, 224, 0.05));
 }
 .profile-avatar {
   width: 72px; height: 72px; border-radius: 50%; background: var(--grad-brand); color: #fff;

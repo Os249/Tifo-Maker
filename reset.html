@@ -6,19 +6,19 @@
   <link rel="icon" href="/favicon.ico" sizes="32x32" />
   <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+  <script src="/theme-boot.js"></script>
   <title>Reset password · TifoMaker</title>
   <meta name="robots" content="noindex" />
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;800&display=swap" rel="stylesheet" />
   <style>
-    :root { --ink:#0e1426; --muted:#5b6473; --line:#e6e8ee; --blue:#1c6fe0; --bg:#fbfbfd; --danger:#c0392b; }
+    /* The site's palette (src/ui/colorScheme.css, imported by reset.ts). */
+    :root { --bg:var(--paper); }
     * { box-sizing:border-box; }
     body { margin:0; min-height:100vh; display:grid; place-items:center; background:var(--bg); color:var(--ink);
-      font:16px/1.6 'Inter',system-ui,-apple-system,sans-serif; -webkit-font-smoothing:antialiased; padding:20px; }
-    .card { width:100%; max-width:380px; background:#fff; border:1px solid var(--line); border-radius:16px; padding:28px 26px;
+      font:16px/1.6 var(--font-ui); -webkit-font-smoothing:antialiased; padding:20px; }
+    .card { width:100%; max-width:380px; background:var(--card); border:1px solid var(--line); border-radius:16px; padding:28px 26px;
       box-shadow:0 12px 40px rgba(20,26,46,.08); }
-    .brand { display:block; font-weight:800; letter-spacing:.03em; color:var(--ink); text-decoration:none; margin-bottom:14px; }
-    .brand b { color:var(--blue); }
+    .brand { display:block; font-weight:800; letter-spacing:.02em; color:var(--ink); text-decoration:none; margin-bottom:14px; }
+    .brand b { color:var(--maker); }
     h1 { font-size:21px; margin:0 0 16px; }
     label { display:block; font-size:13px; color:var(--muted); margin:0 0 12px; }
     /* The spacing sits under the label text rather than above the input, so the
@@ -27,7 +27,7 @@
     input { display:block; width:100%; padding:10px 12px; font:inherit; font-size:14px;
       border:1px solid var(--line); border-radius:10px; }
     input:focus-visible { outline:none; border-color:var(--blue); box-shadow:0 0 0 3px rgba(28,111,224,.18); }
-    button { width:100%; margin-top:4px; padding:11px 0; font:inherit; font-weight:600; color:#fff; background:var(--blue);
+    button { width:100%; margin-top:4px; padding:11px 0; font:inherit; font-weight:600; color:#fff; background:var(--blue-solid);
       border:none; border-radius:999px; cursor:pointer; }
     button:disabled { opacity:.6; cursor:default; }
     .err { background:rgba(192,57,43,.1); color:var(--danger); border:1px solid rgba(192,57,43,.3); border-radius:8px;

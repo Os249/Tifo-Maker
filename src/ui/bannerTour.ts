@@ -74,7 +74,7 @@ const MOBILE_STEPS: TourStep[] = [
 
 /** Something else already has the screen: onboarding, a tour, Match Day. */
 function screenBusy(): boolean {
-  return tourOpen() || !!document.querySelector('.ob-backdrop, .mds-overlay');
+  return tourOpen() || !!document.querySelector('.mds-overlay');
 }
 
 /** Run it now, whether or not it has been seen: "How banners work". */

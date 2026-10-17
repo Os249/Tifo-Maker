@@ -193,6 +193,9 @@ export function mountMobileShell(): MobileShell | null {
     if (!homes.has(id)) homes.set(id, { parent: node.parentNode!, next: node.nextSibling });
     node.classList.remove('ctx-hidden');
     node.hidden = false;
+    // The desktop panel hides the cards a tab does not own with an inline
+    // display:none; a card lent to the sheet is wanted whatever tab it left.
+    node.style.display = '';
     bodyEl.appendChild(node);
     return node;
   };
@@ -565,13 +568,11 @@ export function mountMobileShell(): MobileShell | null {
       onStand = id;
       for (const o of standBtns) o.classList.toggle('on', o === b);
       if (id === 'all') { proxy('#fit'); return; }
-      // #section-nav holds one cell per section, grouped by stand. Jump to the
-      // middle section of that stand: it is the one a tifo is centred on.
-      const groups = document.querySelectorAll('#section-nav .section-stand');
-      const order = ['north', 'east', 'south', 'west'];
-      const g = groups[order.indexOf(id)] as HTMLElement | undefined;
-      const cells = g?.querySelectorAll<HTMLButtonElement>('.section-cell');
-      if (cells && cells.length) cells[Math.floor(cells.length / 2)].click();
+      // The whole stand, framed: the same jump the desktop's stand chips make
+      // (toolbar.ts). It used to press the middle cell of the stand's group in
+      // #section-nav, found by position, and a ground with no seats on one side
+      // has one group fewer, so "South" could land on West.
+      document.dispatchEvent(new CustomEvent('tifo:stand', { detail: id }));
     });
     stands.appendChild(b);
     standBtns.push(b);
@@ -635,8 +636,8 @@ export function mountMobileShell(): MobileShell | null {
   // The header only fits one row once the standalone language and sign-up
   // buttons move into the avatar menu, where Gallery and Community already
   // live. Both remain one tap away; the header gains ~53px for the canvas.
+  // (The language row in the menu is wired in main.ts, for every layout.)
   document.getElementById('menu-signup')?.addEventListener('click', () => proxy('#signin'));
-  document.getElementById('menu-lang')?.addEventListener('click', () => proxy('#lang-toggle'));
 
   // ---------- sync ----------
   function sync(): void {

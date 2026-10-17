@@ -1,5 +1,6 @@
 /**
- * The cookie banner on a first visit, with the Start dialog open.
+ * The cookie banner on a first visit, with the start flow ("Who do you
+ * support?") open on top of the Projects page.
  *
  * Reported (Sept 2026): on the editor's first visit neither "Accept all" nor
  * "Essential only" did anything. The Start dialog makes everything else on the
@@ -31,8 +32,8 @@ async function firstVisit(w, h, lang = 'en', phone = false) {
   const p = await ctx.newPage();
   const errs = [];
   p.on('pageerror', (e) => errs.push(e.message.slice(0, 160)));
-  await p.goto(B + '/app?new=1', { waitUntil: 'networkidle', timeout: 120000 });
-  await p.waitForSelector('.ob-backdrop', { timeout: 60000 });
+  await p.goto(B + '/projects?new=1', { waitUntil: 'networkidle', timeout: 120000 });
+  await p.waitForSelector('.np-backdrop .st-club', { timeout: 60000 });
   await p.waitForSelector('#consent-bar', { timeout: 60000 });
   await p.waitForTimeout(800);
   return { ctx, p, errs };
@@ -62,15 +63,15 @@ for (const [label, w, h, phone] of [['desktop 1916x902 (the report)', 1916, 902,
     // The dialog's own buttons are above the banner, not underneath it.
     const clear = await p.evaluate(() => {
       const bar = document.getElementById('consent-bar').getBoundingClientRect();
-      return [...document.querySelectorAll('.ob-actions button')].every((b) => b.getBoundingClientRect().bottom <= bar.top + 1);
+      return [...document.querySelectorAll('.np-actions button')].every((b) => b.getBoundingClientRect().bottom <= bar.top + 1);
     });
     check('the Start dialog\'s buttons sit above the banner', clear);
-    check('and "Start designing" is clickable with the banner up', await hitOk(p, '.ob-start'));
+    check('and "No club? Just pick a ground" is clickable with the banner up', await hitOk(p, '#st-no-club'));
     await realClick(p, btn);
     check(`clicking ${name} records "${want}"`, (await consent(p)) === want, String(await consent(p)));
     check('and the banner goes away', await p.evaluate(() => !document.getElementById('consent-bar')));
     check('the dialog takes back the room it gave the banner', await p.evaluate(() => !document.documentElement.style.getPropertyValue('--consent-h')));
-    check('the Start dialog is still there to answer', await p.evaluate(() => !!document.querySelector('.ob-backdrop')));
+    check('the Start dialog is still there to answer', await p.evaluate(() => !!document.querySelector('.np-backdrop')));
     check('no page errors', errs.length === 0, errs.join(' | '));
     await ctx.close();
   }
@@ -79,8 +80,12 @@ for (const [label, w, h, phone] of [['desktop 1916x902 (the report)', 1916, 902,
 console.log('\n— with the keyboard —');
 {
   const { ctx, p, errs } = await firstVisit(1366, 768);
+  // Focus starts on the dialog's question; one step back is the banner.
+  await p.keyboard.press('Shift+Tab');
+  check('Shift+Tab from the question goes straight to the cookie banner', await p.evaluate(() => !!document.activeElement?.closest('#consent-bar')));
+  await p.evaluate(() => document.getElementById('np-h')?.focus());
   let reached = false;
-  for (let i = 0; i < 30 && !reached; i++) {
+  for (let i = 0; i < 60 && !reached; i++) {
     await p.keyboard.press('Tab');
     reached = await p.evaluate(() => !!document.activeElement?.closest('#consent-bar'));
   }
@@ -92,7 +97,7 @@ console.log('\n— with the keyboard —');
   let stayed = true;
   for (let i = 0; i < 25; i++) {
     await p.keyboard.press('Tab');
-    if (!(await p.evaluate(() => !!document.activeElement?.closest('.ob-backdrop')))) stayed = false;
+    if (!(await p.evaluate(() => !!document.activeElement?.closest('.np-backdrop')))) stayed = false;
   }
   check('once answered, Tab stays inside the dialog again', stayed);
   check('no page errors', errs.length === 0, errs.join(' | '));
@@ -102,7 +107,7 @@ console.log('\n— with the keyboard —');
 console.log('\n— one scroll, not four —');
 {
   const { ctx, p } = await firstVisit(1916, 902);
-  const scrollers = await p.evaluate(() => [...document.querySelectorAll('.ob-modal *')]
+  const scrollers = await p.evaluate(() => [...document.querySelectorAll('.np-modal *')]
     .filter((e) => /(auto|scroll)/.test(getComputedStyle(e).overflowY) && e.scrollHeight > e.clientHeight + 1).length);
   check('the Start dialog has at most one scrolling area', scrollers <= 1, `${scrollers} scrolling areas`);
   await ctx.close();

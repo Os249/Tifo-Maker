@@ -1,13 +1,9 @@
+@import './ui/colorScheme.css';
 :root {
-  --purple: #5B2A86;
-  --blue: #1C6FE0;
-  --emerald: #0F8A4D;
-  --ink: #0E0A1A;
-  --paper: #FBFAFF;
-  --muted: #767188; /* was #8B86A0 at 3.36:1 on the page ground; 4.5:1 is the floor for body text */
-  --line: #ECE9F5;
-  --font: 'Inter', system-ui, -apple-system, sans-serif;
-  --grad: linear-gradient(135deg, var(--purple), var(--blue) 60%, var(--emerald));
+  /* The button that shows a fan their card: solid action blue. It was a
+     purple-to-green gradient, which also made its disabled state read as a
+     decoration rather than as "not yet". */
+  --grad: var(--blue-solid);
 }
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 html, body { margin: 0; height: 100%; }
@@ -17,8 +13,8 @@ body { font-family: var(--font); background: var(--paper); color: var(--ink); }
 
 /* picker */
 .seat-head { padding: 40px 24px 8px; text-align: center; }
-.seat-brand { font-weight: 800; font-size: 18px; letter-spacing: -0.01em; }
-.seat-brand b { color: var(--blue); }
+.seat-brand { font-weight: 800; font-size: 18px; letter-spacing: .02em; }
+.seat-brand b { color: var(--maker); }
 .seat-title { font-size: 28px; font-weight: 800; letter-spacing: -0.02em; margin-top: 18px; line-height: 1.15; }
 .seat-intro { color: var(--muted); font-size: 16px; margin-top: 10px; line-height: 1.5; }
 .seat-error-title { font-size: 24px; font-weight: 800; margin-top: 18px; }
@@ -29,17 +25,20 @@ body { font-family: var(--font); background: var(--paper); color: var(--ink); }
 .seat-field select {
   -webkit-appearance: none; appearance: none;
   width: 100%; padding: 16px; font-size: 17px; font-family: inherit; font-weight: 500;
-  border: 1.5px solid var(--line); border-radius: 16px; background: #fff;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%238B86A0' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+  border: 1.5px solid var(--line); border-radius: 16px; background-color: var(--card); color: var(--ink);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%238690A7' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
   background-repeat: no-repeat; background-position: right 16px center;
 }
+:root[dir="rtl"] .seat-field select { background-position: left 16px center; }
 .seat-field select:focus { outline: none; border-color: var(--blue); box-shadow: 0 0 0 4px rgba(28,111,224,0.12); }
 .seat-go {
   margin-top: 8px; padding: 18px; font-size: 18px; font-weight: 800; font-family: inherit;
   border: none; border-radius: 999px; background: var(--grad); color: #fff;
   box-shadow: 0 12px 30px rgba(28, 111, 224, 0.3); cursor: pointer;
 }
-.seat-go:disabled { opacity: 0.4; box-shadow: none; }
+/* Not yet: a grey button with a grey label, which reads as "pick your seat
+   first", not as a faded decoration. */
+.seat-go:disabled { background: var(--raise-2); color: var(--muted); box-shadow: inset 0 0 0 1.5px var(--line); cursor: not-allowed; }
 .seat-foot { padding: 20px; text-align: center; color: var(--muted); font-size: 13px; }
 .seat-foot a { color: var(--blue); font-weight: 600; text-decoration: none; }
 

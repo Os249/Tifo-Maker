@@ -328,6 +328,20 @@ export interface NewProjectIntent {
   prompt?: string;
   /** True when the user left the name as it was, so the AI may name it. */
   autoName?: boolean;
+  /**
+   * How the stand looks when the editor opens (the start flow's last step).
+   * Absent for copies, imports and AI projects, which bring their own seats.
+   *
+   *  - club: the free offline designer draws `brief` across the bowl.
+   *  - pattern: `patternId` (core/patterns.ts) in `palette`.
+   *  - blank: every seat empty, `palette` on the swatches.
+   */
+  start?: {
+    kind: 'club' | 'pattern' | 'blank';
+    brief?: string;
+    patternId?: string;
+    palette?: string[];
+  };
 }
 
 const INTENT_KEY = 'tifo_new_project';

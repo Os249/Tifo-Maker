@@ -30,12 +30,32 @@ export function localizeDailyTifo(): void {
   el.textContent = getLang() === 'ar' && ar ? ar : en;
 }
 
+/**
+ * The card's picture as the tifo in the bowl (ui/bowlPicture.ts). The server
+ * sends the strip, which is what a crawler and a no-script visitor get; the
+ * page turns it into the stand picture once it is near the screen.
+ */
+async function standPicture(box: HTMLElement): Promise<void> {
+  const img = box.querySelector<HTMLImageElement>('img.fd-shot');
+  if (!img || img.dataset.bowl) return;
+  const src = img.getAttribute('src');
+  if (!src) return;
+  img.removeAttribute('src');
+  img.removeAttribute('width');
+  img.removeAttribute('height');
+  img.dataset.bowl = src;
+  img.closest('.fd-shot-wrap')?.classList.add('is-bowl');
+  const { hydrateBowls } = await import('./ui/bowlPicture');
+  hydrateBowls(box);
+}
+
 export async function mountDailyTifo(): Promise<void> {
   const box = document.getElementById(ID);
   if (!box) return;
   // Already rendered by the server: nothing to fetch, just pick the language.
   if (box.children.length > 0) {
     localizeDailyTifo();
+    void standPicture(box);
     return;
   }
   try {
@@ -64,6 +84,7 @@ export async function mountDailyTifo(): Promise<void> {
       </a>
       <p class="fd-note" data-i18n="daily.sub">${escapeHtml(t('daily.sub'))}</p>`;
     localizeDailyTifo();
+    void standPicture(box);
   } catch {
     box.innerHTML = '';
   }

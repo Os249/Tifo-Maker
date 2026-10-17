@@ -12,26 +12,12 @@ const sig=()=>page.evaluate(()=>{const id=new URLSearchParams(location.search).g
 let pass=0, fail=0;
 const check=(name,ok,extra='')=>{ (ok?pass++:fail++); console.log(`  ${ok?'PASS':'FAIL'}  ${name}${extra?'  '+extra:''}`); };
 
-// Clear the first-run dialog the way a user does. It makes the rest of the app
-// inert while it is open - deliberately, so a keyboard user cannot tab into
-// controls hidden behind it - which also means nothing behind it takes pointer
-// events. A test that paints straight through it is testing something no real
-// visitor can do.
-const dismissOnboarding = async () => {
-  await page.evaluate(() => {
-    const go = [...document.querySelectorAll('.ob-modal button')]
-      .find((b) => /start designing/i.test(b.textContent || ''));
-    (go ?? document.querySelector('.ob-skip'))?.click();
-  }).catch(() => {});
-  await page.waitForTimeout(1500);
-};
-
-// A new project: the editor is always opened on one now (see e2e-projects.mjs).
+// A new project: the editor is always opened on one now (see e2e-projects.mjs),
+// and with the first-run dialog gone (the start flow on the Projects page asks
+// its questions before the editor opens) it exists as soon as the editor does.
 await page.goto(B+'/app?new=1',{waitUntil:'domcontentloaded'}); await ready(); await page.waitForTimeout(1000);
-check('nothing is kept before the project exists', await page.evaluate(()=>!localStorage.getItem('tifo_projects_v1') && !localStorage.getItem('tifo_draft_v1')));
-await dismissOnboarding();
-check('the first-run dialog makes the app behind it inert',
-  await page.evaluate(()=>document.querySelectorAll('[inert]').length===0), 'cleared on dismiss');
+check('the project exists as soon as the editor is open', await page.evaluate(()=>/[?&]local=/.test(location.search) && JSON.parse(localStorage.getItem('tifo_projects_v1')||'[]').length===1 && !localStorage.getItem('tifo_draft_v1')));
+check('and nothing is left inert behind a dialog', await page.evaluate(()=>document.querySelectorAll('[inert]').length===0));
 
 // Paint with real pointer events (Pixi listens for these, not synthetic mouse).
 await page.evaluate(()=>{
@@ -67,7 +53,7 @@ const state = await page.evaluate(()=>
 check('saved-state says "this browser", not "saved"', /this browser/i.test(state), JSON.stringify(state));
 
 // Reload: the whole point.
-await page.reload({waitUntil:'domcontentloaded'}); await ready(); await page.waitForTimeout(1500); await dismissOnboarding();
+await page.reload({waitUntil:'domcontentloaded'}); await ready(); await page.waitForTimeout(1500);
 const b = await sig();
 check('draft survives a reload', !!b && b.head===a.head, b?`${b.runs} runs`:'');
 check('the reload reopens the same project, not a new one', await page.evaluate(()=>/[?&]local=/.test(location.search) && JSON.parse(localStorage.getItem('tifo_projects_v1')||'[]').length===1));
@@ -128,7 +114,12 @@ const after = await page.evaluate(()=>({
 check('Save works signed out (no modal, no wall)', /this browser/i.test(after.topState), JSON.stringify(after.topState));
 const dupes = await savedText();
 check('the save result is shown once, not in three places', dupes.count === 1, JSON.stringify(dupes));
-check('account is offered AFTER the save', after.offer, after.text);
+check('the first save asks for nothing', !after.offer, after.text);
+// Saving again means the work is worth keeping: that is when an account is offered.
+await page.evaluate(()=>document.getElementById('save-top').click());
+await page.waitForTimeout(1200);
+const again = await page.evaluate(()=>({ offer: !document.getElementById('account-offer')?.hidden, text: (document.getElementById('account-offer')?.innerText||'').replace(/\s+/g,' ').slice(0,110) }));
+check('an account is offered after the second save', again.offer, again.text);
 
 // An offer below the fold is the same as no offer: pressing Save without
 // scrolling used to leave it ~700px under the viewport.

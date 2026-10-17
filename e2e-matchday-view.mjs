@@ -49,6 +49,17 @@ async function sim({ lang = 'en', w = 1440, h = 900, template = 'jewel-jeddah-60
   const p = await ctx.newPage();
   const errs = [];
   p.on('pageerror', (e) => errs.push(e.message.slice(0, 160)));
+  // A new project starts truly empty now, so give it a tifo to show: blue and
+  // white hoops, as the start flow's "Stripes" would (core/projects.ts).
+  if (!design) {
+    await p.addInitScript((tpl) => {
+      try {
+        if (sessionStorage.getItem('e2e_started')) return;
+        sessionStorage.setItem('e2e_started', '1');
+        sessionStorage.setItem('tifo_new_project', JSON.stringify({ title: 'Hoops', templateId: tpl, start: { kind: 'pattern', patternId: 'hoops', palette: ['#262a33', '#1c5fd9', '#f2f1ec', '#16161a'] } }));
+      } catch { /* */ }
+    }, template);
+  }
   await p.goto(design ? `${B}/app?sim=1&design=${design}` : `${B}/app?new=1&template=${template}&sim=1`, { waitUntil: 'networkidle', timeout: 120000 });
   await p.waitForSelector('.mds-overlay canvas', { timeout: 120000 });
   await p.waitForTimeout(3500);

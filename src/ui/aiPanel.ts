@@ -32,7 +32,7 @@ import { isSignedIn, fetchMe, resendVerification } from '../net/api';
 import { openAuthModal } from './authModal';
 import { openAddEmailModal } from './openAddEmailModal';
 
-import { t, tErr, tv } from './i18n';
+import { onLangChange, t, tErr, tv } from './i18n';
 // Auto-resend the verification email at most once per session when AI is blocked.
 let verifyResent = false;
 
@@ -92,7 +92,8 @@ export function mountAiPanel(deps: AiPanelDeps): AiPanelHandle {
 
   const promptEl = $<HTMLTextAreaElement>('#ai-prompt');
   const genBtn = $<HTMLButtonElement>('#ai-generate');
-  const superBtn = $<HTMLButtonElement>('#ai-generate-super');
+  const wholeChk = $<HTMLInputElement>('#ai-whole');
+  const genLabel = $<HTMLElement>('#ai-generate-label');
   const statusEl = $('#ai-status');
   const progressEl = $('#ai-progress');
   const progressStageEl = $('#ai-progress-stage');
@@ -265,7 +266,15 @@ export function mountAiPanel(deps: AiPanelDeps): AiPanelHandle {
       : q.remaining > 0
         ? `${q.remaining} of ${q.limit} premium designs left this hour`
         : `Hourly limit reached: resets in ${resetMins(q)} min`;
+  /** Signed out, the main button says what pressing it does. */
+  function syncGenLabel(): void {
+    if (!genLabel) return;
+    const out = !isSignedIn() && !aiUnlockToken();
+    genLabel.textContent = t(out ? 'ed.ai.signupToUse' : 'ed.ai.generate');
+    genBtn!.classList.toggle('ai-signup', out);
+  }
   const setQuota = (q: AiQuota | null): void => {
+    syncGenLabel();
     if (!quotaEl) return;
     quotaEl.textContent = q ? quotaText(q) : isSignedIn() ? '' : t('err.aiSignIn');
     // Warn before the wall rather than at it.
@@ -343,7 +352,7 @@ export function mountAiPanel(deps: AiPanelDeps): AiPanelHandle {
     inflight = null;
   });
 
-  const lockToggle = ([promptEl, genBtn, superBtn, shuffleBtn, examplesEl, quotaEl] as (HTMLElement | null)[]).filter(
+  const lockToggle = ([promptEl, genBtn, wholeChk?.closest('label') ?? null, shuffleBtn, examplesEl, quotaEl] as (HTMLElement | null)[]).filter(
     (e): e is HTMLElement => !!e,
   );
   const setLocked = (locked: boolean): void => {
@@ -506,9 +515,10 @@ export function mountAiPanel(deps: AiPanelDeps): AiPanelHandle {
     const text = prompt.trim();
     if (!text) { setError(t('ai.card.describeFirst')); return; }
     if (!isSignedIn() && !aiUnlockToken()) {
+      // The button already said so ("Create a free account to use AI"), so
+      // this is that, not a surprise sign-in wall.
       setError(null);
-      setStatus('Sign in or unlock with the admin password.');
-      void openAuthModal();
+      if (await openAuthModal(false, 'signup')) syncGenLabel();
       return;
     }
     const useSuper = !!opts.super;
@@ -518,7 +528,7 @@ export function mountAiPanel(deps: AiPanelDeps): AiPanelHandle {
     setError(null);
     hideChoice();
     genBtn.disabled = true;
-    if (superBtn) superBtn.disabled = true;
+    if (wholeChk) wholeChk.disabled = true;
     if (regenBtn) regenBtn.disabled = true;
     if (polishBtn) polishBtn.disabled = true;
     setStatus('');
@@ -684,7 +694,7 @@ export function mountAiPanel(deps: AiPanelDeps): AiPanelHandle {
       inflight = null;
       busy = false;
       genBtn.disabled = false;
-      if (superBtn) superBtn.disabled = false;
+      if (wholeChk) wholeChk.disabled = false;
       if (regenBtn) regenBtn.disabled = false;
       if (polishBtn) polishBtn.disabled = false;
     }
@@ -724,7 +734,7 @@ export function mountAiPanel(deps: AiPanelDeps): AiPanelHandle {
     busy = true;
     setError(null);
     genBtn.disabled = true;
-    if (superBtn) superBtn.disabled = true;
+    if (wholeChk) wholeChk.disabled = true;
     if (regenBtn) regenBtn.disabled = true;
     if (polishBtn) polishBtn.disabled = true;
     setStatus('');
@@ -765,7 +775,7 @@ export function mountAiPanel(deps: AiPanelDeps): AiPanelHandle {
       stopProgress();
       busy = false;
       genBtn.disabled = false;
-      if (superBtn) superBtn.disabled = false;
+      if (wholeChk) wholeChk.disabled = false;
       if (regenBtn) regenBtn.disabled = false;
       if (polishBtn) polishBtn.disabled = false;
     }
@@ -791,8 +801,14 @@ export function mountAiPanel(deps: AiPanelDeps): AiPanelHandle {
     }
   };
 
-  genBtn.addEventListener('click', () => void run(promptEl.value));
-  superBtn?.addEventListener('click', () => void run(promptEl.value, { super: true }));
+  genBtn.addEventListener('click', () => {
+    // Signed out, the prompt can be empty: the click is "create an account".
+    if (!isSignedIn() && !aiUnlockToken()) {
+      void openAuthModal(false, 'signup').then((ok) => { if (ok) syncGenLabel(); });
+      return;
+    }
+    void run(promptEl.value, { super: !!wholeChk?.checked });
+  });
   regenBtn?.addEventListener('click', () => void run(promptEl.value, { super: lastSuper }));
   polishBtn?.addEventListener('click', () => void polish());
   shuffleBtn?.addEventListener('click', () => void shuffle());
@@ -801,7 +817,7 @@ export function mountAiPanel(deps: AiPanelDeps): AiPanelHandle {
   promptEl.addEventListener('keydown', (e) => {
     if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
       e.preventDefault();
-      void run(promptEl.value);
+      void run(promptEl.value, { super: !!wholeChk?.checked });
     }
   });
   // Example chips fill the prompt.
@@ -819,6 +835,10 @@ export function mountAiPanel(deps: AiPanelDeps): AiPanelHandle {
       genBtn.click();
     });
   }
+
+  syncGenLabel();
+  onLangChange(syncGenLabel);
+  window.addEventListener('tifo:auth', syncGenLabel);
 
   // Determine access: admins (account OR unlock token) see the panel; everyone
   // else gets the lock. The server is the real gate — this is UX only.

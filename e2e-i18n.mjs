@@ -37,6 +37,7 @@ const ALLOW = new Set([
   'TIFO', 'MAKER', 'TIFOMAKER', 'tifomaker.org', 'English', 'العربية',
   'PNG', 'JPG', 'SVG', 'PDF', 'CSV', 'GIF', 'WebM', 'MP4', 'QR', 'AI', 'RTL',
   'CSV + PDF', '@OS99GameDev', '@OSNGameDev', 'Zaunfahne', 'tifomaker', '@tifomaker',
+  'Ctrl', // a key's own label, which an Arabic keyboard prints too
 ]);
 const ALLOW_RE = [
   /^[^\p{L}]*$/u,                         // digits, punctuation, symbols only
@@ -133,10 +134,22 @@ console.log('\n— projects in Arabic —');
   report('projects page (empty)', await p.evaluate(scrapePage));
   await p.click('#pj-empty-new');
   await p.waitForTimeout(700);
-  report('create panel', await p.evaluate(scrapePage));
-  await p.click('#np-to-ai');
+  report('start flow: who do you support', await p.evaluate(scrapePage));
+  await p.fill('#st-search', 'الوحدة');
+  await p.waitForTimeout(300);
+  report('start flow: a club that is not listed', await p.evaluate(scrapePage));
+  await p.click('#st-custom');
+  await p.waitForTimeout(500);
+  report('start flow: where does it play', await p.evaluate(scrapePage));
+  await p.click('.st-ground[data-id="alfaisal-jeddah-27k"]');
+  await p.waitForTimeout(500);
+  report('start flow: how to start, with colours to pick', await p.evaluate(scrapePage));
+  await p.click('.st-opt[data-start="pattern"]');
+  await p.waitForTimeout(300);
+  report('start flow: stripes', await p.evaluate(scrapePage));
+  await p.click('.st-opt[data-start="ai"]');
   await p.waitForTimeout(1500);
-  report('create panel: the AI side, signed out', await p.evaluate(scrapePage));
+  report('start flow: the AI side, signed out', await p.evaluate(scrapePage));
   await ctx.close();
 }
 {
@@ -165,7 +178,6 @@ console.log('\n— the phone gate —');
 console.log('\n— the editor and its panels —');
 {
   const [ctx, p] = await page('/app?new=1', { wait: 6000 });
-  await p.evaluate(() => { document.querySelector('.ob-skip')?.click(); });
   await p.waitForTimeout(1200);
   report('editor', await p.evaluate(scrapePage));
   const sections = await p.evaluate(() => [...document.querySelectorAll('#panel .panel-section')].map((s) => s.id).filter(Boolean));
@@ -201,7 +213,6 @@ for (const [id, label] of [
   ['jewel-jeddah-60k', 'stadium panel, a ground re-laid in its real blocks'],
 ]) {
   const [ctx, p] = await page(`/app?new=1&template=${id}`, { wait: 6000 });
-  await p.evaluate(() => { document.querySelector('.ob-skip')?.click(); });
   await p.waitForTimeout(800);
   await p.click('#rail-stadium', { timeout: 4000, force: true }).catch(() => {});
   await p.waitForTimeout(1500);
@@ -209,15 +220,15 @@ for (const [id, label] of [
   await ctx.close();
 }
 
-console.log('\n— first run (onboarding + cookie banner) —');
+console.log('\n— first run (the start flow + cookie banner) —');
 {
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 960 },
     storageState: { cookies: [], origins: [{ origin: B, localStorage: [{ name: 'tifo_lang_v1', value: 'ar' }] }] } });
   const p = await ctx.newPage();
   p.on('pageerror', () => {});
-  await p.goto(B + '/app?new=1', { waitUntil: 'networkidle', timeout: 60000 });
-  await p.waitForTimeout(5000);
-  report('onboarding + consent', await p.evaluate(scrapePage));
+  await p.goto(B + '/projects?new=1', { waitUntil: 'networkidle', timeout: 60000 });
+  await p.waitForTimeout(2500);
+  report('start flow + consent', await p.evaluate(scrapePage));
   await ctx.close();
 }
 
@@ -232,6 +243,9 @@ console.log('\n— the banners news and the banner tour —');
   const p = await ctx.newPage();
   p.on('pageerror', () => {});
   await p.goto(B + '/app?new=1', { waitUntil: 'networkidle', timeout: 60000 });
+  // News comes to someone reopening a tifo, never on top of one being started.
+  await p.waitForFunction(() => /[?&]local=/.test(location.search), null, { timeout: 60000 }).catch(() => {});
+  await p.goto(p.url(), { waitUntil: 'networkidle', timeout: 60000 });
   const card = await p.waitForSelector('#news-card', { timeout: 20000 }).catch(() => null);
   if (!card) { fail++; console.log('  FAIL  banners news — it never appeared'); }
   else {

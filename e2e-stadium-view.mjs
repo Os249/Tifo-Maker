@@ -72,8 +72,22 @@ const LS = (lang = 'en') => [
 ];
 
 async function open(path, { w = 1280, h = 800 } = {}) {
-  const ctx = await browser.newContext({ viewport: { width: w, height: h }, storageState: { cookies: [], origins: [{ origin: B, localStorage: LS() }] } });
+  // Reduced motion: a tifo the start flow draws plays its card reveal when it
+  // first lands in the stadium, and the card counts below want the cards up.
+  const ctx = await browser.newContext({ viewport: { width: w, height: h }, reducedMotion: 'reduce', storageState: { cookies: [], origins: [{ origin: B, localStorage: LS() }] } });
   const p = await ctx.newPage();
+  // A new project starts with every seat empty now; give it a tifo (blue and
+  // white hoops, as the start flow's "Stripes" makes) so there are cards to count.
+  const tpl = new URL(B + path).searchParams.get('template');
+  if (/[?&]new=1/.test(path)) {
+    await p.addInitScript((templateId) => {
+      try {
+        if (sessionStorage.getItem('e2e_started')) return;
+        sessionStorage.setItem('e2e_started', '1');
+        sessionStorage.setItem('tifo_new_project', JSON.stringify({ title: 'Hoops', templateId: templateId || 'generic-bowl-60k', start: { kind: 'pattern', patternId: 'hoops', palette: ['#262a33', '#1c5fd9', '#f2f1ec', '#16161a'] } }));
+      } catch { /* */ }
+    }, tpl);
+  }
   const errs = [];
   p.on('pageerror', (e) => errs.push(e.message.slice(0, 200)));
   p.on('console', (m) => {
@@ -89,7 +103,11 @@ async function stadium(id, quality = 'low') {
   const o = await open(`/app?new=1&template=${id}&quality=${quality}&e2e=1`);
   const { p } = o;
   await p.waitForFunction(() => /\d/.test(document.getElementById('stat')?.textContent || '') && !/generating/i.test(document.getElementById('stat')?.textContent || ''), null, { timeout: 120000 });
-  await p.click('#view-3d');
+  // A stripes start opens in the Stadium view by itself. Clicking the button
+  // as well lands late (a software-rendered frame holds the page for a second
+  // or more) and its one repaint fell inside the idle check below.
+  const opened = await p.waitForFunction(() => document.getElementById('view-3d')?.classList.contains('active'), null, { timeout: 30000 }).then(() => true, () => false);
+  if (!opened) await p.click('#view-3d');
   await p.waitForFunction(() => !!window.__tifoPreview, null, { timeout: 60000 });
   await p.evaluate(() => window.__tifoPreview.ready);
   await p.waitForTimeout(400);

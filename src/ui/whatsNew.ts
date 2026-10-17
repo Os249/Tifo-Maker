@@ -37,7 +37,7 @@ function markSeen(): void {
 
 /** Something else has the screen, and this can wait for it. */
 function screenBusy(): boolean {
-  return !!document.querySelector('.tour-overlay, .ob-backdrop, .mds-overlay, .dlg-backdrop');
+  return !!document.querySelector('.tour-overlay, .mds-overlay, .dlg-backdrop');
 }
 
 /** The Banner tab this points at: the header's, or the phone's view pill. */

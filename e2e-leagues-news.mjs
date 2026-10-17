@@ -46,6 +46,10 @@ async function open({ lang = 'en', w = 1400, h = 880, extra = [] } = {}) {
   const errs = [];
   page.on('pageerror', (e) => errs.push(e.message.slice(0, 200)));
   await page.goto(B + '/app?new=1', { waitUntil: 'networkidle', timeout: 120000 });
+  // News comes to someone reopening a tifo, never on top of one being started
+  // (main.ts): open the one just made, as a returning visitor would.
+  await page.waitForFunction(() => /[?&]local=/.test(location.search), null, { timeout: 60000 }).catch(() => {});
+  await page.goto(page.url(), { waitUntil: 'networkidle', timeout: 120000 });
   return { ctx, page, errs };
 }
 const flag = (page, k) => page.evaluate((key) => localStorage.getItem(key), k);

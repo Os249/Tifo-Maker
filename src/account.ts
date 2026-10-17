@@ -93,6 +93,16 @@ function renderName(): void {
   dirtyGate(input, $<HTMLButtonElement>('ac-name-save'), () => me?.username ?? '');
 }
 
+/** The way in from the signed-out page: the same dialog as everywhere else. */
+function wireGate(): void {
+  const open = async (startOn: 'signin' | 'signup'): Promise<void> => {
+    const { openAuthModal } = await import('./ui/authModal');
+    if (await openAuthModal(false, startOn)) location.reload();
+  };
+  $('ac-gate-signin')?.addEventListener('click', () => void open('signin'));
+  $('ac-gate-signup')?.addEventListener('click', () => void open('signup'));
+}
+
 async function load(): Promise<void> {
   const sections = $('ac-sections');
   const gate = $('ac-gate');
@@ -106,7 +116,15 @@ async function load(): Promise<void> {
   if (!me) {
     // A token that no longer works reads as signed in locally. Say so plainly
     // rather than showing empty fields that fail on save.
-    if (gate) { gate.hidden = false; gate.textContent = t('ac.sessionOver'); }
+    if (gate) {
+      gate.hidden = false;
+      const msg = $('ac-gate-msg');
+      if (msg) {
+        // Its own sentence now, which a language switch must not put back.
+        msg.dataset.i18n = 'ac.sessionOver';
+        msg.textContent = t('ac.sessionOver');
+      }
+    }
     return;
   }
   if (gate) gate.hidden = true;
@@ -456,6 +474,7 @@ void (async () => {
     const rest = params.toString();
     history.replaceState(null, '', `${location.pathname}${rest ? `?${rest}` : ''}`);
   }
+  wireGate();
   await load();
   if (failed) say($('ac-link-msg'), t(`auth.err.${failed}`), 'bad');
   else if (linked) say($('ac-link-msg'), t('ac.link.added'), 'ok');

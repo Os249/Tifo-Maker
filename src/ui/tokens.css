@@ -1,0 +1,130 @@
+/*
+ * Floodlight: the one design system every surface is built from.
+ *
+ * Before this file there were six: the public pages (purple, blue, emerald and
+ * neon on lavender paper), the editor (navy), the public tifo page, the account
+ * page, Match Day (a GitHub-style green) and the 404 and admin pages (green
+ * again). Each new feature picked whichever its author had open, so each one
+ * looked slightly different from the last.
+ *
+ * Now there is one ground (the navy of a stadium at night, and a cool paper for
+ * the light theme), one action colour (blue, the MAKER in the wordmark), one
+ * celebration colour (floodlight yellow, used sparingly for "new" and for
+ * moments worth marking), and the usual semantic set. Purple is gone as a brand
+ * colour. The editor keeps violet for one job only: showing what is selected.
+ *
+ * This file holds what does not change with the theme: the primitives, the
+ * fonts and the scales. The themed roles live in colorScheme.css (public pages,
+ * light and dark) and floodlight.css (the editor, dark only), both built on
+ * these values.
+ */
+@import './fonts.css';
+
+:root {
+  /* ---- primitives ---- */
+  /* Night: the editor's ground, the dark theme's ground, every dark band. */
+  --night-950: #070B14;
+  --night-900: #0B1120;
+  --night-850: #0F172A;
+  --night-800: #131B2D;
+  --night-750: #161E31;
+  --night-700: #1E2942;
+  --night-600: #243049;
+  --night-500: #33415C;
+  /* Day: the light theme's ground. A cool grey, not lavender: the lavender came
+     with the purple and goes with it. */
+  --day-50: #F6F8FB;
+  --day-100: #EEF1F6;
+  --day-200: #E2E7EF;
+  --day-300: #CBD3DF;
+  /* Text tones. Each is measured against the ground it sits on. */
+  --ink-strong: #0B1424;   /* on day-50: 17:1 */
+  --ink-soft: #55607A;     /* on day-50: 5.9:1, on white 6.3:1 */
+  --snow: #F1F4FB;         /* on night-900: 17:1 */
+  --mist: #A6B0C8;         /* on night-900: 8.4:1 */
+  --mist-2: #8690A7;       /* on night-850: 5.6:1, on night-700: 4.6:1 */
+
+  /* The action colour. White text on it is 4.8:1; it is a SURFACE colour. As
+     TEXT it is a step darker on light grounds (--blue-700, 5.7:1 on day-50;
+     blue-600 itself is 4.49:1 there, a hair under the line) and a step lighter
+     on dark ones (--blue-300, 8.6:1 on night-900). */
+  --blue-600: #1C6FE0;
+  --blue-700: #155EC4;
+  --blue-500: #3B86EE;
+  --blue-300: #7FB0FF;
+  /* The wordmark's MAKER. A logotype, so WCAG's contrast rule does not bind
+     it, but it is lifted on dark grounds anyway so it reads, not glows. */
+  --maker-on-light: #1C6FE0;
+  --maker-on-dark: #4A92F2;
+
+  /* Floodlight yellow: "new", a step number, a celebration. Never text on a
+     light ground (1.2:1); always with --on-flare printed on it. */
+  --flare: #D9F000;
+  --on-flare: #0B1424;
+
+  /* Semantic. -600 for text on light, -400 for text on dark. */
+  --green-600: #0E7C46;
+  --green-400: #3FC77F;
+  --red-600: #C2342C;
+  --red-400: #F06A5F;
+  --amber-600: #995C00;
+  --amber-400: #F5B43C;
+  /* The editor's selection colour, and nothing else. */
+  --violet-400: #8B7CFF;
+
+  /* ---- type ---- */
+  --font-ui: 'Inter', 'Almarai', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-display: 'Changa', 'Inter', 'Almarai', system-ui, sans-serif;
+  --font-data: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  /* One scale for every page. Body text is 16 on public pages and 13 in the
+     editor's dense panels; everything else is a step on this ladder. */
+  --fs-2xs: 11px;
+  --fs-xs: 12px;
+  --fs-sm: 13px;
+  --fs-md: 14px;
+  --fs-base: 16px;
+  --fs-lg: 18px;
+  --fs-xl: 22px;
+  --fs-2xl: 28px;
+  --fs-3xl: clamp(30px, 4vw, 40px);
+  --fs-4xl: clamp(38px, 6.2vw, 64px);
+
+  /* ---- shape ---- */
+  --r-sm: 8px;
+  --r-md: 12px;
+  --r-lg: 16px;
+  --r-xl: 22px;
+  --r-pill: 999px;
+
+  /* ---- layers ----
+     Six of them. There used to be 43 distinct z-index values, up to 10050,
+     each chosen to beat whatever was on top at the time. */
+  --z-raised: 5;      /* floating controls on a canvas */
+  --z-sticky: 20;     /* sticky headers, the editor's bars */
+  --z-popover: 60;    /* menus, cards beside the work */
+  --z-overlay: 100;   /* modal backdrops and dialogs */
+  --z-toast: 200;     /* toasts, which must clear a dialog */
+  --z-consent: 300;   /* the consent bar stays answerable over everything */
+
+  /* ---- motion ---- */
+  --ease: cubic-bezier(.2, .7, .2, 1);
+  --t-fast: .14s;
+  --t-med: .24s;
+
+  /* ---- terrace details ----
+     A supporters' scarf: the brand's stripes, used as a rule under a heading
+     or along the top of a band. Built from the colours above, never from a
+     club's: a club's colours belong to the fan who picked that club. */
+  --scarf: repeating-linear-gradient(90deg,
+      var(--blue-600) 0 22px, var(--snow) 22px 30px, var(--night-900) 30px 52px, var(--snow) 52px 60px);
+  /* The card mosaic: a grid of seats, for dark bands and loading states. */
+  --mosaic-dot: radial-gradient(circle at 50% 50%, rgba(255, 255, 255, .07) 0 1.4px, transparent 1.6px);
+}
+
+/* The wordmark is the same everywhere: TIFO in the text colour, MAKER in blue. */
+.wordmark { font-weight: 800; letter-spacing: .02em; color: inherit; text-decoration: none; white-space: nowrap; }
+.wordmark b { font-weight: 800; color: var(--maker); }
+
+@media (prefers-reduced-motion: reduce) {
+  :root { --t-fast: 0s; --t-med: 0s; }
+}

@@ -62,16 +62,10 @@ const STEPS: TourStep[] = [
     place: 'left',
   },
   {
-    selector: '#rail-ai',
-    titleKey: 'tour.ai',
-    bodyKey: 'tour.ai.b',
-    place: 'right',
-  },
-  {
-    selector: '#rail-stadium',
-    titleKey: 'tour.stadium',
-    bodyKey: 'tour.stadium.b',
-    place: 'right',
+    selector: '.panel-tabs',
+    titleKey: 'tour.tabs',
+    bodyKey: 'tour.tabs.b',
+    place: 'left',
   },
   {
     selector: '#view-2d',
@@ -92,13 +86,13 @@ const STEPS: TourStep[] = [
     place: 'bottom',
   },
   {
-    selector: '#save',
+    selector: '#save-top',
     titleKey: 'tour.save',
     bodyKey: 'tour.save.b',
-    place: 'top',
+    place: 'bottom',
   },
   {
-    selector: '#gallery',
+    selector: '#avatar',
     titleKey: 'tour.inspire',
     bodyKey: 'tour.inspire.b',
     place: 'bottom',

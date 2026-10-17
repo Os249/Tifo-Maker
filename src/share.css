@@ -1,110 +1,141 @@
-:root {
-  --bg: #0a0c11;
-  --panel: #11141b;
-  --line: #232a36;
-  --text: #f2f1ec;
-  --muted: #9aa3b2;
-  --blue: #5b8cff;          /* text on the dark ground */
-  /* White on #5b8cff is 3.16:1 - fine for large text, not for a 12px chip.
-     Anything that puts white ON the accent uses this darker one instead. */
-  --blue-solid: #3a6ad9;    /* 4.95:1 against white */
-}
+/*
+ * The public tifo page (/t/:id): where every shared link lands.
+ *
+ * Dark on purpose (the artwork is the point), on the same night as the editor
+ * and the site's dark theme: share.html pins data-theme="dark", so the shared
+ * roles in colorScheme.css resolve to night, and the sign-in dialog (opened by
+ * Like) is the same one the rest of the site uses.
+ */
+@import './ui/colorScheme.css';
+@import './ui/authPublic.css';
+
 * { box-sizing: border-box; }
-html, body { margin: 0; background: var(--bg); color: var(--text); font-family: Inter, system-ui, Arial, sans-serif; }
-a { color: inherit; }
+html, body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--font-ui); }
+a { color: inherit; text-decoration: none; }
+img { max-width: 100%; }
 
 .s-loading { padding: 80px 20px; text-align: center; color: var(--muted); }
+.share-app { max-width: 1160px; margin: 0 auto; padding: 0 20px 40px; }
 
-.share-app { max-width: 1100px; margin: 0 auto; padding: 16px; }
-
-.s-top { display: flex; align-items: center; justify-content: space-between; padding: 8px 4px 16px; }
-.s-brand a { font-weight: 800; letter-spacing: -0.02em; font-size: 22px; text-decoration: none; color: var(--text); }
-.s-brand b { color: var(--blue); }
-.s-open {
-  all: unset; cursor: pointer; display: inline-flex; align-items: center; gap: 8px;
-  background: #171c26; border: 1px solid var(--line); border-radius: 10px; padding: 9px 14px; font-weight: 700; font-size: 14px;
+/* ---- header ---- */
+.s-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 0 18px; }
+.s-brand { font-size: 21px; }
+.s-nav { display: flex; align-items: center; gap: 6px; }
+.s-navlink {
+  border: none; background: none; color: var(--muted); font: inherit; font-size: 14.5px; font-weight: 600;
+  padding: 8px 10px; border-radius: var(--r-pill); cursor: pointer;
 }
-.s-open:hover { background: #1f2734; }
+.s-navlink:hover { color: var(--ink); background: var(--raise-2); }
 
-.s-hero {
-  position: relative; background: #07090d; border: 1px solid var(--line); border-radius: 16px; overflow: hidden;
+/* ---- buttons ---- */
+.s-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  border: 1px solid var(--line); background: var(--raise); color: var(--ink);
+  font: inherit; font-size: 15px; font-weight: 700; padding: 11px 18px; border-radius: var(--r-pill); cursor: pointer;
+  transition: background var(--t-fast), border-color var(--t-fast), color var(--t-fast);
 }
-#s-preview-host { width: 100%; height: min(64vh, 560px); }
-#s-preview-host canvas { display: block; width: 100%; height: 100%; }
+.s-btn:hover { background: var(--raise-2); border-color: var(--line-strong); }
+.s-btn:disabled { opacity: .6; cursor: progress; }
+.s-btn.primary { background: var(--blue-solid); border-color: var(--blue-solid); color: #fff; }
+.s-btn.primary:hover { background: var(--blue-solid-hover); border-color: var(--blue-solid-hover); }
+.s-make-top { padding: 9px 16px; font-size: 14px; }
+.s-like.on { color: #ff6b81; border-color: rgba(255, 107, 129, .5); }
+.s-like.on i { color: #ff6b81; }
+.s-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+/* ---- the tifo, in its ground ---- */
+.s-hero { margin-bottom: 26px; }
+.s-stage {
+  position: relative; border-radius: var(--r-xl); overflow: hidden; border: 1px solid var(--line);
+  background: var(--mosaic-dot) 0 0 / 12px 12px, radial-gradient(ellipse at 50% 40%, #1a2847, #070B14 75%);
+}
+#s-preview-host { width: 100%; height: min(64vh, 580px); }
+#s-preview-host canvas { display: block; width: 100%; height: 100%; cursor: grab; }
+#s-preview-host canvas:active { cursor: grabbing; }
+/* The camera angles: one row under the view, scrolling sideways on a phone. */
 .s-cams {
-  position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%);
-  display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; max-width: 92%;
-  background: rgba(10, 12, 17, 0.6); backdrop-filter: blur(8px); padding: 6px; border-radius: 12px; border: 1px solid var(--line);
+  display: flex; gap: 8px; margin-top: 12px; overflow-x: auto; scrollbar-width: none; padding-bottom: 2px;
 }
+.s-cams::-webkit-scrollbar { display: none; }
 .s-cam {
-  all: unset; cursor: pointer; font-size: 12px; font-weight: 600; color: var(--muted);
-  padding: 6px 10px; border-radius: 8px;
+  flex: none; border: 1px solid var(--line); background: var(--raise); color: var(--muted);
+  font: inherit; font-size: 13.5px; font-weight: 600; padding: 8px 14px; border-radius: var(--r-pill); cursor: pointer;
 }
-.s-cam:hover { color: var(--text); background: #1b2230; }
-.s-cam.active { color: #fff; background: var(--blue-solid); }
+.s-cam:hover { color: var(--ink); border-color: var(--line-strong); }
+.s-cam.active { background: var(--invert); border-color: var(--invert); color: var(--invert-ink); }
 
-.s-body { padding: 22px 6px; }
-.s-title { font-size: clamp(24px, 4vw, 38px); font-weight: 800; letter-spacing: -0.02em; margin: 0 0 8px; }
-.s-sub { color: var(--muted); font-size: 15px; margin-bottom: 18px; }
+/* ---- who, what, and the way to make one ---- */
+.s-main { display: grid; grid-template-columns: 1.4fr 1fr; gap: 28px; align-items: start; margin-bottom: 40px; }
+.s-title { font-family: var(--font-display); font-size: clamp(28px, 4vw, 44px); font-weight: 800; line-height: 1.1; margin: 0 0 10px; }
+.s-sub { color: var(--muted); font-size: 15px; margin: 0 0 14px; }
 .s-sub .at { color: var(--blue); font-weight: 700; }
-
-.s-actions { display: flex; gap: 10px; margin-bottom: 22px; }
-.s-share {
-  all: unset; cursor: pointer; display: inline-flex; align-items: center; gap: 8px;
-  background: var(--blue-solid); color: #fff; font-weight: 800; font-size: 16px; padding: 13px 24px; border-radius: 12px;
+.s-desc { font-size: 16px; line-height: 1.6; margin: 0 0 18px; max-width: 46em; }
+.s-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.s-make {
+  position: relative; overflow: hidden; padding: 26px 24px 24px; border-radius: var(--r-xl);
+  background: radial-gradient(circle at 90% 0%, rgba(28, 111, 224, .28), transparent 60%), var(--night-850);
+  border: 1px solid var(--line);
 }
-.s-share:hover { background: #4575ec; }
-.s-fork {
-  all: unset; cursor: pointer; display: inline-flex; align-items: center; gap: 8px;
-  background: #171c26; border: 1px solid var(--line); color: var(--text); font-weight: 700; font-size: 15px; padding: 12px 18px; border-radius: 12px;
-}
-.s-fork:hover { background: #1f2734; }
+.s-make-scarf { position: absolute; inset: 0 0 auto 0; height: 6px; background: var(--scarf); }
+.s-make h2 { font-family: var(--font-display); font-size: 22px; line-height: 1.2; margin: 6px 0 8px; }
+.s-make p { color: var(--muted); font-size: 15px; margin: 0 0 18px; }
+.s-make-go { width: 100%; font-size: 16px; padding: 13px 18px; }
 
+/* ---- seats, comments, more ---- */
+.s-block { margin-bottom: 40px; }
+.s-h2 { font-family: var(--font-display); font-size: 24px; margin: 0 0 6px; }
+.s-note { color: var(--muted); font-size: 14.5px; margin: 0 0 14px; }
 .s-flat {
-  width: 100%; height: auto; display: block; border-radius: 12px; border: 1px solid var(--line);
-  background: #07090d; image-rendering: pixelated; margin-bottom: 20px;
+  width: 100%; height: auto; display: block; border-radius: var(--r-md); border: 1px solid var(--line);
+  background: var(--night-950); image-rendering: pixelated;
 }
-.s-foot { color: var(--muted); font-size: 14px; }
-.s-foot a { color: var(--blue); font-weight: 700; text-decoration: none; }
+.s-cmts { list-style: none; padding: 0; margin: 12px 0 14px; display: flex; flex-direction: column; gap: 10px; }
+.s-cmt { padding: 14px 16px; border-radius: var(--r-md); background: var(--raise); border: 1px solid var(--line); }
+.s-cmt b { color: var(--blue); }
+.s-cmt-when { color: var(--muted); font-size: 13px; }
+.s-cmt p { margin: 6px 0 0; font-size: 15px; line-height: 1.5; overflow-wrap: anywhere; }
+.s-cmt-none { color: var(--muted); }
+.s-more-link { color: var(--blue); font-weight: 700; }
+.s-more-link:hover { text-decoration: underline; text-underline-offset: 3px; }
+.s-more-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin-top: 14px; }
+.s-more-card { display: block; border-radius: var(--r-lg); overflow: hidden; background: var(--raise); border: 1px solid var(--line); transition: transform var(--t-fast) var(--ease); }
+.s-more-card:hover { transform: translateY(-3px); }
+.s-more-pic { display: block; aspect-ratio: 16 / 10; background: var(--mosaic-dot) 0 0 / 10px 10px, radial-gradient(ellipse at 50% 50%, #16213a, #070B14 70%); }
+.s-more-pic img { display: block; width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity var(--t-med) var(--ease); }
+.s-more-pic img[data-bowl-state="ready"], .s-more-pic img[data-bowl-state="strip"] { opacity: 1; }
+.s-more-pic.bowl-failed img { object-fit: contain; image-rendering: pixelated; }
+.s-more-title { display: block; padding: 10px 12px; font-weight: 700; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-.s-unavailable { max-width: 560px; margin: 0 auto; padding: 60px 20px; text-align: center; }
-.s-unavailable h1 { font-size: 28px; margin: 24px 0 8px; }
+.s-foot { color: var(--muted); font-size: 14px; text-align: center; padding: 10px 0 20px; border-top: 1px solid var(--line); }
+.s-foot a { color: var(--blue); font-weight: 700; }
+
+/* ---- unavailable ---- */
+.s-unavailable { max-width: 560px; margin: 0 auto; padding: 72px 20px; text-align: center; }
+.s-unavailable h1 { font-family: var(--font-display); font-size: 30px; margin: 28px 0 8px; }
 .s-unavailable p { color: var(--muted); }
-.s-cta { display: inline-block; margin-top: 18px; color: var(--blue); font-weight: 700; text-decoration: none; }
+.s-unavailable-acts { display: flex; justify-content: center; flex-wrap: wrap; gap: 10px; margin-top: 22px; }
 
-@media (max-width: 640px) {
-  #s-preview-host { height: 52vh; }
-  .s-actions { flex-direction: column; }
-  .s-share, .s-fork { justify-content: center; }
-}
+/* Focus: a light ring, 3:1 against this dark page (WCAG 1.4.11). This is the
+   page a shared link lands on, the widest-reach surface the product has. */
+button:focus-visible, a:focus-visible { outline: 2px solid #cfe0ff; outline-offset: 2px; }
 
-/* Eight of the ten focusable controls on this page - Open in TifoMaker and
-   every camera angle - showed nothing at all when focused. This is the page a
-   shared link lands on, so it is the widest-reach surface the product has.
-   The ring needs 3:1 against what is behind it (WCAG 1.4.11), which a light
-   ring gives on this dark chrome; the editor already does the same thing. */
-.s-open:focus-visible,
-.s-cam:focus-visible,
-.s-share:focus-visible,
-.s-foot a:focus-visible,
-.s-cta:focus-visible,
-button:focus-visible,
-a:focus-visible {
-  outline: 2px solid #cfe0ff;
-  outline-offset: 2px;
-  border-radius: 8px;
-}
-
-/* Skip link: first focusable element, invisible until focused. Never
-   display:none - that removes it from the tab order, which is the point. */
+/* Skip link: first focusable element, invisible until focused. */
 .skip-link {
-  position:absolute; inset-inline-start:0; top:0; z-index:1000;
-  width:1px; height:1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap;
-  background:#0e1424; color:#ffffff; border-radius:0 0 8px 0;
-  padding:10px 16px; font-weight:600; text-decoration:none;
+  position: absolute; inset-inline-start: 0; top: 0; z-index: var(--z-toast);
+  width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap;
+  background: var(--night-900); color: #fff; border-end-end-radius: 8px; padding: 10px 16px; font-weight: 600;
 }
-[dir="rtl"] .skip-link { border-radius:0 0 0 8px; }
-.skip-link:focus {
-  width:auto; height:auto; overflow:visible; clip-path:none;
-  outline:2px solid #1c6fe0; outline-offset:2px;
+.skip-link:focus { width: auto; height: auto; overflow: visible; clip-path: none; outline: 2px solid var(--blue-600); outline-offset: 2px; }
+
+@media (max-width: 860px) {
+  .s-main { grid-template-columns: 1fr; }
+  .s-more-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 640px) {
+  .share-app { padding: 0 14px 32px; }
+  .s-navlink:not(.s-lang) { display: none; }
+  #s-preview-host { height: 52vh; }
+  .s-stage { border-radius: var(--r-lg); }
+  .s-cams { margin-inline: -14px; padding-inline: 14px; }
+  .s-actions .s-btn { flex: 1 1 auto; }
 }

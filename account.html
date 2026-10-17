@@ -2,14 +2,13 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
+  <script src="/theme-boot.js"></script>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <link rel="icon" href="/favicon.ico" sizes="32x32" />
   <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
   <title>Account · TifoMaker</title>
   <meta name="robots" content="noindex" />
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/src/ui/account.css" />
 </head>
 <body>
@@ -130,7 +129,15 @@
       <button class="ac-btn wide" id="ac-signout" data-i18n="ac.signOut">Sign out</button>
     </div>
 
-    <p class="ac-gate" id="ac-gate" data-i18n="ac.signedOut">Sign in to manage your account.</p>
+    <!-- Signed out, the page says so AND offers the way in: a sentence with no
+         button left people to find the sign-in somewhere else. -->
+    <div class="ac-gate" id="ac-gate">
+      <p class="ac-gate-msg" id="ac-gate-msg" data-i18n="ac.signedOut">Sign in to manage your account.</p>
+      <div class="ac-gate-actions">
+        <button class="ac-btn primary" id="ac-gate-signin" type="button" data-i18n="ac.gate.signIn">Sign in</button>
+        <button class="ac-btn" id="ac-gate-signup" type="button" data-i18n="ac.gate.signUp">Create a free account</button>
+      </div>
+    </div>
   </main>
 
   <script type="module" src="/src/account.ts"></script>

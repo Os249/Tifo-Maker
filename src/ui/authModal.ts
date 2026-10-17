@@ -74,7 +74,7 @@ async function registerWithDerivedName(email: string, password: string): Promise
  * line never runs. The intent is recorded before the redirect and picked up
  * again on the way back in. See `takeClaimIntent` in net/api.
  */
-export function openAuthModal(claimOnReturn = false): Promise<string | null> {
+export function openAuthModal(claimOnReturn = false, startOn: 'signin' | 'signup' = 'signin'): Promise<string | null> {
   return new Promise((resolve) => {
     const backdrop = document.createElement('div');
     backdrop.className = 'auth-backdrop';
@@ -231,9 +231,14 @@ export function openAuthModal(claimOnReturn = false): Promise<string | null> {
       confirmRow.hidden = next !== 'signup';
       if (next !== 'signup') confirmInput.value = '';
       passwordField.setActive(next === 'signup');
+      // The dialog is named for what it is doing; it was always "Sign in".
+      modal.setAttribute('aria-label', next === 'signin' ? t('auth.signin') : t('auth.signup'));
       clearError();
     };
     tabs.forEach((tab) => tab.addEventListener('click', () => setMode(tab.dataset.mode as 'signin' | 'signup')));
+    // "Sign up" opens on Create account. It used to open on Sign in, which is
+    // the one tab a person pressing "Sign up" has no use for.
+    if (startOn === 'signup') setMode('signup');
 
     // Forgot-password sub-view (sign-in only).
     const showForgot = (on: boolean): void => {

@@ -1,3 +1,4 @@
+import { matchClub } from '../core/clubs';
 import { escapeHtml } from '../core/escape';
 import type { Editor } from '../render/editor';
 import type { DesignStore } from '../core/design';
@@ -19,7 +20,7 @@ import { RevealPlayer, REVEAL_PRESETS, revealEndsHidden, type RevealId } from '.
 import { drumCallBeat, DRUM_CALL_MIN_LENGTH } from '../core/drumCall';
 import { DrumTrack } from '../render/drumTrack';
 import { fetchMe, isSignedIn, registrationEmailWasSent, saveDesign, saveScene, setPublic, setDesignTitle, exportMyData, deleteAccount } from '../net/api';
-import { t as i18nT, tErr, tl, tv } from './i18n';
+import { onLangChange, t as i18nT, tErr, tl, tv } from './i18n';
 import { track, setAnalyticsSignedIn } from '../net/analytics';
 import { buildTifoV2 } from '../core/tifoFormat';
 import {
@@ -102,6 +103,12 @@ export interface ToolbarApi {
    * model, no quota. The first-run "Start from your club" uses it.
    */
   quickDesign(prompt: string): Promise<boolean>;
+  /**
+   * Play the card reveal once, from the start, silently (a page that has not
+   * been clicked yet may not play sound). Resolves nothing; returns how many
+   * seconds it runs, or 0 when it did not start.
+   */
+  playReveal(): number;
   /** What "Post it" needs: the name to print, and the public page if there is one. */
   postTarget(): { title: string; publicId: string | null };
   /** The key this project's banners are kept under in this browser, if any. */
@@ -160,10 +167,13 @@ export function mountToolbar(
   // the left-rail Save button and the right Animation button each open just their
   // own options. Picking any paint tool returns to 'design'.
   let panelMode: 'design' | 'save' | 'animation' | 'ai' | 'stadium' = 'design';
+  // The panel's tabs. The four menu ids are the old rail buttons', kept so the
+  // phone shell, the tour and the browser suites still find them.
   const railSaveBtn = root.querySelector<HTMLButtonElement>('#rail-save');
   const animOpenBtn = root.querySelector<HTMLButtonElement>('#rail-anim');
   const aiOpenBtn = root.querySelector<HTMLButtonElement>('#rail-ai');
   const stadiumOpenBtn = root.querySelector<HTMLButtonElement>('#rail-stadium');
+  const paintTab = root.querySelector<HTMLButtonElement>('#panel-tab-paint');
 
   const showSection = (sec: HTMLElement, show: boolean): void => {
     if (show) {
@@ -197,20 +207,43 @@ export function mountToolbar(
     }
     // Orientation note only helps in design mode for the default brush tool.
     if (orientNote) orientNote.style.display = panelMode === 'design' && tool === 'brush' ? '' : 'none';
-    if (railSaveBtn) railSaveBtn.classList.toggle('menu-active', panelMode === 'save');
-    if (animOpenBtn) animOpenBtn.classList.toggle('menu-active', panelMode === 'animation');
-    if (aiOpenBtn) aiOpenBtn.classList.toggle('menu-active', panelMode === 'ai');
-    if (stadiumOpenBtn) stadiumOpenBtn.classList.toggle('menu-active', panelMode === 'stadium');
+    for (const [btn, mode] of [
+      [paintTab, 'design'], [railSaveBtn, 'save'], [animOpenBtn, 'animation'], [aiOpenBtn, 'ai'], [stadiumOpenBtn, 'stadium'],
+    ] as [HTMLButtonElement | null, typeof panelMode][]) {
+      if (!btn) continue;
+      btn.classList.toggle('menu-active', panelMode === mode);
+      btn.setAttribute('aria-selected', String(panelMode === mode));
+    }
   };
 
   const setPanelMode = (mode: 'design' | 'save' | 'animation' | 'ai' | 'stadium'): void => {
     panelMode = mode;
     applyContextPanel(editor.tool);
   };
-  railSaveBtn?.addEventListener('click', () => { const on = panelMode !== 'save'; setPanelMode(on ? 'save' : 'design'); setOptionsSheet(on); });
-  animOpenBtn?.addEventListener('click', () => { const on = panelMode !== 'animation'; setPanelMode(on ? 'animation' : 'design'); setOptionsSheet(on); });
-  aiOpenBtn?.addEventListener('click', () => { const on = panelMode !== 'ai'; setPanelMode(on ? 'ai' : 'design'); setOptionsSheet(on); });
-  stadiumOpenBtn?.addEventListener('click', () => { const on = panelMode !== 'stadium'; setPanelMode(on ? 'stadium' : 'design'); setOptionsSheet(on); });
+  // A tab selects its panel; pressing the tab that is already open leaves it
+  // open. (The rail buttons these replaced toggled, which is right for a
+  // button and wrong for a tab: a second press emptied the panel back to the
+  // brush.) Paint is the tool's own panel, and choosing any tool returns to it.
+  const openTab = (mode: typeof panelMode): void => { setPanelMode(mode); setOptionsSheet(true); };
+  paintTab?.addEventListener('click', () => openTab('design'));
+  railSaveBtn?.addEventListener('click', () => openTab('save'));
+  animOpenBtn?.addEventListener('click', () => openTab('animation'));
+  aiOpenBtn?.addEventListener('click', () => openTab('ai'));
+  stadiumOpenBtn?.addEventListener('click', () => openTab('stadium'));
+  // Left and right arrows move between the tabs, as in any tab list.
+  root.querySelector('.panel-tabs')?.addEventListener('keydown', (e) => {
+    const ev = e as KeyboardEvent;
+    if (ev.key !== 'ArrowLeft' && ev.key !== 'ArrowRight') return;
+    const tabs = Array.from(root.querySelectorAll<HTMLButtonElement>('.panel-tabs .ptab'));
+    const i = tabs.indexOf(document.activeElement as HTMLButtonElement);
+    if (i < 0) return;
+    ev.preventDefault();
+    const rtl = document.documentElement.dir === 'rtl';
+    const step = (ev.key === 'ArrowRight') !== rtl ? 1 : -1;
+    const next = tabs[(i + step + tabs.length) % tabs.length];
+    next.focus();
+    next.click();
+  });
 
   const setTool = (tool: ToolId): void => {
     editor.tool = tool;
@@ -331,6 +364,10 @@ export function mountToolbar(
     setTool('brush'); // pick a colour, then paint with it immediately
   };
   store.onDirty(renderPalette);
+  // A palette set from outside this panel (a club start, a loaded design)
+  // must show here too, painting colour included: it used to keep showing
+  // the previous palette's colour beside swatches that no longer had it.
+  store.onPaletteChange(() => { renderPalette(); reflectFg(); });
   store.onDirty(() => track('paint_first'));
 
   // ---- AI Tifo Designer panel (rail "sparkles" button → panelMode 'ai') ----
@@ -458,12 +495,12 @@ export function mountToolbar(
     hex.maxLength = 7;
     const apply = (v: string): void => {
       if (!/^#[0-9a-fA-F]{6}$/.test(v)) return;
+      // setSwatch tells the palette listeners, which redraw the swatches and
+      // the painting colour (once per drag event, not twice).
       store.setSwatch(idx, v.toLowerCase());
       editor.rebuildPalette();
       editor.repaintAll();
       editor.objectOverlay?.sync();
-      renderPalette();
-      reflectFg();
     };
     picker.addEventListener('input', () => {
       hex.value = picker.value;
@@ -1330,7 +1367,7 @@ export function mountToolbar(
       toggleAvatarMenu();
       return;
     }
-    const name = await openAuthModal();
+    const name = await openAuthModal(false, 'signup');
     if (name) {
       const me = await fetchMe();
       reflectSignedIn(name, me?.id, true);
@@ -1470,7 +1507,8 @@ export function mountToolbar(
     setAnalyticsSignedIn(false);
     myUserId = null;
     // Reset the header to the signed-out state.
-    if (avatarEl) avatarEl.textContent = 'U';
+    // Signed out there is no initial to show: a person icon, not a "U".
+    if (avatarEl) avatarEl.innerHTML = '<i class="ti ti-user" aria-hidden="true"></i>';
     signinBtn.hidden = false;
     signinBtn.classList.add('signup-shine');
     reflectAdmin(false);
@@ -1768,6 +1806,35 @@ export function mountToolbar(
     edited();
   });
   docTitle.addEventListener('input', edited);
+
+  /**
+   * The club's scarf in the title pill. A project named after a club ("Al
+   * Hilal at Kingdom Arena", which is what the start flow names it) carries
+   * that club's colours beside its name, so the editor feels like theirs. It
+   * is a mark, not an accent colour: the interface keeps its own blue, which
+   * is measured for contrast where a club's colours are not.
+   */
+  const syncClubMark = (): void => {
+    const club = matchClub(docTitle.value.toLowerCase());
+    const pal = club?.palette ?? [];
+    docTitle.classList.toggle('has-club', pal.length > 0);
+    if (pal.length) {
+      docTitle.style.setProperty('--club1', pal[0]!);
+      docTitle.style.setProperty('--club2', pal[1] ?? '#ffffff');
+    }
+  };
+  // The title is also set from outside (a project opening, a rename), which
+  // fires no input event: watch the property itself.
+  const valueProp = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+  if (valueProp?.get && valueProp.set) {
+    Object.defineProperty(docTitle, 'value', {
+      configurable: true,
+      get() { return valueProp.get!.call(this); },
+      set(v: string) { valueProp.set!.call(this, v); syncClubMark(); },
+    });
+  }
+  docTitle.addEventListener('input', syncClubMark);
+  syncClubMark();
   // A closing tab gets no timer callback, so flush synchronously on the way out.
   window.addEventListener('pagehide', () => draftWriter.flush());
   document.addEventListener('visibilitychange', () => {
@@ -1940,6 +2007,7 @@ export function mountToolbar(
 
   // One action, reachable from two places. It always succeeds, and it never
   // asks a question first.
+  let localSaves = 0;
   const doSave = async (trigger: HTMLElement): Promise<void> => {
     // Report the result where the press happened, not in both places at once.
     lastSaveTrigger = trigger === saveTopBtn ? 'top' : 'panel';
@@ -1958,7 +2026,11 @@ export function mountToolbar(
       // this. Repeating it here put the same sentence on screen twice, which
       // reads as two things having happened rather than one.
       message.textContent = '';
-      showAccountOffer(trigger);
+      // The offer waits for the second save. The first is often seconds into
+      // a brand-new tifo, when an account is the last thing on anyone's mind;
+      // saving again means the work is worth keeping, which is the offer.
+      localSaves += 1;
+      if (localSaves >= 2) showAccountOffer(trigger);
       return;
     }
     await saveToAccount(true);
@@ -2302,19 +2374,9 @@ export function mountToolbar(
     panel.classList.toggle('open', open);
     panelScrim.classList.toggle('show', open);
   };
-  // On a phone, greet RETURNING users each fresh session with the AI "describe it"
-  // front door. First-timers reach the AI via the guided tour instead, so skip it
-  // for them (avoids opening the sheet behind the onboarding modal + tour).
-  try {
-    const onboardedBefore = localStorage.getItem('tifo_onboarded_v1') === '1';
-    if (mobileSheet() && onboardedBefore && !sessionStorage.getItem('tifo_m5_intro')) {
-      sessionStorage.setItem('tifo_m5_intro', '1');
-      setPanelMode('ai');
-      openOptionsSheet();
-    }
-  } catch {
-    /* storage blocked — skip the one-time intro */
-  }
+  // The AI sheet no longer opens by itself on a phone at the start of each
+  // session. It covered the stand a returning fan had come back to look at;
+  // the start flow now offers "Describe it" at the one moment it is a choice.
 
   // Live cursor coordinates in stadium language (stand · section · row · seat).
   const coords = $('#coords');
@@ -2860,6 +2922,9 @@ export function mountToolbar(
       group.sort((a, b) => a.u - b.u);
       const wrap = document.createElement('div');
       wrap.className = 'section-stand';
+      // Named, not counted: a ground with no seats on one side skips that
+      // stand here, so "the third group" is not always South.
+      wrap.dataset.stand = stand.toLowerCase();
       const label = document.createElement('div');
       label.className = 'section-stand-label';
       label.textContent = tl(stand);
@@ -2882,6 +2947,83 @@ export function mountToolbar(
       wrap.append(label, cells);
       sectionNav.appendChild(wrap);
     }
+
+    // ---- Stands on the canvas: their names under the strip, and a jump to each ----
+    //
+    // The strip is the bowl unrolled, and nothing on it said where one stand
+    // ended and the next began. A stand can also be cut in two by the ends of
+    // the strip (the one the unrolling starts in), so each is split wherever
+    // its seats leave a wide gap, and each piece is labelled on its own.
+    const standPieces = new Map<string, number[][]>();
+    for (const stand of ['North', 'East', 'South', 'West']) {
+      const seats = stands[stand].flatMap((sec) => sec.seats);
+      if (seats.length === 0) continue;
+      const byX = seats.slice().sort((a, b) => map.xy[a * 2] - map.xy[b * 2]);
+      const pieces: number[][] = [[]];
+      for (let k = 0; k < byX.length; k++) {
+        if (k > 0 && map.xy[byX[k] * 2] - map.xy[byX[k - 1] * 2] > 120) pieces.push([]);
+        pieces[pieces.length - 1].push(byX[k]);
+      }
+      standPieces.set(stand.toLowerCase(), pieces);
+    }
+    const labelStands = (): void => {
+      const marks: { x0: number; x1: number; text: string }[] = [];
+      for (const [id, pieces] of standPieces) {
+        for (const piece of pieces) {
+          const x0 = map.xy[piece[0] * 2];
+          const x1 = map.xy[piece[piece.length - 1] * 2];
+          if (x1 - x0 < 90) continue; // a sliver at the strip's end: no room for a name
+          marks.push({ x0, x1, text: tl(id.charAt(0).toUpperCase() + id.slice(1)) });
+        }
+      }
+      editor.setStandLabels(marks);
+    };
+    labelStands();
+    onLangChange(labelStands);
+    /** Frame a whole stand (its larger piece, if the strip's ends cut it). */
+    const showStand = (id: string): void => {
+      if (id === 'all') { editor.fitToView(); return; }
+      const pieces = standPieces.get(id);
+      if (!pieces) return;
+      const biggest = pieces.reduce((a, b) => (b.length > a.length ? b : a));
+      editor.zoomToSeats(biggest);
+      const count = pieces.reduce((n, p) => n + p.length, 0);
+      message.textContent = `${tl(id.charAt(0).toUpperCase() + id.slice(1))}: ${count.toLocaleString()} ${i18nT('ed.seats')}`;
+    };
+    const chips = Array.from(document.querySelectorAll<HTMLButtonElement>('#stand-chips .stand-chip'));
+    for (const c of chips) {
+      // A ground with no seats on a side has no such stand to jump to.
+      if (c.dataset.stand !== 'all' && !standPieces.has(c.dataset.stand ?? '')) c.hidden = true;
+      c.addEventListener('click', () => {
+        for (const o of chips) o.classList.toggle('on', o === c);
+        showStand(c.dataset.stand ?? 'all');
+      });
+    }
+    // The phone shell's chips ask for the same thing.
+    document.addEventListener('tifo:stand', (e) => showStand((e as CustomEvent<string>).detail ?? 'all'));
+    // "The home end": the stand with the most seats, for an empty new stand,
+    // so the first thing on screen is a stand big enough to paint, not a
+    // strip a tenth of the screen tall. Pressed through the chip that is on
+    // screen, so the chip row shows where you are.
+    document.addEventListener('tifo:stand-home', () => {
+      let home = '';
+      let most = 0;
+      for (const [id, pieces] of standPieces) {
+        const n = pieces.reduce((k, p) => k + p.length, 0);
+        if (n > most) { most = n; home = id; }
+      }
+      if (!home) return;
+      const phone = document.body.classList.contains('m-shell');
+      const chip = document.querySelector<HTMLButtonElement>(
+        phone ? `.m-stand[data-stand="${home}"]` : `#stand-chips .stand-chip[data-stand="${home}"]`,
+      );
+      if (chip) chip.click();
+      else showStand(home);
+    });
+    // Fitting the whole bowl is "All", however it was asked for.
+    document.getElementById('fit')?.addEventListener('click', () => {
+      for (const o of chips) o.classList.toggle('on', o.dataset.stand === 'all');
+    });
   }
 
   // ---- Animation: reveal player + GIF export ----
@@ -3253,7 +3395,7 @@ export function mountToolbar(
     const url = `${location.origin}/s/${designId}`;
     try {
       const QR = (await import('qrcode')).default;
-      const dataUrl = await QR.toDataURL(url, { width: 720, margin: 2, color: { dark: '#0E0A1A', light: '#FFFFFF' } });
+      const dataUrl = await QR.toDataURL(url, { width: 720, margin: 2, color: { dark: '#0B1424', light: '#FFFFFF' } });
       openQrDialog(dataUrl, url, docTitle.value.trim() || 'Tifo');
     } catch {
       message.textContent = i18nT('ed.msg.qrFailed');
@@ -3356,6 +3498,21 @@ export function mountToolbar(
 
     async quickDesign(prompt) {
       return (await aiPanel.quickDesign(prompt)) !== null;
+    },
+
+    playReveal() {
+      if (player.isPlaying) return 0;
+      drum.stop();
+      // A sweep, not the drum call: the drum call is a beat to stand to, and
+      // without its sound it is a long wait with the cards down.
+      if (player.revealId === 'drum-call') {
+        revealSel.value = 'sweep-rl';
+        player.setReveal(map, 'sweep-rl' as RevealId);
+        syncRevealKind();
+      }
+      player.reset();
+      player.play();
+      return player.durationSec;
     },
 
     postTarget() {

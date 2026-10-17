@@ -49,7 +49,7 @@ function markSeen(): void {
 
 /** Something else has the screen, and this can wait for it. */
 function screenBusy(): boolean {
-  return !!document.querySelector('.tour-overlay, .ob-backdrop, .mds-overlay, .dlg-backdrop, #news-card');
+  return !!document.querySelector('.tour-overlay, .mds-overlay, .dlg-backdrop, #news-card');
 }
 
 export interface LeaguesNewsOptions {
@@ -143,7 +143,7 @@ function show(opts: LeaguesNewsOptions): void {
   document.body.appendChild(card);
 
   function onKey(e: KeyboardEvent): void {
-    if (e.key === 'Escape' && !document.querySelector('.tour-overlay, .ob-backdrop, .mds-overlay, .dlg-backdrop')) close();
+    if (e.key === 'Escape' && !document.querySelector('.tour-overlay, .mds-overlay, .dlg-backdrop')) close();
   }
   q('#news-x').addEventListener('click', close);
   q('#news-later').addEventListener('click', close);

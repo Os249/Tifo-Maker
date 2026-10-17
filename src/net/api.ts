@@ -1,3 +1,4 @@
+import { drawBowl } from '../ui/bowlPicture';
 import type { DesignStore } from '../core/design';
 import type { FactsVote, PhotoKnown } from '../core/photoFacts';
 import type { SeatMap, StadiumTemplate } from '../core/types';
@@ -96,12 +97,18 @@ let token: string | null = (() => {
 })();
 
 function setToken(t: string | null): void {
+  const was = token !== null;
   token = t;
   try {
     if (t) localStorage.setItem(TOKEN_KEY, t);
     else localStorage.removeItem(TOKEN_KEY);
   } catch {
     /* storage unavailable — session stays in-memory for this page */
+  }
+  // Anything that reads differently signed in and out (the AI button's
+  // label, say) listens for this rather than polling.
+  if (was !== (t !== null) && typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('tifo:auth', { detail: { signedIn: t !== null } }));
   }
 }
 
@@ -517,31 +524,9 @@ export function makeThumbnailB64(map: SeatMap, store: DesignStore): string {
 }
 
 function renderThumbnailB64(map: SeatMap, store: DesignStore, W: number): string {
-  // Wider source than it displays at, so the gallery banner stays crisp (the
-  // card shows the whole unrolled tifo at its true aspect via .card-thumb-img).
-  const bw = map.bounds.maxX - map.bounds.minX;
-  const bh = map.bounds.maxY - map.bounds.minY;
-  const scale = W / bw;
-  const H = Math.max(24, Math.round(bh * scale) + 4);
-  const canvas = document.createElement('canvas');
-  canvas.width = W;
-  canvas.height = H;
-  const ctx = canvas.getContext('2d')!;
-  ctx.fillStyle = '#14171f';
-  ctx.fillRect(0, 0, W, H);
-  const colors = store.palette.map((hex, i) => (i === 0 ? '#262a33' : hex));
-  const sw = Math.max(1, Math.round(3.2 * scale));
-  const sh = Math.max(1, Math.round(8 * scale * 0.85));
-  for (let c = 0; c < colors.length; c++) {
-    ctx.fillStyle = colors[c];
-    for (let i = 0; i < map.count; i++) {
-      if (store.cells[i] !== c) continue;
-      const x = Math.round((map.xy[i * 2] - map.bounds.minX) * scale);
-      const y = Math.round((map.xy[i * 2 + 1] - map.bounds.minY) * scale + 2);
-      ctx.fillRect(x, y, sw, sh);
-    }
-  }
-  return canvas.toDataURL('image/png').split(',')[1];
+  // Wider source than it displays at, so the card pictures drawn from it
+  // (ui/bowlPicture.ts) stay crisp.
+  return renderStripCanvas(map, store, W).toDataURL('image/png').split(',')[1];
 }
 
 // ---------- designs ----------
@@ -885,9 +870,11 @@ export async function uploadOgImage(id: string, ogPngB64: string): Promise<void>
 }
 
 /**
- * Compose a branded 1200x630 social card: the unrolled tifo as a banner over a
- * dark field, with the title, creator and TifoMaker wordmark. Reuses the same
- * seat-drawing approach as makeThumbnailB64 — no new rendering pipeline.
+ * Compose a branded 1200x630 social card: the tifo in the bowl (the same
+ * stand picture every card on the site shows, ui/bowlPicture.ts) beside its
+ * title, its creator and the wordmark, on the night ground with a scarf along
+ * the top. It used to be the unrolled strip across the card, which at a
+ * chat app's preview size was a coloured line.
  */
 export function makeOgImageB64(map: SeatMap, store: DesignStore, title: string, ownerName?: string | null): string {
   const W = 1200;
@@ -896,47 +883,99 @@ export function makeOgImageB64(map: SeatMap, store: DesignStore, title: string, 
   canvas.width = W;
   canvas.height = H;
   const ctx = canvas.getContext('2d')!;
-  // Background.
-  ctx.fillStyle = '#0a0c11';
+  // Night, with a grid of seats.
+  const bg = ctx.createRadialGradient(W * 0.3, H * 0.5, 40, W * 0.3, H * 0.5, W * 0.8);
+  bg.addColorStop(0, '#16213a');
+  bg.addColorStop(1, '#070B14');
+  ctx.fillStyle = bg;
   ctx.fillRect(0, 0, W, H);
-  // Tifo banner: full unrolled bowl, fit to width with side margins, vertically
-  // centered in the upper area.
-  const margin = 64;
+  ctx.fillStyle = 'rgba(255,255,255,0.05)';
+  for (let y = 6; y < H; y += 14) for (let x = 6; x < W; x += 14) ctx.fillRect(x, y, 2, 2);
+  // The scarf: the brand's stripes along the top.
+  const stripes = ['#1C6FE0', '#F1F4FB', '#0B1120', '#F1F4FB'];
+  const widths = [22, 8, 22, 8];
+  for (let x = 0, k = 0; x < W; x += widths[k % 4]!, k++) {
+    ctx.fillStyle = stripes[k % 4]!;
+    ctx.fillRect(x, 0, widths[k % 4]!, 10);
+  }
+  // The tifo in the bowl, on the left.
+  const strip = renderStripCanvas(map, store, 800);
+  const pic = drawBowl(strip, 720, 450);
+  ctx.save();
+  ctx.beginPath();
+  ctx.roundRect(40, 110, 680, 425, 22);
+  ctx.clip();
+  ctx.drawImage(pic, 40, 110, 680, 425);
+  ctx.restore();
+  // Title, creator and wordmark, on the right.
+  const x0 = 760;
+  const maxW = W - x0 - 48;
+  ctx.textBaseline = 'alphabetic';
+  ctx.font = '800 36px Inter, Almarai, Arial, sans-serif';
+  ctx.fillStyle = '#F1F4FB';
+  ctx.fillText('TIFO', x0, 168);
+  const tw = ctx.measureText('TIFO').width;
+  ctx.fillStyle = '#4A92F2';
+  ctx.fillText('MAKER', x0 + tw, 168);
+  ctx.fillStyle = '#F1F4FB';
+  ctx.font = '800 50px Changa, Inter, Almarai, Arial, sans-serif';
+  const lines = wrap(ctx, title || 'Untitled tifo', maxW, 4);
+  lines.forEach((line, i) => ctx.fillText(line, x0, 262 + i * 58));
+  let y = 262 + lines.length * 58 + 6;
+  if (ownerName) {
+    ctx.fillStyle = '#7FB0FF';
+    ctx.font = '600 30px Inter, Almarai, Arial, sans-serif';
+    ctx.fillText(clip(ctx, `@${ownerName}`, maxW), x0, y);
+    y += 46;
+  }
+  ctx.fillStyle = '#A6B0C8';
+  ctx.font = '500 26px Inter, Almarai, Arial, sans-serif';
+  ctx.fillText('tifomaker.org', x0, H - 96);
+  return canvas.toDataURL('image/png').split(',')[1];
+}
+
+/** The unrolled bowl, W px wide: the strip every card picture is drawn from. */
+function renderStripCanvas(map: SeatMap, store: DesignStore, W: number): HTMLCanvasElement {
   const bw = map.bounds.maxX - map.bounds.minX;
   const bh = map.bounds.maxY - map.bounds.minY;
-  const drawW = W - margin * 2;
-  const scale = drawW / bw;
-  const drawH = bh * scale;
-  const offX = margin;
-  const offY = 150 - drawH / 2 + 120; // sit the banner in the upper-middle
+  const scale = W / bw;
+  const H = Math.max(24, Math.round(bh * scale) + 4);
+  const canvas = document.createElement('canvas');
+  canvas.width = W;
+  canvas.height = H;
+  const ctx = canvas.getContext('2d')!;
+  ctx.fillStyle = '#14171f';
+  ctx.fillRect(0, 0, W, H);
   const colors = store.palette.map((hex, i) => (i === 0 ? '#262a33' : hex));
+  const sw = Math.max(1, Math.round(3.2 * scale));
+  const sh = Math.max(1, Math.round(8 * scale * 0.85));
   for (let c = 0; c < colors.length; c++) {
     ctx.fillStyle = colors[c];
     for (let i = 0; i < map.count; i++) {
       if (store.cells[i] !== c) continue;
-      const x = offX + (map.xy[i * 2] - map.bounds.minX) * scale;
-      const y = offY + (map.xy[i * 2 + 1] - map.bounds.minY) * scale;
-      ctx.fillRect(x, y, Math.max(1, 3.2 * scale), Math.max(1, 8 * scale * 0.85));
+      const x = Math.round((map.xy[i * 2] - map.bounds.minX) * scale);
+      const y = Math.round((map.xy[i * 2 + 1] - map.bounds.minY) * scale + 2);
+      ctx.fillRect(x, y, sw, sh);
     }
   }
-  // Title + creator.
-  ctx.textBaseline = 'alphabetic';
-  ctx.fillStyle = '#f2f1ec';
-  ctx.font = '700 64px Inter, Arial, sans-serif';
-  ctx.fillText(clip(ctx, title || 'Untitled tifo', W - margin * 2), margin, H - 150);
-  if (ownerName) {
-    ctx.fillStyle = '#9aa3b2';
-    ctx.font = '500 34px Inter, Arial, sans-serif';
-    ctx.fillText(`by @${ownerName}`, margin, H - 100);
+  return canvas;
+}
+
+/** Break text into at most `max` lines of `maxW` px, the last one ellipsised. */
+function wrap(ctx: CanvasRenderingContext2D, text: string, maxW: number, max: number): string[] {
+  const words = text.split(/\s+/).filter(Boolean);
+  const lines: string[] = [];
+  let i = 0;
+  while (i < words.length && lines.length < max) {
+    let line = words[i++]!;
+    while (i < words.length && ctx.measureText(`${line} ${words[i]}`).width <= maxW) line += ` ${words[i++]}`;
+    if (lines.length === max - 1 && i < words.length) {
+      line = `${line} ${words.slice(i).join(' ')}`;
+      i = words.length;
+    }
+    lines.push(ctx.measureText(line).width > maxW ? clip(ctx, line, maxW) : line);
   }
-  // Wordmark.
-  ctx.font = '800 34px Inter, Arial, sans-serif';
-  ctx.fillStyle = '#5b8cff';
-  ctx.fillText('TIFO', margin, H - 48);
-  const tw = ctx.measureText('TIFO').width;
-  ctx.fillStyle = '#f2f1ec';
-  ctx.fillText('MAKER', margin + tw, H - 48);
-  return canvas.toDataURL('image/png').split(',')[1];
+  return lines;
 }
 
 /** Truncate text with an ellipsis to fit `maxW` px in the current ctx font. */

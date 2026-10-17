@@ -7,22 +7,20 @@
  * habit that costs a phone a third of its width, and there are five sections —
  * not enough to need navigation.
  */
+@import './colorScheme.css';
+@import './authPublic.css';
+/* The account page's names for the shared roles (ui/colorScheme.css), so it
+   follows the site's light and dark theme like every other public page. */
 :root {
-  --ac-ink: #0e1426;
-  --ac-muted: #5b6473;
-  --ac-line: #e6e8ee;
-  --ac-blue: #1c6fe0;
-  --ac-bg: #fbfbfd;
-  --ac-ok: #1a7f52;
-  --ac-warn: #9a6205;
-  --ac-danger: #c0392b;
-  --ac-card: #fff;
-}
-@media (prefers-color-scheme: dark) {
-  :root {
-    --ac-ink: #eaeef6; --ac-muted: #9aa3b4; --ac-line: #242c3f; --ac-blue: #4a94ff;
-    --ac-bg: #0b0f1a; --ac-ok: #4ec98d; --ac-warn: #e0a33a; --ac-danger: #ef6b5e; --ac-card: #121829;
-  }
+  --ac-ink: var(--ink);
+  --ac-muted: var(--muted);
+  --ac-line: var(--line);
+  --ac-blue: var(--blue);
+  --ac-bg: var(--paper);
+  --ac-ok: var(--ok);
+  --ac-warn: var(--warn);
+  --ac-danger: var(--danger);
+  --ac-card: var(--card);
 }
 * { box-sizing: border-box; }
 body {
@@ -30,7 +28,7 @@ body {
   min-height: 100vh;
   background: var(--ac-bg);
   color: var(--ac-ink);
-  font: 16px/1.6 'Inter', system-ui, -apple-system, sans-serif;
+  font: 16px/1.6 var(--font-ui);
   -webkit-font-smoothing: antialiased;
 }
 .ac-top {
@@ -45,8 +43,8 @@ body {
 /* Header links are targets too — a 22px-tall anchor is a miss waiting to
    happen, and it is the way back out of this page. */
 .ac-brand, .ac-back { display: inline-flex; align-items: center; min-height: 44px; }
-.ac-brand { font-weight: 800; letter-spacing: .03em; color: var(--ac-ink); text-decoration: none; }
-.ac-brand b { color: var(--ac-blue); }
+.ac-brand { font-weight: 800; letter-spacing: .02em; color: var(--ac-ink); text-decoration: none; }
+.ac-brand b { color: var(--maker); }
 .ac-back { color: var(--ac-blue); text-decoration: none; font-size: 14px; }
 .ac-back:hover { text-decoration: underline; }
 
@@ -144,8 +142,8 @@ input:focus-visible {
   cursor: pointer;
 }
 .ac-btn:hover:not(:disabled) { border-color: var(--ac-blue); color: var(--ac-blue); }
-.ac-btn.primary { background: var(--ac-blue); border-color: var(--ac-blue); color: #fff; }
-.ac-btn.primary:hover:not(:disabled) { color: #fff; opacity: .92; }
+.ac-btn.primary { background: var(--blue-solid); border-color: var(--blue-solid); color: #fff; }
+.ac-btn.primary:hover:not(:disabled) { color: #fff; background: var(--blue-solid-hover); border-color: var(--blue-solid-hover); }
 .ac-btn.danger { color: var(--ac-danger); border-color: color-mix(in srgb, var(--ac-danger) 45%, transparent); }
 .ac-btn.danger:hover:not(:disabled) { background: var(--ac-danger); color: #fff; border-color: var(--ac-danger); }
 .ac-btn.wide { align-self: stretch; width: 100%; }
@@ -176,7 +174,13 @@ input:focus-visible {
 .ac-confirm-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
 .ac-confirm-actions .ac-btn { margin-top: 8px; }
 
-.ac-gate { color: var(--ac-muted); }
+.ac-gate {
+  padding: 22px; border: 1px solid var(--ac-line); border-radius: var(--r-lg); background: var(--ac-card);
+}
+.ac-gate[hidden] { display: none; }
+.ac-gate-msg { margin: 0 0 14px; color: var(--ac-ink); font-weight: 600; }
+.ac-gate-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.ac-gate-actions .ac-btn { margin-top: 0; }
 .ac-sr {
   position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
   overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;

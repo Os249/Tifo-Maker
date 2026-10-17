@@ -50,9 +50,8 @@ const paint=()=>page.evaluate(()=>{
 });
 
 const EMAIL = `fan${Date.now()}@example.test`;
-// A new project, first-run guide skipped: the editor is always on a project now.
+// A new project: the editor is always on a project now.
 await page.goto(B+'/app?new=1',{waitUntil:'domcontentloaded'}); await ready(); await page.waitForTimeout(900);
-await page.evaluate(()=>document.querySelector('.ob-skip')?.click());
 await waitFor(()=>/[?&]local=/.test(location.search));
 await paint();
 
@@ -62,8 +61,10 @@ await waitFor(()=>{const id=new URLSearchParams(location.search).get('local');re
 void localKey;
 await page.evaluate(()=>document.getElementById('doc-title').value='Derby night');
 await page.evaluate(()=>document.getElementById('save').click());
+await page.waitForTimeout(800);
+// The offer appears only after a local save succeeded, and from the second one.
+await page.evaluate(()=>document.getElementById('save').click());
 
-// The offer appears only after a local save succeeded.
 const offered = await waitFor(()=>{const o=document.getElementById('account-offer');return o&&!o.hidden&&!!o.querySelector('.ao-go');});
 check('saving offers an account instead of demanding one', offered);
 

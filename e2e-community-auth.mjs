@@ -152,8 +152,12 @@ for (const lang of ['en', 'ar']) {
   await p.route('**/api/auth/providers', (r) => r.fulfill({ contentType: 'application/json', body: '{"providers":["google"]}' }));
   await p.goto(B + '/app?new=1', { waitUntil: 'networkidle', timeout: 120000 });
   await p.waitForFunction(() => document.getElementById('signin'), null, { timeout: 60000 });
+  // The header button says "Sign up", so it opens on Create account (it used
+  // to open on Sign in); the Sign in tab is checked from there.
   await p.evaluate(() => document.getElementById('signin').click());
   await p.waitForSelector('.auth-providers:not([hidden])', { timeout: 10000 }).catch(() => {});
+  check('"Sign up" in the header opens on Create account', await p.evaluate(() => document.querySelector('.auth-tab[data-mode="signup"]')?.classList.contains('active')));
+  await p.click('.auth-tab[data-mode="signin"]');
   const layout = () => p.evaluate(() => {
     const fields = [...document.querySelectorAll('.auth-form .auth-field:not([hidden])')];
     const form = document.querySelector('.auth-form').getBoundingClientRect();

@@ -70,6 +70,8 @@
     "@fontsource/bungee": "^5.3.0",
     "@fontsource/cairo": "^5.3.0",
     "@fontsource/changa": "^5.3.0",
+    "@fontsource/inter": "^5.3.0",
+    "@fontsource/jetbrains-mono": "^5.3.0",
     "@fontsource/kufam": "^5.3.0",
     "@fontsource/noto-kufi-arabic": "^5.3.0",
     "@fontsource/passion-one": "^5.3.0",

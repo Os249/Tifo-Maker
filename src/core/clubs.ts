@@ -30,6 +30,18 @@ export const CLUBS: ClubIdentity[] = [
   { aliases: ['al shabab', 'alshabab', 'shabab', 'الشباب'], palette: ['#ffffff', '#16161a', '#d4af37'], crest: 'shield' },
   { aliases: ['al ettifaq', 'ettifaq', 'الاتفاق'], palette: ['#0a8a3f', '#ffffff'], crest: 'shield' },
   { aliases: ['al fateh', 'الفتح'], palette: ['#7a1f3d', '#ffffff'], crest: 'shield' },
+  // The rest of the league, from the 2025-26 home kits (shirt colour first),
+  // so every club in the start flow (core/clubGrounds.ts) has its scarf. Al
+  // Riyadh has no bare Arabic alias: "الرياض" is also the city, and a brief
+  // that mentions the city is not about the club.
+  { aliases: ['al qadsiah', 'al qadisiyah', 'qadsiah', 'qadisiyah', 'القادسية'], palette: ['#c8242c', '#e8b73a'], crest: 'shield' },
+  { aliases: ['al khaleej', 'khaleej', 'الخليج'], palette: ['#f4d03f', '#0f7a3d'], crest: 'shield' },
+  { aliases: ['al taawoun', 'al-taawoun', 'taawoun', 'التعاون', 'السكري'], palette: ['#f4d03f', '#14285a'], crest: 'shield' },
+  { aliases: ['al riyadh', 'al-riyadh', 'نادي الرياض'], palette: ['#16161a', '#c8242c'], crest: 'shield' },
+  { aliases: ['neom', 'نيوم'], palette: ['#259eee', '#ffffff'], crest: 'shield' },
+  { aliases: ['al hazem', 'al-hazem', 'hazem', 'الحزم'], palette: ['#f4d03f', '#14284b'], crest: 'shield' },
+  { aliases: ['al kholood', 'al-kholood', 'kholood', 'الخلود'], palette: ['#a3141c', '#0f7a3d'], crest: 'shield' },
+  { aliases: ['al fayha', 'al-fayha', 'fayha', 'الفيحاء'], palette: ['#e8731a', '#10233f'], crest: 'shield' },
   // ---- Gulf / Arab ----
   { aliases: ['al ain', 'alain', 'العين'], palette: ['#6a1b9a', '#ffffff'], crest: 'shield' },
   { aliases: ['al sadd', 'alsadd', 'السد'], palette: ['#7a1f3d', '#ffffff'], crest: 'shield' },

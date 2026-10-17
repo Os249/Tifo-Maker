@@ -55,6 +55,13 @@ async function openApp(width, height, lang, { fresh = false } = {}) {
   await page.goto(B + '/app?new=1', { waitUntil: 'networkidle', timeout: 60000 });
   await page.waitForTimeout(1400);
   await rememberProject(page);
+  if (fresh) {
+    // News is for someone coming back to a tifo, never on top of one being
+    // started (main.ts), so the fresh visitor reopens the tifo they just made.
+    const id = await page.evaluate(() => sessionStorage.getItem('e2e_local'));
+    await page.goto(B + `/app?local=${id}`, { waitUntil: 'networkidle', timeout: 60000 });
+    await page.waitForTimeout(1400);
+  }
   return { ctx, page, errs };
 }
 
@@ -1075,17 +1082,17 @@ console.log('\n— the banners news —');
   await ctx.close();
 }
 {
-  // Waits its turn: after the onboarding dialog, never on top of it.
+  // A first visit gets no news: news is what changed since last time, and a
+  // first-timer has had no last time. It is marked read, so it never turns up
+  // later as "news" either.
   const ctx = await browser.newContext({ viewport: { width: 1400, height: 880 } });
   const page = await ctx.newPage();
   await page.addInitScript(() => { try { if (!sessionStorage.getItem('s')) { sessionStorage.setItem('s', '1'); localStorage.setItem('tifo_lang_v1', 'en'); localStorage.setItem('tifo_consent_v1', 'essential'); } } catch { /* */ } });
   await page.goto(B + '/app?new=1', { waitUntil: 'networkidle', timeout: 60000 });
   await page.waitForTimeout(4000);
-  const both = await page.evaluate(() => ({ ob: !!document.querySelector('.ob-backdrop'), news: !!document.getElementById('news-card') }));
-  check('a first visit gets the onboarding dialog, and no news on top of it', both.ob && !both.news, JSON.stringify(both));
-  await page.evaluate(() => (document.querySelector('.ob-skip') || document.querySelector('.ob-backdrop button'))?.click());
-  const after = await page.waitForSelector('#news-card', { timeout: 15000 }).catch(() => null);
-  check('the news follows once the dialog is closed', !!after);
+  const first = await page.evaluate(() => ({ news: !!document.getElementById('news-card'), leagues: localStorage.getItem('tifo_news_leagues_v2'), banners: localStorage.getItem('tifo_news_banners_v1') }));
+  check('a first visit gets no news card', !first.news, JSON.stringify(first));
+  check('…and the news is marked read for later', first.leagues === '1' && first.banners === '1', JSON.stringify(first));
   await ctx.close();
 }
 {
@@ -1233,6 +1240,11 @@ console.log('\n— the banner tour —');
   page.on('pageerror', (e) => errs.push(String(e.message).slice(0, 200)));
   await page.addInitScript(() => { try { if (!sessionStorage.getItem('s')) { sessionStorage.setItem('s', '1'); for (const [k, v] of [['tifo_lang_v1', 'en'], ['tifo_onboarded_v1', '1'], ['tifo_consent_v1', 'essential'], ['tifo_draw_hint_v1', '1'], ['tifo_news_leagues_v2', '1']]) localStorage.setItem(k, v); } } catch { /* */ } });
   await page.goto(B + '/app?new=1&editor=1', { waitUntil: 'networkidle', timeout: 60000 });
+  await page.waitForTimeout(1400);
+  // News is for someone coming back to a tifo (main.ts), so reopen this one.
+  await rememberProject(page);
+  const localId = await page.evaluate(() => sessionStorage.getItem('e2e_local'));
+  await page.goto(B + `/app?local=${localId}&editor=1`, { waitUntil: 'networkidle', timeout: 60000 });
   await page.waitForSelector('#news-card', { timeout: 15000 }).catch(() => null);
   const n = await newsState(page);
   check('phone: the news points at the view pill\'s Banner', !!n && n.under && n.arrowOnTab && n.inView, JSON.stringify(n?.box));
