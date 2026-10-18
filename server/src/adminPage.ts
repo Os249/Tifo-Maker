@@ -1466,6 +1466,8 @@ function aiTab(){
   html += kpi('Blocked by safety', W.blocked, fmt(T.blocked) + ' all time', true);
   html += '</div>';
 
+  html += aiReliabilitySection(a);
+  html += aiCostSection(a);
   html += picturesSection(a.pictures);
 
   /* The question that started this: has anyone actually been turned away? */
@@ -1503,6 +1505,85 @@ function aiTab(){
 }
 
 
+/* ---- how often each mode delivers ----
+
+   "Model busy or failed" above is every mode together, and Super, Standard,
+   Polish and photo reading fail for different reasons at very different rates.
+   Polish and photo successes are recorded from October 2026; before that only
+   their failures were, so their early rates read as 0%. */
+function aiReliabilitySection(a){
+  var mo = a.modeOutcomes, c = a.cost || {};
+  if (!mo) return '';
+  var lat = c.latencyMs || {}, by = c.byMode || {};
+  var rows = [];
+  var order = ['super', 'std', 'polish', 'photo'];
+  for (var i = 0; i < order.length; i++){
+    var m = order[i], o = mo[m] || {};
+    var limited = o.limited || 0;
+    var failed = Math.max(0, (o.busy || 0) - limited);
+    var asked = (o.model || 0) + failed;
+    if (!o.all) continue;
+    rows.push({ mode: MODE_LABEL[m] || m, all: o.all, model: o.model || 0, busy: failed, limited: limited,
+      rate: asked ? pct(o.model || 0, asked) : '—',
+      wait: lat[m] == null ? '—' : (Math.round(lat[m] / 100) / 10) + ' s',
+      each: by[m] && by[m].perDelivered != null ? usd(by[m].perDelivered) : '—' });
+  }
+  if (!rows.length) return '';
+  var html = '<h2 class="sec">How often each mode delivers <span class="hint">last ' + a.days + ' days</span></h2>';
+  html += tableCard(['Mode','Requests','Delivered','Busy or failed','Our limits','Success','Average wait','Cost each'], rows,
+    [function(d){ return d.mode; }, function(d){ return d.all; }, function(d){ return d.model; }, function(d){ return d.busy; },
+     function(d){ return d.limited; }, function(d){ return d.rate; }, function(d){ return d.wait; }, function(d){ return d.each; }]);
+  html += '<p class="note">Success is delivered ÷ (delivered + busy or failed). <b>Our limits</b> are requests our own rules turned away before any model was asked (the daily AI budget, an account&#39;s daily Polish or photo share, no provider set) and are left out of it. A request answered by the fallback model counts as delivered; the model table below says how many were.</p>';
+  return html;
+}
+
+/* ---- what the AI cost ----
+
+   Every request since the October 2026 release carries the provider's own
+   token counts and the model that answered; before, every cost figure was an
+   estimate from prompt sizes. Prices are LIST prices (paid tier, aiPricing.ts):
+   a project on Google's free tier pays nothing, so these say what the same
+   traffic costs once billing is on. Thinking is billed as output. */
+function usd(n){
+  n = Number(n) || 0;
+  if (n === 0) return '$0';
+  if (n < 0.01) return '$' + n.toFixed(4);
+  if (n < 10) return '$' + n.toFixed(3);
+  return '$' + n.toFixed(2);
+}
+function aiCostSection(a){
+  var c = a.cost;
+  var html = '<h2 class="sec">What it cost <span class="hint">last ' + a.days + ' days &middot; list prices</span></h2>';
+  if (!c || !c.measured){
+    return html + '<div class="card"><p class="empty">No measured requests yet.</p>'
+      + '<p class="note">Token counts are recorded from this release on; older requests carry none.</p></div>';
+  }
+  var t = c.tokens || { in: 0, out: 0, thought: 0, cached: 0 }, by = c.byMode || {};
+  html += '<div class="grid">';
+  html += kpi('Estimated spend', usd(c.usd), c.unpriced ? fmt(c.unpriced) + (c.unpriced === 1 ? ' request had' : ' requests had') + ' no price' : fmt(c.measured) + ' measured requests', true);
+  html += kpi('Per Super design', by['super'] && by['super'].perDelivered != null ? usd(by['super'].perDelivered) : '—', fmt(by['super'] ? by['super'].delivered : 0) + ' delivered', true);
+  html += kpi('Per Standard design', by.std && by.std.perDelivered != null ? usd(by.std.perDelivered) : '—', fmt(by.std ? by.std.delivered : 0) + ' delivered', true);
+  html += kpi('Thinking', pct(t.thought, t.thought + t.out), 'of output tokens: ' + fmt(t.thought) + ' thinking, ' + fmt(t.out) + ' answer', true);
+  html += kpi('Pictures', c.pictures, 'delivered with designs', true);
+  html += kpi('Input tokens', t.in, fmt(t.cached) + ' served from cache', true);
+  html += '</div>';
+  if (c.models && c.models.length){
+    html += '<h3 class="sub">Which model answered <span class="hint">delivered results &middot; a fallback model shows up here</span></h3>';
+    html += tableCard(['Model','Delivered','Spend'], c.models,
+      [function(d){ return d.model; }, function(d){ return d.requests; }, function(d){ return d.usd == null ? 'no price' : usd(d.usd); }]);
+  }
+  /* One day is a dot, not a trend: the line needs two. */
+  if (c.perDay && c.perDay.length > 1){
+    var pts = [];
+    for (var i = 0; i < c.perDay.length; i++) pts.push({ day: c.perDay[i].day, count: Math.round(c.perDay[i].usd * 100) / 100 });
+    html += '<h3 class="sub">Spend per day</h3>';
+    html += '<div class="grid two">' + chartCard('Estimated spend per day (US$)', pts, '#e3b341') + '</div>';
+  }
+  html += '<p class="note">Measured since ' + esc(c.measuredSince ? new Date(c.measuredSince).toLocaleDateString() : '—')
+    + '. Cost each = all spend in a mode, failed calls included, divided by what it delivered (results with no price left out). Prices change: 3.6 Flash doubles on 1 January 2027, and each request keeps the price it ran at. A call that timed out is counted as $0: Google returns no token counts for it, though it may still bill it.</p>';
+  return html;
+}
+
 /* ---- why the AI failed ----
 
    The editor now tells a person only what they can act on ("the AI is busy,
@@ -1511,8 +1592,8 @@ function aiTab(){
    (credential-shaped text masked on the server). Categories come from
    server/src/aiFailure.ts. */
 var REASON_INFO = {
-  overloaded:      ['Provider overloaded', 'The model provider is short of capacity (HTTP 503, "high demand"). Nothing to fix on our side and it passes; if it keeps happening, point AI_MODEL_PREMIUM / AI_MODEL_FAST at a less busy model.'],
-  rate_limited:    ['Rate limit or quota', 'Our API key hit the provider&#39;s quota (HTTP 429). Raise the quota or billing tier in the provider&#39;s console.'],
+  overloaded:      ['Provider overloaded', 'The model provider is short of capacity (HTTP 503, "high demand"). The fallback model (AI_MODEL_FALLBACK) is asked next, so a row here means it failed too. If it keeps happening, point AI_MODEL_PREMIUM / AI_MODEL_FAST at a less busy model.'],
+  rate_limited:    ['Rate limit or quota', 'Our API key hit the provider&#39;s quota (HTTP 429), and so did the fallback model. On Google&#39;s free tier the Flash models allow only 20 requests a day: Google AI Studio → Billing → add prepay credit to move the project to a paid tier. Otherwise raise the quota in the provider&#39;s console.'],
   budget:          ['Daily budget spent', 'Our own AI_DAILY_BUDGET breaker tripped. Raise it, or wait for 00:00 UTC.'],
   timeout:         ['Timed out', 'No answer inside AI_TIMEOUT_MS / AI_TIMEOUT_PREMIUM_MS. Raise the limit or use a faster model.'],
   network:         ['Could not reach the provider', 'The server&#39;s request never got an answer: DNS, egress or an outage.'],

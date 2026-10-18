@@ -53,6 +53,13 @@ export interface ImageResult {
   viaBackup?: boolean;
   /** When url is null: what kind of failure the last provider tried reported. */
   kind?: ImageFailureKind;
+  /** The model that drew it (e.g. "flux", "gemini-2.5-flash-image"), for the cost panel. */
+  model?: string;
+}
+
+/** The model each picture provider is asked for. */
+export function pictureModel(p: PictureProvider): string {
+  return p === 'gemini' ? process.env.AI_IMAGE_MODEL ?? 'gemini-2.5-flash-image' : process.env.AI_POLLINATIONS_MODEL || 'flux';
 }
 
 // ---- describing the target to a diffusion model ----
@@ -303,7 +310,7 @@ async function callPollinations(prompt: string, timeoutMs: number, style: ImageS
     return { url: null, error: 'pollinations needs a key, create one at enter.pollinations.ai and set AI_POLLINATIONS_KEY' };
   }
   const base = process.env.AI_POLLINATIONS_URL || 'https://gen.pollinations.ai/image/';
-  const model = process.env.AI_POLLINATIONS_MODEL || 'flux';
+  const model = pictureModel('pollinations');
   // Was hard-coded 768x768 for every request, whatever shape it had to fill.
   const { width, height } = pollinationsSize(style.aspect ?? 1);
   const url = `${base}${encodeURIComponent(prompt + mosaicStyle(style))}?width=${width}&height=${height}&model=${encodeURIComponent(model)}&nologo=true`;
@@ -331,17 +338,18 @@ async function callPollinations(prompt: string, timeoutMs: number, style: ImageS
 async function callGemini(prompt: string, timeoutMs: number, style: ImageStyle, withAspect = true): Promise<Attempt> {
   const key = geminiKey();
   if (!key) return { url: null, error: 'no GEMINI_API_KEY configured' };
-  const model = process.env.AI_IMAGE_MODEL ?? 'gemini-2.5-flash-image';
+  const model = pictureModel('gemini');
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
     const generationConfig: Record<string, unknown> = { responseModalities: ['TEXT', 'IMAGE'] };
     if (withAspect && style.aspect) generationConfig.imageConfig = { aspectRatio: geminiAspect(style.aspect) };
     const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`,
+      // The key in a header, as Google documents it, not in the URL.
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
       {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: { 'content-type': 'application/json', 'x-goog-api-key': key },
         body: JSON.stringify({
           contents: [{ role: 'user', parts: [{ text: prompt + mosaicStyle(style) }] }],
           generationConfig,
@@ -420,7 +428,7 @@ export async function generateImage(prompt: string, style: ImageStyle = {}): Pro
       const viaBackup = p !== main;
       imageHealth.recordOk(p, viaBackup);
       imageHealth.finish({ deliveredBy: p, main, backup, problems, breakerMs });
-      return { url: r.url, provider: p, viaBackup };
+      return { url: r.url, provider: p, viaBackup, model: pictureModel(p) };
     }
     lastKind = imageHealth.recordFailure(p, r.status, r.error, breakerMs);
     const detail = r.error ?? 'unknown error';

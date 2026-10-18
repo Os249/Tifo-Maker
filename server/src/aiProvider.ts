@@ -18,6 +18,8 @@ import { fewShotBlock } from '../../src/core/exemplars';
 import { TIFO_VOICES } from '../../src/core/tifoVoices';
 import { matchClub } from '../../src/core/clubs';
 import { envNum } from './env';
+import { addUsage, textCostMicros, zeroUsage, type TokenUsage } from './aiPricing';
+import { RETIRED_TEXT_MODELS } from './preflight';
 
 export { envNum };
 
@@ -28,14 +30,53 @@ function geminiKey(): string | undefined {
 }
 
 /**
+ * The model to ask for, given an id that Google may have retired.
+ * `gemini-3.5-flash` was deprecated in 2026 and every call to it is silently
+ * served by 3.6 Flash, so asking for it by name only hides which model (and
+ * which price) answered. Naming the real model keeps the failure log, the cost
+ * table and Google's own usage page in agreement. The list lives in
+ * preflight.ts, which also warns at boot when a variable still names one.
+ */
+export function currentModelId(id: string): string {
+  const m = id.trim();
+  return RETIRED_TEXT_MODELS[m] ?? m;
+}
+
+/**
  * Pick the Gemini text model for a quality tier (Phase 5 fast/premium routing).
  * Both tiers default to AI_MODEL, so behaviour is UNCHANGED until AI_MODEL_FAST
  * / AI_MODEL_PREMIUM are set — e.g. set AI_MODEL_PREMIUM=gemini-2.5-pro to give
  * Super AI + the critic a stronger model while simple prompts stay on Flash.
  */
-function geminiModel(tier: 'fast' | 'premium'): string {
+export function geminiModel(tier: 'fast' | 'premium'): string {
   const base = process.env.AI_MODEL ?? 'gemini-2.5-flash';
-  return tier === 'premium' ? process.env.AI_MODEL_PREMIUM ?? base : process.env.AI_MODEL_FAST ?? base;
+  return currentModelId(tier === 'premium' ? process.env.AI_MODEL_PREMIUM ?? base : process.env.AI_MODEL_FAST ?? base);
+}
+
+/**
+ * The model a tier falls back to when its own model cannot answer.
+ *
+ * In the 30 days to 17 October 2026, 112 premium requests ended "busy", and
+ * 45 of the last 50 were the premium model refusing: Google's "high demand"
+ * 503s and quota 429s. Nothing tried anything else. Each Gemini model has its
+ * own capacity and its own quota, so a second model usually answers when the
+ * first will not, and a design from a lighter model beats "come back later".
+ *
+ * gemini-3.5-flash-lite by default: current, cheap ($0.30 / $2.50), structured
+ * output, and on Google's free tier it allows 500 requests a day where the
+ * Flash models allow 20. AI_MODEL_FALLBACK sets both tiers,
+ * AI_MODEL_FALLBACK_PREMIUM / AI_MODEL_FALLBACK_FAST one each; "none" turns it
+ * off (and brings back the old same-model retry).
+ */
+export const DEFAULT_FALLBACK_MODEL = 'gemini-3.5-flash-lite';
+
+export function geminiFallback(tier: 'fast' | 'premium'): string | null {
+  const own = tier === 'premium' ? process.env.AI_MODEL_FALLBACK_PREMIUM : process.env.AI_MODEL_FALLBACK_FAST;
+  // An EMPTY variable inherits (a blank line in .env or Railway is not "off");
+  // only the words below turn the fallback off.
+  const v = own?.trim() || process.env.AI_MODEL_FALLBACK?.trim() || DEFAULT_FALLBACK_MODEL;
+  if (/^(none|off|false|0)$/i.test(v)) return null;
+  return currentModelId(v);
 }
 
 export function activeProvider(): AiProvider {
@@ -511,8 +552,10 @@ const VOICE_IDS = new Set(TIFO_VOICES.map((v) => v.id));
  * director simply designs from the raw brief, exactly as it did before. A words
  * stage that can break generation would not be worth having.
  */
-export async function writeCopy(prompt: string, hint?: string): Promise<TifoCopy | null> {
+export async function writeCopy(prompt: string, hint?: string, meter?: (usage: TokenUsage) => void): Promise<TifoCopy | null> {
   const r = await generateSpecViaProvider(prompt, { system: buildCopywriterPrompt(), tier: 'fast', hint });
+  // Its tokens belong to the request that asked, failed calls included.
+  if (r.usage) meter?.(r.usage);
   const o = r.spec as Partial<TifoCopy> | null;
   if (!o || typeof o.phrase !== 'string' || !o.phrase.trim()) return null;
   const phrase = o.phrase.trim().slice(0, 60);
@@ -593,6 +636,35 @@ export function maxOutputTokens(): number {
 export interface GeminiReply {
   candidates?: Array<{ content?: { parts?: Array<{ text?: string; thought?: boolean }> }; finishReason?: string }>;
   promptFeedback?: { blockReason?: string };
+  /** What the call cost in tokens. Thinking is reported apart from the answer. */
+  usageMetadata?: {
+    promptTokenCount?: number;
+    candidatesTokenCount?: number;
+    thoughtsTokenCount?: number;
+    cachedContentTokenCount?: number;
+  };
+}
+
+const n0 = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? Math.round(v) : 0);
+
+/** One call's usage, priced for the model that answered. */
+function callUsage(model: string, t: { in: number; out: number; thought: number; cached: number }): TokenUsage {
+  return { ...t, calls: 1, costMicros: textCostMicros(model, t) };
+}
+
+/**
+ * Usage from a Gemini reply. A reply that carried no usageMetadata was still
+ * an answer Google bills, so its cost is UNKNOWN (null), not $0.
+ */
+export function geminiUsage(model: string, data: GeminiReply | null | undefined): TokenUsage {
+  const u = data?.usageMetadata;
+  if (!u) return { ...zeroUsage(), calls: 1, costMicros: null };
+  return callUsage(model, {
+    in: n0(u?.promptTokenCount),
+    out: n0(u?.candidatesTokenCount),
+    thought: n0(u?.thoughtsTokenCount),
+    cached: n0(u?.cachedContentTokenCount),
+  });
 }
 
 /**
@@ -658,16 +730,64 @@ export interface ProviderResult {
   error?: string;
   /** HTTP status when the provider refused, so the retry decision isn't a string match. */
   status?: number;
+  /** The model that answered, or the last one asked when none did. */
+  model?: string;
+  /** Tokens and estimated cost of every call this request made, failed ones included. */
+  usage?: TokenUsage;
+  /** Set when the answer came from the fallback model: the model that could not. */
+  fellBackFrom?: string;
+  /**
+   * The failure says nothing about the brief, so another model (or another try)
+   * may well answer: capacity, quota, timeouts, a retired or refused model id.
+   * Not set for a key the provider refused, its safety filter, or an answer
+   * that arrived but was not usable JSON.
+   */
+  transient?: boolean;
+  /**
+   * When the fallback failed too: what the FIRST model said. The failure is
+   * classified from this, not from the fallback: a premium model at capacity
+   * whose fallback is out of quota is "busy, try again", not "resting until
+   * tomorrow", and a mistyped AI_MODEL_FALLBACK must not relabel every
+   * premium failure as "model not found" (review, 17 October 2026).
+   */
+  firstFailure?: { error: string; status?: number };
 }
 
-async function httpError(label: string, res: Response): Promise<string> {
+/** HTTP statuses where a second model is worth asking. 401/403 are the key: every model refuses. */
+const TRANSIENT_STATUS = new Set([404, 408, 429, 500, 502, 503, 504, 529]);
+
+/**
+ * Is this refusal worth a second model?
+ *
+ * A 400 only when it is about THIS model: a retired id, a setting the model
+ * does not take. Google answers a wrong or expired key with 400 as well
+ * (API_KEY_INVALID, not 401), and so it answers an unsupported region or an
+ * image it cannot read. Every model refuses those, so falling back doubled the
+ * calls and the budget during a key outage and fixed nothing (review, 17
+ * October 2026). The whole body is read, not the 180 characters kept.
+ */
+export function isTransient(status: number, body: string): boolean {
+  if (status !== 400) return TRANSIENT_STATUS.has(status);
+  return /\bmodels?\b/i.test(body) && !/api[ _]?key|permission|location|region|country|mime|image/i.test(body);
+}
+
+/** A provider's refusal: the call still counts, and the error keeps a bounded copy of the body. */
+async function refusal(label: string, res: Response, model: string): Promise<ProviderResult> {
   let body = '';
   try {
-    body = (await res.text()).slice(0, 180).replace(/\s+/g, ' ').trim();
+    body = await res.text();
   } catch {
     /* ignore */
   }
-  return `${label}: HTTP ${res.status}${body ? `: ${body}` : ''}`;
+  const short = body.slice(0, 180).replace(/\s+/g, ' ').trim();
+  return {
+    spec: null,
+    status: res.status,
+    model,
+    usage: { ...zeroUsage(), calls: 1 },
+    transient: isTransient(res.status, body),
+    error: `${label}: HTTP ${res.status}${short ? `: ${short}` : ''}`,
+  };
 }
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
@@ -677,13 +797,19 @@ const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms
  * plus, on failure, a human-readable reason. The caller validates and falls back
  * to the offline designer, surfacing the reason in the UI.
  *
+ * A second attempt goes to the FALLBACK MODEL (geminiFallback) whenever the
+ * first failure says nothing about the brief: a 503, a 429, a timeout, a
+ * retired model id. Two calls at most, as before; only the second one now goes
+ * where an answer is likely. With no fallback the old rules below apply.
+ *
  * Retries ONCE on 503. "This model is currently experiencing high demand" is
  * Google's own wording for a temporary spike, and it costs the user a whole
  * generation: the image path has always retried these, while the text path —
  * the one that decides whether there is a design at all — did not.
  *
- * Never on 429. A quota error is not transient, and retrying it spends another
- * request against the limit that just refused you.
+ * Never the same model on 429. A quota error is not transient for that model,
+ * and retrying it spends another request against the limit that just refused
+ * you. (Another model has its own quota, which is why the fallback does try.)
  *
  * And once on a TIMEOUT. The fast tier runs gemini-3.1-flash-lite, whose latency
  * is spiky — most calls answer in a couple of seconds, about one in four takes
@@ -709,21 +835,45 @@ export async function generateSpecViaProvider(
 ): Promise<ProviderResult> {
   const r = await callProvider(prompt, opts);
   if (r.spec) return r;
-  const timedOut = /timed out$/.test(r.error ?? '') && process.env.AI_TIMEOUT_RETRY !== '0';
-  if (r.status !== 503 && !timedOut) return r;
+  const timedOut = /timed out$/.test(r.error ?? '');
+  const timeoutRetry = timedOut && process.env.AI_TIMEOUT_RETRY !== '0';
+
+  // A second MODEL first. Still at most two calls per request, so the wait and
+  // the budget are what they were; the second call just goes somewhere that is
+  // likely to answer. A 429 is now worth one: it is THIS model's quota that
+  // refused, and the fallback has its own.
+  const fallback = activeProvider() === 'gemini' ? geminiFallback(opts.tier ?? 'fast') : null;
+  if (fallback && fallback !== r.model && r.transient && (!timedOut || timeoutRetry)) {
+    retryMeter?.();
+    const again = await callProvider(prompt, opts, fallback);
+    const usage = addUsage(r.usage ?? zeroUsage(), again.usage);
+    if (again.spec) return { ...again, usage, fellBackFrom: r.model };
+    // Both failed. The first model's failure is the cause (firstFailure), the
+    // fallback's is context; the error carries both, first model first.
+    return {
+      ...again,
+      usage,
+      error: `${r.error ?? 'no answer'}; then fallback ${again.error ?? 'no answer'}`,
+      firstFailure: { error: r.error ?? 'no answer', ...(r.status ? { status: r.status } : {}) },
+    };
+  }
+
+  // No fallback (or the fallback IS this model): the old same-model retry.
+  if (r.status !== 503 && !timeoutRetry) return r;
   if (!timedOut) await sleep(envNum('AI_RETRY_DELAY_MS', 1200, 100, 10000));
   retryMeter?.();
   const again = await callProvider(prompt, opts);
   // Report the SECOND failure: if it is still down, that is the current truth.
-  return again;
+  return { ...again, usage: addUsage(r.usage ?? zeroUsage(), again.usage) };
 }
 
 async function callProvider(
   prompt: string,
   opts: { system?: string; context?: string; image?: string; tier?: 'fast' | 'premium'; hint?: string; raw?: boolean } = {},
+  modelOverride?: string,
 ): Promise<ProviderResult> {
   const provider = activeProvider();
-  if (provider === 'none') return { spec: null, error: 'no AI provider configured' };
+  if (provider === 'none') return { spec: null, error: 'no AI provider configured', usage: zeroUsage() };
   // Premium runs a bigger model on a longer prompt, and Super now makes two
   // calls. 20s was tuned for a single fast call and truncates the rest.
   // A quoted value here used to abort every call on the next tick — see envNum.
@@ -741,6 +891,14 @@ async function callProvider(
   // "Return the TifoSpec JSON now" would ask the model for the wrong object.
   const user = opts.raw ? prompt : userMessage(prompt, opts.context, opts.hint);
 
+  // The model this call asks, named before the call so a failure can say which.
+  const model = provider === 'gemini'
+    ? modelOverride ?? geminiModel(opts.tier ?? 'fast')
+    : process.env.AI_MODEL ?? (provider === 'anthropic' ? 'claude-3-5-sonnet-latest' : 'gpt-4o-mini');
+  // A refused call still counts as a call (the budget and the cost panel see
+  // it), even though it bills no tokens.
+  const refused = (): TokenUsage => ({ ...zeroUsage(), calls: 1 });
+
   try {
     if (provider === 'anthropic') {
       const res = await postJson(
@@ -749,53 +907,76 @@ async function callProvider(
         // 4096 to match Gemini: outline pairs double the text-layer count and
         // Anthropic is not in JSON mode, so it pretty-prints. A truncated reply
         // fails extractJson and surfaces to the user as "premium is busy".
-        { model: process.env.AI_MODEL ?? 'claude-3-5-sonnet-latest', max_tokens: maxOutputTokens(), system, messages: [{ role: 'user', content: anthropicContent(user, opts.image) }] },
+        { model, max_tokens: maxOutputTokens(), system, messages: [{ role: 'user', content: anthropicContent(user, opts.image) }] },
         timeoutMs,
       );
-      if (!res.ok) return { spec: null, status: res.status, error: await httpError('claude', res) };
-      const data = (await res.json()) as { content?: Array<{ text?: string; type?: string }>; stop_reason?: string };
+      if (!res.ok) return refusal('claude', res, model);
+      const data = (await res.json()) as {
+        content?: Array<{ text?: string; type?: string }>;
+        stop_reason?: string;
+        usage?: { input_tokens?: number; output_tokens?: number; cache_read_input_tokens?: number };
+      };
+      const cached = n0(data.usage?.cache_read_input_tokens);
+      const usage = callUsage(model, { in: n0(data.usage?.input_tokens) + cached, out: n0(data.usage?.output_tokens), thought: 0, cached });
       // Every text block, not just the first: with extended thinking on, block 0
       // is a thinking block and the JSON is further down.
       const text = (data.content ?? []).map((b) => b?.text ?? '').join('');
       const spec = extractJson(text);
-      return spec ? { spec } : { spec: null, error: `claude: response was not valid JSON${data.stop_reason ? ` (stop_reason ${data.stop_reason})` : ''}` };
+      return spec ? { spec, model, usage } : { spec: null, model, usage, error: `claude: response was not valid JSON${data.stop_reason ? ` (stop_reason ${data.stop_reason})` : ''}` };
     }
     if (provider === 'gemini') {
-      const model = geminiModel(opts.tier ?? 'fast');
       const res = await postJson(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey()!}`,
-        { 'content-type': 'application/json' },
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
+        // The key goes in a header. Google documents x-goog-api-key and nothing
+        // else; a key in the URL also ends up in every proxy and access log the
+        // request passes through.
+        { 'content-type': 'application/json', 'x-goog-api-key': geminiKey()! },
         {
           systemInstruction: { parts: [{ text: system }] },
           contents: [{ role: 'user', parts: geminiParts(user, opts.image) }],
+          // No temperature. Google deprecated it for 3.6 Flash and later (it is
+          // ignored there, and the next generation answers it with HTTP 400),
+          // and for 3.0/3.1 it recommended the default anyway.
           generationConfig: {
             responseMimeType: 'application/json',
             ...(process.env.AI_RESPONSE_SCHEMA === '1' ? { responseJsonSchema: tifoResponseSchema() } : {}),
-            temperature: 0.9,
             maxOutputTokens: maxOutputTokens(),
           },
         },
         timeoutMs,
       );
-      if (!res.ok) return { spec: null, status: res.status, error: await httpError(`gemini "${model}"`, res) };
+      if (!res.ok) return refusal(`gemini "${model}"`, res, model);
       const data = (await res.json()) as GeminiReply;
+      const usage = geminiUsage(model, data);
       const text = geminiText(data);
       const spec = extractJson(text);
-      if (spec) return { spec };
-      return { spec: null, error: `gemini "${model}": ${whyNoJson(data, text)}` };
+      if (spec) return { spec, model, usage };
+      return { spec: null, model, usage, error: `gemini "${model}": ${whyNoJson(data, text)}` };
     }
     // openai
     const res = await postJson(
       'https://api.openai.com/v1/chat/completions',
       { 'content-type': 'application/json', authorization: `Bearer ${process.env.OPENAI_API_KEY!}` },
-      { model: process.env.AI_MODEL ?? 'gpt-4o-mini', response_format: { type: 'json_object' }, messages: [{ role: 'system', content: system }, { role: 'user', content: openaiContent(user, opts.image) }] },
+      { model, response_format: { type: 'json_object' }, messages: [{ role: 'system', content: system }, { role: 'user', content: openaiContent(user, opts.image) }] },
       timeoutMs,
     );
-    if (!res.ok) return { spec: null, status: res.status, error: await httpError('openai', res) };
-    const data = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
+    if (!res.ok) return refusal('openai', res, model);
+    const data = (await res.json()) as {
+      choices?: Array<{ message?: { content?: string } }>;
+      usage?: { prompt_tokens?: number; completion_tokens?: number; prompt_tokens_details?: { cached_tokens?: number }; completion_tokens_details?: { reasoning_tokens?: number } };
+    };
+    const thought = n0(data.usage?.completion_tokens_details?.reasoning_tokens);
+    const usage = callUsage(model, {
+      in: n0(data.usage?.prompt_tokens),
+      out: Math.max(0, n0(data.usage?.completion_tokens) - thought),
+      thought,
+      cached: n0(data.usage?.prompt_tokens_details?.cached_tokens),
+    });
     const spec = extractJson(data.choices?.[0]?.message?.content ?? '');
-    return spec ? { spec } : { spec: null, error: 'openai: response was not valid JSON' };
+    return spec ? { spec, model, usage } : { spec: null, model, usage, error: 'openai: response was not valid JSON' };
   } catch (e) {
-    return { spec: null, error: `${provider}: ${(e as Error)?.name === 'AbortError' ? 'timed out' : 'network error'}` };
+    // Timed out or unreachable: nothing about the brief, so worth another model.
+    const who = provider === 'gemini' ? `gemini "${model}"` : provider;
+    return { spec: null, model, usage: refused(), transient: true, error: `${who}: ${(e as Error)?.name === 'AbortError' ? 'timed out' : 'network error'}` };
   }
 }

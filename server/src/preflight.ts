@@ -147,8 +147,26 @@ export function configWarnings(env: NodeJS.ProcessEnv): ConfigWarning[] {
     });
   }
 
+  // A model id Google has retired. The server already asks for the current
+  // model instead (currentModelId in aiProvider), but the variable should say
+  // what is really answering, or the next person to read it is misled.
+  for (const k of ['AI_MODEL', 'AI_MODEL_PREMIUM', 'AI_MODEL_FAST', 'AI_MODEL_FALLBACK', 'AI_MODEL_FALLBACK_PREMIUM', 'AI_MODEL_FALLBACK_FAST'] as const) {
+    const v = env[k]?.trim();
+    const now = v ? RETIRED_TEXT_MODELS[v] : undefined;
+    if (now) out.push({ key: k, effect: `set to "${v}", which Google has retired; the server asks for "${now}" instead. Change the variable to ${now}.`, state: 'wrong' });
+  }
+
   return out;
 }
+
+/**
+ * Text models Google retired, and what the server asks for instead
+ * (aiProvider's currentModelId reads this list). Source: the Gemini API
+ * deprecations page, ai.google.dev/gemini-api/docs/deprecations.
+ */
+export const RETIRED_TEXT_MODELS: Record<string, string> = {
+  'gemini-3.5-flash': 'gemini-3.6-flash',
+};
 
 /** Print them, once, at boot. Nothing here should ever stop the server. */
 export function logConfigWarnings(env: NodeJS.ProcessEnv = process.env, log = console.warn): void {

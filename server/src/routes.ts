@@ -15,7 +15,7 @@ import { renderDistributionPdf } from '../../src/export/distributionPdf';
 
 import { tmpdir } from 'node:os';
 import { readFile, unlink } from 'node:fs/promises';
-import type { AiEventsRepository, AiUsageRepository, AuthRepository, DesignRepository, EventsRepository, LeadsRepository, SocialRepository } from './repo';
+import type { AiBudgetRepository, AiEventsRepository, AiUsageRepository, AuthRepository, DesignRepository, EventsRepository, LeadsRepository, SocialRepository } from './repo';
 import { picturesStatus } from './imageAssets';
 import { imageHealth } from './imageHealth';
 import { registerAiRoutes, safeEqual, verifyUnlock } from './aiRoutes';
@@ -231,6 +231,8 @@ export interface AppOptions {
   /** AI Tifo Designer quota store. When present, the /api/ai/* routes are enabled. */
   aiUsage?: AiUsageRepository;
   aiEvents?: AiEventsRepository;
+  /** Where the daily AI budget survives a restart (memory only when absent). */
+  aiBudget?: AiBudgetRepository;
   /** Free AI generations per account (default 5). */
   aiFreeLimit?: number;
   /** Optional community stadium submissions store. When present, /api/stadiums/* is enabled. */
@@ -1041,6 +1043,7 @@ export async function buildApp(
     registerAiRoutes(app, {
       aiUsage: options.aiUsage,
       aiEvents: options.aiEvents,
+      aiBudget: options.aiBudget,
       userOf,
       isAdmin: isAdminUser,
       adminPassword: aiAdminPassword,

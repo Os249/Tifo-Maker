@@ -16,6 +16,7 @@ import type {
   NewDesign,
   AiEventInput,
   AiEventsRepository,
+  AiBudgetRepository,
   AiFailReason,
   AiMode,
   AiOutcome,
@@ -31,6 +32,7 @@ import type {
   PhotoReviewItem,
 } from './repo';
 import { normalizeTags } from './memoryRepo';
+import { costStats, LIMIT_REASONS, modeOutcomes, type AiGroup } from './aiStats';
 import { designFacets } from '../../src/core/facets';
 
 const META_COLS =
@@ -147,28 +149,60 @@ const zero = (): Record<AiOutcome, number> & { all: number } => ({
   model: 0, cache: 0, quick: 0, quota: 0, busy: 0, blocked: 0, invalid: 0, all: 0,
 });
 
+/** Postgres daily AI budget: one row per UTC day, see ai_budget in schema.sql. */
+export class PgAiBudgetRepository implements AiBudgetRepository {
+  constructor(private readonly pool: pg.Pool) {}
+
+  async load(day: string): Promise<{ calls: number; pictures: number }> {
+    const r = await this.pool.query('SELECT calls, pictures FROM ai_budget WHERE day = $1', [day]);
+    return { calls: Number(r.rows[0]?.calls ?? 0), pictures: Number(r.rows[0]?.pictures ?? 0) };
+  }
+
+  async add(day: string, calls: number, pictures: number): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO ai_budget (day, calls, pictures) VALUES ($1, $2, $3)
+       ON CONFLICT (day) DO UPDATE SET calls = ai_budget.calls + EXCLUDED.calls,
+         pictures = ai_budget.pictures + EXCLUDED.pictures, updated_at = now()`,
+      [day, calls, pictures],
+    );
+  }
+}
+
+/** A design is a 'model' outcome in std or super; Polish and photo successes are not designs. */
+const DESIGN_SQL = `outcome = 'model' AND mode IN ('std', 'super')`;
+
 /** Postgres AI history. One row per request — see the ai_events comment in schema.sql. */
 export class PgAiEventsRepository implements AiEventsRepository {
   constructor(private readonly pool: pg.Pool) {}
 
   async record(e: AiEventInput): Promise<void> {
+    const int = (v: number | null | undefined, max: number): number | null =>
+      typeof v === 'number' && Number.isFinite(v) ? Math.max(0, Math.min(max, Math.round(v))) : null;
     await this.pool.query(
-      'INSERT INTO ai_events (user_id, mode, outcome, reason, detail, via) VALUES ($1, $2, $3, $4, $5, $6)',
-      [e.userId, e.mode, e.outcome, e.reason ?? null, e.detail ? e.detail.slice(0, 400) : null, e.via ?? null],
+      `INSERT INTO ai_events (user_id, mode, outcome, reason, detail, via,
+         model, latency_ms, tokens_in, tokens_out, tokens_thought, tokens_cached, calls, pictures, cost_micros)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
+      [e.userId, e.mode, e.outcome, e.reason ?? null, e.detail ? e.detail.slice(0, 400) : null, e.via ?? null,
+        e.model ? e.model.slice(0, 80) : null, int(e.latencyMs, 2_000_000_000),
+        int(e.tokensIn, 2_000_000_000), int(e.tokensOut, 2_000_000_000), int(e.tokensThought, 2_000_000_000), int(e.tokensCached, 2_000_000_000),
+        int(e.calls, 32_000), int(e.pictures, 32_000), int(e.costMicros, Number.MAX_SAFE_INTEGER)],
     );
   }
 
   async stats(days: number): Promise<AiStats> {
     const since = `${days} days`;
-    const [tot, win, perDay, top, cap, modes, metered, first, fails, recent] = await Promise.all([
-      this.pool.query('SELECT outcome, count(*)::int AS n FROM ai_events GROUP BY outcome'),
+    // 'model' counts DESIGNS: a successful Polish or photo reading lands in
+    // `all` only, so the "premium generations" figures mean what they always did.
+    const outcomeOf = `CASE WHEN outcome = 'model' AND mode NOT IN ('std', 'super') THEN 'other' ELSE outcome END`;
+    const [tot, win, perDay, top, cap, modes, metered, first, fails, recent, groupRows, measuredFirst] = await Promise.all([
+      this.pool.query(`SELECT ${outcomeOf} AS outcome, count(*)::int AS n FROM ai_events GROUP BY 1`),
       this.pool.query(
-        `SELECT outcome, count(*)::int AS n FROM ai_events WHERE at > now() - $1::interval GROUP BY outcome`,
+        `SELECT ${outcomeOf} AS outcome, count(*)::int AS n FROM ai_events WHERE at > now() - $1::interval GROUP BY 1`,
         [since],
       ),
       this.pool.query(
         `SELECT to_char(at AT TIME ZONE 'utc','YYYY-MM-DD') AS day,
-                count(*) FILTER (WHERE outcome = 'model')::int   AS model,
+                count(*) FILTER (WHERE ${DESIGN_SQL})::int   AS model,
                 count(*) FILTER (WHERE outcome = 'quick')::int   AS quick,
                 count(*) FILTER (WHERE outcome = 'blocked')::int AS blocked
          FROM ai_events WHERE at > now() - $1::interval GROUP BY day ORDER BY day`,
@@ -176,7 +210,7 @@ export class PgAiEventsRepository implements AiEventsRepository {
       ),
       this.pool.query(
         `SELECT coalesce(u.username, 'admin / unlocked') AS username,
-                count(*) FILTER (WHERE e.outcome = 'model')::int AS model,
+                count(*) FILTER (WHERE e.outcome = 'model' AND e.mode IN ('std', 'super'))::int AS model,
                 count(*) FILTER (WHERE e.outcome = 'quick')::int AS quick,
                 count(*) FILTER (WHERE e.outcome = 'quota')::int AS quota,
                 count(*)::int AS total, max(e.at) AS last
@@ -211,7 +245,32 @@ export class PgAiEventsRepository implements AiEventsRepository {
          ORDER BY e.at DESC, e.id DESC LIMIT 50`,
         [since],
       ),
+      // Day × mode × outcome × model: the shape the cost panel is built from
+      // (aiStats.ts), so memory and Postgres cannot disagree.
+      this.pool.query(
+        `SELECT to_char(at AT TIME ZONE 'utc','YYYY-MM-DD') AS day, mode, outcome, model,
+                count(*)::int AS n,
+                count(*) FILTER (WHERE reason = ANY($2::text[]))::int AS limited,
+                count(*) FILTER (WHERE calls IS NOT NULL)::int AS measured,
+                count(*) FILTER (WHERE calls IS NOT NULL AND cost_micros IS NULL)::int AS unpriced,
+                coalesce(sum(cost_micros) FILTER (WHERE calls IS NOT NULL), 0)::bigint AS cost,
+                coalesce(sum(tokens_in), 0)::bigint AS tin, coalesce(sum(tokens_out), 0)::bigint AS tout,
+                coalesce(sum(tokens_thought), 0)::bigint AS tthought, coalesce(sum(tokens_cached), 0)::bigint AS tcached,
+                coalesce(sum(pictures), 0)::int AS pictures,
+                coalesce(sum(latency_ms) FILTER (WHERE calls IS NOT NULL), 0)::bigint AS lat_sum,
+                count(latency_ms) FILTER (WHERE calls IS NOT NULL)::int AS lat_n
+         FROM ai_events WHERE at > now() - $1::interval GROUP BY 1, 2, 3, 4`,
+        [since, [...LIMIT_REASONS]],
+      ),
+      this.pool.query('SELECT min(at) AS first FROM ai_events WHERE calls IS NOT NULL'),
     ]);
+
+    const groups: AiGroup[] = groupRows.rows.map((r) => ({
+      day: String(r.day), mode: String(r.mode) as AiMode, outcome: String(r.outcome) as AiOutcome,
+      model: r.model ? String(r.model) : null, n: Number(r.n), limited: Number(r.limited), measured: Number(r.measured), unpriced: Number(r.unpriced),
+      costMicros: Number(r.cost), tokensIn: Number(r.tin), tokensOut: Number(r.tout), tokensThought: Number(r.tthought),
+      tokensCached: Number(r.tcached), pictures: Number(r.pictures), latencySum: Number(r.lat_sum), latencyN: Number(r.lat_n),
+    }));
 
     const fold = (rows: { outcome: string; n: number }[]) => {
       const out = zero();
@@ -250,6 +309,8 @@ export class PgAiEventsRepository implements AiEventsRepository {
         reason: String(r.reason) as AiFailReason,
         detail: r.detail ? String(r.detail) : '',
       })),
+      modeOutcomes: modeOutcomes(groups),
+      cost: costStats(groups, measuredFirst.rows[0]?.first ? new Date(measuredFirst.rows[0].first).toISOString() : null),
     };
   }
 }

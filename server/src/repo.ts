@@ -565,10 +565,31 @@ export interface AiUsageRepository {
 export type AiOutcome = 'model' | 'cache' | 'quick' | 'quota' | 'busy' | 'blocked' | 'invalid';
 
 /** std/super are generations; polish (the vision critic) and photo (reading a
- *  ground photo) are recorded only when they FAIL, so their counts are failures. */
+ *  ground photo) are the two other premium calls. Until October 2026 polish and
+ *  photo were recorded only when they FAILED; their successes are recorded now
+ *  too (outcome 'model'), and the design counts below leave them out. */
 export type AiMode = 'std' | 'super' | 'polish' | 'photo';
 
-export interface AiEventInput {
+/** What a request cost, measured from the provider's own usage numbers. */
+export interface AiEventUsage {
+  /** The model that answered (the one that failed last, when none did). */
+  model?: string | null;
+  /** Whole request, as the user waited for it. */
+  latencyMs?: number | null;
+  tokensIn?: number;
+  /** Answer tokens, thinking excluded. */
+  tokensOut?: number;
+  tokensThought?: number;
+  tokensCached?: number;
+  /** Provider calls made, failed ones and retries included. */
+  calls?: number;
+  /** Pictures delivered for this request. */
+  pictures?: number;
+  /** Estimated list-price cost in millionths of a dollar; null when a price is unknown. */
+  costMicros?: number | null;
+}
+
+export interface AiEventInput extends AiEventUsage {
   /** The signed-in account. With the admin password this is still the account
    *  the operator was signed into, when there is one — "by which user". */
   userId: string | null;
@@ -586,6 +607,55 @@ export interface AiEventsRepository {
   /** Best-effort: telemetry must never fail a generation. */
   record(e: AiEventInput): Promise<void>;
   stats(days: number): Promise<AiStats>;
+}
+
+/**
+ * The daily AI budget, kept somewhere a deploy cannot wipe.
+ *
+ * AI_DAILY_BUDGET used to live in a variable, so every deploy or restart gave
+ * the day a fresh 1,000 — and a day of Railway deploys multiplied the cap.
+ * The route still counts in memory (it answers on every request); this is
+ * where the count is read back from on start-up and written to as it grows.
+ */
+export interface AiBudgetRepository {
+  /** What has been spent on a UTC day ("YYYY-MM-DD"). */
+  load(day: string): Promise<{ calls: number; pictures: number }>;
+  /** Add to a day's count. Best-effort: never fails a generation. */
+  add(day: string, calls: number, pictures: number): Promise<void>;
+}
+
+/** Outcome counts for one mode. */
+export type AiOutcomeCounts = Record<AiOutcome, number> & { all: number };
+/**
+ * Outcome counts for one mode, plus how many of its "busy" rows were OUR
+ * limits (the daily budget, an account's daily share, no provider) rather
+ * than the model failing. The reliability table leaves those out of the rate.
+ */
+export type AiModeOutcomes = AiOutcomeCounts & { limited: number };
+
+/** What the AI cost in the window, from measured tokens (list prices). */
+export interface AiCostStats {
+  /** First request that carried token counts; nothing before it was measured. */
+  measuredSince: string | null;
+  /** Requests in the window that carried token counts. */
+  measured: number;
+  /** Estimated spend in the window, US dollars. */
+  usd: number;
+  /** Requests whose price could not be worked out (a model missing from the price table). */
+  unpriced: number;
+  perDay: { day: string; usd: number }[];
+  /**
+   * Per mode: requests measured, total and average cost per DELIVERED result.
+   * perDelivered divides by priced deliveries only, and is null when none
+   * was priced: an unknown price must never read as $0.
+   */
+  byMode: Record<AiMode, { measured: number; delivered: number; usd: number; perDelivered: number | null }>;
+  tokens: { in: number; out: number; thought: number; cached: number };
+  pictures: number;
+  /** Which models answered delivered requests, most used first. usd is null when none of them could be priced. */
+  models: { model: string; requests: number; usd: number | null }[];
+  /** Average wait for a delivered result, per mode, in milliseconds. */
+  latencyMs: Record<AiMode, number | null>;
 }
 
 /** One failed (or partly failed) request, for the admin "why" table. */
@@ -618,6 +688,9 @@ export interface AiStats {
   failures: { reason: AiFailReason; count: number; last: string }[];
   /** The latest failures in the window, newest first (at most 50). */
   recentFailures: AiFailureRow[];
+  /** Outcomes split by mode, so "how often does Super fail" has an answer. */
+  modeOutcomes: Record<AiMode, AiModeOutcomes>;
+  cost: AiCostStats;
 }
 
 /** Current hourly metering period, e.g. "2026-06-28T14" (UTC). Usage resets each hour. */

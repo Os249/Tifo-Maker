@@ -22,15 +22,16 @@
 
 import { createHmac, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
-import type { AiEventsRepository, AiMode, AiOutcome, AiUsageRepository } from './repo';
+import type { AiBudgetRepository, AiEventsRepository, AiEventUsage, AiMode, AiOutcome, AiUsageRepository } from './repo';
 import { classifyAiFailure, publicCause, sanitizeDetail, type AiFailure } from './aiFailure';
 import { secondsToNextPeriod } from './repo';
+import { addCostMicros, addUsage, pictureCostMicros, zeroUsage, type TokenUsage } from './aiPricing';
 import { validateSpec, validateModelSpec, narrowToSingleStand, regionAspectHint, regionRowsHint, type TifoSpec } from '../../src/core/tifoSpec';
 import { refineSpec } from '../../src/core/specRefine';
 import { designFromPrompt, composeSuperOffline } from '../../src/core/promptDesigner';
 import { ensureHeroImage } from '../../src/core/heroImage';
 import { matchClub } from '../../src/core/clubs';
-import { generateSpecViaProvider, buildDirectorPrompt, critiqueSpecViaProvider, activeProvider, clubHintLine, writeCopy, copyLine, meterRetries } from './aiProvider';
+import { generateSpecViaProvider, buildDirectorPrompt, critiqueSpecViaProvider, activeProvider, clubHintLine, writeCopy, copyLine, meterRetries, geminiModel, type ProviderResult } from './aiProvider';
 import { readGroundPhoto, PHOTO_SAMPLE_DEFAULT, PHOTO_SAMPLE_MAX } from './photoRead';
 import { generateImage, type ImageResult } from './imageAssets';
 import { envNum } from './env';
@@ -85,18 +86,78 @@ const genCache = new TtlCache<{ spec: TifoSpec; source: 'model' }>(80, 30 * 60 *
 // Daily circuit breaker: cap premium model calls per UTC day so we never blow past
 // the provider's free daily quota / budget. When spent, everyone is routed to the
 // free Quick Designer ("premium resting") until midnight UTC. <=0 disables the cap.
-// In-memory (fine for a single instance); a multi-instance deploy would share this.
+//
+// Counted in memory, because it is checked on every request, and written
+// through to the AI budget store (ai_budget in Postgres) as it grows. On start-up
+// the day's count is read back, so a deploy no longer hands out a fresh 1,000:
+// before October 2026 a day with three deploys had a cap of 4,000.
 const DAILY_BUDGET = envNum('AI_DAILY_BUDGET', 1000, 0);
+/**
+ * Picture requests per UTC day, across everyone. The model budget never
+ * counted them, and a picture is paid for separately (the Pollinations credit
+ * the owner tops up, or Gemini at about 20 times the price when Pollinations is
+ * down). Every request to the image provider counts, a failed try or the
+ * bare-subject retry included, since a provider may bill those too. When it is
+ * spent, designs arrive without their picture, reported as incomplete (the
+ * usual incomplete-run rules decide whether that is charged), until 00:00 UTC.
+ * <=0 disables the cap.
+ */
+const pictureBudget = (): number => envNum('AI_DAILY_PICTURE_BUDGET', 1000, 0);
 /** Pictures one Super AI design may ask for: one per stand. */
 const MAX_PICTURES_PER_DESIGN = 4;
 let premiumDay = '';
 let premiumCount = 0;
+let pictureCount = 0;
+let budgetStore: AiBudgetRepository | null = null;
+/** The day whose stored count has been read back (or is being read). */
+let loadedDay = '';
+let loading: Promise<void> | null = null;
 function rollPremiumDay(): void {
   const today = new Date().toISOString().slice(0, 10);
   if (today !== premiumDay) {
     premiumDay = today;
     premiumCount = 0;
+    pictureCount = 0;
   }
+}
+/** After a failed read-back, when to try again (ms since epoch). */
+let loadRetryAt = 0;
+/** How long an AI request waits for the stored count before going on without it. */
+const BUDGET_LOAD_WAIT_MS = 2000;
+/**
+ * Read the day's stored count back once per day (and once per start-up).
+ * A store that cannot answer leaves the memory count in charge, and is asked
+ * again a minute later: a database blip on the first request after a deploy
+ * must not reset the day's cap to zero until midnight (review, 17 October
+ * 2026). A request never waits more than two seconds for it.
+ */
+async function budgetReady(): Promise<void> {
+  rollPremiumDay();
+  if (!budgetStore) return;
+  if (loadedDay === premiumDay) return loading ?? undefined;
+  if (Date.now() < loadRetryAt) return;
+  const day = premiumDay;
+  loadedDay = day;
+  const load = budgetStore.load(day).then((v) => {
+    // Late answers still count: max() can only raise the count.
+    if (premiumDay !== day) return true;
+    premiumCount = Math.max(premiumCount, v.calls);
+    pictureCount = Math.max(pictureCount, v.pictures);
+    return true;
+  });
+  const failed = (): void => {
+    if (loadedDay !== day) return;
+    loadedDay = '';
+    loading = null;
+    loadRetryAt = Date.now() + 60_000;
+  };
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const wait = new Promise<boolean>((resolve) => { timer = setTimeout(() => resolve(false), BUDGET_LOAD_WAIT_MS); });
+  loading = Promise.race([load, wait]).then(
+    (ok) => { clearTimeout(timer); if (!ok) failed(); },
+    () => { clearTimeout(timer); failed(); },
+  );
+  return loading;
 }
 /** True when the day's premium budget is spent (breaker tripped). */
 function premiumExhausted(): boolean {
@@ -107,6 +168,16 @@ function premiumExhausted(): boolean {
 function notePremiumCall(calls = 1): void {
   rollPremiumDay();
   premiumCount += calls;
+  void budgetStore?.add(premiumDay, calls, 0).catch(() => {});
+}
+/** Take one picture from the day's budget; false when it is spent. */
+function takePicture(): boolean {
+  rollPremiumDay();
+  const cap = pictureBudget();
+  if (cap > 0 && pictureCount >= cap) return false;
+  pictureCount++;
+  void budgetStore?.add(premiumDay, 0, 1).catch(() => {});
+  return true;
 }
 // A retried provider call is a real second call, and counts as one.
 meterRetries(() => notePremiumCall(1));
@@ -114,6 +185,20 @@ meterRetries(() => notePremiumCall(1));
 export function premiumCallsToday(): number {
   rollPremiumDay();
   return premiumCount;
+}
+/** Pictures counted today (for tests; read-only). */
+export function picturesToday(): number {
+  rollPremiumDay();
+  return pictureCount;
+}
+/** Tests only: forget today's in-memory count, as a restart would. */
+export function forgetBudgetMemoryForTests(): void {
+  premiumDay = '';
+  premiumCount = 0;
+  pictureCount = 0;
+  loadRetryAt = 0;
+  loadedDay = '';
+  loading = null;
 }
 /** Busy-retry countdown with a little jitter so retries don't stampede the same second. */
 function busyRetrySec(): number {
@@ -126,6 +211,8 @@ export interface AiRouteDeps {
   /** History of every request, for the admin AI section. Optional so tests and
    *  older wiring keep working; when absent nothing is recorded. */
   aiEvents?: AiEventsRepository;
+  /** Where the daily budget survives a restart. Absent ⇒ memory only, as before. */
+  aiBudget?: AiBudgetRepository;
   /** Resolve a user id from the request's bearer token (null = anonymous). */
   userOf: (req: FastifyRequest) => Promise<string | null>;
   /** Whether a user id belongs to an ADMIN_USERNAMES admin. */
@@ -229,8 +316,35 @@ export function verifyUnlock(secret: string, token: string): boolean {
   return safeEqual(parts[3], expected);
 }
 
+/** What one request spent, for its ai_events row (/admin → AI → cost). */
+interface Spent {
+  usage: TokenUsage;
+  /** The model that answered (or failed last). */
+  model?: string | null;
+  startedAt: number;
+  /** Pictures delivered. */
+  pictures?: number;
+}
+
+function usageFields(s: Spent): AiEventUsage {
+  return {
+    model: s.model ?? null,
+    latencyMs: Date.now() - s.startedAt,
+    tokensIn: s.usage.in,
+    tokensOut: s.usage.out,
+    tokensThought: s.usage.thought,
+    tokensCached: s.usage.cached,
+    calls: s.usage.calls,
+    pictures: s.pictures ?? 0,
+    costMicros: s.usage.costMicros,
+  };
+}
+
 export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void {
   const adminPassword = deps.adminPassword;
+  budgetStore = deps.aiBudget ?? null;
+  loadedDay = '';
+  loading = null;
 
   type Access =
     | { kind: 'admin'; actorId: string | null }
@@ -305,7 +419,7 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
    * failure must never turn into a failed generation, so this is never awaited
    * and never throws.
    */
-  const note = (a: Access, mode: AiMode, outcome: AiOutcome, fail?: AiFailure): void => {
+  const note = (a: Access, mode: AiMode, outcome: AiOutcome, fail?: AiFailure, spent?: Spent): void => {
     const userId = a.kind === 'user' ? a.userId : a.kind === 'admin' ? a.actorId : null;
     void deps.aiEvents
       ?.record({
@@ -314,15 +428,29 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
         outcome,
         via: a.kind === 'admin' ? 'password' : null,
         ...(fail ? { reason: fail.reason, detail: fail.status && !fail.detail.includes(String(fail.status)) ? `HTTP ${fail.status}: ${fail.detail}` : fail.detail } : {}),
+        ...(spent ? usageFields(spent) : {}),
       })
       .catch(() => {});
   };
   /** The model id a tier resolves to, for the operator's failure detail. */
   const modelOf = (isSuper: boolean): string =>
-    isSuper ? (process.env.AI_MODEL_PREMIUM ?? process.env.AI_MODEL ?? 'default') : (process.env.AI_MODEL_FAST ?? process.env.AI_MODEL ?? 'default');
+    activeProvider() === 'gemini'
+      ? geminiModel(isSuper ? 'premium' : 'fast')
+      : isSuper ? (process.env.AI_MODEL_PREMIUM ?? process.env.AI_MODEL ?? 'default') : (process.env.AI_MODEL_FAST ?? process.env.AI_MODEL ?? 'default');
   /** Name the model in the operator's detail when the provider's text did not. */
   const withModel = (err: string, model: string): string =>
     model === 'default' || err.includes(model) ? err : `${err} (model ${model})`;
+  /**
+   * Why a provider call failed. When the fallback model failed too, the
+   * reason is the FIRST model's (firstFailure); the operator's detail keeps
+   * both answers.
+   */
+  const failureOf = (res: ProviderResult, otherwise: string, model: string): AiFailure => {
+    const first = res.firstFailure;
+    if (!first) return classifyAiFailure(withModel(res.error ?? otherwise, model), res.status);
+    const fail = classifyAiFailure(withModel(first.error, model), first.status);
+    return { ...fail, detail: sanitizeDetail(withModel(res.error ?? first.error, model)) };
+  };
   const budgetFailure = (): AiFailure => ({
     reason: 'budget',
     detail: `AI_DAILY_BUDGET spent: ${DAILY_BUDGET} premium calls today; resets at 00:00 UTC`,
@@ -385,6 +513,7 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
   });
 
   app.post('/api/ai/generate', deps.routeConfig ?? {}, async (req, reply) => {
+    const startedAt = Date.now();
     const access = await baseAccess(req);
     if (access.kind === 'deny') {
       return reply.code(access.status).send({ error: access.error, reason: access.reason, locked: true });
@@ -450,6 +579,7 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
 
     // Daily circuit breaker: budget spent → route to the Quick Designer instead of
     // burning the provider's daily quota. Same "choice" UX, no error shown.
+    await budgetReady();
     if (premiumExhausted()) {
       note(access, mode0, 'busy', budgetFailure());
       return reply.code(200).send({ needsChoice: true, reason: 'busy', cause: publicCause('budget'), retryAfterSec: busyRetrySec(), quota: quotaInfo });
@@ -460,6 +590,9 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
     // The club hint is a pure function of `prompt`, so the result-cache key above
     // stays correct without mentioning it.
     const hint = clubHintLine(prompt);
+    // Every provider call this request makes, failed ones included: the row in
+    // ai_events carries the total, which is what the request cost.
+    let spent: TokenUsage = zeroUsage();
 
     // Stage 1 (Super only): the copywriter picks the WORDS before anything is
     // laid out. A hero phrase is what decides whether a stand can be filled at
@@ -468,13 +601,17 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
     // a failure or a disabled stage just means the director designs from the raw
     // brief, exactly as before. Costs a fraction of a cent on the fast tier.
     const wantsCopy = isSuper && process.env.AI_COPYWRITER !== '0';
-    const copy = wantsCopy ? await writeCopy(prompt, hint).catch(() => null) : null;
+    const copy = wantsCopy ? await writeCopy(prompt, hint, (u) => { spent = addUsage(spent, u); }).catch(() => null) : null;
     const brief = copy ? `${prompt}\n\n${copyLine(copy)}` : prompt;
 
     const modelResult = await generateSpecViaProvider(
       brief,
       isSuper ? { system: buildDirectorPrompt(), context: stadium, tier: 'premium', hint } : { context: stadium, tier: 'fast', hint },
     );
+    spent = addUsage(spent, modelResult.usage);
+    if (modelResult.fellBackFrom) {
+      app.log.info({ mode: mode0, from: modelResult.fellBackFrom, to: modelResult.model }, 'ai generate: answered by the fallback model');
+    }
     // Repaired before it is judged: a stripes layer that says `direction` for
     // `orientation`, or colours as hex, has one obvious reading and used to cost
     // the user the whole design.
@@ -493,7 +630,7 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
             reason: 'invalid_design',
             detail: sanitizeDetail(`${modelOf(isSuper)}: spec failed validation: ${(r.errors ?? []).slice(0, 3).map((e) => `${e.path} ${e.message}`).join('; ')}`),
           }
-        : classifyAiFailure(withModel(modelResult.error ?? 'the model did not answer', modelOf(isSuper)), modelResult.status);
+        : failureOf(modelResult, 'the model did not answer', modelOf(isSuper));
       app.log.warn(
         {
           reason: fail.reason,
@@ -504,7 +641,7 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
         },
         'ai generate: premium could not deliver',
       );
-      note(access, mode0, 'busy', fail);
+      note(access, mode0, 'busy', fail, { usage: spent, model: modelResult.model, startedAt });
       // The editor gets ONE vendor-free word it turns into a translated
       // sentence (busy / resting / slow / content / garbled / unavailable).
       // It used to get the provider's raw reply when the caller was an admin,
@@ -542,6 +679,7 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
     const notes: string[] = [];
     let wanted = 0;
     let missed = 0;
+    let delivered = 0;
     let firstFailure: string | undefined;
     for (const layer of spec.layers) {
       if (layer.kind === 'image' && !layer.assetRef) {
@@ -557,12 +695,19 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
           rows: regionRowsHint(region),
         };
         // Each request to the image provider is one of the account's daily
-        // pictures. A spent share is reported like a rate limit, so the
-        // bare-subject second attempt is not made either.
-        const draw = (p: string): Promise<ImageResult> =>
-          takeSide(access, 'picture', 1)
-            ? generateImage(p, style).catch((e) => ({ url: null, error: String(e) }))
-            : Promise.resolve({ url: null, error: "this account's pictures for today are used up", kind: 'rate' as const });
+        // pictures, and one of the site's (AI_DAILY_PICTURE_BUDGET). A spent
+        // share is reported like a rate limit, so the bare-subject second
+        // attempt is not made either.
+        const draw = async (p: string): Promise<ImageResult> => {
+          if (!takeSide(access, 'picture', 1)) return { url: null, error: "this account's pictures for today are used up", kind: 'rate' };
+          if (!takePicture()) return { url: null, error: `AI_DAILY_PICTURE_BUDGET spent: ${pictureBudget()} pictures today; resets at 00:00 UTC`, kind: 'rate' };
+          const got = await generateImage(p, style).catch((e) => ({ url: null, error: String(e) }) as ImageResult);
+          if (got.url) {
+            delivered++;
+            spent = addCostMicros(spent, pictureCostMicros(got.provider, got.model));
+          }
+          return got;
+        };
 
         let { url, error, kind } = await draw(layer.prompt);
         // An account that is out of credit, a refused key or a rate limit say
@@ -598,7 +743,11 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
     const degraded = missed > 0;
     // Recorded here rather than when the spec validated, so a design whose
     // picture never came is on file WITH the reason it did not.
-    note(access, mode0, 'model', degraded ? { reason: 'picture_failed', detail: sanitizeDetail(`${missed} of ${wanted}: ${firstFailure ?? 'unknown error'}`) } : undefined);
+    note(
+      access, mode0, 'model',
+      degraded ? { reason: 'picture_failed', detail: sanitizeDetail(`${missed} of ${wanted}: ${firstFailure ?? 'unknown error'}`) } : undefined,
+      { usage: spent, model: modelResult.model, startedAt, pictures: delivered },
+    );
     // An incomplete run is free only while the account's daily allowance of
     // free incomplete runs lasts (see PREMIUM_SIDE_PER_DAY.uncharged).
     const charged = !!(usage && userId) && (!degraded || !takeSide(access, 'uncharged', 1));
@@ -627,6 +776,7 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
   // model to fix legibility/balance, and return an improved spec. Best-effort: any
   // failure returns the ORIGINAL design unchanged, so polish never breaks a design.
   app.post('/api/ai/critique', deps.routeConfig ?? {}, async (req, reply) => {
+    const startedAt = Date.now();
     const access = await baseAccess(req);
     if (access.kind === 'deny') {
       return reply.code(access.status).send({ error: access.error, reason: access.reason, locked: true });
@@ -644,6 +794,9 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
     let source: 'model' | 'original' = 'original';
     // Set when the critic could not run; the client says so in its own words.
     let failed: AiFailure | null = null;
+    // What the critic spent, when it ran.
+    let spent: Spent | undefined;
+    await budgetReady();
     if (activeProvider() === 'none') {
       failed = { reason: 'no_provider', detail: 'no AI provider configured' };
     } else if (premiumExhausted() || !takeSide(access, 'polish', 1)) {
@@ -662,6 +815,7 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
         layers: incoming.spec.layers.map((l) => (l.kind === 'image' ? { ...l, assetRef: undefined } : l)),
       };
       const res = await critiqueSpecViaProvider(slim, image, stadium);
+      spent = { usage: res.usage ?? zeroUsage(), model: res.model, startedAt };
       const improved = res.spec ? validateModelSpec(res.spec, incoming.spec) : null;
       if (improved?.repairs.length) app.log.info({ mode: 'polish', repairs: improved.repairs.slice(0, 12) }, 'ai: critic design repaired');
       if (improved && improved.valid && improved.spec) {
@@ -677,15 +831,18 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
       } else {
         failed = res.spec
           ? { reason: 'invalid_design', detail: sanitizeDetail(`critique spec failed validation: ${(improved?.errors ?? []).slice(0, 3).map((e) => `${e.path} ${e.message}`).join('; ')}`) }
-          : classifyAiFailure(withModel(res.error ?? 'invalid response', modelOf(true)), res.status);
+          : failureOf(res, 'invalid response', modelOf(true));
       }
     }
     if (failed) {
-      // Only failures of the critic are recorded (mode 'polish'): the design is
-      // left exactly as it was, and the provider's words stay on the server.
-      note(access, 'polish', 'busy', failed);
+      // A failed critic leaves the design exactly as it was, and the
+      // provider's words stay on the server.
+      note(access, 'polish', 'busy', failed, spent);
       return reply.code(200).send({ spec, source, notes, cause: publicCause(failed.reason) });
     }
+    // Successes are recorded too (from October 2026): without them a Polish
+    // failure rate, or what Polish costs, had no denominator.
+    note(access, 'polish', 'model', undefined, spent);
     return reply.code(200).send({ spec, source, notes });
   });
 
@@ -699,6 +856,7 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
   // A photo is a megabyte or two, well past the global 1 MB body limit, so this
   // route carries its own like the design-photo upload does.
   app.post('/api/stadium/photo', { ...(deps.routeConfig ?? {}), bodyLimit: 3 * 1024 * 1024 }, async (req, reply) => {
+    const startedAt = Date.now();
     const access = await baseAccess(req);
     if (access.kind === 'deny') {
       return reply.code(access.status).send({ error: access.error, reason: access.reason, locked: true });
@@ -716,21 +874,27 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
     // Up to eight premium vision calls per request, and none of them used to
     // count against AI_DAILY_BUDGET: the breaker that stops generation did not
     // stop this. Every reading now counts.
+    await budgetReady();
     if (premiumExhausted() || !takeSide(access, 'photo', samples)) {
       note(access, 'photo', 'busy', budgetFailure());
       return reply.code(503).send({ error: 'premium AI is resting for today, try again tomorrow', reason: 'busy', retryAfterSec: busyRetrySec() });
     }
     notePremiumCall(samples);
-    const out = await readGroundPhoto(image, samples);
+    const { usage: readUsage, model: readModel, failure: readFailure, ...out } = await readGroundPhoto(image, samples);
+    const spent: Spent = { usage: readUsage, model: readModel, startedAt };
     // Every reading failed: that is an upstream problem, not an empty photo.
     if (!out.vote.samples) {
-      const fail = classifyAiFailure(out.errors[0] ?? 'the model did not answer');
+      const fail = classifyAiFailure(readFailure?.error ?? out.errors[0] ?? 'the model did not answer', readFailure?.status);
+      if (readFailure && out.errors[0]) fail.detail = sanitizeDetail(out.errors[0]);
       if (out.errors.length > 1) fail.detail = sanitizeDetail(`${fail.detail} (${out.errors.length} readings failed)`);
-      note(access, 'photo', 'busy', fail);
+      note(access, 'photo', 'busy', fail, spent);
       // The provider's text used to ride back in `error` and `errors`.
       return reply.code(502).send({ error: 'the model did not answer', reason: 'busy', cause: publicCause(fail.reason) });
     }
-    // Readings that failed while others succeeded are the operator's business.
+    // Recorded from October 2026, so photo reading has a success rate and a cost.
+    note(access, 'photo', 'model', undefined, spent);
+    // Readings that failed while others succeeded are the operator's business,
+    // and so are the tokens: neither goes back to the browser.
     return reply.code(200).send({ ...out, errors: [] });
   });
 }

@@ -1923,6 +1923,61 @@ if (process.env.DATABASE_URL) {
     assert.equal(st.window.busy, 3);
     console.log('postgres: ai failure reasons passed (columns, breakdown, recent table, cap, door, modes)');
   }
+
+  // AI Phase 0 (17 Oct 2026) on real Postgres: token, model and cost columns,
+  // the cost panel built from them (identical to the memory store's), Polish
+  // successes kept out of the design counts, and the daily budget table.
+  {
+    const { PgAiEventsRepository, PgAiBudgetRepository } = await import('../src/pgRepo');
+    const { MemoryAiEventsRepository } = await import('../src/memoryRepo');
+    const pgEv = new PgAiEventsRepository(pool);
+    const memEv = new MemoryAiEventsRepository();
+    await pool.query('TRUNCATE ai_events');
+    const rows: Parameters<typeof pgEv.record>[0][] = [
+      { userId: null, mode: 'super', outcome: 'model', model: 'gemini-3.6-flash', latencyMs: 21000, tokensIn: 3500, tokensOut: 940, tokensThought: 1500, tokensCached: 0, calls: 2, pictures: 1, costMicros: 14_000 },
+      { userId: null, mode: 'std', outcome: 'busy', reason: 'overloaded', detail: 'gemini "gemini-3.5-flash-lite": HTTP 503 (after ...)', model: 'gemini-3.5-flash-lite', latencyMs: 3000, tokensIn: 0, tokensOut: 0, tokensThought: 0, tokensCached: 0, calls: 2, pictures: 0, costMicros: 0 },
+      { userId: null, mode: 'polish', outcome: 'model', model: 'gemini-3.6-flash', latencyMs: 9000, tokensIn: 2800, tokensOut: 1500, tokensThought: 1000, tokensCached: 100, calls: 1, costMicros: 11_000 },
+      { userId: null, mode: 'std', outcome: 'model' }, // an old-style row: no measurements
+      { userId: null, mode: 'super', outcome: 'model', model: 'a-model-with-no-price', tokensIn: 10, calls: 1, costMicros: null },
+      // Our own limit, not the model failing (the review, 17 October).
+      { userId: null, mode: 'super', outcome: 'busy', reason: 'budget', detail: 'AI_DAILY_BUDGET spent' },
+    ];
+    for (const r of rows) { await pgEv.record(r); await memEv.record(r); }
+    const st = await pgEv.stats(30);
+    assert.equal(st.window.model, 3, 'designs: std and super models only, Polish successes are not designs');
+    assert.equal(st.window.all, 6);
+    assert.deepEqual([st.modeOutcomes.super.busy, st.modeOutcomes.super.limited, st.modeOutcomes.std.limited], [1, 1, 0], 'a budget refusal is counted as our limit');
+    assert.equal(st.perDay.reduce((n, d) => n + d.model, 0), 3);
+    assert.equal(st.modeOutcomes.polish.model, 1);
+    assert.equal(st.modeOutcomes.std.busy, 1);
+    assert.equal(st.cost.measured, 4, 'the old-style row is not measured');
+    assert.equal(st.cost.unpriced, 1);
+    assert.ok(Math.abs(st.cost.usd - 0.025) < 1e-9, `spend ${st.cost.usd}`);
+    assert.deepEqual(st.cost.tokens, { in: 6310, out: 2440, thought: 2500, cached: 100 });
+    assert.equal(st.cost.pictures, 1);
+    assert.equal(st.cost.byMode.super.delivered, 2);
+    assert.equal(st.cost.byMode.std.delivered, 0, 'the unmeasured std design is not counted as measured');
+    assert.equal(st.cost.latencyMs.super, 21000);
+    assert.deepEqual(st.cost.models.map((m) => [m.model, m.requests]), [['gemini-3.6-flash', 2], ['a-model-with-no-price', 1]]);
+    assert.equal(st.cost.models[1].usd, null, 'a model with no price shows no price, not $0');
+    assert.ok(Math.abs((st.cost.byMode.super.perDelivered ?? 0) - 0.014) < 1e-9, `per Super design over the priced one only: ${st.cost.byMode.super.perDelivered}`);
+    assert.ok(st.cost.measuredSince, 'and when measuring started');
+    const mem = await memEv.stats(30);
+    assert.deepEqual({ ...mem.cost, measuredSince: null }, { ...st.cost, measuredSince: null }, 'the memory store builds the same cost panel');
+    assert.deepEqual(mem.modeOutcomes, st.modeOutcomes, 'and the same per-mode outcomes');
+    assert.deepEqual(mem.window, st.window);
+
+    const budget = new PgAiBudgetRepository(pool);
+    const day = '2099-01-01';
+    await pool.query('DELETE FROM ai_budget WHERE day = $1', [day]);
+    assert.deepEqual(await budget.load(day), { calls: 0, pictures: 0 });
+    await budget.add(day, 3, 0);
+    await budget.add(day, 2, 1);
+    await Promise.all([budget.add(day, 1, 0), budget.add(day, 1, 1)]);
+    assert.deepEqual(await budget.load(day), { calls: 7, pictures: 2 }, 'adds accumulate, concurrent ones included');
+    await pool.query('DELETE FROM ai_budget WHERE day = $1', [day]);
+    console.log('postgres: ai phase 0 passed (usage columns, cost panel equal to memory, polish not a design, our limits apart, unpriced not $0, budget table)');
+  }
   await pool.end();
 } else {
   console.log('postgres repos: skipped (set DATABASE_URL to run)');

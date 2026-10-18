@@ -280,7 +280,7 @@ CREATE TABLE IF NOT EXISTS ai_events (
   id      BIGSERIAL PRIMARY KEY,
   user_id UUID REFERENCES users(id) ON DELETE SET NULL,  -- null = admin/unlocked
   at      TIMESTAMPTZ NOT NULL DEFAULT now(),
-  mode    TEXT NOT NULL,     -- 'std' | 'super' | 'polish' | 'photo' (the last two: failures only)
+  mode    TEXT NOT NULL,     -- 'std' | 'super' | 'polish' | 'photo' (the last two: failures only until Oct 2026)
   outcome TEXT NOT NULL      -- model | cache | quick | quota | busy | blocked | invalid
 );
 CREATE INDEX IF NOT EXISTS ai_events_at_idx      ON ai_events (at DESC);
@@ -297,6 +297,35 @@ ALTER TABLE ai_events ADD COLUMN IF NOT EXISTS reason TEXT;
 ALTER TABLE ai_events ADD COLUMN IF NOT EXISTS detail TEXT;
 ALTER TABLE ai_events ADD COLUMN IF NOT EXISTS via TEXT;
 CREATE INDEX IF NOT EXISTS ai_events_reason_idx ON ai_events (at DESC) WHERE reason IS NOT NULL;
+-- WHAT a request cost, from the provider's own usage numbers (October 2026).
+-- Before this, every cost figure was an estimate from prompt sizes. model is
+-- the one that answered; tokens_out excludes thinking, which has its own
+-- column because it is billed as output and is the part that moves with the
+-- thinking level; calls counts provider calls, retries and failed ones
+-- included; cost_micros is the list-price estimate in millionths of a dollar,
+-- fixed when the request ran (NULL when a price was unknown). A row with
+-- calls IS NULL is from before this existed, or a free outcome (cache, quick).
+-- Polish and photo successes are recorded from now on too, not only failures.
+ALTER TABLE ai_events ADD COLUMN IF NOT EXISTS model TEXT;
+ALTER TABLE ai_events ADD COLUMN IF NOT EXISTS latency_ms INT;
+ALTER TABLE ai_events ADD COLUMN IF NOT EXISTS tokens_in INT;
+ALTER TABLE ai_events ADD COLUMN IF NOT EXISTS tokens_out INT;
+ALTER TABLE ai_events ADD COLUMN IF NOT EXISTS tokens_thought INT;
+ALTER TABLE ai_events ADD COLUMN IF NOT EXISTS tokens_cached INT;
+ALTER TABLE ai_events ADD COLUMN IF NOT EXISTS calls SMALLINT;
+ALTER TABLE ai_events ADD COLUMN IF NOT EXISTS pictures SMALLINT;
+ALTER TABLE ai_events ADD COLUMN IF NOT EXISTS cost_micros BIGINT;
+
+-- The daily AI budget (AI_DAILY_BUDGET, AI_DAILY_PICTURE_BUDGET), per UTC day.
+-- It lived in a variable, so every deploy or restart started the day at zero
+-- and a day of deploys multiplied the cap. The server keeps counting in memory
+-- and reads this back when it starts.
+CREATE TABLE IF NOT EXISTS ai_budget (
+  day        TEXT PRIMARY KEY,                -- 'YYYY-MM-DD', UTC
+  calls      INT NOT NULL DEFAULT 0,          -- premium model requests (retries included)
+  pictures   INT NOT NULL DEFAULT 0,          -- pictures asked of the image providers
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 
 -- Sharing system: a public view counter on each design, a branded social-card
 -- image, and a per-platform share/open log for analytics.

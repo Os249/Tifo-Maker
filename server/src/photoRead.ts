@@ -1,4 +1,5 @@
 import { generateSpecViaProvider, activeProvider } from './aiProvider';
+import { addUsage, zeroUsage, type TokenUsage } from './aiPricing';
 import {
   PHOTO_FACTS_PROMPT,
   aggregateFacts,
@@ -35,13 +36,22 @@ export interface PhotoReadResult {
   dropped: Array<{ field: string; agreement: number; answered: number }>;
   /** One line per failed call, so a half-working key is visible rather than silent. */
   errors: string[];
+  /** Tokens and estimated cost of every reading, for /admin. Never sent to the client. */
+  usage: TokenUsage;
+  /** The model that answered (the first reading that did), else the last one asked. */
+  model?: string;
+  /**
+   * What the first failed reading's first model said, for the operator's
+   * reason (see ProviderResult.firstFailure). Never sent to the client.
+   */
+  failure?: { error: string; status?: number };
 }
 
 export async function readGroundPhoto(image: string, samples = PHOTO_SAMPLE_DEFAULT): Promise<PhotoReadResult> {
   const n = Math.max(1, Math.min(PHOTO_SAMPLE_MAX, Math.round(samples)));
   if (activeProvider() === 'none') {
     const vote = aggregateFacts([]);
-    return { vote, known: {}, used: [], dropped: [], errors: ['no AI provider configured'] };
+    return { vote, known: {}, used: [], dropped: [], errors: ['no AI provider configured'], usage: zeroUsage() };
   }
   const results = await Promise.all(
     Array.from({ length: n }, () =>
@@ -54,11 +64,20 @@ export async function readGroundPhoto(image: string, samples = PHOTO_SAMPLE_DEFA
   );
   const facts: PhotoFacts[] = [];
   const errors: string[] = [];
+  let usage = zeroUsage();
+  let model: string | undefined;
+  let asked: string | undefined;
+  let failure: PhotoReadResult['failure'];
   for (const r of results) {
-    if (r.spec) facts.push(parsePhotoFacts(r.spec));
-    else if (r.error) errors.push(r.error);
+    usage = addUsage(usage, r.usage);
+    asked = r.model ?? asked;
+    if (r.spec) { facts.push(parsePhotoFacts(r.spec)); model = model ?? r.model; }
+    else if (r.error) {
+      errors.push(r.error);
+      failure = failure ?? r.firstFailure ?? { error: r.error, ...(r.status ? { status: r.status } : {}) };
+    }
   }
   const vote = aggregateFacts(facts);
   const { known, used, dropped } = factsToKnown(vote);
-  return { vote, known, used, dropped, errors };
+  return { vote, known, used, dropped, errors, usage, model: model ?? asked, ...(failure ? { failure } : {}) };
 }

@@ -2562,3 +2562,376 @@ async function makeDesign(app: FastifyInstance, token: string, isPublic = false)
 
   console.log('audit round five: all assertions passed (IPv6 rate limits, admin names need the password and take as long as a taken name, claims audited, verification race, AI picture limits, storage caps per account and per client, refused copies refunded, foreign-key races are 409, comment reports, ownerless designs, owner-only fields, event limits, print-panel markup, memory name case, shared escaper, Postgres reply cascade, bad ids, Pro on Postgres)');
 }
+
+// ---------- 2026-10-17: AI Phase 0 — fallback model, pinned ids, usage, budgets ----------
+// From the October AI analysis: 112 premium requests in 30 days ended "busy",
+// 45 of the last 50 on the premium model (Google's 503s and quota 429s), and
+// nothing tried another model. Nothing recorded tokens, so cost was a guess;
+// Polish and photo successes were not recorded at all; the daily budget lived
+// in a variable that every deploy reset; pictures were counted by nothing
+// site-wide; the Gemini key travelled in the URL; a retired model id was asked
+// for by name; and every call sent a temperature Google has deprecated.
+{
+  const prov = await import('../src/aiProvider');
+  const pricing = await import('../src/aiPricing');
+  const { configWarnings } = await import('../src/preflight');
+  const { MemoryAiUsageRepository, MemoryAiEventsRepository, MemoryAiBudgetRepository } = await import('../src/memoryRepo');
+  const { premiumCallsToday, picturesToday, forgetBudgetMemoryForTests } = await import('../src/aiRoutes');
+  const KEYS = [
+    'GEMINI_API_KEY', 'GOOGLE_API_KEY', 'AI_PROVIDER', 'AI_MODEL', 'AI_MODEL_PREMIUM', 'AI_MODEL_FAST', 'AI_MODEL_FALLBACK',
+    'AI_MODEL_FALLBACK_PREMIUM', 'AI_MODEL_FALLBACK_FAST', 'AI_TIMEOUT_MS', 'AI_TIMEOUT_PREMIUM_MS', 'AI_TIMEOUT_RETRY', 'AI_RETRY_DELAY_MS',
+    'AI_POLLINATIONS_KEY', 'POLLINATIONS_KEY', 'AI_IMAGE_FALLBACK', 'AI_IMAGE_PROVIDER', 'AI_DAILY_PICTURE_BUDGET', 'AI_COPYWRITER',
+    'ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'AI_RESPONSE_SCHEMA',
+  ] as const;
+  const saved = Object.fromEntries(KEYS.map((k) => [k, process.env[k]]));
+  for (const k of KEYS) delete process.env[k];
+  process.env.GEMINI_API_KEY = 'AIzaSyTESTKEY0000000000';
+  process.env.AI_PROVIDER = 'gemini';
+  process.env.AI_MODEL_PREMIUM = 'gemini-3.5-flash';
+  process.env.AI_MODEL_FAST = 'gemini-3.1-flash-lite';
+  process.env.AI_TIMEOUT_MS = '1500';
+  process.env.AI_TIMEOUT_PREMIUM_MS = '1500';
+  process.env.AI_RETRY_DELAY_MS = '100';
+
+  // ---- pinned ids, the fallback model, prices ----
+  assert.equal(prov.currentModelId('gemini-3.5-flash'), 'gemini-3.6-flash');
+  assert.equal(prov.geminiModel('premium'), 'gemini-3.6-flash', 'a retired premium id is asked for by its replacement');
+  assert.equal(prov.geminiModel('fast'), 'gemini-3.1-flash-lite');
+  assert.equal(prov.geminiFallback('premium'), 'gemini-3.5-flash-lite', 'the default fallback');
+  process.env.AI_MODEL_FALLBACK = 'none';
+  assert.equal(prov.geminiFallback('fast'), null, '"none" turns the fallback off');
+  process.env.AI_MODEL_FALLBACK_PREMIUM = 'gemini-2.5-flash';
+  assert.equal(prov.geminiFallback('premium'), 'gemini-2.5-flash', 'a per-tier setting wins over AI_MODEL_FALLBACK');
+  delete process.env.AI_MODEL_FALLBACK;
+  delete process.env.AI_MODEL_FALLBACK_PREMIUM;
+  assert.ok(
+    configWarnings({ AI_MODEL_PREMIUM: 'gemini-3.5-flash' } as NodeJS.ProcessEnv).some((w) => w.key === 'AI_MODEL_PREMIUM' && w.state === 'wrong' && w.effect.includes('gemini-3.6-flash')),
+    'the boot report names a retired model id and its replacement',
+  );
+  assert.equal(configWarnings({ AI_MODEL_PREMIUM: 'gemini-3.6-flash' } as NodeJS.ProcessEnv).filter((w) => w.key === 'AI_MODEL_PREMIUM').length, 0, 'and says nothing about a current one');
+
+  const dec = new Date(Date.UTC(2026, 11, 31, 12));
+  const jan = new Date(Date.UTC(2027, 0, 1, 0, 1));
+  const mil = { in: 1_000_000, out: 0, thought: 0, cached: 0 };
+  assert.equal(pricing.textCostMicros('gemini-3.6-flash', mil, dec), 750_000);
+  assert.equal(pricing.textCostMicros('gemini-3.6-flash', mil, jan), 1_500_000, 'the January price applies from its date');
+  assert.equal(pricing.textCostMicros('gemini-3.6-flash', { in: 0, out: 1000, thought: 1000, cached: 0 }, dec), 7500, 'thinking is billed as output');
+  assert.equal(pricing.textCostMicros('gemini-3.6-flash', { ...mil, cached: 1_000_000 }, dec), 75_000, 'cached input at the cached rate');
+  assert.equal(pricing.textCostMicros('gemini-3.1-flash-lite', { in: 2000, out: 1000, thought: 0, cached: 0 }), 2000, 'Flash-Lite: 2,000 in + 1,000 out = $0.002');
+  assert.equal(pricing.textCostMicros('a-model-with-no-price', { in: 10, out: 10, thought: 0, cached: 0 }), null, 'an unknown price is unknown, not free');
+  assert.equal(pricing.textCostMicros('a-model-with-no-price', { in: 0, out: 0, thought: 0, cached: 0 }), 0, 'a call that billed nothing costs nothing');
+  assert.equal(pricing.pictureCostMicros('pollinations', 'flux'), 2000);
+  assert.equal(pricing.pictureCostMicros('gemini', 'gemini-2.5-flash-image'), 39_000);
+  assert.equal(pricing.addUsage({ ...pricing.zeroUsage(), costMicros: 5 }, { ...pricing.zeroUsage(), costMicros: null }).costMicros, null, 'one unpriced call leaves the total unpriced');
+  const gu = prov.geminiUsage('gemini-3.6-flash', { usageMetadata: { promptTokenCount: 3000, candidatesTokenCount: 1200, thoughtsTokenCount: 2000 } });
+  assert.deepEqual([gu.in, gu.out, gu.thought, gu.cached, gu.calls], [3000, 1200, 2000, 0, 1]);
+  assert.ok((gu.costMicros ?? 0) > 0);
+
+  // ---- the independent review (17 October) ----
+  // An answer that carried no token counts is billed all the same: unknown, not $0.
+  assert.equal(prov.geminiUsage('gemini-3.6-flash', { candidates: [] }).costMicros, null, 'no usageMetadata: the cost is unknown');
+  // Google answers a bad key with 400, not 401; a region or an image every model
+  // refuses is a 400 too. Only a 400 about THIS model is worth a second one.
+  const KEY_400 = '{"error":{"code":400,"message":"API key not valid. Please pass a valid API key.","status":"INVALID_ARGUMENT","details":[{"reason":"API_KEY_INVALID"}]}}';
+  assert.equal(prov.isTransient(400, KEY_400), false, 'a refused key (400) is not transient');
+  assert.equal(prov.isTransient(400, '{"error":{"message":"User location is not supported for the API use."}}'), false);
+  assert.equal(prov.isTransient(400, '{"error":{"message":"Unsupported MIME type: image/heic"}}'), false);
+  assert.equal(prov.isTransient(400, '{"error":{"message":"Thinking level is not supported for this model."}}'), true, 'a setting this model does not take is');
+  assert.equal(prov.isTransient(400, '{"error":{"message":"Invalid JSON payload received."}}'), false);
+  assert.equal(prov.isTransient(503, ''), true);
+  assert.equal(prov.isTransient(401, ''), false);
+  // An EMPTY per-tier variable inherits; it does not switch the fallback off.
+  process.env.AI_MODEL_FALLBACK = 'gemini-2.5-flash';
+  process.env.AI_MODEL_FALLBACK_PREMIUM = '';
+  assert.equal(prov.geminiFallback('premium'), 'gemini-2.5-flash', 'a blank AI_MODEL_FALLBACK_PREMIUM inherits AI_MODEL_FALLBACK');
+  process.env.AI_MODEL_FALLBACK = '  ';
+  assert.equal(prov.geminiFallback('premium'), 'gemini-3.5-flash-lite', 'blank everywhere: the default');
+  delete process.env.AI_MODEL_FALLBACK;
+  delete process.env.AI_MODEL_FALLBACK_PREMIUM;
+  {
+    // An unknown price never reads as $0 per design, and our own limits are
+    // not the model failing.
+    const { costStats, modeOutcomes } = await import('../src/aiStats');
+    const g = (o: Partial<import('../src/aiStats').AiGroup>): import('../src/aiStats').AiGroup => ({
+      day: '2026-10-17', mode: 'super', outcome: 'model', model: 'gemini-3.6-flash', n: 1, limited: 0, measured: 1, unpriced: 0, costMicros: 0,
+      tokensIn: 0, tokensOut: 0, tokensThought: 0, tokensCached: 0, pictures: 0, latencySum: 0, latencyN: 0, ...o,
+    });
+    const onlyUnpriced = costStats([g({ model: 'claude-x', unpriced: 1 })], null);
+    assert.equal(onlyUnpriced.byMode.super.perDelivered, null, 'nothing priced: "—", not $0');
+    assert.equal(onlyUnpriced.models[0].usd, null, 'and the model has no price, not $0');
+    const mixed = costStats([g({ costMicros: 40_000 }), g({ model: 'claude-x', unpriced: 1 }), g({ outcome: 'busy', costMicros: 10_000 })], null);
+    assert.equal(mixed.byMode.super.perDelivered, 0.05, 'all priced spend over the priced deliveries');
+    const mo = modeOutcomes([g({ n: 3 }), g({ outcome: 'busy', n: 5, limited: 4, measured: 1 })]);
+    assert.deepEqual([mo.super.model, mo.super.busy, mo.super.limited], [3, 5, 4]);
+  }
+
+  // ---- a stubbed Gemini (and Pollinations) ----
+  const realFetch = globalThis.fetch;
+  type Call = { url: string; headers: Record<string, string>; body: { systemInstruction?: unknown; generationConfig?: Record<string, unknown> } | null };
+  const calls: Call[] = [];
+  const modelIn = (u: string): string | undefined => /models\/([^:]+):/.exec(u)?.[1];
+  const USAGE = { promptTokenCount: 3000, candidatesTokenCount: 900, thoughtsTokenCount: 1500 };
+  const specReply = (spec: unknown, usage: Record<string, number> = USAGE) =>
+    new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: JSON.stringify(spec) }] }, finishReason: 'STOP' }], usageMetadata: usage }), { status: 200, headers: { 'content-type': 'application/json' } });
+  const refuse = (status: number, message: string) => new Response(JSON.stringify({ error: { code: status, message } }), { status, headers: { 'content-type': 'application/json' } });
+  let respond: (url: string, body: Call['body']) => Response = () => refuse(500, 'no plan');
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input instanceof Request ? input.url : input);
+    if (url.includes('pollinations')) return new Response(Buffer.alloc(400, 7), { status: 200, headers: { 'content-type': 'image/png' } });
+    if (!url.includes('generativelanguage.googleapis.com')) return realFetch(input as RequestInfo, init);
+    const headers = Object.fromEntries(new Headers(init?.headers as HeadersInit).entries());
+    const body = init?.body ? JSON.parse(String(init.body)) : null;
+    calls.push({ url, headers, body });
+    return respond(url, body);
+  }) as typeof fetch;
+
+  const GOOD = {
+    title: 'Zaeem', palette: ['#262a33', '#0033a0', '#ffffff', '#d4af37'],
+    layers: [{ kind: 'fill', region: 'all', colorIndex: 1 }, { kind: 'text', region: 'south', text: 'ZAEEM', colorIndex: 2, fontId: 'poster', heightFrac: 0.7 }],
+  };
+  try {
+    // 1. The request itself: the current model, the key in a header, no temperature.
+    calls.length = 0;
+    respond = () => specReply(GOOD);
+    const ok = await prov.generateSpecViaProvider('brief', { tier: 'premium' });
+    assert.ok(ok.spec);
+    assert.equal(calls.length, 1);
+    assert.equal(modelIn(calls[0].url), 'gemini-3.6-flash', 'the retired id is not what is asked for');
+    assert.ok(!/[?&]key=/.test(calls[0].url), `no key in the URL: ${calls[0].url}`);
+    assert.equal(calls[0].headers['x-goog-api-key'], 'AIzaSyTESTKEY0000000000', 'the key travels in x-goog-api-key');
+    assert.equal(calls[0].body?.generationConfig?.temperature, undefined, 'no temperature (deprecated from 3.6 Flash on)');
+    assert.equal(ok.model, 'gemini-3.6-flash');
+    assert.deepEqual([ok.usage!.calls, ok.usage!.in, ok.usage!.out, ok.usage!.thought], [1, 3000, 900, 1500], 'usage read from usageMetadata');
+
+    // 2. Google's "high demand" 503: the fallback model answers.
+    calls.length = 0;
+    respond = (u) => (modelIn(u) === 'gemini-3.6-flash' ? refuse(503, 'This model is currently experiencing high demand.') : specReply(GOOD));
+    const fb = await prov.generateSpecViaProvider('brief', { tier: 'premium' });
+    assert.ok(fb.spec, 'the fallback model answered');
+    assert.deepEqual(calls.map((c) => modelIn(c.url)), ['gemini-3.6-flash', 'gemini-3.5-flash-lite'], 'two calls, the second to the fallback');
+    assert.equal(fb.model, 'gemini-3.5-flash-lite');
+    assert.equal(fb.fellBackFrom, 'gemini-3.6-flash');
+    assert.equal(fb.usage!.calls, 2, 'the refused call is counted');
+
+    // 3. A quota 429: THIS model's quota. The fallback has its own.
+    calls.length = 0;
+    respond = (u) => (modelIn(u) === 'gemini-3.6-flash' ? refuse(429, 'You exceeded your current quota, please check your plan and billing details.') : specReply(GOOD));
+    assert.ok((await prov.generateSpecViaProvider('brief', { tier: 'premium' })).spec, 'a quota refusal is answered by the fallback');
+    assert.equal(calls.length, 2);
+
+    // 4. A refused key: every model refuses it, so nothing else is asked.
+    calls.length = 0;
+    respond = () => refuse(401, 'API key not valid.');
+    const k = await prov.generateSpecViaProvider('brief', { tier: 'premium' });
+    assert.equal(k.spec, null);
+    assert.equal(calls.length, 1, 'a refused key is not tried on another model');
+
+    // 4b. ...and Google's way of refusing a key, a 400: one call, not two.
+    calls.length = 0;
+    respond = () => new Response(KEY_400, { status: 400, headers: { 'content-type': 'application/json' } });
+    assert.equal((await prov.generateSpecViaProvider('brief', { tier: 'premium' })).spec, null);
+    assert.equal(calls.length, 1, 'a 400 API_KEY_INVALID is not tried on another model');
+    // 4c. A 400 about the model itself still falls back.
+    calls.length = 0;
+    respond = (u) => (modelIn(u) === 'gemini-3.6-flash' ? refuse(400, 'Thinking level is not supported for this model.') : specReply(GOOD));
+    assert.ok((await prov.generateSpecViaProvider('brief', { tier: 'premium' })).spec);
+    assert.equal(calls.length, 2, 'a 400 about this model goes to the fallback');
+
+    // 5. Both refuse: still two calls, and the error names both.
+    calls.length = 0;
+    respond = () => refuse(503, 'high demand');
+    const both = await prov.generateSpecViaProvider('brief', { tier: 'fast' });
+    assert.equal(both.spec, null);
+    assert.equal(calls.length, 2, 'never more than two calls');
+    assert.ok(both.error!.includes('gemini-3.5-flash-lite') && both.error!.includes('gemini-3.1-flash-lite'), both.error);
+    assert.equal(both.status, 503);
+
+    // 6. A timeout: the second try goes to the fallback. (The fast model never
+    //    answers here; the call's own timeout aborts it.)
+    calls.length = 0;
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input instanceof Request ? input.url : input);
+      if (!url.includes('generativelanguage.googleapis.com')) return realFetch(input as RequestInfo, init);
+      calls.push({ url, headers: {}, body: null });
+      if (modelIn(url) === 'gemini-3.1-flash-lite') {
+        return new Promise<Response>((_, reject) => init?.signal?.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' }))));
+      }
+      return specReply(GOOD);
+    }) as typeof fetch;
+    const slow = await prov.generateSpecViaProvider('brief', { tier: 'fast' });
+    assert.ok(slow.spec, 'a timed-out call is answered by the fallback');
+    assert.deepEqual(calls.map((c) => modelIn(c.url)), ['gemini-3.1-flash-lite', 'gemini-3.5-flash-lite']);
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input instanceof Request ? input.url : input);
+      if (url.includes('pollinations')) return new Response(Buffer.alloc(400, 7), { status: 200, headers: { 'content-type': 'image/png' } });
+      if (!url.includes('generativelanguage.googleapis.com')) return realFetch(input as RequestInfo, init);
+      const headers = Object.fromEntries(new Headers(init?.headers as HeadersInit).entries());
+      const body = init?.body ? JSON.parse(String(init.body)) : null;
+      calls.push({ url, headers, body });
+      return respond(url, body);
+    }) as typeof fetch;
+
+    // 7. AI_MODEL_FALLBACK=none brings back the old rules exactly.
+    process.env.AI_MODEL_FALLBACK = 'none';
+    calls.length = 0;
+    respond = () => refuse(503, 'high demand');
+    await prov.generateSpecViaProvider('brief', { tier: 'fast' });
+    assert.deepEqual(calls.map((c) => modelIn(c.url)), ['gemini-3.1-flash-lite', 'gemini-3.1-flash-lite'], 'no fallback: a 503 retries the same model');
+    calls.length = 0;
+    respond = () => refuse(429, 'quota');
+    await prov.generateSpecViaProvider('brief', { tier: 'fast' });
+    assert.equal(calls.length, 1, 'no fallback: a 429 is still not retried');
+    delete process.env.AI_MODEL_FALLBACK;
+
+    // 8. A model Google has switched off (404) falls back too.
+    process.env.AI_MODEL_FAST = 'gemini-1.0-pro';
+    calls.length = 0;
+    respond = (u) => (modelIn(u) === 'gemini-1.0-pro' ? refuse(404, 'models/gemini-1.0-pro is not found for API version v1beta') : specReply(GOOD));
+    assert.ok((await prov.generateSpecViaProvider('brief', { tier: 'fast' })).spec, 'a retired model that answers 404 falls back');
+    process.env.AI_MODEL_FAST = 'gemini-3.1-flash-lite';
+
+    // ---- through the routes: what lands in ai_events ----
+    forgetBudgetMemoryForTests();
+    process.env.AI_POLLINATIONS_KEY = 'pk_test_phase0';
+    process.env.AI_IMAGE_FALLBACK = 'none';
+    const auth = new MemoryAuthRepository();
+    const designs = new MemoryDesignRepository((id) => auth.usernameOf(id));
+    const events = new MemoryAiEventsRepository((id) => auth.usernameOf(id));
+    const budget = new MemoryAiBudgetRepository();
+    const app = await buildApp(designs, auth, templates, {
+      social: new MemorySocialRepository(designs, auth), aiUsage: new MemoryAiUsageRepository(), aiEvents: events, aiBudget: budget,
+    });
+    const fan = await reg(app, 'fan_phase0');
+    await auth.markEmailVerified(fan.id);
+    const COPY = { phrase: 'الزعيم', support: '', language: 'ar', mood: 'pride', voice: 'poster' };
+    const isCopywriter = (b: Call['body']): boolean => JSON.stringify(b?.systemInstruction ?? '').includes('COPYWRITER');
+    const withPicture = (n: number) => ({
+      ...GOOD,
+      layers: [...GOOD.layers, ...(['north', 'west'] as const).slice(0, n).map((stand) => ({ kind: 'image', region: stand, prompt: 'an eagle', scaleFrac: 0.9 }))],
+    });
+
+    // A Super design: copywriter + director + one picture, all on one row.
+    respond = (_u, b) => (isCopywriter(b) ? specReply(COPY, { promptTokenCount: 500, candidatesTokenCount: 40 }) : specReply(withPicture(1)));
+    const s1 = (await app.inject({ method: 'POST', url: '/api/ai/generate', headers: bearer(fan.token), payload: { prompt: 'Hilal zaeem eagle', mode: 'super', stadium: '- north: 900 seats' } })).json();
+    assert.equal(s1.source, 'model', JSON.stringify(s1).slice(0, 300));
+    assert.equal(s1.outcome.kind, 'full');
+    const st1 = await events.stats(30);
+    assert.equal(st1.cost.measured, 1);
+    assert.equal(st1.cost.byMode.super.delivered, 1);
+    assert.deepEqual([st1.cost.tokens.in, st1.cost.tokens.out, st1.cost.tokens.thought], [3500, 940, 1500], 'the copywriter and the director are both counted');
+    assert.equal(st1.cost.pictures, 1);
+    assert.ok(st1.cost.usd > 0.002, `priced, the picture included: ${st1.cost.usd}`);
+    assert.deepEqual(st1.cost.models.map((m) => m.model), ['gemini-3.6-flash'], 'the model that answered is on file');
+    assert.ok(st1.cost.latencyMs.super !== null && st1.cost.latencyMs.super! >= 0);
+    assert.equal(st1.modeOutcomes.super.model, 1);
+    assert.equal(picturesToday(), 1, 'the picture is counted in the day\'s picture budget');
+
+    // A Standard design the fast model could not make, made by the fallback.
+    respond = (u) => (modelIn(u) === 'gemini-3.1-flash-lite' ? refuse(503, 'high demand') : specReply(GOOD));
+    const s2 = (await app.inject({ method: 'POST', url: '/api/ai/generate', headers: bearer(fan.token), payload: { prompt: 'Ittihad tigers gold' } })).json();
+    assert.equal(s2.source, 'model', `the fallback made the design instead of "busy": ${JSON.stringify(s2).slice(0, 200)}`);
+    const st2 = await events.stats(30);
+    assert.ok(st2.cost.models.some((m) => m.model === 'gemini-3.5-flash-lite'), 'and the fallback is named as the model that answered');
+    assert.equal(st2.modeOutcomes.std.model, 1);
+
+    // A Polish that works is on file now, and is not a design.
+    respond = () => specReply(s2.spec);
+    const p = (await app.inject({ method: 'POST', url: '/api/ai/critique', headers: bearer(fan.token), payload: { spec: s2.spec } })).json();
+    assert.equal(p.source, 'model', JSON.stringify(p).slice(0, 200));
+    const st3 = await events.stats(30);
+    assert.equal(st3.modeOutcomes.polish.model, 1, 'a successful Polish is recorded');
+    assert.equal(st3.window.model, 2, 'and not counted as a design');
+    assert.equal(st3.perDay.reduce((n, d) => n + d.model, 0), 2);
+    assert.equal(st3.window.all, 3);
+
+    // A request that failed is measured too: it made calls.
+    respond = () => refuse(503, 'high demand');
+    const s4 = (await app.inject({ method: 'POST', url: '/api/ai/generate', headers: bearer(fan.token), payload: { prompt: 'Nassr yellow storm' } })).json();
+    assert.equal(s4.needsChoice, true);
+    const st4 = await events.stats(30);
+    assert.equal(st4.modeOutcomes.std.busy, 1);
+    assert.equal(st4.cost.byMode.std.measured, 2, 'the failed request is measured');
+    assert.ok(st4.recentFailures[0].detail.includes('gemini-3.5-flash-lite') && st4.recentFailures[0].detail.includes('gemini-3.1-flash-lite'), st4.recentFailures[0].detail);
+
+    // Both models refuse for DIFFERENT reasons: the first model's is the
+    // reason. A busy premium model is "try again", not "resting till tomorrow".
+    respond = (u) => (modelIn(u) === 'gemini-3.1-flash-lite' ? refuse(503, 'This model is currently experiencing high demand.') : refuse(429, 'You exceeded your current quota.'));
+    const s5 = (await app.inject({ method: 'POST', url: '/api/ai/generate', headers: bearer(fan.token), payload: { prompt: 'Shabab green wave' } })).json();
+    assert.equal(s5.needsChoice, true);
+    assert.equal(s5.cause, 'busy', `the first model's reason reaches the user: ${s5.cause}`);
+    const st5 = await events.stats(30);
+    assert.equal(st5.recentFailures[0].reason, 'overloaded', 'and the operator\'s reason is the first model\'s');
+    assert.ok(st5.recentFailures[0].detail.includes('quota'), `the fallback's answer stays in the detail: ${st5.recentFailures[0].detail}`);
+
+    // The budget store has every call the memory counter has.
+    const today = new Date().toISOString().slice(0, 10);
+    const stored = await budget.load(today);
+    assert.equal(stored.calls, premiumCallsToday(), `stored ${stored.calls}, counted ${premiumCallsToday()}`);
+    assert.equal(stored.pictures, 1);
+
+    // ---- the daily budget survives a restart ----
+    forgetBudgetMemoryForTests(); // what a deploy does to the memory count
+    await budget.add(today, 1_000_000, 0);
+    const app2 = await buildApp(designs, auth, templates, {
+      social: new MemorySocialRepository(designs, auth), aiUsage: new MemoryAiUsageRepository(), aiEvents: events, aiBudget: budget,
+    });
+    calls.length = 0;
+    respond = () => specReply(GOOD);
+    const r2 = (await app2.inject({ method: 'POST', url: '/api/ai/generate', headers: bearer(fan.token), payload: { prompt: 'after the deploy' } })).json();
+    assert.equal(r2.needsChoice, true, 'the day\'s spent budget is read back after a restart');
+    assert.equal(r2.reason, 'busy');
+    assert.equal(calls.length, 0, 'and no model is called');
+    const st6 = await events.stats(30);
+    assert.equal(st6.modeOutcomes.std.limited, 1, 'a budget refusal is our limit, not the model failing');
+    await app2.close();
+
+    // ---- a read-back that fails is tried again, and never holds a request up ----
+    forgetBudgetMemoryForTests();
+    let loads = 0;
+    const flaky = {
+      load: (_day: string) => (++loads === 1 ? new Promise<{ calls: number; pictures: number }>(() => {}) : Promise.resolve({ calls: 1_000_000, pictures: 0 })),
+      add: async () => {},
+    };
+    const app4 = await buildApp(designs, auth, templates, {
+      social: new MemorySocialRepository(designs, auth), aiUsage: new MemoryAiUsageRepository(), aiEvents: events, aiBudget: flaky,
+    });
+    respond = () => specReply(GOOD);
+    const t0 = Date.now();
+    const h1 = (await app4.inject({ method: 'POST', url: '/api/ai/generate', headers: bearer(fan.token), payload: { prompt: 'store hangs' } })).json();
+    assert.equal(h1.source, 'model', 'a store that does not answer does not stop the design');
+    assert.ok(Date.now() - t0 < 6000, `and the wait for it is bounded: ${Date.now() - t0} ms`);
+    const realNow = Date.now;
+    Date.now = () => realNow() + 61_000;
+    try {
+      const h2 = (await app4.inject({ method: 'POST', url: '/api/ai/generate', headers: bearer(fan.token), payload: { prompt: 'store is back' } })).json();
+      assert.equal(loads, 2, 'the read-back is tried again a minute later');
+      assert.equal(h2.needsChoice, true, 'and the stored count it finds applies the same day');
+    } finally {
+      Date.now = realNow;
+    }
+    await app4.close();
+
+    // ---- the site-wide picture budget ----
+    forgetBudgetMemoryForTests();
+    process.env.AI_DAILY_PICTURE_BUDGET = '1';
+    const app3 = await buildApp(designs, auth, templates, {
+      social: new MemorySocialRepository(designs, auth), aiUsage: new MemoryAiUsageRepository(), aiEvents: events, aiBudget: new MemoryAiBudgetRepository(),
+    });
+    respond = (_u, b) => (isCopywriter(b) ? specReply(COPY) : specReply(withPicture(2)));
+    const pr = (await app3.inject({ method: 'POST', url: '/api/ai/generate', headers: bearer(fan.token), payload: { prompt: 'two pictures please', mode: 'super' } })).json();
+    assert.equal(pr.outcome.kind, 'degraded', JSON.stringify(pr.outcome));
+    assert.deepEqual([pr.outcome.missingCount, pr.outcome.of], [1, 2], 'the second picture was not asked for');
+    assert.equal(pr.outcome.charged, false, 'and the incomplete design is not charged');
+    assert.equal(picturesToday(), 1);
+    await app3.close();
+    await app.close();
+  } finally {
+    globalThis.fetch = realFetch;
+    for (const k of KEYS) {
+      const v = saved[k];
+      if (v === undefined) delete process.env[k]; else process.env[k] = v;
+    }
+    forgetBudgetMemoryForTests();
+  }
+  console.log('ai phase 0 (17 October): all assertions passed (retired id pinned, key in a header, no temperature, fallback on 503/429/timeout/404 and not on a refused key (401 or Google’s 400), old rules with the fallback off, usage + cost + model + latency on file, Polish successes recorded and not counted as designs, failed requests measured, budget survives a restart and a failed read-back is retried, site-wide picture budget, the first model’s reason when both fail, unknown prices never read as $0, our own limits apart from failures)');
+}

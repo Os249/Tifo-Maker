@@ -15,6 +15,7 @@ import type {
   NewDesign,
   AiEventInput,
   AiEventsRepository,
+  AiBudgetRepository,
   AiFailReason,
   AiFailureRow,
   AiMode,
@@ -31,6 +32,7 @@ import type {
   FunnelStep,
 } from './repo';
 import { aiPeriod, REVISIONS_KEPT } from './repo';
+import { costStats, DESIGN_MODES, isLimitReason, modeOutcomes, type AiGroup } from './aiStats';
 import { designFacets, paletteColours } from '../../src/core/facets';
 
 interface Row extends DesignRecord {
@@ -77,11 +79,28 @@ const zeroOutcomes = (): Record<AiOutcome, number> & { all: number } => ({
   model: 0, cache: 0, quick: 0, quota: 0, busy: 0, blocked: 0, invalid: 0, all: 0,
 });
 
+/** A delivered DESIGN: Polish and photo successes are requests, not designs. */
+const isDesign = (r: { mode: AiMode; outcome: AiOutcome }): boolean => r.outcome === 'model' && DESIGN_MODES.includes(r.mode);
+
+/** In-memory daily budget: dev mode and tests. Same contract as Postgres. */
+export class MemoryAiBudgetRepository implements AiBudgetRepository {
+  private days = new Map<string, { calls: number; pictures: number }>();
+  async load(day: string): Promise<{ calls: number; pictures: number }> {
+    return { ...(this.days.get(day) ?? { calls: 0, pictures: 0 }) };
+  }
+  async add(day: string, calls: number, pictures: number): Promise<void> {
+    const d = this.days.get(day) ?? { calls: 0, pictures: 0 };
+    this.days.set(day, { calls: d.calls + calls, pictures: d.pictures + pictures });
+  }
+}
+
 /** In-memory AI history. Same shape as Postgres, so the dashboard behaves in dev. */
 export class MemoryAiEventsRepository implements AiEventsRepository {
   private rows: {
     userId: string | null; at: number; mode: AiMode; outcome: AiOutcome;
     reason: AiFailReason | null; detail: string | null; via: 'password' | null;
+    model: string | null; latencyMs: number | null; calls: number | null; costMicros: number | null;
+    tokensIn: number; tokensOut: number; tokensThought: number; tokensCached: number; pictures: number;
   }[] = [];
   constructor(private readonly usernames: (id: string | null) => string = () => 'unknown') {}
 
@@ -89,6 +108,13 @@ export class MemoryAiEventsRepository implements AiEventsRepository {
     this.rows.push({
       userId: e.userId, mode: e.mode, outcome: e.outcome,
       reason: e.reason ?? null, detail: e.detail ? e.detail.slice(0, 400) : null, via: e.via ?? null,
+      model: e.model ? e.model.slice(0, 80) : null,
+      latencyMs: e.latencyMs ?? null,
+      // A row with calls is a MEASURED row; older rows and free outcomes have none.
+      calls: e.calls ?? null,
+      costMicros: e.costMicros ?? null,
+      tokensIn: e.tokensIn ?? 0, tokensOut: e.tokensOut ?? 0, tokensThought: e.tokensThought ?? 0, tokensCached: e.tokensCached ?? 0,
+      pictures: e.pictures ?? 0,
       at: Date.now(),
     });
     if (this.rows.length > 20000) this.rows.splice(0, this.rows.length - 20000);
@@ -99,7 +125,11 @@ export class MemoryAiEventsRepository implements AiEventsRepository {
     const win = this.rows.filter((r) => r.at > from);
     const fold = (rows: typeof this.rows) => {
       const out = zeroOutcomes();
-      for (const r of rows) { out[r.outcome]++; out.all++; }
+      for (const r of rows) {
+        // 'model' counts DESIGNS; a successful Polish or photo reading is in `all`.
+        if (r.outcome !== 'model' || isDesign(r)) out[r.outcome]++;
+        out.all++;
+      }
       return out;
     };
     const name = (id: string | null): string => (id ? this.usernames(id) : 'admin / unlocked');
@@ -108,7 +138,7 @@ export class MemoryAiEventsRepository implements AiEventsRepository {
     for (const r of win) {
       const day = new Date(r.at).toISOString().slice(0, 10);
       const d = byDay.get(day) ?? { model: 0, quick: 0, blocked: 0 };
-      if (r.outcome === 'model') d.model++;
+      if (isDesign(r)) d.model++;
       else if (r.outcome === 'quick') d.quick++;
       else if (r.outcome === 'blocked') d.blocked++;
       byDay.set(day, d);
@@ -118,7 +148,7 @@ export class MemoryAiEventsRepository implements AiEventsRepository {
     for (const r of win) {
       const k = name(r.userId);
       const u = byUser.get(k) ?? { model: 0, quick: 0, quota: 0, total: 0, last: 0 };
-      if (r.outcome === 'model') u.model++;
+      if (isDesign(r)) u.model++;
       if (r.outcome === 'quick') u.quick++;
       if (r.outcome === 'quota') u.quota++;
       u.total++;
@@ -145,6 +175,8 @@ export class MemoryAiEventsRepository implements AiEventsRepository {
       caps.set(k, c);
     }
 
+    const groups = this.groups(win);
+    const measuredFirst = this.rows.find((r) => r.calls !== null)?.at;
     return {
       days,
       since: this.rows.length ? new Date(Math.min(...this.rows.map((r) => r.at))).toISOString() : null,
@@ -180,7 +212,33 @@ export class MemoryAiEventsRepository implements AiEventsRepository {
           reason: r.reason as AiFailReason,
           detail: r.detail ?? '',
         })),
+      modeOutcomes: modeOutcomes(groups),
+      cost: costStats(groups, measuredFirst ? new Date(measuredFirst).toISOString() : null),
     };
+  }
+
+  /** The rows reduced to day × mode × outcome × model, as Postgres does in SQL. */
+  private groups(rows: typeof this.rows): AiGroup[] {
+    const out = new Map<string, AiGroup>();
+    for (const r of rows) {
+      const day = new Date(r.at).toISOString().slice(0, 10);
+      const key = `${day}|${r.mode}|${r.outcome}|${r.model ?? ''}`;
+      const g = out.get(key) ?? {
+        day, mode: r.mode, outcome: r.outcome, model: r.model, n: 0, limited: 0, measured: 0, unpriced: 0, costMicros: 0,
+        tokensIn: 0, tokensOut: 0, tokensThought: 0, tokensCached: 0, pictures: 0, latencySum: 0, latencyN: 0,
+      };
+      g.n++;
+      if (isLimitReason(r.reason)) g.limited++;
+      if (r.calls !== null) {
+        g.measured++;
+        if (r.costMicros === null) g.unpriced++; else g.costMicros += r.costMicros;
+        g.tokensIn += r.tokensIn; g.tokensOut += r.tokensOut; g.tokensThought += r.tokensThought; g.tokensCached += r.tokensCached;
+        g.pictures += r.pictures;
+        if (r.latencyMs !== null) { g.latencySum += r.latencyMs; g.latencyN++; }
+      }
+      out.set(key, g);
+    }
+    return [...out.values()];
   }
 }
 

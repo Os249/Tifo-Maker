@@ -3,8 +3,8 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import pg from 'pg';
 import { shippedTemplateInfo } from './templates';
-import { MemoryAiEventsRepository, MemoryAiUsageRepository, MemoryAuthRepository, MemoryDesignRepository, MemoryEventsRepository, MemoryLeadsRepository } from './memoryRepo';
-import { PgAiEventsRepository, PgAiUsageRepository, PgAuthRepository, PgDesignRepository, PgEventsRepository, PgLeadsRepository } from './pgRepo';
+import { MemoryAiBudgetRepository, MemoryAiEventsRepository, MemoryAiUsageRepository, MemoryAuthRepository, MemoryDesignRepository, MemoryEventsRepository, MemoryLeadsRepository } from './memoryRepo';
+import { PgAiBudgetRepository, PgAiEventsRepository, PgAiUsageRepository, PgAuthRepository, PgDesignRepository, PgEventsRepository, PgLeadsRepository } from './pgRepo';
 import { PgSocialRepository } from './pgSocial';
 import { MemorySocialRepository } from './memorySocial';
 import { MemoryStadiumRepository, PgStadiumRepository } from './stadiumRepo';
@@ -171,6 +171,7 @@ async function main(): Promise<void> {
       leads: new PgLeadsRepository(pool),
       aiUsage: new PgAiUsageRepository(pool),
       aiEvents: new PgAiEventsRepository(pool),
+      aiBudget: new PgAiBudgetRepository(pool),
       aiFreeLimit: envNum('AI_FREE_LIMIT', 10, 0), // premium designs per hour
       stadiums,
       stats: new PgAdminStatsRepository(pool),
@@ -206,6 +207,7 @@ async function main(): Promise<void> {
       leads: new MemoryLeadsRepository(),
       aiUsage: new MemoryAiUsageRepository(),
       aiEvents: new MemoryAiEventsRepository((id) => auth.usernameOf(id)),
+      aiBudget: new MemoryAiBudgetRepository(),
       aiFreeLimit: envNum('AI_FREE_LIMIT', 10, 0), // premium designs per hour
       stadiums: new MemoryStadiumRepository(),
       stats: new MemoryAdminStatsRepository(designs),

@@ -650,7 +650,8 @@ check('the image rule is no longer people-only', !PROMPTS[1][1].includes('image 
 const provSrc = readFileSync(new URL('../server/src/aiProvider.ts', import.meta.url), 'utf8');
 check('the retry is keyed on status, not an error string', /r\.status !== 503/.test(provSrc));
 check('429 is never retried', !/status === 429/.test(provSrc.split('async function callProvider')[0]));
-check('every provider branch reports its status', (provSrc.match(/status: res\.status/g) ?? []).length >= 3);
+// One refusal() for all three providers since 17 October; it carries the status.
+check('every provider branch reports its status', (provSrc.match(/if \(!res\.ok\) return refusal\(/g) ?? []).length >= 3 && /status: res\.status/.test(provSrc.split('async function refusal')[1] ?? ''));
 
 // ---- 31. a picture must not be clustered below what it can afford ----
 // Halftone averages BxB cells into one tone, so it DIVIDES tonal resolution by
