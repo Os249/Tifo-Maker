@@ -17,6 +17,7 @@ import { tmpdir } from 'node:os';
 import { readFile, unlink } from 'node:fs/promises';
 import type { AiBudgetRepository, AiEventsRepository, AiUsageRepository, AuthRepository, DesignRepository, EventsRepository, LeadsRepository, SocialRepository } from './repo';
 import { picturesStatus } from './imageAssets';
+import { textModelsStatus } from './aiProvider';
 import { imageHealth } from './imageHealth';
 import { registerAiRoutes, safeEqual, verifyUnlock } from './aiRoutes';
 import { stadiumPlan } from './stadiumPlan';
@@ -865,12 +866,12 @@ export async function buildApp(
     // history instead — the difference is the whole point of the section.
     app.get('/api/admin/ai', async (req, reply) => {
       if (!(await adminAccess(req))) return reply.code(403).send({ error: 'admin access required' });
-      if (!options.aiEvents) return { days: 0, since: null, unavailable: true, pictures: picturesStatus() };
+      if (!options.aiEvents) return { days: 0, since: null, unavailable: true, pictures: picturesStatus(), text: textModelsStatus() };
       const q = req.query as { days?: string };
       const days = Math.min(365, Math.max(1, Number(q.days) || 30));
       // Pictures are live state since the last restart, not history, so they
       // sit beside the stats rather than in ai_events.
-      return { ...(await options.aiEvents.stats(days)), pictures: picturesStatus() };
+      return { ...(await options.aiEvents.stats(days)), pictures: picturesStatus(), text: textModelsStatus() };
     });
 
     app.get('/api/admin/shares', async (req, reply) => {

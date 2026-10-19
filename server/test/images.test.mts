@@ -29,6 +29,7 @@ const MIN = 60_000;
 const ENV_KEYS = [
   'AI_IMAGE_PROVIDER', 'AI_IMAGE_FALLBACK', 'AI_POLLINATIONS_KEY', 'POLLINATIONS_KEY', 'GEMINI_API_KEY', 'GOOGLE_API_KEY',
   'AI_IMAGE_RETRY_MS', 'AI_IMAGE_BREAKER_MS', 'AI_IMAGE_TIMEOUT_MS', 'AI_PROVIDER', 'AI_ADMIN_PASSWORD', 'AI_RETRY_DELAY_MS', 'ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'AI_COPYWRITER',
+  'AI_CLOUDFLARE_ACCOUNT_ID', 'AI_CLOUDFLARE_API_TOKEN', 'AI_CLOUDFLARE_IMAGE_MODEL', 'AI_CLOUDFLARE_STEPS',
 ] as const;
 const savedEnv = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));
 function env(vals: Partial<Record<(typeof ENV_KEYS)[number], string>>): void {
@@ -39,8 +40,10 @@ function env(vals: Partial<Record<(typeof ENV_KEYS)[number], string>>): void {
 // ---------------------------------------------------------------------------
 // A fetch that plays both providers.
 type Answer = { status: number; body?: string } | 'image';
-const script: { pollinations: Answer[]; gemini: Answer[]; model: string[] } = { pollinations: [], gemini: [], model: [] };
-const calls = { pollinations: 0, gemini: 0, model: 0 };
+const script: { pollinations: Answer[]; gemini: Answer[]; cloudflare: Answer[]; model: string[] } = { pollinations: [], gemini: [], cloudflare: [], model: [] };
+const calls = { pollinations: 0, gemini: 0, cloudflare: 0, model: 0 };
+const cfSeen: Array<{ url: string; auth: string | null; body: { prompt?: string; steps?: number } }> = [];
+const JPEG_B64 = Buffer.from('ffd8ffe0' + '00'.repeat(300), 'hex').toString('base64');
 const PNG = Buffer.from('89504e470d0a1a0a' + '00'.repeat(200), 'hex');
 const realFetch = globalThis.fetch;
 globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -59,6 +62,13 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     }
     return new Response(a.body ?? '', { status: a.status });
   }
+  if (url.startsWith('https://api.cloudflare.com/client/v4/accounts/')) {
+    calls.cloudflare++;
+    cfSeen.push({ url, auth: new Headers(init?.headers as HeadersInit).get('authorization'), body: init?.body ? JSON.parse(String(init.body)) : {} });
+    const a = script.cloudflare.shift() ?? 'image';
+    if (a === 'image') return new Response(JSON.stringify({ result: { image: JPEG_B64 }, success: true, errors: [], messages: [] }), { status: 200 });
+    return new Response(a.body ?? '', { status: a.status });
+  }
   if (url.includes('generativelanguage.googleapis.com')) {
     calls.model++;
     const text = script.model.shift() ?? '{}';
@@ -66,7 +76,12 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   }
   return realFetch(input as RequestInfo, init);
 }) as typeof fetch;
-const resetCalls = (): void => { calls.pollinations = 0; calls.gemini = 0; calls.model = 0; script.pollinations = []; script.gemini = []; script.model = []; };
+const resetCalls = (): void => {
+  calls.pollinations = 0; calls.gemini = 0; calls.cloudflare = 0; calls.model = 0;
+  script.pollinations = []; script.gemini = []; script.cloudflare = []; script.model = []; cfSeen.length = 0;
+};
+const CF_ACCOUNT = '0123456789abcdef0123456789abcdef';
+const CF_DAILY = { status: 429, body: '{"result":null,"success":false,"errors":[{"code":3036,"message":"You have used up your daily free allocation of 10,000 neurons. Please upgrade to Cloudflare\'s Workers Paid plan if you would like to continue usage."}],"messages":[]}' };
 
 const NO_CREDIT = { status: 402, body: '{"success":false,"error":{"message":"Insufficient balance. This request costs ~0.0020 pollen, but your available balance is 0.0005. Top up at https://enter.pollinations.ai"}}' };
 const GEMINI_NO_BILLING = { status: 429, body: '{"error":{"code":429,"message":"You exceeded your current quota. Quota exceeded for metric: generate_content_free_tier_requests, limit: 0, model: gemini-2.5-flash-image","status":"RESOURCE_EXHAUSTED"}}' };
@@ -295,6 +310,138 @@ try {
   });
 
   // -------------------------------------------------------------------------
+  // 18 October 2026: Gemini's pictures have no free quota, and a backup that
+  // costs $30 up front to exist is no backup. Cloudflare Workers AI runs the
+  // same FLUX model free for about 170 pictures a day.
+  console.log('\n— Cloudflare, the free backup —');
+  await check('with Cloudflare set up it is the backup, ahead of a Gemini key', () => {
+    env({ AI_POLLINATIONS_KEY: 'pk', GEMINI_API_KEY: 'AIzaTEST', AI_CLOUDFLARE_ACCOUNT_ID: CF_ACCOUNT, AI_CLOUDFLARE_API_TOKEN: 'cf-token' });
+    assert.deepEqual(imageProviderChain(), ['pollinations', 'cloudflare']);
+    process.env.AI_IMAGE_FALLBACK = 'cloudflare,gemini';
+    assert.deepEqual(imageProviderChain(), ['pollinations', 'cloudflare', 'gemini'], 'a list is asked in order');
+    process.env.AI_IMAGE_FALLBACK = 'gemini';
+    assert.deepEqual(imageProviderChain(), ['pollinations', 'gemini'], 'and naming Gemini still works');
+  });
+  await check('a backup setting with no provider name in it ("on", a typo) means auto, not off', () => {
+    env({ AI_POLLINATIONS_KEY: 'pk', GEMINI_API_KEY: 'AIzaTEST', AI_IMAGE_FALLBACK: 'on' });
+    assert.deepEqual(imageProviderChain(), ['pollinations', 'gemini']);
+    env({ AI_POLLINATIONS_KEY: 'pk', GEMINI_API_KEY: 'AIzaTEST', AI_IMAGE_FALLBACK: 'cloudfare', AI_CLOUDFLARE_ACCOUNT_ID: CF_ACCOUNT, AI_CLOUDFLARE_API_TOKEN: 'cf-token' });
+    assert.deepEqual(imageProviderChain(), ['pollinations', 'cloudflare']);
+    assert.ok(configWarnings({ AI_IMAGE_FALLBACK: 'cloudfare' } as NodeJS.ProcessEnv).some((w) => w.key === 'AI_IMAGE_FALLBACK' && w.state === 'wrong'), 'and the boot report names the word');
+  });
+  await check('Cloudflare as the main provider: Pollinations behind it; without its keys, Pollinations makes every picture', () => {
+    env({ AI_POLLINATIONS_KEY: 'pk', AI_IMAGE_PROVIDER: 'cloudflare', AI_CLOUDFLARE_ACCOUNT_ID: CF_ACCOUNT, AI_CLOUDFLARE_API_TOKEN: 'cf-token' });
+    assert.deepEqual(imageProviderChain(), ['cloudflare', 'pollinations']);
+    env({ AI_POLLINATIONS_KEY: 'pk', AI_IMAGE_PROVIDER: 'cloudflare' });
+    assert.deepEqual(imageProviderChain(), ['pollinations']);
+    const prodCf = { NODE_ENV: 'production', AI_IMAGE_PROVIDER: 'cloudflare', AI_CLOUDFLARE_ACCOUNT_ID: CF_ACCOUNT, AI_CLOUDFLARE_API_TOKEN: 't' } as NodeJS.ProcessEnv;
+    assert.equal(configWarnings(prodCf).filter((w) => /AI_POLLINATIONS_KEY|AI_IMAGE_PROVIDER|CLOUDFLARE/.test(w.key)).length, 0, 'a working Cloudflare main needs no Pollinations warning');
+    assert.ok(configWarnings({ NODE_ENV: 'production', AI_IMAGE_PROVIDER: 'cloudflare', AI_POLLINATIONS_KEY: 'pk' } as NodeJS.ProcessEnv).some((w) => w.key === 'AI_IMAGE_PROVIDER' && /Pollinations/.test(w.effect)));
+  });
+  await check('half a Cloudflare setup, or a malformed account id, is not a backup', () => {
+    env({ AI_POLLINATIONS_KEY: 'pk', AI_CLOUDFLARE_API_TOKEN: 'cf-token' });
+    assert.deepEqual(imageProviderChain(), ['pollinations']);
+    env({ AI_POLLINATIONS_KEY: 'pk', AI_CLOUDFLARE_ACCOUNT_ID: '../../evil', AI_CLOUDFLARE_API_TOKEN: 'cf-token' });
+    assert.deepEqual(imageProviderChain(), ['pollinations']);
+  });
+  await check('Pollinations 402 → Cloudflare makes the picture, and Gemini is never asked', async () => {
+    env({ AI_POLLINATIONS_KEY: 'pk', GEMINI_API_KEY: 'AIzaTEST', AI_CLOUDFLARE_ACCOUNT_ID: CF_ACCOUNT, AI_CLOUDFLARE_API_TOKEN: 'cf-token' });
+    fresh();
+    script.pollinations = [NO_CREDIT];
+    const r = await generateImage('an eagle with spread wings, for: hilal', { aspect: 2.4, palette: ['#262a33', '#0033a0', '#ffffff'] });
+    assert.ok(r.url?.startsWith('data:image/jpeg;base64,'), String(r.error));
+    assert.equal(r.provider, 'cloudflare');
+    assert.equal(r.viaBackup, true);
+    assert.equal(r.model, '@cf/black-forest-labs/flux-1-schnell');
+    assert.equal(calls.gemini, 0, 'the paid backup is not touched');
+    const seen = cfSeen[0];
+    assert.equal(seen.url, `https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT}/ai/run/@cf/black-forest-labs/flux-1-schnell`);
+    assert.equal(seen.auth, 'Bearer cf-token');
+    assert.equal(seen.body.steps, 4);
+    assert.ok(seen.body.prompt!.startsWith('an eagle with spread wings') && seen.body.prompt!.length <= 2048, 'the subject first, inside the 2,048-character limit');
+    const { pictureCostMicros } = await import('../src/aiPricing');
+    assert.equal(pictureCostMicros('cloudflare', r.model), 634, 'priced (free inside the daily allowance)');
+    await imageHealth.settled();
+    const mail = mails.find((m) => /Pollinations is out of credit/.test(m.subject));
+    assert.ok(mail && /Cloudflare instead/.test(mail.text ?? ''), 'the email says Cloudflare is covering');
+  });
+  await check('a very long subject is cut to fit; the style is what gets shortened', async () => {
+    fresh();
+    script.pollinations = [NO_CREDIT];
+    await generateImage('x'.repeat(5000), { aspect: 1 });
+    assert.ok(cfSeen[0].body.prompt!.length <= 2048);
+    assert.ok(cfSeen[0].body.prompt!.startsWith('x'.repeat(600)));
+  });
+  await check('Cloudflare\'s daily allowance spent: "out of credit", paused, and the email says it comes back at 00:00 UTC', async () => {
+    fresh();
+    script.pollinations = [NO_CREDIT];
+    script.cloudflare = [CF_DAILY];
+    const r = await generateImage('a lion', { aspect: 1 });
+    assert.equal(r.url, null);
+    assert.equal(calls.cloudflare, 1, 'no retry: it will not pass in a second and a half');
+    assert.equal(classifyImageFailure(429, CF_DAILY.body), 'credit');
+    assert.equal(picturesStatus().providers.find((p) => p.provider === 'cloudflare')?.pausedFor, 'credit');
+    await imageHealth.settled();
+    assert.ok(mails.some((m) => /Cloudflare is out of credit/.test(m.subject) && /00:00 UTC/.test(m.text ?? '')));
+  });
+  await check('a wrong Cloudflare token is the key, not the prompt', () => {
+    assert.equal(classifyImageFailure(400, 'cloudflare: HTTP 400: {"success":false,"errors":[{"code":6003,"message":"Invalid request headers","error_chain":[{"code":6111,"message":"Invalid format for Authorization header"}]}]}'), 'auth');
+    assert.equal(classifyImageFailure(403, 'cloudflare: HTTP 403: {"success":false,"errors":[{"code":10000,"message":"Authentication error"}]}'), 'auth');
+  });
+  await check('a model that answers with the image bytes works too; a ".." model id is ignored', async () => {
+    fresh();
+    script.pollinations = [NO_CREDIT];
+    const real = globalThis.fetch;
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input instanceof Request ? input.url : input);
+      if (url.startsWith('https://api.cloudflare.com/')) { cfSeen.push({ url, auth: null, body: {} }); return new Response(PNG, { status: 200, headers: { 'content-type': 'image/png' } }); }
+      return real(input, init);
+    }) as typeof fetch;
+    process.env.AI_CLOUDFLARE_IMAGE_MODEL = '@cf/../..';
+    try {
+      const r = await generateImage('a lion', { aspect: 1 });
+      assert.ok(r.url?.startsWith('data:image/png;base64,'), String(r.error));
+      assert.ok(cfSeen[0].url.endsWith('/ai/run/@cf/black-forest-labs/flux-1-schnell'), cfSeen[0].url);
+    } finally {
+      globalThis.fetch = real;
+      delete process.env.AI_CLOUDFLARE_IMAGE_MODEL;
+    }
+  });
+  await check('with two backups that both fail, the email names both', async () => {
+    fresh();
+    process.env.AI_IMAGE_FALLBACK = 'cloudflare,gemini';
+    script.pollinations = [NO_CREDIT];
+    script.cloudflare = [CF_DAILY];
+    script.gemini = [GEMINI_NO_BILLING];
+    const r = await generateImage('a lion', { aspect: 1 });
+    assert.equal(r.url, null);
+    assert.deepEqual([calls.pollinations, calls.cloudflare, calls.gemini], [1, 1, 1]);
+    await imageHealth.settled();
+    assert.ok(mails.some((m) => /The backups, Cloudflare and Gemini, did not produce/.test(m.text ?? '')), mails.map((m) => m.text).join('\n---\n').slice(0, 600));
+    delete process.env.AI_IMAGE_FALLBACK;
+  });
+  await check('an answer with no image is a refusal, not an outage', async () => {
+    fresh();
+    script.pollinations = [NO_CREDIT];
+    script.cloudflare = [{ status: 200, body: '{"result":null,"success":false,"errors":[{"code":5004,"message":"bad input"}]}' }];
+    const r = await generateImage('a lion', { aspect: 1 });
+    assert.equal(r.url, null);
+    assert.match(r.error ?? '', /cloudflare returned no image: bad input/);
+    assert.equal(picturesStatus().providers.find((p) => p.provider === 'cloudflare')?.pausedFor, null, 'not paused for it');
+  });
+  await check('the dashboard lists Cloudflare as a backup', () => {
+    const p = picturesStatus();
+    assert.deepEqual(p.backups, ['cloudflare']);
+    assert.equal(p.providers.find((x) => x.provider === 'cloudflare')?.role, 'backup');
+  });
+  await check('boot warnings: Gemini as the only backup says it has no free quota; half a Cloudflare setup is named', () => {
+    const prod = { NODE_ENV: 'production', AI_POLLINATIONS_KEY: 'pk', GEMINI_API_KEY: 'AIza' } as NodeJS.ProcessEnv;
+    assert.ok(configWarnings(prod).some((w) => w.key === 'AI_CLOUDFLARE_API_TOKEN' && /no free quota/.test(w.effect)));
+    assert.equal(configWarnings({ ...prod, AI_CLOUDFLARE_ACCOUNT_ID: CF_ACCOUNT, AI_CLOUDFLARE_API_TOKEN: 't' }).filter((w) => /CLOUDFLARE/.test(w.key)).length, 0);
+    assert.ok(configWarnings({ ...prod, AI_CLOUDFLARE_API_TOKEN: 't' }).some((w) => w.key === 'AI_CLOUDFLARE_ACCOUNT_ID' && w.state === 'wrong'));
+  });
+
+  // -------------------------------------------------------------------------
   console.log('\n— a real Super AI generation through the route —');
   env({
     AI_POLLINATIONS_KEY: 'pk', GEMINI_API_KEY: 'AIzaSyTESTKEY0000000000', AI_PROVIDER: 'gemini',
@@ -375,10 +522,28 @@ try {
     assert.equal(j.pictures!.providers.find((p) => p.provider === 'gemini')?.pausedFor, 'credit');
     assert.ok(j.failures?.some((f) => f.reason === 'picture_failed'), 'the lost picture is also on file as before');
     assert.ok(!/AIzaSyTESTKEY0000000000|Bearer pk/.test(r.body), 'no key in the admin reply');
+    const t = (r.json() as { text?: { main: string; backup: string | null; models: { fast: string; premium: string } } }).text;
+    assert.equal(t?.main, 'gemini', 'and which text models answer');
+    assert.equal(t?.backup, null);
   });
   await check('and an ordinary account cannot read it', async () => {
     const r = await app.inject({ method: 'GET', url: '/api/admin/ai', headers: { authorization: `Bearer ${token}` } });
     assert.equal(r.statusCode, 403);
+  });
+  await check('with Cloudflare set up, a Super design whose Pollinations is out of credit arrives with a free picture', async () => {
+    process.env.AI_CLOUDFLARE_ACCOUNT_ID = CF_ACCOUNT;
+    process.env.AI_CLOUDFLARE_API_TOKEN = 'cf-token';
+    imageHealth.reset(clock);
+    resetCalls();
+    script.pollinations = [NO_CREDIT, NO_CREDIT, NO_CREDIT, NO_CREDIT];
+    const { body, raw } = await superGen('farewell to our striker, red and black');
+    const refs = imageRefs(body);
+    assert.ok(refs.length >= 1 && refs.every((u) => typeof u === 'string' && u.startsWith('data:image/jpeg;base64,')), raw.slice(0, 300));
+    assert.equal(calls.gemini, 0, 'Gemini is not asked for pictures');
+    assert.ok(!/cloudflare|neurons/i.test(raw), 'vendor-free reply');
+    const j = (await app.inject({ method: 'GET', url: '/api/admin/ai?days=30', headers: { 'x-ai-unlock': unlock } })).json() as { pictures: ReturnType<typeof picturesStatus> };
+    assert.deepEqual(j.pictures.backups, ['cloudflare']);
+    assert.ok(!/cf-token/.test(JSON.stringify(j)), 'no token in the admin reply');
   });
   await app.close();
 
@@ -388,6 +553,7 @@ try {
     new Function(ADMIN_JS.replace(/^\s*import .*$/gm, ''));
     assert.match(ADMIN_JS, /function picturesSection\(p\)/);
     assert.match(ADMIN_JS, /picturesSection\(a\.pictures\)/);
+    assert.match(ADMIN_JS, /textModelsSection\(a\.text\)/);
   });
 
   console.log(`\nimages: ${passed} checks passed`);

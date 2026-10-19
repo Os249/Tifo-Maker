@@ -127,8 +127,17 @@ export function configWarnings(env: NodeJS.ProcessEnv): ConfigWarning[] {
   const geminiKey = env.GEMINI_API_KEY || env.GOOGLE_API_KEY;
   const pollKey = env.AI_POLLINATIONS_KEY || env.POLLINATIONS_KEY;
   const noBackup = /^(none|off|false)$/i.test((env.AI_IMAGE_FALLBACK ?? '').trim());
+  const cfReady = /^[a-f0-9]{32}$/i.test(env.AI_CLOUDFLARE_ACCOUNT_ID?.trim() ?? '') && !!env.AI_CLOUDFLARE_API_TOKEN?.trim();
   if (img === 'none') {
     out.push({ key: 'AI_IMAGE_PROVIDER', effect: 'set to "none": every AI design with a portrait will ship with the face missing.' });
+  } else if (img === 'cloudflare' && !cfReady) {
+    out.push({
+      key: 'AI_IMAGE_PROVIDER',
+      effect: pollKey && !noBackup
+        ? 'set to "cloudflare" without a working AI_CLOUDFLARE_ACCOUNT_ID and AI_CLOUDFLARE_API_TOKEN, so every picture comes from the backup, Pollinations.'
+        : 'set to "cloudflare" without a working AI_CLOUDFLARE_ACCOUNT_ID and AI_CLOUDFLARE_API_TOKEN, which means no pictures: every AI design with a portrait ships with the face missing.',
+      state: 'wrong',
+    });
   } else if (img === 'gemini' && !geminiKey) {
     out.push({
       key: 'AI_IMAGE_PROVIDER',
@@ -136,7 +145,7 @@ export function configWarnings(env: NodeJS.ProcessEnv): ConfigWarning[] {
         ? 'set to "gemini" with no GEMINI_API_KEY or GOOGLE_API_KEY, so every picture comes from the backup, Pollinations.'
         : 'set to "gemini" with no GEMINI_API_KEY or GOOGLE_API_KEY, which silently means "none" — every AI design with a portrait ships with the face missing.',
     });
-  } else if (prod && img !== 'gemini' && !pollKey) {
+  } else if (prod && img !== 'gemini' && img !== 'cloudflare' && !pollKey) {
     // Pollinations is the main picture provider and refuses every request
     // without a key. Said only in production: a dev box without one is normal.
     out.push({
@@ -147,6 +156,36 @@ export function configWarnings(env: NodeJS.ProcessEnv): ConfigWarning[] {
     });
   }
 
+  // The picture backup. Gemini's image models have no free quota, so on a
+  // project without billing a Gemini backup only fails, pauses and emails.
+  // Cloudflare Workers AI is free for about 170 pictures a day.
+  const cloudflare = cfReady;
+  const fb = (env.AI_IMAGE_FALLBACK ?? '').trim().toLowerCase();
+  const unknownFb = fb.split(/[\s,]+/).filter((w) => w && !['auto', 'none', 'off', 'false', 'pollinations', 'cloudflare', 'gemini'].includes(w));
+  if (unknownFb.length) {
+    out.push({
+      key: 'AI_IMAGE_FALLBACK',
+      effect: `has "${unknownFb.join(', ').slice(0, 60)}", which is not a picture provider; ${fb.split(/[\s,]+/).some((w) => ['pollinations', 'cloudflare', 'gemini'].includes(w)) ? 'it is ignored' : 'the backup is chosen automatically'}. The values are auto, none, or provider names (cloudflare, gemini, pollinations), comma-separated.`,
+      state: 'wrong',
+    });
+  }
+  if (img !== 'cloudflare' && (env.AI_CLOUDFLARE_ACCOUNT_ID?.trim() || env.AI_CLOUDFLARE_API_TOKEN?.trim()) && !cloudflare) {
+    out.push({
+      key: env.AI_CLOUDFLARE_API_TOKEN?.trim() ? 'AI_CLOUDFLARE_ACCOUNT_ID' : 'AI_CLOUDFLARE_API_TOKEN',
+      effect: env.AI_CLOUDFLARE_API_TOKEN?.trim()
+        ? 'is missing or is not a 32-character account id, so the free Cloudflare picture backup is off. Copy the Account ID from the Cloudflare dashboard (Workers AI page).'
+        : 'is missing while AI_CLOUDFLARE_ACCOUNT_ID is set, so the free Cloudflare picture backup is off. Create a token with the "Workers AI" permission.',
+      state: 'wrong',
+    });
+  } else if (prod && (img === '' || img === 'pollinations') && !noBackup && !cloudflare && pollKey) {
+    out.push({
+      key: 'AI_CLOUDFLARE_API_TOKEN',
+      effect: geminiKey
+        ? 'not set, so the picture backup is Gemini, which has no free quota: without billing on the Google project it cannot make a single picture. Set AI_CLOUDFLARE_ACCOUNT_ID and AI_CLOUDFLARE_API_TOKEN for a free backup (about 170 pictures a day).'
+        : 'not set, so pictures have no backup: when Pollinations fails, AI designs arrive without their picture. Set AI_CLOUDFLARE_ACCOUNT_ID and AI_CLOUDFLARE_API_TOKEN for a free backup (about 170 pictures a day).',
+    });
+  }
+
   // A model id Google has retired. The server already asks for the current
   // model instead (currentModelId in aiProvider), but the variable should say
   // what is really answering, or the next person to read it is misled.
@@ -154,6 +193,31 @@ export function configWarnings(env: NodeJS.ProcessEnv): ConfigWarning[] {
     const v = env[k]?.trim();
     const now = v ? RETIRED_TEXT_MODELS[v] : undefined;
     if (now) out.push({ key: k, effect: `set to "${v}", which Google has retired; the server asks for "${now}" instead. Change the variable to ${now}.`, state: 'wrong' });
+  }
+
+  // Claude first, Gemini behind it (aiProvider). Claude with nothing behind it
+  // turns every Claude outage, and the day the month's API credit runs out,
+  // into "premium is busy" for everyone.
+  const forcedAi = (env.AI_PROVIDER ?? '').trim().toLowerCase();
+  const claudeMain = !!env.ANTHROPIC_API_KEY?.trim() && (forcedAi === '' || forcedAi === 'anthropic');
+  const noTextBackup = /^(none|off|false|0)$/i.test((env.AI_PROVIDER_FALLBACK ?? '').trim());
+  if (prod && claudeMain && !geminiKey && !noTextBackup) {
+    out.push({
+      key: 'GEMINI_API_KEY',
+      effect: 'Claude is the AI designer with no backup: when it is busy, or the month\'s API credit is spent, premium designs end "busy". Set GEMINI_API_KEY (Google\'s free tier is enough) and Gemini takes over by itself.',
+    });
+  }
+  for (const k of ['AI_CLAUDE_MODEL_FAST', 'AI_CLAUDE_MODEL_PREMIUM'] as const) {
+    const v = env[k]?.trim();
+    if (v && !/^claude-/i.test(v)) {
+      out.push({ key: k, effect: `set to "${v}", which is not a Claude model id. Claude refuses every call for it, so ${geminiKey ? 'Gemini answers all of them instead' : 'every AI design on that tier fails'}.`, state: 'wrong' });
+    }
+  }
+  for (const k of ['AI_CLAUDE_EFFORT_FAST', 'AI_CLAUDE_EFFORT_PREMIUM'] as const) {
+    const v = env[k]?.trim().toLowerCase();
+    if (v && !['low', 'medium', 'high', 'xhigh', 'max'].includes(v)) {
+      out.push({ key: k, effect: `set to "${env[k]}", which is not an effort level, so the default is used. The levels are low, medium, high, xhigh and max.`, state: 'wrong' });
+    }
   }
 
   return out;

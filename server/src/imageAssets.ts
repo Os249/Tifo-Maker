@@ -2,12 +2,14 @@
  * Server-side image generation for the AI Tifo Designer (Phase 5).
  *
  * Provider-agnostic. Defaults to Pollinations.ai (FLUX, cheap, paid from a pollen
- * balance with AI_POLLINATIONS_KEY). Gemini's image model (higher quality, more
- * per picture) is the main one with AI_IMAGE_PROVIDER=gemini, and the backup by
- * default whenever GEMINI_API_KEY is set.
+ * balance with AI_POLLINATIONS_KEY). The backup is Cloudflare Workers AI when
+ * its account id and token are set: the same FLUX.1 [schnell] model, free for
+ * about 170 pictures a day. Gemini's image model (higher quality, more per
+ * picture, and no free quota at all) is the backup only when Cloudflare is not
+ * set up, and the main one with AI_IMAGE_PROVIDER=gemini.
  *
  * Robust + best-effort: one retry on transient 429/503, then the BACKUP provider
- * (the other one, when it has a key; AI_IMAGE_FALLBACK=none turns that off). A
+ * (AI_IMAGE_FALLBACK names it, or a list; "none" turns it off). A
  * provider that is out of credit or has its key refused is paused for a few
  * minutes so every picture does not pay a doomed round trip first, and the
  * operator is emailed (imageHealth.ts). When nothing produces a picture, the
@@ -25,7 +27,7 @@
 import { envNum } from './env';
 import { classifyImageFailure, imageHealth, type ImageFailureKind, type PictureProvider } from './imageHealth';
 
-export type ImageProvider = 'pollinations' | 'gemini' | 'none';
+export type ImageProvider = 'pollinations' | 'cloudflare' | 'gemini' | 'none';
 
 /**
  * What the picture has to fit into. Before this existed the generator was told
@@ -59,7 +61,22 @@ export interface ImageResult {
 
 /** The model each picture provider is asked for. */
 export function pictureModel(p: PictureProvider): string {
-  return p === 'gemini' ? process.env.AI_IMAGE_MODEL ?? 'gemini-2.5-flash-image' : process.env.AI_POLLINATIONS_MODEL || 'flux';
+  if (p === 'gemini') return process.env.AI_IMAGE_MODEL ?? 'gemini-2.5-flash-image';
+  if (p === 'cloudflare') return cloudflareModel();
+  return process.env.AI_POLLINATIONS_MODEL || 'flux';
+}
+
+/**
+ * The Workers AI model. FLUX.1 [schnell] by default: the model Pollinations'
+ * "flux" runs, so a picture from the backup looks like one from the main
+ * provider, and at about 58 neurons a picture the free 10,000 a day go a long
+ * way. Anything that is not a plain @cf/ id is ignored, since it lands in the
+ * request path.
+ */
+const CLOUDFLARE_DEFAULT_MODEL = '@cf/black-forest-labs/flux-1-schnell';
+function cloudflareModel(): string {
+  const v = process.env.AI_CLOUDFLARE_IMAGE_MODEL?.trim();
+  return v && /^@cf\/[\w-][\w.-]*\/[\w-][\w.-]*$/.test(v) ? v : CLOUDFLARE_DEFAULT_MODEL;
 }
 
 // ---- describing the target to a diffusion model ----
@@ -234,38 +251,64 @@ function pollinationsKey(): string | undefined {
   return process.env.AI_POLLINATIONS_KEY || process.env.POLLINATIONS_KEY || undefined;
 }
 
-/** Pollinations by default (needs AI_POLLINATIONS_KEY). Gemini only if forced + keyed. */
+/** Cloudflare needs both the account id (32 hex characters) and an API token. */
+function cloudflareCreds(): { account: string; token: string } | null {
+  const account = process.env.AI_CLOUDFLARE_ACCOUNT_ID?.trim() ?? '';
+  const token = process.env.AI_CLOUDFLARE_API_TOKEN?.trim() ?? '';
+  return /^[a-f0-9]{32}$/i.test(account) && token ? { account, token } : null;
+}
+
+const keyed = (p: PictureProvider): boolean =>
+  p === 'gemini' ? !!geminiKey() : p === 'cloudflare' ? !!cloudflareCreds() : !!pollinationsKey();
+
+/** Pollinations by default (needs AI_POLLINATIONS_KEY). Gemini or Cloudflare only if forced + keyed. */
 export function activeImageProvider(): ImageProvider {
   const forced = (process.env.AI_IMAGE_PROVIDER ?? '').toLowerCase();
   if (forced === 'none') return 'none';
   if (forced === 'gemini') return geminiKey() ? 'gemini' : 'none';
+  if (forced === 'cloudflare') return cloudflareCreds() ? 'cloudflare' : 'none';
   return 'pollinations';
 }
 
 /**
- * The provider tried when the main one cannot deliver.
+ * The providers tried, in order, when the main one cannot deliver.
  *
  * AI_IMAGE_FALLBACK:
- *   unset / auto   the other provider, if its key is set
- *   gemini | pollinations   that one, if its key is set (and it is not the main)
+ *   unset / auto   Cloudflare when it is set up (free), otherwise the other
+ *                  keyed provider (Gemini behind Pollinations, as before)
+ *   a name or a comma list (cloudflare,gemini)   those, in that order, each
+ *                  only if its key is set and it is not the main
  *   none           no backup
  *
  * On by default because the alternative is worse: on 28 Sep 2026 the
  * Pollinations credit ran out and every Super AI design shipped with a bare
  * stand while a working Gemini key sat unused in the same environment. Gemini
- * pictures cost more, so the backup only runs when the main provider fails,
- * and the operator is emailed when it starts doing so.
+ * has no free picture quota, so "auto" no longer reaches for it once a free
+ * backup exists: a project without billing would only fail, pause and email.
  */
-export function fallbackImageProvider(): PictureProvider | null {
+const PICTURE_PROVIDERS: PictureProvider[] = ['pollinations', 'cloudflare', 'gemini'];
+
+export function fallbackImageProviders(): PictureProvider[] {
   // "none" means no pictures at all, not "no main provider".
-  if ((process.env.AI_IMAGE_PROVIDER ?? '').trim().toLowerCase() === 'none') return null;
+  if ((process.env.AI_IMAGE_PROVIDER ?? '').trim().toLowerCase() === 'none') return [];
   const main = activeImageProvider();
   const pref = (process.env.AI_IMAGE_FALLBACK ?? 'auto').trim().toLowerCase();
-  if (pref === 'none' || pref === 'off' || pref === 'false') return null;
-  const keyed = (p: PictureProvider): boolean => (p === 'gemini' ? !!geminiKey() : !!pollinationsKey());
-  const pick = (p: PictureProvider): PictureProvider | null => (p !== main && keyed(p) ? p : null);
-  if (pref === 'gemini' || pref === 'pollinations') return pick(pref);
-  return pick(main === 'gemini' ? 'pollinations' : 'gemini');
+  if (pref === 'none' || pref === 'off' || pref === 'false') return [];
+  const usable = (p: PictureProvider): boolean => p !== main && keyed(p);
+  // Names it knows, in the order given. A value with none ("on", "yes", a
+  // typo) is read as "auto": a misspelt setting must not quietly switch off
+  // the backup (the boot report names the unknown word).
+  const named = pref.split(/[\s,]+/).filter((p): p is PictureProvider => (PICTURE_PROVIDERS as string[]).includes(p));
+  if (named.length) return [...new Set(named)].filter(usable);
+  // auto: the cheapest provider that can answer. Cloudflare is free; Gemini,
+  // with no free picture quota, comes last.
+  const first = (['cloudflare', 'pollinations', 'gemini'] as PictureProvider[]).find(usable);
+  return first ? [first] : [];
+}
+
+/** The first backup, or null. */
+export function fallbackImageProvider(): PictureProvider | null {
+  return fallbackImageProviders()[0] ?? null;
 }
 
 /**
@@ -274,10 +317,9 @@ export function fallbackImageProvider(): PictureProvider | null {
  */
 export function imageProviderChain(): PictureProvider[] {
   const main = activeImageProvider();
-  const backup = fallbackImageProvider();
   const chain: PictureProvider[] = [];
   if (main !== 'none') chain.push(main);
-  if (backup && !chain.includes(backup)) chain.push(backup);
+  for (const b of fallbackImageProviders()) if (!chain.includes(b)) chain.push(b);
   return chain;
 }
 
@@ -288,7 +330,7 @@ export function imageGenAvailable(): boolean {
 /** What /admin → AI → Pictures shows. */
 export function picturesStatus(): ReturnType<typeof imageHealth.snapshot> {
   const main = activeImageProvider();
-  return imageHealth.snapshot(main === 'none' ? null : main, fallbackImageProvider());
+  return imageHealth.snapshot(main === 'none' ? null : main, fallbackImageProviders());
 }
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
@@ -383,6 +425,60 @@ async function callGemini(prompt: string, timeoutMs: number, style: ImageStyle, 
 }
 
 /**
+ * Cloudflare Workers AI, FLUX.1 [schnell]. Free up to 10,000 neurons a day on
+ * any Cloudflare account (about 170 of these pictures); past that it answers
+ * 429 "used up your daily free allocation" until 00:00 UTC, which the health
+ * tracker reads as "out of credit" and pauses. JSON in, base64 JPEG out.
+ *
+ * The model takes no width or height: it always draws a square. The prompt
+ * still carries the region's shape (mosaicStyle), and the client fits the
+ * picture to the stand. The prompt is capped at 2,048 characters; the
+ * subject is kept whole and the style suffix is what gets shortened.
+ */
+async function callCloudflare(prompt: string, timeoutMs: number, style: ImageStyle): Promise<Attempt> {
+  const creds = cloudflareCreds();
+  if (!creds) return { url: null, error: 'cloudflare needs AI_CLOUDFLARE_ACCOUNT_ID and AI_CLOUDFLARE_API_TOKEN' };
+  const model = cloudflareModel();
+  const text = (prompt.slice(0, 600) + mosaicStyle(style)).slice(0, 2048);
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const res = await fetch(`https://api.cloudflare.com/client/v4/accounts/${creds.account}/ai/run/${model}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${creds.token}` },
+      body: JSON.stringify({ prompt: text, steps: envNum('AI_CLOUDFLARE_STEPS', 4, 1, 8) }),
+      signal: ctrl.signal,
+    });
+    // Some Workers AI image models answer with the picture's bytes rather
+    // than JSON; take either.
+    const type = res.headers.get('content-type') ?? '';
+    if (res.ok && /^image\//i.test(type)) {
+      const ab = await res.arrayBuffer();
+      if (ab.byteLength < 128) return { url: null, error: 'cloudflare returned an empty image' };
+      return { url: `data:${type.split(';')[0]};base64,${Buffer.from(ab).toString('base64')}` };
+    }
+    const raw = await res.text().catch(() => '');
+    if (!res.ok) {
+      const body = raw.slice(0, 160).replace(/\s+/g, ' ').trim();
+      return { url: null, status: res.status, error: `cloudflare: HTTP ${res.status}${body ? `: ${body}` : ''}` };
+    }
+    let data: { result?: { image?: string }; image?: string; success?: boolean; errors?: Array<{ message?: string }> } = {};
+    try { data = JSON.parse(raw); } catch { /* not JSON */ }
+    const image = data.result?.image ?? data.image;
+    if (data.success === false || !image) {
+      const why = data.errors?.map((e) => e?.message).filter(Boolean).join('; ');
+      return { url: null, error: `cloudflare returned no image${why ? `: ${why.slice(0, 160)}` : ''}` };
+    }
+    if (image.length < 128) return { url: null, error: 'cloudflare returned an empty image' };
+    return { url: `data:image/jpeg;base64,${image}` };
+  } catch (e) {
+    return { url: null, error: `cloudflare: ${(e as Error)?.name === 'AbortError' ? 'request timed out' : 'network error'}` };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
  * Generate one image: the main provider, then the backup.
  *
  * Each provider gets one retry on a busy answer (429/503) that is not a credit
@@ -396,7 +492,7 @@ export async function generateImage(prompt: string, style: ImageStyle = {}): Pro
   if (chain.length === 0) {
     return { url: null, kind: 'other', error: (process.env.AI_IMAGE_PROVIDER ?? '').toLowerCase() === 'none'
       ? 'image generation disabled (AI_IMAGE_PROVIDER=none)'
-      : 'no image provider has a key (AI_POLLINATIONS_KEY or GEMINI_API_KEY)' };
+      : 'no image provider has a key (AI_POLLINATIONS_KEY, AI_CLOUDFLARE_API_TOKEN or GEMINI_API_KEY)' };
   }
   const timeoutMs = envNum('AI_IMAGE_TIMEOUT_MS', 45000, 1000);
   const breakerMs = envNum('AI_IMAGE_BREAKER_MS', 10 * 60_000, 0);
@@ -416,7 +512,7 @@ export async function generateImage(prompt: string, style: ImageStyle = {}): Pro
     // The backup gets what is left of the budget, but never less than 15 s:
     // a main provider that timed out must not leave the backup no time at all.
     const budget = i === 0 ? timeoutMs : Math.max(Math.min(15_000, timeoutMs), timeoutMs - (Date.now() - started));
-    const call = p === 'gemini' ? callGemini : callPollinations;
+    const call = p === 'gemini' ? callGemini : p === 'cloudflare' ? callCloudflare : callPollinations;
     let r = await call(prompt, budget, style);
     // A busy answer is worth one more try; a 429 that really means "no credit"
     // (Gemini without billing says limit: 0) will not pass in 1.5 s.
@@ -427,7 +523,7 @@ export async function generateImage(prompt: string, style: ImageStyle = {}): Pro
     if (r.url) {
       const viaBackup = p !== main;
       imageHealth.recordOk(p, viaBackup);
-      imageHealth.finish({ deliveredBy: p, main, backup, problems, breakerMs });
+      imageHealth.finish({ deliveredBy: p, main, backup, backups: chain.slice(1), problems, breakerMs });
       return { url: r.url, provider: p, viaBackup, model: pictureModel(p) };
     }
     lastKind = imageHealth.recordFailure(p, r.status, r.error, breakerMs);
@@ -436,6 +532,6 @@ export async function generateImage(prompt: string, style: ImageStyle = {}): Pro
     errors.push(detail);
   }
   const error = errors.join('; then ');
-  imageHealth.finish({ deliveredBy: null, main, backup, problems, breakerMs, lastError: error });
+  imageHealth.finish({ deliveredBy: null, main, backup, backups: chain.slice(1), problems, breakerMs, lastError: error });
   return { url: null, error, kind: lastKind };
 }

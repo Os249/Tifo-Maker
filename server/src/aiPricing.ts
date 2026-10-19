@@ -10,8 +10,14 @@
  *
  * LIST PRICE, paid tier. A project on Google's free tier pays nothing, so the
  * dashboard labels these as estimates. Thinking tokens are billed as output.
- * Sources (checked 17 Oct 2026): ai.google.dev/gemini-api/docs/pricing,
- * the Pollinations image registry (shared/registry/image.ts).
+ * Claude is billed the same way, and on this account it is paid from the Max
+ * plan's monthly API credit rather than in cash: the figure says how much of
+ * that credit a request used. Cloudflare pictures are free up to the daily
+ * Workers AI allowance; the figure is what one would cost beyond it.
+ * Sources (checked 17-18 Oct 2026): ai.google.dev/gemini-api/docs/pricing,
+ * platform.claude.com/docs/en/about-claude/pricing,
+ * developers.cloudflare.com/workers-ai/platform/pricing, the Pollinations image
+ * registry (shared/registry/image.ts).
  *
  * A model missing here costs `null`, not 0: an unknown price must read as
  * "unknown" in the dashboard rather than as free.
@@ -53,6 +59,15 @@ const TEXT: Array<[RegExp, (at: Date) => TextPrice]> = [
   [/^gemini-3\.1-flash-lite$/, () => ({ in: 0.25, out: 1.5, cached: 0.025 })],
   [/^gemini-3\.5-flash-lite$/, () => ({ in: 0.3, out: 2.5, cached: 0.03 })],
   [/^gemini-2\.5-flash$/, () => ({ in: 0.3, out: 2.5, cached: 0.03 })],
+  // Claude. Haiku 5.5 is priced by prompt length; every prompt here is far
+  // under its 100,000-token step, so the lower rate applies.
+  [/^claude-haiku-5-5(?:-\d{8})?$/, () => ({ in: 0.1, out: 0.5, cached: 0.01 })],
+  [/^claude-sonnet-5-5(?:-\d{8})?$/, () => ({ in: 2, out: 10, cached: 0.1 })],
+  [/^claude-opus-5-5(?:-\d{8})?$/, () => ({ in: 4, out: 20, cached: 0.2 })],
+  [/^claude-sonnet-5(?:-\d{8})?$/, () => ({ in: 2, out: 10, cached: 0.2 })],
+  [/^claude-opus-5(?:-\d{8})?$/, () => ({ in: 5, out: 25, cached: 0.5 })],
+  [/^claude-sonnet-4-6(?:-\d{8})?$/, () => ({ in: 3, out: 15, cached: 0.3 })],
+  [/^claude-haiku-4-5(?:-\d{8})?$/, () => ({ in: 1, out: 5, cached: 0.1 })],
 ];
 
 export function textPrice(model: string | undefined, at: Date = new Date()): TextPrice | null {
@@ -80,6 +95,9 @@ const PICTURES: Record<string, number> = {
   'gemini:gemini-2.5-flash-image': 0.039,
   'gemini:gemini-3.1-flash-lite-image': 0.0336,
   'gemini:gemini-3.1-flash-image': 0.067,
+  // 1024x1024 at 4 steps: 4 tiles x 4.8 + 4 steps x 9.6 = 57.6 neurons at
+  // $0.011 per 1,000. Free inside the daily 10,000-neuron allowance.
+  'cloudflare:@cf/black-forest-labs/flux-1-schnell': 0.000634,
 };
 
 export function pictureCostMicros(provider: string | undefined, model: string | undefined): number | null {

@@ -2935,3 +2935,328 @@ async function makeDesign(app: FastifyInstance, token: string, isPublic = false)
   }
   console.log('ai phase 0 (17 October): all assertions passed (retired id pinned, key in a header, no temperature, fallback on 503/429/timeout/404 and not on a refused key (401 or Google’s 400), old rules with the fallback off, usage + cost + model + latency on file, Polish successes recorded and not counted as designs, failed requests measured, budget survives a restart and a failed read-back is retried, site-wide picture budget, the first model’s reason when both fail, unknown prices never read as $0, our own limits apart from failures)');
 }
+
+// ---------- 2026-10-18: Claude first, Gemini behind it ----------
+// The Max plan carries $100 of Claude API credit a month, used or lost, so
+// Claude writes the designs and Gemini (free tier) takes over when Claude
+// cannot: busy, down, out of the month's credit, a refused key.
+{
+  const prov = await import('../src/aiProvider');
+  const pricing = await import('../src/aiPricing');
+  const { classifyAiFailure } = await import('../src/aiFailure');
+  const { configWarnings } = await import('../src/preflight');
+  const { MemoryAiUsageRepository, MemoryAiEventsRepository, MemoryAiBudgetRepository } = await import('../src/memoryRepo');
+  const { forgetBudgetMemoryForTests } = await import('../src/aiRoutes');
+  const KEYS = [
+    'GEMINI_API_KEY', 'GOOGLE_API_KEY', 'AI_PROVIDER', 'AI_MODEL', 'AI_MODEL_PREMIUM', 'AI_MODEL_FAST', 'AI_MODEL_FALLBACK',
+    'AI_MODEL_FALLBACK_PREMIUM', 'AI_MODEL_FALLBACK_FAST', 'AI_TIMEOUT_MS', 'AI_TIMEOUT_PREMIUM_MS', 'AI_TIMEOUT_RETRY', 'AI_RETRY_DELAY_MS',
+    'AI_POLLINATIONS_KEY', 'POLLINATIONS_KEY', 'AI_IMAGE_FALLBACK', 'AI_IMAGE_PROVIDER', 'AI_DAILY_PICTURE_BUDGET', 'AI_COPYWRITER',
+    'ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'AI_RESPONSE_SCHEMA', 'AI_CLAUDE_MODEL_FAST', 'AI_CLAUDE_MODEL_PREMIUM', 'AI_CLAUDE_EFFORT_FAST',
+    'AI_CLAUDE_EFFORT_PREMIUM', 'AI_CLAUDE_MAX_TOKENS', 'AI_PROVIDER_FALLBACK', 'AI_PROVIDER_COOLDOWN_MS', 'AI_CLOUDFLARE_ACCOUNT_ID', 'AI_CLOUDFLARE_API_TOKEN',
+  ] as const;
+  const saved = Object.fromEntries(KEYS.map((k) => [k, process.env[k]]));
+  for (const k of KEYS) delete process.env[k];
+  process.env.ANTHROPIC_API_KEY = 'sk-ant-api03-TESTKEY000000000000';
+  process.env.GEMINI_API_KEY = 'AIzaSyTESTKEY0000000000';
+  // What Railway may well hold from the Gemini days: Claude must not be asked for it.
+  process.env.AI_MODEL = 'gemini-3.6-flash';
+  process.env.AI_MODEL_PREMIUM = 'gemini-3.6-flash';
+  process.env.AI_MODEL_FAST = 'gemini-3.1-flash-lite';
+  process.env.AI_TIMEOUT_MS = '1500';
+  process.env.AI_TIMEOUT_PREMIUM_MS = '1500';
+  process.env.AI_RETRY_DELAY_MS = '100';
+  prov.resetProviderCooldownForTests();
+
+  // ---- who answers, with which model ----
+  assert.equal(prov.activeProvider(), 'anthropic', 'with both keys, Claude first');
+  assert.equal(prov.backupProvider(), 'gemini', 'and Gemini behind it');
+  assert.equal(prov.claudeModel('fast'), 'claude-haiku-5-5');
+  assert.equal(prov.claudeModel('premium'), 'claude-sonnet-5-5', 'a Gemini id in AI_MODEL is not sent to Claude');
+  process.env.AI_CLAUDE_MODEL_PREMIUM = 'claude-opus-5-5';
+  assert.equal(prov.claudeModel('premium'), 'claude-opus-5-5');
+  delete process.env.AI_CLAUDE_MODEL_PREMIUM;
+  assert.equal(prov.claudeEffort('premium'), 'low');
+  assert.equal(prov.claudeEffort('fast'), 'medium');
+  process.env.AI_CLAUDE_EFFORT_PREMIUM = 'hard';
+  assert.equal(prov.claudeEffort('premium'), 'low', 'an unknown effort falls back to the default');
+  delete process.env.AI_CLAUDE_EFFORT_PREMIUM;
+  assert.deepEqual(prov.claudeThinking('claude-haiku-5-5', 'fast', 'medium'), { type: 'disabled' });
+  assert.deepEqual(prov.claudeThinking('claude-sonnet-5-5', 'fast', 'medium'), { type: 'between_tools' });
+  assert.equal(prov.claudeThinking('claude-opus-5-5', 'fast', 'medium'), undefined, 'Opus cannot turn thinking off');
+  assert.equal(prov.claudeThinking('claude-haiku-5-5', 'fast', 'xhigh'), undefined);
+  assert.equal(prov.claudeThinking('claude-sonnet-5-5', 'premium', 'low'), undefined, 'premium thinks');
+  process.env.AI_PROVIDER_FALLBACK = 'none';
+  assert.equal(prov.backupProvider(), null);
+  delete process.env.AI_PROVIDER_FALLBACK;
+  process.env.AI_PROVIDER = 'gemini';
+  assert.equal(prov.backupProvider(), null, 'Gemini as main has its fallback model, nothing behind it');
+  delete process.env.AI_PROVIDER;
+  assert.equal(pricing.textCostMicros('claude-sonnet-5-5', { in: 1_000_000, out: 0, thought: 0, cached: 0 }), 2_000_000);
+  assert.equal(pricing.textCostMicros('claude-haiku-5-5', { in: 0, out: 1_000_000, thought: 0, cached: 0 }), 500_000);
+  assert.equal(pricing.textCostMicros('claude-opus-5-5', { in: 1000, out: 1000, thought: 0, cached: 0 }), 24_000);
+  const CREDIT = '{"type":"error","error":{"type":"invalid_request_error","message":"Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits."}}';
+  assert.equal(prov.isAccountProblem(400, CREDIT), true);
+  assert.equal(prov.isAccountProblem(401, 'invalid x-api-key'), true);
+  assert.equal(prov.isAccountProblem(529, 'Overloaded'), false);
+  assert.equal(prov.isAccountProblem(400, 'messages: field required'), false);
+  assert.equal(classifyAiFailure(`claude "claude-sonnet-5-5": HTTP 400: ${CREDIT}`, 400).reason, 'rate_limited', 'spent credit reads as a quota, and the user is told "resting"');
+
+  // ---- the boot report ----
+  const prodEnv = { NODE_ENV: 'production', ANTHROPIC_API_KEY: 'x' } as NodeJS.ProcessEnv;
+  assert.ok(configWarnings(prodEnv).some((w) => w.key === 'GEMINI_API_KEY' && /no backup/.test(w.effect)), 'Claude with nothing behind it is said out loud');
+  assert.equal(configWarnings({ ...prodEnv, GEMINI_API_KEY: 'g' }).filter((w) => w.key === 'GEMINI_API_KEY').length, 0);
+  assert.ok(configWarnings({ ...prodEnv, AI_CLAUDE_MODEL_PREMIUM: 'gemini-3.6-flash' }).some((w) => w.key === 'AI_CLAUDE_MODEL_PREMIUM' && w.state === 'wrong'));
+  assert.ok(configWarnings({ ...prodEnv, AI_CLAUDE_EFFORT_PREMIUM: 'hard' }).some((w) => w.key === 'AI_CLAUDE_EFFORT_PREMIUM' && w.state === 'wrong'));
+
+  // ---- a stubbed Claude and Gemini ----
+  const realFetch = globalThis.fetch;
+  type Body = Record<string, unknown> & { model?: string; output_config?: { effort?: string }; thinking?: unknown; max_tokens?: number; system?: unknown };
+  type Call = { who: 'claude' | 'gemini'; model: string; headers: Record<string, string>; body: Body };
+  const calls: Call[] = [];
+  const modelIn = (u: string): string => /models\/([^:]+):/.exec(u)?.[1] ?? '';
+  const USAGE = { input_tokens: 3000, output_tokens: 1400, cache_read_input_tokens: 0 };
+  const claudeReply = (spec: unknown, extra: Record<string, unknown> = {}) =>
+    new Response(JSON.stringify({ content: [{ type: 'thinking', thinking: 'about { braces }' }, { type: 'text', text: JSON.stringify(spec) }], stop_reason: 'end_turn', usage: USAGE, ...extra }), { status: 200 });
+  const geminiReply = (spec: unknown) =>
+    new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: JSON.stringify(spec) }] }, finishReason: 'STOP' }], usageMetadata: { promptTokenCount: 2000, candidatesTokenCount: 800 } }), { status: 200 });
+  const err = (status: number, body: string) => new Response(body, { status, headers: { 'content-type': 'application/json' } });
+  let onClaude: (b: Body) => Response | Promise<Response> = () => err(500, 'no plan');
+  let onGemini: (model: string) => Response = () => err(500, 'no plan');
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input instanceof Request ? input.url : input);
+    const headers = Object.fromEntries(new Headers(init?.headers as HeadersInit).entries());
+    const body = (init?.body ? JSON.parse(String(init.body)) : {}) as Body;
+    if (url === 'https://api.anthropic.com/v1/messages') {
+      calls.push({ who: 'claude', model: String(body.model), headers, body });
+      return onClaude(body);
+    }
+    if (url.includes('generativelanguage.googleapis.com')) {
+      calls.push({ who: 'gemini', model: modelIn(url), headers, body });
+      return onGemini(modelIn(url));
+    }
+    if (url.includes('pollinations')) return new Response(Buffer.alloc(400, 7), { status: 200, headers: { 'content-type': 'image/png' } });
+    return realFetch(input as RequestInfo, init);
+  }) as typeof fetch;
+  const GOOD = {
+    title: 'Zaeem', palette: ['#262a33', '#0033a0', '#ffffff', '#d4af37'],
+    layers: [{ kind: 'fill', region: 'all', colorIndex: 1 }, { kind: 'text', region: 'south', text: 'ZAEEM', colorIndex: 2, fontId: 'poster', heightFrac: 0.7 }],
+  };
+  const OVERLOADED = '{"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}';
+  const who = (): string[] => calls.map((c) => `${c.who}:${c.model}`);
+
+  try {
+    // 1. Claude answers: the request it gets, and what the result carries.
+    calls.length = 0;
+    onClaude = () => claudeReply(GOOD);
+    const p1 = await prov.generateSpecViaProvider('brief', { tier: 'premium' });
+    assert.ok(p1.spec, String(p1.error));
+    assert.deepEqual(who(), ['claude:claude-sonnet-5-5']);
+    const c = calls[0];
+    assert.equal(c.headers['x-api-key'], 'sk-ant-api03-TESTKEY000000000000');
+    assert.equal(c.headers['anthropic-version'], '2023-06-01');
+    assert.equal(c.body.output_config?.effort, 'low');
+    assert.equal(c.body.thinking, undefined, 'premium keeps adaptive thinking');
+    assert.equal(c.body.max_tokens, 16000);
+    assert.equal(typeof c.body.system, 'string');
+    assert.equal(p1.provider, 'anthropic');
+    assert.equal(p1.model, 'claude-sonnet-5-5');
+    assert.deepEqual([p1.usage!.calls, p1.usage!.in, p1.usage!.out], [1, 3000, 1400]);
+    assert.equal(p1.usage!.costMicros, 20_000, '3,000 in + 1,400 out on Sonnet 5.5 = $0.02');
+    calls.length = 0;
+    await prov.generateSpecViaProvider('brief', { tier: 'fast' });
+    assert.deepEqual(who(), ['claude:claude-haiku-5-5']);
+    assert.deepEqual(calls[0].body.thinking, { type: 'disabled' }, 'the fast tier does not think');
+    assert.equal(calls[0].body.output_config?.effort, 'medium');
+
+    // 2. Claude overloaded: Gemini answers, its tier model.
+    calls.length = 0;
+    onClaude = () => err(529, OVERLOADED);
+    onGemini = () => geminiReply(GOOD);
+    const p2 = await prov.generateSpecViaProvider('brief', { tier: 'premium' });
+    assert.ok(p2.spec);
+    assert.deepEqual(who(), ['claude:claude-sonnet-5-5', 'gemini:gemini-3.6-flash']);
+    assert.equal(p2.provider, 'gemini');
+    assert.equal(p2.fellBackFrom, 'claude-sonnet-5-5');
+    assert.equal(p2.usage!.calls, 2);
+
+    // 3. ...and when Gemini's model is busy too, Gemini's own fallback model.
+    calls.length = 0;
+    onGemini = (m) => (m === 'gemini-3.6-flash' ? err(503, '{"error":{"code":503,"message":"high demand"}}') : geminiReply(GOOD));
+    assert.ok((await prov.generateSpecViaProvider('brief', { tier: 'premium' })).spec);
+    assert.deepEqual(who(), ['claude:claude-sonnet-5-5', 'gemini:gemini-3.6-flash', 'gemini:gemini-3.5-flash-lite']);
+
+    // 4. All three fail: the reason is Claude's, the detail has every answer.
+    calls.length = 0;
+    onGemini = () => err(429, '{"error":{"code":429,"message":"You exceeded your current quota"}}');
+    const p4 = await prov.generateSpecViaProvider('brief', { tier: 'premium' });
+    assert.equal(p4.spec, null);
+    assert.equal(calls.length, 3, 'three calls at most');
+    assert.equal(p4.firstFailure?.status, 529);
+    assert.ok(/claude-sonnet-5-5.*then fallback/.test(p4.error!), p4.error);
+    assert.equal(classifyAiFailure(p4.firstFailure!.error, p4.firstFailure!.status).reason, 'overloaded');
+
+    // 5. A timeout: one quick call to Gemini's fallback model, not two more.
+    calls.length = 0;
+    onClaude = (b) => new Promise<Response>(() => { void b; }); // never answers; the call's own timeout aborts it
+    const stuck = globalThis.fetch;
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input instanceof Request ? input.url : input);
+      if (url === 'https://api.anthropic.com/v1/messages') {
+        calls.push({ who: 'claude', model: 'claude', headers: {}, body: {} });
+        return new Promise<Response>((_, reject) => init?.signal?.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' }))));
+      }
+      return stuck(input, init);
+    }) as typeof fetch;
+    onGemini = () => err(503, '{"error":{"code":503,"message":"high demand"}}');
+    const p5 = await prov.generateSpecViaProvider('brief', { tier: 'premium' });
+    assert.equal(p5.spec, null);
+    assert.deepEqual(who(), ['claude:claude', 'gemini:gemini-3.5-flash-lite'], 'after a timeout, one call to the quick model');
+    globalThis.fetch = stuck;
+
+    // 6. Claude declines the brief: not shopped around to Gemini.
+    calls.length = 0;
+    onClaude = () => claudeReply({}, { content: [], stop_reason: 'refusal' });
+    const p6 = await prov.generateSpecViaProvider('brief', { tier: 'premium' });
+    assert.equal(p6.spec, null);
+    assert.equal(p6.refused, true);
+    assert.deepEqual(who(), ['claude:claude-sonnet-5-5'], 'a refusal is a decision about the content');
+    assert.equal(classifyAiFailure(p6.error!).reason, 'safety');
+
+    // 7. A reply that is not JSON goes to Gemini.
+    calls.length = 0;
+    onClaude = () => new Response(JSON.stringify({ content: [{ type: 'text', text: 'Here is a lovely tifo idea!' }], stop_reason: 'end_turn', usage: USAGE }), { status: 200 });
+    onGemini = () => geminiReply(GOOD);
+    assert.ok((await prov.generateSpecViaProvider('brief', { tier: 'fast' })).spec);
+    assert.deepEqual(who(), ['claude:claude-haiku-5-5', 'gemini:gemini-3.1-flash-lite']);
+
+    // 8. An older model that does not take a setting: asked again without
+    //    THAT setting only, and the extra call is counted.
+    calls.length = 0;
+    process.env.AI_CLAUDE_MODEL_FAST = 'claude-haiku-4-5';
+    onClaude = (b) => (b.thinking ? err(400, '{"type":"error","error":{"type":"invalid_request_error","message":"thinking.type: disabled is not supported on this model"}}') : claudeReply(GOOD));
+    const p8 = await prov.generateSpecViaProvider('brief', { tier: 'fast' });
+    assert.ok(p8.spec, String(p8.error));
+    assert.equal(calls.length, 2);
+    assert.equal(calls[1].body.thinking, undefined, 'the thinking setting is dropped');
+    assert.equal(calls[1].body.output_config?.effort, 'medium', 'the effort level is kept');
+    assert.equal(p8.usage!.calls, 2, 'the refused first try is counted');
+    calls.length = 0;
+    onClaude = (b) => (b.output_config ? err(400, '{"type":"error","error":{"type":"invalid_request_error","message":"output_config.effort: Extra inputs are not permitted"}}') : claudeReply(GOOD));
+    assert.ok((await prov.generateSpecViaProvider('brief', { tier: 'fast' })).spec);
+    assert.equal(calls[1].body.output_config, undefined, 'and an effort the model refuses is dropped');
+    assert.deepEqual(calls[1].body.thinking, { type: 'disabled' });
+    delete process.env.AI_CLAUDE_MODEL_FAST;
+    assert.equal(prov.claudeThinking('claude-sonnet-5', 'fast', 'medium'), undefined, '"between_tools" is a Sonnet 5.5 setting only');
+
+    // 8b. A slow failure (an answer after half the time limit): one quick
+    //     Gemini call, not two more. AI_TIMEOUT_RETRY=0: none after a timeout.
+    calls.length = 0;
+    onClaude = () => new Promise<Response>((res) => setTimeout(() => res(err(500, '{"type":"error","error":{"type":"api_error","message":"Internal server error"}}')), 900));
+    onGemini = () => err(503, '{"error":{"code":503,"message":"high demand"}}');
+    await prov.generateSpecViaProvider('brief', { tier: 'premium' });
+    assert.deepEqual(who(), ['claude:claude-sonnet-5-5', 'gemini:gemini-3.5-flash-lite']);
+    // A Gemini AI_MODEL left over from Claude's old setup is never asked of Google.
+    process.env.AI_MODEL = 'claude-sonnet-4-6';
+    delete process.env.AI_MODEL_PREMIUM;
+    assert.equal(prov.geminiModel('premium'), 'gemini-2.5-flash', 'a Claude id in AI_MODEL is not a Gemini model');
+    assert.equal(prov.claudeModel('premium'), 'claude-sonnet-4-6', 'it still names the Claude model, as before');
+    process.env.AI_MODEL = 'gemini-3.6-flash';
+    process.env.AI_MODEL_PREMIUM = 'gemini-3.6-flash';
+    onGemini = () => geminiReply(GOOD);
+
+    // 8c. The tier's monthly spend cap answers 429, and pauses Claude too.
+    assert.equal(prov.isAccountProblem(429, '{"type":"error","error":{"type":"rate_limit_error","message":"You have reached your API usage limits. You will regain access on 2026-11-01"},"error_code":"enforced_spend_limit_reached"}'), true);
+    assert.equal(prov.isAccountProblem(429, '{"type":"error","error":{"type":"rate_limit_error","message":"Number of request tokens has exceeded your per-minute rate limit"}}'), false, 'a per-minute limit is a busy minute');
+
+    // 9. The month's credit is spent: Gemini answers, and Claude is skipped
+    //    until the pause ends, then asked again.
+    calls.length = 0;
+    process.env.AI_PROVIDER_COOLDOWN_MS = '300';
+    onClaude = () => err(400, CREDIT);
+    assert.ok((await prov.generateSpecViaProvider('brief', { tier: 'premium' })).spec);
+    assert.deepEqual(who(), ['claude:claude-sonnet-5-5', 'gemini:gemini-3.6-flash']);
+    assert.ok(prov.providerCooldown(), 'Claude is paused');
+    assert.match(prov.textModelsStatus().paused!.why, /credit balance is too low/);
+    calls.length = 0;
+    assert.ok((await prov.generateSpecViaProvider('brief', { tier: 'premium' })).spec);
+    assert.deepEqual(who(), ['gemini:gemini-3.6-flash'], 'while paused, no doomed round trip to Claude');
+    await new Promise((r) => setTimeout(r, 350));
+    calls.length = 0;
+    onClaude = () => claudeReply(GOOD);
+    assert.ok((await prov.generateSpecViaProvider('brief', { tier: 'premium' })).spec);
+    assert.deepEqual(who(), ['claude:claude-sonnet-5-5'], 'the new month\'s credit heals on its own');
+    delete process.env.AI_PROVIDER_COOLDOWN_MS;
+    prov.resetProviderCooldownForTests();
+
+    // 9b. AI_TIMEOUT_RETRY=0 still means one call after a timeout.
+    const stuck2 = globalThis.fetch;
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input instanceof Request ? input.url : input);
+      if (url === 'https://api.anthropic.com/v1/messages') {
+        calls.push({ who: 'claude', model: 'claude', headers: {}, body: {} });
+        return new Promise<Response>((_, reject) => init?.signal?.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' }))));
+      }
+      return stuck2(input, init);
+    }) as typeof fetch;
+    process.env.AI_TIMEOUT_RETRY = '0';
+    calls.length = 0;
+    await prov.generateSpecViaProvider('brief', { tier: 'premium' });
+    assert.deepEqual(who(), ['claude:claude']);
+    delete process.env.AI_TIMEOUT_RETRY;
+    globalThis.fetch = stuck2;
+
+    // 10. No Gemini key: Claude alone, with a same-model retry when overloaded.
+    delete process.env.GEMINI_API_KEY;
+    calls.length = 0;
+    onClaude = () => err(529, OVERLOADED);
+    await prov.generateSpecViaProvider('brief', { tier: 'premium' });
+    assert.deepEqual(who(), ['claude:claude-sonnet-5-5', 'claude:claude-sonnet-5-5'], 'one retry on 529, as on Google\'s 503');
+    process.env.GEMINI_API_KEY = 'AIzaSyTESTKEY0000000000';
+
+    // ---- through the routes ----
+    forgetBudgetMemoryForTests();
+    const auth = new MemoryAuthRepository();
+    const designs = new MemoryDesignRepository((id) => auth.usernameOf(id));
+    const events = new MemoryAiEventsRepository((id) => auth.usernameOf(id));
+    const app = await buildApp(designs, auth, templates, {
+      social: new MemorySocialRepository(designs, auth), aiUsage: new MemoryAiUsageRepository(), aiEvents: events, aiBudget: new MemoryAiBudgetRepository(),
+    });
+    const fan = await reg(app, 'fan_claude');
+    await auth.markEmailVerified(fan.id);
+    process.env.AI_POLLINATIONS_KEY = 'pk_test_claude';
+    const COPY = { phrase: 'الزعيم', support: '', language: 'ar', mood: 'pride', voice: 'poster' };
+    onClaude = (b) => (JSON.stringify(b.system ?? '').includes('COPYWRITER') ? claudeReply(COPY) : claudeReply(GOOD));
+    calls.length = 0;
+    const s1 = (await app.inject({ method: 'POST', url: '/api/ai/generate', headers: bearer(fan.token), payload: { prompt: 'Hilal zaeem', mode: 'super', stadium: '- north: 900 seats' } })).json();
+    assert.equal(s1.source, 'model', JSON.stringify(s1).slice(0, 300));
+    assert.deepEqual(who(), ['claude:claude-haiku-5-5', 'claude:claude-sonnet-5-5'], 'the copywriter on Haiku, the director on Sonnet');
+    const st = await events.stats(30);
+    assert.deepEqual(st.cost.models.map((m) => m.model), ['claude-sonnet-5-5'], 'Claude is on file as the model that answered');
+    assert.ok(st.cost.usd > 0, 'and priced');
+    // A Standard design Claude cannot make, made by Gemini, is a success.
+    onClaude = () => err(529, OVERLOADED);
+    onGemini = () => geminiReply(GOOD);
+    const s2 = (await app.inject({ method: 'POST', url: '/api/ai/generate', headers: bearer(fan.token), payload: { prompt: 'Ittihad tigers' } })).json();
+    assert.equal(s2.source, 'model');
+    assert.ok((await events.stats(30)).cost.models.some((m) => m.model === 'gemini-3.1-flash-lite'), 'and Gemini is named as the model that answered');
+    // Everything refuses: the user is told "busy", the operator gets Claude's reason.
+    onGemini = () => err(503, '{"error":{"code":503,"message":"high demand"}}');
+    const s3 = (await app.inject({ method: 'POST', url: '/api/ai/generate', headers: bearer(fan.token), payload: { prompt: 'Nassr yellow' } })).json();
+    assert.equal(s3.needsChoice, true);
+    assert.equal(s3.cause, 'busy');
+    const f = (await events.stats(30)).recentFailures[0];
+    assert.equal(f.reason, 'overloaded');
+    assert.ok(/claude-haiku-5-5/.test(f.detail) && /gemini/.test(f.detail), f.detail);
+    assert.ok(!/sk-ant-api03-TESTKEY/.test(JSON.stringify(await events.stats(30))), 'no key on file');
+    await app.close();
+  } finally {
+    globalThis.fetch = realFetch;
+    for (const k of KEYS) {
+      const v = saved[k];
+      if (v === undefined) delete process.env[k]; else process.env[k] = v;
+    }
+    prov.resetProviderCooldownForTests();
+    forgetBudgetMemoryForTests();
+  }
+  console.log('claude first (18 October): all assertions passed (Haiku fast + Sonnet premium, a Gemini AI_MODEL never sent to Claude, effort and thinking per tier, Gemini behind Claude then its own fallback, three calls at most, one quick call after a slow failure, refusals not shopped around, an older model asked again without the setting it refuses, spent credit or the spend cap pauses Claude and heals, a Claude AI_MODEL never sent to Google, Claude alone retries 529, routes record Claude and Gemini, the first model\'s reason)');
+}

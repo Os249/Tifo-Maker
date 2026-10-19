@@ -206,10 +206,10 @@ const ADMIN_HTML_HEAD = `<!doctype html>
   td.when{ white-space:nowrap; }
   .scroll{ overflow-x:auto; }
   .scroll table{ min-width:560px; }
-  .posture-row{ display:grid; grid-template-columns:70px minmax(140px,220px) 1fr; gap:12px; align-items:start; padding:9px 0; border-bottom:1px solid var(--line); font-size:13px; }
+  .posture-row{ display:grid; grid-template-columns:112px minmax(140px,220px) 1fr; gap:12px; align-items:start; padding:9px 0; border-bottom:1px solid var(--line); font-size:13px; }
   .posture-row:last-child{ border-bottom:none; }
   .posture-row .pd{ color:var(--mut); line-height:1.55; }
-  @media (max-width:640px){ .posture-row{ grid-template-columns:70px 1fr; } .posture-row .pd{ grid-column:1 / -1; } }
+  @media (max-width:640px){ .posture-row{ grid-template-columns:112px 1fr; } .posture-row .pd{ grid-column:1 / -1; } }
   /* Review queues: the work shown where the count is. Each item is a card with
      what a decision needs (a picture, who sent it, when) and its two actions. */
   .qgrid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(250px,1fr)); gap:10px; }
@@ -1466,6 +1466,7 @@ function aiTab(){
   html += kpi('Blocked by safety', W.blocked, fmt(T.blocked) + ' all time', true);
   html += '</div>';
 
+  html += textModelsSection(a.text);
   html += aiReliabilitySection(a);
   html += aiCostSection(a);
   html += picturesSection(a.pictures);
@@ -1504,6 +1505,34 @@ function aiTab(){
   return html;
 }
 
+
+/* ---- which models answer ----
+
+   Claude first and Gemini behind it (October 2026). The one thing worth
+   shouting about is Claude being paused: its key refused, or the month's API
+   credit spent, so Gemini is answering everything until the pause ends. */
+var PROVIDER_NAME = { anthropic: 'Claude', gemini: 'Gemini', openai: 'OpenAI', none: 'none' };
+function textModelsSection(t){
+  if (!t || !t.main || t.main === 'none') return '';
+  var main = PROVIDER_NAME[t.main] || t.main;
+  var html = '<h2 class="sec">Text models <span class="hint">who writes the designs</span></h2>';
+  html += '<div class="card"><div class="posture-row"><div>' + picChip(t.paused ? 'bad' : 'good', t.paused ? 'paused' : 'first') + '</div><div><b>' + esc(main) + '</b> <span class="dim">main</span></div>'
+    + '<div class="pd">Standard designs and the copywriter: <b>' + esc(t.models.fast) + '</b> &middot; Super, Polish and photos: <b>' + esc(t.models.premium) + '</b></div></div>';
+  if (t.backup){
+    var b = t.backupModels || {};
+    html += '<div class="posture-row"><div>' + picChip('info', 'backup') + '</div><div><b>' + esc(PROVIDER_NAME[t.backup] || t.backup) + '</b> <span class="dim">when ' + esc(main) + ' cannot</span></div>'
+      + '<div class="pd">' + esc(b.fast || '') + ' &middot; ' + esc(b.premium || '') + (b.fallback ? ', then ' + esc(b.fallback) : '') + '</div></div>';
+  }
+  html += '</div>';
+  if (t.paused){
+    html += '<div class="callout bad"><b>' + esc(PROVIDER_NAME[t.paused.provider] || t.paused.provider) + ' is paused until ' + esc(new Date(t.paused.until).toLocaleTimeString()) + '</b>'
+      + (t.backup ? ', and ' + esc(PROVIDER_NAME[t.backup] || t.backup) + ' is writing every design meanwhile' : '') + '. It answered: <span class="dim">' + esc(t.paused.why) + '</span>'
+      + (/credit|usage limit/i.test(t.paused.why) ? ' The month&#39;s Claude API credit is spent; the next one arrives with the Max plan&#39;s renewal.' : '') + '</div>';
+  } else if (!t.backup && t.main !== 'gemini'){
+    html += '<p class="note">No backup: when ' + esc(main) + ' is busy or out of credit, premium designs end &ldquo;busy&rdquo;. Set GEMINI_API_KEY (Google&#39;s free tier is enough).</p>';
+  }
+  return html;
+}
 
 /* ---- how often each mode delivers ----
 
@@ -1580,7 +1609,7 @@ function aiCostSection(a){
     html += '<div class="grid two">' + chartCard('Estimated spend per day (US$)', pts, '#e3b341') + '</div>';
   }
   html += '<p class="note">Measured since ' + esc(c.measuredSince ? new Date(c.measuredSince).toLocaleDateString() : '—')
-    + '. Cost each = all spend in a mode, failed calls included, divided by what it delivered (results with no price left out). Prices change: 3.6 Flash doubles on 1 January 2027, and each request keeps the price it ran at. A call that timed out is counted as $0: Google returns no token counts for it, though it may still bill it.</p>';
+    + '. Cost each = all spend in a mode, failed calls included, divided by what it delivered (results with no price left out). Prices change: 3.6 Flash doubles on 1 January 2027, and each request keeps the price it ran at. A call that timed out is counted as $0: no token counts come back for it, though it may still be billed. Claude&#39;s share is paid from the Max plan&#39;s monthly API credit, not in cash, and Claude does not report its thinking apart from the answer.</p>';
   return html;
 }
 
@@ -1593,7 +1622,7 @@ function aiCostSection(a){
    server/src/aiFailure.ts. */
 var REASON_INFO = {
   overloaded:      ['Provider overloaded', 'The model provider is short of capacity (HTTP 503, "high demand"). The fallback model (AI_MODEL_FALLBACK) is asked next, so a row here means it failed too. If it keeps happening, point AI_MODEL_PREMIUM / AI_MODEL_FAST at a less busy model.'],
-  rate_limited:    ['Rate limit or quota', 'Our API key hit the provider&#39;s quota (HTTP 429), and so did the fallback model. On Google&#39;s free tier the Flash models allow only 20 requests a day: Google AI Studio → Billing → add prepay credit to move the project to a paid tier. Otherwise raise the quota in the provider&#39;s console.'],
+  rate_limited:    ['Rate limit or quota', 'Our API key hit the provider&#39;s quota (HTTP 429), or the month&#39;s Claude API credit is spent (it comes back with the Max plan&#39;s renewal), and the backup could not answer either. On Google&#39;s free tier the Flash models allow only 20 requests a day.'],
   budget:          ['Daily budget spent', 'Our own AI_DAILY_BUDGET breaker tripped. Raise it, or wait for 00:00 UTC.'],
   timeout:         ['Timed out', 'No answer inside AI_TIMEOUT_MS / AI_TIMEOUT_PREMIUM_MS. Raise the limit or use a faster model.'],
   network:         ['Could not reach the provider', 'The server&#39;s request never got an answer: DNS, egress or an outage.'],
@@ -1661,12 +1690,13 @@ function picturesSection(p){
     return html + '<div class="card"><p class="empty">No picture provider has a key, so AI designs arrive without pictures.</p>'
       + '<p class="note">Set AI_POLLINATIONS_KEY (from enter.pollinations.ai) or GEMINI_API_KEY in Railway.</p></div>';
   }
-  var mainRow = null, backupRow = null;
+  var mainRow = null, backupRow = null, backups = p.backups || (p.backup ? [p.backup] : []);
   html += '<div class="card">';
   for (var i = 0; i < list.length; i++){
     var r = list[i], chip, bits = [];
     if (r.provider === p.main) mainRow = r;
-    if (r.provider === p.backup) backupRow = r;
+    /* The backup that matters is the first one still working. */
+    if (backups.indexOf(r.provider) >= 0 && (!backupRow || (backupRow.pausedUntil && !r.pausedUntil))) backupRow = r;
     var lastFailAt = r.lastFailure ? new Date(r.lastFailure.at).getTime() : 0;
     var lastOkAt = r.lastOk ? new Date(r.lastOk).getTime() : 0;
     if (r.pausedUntil) chip = picChip('bad', 'paused');
@@ -1677,18 +1707,18 @@ function picturesSection(p){
     if (r.pausedUntil) bits.push('<b>' + esc(PIC_KIND[r.pausedFor] || 'paused') + '</b>: skipped while the other provider works, tried again in ' + esc(inMinutes(r.pausedUntil)));
     if (r.lastFailure) bits.push('last problem ' + esc(timeAgo(r.lastFailure.at)) + ': ' + esc(PIC_KIND[r.lastFailure.kind] || r.lastFailure.kind)
       + (r.lastFailure.detail ? ' <span class="dim">(' + esc(r.lastFailure.detail) + ')</span>' : ''));
-    var role = r.provider === p.main ? 'main' : (r.provider === p.backup ? 'backup' : 'not in use');
+    var role = r.provider === p.main ? 'main' : (backups.indexOf(r.provider) >= 0 ? 'backup' : 'not in use');
     html += '<div class="posture-row"><div>' + chip + '</div><div><b>' + esc(r.label) + '</b> <span class="dim">' + role + '</span></div><div class="pd">' + bits.join(' &middot; ') + '</div></div>';
   }
   html += '</div>';
 
   if (mainRow && mainRow.pausedUntil){
     html += backupRow && !backupRow.pausedUntil
-      ? '<div class="callout"><b>' + esc(backupRow.label) + ' is making the pictures</b> because ' + esc(mainRow.label) + ' is ' + esc(PIC_KIND[mainRow.pausedFor] || 'paused') + '. People are not affected' + (backupRow.provider === 'gemini' ? ', but Gemini pictures cost more.' : '.') + '</div>'
+      ? '<div class="callout"><b>' + esc(backupRow.label) + ' is making the pictures</b> because ' + esc(mainRow.label) + ' is ' + esc(PIC_KIND[mainRow.pausedFor] || 'paused') + '. People are not affected' + (backupRow.provider === 'gemini' ? ', but Gemini pictures cost more.' : backupRow.provider === 'cloudflare' ? ' (free for about 170 pictures a day).' : '.') + '</div>'
       : '<div class="callout bad"><b>No provider can make pictures right now.</b> ' + esc(mainRow.label) + ' is ' + esc(PIC_KIND[mainRow.pausedFor] || 'paused') + (backupRow ? ' and the backup is failing too' : ' and there is no backup') + '. AI designs arrive without their picture (and are not charged).</div>';
   }
   if (!p.backup){
-    html += '<p class="note">No backup provider: when ' + esc(mainRow ? mainRow.label : 'the main provider') + ' fails, pictures are lost. Setting both AI_POLLINATIONS_KEY and GEMINI_API_KEY gives each a backup (AI_IMAGE_FALLBACK=none turns that off).</p>';
+    html += '<p class="note">No backup provider: when ' + esc(mainRow ? mainRow.label : 'the main provider') + ' fails, pictures are lost. Set AI_CLOUDFLARE_ACCOUNT_ID and AI_CLOUDFLARE_API_TOKEN for a free backup, about 170 pictures a day (AI_IMAGE_FALLBACK=none turns backups off).</p>';
   }
   var sums = [];
   sums.push(fmt(p.servedByBackup) + ' picture' + (p.servedByBackup === 1 ? '' : 's') + ' made by the backup');

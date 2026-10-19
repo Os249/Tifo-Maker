@@ -10,7 +10,17 @@
  * that drifts from the schema simply gets rejected and the offline result wins.
  *
  * Provider-agnostic: AI_PROVIDER=anthropic|openai|gemini (auto-detected from
- * whichever key is set). No SDK dependency — we call the REST API with global fetch.
+ * whichever key is set, Claude first). No SDK dependency — we call the REST API
+ * with global fetch.
+ *
+ * Claude FIRST, Gemini BEHIND IT (October 2026). With both keys set, every call
+ * goes to Claude (Haiku 5.5 on the fast tier, Sonnet 5.5 on premium), and when
+ * Claude cannot answer (busy, down, out of the month's API credit, a refused
+ * key) the same request runs on Gemini exactly as it did before, with Gemini's
+ * own fallback model behind that. A Claude account problem pauses Claude for a
+ * while (providerCooldown) so every request does not pay a doomed round trip
+ * first. A brief Claude's safety system declines (stop_reason "refusal") is
+ * not sent on to Gemini: that is a decision about the content, not an outage.
  */
 
 import { SYMBOL_NAMES, SPEC_FONT_IDS, STANDS, SPEC_LIMITS, PATTERN_NAMES } from '../../src/core/tifoSpec';
@@ -49,7 +59,10 @@ export function currentModelId(id: string): string {
  * Super AI + the critic a stronger model while simple prompts stay on Flash.
  */
 export function geminiModel(tier: 'fast' | 'premium'): string {
-  const base = process.env.AI_MODEL ?? 'gemini-2.5-flash';
+  // AI_MODEL may name a Claude model (it used to be how Claude was chosen);
+  // that is never a Gemini model, and asking Google for it fails every call.
+  const legacy = process.env.AI_MODEL?.trim();
+  const base = legacy && !/^claude-/i.test(legacy) ? legacy : 'gemini-2.5-flash';
   return currentModelId(tier === 'premium' ? process.env.AI_MODEL_PREMIUM ?? base : process.env.AI_MODEL_FAST ?? base);
 }
 
@@ -88,6 +101,146 @@ export function activeProvider(): AiProvider {
   if (!forced && process.env.OPENAI_API_KEY) return 'openai';
   if (!forced && geminiKey()) return 'gemini';
   return 'none';
+}
+
+/**
+ * The provider that answers when the main one cannot: Gemini, behind Claude
+ * (or OpenAI). Gemini as the main provider has its own fallback MODEL
+ * (geminiFallback) and nothing behind that. AI_PROVIDER_FALLBACK=none turns
+ * the backup off; it needs GEMINI_API_KEY (or GOOGLE_API_KEY).
+ */
+export function backupProvider(): AiProvider | null {
+  const main = activeProvider();
+  if (main === 'none' || main === 'gemini') return null;
+  if (/^(none|off|false|0)$/i.test((process.env.AI_PROVIDER_FALLBACK ?? '').trim())) return null;
+  return geminiKey() ? 'gemini' : null;
+}
+
+/**
+ * Claude models per tier. Haiku 5.5 for the fast tier (standard designs, the
+ * copywriter): the cheapest current model, $0.10 / $0.50 per million tokens.
+ * Sonnet 5.5 for premium (Super's director, Polish, photo reading): fast, and
+ * a size class above the Flash models it replaces. AI_CLAUDE_MODEL_FAST /
+ * AI_CLAUDE_MODEL_PREMIUM change them (claude-opus-5-5 for the most capable).
+ *
+ * AI_MODEL used to name the Claude model for both tiers. It is honoured only
+ * when it IS a Claude id: on Railway it may well name a Gemini model, and
+ * asking Claude for that fails every call.
+ */
+export const CLAUDE_DEFAULT_MODELS = { fast: 'claude-haiku-5-5', premium: 'claude-sonnet-5-5' } as const;
+
+export function claudeModel(tier: 'fast' | 'premium'): string {
+  const own = (tier === 'premium' ? process.env.AI_CLAUDE_MODEL_PREMIUM : process.env.AI_CLAUDE_MODEL_FAST)?.trim();
+  if (own) return own;
+  const legacy = process.env.AI_MODEL?.trim();
+  if (legacy && /^claude-/i.test(legacy)) return legacy;
+  return CLAUDE_DEFAULT_MODELS[tier];
+}
+
+export type ClaudeEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+const EFFORTS: ClaudeEffort[] = ['low', 'medium', 'high', 'xhigh', 'max'];
+
+/**
+ * How much work Claude puts into a reply, thinking included (output_config.effort).
+ *
+ * Premium defaults to LOW. Sonnet 5.5 thinks at "high" when nothing is said,
+ * and the director has a 45-second limit with pictures still to fetch after
+ * it, inside Cloudflare's 100-second ceiling. Low keeps the wait close to what
+ * Gemini Flash took; AI_CLAUDE_EFFORT_PREMIUM=medium buys more thought if the
+ * "Average wait" in /admin → AI says there is room for it.
+ * The fast tier keeps Haiku's own default, medium, with up-front thinking off
+ * (claudeThinking): it writes a short JSON answer and nothing more.
+ */
+export function claudeEffort(tier: 'fast' | 'premium'): ClaudeEffort {
+  const v = (tier === 'premium' ? process.env.AI_CLAUDE_EFFORT_PREMIUM : process.env.AI_CLAUDE_EFFORT_FAST)?.trim().toLowerCase();
+  if (v && (EFFORTS as string[]).includes(v)) return v as ClaudeEffort;
+  return tier === 'premium' ? 'low' : 'medium';
+}
+
+/**
+ * Thinking off for the fast tier, where the model allows it: Haiku takes
+ * {type:"disabled"}, Sonnet 5.5 {type:"between_tools"} (no up-front thinking).
+ * Older Sonnets refuse "between_tools", Opus cannot turn thinking off, and
+ * neither setting works at xhigh or max, so then nothing is sent and the
+ * model's own default applies. Premium always thinks.
+ */
+export function claudeThinking(model: string, tier: 'fast' | 'premium', effort: ClaudeEffort): Record<string, unknown> | undefined {
+  if (tier !== 'fast' || effort === 'xhigh' || effort === 'max') return undefined;
+  if (/haiku/i.test(model)) return { type: 'disabled' };
+  if (/sonnet-5-5/i.test(model)) return { type: 'between_tools' };
+  return undefined;
+}
+
+/**
+ * Claude's output ceiling. Thinking counts against max_tokens, and it is a cap
+ * rather than a charge (only what is written is billed), so it is set well
+ * above a design's ~2,000 tokens of JSON.
+ */
+export function claudeMaxTokens(): number {
+  return envNum('AI_CLAUDE_MAX_TOKENS', 16000, 1024, 64000);
+}
+
+/** The model a provider asks for on a tier, for logs and the failure record. */
+export function providerModel(provider: AiProvider, tier: 'fast' | 'premium'): string {
+  if (provider === 'gemini') return geminiModel(tier);
+  if (provider === 'anthropic') return claudeModel(tier);
+  if (provider === 'openai') return process.env.AI_MODEL ?? 'gpt-4o-mini';
+  return 'none';
+}
+
+// ---- a paused main provider --------------------------------------------------
+
+/**
+ * A main provider that refused for an ACCOUNT reason is paused, and requests
+ * go straight to the backup until the pause ends: its key was refused, or the
+ * API credit is spent (Claude: HTTP 400 "Your credit balance is too low", or
+ * a spend limit the owner set). Neither fixes itself between two requests, so
+ * asking first only adds a round trip to every design. After the pause the
+ * provider is asked again, so a new month's credit heals on its own.
+ * AI_PROVIDER_COOLDOWN_MS sets the pause (15 minutes; 0 turns it off).
+ */
+let cooldown: { provider: AiProvider; until: number; why: string } | null = null;
+
+export function isAccountProblem(status: number | undefined, error: string | undefined): boolean {
+  if (status === 401 || status === 402 || status === 403) return true;
+  const text = error ?? '';
+  // A spend limit the owner set answers 400; the tier's monthly cap answers
+  // 429 "You have reached your API usage limits" (enforced_spend_limit_reached)
+  // until the 1st. Neither is a busy minute.
+  if (status === 429) return /enforced_spend_limit|usage limits/i.test(text);
+  return status === 400 && /credit balance is too low|usage limits|spend limit|purchase credits|billing/i.test(text);
+}
+
+/** The main provider's pause, if one is on. */
+export function providerCooldown(now: number = Date.now()): { provider: AiProvider; until: string; why: string } | null {
+  if (!cooldown || cooldown.until <= now) return null;
+  return { provider: cooldown.provider, until: new Date(cooldown.until).toISOString(), why: cooldown.why };
+}
+
+/** Tests only. */
+export function resetProviderCooldownForTests(): void {
+  cooldown = null;
+}
+
+/** Which text models are in use, and whether the main one is paused: for /admin → AI. */
+export function textModelsStatus(): {
+  main: AiProvider;
+  backup: AiProvider | null;
+  models: { fast: string; premium: string };
+  backupModels: { fast: string; premium: string; fallback: string | null } | null;
+  paused: { provider: AiProvider; until: string; why: string } | null;
+} {
+  const main = activeProvider();
+  const backup = backupProvider();
+  return {
+    main,
+    backup,
+    models: { fast: providerModel(main, 'fast'), premium: providerModel(main, 'premium') },
+    backupModels: backup === 'gemini'
+      ? { fast: geminiModel('fast'), premium: geminiModel('premium'), fallback: geminiFallback('premium') }
+      : null,
+    paused: providerCooldown(),
+  };
 }
 
 
@@ -751,6 +904,14 @@ export interface ProviderResult {
    * premium failure as "model not found" (review, 17 October 2026).
    */
   firstFailure?: { error: string; status?: number };
+  /** The provider that answered, or the last one asked when none did. */
+  provider?: AiProvider;
+  /**
+   * The provider declined the brief itself (Claude's stop_reason "refusal",
+   * Gemini's safety block). Not sent on to the backup: that is a decision
+   * about the content, and shopping it around would be the wrong answer to it.
+   */
+  refused?: boolean;
 }
 
 /** HTTP statuses where a second model is worth asking. 401/403 are the key: every model refuses. */
@@ -829,11 +990,69 @@ export function meterRetries(fn: (() => void) | null): void {
   retryMeter = fn;
 }
 
-export async function generateSpecViaProvider(
-  prompt: string,
-  opts: { system?: string; context?: string; image?: string; tier?: 'fast' | 'premium'; hint?: string; raw?: boolean } = {},
-): Promise<ProviderResult> {
-  const r = await callProvider(prompt, opts);
+type CallOpts = { system?: string; context?: string; image?: string; tier?: 'fast' | 'premium'; hint?: string; raw?: boolean };
+
+/**
+ * One call's time limit. Premium runs a bigger model on a longer prompt, and
+ * Super makes two calls; 20 s was tuned for a single fast call and truncated
+ * the rest. The fast tier gets 30 s, not 20: its slow calls land at 15-20 s,
+ * right on the old limit, so they were cut off just before they answered.
+ * A quoted value here used to abort every call on the next tick — see envNum.
+ */
+function callTimeoutMs(tier: 'fast' | 'premium'): number {
+  return tier === 'premium' ? envNum('AI_TIMEOUT_PREMIUM_MS', 45000, 1000) : envNum('AI_TIMEOUT_MS', 30000, 1000);
+}
+
+export async function generateSpecViaProvider(prompt: string, opts: CallOpts = {}): Promise<ProviderResult> {
+  const main = activeProvider();
+  const backup = backupProvider();
+  if (!backup) return generateWith(main, prompt, opts);
+
+  // Paused for an account problem (no credit left, key refused): straight to
+  // the backup, without the round trip that would only fail again.
+  if (cooldown && cooldown.provider === main && cooldown.until > Date.now()) {
+    return generateWith(backup, prompt, opts);
+  }
+
+  const started = Date.now();
+  const r = await callProvider(prompt, opts, { provider: main });
+  if (r.spec || r.refused) return r;
+  const pauseMs = envNum('AI_PROVIDER_COOLDOWN_MS', 15 * 60_000, 0);
+  if (pauseMs > 0 && isAccountProblem(r.status, r.error)) {
+    // The provider's own sentence when there is one ("Your credit balance is
+    // too low..."), not its JSON envelope.
+    const said = /"message"\s*:\s*"([^"]+)/.exec(r.error ?? '')?.[1];
+    cooldown = { provider: main, until: Date.now() + pauseMs, why: (said ?? r.error ?? '').slice(0, 200) };
+  }
+  // Anything else Claude could not do (busy, down, out of credit, an answer
+  // that was not JSON) goes to Gemini, which runs exactly as it does on its
+  // own: its tier model, then its fallback model. A SLOW failure (a timeout,
+  // or any answer after half the time limit) leaves no time for two more
+  // calls, since the whole request has to land inside Cloudflare's 100
+  // seconds, so it gets one, to Gemini's quick fallback model (or its tier
+  // model when the fallback is off). AI_TIMEOUT_RETRY=0 still means a timed
+  // out request makes no second call at all.
+  const tier = opts.tier ?? 'fast';
+  const timedOut = /timed out$/.test(r.error ?? '');
+  if (timedOut && process.env.AI_TIMEOUT_RETRY === '0') return r;
+  const slow = timedOut || Date.now() - started > callTimeoutMs(tier) / 2;
+  retryMeter?.();
+  const g = slow && backup === 'gemini'
+    ? await callProvider(prompt, opts, { provider: backup, model: geminiFallback(tier) ?? geminiModel(tier) })
+    : await generateWith(backup, prompt, opts);
+  const usage = addUsage(r.usage ?? zeroUsage(), g.usage);
+  if (g.spec) return { ...g, usage, fellBackFrom: r.model };
+  return {
+    ...g,
+    usage,
+    error: `${r.error ?? 'no answer'}; then fallback ${g.error ?? 'no answer'}`,
+    firstFailure: { error: r.error ?? 'no answer', ...(r.status ? { status: r.status } : {}) },
+  };
+}
+
+/** One provider, with its own second chance: Gemini's fallback model, or a same-model retry. */
+async function generateWith(provider: AiProvider, prompt: string, opts: CallOpts): Promise<ProviderResult> {
+  const r = await callProvider(prompt, opts, { provider });
   if (r.spec) return r;
   const timedOut = /timed out$/.test(r.error ?? '');
   const timeoutRetry = timedOut && process.env.AI_TIMEOUT_RETRY !== '0';
@@ -842,10 +1061,10 @@ export async function generateSpecViaProvider(
   // the budget are what they were; the second call just goes somewhere that is
   // likely to answer. A 429 is now worth one: it is THIS model's quota that
   // refused, and the fallback has its own.
-  const fallback = activeProvider() === 'gemini' ? geminiFallback(opts.tier ?? 'fast') : null;
+  const fallback = provider === 'gemini' ? geminiFallback(opts.tier ?? 'fast') : null;
   if (fallback && fallback !== r.model && r.transient && (!timedOut || timeoutRetry)) {
     retryMeter?.();
-    const again = await callProvider(prompt, opts, fallback);
+    const again = await callProvider(prompt, opts, { provider, model: fallback });
     const usage = addUsage(r.usage ?? zeroUsage(), again.usage);
     if (again.spec) return { ...again, usage, fellBackFrom: r.model };
     // Both failed. The first model's failure is the cause (firstFailure), the
@@ -859,29 +1078,31 @@ export async function generateSpecViaProvider(
   }
 
   // No fallback (or the fallback IS this model): the old same-model retry.
-  if (r.status !== 503 && !timeoutRetry) return r;
+  // 529 is Claude's "overloaded", its word for Google's 503.
+  if (r.status !== 503 && r.status !== 529 && !timeoutRetry) return r;
   if (!timedOut) await sleep(envNum('AI_RETRY_DELAY_MS', 1200, 100, 10000));
   retryMeter?.();
-  const again = await callProvider(prompt, opts);
+  const again = await callProvider(prompt, opts, { provider });
   // Report the SECOND failure: if it is still down, that is the current truth.
   return { ...again, usage: addUsage(r.usage ?? zeroUsage(), again.usage) };
 }
 
 async function callProvider(
   prompt: string,
-  opts: { system?: string; context?: string; image?: string; tier?: 'fast' | 'premium'; hint?: string; raw?: boolean } = {},
-  modelOverride?: string,
+  opts: CallOpts = {},
+  target: { provider?: AiProvider; model?: string } = {},
 ): Promise<ProviderResult> {
-  const provider = activeProvider();
+  const provider = target.provider ?? activeProvider();
   if (provider === 'none') return { spec: null, error: 'no AI provider configured', usage: zeroUsage() };
+  const r = await callOne(provider, prompt, opts, target.model);
+  return { ...r, provider };
+}
+
+async function callOne(provider: AiProvider, prompt: string, opts: CallOpts, modelOverride?: string): Promise<ProviderResult> {
   // Premium runs a bigger model on a longer prompt, and Super now makes two
   // calls. 20s was tuned for a single fast call and truncates the rest.
   // A quoted value here used to abort every call on the next tick — see envNum.
-  const timeoutMs = opts.tier === 'premium'
-    ? envNum('AI_TIMEOUT_PREMIUM_MS', 45000, 1000)
-    // 30 s, not 20: the fast tier's slow calls land at 15-20 s, right on the old
-    // limit, so they were cut off just before they answered.
-    : envNum('AI_TIMEOUT_MS', 30000, 1000);
+  const timeoutMs = callTimeoutMs(opts.tier ?? 'fast');
   const system = opts.system ?? buildSystemPrompt();
   // Built ONCE. Three separate userMessage() calls meant a new argument had to
   // be threaded through three bodies, and forgetting one would silently drop it
@@ -892,37 +1113,64 @@ async function callProvider(
   const user = opts.raw ? prompt : userMessage(prompt, opts.context, opts.hint);
 
   // The model this call asks, named before the call so a failure can say which.
-  const model = provider === 'gemini'
-    ? modelOverride ?? geminiModel(opts.tier ?? 'fast')
-    : process.env.AI_MODEL ?? (provider === 'anthropic' ? 'claude-3-5-sonnet-latest' : 'gpt-4o-mini');
+  const tier = opts.tier ?? 'fast';
+  const model = modelOverride ?? providerModel(provider, tier);
   // A refused call still counts as a call (the budget and the cost panel see
   // it), even though it bills no tokens.
   const refused = (): TokenUsage => ({ ...zeroUsage(), calls: 1 });
 
   try {
     if (provider === 'anthropic') {
-      const res = await postJson(
-        'https://api.anthropic.com/v1/messages',
-        { 'content-type': 'application/json', 'x-api-key': process.env.ANTHROPIC_API_KEY!, 'anthropic-version': '2023-06-01' },
-        // 4096 to match Gemini: outline pairs double the text-layer count and
-        // Anthropic is not in JSON mode, so it pretty-prints. A truncated reply
-        // fails extractJson and surfaces to the user as "premium is busy".
-        { model, max_tokens: maxOutputTokens(), system, messages: [{ role: 'user', content: anthropicContent(user, opts.image) }] },
-        timeoutMs,
-      );
-      if (!res.ok) return refusal('claude', res, model);
+      const label = `claude "${model}"`;
+      const headers = { 'content-type': 'application/json', 'x-api-key': process.env.ANTHROPIC_API_KEY!, 'anthropic-version': '2023-06-01' };
+      const effort = claudeEffort(tier);
+      const thinking = claudeThinking(model, tier, effort);
+      const base = { model, max_tokens: claudeMaxTokens(), system, messages: [{ role: 'user', content: anthropicContent(user, opts.image) }] };
+      const started = Date.now();
+      let res = await postJson('https://api.anthropic.com/v1/messages', headers, { ...base, output_config: { effort }, ...(thinking ? { thinking } : {}) }, timeoutMs);
+      let spent = zeroUsage();
+      // A model that does not take the effort or thinking setting (an older
+      // id in AI_CLAUDE_MODEL_*) says so with a 400. Losing the setting is far
+      // better than losing the design, so it is dropped once and asked again.
+      // Only the setting the error names is dropped: an older Sonnet that
+      // refuses the thinking setting still gets its effort level.
+      if (res.status === 400) {
+        const body = await res.clone().text().catch(() => '');
+        const noThinking = !!thinking && /thinking/i.test(body);
+        const noEffort = /effort|output_config/i.test(body);
+        if ((noThinking || noEffort) && !/credit balance|usage limits/i.test(body)) {
+          spent = { ...zeroUsage(), calls: 1 };
+          retryMeter?.();
+          const again = { ...base, ...(noEffort ? {} : { output_config: { effort } }), ...(thinking && !noThinking ? { thinking } : {}) };
+          res = await postJson('https://api.anthropic.com/v1/messages', headers, again, Math.max(5000, timeoutMs - (Date.now() - started)));
+        }
+      }
+      if (!res.ok) {
+        const r = await refusal(label, res, model);
+        return { ...r, usage: addUsage(spent, r.usage) };
+      }
       const data = (await res.json()) as {
         content?: Array<{ text?: string; type?: string }>;
         stop_reason?: string;
-        usage?: { input_tokens?: number; output_tokens?: number; cache_read_input_tokens?: number };
+        usage?: { input_tokens?: number; output_tokens?: number; cache_read_input_tokens?: number; cache_creation_input_tokens?: number };
       };
+      // Thinking is inside output_tokens (billed as output); Claude does not
+      // report it apart, so `thought` stays 0 for Claude rows.
       const cached = n0(data.usage?.cache_read_input_tokens);
-      const usage = callUsage(model, { in: n0(data.usage?.input_tokens) + cached, out: n0(data.usage?.output_tokens), thought: 0, cached });
-      // Every text block, not just the first: with extended thinking on, block 0
-      // is a thinking block and the JSON is further down.
-      const text = (data.content ?? []).map((b) => b?.text ?? '').join('');
+      const usage = addUsage(spent, data.usage
+        ? callUsage(model, { in: n0(data.usage.input_tokens) + cached + n0(data.usage.cache_creation_input_tokens), out: n0(data.usage.output_tokens), thought: 0, cached })
+        : { ...zeroUsage(), calls: 1, costMicros: null });
+      if (data.stop_reason === 'refusal') {
+        return { spec: null, model, usage, refused: true, error: `${label}: declined by its safety system (stop_reason refusal)` };
+      }
+      // The answer's text blocks only: thinking arrives in blocks of its own.
+      const text = (data.content ?? []).filter((b) => (b?.type ?? 'text') === 'text').map((b) => b?.text ?? '').join('');
       const spec = extractJson(text);
-      return spec ? { spec, model, usage } : { spec: null, model, usage, error: `claude: response was not valid JSON${data.stop_reason ? ` (stop_reason ${data.stop_reason})` : ''}` };
+      if (spec) return { spec, model, usage };
+      if (data.stop_reason === 'max_tokens') {
+        return { spec: null, model, usage, error: `${label}: ran out of output tokens before finishing the JSON (stop_reason max_tokens, limit ${claudeMaxTokens()}) — raise AI_CLAUDE_MAX_TOKENS` };
+      }
+      return { spec: null, model, usage, error: `${label}: ${text.trim() ? `response was not valid JSON; it began: ${text.slice(0, 140).replace(/\s+/g, ' ')}` : 'empty response (no text blocks)'}` };
     }
     if (provider === 'gemini') {
       const res = await postJson(
@@ -951,7 +1199,8 @@ async function callProvider(
       const text = geminiText(data);
       const spec = extractJson(text);
       if (spec) return { spec, model, usage };
-      return { spec: null, model, usage, error: `gemini "${model}": ${whyNoJson(data, text)}` };
+      const blocked = !!data.promptFeedback?.blockReason || data.candidates?.[0]?.finishReason === 'SAFETY';
+      return { spec: null, model, usage, ...(blocked ? { refused: true } : {}), error: `gemini "${model}": ${whyNoJson(data, text)}` };
     }
     // openai
     const res = await postJson(
@@ -976,7 +1225,7 @@ async function callProvider(
     return spec ? { spec, model, usage } : { spec: null, model, usage, error: 'openai: response was not valid JSON' };
   } catch (e) {
     // Timed out or unreachable: nothing about the brief, so worth another model.
-    const who = provider === 'gemini' ? `gemini "${model}"` : provider;
+    const who = provider === 'gemini' ? `gemini "${model}"` : provider === 'anthropic' ? `claude "${model}"` : provider;
     return { spec: null, model, usage: refused(), transient: true, error: `${who}: ${(e as Error)?.name === 'AbortError' ? 'timed out' : 'network error'}` };
   }
 }

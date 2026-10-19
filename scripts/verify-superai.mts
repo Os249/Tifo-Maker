@@ -649,9 +649,12 @@ check('the image rule is no longer people-only', !PROMPTS[1][1].includes('image 
 // refused you; an overload retried is usually a design the user does get.
 const provSrc = readFileSync(new URL('../server/src/aiProvider.ts', import.meta.url), 'utf8');
 check('the retry is keyed on status, not an error string', /r\.status !== 503/.test(provSrc));
-check('429 is never retried', !/status === 429/.test(provSrc.split('async function callProvider')[0]));
+// The retry rules live in generateWith (since 18 October; isAccountProblem
+// above it reads a 429 to PAUSE Claude, which is the opposite of a retry).
+const retryRules = provSrc.split('async function generateWith')[1]?.split('async function callProvider')[0] ?? '';
+check('429 is never retried', retryRules.length > 0 && !/status === 429/.test(retryRules));
 // One refusal() for all three providers since 17 October; it carries the status.
-check('every provider branch reports its status', (provSrc.match(/if \(!res\.ok\) return refusal\(/g) ?? []).length >= 3 && /status: res\.status/.test(provSrc.split('async function refusal')[1] ?? ''));
+check('every provider branch reports its status', (provSrc.match(/if \(!res\.ok\) (?:return |\{\s*const r = await )refusal\(/g) ?? []).length >= 3 && /status: res\.status/.test(provSrc.split('async function refusal')[1] ?? ''));
 
 // ---- 31. a picture must not be clustered below what it can afford ----
 // Halftone averages BxB cells into one tone, so it DIVIDES tonal resolution by

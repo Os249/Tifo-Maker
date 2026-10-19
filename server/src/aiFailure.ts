@@ -18,7 +18,7 @@
 /** What the operator sees. Specific enough to decide what to fix. */
 export type AiFailReason =
   | 'overloaded'      // 503 / 529 / "high demand": the provider's own capacity spike
-  | 'rate_limited'    // 429 / RESOURCE_EXHAUSTED: our key's quota with the provider
+  | 'rate_limited'    // 429 / RESOURCE_EXHAUSTED / Claude credit spent: our key's quota with the provider
   | 'budget'          // our own AI_DAILY_BUDGET breaker tripped
   | 'timeout'         // no answer inside AI_TIMEOUT(_PREMIUM)_MS
   | 'network'         // could not reach the provider at all
@@ -83,7 +83,10 @@ export function classifyAiFailure(error: string | undefined | null, status?: num
   if (st === 404) return out('model_not_found');
   if (st === 504 || st === 408) return out('timeout');
   if (/high demand|overloaded|\bunavailable\b/.test(low)) return out('overloaded');
-  if (/resource_exhausted|rate limit|quota/.test(low)) return out('rate_limited');
+  // Claude's monthly API credit running out (or a spend limit the owner set)
+  // arrives as HTTP 400, but it is the same thing as a quota: the account, not
+  // the request, and it passes when the credit comes back.
+  if (/resource_exhausted|rate limit|quota|credit balance is too low|usage limits/.test(low)) return out('rate_limited');
   if (/api key|permission_denied|unauthenticated/.test(low)) return out('auth');
   if (/not found for api version|is not found|model_not_found/.test(low)) return out('model_not_found');
   if (/timed out|timeout|deadline/.test(low)) return out('timeout');

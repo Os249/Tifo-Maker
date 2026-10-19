@@ -30,7 +30,7 @@ import type { EmailSender } from './email';
 import { sanitizeDetail } from './aiFailure';
 import { maskEmail } from './soc';
 
-export type PictureProvider = 'pollinations' | 'gemini';
+export type PictureProvider = 'pollinations' | 'cloudflare' | 'gemini';
 
 /** What a person would do about a failure. */
 export type ImageFailureKind = 'credit' | 'auth' | 'rate' | 'down' | 'refused' | 'other';
@@ -46,6 +46,7 @@ export const FAILING_WINDOW_MS = 30 * MINUTE;
 
 export const PROVIDER_LABEL: Record<PictureProvider, string> = {
   pollinations: 'Pollinations',
+  cloudflare: 'Cloudflare',
   gemini: 'Gemini',
 };
 
@@ -57,22 +58,27 @@ export const PROVIDER_LABEL: Record<PictureProvider, string> = {
  * - Pollinations answers 402 with "Insufficient balance ... Top up".
  * - Gemini's image models answer 429 RESOURCE_EXHAUSTED with "limit: 0" on a
  *   key without billing: that is not a busy minute, it will never work.
+ * - Cloudflare answers 429 (code 3036) "You have used up your daily free
+ *   allocation of 10,000 neurons": nothing until 00:00 UTC.
  * A 403 counts as a key problem only when the body says so, because some
  * providers use 403 for a refused prompt, and pausing a working provider for
  * ten minutes over one user's prompt would be far worse than one extra call.
  */
 export function classifyImageFailure(status: number | undefined, error: string | undefined): ImageFailureKind {
   const text = String(error ?? '');
-  const creditText = /insufficient (balance|funds|credit)|top ?up|out of (credit|pollen)|billing|payment required|limit: ?0\b/i;
+  const creditText = /insufficient (balance|funds|credit)|top ?up|out of (credit|pollen)|billing|payment required|limit: ?0\b|daily free allocation|used up your/i;
   if (status === 402) return 'credit';
   // Gemini answers a bad key with 400 INVALID_ARGUMENT, not 401.
   if (/api[ _]?key[ _]?(not valid|invalid)|API_KEY_INVALID/i.test(text)) return 'auth';
   if (status === 401) return 'auth';
+  // Cloudflare answers a malformed or wrong token with 400 (codes 6003, 6111,
+  // 10000) and the word Authorization/Authentication: the key, not the prompt.
+  if ((status === 400 || status === 403) && /authori[sz]ation header|authentication error|invalid api token|invalid access token/i.test(text)) return 'auth';
   if (status === 403) return /key|token|auth|unauthori[sz]ed|permission|access denied|forbidden: ?(api|access)/i.test(text) ? 'auth' : 'refused';
   if (status === 429) return creditText.test(text) ? 'credit' : 'rate';
   if (status === 400 || status === 422) return creditText.test(text) ? 'credit' : 'refused';
   if (status !== undefined && status >= 500) return 'down';
-  if (/needs a (free )?key|no GEMINI_API_KEY/i.test(text)) return 'auth';
+  if (/needs a (free )?key|no GEMINI_API_KEY|needs AI_CLOUDFLARE/i.test(text)) return 'auth';
   if (creditText.test(text)) return 'credit';
   if (/timed out|network error|empty image|ECONN|ENOTFOUND|fetch failed/i.test(text)) return 'down';
   if (/returned no image|safety|blocked/i.test(text)) return 'refused';
@@ -92,7 +98,7 @@ export const KIND_LABEL: Record<ImageFailureKind, string> = {
 export interface ProviderSnapshot {
   provider: PictureProvider;
   label: string;
-  role: 'main' | 'backup';
+  role: 'main' | 'backup' | 'unused';
   delivered: number;
   failed: number;
   failedByKind: Partial<Record<ImageFailureKind, number>>;
@@ -106,7 +112,10 @@ export interface ProviderSnapshot {
 export interface PicturesSnapshot {
   since: string;
   main: PictureProvider | null;
+  /** The first backup (kept for older readers of this snapshot). */
   backup: PictureProvider | null;
+  /** Every backup, in the order they are asked. */
+  backups: PictureProvider[];
   providers: ProviderSnapshot[];
   /** Pictures the backup delivered because the main provider could not. */
   servedByBackup: number;
@@ -243,6 +252,8 @@ export class ImageHealth {
     deliveredBy: PictureProvider | null;
     main: PictureProvider;
     backup: PictureProvider | null;
+    /** Every backup tried, when there is more than one. */
+    backups?: PictureProvider[];
     problems: { provider: PictureProvider; kind: ImageFailureKind; detail: string }[];
     breakerMs: number;
     lastError?: string;
@@ -278,7 +289,7 @@ export class ImageHealth {
     p: PictureProvider,
     kind: 'credit' | 'auth',
     detail: string,
-    r: { deliveredBy: PictureProvider | null; main: PictureProvider; backup: PictureProvider | null; breakerMs: number },
+    r: { deliveredBy: PictureProvider | null; main: PictureProvider; backup: PictureProvider | null; backups?: PictureProvider[]; breakerMs: number },
   ): void {
     const label = PROVIDER_LABEL[p];
     const what =
@@ -287,12 +298,14 @@ export class ImageHealth {
         : `${label} refused the API key.`;
     let impact: string;
     if (p !== r.main) {
-      impact = `${label} is the backup, so this matters only when ${PROVIDER_LABEL[r.main]} fails too.`;
-    } else if (r.backup && r.deliveredBy === r.backup) {
-      impact = `Pictures are being made by ${PROVIDER_LABEL[r.backup]} instead, so people are not affected for now.` +
-        (r.backup === 'gemini' ? ' Gemini pictures cost more per picture than Pollinations.' : '');
+      impact = `${label} is a backup, so this matters only when ${PROVIDER_LABEL[r.main]} fails too.`;
+    } else if (r.deliveredBy && r.deliveredBy !== p) {
+      impact = `Pictures are being made by ${PROVIDER_LABEL[r.deliveredBy]} instead, so people are not affected for now.` +
+        (r.deliveredBy === 'gemini' ? ' Gemini pictures cost more per picture than Pollinations.' : '') +
+        (r.deliveredBy === 'cloudflare' ? ' Cloudflare is free for about 170 pictures a day.' : '');
     } else if (r.backup) {
-      impact = `The backup, ${PROVIDER_LABEL[r.backup]}, did not produce the picture either, so AI designs are arriving without their picture (people are not charged for those).`;
+      const list = (r.backups?.length ? r.backups : [r.backup]).map((b) => PROVIDER_LABEL[b]);
+      impact = `${list.length > 1 ? `The backups, ${list.join(' and ')},` : `The backup, ${list[0]},`} did not produce the picture either, so AI designs are arriving without their picture (people are not charged for those).`;
     } else {
       impact = 'No backup provider is set up, so AI designs are arriving without their picture (people are not charged for those).';
     }
@@ -301,6 +314,10 @@ export class ImageHealth {
         ? kind === 'credit'
           ? 'Top up the pollen balance at https://enter.pollinations.ai. The key in Railway stays the same and nothing needs redeploying.'
           : 'Create a key at https://enter.pollinations.ai and put it in AI_POLLINATIONS_KEY in Railway.'
+        : p === 'cloudflare'
+          ? kind === 'credit'
+            ? 'Cloudflare\'s free Workers AI allowance (10,000 neurons, about 170 pictures) is used up for today. It comes back at 00:00 UTC by itself; nothing needs doing unless this happens most days.'
+            : 'Check AI_CLOUDFLARE_ACCOUNT_ID and AI_CLOUDFLARE_API_TOKEN in Railway: the token needs the "Workers AI" permission on that account.'
         : kind === 'credit'
           ? 'Turn on billing for the Google AI Studio project that owns GEMINI_API_KEY (image models have no free quota), or set AI_IMAGE_FALLBACK=none in Railway to stop using Gemini for pictures.'
           : 'Check GEMINI_API_KEY in Railway: it is wrong, expired, or has no access to the image model in AI_IMAGE_MODEL.';
@@ -368,10 +385,12 @@ export class ImageHealth {
     );
   }
 
-  snapshot(main: PictureProvider | null, backup: PictureProvider | null): PicturesSnapshot {
+  snapshot(main: PictureProvider | null, backupOrList: PictureProvider | PictureProvider[] | null): PicturesSnapshot {
     const t = this.now();
     const iso = (n: number | null): string | null => (n ? new Date(n).toISOString() : null);
-    const order = [main, backup].filter((p): p is PictureProvider => !!p);
+    const backups = (Array.isArray(backupOrList) ? backupOrList : backupOrList ? [backupOrList] : []).filter((p) => p !== main);
+    const backup = backups[0] ?? null;
+    const order = [main, ...backups].filter((p): p is PictureProvider => !!p);
     // A provider that is no longer configured but failed earlier is still shown,
     // so the reason for a past alert does not vanish from the page.
     for (const p of this.state.keys()) if (!order.includes(p)) order.push(p);
@@ -379,13 +398,14 @@ export class ImageHealth {
       since: new Date(this.since).toISOString(),
       main,
       backup,
+      backups,
       providers: order.map((p) => {
         const s = this.of(p);
         const paused = s.pausedUntil > t;
         return {
           provider: p,
           label: PROVIDER_LABEL[p],
-          role: p === main ? 'main' : 'backup',
+          role: p === main ? 'main' : backups.includes(p) ? 'backup' : 'unused',
           delivered: s.delivered,
           failed: s.failed,
           failedByKind: { ...s.failedByKind },

@@ -31,7 +31,7 @@ import { refineSpec } from '../../src/core/specRefine';
 import { designFromPrompt, composeSuperOffline } from '../../src/core/promptDesigner';
 import { ensureHeroImage } from '../../src/core/heroImage';
 import { matchClub } from '../../src/core/clubs';
-import { generateSpecViaProvider, buildDirectorPrompt, critiqueSpecViaProvider, activeProvider, clubHintLine, writeCopy, copyLine, meterRetries, geminiModel, type ProviderResult } from './aiProvider';
+import { generateSpecViaProvider, buildDirectorPrompt, critiqueSpecViaProvider, activeProvider, clubHintLine, writeCopy, copyLine, meterRetries, providerModel, type ProviderResult } from './aiProvider';
 import { readGroundPhoto, PHOTO_SAMPLE_DEFAULT, PHOTO_SAMPLE_MAX } from './photoRead';
 import { generateImage, type ImageResult } from './imageAssets';
 import { envNum } from './env';
@@ -432,11 +432,8 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
       })
       .catch(() => {});
   };
-  /** The model id a tier resolves to, for the operator's failure detail. */
-  const modelOf = (isSuper: boolean): string =>
-    activeProvider() === 'gemini'
-      ? geminiModel(isSuper ? 'premium' : 'fast')
-      : isSuper ? (process.env.AI_MODEL_PREMIUM ?? process.env.AI_MODEL ?? 'default') : (process.env.AI_MODEL_FAST ?? process.env.AI_MODEL ?? 'default');
+  /** The model id a tier resolves to on the main provider, for the operator's failure detail. */
+  const modelOf = (isSuper: boolean): string => providerModel(activeProvider(), isSuper ? 'premium' : 'fast');
   /** Name the model in the operator's detail when the provider's text did not. */
   const withModel = (err: string, model: string): string =>
     model === 'default' || err.includes(model) ? err : `${err} (model ${model})`;
@@ -447,9 +444,12 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
    */
   const failureOf = (res: ProviderResult, otherwise: string, model: string): AiFailure => {
     const first = res.firstFailure;
-    if (!first) return classifyAiFailure(withModel(res.error ?? otherwise, model), res.status);
-    const fail = classifyAiFailure(withModel(first.error, model), first.status);
-    return { ...fail, detail: sanitizeDetail(withModel(res.error ?? first.error, model)) };
+    // The model that was asked, not the main tier's: during a Claude pause,
+    // or after a fall back, that is Gemini.
+    if (!first) return classifyAiFailure(withModel(res.error ?? otherwise, res.model ?? model), res.status);
+    // Both providers' errors already name their model.
+    const fail = classifyAiFailure(first.error, first.status);
+    return { ...fail, detail: sanitizeDetail(res.error ?? first.error) };
   };
   const budgetFailure = (): AiFailure => ({
     reason: 'budget',
@@ -628,7 +628,7 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
       const fail: AiFailure = modelResult.spec
         ? {
             reason: 'invalid_design',
-            detail: sanitizeDetail(`${modelOf(isSuper)}: spec failed validation: ${(r.errors ?? []).slice(0, 3).map((e) => `${e.path} ${e.message}`).join('; ')}`),
+            detail: sanitizeDetail(`${modelResult.model ?? modelOf(isSuper)}: spec failed validation: ${(r.errors ?? []).slice(0, 3).map((e) => `${e.path} ${e.message}`).join('; ')}`),
           }
         : failureOf(modelResult, 'the model did not answer', modelOf(isSuper));
       app.log.warn(
@@ -636,8 +636,8 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
           reason: fail.reason,
           detail: fail.detail,
           mode: mode0,
-          model: modelOf(isSuper),
-          provider: activeProvider(),
+          model: modelResult.model ?? modelOf(isSuper),
+          provider: modelResult.provider ?? activeProvider(),
         },
         'ai generate: premium could not deliver',
       );
