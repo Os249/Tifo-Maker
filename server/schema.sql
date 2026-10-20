@@ -89,6 +89,10 @@ CREATE TABLE IF NOT EXISTS auth_tokens (
   user_id    UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   expires_at TIMESTAMPTZ NOT NULL
 );
+-- A password change, a reset and an account deletion find every session of
+-- one account, while holding that account's row: without this, each read the
+-- whole table to do it.
+CREATE INDEX IF NOT EXISTS auth_tokens_user_idx ON auth_tokens (user_id);
 
 -- Single-use, hashed, expiring tokens for email verification and password reset.
 -- purpose is 'verify_email' or 'reset_password'. used_at marks consumption.

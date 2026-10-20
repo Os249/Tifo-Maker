@@ -1,4 +1,4 @@
-import { gunzipSync, gzipSync } from 'node:zlib';
+import { gunzip, gunzipSync, gzipSync } from 'node:zlib';
 
 /** Wire/storage codecs. Typed arrays travel as base64; cells travel gzipped. */
 
@@ -12,6 +12,13 @@ export function gzipBytes(data: Uint8Array): Buffer {
 const MAX_GUNZIP_BYTES = 4 * 1024 * 1024;
 export function gunzipBytes(data: Uint8Array, maxOutputLength = MAX_GUNZIP_BYTES): Buffer {
   return gunzipSync(data, { maxOutputLength });
+}
+
+/** The same, on libuv's thread pool: a large inflate does not hold the event loop. */
+export function gunzipBytesAsync(data: Uint8Array, maxOutputLength = MAX_GUNZIP_BYTES): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    gunzip(data, { maxOutputLength }, (err, out) => (err ? reject(err) : resolve(out)));
+  });
 }
 
 /**

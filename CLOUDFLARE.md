@@ -99,6 +99,17 @@ Sanity-check these too, since they are the things most likely to break:
 - Sign up with a throwaway email → the verification email still arrives (confirms your DNS records carried over).
 - Open the site normally → no certificate warning, no redirect loop.
 
+## Caching and takedowns
+
+Cloudflare keeps `.png` files by default and follows the site's `cache-control`
+header. Anything only its owner may see says `private, no-store` and is never
+kept, and every `/api` answer says `no-store` unless the route chose otherwise.
+Do not add a "Cache Everything" rule: pages and `/api` answers differ per person.
+
+A public design's share card (`/og/…png`) can be kept for up to an hour. If a
+moderator takes a design down and its card must disappear at once, purge that URL
+in the Cloudflare dashboard (Caching → Configuration → Purge Cache, by URL).
+
 ## Rolling back
 
 Point the nameservers at your registrar back to what they were, and set `TRUST_PROXY=1` on Railway. Nothing else in the app depends on Cloudflare — the Countries panel simply goes quiet again.

@@ -118,6 +118,134 @@ const page2=await (await browser.newContext()).newPage();
 const login = await page2.request.post(B+'/api/auth/login',{data:{username:EMAIL,password:'harbor-kite-moss-31'}});
 check('can sign back in with the email', login.status()===200, `status=${login.status()}`);
 
+// A project whose banners cannot be moved yet stays in this browser, whole.
+// Moving local projects used to delete them here whether or not their banners
+// and layers reached the account (audit round six), and scene saves now have
+// a limit of their own, so "not right now" has to mean "next time".
+{
+  const ctx3 = await browser.newContext({ viewport: { width: 1400, height: 900 } });
+  const p3 = await ctx3.newPage();
+  p3.on('pageerror', (e) => errs.push(String(e.message).slice(0, 200)));
+  const until = (fn, arg = null, ms = 60000) => p3.waitForFunction(fn, arg, { timeout: ms }).then(() => true).catch(() => false);
+  await p3.goto(B + '/app?new=1', { waitUntil: 'domcontentloaded' });
+  await p3.waitForFunction(() => /seats/.test(document.getElementById('stat')?.textContent || ''), null, { timeout: 90000 });
+  await until(() => /[?&]local=/.test(location.search));
+  await until(() => { const id = new URLSearchParams(location.search).get('local'); return !!id && !!localStorage.getItem('tifo_proj_' + id); });
+  const localId = await p3.evaluate(() => new URLSearchParams(location.search).get('local'));
+  // Leave the editor first (its own autosave writes this key), then give the
+  // project a banner of its own, which exists nowhere but this browser.
+  await p3.goto(B + '/legal', { waitUntil: 'domcontentloaded' });
+  const BANNERS = '{"version":1,"banners":[{"id":"r6-banner"}]}';
+  await p3.evaluate(([id, b]) => localStorage.setItem(`tifo_proj_${id}_banners`, b), [localId, BANNERS]);
+  const reg = await p3.request.post(B + '/api/auth/register', { data: { username: `mover${Date.now() % 1e8}`, password: 'harbor-kite-moss-31', email: `mover${Date.now()}@example.test`, acceptedVersion: 'test' } });
+  const tok = (await reg.json()).token;
+  await p3.evaluate((t) => localStorage.setItem('tifo_token_v1', t), tok);
+  const accountDesigns = () => p3.request.get(B + '/api/designs', { headers: { authorization: 'Bearer ' + tok } }).then((r) => r.json());
+
+  // The server is busy for scene saves (503 on both tries).
+  let refused = 0;
+  await p3.route('**/api/designs/*/scene', (route) => {
+    if (route.request().method() !== 'PUT') return route.continue();
+    refused++;
+    return route.fulfill({ status: 503, contentType: 'application/json', body: '{"error":"internal error"}' });
+  });
+  // The page moves local projects first, then lists the account's.
+  const listed = p3.waitForResponse((r) => r.url().includes('/api/projects'), { timeout: 120000 }).catch(() => null);
+  await p3.goto(B + '/projects', { waitUntil: 'domcontentloaded' });
+  await listed;
+  const stillLocal = await p3.evaluate((id) => JSON.parse(localStorage.getItem('tifo_projects_v1') || '[]').some((p) => p.id === id) && !!localStorage.getItem(`tifo_proj_${id}_banners`), localId);
+  check('a project whose banners could not move stays in this browser', refused > 0 && stillLocal, `scene PUTs refused=${refused}`);
+  check('and no half copy is left in the account', (await accountDesigns()).length === 0, JSON.stringify(await accountDesigns()).slice(0, 120));
+
+  // Next visit, the server takes it: the project moves, banners included.
+  await p3.unroute('**/api/designs/*/scene');
+  const listedAgain = p3.waitForResponse((r) => r.url().includes('/api/projects'), { timeout: 120000 }).catch(() => null);
+  await p3.goto(B + '/projects', { waitUntil: 'domcontentloaded' });
+  await listedAgain;
+  const moved = await until(() => JSON.parse(localStorage.getItem('tifo_projects_v1') || '[]').length === 0, null, 30000);
+  const mineNow = await accountDesigns();
+  const scene = mineNow.length ? await p3.request.get(B + `/api/designs/${mineNow[0].id}/scene`, { headers: { authorization: 'Bearer ' + tok } }).then((r) => r.json()) : null;
+  const banners = scene?.sceneGzB64
+    ? JSON.parse((await import('node:zlib')).gunzipSync(Buffer.from(scene.sceneGzB64, 'base64')).toString()).banners
+    : null;
+  check('and moves on the next visit, banners included', moved && mineNow.length === 1 && JSON.stringify(banners) === BANNERS, JSON.stringify(banners));
+  await ctx3.close();
+}
+
+/** A fresh browser with one local project in it, signed in to a new account. */
+async function localProjectSignedIn(tag, bannersRaw) {
+  const ctx = await browser.newContext({ viewport: { width: 1400, height: 900 } });
+  const pg = await ctx.newPage();
+  pg.on('pageerror', (e) => errs.push(String(e.message).slice(0, 200)));
+  await pg.goto(B + '/app?new=1', { waitUntil: 'domcontentloaded' });
+  await pg.waitForFunction(() => /seats/.test(document.getElementById('stat')?.textContent || ''), null, { timeout: 90000 });
+  await pg.waitForFunction(() => { const id = new URLSearchParams(location.search).get('local'); return !!id && !!localStorage.getItem('tifo_proj_' + id); }, null, { timeout: 60000 }).catch(() => {});
+  const id = await pg.evaluate(() => new URLSearchParams(location.search).get('local'));
+  await pg.goto(B + '/legal', { waitUntil: 'domcontentloaded' });
+  await pg.evaluate(([i, b]) => localStorage.setItem(`tifo_proj_${i}_banners`, b), [id, bannersRaw]);
+  const stamp = `${tag}${Date.now() % 1e8}`;
+  const reg = await pg.request.post(B + '/api/auth/register', { data: { username: stamp, password: 'harbor-kite-moss-31', email: `${stamp}@example.test`, acceptedVersion: 'test' } });
+  const tok = (await reg.json()).token;
+  await pg.evaluate((t) => localStorage.setItem('tifo_token_v1', t), tok);
+  const designs = () => pg.request.get(B + '/api/designs', { headers: { authorization: 'Bearer ' + tok } }).then((r) => r.json());
+  const visitProjects = async () => {
+    const listedP = pg.waitForResponse((r) => r.url().includes('/api/projects'), { timeout: 120000 }).catch(() => null);
+    await pg.goto(B + '/projects', { waitUntil: 'domcontentloaded' });
+    await listedP;
+  };
+  const isLocal = () => pg.evaluate((i) => JSON.parse(localStorage.getItem('tifo_projects_v1') || '[]').some((p) => p.id === i), id);
+  return { ctx, pg, id, designs, visitProjects, isLocal };
+}
+
+// The copy could not be taken back out either (offline): the next visit removes
+// it first instead of leaving a duplicate in the account.
+{
+  const BANNERS = '{"version":1,"banners":[{"id":"r6-orphan"}]}';
+  const t = await localProjectSignedIn('orphan', BANNERS);
+  await t.pg.route('**/api/designs/*/scene', (route) => route.request().method() === 'PUT' ? route.fulfill({ status: 503, contentType: 'application/json', body: '{"error":"internal error"}' }) : route.continue());
+  await t.pg.route('**/api/designs/*', (route) => route.request().method() === 'DELETE' ? route.abort('failed') : route.continue());
+  await t.pg.route('**/api/designs/*?permanent=1', (route) => route.abort('failed'));
+  await t.visitProjects();
+  const leftOver = (await t.designs()).length;
+  check('a copy that could not be removed is remembered', (await t.isLocal()) && leftOver === 1 && !!(await t.pg.evaluate((i) => localStorage.getItem(`tifo_proj_${i}_orphan`), t.id)), `account=${leftOver}`);
+  await t.pg.unrouteAll();
+  await t.visitProjects();
+  const after = await t.designs();
+  check('and is removed before the project moves, so there is one copy', !(await t.isLocal()) && after.length === 1, `account=${after.length}`);
+  await t.ctx.close();
+}
+
+// Banners the server will never take (too large even alone) keep the project
+// here, and it is not copied again on every visit until they change.
+{
+  const t = await localProjectSignedIn('held', '{"version":1,"banners":[{"id":"r6-held"}]}');
+  let puts = 0;
+  await t.pg.route('**/api/designs/*/scene', (route) => {
+    if (route.request().method() !== 'PUT') return route.continue();
+    puts++;
+    return route.fulfill({ status: 413, contentType: 'application/json', body: '{"error":"Request body is too large"}' });
+  });
+  await t.visitProjects();
+  const putsFirst = puts;
+  const firstCopies = (await t.designs()).length;
+  await t.visitProjects();
+  check('banners the server never takes keep the project here, and it is not copied again', (await t.isLocal()) && firstCopies === 0 && (await t.designs()).length === 0 && putsFirst > 0 && puts === putsFirst, `puts=${putsFirst}->${puts} copies=${firstCopies}`);
+  await t.pg.unrouteAll();
+  await t.pg.evaluate((i) => localStorage.setItem(`tifo_proj_${i}_banners`, '{"version":1,"banners":[{"id":"r6-held-smaller"}]}'), t.id);
+  await t.visitProjects();
+  check('and it moves once its banners change', !(await t.isLocal()) && (await t.designs()).length === 1);
+  await t.ctx.close();
+}
+
+// A banners record this browser cannot read moves as no banners, as it always did.
+{
+  const t = await localProjectSignedIn('badbanners', '{not json');
+  await t.visitProjects();
+  const after = await t.designs();
+  check('a project with unreadable banners still moves, once', !(await t.isLocal()) && after.length === 1, `account=${after.length}`);
+  await t.ctx.close();
+}
+
 console.log(`\n  ${pass} passed, ${fail} failed`);
 console.log('  pageerrors:', errs.length?errs:'none');
 await browser.close(); stop(); process.exit(fail?1:0);

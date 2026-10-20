@@ -303,7 +303,10 @@ async function load(): Promise<void> {
     if (listLocal().length) {
       status.textContent = t('pj.moving');
       const r = await claimAllLocal();
-      if (r.moved) toast(t('pj.t.moved'));
+      // A project held back for good is the one thing the person must do
+      // something about, so it is the one said when there is more than one.
+      if (r.held) toast(t('pj.t.held'));
+      else if (r.moved) toast(t('pj.t.moved'));
       else if (r.failed) toast(t('pj.t.moveFailed'));
     }
     try {

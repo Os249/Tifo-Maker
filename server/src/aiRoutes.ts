@@ -20,7 +20,7 @@
  * HMAC key).
  */
 
-import { createHmac, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
+import { createHash, createHmac, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { AiBudgetRepository, AiEventsRepository, AiEventUsage, AiMode, AiOutcome, AiUsageRepository } from './repo';
 import { classifyAiFailure, publicCause, sanitizeDetail, type AiFailure } from './aiFailure';
@@ -231,12 +231,18 @@ export interface AiRouteDeps {
   authRouteConfig?: object;
 }
 
-/** Constant-time string compare that never throws on length mismatch. */
+/**
+ * Constant-time string compare that never throws on length mismatch.
+ *
+ * Both sides are hashed to 32 bytes first. It used to return early when the
+ * lengths differed, so the time a wrong guess took told the guesser whether
+ * they had the admin password's length right (audit round six). Equal digests
+ * mean equal strings for any purpose here.
+ */
 export function safeEqual(a: string, b: string): boolean {
-  const ba = Buffer.from(a);
-  const bb = Buffer.from(b);
-  if (ba.length !== bb.length) return false;
-  return timingSafeEqual(ba, bb);
+  const da = createHash('sha256').update(a, 'utf8').digest();
+  const db = createHash('sha256').update(b, 'utf8').digest();
+  return timingSafeEqual(da, db);
 }
 
 /**
@@ -271,6 +277,19 @@ function unlockKey(secret: string): Buffer {
     unlockKeys.set(secret, key);
   }
   return key;
+}
+
+/**
+ * Derive the unlock key now, while the server is starting, rather than on the
+ * first request that carries a token. That first request could be anyone's:
+ * a well-formed `x-ai-unlock` header from an anonymous caller held the only
+ * event loop for the 0.35-0.74 s the derivation takes, once per process
+ * (audit round six). Synchronous on purpose, so `verifyUnlock` stays a plain
+ * boolean check with no window in which a key is missing or a promise could be
+ * mistaken for a yes. A failure throws here and stops the boot.
+ */
+export function warmUnlockKey(secret: string | undefined): void {
+  if (secret) unlockKey(secret);
 }
 
 /**

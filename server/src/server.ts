@@ -20,6 +20,7 @@ import { envNum } from './env';
 import { logConfigWarnings, logProviderSetup } from './preflight';
 import { schemaStatements } from './schema';
 import { SocMonitor, socKeyFrom } from './soc';
+import { createPool } from './db';
 import { MemorySocRepository, PgSocRepository } from './socRepo';
 
 /**
@@ -94,7 +95,7 @@ async function main(): Promise<void> {
     publicUrl: process.env.PUBLIC_URL,
   };
   if (process.env.DATABASE_URL) {
-    const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
+    const pool = createPool(process.env.DATABASE_URL);
     await applySchema(pool);
     // Community stadium submissions — best-effort table init so a schema slip here
     // can never block server boot; on failure the feature is simply disabled.

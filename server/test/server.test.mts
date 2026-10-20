@@ -363,6 +363,16 @@ async function runSuite(name: string, repo: DesignRepository, auth: AuthReposito
   const frankTok = await registerUser(app, 'frank');
   assert.equal(
     (await app.inject({ method: 'DELETE', url: '/api/account', headers: bearer(frankTok) })).statusCode,
+    401,
+    'deleting an account needs its password, not the session alone',
+  );
+  assert.equal(
+    (await app.inject({ method: 'DELETE', url: '/api/account', headers: bearer(frankTok), payload: { password: 'wrong-password-here' } })).statusCode,
+    401,
+    'the right password',
+  );
+  assert.equal(
+    (await app.inject({ method: 'DELETE', url: '/api/account', headers: bearer(frankTok), payload: { password: 'harbor-kite-moss-31' } })).statusCode,
     204,
     'account deletion succeeds',
   );

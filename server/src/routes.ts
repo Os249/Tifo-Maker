@@ -6,7 +6,7 @@ import rateLimit from '@fastify/rate-limit';
 import helmet from '@fastify/helmet';
 import fastifyStatic from '@fastify/static';
 import { dummyHash, hashPassword, hashToken, issueToken, TOKEN_TTL_MS, verifyPassword } from './auth';
-import { MAX_SCENE_GUNZIP_BYTES, gunzipBytes, gzipBytes, u32FromB64, u8FromB64 } from './codec';
+import { MAX_SCENE_GUNZIP_BYTES, gunzipBytes, gunzipBytesAsync, gzipBytes, u32FromB64, u8FromB64 } from './codec';
 import { generateSeatMap } from '../../src/core/seatmap';
 import { shippedTemplates } from '../../src/core/stadiumCatalog';
 import { noTifoMask } from '../../src/core/venueDetails';
@@ -19,7 +19,7 @@ import type { AiBudgetRepository, AiEventsRepository, AiUsageRepository, AuthRep
 import { picturesStatus } from './imageAssets';
 import { textModelsStatus } from './aiProvider';
 import { imageHealth } from './imageHealth';
-import { registerAiRoutes, safeEqual, verifyUnlock } from './aiRoutes';
+import { registerAiRoutes, safeEqual, verifyUnlock, warmUnlockKey } from './aiRoutes';
 import { stadiumPlan } from './stadiumPlan';
 import { emailHealth, type EmailSender } from './email';
 import { button, codeBox, layoutEmail, para, smallPrint, textFooter } from './emailLayout';
@@ -134,6 +134,41 @@ const MAX_THUMB_BYTES = 128 * 1024;
  * is reached long before a database row becomes a problem.
  */
 const SCENE_MAX_BYTES = 3 * 1024 * 1024;
+
+/**
+ * How much structure a saved scene may have before it is parsed.
+ *
+ * A scene may inflate to 16 MB, and what it costs to parse depends on what is
+ * in it: 16 MB of `{},` took 3.4 s on the one event loop, 16 MB of `0,` 0.4 s,
+ * while a real scene (banners with pictures, layer grids) is a few long base64
+ * strings and a few thousand objects and parses in about 10 ms (audit round
+ * six). A cap on the inflate ratio would refuse real saves (a solid layer
+ * compresses hundreds to one); a cap on the structure does not. Counted on the
+ * bytes before parsing, stopping as soon as a cap is passed. Characters inside
+ * strings are counted too, which only ever overcounts.
+ */
+// Real scenes stay far below these: their bulk is base64 strings, and the one
+// big source of commas, stroke points at full precision, fits about 100,000
+// numbers in the largest body the server takes. Under the caps the slowest
+// shapes found (duplicate keys, short floats) parse in about 100 ms.
+const SCENE_MAX_CONTAINERS = 100_000; // '{' and '['
+const SCENE_MAX_COMMAS = 400_000;
+const SCENE_MAX_COLONS = 200_000; // object keys
+/** How many times `byte` occurs, counting no further than just past `cap`. */
+function countUpTo(buf: Buffer, byte: number, cap: number): number {
+  let n = 0;
+  // indexOf is native: a long base64 string is skipped in a few milliseconds,
+  // where a JavaScript loop over 16 MB took about 65.
+  for (let i = buf.indexOf(byte); i !== -1 && n <= cap; i = buf.indexOf(byte, i + 1)) n++;
+  return n;
+}
+function sceneTooComplex(json: Buffer): boolean {
+  const objects = countUpTo(json, 0x7b, SCENE_MAX_CONTAINERS); // {
+  if (objects > SCENE_MAX_CONTAINERS) return true;
+  if (objects + countUpTo(json, 0x5b, SCENE_MAX_CONTAINERS - objects) > SCENE_MAX_CONTAINERS) return true; // [
+  if (countUpTo(json, 0x3a, SCENE_MAX_COLONS) > SCENE_MAX_COLONS) return true; // :
+  return countUpTo(json, 0x2c, SCENE_MAX_COMMAS) > SCENE_MAX_COMMAS; // ,
+}
 const MAX_PHOTO_BYTES = 2 * 1024 * 1024; // real photos, resized client-side before upload
 // A full 60k design gzips to a few hundred bytes, but base64 of (cells + a
 // thumbnail PNG up to 128KB) can approach ~200KB. 1MB gives generous headroom
@@ -324,6 +359,27 @@ export async function buildApp(
   app.decorateRequest('socActor', null);
   attachSecurityMonitor(app, options.soc);
 
+  // Nothing that answers about one person may be kept by a shared cache.
+  //
+  // Most JSON routes set no Cache-Control at all: /api/me, a design's owner-only
+  // fields, the scene with its owner's layers, the gallery with the caller's own
+  // votes, notifications, the account export. Harmless while nothing sits in
+  // front of Railway; the day a CDN does, a rule that matches /api/* would store
+  // one person's answer and hand it to the next (audit round six). So any /api
+  // response, and any error response anywhere, that has not said how it may be
+  // cached is `no-store`. Routes that chose a policy (photos, og cards,
+  // thumbnails, the projects list) keep it: this only fills a header that is
+  // missing, it never overrides one.
+  // Decided on the route that answered, not the raw URL: `/%61pi/me` is
+  // /api/me to the router and must be no-store too.
+  app.addHook('onSend', async (req, reply, payload) => {
+    const path = req.routeOptions?.url ?? req.url;
+    if (!reply.hasHeader('cache-control') && (path.startsWith('/api/') || req.url.startsWith('/api/') || reply.statusCode >= 400)) {
+      reply.header('cache-control', 'no-store');
+    }
+    return payload;
+  });
+
   // No stack traces, driver messages or constraint names in a response.
   //
   // Without a handler, Fastify answers an unexpected throw with the error's own
@@ -410,8 +466,13 @@ export async function buildApp(
   //  - style-src 'self' + inline   — the app injects its theme CSS via JS and uses a
   //                                  couple of inline style= attributes; 'unsafe-inline'
   //                                  for *styles* is low-risk (style injection ≠ script
-  //                                  execution). Google Fonts + jsDelivr ship CSS too.
-  //  - font-src                    — Google Fonts + the Tabler icons webfont (jsDelivr).
+  //                                  execution).
+  //  - font-src 'self'             — every font is bundled (@fontsource, the Tabler
+  //                                  subset in src/vendor). Google Fonts and jsDelivr
+  //                                  were allowed here and in style-src until audit
+  //                                  round six, long after the last page stopped
+  //                                  using them: an origin nothing needs is only room
+  //                                  for someone else's stylesheet.
   //  - img-src 'self' data:        — thumbnails and the generated QR PNGs are data: URIs.
   //  - connect-src 'self'          — the app only talks to its own origin (no CORS).
   //  - object-src 'none', frame-ancestors 'none' — no plugins; can't be framed
@@ -428,8 +489,8 @@ export async function buildApp(
         // (set below by helmet) blocks inline on*= handlers. Combined with the fact that
         // all user input is HTML-escaped before rendering, the residual risk is low.
         scriptSrc: ["'self'", "'unsafe-eval'"],
-        styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com', 'https://cdn.jsdelivr.net'],
-        fontSrc: ["'self'", 'https://fonts.gstatic.com', 'https://cdn.jsdelivr.net'],
+        styleSrc: ["'self'", "'unsafe-inline'"],
+        fontSrc: ["'self'"],
         imgSrc: ["'self'", 'data:'],
         connectSrc: ["'self'"],
         objectSrc: ["'none'"],
@@ -520,6 +581,13 @@ export async function buildApp(
     if (!m) return null;
     const bare = m[1].toLowerCase();
     if (!ALLOWED_EMAIL_HOSTS.has(bare)) return null;
+    // A port only on a dev host. The public names are only ever reached on the
+    // default port, and accepting any port let a request write
+    // `tifomaker.org:1234` into the canonical and og:url of the page it got
+    // back, and into the links of the mail it set off (audit round six). With
+    // PUBLIC_URL set this is never reached, which is the setting for production.
+    const local = bare === 'localhost' || bare === '127.0.0.1';
+    if (m[2] && !local) return null;
     return { bare, host: m[2] ? `${bare}:${Number(m[2])}` : bare };
   };
   const emailBase = (req: FastifyRequest): string => {
@@ -571,14 +639,35 @@ export async function buildApp(
       return null;
     }
     const where = `${req.method} ${(req.routeOptions?.url ?? req.url).split('?')[0]}`;
-    if (!OPEN_WHILE_UNNAMED.has(where) && !(await auth.hasChosenUsername(userId).catch(() => true))) {
-      // 428: the request is fine, something has to happen first. A 403 would
-      // read as "you may not", which is the wrong thing to tell someone who has
-      // simply not finished signing up.
-      await reply.code(428).send({ error: 'choose a username first', code: 'needs_username' });
-      return null;
+    if (!OPEN_WHILE_UNNAMED.has(where)) {
+      const chosen = await usernameChosen(userId, reply);
+      if (chosen === null) return null;
+      if (!chosen) {
+        // 428: the request is fine, something has to happen first. A 403 would
+        // read as "you may not", which is the wrong thing to tell someone who has
+        // simply not finished signing up.
+        await reply.code(428).send({ error: 'choose a username first', code: 'needs_username' });
+        return null;
+      }
     }
     return userId;
+  };
+  /**
+   * Has this account picked its @name? null when the answer could not be read,
+   * after telling the caller to try again.
+   *
+   * A database error used to count as "yes" (`.catch(() => true)`), so the wall
+   * opened whenever the lookup failed: an account still wearing the handle we
+   * derived from its email could publish under it during any database hiccup
+   * (audit round six). A check that cannot be made now refuses now.
+   */
+  const usernameChosen = async (userId: string, reply: FastifyReply): Promise<boolean | null> => {
+    try {
+      return await auth.hasChosenUsername(userId);
+    } catch {
+      await reply.code(503).send({ error: 'something went wrong on our side, please try again', code: 'retry' });
+      return null;
+    }
   };
 
   // Admin = the user's username is in the ADMIN_USERNAMES allow-list. This is
@@ -591,10 +680,20 @@ export async function buildApp(
   // username that case-folds onto an allow-listed one, so the pair cannot exist.
   const adminSet = new Set(options.adminUsernames ?? []);
   const adminFolded = new Set((options.adminUsernames ?? []).map((u) => u.toLowerCase()));
-  /** The username when the account is an allow-listed admin, else null. */
+  /**
+   * The username when the account is an allow-listed admin, else null.
+   *
+   * Throws when the account cannot be read. It used to answer "not an admin" on
+   * a database error, which is the safe answer for granting rights but the
+   * unsafe one for the guards that protect an admin account (no rename away
+   * from the name, no deletion): those opened whenever the lookup failed, and
+   * the freed name was moderator rights for whoever registered it next (audit
+   * round six). Every caller treats a throw as a failed request, so it now
+   * fails closed both ways.
+   */
   const adminNameOf = async (userId: string): Promise<string | null> => {
     if (adminSet.size === 0) return null;
-    const user = await auth.getUserById(userId).catch(() => null);
+    const user = await auth.getUserById(userId);
     return user && adminSet.has(user.username) ? user.username : null;
   };
   const isAdminUser = async (userId: string): Promise<boolean> => (await adminNameOf(userId)) !== null;
@@ -643,6 +742,7 @@ export async function buildApp(
   };
 
   const aiAdminPassword = options.aiAdminPassword ?? process.env.AI_ADMIN_PASSWORD;
+  warmUnlockKey(aiAdminPassword);
   /**
    * May this request take an allow-listed admin name? Only the exact name (a
    * case-folded lookalike never), and only with the admin password itself in
@@ -1391,7 +1491,10 @@ export async function buildApp(
     try {
       await auth.deleteEmailTokens(user.id, 'reset_password');
       const { token, tokenHash } = issueToken();
-      await auth.createEmailToken(user.id, tokenHash, 'reset_password', new Date(Date.now() + RESET_TTL_MS));
+      // Only while the account still has this address: an email change landing
+      // since the lookup would otherwise leave a working link in the old
+      // mailbox, mailed after the change had spent the others (audit round six).
+      if (!(await auth.createEmailTokenForAddress(user.id, user.email, tokenHash, 'reset_password', new Date(Date.now() + RESET_TTL_MS)))) return;
       const base = emailBase(req);
       const link = `${base}/reset?token=${token}`;
       const subject = 'إعادة تعيين كلمة مرور تيفو ميكر · Reset your TifoMaker password';
@@ -1484,6 +1587,17 @@ export async function buildApp(
    * with no password (made with a provider) have nothing to confirm with, and
    * pass. Sends the reply and returns false when it fails.
    */
+  /**
+   * The account's hash now, when it is no longer `before` but `password` still
+   * opens it: another sign-in upgraded the same password. Null for anything
+   * else, a reset above all.
+   */
+  const stillThePassword = async (userId: string, password: string, before: string): Promise<string | null> => {
+    const now = (await auth.getUserById(userId).catch(() => null))?.passwordHash ?? null;
+    if (!now || now === before || !password) return null;
+    return (await verifyPassword(password, now)).ok ? now : null;
+  };
+
   const reauthenticated = async (req: FastifyRequest, reply: FastifyReply, user: { username: string; passwordHash: string | null }): Promise<boolean> => {
     if (user.passwordHash === null) return true;
     const given = (req.body as { password?: unknown } | null)?.password;
@@ -1770,16 +1884,26 @@ export async function buildApp(
     if (!userId) return;
     const { currentPassword, newPassword } = (req.body ?? {}) as { currentPassword?: string; newPassword?: string };
     const user = await auth.getUserById(userId).catch(() => null);
+    // Copied out: a repository may hand back a live object that a reset changes.
+    const checkedHash = user ? user.passwordHash ?? null : null;
     // An account created by signing in with a provider has no password to
     // confirm. Asking for one it never had would lock it out of ever getting
     // one — and the bearer token has already proved who is asking, which is the
     // only thing the current password was ever there to prove.
-    const settingFirst = !!user && user.passwordHash === null;
+    const settingFirst = !!user && checkedHash === null;
+    if (settingFirst && user.email && user.emailVerifiedAt) {
+      // A session alone used to be enough here. On an account that signs in
+      // only with Google, a stolen session could then set a password the thief
+      // knows, move the email with it, and reset the owner out for good (audit
+      // round six). Where there is a proven mailbox, the mailbox decides: the
+      // page sends the set-a-password link there instead (the reset flow).
+      return reply.code(403).send({ error: 'we will email you a link to set a password', code: 'use_email_link' });
+    }
     if (!settingFirst) {
       // Ownership first, then the policy. The old order graded the new password
       // before checking that the caller could prove the account was theirs, which
       // meant anyone holding a stale token could probe the blocklist for free.
-      const current = await verifyPassword(currentPassword ?? '', user?.passwordHash ?? await dummyHash());
+      const current = await verifyPassword(currentPassword ?? '', checkedHash ?? await dummyHash());
       if (!user || !currentPassword || !current.ok) {
         req.socNote = { kind: 'password_change_failed', subject: user?.username };
         return reply.code(401).send({ error: 'current password is incorrect' });
@@ -1788,17 +1912,49 @@ export async function buildApp(
     if (!user) return reply.code(401).send({ error: 'current password is incorrect' });
     const next = gradePassword(reply, newPassword, { email: user.email ?? undefined, username: user.username });
     if (next === null) return;
-    await auth.setPasswordHash(userId, await hashPassword(next));
-    // An outstanding reset link would undo this from the mailbox it went to.
-    await auth.deleteEmailTokens(userId, 'reset_password').catch(() => {});
     // Changing a password is what someone does when they think a session is
     // compromised. It has to end the other sessions, or it is theatre: tokens
     // live 30 days, so a stolen one otherwise outlived the "fix" by a month.
-    // /api/auth/reset already did this; this path did not.
-    await auth.deleteUserTokens(userId).catch(() => {});
-    // Mint a replacement so the person who just changed it stays signed in here.
+    // A replacement session is minted so the person who just changed it stays
+    // signed in here.
+    //
+    // Reset links stay. The mailbox outranks a session: someone holding a
+    // stolen session and the password could otherwise spend every link the
+    // owner asked for by changing the password every few seconds, and the
+    // owner could never take the account back (audit round six).
+    //
+    // One step, all or nothing. It was four writes with the token cleanup's
+    // errors swallowed, so a failure there kept every stolen session alive and
+    // still answered `signedOutEverywhereElse: true` (audit round six). Now a
+    // failure changes nothing, says so, and the old password still works.
+    // And only over the password just checked: a reset that landed while this
+    // was hashing has taken the account back, and this change must not undo it.
     const { token, tokenHash } = issueToken();
-    await auth.createToken(userId, tokenHash, new Date(Date.now() + TOKEN_TTL_MS));
+    let changed: boolean;
+    try {
+      const nextHash = await hashPassword(next);
+      const write = (expectedHash: string | null) =>
+        auth.replacePassword(userId, nextHash, {
+          expectedHash,
+          keepResetLinks: true,
+          newSession: { tokenHash, expiresAt: new Date(Date.now() + TOKEN_TTL_MS) },
+        });
+      changed = await write(checkedHash);
+      if (!changed && checkedHash !== null) {
+        // A sign-in in another tab may have upgraded the hash of this same
+        // password meanwhile. That is not a reset: go on over the new hash if
+        // the password just confirmed still opens it.
+        const now = await stillThePassword(userId, currentPassword ?? '', checkedHash);
+        if (now) changed = await write(now);
+      }
+    } catch (err) {
+      req.log.error({ err }, 'password change failed');
+      return reply.code(503).send({ error: 'your password was not changed, please try again', code: 'retry' });
+    }
+    if (!changed) {
+      req.socNote = { kind: 'password_change_failed', subject: user.username };
+      return reply.code(401).send({ error: 'current password is incorrect' });
+    }
     return reply.code(200).send({ ok: true, token, signedOutEverywhereElse: true });
   });
 
@@ -1840,20 +1996,31 @@ export async function buildApp(
     // trade is worth it.
     const next = gradePassword(reply, newPassword);
     if (next === null) return;
+    // Hashed before the link is spent, so spending it and using it are
+    // milliseconds apart rather than the 0.3 s of the hash.
+    const newHash = token ? await hashPassword(next) : null;
     const userId = token ? await auth.consumeEmailToken(hashToken(token), 'reset_password') : null;
-    if (!userId) return reply.code(400).send({ error: 'invalid or expired reset link' });
-    await auth.setPasswordHash(userId, await hashPassword(next));
-    await auth.deleteUserTokens(userId);
-    await auth.deleteEmailTokens(userId, 'reset_password').catch(() => {});
+    if (!userId || !newHash) return reply.code(400).send({ error: 'invalid or expired reset link' });
     // A reset is how an account is taken back. It proves who owns the mailbox,
     // not who connected the Google or X sign-ins already on the account, so
     // those are removed too: one connected by whoever had the account before
     // would otherwise still open it (audit round four). The owner's own comes
     // back by itself the next time they sign in with it, because the account's
     // verified address matches.
-    for (const provider of await auth.identitiesFor(userId).catch(() => [] as string[])) {
-      await auth.unlinkIdentity(provider, userId).catch(() => false);
+    //
+    // New password, every session ended, every other reset link spent and the
+    // sign-ins removed, in one transaction. The removals used to be separate
+    // writes with their errors swallowed, so a failure could leave the
+    // intruder's Google sign-in on an account that had just been "taken back",
+    // behind a reply of ok (audit round six). Now it is all of it or none of it.
+    let reset: boolean;
+    try {
+      reset = await auth.replacePassword(userId, newHash, { dropIdentities: true });
+    } catch (err) {
+      req.log.error({ err }, 'password reset failed');
+      return reply.code(503).send({ error: 'your password was not changed; request a new reset link and try again', code: 'retry' });
     }
+    if (!reset) return reply.code(400).send({ error: 'invalid or expired reset link' }); // the account is gone
     return reply.code(200).send({ ok: true });
   });
 
@@ -1881,26 +2048,48 @@ export async function buildApp(
     // password that is not already NFC and did not match, which is nobody's
     // normal sign-in and no new signal about whether the account exists.
     const supplied = typeof password === 'string' ? password : '';
+    // Read once: the hash this sign-in is judged against, and the one the
+    // session is issued against below. A repository may hand back a live
+    // object that a reset changes while scrypt runs.
+    const storedHash = user?.passwordHash ?? null;
     let matched = normalizePassword(supplied);
-    let check = await verifyPassword(matched, user?.passwordHash ?? await dummyHash());
+    let check = await verifyPassword(matched, storedHash ?? await dummyHash());
     if (!check.ok && matched !== supplied) {
       matched = supplied;
-      check = await verifyPassword(matched, user?.passwordHash ?? await dummyHash());
+      check = await verifyPassword(matched, storedHash ?? await dummyHash());
     }
     // The account a sign-in was aimed at, for the Security tab: its public
     // @name when it exists, nothing when it does not (what was typed stays out).
     req.socNote = { subject: user?.username };
-    if (!user || !password || !check.ok) {
+    if (!user || !password || !check.ok || !storedHash) {
       return reply.code(401).send({ error: 'invalid credentials' });
     }
     // Right password, weaker parameters than we now use: this is the only moment
     // the password exists in the clear, so it is the only moment it can be
-    // upgraded. Best-effort — a failed rehash must not fail the sign-in.
+    // upgraded. Best-effort — a failed rehash must not fail the sign-in. And
+    // only over the hash just checked: written unconditionally, a sign-in that
+    // overlapped a reset put the OLD password back over the new one (audit
+    // round six).
+    let sessionHash = storedHash;
     if (check.needsRehash) {
-      await auth.setPasswordHash(user.id, await hashPassword(matched)).catch(() => {});
+      const upgraded = await hashPassword(matched);
+      if (await auth.upgradePasswordHash(user.id, storedHash, upgraded).catch(() => false)) {
+        sessionHash = upgraded;
+      } else {
+        // Someone else changed the hash meanwhile. Another sign-in upgrading the
+        // same password is fine and this one goes ahead on the hash it wrote; a
+        // reset is not, and the password just typed will not match it.
+        const now = (await auth.getUserById(user.id).catch(() => null))?.passwordHash ?? null;
+        if (now && now !== storedHash && (await verifyPassword(matched, now)).ok) sessionHash = now;
+      }
     }
+    // The session is issued only while the password is still the one checked.
+    // A reset or a password change that landed meanwhile has signed everyone
+    // out, this sign-in included; it gets the same answer as a wrong password.
     const { token, tokenHash } = issueToken();
-    await auth.createToken(user.id, tokenHash, new Date(Date.now() + TOKEN_TTL_MS));
+    if (!(await auth.createTokenIfPassword(user.id, sessionHash, tokenHash, new Date(Date.now() + TOKEN_TTL_MS)))) {
+      return reply.code(401).send({ error: 'invalid credentials' });
+    }
     return { token, username: user.username };
   });
 
@@ -2047,7 +2236,15 @@ export async function buildApp(
     const profile = await impl.profile(accessToken);
     if (!profile) return bail('provider', pending.r);
 
-    const owner = await auth.getUserIdByIdentity(provider, profile.id).catch(() => null);
+    // A failed lookup is not "nobody has this sign-in": answered as that, the
+    // code below made a new account holding the provider's verified address, or
+    // linked the sign-in somewhere it does not belong (audit round six).
+    let owner: string | null;
+    try {
+      owner = await auth.getUserIdByIdentity(provider, profile.id);
+    } catch {
+      return bail('provider', pending.r);
+    }
 
     // ---- linking an extra provider onto an account that is already signed in.
     // Safe by construction: `pending.u` was written by us, in a request that
@@ -2056,10 +2253,16 @@ export async function buildApp(
       // The session that started the link must still be the account's: one
       // revoked since (password changed, signed out everywhere) cannot finish it.
       const live = pending.t ? await auth.getUserIdByToken(pending.t).catch(() => null) : null;
-      if (live !== pending.u) return bail('state', pending.r);
+      if (live !== pending.u || !pending.t) return bail('state', pending.r);
       if (owner && owner !== pending.u) return bail('linked_elsewhere', pending.r);
-      if (!owner && !(await auth.linkIdentity(provider, profile.id, pending.u).catch(() => false))) {
-        return bail('provider', pending.r);
+      // Stored only while that session is still live, in the same statement: a
+      // reset landing between the check above and the write used to leave this
+      // sign-in on the account it had just taken back (audit round six).
+      if (!owner && !(await auth.linkIdentityForSession(provider, profile.id, pending.u, pending.t).catch(() => false))) {
+        const now = await auth.getUserIdByIdentity(provider, profile.id).catch(() => null);
+        if (now && now !== pending.u) return bail('linked_elsewhere', pending.r);
+        if (now !== pending.u) return bail('state', pending.r);
+        // Linked by this same sign-in finishing twice at once: fine.
       }
       if (!owner) noticeLinked(req, pending.u, provider);
       req.socNote = { kind: 'oauth_linked', subject: provider };
@@ -2088,7 +2291,16 @@ export async function buildApp(
       profile.email && profile.email.length <= MAX_EMAIL && EMAIL.test(profile.email) ? profile.email : null;
 
     if (!userId && claimedEmail && profile.emailVerified) {
-      const byEmail = await auth.getUserByEmail(claimedEmail).catch(() => null);
+      // A failed lookup is not "nobody has this address": answered as that, it
+      // made a new empty account and tied the sign-in to it, so the owner's
+      // Google opened an account that was not theirs from then on (audit
+      // round six). Stop and let them try again.
+      let byEmail: Awaited<ReturnType<typeof auth.getUserByEmail>>;
+      try {
+        byEmail = await auth.getUserByEmail(claimedEmail);
+      } catch {
+        return bail('provider', pending.r);
+      }
       if (byEmail) {
         if (!byEmail.emailVerifiedAt) {
           req.socNote = { kind: 'oauth_link_refused', subject: byEmail.username };
@@ -2149,8 +2361,14 @@ export async function buildApp(
     // as a bearer anywhere, and is spent atomically when traded. It used to be
     // a full 30-day session token, so the cookie itself was a session, and two
     // concurrent trades of one cookie both succeeded (audit round four).
+    //
+    // Stored only while this identity still opens the account: a reset that
+    // removed it after the lookup above would otherwise be followed by a
+    // ticket, and a session, for the very sign-in it took away (audit round six).
     const { token, tokenHash } = issueToken();
-    await auth.createEmailToken(userId, tokenHash, 'oauth_handoff', new Date(Date.now() + HANDOFF_TTL_MS));
+    if (!(await auth.createHandoffIfLinked(userId, provider, profile.id, tokenHash, new Date(Date.now() + HANDOFF_TTL_MS)).catch(() => false))) {
+      return bail('provider', pending.r);
+    }
     req.socNote = { subject: (await auth.getUserById(userId).catch(() => null))?.username };
 
     // The session must not travel in the URL. This site's own logger redacts
@@ -2179,11 +2397,12 @@ export async function buildApp(
     const handed = readCookie(req, HANDOFF_COOKIE);
     void reply.header('set-cookie', [clearLine(req, HANDOFF_COOKIE, '/api/auth/handoff')]);
     if (!handed) return reply.code(401).send({ error: 'no session to adopt' });
-    // Spent in one statement: only the first trade of a ticket gets a session.
-    const userId = await auth.consumeEmailToken(hashToken(handed), 'oauth_handoff').catch(() => null);
-    if (!userId) return reply.code(401).send({ error: 'no session to adopt' });
+    // Spent in one statement: only the first trade of a ticket gets a session,
+    // and the ticket and the session are one write, so a reset cannot land
+    // between them and leave the session standing.
     const fresh = issueToken();
-    await auth.createToken(userId, fresh.tokenHash, new Date(Date.now() + TOKEN_TTL_MS));
+    const userId = await auth.exchangeHandoff(hashToken(handed), fresh.tokenHash, new Date(Date.now() + TOKEN_TTL_MS)).catch(() => null);
+    if (!userId) return reply.code(401).send({ error: 'no session to adopt' });
     const user = await auth.getUserById(userId).catch(() => null);
     return { token: fresh.token, username: user?.username ?? null };
   });
@@ -2211,6 +2430,13 @@ export async function buildApp(
     if (user.email && !user.emailVerifiedAt) {
       return reply.code(403).send({ error: 'verify your email before connecting another sign-in', code: 'verify_first' });
     }
+    // A link is a lasting second key. An account with no password has nothing
+    // but the session to confirm one with, and a stolen session must not be
+    // able to add the thief's own Google (audit round six): where there is a
+    // proven address, a password is set through it first.
+    if (user.passwordHash === null && user.email) {
+      return reply.code(403).send({ error: 'set a password before connecting another sign-in', code: 'set_password_first' });
+    }
     if (!(await reauthenticated(req, reply, user))) return;
     const header = String(req.headers.authorization ?? '');
     const url = startFlow(req, reply, provider, { u: userId, t: hashToken(header.slice(7)) });
@@ -2224,7 +2450,8 @@ export async function buildApp(
     const { provider } = req.params as { provider: string };
     const user = await auth.getUserById(userId).catch(() => null);
     const linked = await auth.identitiesFor(userId).catch(() => [] as string[]);
-    if (!user?.passwordHash && linked.length <= 1) {
+    // Counted after the removal: every sign-in of that provider goes at once.
+    if (!user?.passwordHash && linked.filter((p) => p !== provider).length === 0) {
       return reply.code(400).send({
         error: 'set a password before removing your last sign-in method',
         code: 'last_method',
@@ -2271,12 +2498,23 @@ export async function buildApp(
     if (!before) return reply.code(401).send({ error: 'authentication required' });
     // Copied out: a repository may hand back a live object that setEmail changes.
     const oldEmail = before.email;
+    const oldHash = before.passwordHash ?? null;
     const oldVerified = !!before.emailVerifiedAt;
     const handle = before.username;
-    // Moving an account to another address hands that address the reset link.
-    // Adding a first address to an account that never had one changes nothing
-    // anyone else relied on, so only a change asks for the password.
-    if (oldEmail && oldEmail.toLowerCase() !== mail.toLowerCase() && !(await reauthenticated(req, reply, before))) return;
+    // An address on the account is where its reset links go, so putting one
+    // there asks for the password, a first address included: without one, a
+    // stolen session could add the thief's address, verify it, and reset the
+    // password out from under the owner (audit round six). Sending the same
+    // address again (a new code) changes nothing and needs no password.
+    const moving = !oldEmail || oldEmail.toLowerCase() !== mail.toLowerCase();
+    if (moving && !(await reauthenticated(req, reply, before))) return;
+    // An account with no password has nothing to confirm a move with, and its
+    // proven address is what would take it back after a stolen session: so it
+    // keeps that address until it has a password (set through the emailed
+    // link, see /api/account/password).
+    if (moving && oldHash === null && oldEmail && before.emailVerifiedAt) {
+      return reply.code(403).send({ error: 'set a password before changing your email', code: 'set_password_first' });
+    }
     // Every call here mails a code to whatever address it names, so without
     // limits one signed-in account could mail any stranger over and over. And an
     // address that already has an account answers 409, which a person changing
@@ -2300,14 +2538,42 @@ export async function buildApp(
       req.socNote = { kind: 'mail_refused' };
       return reply.code(429).send({ error: 'too many emails to that address, try again later', retryInSeconds: toWait });
     }
-    const ok = await auth.setEmail(userId, mail, version);
-    if (!ok) {
-      // Taken between the lookup and the write. Nothing went to the address.
+    // The move also spends any reset link already sent to the old address, in
+    // the same write (see setEmail): it used to be a second call whose failure
+    // was swallowed, so a link in a compromised old mailbox kept working.
+    // And only over the password just confirmed: a reset that landed meanwhile
+    // has taken the account back, and this move must not land after it.
+    let ok: boolean;
+    let overHash = oldHash;
+    try {
+      ok = await auth.setEmail(userId, mail, version, oldHash);
+      if (!ok && oldHash !== null) {
+        // As for a password change: a hash upgraded by another sign-in of the
+        // same password is not a reset.
+        const given = (req.body as { password?: unknown } | null)?.password;
+        const now = typeof given === 'string' && given.length <= 1024 ? await stillThePassword(userId, given, oldHash) : null;
+        if (now) {
+          overHash = now;
+          ok = await auth.setEmail(userId, mail, version, now);
+        }
+      }
+    } catch (err) {
+      req.log.error({ err }, 'email change failed');
       mailBudget.refund(addressKey('verify-to', mail));
+      mailBudget.refund(`verify-by:${userId}`);
+      return reply.code(503).send({ error: 'something went wrong on our side, please try again', code: 'retry' });
+    }
+    if (!ok) {
+      // Taken between the lookup and the write, or the password changed under
+      // it. Nothing went to the address either way.
+      mailBudget.refund(addressKey('verify-to', mail));
+      const now = await auth.getUserById(userId).catch(() => null);
+      if (!now || (now.passwordHash ?? null) !== overHash) {
+        mailBudget.refund(`verify-by:${userId}`);
+        return reply.code(401).send({ error: 'current password is incorrect', code: 'reauth' });
+      }
       return reply.code(409).send({ error: 'email already in use' });
     }
-    // A reset link already sent to the old address must not outlive the move.
-    await auth.deleteEmailTokens(userId, 'reset_password').catch(() => {});
     // Send the verification link for the newly added/changed email, server-side,
     // so it never depends on a separate client call.
     await sendVerifyEmail(req, { id: userId, email: mail });
@@ -2349,8 +2615,18 @@ export async function buildApp(
     if (await adminNameOf(userId)) {
       return reply.code(403).send({ error: 'an admin account cannot be deleted here; remove it from ADMIN_USERNAMES first', code: 'admin_name' });
     }
+    // For good, with every design: the password, when there is one, not a
+    // session alone, which may be a stolen one (audit round six).
+    const who = await auth.getUserById(userId).catch(() => null);
+    if (!who) return reply.code(503).send({ error: 'something went wrong on our side, please try again', code: 'retry' });
+    if (!(await reauthenticated(req, reply, who))) return;
     await repo.deleteByOwner(userId).catch(() => {});
     await auth.deleteUser(userId);
+    // Today's home-page pick goes with the account at once, not at the next
+    // 60-second recheck: until then the landing page kept showing a deleted
+    // person's design and their name (audit round six). After the deletion,
+    // so a request in between cannot pick it again.
+    daily?.forgetOwner(userId);
     return reply.code(204).send();
   });
 
@@ -3029,7 +3305,9 @@ export async function buildApp(
    */
   const unnamedWall = async (req: FastifyRequest, reply: FastifyReply, userId: string | null): Promise<boolean> => {
     if (!userId || req.method === 'GET' || req.method === 'HEAD') return false;
-    if (await auth.hasChosenUsername(userId).catch(() => true)) return false;
+    const chosen = await usernameChosen(userId, reply);
+    if (chosen === null) return true; // refused with a 503: the check could not be made
+    if (chosen) return false;
     await reply.code(428).send({ error: 'choose a username first', code: 'needs_username' });
     return true;
   };
@@ -3111,7 +3389,8 @@ export async function buildApp(
     // owner's. Everyone else sees the design as its seats: the banners come
     // with it, the layers do not.
     const out = ownsDesign(v.rec, v.userId) ? gz : withoutLayers(gz);
-    return { sceneGzB64: out.toString('base64') };
+    // A scene that cannot be stripped is not shown to anyone but its owner.
+    return { sceneGzB64: out ? out.toString('base64') : null };
   });
 
   /**
@@ -3124,40 +3403,61 @@ export async function buildApp(
    * the stored bytes, so it is computed once per version and served from here,
    * capped at 32 MB.
    */
-  const strippedCache = new Map<string, Buffer>();
+  // A scene that could not be stripped is remembered as `null` (costed at 64
+  // bytes), so a broken one is not re-parsed on every view either.
+  const strippedCache = new Map<string, Buffer | null>();
   let strippedBytes = 0;
   const STRIPPED_CACHE_MAX = 32 * 1024 * 1024;
-  function withoutLayers(gz: Buffer): Buffer {
+  const strippedCost = (b: Buffer | null): number => (b ? b.byteLength : 64);
+  function withoutLayers(gz: Buffer): Buffer | null {
     const key = createHash('sha1').update(gz).digest('hex');
-    const hit = strippedCache.get(key);
-    if (hit) {
+    if (strippedCache.has(key)) {
+      const hit = strippedCache.get(key) ?? null;
       strippedCache.delete(key); // refresh: most recently used goes last
       strippedCache.set(key, hit);
       return hit;
     }
     const out = stripLayers(gz);
     strippedCache.set(key, out);
-    strippedBytes += out.byteLength;
+    strippedBytes += strippedCost(out);
     for (const [k, v] of strippedCache) {
       if (strippedBytes <= STRIPPED_CACHE_MAX) break;
       strippedCache.delete(k);
-      strippedBytes -= v.byteLength;
+      strippedBytes -= strippedCost(v);
     }
     return out;
   }
-  /** A scene without its layer stack (for anyone but the design's owner). */
-  function stripLayers(gz: Buffer): Buffer {
+  /**
+   * A scene without its layer stack (for anyone but the design's owner), or
+   * null when it cannot be read.
+   *
+   * It used to hand back the stored bytes untouched whenever they failed to
+   * decompress or parse: the one case where it could not check for the owner's
+   * layers was the case where it sent them, to everyone, and cached that
+   * (audit round six). A save cannot store such a scene today, because PUT
+   * parses it first, but a strip that is only safe while every writer behaves
+   * is not a strip. It fails closed now: no scene rather than the owner's.
+   */
+  function stripLayers(gz: Buffer): Buffer | null {
     try {
-      const scene = JSON.parse(gunzipBytes(gz, MAX_SCENE_GUNZIP_BYTES).toString('utf8')) as Record<string, unknown>;
-      if (!scene || typeof scene !== 'object' || !('layers' in scene)) return gz;
-      delete scene.layers;
+      const scene = JSON.parse(gunzipBytes(gz, MAX_SCENE_GUNZIP_BYTES).toString('utf8')) as unknown;
+      if (!scene || typeof scene !== 'object') return null;
+      if (Array.isArray(scene) || !('layers' in scene)) return gz; // nothing of the owner's in it
+      delete (scene as Record<string, unknown>).layers;
       return gzipBytes(Buffer.from(JSON.stringify(scene), 'utf8'));
     } catch {
-      return gz;
+      return null;
     }
   }
 
-  app.put('/api/designs/:id/scene', async (req, reply) => {
+  // A scene is saved when someone presses Save or moves a project into their
+  // account, not continuously, so 30 a minute is far above any real pace. The
+  // limit is there because each save is decompressed (up to 16 MB) and parsed
+  // on the one event loop: a crafted 21 KB body cost 0.6 s, so the global 300 a
+  // minute let one free account hold the server for three minutes in every
+  // minute (audit round six).
+  const sceneLimit = { config: { rateLimit: { max: 30, timeWindow: '1 minute' } } };
+  app.put('/api/designs/:id/scene', sceneLimit, async (req, reply) => {
     const rec = await getOwned(req, reply);
     if (!rec) return;
     const body = (req.body ?? {}) as { sceneGzB64?: unknown };
@@ -3168,17 +3468,23 @@ export async function buildApp(
     if (gz.byteLength > SCENE_MAX_BYTES) {
       return reply.code(413).send({ error: `scene must be under ${Math.round(SCENE_MAX_BYTES / 1024)} KB gzipped` });
     }
-    let json: string;
+    let inflated: Buffer;
     try {
-      json = gunzipBytes(gz, MAX_SCENE_GUNZIP_BYTES).toString('utf8');
+      // Inflated off the event loop (libuv's pool), so a large one does not
+      // hold every other request.
+      inflated = await gunzipBytesAsync(gz, MAX_SCENE_GUNZIP_BYTES);
     } catch {
       return reply.code(400).send({ error: 'sceneGzB64 is not valid gzip' });
+    }
+    // Bounded before it is parsed (see sceneTooComplex).
+    if (sceneTooComplex(inflated)) {
+      return reply.code(413).send({ error: 'scene is too complex to save', code: 'scene_complex' });
     }
     // Parsed, not just decompressed: a scene that cannot be read back is worse
     // than no scene, because it fails on LOAD, in front of whoever opened the
     // share link, rather than here in front of the person who can fix it.
     try {
-      const parsed = JSON.parse(json) as unknown;
+      const parsed = JSON.parse(inflated.toString('utf8')) as unknown;
       if (!parsed || typeof parsed !== 'object') throw new Error('not an object');
     } catch {
       return reply.code(400).send({ error: 'scene is not valid JSON' });
@@ -3193,7 +3499,12 @@ export async function buildApp(
     if (!v) return;
     const png = await repo.getThumbnail(v.rec.id);
     if (!png) return reply.code(404).send({ error: 'no thumbnail' });
-    return reply.header('content-type', 'image/png').header('cache-control', 'no-cache').send(png);
+    // A private design's picture is for its owner only: not kept in any cache,
+    // the browser's included (audit round six).
+    return reply
+      .header('content-type', 'image/png')
+      .header('cache-control', v.rec.isPublic ? 'no-cache' : 'private, no-store')
+      .send(png);
   });
 
   // ---------- sharing system ----------
@@ -3226,10 +3537,18 @@ export async function buildApp(
     const img =
       (await repo.getOgImage(v.rec.id)) ?? (await repo.getThumbnail(v.rec.id)) ?? defaultCardPng;
     if (!img) return reply.code(404).send({ error: 'no image' });
+    // Only a public design's card is public. A private design's owner can fetch
+    // its card too (getVisible lets them), and that answer was also marked
+    // `public, max-age=3600`: any shared cache in front of the site would have
+    // kept a private design's picture for an hour and served it on (audit
+    // round six; photos follow the same rule since round four). A card cached
+    // while its design WAS public can still be served by such a cache for up to
+    // the hour after it is made private or taken down; a CDN in front needs a
+    // purge on takedown for that (see CLOUDFLARE.md).
     return reply
       .header('content-type', 'image/png')
       .header('x-content-type-options', 'nosniff')
-      .header('cache-control', 'public, max-age=3600')
+      .header('cache-control', v.rec.isPublic ? 'public, max-age=3600' : 'private, no-store')
       .send(img);
   };
   app.get('/og/t/:id.png', sendDesignCard);
@@ -3509,8 +3828,20 @@ export async function buildApp(
     if (created) await copyScene(v.rec.id, created.id, own);
     // A copy of a design a moderator took down is taken down with it, or
     // publishing the copy would undo the takedown.
+    //
+    // The repository copies the takedown in the same write that makes the
+    // copy. It used to be a second call whose failure was swallowed, leaving a
+    // copy its owner could publish while the reply said `takenDown: true`
+    // (audit round six). Should a copy ever come back without it, it is
+    // deleted and the fork refused rather than handed over.
     if (created && v.rec.takenDown) {
-      await repo.takedownDesign(created.id).catch(() => false);
+      if (!created.takenDown) {
+        // Taken down first, so a copy that cannot be deleted is at least down.
+        await repo.takedownDesign(created.id).catch(() => false);
+        await repo.purge(created.id).catch(() => false);
+        refundDesign(req, v.userId);
+        return reply.code(503).send({ error: 'could not copy this design, please try again', code: 'retry' });
+      }
       return reply.code(201).send({ ...created, isPublic: false, takenDown: true });
     }
     return reply.code(201).send(created);
@@ -3529,7 +3860,8 @@ export async function buildApp(
       const scene = await repo.getScene(fromId);
       // A copy for someone else is the design as its seats: its banners, not
       // its owner's layers (and pictures). The owner's own copy keeps them.
-      if (scene) await repo.putScene(toId, keepLayers ? scene : withoutLayers(scene));
+      const copy = scene && (keepLayers ? scene : withoutLayers(scene));
+      if (copy) await repo.putScene(toId, copy);
     } catch {
       /* the seats are copied; that is the part that must not fail */
     }
@@ -3895,7 +4227,7 @@ export async function buildApp(
         /<head>/i,
         (m) => `${m}\n    ${meta}`,
       );
-      return reply.type('text/html').send(html);
+      return reply.header('cache-control', 'no-cache').type('text/html').send(html);
     });
 
     // Dedicated public VIEW page at /t/:id, the canonical share link. Serves the
@@ -3929,7 +4261,7 @@ export async function buildApp(
           }.`;
         }
         const html = withCard(sharePage, req, { title, description, path: `/t/${id}`, image, alt });
-        return reply.type('text/html').send(html);
+        return reply.header('cache-control', 'no-cache').type('text/html').send(html);
       });
     }
 
@@ -4024,7 +4356,7 @@ export async function buildApp(
     try {
       const specHtml = readFileSync(join(staticDir, 'tifo-spec.html'), 'utf8');
       app.get('/tifo-spec', async (req, reply) =>
-        reply.type('text/html').send(
+        reply.header('cache-control', 'no-cache').type('text/html').send(
           withCard(specHtml, req, {
             title: 'The .tifo format: an open spec for stadium choreography',
             description:
@@ -4080,7 +4412,7 @@ export async function buildApp(
             'Browse tifos designed by supporters around the world. Like, comment, follow the people making them, and remix any display into your own.',
           path: '/community',
         });
-        return reply.type('text/html').send(html);
+        return reply.header('cache-control', 'no-cache').type('text/html').send(html);
       });
     } catch {
       /* community page optional in API-only builds */
@@ -4089,7 +4421,7 @@ export async function buildApp(
     // Match-day QR landing: fans scan one stadium-wide code → /s/:id → find seat.
     try {
       const seatHtml = readFileSync(join(staticDir, 'seat.html'), 'utf8');
-      app.get('/s/:id', async (_req, reply) => reply.type('text/html').send(seatHtml));
+      app.get('/s/:id', async (_req, reply) => reply.header('cache-control', 'no-cache').type('text/html').send(seatHtml));
     } catch {
       /* seat page optional in API-only builds */
     }
@@ -4098,7 +4430,7 @@ export async function buildApp(
     try {
       const clubsHtml = readFileSync(join(staticDir, 'clubs.html'), 'utf8');
       app.get('/clubs', async (req, reply) =>
-        reply.type('text/html').send(
+        reply.header('cache-control', 'no-cache').type('text/html').send(
           withCard(clubsHtml, req, {
             title: 'TifoMaker for clubs: run the whole stand like a production',
             description:
@@ -4114,7 +4446,7 @@ export async function buildApp(
     try {
       const legalHtml = readFileSync(join(staticDir, 'legal.html'), 'utf8');
       app.get('/legal', async (req, reply) =>
-        reply.type('text/html').send(
+        reply.header('cache-control', 'no-cache').type('text/html').send(
           withCard(legalHtml, req, {
             title: 'Terms, privacy and acceptable use: TifoMaker',
             description:
@@ -4218,20 +4550,39 @@ export async function buildApp(
         if (filePath.startsWith(hashedAssets)) reply.header('cache-control', 'public, max-age=31536000, immutable');
       },
     });
-    // Unknown paths get a REAL 404. Previously this served the editor with a 200,
-    // which meant every mistyped link and every vulnerability probe (/.git/config,
-    // /wp-login.php — hundreds a week) looked to Google like a real page, producing
-    // an unbounded set of soft-404 duplicates competing with the pages that matter.
-    // Safe to do: every genuine page is registered explicitly above, and the client
-    // only ever reads /d/:id, /t/:id and /s/:id from the URL — there is no
-    // client-side router relying on this fallback.
-    app.setNotFoundHandler((req, reply) => {
-      if (req.url.startsWith('/api/')) {
-        return reply.code(404).send({ error: 'not found' });
-      }
-      return reply.code(404).header('cache-control', 'no-cache').type('text/html').send(NOT_FOUND_HTML);
+  }
+
+  // Unknown paths get a REAL 404. Previously this served the editor with a 200,
+  // which meant every mistyped link and every vulnerability probe (/.git/config,
+  // /wp-login.php — hundreds a week) looked to Google like a real page, producing
+  // an unbounded set of soft-404 duplicates competing with the pages that matter.
+  // Safe to do: every genuine page is registered explicitly above, and the client
+  // only ever reads /d/:id, /t/:id and /s/:id from the URL — there is no
+  // client-side router relying on this fallback.
+  //
+  // And under the same per-client limit as everything else. The limiter
+  // attaches itself to routes, and a 404 is not a route, so a
+  // scanner could fire unlimited probes (/.env, /wp-login.php, /api/anything)
+  // from one address: 320 in a row got 320 answers and no 429 (audit round
+  // six). Same store and key as the global limit, so a probe costs the prober
+  // and nobody else. Registered for the API-only server too.
+  const notFound = (req: FastifyRequest, reply: FastifyReply) => {
+    if (!options.staticDir || req.url.startsWith('/api/')) {
+      return reply.code(404).send({ error: 'not found' });
+    }
+    return reply.code(404).header('cache-control', 'no-cache').type('text/html').send(NOT_FOUND_HTML);
+  };
+  //
+  // Counted in onRequest, before the body is read. As a preHandler it ran after
+  // the parser, so a POST with a malformed body was answered 400 and never
+  // counted, however many came from one address.
+  if (options.rateLimit) {
+    const limit404 = app.rateLimit();
+    app.addHook('onRequest', async (req, reply) => {
+      if (req.is404) await limit404.call(app, req, reply);
     });
   }
+  app.setNotFoundHandler(notFound);
 
   return app;
 }

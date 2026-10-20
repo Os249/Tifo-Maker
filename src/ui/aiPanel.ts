@@ -641,7 +641,7 @@ export function mountAiPanel(deps: AiPanelDeps): AiPanelHandle {
         };
         const me = await fetchMe().catch(() => null);
         if (me && !me.email) {
-          const added = await openAddEmailModal();
+          const added = await openAddEmailModal(me.hasPassword !== false);
           setError(added ? t('ai.verify.addedCheckInbox') : t('ai.verify.addEmail'), added ? [enterCode] : undefined);
         } else if (!verifyResent) {
           verifyResent = true;

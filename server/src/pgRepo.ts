@@ -782,9 +782,12 @@ export class PgDesignRepository implements DesignRepository {
   }
 
   async fork(id: string, title: string, ownerId: string): Promise<DesignMeta | null> {
+    // A copy of a design a moderator took down is taken down with it, in the
+    // same statement, so there is no moment and no failure in which the copy
+    // exists without its takedown (audit round six).
     const res = await this.pool.query(
-      `INSERT INTO designs (title, template_id, template_version, palette, cells, owner_id, thumbnail)
-       SELECT $2, template_id, template_version, palette, cells, $3, thumbnail FROM designs WHERE id = $1
+      `INSERT INTO designs (title, template_id, template_version, palette, cells, owner_id, thumbnail, taken_down_at)
+       SELECT $2, template_id, template_version, palette, cells, $3, thumbnail, taken_down_at FROM designs WHERE id = $1
        RETURNING ${META_COLS}`,
       [id, title, ownerId],
     );
@@ -1112,21 +1115,37 @@ export class PgAuthRepository implements AuthRepository {
     return res.rowCount ? mapUserRow(res.rows[0]) : null;
   }
 
-  async setEmail(userId: string, email: string, acceptedVersion?: string | null): Promise<boolean> {
+  async setEmail(userId: string, email: string, acceptedVersion?: string | null, expectedHash?: string | null): Promise<boolean> {
+    // One transaction, so the move and the end of the old address's reset links
+    // happen together or (a taken address, a changed password, any error) not at
+    // all. Two statements, not one: the DELETE must see a reset link that was
+    // being stored while the UPDATE waited for the row (createEmailTokenForAddress
+    // holds it), and one statement sees only what existed when it began.
+    const client = await this.pool.connect();
     try {
-      const res = await this.pool.query(
+      await client.query('BEGIN');
+      const res = await client.query(
         `UPDATE users
-           SET email = $2,
-               email_verified_at = NULL,
-               accepted_terms_version = COALESCE($3, accepted_terms_version),
-               accepted_terms_at = CASE WHEN $3 IS NULL THEN accepted_terms_at ELSE now() END
-         WHERE id = $1`,
-        [userId, email, acceptedVersion ?? null],
+            SET email = $2,
+                email_verified_at = NULL,
+                accepted_terms_version = COALESCE($3, accepted_terms_version),
+                accepted_terms_at = CASE WHEN $3 IS NULL THEN accepted_terms_at ELSE now() END
+          WHERE id = $1 AND (NOT $4 OR password_hash IS NOT DISTINCT FROM $5)`,
+        [userId, email, acceptedVersion ?? null, expectedHash !== undefined, expectedHash ?? null],
       );
-      return (res.rowCount ?? 0) > 0;
+      if (!res.rowCount) {
+        await client.query('ROLLBACK');
+        return false;
+      }
+      await client.query("DELETE FROM email_tokens WHERE user_id = $1 AND purpose = 'reset_password'", [userId]);
+      await client.query('COMMIT');
+      return true;
     } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
       if ((err as { code?: string }).code === '23505') return false; // email taken
       throw err;
+    } finally {
+      client.release();
     }
   }
 
@@ -1182,6 +1201,25 @@ export class PgAuthRepository implements AuthRepository {
     await this.pool.query('DELETE FROM auth_tokens WHERE token_hash = $1', [tokenHash]);
   }
 
+  async createEmailTokenForAddress(
+    userId: string,
+    email: string,
+    tokenHash: string,
+    purpose: string,
+    expiresAt: Date,
+  ): Promise<boolean> {
+    // FOR SHARE: an email change waits for this to finish (and then removes it),
+    // or this waits for the change and finds the address gone.
+    const res = await this.pool.query(
+      `INSERT INTO email_tokens (token_hash, user_id, purpose, expires_at)
+       SELECT $1, u.id, $3, $4 FROM (
+         SELECT id FROM users WHERE id = $2 AND lower(email) = lower($5) FOR SHARE
+       ) u`,
+      [tokenHash, userId, purpose, expiresAt, email],
+    );
+    return (res.rowCount ?? 0) === 1;
+  }
+
   async createEmailToken(userId: string, tokenHash: string, purpose: string, expiresAt: Date): Promise<void> {
     await this.pool.query(
       'INSERT INTO email_tokens (token_hash, user_id, purpose, expires_at) VALUES ($1, $2, $3, $4)',
@@ -1210,6 +1248,118 @@ export class PgAuthRepository implements AuthRepository {
 
   async deleteUserTokens(userId: string): Promise<void> {
     await this.pool.query('DELETE FROM auth_tokens WHERE user_id = $1', [userId]);
+  }
+
+  async replacePassword(
+    userId: string,
+    passwordHash: string,
+    opts: {
+      dropIdentities?: boolean;
+      keepResetLinks?: boolean;
+      expectedHash?: string | null;
+      newSession?: { tokenHash: string; expiresAt: Date };
+    } = {},
+  ): Promise<boolean> {
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+      // Order matters for everything racing this (see repo.ts). The account row
+      // first: two of these on one account then queue rather than deadlock, a
+      // sign-in or an email change holding it finishes first, and one arriving
+      // later waits and re-reads it. NO KEY UPDATE, the lock the UPDATE below
+      // takes anyway, so inserts that only reference the account are not held.
+      const row = await client.query('SELECT password_hash FROM users WHERE id = $1 FOR NO KEY UPDATE', [userId]);
+      if (!row.rowCount) {
+        await client.query('ROLLBACK');
+        return false;
+      }
+      if (opts.expectedHash !== undefined && (row.rows[0].password_hash ?? null) !== opts.expectedHash) {
+        await client.query('ROLLBACK');
+        return false; // the password changed since the caller checked it
+      }
+      // Then its sessions: a provider link holding one finishes before the
+      // identities are read below, or waits and finds it gone.
+      await client.query('SELECT 1 FROM auth_tokens WHERE user_id = $1 FOR UPDATE', [userId]);
+      if (opts.dropIdentities) await client.query('DELETE FROM oauth_identities WHERE user_id = $1', [userId]);
+      await client.query(
+        opts.keepResetLinks
+          ? "DELETE FROM email_tokens WHERE user_id = $1 AND purpose = 'oauth_handoff'"
+          : "DELETE FROM email_tokens WHERE user_id = $1 AND purpose IN ('reset_password', 'oauth_handoff')",
+        [userId],
+      );
+      await client.query('UPDATE users SET password_hash = $2 WHERE id = $1', [userId, passwordHash]);
+      await client.query('DELETE FROM auth_tokens WHERE user_id = $1', [userId]);
+      if (opts.newSession) {
+        await client.query('INSERT INTO auth_tokens (token_hash, user_id, expires_at) VALUES ($1, $2, $3)', [
+          opts.newSession.tokenHash,
+          userId,
+          opts.newSession.expiresAt,
+        ]);
+      }
+      await client.query('COMMIT');
+      return true;
+    } catch (e) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw e;
+    } finally {
+      client.release();
+    }
+  }
+
+  async upgradePasswordHash(userId: string, expected: string, next: string): Promise<boolean> {
+    const res = await this.pool.query('UPDATE users SET password_hash = $3 WHERE id = $1 AND password_hash = $2', [
+      userId,
+      expected,
+      next,
+    ]);
+    return (res.rowCount ?? 0) > 0;
+  }
+
+  async createTokenIfPassword(userId: string, verifiedHash: string, tokenHash: string, expiresAt: Date): Promise<boolean> {
+    // FOR SHARE waits behind a password change's UPDATE of the same row and
+    // then re-reads it, so a sign-in checked against the old password stores
+    // nothing once the new one has landed.
+    const res = await this.pool.query(
+      `INSERT INTO auth_tokens (token_hash, user_id, expires_at)
+       SELECT $1, u.id, $3 FROM (SELECT id FROM users WHERE id = $2 AND password_hash = $4 FOR SHARE) u`,
+      [tokenHash, userId, expiresAt, verifiedHash],
+    );
+    return (res.rowCount ?? 0) === 1;
+  }
+
+  async createHandoffIfLinked(
+    userId: string,
+    provider: string,
+    providerUserId: string,
+    tokenHash: string,
+    expiresAt: Date,
+  ): Promise<boolean> {
+    const res = await this.pool.query(
+      `INSERT INTO email_tokens (token_hash, user_id, purpose, expires_at)
+       SELECT $1, i.user_id, 'oauth_handoff', $5 FROM (
+         SELECT user_id FROM oauth_identities
+          WHERE provider = $2 AND provider_user_id = $3 AND user_id = $4 FOR SHARE
+       ) i`,
+      [tokenHash, provider, providerUserId, userId, expiresAt],
+    );
+    return (res.rowCount ?? 0) === 1;
+  }
+
+  async exchangeHandoff(ticketHash: string, tokenHash: string, expiresAt: Date): Promise<string | null> {
+    // One statement: the ticket is spent and the session stored together, so a
+    // reset cannot land between the two.
+    const res = await this.pool.query(
+      `WITH spent AS (
+         UPDATE email_tokens SET used_at = now()
+          WHERE token_hash = $1 AND purpose = 'oauth_handoff' AND used_at IS NULL AND expires_at > now()
+          RETURNING user_id
+       )
+       INSERT INTO auth_tokens (token_hash, user_id, expires_at)
+       SELECT $2, user_id, $3 FROM spent
+       RETURNING user_id`,
+      [ticketHash, tokenHash, expiresAt],
+    );
+    return res.rowCount ? String(res.rows[0].user_id) : null;
   }
 
   async deleteUser(userId: string): Promise<void> {
@@ -1261,6 +1411,27 @@ export class PgAuthRepository implements AuthRepository {
     // Already there: fine if it is already ours, a refusal if it is someone else's.
     const owner = await this.getUserIdByIdentity(provider, providerUserId);
     return owner === userId;
+  }
+
+  async linkIdentityForSession(
+    provider: string,
+    providerUserId: string,
+    userId: string,
+    sessionTokenHash: string,
+  ): Promise<boolean> {
+    // FOR SHARE on the session: a reset or password change locks the account's
+    // sessions before it reads the identities, so it either waits for this
+    // link and then removes it, or ends the session first and this stores nothing.
+    const res = await this.pool.query(
+      `INSERT INTO oauth_identities (provider, provider_user_id, user_id)
+       SELECT $1, $2, t.user_id FROM (
+         SELECT user_id FROM auth_tokens
+          WHERE token_hash = $4 AND user_id = $3 AND expires_at > now() FOR SHARE
+       ) t
+       ON CONFLICT (provider, provider_user_id) DO NOTHING`,
+      [provider, providerUserId, userId, sessionTokenHash],
+    );
+    return (res.rowCount ?? 0) === 1;
   }
 
   async unlinkIdentity(provider: string, userId: string): Promise<boolean> {

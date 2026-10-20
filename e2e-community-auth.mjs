@@ -154,7 +154,14 @@ for (const lang of ['en', 'ar']) {
   await p.waitForFunction(() => document.getElementById('signin'), null, { timeout: 60000 });
   // The header button says "Sign up", so it opens on Create account (it used
   // to open on Sign in); the Sign in tab is checked from there.
-  await p.evaluate(() => document.getElementById('signin').click());
+  // The button is in the page before the editor has wired it (that happens
+  // once the stadium is built), so keep pressing until the dialog opens rather
+  // than racing the boot: a click that lands first is lost, and the check
+  // after it failed on a slow machine in about half the runs.
+  await p.waitForFunction(() => {
+    if (!document.querySelector('.auth-modal')) document.getElementById('signin')?.click();
+    return !!document.querySelector('.auth-modal');
+  }, null, { timeout: 90000, polling: 1000 });
   await p.waitForSelector('.auth-providers:not([hidden])', { timeout: 10000 }).catch(() => {});
   check('"Sign up" in the header opens on Create account', await p.evaluate(() => document.querySelector('.auth-tab[data-mode="signup"]')?.classList.contains('active')));
   await p.click('.auth-tab[data-mode="signin"]');
@@ -183,6 +190,28 @@ for (const lang of ['en', 'ar']) {
   await p.click('.auth-tab[data-mode="signin"]');
   await p.click('.auth-forgot-link');
   check('Forgot password hides "Continue with Google"', await p.evaluate(() => document.querySelector('.auth-providers').hidden));
+  await ctx.close();
+}
+
+// The creator search finds people. It is signed-in only on the server (an open
+// one listed every account), and the page never sent the token, so it answered
+// "No creators found" to everyone (found in audit round six).
+{
+  const stamp = Date.now() % 1e8;
+  const target = `findme_${stamp}`;
+  const ctx = await browser.newContext({ storageState: { cookies: [], origins: [{ origin: B, localStorage: [
+    { name: 'tifo_lang_v1', value: 'en' }, { name: 'tifo_consent_v1', value: 'essential' }] }] } });
+  const p = await ctx.newPage();
+  const reg = (u) => p.request.post(B + '/api/auth/register', { data: { username: u, password: 'harbor-kite-moss-31', email: `${u}@example.test`, acceptedVersion: 'test' } }).then((r) => r.json());
+  await reg(target);
+  const me = await reg(`seeker_${stamp}`);
+  await p.goto(B + '/community', { waitUntil: 'domcontentloaded', timeout: 120000 });
+  await p.evaluate((t) => localStorage.setItem('tifo_token_v1', t), me.token);
+  await p.reload({ waitUntil: 'domcontentloaded', timeout: 120000 });
+  await p.waitForSelector('#user-search', { timeout: 60000 });
+  await p.fill('#user-search', 'findme_');
+  const found = await p.waitForFunction((name) => [...document.querySelectorAll('#search-results .sr-name')].some((e) => e.textContent === '@' + name), target, { timeout: 15000 }).then(() => true).catch(() => false);
+  check('a signed-in visitor finds a creator by name', found, await p.evaluate(() => document.getElementById('search-results')?.textContent?.trim().slice(0, 80)));
   await ctx.close();
 }
 

@@ -19,6 +19,7 @@ import {
   verifyEmailCode,
   changeUsername,
   changePassword,
+  requestPasswordReset,
   exportMyData,
   deleteAccount,
   signOut,
@@ -75,9 +76,10 @@ function renderEmail(): void {
   const needsCode = !!me?.email && !me.emailVerified;
   if (verify) verify.hidden = !needsCode;
   if (note && needsCode) note.textContent = tv('ac.verify.sentTo', { email: me?.email ?? '' });
-  // Moving an existing address needs the current password (see the server's
-  // `reauthenticated`); a first address, or an account without a password, does not.
-  const askPw = !!me?.email && me.hasPassword !== false;
+  // Putting an address on the account, a first one included, needs the current
+  // password (see the server's `reauthenticated`); an account without a
+  // password has none to give.
+  const askPw = me?.hasPassword !== false;
   const pw = $<HTMLInputElement>('ac-email-pw');
   const pwLabel = $('ac-email-pw-label');
   if (pw) pw.hidden = !askPw;
@@ -145,6 +147,9 @@ async function load(): Promise<void> {
  */
 function renderPasswordSection(): void {
   const first = me?.hasPassword === false;
+  // No password but a proven address: the address decides, not this session.
+  // The server refuses a first password set from here, and sends the link.
+  const byLink = linkOnly();
   const current = $<HTMLInputElement>('ac-pw-current');
   const currentLabel = document.querySelector('label[for="ac-pw-current"]') as HTMLElement | null;
   const title = document.querySelector('#sec-password h2') as HTMLElement | null;
@@ -153,8 +158,15 @@ function renderPasswordSection(): void {
   if (current) current.hidden = first;
   if (currentLabel) currentLabel.hidden = first;
   if (title) title.textContent = t(first ? 'ac.pw.titleSet' : 'ac.pw.title');
-  if (note) note.textContent = t(first ? 'ac.pw.noteSet' : 'ac.pw.note');
-  if (save) save.textContent = t(first ? 'ac.pw.setSave' : 'ac.pw.save');
+  if (note) note.textContent = byLink ? tv('ac.pw.noteEmail', { email: me?.email ?? '' }) : t(first ? 'ac.pw.noteSet' : 'ac.pw.note');
+  if (save) save.textContent = t(byLink ? 'ac.pw.sendLink' : first ? 'ac.pw.setSave' : 'ac.pw.save');
+  const box = $('ac-pw-newbox');
+  if (box) box.hidden = byLink;
+}
+
+/** An account without a password whose address is proven: it gets its password by email. */
+function linkOnly(): boolean {
+  return me?.hasPassword === false && !!me.email && !!me.emailVerified;
 }
 
 // ---- connected accounts ----------------------------------------------------
@@ -223,6 +235,9 @@ $('ac-email-form')?.addEventListener('submit', async (e) => {
   const msg = $('ac-email-msg');
   const email = (input?.value ?? '').trim();
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return say(msg, t('ac.email.invalid'), 'bad');
+  if (linkOnly() && me?.email && me.email.toLowerCase() !== email.toLowerCase()) {
+    return say(msg, t('ac.email.setPwFirst'), 'bad');
+  }
   const pwInput = $<HTMLInputElement>('ac-email-pw');
   const password = pwInput && !pwInput.hidden ? pwInput.value : '';
   if (pwInput && !pwInput.hidden && !password) return say(msg, t('ac.email.needPw'), 'bad');
@@ -375,6 +390,16 @@ $('ac-pw-form')?.addEventListener('submit', async (e) => {
   const cur = $<HTMLInputElement>('ac-pw-current');
   const next = $<HTMLInputElement>('ac-pw-new');
   const msg = $('ac-pw-msg');
+  if (linkOnly() && me?.email) {
+    say(msg, t('ac.saving'), 'info');
+    try {
+      await requestPasswordReset(me.email);
+      say(msg, tv('ac.pw.linkSent', { email: me.email }), 'ok');
+    } catch (err) {
+      say(msg, (err as Error).message || t('err.retry'), 'bad');
+    }
+    return;
+  }
   const complaint = pwField?.validate();
   if (complaint) {
     complaint.field.focus();
@@ -421,6 +446,11 @@ $('ac-delete')?.addEventListener('click', () => {
   const box = $('ac-delete-confirm');
   const ask = $('ac-delete-ask');
   if (ask) ask.textContent = tv('ac.danger.typeName', { name: me?.username ?? '' });
+  const askPw = me?.hasPassword !== false;
+  const pw = $<HTMLInputElement>('ac-delete-pw');
+  const pwLabel = $('ac-delete-pw-label');
+  if (pw) pw.hidden = !askPw;
+  if (pwLabel) pwLabel.hidden = !askPw;
   if (box) box.hidden = false;
   $('ac-delete')?.setAttribute('hidden', '');
   $<HTMLInputElement>('ac-delete-name')?.focus();
@@ -436,12 +466,16 @@ $('ac-delete-go')?.addEventListener('click', async () => {
   const msg = $('ac-delete-msg');
   // Typing the name is the second step. A window.confirm is one reflex click.
   if (typed !== me?.username) return say(msg, t('ac.danger.mismatch'), 'bad');
+  const pwInput = $<HTMLInputElement>('ac-delete-pw');
+  const password = pwInput && !pwInput.hidden ? pwInput.value : '';
+  if (pwInput && !pwInput.hidden && !password) return say(msg, t('ac.danger.needPw'), 'bad');
   say(msg, t('ac.saving'), 'info');
   try {
-    await deleteAccount();
+    await deleteAccount(password || undefined);
     window.location.href = '/';
-  } catch {
-    say(msg, t('ac.danger.failed'), 'bad');
+  } catch (err) {
+    const status = (err as { status?: number }).status;
+    say(msg, status === 401 ? (err as Error).message : t('ac.danger.failed'), 'bad');
   }
 });
 

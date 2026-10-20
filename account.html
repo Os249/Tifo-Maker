@@ -49,8 +49,8 @@
         <form class="ac-form" id="ac-email-form">
           <label for="ac-email" data-i18n="ac.email.change">Change email</label>
           <input id="ac-email" type="email" autocomplete="email" />
-          <!-- Asked only when an address is already on the account and the
-               account has a password: moving it hands out the reset link. -->
+          <!-- Asked whenever the account has a password: the address on the
+               account is where its reset links go. -->
           <label for="ac-email-pw" id="ac-email-pw-label" data-i18n="ac.pw.current" hidden>Current password</label>
           <input id="ac-email-pw" type="password" autocomplete="current-password" hidden />
           <button class="ac-btn" type="submit" id="ac-email-save" data-i18n="ac.save">Save</button>
@@ -81,12 +81,16 @@
         <form class="ac-form" id="ac-pw-form">
           <label for="ac-pw-current" data-i18n="ac.pw.current">Current password</label>
           <input id="ac-pw-current" type="password" autocomplete="current-password" />
-          <label for="ac-pw-new" data-i18n="ac.pw.new">New password</label>
-          <!-- No minlength: the minimum lives in src/core/password.ts, and a
-               number written here would be a second copy of it to forget. -->
-          <input id="ac-pw-new" type="password" autocomplete="new-password" />
-          <label for="ac-pw-again" data-i18n="pw.confirm">Confirm password</label>
-          <input id="ac-pw-again" type="password" autocomplete="new-password" />
+          <!-- Hidden for an account that has no password but a proven address:
+               it is sent the set-a-password link instead (see account.ts). -->
+          <div class="ac-group" id="ac-pw-newbox">
+            <label for="ac-pw-new" data-i18n="ac.pw.new">New password</label>
+            <!-- No minlength: the minimum lives in src/core/password.ts, and a
+                 number written here would be a second copy of it to forget. -->
+            <input id="ac-pw-new" type="password" autocomplete="new-password" />
+            <label for="ac-pw-again" data-i18n="pw.confirm">Confirm password</label>
+            <input id="ac-pw-again" type="password" autocomplete="new-password" />
+          </div>
           <button class="ac-btn" type="submit" id="ac-pw-save" data-i18n="ac.pw.save">Change password</button>
         </form>
         <p class="ac-msg" id="ac-pw-msg" role="status" aria-live="polite"></p>
@@ -118,6 +122,9 @@
         <div class="ac-confirm" id="ac-delete-confirm" hidden>
           <p class="ac-note" id="ac-delete-ask"></p>
           <input id="ac-delete-name" autocomplete="off" />
+          <!-- Shown when the account has a password: deleting needs it. -->
+          <label for="ac-delete-pw" id="ac-delete-pw-label" data-i18n="ac.pw.current" hidden>Current password</label>
+          <input id="ac-delete-pw" type="password" autocomplete="current-password" hidden />
           <div class="ac-confirm-actions">
             <button class="ac-btn danger" id="ac-delete-go" data-i18n="ac.danger.confirm">Delete for good</button>
             <button class="ac-btn" id="ac-delete-cancel" data-i18n="ac.cancel">Cancel</button>

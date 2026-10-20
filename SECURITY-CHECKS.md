@@ -114,6 +114,14 @@ can hurt real visitors.
 - Input bounds: every string that reaches a renderer, a regex or the database
   has a length cap; bodies have size caps; uploads are really images.
 - What comes back: error bodies, log lines (no tokens, no passwords), headers.
+- Caching: nothing only its owner may see (a private design's card or picture,
+  any `/api` answer) can be kept by a shared cache. Look at `cache-control` on
+  each, as a CDN in front would.
+- Failing closed: when the database cannot answer, does every check refuse
+  (the username wall, the admin-name guards, the scene strip), or does it wave
+  the request through? Make the repository throw and see.
+- Races: a sign-in, an email change or a provider sign-in that overlaps a
+  password reset must not leave a session or a reset link behind.
 - Proxy trust: `req.ip` cannot be chosen by the caller.
 
 **Client and admin pages** (`src/`, `server/src/adminPage.ts`)

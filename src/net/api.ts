@@ -150,10 +150,30 @@ function authHeaders(json: boolean): Record<string, string> {
   return h;
 }
 
+/**
+ * A refused API call. Still an Error whose message is the translated server
+ * text, so every existing `catch (e) { e.message }` reads the same; the status
+ * and Retry-After are there for the callers that must tell "try again in a
+ * moment" from "this will never work" (moving local projects into an account).
+ */
+export class ApiError extends Error {
+  constructor(message: string, readonly status: number, readonly retryAfterS: number | null) {
+    super(message);
+    this.name = 'ApiError';
+  }
+}
+
 async function expectOk(res: Response): Promise<unknown> {
   if (!res.ok) {
     const body = (await res.json().catch(() => null)) as { error?: string } | null;
-    throw new Error(body?.error ? tErr(body.error) : `${res.status} ${res.statusText}`);
+    // No header is "no hint", not "retry now": Number(null) is 0.
+    const raw = res.headers.get('retry-after');
+    const after = raw === null || raw.trim() === '' ? Number.NaN : Number(raw);
+    throw new ApiError(
+      body?.error ? tErr(body.error) : `${res.status} ${res.statusText}`,
+      res.status,
+      Number.isFinite(after) && after >= 0 ? after : null,
+    );
   }
   return res.status === 204 ? null : res.json();
 }
@@ -337,8 +357,8 @@ export async function register(
 
 /** Attach or change the signed-in user's email (resets verification). */
 export async function setAccountEmail(email: string, acceptedVersion?: string, password?: string): Promise<void> {
-  // Changing an address that is already on the account needs the current
-  // password (when there is one); adding a first address does not.
+  // Putting an address on the account, a first one included, needs the
+  // current password when the account has one.
   await expectOk(
     await fetch(`${API}/account/email`, {
       method: 'POST',
@@ -466,9 +486,14 @@ export async function exportMyData(): Promise<unknown> {
 }
 
 /** Permanently delete the signed-in user's account + designs, then sign out. */
-export async function deleteAccount(): Promise<void> {
-  const res = await fetch(`${API}/account`, { method: 'DELETE', headers: authHeaders(false) });
-  if (!res.ok && res.status !== 204) throw new Error('could not delete account');
+/** Delete the account for good. Needs the current password when the account has one. */
+export async function deleteAccount(password?: string): Promise<void> {
+  const res = await fetch(`${API}/account`, {
+    method: 'DELETE',
+    headers: authHeaders(true),
+    body: JSON.stringify(password ? { password } : {}),
+  });
+  if (res.status !== 204) await expectOk(res); // throws an ApiError with the reason
   signOut();
 }
 
@@ -672,6 +697,13 @@ export async function duplicateProject(id: string, title: string): Promise<Saved
 }
 
 /** The raw seats and palette of a design, without a store to load them into. */
+/** When a design of this account was made and last changed; null when it is not there (or not ours). */
+export async function fetchDesignFacts(id: string): Promise<{ revisionCount: number; createdAt: string; updatedAt: string } | null> {
+  const res = await fetch(`${API}/designs/${id}`, { headers: authHeaders(false) });
+  if (res.status === 404 || res.status === 403) return null;
+  return (await expectOk(res)) as { revisionCount: number; createdAt: string; updatedAt: string };
+}
+
 export async function fetchDesignCells(id: string): Promise<{
   title: string; palette: string[]; cells: Uint8Array; templateId: string; templateVersion: number;
 }> {
@@ -1414,7 +1446,10 @@ export async function unfollowUser(userId: string): Promise<void> {
 }
 
 export async function searchUsers(q: string): Promise<PublicProfile[]> {
-  const res = await fetch(`${API}/users/search?q=${encodeURIComponent(q)}`);
+  // Signed-in only on the server (an open search listed every account), so the
+  // token goes with it; without one this always answered 401 and the creator
+  // search on /community never found anyone.
+  const res = await fetch(`${API}/users/search?q=${encodeURIComponent(q)}`, { headers: authHeaders(false) });
   if (!res.ok) return [];
   return res.json() as Promise<PublicProfile[]>;
 }

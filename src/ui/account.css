@@ -111,6 +111,9 @@ h1 { font-size: 26px; margin: 0 0 4px; }
 .ac-link-row .ac-btn { margin-top: 0; }
 
 .ac-form { display: flex; flex-direction: column; gap: 4px; }
+/* Groups fields for hiding together without changing the form's layout. */
+.ac-group { display: contents; }
+.ac-group[hidden] { display: none; }
 .ac-form label { font-size: 13px; color: var(--ac-muted); margin-top: 8px; }
 .ac-form input, .ac-confirm input {
   font: inherit;

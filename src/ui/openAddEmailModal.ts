@@ -11,7 +11,11 @@ import { POLICY_VERSION } from './authModal';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-export function openAddEmailModal(): Promise<boolean> {
+/**
+ * `askPassword`: the account has a password, so the server asks for it before
+ * putting an address on the account (that address receives its reset links).
+ */
+export function openAddEmailModal(askPassword = true): Promise<boolean> {
   return new Promise((resolve) => {
     const backdrop = document.createElement('div');
     backdrop.className = 'auth-backdrop';
@@ -25,6 +29,10 @@ export function openAddEmailModal(): Promise<boolean> {
             <span>${t('auth.email')}</span>
             <input type="email" name="email" autocomplete="email" autocapitalize="off" spellcheck="false" placeholder="${t('auth.emailPh')}" />
           </label>
+          ${askPassword ? `<label class="auth-field">
+            <span>${t('ac.pw.current')}</span>
+            <input type="password" name="password" autocomplete="current-password" />
+          </label>` : ''}
           <div class="auth-error" role="alert" hidden></div>
           <div class="auth-forgot-msg" role="status" hidden></div>
           <button type="submit" class="auth-submit primary">${t('addemail.submit')}</button>
@@ -34,6 +42,7 @@ export function openAddEmailModal(): Promise<boolean> {
 
     const form = backdrop.querySelector('.auth-form') as HTMLFormElement;
     const input = form.email as HTMLInputElement;
+    const pwInput = form.querySelector('input[name="password"]') as HTMLInputElement | null;
     const err = backdrop.querySelector('.auth-error') as HTMLElement;
     const okMsg = backdrop.querySelector('.auth-forgot-msg') as HTMLElement;
     const submit = backdrop.querySelector('.auth-submit') as HTMLButtonElement;
@@ -62,10 +71,18 @@ export function openAddEmailModal(): Promise<boolean> {
         err.hidden = false;
         return;
       }
+      const password = pwInput?.value ?? '';
+      if (pwInput && !password) {
+        err.textContent = t('addemail.needPw');
+        err.hidden = false;
+        pwInput.focus();
+        return;
+      }
       submit.disabled = true;
       submit.textContent = t('auth.sending');
       try {
-        await setAccountEmail(email, POLICY_VERSION);
+        await setAccountEmail(email, POLICY_VERSION, password || undefined);
+        if (pwInput) pwInput.value = '';
         added = true;
         form.hidden = true;
         okMsg.hidden = false;

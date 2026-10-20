@@ -16,6 +16,8 @@
  *   tifo_proj_<id>              the project's DraftEnvelope (seats, palette…)
  *   tifo_proj_<id>_banners      its banners (BannerStore JSON)
  *   tifo_proj_<id>_thumb        a small PNG data URL for its card
+ *   tifo_proj_<id>_held         its banners were refused by the account (claimProjects)
+ *   tifo_proj_<id>_orphan       an account copy still to take back (claimProjects)
  *   tifo_proj_d_<designId>      this browser's copy of an account project
  *   tifo_proj_d_<designId>_banners
  *
@@ -237,6 +239,9 @@ function dropLocalData(id: string): void {
   remove(docKey(id));
   remove(bannersKey(id));
   remove(thumbKey(id));
+  // Notes the move into an account keeps (see net/claimProjects.ts).
+  remove(`tifo_proj_${id}_held`);
+  remove(`tifo_proj_${id}_orphan`);
 }
 
 /** Delete a local project for good. */

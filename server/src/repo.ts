@@ -433,9 +433,17 @@ export interface AuthRepository {
   getUserByEmail(email: string): Promise<UserRow | null>;
   /**
    * Attach or replace the caller's email (e.g. pre-launch accounts adding one).
-   * Resets verification. Returns false if the email belongs to someone else.
+   * Resets verification and spends every outstanding password-reset link, in
+   * one step: a link already sent to the old address must not outlive the move,
+   * and as a second write its failure was swallowed (audit round six). Returns
+   * false if the email belongs to someone else, and then changes nothing.
+   *
+   * With `expectedHash` (null for an account without a password), the move
+   * happens only while the password is still that one, and is otherwise false
+   * too: an email change confirmed with the old password must not land after a
+   * reset took the account back (audit round six).
    */
-  setEmail(userId: string, email: string, acceptedVersion?: string | null): Promise<boolean>;
+  setEmail(userId: string, email: string, acceptedVersion?: string | null, expectedHash?: string | null): Promise<boolean>;
   /** Mark the user's current email as verified now. */
   /**
    * Mark the email verified. With `email`, only while the account's address is
@@ -460,6 +468,12 @@ export interface AuthRepository {
   deleteToken(tokenHash: string): Promise<void>;
   /** Store a single-use email/reset token (hashed), with a purpose + expiry. */
   createEmailToken(userId: string, tokenHash: string, purpose: string, expiresAt: Date): Promise<void>;
+  /**
+   * Store one only while the account's email is still `email`. A reset link
+   * worked out for an address that an email change then replaced would
+   * otherwise be mailed to the old address and work (audit round six).
+   */
+  createEmailTokenForAddress(userId: string, email: string, tokenHash: string, purpose: string, expiresAt: Date): Promise<boolean>;
   /** Consume a matching, unused, unexpired token; returns its user id and marks it used. */
   consumeEmailToken(tokenHash: string, purpose: string): Promise<string | null>;
   /** Invalidate any outstanding tokens of a purpose for a user (before issuing a new one). */
@@ -468,6 +482,67 @@ export interface AuthRepository {
   setPasswordHash(userId: string, passwordHash: string): Promise<void>;
   /** Invalidate all of a user's bearer tokens (e.g. force re-login after a reset). */
   deleteUserTokens(userId: string): Promise<void>;
+  /**
+   * A new password, and every other way into the account ended, as ONE step.
+   *
+   * Sets the hash, deletes every bearer token and every unexchanged Google/X
+   * sign-in ticket, deletes every outstanding reset link unless
+   * `keepResetLinks`, optionally removes the account's Google/X sign-ins (a
+   * reset takes an account back from whoever connected them), and optionally
+   * issues the one session the caller keeps. All of it happens or none of it
+   * does: done as separate writes, a failure halfway left the old sessions
+   * alive while the reply said "signed out everywhere" (audit round six).
+   *
+   * With `expectedHash` (null: the account has no password yet) it happens
+   * only while the password is still that one, and is false otherwise: a
+   * change confirmed with the old password must not land after a reset.
+   *
+   * Ordered so that nothing running at the same moment can slip a way in past
+   * it: the account row is locked first, then its sessions, then identities
+   * and tickets go, then the hash, then the tokens. See createTokenIfPassword,
+   * createHandoffIfLinked, exchangeHandoff and linkIdentityForSession, which
+   * check the same rows. False also when the account does not exist.
+   */
+  replacePassword(
+    userId: string,
+    passwordHash: string,
+    opts?: {
+      dropIdentities?: boolean;
+      keepResetLinks?: boolean;
+      expectedHash?: string | null;
+      newSession?: { tokenHash: string; expiresAt: Date };
+    },
+  ): Promise<boolean>;
+  /**
+   * Store an upgraded hash only while the stored one is still `expected`.
+   * A sign-in rehashing the old password must never write it back over a
+   * password that a reset set while the sign-in was checking (audit round six).
+   */
+  upgradePasswordHash(userId: string, expected: string, next: string): Promise<boolean>;
+  /**
+   * Issue a session only while the account's password is still the one the
+   * sign-in just verified. False, and nothing stored, when it changed: a
+   * sign-in that overlapped a reset or a password change used to come away
+   * with a session that outlived "signed out everywhere" (audit round six).
+   */
+  createTokenIfPassword(userId: string, verifiedHash: string, tokenHash: string, expiresAt: Date): Promise<boolean>;
+  /**
+   * Store a Google/X sign-in ticket only while that identity still opens this
+   * account. False when a reset removed it in the meantime.
+   */
+  createHandoffIfLinked(
+    userId: string,
+    provider: string,
+    providerUserId: string,
+    tokenHash: string,
+    expiresAt: Date,
+  ): Promise<boolean>;
+  /**
+   * Spend a sign-in ticket and issue the session for it, as one step. Returns
+   * the account id, or null when the ticket is unknown, used, expired or was
+   * cancelled by a reset.
+   */
+  exchangeHandoff(ticketHash: string, tokenHash: string, expiresAt: Date): Promise<string | null>;
   /** Permanently delete a user (account deletion). Cascades tokens/usage rows. */
   deleteUser(userId: string): Promise<void>;
 
@@ -481,6 +556,13 @@ export interface AuthRepository {
   getUserIdByIdentity(provider: string, providerUserId: string): Promise<string | null>;
   /** Attach an identity. False when it already belongs to a different account. */
   linkIdentity(provider: string, providerUserId: string, userId: string): Promise<boolean>;
+  /**
+   * Attach one only while the session that asked for it is still live, in one
+   * step. Checked first and written second, a reset landing in between left
+   * the new sign-in on an account it had just taken back (audit round six).
+   * False when the session is gone or the identity is someone else's.
+   */
+  linkIdentityForSession(provider: string, providerUserId: string, userId: string, sessionTokenHash: string): Promise<boolean>;
   /** Detach one. False when this user had no identity with that provider. */
   unlinkIdentity(provider: string, userId: string): Promise<boolean>;
   /** The providers this user can sign in with, for the account page. */

@@ -19,7 +19,7 @@ import { MIN_LEGIBLE_RUN, findFragileSeats } from '../core/analysis';
 import { RevealPlayer, REVEAL_PRESETS, revealEndsHidden, type RevealId } from '../core/reveal';
 import { drumCallBeat, DRUM_CALL_MIN_LENGTH } from '../core/drumCall';
 import { DrumTrack } from '../render/drumTrack';
-import { fetchMe, isSignedIn, registrationEmailWasSent, saveDesign, saveScene, setPublic, setDesignTitle, exportMyData, deleteAccount } from '../net/api';
+import { fetchMe, isSignedIn, registrationEmailWasSent, saveDesign, saveScene, setPublic, setDesignTitle, exportMyData } from '../net/api';
 import { onLangChange, t as i18nT, tErr, tl, tv } from './i18n';
 import { track, setAnalyticsSignedIn } from '../net/analytics';
 import { buildTifoV2 } from '../core/tifoFormat';
@@ -1485,15 +1485,11 @@ export function mountToolbar(
       /* best-effort download */
     }
   });
-  document.getElementById('menu-delete')?.addEventListener('click', async () => {
+  document.getElementById('menu-delete')?.addEventListener('click', () => {
+    // Deleting needs the password now (audit round six), which the account
+    // page asks for; this menu only takes you there.
     toggleAvatarMenu(false);
-    if (!window.confirm(i18nT('ed.deleteConfirm'))) return;
-    try {
-      await deleteAccount();
-      window.location.href = '/';
-    } catch {
-      /* ignore — stay on the page if deletion failed */
-    }
+    window.location.href = '/account#sec-danger';
   });
   document.getElementById('menu-tutorial')?.addEventListener('click', async () => {
     toggleAvatarMenu(false);

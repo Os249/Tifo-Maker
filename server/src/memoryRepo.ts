@@ -524,7 +524,7 @@ export class MemoryDesignRepository implements DesignRepository {
   async fork(id: string, title: string, ownerId: string): Promise<DesignMeta | null> {
     const r = this.rows.get(id);
     if (!r) return null;
-    return this.create({
+    const meta = await this.create({
       title,
       templateId: r.templateId,
       templateVersion: r.templateVersion,
@@ -533,6 +533,13 @@ export class MemoryDesignRepository implements DesignRepository {
       ownerId,
       thumbnailPng: r.thumbnail,
     });
+    // A taken-down source's copy is born taken down, as on Postgres.
+    if (r.takenDown) {
+      const copy = this.rows.get(meta.id);
+      if (copy) copy.takenDown = true;
+      return { ...meta, takenDown: true };
+    }
+    return meta;
   }
 
   // ---- social helpers (used by MemorySocialRepository) ----
@@ -827,13 +834,18 @@ export class MemoryAuthRepository implements AuthRepository {
     return null;
   }
 
-  async setEmail(userId: string, email: string, _acceptedVersion?: string | null): Promise<boolean> {
+  async setEmail(userId: string, email: string, _acceptedVersion?: string | null, expectedHash?: string | null): Promise<boolean> {
     const u = await this.getUserById(userId);
     if (!u) return false;
+    if (expectedHash !== undefined && (u.passwordHash ?? null) !== expectedHash) return false;
     const mine = u.email && u.email.toLowerCase() === email.toLowerCase();
     if (!mine && this.emailTaken(email)) return false;
     u.email = email;
     u.emailVerifiedAt = null; // re-verify whenever the address changes
+    // And the old address's reset links end with the move (as on Postgres).
+    for (const [hash, t] of this.emailTokens) {
+      if (t.userId === userId && t.purpose === 'reset_password') this.emailTokens.delete(hash);
+    }
     return true;
   }
 
@@ -899,6 +911,19 @@ export class MemoryAuthRepository implements AuthRepository {
     this.tokens.delete(tokenHash);
   }
 
+  async createEmailTokenForAddress(
+    userId: string,
+    email: string,
+    tokenHash: string,
+    purpose: string,
+    expiresAt: Date,
+  ): Promise<boolean> {
+    const u = [...this.users.values()].find((x) => x.id === userId);
+    if (!u?.email || u.email.toLowerCase() !== email.toLowerCase()) return false;
+    this.emailTokens.set(tokenHash, { userId, purpose, expiresAt: expiresAt.getTime(), used: false });
+    return true;
+  }
+
   async createEmailToken(userId: string, tokenHash: string, purpose: string, expiresAt: Date): Promise<void> {
     this.emailTokens.set(tokenHash, { userId, purpose, expiresAt: expiresAt.getTime(), used: false });
   }
@@ -925,6 +950,68 @@ export class MemoryAuthRepository implements AuthRepository {
     for (const [hash, t] of this.tokens) if (t.userId === userId) this.tokens.delete(hash);
   }
 
+  async replacePassword(
+    userId: string,
+    passwordHash: string,
+    opts: {
+      dropIdentities?: boolean;
+      keepResetLinks?: boolean;
+      expectedHash?: string | null;
+      newSession?: { tokenHash: string; expiresAt: Date };
+    } = {},
+  ): Promise<boolean> {
+    // No await between the writes, so nothing else runs in the middle: the
+    // memory store's version of one transaction.
+    const u = [...this.users.values()].find((x) => x.id === userId);
+    if (!u) return false;
+    if (opts.expectedHash !== undefined && (u.passwordHash ?? null) !== opts.expectedHash) return false;
+    u.passwordHash = passwordHash;
+    for (const [hash, t] of this.tokens) if (t.userId === userId) this.tokens.delete(hash);
+    for (const [hash, t] of this.emailTokens) {
+      if (t.userId !== userId) continue;
+      if (t.purpose === 'oauth_handoff' || (t.purpose === 'reset_password' && !opts.keepResetLinks)) this.emailTokens.delete(hash);
+    }
+    if (opts.dropIdentities) for (const [k, id] of this.identities) if (id === userId) this.identities.delete(k);
+    if (opts.newSession) this.tokens.set(opts.newSession.tokenHash, { userId, expiresAt: opts.newSession.expiresAt.getTime() });
+    return true;
+  }
+
+  // The conditional writes below read and write with no await in between, which
+  // is the memory store's way of doing them in one statement.
+  async upgradePasswordHash(userId: string, expected: string, next: string): Promise<boolean> {
+    const u = [...this.users.values()].find((x) => x.id === userId);
+    if (!u || u.passwordHash !== expected) return false;
+    u.passwordHash = next;
+    return true;
+  }
+
+  async createTokenIfPassword(userId: string, verifiedHash: string, tokenHash: string, expiresAt: Date): Promise<boolean> {
+    const u = [...this.users.values()].find((x) => x.id === userId);
+    if (!u || u.passwordHash !== verifiedHash) return false;
+    this.tokens.set(tokenHash, { userId, expiresAt: expiresAt.getTime() });
+    return true;
+  }
+
+  async createHandoffIfLinked(
+    userId: string,
+    provider: string,
+    providerUserId: string,
+    tokenHash: string,
+    expiresAt: Date,
+  ): Promise<boolean> {
+    if (this.identities.get(`${provider}:${providerUserId}`) !== userId) return false;
+    this.emailTokens.set(tokenHash, { userId, purpose: 'oauth_handoff', expiresAt: expiresAt.getTime(), used: false });
+    return true;
+  }
+
+  async exchangeHandoff(ticketHash: string, tokenHash: string, expiresAt: Date): Promise<string | null> {
+    const t = this.emailTokens.get(ticketHash);
+    if (!t || t.used || t.purpose !== 'oauth_handoff' || t.expiresAt < Date.now()) return null;
+    t.used = true;
+    this.tokens.set(tokenHash, { userId: t.userId, expiresAt: expiresAt.getTime() });
+    return t.userId;
+  }
+
   async deleteUser(userId: string): Promise<void> {
     for (const [name, u] of this.users) if (u.id === userId) this.users.delete(name);
     for (const [hash, t] of this.tokens) if (t.userId === userId) this.tokens.delete(hash);
@@ -944,6 +1031,20 @@ export class MemoryAuthRepository implements AuthRepository {
     const k = `${provider}:${providerUserId}`;
     const owner = this.identities.get(k);
     if (owner && owner !== userId) return false;
+    this.identities.set(k, userId);
+    return true;
+  }
+
+  async linkIdentityForSession(
+    provider: string,
+    providerUserId: string,
+    userId: string,
+    sessionTokenHash: string,
+  ): Promise<boolean> {
+    const t = this.tokens.get(sessionTokenHash);
+    if (!t || t.userId !== userId || t.expiresAt < Date.now()) return false;
+    const k = `${provider}:${providerUserId}`;
+    if (this.identities.has(k)) return false;
     this.identities.set(k, userId);
     return true;
   }

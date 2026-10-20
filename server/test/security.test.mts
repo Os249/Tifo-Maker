@@ -1317,18 +1317,25 @@ async function makeDesign(app: FastifyInstance, token: string, isPublic = false)
       assert.equal(lastWay.statusCode, 400, 'unlinking the only sign-in method is refused');
       assert.equal((lastWay.json() as { code: string }).code, 'last_method');
 
-      // ...until a password is set. No current password is asked for, because
-      // there is none — the bearer token has already proved who is asking.
+      // ...until a password is set. Not with the session alone: a stolen one
+      // could set a password the thief knows (audit round six). The proven
+      // address decides, through the set-a-password link sent to it.
       const setFirst = await gApp.inject({
         method: 'POST',
         url: '/api/account/password',
         headers: bearer(newcomerToken),
         payload: { newPassword: 'quartz-lantern-echo7' },
       });
-      assert.equal(setFirst.statusCode, 200, 'a Google account can set its first password without confirming one');
-      const afterSet = (setFirst.json() as { token: string }).token;
-      const nowUnlink = await gApp.inject({ method: 'DELETE', url: '/api/account/link/google', headers: bearer(afterSet) });
-      assert.equal(nowUnlink.statusCode, 200, 'with a password in place, the link can go');
+      assert.equal(setFirst.statusCode, 403, 'a Google account sets its first password through its mailbox');
+      assert.equal((setFirst.json() as { code: string }).code, 'use_email_link');
+      const newcomerId = ((await gApp.inject({ method: 'GET', url: '/api/me', headers: bearer(newcomerToken) })).json() as { id: string }).id;
+      const mailed = 'newcomer-set-password-link-0123456789';
+      await gAuth.createEmailToken(newcomerId, hashToken(mailed), 'reset_password', new Date(Date.now() + 3600_000));
+      assert.equal((await gApp.inject({ method: 'POST', url: '/api/auth/reset', payload: { token: mailed, newPassword: 'quartz-lantern-echo7' } })).statusCode, 200);
+      assert.deepEqual(await gAuth.identitiesFor(newcomerId), [], 'which, like any reset, removes the Google sign-in; it can be connected again');
+      const signedBackIn = await gApp.inject({ method: 'POST', url: '/api/auth/login', payload: { username: 'curva_north', password: 'quartz-lantern-echo7' } });
+      assert.equal(signedBackIn.statusCode, 200, 'and the password opens the account');
+      const afterSet = (signedBackIn.json() as { token: string }).token;
       // And the policy still applies to that first password.
       const weakFirst = await gApp.inject({
         method: 'POST',
@@ -2534,7 +2541,7 @@ async function makeDesign(app: FastifyInstance, token: string, isPublic = false)
       await papp.inject({ method: 'PATCH', url: `/api/designs/${dy.id}`, headers: bearer(y.token), payload: { isPublic: true } });
       const cx = ((await papp.inject({ method: 'POST', url: `/api/designs/${dy.id}/comments`, headers: bearer(x.token), payload: { body: 'X again' } })).json() as { id: string }).id;
       await papp.inject({ method: 'POST', url: `/api/designs/${dy.id}/comments`, headers: bearer(y.token), payload: { body: 'Y answers', parentId: cx } });
-      assert.equal((await papp.inject({ method: 'DELETE', url: '/api/account', headers: bearer(x.token) })).statusCode, 204);
+      assert.equal((await papp.inject({ method: 'DELETE', url: '/api/account', headers: bearer(x.token), payload: { password: R5PW } })).statusCode, 204);
       const after = (await papp.inject({ method: 'GET', url: `/api/designs/${dy.id}/comments` })).json() as { body: string }[];
       assert.deepEqual(after.map((c) => c.body), ['Y answers'], 'Postgres: deleting an account leaves the replies to its comments');
 
@@ -3259,4 +3266,879 @@ async function makeDesign(app: FastifyInstance, token: string, isPublic = false)
     forgetBudgetMemoryForTests();
   }
   console.log('claude first (18 October): all assertions passed (Haiku fast + Sonnet premium, a Gemini AI_MODEL never sent to Claude, effort and thinking per tier, Gemini behind Claude then its own fallback, three calls at most, one quick call after a slow failure, refusals not shopped around, an older model asked again without the setting it refuses, spent credit or the spend cap pauses Claude and heals, a Claude AI_MODEL never sent to Google, Claude alone retries 529, routes record Claude and Gemini, the first model\'s reason)');
+}
+
+// ---------- 2026-10: audit round six ----------
+// Found during the October performance review: caching that a CDN would turn
+// into leaks, checks that opened when the database failed, and a few smaller
+// holes. Every block here fails on the code before the fix.
+{
+  const { existsSync } = await import('node:fs');
+  const { gunzipSync } = await import('node:zlib');
+  const { resolve } = await import('node:path');
+  const { MemoryDailyFeatureRepository } = await import('../src/featureRepo');
+  const { safeEqual: eq6, mintUnlock: mint6, verifyUnlock: verify6 } = await import('../src/aiRoutes');
+  const check = (cond: unknown, msg: string): void => assert.ok(cond, msg);
+  const R6PW = 'quartz-lantern-echo7';
+  const R6PW2 = 'harbour-violet-signal4';
+  const PNG_B64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+  const SECRET_PIC = 'data:image/png;base64,T1dORVJTLVBJQ1RVUkUtUjY=';
+
+  /** Repositories that can be told to fail, for the paths that must fail closed. */
+  class FlakyAuth extends MemoryAuthRepository {
+    failUsernameCheck = false;
+    /** Fail the next N account reads: the first lookup a route makes. */
+    failGetUserCalls = 0;
+    failPasswordWrites = false;
+    override async hasChosenUsername(userId: string): Promise<boolean> {
+      if (this.failUsernameCheck) throw new Error('connection terminated');
+      return super.hasChosenUsername(userId);
+    }
+    override async getUserById(userId: string): ReturnType<MemoryAuthRepository['getUserById']> {
+      if (this.failGetUserCalls > 0) {
+        this.failGetUserCalls--;
+        throw new Error('connection terminated');
+      }
+      return super.getUserById(userId);
+    }
+    override async deleteUserTokens(userId: string): Promise<void> {
+      if (this.failPasswordWrites) throw new Error('connection terminated');
+      return super.deleteUserTokens(userId);
+    }
+    /**
+     * A reset (to this hash) that lands between a change's password check and
+     * its write: the next password change or email change runs it first.
+     */
+    resetDuring: string | null = null;
+    private async landReset(userId: string): Promise<void> {
+      const h = this.resetDuring;
+      this.resetDuring = null;
+      if (h) await super.replacePassword(userId, h, { dropIdentities: true });
+    }
+    /** Another sign-in upgrading the same password's hash, mid-change (to this new hash). */
+    rehashDuring: string | null = null;
+    override async replacePassword(...args: Parameters<MemoryAuthRepository['replacePassword']>): Promise<boolean> {
+      if (this.failPasswordWrites) throw new Error('connection terminated');
+      if (this.resetDuring && args[2]?.expectedHash !== undefined) await this.landReset(args[0]);
+      if (this.rehashDuring && typeof args[2]?.expectedHash === 'string') {
+        const next = this.rehashDuring;
+        this.rehashDuring = null;
+        await super.upgradePasswordHash(args[0], args[2].expectedHash, next);
+      }
+      return super.replacePassword(...args);
+    }
+    override async setEmail(...args: Parameters<MemoryAuthRepository['setEmail']>): Promise<boolean> {
+      if (this.resetDuring) await this.landReset(args[0]);
+      return super.setEmail(...args);
+    }
+    /** An email change that lands while a forgot-password request is being handled. */
+    moveDuringLookup: string | null = null;
+    override async getUserByEmail(email: string): ReturnType<MemoryAuthRepository['getUserByEmail']> {
+      const u = await super.getUserByEmail(email);
+      const snap = u ? { ...u } : null;
+      if (u && this.moveDuringLookup) {
+        const to = this.moveDuringLookup;
+        this.moveDuringLookup = null;
+        await super.setEmail(u.id, to);
+      }
+      return snap;
+    }
+    failDeleteEmailTokens = false;
+    override async deleteEmailTokens(userId: string, purpose: string): Promise<void> {
+      if (this.failDeleteEmailTokens) throw new Error('connection terminated');
+      return super.deleteEmailTokens(userId, purpose);
+    }
+    /**
+     * A reset that lands while a sign-in is checking the password: the sign-in
+     * has read the account (a copy, as Postgres hands back), then the password
+     * is replaced and every session ended, then the sign-in carries on.
+     */
+    raceReset: string | null = null;
+    override async getUserByName(username: string): ReturnType<MemoryAuthRepository['getUserByName']> {
+      const u = await super.getUserByName(username);
+      const snap = u ? { ...u } : null;
+      if (u && this.raceReset) {
+        const next = this.raceReset;
+        this.raceReset = null;
+        await this.replacePassword(u.id, next);
+      }
+      return snap;
+    }
+  }
+  class FlakyDesigns extends MemoryDesignRepository {
+    failTakedown = false;
+    override async takedownDesign(designId: string): Promise<boolean> {
+      if (this.failTakedown) throw new Error('connection terminated');
+      return super.takedownDesign(designId);
+    }
+    /** A repository that forgot to carry a takedown into the copy. */
+    forkLosesTakedown = false;
+    override async fork(id: string, title: string, ownerId: string): ReturnType<MemoryDesignRepository['fork']> {
+      const meta = await super.fork(id, title, ownerId);
+      if (!meta || !this.forkLosesTakedown) return meta;
+      const row = (this as unknown as { rows: Map<string, { takenDown?: boolean }> }).rows.get(meta.id);
+      if (row) row.takenDown = false;
+      return { ...meta, takenDown: false };
+    }
+  }
+
+  const auth = new FlakyAuth();
+  const designs = new FlakyDesigns((id) => auth.usernameOf(id));
+  const social = new MemorySocialRepository(designs, auth);
+  const featured = new MemoryDailyFeatureRepository();
+  const dist = existsSync('dist/index.html') ? resolve('dist') : process.cwd();
+  const sent6: { to: string; subject?: string; text?: string; html: string }[] = [];
+  const app = await buildApp(designs, auth, templates, {
+    social, featured, leads: new MemoryLeadsRepository(),
+    staticDir: dist, adminUsernames: ['mod_r6', 'chief_r6'], aiAdminPassword: 'r6 admin password',
+    emailSender: { send: async (m: { to: string; subject?: string; text?: string; html: string }) => { sent6.push(m); } } as never,
+  });
+  const r6 = async (u: string): Promise<{ token: string; id: string }> => {
+    const r = await app.inject({ method: 'POST', url: '/api/auth/register', payload: { username: u, password: R6PW, email: `${u}@example.test`, acceptedVersion: 'test', adminPassword: 'r6 admin password' } });
+    assert.equal(r.statusCode, 201, r.body);
+    const token = (r.json() as { token: string }).token;
+    return { token, id: (await app.inject({ method: 'GET', url: '/api/me', headers: bearer(token) })).json().id as string };
+  };
+  const design = async (token: string, pub: boolean, title = 'R6'): Promise<string> => {
+    const d = await app.inject({ method: 'POST', url: '/api/designs', headers: bearer(token), payload: { title, templateId: DEFAULT_TEMPLATE.id, templateVersion: 1, palette: PALETTE, cellsGzB64, thumbnailPngB64: PNG_B64 } });
+    assert.equal(d.statusCode, 201, d.body);
+    const id = (d.json() as { id: string }).id;
+    if (pub) assert.equal((await app.inject({ method: 'PATCH', url: `/api/designs/${id}`, headers: bearer(token), payload: { isPublic: true } })).statusCode, 200);
+    return id;
+  };
+  const issueR6Session = async (userId: string): Promise<string> => {
+    const raw = `r6-session-${userId}-${Math.random().toString(36).slice(2)}`;
+    await auth.createToken(userId, hashToken(raw), new Date(Date.now() + 3600_000));
+    return raw;
+  };
+  const owner = await r6('owner_r6');
+  const other = await r6('other_r6');
+  const mod = await r6('mod_r6');
+
+  // ---- MEDIUM: a private design's card and picture were cacheable by anyone ----
+  {
+    const priv = await design(owner.token, false);
+    const pub = await design(owner.token, true);
+    const ogPriv = await app.inject({ method: 'GET', url: `/og/t/${priv}.png`, headers: bearer(owner.token) });
+    assert.equal(ogPriv.statusCode, 200);
+    assert.equal(ogPriv.headers['cache-control'], 'private, no-store', 'a private design’s card is never public');
+    const ogLegacy = await app.inject({ method: 'GET', url: `/api/designs/${priv}/og.png`, headers: bearer(owner.token) });
+    assert.equal(ogLegacy.headers['cache-control'], 'private, no-store', 'on the old URL too');
+    assert.equal((await app.inject({ method: 'GET', url: `/og/t/${pub}.png` })).headers['cache-control'], 'public, max-age=3600', 'a public card still caches');
+    const thPriv = await app.inject({ method: 'GET', url: `/api/designs/${priv}/thumbnail.png`, headers: bearer(owner.token) });
+    assert.equal(thPriv.headers['cache-control'], 'private, no-store', 'a private thumbnail is not kept in any cache');
+    assert.equal((await app.inject({ method: 'GET', url: `/api/designs/${pub}/thumbnail.png` })).headers['cache-control'], 'no-cache', 'a public one keeps its own policy');
+
+    // ---- MEDIUM: answers about one person carried no Cache-Control ----
+    await app.inject({ method: 'PUT', url: `/api/designs/${priv}/scene`, headers: bearer(owner.token), payload: { sceneGzB64: gzipSync(Buffer.from(JSON.stringify({ v: 1, banners: [] }))).toString('base64') } });
+    const personal: [string, string][] = [
+      ['/api/me', owner.token],
+      [`/api/designs/${priv}`, owner.token],
+      [`/api/designs/${priv}/scene`, owner.token],
+      ['/api/gallery', owner.token],
+      ['/api/notifications', owner.token],
+      ['/api/account/export', owner.token],
+      [`/api/users/${owner.id}/profile`, other.token],
+    ];
+    for (const [url, token] of personal) {
+      const r = await app.inject({ method: 'GET', url, headers: bearer(token) });
+      assert.equal(r.statusCode, 200, `${url}: ${r.body.slice(0, 120)}`);
+      assert.equal(r.headers['cache-control'], 'no-store', `${url} must say no-store`);
+    }
+    for (const url of ['/api/nope', `/api/designs/${priv}`, '/admin.js', '/og/t/00000000-0000-4000-8000-000000000000.png']) {
+      const r = await app.inject({ method: 'GET', url });
+      assert.ok(r.statusCode >= 400, `${url} refused (${r.statusCode})`);
+      check(/no-store|no-cache/.test(String(r.headers['cache-control'] ?? '')), `${url}: a refusal says how it may be cached (${r.headers['cache-control']})`);
+    }
+    // Decided on the route that answered, not on how the path was spelled.
+    const spelled = await app.inject({ method: 'GET', url: '/%61pi/me', headers: bearer(owner.token) });
+    if (spelled.statusCode === 200) check(spelled.headers['cache-control'] === 'no-store', `/%61pi/me is /api/me (${spelled.headers['cache-control']})`);
+    // A route that chose its own policy keeps it.
+    const proj = await app.inject({ method: 'GET', url: '/api/projects', headers: bearer(owner.token) });
+    assert.equal(proj.headers['cache-control'], 'no-store');
+
+    // ---- LOW: server-rendered pages named no cache policy ----
+    for (const url of ['/community', `/t/${pub}`, `/d/${pub}`, `/s/${pub}`, '/clubs', '/legal', '/tifo-spec']) {
+      const r = await app.inject({ method: 'GET', url });
+      assert.equal(r.statusCode, 200, `${url} (${r.statusCode})`);
+      assert.equal(r.headers['cache-control'], 'no-cache', `${url} must say no-cache`);
+    }
+  }
+
+  // ---- LOW: a forged port went into the canonical URL ----
+  {
+    const page = await app.inject({ method: 'GET', url: '/community', headers: { host: 'tifomaker.org:1234' } });
+    check(!page.body.includes('tifomaker.org:1234'), 'a port on a public name is not echoed into the page');
+    check(page.body.includes('https://tifomaker.org/community'), 'it falls back to the canonical address');
+    const dev = await app.inject({ method: 'GET', url: '/community', headers: { host: 'localhost:5173' } });
+    check(dev.body.includes('http://localhost:5173/community'), 'a dev host keeps its port');
+  }
+
+  // ---- LOW-MEDIUM: "signed out everywhere" when it had not happened ----
+  {
+    const u = await r6('pw_r6');
+    const login = async (password: string) =>
+      app.inject({ method: 'POST', url: '/api/auth/login', payload: { username: 'pw_r6', password } });
+    const second = (await login(R6PW)).json().token as string;
+    auth.failPasswordWrites = true;
+    const r = await app.inject({ method: 'POST', url: '/api/account/password', headers: bearer(u.token), payload: { currentPassword: R6PW, newPassword: R6PW2 } });
+    auth.failPasswordWrites = false;
+    check(r.statusCode !== 200 && !/signedOutEverywhereElse/.test(r.body), `a failed sign-out is not reported as done (${r.statusCode} ${r.body.slice(0, 120)})`);
+    check((await login(R6PW)).statusCode === 200, 'and nothing changed: the old password still works');
+    // When it works, it all works.
+    const ok = await app.inject({ method: 'POST', url: '/api/account/password', headers: bearer(u.token), payload: { currentPassword: R6PW, newPassword: R6PW2 } });
+    assert.equal(ok.statusCode, 200, ok.body);
+    assert.equal((await app.inject({ method: 'GET', url: '/api/me', headers: bearer(second) })).statusCode, 401, 'the other session is gone');
+    assert.equal((await app.inject({ method: 'GET', url: '/api/me', headers: bearer(ok.json().token as string) })).statusCode, 200, 'this one stays signed in');
+    assert.equal((await login(R6PW)).statusCode, 401);
+
+    // The reset path: all of it, or none of it.
+    const resetSecret = 'r6-reset-secret-0123456789abcdef';
+    await auth.createEmailToken(u.id, hashToken(resetSecret), 'reset_password', new Date(Date.now() + 3600_000));
+    await auth.linkIdentity('google', 'g-sub-r6', u.id);
+    auth.failPasswordWrites = true;
+    const bad = await app.inject({ method: 'POST', url: '/api/auth/reset', payload: { token: resetSecret, newPassword: 'meadow-copper-orbit9' } });
+    auth.failPasswordWrites = false;
+    check(bad.statusCode === 503, `a reset that could not finish says so (${bad.statusCode})`);
+    check((await login(R6PW2)).statusCode === 200, 'and the password it was meant to replace still works');
+    const resetAgain = 'r6-reset-secret-fedcba9876543210';
+    await auth.createEmailToken(u.id, hashToken(resetAgain), 'reset_password', new Date(Date.now() + 3600_000));
+    const good = await app.inject({ method: 'POST', url: '/api/auth/reset', payload: { token: resetAgain, newPassword: 'meadow-copper-orbit9' } });
+    assert.equal(good.statusCode, 200, good.body);
+    assert.deepEqual(await auth.identitiesFor(u.id), [], 'a reset still removes the connected sign-ins');
+    assert.equal((await login('meadow-copper-orbit9')).statusCode, 200);
+  }
+
+  // ---- MEDIUM: a sign-in that overlapped a reset kept its session ----
+  {
+    const { randomBytes, scryptSync } = await import('node:crypto');
+    const { hashPassword: hash6 } = await import('../src/auth');
+    const victim = await r6('race_r6');
+    const login = (password: string) => app.inject({ method: 'POST', url: '/api/auth/login', payload: { username: 'race_r6', password } });
+    // The thief signs in with the old password just as the owner resets it.
+    auth.raceReset = await hash6('lantern-crimson-quay8');
+    const thief = await login(R6PW);
+    check(thief.statusCode === 401, `a sign-in checked against the old password gets no session once the reset lands (${thief.statusCode})`);
+    if (thief.statusCode === 200) {
+      check((await app.inject({ method: 'GET', url: '/api/me', headers: bearer(thief.json().token as string) })).statusCode === 401, 'or at least not one that outlives the reset');
+    }
+    assert.equal((await login('lantern-crimson-quay8')).statusCode, 200, 'the new password works');
+    void victim;
+
+    // An account with a legacy hash: the sign-in's rehash used to write the
+    // OLD password back over the new one.
+    const salt = randomBytes(16);
+    const legacy = `${salt.toString('hex')}:${scryptSync('ember-quill-harbor5', salt, 64, { N: 16384, r: 8, p: 1 }).toString('hex')}`;
+    const old = await auth.createUser('legacy_r6', legacy, { email: 'legacy_r6@example.test' });
+    assert.ok(old);
+    auth.raceReset = await hash6('signal-amber-forest2');
+    const raced = await app.inject({ method: 'POST', url: '/api/auth/login', payload: { username: 'legacy_r6', password: 'ember-quill-harbor5' } });
+    check(raced.statusCode === 401, `the legacy sign-in that overlapped gets no session (${raced.statusCode})`);
+    const afterOld = await app.inject({ method: 'POST', url: '/api/auth/login', payload: { username: 'legacy_r6', password: 'ember-quill-harbor5' } });
+    check(afterOld.statusCode === 401, 'and the old password is not written back');
+    assert.equal((await app.inject({ method: 'POST', url: '/api/auth/login', payload: { username: 'legacy_r6', password: 'signal-amber-forest2' } })).statusCode, 200, 'the reset password stands');
+    // Without a race, a legacy sign-in still upgrades in place and signs in.
+    const clean = await auth.createUser('legacy2_r6', `${salt.toString('hex')}:${scryptSync('ember-quill-harbor5', salt, 64, { N: 16384, r: 8, p: 1 }).toString('hex')}`, { email: 'legacy2_r6@example.test' });
+    assert.equal((await app.inject({ method: 'POST', url: '/api/auth/login', payload: { username: 'legacy2_r6', password: 'ember-quill-harbor5' } })).statusCode, 200);
+    check(((await auth.getUserById(clean!.id))?.passwordHash ?? '').startsWith('s2:'), 'and its hash is upgraded');
+  }
+
+  // ---- MEDIUM: a provider sign-in still in flight survived a reset ----
+  {
+    const held = await r6('handoff_r6');
+    // A ticket minted by the provider callback seconds before the owner resets.
+    const ticket = 'r6-handoff-ticket-0123456789abcdef';
+    await auth.createEmailToken(held.id, hashToken(ticket), 'oauth_handoff', new Date(Date.now() + 120_000));
+    const link = 'r6-handoff-reset-0123456789abcdef';
+    await auth.createEmailToken(held.id, hashToken(link), 'reset_password', new Date(Date.now() + 3600_000));
+    assert.equal((await app.inject({ method: 'POST', url: '/api/auth/reset', payload: { token: link, newPassword: 'cobalt-meadow-rally6' } })).statusCode, 200);
+    const traded = await app.inject({ method: 'POST', url: '/api/auth/handoff', headers: { cookie: `tm_handoff=${encodeURIComponent(ticket)}` } });
+    check(traded.statusCode === 401, `a reset ends a provider sign-in that had not been collected yet (${traded.statusCode})`);
+    // The same for a password change.
+    const ticket2 = 'r6-handoff-ticket-fedcba9876543210';
+    const relog = (await app.inject({ method: 'POST', url: '/api/auth/login', payload: { username: 'handoff_r6', password: 'cobalt-meadow-rally6' } })).json().token as string;
+    await auth.createEmailToken(held.id, hashToken(ticket2), 'oauth_handoff', new Date(Date.now() + 120_000));
+    assert.equal((await app.inject({ method: 'POST', url: '/api/account/password', headers: bearer(relog), payload: { currentPassword: 'cobalt-meadow-rally6', newPassword: R6PW2 } })).statusCode, 200);
+    const traded2 = await app.inject({ method: 'POST', url: '/api/auth/handoff', headers: { cookie: `tm_handoff=${encodeURIComponent(ticket2)}` } });
+    check(traded2.statusCode === 401, `and so does a password change (${traded2.statusCode})`);
+  }
+
+  // ---- HIGH: a password or email change confirmed just before a reset undid it ----
+  {
+    const { hashPassword: hashR6 } = await import('../src/auth');
+    const vic = await r6('undo_r6');
+    const signIn = (password: string) => app.inject({ method: 'POST', url: '/api/auth/login', payload: { username: 'undo_r6', password } });
+    // The thief has a session and the password; the owner resets meanwhile.
+    const thief = (await signIn(R6PW)).json().token as string;
+    auth.resetDuring = await hashR6('owner-takes-back-9');
+    const changed = await app.inject({ method: 'POST', url: '/api/account/password', headers: bearer(thief), payload: { currentPassword: R6PW, newPassword: 'thief-keeps-it-77' } });
+    auth.resetDuring = null;
+    check(changed.statusCode === 401, `a change checked against the old password does not land after the reset (${changed.statusCode})`);
+    check((await signIn('owner-takes-back-9')).statusCode === 200, 'the reset stands');
+    check((await signIn('thief-keeps-it-77')).statusCode === 401, 'and the thief\u2019s password was never set');
+    if (changed.statusCode === 200) check((await app.inject({ method: 'GET', url: '/api/me', headers: bearer(changed.json().token as string) })).statusCode === 401, 'nor its session kept');
+    // The same race on an email change: the address must not move after the reset.
+    const againRes = await signIn('owner-takes-back-9');
+    assert.equal(againRes.statusCode, 200, 'the owner signs in with the reset password');
+    const again = againRes.json().token as string;
+    auth.resetDuring = await hashR6('owner-again-lantern-5');
+    const moved = await app.inject({ method: 'POST', url: '/api/account/email', headers: bearer(again), payload: { email: 'undo_thief@example.test', password: 'owner-takes-back-9' } });
+    auth.resetDuring = null;
+    check(moved.statusCode === 401, `an email change checked against the old password does not land after the reset (${moved.statusCode})`);
+    check((await auth.getUserById(vic.id))?.email === 'undo_r6@example.test', 'the address did not move');
+  }
+
+  // ---- MEDIUM: a password change spent the owner's reset links ----
+  {
+    const keep = await r6('keep_r6');
+    const link = 'r6-keep-reset-link-0123456789abcd';
+    await auth.createEmailToken(keep.id, hashToken(link), 'reset_password', new Date(Date.now() + 3600_000));
+    // Someone with the session and the password changes it, as often as they like.
+    assert.equal((await app.inject({ method: 'POST', url: '/api/account/password', headers: bearer(keep.token), payload: { currentPassword: R6PW, newPassword: 'thief-changed-it-3' } })).statusCode, 200);
+    const back = await app.inject({ method: 'POST', url: '/api/auth/reset', payload: { token: link, newPassword: 'owner-recovers-8' } });
+    check(back.statusCode === 200, `the mailbox can still take the account back after a change (${back.statusCode})`);
+  }
+
+  // ---- MEDIUM: a stolen session could add a first email, then reset the password ----
+  {
+    const { hashPassword: hashR6 } = await import('../src/auth');
+    const bare = await auth.createUser('noemail_r6', await hashR6(R6PW), {});
+    assert.ok(bare);
+    const tok = (await app.inject({ method: 'POST', url: '/api/auth/login', payload: { username: 'noemail_r6', password: R6PW } })).json().token as string;
+    const noPw = await app.inject({ method: 'POST', url: '/api/account/email', headers: bearer(tok), payload: { email: 'thief_r6@example.test' } });
+    check(noPw.statusCode === 401, `a first address needs the password too (${noPw.statusCode})`);
+    check(!(await auth.getUserById(bare!.id))?.email, 'and was not added');
+    const withPw = await app.inject({ method: 'POST', url: '/api/account/email', headers: bearer(tok), payload: { email: 'noemail_r6@example.test', password: R6PW } });
+    assert.equal(withPw.statusCode, 200, withPw.body);
+    // An account with no password has none to give, and adds one with its session.
+    const oauthOnly = await auth.createUser('oauthonly_r6', null, {});
+    const t2 = issueR6Session(oauthOnly!.id);
+    assert.equal((await app.inject({ method: 'POST', url: '/api/account/email', headers: bearer(await t2), payload: { email: 'oauthonly_r6@example.test' } })).statusCode, 200);
+  }
+
+  // ---- MEDIUM: a stolen session alone could take over a Google-only account ----
+  {
+    // Signed up with Google: a proven address, no password.
+    const gOnly = await auth.createUser('gonly_r6', null, { email: 'gonly_r6@example.test', emailVerified: true });
+    const gTok = await issueR6Session(gOnly!.id);
+    const setFirst = await app.inject({ method: 'POST', url: '/api/account/password', headers: bearer(gTok), payload: { newPassword: 'thief-sets-this-6' } });
+    check(setFirst.statusCode === 403 && setFirst.json().code === 'use_email_link', `a first password is set through the mailbox, not the session (${setFirst.statusCode})`);
+    check((await auth.getUserById(gOnly!.id))?.passwordHash === null, 'and none was set');
+    const moveIt = await app.inject({ method: 'POST', url: '/api/account/email', headers: bearer(gTok), payload: { email: 'gonly_thief@example.test' } });
+    check(moveIt.statusCode === 403 && moveIt.json().code === 'set_password_first', `nor is its proven address moved by the session (${moveIt.statusCode})`);
+    check((await auth.getUserById(gOnly!.id))?.email === 'gonly_r6@example.test', 'the address stays');
+    // The mailbox route works: the link goes to the proven address and sets it.
+    const n = sent6.length;
+    await app.inject({ method: 'POST', url: '/api/auth/forgot', payload: { email: 'gonly_r6@example.test' } });
+    await app.drainBackground();
+    const link = /reset\?token=([a-f0-9]+)/.exec(sent6.slice(n).find((m) => m.to === 'gonly_r6@example.test')?.text ?? '')?.[1];
+    assert.ok(link, 'the set-a-password link went to the proven address');
+    assert.equal((await app.inject({ method: 'POST', url: '/api/auth/reset', payload: { token: link, newPassword: 'owner-sets-this-4' } })).statusCode, 200);
+    // Without a proven address there is nothing else to ask: the session sets it.
+    const bareG = await auth.createUser('gbare_r6', null, {});
+    const bTok = await issueR6Session(bareG!.id);
+    assert.equal((await app.inject({ method: 'POST', url: '/api/account/password', headers: bearer(bTok), payload: { newPassword: 'bare-sets-this-5' } })).statusCode, 200);
+  }
+
+  // ---- MEDIUM: a session alone connected a second sign-in, or deleted the account ----
+  {
+    const ga = new MemoryAuthRepository();
+    const gd = new MemoryDesignRepository((id) => ga.usernameOf(id));
+    const gapp = await buildApp(gd, ga, templates, { oauth: { google: { id: 'cid', secret: 'csecret' } } });
+    const gOnly = await ga.createUser('glink_r6', null, { email: 'glink_r6@example.test', emailVerified: true });
+    await ga.linkIdentity('google', 'g-owner-r6', gOnly!.id);
+    const raw = 'r6-glink-session-0123456789';
+    await ga.createToken(gOnly!.id, hashToken(raw), new Date(Date.now() + 3600_000));
+    const started = await gapp.inject({ method: 'POST', url: '/api/account/link/google', headers: bearer(raw) });
+    check(started.statusCode === 403 && started.json().code === 'set_password_first', `a Google-only account cannot connect another sign-in with its session alone (${started.statusCode})`);
+    // Two Google sign-ins on it: removing "google" removes both, so it is the last method.
+    await ga.linkIdentity('google', 'g-second-r6', gOnly!.id);
+    const unlinked = await gapp.inject({ method: 'DELETE', url: '/api/account/link/google', headers: bearer(raw) });
+    check(unlinked.statusCode === 400, `removing every sign-in of a passwordless account is refused (${unlinked.statusCode})`);
+    // Deleting needs the password when there is one.
+    const pwd = await r6('delete_r6');
+    check((await app.inject({ method: 'DELETE', url: '/api/account', headers: bearer(pwd.token) })).statusCode === 401, 'a session alone does not delete an account that has a password');
+    check((await app.inject({ method: 'GET', url: '/api/me', headers: bearer(pwd.token) })).statusCode === 200, 'and it is still there');
+    assert.equal((await app.inject({ method: 'DELETE', url: '/api/account', headers: bearer(pwd.token), payload: { password: R6PW } })).statusCode, 204);
+    await gapp.close();
+  }
+
+  // ---- AVAILABILITY: a few kilobytes of scene held the event loop for seconds ----
+  {
+    const sa = new MemoryAuthRepository();
+    const sd = new MemoryDesignRepository((id) => sa.usernameOf(id));
+    const sapp = await buildApp(sd, sa, templates, {});
+    const reg = await sapp.inject({ method: 'POST', url: '/api/auth/register', payload: { username: 'bomb_r6', password: R6PW, email: 'bomb_r6@example.test', acceptedVersion: 'test' } });
+    const btok = reg.json().token as string;
+    const made = await sapp.inject({ method: 'POST', url: '/api/designs', headers: bearer(btok), payload: { title: 'b', templateId: DEFAULT_TEMPLATE.id, templateVersion: 1, palette: PALETTE, cellsGzB64 } });
+    const did = made.json().id as string;
+    const gz = (doc: string) => gzipSync(Buffer.from(doc)).toString('base64');
+    const put = (doc: string) => putGz(gz(doc));
+    const putGz = (sceneGzB64: string) => sapp.inject({ method: 'PUT', url: `/api/designs/${did}/scene`, headers: bearer(btok), payload: { sceneGzB64 } });
+    // 16 MB of empty objects took 3.4 s to parse; 15 MB of zeros 0.4 s; two
+    // million repeated keys 0.45 s.
+    for (const [name, doc] of [
+      ['objects', `[${'{},'.repeat(5_000_000)}{}]`],
+      ['numbers', `{"x":[${'0,'.repeat(7_500_000)}0]}`],
+      ['keys', `{${'"a":"",'.repeat(2_000_000)}"a":""}`],
+    ] as const) {
+      // Refused with scene_complex, which the route answers before it parses.
+      const r = await putGz(gz(doc));
+      check(r.statusCode === 413 && r.json().code === 'scene_complex', `a scene of millions of ${name} is refused unparsed (${r.statusCode})`);
+    }
+    // A big real one goes through: banners full of freehand strokes (points at
+    // full precision, as the editor keeps them), and layer grids.
+    const real = JSON.stringify({
+      v: 1,
+      banners: Array.from({ length: 40 }, (_, k) => ({ id: `b${k}`, items: Array.from({ length: 25 }, () => ({ kind: 'stroke', pts: Array.from({ length: 60 }, () => Math.random() * 100) })) })),
+      layers: { layers: Array.from({ length: 10 }, () => ({ grid: { cols: 500, rows: 300, b64: 'AAEA'.repeat(75_000) } })) },
+    });
+    const ok = await put(real);
+    check(ok.statusCode === 200, `a large real scene still saves (${ok.statusCode} ${ok.body.slice(0, 80)})`);
+    await sapp.close();
+  }
+
+  // ---- LOW: a hash upgraded by another sign-in failed a password change ----
+  {
+    const { hashPassword: hashR6 } = await import('../src/auth');
+    const up = await r6('rehash_r6');
+    auth.rehashDuring = await hashR6(R6PW);
+    const ch = await app.inject({ method: 'POST', url: '/api/account/password', headers: bearer(up.token), payload: { currentPassword: R6PW, newPassword: 'after-rehash-lantern-2' } });
+    auth.rehashDuring = null;
+    check(ch.statusCode === 200, `the change goes ahead over the same password\u2019s new hash (${ch.statusCode})`);
+    check((await app.inject({ method: 'POST', url: '/api/auth/login', payload: { username: 'rehash_r6', password: 'after-rehash-lantern-2' } })).statusCode === 200, 'and the new password works');
+  }
+
+  // ---- LOW: a reset link mailed to the address an account had just left ----
+  {
+    await r6('left_r6');
+    await app.drainBackground();
+    auth.moveDuringLookup = 'left_r6_new@example.test';
+    const n = sent6.length;
+    await app.inject({ method: 'POST', url: '/api/auth/forgot', payload: { email: 'left_r6@example.test' } });
+    await app.drainBackground();
+    auth.moveDuringLookup = null;
+    check(!sent6.slice(n).some((m) => m.to === 'left_r6@example.test' && /reset\?token=/.test(`${m.text ?? ''} ${m.html}`)), 'no reset link goes to the address the account left');
+  }
+
+  // ---- LOW: two sign-ins upgrading one legacy password at once ----
+  {
+    const { randomBytes, scryptSync } = await import('node:crypto');
+    const salt = randomBytes(16);
+    await auth.createUser('legacy3_r6', `${salt.toString('hex')}:${scryptSync('ember-quill-harbor5', salt, 64, { N: 16384, r: 8, p: 1 }).toString('hex')}`, { email: 'legacy3_r6@example.test' });
+    const both = await Promise.all([1, 2].map(() => app.inject({ method: 'POST', url: '/api/auth/login', payload: { username: 'legacy3_r6', password: 'ember-quill-harbor5' } })));
+    check(both.every((r) => r.statusCode === 200), `both sign-ins succeed (${both.map((r) => r.statusCode)})`);
+  }
+
+  // ---- LOW: an email change kept the old address's reset links on a failure ----
+  {
+    const mover = await r6('mover_r6');
+    const link = 'r6-old-mailbox-reset-link-0123456789';
+    await auth.createEmailToken(mover.id, hashToken(link), 'reset_password', new Date(Date.now() + 3600_000));
+    auth.failDeleteEmailTokens = true;
+    const moved = await app.inject({ method: 'POST', url: '/api/account/email', headers: bearer(mover.token), payload: { email: 'mover_r6_new@example.test', password: R6PW } });
+    auth.failDeleteEmailTokens = false;
+    if (moved.statusCode === 200) {
+      const used = await app.inject({ method: 'POST', url: '/api/auth/reset', payload: { token: link, newPassword: 'orchid-basalt-rally3' } });
+      check(used.statusCode === 400, `a reset link sent to the old address dies with the move (${used.statusCode})`);
+    } else {
+      check(moved.statusCode === 503, `or the move is refused (${moved.statusCode})`);
+    }
+  }
+
+  // ---- LOW: an unreadable scene went out with its owner's pictures ----
+  {
+    const pub = await design(owner.token, true);
+    // Bytes that gunzip but do not parse, with the owner's picture in them. A
+    // save cannot store this (PUT parses first); a strip must not depend on it.
+    await designs.putScene(pub, gzipSync(Buffer.from(`{"v":1,"layers":[{"src":"${SECRET_PIC}"}],"banners":[`)));
+    const anon = (await app.inject({ method: 'GET', url: `/api/designs/${pub}/scene` })).json() as { sceneGzB64: string | null };
+    check(anon.sceneGzB64 === null, 'a scene that cannot be stripped is not shown to others');
+    const mine = (await app.inject({ method: 'GET', url: `/api/designs/${pub}/scene`, headers: bearer(owner.token) })).json() as { sceneGzB64: string | null };
+    assert.ok(mine.sceneGzB64, 'its owner still gets it back');
+    const copy = await app.inject({ method: 'POST', url: `/api/designs/${pub}/fork`, headers: bearer(other.token) });
+    assert.equal(copy.statusCode, 201, copy.body);
+    const copied = (await app.inject({ method: 'GET', url: `/api/designs/${(copy.json() as { id: string }).id}/scene`, headers: bearer(other.token) })).json() as { sceneGzB64: string | null };
+    check(!copied.sceneGzB64 || !gunzipSync(Buffer.from(copied.sceneGzB64, 'base64')).toString().includes(SECRET_PIC), 'nor copied into someone else’s fork');
+  }
+
+  // ---- LOW: a taken-down design's copy could be published ----
+  {
+    const bad = await design(owner.token, true, 'Taken down r6');
+    assert.equal((await app.inject({ method: 'POST', url: `/api/admin/designs/${bad}/takedown`, headers: bearer(mod.token) })).statusCode, 200);
+    designs.failTakedown = true;
+    const fork = await app.inject({ method: 'POST', url: `/api/designs/${bad}/fork`, headers: bearer(owner.token) });
+    designs.failTakedown = false;
+    if (fork.statusCode === 201) {
+      const id = (fork.json() as { id: string }).id;
+      await app.inject({ method: 'PATCH', url: `/api/designs/${id}`, headers: bearer(owner.token), payload: { isPublic: true } });
+      check((await app.inject({ method: 'GET', url: `/api/designs/${id}` })).statusCode === 404, 'the copy of a taken-down design never becomes public');
+    } else {
+      check(fork.statusCode === 503, `or the copy is refused (${fork.statusCode})`);
+    }
+    // And if a copy ever came back without the takedown, the route refuses it
+    // and leaves nothing behind.
+    const before = (await app.inject({ method: 'GET', url: '/api/designs', headers: bearer(owner.token) })).json() as unknown[];
+    designs.forkLosesTakedown = true;
+    const lost = await app.inject({ method: 'POST', url: `/api/designs/${bad}/fork`, headers: bearer(owner.token) });
+    designs.forkLosesTakedown = false;
+    assert.equal(lost.statusCode, 503, `a copy without its takedown is refused (${lost.statusCode})`);
+    const after = (await app.inject({ method: 'GET', url: '/api/designs', headers: bearer(owner.token) })).json() as unknown[];
+    assert.equal(after.length, before.length, 'and is not left in the account');
+  }
+
+  // ---- LOW: the username wall opened when the database failed ----
+  {
+    const mine = await design(owner.token, false);
+    auth.failUsernameCheck = true;
+    const make = await app.inject({ method: 'POST', url: '/api/designs', headers: bearer(owner.token), payload: { title: 'X', templateId: DEFAULT_TEMPLATE.id, templateVersion: 1, palette: PALETTE, cellsGzB64 } });
+    const scene = await app.inject({ method: 'PUT', url: `/api/designs/${mine}/scene`, headers: bearer(owner.token), payload: { sceneGzB64: gzipSync(Buffer.from('{"v":1}')).toString('base64') } });
+    auth.failUsernameCheck = false;
+    check(make.statusCode === 503, `a write is refused when the name check cannot be made (${make.statusCode})`);
+    check(scene.statusCode === 503, `on design routes too (${scene.statusCode})`);
+    assert.equal((await app.inject({ method: 'POST', url: '/api/designs', headers: bearer(owner.token), payload: { title: 'Y', templateId: DEFAULT_TEMPLATE.id, templateVersion: 1, palette: PALETTE, cellsGzB64 } })).statusCode, 201, 'and open again once it can');
+  }
+
+  // ---- LOW: admin-name guards opened when the database failed ----
+  {
+    const chief = await r6('chief_r6');
+    auth.failGetUserCalls = 1;
+    const rename = await app.inject({ method: 'POST', url: '/api/account/username', headers: bearer(chief.token), payload: { username: 'chief_r6_gone' } });
+    auth.failGetUserCalls = 1;
+    const del = await app.inject({ method: 'DELETE', url: '/api/account', headers: bearer(chief.token) });
+    auth.failGetUserCalls = 0;
+    check(rename.statusCode >= 500, `an admin account is not renamed when it cannot be checked (${rename.statusCode})`);
+    check(del.statusCode >= 500, `nor deleted (${del.statusCode})`);
+    check((await auth.getUserByName('chief_r6'))?.id === chief.id, 'it still has its name');
+  }
+
+  // ---- INFO: the admin password's length leaked through timing ----
+  {
+    assert.equal(eq6('same text', 'same text'), true);
+    assert.equal(eq6('short', 'a much longer guess'), false);
+    assert.equal(eq6('', 'x'), false);
+    check(!/\.length/.test(eq6.toString()), 'no early exit on a length mismatch');
+    // And the unlock key is derived when the app is built, not on a stranger's request.
+    const fresh = 'r6 fresh admin password';
+    const tok = mint6('r6 other password'); // a well-formed token for a different key
+    await buildApp(new MemoryDesignRepository(() => 'x'), new MemoryAuthRepository(), templates, { aiAdminPassword: fresh });
+    const t0 = performance.now();
+    verify6(fresh, tok);
+    const ms = performance.now() - t0;
+    check(ms < 200, `the first unlock check after boot does not derive the key (${ms.toFixed(1)} ms)`);
+  }
+
+  // ---- INFO: a deleted account's design stayed on the home page ----
+  {
+    const a3 = new MemoryAuthRepository();
+    class SlowDelete extends MemoryDesignRepository {
+      onDelete: (() => Promise<void>) | null = null;
+      override async deleteByOwner(ownerId: string): Promise<void> {
+        // Someone opens the home page while the deletion is under way.
+        if (this.onDelete) await this.onDelete();
+        return super.deleteByOwner(ownerId);
+      }
+    }
+    const d3 = new SlowDelete((id) => a3.usernameOf(id));
+    const home = await buildApp(d3, a3, templates, { featured: new MemoryDailyFeatureRepository(), social: new MemorySocialRepository(d3, a3) });
+    const reg3 = await home.inject({ method: 'POST', url: '/api/auth/register', payload: { username: 'star_r6', password: R6PW, email: 'star_r6@example.test', acceptedVersion: 'test' } });
+    const tok3 = (reg3.json() as { token: string }).token;
+    const made3 = await home.inject({ method: 'POST', url: '/api/designs', headers: bearer(tok3), payload: { title: 'Featured, then deleted', templateId: DEFAULT_TEMPLATE.id, templateVersion: 1, palette: PALETTE, cellsGzB64, thumbnailPngB64: PNG_B64 } });
+    const starred = (made3.json() as { id: string }).id;
+    await home.inject({ method: 'PATCH', url: `/api/designs/${starred}`, headers: bearer(tok3), payload: { isPublic: true } });
+    const today = (await home.inject({ method: 'GET', url: '/api/featured/today' })).json() as { item: { id: string } | null };
+    assert.equal(today.item?.id, starred, 'the only public design is the pick');
+    d3.onDelete = async () => {
+      await home.inject({ method: 'GET', url: '/api/featured/today' });
+    };
+    assert.equal((await home.inject({ method: 'DELETE', url: '/api/account', headers: bearer(tok3), payload: { password: R6PW } })).statusCode, 204);
+    const after = (await home.inject({ method: 'GET', url: '/api/featured/today' })).json() as { item: { id: string } | null };
+    check(after.item?.id !== starred, 'a deleted account\u2019s design leaves the home page at once');
+    await home.close();
+
+    // A pick being worked out while the account goes: it must not land after.
+    const a4 = new MemoryAuthRepository();
+    class SlowList extends MemoryDesignRepository {
+      gate: Promise<void> | null = null;
+      reached: (() => void) | null = null;
+      override async listPublic(...args: Parameters<MemoryDesignRepository['listPublic']>): ReturnType<MemoryDesignRepository['listPublic']> {
+        const rows = await super.listPublic(...args);
+        if (this.gate) {
+          const g = this.gate;
+          this.gate = null;
+          this.reached?.();
+          await g;
+        }
+        return rows;
+      }
+    }
+    const d4 = new SlowList((id) => a4.usernameOf(id));
+    const home4 = await buildApp(d4, a4, templates, { featured: new MemoryDailyFeatureRepository(), social: new MemorySocialRepository(d4, a4) });
+    const reg4 = await home4.inject({ method: 'POST', url: '/api/auth/register', payload: { username: 'star2_r6', password: R6PW, email: 'star2_r6@example.test', acceptedVersion: 'test' } });
+    const tok4 = (reg4.json() as { token: string }).token;
+    const made4 = await home4.inject({ method: 'POST', url: '/api/designs', headers: bearer(tok4), payload: { title: 'Picked, mid-deletion', templateId: DEFAULT_TEMPLATE.id, templateVersion: 1, palette: PALETTE, cellsGzB64, thumbnailPngB64: PNG_B64 } });
+    const starred4 = (made4.json() as { id: string }).id;
+    await home4.inject({ method: 'PATCH', url: `/api/designs/${starred4}`, headers: bearer(tok4), payload: { isPublic: true } });
+    let release: () => void = () => {};
+    d4.gate = new Promise<void>((r) => (release = r));
+    const reached = new Promise<void>((r) => (d4.reached = r));
+    const picking = home4.inject({ method: 'GET', url: '/api/featured/today' });
+    await reached; // the pick has read the feed, the design still in it
+    assert.equal((await home4.inject({ method: 'DELETE', url: '/api/account', headers: bearer(tok4), payload: { password: R6PW } })).statusCode, 204);
+    release();
+    const landed = (await picking).json() as { item: { id: string } | null };
+    check(landed.item?.id !== starred4, 'a pick made from before the deletion is not shown after it');
+    const next = (await home4.inject({ method: 'GET', url: '/api/featured/today' })).json() as { item: { id: string } | null };
+    check(next.item?.id !== starred4, 'nor kept for the next visitor');
+    await home4.close();
+  }
+
+  // ---- LOW: a 404 was never rate limited; a scene save only by the global 300 ----
+  {
+    const a2 = new MemoryAuthRepository();
+    const d2 = new MemoryDesignRepository((id) => a2.usernameOf(id));
+    const limited = await buildApp(d2, a2, templates, { rateLimit: true });
+    let refused = 0;
+    for (let i = 0; i < 310; i++) {
+      const r = await limited.inject({ method: 'GET', url: i % 2 ? '/.env' : '/api/nothing-here' });
+      if (r.statusCode === 429) refused++;
+    }
+    check(refused > 0, `probes to unknown paths are limited too (${refused} of 310 refused)`);
+    const garbled = await limited.inject({ method: 'POST', url: '/nope', headers: { 'content-type': 'application/json' }, payload: '{bad' });
+    check(garbled.statusCode === 429, `a malformed body does not get a probe past the limit (${garbled.statusCode})`);
+    const scanner = await limited.inject({ method: 'GET', url: '/api/templates', remoteAddress: '203.0.113.66' });
+    assert.equal(scanner.statusCode, 200, 'another address is unaffected');
+
+    const reg2 = await limited.inject({ method: 'POST', url: '/api/auth/register', remoteAddress: '198.51.100.6', payload: { username: 'scener_r6', password: R6PW, email: 'scener_r6@example.test', acceptedVersion: 'test' } });
+    const tok2 = (reg2.json() as { token: string }).token;
+    const made = await limited.inject({ method: 'POST', url: '/api/designs', remoteAddress: '198.51.100.6', headers: bearer(tok2), payload: { title: 'S', templateId: DEFAULT_TEMPLATE.id, templateVersion: 1, palette: PALETTE, cellsGzB64 } });
+    const sid = (made.json() as { id: string }).id;
+    const body = { sceneGzB64: gzipSync(Buffer.from('{"v":1,"banners":[]}')).toString('base64') };
+    let sceneRefused = 0;
+    for (let i = 0; i < 40; i++) {
+      const r = await limited.inject({ method: 'PUT', url: `/api/designs/${sid}/scene`, remoteAddress: '198.51.100.6', headers: bearer(tok2), payload: body });
+      if (r.statusCode === 429) sceneRefused++;
+    }
+    check(sceneRefused >= 10, `scene saves have their own limit (${sceneRefused} of 40 refused)`);
+    await limited.close();
+  }
+
+  // ---- LOW: CSP still allowed origins nothing uses ----
+  {
+    const csp = String((await app.inject({ method: 'GET', url: '/api/templates' })).headers['content-security-policy'] ?? '');
+    check(!/googleapis|gstatic|jsdelivr/.test(csp), `no third-party style or font origins (${csp})`);
+  }
+
+  // ---- Postgres: the same guarantees, races included, on a real database ----
+  if (process.env.DATABASE_URL) {
+    const pg = (await import('pg')).default;
+    const { readFileSync: read6 } = await import('node:fs');
+    const { PgAuthRepository, PgDesignRepository } = await import('../src/pgRepo');
+    const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
+    try {
+      await pool.query(read6(new URL('../schema.sql', import.meta.url), 'utf8'));
+      const pAuth = new PgAuthRepository(pool);
+      const pDesigns = new PgDesignRepository(pool);
+      const papp = await buildApp(pDesigns, pAuth, templates, {});
+      const s6 = Math.random().toString(36).slice(2, 7);
+      const exp = () => new Date(Date.now() + 3600_000);
+      const preg = async (u: string): Promise<{ token: string; id: string }> => {
+        const r = await papp.inject({ method: 'POST', url: '/api/auth/register', payload: { username: `${u}${s6}`, password: R6PW, email: `${u}${s6}@example.test`, acceptedVersion: 'test' } });
+        assert.equal(r.statusCode, 201, r.body);
+        const token = (r.json() as { token: string }).token;
+        return { token, id: ((await papp.inject({ method: 'GET', url: '/api/me', headers: bearer(token) })).json() as { id: string }).id };
+      };
+      const plogin = (u: string, password: string) => papp.inject({ method: 'POST', url: '/api/auth/login', payload: { username: `${u}${s6}`, password } });
+
+      // A password change: one transaction, this session kept, the rest gone.
+      const a = await preg('pga');
+      const other = (await plogin('pga', R6PW)).json().token as string;
+      const ch = await papp.inject({ method: 'POST', url: '/api/account/password', headers: bearer(a.token), payload: { currentPassword: R6PW, newPassword: R6PW2 } });
+      assert.equal(ch.statusCode, 200, ch.body);
+      check((await papp.inject({ method: 'GET', url: '/api/me', headers: bearer(other) })).statusCode === 401, 'Postgres: the other session ends');
+      check((await papp.inject({ method: 'GET', url: '/api/me', headers: bearer(ch.json().token as string) })).statusCode === 200, 'Postgres: this one stays');
+      check((await plogin('pga', R6PW)).statusCode === 401, 'Postgres: the old password is gone');
+
+      // A sign-in checked against the old password while the change commits.
+      const b = await preg('pgb');
+      const oldHash = (await pAuth.getUserById(b.id))!.passwordHash!;
+      const holder = await pool.connect();
+      await holder.query('BEGIN');
+      await holder.query('UPDATE users SET password_hash = $2 WHERE id = $1', [b.id, 'changed-in-flight']);
+      const raceTok = hashToken(`pg-race-session-${s6}`);
+      // Started as a promise either way, so a failure cannot leave the row held.
+      const signIn = Promise.resolve().then(() => pAuth.createTokenIfPassword(b.id, oldHash, raceTok, exp()));
+      signIn.catch(() => {});
+      await new Promise((r) => setTimeout(r, 250)); // waiting on the row the change holds
+      await holder.query('DELETE FROM auth_tokens WHERE user_id = $1', [b.id]);
+      await holder.query('COMMIT');
+      holder.release();
+      check((await signIn) === false, 'Postgres: a sign-in that waited behind the change stores nothing');
+      check((await pool.query('SELECT 1 FROM auth_tokens WHERE token_hash = $1', [raceTok])).rowCount === 0, 'Postgres: and no session row exists');
+      check((await pAuth.upgradePasswordHash(b.id, oldHash, 'stale-rehash')) === false, 'Postgres: a rehash from the old hash changes nothing');
+      check((await pAuth.getUserById(b.id))!.passwordHash === 'changed-in-flight', 'Postgres: the new hash stands');
+      check((await pAuth.createTokenIfPassword(b.id, 'changed-in-flight', hashToken(`pg-ok-${s6}`), exp())) === true, 'Postgres: a sign-in with the current hash works');
+
+      // Provider handoff tickets: only for a linked account, spent once, ended by a reset.
+      const c = await preg('pgc');
+      const sub = `pg-sub-${s6}`;
+      check((await pAuth.createHandoffIfLinked(c.id, 'google', sub, hashToken(`t1${s6}`), exp())) === false, 'Postgres: no ticket for an identity that is not linked');
+      assert.equal(await pAuth.linkIdentity('google', sub, c.id), true);
+      check((await pAuth.createHandoffIfLinked(c.id, 'google', sub, hashToken(`t1${s6}`), exp())) === true, 'Postgres: a ticket for a linked one');
+      check((await pAuth.exchangeHandoff(hashToken(`t1${s6}`), hashToken(`s1${s6}`), exp())) === c.id, 'Postgres: the ticket trades for a session');
+      check((await pAuth.exchangeHandoff(hashToken(`t1${s6}`), hashToken(`s2${s6}`), exp())) === null, 'Postgres: once');
+      assert.equal(await pAuth.createHandoffIfLinked(c.id, 'google', sub, hashToken(`t2${s6}`), exp()), true);
+      await pAuth.replacePassword(c.id, await hashPassword('pg-reset-lantern-4'), { dropIdentities: true });
+      check((await pAuth.exchangeHandoff(hashToken(`t2${s6}`), hashToken(`s3${s6}`), exp())) === null, 'Postgres: a reset ends a ticket not yet collected');
+      check((await pAuth.createHandoffIfLinked(c.id, 'google', sub, hashToken(`t3${s6}`), exp())) === false, 'Postgres: and the link it removed mints no more');
+      check((await papp.inject({ method: 'GET', url: '/api/me', headers: bearer(c.token) })).statusCode === 401, 'Postgres: and every session ended');
+
+      // Many trades of one ticket at once: one session.
+      const c2 = await preg('pgc2');
+      assert.equal(await pAuth.linkIdentity('google', `${sub}-2`, c2.id), true);
+      assert.equal(await pAuth.createHandoffIfLinked(c2.id, 'google', `${sub}-2`, hashToken(`t4${s6}`), exp()), true);
+      const trades = await Promise.all([...Array(12).keys()].map((i) => pAuth.exchangeHandoff(hashToken(`t4${s6}`), hashToken(`s4-${i}-${s6}`), exp())));
+      check(trades.filter(Boolean).length === 1, `Postgres: a ticket traded twelve times at once gives one session (${trades.filter(Boolean).length})`);
+
+      // An email change: the old address's reset links go with it, or nothing moves.
+      const d = await preg('pgd');
+      await pAuth.createEmailToken(d.id, hashToken(`rl${s6}`), 'reset_password', exp());
+      check((await pAuth.setEmail(d.id, `pgd2${s6}@example.test`)) === true, 'Postgres: the address moves');
+      check((await pAuth.consumeEmailToken(hashToken(`rl${s6}`), 'reset_password')) === null, 'Postgres: and the old mailbox\u2019s reset link is dead');
+      check((await pAuth.setEmail(d.id, `pga${s6}@example.test`)) === false, 'Postgres: a taken address is refused');
+      check((await pAuth.getUserById(d.id))!.email === `pgd2${s6}@example.test`, 'Postgres: and nothing moved');
+
+      // A change only over the password it checked; a change keeps reset links.
+      const e = await preg('pge');
+      const eHash = (await pAuth.getUserById(e.id))!.passwordHash!;
+      await pAuth.createEmailToken(e.id, hashToken(`kl${s6}`), 'reset_password', exp());
+      check((await pAuth.replacePassword(e.id, 'stale-change', { expectedHash: 'not-the-hash', keepResetLinks: true })) === false, 'Postgres: a change over a password that moved is refused');
+      check((await pAuth.getUserById(e.id))!.passwordHash === eHash, 'Postgres: and changes nothing');
+      check((await pAuth.replacePassword(e.id, 'fresh-change', { expectedHash: eHash, keepResetLinks: true })) === true, 'Postgres: a change over the checked password lands');
+      check((await pAuth.consumeEmailToken(hashToken(`kl${s6}`), 'reset_password')) === e.id, 'Postgres: and the owner\u2019s reset link still works');
+      check((await pAuth.replacePassword('00000000-0000-4000-8000-000000000000', 'x')) === false, 'Postgres: no account, no change');
+      // An email move only over the password it checked.
+      check((await pAuth.setEmail(e.id, `pge2${s6}@example.test`, null, 'not-the-hash')) === false, 'Postgres: an email move over a password that moved is refused');
+      check((await pAuth.getUserById(e.id))!.email === `pge${s6}@example.test`, 'Postgres: and the address stays');
+      check((await pAuth.setEmail(e.id, `pge2${s6}@example.test`, null, 'fresh-change')) === true, 'Postgres: over the right one it moves');
+      // A reset link only for the address the account still has.
+      check((await pAuth.createEmailTokenForAddress(e.id, `pge${s6}@example.test`, hashToken(`old${s6}`), 'reset_password', exp())) === false, 'Postgres: no link for an address the account left');
+      check((await pAuth.createEmailTokenForAddress(e.id, `PGE2${s6}@example.test`, hashToken(`new${s6}`), 'reset_password', exp())) === true, 'Postgres: one for the address it has');
+      // A link mid-way while the move commits: it waits, then the move removes it.
+      {
+        const holder2 = await pool.connect();
+        await holder2.query('BEGIN');
+        await holder2.query(
+          `INSERT INTO email_tokens (token_hash, user_id, purpose, expires_at)
+           SELECT $1, u.id, 'reset_password', $3 FROM (SELECT id FROM users WHERE id = $2 AND lower(email) = lower($4) FOR SHARE) u`,
+          [hashToken(`mid${s6}`), e.id, exp(), `pge2${s6}@example.test`],
+        );
+        const moving = pAuth.setEmail(e.id, `pge3${s6}@example.test`, null, 'fresh-change');
+        moving.catch(() => {});
+        await new Promise((r) => setTimeout(r, 250));
+        await holder2.query('COMMIT');
+        holder2.release();
+        check((await moving) === true, 'Postgres: the move goes through');
+        check((await pAuth.consumeEmailToken(hashToken(`mid${s6}`), 'reset_password')) === null, 'Postgres: and the link being stored as it moved is dead');
+      }
+
+      // A provider link racing a reset, both ways round.
+      {
+        const f = await preg('pgf');
+        const fSession = hashToken(f.token);
+        // The reset gets there first: the link waits, then finds the session gone.
+        const resetter = await pool.connect();
+        await resetter.query('BEGIN');
+        await resetter.query('SELECT 1 FROM users WHERE id = $1 FOR NO KEY UPDATE', [f.id]);
+        await resetter.query('SELECT 1 FROM auth_tokens WHERE user_id = $1 FOR UPDATE', [f.id]);
+        const linking = Promise.resolve().then(() => pAuth.linkIdentityForSession('google', `pgf-a-${s6}`, f.id, fSession));
+        linking.catch(() => {});
+        await new Promise((r) => setTimeout(r, 250));
+        await resetter.query('DELETE FROM oauth_identities WHERE user_id = $1', [f.id]);
+        await resetter.query('DELETE FROM auth_tokens WHERE user_id = $1', [f.id]);
+        await resetter.query('COMMIT');
+        resetter.release();
+        check((await linking) === false, 'Postgres: a link that waited behind a reset stores nothing');
+        check((await pAuth.getUserIdByIdentity('google', `pgf-a-${s6}`)) === null, 'Postgres: and no sign-in was added');
+        // The link gets there first: the reset waits for it, then removes it.
+        const g = await preg('pgg');
+        const linker = await pool.connect();
+        await linker.query('BEGIN');
+        const held = await linker.query(
+          `INSERT INTO oauth_identities (provider, provider_user_id, user_id)
+           SELECT 'google', $1, t.user_id FROM (SELECT user_id FROM auth_tokens WHERE token_hash = $2 AND user_id = $3 FOR SHARE) t`,
+          [`pgg-a-${s6}`, hashToken(g.token), g.id],
+        );
+        assert.equal(held.rowCount, 1);
+        const resetting = pAuth.replacePassword(g.id, await hashPassword('pgg-reset-lantern-2'), { dropIdentities: true });
+        resetting.catch(() => {});
+        await new Promise((r) => setTimeout(r, 250));
+        await linker.query('COMMIT');
+        linker.release();
+        check((await resetting) === true, 'Postgres: the reset goes through');
+        check((await pAuth.getUserIdByIdentity('google', `pgg-a-${s6}`)) === null, 'Postgres: and removes the sign-in linked just before it');
+        // And with a live session, the link works.
+        const h = await preg('pgh');
+        check((await pAuth.linkIdentityForSession('google', `pgh-a-${s6}`, h.id, hashToken(h.token))) === true, 'Postgres: a live session links');
+        check((await pAuth.linkIdentityForSession('google', `pgh-a-${s6}`, f.id, hashToken(h.token))) === false, 'Postgres: not onto someone else\u2019s session');
+      }
+
+      // A copy of a taken-down design is born taken down.
+      const made = await papp.inject({ method: 'POST', url: '/api/designs', headers: bearer(d.token), payload: { title: 'Taken down on Postgres', templateId: DEFAULT_TEMPLATE.id, templateVersion: 1, palette: PALETTE, cellsGzB64 } });
+      assert.equal(made.statusCode, 201, made.body);
+      const src = (made.json() as { id: string }).id;
+      assert.equal(await pDesigns.takedownDesign(src), true);
+      const copy = await pDesigns.fork(src, 'copy', b.id);
+      check(copy?.takenDown === true, 'Postgres: the copy carries the takedown');
+      await papp.close();
+    } finally {
+      await pool.end();
+    }
+  }
+
+  // ---- AVAILABILITY: a dropped idle database connection killed the server ----
+  if (process.env.DATABASE_URL) {
+    const pg = (await import('pg')).default;
+    let pool: InstanceType<typeof pg.Pool> | null = null;
+    try {
+      const { createPool } = await import('../src/db');
+      pool = createPool(process.env.DATABASE_URL);
+    } catch {
+      check(false, 'the server builds its pool with createPool (server/src/db.ts)');
+    }
+    if (pool) {
+      const client = await pool.connect();
+      const pid = (await client.query('SELECT pg_backend_pid() AS pid')).rows[0].pid as number;
+      client.release(); // idle in the pool now
+      const killer = new pg.Client({ connectionString: process.env.DATABASE_URL });
+      await killer.connect();
+      check(pool.listenerCount('error') > 0, 'the pool has its own error handler');
+      const lost = new Promise<boolean>((r) => {
+        pool!.once('error', () => r(true));
+        setTimeout(() => r(false), 5000);
+      });
+      await killer.query('SELECT pg_terminate_backend($1)', [pid]);
+      await killer.end();
+      assert.ok(await lost, 'the dropped connection was reported to the pool');
+      // Still here, and the pool reconnects.
+      assert.equal((await pool.query('SELECT 1 AS one')).rows[0].one, 1, 'the pool survives a dropped idle connection');
+      // And one dropped mid-transaction, while checked out of the pool.
+      const busy = await pool.connect();
+      check(busy.listenerCount('error') > 0, 'a checked-out connection has an error handler too');
+      await busy.query('BEGIN');
+      const busyPid = (await busy.query('SELECT pg_backend_pid() AS pid')).rows[0].pid as number;
+      const killer2 = new pg.Client({ connectionString: process.env.DATABASE_URL });
+      await killer2.connect();
+      await killer2.query('SELECT pg_terminate_backend($1)', [busyPid]);
+      await killer2.end();
+      await new Promise((r) => setTimeout(r, 300));
+      await busy.query('SELECT 1').then(() => check(false, 'the dead connection does not answer'), () => {});
+      busy.release(true);
+      assert.equal((await pool.query('SELECT 1 AS one')).rows[0].one, 1, 'the pool survives a connection dropped mid-transaction');
+      await pool.end();
+    }
+  }
+
+  await app.close();
+  console.log('audit round six: all assertions passed (private og cards and thumbnails, no-store by default for /api and errors, no-cache on server pages, dev-only ports, atomic password change and reset, sign-ins racing a reset, atomic email change, fail-closed scene strip, born-taken-down forks, fail-closed username wall and admin guards, length-blind compare, unlock key at boot, deleted account leaves the home page, limited 404s and scene saves, no dead CSP origins, pool error handler)');
 }

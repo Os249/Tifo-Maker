@@ -49,6 +49,13 @@ export class DailyFeaturePicker {
   private checkedAt = 0;
   private miss: { day: string; at: number } | null = null;
   private inFlight: Promise<FeaturedTifo | null> | null = null;
+  /**
+   * Bumped by every forget. A pick that was being resolved while a design
+   * stopped being showable may still land after the forget; it is then kept
+   * unverified (checkedAt 0), so the next request re-checks it before showing
+   * it (audit round six).
+   */
+  private gen = 0;
 
   constructor(
     private readonly designs: DesignRepository,
@@ -67,7 +74,9 @@ export class DailyFeaturePicker {
     if (this.hit?.day === day) {
       if (Date.now() - this.checkedAt < RECHECK_MS) return this.hit;
       const still = await this.designs.getPublicItem(this.hit.item.id).catch(() => undefined);
-      if (still === undefined) return this.hit; // could not ask: keep what we have
+      // Could not ask: keep what we have, unless it was never checked (a pick
+      // that landed after a forget), which is not shown on trust.
+      if (still === undefined) return this.checkedAt === 0 ? null : this.hit;
       if (still) {
         this.checkedAt = Date.now();
         return this.hit;
@@ -84,6 +93,7 @@ export class DailyFeaturePicker {
   }
 
   private async resolve(day: string): Promise<FeaturedTifo | null> {
+    const startedAt = this.gen;
     try {
       const pool = (
         await this.designs.listPublic({ sort: 'likes', excludeTemplates: true, limit: POOL_SIZE })
@@ -120,7 +130,16 @@ export class DailyFeaturePicker {
       }
       this.miss = null;
       this.hit = { day, item };
-      this.checkedAt = Date.now();
+      this.checkedAt = startedAt === this.gen ? Date.now() : 0;
+      if (startedAt !== this.gen) {
+        // Something was forgotten while this pick was being made: check it now.
+        const still = await this.designs.getPublicItem(item.id).catch(() => null);
+        if (!still) {
+          this.hit = null;
+          return null;
+        }
+        this.checkedAt = Date.now();
+      }
       return this.hit;
     } catch {
       return this.nothing(day);
@@ -132,7 +151,17 @@ export class DailyFeaturePicker {
    * if it is today's pick, stop serving it now rather than at the next check.
    */
   forget(designId: string): void {
+    this.gen++;
     if (this.hit?.item.id === designId) {
+      this.hit = null;
+      this.miss = null;
+    }
+  }
+
+  /** An account is being deleted: if today's pick is one of its designs, drop it now. */
+  forgetOwner(ownerId: string): void {
+    this.gen++;
+    if (this.hit?.item.ownerId === ownerId) {
       this.hit = null;
       this.miss = null;
     }
