@@ -15,7 +15,20 @@ updates:
           - "patch"
     labels:
       - "dependencies"
-
+  # The Node base image. The Dockerfile pins an exact release (node:24.x.y-slim),
+  # so a new Node patch only reaches production through a PR from here: daily,
+  # because Node security releases are dated and the image should follow fast.
+  # Moving to the next major line is deliberate work (deploy.test.mts prompts
+  # it 90 days before end of life), so those bumps are not proposed.
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "daily"
+    ignore:
+      - dependency-name: "node"
+        update-types: ["version-update:semver-major"]
+    labels:
+      - "dependencies"
   # Keep the GitHub Actions used in CI patched too (if/when you add workflows).
   - package-ecosystem: "github-actions"
     directory: "/"
