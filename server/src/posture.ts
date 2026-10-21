@@ -9,7 +9,7 @@
 import { readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { configWarnings } from './preflight';
-import { nodeSupport } from './nodeSupport';
+import { missingSecurityFixes, nodeSupport } from './nodeSupport';
 import { proxyModeFrom } from './proxyTrust';
 import { maskEmail } from './soc';
 import type { EmailHealth } from './email';
@@ -46,7 +46,17 @@ export function securityPosture(input: PostureInput): PostureCheck[] {
 
   const major = Number(/^v?(\d+)/.exec(input.nodeVersion)?.[1] ?? 0);
   const node = nodeSupport(major, input.now ?? new Date());
-  out.push({ id: 'node', label: `Node.js ${input.nodeVersion}`, state: node.state, detail: `${node.why}.` });
+  // A supported line can still be an unpatched release: the line being in
+  // support says nothing about whether this build picked up its fixes.
+  const floor = node.state === 'bad' ? null : missingSecurityFixes(input.nodeVersion);
+  out.push(floor
+    ? {
+        id: 'node',
+        label: `Node.js ${input.nodeVersion}`,
+        state: prod ? 'bad' : 'warn',
+        detail: `Missing published security fixes: ${floor} or later is needed. Rebuild and redeploy the image (the Dockerfile pins the version). ${node.why}.`,
+      }
+    : { id: 'node', label: `Node.js ${input.nodeVersion}`, state: node.state, detail: `${node.why}.` });
 
   if (input.uid === null) {
     out.push({ id: 'user', label: 'Process user', state: 'info', detail: 'Not reported on this platform.' });

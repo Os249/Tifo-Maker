@@ -5,9 +5,17 @@
 # fixes, which is what this image ran before. server/test/deploy.test.mts fails
 # once the Node line named here is within 90 days of its end of life, so the
 # next move is prompted, not remembered.
+#
+# The exact patch is pinned, not the floating `node:24-slim`. With the floating
+# tag, which Node a deploy got depended on whether the builder still had an old
+# base layer cached, so a security release could be "deployed" and not be
+# running. 24.22.1 is the October 2026 security release (Brotli decoder
+# out-of-bounds write reachable through fetch(), TLS hostname-check bypasses).
+# deploy.test.mts refuses anything below NODE_SECURITY_FLOOR in
+# server/src/nodeSupport.ts, and Dependabot opens a PR for each new 24.x patch.
 
 # ---- build: everything needed to compile the frontend ----
-FROM node:24-slim AS build
+FROM node:24.22.1-slim AS build
 WORKDIR /app
 
 # Install exactly what package-lock.json says, or stop. This used to be
@@ -30,7 +38,7 @@ RUN npm audit --omit=dev --json > audit-snapshot.json 2>/dev/null || true
 RUN npm prune --omit=dev --no-audit --no-fund
 
 # ---- runtime: the built site, the server source and production packages ----
-FROM node:24-slim
+FROM node:24.22.1-slim
 WORKDIR /app
 ENV NODE_ENV=production
 

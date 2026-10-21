@@ -13,7 +13,7 @@
 import assert from 'node:assert/strict';
 import { logProviderSetup } from '../src/preflight';
 import { readFileSync } from 'node:fs';
-import { NODE_END_OF_LIFE, nodeSupport } from '../src/nodeSupport';
+import { NODE_END_OF_LIFE, NODE_SECURITY_FLOOR, missingSecurityFixes, nodeSupport } from '../src/nodeSupport';
 
 const read = (f: string): string => readFileSync(f, 'utf8');
 
@@ -37,6 +37,23 @@ assert.equal(new Set(majors).size, 1, `build and runtime stages use the same Nod
 const imageMajor = majors[0];
 const window = supported(imageMajor);
 assert.ok(window.ok, window.why);
+
+// The patch is pinned, and is at or above the last security release. A floating
+// `node:24-slim` let a cached base layer keep serving an unpatched Node.
+const pins = fromLines.map((ref) => {
+  const m = /^node:(\d+\.\d+\.\d+)(?:-|$)/.exec(ref);
+  assert.ok(m, `every stage pins an exact Node release, not a floating tag (got ${ref})`);
+  return m[1]!;
+});
+assert.equal(new Set(pins).size, 1, `build and runtime stages use the same Node release (${pins.join(', ')})`);
+const floor = missingSecurityFixes(pins[0]!);
+assert.equal(floor, null, `the image's Node ${pins[0]} is missing published security fixes; use ${floor} or later`);
+assert.ok(NODE_SECURITY_FLOOR[imageMajor], `server/src/nodeSupport.ts has a security floor for Node ${imageMajor}`);
+// ...and the check itself knows what it is looking for.
+assert.equal(missingSecurityFixes('24.22.0'), '24.22.1', 'the release before the October 2026 fixes is caught');
+assert.equal(missingSecurityFixes('v24.22.1'), null);
+assert.equal(missingSecurityFixes('24.23.0'), null, 'a later minor is not mistaken for an older one');
+assert.equal(missingSecurityFixes('24.9.9'), '24.22.1', 'versions compare as numbers, not text');
 
 const ci = read('.github/workflows/ci.yml').replace(/^\s*#.*$/gm, '');
 const ciNodes = [...ci.matchAll(/node-version:\s*'?(\d+)/g)].map((m) => Number(m[1]));
@@ -95,7 +112,7 @@ assert.ok(gitignore.includes('.env*') && gitignore.includes('!.env.example'), 'e
 const railway = JSON.parse(read('railway.json')) as { deploy?: { restartPolicyMaxRetries?: number } };
 assert.ok((railway.deploy?.restartPolicyMaxRetries ?? 0) >= 5, 'a crash loop gets more than three restarts before the site stays down');
 
-console.log(`deploy: all assertions passed (${window.why}; non-root image, lockfile-only installs, dockerignore, CI token + pins, secret scan, restart policy)`);
+console.log(`deploy: all assertions passed (${window.why}; image pinned to Node ${pins[0]}, at or above the security floor; non-root image, lockfile-only installs, dockerignore, CI token + pins, secret scan, restart policy)`);
 
 // ---- the redirect URI the operator has to register -------------------------
 //

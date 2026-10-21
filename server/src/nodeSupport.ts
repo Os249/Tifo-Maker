@@ -19,6 +19,35 @@ export const NODE_END_OF_LIFE: Readonly<Record<number, string>> = {
 /** How long before end of life the move to the next line should start. */
 export const NODE_WARN_DAYS = 90;
 
+/**
+ * The first release on each line with every published security fix. A line
+ * that is still supported but running an older patch is missing them.
+ *
+ * Raise these on each Node.js security release
+ * (https://nodejs.org/en/blog/vulnerability). Last raised for the October 2026
+ * release: four HIGH, including an out-of-bounds write in the Brotli decoder
+ * reachable through any fetch() response with Content-Encoding: br.
+ */
+export const NODE_SECURITY_FLOOR: Readonly<Record<number, string>> = {
+  22: '22.23.4',
+  24: '24.22.1',
+  26: '26.12.1',
+};
+
+const parts = (v: string): number[] => v.replace(/^v/, '').split('.').map((n) => Number(n) || 0);
+
+/** The floor `version` is below, or null when it has every known fix (or its line has no floor). */
+export function missingSecurityFixes(version: string): string | null {
+  const v = parts(version);
+  const floor = NODE_SECURITY_FLOOR[v[0]!];
+  if (!floor) return null;
+  const f = parts(floor);
+  for (let i = 0; i < 3; i++) {
+    if ((v[i] ?? 0) !== (f[i] ?? 0)) return (v[i] ?? 0) < (f[i] ?? 0) ? floor : null;
+  }
+  return null;
+}
+
 export interface NodeSupport {
   state: 'good' | 'warn' | 'bad';
   major: number;

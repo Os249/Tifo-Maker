@@ -312,7 +312,7 @@ console.log('— the monitor under pressure —');
 // ---------------------------------------------------------------------------
 console.log('— posture —');
 {
-  const base = { nodeVersion: 'v24.21.0', uid: 1000, rateLimit: true, database: 'postgres' as const, email: null, soc: null, now: new Date('2026-09-16T00:00:00Z') };
+  const base = { nodeVersion: 'v24.22.1', uid: 1000, rateLimit: true, database: 'postgres' as const, email: null, soc: null, now: new Date('2026-09-16T00:00:00Z') };
   const byId = (checks: { id: string; state: string }[], id: string) => checks.find((c) => c.id === id)?.state;
   const env = (e: Record<string, string>) => ({ NODE_ENV: 'production', ...e }) as NodeJS.ProcessEnv;
   const noSnapshot = '/nonexistent/audit-snapshot.json';
@@ -325,6 +325,14 @@ console.log('— posture —');
   assert.equal(byId(p, 'dependencies'), 'info');
   p = securityPosture({ ...base, nodeVersion: 'v20.19.0', uid: 0, rateLimit: false, env: env({ AI_ADMIN_PASSWORD: 'short', TRUST_PROXY: '2' }), auditSnapshotPath: noSnapshot });
   assert.equal(byId(p, 'node'), 'bad', 'Node 20 is past end of life');
+  assert.match(p.find((c) => c.id === 'node')!.detail, /end of life/, 'an end-of-life line is reported as that, not as a missing patch');
+
+  // A supported line on a release from before the last security fixes.
+  const unpatched = securityPosture({ ...base, nodeVersion: 'v24.22.0', env: env({}), auditSnapshotPath: noSnapshot }).find((c) => c.id === 'node')!;
+  assert.equal(unpatched.state, 'bad', 'v24.22.0 in production is missing the October 2026 security fixes');
+  assert.match(unpatched.detail, /24\.22\.1/, 'and says which release fixes it');
+  assert.equal(byId(securityPosture({ ...base, nodeVersion: 'v24.22.0', env: { NODE_ENV: 'development' } as NodeJS.ProcessEnv, auditSnapshotPath: noSnapshot }), 'node'), 'warn', 'a warning on a dev machine');
+  assert.equal(byId(securityPosture({ ...base, nodeVersion: 'v24.23.0', env: env({}), auditSnapshotPath: noSnapshot }), 'node'), 'good', 'a later release is fine');
   assert.equal(byId(p, 'user'), 'bad', 'root in production');
   assert.equal(byId(p, 'ratelimit'), 'bad');
   assert.equal(byId(p, 'proxy'), 'bad', 'TRUST_PROXY=2');
