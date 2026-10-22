@@ -1525,6 +1525,18 @@ export function shippedTemplates(): StadiumTemplate[] {
   return [...BUILTINS_LIVE, ...COMMUNITY_LIVE, ...PREMIER_LEAGUE_LIVE, ...LA_LIGA_LIVE, ...WORLD_LIVE, ...LEGACY_STADIUMS].map((e) => e.template);
 }
 
+/**
+ * Is this exactly one of the templates we ship (the catalogue or a legacy
+ * ground), as opposed to a custom or community one registered at run time?
+ * By identity, not id: a copy with a shipped id is not trusted for it. The
+ * seat-map worker client checks the others before building them (P1.16).
+ */
+let shippedSet: WeakSet<StadiumTemplate> | null = null;
+export function isShippedTemplate(t: StadiumTemplate): boolean {
+  shippedSet ??= new WeakSet(shippedTemplates());
+  return shippedSet.has(t);
+}
+
 /** Every template the generator might be asked for (built-in + community + custom). */
 export function allTemplates(): StadiumTemplate[] {
   return STADIUM_CATALOG.map((e) => e.template);

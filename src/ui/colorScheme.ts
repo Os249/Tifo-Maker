@@ -12,11 +12,15 @@
  *  - once they press the toggle, that is the answer until they change it. An
  *    explicit choice outranks the system, on every page and every visit.
  *
- * The attribute itself is set by /theme-boot.js (public/theme-boot.js), a tiny
- * classic script at the top of each page's head, because a module loads too
- * late: the page would paint white and then snap to dark, which is worse than
- * not having the feature at all. This module handles only what happens after
- * that first paint.
+ * The attribute itself is set by public/theme-boot.js, a tiny classic script at
+ * the top of each page's head, because a module loads too late: the page would
+ * paint white and then snap to dark, which is worse than not having the feature
+ * at all. This module handles only what happens after that first paint.
+ *
+ * The build serves that file as /assets/theme-boot-<hash>.js and rewrites every
+ * page's tag to it (vite.config.ts, performance plan P1.29), so a returning
+ * visitor's browser keeps it for good instead of asking for it again, one round
+ * trip, before every first paint.
  */
 export type Scheme = 'light' | 'dark';
 

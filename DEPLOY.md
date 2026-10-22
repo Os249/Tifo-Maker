@@ -16,9 +16,36 @@ Three environment variables (see `.env.example`):
 | `NODE_ENV` | `production` | Enables the DATABASE_URL guard, rate limiting, and logging. |
 | `PORT` | (injected by host) | The server reads it; you rarely set this yourself. |
 
-The build command is `npm run build:prod` and the start command is `npm start`
-— both already wired into the `Dockerfile`, so Docker-based hosts need no
-command overrides.
+The build commands are `npm run build:prod` (the site, into `dist/`) and
+`npm run build:server` (the seat table and the server bundle, into
+`server/build/`), and the start command is `npm start`, which runs
+`node server/build/server.mjs` — all already wired into the `Dockerfile`, so
+Docker-based hosts need no command overrides. A non-Docker host must run both
+builds; `tsx` and `esbuild` are build tools only and are not installed with
+`--omit=dev`.
+
+### How the server is built (October 2026)
+
+- **One bundled file.** `scripts/bundle-server.mjs` bundles `server/src` into
+  `server/build/server.mjs` with esbuild. Boot went from 18-31 s under tsx to
+  about 1.5 s. The bundle sits outside `dist/` (the public web root), has no
+  source map, bakes in no environment value (nothing is `define`d), and keeps
+  every package as an import so `npm audit` sees what runs. `test:deploy`
+  checks all of this.
+- **The seat table.** Every ground's seat count and royal box are read from
+  `server/data/seat-table.json` rather than generated at boot.
+  `npm run seats:table` rewrites it from the seat-map generator; the Docker
+  build does that itself, and `test:deploy` fails if the committed copy differs
+  from what the generator makes now. After changing a ground or the generator,
+  run `npm run seats:table` and commit the file. A ground the table does not
+  match is generated at boot (and the boot log says so), so a stale table is
+  slow, never wrong.
+- **Database pools.** Requests use a pool of 20 connections (5 s wait, 10 s
+  per statement); schema, purges, the admin dashboard and account erasure use a
+  separate pool of 2 (a minute per statement). A database that is too slow
+  answers 503 "try again". Eight foreign-key indexes are built `CONCURRENTLY`
+  after the server starts listening (see `server/src/schema.ts`); a build that
+  fails is logged and retried at the next boot.
 
 ---
 

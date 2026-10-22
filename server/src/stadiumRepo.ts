@@ -69,11 +69,15 @@ export class MemoryStadiumRepository implements StadiumSubmissionRepository {
 }
 
 export class PgStadiumRepository implements StadiumSubmissionRepository {
-  constructor(private readonly pool: pg.Pool) {}
+  /**
+   * `maintenance` is the small pool for slow, non-request work (server/src/db.ts,
+   * performance plan P1.26); it defaults to the one pool where only one exists.
+   */
+  constructor(private readonly pool: pg.Pool, private readonly maintenance: pg.Pool = pool) {}
 
   /** Idempotent table creation. Called best-effort at boot (must not throw boot). */
   async init(): Promise<void> {
-    await this.pool.query(
+    await this.maintenance.query(
       `CREATE TABLE IF NOT EXISTS community_stadiums (
          id          text PRIMARY KEY,
          name        text NOT NULL,

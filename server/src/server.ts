@@ -18,7 +18,7 @@ import { seedShowcase, seedTemplates } from './seedTemplates';
 import { EVENTS_RETENTION_DAYS, type AuthRepository, type DesignRepository } from './repo';
 import { envNum } from './env';
 import { logConfigWarnings, logProviderSetup } from './preflight';
-import { schemaStatements } from './schema';
+import { applyForeignKeyIndexes, schemaStatements } from './schema';
 import { SocMonitor, socKeyFrom } from './soc';
 import { createPool } from './db';
 import { MemorySocRepository, PgSocRepository } from './socRepo';
@@ -94,14 +94,19 @@ async function main(): Promise<void> {
     alertTo: process.env.SECURITY_ALERT_TO,
     publicUrl: process.env.PUBLIC_URL,
   };
+  let maintenancePool: pg.Pool | null = null;
   if (process.env.DATABASE_URL) {
-    const pool = createPool(process.env.DATABASE_URL);
-    await applySchema(pool);
+    // Requests on one pool, slow non-request work on a small one of its own
+    // (server/src/db.ts, performance plan P1.26).
+    const pool = createPool(process.env.DATABASE_URL, 'app');
+    const maint = createPool(process.env.DATABASE_URL, 'maintenance');
+    maintenancePool = maint;
+    await applySchema(maint);
     // Community stadium submissions — best-effort table init so a schema slip here
     // can never block server boot; on failure the feature is simply disabled.
     let stadiums: PgStadiumRepository | undefined;
     try {
-      const s = new PgStadiumRepository(pool);
+      const s = new PgStadiumRepository(pool, maint);
       await s.init();
       stadiums = s;
     } catch (e) {
@@ -111,7 +116,7 @@ async function main(): Promise<void> {
     // schema slip here can never block boot; on failure the feature simply stays off.
     let traffic: TrafficRepository | undefined;
     try {
-      const t = new PgTrafficRepository(pool);
+      const t = new PgTrafficRepository(pool, maint);
       await t.init();
       await t.purge();
       // Daily minimisation: strip visitor keys past the anonymisation window and drop
@@ -123,7 +128,7 @@ async function main(): Promise<void> {
     }
     let feedback: FeedbackRepository | undefined;
     try {
-      const fb = new PgFeedbackRepository(pool);
+      const fb = new PgFeedbackRepository(pool, maint);
       await fb.init();
       feedback = fb;
     } catch (e) {
@@ -133,7 +138,7 @@ async function main(): Promise<void> {
     // simply has no featured section; it is never a reason to fail a deploy.
     let featured: DailyFeatureRepository | undefined;
     try {
-      const df = new PgDailyFeatureRepository(pool);
+      const df = new PgDailyFeatureRepository(pool, maint);
       await df.init();
       featured = df;
     } catch (e) {
@@ -142,7 +147,7 @@ async function main(): Promise<void> {
     // Security monitor. Best-effort like the tables above: if its tables cannot
     // be created, alerts and recent events still work from memory, history is
     // not kept, and the Security tab shows the storage error.
-    const socRepo = new PgSocRepository(pool);
+    const socRepo = new PgSocRepository(pool, maint);
     try {
       await socRepo.init();
       await socRepo.purge();
@@ -154,13 +159,13 @@ async function main(): Promise<void> {
     const soc = new SocMonitor({ ...socOptions, repo: socRepo });
     // Funnel events are kept for EVENTS_RETENTION_DAYS (repo.ts), then deleted,
     // once at boot and daily, like the visits and the security log.
-    const events = new PgEventsRepository(pool);
+    const events = new PgEventsRepository(pool, maint);
     const pruneEvents = (): Promise<unknown> =>
       events.purge(new Date(Date.now() - EVENTS_RETENTION_DAYS * 24 * 60 * 60 * 1000)).catch((e) => console.error('[tifo] events purge failed:', e));
     await pruneEvents();
     setInterval(() => void pruneEvents(), 24 * 60 * 60 * 1000).unref();
-    const pgDesigns = new PgDesignRepository(pool);
-    const pgAuth = new PgAuthRepository(pool);
+    const pgDesigns = new PgDesignRepository(pool, maint);
+    const pgAuth = new PgAuthRepository(pool, maint);
     seedRepos = { designs: pgDesigns, auth: pgAuth };
     app = await buildApp(pgDesigns, pgAuth, templates, {
       staticDir,
@@ -171,11 +176,11 @@ async function main(): Promise<void> {
       social: new PgSocialRepository(pool),
       leads: new PgLeadsRepository(pool),
       aiUsage: new PgAiUsageRepository(pool),
-      aiEvents: new PgAiEventsRepository(pool),
+      aiEvents: new PgAiEventsRepository(pool, maint),
       aiBudget: new PgAiBudgetRepository(pool),
       aiFreeLimit: envNum('AI_FREE_LIMIT', 10, 0), // premium designs per hour
       stadiums,
-      stats: new PgAdminStatsRepository(pool),
+      stats: new PgAdminStatsRepository(maint), // the dashboard's aggregates, admin only
       traffic,
       feedback,
       featured,
@@ -250,6 +255,19 @@ async function main(): Promise<void> {
       `${templates.map((t) => `${t.id}=${t.seatCount}`).join(', ')})`,
   );
 
+  // The foreign-key indexes (schema.ts, performance plan P1.25): after listen,
+  // not awaited, on the maintenance pool. Built CONCURRENTLY, so the site
+  // keeps answering while one builds; a failure is logged and retried at the
+  // next boot, and is never a reason not to serve.
+  if (maintenancePool) {
+    const maint = maintenancePool;
+    void applyForeignKeyIndexes(maint)
+      .then(({ built }) => {
+        if (built.length) console.log(`[tifo] foreign-key indexes built: ${built.join(', ')}`);
+      })
+      .catch((e) => console.error('[tifo] foreign-key indexes skipped:', (e as Error).message));
+  }
+
   // Empty the Trash of anything that has sat there for TRASH_DAYS. After
   // listen, not awaited, and best-effort: a slow delete must never hold the
   // port shut, and one that fails simply runs again at the next sweep.
@@ -297,9 +315,14 @@ async function main(): Promise<void> {
         // filter facets, so running the backfill first would sweep an empty
         // table and then miss all 619 rows until the next restart.
         if (designs instanceof PgDesignRepository) {
-          const n = await designs.backfillFacets();
-          if (n) console.log(`[tifo] filter facets: backfilled ${n} design(s)`);
+          // Every design's facets checked against this build's rules, not only
+          // the ones never computed: the feed's counts are read from them now.
+          const n = await designs.resyncFacets();
+          if (n) console.log(`[tifo] filter facets: brought ${n} design(s) up to date`);
         }
+        // The feed's facet counts are remembered for a minute (P1.12); what
+        // just landed should be counted now, not after it.
+        app.forgetPublicCounts();
       } catch (e) {
         console.warn('[tifo] template seeding skipped:', (e as Error).message);
       }

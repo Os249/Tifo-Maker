@@ -1,21 +1,22 @@
 import { createHash, randomInt } from 'node:crypto';
+import { isDatabaseUnavailable } from './db';
 import { readFileSync } from 'node:fs';
 import { join, sep } from 'node:path';
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
-import rateLimit from '@fastify/rate-limit';
-import helmet from '@fastify/helmet';
+import rateLimit, { normalizeIP } from '@fastify/rate-limit';
+import helmet from 'helmet';
 import fastifyStatic from '@fastify/static';
 import { dummyHash, hashPassword, hashToken, issueToken, TOKEN_TTL_MS, verifyPassword } from './auth';
 import { MAX_SCENE_GUNZIP_BYTES, gunzipBytes, gunzipBytesAsync, gzipBytes, u32FromB64, u8FromB64 } from './codec';
 import { generateSeatMap } from '../../src/core/seatmap';
 import { shippedTemplates } from '../../src/core/stadiumCatalog';
-import { noTifoMask } from '../../src/core/venueDetails';
+import { seatTable } from './seatTable';
 import { validateTifo, TIFO_SCHEMA_VERSION } from '../../src/core/tifoFormat';
 import { renderDistributionPdf } from '../../src/export/distributionPdf';
 
 import { tmpdir } from 'node:os';
 import { readFile, unlink } from 'node:fs/promises';
-import type { AiBudgetRepository, AiEventsRepository, AiUsageRepository, AuthRepository, DesignRepository, EventsRepository, LeadsRepository, SocialRepository } from './repo';
+import type { AiBudgetRepository, AiEventsRepository, AiUsageRepository, AuthRepository, DesignRepository, EventsRepository, FacetBase, FacetScope, LeadsRepository, SocialRepository } from './repo';
 import { picturesStatus } from './imageAssets';
 import { textModelsStatus } from './aiProvider';
 import { imageHealth } from './imageHealth';
@@ -37,7 +38,7 @@ import { buildVisit, isSocialReferrer, type TrafficRepository } from './trafficR
 import { isFeedbackKind, type FeedbackContext, type FeedbackRepository } from './feedbackRepo';
 import { adminHtml, ADMIN_JS, ADMIN_UNLOCK_JS } from './adminPage';
 import { isValidTemplate } from '../../src/core/customStadiums';
-import { clubFilterOptions, COLOUR_FAMILIES, designFacets } from '../../src/core/facets';
+import { clubFilterOptions, COLOUR_FAMILIES } from '../../src/core/facets';
 import {
   checkPassword,
   normalizePassword,
@@ -87,6 +88,13 @@ import {
  */
 
 export const SNAPSHOT_EVERY = 20;
+/** The general per-client limit: every route without one of its own, 404s included. */
+export const REQUESTS_PER_MINUTE = 300;
+/** The hashed files under /assets, in a bucket of their own (performance plan P1.27). */
+export const ASSETS_PER_MINUTE = 600;
+const ASSET_BUCKET = '|assets';
+/** Public pictures and icons outside /assets, which may be cached for an hour (P1.29). */
+const PUBLIC_PICTURE = /\.(?:png|jpe?g|webp|avif|gif|svg|ico)$/i;
 const HEX = /^#[0-9a-fA-F]{6}$/;
 const USERNAME = /^[a-zA-Z0-9_]{3,24}$/;
 /** Longest design title anywhere. PATCH already enforced this; create, fork and
@@ -120,6 +128,11 @@ declare module 'fastify' {
   interface FastifyInstance {
     /** Resolves once every response-independent task (e.g. a reset email) has finished. */
     drainBackground(): Promise<void>;
+    /**
+     * The set of public designs changed outside a request (the template library
+     * seeded, facets backfilled at boot): forget the counts remembered from it.
+     */
+    forgetPublicCounts(): void;
   }
 }
 const MAX_THUMB_BYTES = 128 * 1024;
@@ -313,6 +326,12 @@ export interface AppOptions {
    * variables that would leak into every other test in the file.
    */
   oauth?: Record<string, { id: string; secret: string }>;
+  /**
+   * Sees every route as it is registered. Tests only: the Cache-Control walk in
+   * security.test.mts asks every /api route how it may be cached, including
+   * the ones added after the test was written.
+   */
+  onRoute?: (route: { method: string | string[]; url: string }) => void;
 }
 
 export async function buildApp(
@@ -351,7 +370,37 @@ export async function buildApp(
       : false,
     bodyLimit: MAX_BODY_BYTES,
     trustProxy,
+    // A URL the router cannot read (`/%E0%A4%A`), a path parameter too long,
+    // or a failed route constraint is answered by Fastify before any hook
+    // runs: no security headers, no Cache-Control, the path echoed back, and
+    // never counted by the rate limiter, so this one shape of scanner probe
+    // was unlimited (found by the performance plan's security review; on the
+    // code before it too). Answered here with the same headers, the same
+    // limit as any other probe, and a body that repeats nothing.
+    frameworkErrors: (err, req, reply) => {
+      void answerFrameworkError(err as { statusCode?: number }, req, reply);
+    },
   });
+  /** Set once the limiter is registered (below), when it is on. */
+  let frameworkErrorLimit: ReturnType<FastifyInstance['rateLimit']> | null = null;
+  const answerFrameworkError = async (err: { statusCode?: number }, req: FastifyRequest, reply: FastifyReply): Promise<void> => {
+    try {
+      securityHeaders(req.raw, reply.raw, () => {});
+      reply.header('cache-control', 'no-store');
+      if (frameworkErrorLimit) {
+        await frameworkErrorLimit.call(app, req, reply);
+        if (reply.sent) return;
+      }
+      const status = err.statusCode === 414 ? 414 : err.statusCode === 400 ? 400 : 500;
+      await reply.code(status).send({ error: status === 500 ? 'internal error' : 'bad request' });
+    } catch {
+      if (!reply.sent) reply.raw.writeHead(400, { 'content-type': 'application/json', 'cache-control': 'no-store' }).end('{"error":"bad request"}');
+    }
+  };
+  if (options.onRoute) {
+    const seen = options.onRoute;
+    app.addHook('onRoute', (r) => seen({ method: r.method, url: r.url }));
+  }
 
   // What a finished request meant for security, for /admin#security. Declared
   // before any route so every one of them is watched. See soc.ts.
@@ -404,6 +453,14 @@ export async function buildApp(
     // and trip the alert. (A unique violation stays a 500: when one gets this
     // far it is a bug to see, not a race.)
     if (e.code === '23503') return reply.code(409).send({ error: 'that changed while you were doing it, please try again' });
+    // The database too slow or out of reach: a statement past its 10 s, no
+    // free connection within 5 s (performance plan P1.26), a restart. The
+    // request did nothing it can report, so it says so and asks for a retry.
+    // Still a server error (logged, counted by the security monitor).
+    if (isDatabaseUnavailable(err)) {
+      req.log.error({ err }, 'database unavailable');
+      return reply.code(503).send({ error: 'the server is busy, please try again', code: 'retry' });
+    }
     const status = typeof e.statusCode === 'number' && e.statusCode >= 400 && e.statusCode < 600 ? e.statusCode : 500;
     if (status >= 500) {
       req.log.error({ err }, 'request failed');
@@ -477,7 +534,16 @@ export async function buildApp(
   //  - connect-src 'self'          — the app only talks to its own origin (no CORS).
   //  - object-src 'none', frame-ancestors 'none' — no plugins; can't be framed
   //                                  (clickjacking protection).
-  await app.register(helmet, {
+  //
+  // Built ONCE, here, not per request. @fastify/helmet called helmet(options)
+  // inside its onRequest hook, so every request re-validated and re-joined the
+  // whole policy before setting the same twelve headers: 24.5 µs a request,
+  // against 7.6 µs for the middleware built once (performance plan P1.30). Same
+  // options, same headers (pinned byte for byte in security.test.mts), and the
+  // same place: a root onRequest hook registered at this point, before the rate
+  // limiter and every route, so a refusal, a 404 and a static file carry them
+  // too. helmet is a direct dependency, pinned in package.json.
+  const securityHeaders = helmet({
     contentSecurityPolicy: {
       useDefaults: true,
       directives: {
@@ -500,6 +566,21 @@ export async function buildApp(
       },
     },
   });
+  app.addHook('onRequest', (req, reply, done) => {
+    securityHeaders(req.raw, reply.raw, (err?: unknown) => done(err as Error | undefined));
+  });
+
+  /**
+   * The static file routes under /assets, as registered by @fastify/static
+   * (one route per file: `wildcard: false`). Filled while that plugin
+   * registers, below, and read by the rate limiter's key: a request is an
+   * asset request only when one of these routes is what answered it.
+   */
+  const assetRoutes = new Set<string>();
+  let collectingAssetRoutes = false;
+  app.addHook('onRoute', (r) => {
+    if (collectingAssetRoutes && r.url.startsWith('/assets/')) assetRoutes.add(r.url);
+  });
 
   // Rate limiting protects the auth endpoints (and everything else) from
   // brute-force and spam. Generous global ceiling; auth routes add a tighter
@@ -512,7 +593,37 @@ export async function buildApp(
     // every limit in this file was unlimited for it (audit round five,
     // CVE-2026-15144). 64 is the plugin's default; it is spelled out so a
     // downgrade or a changed default cannot quietly undo it.
-    await app.register(rateLimit, { global: true, max: 300, timeWindow: '1 minute', ipv6Subnet: 64 });
+    //
+    // The hashed build files under /assets count in a bucket of their own, 600
+    // a minute, beside the 300 for everything else (performance plan P1.27).
+    // They were in the 300, and a page pulls 20 to 40 of them: six ordinary
+    // page views in 50 seconds used the whole minute, and the seventh page's
+    // own scripts were refused with 429, which leaves a page broken. They are
+    // still limited, and per client: same address, same /64, one bucket for
+    // all of them (never one per file, which would multiply the allowance by
+    // the number of files). What counts as an asset is the registered static
+    // route that answered (see assetRoutes), never the URL as written: a path
+    // that only looks like /assets/ (a 404, a traversal, `/assets/../api/me`)
+    // is the router's to resolve, and anything that is not one of those files
+    // stays in the 300. Every route with its own limit (sign-in 10, PDF 6,
+    // scene saves 30...) keeps its own store and number; only the key is
+    // shared, and for those it is exactly the address as before.
+    await app.register(rateLimit, {
+      global: true,
+      timeWindow: '1 minute',
+      ipv6Subnet: 64,
+      keyGenerator: (req) => {
+        const client = normalizeIP(req.ip, 64);
+        const route = req.routeOptions?.url;
+        const isAsset = (req.method === 'GET' || req.method === 'HEAD') && route !== undefined && assetRoutes.has(route);
+        return isAsset ? `${client}${ASSET_BUCKET}` : client;
+      },
+      max: (_req, key) => (key.endsWith(ASSET_BUCKET) ? ASSETS_PER_MINUTE : REQUESTS_PER_MINUTE),
+      // Twice the plugin's default number of remembered clients, since each
+      // now has up to two entries: the same number of clients fit before the
+      // least recent are forgotten.
+      cache: 10_000,
+    });
   }
 
   const seatCount = (id: string, version: number): number | null =>
@@ -534,22 +645,21 @@ export async function buildApp(
    * editor locks them, and the server enforces the same rule, so a design from
    * an old client or an outside generator cannot print cards for them. Returns
    * true if any cell had to be cleared.
+   *
+   * The runs come from the seat table (seatTable.ts), generated from the same
+   * seat maps: the first save on a ground used to generate its whole map to
+   * find them, up to 1.3 s on the one event loop (performance plan P1.28).
    */
-  const lockMasks = new Map<string, Uint8Array | null>();
   const clearLocked = (templateId: string, version: number, cells: Uint8Array): boolean => {
-    const key = `${templateId}@${version}`;
-    let mask = lockMasks.get(key);
-    if (mask === undefined) {
-      const tpl = shippedTemplates().find((t) => t.id === templateId && t.version === version);
-      mask = tpl ? noTifoMask(seatMapFor(tpl), tpl) : null;
-      lockMasks.set(key, mask);
-    }
-    if (!mask) return false;
+    const runs = seatTable.lockedRuns(templateId, version);
+    if (!runs) return false;
     let changed = false;
-    for (let i = 0; i < cells.length && i < mask.length; i++) {
-      if (mask[i] && cells[i] !== 0) {
-        cells[i] = 0;
-        changed = true;
+    for (const [start, end] of runs) {
+      for (let i = start; i < end && i < cells.length; i++) {
+        if (cells[i] !== 0) {
+          cells[i] = 0;
+          changed = true;
+        }
       }
     }
     return changed;
@@ -1290,7 +1400,16 @@ export async function buildApp(
   /** Room for one more design on this account? Sends the refusal itself. */
   const roomForDesign = async (req: FastifyRequest, userId: string, reply: FastifyReply): Promise<boolean> => {
     if (await adminNameOf(userId)) return true;
-    const owned = (await repo.listTitlesByOwner(userId).catch(() => [])).length;
+    // A count that cannot be read is not a count of zero: that let an account
+    // past its thousand whenever the lookup failed, which a statement limit
+    // makes a thing that happens (performance plan P1.26 fail-closed review).
+    let owned: number;
+    try {
+      owned = (await repo.listTitlesByOwner(userId)).length;
+    } catch {
+      await reply.code(503).send({ error: 'something went wrong on our side, please try again', code: 'retry' });
+      return false;
+    }
     if (owned >= DESIGNS_PER_ACCOUNT) {
       await reply.code(403).send({ error: 'this account has reached its limit of designs', code: 'design_limit', limit: DESIGNS_PER_ACCOUNT });
       return false;
@@ -2595,8 +2714,16 @@ export async function buildApp(
   app.get('/api/account/export', authLimit, async (req, reply) => {
     const userId = await requireUser(req, reply);
     if (!userId) return;
-    const user = await auth.getUserById(userId).catch(() => null);
-    const designs = await repo.listByOwner(userId).catch(() => []);
+    // All of it or none of it: an export that quietly left out the designs it
+    // could not read would be a wrong answer to an access request, given as if
+    // complete (P1.26 fail-closed review).
+    let user: Awaited<ReturnType<typeof auth.getUserById>>;
+    let designs: Awaited<ReturnType<typeof repo.listByOwner>>;
+    try {
+      [user, designs] = await Promise.all([auth.getUserById(userId), repo.listByOwner(userId)]);
+    } catch {
+      return reply.code(503).send({ error: 'something went wrong on our side, please try again', code: 'retry' });
+    }
     return reply.header('content-disposition', 'attachment; filename="tifomaker-data.json"').send({
       exportedAt: new Date().toISOString(),
       account: user
@@ -2620,8 +2747,18 @@ export async function buildApp(
     const who = await auth.getUserById(userId).catch(() => null);
     if (!who) return reply.code(503).send({ error: 'something went wrong on our side, please try again', code: 'retry' });
     if (!(await reauthenticated(req, reply, who))) return;
-    await repo.deleteByOwner(userId).catch(() => {});
+    // The designs first, and only then the account. A failure to delete them
+    // used to be swallowed and the account deleted anyway (or not, depending
+    // on the store), so an erasure could answer 204 having left the person's
+    // designs behind with no owner. Now a failure stops here and says so;
+    // nothing is half done that a retry cannot finish (P1.26 review).
+    try {
+      await repo.deleteByOwner(userId);
+    } catch {
+      return reply.code(503).send({ error: 'your account was not deleted, please try again', code: 'retry' });
+    }
     await auth.deleteUser(userId);
+    publicSetChanged();
     // Today's home-page pick goes with the account at once, not at the next
     // 60-second recheck: until then the landing page kept showing a deleted
     // person's design and their name (audit round six). After the deletion,
@@ -2728,6 +2865,37 @@ export async function buildApp(
   });
 
   /**
+   * The four base facet scopes (people or all, templates or not), remembered
+   * for up to a minute (performance plan P1.12).
+   *
+   * /community asks for them on every load. They are counts over public
+   * designs and nothing else: no viewer, no selection, the same answer for
+   * everyone, so there is nothing personal to keep. They are forgotten at once
+   * whenever a design joins or leaves the public set, or changes in a way that
+   * moves a count: publish, unpublish, a title or palette edit, the template
+   * flag, takedown, trash, restore, delete and account deletion (see
+   * publicSetChanged). The minute is only the backstop for a change made
+   * outside this process.
+   */
+  const FACET_MEMO_MS = 60_000;
+  const facetMemo = new Map<string, { at: number; value: Promise<FacetBase> }>();
+  const facetsFor = (scope: FacetScope): Promise<FacetBase> => {
+    const key = `${scope.excludeTemplates ? 'people' : 'all'}|${scope.templatesOnly ? 'templates' : 'any'}`;
+    const hit = facetMemo.get(key);
+    if (hit && Date.now() - hit.at < FACET_MEMO_MS) return hit.value;
+    const value = repo.facetBase(scope);
+    facetMemo.set(key, { at: Date.now(), value });
+    // A failed count is not remembered: the next request asks again.
+    value.catch(() => {
+      if (facetMemo.get(key)?.value === value) facetMemo.delete(key);
+    });
+    return value;
+  };
+  /** Something about the set of public designs changed: drop what was counted from it. */
+  const publicSetChanged = (): void => facetMemo.clear();
+  app.decorate('forgetPublicCounts', publicSetChanged);
+
+  /**
    * What the filter chips can offer.
    *
    * The colour list is fixed (it is a classification, not data), but the CLUB
@@ -2737,16 +2905,8 @@ export async function buildApp(
    */
   app.get('/api/gallery/facets', async (req) => {
     const q = req.query as Record<string, unknown>;
-    const made = oneParam(q.made) === 'people';
-    const scope = { sort: 'recent' as const, limit: 5000, excludeTemplates: made, templatesOnly: oneParam(q.templates) === '1' };
-    const rows = await repo.listPublic(scope);
-    const colourCounts = new Map<string, number>();
-    const clubCounts = new Map<string, number>();
-    for (const r of rows) {
-      const f = designFacets({ title: r.title, titleAr: r.titleAr, palette: r.palette });
-      for (const c of f.colors) colourCounts.set(c, (colourCounts.get(c) ?? 0) + 1);
-      if (f.clubId) clubCounts.set(f.clubId, (clubCounts.get(f.clubId) ?? 0) + 1);
-    }
+    const scope: FacetScope = { excludeTemplates: oneParam(q.made) === 'people', templatesOnly: oneParam(q.templates) === '1' };
+    const base = await facetsFor(scope);
     const names = new Map(clubFilterOptions().map((c) => [c.id, c]));
 
     // How many a candidate selection would return.
@@ -2755,18 +2915,20 @@ export async function buildApp(
     // confirm, so without this the confirm button is a leap: you pick three
     // things, press it, and land on an empty grid with no idea which one was
     // the mistake. Counting first turns that into a number you can watch.
+    // Counted in SQL with the feed's own WHERE; never remembered, since it
+    // depends on what the caller picked.
     const wantColors = oneParam(q.colors)?.split(',').map((c) => c.trim().toLowerCase()).filter(Boolean).slice(0, 6);
     const wantTags = oneParam(q.tags)?.split(',').map((t) => t.trim()).filter(Boolean).slice(0, 8);
     const wantClub = oneParam(q.club)?.slice(0, 60) || undefined;
     const matching = (wantColors?.length || wantTags?.length || wantClub)
-      ? (await repo.listPublic({ ...scope, colors: wantColors, tags: wantTags, clubId: wantClub })).length
-      : rows.length;
+      ? await repo.countPublic({ ...scope, colors: wantColors, tags: wantTags, clubId: wantClub })
+      : base.total;
 
     return {
-      total: rows.length,
+      total: base.total,
       matching,
-      colors: COLOUR_FAMILIES.filter((c) => colourCounts.has(c)).map((c) => ({ id: c, count: colourCounts.get(c)! })),
-      clubs: [...clubCounts.entries()]
+      colors: COLOUR_FAMILIES.filter((c) => (base.colors[c] ?? 0) > 0).map((c) => ({ id: c, count: base.colors[c] })),
+      clubs: Object.entries(base.clubs)
         .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
         .map(([id, count]) => ({ id, name: names.get(id)?.name ?? id, nameAr: names.get(id)?.nameAr ?? id, count })),
     };
@@ -2793,6 +2955,7 @@ export async function buildApp(
     const isTemplate = Boolean((req.body as { isTemplate?: unknown } | null)?.isTemplate);
     const result = await repo.setTemplate(id, userId, isTemplate);
     if (result === null) return reply.code(404).send({ error: 'not found or not yours' });
+    publicSetChanged(); // the templates / people scopes count it differently now
     return { isTemplate: result };
   });
 
@@ -2873,7 +3036,10 @@ export async function buildApp(
       if (!uploader?.emailVerifiedAt && !admin) {
         return reply.code(403).send({ error: 'verify your email to add photos', code: 'verify' });
       }
-      if ((await repo.listPhotos(id).catch(() => [])).length >= PHOTOS_PER_DESIGN) {
+      // Counted, or refused: an unreadable list is not an empty one (P1.26 review).
+      const existing = await repo.listPhotos(id).catch(() => null);
+      if (existing === null) return reply.code(503).send({ error: 'something went wrong on our side, please try again', code: 'retry' });
+      if (existing.length >= PHOTOS_PER_DESIGN) {
         return reply.code(403).send({ error: 'this design has as many photos as it can hold', code: 'photo_limit', limit: PHOTOS_PER_DESIGN });
       }
       if (!admin && !takeDaily(userId, 'photo', PHOTOS_PER_DAY)) {
@@ -2957,6 +3123,7 @@ export async function buildApp(
     const ok = await repo.takedownDesign(id);
     if (!ok) return reply.code(404).send({ error: 'design not found' });
     daily?.forget(id);
+    publicSetChanged();
     return { takendown: true };
   });
 
@@ -3194,8 +3361,14 @@ export async function buildApp(
     const user = await auth.getUserById(id).catch(() => null);
     if (!user) return reply.code(404).send({ error: 'not found' });
     const viewerId = await userOf(req);
+    // Their public designs, asked for as such: owner AND public, in SQL, at
+    // most `limit` (1-200, default 200). It used to fetch every public design
+    // on the site and filter in JavaScript, 414 KB for the library's owner on
+    // every share page (performance plan P1.12). Never listByOwner: that is
+    // the owner's own list, private designs included.
+    const limit = Math.min(200, Math.max(1, Number(oneParam((req.query as Record<string, unknown>).limit)) || 200));
     const [created, liked, socialProfile] = await Promise.all([
-      repo.listPublic({ sort: 'recent', viewerId }).then((all) => all.filter((d) => d.ownerId === id)),
+      repo.listPublicByOwner(id, { viewerId, limit }),
       repo.listLikedBy(id),
       options.social ? options.social.getProfile(id, viewerId) : Promise.resolve(null),
     ]);
@@ -3365,10 +3538,17 @@ export async function buildApp(
     // is the owner's business: those fields describe their Projects page, and
     // they were in every anonymous answer (audit round five).
     const { pinned: _p, deletedAt: _d, takenDown: _t, origin: _o, ...shared } = all;
-    const meta = ownsDesign(v.rec, v.userId) ? all : shared;
+    // Whether the caller owns it, from the same check that chose the fields,
+    // after getVisible: the page no longer has to ask /api/me and compare ids
+    // (performance plan P1.8). True only for the bearer token's own account;
+    // anonymous callers, other accounts and ownerless designs get false.
+    const isOwner = ownsDesign(v.rec, v.userId);
+    const meta = isOwner ? all : shared;
     // Creator name is needed by the public share page; resolve it from the owner id.
     const owner = meta.ownerId ? await auth.getUserById(meta.ownerId).catch(() => null) : null;
-    return { ...meta, ownerName: owner?.username ?? null, cellsGzB64: cellsGz.toString('base64') };
+    // Per caller, so the /api default (no-store, the onSend hook above) is
+    // what keeps it out of every cache; the security suite pins it.
+    return { ...meta, isOwner, ownerName: owner?.username ?? null, cellsGzB64: cellsGz.toString('base64') };
   });
 
   /**
@@ -3690,7 +3870,10 @@ export async function buildApp(
     if (clearLocked(rec.templateId, rec.templateVersion, cells)) cellsGz = gzipBytes(cells);
     const thumb = decodeThumb(body.thumbnailPngB64, reply);
     if (thumb === undefined) return;
-    return repo.updateCells(rec.id, cellsGz, body.palette, thumb);
+    const saved = await repo.updateCells(rec.id, cellsGz, body.palette, thumb);
+    // A public design's palette is its colour facets.
+    if (rec.isPublic) publicSetChanged();
+    return saved;
   });
 
   app.patch('/api/designs/:id', async (req, reply) => {
@@ -3729,6 +3912,8 @@ export async function buildApp(
     const wasPublic = rec.isPublic;
     const result = await repo.patchMeta(rec.id, patch);
     if (patch.isPublic === false) daily?.forget(rec.id);
+    // Published, unpublished or renamed (a title names the club facet).
+    publicSetChanged();
     // Newly published → notify the owner's followers (best-effort, non-blocking).
     if (options.social && patch.isPublic === true && !wasPublic && rec.ownerId) {
       options.social.notifyFollowersOfPost(rec.ownerId, rec.id).catch(() => {});
@@ -3752,16 +3937,21 @@ export async function buildApp(
     if (permanent) {
       if (!rec.deletedAt) return reply.code(409).send({ error: 'move it to the trash first' });
       await repo.purge(rec.id);
+      publicSetChanged();
       return reply.code(204).send();
     }
-    return repo.trash(rec.id);
+    const trashed = await repo.trash(rec.id);
+    publicSetChanged();
+    return trashed;
   });
 
   app.post('/api/designs/:id/restore', async (req, reply) => {
     if (badId((req.params as { id: string }).id, reply)) return;
     const rec = await getOwned(req, reply);
     if (!rec) return;
-    return repo.restore(rec.id);
+    const restored = await repo.restore(rec.id);
+    publicSetChanged();
+    return restored;
   });
 
   app.post('/api/designs/:id/revisions', writeLimit, async (req, reply) => {
@@ -4340,8 +4530,36 @@ export async function buildApp(
           }),
         );
     });
-    app.get('/app', async (req, reply) =>
-      reply
+    /**
+     * Where a bare /app goes: the Projects page, decided here instead of in
+     * the editor (performance plan P1.9).
+     *
+     * The editor always has a project open, so main.ts sent a bare /app on to
+     * /projects?start=1 itself, but only after the browser had fetched and run
+     * the editor to find that out: one page, about 300 KB and 2.2 s of a phone's
+     * first paint spent on a redirect. Only a query that is empty, or nothing
+     * but campaign tags, is bare. Anything else (?design=, ?project=, ?local=,
+     * ?new=1, ?admin=, ?signedin= from a provider's sign-in, and whatever is
+     * added later) is the editor's to read, exactly as before. The target is a
+     * fixed path on this site; the only thing carried over is the utm_* tags,
+     * re-encoded, so the visit is still counted with its campaign on the page it
+     * lands on. Not an open redirect: nothing in the request picks where it goes.
+     */
+    const UTM_KEY = /^utm_[a-z_]{1,32}$/;
+    const bareAppTarget = (rawUrl: string): string | null => {
+      const at = rawUrl.indexOf('?');
+      const query = new URLSearchParams(at === -1 ? '' : rawUrl.slice(at + 1));
+      const kept = new URLSearchParams({ start: '1' });
+      for (const [k, v] of query) {
+        if (!UTM_KEY.test(k)) return null;
+        kept.append(k, v);
+      }
+      return `/projects?${kept.toString()}`;
+    };
+    app.get('/app', async (req, reply) => {
+      const bare = bareAppTarget(req.raw.url ?? req.url);
+      if (bare) return reply.header('cache-control', 'no-cache').redirect(bare, 302);
+      return reply
         .header('cache-control', 'no-cache')
         .type('text/html')
         .send(
@@ -4351,7 +4569,8 @@ export async function buildApp(
               'Paint a tifo seat by seat, drop in a crest or text, and watch the whole bowl update in 3D as you work. Free, in the browser, no download.',
             path: '/app',
           }),
-        ));
+        );
+    });
     // Public developer spec for the .tifo format.
     try {
       const specHtml = readFileSync(join(staticDir, 'tifo-spec.html'), 'utf8');
@@ -4492,7 +4711,8 @@ export async function buildApp(
       const staticPages: [string, string, string][] = [
         // path, changefreq, priority
         ['/', 'weekly', '1.0'],
-        ['/app', 'weekly', '0.9'],
+        // Not /app: a bare /app is a redirect to /projects now (performance
+        // plan P1.9), and a sitemap lists pages, not redirects.
         ['/community', 'daily', '0.8'],
         ['/clubs', 'monthly', '0.6'],
         ['/tifo-spec', 'yearly', '0.4'],
@@ -4500,9 +4720,9 @@ export async function buildApp(
       ];
       let designs: { id: string; updatedAt: string }[] = [];
       try {
-        const items = await repo.listPublic({ sort: 'recent' });
-        // The protocol caps a sitemap at 50k URLs; stay well inside it.
-        designs = items.slice(0, 5000).map((d) => ({ id: d.id, updatedAt: d.updatedAt }));
+        // The protocol caps a sitemap at 50k URLs; stay well inside it. Ids and
+        // dates only: it read every public design's whole card for these two.
+        designs = await repo.listPublicIds(5000);
       } catch {
         designs = []; // a gallery failure must not take the sitemap down
       }
@@ -4535,6 +4755,10 @@ export async function buildApp(
     // index:false so the static plugin doesn't auto-serve index.html at '/'
     // (we serve the landing there instead); assets still resolve by path.
     const hashedAssets = join(staticDir, 'assets') + sep;
+    const robotsTxt = join(staticDir, 'robots.txt');
+    // The routes it registers under /assets/ are the asset bucket's (see
+    // assetRoutes); nothing registered before or after this is.
+    collectingAssetRoutes = true;
     await app.register(fastifyStatic, {
       root: staticDir,
       wildcard: false,
@@ -4546,10 +4770,21 @@ export async function buildApp(
       // page and 109 for /community, each counted by the 300-a-minute limit, so a
       // supporter who opened /community three times in a minute was locked out by
       // their own browser, and the security log filled with them.
+      //
+      // The public pictures, icons and robots.txt keep their names across
+      // deploys, so they cannot be kept for a year, but max-age=0 had every
+      // page view ask again for each of them (performance plan P1.29): an hour,
+      // then a day in which a stale copy is shown while a fresh one is fetched
+      // in the background. They are the same for everyone and carry nothing
+      // private. Pages (.html) and scripts outside /assets keep max-age=0: a
+      // page must never be served from a cache, and a script must not run a
+      // day late.
       setHeaders: (reply, filePath) => {
         if (filePath.startsWith(hashedAssets)) reply.header('cache-control', 'public, max-age=31536000, immutable');
+        else if (PUBLIC_PICTURE.test(filePath) || filePath === robotsTxt) reply.header('cache-control', 'public, max-age=3600, stale-while-revalidate=86400');
       },
     });
+    collectingAssetRoutes = false;
   }
 
   // Unknown paths get a REAL 404. Previously this served the editor with a 200,
@@ -4581,6 +4816,8 @@ export async function buildApp(
     app.addHook('onRequest', async (req, reply) => {
       if (req.is404) await limit404.call(app, req, reply);
     });
+    // The same limit for the URLs the router could not read (see frameworkErrors).
+    frameworkErrorLimit = limit404;
   }
   app.setNotFoundHandler(notFound);
 

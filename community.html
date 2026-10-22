@@ -14,9 +14,17 @@
   <link rel="stylesheet" href="/src/community.css" />
   <style>
     /* The server-rendered link list. Real, visible content: it is what a crawler
-       and a no-JS visitor get, and it is removed the moment the interactive grid
-       renders. Styled as a plain thumbnail list so the brief moment it is on
-       screen looks deliberate rather than broken. */
+       and a visitor without JavaScript get. Where the page's script runs
+       (theme-boot.js puts .js on <html> before the first paint) it is never
+       painted at all: painting sixty cards' worth of links and then swapping
+       them for the real grid moved everything under them, the worst layout
+       shift on the site (CLS 0.24 phone, 0.91 desktop). Hidden like this its
+       lazy thumbnails are not fetched either; the cards fetch their own
+       (performance plan P1.10). */
+    .js #seo-feed { display: none; }
+    /* At least a screen tall, so the footer and "Load more" start below the
+       fold and the cards arriving do not push them down the screen. */
+    .js main.community .grid-wrap { min-height: 100vh; }
     .seo-feed ul { list-style: none; margin: 0; padding: 0;
       display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px; }
     .seo-feed li { background: rgba(255,255,255,.03); border: 1px solid rgba(255,255,255,.08);

@@ -131,7 +131,9 @@ img { max-width: 100%; }
   box-shadow: var(--shadow-lg), 0 0 0 1px rgba(11, 20, 36, .08);
 }
 .hero-3d { position: relative; width: 100%; aspect-ratio: 16 / 10; opacity: 0; transition: opacity .6s var(--ease); }
-.hero-3d.ready { opacity: 1; }
+/* The still is in the HTML and shows from the first paint (performance plan
+   P1.14); only the live stadium fades in once it is ready. */
+.hero-3d.ready, .hero-3d.still { opacity: 1; }
 .hero-3d.switching { opacity: .45; }
 .hero-3d canvas { width: 100% !important; height: 100% !important; display: block; cursor: grab; }
 .hero-3d canvas:active { cursor: grabbing; }

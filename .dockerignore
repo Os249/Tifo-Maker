@@ -1,6 +1,7 @@
 # Never in the image: dependencies are installed fresh, output is rebuilt.
 node_modules
 dist
+server/build
 out
 preview-out
 .git

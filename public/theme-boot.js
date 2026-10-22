@@ -28,3 +28,18 @@
     document.documentElement.setAttribute('dir', l === 'ar' ? 'rtl' : 'ltr');
   } catch (e) { /* the page's own initLang() settles it */ }
 })();
+
+/*
+ * And whether the page's own script will run, so CSS can hide what only a
+ * visitor without it needs before the first paint (performance plan P1.10):
+ * /community ships a plain list of links for crawlers and no-JS visitors, and
+ * painting it and then swapping it for the real grid moved the whole page.
+ * Only where ES modules run, because every page script is one: a browser that
+ * runs this file but not the module keeps the plain list instead of a feed
+ * that never arrives. Set here rather than inline for the same CSP reason.
+ */
+(function () {
+  try {
+    if ('noModule' in HTMLScriptElement.prototype) document.documentElement.classList.add('js');
+  } catch (e) { /* no class: the server-rendered content stays visible */ }
+})();

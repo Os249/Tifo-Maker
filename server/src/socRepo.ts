@@ -298,11 +298,15 @@ export class MemorySocRepository implements SocRepository {
 // ============ Postgres ============
 
 export class PgSocRepository implements SocRepository {
-  constructor(private readonly pool: pg.Pool) {}
+  /**
+   * `maintenance` is the small pool for slow, non-request work (server/src/db.ts,
+   * performance plan P1.26); it defaults to the one pool where only one exists.
+   */
+  constructor(private readonly pool: pg.Pool, private readonly maintenance: pg.Pool = pool) {}
 
   /** Idempotent, like the other tables that bootstrap on boot. */
   async init(): Promise<void> {
-    await this.pool.query(`
+    await this.maintenance.query(`
       CREATE TABLE IF NOT EXISTS soc_events (
         minute  TIMESTAMPTZ NOT NULL,
         kind    TEXT NOT NULL,
@@ -312,8 +316,8 @@ export class PgSocRepository implements SocRepository {
         count   INTEGER NOT NULL,
         PRIMARY KEY (minute, kind, source, route, subject)
       )`);
-    await this.pool.query('CREATE INDEX IF NOT EXISTS soc_events_minute_idx ON soc_events (minute DESC)');
-    await this.pool.query(`
+    await this.maintenance.query('CREATE INDEX IF NOT EXISTS soc_events_minute_idx ON soc_events (minute DESC)');
+    await this.maintenance.query(`
       CREATE TABLE IF NOT EXISTS soc_audit (
         id      BIGSERIAL PRIMARY KEY,
         at      TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -324,8 +328,8 @@ export class PgSocRepository implements SocRepository {
         source  TEXT NOT NULL DEFAULT '',
         detail  JSONB
       )`);
-    await this.pool.query('CREATE INDEX IF NOT EXISTS soc_audit_at_idx ON soc_audit (at DESC)');
-    await this.pool.query(`
+    await this.maintenance.query('CREATE INDEX IF NOT EXISTS soc_audit_at_idx ON soc_audit (at DESC)');
+    await this.maintenance.query(`
       CREATE TABLE IF NOT EXISTS soc_alerts (
         id         BIGSERIAL PRIMARY KEY,
         at         TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -336,7 +340,7 @@ export class PgSocRepository implements SocRepository {
         error      TEXT,
         summary    TEXT NOT NULL DEFAULT ''
       )`);
-    await this.pool.query('CREATE INDEX IF NOT EXISTS soc_alerts_at_idx ON soc_alerts (at DESC)');
+    await this.maintenance.query('CREATE INDEX IF NOT EXISTS soc_alerts_at_idx ON soc_alerts (at DESC)');
   }
 
   async addEvents(rows: SocEventRow[]): Promise<void> {
@@ -368,7 +372,7 @@ export class PgSocRepository implements SocRepository {
     const twoDays = new Date(t - 48 * HOUR);
     try {
       const [totals, hourly, daily, sources, subjects, routes] = await Promise.all([
-        this.pool.query(
+        this.maintenance.query(
           `SELECT kind,
                   COALESCE(SUM(count) FILTER (WHERE minute >= $1), 0)::bigint AS day,
                   COALESCE(SUM(count) FILTER (WHERE minute >= $2), 0)::bigint AS week,
@@ -376,31 +380,31 @@ export class PgSocRepository implements SocRepository {
              FROM soc_events WHERE minute >= $3 GROUP BY kind`,
           [day, week, month],
         ),
-        this.pool.query(
+        this.maintenance.query(
           `SELECT date_trunc('hour', minute AT TIME ZONE 'UTC') AT TIME ZONE 'UTC' AS hour, kind, SUM(count)::bigint AS n
              FROM soc_events WHERE minute >= $1 GROUP BY 1, 2`,
           [twoDays],
         ),
-        this.pool.query(
+        this.maintenance.query(
           `SELECT to_char(minute AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS day, kind, SUM(count)::bigint AS n
              FROM soc_events WHERE minute >= $1 GROUP BY 1, 2`,
           [month],
         ),
-        this.pool.query(
+        this.maintenance.query(
           `SELECT source, SUM(count)::bigint AS total, array_agg(DISTINCT kind) AS kinds
              FROM soc_events
             WHERE minute >= $1 AND source <> '' AND kind <> 'login_ok'
             GROUP BY source ORDER BY total DESC LIMIT 10`,
           [day],
         ),
-        this.pool.query(
+        this.maintenance.query(
           `SELECT subject, SUM(count)::bigint AS failures, COUNT(DISTINCT NULLIF(source, ''))::int AS sources
              FROM soc_events
             WHERE minute >= $1 AND kind = 'login_failed' AND subject <> ''
             GROUP BY subject ORDER BY failures DESC LIMIT 10`,
           [week],
         ),
-        this.pool.query(
+        this.maintenance.query(
           `SELECT kind, route, SUM(count)::bigint AS total
              FROM soc_events
             WHERE minute >= $1 AND route <> '' AND kind = ANY($2::text[])
@@ -458,7 +462,7 @@ export class PgSocRepository implements SocRepository {
 
   async listAudit(limit: number): Promise<SocAuditRow[]> {
     try {
-      const res = await this.pool.query(
+      const res = await this.maintenance.query(
         `SELECT id, at, actor, action, target, outcome, source, detail FROM soc_audit ORDER BY at DESC LIMIT $1`,
         [limit],
       );
@@ -508,7 +512,7 @@ export class PgSocRepository implements SocRepository {
 
   async listAlerts(limit: number): Promise<SocAlertRow[]> {
     try {
-      const res = await this.pool.query(
+      const res = await this.maintenance.query(
         `SELECT id, at, rule, count, window_min, delivered, error, summary FROM soc_alerts ORDER BY at DESC LIMIT $1`,
         [limit],
       );
@@ -526,7 +530,7 @@ export class PgSocRepository implements SocRepository {
       'DELETE FROM soc_audit WHERE at < $1',
       'DELETE FROM soc_alerts WHERE at < $1',
     ]) {
-      const res = await this.pool.query(sql, [cutoff]);
+      const res = await this.maintenance.query(sql, [cutoff]);
       removed += res.rowCount ?? 0;
     }
     return removed;

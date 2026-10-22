@@ -223,12 +223,89 @@ function catenaryDip(u: number, spanM: number, sagM: number): number {
 }
 
 /**
+ * The part of a banner's shape that does not depend on the clock.
+ *
+ * Worked out once for a slot, a crowd, a wind and a point in the reveal, and
+ * then only the wave is added each frame (performance plan P1.20). Finding
+ * where the stand is under every vertex — 1,025 `pointAt` and `normalAt`
+ * calls, each a walk up a column of seats — was 7-18 ms and 1.8 MB of garbage
+ * a frame for a banner that was only waving; now it is done when the banner
+ * moves, grows or unrolls, and never while it just breathes.
+ *
+ * The arithmetic is split, not rearranged: each per-vertex term is computed
+ * in the same order as before and the wave is added last, as it always was,
+ * so the vertices come out bit-identical to a one-shot `buildSurface`.
+ */
+export interface SurfaceRest {
+  kind: BannerDoc['kind'];
+  /** Wave amplitude, metres. */
+  amp: number;
+  /** Sheet size, metres. */
+  widthM: number;
+  heightM: number;
+  /**
+   * Per vertex. Stand: x, y, z of the stand under it, its normal, the offset
+   * without the wave, and how free it is to move (8 a vertex). Hanging: x and
+   * z at rest on the cable's plane, y, the offset without the wave, and its
+   * freedom (5 a vertex). Unused by a sign.
+   */
+  vert: Float64Array;
+  /** Hanging: the outward direction the offset moves along. */
+  ox: number;
+  oz: number;
+  /** Sign: where it is held along its length, one per column. */
+  holds: SignHold[];
+  /** Sign: tied to the fence (or held), ties or hands along it, reveal progress. */
+  tied: boolean;
+  hands: number;
+  e: number;
+}
+
+type SignHold = ReturnType<typeof signHold>;
+
+const STAND_STRIDE = 8;
+const HANG_STRIDE = 5;
+
+export function newSurfaceRest(): SurfaceRest {
+  return {
+    kind: 'stand', amp: 0, widthM: 0, heightM: 0,
+    vert: new Float64Array(SURF_VERTS * STAND_STRIDE),
+    ox: 0, oz: 0, holds: new Array(SURF_COLS), tied: false, hands: 1, e: 1,
+  };
+}
+
+/**
+ * Work out the clock-independent part of the shape into `into`.
+ *
+ * Everything the old per-frame builders computed that does not read `t`.
+ */
+export function restSurface(doc: BannerDoc, slot: ResolvedSlot, env: SurfaceEnv, into: SurfaceRest): SurfaceRest {
+  into.kind = doc.kind;
+  if (doc.kind === 'hanging') restHanging(doc, slot, env, into);
+  else if (doc.kind === 'sign') restSign(doc, slot, env, into);
+  else restStand(doc, slot, env, into);
+  return into;
+}
+
+/** Add the wave at time `t` and write the vertices. Allocates nothing. */
+export function waveSurface(rest: SurfaceRest, t: number, out: Float32Array): void {
+  if (rest.kind === 'hanging') waveHanging(rest, t, out);
+  else if (rest.kind === 'sign') waveSign(rest, t, out);
+  else waveStand(rest, t, out);
+}
+
+/** Scratch for the one-shot path below. */
+const ONE_SHOT = newSurfaceRest();
+
+/**
  * Build one banner's vertices.
  *
- * Writes straight into the position array. No allocation, no state, and the
- * same arguments always produce the same bytes — which is what makes the
- * whole-space test possible and what makes every bug a repro rather than a
- * story about what happened on frame four hundred.
+ * Writes straight into the position array. No state, and the same arguments
+ * always produce the same bytes — which is what makes the whole-space test
+ * possible and what makes every bug a repro rather than a story about what
+ * happened on frame four hundred. It is the rest and the wave in one go, the
+ * very same two functions the renderer calls a frame apart, so the sweep
+ * tests what is drawn.
  */
 export function buildSurface(
   doc: BannerDoc,
@@ -237,9 +314,7 @@ export function buildSurface(
   t: number,
   out: Float32Array,
 ): void {
-  if (doc.kind === 'hanging') buildHanging(doc, slot, env, t, out);
-  else if (doc.kind === 'sign') buildSign(doc, slot, env, t, out);
-  else buildStand(doc, slot, env, t, out);
+  waveSurface(restSurface(doc, slot, env, ONE_SHOT), t, out);
 }
 
 /** How far a sign's top edge dips between two pairs of hands, in metres. */
@@ -269,29 +344,34 @@ const SIGN_WAVE_WIND_M = 0.3;
  * it ends — which is what keeps a half-raised sign out of the concrete.
  * Tied on, it unrolls down from the fence instead.
  */
-const HOLDS: ReturnType<typeof signHold>[] = new Array(SURF_COLS);
-
-function buildSign(
+function restSign(
   doc: BannerDoc,
   slot: ResolvedSlot,
   env: SurfaceEnv,
-  t: number,
-  out: Float32Array,
+  into: SurfaceRest,
 ): void {
   const { frame } = env;
   const row = slot.row ?? signRowFor(frame, slot.tier, signPlaceOf(doc.slot).row, slot.size.heightM);
   const tied = row < 0;
   const W = slot.size.widthM;
-  const amp = SIGN_WAVE_STILL_M + env.wind * SIGN_WAVE_WIND_M;
-  const e = Math.max(0.0001, Math.min(1, env.progress));
+  into.tied = tied;
+  into.widthM = W;
+  into.heightM = slot.size.heightM;
+  into.amp = SIGN_WAVE_STILL_M + env.wind * SIGN_WAVE_WIND_M;
+  into.e = Math.max(0.0001, Math.min(1, env.progress));
   const colU = COL_U;
   // The row it is held in is the line the columns are spaced along.
   columnsU({ ...slot, v1: slot.vBottom }, frame, colU);
-  const hands = Math.max(1, Math.round(W / (tied ? SIGN_TIE_SPACING_M : SIGN_HOLDER_SPACING_M)));
+  into.hands = Math.max(1, Math.round(W / (tied ? SIGN_TIE_SPACING_M : SIGN_HOLDER_SPACING_M)));
 
   // Where it is held, once per column: it is the same all the way down one.
-  for (let i = 0; i < SURF_COLS; i++) HOLDS[i] = signHold(frame, slot, row, colU[i]);
+  for (let i = 0; i < SURF_COLS; i++) into.holds[i] = signHold(frame, slot, row, colU[i]);
+}
 
+function waveSign(rest: SurfaceRest, t: number, out: Float32Array): void {
+  const { tied, hands, e, amp } = rest;
+  const W = rest.widthM;
+  const HOLDS = rest.holds;
   let k = 0;
   for (let j = 0; j < SURF_ROWS; j++) {
     const v = j / (SURF_ROWS - 1);
@@ -334,16 +414,19 @@ function buildSign(
  * outward normal by a strictly positive amount. There is no configuration in
  * which it can be inside the seating.
  */
-function buildStand(
+function restStand(
   doc: BannerDoc,
   slot: ResolvedSlot,
   env: SurfaceEnv,
-  t: number,
-  out: Float32Array,
+  into: SurfaceRest,
 ): void {
   const { frame } = env;
   const support = Math.max(0.06, crowdSupportM(env.crowdFill));
   const amp = WAVE_STILL_M + env.wind * WAVE_WIND_M;
+  into.amp = amp;
+  into.widthM = slot.size.widthM;
+  into.heightM = slot.size.heightM;
+  const R = into.vert;
   // The sheet runs from the top of its band down to `vBottom`, which the slot
   // worked out from the rake across this very run of blocks. Rows are evenly
   // spaced between the two, so the bottom edge is a straight line along a row
@@ -395,12 +478,36 @@ function buildStand(
       const hemFree = doc.weightBar ? 0.45 : 1;
       off += scallop(u, Math.max(2, Math.round(slot.size.widthM / 6)), SCALLOP_HANDS_M) * v * 0.6 * hemFree;
       off += scallop(v, 2, SCALLOP_HANDS_M) * 0.4;
-      off += wave(u * slot.size.widthM, v * slot.size.heightM, t, amp)
-        * freedom(u, v, false);
+      // The wave goes on in `waveStand`, last, exactly as it always did.
+      R[k] = p.x;
+      R[k + 1] = p.y;
+      R[k + 2] = p.z;
+      R[k + 3] = n.nx;
+      R[k + 4] = n.ny;
+      R[k + 5] = n.nz;
+      R[k + 6] = off;
+      R[k + 7] = freedom(u, v, false);
+      k += STAND_STRIDE;
+    }
+  }
+}
 
-      out[k++] = p.x + n.nx * off;
-      out[k++] = p.y + n.ny * off;
-      out[k++] = p.z + n.nz * off;
+function waveStand(rest: SurfaceRest, t: number, out: Float32Array): void {
+  const R = rest.vert;
+  const W = rest.widthM;
+  const H = rest.heightM;
+  const amp = rest.amp;
+  let k = 0;
+  let r = 0;
+  for (let j = 0; j < SURF_ROWS; j++) {
+    const v = j / (SURF_ROWS - 1);
+    for (let i = 0; i < SURF_COLS; i++) {
+      const u = i / (SURF_COLS - 1);
+      const off = R[r + 6] + wave(u * W, v * H, t, amp) * R[r + 7];
+      out[k++] = R[r] + R[r + 3] * off;
+      out[k++] = R[r + 1] + R[r + 4] * off;
+      out[k++] = R[r + 2] + R[r + 5] * off;
+      r += STAND_STRIDE;
     }
   }
 }
@@ -413,17 +520,20 @@ function buildStand(
  * anchored at the lip of a tier or at the roof steel, both of which are in
  * front of the terracing, so there is nothing behind it to hit.
  */
-function buildHanging(
+function restHanging(
   doc: BannerDoc,
   slot: ResolvedSlot,
   env: SurfaceEnv,
-  t: number,
-  out: Float32Array,
+  into: SurfaceRest,
 ): void {
   const { frame } = env;
   const amp = WAVE_STILL_M + env.wind * WAVE_WIND_M;
   const W = slot.size.widthM;
   const H = slot.size.heightM;
+  into.amp = amp;
+  into.widthM = W;
+  into.heightM = H;
+  const R = into.vert;
 
   // The anchor line: a straight chord at the lip, because a banner flown on a
   // cable hangs from a cable and not from the curve of the rail behind it.
@@ -470,11 +580,35 @@ function buildHanging(
       // freely as the sides do.
       off += scallop(u, Math.max(2, Math.round(W / 4)), SCALLOP_TIED_M)
         * (doc.weightBar ? 0.5 + v * 0.2 : 0.5 + v * 0.8);
-      off += wave(u * W, v * H, t, amp) * freedom(u, v, true);
+      // The wave goes on in `waveHanging`, last, exactly as it always did.
+      R[k] = mid.x + mid.rx * s;
+      R[k + 1] = mid.z + mid.rz * s;
+      R[k + 2] = y;
+      R[k + 3] = off;
+      R[k + 4] = freedom(u, v, true);
+      k += HANG_STRIDE;
+    }
+  }
+  into.ox = mid.ox;
+  into.oz = mid.oz;
+}
 
-      out[k++] = mid.x + mid.rx * s + mid.ox * off;
-      out[k++] = y;
-      out[k++] = mid.z + mid.rz * s + mid.oz * off;
+function waveHanging(rest: SurfaceRest, t: number, out: Float32Array): void {
+  const R = rest.vert;
+  const W = rest.widthM;
+  const H = rest.heightM;
+  const { amp, ox, oz } = rest;
+  let k = 0;
+  let r = 0;
+  for (let j = 0; j < SURF_ROWS; j++) {
+    const v = j / (SURF_ROWS - 1);
+    for (let i = 0; i < SURF_COLS; i++) {
+      const u = i / (SURF_COLS - 1);
+      const off = R[r + 3] + wave(u * W, v * H, t, amp) * R[r + 4];
+      out[k++] = R[r] + ox * off;
+      out[k++] = R[r + 2];
+      out[k++] = R[r + 1] + oz * off;
+      r += HANG_STRIDE;
     }
   }
 }
@@ -504,7 +638,12 @@ export function buildNormals(pos: Float32Array, out: Float32Array): void {
       let nx = uy * vz - uz * vy;
       let ny = uz * vx - ux * vz;
       let nz = ux * vy - uy * vx;
-      const len = Math.hypot(nx, ny, nz) || 1;
+      // sqrt of the sum, not Math.hypot: hypot is a call Chrome does not
+      // inline, so its three doubles were boxed on the heap for every vertex
+      // of every frame — 48 KB of garbage a banner a frame. The difference is
+      // in the last bit of a double, below what a float32 normal keeps
+      // (performance plan P1.20).
+      const len = Math.sqrt(nx * nx + ny * ny + nz * nz) || 1;
       nx /= len;
       ny /= len;
       nz /= len;

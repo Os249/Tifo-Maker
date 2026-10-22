@@ -96,9 +96,21 @@ let token: string | null = (() => {
   }
 })();
 
+/**
+ * Bumped on every change of token: sign in, sign out, an account switch
+ * without a sign-out, a password change (which hands back a fresh token).
+ * The page-memory caches below are keyed by it, so nothing fetched with one
+ * session is ever handed to another (performance plan P1.8). Keyed by the
+ * token itself changing, not by the sign-in event: a second sign-in over a
+ * live session is a new generation too.
+ */
+let tokenGen = 0;
+
 function setToken(t: string | null): void {
   const was = token !== null;
   token = t;
+  tokenGen++;
+  forgetPageMemos();
   try {
     if (t) localStorage.setItem(TOKEN_KEY, t);
     else localStorage.removeItem(TOKEN_KEY);
@@ -296,6 +308,7 @@ export async function beginLinkProvider(provider: string, returnTo: string, pass
 
 /** Detach one. The server refuses to leave an account with no way in. */
 export async function unlinkProvider(provider: string): Promise<string[]> {
+  forgetPageMemos(); // what /api/me says is about to change
   const data = (await expectOk(
     await fetch(`${API}/account/link/${provider}`, { method: 'DELETE', headers: authHeaders(false) }),
   )) as { providers?: string[] };
@@ -357,6 +370,7 @@ export async function register(
 
 /** Attach or change the signed-in user's email (resets verification). */
 export async function setAccountEmail(email: string, acceptedVersion?: string, password?: string): Promise<void> {
+  forgetPageMemos(); // what /api/me says is about to change
   // Putting an address on the account, a first one included, needs the
   // current password when the account has one.
   await expectOk(
@@ -389,6 +403,7 @@ export interface ResendResult {
   error?: string;
 }
 export async function resendVerification(): Promise<ResendResult> {
+  forgetPageMemos(); // what /api/me says is about to change
   // No body, so no JSON content-type: that pairing is what made every press of
   // this button a 400 that never reached the server's send code.
   const res = await fetch(`${API}/auth/verify/resend`, { method: 'POST', headers: authHeaders(false) });
@@ -406,6 +421,7 @@ export async function resendVerification(): Promise<ResendResult> {
  * say so before the budget runs out and a new code is needed.
  */
 export async function verifyEmailCode(code: string): Promise<{ ok: boolean; triesLeft?: number; error?: string }> {
+  forgetPageMemos(); // what /api/me says is about to change
   const res = await fetch(`${API}/auth/verify/code`, {
     method: 'POST',
     headers: authHeaders(true),
@@ -437,6 +453,9 @@ export async function changeUsername(username: string, adminPassword?: string): 
     throw Object.assign(new Error(tErr(body?.error ?? 'that name is taken')), { taken: true });
   }
   const data = (await expectOk(res)) as { username: string };
+  // Until a handle is chosen the server refuses designs (428); anything asked
+  // for before this was refused, and /api/me has changed.
+  forgetPageMemos();
   return data.username;
 }
 
@@ -574,6 +593,7 @@ export async function saveDesign(
   /** For a new design only: how the project began ('ai' earns a badge). */
   origin: 'ai' | null = null,
 ): Promise<SavedMeta> {
+  forgetDesign(id);
   const cellsGzB64 = toB64(await gzip(store.cells));
   const thumbnailPngB64 = makeThumbnailB64(map, store);
   const payload = id
@@ -671,6 +691,7 @@ export async function createDesignFromCells(d: {
 }
 
 export async function setProjectPinned(id: string, pinned: boolean): Promise<void> {
+  forgetDesign(id);
   await expectOk(await fetch(`${API}/designs/${id}`, {
     method: 'PATCH', headers: authHeaders(true), body: JSON.stringify({ pinned }),
   }));
@@ -678,6 +699,7 @@ export async function setProjectPinned(id: string, pinned: boolean): Promise<voi
 
 /** Into the Trash (permanent=false), or out of existence from there. */
 export async function deleteProject(id: string, permanent = false): Promise<void> {
+  forgetDesign(id);
   const res = await fetch(`${API}/designs/${id}${permanent ? '?permanent=1' : ''}`, {
     method: 'DELETE', headers: authHeaders(false),
   });
@@ -686,6 +708,7 @@ export async function deleteProject(id: string, permanent = false): Promise<void
 }
 
 export async function restoreProject(id: string): Promise<void> {
+  forgetDesign(id);
   await expectOk(await fetch(`${API}/designs/${id}/restore`, { method: 'POST', headers: authHeaders(false) }));
 }
 
@@ -718,6 +741,7 @@ export async function fetchDesignCells(id: string): Promise<{
  * title of the URL other people see, so it must not stay "Untitled tifo".
  */
 export async function setDesignTitle(id: string, title: string): Promise<SavedMeta> {
+  forgetDesign(id);
   const res = await fetch(`${API}/designs/${id}`, {
     method: 'PATCH',
     headers: authHeaders(true),
@@ -727,6 +751,7 @@ export async function setDesignTitle(id: string, title: string): Promise<SavedMe
 }
 
 export async function setPublic(id: string, isPublic: boolean): Promise<SavedMeta> {
+  forgetDesign(id);
   const res = await fetch(`${API}/designs/${id}`, {
     method: 'PATCH',
     headers: authHeaders(true),
@@ -735,28 +760,102 @@ export async function setPublic(id: string, isPublic: boolean): Promise<SavedMet
   return (await expectOk(res)) as SavedMeta;
 }
 
+// ---------- one fetch of a design per page (performance plan P1.8) ----------
+//
+// A page that opens a design asked for it twice in a row: once for its
+// stadium (to build the seat map), then again for its seats, and /api/me on
+// top to learn whose it was. From Saudi Arabia each of those is a 240-290 ms
+// round trip. Now one request answers both, and the server says `isOwner`.
+//
+// Page memory only. Nothing here is an HTTP cache, a service worker or a
+// prefetch hint: the answer is private JSON (no-store), it lives in this
+// page's memory for at most half a minute, keyed by the token generation,
+// and it is dropped on any token change, on any change this page makes to
+// the design, and once the seats have been loaded from it.
+
+/** What GET /api/designs/:id answers (the fields this client reads). */
+interface DesignJson {
+  title: string;
+  palette: string[];
+  cellsGzB64: string;
+  isPublic: boolean;
+  /** True only when this session's account owns the design (server-computed). */
+  isOwner?: boolean;
+  ownerId: string | null;
+  ownerName?: string | null;
+  templateId: string;
+  templateVersion: number;
+  createdAt?: string;
+  viewCount?: number;
+}
+
+const DESIGN_MEMO_MS = 30_000;
+const designMemo = new Map<string, { gen: number; at: number; p: Promise<DesignJson> }>();
+let meMemo: { gen: number; p: Promise<Me | null> } | null = null;
+
+/** Drop every page-memory answer: the session, or what it may see, changed. */
+function forgetPageMemos(): void {
+  designMemo.clear();
+  meMemo = null;
+}
+
+/** This page changed the design: the next read goes to the server. */
+function forgetDesign(id: string | null | undefined): void {
+  if (id) designMemo.delete(id);
+}
+
+/**
+ * The design's JSON, fetched once for the stadium lookup and the load that
+ * follows it. `take` hands the answer over and forgets it, which is what
+ * loading the seats does: a later look is a fresh request.
+ */
+function designJson(id: string, take = false): Promise<DesignJson> {
+  const hit = designMemo.get(id);
+  if (hit && hit.gen === tokenGen && Date.now() - hit.at < DESIGN_MEMO_MS) {
+    if (take) designMemo.delete(id);
+    return hit.p;
+  }
+  const p = fetch(`${API}/designs/${id}`, { headers: authHeaders(false) }).then(expectOk) as Promise<DesignJson>;
+  if (!take) {
+    const entry = { gen: tokenGen, at: Date.now(), p };
+    designMemo.set(id, entry);
+    // A refusal is not remembered: the next caller asks again.
+    p.catch(() => {
+      if (designMemo.get(id) === entry) designMemo.delete(id);
+    });
+  } else if (hit) {
+    designMemo.delete(id);
+  }
+  return p;
+}
+
+/**
+ * Start fetching a design now, for the stadium lookup and the load that will
+ * follow. An ordinary request from this page, started sooner; not a browser
+ * prefetch hint, and nothing is kept beyond the page memo above.
+ */
+export function fetchDesignEarly(id: string): void {
+  void designJson(id).catch(() => {});
+}
+
+/** Is it this session's own design? The server says so; an older server is asked the old way. */
+async function ownsIt(data: DesignJson): Promise<boolean> {
+  if (typeof data.isOwner === 'boolean') return data.isOwner;
+  if (!token) return false;
+  const me = await fetchMeOnce();
+  return !!me && !!data.ownerId && me.id === data.ownerId;
+}
+
 /** Fetch a design (must be public or yours) and load it into the store. */
 export async function loadDesign(
   store: DesignStore,
   id: string,
 ): Promise<{ title: string; isPublic: boolean; ownerIsMe: boolean; templateId: string; templateVersion: number }> {
-  const data = (await expectOk(await fetch(`${API}/designs/${id}`, { headers: authHeaders(false) }))) as {
-    title: string;
-    palette: string[];
-    cellsGzB64: string;
-    isPublic: boolean;
-    ownerId: string | null;
-    templateId: string;
-    templateVersion: number;
-  };
+  const data = await designJson(id, true);
   const cells = await gunzip(fromB64(data.cellsGzB64));
   store.setPalette(data.palette.slice(0, 256));
   store.loadCells(cells);
-  let ownerIsMe = false;
-  if (token) {
-    const me = (await expectOk(await fetch(`${API}/me`, { headers: authHeaders(false) }))) as { id: string };
-    ownerIsMe = me.id === data.ownerId;
-  }
+  const ownerIsMe = await ownsIt(data);
   return {
     title: data.title,
     isPublic: data.isPublic,
@@ -798,10 +897,8 @@ export async function fetchScene(designId: string): Promise<unknown | null> {
 
 /** Fetch a design's template id/version without loading cells (for share-link boot). */
 export async function fetchDesignTemplate(id: string): Promise<{ templateId: string; templateVersion: number }> {
-  const data = (await expectOk(await fetch(`${API}/designs/${id}`, { headers: authHeaders(false) }))) as {
-    templateId: string;
-    templateVersion: number;
-  };
+  // Kept for the load that follows (see designJson): the same answer serves both.
+  const data = await designJson(id);
   return { templateId: data.templateId, templateVersion: data.templateVersion };
 }
 
@@ -836,26 +933,11 @@ export interface ShareStats {
 
 /** Load a design into the store AND return its public-page metadata. */
 export async function loadPublicDesign(store: DesignStore, id: string): Promise<PublicDesignMeta> {
-  const data = (await expectOk(await fetch(`${API}/designs/${id}`, { headers: authHeaders(false) }))) as {
-    title: string;
-    palette: string[];
-    cellsGzB64: string;
-    isPublic: boolean;
-    ownerId: string | null;
-    ownerName: string | null;
-    templateId: string;
-    templateVersion: number;
-    createdAt: string;
-    viewCount?: number;
-  };
+  const data = await designJson(id, true);
   const cells = await gunzip(fromB64(data.cellsGzB64));
   store.setPalette(data.palette.slice(0, 256));
   store.loadCells(cells);
-  let ownerIsMe = false;
-  if (token) {
-    const me = (await expectOk(await fetch(`${API}/me`, { headers: authHeaders(false) }))) as { id: string };
-    ownerIsMe = me.id === data.ownerId;
-  }
+  const ownerIsMe = await ownsIt(data);
   return {
     title: data.title,
     ownerName: data.ownerName ?? null,
@@ -863,7 +945,7 @@ export async function loadPublicDesign(store: DesignStore, id: string): Promise<
     isPublic: data.isPublic,
     templateId: data.templateId,
     templateVersion: data.templateVersion,
-    createdAt: data.createdAt,
+    createdAt: data.createdAt ?? '',
     viewCount: data.viewCount ?? 0,
   };
 }
@@ -1030,6 +1112,11 @@ export interface GalleryItem {
   myVote: number;
   /** Public view count. Absent on an older server; treat it as 0, not unknown. */
   viewCount?: number;
+  /**
+   * Comments on the card, counted as the thread would show them (performance
+   * plan P1.11). Absent on an older server: then the card asks for its thread.
+   */
+  commentCount?: number;
   updatedAt: string;
   isTemplate: boolean;
   tags: string[];
@@ -1293,7 +1380,7 @@ export interface Me {
   needsUsername?: boolean;
 }
 
-/** The signed-in user's id + name, or null. */
+/** The signed-in user's id + name, or null. Always asks the server. */
 export async function fetchMe(): Promise<Me | null> {
   if (!token) return null;
   try {
@@ -1301,6 +1388,24 @@ export async function fetchMe(): Promise<Me | null> {
   } catch {
     return null;
   }
+}
+
+/**
+ * The same, asked once per page and session: for the checks a page makes as
+ * it opens (the editor asked four times). Keyed by the token generation, so a
+ * sign-in, sign-out or account switch asks again; a failure is not kept.
+ * Anything that acts on fresh account state (verified yet? which name?)
+ * keeps calling fetchMe().
+ */
+export function fetchMeOnce(): Promise<Me | null> {
+  if (!token) return Promise.resolve(null);
+  if (meMemo && meMemo.gen === tokenGen) return meMemo.p;
+  const entry = { gen: tokenGen, p: fetchMe() };
+  meMemo = entry;
+  void entry.p.then((me) => {
+    if (!me && meMemo === entry) meMemo = null;
+  });
+  return entry.p;
 }
 
 // ---- moderation / trust review (admin only) ----
@@ -1331,6 +1436,7 @@ export async function dismissReport(id: string): Promise<void> {
   await expectOk(await fetch(`${API}/admin/reports/${id}/dismiss`, { method: 'POST', headers: authHeaders(false) }));
 }
 export async function takedownDesign(id: string): Promise<void> {
+  forgetDesign(id);
   await expectOk(await fetch(`${API}/admin/designs/${id}/takedown`, { method: 'POST', headers: authHeaders(false) }));
 }
 export async function listUnverifiedPhotos(): Promise<PhotoReviewItem[]> {
@@ -1414,6 +1520,7 @@ export interface NotificationItem {
 
 /** Set a design's creator explanation + remix permission (owner only). */
 export async function setPublishMeta(id: string, description: string | null, allowRemix: boolean): Promise<void> {
+  forgetDesign(id);
   const res = await fetch(`${API}/designs/${id}/publish-meta`, {
     method: 'PUT',
     headers: authHeaders(true),

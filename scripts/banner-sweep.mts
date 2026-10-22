@@ -19,6 +19,9 @@
  *   FINITE     nothing is NaN
  *   STILL      frame-to-frame movement is under a bound
  *   SAME       two evaluations are bit-identical
+ *   REST       the rest shape worked out once and waved frame after frame
+ *              (what the renderer does, performance plan P1.20) gives the
+ *              same bits as a fresh build at every one of those times
  *
  * It needs no browser and runs in seconds.
  */
@@ -31,7 +34,7 @@ import {
 } from '../src/render/simulator/bannerSlot';
 import { rowV } from '../src/render/simulator/standFrame';
 import {
-  buildSurface, columnsU, maxOffsetM, SURF_VERTS, SURF_COLS, SURF_ROWS,
+  buildSurface, columnsU, maxOffsetM, newSurfaceRest, restSurface, waveSurface, SURF_VERTS, SURF_COLS, SURF_ROWS,
 } from '../src/render/simulator/bannerSurface';
 import { newBanner, BLOCK_KINDS, type BannerDoc, type StandIndex } from '../src/core/banner';
 
@@ -80,6 +83,24 @@ let checked = 0;
 
 const a = new Float32Array(SURF_VERTS * 3);
 const b = new Float32Array(SURF_VERTS * 3);
+const c = new Float32Array(SURF_VERTS * 3);
+const REST = newSurfaceRest();
+
+/**
+ * REST: one rest shape, waved at three times and then at the first again,
+ * against a fresh build at each. A wave that wrote into the rest, or a rest
+ * that read the clock, would show here.
+ */
+function checkRest(where: string, doc: BannerDoc, res: ResolvedSlot, env: Parameters<typeof buildSurface>[2]): void {
+  restSurface(doc, res, env, REST);
+  for (const t of [3.0, 3.0 + 1 / 60, 11.7, 3.0]) {
+    waveSurface(REST, t, c);
+    buildSurface(doc, res, env, t, b);
+    for (let k = 0; k < c.length; k++) {
+      if (c[k] !== b[k]) { fail(where, 'REST', `t=${t} index ${k}: ${c[k]} vs ${b[k]}`); return; }
+    }
+  }
+}
 
 /**
  * How far a point is inside the stand, in metres.
@@ -229,6 +250,7 @@ for (const gid of GROUNDS) {
           for (let k = 0; k < a.length; k++) {
             if (a[k] !== b[k]) { fail(where, 'SAME', `index ${k}: ${a[k]} vs ${b[k]}`); break; }
           }
+          checkRest(where, doc, res, env);
 
           // EXTENT — the mesh is the size the slot promised.
           //
@@ -592,6 +614,7 @@ function sweepSigns(gid: string, map: ReturnType<typeof generateSeatMap>): numbe
 
               buildSurface(doc, res, env, 3.0, b);
               for (let k = 0; k < a.length; k++) if (a[k] !== b[k]) { fail(where, 'SAME', `index ${k}`); break; }
+              checkRest(where, doc, res, env);
               buildSurface(doc, res, env, 3.0 + 1 / 60, b);
               let move = 0;
               for (let k = 0; k < a.length; k += 3) move = Math.max(move, Math.hypot(a[k] - b[k], a[k + 1] - b[k + 1], a[k + 2] - b[k + 2]));

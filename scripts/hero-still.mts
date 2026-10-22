@@ -1,5 +1,7 @@
 /**
- * Render public/hero-stadium.webp: the picture phones see in the landing hero.
+ * Render public/hero-stadium.webp (and public/hero-stadium-640.webp, the same
+ * picture for smaller screens): the picture every visitor first sees in the
+ * landing hero, written into landing.html with a srcset.
  *   npx tsx scripts/hero-still.mts
  *
  * It is the live hero (src/heroStadium.ts): the first club in
@@ -16,11 +18,13 @@ import { createServer, type ViteDevServer } from 'vite';
 import { chromium } from 'playwright';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const OUT = resolve(ROOT, 'public/hero-stadium.webp');
-// Phones only: the hero box is at most ~360 CSS px wide there, so 960 covers
-// a 2.7× screen, and every step up costs more bytes than it shows.
-const W = 960;
-const H = 600; // the hero frame is 16:10
+// The hero box is at most ~360 CSS px wide on a phone, so 960 covers a 2.7×
+// screen, and every step up costs more bytes than it shows. On a desktop it is
+// at most ~574 px, so a 1× desktop takes the 640 copy (performance plan P1.14).
+const OUTPUTS = [
+  { out: resolve(ROOT, 'public/hero-stadium.webp'), w: 960, h: 600 }, // the hero frame is 16:10
+  { out: resolve(ROOT, 'public/hero-stadium-640.webp'), w: 640, h: 400 },
+];
 
 const vite: ViteDevServer = await createServer({ root: ROOT, server: { port: 5241 }, logLevel: 'error' });
 await vite.listen(5241);
@@ -37,29 +41,40 @@ try {
   await page.waitForSelector('#hero-3d[data-stadium="ready"]', { timeout: 240_000 });
   // Let it turn a little: the first frame faces the pitch square-on.
   await page.waitForTimeout(6000);
-  const dataUrl = await page.evaluate(
-    ({ w, h }) => {
-      const src = document.querySelector('#hero-3d canvas') as HTMLCanvasElement;
-      const c = document.createElement('canvas');
-      c.width = w;
-      c.height = h;
-      const ctx = c.getContext('2d')!;
-      // Smoothed on the way down, which keeps the seat rows from aliasing as badly.
-      ctx.imageSmoothingEnabled = true;
-      ctx.imageSmoothingQuality = 'high';
-      // Cover-fit the renderer's canvas into the 16:10 box.
-      const s = Math.max(w / src.width, h / src.height);
-      const cw = w / s;
-      const ch = h / s;
-      ctx.drawImage(src, (src.width - cw) / 2, (src.height - ch) / 2, cw, ch, 0, 0, w, h);
-      return c.toDataURL('image/webp', 0.74);
-    },
-    { w: W, h: H },
-  );
-  if (!dataUrl.startsWith('data:image/webp')) throw new Error('this browser cannot encode WebP');
-  const bytes = Buffer.from(dataUrl.split(',')[1], 'base64');
-  writeFileSync(OUT, bytes);
-  console.log(`hero still: ${OUT} (${(bytes.length / 1024).toFixed(1)} KB, ${W}×${H})`);
+  // Both sizes from the same frame, so the srcset never mixes two angles.
+  await page.evaluate(() => {
+    const src = document.querySelector('#hero-3d canvas') as HTMLCanvasElement;
+    const copy = document.createElement('canvas');
+    copy.width = src.width;
+    copy.height = src.height;
+    copy.getContext('2d')!.drawImage(src, 0, 0);
+    (window as unknown as { __heroFrame: HTMLCanvasElement }).__heroFrame = copy;
+  });
+  for (const { out, w, h } of OUTPUTS) {
+    const dataUrl = await page.evaluate(
+      ({ w, h }) => {
+        const src = (window as unknown as { __heroFrame: HTMLCanvasElement }).__heroFrame;
+        const c = document.createElement('canvas');
+        c.width = w;
+        c.height = h;
+        const ctx = c.getContext('2d')!;
+        // Smoothed on the way down, which keeps the seat rows from aliasing as badly.
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+        // Cover-fit the renderer's canvas into the 16:10 box.
+        const s = Math.max(w / src.width, h / src.height);
+        const cw = w / s;
+        const ch = h / s;
+        ctx.drawImage(src, (src.width - cw) / 2, (src.height - ch) / 2, cw, ch, 0, 0, w, h);
+        return c.toDataURL('image/webp', 0.74);
+      },
+      { w, h },
+    );
+    if (!dataUrl.startsWith('data:image/webp')) throw new Error('this browser cannot encode WebP');
+    const bytes = Buffer.from(dataUrl.split(',')[1], 'base64');
+    writeFileSync(out, bytes);
+    console.log(`hero still: ${out} (${(bytes.length / 1024).toFixed(1)} KB, ${w}×${h})`);
+  }
 } finally {
   await browser.close();
   await vite.close();

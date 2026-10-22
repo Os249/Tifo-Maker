@@ -5,8 +5,8 @@ import { bannerToCanvas, onBannerImageReady } from '../bannerRender';
 import type { StandFrame } from './standFrame';
 import { resolveSlot, type ResolvedSlot } from './bannerSlot';
 import {
-  buildSurface, buildNormals, surfaceIndices, surfaceUVs, columnsU,
-  SURF_COLS, SURF_ROWS, SURF_VERTS, type SurfaceEnv,
+  restSurface, waveSurface, newSurfaceRest, buildNormals, surfaceIndices, surfaceUVs, columnsU,
+  SURF_COLS, SURF_ROWS, SURF_VERTS, type SurfaceRest,
 } from './bannerSurface';
 
 /**
@@ -29,8 +29,16 @@ import {
 export interface BannerRigLayer {
   readonly object: THREE.Group;
   refresh(): void;
-  /** Advance the reveal clock. `dt` is real seconds since the last frame. */
-  update(elapsed: number, dt: number): void;
+  /**
+   * Advance the clock by `dt` real seconds and redraw the fabric.
+   *
+   * Returns true while a reveal is playing: that is the only motion here that
+   * has to finish by itself. The wave does not need frames of its own; a view
+   * that draws on demand can stop calling this when its camera is still, and
+   * the sheet carries on from the same phase when it moves again
+   * (performance plan P1.23).
+   */
+  update(elapsed: number, dt: number): boolean;
   play(id?: string): void;
   setProgress(id: string, p: number): void;
   /** Where a banner is in its reveal, for a scrub bar that follows it. */
@@ -93,6 +101,21 @@ interface Rig {
   mat: THREE.MeshStandardMaterial;
   pos: Float32Array;
   nrm: Float32Array;
+  /**
+   * The shape without the wave, and what it was worked out from (performance
+   * plan P1.20). Recomputed only when one of these changes; a still banner in
+   * the wind costs the wave and nothing else.
+   */
+  rest: SurfaceRest;
+  restSlot: ResolvedSlot | null;
+  restFrame: StandFrame | null;
+  restCrowd: number;
+  restProgress: number;
+  restWind: number;
+  restKind: BannerDoc['kind'] | null;
+  restBar: boolean;
+  /** Where the ropes are tied, worked out with the rest. */
+  ties: [RigPoint, RigPoint] | null;
   texKey: string;
   ropes: THREE.Mesh[];
   bar: THREE.Mesh | null;
@@ -197,18 +220,36 @@ export function buildBannerRigs(
     return tex;
   }
 
-  function envOf(rig: Rig): SurfaceEnv {
-    return {
-      frame: rig.frame,
-      crowdFill: crowdFill(),
-      wind: rig.doc.wind,
-      // EASED, not linear. The easing curves were written and gate-tested and
-      // then never reached the renderer, so every reveal ran at a constant
-      // rate: an unroll that should start slow and run away as the roll pays
-      // out crept down the stand instead, and a banner lowered on ropes
-      // arrived without the settle that makes it read as having weight.
-      progress: revealEase(rig.doc.reveal, rig.prog),
-    };
+  /**
+   * Bring the rig's rest shape up to date, if anything it depends on moved.
+   *
+   * The slot is re-resolved on every store change (refresh), so a new slot
+   * object means the document changed; the crowd, the wind and the reveal are
+   * compared as numbers because they can change without one.
+   */
+  function ensureRest(rig: Rig): void {
+    const crowd = crowdFill();
+    // EASED, not linear. The easing curves were written and gate-tested and
+    // then never reached the renderer, so every reveal ran at a constant
+    // rate: an unroll that should start slow and run away as the roll pays
+    // out crept down the stand instead, and a banner lowered on ropes
+    // arrived without the settle that makes it read as having weight.
+    const progress = revealEase(rig.doc.reveal, rig.prog);
+    const doc = rig.doc;
+    if (
+      rig.restSlot === rig.slot && rig.restFrame === rig.frame && rig.restCrowd === crowd
+      && rig.restProgress === progress && rig.restWind === doc.wind && rig.restKind === doc.kind
+      && rig.restBar === doc.weightBar
+    ) return;
+    restSurface(doc, rig.slot, { frame: rig.frame, crowdFill: crowd, wind: doc.wind, progress }, rig.rest);
+    rig.restSlot = rig.slot;
+    rig.restFrame = rig.frame;
+    rig.restCrowd = crowd;
+    rig.restProgress = progress;
+    rig.restWind = doc.wind;
+    rig.restKind = doc.kind;
+    rig.restBar = doc.weightBar;
+    rig.ties = null;
   }
 
   function makeRig(doc: BannerDoc): Rig {
@@ -310,6 +351,8 @@ export function buildBannerRigs(
     const rig: Rig = {
       doc, standOf: doc.slot.stand, standsOf: doc.slot.stands, kindOf: doc.kind, barOf: doc.weightBar,
       slot, frame, group, mesh, geo, mat, pos, nrm,
+      rest: newSurfaceRest(), restSlot: null, restFrame: null, restCrowd: NaN, restProgress: NaN,
+      restWind: NaN, restKind: null, restBar: false, ties: null,
       texKey: textureKey(doc), ropes, bar, outline,
       prog: 1, playing: false, t0: 0, durationS: revealSeconds(doc, slot.size),
     };
@@ -320,7 +363,8 @@ export function buildBannerRigs(
   /** One pass: vertices, normals, hardware, outline. */
   function writeGeometry(rig: Rig): void {
     if (!rig.frame.ok) return;
-    buildSurface(rig.doc, rig.slot, envOf(rig), elapsed, rig.pos);
+    ensureRest(rig);
+    waveSurface(rig.rest, elapsed, rig.pos);
     buildNormals(rig.pos, rig.nrm);
     (rig.geo.getAttribute('position') as THREE.BufferAttribute).needsUpdate = true;
     (rig.geo.getAttribute('normal') as THREE.BufferAttribute).needsUpdate = true;
@@ -349,19 +393,25 @@ export function buildBannerRigs(
     m.quaternion.setFromUnitVectors(UP, vC.copy(b).sub(a).normalize());
   }
 
+  /** Where a rope from the sheet's top corner `alongU` is tied. */
+  function tieFor(rig: Rig, alongU: number): RigPoint {
+    if (rigPointFor) return rigPointFor(rig.slot.stand, rig.doc.slot.stands, alongU);
+    const p = rig.frame.pointAt(alongU, 1);
+    return { x: p.x, y: p.y + 1.2, z: p.z, onRoof: false };
+  }
+
   function updateHardware(rig: Rig): void {
     if (rig.ropes.length) {
       // From the sheet's top corners BACK AND UP to what they are tied to.
-      const spanU = rig.slot.u1 - rig.slot.u0;
+      // The tie points only move with the rest shape, so they are asked for
+      // once with it rather than every frame.
+      if (!rig.ties) {
+        const spanU = rig.slot.u1 - rig.slot.u0;
+        rig.ties = [tieFor(rig, rig.slot.u0 + 0.04 * spanU), tieFor(rig, rig.slot.u0 + 0.96 * spanU)];
+      }
       for (let i = 0; i < 2; i++) {
         vert(rig, i === 0 ? 0 : SURF_COLS - 1, 0, vA);
-        const alongU = rig.slot.u0 + (i === 0 ? 0.04 : 0.96) * spanU;
-        const tie = rigPointFor
-          ? rigPointFor(rig.slot.stand, rig.doc.slot.stands, alongU)
-          : (() => {
-            const p = rig.frame.pointAt(alongU, 1);
-            return { x: p.x, y: p.y + 1.2, z: p.z, onRoof: false };
-          })();
+        const tie = rig.ties[i];
         vB.set(tie.x, tie.y, tie.z);
         aimRope(rig.ropes[i], vA, vB);
       }
@@ -372,10 +422,7 @@ export function buildBannerRigs(
       const len = vA.distanceTo(vB);
       rig.bar.position.copy(vA).add(vB).multiplyScalar(0.5);
       rig.bar.scale.set(1, Math.max(0.1, len), 1);
-      rig.bar.quaternion.setFromUnitVectors(
-        new THREE.Vector3(0, 1, 0),
-        vB.clone().sub(vA).normalize(),
-      );
+      rig.bar.quaternion.setFromUnitVectors(UP, vC.copy(vB).sub(vA).normalize());
       // A bar in a hem that is still rolled up has nothing to be straight
       // along, so it only appears once the sheet is most of the way out.
       rig.bar.visible = rig.prog > 0.35;
@@ -498,7 +545,9 @@ export function buildBannerRigs(
   });
   refresh();
 
-  function advance(): void {
+  /** Move every reveal on and redraw; true while one is still playing. */
+  function advance(): boolean {
+    let playing = false;
     for (const r of rigs.values()) {
       if (r.playing) {
         const raw = (elapsed - r.t0) / Math.max(0.2, r.durationS);
@@ -506,8 +555,10 @@ export function buildBannerRigs(
         if (raw >= 1) r.playing = false;
       }
       if (r.doc.visible === false) continue;
+      if (r.playing) playing = true;
       writeGeometry(r);
     }
+    return playing;
   }
 
   return {
@@ -515,7 +566,7 @@ export function buildBannerRigs(
     refresh,
     update(_elapsed, dt) {
       elapsed += dt;
-      advance();
+      return advance();
     },
     play(id) {
       for (const [rid, r] of rigs) {

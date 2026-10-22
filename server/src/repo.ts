@@ -59,6 +59,28 @@ export interface GalleryItem extends DesignMeta {
   /** If remixed, the original creator's handle/name for attribution. */
   remixedFromName?: string | null;
   remixedFromTitle?: string | null;
+  /**
+   * How many comments the design's thread holds: exactly the number
+   * `GET /api/designs/:id/comments` returns, so the feed can show it without
+   * fetching every thread (performance plan P1.11). Only ever on a public
+   * design's card, whose thread is public too.
+   */
+  commentCount: number;
+}
+
+/** Which public designs a facet count is over: the four scopes the feed's tabs ask for. */
+export interface FacetScope {
+  excludeTemplates?: boolean;
+  templatesOnly?: boolean;
+}
+
+/** What the filter chips can offer for one scope, counted over public designs only. */
+export interface FacetBase {
+  total: number;
+  /** Colour family -> how many public designs carry it. */
+  colors: Record<string, number>;
+  /** Club id -> how many public designs are that club's. */
+  clubs: Record<string, number>;
 }
 
 export type GallerySort = 'recent' | 'likes';
@@ -177,6 +199,25 @@ export interface DesignRepository {
   /** Delete all of an owner's designs (used by account deletion). */
   deleteByOwner(ownerId: string): Promise<void>;
   listPublic(query: GalleryQuery): Promise<GalleryItem[]>;
+  /**
+   * How many public designs a feed query would return, without fetching them:
+   * the "N tifos" on the filter panel's confirm button. Same rules as
+   * listPublic (public only, the same filters), no paging.
+   */
+  countPublic(query: Omit<GalleryQuery, 'limit' | 'offset' | 'viewerId' | 'sort'>): Promise<number>;
+  /**
+   * The colour and club counts for one scope of the feed, counted from the
+   * stored facet columns (performance plan P1.12). Public designs only.
+   */
+  facetBase(scope: FacetScope): Promise<FacetBase>;
+  /**
+   * One person's PUBLIC designs, newest first, at most `limit`: a profile's
+   * "created" list. Never listByOwner, which is the owner's own list and
+   * includes their private designs.
+   */
+  listPublicByOwner(ownerId: string, opts: { viewerId?: string | null; limit: number }): Promise<GalleryItem[]>;
+  /** Ids and last edits of public designs, newest first, for the sitemap. */
+  listPublicIds(limit: number): Promise<{ id: string; updatedAt: string }[]>;
   /**
    * One public design as a feed card, or null if it is private or gone.
    *

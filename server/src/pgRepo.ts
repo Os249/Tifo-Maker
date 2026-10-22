@@ -9,6 +9,8 @@ import type {
   DesignRecord,
   DesignRepository,
   DiffBytes,
+  FacetBase,
+  FacetScope,
   GalleryItem,
   GalleryQuery,
   Lead,
@@ -72,6 +74,17 @@ function rowToMeta(r: Record<string, unknown>): DesignMeta {
  * META_COLS, so `rowToMeta` read `undefined` and every card in the feed showed
  * zero views while /t/:id showed the real number.
  */
+/**
+ * A card's comment count (performance plan P1.11), counted the way
+ * PgSocialRepository.listComments returns the thread: the design's comments
+ * joined to their authors. /community used to fetch all 60 threads of a page
+ * just to show their lengths. Only ever selected for public designs (every
+ * query using it has `d.is_public` in its WHERE), whose threads are public.
+ * One index scan per card on comments_design_idx.
+ */
+const COMMENT_COUNT =
+  `(SELECT count(*)::int FROM comments c JOIN users cu ON cu.id = c.author_id WHERE c.design_id = d.id) AS comment_count`;
+
 const GALLERY_COLS =
   `d.id, d.title, d.title_ar, d.template_id, d.template_version, d.palette, d.revision_count,
    d.is_public, d.owner_id, d.created_at, d.updated_at, d.like_score, d.is_template,
@@ -81,7 +94,8 @@ const GALLERY_COLS =
    (d.thumbnail IS NOT NULL) AS has_thumbnail,
    coalesce((SELECT array_agg(t.slug ORDER BY t.slug) FROM design_tags dt
              JOIN tags t ON t.id = dt.tag_id WHERE dt.design_id = d.id), '{}') AS tags,
-   EXISTS (SELECT 1 FROM design_photos dp WHERE dp.design_id = d.id) AS has_photo`;
+   EXISTS (SELECT 1 FROM design_photos dp WHERE dp.design_id = d.id) AS has_photo,
+   ${COMMENT_COUNT}`;
 
 const GALLERY_JOINS =
   `FROM designs d
@@ -108,6 +122,7 @@ function rowToGalleryItem(r: Record<string, unknown>): GalleryItem {
     hasPhoto: Boolean(r.has_photo),
     remixedFromName: (r.remixed_from_name as string) ?? null,
     remixedFromTitle: (r.remixed_from_title as string) ?? null,
+    commentCount: Number(r.comment_count ?? 0),
   };
 }
 
@@ -173,7 +188,11 @@ const DESIGN_SQL = `outcome = 'model' AND mode IN ('std', 'super')`;
 
 /** Postgres AI history. One row per request — see the ai_events comment in schema.sql. */
 export class PgAiEventsRepository implements AiEventsRepository {
-  constructor(private readonly pool: pg.Pool) {}
+  /**
+   * `maintenance` is the small pool for slow, non-request work (server/src/db.ts,
+   * performance plan P1.26); it defaults to the one pool where only one exists.
+   */
+  constructor(private readonly pool: pg.Pool, private readonly maintenance: pg.Pool = pool) {}
 
   async record(e: AiEventInput): Promise<void> {
     const int = (v: number | null | undefined, max: number): number | null =>
@@ -195,12 +214,12 @@ export class PgAiEventsRepository implements AiEventsRepository {
     // `all` only, so the "premium generations" figures mean what they always did.
     const outcomeOf = `CASE WHEN outcome = 'model' AND mode NOT IN ('std', 'super') THEN 'other' ELSE outcome END`;
     const [tot, win, perDay, top, cap, modes, metered, first, fails, recent, groupRows, measuredFirst] = await Promise.all([
-      this.pool.query(`SELECT ${outcomeOf} AS outcome, count(*)::int AS n FROM ai_events GROUP BY 1`),
-      this.pool.query(
+      this.maintenance.query(`SELECT ${outcomeOf} AS outcome, count(*)::int AS n FROM ai_events GROUP BY 1`),
+      this.maintenance.query(
         `SELECT ${outcomeOf} AS outcome, count(*)::int AS n FROM ai_events WHERE at > now() - $1::interval GROUP BY 1`,
         [since],
       ),
-      this.pool.query(
+      this.maintenance.query(
         `SELECT to_char(at AT TIME ZONE 'utc','YYYY-MM-DD') AS day,
                 count(*) FILTER (WHERE ${DESIGN_SQL})::int   AS model,
                 count(*) FILTER (WHERE outcome = 'quick')::int   AS quick,
@@ -208,7 +227,7 @@ export class PgAiEventsRepository implements AiEventsRepository {
          FROM ai_events WHERE at > now() - $1::interval GROUP BY day ORDER BY day`,
         [since],
       ),
-      this.pool.query(
+      this.maintenance.query(
         `SELECT coalesce(u.username, 'admin / unlocked') AS username,
                 count(*) FILTER (WHERE e.outcome = 'model' AND e.mode IN ('std', 'super'))::int AS model,
                 count(*) FILTER (WHERE e.outcome = 'quick')::int AS quick,
@@ -220,25 +239,25 @@ export class PgAiEventsRepository implements AiEventsRepository {
         [since],
       ),
       // Not windowed: "has anyone ever hit the cap" is the question.
-      this.pool.query(
+      this.maintenance.query(
         `SELECT coalesce(u.username, 'admin / unlocked') AS username,
                 count(*)::int AS times, max(e.at) AS last
          FROM ai_events e LEFT JOIN users u ON u.id = e.user_id
          WHERE e.outcome = 'quota' GROUP BY 1 ORDER BY times DESC LIMIT 20`,
       ),
-      this.pool.query(
+      this.maintenance.query(
         `SELECT mode, count(*)::int AS n FROM ai_events WHERE at > now() - $1::interval GROUP BY mode`,
         [since],
       ),
-      this.pool.query('SELECT count(*)::int AS n FROM ai_usage WHERE used > 0'),
-      this.pool.query('SELECT min(at) AS first FROM ai_events'),
-      this.pool.query(
+      this.maintenance.query('SELECT count(*)::int AS n FROM ai_usage WHERE used > 0'),
+      this.maintenance.query('SELECT min(at) AS first FROM ai_events'),
+      this.maintenance.query(
         `SELECT reason, count(*)::int AS n, max(at) AS last FROM ai_events
          WHERE reason IS NOT NULL AND at > now() - $1::interval
          GROUP BY reason ORDER BY n DESC, last DESC`,
         [since],
       ),
-      this.pool.query(
+      this.maintenance.query(
         `SELECT e.at, e.user_id, u.username, e.via, e.mode, e.outcome, e.reason, e.detail
          FROM ai_events e LEFT JOIN users u ON u.id = e.user_id
          WHERE e.reason IS NOT NULL AND e.at > now() - $1::interval
@@ -247,7 +266,7 @@ export class PgAiEventsRepository implements AiEventsRepository {
       ),
       // Day × mode × outcome × model: the shape the cost panel is built from
       // (aiStats.ts), so memory and Postgres cannot disagree.
-      this.pool.query(
+      this.maintenance.query(
         `SELECT to_char(at AT TIME ZONE 'utc','YYYY-MM-DD') AS day, mode, outcome, model,
                 count(*)::int AS n,
                 count(*) FILTER (WHERE reason = ANY($2::text[]))::int AS limited,
@@ -262,7 +281,7 @@ export class PgAiEventsRepository implements AiEventsRepository {
          FROM ai_events WHERE at > now() - $1::interval GROUP BY 1, 2, 3, 4`,
         [since, [...LIMIT_REASONS]],
       ),
-      this.pool.query('SELECT min(at) AS first FROM ai_events WHERE calls IS NOT NULL'),
+      this.maintenance.query('SELECT min(at) AS first FROM ai_events WHERE calls IS NOT NULL'),
     ]);
 
     const groups: AiGroup[] = groupRows.rows.map((r) => ({
@@ -317,7 +336,11 @@ export class PgAiEventsRepository implements AiEventsRepository {
 
 /** Postgres design repository. Diffs and snapshots append in one transaction. */
 export class PgDesignRepository implements DesignRepository {
-  constructor(private readonly pool: pg.Pool) {}
+  /**
+   * `maintenance` is the small pool for slow, non-request work (server/src/db.ts,
+   * performance plan P1.26); it defaults to the one pool where only one exists.
+   */
+  constructor(private readonly pool: pg.Pool, private readonly maintenance: pg.Pool = pool) {}
 
   async create(d: NewDesign): Promise<DesignMeta> {
     const res = await this.pool.query(
@@ -344,7 +367,7 @@ export class PgDesignRepository implements DesignRepository {
 
   async seedDesigns(ownerId: string, items: SeedDesign[]): Promise<number> {
     if (items.length === 0) return 0;
-    const client = await this.pool.connect();
+    const client = await this.maintenance.connect();
     try {
       await client.query('BEGIN');
 
@@ -470,12 +493,12 @@ export class PgDesignRepository implements DesignRepository {
   }
 
   async purgeTrashed(cutoff: Date): Promise<number> {
-    const res = await this.pool.query('DELETE FROM designs WHERE deleted_at IS NOT NULL AND deleted_at < $1', [cutoff]);
+    const res = await this.maintenance.query('DELETE FROM designs WHERE deleted_at IS NOT NULL AND deleted_at < $1', [cutoff]);
     return res.rowCount ?? 0;
   }
 
   async deleteByOwner(ownerId: string): Promise<void> {
-    await this.pool.query('DELETE FROM designs WHERE owner_id = $1', [ownerId]);
+    await this.maintenance.query('DELETE FROM designs WHERE owner_id = $1', [ownerId]);
   }
 
   /**
@@ -501,7 +524,7 @@ export class PgDesignRepository implements DesignRepository {
    * forgot. Runs at boot, reads only what it needs, and is a no-op once done.
    */
   async backfillFacets(limit = 5000): Promise<number> {
-    const res = await this.pool.query<{ id: string; title: string; title_ar: string | null; palette: string[] }>(
+    const res = await this.maintenance.query<{ id: string; title: string; title_ar: string | null; palette: string[] }>(
       `SELECT id, title, title_ar, palette FROM designs WHERE colors = '{}' LIMIT $1`,
       [limit],
     );
@@ -517,7 +540,7 @@ export class PgDesignRepository implements DesignRepository {
       const n = params.length;
       values.push(`($${n - 2}::uuid, $${n - 1}::text[], $${n}::text)`);
     }
-    await this.pool.query(
+    await this.maintenance.query(
       `UPDATE designs d SET colors = v.colors, club_id = v.club_id
          FROM (VALUES ${values.join(', ')}) AS v(id, colors, club_id)
         WHERE d.id = v.id`,
@@ -526,8 +549,12 @@ export class PgDesignRepository implements DesignRepository {
     return res.rowCount;
   }
 
-  async listPublic(query: GalleryQuery): Promise<GalleryItem[]> {
-    const params: unknown[] = [];
+  /**
+   * The WHERE every public feed query shares, filters appended to `params`.
+   * It always starts with `d.is_public`: nothing built on it can return a
+   * private, trashed or taken-down design (those are all is_public = false).
+   */
+  private publicWhere(query: Omit<GalleryQuery, 'limit' | 'offset' | 'viewerId' | 'sort'> & { ownerId?: string }, params: unknown[]): string {
     let where = 'd.is_public';
     if (query.templatesOnly) where += ' AND d.is_template';
     if (query.excludeTemplates) where += ' AND NOT d.is_template';
@@ -540,6 +567,10 @@ export class PgDesignRepository implements DesignRepository {
     if (query.clubId) {
       params.push(query.clubId);
       where += ` AND d.club_id = $${params.length}`;
+    }
+    if (query.ownerId) {
+      params.push(query.ownerId);
+      where += ` AND d.owner_id = $${params.length}`;
     }
     if (query.search && query.search.trim()) {
       params.push(`%${query.search.trim()}%`);
@@ -554,6 +585,66 @@ export class PgDesignRepository implements DesignRepository {
         ` AND d.id IN (SELECT dt.design_id FROM design_tags dt JOIN tags t ON t.id = dt.tag_id` +
         ` WHERE t.slug = ANY($${p}::text[]) GROUP BY dt.design_id HAVING count(DISTINCT t.id) = $${params.length})`;
     }
+    return where;
+  }
+
+  /**
+   * Bring every design's stored facets in line with the rules as they are in
+   * this build. Runs at boot, after the library is seeded, on the
+   * maintenance pool (performance plan P1.12).
+   *
+   * The feed's facet counts and its colour and club filters both read the
+   * stored columns, so the columns have to be right, and two things could leave
+   * them wrong: a best-effort syncFacets that failed (a design that saved while
+   * its facet update did not), and a change to the rules themselves (a club or
+   * an alias added to clubs.ts, a colour boundary moved), which used to reach
+   * old designs never. Reads only id, titles, palette and the two columns, a
+   * page at a time, and writes only the rows that differ; updated_at is left
+   * alone, so the feed's order does not move.
+   */
+  async resyncFacets(): Promise<number> {
+    let changed = 0;
+    let after = '00000000-0000-0000-0000-000000000000';
+    for (;;) {
+      const res = await this.maintenance.query<{ id: string; title: string; title_ar: string | null; palette: string[]; colors: string[]; club_id: string | null }>(
+        'SELECT id, title, title_ar, palette, colors, club_id FROM designs WHERE id > $1 ORDER BY id LIMIT 2000',
+        [after],
+      );
+      if (!res.rowCount) break;
+      const values: string[] = [];
+      const params: unknown[] = [];
+      for (const r of res.rows) {
+        const f = designFacets({ title: r.title, titleAr: r.title_ar, palette: r.palette });
+        if (f.colors.join(',') === (r.colors ?? []).join(',') && f.clubId === (r.club_id ?? null)) continue;
+        params.push(r.id, f.colors, f.clubId, r.title, r.title_ar, JSON.stringify(r.palette));
+        const n = params.length;
+        values.push(`($${n - 5}::uuid, $${n - 4}::text[], $${n - 3}::text, $${n - 2}::text, $${n - 1}::text, $${n}::jsonb)`);
+      }
+      if (values.length) {
+        // Only over the title and palette these facets were worked out from:
+        // this runs while people are saving, and a rename or repaint that
+        // landed since the read has already written its own facets.
+        await this.maintenance.query(
+          `UPDATE designs d SET colors = v.colors, club_id = v.club_id
+             FROM (VALUES ${values.join(', ')}) AS v(id, colors, club_id, title, title_ar, palette)
+            WHERE d.id = v.id AND d.title = v.title AND d.title_ar IS NOT DISTINCT FROM v.title_ar AND d.palette = v.palette`,
+          params,
+        );
+        changed += values.length;
+      }
+      after = String(res.rows[res.rows.length - 1].id);
+      if (res.rowCount < 2000) break;
+    }
+    return changed;
+  }
+
+  async listPublic(query: GalleryQuery): Promise<GalleryItem[]> {
+    return this.queryPublic(query);
+  }
+
+  private async queryPublic(query: GalleryQuery & { ownerId?: string }): Promise<GalleryItem[]> {
+    const params: unknown[] = [];
+    const where = this.publicWhere(query, params);
     let voteSelect = '0 AS my_vote';
     if (query.viewerId) {
       params.push(query.viewerId);
@@ -582,6 +673,59 @@ export class PgDesignRepository implements DesignRepository {
       params,
     );
     return res.rows.map(rowToGalleryItem);
+  }
+
+  async countPublic(query: Omit<GalleryQuery, 'limit' | 'offset' | 'viewerId' | 'sort'>): Promise<number> {
+    const params: unknown[] = [];
+    const where = this.publicWhere(query, params);
+    const res = await this.pool.query(`SELECT count(*)::int AS n FROM designs d WHERE ${where}`, params);
+    return Number(res.rows[0]?.n ?? 0);
+  }
+
+  /**
+   * Colour and club counts for one scope, from the stored facet columns, in
+   * one statement. It used to fetch every public design's full card (up to
+   * 5,000, with the joins and per-row subqueries) and classify each in
+   * JavaScript, on every call: 707 KB read and ~135 ms at 2,155 public designs,
+   * growing with each one published, and a `total` stuck at 5,000 past that
+   * (performance plan P1.12). The columns are written from the same
+   * designFacets() at every save (syncFacets) and are what the feed's own
+   * filters already use, so the counts now agree with what a chip returns.
+   */
+  async facetBase(scope: FacetScope): Promise<FacetBase> {
+    let where = 'd.is_public';
+    if (scope.templatesOnly) where += ' AND d.is_template';
+    if (scope.excludeTemplates) where += ' AND NOT d.is_template';
+    const res = await this.pool.query(
+      `WITH pub AS (SELECT d.colors, d.club_id FROM designs d WHERE ${where})
+       SELECT (SELECT count(*)::int FROM pub) AS total,
+              (SELECT coalesce(json_object_agg(c, n), '{}'::json)
+                 FROM (SELECT c, count(*)::int AS n FROM pub, unnest(pub.colors) AS c GROUP BY c) x) AS colors,
+              (SELECT coalesce(json_object_agg(club_id, n), '{}'::json)
+                 FROM (SELECT club_id, count(*)::int AS n FROM pub WHERE club_id IS NOT NULL GROUP BY club_id) y) AS clubs`,
+    );
+    const r = res.rows[0] ?? {};
+    return {
+      total: Number(r.total ?? 0),
+      colors: (r.colors ?? {}) as Record<string, number>,
+      clubs: (r.clubs ?? {}) as Record<string, number>,
+    };
+  }
+
+  async listPublicByOwner(ownerId: string, opts: { viewerId?: string | null; limit: number }): Promise<GalleryItem[]> {
+    // The feed's own query with the owner added to its WHERE, so it is public
+    // only by construction, served by designs_owner_updated_idx and capped.
+    return this.queryPublic({ sort: 'recent', ownerId, viewerId: opts.viewerId, limit: Math.min(200, Math.max(1, Math.floor(opts.limit))) });
+  }
+
+  async listPublicIds(limit: number): Promise<{ id: string; updatedAt: string }[]> {
+    // Two columns, not the full card: the sitemap read every public design's
+    // card to use these two (performance plan P1.12).
+    const res = await this.pool.query(
+      'SELECT id, updated_at FROM designs WHERE is_public ORDER BY updated_at DESC, id DESC LIMIT $1',
+      [Math.min(50_000, Math.max(0, Math.floor(limit)))],
+    );
+    return res.rows.map((r) => ({ id: String(r.id), updatedAt: new Date(r.updated_at as string).toISOString() }));
   }
 
   async getPublicItem(id: string, viewerId?: string | null): Promise<GalleryItem | null> {
@@ -650,7 +794,8 @@ export class PgDesignRepository implements DesignRepository {
               (d.thumbnail IS NOT NULL) AS has_thumbnail, 1 AS my_vote,
               coalesce((SELECT array_agg(t.slug ORDER BY t.slug) FROM design_tags dt
                         JOIN tags t ON t.id = dt.tag_id WHERE dt.design_id = d.id), '{}') AS tags,
-              EXISTS (SELECT 1 FROM design_photos dp WHERE dp.design_id = d.id) AS has_photo
+              EXISTS (SELECT 1 FROM design_photos dp WHERE dp.design_id = d.id) AS has_photo,
+              ${COMMENT_COUNT}
        FROM design_votes vt
        JOIN designs d ON d.id = vt.design_id AND d.is_public
        LEFT JOIN users u ON u.id = d.owner_id
@@ -667,6 +812,7 @@ export class PgDesignRepository implements DesignRepository {
       isTemplate: Boolean(r.is_template),
       tags: (r.tags as string[]) ?? [],
       hasPhoto: Boolean(r.has_photo),
+      commentCount: Number(r.comment_count ?? 0),
     }));
   }
 
@@ -1057,7 +1203,11 @@ function mapUserRow(r: {
 }
 
 export class PgAuthRepository implements AuthRepository {
-  constructor(private readonly pool: pg.Pool) {}
+  /**
+   * `maintenance` is the small pool for slow, non-request work (server/src/db.ts,
+   * performance plan P1.26); it defaults to the one pool where only one exists.
+   */
+  constructor(private readonly pool: pg.Pool, private readonly maintenance: pg.Pool = pool) {}
 
   async createUser(
     username: string,
@@ -1366,7 +1516,7 @@ export class PgAuthRepository implements AuthRepository {
     // The account's comments go with it (by cascade), but other people's
     // replies to them stay, at the top of their thread. Without this the
     // cascade on comments.parent_id took them too (audit round five).
-    const client = await this.pool.connect();
+    const client = await this.maintenance.connect();
     try {
       await client.query('BEGIN');
       // Locked first, so a reply arriving meanwhile waits and then fails
@@ -1453,7 +1603,11 @@ export class PgAuthRepository implements AuthRepository {
 
 /** Postgres events repo. Append-only inserts; funnel via one grouped query. */
 export class PgEventsRepository implements EventsRepository {
-  constructor(private readonly pool: pg.Pool) {}
+  /**
+   * `maintenance` is the small pool for slow, non-request work (server/src/db.ts,
+   * performance plan P1.26); it defaults to the one pool where only one exists.
+   */
+  constructor(private readonly pool: pg.Pool, private readonly maintenance: pg.Pool = pool) {}
 
   async record(sessionId: string, name: string, signedIn: boolean): Promise<void> {
     await this.pool.query(
@@ -1463,12 +1617,12 @@ export class PgEventsRepository implements EventsRepository {
   }
 
   async purge(before: Date): Promise<number> {
-    const res = await this.pool.query('DELETE FROM events WHERE created_at < $1', [before]);
+    const res = await this.maintenance.query('DELETE FROM events WHERE created_at < $1', [before]);
     return res.rowCount ?? 0;
   }
 
   async funnel(steps: string[], days: number): Promise<FunnelStep[]> {
-    const res = await this.pool.query(
+    const res = await this.maintenance.query(
       `SELECT name, count(DISTINCT session_id)::int AS sessions
        FROM events
        WHERE name = ANY($1::text[]) AND created_at >= now() - ($2::int * interval '1 day')

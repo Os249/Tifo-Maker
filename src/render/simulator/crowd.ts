@@ -8,8 +8,11 @@ import type { DesignStore } from '../../core/design';
  * One InstancedMesh of camera-card-style spectator billboards, one slot per seat,
  * placed on seats that are NOT part of the tifo (or everywhere, if "show on tifo"
  * is on). Density hides a deterministic fraction; colours come from the design's
- * palette split into home/away supporter sections by stand. Hidden instances are
- * scaled to zero — still one draw call for the whole crowd.
+ * palette split into home/away supporter sections by stand. Only the people who
+ * are there are drawn: they are packed to the front of the instance buffer, in
+ * seat order, and the mesh draws that many — still one draw call for the whole
+ * crowd, and none for the seats under the tifo, which on a full design is
+ * nearly all of them (performance plan P1.21).
  */
 
 export type CrowdPreset = 'sellout' | 'home' | 'away-end' | 'half' | 'empty';
@@ -82,7 +85,15 @@ const BISHT = new THREE.Color(0x1c1814);
 export function buildCrowd(map: SeatMap, store: DesignStore, dressed: Uint8Array | null = null): CrowdController {
   const tex = personTexture();
   const geo = new THREE.PlaneGeometry(0.62, 1.25);
-  const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, alphaTest: 0.45, side: THREE.DoubleSide });
+  // Drawn in ONE pass (performance plan P1.21). three draws a transparent
+  // double-sided material twice, back faces then front faces, so every fan
+  // cost two triangles' worth of every instance; a flat billboard shows only
+  // one face to the camera, so a single pass draws the same pixels. It stays
+  // transparent rather than opaque: the soft edge of a distant fan is
+  // blended, and drawn opaque those edges went hard — 2.5% of the picture
+  // changed by up to 96 levels in a full Kingdom Arena — where a single pass
+  // changes nothing.
+  const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, alphaTest: 0.45, side: THREE.DoubleSide, forceSinglePass: true });
   // Tint the shirt, not the head: the head is the only part of the texture
   // with a low blue channel (skin and hair), so it keeps its own colour.
   mat.onBeforeCompile = (shader) => {
@@ -128,29 +139,76 @@ export function buildCrowd(map: SeatMap, store: DesignStore, dressed: Uint8Array
     return tmp;
   };
 
+  /** Who is in which seat at the last refresh. */
+  const present = new Uint8Array(map.count);
+  /** A fan's placement: on the seat, a little taller or shorter, facing the pitch. */
+  const place = (i: number): THREE.Matrix4 => {
+    const x = map.pos3[i * 3];
+    const y = map.pos3[i * 3 + 1] + 0.62;
+    const z = map.pos3[i * 3 + 2];
+    dummy.position.set(x, y, z);
+    dummy.scale.set(1, 0.92 + hash(i * 11) * 0.18, 1);
+    dummy.lookAt(0, y, 0);
+    dummy.updateMatrix();
+    return dummy.matrix;
+  };
+
   const refresh = (): void => {
+    let n = 0;
     for (let i = 0; i < map.count; i++) {
       const isTifo = store.cells[i] !== 0;
       const allowed = (showOnTifo || !isTifo) && hash(i) < density;
-      if (!allowed) {
+      present[i] = allowed ? 1 : 0;
+      if (!allowed) continue;
+      mesh.setMatrixAt(n, place(i));
+      mesh.setColorAt(n, colorFor(i));
+      n++;
+    }
+    mesh.count = n;
+    // Only the part that is drawn goes to the GPU. (Nothing at all for an
+    // empty ground: a zero-length range would mean "to the end" to WebGL.)
+    if (n === 0) return;
+    mesh.instanceMatrix.clearUpdateRanges();
+    mesh.instanceMatrix.addUpdateRange(0, n * 16);
+    mesh.instanceMatrix.needsUpdate = true;
+    if (mesh.instanceColor) {
+      mesh.instanceColor.clearUpdateRanges();
+      mesh.instanceColor.addUpdateRange(0, n * 3);
+      mesh.instanceColor.needsUpdate = true;
+    }
+  };
+
+  /**
+   * Where three sorts the crowd among the transparent things, kept where it
+   * was. three places a transparent mesh by the centre of its bounding
+   * sphere, worked out over the instances it draws, and the empty seats used
+   * to be in that buffer as zero-size fans at (0, -9999, 0). Packing them out
+   * moved the sphere, and with it the order the crowd and the floodlights'
+   * haze are blended in: up to 13 levels in the haze over the far stand. So
+   * the sphere is still the one the whole buffer gave — every seat in order,
+   * through float32 as the buffer stored it — and the picture is the same.
+   */
+  const SCRATCH = new Float32Array(16);
+  const seatMatrix = new THREE.Matrix4();
+  const sphere = new THREE.Sphere();
+  mesh.computeBoundingSphere = (): void => {
+    const bs = (mesh.boundingSphere ??= new THREE.Sphere());
+    if (geo.boundingSphere === null) geo.computeBoundingSphere();
+    bs.makeEmpty();
+    for (let i = 0; i < map.count; i++) {
+      let m: THREE.Matrix4;
+      if (present[i]) m = place(i);
+      else {
         dummy.position.set(0, -9999, 0);
         dummy.scale.set(0, 0, 0);
         dummy.updateMatrix();
-        mesh.setMatrixAt(i, dummy.matrix);
-        continue;
+        m = dummy.matrix;
       }
-      const x = map.pos3[i * 3];
-      const y = map.pos3[i * 3 + 1] + 0.62;
-      const z = map.pos3[i * 3 + 2];
-      dummy.position.set(x, y, z);
-      dummy.scale.set(1, 0.92 + hash(i * 11) * 0.18, 1);
-      dummy.lookAt(0, y, 0);
-      dummy.updateMatrix();
-      mesh.setMatrixAt(i, dummy.matrix);
-      mesh.setColorAt(i, colorFor(i));
+      m.toArray(SCRATCH);
+      seatMatrix.fromArray(SCRATCH);
+      sphere.copy(geo.boundingSphere!).applyMatrix4(seatMatrix);
+      bs.union(sphere);
     }
-    mesh.instanceMatrix.needsUpdate = true;
-    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
   };
 
   refresh();

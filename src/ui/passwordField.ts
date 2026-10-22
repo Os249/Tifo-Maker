@@ -20,7 +20,11 @@
  * so every colour here is `var(--token, fallback)`: it picks up the app's theme
  * inside the app, and looks right on the reset page without it.
  */
-import { checkPassword, suggestPassphrase, PASSWORD_MAX, PASSWORD_MIN, type PasswordContext } from '../core/password';
+// The grader and its blocklist come in here, with the field that needs them, and
+// not through i18n on every page (performance plan P1.15). Statically, so the
+// field's validate() can stay synchronous and check exactly the server's rules.
+import { checkPassword, suggestPassphrase, type PasswordContext } from '../core/password';
+import { PASSWORD_MAX, PASSWORD_MIN } from '../core/passwordLimits';
 import { t, tv } from './i18n';
 
 export interface PasswordFieldOptions {

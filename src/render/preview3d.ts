@@ -10,7 +10,8 @@ import { spanFrameCache, type StandFrame } from './simulator/standFrame';
 import { bannerShot } from './simulator/bannerCamera';
 import { standIsRoofed } from './simulator/roof';
 import { emptySeatColours } from './seatColours';
-import { buildChairs, seatFacing, seatStateTexture, KEY_LIGHT_DIR, type ChairBuild } from './seatChairs';
+import { buildChairs, seatFacing, seatStateTexture, KEY_LIGHT_DIR, SEAT_TEX_W, type ChairBuild } from './seatChairs';
+import { SeatUploads, seatRuns } from './seatUploads';
 import { viewTierSettings, type ViewTier, type ViewTierSettings } from './viewTier';
 import type { ShellBuild } from './stadiumShell';
 import { baseGroundId } from '../core/realBlocks';
@@ -71,6 +72,11 @@ const CARD_UP = 1.22;
 const CARD_FORWARD = 0.06;
 const CARD_TILT = 0.22;
 const FOV = 50;
+/**
+ * Where an indoor hall's cut sits when it is not cut: far above anything, so
+ * the one clipping plane it keeps clips nothing (performance plan P1.24).
+ */
+const CUT_OFF = 1e7;
 
 export interface Preview3DOptions {
   autoRotate?: boolean;
@@ -111,6 +117,8 @@ export class Preview3D {
   private readonly cardShow: THREE.InstancedBufferAttribute;
   /** The same, one byte a seat, for the chairs' shader (a chair under a raised card goes dark). */
   private readonly seatState: THREE.DataTexture;
+  /** Which seats of the three card arrays to send at the next frame (see render/seatUploads.ts). */
+  private readonly uploads: SeatUploads[];
   private readonly facing: Float32Array;
   private paletteColors: THREE.Color[] = [];
   private readonly noShowMask: Uint8Array;
@@ -181,6 +189,7 @@ export class Preview3D {
     this.canvas = this.renderer.domElement;
     this.canvas.addEventListener('webglcontextlost', this.onCtxLost);
     host.appendChild(this.canvas);
+    this.holdCutPlane();
 
     // Transparent hero variant shows the page background through the canvas.
     if (options.transparent) {
@@ -245,6 +254,15 @@ export class Preview3D {
     this.staticTrash.push(this.seatState);
     this.cards = this.buildCards();
     this.scene.add(this.cards);
+    // Painting sends only the seats it changed (performance plan P1.4). Each
+    // array is sent whole until three reports it has been sent at all.
+    const showUp = new SeatUploads(this.cardShow, 1);
+    const colourUp = new SeatUploads(this.cards.instanceColor!, 3);
+    const stateUp = new SeatUploads(this.seatState, 1, SEAT_TEX_W);
+    this.cardShow.onUpload(() => showUp.uploaded());
+    this.cards.instanceColor!.onUpload(() => colourUp.uploaded());
+    this.seatState.onUpdate = () => stateUp.uploaded();
+    this.uploads = [showUp, colourUp, stateUp];
     this.recolorAll();
 
     // Light. The building is lit; the cards and chairs are not (their
@@ -278,7 +296,7 @@ export class Preview3D {
         return;
       }
       for (const i of indices) this.recolor(i);
-      this.flushCards();
+      this.flushCards(indices);
     };
     // Palette swaps/edits must rebuild this view's color cache too — otherwise
     // the 3D preview keeps the palette it was built with and drifts from 2D.
@@ -313,7 +331,15 @@ export class Preview3D {
     if (up) this.cards.setColorAt(i, this.paletteColors[this.store.cells[i]] ?? this.paletteColors[1] ?? new THREE.Color(0xffffff));
   }
 
-  private flushCards(): void {
+  /** Send the cards at the next frame: only the seats given, or every seat. */
+  private flushCards(changed?: ArrayLike<number>): void {
+    // Most of a ground changing at once (a fill) goes up whole.
+    if (changed && changed.length < this.map.count / 8) {
+      const runs = seatRuns(changed);
+      for (const u of this.uploads) u.changed(runs);
+    } else {
+      for (const u of this.uploads) u.all();
+    }
     this.cardShow.needsUpdate = true;
     this.seatState.needsUpdate = true;
     if (this.cards.instanceColor) this.cards.instanceColor.needsUpdate = true;
@@ -437,6 +463,7 @@ export class Preview3D {
       }
       if (this.disposed) return;
       const tpl = this.template;
+      this.holdCutPlane();
       this.noTifo = tpl ? noTifoMask(this.map, tpl) : null;
       this.seatRGB = emptySeatColours(tpl, this.map);
       if (this.noTifo) this.recolorAll();
@@ -541,8 +568,21 @@ export class Preview3D {
     const want = !!this.template?.indoor && y > cutY + 6;
     if (want === this.cutOn) return;
     this.cutOn = want;
-    this.cutPlane.constant = cutY;
-    this.renderer.clippingPlanes = want ? [this.cutPlane] : [];
+    this.holdCutPlane();
+    this.cutPlane.constant = want ? cutY : CUT_OFF;
+  }
+
+  /**
+   * An indoor hall keeps its one clipping plane for good, moved out of the way
+   * when the hall is not cut. Adding or removing a plane changes every
+   * shader in the scene, so the camera rising past the roof used to recompile
+   * all of them in the middle of an orbit (Kingdom Arena: 15 programs). Set
+   * before the first compile, the plane is already in every program.
+   */
+  private holdCutPlane(): void {
+    if (!this.template?.indoor || this.renderer.clippingPlanes.length) return;
+    this.cutPlane.constant = CUT_OFF;
+    this.renderer.clippingPlanes = [this.cutPlane];
   }
 
   // ---------------------------------------------------------------- cameras
@@ -925,9 +965,11 @@ export class Preview3D {
     let again = false;
     if (this.bannersLive()) {
       // Clamped: a preview that has been in a background tab for a minute
-      // must not hand the fabric a sixty-second step.
-      this.banners!.update(0, Math.min(0.05, dt));
-      again = true;
+      // must not hand the fabric a sixty-second step. The wave moves only on
+      // frames drawn for something else, so a still camera draws nothing and
+      // the sheet picks up from the same phase when it moves; only a reveal
+      // still playing asks for frames of its own (performance plan P1.23).
+      if (this.banners!.update(0, Math.min(0.05, dt))) again = true;
     }
     // With damping, the camera keeps gliding after the hand lets go.
     if (this.controls.update()) again = true;
@@ -989,6 +1031,8 @@ export class Preview3D {
   private readonly onCtxLost = (e: Event): void => {
     e.preventDefault();
     this.stop();
+    // A restored context holds none of the cards: their next upload is whole (P1.4).
+    for (const u of this.uploads) u.all();
   };
 
   /**
@@ -1090,6 +1134,11 @@ export class Preview3D {
     this.envTarget?.dispose();
     this.canvas.removeEventListener('webglcontextlost', this.onCtxLost);
     this.renderer.dispose();
+    // Give the context back now rather than whenever the canvas is collected:
+    // the community modal and the hero chips make a view per open, and Chrome
+    // keeps sixteen live contexts before it kills the oldest (performance plan
+    // P1.19).
+    if (!this.renderer.getContext().isContextLost()) this.renderer.forceContextLoss();
     this.canvas.remove();
   }
 }

@@ -3,8 +3,9 @@
  *
  *   npm run test:growth      (needs `npm run build` first: it serves dist/)
  *
- *   1. Phones get a still stadium, not the 3D engine; thumbnails wait for the
- *      scroll; Arabic browsers get Arabic; tags leave the address bar.
+ *   1. Phones and desktops get a still stadium, in the HTML, not the 3D
+ *      engine, until they tap it; thumbnails wait for the scroll; Arabic
+ *      browsers get Arabic; tags leave the address bar.
  *   2. A tagged visit is counted by name, a shared-link visit under "Shared by
  *      visitors", and "Links opened" counts it (it read 0 forever before).
  *   3. First run: Start from your club draws the bowl, opens the stadium, and
@@ -88,12 +89,32 @@ console.log('\n— 1. the home page on a phone —');
   await p.context().close();
 }
 {
+  // Desktops too get the picture first, since performance plan P1.14: the live
+  // stadium cost them 183 KB gz and seconds of main thread before anyone had
+  // asked for it. A click on the picture, or on a club, starts it.
   const p = await open(WIDE);
   const asked = [];
   p.on('request', (r) => asked.push(r.url()));
   await p.goto(`${B}/`, { waitUntil: 'load' });
-  const live = await until(p, () => !!document.querySelector('#hero-3d canvas'), null, 60000);
-  check('a desktop still gets the live 3D stadium', live && asked.some((u) => /preview3d-.*\.js/.test(u)));
+  const html = await (await fetch(`${B}/`)).text();
+  check('the hero picture is in the page itself, fetched first',
+    /<img class="hero-still"[^>]*fetchpriority="high"/.test(html) && /<img class="hero-still"[^>]*srcset="[^"]*640w/.test(html));
+  const shown = await until(p, () => { const i = document.querySelector('#hero-3d img.hero-still'); return !!i && i.complete && i.naturalWidth > 0 && getComputedStyle(document.getElementById('hero-3d')).opacity === '1'; }, null, 20000);
+  await p.waitForTimeout(2500);
+  check('a desktop gets the still picture, visible', shown);
+  check('and no 3D engine until it is asked for', !asked.some((u) => /preview3d-.*\.js/.test(u)), asked.filter((u) => /preview3d/.test(u)).join(' '));
+  check('a 1x desktop takes the 640 px copy', await p.evaluate(() => /hero-stadium-640\.webp$/.test(document.querySelector('#hero-3d img.hero-still')?.currentSrc ?? '')));
+  await p.evaluate(() => document.querySelector('#hero-3d img.hero-still')?.click());
+  const live = await until(p, () => !!document.querySelector('#hero-3d canvas') && !document.querySelector('#hero-3d img.hero-still'), null, 60000);
+  check('a click on it starts the live 3D stadium', live && asked.some((u) => /preview3d-.*\.js/.test(u)));
+  await p.context().close();
+}
+{
+  const p = await open(WIDE);
+  await p.goto(`${B}/`, { waitUntil: 'load' });
+  await p.evaluate(() => document.querySelector('.hero-club[data-club="hilal"]')?.click());
+  const live = await until(p, () => !!document.querySelector('#hero-3d canvas') && document.querySelector('.hero-club.on')?.dataset.club === 'hilal', null, 60000);
+  check('on a desktop, a club chip starts the live stadium on that club', live && p.url() === `${B}/`, p.url());
   await p.context().close();
 }
 {

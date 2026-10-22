@@ -31,6 +31,7 @@
     "test:preview": "node e2e-preview.mjs",
     "test:stadium-view": "node e2e-stadium-view.mjs",
     "test:world": "node e2e-world.mjs",
+    "seats:table": "tsx scripts/seat-table.mts",
     "server": "tsx server/src/server.ts",
     "server:watch": "tsx watch server/src/server.ts",
     "server:local": "node --env-file=.env --import tsx server/src/server.ts",
@@ -44,7 +45,8 @@
     "security:check": "npm run test:security && npm run test:soc && npm run test:deploy && node scripts/secret-scan.mjs && npm audit --omit=dev --audit-level=high",
     "test:verify": "npm run build && node e2e-verify.mjs",
     "build:prod": "tsc --noEmit && vite build",
-    "start": "NODE_ENV=production tsx server/src/server.ts",
+    "build:server": "tsx scripts/seat-table.mts && node scripts/bundle-server.mjs",
+    "start": "NODE_ENV=production node server/build/server.mjs",
     "verify:stadiumfit": "tsx scripts/verify-stadiumfit.mts",
     "verify:osm": "tsx scripts/verify-osm.mts",
     "shots:stadiumimport": "tsx scripts/stadium-import-shots.mts",
@@ -60,7 +62,6 @@
     "hero:still": "tsx scripts/hero-still.mts"
   },
   "dependencies": {
-    "@fastify/helmet": "^13.0.2",
     "@fastify/rate-limit": "^11.2.1",
     "@fastify/static": "^10.1.3",
     "@fontsource/alfa-slab-one": "^5.3.0",
@@ -78,12 +79,12 @@
     "@fontsource/tajawal": "^5.3.0",
     "@tabler/icons-webfont": "^3.21.0",
     "fastify": "^5.12.3",
+    "helmet": "8.2.0",
     "pdfkit": "^0.19.1",
     "pg": "^8.21.0",
     "pixi.js": "^8.6.6",
     "qrcode": "^1.5.4",
-    "three": "^0.184.0",
-    "tsx": "^4.22.4"
+    "three": "^0.184.0"
   },
   "devDependencies": {
     "@types/node": "^25.9.3",
@@ -91,7 +92,9 @@
     "@types/pg": "^8.20.0",
     "@types/qrcode": "^1.5.6",
     "@types/three": "^0.184.1",
+    "esbuild": "^0.21.5",
     "playwright": "^1.63.0",
+    "tsx": "^4.22.4",
     "typescript": "^5.6.3",
     "vite": "^5.4.11"
   },

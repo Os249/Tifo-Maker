@@ -77,6 +77,22 @@ export class DesignStore {
   private listeners: DirtyListener[] = [];
   private paletteListeners: (() => void)[] = [];
   private historyListeners: (() => void)[] = [];
+  /**
+   * How many seats show each palette index, kept as seats change rather than
+   * recounted (performance plan P1.2). The palette panel used to count all
+   * 83,000 seats of a big ground, and rebuild every swatch, on every painted
+   * frame. Null until somebody asks, so a store nobody counts pays nothing.
+   *
+   * `tallied` is what the tally last saw at each seat. A stroke's seats are
+   * followed as `paint` writes them, which covers the panels that paint and
+   * then repaint by hand without a notification (an orientation, an AI
+   * design). Every other write to `cells` (undo, the layer stack's flattening,
+   * locked seats) reaches the listeners through `notify`, and is followed
+   * there. One compare per changed seat; a seat seen twice is counted once.
+   */
+  private tally: Uint32Array | null = null;
+  private tallied: Uint8Array | null = null;
+  private tallyStale = true;
 
   /** Max undo depth; a diff is typically a few hundred bytes, so this is cheap. */
   private static readonly MAX_UNDO = 200;
@@ -267,7 +283,50 @@ export class DesignStore {
   }
 
   private notify(indices: number[] | 'all'): void {
+    this.followTally(indices);
     for (const fn of this.listeners) fn(indices);
+  }
+
+  /**
+   * Seats per palette index (index 0 is the empty seat), exact at the last
+   * notification. Read-only: the array is the store's own and changes in place.
+   */
+  colorCounts(): Uint32Array {
+    if (!this.tally || !this.tallied) {
+      this.tally = new Uint32Array(DesignStore.MAX_COLORS);
+      this.tallied = new Uint8Array(this.cells.length);
+      this.tallyStale = true;
+    }
+    if (this.tallyStale) {
+      const tally = this.tally;
+      tally.fill(0);
+      this.tallied.set(this.cells);
+      for (let i = 0; i < this.cells.length; i++) tally[this.cells[i]]++;
+      this.tallyStale = false;
+    }
+    return this.tally;
+  }
+
+  private followTally(indices: number[] | 'all'): void {
+    if (!this.tally || !this.tallied || this.tallyStale) return;
+    // A whole-design change is recounted when next asked for: one pass over
+    // the seats then, rather than one per notification now.
+    if (indices === 'all') {
+      this.tallyStale = true;
+      return;
+    }
+    for (let k = 0; k < indices.length; k++) this.retally(indices[k]);
+  }
+
+  /** Bring one seat's count up to date with what it shows now. */
+  private retally(i: number): void {
+    const tallied = this.tallied!;
+    const now = this.cells[i];
+    const was = tallied[i];
+    if (now === was) return;
+    this.tally![was]--;
+    this.tally![now]++;
+    tallied[i] = now;
   }
 
   // ---- layers -------------------------------------------------------------
@@ -370,6 +429,7 @@ export class DesignStore {
         const nv = L.touch(owner, index, value);
         if (nv < 0 || nv === this.cells[index]) return false;
         this.cells[index] = nv;
+        if (this.tallied && !this.tallyStale) this.retally(index);
         return true;
       }
     }
@@ -386,6 +446,7 @@ export class DesignStore {
     } else {
       this.cells[index] = value;
     }
+    if (this.tallied && !this.tallyStale) this.retally(index);
     return true;
   }
 

@@ -3153,3 +3153,127 @@ await (async () => {
   console.log(`big screens: ${screens} on ${grounds} grounds, none over a seat or hidden by a stand | the closest on a frame stands ${closest.d.toFixed(1)} m from a seat (${closest.id})`);
   if (fails.length) throw new Error(`big screens: ${fails.join('; ')}`);
 })();
+
+// ---------------------------------------------------------------------------
+// Performance plan, phase 1 (October 2026): what the editor now keeps instead
+// of recomputing. The per-colour seat counts follow every kind of change (P1.2);
+// the 3D views send only the runs of seats that changed (P1.4); the seat-map
+// worker is handed the template itself and must build the very same seats
+// from its copy (P1.16).
+await (async () => {
+  const fails: string[] = [];
+  const { DesignStore: DST } = await import('../src/core/design');
+  const { seatRuns, SeatUploads } = await import('../src/render/seatUploads');
+  const cat = await import('../src/core/stadiumCatalog');
+  // -- P1.2: counts kept as seats change equal a fresh count, after anything --
+  {
+    const m = generateSeatMap(DEFAULT_TEMPLATE);
+    const s = new DST(m, ['#262a33', '#1c5fd9', '#f2f1ec', '#e8b73a', '#c0392b']);
+    const fresh = (): number[] => { const c = new Array(256).fill(0); for (const v of s.cells) c[v]++; return c; };
+    const same = (what: string): void => {
+      const kept = s.colorCounts();
+      const want = fresh();
+      for (let k = 0; k < 256; k++) if (kept[k] !== want[k]) { fails.push(`colour counts after ${what}: index ${k} says ${kept[k]}, the seats say ${want[k]}`); return; }
+    };
+    let seed = 7;
+    const rnd = (n: number): number => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed % n; };
+    same('nothing');
+    for (let round = 0; round < 40; round++) {
+      // A stroke, flushed the way the editor flushes it.
+      s.beginStroke();
+      const dirty: number[] = [];
+      const at = rnd(m.count);
+      for (let k = 0; k < 400; k++) { const i = (at + k * 3) % m.count; if (s.paint(i, 1 + rnd(4))) dirty.push(i); }
+      if (round % 3) s.flush(dirty);
+      s.commitStroke();
+      same(`stroke ${round}`);
+      // A panel that paints and never notifies (the orientation buttons do).
+      if (round % 7 === 0) {
+        s.beginStroke();
+        for (let i = 0; i < m.count; i += 5) s.paint(i, rnd(5));
+        s.commitStroke();
+        same(`an unflushed whole-ground stroke ${round}`);
+      }
+      if (round % 5 === 0) { s.undo(); same(`undo ${round}`); s.redo(); same(`redo ${round}`); }
+      if (round % 9 === 0) {
+        s.beginStroke();
+        for (let k = 0; k < 50; k++) s.paint((at + k) % m.count, 2);
+        s.cancelStroke();
+        same(`a cancelled stroke ${round}`);
+      }
+    }
+    s.transform((i) => (i % 3) + 1); same('a pattern');
+    s.fillAll(2); same('fill all');
+    s.remapToPalette(['#262a33', '#f2f1ec', '#1c5fd9']); same('a remap');
+    const lock = new Uint8Array(m.count); for (let i = 0; i < m.count; i += 11) lock[i] = 1;
+    s.setLockedSeats(lock); same('locked seats');
+    s.loadCells(new Uint8Array(m.count).fill(1)); same('a loaded design');
+    s.setBase(new Uint8Array(m.count).fill(2)); same('a new paint layer');
+  }
+  // -- P1.4: runs cover exactly the changed seats --
+  {
+    let seed = 3;
+    const rnd = (n: number): number => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed % n; };
+    for (let t = 0; t < 200; t++) {
+      const idx = Array.from({ length: 1 + rnd(300) }, () => rnd(5000));
+      const runs = seatRuns(idx);
+      const covered = new Set<number>();
+      for (let k = 0; k < runs.length; k += 2) {
+        if (k && runs[k] <= runs[k - 1]) fails.push(`seat runs overlap or are out of order: ${runs.slice(k - 2, k + 2)}`);
+        for (let i = runs[k]; i < runs[k + 1]; i++) covered.add(i);
+      }
+      if (!idx.every((i) => covered.has(i))) fails.push('a changed seat fell outside every run');
+    }
+    // A target is sent whole until it has been uploaded, and again after a whole recolour.
+    const ranges: { start: number; count: number }[] = [];
+    const target = { updateRanges: ranges, addUpdateRange: (start: number, count: number) => void ranges.push({ start, count }), clearUpdateRanges: () => void (ranges.length = 0) };
+    const u = new SeatUploads(target, 3);
+    u.changed(seatRuns([5, 6, 7]));
+    if (ranges.length) fails.push('a target never uploaded was sent in part');
+    u.uploaded();
+    u.changed(seatRuns([5, 6, 7, 40]));
+    if (JSON.stringify(ranges) !== JSON.stringify([{ start: 15, count: 9 }, { start: 120, count: 3 }])) fails.push(`colour ranges: ${JSON.stringify(ranges)}`);
+    u.all();
+    if (ranges.length) fails.push('a whole recolour kept its partial ranges');
+    u.changed(seatRuns([1]));
+    if (ranges.length) fails.push('ranges were added on top of a pending whole upload');
+    // A texture range never runs onto the next row (three sends one row per range).
+    const tr: { start: number; count: number }[] = [];
+    const tex = new SeatUploads({ updateRanges: tr, addUpdateRange: (start, count) => void tr.push({ start, count }), clearUpdateRanges: () => void (tr.length = 0) }, 1, 1024);
+    tex.uploaded();
+    tex.changed(seatRuns([1020, 1021, 1022, 1023, 1024, 1025]));
+    if (JSON.stringify(tr) !== JSON.stringify([{ start: 1020 * 4, count: 16 }, { start: 1024 * 4, count: 8 }])) fails.push(`texture ranges: ${JSON.stringify(tr)}`);
+  }
+  // -- P1.16: every shipped ground survives the copy to the worker, seat for seat --
+  {
+    const all = cat.shippedTemplates();
+    for (const t of all) {
+      try { structuredClone(t); } catch (e) { fails.push(`${t.id} cannot be posted to the worker: ${(e as Error).message}`); }
+      if (!cat.isShippedTemplate(t)) fails.push(`${t.id} is shipped but not recognised as shipped`);
+    }
+    if (cat.isShippedTemplate(structuredClone(all[0]))) fails.push('a copy of a shipped template passed as the shipped one');
+    const sample = ['bernabeu-83k', 'jewel-jeddah-60k-rb', DEFAULT_TEMPLATE.id, all[all.length - 1].id].map((id) => cat.templateById(id)).filter((t) => !!t);
+    for (const t of sample) {
+      const a = generateSeatMap(t!);
+      const b = generateSeatMap(structuredClone(t!));
+      const keys = ['xy', 'uv', 'pos3', 'tierOf', 'rowOf', 'sectionOf', 'neighbors', 'mirrorOf'] as const;
+      for (const k of keys) {
+        const x = a[k] as ArrayLike<number>, y = b[k] as ArrayLike<number>;
+        let ok = x.length === y.length;
+        for (let i = 0; ok && i < x.length; i++) if (x[i] !== y[i] && !(Number.isNaN(x[i]) && Number.isNaN(y[i]))) ok = false;
+        if (!ok) fails.push(`${t!.id}: the worker's copy builds a different ${k}`);
+      }
+    }
+    // A ground we did not ship is checked before anything builds it, on either thread.
+    const { generateSeatMapAsync } = await import('../src/workers/client');
+    const custom = { ...structuredClone(DEFAULT_TEMPLATE), id: 'custom-verify-1', name: 'Verify' };
+    const built = await generateSeatMapAsync(custom).catch(() => null);
+    if (!built || built.count !== generateSeatMap(DEFAULT_TEMPLATE).count) fails.push('a valid custom stadium is not built');
+    const wild = { ...custom, id: 'custom-verify-2', tiers: [{ ...custom.tiers[0], rows: 100000 }] };
+    if (await generateSeatMapAsync(wild).then(() => true, () => false)) fails.push('a stadium outside the template limits was built');
+    if (await generateSeatMapAsync('no-such-ground').then(() => true, () => false)) fails.push('an unknown ground id was built');
+    console.log(`worker templates: all ${all.length} shipped grounds post to the worker; ${sample.length} rebuilt from the copy, seat for seat; a custom one is checked first, and one out of bounds is refused`);
+  }
+  console.log('editor keeps: colour counts exact after strokes, undo, patterns, fills, remaps, locks and loads | seat runs and partial uploads exact');
+  if (fails.length) throw new Error(`performance plan P1: ${fails.slice(0, 10).join('; ')}`);
+})();

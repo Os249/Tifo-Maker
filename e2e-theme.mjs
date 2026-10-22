@@ -6,8 +6,10 @@
  *
  *   the default   a phone in dark mode must never be handed a white page, and
  *                 must never be handed one for a frame either — the scheme is
- *                 settled by /theme-boot.js at the top of the head, before anything
+ *                 settled by theme-boot.js at the top of the head, before anything
  *                 paints, and this checks that it really is ahead of the body.
+ *                 The build serves it as /assets/theme-boot-<hash>.js (cached
+ *                 for good) and rewrites every page's tag to that name.
  *   the choice    pressing the toggle outranks the system, on every page and
  *                 on the next visit.
  *   readability   a theme that flips colours without checking them is how you
@@ -77,11 +79,21 @@ console.log('\n— and it is settled before anything paints —');
 // A classic (not module, not async, not deferred) script from this origin, at
 // the top of the head. It used to be inline, which the Content-Security-Policy
 // blocked on every production load while this check still passed.
-const bootJs = await (await fetch(B + '/theme-boot.js')).text();
-check('/theme-boot.js is served and reads the saved choice', bootJs.includes("localStorage.getItem('tifo_theme_v1')"));
+// Under a content-hashed name in /assets (performance plan P1.29), so a repeat
+// view never waits on it; the unhashed path is gone, not left to drift.
+const BOOT_TAG = /<script src="(\/assets\/theme-boot-[\w-]+\.js)"><\/script>/;
+const bootSrc = ((await (await fetch(B + '/')).text()).match(BOOT_TAG) ?? [])[1];
+const bootRes = bootSrc ? await fetch(B + bootSrc) : null;
+const bootJs = bootRes ? await bootRes.text() : '';
+check('theme-boot.js is served under a hashed name and reads the saved choice',
+  !!bootSrc && bootRes.ok && bootJs.includes("localStorage.getItem('tifo_theme_v1')"), String(bootSrc));
+check('and is cached for good', /max-age=31536000.*immutable/.test(bootRes?.headers.get('cache-control') ?? ''),
+  String(bootRes?.headers.get('cache-control')));
+check('the old unhashed path is gone', (await fetch(B + '/theme-boot.js')).status === 404);
 for (const path of PAGES) {
   const html = await (await fetch(B + path)).text();
-  const boot = html.indexOf('<script src="/theme-boot.js"></script>');
+  check(`${path} names the same hashed theme-boot`, (html.match(BOOT_TAG) ?? [])[1] === bootSrc);
+  const boot = html.search(BOOT_TAG);
   const body = html.indexOf('<body');
   const css = html.indexOf('<link rel="stylesheet"');
   check(`${path} decides the scheme before the body`, boot > -1 && boot < body, `boot=${boot} body=${body}`);

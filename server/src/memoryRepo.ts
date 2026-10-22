@@ -8,6 +8,8 @@ import type {
   DesignRecord,
   DesignRepository,
   DiffBytes,
+  FacetBase,
+  FacetScope,
   GalleryItem,
   GalleryQuery,
   Lead,
@@ -249,6 +251,16 @@ export class MemoryDesignRepository implements DesignRepository {
   private scenes = new Map<string, Buffer>();
   constructor(private readonly usernames: (id: string | null) => string = () => 'unknown') {}
 
+  /**
+   * How many comments a design's thread holds. The comments live in
+   * MemorySocialRepository, which installs the counter when it is built on
+   * this repository; without a social layer there are none.
+   */
+  private commentsOf: (designId: string) => number = () => 0;
+  countCommentsWith(count: (designId: string) => number): void {
+    this.commentsOf = count;
+  }
+
   private meta(r: Row): DesignMeta {
     const { id, title, titleAr, templateId, templateVersion, palette, revisionCount, isPublic, ownerId, createdAt, updatedAt, description, allowRemix, remixedFrom } = r;
     return { id, title, titleAr: titleAr ?? null, templateId, templateVersion, palette: [...palette], revisionCount, isPublic, ownerId, createdAt, updatedAt, description: description ?? null, allowRemix: allowRemix !== false, remixedFrom: remixedFrom ?? null, viewCount: r.views, pinned: r.pinned === true, deletedAt: r.deletedAt ?? null, origin: r.origin ?? null, takenDown: r.takenDown === true };
@@ -394,10 +406,46 @@ export class MemoryDesignRepository implements DesignRepository {
       hasPhoto: this.photos.some((p) => p.designId === r.id),
       remixedFromName: source ? this.usernames(source.ownerId) : null,
       remixedFromTitle: source ? source.title : null,
+      commentCount: this.commentsOf(r.id),
     };
   }
 
   async listPublic(query: GalleryQuery): Promise<GalleryItem[]> {
+    const rows = this.publicRows(query);
+    const from = Math.max(0, query.offset ?? 0);
+    const page = query.limit == null ? rows.slice(from) : rows.slice(from, from + query.limit);
+    return page.map((r) => this.galleryItem(r, query.viewerId));
+  }
+
+  async countPublic(query: Omit<GalleryQuery, 'limit' | 'offset' | 'viewerId' | 'sort'>): Promise<number> {
+    return this.publicRows({ sort: 'recent', ...query }).length;
+  }
+
+  async facetBase(scope: FacetScope): Promise<FacetBase> {
+    const out: FacetBase = { total: 0, colors: {}, clubs: {} };
+    for (const r of this.publicRows({ sort: 'recent', ...scope })) {
+      out.total++;
+      const f = designFacets({ title: r.title, titleAr: r.titleAr, palette: r.palette });
+      for (const c of f.colors) out.colors[c] = (out.colors[c] ?? 0) + 1;
+      if (f.clubId) out.clubs[f.clubId] = (out.clubs[f.clubId] ?? 0) + 1;
+    }
+    return out;
+  }
+
+  async listPublicByOwner(ownerId: string, opts: { viewerId?: string | null; limit: number }): Promise<GalleryItem[]> {
+    const limit = Math.min(200, Math.max(1, Math.floor(opts.limit)));
+    return this.publicRows({ sort: 'recent' })
+      .filter((r) => r.ownerId !== null && r.ownerId === ownerId)
+      .slice(0, limit)
+      .map((r) => this.galleryItem(r, opts.viewerId));
+  }
+
+  async listPublicIds(limit: number): Promise<{ id: string; updatedAt: string }[]> {
+    return this.publicRows({ sort: 'recent' }).slice(0, Math.max(0, Math.floor(limit))).map((r) => ({ id: r.id, updatedAt: r.updatedAt }));
+  }
+
+  /** Public rows a feed query matches, in feed order. Public only, whatever the query. */
+  private publicRows(query: Omit<GalleryQuery, 'limit' | 'offset' | 'viewerId'>): Row[] {
     let rows = [...this.rows.values()].filter((r) => r.isPublic);
     if (query.templatesOnly) rows = rows.filter((r) => r.isTemplate);
     if (query.excludeTemplates) rows = rows.filter((r) => !r.isTemplate);
@@ -427,9 +475,7 @@ export class MemoryDesignRepository implements DesignRepository {
         ? this.score(b) - this.score(a) || b.updatedAt.localeCompare(a.updatedAt)
         : b.updatedAt.localeCompare(a.updatedAt)) || a.id.localeCompare(b.id),
     );
-    const from = Math.max(0, query.offset ?? 0);
-    const page = query.limit == null ? rows.slice(from) : rows.slice(from, from + query.limit);
-    return page.map((r) => this.galleryItem(r, query.viewerId));
+    return rows;
   }
 
   async getPublicItem(id: string, viewerId?: string | null): Promise<GalleryItem | null> {

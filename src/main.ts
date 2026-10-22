@@ -1,10 +1,9 @@
 import { cleanAddressBar } from './core/utm';
 import './vendor/tabler-subset.css';
-import { loadTifoFonts } from './core/tifoFonts';
 import { installTheme } from './ui/theme';
 import { initLang, applyDom, toggleLang, t, tl, tv, onLangChange } from './ui/i18n';
 import { installConsent } from './ui/consent';
-import { generateSeatMapAsync } from './workers/client';
+import { generateSeatMapAsync, warmHeavyWorker } from './workers/client';
 import { DEFAULT_PALETTE, DEFAULT_TEMPLATE, TEMPLATES } from './core/template';
 import { templateById, registerServerCommunity, type StadiumEntry } from './core/stadiumCatalog';
 import { adoptProviderSession, fetchCommunityStadiums, providerFailure } from './net/api';
@@ -31,11 +30,9 @@ import {
 // so a draft started on a phone is never permanently stranded.
 import { isNarrowForEditor } from './ui/desktopOnly';
 
-// The display faces are ~270 KB and nothing on first paint needs them, so warm
-// them when the browser is idle. The text tool and the AI panel await the same
-// promise, so an early click just waits for this fetch instead of racing it.
-if (typeof requestIdleCallback === 'function') requestIdleCallback(() => void loadTifoFonts(), { timeout: 4000 });
-else setTimeout(() => void loadTifoFonts(), 2000);
+// The display faces (~256 KB) are not loaded here any more: the toolbar asks
+// for them the first time the Text tool, the AI panel or a text layer needs
+// them (performance plan P1.6). Most editor opens never use them.
 // Editor (Pixi), the toolbar and the banner studio are imported dynamically
 // inside main(), below the desktop-only gate. They are the bulk of the bundle,
 // and a phone that is about to be told "come back on a laptop" should not pay
@@ -78,20 +75,44 @@ async function main(): Promise<void> {
   await adoptProviderSession();
   const signinFailed = providerFailure();
 
+  const sharedId = sharedDesignId();
+
+  // Everything the page is about to wait on, asked for at once (performance
+  // plan P1.8): the account, the design, its scene, and the seat-map worker.
+  // They used to go one after another, five round trips deep, which from
+  // Saudi Arabia is most of the wait for a project to open. The design comes
+  // back once and serves both the stadium lookup and the load below (see
+  // designJson in net/api.ts); nothing is cached beyond this page.
+  //
+  // Not for a screen that is about to be turned away (a phone without a
+  // shared link gets the desktop-only notice), and the scene not for the
+  // read-only phone viewer, which shows no banners.
+  const earlyFrom = bootParams.get('new') === '1' ? bootParams.get('from') : null;
+  const earlySource = sharedId ?? (earlyFrom && UUID_RE.test(earlyFrom) ? earlyFrom : null);
+  const narrow = isNarrowForEditor();
+  const turnedAway = narrow && !sharedId;
+  const opensSomething = !!(sharedId || bootParams.get('local') || bootParams.get('new') === '1' || bootParams.get('admin'));
+  if (opensSomething && !turnedAway) warmHeavyWorker();
+  const { fetchMeOnce, fetchDesignEarly, fetchScene } = await import('./net/api');
+  const askScene = (): Promise<unknown> | null => (earlySource && !narrow ? fetchScene(earlySource).catch(() => null) : null);
+  if (earlySource && !turnedAway) fetchDesignEarly(earlySource);
+  let earlyScene = askScene();
+
   // An account that signed up with a provider has a handle we invented for it,
   // and the server refuses almost everything until its owner picks one. Ask
   // here — before the desktop gate, before the editor, and before the draft
   // claim, which is itself one of the calls the server would refuse.
   {
-    const { fetchMe } = await import('./net/api');
-    const me = await fetchMe().catch(() => null);
+    const me = await fetchMeOnce().catch(() => null);
     if (me?.needsUsername) {
       const { ensureUsernameChosen } = await import('./ui/chooseUsernameModal');
       await ensureUsernameChosen(me);
+      // The two requests above were refused (428) while there was no handle;
+      // choosing one forgot them (net/api.ts), so ask again.
+      if (earlySource && !turnedAway) fetchDesignEarly(earlySource);
+      earlyScene = askScene();
     }
   }
-
-  const sharedId = sharedDesignId();
 
   // ---- which project ----
   //
@@ -225,8 +246,16 @@ async function main(): Promise<void> {
   }
 
   const t0 = performance.now();
-  // Off-thread generation keeps the UI responsive even for the 76k oval.
-  const map = await generateSeatMapAsync(template.id);
+  // Off-thread generation keeps the UI responsive even for the 76k oval. The
+  // template itself goes to the worker, custom and community grounds included
+  // (P1.16).
+  // A ground that fails its checks is not built at all (P1.16): back to the
+  // projects page with its "could not open" note, not a blank editor.
+  const map = await generateSeatMapAsync(template).catch(() => null);
+  if (!map) {
+    location.replace('/projects?missing=1');
+    return;
+  }
   const genMs = performance.now() - t0;
 
   // Narrow + shared link → lightweight read-only viewer (great for opening a
@@ -343,8 +372,8 @@ async function main(): Promise<void> {
     // Separate request, and a failure here costs the banners rather than the
     // tifo: an old design simply has no scene, and that is not an error.
     try {
-      const { fetchScene } = await import('./net/api');
-      sharedScene = await fetchScene(sourceId);
+      // Asked for at the start (above), alongside the design.
+      sharedScene = await (earlyScene ?? fetchScene(sourceId));
     } catch {
       sharedScene = null;
     }

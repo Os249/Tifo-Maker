@@ -449,11 +449,15 @@ export class MemoryTrafficRepository implements TrafficRepository {
 
 /** Postgres traffic store. All reads are defensive; a failure yields empty, never a 500. */
 export class PgTrafficRepository implements TrafficRepository {
-  constructor(private readonly pool: pg.Pool) {}
+  /**
+   * `maintenance` is the small pool for slow, non-request work (server/src/db.ts,
+   * performance plan P1.26); it defaults to the one pool where only one exists.
+   */
+  constructor(private readonly pool: pg.Pool, private readonly maintenance: pg.Pool = pool) {}
 
   /** Idempotent table creation, mirroring stadiumRepo's boot-safe pattern. */
   async init(): Promise<void> {
-    await this.pool.query(`
+    await this.maintenance.query(`
       CREATE TABLE IF NOT EXISTS visits (
         id            BIGSERIAL PRIMARY KEY,
         visitor_key   TEXT,
@@ -471,12 +475,12 @@ export class PgTrafficRepository implements TrafficRepository {
         is_bot        BOOLEAN NOT NULL DEFAULT false,
         created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
       )`);
-    await this.pool.query('CREATE INDEX IF NOT EXISTS visits_created_idx ON visits (created_at DESC)');
-    await this.pool.query('CREATE INDEX IF NOT EXISTS visits_source_idx ON visits (source, created_at DESC)');
-    await this.pool.query('CREATE INDEX IF NOT EXISTS visits_human_idx ON visits (created_at DESC) WHERE NOT is_bot');
+    await this.maintenance.query('CREATE INDEX IF NOT EXISTS visits_created_idx ON visits (created_at DESC)');
+    await this.maintenance.query('CREATE INDEX IF NOT EXISTS visits_source_idx ON visits (source, created_at DESC)');
+    await this.maintenance.query('CREATE INDEX IF NOT EXISTS visits_human_idx ON visits (created_at DESC) WHERE NOT is_bot');
     // One row per UTC day: how many distinct visitors it had. Written before
     // that day's keys are stripped, and holds nothing but a date and a count.
-    await this.pool.query(`CREATE TABLE IF NOT EXISTS visits_daily (
+    await this.maintenance.query(`CREATE TABLE IF NOT EXISTS visits_daily (
         day      DATE PRIMARY KEY,
         visitors INTEGER NOT NULL
       )`);
@@ -498,7 +502,7 @@ export class PgTrafficRepository implements TrafficRepository {
   /** One grouped query; [] on any failure so a single bad column can't blank the page. */
   private async bucket(expr: string, days: number, extra = ''): Promise<Bucket[]> {
     try {
-      const r = await this.pool.query(
+      const r = await this.maintenance.query(
         `SELECT ${expr} AS key, count(*)::int AS visits, count(DISTINCT visitor_key)::int AS visitors
            FROM visits
           WHERE NOT is_bot AND created_at >= now() - ($1::int * interval '1 day')
@@ -515,7 +519,7 @@ export class PgTrafficRepository implements TrafficRepository {
   async summary(days: number): Promise<TrafficSummary> {
     const out = EMPTY(days, true);
     try {
-      const r = await this.pool.query(
+      const r = await this.maintenance.query(
         `SELECT
            count(*) FILTER (WHERE NOT is_bot)::int                    AS visits,
            count(DISTINCT visitor_key) FILTER (WHERE NOT is_bot)::int AS visitors,
@@ -544,7 +548,7 @@ export class PgTrafficRepository implements TrafficRepository {
     out.countries = await this.bucket('country', days);
 
     try {
-      const r = await this.pool.query(
+      const r = await this.maintenance.query(
         `SELECT to_char(date_trunc('day', created_at),'YYYY-MM-DD') AS day,
                 count(*)::int AS visits, count(DISTINCT visitor_key)::int AS visitors
            FROM visits
@@ -558,7 +562,7 @@ export class PgTrafficRepository implements TrafficRepository {
     }
     // Days whose keys are already gone: the count kept before they went.
     try {
-      const r = await this.pool.query(
+      const r = await this.maintenance.query(
         `SELECT to_char(day,'YYYY-MM-DD') AS day, visitors FROM visits_daily
           WHERE day >= (now() - ($1::int * interval '1 day'))::date`,
         [days],
@@ -583,7 +587,7 @@ export class PgTrafficRepository implements TrafficRepository {
       // Yesterday is complete and every one of its keys is still present (keys
       // live two days), and purge runs at boot and every 24 h, so every day is
       // "yesterday" for at least one run. Kept first, stripped after.
-      await this.pool.query(
+      await this.maintenance.query(
         `INSERT INTO visits_daily (day, visitors)
          SELECT created_at::date, count(DISTINCT visitor_key)::int
            FROM visits
@@ -597,13 +601,13 @@ export class PgTrafficRepository implements TrafficRepository {
       /* best-effort, like the rest of purge */
     }
     try {
-      await this.pool.query(
+      await this.maintenance.query(
         `UPDATE visits SET visitor_key = NULL
           WHERE visitor_key IS NOT NULL AND created_at < now() - ($1::int * interval '1 day')`,
         [ANONYMIZE_AFTER_DAYS],
       );
-      await this.pool.query(`DELETE FROM visits WHERE created_at < now() - ($1::int * interval '1 day')`, [RETAIN_DAYS]);
-      await this.pool.query(`DELETE FROM visits_daily WHERE day < (now() - ($1::int * interval '1 day'))::date`, [RETAIN_DAYS]);
+      await this.maintenance.query(`DELETE FROM visits WHERE created_at < now() - ($1::int * interval '1 day')`, [RETAIN_DAYS]);
+      await this.maintenance.query(`DELETE FROM visits_daily WHERE day < (now() - ($1::int * interval '1 day'))::date`, [RETAIN_DAYS]);
     } catch {
       /* purge is best-effort; never block the app */
     }

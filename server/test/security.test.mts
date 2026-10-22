@@ -4142,3 +4142,1296 @@ async function makeDesign(app: FastifyInstance, token: string, isPublic = false)
   await app.close();
   console.log('audit round six: all assertions passed (private og cards and thumbnails, no-store by default for /api and errors, no-cache on server pages, dev-only ports, atomic password change and reset, sign-ins racing a reset, atomic email change, fail-closed scene strip, born-taken-down forks, fail-closed username wall and admin guards, length-blind compare, unlock key at boot, deleted account leaves the home page, limited 404s and scene saves, no dead CSP origins, pool error handler)');
 }
+
+// ---------- 2026-10: performance plan, stage 1 (server) ----------
+// The speed work changes how the security headers are built (helmet once per
+// process, P1.30), how requests are counted (a bucket for hashed assets,
+// P1.27), what the database is asked (comment counts, facets, profiles,
+// P1.11/P1.12) and how the server boots (P1.31). Each of those sits next to a
+// control, so the controls are pinned first: P0.1 the exact headers on every
+// kind of response, P0.2 who may cache what. Then one section per item.
+{
+  const { mkdtempSync, writeFileSync, mkdirSync, copyFileSync, readdirSync: listDir, readFileSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { MemoryAiUsageRepository, MemoryAiEventsRepository, MemoryEventsRepository } = await import('../src/memoryRepo');
+  const { MemoryDailyFeatureRepository } = await import('../src/featureRepo');
+  const { MemoryStadiumRepository } = await import('../src/stadiumRepo');
+  const { MemoryAdminStatsRepository } = await import('../src/statsRepo');
+  const { MemoryTrafficRepository } = await import('../src/trafficRepo');
+  const { MemoryFeedbackRepository } = await import('../src/feedbackRepo');
+  const { MemorySocRepository } = await import('../src/socRepo');
+  const { SocMonitor } = await import('../src/soc');
+  const { seatTable } = await import('../src/seatTable');
+  const check = (cond: unknown, msg: string): void => assert.ok(cond, msg);
+  const S1PW = 'orchid-ledger-pivot3';
+  const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64');
+  const NO_SUCH = '7f000000-0000-4000-8000-0000000000ee';
+  const mailStub = { send: async () => {} } as never;
+
+  // A build output of the shape vite writes: the pages, hashed assets (a
+  // module worker among them) and the public files, copied as they are.
+  const dist = mkdtempSync(`${tmpdir()}/tifo-perf-s1-`);
+  for (const f of listDir('.').filter((n) => n.endsWith('.html'))) copyFileSync(f, `${dist}/${f}`);
+  mkdirSync(`${dist}/assets`);
+  mkdirSync(`${dist}/news`);
+  const WORKER = '/assets/heavy.worker-Ab12Cd34.js';
+  writeFileSync(`${dist}${WORKER}`, 'self.onmessage = () => {};\n');
+  writeFileSync(`${dist}/assets/index-Ab12Cd34.js`, 'export {};\n');
+  writeFileSync(`${dist}/assets/index-Ab12Cd34.css`, 'body{margin:0}\n');
+  writeFileSync(`${dist}/assets/inter-latin-400-Ab12Cd34.woff2`, Buffer.alloc(64, 1));
+  writeFileSync(`${dist}/favicon.svg`, '<svg xmlns="http://www.w3.org/2000/svg"/>\n');
+  writeFileSync(`${dist}/favicon.ico`, Buffer.alloc(32, 1));
+  for (const f of ['apple-touch-icon.png', 'icon-512.png', 'og-card.png', 'og-default.png']) writeFileSync(`${dist}/${f}`, PNG);
+  writeFileSync(`${dist}/hero-stadium.webp`, Buffer.from('RIFF\0\0\0\0WEBPVP8 '));
+  writeFileSync(`${dist}/hero-stadium-640.webp`, Buffer.from('RIFF\0\0\0\0WEBPVP8 '));
+  writeFileSync(`${dist}/news/leagues-saudi.webp`, Buffer.from('RIFF\0\0\0\0WEBPVP8 '));
+  writeFileSync(`${dist}/robots.txt`, 'User-agent: *\nDisallow: /api/\n');
+  // A script outside /assets whose name never changes (theme-boot.js today).
+  writeFileSync(`${dist}/boot-script.js`, '/* unhashed */\n');
+  writeFileSync(`${dist}/verify-site.html`, '<!doctype html><title>v</title>\n');
+
+  /** Repositories that can be told to break, for the 500 and fail-closed paths. */
+  class S1Designs extends MemoryDesignRepository {
+    failGallery = false;
+    override async listPublic(q: Parameters<MemoryDesignRepository['listPublic']>[0]): ReturnType<MemoryDesignRepository['listPublic']> {
+      if (this.failGallery) throw new Error('connection terminated');
+      return super.listPublic(q);
+    }
+  }
+  let ipSeq = 0;
+  /** A fresh client address, so one section's requests never use another's budget. */
+  const freshIp = (): string => `198.18.${(ipSeq >> 8) & 255}.${ipSeq++ & 255}`;
+  const s1reg = async (app: FastifyInstance, u: string, ip = freshIp(), adminPassword?: string): Promise<{ token: string; id: string }> => {
+    const r = await app.inject({ method: 'POST', url: '/api/auth/register', remoteAddress: ip, payload: { username: u, password: S1PW, email: `${u}@example.test`, acceptedVersion: 'test', adminPassword } });
+    assert.equal(r.statusCode, 201, r.body);
+    const token = (r.json() as { token: string }).token;
+    return { token, id: ((await app.inject({ method: 'GET', url: '/api/me', remoteAddress: ip, headers: bearer(token) })).json() as { id: string }).id };
+  };
+
+  // ---- P0.1: the exact security headers, on every kind of response ----
+  //
+  // Nothing tested the headers themselves until now: "the CSP is unchanged"
+  // was a claim checked by reading. This pins every header helmet sets, byte
+  // for byte, on HTML, JSON, the module worker, images, static files (200 and
+  // 304), every error status the server produces, the admin pages and the AI
+  // routes. A change to any of them fails here; a deliberate tightening
+  // updates this table in the same commit, and nothing may ever loosen it.
+  {
+    const CSP = "default-src 'self';script-src 'self' 'unsafe-eval';style-src 'self' 'unsafe-inline';font-src 'self';img-src 'self' data:;connect-src 'self';object-src 'none';frame-ancestors 'none';base-uri 'self';form-action 'self';script-src-attr 'none';upgrade-insecure-requests";
+    const PINNED: Record<string, string> = {
+      'content-security-policy': CSP,
+      'cross-origin-opener-policy': 'same-origin',
+      'cross-origin-resource-policy': 'same-origin',
+      'origin-agent-cluster': '?1',
+      'referrer-policy': 'no-referrer',
+      'strict-transport-security': 'max-age=31536000; includeSubDomains',
+      'x-content-type-options': 'nosniff',
+      'x-dns-prefetch-control': 'off',
+      'x-download-options': 'noopen',
+      'x-frame-options': 'SAMEORIGIN',
+      'x-permitted-cross-domain-policies': 'none',
+      'x-xss-protection': '0',
+    };
+    // Headers that would each loosen something if they ever appeared.
+    const NEVER = ['x-powered-by', 'content-security-policy-report-only', 'access-control-allow-origin', 'access-control-allow-credentials', 'cross-origin-embedder-policy'];
+    /** The policy, read as directives, for the rules that hold whatever the exact string. */
+    const directivesOf = (csp: string): Map<string, string[]> =>
+      new Map(csp.split(';').map((d) => d.trim()).filter(Boolean).map((d) => { const [k, ...v] = d.split(/\s+/); return [k, v]; }));
+    const pinned = (r: { statusCode: number; headers: Record<string, unknown> }, label: string): void => {
+      for (const [h, v] of Object.entries(PINNED)) {
+        assert.equal(r.headers[h], v, `${label} (${r.statusCode}): ${h}`);
+      }
+      for (const h of NEVER) assert.equal(r.headers[h], undefined, `${label}: no ${h}`);
+      const d = directivesOf(String(r.headers['content-security-policy'] ?? ''));
+      assert.deepEqual(d.get('script-src'), ["'self'", "'unsafe-eval'"], `${label}: script-src is exactly 'self' 'unsafe-eval'`);
+      check(!d.has('worker-src') || d.get('worker-src')!.join(' ') === "'self'", `${label}: workers only from this origin`);
+      check((d.get('img-src') ?? []).every((s) => s === "'self'" || s === 'data:'), `${label}: img-src is 'self' and data: at most`);
+      assert.deepEqual(d.get('connect-src'), ["'self'"], `${label}: connect-src 'self'`);
+      assert.deepEqual(d.get('frame-ancestors'), ["'none'"], `${label}: never framed`);
+      assert.deepEqual(d.get('object-src'), ["'none'"], `${label}: no plugins`);
+      assert.deepEqual(d.get('script-src-attr'), ["'none'"], `${label}: no inline handlers`);
+      for (const [k, v] of d) {
+        if (!k.startsWith('script') && k !== 'default-src' && k !== 'worker-src') continue;
+        check(v.every((s) => !/unsafe-inline|^blob:|^data:|^https?:|^'nonce-|^'sha(256|384|512)-|^\*$/.test(s)), `${label}: ${k} allows no inline, blob:, data:, remote host, nonce or hash (${v.join(' ')})`);
+      }
+    };
+
+    const hAuth = new MemoryAuthRepository();
+    const hDesigns = new S1Designs((id) => hAuth.usernameOf(id));
+    const hApp = await buildApp(hDesigns, hAuth, templates, {
+      staticDir: dist,
+      rateLimit: true,
+      social: new MemorySocialRepository(hDesigns, hAuth),
+      featured: new MemoryDailyFeatureRepository(),
+      leads: new MemoryLeadsRepository(),
+      aiUsage: new MemoryAiUsageRepository(),
+      aiEvents: new MemoryAiEventsRepository(),
+      adminUsernames: ['mod_s1'],
+      aiAdminPassword: 'stage one admin password',
+      oauth: { google: { id: 'client-id', secret: 'client-secret' } },
+      emailSender: mailStub,
+    });
+    const owner = await s1reg(hApp, 'owner_s1');
+    await hAuth.markEmailVerified(owner.id);
+    const made = await hApp.inject({ method: 'POST', url: '/api/designs', remoteAddress: freshIp(), headers: bearer(owner.token), payload: { title: 'Pinned headers', templateId: DEFAULT_TEMPLATE.id, templateVersion: 1, palette: PALETTE, cellsGzB64, thumbnailPngB64: PNG.toString('base64') } });
+    assert.equal(made.statusCode, 201, made.body);
+    const pub = (made.json() as { id: string }).id;
+    assert.equal((await hApp.inject({ method: 'PATCH', url: `/api/designs/${pub}`, remoteAddress: freshIp(), headers: bearer(owner.token), payload: { isPublic: true } })).statusCode, 200);
+    const photo = await hApp.inject({ method: 'POST', url: `/api/designs/${pub}/photos`, remoteAddress: freshIp(), headers: bearer(owner.token), payload: { imageB64: PNG.toString('base64'), width: 1, height: 1 } });
+    assert.equal(photo.statusCode, 200, photo.body);
+    const photoId = (photo.json() as { photoId: string }).photoId;
+    const unlock = await hApp.inject({ method: 'POST', url: '/api/ai/unlock', remoteAddress: freshIp(), payload: { password: 'stage one admin password' } });
+    assert.equal(unlock.statusCode, 200, unlock.body);
+    pinned(unlock, 'POST /api/ai/unlock');
+    const unlockToken = (unlock.json() as { token: string }).token;
+
+    type Case = { label: string; status: number; method?: 'GET' | 'HEAD' | 'POST' | 'PUT' | 'DELETE' | 'OPTIONS'; url: string; headers?: Record<string, string>; payload?: unknown };
+    const own = bearer(owner.token);
+    const cases: Case[] = [
+      // Pages, server-rendered and static.
+      { label: 'landing', status: 200, url: '/' },
+      { label: 'landing HEAD', status: 200, method: 'HEAD', url: '/' },
+      { label: 'editor', status: 200, url: `/app?design=${pub}` },
+      { label: 'bare editor, sent to Projects', status: 302, url: '/app' },
+      { label: 'community', status: 200, url: '/community' },
+      { label: 'share page', status: 200, url: `/t/${pub}` },
+      { label: 'design page', status: 200, url: `/d/${pub}` },
+      { label: 'seat page', status: 200, url: `/s/${pub}` },
+      { label: 'clubs', status: 200, url: '/clubs' },
+      { label: 'legal', status: 200, url: '/legal' },
+      { label: 'spec', status: 200, url: '/tifo-spec' },
+      { label: 'reset page', status: 200, url: '/reset?token=abc' },
+      { label: 'account page', status: 200, url: '/account' },
+      { label: 'projects page', status: 200, url: '/projects' },
+      { label: 'sitemap', status: 200, url: '/sitemap.xml' },
+      { label: 'static html file', status: 200, url: '/verify-site.html' },
+      { label: 'admin shell', status: 200, url: '/admin' },
+      { label: 'admin module, locked', status: 404, url: '/admin.js' },
+      { label: 'admin module, unlocked', status: 200, url: '/admin.js', headers: { cookie: `tm_admin=${encodeURIComponent(unlockToken)}` } },
+      { label: 'admin unlock module', status: 200, url: '/admin-unlock.js' },
+      // JSON.
+      { label: 'health', status: 200, url: '/health' },
+      { label: 'templates', status: 200, url: '/api/templates' },
+      { label: 'gallery', status: 200, url: '/api/gallery' },
+      { label: 'gallery signed in', status: 200, url: '/api/gallery', headers: own },
+      { label: 'facets', status: 200, url: '/api/gallery/facets' },
+      { label: 'design JSON', status: 200, url: `/api/designs/${pub}` },
+      { label: 'me', status: 200, url: '/api/me', headers: own },
+      { label: 'admin overview without access', status: 403, url: '/api/funnel' },
+      { label: 'admin data with the unlock', status: 200, url: '/api/funnel', headers: { 'x-ai-unlock': unlockToken } },
+      // The module worker and the other static files, fresh and revalidated.
+      { label: 'module worker', status: 200, url: WORKER },
+      { label: 'hashed script', status: 200, url: '/assets/index-Ab12Cd34.js' },
+      { label: 'hashed stylesheet', status: 200, url: '/assets/index-Ab12Cd34.css' },
+      { label: 'hashed font', status: 200, url: '/assets/inter-latin-400-Ab12Cd34.woff2' },
+      { label: 'unhashed script', status: 200, url: '/boot-script.js' },
+      { label: 'favicon svg', status: 200, url: '/favicon.svg' },
+      { label: 'favicon ico', status: 200, url: '/favicon.ico' },
+      { label: 'robots', status: 200, url: '/robots.txt' },
+      { label: 'site card', status: 200, url: '/og-card.png' },
+      { label: 'hero picture', status: 200, url: '/hero-stadium.webp' },
+      { label: 'news picture', status: 200, url: '/news/leagues-saudi.webp' },
+      // Pictures served by routes.
+      { label: 'thumbnail', status: 200, url: `/api/designs/${pub}/thumbnail.png` },
+      { label: 'share card', status: 200, url: `/og/t/${pub}.png` },
+      { label: 'share card, old URL', status: 200, url: `/api/designs/${pub}/og.png` },
+      { label: 'match photo', status: 200, url: `/api/photos/${photoId}` },
+      // Redirects.
+      { label: 'provider sign-in', status: 302, url: '/api/auth/google' },
+      // Every refusal the server writes.
+      { label: '404 api', status: 404, url: '/api/nope' },
+      { label: '404 page', status: 404, url: '/nope' },
+      { label: '404 asset', status: 404, url: '/assets/nope.js' },
+      { label: '404 card', status: 404, url: `/og/t/${NO_SUCH}.png` },
+      { label: '404 picture', status: 404, url: `/api/designs/${NO_SUCH}/thumbnail.png` },
+      { label: '404 preflight', status: 404, method: 'OPTIONS', url: '/api/me', headers: { origin: 'https://evil.example', 'access-control-request-method': 'GET' } },
+      { label: '400 bad id', status: 400, method: 'POST', url: '/api/report', payload: { targetType: 'design', targetId: 'abc', reason: 'x' } },
+      { label: '400 broken JSON', status: 400, method: 'POST', url: '/api/designs', headers: { ...own, 'content-type': 'application/json' }, payload: '{bad' },
+      { label: '401', status: 401, url: '/api/me' },
+      { label: '403', status: 403, method: 'PUT', url: `/api/designs/${pub}/tags`, headers: bearer('not-a-session'), payload: { tags: [] } },
+      { label: '413', status: 413, method: 'POST', url: '/api/designs', headers: own, payload: { title: 'x'.repeat(1_100_000) } },
+      { label: '415', status: 415, method: 'POST', url: '/api/designs', headers: { ...own, 'content-type': 'application/x-www-form-urlencoded' }, payload: 'title=x' },
+      // The AI routes, refused and answered.
+      { label: 'AI unlock, wrong password', status: 401, method: 'POST', url: '/api/ai/unlock', payload: { password: 'nope' } },
+      { label: 'AI quota, signed out', status: 401, url: '/api/ai/quota' },
+      { label: 'AI quota, unlocked', status: 200, url: '/api/ai/quota', headers: { 'x-ai-unlock': unlockToken } },
+      { label: 'AI generate, signed out', status: 401, method: 'POST', url: '/api/ai/generate', payload: { prompt: 'a red tifo' } },
+      { label: 'AI sign out', status: 204, method: 'DELETE', url: '/api/ai/unlock' },
+    ];
+    // 403 above is a forged token on an owner route: 401 is what it answers.
+    cases.find((c) => c.label === '403')!.status = 401;
+    for (const c of cases) {
+      const r = await hApp.inject({ method: c.method ?? 'GET', url: c.url, remoteAddress: freshIp(), headers: c.headers, payload: c.payload as never });
+      assert.equal(r.statusCode, c.status, `${c.label}: ${c.method ?? 'GET'} ${c.url} answered ${r.statusCode} (${r.body.slice(0, 120)})`);
+      pinned(r, c.label);
+    }
+    // 304s: a static file revalidated, the worker included.
+    for (const url of [WORKER, '/favicon.svg', '/robots.txt']) {
+      const ip = freshIp();
+      const first = await hApp.inject({ method: 'GET', url, remoteAddress: ip });
+      const etag = String(first.headers.etag ?? '');
+      check(etag, `${url} has an ETag`);
+      const again = await hApp.inject({ method: 'GET', url, remoteAddress: ip, headers: { 'if-none-match': etag } });
+      assert.equal(again.statusCode, 304, `${url} revalidates`);
+      pinned(again, `${url} 304`);
+    }
+    // 429: the sign-in limit, and the global one.
+    {
+      const ip = freshIp();
+      let last = null as Awaited<ReturnType<FastifyInstance['inject']>> | null;
+      for (let i = 0; i < 11; i++) last = await hApp.inject({ method: 'POST', url: '/api/auth/login', remoteAddress: ip, payload: { username: 'nobody_s1', password: 'wrong password here' } });
+      assert.equal(last!.statusCode, 429, 'the 11th sign-in in a minute is refused');
+      pinned(last!, 'sign-in 429');
+      const ip2 = freshIp();
+      for (let i = 0; i < 300; i++) await hApp.inject({ method: 'GET', url: '/api/templates', remoteAddress: ip2 });
+      const over = await hApp.inject({ method: 'GET', url: '/api/templates', remoteAddress: ip2 });
+      assert.equal(over.statusCode, 429, 'the 301st request in a minute is refused');
+      pinned(over, 'global 429');
+      const over404 = await hApp.inject({ method: 'GET', url: '/nope', remoteAddress: ip2 });
+      assert.equal(over404.statusCode, 429, 'and so is a probe from the same client');
+      pinned(over404, '404 429');
+    }
+    // 500: a database failure, through the error handler.
+    hDesigns.failGallery = true;
+    const failed = await hApp.inject({ method: 'GET', url: '/api/gallery', remoteAddress: freshIp() });
+    hDesigns.failGallery = false;
+    assert.equal(failed.statusCode, 500);
+    assert.deepEqual(failed.json(), { error: 'internal error' }, 'no driver message');
+    pinned(failed, '500');
+    await hApp.close();
+    console.log(`  P0.1 header pin: ${cases.length + 3 + 3 + 1} responses carry exactly the pinned headers`);
+  }
+
+  // ---- P0.2: who may cache what ----
+  //
+  // Every route that serves a design, for every kind of design and every kind
+  // of caller. The rules: a response that says `public` is about a public
+  // design, is the same for everyone, and carries nothing that belongs to its
+  // owner; anything about a design that is not public says `private` or
+  // `no-store` (or, for a generic HTML page, `no-cache` with the design kept
+  // out of it); every refusal says how it may be cached.
+  {
+    const auth = new MemoryAuthRepository();
+    const designs = new MemoryDesignRepository((id) => auth.usernameOf(id));
+    const social = new MemorySocialRepository(designs, auth);
+    const app = await buildApp(designs, auth, templates, {
+      staticDir: dist, social, featured: new MemoryDailyFeatureRepository(),
+      adminUsernames: ['mod_m'], aiAdminPassword: 'matrix admin password', emailSender: mailStub,
+    });
+    const owner = await s1reg(app, 'owner_m');
+    const other = await s1reg(app, 'other_m');
+    const mod = await s1reg(app, 'mod_m', freshIp(), 'matrix admin password');
+    await auth.markEmailVerified(owner.id);
+    const SECRET_LAYER = 'data:image/png;base64,T1dORVItTEFZRVItTTI=';
+    const sceneB64 = gzipSync(Buffer.from(JSON.stringify({ v: 1, banners: [{ id: 'b1' }], layers: [{ id: 'l1', src: SECRET_LAYER }] }))).toString('base64');
+    const OWNER_ONLY = ['pinned', 'deletedAt', 'takenDown', 'origin'];
+    type Kind = 'public' | 'private' | 'taken down' | 'trashed' | 'ownerless private' | 'ownerless public';
+    const ids = new Map<Kind, { id: string; title: string; photo: string | null }>();
+    const mk = async (kind: Kind): Promise<void> => {
+      const title = `Matrix ${kind} ${Math.random().toString(36).slice(2, 7)}`;
+      if (kind.startsWith('ownerless')) {
+        const m = await designs.create({ title, templateId: DEFAULT_TEMPLATE.id, templateVersion: 1, palette: PALETTE, cellsGz: gzipSync(new Uint8Array(map.count)), ownerId: null as unknown as string, thumbnailPng: PNG });
+        if (kind === 'ownerless public') await designs.patchMeta(m.id, { isPublic: true });
+        await designs.putScene(m.id, Buffer.from(sceneB64, 'base64'));
+        ids.set(kind, { id: m.id, title, photo: null });
+        return;
+      }
+      const r = await app.inject({ method: 'POST', url: '/api/designs', headers: bearer(owner.token), payload: { title, templateId: DEFAULT_TEMPLATE.id, templateVersion: 1, palette: PALETTE, cellsGzB64, thumbnailPngB64: PNG.toString('base64') } });
+      assert.equal(r.statusCode, 201, r.body);
+      const id = (r.json() as { id: string }).id;
+      const ownH = bearer(owner.token);
+      assert.equal((await app.inject({ method: 'PUT', url: `/api/designs/${id}/scene`, headers: ownH, payload: { sceneGzB64: sceneB64 } })).statusCode, 200);
+      assert.equal((await app.inject({ method: 'POST', url: `/api/designs/${id}/og-image`, headers: ownH, payload: { ogPngB64: PNG.toString('base64') } })).statusCode, 200);
+      const ph = await app.inject({ method: 'POST', url: `/api/designs/${id}/photos`, headers: ownH, payload: { imageB64: PNG.toString('base64'), width: 1, height: 1 } });
+      assert.equal(ph.statusCode, 200, ph.body);
+      await app.inject({ method: 'POST', url: `/api/designs/${id}/revisions`, headers: ownH, payload: { indicesB64: Buffer.from(new Uint32Array([0]).buffer).toString('base64'), beforeB64: Buffer.from([0]).toString('base64'), afterB64: Buffer.from([1]).toString('base64') } });
+      if (kind !== 'private') assert.equal((await app.inject({ method: 'PATCH', url: `/api/designs/${id}`, headers: ownH, payload: { isPublic: true } })).statusCode, 200);
+      assert.equal((await app.inject({ method: 'POST', url: `/api/designs/${id}/comments`, headers: ownH, payload: { body: `a comment on ${kind}` } })).statusCode, 201);
+      await designs.setPinned(id, true);
+      if (kind === 'taken down') assert.equal((await app.inject({ method: 'POST', url: `/api/admin/designs/${id}/takedown`, headers: bearer(mod.token) })).statusCode, 200);
+      if (kind === 'trashed') assert.equal((await app.inject({ method: 'DELETE', url: `/api/designs/${id}`, headers: ownH })).statusCode, 200);
+      ids.set(kind, { id, title, photo: (ph.json() as { photoId: string }).photoId });
+    };
+    for (const k of ['public', 'private', 'taken down', 'trashed', 'ownerless private', 'ownerless public'] as Kind[]) await mk(k);
+    const isPublicKind = (k: Kind): boolean => k === 'public' || k === 'ownerless public';
+    const callers: [string, Record<string, string> | undefined][] = [['anon', undefined], ['other', bearer(other.token)], ['owner', bearer(owner.token)], ['moderator', bearer(mod.token)]];
+    let checked = 0;
+    for (const [kind, d] of ids) {
+      const urls = [
+        `/api/designs/${d.id}`, `/api/designs/${d.id}/scene`, `/api/designs/${d.id}/thumbnail.png`,
+        `/og/t/${d.id}.png`, `/api/designs/${d.id}/og.png`, `/api/designs/${d.id}/comments`,
+        `/api/designs/${d.id}/revisions`, `/api/designs/${d.id}/photos`, `/api/designs/${d.id}/stats`,
+        `/api/gallery/${d.id}`, `/t/${d.id}`, `/d/${d.id}`, `/s/${d.id}`,
+        `/api/admin/designs/${d.id}/thumbnail.png`,
+        ...(d.photo ? [`/api/photos/${d.photo}`] : []),
+      ];
+      for (const url of urls) {
+        const anonBody = (await app.inject({ method: 'GET', url })).rawPayload;
+        for (const [who, headers] of callers) {
+          const r = await app.inject({ method: 'GET', url, headers });
+          const label = `${kind} design, ${who}: GET ${url} (${r.statusCode})`;
+          const cc = String(r.headers['cache-control'] ?? '');
+          check(cc, `${label} says how it may be cached`);
+          const html = String(r.headers['content-type'] ?? '').startsWith('text/html');
+          const json = String(r.headers['content-type'] ?? '').startsWith('application/json');
+          const text = r.body;
+          const ownerOnly = json && r.statusCode === 200 && (OWNER_ONLY.some((k) => new RegExp(`"${k}"\\s*:`).test(text)) || text.includes(SECRET_LAYER) || /"sceneGzB64":"[^"]/.test(text) && who === 'owner');
+          if (/\bpublic\b/.test(cc)) {
+            check(isPublicKind(kind), `${label}: only a public design's answer may be public (${cc})`);
+            check(!json || !OWNER_ONLY.some((k) => new RegExp(`"${k}"\\s*:`).test(text)), `${label}: a public answer has no owner-only field`);
+            check(!text.includes(SECRET_LAYER), `${label}: a public answer has no layer`);
+            check(Buffer.compare(r.rawPayload, anonBody) === 0, `${label}: a public answer is the same for everyone`);
+          }
+          if (r.statusCode === 200 && !isPublicKind(kind)) {
+            if (html) {
+              assert.equal(cc, 'no-cache', `${label}: a page about a design that is not public is generic and revalidated`);
+              check(!text.includes(d.title), `${label}: and does not name it`);
+            } else {
+              check(/\bprivate\b|no-store/.test(cc) && !/\bpublic\b/.test(cc), `${label}: never shared-cacheable (${cc})`);
+            }
+          }
+          if (ownerOnly) check(/no-store|\bprivate\b/.test(cc), `${label}: an answer with the owner's own fields is no-store (${cc})`);
+          if (r.statusCode >= 400) check(/no-store|no-cache/.test(cc), `${label}: a refusal is not cached (${cc})`);
+          checked++;
+        }
+      }
+    }
+    // The lists: never a design that is not public, whoever asks.
+    const hidden = [...ids].filter(([k]) => !isPublicKind(k)).map(([, d]) => d);
+    for (const url of ['/api/gallery', '/api/gallery?limit=120', '/api/gallery/facets', `/api/users/${owner.id}/profile`, '/sitemap.xml', '/community', '/']) {
+      for (const [who, headers] of callers) {
+        const r = await app.inject({ method: 'GET', url, headers });
+        assert.equal(r.statusCode, 200, `${url} as ${who}`);
+        check(r.headers['cache-control'], `${url} as ${who} says how it may be cached`);
+        for (const h of hidden) check(!r.body.includes(h.id) && !r.body.includes(h.title), `${url} as ${who} does not list a design that is not public`);
+        if (url.startsWith('/api/') && headers) assert.equal(r.headers['cache-control'], 'no-store', `${url} for a signed-in caller is per-viewer: no-store`);
+        checked++;
+      }
+    }
+    for (const url of ['/api/designs', '/api/projects']) {
+      const r = await app.inject({ method: 'GET', url, headers: bearer(owner.token) });
+      assert.equal(r.headers['cache-control'], 'no-store', `${url}: the owner's own list`);
+    }
+    await app.close();
+    console.log(`  P0.2 cache matrix: ${checked} answers checked (6 kinds of design x 4 callers x every route that serves one, and the lists)`);
+  }
+
+  // ---- P0.2: every /api answer and every 404 says how it may be cached ----
+  //
+  // Walked from the routes the app actually registers, so a route added later
+  // is checked without anyone remembering to add it here.
+  {
+    const routes: { method: string | string[]; url: string }[] = [];
+    const auth = new MemoryAuthRepository();
+    const designs = new MemoryDesignRepository((id) => auth.usernameOf(id));
+    const social = new MemorySocialRepository(designs, auth);
+    const app = await buildApp(designs, auth, templates, {
+      onRoute: (r) => routes.push(r),
+      staticDir: dist, social, featured: new MemoryDailyFeatureRepository(), leads: new MemoryLeadsRepository(),
+      events: new MemoryEventsRepository(), aiUsage: new MemoryAiUsageRepository(), aiEvents: new MemoryAiEventsRepository(),
+      stadiums: new MemoryStadiumRepository(), stats: new MemoryAdminStatsRepository(), traffic: new MemoryTrafficRepository(),
+      feedback: new MemoryFeedbackRepository(), soc: new SocMonitor({ repo: new MemorySocRepository() }),
+      adminUsernames: ['walk_mod'], aiAdminPassword: 'walk admin password', emailSender: mailStub,
+      oauth: { google: { id: 'client-id', secret: 'client-secret' } },
+    });
+    const u = await s1reg(app, 'walker_s1');
+    const d = await app.inject({ method: 'POST', url: '/api/designs', headers: bearer(u.token), payload: { title: 'Walked', templateId: DEFAULT_TEMPLATE.id, templateVersion: 1, palette: PALETTE, cellsGzB64 } });
+    const designId = (d.json() as { id: string }).id;
+    const values: Record<string, string> = { id: designId, provider: 'google', photoId: NO_SUCH, commentId: NO_SUCH };
+    const api = routes.filter((r) => r.url.startsWith('/api/'));
+    check(api.length > 100, `the walk sees the API (${api.length} routes)`);
+    // Sign-out and account deletion last, so the session lasts the walk.
+    const last = (r: { url: string }) => (r.url === '/api/auth/logout' || r.url === '/api/account' ? 1 : 0);
+    api.sort((a, b) => last(a) - last(b));
+    let walked = 0;
+    for (const who of [undefined, bearer(u.token)]) {
+      for (const r of api) {
+        for (const method of [r.method].flat()) {
+          const url = r.url.replace(/:([A-Za-z]+)/g, (_m, name: string) => values[name] ?? NO_SUCH);
+          const body = method === 'GET' || method === 'HEAD' ? undefined : {};
+          const res = await app.inject({ method: method as 'GET', url, headers: who, payload: body as never });
+          check(res.headers['cache-control'], `${method} ${r.url} (${who ? 'signed in' : 'anon'}, ${res.statusCode}) says how it may be cached`);
+          walked++;
+        }
+      }
+    }
+    for (const url of ['/nope', '/api/nope', '/assets/nope.js', '/news/nope.webp', `/og/t/${NO_SUCH}.png`, '/admin.js', '/d/not-a-uuid/x', '/.env', '/wp-login.php']) {
+      for (const method of ['GET', 'HEAD', 'POST'] as const) {
+        const res = await app.inject({ method, url });
+        if (res.statusCode !== 404) continue;
+        check(/no-store|no-cache/.test(String(res.headers['cache-control'] ?? '')), `${method} ${url} 404 says how it may be cached (${res.headers['cache-control']})`);
+        walked++;
+      }
+    }
+    await app.close();
+    console.log(`  P0.2 walk: ${walked} answers from ${api.length} API routes and the 404s all carry Cache-Control`);
+  }
+
+  // ---- P1.27: the hashed build files have a capped bucket of their own ----
+  //
+  // They were in the general 300, and six ordinary page views in 50 seconds
+  // used it up: the seventh page's own scripts got 429. They now count in a
+  // bucket of 600 a minute. Still a limit, still per client (an IPv6 /64 is
+  // one client here too), one bucket for every file, decided by the static
+  // route that answered and never by how the URL was written. The 300 and
+  // every per-route limit are unchanged.
+  {
+    const auth = new MemoryAuthRepository();
+    const designs = new MemoryDesignRepository((id) => auth.usernameOf(id));
+    const app = await buildApp(designs, auth, templates, { staticDir: dist, rateLimit: true });
+    const ASSETS = ['/assets/index-Ab12Cd34.js', '/assets/index-Ab12Cd34.css', WORKER, '/assets/inter-latin-400-Ab12Cd34.woff2'];
+    const login = (ip: string) => app.inject({ method: 'POST', url: '/api/auth/login', remoteAddress: ip, payload: { username: 'nobody_s1', password: 'wrong password here' } });
+    const count = async (n: number, f: (i: number) => Promise<{ statusCode: number }>): Promise<Record<number, number>> => {
+      const by: Record<number, number> = {};
+      for (let i = 0; i < n; i++) { const st = (await f(i)).statusCode; by[st] = (by[st] ?? 0) + 1; }
+      return by;
+    };
+    // 400 asset requests, then sign-ins: still exactly 10 a minute.
+    const ip = '198.19.0.1';
+    assert.deepEqual(await count(400, (i) => app.inject({ method: 'GET', url: ASSETS[i % ASSETS.length], remoteAddress: ip })), { 200: 400 }, 'a page’s worth of assets, many times over, is served');
+    assert.deepEqual(await count(12, () => login(ip)), { 401: 10, 429: 2 }, 'sign-in is still 10 a minute after 400 asset requests');
+    // The general 300 is untouched by them, and still 300.
+    assert.deepEqual(await count(301, () => app.inject({ method: 'GET', url: '/api/templates', remoteAddress: ip })), { 200: 300, 429: 1 }, 'the general bucket is 300, whatever the assets used');
+    // And the assets are capped: 600 in all.
+    assert.deepEqual(await count(201, (i) => app.inject({ method: i % 2 ? 'HEAD' : 'GET', url: ASSETS[i % ASSETS.length], remoteAddress: ip })), { 200: 200, 429: 1 }, 'the 601st asset request in a minute is refused');
+    // A miss under /assets/ is a 404 like any other: in the 300, not the 600.
+    const ip2 = '198.19.0.2';
+    assert.deepEqual(await count(300, () => app.inject({ method: 'GET', url: '/assets/nope.js', remoteAddress: ip2 })), { 404: 300 });
+    assert.equal((await app.inject({ method: 'GET', url: '/api/templates', remoteAddress: ip2 })).statusCode, 429, '/assets/nope.js counted in the 300');
+    assert.equal((await app.inject({ method: 'GET', url: ASSETS[0], remoteAddress: ip2 })).statusCode, 200, 'while the real files are still served');
+    // Paths that only look like assets are whatever the router makes of them.
+    for (const url of ['/assets/../api/templates', '/assets%2F..%2Fapi/templates', '/assets/./index-Ab12Cd34.js/../../api/templates', '/assets//index-Ab12Cd34.js']) {
+      const r = await app.inject({ method: 'GET', url, remoteAddress: ip2 });
+      assert.equal(r.statusCode, 429, `${url} is not an asset request (${r.statusCode})`);
+    }
+    // A POST to a file's path is not a file request either.
+    const ip3 = '198.19.0.3';
+    assert.deepEqual(await count(300, () => app.inject({ method: 'POST', url: ASSETS[0], remoteAddress: ip3, payload: {} })), { 404: 300 });
+    assert.equal((await app.inject({ method: 'GET', url: '/api/templates', remoteAddress: ip3 })).statusCode, 429, 'a POST to an asset path counted in the 300');
+    // IPv6: the whole /64 is one client for the asset bucket too.
+    const in64 = (i: number) => `2001:db8:5:6:${(i >> 16 & 0xffff).toString(16)}:${(i & 0xffff).toString(16)}::${(i % 7) + 1}`;
+    assert.deepEqual(await count(600, (i) => app.inject({ method: 'GET', url: ASSETS[i % ASSETS.length], remoteAddress: in64(i) })), { 200: 600 });
+    assert.equal((await app.inject({ method: 'GET', url: ASSETS[0], remoteAddress: '2001:db8:5:6:ffff:ffff:ffff:fffe' })).statusCode, 429, 'a new address in the same /64 is the same client');
+    assert.equal((await app.inject({ method: 'GET', url: ASSETS[0], remoteAddress: '2001:DB8:5:6::abcd' })).statusCode, 429, 'however it is written');
+    assert.equal((await app.inject({ method: 'GET', url: ASSETS[0], remoteAddress: '2001:db8:5:7::1' })).statusCode, 200, 'the next /64 is another client');
+    assert.equal((await app.inject({ method: 'GET', url: '/api/templates', remoteAddress: '2001:db8:5:6::99' })).statusCode, 200, 'and the /64’s general bucket is its own');
+    // The key never comes from what the caller sends: a new bearer per request is still one client.
+    const ip4 = '198.19.0.4';
+    assert.deepEqual(await count(301, (i) => app.inject({ method: 'GET', url: '/api/templates', remoteAddress: ip4, headers: bearer(`forged-${i}`) })), { 200: 300, 429: 1 }, 'a forged bearer per request shares one bucket');
+    assert.deepEqual(await count(601, (i) => app.inject({ method: 'GET', url: ASSETS[i % ASSETS.length], remoteAddress: ip4, headers: bearer(`forged-${i}`) })), { 200: 600, 429: 1 }, 'for the assets too');
+    const head = await app.inject({ method: 'GET', url: ASSETS[0], remoteAddress: '198.19.0.5' });
+    assert.equal(head.headers['x-ratelimit-limit'], '600', 'an asset answer reports its own bucket');
+    assert.equal((await app.inject({ method: 'GET', url: '/api/templates', remoteAddress: '198.19.0.5' })).headers['x-ratelimit-limit'], '300', 'and the API its own');
+    await app.close();
+    console.log('  P1.27 asset bucket: 600 a minute for hashed files, per client and /64; sign-in, the 300 and 404s unchanged');
+  }
+
+  // ---- P1.9: a bare /app is sent to Projects by the server ----
+  //
+  // Only when the query is empty or campaign tags alone; every other query is
+  // the editor's, as before. The target is a fixed path here, so nothing a
+  // visitor puts in the link can choose where the redirect goes.
+  {
+    const auth = new MemoryAuthRepository();
+    const designs = new MemoryDesignRepository((id) => auth.usernameOf(id));
+    const app = await buildApp(designs, auth, templates, { staticDir: dist });
+    const bare: [string, string][] = [
+      ['/app', '/projects?start=1'],
+      ['/app?', '/projects?start=1'],
+      ['/app?&&', '/projects?start=1'],
+      ['/app?utm_source=whatsapp&utm_medium=share&utm_campaign=tifo', '/projects?start=1&utm_source=whatsapp&utm_medium=share&utm_campaign=tifo'],
+      ['/app?utm_source=chatgpt.com', '/projects?start=1&utm_source=chatgpt.com'],
+      ['/app?utm_term=%0d%0aSet-Cookie:%20x=1', '/projects?start=1&utm_term=%0D%0ASet-Cookie%3A+x%3D1'],
+      ['/app?utm_content=https://evil.example/', '/projects?start=1&utm_content=https%3A%2F%2Fevil.example%2F'],
+    ];
+    for (const [url, to] of bare) {
+      for (const method of ['GET', 'HEAD'] as const) {
+        const r = await app.inject({ method, url });
+        assert.equal(r.statusCode, 302, `${method} ${url} is bare`);
+        assert.equal(r.headers.location, to, `${method} ${url} goes to Projects`);
+        assert.equal(r.headers['cache-control'], 'no-cache', `${url}: the redirect is revalidated like the page it replaces`);
+        check(!/[\r\n]/.test(String(r.headers.location)) && !String(r.headers['set-cookie'] ?? '').includes('x=1'), `${url}: nothing from the link becomes a header`);
+      }
+    }
+    // Everything else is the editor's to read, exactly as before.
+    for (const url of [
+      `/app?design=${NO_SUCH}`, `/app?project=${NO_SUCH}`, '/app?local=abc123', '/app?new=1', '/app?new=1&from=x&import=1',
+      '/app?admin=1', '/app?signedin=google', '/app?verified=1', '/app?sim=1', '/app?e2e', '/app?start=1',
+      `/app?utm_source=x&design=${NO_SUCH}`, '/app?utm_source=x&local=abc', '/app?x=1', '/app?=1', '/app?UTM_SOURCE=x', '/app?utm_=x', '/app?utm_source[]=x',
+    ]) {
+      const r = await app.inject({ method: 'GET', url });
+      assert.equal(r.statusCode, 200, `${url} opens the editor`);
+      check(String(r.headers['content-type']).startsWith('text/html'), `${url} is the editor page`);
+    }
+    await app.close();
+    console.log('  P1.9 bare /app: 302 to /projects?start=1 for an empty or utm-only query, the editor for anything else');
+  }
+
+  // ---- P1.11 / P1.12: comment counts, facets, profiles and the sitemap ----
+  //
+  // The feed's cards carry their comment count (the 60 thread fetches per
+  // /community view go), counted exactly as the thread route returns it. The
+  // facets are counted in SQL and remembered per scope for a minute, and
+  // forgotten at once on every change to the public set. A profile lists the
+  // person's public designs from a query that is "owner AND public", never
+  // their own list. The sitemap reads two columns.
+  {
+    const { designFacets, COLOUR_FAMILIES: FAMILIES } = await import('../../src/core/facets');
+    const auth = new MemoryAuthRepository();
+    const designs = new MemoryDesignRepository((id) => auth.usernameOf(id));
+    const social = new MemorySocialRepository(designs, auth);
+    const app = await buildApp(designs, auth, templates, { staticDir: dist, social, featured: new MemoryDailyFeatureRepository(), adminUsernames: ['mod_f'], aiAdminPassword: 'facets admin password' });
+    const owner = await s1reg(app, 'owner_f');
+    const fan = await s1reg(app, 'fan_f');
+    const leaver = await s1reg(app, 'leaver_f');
+    const mod = await s1reg(app, 'mod_f', freshIp(), 'facets admin password');
+    await auth.markEmailVerified(fan.id);
+    const ownH = bearer(owner.token);
+    const create = async (title: string, palette: string[], pub: boolean, who = owner): Promise<string> => {
+      const r = await app.inject({ method: 'POST', url: '/api/designs', headers: bearer(who.token), payload: { title, templateId: DEFAULT_TEMPLATE.id, templateVersion: 1, palette, cellsGzB64 } });
+      assert.equal(r.statusCode, 201, r.body);
+      const id = (r.json() as { id: string }).id;
+      if (pub) assert.equal((await app.inject({ method: 'PATCH', url: `/api/designs/${id}`, headers: bearer(who.token), payload: { isPublic: true } })).statusCode, 200);
+      return id;
+    };
+    const comment = async (who: { token: string }, id: string, body: string, parentId?: string): Promise<string> => {
+      const r = await app.inject({ method: 'POST', url: `/api/designs/${id}/comments`, headers: bearer(who.token), payload: { body, parentId } });
+      assert.equal(r.statusCode, 201, r.body);
+      return (r.json() as { id: string }).id;
+    };
+    const RED = ['#262a33', '#d01020', '#ffffff'];
+    const BLUE = ['#262a33', '#1040d0', '#ffffff'];
+    const a = await create('Al Hilal in blue', BLUE, true);
+    const b = await create('Red wall', RED, true);
+    const c = await create('Quiet one', BLUE, true);
+    const priv = await create('Al Nassr private plan', RED, false);
+    const top = await comment(fan, a, 'first');
+    await comment(owner, a, 'a reply', top);
+    await comment(leaver, a, 'from someone who leaves');
+    const gone = await comment(fan, b, 'to be deleted');
+    await comment(fan, b, 'stays');
+    await comment(owner, priv, 'a note on a private design');
+    assert.equal((await app.inject({ method: 'DELETE', url: `/api/comments/${gone}`, headers: bearer(fan.token) })).statusCode, 200);
+    assert.equal((await app.inject({ method: 'DELETE', url: '/api/account', headers: bearer(leaver.token), payload: { password: S1PW } })).statusCode, 204);
+    // A design liked by the fan, so the profile's other list has a card too.
+    assert.equal((await app.inject({ method: 'POST', url: `/api/designs/${a}/vote`, headers: bearer(fan.token), payload: { value: 1 } })).statusCode, 200);
+
+    /** Every card the API hands out, from every list that carries them. */
+    const cards = async (headers?: Record<string, string>): Promise<{ from: string; id: string; commentCount: unknown }[]> => {
+      const out: { from: string; id: string; commentCount: unknown }[] = [];
+      for (const it of (await app.inject({ method: 'GET', url: '/api/gallery', headers })).json() as { id: string; commentCount: unknown }[]) out.push({ from: 'gallery', ...it });
+      for (const it of (await app.inject({ method: 'GET', url: '/api/gallery?sort=likes', headers })).json() as { id: string; commentCount: unknown }[]) out.push({ from: 'gallery by likes', ...it });
+      for (const id of [a, b, c]) out.push({ from: 'gallery item', ...((await app.inject({ method: 'GET', url: `/api/gallery/${id}`, headers })).json() as { id: string; commentCount: unknown }) });
+      const prof = (await app.inject({ method: 'GET', url: `/api/users/${owner.id}/profile`, headers })).json() as { created: { id: string; commentCount: unknown }[] };
+      for (const it of prof.created) out.push({ from: 'profile created', ...it });
+      const fanProf = (await app.inject({ method: 'GET', url: `/api/users/${fan.id}/profile`, headers })).json() as { liked: { id: string; commentCount: unknown }[] };
+      for (const it of fanProf.liked) out.push({ from: 'profile liked', ...it });
+      return out;
+    };
+    for (const [who, headers] of [['anon', undefined], ['fan', bearer(fan.token)], ['owner', ownH]] as const) {
+      const all = await cards(headers);
+      check(all.length >= 10, `${who}: cards from every list (${all.length})`);
+      for (const card of all) {
+        const thread = (await app.inject({ method: 'GET', url: `/api/designs/${card.id}/comments`, headers })).json() as unknown[];
+        assert.equal(card.commentCount, thread.length, `${who}, ${card.from}: commentCount is the thread's length (${card.id})`);
+        check(card.id !== priv, `${who}, ${card.from}: never a private design`);
+      }
+    }
+    // A thread that changes is counted as it is now.
+    await comment(fan, c, 'new');
+    const cNow = ((await app.inject({ method: 'GET', url: `/api/gallery/${c}` })).json() as { commentCount: number }).commentCount;
+    assert.equal(cNow, 1, 'a new comment is counted at once');
+
+    // ---- facets: what the JavaScript used to compute, now from the counts ----
+    /** The old answer, computed the old way: every public card, classified here. */
+    const oldWay = async (query: string): Promise<{ total: number; colors: { id: string; count: number }[]; clubs: { id: string; count: number }[] }> => {
+      const qs = new URLSearchParams(query);
+      const rows = (await designs.listPublic({ sort: 'recent', excludeTemplates: qs.get('made') === 'people', templatesOnly: qs.get('templates') === '1' }));
+      const cc = new Map<string, number>(); const kc = new Map<string, number>();
+      for (const r of rows) {
+        const f = designFacets({ title: r.title, titleAr: r.titleAr, palette: r.palette });
+        for (const x of f.colors) cc.set(x, (cc.get(x) ?? 0) + 1);
+        if (f.clubId) kc.set(f.clubId, (kc.get(f.clubId) ?? 0) + 1);
+      }
+      return {
+        total: rows.length,
+        colors: FAMILIES.filter((x) => cc.has(x)).map((x) => ({ id: x, count: cc.get(x)! })),
+        clubs: [...kc.entries()].sort((p, q) => q[1] - p[1] || p[0].localeCompare(q[0])).map(([id, count]) => ({ id, count })),
+      };
+    };
+    const facets = async (query = ''): Promise<{ total: number; matching: number; colors: { id: string; count: number }[]; clubs: { id: string; count: number; name: string }[] }> => {
+      const r = await app.inject({ method: 'GET', url: `/api/gallery/facets${query ? `?${query}` : ''}` });
+      assert.equal(r.statusCode, 200, r.body);
+      return r.json();
+    };
+    const sameAsOld = async (why: string): Promise<void> => {
+      for (const query of ['', 'made=people', 'templates=1', 'made=people&templates=1']) {
+        const now = await facets(query);
+        const was = await oldWay(query);
+        assert.equal(now.total, was.total, `${why} [${query}]: total`);
+        assert.equal(now.matching, was.total, `${why} [${query}]: matching with nothing picked`);
+        assert.deepEqual(now.colors, was.colors, `${why} [${query}]: colours`);
+        assert.deepEqual(now.clubs.map(({ id, count }) => ({ id, count })), was.clubs, `${why} [${query}]: clubs`);
+      }
+    };
+    await sameAsOld('to begin with');
+    const hilal = designFacets({ title: 'Al Hilal in blue', palette: BLUE }).clubId!;
+    check(hilal, 'the test title names a club');
+    assert.equal((await facets('colors=red')).matching, (await designs.listPublic({ sort: 'recent', colors: ['red'] })).length, 'matching counts a selection like the feed returns it');
+    assert.equal((await facets(`club=${hilal}&colors=blue`)).matching, 1);
+    // Every change to the public set is seen at once, not after the minute.
+    const changes: [string, () => Promise<unknown>][] = [
+      ['publish', () => app.inject({ method: 'PATCH', url: `/api/designs/${priv}`, headers: ownH, payload: { isPublic: true } })],
+      ['unpublish', () => app.inject({ method: 'PATCH', url: `/api/designs/${priv}`, headers: ownH, payload: { isPublic: false } })],
+      ['rename to another club', () => app.inject({ method: 'PATCH', url: `/api/designs/${c}`, headers: ownH, payload: { title: 'Al Ittihad night' } })],
+      ['repaint', () => app.inject({ method: 'PUT', url: `/api/designs/${b}`, headers: ownH, payload: { palette: BLUE, cellsGzB64 } })],
+      ['template flag', () => app.inject({ method: 'PUT', url: `/api/designs/${b}/template`, headers: ownH, payload: { isTemplate: true } })],
+      ['takedown', () => app.inject({ method: 'POST', url: `/api/admin/designs/${b}/takedown`, headers: bearer(mod.token) })],
+      ['trash', () => app.inject({ method: 'DELETE', url: `/api/designs/${c}`, headers: ownH })],
+      ['restore', () => app.inject({ method: 'POST', url: `/api/designs/${c}/restore`, headers: ownH })],
+      ['trash again', () => app.inject({ method: 'DELETE', url: `/api/designs/${c}`, headers: ownH })],
+      ['delete for good', () => app.inject({ method: 'DELETE', url: `/api/designs/${c}?permanent=1`, headers: ownH })],
+    ];
+    for (const [why, change] of changes) {
+      await facets(); await facets('made=people'); await facets('templates=1'); // remembered now
+      const r = (await change()) as { statusCode: number; body: string };
+      check(r.statusCode < 300, `${why}: ${r.statusCode} ${r.body.slice(0, 80)}`);
+      await sameAsOld(`after ${why}`);
+    }
+    // Account deletion takes its designs out of the counts at once.
+    const goner = await s1reg(app, 'goner_f');
+    await create('Al Nassr farewell', RED, true, goner);
+    await facets();
+    await sameAsOld('with the leaving account');
+    assert.equal((await app.inject({ method: 'DELETE', url: '/api/account', headers: bearer(goner.token), payload: { password: S1PW } })).statusCode, 204);
+    await sameAsOld('after an account deletion');
+    // Memoised: a change made behind the routes' back (another process) shows after the minute, not before.
+    await facets();
+    const before = (await facets()).total;
+    const sneaky = await designs.create({ title: 'Behind the routes', templateId: DEFAULT_TEMPLATE.id, templateVersion: 1, palette: RED, cellsGz: gzipSync(new Uint8Array(map.count)), ownerId: owner.id, thumbnailPng: null });
+    await designs.patchMeta(sneaky.id, { isPublic: true });
+    assert.equal((await facets()).total, before, 'the base counts are remembered between changes');
+    app.forgetPublicCounts(); // what server.ts does after seeding the library at boot
+    assert.equal((await facets()).total, before + 1, 'and forgotten when the server says the public set changed');
+    assert.equal((await facets('colors=red')).matching, (await designs.listPublic({ sort: 'recent', colors: ['red'] })).length, 'a selection is never remembered');
+
+    // ---- profiles: the person's public designs, nothing else ----
+    const pubMine = await create('Profile public', RED, true);
+    const privMine = await create('Profile private', RED, false);
+    const downMine = await create('Profile taken down', RED, true);
+    assert.equal((await app.inject({ method: 'POST', url: `/api/admin/designs/${downMine}/takedown`, headers: bearer(mod.token) })).statusCode, 200);
+    const trashMine = await create('Profile trashed', RED, true);
+    assert.equal((await app.inject({ method: 'DELETE', url: `/api/designs/${trashMine}`, headers: ownH })).statusCode, 200);
+    const orphanPub = await designs.create({ title: 'Profile orphan public', templateId: DEFAULT_TEMPLATE.id, templateVersion: 1, palette: RED, cellsGz: gzipSync(new Uint8Array(map.count)), ownerId: null as unknown as string, thumbnailPng: null });
+    await designs.patchMeta(orphanPub.id, { isPublic: true });
+    const orphanPriv = await designs.create({ title: 'Profile orphan private', templateId: DEFAULT_TEMPLATE.id, templateVersion: 1, palette: RED, cellsGz: gzipSync(new Uint8Array(map.count)), ownerId: null as unknown as string, thumbnailPng: null });
+    const neverListed = [privMine, downMine, trashMine, orphanPub.id, orphanPriv.id, priv];
+    const expected = (await designs.listPublic({ sort: 'recent' })).filter((d) => d.ownerId === owner.id).map((d) => d.id);
+    check(expected.includes(pubMine) && expected.length >= 3, 'the owner has public designs to list');
+    for (const [who, headers] of [['anon', undefined], ['fan', bearer(fan.token)], ['owner', ownH], ['moderator', bearer(mod.token)]] as const) {
+      const prof = (await app.inject({ method: 'GET', url: `/api/users/${owner.id}/profile`, headers })).json() as { created: { id: string; ownerId: string; isPublic: boolean }[]; designCount: number };
+      assert.deepEqual(prof.created.map((d) => d.id), expected, `${who}: exactly the owner's public designs, newest first`);
+      for (const id of neverListed) check(!prof.created.some((d) => d.id === id), `${who}: never a private, taken-down, trashed or ownerless design (${id})`);
+      check(prof.created.every((d) => d.isPublic && d.ownerId === owner.id), `${who}: every card is public and theirs`);
+      for (const k of ['pinned', 'deletedAt', 'takenDown', 'origin']) check(prof.created.every((d) => !(k in d)), `${who}: no owner-only "${k}"`);
+    }
+    // Asking for fewer, or for nonsense.
+    const sized = async (q: string) => ((await app.inject({ method: 'GET', url: `/api/users/${owner.id}/profile${q}` })).json() as { created: { id: string }[] }).created.map((d) => d.id);
+    assert.deepEqual(await sized('?limit=2'), expected.slice(0, 2), 'limit=2 is the newest two');
+    assert.deepEqual(await sized('?limit=1'), expected.slice(0, 1));
+    for (const q of ['?limit=0', '?limit=-5', '?limit=abc', '?limit=1e9', '?limit=1000', '?limit=2&limit=3']) {
+      const got = await sized(q);
+      check(got.length >= 1 && got.length <= 200 && got.every((id, i) => id === expected[i]), `${q}: a prefix of the list, 1 to 200 long (${got.length})`);
+    }
+    // An ownerless design is nobody's profile; a profile of nobody is a 404.
+    assert.equal((await app.inject({ method: 'GET', url: `/api/users/${NO_SUCH}/profile` })).statusCode, 404);
+    for (const id of [orphanPub.id, orphanPriv.id]) check(!(await designs.listPublicByOwner(null as unknown as string, { limit: 200 })).some((d) => d.id === id), 'no owner matches an ownerless design');
+
+    // ---- the sitemap: public designs only, ids and dates ----
+    const xml = (await app.inject({ method: 'GET', url: '/sitemap.xml' })).body;
+    const listed = [...xml.matchAll(/\/t\/([0-9a-f-]{36})<\/loc>/g)].map((m) => m[1]);
+    assert.deepEqual(listed, (await designs.listPublic({ sort: 'recent' })).map((d) => d.id), 'the sitemap lists every public design, newest first, and nothing else');
+    for (const id of neverListed.filter((x) => x !== orphanPub.id)) check(!xml.includes(id), `the sitemap never lists a design that is not public (${id})`);
+    check(xml.includes(orphanPub.id), 'an ownerless design that is public is listed like any public one');
+    await app.close();
+    console.log('  P1.11/P1.12: comment counts match every thread, facets match the old computation through every change, profiles and the sitemap are public-only');
+  }
+
+  // ---- Postgres: the same counts, privacy and parity on a real database ----
+  if (process.env.DATABASE_URL) {
+    const pg = (await import('pg')).default;
+    const { readFileSync: readSql } = await import('node:fs');
+    const { schemaStatements } = await import('../src/schema');
+    const { PgAuthRepository, PgDesignRepository } = await import('../src/pgRepo');
+    const { PgSocialRepository } = await import('../src/pgSocial');
+    const { designFacets, COLOUR_FAMILIES: FAMILIES } = await import('../../src/core/facets');
+    const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
+    try {
+      for (const stmt of schemaStatements(readSql(new URL('../schema.sql', import.meta.url), 'utf8'))) await pool.query(stmt).catch(() => {});
+      const pAuth = new PgAuthRepository(pool);
+      const pDesigns = new PgDesignRepository(pool);
+      const pSocial = new PgSocialRepository(pool);
+      const sfx = Math.random().toString(36).slice(2, 7);
+      const papp = await buildApp(pDesigns, pAuth, templates, { social: pSocial, adminUsernames: [`pgmod${sfx}`], aiAdminPassword: 'pg stage one admin' });
+      const owner = await s1reg(papp, `pgown${sfx}`);
+      const fan = await s1reg(papp, `pgfan${sfx}`);
+      const leaver = await s1reg(papp, `pglve${sfx}`);
+      const mod = await s1reg(papp, `pgmod${sfx}`, freshIp(), 'pg stage one admin');
+      await pAuth.markEmailVerified(fan.id);
+      const ownH = bearer(owner.token);
+      const create = async (title: string, palette: string[], pub: boolean): Promise<string> => {
+        const r = await papp.inject({ method: 'POST', url: '/api/designs', headers: ownH, payload: { title, templateId: DEFAULT_TEMPLATE.id, templateVersion: 1, palette, cellsGzB64 } });
+        assert.equal(r.statusCode, 201, r.body);
+        const id = (r.json() as { id: string }).id;
+        if (pub) assert.equal((await papp.inject({ method: 'PATCH', url: `/api/designs/${id}`, headers: ownH, payload: { isPublic: true } })).statusCode, 200);
+        return id;
+      };
+      const comment = async (who: { token: string }, id: string, body: string, parentId?: string): Promise<string> => {
+        const r = await papp.inject({ method: 'POST', url: `/api/designs/${id}/comments`, headers: bearer(who.token), payload: { body, parentId } });
+        assert.equal(r.statusCode, 201, r.body);
+        return (r.json() as { id: string }).id;
+      };
+      const a = await create(`Al Hilal pg ${sfx}`, ['#262a33', '#1040d0', '#ffffff'], true);
+      const b = await create(`Red pg ${sfx}`, ['#262a33', '#d01020', '#ffffff'], true);
+      const priv = await create(`Private pg ${sfx}`, ['#262a33', '#d01020'], false);
+      const down = await create(`Down pg ${sfx}`, ['#262a33', '#d01020'], true);
+      const trashed = await create(`Trashed pg ${sfx}`, ['#262a33', '#d01020'], true);
+      const leaverTop = await comment(leaver, a, 'from someone who leaves');
+      await comment(fan, a, 'a reply to the leaver', leaverTop);
+      await comment(fan, a, 'top level');
+      const gone = await comment(fan, b, 'deleted');
+      await comment(owner, b, 'kept');
+      await comment(owner, priv, 'private note');
+      await comment(fan, down, 'on a design about to go');
+      assert.equal((await papp.inject({ method: 'DELETE', url: `/api/comments/${gone}`, headers: bearer(fan.token) })).statusCode, 200);
+      assert.equal((await papp.inject({ method: 'DELETE', url: '/api/account', headers: bearer(leaver.token), payload: { password: S1PW } })).statusCode, 204);
+      assert.equal((await papp.inject({ method: 'POST', url: `/api/admin/designs/${down}/takedown`, headers: bearer(mod.token) })).statusCode, 200);
+      assert.equal((await papp.inject({ method: 'DELETE', url: `/api/designs/${trashed}`, headers: ownH })).statusCode, 200);
+      const orphans = await pool.query(
+        `INSERT INTO designs (title, template_id, template_version, palette, cells, is_public)
+         VALUES ($1, $3, 1, '["#262a33","#d01020"]'::jsonb, $4, true), ($2, $3, 1, '["#262a33","#d01020"]'::jsonb, $4, false) RETURNING id`,
+        [`Orphan pub pg ${sfx}`, `Orphan priv pg ${sfx}`, DEFAULT_TEMPLATE.id, gzipSync(new Uint8Array(map.count))],
+      );
+      const [orphanPub, orphanPriv] = orphans.rows.map((r) => String(r.id));
+      // Comment counts: what each thread returns, from every list.
+      const ids = [a, b];
+      for (const headers of [undefined, bearer(fan.token)]) {
+        const lists = [
+          ...((await papp.inject({ method: 'GET', url: '/api/gallery?limit=120', headers })).json() as { id: string; commentCount: number }[]),
+          ...(await Promise.all(ids.map(async (id) => (await papp.inject({ method: 'GET', url: `/api/gallery/${id}`, headers })).json() as { id: string; commentCount: number }))),
+          ...((await papp.inject({ method: 'GET', url: `/api/users/${owner.id}/profile`, headers })).json() as { created: { id: string; commentCount: number }[] }).created,
+        ];
+        for (const id of ids) check(lists.some((c) => c.id === id), `Postgres: ${id} is on the lists`);
+        for (const card of lists) {
+          const thread = (await papp.inject({ method: 'GET', url: `/api/designs/${card.id}/comments`, headers })).json() as unknown[];
+          assert.equal(card.commentCount, thread.length, `Postgres: commentCount is the thread's length (${card.id})`);
+        }
+      }
+      assert.equal(((await papp.inject({ method: 'GET', url: `/api/gallery/${a}` })).json() as { commentCount: number }).commentCount, 2, 'Postgres: a departed account’s comment is gone from the count as from the thread, its reply kept');
+      // Profiles: owner AND public, whatever else the owner has.
+      const created = ((await papp.inject({ method: 'GET', url: `/api/users/${owner.id}/profile`, headers: ownH })).json() as { created: { id: string }[] }).created.map((d) => d.id);
+      assert.deepEqual(created, [b, a], 'Postgres: the profile lists the public designs, newest first');
+      for (const id of [priv, down, trashed, orphanPub, orphanPriv]) check(!created.includes(id), `Postgres: never ${id} in a profile`);
+      assert.deepEqual((await pDesigns.listPublicByOwner(owner.id, { limit: 1 })).map((d) => d.id), [b], 'Postgres: the limit holds');
+      // Facets: the SQL counts are the old JavaScript classification of every public design.
+      // A row whose stored facets went stale (a failed sync, or rules that
+      // changed since) is put right by the boot resync.
+      await pool.query(`UPDATE designs SET colors = '{grey}', club_id = 'not-a-club' WHERE id = $1`, [b]);
+      check((await pDesigns.resyncFacets()) >= 1, 'Postgres: the resync finds the stale row');
+      assert.equal(await pDesigns.resyncFacets(), 0, 'Postgres: and a second one has nothing left to do');
+      for (const scope of [{}, { excludeTemplates: true }, { templatesOnly: true }, { excludeTemplates: true, templatesOnly: true }]) {
+        const rows = await pDesigns.listPublic({ sort: 'recent', ...scope });
+        const want = { total: rows.length, colors: {} as Record<string, number>, clubs: {} as Record<string, number> };
+        for (const r of rows) {
+          const f = designFacets({ title: r.title, titleAr: r.titleAr, palette: r.palette });
+          for (const x of f.colors) want.colors[x] = (want.colors[x] ?? 0) + 1;
+          if (f.clubId) want.clubs[f.clubId] = (want.clubs[f.clubId] ?? 0) + 1;
+        }
+        const got = await pDesigns.facetBase(scope);
+        assert.equal(got.total, want.total, `Postgres facets ${JSON.stringify(scope)}: total`);
+        assert.deepEqual(Object.fromEntries(FAMILIES.filter((x) => got.colors[x]).map((x) => [x, got.colors[x]])), Object.fromEntries(FAMILIES.filter((x) => want.colors[x]).map((x) => [x, want.colors[x]])), `Postgres facets ${JSON.stringify(scope)}: colours`);
+        assert.deepEqual(got.clubs, want.clubs, `Postgres facets ${JSON.stringify(scope)}: clubs`);
+        assert.equal(await pDesigns.countPublic({ ...scope, colors: ['red'] }), (await pDesigns.listPublic({ sort: 'recent', ...scope, colors: ['red'] })).length, `Postgres count ${JSON.stringify(scope)}: as the feed`);
+      }
+      // The sitemap's ids are exactly the public ones.
+      assert.deepEqual((await pDesigns.listPublicIds(5000)).map((d) => d.id), (await pDesigns.listPublic({ sort: 'recent' })).map((d) => d.id), 'Postgres: sitemap ids are the public designs');
+      await papp.close();
+    } finally {
+      await pool.end();
+    }
+    console.log('  Postgres: comment counts, profiles, facets and sitemap ids agree with the threads and the old computation');
+  }
+
+  // ---- P1.26: bounded pools, a maintenance pool, and fail-closed under timeouts ----
+  //
+  // A statement now stops at 10 s and a request waits at most 5 s for a
+  // connection, so database errors stop being rare. Every check that reads
+  // the database must refuse when the read fails, and a timeout answers 503
+  // "try again" through the error handler, never a driver message.
+  {
+    const { POOL_SETTINGS, createPool, isDatabaseUnavailable } = await import('../src/db');
+    assert.equal(POOL_SETTINGS.app.max, 20);
+    assert.equal(POOL_SETTINGS.app.connectionTimeoutMillis, 5_000, 'a request waits at most 5 s for a connection');
+    assert.equal(POOL_SETTINGS.app.statement_timeout, 10_000, 'and a statement runs at most 10 s');
+    assert.equal(POOL_SETTINGS.app.idle_in_transaction_session_timeout, 10_000);
+    assert.equal(POOL_SETTINGS.maintenance.max, 3, 'the maintenance pool is small');
+    check((POOL_SETTINGS.maintenance.statement_timeout as number) >= 60_000, 'and patient');
+    for (const role of ['app', 'maintenance'] as const) {
+      const p = createPool('postgres://nobody:nothing@127.0.0.1:1/none', role);
+      check(p.listenerCount('error') > 0 && p.listenerCount('connect') > 0, `the ${role} pool keeps its error listeners (pool and client)`);
+      await p.end();
+    }
+    for (const e of [{ code: '57014' }, { code: '25P03' }, { code: '53300' }, { code: '57P01' }, { code: '08006' }, new Error('timeout exceeded when trying to connect'), new Error('Connection terminated unexpectedly'), new Error('Connection terminated due to connection timeout')]) {
+      check(isDatabaseUnavailable(e), `${JSON.stringify(e)} / ${(e as Error).message ?? ''} is the database being unavailable`);
+    }
+    for (const e of [{ code: '23505' }, { code: '22P02' }, new Error('boom'), null, undefined]) check(!isDatabaseUnavailable(e), `${JSON.stringify(e)} is not`);
+    const src = readFileSync('server/src/server.ts', 'utf8');
+    assert.match(src, /createPool\(process\.env\.DATABASE_URL, 'app'\)/, 'server.ts builds the request pool');
+    assert.match(src, /createPool\(process\.env\.DATABASE_URL, 'maintenance'\)/, 'and the maintenance pool');
+    assert.match(src, /await applySchema\(maint\)/, 'the schema is applied on the maintenance pool');
+    assert.match(src, /new PgAdminStatsRepository\(maint\)/, 'the admin aggregates run there');
+    assert.match(src, /new PgDesignRepository\(pool, maint\)/);
+    assert.match(src, /new PgAuthRepository\(pool, maint\)/, 'and account erasure');
+
+    class Flaky extends MemoryDesignRepository {
+      fail = new Set<string>();
+      private boom(what: string): void { if (this.fail.has(what)) throw Object.assign(new Error('canceling statement due to statement timeout'), { code: '57014' }); }
+      override async listTitlesByOwner(id: string) { this.boom('titles'); return super.listTitlesByOwner(id); }
+      override async listPhotos(id: string) { this.boom('photos'); return super.listPhotos(id); }
+      override async listByOwner(id: string) { this.boom('list'); return super.listByOwner(id); }
+      override async deleteByOwner(id: string) { this.boom('erase'); return super.deleteByOwner(id); }
+      override async listPublic(q: Parameters<MemoryDesignRepository['listPublic']>[0]) { this.boom('gallery'); return super.listPublic(q); }
+    }
+    const auth = new MemoryAuthRepository();
+    const designs = new Flaky((id) => auth.usernameOf(id));
+    const app = await buildApp(designs, auth, templates, {});
+    const u = await s1reg(app, 'flaky_s1');
+    await auth.markEmailVerified(u.id);
+    const h = bearer(u.token);
+    const made = await app.inject({ method: 'POST', url: '/api/designs', headers: h, payload: { title: 'F', templateId: DEFAULT_TEMPLATE.id, templateVersion: 1, palette: PALETTE, cellsGzB64 } });
+    const id = (made.json() as { id: string }).id;
+    // A timeout anywhere: 503 and a retry code, no driver text.
+    designs.fail.add('gallery');
+    const t = await app.inject({ method: 'GET', url: '/api/gallery' });
+    designs.fail.delete('gallery');
+    assert.equal(t.statusCode, 503, 'a statement timeout answers 503');
+    assert.deepEqual(t.json(), { error: 'the server is busy, please try again', code: 'retry' }, 'with nothing from the driver');
+    // The design cap: an unreadable count refuses, it does not let the design in.
+    designs.fail.add('titles');
+    const capped = await app.inject({ method: 'POST', url: '/api/designs', headers: h, payload: { title: 'G', templateId: DEFAULT_TEMPLATE.id, templateVersion: 1, palette: PALETTE, cellsGzB64 } });
+    assert.equal(capped.statusCode, 503, `a design is not created when the account's count cannot be read (${capped.statusCode})`);
+    assert.equal((await app.inject({ method: 'POST', url: `/api/designs/${id}/fork`, headers: h, payload: {} })).statusCode, 503, 'nor a copy');
+    designs.fail.delete('titles');
+    assert.equal((await designs.listByOwner(u.id)).length, 1, 'and nothing was added');
+    // The photo cap, likewise.
+    designs.fail.add('photos');
+    const ph = await app.inject({ method: 'POST', url: `/api/designs/${id}/photos`, headers: h, payload: { imageB64: PNG.toString('base64'), width: 1, height: 1 } });
+    designs.fail.delete('photos');
+    assert.equal(ph.statusCode, 503, `a photo is not stored when the design's photos cannot be counted (${ph.statusCode})`);
+    assert.equal((await designs.listPhotos(id)).length, 0);
+    // The export: all of it or a refusal, never part of it given as the whole.
+    designs.fail.add('list');
+    const ex = await app.inject({ method: 'GET', url: '/api/account/export', headers: h });
+    designs.fail.delete('list');
+    assert.equal(ex.statusCode, 503, 'an export that cannot read the designs is refused');
+    // Erasure: the designs first; if they cannot go, nothing goes and it says so.
+    designs.fail.add('erase');
+    const del = await app.inject({ method: 'DELETE', url: '/api/account', headers: h, payload: { password: S1PW } });
+    designs.fail.delete('erase');
+    assert.equal(del.statusCode, 503, 'an erasure that cannot delete the designs fails');
+    assert.equal((await app.inject({ method: 'GET', url: '/api/me', headers: h })).statusCode, 200, 'and the account is still there');
+    assert.equal((await designs.listByOwner(u.id)).length, 1, 'with its designs: nothing was left ownerless');
+    assert.equal((await app.inject({ method: 'DELETE', url: '/api/account', headers: h, payload: { password: S1PW } })).statusCode, 204, 'a retry finishes it');
+    assert.equal((await designs.listByOwner(u.id)).length, 0);
+    await app.close();
+
+    // The slow work goes to the maintenance pool and nothing else does.
+    const { PgAuthRepository, PgDesignRepository, PgEventsRepository, PgAiEventsRepository } = await import('../src/pgRepo');
+    const { PgTrafficRepository } = await import('../src/trafficRepo');
+    const { PgFeedbackRepository } = await import('../src/feedbackRepo');
+    const { PgSocRepository } = await import('../src/socRepo');
+    const seen: string[] = [];
+    const fakePool = (name: string) => {
+      const answer = { rows: [], rowCount: 0 };
+      const client = { query: async (sql: string) => { seen.push(`${name}: ${String(sql).trim().split(/\s+/).slice(0, 2).join(' ')}`); return answer; }, release: () => {} };
+      return { query: client.query, connect: async () => client } as unknown as import('pg').Pool;
+    };
+    const app_ = fakePool('app');
+    const maint = fakePool('maintenance');
+    const pd = new PgDesignRepository(app_, maint);
+    const pa = new PgAuthRepository(app_, maint);
+    await pd.deleteByOwner(NO_SUCH); await pd.purgeTrashed(new Date()); await pd.backfillFacets(); await pd.resyncFacets();
+    await pa.deleteUser(NO_SUCH);
+    await new PgEventsRepository(app_, maint).purge(new Date());
+    await new PgEventsRepository(app_, maint).funnel(['a'], 1).catch(() => {});
+    await new PgAiEventsRepository(app_, maint).stats(1).catch(() => {});
+    await new PgTrafficRepository(app_, maint).purge().catch(() => {});
+    await new PgTrafficRepository(app_, maint).summary(1).catch(() => {});
+    await new PgFeedbackRepository(app_, maint).list(1).catch(() => {});
+    await new PgSocRepository(app_, maint).purge().catch(() => {});
+    check(seen.length > 8 && seen.every((q) => q.startsWith('maintenance:')), `slow work runs on the maintenance pool (${seen.filter((q) => !q.startsWith('maintenance:')).join('; ')})`);
+    seen.length = 0;
+    await pd.listPublic({ sort: 'recent', limit: 1 }); await pd.get(NO_SUCH); await pd.facetBase({}); await pa.getUserIdByToken('x');
+    await new PgEventsRepository(app_, maint).record('s', 'landed', false);
+    check(seen.length >= 5 && seen.every((q) => q.startsWith('app:')), `requests run on the request pool (${seen.join('; ')})`);
+
+    // On a real database: the limits are what the session runs with, and a
+    // timeout is recognised for what it is.
+    if (process.env.DATABASE_URL) {
+      const appPool = createPool(process.env.DATABASE_URL, 'app');
+      const mPool = createPool(process.env.DATABASE_URL, 'maintenance');
+      try {
+        assert.equal((await appPool.query('SHOW statement_timeout')).rows[0].statement_timeout, '10s', 'Postgres: requests run with a 10 s statement limit');
+        assert.equal((await appPool.query('SHOW idle_in_transaction_session_timeout')).rows[0].idle_in_transaction_session_timeout, '10s');
+        assert.equal((await mPool.query('SHOW statement_timeout')).rows[0].statement_timeout, '1min', 'Postgres: maintenance a minute');
+        const pg = (await import('pg')).default;
+        const quick = new pg.Pool({ connectionString: process.env.DATABASE_URL, statement_timeout: 200, max: 1, connectionTimeoutMillis: 300 });
+        const slow = await quick.query('SELECT pg_sleep(2)').then(() => null, (e: unknown) => e);
+        check(slow && isDatabaseUnavailable(slow), `Postgres: a statement past its limit is "unavailable" (${(slow as { code?: string })?.code})`);
+        const held = await quick.connect();
+        const waited = await quick.query('SELECT 1').then(() => null, (e: unknown) => e);
+        held.release();
+        check(waited && isDatabaseUnavailable(waited), `Postgres: no connection within the wait is "unavailable" (${(waited as Error)?.message})`);
+        await quick.end();
+      } finally {
+        await appPool.end();
+        await mPool.end();
+      }
+    }
+    console.log('  P1.26 pools: 20 + 2 connections, 5 s wait, 10 s statements; timeouts answer 503; the design and photo caps, the export and erasure fail closed');
+  }
+
+  // ---- P1.25: the foreign-key indexes ----
+  {
+    const { FOREIGN_KEY_INDEXES, applyForeignKeyIndexes } = await import('../src/schema');
+    assert.equal(FOREIGN_KEY_INDEXES.length, 8, 'eight indexes');
+    const schemaSql = readFileSync('server/schema.sql', 'utf8');
+    check(/CREATE INDEX IF NOT EXISTS auth_tokens_user_idx ON auth_tokens \(user_id\)/.test(schemaSql), 'auth_tokens (user_id) is in the schema already (round six)');
+    check(!/CONCURRENTLY/.test(schemaSql.replace(/^\s*--.*$/gm, '')), 'schema.sql stays runnable as one query: no CONCURRENTLY in it');
+    // A build that fails is logged and the next one tried; nothing throws.
+    const ran: string[] = [];
+    const logged: string[] = [];
+    const fake = { connect: async () => ({
+      query: async (sql: string) => {
+        ran.push(sql);
+        if (sql.startsWith('SELECT i.indisvalid')) return { rows: [] };
+        if (sql.includes('ON notifications (design_id)')) throw new Error('canceling statement due to lock timeout');
+        return { rows: [] };
+      },
+      release: () => {},
+    }) };
+    const r = await applyForeignKeyIndexes(fake as never, (m) => logged.push(m));
+    assert.deepEqual(r.failed, ['notifications_design_idx'], 'the failure is reported');
+    assert.equal(r.built.length, 7, 'and the other seven built');
+    check(logged.length === 1 && logged[0].includes('notifications_design_idx'), 'and logged');
+    check(ran.filter((q) => q.startsWith('CREATE INDEX CONCURRENTLY IF NOT EXISTS')).length === 8, 'every build is CONCURRENTLY, one statement each');
+    check(ran.some((q) => /^SET statement_timeout/.test(q)) && ran.some((q) => /RESET statement_timeout/.test(q)), 'the build session’s limits are set and put back');
+
+    if (process.env.DATABASE_URL) {
+      const pg = (await import('pg')).default;
+      const { schemaStatements } = await import('../src/schema');
+      const { PgFeedbackRepository } = await import('../src/feedbackRepo');
+      const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
+      try {
+        for (const stmt of schemaStatements(schemaSql)) await pool.query(stmt).catch(() => {});
+        await new PgFeedbackRepository(pool).init();
+        for (const ix of FOREIGN_KEY_INDEXES) await pool.query(`DROP INDEX IF EXISTS ${ix.name}`);
+        const first = await applyForeignKeyIndexes(pool);
+        assert.deepEqual(first.failed, [], 'Postgres: every index builds');
+        assert.equal(first.built.length, 8);
+        const state = async () => (await pool.query(
+          `SELECT c.relname AS name, i.indisvalid AS valid, pg_get_indexdef(i.indexrelid) AS def
+             FROM pg_class c JOIN pg_index i ON i.indexrelid = c.oid WHERE c.relname = ANY($1)`,
+          [FOREIGN_KEY_INDEXES.map((x) => x.name)],
+        )).rows as { name: string; valid: boolean; def: string }[];
+        for (const ix of FOREIGN_KEY_INDEXES) {
+          const row = (await state()).find((x) => x.name === ix.name);
+          check(row?.valid && row.def.includes(`ON public.${ix.table} USING btree (${ix.column})`), `Postgres: ${ix.name} is valid, on ${ix.table} (${ix.column}): ${row?.def}`);
+        }
+        assert.deepEqual((await applyForeignKeyIndexes(pool)).built, [], 'Postgres: a second run builds nothing');
+        // A half-built index (what an interrupted CONCURRENTLY build leaves) is rebuilt.
+        await pool.query('DROP INDEX IF EXISTS design_votes_user_idx');
+        await pool.query("INSERT INTO users (username, password_hash) VALUES ('ixa_' || md5(random()::text), 'x'), ('ixb_' || md5(random()::text), 'x')");
+        const two = (await pool.query("SELECT id FROM users ORDER BY created_at DESC LIMIT 2")).rows.map((x) => x.id);
+        const someDesign = (await pool.query(`INSERT INTO designs (title, template_id, template_version, palette, cells) VALUES ('ix', 'x', 1, '[]'::jsonb, '\\x00') RETURNING id`)).rows[0].id;
+        await pool.query('INSERT INTO design_votes (design_id, user_id, value) VALUES ($1, $2, 1), ($1, $3, 1)', [someDesign, two[0], two[1]]);
+        await pool.query('CREATE UNIQUE INDEX CONCURRENTLY design_votes_user_idx ON design_votes (design_id, value)').catch(() => {});
+        check((await state()).find((x) => x.name === 'design_votes_user_idx')?.valid === false, 'Postgres: (the test made an invalid index)');
+        const repaired = await applyForeignKeyIndexes(pool);
+        assert.deepEqual(repaired.built, ['design_votes_user_idx'], 'Postgres: the invalid index is rebuilt');
+        const fixed = (await state()).find((x) => x.name === 'design_votes_user_idx');
+        check(fixed?.valid && fixed.def.includes('(user_id)') && !fixed.def.includes('UNIQUE'), `Postgres: and is the right one now (${fixed?.def})`);
+        await pool.query('DELETE FROM designs WHERE id = $1', [someDesign]);
+        await pool.query('DELETE FROM users WHERE id = ANY($1)', [two]);
+        // The session limits went back to what the connection had.
+        assert.equal((await pool.query('SHOW lock_timeout')).rows[0].lock_timeout, '0');
+      } finally {
+        await pool.end();
+      }
+    }
+    console.log('  P1.25 foreign-key indexes: eight, CONCURRENTLY, after listen; a failure is logged and skipped, an invalid one rebuilt');
+  }
+
+  // ---- P1.29: public pictures, icons and robots.txt cached for an hour ----
+  {
+    const auth = new MemoryAuthRepository();
+    const designs = new MemoryDesignRepository((id) => auth.usernameOf(id));
+    const app = await buildApp(designs, auth, templates, { staticDir: dist });
+    const HOUR = 'public, max-age=3600, stale-while-revalidate=86400';
+    const expect: [string, string][] = [
+      ['/favicon.svg', HOUR], ['/favicon.ico', HOUR], ['/apple-touch-icon.png', HOUR], ['/icon-512.png', HOUR],
+      ['/og-card.png', HOUR], ['/og-default.png', HOUR], ['/hero-stadium.webp', HOUR], ['/hero-stadium-640.webp', HOUR], ['/news/leagues-saudi.webp', HOUR], ['/robots.txt', HOUR],
+      ['/assets/index-Ab12Cd34.js', 'public, max-age=31536000, immutable'], [WORKER, 'public, max-age=31536000, immutable'],
+      // A page and an unhashed script are never kept.
+      ['/boot-script.js', 'public, max-age=0'], ['/verify-site.html', 'public, max-age=0'], ['/landing.html', 'public, max-age=0'], ['/index.html', 'public, max-age=0'],
+    ];
+    for (const [url, cc] of expect) {
+      const r = await app.inject({ method: 'GET', url });
+      assert.equal(r.statusCode, 200, url);
+      assert.equal(r.headers['cache-control'], cc, `${url}: ${cc}`);
+      const again = await app.inject({ method: 'GET', url, headers: { 'if-none-match': String(r.headers.etag) } });
+      assert.equal(again.statusCode, 304, `${url} revalidates`);
+      check(again.headers['cache-control'] === undefined || again.headers['cache-control'] === cc, `${url}: a 304 never says something different from its 200 (${again.headers['cache-control']})`);
+    }
+    for (const url of ['/', '/community', '/projects', '/clubs', '/legal', '/tifo-spec', '/account', '/reset']) {
+      assert.equal((await app.inject({ method: 'GET', url })).headers['cache-control'], 'no-cache', `${url}: pages are revalidated every time`);
+    }
+    // The server never names the boot script: the build may give it a hashed name.
+    for (const f of listDir('server/src')) check(!readFileSync(`server/src/${f}`, 'utf8').includes('theme-boot'), `server/src/${f} does not hard-code theme-boot.js`);
+    await app.close();
+    console.log('  P1.29 static: pictures, icons and robots.txt an hour (+ a day stale-while-revalidate); pages and unhashed scripts max-age=0');
+  }
+
+  // ---- P1.28 / P1.31: seat counts and royal boxes from the generated table ----
+  //
+  // Boot no longer generates 104 seat maps to count seats, and the first save
+  // on a ground no longer generates its map to find the royal box. Both come
+  // from server/data/seat-table.json, written by the same generator. A row is
+  // used only when it was generated from the ground's current definition;
+  // otherwise, or when the file is missing or malformed, the ground is
+  // generated as before. (test:deploy regenerates the whole table and compares.)
+  {
+    const { SeatTable, SEAT_TABLE_PATH, readSeatTable, formatSeatTable, generateSeatEntry, templateFingerprint, maskRuns } = await import('../src/seatTable');
+    const { shippedTemplates } = await import('../../src/core/stadiumCatalog');
+    const { noTifoMask } = await import('../../src/core/venueDetails');
+    const { gunzipSync } = await import('node:zlib');
+    const file = readSeatTable(SEAT_TABLE_PATH);
+    check(file && file.size === shippedTemplates().length, `the table has every shipped ground (${file?.size})`);
+    // The one the save test uses: a ground with a royal box, and its row checked against the generator.
+    const boxed = shippedTemplates().find((t) => (file!.get(`${t.id}@${t.version}`)?.locked.length ?? 0) > 0)!;
+    check(boxed, 'some ground has locked seats');
+    const fresh = generateSeatEntry(boxed);
+    assert.deepEqual(file!.get(fresh.key), fresh, `${boxed.id}: the table's row is exactly what the generator makes`);
+    assert.deepEqual(fresh.locked, maskRuns(noTifoMask(generateSeatMap(boxed), boxed)!), 'and its locked runs are the royal box');
+    assert.deepEqual(maskRuns(Uint8Array.from([0, 1, 1, 0, 1, 0, 0, 1])), [[1, 3], [4, 5], [7, 8]], 'runs are [start, end)');
+    // A good table is read, not regenerated.
+    const logs: string[] = [];
+    const good = new SeatTable(SEAT_TABLE_PATH, (m) => logs.push(m));
+    const t0 = Date.now();
+    const rows = good.shipped();
+    const readMs = Date.now() - t0;
+    check(readMs < 2000 && good.generatedIds().length === 0 && logs.length === 0, `a current table is used as it is (${readMs} ms, ${good.generatedIds().length} generated)`);
+    assert.equal(rows.length, shippedTemplates().length);
+    // A stale, missing or malformed row is generated, and said.
+    const dir = mkdtempSync(`${tmpdir()}/tifo-seat-table-`);
+    const stalePath = `${dir}/stale.json`;
+    const all = [...file!.values()];
+    writeFileSync(stalePath, formatSeatTable(all.map((e) => (e.key === fresh.key ? { ...e, fp: 'old-definition', seats: e.seats + 1 } : e))));
+    const stale = new SeatTable(stalePath, (m) => logs.push(m));
+    assert.equal(stale.entry(boxed).seats, fresh.seats, 'a row from an older definition is not used: the ground is generated');
+    assert.deepEqual(stale.generatedIds(), [boxed.id]);
+    stale.shipped();
+    check(logs.some((m) => m.includes(boxed.id) && m.includes('seats:table')), 'and the boot line says which, and what to run');
+    for (const [label, text] of [
+      ['missing', null],
+      ['not JSON', '{"format":1,"grounds":['],
+      ['another format', JSON.stringify({ format: 2, grounds: all })],
+      ['a negative count', formatSeatTable(all.map((e) => (e.key === fresh.key ? { ...e, seats: -5 } : e)))],
+      ['locked seats past the end', formatSeatTable(all.map((e) => (e.key === fresh.key ? { ...e, locked: [[0, e.seats + 10]] } : e)))],
+      ['runs out of order', formatSeatTable(all.map((e) => (e.key === fresh.key ? { ...e, locked: [[50, 60], [10, 20]] } : e)))],
+      ['a key that is not its ground', formatSeatTable(all.map((e) => (e.key === fresh.key ? { ...e, key: 'generic-bowl-60k@1' } : e)))],
+    ] as [string, string | null][]) {
+      const path = `${dir}/${label.replace(/\W+/g, '-')}.json`;
+      if (text !== null) writeFileSync(path, text);
+      const t = new SeatTable(path, () => {});
+      assert.deepEqual(t.entry(boxed), fresh, `${label}: the ground is generated, never read from a bad row`);
+    }
+    assert.equal(templateFingerprint(boxed), fresh.fp);
+    // Through the routes: a save on that ground clears exactly its royal box, from the table.
+    const auth = new MemoryAuthRepository();
+    const designs = new MemoryDesignRepository((id) => auth.usernameOf(id));
+    const app = await buildApp(designs, auth, [{ id: boxed.id, version: boxed.version, name: boxed.name, seatCount: fresh.seats }], {});
+    const u = await s1reg(app, 'boxed_s1');
+    const full = gzipSync(new Uint8Array(fresh.seats).fill(1)).toString('base64');
+    const made = await app.inject({ method: 'POST', url: '/api/designs', headers: bearer(u.token), payload: { title: 'Royal box', templateId: boxed.id, templateVersion: boxed.version, palette: PALETTE, cellsGzB64: full } });
+    assert.equal(made.statusCode, 201, made.body);
+    const id = (made.json() as { id: string }).id;
+    const cells = gunzipSync(Buffer.from(((await app.inject({ method: 'GET', url: `/api/designs/${id}`, headers: bearer(u.token) })).json() as { cellsGzB64: string }).cellsGzB64, 'base64'));
+    const lockedSet = new Uint8Array(fresh.seats);
+    for (const [a, b] of fresh.locked) lockedSet.fill(1, a, b);
+    let wrong = 0;
+    for (let i = 0; i < cells.length; i++) if ((cells[i] === 0) !== (lockedSet[i] === 1)) wrong++;
+    assert.equal(wrong, 0, 'every royal-box seat cleared, every other seat kept');
+    const saved = await app.inject({ method: 'PUT', url: `/api/designs/${id}`, headers: bearer(u.token), payload: { palette: PALETTE, cellsGzB64: full } });
+    assert.equal(saved.statusCode, 200, 'a full save on it works too');
+    check(seatTable.lockedRuns('not-a-ground', 1) === null, 'a ground that is not shipped has no runs and clears nothing');
+    await app.close();
+    console.log(`  P1.28/P1.31 seat table: ${rows.length} grounds read in ${readMs} ms; stale, missing and malformed rows regenerated; the royal box cleared from it`);
+  }
+
+  console.log('performance plan stage 1 (server): all assertions passed');
+}
+
+// ---------- 2026-10: performance plan, the editor's one fetch of a design (P1.8) ----------
+// GET /api/designs/:id says whether the caller owns the design, so a page no
+// longer fetches /api/me to compare ids; and the browser client keeps the
+// design's answer (and /api/me) in page memory for the load that follows. The
+// guardrails: isOwner is true only for the bearer token's own account, the
+// answer stays no-store, and the page memos are keyed by the token
+// generation, so switching accounts without signing out never hands one
+// account's answer to the other.
+{
+  const check = (cond: unknown, msg: string): void => assert.ok(cond, msg);
+  const auth = new MemoryAuthRepository();
+  const designs = new MemoryDesignRepository((id) => auth.usernameOf(id));
+  const social = new MemorySocialRepository(designs, auth);
+  const app = await buildApp(designs, auth, templates, { social, leads: new MemoryLeadsRepository() });
+  const alice = await reg(app, 'alice_p18');
+  const bob = await reg(app, 'bob_p18');
+  const priv = await makeDesign(app, alice.token, false);
+  const pub = await makeDesign(app, alice.token, true);
+  const orphan = await designs.create({ title: 'no owner', templateId: DEFAULT_TEMPLATE.id, templateVersion: 1, palette: PALETTE, cellsGz: gzipSync(new Uint8Array(map.count)), ownerId: null as unknown as string, thumbnailPng: null });
+  await designs.patchMeta(orphan.id, { isPublic: true });
+  const get = (id: string, headers: Record<string, string> = {}) => app.inject({ method: 'GET', url: `/api/designs/${id}`, headers });
+
+  // ---- isOwner: true for the owner's own session, false for everyone else ----
+  for (const [what, id, headers, want] of [
+    ['the owner, private', priv, bearer(alice.token), true],
+    ['the owner, public', pub, bearer(alice.token), true],
+    ['another account, public', pub, bearer(bob.token), false],
+    ['anonymous, public', pub, {}, false],
+    ['a made-up token, public', pub, bearer('f'.repeat(64)), false],
+    ['a token for the owner’s id spelled as a header', pub, { authorization: `Bearer ${alice.id}` }, false],
+    ['the owner, an ownerless design', orphan.id, bearer(alice.token), false],
+    ['anonymous, an ownerless design', orphan.id, {}, false],
+  ] as [string, string, Record<string, string>, boolean][]) {
+    const r = await get(id, headers);
+    assert.equal(r.statusCode, 200, `${what}: ${r.body.slice(0, 120)}`);
+    const body = r.json() as { isOwner?: unknown };
+    assert.equal(typeof body.isOwner, 'boolean', `${what}: isOwner is a boolean`);
+    assert.equal(body.isOwner, want, `${what}: isOwner is ${want}`);
+    assert.equal(r.headers['cache-control'], 'no-store', `${what}: the answer is still no-store`);
+  }
+  // A private design is still not there for anyone but its owner, isOwner or not.
+  for (const headers of [{}, bearer(bob.token)]) {
+    const r = await get(priv, headers);
+    assert.equal(r.statusCode, 404, 'a private design is 404 to others');
+    check(!/isOwner/.test(r.body), 'and a refusal says nothing about ownership');
+  }
+  // A session that has been signed out owns nothing any more.
+  const gone = await reg(app, 'gone_p18');
+  const gonePub = await makeDesign(app, gone.token, true);
+  assert.equal((await get(gonePub, bearer(gone.token))).json().isOwner, true);
+  await app.inject({ method: 'POST', url: '/api/auth/logout', headers: bearer(gone.token) });
+  assert.equal((await get(gonePub, bearer(gone.token))).json().isOwner, false, 'a revoked token is not the owner');
+
+  // ---- the browser client's page memos, against this server ----
+  // src/net/api.ts, run as it runs in a page, with fetch answered by the app.
+  const calls: string[] = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    const method = init?.method ?? 'GET';
+    calls.push(`${method} ${url}`);
+    const r = await app.inject({ method: method as 'GET', url, headers: (init?.headers ?? {}) as Record<string, string>, payload: init?.body as string | undefined });
+    const empty = r.statusCode === 204 || r.statusCode === 304;
+    return new Response(empty ? null : new Uint8Array(r.rawPayload), { status: r.statusCode, headers: r.headers as Record<string, string> });
+  }) as typeof fetch;
+  try {
+    const api = await import('../../src/net/api');
+    const { DesignStore } = await import('../../src/core/design');
+    const count = (s: string) => calls.filter((c) => c === s).length;
+    const designGets = (id: string) => count(`GET /api/designs/${id}`);
+
+    await api.login('alice_p18', 'quartz-lantern-echo7');
+    // One request answers the stadium lookup and the load after it.
+    api.fetchDesignEarly(priv);
+    const ref = await api.fetchDesignTemplate(priv);
+    assert.equal(ref.templateId, DEFAULT_TEMPLATE.id);
+    const loaded = await api.loadDesign(new DesignStore(map, PALETTE.slice()), priv);
+    assert.equal(loaded.ownerIsMe, true, 'the owner is told it is theirs, from isOwner');
+    assert.equal(designGets(priv), 1, `one GET for the template and the seats (${designGets(priv)})`);
+    assert.equal(count('GET /api/me'), 0, 'and no /api/me to find out whose it is');
+    // Loaded is forgotten: a later look asks again.
+    await api.fetchDesignTemplate(priv);
+    assert.equal(designGets(priv), 2, 'a design already loaded is fetched afresh');
+    // The page's /api/me, once.
+    const me1 = await api.fetchMeOnce();
+    const me2 = await api.fetchMeOnce();
+    assert.equal(me1?.id, alice.id);
+    assert.equal(me2?.id, alice.id);
+    assert.equal(count('GET /api/me'), 1, 'fetchMeOnce asks once per session');
+
+    // Switching accounts without signing out: nothing of alice's is handed to bob.
+    api.fetchDesignEarly(priv); // in memory (or still in flight) for alice
+    await api.login('bob_p18', 'quartz-lantern-echo7');
+    const before = designGets(priv);
+    let refused: unknown = null;
+    await api.fetchDesignTemplate(priv).catch((e) => { refused = e; });
+    check(refused instanceof Error, 'after the switch, alice’s private design is refused to bob, not served from memory');
+    assert.equal(designGets(priv), before + 1, 'the switch made the page ask the server again');
+    const meBob = await api.fetchMeOnce();
+    assert.equal(meBob?.id, bob.id, 'the /api/me memo is bob’s after the switch');
+    assert.equal(count('GET /api/me'), 2, '…fetched again, not alice’s kept answer');
+    // Bob opening alice's public design is not its owner.
+    const asBob = await api.loadDesign(new DesignStore(map, PALETTE.slice()), pub);
+    assert.equal(asBob.ownerIsMe, false, 'another account is never told it owns the design');
+    // A change of password hands back a new token: a new generation too.
+    api.fetchDesignEarly(pub);
+    const g = designGets(pub);
+    await api.changePassword('quartz-lantern-echo7', 'harbour-violet-signal4');
+    await api.fetchDesignTemplate(pub);
+    assert.equal(designGets(pub), g + 1, 'a password change drops the memo');
+    // Signed out: no account, and no request to learn that.
+    api.signOut();
+    const meOut = await api.fetchMeOnce();
+    assert.equal(meOut, null, 'signed out, there is no /api/me');
+    assert.equal(count('GET /api/me'), 2, 'and none was asked for');
+    const asAnon = await api.loadDesign(new DesignStore(map, PALETTE.slice()), pub);
+    assert.equal(asAnon.ownerIsMe, false, 'nobody signed in owns anything');
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+  await app.close();
+  console.log('performance plan P1.8: all assertions passed (isOwner only for the owner’s own session, still no-store, page memos dropped on every token change)');
+}
+
+// ---------- 2026-10: performance plan stage 1, the independent review ----------
+// A URL the router cannot read was answered by Fastify itself, before any
+// hook: none of the security headers, no Cache-Control, the path echoed in the
+// body, and never rate limited. It is answered by our own handler now.
+{
+  const { existsSync } = await import('node:fs');
+  const { resolve } = await import('node:path');
+  const a = new MemoryAuthRepository();
+  const d = new MemoryDesignRepository((id) => a.usernameOf(id));
+  const dist = existsSync('dist/index.html') ? resolve('dist') : undefined;
+  const app = await buildApp(d, a, templates, { rateLimit: true, ...(dist ? { staticDir: dist } : {}) });
+  const ref = await app.inject({ method: 'GET', url: '/no-such-page' });
+  const pinned = ['content-security-policy', 'x-content-type-options', 'x-frame-options', 'strict-transport-security', 'referrer-policy', 'cross-origin-opener-policy', 'cross-origin-resource-policy', 'origin-agent-cluster', 'x-dns-prefetch-control', 'x-download-options', 'x-permitted-cross-domain-policies', 'x-xss-protection'];
+  for (const url of ['/%E0%A4%A', '/api/%', '/assets/%E0']) {
+    const r = await app.inject({ method: 'GET', url });
+    assert.equal(r.statusCode, 400, `${url} is a bad request`);
+    for (const h of pinned) assert.equal(r.headers[h], ref.headers[h], `${url} carries ${h} like any other answer`);
+    assert.equal(r.headers['cache-control'], 'no-store', `${url} says no-store`);
+    assert.ok(!r.body.includes('%E0') && !r.body.includes('valid url'), `${url}: the body repeats nothing (${r.body})`);
+  }
+  let refused = 0;
+  for (let i = 0; i < 305; i++) {
+    const r = await app.inject({ method: 'GET', url: `/%E0%A4%A${i}` });
+    if (r.statusCode === 429) refused++;
+  }
+  assert.ok(refused > 0, `unreadable URLs count against the limit like any probe (${refused} of 305 refused)`);
+  await app.close();
+  console.log('performance plan stage 1 review: all assertions passed (unreadable URLs get the headers, no-store and the limit)');
+}

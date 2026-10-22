@@ -41,12 +41,21 @@ export function settingsFor(tier: QualityTier): QualitySettings {
   return QUALITY_PRESETS[tier] ?? QUALITY_PRESETS.high;
 }
 
+/** The probe's answer, kept for the page's life: nothing it reads changes. */
+let probed: QualityTier | null = null;
+
 /**
  * Pick a sensible default tier for this device. Conservative on mobile / low
  * memory; HIGH (not ULTRA) on capable desktops so first paint stays smooth and
  * the user can opt up to ULTRA explicitly.
+ *
+ * Asked once a page. The WebGL check makes a context of its own, which it
+ * gives straight back: it used to be made on every Match Day open and kept,
+ * one more live context each time towards Chrome's limit (performance plan
+ * P1.19).
  */
 export function probeQuality(): QualityTier {
+  if (probed) return probed;
   try {
     if (typeof document === 'undefined') return 'high';
     const canvas = document.createElement('canvas');
@@ -54,12 +63,13 @@ export function probeQuality(): QualityTier {
       (canvas.getContext('webgl2') as WebGLRenderingContext | null) ||
       (canvas.getContext('webgl') as WebGLRenderingContext | null);
     if (!gl) return 'low';
+    gl.getExtension('WEBGL_lose_context')?.loseContext();
     const ua = typeof navigator !== 'undefined' ? navigator.userAgent : '';
     const isMobile = /Mobi|Android|iPhone|iPad|iPod/i.test(ua);
     const mem = (navigator as unknown as { deviceMemory?: number }).deviceMemory;
-    if (isMobile) return mem !== undefined && mem <= 3 ? 'low' : 'medium';
-    if (mem !== undefined && mem <= 4) return 'medium';
-    return 'high';
+    if (isMobile) return (probed = mem !== undefined && mem <= 3 ? 'low' : 'medium');
+    if (mem !== undefined && mem <= 4) return (probed = 'medium');
+    return (probed = 'high');
   } catch {
     return 'low';
   }

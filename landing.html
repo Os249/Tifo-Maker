@@ -59,7 +59,18 @@
     </div>
     <div class="hero-visual">
       <figure class="hero-frame">
-        <div class="hero-3d" id="hero-3d"></div>
+        <!-- The picture is in the page itself, visible at the first paint and
+             fetched first (performance plan P1.14): it is the largest thing on
+             the screen, and it used to be created by script after the rest of
+             the page's code had run, then held invisible until it loaded. A
+             tap or click on it starts the live 3D stadium (heroStadium.ts),
+             on a desktop too. -->
+        <div class="hero-3d still" id="hero-3d">
+          <img class="hero-still" src="/hero-stadium.webp"
+               srcset="/hero-stadium-640.webp 640w, /hero-stadium.webp 960w"
+               sizes="(max-width: 860px) calc(100vw - 36px), 574px"
+               width="960" height="600" fetchpriority="high" alt="" />
+        </div>
         <figcaption class="hero-cap">
           <span class="hero-cap-scarf" id="hero-cap-scarf" aria-hidden="true"></span>
           <span class="hero-cap-text" id="hero-cap-text">Al Ittihad at The Jewel of Jeddah</span>

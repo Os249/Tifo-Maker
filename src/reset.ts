@@ -5,7 +5,7 @@
  */
 import './ui/colorScheme.css';
 import { resetPassword } from './net/api';
-import { PASSWORD_MIN } from './core/password';
+import { PASSWORD_MIN } from './core/passwordLimits';
 import { enhancePasswordField } from './ui/passwordField';
 import { initLang, applyDom, t, tv } from './ui/i18n';
 

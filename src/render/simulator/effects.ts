@@ -7,11 +7,15 @@ import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import type { StadiumTemplate } from '../../core/types';
 import { kelvinToRgb, layOutLights } from './lighting';
 
-let _beamGrad: THREE.Texture | null = null;
-/** Soft vertical gradient (bright at the lamp, fading toward the pitch) so the
- * floodlight beams read as haze rather than a hard cone. Cached module-wide. */
+/**
+ * Soft vertical gradient (bright at the lamp, fading toward the pitch) so the
+ * floodlight beams read as haze rather than a hard cone.
+ *
+ * One per simulator, freed with it. It was cached for the whole page, and a
+ * texture that outlives a renderer keeps that renderer's context reachable
+ * through three's own dispose listener on it (performance plan P1.19).
+ */
 function beamGradient(): THREE.Texture {
-  if (_beamGrad) return _beamGrad;
   const c = document.createElement('canvas');
   c.width = 4;
   c.height = 64;
@@ -22,8 +26,7 @@ function beamGradient(): THREE.Texture {
   grd.addColorStop(1, 'rgba(255,255,255,0)');
   g.fillStyle = grd;
   g.fillRect(0, 0, 4, 64);
-  _beamGrad = new THREE.CanvasTexture(c);
-  return _beamGrad;
+  return new THREE.CanvasTexture(c);
 }
 
 /**
@@ -56,6 +59,14 @@ export interface EffectsController {
   burstPyro(): void;
   update(dt: number): void;
   render(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.Camera): void;
+  /**
+   * What the scene is drawn into, for compiling its shaders ahead: a scene
+   * drawn into the post pass's buffer gets different programs (no tone
+   * mapping, linear output) from one drawn to the screen, so a compile for
+   * the wrong one would be thrown away at the first frame. Null when there is
+   * no post pass.
+   */
+  compileTarget(): THREE.WebGLRenderTarget | null;
   setSize(renderer: THREE.WebGLRenderer, w: number, h: number): void;
   dispose(): void;
 }
@@ -152,6 +163,19 @@ export function buildEffects(
 ): EffectsController {
   const tex = dotTexture();
   const trash: { dispose(): void }[] = [tex];
+  // Made when the first beam asks for it, as before: a ground with no beams
+  // makes none, and every texture made takes four draws of Math.random for
+  // its id, which the random textures made after it (the pitch's mown
+  // stripes, a neighbourhood's lit windows) would otherwise come out of
+  // shifted.
+  let beamGrad: THREE.Texture | null = null;
+  const beamTexture = (): THREE.Texture => {
+    if (!beamGrad) {
+      beamGrad = beamGradient();
+      trash.push(beamGrad);
+    }
+    return beamGrad;
+  };
 
   // ---- Floodlights ----
   // Positions, heights and colour all come from the template now (see
@@ -243,7 +267,7 @@ export function buildEffects(
       blending: THREE.AdditiveBlending,
       depthWrite: false,
       side: THREE.DoubleSide,
-      alphaMap: beamGradient(),
+      alphaMap: beamTexture(),
     });
     beams.push({ mat: beamMat, base: beamMat.opacity });
     const beam = new THREE.Mesh(beamGeo, beamMat);
@@ -267,6 +291,11 @@ export function buildEffects(
   const pyro = new Particles(180, tex, 4, 0xffa53d, true);
   scene.add(pyro.points);
   trash.push(pyro);
+
+  // Whether anything was alive last frame: once both bursts are over their
+  // buffers are left alone instead of re-sent every frame for nothing.
+  let confettiLive = false;
+  let pyroLive = false;
 
   // ---- Post pass: the grade, and the glow (optional, guarded) ----
   let composer: EffectComposer | null = null;
@@ -334,8 +363,10 @@ export function buildEffects(
     },
     update(dt) {
       const d = Math.min(0.05, dt);
+      let confettiAny = false;
       for (let i = 0; i < confetti.n; i++) {
         if (confetti.life[i] <= 0) continue;
+        confettiAny = true;
         confetti.vel[i * 3 + 1] -= 2.2 * d; // gravity
         confetti.pos[i * 3] += (confetti.vel[i * 3] + Math.sin(confetti.pos[i * 3 + 1] + i) * 1.5) * d;
         confetti.pos[i * 3 + 1] += confetti.vel[i * 3 + 1] * d;
@@ -345,9 +376,14 @@ export function buildEffects(
           confetti.pos[i * 3 + 1] = -9999;
         }
       }
-      confetti.flush();
+      // One more upload after the last piece lands, so the buffer holds it
+      // parked out of sight, then none until the next burst.
+      if (confettiAny || confettiLive) confetti.flush();
+      confettiLive = confettiAny;
+      let pyroAny = false;
       for (let i = 0; i < pyro.n; i++) {
         if (pyro.life[i] <= 0) continue;
+        pyroAny = true;
         pyro.vel[i * 3 + 1] -= 9 * d;
         pyro.pos[i * 3] += pyro.vel[i * 3] * d;
         pyro.pos[i * 3 + 1] += pyro.vel[i * 3 + 1] * d;
@@ -358,7 +394,8 @@ export function buildEffects(
           pyro.pos[i * 3 + 1] = -9999;
         }
       }
-      pyro.flush();
+      if (pyroAny || pyroLive) pyro.flush();
+      pyroLive = pyroAny;
     },
     render(r, s, cam) {
       if (composer) {
@@ -368,12 +405,15 @@ export function buildEffects(
         } catch {
           // A post pass failed at runtime — degrade to a plain render instead of
           // a black frame, and stop trying the broken composer.
-          composer.dispose();
+          disposeComposer(composer);
           composer = null;
           glowPass = null;
         }
       }
       r.render(s, cam);
+    },
+    compileTarget() {
+      return composer ? composer.readBuffer : null;
     },
     setSize(r, w, h) {
       if (composer) {
@@ -386,7 +426,24 @@ export function buildEffects(
       scene.remove(confetti.points);
       scene.remove(pyro.points);
       for (const t of trash) t.dispose();
-      composer?.dispose();
+      if (composer) disposeComposer(composer);
+      composer = null;
     },
   };
+}
+
+/**
+ * The composer and every pass in it. EffectComposer.dispose() frees only its
+ * own two buffers; the glow's mip chain and each pass's material went with
+ * the context, or with nothing (performance plan P1.19).
+ */
+function disposeComposer(c: EffectComposer): void {
+  for (const p of c.passes) {
+    try {
+      p.dispose();
+    } catch {
+      /* a pass that failed half-built */
+    }
+  }
+  c.dispose();
 }

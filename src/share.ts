@@ -1,6 +1,6 @@
 import { cleanAddressBar } from './core/utm';
 import './vendor/tabler-subset.css';
-import { generateSeatMapAsync } from './workers/client';
+import { generateSeatMapAsync, warmHeavyWorker } from './workers/client';
 import { TEMPLATES, DEFAULT_PALETTE } from './core/template';
 import { templateById } from './core/stadiumCatalog';
 import { DesignStore } from './core/design';
@@ -71,6 +71,12 @@ async function main(): Promise<void> {
     return;
   }
 
+  // One request for the design, not two (performance plan P1.8): the answer
+  // that names its stadium is the one its seats are loaded from below (see
+  // designJson in net/api.ts). The gallery card and the worker start at the
+  // same time instead of waiting their turn.
+  warmHeavyWorker();
+  const itemP = fetchGalleryItem(id).catch(() => null);
   // Resolve the template first so the seat map matches the saved cell count.
   const ref = await fetchDesignTemplate(id).catch(() => null);
   if (!ref) {
@@ -79,7 +85,13 @@ async function main(): Promise<void> {
   }
   // Any shipped ground, legacy ones included — not only the three generic bowls.
   const template = templateById(ref.templateId) ?? TEMPLATES[0];
-  const [map, item] = await Promise.all([generateSeatMapAsync(template.id), fetchGalleryItem(id).catch(() => null)]);
+  // A ground that fails its checks is not built at all (P1.16); say so rather
+  // than leave the page blank.
+  const [map, item] = await Promise.all([generateSeatMapAsync(template).catch(() => null), itemP]);
+  if (!map) {
+    unavailable(app, t('sh.gone'));
+    return;
+  }
   const store = new DesignStore(map, DEFAULT_PALETTE.slice());
 
   const meta = await loadPublicDesign(store, id).catch(() => null);

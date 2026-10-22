@@ -1,5 +1,4 @@
-import { generateSeatMap } from '../../src/core/seatmap';
-import { shippedTemplates } from '../../src/core/stadiumCatalog';
+import { seatTable } from './seatTable';
 import type { TemplateInfo } from './routes';
 
 /**
@@ -13,13 +12,11 @@ import type { TemplateInfo } from './routes';
  * templateRef required"), and its share page fell back to the generic bowl.
  *
  * Seat counts come from the SAME generator the browser uses — core/ being
- * DOM-free is what makes server-side validation byte-identical.
+ * DOM-free is what makes server-side validation byte-identical. They are read
+ * from the table that generator wrote (seatTable.ts) instead of generating
+ * all 104 seat maps at every boot (performance plan P1.31); a ground the table
+ * does not match is generated here, as it always was.
  */
 export function shippedTemplateInfo(): TemplateInfo[] {
-  return shippedTemplates().map((t) => ({
-    id: t.id,
-    version: t.version,
-    name: t.name,
-    seatCount: generateSeatMap(t).count,
-  }));
+  return seatTable.shipped().map((e) => ({ id: e.id, version: e.version, name: e.name, seatCount: e.seats }));
 }

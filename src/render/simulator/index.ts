@@ -215,6 +215,23 @@ export class MatchDaySimulator {
   private paletteColors: THREE.Color[] = [];
   private running = false;
   private disposed = false;
+  /**
+   * Every listener this instance puts on the page, on one signal, so closing
+   * takes them all off at once (performance plan P1.19). A `pointercancel`
+   * left behind on the canvas used to keep the whole simulator — and its
+   * WebGL context — alive after every close.
+   */
+  private readonly listeners = new AbortController();
+  /** The frame the loop has asked for, and which loop asked (performance plan P1.18). */
+  private raf = 0;
+  private loopToken = 0;
+  /** Shaders compiled ahead of the first frame (performance plan P1.24); null until the first start. */
+  private compiled: Promise<void> | null = null;
+  private compileDone = false;
+  /** Compiles still in flight; the GPU side of a close waits for them. */
+  private readonly compiling = new Set<Promise<void>>();
+  /** The night-sky environment map, freed on close. */
+  private envTex: THREE.Texture | null = null;
   private readonly resizeObserver: ResizeObserver;
   private readonly onDirtyCb: (indices: number[] | 'all') => void;
   private readonly onPaletteCb: () => void;
@@ -302,16 +319,33 @@ export class MatchDaySimulator {
     this.renderer.setPixelRatio(Math.min(this.settings.maxPixelRatio, window.devicePixelRatio || 1));
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.05;
+    // Shader errors are checked where someone can read them: in development
+    // and in the browser suites, which all run on this machine and watch the
+    // console for them. On the live site each check is a synchronous round
+    // trip to the GPU per program at the first frame (performance plan P1.24).
+    this.renderer.debug.checkShaderErrors = shaderChecksWanted();
     if (this.settings.shadows) {
       this.renderer.shadowMap.enabled = true;
-      this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+      // PCF, which is what three r184 draws anyway: it replaces the
+      // deprecated PCFSoft with PCF at the first shadow pass (and warns). Left
+      // as PCFSoft, every shader compiled ahead of that pass was built for the
+      // wrong type and compiled again at the first frame (performance plan
+      // P1.24).
+      this.renderer.shadowMap.type = THREE.PCFShadowMap;
+      // Nothing that casts a shadow moves: the stands, roofs and buildings are
+      // built once and the sun moves only when the time of day does. So the
+      // shadow map is drawn once and again only when one of those changes
+      // (shadowsChanged), instead of a whole extra pass of the bowl every
+      // frame (performance plan P1.22).
+      this.renderer.shadowMap.autoUpdate = false;
+      this.renderer.shadowMap.needsUpdate = true;
     }
     this.canvas = this.renderer.domElement;
     // A phone under memory pressure — a call arriving, a camera app opening —
     // takes the GL context back. Unhandled, the bowl goes black and stays
     // black while the loop keeps calling draw on a dead context, which is both
     // silent and expensive. preventDefault is what makes it restorable at all.
-    this.canvas.addEventListener('webglcontextlost', this.onCtxLost);
+    this.canvas.addEventListener('webglcontextlost', this.onCtxLost, { signal: this.listeners.signal });
     host.appendChild(this.canvas);
 
     this.skyTex = skyTexture(SKIES.dusk.sky);
@@ -320,7 +354,7 @@ export class MatchDaySimulator {
     // further out: the streets round it stay clear and the horizon still fades.
     if (this.settings.fog) this.scene.fog = this.template.site ? new THREE.Fog(SKIES.dusk.fog, 480, 1500) : new THREE.Fog(SKIES.dusk.fog, 260, 620);
     // P1: image-based lighting — real ambient + reflections on every PBR surface.
-    if (this.settings.ibl) applyNightIBL(this.renderer, this.scene, this.settings.envIntensity);
+    if (this.settings.ibl) this.envTex = applyNightIBL(this.renderer, this.scene, this.settings.envIntensity);
 
     this.camera = new THREE.PerspectiveCamera(50, 1, 0.5, 5000);
     this.controls = new OrbitControls(this.camera, this.canvas);
@@ -412,9 +446,15 @@ export class MatchDaySimulator {
         reach,
         shadows: this.settings.shadows,
         detail: this.settings.tier === 'low' ? 'low' : 'full',
+        // The neighbourhood's shaders are compiled before it is put in the
+        // scene, so its arrival is not a stall mid-orbit (performance plan P1.24).
+        prepare: (obj) => this.precompile(obj),
       });
     }
     this.scene.add(this.surroundings.object);
+    // A real neighbourhood arrives after the first frame, with buildings that
+    // cast shadows of their own.
+    void this.surroundings.ready.then(() => this.shadowsChanged(), () => {});
     // Everything starts at Off: a bowl that twinkles, smokes or waves by
     // itself misreads a still tifo as motion, and it is the first thing to
     // distract from the artwork. Phone lights are one of these now.
@@ -1113,7 +1153,10 @@ export class MatchDaySimulator {
 
   // ---- pitch-side (Phase 3) ----
   setPitchsideVisible(b: boolean): void {
+    if (this.pitchside.object.visible === b) return;
     this.pitchside.object.visible = b;
+    // The dugouts cast shadows.
+    this.shadowsChanged();
   }
 
   // ---- banners (Phase 4) ----
@@ -1291,6 +1334,16 @@ export class MatchDaySimulator {
     this.fill.intensity = l.fillInt;
     this.renderer.toneMappingExposure = l.exposure;
     this.surroundings?.setTimeOfDay(tod);
+    // The sun moved.
+    this.shadowsChanged();
+  }
+  /**
+   * Redraw the shadow map on the next frame. Called by everything that moves
+   * the sun or adds, removes, shows or hides something that casts a shadow;
+   * the map is otherwise kept from frame to frame (performance plan P1.22).
+   */
+  private shadowsChanged(): void {
+    if (this.settings.shadows && !this.disposed) this.renderer.shadowMap.needsUpdate = true;
   }
   /** Resolves once the ground's surroundings (a real neighbourhood loads on its own) are in the scene. */
   whenSurroundingsReady(): Promise<void> {
@@ -1879,10 +1932,11 @@ export class MatchDaySimulator {
   }
 
   private bindBannerPointer(): void {
-    this.canvas.addEventListener('pointerdown', this.onBannerDown);
-    this.canvas.addEventListener('pointermove', this.onBannerMove);
-    this.canvas.addEventListener('pointerup', this.onBannerUp);
-    this.canvas.addEventListener('pointercancel', this.onBannerUp);
+    const opts = { signal: this.listeners.signal };
+    this.canvas.addEventListener('pointerdown', this.onBannerDown, opts);
+    this.canvas.addEventListener('pointermove', this.onBannerMove, opts);
+    this.canvas.addEventListener('pointerup', this.onBannerUp, opts);
+    this.canvas.addEventListener('pointercancel', this.onBannerUp, opts);
   }
 
   /**
@@ -2562,7 +2616,7 @@ export class MatchDaySimulator {
    */
   private readonly onCtxLost = (e: Event): void => {
     e.preventDefault();
-    this.running = false;
+    this.stop();
     this.onContextLost?.();
   };
 
@@ -2588,17 +2642,49 @@ export class MatchDaySimulator {
     }
   }
 
+  /**
+   * Compile `obj`'s shaders without drawing, where the browser can do it off
+   * the main thread (KHR_parallel_shader_compile). Never rejects: whatever is
+   * not ready is compiled at its first draw, as before.
+   */
+  private precompile(obj: THREE.Object3D): Promise<void> {
+    if (this.disposed) return Promise.resolve();
+    let p: Promise<void>;
+    // Built for where it will be drawn: into the post pass's buffer at High
+    // and Ultra, to the screen below them. compileAsync builds every program
+    // before it returns, so the target only has to be set across the call.
+    const target = this.effects.compileTarget();
+    const was = this.renderer.getRenderTarget();
+    try {
+      if (target) this.renderer.setRenderTarget(target);
+      p = this.renderer.compileAsync(obj, this.camera, this.scene).then(() => undefined, () => undefined);
+    } catch {
+      return Promise.resolve();
+    } finally {
+      if (target) this.renderer.setRenderTarget(was);
+    }
+    this.compiling.add(p);
+    void p.then(() => this.compiling.delete(p));
+    return p;
+  }
+
   start(): void {
     if (this.running || this.disposed) return;
     if (!this.visBound) {
-      document.addEventListener('visibilitychange', this.onVisibility);
+      document.addEventListener('visibilitychange', this.onVisibility, { signal: this.listeners.signal });
       this.visBound = true;
     }
     this.running = true;
     this.resize();
     this.clock.start();
+    // A loop belongs to the start() that made it. stop() retires it, so a
+    // frame it had already asked for cannot carry it on next to the new one:
+    // a hidden tab runs no frames, so that frame used to be waiting when the
+    // tab came back, and every switch added a loop (performance plan P1.18).
+    const token = ++this.loopToken;
     const loop = (): void => {
-      if (!this.running) return;
+      this.raf = 0;
+      if (!this.running || token !== this.loopToken) return;
       const dt = this.clock.getDelta();
       this.elapsed += dt;
       if (this.flyActive) {
@@ -2641,25 +2727,50 @@ export class MatchDaySimulator {
       this.controls.update();
       this.adaptPerf(dt);
       this.effects.render(this.renderer, this.scene, this.camera);
-      requestAnimationFrame(loop);
+      this.raf = requestAnimationFrame(loop);
     };
-    requestAnimationFrame(loop);
+    const begin = (): void => {
+      if (!this.running || token !== this.loopToken) return;
+      this.raf = requestAnimationFrame(loop);
+    };
+    // The first start compiles the scene as it stands — the overlay has set
+    // the floodlights, sky and weather by now, so the lights the shaders are
+    // built for are the ones the first frame has — and the loop starts when
+    // that is done (performance plan P1.24).
+    if (!this.compiled) this.compiled = this.precompile(this.scene).then(() => { this.compileDone = true; });
+    if (this.compileDone) begin();
+    else void this.compiled.then(begin);
   }
 
   stop(): void {
     this.running = false;
+    this.loopToken++;
+    if (this.raf) cancelAnimationFrame(this.raf);
+    this.raf = 0;
   }
 
   dispose(): void {
     if (this.disposed) return;
+    this.stop();
     this.disposed = true;
-    this.running = false;
-    document.removeEventListener('visibilitychange', this.onVisibility);
-    this.canvas.removeEventListener('webglcontextlost', this.onCtxLost);
+    // Every listener off first, so the context loss below reports nothing.
+    this.listeners.abort();
     this.resizeObserver.disconnect();
     this.store.offDirty(this.onDirtyCb);
     this.store.offPaletteChange(this.onPaletteCb);
     this.controls.dispose();
+    // The sound stops and the picture goes now; the GPU side follows.
+    this.atmosphere.dispose();
+    this.canvas.remove();
+    // three's compileAsync polls the programs it is waiting for on a timer,
+    // and a material disposed under it makes that timer throw. A compile in
+    // flight is at most a moment, so the release waits for it.
+    if (this.compiling.size) void Promise.all([...this.compiling]).then(() => this.release());
+    else this.release();
+  }
+
+  /** Free every GPU resource and lose the context. The second half of dispose(). */
+  private release(): void {
     this.seats.geometry.dispose();
     (this.seats.material as THREE.Material).dispose();
     this.standsGroup.traverse((o) => {
@@ -2675,18 +2786,38 @@ export class MatchDaySimulator {
     this.banners.dispose();
     this.bannerRigs?.dispose();
     this.placement?.dispose();
-    this.canvas.removeEventListener('pointerdown', this.onBannerDown);
-    this.canvas.removeEventListener('pointermove', this.onBannerMove);
-    this.canvas.removeEventListener('pointerup', this.onBannerUp);
     this.effects.dispose();
-    this.atmosphere.dispose();
     this.assetLayer.dispose();
     this.weather.dispose();
     this.surroundings.dispose();
     this.accessories.dispose();
     for (const d of this.disposables) d.dispose();
+    // The sun's shadow map is a render target of its own (16-64 MB at High
+    // and Ultra) that renderer.dispose() does not reach.
+    this.sun.dispose();
     this.skyTex.dispose();
+    this.envTex?.dispose();
+    this.envTex = null;
+    this.scene.environment = null;
     this.renderer.dispose();
-    this.canvas.remove();
+    // dispose() frees three's own objects but leaves the context itself alive
+    // for as long as anything can reach the canvas, and three keeps a hand on
+    // it through textures it shares between renderers. Losing it on purpose
+    // frees its GPU memory now and takes it off Chrome's count of live
+    // contexts — the count that, at sixteen, killed the editor's own canvas
+    // around the fifteenth Match Day of a session (performance plan P1.19).
+    // A context the GPU already took (the Rebuild path) is not lost twice.
+    if (!this.renderer.getContext().isContextLost()) this.renderer.forceContextLoss();
+  }
+}
+
+/** Development, the browser suites (all on this machine), or ?e2e. */
+function shaderChecksWanted(): boolean {
+  try {
+    if ((import.meta as unknown as { env?: { DEV?: boolean } }).env?.DEV) return true;
+    if (/^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname)) return true;
+    return new URLSearchParams(location.search).has('e2e');
+  } catch {
+    return true;
   }
 }

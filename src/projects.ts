@@ -22,7 +22,6 @@ import { installMobileNav } from './ui/mobileNav';
 import { installConsent } from './ui/consent';
 import { ensureUsernameChosen } from './ui/chooseUsernameModal';
 import { escapeHtml } from './core/escape';
-import { templateById } from './core/stadiumCatalog';
 import {
   TRASH_DAYS, docKey, accountDraftKey, duplicateLocal, listLocal, localThumb,
   migrateLegacyDraft, nextDefaultName, openUrl, purgeLocal, readEnvelope, restoreLocal,
@@ -258,7 +257,7 @@ function render(): void {
   }
   grid.innerHTML = list.map(cardHtml).join('');
   hydrateBowls(grid);
-  void hydrateThumbs();
+  hydrateThumbs();
   status.textContent = list.length
     ? ''
     : view === 'trash' && !query ? t('pj.emptyTrash') : tv('pj.noMatch', { q: query.trim() });
@@ -268,26 +267,78 @@ function render(): void {
 const thumbCache = new Map<string, string>();
 const thumbLoading = new Set<string>();
 
-async function hydrateThumbs(): Promise<void> {
+/**
+ * Account pictures, fetched as their cards come near the screen.
+ *
+ * Every one used to be fetched as soon as the list rendered, four at a time:
+ * someone with 169 projects downloaded 169 pictures to look at the first
+ * dozen, and the ones on screen queued behind the rest. Now a card asks for
+ * its picture when it is within a screen or so of the viewport (performance
+ * plan P1.13), still at most four requests at a time.
+ */
+const THUMB_PARALLEL = 4;
+const thumbQueue: string[] = [];
+let thumbWorkers = 0;
+let thumbIo: IntersectionObserver | null = null;
+
+function hydrateThumbs(): void {
   const imgs = Array.from(grid.querySelectorAll<HTMLImageElement>('img[data-thumb]'));
-  // A few at a time: a long list should not open fifty requests at once.
-  const queue = imgs.map((img) => img.dataset.thumb!).filter((k) => !thumbLoading.has(k));
-  const work = async (): Promise<void> => {
-    for (let k = queue.shift(); k; k = queue.shift()) {
-      thumbLoading.add(k);
-      const id = k.split(':')[1]!;
-      const url = await fetchThumbnailObjectUrl(id).catch(() => null);
-      thumbLoading.delete(k);
-      if (!url) continue;
-      thumbCache.set(k, url);
-      grid.querySelectorAll<HTMLImageElement>(`img[data-thumb="${CSS.escape(k)}"]`).forEach((img) => {
-        img.dataset.bowl = url;
-        img.removeAttribute('data-thumb');
+  // render() replaces the whole grid, so the cards the last observer watched
+  // are gone; start a fresh one for the cards on the page now.
+  thumbIo?.disconnect();
+  thumbIo = null;
+  if (typeof IntersectionObserver === 'undefined') {
+    for (const img of imgs) queueThumb(img.dataset.thumb!);
+    return;
+  }
+  const io = new IntersectionObserver(
+    (entries) => {
+      for (const e of entries) {
+        if (!e.isIntersecting) continue;
+        io.unobserve(e.target);
+        const k = (e.target as HTMLImageElement).dataset.thumb;
+        if (k) queueThumb(k);
+      }
+    },
+    { rootMargin: '600px 0px' },
+  );
+  thumbIo = io;
+  for (const img of imgs) io.observe(img);
+}
+
+function queueThumb(k: string): void {
+  if (thumbLoading.has(k) || thumbCache.has(k) || thumbQueue.includes(k)) return;
+  thumbQueue.push(k);
+  pumpThumbs();
+}
+
+function pumpThumbs(): void {
+  while (thumbWorkers < THUMB_PARALLEL && thumbQueue.length) {
+    const k = thumbQueue.shift()!;
+    const sel = `img[data-thumb="${CSS.escape(k)}"]`;
+    // Filtered out or re-sorted off the page while it waited: its card asks
+    // again if it comes back.
+    if (!grid.querySelector(sel)) continue;
+    thumbWorkers++;
+    thumbLoading.add(k);
+    const id = k.split(':')[1]!;
+    void fetchThumbnailObjectUrl(id)
+      .catch(() => null)
+      .then((url) => {
+        if (!url) return;
+        thumbCache.set(k, url);
+        grid.querySelectorAll<HTMLImageElement>(sel).forEach((img) => {
+          img.dataset.bowl = url;
+          img.removeAttribute('data-thumb');
+        });
+        hydrateBowls(grid);
+      })
+      .finally(() => {
+        thumbLoading.delete(k);
+        thumbWorkers--;
+        pumpThumbs();
       });
-      hydrateBowls(grid);
-    }
-  };
-  await Promise.all([work(), work(), work(), work()]);
+  }
 }
 
 // ----------------------------------------------------------------- data ---
@@ -662,7 +713,13 @@ fileInput.addEventListener('change', async () => {
     const text = await f.text();
     const parsed = JSON.parse(text) as { stadium?: { templateId?: string }; templateId?: string; meta?: { title?: string } };
     const stadiumId = parsed?.stadium?.templateId ?? parsed?.templateId;
-    if (typeof stadiumId !== 'string' || !templateById(stadiumId)) throw new Error('unknown stadium');
+    if (typeof stadiumId !== 'string') throw new Error('unknown stadium');
+    // The catalogue is the biggest module the site has and builds stadium
+    // geometry as it loads; this check is the only thing on the page that
+    // needs it, so it comes in here and not with the page (performance plan
+    // P1.13).
+    const { templateById } = await import('./core/stadiumCatalog');
+    if (!templateById(stadiumId)) throw new Error('unknown stadium');
     sessionStorage.setItem('tifo_pending_import', text);
     stashNewProject({
       title: (parsed.meta?.title || f.name.replace(/\.tifo$/i, '')).slice(0, 80) || t('np.nameDefault'),

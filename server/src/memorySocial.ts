@@ -21,7 +21,11 @@ export class MemorySocialRepository implements SocialRepository {
   constructor(
     private readonly designs: MemoryDesignRepository,
     private readonly auth: MemoryAuthRepository,
-  ) {}
+  ) {
+    // The feed's comment counts are the threads' lengths, as listComments
+    // returns them (performance plan P1.11).
+    designs.countCommentsWith((designId) => this.comments.reduce((n, c) => n + (c.designId === designId ? 1 : 0), 0));
+  }
 
   private key(a: string, b: string): string {
     return `${a}->${b}`;

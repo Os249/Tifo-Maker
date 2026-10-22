@@ -111,11 +111,15 @@ export class MemoryFeedbackRepository implements FeedbackRepository {
 }
 
 export class PgFeedbackRepository implements FeedbackRepository {
-  constructor(private readonly pool: pg.Pool) {}
+  /**
+   * `maintenance` is the small pool for slow, non-request work (server/src/db.ts,
+   * performance plan P1.26); it defaults to the one pool where only one exists.
+   */
+  constructor(private readonly pool: pg.Pool, private readonly maintenance: pg.Pool = pool) {}
 
   /** Idempotent creation, matching how the other tables bootstrap on boot. */
   async init(): Promise<void> {
-    await this.pool.query(`
+    await this.maintenance.query(`
       CREATE TABLE IF NOT EXISTS feedback (
         id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         kind       TEXT NOT NULL,
@@ -127,7 +131,7 @@ export class PgFeedbackRepository implements FeedbackRepository {
         handled    BOOLEAN NOT NULL DEFAULT false,
         created_at TIMESTAMPTZ NOT NULL DEFAULT now()
       )`);
-    await this.pool.query('CREATE INDEX IF NOT EXISTS feedback_created_idx ON feedback (created_at DESC)');
+    await this.maintenance.query('CREATE INDEX IF NOT EXISTS feedback_created_idx ON feedback (created_at DESC)');
   }
 
   async create(input: FeedbackInput): Promise<{ id: string }> {
@@ -142,7 +146,7 @@ export class PgFeedbackRepository implements FeedbackRepository {
 
   async list(limit: number): Promise<FeedbackRow[]> {
     try {
-      const res = await this.pool.query(
+      const res = await this.maintenance.query(
         `SELECT id, kind, message, email, steps, context, user_id, handled, created_at
            FROM feedback ORDER BY created_at DESC LIMIT $1`,
         [Math.min(200, Math.max(1, limit))],
@@ -165,7 +169,7 @@ export class PgFeedbackRepository implements FeedbackRepository {
 
   async counts(): Promise<{ total: number; open: number; bugs: number; ideas: number }> {
     try {
-      const res = await this.pool.query(
+      const res = await this.maintenance.query(
         `SELECT count(*)::int AS total,
                 count(*) FILTER (WHERE NOT handled)::int AS open,
                 count(*) FILTER (WHERE kind = 'bug')::int AS bugs,

@@ -16,13 +16,9 @@ import { initScheme, setSchemeLabels } from './ui/colorScheme';
 import { installMobileNav } from './ui/mobileNav';
 import { installConsent } from './ui/consent';
 import { ensureUsernameChosen } from './ui/chooseUsernameModal';
-import { generateSeatMapAsync } from './workers/client';
-import { TEMPLATES } from './core/template';
-import { templateById } from './core/stadiumCatalog';
-import { DesignStore } from './core/design';
-import { Preview3D, CAMERA_PRESETS } from './render/preview3d';
-import { openAuthModal } from './ui/authModal';
-import { openShareModal } from './ui/shareModal';
+import type { Preview3D } from './render/preview3d';
+import type { SeatMap } from './core/types';
+import type { ShareTarget } from './ui/shareModal';
 import {
   isSignedIn,
   fetchMe,
@@ -53,12 +49,79 @@ import {
   type ProfileData,
 } from './net/api';
 
+// ---------- what loads only when it is needed ----------
+/**
+ * The 3D preview, the stadium catalogue and the share and sign-in dialogs are
+ * fetched when someone is about to use them, not with the feed (performance
+ * plan P1.10).
+ *
+ * They were static imports, so the page modulepreloaded three.js, the whole
+ * catalogue (which builds stadium geometry as it loads) and the worker client
+ * at High priority, about 276 KB gz of a 332 KB gz start, and could not even
+ * ask for the feed until all of it had been evaluated. A card warms the 3D
+ * code the moment a pointer or the focus reaches it (warmCard, below), so by
+ * the time the click lands most of it is already here.
+ *
+ * A failed load is forgotten rather than cached, so the next try starts over
+ * instead of failing forever on a page that stayed open through a blip.
+ */
+type Preview3DModules = typeof import('./community3d');
+let preview3dModules: Promise<Preview3DModules> | null = null;
+function load3D(): Promise<Preview3DModules> {
+  preview3dModules ??= import('./community3d').catch((e: unknown) => {
+    preview3dModules = null;
+    throw e;
+  });
+  return preview3dModules;
+}
+
+let authModalModule: Promise<typeof import('./ui/authModal')> | null = null;
+function loadAuthModal(): Promise<typeof import('./ui/authModal')> {
+  authModalModule ??= import('./ui/authModal').catch((e: unknown) => {
+    authModalModule = null;
+    throw e;
+  });
+  return authModalModule;
+}
+/** The sign-in dialog. A dialog that will not load counts as closed. */
+async function openAuthModal(): Promise<string | null> {
+  try {
+    return await (await loadAuthModal()).openAuthModal();
+  } catch {
+    return null;
+  }
+}
+
+let shareModalModule: Promise<typeof import('./ui/shareModal')> | null = null;
+function loadShareModal(): Promise<typeof import('./ui/shareModal')> {
+  shareModalModule ??= import('./ui/shareModal').catch((e: unknown) => {
+    shareModalModule = null;
+    throw e;
+  });
+  return shareModalModule;
+}
+function openShareModal(target: ShareTarget): void {
+  void loadShareModal().then((m) => m.openShareModal(target), () => undefined);
+}
+
+/**
+ * A pointer or the focus on any card (the feed's or a profile's): it is about
+ * to be opened or shared, so start fetching what that needs. One listener for
+ * the whole page rather than three on each of sixty cards.
+ */
+function warmCard(e: Event): void {
+  if (!(e.target as Element | null)?.closest?.('.tifo-card')) return;
+  if (!preview3dModules) void load3D().catch(() => undefined);
+  if (!shareModalModule) void loadShareModal().catch(() => undefined);
+}
+for (const ev of ['pointerover', 'pointerdown', 'focusin']) document.addEventListener(ev, warmCard, { passive: true });
+
 // ---------- bootstrap ----------
 initLang();
 // The visit was counted when the page was sent; see core/utm.ts.
 cleanAddressBar();
-// Light / dark. The scheme is already on the <html> element (the inline head
-// script settles it before first paint); this wires the header toggle and the
+// Light / dark. The scheme is already on the <html> element (theme-boot.js
+// settles it before first paint); this wires the header toggle and the
 // translated labels.
 initScheme();
 setSchemeLabels({ dark: t('theme.dark'), light: t('theme.light') });
@@ -89,6 +152,10 @@ const timeAgo = (iso: string): string => {
 
 // ---------- nav: auth + language ----------
 const authBtn = $('#auth-btn') as HTMLButtonElement;
+// Fetched as the pointer or the focus arrives, so the dialog opens on the click.
+for (const ev of ['pointerenter', 'focus']) {
+  authBtn.addEventListener(ev, () => { if (!isSignedIn()) void loadAuthModal().catch(() => undefined); }, { passive: true });
+}
 const langToggle = $('#lang-toggle');
 langToggle?.addEventListener('click', () => {
   toggleLang();
@@ -187,8 +254,9 @@ async function loadGallery(): Promise<void> {
   const loading = $('#grid-loading');
   const empty = $('#grid-empty');
   // The server ships a plain list of links so crawlers (and anyone without JS)
-  // can reach every published tifo. Once the real grid is about to render it
-  // has done its job, and leaving it would show the same designs twice.
+  // can reach every published tifo. CSS has kept it unpainted from the start
+  // (the .js rule in community.html); once the real grid is about to render it
+  // has done its job, and it goes, so nothing can show the same designs twice.
   document.getElementById('seo-feed')?.remove();
   grid.innerHTML = '';
   $('#grid-more').hidden = true;
@@ -282,6 +350,7 @@ function renderCard(item: GalleryItem, onClick?: () => void): HTMLElement {
     ? `<div class="card-remixed">↻ remixed from <span class="at">@${escapeHtml(item.remixedFromName)}</span></div>`
     : '';
   const liked = item.myVote === 1;
+  const comments = commentCountOf(item);
   card.innerHTML = `
     ${thumb}</div>
     <div class="card-body">
@@ -291,7 +360,7 @@ function renderCard(item: GalleryItem, onClick?: () => void): HTMLElement {
       ${remixed}
       <div class="card-stats">
         <span class="card-stat like ${liked ? 'on' : ''}"><i class="ti ti-heart${liked ? '-filled' : ''}"></i> ${item.likeScore}</span>
-        <span class="card-stat"><i class="ti ti-message-circle"></i> <span class="cmt-count" data-id="${item.id}">·</span></span>
+        <span class="card-stat"><i class="ti ti-message-circle"></i> <span class="cmt-count" data-id="${item.id}">${comments ?? '·'}</span></span>
         <span class="card-stat views" title="${escapeHtml(t('cm.viewsTitle'))}"><i class="ti ti-eye"></i> <span class="view-count" data-id="${item.id}">${item.viewCount ?? 0}</span></span>
         <button class="card-stat card-share" title="${escapeHtml(t('cm.shareThis'))}"><i class="ti ti-share"></i></button>
       </div>
@@ -477,6 +546,9 @@ async function openPreview(item: GalleryItem, focusCommentId?: string | null): P
   });
   document.addEventListener('keydown', escClose);
 
+  // Liking, following, commenting and remixing all ask a signed-out visitor to
+  // sign in first, so have that dialog ready before they press anything.
+  if (!isSignedIn()) void loadAuthModal().catch(() => undefined);
   // render the live 3D stadium
   void mountPreview3D(item);
   // follow / like / remix
@@ -546,8 +618,10 @@ function closePreview(): void {
 
 async function mountPreview3D(item: GalleryItem): Promise<void> {
   try {
-    // Resolve the design's template, generate its seat map, load cells.
-    const tpl = await resolveTemplate(item.id);
+    // Resolve the design's template, generate its seat map, load cells. The
+    // code for all of it arrives in parallel with the design's own request.
+    const [tpl, { generateSeatMapAsync, templateById, DesignStore, Preview3D, CAMERA_PRESETS }] =
+      await Promise.all([resolveTemplate(item.id), load3D()]);
     const map = await generateSeatMapAsync(tpl);
     const store = new DesignStore(map, ['#262a33', '#1c5fd9']);
     await loadDesign(store, item.id);
@@ -583,7 +657,7 @@ async function mountPreview3D(item: GalleryItem): Promise<void> {
 async function attachBanners(
   item: GalleryItem,
   preview: Preview3D,
-  map: Awaited<ReturnType<typeof generateSeatMapAsync>>,
+  map: SeatMap,
   tplId: string,
   bar: HTMLElement | null,
 ): Promise<void> {
@@ -603,6 +677,7 @@ async function attachBanners(
       .filter((b) => b.visible !== false)
       .sort((a, b) => (a.name ?? '').localeCompare(b.name ?? '', undefined, { numeric: true, sensitivity: 'base' }));
     if (shown.length === 0) return;
+    const { TEMPLATES, templateById } = await load3D();
     const template = templateById(tplId) ?? TEMPLATES[0];
     preview.attachBanners(banners, template);
     // Open on the banner. The default camera looks at one end, and a banner on
@@ -627,7 +702,7 @@ async function attachBanners(
 /** Find the template object for a design (by querying its template id/version). */
 async function resolveTemplate(designId: string): Promise<string> {
   const { fetchDesignTemplate } = await import('./net/api');
-  const info = await fetchDesignTemplate(designId);
+  const [info, { TEMPLATES, templateById }] = await Promise.all([fetchDesignTemplate(designId), load3D()]);
   const tpl = templateById(info.templateId) ?? TEMPLATES[0];
   return tpl.id;
 }
@@ -917,14 +992,29 @@ function bumpCommentCount(designId: string): void {
 }
 
 /**
- * Fill in comment counts once a page of cards is on screen.
+ * A card's comment count, when the feed carries one (performance plan P1.11).
  *
- * One request per card, so it runs a few at a time rather than one after
- * another: a 60-card page used to be 60 serial round-trips, which on a phone
- * meant the last card's count landed long after the reader had scrolled past.
+ * Each gallery row now says how many comments it has, so a page of sixty cards
+ * no longer needs sixty more requests that download every thread just to count
+ * it. Null from a server that does not send the field yet.
+ */
+function commentCountOf(item: GalleryItem): number | null {
+  const n: unknown = item.commentCount;
+  return typeof n === 'number' && Number.isInteger(n) && n >= 0 ? n : null;
+}
+
+/**
+ * Fill in the comment counts the feed did not carry.
+ *
+ * Only for a server that predates commentCount: one request per card, so it
+ * runs a few at a time rather than one after another (a 60-card page used to
+ * be 60 serial round-trips, and on a phone the last count landed long after
+ * the reader had scrolled past).
  */
 async function fillCommentCounts(items: GalleryItem[]): Promise<void> {
-  const queue = items.filter((i) => document.querySelector(`.cmt-count[data-id="${cssId(i.id)}"]`));
+  const queue = items.filter(
+    (i) => commentCountOf(i) === null && document.querySelector(`.cmt-count[data-id="${cssId(i.id)}"]`),
+  );
   let at = 0;
   const worker = async (): Promise<void> => {
     while (at < queue.length) {
@@ -1159,7 +1249,10 @@ interface Selection { colors: string[]; clubs: string[]; tags: string[] }
 const emptySelection = (): Selection => ({ colors: [], clubs: [], tags: [] });
 let draft: Selection = emptySelection();
 let facetCache: GalleryFacets | null = null;
+/** Which tab facetCache was fetched for, so it is never read for another one. */
+let facetScope: string | null = null;
 let tagCache: { slug: string; count: number }[] = [];
+let tagsFetched = false;
 let countTimer: number | undefined;
 
 const selectionCount = (sel: Selection): number => sel.colors.length + sel.clubs.length + sel.tags.length;
@@ -1212,13 +1305,26 @@ const toggle = (list: string[], id: string): string[] =>
  * than an empty category.
  */
 async function loadFilters(): Promise<void> {
+  const scopeKey = currentSort;
   const scope = { peopleOnly: currentSort === 'people', templatesOnly: currentSort === 'templates' };
-  const [facets, tags] = await Promise.all([
-    listGalleryFacets(scope).catch(() => null),
-    listPopularTags().catch(() => []),
-  ]);
+  // What this tab offers was fetched when the page (or the tab) opened; opening
+  // the panel, removing a pill or switching language only redraws it
+  // (performance plan P1.11). A failed fetch is not kept, so it is tried again.
+  const reuse = facetCache !== null && facetScope === scopeKey && tagsFetched;
+  const [facets, tags] = reuse
+    ? [facetCache, tagCache]
+    : await Promise.all([
+        listGalleryFacets(scope).catch(() => null),
+        listPopularTags().then(
+          (list) => { tagsFetched = true; return list.slice(0, 14); },
+          () => [] as { slug: string; count: number }[],
+        ),
+      ]);
+  // The tab changed while this was in flight: the newer call draws the panel.
+  if (scopeKey !== currentSort) return;
   facetCache = facets;
-  tagCache = tags.slice(0, 14);
+  facetScope = facets ? scopeKey : null;
+  tagCache = tags;
 
   const colourBox = $('#colour-chips');
   const clubBox = $('#club-chips');
@@ -1273,13 +1379,19 @@ async function refreshCount(): Promise<void> {
       apply.textContent = t('cm.apply');
       return;
     }
-    const facets = await listGalleryFacets({
-      peopleOnly: currentSort === 'people',
-      templatesOnly: currentSort === 'templates',
-      colors: draft.colors,
-      tags: draft.tags,
-      clubId: draft.clubs[0],
-    }).catch(() => null);
+    // Nothing picked: the count is the tab's total, which loadFilters has just
+    // fetched. Asking again (as this did on every page load, 220 ms after the
+    // first) cost a second facets request for the same answer (performance
+    // plan P1.11).
+    const facets = selectionCount(draft) === 0 && facetCache && facetScope === currentSort
+      ? facetCache
+      : await listGalleryFacets({
+          peopleOnly: currentSort === 'people',
+          templatesOnly: currentSort === 'templates',
+          colors: draft.colors,
+          tags: draft.tags,
+          clubId: draft.clubs[0],
+        }).catch(() => null);
     if (!facets) { apply.disabled = false; apply.textContent = t('cm.apply'); return; }
     apply.disabled = facets.matching === 0;
     apply.textContent = facets.matching === 0
@@ -1410,9 +1522,15 @@ async function openDeepLink(): Promise<void> {
 
 async function main(): Promise<void> {
   langToggle.textContent = t('common.language');
-  await refreshAuthUI();
+  // The feed, the filters and who is signed in all start together (performance
+  // plan P1.11). The feed used to wait for /api/me, a whole round trip, though
+  // it never needed the answer: the request carries the saved token itself, so
+  // a signed-in visitor's own likes still come back. Nothing about writes
+  // changes: each one (like, comment, follow, remix) still goes through
+  // ensureAuth, the choose-a-name dialog still opens as soon as /api/me says
+  // it is needed, and the server answers 428 to any write until it is done.
   initPaging();
-  await Promise.all([loadGallery(), loadFilters()]);
+  await Promise.all([refreshAuthUI(), loadGallery(), loadFilters()]);
   renderApplied();
   void openDeepLink();
 }

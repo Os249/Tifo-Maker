@@ -10,8 +10,11 @@
  * flips <html dir/lang>, persists the choice, and re-applies the DOM.
  */
 
-import { PASSWORD_MAX, PASSWORD_MIN } from '../core/password';
-import { SAUDI_REAL_BLOCKS } from '../core/realBlocksSaudi';
+// The limits and the rebuilt-ground ids as plain data, not the password grader
+// (with its blocklist) and the Saudi geometry builders they used to come with:
+// this chunk is on every page, and those were 47 KB of it (performance plan P1.15).
+import { PASSWORD_MAX, PASSWORD_MIN } from '../core/passwordLimits';
+import { REAL_BLOCK_IDS } from '../core/realBlockIds';
 
 export type Lang = 'en' | 'ar';
 
@@ -2666,8 +2669,8 @@ const LABEL_KEYS: Record<string, string> = {
  * saved on it — is that name marked as the earlier layout.
  */
 const EARLIER_LAYOUT = new Set<string>();
-for (const [oldId, l] of Object.entries(SAUDI_REAL_BLOCKS)) {
-  if (LABEL_KEYS[oldId] && !LABEL_KEYS[l.id]) LABEL_KEYS[l.id] = LABEL_KEYS[oldId];
+for (const [oldId, newId] of Object.entries(REAL_BLOCK_IDS)) {
+  if (LABEL_KEYS[oldId] && !LABEL_KEYS[newId]) LABEL_KEYS[newId] = LABEL_KEYS[oldId];
   EARLIER_LAYOUT.add(oldId);
 }
 

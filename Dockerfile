@@ -28,13 +28,21 @@ RUN npm ci --no-audit --no-fund
 COPY . .
 RUN npm run build:prod
 
+# The server: the seat table, written fresh by the seat-map generator in this
+# checkout, and the server bundled into one file, server/build/server.mjs
+# (performance plan P1.31; scripts/seat-table.mts, scripts/bundle-server.mjs).
+# Outside dist/, so never served; no source map; no environment value baked in.
+RUN npm run build:server
+# A bundle that was never written must fail the build here, not the deploy.
+RUN test -s server/build/server.mjs && test -s server/data/seat-table.json
+
 # What npm knew about the production packages on the day this image was built,
 # shown on /admin#security. Informational only: an advisory service that cannot
 # be reached must not block a deploy (CI runs the strict check on every push).
 RUN npm audit --omit=dev --json > audit-snapshot.json 2>/dev/null || true
 
-# Drop the build-only packages (TypeScript, Vite, Playwright) so they never
-# reach the server image.
+# Drop the build-only packages (TypeScript, Vite, Playwright, tsx, esbuild) so
+# they never reach the server image: it runs the bundle with plain node.
 RUN npm prune --omit=dev --no-audit --no-fund
 
 # ---- runtime: the built site, the server source and production packages ----
@@ -58,4 +66,6 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=20s --retries=3 \
 # container with SIGTERM; npm did not pass it on, so the server was killed
 # without closing: in-flight requests cut, queued emails and the last seconds
 # of the security log lost. server.ts handles SIGTERM and closes cleanly.
-CMD ["node", "--import", "tsx", "server/src/server.ts"]
+# It runs the bundle, not the TypeScript under tsx: boot went from 18-31 s to
+# about 1.5 s, against Railway's 30 s healthcheck.
+CMD ["node", "server/build/server.mjs"]

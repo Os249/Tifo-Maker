@@ -60,7 +60,7 @@ const ciNodes = [...ci.matchAll(/node-version:\s*'?(\d+)/g)].map((m) => Number(m
 assert.ok(ciNodes.length > 0, 'CI names its Node version');
 assert.ok(ciNodes.every((n) => n === imageMajor), `CI tests on the Node line production runs (CI ${ciNodes.join(', ')}, image ${imageMajor})`);
 
-const pkg = JSON.parse(read('package.json')) as { engines?: { node?: string } };
+const pkg = JSON.parse(read('package.json')) as { engines?: { node?: string }; dependencies?: Record<string, string>; devDependencies?: Record<string, string> };
 const engineMin = Number(/>=\s*(\d+)/.exec(pkg.engines?.node ?? '')?.[1]);
 assert.ok(Number.isFinite(engineMin), 'package.json declares a minimum Node version');
 assert.ok(engineMin <= imageMajor, 'the image satisfies package.json engines');
@@ -69,6 +69,14 @@ assert.ok(new Date(`${NODE_END_OF_LIFE[engineMin] ?? '1970-01-01'}T00:00:00Z`) >
 // The table itself must be right about the past, or none of the above means anything.
 assert.equal(supported(20).ok, false, 'Node 20 is past end of life');
 assert.equal(NODE_END_OF_LIFE[20], '2026-04-30');
+
+// ---- the security headers' package ------------------------------------------
+// The server builds helmet's middleware itself, once (performance plan P1.30),
+// so helmet is a direct dependency, pinned exactly: a minor release changes
+// what the defaults send, and the header pin in security.test.mts is what
+// decides whether that is accepted, not an install.
+assert.match(pkg.dependencies?.helmet ?? '', /^\d+\.\d+\.\d+$/, 'helmet is a direct runtime dependency, pinned to one version');
+assert.match(read('server/src/routes.ts'), /^import helmet from 'helmet';$/m, 'and the server uses it directly');
 
 // ---- the image ---------------------------------------------------------------
 const stages = dockerfile.split(/^FROM\s/m).slice(1);
@@ -82,7 +90,8 @@ assert.match(dockerfile, /COPY package\.json package-lock\.json \.\//, 'a missin
 assert.match(dockerfile, /npm prune --omit=dev/, 'build-only packages are removed before the runtime stage');
 assert.doesNotMatch(dockerfile, /^ADD\s+https?:/m, 'nothing is downloaded into the image unverified');
 // npm as the main process swallowed Railway's SIGTERM, so the server never closed cleanly.
-assert.match(runtime, /^CMD \["node", "--import", "tsx", "server\/src\/server\.ts"\]\s*$/m, 'node is the main process, so it receives SIGTERM');
+// And it runs the bundle with plain node, not TypeScript under tsx (performance plan P1.31).
+assert.match(runtime, /^CMD \["node", "server\/build\/server\.mjs"\]\s*$/m, 'node is the main process, so it receives SIGTERM, running the server bundle');
 assert.match(read('server/src/server.ts'), /process\.once\(signal/, 'and the server handles it');
 
 const dockerignore = read('.dockerignore').split('\n').map((l) => l.trim());
@@ -111,6 +120,78 @@ const gitignore = read('.gitignore').split('\n').map((l) => l.trim());
 assert.ok(gitignore.includes('.env*') && gitignore.includes('!.env.example'), 'every .env variant is ignored, the template is not');
 const railway = JSON.parse(read('railway.json')) as { deploy?: { restartPolicyMaxRetries?: number } };
 assert.ok((railway.deploy?.restartPolicyMaxRetries ?? 0) >= 5, 'a crash loop gets more than three restarts before the site stays down');
+
+// ---- the server bundle (performance plan P1.31) --------------------------------
+// The image runs server/build/server.mjs, made in the build stage. It must
+// never be public, never carry a secret or a source map, and never hide a
+// dependency from npm audit.
+{
+  const buildStage = stages[0];
+  const at = (re: RegExp): number => { const m = re.exec(buildStage); return m ? m.index : -1; };
+  assert.ok(at(/^RUN npm run build:prod$/m) >= 0 && at(/^RUN npm run build:server$/m) > at(/^RUN npm run build:prod$/m), 'the build stage makes the seat table and the bundle, after the site');
+  assert.ok(at(/^RUN npm prune --omit=dev/m) > at(/^RUN npm run build:server$/m), 'before the build tools are pruned');
+  const scripts = (JSON.parse(read('package.json')) as { scripts: Record<string, string> }).scripts;
+  assert.equal(scripts['build:server'], 'tsx scripts/seat-table.mts && node scripts/bundle-server.mjs', 'build:server writes the seat table and bundles');
+  assert.equal(scripts.start, 'NODE_ENV=production node server/build/server.mjs', 'npm start runs the bundle too');
+  for (const tool of ['tsx', 'esbuild']) {
+    assert.equal(pkg.dependencies?.[tool], undefined, `${tool} is not a runtime dependency: it never reaches the image`);
+    assert.ok(pkg.devDependencies?.[tool], `${tool} is a build dependency`);
+  }
+  assert.ok(dockerignore.includes('server/build'), 'a local bundle never enters the build context: the image makes its own');
+  const { BUNDLE_OPTIONS } = await import('../../scripts/bundle-server.mjs');
+  assert.equal(BUNDLE_OPTIONS.outfile, 'server/build/server.mjs');
+  assert.doesNotMatch(String(BUNDLE_OPTIONS.outfile), /(^|\/)dist\//, 'the bundle is outside dist/, the public web root');
+  assert.equal(BUNDLE_OPTIONS.sourcemap, false, 'no source map');
+  assert.equal(BUNDLE_OPTIONS.packages, 'external', 'every package stays an import, visible to npm audit');
+  assert.equal('define' in BUNDLE_OPTIONS, false, 'nothing defined at build time: process.env is read at run time');
+  assert.doesNotMatch(read('scripts/bundle-server.mjs'), /\bdefine\s*:/, 'nor anywhere in the bundler script');
+  // Build one and look at it.
+  const { build } = await import('esbuild');
+  const { mkdtempSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const out = `${mkdtempSync(`${tmpdir()}/tifo-bundle-`)}/server.mjs`;
+  await build({ ...(BUNDLE_OPTIONS as object), outfile: out, logLevel: 'silent' } as Parameters<typeof build>[0]);
+  const bundle = read(out);
+  assert.doesNotMatch(bundle, /sourceMappingURL/, 'no source map, inline or linked');
+  assert.match(bundle, /process\.env\.DATABASE_URL/, 'the database URL is read when it runs');
+  assert.match(bundle, /process\.env\.AI_ADMIN_PASSWORD/, 'and so is the admin password');
+  const imported = [...bundle.matchAll(/^import\s[^;]*?from\s+"([^"]+)"/gm), ...bundle.matchAll(/^import\s+"([^"]+)"/gm)].map((m) => m[1]);
+  const runtimeDeps = new Set(Object.keys(pkg.dependencies ?? {}));
+  for (const spec of new Set(imported)) {
+    if (spec.startsWith('node:')) continue;
+    const name = spec.startsWith('@') ? spec.split('/').slice(0, 2).join('/') : spec.split('/')[0];
+    assert.ok(runtimeDeps.has(name), `the bundle imports ${spec}, which must be a runtime dependency`);
+  }
+  assert.ok(!imported.some((x) => x.startsWith('tsx') || x.startsWith('esbuild')), 'and never a build tool');
+  // Nothing in the public web root is a map or a server file.
+  const { existsSync, readdirSync } = await import('node:fs');
+  if (existsSync('dist')) {
+    const walk = (d: string): string[] => readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(`${d}/${e.name}`) : [`${d}/${e.name}`]));
+    const files = walk('dist');
+    assert.deepEqual(files.filter((f) => f.endsWith('.map')), [], 'no source maps in dist/');
+    assert.deepEqual(files.filter((f) => /server\.mjs$|seat-table\.json$/.test(f)), [], 'no server file in dist/');
+  }
+  console.log(`  server bundle: built outside dist/, no map, no define, ${new Set(imported).size} imports all runtime dependencies or node:`);
+}
+
+// ---- the seat table ----------------------------------------------------------
+// The server reads every ground's seat count and royal box from
+// server/data/seat-table.json instead of generating 104 seat maps at boot
+// (performance plan P1.31). The counts decide whether a design may be saved,
+// so the table must be exactly what the generator makes: every ground is
+// generated again here and compared, row by row.
+{
+  const { formatSeatTable, generateSeatTable, readSeatTable, SEAT_TABLE_PATH } = await import('../src/seatTable');
+  const { shippedTemplates } = await import('../../src/core/stadiumCatalog');
+  const started = Date.now();
+  const fresh = generateSeatTable();
+  const onDisk = readSeatTable(SEAT_TABLE_PATH);
+  assert.ok(onDisk, 'server/data/seat-table.json exists and reads as a table');
+  assert.equal(onDisk.size, shippedTemplates().length, 'one row per shipped ground');
+  for (const row of fresh) assert.deepEqual(onDisk.get(row.key), row, `${row.key}: the table's row is what the generator makes (run npm run seats:table)`);
+  assert.equal(read(SEAT_TABLE_PATH), formatSeatTable(fresh), 'and the file is byte for byte what the generator writes');
+  console.log(`  seat table: ${fresh.length} grounds regenerated and identical (${((Date.now() - started) / 1000).toFixed(1)}s)`);
+}
 
 console.log(`deploy: all assertions passed (${window.why}; image pinned to Node ${pins[0]}, at or above the security floor; non-root image, lockfile-only installs, dockerignore, CI token + pins, secret scan, restart policy)`);
 

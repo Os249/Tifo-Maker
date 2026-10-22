@@ -5,13 +5,11 @@ import type { DesignStore } from '../core/design';
 import type { SeatMap, ToolId } from '../core/types';
 import { PALETTE_PRESETS } from '../core/template';
 import { PATTERN_PRESETS } from '../core/patterns';
-import {
-  makeThumbnailB64,
-  takeClaimIntent,
-} from '../net/api';
+import { takeClaimIntent } from '../net/api';
+import { MiniMapPixels, canvasOf, dataUrlOf, stripPixels } from '../render/seatPixels';
 import { renderTextCanvas, TIFO_FONTS, type RenderedText } from '../core/text';
 import { loadTifoFonts } from '../core/tifoFonts';
-import { MAX_PICTURES, encodePictureSrc, rememberPicture, type ObjectLayer } from '../core/objects';
+import { MAX_PICTURES, encodePictureSrcAsync, rememberPicture, type ObjectLayer } from '../core/objects';
 import type { Composer } from '../core/composer';
 import { writeLayers } from '../core/layerStore';
 import { mountLayersPanel, layerName } from './layersPanel';
@@ -19,7 +17,7 @@ import { MIN_LEGIBLE_RUN, findFragileSeats } from '../core/analysis';
 import { RevealPlayer, REVEAL_PRESETS, revealEndsHidden, type RevealId } from '../core/reveal';
 import { drumCallBeat, DRUM_CALL_MIN_LENGTH } from '../core/drumCall';
 import { DrumTrack } from '../render/drumTrack';
-import { fetchMe, isSignedIn, registrationEmailWasSent, saveDesign, saveScene, setPublic, setDesignTitle, exportMyData } from '../net/api';
+import { fetchMe, fetchMeOnce, isSignedIn, registrationEmailWasSent, saveDesign, saveScene, setPublic, setDesignTitle, exportMyData } from '../net/api';
 import { onLangChange, t as i18nT, tErr, tl, tv } from './i18n';
 import { track, setAnalyticsSignedIn } from '../net/analytics';
 import { buildTifoV2 } from '../core/tifoFormat';
@@ -33,7 +31,7 @@ import { openAuthModal } from './authModal';
 import { openGallery } from './gallery';
 import { mountAiPanel } from './aiPanel';
 import {
-  createLocal, getLocal, keysFor, makeStripDataUrl, openUrl, purgeLocal, stashNewProject,
+  createLocal, getLocal, keysFor, openUrl, purgeLocal, stashNewProject,
   newProjectUrl, thumbKey, updateLocal, writeEnvelope, writeRaw, type ProjectRef,
 } from '../core/projects';
 import { mountStadiumPanel } from './stadiumPanel';
@@ -149,8 +147,17 @@ export function mountToolbar(
   const textBar = $('#text-bar');
   const importBar = $('#import-bar');
   const shapeBar = $('#shape-bar');
-  let pendingImport: { bitmap: ImageBitmap; name: string } | null = null;
+  /**
+   * A picture waiting to be placed. `src` is its saved form, encoded off the
+   * main thread from the moment the picture is chosen (performance plan
+   * P1.7), so by the time it is placed the encode is usually done.
+   */
+  let pendingImport: { bitmap: ImageBitmap; name: string; src?: Promise<string | undefined> } | null = null;
   let onEnterMode: (tool: ToolId) => void = () => {};
+  // The twelve display faces, the first time anything needs them (see wantFaces below).
+  let wantFaces: () => void = () => {};
+  // The stadium panel's list, the first time it is opened (see mountStadiumPanel).
+  let openStadiumPanel: () => void = () => {};
   let objectPanelHook: () => void = () => {};
   // Mobile options sheet — assigned once the panel + scrim exist (see chrome below).
   let openOptionsSheet: () => void = () => {};
@@ -218,6 +225,8 @@ export function mountToolbar(
 
   const setPanelMode = (mode: 'design' | 'save' | 'animation' | 'ai' | 'stadium'): void => {
     panelMode = mode;
+    if (mode === 'ai') wantFaces();
+    if (mode === 'stadium') openStadiumPanel();
     applyContextPanel(editor.tool);
   };
   // A tab selects its panel; pressing the tab that is already open leaves it
@@ -260,6 +269,7 @@ export function mountToolbar(
     // its key and its tool bar; only the surface underneath changes.
     bannerHost.current?.setTool(tool);
     applyContextPanel(tool);
+    if (tool === 'text') wantFaces();
     onEnterMode(tool);
     objectPanelHook();
   };
@@ -282,6 +292,7 @@ export function mountToolbar(
   const fgWell = $('#fg-well') as unknown as HTMLButtonElement;
   const fgHex = $('#fg-hex');
   const addBtn = $('#add-swatch') as HTMLButtonElement;
+  /** Seats per swatch, counted afresh: for a decision (removing a colour), not a label. */
   const colorCounts = (): number[] => {
     const counts = new Array(store.palette.length).fill(0);
     for (let i = 0; i < store.cells.length; i++) counts[store.cells[i]]++;
@@ -311,49 +322,97 @@ export function mountToolbar(
     if (fgSub) fgSub.textContent = i18nT(unsaved ? 'ed.colors.notAdded' : 'ed.colors.painting');
     addBtn?.classList.toggle('ready', unsaved);
   };
-  const renderPalette = (): void => {
-    palEl.innerHTML = '';
-    const counts = colorCounts();
+  /*
+   * The swatches are built when the palette or the language changes, and only
+   * then (performance plan P1.2). They used to be torn down and rebuilt on
+   * every painted frame, 36 elements and 96 listeners at a time, after a count
+   * of every seat in the ground: 398 ms of each test stroke. Now the store
+   * keeps the counts as seats change (DesignStore.colorCounts), one listener
+   * on the palette serves every swatch, and while painting the tallies are
+   * rewritten at most four times a second.
+   */
+  type SwatchEl = { idx: number; hex: string; b: HTMLButtonElement; tally: HTMLElement; n: number };
+  let swatchEls: SwatchEl[] = [];
+  let swatchesFor: string | null = null; // the palette the swatches were built for
+  const tallyText = (n: number): string => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
+  const paintTallies = (): void => {
+    const counts = store.colorCounts();
+    const seats = i18nT('ed.seats');
+    for (const s of swatchEls) {
+      const n = counts[s.idx] ?? 0;
+      if (n === s.n) continue;
+      s.n = n;
+      s.b.title = `${s.hex} · ${n.toLocaleString()} ${seats} · ${i18nT('ed.colors.editT')}`;
+      s.b.setAttribute('aria-label', `${i18nT('ed.colors.swatch')} ${s.hex}, ${n.toLocaleString()} ${seats}`);
+      s.tally.textContent = tallyText(n);
+    }
+  };
+  const buildSwatches = (): void => {
+    swatchesFor = store.palette.join(',');
+    swatchEls = [];
+    const cells: HTMLElement[] = [];
     store.palette.forEach((hex, idx) => {
       if (idx === 0) return; // index 0 = empty seat = eraser
       const cell = document.createElement('div');
       cell.className = 'swatch-cell';
       const b = document.createElement('button');
-      b.className = 'swatch' + (idx === editor.colorIndex ? ' active' : '');
+      b.className = 'swatch';
+      b.dataset.idx = String(idx);
       b.style.background = hex;
-      b.title = `${hex} · ${counts[idx].toLocaleString()} ${i18nT('ed.seats')} · ${i18nT('ed.colors.editT')}`;
-      b.setAttribute('aria-label', `${i18nT('ed.colors.swatch')} ${hex}, ${counts[idx].toLocaleString()} ${i18nT('ed.seats')}`);
-      b.addEventListener('click', () => {
-        editor.colorIndex = idx;
-        pendingHex = null; // choosing a swatch settles it; nothing is pending
-        if (editor.tool === 'eraser') setTool('brush');
-        editor.refreshStampPreviewTint();
-        renderPalette();
-        reflectFg();
-      });
-      b.addEventListener('dblclick', () => openColorEditor(idx, b));
-      b.addEventListener('contextmenu', (e) => { e.preventDefault(); openColorEditor(idx, b); });
-      // Press and hold. A swatch could only be edited by double-clicking it and
-      // only removed by right-clicking it, so on a phone a palette was
-      // add-only: no second tap gesture, no right button. Hold is the gesture
-      // touch already uses for "more about this thing".
-      let holdTimer: number | undefined;
-      const cancelHold = (): void => { window.clearTimeout(holdTimer); holdTimer = undefined; };
-      b.addEventListener('pointerdown', (e) => {
-        if (e.pointerType === 'mouse') return; // mouse has dblclick and right-click
-        cancelHold();
-        holdTimer = window.setTimeout(() => { holdTimer = undefined; openColorEditor(idx, b); }, 450);
-      });
-      for (const ev of ['pointerup', 'pointercancel', 'pointermove', 'pointerleave'] as const) {
-        b.addEventListener(ev, cancelHold);
-      }
       const tally = document.createElement('span');
       tally.className = 'swatch-count';
-      tally.textContent = counts[idx] >= 1000 ? `${(counts[idx] / 1000).toFixed(1)}k` : String(counts[idx]);
       cell.append(b, tally);
-      palEl.appendChild(cell);
+      cells.push(cell);
+      swatchEls.push({ idx, hex, b, tally, n: -1 });
     });
+    palEl.replaceChildren(...cells);
   };
+  const renderPalette = (): void => {
+    if (swatchesFor !== store.palette.join(',')) buildSwatches();
+    for (const s of swatchEls) s.b.classList.toggle('active', s.idx === editor.colorIndex);
+    paintTallies();
+  };
+  // One set of listeners for every swatch, on the palette itself.
+  const swatchAt = (e: Event): { idx: number; b: HTMLButtonElement } | null => {
+    const b = (e.target as Element | null)?.closest?.('button.swatch') as HTMLButtonElement | null;
+    const idx = b && palEl.contains(b) ? Number(b.dataset.idx) : NaN;
+    return b && Number.isInteger(idx) && idx > 0 && idx < store.palette.length ? { idx, b } : null;
+  };
+  palEl.addEventListener('click', (e) => {
+    const s = swatchAt(e);
+    if (!s) return;
+    editor.colorIndex = s.idx;
+    pendingHex = null; // choosing a swatch settles it; nothing is pending
+    if (editor.tool === 'eraser') setTool('brush');
+    editor.refreshStampPreviewTint();
+    renderPalette();
+    reflectFg();
+  });
+  palEl.addEventListener('dblclick', (e) => {
+    const s = swatchAt(e);
+    if (s) openColorEditor(s.idx, s.b);
+  });
+  palEl.addEventListener('contextmenu', (e) => {
+    const s = swatchAt(e);
+    if (!s) return;
+    e.preventDefault();
+    openColorEditor(s.idx, s.b);
+  });
+  // Press and hold. A swatch could only be edited by double-clicking it and
+  // only removed by right-clicking it, so on a phone a palette was
+  // add-only: no second tap gesture, no right button. Hold is the gesture
+  // touch already uses for "more about this thing".
+  let holdTimer: number | undefined;
+  const cancelHold = (): void => { window.clearTimeout(holdTimer); holdTimer = undefined; };
+  palEl.addEventListener('pointerdown', (e) => {
+    const s = swatchAt(e);
+    if (!s || e.pointerType === 'mouse') return; // mouse has dblclick and right-click
+    cancelHold();
+    holdTimer = window.setTimeout(() => { holdTimer = undefined; openColorEditor(s.idx, s.b); }, 450);
+  });
+  for (const ev of ['pointerup', 'pointercancel', 'pointermove'] as const) palEl.addEventListener(ev, cancelHold);
+  // pointerleave does not bubble; caught on its way down instead.
+  palEl.addEventListener('pointerleave', cancelHold, true);
   renderPalette();
   reflectFg();
   editor.onColorPick = (idx) => {
@@ -363,7 +422,33 @@ export function mountToolbar(
     reflectFg();
     setTool('brush'); // pick a colour, then paint with it immediately
   };
-  store.onDirty(renderPalette);
+  // The tallies follow the seats on a short timer, and not at all while a
+  // layer is being dragged (performance plan P1.5): its release redraws the
+  // seats it settled on, and the tallies follow that.
+  let tallyTimer = 0;
+  let tallyHeld = false;
+  const tallySoon = (): void => {
+    if (objects.inGesture) {
+      tallyHeld = true;
+      return;
+    }
+    if (tallyTimer) return;
+    tallyTimer = window.setTimeout(() => {
+      tallyTimer = 0;
+      paintTallies();
+    }, 250);
+  };
+  store.onDirty(tallySoon);
+  objects.onChange(() => {
+    if (tallyHeld && !objects.inGesture) {
+      tallyHeld = false;
+      tallySoon();
+    }
+  });
+  onLangChange(() => {
+    swatchesFor = null;
+    renderPalette();
+  });
   // A palette set from outside this panel (a club start, a loaded design)
   // must show here too, painting colour included: it used to keep showing
   // the previous palette's colour beside swatches that no longer had it.
@@ -403,7 +488,8 @@ export function mountToolbar(
   });
 
   // ---- Stadium panel (rail "stadium" button → panelMode 'stadium') ----
-  mountStadiumPanel({ root, map, store, objects, refresh: panelRefresh });
+  const stadiumPanel = mountStadiumPanel({ root, map, store, objects, refresh: panelRefresh });
+  openStadiumPanel = stadiumPanel.open;
 
   /**
    * Put a real <input type="color"> over a control, so the user's own tap is
@@ -781,9 +867,27 @@ export function mountToolbar(
     updateTextPreviewSize();
   };
   const rebuildTextPreviewT = rafThrottle(rebuildTextPreview);
-  // The preview is drawn before the faces finish downloading; redraw once when
-  // they land so the preview matches what placing will actually stamp.
-  void loadTifoFonts().then(() => rebuildTextPreview());
+  /*
+   * The display faces (twelve files, about 256 KB) load the first time
+   * something needs them: the Text tool, the AI panel, or a text layer in the
+   * design (performance plan P1.6). They used to load at every editor open,
+   * whether anybody typed a word or not. Everything that stamps text still
+   * awaits loadTifoFonts() itself; this only starts the download early. The
+   * preview is drawn before the faces land, and redrawn once they have, so it
+   * matches what placing will actually stamp.
+   */
+  let facesAsked = false;
+  wantFaces = (): void => {
+    if (facesAsked) return;
+    facesAsked = true;
+    void loadTifoFonts().then(() => rebuildTextPreview());
+  };
+  const textLayerShown = (): void => {
+    if (!facesAsked && objects.list().some((o) => o.kind === 'text')) wantFaces();
+  };
+  objects.onChange(textLayerShown);
+  textLayerShown();
+  if (editor.tool === 'text') wantFaces();
   textInput.addEventListener('input', rebuildTextPreviewT);
   textFont.addEventListener('change', rebuildTextPreview);
   textArc.addEventListener('input', () => {
@@ -1025,7 +1129,7 @@ export function mountToolbar(
     document.dispatchEvent(new CustomEvent('tifo:import-done'));
   };
 
-  const stampImageAt = (cx: number, cy: number): void => {
+  const stampImageAt = async (cx: number, cy: number): Promise<void> => {
     if (!pendingImport) return;
     if (bannerActive()) {
       // A banner prints the picture, it does not quantize it to cards, so the
@@ -1078,24 +1182,33 @@ export function mountToolbar(
     }
     // The picture as it will be saved with the project: small enough that
     // twelve fit beside the banners, decoded again only to re-draw at a new size.
-    const src = encodePictureSrc(pendingImport.bitmap);
-    rememberPicture(src, pendingImport.bitmap);
+    // Taken now, so a second click while the encode finishes cannot place it twice.
+    const imp = pendingImport;
+    pendingImport = null;
+    importApply.disabled = true;
+    const placeAs = {
+      tier: importTier.value === 'both' ? null : Number(importTier.value),
+      dither: ditherChk.checked,
+      cutout: cutoutChk?.checked === true,
+      alphaThreshold: Number(importAlpha.value),
+    };
+    const src = await (imp.src ?? encodePictureSrcAsync(imp.bitmap));
+    rememberPicture(src, imp.bitmap);
     objects.addImage({
       cx,
       cy,
       width: w,
       height: h,
       colorIndex: 0,
-      tier: importTier.value === 'both' ? null : Number(importTier.value),
-      bitmap: pendingImport.bitmap,
-      name: pendingImport.name,
+      tier: placeAs.tier,
+      bitmap: imp.bitmap,
+      name: imp.name,
       src,
-      dither: ditherChk.checked,
-      cutout: cutoutChk?.checked === true,
-      alphaThreshold: Number(importAlpha.value),
+      dither: placeAs.dither,
+      cutout: placeAs.cutout,
+      alphaThreshold: placeAs.alphaThreshold,
     });
     // Keep the bitmap alive (the object now owns a reference); just exit import mode.
-    pendingImport = null;
     setTool('select');
     importDone();
     const placed = objects.selected;
@@ -1131,7 +1244,8 @@ export function mountToolbar(
       // decodeImportBitmap, not createImageBitmap: a phone camera hands you
       // 4000-8000px on the long edge, which is both a 47MB+ texture and, past
       // 4096, larger than many mobile GPUs will accept at all.
-      pendingImport = { bitmap: await decodeImportBitmap(file), name: file.name };
+      const bitmap = await decodeImportBitmap(file);
+      pendingImport = { bitmap, name: file.name, src: encodePictureSrcAsync(bitmap) };
       importName.textContent = file.name;
       setTool('import');
       editor.setStampPreview(pendingImport.bitmap, false);
@@ -1154,11 +1268,11 @@ export function mountToolbar(
       // No stand chosen → the centre of the current viewport, which is the one
       // place the user is demonstrably looking at.
       const view = editor.getViewportRect();
-      stampImageAt(view.x + view.width / 2, view.y + view.height / 2);
+      void stampImageAt(view.x + view.width / 2, view.y + view.height / 2);
       return;
     }
     const u = Number(importPlace.value);
-    stampImageAt(u * EDITOR_UNITS.width, tierY[importTier.value] ?? tierY.both);
+    void stampImageAt(u * EDITOR_UNITS.width, tierY[importTier.value] ?? tierY.both);
   });
   $('#import-cancel').addEventListener('click', cancelImport);
 
@@ -1231,14 +1345,14 @@ export function mountToolbar(
   document.addEventListener('tifo:banner-place', () => {
     if (editor.tool === 'text') void placeTextAt(0, 0);
     else if (editor.tool === 'shape') placeShapeAt(0, 0);
-    else if (editor.tool === 'import') stampImageAt(0, 0);
+    else if (editor.tool === 'import') void stampImageAt(0, 0);
   });
 
   // One shared placement-click callback, dispatched by the active mode.
   editor.onPlaceStamp = (x, y) => {
     if (editor.tool === 'text') void placeTextAt(x, y);
     else if (editor.tool === 'shape') placeShapeAt(x, y);
-    else if (editor.tool === 'import' && importPlace.value === 'click') stampImageAt(x, y);
+    else if (editor.tool === 'import' && importPlace.value === 'click') void stampImageAt(x, y);
   };
 
   // Rebuild the right ghost when (re-)entering a stamp mode.
@@ -1521,8 +1635,9 @@ export function mountToolbar(
   });
 
   // Restore session on load: if a token is present, show the name (no shine).
+  // The page's one /api/me (fetchMeOnce: main.ts asked it already, P1.8).
   void (async () => {
-    const me = await fetchMe();
+    const me = await fetchMeOnce();
     if (me?.username) reflectSignedIn(me.username, me.id);
     if (me) reflectAdmin(me.isAdmin);
     refreshPhotoRow();
@@ -1690,20 +1805,69 @@ export function mountToolbar(
   };
 
   /**
-   * The card picture of a local project, redrawn a few seconds after the last
-   * change. It is the only picture a project in this browser has, and a
-   * Projects page of grey rectangles is a page nobody can find anything on.
+   * The card picture of a local project. It is the only picture a project in
+   * this browser has, and a Projects page of grey rectangles is a page nobody
+   * can find anything on.
+   *
+   * It used to be a whole-ground PNG drawn and encoded on the main thread 2.5 s
+   * after every autosave, and once more when the project was made: up to
+   * 2.8 s each on a slow canvas. Now (performance plan P1.6) it is written on
+   * the way out of the page, on Save, and otherwise at most once a minute; the
+   * seats go straight into pixels and the PNG is encoded off the main thread.
+   * Still a data: URL, as the Projects page's <img> needs (the CSP allows
+   * data: images, not blob: ones).
    */
+  const THUMB_EVERY_MS = 60_000;
   let thumbTimer = 0;
-  const scheduleThumb = (): void => {
+  let thumbAt = 0;
+  /** The seats changed since the picture was last stored. */
+  let thumbStale = false;
+  /** An encode is under way; its picture is not stored yet. */
+  let thumbEncoding = false;
+  const thumbCanvas = (): HTMLCanvasElement => canvasOf(stripPixels(map, store.cells, store.palette));
+  const writeThumb = async (): Promise<void> => {
     if (ref?.kind !== 'local') return;
     window.clearTimeout(thumbTimer);
+    thumbTimer = 0;
     const id = ref.id;
+    thumbStale = false;
+    thumbEncoding = true;
+    thumbAt = Date.now();
+    try {
+      const url = await dataUrlOf(thumbCanvas(), 'image/png');
+      if (url?.startsWith('data:image/png') && ref?.kind === 'local' && ref.id === id) writeRaw(thumbKey(id), url);
+    } finally {
+      thumbEncoding = false;
+    }
+  };
+  const markThumb = (): void => {
+    thumbStale = true;
+  };
+  store.onDirty(markThumb);
+  store.onPaletteChange(markThumb);
+  /** After an autosave: the picture follows, within the minute. */
+  const scheduleThumb = (): void => {
+    if (ref?.kind !== 'local' || !thumbStale) return;
+    if (thumbTimer) return;
     thumbTimer = window.setTimeout(() => {
-      if (ref?.kind !== 'local' || ref.id !== id) return;
-      const url = makeStripDataUrl(map, store);
-      if (url) writeRaw(thumbKey(id), url);
-    }, 2500);
+      thumbTimer = 0;
+      if (thumbStale) void writeThumb();
+    }, Math.max(2500, thumbAt + THUMB_EVERY_MS - Date.now()));
+  };
+  /**
+   * Leaving the page (after the draft's own last write): no time for an encode
+   * to come back, so this one is synchronous, and only when the stored picture
+   * is behind the seats. Straight from pixels, it is a few milliseconds.
+   */
+  const thumbOnLeave = (): void => {
+    if (ref?.kind !== 'local' || (!thumbStale && !thumbEncoding)) return;
+    try {
+      const url = thumbCanvas().toDataURL('image/png');
+      if (url.startsWith('data:image/png')) writeRaw(thumbKey(ref.id), url);
+      thumbStale = false;
+    } catch {
+      /* the previous picture stays */
+    }
   };
 
   /**
@@ -1775,8 +1939,22 @@ export function mountToolbar(
     }
     return ensuring;
   };
+  /**
+   * While a layer is being dragged, resized or turned, its seats change on
+   * every pointer move, and each autosave of a stack with pictures in it is a
+   * whole layer document into IndexedDB: one 40-move drag made 14 writes of
+   * 607 KB. The work is kept from the release instead (performance plan
+   * P1.5): the gesture's end is itself a change, and it lands here. A tab
+   * closed mid-drag still writes, because pagehide flushes regardless.
+   */
+  let editHeld = false;
   const edited = (): void => {
     unsynced = true;
+    if (objects.inGesture) {
+      editHeld = true;
+      return;
+    }
+    editHeld = false;
     if (!ref) {
       void ensureProject().then(() => draftWriter.schedule());
       return;
@@ -1794,7 +1972,8 @@ export function mountToolbar(
   let sceneUnread = false;
 
   store.onDirty(edited);
-  objects.onChange((why) => { if (why !== 'select') edited(); }); // picking a layer is not an edit
+  // Picking a layer is not an edit, but it does end a held one (above).
+  objects.onChange((why) => { if (why !== 'select' || (editHeld && !objects.inGesture)) edited(); });
   // A banner is part of the tifo: a design that is only a banner so far is
   // still work to keep, and it is the draft that says which tifo this is.
   sceneIO?.onChange?.(() => {
@@ -1832,7 +2011,10 @@ export function mountToolbar(
   docTitle.addEventListener('input', syncClubMark);
   syncClubMark();
   // A closing tab gets no timer callback, so flush synchronously on the way out.
-  window.addEventListener('pagehide', () => draftWriter.flush());
+  window.addEventListener('pagehide', () => {
+    draftWriter.flush();
+    thumbOnLeave();
+  });
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') draftWriter.flush();
   });
@@ -2022,6 +2204,8 @@ export function mountToolbar(
       // this. Repeating it here put the same sentence on screen twice, which
       // reads as two things having happened rather than one.
       message.textContent = '';
+      // Saving is a moment to bring the card picture up to date (P1.6).
+      if (thumbStale) void writeThumb();
       // The offer waits for the second save. The first is often seconds into
       // a brand-new tifo, when an account is the last thing on anyone's mind;
       // saving again means the work is worth keeping, which is the offer.
@@ -2042,7 +2226,7 @@ export function mountToolbar(
   // rewrite existed to fix, reintroduced by the redirect.
   if (takeClaimIntent()) {
     void (async () => {
-      const me = await fetchMe();
+      const me = await fetchMeOnce();
       if (!me?.username) return;
       reflectSignedIn(me.username, me.id, true);
       reflectAdmin(me.isAdmin);
@@ -2182,7 +2366,7 @@ export function mountToolbar(
 
   // Check admin status on load (once the session is known).
   void (async () => {
-    const me = await fetchMe();
+    const me = await fetchMeOnce();
     const isAdmin = me?.isAdmin ?? false;
     reflectAdmin(isAdmin);
     const wanted = new URLSearchParams(location.search).get('admin');
@@ -2402,22 +2586,31 @@ export function mountToolbar(
   const miniCanvas = $('#minimap-canvas') as unknown as HTMLCanvasElement;
   const miniViewport = $('#minimap-viewport');
   const miniCtx = miniCanvas.getContext('2d')!;
+  // Straight into pixels (performance plan P1.1): no PNG, no base64, no image
+  // to decode, one pass over the seats. It used to encode a PNG of the whole
+  // ground and decode it again on every painted frame.
+  const miniPixels = new MiniMapPixels(map, miniCanvas.width, miniCanvas.height);
   const renderMiniMap = (): void => {
-    const b64 = makeThumbnailB64(map, store);
-    const img = new Image();
-    img.onload = () => miniCtx.drawImage(img, 0, 0, miniCanvas.width, miniCanvas.height);
-    img.src = `data:image/png;base64,${b64}`;
+    miniCtx.putImageData(miniPixels.paint(store.cells, store.palette), 0, 0);
   };
   renderMiniMap();
-  let miniMapDirty = false;
-  store.onDirty(() => {
-    if (miniMapDirty) return;
-    miniMapDirty = true;
-    requestAnimationFrame(() => {
-      miniMapDirty = false;
+  // At most ten times a second, whatever is changing the seats: a brush, a
+  // layer being dragged (P1.5), an AI design arriving. The last change is
+  // always drawn.
+  const MINI_EVERY_MS = 100;
+  let miniTimer = 0;
+  let miniAt = 0;
+  const miniMapSoon = (): void => {
+    if (miniTimer) return;
+    const wait = Math.max(0, miniAt + MINI_EVERY_MS - performance.now());
+    miniTimer = window.setTimeout(() => {
+      miniTimer = 0;
+      miniAt = performance.now();
       renderMiniMap();
-    });
-  });
+    }, wait);
+  };
+  store.onDirty(miniMapSoon);
+  store.onPaletteChange(miniMapSoon);
   editor.onViewChange = (u0, v0, u1, v1, zoom) => {
     const cw = miniCanvas.clientWidth || miniCanvas.width;
     const ch = miniCanvas.clientHeight || miniCanvas.height;
@@ -3467,8 +3660,8 @@ export function mountToolbar(
       unsynced = false;
       bindProject({ kind: 'local', id: lp.id });
       draftWriter.flush();
-      const thumb = makeStripDataUrl(map, store);
-      if (thumb) writeRaw(thumbKey(lp.id), thumb);
+      // Its first card picture, encoded off the main thread (P1.6).
+      void writeThumb();
       if (lastDraft && !lastDraft.ok) message.textContent = i18nT('pj.t.full');
       track('project_created');
       return ref;

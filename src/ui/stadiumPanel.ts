@@ -35,6 +35,7 @@ import {
 } from '../core/stadiumCatalog';
 import { requestStadiumSwitch } from './stadiumSwitch';
 import { zoneCounts } from '../core/venueDetails';
+import { hasBlocks } from '../core/blocks';
 import { loadFavorites, toggleFavorite } from './stadiumFavorites';
 import { ACTIVE_AREAS, getActiveArea, setActiveArea } from '../core/activeArea';
 import { orientCells, type OrientOp } from '../core/orientation';
@@ -102,7 +103,13 @@ const isVisible = (e: StadiumEntry): boolean => VISIBLE_SOURCES.includes(e.meta.
 
 type Tab = StadiumSource | 'favorites';
 
-export function mountStadiumPanel(deps: StadiumPanelDeps): void {
+/** What the toolbar may ask of the panel once it is mounted. */
+export interface StadiumPanelApi {
+  /** Build it, if this is the first time it is shown. Cheap every other time. */
+  open(): void;
+}
+
+export function mountStadiumPanel(deps: StadiumPanelDeps): StadiumPanelApi {
   const { root, map, store, refresh } = deps;
   const $ = <T extends HTMLElement>(s: string): T | null => root.querySelector<T>(s);
   const tabsEl = $('#stadium-tabs');
@@ -114,9 +121,25 @@ export function mountStadiumPanel(deps: StadiumPanelDeps): void {
   const orientEl = $('#stadium-orient');
   const reviewEl = $('#stadium-review');
   const reviewListEl = $('#stadium-review-list');
-  if (!listEl || !infoEl) return; // panel not present (e.g. phone build)
+  if (!listEl || !infoEl) return { open: () => {} }; // panel not present (e.g. phone build)
 
   const currentId = map.templateRef.id;
+  /**
+   * The open ground's sections, off the seat map the editor already has
+   * (performance plan P1.3). `sectionCount` has to place every seat of a
+   * ground in its real blocks to know, which on the Jewel was a second
+   * 500 ms seat map at every editor open, for one number in this panel.
+   */
+  let openSections = -1;
+  const sectionsOf = (e: StadiumEntry): number => {
+    if (e.id !== currentId) return sectionCount(e.template);
+    if (openSections < 0) {
+      let n = 0;
+      for (let i = 0; i < map.count; i++) if (map.sectionOf[i] + 1 > n) n = map.sectionOf[i] + 1;
+      openSections = hasBlocks(e.template) ? n : sectionCount(e.template);
+    }
+    return openSections;
+  };
   let favorites = loadFavorites();
   // Landing on a hidden tab is a real path, not a hypothetical: a design saved
   // while the Custom tab existed still reports source 'custom' when reopened,
@@ -298,7 +321,7 @@ export function mountStadiumPanel(deps: StadiumPanelDeps): void {
       [t('sp.region'), e.meta.country ? tl(e.meta.country) : '-'],
       [t('sp.capacity'), e.meta.capacity ? '~' + fmt(e.meta.capacity) : '-'],
       [t('sp.seats'), e.id === currentId ? fmt(map.count) : e.meta.capacity ? '~' + fmt(e.meta.capacity) : '-'],
-      [t('sp.sections'), String(sectionCount(e.template))],
+      [t('sp.sections'), String(sectionsOf(e))],
       [t('sp.tiersLabel'), String(tierCount(e.template))],
       [t('sp.type'), e.meta.type ? tl(e.meta.type) : '-'],
     ];
@@ -640,13 +663,21 @@ export function mountStadiumPanel(deps: StadiumPanelDeps): void {
     renderArea();
     renderOrient();
   }
-  render();
-  void renderReviewQueue(); // one admin-gated probe; hides itself for non-admins
+  // Built the first time the panel is shown, not at editor open (P1.3): a
+  // hundred rows nobody looks at until they press Stadium.
+  let built = false;
+  const open = (): void => {
+    if (built) return;
+    built = true;
+    render();
+    void renderReviewQueue(); // one admin-gated probe; hides itself for non-admins
+  };
 
   // "Show me a league" from elsewhere (the new-stadiums card): the built-in tab,
   // that league's grounds, every other filter cleared so none of them hides one.
   document.addEventListener('tifo:stadium-league', (ev) => {
     const tag = (ev as CustomEvent<string>).detail;
+    built = true;
     buildFilters();
     activeTab = 'builtin';
     if (searchEl) searchEl.value = '';
@@ -669,6 +700,7 @@ export function mountStadiumPanel(deps: StadiumPanelDeps): void {
   // Clearing the two guards and re-rendering rebuilds the panel in the new
   // language, keeping the selected stadium, tab and filters as they were.
   onLangChange(() => {
+    if (!built) return; // built in the new language when it is first opened
     const keptTab = activeTab;
     const keptSearch = searchEl?.value ?? '';
     const keptType = typeEl?.value ?? '';
@@ -688,4 +720,5 @@ export function mountStadiumPanel(deps: StadiumPanelDeps): void {
     if (leagueEl) leagueEl.value = keptLeague;
     renderList();
   });
+  return { open };
 }

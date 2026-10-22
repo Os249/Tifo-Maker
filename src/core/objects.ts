@@ -503,19 +503,65 @@ export function fontForObject(fonts: TifoFont[], id: string): string {
  */
 export function encodePictureSrc(bitmap: ImageBitmap, maxEdge = 1024): string | undefined {
   try {
-    const k = Math.min(1, maxEdge / Math.max(bitmap.width, bitmap.height));
-    const c = document.createElement('canvas');
-    c.width = Math.max(1, Math.round(bitmap.width * k));
-    c.height = Math.max(1, Math.round(bitmap.height * k));
-    const ctx = c.getContext('2d')!;
-    ctx.imageSmoothingQuality = 'high';
-    ctx.drawImage(bitmap, 0, 0, c.width, c.height);
+    const c = pictureCanvas(bitmap, maxEdge);
     const webp = c.toDataURL('image/webp', 0.84);
     return webp.startsWith('data:image/webp') ? webp : c.toDataURL('image/png');
   } catch {
     return undefined;
   }
 }
+
+/** The picture drawn at the size it is saved at. */
+function pictureCanvas(bitmap: ImageBitmap, maxEdge: number): HTMLCanvasElement {
+  const k = Math.min(1, maxEdge / Math.max(bitmap.width, bitmap.height));
+  const c = document.createElement('canvas');
+  c.width = Math.max(1, Math.round(bitmap.width * k));
+  c.height = Math.max(1, Math.round(bitmap.height * k));
+  const ctx = c.getContext('2d')!;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(bitmap, 0, 0, c.width, c.height);
+  return c;
+}
+
+/** A canvas encoded off the main thread, as a data: URL (null when the browser cannot write that type). */
+function encodeAsync(c: HTMLCanvasElement, type: string, quality?: number): Promise<string | null> {
+  return new Promise((resolve) => {
+    try {
+      c.toBlob((blob) => {
+        // A browser that cannot write the type hands back a PNG instead.
+        if (!blob || blob.type !== type) return resolve(null);
+        const r = new FileReader();
+        r.onload = () => resolve(typeof r.result === 'string' ? r.result : null);
+        r.onerror = () => resolve(null);
+        r.readAsDataURL(blob);
+      }, type, quality);
+    } catch {
+      resolve(null);
+    }
+  });
+}
+
+/**
+ * The same picture as `encodePictureSrc`, encoded off the main thread
+ * (performance plan P1.7). `toDataURL` encodes on the spot: 300–500 ms of a
+ * frozen page for a phone photo, at the moment it is placed. `toBlob` hands
+ * the encode to the browser and comes back when it is done.
+ *
+ * Whatever comes back is held to the rule `objectFromJSON` applies on the way
+ * in: a base64 data: URL of a WebP, PNG or JPEG, or nothing at all.
+ */
+export async function encodePictureSrcAsync(bitmap: ImageBitmap, maxEdge = 1024): Promise<string | undefined> {
+  try {
+    const c = pictureCanvas(bitmap, maxEdge);
+    const url = (await encodeAsync(c, 'image/webp', 0.84)) ?? (await encodeAsync(c, 'image/png'));
+    return url && PICTURE_SRC.test(url) ? url : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** The only picture sources a layer will hold: what the CSP's img-src allows and nothing that runs. */
+const PICTURE_SRC = /^data:image\/(webp|png|jpeg);base64,/;
 
 /** Decode a saved picture back into a bitmap (an <img>, because the CSP allows data: images). */
 export async function decodePictureSrc(src: string): Promise<ImageBitmap | null> {
@@ -626,7 +672,7 @@ export function objectFromJSON(j: unknown, fonts: TifoFont[], paletteLen: number
     };
   }
   if (kind === 'image') {
-    const src = typeof r.src === 'string' && /^data:image\/(webp|png|jpeg);base64,/.test(r.src) ? r.src : undefined;
+    const src = typeof r.src === 'string' && PICTURE_SRC.test(r.src) ? r.src : undefined;
     if (!src && !grid) return null;
     return {
       ...base, kind, bitmap: null, name: typeof r.name === 'string' ? r.name.slice(0, 120) : 'picture', src,

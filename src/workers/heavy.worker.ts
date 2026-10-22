@@ -1,8 +1,7 @@
 /// <reference lib="webworker" />
 import { generateSeatMap } from '../core/seatmap';
-import { templateById } from '../core/stadiumCatalog';
 import { encodeGif } from '../core/gif';
-import type { SeatMap } from '../core/types';
+import type { SeatMap, StadiumTemplate } from '../core/types';
 
 /**
  * Background worker for the two genuinely heavy, pure operations:
@@ -13,10 +12,21 @@ import type { SeatMap } from '../core/types';
  * fields are transferred (zero-copy) back to the main thread. The editor uses
  * these via an async wrapper and falls back to synchronous calls if Workers
  * are unavailable.
+ *
+ * The page sends the stadium itself, not its id (performance plan P1.16).
+ * Resolving the id here meant bundling the whole stadium catalogue into the
+ * worker (46 KB gzipped, evaluated again before the first seat map), and it
+ * still could not see the grounds the page had registered at run time: a
+ * custom or community stadium answered "unknown template" and was quietly
+ * built on the main thread instead. The page resolves the template, checks a
+ * stadium it did not ship (workers/client.ts), and hands it over.
+ *
+ * This file is loaded only as a same-origin module worker from /assets (the
+ * CSP's script-src 'self'); never as a blob: or data: worker.
  */
 
 type Req =
-  | { id: number; kind: 'seatmap'; templateId: string }
+  | { id: number; kind: 'seatmap'; template: StadiumTemplate }
   | {
       id: number;
       kind: 'gif';
@@ -41,19 +51,26 @@ function seatMapTransfer(m: SeatMap): Transferable[] {
   ] as Transferable[];
 }
 
+const post = (msg: unknown, transfer: Transferable[] = []): void => (self as unknown as Worker).postMessage(msg, transfer);
+
 self.onmessage = (e: MessageEvent<Req>) => {
   const msg = e.data;
-  if (msg.kind === 'seatmap') {
-    const tpl = templateById(msg.templateId);
-    if (!tpl) {
-      (self as unknown as Worker).postMessage({ id: msg.id, error: `unknown template ${msg.templateId}` });
-      return;
+  const id = msg && typeof msg === 'object' && typeof msg.id === 'number' ? msg.id : -1;
+  // Every failure is an answer, so the page never waits on a request that
+  // threw in here; it falls back to doing the work itself.
+  try {
+    if (msg.kind === 'seatmap') {
+      if (!msg.template || typeof msg.template !== 'object') throw new Error('no template');
+      const map = generateSeatMap(msg.template);
+      post({ id, map }, seatMapTransfer(map));
+    } else if (msg.kind === 'gif') {
+      const frames = msg.frames.map((b) => new Uint8Array(b));
+      const bytes = encodeGif(frames, msg.w, msg.h, msg.table, msg.delayCs);
+      post({ id, gif: bytes.buffer }, [bytes.buffer] as Transferable[]);
+    } else {
+      throw new Error('unknown request');
     }
-    const map = generateSeatMap(tpl);
-    (self as unknown as Worker).postMessage({ id: msg.id, map }, seatMapTransfer(map));
-  } else if (msg.kind === 'gif') {
-    const frames = msg.frames.map((b) => new Uint8Array(b));
-    const bytes = encodeGif(frames, msg.w, msg.h, msg.table, msg.delayCs);
-    (self as unknown as Worker).postMessage({ id: msg.id, gif: bytes.buffer }, [bytes.buffer] as Transferable[]);
+  } catch (err) {
+    post({ id, error: err instanceof Error ? err.message : 'failed' });
   }
 };

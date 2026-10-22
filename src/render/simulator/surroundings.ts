@@ -40,6 +40,11 @@ export interface RealSite {
   reach: number;
   shadows: boolean;
   detail: 'low' | 'full';
+  /**
+   * Called with the neighbourhood once it is built and before it goes into
+   * the scene, so its shaders can be compiled first (performance plan P1.24).
+   */
+  prepare?: (obj: THREE.Object3D) => Promise<void>;
 }
 
 const NIGHT: Record<string, number> = { day: 0, sunset: 0.45, dusk: 0.75, night: 1 };
@@ -354,17 +359,26 @@ function buildRealSurroundings(bowlRadius: number, real: RealSite): Surroundings
     people.instanceMatrix.needsUpdate = true;
   };
 
-  const ready = loadSite(spec.key).then((data) => {
+  const ready = loadSite(spec.key).then(async (data) => {
     if (!data) return;
-    site = buildSite(real.template, spec, data, { shadows: real.shadows, detail: real.detail });
-    group.add(site.object);
+    const built = buildSite(real.template, spec, data, { shadows: real.shadows, detail: real.detail });
     const tex = horizonTextures();
     trash.push(tex.facade, tex.lit);
     const h = buildHorizon(spec, data.r, tex);
-    horizon = h;
-    group.add(h.object);
-    site.setNight(night);
+    built.setNight(night);
     h.setNight(night);
+    // Compiled off to the side, then shown: everything below goes in at once.
+    // (Each on its own rather than under a new Group: an Object3D takes four
+    // draws of Math.random for its id, and the random textures made after it
+    // would come out shifted.)
+    if (real.prepare) await Promise.all([real.prepare(built.object), real.prepare(h.object)]);
+    site = built;
+    horizon = h;
+    // Set again: the time of day may have changed while it compiled.
+    built.setNight(night);
+    h.setNight(night);
+    group.add(built.object);
+    group.add(h.object);
     for (let i = 0; i < PEOPLE; i++) spawn(i, true);
     writePeople(0);
     people.visible = true;

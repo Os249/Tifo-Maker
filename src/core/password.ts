@@ -50,14 +50,11 @@
  * decision instead.
  */
 
-/** Minimum password length, in code points. */
-export const PASSWORD_MIN = 12;
-
-/**
- * Maximum password length. Above ASVS §6.2.9's "at least 64", and far below
- * anything that would make scrypt's HMAC step expensive.
- */
-export const PASSWORD_MAX = 128;
+// The two length limits (12 and 128 code points) are defined in
+// ./passwordLimits.ts and re-exported here unchanged, so this stays the one
+// module the server and the forms import the policy from.
+import { PASSWORD_MAX, PASSWORD_MIN } from './passwordLimits';
+export { PASSWORD_MAX, PASSWORD_MIN };
 
 /**
  * Why a password was refused. A code rather than a sentence, because the

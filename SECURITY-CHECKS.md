@@ -19,10 +19,10 @@ because new advisories are published whether or not anyone pushes.
 |---|---|---|
 | Types and build | `npm run build` | anything does not compile |
 | Server behaviour, on real Postgres | `npm run test:server` | a route or repository regresses |
-| Security regressions | `npm run test:security` | any exploit from an audit works again |
+| Security regressions | `npm run test:security` | any exploit from an audit works again; any security header changes by a byte (the header pin); anything about a non-public design becomes shareable-cacheable (the cache matrix); an `/api` answer or a 404 carries no Cache-Control; the asset rate-limit bucket opens a hole (sign-in, the 300, IPv6 /64); a check stops failing closed on a database timeout |
 | Security monitor | `npm run test:soc` | an attack stops being recorded, an alert stops firing, or an address gets stored |
 | Email | `npm run test:email` | verification or reset mail breaks, or looks like spam |
-| Deployment | `npm run test:deploy` | Node.js is within 90 days of end of life, the image runs as root, installs stop using the lockfile, CI loses its read-only token or pinned actions |
+| Deployment | `npm run test:deploy` | Node.js is within 90 days of end of life, the image runs as root, installs stop using the lockfile, CI loses its read-only token or pinned actions; the server bundle lands in `dist/`, gets a source map or a `define`, imports something that is not a runtime dependency, or tsx/esbuild reach the image; the seat table differs from what the generator makes; helmet stops being a pinned direct dependency |
 | Committed credentials | `node scripts/secret-scan.mjs` | a key, token, private key or database password is in a tracked file |
 | Known vulnerabilities | `npm audit --omit=dev --audit-level=high --package-lock-only` | a production dependency has a high or critical advisory |
 
@@ -123,6 +123,14 @@ can hurt real visitors.
 - Races: a sign-in, an email change or a provider sign-in that overlaps a
   password reset must not leave a session or a reset link behind.
 - Proxy trust: `req.ip` cannot be chosen by the caller.
+- Rate limits: every bucket (the general 300, the asset 600, each route's own)
+  is keyed on the address with IPv6 grouped by /64, never on a header the
+  caller writes, and decided on the route that answered, never the raw URL.
+- Timeouts: with the database slow (a statement past 10 s, no connection
+  within 5 s) every check still refuses; nothing that counts toward a cap
+  reads a failure as zero.
+- The headers: `test:security` pins them byte for byte; a change there must
+  only ever tighten them.
 
 **Client and admin pages** (`src/`, `server/src/adminPage.ts`)
 - Every `innerHTML`, attribute and URL built from user data goes through
