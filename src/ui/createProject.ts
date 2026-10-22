@@ -251,7 +251,7 @@ export function openCreateProject(opts: CreateProjectOptions): void {
     <div class="np-modal st-modal" role="dialog" aria-modal="true" aria-labelledby="np-h">
       <div class="st-head">
         <button type="button" class="np-close" aria-label="${escapeHtml(t('common.close'))}">&times;</button>
-        <ol class="st-steps" aria-hidden="true"><li data-s="club"></li><li data-s="ground"></li><li data-s="start"></li></ol>
+        <ol class="st-steps" aria-label="${escapeHtml(t('hero.workflow'))}"><li data-s="club">${escapeHtml(t('st.yours'))}</li><li data-s="ground">${escapeHtml(t('st.grounds'))}</li><li data-s="start">${escapeHtml(t('st.h.start'))}</li></ol>
         <h2 class="np-h" id="np-h" tabindex="-1"></h2>
         <p class="st-lead" id="st-lead"></p>
       </div>
@@ -723,6 +723,8 @@ export function openCreateProject(opts: CreateProjectOptions): void {
     backdrop.querySelectorAll<HTMLElement>('.st-steps li').forEach((li) => {
       const order: Step[] = ['club', 'ground', 'start'];
       li.classList.toggle('on', order.indexOf(li.dataset.s as Step) <= order.indexOf(step));
+      if (li.dataset.s === step) li.setAttribute('aria-current', 'step');
+      else li.removeAttribute('aria-current');
     });
     gateEl.hidden = true;
     if (step === 'club') renderClubStep();

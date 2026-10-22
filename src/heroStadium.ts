@@ -23,6 +23,7 @@
  * ?hero3d still starts it at once, for the still-picture script and the tests.
  */
 import HERO_TIFOS from './data/heroTifos.json';
+import { t } from './ui/i18n';
 
 const HOST_ID = 'hero-3d';
 const PHONE_QUERY = '(max-width: 860px)';
@@ -110,21 +111,33 @@ function mountStill(host: HTMLElement, live: () => Promise<boolean>): void {
     host.appendChild(img);
   }
   const still = img;
+  const play = document.getElementById('hero-play') as HTMLButtonElement | null;
   // No picture (offline, blocked): the frame's own night ground stays. It may
   // have failed before this script ran, so look as well as listen.
   if (still.complete && still.naturalWidth === 0 && still.currentSrc) still.remove();
   still.addEventListener('error', () => still.remove());
   const tap = (): void => {
+    if (play?.disabled) return;
     still.style.cursor = 'progress';
+    if (play) {
+      play.disabled = true;
+      play.setAttribute('aria-busy', 'true');
+      const label = play.querySelector<HTMLElement>('[data-i18n]');
+      if (label) { label.dataset.i18n = 'hero.previewLoading'; label.textContent = t('hero.previewLoading'); }
+    }
     void live().then((ok) => {
+      if (play) { play.disabled = false; play.removeAttribute('aria-busy'); }
       if (ok) return;
       // No WebGL, or the stadium would not build: keep the picture, and let a
       // later tap try again.
       still.style.cursor = '';
       still.addEventListener('click', tap, { once: true });
+      const label = play?.querySelector<HTMLElement>('[data-i18n]');
+      if (label) { label.dataset.i18n = 'hero.previewRetry'; label.textContent = t('hero.previewRetry'); }
     });
   };
   still.addEventListener('click', tap, { once: true });
+  play?.addEventListener('click', tap);
 }
 
 export async function mountHeroStadium(): Promise<void> {
@@ -172,6 +185,7 @@ export async function mountHeroStadium(): Promise<void> {
       showing = i;
       // The live one is in: the picture that stood in for it goes.
       host.querySelector('img.hero-still')?.remove();
+      document.getElementById('hero-play')?.remove();
       host.classList.remove('still');
       host.classList.add('ready');
       preview.start();

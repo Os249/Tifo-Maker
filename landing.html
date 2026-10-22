@@ -16,7 +16,7 @@
   <meta property="og:type" content="website" />
   <link rel="stylesheet" href="/src/landing.css" />
 </head>
-<body>
+<body class="landing-page">
 <a class="skip-link" href="#main" data-i18n="common.skip">Skip to main content</a>
 
   <header class="nav">
@@ -39,9 +39,9 @@
        club's tifo in its real ground (heroStadium.ts). -->
   <section class="hero">
     <div class="hero-copy">
-      <div class="eyebrow" data-i18n="hero.eyebrow2">Free tifo designer · real grounds, seat by seat</div>
+      <div class="eyebrow" data-i18n="hero.eyebrow2">Made for the stands</div>
       <h1 class="hero-h1"><span data-i18n="hero.h1a">Your club.</span> <span data-i18n="hero.h1b">Your ground.</span> <span class="hero-h1-last" data-i18n="hero.h1c">Your tifo.</span></h1>
-      <p class="lead" data-i18n="hero.lead2">Pick your club and start in its real ground, seat by seat. Paint the display, watch it rise on match day in 3D, and give every fan the card they hold.</p>
+      <p class="lead" data-i18n="hero.lead2">Turn your idea into a stadium-wide display. Design in your club’s real ground, preview it in 3D, and get every card ready for match day.</p>
       <div class="cta-row">
         <a class="btn btn-primary" href="/projects?new=1" data-i18n="hero.ctaPrimary">Start designing free</a>
         <a class="btn btn-ghost" href="/community" data-i18n="hero.ctaCommunity">See fans' tifos</a>
@@ -55,9 +55,10 @@
         </div>
         <ul class="ground-list" id="ground-list" role="listbox" hidden></ul>
       </form>
-      <div class="trust-line" data-i18n="hero.noDownload">No download. No account needed to start.</div>
+      <div class="trust-line"><span class="trust-check" aria-hidden="true">✓</span><span data-i18n="hero.noDownload">No download. No account needed to start.</span></div>
     </div>
     <div class="hero-visual">
+      <div class="preview-heading"><span class="preview-dot" aria-hidden="true"></span><span data-i18n="hero.previewLabel">Your idea. In the stands.</span><span class="preview-format">3D</span></div>
       <figure class="hero-frame">
         <!-- The picture is in the page itself, visible at the first paint and
              fetched first (performance plan P1.14): it is the largest thing on
@@ -70,6 +71,7 @@
                srcset="/hero-stadium-640.webp 640w, /hero-stadium.webp 960w"
                sizes="(max-width: 860px) calc(100vw - 36px), 574px"
                width="960" height="600" fetchpriority="high" alt="" />
+          <button class="hero-play" id="hero-play" type="button"><span aria-hidden="true">▷</span><span data-i18n="hero.previewPlay" aria-live="polite">Explore in 3D</span></button>
         </div>
         <figcaption class="hero-cap">
           <span class="hero-cap-scarf" id="hero-cap-scarf" aria-hidden="true"></span>
@@ -86,6 +88,12 @@
         <button type="button" class="hero-club" data-club="liverpool" aria-pressed="false" data-i18n="club.liverpool">Liverpool</button>
       </div>
     </div>
+  </section>
+
+  <section class="workflow" aria-label="From idea to match day" data-i18n-attr="aria-label:hero.workflow">
+    <a href="/projects?new=1"><span class="workflow-num">01</span><span><b data-i18n="how.step1.title">Pick your club</b><small data-i18n="hero.workflow1">Your ground. Your colours.</small></span><span class="workflow-arrow" aria-hidden="true">↗</span></a>
+    <a href="#features"><span class="workflow-num">02</span><span><b data-i18n="how.step2.title">Design the choreography</b><small data-i18n="hero.workflow2">Paint, add text, or start with AI.</small></span><span class="workflow-arrow" aria-hidden="true">↗</span></a>
+    <a href="/clubs"><span class="workflow-num">03</span><span><b data-i18n="hero.workflow3Title">Make match day happen</b><small data-i18n="hero.workflow3">Preview in 3D. Export every seat.</small></span><span class="workflow-arrow" aria-hidden="true">↗</span></a>
   </section>
 
   <!-- ============ LEAGUES ============ -->

@@ -122,6 +122,7 @@
 }
 
 /* The wordmark is the same everywhere: TIFO in the text colour, MAKER in blue. */
+:root:not([dir="rtl"]) { --font-display: 'Inter', 'Almarai', system-ui, sans-serif; }
 .wordmark { font-weight: 800; letter-spacing: .02em; color: inherit; text-decoration: none; white-space: nowrap; }
 .wordmark b { font-weight: 800; color: var(--maker); }
 

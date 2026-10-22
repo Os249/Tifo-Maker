@@ -41,6 +41,9 @@ img, svg, video, canvas { max-width: 100%; }
 /* The shadow only while open: parked off-screen it still cast one, a grey
    band down the right edge of every public page on a desktop. */
 .mnav-drawer.open { transform: none; box-shadow: -14px 0 44px rgba(0,0,0,.45); }
+.mnav-drawer[inert] { visibility: hidden; }
+.mnav-drawer :focus-visible, .mnav-burger:focus-visible { outline: 3px solid #7FB0FF; outline-offset: -3px; }
+.mnav-drawer .mnav-close { width: 44px; min-height: 44px; align-self: flex-end; padding: 0; text-align: center; font-size: 26px; }
 .mnav-title { font-weight: 800; font-size: 18px; letter-spacing: .04em; padding: 4px 14px 14px; color: #fff; }
 .mnav-drawer a, .mnav-drawer button {
   display: block; width: 100%; text-align: start; box-sizing: border-box;
@@ -97,25 +100,47 @@ export function installMobileNav(): void {
   burger.className = 'mnav-burger';
   burger.type = 'button';
   burger.setAttribute('aria-label', t('nav.menu'));
+  burger.setAttribute('data-i18n-attr', 'aria-label:nav.menu');
   burger.setAttribute('aria-expanded', 'false');
+  burger.setAttribute('aria-controls', 'mnav-drawer');
   burger.innerHTML = BURGER_SVG;
 
   const scrim = document.createElement('div');
   scrim.className = 'mnav-scrim';
   const drawer = document.createElement('div');
   drawer.className = 'mnav-drawer';
+  drawer.id = 'mnav-drawer';
+  drawer.inert = true;
   drawer.setAttribute('role', 'dialog');
+  drawer.setAttribute('aria-modal', 'true');
   drawer.setAttribute('aria-label', t('nav.menu'));
+  drawer.setAttribute('data-i18n-attr', 'aria-label:nav.menu');
 
   const title = document.createElement('div');
   title.className = 'mnav-title';
   title.textContent = document.querySelector('.brand')?.textContent ?? 'TIFOMAKER';
   drawer.appendChild(title);
 
+  const closeButton = document.createElement('button');
+  closeButton.className = 'mnav-close';
+  closeButton.type = 'button';
+  closeButton.setAttribute('aria-label', t('common.close'));
+  closeButton.setAttribute('data-i18n-attr', 'aria-label:common.close');
+  closeButton.textContent = '×';
+  drawer.prepend(closeButton);
+  let oldOverflow = '';
+  let background: { el: HTMLElement; inert: boolean }[] = [];
+
   const close = (): void => {
+    if (!drawer.classList.contains('open')) return;
     drawer.classList.remove('open');
+    drawer.inert = true;
     scrim.classList.remove('open');
     burger.setAttribute('aria-expanded', 'false');
+    document.body.style.overflow = oldOverflow;
+    for (const item of background) item.el.inert = item.inert;
+    background = [];
+    burger.focus();
   };
   /**
    * Rebuild the drawer's rows from the live nav.
@@ -130,15 +155,18 @@ export function installMobileNav(): void {
     for (const old of Array.from(drawer.querySelectorAll('.mnav-cloned'))) old.remove();
     Array.from(links.children).forEach((orig) => {
       const el = orig as HTMLElement;
-      if (el.hidden || getComputedStyle(el).display === 'none') return; // hidden in the nav, hidden here
+      // Responsive CSS hides desktop links on phones; they still belong in
+      // the drawer. Only explicitly hidden account controls are omitted.
+      if (el.hidden) return;
       const clone = el.cloneNode(true) as HTMLElement;
       clone.removeAttribute('id');
+      clone.querySelectorAll('[id]').forEach((child) => child.removeAttribute('id'));
       clone.classList.add('mnav-cloned');
       if (el.tagName === 'BUTTON') {
         clone.addEventListener('click', (e) => {
           e.preventDefault();
-          el.click();
           close();
+          el.click();
         });
       } else {
         clone.addEventListener('click', () => close());
@@ -149,16 +177,34 @@ export function installMobileNav(): void {
 
   const open = (): void => {
     fillDrawer();
+    drawer.inert = false;
     drawer.classList.add('open');
     scrim.classList.add('open');
     burger.setAttribute('aria-expanded', 'true');
+    oldOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    background = Array.from(document.body.children)
+      .filter((el): el is HTMLElement => el instanceof HTMLElement && el !== drawer && el !== scrim && !['SCRIPT', 'STYLE'].includes(el.tagName))
+      .map((el) => ({ el, inert: el.inert }));
+    for (const item of background) item.el.inert = true;
+    closeButton.focus();
   };
 
+  closeButton.addEventListener('click', close);
   burger.addEventListener('click', () => (drawer.classList.contains('open') ? close() : open()));
   scrim.addEventListener('click', close);
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') close();
+    if (!drawer.classList.contains('open')) return;
+    if (e.key === 'Escape') { e.preventDefault(); close(); }
+    if (e.key === 'Tab') {
+      const focusable = Array.from(drawer.querySelectorAll<HTMLElement>('a[href], button:not(:disabled)')).filter((el) => !el.hidden && el.getClientRects().length > 0);
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last?.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first?.focus(); }
+    }
   });
+  window.matchMedia('(min-width: 861px)').addEventListener('change', (e) => { if (e.matches) close(); });
 
   header.appendChild(burger);
   document.body.append(scrim, drawer);

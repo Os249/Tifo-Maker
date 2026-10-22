@@ -10,7 +10,11 @@
 .pj:focus { outline: none; }
 
 /* ---- head ---- */
-.pj-head { padding: 44px 0 22px; }
+.pj-head { padding: 48px 0 28px; }
+.pj-eyebrow { margin: 0 0 12px; font-size: 11px; font-weight: 800; letter-spacing: .13em; text-transform: uppercase; color: var(--blue); }
+[dir="rtl"] .pj-eyebrow { letter-spacing: 0; }
+.pj-intro { margin: 10px 0 0; max-width: 56ch; font-size: 16px; line-height: 1.6; color: var(--muted); }
+.pj-head:has(~ .pj-empty:not([hidden])) .pj-intro { display: none; }
 .pj-title-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
 .pj-title-row h1 { font-size: clamp(28px, 4vw, 40px); font-weight: 800; letter-spacing: -0.03em; margin: 0; }
 .pj-new {
@@ -29,7 +33,7 @@
 }
 .pj-link:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; border-radius: 4px; }
 
-.pj-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 22px; }
+.pj-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 26px; padding: 16px; background: var(--card); border: 1px solid var(--line); border-radius: var(--r-lg); }
 .pj-controls[hidden] { display: none; }
 .pj-search { position: relative; flex: 1 1 260px; max-width: 380px; }
 .pj-search svg { position: absolute; inset-inline-start: 15px; top: 50%; transform: translateY(-50%); color: var(--muted); }
@@ -86,7 +90,7 @@
 .pj-thumb-empty { font-size: 13px; font-weight: 600; text-align: center; opacity: .8; }
 .pj-card.trashed .pj-thumb { filter: grayscale(1); opacity: .6; }
 
-.pj-body { padding: 12px 12px 14px 16px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.pj-body { padding: 16px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 [dir="rtl"] .pj-body { padding: 12px 16px 14px 12px; }
 .pj-row { display: flex; align-items: center; gap: 4px; min-width: 0; }
 .pj-name {
@@ -99,7 +103,7 @@ a.pj-name:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; b
 a.pj-name::after { content: ''; position: absolute; inset: 0; z-index: 0; }
 .pj-pin, .pj-more {
   position: relative; z-index: 1; flex: 0 0 auto; display: grid; place-items: center;
-  width: 36px; height: 36px; border: none; border-radius: var(--r-pill); background: transparent; color: var(--muted);
+  width: 44px; height: 44px; border: none; border-radius: var(--r-pill); background: transparent; color: var(--muted);
 }
 .pj-pin:hover, .pj-more:hover, .pj-more[aria-expanded="true"] { background: var(--raise-2); color: var(--ink); }
 .pj-pin:focus-visible, .pj-more:focus-visible { outline: 2px solid var(--blue); outline-offset: 1px; }
@@ -132,13 +136,13 @@ a.pj-name::after { content: ''; position: absolute; inset: 0; z-index: 0; }
 :root[data-theme="dark"] .pj-menu-item.danger { color: #ff8d97; }
 
 /* ---- empty ---- */
-.pj-empty { text-align: center; padding: 40px 20px 20px; max-width: 540px; margin: 0 auto; }
+.pj-empty { text-align: center; padding: 56px 28px; max-width: 680px; margin: 12px auto 0; border: 1px solid var(--line); border-radius: var(--r-xl); background: var(--card); box-shadow: var(--shadow-sm); }
 .pj-empty[hidden] { display: none; }
 .pj-empty h2 { font-size: 26px; font-weight: 800; letter-spacing: -0.02em; margin: 22px 0 8px; }
 .pj-empty p { color: var(--muted); font-size: 16px; line-height: 1.55; margin: 0 0 24px; }
 .pj-empty-actions { display: flex; justify-content: center; flex-wrap: wrap; gap: 10px; }
 .pj-empty-art {
-  display: grid; grid-template-columns: repeat(5, 1fr); gap: 5px; width: 220px; height: 64px; margin: 0 auto;
+  display: grid; grid-template-columns: repeat(5, 1fr); gap: 5px; width: min(220px, 100%); height: 84px; margin: 0 auto;
   padding: 10px; background: #14171f; border-radius: 14px; box-shadow: var(--shadow-md);
 }
 .pj-empty-art span { border-radius: 3px; }
@@ -235,20 +239,22 @@ a.pj-name::after { content: ''; position: absolute; inset: 0; z-index: 0; }
 /* The two list steps keep one height, so the card does not jump about as a
    search narrows the list. */
 .st-modal[data-step="club"], .st-modal[data-step="ground"] { height: min(820px, calc(100dvh - 6vh - 24px - var(--consent-h, 0px))); }
-.st-head { position: relative; padding: 20px 26px 6px; }
+.st-head { position: relative; padding: 24px 26px 16px; border-bottom: 1px solid var(--line); }
 .st-head .np-h { margin: 0; outline: none; font-family: var(--font-display); font-size: 26px; letter-spacing: -0.01em; }
 .st-lead { margin: 6px 0 0; font-size: 14.5px; line-height: 1.5; color: var(--muted); padding-inline-end: 40px; }
 .st-lead:empty { display: none; }
-.st-steps { display: flex; gap: 4px; margin: 0 0 14px; padding: 0; list-style: none; }
-.st-steps li { width: 28px; height: 4px; border-radius: 2px; background: var(--line); transition: background var(--t-med); }
-.st-steps li.on { background: var(--blue-solid); }
+.st-steps { display: flex; gap: 16px; margin: 0 40px 18px 0; padding: 0; list-style: none; }
+[dir="rtl"] .st-steps { margin: 0 0 18px 40px; }
+.st-steps li { padding-bottom: 8px; border-bottom: 3px solid var(--line); color: var(--muted); font-size: 11px; font-weight: 700; transition: border-color var(--t-med); }
+.st-steps li.on { border-color: var(--blue-solid); }
+.st-steps li[aria-current="step"] { color: var(--blue); }
 /* No ground step for someone who picked a listed club: two dots, not three. */
 .st-modal:not([data-step="ground"]) .st-steps li[data-s="ground"]:not(.on) { display: none; }
 .st-body {
   flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
   padding: 12px 26px 18px; display: flex; flex-direction: column; gap: 16px;
 }
-.st-foot { margin: 0; padding: 14px 26px 18px; }
+.st-foot { margin: 0; padding: 16px 26px 20px; border-top: 1px solid var(--line); background: var(--card); border-radius: 0 0 var(--r-lg) var(--r-lg); }
 .st-modal[data-step="club"] .np-actions { justify-content: space-between; }
 .st-search {
   position: sticky; top: -12px; z-index: 1; padding: 11px 14px; font-size: 15px;
@@ -333,7 +339,7 @@ a.pj-name::after { content: ''; position: absolute; inset: 0; z-index: 0; }
 
 .st-colours { display: flex; flex-wrap: wrap; gap: 8px; }
 .st-colour {
-  position: relative; width: 34px; height: 34px; border-radius: 50%; padding: 0; cursor: pointer;
+  position: relative; width: 44px; height: 44px; border-radius: 50%; padding: 0; cursor: pointer;
   background: var(--sw); border: 2px solid var(--card); box-shadow: 0 0 0 1px var(--line-strong);
   transition: box-shadow var(--t-fast), transform var(--t-fast) var(--ease);
 }
@@ -402,6 +408,9 @@ a.pj-name::after { content: ''; position: absolute; inset: 0; z-index: 0; }
 a.np-btn { text-decoration: none; }
 
 @media (max-width: 600px) {
+  .pj { padding-inline: 18px; }
+  .pj-controls { padding: 12px; }
+  .pj-empty { padding: 32px 18px; }
   .pj-head { padding-top: 28px; }
   .pj-title-row h1 { font-size: 28px; }
   .pj-search { max-width: none; flex-basis: 100%; }
@@ -423,7 +432,7 @@ a.np-btn { text-decoration: none; }
   .st-summary { flex-wrap: wrap; }
   .st-summary-acts { width: 100%; justify-content: flex-start; padding-inline-start: 58px; }
   .st-modal[data-step="club"] .np-actions .np-btn { flex: 0 1 auto; }
-  .st-colour { width: 36px; height: 36px; }
+  .st-colour { width: 44px; height: 44px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .pj-card, .pj-new { transition: none; }

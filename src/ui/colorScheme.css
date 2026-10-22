@@ -119,6 +119,14 @@
 /* Headlines: the display face, on every public page. */
 h1, h2, .display { font-family: var(--font-display); }
 
+/* Shared interaction foundations for the public pages. */
+html { scroll-padding-top: 90px; }
+:where(a, button, input, select, textarea):focus-visible { outline: 3px solid var(--blue); outline-offset: 3px; }
+.nav :is(a, button) { min-height: 44px; }
+.nav-links { gap: clamp(12px, 2vw, 26px); }
+.nav-links > a[aria-current="page"] { text-decoration: underline; text-underline-offset: 8px; text-decoration-thickness: 2px; }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto !important; } }
+
 /* The toggle itself, next to the language toggle in every public header. */
 .theme-toggle {
   display: inline-flex; align-items: center; justify-content: center;
