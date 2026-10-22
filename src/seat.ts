@@ -229,9 +229,13 @@ function errorScreen(title: string, body: string): string {
       <div class="seat-brand">TIFO<b>MAKER</b></div>
       <div class="seat-error-title">${escapeHtml(title)}</div>
       <p class="seat-intro">${escapeHtml(body)}</p>
+      ${designIdFromPath() ? `<button type="button" class="seat-go" id="seat-retry">${t('common.retry')}</button>` : ''}
       <a class="seat-go" style="display:inline-block;text-decoration:none;text-align:center;" href="/">${t('seat.goHome')}</a>
     </div>`;
 }
 
+app.addEventListener('click', (e) => {
+  if ((e.target as HTMLElement).closest('#seat-retry')) location.reload();
+});
 
 void main();

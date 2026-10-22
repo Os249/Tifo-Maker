@@ -43,7 +43,7 @@
   <main class="card">
     <a class="brand" href="/">TIFO<b>MAKER</b></a>
     <h1 data-i18n="rs.title">Reset your password</h1>
-    <div class="err" id="err" hidden></div>
+    <div class="err" id="err" role="alert" hidden></div>
     <form id="reset-form">
       <label><span data-i18n="rs.new">New password</span>
         <input type="password" id="pw" autocomplete="new-password" placeholder="at least 12 characters" />
@@ -53,6 +53,7 @@
       </label>
       <button type="submit" id="submit" data-i18n="rs.submit">Update password</button>
     </form>
+    <button type="button" id="reset-recover" data-i18n="rs.recover">Request a new reset link</button>
     <p class="done" id="done" hidden><span data-i18n="rs.done">Your password has been updated.</span> <a href="/app" data-i18n="rs.goSignIn">Go to sign in</a></p>
   </main>
   <script type="module" src="/src/reset.ts"></script>

@@ -83,10 +83,10 @@ function ensureStyles(): void {
   position:absolute; inset-inline-end:2px; top:50%; transform:translateY(-50%);
   display:flex; align-items:center; justify-content:center;
   width:34px; height:34px; padding:0; margin:0; border:none; background:none; cursor:pointer;
-  color:var(--text-3, #5b6473); border-radius:8px;
+  color:var(--text-3, var(--muted, #5b6473)); border-radius:8px;
 }
-.pwf-eye:hover { color:var(--text-1, #0e1426); background:none; }
-.pwf-eye:focus-visible { outline:2px solid var(--flare, #1c6fe0); outline-offset:1px; }
+.pwf-eye:hover { color:var(--text-1, var(--ink, #0e1426)); background:none; }
+.pwf-eye:focus-visible { outline:2px solid var(--blue, #1c6fe0); outline-offset:1px; }
 /* No margin of its own: it is a child of the form that owns it, and each of
    the four forms already has its own idea of vertical rhythm. */
 .pwf { display:flex; flex-direction:column; gap:6px; }
@@ -100,13 +100,13 @@ function ensureStyles(): void {
 .pwf[data-score="3"] .pwf-bars i:nth-child(-n+3) { background:#3f9ad6; }
 .pwf[data-score="4"] .pwf-bars i { background:#3fb37a; }
 .pwf-row { display:flex; align-items:baseline; justify-content:space-between; gap:10px; }
-.pwf-hint { margin:0; font-size:11.5px; line-height:1.5; color:var(--text-3, #5b6473); }
+.pwf-hint { margin:0; font-size:11.5px; line-height:1.5; color:var(--text-3, var(--muted, #5b6473)); }
 .pwf[data-bad="1"] .pwf-hint { color:#d0695f; }
 .pwf-suggest {
   /* width and margin are spelled out because /reset styles bare <button> as a
      full-width pill, and this one is a link sitting at the end of a line. */
   flex:none; width:auto; padding:0; margin:0; border:none; background:none; cursor:pointer;
-  font:inherit; font-size:11.5px; color:var(--flare, #1c6fe0); text-decoration:underline;
+  font:inherit; font-size:11.5px; color:var(--blue, #1c6fe0); text-decoration:underline;
   white-space:nowrap;
 }
 .pwf-suggest:hover { background:none; }

@@ -12,13 +12,18 @@
   <link rel="stylesheet" href="/src/ui/account.css" />
 </head>
 <body>
+  <a class="skip-link" href="#main" data-i18n="common.skip">Skip to main content</a>
   <header class="ac-top">
     <!-- A latin wordmark must not reorder itself when the page is RTL. -->
     <a class="ac-brand" href="/" dir="ltr">TIFO<b>MAKER</b></a>
-    <a class="ac-back" href="/projects"><span data-i18n="nav.projects">My projects</span></a>
+    <div class="ac-nav">
+      <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Dark mode"><svg class="ic-moon" viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M20 14.2A8.2 8.2 0 0 1 9.8 4a8.4 8.4 0 1 0 10.2 10.2z"/></svg><svg class="ic-sun" viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2"/></svg></button>
+      <button class="ac-language" id="lang-toggle" type="button" data-i18n="common.language">العربية</button>
+      <a class="ac-back" href="/projects"><span data-i18n="nav.projects">My projects</span></a>
+    </div>
   </header>
 
-  <main class="ac-wrap">
+  <main class="ac-wrap" id="main" tabindex="-1">
     <h1 data-i18n="ac.title">Account</h1>
     <p class="ac-sub" data-i18n="ac.sub">Your sign-in details, your data, and how to leave.</p>
 

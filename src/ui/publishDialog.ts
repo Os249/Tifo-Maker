@@ -16,6 +16,7 @@
 
 import { escapeHtml } from '../core/escape';
 import { t } from './i18n';
+import { containDialog } from './dialogFocus';
 
 export interface PublishChoice {
   /**
@@ -76,10 +77,12 @@ export function openPublishDialog(opts: {
     document.body.appendChild(backdrop);
 
     const close = (result: PublishChoice | null): void => {
+      release();
       backdrop.remove();
       document.removeEventListener('keydown', onKey);
       resolve(result);
     };
+    const release = containDialog(backdrop, () => close(null));
     const onKey = (e: KeyboardEvent): void => {
       if (e.key === 'Escape') close(null);
     };

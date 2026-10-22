@@ -32,6 +32,14 @@ function show(): void {
   const toggle = document.getElementById('lang-toggle');
   if (toggle) toggle.textContent = t('common.language');
   document.title = t('lg.title');
+  // Links throughout the app use canonical hashes. Resolve them to the visible
+  // language, including when an Arabic visitor arrives directly from a form.
+  const section = location.hash.replace(/^#/, '').replace(/-ar$/, '');
+  if (['about', 'terms', 'privacy', 'acceptable-use', 'cookies'].includes(section)) {
+    const hash = `#${section}${suffix}`;
+    if (location.hash !== hash) history.replaceState(null, '', hash);
+    requestAnimationFrame(() => document.getElementById(section + suffix)?.scrollIntoView());
+  }
 }
 
 initLang();

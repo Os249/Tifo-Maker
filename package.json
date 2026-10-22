@@ -15,6 +15,7 @@
     "templates:pack": "tsx scripts/pack-templates.mts",
     "test:templates": "node e2e-templates.mjs",
     "test:theme": "node e2e-theme.mjs",
+    "test:ux": "node e2e-ux.mjs",
     "test:sound": "node e2e-sound.mjs",
     "test:drumcall": "node e2e-drumcall.mjs",
     "test:accessories": "node e2e-accessories.mjs",

@@ -1,5 +1,7 @@
 import { matchClub } from '../core/clubs';
 import { escapeHtml } from '../core/escape';
+import { containDialog } from './dialogFocus';
+import { copyText } from './clipboard';
 import type { Editor } from '../render/editor';
 import type { DesignStore } from '../core/design';
 import type { SeatMap, ToolId } from '../core/types';
@@ -220,6 +222,7 @@ export function mountToolbar(
       if (!btn) continue;
       btn.classList.toggle('menu-active', panelMode === mode);
       btn.setAttribute('aria-selected', String(panelMode === mode));
+      btn.tabIndex = panelMode === mode ? 0 : -1;
     }
   };
 
@@ -242,14 +245,14 @@ export function mountToolbar(
   // Left and right arrows move between the tabs, as in any tab list.
   root.querySelector('.panel-tabs')?.addEventListener('keydown', (e) => {
     const ev = e as KeyboardEvent;
-    if (ev.key !== 'ArrowLeft' && ev.key !== 'ArrowRight') return;
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(ev.key)) return;
     const tabs = Array.from(root.querySelectorAll<HTMLButtonElement>('.panel-tabs .ptab'));
     const i = tabs.indexOf(document.activeElement as HTMLButtonElement);
     if (i < 0) return;
     ev.preventDefault();
     const rtl = document.documentElement.dir === 'rtl';
     const step = (ev.key === 'ArrowRight') !== rtl ? 1 : -1;
-    const next = tabs[(i + step + tabs.length) % tabs.length];
+    const next = tabs[ev.key === 'Home' ? 0 : ev.key === 'End' ? tabs.length - 1 : (i + step + tabs.length) % tabs.length];
     next.focus();
     next.click();
   });
@@ -3456,19 +3459,20 @@ export function mountToolbar(
       const backdrop = document.createElement('div');
       backdrop.className = 'sx-backdrop';
       backdrop.innerHTML = `
-        <div class="sx-modal" role="dialog" aria-modal="true" aria-label="Stadium animation preview">
-          <button class="sx-close" aria-label="Close">&times;</button>
-          <h3>Animation preview</h3>
-          <p class="sx-lead">Exactly what will be exported, watermark included.</p>
+        <div class="sx-modal" role="dialog" aria-modal="true" aria-label="${i18nT('ed.sx.modalTitle')}">
+          <button class="sx-close" aria-label="${i18nT('common.close')}">&times;</button>
+          <h3>${i18nT('ed.sx.modalTitle')}</h3>
+          <p class="sx-lead">${i18nT('ed.sx.modalLead')}</p>
           <canvas class="sx-canvas"></canvas>
           <div class="sx-actions">
-            <button id="sx-modal-download" class="primary"><i class="ti ti-download"></i> Download ${sxFormat.value === 'gif' ? 'GIF' : 'video'}</button>
-            <button id="sx-modal-replay">Replay</button>
+            <button id="sx-modal-download" class="primary"><i class="ti ti-download"></i> ${i18nT(sxFormat.value === 'gif' ? 'ed.sx.downloadGif' : 'ed.sx.downloadVideo')}</button>
+            <button id="sx-modal-replay">${i18nT('ed.sx.replay')}</button>
           </div>
-          <p class="sx-msg" id="sx-modal-msg"></p>
+          <p class="sx-msg" id="sx-modal-msg" role="status"></p>
         </div>`;
       document.body.appendChild(backdrop);
-      const close = (): void => backdrop.remove();
+      const close = (): void => { release(); backdrop.remove(); };
+      const release = containDialog(backdrop, close);
       backdrop.querySelector('.sx-close')!.addEventListener('click', close);
       backdrop.addEventListener('mousedown', (e) => {
         if (e.target === backdrop) close();
@@ -3477,6 +3481,7 @@ export function mountToolbar(
       const ctx = cv.getContext('2d')!;
       const modalMsg = backdrop.querySelector('#sx-modal-msg') as HTMLElement;
       await previewStadium(preview, map, opts, ctx);
+      if (!backdrop.isConnected) return;
       backdrop.querySelector('#sx-modal-replay')!.addEventListener('click', () => {
         void previewStadium(preview, map, buildExportOpts(sxFormat.value === 'gif'), ctx);
       });
@@ -3488,7 +3493,7 @@ export function mountToolbar(
             modalMsg.textContent = t;
           });
         } catch (err) {
-          modalMsg.textContent = `Export failed: ${(err as Error).message}`;
+          modalMsg.textContent = i18nT('ed.sx.failed');
         } finally {
           dlBtn.disabled = false;
         }
@@ -3528,7 +3533,7 @@ export function mountToolbar(
   pdfBtn.addEventListener('click', async () => {
     pdfBtn.disabled = true;
     const original = pdfBtn.innerHTML;
-    pdfBtn.textContent = 'Generating…';
+    pdfBtn.textContent = i18nT('ed.prod.generating');
     try {
       const { exportDistributionPdf } = await import('../net/api');
       const blob = await exportDistributionPdf(store, map, {
@@ -3577,8 +3582,9 @@ export function mountToolbar(
   // pick their seat, and see exactly which card to hold. Needs a saved design.
   const qrBtn = $('#export-qr') as unknown as HTMLButtonElement;
   qrBtn.addEventListener('click', async () => {
-    if (!designId) {
+    if (!designId || !publicChk.checked) {
       message.textContent = i18nT('ed.msg.saveBeforeQr');
+      $('#publish-design').focus();
       return;
     }
     const url = `${location.origin}/s/${designId}`;
@@ -3596,18 +3602,20 @@ export function mountToolbar(
     backdrop.className = 'qr-backdrop';
     backdrop.innerHTML = `
       <div class="qr-modal" role="dialog" aria-modal="true">
-        <button class="qr-close" aria-label="Close">&times;</button>
-        <h3 class="qr-h3">Fan QR code</h3>
-        <p class="qr-lead">Print this on the cards, banners, or the big screen. Fans scan it, pick their seat, and see exactly which colour to hold up.</p>
-        <img class="qr-img" src="${dataUrl}" alt="QR code for ${escapeHtml(name)}" />
-        <div class="qr-url">${escapeHtml(url)}</div>
+        <button class="qr-close" aria-label="${i18nT('common.close')}">&times;</button>
+        <h3 class="qr-h3">${i18nT('ed.prod.qr')}</h3>
+        <p class="qr-lead">${i18nT('ed.prod.qrLead')}</p>
+        <img class="qr-img" src="${dataUrl}" alt="${i18nT('sm.qrAlt')}" />
+        <input class="qr-url" readonly aria-label="${i18nT('sm.link')}" value="${escapeHtml(url)}" />
+        <p class="qr-status" role="status"></p>
         <div class="qr-actions">
-          <button class="primary" id="qr-download"><i class="ti ti-download"></i> Download PNG</button>
-          <button id="qr-copy"><i class="ti ti-link"></i> Copy link</button>
+          <button class="primary" id="qr-download"><i class="ti ti-download"></i> ${i18nT('ed.prod.downloadPng')}</button>
+          <button id="qr-copy"><i class="ti ti-link"></i> ${i18nT('sm.copy')}</button>
         </div>
       </div>`;
     document.body.appendChild(backdrop);
-    const close = (): void => backdrop.remove();
+    const close = (): void => { release(); backdrop.remove(); };
+    const release = containDialog(backdrop, close);
     backdrop.querySelector('.qr-close')!.addEventListener('click', close);
     backdrop.addEventListener('mousedown', (e) => {
       if (e.target === backdrop) close();
@@ -3619,12 +3627,9 @@ export function mountToolbar(
       a.click();
     });
     backdrop.querySelector('#qr-copy')!.addEventListener('click', async () => {
-      try {
-        await navigator.clipboard.writeText(url);
-        (backdrop.querySelector('#qr-copy') as HTMLElement).textContent = 'Copied!';
-      } catch {
-        /* clipboard blocked */
-      }
+      const ok = await copyText(url);
+      backdrop.querySelector('.qr-status')!.textContent = i18nT(ok ? 'sm.copied' : 'sm.copyFailed');
+      if (!ok) { const field = backdrop.querySelector<HTMLInputElement>('.qr-url')!; field.focus(); field.select(); }
     });
   }
 

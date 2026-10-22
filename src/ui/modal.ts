@@ -1,4 +1,5 @@
 import { t } from './i18n';
+import { containDialog } from './dialogFocus';
 import { escapeHtml } from '../core/escape';
 
 /**
@@ -42,21 +43,24 @@ interface ChoiceOptions {
   cancelLabel?: string | null;
 }
 
-let liveBackdrop: HTMLElement | null = null;
+let cancelLive: (() => void) | null = null;
 
 function mount(html: string): { backdrop: HTMLElement; close: (then?: () => void) => void } {
   // Only one dialog at a time.
-  liveBackdrop?.remove();
+  cancelLive?.();
   const backdrop = document.createElement('div');
   backdrop.className = 'dlg-backdrop';
   backdrop.innerHTML = html;
   const opener = document.activeElement as HTMLElement | null;
   document.body.appendChild(backdrop);
-  liveBackdrop = backdrop;
+  const cancel = (): void => { backdrop.dispatchEvent(new CustomEvent('dlg-cancel')); };
+  cancelLive = cancel;
+  const release = containDialog(backdrop, cancel);
 
   const close = (then?: () => void): void => {
+    release();
     backdrop.remove();
-    if (liveBackdrop === backdrop) liveBackdrop = null;
+    if (cancelLive === cancel) cancelLive = null;
     document.removeEventListener('keydown', onKey);
     // Return focus to whatever opened the dialog. Without this a keyboard user
     // who opens it, changes their mind and presses Escape is dropped at the top
@@ -91,7 +95,7 @@ export function confirmModal(opts: ConfirmOptions): Promise<boolean> {
     backdrop.querySelector('.dlg-confirm')!.addEventListener('click', () => done(true));
     backdrop.querySelector('.dlg-cancel')!.addEventListener('click', () => done(false));
     backdrop.addEventListener('dlg-cancel', () => done(false));
-    (backdrop.querySelector('.dlg-confirm') as HTMLButtonElement).focus();
+    (backdrop.querySelector(opts.danger ? '.dlg-cancel' : '.dlg-confirm') as HTMLButtonElement).focus();
   });
 }
 

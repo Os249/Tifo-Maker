@@ -9,6 +9,7 @@
 import { cleanAddressBar } from './core/utm';
 import { hydrateBowls } from './ui/bowlPicture';
 import { escapeHtml } from './core/escape';
+import { containDialog } from './ui/dialogFocus';
 import './vendor/tabler-subset.css';
 import './community.css';
 import { initLang, applyDom, getLang, onLangChange, toggleLang, t, tv, tTag, tTitle } from './ui/i18n';
@@ -212,6 +213,7 @@ let activeTags: string[] = [];
 /** Colour families, OR'd. See core/facets for where they come from. */
 let activeColours: string[] = [];
 let activeClub = '';
+let designQuery = '';
 
 /**
  * Paging.
@@ -250,6 +252,7 @@ async function loadGallery(): Promise<void> {
   pageOffset = 0;
   exhausted = false;
   pageToken++;
+  const token = pageToken;
   const grid = $('#gallery-grid');
   const loading = $('#grid-loading');
   const empty = $('#grid-empty');
@@ -261,8 +264,12 @@ async function loadGallery(): Promise<void> {
   grid.innerHTML = '';
   $('#grid-more').hidden = true;
   loading.hidden = false;
+  loading.textContent = t('cm.loading');
+  $('#grid-error').hidden = true;
   empty.hidden = true;
-  const ok = await loadPage(pageToken);
+  empty.querySelector('p')!.textContent = t(designQuery || activeClub || activeTags.length || activeColours.length ? 'cm.emptySearch' : 'cm.empty');
+  const ok = await loadPage(token);
+  if (token !== pageToken) return;
   loading.hidden = true;
   if (!ok) return;
   if (grid.childElementCount === 0) empty.hidden = false;
@@ -278,6 +285,7 @@ async function loadPage(token: number): Promise<boolean> {
     const sort: GallerySort = currentSort === 'likes' ? 'likes' : 'recent';
     const items = await listGallery({
       sort,
+      search: designQuery || undefined,
       tags: activeTags,
       templatesOnly: currentSort === 'templates',
       peopleOnly: currentSort === 'people',
@@ -289,6 +297,7 @@ async function loadPage(token: number): Promise<boolean> {
     if (token !== pageToken) return true; // a newer tab/tag won the race
     const grid = $('#gallery-grid');
     for (const item of items) grid.appendChild(renderCard(item));
+    $('#grid-empty').hidden = grid.childElementCount > 0;
     pageOffset += items.length;
     if (items.length < PAGE) exhausted = true;
     more.hidden = exhausted || grid.childElementCount === 0;
@@ -296,7 +305,12 @@ async function loadPage(token: number): Promise<boolean> {
     void fillCommentCounts(items);
     return true;
   } catch {
-    if (token === pageToken) $('#grid-loading').textContent = t('cm.errFeed');
+    if (token === pageToken) {
+      $('#grid-error').hidden = false;
+      // Retain the current page and allow an explicit retry. Do not let the
+      // sentinel repeatedly retry a failed connection on its own.
+      $('#grid-more').hidden = true;
+    }
     return false;
   } finally {
     // Only if we are still the current request. A stale call finishing late
@@ -313,11 +327,18 @@ async function loadPage(token: number): Promise<boolean> {
 
 /** Wire the sentinel and the button once, at mount. */
 function initPaging(): void {
+  $('#grid-retry').addEventListener('click', async () => {
+    $('#grid-error').hidden = true;
+    const button = $('#grid-retry') as HTMLButtonElement;
+    button.disabled = true;
+    await loadPage(pageToken);
+    button.disabled = false;
+  });
   $('#grid-more-btn').addEventListener('click', () => void loadPage(pageToken));
   const sentinel = document.getElementById('grid-sentinel');
   if (!sentinel || typeof IntersectionObserver === 'undefined') return;
   new IntersectionObserver(
-    (entries) => { if (entries.some((e) => e.isIntersecting)) void loadPage(pageToken); },
+    (entries) => { if ($('#grid-error').hidden && entries.some((e) => e.isIntersecting)) void loadPage(pageToken); },
     { rootMargin: '600px 0px' }, // start fetching before the user reaches the end
   ).observe(sentinel);
 }
@@ -355,18 +376,25 @@ function renderCard(item: GalleryItem, onClick?: () => void): HTMLElement {
     ${thumb}</div>
     <div class="card-body">
       ${badges}
-      <div class="card-title">${escapeHtml(tTitle(item))}</div>
-      <div class="card-by">${escapeHtml(t('cm.by'))} <span class="at">@${escapeHtml(item.ownerName)}</span></div>
+      <a class="card-title card-open" href="/t/${encodeURIComponent(item.id)}">${escapeHtml(tTitle(item))}</a>
+      <div class="card-by">${escapeHtml(t('cm.by'))} <button class="at card-creator" type="button">@${escapeHtml(item.ownerName)}</button></div>
       ${remixed}
       <div class="card-stats">
         <span class="card-stat like ${liked ? 'on' : ''}"><i class="ti ti-heart${liked ? '-filled' : ''}"></i> ${item.likeScore}</span>
         <span class="card-stat"><i class="ti ti-message-circle"></i> <span class="cmt-count" data-id="${item.id}">${comments ?? '·'}</span></span>
         <span class="card-stat views" title="${escapeHtml(t('cm.viewsTitle'))}"><i class="ti ti-eye"></i> <span class="view-count" data-id="${item.id}">${item.viewCount ?? 0}</span></span>
-        <button class="card-stat card-share" title="${escapeHtml(t('cm.shareThis'))}"><i class="ti ti-share"></i></button>
+        <button class="card-stat card-share" title="${escapeHtml(t('cm.shareThis'))}" aria-label="${escapeHtml(t('cm.shareThis'))}"><i class="ti ti-share" aria-hidden="true"></i></button>
       </div>
     </div>`;
   queueMicrotask(() => hydrateBowls(card));
-  card.addEventListener('click', () => (onClick ? onClick() : openPreview(item)));
+  card.querySelector('.card-open')!.addEventListener('click', (e) => {
+    const ev = e as MouseEvent;
+    if (!ev.ctrlKey && !ev.metaKey && !ev.shiftKey && !ev.altKey) e.preventDefault();
+  });
+  card.addEventListener('click', (e) => {
+    if (e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
+    if (onClick) onClick(); else void openPreview(item);
+  });
   // Share button — opens the share modal without triggering the card's open.
   const shareBtn = card.querySelector('.card-share') as HTMLElement | null;
   shareBtn?.addEventListener('click', (e) => {
@@ -390,18 +418,24 @@ function renderCard(item: GalleryItem, onClick?: () => void): HTMLElement {
 
 // ---------- creator profile view ----------
 async function openProfile(userId: string): Promise<void> {
+  closePreview();
+  const revision = previewRevision;
   const root = $('#modal-root');
   root.hidden = false;
   root.innerHTML = `
     <div class="modal profile-modal">
-      <button class="modal-close" id="profile-close" aria-label="Close">&times;</button>
-      <div class="profile-loading">Loading profile…</div>
+      <button class="modal-close" id="profile-close" aria-label="${t('common.close')}">&times;</button>
+      <div class="profile-loading" role="status">${t('cm.profileLoading')}</div>
     </div>`;
   const close = (): void => {
+    releaseCommunityDialog?.();
+    releaseCommunityDialog = null;
     root.hidden = true;
     root.innerHTML = '';
     document.removeEventListener('keydown', escProfile);
   };
+  releaseCommunityDialog = containDialog(root, close);
+  root.querySelector('.profile-modal')?.setAttribute('aria-label', t('cm.profileLoading'));
   $('#profile-close').addEventListener('click', close);
   root.addEventListener('click', (e) => {
     if (e.target === root) close();
@@ -418,6 +452,7 @@ async function openProfile(userId: string): Promise<void> {
   }
 
   const isSelf = me && me.id === userId;
+  if (revision !== previewRevision || root.hidden) return;
   const modal = root.querySelector('.profile-modal') as HTMLElement;
   modal.innerHTML = `
     <button class="modal-close" id="profile-close" aria-label="Close">&times;</button>
@@ -482,25 +517,26 @@ function escProfile(e: KeyboardEvent): void {
   if (e.key === 'Escape') {
     const root = document.getElementById('modal-root');
     if (root && root.querySelector('.profile-modal')) {
-      root.hidden = true;
-      root.innerHTML = '';
-      document.removeEventListener('keydown', escProfile);
+      closePreview();
     }
   }
 }
 
 // ---------- 3D preview modal ----------
 let activePreview: Preview3D | null = null;
+let releaseCommunityDialog: (() => void) | null = null;
+let previewRevision = 0;
 
 async function openPreview(item: GalleryItem, focusCommentId?: string | null): Promise<void> {
+  closePreview();
   const root = $('#modal-root');
   root.hidden = false;
   root.innerHTML = `
     <div class="modal">
-      <button class="modal-close" id="modal-close" aria-label="Close">&times;</button>
+      <button class="modal-close" id="modal-close" aria-label="${t('common.close')}">&times;</button>
       <div class="modal-3d">
         <div class="modal-3d-host" id="modal-3d-host">
-          <div class="grid-loading" style="color:#9aa3b5;padding-top:80px;">Rendering stadium…</div>
+          <div class="grid-loading" role="status" style="color:#9aa3b5;padding-top:80px;">${t('cm.rendering')}</div>
         </div>
         <div class="modal-3d-bar" id="cam-bar"></div>
       </div>
@@ -540,6 +576,7 @@ async function openPreview(item: GalleryItem, focusCommentId?: string | null): P
 
   // close handlers
   const close = (): void => closePreview();
+  releaseCommunityDialog = containDialog(root, close);
   $('#modal-close').addEventListener('click', close);
   root.addEventListener('click', (e) => {
     if (e.target === root) close();
@@ -608,6 +645,10 @@ function escClose(e: KeyboardEvent): void {
 }
 
 function closePreview(): void {
+  ++previewRevision;
+  releaseCommunityDialog?.();
+  releaseCommunityDialog = null;
+  document.removeEventListener('keydown', escProfile);
   activePreview?.dispose();
   activePreview = null;
   document.removeEventListener('keydown', escClose);
@@ -617,6 +658,7 @@ function closePreview(): void {
 }
 
 async function mountPreview3D(item: GalleryItem): Promise<void> {
+  const revision = previewRevision;
   try {
     // Resolve the design's template, generate its seat map, load cells. The
     // code for all of it arrives in parallel with the design's own request.
@@ -626,7 +668,7 @@ async function mountPreview3D(item: GalleryItem): Promise<void> {
     const store = new DesignStore(map, ['#262a33', '#1c5fd9']);
     await loadDesign(store, item.id);
     const host = document.getElementById('modal-3d-host');
-    if (!host) return;
+    if (!host || revision !== previewRevision) return;
     host.innerHTML = '';
     const preview = new Preview3D(host, map, store, { template: templateById(tpl) ?? null });
     activePreview = preview;
@@ -648,6 +690,7 @@ async function mountPreview3D(item: GalleryItem): Promise<void> {
     // seats, which are the design.
     void attachBanners(item, preview, map, tpl, bar);
   } catch {
+    if (revision !== previewRevision) return;
     const host = document.getElementById('modal-3d-host');
     if (host) host.innerHTML = `<div class="grid-loading" style="color:#9aa3b5;padding-top:80px;">${t('cm.errRender')}</div>`;
   }
@@ -1032,45 +1075,71 @@ async function fillCommentCounts(items: GalleryItem[]): Promise<void> {
 const searchInput = $('#user-search') as HTMLInputElement;
 const searchResults = $('#search-results');
 let searchTimer: number | undefined;
+let searchRevision = 0;
+const closeSearch = (): void => { searchResults.hidden = true; searchInput.setAttribute('aria-expanded', 'false'); };
 searchInput.addEventListener('input', () => {
   window.clearTimeout(searchTimer);
+  const revision = ++searchRevision;
+  closeSearch();
   const q = searchInput.value.trim();
   if (q.length < 1) {
-    searchResults.hidden = true;
+    if (designQuery) { designQuery = ''; void loadGallery(); }
     return;
   }
   searchTimer = window.setTimeout(async () => {
-    const users = await searchUsers(q);
+    const nextQuery = q.startsWith('@') ? '' : q;
+    if (nextQuery !== designQuery) { designQuery = nextQuery; void loadGallery(); }
+    void refreshCount();
+    let users: Awaited<ReturnType<typeof searchUsers>>;
+    try { users = await searchUsers(q.replace(/^@/, '')); }
+    catch {
+      if (revision !== searchRevision) return;
+      searchResults.innerHTML = `<p class="search-message" role="status">${escapeHtml(t('cm.searchFailed'))}</p>`;
+      searchResults.hidden = false;
+      searchInput.setAttribute('aria-expanded', 'true');
+      return;
+    }
+    if (revision !== searchRevision) return;
+    searchInput.setAttribute('aria-expanded', 'true');
     if (users.length === 0) {
-      searchResults.innerHTML = `<div class="search-result"><div class="sr-meta"><div class="sr-sub">No creators found</div></div></div>`;
+      if (!q.startsWith('@')) { closeSearch(); return; }
+      searchResults.innerHTML = `<p class="search-message" role="status">${escapeHtml(t('cm.noCreators'))}</p>`;
       searchResults.hidden = false;
       return;
     }
     searchResults.innerHTML = users
       .map(
         (u) => `
-      <div class="search-result" data-id="${u.id}">
+      <button type="button" class="search-result" data-id="${u.id}">
         <div class="sr-avatar">${initials(u.username)}</div>
         <div class="sr-meta">
           <div class="sr-name">@${escapeHtml(u.username)}</div>
-          <div class="sr-sub">${u.followerCount} follower${u.followerCount === 1 ? '' : 's'} · ${u.designCount} tifo${u.designCount === 1 ? '' : 's'}</div>
+          <div class="sr-sub">${escapeHtml(tv('cm.creatorStats', { followers: u.followerCount, designs: u.designCount }))}</div>
         </div>
-      </div>`,
+      </button>`,
       )
       .join('');
     searchResults.hidden = false;
     searchResults.querySelectorAll<HTMLElement>('.search-result[data-id]').forEach((el) => {
       el.addEventListener('click', () => {
         const uid = el.dataset.id!;
-        searchResults.hidden = true;
+        closeSearch();
         searchInput.value = '';
+        if (designQuery) { designQuery = ''; void loadGallery(); }
         void openProfile(uid);
       });
     });
   }, 220);
 });
+searchInput.addEventListener('keydown', (e) => {
+  if (e.key === 'ArrowDown' && !searchResults.hidden) { e.preventDefault(); searchResults.querySelector<HTMLButtonElement>('button')?.focus(); }
+  if (e.key === 'Escape') { ++searchRevision; closeSearch(); }
+});
+searchResults.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') { closeSearch(); searchInput.focus(); }
+});
 document.addEventListener('click', (e) => {
-  if (!searchInput.contains(e.target as Node) && !searchResults.contains(e.target as Node)) searchResults.hidden = true;
+  if (!searchInput.contains(e.target as Node) && !searchResults.contains(e.target as Node)) { ++searchRevision; closeSearch(); }
 });
 
 // ---------- notifications ----------
@@ -1370,6 +1439,7 @@ async function refreshCount(): Promise<void> {
   const clear = $('#fp-clear') as HTMLButtonElement;
   clear.disabled = selectionCount(draft) === 0;
   window.clearTimeout(countTimer);
+  if (designQuery) { apply.disabled = false; apply.textContent = t('cm.apply'); return; }
   countTimer = window.setTimeout(async () => {
     // The club filter takes ONE club server-side, so a multi-club draft cannot
     // be counted in a single request. Counting only the first would be a lie, so
@@ -1474,6 +1544,11 @@ function closePanel(focusBtn = true): void {
 // button's live count are all made here.
 onLangChange(() => {
   renderApplied();
+  // Cards are runtime markup, so applyDom cannot translate their badges,
+  // creator labels or accessible actions when the language changes in place.
+  ++searchRevision;
+  closeSearch();
+  void loadGallery();
   if (!panel.hidden) void loadFilters();
   else void refreshCount();
 });

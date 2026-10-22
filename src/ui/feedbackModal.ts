@@ -26,6 +26,7 @@
  */
 
 import { t } from './i18n';
+import { containDialog } from './dialogFocus';
 import { isSignedIn } from '../net/api';
 
 type Kind = 'bug' | 'idea' | 'other';
@@ -228,12 +229,14 @@ export function openFeedbackModal(initialKind: Kind = 'bug'): void {
   paintKind();
 
   const close = (): void => {
+    release();
     backdrop.remove();
     // Focus goes back to whatever opened this, so a keyboard user who
     // closes it is not dropped at the top of the document.
     if (opener && document.contains(opener)) opener.focus();
     document.removeEventListener('keydown', onKey);
   };
+  const release = containDialog(backdrop, close);
   const onKey = (e: KeyboardEvent): void => { if (e.key === 'Escape') close(); };
   document.addEventListener('keydown', onKey);
   backdrop.addEventListener('mousedown', (e) => { if (e.target === backdrop) close(); });

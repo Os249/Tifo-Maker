@@ -1,7 +1,7 @@
 import { cleanAddressBar } from './core/utm';
 import { escapeHtml } from './core/escape';
 import './clubs.css';
-import { initLang, applyDom, toggleLang, t } from './ui/i18n';
+import { initLang, applyDom, toggleLang, t, tv } from './ui/i18n';
 import { initScheme, setSchemeLabels } from './ui/colorScheme';
 import { submitLead } from './net/api';
 import { installMobileNav } from './ui/mobileNav';
@@ -45,7 +45,7 @@ form?.addEventListener('submit', async (e) => {
     message: (document.getElementById('lf-msg') as HTMLTextAreaElement).value.trim(),
   };
   if (!data.name || !data.email) {
-    note.textContent = 'Please add your name and a valid email.';
+    note.textContent = t('clubs.invalid');
     note.className = 'b-form-note err';
     return;
   }
@@ -58,11 +58,11 @@ form?.addEventListener('submit', async (e) => {
     form.classList.add('sent');
     form.innerHTML = `
       <div class="b-sent-icon">✓</div>
-      <div class="b-sent-title">Thanks, ${escapeHtml(data.name.split(' ')[0] || 'there')}!</div>
-      <div class="b-sent-body">We’ve got your details and will be in touch shortly to set up your walkthrough and venue model.</div>`;
+      <div class="b-sent-title">${escapeHtml(tv('clubs.thanks', { name: data.name.split(' ')[0] || data.name }))}</div>
+      <div class="b-sent-body">${t('clubs.received')}</div>`;
   } catch (err) {
     submit.disabled = false;
-    note.textContent = (err as Error).message;
+    note.textContent = t('clubs.failed');
     note.className = 'b-form-note err';
   }
 });

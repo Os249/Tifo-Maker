@@ -95,7 +95,7 @@ export function runBannerTour(): Promise<void> {
 export function offerBannerTour(stillHere: () => boolean): void {
   if (hasSeenBannerTour()) return;
   window.setTimeout(() => {
-    if (hasSeenBannerTour() || !stillHere() || screenBusy()) return;
+    if (hasSeenBannerTour() || !stillHere() || screenBusy() || document.body.dataset.panelMode !== 'design') return;
     void runBannerTour();
   }, 450);
 }

@@ -791,6 +791,9 @@ async function main(): Promise<void> {
     btnBanner?.classList.toggle('active', next === 'banner');
     btn3d.classList.toggle('active', next === '3d');
     btnSplit.classList.toggle('active', next === 'split');
+    for (const [button, view] of [[btn2d, '2d'], [btnBanner, 'banner'], [btn3d, '3d'], [btnSplit, 'split']] as const) {
+      button?.setAttribute('aria-pressed', String(next === view));
+    }
     railFlag?.classList.toggle('active', showBanner);
 
     // The Banner view owns the tool rail while it is up: the rail's buttons,

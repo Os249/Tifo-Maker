@@ -3,6 +3,7 @@ import { PASSWORD_MIN } from '../core/password';
 import { deriveUsername } from '../core/handle';
 import { enhancePasswordField } from './passwordField';
 import { t, tv, getLang } from './i18n';
+import { containDialog } from './dialogFocus';
 
 /**
  * Sign in / sign up modal. Replaces the window.prompt() auth with a proper
@@ -74,7 +75,7 @@ async function registerWithDerivedName(email: string, password: string): Promise
  * line never runs. The intent is recorded before the redirect and picked up
  * again on the way back in. See `takeClaimIntent` in net/api.
  */
-export function openAuthModal(claimOnReturn = false, startOn: 'signin' | 'signup' = 'signin'): Promise<string | null> {
+export function openAuthModal(claimOnReturn = false, startOn: 'signin' | 'signup' = 'signin', forgotOnOpen = false): Promise<string | null> {
   return new Promise((resolve) => {
     const backdrop = document.createElement('div');
     backdrop.className = 'auth-backdrop';
@@ -190,6 +191,7 @@ export function openAuthModal(claimOnReturn = false, startOn: 'signin' | 'signup
     passwordField.setActive(false);
 
     const close = (result: string | null): void => {
+      release();
       backdrop.remove();
       // Return focus to whatever opened the dialog. Without this a keyboard user
       // who opens it, changes their mind and presses Escape is dropped at the top
@@ -198,6 +200,7 @@ export function openAuthModal(claimOnReturn = false, startOn: 'signin' | 'signup
       document.removeEventListener('keydown', onKey);
       resolve(result);
     };
+    const release = containDialog(backdrop, () => close(null));
     const onKey = (e: KeyboardEvent): void => {
       if (e.key === 'Escape') close(null);
     };
@@ -218,6 +221,7 @@ export function openAuthModal(claimOnReturn = false, startOn: 'signin' | 'signup
     const setMode = (next: 'signin' | 'signup'): void => {
       mode = next;
       tabs.forEach((tab) => tab.classList.toggle('active', tab.dataset.mode === next));
+      tabs.forEach((tab) => tab.setAttribute('aria-pressed', String(tab.dataset.mode === next)));
       submit.textContent = next === 'signin' ? t('auth.signin') : t('auth.signup');
       passwordInput.autocomplete = next === 'signin' ? 'current-password' : 'new-password';
       // Signing up asks only for an email. Signing in accepts either, because
@@ -242,6 +246,7 @@ export function openAuthModal(claimOnReturn = false, startOn: 'signin' | 'signup
 
     // Forgot-password sub-view (sign-in only).
     const showForgot = (on: boolean): void => {
+      modal.setAttribute('aria-label', t(on ? 'auth.forgot' : mode === 'signin' ? 'auth.signin' : 'auth.signup'));
       forgotForm.hidden = !on;
       form.hidden = on;
       tabsRow.hidden = on;
@@ -335,7 +340,8 @@ export function openAuthModal(claimOnReturn = false, startOn: 'signin' | 'signup
     });
 
     // Focus the first field once mounted.
-    setTimeout(() => identityInput.focus(), 0);
+    if (forgotOnOpen) forgotLink.click();
+    else setTimeout(() => { if (backdrop.isConnected) identityInput.focus(); }, 0);
     void modal;
   });
 }

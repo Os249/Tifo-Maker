@@ -207,6 +207,7 @@ export function startTour(opts?: TourOptions): Promise<void> {
       markDone();
       window.removeEventListener('resize', render);
       document.removeEventListener('keydown', onKey);
+      document.removeEventListener('pointerdown', onOutside, true);
       overlay.remove();
       // On phones, hand off to the AI front door (unless it's already open).
       if (main && isPhone) {
@@ -215,6 +216,11 @@ export function startTour(opts?: TourOptions): Promise<void> {
       }
       resolve();
     };
+    // The tutorial is guidance, not a mode. Yield as soon as someone chooses
+    // to work elsewhere instead of leaving a stale spotlight over their task.
+    function onOutside(e: PointerEvent): void {
+      if (!overlay.contains(e.target as Node)) finish();
+    }
 
     function render(): void {
       const step = steps[i];
@@ -322,6 +328,7 @@ export function startTour(opts?: TourOptions): Promise<void> {
       if (e.key === 'Escape') finish();
     }
     document.addEventListener('keydown', onKey);
+    document.addEventListener('pointerdown', onOutside, true);
 
     render();
   });

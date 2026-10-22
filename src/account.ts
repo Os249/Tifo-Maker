@@ -31,7 +31,8 @@ import {
   aiUnlockToken,
 } from './net/api';
 import type { Me } from './net/api';
-import { applyDom, getLang, initLang, t, tErr, tv } from './ui/i18n';
+import { applyDom, getLang, initLang, toggleLang, t, tErr, tv } from './ui/i18n';
+import { initScheme, setSchemeLabels } from './ui/colorScheme';
 import { enhancePasswordField } from './ui/passwordField';
 import { ensureUsernameChosen } from './ui/chooseUsernameModal';
 import { POLICY_VERSION } from './ui/authModal';
@@ -492,6 +493,14 @@ initLang();
 cleanAddressBar();
 document.documentElement.lang = getLang();
 applyDom(document);
+initScheme();
+setSchemeLabels({ dark: t('theme.dark'), light: t('theme.light') });
+$('lang-toggle')?.addEventListener('click', () => {
+  toggleLang();
+  applyDom(document);
+  setSchemeLabels({ dark: t('theme.dark'), light: t('theme.light') });
+  if (me) { renderEmail(); renderPasswordSection(); }
+});
 
 /**
  * This page is also a landing spot for a provider round trip: a link started

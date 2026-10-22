@@ -27,6 +27,7 @@
  * it brings back are counted under "Shared by visitors".
  */
 import { getLang, t } from './i18n';
+import { copyText } from './clipboard';
 import { tagShareUrl, type ShareSource } from '../core/utm';
 import { track } from '../net/analytics';
 import { recordShare } from '../net/api';
@@ -344,7 +345,7 @@ export async function openPostSheet(deps: PostDeps): Promise<void> {
     counted(deps, 'whatsapp');
   }));
   row.appendChild(button('pm-b', 'ti-link', t('post.copyLink'), async () => {
-    await navigator.clipboard?.writeText(linkFor(deps, 'copy')).catch(() => {});
+    if (!await copyText(linkFor(deps, 'copy'))) { say(t('sm.copyUnavailable')); return; }
     counted(deps, 'copy');
     say(t('post.copiedLink'));
   }));

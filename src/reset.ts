@@ -4,6 +4,7 @@
  * On success the user's other sessions are invalidated server-side.
  */
 import './ui/colorScheme.css';
+import './ui/authPublic.css';
 import { resetPassword } from './net/api';
 import { PASSWORD_MIN } from './core/passwordLimits';
 import { enhancePasswordField } from './ui/passwordField';
@@ -35,8 +36,13 @@ function showErr(msg: string): void {
 
 if (!token) {
   showErr(t('rs.noToken'));
+  form.hidden = true;
   submit.disabled = true;
 }
+document.getElementById('reset-recover')?.addEventListener('click', async () => {
+  const { openAuthModal } = await import('./ui/authModal');
+  void openAuthModal(false, 'signin', true);
+});
 
 form.addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -53,6 +59,7 @@ form.addEventListener('submit', async (e) => {
     await resetPassword(token, pw.value);
     form.hidden = true;
     done.hidden = false;
+    document.getElementById('reset-recover')!.hidden = true;
   } catch (e2) {
     showErr((e2 as Error).message || t('rs.badLink'));
     submit.disabled = false;

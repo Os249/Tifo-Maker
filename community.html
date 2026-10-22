@@ -36,6 +36,7 @@
   </style>
 </head>
 <body>
+  <a class="skip-link" href="#main" data-i18n="common.skip">Skip to main content</a>
   <header class="nav">
     <a class="brand" href="/">TIFO<b>MAKER</b></a>
     <nav class="nav-links">
@@ -50,7 +51,7 @@
     </nav>
   </header>
 
-  <main class="community">
+  <main class="community" id="main" tabindex="-1">
     <section class="hub-head">
       <div class="hub-head-inner">
         <h1 data-i18n="community.title">The tifo community</h1>
@@ -58,7 +59,7 @@
         <div class="hub-controls">
           <div class="search-wrap">
             <i class="ti ti-search"></i>
-            <input type="text" id="user-search" placeholder="Search creators by @username…" data-i18n-attr="placeholder:cm.searchUsers" autocomplete="off" />
+            <input type="search" id="user-search" placeholder="Search tifos or @creators…" aria-label="Search tifos or creators" data-i18n-attr="placeholder:cm.searchUsers,aria-label:cm.searchUsers" autocomplete="off" aria-controls="search-results" aria-expanded="false" />
             <div class="search-results" id="search-results" hidden></div>
           </div>
           <div class="sort-tabs" id="sort-tabs">
@@ -122,6 +123,10 @@
         <a class="btn btn-primary" href="/projects?new=1" data-i18n="pj.new">New project</a>
       </div>
       <div class="grid-loading" id="grid-loading" data-i18n="cm.loading">Loading the community feed…</div>
+      <div class="grid-error" id="grid-error" hidden>
+        <p role="status" data-i18n="cm.errFeed">Could not load the feed.</p>
+        <button class="btn btn-primary" id="grid-retry" type="button" data-i18n="common.retry">Try again</button>
+      </div>
       <!-- Paging. The sentinel loads the next page on scroll; the button is the
            accessible, no-observer fallback and the keyboard path. -->
       <div class="grid-more" id="grid-more" hidden>

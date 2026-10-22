@@ -13,7 +13,9 @@ import type { Weather } from './weather';
 import type { ScreenMode } from './screenPicture';
 import { tlBoth } from '../../ui/i18n';
 import { dbg } from './debug';
-import { getLang } from '../../ui/i18n';
+import { getLang, t } from '../../ui/i18n';
+import { containDialog } from '../../ui/dialogFocus';
+import { copyText } from '../../ui/clipboard';
 import { OSM_ATTRIBUTION } from '../../net/osm';
 import {
   ACCESSORY_KINDS,
@@ -1280,6 +1282,7 @@ export function openMatchDaySimulator(
   overlay.append(bar, panel, host);
   document.body.appendChild(overlay);
   const prevOverflow = document.body.style.overflow;
+  let releaseSimulator = (): void => {};
   document.body.style.overflow = 'hidden';
 
   // ---------- onboarding / help ----------
@@ -1359,23 +1362,25 @@ export function openMatchDaySimulator(
     });
   };
 
-  const showHelp = (): void => help.classList.add('show');
-  const hideHelp = (): void => help.classList.remove('show');
+  help.inert = true;
+  let releaseHelp: (() => void) | null = null;
+  const showHelp = (): void => {
+    if (releaseHelp) return;
+    help.inert = false;
+    help.classList.add('show');
+    releaseHelp = containDialog(help, hideHelp);
+  };
+  const hideHelp = (): void => {
+    releaseHelp?.(); releaseHelp = null;
+    help.classList.remove('show');
+    help.inert = true;
+  };
   const helpOpen = (): boolean => help.classList.contains('show');
   helpBtn.addEventListener('click', () => (helpOpen() ? hideHelp() : showHelp()));
   gotBtn.addEventListener('click', hideHelp);
   help.addEventListener('click', (e) => {
     if (e.target === help) hideHelp();
   });
-  // Greet first-time visitors once.
-  try {
-    if (!localStorage.getItem('mds_seen_intro')) {
-      showHelp();
-      localStorage.setItem('mds_seen_intro', '1');
-    }
-  } catch {
-    /* storage blocked — skip the intro */
-  }
 
   // Bulletproof panel scroll: drive it manually and stop the wheel reaching the
   // editor's global zoom handler behind the overlay (which was eating the scroll).
@@ -2357,11 +2362,11 @@ export function openMatchDaySimulator(
   });
   recordBtn2.addEventListener('click', () => void doRecord());
   recBtn.addEventListener('click', () => void doRecord());
-  linkBtn.addEventListener('click', () => {
+  linkBtn.addEventListener('click', async () => {
     const u = new URL(location.href);
     u.searchParams.set('sim', '1');
-    void navigator.clipboard?.writeText(u.toString());
-    toast(L('toast.linkCopied'));
+    const ok = await copyText(u.toString());
+    toast(ok ? L('toast.linkCopied') : t('sm.copyDenied'));
   });
 
   // iOS Safari implements fullscreen for <video> only — Element.requestFullscreen
@@ -2407,6 +2412,8 @@ export function openMatchDaySimulator(
   const close = (): void => {
     if (closed) return;
     closed = true;
+    hideHelp();
+    releaseSimulator();
     disarmSoundStart();
     document.removeEventListener('keydown', onKey);
     document.removeEventListener('fullscreenchange', onFsChange);
@@ -2474,6 +2481,17 @@ export function openMatchDaySimulator(
   };
   closeBtn.addEventListener('click', close);
   document.addEventListener('keydown', onKey);
+
+  overlay.setAttribute('aria-label', 'Match Day Simulator');
+  overlay.setAttribute('role', 'dialog');
+  releaseSimulator = containDialog(overlay, () => { if (!document.fullscreenElement) close(); });
+  // Greet first-time visitors after the simulator owns focus.
+  try {
+    if (!localStorage.getItem('mds_seen_intro')) {
+      showHelp();
+      localStorage.setItem('mds_seen_intro', '1');
+    }
+  } catch { /* storage blocked — skip the intro */ }
 
   return { close };
 }

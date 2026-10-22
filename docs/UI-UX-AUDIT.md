@@ -72,3 +72,118 @@ establish a conversion improvement or full WCAG conformance.
 5. **Content density:** compare the compact workflow against the longer
    explanation later on the homepage. Remove repetition if user testing shows
    the shorter version answers the necessary questions.
+
+## Full product pass — 22 October 2026
+
+The second pass follows the actual product beyond the landing page. It combines
+source inspection, browser walkthroughs, simulated failures, and regression tests.
+The earlier results above describe the first pass; the coverage below describes
+this wider review.
+
+### Journey coverage
+
+| Surface | Review performed | Result |
+| --- | --- | --- |
+| Homepage and navigation | Entry points, club selection, responsive navigation, existing light/dark support | Retained the first pass; checked continuity into projects. |
+| Projects and creation | Club/ground/start flow, storage messaging, search, rename, copies, recovery, account migration | Existing project suite re-run after dialog changes. |
+| Seat editor | Views, tool names, tab navigation, colour controls, save state, export discovery | Corrected shortcut guidance, tab keyboard behavior, and misleading empty save indicator. |
+| Banner studio | Empty state, creation choices, contextual properties, introductory tour | Tour now yields to work elsewhere and does not interrupt another panel. |
+| AI designer | Prompt/examples and guest account gate; account and verification states in project tests | Preserved the existing gate and editable workflow. Live external AI output is not a visual-design validation method. |
+| Stadium and Match Day | Entry/exit, help, camera controls, recording controls, touch layout, failure states | Added focus containment and honest clipboard feedback; preserved rendering and camera behavior. |
+| Publishing and sharing | Public/private distinction, metadata dialog, nested Share overlay, QR and clipboard denial | Reworked shared Share presentation and recovery; added modal focus behavior. |
+| Production exports | PDF and CSV downloads, QR prerequisites, explanations | Described each format; stopped offering unusable fan QR links for private/local work. |
+| Public tifo page | Viewing, share entry, related designs, phone width | Exercised public links in English and Arabic. |
+| Fan seat page | Section → row → seat → card, small-screen width, failed loading | Exercised the real seat-selection path and added retry on load failure. |
+| Community | Cards, search, filters, profiles, preview, pagination and failed network requests | Added title search, keyboard entry points, safe async transitions, visible failures and retry. |
+| Account and authentication | Signed-out entry, settings layout, sign-in/signup/reset subviews, themes and Arabic | Added consistent language/theme controls; fixed modal focus and light-theme password hints. Authenticated project states use disposable local test accounts. |
+| Password reset | Missing-token state and link recovery | Hide the unusable password form; open the reset-email form directly from recovery. |
+| Clubs | Capability claims, form feedback, language consistency | Describe implemented tools rather than promising shared editing or white-label hosting; localize results and preserve fields on failure. |
+| Legal | Direct section links, English/Arabic section mapping | Canonical links now resolve to the section that is actually visible. Legal policy text was not rewritten. |
+
+### Important findings addressed
+
+1. **Private fan QR links:** a saved private design is visible to its owner,
+   but a fan without that session cannot load it. Require publication, explain
+   why, focus the publishing action, and remind organizers to keep it published.
+2. **False clipboard success:** Share, Post it, and Match Day previously treated
+   denied or missing clipboard access as success. Report the actual result. The
+   Share/QR dialogs offer a selectable link for manual copying.
+3. **Dialog focus and nesting:** a visually modal screen did not consistently
+   isolate the page or restore focus. A reusable controller handles keyboard
+   containment, scroll locking, original inert states, and top-dialog Escape.
+   It covers confirmations, auth, publishing, feedback, community previews,
+   sharing, animation previews, QR, simulator, and simulator help.
+4. **Invisible community failures:** feed loading wrote an error and then hid
+   the element containing it. Separate errors from loading; retain existing
+   cards, expose Retry, and avoid automatic repeated requests during an outage.
+5. **Inaccessible cards and creator search:** click handlers on articles/spans
+   gave keyboard users no equivalent. Use real title links and creator buttons;
+   preserve public URLs and modified-click behavior.
+6. **Search expectations:** the prominent search field only searched creators.
+   It now also searches design titles; @creator lookup remains available, and
+   responses from old searches cannot replace a newer result.
+7. **Stale preview loading:** closing or switching a preview while its 3D assets
+   loaded could populate a different preview. Ignore results from older opens.
+8. **Lost reset flow:** a tokenless reset page solicited a new password that
+   could never be submitted. It now leads directly to requesting a fresh link.
+9. **Unclear export formats:** use labeled rows with a short task-oriented
+   explanation for volunteer sheets, spreadsheet seat records, and fan QR.
+10. **Keyboard orientation:** panel tabs now have one Tab stop and support
+    Home/End; view buttons expose their selected state; status messages are
+    announced. The footer correctly identifies I as the colour picker.
+11. **Stray save indicator:** the empty panel status still drew a green tick
+    via CSS when the actual save message was shown in the header. Hide it when
+    empty rather than showing an unexplained success mark.
+12. **Interrupted onboarding:** a spotlight could remain over another task.
+    Tours now yield on an outside pointer interaction; automatic banner help
+    waits until the painting panel is the active task.
+13. **Inconsistent account controls:** settings lacked the public site's theme
+    and language switches. Add both without discarding form values.
+14. **Password contrast:** a yellow decorative accent was used for a link on a
+    light background. Use the semantic blue and theme-aware text colours.
+15. **Credibility:** the club page claimed simultaneous collaboration,
+    white-label domains, and guaranteed exact venue modeling without those
+    facilities in the inspected application. Replace these with the actual
+    design, preview, distribution, and fan-instruction capabilities.
+16. **Arabic legal navigation:** links to the canonical English section IDs
+    could target hidden content. Resolve hashes to the current language.
+17. **Cropped Share artwork:** older OG endpoints can return an 800×84 seat
+    strip. Cropping it to a landscape tile enlarged only a few seats. Fit the
+    whole image and reuse the existing bowl renderer for panoramic fallbacks.
+    Move Copy link before secondary platform choices.
+18. **Live language switching:** static headings translated while already
+    rendered community cards kept the old language. Refresh runtime card labels
+    and clear stale creator suggestions when switching languages in place.
+
+### Regression results from the full pass
+
+| Command | Result | What it establishes |
+| --- | --- | --- |
+| `npm run build` | Passed | Strict TypeScript and production asset build. The existing large-chunk warning remains. |
+| `npm run test:ux` | 82 passed, no page errors | New cross-page recovery, keyboard/nesting, real PDF/CSV downloads, public seat links, simulator focus, and live language switching. |
+| `npm run test:community-auth` | 118 passed | Sign-in/signup/reset views, creator lookup, light/dark, Arabic, and phone presentation. |
+| `npm run test:projects` | 93 passed, no page errors | Guest and account project persistence, AI gates, publishing, copies and recovery. |
+| `node e2e-mobile.mjs` | 318 passed | Touch editing, short screens, rotation, Arabic, simulator controls and WebGL failure behavior. |
+| `npm run test:theme` | 62 passed | Public-page theme switching and the suite's sampled contrast checks. |
+
+These suites ran during the review. The production build and new UX suite are
+repeated after final fixes; the test totals describe executable checks, not a
+claim of exhaustive usability or accessibility certification. Preview and test
+logs live in the ignored `preview-out/` directory. The new `e2e-ux.mjs` is a
+maintainable regression suite; it expects the local built site and in-memory
+server on port 8911 (or `BASE` set to a separate test server).
+
+### Additional research
+
+- [W3C APG: Modal Dialog Pattern](https://www.w3.org/WAI/ARIA/apg/patterns/dialog-modal/) informed focus containment, top-dialog Escape, and focus restoration.
+- [NN/g: Error-Message Guidelines](https://www.nngroup.com/articles/error-message-guidelines/) informed visible, actionable network and clipboard recovery.
+- [NN/g: Empty States](https://www.nngroup.com/articles/empty-state-interface-design/) informed distinct empty-search, loading, and failed-feed feedback.
+
+### Limits
+
+This does not claim every possible state is flawless or that a heuristic review
+substitutes for representative users. Real device performance, screen-reader
+testing with assistive technology, live email/OAuth delivery, and production
+latency remain separate checks. Admin/security operations and moderation policy
+were not redesigned. Existing large 3D bundles remain lazy-loaded; no renderer
+rewrite or new dependency was introduced. No live-site publication was performed.

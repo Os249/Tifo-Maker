@@ -23,6 +23,12 @@
   --ac-card: var(--card);
 }
 * { box-sizing: border-box; }
+.ac-nav { display:flex; align-items:center; flex-wrap:wrap; justify-content:flex-end; gap:12px; }
+.ac-language { font:inherit; font-size:13px; font-weight:600; padding:8px 12px; min-height:44px; border:1px solid var(--ac-line); border-radius:var(--r-pill); color:var(--ac-ink); background:var(--ac-card); cursor:pointer; }
+.ac-top .theme-toggle { min-width:44px; height:44px; }
+.ac-back { min-height:44px; display:inline-flex; align-items:center; }
+.ac-wrap:focus { outline:none; }
+@media(max-width:420px){.ac-top{flex-wrap:wrap;}.ac-nav{gap:8px;} }
 body {
   margin: 0;
   min-height: 100vh;

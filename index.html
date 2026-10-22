@@ -778,9 +778,9 @@
             <label for="bag-size" style="white-space:nowrap;" data-i18n="ed.prod.bag">Cards / bag</label>
             <input type="number" id="bag-size" min="10" max="1000" step="10" value="100" class="grow0" />
           </div>
-          <button id="export-pdf" style="width:100%;margin-bottom:8px;"><i class="ti ti-file-text"></i> <span data-i18n="ed.prod.pdf">Distribution PDF</span></button>
-          <button id="export-csv" style="width:100%;margin-bottom:8px;"><i class="ti ti-table"></i> <span data-i18n="ed.prod.csv">Seat manifest (CSV)</span></button>
-          <button id="export-qr" style="width:100%;"><i class="ti ti-qrcode"></i> <span data-i18n="ed.prod.qr">Fan QR code</span></button>
+          <button id="export-pdf" class="export-option"><i class="ti ti-file-text" aria-hidden="true"></i><span><b data-i18n="ed.prod.pdf">Distribution PDF</b><small data-i18n="ed.prod.pdfHelp">Print section sheets for your volunteers.</small></span></button>
+          <button id="export-csv" class="export-option"><i class="ti ti-table" aria-hidden="true"></i><span><b data-i18n="ed.prod.csv">Seat manifest (CSV)</b><small data-i18n="ed.prod.csvHelp">Open every seat and card in a spreadsheet.</small></span></button>
+          <button id="export-qr" class="export-option"><i class="ti ti-qrcode" aria-hidden="true"></i><span><b data-i18n="ed.prod.qr">Fan QR code</b><small data-i18n="ed.prod.qrHelp">For published tifos: fans find their card.</small></span></button>
           <p id="export-note" class="hint" style="font-size:11px;color:var(--text-3);margin:8px 0 0;" data-i18n="ed.prod.note">Seat-by-seat instructions, material &amp; bag counts, and a QR fans scan to find their card.</p>
         </div>
       </aside>
@@ -791,7 +791,7 @@
       <span class="coords" id="coords">&mdash;</span>
       <span id="stat" data-i18n="ed.stat.generating">generating seat map&hellip;</span>
       <span class="spacer"></span>
-      <span class="legible-chip ok" id="message"></span>
+      <span class="legible-chip ok" id="message" role="status" aria-live="polite"></span>
       <span class="kbd-hints"><kbd>Ctrl</kbd>+<kbd>Z</kbd> <span data-i18n="ed.hint.undo">undo</span> &middot; <kbd>B</kbd> <span data-i18n="ed.hint.brush">brush</span> &middot; <kbd>F</kbd> <span data-i18n="ed.hint.fill">fill</span> &middot; <kbd>T</kbd> <span data-i18n="ed.hint.text">text</span> &middot; <kbd>I</kbd> <span data-i18n="ed.hint.image">image</span> &middot; <kbd>Z</kbd> <span data-i18n="ed.hint.zen">zen</span></span>
     </footer>
 

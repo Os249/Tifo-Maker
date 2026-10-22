@@ -16,7 +16,10 @@ import { shareUrl, ogImageUrl, recordShare } from '../net/api';
 import { tagShareUrl, type ShareSource } from '../core/utm';
 import { track } from '../net/analytics';
 
-import { t } from './i18n';
+import { t, tv } from './i18n';
+import { escapeHtml } from '../core/escape';
+import { containDialog } from './dialogFocus';
+import { copyText } from './clipboard';
 export interface ShareTarget {
   id: string;
   title: string;
@@ -25,11 +28,11 @@ export interface ShareTarget {
 }
 
 const CSS = `
-.sm-overlay{position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;
+.sm-overlay{position:fixed;inset:0;z-index:var(--z-overlay,100);display:flex;align-items:center;justify-content:center;
   background:rgba(4,6,10,.66);backdrop-filter:blur(4px);padding:16px;}
-.sm-card{width:min(440px,100%);max-height:92vh;overflow:auto;background:#11141b;color:#f2f1ec;
-  border:1px solid #232a36;border-radius:16px;box-shadow:0 24px 64px rgba(0,0,0,.5);padding:20px;
-  font-family:Inter,system-ui,Arial,sans-serif;}
+.sm-card{width:min(480px,100%);max-height:calc(100dvh - 32px - var(--consent-h,0px));overflow:auto;background:var(--card,var(--ink-1,#131d30));color:var(--ink,var(--text-1,#f1f4fb));
+  border:1px solid var(--line,var(--line-1,#2a3650));border-radius:20px;box-shadow:0 24px 64px rgba(0,0,0,.3);padding:24px;
+  font-family:var(--font-ui,Inter,system-ui,sans-serif);}
 .sm-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;}
 .sm-head h3{margin:0;font-size:18px;font-weight:800;}
 .sm-x{all:unset;cursor:pointer;color:#9aa3b2;font-size:22px;line-height:1;padding:2px 6px;border-radius:8px;}
@@ -38,7 +41,7 @@ const CSS = `
 .sm-native{all:unset;box-sizing:border-box;display:flex;gap:8px;align-items:center;justify-content:center;width:100%;
   background:#2563eb;color:#fff;font-weight:700;padding:12px;border-radius:10px;cursor:pointer;margin-bottom:14px;}
 .sm-native:hover{background:#1d4ed8;}
-.sm-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px;}
+.sm-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-bottom:14px;}
 .sm-btn{all:unset;box-sizing:border-box;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:6px;
   padding:12px 4px;border-radius:10px;background:#171c26;border:1px solid #232a36;text-align:center;}
 .sm-btn:hover{background:#1f2734;border-color:#33405a;}
@@ -55,6 +58,20 @@ const CSS = `
 .sm-qrbtn{all:unset;cursor:pointer;color:#9aa3b2;font-size:13px;display:flex;align-items:center;gap:6px;}
 .sm-qr{margin-top:12px;display:flex;justify-content:center;}
 .sm-qr img{width:180px;height:180px;border-radius:10px;background:#fff;padding:8px;}
+.sm-qr[hidden]{display:none;}
+.sm-x{display:grid;place-items:center;box-sizing:border-box;width:44px;height:44px;color:inherit;}
+.sm-btn,.sm-copy{background:var(--raise,var(--ink-2,#1a263b));border-color:var(--line,var(--line-1,#2a3650));color:inherit;}
+.sm-btn span{color:inherit;font-size:12px;}
+.sm-btn:hover,.sm-copy:hover,.sm-x:hover{background:var(--raise-2,var(--ink-3,#25334c));color:inherit;}
+.sm-link{background:var(--paper,var(--ink-0,#0b1120));border-color:var(--line,var(--line-1,#2a3650));color:inherit;min-height:44px;}
+.sm-foot{flex-wrap:wrap;gap:12px;}
+.sm-open,.sm-qrbtn{color:var(--blue,#7fb0ff);min-height:44px;display:inline-flex;align-items:center;}
+.sm-card :is(button,a,input):focus-visible{outline:3px solid var(--blue,#7fb0ff);outline-offset:3px;}
+.sm-status{font-size:13px;line-height:1.5;color:var(--muted,var(--text-2,#a6b0c8));margin:0 0 12px;}
+.sm-status:empty{display:none;}
+.sm-preview{height:140px;aspect-ratio:auto;object-fit:contain;background:#0b1120;margin-bottom:8px;}
+.sm-target{margin:0 0 16px;font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+@media(max-width:480px){.sm-overlay{align-items:flex-end;padding:12px 12px calc(12px + var(--consent-h,0px));}.sm-card{padding:18px;}.sm-grid{grid-template-columns:repeat(3,minmax(0,1fr));}}
 .sm-toast{position:fixed;left:50%;bottom:32px;transform:translateX(-50%);background:#1f2734;color:#fff;
   padding:10px 16px;border-radius:10px;font-size:13px;z-index:10000;box-shadow:0 8px 24px rgba(0,0,0,.4);}
 `;
@@ -67,14 +84,6 @@ function ensureCss(): void {
   document.head.appendChild(style);
 }
 
-function toast(msg: string): void {
-  const t = document.createElement('div');
-  t.className = 'sm-toast';
-  t.textContent = msg;
-  document.body.appendChild(t);
-  setTimeout(() => t.remove(), 1800);
-}
-
 /** Open the share modal for a public tifo. */
 export function openShareModal(target: ShareTarget): void {
   ensureCss();
@@ -82,7 +91,7 @@ export function openShareModal(target: ShareTarget): void {
   // Each platform gets its own tagged copy of the link, so an opened link is
   // counted by where it was shared, WhatsApp and Discord included.
   const url = (source: ShareSource): string => tagShareUrl(base, source);
-  const text = `${target.title}: made with TifoMaker`;
+  const text = tv('sm.shareText', { title: target.title });
   const enc = encodeURIComponent;
 
   // Platforms with a real web share-intent.
@@ -107,22 +116,48 @@ export function openShareModal(target: ShareTarget): void {
     <div class="sm-card" role="dialog" aria-modal="true" aria-label="${t('sm.title')}">
       <div class="sm-head"><h3>${t('sm.head')}</h3><button class="sm-x" aria-label="${t('common.close')}">&times;</button></div>
       <img class="sm-preview" src="${ogImageUrl(target.id)}" alt="" />
-      ${'share' in navigator ? `<button class="sm-native"><i class="ti ti-share"></i> Share…</button>` : ''}
-      <div class="sm-grid"></div>
+      <p class="sm-target">${escapeHtml(target.title)}</p>
+      ${'share' in navigator ? `<button class="sm-native"><i class="ti ti-share" aria-hidden="true"></i> ${t('cm.share')}</button>` : ''}
       <div class="sm-row">
-        <input class="sm-link" readonly value="${url('copy')}" />
-        <button class="sm-copy"><i class="ti ti-copy"></i> Copy</button>
+        <input class="sm-link" readonly aria-label="${t('sm.link')}" dir="ltr" value="${escapeHtml(url('copy'))}" />
+        <button class="sm-copy"><i class="ti ti-copy" aria-hidden="true"></i> ${t('sm.copy')}</button>
       </div>
+      <p class="sm-status" role="status" aria-live="polite"></p>
+      <div class="sm-grid"></div>
       <div class="sm-foot">
-        <a class="sm-open" href="${base}" target="_blank" rel="noopener">${t('sm.openPublic')} ↗</a>
-        <button class="sm-qrbtn"><i class="ti ti-qrcode"></i> QR code</button>
+        <a class="sm-open" href="${escapeHtml(base)}" target="_blank" rel="noopener">${t('sm.openPublic')} ↗</a>
+        <button class="sm-qrbtn" aria-expanded="false"><i class="ti ti-qrcode" aria-hidden="true"></i> ${t('sm.qr')}</button>
       </div>
       <div class="sm-qr" hidden></div>
     </div>`;
 
   const close = (): void => {
+    release();
     overlay.remove();
     document.removeEventListener('keydown', onKey);
+  };
+  document.body.appendChild(overlay);
+  const release = containDialog(overlay, close);
+  overlay.querySelector<HTMLImageElement>('.sm-preview')?.addEventListener('error', (e) => { (e.target as HTMLImageElement).hidden = true; });
+  const picture = overlay.querySelector<HTMLImageElement>('.sm-preview')!;
+  const fitPicture = (): void => {
+    // Older designs return the panoramic seat strip as their OG fallback.
+    // Wrap that strip using the same bowl renderer as the community cards.
+    if (!picture.naturalHeight || picture.naturalWidth / picture.naturalHeight <= 4) return;
+    void import('./bowlPicture').then(({ drawBowl }) => {
+      if (picture.isConnected) picture.src = drawBowl(picture).toDataURL('image/webp');
+    }).catch(() => { /* contain keeps the complete strip visible */ });
+  };
+  if (picture.complete) fitPicture();
+  else picture.addEventListener('load', fitPicture, { once: true });
+  const copy = async (source: ShareSource, message: string): Promise<void> => {
+    const field = overlay.querySelector<HTMLInputElement>('.sm-link')!;
+    field.value = url(source);
+    const ok = await copyText(field.value);
+    overlay.querySelector('.sm-status')!.textContent = ok ? message : t('sm.copyFailed');
+    if (!ok) { field.focus(); field.select(); return; }
+    recordShare(target.id, source);
+    track('shared');
   };
   const onKey = (e: KeyboardEvent): void => {
     if (e.key === 'Escape') close();
@@ -162,20 +197,14 @@ export function openShareModal(target: ShareTarget): void {
     b.className = 'sm-btn';
     b.innerHTML = `<i class="ti ${p.icon}"></i><span>${p.label}</span>`;
     b.addEventListener('click', async () => {
-      await navigator.clipboard.writeText(url(p.id)).catch(() => {});
-      recordShare(target.id, p.id);
-      track('shared');
-      toast(`${t('sm.copiedFor')} ${p.label}`);
+      await copy(p.id, `${t('sm.copiedFor')} ${p.label}`);
     });
     grid.appendChild(b);
   }
 
   // Copy link.
   overlay.querySelector('.sm-copy')!.addEventListener('click', async () => {
-    await navigator.clipboard.writeText(url('copy')).catch(() => {});
-    recordShare(target.id, 'copy');
-    track('shared');
-    toast(t('sm.copied'));
+    await copy('copy', t('sm.copied'));
   });
 
   // QR code (lazy: only build the qrcode lib + image when requested).
@@ -183,9 +212,11 @@ export function openShareModal(target: ShareTarget): void {
   overlay.querySelector('.sm-qrbtn')!.addEventListener('click', async () => {
     if (!qrWrap.hidden) {
       qrWrap.hidden = true;
+      overlay.querySelector('.sm-qrbtn')!.setAttribute('aria-expanded', 'false');
       return;
     }
     qrWrap.hidden = false;
+    overlay.querySelector('.sm-qrbtn')!.setAttribute('aria-expanded', 'true');
     if (!qrWrap.querySelector('img')) {
       try {
         const QRCode = (await import('qrcode')).default;
@@ -201,5 +232,4 @@ export function openShareModal(target: ShareTarget): void {
     }
   });
 
-  document.body.appendChild(overlay);
 }
