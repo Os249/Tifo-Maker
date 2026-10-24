@@ -16,7 +16,14 @@ import { textureFromUrl, stripeTexture, textTexture } from './textures';
 export interface AssetLayer {
   readonly object: THREE.Group;
   refresh(): void;
-  update(elapsed: number): void;
+  /**
+   * Move the cloth and any unfurl on to `elapsed`. True while an unfurl is
+   * still dropping: that has to finish by itself. The cloth's ripple does not
+   * keep a view drawing; it moves on the frames drawn for anything else and
+   * carries on from the same phase (as the banners do, performance plan
+   * P1.23 and P2.12).
+   */
+  update(elapsed: number): boolean;
   unfurl(id: string, durMs?: number): void;
   setOpacity(id: string, o: number): void;
   dispose(): void;
@@ -34,7 +41,8 @@ function isCloth(a: SceneAsset): boolean {
   return a.cloth === true;
 }
 
-export function buildAssetLayer(store: AssetStore, paletteHex: () => string[]): AssetLayer {
+/** `onChange`: a picture an asset shows has finished loading (the view has to draw it). */
+export function buildAssetLayer(store: AssetStore, paletteHex: () => string[], onChange?: () => void): AssetLayer {
   const group = new THREE.Group();
   const meshes = new Map<string, THREE.Mesh>();
   const anim = new Map<string, Anim>();
@@ -54,7 +62,7 @@ export function buildAssetLayer(store: AssetStore, paletteHex: () => string[]): 
     const pal = paletteHex();
     let map: THREE.Texture;
     if (a.imageRef) {
-      map = tex('img:' + a.imageRef, () => textureFromUrl(a.imageRef as string));
+      map = tex('img:' + a.imageRef, () => textureFromUrl(a.imageRef as string, onChange));
     } else if (a.text) {
       const bg = a.color ?? pal[1] ?? '#15294e';
       map = tex('text:' + a.text + ':' + bg, () => textTexture(a.text as string, '#ffffff', bg));
@@ -119,8 +127,9 @@ export function buildAssetLayer(store: AssetStore, paletteHex: () => string[]): 
     }
   }
 
-  function update(elapsed: number): void {
+  function update(elapsed: number): boolean {
     lastElapsed = elapsed;
+    let unfurling = false;
     for (const a of store.list()) {
       const mesh = meshes.get(a.id);
       if (!mesh) continue;
@@ -128,6 +137,7 @@ export function buildAssetLayer(store: AssetStore, paletteHex: () => string[]): 
       if (st && st.unfurl < st.target) {
         st.unfurl = Math.min(st.target, st.dur > 0 ? (elapsed - st.t0) / st.dur : 1);
         placeMesh(mesh, a);
+        if (st.unfurl < st.target) unfurling = true;
       }
       if (a.cloth && st?.base) {
         const arr = mesh.geometry.attributes.position.array as Float32Array;
@@ -142,6 +152,7 @@ export function buildAssetLayer(store: AssetStore, paletteHex: () => string[]): 
         mesh.geometry.attributes.position.needsUpdate = true;
       }
     }
+    return unfurling;
   }
 
   function unfurl(id: string, durMs = 3000): void {

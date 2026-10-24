@@ -6,6 +6,7 @@ import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import type { StadiumTemplate } from '../../core/types';
 import { kelvinToRgb, layOutLights } from './lighting';
+import { mergeInPlace, singlePass, withoutRandom } from './merge';
 
 /**
  * Soft vertical gradient (bright at the lamp, fading toward the pitch) so the
@@ -57,7 +58,12 @@ export interface EffectsController {
   setGlow(on: boolean): void;
   burstConfetti(): void;
   burstPyro(): void;
-  update(dt: number): void;
+  /**
+   * Move the confetti and the pyro on. True while any of it is still in the
+   * air: the frames Match Day has to keep drawing for it (performance plan
+   * P2.12).
+   */
+  update(dt: number): boolean;
   render(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.Camera): void;
   /**
    * What the scene is drawn into, for compiling its shaders ahead: a scene
@@ -278,6 +284,14 @@ export function buildEffects(
     floodGroup.add(beam);
     trash.push(beamGeo, beamMat);
   });
+  // A roof-rim array is sixty-odd lamp heads, each a draw call of its own
+  // every frame: they share one material (the brightness slider changes
+  // that material, so the merged lamps follow it), and become one mesh, as
+  // do the masts. The haze is light added to the picture and writes no
+  // depth, so its cones are drawn in one pass instead of two (performance
+  // plan P2.13).
+  withoutRandom(() => trash.push(...mergeInPlace(floodGroup, { colourAgnostic: false }).disposables));
+  singlePass(floodGroup);
   scene.add(floodGroup);
 
   // ---- Confetti ----
@@ -396,6 +410,8 @@ export function buildEffects(
       }
       if (pyroAny || pyroLive) pyro.flush();
       pyroLive = pyroAny;
+      // The frame that parks the last piece is this one; the next has nothing to move.
+      return confettiAny || pyroAny;
     },
     render(r, s, cam) {
       if (composer) {

@@ -420,6 +420,35 @@ CREATE TABLE IF NOT EXISTS design_scenes (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- Content hashes (performance plan P2.4, P2.5): the sha-256 of the stored
+-- thumbnail and scene, hex. The thumbnail's is its ETag, compared only after
+-- the visibility check; the scene's keys the anonymous view's stripped copy,
+-- so the full scene is not read for every view. Nullable and without a
+-- default, so adding them changes no row.
+ALTER TABLE designs ADD COLUMN IF NOT EXISTS thumbnail_hash TEXT;
+ALTER TABLE design_scenes ADD COLUMN IF NOT EXISTS scene_hash TEXT;
+
+-- The database computes both hashes itself, on every insert and on every
+-- update that names the bytes or the hash, whoever writes them (stage 2
+-- review). A release that does not know the columns (the previous one, still
+-- serving while a deploy overlaps, or one rolled back to) used to write new
+-- bytes beside the old hash: a replaced picture answered 304 to its old ETag,
+-- and anonymous viewers kept seeing a banner the owner had removed. The hex of
+-- the sha-256 is exactly what the server computes (contentHash in repo.ts),
+-- so the two always agree. Security statements (schema.ts): checked in the
+-- catalogue at every boot, and once they first take effect every stored hash
+-- is recomputed from its bytes (after listen, in batches).
+-- Each body is kept on one line: schema.sql is split on a semicolon that ends
+-- a line, and a function body has semicolons of its own.
+CREATE OR REPLACE FUNCTION tifo_thumbnail_hash() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
+  NEW.thumbnail_hash := CASE WHEN NEW.thumbnail IS NULL THEN NULL ELSE encode(sha256(NEW.thumbnail), 'hex') END; RETURN NEW; END $$;
+DO $$ BEGIN DROP TRIGGER IF EXISTS designs_thumbnail_hash ON designs; CREATE TRIGGER designs_thumbnail_hash
+  BEFORE INSERT OR UPDATE OF thumbnail, thumbnail_hash ON designs FOR EACH ROW EXECUTE FUNCTION tifo_thumbnail_hash(); END $$;
+CREATE OR REPLACE FUNCTION tifo_scene_hash() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
+  NEW.scene_hash := CASE WHEN NEW.scene IS NULL THEN NULL ELSE encode(sha256(NEW.scene), 'hex') END; RETURN NEW; END $$;
+DO $$ BEGIN DROP TRIGGER IF EXISTS design_scenes_scene_hash ON design_scenes; CREATE TRIGGER design_scenes_scene_hash
+  BEFORE INSERT OR UPDATE OF scene, scene_hash ON design_scenes FOR EACH ROW EXECUTE FUNCTION tifo_scene_hash(); END $$;
+
 -- Projects (September 2026). Every design a person owns is one of their
 -- projects, listed on /projects. Three things the page needs that a design
 -- did not carry:

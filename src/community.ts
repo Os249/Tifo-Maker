@@ -42,6 +42,7 @@ import {
   recordView,
   listNotifications,
   markNotificationsRead,
+  unreadNotifications,
   fetchProfile,
   type GalleryItem,
   type GallerySort,
@@ -1160,7 +1161,8 @@ let notifTimer: number | undefined;
 async function refreshNotifications(): Promise<void> {
   if (!isSignedIn()) return;
   try {
-    const { unread } = await listNotifications();
+    // The count alone; the list itself only when the bell is opened (performance plan P2.16).
+    const unread = await unreadNotifications();
     $('#notif-dot').hidden = unread === 0;
   } catch {
     /* a failed poll is not worth a toast; the next one will do */

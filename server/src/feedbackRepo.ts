@@ -117,9 +117,14 @@ export class PgFeedbackRepository implements FeedbackRepository {
    */
   constructor(private readonly pool: pg.Pool, private readonly maintenance: pg.Pool = pool) {}
 
-  /** Idempotent creation, matching how the other tables bootstrap on boot. */
-  async init(): Promise<void> {
-    await this.maintenance.query(`
+  /**
+   * Idempotent creation, matching how the other tables bootstrap on boot.
+   * Its tables, made if missing. `run` is how each statement is applied: the
+   * schema ledger at boot (schema.ts, performance plan P2.15), so a boot that
+   * finds them already there takes no lock; directly otherwise.
+   */
+  async init(run: (sql: string) => Promise<unknown> = (sql) => this.maintenance.query(sql)): Promise<void> {
+    await run(`
       CREATE TABLE IF NOT EXISTS feedback (
         id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         kind       TEXT NOT NULL,
@@ -131,7 +136,7 @@ export class PgFeedbackRepository implements FeedbackRepository {
         handled    BOOLEAN NOT NULL DEFAULT false,
         created_at TIMESTAMPTZ NOT NULL DEFAULT now()
       )`);
-    await this.maintenance.query('CREATE INDEX IF NOT EXISTS feedback_created_idx ON feedback (created_at DESC)');
+    await run('CREATE INDEX IF NOT EXISTS feedback_created_idx ON feedback (created_at DESC)');
   }
 
   async create(input: FeedbackInput): Promise<{ id: string }> {

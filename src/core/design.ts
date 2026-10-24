@@ -77,6 +77,7 @@ export class DesignStore {
   private listeners: DirtyListener[] = [];
   private paletteListeners: (() => void)[] = [];
   private historyListeners: (() => void)[] = [];
+  private strokeEndListeners: (() => void)[] = [];
   /**
    * How many seats show each palette index, kept as seats change rather than
    * recounted (performance plan P1.2). The palette panel used to count all
@@ -134,6 +135,23 @@ export class DesignStore {
 
   private notifyHistory(): void {
     for (const fn of this.historyListeners) fn();
+  }
+
+  /**
+   * A stroke is open: a brush or eraser drag between pointerdown and
+   * pointerup. Autosave waits for it to end (performance plan P2.11).
+   */
+  get inStroke(): boolean {
+    return this.strokeOld !== null;
+  }
+
+  /** Notified when a stroke closes, committed or cancelled (autosave writes after it, P2.11). */
+  onStrokeEnd(fn: () => void): void {
+    this.strokeEndListeners.push(fn);
+  }
+
+  private notifyStrokeEnd(): void {
+    for (const fn of this.strokeEndListeners) fn();
   }
 
   /** Detach a dirty listener (for views that mount/unmount, e.g. the simulator). */
@@ -464,7 +482,10 @@ export class DesignStore {
     const old = this.strokeOld;
     this.strokeOld = null;
     this.layers?.strokeCancel();
-    if (!old || old.size === 0) return [];
+    if (!old || old.size === 0) {
+      if (old) this.notifyStrokeEnd();
+      return [];
+    }
     const dirty: number[] = [];
     for (const [i, before] of old) {
       this.base[i] = before;
@@ -472,6 +493,7 @@ export class DesignStore {
     }
     this.recompose(dirty);
     this.notify(dirty);
+    this.notifyStrokeEnd();
     return dirty;
   }
 
@@ -482,14 +504,22 @@ export class DesignStore {
     const objs = this.layers ? this.layers.strokeEnd() : null;
     // Drop entries that ended up back at their original value (e.g. paint then erase).
     const entries = old ? [...old.entries()].filter(([i, before]) => this.base[i] !== before) : [];
-    if (entries.length === 0 && !objs) return null;
+    if (entries.length === 0 && !objs) {
+      if (old) this.notifyStrokeEnd();
+      return null;
+    }
     const diff: SparseDiff = {
       indices: new Uint32Array(entries.map(([i]) => i)),
       before: new Uint8Array(entries.map(([, v]) => v)),
       after: new Uint8Array(entries.map(([i]) => this.base[i])),
     };
-    this.push({ t: 'paint', diff, objs });
-    return diff;
+    try {
+      this.push({ t: 'paint', diff, objs });
+      return diff;
+    } finally {
+      // After the step is on the stack: the stroke has fully ended.
+      if (old) this.notifyStrokeEnd();
+    }
   }
 
   get canUndo(): boolean {

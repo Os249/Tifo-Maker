@@ -28,7 +28,8 @@
  * starting point is the one they chose.
  */
 
-import { LEAGUES, STADIUM_CATALOG, sectionCount, tierCount, type StadiumEntry } from '../core/stadiumCatalog';
+// The index, not the catalogue: names, tags and counts, no geometry (performance plan P2.7).
+import { LEAGUES, STADIUM_INDEX, type StadiumIndexEntry as StadiumEntry } from '../core/stadiumIndex';
 import { DEFAULT_TEMPLATE } from '../core/template';
 import {
   CLUB_STARTS, COLOUR_CHOICES, clubBrief, clubById, clubColours, clubPalette, clubsAt, paletteFrom, type ClubStart,
@@ -204,7 +205,7 @@ export function openCreateProject(opts: CreateProjectOptions): void {
   const go = opts.navigate ?? ((url: string) => location.assign(url));
   const taken = opts.takenNames ?? [];
   const favs = loadFavorites();
-  const grounds = STADIUM_CATALOG.filter((e) => e.meta.source === 'builtin');
+  const grounds = STADIUM_INDEX.filter((e) => e.meta.source === 'builtin');
   const groundById = (id: string | null | undefined): StadiumEntry | undefined =>
     id ? grounds.find((e) => e.id === id) : undefined;
 
@@ -491,10 +492,10 @@ export function openCreateProject(opts: CreateProjectOptions): void {
     if (pick && needsColours()) colourWords = savedColours(pickKey(pick)) ?? colourWords;
     const [c1, c2] = leadColours();
     const capacity = tv('np.seats', { seats: fmt(ground.meta.capacity ?? 0) });
-    const tiers = tierCount(ground.template);
+    const tiers = ground.tiers;
     const facts = tiers === 1
-      ? tv('np.facts1', { seats: fmt(ground.meta.capacity ?? 0), sections: fmt(sectionCount(ground.template)) })
-      : tv('np.facts', { seats: fmt(ground.meta.capacity ?? 0), tiers: fmt(tiers), sections: fmt(sectionCount(ground.template)) });
+      ? tv('np.facts1', { seats: fmt(ground.meta.capacity ?? 0), sections: fmt(ground.sections) })
+      : tv('np.facts', { seats: fmt(ground.meta.capacity ?? 0), tiers: fmt(tiers), sections: fmt(ground.sections) });
     const options: StartKind[] = pick ? ['club', 'pattern', 'blank', 'ai'] : ['pattern', 'blank', 'ai'];
     if (!options.includes(start)) start = 'pattern';
     const labels: Record<StartKind, [string, string]> = {

@@ -42,10 +42,33 @@ builds; `tsx` and `esbuild` are build tools only and are not installed with
   slow, never wrong.
 - **Database pools.** Requests use a pool of 20 connections (5 s wait, 10 s
   per statement); schema, purges, the admin dashboard and account erasure use a
-  separate pool of 2 (a minute per statement). A database that is too slow
+  separate pool of 3 (a minute per statement). A database that is too slow
   answers 503 "try again". Eight foreign-key indexes are built `CONCURRENTLY`
   after the server starts listening (see `server/src/schema.ts`); a build that
   fails is logged and retried at the next boot.
+- **The schema at boot (stage 2).** Each statement of `server/schema.sql` that
+  has taken effect is recorded in a `schema_ledger` table and skipped at the
+  next boot; one not recorded yet whose index, column or table is already there
+  is recorded without running. Anything else runs with a 3-second lock wait, so
+  a deploy never queues behind the old instance's writes; one that fails is
+  logged and tried again at the next boot. The statements a security control
+  rests on are checked in the catalogue at every boot whatever the ledger says,
+  and one not in force says `SECURITY` in the boot log and **fix** on
+  `/admin#security`. Among them are two triggers that make the database compute
+  the picture and scene hashes itself, so a release that does not know those
+  columns (the previous one during the deploy overlap, or a rollback) can never
+  leave a stale one; the first boot that has them recomputes every stored hash
+  once, after the port is open, and until that is done the server hashes the
+  bytes it reads instead of believing the stored hash. The purges run after the
+  port is open too.
+- **Worker threads.** Scene checks and strips, and the distribution PDF, run in
+  `server/build/sceneWorker.mjs` and `pdfWorker.mjs`, beside the server bundle
+  (both built by `npm run build:server`, checked by `test:deploy`). Do not set
+  `NODE_OPTIONS=--max-old-space-size`: V8 lets it override the workers' own
+  memory limits (preflight and the posture panel say so if it is set).
+- **Cloudflare.** When it goes in front, follow `CLOUDFLARE.md` in order:
+  `TRUST_PROXY=cloudflare` first, and `ORIGIN_SECRET` only after the Transform
+  Rule that sends it is live.
 
 ---
 
@@ -65,6 +88,65 @@ Railway provisions the database and reads `railway.json` automatically.
    gives you a public URL. The schema is applied on first boot.
 
 To verify: open the URL (the app loads), then `…/api/templates` returns JSON.
+
+### Moving the app and its database to Europe (performance plan P2.1)
+
+Most visitors are in Saudi Arabia. From there, Amsterdam is roughly 100 to 140 ms
+closer per round trip than US West (an estimate), and a page makes several round
+trips. Railway's regions are US West (California), US East (Virginia), EU West
+(Amsterdam) and Southeast Asia (Singapore). EU West is the nearest for Saudi
+visitors that Railway offers.
+
+Move **both** services, the database first. Never leave the app and the
+database in different regions: every query would cross the Atlantic, which is
+much slower than today.
+
+Before you start:
+
+1. Check where you are: each service, **Settings → Region**. If both already say
+   EU West, there is nothing to do.
+2. Take a backup you hold yourself. Railway keeps volume backups with the *old*
+   volume, and a failed volume move has lost data for some users. Turn on the
+   Postgres TCP proxy for this only (Postgres service → Settings → Networking),
+   then on your PC:
+   `pg_dump --format=custom --no-owner "postgresql://…@….proxy.rlwy.net:PORT/railway?sslmode=require" -f tifo-backup.dump`
+   and check it opens: `pg_restore --list tifo-backup.dump`. Always use
+   `sslmode=require` over the proxy. Turn the proxy off again afterwards. Keep
+   the file somewhere private: it holds every account.
+3. Pick a quiet hour (late night in Saudi Arabia). The site is down while the
+   database moves: Railway copies the volume first, then moves the service, and
+   the time grows with the volume's size.
+
+The move:
+
+4. **Postgres service → Settings → Region → EU West.** Wait until the volume
+   migration is finished and the service is Active again, and its log shows
+   `database system is ready to accept connections`.
+5. **Tifo-Maker service → Settings → Region → EU West.** It has no volume, so
+   this is an ordinary redeploy.
+6. Leave `DATABASE_URL` as `${{Postgres.DATABASE_URL}}` (the private network,
+   `postgres.railway.internal`). No secret changes. If `DATABASE_URL` ever
+   pointed at the public proxy, switch it to the reference and regenerate the
+   database password.
+
+Check it worked:
+
+7. `/health` answers 200, and the boot log says
+   `[tifo] schema: 0 applied, … already in place`. Open a project, `/community` and a share page, sign in, and look at
+   the posture panel in `/admin` (everything good).
+8. Compare a few counts with the backup, for example the number of designs and
+   users in `/admin`.
+
+If something goes wrong (the migration fails, or data is missing): make a new
+Postgres service in EU West, restore into it with
+`pg_restore --no-owner --clean --if-exists -d "<its URL>?sslmode=require" tifo-backup.dump`,
+and point the app's `DATABASE_URL` at it with a reference variable.
+
+Privacy: the data moves from the United States to the Netherlands. The privacy
+policy already says some services may process data in other countries, so the
+page needs no change. Saudi Arabia's PDPL has rules on transfers abroad; the EU
+is generally regarded as giving strong protection, but check this yourself or
+with someone qualified (this note is not legal advice).
 
 ---
 

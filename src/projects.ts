@@ -322,7 +322,10 @@ function pumpThumbs(): void {
     thumbWorkers++;
     thumbLoading.add(k);
     const id = k.split(':')[1]!;
-    void fetchThumbnailObjectUrl(id)
+    // A private project's picture is never kept by the browser (performance
+    // plan P2.4); a public one may be, and the server's ETag revalidates it.
+    const it = items.find((x) => x.kind === 'account' && x.id === id);
+    void fetchThumbnailObjectUrl(id, { isPublic: !!it?.isPublic && !it.deletedAt })
       .catch(() => null)
       .then((url) => {
         if (!url) return;

@@ -83,8 +83,30 @@ const TAP = () => {
   // drawing buffer can be read), together with the count on screen at that
   // instant.
   window.__frames = [];
-  window.__rec = null; // { full: bool }
   const raf = window.requestAnimationFrame.bind(window);
+  // While recording ({ full: bool }), keep a frame coming. Match Day draws only
+  // when something moves (performance plan P2.12), and nothing else on the page
+  // asks for frames any more (the 2D editor draws on demand and Pixi's own
+  // loops are off, P2.10): a design standing still, before Play or once it
+  // has settled, was only ever sampled because Pixi's system ticker happened
+  // to be spinning. Its canvas keeps its drawing buffer
+  // (preserveDrawingBuffer), so a frame sampled here is what is on screen.
+  let recording = null;
+  let keeping = false;
+  Object.defineProperty(window, '__rec', {
+    configurable: true,
+    get: () => recording,
+    set: (v) => {
+      recording = v;
+      if (!v || keeping) return;
+      keeping = true;
+      const keep = () => {
+        if (!recording) { keeping = false; return; }
+        window.requestAnimationFrame(keep);
+      };
+      window.requestAnimationFrame(keep);
+    },
+  });
   window.requestAnimationFrame = (cb) => raf((ts) => {
     cb(ts);
     const rec = window.__rec;
@@ -129,8 +151,11 @@ const TAP = () => {
   }
 };
 
-const gallery = await (await fetch(B + '/api/gallery?templates=1&limit=5')).json();
-const DESIGN = gallery[0].id;
+const gallery = await (await fetch(B + '/api/gallery?templates=1&limit=30')).json();
+// A cards-only template. The pixel checks compare whole Match Day frames, and
+// the banner showcase designs (seeded last, so they lead the list) carry
+// banners whose cloth waves between any two frames.
+const DESIGN = (gallery.find((g) => !(g.tags ?? []).includes('banners')) ?? gallery[0]).id;
 
 async function openPage(path, { lang = 'en', w = 1440, h = 900, extra = [] } = {}) {
   const ctx = await browser.newContext({
@@ -381,6 +406,17 @@ console.log('\n— Match Day —');
 
   // Every frame of the show, sampled as it is drawn (see TAP).
   const diffPx = (a, b) => { let n = 0; for (let i = 0; i < a.length; i += 3) if (Math.abs(a[i] - b[i]) + Math.abs(a[i + 1] - b[i + 1]) + Math.abs(a[i + 2] - b[i + 2]) > 50) n++; return n / (a.length / 3); };
+  // Wait for the stand to stop changing before taking "the design as it
+  // stands": the first time a ground is opened its neighbourhood and textures
+  // can still be arriving after the switch to Low, and every frame of the show
+  // would then differ from a picture taken before they came (up to 20 s).
+  await p.evaluate(() => { window.__frames.length = 0; window.__rec = { full: false }; });
+  for (let i = 0, prev = null; i < 20; i++) {
+    await p.waitForTimeout(1000);
+    const f = await p.evaluate(() => window.__frames.slice(-1)[0] ?? null);
+    if (prev && f && diffPx(prev.px, f.px) < 0.002) break;
+    prev = f;
+  }
   await p.evaluate((full) => { window.__frames.length = 0; window.__rec = { full }; }, !!SHOTS);
   await p.waitForTimeout(2500); // a frame or two of the design as it stands
   // Marked and clicked in one go: a frame rendered between the two would count
@@ -390,7 +426,14 @@ console.log('\n— Match Day —');
     window.__audio.oohs.length = 0;
     window.__audio.applause = 0;
     window.__playAt = performance.now();
-    window.__clickAudio = window.__audio.contexts[0]?.ctx.currentTime ?? 0;
+    // The live context's clock, not the first one's: the switch to Low above
+    // rebuilt Match Day, and the first context was closed with the old one, its
+    // clock stopped where it was. Measured against that, how far "after the
+    // click" a hit is depends on how long the switch took — and with Match Day
+    // still while nothing moves, it takes a fraction of what it did, so the
+    // terrace drum's hits from BEFORE the click read as inside the call.
+    const live = window.__audio.contexts.filter((a) => a.ctx.state !== 'closed').pop();
+    window.__clickAudio = live?.ctx.currentTime ?? 0;
     document.querySelector('.mds-overlay [data-k="play-reveal"]').click();
   });
   await p.waitForTimeout(13000);

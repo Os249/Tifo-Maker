@@ -2,7 +2,7 @@ import { cleanAddressBar } from './core/utm';
 import './vendor/tabler-subset.css';
 import { generateSeatMapAsync, warmHeavyWorker } from './workers/client';
 import { TEMPLATES, DEFAULT_PALETTE } from './core/template';
-import { templateById } from './core/stadiumCatalog';
+import { loadTemplate } from './core/stadiumLoad';
 import { DesignStore } from './core/design';
 import {
   fetchDesignTemplate, fetchGalleryItem, fetchProfile, isSignedIn, listComments, loadPublicDesign, recordView,
@@ -84,7 +84,8 @@ async function main(): Promise<void> {
     return;
   }
   // Any shipped ground, legacy ones included — not only the three generic bowls.
-  const template = templateById(ref.templateId) ?? TEMPLATES[0];
+  // Its own league's grounds only, not the whole catalogue (performance plan P2.7).
+  const template = (await loadTemplate(ref.templateId)) ?? TEMPLATES[0];
   // A ground that fails its checks is not built at all (P1.16); say so rather
   // than leave the page blank.
   const [map, item] = await Promise.all([generateSeatMapAsync(template).catch(() => null), itemP]);

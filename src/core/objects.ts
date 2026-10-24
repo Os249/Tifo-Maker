@@ -613,6 +613,25 @@ export interface ObjectJSON {
   shape?: string;
 }
 
+/**
+ * A raster's JSON, kept with the raster (performance plan P2.11). A raster is
+ * never written in place: a new size, source or palette makes a new one
+ * (ensureGrid, remapColours), which is also what lets an undo snapshot share
+ * it. So its encoding never goes stale, and an autosave of a stack whose
+ * pictures did not change does not encode them again. Touch-ups are not kept
+ * here: a stroke writes into its copy of them.
+ */
+const rasterJSON = new WeakMap<Grid, GridJSON>();
+function gridJSONOf(g: Grid): GridJSON {
+  let j = rasterJSON.get(g);
+  if (!j) {
+    // Frozen: every document built from this raster shares the one object.
+    j = Object.freeze(gridToJSON(g));
+    rasterJSON.set(g, j);
+  }
+  return j;
+}
+
 export function objectToJSON(o: TifoObject): ObjectJSON {
   const out: ObjectJSON = {
     id: o.id, kind: o.kind, cx: o.cx, cy: o.cy, width: o.width, height: o.height,
@@ -624,7 +643,7 @@ export function objectToJSON(o: TifoObject): ObjectJSON {
   if (o.keep) out.keep = o.keep;
   if (o.touch) out.touch = gridToJSON(o.touch);
   if (o.grid) {
-    out.grid = gridToJSON(o.grid);
+    out.grid = gridJSONOf(o.grid);
     if (o.gridKey) out.gridKey = o.gridKey;
   }
   if (o.kind === 'text') Object.assign(out, { text: o.text, fontId: o.fontId, arcDeg: o.arcDeg, heightSeats: o.heightSeats });

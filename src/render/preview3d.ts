@@ -978,7 +978,7 @@ export class Preview3D {
     // Cheaper pixels while it moves, sharp ones when it stops.
     this.setRatio(moving && this.moving ? this.movingRatio : this.pixelRatio);
     this.updateRoofs();
-    this.renderer.render(this.scene, this.camera);
+    this.draw();
     this.framesDrawn++;
     if (moving && this.moving) this.watch(dt);
     if (moving) {
@@ -1065,7 +1065,7 @@ export class Preview3D {
       this.camera.lookAt(this.controls.target);
       this.camera.updateProjectionMatrix();
       this.updateRoofs();
-      this.renderer.render(this.scene, this.camera);
+      this.draw();
       out.getContext('2d')?.drawImage(this.canvas, 0, 0, size, size);
     } finally {
       this.renderer.setPixelRatio(ratio);
@@ -1075,16 +1075,25 @@ export class Preview3D {
       this.camera.aspect = aspect;
       this.camera.updateProjectionMatrix();
       this.controls.update();
-      this.renderer.render(this.scene, this.camera);
+      this.draw();
     }
     return out;
+  }
+
+  /**
+   * Draw the scene once. The premium armchairs pick their detail for this
+   * camera and this buffer's size first (performance plan P2.13).
+   */
+  private draw(): void {
+    this.shell?.lod(this.camera, this.canvas.height);
+    this.renderer.render(this.scene, this.camera);
   }
 
   /** Render a single frame on demand (used by the video/GIF exporter, which
    * pauses the internal loop and steps the reveal clock deterministically). */
   renderOnce(): void {
     this.updateRoofs();
-    this.renderer.render(this.scene, this.camera);
+    this.draw();
   }
 
   /** What the view is drawing, for tests and the perf harness. */
@@ -1093,7 +1102,7 @@ export class Preview3D {
     const auto = info.autoReset;
     info.autoReset = false;
     info.reset();
-    this.renderer.render(this.scene, this.camera);
+    this.draw();
     const out = {
       tier: this.settings.tier,
       structure: !!this.shell,

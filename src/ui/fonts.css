@@ -21,16 +21,91 @@
  * Only the weights the CSS actually uses are imported; each file carries
  * unicode-range subsets, so a browser downloads only the scripts on the page.
  */
-@import '@fontsource/inter/400.css';
-@import '@fontsource/inter/500.css';
-@import '@fontsource/inter/600.css';
-@import '@fontsource/inter/700.css';
-@import '@fontsource/inter/800.css';
 @import '@fontsource/changa/600.css';
 @import '@fontsource/changa/700.css';
 @import '@fontsource/changa/800.css';
 @import '@fontsource/jetbrains-mono/latin-400.css';
 @import '@fontsource/jetbrains-mono/latin-500.css';
+@import '../vendor/almarai-toggle.css';
+
+/*
+ * Inter, one variable file per script instead of a file per weight
+ * (performance plan P2.8).
+ *
+ * Pages use four or five of Inter's weights (400 to 800), and each was its own
+ * file: about 24 KB apiece for Latin, so 96-120 KB and 4-5 requests on every
+ * page, English or Arabic (an Arabic page still draws its digits, the wordmark
+ * and handles in Inter). @fontsource-variable/inter has the whole weight axis
+ * in one 48 KB file per script, drawn from the same masters, so 600 is the same
+ * 600. Same family name, so no font stack changes; same seven scripts with the
+ * same unicode-range as the static files had, so a page still downloads only
+ * the scripts it shows (in practice only Latin). The Latin file is preloaded
+ * by every page (scripts/vite/fontPreload.ts), so it no longer waits for the
+ * CSS to be parsed before it is asked for. Self-hosted as ever (font-src 'self').
+ *
+ * Declared for 400-800 only, the weights the fixed files covered, so every
+ * request draws exactly what it drew before: 900 (the wordmark, /clubs
+ * headings) still draws 800 rather than a heavier real 900, and 300 draws 400.
+ *
+ * 'woff2-variations' first for the browsers that want the variable hint, then
+ * plain 'woff2'; both name the same file, which is fetched once.
+ */
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 400 800;
+  src: url('../../node_modules/@fontsource-variable/inter/files/inter-cyrillic-ext-wght-normal.woff2') format('woff2-variations'), url('../../node_modules/@fontsource-variable/inter/files/inter-cyrillic-ext-wght-normal.woff2') format('woff2');
+  unicode-range: U+0460-052F,U+1C80-1C8A,U+20B4,U+2DE0-2DFF,U+A640-A69F,U+FE2E-FE2F;
+}
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 400 800;
+  src: url('../../node_modules/@fontsource-variable/inter/files/inter-cyrillic-wght-normal.woff2') format('woff2-variations'), url('../../node_modules/@fontsource-variable/inter/files/inter-cyrillic-wght-normal.woff2') format('woff2');
+  unicode-range: U+0301,U+0400-045F,U+0490-0491,U+04B0-04B1,U+2116;
+}
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 400 800;
+  src: url('../../node_modules/@fontsource-variable/inter/files/inter-greek-ext-wght-normal.woff2') format('woff2-variations'), url('../../node_modules/@fontsource-variable/inter/files/inter-greek-ext-wght-normal.woff2') format('woff2');
+  unicode-range: U+1F00-1FFF;
+}
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 400 800;
+  src: url('../../node_modules/@fontsource-variable/inter/files/inter-greek-wght-normal.woff2') format('woff2-variations'), url('../../node_modules/@fontsource-variable/inter/files/inter-greek-wght-normal.woff2') format('woff2');
+  unicode-range: U+0370-0377,U+037A-037F,U+0384-038A,U+038C,U+038E-03A1,U+03A3-03FF;
+}
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 400 800;
+  src: url('../../node_modules/@fontsource-variable/inter/files/inter-vietnamese-wght-normal.woff2') format('woff2-variations'), url('../../node_modules/@fontsource-variable/inter/files/inter-vietnamese-wght-normal.woff2') format('woff2');
+  unicode-range: U+0102-0103,U+0110-0111,U+0128-0129,U+0168-0169,U+01A0-01A1,U+01AF-01B0,U+0300-0301,U+0303-0304,U+0308-0309,U+0323,U+0329,U+1EA0-1EF9,U+20AB;
+}
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 400 800;
+  src: url('../../node_modules/@fontsource-variable/inter/files/inter-latin-ext-wght-normal.woff2') format('woff2-variations'), url('../../node_modules/@fontsource-variable/inter/files/inter-latin-ext-wght-normal.woff2') format('woff2');
+  unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 400 800;
+  src: url('../../node_modules/@fontsource-variable/inter/files/inter-latin-wght-normal.woff2') format('woff2-variations'), url('../../node_modules/@fontsource-variable/inter/files/inter-latin-wght-normal.woff2') format('woff2');
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
 
 /*
  * Almarai, Arabic letters only (performance plan P1.17).
@@ -46,7 +121,15 @@
  * ever (font-src 'self').
  *
  * Written out rather than imported because an @import has to come before every
- * other rule, and these are the only rules in this file.
+ * other rule.
+ *
+ * Without U+2010-2011 (performance plan P2.8): the package's range lists the
+ * two hyphens, but this Almarai file has no glyph for either, and neither has
+ * Inter. So any English text with a non-breaking hyphen (the English /legal
+ * page has 14: "as‑is") made the browser download Almarai 400 and 700, 64 KB,
+ * find nothing in them and draw the hyphen with the system font anyway. Now
+ * it goes to the system font straight away: the same hyphen, without the two
+ * downloads.
  */
 @font-face {
   font-family: 'Almarai';
@@ -55,7 +138,7 @@
   font-weight: 400;
   src: url('../../node_modules/@fontsource/almarai/files/almarai-arabic-400-normal.woff2') format('woff2'),
     url('../../node_modules/@fontsource/almarai/files/almarai-arabic-400-normal.woff') format('woff');
-  unicode-range: U+0600-06FF,U+0750-077F,U+0870-088E,U+0890-0891,U+0897-08E1,U+08E3-08FF,U+200C-200E,U+2010-2011,U+204F,U+2E41,U+FB50-FDFF,U+FE70-FE74,U+FE76-FEFC,U+102E0-102FB,U+10E60-10E7E,U+10EC2-10EC4,U+10EFC-10EFF,U+1EE00-1EE03,U+1EE05-1EE1F,U+1EE21-1EE22,U+1EE24,U+1EE27,U+1EE29-1EE32,U+1EE34-1EE37,U+1EE39,U+1EE3B,U+1EE42,U+1EE47,U+1EE49,U+1EE4B,U+1EE4D-1EE4F,U+1EE51-1EE52,U+1EE54,U+1EE57,U+1EE59,U+1EE5B,U+1EE5D,U+1EE5F,U+1EE61-1EE62,U+1EE64,U+1EE67-1EE6A,U+1EE6C-1EE72,U+1EE74-1EE77,U+1EE79-1EE7C,U+1EE7E,U+1EE80-1EE89,U+1EE8B-1EE9B,U+1EEA1-1EEA3,U+1EEA5-1EEA9,U+1EEAB-1EEBB,U+1EEF0-1EEF1;
+  unicode-range: U+0600-06FF,U+0750-077F,U+0870-088E,U+0890-0891,U+0897-08E1,U+08E3-08FF,U+200C-200E,U+204F,U+2E41,U+FB50-FDFF,U+FE70-FE74,U+FE76-FEFC,U+102E0-102FB,U+10E60-10E7E,U+10EC2-10EC4,U+10EFC-10EFF,U+1EE00-1EE03,U+1EE05-1EE1F,U+1EE21-1EE22,U+1EE24,U+1EE27,U+1EE29-1EE32,U+1EE34-1EE37,U+1EE39,U+1EE3B,U+1EE42,U+1EE47,U+1EE49,U+1EE4B,U+1EE4D-1EE4F,U+1EE51-1EE52,U+1EE54,U+1EE57,U+1EE59,U+1EE5B,U+1EE5D,U+1EE5F,U+1EE61-1EE62,U+1EE64,U+1EE67-1EE6A,U+1EE6C-1EE72,U+1EE74-1EE77,U+1EE79-1EE7C,U+1EE7E,U+1EE80-1EE89,U+1EE8B-1EE9B,U+1EEA1-1EEA3,U+1EEA5-1EEA9,U+1EEAB-1EEBB,U+1EEF0-1EEF1;
 }
 @font-face {
   font-family: 'Almarai';
@@ -64,7 +147,7 @@
   font-weight: 700;
   src: url('../../node_modules/@fontsource/almarai/files/almarai-arabic-700-normal.woff2') format('woff2'),
     url('../../node_modules/@fontsource/almarai/files/almarai-arabic-700-normal.woff') format('woff');
-  unicode-range: U+0600-06FF,U+0750-077F,U+0870-088E,U+0890-0891,U+0897-08E1,U+08E3-08FF,U+200C-200E,U+2010-2011,U+204F,U+2E41,U+FB50-FDFF,U+FE70-FE74,U+FE76-FEFC,U+102E0-102FB,U+10E60-10E7E,U+10EC2-10EC4,U+10EFC-10EFF,U+1EE00-1EE03,U+1EE05-1EE1F,U+1EE21-1EE22,U+1EE24,U+1EE27,U+1EE29-1EE32,U+1EE34-1EE37,U+1EE39,U+1EE3B,U+1EE42,U+1EE47,U+1EE49,U+1EE4B,U+1EE4D-1EE4F,U+1EE51-1EE52,U+1EE54,U+1EE57,U+1EE59,U+1EE5B,U+1EE5D,U+1EE5F,U+1EE61-1EE62,U+1EE64,U+1EE67-1EE6A,U+1EE6C-1EE72,U+1EE74-1EE77,U+1EE79-1EE7C,U+1EE7E,U+1EE80-1EE89,U+1EE8B-1EE9B,U+1EEA1-1EEA3,U+1EEA5-1EEA9,U+1EEAB-1EEBB,U+1EEF0-1EEF1;
+  unicode-range: U+0600-06FF,U+0750-077F,U+0870-088E,U+0890-0891,U+0897-08E1,U+08E3-08FF,U+200C-200E,U+204F,U+2E41,U+FB50-FDFF,U+FE70-FE74,U+FE76-FEFC,U+102E0-102FB,U+10E60-10E7E,U+10EC2-10EC4,U+10EFC-10EFF,U+1EE00-1EE03,U+1EE05-1EE1F,U+1EE21-1EE22,U+1EE24,U+1EE27,U+1EE29-1EE32,U+1EE34-1EE37,U+1EE39,U+1EE3B,U+1EE42,U+1EE47,U+1EE49,U+1EE4B,U+1EE4D-1EE4F,U+1EE51-1EE52,U+1EE54,U+1EE57,U+1EE59,U+1EE5B,U+1EE5D,U+1EE5F,U+1EE61-1EE62,U+1EE64,U+1EE67-1EE6A,U+1EE6C-1EE72,U+1EE74-1EE77,U+1EE79-1EE7C,U+1EE7E,U+1EE80-1EE89,U+1EE8B-1EE9B,U+1EEA1-1EEA3,U+1EEA5-1EEA9,U+1EEAB-1EEBB,U+1EEF0-1EEF1;
 }
 @font-face {
   font-family: 'Almarai';
@@ -73,5 +156,28 @@
   font-weight: 800;
   src: url('../../node_modules/@fontsource/almarai/files/almarai-arabic-800-normal.woff2') format('woff2'),
     url('../../node_modules/@fontsource/almarai/files/almarai-arabic-800-normal.woff') format('woff');
-  unicode-range: U+0600-06FF,U+0750-077F,U+0870-088E,U+0890-0891,U+0897-08E1,U+08E3-08FF,U+200C-200E,U+2010-2011,U+204F,U+2E41,U+FB50-FDFF,U+FE70-FE74,U+FE76-FEFC,U+102E0-102FB,U+10E60-10E7E,U+10EC2-10EC4,U+10EFC-10EFF,U+1EE00-1EE03,U+1EE05-1EE1F,U+1EE21-1EE22,U+1EE24,U+1EE27,U+1EE29-1EE32,U+1EE34-1EE37,U+1EE39,U+1EE3B,U+1EE42,U+1EE47,U+1EE49,U+1EE4B,U+1EE4D-1EE4F,U+1EE51-1EE52,U+1EE54,U+1EE57,U+1EE59,U+1EE5B,U+1EE5D,U+1EE5F,U+1EE61-1EE62,U+1EE64,U+1EE67-1EE6A,U+1EE6C-1EE72,U+1EE74-1EE77,U+1EE79-1EE7C,U+1EE7E,U+1EE80-1EE89,U+1EE8B-1EE9B,U+1EEA1-1EEA3,U+1EEA5-1EEA9,U+1EEAB-1EEBB,U+1EEF0-1EEF1;
+  unicode-range: U+0600-06FF,U+0750-077F,U+0870-088E,U+0890-0891,U+0897-08E1,U+08E3-08FF,U+200C-200E,U+204F,U+2E41,U+FB50-FDFF,U+FE70-FE74,U+FE76-FEFC,U+102E0-102FB,U+10E60-10E7E,U+10EC2-10EC4,U+10EFC-10EFF,U+1EE00-1EE03,U+1EE05-1EE1F,U+1EE21-1EE22,U+1EE24,U+1EE27,U+1EE29-1EE32,U+1EE34-1EE37,U+1EE39,U+1EE3B,U+1EE42,U+1EE47,U+1EE49,U+1EE4B,U+1EE4D-1EE4F,U+1EE51-1EE52,U+1EE54,U+1EE57,U+1EE59,U+1EE5B,U+1EE5D,U+1EE5F,U+1EE61-1EE62,U+1EE64,U+1EE67-1EE6A,U+1EE6C-1EE72,U+1EE74-1EE77,U+1EE79-1EE7C,U+1EE7E,U+1EE80-1EE89,U+1EE8B-1EE9B,U+1EEA1-1EEA3,U+1EEA5-1EEA9,U+1EEAB-1EEBB,U+1EEF0-1EEF1;
+}
+
+/*
+ * The language toggle (performance plan P2.8).
+ *
+ * On an English page it reads "العربية", the page's one Arabic word, and drew
+ * it from Almarai: a 33 KB Arabic font file on every English page view for
+ * seven letters. 'Almarai Toggle' (src/vendor/almarai-toggle.css, made by
+ * scripts/build-lang-font.mjs) is the same font cut down to those letters,
+ * about 5 KB, so the word looks exactly as before. Inter stays first (it is
+ * the toggle's font for "English" on an Arabic page, and for its metrics).
+ *
+ * Only on the toggles: elsewhere, a word that mixes these letters with others
+ * would be drawn from two fonts and lose its joins. And only while the page is
+ * not in Arabic (theme-boot.js sets <html lang> before the first paint): the
+ * HTML ships the English label, so an Arabic page paints "العربية" for a moment
+ * before its script swaps in "English", and there the full Almarai, which that
+ * page loads anyway, draws it, rather than a second file. The selector
+ * outranks the pages' own toggle rules (several reset the font with
+ * `font: inherit`).
+ */
+:root:not([lang='ar']) body :is(.lang-toggle, .s-lang, [data-i18n="common.language"]) {
+  font-family: 'Inter', 'Almarai Toggle', var(--font-ui);
 }

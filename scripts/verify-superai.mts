@@ -782,7 +782,7 @@ check('the house rule now forbids repeating the margin',
 // build, does not fail a type-check, and is invisible until an Arabic-speaking
 // user hits exactly that state — which is how "Designed with Premium AI" ended
 // up sitting in English inside an Arabic panel.
-const i18nSrc = readFileSync(new URL('../src/ui/i18n.ts', import.meta.url), 'utf8');
+const i18nSrc = readFileSync(new URL('../src/ui/i18n/strings.ts', import.meta.url), 'utf8');
 const panelSrc = readFileSync(new URL('../src/ui/aiPanel.ts', import.meta.url), 'utf8');
 const declared = new Set(Array.from(i18nSrc.matchAll(/^\s*'([\w.]+)':\s*\{\s*en:/gm), (m) => m[1]));
 const used = Array.from(panelSrc.matchAll(/\bt[v]?\('([\w.]+)'/g), (m) => m[1]);

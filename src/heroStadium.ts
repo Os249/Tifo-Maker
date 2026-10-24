@@ -24,6 +24,7 @@
  */
 import HERO_TIFOS from './data/heroTifos.json';
 import { t } from './ui/i18n';
+import { HERO_GROUND_KEYS } from './heroGrounds';
 
 const HOST_ID = 'hero-3d';
 const PHONE_QUERY = '(max-width: 860px)';
@@ -69,11 +70,13 @@ async function gunzip(b64: string): Promise<Uint8Array> {
 
 /** The caption and the "Make this tifo" link, for whichever club is showing. */
 async function caption(tifo: HeroTifo): Promise<void> {
-  const [{ clubById, clubColours }, { getLang, tv, tl }] = await Promise.all([import('./core/clubGrounds'), import('./ui/i18n')]);
+  const [{ clubById, clubColours }, { getLang, t, tv }] = await Promise.all([import('./core/clubGrounds'), import('./ui/i18n')]);
   const club = clubById(tifo.club);
   if (!club) return;
   const name = getLang() === 'ar' ? club.ar : club.en;
-  const ground = tl(tifo.templateId).replace(/\s*[(（][^)）]*[)）]\s*$/, '');
+  // The ground's own key rather than tl(): see heroGrounds.ts.
+  const groundKey = HERO_GROUND_KEYS[tifo.templateId];
+  const ground = (groundKey ? t(groundKey) : tifo.templateId).replace(/\s*[(（][^)）]*[)）]\s*$/, '');
   const text = document.getElementById('hero-cap-text');
   if (text) text.textContent = tv('st.nameAt', { club: name, ground });
   const scarf = document.getElementById('hero-cap-scarf');

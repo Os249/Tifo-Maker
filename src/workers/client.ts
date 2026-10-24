@@ -1,6 +1,7 @@
 import { generateSeatMap } from '../core/seatmap';
-import { isShippedTemplate, templateById } from '../core/stadiumCatalog';
-import { isValidTemplate } from '../core/customStadiums';
+// Not the catalogue: one ground's league is loaded for an id (performance plan P2.7).
+import { isShipped, loadTemplate } from '../core/stadiumLoad';
+import { isValidTemplate } from '../core/templateValidate';
 import { encodeGif, renderRevealFrames, type GifOptions } from '../core/gif';
 import type { DesignStore } from '../core/design';
 import type { SeatMap, StadiumTemplate } from '../core/types';
@@ -107,13 +108,14 @@ export function warmHeavyWorker(): void {
  *
  * A ground we ship is trusted as it is. Anything else (a custom stadium from
  * this browser's storage, a community one from the server) is held to the
- * same rules the server applies on submission (core/customStadiums
- * isValidTemplate), here, before it reaches the generator on either thread.
+ * same rules the server applies on submission (isValidTemplate), here, before
+ * it reaches the generator on either thread. "We ship" is by identity, never
+ * by id (core/stadiumLoad.ts isShipped).
  */
-function resolveTemplate(t: string | StadiumTemplate): StadiumTemplate {
-  const tpl = typeof t === 'string' ? templateById(t) : t;
+async function resolveTemplate(t: string | StadiumTemplate): Promise<StadiumTemplate> {
+  const tpl = typeof t === 'string' ? await loadTemplate(t) : t;
   if (!tpl) throw new Error(`unknown template ${String(t)}`);
-  if (!isShippedTemplate(tpl) && !isValidTemplate(tpl as unknown)) throw new Error(`invalid stadium template ${String(tpl.id)}`);
+  if (!(await isShipped(tpl)) && !isValidTemplate(tpl as unknown)) throw new Error(`invalid stadium template ${String(tpl.id)}`);
   return tpl;
 }
 
@@ -123,7 +125,7 @@ function resolveTemplate(t: string | StadiumTemplate): StadiumTemplate {
  * grounds included) or the template itself.
  */
 export async function generateSeatMapAsync(t: string | StadiumTemplate): Promise<SeatMap> {
-  const tpl = resolveTemplate(t);
+  const tpl = await resolveTemplate(t);
   try {
     const res = await call<{ map?: SeatMap; error?: string }>({ kind: 'seatmap', template: tpl });
     if (res.map) return res.map;

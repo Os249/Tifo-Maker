@@ -1953,7 +1953,9 @@ body.gate { display:block; overflow-y:auto; background:var(--ink-0); }
   gap: 7px;
   margin: 0;
   font-size: 12.5px;
-  font-weight: 650;
+  /* 700, which is what 650 always drew with Inter in fixed weights; the
+     variable file would draw a real 650 (performance plan P2.8). */
+  font-weight: 700;
   line-height: 1.35;
   color: var(--tone, var(--text-1));
 }

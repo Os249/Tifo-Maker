@@ -75,9 +75,14 @@ export class PgStadiumRepository implements StadiumSubmissionRepository {
    */
   constructor(private readonly pool: pg.Pool, private readonly maintenance: pg.Pool = pool) {}
 
-  /** Idempotent table creation. Called best-effort at boot (must not throw boot). */
-  async init(): Promise<void> {
-    await this.maintenance.query(
+  /**
+   * Idempotent table creation. Called best-effort at boot (must not throw boot).
+   * Its tables, made if missing. `run` is how each statement is applied: the
+   * schema ledger at boot (schema.ts, performance plan P2.15), so a boot that
+   * finds them already there takes no lock; directly otherwise.
+   */
+  async init(run: (sql: string) => Promise<unknown> = (sql) => this.maintenance.query(sql)): Promise<void> {
+    await run(
       `CREATE TABLE IF NOT EXISTS community_stadiums (
          id          text PRIMARY KEY,
          name        text NOT NULL,

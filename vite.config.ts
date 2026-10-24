@@ -4,6 +4,12 @@ import { readFileSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { SAUDI_REAL_BLOCKS } from './src/core/realBlocksSaudi';
 import { REAL_BLOCK_IDS } from './src/core/realBlockIds';
+import { i18nTables } from './scripts/vite/i18nTables';
+import { EARLIER_LAYOUT_IDS, LABEL_KEYS } from './src/ui/i18n/maps';
+import { HERO_GROUND_KEYS } from './src/heroGrounds';
+import HERO_TIFOS from './src/data/heroTifos.json';
+import { precompress } from './scripts/vite/precompress';
+import { fontPreload } from './scripts/vite/fontPreload';
 
 const INPUT = {
   landing: resolve(__dirname, 'landing.html'),
@@ -122,14 +128,52 @@ function checkRealBlockIds(): Plugin {
   };
 }
 
+/**
+ * src/heroGrounds.ts names the label key of each hero tifo's ground, so the
+ * landing does not need the whole ground-name map to caption its hero
+ * (performance plan P2.6). It is a hand-kept copy of what tl() would answer,
+ * so the build fails the moment it differs for any tifo in heroTifos.json.
+ */
+function checkHeroGrounds(): Plugin {
+  return {
+    name: 'tifo:check-hero-grounds',
+    buildStart() {
+      for (const { templateId } of HERO_TIFOS as { templateId: string }[]) {
+        const want = LABEL_KEYS[templateId];
+        if (!want || EARLIER_LAYOUT_IDS.includes(templateId) || HERO_GROUND_KEYS[templateId] !== want) {
+          this.error(`src/heroGrounds.ts: ${templateId} should map to ${want ?? '(a ground with a label)'}, found ${HERO_GROUND_KEYS[templateId] ?? 'nothing'}`);
+        }
+      }
+    },
+  };
+}
+
 // Two entry points: the marketing landing (served at /) and the editor app
 // (served at /app and for /d/:id share links). Both build into dist/.
 export default defineConfig({
-  plugins: [checkRealBlockIds(), hashThemeBoot(), checkBuiltScripts()],
+  plugins: [checkRealBlockIds(), checkHeroGrounds(), i18nTables(INPUT), hashThemeBoot(), fontPreload(INPUT), checkBuiltScripts(), precompress()],
   build: {
     target: 'es2022',
     rollupOptions: {
       input: INPUT,
+      output: {
+        /**
+         * three.js in a chunk of its own (performance plan P2.19).
+         *
+         * It used to share a chunk with preview3d.ts and the code around it, so
+         * any change to the 3D code (19 of the last 59 commits) gave the chunk a
+         * new hash and every returning visitor downloaded three again: about
+         * 139 KB gz for a library that had not changed. On its own, its file
+         * name changes only when three itself (or the set of its exports the
+         * app uses) does. It is still loaded exactly where it was: only by the
+         * 3D code that imports it, never at page load where it was not before
+         * (e2e-pages-load checks both).
+         */
+        manualChunks(id) {
+          if (/\/node_modules\/three\/build\//.test(id)) return 'three';
+          return undefined;
+        },
+      },
     },
   },
   server: { port: 5173, proxy: { '/api': 'http://localhost:8787' } },

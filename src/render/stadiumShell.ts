@@ -14,6 +14,7 @@ import { buildPitchDetail } from './simulator/pitchDetail';
 import { kelvinToRgb, layOutLights } from './simulator/lighting';
 import { paintScreen } from './simulator/screenPicture';
 import { baseGroundId } from '../core/realBlocks';
+import { bakeColour, bakeMatrix, batchLines, madeAt, materialKey as drawKey, normaliseForMerge, singlePass } from './simulator/merge';
 
 /**
  * The building, for the Stadium view: the ground's real stands, roofs,
@@ -44,6 +45,8 @@ export interface ShellBuild {
   chairMask: Uint8Array | null;
   /** How many draw calls the building takes, before and after merging. */
   stats: { meshesBefore: number; meshesAfter: number; triangles: number; ms: number; steps: Record<string, number> };
+  /** Pick the premium armchairs' detail for a camera, before each frame (premium.ts, performance plan P2.13). */
+  lod(camera: THREE.PerspectiveCamera, heightPx: number): void;
   dispose(): void;
 }
 
@@ -220,6 +223,8 @@ function toLambert(m: THREE.MeshStandardMaterial): THREE.MeshLambertMaterial {
     depthWrite: m.depthWrite,
     flatShading: m.flatShading,
   });
+  l.forceSinglePass = m.forceSinglePass;
+  l.userData = { ...m.userData };
   l.name = m.name;
   return l;
 }
@@ -234,54 +239,18 @@ function materialKey(m: THREE.Material): string {
   return [m.type, c, e, a.roughness, a.metalness, m.transparent, m.opacity, m.side, m.vertexColors, m.depthWrite, a.flatShading, m.alphaTest].join('|');
 }
 
-/** Make sure a geometry can be merged with others of its material. */
-function normalise(g: THREE.BufferGeometry, wantUv: boolean, wantColor: boolean): THREE.BufferGeometry {
-  for (const name of Object.keys(g.attributes)) {
-    if (name === 'position' || name === 'normal' || (name === 'uv' && wantUv) || (name === 'color' && wantColor)) continue;
-    g.deleteAttribute(name);
-  }
-  if (!g.attributes.normal) g.computeVertexNormals();
-  if (wantUv && !g.attributes.uv) g.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(g.attributes.position.count * 2), 2));
-  if (wantColor && !g.attributes.color) {
-    const c = new Float32Array(g.attributes.position.count * 3).fill(1);
-    g.setAttribute('color', new THREE.BufferAttribute(c, 3));
-  }
-  // The colour attribute's item size must agree across the merge.
-  if (wantColor && g.attributes.color.itemSize !== 3) {
-    const src = g.attributes.color;
-    const c = new Float32Array(src.count * 3);
-    for (let i = 0; i < src.count; i++) {
-      c[i * 3] = src.getX(i);
-      c[i * 3 + 1] = src.getY(i);
-      c[i * 3 + 2] = src.getZ(i);
-    }
-    g.setAttribute('color', new THREE.BufferAttribute(c, 3));
-  }
-  // Every attribute as plain float, so mixed sources merge.
-  for (const name of Object.keys(g.attributes)) {
-    const at = g.attributes[name] as THREE.BufferAttribute;
-    if ((at as unknown as { isInterleavedBufferAttribute?: boolean }).isInterleavedBufferAttribute || !(at.array instanceof Float32Array) || at.normalized) {
-      const out = new Float32Array(at.count * at.itemSize);
-      for (let i = 0; i < at.count; i++) for (let k = 0; k < at.itemSize; k++) out[i * at.itemSize + k] = at.getComponent(i, k);
-      g.setAttribute(name, new THREE.BufferAttribute(out, at.itemSize));
-    }
-  }
-  if (!g.index) {
-    const n = g.attributes.position.count;
-    const idx = n > 65535 ? new Uint32Array(n) : new Uint16Array(n);
-    for (let i = 0; i < n; i++) idx[i] = i;
-    g.setIndex(new THREE.BufferAttribute(idx, 1));
-  }
-  g.clearGroups();
-  g.morphAttributes = {};
-  return g;
-}
-
 /**
  * Bake every static mesh into world space and merge by material. Instanced
- * meshes are already one draw call and stay as they are, as do lines, points,
+ * meshes are already one draw call and stay as they are, as do points,
  * transparent surfaces (merging them would break their sorting) and anything
  * with more than one material.
+ *
+ * Materials that differ only in colour merge too (performance plan P2.13):
+ * the colour goes into the vertices and the merged mesh draws with a white
+ * copy of the material, which three multiplies by the vertex colour — the
+ * same colour as before, one draw call instead of one per colour. Lines that
+ * share a material go in one batch, and flat see-through panels are drawn in
+ * one pass instead of two (see simulator/merge.ts).
  */
 function mergeStatic(root: THREE.Group, tier: ShellTier, roofs: Set<THREE.Object3D>, roofLine: number): { object: THREE.Group; roofs: THREE.Object3D[]; roofMaterials: THREE.Material[]; before: number; after: number; triangles: number } {
   root.updateMatrixWorld(true);
@@ -316,7 +285,12 @@ function mergeStatic(root: THREE.Group, tier: ShellTier, roofs: Set<THREE.Object
     }
     return r;
   };
-  const buckets = new Map<THREE.Material, { roof: THREE.BufferGeometry[]; rest: THREE.BufferGeometry[] }>();
+  /** A piece in world space, with the material it was drawn with. */
+  interface Piece { g: THREE.BufferGeometry; mat: THREE.Material }
+  // By what the material draws, colour aside.
+  const buckets = new Map<string, { roof: Piece[]; rest: Piece[] }>();
+  /** When each material was first met, in the order the pieces were built. */
+  const seen = new Map<THREE.Material, number>();
   const keep: THREE.Object3D[] = [];
   let before = 0;
   const underRoof = (o: THREE.Object3D): boolean => {
@@ -330,43 +304,89 @@ function mergeStatic(root: THREE.Group, tier: ShellTier, roofs: Set<THREE.Object
     for (let p: THREE.Object3D | null = o.parent; p; p = p.parent) if (!p.visible) return;
     before++;
     const mat = mesh.material as THREE.Material | THREE.Material[];
-    const plain = mesh.isMesh && !(mesh as THREE.InstancedMesh).isInstancedMesh && !(mesh as unknown as THREE.SkinnedMesh).isSkinnedMesh && !Array.isArray(mat) && !mat.transparent && mesh.geometry.attributes.position;
+    // (A see-through material is merged only when it blends the same in any
+    // order: see mergeInPlace in simulator/merge.ts.)
+    const plain = mesh.isMesh && !(mesh as THREE.InstancedMesh).isInstancedMesh && !(mesh as unknown as THREE.SkinnedMesh).isSkinnedMesh && !Array.isArray(mat) && (!mat.transparent || !!mat.userData?.mergeTransparent) && mesh.geometry.attributes.position;
     if (!plain) {
       keep.push(o);
       return;
     }
     const m = swap(mat as THREE.Material);
+    if (!seen.has(m)) seen.set(m, seen.size);
     const wantUv = !!((m as THREE.MeshStandardMaterial).map || (m as THREE.MeshStandardMaterial).emissiveMap || (m as THREE.MeshStandardMaterial).alphaMap);
-    const g = normalise(mesh.geometry.clone(), wantUv, !!m.vertexColors);
-    g.applyMatrix4(mesh.matrixWorld);
+    const g = normaliseForMerge(mesh.geometry.clone(), wantUv, !!m.vertexColors);
+    bakeMatrix(g, mesh.matrixWorld);
     g.computeBoundingBox();
-    let b = buckets.get(m);
-    if (!b) buckets.set(m, (b = { roof: [], rest: [] }));
+    const key = drawKey(m, false);
+    let b = buckets.get(key);
+    if (!b) buckets.set(key, (b = { roof: [], rest: [] }));
     // A roof is anything a builder called one, or anything wholly above the
     // top row of seats (the Jewel's crown, a hall's ceiling, a hung screen).
-    (underRoof(o) || g.boundingBox!.min.y > roofLine ? b.roof : b.rest).push(g);
+    (underRoof(o) || g.boundingBox!.min.y > roofLine ? b.roof : b.rest).push({ g, mat: m });
   });
   let triangles = 0;
   let after = 0;
-  for (const [m0, b] of buckets) {
+  /** The colour-agnostic copies, one per material they stand in for. */
+  const white = new Map<THREE.Material, THREE.Material>();
+  // Made and drawn in the order the merge by material drew them before
+  // (performance plan P2.13). three draws solid meshes in the order their
+  // materials were made, and the roofs' copies are made here — so they are
+  // made as that merge made them: every stand before any roof, and the roofs
+  // in the order their materials were first met. Where two pieces lie in one
+  // plane (a roof's fascia and the front edge of its deck), the one drawn
+  // second wins; grouped by colour-agnostic key and taken in the key's order,
+  // a roof's deck came out over its fascia on the low tier.
+  const jobs: { list: Piece[]; into: THREE.Group; at: number }[] = [];
+  for (const b of buckets.values()) {
     for (const [list, into] of [[b.rest, out], [b.roof, roofOut]] as const) {
-      if (!list.length) continue;
-      const m = into === roofOut ? roofMat(m0) : m0;
-      const merged = list.length === 1 ? list[0] : mergeGeometries(list, false);
-      if (!merged) {
-        // Should not happen after normalise(); keep the pieces rather than lose them.
-        for (const g of list) into.add(new THREE.Mesh(g, m));
-        after += list.length;
-        continue;
-      }
-      if (merged !== list[0]) for (const g of list) g.dispose();
-      merged.computeBoundingSphere();
-      const mesh = new THREE.Mesh(merged, m);
-      mesh.matrixAutoUpdate = false;
-      into.add(mesh);
-      triangles += (merged.index ? merged.index.count : merged.attributes.position.count) / 3;
-      after++;
+      if (list.length) jobs.push({ list, into, at: list.reduce((n, p) => Math.min(n, seen.get(p.mat)!), Infinity) });
     }
+  }
+  jobs.sort((x, y) => Number(x.into === roofOut) - Number(y.into === roofOut) || x.at - y.at);
+  for (const { list: unordered, into } of jobs) {
+    const one = unordered.every((p) => p.mat === unordered[0].mat);
+    // And inside one merged mesh too: its pieces in the order their own
+    // meshes were drawn (stands by material, roofs by first meeting), so a
+    // coplanar pair inside it still resolves the same way.
+    const list = one ? unordered : [...unordered].sort((x, y) => (into === roofOut ? seen.get(x.mat)! - seen.get(y.mat)! : madeAt(x.mat) - madeAt(y.mat)));
+    const first = list[0].mat;
+    let m0 = first;
+    if (!one) {
+      let w = white.get(first);
+      if (!w) {
+        w = first.clone();
+        (w as THREE.MeshStandardMaterial).color?.setRGB(1, 1, 1);
+        w.vertexColors = true;
+        w.name = (first.name || first.type) + ':colours';
+        white.set(first, w);
+      }
+      m0 = w;
+    }
+    const m = into === roofOut ? roofMat(m0) : m0;
+    const a = m as THREE.MeshStandardMaterial;
+    const wantUv = !!(a.map || a.emissiveMap || a.alphaMap);
+    // Colours into the vertices (a white one where a piece had none).
+    const parts = one
+      ? list.map((p) => p.g)
+      : list.map((p) => {
+        const g = normaliseForMerge(p.g, wantUv, true);
+        bakeColour(g, (p.mat as THREE.MeshStandardMaterial).color ?? new THREE.Color(1, 1, 1));
+        return g;
+      });
+    const merged = parts.length === 1 ? parts[0] : mergeGeometries(parts, false);
+    if (!merged) {
+      // Should not happen after normaliseForMerge; keep the pieces rather than lose them.
+      list.forEach((p, i) => into.add(new THREE.Mesh(parts[i], one ? m : into === roofOut ? roofMat(p.mat) : p.mat)));
+      after += list.length;
+      continue;
+    }
+    if (merged !== parts[0]) for (const g of parts) g.dispose();
+    merged.computeBoundingSphere();
+    const mesh = new THREE.Mesh(merged, m);
+    mesh.matrixAutoUpdate = false;
+    into.add(mesh);
+    triangles += (merged.index ? merged.index.count : merged.attributes.position.count) / 3;
+    after++;
   }
   // What could not be merged keeps its place in the world.
   // (Decided while every piece is still in its builder's tree: the names that
@@ -387,6 +407,13 @@ function mergeStatic(root: THREE.Group, tier: ShellTier, roofs: Set<THREE.Object
     const g = (clone as THREE.Mesh).geometry;
     if (g?.index) triangles += (g.index.count / 3) * ((clone as THREE.InstancedMesh).count ?? 1);
   }
+  // Lines that share a material, one batch each; the roof's apart, so that
+  // hiding the roofs still hides theirs.
+  const lr = batchLines(roofOut, { transparent: true });
+  const lo = batchLines(out, { transparent: true });
+  after -= lr.before - lr.after + (lo.before - lo.after);
+  singlePass(out);
+  singlePass(roofOut);
   if (roofOut.children.length) out.add(roofOut);
   out.matrixAutoUpdate = false;
   return { object: out, roofs: roofOut.children.length ? [roofOut] : [], roofMaterials: [...roofMats.values()], before, after, triangles };
@@ -416,6 +443,7 @@ export function buildStadiumShell(template: StadiumTemplate, map: SeatMap, opts:
   buildFloodlightHeads(template, raw);
   lap('pitch+track+lights');
   let chairMask: Uint8Array | null = null;
+  let lod: ShellBuild['lod'] = () => {};
   if (template.details) {
     const venue = buildVenueDetails(template, map, false);
     if (venue.screen) {
@@ -426,6 +454,7 @@ export function buildStadiumShell(template: StadiumTemplate, map: SeatMap, opts:
     const premium = buildPremium(template, map, false);
     raw.add(premium.object);
     chairMask = premium.chairMask;
+    lod = premium.lod;
   }
   lap('venue+premium');
   if (template.roofs?.length || template.lighting?.masts?.style || template.details?.buildings?.length || template.details?.skins?.length || template.details?.ribbons || template.details?.girders?.length || template.details?.cranes?.length) {
@@ -472,6 +501,7 @@ export function buildStadiumShell(template: StadiumTemplate, map: SeatMap, opts:
     roofSpan,
     chairMask,
     stats: { meshesBefore: merged.before, meshesAfter: merged.after, triangles: Math.round(merged.triangles), ms: Math.round(ms), steps },
+    lod,
     dispose(): void {
       const mats = new Set<THREE.Material>();
       const texs = new Set<THREE.Texture>();

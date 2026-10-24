@@ -32,6 +32,8 @@ import type {
   PhotoMeta,
   ReportItem,
   PhotoReviewItem,
+  SceneMeta,
+  ThumbnailMeta,
 } from './repo';
 import { normalizeTags } from './memoryRepo';
 import { costStats, LIMIT_REASONS, modeOutcomes, type AiGroup } from './aiStats';
@@ -39,6 +41,12 @@ import { designFacets } from '../../src/core/facets';
 
 const META_COLS =
   'id, title, title_ar, template_id, template_version, palette, revision_count, is_public, owner_id, created_at, updated_at, description, allow_remix, remixed_from, view_count, pinned, deleted_at, origin, taken_down_at';
+
+/**
+ * The sha-256 of a bytea, as hex: what contentHash() gives for the same bytes
+ * (P2.4, P2.5). NULL for NULL.
+ */
+const THUMB_HASH = (expr: string): string => `encode(sha256(${expr}::bytea), 'hex')`;
 
 function rowToMeta(r: Record<string, unknown>): DesignMeta {
   return {
@@ -344,8 +352,10 @@ export class PgDesignRepository implements DesignRepository {
 
   async create(d: NewDesign): Promise<DesignMeta> {
     const res = await this.pool.query(
-      `INSERT INTO designs (title, title_ar, template_id, template_version, palette, cells, owner_id, thumbnail, origin)
-       VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9) RETURNING ${META_COLS}`,
+      // The picture's hash in the same statement as the picture (P2.4), worked
+      // out by Postgres from the very bytes it stores.
+      `INSERT INTO designs (title, title_ar, template_id, template_version, palette, cells, owner_id, thumbnail, thumbnail_hash, origin)
+       VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, ${THUMB_HASH('$8')}, $9) RETURNING ${META_COLS}`,
       [d.title, d.titleAr ?? null, d.templateId, d.templateVersion, JSON.stringify(d.palette), d.cellsGz, d.ownerId, d.thumbnailPng, d.origin ?? null],
     );
     await this.syncFacets(res.rows[0].id as string, { title: d.title, titleAr: d.titleAr, palette: d.palette });
@@ -395,11 +405,11 @@ export class PgDesignRepository implements DesignRepository {
           const p = params.length;
           params.push(d.title, d.titleAr, d.templateId, d.templateVersion,
             JSON.stringify(d.palette), d.cellsGz, d.thumbnailPng);
-          return `($${p + 1}, $${p + 2}, $${p + 3}, $${p + 4}, $${p + 5}::jsonb, $${p + 6}, $${p + 7}, $1, true, true)`;
+          return `($${p + 1}, $${p + 2}, $${p + 3}, $${p + 4}, $${p + 5}::jsonb, $${p + 6}, $${p + 7}, ${THUMB_HASH(`$${p + 7}`)}, $1, true, true)`;
         });
         const res = await client.query(
           `INSERT INTO designs
-             (title, title_ar, template_id, template_version, palette, cells, thumbnail,
+             (title, title_ar, template_id, template_version, palette, cells, thumbnail, thumbnail_hash,
               owner_id, is_public, is_template)
            VALUES ${values.join(', ')} RETURNING id, title`,
           params,
@@ -830,7 +840,9 @@ export class PgDesignRepository implements DesignRepository {
   ): Promise<DesignMeta | null> {
     const res = await this.pool.query(
       `UPDATE designs SET cells = $2, palette = $3::jsonb,
-              thumbnail = coalesce($4, thumbnail), updated_at = now()
+              thumbnail = coalesce($4, thumbnail),
+              thumbnail_hash = CASE WHEN $4::bytea IS NULL THEN thumbnail_hash ELSE ${THUMB_HASH('$4')} END,
+              updated_at = now()
        WHERE id = $1 RETURNING ${META_COLS}`,
       [id, cellsGz, JSON.stringify(palette), thumbnailPng],
     );
@@ -848,13 +860,94 @@ export class PgDesignRepository implements DesignRepository {
   async putScene(id: string, sceneGz: Buffer): Promise<boolean> {
     // ON CONFLICT rather than a read-then-write: two tabs of the same design
     // saving at once is ordinary, and the loser of that race should overwrite
-    // rather than error.
+    // rather than error. The hash goes in the same row and statement as the
+    // bytes (P2.5), worked out by Postgres from them.
     const res = await this.pool.query(
-      `INSERT INTO design_scenes (design_id, scene, updated_at) VALUES ($1, $2, now())
-       ON CONFLICT (design_id) DO UPDATE SET scene = EXCLUDED.scene, updated_at = now()`,
+      `INSERT INTO design_scenes (design_id, scene, scene_hash, updated_at) VALUES ($1, $2, ${THUMB_HASH('$2')}, now())
+       ON CONFLICT (design_id) DO UPDATE SET scene = EXCLUDED.scene, scene_hash = EXCLUDED.scene_hash, updated_at = now()`,
       [id, sceneGz],
     );
     return (res.rowCount ?? 0) > 0;
+  }
+
+  async getSceneMeta(id: string): Promise<SceneMeta | null> {
+    const res = await this.pool.query(
+      `SELECT d.is_public, d.owner_id, s.scene_hash, (s.design_id IS NOT NULL) AS has_scene
+         FROM designs d LEFT JOIN design_scenes s ON s.design_id = d.id
+        WHERE d.id = $1`,
+      [id],
+    );
+    if (!res.rowCount) return null;
+    const r = res.rows[0];
+    return { isPublic: Boolean(r.is_public), ownerId: r.owner_id ? String(r.owner_id) : null, hash: (r.scene_hash as string) ?? null, hasScene: Boolean(r.has_scene) };
+  }
+
+  async getSceneRow(id: string): Promise<{ gz: Buffer; hash: string | null } | null> {
+    const res = await this.pool.query('SELECT scene, scene_hash FROM design_scenes WHERE design_id = $1', [id]);
+    return res.rowCount ? { gz: res.rows[0].scene as Buffer, hash: (res.rows[0].scene_hash as string) ?? null } : null;
+  }
+
+  async getThumbnailMeta(id: string): Promise<ThumbnailMeta | null> {
+    // `thumbnail IS NOT NULL` is the null bitmap: the picture is not read.
+    const res = await this.pool.query(
+      'SELECT is_public, owner_id, thumbnail_hash, (thumbnail IS NOT NULL) AS has_thumbnail FROM designs WHERE id = $1',
+      [id],
+    );
+    if (!res.rowCount) return null;
+    const r = res.rows[0];
+    return { isPublic: Boolean(r.is_public), ownerId: r.owner_id ? String(r.owner_id) : null, hash: (r.thumbnail_hash as string) ?? null, hasThumbnail: Boolean(r.has_thumbnail) };
+  }
+
+  async getThumbnailRow(id: string): Promise<(ThumbnailMeta & { png: Buffer | null }) | null> {
+    const res = await this.pool.query('SELECT is_public, owner_id, thumbnail_hash, thumbnail FROM designs WHERE id = $1', [id]);
+    if (!res.rowCount) return null;
+    const r = res.rows[0];
+    const png = (r.thumbnail as Buffer | null) ?? null;
+    return { isPublic: Boolean(r.is_public), ownerId: r.owner_id ? String(r.owner_id) : null, hash: (r.thumbnail_hash as string) ?? null, hasThumbnail: png !== null, png };
+  }
+
+  async backfillHashes(id?: string): Promise<number> {
+    // From the stored bytes, in SQL, and only where none is stored: a save
+    // landing meanwhile writes its own hash with its bytes, and this then
+    // finds nothing to do for that row (the WHERE is checked again on the row
+    // it would change).
+    if (id) {
+      const a = await this.maintenance.query(
+        `UPDATE designs SET thumbnail_hash = ${THUMB_HASH('thumbnail')} WHERE id = $1 AND thumbnail IS NOT NULL AND thumbnail_hash IS NULL`,
+        [id],
+      );
+      const b = await this.maintenance.query(
+        `UPDATE design_scenes SET scene_hash = ${THUMB_HASH('scene')} WHERE design_id = $1 AND scene_hash IS NULL`,
+        [id],
+      );
+      return (a.rowCount ?? 0) + (b.rowCount ?? 0);
+    }
+    // Every row, its hash recomputed from its bytes where it differs: missing
+    // ones, and ones a writer that did not know the column left stale (stage 2
+    // review). Run once, after the hash triggers first take effect
+    // (server.ts); the triggers keep them right from then on. Walked by key in
+    // batches of 500, so each row is hashed once and no statement holds many
+    // rows or runs long.
+    let total = 0;
+    for (const [table, key, col, hash] of [['designs', 'id', 'thumbnail', 'thumbnail_hash'], ['design_scenes', 'design_id', 'scene', 'scene_hash']] as const) {
+      let after: string | null = null;
+      for (;;) {
+        const page: { rows: Record<string, unknown>[] } = await this.maintenance.query(
+          `SELECT ${key} AS k FROM ${table} WHERE ($1::uuid IS NULL OR ${key} > $1::uuid) ORDER BY ${key} LIMIT 500`,
+          [after],
+        );
+        if (!page.rows.length) break;
+        const keys = page.rows.map((r) => String(r.k));
+        const res = await this.maintenance.query(
+          `UPDATE ${table} SET ${hash} = ${THUMB_HASH(col)} WHERE ${key} = ANY ($1::uuid[]) AND ${hash} IS DISTINCT FROM ${THUMB_HASH(col)}`,
+          [keys],
+        );
+        total += res.rowCount ?? 0;
+        after = keys[keys.length - 1];
+        if (keys.length < 500) break;
+      }
+    }
+    return total;
   }
 
   async patchMeta(id: string, patch: { title?: string; isPublic?: boolean }): Promise<DesignMeta | null> {
@@ -932,8 +1025,8 @@ export class PgDesignRepository implements DesignRepository {
     // same statement, so there is no moment and no failure in which the copy
     // exists without its takedown (audit round six).
     const res = await this.pool.query(
-      `INSERT INTO designs (title, template_id, template_version, palette, cells, owner_id, thumbnail, taken_down_at)
-       SELECT $2, template_id, template_version, palette, cells, $3, thumbnail, taken_down_at FROM designs WHERE id = $1
+      `INSERT INTO designs (title, template_id, template_version, palette, cells, owner_id, thumbnail, thumbnail_hash, taken_down_at)
+       SELECT $2, template_id, template_version, palette, cells, $3, thumbnail, thumbnail_hash, taken_down_at FROM designs WHERE id = $1
        RETURNING ${META_COLS}`,
       [id, title, ownerId],
     );
@@ -1345,6 +1438,19 @@ export class PgAuthRepository implements AuthRepository {
       [tokenHash],
     );
     return res.rowCount ? String(res.rows[0].user_id) : null;
+  }
+
+  async getSessionUser(tokenHash: string): Promise<UserRow | null> {
+    // The session and its account in one read (performance plan P2.17): a
+    // signed-in request used to ask for the token, then the account, then
+    // whether it had chosen its name, then again whether it was an admin.
+    const res = await this.pool.query(
+      `SELECT u.id, u.username, u.password_hash, u.email, u.email_verified_at, u.username_chosen, u.is_pro
+         FROM auth_tokens t JOIN users u ON u.id = t.user_id
+        WHERE t.token_hash = $1 AND t.expires_at > now()`,
+      [tokenHash],
+    );
+    return res.rowCount ? mapUserRow(res.rows[0]) : null;
   }
 
   async deleteToken(tokenHash: string): Promise<void> {

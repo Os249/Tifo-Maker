@@ -73,7 +73,9 @@ h1 { font-size: 26px; margin: 0 0 4px; }
 /* Status as a badge beside the value it describes, not a sentence elsewhere. */
 .ac-badge {
   font-size: 11.5px;
-  font-weight: 650;
+  /* 700, which is what 650 always drew with Inter in fixed weights; the
+     variable file would draw a real 650 (performance plan P2.8). */
+  font-weight: 700;
   padding: 3px 9px;
   border-radius: 999px;
   border: 1px solid currentColor;

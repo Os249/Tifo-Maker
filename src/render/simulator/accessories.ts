@@ -53,8 +53,14 @@ export interface AccessoriesController {
   setFlareColour(id: string): void;
   setSmokeColour(id: string): void;
   setPalette(palette: readonly string[]): void;
-  /** `view`: the camera's vertical field of view (degrees) and the canvas height in CSS px. */
-  update(dt: number, view?: { fov: number; height: number }): void;
+  /**
+   * `view`: the camera's vertical field of view (degrees) and the canvas
+   * height in CSS px. True while anything is in the stand (flags waving,
+   * flares burning, smoke drifting, strobes, paper, phone lights) or still in
+   * the air after it was put away: the frames Match Day has to keep drawing
+   * for it (performance plan P2.12). Off, a stand is still.
+   */
+  update(dt: number, view?: { fov: number; height: number }): boolean;
   census(): AccessoriesCensus;
   dispose(): void;
 }
@@ -1088,6 +1094,8 @@ export function buildAccessories(
       if (throwers.length || paper.count) stepPaper(d);
       if (flagHolders.length) stepFlags(time);
       phones?.update(d);
+      return !!(flares.length || sparks.count || flareSmoke.count || strobes.length || strobeQ.count || pots.length || bombSmoke.count
+        || throwers.length || paper.count || flagHolders.length || phones);
     },
     census() {
       const h = {} as Record<AccessoryKind, number>;

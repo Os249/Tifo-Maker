@@ -28,9 +28,13 @@ export function loadImage(url: string): Promise<LoadedImage> {
   });
 }
 
-/** Texture from a URL / data URL (sRGB, mild anisotropy for angled banners). */
-export function textureFromUrl(url: string): THREE.Texture {
-  const tex = new THREE.TextureLoader().load(url);
+/**
+ * Texture from a URL / data URL (sRGB, mild anisotropy for angled banners).
+ * `onLoad` is told when the picture has arrived: a view that draws on demand
+ * has to draw again then, or it keeps showing the empty texture.
+ */
+export function textureFromUrl(url: string, onLoad?: () => void): THREE.Texture {
+  const tex = new THREE.TextureLoader().load(url, onLoad ? () => onLoad() : undefined);
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.anisotropy = 4;
   return tex;

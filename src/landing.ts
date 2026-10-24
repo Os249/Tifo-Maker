@@ -65,18 +65,21 @@ function renderLeagues(): void {
 }
 renderLeagues();
 
-/** The catalogue, loaded once, when the strip or the search first needs it. */
-let catalog: Promise<typeof import('./core/stadiumCatalog')> | null = null;
-const loadCatalog = (): Promise<typeof import('./core/stadiumCatalog')> => (catalog ??= import('./core/stadiumCatalog'));
+/**
+ * The grounds, loaded once, when the strip or the search first needs them:
+ * the index, names and tags without the geometry (performance plan P2.7).
+ */
+let catalog: Promise<typeof import('./core/stadiumIndex')> | null = null;
+const loadCatalog = (): Promise<typeof import('./core/stadiumIndex')> => (catalog ??= import('./core/stadiumIndex'));
 
 const strip = document.getElementById('league-strip');
 if (strip && typeof IntersectionObserver !== 'undefined') {
   const io = new IntersectionObserver((entries) => {
     if (!entries.some((e) => e.isIntersecting)) return;
     io.disconnect();
-    void loadCatalog().then(({ STADIUM_CATALOG }) => {
+    void loadCatalog().then(({ STADIUM_INDEX }) => {
       leagueCounts = new Map();
-      for (const e of STADIUM_CATALOG) {
+      for (const e of STADIUM_INDEX) {
         if (e.meta.source !== 'builtin') continue;
         for (const tag of e.meta.tags ?? []) leagueCounts.set(tag, (leagueCounts.get(tag) ?? 0) + 1);
       }
@@ -98,14 +101,15 @@ function mountGroundFinder(): void {
   const input = document.getElementById('ground-q') as HTMLInputElement | null;
   const list = document.getElementById('ground-list');
   if (!form || !input || !list) return;
-  type Hit = { href: string; name: string; sub: string; kind: 'club' | 'ground'; colours?: [string, string] | null };
-  let hits: Hit[] = [];
+  let hits: import('./groundFinder').GroundHit[] = [];
   let active = -1;
-  let mods: [typeof import('./core/clubGrounds'), typeof import('./core/stadiumCatalog'), typeof import('./ui/i18n')] | null = null;
+  let finder: typeof import('./groundFinder') | null = null;
 
+  // The search and the stadium index it reads, with the ground-name strings they
+  // bring, on first use (performance plan P2.6).
   const load = async (): Promise<void> => {
-    if (mods) return;
-    mods = await Promise.all([import('./core/clubGrounds'), loadCatalog(), import('./ui/i18n')]);
+    if (finder) return;
+    finder = (await Promise.all([import('./groundFinder'), loadCatalog()]))[0];
   };
   const close = (): void => {
     // Nothing left to pick from: Enter on an emptied box goes to the start
@@ -138,25 +142,7 @@ function mountGroundFinder(): void {
     await load();
     // The first search waits for the catalogue; the box may have changed since.
     if (input.value.trim().toLowerCase() !== q) return;
-    const [{ CLUB_STARTS, clubColours }, { STADIUM_CATALOG }, { getLang, tl }] = mods!;
-    const ar = getLang() === 'ar';
-    const short = (id: string): string => tl(id).replace(/\s*[(（][^)）]*[)）]\s*$/, '');
-    const clubs: Hit[] = CLUB_STARTS.filter((c) => `${c.en} ${c.ar}`.toLowerCase().includes(q)).map((c) => ({
-      href: `/projects?new=1&club=${encodeURIComponent(c.id)}`,
-      name: ar ? c.ar : c.en,
-      sub: short(c.ground),
-      kind: 'club',
-      colours: clubColours(c),
-    }));
-    const grounds: Hit[] = STADIUM_CATALOG.filter(
-      (e) => e.meta.source === 'builtin' && `${tl(e.id)} ${e.meta.name} ${(e.meta.tags ?? []).join(' ')} ${e.meta.country ?? ''}`.toLowerCase().includes(q),
-    ).map((e) => ({
-      href: `/projects?new=1&ground=${encodeURIComponent(e.id)}`,
-      name: tl(e.id),
-      sub: tv('np.seats', { seats: (e.meta.capacity ?? 0).toLocaleString('en-US') }),
-      kind: 'ground',
-    }));
-    hits = [...clubs.slice(0, 5), ...grounds.slice(0, 6)];
+    hits = finder!.findGrounds(q);
     active = hits.length ? 0 : -1;
     paint();
   };

@@ -1074,6 +1074,11 @@ export class BannerStore {
     this.redoStack.length = 0;
   }
 
+  /** A gesture is open (begin() without its commit() or cancel() yet). */
+  get inGesture(): boolean {
+    return this.gestureOpen;
+  }
+
   /** Close the gesture. Drops the entry if nothing actually changed. */
   commit(): void {
     if (!this.gestureOpen) return;

@@ -1704,10 +1704,22 @@ export function openMatchDaySimulator(
    * it.
    */
   let built = false;
+  /**
+   * The browser suites and the shot scripts reach the live simulator here
+   * (with ?e2e, like the editor's own window.__tifo): Match Day draws on
+   * demand, so a script that stopped the page clock asks it for a frame.
+   */
+  // (The editor drops ?e2e from the address once a project is open; its own
+  // hook, window.__tifo, is how a page opened with it still says so.)
+  const e2e = new URLSearchParams(location.search).has('e2e') || '__tifo' in window;
+  const exposeSim = (s: MatchDaySimulator | null): void => {
+    if (e2e) (window as unknown as { __tifoMatchDay?: MatchDaySimulator | null }).__tifoMatchDay = s;
+  };
   function disposeSim(): void {
     if (!built) return;
     built = false;
     mounted = false;
+    exposeSim(null);
     try {
       sim.dispose();
     } catch {
@@ -1742,6 +1754,7 @@ export function openMatchDaySimulator(
     refreshAssets();
     refreshBanners();
     sim.start();
+    exposeSim(sim);
     return true;
   }
 
@@ -1831,6 +1844,13 @@ export function openMatchDaySimulator(
   dbg('panel @mount client=' + panel.clientHeight + ' scroll=' + panel.scrollHeight + ' (open Tifo Assets, then scroll)');
 
   // ---------- wiring ----------
+  // Match Day draws only when something changes (performance plan P2.12),
+  // and every setter the panel calls asks for its frame. Anything typed,
+  // ticked, slid or clicked in the overlay asks for one too, so a control
+  // wired up later without that cannot leave a stale picture on screen.
+  for (const ev of ['input', 'change', 'click']) {
+    overlay.addEventListener(ev, () => { if (mounted) sim.requestRender(); }, { passive: true });
+  }
   panelToggle.addEventListener('click', () => panel.classList.toggle('collapsed'));
   camSel.addEventListener('change', () => {
     state.camIdx = Number(camSel.value);

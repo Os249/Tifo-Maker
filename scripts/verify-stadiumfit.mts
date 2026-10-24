@@ -311,7 +311,7 @@ console.log('\n--- the two rules with no data behind them ----------------------
 
   // The panel quotes it too, in English and in Arabic. Same drift, same check —
   // the user-facing number is the one it actually matters to get right.
-  const i18nSrc = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '../src/ui/i18n.ts'), 'utf8');
+  const i18nSrc = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '../src/ui/i18n/strings.ts'), 'utf8');
   const line = /'si\.note\.lighting':.*$/m.exec(i18nSrc)?.[0] ?? '';
   const AR = '٠١٢٣٤٥٦٧٨٩';
   const enNum = /right on (\d+) of our (\d+)/.exec(line);

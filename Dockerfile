@@ -34,7 +34,7 @@ RUN npm run build:prod
 # Outside dist/, so never served; no source map; no environment value baked in.
 RUN npm run build:server
 # A bundle that was never written must fail the build here, not the deploy.
-RUN test -s server/build/server.mjs && test -s server/data/seat-table.json
+RUN test -s server/build/server.mjs && test -s server/build/sceneWorker.mjs && test -s server/build/pdfWorker.mjs && test -s server/data/seat-table.json
 
 # What npm knew about the production packages on the day this image was built,
 # shown on /admin#security. Informational only: an advisory service that cannot

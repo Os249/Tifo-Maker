@@ -539,6 +539,8 @@ async function main(): Promise<void> {
       bannerStore.onChange(fn);
     },
     bannerCount: (): number => bannerStore.count,
+    /** A banner is being dragged or drawn on: autosave waits for it (performance plan P2.11). */
+    inGesture: (): boolean => bannerStore.inGesture,
   };
 
   // The account's banners, unless this browser has newer ones for it (below).
@@ -828,16 +830,15 @@ async function main(): Promise<void> {
     } else {
       preview?.stop();
     }
-    // The 2D editor keeps rendering in 2d and split; pauses only in pure 3d.
+    // The 2D editor draws in 2d and split, on demand (performance plan
+    // P2.10), and not at all while it is hidden.
+    editor.setShown(show2d);
     if (show2d) {
-      editor.app.ticker.start();
       requestAnimationFrame(() => {
         editor.app.resize();
         if (next !== 'split') editor.fitToView();
         else editor.fitToView();
       });
-    } else {
-      editor.app.ticker.stop();
     }
     // In split, the 3D canvas shares the row — its ResizeObserver re-fits it
     // automatically when the layout changes to half width.
@@ -1022,14 +1023,33 @@ async function main(): Promise<void> {
   } catch {
     /* ignore */
   }
+  // What the banners key was last written with in this page: which key, and
+  // which version of the banners (performance plan P2.11).
+  let bannersVersion = 0;
+  let bannersWritten: { key: string; version: number } | null = null;
+  bannerStore.onChange(() => {
+    bannersVersion++;
+  });
   const writeBanners = (): void => {
     const key = tb.bannersKey();
-    // Quota exceeded (a pasted photo): the banner still lives for this session.
-    if (key) writeRaw(key, JSON.stringify(bannerStore.toJSON()));
+    if (!key) return;
+    // Unchanged since they were last written to this key: nothing to write.
+    // A banner with a pasted photo in it is a big string to rewrite for a
+    // brush stroke that never touched it.
+    if (bannersWritten && bannersWritten.key === key && bannersWritten.version === bannersVersion) return;
+    const version = bannersVersion;
+    // Quota exceeded (a pasted photo): the banner still lives for this
+    // session, and the write is tried again with the next draft.
+    if (writeRaw(key, JSON.stringify(bannerStore.toJSON())).ok) bannersWritten = { key, version };
   };
-  // And the key is written with every draft, so the two always describe the
-  // same tifo. A new tifo that never touches its banners would otherwise
-  // leave the last one's in the key, to be restored with the new one's draft.
+  // And the key is written with the drafts, so the two always describe the
+  // same tifo: at the first draft this page writes to a key, and after that
+  // whenever the banners changed. A new tifo that never touches its banners
+  // would otherwise leave the last one's in the key, to be restored with the
+  // new one's draft. A banner change is itself an edit, so it brings a draft
+  // write (toolbar: sceneIO.onChange), after the same waits and never in the
+  // middle of a banner gesture; the banners used to be written on their own
+  // 600 ms after every change as well.
   document.addEventListener('tifo:draft-written', writeBanners);
   let sceneSaveTimer = 0;
   assetStore.onChange(() => {
@@ -1041,11 +1061,6 @@ async function main(): Promise<void> {
         /* quota exceeded (large images) or storage off — assets stay for this session */
       }
     }, 500);
-  });
-  let bannerSaveTimer = 0;
-  bannerStore.onChange(() => {
-    window.clearTimeout(bannerSaveTimer);
-    bannerSaveTimer = window.setTimeout(writeBanners, 600);
   });
   document.getElementById('post-tifo')?.addEventListener('click', () => {
     void import('./ui/postMoment').then(({ openPostSheet }) => openPostSheet(postDeps));

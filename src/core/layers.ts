@@ -214,6 +214,12 @@ export function fingerprint(bytes: Uint8Array): string {
 // ---- encodings -----------------------------------------------------------
 
 function bytesToB64(bytes: Uint8Array): string {
+  // The browser's own encoder where there is one (Chrome 140, Safari 18.2,
+  // Firefox 133): the same standard, padded base64 as btoa gives, without
+  // building a binary string first. Every autosave of a layer stack encodes
+  // the whole Paint layer (performance plan P2.11).
+  const native = (bytes as Uint8Array & { toBase64?: () => string }).toBase64;
+  if (typeof native === 'function') return native.call(bytes);
   let s = '';
   const CHUNK = 0x8000;
   for (let i = 0; i < bytes.length; i += CHUNK) {

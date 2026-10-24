@@ -484,6 +484,11 @@ console.log('\n— the layers are kept —');
   await p.waitForURL(/project=/, { timeout: 30000 });
   const id = new URL(p.url()).searchParams.get('project');
   await p.click('#save-top');
+  // Save is busy (its button disabled) until the design, its card picture and
+  // its scene have all been sent; the chip can already say "Saved" from an
+  // earlier save. On this machine the whole save takes about 4 s, so closing
+  // the page 1.5 s after the chip changed could cut off the scene upload.
+  await p.waitForFunction(() => { const b = document.getElementById('save-top'); return !!b && !b.disabled; }, null, { timeout: 60000 }).catch(() => {});
   await p.waitForFunction(() => /Saved to your account|Saved in your account/i.test(document.getElementById('save-state-top')?.textContent || ''), null, { timeout: 30000 }).catch(() => {});
   await p.waitForTimeout(1500);
   const cells = await p.evaluate(() => Array.from(window.__tifo.store.cells).join(''));
@@ -492,6 +497,9 @@ console.log('\n— the layers are kept —');
   check('Save puts the layers in the account, beside the banners', !!own.json?.sceneGzB64);
   // Another machine: a fresh browser, nothing kept locally.
   const two = await editor({ token, url: `/app?project=${id}&e2e=1` });
+  // The layers arrive with the scene, after the ground's own module: wait for
+  // them (up to 15 s) rather than a fixed moment, then judge exactly as before.
+  await two.p.waitForFunction(() => (window.__tifo?.objects?.list().length ?? 0) >= 2, null, { timeout: 15000 }).catch(() => {});
   await two.p.waitForTimeout(800);
   const back = await two.p.evaluate(() => ({ n: window.__tifo.objects.list().length, cells: Array.from(window.__tifo.store.cells).join('') }));
   check('opened anywhere, the project has its layers', back.n === 2, `${back.n}`);

@@ -172,6 +172,36 @@ assert.ok((railway.deploy?.restartPolicyMaxRetries ?? 0) >= 5, 'a crash loop get
     assert.deepEqual(files.filter((f) => /server\.mjs$|seat-table\.json$/.test(f)), [], 'no server file in dist/');
   }
   console.log(`  server bundle: built outside dist/, no map, no define, ${new Set(imported).size} imports all runtime dependencies or node:`);
+
+  // The worker threads (performance plan P2.14): separate files beside the
+  // server bundle, built with the same options, and held to the same rules.
+  // The server finds them by its own location (workerPool.ts, workerFile),
+  // so they must sit next to it, with these exact names.
+  const { WORKER_BUNDLES } = await import('../../scripts/bundle-server.mjs');
+  const { basename, dirname, join } = await import('node:path');
+  assert.deepEqual(WORKER_BUNDLES.map((w) => w.outfile), ['server/build/sceneWorker.mjs', 'server/build/pdfWorker.mjs'], 'one bundle per worker, beside server.mjs');
+  assert.match(read('server/src/workerPool.ts'), /new URL\(`\.\/\$\{name\}\.mjs`, here\)/, 'and the server looks for them beside itself');
+  for (const w of WORKER_BUNDLES) {
+    for (const [k, v] of Object.entries(BUNDLE_OPTIONS)) if (k !== 'entryPoints' && k !== 'outfile') assert.deepEqual((w as Record<string, unknown>)[k], v, `${w.outfile}: ${k} as the server's`);
+    assert.equal('define' in w, false, `${w.outfile}: nothing defined at build time`);
+    assert.equal(dirname(w.outfile), dirname(BUNDLE_OPTIONS.outfile), `${w.outfile}: beside the server bundle, outside dist/`);
+    const wout = join(dirname(out), basename(w.outfile));
+    await build({ ...(w as object), outfile: wout, logLevel: 'silent' } as Parameters<typeof build>[0]);
+    const code = read(wout);
+    assert.doesNotMatch(code, /sourceMappingURL/, `${w.outfile}: no source map`);
+    assert.doesNotMatch(code, /process\.env\.[A-Z_]+/, `${w.outfile}: reads no environment variable (it is started with env: {})`);
+    const wImports = [...code.matchAll(/^import\s[^;]*?from\s+"([^"]+)"/gm), ...code.matchAll(/^import\s+"([^"]+)"/gm)].map((m) => m[1]);
+    for (const spec of new Set(wImports)) {
+      if (spec.startsWith('node:')) continue;
+      const name = spec.startsWith('@') ? spec.split('/').slice(0, 2).join('/') : spec.split('/')[0];
+      assert.ok(runtimeDeps.has(name), `${w.outfile} imports ${spec}, which must be a runtime dependency`);
+    }
+    assert.ok(!wImports.some((x) => x.startsWith('tsx') || x.startsWith('esbuild')), `${w.outfile}: never a build tool (workerBoot.mjs is development only)`);
+    assert.doesNotMatch(code, /workerBoot/, `${w.outfile}: does not start through the development bootstrap`);
+  }
+  assert.doesNotMatch(bundle, /from "tsx|tsx\/esm\/api/, 'the server bundle never loads tsx, for its workers either');
+  assert.match(dockerfile, /test -s server\/build\/sceneWorker\.mjs && test -s server\/build\/pdfWorker\.mjs/, 'the image build fails without the worker bundles');
+  console.log(`  worker bundles: ${WORKER_BUNDLES.map((w) => basename(w.outfile)).join(', ')} beside server.mjs, same rules (no map, no define, no environment, runtime imports only)`);
 }
 
 // ---- the seat table ----------------------------------------------------------

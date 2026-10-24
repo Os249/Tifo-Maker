@@ -3277,3 +3277,74 @@ await (async () => {
   console.log('editor keeps: colour counts exact after strokes, undo, patterns, fills, remaps, locks and loads | seat runs and partial uploads exact');
   if (fails.length) throw new Error(`performance plan P1: ${fails.slice(0, 10).join('; ')}`);
 })();
+
+// ---------------------------------------------------------------------------
+// Performance plan P2.7: the catalogue builds each ground on first use, a
+// small index carries what lists need, and one ground loads with its own
+// league only — always the very template the catalogue has.
+// ---------------------------------------------------------------------------
+await (async () => {
+  const fails: string[] = [];
+  const { execFileSync } = await import('node:child_process');
+  const { readFileSync: rf } = await import('node:fs');
+  // Importing the catalogue builds no geometry; asking for a ground builds that ground.
+  const probe = execFileSync(process.execPath, ['--import', 'tsx', '-e', `
+    const lazy = await import('./src/core/lazyEntry.ts');
+    const cat = await import('./src/core/stadiumCatalog.ts');
+    const atImport = lazy.lazyEntryBuilds();
+    cat.templateById('kingdom-arena-26k-rb'); cat.templateById('kingdom-arena-26k-rb');
+    const afterOne = lazy.lazyEntryBuilds();
+    cat.isShippedTemplate(cat.templateById('velodrome-67k'));
+    const afterCheck = lazy.lazyEntryBuilds();
+    cat.shippedTemplates();
+    process.stdout.write(JSON.stringify({ atImport, afterOne, afterCheck, all: lazy.lazyEntryBuilds() }));
+  `], { encoding: 'utf8', cwd: process.cwd() });
+  const lz = JSON.parse(probe) as { atImport: number; afterOne: number; afterCheck: number; all: number };
+  if (lz.atImport !== 0) fails.push(`importing the catalogue built ${lz.atImport} grounds`);
+  if (lz.afterOne !== 1) fails.push(`asking for one ground (twice) built ${lz.afterOne}`);
+  if (lz.afterCheck !== 2) fails.push(`checking a template is shipped built ${lz.afterCheck - 1} more grounds than the one it is`);
+  if (lz.all < 30) fails.push(`only ${lz.all} grounds are built on first use`);
+
+  // The generated index and module list are what the catalogue makes now.
+  const { buildIndexFiles, INDEX_PATH, GROUPS_PATH } = await import('./stadium-index.mjs');
+  const built = await buildIndexFiles();
+  if (rf(INDEX_PATH, 'utf8') !== built.index) fails.push('src/core/stadiumIndex.data.ts is out of date: run `npx tsx scripts/stadium-index.mts`');
+  if (rf(GROUPS_PATH, 'utf8') !== built.groups) fails.push('src/core/stadiumGroups.data.ts is out of date: run `npx tsx scripts/stadium-index.mts`');
+
+  const cat = await import('../src/core/stadiumCatalog');
+  const idx = await import('../src/core/stadiumIndex');
+  const load = await import('../src/core/stadiumLoad');
+  // The index says what the catalogue says, in its order.
+  if (idx.STADIUM_INDEX.map((e) => e.id).join() !== cat.STADIUM_CATALOG.map((e) => e.id).join()) fails.push('the index does not list the catalogue in its order');
+  for (const e of idx.STADIUM_INDEX) {
+    const c = cat.entryById(e.id)!;
+    if (JSON.stringify(e.meta) !== JSON.stringify(c.meta)) fails.push(`${e.id}: the index has other metadata`);
+    if (e.tiers !== cat.tierCount(c.template) || e.sections !== cat.sectionCount(c.template)) fails.push(`${e.id}: the index has other counts`);
+  }
+  for (const q of [{ league: 'saudi-pro-league' }, { search: 'hilal' }, { tiers: 1 }, { country: 'Europe', minCapacity: 40000 }, { type: 'Oval' as const, source: 'builtin' as const }]) {
+    const a = idx.queryIndex(q).map((e) => e.id).join();
+    const b = cat.queryCatalog(q).map((e) => e.id).join();
+    if (a !== b) fails.push(`index and catalogue disagree on ${JSON.stringify(q)}`);
+  }
+  // One ground at a time: the same template object as the catalogue's, for every shipped ground.
+  const shipped = [...cat.STADIUM_CATALOG, ...cat.LEGACY_STADIUMS];
+  for (const e of shipped) {
+    const t = await load.loadTemplate(e.id);
+    if (t !== cat.templateById(e.id)) fails.push(`${e.id}: loaded on its own it is not the catalogue's template`);
+    if (!(await load.isShipped(t!))) fails.push(`${e.id}: loaded on its own it is not recognised as shipped`);
+  }
+  // A copy is never one of ours, by id or otherwise; an unknown id is unknown.
+  const copy = structuredClone(cat.templateById('jewel-jeddah-60k-rb')!);
+  if (await load.isShipped(copy)) fails.push('a copy of a shipped template passed as shipped (stadiumLoad)');
+  if (cat.isShippedTemplate(copy)) fails.push('a copy of a shipped template passed as shipped (catalogue)');
+  if (await load.isShipped({ ...copy, id: 'custom-x-1' })) fails.push('a custom template passed as shipped');
+  if ((await load.loadTemplate('no-such-ground')) !== undefined) fails.push('an unknown ground loaded');
+  // A custom ground registered in the catalogue still loads by id.
+  const custom = { ...structuredClone(cat.templateById('generic-bowl-60k')!), id: 'custom-verify-p27', name: 'Verify' };
+  cat.registerCustomStadiums([...cat.STADIUM_CATALOG.filter((e) => e.meta.source === 'custom'), { id: custom.id, template: custom, meta: { name: 'Verify', source: 'custom' } }]);
+  if ((await load.loadTemplate(custom.id)) !== custom) fails.push('a custom ground does not load by id');
+  if (await load.isShipped(custom)) fails.push('a custom ground passed as shipped');
+  cat.registerCustomStadiums([]);
+  console.log(`stadium index: ${idx.STADIUM_INDEX.length} grounds, ${built.ids} ids in ${Object.keys((await import('../src/core/stadiumGroups.data')).GROUND_GROUPS).length} modules, up to date | import builds ${lz.atImport} grounds, one ground ${lz.afterOne}, all ${lz.all} on first use | all ${shipped.length} load on their own as the catalogue's own template`);
+  if (fails.length) throw new Error(`performance plan P2.7: ${fails.slice(0, 10).join('; ')}`);
+})();

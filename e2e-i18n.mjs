@@ -11,6 +11,12 @@
  * predominantly Latin script — a translated string that happens to contain
  * "PDF" or "tifomaker.org" is fine, a string that is entirely Latin words is
  * not — minus an explicit allow-list of things that stay in English on purpose.
+ *
+ * Each chunk carries the strings of its own code (performance plan P2.6), so
+ * every page and dialog opened here is also watched for a key its tables
+ * lacked: ui/i18n.ts warns "[i18n] ..." and fetches the full table when that
+ * happens, and either one fails the run. A pass in English then checks every
+ * page shows its strings, never a raw key and never an empty label.
  */
 import { chromium } from 'playwright';
 const B = 'http://127.0.0.1:8911';
@@ -28,6 +34,18 @@ const AR_LS = [
 ];
 const state = (extra = []) => ({ cookies: [], origins: [{ origin: B, localStorage: [...AR_LS, ...extra] }] });
 
+// Every page the suite opens is watched for a string its tables lacked.
+const misses = [];
+const newContext = browser.newContext.bind(browser);
+browser.newContext = async (...args) => {
+  const ctx = await newContext(...args);
+  ctx.on('page', (p) => {
+    p.on('console', (m) => { if (m.type() === 'warning' && m.text().startsWith('[i18n]')) misses.push(`${p.url()}: ${m.text()}`); });
+    p.on('request', (r) => { if (/\/assets\/strings-[\w-]+\.js$/.test(r.url())) misses.push(`${p.url()}: fetched the full string table`); });
+  });
+  return ctx;
+};
+
 /**
  * Kept in English deliberately: the brand, file formats, units, hex colours,
  * the language toggle (it names the OTHER language), single-letter keyboard
@@ -36,7 +54,7 @@ const state = (extra = []) => ({ cookies: [], origins: [{ origin: B, localStorag
 const ALLOW = new Set([
   'TIFO', 'MAKER', 'TIFOMAKER', 'tifomaker.org', 'English', 'العربية',
   'PNG', 'JPG', 'SVG', 'PDF', 'CSV', 'GIF', 'WebM', 'MP4', 'QR', 'AI', 'RTL',
-  'CSV + PDF', '@OS99GameDev', '@OSNGameDev', 'Zaunfahne', 'tifomaker', '@tifomaker',
+  'CSV + PDF', 'PDF + CSV', '@OS99GameDev', '@OSNGameDev', 'Zaunfahne', 'tifomaker', '@tifomaker',
   'Ctrl', // a key's own label, which an Arabic keyboard prints too
 ]);
 const ALLOW_RE = [
@@ -263,6 +281,49 @@ console.log('\n— the banners news and the banner tour —');
   }
   await ctx.close();
 }
+
+console.log('\n— pages in English: every string there, no raw key, no empty label —');
+{
+  // The keys, read from the one source of truth (the way scripts/verify-superai.mts does).
+  const src = (await import('node:fs')).readFileSync(new URL('./src/ui/i18n/strings.ts', 'file://' + process.cwd() + '/'), 'utf8');
+  const KEYS = [...src.matchAll(/^\s*'([\w.-]+)':\s*\{/gm)].map((m) => m[1]);
+  const g = await (await fetch(B + '/api/gallery?templates=1&limit=5')).json();
+  const id = g[0]?.id ?? 'nope';
+  const EN_LS = AR_LS.map((x) => (x.name === 'tifo_lang_v1' ? { ...x, value: 'en' } : x));
+  for (const [path, name, w, h] of [['/', 'landing', 1440, 960], ['/', 'landing (phone)', 390, 844], ['/community', 'community', 1440, 960],
+                                    ['/clubs', 'clubs', 1440, 960], ['/legal', 'legal', 1440, 960], ['/reset', 'reset', 1440, 960],
+                                    ['/projects', 'projects', 1440, 960], ['/account', 'account', 1440, 960], [`/t/${id}`, 'share', 1440, 960],
+                                    [`/s/${id}`, 'seat (phone)', 390, 844], [`/d/${id}`, 'editor', 1440, 960]]) {
+    const ctx = await browser.newContext({ viewport: { width: w, height: h }, storageState: { cookies: [], origins: [{ origin: B, localStorage: EN_LS }] } });
+    const p = await ctx.newPage();
+    p.on('pageerror', () => {});
+    await p.goto(B + path, { waitUntil: 'networkidle', timeout: 60000 });
+    await p.waitForTimeout(2500);
+    const bad = await p.evaluate((keys) => {
+      const K = new Set(keys);
+      const out = [];
+      for (const el of document.querySelectorAll('[data-i18n]')) {
+        const k = el.getAttribute('data-i18n');
+        // A status line (aria-live) is emptied on purpose once its news is old.
+        if (el.closest('[aria-live],[role="status"],[hidden]')) continue;
+        if (K.has(k) && !el.textContent.trim() && !el.children.length) out.push(`empty [data-i18n=${k}]`);
+      }
+      const walk = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+      for (let n = walk.nextNode(); n; n = walk.nextNode()) if (K.has(n.textContent.trim())) out.push(`raw key "${n.textContent.trim()}"`);
+      for (const el of document.querySelectorAll('[placeholder],[title],[aria-label]')) {
+        for (const a of ['placeholder', 'title', 'aria-label']) if (K.has((el.getAttribute(a) ?? '').trim())) out.push(`raw key in @${a}: ${el.getAttribute(a)}`);
+      }
+      return out;
+    }, KEYS);
+    if (bad.length) { fail++; console.log(`  FAIL  ${name} (en) — ${bad.slice(0, 8).join('; ')}`); }
+    else { pass++; console.log(`  PASS  ${name} (en)`); }
+    await ctx.close();
+  }
+}
+
+console.log('\n— every page and dialog above: strings came with the code —');
+if (misses.length) { fail++; console.log(`  FAIL  ${misses.length} string(s) missing from a page's tables`); for (const m of [...new Set(misses)].slice(0, 12)) console.log(`          ${m}`); }
+else { pass++; console.log('  PASS  no key was missing from any table, no page fetched the full table'); }
 
 console.log(`\n  ${pass} surfaces clean, ${fail} with untranslated text`);
 await browser.close();

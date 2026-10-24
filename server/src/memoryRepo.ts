@@ -32,13 +32,17 @@ import type {
   ReportItem,
   PhotoReviewItem,
   FunnelStep,
+  SceneMeta,
+  ThumbnailMeta,
 } from './repo';
-import { aiPeriod, REVISIONS_KEPT } from './repo';
+import { aiPeriod, contentHash, REVISIONS_KEPT } from './repo';
 import { costStats, DESIGN_MODES, isLimitReason, modeOutcomes, type AiGroup } from './aiStats';
 import { designFacets, paletteColours } from '../../src/core/facets';
 
 interface Row extends DesignRecord {
   thumbnail: Buffer | null;
+  /** sha-256 of `thumbnail`, set wherever it is (P2.4); null when there is none. */
+  thumbnailHash: string | null;
   revisions: { seq: number; diff: DiffBytes; snapshot: Buffer | null; createdAt: string }[];
   /** userId → vote value (+1/-1). */
   votes: Map<string, number>;
@@ -247,8 +251,8 @@ export class MemoryAiEventsRepository implements AiEventsRepository {
 /** In-memory repositories: dev mode and route tests. Same contracts as Postgres. */
 export class MemoryDesignRepository implements DesignRepository {
   private rows = new Map<string, Row>();
-  /** design id -> gzipped scene JSON. Separate from the row, like the table. */
-  private scenes = new Map<string, Buffer>();
+  /** design id -> gzipped scene JSON and its sha-256 (P2.5). Separate from the row, like the table. */
+  private scenes = new Map<string, { gz: Buffer; hash: string }>();
   constructor(private readonly usernames: (id: string | null) => string = () => 'unknown') {}
 
   /**
@@ -279,6 +283,7 @@ export class MemoryDesignRepository implements DesignRepository {
       ownerId: d.ownerId,
       isPublic: false,
       thumbnail: d.thumbnailPng,
+      thumbnailHash: d.thumbnailPng ? contentHash(d.thumbnailPng) : null,
       revisionCount: 0,
       createdAt: now,
       updatedAt: now,
@@ -517,7 +522,10 @@ export class MemoryDesignRepository implements DesignRepository {
     if (!r) return null;
     r.cellsGz = cellsGz;
     r.palette = [...palette];
-    if (thumbnailPng) r.thumbnail = thumbnailPng;
+    if (thumbnailPng) {
+      r.thumbnail = thumbnailPng;
+      r.thumbnailHash = contentHash(thumbnailPng);
+    }
     r.updatedAt = new Date().toISOString();
     return this.meta(r);
   }
@@ -536,13 +544,39 @@ export class MemoryDesignRepository implements DesignRepository {
   }
 
   async getScene(id: string): Promise<Buffer | null> {
-    return this.scenes.get(id) ?? null;
+    return this.scenes.get(id)?.gz ?? null;
   }
 
   async putScene(id: string, sceneGz: Buffer): Promise<boolean> {
     if (!this.rows.has(id)) return false;
-    this.scenes.set(id, sceneGz);
+    this.scenes.set(id, { gz: sceneGz, hash: contentHash(sceneGz) });
     return true;
+  }
+
+  async getSceneMeta(id: string): Promise<SceneMeta | null> {
+    const r = this.rows.get(id);
+    if (!r) return null;
+    const s = this.scenes.get(id);
+    return { isPublic: r.isPublic, ownerId: r.ownerId, hash: s?.hash ?? null, hasScene: !!s };
+  }
+
+  async getSceneRow(id: string): Promise<{ gz: Buffer; hash: string | null } | null> {
+    const s = this.scenes.get(id);
+    return s ? { gz: s.gz, hash: s.hash } : null;
+  }
+
+  async getThumbnailMeta(id: string): Promise<ThumbnailMeta | null> {
+    const r = this.rows.get(id);
+    return r ? { isPublic: r.isPublic, ownerId: r.ownerId, hash: r.thumbnailHash, hasThumbnail: r.thumbnail !== null } : null;
+  }
+
+  async getThumbnailRow(id: string): Promise<(ThumbnailMeta & { png: Buffer | null }) | null> {
+    const r = this.rows.get(id);
+    return r ? { isPublic: r.isPublic, ownerId: r.ownerId, hash: r.thumbnailHash, hasThumbnail: r.thumbnail !== null, png: r.thumbnail } : null;
+  }
+
+  async backfillHashes(): Promise<number> {
+    return 0; // every write here hashes as it stores
   }
 
   async appendRevision(id: string, diff: DiffBytes, newCellsGz: Buffer, snapshot: Buffer | null): Promise<DesignMeta | null> {
@@ -951,6 +985,13 @@ export class MemoryAuthRepository implements AuthRepository {
     const t = this.tokens.get(tokenHash);
     if (!t || t.expiresAt < Date.now()) return null;
     return t.userId;
+  }
+
+  async getSessionUser(tokenHash: string): Promise<UserRow | null> {
+    // Same rule as getUserIdByToken: an expired token opens nothing.
+    const t = this.tokens.get(tokenHash);
+    if (!t || t.expiresAt < Date.now()) return null;
+    return this.getUserById(t.userId);
   }
 
   async deleteToken(tokenHash: string): Promise<void> {

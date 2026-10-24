@@ -1462,7 +1462,9 @@ async function makeDesign(app: FastifyInstance, token: string, isPublic = false)
       assert.equal(j.needsChoice, true);
       assert.equal(j.cause, 'busy', 'a 503 reads as "busy" to the person designing');
       assert.equal(j.detail, undefined, 'no raw detail, admins included');
-      assert.ok(!/gemini|HTTP|503|high demand|AIza/i.test(r.body), `nothing of the provider's reply reaches the editor: ${r.body}`);
+      // The provider's own words, not a bare 503: the body carries numbers of
+      // its own (resetInSec was once exactly 503 and failed this check).
+      assert.ok(!/gemini|HTTP|high demand|spikes in demand|AIza/i.test(r.body) && !/UNAVAILABLE|"code":\s*503/.test(r.body), `nothing of the provider's reply reaches the editor: ${r.body}`);
     }
     assert.equal(providerCalls, 4, 'each generation tried the model and retried the 503 once');
 
@@ -3294,6 +3296,12 @@ async function makeDesign(app: FastifyInstance, token: string, isPublic = false)
       if (this.failUsernameCheck) throw new Error('connection terminated');
       return super.hasChosenUsername(userId);
     }
+    // The name check is read with the session now, in one statement
+    // (performance plan P2.17), so the same switch breaks that read.
+    override async getSessionUser(tokenHash: string): ReturnType<MemoryAuthRepository['getSessionUser']> {
+      if (this.failUsernameCheck) throw new Error('connection terminated');
+      return super.getSessionUser(tokenHash);
+    }
     override async getUserById(userId: string): ReturnType<MemoryAuthRepository['getUserById']> {
       if (this.failGetUserCalls > 0) {
         this.failGetUserCalls--;
@@ -3427,7 +3435,10 @@ async function makeDesign(app: FastifyInstance, token: string, isPublic = false)
     assert.equal((await app.inject({ method: 'GET', url: `/og/t/${pub}.png` })).headers['cache-control'], 'public, max-age=3600', 'a public card still caches');
     const thPriv = await app.inject({ method: 'GET', url: `/api/designs/${priv}/thumbnail.png`, headers: bearer(owner.token) });
     assert.equal(thPriv.headers['cache-control'], 'private, no-store', 'a private thumbnail is not kept in any cache');
-    assert.equal((await app.inject({ method: 'GET', url: `/api/designs/${pub}/thumbnail.png` })).headers['cache-control'], 'no-cache', 'a public one keeps its own policy');
+    // `public, no-cache` with its content-hash ETag since performance plan
+    // P2.4: kept, but asked about every time, and the visibility check runs
+    // before the ETag is compared (the stage 2 block at the end of this file).
+    assert.equal((await app.inject({ method: 'GET', url: `/api/designs/${pub}/thumbnail.png` })).headers['cache-control'], 'public, no-cache', 'a public one keeps its own policy');
 
     // ---- MEDIUM: answers about one person carried no Cache-Control ----
     await app.inject({ method: 'PUT', url: `/api/designs/${priv}/scene`, headers: bearer(owner.token), payload: { sceneGzB64: gzipSync(Buffer.from(JSON.stringify({ v: 1, banners: [] }))).toString('base64') } });
@@ -3443,7 +3454,9 @@ async function makeDesign(app: FastifyInstance, token: string, isPublic = false)
     for (const [url, token] of personal) {
       const r = await app.inject({ method: 'GET', url, headers: bearer(token) });
       assert.equal(r.statusCode, 200, `${url}: ${r.body.slice(0, 120)}`);
-      assert.equal(r.headers['cache-control'], 'no-store', `${url} must say no-store`);
+      // The export carries everything the account holds, so it also says
+      // no-transform (performance plan P2.3: no edge compresses a secret).
+      assert.equal(r.headers['cache-control'], url === '/api/account/export' ? 'no-store, no-transform' : 'no-store', `${url} must say no-store`);
     }
     for (const url of ['/api/nope', `/api/designs/${priv}`, '/admin.js', '/og/t/00000000-0000-4000-8000-000000000000.png']) {
       const r = await app.inject({ method: 'GET', url });
@@ -4162,6 +4175,7 @@ async function makeDesign(app: FastifyInstance, token: string, isPublic = false)
   const { MemorySocRepository } = await import('../src/socRepo');
   const { SocMonitor } = await import('../src/soc');
   const { seatTable } = await import('../src/seatTable');
+  const { createHash } = await import('node:crypto');
   const check = (cond: unknown, msg: string): void => assert.ok(cond, msg);
   const S1PW = 'orchid-ledger-pivot3';
   const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64');
@@ -4177,6 +4191,9 @@ async function makeDesign(app: FastifyInstance, token: string, isPublic = false)
   const WORKER = '/assets/heavy.worker-Ab12Cd34.js';
   writeFileSync(`${dist}${WORKER}`, 'self.onmessage = () => {};\n');
   writeFileSync(`${dist}/assets/index-Ab12Cd34.js`, 'export {};\n');
+  // The build's compressed copies beside it (performance plan P2.3).
+  writeFileSync(`${dist}/assets/index-Ab12Cd34.js.br`, (await import('node:zlib')).brotliCompressSync(Buffer.from('export {};\n')));
+  writeFileSync(`${dist}/assets/index-Ab12Cd34.js.gz`, gzipSync(Buffer.from('export {};\n')));
   writeFileSync(`${dist}/assets/index-Ab12Cd34.css`, 'body{margin:0}\n');
   writeFileSync(`${dist}/assets/inter-latin-400-Ab12Cd34.woff2`, Buffer.alloc(64, 1));
   writeFileSync(`${dist}/favicon.svg`, '<svg xmlns="http://www.w3.org/2000/svg"/>\n');
@@ -4317,11 +4334,16 @@ async function makeDesign(app: FastifyInstance, token: string, isPublic = false)
       { label: 'facets', status: 200, url: '/api/gallery/facets' },
       { label: 'design JSON', status: 200, url: `/api/designs/${pub}` },
       { label: 'me', status: 200, url: '/api/me', headers: own },
+      { label: 'unread count', status: 200, url: '/api/notifications/unread', headers: own },
+      { label: 'unread count, signed out', status: 401, url: '/api/notifications/unread' },
       { label: 'admin overview without access', status: 403, url: '/api/funnel' },
       { label: 'admin data with the unlock', status: 200, url: '/api/funnel', headers: { 'x-ai-unlock': unlockToken } },
       // The module worker and the other static files, fresh and revalidated.
       { label: 'module worker', status: 200, url: WORKER },
       { label: 'hashed script', status: 200, url: '/assets/index-Ab12Cd34.js' },
+      { label: 'hashed script, brotli copy', status: 200, url: '/assets/index-Ab12Cd34.js', headers: { 'accept-encoding': 'br' } },
+      { label: 'hashed script, gzip copy', status: 200, url: '/assets/index-Ab12Cd34.js', headers: { 'accept-encoding': 'gzip' } },
+      { label: 'a copy asked for by name', status: 404, url: '/assets/index-Ab12Cd34.js.br', headers: { 'accept-encoding': 'br' } },
       { label: 'hashed stylesheet', status: 200, url: '/assets/index-Ab12Cd34.css' },
       { label: 'hashed font', status: 200, url: '/assets/inter-latin-400-Ab12Cd34.woff2' },
       { label: 'unhashed script', status: 200, url: '/boot-script.js' },
@@ -4365,13 +4387,19 @@ async function makeDesign(app: FastifyInstance, token: string, isPublic = false)
       assert.equal(r.statusCode, c.status, `${c.label}: ${c.method ?? 'GET'} ${c.url} answered ${r.statusCode} (${r.body.slice(0, 120)})`);
       pinned(r, c.label);
     }
-    // 304s: a static file revalidated, the worker included.
-    for (const url of [WORKER, '/favicon.svg', '/robots.txt']) {
+    // 304s: a static file revalidated, the worker and a compressed copy
+    // included; and the routes that revalidate (stage 2): a public picture by
+    // its hash (P2.4) and the HTML shells (P2.9).
+    const revalidated: [string, Record<string, string>?][] = [
+      [WORKER], ['/favicon.svg'], ['/robots.txt'], ['/assets/index-Ab12Cd34.js', { 'accept-encoding': 'br' }],
+      [`/api/designs/${pub}/thumbnail.png`], ['/clubs'], ['/legal'], ['/tifo-spec'], [`/app?design=${pub}`],
+    ];
+    for (const [url, extra] of revalidated) {
       const ip = freshIp();
-      const first = await hApp.inject({ method: 'GET', url, remoteAddress: ip });
+      const first = await hApp.inject({ method: 'GET', url, remoteAddress: ip, headers: extra });
       const etag = String(first.headers.etag ?? '');
       check(etag, `${url} has an ETag`);
-      const again = await hApp.inject({ method: 'GET', url, remoteAddress: ip, headers: { 'if-none-match': etag } });
+      const again = await hApp.inject({ method: 'GET', url, remoteAddress: ip, headers: { ...extra, 'if-none-match': etag } });
       assert.equal(again.statusCode, 304, `${url} revalidates`);
       pinned(again, `${url} 304`);
     }
@@ -4398,8 +4426,48 @@ async function makeDesign(app: FastifyInstance, token: string, isPublic = false)
     assert.equal(failed.statusCode, 500);
     assert.deepEqual(failed.json(), { error: 'internal error' }, 'no driver message');
     pinned(failed, '500');
+    // The origin lock's refusals (P2.2): on a page, the API, a 404, an asset
+    // and a URL the router cannot read; and its 429.
+    let stage2 = 0;
+    {
+      const lockApp = await buildApp(hDesigns, hAuth, templates, { staticDir: dist, rateLimit: true, originSecret: 'pinned-origin-secret-0123456789abcdef' });
+      for (const [label, url] of [['locked page', '/'], ['locked API', '/api/templates'], ['locked 404', '/nope'], ['locked asset', '/assets/index-Ab12Cd34.js'], ['locked unreadable URL', '/%E0%A4%A']]) {
+        const r = await lockApp.inject({ method: 'GET', url, remoteAddress: freshIp() });
+        assert.equal(r.statusCode, 403, `${label}: ${r.statusCode}`);
+        pinned(r, label);
+        stage2++;
+      }
+      const ip = freshIp();
+      for (let i = 0; i < 300; i++) await lockApp.inject({ method: 'GET', url: '/api/templates', remoteAddress: ip });
+      const over = await lockApp.inject({ method: 'GET', url: '/api/templates', remoteAddress: ip });
+      assert.equal(over.statusCode, 429, 'the lock counts in the limit');
+      pinned(over, 'locked 429');
+      stage2++;
+      await lockApp.close();
+    }
+    // Work the worker could not take (P2.14): a scene strip, a scene check and a PDF, 503.
+    {
+      const { WorkerPool } = await import('../src/workerPool');
+      const dead = new WorkerPool({ name: 'pin', file: { url: new URL(`data:text/javascript,${encodeURIComponent("import { parentPort } from 'node:worker_threads'; parentPort.on('message', () => process.exit(5)); parentPort.postMessage({ ready: true });")}`) }, size: 1, maxQueue: 1, timeoutMs: 2_000, idleMs: 1_000, resourceLimits: { maxOldGenerationSizeMb: 32 }, log: () => {} });
+      const poolApp = await buildApp(hDesigns, hAuth, templates, { staticDir: dist, workers: { scene: dead as never, pdf: dead as never } });
+      const scene = gzipSync(Buffer.from(JSON.stringify({ v: 1, banners: [{ id: 'pin' }] }))).toString('base64');
+      assert.equal((await hApp.inject({ method: 'PUT', url: `/api/designs/${pub}/scene`, remoteAddress: freshIp(), headers: own, payload: { sceneGzB64: scene } })).statusCode, 200);
+      for (const [label, method, url, headers, payload] of [
+        ['scene strip 503', 'GET', `/api/designs/${pub}/scene`, undefined, undefined],
+        ['scene check 503', 'PUT', `/api/designs/${pub}/scene`, own, { sceneGzB64: scene }],
+        ['PDF 503', 'POST', '/api/export/pdf', undefined, { title: 'x', templateId: DEFAULT_TEMPLATE.id, templateVersion: DEFAULT_TEMPLATE.version, palette: PALETTE, cellsGzB64 }],
+      ] as const) {
+        const r = await poolApp.inject({ method, url, remoteAddress: freshIp(), headers, payload: payload as never });
+        assert.equal(r.statusCode, 503, `${label}: ${r.statusCode} ${r.body.slice(0, 120)}`);
+        pinned(r, label);
+        assert.equal(r.headers['cache-control'], 'no-store', `${label}: not cached`);
+        stage2++;
+      }
+      await poolApp.close();
+      await dead.close();
+    }
     await hApp.close();
-    console.log(`  P0.1 header pin: ${cases.length + 3 + 3 + 1} responses carry exactly the pinned headers`);
+    console.log(`  P0.1 header pin: ${cases.length + revalidated.length + 3 + 1 + stage2} responses carry exactly the pinned headers`);
   }
 
   // ---- P0.2: who may cache what ----
@@ -4493,6 +4561,22 @@ async function makeDesign(app: FastifyInstance, token: string, isPublic = false)
           if (ownerOnly) check(/no-store|\bprivate\b/.test(cc), `${label}: an answer with the owner's own fields is no-store (${cc})`);
           if (r.statusCode >= 400) check(/no-store|no-cache/.test(cc), `${label}: a refusal is not cached (${cc})`);
           checked++;
+          // With an ETag in hand (stage 2, P2.4): the one it was given, or the
+          // picture's hash, which anyone who once saw it while public knows.
+          // A 304 only ever for a public design, and only after the visibility
+          // check: otherwise exactly the answer it gets without one.
+          const tag = String(r.headers.etag ?? `"${createHash('sha256').update(PNG).digest('hex')}"`);
+          const again = await app.inject({ method: 'GET', url, headers: { ...headers, 'if-none-match': tag } });
+          if (again.statusCode === 304) {
+            check(isPublicKind(kind), `${label}: a 304 only for a public design`);
+            check(/\bpublic\b|no-cache/.test(String(again.headers['cache-control'])) && !/\bprivate\b|no-store/.test(String(again.headers['cache-control'])), `${label}: and only for an answer that may be kept (${again.headers['cache-control']})`);
+            assert.equal(again.rawPayload.byteLength, 0);
+          } else {
+            assert.equal(again.statusCode, r.statusCode, `${label}: an ETag changes nothing else (${again.statusCode})`);
+            assert.equal(again.headers['cache-control'], r.headers['cache-control'], `${label}: nor how it may be cached`);
+          }
+          if (/\bprivate\b|no-store/.test(cc)) check(!r.headers.etag, `${label}: an answer nobody may keep has no ETag`);
+          checked++;
         }
       }
     }
@@ -4513,7 +4597,7 @@ async function makeDesign(app: FastifyInstance, token: string, isPublic = false)
       assert.equal(r.headers['cache-control'], 'no-store', `${url}: the owner's own list`);
     }
     await app.close();
-    console.log(`  P0.2 cache matrix: ${checked} answers checked (6 kinds of design x 4 callers x every route that serves one, and the lists)`);
+    console.log(`  P0.2 cache matrix: ${checked} answers checked (6 kinds of design x 4 callers x every route that serves one, with and without an ETag, and the lists)`);
   }
 
   // ---- P0.2: every /api answer and every 404 says how it may be cached ----
@@ -5434,4 +5518,1926 @@ async function makeDesign(app: FastifyInstance, token: string, isPublic = false)
   assert.ok(refused > 0, `unreadable URLs count against the limit like any probe (${refused} of 305 refused)`);
   await app.close();
   console.log('performance plan stage 1 review: all assertions passed (unreadable URLs get the headers, no-store and the limit)');
+}
+
+// ---------- 2026-10: performance plan, stage 2 (server), part one ----------
+// One log line per request (P2.20), one auth query per request (P2.17), the
+// unread count (P2.16) and batched page views (P2.18). Each sits next to a
+// control: the request log is where real addresses live, the session read
+// decides who a request is, and the page views must never carry an address.
+{
+  const { connect } = await import('node:net');
+  const { readFileSync } = await import('node:fs');
+  const { MemoryTrafficRepository, BatchedTrafficRepository } = await import('../src/trafficRepo');
+  const check = (cond: unknown, msg: string): void => assert.ok(cond, msg);
+  const S2PW = 'lantern-orchid-quarry8';
+  const s2reg = async (app: FastifyInstance, u: string, adminPassword?: string): Promise<{ token: string; id: string }> => {
+    const r = await app.inject({ method: 'POST', url: '/api/auth/register', payload: { username: u, password: S2PW, email: `${u}@example.test`, acceptedVersion: 'test', adminPassword } });
+    assert.equal(r.statusCode, 201, r.body);
+    const token = (r.json() as { token: string }).token;
+    return { token, id: ((await app.inject({ method: 'GET', url: '/api/me', headers: bearer(token) })).json() as { id: string }).id };
+  };
+  const settle = () => new Promise((r) => setTimeout(r, 30));
+
+  // ---- P2.20: one line per request; redacted; errors kept; aborts written ----
+  {
+    const lines: string[] = [];
+    const auth = new MemoryAuthRepository();
+    const designs = new MemoryDesignRepository((id) => auth.usernameOf(id));
+    const { MemorySocRepository } = await import('../src/socRepo');
+    const { SocMonitor } = await import('../src/soc');
+    const soc = new SocMonitor({ repo: new MemorySocRepository() });
+    const app = await buildApp(designs, auth, templates, { logger: true, logStream: { write: (l: string) => { lines.push(l); } }, soc });
+    app.get('/__s2_slow', async () => { await new Promise((r) => setTimeout(r, 400)); return { ok: true }; });
+    const parsed = () => lines.map((l) => JSON.parse(l) as { level: number; reqId?: string; msg: string; req?: { url: string; remoteAddress?: string; method: string }; res?: { statusCode: number | null }; responseTime?: number; aborted?: boolean });
+    const u = await s2reg(app, 'logline_s2');
+    await settle();
+    lines.length = 0;
+    const urls: [string, string, Record<string, string>?][] = [
+      ['GET', '/health'],
+      ['GET', '/api/me', bearer(u.token)],
+      ['GET', '/reset?token=RESETSECRET2222'],
+      ['GET', '/api/auth/verify?token=VERIFYSECRET2222&code=123456'],
+      ['GET', '/api/nope'],
+      ['GET', '/%E0%A4%A'],
+      ['POST', '/api/auth/login'],
+    ];
+    for (const [method, url, headers] of urls) await app.inject({ method: method as 'GET', url, headers: { ...headers, 'x-origin-secret': 'NOT-A-REAL-SECRET-0000', 'user-agent': 'S2-UA-marker' } });
+    // A failure: the error line and the request's own line.
+    const leaky = designs as unknown as { popularTags: () => Promise<never> };
+    const realTags = leaky.popularTags;
+    leaky.popularTags = async () => { throw new Error('S2 boom'); };
+    await app.inject({ method: 'GET', url: '/api/tags' });
+    leaky.popularTags = realTags;
+    await settle();
+    const all = parsed();
+    const done = all.filter((l) => l.msg === 'request completed');
+    assert.equal(done.length, urls.length + 1, `one "request completed" line per request (${done.length} for ${urls.length + 1})`);
+    assert.equal(all.filter((l) => l.msg === 'incoming request').length, 0, 'and no "incoming request" line');
+    assert.equal(new Set(done.map((l) => l.reqId)).size, done.length, 'one line per request id');
+    for (const l of done) {
+      check(l.req && l.req.method && l.req.url && l.req.remoteAddress === '127.0.0.1', `the line keeps method, URL and address (${JSON.stringify(l.req)})`);
+      check(typeof l.res?.statusCode === 'number' && typeof l.responseTime === 'number', 'and the status and response time');
+    }
+    const joined = lines.join('');
+    check(!/RESETSECRET2222|VERIFYSECRET2222|123456/.test(joined), 'one-time secrets in a URL are redacted');
+    check(joined.includes('/reset?token=[redacted]') && joined.includes('code=[redacted]'), 'and the URL is still there, minus the secret');
+    check(!joined.includes(u.token) && !joined.includes('NOT-A-REAL-SECRET-0000') && !joined.includes('S2-UA-marker'), 'no header is ever written: not the bearer, not x-origin-secret, not the user-agent');
+    const failed = all.find((l) => l.level === 50 && /request failed/.test(l.msg));
+    check(failed, 'the error line is still written');
+    const failedLine = done.find((l) => l.req?.url === '/api/tags');
+    check(failed && failedLine && failed.reqId === failedLine.reqId && failedLine.res?.statusCode === 500, 'with the same reqId as its request line');
+    check(done.some((l) => l.req?.url === '/%E0%A4%A' && l.res?.statusCode === 400), 'an unreadable URL (no hook runs for it) still gets its line');
+    // The Security tab names events by reqId, and the log line carries the same one.
+    await soc.flush();
+    const ev = soc.recent(20).find((e: { kind: string }) => e.kind === 'server_error') as { reqId?: string } | undefined;
+    check(ev && ev.reqId === failedLine?.reqId, `a Security tab event can still be found in the log by its reqId (${ev?.reqId} / ${failedLine?.reqId})`);
+    // A client that leaves before the answer: a line of its own, with the address.
+    await app.listen({ port: 0, host: '127.0.0.1' });
+    const port = (app.server.address() as { port: number }).port;
+    lines.length = 0;
+    await new Promise<void>((resolve) => {
+      const sock = connect(port, '127.0.0.1', () => {
+        sock.write('GET /__s2_slow?token=ABORTSECRET HTTP/1.1\r\nHost: localhost\r\n\r\n');
+        setTimeout(() => { sock.destroy(); resolve(); }, 60);
+      });
+    });
+    await new Promise((r) => setTimeout(r, 600));
+    const aborted = parsed().filter((l) => l.msg === 'request aborted');
+    assert.equal(aborted.length, 1, 'an aborted request is written once');
+    check(aborted[0].req?.url === '/__s2_slow?token=[redacted]' && aborted[0].req?.remoteAddress === '127.0.0.1' && aborted[0].aborted === true, `with its redacted URL and its address (${JSON.stringify(aborted[0])})`);
+    assert.equal(parsed().filter((l) => l.msg === 'request completed').length, 0, 'and not also as completed');
+    await app.close();
+    // The SOC monitor does not read the log; its hook is untouched.
+    check(/attachSecurityMonitor\(app, options\.soc\)/.test(readFileSync('server/src/routes.ts', 'utf8')), 'the security monitor is still attached to every route');
+    console.log('  P2.20 request log: one line per request, secrets and headers out, error lines kept, aborted requests written');
+  }
+
+  // ---- P2.17: one read of the session per request, never kept past it ----
+  {
+    /** Counts the account reads a route makes (the store's own lookup inside getSessionUser is not one). */
+    class CountingAuth extends MemoryAuthRepository {
+      reads: string[] = [];
+      failSession = false;
+      private inSession = false;
+      override async getSessionUser(h: string): ReturnType<MemoryAuthRepository['getSessionUser']> {
+        this.reads.push('session');
+        if (this.failSession) throw new Error('connection terminated');
+        this.inSession = true;
+        try {
+          return await super.getSessionUser(h);
+        } finally {
+          this.inSession = false;
+        }
+      }
+      override async getUserIdByToken(h: string): Promise<string | null> { this.reads.push('token'); return super.getUserIdByToken(h); }
+      override async hasChosenUsername(id: string): Promise<boolean> { this.reads.push('chosen'); return super.hasChosenUsername(id); }
+      override async getUserById(id: string): ReturnType<MemoryAuthRepository['getUserById']> {
+        if (!this.inSession) this.reads.push('user');
+        return super.getUserById(id);
+      }
+    }
+    const auth = new CountingAuth();
+    const designs = new MemoryDesignRepository((id) => auth.usernameOf(id));
+    const social = new MemorySocialRepository(designs, auth);
+    const app = await buildApp(designs, auth, templates, { social, adminUsernames: ['chief_s2'], aiAdminPassword: 'stage two admin password' });
+    const fan = await s2reg(app, 'fan_s2');
+    const chief = await s2reg(app, 'chief_s2', 'stage two admin password');
+    await auth.markEmailVerified(fan.id);
+    const pub = await makeDesign(app, chief.token, true);
+    const authReads = async (method: 'GET' | 'POST' | 'PUT' | 'DELETE', url: string, token: string, payload?: unknown) => {
+      auth.reads.length = 0;
+      const r = await app.inject({ method, url, headers: bearer(token), payload: payload as never });
+      return { status: r.statusCode, reads: [...auth.reads] };
+    };
+    for (const [method, url, who, payload] of [
+      ['GET', '/api/me', fan, undefined],
+      ['GET', '/api/me', chief, undefined],
+      ['GET', '/api/notifications', fan, undefined],
+      ['GET', '/api/notifications/unread', fan, undefined],
+      ['POST', `/api/designs/${pub}/vote`, fan, { value: 1 }],
+      ['GET', '/api/admin/reports', chief, undefined],
+      ['GET', `/api/designs/${pub}`, chief, undefined],
+      ['GET', '/api/projects', fan, undefined],
+      ['GET', '/api/account/export', fan, undefined],
+    ] as const) {
+      const { status, reads } = await authReads(method, url, who.token, payload);
+      check(status < 400, `${method} ${url} answers (${status})`);
+      assert.deepEqual(reads, ['session'], `${method} ${url}: one read of the session and the account, nothing else (${reads.join(', ')})`);
+    }
+    // Every way a session ends is seen by the very next request.
+    const fresh = async (u: string) => s2reg(app, u);
+    const a = await fresh('revoke_s2');
+    await auth.deleteToken(hashToken(a.token));
+    assert.equal((await app.inject({ method: 'GET', url: '/api/me', headers: bearer(a.token) })).statusCode, 401, 'a revoked token is refused on the next request');
+    const b = await fresh('logout_s2');
+    assert.equal((await app.inject({ method: 'GET', url: '/api/me', headers: bearer(b.token) })).statusCode, 200);
+    assert.equal((await app.inject({ method: 'POST', url: '/api/auth/logout', headers: bearer(b.token) })).statusCode, 204);
+    assert.equal((await app.inject({ method: 'GET', url: '/api/me', headers: bearer(b.token) })).statusCode, 401, 'a signed-out token is refused on the next request');
+    const c = await fresh('pwchange_s2');
+    const other = (await app.inject({ method: 'POST', url: '/api/auth/login', payload: { username: 'pwchange_s2', password: S2PW } })).json().token as string;
+    const changed = await app.inject({ method: 'POST', url: '/api/account/password', headers: bearer(c.token), payload: { currentPassword: S2PW, newPassword: 'basalt-ember-violin4' } });
+    assert.equal(changed.statusCode, 200, changed.body);
+    assert.equal((await app.inject({ method: 'GET', url: '/api/me', headers: bearer(c.token) })).statusCode, 401, 'after a password change the old session is refused on the next request');
+    assert.equal((await app.inject({ method: 'GET', url: '/api/me', headers: bearer(other) })).statusCode, 401, 'and so is every other one');
+    assert.equal((await app.inject({ method: 'GET', url: '/api/me', headers: bearer(changed.json().token) })).statusCode, 200, 'the session it handed back works');
+    const d = await fresh('deleted_s2');
+    assert.equal((await app.inject({ method: 'DELETE', url: '/api/account', headers: bearer(d.token), payload: { password: S2PW } })).statusCode, 204);
+    assert.equal((await app.inject({ method: 'GET', url: '/api/me', headers: bearer(d.token) })).statusCode, 401, 'a deleted account is refused on the next request');
+    const e = await fresh('expired_s2');
+    const expiredTok = 'e'.repeat(64);
+    await auth.createToken(e.id, hashToken(expiredTok), new Date(Date.now() - 1000));
+    assert.equal((await app.inject({ method: 'GET', url: '/api/me', headers: bearer(expiredTok) })).statusCode, 401, 'an expired token opens nothing');
+    // Two sessions at once never see each other's account.
+    const x = await fresh('twin_x_s2');
+    const y = await fresh('twin_y_s2');
+    for (let round = 0; round < 25; round++) {
+      const [rx, ry] = await Promise.all([
+        app.inject({ method: 'GET', url: '/api/me', headers: bearer(x.token) }),
+        app.inject({ method: 'GET', url: '/api/me', headers: bearer(y.token) }),
+      ]);
+      assert.equal(rx.json().id, x.id, 'each request is its own token’s account');
+      assert.equal(ry.json().id, y.id, 'each request is its own token’s account');
+    }
+    // The wall and the admin checks read the same row, and still hold.
+    const unnamed = await auth.createUser('gfan_s2_unnamed', null, { email: 'unnamed_s2@example.test', emailVerified: true, usernameChosen: false });
+    const unnamedTok = 'u'.repeat(64);
+    await auth.createToken(unnamed!.id, hashToken(unnamedTok), new Date(Date.now() + 3600_000));
+    assert.equal((await app.inject({ method: 'GET', url: '/api/me', headers: bearer(unnamedTok) })).statusCode, 200, 'an unnamed account may ask who it is');
+    assert.equal((await app.inject({ method: 'POST', url: '/api/designs', headers: bearer(unnamedTok), payload: { title: 'x', templateId: DEFAULT_TEMPLATE.id, templateVersion: 1, palette: PALETTE, cellsGzB64 } })).statusCode, 428, 'and nothing else: the wall still holds');
+    assert.equal((await app.inject({ method: 'GET', url: '/api/notifications/unread', headers: bearer(unnamedTok) })).statusCode, 428, 'the unread count included');
+    assert.equal((await app.inject({ method: 'GET', url: '/api/admin/reports', headers: bearer(fan.token) })).statusCode, 403, 'an ordinary account is no moderator');
+    assert.equal((await app.inject({ method: 'GET', url: '/api/admin/reports', headers: bearer(chief.token) })).statusCode, 200, 'the allow-listed one is');
+    // A session that cannot be read refuses: 503, never a guess.
+    auth.failSession = true;
+    const refused = await Promise.all([
+      app.inject({ method: 'POST', url: '/api/designs', headers: bearer(fan.token), payload: { title: 'x', templateId: DEFAULT_TEMPLATE.id, templateVersion: 1, palette: PALETTE, cellsGzB64 } }),
+      app.inject({ method: 'PUT', url: `/api/designs/${pub}/scene`, headers: bearer(chief.token), payload: { sceneGzB64: gzipSync(Buffer.from('{"v":1}')).toString('base64') } }),
+      app.inject({ method: 'GET', url: '/api/me', headers: bearer(fan.token) }),
+    ]);
+    auth.failSession = false;
+    for (const r of refused) assert.equal(r.statusCode, 503, `a session that cannot be read is refused with 503 (${r.statusCode})`);
+    // Kept on the request object only: no cache of tokens anywhere in the routes.
+    const src = readFileSync('server/src/routes.ts', 'utf8');
+    check(/new WeakMap<FastifyRequest, Promise<UserRow \| null>>\(\)/.test(src), 'the session read is kept in a WeakMap keyed by the request');
+    check(!/new Map<string, Promise<UserRow/.test(src) && !/tokenCache|sessionCache/.test(src), 'and in nothing keyed by a token');
+    await app.close();
+    console.log('  P2.17 one session read per request: revoked, signed out, password-changed, deleted and expired sessions refused at once; no crossing; wall and admin checks hold; fails closed');
+  }
+
+  // ---- P2.16: the unread count ----
+  {
+    const auth = new MemoryAuthRepository();
+    const designs = new MemoryDesignRepository((id) => auth.usernameOf(id));
+    const social = new MemorySocialRepository(designs, auth);
+    const app = await buildApp(designs, auth, templates, { social });
+    const maker = await s2reg(app, 'unread_maker_s2');
+    const fanA = await s2reg(app, 'unread_a_s2');
+    const fanB = await s2reg(app, 'unread_b_s2');
+    for (const f of [fanA, fanB]) await app.inject({ method: 'POST', url: `/api/users/${maker.id}/follow`, headers: bearer(f.token) });
+    await app.inject({ method: 'POST', url: `/api/users/${fanA.id}/follow`, headers: bearer(maker.token) });
+    const unread = (t?: string) => app.inject({ method: 'GET', url: '/api/notifications/unread', headers: t ? bearer(t) : undefined });
+    const anon = await unread();
+    assert.equal(anon.statusCode, 401, 'signed out: 401');
+    const mine = await unread(maker.token);
+    assert.equal(mine.statusCode, 200);
+    assert.deepEqual(mine.json(), { unread: 2 }, 'exactly { unread }: the caller’s own count');
+    assert.equal(mine.headers['cache-control'], 'no-store', 'never kept by any cache');
+    assert.deepEqual((await unread(fanA.token)).json(), { unread: 1 }, 'another account sees its own count');
+    assert.deepEqual((await unread(fanB.token)).json(), { unread: 0 });
+    const feed = (await app.inject({ method: 'GET', url: '/api/notifications', headers: bearer(maker.token) })).json() as { unread: number; items: unknown[] };
+    assert.equal(feed.unread, 2, 'and the same number as the feed, which keeps { unread, items }');
+    check(Array.isArray(feed.items), 'the feed is unchanged');
+    await app.inject({ method: 'POST', url: '/api/notifications/read', headers: bearer(maker.token), payload: {} });
+    assert.deepEqual((await unread(maker.token)).json(), { unread: 0 }, 'read is read');
+    await app.close();
+    const noSocial = await buildApp(new MemoryDesignRepository(), new MemoryAuthRepository(), templates, {});
+    assert.equal((await noSocial.inject({ method: 'GET', url: '/api/notifications/unread' })).statusCode, 503, 'without the social layer it is off, like the feed');
+    await noSocial.close();
+    // The same limit as the feed: the general 300, per client.
+    const limited = await buildApp(new MemoryDesignRepository(), new MemoryAuthRepository(), templates, { social: new MemorySocialRepository(new MemoryDesignRepository(), new MemoryAuthRepository()), rateLimit: true });
+    const h1 = await limited.inject({ method: 'GET', url: '/api/notifications/unread', remoteAddress: '198.18.200.1' });
+    const h2 = await limited.inject({ method: 'GET', url: '/api/notifications', remoteAddress: '198.18.200.2' });
+    assert.equal(h1.headers['x-ratelimit-limit'], h2.headers['x-ratelimit-limit'], 'the unread count is limited like the feed');
+    await limited.close();
+    console.log('  P2.16 unread count: signed in, own count only, no-store, same limits as the feed');
+  }
+
+  // ---- P2.18: page views batched, never an address ----
+  {
+    const inner = new MemoryTrafficRepository();
+    const logged: string[] = [];
+    const buffer = new BatchedTrafficRepository(inner, { maxBuffered: 3, log: (m) => logged.push(m) });
+    const auth = new MemoryAuthRepository();
+    const designs = new MemoryDesignRepository((id) => auth.usernameOf(id));
+    const { existsSync } = await import('node:fs');
+    // Absolute: @fastify/static refuses a relative root (the built dist/ when there is one).
+    const staticDir = existsSync('dist/index.html') ? `${process.cwd()}/dist` : process.cwd();
+    const app = await buildApp(designs, auth, templates, { traffic: buffer, staticDir, adminUsernames: ['trafficadmin_s2'], aiAdminPassword: 'stage two traffic admin' });
+    const admin = await s2reg(app, 'trafficadmin_s2', 'stage two traffic admin');
+    const UA = 'Mozilla/5.0 (S2 visit marker; Android 14) Mobile Safari/537.36';
+    await app.inject({ method: 'GET', url: '/?utm_source=whatsapp', remoteAddress: '203.0.113.77', headers: { 'user-agent': UA, referer: 'https://t.co/abc?secret=1' } });
+    await settle();
+    assert.equal(buffer.pending, 1, 'a page view waits in memory');
+    assert.equal((await inner.summary(1)).totals.visits, 0, 'and is not written yet');
+    const waiting = (buffer as unknown as { buffer: { visit: Record<string, unknown>; at: Date }[] }).buffer;
+    assert.deepEqual(Object.keys(waiting[0]).sort(), ['at', 'visit'], 'what waits is a visit and its time');
+    assert.deepEqual(Object.keys(waiting[0].visit).sort(), ['browser', 'country', 'device', 'isBot', 'lang', 'os', 'path', 'referrerHost', 'source', 'utmCampaign', 'utmMedium', 'utmSource', 'visitorKey'], 'exactly buildVisit’s output');
+    const text = JSON.stringify(waiting);
+    check(!text.includes('203.0.113.77') && !text.includes('S2 visit marker') && !text.includes('secret=1'), 'never the address, the user-agent or the referrer’s path');
+    // The admin view flushes before it reads, so it is right at once.
+    const t = await app.inject({ method: 'GET', url: '/api/admin/traffic?days=1', headers: bearer(admin.token) });
+    assert.equal(t.statusCode, 200, t.body);
+    assert.equal((t.json() as { totals: { visits: number } }).totals.visits, 1, 'the admin traffic view includes the page view just made');
+    assert.equal(buffer.pending, 0);
+    assert.equal((await inner.summary(1)).totals.visits, 1, 'one row written');
+    // Capped: beyond the cap, dropped and counted, said once at the next flush.
+    for (let i = 0; i < 5; i++) await buffer.record(waiting[0]?.visit as never ?? (await import('../src/trafficRepo')).buildVisit({ ip: '1.1.1.1', ua: UA, path: '/', query: {} }));
+    assert.equal(buffer.pending, 3, 'at most maxBuffered wait');
+    await buffer.flush();
+    assert.equal(logged.filter((m) => /2 page view\(s\) not recorded, the buffer was full/.test(m)).length, 1, 'the drop is said once, with the count');
+    await buffer.flush();
+    assert.equal(logged.length, 1, 'and not again');
+    // A write that fails is logged and dropped, not retried.
+    const store = (recordMany: (rows: unknown[]) => Promise<void>) => ({ recordMany, record: (v: never) => inner.record(v), summary: (d: number) => inner.summary(d), purge: () => inner.purge() });
+    const failing = new BatchedTrafficRepository(store(async () => { throw new Error('connection terminated'); }), { log: (m) => logged.push(m) });
+    await failing.record(waiting[0]?.visit as never);
+    await failing.flush();
+    check(logged.some((m) => /could not be written and were dropped: connection terminated/.test(m)), 'a failed write is logged');
+    assert.equal(failing.pending, 0, 'and its views are gone, not queued again');
+    // Stopping waits for the last write, but not for ever.
+    const stuck = new BatchedTrafficRepository(store(() => new Promise<void>(() => {})), { log: (m) => logged.push(m) });
+    await stuck.record(waiting[0]?.visit as never);
+    const t0 = Date.now();
+    await stuck.close(300);
+    check(Date.now() - t0 < 2000, 'a stuck last write does not hold the shutdown');
+    const ok = new BatchedTrafficRepository(inner, { log: (m) => logged.push(m) });
+    const before = (await inner.summary(1)).totals.visits;
+    await ok.record(waiting[0]?.visit as never);
+    await ok.close(1000);
+    assert.equal((await inner.summary(1)).totals.visits, before + 1, 'closing writes what was waiting');
+    const server = readFileSync('server/src/server.ts', 'utf8');
+    check(/visitBuffer\?\.close\(2_000\)/.test(server) && /app\.close\(\)\.then\(lastVisits, lastVisits\)/.test(server), 'SIGTERM closes the app, then awaits one last write of the page views, for at most 2 s');
+    await app.close();
+    console.log('  P2.18 page views: buffered as buildVisit output only, flushed in one write, capped and said, failed writes dropped, drained at shutdown');
+  }
+
+  // ---- Postgres: the session read, the unread count and the batch on a real database ----
+  if (process.env.DATABASE_URL) {
+    const pg = (await import('pg')).default;
+    const { PgAuthRepository, PgDesignRepository } = await import('../src/pgRepo');
+    const { PgSocialRepository } = await import('../src/pgSocial');
+    const { PgTrafficRepository } = await import('../src/trafficRepo');
+    const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
+    try {
+      await pool.query(readFileSync(new URL('../schema.sql', import.meta.url), 'utf8'));
+      const pAuth = new PgAuthRepository(pool);
+      const pDesigns = new PgDesignRepository(pool);
+      const pTraffic = new PgTrafficRepository(pool);
+      await pTraffic.init();
+      const sfx = Math.random().toString(36).slice(2, 7);
+      const papp = await buildApp(pDesigns, pAuth, templates, { social: new PgSocialRepository(pool), adminUsernames: [`pgchief${sfx}`], aiAdminPassword: 'pg stage two admin' });
+      const fan = await s2reg(papp, `pgfan2${sfx}`);
+      const chief = await s2reg(papp, `pgchief${sfx}`, 'pg stage two admin');
+      // Count what each request asks the database about its session.
+      const seen: string[] = [];
+      const realQuery = pg.Client.prototype.query;
+      pg.Client.prototype.query = function (this: unknown, ...args: unknown[]) {
+        const text = typeof args[0] === 'string' ? args[0] : (args[0] as { text?: string })?.text ?? '';
+        seen.push(text.replace(/\s+/g, ' '));
+        return (realQuery as (...a: unknown[]) => unknown).apply(this, args);
+      } as typeof realQuery;
+      try {
+        for (const [url, who] of [['/api/me', fan], ['/api/me', chief], ['/api/notifications/unread', fan], ['/api/admin/reports', chief]] as const) {
+          seen.length = 0;
+          const r = await papp.inject({ method: 'GET', url, headers: bearer(who.token) });
+          assert.equal(r.statusCode, 200, `${url}: ${r.body}`);
+          const authQ = seen.filter((q) => /auth_tokens|FROM users WHERE id|username_chosen FROM users/.test(q));
+          assert.equal(authQ.length, 1, `Postgres ${url}: one session query (${authQ.join(' | ')})`);
+          check(/FROM auth_tokens t JOIN users u ON u\.id = t\.user_id WHERE t\.token_hash = \$1 AND t\.expires_at > now\(\)/.test(authQ[0]), 'Postgres: the token joined to its account, still unexpired');
+        }
+      } finally {
+        pg.Client.prototype.query = realQuery;
+      }
+      const gone = await s2reg(papp, `pggone${sfx}`);
+      await pool.query('DELETE FROM auth_tokens WHERE token_hash = $1', [hashToken(gone.token)]);
+      assert.equal((await papp.inject({ method: 'GET', url: '/api/me', headers: bearer(gone.token) })).statusCode, 401, 'Postgres: a revoked token is refused on the next request');
+      const old = await s2reg(papp, `pgold${sfx}`);
+      await pool.query('UPDATE auth_tokens SET expires_at = now() - interval \'1 second\' WHERE token_hash = $1', [hashToken(old.token)]);
+      assert.equal((await papp.inject({ method: 'GET', url: '/api/me', headers: bearer(old.token) })).statusCode, 401, 'Postgres: an expired token is refused');
+      const del = await s2reg(papp, `pgdel${sfx}`);
+      assert.equal((await papp.inject({ method: 'DELETE', url: '/api/account', headers: bearer(del.token), payload: { password: S2PW } })).statusCode, 204);
+      assert.equal((await papp.inject({ method: 'GET', url: '/api/me', headers: bearer(del.token) })).statusCode, 401, 'Postgres: a deleted account is refused on the next request');
+      const lo = await s2reg(papp, `pglo${sfx}`);
+      await papp.inject({ method: 'POST', url: '/api/auth/logout', headers: bearer(lo.token) });
+      assert.equal((await papp.inject({ method: 'GET', url: '/api/me', headers: bearer(lo.token) })).statusCode, 401, 'Postgres: a signed-out token is refused on the next request');
+      const pw = await s2reg(papp, `pgpw${sfx}`);
+      const ch = await papp.inject({ method: 'POST', url: '/api/account/password', headers: bearer(pw.token), payload: { currentPassword: S2PW, newPassword: 'quarry-velvet-anchor5' } });
+      assert.equal(ch.statusCode, 200, ch.body);
+      assert.equal((await papp.inject({ method: 'GET', url: '/api/me', headers: bearer(pw.token) })).statusCode, 401, 'Postgres: the old session is refused after a password change');
+      const tx = await s2reg(papp, `pgtx${sfx}`);
+      for (let i = 0; i < 10; i++) {
+        const [r1, r2] = await Promise.all([papp.inject({ method: 'GET', url: '/api/me', headers: bearer(fan.token) }), papp.inject({ method: 'GET', url: '/api/me', headers: bearer(tx.token) })]);
+        assert.equal(r1.json().id, fan.id);
+        assert.equal(r2.json().id, tx.id, 'Postgres: two sessions at once never see each other’s account');
+      }
+      assert.deepEqual((await papp.inject({ method: 'GET', url: '/api/notifications/unread', headers: bearer(fan.token) })).json(), { unread: 0 }, 'Postgres: the unread count');
+      // The batch: one statement for many views, each with its own time.
+      const at = new Date(Date.now() - 4000);
+      const { buildVisit } = await import('../src/trafficRepo');
+      const mark = `/s2-batch-${sfx}`;
+      const v = buildVisit({ ip: '203.0.113.9', ua: 'Mozilla/5.0 (S2 batch) Chrome/120 Safari/537.36', path: mark, query: {} });
+      const writes: string[] = [];
+      const realQ = pool.query.bind(pool);
+      (pool as unknown as { query: (...a: unknown[]) => unknown }).query = (...a: unknown[]) => { writes.push(String(a[0])); return (realQ as (...x: unknown[]) => unknown)(...a); };
+      await pTraffic.recordMany(Array.from({ length: 50 }, (_, i) => ({ visit: { ...v, path: `${mark}-${i % 2}` }, at })));
+      (pool as unknown as { query: typeof realQ }).query = realQ;
+      assert.equal(writes.length, 1, 'Postgres: fifty page views are one statement');
+      const rows = await pool.query('SELECT count(*)::int AS n, min(created_at) AS t FROM visits WHERE path LIKE $1', [`${mark}%`]);
+      assert.equal(rows.rows[0].n, 50, 'Postgres: all of them written');
+      check(Math.abs(new Date(rows.rows[0].t).getTime() - at.getTime()) < 1000, 'Postgres: with the time of the view, not of the write');
+      const cols = await pool.query("SELECT column_name FROM information_schema.columns WHERE table_name = 'visits'");
+      check(!cols.rows.some((c: { column_name: string }) => /ip|agent/.test(c.column_name)), 'Postgres: the visits table has no address or user-agent column');
+      await papp.close();
+    } finally {
+      await pool.end();
+    }
+    console.log('  Postgres: one session query per request, revocations at once, no crossing; unread count; page views in one statement');
+  }
+  console.log('performance plan stage 2 (server), part one: all assertions passed');
+}
+
+// ---------- 2026-10: performance plan, stage 2 (server), part two ----------
+// Pre-compressed files (P2.3), thumbnail ETags (P2.4), the anonymous scene's
+// stripped copy (P2.5) and the static HTML shells (P2.9). Every one of them
+// keeps something for later, so every one is checked against the rules for
+// what may be kept: nothing private, nothing before the visibility check, no
+// layer, nothing a caller can choose.
+{
+  const { mkdtempSync, writeFileSync, mkdirSync, copyFileSync, readdirSync: listDir, readFileSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { createHash } = await import('node:crypto');
+  const { brotliCompressSync, constants: zc, gunzipSync } = await import('node:zlib');
+  const { MemoryAiUsageRepository, MemoryAiEventsRepository } = await import('../src/memoryRepo');
+  const { StrippedSceneCache } = await import('../src/sceneCache');
+  const { WorkerPool } = await import('../src/workerPool');
+  const check = (cond: unknown, msg: string): void => assert.ok(cond, msg);
+  const S2PW = 'lantern-orchid-quarry8';
+  const sha = (b: Uint8Array): string => createHash('sha256').update(b).digest('hex');
+  const png = (n: number): Buffer => Buffer.concat([Buffer.from('89504e470d0a1a0a', 'hex'), Buffer.alloc(200 + n, n & 0xff)]);
+  const s2reg = async (app: FastifyInstance, u: string, adminPassword?: string): Promise<{ token: string; id: string }> => {
+    const r = await app.inject({ method: 'POST', url: '/api/auth/register', payload: { username: u, password: S2PW, email: `${u}@example.test`, acceptedVersion: 'test', adminPassword } });
+    assert.equal(r.statusCode, 201, r.body);
+    const token = (r.json() as { token: string }).token;
+    return { token, id: ((await app.inject({ method: 'GET', url: '/api/me', headers: bearer(token) })).json() as { id: string }).id };
+  };
+  const makeWith = async (app: FastifyInstance, token: string, thumb: Buffer | null, isPublic: boolean, title = 'S2 design'): Promise<string> => {
+    const r = await app.inject({ method: 'POST', url: '/api/designs', headers: bearer(token), payload: { title, templateId: DEFAULT_TEMPLATE.id, templateVersion: 1, palette: PALETTE, cellsGzB64, ...(thumb ? { thumbnailPngB64: thumb.toString('base64') } : {}) } });
+    assert.equal(r.statusCode, 201, r.body);
+    const id = (r.json() as { id: string }).id;
+    if (isPublic) assert.equal((await app.inject({ method: 'PATCH', url: `/api/designs/${id}`, headers: bearer(token), payload: { isPublic: true } })).statusCode, 200);
+    return id;
+  };
+
+  // A build output with compressed copies beside some files, as the build writes them.
+  const dist = mkdtempSync(`${tmpdir()}/tifo-perf-s2-`);
+  for (const f of listDir('.').filter((n) => n.endsWith('.html'))) copyFileSync(f, `${dist}/${f}`);
+  mkdirSync(`${dist}/assets`);
+  const JS = `export const s2 = ${JSON.stringify('tifo '.repeat(2000))};\n`;
+  const JS_BR = brotliCompressSync(Buffer.from(JS), { params: { [zc.BROTLI_PARAM_QUALITY]: 11 } });
+  const JS_GZ = (await import('node:zlib')).gzipSync(Buffer.from(JS), { level: 9 });
+  writeFileSync(`${dist}/assets/app-S2hash01.js`, JS);
+  writeFileSync(`${dist}/assets/app-S2hash01.js.br`, JS_BR);
+  writeFileSync(`${dist}/assets/app-S2hash01.js.gz`, JS_GZ);
+  writeFileSync(`${dist}/assets/only-S2hash02.js.br`, JS_BR); // a copy with no original
+  const SVG = `<svg xmlns="http://www.w3.org/2000/svg">${'<g/>'.repeat(500)}</svg>\n`;
+  writeFileSync(`${dist}/favicon.svg`, SVG);
+  writeFileSync(`${dist}/favicon.svg.br`, brotliCompressSync(Buffer.from(SVG)));
+  writeFileSync(`${dist}/og-card.png`, png(1));
+
+  // ---- P2.3: the build's compressed copies, and nothing compressed on the fly ----
+  {
+    const auth = new MemoryAuthRepository();
+    const designs = new MemoryDesignRepository((id) => auth.usernameOf(id));
+    const app = await buildApp(designs, auth, templates, { staticDir: dist, rateLimit: true });
+    let ip = 0;
+    const get = (url: string, headers: Record<string, string> = {}) => app.inject({ method: 'GET', url, headers, remoteAddress: `198.18.210.${ip++ % 250}` });
+    const br = await get('/assets/app-S2hash01.js', { 'accept-encoding': 'br, gzip' });
+    assert.equal(br.statusCode, 200);
+    assert.equal(br.headers['content-encoding'], 'br', 'brotli when the browser takes it');
+    assert.deepEqual(br.rawPayload, JS_BR, 'the build’s own bytes');
+    assert.equal(Number(br.headers['content-length']), JS_BR.byteLength, 'and their length');
+    check(String(br.headers['content-type']).includes('javascript'), `the original’s type (${br.headers['content-type']})`);
+    check(/accept-encoding/i.test(String(br.headers.vary)), 'Vary: Accept-Encoding');
+    assert.equal(br.headers['cache-control'], 'public, max-age=31536000, immutable', 'the original’s cache rule');
+    assert.equal(br.headers['x-ratelimit-limit'], '600', 'still counted in the assets bucket, decided by the registered route');
+    const gz = await get('/assets/app-S2hash01.js', { 'accept-encoding': 'gzip' });
+    assert.equal(gz.headers['content-encoding'], 'gzip', 'gzip when that is all it takes');
+    assert.deepEqual(gz.rawPayload, JS_GZ);
+    assert.equal(Number(gz.headers['content-length']), JS_GZ.byteLength);
+    for (const ae of [undefined, 'identity', 'br;q=0, gzip;q=0', 'deflate']) {
+      const plain = await get('/assets/app-S2hash01.js', ae ? { 'accept-encoding': ae } : {});
+      assert.equal(plain.headers['content-encoding'], undefined, `the original when neither is taken (${ae})`);
+      assert.equal(plain.body, JS);
+      check(/accept-encoding/i.test(String(plain.headers.vary)), 'and Vary on that answer too, so no cache hands it to a browser that takes brotli');
+    }
+    assert.equal((await get('/assets/app-S2hash01.js', { 'accept-encoding': 'br;q=0, gzip' })).headers['content-encoding'], 'gzip', 'q-values are honoured');
+    // 304s, per copy.
+    const etag = String(br.headers.etag);
+    const again = await get('/assets/app-S2hash01.js', { 'accept-encoding': 'br', 'if-none-match': etag });
+    assert.equal(again.statusCode, 304, 'a copy revalidates');
+    assert.equal(again.rawPayload.byteLength, 0);
+    assert.equal((await get('/assets/app-S2hash01.js', { 'accept-encoding': 'gzip', 'if-none-match': etag })).statusCode, 200, 'the brotli copy’s ETag is not the gzip copy’s');
+    // The copies are never files of their own, and never stand in for a missing original.
+    for (const url of ['/assets/app-S2hash01.js.br', '/assets/app-S2hash01.js.gz', '/assets/only-S2hash02.js', '/assets/only-S2hash02.js.br', '/favicon.svg.br']) {
+      const r = await get(url, { 'accept-encoding': 'br, gzip' });
+      assert.equal(r.statusCode, 404, `${url} is a 404`);
+      check(!r.headers['content-encoding'], `${url} sends no compressed bytes`);
+    }
+    // Nothing outside the build is reachable with a copy asked for, however the path is spelled.
+    writeFileSync(`${dist}/../tifo-s2-outside.txt`, 'S2-OUTSIDE-MARKER');
+    writeFileSync(`${dist}/../tifo-s2-outside.txt.br`, brotliCompressSync(Buffer.from('S2-OUTSIDE-MARKER')));
+    for (const url of ['/assets/../../tifo-s2-outside.txt', '/assets/..%2f..%2ftifo-s2-outside.txt', '/assets/%2e%2e/%2e%2e/tifo-s2-outside.txt', '/..%2ftifo-s2-outside.txt', '/assets/..%5c..%5ctifo-s2-outside.txt', '/%2e%2e/tifo-s2-outside.txt.br']) {
+      const r = await get(url, { 'accept-encoding': 'br, gzip' });
+      check(r.statusCode >= 300 && r.statusCode !== 304, `${url}: not served (${r.statusCode})`);
+      check(!r.rawPayload.includes(Buffer.from('S2-OUTSIDE')) && r.rawPayload.indexOf(brotliCompressSync(Buffer.from('S2-OUTSIDE-MARKER'))) < 0, `${url}: nothing from outside the build`);
+    }
+    // A spelling that resolves to the file inside the build is the file, with its rule.
+    const dotted = await get('/assets/./app-S2hash01.js', { 'accept-encoding': 'br' });
+    check(dotted.statusCode !== 200 || (dotted.headers['cache-control'] === 'public, max-age=31536000, immutable' && Buffer.compare(dotted.rawPayload, JS_BR) === 0), 'a dotted path is the same file under the same rule');
+    // A public file outside /assets keeps its own rule when its copy is sent.
+    const fav = await get('/favicon.svg', { 'accept-encoding': 'br' });
+    assert.equal(fav.headers['content-encoding'], 'br');
+    assert.equal(fav.headers['cache-control'], 'public, max-age=3600, stale-while-revalidate=86400', 'the copy has its original’s cache rule');
+    // Pages and API answers are not compressed by the server at all.
+    for (const url of ['/clubs', '/api/templates', '/']) {
+      const r = await get(url, { 'accept-encoding': 'br, gzip' });
+      assert.equal(r.headers['content-encoding'], undefined, `${url} is not compressed on the fly`);
+    }
+    const pkg = JSON.parse(readFileSync('package.json', 'utf8')) as { dependencies: Record<string, string> };
+    check(!pkg.dependencies['@fastify/compress'], 'no on-the-fly compression plugin');
+    const routesSrc = readFileSync('server/src/routes.ts', 'utf8');
+    check(/preCompressed: true/.test(routesSrc) && /globIgnore: \['\*\*\/\*\.br', '\*\*\/\*\.gz'\]/.test(routesSrc) && !/@fastify\/compress/.test(routesSrc), 'preCompressed, copies never routes, nothing compressed per request');
+    await app.close();
+  }
+
+  // ---- P2.3: an answer that carries a secret says no-store, no-transform ----
+  {
+    const auth = new MemoryAuthRepository();
+    const designs = new MemoryDesignRepository((id) => auth.usernameOf(id));
+    const app = await buildApp(designs, auth, templates, {
+      staticDir: dist, aiUsage: new MemoryAiUsageRepository(), aiEvents: new MemoryAiEventsRepository(), aiAdminPassword: 'stage two transform admin',
+      oauth: { google: { id: 'client-id', secret: 'client-secret' } }, emailSender: { send: async () => {} } as never,
+    });
+    const secret = (r: { headers: Record<string, unknown>; statusCode: number }, label: string): void => {
+      const cc = String(r.headers['cache-control'] ?? '');
+      check(/\bno-store\b/.test(cc) && /\bno-transform\b/.test(cc), `${label} (${r.statusCode}): no-store, no-transform (${cc})`);
+    };
+    const reg = await app.inject({ method: 'POST', url: '/api/auth/register', payload: { username: 'transform_s2', password: S2PW, email: 'transform_s2@example.test', acceptedVersion: 'test' } });
+    assert.equal(reg.statusCode, 201);
+    secret(reg, 'sign-up, with its session token');
+    const login = await app.inject({ method: 'POST', url: '/api/auth/login', payload: { username: 'transform_s2', password: S2PW } });
+    assert.equal(login.statusCode, 200);
+    secret(login, 'sign-in');
+    const tok = (login.json() as { token: string }).token;
+    const me = (await app.inject({ method: 'GET', url: '/api/me', headers: bearer(tok) })).json() as { id: string };
+    await auth.markEmailVerified(me.id);
+    secret(await app.inject({ method: 'GET', url: '/api/account/export', headers: bearer(tok) }), 'the account export');
+    const link = await app.inject({ method: 'POST', url: '/api/account/link/google', headers: bearer(tok), payload: { password: S2PW } });
+    assert.equal(link.statusCode, 200, link.body);
+    secret(link, 'a link start, with its sealed state cookie');
+    const start = await app.inject({ method: 'GET', url: '/api/auth/google' });
+    assert.equal(start.statusCode, 302);
+    secret(start, 'a sign-in start, with its sealed state cookie');
+    secret(await app.inject({ method: 'GET', url: '/api/auth/google/callback?code=x&state=y' }), 'a sign-in return');
+    secret(await app.inject({ method: 'GET', url: '/api/auth/verify?token=abc' }), 'the verification link');
+    await auth.linkIdentity('google', 'sub-s2-transform', me.id);
+    const ticket = 'f'.repeat(64);
+    assert.ok(await auth.createHandoffIfLinked(me.id, 'google', 'sub-s2-transform', hashToken(ticket), new Date(Date.now() + 60_000)));
+    const hand = await app.inject({ method: 'POST', url: '/api/auth/handoff', headers: { cookie: `tm_handoff=${ticket}` } });
+    assert.equal(hand.statusCode, 200, hand.body);
+    secret(hand, 'the Google handoff, which hands out a session');
+    const pw = await app.inject({ method: 'POST', url: '/api/account/password', headers: bearer(tok), payload: { currentPassword: S2PW, newPassword: 'ember-violet-harbour6' } });
+    assert.equal(pw.statusCode, 200, pw.body);
+    secret(pw, 'a password change, with the session it keeps');
+    const unlock = await app.inject({ method: 'POST', url: '/api/ai/unlock', payload: { password: 'stage two transform admin' } });
+    assert.equal(unlock.statusCode, 200);
+    secret(unlock, 'the admin unlock, with its token and cookie');
+    // The guard is written down, response by response.
+    const checks = readFileSync('SECURITY-CHECKS.md', 'utf8');
+    check(/no-transform/.test(checks) && /BREACH/.test(checks), 'SECURITY-CHECKS.md says which answers carry a secret and why BREACH has nothing to work with');
+    await app.close();
+    console.log('  P2.3 pre-compressed files: br, gzip or the original by Accept-Encoding, right length, Vary, 304s; copies never routes; secrets no-transform');
+  }
+
+  // ---- P2.4: a thumbnail's ETag is its content hash, compared after the visibility check ----
+  const thumbFlow = async (label: string, designs: InstanceType<typeof MemoryDesignRepository> | import('../src/repo').DesignRepository, auth: import('../src/repo').AuthRepository, suffix: string): Promise<void> => {
+    const app = await buildApp(designs, auth, templates, { adminUsernames: [`thmod${suffix}`], aiAdminPassword: 'stage two thumb admin' });
+    const owner = await s2reg(app, `thown${suffix}`);
+    const other = await s2reg(app, `thoth${suffix}`);
+    const mod = await s2reg(app, `thmod${suffix}`, 'stage two thumb admin');
+    const P1 = png(7);
+    const pub = await makeWith(app, owner.token, P1, true);
+    const url = `/api/designs/${pub}/thumbnail.png`;
+    const first = await app.inject({ method: 'GET', url });
+    assert.equal(first.statusCode, 200);
+    assert.equal(first.headers['cache-control'], 'public, no-cache', `${label}: a public picture: public, revalidated`);
+    assert.equal(first.headers.etag, `"${sha(P1)}"`, `${label}: its ETag is the sha-256 of the stored bytes`);
+    assert.deepEqual(first.rawPayload, P1);
+    for (const inm of [`"${sha(P1)}"`, `W/"${sha(P1)}"`, `"nope", "${sha(P1)}"`]) {
+      const again = await app.inject({ method: 'GET', url, headers: { 'if-none-match': inm } });
+      assert.equal(again.statusCode, 304, `${label}: a repeat view is a 304 (${inm})`);
+      assert.equal(again.rawPayload.byteLength, 0, 'with no body');
+      assert.equal(again.headers['cache-control'], 'public, no-cache', 'and the same Cache-Control as its 200');
+      assert.equal(again.headers.etag, `"${sha(P1)}"`);
+    }
+    for (const who of [undefined, bearer(other.token), bearer(owner.token)]) {
+      assert.equal((await app.inject({ method: 'GET', url, headers: { ...who, 'if-none-match': `"${sha(P1)}"` } })).statusCode, 304, `${label}: the same answer for everyone`);
+    }
+    assert.equal((await app.inject({ method: 'GET', url, headers: { 'if-none-match': '"0000"' } })).statusCode, 200, `${label}: another ETag gets the picture`);
+    // A new picture is a new hash.
+    const P2 = png(9);
+    assert.equal((await app.inject({ method: 'PUT', url: `/api/designs/${pub}`, headers: bearer(owner.token), payload: { palette: PALETTE, cellsGzB64, thumbnailPngB64: P2.toString('base64') } })).statusCode, 200);
+    const changed = await app.inject({ method: 'GET', url, headers: { 'if-none-match': `"${sha(P1)}"` } });
+    assert.equal(changed.statusCode, 200, `${label}: a changed picture is sent again`);
+    assert.equal(changed.headers.etag, `"${sha(P2)}"`, `${label}: with the new hash`);
+    // A private design's picture: the owner's only, never an ETag, never a 304.
+    const P3 = png(11);
+    const priv = await makeWith(app, owner.token, P3, false);
+    const purl = `/api/designs/${priv}/thumbnail.png`;
+    const own = await app.inject({ method: 'GET', url: purl, headers: bearer(owner.token) });
+    assert.equal(own.statusCode, 200);
+    assert.equal(own.headers['cache-control'], 'private, no-store', `${label}: private, no-store`);
+    assert.equal(own.headers.etag, undefined, `${label}: no ETag on a private picture`);
+    assert.equal((await app.inject({ method: 'GET', url: purl, headers: { ...bearer(owner.token), 'if-none-match': `"${sha(P3)}"` } })).statusCode, 200, `${label}: never a 304, even for its owner with the right hash`);
+    for (const who of [undefined, bearer(other.token)]) {
+      assert.equal((await app.inject({ method: 'GET', url: purl, headers: { ...who, 'if-none-match': `"${sha(P3)}"` } })).statusCode, 404, `${label}: anyone else, the right hash in hand, gets the 404 of an id that does not exist`);
+    }
+    // A public design that stops being public: an old ETag gets exactly what it would without one.
+    const lose = async (kind: string, act: (id: string) => Promise<unknown>): Promise<void> => {
+      const P = png(13 + kind.length);
+      const id = await makeWith(app, owner.token, P, true, `S2 ${kind}`);
+      const u = `/api/designs/${id}/thumbnail.png`;
+      assert.equal((await app.inject({ method: 'GET', url: u, headers: { 'if-none-match': `"${sha(P)}"` } })).statusCode, 304);
+      await act(id);
+      for (const who of [undefined, bearer(other.token)]) {
+        const r = await app.inject({ method: 'GET', url: u, headers: { ...who, 'if-none-match': `"${sha(P)}"` } });
+        assert.equal(r.statusCode, 404, `${label}: ${kind}: a stale ETag is a 404 for everyone else (${r.statusCode})`);
+        check(/no-store|no-cache/.test(String(r.headers['cache-control'])), 'and the 404 is not cached');
+      }
+      const mine = await app.inject({ method: 'GET', url: u, headers: { ...bearer(owner.token), 'if-none-match': `"${sha(P)}"` } });
+      check(mine.statusCode === 404 || (mine.statusCode === 200 && mine.headers['cache-control'] === 'private, no-store' && !mine.headers.etag), `${label}: ${kind}: and for the owner a private answer or nothing (${mine.statusCode})`);
+    };
+    await lose('unpublished', (id) => app.inject({ method: 'PATCH', url: `/api/designs/${id}`, headers: bearer(owner.token), payload: { isPublic: false } }));
+    await lose('taken down', (id) => app.inject({ method: 'POST', url: `/api/admin/designs/${id}/takedown`, headers: bearer(mod.token) }));
+    await lose('trashed', (id) => app.inject({ method: 'DELETE', url: `/api/designs/${id}`, headers: bearer(owner.token) }));
+    await lose('deleted', async (id) => {
+      await app.inject({ method: 'DELETE', url: `/api/designs/${id}`, headers: bearer(owner.token) });
+      await app.inject({ method: 'DELETE', url: `/api/designs/${id}?permanent=1`, headers: bearer(owner.token) });
+    });
+    // A copy carries its picture's hash.
+    const copy = await app.inject({ method: 'POST', url: `/api/designs/${pub}/fork`, headers: bearer(other.token), payload: {} });
+    assert.equal(copy.statusCode, 201);
+    const copyId = (copy.json() as { id: string }).id;
+    await app.inject({ method: 'PATCH', url: `/api/designs/${copyId}`, headers: bearer(other.token), payload: { isPublic: true } });
+    assert.equal((await app.inject({ method: 'GET', url: `/api/designs/${copyId}/thumbnail.png` })).headers.etag, `"${sha(P2)}"`, `${label}: a fork’s picture has the hash of its bytes`);
+    await app.close();
+  };
+  {
+    const auth = new MemoryAuthRepository();
+    await thumbFlow('memory', new MemoryDesignRepository((id) => auth.usernameOf(id)), auth, '_m2');
+    console.log('  P2.4 thumbnails: ETag = sha-256 of the bytes, 304 only after the visibility check and only public; private no-store, never 304; stale ETags 404');
+  }
+
+  // ---- P2.5: anonymous views of a scene reuse its stripped copy, by the stored hash ----
+  const SECRET = 'data:image/webp;base64,UzItT1dORVItTEFZRVI=';
+  const scene = (banner: string, layers = true) => gzipSync(Buffer.from(JSON.stringify({ v: 1, banners: [{ id: banner, text: banner }], ...(layers ? { layers: [{ id: 'l1', src: SECRET }] } : {}) }))).toString('base64');
+  const sceneOf = (r: { json(): unknown }): string | null => {
+    const b64 = (r.json() as { sceneGzB64: string | null }).sceneGzB64;
+    return b64 ? gunzipSync(Buffer.from(b64, 'base64')).toString('utf8') : null;
+  };
+  const sceneFlow = async (label: string, designs: import('../src/repo').DesignRepository, auth: import('../src/repo').AuthRepository, suffix: string, reads: { scene: number }): Promise<void> => {
+    const cache = new StrippedSceneCache();
+    const app = await buildApp(designs, auth, templates, { sceneCache: cache, adminUsernames: [`scmod${suffix}`], aiAdminPassword: 'stage two scene admin' });
+    const owner = await s2reg(app, `scown${suffix}`);
+    const other = await s2reg(app, `scoth${suffix}`);
+    const mod = await s2reg(app, `scmod${suffix}`, 'stage two scene admin');
+    const pub = await makeWith(app, owner.token, null, true);
+    const put = (id: string, b64: string) => app.inject({ method: 'PUT', url: `/api/designs/${id}/scene`, headers: bearer(owner.token), payload: { sceneGzB64: b64 } });
+    const v1 = scene('derby-v1');
+    assert.equal((await put(pub, v1)).statusCode, 200);
+    const a1 = await app.inject({ method: 'GET', url: `/api/designs/${pub}/scene` });
+    assert.match(sceneOf(a1) ?? '', /derby-v1/, `${label}: the banners are there`);
+    check(!(sceneOf(a1) ?? '').includes(SECRET) && !(sceneOf(a1) ?? '').includes('"layers"'), `${label}: the owner’s layers are not`);
+    const before = reads.scene;
+    for (const who of [undefined, bearer(other.token)]) {
+      const again = await app.inject({ method: 'GET', url: `/api/designs/${pub}/scene`, headers: who });
+      assert.match(sceneOf(again) ?? '', /derby-v1/);
+    }
+    assert.equal(reads.scene, before, `${label}: repeat views do not read the stored scene`);
+    // Right after the owner saves, the next anonymous view has the new banners.
+    assert.equal((await put(pub, scene('derby-v2'))).statusCode, 200);
+    const a2 = await app.inject({ method: 'GET', url: `/api/designs/${pub}/scene` });
+    assert.match(sceneOf(a2) ?? '', /derby-v2/, `${label}: an anonymous view right after a save shows the new banners`);
+    check(!(sceneOf(a2) ?? '').includes('derby-v1'), `${label}: and not the old ones`);
+    // The owner's own view is the scene as stored, layers and all.
+    const mine = await app.inject({ method: 'GET', url: `/api/designs/${pub}/scene`, headers: bearer(owner.token) });
+    assert.match(sceneOf(mine) ?? '', /derby-v2/);
+    check((sceneOf(mine) ?? '').includes(SECRET), `${label}: the owner gets their layers back`);
+    // A private design is never served from the cache, and never cached.
+    const priv = await makeWith(app, owner.token, null, false);
+    assert.equal((await put(priv, scene('private-v1'))).statusCode, 200);
+    const sizeBefore = cache.size;
+    for (const who of [undefined, bearer(other.token)]) assert.equal((await app.inject({ method: 'GET', url: `/api/designs/${priv}/scene`, headers: who })).statusCode, 404, `${label}: a private scene is a 404 to others`);
+    check((sceneOf(await app.inject({ method: 'GET', url: `/api/designs/${priv}/scene`, headers: bearer(owner.token) })) ?? '').includes(SECRET), 'its owner has it, layers and all');
+    assert.equal(cache.size, sizeBefore, `${label}: nothing about a private design is kept`);
+    // Kept while public, then taken down: the copy is never served again.
+    const down = await makeWith(app, owner.token, null, true);
+    assert.equal((await put(down, scene('down-v1'))).statusCode, 200);
+    assert.match(sceneOf(await app.inject({ method: 'GET', url: `/api/designs/${down}/scene` })) ?? '', /down-v1/);
+    assert.equal((await app.inject({ method: 'POST', url: `/api/admin/designs/${down}/takedown`, headers: bearer(mod.token) })).statusCode, 200);
+    for (const who of [undefined, bearer(other.token)]) assert.equal((await app.inject({ method: 'GET', url: `/api/designs/${down}/scene`, headers: who })).statusCode, 404, `${label}: a taken-down design’s scene is not served from the cache`);
+    const trashedId = await makeWith(app, owner.token, null, true);
+    assert.equal((await put(trashedId, scene('trash-v1'))).statusCode, 200);
+    await app.inject({ method: 'GET', url: `/api/designs/${trashedId}/scene` });
+    await app.inject({ method: 'DELETE', url: `/api/designs/${trashedId}`, headers: bearer(owner.token) });
+    assert.equal((await app.inject({ method: 'GET', url: `/api/designs/${trashedId}/scene` })).statusCode, 404, `${label}: nor a trashed one’s`);
+    // The cache holds stripped scenes and nothing else.
+    check(cache.size > 0, 'something was kept');
+    for (const v of cache.values()) {
+      if (!v) continue;
+      const text = gunzipSync(Buffer.from(v)).toString('utf8');
+      check(!text.includes(SECRET) && !/"layers"/.test(text), `${label}: the cache never holds a layer`);
+    }
+    // A strip the worker cannot do now is a 503, never the scene as stored.
+    const broken = new WorkerPool({ name: 'scene-test', file: { url: new URL(`data:text/javascript,import{parentPort}from'node:worker_threads';parentPort.postMessage({ready:true});parentPort.on('message',()=>process.exit(3))`) }, size: 1, maxQueue: 1, timeoutMs: 2000, idleMs: 1000, resourceLimits: { maxOldGenerationSizeMb: 32 }, log: () => {} });
+    const app2 = await buildApp(designs, auth, templates, { workers: { scene: broken as never }, sceneCache: new StrippedSceneCache() });
+    const r503 = await app2.inject({ method: 'GET', url: `/api/designs/${pub}/scene` });
+    assert.equal(r503.statusCode, 503, `${label}: a worker that dies answers 503`);
+    check(!r503.body.includes(SECRET) && !r503.body.includes('sceneGzB64'), 'with no scene in it');
+    const own503 = await app2.inject({ method: 'GET', url: `/api/designs/${pub}/scene`, headers: bearer(owner.token) });
+    assert.equal(own503.statusCode, 200, `${label}: the owner path needs no worker and is unchanged`);
+    await broken.close();
+    await app2.close();
+    await app.close();
+  };
+  {
+    const auth = new MemoryAuthRepository();
+    const reads = { scene: 0 };
+    class CountingDesigns extends MemoryDesignRepository {
+      override async getSceneRow(id: string) { reads.scene++; return super.getSceneRow(id); }
+      override async getScene(id: string) { reads.scene++; return super.getScene(id); }
+    }
+    await sceneFlow('memory', new CountingDesigns((id) => auth.usernameOf(id)), auth, '_m2', reads);
+    // Bounded in bytes, one version per design.
+    const small = new StrippedSceneCache(1000);
+    small.set('d1', 'h1', new Uint8Array(600));
+    small.set('d1', 'h2', new Uint8Array(600));
+    assert.equal(small.size, 1, 'a newer version replaces the older');
+    small.set('d2', 'h1', new Uint8Array(600));
+    check(small.usedBytes <= 1000 && small.size === 1, `bounded in bytes, least recently used out first (${small.usedBytes} bytes, ${small.size} kept)`);
+    assert.equal(small.get('d1', 'h2'), undefined);
+    console.log('  P2.5 scenes: anonymous views from the stripped copy keyed by the stored hash; new banners right after a save; private, taken-down and trashed never served from it; no layer ever kept; worker failure 503');
+  }
+
+  // ---- P2.9: the static HTML shells ----
+  {
+    const inlineScript = /<script(?![^>]*\bsrc=)[^>]*>\s*\S/i;
+    const SHELLS = ['/app?design=7f000000-0000-4000-8000-0000000000aa', '/clubs', '/legal', '/tifo-spec'];
+    const auth = new MemoryAuthRepository();
+    const designs = new MemoryDesignRepository((id) => auth.usernameOf(id));
+    const app = await buildApp(designs, auth, templates, { staticDir: dist, publicUrl: 'https://tifomaker.org' });
+    const u = await s2reg(app, 'shell_s2');
+    for (const url of SHELLS) {
+      const ref = await app.inject({ method: 'GET', url });
+      assert.equal(ref.statusCode, 200, url);
+      assert.equal(ref.headers['cache-control'], 'no-cache', `${url}: still revalidated every time`);
+      assert.equal(ref.headers['content-type'], 'text/html; charset=utf-8', `${url}: utf-8`);
+      const etag = String(ref.headers.etag ?? '');
+      check(/^"[0-9a-f]{32}"$/.test(etag), `${url}: an ETag (${etag})`);
+      check(!inlineScript.test(ref.body), `${url}: the served page has no inline script`);
+      check(ref.body.includes('https://tifomaker.org'), `${url}: it names the fixed address`);
+      for (const headers of [bearer(u.token), { cookie: 'tm_admin=x' }, { host: 'evil.example' }, { host: 'tifomaker.org:1234' }, { 'accept-language': 'ar' }, { 'x-forwarded-host': 'evil.example' }]) {
+        const r = await app.inject({ method: 'GET', url, headers });
+        assert.equal(r.body, ref.body, `${url}: the same bytes whoever asks (${JSON.stringify(headers)})`);
+        assert.equal(r.headers.etag, etag);
+        check(!r.body.includes('evil.example') && !r.body.includes(':1234'), `${url}: a forged Host never appears`);
+      }
+      for (const inm of [etag, `W/${etag}`]) {
+        const r = await app.inject({ method: 'GET', url, headers: { 'if-none-match': inm } });
+        assert.equal(r.statusCode, 304, `${url}: a 304 for its ETag`);
+        assert.equal(r.rawPayload.byteLength, 0);
+        assert.equal(r.headers.etag, etag);
+        assert.equal(r.headers['cache-control'], 'no-cache', 'with the 200’s Cache-Control');
+      }
+      assert.equal((await app.inject({ method: 'GET', url, headers: { 'if-none-match': '"0123456789abcdef0123456789abcdef"' } })).statusCode, 200, `${url}: only for its own ETag`);
+    }
+    assert.equal(app.htmlShellStats!().rendered, SHELLS.length, 'each built once');
+    // Never the pages that name designs: those are read per request.
+    const pub = await makeWith(app, u.token, png(3), true, 'Shell check public');
+    for (const url of ['/', '/community', `/t/${pub}`, `/d/${pub}`]) {
+      const r = await app.inject({ method: 'GET', url });
+      assert.equal(r.statusCode, 200, url);
+      assert.equal(r.headers.etag, undefined, `${url} is not a kept shell`);
+    }
+    check((await app.inject({ method: 'GET', url: `/t/${pub}` })).body.includes('Shell check public'), 'the share page names the public design');
+    await app.inject({ method: 'PATCH', url: `/api/designs/${pub}`, headers: bearer(u.token), payload: { isPublic: false } });
+    check(!(await app.inject({ method: 'GET', url: `/t/${pub}` })).body.includes('Shell check public'), 'and stops the moment it is private');
+    await app.close();
+    // Without PUBLIC_URL: kept per address, at most eight of them.
+    const app2 = await buildApp(designs, auth, templates, { staticDir: dist });
+    for (let i = 1; i <= 9; i++) {
+      const r = await app2.inject({ method: 'GET', url: '/legal', headers: { host: `localhost:${9100 + i}` } });
+      check(r.body.includes(`http://localhost:${9100 + i}/legal`), `host ${i}: its own address in its page`);
+    }
+    const stats = app2.htmlShellStats!();
+    assert.equal(stats.rendered, 9);
+    assert.equal(stats.cached, 8, 'eight addresses kept');
+    for (let i = 1; i <= 8; i++) await app2.inject({ method: 'GET', url: '/legal', headers: { host: `localhost:${9100 + i}` } });
+    assert.equal(app2.htmlShellStats!().rendered, 9, 'the eight kept ones are not built again');
+    const ninth = await app2.inject({ method: 'GET', url: '/legal', headers: { host: 'localhost:9109' } });
+    check(ninth.body.includes('http://localhost:9109/legal'), 'the ninth is right');
+    assert.equal(app2.htmlShellStats!().rendered, 10, 'and built fresh each time, never kept');
+    const forged = await app2.inject({ method: 'GET', url: '/legal', headers: { host: 'evil.example' } });
+    check(!forged.body.includes('evil.example') && forged.body.includes('https://tifomaker.org/legal'), 'a Host not on the list is the canonical address');
+    await app2.close();
+    console.log('  P2.9 shells: built once with an ETag and utf-8, no-cache; identical for every caller and Host; 304 only for its ETag; 8 addresses at most without PUBLIC_URL; never the design pages');
+  }
+
+  // ---- Postgres: hashes stored with the bytes, one query per repeat view, lazy backfill ----
+  if (process.env.DATABASE_URL) {
+    const pg = (await import('pg')).default;
+    const { PgAuthRepository, PgDesignRepository } = await import('../src/pgRepo');
+    const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
+    try {
+      await pool.query(readFileSync(new URL('../schema.sql', import.meta.url), 'utf8'));
+      const sfx = Math.random().toString(36).slice(2, 7);
+      const pAuth = new PgAuthRepository(pool);
+      const pDesigns = new PgDesignRepository(pool);
+      await thumbFlow('Postgres', pDesigns, pAuth, `_p${sfx}`);
+      const reads = { scene: 0 };
+      class CountingPg extends PgDesignRepository {
+        override async getSceneRow(id: string) { reads.scene++; return super.getSceneRow(id); }
+        override async getScene(id: string) { reads.scene++; return super.getScene(id); }
+      }
+      await sceneFlow('Postgres', new CountingPg(pool), pAuth, `_p${sfx}`, reads);
+      // Rows written before the hashes existed may be NULL until the backfill; none may be wrong.
+      const wrong = await pool.query("SELECT count(*)::int AS n FROM designs WHERE thumbnail_hash IS NOT NULL AND thumbnail_hash <> encode(sha256(thumbnail), 'hex')");
+      assert.equal(wrong.rows[0].n, 0, 'Postgres: no stored picture hash describes other bytes');
+      const swrong = await pool.query("SELECT count(*)::int AS n FROM design_scenes WHERE scene_hash IS NOT NULL AND scene_hash <> encode(sha256(scene), 'hex')");
+      assert.equal(swrong.rows[0].n, 0, 'Postgres: nor any stored scene hash');
+      // Counted: a repeat view of a public picture is one query and no body.
+      const app = await buildApp(pDesigns, pAuth, templates, {});
+      const o = await s2reg(app, `pgth${sfx}`);
+      const P = png(21);
+      const id = await makeWith(app, o.token, P, true);
+      const seen: string[] = [];
+      const realQuery = pg.Client.prototype.query;
+      pg.Client.prototype.query = function (this: unknown, ...args: unknown[]) {
+        seen.push(typeof args[0] === 'string' ? args[0] : (args[0] as { text?: string })?.text ?? '');
+        return (realQuery as (...a: unknown[]) => unknown).apply(this, args);
+      } as typeof realQuery;
+      let r304;
+      let sceneQueries: string[] = [];
+      try {
+        r304 = await app.inject({ method: 'GET', url: `/api/designs/${id}/thumbnail.png`, headers: { 'if-none-match': `"${sha(P)}"` } });
+        const repeat = [...seen];
+        assert.equal(r304.statusCode, 304);
+        assert.equal(repeat.length, 1, `Postgres: a repeat view is one query (${repeat.map((q) => q.replace(/\s+/g, ' ').slice(0, 60)).join(' | ')})`);
+        check(!/SELECT[^]*\bthumbnail\b[^]*FROM/.test(repeat[0].replace(/thumbnail_hash|thumbnail IS NOT NULL/g, '')), 'Postgres: and it does not read the picture');
+        seen.length = 0;
+        const firstView = await app.inject({ method: 'GET', url: `/api/designs/${id}/thumbnail.png` });
+        assert.equal(firstView.statusCode, 200);
+        assert.equal(seen.length, 1, 'Postgres: a first view is one query too');
+        // A scene view, anonymous, kept: visibility and hash only.
+        await app.inject({ method: 'PUT', url: `/api/designs/${id}/scene`, headers: bearer(o.token), payload: { sceneGzB64: scene('pg-count') } });
+        await app.inject({ method: 'GET', url: `/api/designs/${id}/scene` });
+        seen.length = 0;
+        await app.inject({ method: 'GET', url: `/api/designs/${id}/scene` });
+        sceneQueries = [...seen];
+      } finally {
+        pg.Client.prototype.query = realQuery;
+      }
+      assert.equal(sceneQueries.length, 1, `Postgres: a repeat anonymous scene view is one query (${sceneQueries.length})`);
+      check(!/SELECT scene\b/.test(sceneQueries[0]) && /scene_hash/.test(sceneQueries[0]), 'Postgres: visibility and the hash, never the scene');
+      // Rows stored before the hashes: served right, and filled in. (The
+      // triggers that keep the hashes are switched off for this, as they
+      // were before they existed; the stage 2 review block tests them.)
+      await pool.query('ALTER TABLE designs DISABLE TRIGGER designs_thumbnail_hash; ALTER TABLE design_scenes DISABLE TRIGGER design_scenes_scene_hash');
+      await pool.query('UPDATE designs SET thumbnail_hash = NULL WHERE id = $1', [id]);
+      await pool.query('UPDATE design_scenes SET scene_hash = NULL WHERE design_id = $1', [id]);
+      const lazy = await app.inject({ method: 'GET', url: `/api/designs/${id}/thumbnail.png` });
+      assert.equal(lazy.headers.etag, `"${sha(P)}"`, 'Postgres: a picture with no stored hash gets the right ETag');
+      assert.match(sceneOf(await app.inject({ method: 'GET', url: `/api/designs/${id}/scene` })) ?? '', /pg-count/, 'Postgres: and a scene with none is still served stripped');
+      await new Promise((r) => setTimeout(r, 300));
+      const filled = await pool.query("SELECT (d.thumbnail_hash = encode(sha256(d.thumbnail), 'hex')) AS t, (s.scene_hash = encode(sha256(s.scene), 'hex')) AS s FROM designs d JOIN design_scenes s ON s.design_id = d.id WHERE d.id = $1", [id]);
+      check(filled.rows[0].t === true && filled.rows[0].s === true, 'Postgres: and both are filled in from the stored bytes');
+      await pool.query('UPDATE designs SET thumbnail_hash = NULL WHERE id = $1', [id]);
+      await pool.query('ALTER TABLE designs ENABLE TRIGGER designs_thumbnail_hash; ALTER TABLE design_scenes ENABLE TRIGGER design_scenes_scene_hash');
+      check((await pDesigns.backfillHashes()) >= 1, 'Postgres: the boot backfill fills what is missing');
+      assert.equal((await pool.query("SELECT count(*)::int AS n FROM designs WHERE thumbnail IS NOT NULL AND thumbnail_hash IS NULL")).rows[0].n, 0, 'Postgres: all of it');
+      await app.close();
+    } finally {
+      await pool.end();
+    }
+    console.log('  Postgres: thumbnails and scenes as on memory; hashes stored with the bytes; repeat views one query, no picture or scene read; lazy and boot backfill');
+  }
+  console.log('performance plan stage 2 (server), part two: all assertions passed');
+}
+
+// ---------- 2026-10: performance plan, stage 2 (server), part three ----------
+// Work in worker threads (P2.14), the schema at boot (P2.15) and the
+// Cloudflare code side (P2.2). The workers hold scene and PDF work that used to
+// hold the event loop, so they must fail closed; the schema ledger skips work,
+// so it must never skip a control; the origin lock refuses traffic, so it must
+// refuse the right traffic and leak nothing.
+{
+  const { readFileSync, existsSync } = await import('node:fs');
+  const { spawnSync } = await import('node:child_process');
+  const { randomBytes } = await import('node:crypto');
+  const { WorkerPool, PoolBusyError, PoolFailedError, workerFile, SCENE_POOL, PDF_POOL } = await import('../src/workerPool');
+  const { StrippedSceneCache } = await import('../src/sceneCache');
+  const { securityPosture } = await import('../src/posture');
+  const { configWarnings } = await import('../src/preflight');
+  const { MemorySocRepository } = await import('../src/socRepo');
+  const { SocMonitor } = await import('../src/soc');
+  const { MemoryAiUsageRepository, MemoryAiEventsRepository } = await import('../src/memoryRepo');
+  const check = (cond: unknown, msg: string): void => assert.ok(cond, msg);
+  const S2PW = 'lantern-orchid-quarry8';
+  const s2reg = async (app: FastifyInstance, u: string, ip = '198.18.230.1'): Promise<{ token: string; id: string }> => {
+    const r = await app.inject({ method: 'POST', url: '/api/auth/register', remoteAddress: ip, payload: { username: u, password: S2PW, email: `${u}@example.test`, acceptedVersion: 'test' } });
+    assert.equal(r.statusCode, 201, r.body);
+    const token = (r.json() as { token: string }).token;
+    return { token, id: ((await app.inject({ method: 'GET', url: '/api/me', remoteAddress: ip, headers: bearer(token) })).json() as { id: string }).id };
+  };
+  /** A worker written inline, started by the pool exactly as the real ones are. */
+  const inline = (body: string) => ({ url: new URL(`data:text/javascript,${encodeURIComponent(`import { parentPort } from 'node:worker_threads';\n${body}\nparentPort.postMessage({ ready: true });`)}`) });
+  const pool = (body: string, o: Partial<{ size: number; maxQueue: number; timeoutMs: number; idleMs: number; memMb: number }> = {}) =>
+    new WorkerPool<unknown, unknown>({
+      name: 'test', file: inline(body), size: o.size ?? 1, maxQueue: o.maxQueue ?? 4, timeoutMs: o.timeoutMs ?? 2_000, idleMs: o.idleMs ?? 5_000,
+      resourceLimits: { maxOldGenerationSizeMb: o.memMb ?? 64, maxYoungGenerationSizeMb: 16, stackSizeMb: 4 }, log: () => {},
+    });
+  const reply = `parentPort.on('message', async (m) => {
+    if (m === 'die') process.exit(3);
+    if (m === 'throw') return void setTimeout(() => { throw new Error('S2 thrown'); });
+    if (m === 'spin') for (;;) {}
+    if (m === 'eat') { const keep = []; for (;;) keep.push(new Array(1e6).fill(Math.random())); }
+    if (m === 'slow') await new Promise((r) => setTimeout(r, 300));
+    if (m === 'env') return parentPort.postMessage({ ok: true, result: { keys: Object.keys(process.env), secret: process.env.S2_WORKER_SECRET ?? null, db: process.env.DATABASE_URL ?? null } });
+    if (m === 'fail') return parentPort.postMessage({ ok: false, error: 'S2 refused' });
+    parentPort.postMessage({ ok: true, result: m });
+  });`;
+
+  // ---- P2.14: the pool's guardrails, one by one ----
+  {
+    process.env.S2_WORKER_SECRET = 'S2-SECRET-NOT-FOR-WORKERS';
+    const p = pool(reply, { timeoutMs: 400, idleMs: 300, memMb: 24 });
+    assert.equal(await p.run('hello'), 'hello', 'a task runs');
+    const env = (await p.run('env')) as { keys: string[]; secret: string | null; db: string | null };
+    assert.deepEqual(env.keys, [], 'a worker starts with an empty environment');
+    assert.equal(env.secret, null, 'so no secret of the server is within its reach');
+    assert.equal(env.db, null);
+    delete process.env.S2_WORKER_SECRET;
+    await assert.rejects(p.run('fail'), PoolFailedError, 'a task the worker refuses fails');
+    assert.equal(await p.run('after a refusal'), 'after a refusal', 'and the worker carries on');
+    for (const [m, stat] of [['die', 'crashed'], ['throw', 'crashed'], ['spin', 'timedOut']] as const) {
+      const before = p.stats[stat];
+      const t0 = Date.now();
+      await assert.rejects(p.run(m), PoolFailedError, `${m}: the task fails`);
+      check(p.stats[stat] === before + 1, `${m}: counted as ${stat}`);
+      if (m === 'spin') check(Date.now() - t0 < 2_000, `the time limit ends a task that never answers (${Date.now() - t0} ms)`);
+      assert.equal(await p.run(`after ${m}`), `after ${m}`, `${m}: a new worker takes the next task`);
+    }
+    check(p.stats.started >= 4, 'each lost worker was replaced');
+    // Out of memory: the worker's own limit, never the server's. Run in a
+    // process of its own without NODE_OPTIONS (a V8 heap flag there overrides
+    // every worker's limit, which is what the next check is about), and with
+    // a guard that ends it long before it could hurt the machine.
+    {
+      const script = `
+        import { WorkerPool, PoolFailedError } from './server/src/workerPool.ts';
+        setInterval(() => { if (process.memoryUsage().rss > 700e6) { console.log('GUARD'); process.exit(9); } }, 10).unref();
+        const p = new WorkerPool({ name: 'oom', file: { url: new URL('data:text/javascript,' + encodeURIComponent(${JSON.stringify(`import { parentPort } from 'node:worker_threads'; import { getHeapStatistics } from 'node:v8'; parentPort.on('message', (m) => { if (m === 'eat') { const keep = []; for (;;) keep.push({ a: Math.random(), b: [1, 2, 3] }); } parentPort.postMessage({ ok: true, result: m }); }); parentPort.postMessage({ ready: true, heapLimitMb: Math.round(getHeapStatistics().heap_size_limit / 1048576) });`)})) }, size: 1, maxQueue: 1, timeoutMs: 20000, idleMs: 1000, resourceLimits: { maxOldGenerationSizeMb: 16, maxYoungGenerationSizeMb: 8, stackSizeMb: 4 }, log: () => {} });
+        const t0 = Date.now();
+        const err = await p.run('eat').then(() => null, (e) => e);
+        const after = await p.run('after');
+        console.log(JSON.stringify({ failed: err instanceof PoolFailedError, crashed: p.stats.crashed, ms: Date.now() - t0, rssMb: Math.round(process.memoryUsage().rss / 1e6), after, overridden: p.limitOverridden }));
+        await p.close();`;
+      const env = { ...process.env } as Record<string, string | undefined>;
+      delete env.NODE_OPTIONS;
+      const run = spawnSync(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', script], { env: env as NodeJS.ProcessEnv, encoding: 'utf8', timeout: 60_000 });
+      const out = JSON.parse(run.stdout.trim().split('\n').pop() ?? '{}') as { failed: boolean; crashed: number; ms: number; rssMb: number; after: string; overridden: boolean };
+      check(run.status === 0 && out.failed && out.crashed === 1, `a task past its memory limit fails as a lost worker (${run.status} ${run.stdout.slice(-200)} ${run.stderr.slice(-300)})`);
+      check(out.rssMb < 600 && !out.overridden, `the process stays small: the worker’s limit held (${out.rssMb} MB)`);
+      assert.equal(out.after, 'after', 'and a new worker takes the next task');
+    }
+    // A process-wide heap flag is noticed: by the pool, by preflight and so on the posture panel.
+    {
+      const said: string[] = [];
+      const w = new WorkerPool<unknown, unknown>({ name: 'limit-check', file: workerFile('sceneWorker'), size: 1, maxQueue: 1, timeoutMs: 5_000, idleMs: 1_000, resourceLimits: SCENE_POOL.resourceLimits, log: (m) => said.push(m) });
+      await w.run({ kind: 'check', gz: gzipSync(Buffer.from('{}')) });
+      const flagged = /--max-old-space-size/.test(process.env.NODE_OPTIONS ?? '') || process.execArgv.some((a) => a.startsWith('--max-old-space-size'));
+      assert.equal(w.limitOverridden, flagged, `the pool knows whether its limit is in force (NODE_OPTIONS ${process.env.NODE_OPTIONS ?? 'unset'})`);
+      assert.equal(said.some((m) => /memory limit not in force/.test(m)), flagged, 'and says so in the log when it is not');
+      await w.close();
+      assert.equal(configWarnings({ NODE_OPTIONS: '--max-old-space-size=8192' }).find((x) => x.key === 'NODE_OPTIONS')?.state, 'wrong');
+      assert.equal(configWarnings({ NODE_OPTIONS: '--enable-source-maps' }).find((x) => x.key === 'NODE_OPTIONS'), undefined);
+      const post = securityPosture({ env: { NODE_OPTIONS: '--max-old-space-size=4096' }, nodeVersion: process.version, uid: 1000, rateLimit: true, database: 'postgres', email: null, soc: null });
+      assert.equal(post.find((c) => c.id === 'config-NODE_OPTIONS')?.state, 'bad', 'the posture panel says fix');
+    }
+    // The queue: one running, two waiting, the fourth refused at once.
+    const q = pool(reply, { maxQueue: 2 });
+    const running = [q.run('slow'), q.run('slow'), q.run('slow')];
+    await assert.rejects(q.run('slow'), PoolBusyError, 'a full queue refuses at once');
+    assert.equal(q.stats.refused, 1);
+    assert.deepEqual(await Promise.all(running), ['slow', 'slow', 'slow'], 'and the waiting tasks still run');
+    // A slow start is not a slow task: the clock starts once the worker has loaded.
+    const late = new WorkerPool<unknown, unknown>({ name: 'late', file: { url: new URL(`data:text/javascript,${encodeURIComponent(`import { parentPort } from 'node:worker_threads'; await new Promise((r) => setTimeout(r, 600)); parentPort.on('message', (m) => parentPort.postMessage({ ok: true, result: m })); parentPort.postMessage({ ready: true });`)}`) }, size: 1, maxQueue: 1, timeoutMs: 200, idleMs: 1_000, resourceLimits: { maxOldGenerationSizeMb: 32 }, log: () => {} });
+    assert.equal(await late.run('started late'), 'started late', 'a worker that loads slowly still gets its full time limit');
+    // Idle workers end, and the next task starts one.
+    await new Promise((r) => setTimeout(r, 500));
+    assert.equal(p.alive, 0, 'an idle worker is ended');
+    assert.equal(await p.run('again'), 'again');
+    // Closing refuses what waits.
+    const c = pool(reply, { maxQueue: 2 });
+    const pending = [c.run('slow'), c.run('slow')].map((x) => x.then(() => null, (e: unknown) => e));
+    await c.close();
+    for (const x of pending) check((await x) instanceof PoolBusyError, 'a pool that closes refuses its running and waiting tasks');
+    await assert.rejects(c.run('x'), PoolBusyError, 'a closed pool takes nothing');
+    await Promise.all([p.close(), q.close(), late.close()]);
+    // The real pools: separate, bounded, time-limited, memory-limited, no environment.
+    const src = readFileSync('server/src/workerPool.ts', 'utf8');
+    check(/new Worker\(this\.opts\.file\.url, \{\s*env: \{\},\s*resourceLimits: this\.opts\.resourceLimits,/.test(src), 'every worker: env {} and resourceLimits');
+    check(/worker\.on\('error'/.test(src) && /worker\.on\('exit'/.test(src), 'an error and an exit handler on every worker');
+    check(SCENE_POOL.maxQueue > 0 && SCENE_POOL.maxQueue <= 32 && PDF_POOL.maxQueue > 0 && PDF_POOL.maxQueue <= 8, 'both queues are bounded');
+    check(SCENE_POOL.timeoutMs <= 10_000 && PDF_POOL.timeoutMs <= 60_000, 'both have a time limit');
+    check(!!SCENE_POOL.resourceLimits.maxOldGenerationSizeMb && !!PDF_POOL.resourceLimits.maxOldGenerationSizeMb, 'both have a memory limit');
+    for (const name of ['sceneWorker', 'pdfWorker'] as const) {
+      const f = workerFile(name);
+      check(existsSync(new URL(f.workerData!.entry)), `${name}: its source exists`);
+      const w = readFileSync(new URL(f.workerData!.entry), 'utf8');
+      check(!/process\.env/.test(w.replace(/\/\*[^]*?\*\/|\/\/.*$/gm, '')), `${name}: reads no environment`);
+    }
+    console.log('  P2.14 pools: empty environment; refusals, crashes, throws, time-outs and out-of-memory fail the task and replace the worker; bounded queue; slow start not counted; idle end; close');
+  }
+
+  // ---- P2.14: the routes fail closed when the work cannot be done ----
+  {
+    const auth = new MemoryAuthRepository();
+    const designs = new MemoryDesignRepository((id) => auth.usernameOf(id));
+    const app = await buildApp(designs, auth, templates, {});
+    const owner = await s2reg(app, 'wkown_s2');
+    const SECRET = 'data:image/webp;base64,UzItV09SS0VSLUxBWUVS';
+    const scene = (b: string) => gzipSync(Buffer.from(JSON.stringify({ v: 1, banners: [{ id: b }], layers: [{ id: 'l', src: SECRET }] }))).toString('base64');
+    const made = await app.inject({ method: 'POST', url: '/api/designs', headers: bearer(owner.token), payload: { title: 'Workers', templateId: DEFAULT_TEMPLATE.id, templateVersion: 1, palette: PALETTE, cellsGzB64 } });
+    const id = (made.json() as { id: string }).id;
+    await app.inject({ method: 'PATCH', url: `/api/designs/${id}`, headers: bearer(owner.token), payload: { isPublic: true } });
+    assert.equal((await app.inject({ method: 'PUT', url: `/api/designs/${id}/scene`, headers: bearer(owner.token), payload: { sceneGzB64: scene('kept-v1') } })).statusCode, 200, 'a save through the real scene worker');
+    const { gunzipSync } = await import('node:zlib');
+    const ownScene = async (): Promise<string> => gunzipSync(Buffer.from((await app.inject({ method: 'GET', url: `/api/designs/${id}/scene`, headers: bearer(owner.token) })).json().sceneGzB64, 'base64')).toString();
+    for (const [label, body, o] of [
+      ['a worker that dies', `parentPort.on('message', () => process.exit(4));`, {}],
+      ['a worker that never answers', `parentPort.on('message', () => { for (;;) {} });`, { timeoutMs: 300 }],
+      ['a worker that throws', `parentPort.on('message', () => { throw new Error('x'); });`, {}],
+      ['a worker that refuses', `parentPort.on('message', () => parentPort.postMessage({ ok: false, error: 'no' }));`, {}],
+    ] as const) {
+      const bad = pool(body, o);
+      const broken = await buildApp(designs, auth, templates, { workers: { scene: bad as never, pdf: bad as never }, sceneCache: new StrippedSceneCache() });
+      const put = await broken.inject({ method: 'PUT', url: `/api/designs/${id}/scene`, headers: bearer(owner.token), payload: { sceneGzB64: scene(`unchecked-${label}`) } });
+      assert.equal(put.statusCode, 503, `${label}: a save that could not be checked is a 503 (${put.body})`);
+      assert.equal((put.json() as { code: string }).code, 'retry');
+      check(!(await ownScene()).includes('unchecked'), `${label}: and the unchecked scene was not stored`);
+      const anon = await broken.inject({ method: 'GET', url: `/api/designs/${id}/scene` });
+      assert.equal(anon.statusCode, 503, `${label}: a strip that could not be done is a 503`);
+      check(!anon.body.includes('sceneGzB64') && !anon.body.includes(SECRET), `${label}: never the scene as stored`);
+      const pdf = await broken.inject({ method: 'POST', url: '/api/export/pdf', payload: { title: 'x', templateId: DEFAULT_TEMPLATE.id, templateVersion: DEFAULT_TEMPLATE.version, palette: PALETTE, cellsGzB64 } });
+      assert.equal(pdf.statusCode, 503, `${label}: a PDF that could not be drawn is a 503`);
+      check(!String(pdf.headers['content-type']).includes('pdf'), 'with no PDF');
+      await broken.close();
+      await bad.close();
+    }
+    // A full queue: one save checking, the next refused, never stored unchecked.
+    {
+      const slow = pool(`parentPort.on('message', () => setTimeout(() => parentPort.postMessage({ ok: true, result: 'ok' }), 400));`, { maxQueue: 0 });
+      const busyApp = await buildApp(designs, auth, templates, { workers: { scene: slow as never, pdf: slow as never } });
+      const [a, b] = await Promise.all([
+        busyApp.inject({ method: 'PUT', url: `/api/designs/${id}/scene`, headers: bearer(owner.token), payload: { sceneGzB64: scene('first-in') } }),
+        new Promise((r) => setTimeout(r, 50)).then(() => busyApp.inject({ method: 'PUT', url: `/api/designs/${id}/scene`, headers: bearer(owner.token), payload: { sceneGzB64: scene('queue-full') } })),
+      ]);
+      assert.equal(a.statusCode, 200, 'the first is checked and saved');
+      assert.equal(b.statusCode, 503, 'the one the queue could not take is a 503');
+      check(!(await ownScene()).includes('queue-full'), 'and was not stored');
+      await busyApp.close();
+      await slow.close();
+    }
+    // The PDF's temporary file is gone after every outcome, a stopped worker included.
+    {
+      const real = workerFile('pdfWorker');
+      const paths: string[] = [];
+      const spy = (p: InstanceType<typeof WorkerPool>) => ({ run: (msg: { outPath: string }, t?: never) => { paths.push(msg.outPath); return p.run(msg, t); }, close: () => p.close() });
+      const ok = new WorkerPool({ ...PDF_POOL, file: real, log: () => {} });
+      const okApp = await buildApp(designs, auth, templates, { workers: { pdf: spy(ok) as never } });
+      const body = { title: 'Temp file', templateId: DEFAULT_TEMPLATE.id, templateVersion: DEFAULT_TEMPLATE.version, palette: PALETTE, cellsGzB64 };
+      const pdf = await okApp.inject({ method: 'POST', url: '/api/export/pdf', payload: body });
+      assert.equal(pdf.statusCode, 200, pdf.body.slice(0, 200));
+      assert.equal(pdf.rawPayload.subarray(0, 5).toString(), '%PDF-', 'a PDF, drawn in the worker');
+      check(/^tifo-[0-9a-f]{24}\.pdf$/.test(paths[0].split('/').pop()!), 'a random name');
+      check(!existsSync(paths[0]), 'its temporary file is gone once it is sent');
+      const stopped = new WorkerPool({ ...PDF_POOL, timeoutMs: 120, file: real, log: () => {} });
+      const stoppedApp = await buildApp(designs, auth, templates, { workers: { pdf: spy(stopped) as never } });
+      // Warm the worker up first, so the time limit lands while it is drawing.
+      await stopped.run({ outPath: `/nonexistent/tifo-${'0'.repeat(24)}.pdf`, templateId: 'no-such', templateVersion: 1, cells: new Uint8Array(1), palette: PALETTE, meta: {} as never }).catch(() => {});
+      const cut = await stoppedApp.inject({ method: 'POST', url: '/api/export/pdf', payload: body });
+      assert.equal(cut.statusCode, 503, 'a PDF past its time limit is a 503');
+      await new Promise((r) => setTimeout(r, 2_500));
+      check(!existsSync(paths[paths.length - 1]), 'and the stopped worker’s temporary file is removed too');
+      // The worker writes only where the route says, and only that kind of name.
+      await assert.rejects(ok.run({ ...body, outPath: '/tmp/../etc/passwd', templateVersion: DEFAULT_TEMPLATE.version, cells: new Uint8Array(map.count), palette: PALETTE, meta: { designTitle: 'x', stadiumName: 'x', cardsPerBag: 1, watermark: true } } as never), PoolFailedError);
+      await Promise.all([okApp.close(), stoppedApp.close(), ok.close(), stopped.close()]);
+    }
+    // Every cap and limit stays in front of the queue.
+    {
+      const limited = await buildApp(designs, auth, templates, { rateLimit: true });
+      const ip = '198.18.231.7';
+      const lim = await s2reg(limited, 'wklim_s2', ip);
+      const m2 = await limited.inject({ method: 'POST', url: '/api/designs', remoteAddress: ip, headers: bearer(lim.token), payload: { title: 'Limited', templateId: DEFAULT_TEMPLATE.id, templateVersion: 1, palette: PALETTE, cellsGzB64 } });
+      const lid = (m2.json() as { id: string }).id;
+      let last;
+      for (let i = 0; i < 31; i++) last = await limited.inject({ method: 'PUT', url: `/api/designs/${lid}/scene`, remoteAddress: ip, headers: bearer(lim.token), payload: {} });
+      assert.equal(last!.statusCode, 429, 'scene saves: 30 a minute');
+      for (let i = 0; i < 7; i++) last = await limited.inject({ method: 'POST', url: '/api/export/pdf', remoteAddress: '198.18.231.8', payload: {} });
+      assert.equal(last!.statusCode, 429, 'PDFs: 6 a minute');
+      const huge = await limited.inject({ method: 'PUT', url: `/api/designs/${lid}/scene`, remoteAddress: '198.18.231.9', headers: bearer(lim.token), payload: { sceneGzB64: Buffer.alloc(3_000_000, 1).toString('base64') } });
+      check(huge.statusCode === 413, `an oversized scene is refused before any worker sees it (${huge.statusCode})`);
+      await limited.close();
+    }
+    await app.close();
+    console.log('  P2.14 routes: a scene save, a strip or a PDF the worker cannot do is a 503 (never stored unchecked, never the layers); temp files removed after every outcome; limits kept');
+  }
+
+  // ---- P2.15: the statements a control rests on are known, one each ----
+  const { SchemaLedger, schemaStatements, statementBody, withoutDollarQuotes, SECURITY_STATEMENTS, SCHEMA_LOCK_TIMEOUT_MS } = await import('../src/schema');
+  const schemaSql = readFileSync(new URL('../schema.sql', import.meta.url), 'utf8');
+  const statements = schemaStatements(schemaSql);
+  for (const rule of SECURITY_STATEMENTS) {
+    assert.equal(statements.filter((s) => rule.match.test(statementBody(s))).length, 1, `${rule.id}: matches exactly one statement of schema.sql`);
+  }
+  // Recognised without their comments, which most of them open with; never two statements in one.
+  assert.equal(statementBody("-- why\nALTER TABLE t ADD COLUMN IF NOT EXISTS k TEXT DEFAULT 'a--b' -- trailing\n  -- more"), "ALTER TABLE t ADD COLUMN IF NOT EXISTS k TEXT DEFAULT 'a--b'");
+  assert.deepEqual(schemaStatements('A BYTEA;  -- note\nB;\nC'), ['A BYTEA', 'B', 'C'], 'a comment after the semicolon still ends the statement');
+  assert.deepEqual(statements.filter((s) => withoutDollarQuotes(statementBody(s)).replace(/;\s*$/, '').includes(';')).map((s) => s.slice(0, 60)), [], 'no text of schema.sql holds two statements (a $$ body has semicolons of its own)');
+  check(SECURITY_STATEMENTS.length >= 10, 'the controls the database holds are all listed');
+  assert.equal(SCHEMA_LOCK_TIMEOUT_MS, 3_000);
+  {
+    const src = readFileSync('server/src/server.ts', 'utf8');
+    const listen = src.indexOf('await app.listen(');
+    const loop = src.indexOf('for (const task of afterListen)');
+    check(listen > 0 && loop > listen, 'the boot purges run after the port is open');
+    for (const purge of ['t.purge()', 'socRepo.purge()', 'pruneEvents', 'backfillHashes()']) {
+      const at = src.indexOf(purge);
+      check(at > 0 && !new RegExp(`await ${purge.replace(/[().]/g, '\\$&')}`).test(src.slice(0, listen).replace(/afterListen\.push\([^]*?\);/g, '')), `${purge}: not awaited before listen`);
+    }
+    check(/afterListen\.push\(\(\) => t\.purge\(\)\)/.test(src) && /afterListen\.push\(\(\) => socRepo\.purge\(\)\)/.test(src) && /afterListen\.push\(pruneEvents\)/.test(src), 'each purge is queued for after listen');
+    check(/createPool\(process\.env\.DATABASE_URL, 'maintenance'\)/.test(src) && /applySchema\(maint\)/.test(src), 'on the maintenance pool');
+  }
+  // The posture panel's schema check.
+  {
+    const base = { env: { NODE_ENV: 'production' }, nodeVersion: process.version, uid: 1000, rateLimit: true, database: 'postgres' as const, email: null, soc: null };
+    const schemaState = (schema: { pendingSecurity: { id: string; why: string }[]; failed: number } | null) => securityPosture({ ...base, schema }).find((c) => c.id === 'schema');
+    assert.equal(schemaState({ pendingSecurity: [{ id: 'username-unique-ci', why: 'x' }], failed: 1 })?.state, 'bad', 'a security statement not in force: fix');
+    check(/username-unique-ci|x/.test(schemaState({ pendingSecurity: [{ id: 'username-unique-ci', why: 'x' }], failed: 1 })!.detail), 'naming it');
+    assert.equal(schemaState({ pendingSecurity: [], failed: 2 })?.state, 'warn', 'others not applied: check');
+    assert.equal(schemaState({ pendingSecurity: [], failed: 0 })?.state, 'good');
+    assert.equal(schemaState(null), undefined, 'no schema check on the memory store');
+  }
+  if (process.env.DATABASE_URL) {
+    const pg = (await import('pg')).default;
+    const name = `s2_ledger_${randomBytes(4).toString('hex')}`;
+    const adminPool = new pg.Pool({ connectionString: process.env.DATABASE_URL, max: 2 });
+    await adminPool.query(`CREATE SCHEMA ${name}`);
+    const p = new pg.Pool({ connectionString: process.env.DATABASE_URL, max: 3, options: `-c search_path=${name}` });
+    try {
+      // schema.sql is still runnable as one query.
+      await p.query(schemaSql);
+      await p.query(`DROP SCHEMA ${name} CASCADE; CREATE SCHEMA ${name}`);
+      // First boot on an empty database: everything applied.
+      const first = new SchemaLedger(p, { log: () => {} });
+      await first.load();
+      const r1 = await first.applyAll(statements);
+      assert.deepEqual(r1.failed, [], 'a first boot applies the whole file');
+      assert.equal(r1.applied + r1.present, statements.length);
+      assert.deepEqual(r1.pendingSecurity, []);
+      // Second boot: nothing to run.
+      const second = new SchemaLedger(p, { log: () => {} });
+      await second.load();
+      const t2 = Date.now();
+      const r2 = await second.applyAll(statements);
+      assert.equal(r2.skipped, statements.length, `a second boot skips every statement (${JSON.stringify({ ...r2, failed: r2.failed.length })})`);
+      assert.equal(r2.applied, 0);
+      console.log(`  P2.15 boot: first ${r1.applied} applied + ${r1.present} present; second ${r2.skipped} skipped in ${Date.now() - t2} ms`);
+      // ...even while a long write holds the busiest table: no lock is asked for.
+      const holder = await adminPool.connect();
+      await holder.query(`BEGIN; LOCK TABLE ${name}.designs IN ACCESS EXCLUSIVE MODE; LOCK TABLE ${name}.users IN ACCESS EXCLUSIVE MODE`);
+      try {
+        const third = new SchemaLedger(p, { log: () => {} });
+        await third.load();
+        const t3 = Date.now();
+        const r3 = await third.applyAll(statements);
+        check(Date.now() - t3 < 2_000, `a boot with nothing to do waits for no lock, security re-checks included (${Date.now() - t3} ms)`);
+        assert.equal(r3.skipped, statements.length);
+      } finally {
+        await holder.query('ROLLBACK');
+        holder.release();
+      }
+      // A database that already has the objects (one made before the ledger): recorded, not run.
+      await p.query('DROP TABLE schema_ledger');
+      const legacy = new SchemaLedger(p, { log: () => {} });
+      await legacy.load();
+      const holder2 = await adminPool.connect();
+      await holder2.query(`BEGIN; LOCK TABLE ${name}.users IN ROW EXCLUSIVE MODE`);
+      let r4;
+      try {
+        const t4 = Date.now();
+        r4 = await legacy.applyAll(statements.filter((s) => /^(CREATE (UNIQUE )?INDEX|ALTER TABLE \w+ ADD COLUMN|CREATE TABLE) IF NOT EXISTS/i.test(statementBody(s))));
+        check(Date.now() - t4 < 2_000, `objects already there are recorded without waiting on a lock (${Date.now() - t4} ms)`);
+      } finally {
+        await holder2.query('ROLLBACK');
+        holder2.release();
+      }
+      assert.deepEqual(r4.failed, []);
+      check(r4.present > 0 && r4.applied === 0, `recorded as present (${r4.present}), none run`);
+      // The rest of the file (the statements of no IF NOT EXISTS shape) runs once and is recorded.
+      const rest = await legacy.applyAll(statements);
+      assert.deepEqual(rest.failed, []);
+      assert.equal(rest.skipped + rest.applied, statements.length);
+      // A security statement whose object is missing is run again, however it is recorded...
+      await p.query('DROP INDEX users_username_lower_idx');
+      const again = new SchemaLedger(p, { log: () => {} });
+      await again.load();
+      // ...and while a write holds its table, it gives up after 3 s, says so, and the panel says fix.
+      const holder3 = await adminPool.connect();
+      await holder3.query(`BEGIN; LOCK TABLE ${name}.users IN ROW EXCLUSIVE MODE`);
+      let r5;
+      const t5 = Date.now();
+      try {
+        r5 = await again.applyAll(statements);
+      } finally {
+        await holder3.query('ROLLBACK');
+        holder3.release();
+      }
+      const waited = Date.now() - t5;
+      check(waited >= 2_900 && waited < 8_000, `a statement waits at most 3 s for its lock (${waited} ms)`);
+      assert.equal(r5.failed.length, 1, 'that statement failed');
+      check(/lock timeout|canceling statement due to lock timeout/i.test(r5.failed[0].error), r5.failed[0].error);
+      assert.deepEqual(r5.pendingSecurity.map((x) => x.id), ['username-unique-ci'], 'and it is reported as a security statement not in force');
+      assert.equal(r5.skipped, statements.length - 1, 'the rest of the boot went on');
+      // Wired to the panel.
+      const auth = new MemoryAuthRepository();
+      const designs = new MemoryDesignRepository((id) => auth.usernameOf(id));
+      const panel = await buildApp(designs, auth, templates, { soc: new SocMonitor({ repo: new MemorySocRepository() }), aiAdminPassword: 'stage two schema admin', schemaStatus: () => ({ pendingSecurity: r5.pendingSecurity, failed: r5.failed.length }) });
+      const soc = await panel.inject({ method: 'GET', url: '/api/admin/soc', headers: { 'x-ai-unlock': mintUnlock('stage two schema admin') } });
+      assert.equal(soc.statusCode, 200, soc.body);
+      const posture = (soc.json() as { posture: { id: string; state: string }[] }).posture;
+      assert.equal(posture.find((c) => c.id === 'schema')?.state, 'bad', 'the posture panel says fix');
+      await panel.close();
+      // The next boot, without the lock, puts it back.
+      const healed = new SchemaLedger(p, { log: () => {} });
+      await healed.load();
+      const r6 = await healed.applyAll(statements);
+      assert.equal(r6.applied, 1, 'applied at the next boot');
+      assert.deepEqual(r6.pendingSecurity, []);
+      assert.equal((await p.query("SELECT count(*)::int AS n FROM pg_indexes WHERE schemaname = current_schema() AND indexname = 'users_username_lower_idx'")).rows[0].n, 1);
+      // A statement that changes is a new hash, and runs; then it is recorded.
+      const changed = new SchemaLedger(p, { log: () => {} });
+      await changed.load();
+      assert.equal(await changed.run('ALTER TABLE designs ADD COLUMN IF NOT EXISTS s2_ledger_probe TEXT'), 'applied');
+      assert.equal(await changed.run('ALTER TABLE designs ADD COLUMN IF NOT EXISTS s2_ledger_probe TEXT'), 'skipped');
+      assert.equal(await changed.run("UPDATE designs SET s2_ledger_probe = 'x' WHERE false"), 'applied', 'any other statement runs once');
+      const later = new SchemaLedger(p, { log: () => {} });
+      await later.load();
+      assert.equal(await later.run("UPDATE designs SET s2_ledger_probe = 'x' WHERE false"), 'skipped', 'and is skipped after that');
+      // The repositories' own tables go through the same ledger.
+      const srv = readFileSync('server/src/server.ts', 'utf8');
+      check(/const ddl = \(sql: string\): Promise<unknown> => ledger\.run\(sql\)/.test(srv) && (srv.match(/\.init\(ddl\)/g) ?? []).length >= 4, 'repository tables are made through the ledger');
+      console.log(`  P2.15 Postgres: ledger skips what ran; present objects recorded without a lock; a held lock fails one statement after ${waited} ms and the panel says fix; the next boot heals it`);
+    } finally {
+      await p.end();
+      await adminPool.query(`DROP SCHEMA ${name} CASCADE`).catch(() => {});
+      await adminPool.end();
+    }
+  }
+
+  // ---- P2.2: Cloudflare in front, and the origin lock ----
+  {
+    const auth = new MemoryAuthRepository();
+    const designs = new MemoryDesignRepository((id) => auth.usernameOf(id));
+    const SECRET = randomBytes(32).toString('hex');
+    assert.equal(process.env.ORIGIN_SECRET, undefined, 'tests run without ORIGIN_SECRET');
+    for (const short of ['x', 'a'.repeat(31), ` ${'b'.repeat(31)} `]) {
+      await assert.rejects(buildApp(designs, auth, templates, { originSecret: short }), /at least 32/, `a ${short.trim().length}-character secret is refused`);
+    }
+    const lines: string[] = [];
+    const soc = new SocMonitor({ repo: new MemorySocRepository() });
+    const app = await buildApp(designs, auth, templates, { originSecret: SECRET, rateLimit: true, logger: true, logStream: { write: (l: string) => { lines.push(l); } }, soc, staticDir: undefined });
+    app.get('/__s2_headers', async (req) => ({ names: Object.keys(req.headers) }));
+    const ok = { 'x-origin-secret': SECRET };
+    let n = 0;
+    const ip = () => `198.18.232.${n++ % 250}`;
+    const normal = await app.inject({ method: 'GET', url: '/api/templates', remoteAddress: ip(), headers: ok });
+    assert.equal(normal.statusCode, 200, 'through Cloudflare: answered');
+    const refusals: [string, string, Record<string, string>?][] = [
+      ['GET', '/api/templates'],
+      ['GET', '/api/templates', { 'x-origin-secret': SECRET.slice(0, -1) + (SECRET.endsWith('0') ? '1' : '0') }],
+      ['GET', '/api/templates', { 'x-origin-secret': `${SECRET}x` }],
+      ['GET', '/api/templates', { 'x-origin-secret': SECRET.toUpperCase() }],
+      ['GET', '/api/templates', { 'x-origin-secret': '' }],
+      ['GET', '/api/me', { authorization: 'Bearer x' }],
+      ['GET', '/api/admin/soc'],
+      ['POST', '/api/auth/login'],
+      ['GET', '/nope'],
+      ['HEAD', '/health'],
+      ['POST', '/health'],
+      ['GET', '/health/'],
+      ['GET', '/%E0%A4%A'],
+    ];
+    for (const [method, url, headers] of refusals) {
+      const r = await app.inject({ method: method as 'GET', url, remoteAddress: ip(), headers });
+      assert.equal(r.statusCode, 403, `around Cloudflare: ${method} ${url} ${JSON.stringify(headers ?? {})} is refused (${r.statusCode})`);
+      assert.equal(r.headers['cache-control'], 'no-store', 'not cached');
+      for (const h of ['content-security-policy', 'strict-transport-security', 'x-content-type-options', 'x-frame-options', 'referrer-policy', 'cross-origin-resource-policy']) {
+        assert.equal(r.headers[h], normal.headers[h], `${method} ${url}: ${h} as on any answer`);
+      }
+      if (method !== 'HEAD') assert.deepEqual(r.json(), { error: 'forbidden' }, 'saying nothing else');
+    }
+    assert.equal((await app.inject({ method: 'GET', url: '/health', remoteAddress: ip() })).statusCode, 200, 'GET /health is exempt, for the platform’s healthcheck');
+    assert.equal((await app.inject({ method: 'GET', url: '/health?probe=1', remoteAddress: ip() })).statusCode, 200);
+    assert.equal((await app.inject({ method: 'GET', url: '/%E0%A4%A', remoteAddress: ip(), headers: ok })).statusCode, 400, 'with the secret, an unreadable URL is its usual 400');
+    // Gone from the request once checked, and never in a log line.
+    const seen = await app.inject({ method: 'GET', url: '/__s2_headers', remoteAddress: ip(), headers: ok });
+    assert.equal(seen.statusCode, 200);
+    check(!(seen.json() as { names: string[] }).names.includes('x-origin-secret'), 'no route ever sees the secret');
+    await new Promise((r) => setTimeout(r, 30));
+    check(lines.length > 0 && !lines.some((l) => l.includes(SECRET) || l.includes(SECRET.slice(0, 16)) || l.includes(SECRET.toUpperCase())), 'the secret, right or wrong, is in no log line');
+    check(lines.some((l) => /"statusCode":403/.test(l)), 'the refusals are logged like any request');
+    // Counted in the rate limit, in the same bucket as everything else.
+    const lip = '198.18.233.1';
+    for (let i = 0; i < 299; i++) await app.inject({ method: 'GET', url: '/api/templates', remoteAddress: lip });
+    assert.equal((await app.inject({ method: 'GET', url: '/api/templates', remoteAddress: lip, headers: ok })).statusCode, 200, 'the 300th in a minute, with the secret');
+    const over = await app.inject({ method: 'GET', url: '/api/templates', remoteAddress: lip });
+    assert.equal(over.statusCode, 429, 'refusals count: the 301st is a 429');
+    assert.equal((await app.inject({ method: 'GET', url: '/api/templates', remoteAddress: lip, headers: ok })).statusCode, 429, 'for that client’s real requests too');
+    const events = soc.recent(400);
+    check(!events.some((e) => e.kind === 'admin_denied' || e.kind === 'admin_unlock_failed' || e.kind === 'login_failed'), 'a request refused by the lock is not an admin or sign-in event');
+    check(events.some((e) => e.kind === 'rate_limited'), 'but a flood at the origin itself is on the Security tab');
+    await app.close();
+    // Unset: exactly as before, and the header means nothing.
+    const open = await buildApp(designs, auth, templates, {});
+    assert.equal((await open.inject({ method: 'GET', url: '/api/templates' })).statusCode, 200, 'no secret, no lock');
+    assert.equal((await open.inject({ method: 'GET', url: '/api/templates', headers: { 'x-origin-secret': 'anything' } })).statusCode, 200);
+    await open.close();
+    // server.ts refuses to start with a short secret, before it listens.
+    const env = { ...process.env, ORIGIN_SECRET: 'too-short-a-secret', PORT: '8961' } as Record<string, string | undefined>;
+    delete env.DATABASE_URL;
+    const boot = spawnSync(process.execPath, ['--import', 'tsx', 'server/src/server.ts'], { env: env as NodeJS.ProcessEnv, encoding: 'utf8', timeout: 90_000 });
+    assert.equal(boot.status, 1, `the server exits (${boot.status}, ${boot.stderr.slice(-300)})`);
+    check(/FATAL: ORIGIN_SECRET is 18 characters/.test(boot.stderr) && !/tifo-maker on :/.test(boot.stdout), 'saying why, without having listened');
+    check(!boot.stderr.includes('too-short-a-secret') && !boot.stdout.includes('too-short-a-secret'), 'and without printing it');
+    // The config warnings and the posture panel.
+    assert.equal(configWarnings({ ORIGIN_SECRET: 'short' }).find((w) => w.key === 'ORIGIN_SECRET')?.state, 'wrong');
+    check(configWarnings({ TRUST_PROXY: 'cloudflare' }).some((w) => w.key === 'ORIGIN_SECRET'), 'cloudflare without a secret is a warning');
+    check(!configWarnings({ TRUST_PROXY: 'cloudflare', ORIGIN_SECRET: SECRET }).some((w) => w.key === 'ORIGIN_SECRET'), 'and not with one');
+    const base = { nodeVersion: process.version, uid: 1000, rateLimit: true, database: 'postgres' as const, email: null, soc: null };
+    const proxy = (env: Record<string, string>, cloudflareSeen: string | null = null) => securityPosture({ ...base, env, cloudflareSeen });
+    assert.equal(proxy({ NODE_ENV: 'production', TRUST_PROXY: 'cloudflare' }).find((c) => c.id === 'proxy')?.state, 'warn', 'Cloudflare mode, origin not locked: check');
+    assert.equal(proxy({ NODE_ENV: 'production', TRUST_PROXY: 'cloudflare', ORIGIN_SECRET: SECRET }).find((c) => c.id === 'proxy')?.state, 'good');
+    assert.equal(proxy({ NODE_ENV: 'production', TRUST_PROXY: 'cloudflare', ORIGIN_SECRET: 'short' }).find((c) => c.id === 'origin-secret')?.state, 'bad');
+    // Anyone can send Cloudflare's headers, so seeing them is a check with advice for both cases, never a fix (stage 2 review).
+    const seenProd = proxy({ NODE_ENV: 'production' }, new Date().toISOString()).find((c) => c.id === 'proxy')!;
+    assert.equal(seenProd.state, 'warn', 'Cloudflare headers seen, not told, in production: a check');
+    check(/TRUST_PROXY=cloudflare/.test(seenProd.detail) && /someone wrote themselves/.test(seenProd.detail) && /nothing to do/.test(seenProd.detail), 'with the advice for Cloudflare in front, and for headers someone sent');
+    assert.equal(proxy({ NODE_ENV: 'production', TRUST_PROXY: '1' }, new Date().toISOString()).find((c) => c.id === 'proxy')?.state, 'warn');
+    assert.equal(proxy({}, new Date().toISOString()).find((c) => c.id === 'proxy')?.state, 'warn');
+    assert.equal(proxy({ NODE_ENV: 'production', TRUST_PROXY: 'cloudflare' }, new Date().toISOString()).find((c) => c.id === 'proxy')?.state, 'warn', 'seen while told: only the lock is missing');
+    check(!proxy({ NODE_ENV: 'production', TRUST_PROXY: 'cloudflare' }).some((c) => c.id === 'config-ORIGIN_SECRET'), 'the panel says it once, in its own check, not again as a config line');
+    console.log('  P2.2 origin lock: short secrets refused (buildApp and boot); everything but GET /health needs the secret; 403 pinned, no-store, counted, unlogged, gone from the request; unset is unchanged');
+  }
+
+  // ---- P2.2: Cloudflare's headers noticed, never believed ----
+  {
+    const auth = new MemoryAuthRepository();
+    const designs = new MemoryDesignRepository((id) => auth.usernameOf(id));
+    const warned: string[] = [];
+    const realWarn = console.warn;
+    console.warn = (...a: unknown[]) => { warned.push(a.join(' ')); };
+    try {
+      const soc = new SocMonitor({ repo: new MemorySocRepository() });
+      const app = await buildApp(designs, auth, templates, { rateLimit: true, soc, aiAdminPassword: 'stage two proxy admin', aiUsage: new MemoryAiUsageRepository(), aiEvents: new MemoryAiEventsRepository() });
+      app.get('/__s2_ip', async (req) => ({ ip: req.ip }));
+      const unlock = { 'x-ai-unlock': mintUnlock('stage two proxy admin') };
+      const postureOf = async () => ((await app.inject({ method: 'GET', url: '/api/admin/soc', remoteAddress: '198.18.234.250', headers: unlock })).json() as { posture: { id: string; state: string; detail: string }[] }).posture.find((c) => c.id === 'proxy')!;
+      assert.equal((await postureOf()).state, 'good', 'development, nothing in front: fine');
+      const r = await app.inject({ method: 'GET', url: '/__s2_ip', remoteAddress: '198.18.234.1', headers: { 'cf-ray': '8f00000000000000-LHR', 'cf-connecting-ip': '203.0.113.77', 'x-forwarded-for': '203.0.113.78' } });
+      assert.equal((r.json() as { ip: string }).ip, '198.18.234.1', 'the address is the connection’s, never CF-Connecting-IP or X-Forwarded-For');
+      const p = await postureOf();
+      assert.equal(p.state, 'warn', 'the posture panel notices Cloudflare');
+      check(/TRUST_PROXY=cloudflare/.test(p.detail), 'and says what to set');
+      for (let i = 0; i < 5; i++) await app.inject({ method: 'GET', url: '/api/templates', remoteAddress: '198.18.234.2', headers: { 'cf-ray': `x${i}` } });
+      assert.equal(warned.filter((w) => /TRUST_PROXY/.test(w)).length, 1, 'said in the log once a minute, not per request');
+      // Rate limits are keyed on the connection, whatever CF-Connecting-IP says.
+      const one = '198.18.234.3';
+      for (let i = 0; i < 300; i++) await app.inject({ method: 'GET', url: '/api/templates', remoteAddress: one, headers: { 'cf-connecting-ip': `203.0.113.${i % 250}` } });
+      assert.equal((await app.inject({ method: 'GET', url: '/api/templates', remoteAddress: one, headers: { 'cf-connecting-ip': '192.0.2.1' } })).statusCode, 429, 'a new CF-Connecting-IP is not a new client');
+      await app.close();
+      // In Cloudflare mode: the hop is believed from Cloudflare's addresses only, and CF-Connecting-IP never.
+      const saved = process.env.TRUST_PROXY;
+      process.env.TRUST_PROXY = 'cloudflare';
+      try {
+        const cf = await buildApp(designs, auth, templates, {});
+        cf.get('/__s2_ip', async (req) => ({ ip: req.ip }));
+        const via = await cf.inject({ method: 'GET', url: '/__s2_ip', remoteAddress: '10.0.0.5', headers: { 'x-forwarded-for': '203.0.113.9, 173.245.48.1', 'cf-connecting-ip': '198.51.100.7', 'cf-ray': 'y' } });
+        assert.equal((via.json() as { ip: string }).ip, '203.0.113.9', 'through a Cloudflare edge: the visitor, from X-Forwarded-For');
+        const around = await cf.inject({ method: 'GET', url: '/__s2_ip', remoteAddress: '10.0.0.5', headers: { 'x-forwarded-for': '203.0.113.9, 198.18.234.9', 'cf-connecting-ip': '198.51.100.7' } });
+        assert.equal((around.json() as { ip: string }).ip, '198.18.234.9', 'around Cloudflare: the address that reached Railway, whatever was written before it');
+        await cf.close();
+        check(warned.filter((w) => /TRUST_PROXY/.test(w)).length === 1, 'no warning once told');
+      } finally {
+        if (saved === undefined) delete process.env.TRUST_PROXY;
+        else process.env.TRUST_PROXY = saved;
+      }
+    } finally {
+      console.warn = realWarn;
+    }
+    // CLOUDFLARE.md: the whole rule set, in an order that never locks the site out.
+    const doc = readFileSync('CLOUDFLARE.md', 'utf8');
+    for (const must of ['x-origin-secret', 'ORIGIN_SECRET', 'Transform Rule', 'Cache Rule', 'TRUST_PROXY=cloudflare', '/health', 'Bypass']) check(doc.includes(must), `CLOUDFLARE.md covers ${must}`);
+    check(doc.indexOf('TRUST_PROXY=cloudflare') < doc.indexOf('ORIGIN_SECRET'), 'TRUST_PROXY first');
+    const transform = doc.indexOf('Transform Rule');
+    check(transform > 0 && transform < doc.lastIndexOf('ORIGIN_SECRET'), 'the Transform Rule before the secret is set on the server');
+    check(!/^TRUST_PROXY=2\s*$/m.test(doc) && !/Cache Everything[^\n]*\b(on|yes)\b/i.test(doc), 'never TRUST_PROXY=2, never Cache Everything');
+    console.log('  P2.2 Cloudflare: its headers noticed (log once a minute, posture panel) and never believed; CLOUDFLARE.md complete and in order');
+  }
+  console.log('performance plan stage 2 (server), part three: all assertions passed');
+}
+
+// ---------- 2026-10: performance plan, stage 2 (server), the security review's fixes ----------
+// Two should-fix findings and seven nits from the independent review of the
+// merged stage 2. Each is checked the way the review found it: a stored hash
+// left stale by a writer that did not know it, a cache charged less than it
+// holds, a flood of views refusing saves, a security statement recorded once
+// and never looked at again.
+{
+  const { readFileSync } = await import('node:fs');
+  const { createHash, randomBytes } = await import('node:crypto');
+  const { gunzipSync } = await import('node:zlib');
+  const { WorkerPool, PoolBusyError, workerFile, SCENE_POOL, PDF_POOL, SCENE_VIEW_ROOM } = await import('../src/workerPool');
+  const { StrippedSceneCache } = await import('../src/sceneCache');
+  const { SchemaLedger, schemaStatements, statementBody, SECURITY_STATEMENTS, HASH_STATEMENT_IDS, inForce } = await import('../src/schema');
+  const { securityPosture } = await import('../src/posture');
+  const check = (cond: unknown, msg: string): void => assert.ok(cond, msg);
+  const sha = (b: Uint8Array): string => createHash('sha256').update(b).digest('hex');
+  const R4PW = 'harbour-quill-meadow5';
+  const r4reg = async (app: FastifyInstance, u: string): Promise<{ token: string; id: string }> => {
+    const r = await app.inject({ method: 'POST', url: '/api/auth/register', payload: { username: u, password: R4PW, email: `${u}@example.test`, acceptedVersion: 'test' } });
+    assert.equal(r.statusCode, 201, r.body);
+    const token = (r.json() as { token: string }).token;
+    return { token, id: ((await app.inject({ method: 'GET', url: '/api/me', headers: bearer(token) })).json() as { id: string }).id };
+  };
+  const png = (n: number): Buffer => Buffer.concat([Buffer.from('89504e470d0a1a0a', 'hex'), Buffer.alloc(300 + n, n & 0xff)]);
+  const LAYER = 'data:image/webp;base64,UjQtT1dORVItTEFZRVI=';
+  const sceneGz = (banner: string): Buffer => gzipSync(Buffer.from(JSON.stringify({ v: 1, banners: [{ id: 'b', text: banner }], layers: [{ id: 'l', src: LAYER }] })));
+  const sceneText = (r: { json(): unknown }): string => {
+    const b64 = (r.json() as { sceneGzB64: string | null }).sceneGzB64;
+    return b64 ? gunzipSync(Buffer.from(b64, 'base64')).toString('utf8') : '(none)';
+  };
+  const publicDesign = async (app: FastifyInstance, token: string, thumb: Buffer, title = 'R4'): Promise<string> => {
+    const r = await app.inject({ method: 'POST', url: '/api/designs', headers: bearer(token), payload: { title, templateId: DEFAULT_TEMPLATE.id, templateVersion: 1, palette: PALETTE, cellsGzB64, thumbnailPngB64: thumb.toString('base64') } });
+    assert.equal(r.statusCode, 201, r.body);
+    const id = (r.json() as { id: string }).id;
+    assert.equal((await app.inject({ method: 'PATCH', url: `/api/designs/${id}`, headers: bearer(token), payload: { isPublic: true } })).statusCode, 200);
+    return id;
+  };
+  const inline = (body: string) => ({ url: new URL(`data:text/javascript,${encodeURIComponent(`import { parentPort } from 'node:worker_threads';\n${body}\nparentPort.postMessage({ ready: true });`)}`) });
+
+  // ---- nit d: every security statement names a catalogue check for what it makes ----
+  {
+    const statements = schemaStatements(readFileSync(new URL('../schema.sql', import.meta.url), 'utf8'));
+    const squash = (x: string): string => x.replace(/\s+/g, ' ');
+    for (const rule of SECURITY_STATEMENTS) {
+      const found = statements.filter((s) => rule.match.test(statementBody(s)));
+      assert.equal(found.length, 1, `${rule.id}: one statement`);
+      const body = statementBody(found[0]);
+      const c = rule.check;
+      let m: RegExpExecArray | null;
+      if ((m = /^CREATE (UNIQUE )?INDEX IF NOT EXISTS (\w+)/i.exec(body))) {
+        check(c.kind === 'index' && c.name === m[2] && c.unique === !!m[1], `${rule.id}: checked as the ${m[1] ? 'unique ' : ''}index it makes (${JSON.stringify(c)})`);
+      } else if ((m = /^ALTER TABLE (\w+) ADD COLUMN IF NOT EXISTS (\w+)/i.exec(body))) {
+        check(c.kind === 'column' && c.table === m[1] && c.column === m[2], `${rule.id}: checked as the column it adds`);
+      } else if ((m = /^CREATE TABLE IF NOT EXISTS (\w+)/i.exec(body))) {
+        check(c.kind === 'table' && c.name === m[1], `${rule.id}: checked as the table it makes`);
+      } else if ((m = /^CREATE OR REPLACE FUNCTION (\w+)\(/i.exec(body))) {
+        check(c.kind === 'function' && c.name === m[1] && squash(body).includes(squash(c.body)), `${rule.id}: checked as the function it makes, by its body`);
+      } else if ((m = /CREATE TRIGGER (\w+)\s+BEFORE INSERT OR UPDATE OF ([\w, ]+) ON (\w+) FOR EACH ROW EXECUTE FUNCTION (\w+)\(/i.exec(squash(body)))) {
+        const cols = m[2].split(',').map((x) => x.trim());
+        check(c.kind === 'trigger' && c.name === m[1] && c.table === m[3] && c.fn === m[4] && cols.includes(c.column), `${rule.id}: checked as the trigger it makes`);
+      } else {
+        assert.fail(`${rule.id}: a security statement of a shape no catalogue check knows: add one to CatalogueCheck and inForce() (${body.slice(0, 80)})`);
+      }
+    }
+    for (const id of HASH_STATEMENT_IDS) check(SECURITY_STATEMENTS.some((r) => r.id === id), `${id} is a security statement`);
+    const src = readFileSync('server/src/schema.ts', 'utf8');
+    check(/report\.pendingSecurity = await this\.pendingSecurity\(statements\)/.test(src), 'pendingSecurity is read from the catalogue after the run, not from what threw');
+    console.log('  review d: every security statement names its catalogue check (index unique and valid, column, table, function body, enabled trigger)');
+  }
+
+  // ---- nit c: views cannot take the places saves need ----
+  {
+    const p = new WorkerPool<unknown, unknown>({ name: 'room', file: inline(`parentPort.on('message', (m) => setTimeout(() => parentPort.postMessage({ ok: true, result: m }), 40));`), size: 1, maxQueue: SCENE_POOL.maxQueue, timeoutMs: 5_000, idleMs: 1_000, resourceLimits: { maxOldGenerationSizeMb: 32 }, log: () => {} });
+    const done: string[] = [];
+    const track = (tag: string, opts: { room?: number; urgent?: boolean }) =>
+      p.run(tag, [], opts).then((v) => { done.push(String(v)); return 'ok'; }, (e: unknown) => (e instanceof PoolBusyError ? 'busy' : 'failed'));
+    const views = Array.from({ length: SCENE_VIEW_ROOM + 2 }, (_, i) => track(`view-${i}`, { room: SCENE_VIEW_ROOM }));
+    const saves = Array.from({ length: SCENE_POOL.maxQueue - SCENE_VIEW_ROOM + 1 }, (_, i) => track(`save-${i}`, { urgent: true }));
+    const vr = await Promise.all(views);
+    const sr = await Promise.all(saves);
+    assert.equal(vr.filter((x) => x === 'busy').length, 1, `one running and ${SCENE_VIEW_ROOM} waiting views; the next is refused (${vr.join(',')})`);
+    assert.deepEqual(sr.slice(0, -1).every((x) => x === 'ok'), true, 'the saves still find room');
+    assert.equal(sr[sr.length - 1], 'busy', 'until the whole queue is full');
+    assert.deepEqual(done.slice(1, 1 + sr.length - 1), sr.slice(0, -1).map((_, i) => `save-${i}`), `saves run ahead of every waiting view (${done.slice(0, 8).join(',')})`);
+    await p.close();
+    // Through the routes: a flood of cache-missing anonymous views, and an owner saving.
+    const slow = new WorkerPool<unknown, unknown>({ name: 'scene-flood', file: inline(`parentPort.on('message', (m) => setTimeout(() => parentPort.postMessage({ ok: true, result: m.kind === 'check' ? 'ok' : null }), 60));`), size: 1, maxQueue: SCENE_POOL.maxQueue, timeoutMs: 5_000, idleMs: 1_000, resourceLimits: { maxOldGenerationSizeMb: 32 }, log: () => {} });
+    const auth = new MemoryAuthRepository();
+    const designs = new MemoryDesignRepository((id) => auth.usernameOf(id));
+    const app = await buildApp(designs, auth, templates, { workers: { scene: slow as never }, sceneCache: new StrippedSceneCache() });
+    const owner = await r4reg(app, 'flood_r4');
+    const ids: string[] = [];
+    for (let i = 0; i < SCENE_VIEW_ROOM + 4; i++) {
+      const id = await publicDesign(app, owner.token, png(i), `Flood ${i}`);
+      await designs.putScene(id, sceneGz(`flood-${i}`));
+      ids.push(id);
+    }
+    const order: string[] = [];
+    const viewsDone = ids.map((id) => app.inject({ method: 'GET', url: `/api/designs/${id}/scene` }).then((r) => { order.push('view'); return r.statusCode; }));
+    await new Promise((r) => setTimeout(r, 20));
+    const save = await app.inject({ method: 'PUT', url: `/api/designs/${ids[0]}/scene`, headers: bearer(owner.token), payload: { sceneGzB64: sceneGz('saved during the flood').toString('base64') } });
+    order.push('save');
+    const codes = await Promise.all(viewsDone);
+    check(codes.filter((c) => c === 503).length >= 1, `the flood is refused past its room (${codes.join(',')})`);
+    assert.equal(save.statusCode, 200, `and the owner's save is not (${save.body})`);
+    check(order.indexOf('save') < order.lastIndexOf('view'), `the save went ahead of the waiting views (${order.join(',')})`);
+    await app.close();
+    await slow.close();
+    console.log(`  review c: anonymous views take at most ${SCENE_VIEW_ROOM} of the ${SCENE_POOL.maxQueue} places; a save waits ahead of them and is not refused by a flood`);
+  }
+
+  // ---- should-fix 2, nit a: exact-size buffers cross, and the cache is charged what it holds ----
+  {
+    // The cache on its own: a view into a larger buffer is copied out of it.
+    const cache = new StrippedSceneCache(1024 * 1024);
+    let held = 0;
+    for (let i = 0; i < 200; i++) {
+      const slab = new Uint8Array(16 * 1024);
+      const view = slab.subarray(100, 140);
+      cache.set(`d${i}`, `h${i}`, view);
+    }
+    for (const v of cache.values()) {
+      if (!v) continue;
+      assert.equal(v.buffer.byteLength, v.byteLength, 'every entry is exact-size');
+      held += v.buffer.byteLength;
+    }
+    check(held <= cache.usedBytes, `the cache counts at least what its entries hold (${cache.usedBytes} counted, ${held} held)`);
+    check(cache.usedBytes < 200 * 1024, `and 200 small entries no longer pin 200 slabs (${cache.usedBytes} bytes)`);
+    // Through the routes and the real worker: what crosses, both ways.
+    const real = new WorkerPool<unknown, unknown>({ ...SCENE_POOL, file: workerFile('sceneWorker'), log: () => {} });
+    const realPdf = new WorkerPool<unknown, unknown>({ ...PDF_POOL, file: workerFile('pdfWorker'), log: () => {} });
+    const MARK = Buffer.from('R4-OTHER-REQUEST-SECRET');
+    const crossed: { kind: string; exact: boolean; handedOver: boolean; foreign: boolean }[] = [];
+    const spy = (pool: typeof real, field: 'gz' | 'cells') => ({
+      run: (msg: Record<string, Uint8Array>, transfer: import('node:worker_threads').Transferable[] = [], opts?: { room?: number; urgent?: boolean }) => {
+        const b = msg[field];
+        crossed.push({ kind: String((msg as { kind?: string }).kind ?? field), exact: b.byteOffset === 0 && b.buffer.byteLength === b.byteLength, handedOver: (transfer as unknown[]).includes(b.buffer), foreign: Buffer.from(b.buffer).includes(MARK) });
+        return pool.run(msg, transfer, opts);
+      },
+      close: () => pool.close(),
+    });
+    const kept = new StrippedSceneCache();
+    const auth = new MemoryAuthRepository();
+    const designs = new MemoryDesignRepository((id) => auth.usernameOf(id));
+    const app = await buildApp(designs, auth, templates, { workers: { scene: spy(real, 'gz') as never, pdf: spy(realPdf, 'cells') as never }, sceneCache: kept });
+    const owner = await r4reg(app, 'exact_r4');
+    const id = await publicDesign(app, owner.token, png(3));
+    // Another request's bytes, decoded into Node's shared pool just before the save's own.
+    const other = Buffer.from(Buffer.concat([MARK, MARK]).toString('base64'), 'base64');
+    assert.equal((await app.inject({ method: 'PUT', url: `/api/designs/${id}/scene`, headers: bearer(owner.token), payload: { sceneGzB64: sceneGz('exact').toString('base64') } })).statusCode, 200);
+    check(other.length > 0, 'the other bytes are in use');
+    assert.match(sceneText(await app.inject({ method: 'GET', url: `/api/designs/${id}/scene` })), /exact/);
+    assert.equal((await app.inject({ method: 'POST', url: '/api/export/pdf', payload: { title: 'x', templateId: DEFAULT_TEMPLATE.id, templateVersion: DEFAULT_TEMPLATE.version, palette: PALETTE, cellsGzB64 } })).statusCode, 200);
+    check(crossed.length >= 3, `the save's check, the view's strip and the PDF crossed (${crossed.map((c) => c.kind).join(',')})`);
+    for (const c of crossed) {
+      check(c.exact, `${c.kind}: an exact-size copy crosses, not a view into a larger buffer`);
+      check(c.handedOver, `${c.kind}: handed over, not cloned`);
+      check(!c.foreign, `${c.kind}: no other request's bytes cross with it`);
+    }
+    // What comes back, with layers and without, is exact-size too.
+    for (const gz of [sceneGz('back'), gzipSync(Buffer.from(JSON.stringify({ v: 1, banners: [{ id: 'b' }] })))]) {
+      const input = new Uint8Array(gz);
+      const out = (await real.run({ kind: 'strip', gz: input }, [input.buffer])) as Uint8Array;
+      check(out && out.byteOffset === 0 && out.buffer.byteLength === out.byteLength, `the strip comes back exact-size (${out?.byteLength} of ${out?.buffer.byteLength})`);
+    }
+    // The reviewer's case: 200 small public scenes viewed once each.
+    const ids: string[] = [];
+    for (let i = 0; i < 200; i++) {
+      const d = await designs.create({ title: `Small ${i}`, templateId: DEFAULT_TEMPLATE.id, templateVersion: 1, palette: PALETTE, cellsGz: gzipSync(new Uint8Array(map.count)), ownerId: owner.id, thumbnailPng: png(i % 50) });
+      await designs.patchMeta(d.id, { isPublic: true });
+      await designs.putScene(d.id, sceneGz(`small-${i}`));
+      ids.push(d.id);
+    }
+    for (const sid of ids) assert.equal((await app.inject({ method: 'GET', url: `/api/designs/${sid}/scene` })).statusCode, 200);
+    let pinned = 0;
+    for (const v of kept.values()) if (v) pinned += v.buffer.byteLength;
+    check(kept.size >= 200 && pinned <= kept.usedBytes, `200 kept strips hold ${pinned} bytes and are charged ${kept.usedBytes}`);
+    await app.close();
+    await real.close();
+    await realPdf.close();
+    console.log(`  review 2/a: exact-size copies cross both ways, handed over, nothing of another request; 200 small strips held ${pinned} bytes, charged ${kept.usedBytes}`);
+  }
+
+  // ---- should-fix 1 (routes): stored hashes are believed only when trusted ----
+  {
+    const auth = new MemoryAuthRepository();
+    /** A store whose hashes can be made stale, as a writer that does not know them would leave them. */
+    class StaleDesigns extends MemoryDesignRepository {
+      staleThumb = new Map<string, string>();
+      staleScene = new Map<string, string>();
+      override async getThumbnailMeta(id: string) { const m = await super.getThumbnailMeta(id); return m && this.staleThumb.has(id) ? { ...m, hash: this.staleThumb.get(id)! } : m; }
+      override async getThumbnailRow(id: string) { const m = await super.getThumbnailRow(id); return m && this.staleThumb.has(id) ? { ...m, hash: this.staleThumb.get(id)! } : m; }
+      override async getSceneMeta(id: string) { const m = await super.getSceneMeta(id); return m && this.staleScene.has(id) ? { ...m, hash: this.staleScene.get(id)! } : m; }
+      override async getSceneRow(id: string) { const m = await super.getSceneRow(id); return m && this.staleScene.has(id) ? { ...m, hash: this.staleScene.get(id)! } : m; }
+    }
+    const designs = new StaleDesigns((id) => auth.usernameOf(id));
+    let trusted = true;
+    const app = await buildApp(designs, auth, templates, { storedHashesTrusted: () => trusted, sceneCache: new StrippedSceneCache() });
+    const owner = await r4reg(app, 'trust_r4');
+    const P1 = png(5);
+    const id = await publicDesign(app, owner.token, P1);
+    await designs.putScene(id, sceneGz('FIRST-BANNER'));
+    assert.match(sceneText(await app.inject({ method: 'GET', url: `/api/designs/${id}/scene` })), /FIRST-BANNER/);
+    const oldTag = `"${sha(P1)}"`;
+    const oldSceneHash = sha(sceneGz('FIRST-BANNER'));
+    // New bytes, the old hashes left beside them.
+    const P2 = png(6);
+    await app.inject({ method: 'PUT', url: `/api/designs/${id}`, headers: bearer(owner.token), payload: { palette: PALETTE, cellsGzB64, thumbnailPngB64: P2.toString('base64') } });
+    await designs.putScene(id, sceneGz('SECOND-ONLY'));
+    designs.staleThumb.set(id, sha(P1));
+    designs.staleScene.set(id, oldSceneHash);
+    // What the review found, while the stored hashes are believed:
+    assert.equal((await app.inject({ method: 'GET', url: `/api/designs/${id}/thumbnail.png`, headers: { 'if-none-match': oldTag } })).statusCode, 304, '(the stale hash is believed: the bug the triggers close)');
+    // Not trusted (the triggers not yet in force, or the recompute not done): the bytes decide.
+    trusted = false;
+    const t = await app.inject({ method: 'GET', url: `/api/designs/${id}/thumbnail.png`, headers: { 'if-none-match': oldTag } });
+    assert.equal(t.statusCode, 200, 'untrusted: a replaced picture is sent, not a 304');
+    assert.equal(t.headers.etag, `"${sha(P2)}"`, 'with the ETag of its bytes');
+    assert.equal((await app.inject({ method: 'GET', url: `/api/designs/${id}/thumbnail.png`, headers: { 'if-none-match': `"${sha(P2)}"` } })).statusCode, 304, 'and a 304 for that one');
+    const view = sceneText(await app.inject({ method: 'GET', url: `/api/designs/${id}/scene` }));
+    check(/SECOND-ONLY/.test(view) && !/FIRST-BANNER/.test(view) && !view.includes(LAYER), `untrusted: the strip follows the bytes (${view})`);
+    await app.close();
+    const srv = readFileSync('server/src/server.ts', 'utf8');
+    check(/const hashTrust = await hashTrustAfterBoot\(ledger, schemaReport\);\s*let hashesTrusted = hashTrust\.trusted;/.test(srv) && /storedHashesTrusted: \(\) => hashesTrusted/.test(srv), 'server.ts trusts stored hashes only as hashTrustAfterBoot says (triggers in force, recompute done)');
+    check(/await pgDesigns\.backfillHashes\(\);\s*await ledger\.mark\(HASH_RECOMPUTE_TASK\);\s*hashesTrusted = true;/.test(srv), 'and marks the recompute done only after it ran');
+    console.log('  review 1 (routes): stored hashes believed only when trusted; otherwise the 304 and the kept strip follow the bytes read');
+  }
+
+  // ---- nits b, f, g: what the documents and the panel say ----
+  {
+    const checks = readFileSync('SECURITY-CHECKS.md', 'utf8');
+    check(/not a sandbox/.test(checks) && /\/proc\/self\/environ/.test(checks) && /defence in depth/.test(checks), 'SECURITY-CHECKS: env {} is defence in depth; a worker thread is not a sandbox');
+    const pool = readFileSync('server/src/workerPool.ts', 'utf8');
+    check(/NOT a sandbox/.test(pool) && /\/proc\/self\/environ/.test(pool) && !/so no secret\s+\* \(DATABASE_URL/.test(pool), 'workerPool.ts says the same');
+    const seen = securityPosture({ env: { NODE_ENV: 'production' }, nodeVersion: process.version, uid: 1000, rateLimit: true, database: 'postgres', email: null, soc: null, cloudflareSeen: new Date().toISOString() }).find((c) => c.id === 'proxy')!;
+    assert.equal(seen.state, 'warn', 'a header anyone can send never turns the row red');
+    check(/If Cloudflare is not in front/.test(seen.detail) && /nothing to do/.test(seen.detail), 'and the advice covers spoofed headers');
+    const cf = readFileSync('CLOUDFLARE.md', 'utf8');
+    const order = cf.slice(cf.indexOf('## The order to do things in'), cf.indexOf('## 1.'));
+    check(/legal|privacy policy/i.test(order) && order.search(/privacy policy/i) < order.search(/orange cloud on/i), 'CLOUDFLARE.md: naming Cloudflare in the privacy policy is a step, before the orange cloud');
+    check(cf.includes('Cloudflare sits in front of the site as a content delivery and security network') && cf.includes('تمرّ كل الطلبات إلى الموقع عبر Cloudflare'), 'with the exact sentences, in English and Arabic');
+    check(!readFileSync('legal.html', 'utf8').includes('Cloudflare sits in front'), 'and legal.html is not changed while Cloudflare is not in front');
+    console.log('  review b/f/g: worker threads described as no sandbox; spoofable Cloudflare headers a check with both answers; the privacy-policy step with its sentences');
+  }
+
+  // ---- should-fix 1 (Postgres): the database keeps the hashes for every writer ----
+  if (process.env.DATABASE_URL) {
+    const pg = (await import('pg')).default;
+    const { PgAuthRepository, PgDesignRepository } = await import('../src/pgRepo');
+    const name = `s2_review_${randomBytes(4).toString('hex')}`;
+    const admin = new pg.Pool({ connectionString: process.env.DATABASE_URL, max: 2 });
+    await admin.query(`CREATE SCHEMA ${name}`);
+    const p = new pg.Pool({ connectionString: process.env.DATABASE_URL, max: 4, options: `-c search_path=${name}` });
+    const statements = schemaStatements(readFileSync(new URL('../schema.sql', import.meta.url), 'utf8'));
+    try {
+      const ledger = new SchemaLedger(p, { log: () => {} });
+      await ledger.load();
+      const first = await ledger.applyAll(statements);
+      assert.deepEqual(first.failed, []);
+      assert.deepEqual(first.pendingSecurity, [], 'the hash triggers are in force after a first boot');
+      const pDesigns = new PgDesignRepository(p, p);
+      const pAuth = new PgAuthRepository(p, p);
+      const app = await buildApp(pDesigns, pAuth, templates, { sceneCache: new StrippedSceneCache() });
+      const owner = await r4reg(app, 'pgrev_r4');
+      const P1 = png(11);
+      const id = await publicDesign(app, owner.token, P1);
+      assert.equal((await app.inject({ method: 'PUT', url: `/api/designs/${id}/scene`, headers: bearer(owner.token), payload: { sceneGzB64: sceneGz('FIRST-BANNER').toString('base64') } })).statusCode, 200);
+      const t1 = await app.inject({ method: 'GET', url: `/api/designs/${id}/thumbnail.png` });
+      assert.equal(t1.headers.etag, `"${sha(P1)}"`);
+      assert.equal((await app.inject({ method: 'GET', url: `/api/designs/${id}/thumbnail.png`, headers: { 'if-none-match': `"${sha(P1)}"` } })).statusCode, 304);
+      assert.match(sceneText(await app.inject({ method: 'GET', url: `/api/designs/${id}/scene` })), /FIRST-BANNER/, 'the first scene is kept stripped');
+      // The previous release's writes, as it ran them: bytes, and no hash.
+      const P2 = png(12);
+      const S2 = sceneGz('SECOND-ONLY');
+      await p.query('UPDATE designs SET thumbnail = coalesce($2, thumbnail), updated_at = now() WHERE id = $1', [id, P2]);
+      await p.query(`INSERT INTO design_scenes (design_id, scene, updated_at) VALUES ($1, $2, now())
+                     ON CONFLICT (design_id) DO UPDATE SET scene = EXCLUDED.scene, updated_at = now()`, [id, S2]);
+      const row = await p.query('SELECT d.thumbnail_hash AS t, s.scene_hash AS s FROM designs d JOIN design_scenes s ON s.design_id = d.id WHERE d.id = $1', [id]);
+      assert.equal(row.rows[0].t, sha(P2), 'Postgres: the picture written the old way has the hash of its bytes');
+      assert.equal(row.rows[0].s, sha(S2), 'Postgres: and so has the scene');
+      const stale = await app.inject({ method: 'GET', url: `/api/designs/${id}/thumbnail.png`, headers: { 'if-none-match': `"${sha(P1)}"` } });
+      assert.equal(stale.statusCode, 200, 'Postgres: the old ETag gets the new picture, not a 304');
+      assert.equal(stale.headers.etag, `"${sha(P2)}"`);
+      assert.deepEqual(stale.rawPayload, P2);
+      assert.equal((await app.inject({ method: 'GET', url: `/api/designs/${id}/thumbnail.png`, headers: { 'if-none-match': `"${sha(P2)}"` } })).statusCode, 304, 'Postgres: and the new ETag its 304');
+      const view = sceneText(await app.inject({ method: 'GET', url: `/api/designs/${id}/scene` }));
+      check(/SECOND-ONLY/.test(view) && !/FIRST-BANNER/.test(view) && !view.includes(LAYER), `Postgres: anonymous viewers see the scene as now stored, not the kept strip of the old one (${view})`);
+      // An old-style insert, and a write of a wrong hash: both put right.
+      const ins = await p.query(`INSERT INTO designs (title, template_id, template_version, palette, cells, owner_id, thumbnail)
+                                 SELECT 'old insert', template_id, template_version, palette, cells, owner_id, $2 FROM designs WHERE id = $1 RETURNING thumbnail_hash`, [id, P1]);
+      assert.equal(ins.rows[0].thumbnail_hash, sha(P1), 'Postgres: an insert that names no hash gets one');
+      await p.query("UPDATE designs SET thumbnail_hash = 'deadbeef' WHERE id = $1", [id]);
+      assert.equal((await p.query('SELECT thumbnail_hash FROM designs WHERE id = $1', [id])).rows[0].thumbnail_hash, sha(P2), 'Postgres: a hash written by hand is replaced by the real one');
+      await app.close();
+
+      // The triggers are security statements: a disabled or dropped one is pending, and put back.
+      await p.query('ALTER TABLE designs DISABLE TRIGGER designs_thumbnail_hash');
+      const l2 = new SchemaLedger(p, { log: () => {} });
+      await l2.load();
+      assert.deepEqual((await l2.pendingSecurity(statements)).map((x) => x.id), ['thumbnail-hash'], 'Postgres: a disabled hash trigger is not in force');
+      const posture = securityPosture({ env: {}, nodeVersion: process.version, uid: 1000, rateLimit: true, database: 'postgres', email: null, soc: null, schema: { pendingSecurity: await l2.pendingSecurity(statements), failed: 0 } });
+      assert.equal(posture.find((c) => c.id === 'schema')?.state, 'bad', 'Postgres: and the panel says fix');
+      const r2 = await l2.applyAll(statements);
+      assert.equal(r2.applied, 1, 'Postgres: the next boot runs the recorded trigger statement again');
+      assert.deepEqual(r2.pendingSecurity, []);
+      assert.equal((await p.query("SELECT t.tgenabled FROM pg_trigger t JOIN pg_class c ON c.oid = t.tgrelid JOIN pg_namespace n ON n.oid = c.relnamespace WHERE t.tgname = 'designs_thumbnail_hash' AND n.nspname = current_schema()")).rows[0].tgenabled, 'O', 'Postgres: enabled again');
+      await p.query('DROP FUNCTION tifo_scene_hash() CASCADE');
+      const l3 = new SchemaLedger(p, { log: () => {} });
+      await l3.load();
+      const r3 = await l3.applyAll(statements);
+      assert.equal(r3.applied, 2, 'Postgres: a dropped function and the trigger it took with it are both made again');
+      assert.deepEqual(r3.pendingSecurity, []);
+      check(await inForce(p, { kind: 'trigger', table: 'design_scenes', name: 'design_scenes_scene_hash', fn: 'tifo_scene_hash', column: 'scene' }), 'Postgres: the scene trigger is in force');
+
+      // An index that ran cleanly but is not in force: invalid, or not unique, under the right name.
+      await p.query('DROP INDEX users_username_lower_idx');
+      const dupe = await p.query("INSERT INTO users (username, password_hash) VALUES ('Dupe_R4', 'x'), ('dupe_r4', 'x') RETURNING id");
+      await p.query('CREATE UNIQUE INDEX CONCURRENTLY users_username_lower_idx ON users (lower(username))').catch(() => {});
+      assert.equal((await p.query("SELECT i.indisvalid FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.relname = 'users_username_lower_idx' AND n.nspname = current_schema()")).rows[0]?.indisvalid, false, '(an invalid index under the right name)');
+      const l4 = new SchemaLedger(p, { log: () => {} });
+      await l4.load();
+      const r4 = await l4.applyAll(statements);
+      assert.deepEqual(r4.failed, [], 'Postgres: CREATE UNIQUE INDEX IF NOT EXISTS runs without an error');
+      assert.deepEqual(r4.pendingSecurity.map((x) => x.id), ['username-unique-ci'], 'Postgres: but it is reported as not in force');
+      await p.query('DROP INDEX users_username_lower_idx');
+      await p.query('CREATE INDEX users_username_lower_idx ON users (lower(username))');
+      assert.deepEqual((await l4.pendingSecurity(statements)).map((x) => x.id), ['username-unique-ci'], 'Postgres: nor is one that is not unique');
+      await p.query('DROP INDEX users_username_lower_idx');
+      await p.query('DELETE FROM users WHERE id = ANY ($1::uuid[])', [dupe.rows.map((r) => r.id)]);
+      assert.deepEqual((await l4.applyAll(statements)).pendingSecurity, [], 'Postgres: put right at the next boot');
+
+      // Hashes left stale before the triggers existed are recomputed once, and that is recorded.
+      await p.query('ALTER TABLE designs DISABLE TRIGGER designs_thumbnail_hash; ALTER TABLE design_scenes DISABLE TRIGGER design_scenes_scene_hash');
+      await p.query("UPDATE designs SET thumbnail_hash = 'stale' WHERE thumbnail IS NOT NULL");
+      await p.query("UPDATE design_scenes SET scene_hash = NULL");
+      await p.query('ALTER TABLE designs ENABLE TRIGGER designs_thumbnail_hash; ALTER TABLE design_scenes ENABLE TRIGGER design_scenes_scene_hash');
+      const staleRows = (await p.query("SELECT count(*)::int AS n FROM designs WHERE thumbnail_hash = 'stale'")).rows[0].n + (await p.query('SELECT count(*)::int AS n FROM design_scenes WHERE scene_hash IS NULL')).rows[0].n;
+      check(staleRows >= 2, `(${staleRows} rows left stale)`);
+      const l5 = new SchemaLedger(p, { log: () => {} });
+      await l5.load();
+      check(!l5.has('content-hashes-recomputed-v1'), 'Postgres: not recorded as done yet');
+      assert.equal(await pDesigns.backfillHashes(), staleRows, 'Postgres: the recompute corrects every stale or missing hash, and nothing else');
+      const wrong = (await p.query("SELECT count(*)::int AS n FROM designs WHERE thumbnail_hash IS DISTINCT FROM CASE WHEN thumbnail IS NULL THEN NULL ELSE encode(sha256(thumbnail), 'hex') END")).rows[0].n
+        + (await p.query("SELECT count(*)::int AS n FROM design_scenes WHERE scene_hash IS DISTINCT FROM encode(sha256(scene), 'hex')")).rows[0].n;
+      assert.equal(wrong, 0, 'Postgres: every hash matches its bytes');
+      await l5.mark('content-hashes-recomputed-v1');
+      const l6 = new SchemaLedger(p, { log: () => {} });
+      await l6.load();
+      check(l6.has('content-hashes-recomputed-v1'), 'Postgres: recorded in the ledger for the next boot');
+      assert.equal(await pDesigns.backfillHashes(), 0, 'Postgres: a second recompute finds nothing to do');
+      console.log('  review 1 (Postgres): triggers keep both hashes for old-style writes (hash, 304 and strip follow); disabled or dropped ones pending and put back; an invalid or non-unique security index pending; one recompute, recorded');
+    } finally {
+      await p.end();
+      await admin.query(`DROP SCHEMA ${name} CASCADE`).catch(() => {});
+      await admin.end();
+    }
+  }
+  console.log('performance plan stage 2 (server), the security review: all assertions passed');
+}
+
+// ---------- 2026-10: performance plan, stage 2 (server), the review's second pass ----------
+// A forged header must never make the posture panel kinder; a waiting task
+// must never wait for ever; a trigger that does not fire is not in force, and
+// a boot that had to put one back recomputes the hashes before trusting them.
+{
+  const { readFileSync } = await import('node:fs');
+  const { randomBytes, createHash } = await import('node:crypto');
+  const { securityPosture } = await import('../src/posture');
+  const { WorkerPool, PoolBusyError, SCENE_POOL, PDF_POOL, SCENE_VIEW_ROOM, DEFAULT_MAX_WAIT_MS } = await import('../src/workerPool');
+  const { StrippedSceneCache } = await import('../src/sceneCache');
+  const { SchemaLedger, schemaStatements, SECURITY_STATEMENTS, inForce, hashTrustAfterBoot, HASH_RECOMPUTE_TASK } = await import('../src/schema');
+  const check = (cond: unknown, msg: string): void => assert.ok(cond, msg);
+  const inline = (body: string) => ({ url: new URL(`data:text/javascript,${encodeURIComponent(`import { parentPort } from 'node:worker_threads';\n${body}\nparentPort.postMessage({ ready: true });`)}`) });
+
+  // ---- the posture panel: Cloudflare's headers can only make the verdict worse ----
+  {
+    const SECRET = 'o'.repeat(40);
+    const rank = { good: 0, info: 1, warn: 2, bad: 3 } as const;
+    const proxyRow = (env: Record<string, string>, seen: boolean) =>
+      securityPosture({ env, nodeVersion: process.version, uid: 1000, rateLimit: true, database: 'postgres', email: null, soc: null, schema: null, cloudflareSeen: seen ? '2026-10-24T10:00:00.000Z' : null }).find((c) => c.id === 'proxy')!;
+    const table: [string, Record<string, string>, string, string][] = [
+      ['unset', { NODE_ENV: 'production' }, 'good', 'warn'],
+      ['1', { NODE_ENV: 'production', TRUST_PROXY: '1' }, 'good', 'warn'],
+      ['2', { NODE_ENV: 'production', TRUST_PROXY: '2' }, 'bad', 'bad'],
+      ['5', { NODE_ENV: 'production', TRUST_PROXY: '5' }, 'bad', 'bad'],
+      ['0', { NODE_ENV: 'production', TRUST_PROXY: '0' }, 'warn', 'warn'],
+      ['cloudflare, no secret', { NODE_ENV: 'production', TRUST_PROXY: 'cloudflare' }, 'warn', 'warn'],
+      ['cloudflare, locked', { NODE_ENV: 'production', TRUST_PROXY: 'cloudflare', ORIGIN_SECRET: SECRET }, 'good', 'good'],
+      ['unset, development', {}, 'good', 'warn'],
+    ];
+    for (const [label, env, without, withCf] of table) {
+      const a = proxyRow(env, false);
+      const b = proxyRow(env, true);
+      assert.equal(a.state, without, `TRUST_PROXY ${label}, no Cloudflare headers: ${a.state}`);
+      assert.equal(b.state, withCf, `TRUST_PROXY ${label}, Cloudflare headers seen: ${b.state}`);
+      check(rank[b.state as keyof typeof rank] >= rank[a.state as keyof typeof rank], `${label}: a request's headers never make the verdict kinder`);
+      if (env.TRUST_PROXY === 'cloudflare') {
+        assert.equal(b.detail, a.detail, `${label}: in Cloudflare mode the headers are expected and change nothing`);
+      } else {
+        check(/someone wrote themselves/.test(b.detail) && /TRUST_PROXY=cloudflare/.test(b.detail), `${label}: the Cloudflare advice is added`);
+        if (a.state !== 'good') check(b.detail.startsWith(a.detail), `${label}: after the verdict's own explanation, which is kept (${b.detail.slice(0, 60)})`);
+      }
+    }
+    check(/^Trusting 2 hops whoever wrote them/.test(proxyRow({ NODE_ENV: 'production', TRUST_PROXY: '2' }, true).detail), 'TRUST_PROXY=2 with Cloudflare headers still says why it is a fix, first');
+    console.log('  review 2nd pass, posture: the TRUST_PROXY verdict is the worse of its own and the Cloudflare check; a fix keeps its explanation');
+  }
+
+  // ---- no task waits in a queue for ever ----
+  {
+    check(SCENE_POOL.maxWaitMs! > 0 && SCENE_POOL.maxWaitMs! <= 10_000 && PDF_POOL.maxWaitMs! > 0 && PDF_POOL.maxWaitMs! <= 20_000 && DEFAULT_MAX_WAIT_MS <= 10_000, 'both pools, and any pool naming none, have a limit on waiting');
+    const body = `parentPort.on('message', (m) => setTimeout(() => parentPort.postMessage({ ok: true, result: m.tag }), m.ms));`;
+    const p = new WorkerPool<{ tag: string; ms: number }, string>({ name: 'wait', file: inline(body), size: 1, maxQueue: 16, timeoutMs: 5_000, maxWaitMs: 300, idleMs: 1_000, resourceLimits: { maxOldGenerationSizeMb: 32 }, log: () => {} });
+    const outcome = (x: Promise<string>, t0: number) => x.then((v) => `ran ${v}`, (e: unknown) => (e instanceof PoolBusyError ? `refused after ${Date.now() - t0} ms` : 'failed'));
+    let t0 = Date.now();
+    const long = outcome(p.run({ tag: 'long', ms: 1_000 }), t0);
+    const queued = [outcome(p.run({ tag: 'q1', ms: 10 }), t0), outcome(p.run({ tag: 'q2', ms: 10 }, [], { urgent: true }), t0), outcome(p.run({ tag: 'q3', ms: 10 }, [], { room: SCENE_VIEW_ROOM }), t0)];
+    const q = await Promise.all(queued);
+    for (const r of q) check(/^refused after (\d+) ms$/.test(r) && Number(/\d+/.exec(r)![0]) < 900, `a task not started in time is refused, view, save or other (${r})`);
+    assert.equal(await long, 'ran long', 'the running task is not touched');
+    assert.equal(p.stats.expired, 3);
+    // The review's case: a view queued behind a steady stream of saves.
+    let stop = false;
+    t0 = Date.now();
+    void outcome(p.run({ tag: 'busy', ms: 50 }), t0);
+    const view = outcome(p.run({ tag: 'V', ms: 5 }, [], { room: SCENE_VIEW_ROOM }), t0);
+    const feeder = (async () => { while (!stop) { void p.run({ tag: 's', ms: 50 }, [], { urgent: true }).catch(() => {}); await new Promise((r) => setTimeout(r, 40)); } })();
+    const waited = await Promise.race([view, new Promise<string>((r) => setTimeout(() => r('still waiting after 3000 ms'), 3_000))]);
+    stop = true;
+    await feeder;
+    check(/^refused after/.test(waited), `a view behind a steady stream of saves gets an answer, not a hang (${waited})`);
+    await p.close();
+    // Through the routes: the request is answered 503 retry.
+    const slow = new WorkerPool<unknown, unknown>({ name: 'scene-wait', file: inline(`parentPort.on('message', () => setTimeout(() => parentPort.postMessage({ ok: true, result: null }), 1_500));`), size: 1, maxQueue: 16, timeoutMs: 5_000, maxWaitMs: 200, idleMs: 1_000, resourceLimits: { maxOldGenerationSizeMb: 32 }, log: () => {} });
+    const auth = new MemoryAuthRepository();
+    const designs = new MemoryDesignRepository((id) => auth.usernameOf(id));
+    const app = await buildApp(designs, auth, templates, { workers: { scene: slow as never }, sceneCache: new StrippedSceneCache() });
+    const mk = async (n: number) => {
+      const d = await designs.create({ title: `Wait ${n}`, templateId: DEFAULT_TEMPLATE.id, templateVersion: 1, palette: PALETTE, cellsGz: gzipSync(new Uint8Array(map.count)), ownerId: null as unknown as string, thumbnailPng: null as never });
+      await designs.patchMeta(d.id, { isPublic: true });
+      await designs.putScene(d.id, gzipSync(Buffer.from(JSON.stringify({ v: 1, banners: [{ id: `w${n}` }] }))));
+      return d.id;
+    };
+    const [a, b] = [await mk(1), await mk(2)];
+    const first = app.inject({ method: 'GET', url: `/api/designs/${a}/scene` });
+    await new Promise((r) => setTimeout(r, 30));
+    const t1 = Date.now();
+    const second = await app.inject({ method: 'GET', url: `/api/designs/${b}/scene` });
+    assert.equal(second.statusCode, 503, `a view that could not start in time is answered (${second.statusCode})`);
+    assert.equal((second.json() as { code: string }).code, 'retry');
+    check(Date.now() - t1 < 1_200, `within the wait limit, not after the task ahead (${Date.now() - t1} ms)`);
+    assert.equal((await first).statusCode, 200);
+    await app.close();
+    await slow.close();
+    console.log('  review 2nd pass, queue: a task not started within its pool\'s wait limit is refused (503 retry), views and saves alike');
+  }
+
+  // ---- a trigger that does not fire is not in force; putting one back means recomputing ----
+  if (process.env.DATABASE_URL) {
+    const pg = (await import('pg')).default;
+    const name = `s2_review2_${randomBytes(4).toString('hex')}`;
+    const admin = new pg.Pool({ connectionString: process.env.DATABASE_URL, max: 2 });
+    await admin.query(`CREATE SCHEMA ${name}`);
+    const p = new pg.Pool({ connectionString: process.env.DATABASE_URL, max: 4, options: `-c search_path=${name}` });
+    const statements = schemaStatements(readFileSync(new URL('../schema.sql', import.meta.url), 'utf8'));
+    const rule = SECURITY_STATEMENTS.find((r) => r.id === 'thumbnail-hash')!;
+    const sha = (b: Buffer): string => createHash('sha256').update(b).digest('hex');
+    try {
+      const boot = async () => {
+        const l = new SchemaLedger(p, { log: () => {} });
+        await l.load();
+        return { l, rep: await l.applyAll(statements) };
+      };
+      const b0 = await boot();
+      check(b0.rep.ran.includes('thumbnail-hash') && b0.rep.ran.includes('scene-hash'), 'Postgres: a first boot reports the hash statements it ran');
+      const t0 = await hashTrustAfterBoot(b0.l, b0.rep);
+      assert.deepEqual(t0, { inForce: true, trusted: false, recompute: true }, 'Postgres: the first boot with the triggers recomputes before trusting');
+      await b0.l.mark(HASH_RECOMPUTE_TASK);
+      const b1 = await boot();
+      assert.deepEqual(b1.rep.ran, [], 'Postgres: a boot with nothing to do runs no security statement');
+      assert.deepEqual(await hashTrustAfterBoot(b1.l, b1.rep), { inForce: true, trusted: true, recompute: false }, 'Postgres: and trusts the hashes at once');
+      // A replica-only trigger does not fire for the server's writes.
+      await p.query("INSERT INTO users (username, password_hash) VALUES ('rep_owner', 'x')");
+      const row = await p.query("INSERT INTO designs (title, template_id, template_version, palette, cells, thumbnail) VALUES ('R', 'x', 1, '[]'::jsonb, '\\x00', '\\x0102') RETURNING id");
+      const id = row.rows[0].id as string;
+      await p.query('ALTER TABLE designs ENABLE REPLICA TRIGGER designs_thumbnail_hash');
+      await p.query("UPDATE designs SET thumbnail = '\\x0304' WHERE id = $1", [id]);
+      const after = (await p.query('SELECT thumbnail_hash FROM designs WHERE id = $1', [id])).rows[0].thumbnail_hash;
+      check(after !== sha(Buffer.from([3, 4])), '(a replica-only trigger did not fire: the hash went stale)');
+      check(!(await inForce(p, rule.check)), 'Postgres: so it is not in force');
+      assert.deepEqual((await new SchemaLedger(p, { log: () => {} }).pendingSecurity(statements)).map((x) => x.id), ['thumbnail-hash'], 'Postgres: and reads as pending');
+      await p.query('ALTER TABLE designs ENABLE ALWAYS TRIGGER designs_thumbnail_hash');
+      check(await inForce(p, rule.check), "Postgres: an ENABLE ALWAYS trigger fires everywhere, and counts");
+      await p.query('ALTER TABLE designs ENABLE REPLICA TRIGGER designs_thumbnail_hash');
+      // The next boot puts it back, and does not trust the hashes until they are recomputed.
+      const b2 = await boot();
+      check(b2.rep.ran.includes('thumbnail-hash') && b2.rep.pendingSecurity.length === 0, `Postgres: the boot makes it again (${b2.rep.ran.join(',')})`);
+      const t2 = await hashTrustAfterBoot(b2.l, b2.rep);
+      assert.deepEqual(t2, { inForce: true, trusted: false, recompute: true }, 'Postgres: rows written meanwhile may be stale, so the recompute runs again first');
+      check(!b2.l.has(HASH_RECOMPUTE_TASK), 'Postgres: the record of the old recompute is gone');
+      const fresh = new SchemaLedger(p, { log: () => {} });
+      await fresh.load();
+      check(!fresh.has(HASH_RECOMPUTE_TASK), 'Postgres: for the next boot too, until the recompute has run');
+      const { PgDesignRepository } = await import('../src/pgRepo');
+      check((await new PgDesignRepository(p, p).backfillHashes()) >= 1, 'Postgres: the recompute finds the stale hash');
+      assert.equal((await p.query('SELECT thumbnail_hash FROM designs WHERE id = $1', [id])).rows[0].thumbnail_hash, sha(Buffer.from([3, 4])), 'Postgres: and corrects it');
+      await b2.l.mark(HASH_RECOMPUTE_TASK);
+      const b3 = await boot();
+      assert.deepEqual(await hashTrustAfterBoot(b3.l, b3.rep), { inForce: true, trusted: true, recompute: false }, 'Postgres: then the hashes are trusted again');
+      // A dropped function counts the same way.
+      await p.query('DROP FUNCTION tifo_scene_hash() CASCADE');
+      const b4 = await boot();
+      check(b4.rep.ran.includes('scene-hash-fn') && b4.rep.ran.includes('scene-hash'), 'Postgres: function and trigger made again');
+      assert.equal((await hashTrustAfterBoot(b4.l, b4.rep)).recompute, true, 'Postgres: and the recompute runs again');
+      console.log('  review 2nd pass, Postgres: a replica-only or disabled trigger is not in force; a boot that puts one back recomputes before trusting stored hashes');
+    } finally {
+      await p.end();
+      await admin.query(`DROP SCHEMA ${name} CASCADE`).catch(() => {});
+      await admin.end();
+    }
+  }
+  console.log('performance plan stage 2 (server), the review\'s second pass: all assertions passed');
 }

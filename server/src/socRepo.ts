@@ -304,9 +304,14 @@ export class PgSocRepository implements SocRepository {
    */
   constructor(private readonly pool: pg.Pool, private readonly maintenance: pg.Pool = pool) {}
 
-  /** Idempotent, like the other tables that bootstrap on boot. */
-  async init(): Promise<void> {
-    await this.maintenance.query(`
+  /**
+   * Idempotent, like the other tables that bootstrap on boot.
+   * Its tables, made if missing. `run` is how each statement is applied: the
+   * schema ledger at boot (schema.ts, performance plan P2.15), so a boot that
+   * finds them already there takes no lock; directly otherwise.
+   */
+  async init(run: (sql: string) => Promise<unknown> = (sql) => this.maintenance.query(sql)): Promise<void> {
+    await run(`
       CREATE TABLE IF NOT EXISTS soc_events (
         minute  TIMESTAMPTZ NOT NULL,
         kind    TEXT NOT NULL,
@@ -316,8 +321,8 @@ export class PgSocRepository implements SocRepository {
         count   INTEGER NOT NULL,
         PRIMARY KEY (minute, kind, source, route, subject)
       )`);
-    await this.maintenance.query('CREATE INDEX IF NOT EXISTS soc_events_minute_idx ON soc_events (minute DESC)');
-    await this.maintenance.query(`
+    await run('CREATE INDEX IF NOT EXISTS soc_events_minute_idx ON soc_events (minute DESC)');
+    await run(`
       CREATE TABLE IF NOT EXISTS soc_audit (
         id      BIGSERIAL PRIMARY KEY,
         at      TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -328,8 +333,8 @@ export class PgSocRepository implements SocRepository {
         source  TEXT NOT NULL DEFAULT '',
         detail  JSONB
       )`);
-    await this.maintenance.query('CREATE INDEX IF NOT EXISTS soc_audit_at_idx ON soc_audit (at DESC)');
-    await this.maintenance.query(`
+    await run('CREATE INDEX IF NOT EXISTS soc_audit_at_idx ON soc_audit (at DESC)');
+    await run(`
       CREATE TABLE IF NOT EXISTS soc_alerts (
         id         BIGSERIAL PRIMARY KEY,
         at         TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -340,7 +345,7 @@ export class PgSocRepository implements SocRepository {
         error      TEXT,
         summary    TEXT NOT NULL DEFAULT ''
       )`);
-    await this.maintenance.query('CREATE INDEX IF NOT EXISTS soc_alerts_at_idx ON soc_alerts (at DESC)');
+    await run('CREATE INDEX IF NOT EXISTS soc_alerts_at_idx ON soc_alerts (at DESC)');
   }
 
   async addEvents(rows: SocEventRow[]): Promise<void> {

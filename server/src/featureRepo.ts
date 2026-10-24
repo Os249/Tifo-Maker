@@ -75,16 +75,21 @@ export class PgDailyFeatureRepository implements DailyFeatureRepository {
    */
   constructor(private readonly pool: pg.Pool, private readonly maintenance: pg.Pool = pool) {}
 
-  /** Idempotent table creation. Called best-effort at boot (must not fail boot). */
-  async init(): Promise<void> {
-    await this.maintenance.query(
+  /**
+   * Idempotent table creation. Called best-effort at boot (must not fail boot).
+   * Its tables, made if missing. `run` is how each statement is applied: the
+   * schema ledger at boot (schema.ts, performance plan P2.15), so a boot that
+   * finds them already there takes no lock; directly otherwise.
+   */
+  async init(run: (sql: string) => Promise<unknown> = (sql) => this.maintenance.query(sql)): Promise<void> {
+    await run(
       `CREATE TABLE IF NOT EXISTS daily_features (
          day        TEXT PRIMARY KEY,
          design_id  UUID NOT NULL REFERENCES designs(id) ON DELETE CASCADE,
          created_at TIMESTAMPTZ NOT NULL DEFAULT now()
        )`,
     );
-    await this.maintenance.query('CREATE INDEX IF NOT EXISTS daily_features_design_idx ON daily_features (design_id)');
+    await run('CREATE INDEX IF NOT EXISTS daily_features_design_idx ON daily_features (design_id)');
   }
 
   async claim(day: string, designId: string): Promise<{ designId: string; inserted: boolean }> {

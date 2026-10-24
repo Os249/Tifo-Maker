@@ -15,6 +15,9 @@ import { maskEmail } from './soc';
 import type { EmailHealth } from './email';
 
 export type PostureState = 'good' | 'warn' | 'bad' | 'info';
+/** Worst first: what a check that may only ever make a verdict worse compares by. */
+const STATE_RANK: Record<PostureState, number> = { bad: 3, warn: 2, info: 1, good: 0 };
+
 export interface PostureCheck {
   id: string;
   label: string;
@@ -32,6 +35,14 @@ export interface PostureInput {
   soc: { alertTo: string | null; keyStable: boolean; lastWriteError: string | null } | null;
   /** Where the Docker build left `npm audit` output, if it did. */
   auditSnapshotPath?: string;
+  /**
+   * What this boot did with the schema (schema.ts, performance plan P2.15):
+   * the security statements not in force, and how many statements failed.
+   * Absent on the memory store.
+   */
+  schema?: { pendingSecurity: { id: string; why: string }[]; failed: number } | null;
+  /** When a request last arrived with Cloudflare's headers while TRUST_PROXY is not cloudflare (P2.2). */
+  cloudflareSeen?: string | null;
   now?: Date;
 }
 
@@ -88,20 +99,36 @@ export function securityPosture(input: PostureInput): PostureCheck[] {
   });
 
   const mode = proxyModeFrom(env.TRUST_PROXY, env.NODE_ENV);
+  const originSecret = (env.ORIGIN_SECRET ?? '').trim();
+  // The verdict on TRUST_PROXY itself, whatever any request carried.
+  const baseState: PostureState = mode.kind === 'hops' && mode.hops >= 2 ? 'bad' : mode.kind === 'none' && prod ? 'warn' : mode.kind === 'cloudflare' && !originSecret ? 'warn' : 'good';
+  const baseDetail = mode.kind === 'cloudflare'
+    ? originSecret
+      ? 'Cloudflare mode: the extra hop is believed only from Cloudflare’s published addresses, and the origin answers only requests that carry ORIGIN_SECRET.'
+      : 'Cloudflare mode: the extra hop is believed only from Cloudflare’s published addresses. The origin is not locked: anyone can still reach Railway directly, around Cloudflare. Set ORIGIN_SECRET and the Transform Rule that sends it (CLOUDFLARE.md).'
+    : mode.kind === 'none'
+      ? prod
+        ? 'Never trusting X-Forwarded-For. Behind Railway every visitor looks like the proxy, so per-address limits become one shared bucket.'
+        : 'Never trusting X-Forwarded-For (right for local development).'
+      : mode.hops >= 2
+        ? `Trusting ${mode.hops} hops whoever wrote them: a request sent straight to Railway can choose its own address and dodge every rate limit. Use TRUST_PROXY=cloudflare.`
+        : 'One hop (Railway). Right while nothing else sits in front.';
+  // Cloudflare's headers on requests while the server is not in Cloudflare
+  // mode (P2.2): if Cloudflare really is in front, req.ip is Cloudflare's and
+  // every visitor behind one edge shares one set of limits. But anyone can
+  // send those headers straight to Railway, so this can be a stranger's
+  // request rather than a setup problem. It can only ever make the verdict
+  // worse, never better: at least a check, and a "fix" on TRUST_PROXY (a
+  // plain 2, say) stays a fix with its own explanation first (stage 2 review:
+  // one forged header used to turn the red line into a warning).
+  const cfUntold = mode.kind !== 'cloudflare' && !!input.cloudflareSeen;
+  const cfSentence = `A request arrived with Cloudflare's headers (cf-ray or cf-connecting-ip; last at ${input.cloudflareSeen}) while TRUST_PROXY is not "cloudflare". If you have put Cloudflare in front of the site, set TRUST_PROXY=cloudflare: until then every visitor behind one Cloudflare edge looks like one address and shares one set of rate limits. If Cloudflare is not in front, these are headers someone wrote themselves: they change nothing here (they are never believed), and there is nothing to do.`;
+  const worse = (a: PostureState, b: PostureState): PostureState => (STATE_RANK[a] >= STATE_RANK[b] ? a : b);
   out.push({
     id: 'proxy',
     label: 'Client address (TRUST_PROXY)',
-    state: mode.kind === 'hops' && mode.hops >= 2 ? 'bad' : mode.kind === 'none' && prod ? 'warn' : 'good',
-    detail:
-      mode.kind === 'cloudflare'
-        ? 'Cloudflare mode: the extra hop is believed only from Cloudflare’s published addresses.'
-        : mode.kind === 'none'
-          ? prod
-            ? 'Never trusting X-Forwarded-For. Behind Railway every visitor looks like the proxy, so per-address limits become one shared bucket.'
-            : 'Never trusting X-Forwarded-For (right for local development).'
-          : mode.hops >= 2
-            ? `Trusting ${mode.hops} hops whoever wrote them: a request sent straight to Railway can choose its own address and dodge every rate limit. Use TRUST_PROXY=cloudflare.`
-            : 'One hop (Railway). Right while nothing else sits in front.',
+    state: cfUntold ? worse(baseState, 'warn') : baseState,
+    detail: !cfUntold ? baseDetail : baseState === 'good' ? cfSentence : `${baseDetail} ${cfSentence}`,
   });
 
   const pw = env.AI_ADMIN_PASSWORD ?? '';
@@ -158,6 +185,10 @@ export function securityPosture(input: PostureInput): PostureCheck[] {
     }
   }
 
+  if (originSecret && originSecret.length < 32) {
+    out.push({ id: 'origin-secret', label: 'Origin lock (ORIGIN_SECRET)', state: 'bad', detail: `Only ${originSecret.length} characters; the server refuses to start with it. Use 32 or more random characters.` });
+  }
+
   out.push({
     id: 'public-url',
     label: 'Links in emails (PUBLIC_URL)',
@@ -165,10 +196,29 @@ export function securityPosture(input: PostureInput): PostureCheck[] {
     detail: env.PUBLIC_URL ? `Fixed to ${env.PUBLIC_URL}.` : 'Derived from an allow-listed Host header. Setting PUBLIC_URL removes the dependency on what a caller sent.',
   });
 
+  // A security control's index, column or table that this boot could not put
+  // in place (a lock not granted in 3 s, a database it does not fit). The
+  // controls in the code still run, but the one in the database is not there.
+  if (input.schema) {
+    const { pendingSecurity, failed } = input.schema;
+    out.push(
+      pendingSecurity.length
+        ? {
+            id: 'schema',
+            label: 'Database schema',
+            state: 'bad',
+            detail: `Not in force: ${pendingSecurity.map((p) => `${p.id} (${p.why})`).join('; ')}. It is tried again at the next boot: restart the service, and check the boot log for the reason.`,
+          }
+        : failed
+          ? { id: 'schema', label: 'Database schema', state: 'warn', detail: `${failed} statement(s) could not be applied at boot and will be tried again at the next one; none of them is one a security control relies on. The boot log says why.` }
+          : { id: 'schema', label: 'Database schema', state: 'good', detail: 'Every statement is in force, the security ones checked against the database at boot.' },
+    );
+  }
+
   out.push(dependencyCheck(input.auditSnapshotPath ?? join(process.cwd(), 'audit-snapshot.json')));
 
   // Anything preflight would print at boot that is not already covered above.
-  const covered = new Set(['TRUST_PROXY', 'AI_ADMIN_PASSWORD', 'RESEND_API_KEY', 'PUBLIC_URL', 'SECURITY_ALERT_TO', 'SOC_IP_KEY']);
+  const covered = new Set(['TRUST_PROXY', 'AI_ADMIN_PASSWORD', 'RESEND_API_KEY', 'PUBLIC_URL', 'SECURITY_ALERT_TO', 'SOC_IP_KEY', 'ORIGIN_SECRET']);
   for (const w of configWarnings(env)) {
     if (covered.has(w.key)) continue;
     out.push({ id: `config-${w.key}`, label: w.key, state: w.state === 'wrong' ? 'bad' : 'warn', detail: w.effect });

@@ -110,6 +110,131 @@ export interface TrafficRepository {
   purge(): Promise<void>;
 }
 
+/** One page view as it waits to be written: buildVisit's output and when it happened. */
+export interface TimedVisit {
+  visit: VisitInput;
+  at: Date;
+}
+
+/** A store that can take many page views in one write. */
+export interface VisitBatchStore extends TrafficRepository {
+  recordMany(rows: TimedVisit[]): Promise<void>;
+}
+
+/**
+ * Page views written in batches (performance plan P2.18).
+ *
+ * Every HTML page view used to take a database connection for one INSERT,
+ * after its response. They are now kept in memory and written every five
+ * seconds as one statement, so a busy minute is twelve writes instead of
+ * hundreds, and a page view never waits for a connection the requests need.
+ *
+ * What waits in memory is exactly what would have been written: buildVisit's
+ * output (the salted daily key, coarse buckets, a referrer host) and the time
+ * of the view, so the row keeps its real time and day. The address and the
+ * user-agent are dropped by buildVisit before anything reaches here, as they
+ * always were.
+ *
+ * Bounded three ways:
+ *  - at most `maxBuffered` views wait; beyond that they are dropped and
+ *    counted, and the next flush says how many, once (a flood of page views
+ *    must not grow memory without end, and analytics are not worth an
+ *    out-of-memory kill);
+ *  - a flush that fails is logged and its views dropped, never retried, so a
+ *    database that is down does not make the buffer an ever-growing queue;
+ *  - one flush at a time.
+ *
+ * The admin views read through flush(), so what they show includes the last
+ * few seconds; and the server awaits one last flush when it is stopped
+ * (server.ts, SIGTERM), with a time limit.
+ */
+export class BatchedTrafficRepository implements TrafficRepository {
+  private buffer: TimedVisit[] = [];
+  private dropped = 0;
+  private flushing: Promise<void> | null = null;
+  private timer: ReturnType<typeof setInterval> | null = null;
+  private readonly maxBuffered: number;
+  private readonly flushMs: number;
+  private readonly log: (message: string) => void;
+
+  constructor(
+    private readonly inner: VisitBatchStore,
+    opts: { maxBuffered?: number; flushMs?: number; log?: (message: string) => void } = {},
+  ) {
+    this.maxBuffered = opts.maxBuffered ?? 5_000;
+    this.flushMs = opts.flushMs ?? 5_000;
+    this.log = opts.log ?? ((m) => console.warn(m));
+  }
+
+  /** Write every few seconds. unref(): the timer never holds the process open. */
+  start(): this {
+    if (!this.timer) {
+      this.timer = setInterval(() => void this.flush(), this.flushMs);
+      this.timer.unref();
+    }
+    return this;
+  }
+
+  async record(v: VisitInput): Promise<void> {
+    if (this.buffer.length >= this.maxBuffered) {
+      this.dropped++;
+      return;
+    }
+    this.buffer.push({ visit: v, at: new Date() });
+  }
+
+  /** How many views are waiting (for tests and the boot report). */
+  get pending(): number {
+    return this.buffer.length;
+  }
+
+  /** Write what is waiting, as one batch. Never throws. */
+  flush(): Promise<void> {
+    if (this.flushing) return this.flushing.then(() => this.flush());
+    const batch = this.buffer;
+    const dropped = this.dropped;
+    this.buffer = [];
+    this.dropped = 0;
+    if (dropped) this.log(`[tifo] visits: ${dropped} page view(s) not recorded, the buffer was full (${this.maxBuffered})`);
+    if (!batch.length) return Promise.resolve();
+    this.flushing = this.inner
+      .recordMany(batch)
+      .catch((e) => this.log(`[tifo] visits: ${batch.length} page view(s) could not be written and were dropped: ${(e as Error).message}`))
+      .finally(() => {
+        this.flushing = null;
+      });
+    return this.flushing;
+  }
+
+  async summary(days: number): Promise<TrafficSummary> {
+    await this.flush();
+    return this.inner.summary(days);
+  }
+
+  purge(): Promise<void> {
+    return this.inner.purge();
+  }
+
+  /** Stop the timer and write what is left, waiting at most `limitMs`. */
+  async close(limitMs = 2_000): Promise<void> {
+    if (this.timer) clearInterval(this.timer);
+    this.timer = null;
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    await Promise.race([
+      this.flush(),
+      // Not unref()'d: this timer is the limit, so it must be able to fire
+      // even when nothing else is left to keep the process running.
+      new Promise<void>((resolve) => {
+        timeout = setTimeout(() => {
+          this.log(`[tifo] visits: the last batch was still being written after ${limitMs} ms; not waiting for it`);
+          resolve();
+        }, limitMs);
+      }),
+    ]);
+    if (timeout) clearTimeout(timeout);
+  }
+}
+
 // ============ classification (pure, unit-testable) ============
 
 /**
@@ -379,11 +504,15 @@ const EMPTY = (days: number, enabled: boolean): TrafficSummary => ({
 });
 
 /** Dev/in-memory mode: keeps a bounded ring of visits so /admin renders locally. */
-export class MemoryTrafficRepository implements TrafficRepository {
+export class MemoryTrafficRepository implements VisitBatchStore {
   private rows: (VisitInput & { at: number })[] = [];
 
   async record(v: VisitInput): Promise<void> {
-    this.rows.push({ ...v, at: Date.now() });
+    await this.recordMany([{ visit: v, at: new Date() }]);
+  }
+
+  async recordMany(batch: TimedVisit[]): Promise<void> {
+    for (const { visit, at } of batch) this.rows.push({ ...visit, at: at.getTime() });
     if (this.rows.length > 20000) this.rows.splice(0, this.rows.length - 20000);
   }
 
@@ -448,16 +577,21 @@ export class MemoryTrafficRepository implements TrafficRepository {
 }
 
 /** Postgres traffic store. All reads are defensive; a failure yields empty, never a 500. */
-export class PgTrafficRepository implements TrafficRepository {
+export class PgTrafficRepository implements VisitBatchStore {
   /**
    * `maintenance` is the small pool for slow, non-request work (server/src/db.ts,
    * performance plan P1.26); it defaults to the one pool where only one exists.
    */
   constructor(private readonly pool: pg.Pool, private readonly maintenance: pg.Pool = pool) {}
 
-  /** Idempotent table creation, mirroring stadiumRepo's boot-safe pattern. */
-  async init(): Promise<void> {
-    await this.maintenance.query(`
+  /**
+   * Idempotent table creation, mirroring stadiumRepo's boot-safe pattern.
+   * Its tables, made if missing. `run` is how each statement is applied: the
+   * schema ledger at boot (schema.ts, performance plan P2.15), so a boot that
+   * finds them already there takes no lock; directly otherwise.
+   */
+  async init(run: (sql: string) => Promise<unknown> = (sql) => this.maintenance.query(sql)): Promise<void> {
+    await run(`
       CREATE TABLE IF NOT EXISTS visits (
         id            BIGSERIAL PRIMARY KEY,
         visitor_key   TEXT,
@@ -475,26 +609,41 @@ export class PgTrafficRepository implements TrafficRepository {
         is_bot        BOOLEAN NOT NULL DEFAULT false,
         created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
       )`);
-    await this.maintenance.query('CREATE INDEX IF NOT EXISTS visits_created_idx ON visits (created_at DESC)');
-    await this.maintenance.query('CREATE INDEX IF NOT EXISTS visits_source_idx ON visits (source, created_at DESC)');
-    await this.maintenance.query('CREATE INDEX IF NOT EXISTS visits_human_idx ON visits (created_at DESC) WHERE NOT is_bot');
+    await run('CREATE INDEX IF NOT EXISTS visits_created_idx ON visits (created_at DESC)');
+    await run('CREATE INDEX IF NOT EXISTS visits_source_idx ON visits (source, created_at DESC)');
+    await run('CREATE INDEX IF NOT EXISTS visits_human_idx ON visits (created_at DESC) WHERE NOT is_bot');
     // One row per UTC day: how many distinct visitors it had. Written before
     // that day's keys are stripped, and holds nothing but a date and a count.
-    await this.maintenance.query(`CREATE TABLE IF NOT EXISTS visits_daily (
+    await run(`CREATE TABLE IF NOT EXISTS visits_daily (
         day      DATE PRIMARY KEY,
         visitors INTEGER NOT NULL
       )`);
   }
 
   async record(v: VisitInput): Promise<void> {
+    await this.recordMany([{ visit: v, at: new Date() }]);
+  }
+
+  /**
+   * Many page views in one statement (P2.18): one array per column, unnested,
+   * so a batch of any size is fourteen parameters, never near Postgres's
+   * limit of 65,535.
+   */
+  async recordMany(batch: TimedVisit[]): Promise<void> {
+    if (!batch.length) return;
+    const col = <T>(pick: (v: VisitInput) => T): T[] => batch.map((b) => pick(b.visit));
     await this.pool.query(
       `INSERT INTO visits
          (visitor_key, source, referrer_host, utm_source, utm_medium, utm_campaign,
-          path, device, os, browser, lang, country, is_bot)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+          path, device, os, browser, lang, country, is_bot, created_at)
+       SELECT * FROM unnest($1::text[], $2::text[], $3::text[], $4::text[], $5::text[], $6::text[],
+                            $7::text[], $8::text[], $9::text[], $10::text[], $11::text[], $12::text[],
+                            $13::bool[], $14::timestamptz[])`,
       [
-        v.visitorKey, v.source, v.referrerHost, v.utmSource, v.utmMedium, v.utmCampaign,
-        v.path, v.device, v.os, v.browser, v.lang, v.country, v.isBot,
+        col((v) => v.visitorKey), col((v) => v.source), col((v) => v.referrerHost), col((v) => v.utmSource),
+        col((v) => v.utmMedium), col((v) => v.utmCampaign), col((v) => v.path), col((v) => v.device),
+        col((v) => v.os), col((v) => v.browser), col((v) => v.lang), col((v) => v.country),
+        col((v) => v.isBot), batch.map((b) => b.at),
       ],
     );
   }

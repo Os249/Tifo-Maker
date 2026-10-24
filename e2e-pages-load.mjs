@@ -15,6 +15,24 @@
  *                      stadium geometry.
  *               P1.17  an English page fetches Almarai only for Arabic letters.
  *
+ * And phase 2:
+ *   every page  P2.6   strings arrive with the code that shows them: a page
+ *                      holds at start only a fraction of the table and no
+ *                      other page's strings, never asks for the full table,
+ *                      switches language without a download, and a key that
+ *                      slipped through shows nothing raw and comes right.
+ *               P2.8   one variable Inter file (preloaded, fetched once)
+ *                      instead of a file per weight; English pages draw the
+ *                      "العربية" toggle with a 5 KB subset, not Almarai.
+ *               P2.19  three.js is a chunk of its own, loaded only where it
+ *                      was (/t, the Stadium view, Match Day), and once.
+ *   /community  P2.16  the bell's poll asks for the unread count alone, and
+ *                      the list only when it is opened (falling back to the
+ *                      list on a server without the route).
+ *   /projects   P2.4   the owner's private pictures are fetched no-store.
+ *   build       P2.3   every text file has a .br and a .gz that decompress
+ *                      to it exactly, and nothing else is compressed.
+ *
  *   node e2e-pages-load.mjs        (server on :8911 with a built dist; BASE= to point elsewhere)
  */
 import { chromium } from 'playwright';
@@ -221,6 +239,242 @@ for (const [lang, path] of [['en', '/clubs'], ['en', '/tifo-spec'], ['ar', '/clu
   }
   await ctx.close();
 }
+
+// ===========================================================================
+// Phase 2
+// ---------------------------------------------------------------------------
+const TITLE = 'Sky & navy chevrons, with a four-block stand banner';
+const design = (await (await fetch(B + '/api/gallery?templates=1&limit=100')).json()).find((it) => it.title === TITLE)?.id;
+const me = async (token) => (await (await fetch(B + '/api/me', { headers: { authorization: 'Bearer ' + token } })).json());
+
+/** Loads a page cold and keeps every response body that is JavaScript, and the i18n warnings. */
+async function visit(path, { lang = 'en', token = null, w = 1440, h = 900, settle = 2500, routes = [], before } = {}) {
+  const o = await open({ lang, token, w, h, routes });
+  const bodies = new Map();
+  const warns = [];
+  o.p.on('console', (m) => { if (m.type() === 'warning' && m.text().startsWith('[i18n]')) warns.push(m.text()); });
+  o.p.on('response', async (r) => { if (/\.js$/.test(new URL(r.url()).pathname)) bodies.set(r.url(), await r.text().catch(() => '')); });
+  if (before) await before(o);
+  await o.p.goto(B + path, { waitUntil: 'load', timeout: 120000 });
+  await o.p.waitForTimeout(settle);
+  return { ...o, bodies, warns };
+}
+/** The keys every string table in these scripts carries (the old one-chunk table counts too). */
+const keysIn = (bodies) => {
+  const keys = new Set();
+  for (const js of bodies.values()) for (const m of js.matchAll(/"([A-Za-z][\w-]*(?:\.[\w-]+)+)":(?:\["|\{en:)/g)) keys.add(m[1]);
+  return keys;
+};
+const fontFiles = (asked) => asked.map((r) => new URL(r.url).pathname).filter((u) => /\.woff2?$/.test(u)).map((u) => u.split('/').pop());
+
+console.log('\n— P2.6: each page holds its own strings, not every page\'s —');
+const ALL_KEYS = (await (await import('node:fs')).promises.readFile(new URL('./src/ui/i18n/strings.ts', 'file://' + process.cwd() + '/'), 'utf8').catch(() => ''))
+  .match(/^\s*'[\w.-]+':\s*\{/gm)?.length ?? 1852;
+const signed = await account(1);
+for (const [path, name, budget, foreign] of [
+  ['/legal', 'legal', 30, /^(ed|cm|pj|ac|bn|ai|st|np|clubs|sh|seat)\./],
+  ['/reset?token=x', 'reset', 60, /^(ed|cm|pj|bn|ai|st|np|lg|clubs|sh|seat)\./],
+  ['/clubs', 'clubs', 100, /^(ed|cm|pj|ac|bn|ai|lg|rs|ly|seat)\./],
+  ['/', 'landing', 200, /^(ed|pj|ac|bn|ai|lg|rs|ly|mb|seat)\./],
+  ['/community', 'community', 250, /^(ed\.ai|ac|bn|ai|lg|rs|ly|mb|st|np)\./],
+  [`/s/${design}`, 'seat', 80, /^(ed|cm|pj|ac|bn|ai|lg|rs|clubs)\./],
+  [`/t/${design}`, 'share', 350, /^(ed\.ai|pj|ac|bn|lg|rs|ly)\./],
+  ['/account', 'account', 300, /^(cm|pj|bn|ai|lg|clubs|st|np|ly|sh|seat)\./],
+  ['/projects', 'projects', 400, /^(cm|bn|ai|lg|rs|ly|sh|seat)\./],
+  // The editor loads most of its panels within its first seconds: still well under the whole table.
+  [`/d/${design}`, 'editor', 1100, /^(lg|rs|clubs)\./],
+]) {
+  const v = await visit(path, { token: ['account', 'projects'].includes(name) ? signed : null });
+  const keys = keysIn(v.bodies);
+  const odd = [...keys].filter((k) => foreign.test(k));
+  check(`${name}: ${keys.size} strings at start (of ${ALL_KEYS}), within ${budget}`, keys.size > 0 && keys.size <= budget, `${keys.size}`);
+  check(`${name}: none of another page's strings`, odd.length === 0, odd.slice(0, 6).join(' '));
+  check(`${name}: never asks for the full table, no key missing`, !paths(v.asked, /^\/assets\/strings-/).length && v.warns.length === 0, v.warns.join(' | ').slice(0, 200));
+  check(`${name}: no page errors`, v.errs.length === 0, v.errs.join(' | '));
+  await v.ctx.close();
+}
+for (const [path, name] of [['/', 'landing'], ['/community', 'community'], [`/t/${design}`, 'share'], [`/d/${design}`, 'editor']]) {
+  const v = await visit(path, { lang: 'ar' });
+  check(`${name} in Arabic: never asks for the full table, no key missing`, !paths(v.asked, /^\/assets\/strings-/).length && v.warns.length === 0, v.warns.join(' | ').slice(0, 200));
+  await v.ctx.close();
+}
+{
+  // The toggle switches language with what the page already holds.
+  const v = await visit('/');
+  const n = v.asked.length;
+  await v.p.click('#lang-toggle');
+  const ar = await until(v.p, () => document.documentElement.lang === 'ar' && document.querySelector('[data-i18n="nav.how"]')?.textContent === 'كيف يشتغل', null, 10000);
+  await v.p.waitForTimeout(800);
+  const later = v.asked.slice(n).filter((r) => /\.js$/.test(new URL(r.url).pathname));
+  check('landing: the language toggle switches to Arabic at once', ar);
+  check('without downloading any strings', !later.some((r) => /strings-|i18n-/.test(r.url)) && v.warns.length === 0, later.map((r) => new URL(r.url).pathname).join(' '));
+  await v.ctx.close();
+}
+{
+  // A key a page's table lacks (one taken out of the landing's own table on
+  // the way in): it is never shown raw, the full table is fetched, and the
+  // label comes right.
+  const seen = [];
+  const v = await visit('/', {
+    routes: [[(u) => /^\/assets\/landing-[\w-]+\.js$/.test(u.pathname), async (route) => {
+      const r = await route.fetch();
+      await route.fulfill({ response: r, body: (await r.text()).replace(/"nav\.how":\["[^"]*","[^"]*"\],?/, '') });
+    }]],
+    before: async (o) => o.ctx.addInitScript(() => {
+      new MutationObserver(() => {
+        const el = document.querySelector('[data-i18n="nav.how"]');
+        if (el) (window.__seen ??= []).push(el.textContent);
+      }).observe(document, { subtree: true, childList: true, characterData: true });
+    }),
+  });
+  const right = await until(v.p, () => document.querySelector('[data-i18n="nav.how"]')?.textContent === 'How it works', null, 15000);
+  seen.push(...(await v.p.evaluate(() => window.__seen ?? [])));
+  check('a key missing from its table is never shown raw', right && !seen.includes('nav.how'), [...new Set(seen)].join(' / ').slice(0, 120));
+  check('the page warns and fetches the full table once', v.warns.length >= 1 && paths(v.asked, /^\/assets\/strings-/).length === 1, `${v.warns.length} warnings, ${paths(v.asked, /^\/assets\/strings-/).length} fetches`);
+  check('and no page errors', v.errs.length === 0, v.errs.join(' | '));
+  await v.ctx.close();
+}
+
+console.log('\n— P2.8: one variable Inter file, preloaded; no Arabic font for the toggle —');
+for (const [path, name, token] of [['/', 'landing'], ['/clubs', 'clubs'], ['/legal', 'legal'], ['/reset?token=x', 'reset'], ['/tifo-spec', 'spec'], ['/account', 'account', signed], ['/projects', 'projects', signed]]) {
+  // /tifo-spec has no script and is English only.
+  for (const lang of name === 'spec' ? ['en'] : ['en', 'ar']) {
+    const v = await visit(path, { lang, token });
+    const files = fontFiles(v.asked);
+    const html = await (await fetch(B + path)).text();
+    const pre = /<link rel="preload" href="(\/assets\/inter-latin-wght-normal-[\w-]+\.woff2)" as="font" type="font\/woff2" crossorigin>/.exec(html)?.[1];
+    const inter = files.filter((f) => /^inter-/.test(f));
+    const bytes = (await v.p.evaluate(() => performance.getEntriesByType('resource').filter((e) => /\.woff2?$/.test(e.name)).reduce((t, e) => t + e.encodedBodySize, 0)));
+    check(`${name} ${lang}: preloads the variable Inter Latin file`, !!pre);
+    check(`${name} ${lang}: Inter is that one file, fetched once`, inter.length === 1 && !!pre && pre.endsWith(inter[0]), inter.join(' '));
+    if (lang === 'en') {
+      check(`${name} en: no Arabic font file, the toggle's 5 KB subset at most`, !files.some((f) => /^almarai-arabic-/.test(f)) && files.filter((f) => /^almarai-toggle-/.test(f)).length <= 1, files.join(' '));
+      check(`${name} en: at most 5 font files and 100 KB (${files.length}, ${Math.round(bytes / 1024)} KB)`, files.length <= 5 && bytes <= 100 * 1024, files.join(' '));
+    } else {
+      check(`${name} ar: Arabic still drawn in Almarai`, files.some((f) => /^almarai-arabic-/.test(f)) && !files.some((f) => /^almarai-toggle-/.test(f)), files.join(' '));
+    }
+    await v.ctx.close();
+  }
+}
+
+console.log('\n— P2.19: three.js on its own, only where it was, and once —');
+for (const [path, name] of [['/', 'landing'], ['/community', 'community'], ['/clubs', 'clubs'], ['/legal', 'legal'], [`/s/${design}`, 'seat'], [`/d/${design}`, 'editor']]) {
+  const v = await visit(path);
+  check(`${name}: no three.js at load`, !chunk(v.asked, 'three') && !chunk(v.asked, 'preview3d'));
+  if (name === 'seat') check('seat: the match-day seat page still works', await until(v.p, () => !!document.querySelector('.seat-title')?.textContent.trim(), null, 20000) && v.errs.length === 0, v.errs.join(' | '));
+  await v.ctx.close();
+}
+{
+  const v = await visit(`/t/${design}`, { settle: 4000 });
+  const three = paths(v.asked, /^\/assets\/three-[\w-]+\.js$/);
+  const p3 = [...v.bodies.entries()].find(([u]) => /\/assets\/preview3d-/.test(u))?.[1] ?? '';
+  check('/t: three.js is its own chunk, fetched once', three.length === 1, `${three.length}`);
+  check('/t: and preview3d no longer carries it', p3.length > 0 && p3.length < 200 * 1024, `${Math.round(p3.length / 1024)} KB`);
+  check('/t: the stadium is drawn', await until(v.p, () => !!document.querySelector('canvas'), null, 60000));
+  check('/t: no page errors', v.errs.length === 0, v.errs.join(' | '));
+  await v.ctx.close();
+}
+for (const [path, name, ready] of [
+  ['/app?new=1&template=anfield-61k&quality=low&e2e=1', 'Stadium view', () => !!window.__tifoPreview],
+  ['/app?new=1&template=jewel-jeddah-60k-rb&sim=1', 'Match Day', () => !!document.querySelector('.mds-overlay canvas')],
+]) {
+  const v = await visit(path, { settle: 500 });
+  if (name === 'Stadium view') {
+    await until(v.p, () => /\d/.test(document.getElementById('stat')?.textContent || ''), null, 120000);
+    if (!(await v.p.evaluate(() => document.getElementById('view-3d')?.classList.contains('active')))) await v.p.click('#view-3d').catch(() => {});
+  }
+  check(`editor: ${name} opens`, await until(v.p, ready, null, 120000));
+  check(`editor: ${name} fetched three.js once`, paths(v.asked, /^\/assets\/three-[\w-]+\.js$/).length === 1, `${paths(v.asked, /^\/assets\/three-[\w-]+\.js$/).length}`);
+  check(`editor: ${name} without page errors`, v.errs.length === 0, v.errs.join(' | '));
+  await v.ctx.close();
+}
+
+console.log('\n— P2.16: the bell asks for the count, and for the list only when opened —');
+{
+  const token = await account();
+  const id = (await me(token)).id;
+  for (const mode of ['route', 'old server']) {
+    // A new follower each time: one unread notification (opening the bell
+    // in the round before marked the last one read).
+    const fan = await account();
+    const f = await fetch(`${B}/api/users/${id}/follow`, { method: 'POST', headers: { authorization: 'Bearer ' + fan, 'content-type': 'application/json' }, body: '{}' });
+    if (!f.ok) console.log(`  (follow answered ${f.status})`);
+    // 'route' asks the server's own GET /api/notifications/unread; 'old server'
+    // answers it 404 the way a server from before the route does (a deploy
+    // where the pages arrive first), so the fallback to the list is tested.
+    const routes = mode === 'route'
+      ? []
+      : [[(u) => u.pathname === '/api/notifications/unread', async (route) => {
+          try {
+            await route.fulfill({ status: 404, contentType: 'application/json', headers: { 'cache-control': 'no-store' }, body: JSON.stringify({ error: 'not found' }) });
+          } catch { /* the page closed while this was in flight */ }
+        }]];
+    const v = await visit('/community', { token, routes, before: (o) => o.ctx.clock.install() });
+    check(`${mode}: the unread dot shows`, await until(v.p, () => document.getElementById('notif-dot') && !document.getElementById('notif-dot').hidden, null, 30000));
+    await v.p.clock.fastForward(61_000);
+    await v.p.waitForTimeout(1500);
+    const counts = paths(v.asked, /^\/api\/notifications\/unread$/).length;
+    const lists = () => paths(v.asked, /^\/api\/notifications$/).length;
+    if (mode === 'route') {
+      check('route: the first check and the 60 s poll ask for the count', counts >= 2, `${counts} count requests`);
+      check('route: and never for the list', lists() === 0, `${lists()} list requests`);
+    } else {
+      check('old server: the count route 404s once, then the list answers', counts === 1 && lists() >= 2, `${counts} count, ${lists()} list requests`);
+    }
+    const before = lists();
+    await v.p.click('#notif-btn');
+    check(`${mode}: opening the bell fetches the list`, await until(v.p, () => !!document.querySelector('#notif-panel .notif-item, #notif-panel .notif-empty'), null, 15000) && lists() > before);
+    await v.ctx.close();
+  }
+}
+
+console.log('\n— P2.4: the owner\'s private pictures are fetched no-store —');
+{
+  const token = await account(2);
+  const { projects } = await (await fetch(B + '/api/projects', { headers: { authorization: 'Bearer ' + token } })).json();
+  const pub = projects[0];
+  const r = await fetch(`${B}/api/designs/${pub.id}`, { method: 'PATCH', headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json' }, body: JSON.stringify({ isPublic: true }) });
+  const priv = projects[1];
+  // The cache mode the page asks fetch() for, per picture. (A no-store fetch
+  // carries no request header that says so; Chrome adds Pragma and
+  // Cache-Control only to a reload.)
+  const v = await visit('/projects', { token, w: 1366, h: 860, before: (o) => o.ctx.addInitScript(() => {
+    const real = window.fetch;
+    window.fetch = function (input, init) {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      if (/\/thumbnail\.png$/.test(url)) (window.__thumbs ??= []).push({ url, cache: init?.cache ?? (input instanceof Request ? input.cache : 'default') });
+      return real.apply(this, arguments);
+    };
+  }) });
+  await until(v.p, () => document.querySelectorAll('#pj-grid img[data-bowl]').length >= 2, null, 30000);
+  const got = await v.p.evaluate(() => window.__thumbs ?? []);
+  const of = (id) => got.find((q) => q.url.includes(id));
+  check('a private picture is fetched with cache: no-store', of(priv.id)?.cache === 'no-store', JSON.stringify(of(priv.id) ?? null));
+  check('a public one keeps the normal cache', r.ok && of(pub.id)?.cache === 'default', r.ok ? JSON.stringify(of(pub.id) ?? null) : `publish ${r.status}`);
+  await v.ctx.close();
+}
+
+console.log('\n— P2.3: pre-compressed copies (needs DIST= to read the build) —');
+if (process.env.DIST) {
+  const { readdirSync, readFileSync, statSync } = await import('node:fs');
+  const { join, extname } = await import('node:path');
+  const { brotliDecompressSync, gunzipSync } = await import('node:zlib');
+  const walk = (d, o = []) => { for (const n of readdirSync(d)) { const q = join(d, n); statSync(q).isDirectory() ? walk(q, o) : o.push(q); } return o; };
+  const all = walk(process.env.DIST);
+  const TEXT = new Set(['.js', '.mjs', '.css', '.html', '.svg', '.json', '.txt', '.xml', '.wasm']);
+  const text = all.filter((f) => TEXT.has(extname(f)));
+  let bad = 0, pairs = 0;
+  for (const f of all.filter((x) => /\.(br|gz)$/.test(x))) {
+    const orig = f.replace(/\.(br|gz)$/, '');
+    if (!TEXT.has(extname(orig))) { bad++; continue; }
+    const back = f.endsWith('.br') ? brotliDecompressSync(readFileSync(f)) : gunzipSync(readFileSync(f));
+    if (!back.equals(readFileSync(orig))) bad++;
+    pairs++;
+  }
+  const withBr = text.filter((f) => all.includes(f + '.br')).length;
+  check(`every text file has its brotli copy (${withBr} of ${text.length})`, withBr >= text.length * 0.95, `${text.length - withBr} without`);
+  check(`all ${pairs} pairs decompress to their original, and only text is compressed`, pairs > 0 && bad === 0, `${bad} bad`);
+} else console.log('  (skipped: set DIST=<path to dist>)');
 
 await browser.close();
 console.log(`\n${pass} passed, ${fail} failed`);

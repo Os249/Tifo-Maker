@@ -111,6 +111,23 @@ export function configWarnings(env: NodeJS.ProcessEnv): ConfigWarning[] {
   } else if (alertTo && !/^[^\s@<>()[\],;:"\\?&#%]+@[^\s@<>()[\],;:"\\?&#%]+\.[^\s@<>()[\],;:"\\?&#%]+$/.test(alertTo)) {
     out.push({ key: 'SECURITY_ALERT_TO', effect: `"${alertTo.slice(0, 80)}" is not an email address, so security alerts cannot be sent.`, state: 'wrong' });
   }
+  // A process-wide V8 heap size (P2.14). V8 lets its own flag override the
+  // memory limit the scene and PDF workers are started with (resourceLimits),
+  // so with this set a hostile scene or PDF could take the server's memory
+  // rather than only its worker's: measured, a worker limited to 16 MB grew
+  // past 1.2 GB under --max-old-space-size=8192.
+  if (/--max-old-space-size|--max-semi-space-size|--max-heap-size/.test(env.NODE_OPTIONS ?? '')) {
+    out.push({ key: 'NODE_OPTIONS', effect: 'sets a V8 heap size for the whole process, which overrides the memory limit of the scene and PDF worker threads. Remove it: the image sets none, and the server needs none.', state: 'wrong' });
+  }
+  // The origin lock (P2.2). The server refuses to start with a short one
+  // (server.ts); said here too, so the reason is in the boot log.
+  const originSecret = env.ORIGIN_SECRET?.trim();
+  if (originSecret && originSecret.length < 32) {
+    out.push({ key: 'ORIGIN_SECRET', effect: `only ${originSecret.length} characters. The server will not start with it: use at least 32 random characters (openssl rand -hex 32).`, state: 'wrong' });
+  }
+  if (tp === 'cloudflare' && !originSecret) {
+    out.push({ key: 'ORIGIN_SECRET', effect: 'not set while TRUST_PROXY=cloudflare: anyone can still reach Railway directly, around Cloudflare. Set it, and the Cloudflare Transform Rule that sends it (CLOUDFLARE.md).' });
+  }
   const socKey = env.SOC_IP_KEY?.trim();
   if (socKey && socKey.length < 16) {
     out.push({

@@ -49,8 +49,9 @@ export class PgSocialRepository implements SocialRepository {
       // Duplicate the data into a brand-new private design owned by the remixer,
       // stamping remixed_from for attribution. The original is never mutated.
       const ins = await client.query(
-        `INSERT INTO designs (title, template_id, template_version, palette, cells, owner_id, is_public, remixed_from, thumbnail)
-         VALUES ($1, $2, $3, $4, $5, $6, false, $7, $8)
+        // The picture's hash with the picture (P2.4), from the bytes copied.
+        `INSERT INTO designs (title, template_id, template_version, palette, cells, owner_id, is_public, remixed_from, thumbnail, thumbnail_hash)
+         VALUES ($1, $2, $3, $4, $5, $6, false, $7, $8, encode(sha256($8::bytea), 'hex'))
          RETURNING id, title, template_id, template_version, palette, revision_count,
                    is_public, owner_id, created_at, updated_at, description, allow_remix, remixed_from`,
         // palette is JSONB: it comes back from SELECT as a parsed JS array, so it

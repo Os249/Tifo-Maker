@@ -3,7 +3,7 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import type { SeatMap, StadiumTemplate } from '../../core/types';
 import type { DesignStore } from '../../core/design';
 import { CAMERA_PRESETS, type CameraPreset } from '../preview3d';
-import { type QualityTier, type QualitySettings, settingsFor, probeQuality } from './quality';
+import { type QualityTier, type QualitySettings, settingsFor, probeQuality, frameCap } from './quality';
 import { applyNightIBL } from './env';
 import { buildStands } from './stands';
 import { buildTrack, type TrackBuild } from './track';
@@ -27,6 +27,7 @@ const BOOKED_EFFECTS = new Set<EffectName>(['drum-hit', 'drum-hit-3', 'ooh', 'oo
 import { drumCallBeat, drumCallPlan, type DrumCallOpts, type DrumCallPlan } from '../../core/drumCall';
 import { buildAssetLayer, type AssetLayer } from './assetLayer';
 import { buildBannerRigs, type BannerRigLayer } from './bannerRig';
+import { onBannerImageReady } from '../bannerRender';
 import { standIsRoofed } from './roof';
 import { buildPlacement, type PlacementHelper } from './bannerPlace';
 import { maxUsefulSpan, hangableTiers, signPlaceNear, signRowNear, signRows, signPlaces, signFenceOk, signUsableRows } from './bannerSlot';
@@ -60,6 +61,7 @@ const KINGDOM_ID = 'kingdom-arena-26k';
 import { buildAlAwwalExtras, buildKingdomArenaExtras } from './stadiumExtras';
 import { buildPitchDetail, pitchStripeTexture } from './pitchDetail';
 import { dbg } from './debug';
+import { mergeInPlace, singlePass, withoutRandom } from './merge';
 import { buildAtmosphere, type Atmosphere, type SoundBus, type SoundLevels } from './atmosphere';
 import { baseGroundId } from '../../core/realBlocks';
 
@@ -97,6 +99,19 @@ const PRESET_FILL: Record<CrowdPreset, number> = {
  */
 
 const EMPTY_COLOR = new THREE.Color(0x20242c);
+
+/**
+ * How often the fans walking in outside take a step, in seconds: ten times a
+ * second (performance plan P2.12). They are hundreds of metres off and mostly
+ * behind the stands, and each step is every walker's matrix again.
+ */
+const WALKER_STEP = 0.1;
+/**
+ * A capped tier draws a frame once this much short of its interval has gone
+ * by, so a 60 Hz display's frames, which arrive a little early or late, still
+ * give a steady 30 rather than a beat of 20.
+ */
+const FRAME_SLACK_MS = 6;
 
 export type TimeOfDay = 'day' | 'dusk' | 'night' | 'sunset';
 
@@ -225,6 +240,31 @@ export class MatchDaySimulator {
   /** The frame the loop has asked for, and which loop asked (performance plan P1.18). */
   private raf = 0;
   private loopToken = 0;
+  /**
+   * Drawing on demand (performance plan P2.12). A still picture is not drawn
+   * again: the loop asks for the next frame only while something moves (the
+   * camera, a show, a reveal, a banner going up, flares, smoke, rain, the
+   * flyover, a recording) or after `requestRender()` said something changed.
+   * Idle, it asks for nothing — a still Match Day used to redraw up to 1.2
+   * million triangles sixty times a second for a picture that did not change.
+   */
+  private dirty = true;
+  /** No frame is asked for: the scene clock stands still until the next one. */
+  private idle = false;
+  /** Inside a frame: a change it makes is drawn by the next one, which the frame itself asks for. */
+  private inFrame = false;
+  /** Ask the running loop for a frame, if it has none on the way. */
+  private kick: (() => void) | null = null;
+  /** A frame asked for later: the walkers' next step, or a screen repaint's turn. */
+  private timer = 0;
+  /** The frame callback's own time stamp at the last frame drawn (for the frame cap). */
+  private lastDrawAt = -Infinity;
+  /** This frame follows the one before it straight away: the only kind the frame-rate governor may judge. */
+  private continuous = false;
+  /** Walking not yet applied: the walkers take their steps ten times a second. */
+  private walkerDt = 0;
+  /** Store subscriptions that outlive no simulator: taken off on close. */
+  private readonly unsubs: (() => void)[] = [];
   /** Shaders compiled ahead of the first frame (performance plan P1.24); null until the first start. */
   private compiled: Promise<void> | null = null;
   private compileDone = false;
@@ -363,6 +403,11 @@ export class MatchDaySimulator {
     this.controls.minDistance = 2; // zoom right in
     this.controls.maxDistance = 2500; // and far out past the skyline
     this.controls.zoomSpeed = 1.2;
+    // A drag, a pinch or the wheel moves the camera from the controls' own
+    // handlers; the frames that follow (and the glide after the hand lets go)
+    // are asked for by the loop while the camera is still moving.
+    this.controls.addEventListener('start', this.onControls);
+    this.controls.addEventListener('change', this.onControls);
     this.applyPreset(CAMERA_PRESETS[0]);
 
     this.buildLights();
@@ -395,7 +440,12 @@ export class MatchDaySimulator {
       glow: options.glow ?? false,
       template: this.template,
     });
-    this.assetLayer = buildAssetLayer(this.assetStore, () => this.store.palette);
+    this.assetLayer = buildAssetLayer(this.assetStore, () => this.store.palette, () => this.requestRender());
+    // Assets and banners are edited from the panel straight into their stores
+    // (and their pictures arrive when they have decoded); each change is a new picture.
+    this.unsubs.push(this.assetStore.onChange(() => this.requestRender()));
+    if (this.bannerStore) this.unsubs.push(this.bannerStore.onChange(() => this.requestRender()));
+    this.unsubs.push(onBannerImageReady(() => this.requestRender()));
     this.scene.add(this.assetLayer.object);
     this.resolveEditorBanners();
     // Banners: their own layer, because a banner is not a decal on a stand —
@@ -454,7 +504,10 @@ export class MatchDaySimulator {
     this.scene.add(this.surroundings.object);
     // A real neighbourhood arrives after the first frame, with buildings that
     // cast shadows of their own.
-    void this.surroundings.ready.then(() => this.shadowsChanged(), () => {});
+    void this.surroundings.ready.then(() => {
+      this.shadowsChanged();
+      this.requestRender();
+    }, () => {});
     // Everything starts at Off: a bowl that twinkles, smokes or waves by
     // itself misreads a still tifo as motion, and it is the first thing to
     // distract from the artwork. Phone lights are one of these now.
@@ -463,6 +516,7 @@ export class MatchDaySimulator {
     if (this.template.id === 'community-jewel-jeddah-62k') {
       const crown = buildJewelCrown();
       this.scene.add(crown.object);
+      this.staticObjects.push(crown.object);
       this.disposables.push(...crown.disposables);
     }
     if (this.template.details) {
@@ -476,6 +530,7 @@ export class MatchDaySimulator {
       this.scene.add(premium.object);
       this.structureObjects.push(premium.object);
       this.premiumObject = premium.object;
+      this.premiumLod = premium.lod;
       this.disposables.push(...premium.disposables);
       this.screen.nameEn = this.template.name;
       this.paintScreens();
@@ -511,6 +566,7 @@ export class MatchDaySimulator {
       }
       const ex = buildAlAwwalExtras(mx, mz, my);
       this.scene.add(ex.object);
+      this.staticObjects.push(ex.object);
       this.disposables.push(...ex.disposables);
     }
     if (this.template.id === 'community-kingdom-arena-28k') {
@@ -524,8 +580,11 @@ export class MatchDaySimulator {
       }
       const ex = buildKingdomArenaExtras(kx, kz, ky);
       this.scene.add(ex.object);
+      this.staticObjects.push(ex.object);
       this.disposables.push(...ex.disposables);
     }
+
+    this.mergeStatic();
 
     this.onDirtyCb = (indices): void => {
       if (this.disposed) return;
@@ -534,6 +593,7 @@ export class MatchDaySimulator {
       this.seats.instanceColor!.needsUpdate = true;
       this.flushSeatMatrix();
       if (this.screen.mode === 'tifo') this.screenDirty = true;
+      this.requestRender();
     };
     this.onPaletteCb = (): void => {
       if (this.disposed) return;
@@ -542,6 +602,7 @@ export class MatchDaySimulator {
       this.screenDirty = true;
       // Flags and "club colours" smoke follow the design's palette.
       this.accessories.setPalette(this.store.palette);
+      this.requestRender();
     };
     store.onDirty(this.onDirtyCb);
     store.onPaletteChange(this.onPaletteCb);
@@ -740,13 +801,16 @@ export class MatchDaySimulator {
     pitch.receiveShadow = this.settings.shadows;
     this.scene.add(pitch);
     this.disposables.push(pitchGeo, this.pitchMat);
-    this.scene.add(buildPitchDetail(this.settings.shadows)); // goals + full markings
+    const detail = buildPitchDetail(this.settings.shadows); // goals + full markings
+    this.scene.add(detail);
+    this.staticObjects.push(detail);
 
     // The track, if this ground has one AND has room for it. buildTrack checks
     // the fit itself, so a template cannot claim a 400 m oval its bowl could
     // never hold — see track.ts.
     this.track = buildTrack(this.template, this.settings.shadows);
     this.scene.add(this.track.object);
+    this.staticObjects.push(this.track.object);
 
     // Markings (unlit lines, like the editor preview).
     const lineMat = new THREE.LineBasicMaterial({ color: 0xe7eee7, transparent: true, opacity: 0.75 });
@@ -769,6 +833,32 @@ export class MatchDaySimulator {
     }
     addLine(circle);
     this.disposables.push(lineMat);
+  }
+
+  /**
+   * Fewer draw calls for the same picture (performance plan P2.13). The
+   * building — stands, roofs, the venue's lanes and screens, the premium
+   * seating, the Jewel's skin, Kingdom Arena's hall — and the goals, the
+   * track and the extras are built once and never touched again, so each is
+   * merged in place: meshes that draw alike become one, those that differ
+   * only in colour too, with the colour in the vertices. Each part keeps its
+   * own group, so the cameras' rays (clearOfStructure, facadeDistance) meet
+   * the same triangles. The dugouts and boards are merged only where they
+   * share a material, because the wet pitch changes one of theirs; flat glass
+   * and nets are drawn in one pass. None of it draws from Math.random (see
+   * withoutRandom), so everything random made later comes out as before.
+   */
+  private mergeStatic(): void {
+    withoutRandom(() => {
+      for (const root of [...this.structureObjects, ...this.staticObjects]) {
+        // Flat panels first, while each is still its own mesh.
+        singlePass(root);
+        const r = mergeInPlace(root, { colourAgnostic: true });
+        this.disposables.push(...r.disposables);
+      }
+      const p = mergeInPlace(this.pitchside.object, { colourAgnostic: false });
+      this.disposables.push(...p.disposables);
+    });
   }
 
   private buildSeats(): THREE.InstancedMesh {
@@ -799,6 +889,7 @@ export class MatchDaySimulator {
     this.camera.position.set(...preset.position);
     this.controls.target.set(...preset.target);
     this.controls.update();
+    this.requestRender();
   }
 
   // ---- camera director (Phase 6) ----
@@ -807,10 +898,14 @@ export class MatchDaySimulator {
   private groundObject: THREE.Object3D | null = null;
   /** The ground's own structure (stands, roofs, buildings, skins, halls): what the Outside shot stands clear of. */
   private structureObjects: THREE.Object3D[] = [];
+  /** Built once and never changed again, besides the structure: the goals and markings, the track, extras. */
+  private staticObjects: THREE.Object3D[] = [];
   private facadeDistCache = new Map<number, number>();
   private siteShotCache: SimShot[] | null = null;
   /** The royal box and premium seating (premium.ts): its fascia must not fill a camera's foreground. */
   private premiumObject: THREE.Object3D | null = null;
+  /** The armchairs' detail for this frame's camera (premium.ts, performance plan P2.13). */
+  private premiumLod: ((camera: THREE.PerspectiveCamera, heightPx: number) => void) | null = null;
   /** Bowl extent from the seat map. Memoised — the flyover asks for it per frame. */
   private seatBounds(): { ax: number; bz: number; ty: number } {
     if (this.seatBoundsCache) return this.seatBoundsCache;
@@ -1084,6 +1179,7 @@ export class MatchDaySimulator {
       toFov: s.fov,
     };
     this.controls.enabled = false;
+    this.requestRender();
   }
   private stepCamTween(): void {
     const tw = this.camTween;
@@ -1116,6 +1212,7 @@ export class MatchDaySimulator {
       this.camTween = null;
       this.controls.enabled = true;
     }
+    this.requestRender();
   }
 
   // ---- crowd (Phase 2) ----
@@ -1139,16 +1236,20 @@ export class MatchDaySimulator {
   setCrowdDensity(f: number): void {
     this.crowd.setDensity(f);
     this.pushCrowdFill(f);
+    this.requestRender();
   }
   setCrowdPreset(p: CrowdPreset): void {
     this.crowd.setPreset(p);
     this.pushCrowdFill(PRESET_FILL[p] ?? 1);
+    this.requestRender();
   }
   setCrowdShowOnTifo(b: boolean): void {
     this.crowd.setShowOnTifo(b);
+    this.requestRender();
   }
   setCrowdVisible(b: boolean): void {
     this.crowd.object.visible = b;
+    this.requestRender();
   }
 
   // ---- pitch-side (Phase 3) ----
@@ -1157,14 +1258,17 @@ export class MatchDaySimulator {
     this.pitchside.object.visible = b;
     // The dugouts cast shadows.
     this.shadowsChanged();
+    this.requestRender();
   }
 
   // ---- banners (Phase 4) ----
   setBannersVisible(b: boolean): void {
     this.banners.setVisible(b);
+    this.requestRender();
   }
   setStairsVisible(b: boolean): void {
     this.banners.setStairsVisible(b);
+    this.requestRender();
   }
 
   // ---- effects (Phase 5) ----
@@ -1203,15 +1307,18 @@ export class MatchDaySimulator {
     };
     paintScreen(this.venue.screen.canvas, src);
     this.venue.screensChanged();
+    this.requestRender();
   }
 
   /** How bright the floodlights burn: 0.1..1.5, 1 as designed. */
   setFloodlightLevel(level: number): void {
     this.effects.setFloodlightLevel(level);
+    this.requestRender();
   }
   /** The glow round white cards and the floodlights. Off by default; HIGH and ULTRA only. */
   setGlow(on: boolean): void {
     this.effects.setGlow(on);
+    this.requestRender();
   }
   /** Whether this quality tier can glow at all (it needs the post pass). */
   get canGlow(): boolean {
@@ -1222,6 +1329,7 @@ export class MatchDaySimulator {
     // The contactor. Stadium lights are one of the few things on this panel
     // that everybody has heard as well as seen.
     this.atmosphere.floodlights(b);
+    this.requestRender();
   }
 
   /**
@@ -1241,10 +1349,13 @@ export class MatchDaySimulator {
       const m = o as THREE.Mesh & { isInstancedMesh?: boolean; count?: number };
       if ((o as THREE.SpotLight).isSpotLight) spotLights++;
       if (!m.isMesh) return;
-      meshes++;
+      // A merged mesh (performance plan P2.13) counts as the parts it stands for.
+      const parts = (m.userData.merged as number | undefined) ?? 1;
+      meshes += parts;
       if (m.isInstancedMesh) instances += m.count ?? 0;
       const mat = m.material as THREE.MeshStandardMaterial | undefined;
-      if (mat && 'emissiveIntensity' in mat && (mat.emissiveIntensity ?? 0) >= 1) lamps++;
+      if (m.userData.merged) lamps += (m.userData.lamps as number | undefined) ?? 0;
+      else if (mat && 'emissiveIntensity' in mat && (mat.emissiveIntensity ?? 0) >= 1) lamps++;
     });
     return { meshes, spotLights, lamps, instances };
   }
@@ -1336,6 +1447,7 @@ export class MatchDaySimulator {
     this.surroundings?.setTimeOfDay(tod);
     // The sun moved.
     this.shadowsChanged();
+    this.requestRender();
   }
   /**
    * Redraw the shadow map on the next frame. Called by everything that moves
@@ -1355,12 +1467,15 @@ export class MatchDaySimulator {
     this.weather.setWeather(here);
     this.weatherNow = here;
     this.atmosphere.setWeatherBed(this.weatherSound ? here : 'clear');
+    this.requestRender();
   }
   setExposure(v: number): void {
     this.renderer.toneMappingExposure = v;
+    this.requestRender();
   }
   setSunIntensity(v: number): void {
     this.sun.intensity = v;
+    this.requestRender();
   }
   /** Wet-look pitch: drop the turf roughness so the sun + floodlights glint off it. */
   setWetPitch(on: boolean): void {
@@ -1383,6 +1498,7 @@ export class MatchDaySimulator {
     this.pitchMat.needsUpdate = true;
     this.pitchside.setWet(on, gloss); // the visible mown-stripe layer must go glossy too
     dbg('setWetPitch', on, '-> pitch roughness', this.pitchMat.roughness, 'metalness', this.pitchMat.metalness);
+    this.requestRender();
   }
 
   /**
@@ -1393,6 +1509,7 @@ export class MatchDaySimulator {
    * and it is the one most likely to be posted as it is.
    */
   snapshot(): string {
+    this.premiumLod?.(this.camera, this.canvas.height);
     this.effects.render(this.renderer, this.scene, this.camera);
     const src = this.renderer.domElement;
     const w = src.width;
@@ -1442,6 +1559,9 @@ export class MatchDaySimulator {
     if (this.recording) return null;
     if (typeof MediaRecorder === 'undefined' || typeof this.canvas.captureStream !== 'function') return null;
     this.recording = true;
+    // A clip is a film: every frame of it is drawn, whatever moves, at the
+    // rate the clip asks for (see frameGap).
+    this.requestRender();
     let seconds = Math.max(1, Math.round(opts.seconds ?? 9));
     // A drum call cut off before the drop is a clip of a tifo going up — the
     // disappearance is the half people share. It gets the length it needs.
@@ -1561,6 +1681,7 @@ export class MatchDaySimulator {
   }
   burstConfetti(): void {
     this.effects.burstConfetti();
+    this.requestRender();
     this.atmosphere.confetti();
     // Paper goes up because something happened, and a crowd that watches it in
     // silence is the wrong crowd.
@@ -1568,6 +1689,7 @@ export class MatchDaySimulator {
   }
   burstPyro(): void {
     this.effects.burstPyro();
+    this.requestRender();
     this.atmosphere.pyro();
   }
 
@@ -1598,6 +1720,7 @@ export class MatchDaySimulator {
     this.atmosphere.setPyroBed(pyroLoudness(after));
     this.logAccessories();
     this.onAccessoriesChange?.(after);
+    this.requestRender();
   }
   /** One line per change, so a test (or a person in the console) can see what is in the stand. */
   private logAccessories(): void {
@@ -1611,12 +1734,15 @@ export class MatchDaySimulator {
     if (w === this.accessories.where()) return;
     this.accessories.setWhere(w);
     this.logAccessories();
+    this.requestRender();
   }
   setFlareColour(id: string): void {
     this.accessories.setFlareColour(id);
+    this.requestRender();
   }
   setSmokeColour(id: string): void {
     this.accessories.setSmokeColour(id);
+    this.requestRender();
   }
   /** What is actually in the bowl — for tests and the shot harness. */
   accessoriesCensus(): AccessoriesCensus {
@@ -1632,6 +1758,7 @@ export class MatchDaySimulator {
     const step = 1 / 30;
     const view = { fov: this.camera.fov, height: this.host.clientHeight };
     for (let t = 0; t < seconds; t += step) this.accessories.update(step, view);
+    this.requestRender();
   }
 
   // ---- tifo assets: banners / text / floor (Wave A) ----
@@ -1810,6 +1937,7 @@ export class MatchDaySimulator {
   unfurlSelected(): void {
     const s = this.assetStore.selected;
     if (s) this.assetLayer.unfurl(s.id, 3000);
+    this.requestRender();
   }
   setSelectedY(y: number): void {
     const s = this.assetStore.selected;
@@ -1896,6 +2024,7 @@ export class MatchDaySimulator {
   }
   selectAsset(id: string | null): void {
     this.assetStore.select(id);
+    this.requestRender();
   }
   removeSelected(): void {
     const s = this.assetStore.selected;
@@ -2046,10 +2175,12 @@ export class MatchDaySimulator {
   /** Replay one banner's reveal, or every banner's. */
   playBannerReveal(id?: string): void {
     this.bannerRigs?.play(id);
+    this.requestRender();
   }
   /** Park a banner part-way through its reveal, for scrubbing. */
   setBannerProgress(id: string, p: number): void {
     this.bannerRigs?.setProgress(id, p);
+    this.requestRender();
   }
   /** Where a banner has got to in its reveal, for a scrub bar that follows it. */
   bannerRevealState(id: string): { progress: number; playing: boolean } | null {
@@ -2058,6 +2189,7 @@ export class MatchDaySimulator {
   selectBanner(id: string | null): void {
     this.heldBanner = id;
     this.bannerRigs?.select(id);
+    this.requestRender();
   }
   /** What the banner layer actually contains. A screenshot cannot say this. */
   bannerCensus(): { banners: number; ropes: number; nets: number; bars: number; poles: number; particles: number } {
@@ -2073,6 +2205,7 @@ export class MatchDaySimulator {
    */
   settleBanners(seconds = 2.5): void {
     this.bannerRigs?.settle(seconds);
+    this.requestRender();
   }
 
   /**
@@ -2122,6 +2255,7 @@ export class MatchDaySimulator {
     // no orbit, no zoom, no pan, for the rest of the visit.
     this.controls.enabled = true;
     applyCameraShot(this.camera, this.controls, { name: 'Banner', ...shot });
+    this.requestRender();
     return true;
   }
 
@@ -2173,6 +2307,7 @@ export class MatchDaySimulator {
     if (hidden === this.tifoHidden) return;
     this.tifoHidden = hidden;
     this.recolorAll();
+    this.requestRender();
   }
   tifoIsHidden(): boolean {
     return this.tifoHidden;
@@ -2207,6 +2342,7 @@ export class MatchDaySimulator {
       this.releaseDrumLoop();
     }
     this.reveal = { mode, start: this.elapsed, dur: Math.max(0.5, durationMs / 1000) };
+    this.requestRender();
   }
 
   // ---- the drum call ----
@@ -2279,9 +2415,14 @@ export class MatchDaySimulator {
     }
     this.onDrumBeat(best);
   }
-  /** Wall-clock seconds since the last rendered frame — how stale `elapsed` is right now. */
+  /**
+   * Wall-clock seconds since the last rendered frame — how stale `elapsed` is
+   * right now. None while the loop is idle: the scene clock stands still then
+   * and starts again from the frame that wakes it (see requestRender), so
+   * "now" is the last frame's time.
+   */
   private sinceFrame(): number {
-    return this.running ? Math.max(0, (performance.now() - this.clock.oldTime) / 1000) : 0;
+    return this.running && !this.idle ? Math.max(0, (performance.now() - this.clock.oldTime) / 1000) : 0;
   }
   /**
    * Book every tabl hit in the show on the audio clock, at the instant it is
@@ -2351,6 +2492,7 @@ export class MatchDaySimulator {
     this.tlLoop = loop;
     this.lastCamName = null;
     this.bookDrumHits();
+    this.requestRender();
   }
   /**
    * `ended` is the show reaching its end by itself. A drum call ends with the
@@ -2381,6 +2523,7 @@ export class MatchDaySimulator {
     // Stopping a show should leave the tifo up, not half-unrolled: the state
     // people want to look at afterwards is the finished one.
     for (const b of this.bannerStore?.list() ?? []) this.bannerRigs?.setProgress(b.id, 1);
+    this.requestRender();
   }
   /** A ready-made show: broadcast view -> tifo wipes in -> smoke -> ultra view -> pyro -> confetti -> drone. */
   buildAutoChoreo(): Timeline {
@@ -2590,6 +2733,8 @@ export class MatchDaySimulator {
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
     this.effects.setSize(this.renderer, w, h);
+    // A new size clears the drawing buffer.
+    this.requestRender();
   }
 
   // ---- performance governor -------------------------------------------
@@ -2620,7 +2765,16 @@ export class MatchDaySimulator {
     this.onContextLost?.();
   };
 
-  /** Hold a smooth frame rate by trimming/raising pixel ratio (no rebuild). */
+  /**
+   * Hold a smooth frame rate by trimming/raising pixel ratio (no rebuild).
+   *
+   * Only frames drawn one straight after another are judged (see `frame`): a
+   * picture drawn on demand, after a still spell or for the walkers' slow
+   * steps, says nothing about how fast the device draws. And the rate is
+   * judged against what the tier is asked for, 30 a second on Medium and Low
+   * (performance plan P2.12): against 60, a capped tier would read as slow on
+   * every device and lose its pixels.
+   */
   private adaptPerf(dt: number): void {
     if (this.elapsed < 2.5) return; // let the scene settle before judging
     this.fpsT += dt;
@@ -2631,11 +2785,12 @@ export class MatchDaySimulator {
     this.fpsN = 0;
     const cur = this.renderer.getPixelRatio();
     const cap = Math.min(this.settings.maxPixelRatio, window.devicePixelRatio || 1);
-    if (fps < 45 && cur > 0.75) {
+    const target = this.frameGap() > 0 ? 1000 / this.frameGap() : 60;
+    if (fps < target * 0.75 && cur > 0.75) {
       this.renderer.setPixelRatio(Math.max(0.75, cur - 0.2));
       this.resize();
       dbg('adaptPerf low fps=' + Math.round(fps) + ' -> pr=' + this.renderer.getPixelRatio().toFixed(2));
-    } else if (fps > 58 && cur < cap - 0.01) {
+    } else if (fps > target - 2 && cur < cap - 0.01) {
       this.renderer.setPixelRatio(Math.min(cap, cur + 0.2));
       this.resize();
       dbg('adaptPerf recover fps=' + Math.round(fps) + ' -> pr=' + this.renderer.getPixelRatio().toFixed(2));
@@ -2668,26 +2823,61 @@ export class MatchDaySimulator {
     return p;
   }
 
-  start(): void {
-    if (this.running || this.disposed) return;
-    if (!this.visBound) {
-      document.addEventListener('visibilitychange', this.onVisibility, { signal: this.listeners.signal });
-      this.visBound = true;
-    }
-    this.running = true;
-    this.resize();
-    this.clock.start();
-    // A loop belongs to the start() that made it. stop() retires it, so a
-    // frame it had already asked for cannot carry it on next to the new one:
-    // a hidden tab runs no frames, so that frame used to be waiting when the
-    // tab came back, and every switch added a loop (performance plan P1.18).
-    const token = ++this.loopToken;
-    const loop = (): void => {
-      this.raf = 0;
-      if (!this.running || token !== this.loopToken) return;
-      const dt = this.clock.getDelta();
-      this.elapsed += dt;
-      if (this.flyActive) {
+  /**
+   * Something on screen changed: draw it (performance plan P2.12). Every
+   * setter that changes the picture calls this; so do the camera's controls,
+   * the design's stores, a resize and anything that arrives on its own (the
+   * neighbourhood, a picture). Cheap and safe to call any number of times:
+   * at most one frame is on the way at once.
+   */
+  requestRender(): void {
+    this.dirty = true;
+    // Inside a frame, the frame asks for the next one itself.
+    if (!this.inFrame) this.kick?.();
+  }
+
+  private readonly onControls = (): void => this.requestRender();
+
+  /**
+   * The shortest time between two frames, in ms: a 30 a second cap on Medium
+   * and Low (performance plan P2.12), none on High and Ultra, and none while
+   * recording — a clip asks for its own rate and every frame of it is drawn.
+   */
+  private frameGap(): number {
+    const cap = this.recording ? 0 : frameCap(this.settings.tier);
+    return cap > 0 ? 1000 / cap : 0;
+  }
+
+  /**
+   * Can the camera see the fans walking in? They are outside the building,
+   * at street level: from a seat, the gantry or the touchline the stands
+   * hide them, and only a camera outside the bowl, or well above its rim
+   * (the drone, the aerial view), sees them move. Indoors never from inside.
+   */
+  private walkersInView(): boolean {
+    if (!this.surroundings.walking()) return false;
+    const c = this.camera.position;
+    const { a, b } = this.template.plan;
+    const reach = this.outerReach();
+    const inside = (c.x / (a + reach)) ** 2 + (c.z / (b + reach)) ** 2 < 1;
+    if (!inside) return true;
+    if (this.template.indoor) return false;
+    return c.y > this.seatBounds().ty + 15;
+  }
+
+  /**
+   * One frame: move everything on by the time since the last one, draw, and
+   * say whether anything is still moving — the camera, a show, a reveal, a
+   * banner going up, flares, smoke, rain, confetti, the flyover, a recording.
+   * The order is the loop's as it always was.
+   */
+  private frame(): boolean {
+    const dt = this.clock.getDelta();
+    this.elapsed += dt;
+    this.dirty = false;
+    let moving = false;
+    if (this.flyActive) {
+      moving = true;
       // Time into the current pass: a clip starts its own pass at 0.
       const ft = this.elapsed - this.flyStart;
       if (baseGroundId(this.template.id) === KINGDOM_ID) {
@@ -2707,30 +2897,129 @@ export class MatchDaySimulator {
         applyCameraShot(this.camera, this.controls, flyover(ft, this.seatBounds(), this.flyPeriod));
       }
     }
-      this.banners.update(this.elapsed);
-      this.assetLayer.update(this.elapsed);
-      this.bannerRigs?.update(this.elapsed, dt);
-      this.effects.update(dt);
-      this.surroundings.update(dt);
-      this.accessories.update(dt, { fov: this.camera.fov, height: this.host.clientHeight });
-      this.weather.update(dt);
-      if (this.reveal) this.stepReveal();
-      if (this.timeline) this.stepTimeline();
-      if (this.restoreFade) this.stepRestore();
-      if (this.camTween) this.stepCamTween();
-      // A live tifo on the screens, repainted at most four times a second —
-      // a brush stroke fires dozens of dirty events and the screen is a picture.
-      if (this.screenDirty && this.elapsed - this.lastScreenPaint > 0.25) {
-        this.lastScreenPaint = this.elapsed;
-        this.paintScreens();
+    this.banners.update(this.elapsed);
+    if (this.assetLayer.update(this.elapsed)) moving = true;
+    // A banner's reveal holds frames until it is up; its ripple in the wind
+    // does not, any more than in the Stadium view (performance plan P1.23):
+    // it moves on the frames drawn for anything else, from where it stopped.
+    if (this.bannerRigs?.update(this.elapsed, dt)) moving = true;
+    if (this.effects.update(dt)) moving = true;
+    // The fans walking in take a step ten times a second, with all the time
+    // since the last one: the same walk, a tenth of the matrices.
+    this.walkerDt += dt;
+    if (this.walkerDt >= WALKER_STEP) {
+      this.surroundings.update(this.walkerDt);
+      this.walkerDt = 0;
+    }
+    if (this.accessories.update(dt, { fov: this.camera.fov, height: this.host.clientHeight })) moving = true;
+    if (this.weather.update(dt)) moving = true;
+    if (this.reveal) {
+      this.stepReveal();
+      moving = true;
+    }
+    if (this.timeline) {
+      this.stepTimeline();
+      moving = true;
+    }
+    if (this.restoreFade) {
+      this.stepRestore();
+      moving = true;
+    }
+    if (this.camTween) {
+      this.stepCamTween();
+      moving = true;
+    }
+    // A live tifo on the screens, repainted at most four times a second —
+    // a brush stroke fires dozens of dirty events and the screen is a picture.
+    if (this.screenDirty && this.elapsed - this.lastScreenPaint > 0.25) {
+      this.lastScreenPaint = this.elapsed;
+      this.paintScreens();
+    }
+    // True while the camera still moves: a drag, and the glide after it.
+    if (this.controls.update()) moving = true;
+    if (this.continuous) this.adaptPerf(dt);
+    this.premiumLod?.(this.camera, this.canvas.height);
+    this.effects.render(this.renderer, this.scene, this.camera);
+    return moving || this.recording;
+  }
+
+  start(): void {
+    if (this.running || this.disposed) return;
+    if (!this.visBound) {
+      document.addEventListener('visibilitychange', this.onVisibility, { signal: this.listeners.signal });
+      this.visBound = true;
+    }
+    this.running = true;
+    this.idle = false;
+    this.dirty = true;
+    this.continuous = false;
+    this.lastDrawAt = -Infinity;
+    this.resize();
+    this.clock.start();
+    // A loop belongs to the start() that made it. stop() retires it, so a
+    // frame it had already asked for cannot carry it on next to the new one:
+    // a hidden tab runs no frames, so that frame used to be waiting when the
+    // tab came back, and every switch added a loop (performance plan P1.18).
+    const token = ++this.loopToken;
+    const live = (): boolean => this.running && token === this.loopToken;
+    const loop = (now: number): void => {
+      this.raf = 0;
+      if (!live()) return;
+      // A capped tier skips the display's frames in between (P2.12). The
+      // callback's own time stamp, not the page clock: a harness that
+      // stops the page clock still gets its frames.
+      const gap = this.frameGap();
+      if (gap > 0 && now - this.lastDrawAt < gap - FRAME_SLACK_MS) {
+        this.raf = requestAnimationFrame(loop);
+        return;
       }
-      this.controls.update();
-      this.adaptPerf(dt);
-      this.effects.render(this.renderer, this.scene, this.camera);
+      this.lastDrawAt = now;
+      this.inFrame = true;
+      let moving = false;
+      try {
+        moving = this.frame();
+      } finally {
+        this.inFrame = false;
+      }
+      if (!live()) return;
+      if (moving || this.dirty) {
+        this.continuous = true;
+        this.raf = requestAnimationFrame(loop);
+        return;
+      }
+      this.continuous = false;
+      // Nothing moves. Something may still be due: the screens' next
+      // repaint, or the next step of fans the camera can see walking in.
+      let wait = -1;
+      if (this.screenDirty) wait = Math.max(0, (this.lastScreenPaint + 0.25 - this.elapsed) * 1000);
+      else if (this.walkersInView()) wait = WALKER_STEP * 1000;
+      if (wait >= 0) {
+        this.timer = window.setTimeout(() => {
+          this.timer = 0;
+          if (live() && !this.raf) this.raf = requestAnimationFrame(loop);
+        }, wait);
+        return;
+      }
+      // Still: no frame is asked for until something changes.
+      this.idle = true;
+    };
+    this.kick = (): void => {
+      if (!live() || !this.compileDone || this.raf) return;
+      if (this.timer) {
+        window.clearTimeout(this.timer);
+        this.timer = 0;
+      }
+      if (this.idle) {
+        // The scene clock starts again from now: the still spell is not
+        // time that passed for anything on screen.
+        this.idle = false;
+        this.clock.oldTime = performance.now();
+      }
+      this.continuous = false;
       this.raf = requestAnimationFrame(loop);
     };
     const begin = (): void => {
-      if (!this.running || token !== this.loopToken) return;
+      if (!live()) return;
       this.raf = requestAnimationFrame(loop);
     };
     // The first start compiles the scene as it stands — the overlay has set
@@ -2747,6 +3036,9 @@ export class MatchDaySimulator {
     this.loopToken++;
     if (this.raf) cancelAnimationFrame(this.raf);
     this.raf = 0;
+    if (this.timer) window.clearTimeout(this.timer);
+    this.timer = 0;
+    this.kick = null;
   }
 
   dispose(): void {
@@ -2755,6 +3047,10 @@ export class MatchDaySimulator {
     this.disposed = true;
     // Every listener off first, so the context loss below reports nothing.
     this.listeners.abort();
+    this.controls.removeEventListener('start', this.onControls);
+    this.controls.removeEventListener('change', this.onControls);
+    // The asset and banner stores belong to the editor and outlive this.
+    for (const u of this.unsubs.splice(0)) u();
     this.resizeObserver.disconnect();
     this.store.offDirty(this.onDirtyCb);
     this.store.offPaletteChange(this.onPaletteCb);

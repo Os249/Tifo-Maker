@@ -13,6 +13,8 @@ import { buildHorizon, buildSite, forecourt, groundTex, loadSite, type SiteBuild
 export interface Surroundings {
   readonly object: THREE.Group;
   update(dt: number): void;
+  /** Are there fans walking in (the generic city's always are; a real neighbourhood's once it has loaded)? */
+  walking(): boolean;
   /** Lights in the windows and the street lights come on after dark. */
   setTimeOfDay(tod: 'day' | 'dusk' | 'night' | 'sunset'): void;
   /** Resolves once a real ground's neighbourhood has loaded and been added (at once for the generic city). */
@@ -244,6 +246,7 @@ export function buildSurroundings(bowlRadius = 130, real?: RealSite): Surroundin
     real: false,
     ready: Promise.resolve(),
     sightlines: () => null,
+    walking: () => people.visible,
     update(dt: number): void {
       clock += dt;
       for (let i = 0; i < PEOPLE; i++) {
@@ -389,6 +392,7 @@ function buildRealSurroundings(bowlRadius: number, real: RealSite): Surroundings
     object: group,
     real: true,
     ready,
+    walking: () => people.visible && site !== null,
     sightlines(): Sightlines | null {
       if (!site) return null;
       const s = site;

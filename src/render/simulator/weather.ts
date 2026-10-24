@@ -10,7 +10,8 @@ export type Weather = 'clear' | 'rain' | 'snow';
 
 export interface WeatherController {
   setWeather(w: Weather): void;
-  update(dt: number): void;
+  /** Move the rain or snow on; true while there is any (performance plan P2.12). */
+  update(dt: number): boolean;
   dispose(): void;
 }
 
@@ -85,7 +86,7 @@ export function buildWeather(scene: THREE.Scene): WeatherController {
       mat.needsUpdate = true;
     },
     update(dt) {
-      if (mode === 'clear') return;
+      if (mode === 'clear') return false;
       const speed = mode === 'rain' ? 130 : 14;
       const drift = mode === 'snow';
       const arr = geo.attributes.position.array as Float32Array;
@@ -100,6 +101,7 @@ export function buildWeather(scene: THREE.Scene): WeatherController {
         }
       }
       geo.attributes.position.needsUpdate = true;
+      return true;
     },
     dispose() {
       scene.remove(points);

@@ -1,22 +1,27 @@
-import { createHash, randomInt } from 'node:crypto';
+import { createHash, randomBytes, randomInt, timingSafeEqual } from 'node:crypto';
 import { isDatabaseUnavailable } from './db';
+import { OneLineLogController, redactUrl, requestLine, watchResponse } from './requestLog';
 import { readFileSync } from 'node:fs';
+import { unlink } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join, sep } from 'node:path';
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
 import rateLimit, { normalizeIP } from '@fastify/rate-limit';
 import helmet from 'helmet';
 import fastifyStatic from '@fastify/static';
 import { dummyHash, hashPassword, hashToken, issueToken, TOKEN_TTL_MS, verifyPassword } from './auth';
-import { MAX_SCENE_GUNZIP_BYTES, gunzipBytes, gunzipBytesAsync, gzipBytes, u32FromB64, u8FromB64 } from './codec';
-import { generateSeatMap } from '../../src/core/seatmap';
+import { gunzipBytes, gzipBytes, u32FromB64, u8FromB64 } from './codec';
+import { PDF_POOL, SCENE_POOL, SCENE_VIEW_ROOM, WorkerPool, workerFile } from './workerPool';
+import { StrippedSceneCache } from './sceneCache';
+import type { SceneTask } from './sceneWorker';
+import type { PdfTask } from './pdfWorker';
+import type { SceneVerdict } from './sceneCheck';
 import { shippedTemplates } from '../../src/core/stadiumCatalog';
 import { seatTable } from './seatTable';
 import { validateTifo, TIFO_SCHEMA_VERSION } from '../../src/core/tifoFormat';
-import { renderDistributionPdf } from '../../src/export/distributionPdf';
 
-import { tmpdir } from 'node:os';
-import { readFile, unlink } from 'node:fs/promises';
-import type { AiBudgetRepository, AiEventsRepository, AiUsageRepository, AuthRepository, DesignRepository, EventsRepository, FacetBase, FacetScope, LeadsRepository, SocialRepository } from './repo';
+import type { AiBudgetRepository, AiEventsRepository, AiUsageRepository, AuthRepository, DesignRepository, EventsRepository, FacetBase, FacetScope, LeadsRepository, SocialRepository, UserRow } from './repo';
+import { contentHash } from './repo';
 import { picturesStatus } from './imageAssets';
 import { textModelsStatus } from './aiProvider';
 import { imageHealth } from './imageHealth';
@@ -90,11 +95,21 @@ import {
 export const SNAPSHOT_EVERY = 20;
 /** The general per-client limit: every route without one of its own, 404s included. */
 export const REQUESTS_PER_MINUTE = 300;
+/** The shortest ORIGIN_SECRET accepted (P2.2): a long random value, never a word. */
+export const ORIGIN_SECRET_MIN = 32;
 /** The hashed files under /assets, in a bucket of their own (performance plan P1.27). */
 export const ASSETS_PER_MINUTE = 600;
 const ASSET_BUCKET = '|assets';
 /** Public pictures and icons outside /assets, which may be cached for an hour (P1.29). */
 const PUBLIC_PICTURE = /\.(?:png|jpe?g|webp|avif|gif|svg|ico)$/i;
+/** The build's compressed copy of a file (P2.3): its name, plus one of these. */
+const PRECOMPRESSED = /\.(?:br|gz)$/;
+/**
+ * For an answer that carries a secret (a session token, a sign-in ticket, the
+ * account export): never stored, and never rewritten or recompressed by
+ * anything between here and the browser (P2.3; see SECURITY-CHECKS.md).
+ */
+const SECRET_NO_STORE = 'no-store, no-transform';
 const HEX = /^#[0-9a-fA-F]{6}$/;
 const USERNAME = /^[a-zA-Z0-9_]{3,24}$/;
 /** Longest design title anywhere. PATCH already enforced this; create, fork and
@@ -120,9 +135,8 @@ const cleanTitle = (v: unknown, fallback: string): string => {
 const EMAIL = /^[^\s@<>()[\],;:"\\]+@(?:[\p{L}\p{N}](?:[\p{L}\p{N}-]{0,61}[\p{L}\p{N}])?\.)+\p{L}[\p{L}\p{N}-]{0,62}$/u;
 const MAX_EMAIL = 254;
 
-/** Request URLs as they may be logged: one-time secrets in the query replaced. */
-export const redactUrl = (url: string): string =>
-  url.replace(/([?&](?:token|code|password|key|secret|unlock)=)[^&#]*/gi, '$1[redacted]');
+/** Request URLs as they may be logged: one-time secrets in the query replaced (requestLog.ts). */
+export { redactUrl };
 
 declare module 'fastify' {
   interface FastifyInstance {
@@ -133,6 +147,8 @@ declare module 'fastify' {
      * seeded, facets backfilled at boot): forget the counts remembered from it.
      */
     forgetPublicCounts(): void;
+    /** The HTML shells (P2.9): how many times one was built, and how many are kept. Tests read it. */
+    htmlShellStats?(): { rendered: number; cached: number };
   }
 }
 const MAX_THUMB_BYTES = 128 * 1024;
@@ -148,40 +164,8 @@ const MAX_THUMB_BYTES = 128 * 1024;
  */
 const SCENE_MAX_BYTES = 3 * 1024 * 1024;
 
-/**
- * How much structure a saved scene may have before it is parsed.
- *
- * A scene may inflate to 16 MB, and what it costs to parse depends on what is
- * in it: 16 MB of `{},` took 3.4 s on the one event loop, 16 MB of `0,` 0.4 s,
- * while a real scene (banners with pictures, layer grids) is a few long base64
- * strings and a few thousand objects and parses in about 10 ms (audit round
- * six). A cap on the inflate ratio would refuse real saves (a solid layer
- * compresses hundreds to one); a cap on the structure does not. Counted on the
- * bytes before parsing, stopping as soon as a cap is passed. Characters inside
- * strings are counted too, which only ever overcounts.
- */
-// Real scenes stay far below these: their bulk is base64 strings, and the one
-// big source of commas, stroke points at full precision, fits about 100,000
-// numbers in the largest body the server takes. Under the caps the slowest
-// shapes found (duplicate keys, short floats) parse in about 100 ms.
-const SCENE_MAX_CONTAINERS = 100_000; // '{' and '['
-const SCENE_MAX_COMMAS = 400_000;
-const SCENE_MAX_COLONS = 200_000; // object keys
-/** How many times `byte` occurs, counting no further than just past `cap`. */
-function countUpTo(buf: Buffer, byte: number, cap: number): number {
-  let n = 0;
-  // indexOf is native: a long base64 string is skipped in a few milliseconds,
-  // where a JavaScript loop over 16 MB took about 65.
-  for (let i = buf.indexOf(byte); i !== -1 && n <= cap; i = buf.indexOf(byte, i + 1)) n++;
-  return n;
-}
-function sceneTooComplex(json: Buffer): boolean {
-  const objects = countUpTo(json, 0x7b, SCENE_MAX_CONTAINERS); // {
-  if (objects > SCENE_MAX_CONTAINERS) return true;
-  if (objects + countUpTo(json, 0x5b, SCENE_MAX_CONTAINERS - objects) > SCENE_MAX_CONTAINERS) return true; // [
-  if (countUpTo(json, 0x3a, SCENE_MAX_COLONS) > SCENE_MAX_COLONS) return true; // :
-  return countUpTo(json, 0x2c, SCENE_MAX_COMMAS) > SCENE_MAX_COMMAS; // ,
-}
+// How much structure a saved scene may have before it is parsed, and the
+// parse itself, are in sceneCheck.ts, run in the scene worker (P2.14).
 const MAX_PHOTO_BYTES = 2 * 1024 * 1024; // real photos, resized client-side before upload
 // A full 60k design gzips to a few hundred bytes, but base64 of (cells + a
 // thumbnail PNG up to 128KB) can approach ~200KB. 1MB gives generous headroom
@@ -332,7 +316,38 @@ export interface AppOptions {
    * the ones added after the test was written.
    */
   onRoute?: (route: { method: string | string[]; url: string }) => void;
+  /**
+   * Worker pools to use instead of the process's shared ones (P2.14). Tests
+   * only: a tiny time limit, a worker that crashes.
+   */
+  workers?: { scene?: ScenePool; pdf?: PdfPool };
+  /** Where stripped scenes are kept (P2.5). Tests pass their own to look inside. */
+  sceneCache?: StrippedSceneCache;
+  /**
+   * The origin lock's secret (P2.2), overriding ORIGIN_SECRET. Tests pass it
+   * here; unset (or empty) is no lock at all, exactly as before.
+   */
+  originSecret?: string;
+  /** What the boot did with the schema, for the posture panel (P2.15). */
+  schemaStatus?: () => { pendingSecurity: { id: string; why: string }[]; failed: number } | null;
+  /**
+   * May the content hashes stored with pictures and scenes be believed (the
+   * thumbnail 304, the kept strip)? On Postgres only once the database's own
+   * hash triggers are in force and every older hash has been recomputed
+   * (server.ts, stage 2 review); until then the bytes read are hashed
+   * instead. Unset: true (the memory store computes them in code).
+   */
+  storedHashesTrusted?: () => boolean;
 }
+
+type ScenePool = WorkerPool<SceneTask, SceneVerdict | Uint8Array | null>;
+type PdfPool = WorkerPool<PdfTask, Uint8Array>;
+let sharedScene: ScenePool | null = null;
+let sharedPdf: PdfPool | null = null;
+/** The process's scene worker pool, started on first use. */
+export const sharedScenePool = (): ScenePool => (sharedScene ??= new WorkerPool({ ...SCENE_POOL, file: workerFile('sceneWorker') }));
+/** The process's PDF worker pool, started on first use. */
+export const sharedPdfPool = (): PdfPool => (sharedPdf ??= new WorkerPool({ ...PDF_POOL, file: workerFile('pdfWorker') }));
 
 export async function buildApp(
   repo: DesignRepository,
@@ -352,22 +367,20 @@ export async function buildApp(
       ? {
           ...(options.logStream ? { stream: options.logStream } : {}),
           serializers: {
-            // Fastify's default request log line carries the full URL, and two
-            // of this site's URLs carry one-time secrets: /reset?token= (a
-            // password reset, valid for an hour and not spent until the form is
-            // submitted) and /api/auth/verify?token=. Anyone who could read the
-            // logs could take over an account. The line keeps its shape, so log
-            // searches like @req.url still work, minus the secret.
-            req: (request: FastifyRequest) => ({
-              method: request.method,
-              url: redactUrl(request.url),
-              host: request.host,
-              remoteAddress: request.ip,
-              remotePort: request.socket?.remotePort,
-            }),
+            // The URL with its one-time secrets redacted, and the address
+            // req.ip worked out; never a header (requestLog.ts).
+            req: requestLine,
           },
+          // The origin secret (P2.2) never reaches a log line: no line writes
+          // headers, the hook below deletes it once checked, and should
+          // anything ever log a request's headers, this blanks it there too.
+          redact: { paths: ['req.headers["x-origin-secret"]', 'headers["x-origin-secret"]', 'request.headers["x-origin-secret"]'], censor: '[redacted]' },
         }
       : false,
+    // One line per request, written when the response closes, instead of an
+    // "incoming" and a "completed" line (performance plan P2.20; see
+    // requestLog.ts for what each line keeps).
+    ...(options.logger ? { logController: new OneLineLogController() } : {}),
     bodyLimit: MAX_BODY_BYTES,
     trustProxy,
     // A URL the router cannot read (`/%E0%A4%A`), a path parameter too long,
@@ -381,15 +394,51 @@ export async function buildApp(
       void answerFrameworkError(err as { statusCode?: number }, req, reply);
     },
   });
+  /**
+   * The origin lock (performance plan P2.2; CLOUDFLARE.md). With
+   * ORIGIN_SECRET set, Cloudflare adds `x-origin-secret: <it>` to every
+   * request it forwards (a Transform Rule), and a request without it, or with
+   * anything else, went around Cloudflare straight to Railway and is refused:
+   * 403, the pinned security headers, no-store, and counted by the rate
+   * limiter like any request. Only `GET /health`, decided on the registered
+   * route, is exempt, for Railway's own healthcheck. Compared in constant
+   * time over fixed-length digests, so neither the secret nor its length
+   * leaks through timing; and deleted from the request once checked, so
+   * nothing later can log it. Unset: no lock, exactly as before.
+   */
+  const originSecret = (options.originSecret ?? process.env.ORIGIN_SECRET ?? '').trim();
+  if (originSecret && originSecret.length < ORIGIN_SECRET_MIN) {
+    // server.ts refuses to boot first; this is for anything else that builds the app.
+    throw new Error(`ORIGIN_SECRET must be at least ${ORIGIN_SECRET_MIN} characters`);
+  }
+  const originKey = originSecret ? createHash('sha256').update(originSecret).digest() : null;
+  const fromOrigin = (req: FastifyRequest): boolean => {
+    if (!originKey) return true;
+    const given = req.headers['x-origin-secret'];
+    delete req.headers['x-origin-secret'];
+    return typeof given === 'string' && timingSafeEqual(createHash('sha256').update(given).digest(), originKey);
+  };
+  /** When a request last arrived with Cloudflare's headers while TRUST_PROXY is not cloudflare (P2.2). */
+  let cloudflareSeenAt: number | null = null;
+  let cloudflareLoggedAt = 0;
+
   /** Set once the limiter is registered (below), when it is on. */
   let frameworkErrorLimit: ReturnType<FastifyInstance['rateLimit']> | null = null;
   const answerFrameworkError = async (err: { statusCode?: number }, req: FastifyRequest, reply: FastifyReply): Promise<void> => {
+    // No hook runs for these, so the request's one log line is asked for here.
+    if (options.logger) watchResponse(req, reply);
     try {
       securityHeaders(req.raw, reply.raw, () => {});
       reply.header('cache-control', 'no-store');
       if (frameworkErrorLimit) {
         await frameworkErrorLimit.call(app, req, reply);
         if (reply.sent) return;
+      }
+      // Locked to Cloudflare (P2.2): refused like any other request without the secret.
+      if (!fromOrigin(req)) {
+        req.socNote = { ignore: true };
+        await reply.code(403).send({ error: 'forbidden' });
+        return;
       }
       const status = err.statusCode === 414 ? 414 : err.statusCode === 400 ? 400 : 500;
       await reply.code(status).send({ error: status === 500 ? 'internal error' : 'bad request' });
@@ -400,6 +449,14 @@ export async function buildApp(
   if (options.onRoute) {
     const seen = options.onRoute;
     app.addHook('onRoute', (r) => seen({ method: r.method, url: r.url }));
+  }
+  // The first hook of all, so a request refused by any later one (a rate
+  // limit, a 404) still gets its line.
+  if (options.logger) {
+    app.addHook('onRequest', (req, reply, done) => {
+      watchResponse(req, reply);
+      done();
+    });
   }
 
   // What a finished request meant for security, for /admin#security. Declared
@@ -626,20 +683,64 @@ export async function buildApp(
     });
   }
 
+  // Cloudflare in front, and the server not told (P2.2). Behind Cloudflare
+  // with TRUST_PROXY unset or a number, req.ip is a Cloudflare edge, so every
+  // visitor of one edge shares one set of rate limits and one address in the
+  // logs. Noticed here, said in the log at most once a minute and on the
+  // posture panel, as a check: anyone can send these headers, so it may be
+  // nothing (the advice says both). Only the headers' presence is looked at:
+  // CF-Connecting-IP is never used for anything (a caller reaching Railway
+  // directly can write it), and the address still comes only from
+  // TRUST_PROXY's rules.
+  if (proxyMode.kind !== 'cloudflare') {
+    app.addHook('onRequest', (req, _reply, done) => {
+      if (req.headers['cf-ray'] !== undefined || req.headers['cf-connecting-ip'] !== undefined) {
+        const now = Date.now();
+        cloudflareSeenAt = now;
+        if (now - cloudflareLoggedAt >= 60_000) {
+          cloudflareLoggedAt = now;
+          console.warn('[tifo] TRUST_PROXY: a request arrived with Cloudflare headers (cf-ray / cf-connecting-ip) while TRUST_PROXY is not "cloudflare". If Cloudflare is in front, set TRUST_PROXY=cloudflare (CLOUDFLARE.md); if it is not, someone sent those headers themselves, they are never believed, and there is nothing to do.');
+        }
+      }
+      done();
+    });
+  }
+  if (originKey) {
+    const lockLimit = options.rateLimit ? app.rateLimit() : null;
+    app.addHook('onRequest', async (req, reply) => {
+      const health = req.method === 'GET' && req.routeOptions?.url === '/health';
+      if (fromOrigin(req) || health) return;
+      reply.header('cache-control', 'no-store');
+      if (lockLimit) {
+        await lockLimit.call(app, req, reply);
+        // A 429 here is recorded by the Security tab like any other: a flood
+        // aimed at the origin itself is worth knowing about.
+        if (reply.sent) return;
+      }
+      // A request that went around Cloudflare (a scanner, mostly): expected,
+      // and not an admin or sign-in event for the Security tab.
+      req.socNote = { ignore: true };
+      await reply.code(403).send({ error: 'forbidden' });
+    });
+  }
+
   const seatCount = (id: string, version: number): number | null =>
     templates.find((t) => t.id === id && t.version === version)?.seatCount ?? null;
-  // Seat maps for the PDF export, generated once per ground rather than per
-  // request (a 91k-seat map is 100-170 ms). Bounded by the shipped grounds.
-  const seatMaps = new Map<string, ReturnType<typeof generateSeatMap>>();
-  const seatMapFor = (tpl: Parameters<typeof generateSeatMap>[0]): ReturnType<typeof generateSeatMap> => {
-    const key = `${tpl.id}@${tpl.version}`;
-    let m = seatMaps.get(key);
-    if (!m) {
-      m = generateSeatMap(tpl);
-      seatMaps.set(key, m);
-    }
-    return m;
-  };
+  // The PDF export's seat maps are built in the PDF worker now, once per
+  // ground there (P2.14); the request is checked against the seat table here.
+
+  /**
+   * The worker pools (performance plan P2.14; workerPool.ts). Shared by every
+   * app in the process unless a test hands in its own: there is one event
+   * loop to protect, and one worker of each kind is enough for it.
+   */
+  const scenePool = options.workers?.scene ?? sharedScenePool();
+  /** May the stored content hashes be believed? (AppOptions.storedHashesTrusted) */
+  const hashesTrusted = (): boolean => options.storedHashesTrusted?.() ?? true;
+  const pdfPool = options.workers?.pdf ?? sharedPdfPool();
+  /** A pool that cannot take or finish the task: the server is busy, try again. */
+  const busy = (reply: FastifyReply): FastifyReply =>
+    reply.code(503).send({ error: 'the server is busy, please try again', code: 'retry' });
   /**
    * Seats that never take the tifo (a royal box — see SeatZone.noTifo). The
    * editor locks them, and the server enforces the same rule, so a design from
@@ -715,11 +816,63 @@ export async function buildApp(
    */
   let defaultCardPng: Buffer | null = null;
 
-  /** User id from a bearer token, or null. Never writes to the reply. */
-  const userOf = async (req: FastifyRequest): Promise<string | null> => {
+  /**
+   * The account behind this request's bearer token, read once per request
+   * (performance plan P2.17).
+   *
+   * A signed-in request used to ask the database for the token, then whether
+   * the account had chosen its name, then for the account itself, then again
+   * whether it was an admin: up to four reads of the same row for one
+   * request. Now the token and its account are one statement
+   * (getSessionUser: the token joined to its user, still `expires_at >
+   * now()`), and every check in the same request reads that answer.
+   *
+   * Kept on the request object and nowhere else: a WeakMap keyed by the
+   * request, so the answer dies with the request and can never be handed to
+   * another request or another account. Nothing is remembered between
+   * requests, so a sign-out, a password change, a revoked session or a
+   * deleted account is refused on the very next request, exactly as before.
+   * A copy, so nothing the request writes later changes what it read.
+   */
+  const sessions = new WeakMap<FastifyRequest, Promise<UserRow | null>>();
+  const sessionUser = (req: FastifyRequest): Promise<UserRow | null> => {
     const header = req.headers.authorization;
-    if (!header?.startsWith('Bearer ')) return null;
-    return auth.getUserIdByToken(hashToken(header.slice(7)));
+    if (!header?.startsWith('Bearer ')) return Promise.resolve(null);
+    let read = sessions.get(req);
+    if (!read) {
+      read = auth.getSessionUser(hashToken(header.slice(7))).then((u) => (u ? { ...u } : null));
+      sessions.set(req, read);
+    }
+    return read;
+  };
+  /** User id from a bearer token, or null. Never writes to the reply. */
+  const userOf = async (req: FastifyRequest): Promise<string | null> => (await sessionUser(req))?.id ?? null;
+  /**
+   * The same, for the checks that must refuse when it cannot be read: the
+   * username wall and the owner routes answer 503 "try again", as the name
+   * check did before it became part of this read (audit round six). undefined
+   * means the refusal has been sent.
+   */
+  const userOrRetry = async (req: FastifyRequest, reply: FastifyReply): Promise<string | null | undefined> => {
+    try {
+      return await userOf(req);
+    } catch {
+      await reply.code(503).send({ error: 'something went wrong on our side, please try again', code: 'retry' });
+      return undefined;
+    }
+  };
+  /**
+   * An account's row: the caller's own straight from this request's session
+   * read, anyone else's from the database. For the checks a route makes on
+   * the caller right after requireUser (verified email, the password to
+   * confirm, the admin allow-list). Reads that must see a change made during
+   * the request (stillThePassword, the email change's second look) go to the
+   * database, never here.
+   */
+  const accountOf = async (req: FastifyRequest, userId: string): Promise<UserRow | null> => {
+    const own = await sessionUser(req).catch(() => null);
+    if (own && own.id === userId) return own;
+    return auth.getUserById(userId);
   };
 
   /**
@@ -743,14 +896,15 @@ export async function buildApp(
   ]);
 
   const requireUser = async (req: FastifyRequest, reply: FastifyReply): Promise<string | null> => {
-    const userId = await userOf(req);
+    const userId = await userOrRetry(req, reply);
+    if (userId === undefined) return null;
     if (!userId) {
       await reply.code(401).send({ error: 'authentication required' });
       return null;
     }
     const where = `${req.method} ${(req.routeOptions?.url ?? req.url).split('?')[0]}`;
     if (!OPEN_WHILE_UNNAMED.has(where)) {
-      const chosen = await usernameChosen(userId, reply);
+      const chosen = await usernameChosen(req, userId, reply);
       if (chosen === null) return null;
       if (!chosen) {
         // 428: the request is fine, something has to happen first. A 403 would
@@ -770,9 +924,14 @@ export async function buildApp(
    * opened whenever the lookup failed: an account still wearing the handle we
    * derived from its email could publish under it during any database hiccup
    * (audit round six). A check that cannot be made now refuses now.
+   *
+   * For the caller's own account the answer is in the session read
+   * (accountOf, P2.17); the flag comes from the same row as the token.
    */
-  const usernameChosen = async (userId: string, reply: FastifyReply): Promise<boolean | null> => {
+  const usernameChosen = async (req: FastifyRequest, userId: string, reply: FastifyReply): Promise<boolean | null> => {
     try {
+      const own = await sessionUser(req);
+      if (own && own.id === userId) return own.usernameChosen !== false;
       return await auth.hasChosenUsername(userId);
     } catch {
       await reply.code(503).send({ error: 'something went wrong on our side, please try again', code: 'retry' });
@@ -801,12 +960,13 @@ export async function buildApp(
    * round six). Every caller treats a throw as a failed request, so it now
    * fails closed both ways.
    */
-  const adminNameOf = async (userId: string): Promise<string | null> => {
+  // With the request, the caller's own row is the session read (accountOf, P2.17).
+  const adminNameOf = async (userId: string, req?: FastifyRequest): Promise<string | null> => {
     if (adminSet.size === 0) return null;
-    const user = await auth.getUserById(userId);
+    const user = req ? await accountOf(req, userId) : await auth.getUserById(userId);
     return user && adminSet.has(user.username) ? user.username : null;
   };
-  const isAdminUser = async (userId: string): Promise<boolean> => (await adminNameOf(userId)) !== null;
+  const isAdminUser = async (userId: string, req?: FastifyRequest): Promise<boolean> => (await adminNameOf(userId, req)) !== null;
   /**
    * Posture: every allow-listed admin name should belong to an account. One
    * that does not is moderator rights waiting for whoever registers it first.
@@ -826,7 +986,7 @@ export async function buildApp(
   const requireAdmin = async (req: FastifyRequest, reply: FastifyReply): Promise<string | null> => {
     const userId = await requireUser(req, reply);
     if (!userId) return null;
-    const name = await adminNameOf(userId);
+    const name = await adminNameOf(userId, req);
     if (!name) {
       await reply.code(403).send({ error: 'moderator access required' });
       return null;
@@ -886,7 +1046,7 @@ export async function buildApp(
       return true;
     }
     const userId = await userOf(req);
-    const name = userId ? await adminNameOf(userId) : null;
+    const name = userId ? await adminNameOf(userId, req) : null;
     if (name) req.socActor = `@${name}`;
     return name !== null;
   };
@@ -1263,8 +1423,8 @@ export async function buildApp(
       // AI_FREE_FOR_ALL=false later to enforce the per-account free limit
       // (which is HOURLY — see aiPeriod; this comment used to say monthly).
       freeForAll: (process.env.AI_FREE_FOR_ALL ?? 'true') !== 'false',
-      userState: async (userId) => {
-        const u = await auth.getUserById(userId).catch(() => null);
+      userState: async (userId, req) => {
+        const u = await (req ? accountOf(req, userId) : auth.getUserById(userId)).catch(() => null);
         return u ? { emailVerified: !!u.emailVerifiedAt, isPro: u.isPro } : null;
       },
       routeConfig: options.rateLimit ? { config: { rateLimit: { max: 12, timeWindow: '1 minute' } } } : undefined,
@@ -1399,7 +1559,7 @@ export async function buildApp(
   };
   /** Room for one more design on this account? Sends the refusal itself. */
   const roomForDesign = async (req: FastifyRequest, userId: string, reply: FastifyReply): Promise<boolean> => {
-    if (await adminNameOf(userId)) return true;
+    if (await adminNameOf(userId, req)) return true;
     // A count that cannot be read is not a count of zero: that let an account
     // past its thousand whenever the lookup failed, which a statement limit
     // makes a thing that happens (performance plan P1.26 fail-closed review).
@@ -1837,7 +1997,7 @@ export async function buildApp(
       mailBudget.refund(`verify-by:${user.id}`);
       mailBudget.refund(addressKey('verify-to', mail));
     }
-    return reply.code(201).send({
+    return reply.code(201).header('cache-control', SECRET_NO_STORE).send({
       token,
       username: user.username,
       email: user.email,
@@ -1864,7 +2024,7 @@ export async function buildApp(
     }
     // The token is in the URL: don't cache it and don't leak it via the Referer header.
     return reply
-      .header('cache-control', 'no-store')
+      .header('cache-control', SECRET_NO_STORE)
       .header('referrer-policy', 'no-referrer')
       .redirect(`/projects?verified=${verified ? 1 : 0}`);
   });
@@ -1874,7 +2034,7 @@ export async function buildApp(
   app.post('/api/auth/verify/resend', authLimit, async (req, reply) => {
     const userId = await requireUser(req, reply);
     if (!userId) return;
-    const user = await auth.getUserById(userId).catch(() => null);
+    const user = await accountOf(req, userId).catch(() => null);
     if (!user?.email) return reply.code(400).send({ error: 'no email on file' });
     if (user.emailVerifiedAt) return reply.code(200).send({ ok: true, alreadyVerified: true });
     const last = lastVerifySentAt.get(userId);
@@ -1921,7 +2081,7 @@ export async function buildApp(
     if (!userId) return;
     const raw = (req.body ?? {}) as { code?: unknown };
     const code = typeof raw.code === 'string' ? raw.code.replace(/\D/g, '') : '';
-    const user = await auth.getUserById(userId).catch(() => null);
+    const user = await accountOf(req, userId).catch(() => null);
     if (user?.emailVerifiedAt) return reply.code(200).send({ ok: true, alreadyVerified: true });
     if (code.length !== 6) return reply.code(400).send({ error: 'enter the 6-digit code' });
 
@@ -1989,7 +2149,7 @@ export async function buildApp(
     // And never AWAY from one. Admin rights follow the name, so an admin who
     // renamed (or deleted) their account freed it, and whoever registered it
     // next was a moderator (audit round four). Change ADMIN_USERNAMES first.
-    if (await adminNameOf(userId)) {
+    if (await adminNameOf(userId, req)) {
       return reply.code(403).send({ error: 'an admin account keeps its name; change ADMIN_USERNAMES first', code: 'admin_name' });
     }
     const ok = await auth.setUsername(userId, username);
@@ -2002,7 +2162,7 @@ export async function buildApp(
     const userId = await requireUser(req, reply);
     if (!userId) return;
     const { currentPassword, newPassword } = (req.body ?? {}) as { currentPassword?: string; newPassword?: string };
-    const user = await auth.getUserById(userId).catch(() => null);
+    const user = await accountOf(req, userId).catch(() => null);
     // Copied out: a repository may hand back a live object that a reset changes.
     const checkedHash = user ? user.passwordHash ?? null : null;
     // An account created by signing in with a provider has no password to
@@ -2074,7 +2234,7 @@ export async function buildApp(
       req.socNote = { kind: 'password_change_failed', subject: user.username };
       return reply.code(401).send({ error: 'current password is incorrect' });
     }
-    return reply.code(200).send({ ok: true, token, signedOutEverywhereElse: true });
+    return reply.code(200).header('cache-control', SECRET_NO_STORE).send({ ok: true, token, signedOutEverywhereElse: true });
   });
 
   // Forgot password: always 200 so the response can't be used to probe which
@@ -2209,7 +2369,7 @@ export async function buildApp(
     if (!(await auth.createTokenIfPassword(user.id, sessionHash, tokenHash, new Date(Date.now() + TOKEN_TTL_MS)))) {
       return reply.code(401).send({ error: 'invalid credentials' });
     }
-    return { token, username: user.username };
+    return reply.header('cache-control', SECRET_NO_STORE).send({ token, username: user.username });
   });
 
   app.post('/api/auth/logout', async (req, reply) => {
@@ -2305,7 +2465,8 @@ export async function buildApp(
     if (!providerReady(provider)) return reply.code(404).send({ error: 'not found' });
     const policy = (req.query as { policy?: string }).policy;
     const url = startFlow(req, reply, provider, typeof policy === 'string' ? { a: policy.slice(0, 32) } : {});
-    return reply.header('cache-control', 'no-store').redirect(url);
+    // The sealed state and PKCE verifier go out in its cookie.
+    return reply.header('cache-control', SECRET_NO_STORE).redirect(url);
   });
 
   // Step two: the browser comes back. Everything here is about being sure it is
@@ -2324,7 +2485,7 @@ export async function buildApp(
     const bail = (reason: string, to = '/app'): FastifyReply =>
       reply
         .header('set-cookie', [cleared])
-        .header('cache-control', 'no-store')
+        .header('cache-control', SECRET_NO_STORE)
         .header('referrer-policy', 'no-referrer')
         .redirect(`${to}?signin=failed&reason=${encodeURIComponent(reason)}`);
 
@@ -2387,7 +2548,7 @@ export async function buildApp(
       req.socNote = { kind: 'oauth_linked', subject: provider };
       return reply
         .header('set-cookie', [cleared])
-        .header('cache-control', 'no-store')
+        .header('cache-control', SECRET_NO_STORE)
         .redirect(`${pending.r}?linked=${provider}`);
     }
 
@@ -2497,7 +2658,7 @@ export async function buildApp(
     // page swaps it for the real thing on load.
     return reply
       .header('set-cookie', [cleared, cookieLine(req, HANDOFF_COOKIE, token, '/api/auth/handoff', HANDOFF_TTL_MS)])
-      .header('cache-control', 'no-store')
+      .header('cache-control', SECRET_NO_STORE)
       .header('referrer-policy', 'no-referrer')
       .redirect(`${pending.r}?signedin=${provider}${pending.c ? '&claim=1' : ''}`);
   });
@@ -2523,7 +2684,7 @@ export async function buildApp(
     const userId = await auth.exchangeHandoff(hashToken(handed), fresh.tokenHash, new Date(Date.now() + TOKEN_TTL_MS)).catch(() => null);
     if (!userId) return reply.code(401).send({ error: 'no session to adopt' });
     const user = await auth.getUserById(userId).catch(() => null);
-    return { token: fresh.token, username: user?.username ?? null };
+    return reply.header('cache-control', SECRET_NO_STORE).send({ token: fresh.token, username: user?.username ?? null });
   });
 
   /**
@@ -2544,7 +2705,7 @@ export async function buildApp(
     if (!userId) return;
     const { provider } = req.params as { provider: string };
     if (!providerReady(provider)) return reply.code(404).send({ error: 'not found' });
-    const user = await auth.getUserById(userId).catch(() => null);
+    const user = await accountOf(req, userId).catch(() => null);
     if (!user) return reply.code(401).send({ error: 'authentication required' });
     if (user.email && !user.emailVerifiedAt) {
       return reply.code(403).send({ error: 'verify your email before connecting another sign-in', code: 'verify_first' });
@@ -2559,7 +2720,7 @@ export async function buildApp(
     if (!(await reauthenticated(req, reply, user))) return;
     const header = String(req.headers.authorization ?? '');
     const url = startFlow(req, reply, provider, { u: userId, t: hashToken(header.slice(7)) });
-    return { url };
+    return reply.header('cache-control', SECRET_NO_STORE).send({ url });
   });
 
   /** Remove one. Never leaves an account with no way back in. */
@@ -2567,7 +2728,7 @@ export async function buildApp(
     const userId = await requireUser(req, reply);
     if (!userId) return;
     const { provider } = req.params as { provider: string };
-    const user = await auth.getUserById(userId).catch(() => null);
+    const user = await accountOf(req, userId).catch(() => null);
     const linked = await auth.identitiesFor(userId).catch(() => [] as string[]);
     // Counted after the removal: every sign-in of that provider goes at once.
     if (!user?.passwordHash && linked.filter((p) => p !== provider).length === 0) {
@@ -2584,13 +2745,13 @@ export async function buildApp(
   app.get('/api/me', async (req, reply) => {
     const userId = await requireUser(req, reply);
     if (!userId) return;
-    const user = await auth.getUserById(userId).catch(() => null);
+    const user = await accountOf(req, userId).catch(() => null);
     return {
       id: userId,
       username: user?.username ?? null,
       email: user?.email ?? null,
       emailVerified: !!user?.emailVerifiedAt,
-      isAdmin: await isAdminUser(userId),
+      isAdmin: await isAdminUser(userId, req),
       // What this account can sign in with. The account page needs both: it
       // offers "Set a password" instead of "Change password" when there is
       // none, and it refuses to unlink the last way in.
@@ -2613,7 +2774,7 @@ export async function buildApp(
       return reply.code(400).send({ error: 'a valid email is required' });
     }
     const version = typeof acceptedVersion === 'string' ? acceptedVersion.slice(0, 32) : null;
-    const before = await auth.getUserById(userId).catch(() => null);
+    const before = await accountOf(req, userId).catch(() => null);
     if (!before) return reply.code(401).send({ error: 'authentication required' });
     // Copied out: a repository may hand back a live object that setEmail changes.
     const oldEmail = before.email;
@@ -2720,11 +2881,11 @@ export async function buildApp(
     let user: Awaited<ReturnType<typeof auth.getUserById>>;
     let designs: Awaited<ReturnType<typeof repo.listByOwner>>;
     try {
-      [user, designs] = await Promise.all([auth.getUserById(userId), repo.listByOwner(userId)]);
+      [user, designs] = await Promise.all([accountOf(req, userId), repo.listByOwner(userId)]);
     } catch {
       return reply.code(503).send({ error: 'something went wrong on our side, please try again', code: 'retry' });
     }
-    return reply.header('content-disposition', 'attachment; filename="tifomaker-data.json"').send({
+    return reply.header('content-disposition', 'attachment; filename="tifomaker-data.json"').header('cache-control', SECRET_NO_STORE).send({
       exportedAt: new Date().toISOString(),
       account: user
         ? { id: user.id, username: user.username, email: user.email, emailVerified: !!user.emailVerifiedAt }
@@ -2739,12 +2900,12 @@ export async function buildApp(
     if (!userId) return;
     // Deleting an allow-listed account would free its name for anyone to
     // register, with moderator rights attached (see the rename route).
-    if (await adminNameOf(userId)) {
+    if (await adminNameOf(userId, req)) {
       return reply.code(403).send({ error: 'an admin account cannot be deleted here; remove it from ADMIN_USERNAMES first', code: 'admin_name' });
     }
     // For good, with every design: the password, when there is one, not a
     // session alone, which may be a stolen one (audit round six).
-    const who = await auth.getUserById(userId).catch(() => null);
+    const who = await accountOf(req, userId).catch(() => null);
     if (!who) return reply.code(503).send({ error: 'something went wrong on our side, please try again', code: 'retry' });
     if (!(await reauthenticated(req, reply, who))) return;
     // The designs first, and only then the account. A failure to delete them
@@ -2772,7 +2933,7 @@ export async function buildApp(
   app.post('/api/admin/pro', authLimit, async (req, reply) => {
     const adminId = await requireUser(req, reply);
     if (!adminId) return;
-    if (!(await isAdminUser(adminId))) return reply.code(403).send({ error: 'admin access required' });
+    if (!(await isAdminUser(adminId, req))) return reply.code(403).send({ error: 'admin access required' });
     const { username, isPro } = (req.body ?? {}) as { username?: string; isPro?: boolean };
     const target = username ? await auth.getUserByName(username) : null;
     if (!target) return reply.code(404).send({ error: 'user not found' });
@@ -3031,8 +3192,8 @@ export async function buildApp(
       // Someone else's design is a 404 before anything else, as it always was.
       const target = await repo.get(id).catch(() => null);
       if (!target || !ownsDesign(target, userId)) return reply.code(404).send({ error: 'not found or not yours' });
-      const uploader = await auth.getUserById(userId).catch(() => null);
-      const admin = !!(await adminNameOf(userId));
+      const uploader = await accountOf(req, userId).catch(() => null);
+      const admin = !!(await adminNameOf(userId, req));
       if (!uploader?.emailVerifiedAt && !admin) {
         return reply.code(403).send({ error: 'verify your email to add photos', code: 'verify' });
       }
@@ -3217,13 +3378,16 @@ export async function buildApp(
         keyStable: soc.keyInfo.stable,
         posture: [
           ...securityPosture({
-            env: process.env,
+            // The origin lock as it is in force in this app, not only as the environment has it.
+            env: { ...process.env, ORIGIN_SECRET: originSecret },
             nodeVersion: process.version,
             uid: typeof process.getuid === 'function' ? process.getuid() : null,
             rateLimit: !!options.rateLimit,
             database: options.database ?? 'memory',
             email: options.emailSender ? emailHealth() : null,
             soc: { alertTo: soc.alertTo, keyStable: soc.keyInfo.stable, lastWriteError: soc.lastWriteError },
+            schema: options.schemaStatus?.() ?? null,
+            cloudflareSeen: cloudflareSeenAt ? new Date(cloudflareSeenAt).toISOString() : null,
           }),
           await adminNamesClaimed(),
         ],
@@ -3347,7 +3511,7 @@ export async function buildApp(
     // made-up addresses used to be enough to put any design on the home page
     // (audit round four). Taking a vote back is always allowed.
     if (value !== 0) {
-      const voter = await auth.getUserById(userId).catch(() => null);
+      const voter = await accountOf(req, userId).catch(() => null);
       if (!voter?.emailVerifiedAt) return reply.code(403).send({ error: 'verify your email to vote', code: 'verify_first' });
     }
     const result = await repo.vote(id, userId, value as -1 | 0 | 1);
@@ -3478,7 +3642,7 @@ export async function buildApp(
    */
   const unnamedWall = async (req: FastifyRequest, reply: FastifyReply, userId: string | null): Promise<boolean> => {
     if (!userId || req.method === 'GET' || req.method === 'HEAD') return false;
-    const chosen = await usernameChosen(userId, reply);
+    const chosen = await usernameChosen(req, userId, reply);
     if (chosen === null) return true; // refused with a 503: the check could not be made
     if (chosen) return false;
     await reply.code(428).send({ error: 'choose a username first', code: 'needs_username' });
@@ -3497,10 +3661,20 @@ export async function buildApp(
    */
   const ownsDesign = (rec: { ownerId: string | null }, userId: string | null): boolean => !!userId && rec.ownerId === userId;
 
-  const getVisible = async (req: FastifyRequest, reply: FastifyReply) => {
-    const { id } = req.params as { id: string };
-    const rec = await repo.get(id).catch(() => null);
-    const userId = await userOf(req);
+  /**
+   * The visibility rule every design route applies: public, or the caller
+   * owns it; anything else is the same 404 a missing id gets (existence is
+   * not leaked). getVisible loads the whole design; a route that needs only
+   * a few columns (the thumbnail's ETag, P2.4; the anonymous scene's hash,
+   * P2.5) passes the row it loaded, and the rule is this same code.
+   */
+  const visibleFor = async <R extends { isPublic: boolean; ownerId: string | null }>(
+    req: FastifyRequest,
+    reply: FastifyReply,
+    rec: R | null,
+  ): Promise<{ rec: R; userId: string | null } | null> => {
+    const userId = await userOrRetry(req, reply);
+    if (userId === undefined) return null;
     if (!rec || (!rec.isPublic && !ownsDesign(rec, userId))) {
       await reply.code(404).send({ error: 'not found' });
       return null;
@@ -3508,12 +3682,17 @@ export async function buildApp(
     if (await unnamedWall(req, reply, userId)) return null;
     return { rec, userId };
   };
+  const getVisible = async (req: FastifyRequest, reply: FastifyReply) => {
+    const { id } = req.params as { id: string };
+    return visibleFor(req, reply, await repo.get(id).catch(() => null));
+  };
 
   /** Load + ownership check for mutations. Sends 404/401/403 itself. */
   const getOwned = async (req: FastifyRequest, reply: FastifyReply) => {
     const { id } = req.params as { id: string };
     const rec = await repo.get(id).catch(() => null);
-    const userId = await userOf(req);
+    const userId = await userOrRetry(req, reply);
+    if (userId === undefined) return null;
     if (!rec || (!rec.isPublic && !ownsDesign(rec, userId))) {
       await reply.code(404).send({ error: 'not found' });
       return null;
@@ -3545,7 +3724,7 @@ export async function buildApp(
     const isOwner = ownsDesign(v.rec, v.userId);
     const meta = isOwner ? all : shared;
     // Creator name is needed by the public share page; resolve it from the owner id.
-    const owner = meta.ownerId ? await auth.getUserById(meta.ownerId).catch(() => null) : null;
+    const owner = meta.ownerId ? await accountOf(req, meta.ownerId).catch(() => null) : null;
     // Per caller, so the /api default (no-store, the onSend hook above) is
     // what keeps it out of every cache; the security suite pins it.
     return { ...meta, isOwner, ownerName: owner?.username ?? null, cellsGzB64: cellsGz.toString('base64') };
@@ -3561,81 +3740,70 @@ export async function buildApp(
    * an error, and a share link should not have to tell the two apart.
    */
   app.get('/api/designs/:id/scene', async (req, reply) => {
-    const v = await getVisible(req, reply);
+    const { id } = req.params as { id: string };
+    // Who may see it, and the stored scene's hash: not the scene (P2.5).
+    const v = await visibleFor(req, reply, await repo.getSceneMeta(id).catch(() => null));
     if (!v) return;
-    const gz = await repo.getScene(v.rec.id);
-    if (!gz) return { sceneGzB64: null };
-    // The layer stack — the owner's own pictures, as uploaded — is the
-    // owner's. Everyone else sees the design as its seats: the banners come
-    // with it, the layers do not.
-    const out = ownsDesign(v.rec, v.userId) ? gz : withoutLayers(gz);
-    // A scene that cannot be stripped is not shown to anyone but its owner.
-    return { sceneGzB64: out ? out.toString('base64') : null };
+    if (!v.rec.hasScene) return { sceneGzB64: null };
+    // The layer stack (the owner's own pictures, as uploaded) is the owner's,
+    // and the owner gets the scene exactly as stored.
+    if (ownsDesign(v.rec, v.userId)) {
+      const gz = await repo.getScene(id);
+      return { sceneGzB64: gz ? gz.toString('base64') : null };
+    }
+    // Everyone else sees the design as its seats: the banners come with it,
+    // the layers do not. A scene that cannot be stripped is shown to nobody
+    // but its owner; a strip that could not be done now (the worker busy,
+    // slow or gone) is a 503, and never the scene as stored.
+    let out: Uint8Array | null;
+    try {
+      out = await strippedScene(id, v.rec.hash);
+    } catch {
+      return busy(reply);
+    }
+    return { sceneGzB64: out ? Buffer.from(out.buffer, out.byteOffset, out.byteLength).toString('base64') : null };
   });
 
   /**
-   * Stripped scenes, remembered by the stored bytes' hash.
-   *
-   * Stripping is gunzip, parse, stringify and gzip, all synchronous, on the one
-   * event loop, for every anonymous view of a public design: one fat published
-   * scene took ~290 ms per request, so a few addresses at the general rate limit
-   * could stall the whole server (audit round four). The result depends only on
-   * the stored bytes, so it is computed once per version and served from here,
-   * capped at 32 MB.
+   * A design's scene without its layers, for anyone but its owner (P2.5):
+   * from the stripped copies kept by the hash stored with the scene
+   * (sceneCache.ts), and only when none is kept, read (bytes and hash
+   * together) and stripped in the scene worker (P2.14). Throws when the
+   * worker cannot do it; nothing is kept then.
    */
-  // A scene that could not be stripped is remembered as `null` (costed at 64
-  // bytes), so a broken one is not re-parsed on every view either.
-  const strippedCache = new Map<string, Buffer | null>();
-  let strippedBytes = 0;
-  const STRIPPED_CACHE_MAX = 32 * 1024 * 1024;
-  const strippedCost = (b: Buffer | null): number => (b ? b.byteLength : 64);
-  function withoutLayers(gz: Buffer): Buffer | null {
-    const key = createHash('sha1').update(gz).digest('hex');
-    if (strippedCache.has(key)) {
-      const hit = strippedCache.get(key) ?? null;
-      strippedCache.delete(key); // refresh: most recently used goes last
-      strippedCache.set(key, hit);
-      return hit;
+  const sceneCache = options.sceneCache ?? new StrippedSceneCache();
+  const strippedScene = async (designId: string, knownHash: string | null): Promise<Uint8Array | null> => {
+    const trusted = hashesTrusted();
+    if (knownHash && trusted) {
+      const kept = sceneCache.get(designId, knownHash);
+      if (kept !== undefined) return kept;
     }
-    const out = stripLayers(gz);
-    strippedCache.set(key, out);
-    strippedBytes += strippedCost(out);
-    for (const [k, v] of strippedCache) {
-      if (strippedBytes <= STRIPPED_CACHE_MAX) break;
-      strippedCache.delete(k);
-      strippedBytes -= strippedCost(v);
-    }
+    const row = await repo.getSceneRow(designId);
+    if (!row) return null;
+    // The stored hash when it can be believed; otherwise (and for a scene
+    // stored before hashes were) the hash of the bytes just read.
+    const hash = trusted && row.hash ? row.hash : contentHash(row.gz);
+    if (!row.hash) void repo.backfillHashes(designId).catch(() => {});
+    const kept = sceneCache.get(designId, hash);
+    if (kept !== undefined) return kept;
+    // An exact-size copy, handed over rather than cloned: a Buffer can be a
+    // view into a larger shared slab, and cloning a view sends the whole slab,
+    // other requests' bytes included (stage 2 review).
+    const input = new Uint8Array(row.gz);
+    // A view may wait only in the first SCENE_VIEW_ROOM places, so a flood
+    // of views never leaves an owner's save without room (workerPool.ts).
+    const out = (await scenePool.run({ kind: 'strip', gz: input }, [input.buffer], { room: SCENE_VIEW_ROOM })) as Uint8Array | null;
+    sceneCache.set(designId, hash, out);
     return out;
-  }
-  /**
-   * A scene without its layer stack (for anyone but the design's owner), or
-   * null when it cannot be read.
-   *
-   * It used to hand back the stored bytes untouched whenever they failed to
-   * decompress or parse: the one case where it could not check for the owner's
-   * layers was the case where it sent them, to everyone, and cached that
-   * (audit round six). A save cannot store such a scene today, because PUT
-   * parses it first, but a strip that is only safe while every writer behaves
-   * is not a strip. It fails closed now: no scene rather than the owner's.
-   */
-  function stripLayers(gz: Buffer): Buffer | null {
-    try {
-      const scene = JSON.parse(gunzipBytes(gz, MAX_SCENE_GUNZIP_BYTES).toString('utf8')) as unknown;
-      if (!scene || typeof scene !== 'object') return null;
-      if (Array.isArray(scene) || !('layers' in scene)) return gz; // nothing of the owner's in it
-      delete (scene as Record<string, unknown>).layers;
-      return gzipBytes(Buffer.from(JSON.stringify(scene), 'utf8'));
-    } catch {
-      return null;
-    }
-  }
+  };
 
   // A scene is saved when someone presses Save or moves a project into their
   // account, not continuously, so 30 a minute is far above any real pace. The
-  // limit is there because each save is decompressed (up to 16 MB) and parsed
-  // on the one event loop: a crafted 21 KB body cost 0.6 s, so the global 300 a
-  // minute let one free account hold the server for three minutes in every
-  // minute (audit round six).
+  // limit is there because each save is decompressed (up to 16 MB) and parsed:
+  // a crafted 21 KB body cost 0.6 s, so the global 300 a minute let one free
+  // account hold the server for three minutes in every minute (audit round
+  // six). The work is in the scene worker now (P2.14), and the limit stays:
+  // it is what keeps that worker's queue for everyone.
   const sceneLimit = { config: { rateLimit: { max: 30, timeWindow: '1 minute' } } };
   app.put('/api/designs/:id/scene', sceneLimit, async (req, reply) => {
     const rec = await getOwned(req, reply);
@@ -3648,43 +3816,79 @@ export async function buildApp(
     if (gz.byteLength > SCENE_MAX_BYTES) {
       return reply.code(413).send({ error: `scene must be under ${Math.round(SCENE_MAX_BYTES / 1024)} KB gzipped` });
     }
-    let inflated: Buffer;
+    // Inflated (16 MB at most), its structure bounded before it is parsed,
+    // and parsed, in the scene worker (sceneCheck.checkScene), not on the
+    // event loop every other request waits on.
+    let verdict: SceneVerdict;
     try {
-      // Inflated off the event loop (libuv's pool), so a large one does not
-      // hold every other request.
-      inflated = await gunzipBytesAsync(gz, MAX_SCENE_GUNZIP_BYTES);
+      // An exact-size copy, handed over; and ahead of any waiting view.
+      const input = new Uint8Array(gz);
+      verdict = (await scenePool.run({ kind: 'check', gz: input }, [input.buffer], { urgent: true })) as SceneVerdict;
     } catch {
-      return reply.code(400).send({ error: 'sceneGzB64 is not valid gzip' });
+      return busy(reply);
     }
-    // Bounded before it is parsed (see sceneTooComplex).
-    if (sceneTooComplex(inflated)) {
-      return reply.code(413).send({ error: 'scene is too complex to save', code: 'scene_complex' });
-    }
-    // Parsed, not just decompressed: a scene that cannot be read back is worse
-    // than no scene, because it fails on LOAD, in front of whoever opened the
-    // share link, rather than here in front of the person who can fix it.
-    try {
-      const parsed = JSON.parse(inflated.toString('utf8')) as unknown;
-      if (!parsed || typeof parsed !== 'object') throw new Error('not an object');
-    } catch {
-      return reply.code(400).send({ error: 'scene is not valid JSON' });
-    }
+    if (verdict === 'gzip') return reply.code(400).send({ error: 'sceneGzB64 is not valid gzip' });
+    if (verdict === 'complex') return reply.code(413).send({ error: 'scene is too complex to save', code: 'scene_complex' });
+    if (verdict !== 'ok') return reply.code(400).send({ error: 'scene is not valid JSON' });
     const ok = await repo.putScene(rec.id, gz);
     if (!ok) return reply.code(404).send({ error: 'not found' });
     return { ok: true, bytes: gz.byteLength };
   });
 
+  /**
+   * A design's picture, revalidated by its content hash (performance plan P2.4).
+   *
+   * Every view of /community downloaded every picture again: `no-cache` and
+   * nothing to revalidate against. A public design's picture now carries an
+   * ETag, the sha-256 of the stored bytes (written in the same statement as
+   * them), and a repeat view is one read of visibility and hash, then a 304
+   * with no body.
+   *
+   * The order is the guardrail: who may see it is decided first, by the same
+   * rule as every design route (visibleFor), and only then is If-None-Match
+   * compared. A 304 before that would tell anyone holding an old ETag that a
+   * private or taken-down design still exists; instead they get the same 404
+   * as for an id that never existed. Only a public design's answer has an
+   * ETag and says `public`: it is the same bytes and headers for everyone.
+   * A private design's picture is for its owner only: `private, no-store`,
+   * no ETag, never a 304, not kept by any cache, the browser's included
+   * (audit round six).
+   */
+  const PUBLIC_THUMB = 'public, no-cache';
+  const etagOf = (hash: string): string => `"${hash}"`;
+  /** Does If-None-Match name this ETag? (Weak comparison, as RFC 9110 has it for this header.) */
+  const ifNoneMatch = (req: FastifyRequest, etag: string): boolean => {
+    const h = req.headers['if-none-match'];
+    return typeof h === 'string' && h.split(',').some((t) => t.trim().replace(/^W\//, '') === etag);
+  };
   app.get('/api/designs/:id/thumbnail.png', async (req, reply) => {
-    const v = await getVisible(req, reply);
+    const { id } = req.params as { id: string };
+    const trusted = hashesTrusted();
+    if (trusted && typeof req.headers['if-none-match'] === 'string') {
+      // Asked conditionally: visibility and the hash, not the picture.
+      const v = await visibleFor(req, reply, await repo.getThumbnailMeta(id).catch(() => null));
+      if (!v) return;
+      if (v.rec.isPublic && v.rec.hash && ifNoneMatch(req, etagOf(v.rec.hash))) {
+        // The same headers as the 200 it stands for.
+        return reply.code(304).header('cache-control', PUBLIC_THUMB).header('etag', etagOf(v.rec.hash)).send();
+      }
+    }
+    // The picture, read together with who may see it, and the rule applied
+    // to that read: a design made private a moment ago is refused here too.
+    const v = await visibleFor(req, reply, await repo.getThumbnailRow(id).catch(() => null));
     if (!v) return;
-    const png = await repo.getThumbnail(v.rec.id);
+    const png = v.rec.png;
     if (!png) return reply.code(404).send({ error: 'no thumbnail' });
-    // A private design's picture is for its owner only: not kept in any cache,
-    // the browser's included (audit round six).
-    return reply
-      .header('content-type', 'image/png')
-      .header('cache-control', v.rec.isPublic ? 'no-cache' : 'private, no-store')
-      .send(png);
+    if (!v.rec.isPublic) {
+      return reply.header('content-type', 'image/png').header('cache-control', 'private, no-store').send(png);
+    }
+    // The stored hash when it can be believed; otherwise (and for a picture
+    // stored before hashes were) the hash of the bytes just read.
+    const hash = trusted && v.rec.hash ? v.rec.hash : contentHash(png);
+    if (!v.rec.hash) void repo.backfillHashes(id).catch(() => {});
+    reply.header('cache-control', PUBLIC_THUMB).header('etag', etagOf(hash));
+    if (ifNoneMatch(req, etagOf(hash))) return reply.code(304).send();
+    return reply.header('content-type', 'image/png').send(png);
   });
 
   // ---------- sharing system ----------
@@ -3815,38 +4019,58 @@ export async function buildApp(
     } catch {
       return reply.code(400).send({ error: 'cells not gzip' });
     }
-    const map = seatMapFor(tpl);
-    if (cells.length !== map.count) {
-      return reply.code(400).send({ error: `cells must have ${map.count} bytes for this template` });
+    // Checked against the seat table here (the same counts as the generator,
+    // test:deploy), so no seat map is built on the event loop; the worker
+    // builds its own and checks again.
+    const count = seatCount(tpl.id, tpl.version);
+    if (count === null || cells.length !== count) {
+      return reply.code(400).send({ error: `cells must have ${count ?? 0} bytes for this template` });
     }
     clearLocked(tpl.id, tpl.version, cells); // no cards are printed for a royal box
-    const outPath = join(tmpdir(), `tifo-${Date.now()}-${Math.random().toString(36).slice(2)}.pdf`);
-    await renderDistributionPdf(
-      { cells: new Uint8Array(cells), palette: body.palette as string[], seatMapRef: { id: tpl.id, version: tpl.version } },
-      map,
-      {
-        // Capped like every other title. It was the one uncapped string on this
-        // anonymous route: pdfkit flows a long title across pages synchronously,
-        // and a 60 KB title held the only event loop for 6 seconds.
-        designTitle: cleanTitle(body.title, 'Tifo'),
-        stadiumName: tpl.name,
-        cardsPerBag: Number.isFinite(Number(body.cardsPerBag)) ? Math.min(10_000, Math.max(1, Math.round(Number(body.cardsPerBag)))) : 100,
-        // pdfkit flows this text and auto-adds pages, so an oversized name is
-        // quadratic synchronous CPU on the only thread the server has. Measured
-        // 8s from one 20KB entry; longer ones run for minutes.
-        colorNames: Array.isArray(body.colorNames)
-          ? body.colorNames.slice(0, 256).map((n) => (typeof n === 'string' ? n.slice(0, 40) : ''))
-          : undefined,
-        watermark: !userId, // anonymous/free → watermark; signed-in → clean
-      },
-      outPath,
-    );
-    const pdf = await readFile(outPath);
-    await unlink(outPath).catch(() => {});
+    // Rendered in the PDF worker (P2.14): seconds of pdfkit layout on a big
+    // ground no longer hold every other request. A full queue, a timeout or
+    // a crash is a 503; the limit of 6 a minute and every cap below stay.
+    // The temporary file pdfkit writes is named here and removed here too,
+    // whatever happened: a worker stopped for running too long or crashing
+    // never reaches its own `finally`.
+    const outPath = join(tmpdir(), `tifo-${randomBytes(12).toString('hex')}.pdf`);
+    let pdf: Uint8Array;
+    const cellsCopy = new Uint8Array(cells); // exact size, handed over (see strippedScene)
+    try {
+      pdf = await pdfPool.run({
+        outPath,
+        templateId: tpl.id,
+        templateVersion: tpl.version,
+        cells: cellsCopy,
+        palette: body.palette as string[],
+        meta: {
+          // Capped like every other title. It was the one uncapped string on this
+          // anonymous route: pdfkit flows a long title across pages synchronously,
+          // and a 60 KB title held the only event loop for 6 seconds.
+          designTitle: cleanTitle(body.title, 'Tifo'),
+          stadiumName: tpl.name,
+          cardsPerBag: Number.isFinite(Number(body.cardsPerBag)) ? Math.min(10_000, Math.max(1, Math.round(Number(body.cardsPerBag)))) : 100,
+          // pdfkit flows this text and auto-adds pages, so an oversized name is
+          // quadratic synchronous CPU. Measured 8s from one 20KB entry; longer
+          // ones run for minutes.
+          colorNames: Array.isArray(body.colorNames)
+            ? body.colorNames.slice(0, 256).map((n) => (typeof n === 'string' ? n.slice(0, 40) : ''))
+            : undefined,
+          watermark: !userId, // anonymous/free → watermark; signed-in → clean
+        },
+      }, [cellsCopy.buffer]);
+    } catch {
+      // Once now, and once more when a write the stopped thread had already
+      // handed to the file system has landed.
+      setTimeout(() => void unlink(outPath).catch(() => {}), 2_000).unref();
+      return busy(reply);
+    } finally {
+      await unlink(outPath).catch(() => {});
+    }
     return reply
       .header('content-type', 'application/pdf')
       .header('content-disposition', `attachment; filename="${(body.title || 'tifo').replace(/[^a-z0-9]+/gi, '-').toLowerCase()}-distribution.pdf"`)
-      .send(pdf);
+      .send(Buffer.from(pdf.buffer, pdf.byteOffset, pdf.byteLength));
   });
 
   app.put('/api/designs/:id', async (req, reply) => {
@@ -4047,11 +4271,11 @@ export async function buildApp(
    */
   async function copyScene(fromId: string, toId: string, keepLayers: boolean): Promise<void> {
     try {
-      const scene = await repo.getScene(fromId);
       // A copy for someone else is the design as its seats: its banners, not
       // its owner's layers (and pictures). The owner's own copy keeps them.
-      const copy = scene && (keepLayers ? scene : withoutLayers(scene));
-      if (copy) await repo.putScene(toId, copy);
+      // A strip that cannot be done copies nothing, never the scene as stored.
+      const copy = keepLayers ? await repo.getScene(fromId) : await strippedScene(fromId, null);
+      if (copy) await repo.putScene(toId, Buffer.from(copy.buffer, copy.byteOffset, copy.byteLength));
     } catch {
       /* the seats are copied; that is the part that must not fail */
     }
@@ -4182,6 +4406,19 @@ export async function buildApp(
       social!.unreadCount(userId),
     ]);
     return { unread, items };
+  });
+  // How many are unread, and nothing else (performance plan P2.16). The bell
+  // asks every 60 seconds, and it used to fetch the whole feed to read one
+  // number: 50 rows joined to their actors and designs, about 15 KB, each
+  // time. The feed is fetched when the bell is opened. Same gate as the feed
+  // (signed in, the username wall, the caller's own count only), the same
+  // limits, and never kept by any cache.
+  app.get('/api/notifications/unread', async (req, reply) => {
+    if (!socialOn(reply)) return;
+    const userId = await requireUser(req, reply);
+    if (!userId) return;
+    const unread = await social!.unreadCount(userId);
+    return reply.header('cache-control', 'no-store').send({ unread });
   });
   app.post('/api/notifications/read', async (req, reply) => {
     if (!socialOn(reply)) return;
@@ -4375,6 +4612,54 @@ export async function buildApp(
       return line.slice(0, 300);
     };
 
+    /**
+     * Pages whose HTML depends on nothing but the site's own address,
+     * rendered once and revalidated by an ETag (performance plan P2.9).
+     *
+     * /app, /clubs, /legal and /tifo-spec are a static file with the link
+     * card put in: three regular expressions over up to 66 KB of HTML on
+     * every request, for the same answer every time. Each is now built on its
+     * first request, kept, and served with an ETag (a hash of the bytes) and
+     * `no-cache`, so the browser still asks every time and gets a 304 when
+     * nothing changed (a new deploy is a new process, so new HTML is new
+     * bytes and a new ETag).
+     *
+     * What may vary the page is the address it names (origin(), above), and
+     * nothing else: never the caller, a token, a cookie or the language, which
+     * is why the bytes can be kept. With PUBLIC_URL set (the setting for
+     * production) that is one fixed value, so a page is kept once and a
+     * forged Host can never reach it. Without it the address comes from the
+     * Host header (allow-listed by knownHost; a dev host may carry any port),
+     * so each page keeps at most SHELL_MAX of them and renders any further
+     * one fresh, uncached, every time: nothing a caller sends can grow it.
+     *
+     * Never a page that lists or names designs (/, /community, /t, /d): those
+     * read the database on every request, so a takedown or an unpublish is
+     * seen by the next visitor.
+     */
+    const SHELL_MAX = 8;
+    const shellStats = { rendered: 0, cached: 0 };
+    const htmlShell = (path: string, html: string, card: { title: string; description: string }) => {
+      const kept = new Map<string, { body: string; etag: string }>();
+      return (req: FastifyRequest, reply: FastifyReply): FastifyReply => {
+        const at = options.publicUrl ? '' : origin(req);
+        let page = kept.get(at);
+        if (!page) {
+          const body = withCard(html, req, { ...card, path });
+          shellStats.rendered++;
+          page = { body, etag: `"${createHash('sha256').update(body).digest('hex').slice(0, 32)}"` };
+          if (kept.size < SHELL_MAX) {
+            kept.set(at, page);
+            shellStats.cached++;
+          }
+        }
+        reply.header('cache-control', 'no-cache').header('etag', page.etag).type('text/html; charset=utf-8');
+        if (ifNoneMatch(req, page.etag)) return reply.code(304).send();
+        return reply.send(page.body);
+      };
+    };
+    app.decorate('htmlShellStats', () => ({ ...shellStats }));
+
     // Share links: /d/:id. Inject Open Graph + Twitter Card tags so a pasted
     // link shows a rich preview (title, author, the stadium thumbnail) in
     // WhatsApp, Twitter/X, Discord, Slack, etc., before any JS runs. Humans
@@ -4391,8 +4676,9 @@ export async function buildApp(
         const owner = rec.ownerId ? await auth.getUserById(rec.ownerId).catch(() => null) : null;
         title = `${rec.title}: Tifo Maker`;
         description = describeDesign(rec, owner?.username ?? null);
-        const thumb = await repo.getThumbnail(rec.id).catch(() => null);
-        if (thumb) image = `${base}/api/designs/${rec.id}/thumbnail.png`;
+        // Whether there is a picture, not the picture itself.
+        const thumb = await repo.getThumbnailMeta(rec.id).catch(() => null);
+        if (thumb?.hasThumbnail) image = `${base}/api/designs/${rec.id}/thumbnail.png`;
       }
       const meta = [
         `<title>${esc(title)}</title>`,
@@ -4556,33 +4842,26 @@ export async function buildApp(
       }
       return `/projects?${kept.toString()}`;
     };
+    const editorShell = htmlShell('/app', indexHtml, {
+      title: 'The TifoMaker editor: paint 60,000 seats',
+      description:
+        'Paint a tifo seat by seat, drop in a crest or text, and watch the whole bowl update in 3D as you work. Free, in the browser, no download.',
+    });
     app.get('/app', async (req, reply) => {
       const bare = bareAppTarget(req.raw.url ?? req.url);
       if (bare) return reply.header('cache-control', 'no-cache').redirect(bare, 302);
-      return reply
-        .header('cache-control', 'no-cache')
-        .type('text/html')
-        .send(
-          withCard(indexHtml, req, {
-            title: 'The TifoMaker editor: paint 60,000 seats',
-            description:
-              'Paint a tifo seat by seat, drop in a crest or text, and watch the whole bowl update in 3D as you work. Free, in the browser, no download.',
-            path: '/app',
-          }),
-        );
+      // The query is the editor's to read in the browser; the page is the same for every one.
+      return editorShell(req, reply);
     });
     // Public developer spec for the .tifo format.
     try {
       const specHtml = readFileSync(join(staticDir, 'tifo-spec.html'), 'utf8');
-      app.get('/tifo-spec', async (req, reply) =>
-        reply.header('cache-control', 'no-cache').type('text/html').send(
-          withCard(specHtml, req, {
-            title: 'The .tifo format: an open spec for stadium choreography',
-            description:
-              'The open file format behind TifoMaker: seat maps, palettes and per-seat instructions, documented so anyone can read or write a tifo.',
-            path: '/tifo-spec',
-          }),
-        ));
+      const specShell = htmlShell('/tifo-spec', specHtml, {
+        title: 'The .tifo format: an open spec for stadium choreography',
+        description:
+          'The open file format behind TifoMaker: seat maps, palettes and per-seat instructions, documented so anyone can read or write a tifo.',
+      });
+      app.get('/tifo-spec', async (req, reply) => specShell(req, reply));
     } catch {
       /* spec page optional in API-only builds */
     }
@@ -4648,15 +4927,12 @@ export async function buildApp(
     // B2B "For Clubs" enterprise page with lead capture.
     try {
       const clubsHtml = readFileSync(join(staticDir, 'clubs.html'), 'utf8');
-      app.get('/clubs', async (req, reply) =>
-        reply.header('cache-control', 'no-cache').type('text/html').send(
-          withCard(clubsHtml, req, {
-            title: 'TifoMaker for clubs: run the whole stand like a production',
-            description:
-              'Your actual venue modelled to seat-level accuracy, a branded editor for your design team, white-label fan pages and match-day exports.',
-            path: '/clubs',
-          }),
-        ));
+      const clubsShell = htmlShell('/clubs', clubsHtml, {
+        title: 'TifoMaker for clubs: run the whole stand like a production',
+        description:
+          'Your actual venue modelled to seat-level accuracy, a branded editor for your design team, white-label fan pages and match-day exports.',
+      });
+      app.get('/clubs', async (req, reply) => clubsShell(req, reply));
     } catch {
       /* clubs page optional in API-only builds */
     }
@@ -4664,15 +4940,12 @@ export async function buildApp(
     // Legal documents (Terms, Privacy, Acceptable Use, Cookies) at /legal.
     try {
       const legalHtml = readFileSync(join(staticDir, 'legal.html'), 'utf8');
-      app.get('/legal', async (req, reply) =>
-        reply.header('cache-control', 'no-cache').type('text/html').send(
-          withCard(legalHtml, req, {
-            title: 'Terms, privacy and acceptable use: TifoMaker',
-            description:
-              'How TifoMaker handles your designs and your data, what you can publish, and how to get in touch.',
-            path: '/legal',
-          }),
-        ));
+      const legalShell = htmlShell('/legal', legalHtml, {
+        title: 'Terms, privacy and acceptable use: TifoMaker',
+        description:
+          'How TifoMaker handles your designs and your data, what you can publish, and how to get in touch.',
+      });
+      app.get('/legal', async (req, reply) => legalShell(req, reply));
     } catch {
       /* legal page optional in API-only builds */
     }
@@ -4779,7 +5052,27 @@ export async function buildApp(
       // private. Pages (.html) and scripts outside /assets keep max-age=0: a
       // page must never be served from a cache, and a script must not run a
       // day late.
-      setHeaders: (reply, filePath) => {
+      //
+      // Compressed copies made at build time (performance plan P2.3): the
+      // build writes `x.js.br` and `x.js.gz` next to `x.js` (brotli 11, gzip
+      // 9, only where smaller), and the plugin sends the one the browser
+      // accepts, with Content-Encoding, the original's Content-Type, the
+      // copy's own Content-Length and ETag, and `Vary: Accept-Encoding` on
+      // every answer, the uncompressed one included. Nothing is compressed
+      // while a request waits, which on this one event loop would be a CPU
+      // lever for anyone (brotli 11 is slow by design). They are public files
+      // with no secret in them, so BREACH has nothing to work with; the
+      // responses that do carry a secret say no-transform (SECURITY-CHECKS.md).
+      //
+      // The copies are never routes of their own (globIgnore): /x.js.br is a
+      // 404, and so is any path whose original is not there, so the routes
+      // are exactly the files the build made, as before; the /assets rate
+      // limit bucket is decided by those same routes. A copy's headers are
+      // its original's (setHeaders is told the copy's path).
+      preCompressed: true,
+      globIgnore: ['**/*.br', '**/*.gz'],
+      setHeaders: (reply, sentPath) => {
+        const filePath = sentPath.replace(PRECOMPRESSED, '');
         if (filePath.startsWith(hashedAssets)) reply.header('cache-control', 'public, max-age=31536000, immutable');
         else if (PUBLIC_PICTURE.test(filePath) || filePath === robotsTxt) reply.header('cache-control', 'public, max-age=3600, stale-while-revalidate=86400');
       },

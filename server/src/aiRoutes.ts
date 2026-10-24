@@ -223,8 +223,12 @@ export interface AiRouteDeps {
   freeLimit: number;
   /** When true, AI is free for any signed-in, email-verified user (no per-account limit). */
   freeForAll: boolean;
-  /** Email-verification + paid state for a user, used to gate AI. null ⇒ unknown user. */
-  userState: (userId: string) => Promise<{ emailVerified: boolean; isPro: boolean } | null>;
+  /**
+   * Email-verification + paid state for a user, used to gate AI. null ⇒ unknown user.
+   * With the request, the caller's own state comes from the request's session
+   * read rather than another query (performance plan P2.17).
+   */
+  userState: (userId: string, req?: FastifyRequest) => Promise<{ emailVerified: boolean; isPro: boolean } | null>;
   /** Per-route rate-limit options ({config:{rateLimit}}) when limiting is on. */
   routeConfig?: object;
   /** Tighter limit for the password-guessing surface. */
@@ -388,7 +392,7 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
     if (!userId) return { kind: 'deny', status: 401, error: 'Sign in to use the AI Designer.', reason: 'signin' };
     // Admins are metered like everyone for now (no auto-unlimited AI); the /admin
     // dashboard is separate. Only the unlock token and paid (pro) accounts are unlimited.
-    const st = await deps.userState(userId);
+    const st = await deps.userState(userId, req);
     if (!st) return { kind: 'deny', status: 401, error: 'Sign in to use the AI Designer.', reason: 'signin' };
     if (!st.emailVerified) {
       return { kind: 'deny', status: 403, error: 'Verify your email to use the AI Designer.', reason: 'verify' };
@@ -507,7 +511,9 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
     const secure = req.protocol === 'https' || process.env.NODE_ENV === 'production';
     void reply.header('set-cookie',
       `tm_admin=${encodeURIComponent(token)}; Path=/; Max-Age=${Math.floor(UNLOCK_TTL_MS / 1000)}; HttpOnly; SameSite=Strict${secure ? '; Secure' : ''}`);
-    return { token, expiresAt: new Date(exp).toISOString() };
+    // A secret in the body and in a cookie: never stored, never rewritten or
+    // recompressed on the way (performance plan P2.3; SECURITY-CHECKS.md).
+    return reply.header('cache-control', 'no-store, no-transform').send({ token, expiresAt: new Date(exp).toISOString() });
   });
 
   // Signing out has to clear the cookie too, or the dashboard module keeps

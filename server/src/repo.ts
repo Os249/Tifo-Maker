@@ -1,4 +1,5 @@
 /** Storage layer contracts. Routes own gzip/diff/auth logic; repos own rows. */
+import { createHash } from 'node:crypto';
 
 import type { AiFailReason } from './aiFailure';
 export type { AiFailReason } from './aiFailure';
@@ -245,7 +246,34 @@ export interface DesignRepository {
    * not be able to take a tifo down with it.
    */
   getScene(id: string): Promise<Buffer | null>;
+  /**
+   * Store a scene, with the sha-256 of its bytes in the same write (P2.5):
+   * the anonymous view keys its stripped copy by that hash, so the hash can
+   * never describe other bytes than the ones stored.
+   */
   putScene(id: string, sceneGz: Buffer): Promise<boolean>;
+  /**
+   * Who may see a design's scene, and the stored hash of it, without reading
+   * the scene (P2.5): visibility, owner and hash only. Null when there is no
+   * such design. `hash` is null for a scene stored before hashes were, or none.
+   */
+  getSceneMeta(id: string): Promise<SceneMeta | null>;
+  /** The scene and its stored hash, read together (P2.5). Null when it has none. */
+  getSceneRow(id: string): Promise<{ gz: Buffer; hash: string | null } | null>;
+  /**
+   * Who may see a design's thumbnail and the stored sha-256 of the picture,
+   * without the picture (P2.4). Null when there is no such design.
+   */
+  getThumbnailMeta(id: string): Promise<ThumbnailMeta | null>;
+  /** The same with the picture, in one read (P2.4). */
+  getThumbnailRow(id: string): Promise<(ThumbnailMeta & { png: Buffer | null }) | null>;
+  /**
+   * Fill in the hashes of pictures and scenes stored before hashes were, from
+   * the stored bytes themselves. With an id, that one design (a view found it
+   * missing); without, every row, in small batches (at boot, on the
+   * maintenance pool). Returns how many were filled.
+   */
+  backfillHashes(id?: string): Promise<number>;
   appendRevision(
     id: string,
     diff: DiffBytes,
@@ -303,6 +331,27 @@ export interface DesignRepository {
   /** Fetch the branded social-card image bytes, or null. */
   getOgImage(id: string): Promise<Buffer | null>;
 }
+
+/** What the thumbnail route needs before it decides to send a picture (P2.4). */
+export interface ThumbnailMeta {
+  isPublic: boolean;
+  ownerId: string | null;
+  /** sha-256 (hex) of the stored picture; null when unknown (stored before hashes) or none. */
+  hash: string | null;
+  hasThumbnail: boolean;
+}
+
+/** What the scene route needs before it decides to read a scene (P2.5). */
+export interface SceneMeta {
+  isPublic: boolean;
+  ownerId: string | null;
+  /** sha-256 (hex) of the stored scene; null when unknown or there is none. */
+  hash: string | null;
+  hasScene: boolean;
+}
+
+/** sha-256 of stored bytes, as hex: the same text Postgres's encode(sha256(x), 'hex') gives. */
+export const contentHash = (bytes: Uint8Array): string => createHash('sha256').update(bytes).digest('hex');
 
 export interface ShareStats {
   views: number;
@@ -506,6 +555,15 @@ export interface AuthRepository {
   createToken(userId: string, tokenHash: string, expiresAt: Date): Promise<void>;
   /** Returns the user id for a live (unexpired) token hash. */
   getUserIdByToken(tokenHash: string): Promise<string | null>;
+  /**
+   * The account a live session token opens, token and account read together
+   * in one statement (performance plan P2.17): the token joined to its user,
+   * `expires_at > now()`. Null for an unknown, expired or revoked token, and
+   * for a deleted account, whose tokens go with it. The routes keep the
+   * answer for the one request that asked and never longer, so a sign-out, a
+   * password change or a deletion is refused on the very next request.
+   */
+  getSessionUser(tokenHash: string): Promise<UserRow | null>;
   deleteToken(tokenHash: string): Promise<void>;
   /** Store a single-use email/reset token (hashed), with a purpose + expiry. */
   createEmailToken(userId: string, tokenHash: string, purpose: string, expiresAt: Date): Promise<void>;

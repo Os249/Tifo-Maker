@@ -10,15 +10,15 @@ import { MemorySocialRepository } from './memorySocial';
 import { MemoryStadiumRepository, PgStadiumRepository } from './stadiumRepo';
 import { MemoryDailyFeatureRepository, PgDailyFeatureRepository, type DailyFeatureRepository } from './featureRepo';
 import { MemoryAdminStatsRepository, PgAdminStatsRepository } from './statsRepo';
-import { MemoryTrafficRepository, PgTrafficRepository, type TrafficRepository } from './trafficRepo';
+import { BatchedTrafficRepository, MemoryTrafficRepository, PgTrafficRepository, type TrafficRepository } from './trafficRepo';
 import { MemoryFeedbackRepository, PgFeedbackRepository, type FeedbackRepository } from './feedbackRepo';
-import { buildApp, TRASH_DAYS, type TemplateInfo } from './routes';
+import { buildApp, ORIGIN_SECRET_MIN, TRASH_DAYS, type TemplateInfo } from './routes';
 import { createEmailSender } from './email';
 import { seedShowcase, seedTemplates } from './seedTemplates';
 import { EVENTS_RETENTION_DAYS, type AuthRepository, type DesignRepository } from './repo';
 import { envNum } from './env';
 import { logConfigWarnings, logProviderSetup } from './preflight';
-import { applyForeignKeyIndexes, schemaStatements } from './schema';
+import { applyForeignKeyIndexes, HASH_RECOMPUTE_TASK, hashTrustAfterBoot, SchemaLedger, schemaStatements, type SchemaReport } from './schema';
 import { SocMonitor, socKeyFrom } from './soc';
 import { createPool } from './db';
 import { MemorySocRepository, PgSocRepository } from './socRepo';
@@ -54,25 +54,41 @@ function resolveDist(): string | undefined {
   return undefined;
 }
 
-async function applySchema(pool: pg.Pool): Promise<void> {
-  const schemaPath = join(__dirname, '../schema.sql');
-  const sql = readFileSync(schemaPath, 'utf8');
-  // Run statements individually so one failing statement on a pre-existing
-  // database can't abort the rest. The splitter is in schema.ts so a test can
-  // apply the file exactly the way a deploy does — see the Postgres block in
-  // server.test.mts, which forces password_hash back to NOT NULL and checks the
-  // migration takes.
-  const statements = schemaStatements(sql);
-  for (const stmt of statements) {
-    try {
-      await pool.query(stmt);
-    } catch (e) {
-      console.error('[tifo] schema statement skipped:', (e as Error).message);
-    }
+/**
+ * schema.sql, through the schema ledger (schema.ts, performance plan P2.15):
+ * what a previous boot applied is skipped, what is already in the database is
+ * recorded without being run, and the rest runs one statement at a time with
+ * a 3 s lock timeout, so a deploy never queues behind a long lock while the
+ * old instance is serving. One that fails is logged and tried again at the
+ * next boot; a security one not in force shows on the posture panel. The
+ * splitter is in schema.ts so a test can apply the file exactly the way a
+ * deploy does (the Postgres block in server.test.mts).
+ */
+async function applySchema(pool: pg.Pool): Promise<{ ledger: SchemaLedger; report: SchemaReport }> {
+  const sql = readFileSync(join(__dirname, '../schema.sql'), 'utf8');
+  const ledger = new SchemaLedger(pool);
+  const started = Date.now();
+  await ledger.load();
+  const report = await ledger.applyAll(schemaStatements(sql));
+  console.log(
+    `[tifo] schema: ${report.applied} applied, ${report.skipped + report.present} already in place` +
+      (report.failed.length ? `, ${report.failed.length} not applied (tried again at the next boot)` : '') +
+      ` (${Date.now() - started} ms)`,
+  );
+  if (report.pendingSecurity.length) {
+    console.error(`[tifo] SECURITY: not in force in the database: ${report.pendingSecurity.map((p) => p.id).join(', ')}. See /admin#security.`);
   }
+  return { ledger, report };
 }
 
 async function main(): Promise<void> {
+  // The origin lock (routes.ts, performance plan P2.2) is only as good as its
+  // secret: a short one is refused here, before anything is served.
+  const originSecret = process.env.ORIGIN_SECRET?.trim();
+  if (originSecret && originSecret.length < ORIGIN_SECRET_MIN) {
+    console.error(`[tifo] FATAL: ORIGIN_SECRET is ${originSecret.length} characters; it must be at least ${ORIGIN_SECRET_MIN} random characters (openssl rand -hex 32). Unset it to run without the origin lock.`);
+    process.exit(1);
+  }
   const staticDir = resolveDist();
   if (!staticDir) {
     console.warn('[tifo] no dist/ found: serving API only (run `npm run build` first to serve the app)');
@@ -95,19 +111,27 @@ async function main(): Promise<void> {
     publicUrl: process.env.PUBLIC_URL,
   };
   let maintenancePool: pg.Pool | null = null;
+  // Page views wait here and are written every five seconds (performance plan
+  // P2.18); the last of them are written when the server is stopped (below).
+  let visitBuffer: BatchedTrafficRepository | null = null;
+  // Slow, non-request work that waits for the port to open (P2.15): the
+  // purges, and the hashes of pictures stored before hashes were (P2.4).
+  const afterListen: (() => Promise<unknown>)[] = [];
   if (process.env.DATABASE_URL) {
     // Requests on one pool, slow non-request work on a small one of its own
     // (server/src/db.ts, performance plan P1.26).
     const pool = createPool(process.env.DATABASE_URL, 'app');
     const maint = createPool(process.env.DATABASE_URL, 'maintenance');
     maintenancePool = maint;
-    await applySchema(maint);
+    const { ledger, report: schemaReport } = await applySchema(maint);
+    // The repositories' own tables go through the same ledger.
+    const ddl = (sql: string): Promise<unknown> => ledger.run(sql);
     // Community stadium submissions — best-effort table init so a schema slip here
     // can never block server boot; on failure the feature is simply disabled.
     let stadiums: PgStadiumRepository | undefined;
     try {
       const s = new PgStadiumRepository(pool, maint);
-      await s.init();
+      await s.init(ddl);
       stadiums = s;
     } catch (e) {
       console.error('[tifo] community_stadiums init failed: submissions disabled:', e);
@@ -117,19 +141,20 @@ async function main(): Promise<void> {
     let traffic: TrafficRepository | undefined;
     try {
       const t = new PgTrafficRepository(pool, maint);
-      await t.init();
-      await t.purge();
+      await t.init(ddl);
+      afterListen.push(() => t.purge());
       // Daily minimisation: strip visitor keys past the anonymisation window and drop
       // rows past retention. unref() so this timer never holds the process open.
       setInterval(() => void t.purge(), 24 * 60 * 60 * 1000).unref();
-      traffic = t;
+      visitBuffer = new BatchedTrafficRepository(t).start();
+      traffic = visitBuffer;
     } catch (e) {
       console.error('[tifo] visits init failed: traffic sources disabled:', e);
     }
     let feedback: FeedbackRepository | undefined;
     try {
       const fb = new PgFeedbackRepository(pool, maint);
-      await fb.init();
+      await fb.init(ddl);
       feedback = fb;
     } catch (e) {
       console.error('[tifo] feedback init failed: in-product reports disabled:', e);
@@ -139,7 +164,7 @@ async function main(): Promise<void> {
     let featured: DailyFeatureRepository | undefined;
     try {
       const df = new PgDailyFeatureRepository(pool, maint);
-      await df.init();
+      await df.init(ddl);
       featured = df;
     } catch (e) {
       console.error('[tifo] daily_features init failed: tifo of the day disabled:', e);
@@ -149,8 +174,8 @@ async function main(): Promise<void> {
     // not kept, and the Security tab shows the storage error.
     const socRepo = new PgSocRepository(pool, maint);
     try {
-      await socRepo.init();
-      await socRepo.purge();
+      await socRepo.init(ddl);
+      afterListen.push(() => socRepo.purge());
       // Thirty days, then gone. unref() so the timer never holds the process open.
       setInterval(() => void socRepo.purge().catch(() => {}), 6 * 60 * 60 * 1000).unref();
     } catch (e) {
@@ -162,9 +187,29 @@ async function main(): Promise<void> {
     const events = new PgEventsRepository(pool, maint);
     const pruneEvents = (): Promise<unknown> =>
       events.purge(new Date(Date.now() - EVENTS_RETENTION_DAYS * 24 * 60 * 60 * 1000)).catch((e) => console.error('[tifo] events purge failed:', e));
-    await pruneEvents();
+    afterListen.push(pruneEvents);
     setInterval(() => void pruneEvents(), 24 * 60 * 60 * 1000).unref();
     const pgDesigns = new PgDesignRepository(pool, maint);
+    // The stored content hashes decide the thumbnail 304 and the anonymous
+    // scene's kept strip (P2.4, P2.5). They are trusted only while the
+    // database's own hash triggers are in force and every hash stored before
+    // them has been recomputed from its bytes (stage 2 review): until then the
+    // routes hash the bytes they read instead. A boot that had to make or
+    // re-enable a trigger recomputes again (hashTrustAfterBoot). The recompute
+    // runs after listen, and is recorded in the schema ledger when done, so a
+    // boot that stops halfway does it again.
+    const hashTrust = await hashTrustAfterBoot(ledger, schemaReport);
+    let hashesTrusted = hashTrust.trusted;
+    if (!hashTrust.inForce) {
+      console.error('[tifo] SECURITY: the content-hash triggers are not in force; stored hashes are not trusted until a boot applies them.');
+    }
+    afterListen.push(async () => {
+      if (!hashTrust.recompute) return;
+      const n = await pgDesigns.backfillHashes();
+      await ledger.mark(HASH_RECOMPUTE_TASK);
+      hashesTrusted = true;
+      console.log(`[tifo] content hashes: recomputed from the stored bytes (${n} corrected); trusted from now on`);
+    });
     const pgAuth = new PgAuthRepository(pool, maint);
     seedRepos = { designs: pgDesigns, auth: pgAuth };
     app = await buildApp(pgDesigns, pgAuth, templates, {
@@ -191,6 +236,8 @@ async function main(): Promise<void> {
       verifyResendCooldownMs: envNum('VERIFY_RESEND_COOLDOWN_MS', 60_000, 0, 3_600_000),
       soc,
       database: 'postgres',
+      schemaStatus: () => ({ pendingSecurity: schemaReport.pendingSecurity, failed: schemaReport.failed.length }),
+      storedHashesTrusted: () => hashesTrusted,
     });
   } else {
     if (isProd) {
@@ -217,7 +264,7 @@ async function main(): Promise<void> {
       aiFreeLimit: envNum('AI_FREE_LIMIT', 10, 0), // premium designs per hour
       stadiums: new MemoryStadiumRepository(),
       stats: new MemoryAdminStatsRepository(designs),
-      traffic: new MemoryTrafficRepository(),
+      traffic: (visitBuffer = new BatchedTrafficRepository(new MemoryTrafficRepository()).start()),
       feedback: new MemoryFeedbackRepository(),
       featured: new MemoryDailyFeatureRepository(),
       feedbackTo: process.env.FEEDBACK_TO,
@@ -244,9 +291,12 @@ async function main(): Promise<void> {
   // log are lost. Close properly, but never hang a deploy waiting for it.
   for (const signal of ['SIGTERM', 'SIGINT'] as const) {
     process.once(signal, () => {
-      console.log(`[tifo] ${signal}: closing (in-flight requests, queued email, security log)`);
+      console.log(`[tifo] ${signal}: closing (in-flight requests, queued email, security log, page views)`);
       setTimeout(() => process.exit(0), 10_000).unref();
-      app.close().then(() => process.exit(0), () => process.exit(0));
+      // The requests first (their page views join the buffer as they finish),
+      // then one last write of the buffered page views, at most 2 s of it.
+      const lastVisits = (): Promise<void> => visitBuffer?.close(2_000) ?? Promise.resolve();
+      app.close().then(lastVisits, lastVisits).then(() => process.exit(0), () => process.exit(0));
     });
   }
   console.log(
@@ -254,6 +304,13 @@ async function main(): Promise<void> {
       `${staticDir ? 'serving app + api' : 'api only'}, ` +
       `${templates.map((t) => `${t.id}=${t.seatCount}`).join(', ')})`,
   );
+
+  // The boot purges and backfills: after listen, one after another, on the
+  // maintenance pool, never awaited (P2.15). Each is best-effort and runs again
+  // on its own timer or at the next boot.
+  void (async () => {
+    for (const task of afterListen) await task().catch((e) => console.error('[tifo] boot task failed:', (e as Error).message));
+  })();
 
   // The foreign-key indexes (schema.ts, performance plan P1.25): after listen,
   // not awaited, on the maintenance pool. Built CONCURRENTLY, so the site

@@ -28,12 +28,30 @@ export interface QualitySettings {
   envIntensity: number;
 }
 
+/**
+ * High and Ultra draw the scene into the post pass's own buffers, which have
+ * no multisampling, so MSAA on the screen's buffer only ever smoothed the one
+ * full-screen quad the last pass draws, and gave the picture nothing: the
+ * image is the same without it (performance plan P2.12). It was the biggest
+ * buffer Match Day held — about 124 MB at a pixel ratio of 2. Nothing is
+ * drawn at more than 1.5x pixels either: at 2x a High frame is 78% more
+ * pixels than at 1.5x for a difference a phone screen does not show.
+ */
 export const QUALITY_PRESETS: Record<QualityTier, QualitySettings> = {
   low: { tier: 'low', shadows: false, maxPixelRatio: 1, antialias: false, fog: false, shadowMapSize: 0, ibl: false, envIntensity: 0 },
   medium: { tier: 'medium', shadows: false, maxPixelRatio: 1.5, antialias: true, fog: true, shadowMapSize: 0, ibl: true, envIntensity: 0.22 },
-  high: { tier: 'high', shadows: true, maxPixelRatio: 2, antialias: true, fog: true, shadowMapSize: 2048, ibl: true, envIntensity: 0.45 },
-  ultra: { tier: 'ultra', shadows: true, maxPixelRatio: 2, antialias: true, fog: true, shadowMapSize: 4096, ibl: true, envIntensity: 0.55 },
+  high: { tier: 'high', shadows: true, maxPixelRatio: 1.5, antialias: false, fog: true, shadowMapSize: 2048, ibl: true, envIntensity: 0.45 },
+  ultra: { tier: 'ultra', shadows: true, maxPixelRatio: 1.5, antialias: false, fog: true, shadowMapSize: 4096, ibl: true, envIntensity: 0.55 },
 };
+
+/**
+ * The most frames a second a tier draws while something moves (performance
+ * plan P2.12): Medium and Low are phones and integrated graphics, where 30
+ * steady frames are worth more than 60 that cannot be held. 0 is no cap.
+ */
+export function frameCap(tier: QualityTier): number {
+  return tier === 'medium' || tier === 'low' ? 30 : 0;
+}
 
 export const ALL_TIERS: QualityTier[] = ['low', 'medium', 'high', 'ultra'];
 

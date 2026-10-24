@@ -7,6 +7,7 @@ import {
   Sprite,
   Text,
   Texture,
+  Ticker,
 } from 'pixi.js';
 import type { SeatMap, ToolId } from '../core/types';
 import { ObjectOverlay, cursorFor } from './objectOverlay';
@@ -26,6 +27,18 @@ import type { VenueMark } from '../core/venueDetails';
  * draw call. Positions are static (uploaded once); only color is dynamic.
  * Painting writes palette indices into the DesignStore; the store's dirty
  * callback updates per-particle tints. React/DOM never touches any of this.
+ *
+ * It draws only when something changed (performance plan P2.10). Pixi's own
+ * loop drew every frame whether or not anything had moved: idle on the
+ * Bernabeu that was a render and a 1.3 MB colour upload per frame, about
+ * 26 MB and 170 ms of main thread every 5 s on this machine. Now every
+ * change to what the canvas shows goes through requestRender(), which draws
+ * once on the next frame however many changes arrived before it: a stroke,
+ * a fill, a selection, a pan or zoom, a resize, a layer moving, the stamp
+ * ghost, the venue and stand labels, undo and redo (they arrive as store
+ * changes), and each frame of a reveal. A change that misses it would show
+ * late, so the methods below that change the scene ask for it themselves,
+ * and nothing outside this class and its overlay touches the scene.
  */
 export class Editor {
   readonly app: Application;
@@ -107,6 +120,13 @@ export class Editor {
   private lastX = 0;
   private lastY = 0;
 
+  /** The frame a render is waiting for, or 0 (performance plan P2.10). */
+  private renderFrameId = 0;
+  /** The 2D view is on screen. While it is not, nothing is drawn; it is drawn when it comes back. */
+  private shown = true;
+  /** Renders drawn so far: the performance harness and the browser suites read it. */
+  rendersDrawn = 0;
+
   private constructor(
     private readonly map: SeatMap,
     private readonly store: DesignStore,
@@ -146,13 +166,17 @@ export class Editor {
     this.fitToView();
     this.bindPointer();
 
+    // Every change to the seats arrives here, undo and redo included.
     store.onDirty((indices) => {
       if (indices === 'all') {
         for (let i = 0; i < map.count; i++) this.particles[i].tint = this.tintFor(store.cells[i]);
       } else {
         for (const i of indices) this.particles[i].tint = this.tintFor(store.cells[i]);
       }
+      this.requestRender();
     });
+    // A lost context comes back empty: draw it again.
+    app.canvas.addEventListener('webglcontextrestored', () => this.requestRender());
   }
 
   static async create(canvasHost: HTMLElement, map: SeatMap, store: DesignStore): Promise<Editor> {
@@ -163,11 +187,60 @@ export class Editor {
       antialias: false,
       autoDensity: true,
       resolution: Math.min(2, window.devicePixelRatio || 1),
+      // No loop: the editor draws on demand (requestRender, performance plan P2.10).
+      autoStart: false,
     });
+    // Pixi's system ticker kept a frame loop of its own going for its event
+    // ticker and its housekeeping, though nothing here is a Pixi-interactive
+    // object (the editor handles its own pointers). It is stopped, and its
+    // housekeeping (the texture and renderable clean-up) runs on the frames
+    // the editor does draw, in renderFrame. Only the editor uses Pixi on
+    // this page.
+    Ticker.system.autoStart = false;
+    Ticker.system.stop();
     canvasHost.appendChild(app.canvas);
     const editor = new Editor(map, store, app);
     editor.watchHost(canvasHost);
     return editor;
+  }
+
+  /**
+   * Draw the scene on the next frame (performance plan P2.10). Any number of
+   * calls before that frame make one render. Cheap: call it after any change
+   * to what the canvas shows.
+   */
+  requestRender(): void {
+    if (!this.shown || this.renderFrameId) return;
+    this.renderFrameId = requestAnimationFrame(this.renderFrame);
+  }
+
+  private readonly renderFrame = (): void => {
+    this.renderFrameId = 0;
+    if (!this.shown) return;
+    // Pixi's scheduled housekeeping, which its stopped system ticker would
+    // have run: due tasks run now, on a frame that is drawn anyway.
+    Ticker.system.update();
+    this.app.render();
+    this.rendersDrawn++;
+  };
+
+  /**
+   * The 2D view went off screen (the Stadium or the Banner view) or came back.
+   * Hidden, nothing is drawn; shown again, it is drawn at once with whatever
+   * changed meanwhile (an AI design, an undo from the other view).
+   */
+  setShown(shown: boolean): void {
+    if (this.shown === shown) return;
+    this.shown = shown;
+    if (!shown && this.renderFrameId) {
+      cancelAnimationFrame(this.renderFrameId);
+      this.renderFrameId = 0;
+    }
+    if (shown) this.requestRender();
+  }
+
+  get isShown(): boolean {
+    return this.shown;
   }
 
   /**
@@ -225,6 +298,7 @@ export class Editor {
       this.particles[i].tint = this.tintFor(this.store.cells[i]);
     }
     this.applySelectionHighlight();
+    this.requestRender();
   }
 
   // ---- magic-wand region selection (select tool, on painted/baked seats) ----
@@ -324,6 +398,9 @@ export class Editor {
       const b = Math.round(pb + (fb - pb) * a);
       this.particles[i].tint = (r << 16) | (g << 8) | b;
     }
+    // A playing reveal calls this every frame, so it keeps asking for frames
+    // while it plays and stops when it stops.
+    this.requestRender();
   }
 
   /**
@@ -335,6 +412,7 @@ export class Editor {
     if (this.stampPreview) {
       this.stampPreview.destroy({ texture: true, textureSource: true });
       this.stampPreview = null;
+      this.requestRender();
     }
     if (!source) return;
     // ownTexture, never Texture.from: this ghost is destroyed the moment the
@@ -361,17 +439,22 @@ export class Editor {
     if (this.stampPreview) {
       this.stampPreview.width = this.stampPreviewW;
       this.stampPreview.height = this.stampPreviewH;
+      this.requestRender();
     }
   }
 
   refreshStampPreviewTint(): void {
     if (this.stampPreview) {
       this.stampPreview.tint = this.stampPreviewTinted ? this.tintFor(this.colorIndex) : 0xffffff;
+      this.requestRender();
     }
   }
 
   hideStampPreview(): void {
-    if (this.stampPreview) this.stampPreview.visible = false;
+    if (this.stampPreview?.visible) {
+      this.stampPreview.visible = false;
+      this.requestRender();
+    }
   }
 
   /** Expand a dirty set with halfway-line mirrors, painted at the same value. */
@@ -394,9 +477,11 @@ export class Editor {
     }
     const warn = 0xff2d78;
     for (const i of indices) this.particles[i].tint = warn;
+    this.requestRender();
     this.flashTimer = setTimeout(() => {
       this.flashTimer = null;
       for (const i of indices) this.particles[i].tint = this.tintFor(this.store.cells[i]);
+      this.requestRender();
     }, durationMs);
   }
 
@@ -409,6 +494,7 @@ export class Editor {
   setVenueMarks(marks: VenueMark[], labels: Record<VenueMark['kind'], string>): void {
     this.venueLayer.removeChildren().forEach((c) => c.destroy());
     this.venueLabels = [];
+    this.requestRender();
     if (marks.length === 0) return;
     const COLOURS: Record<VenueMark['kind'], number> = { gold: 0xe6bd4c, silver: 0xcfd4dc, vip: 0xf4e4bf, lane: 0xff5a4f };
     const g = new Graphics();
@@ -453,6 +539,7 @@ export class Editor {
   setStandLabels(marks: { x0: number; x1: number; text: string }[]): void {
     this.standLayer.removeChildren().forEach((c) => c.destroy());
     this.standLabels = [];
+    this.requestRender();
     if (marks.length === 0) return;
     const y = this.map.bounds.maxY + 10;
     const g = new Graphics();
@@ -497,6 +584,7 @@ export class Editor {
     const g = this.gridOverlay;
     g.clear();
     g.visible = visible;
+    this.requestRender();
     if (!visible) return;
     const { minY, maxY } = this.map.bounds;
     if (this.blockGuides) {
@@ -558,6 +646,7 @@ export class Editor {
   emitView(): void {
     this.scaleVenueLabels();
     this.objectOverlay?.sync();
+    this.requestRender();
     for (const fn of this.viewListeners) fn();
     if (!this.onViewChange) return;
     const r = this.getViewportRect();
@@ -613,6 +702,7 @@ export class Editor {
   /** Mount the floating object layer's overlay into the world container. */
   attachObjectLayer(layer: ObjectLayer, wrapWidth: number): ObjectOverlay {
     const overlay = new ObjectOverlay(layer, () => this.world.scale.x, wrapWidth, () => this.snapTargets(wrapWidth), this.map.bounds);
+    overlay.onRender = () => this.requestRender();
     this.objectOverlay = overlay;
     this.layerRef = layer;
     this.world.addChild(overlay.root);
@@ -928,6 +1018,7 @@ export class Editor {
         const [tx, ty] = this.toWorld(e);
         this.stampPreview.position.set(tx - this.stampPreviewW / 2, ty - this.stampPreviewH / 2);
         this.stampPreview.visible = true;
+        this.requestRender();
         return;
       }
       if (this.onHoverSeat && !this.painting) {

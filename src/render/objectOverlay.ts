@@ -71,6 +71,12 @@ export class ObjectOverlay {
   private guides: { xs: number[]; ys: number[] } = { xs: [], ys: [] };
   /** Called when a gesture starts and ends (the floating action bar steps aside). */
   onGesture: ((active: boolean) => void) | null = null;
+  /**
+   * Called whenever what this layer draws changed. The editor draws on demand
+   * (performance plan P2.10), so a frame, a handle or a guide that moved has
+   * to say so.
+   */
+  onRender: (() => void) | null = null;
 
   constructor(
     private readonly layer: ObjectLayer,
@@ -202,6 +208,7 @@ export class ObjectOverlay {
     } else {
       this.angleText.visible = false;
     }
+    this.onRender?.();
   }
 
   // ---- hit testing ------------------------------------------------------------------
@@ -418,6 +425,7 @@ export class ObjectOverlay {
 
   setVisible(v: boolean): void {
     this.root.visible = v;
+    this.onRender?.();
   }
 }
 

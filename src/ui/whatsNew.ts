@@ -126,16 +126,39 @@ function show(opts: WhatsNewOptions): void {
     arrow.hidden = false;
     arrow.style.left = `${Math.max(18, Math.min(mid - left, cw - 18))}px`;
   };
+  // The tab moves while the card is up whenever the header around it changes
+  // size: the save state appears beside Save after the first autosave (which,
+  // since autosave waits for a pause, can come after the card), the account
+  // controls arrive, the title is renamed. Follow it without a loop: watch the
+  // tab, every box it sits in below <body> and their other children, since
+  // one of those changing size is what moves it. place() moves only the card,
+  // which is fixed and not watched, so this cannot feed itself.
+  const follow = typeof ResizeObserver === 'function' ? new ResizeObserver(() => place()) : null;
+  const track = (): void => {
+    if (!follow) return;
+    follow.disconnect();
+    for (let el = anchor(); el && el.parentElement && el !== document.body; el = el.parentElement) {
+      follow.observe(el);
+      if (el.parentElement === document.body) break;
+      for (const sib of Array.from(el.parentElement.children)) if (sib !== el && sib !== card) follow.observe(sib);
+    }
+  };
+  const onResize = (): void => {
+    place();
+    track(); // the phone pill and the header tab swap at the breakpoint
+  };
   place();
   requestAnimationFrame(place);
-  window.addEventListener('resize', place);
+  track();
+  window.addEventListener('resize', onResize);
 
   let open = true;
   const close = (): void => {
     if (!open) return;
     open = false;
     markSeen();
-    window.removeEventListener('resize', place);
+    follow?.disconnect();
+    window.removeEventListener('resize', onResize);
     document.removeEventListener('keydown', onKey);
     document.removeEventListener('tifo:view', onView);
     document.removeEventListener('tifo:news-close', close);

@@ -101,7 +101,17 @@ async function drawOn(page, pts) {
   await page.waitForTimeout(220);
 }
 
-const storedBanner = (page) =>
+/**
+ * The banners as this browser stored them.
+ *
+ * A banner is written with the tifo's draft (core/draft.ts): 1.5 s after the
+ * last change, at most 6 s after the first, never in the middle of a gesture,
+ * and at once when the page is left or hidden or Save is pressed (performance
+ * plan P2.11). It used to have a 600 ms timer of its own. So a check of what a
+ * change stored waits for that write, `until` what is stored shows the change,
+ * for longer than the longest wait, and then judges whatever is there.
+ */
+const readBanner = (page) =>
   page.evaluate(() => {
     try {
       return JSON.parse(localStorage.getItem('tifo_proj_' + sessionStorage.getItem('e2e_local') + '_banners') || 'null');
@@ -109,6 +119,18 @@ const storedBanner = (page) =>
       return null;
     }
   });
+const storedBanner = async (page, until = null) => {
+  let doc = await readBanner(page);
+  const t0 = Date.now();
+  while (until && !until(doc) && Date.now() - t0 < 8000) {
+    await page.waitForTimeout(150);
+    doc = await readBanner(page);
+  }
+  return doc;
+};
+/** The first banner's items as stored, once `until` holds for them (see storedBanner). */
+const storedItems = async (page, until) => (await storedBanner(page, until && ((d) => until(d?.banners?.[0]?.items ?? []))))?.banners?.[0]?.items ?? [];
+const hasKind = (kind) => (items) => items.some((i) => i.kind === kind);
 
 /**
  * Into the Banner view, and — unless told not to — make a banner there.
@@ -229,8 +251,7 @@ console.log('\n— desktop: the fourth view exists and draws —');
   check('a stroke changes real pixels', before !== after, `${before} -> ${after}`);
 
   await page.waitForTimeout(800);
-  const doc = await storedBanner(page);
-  const items = doc?.banners?.[0]?.items ?? [];
+  const items = await storedItems(page, hasKind('stroke'));
   check('the stroke is stored as a polyline, not a bitmap', items.length === 1 && items[0].kind === 'stroke', JSON.stringify(items.map((i) => i.kind)));
   check('the polyline is simplified, not every sample', items[0] && items[0].pts.length >= 4 && items[0].pts.length <= 80, `${items[0]?.pts.length} numbers`);
 
@@ -250,10 +271,9 @@ console.log('\n— desktop: the fourth view exists and draws —');
     return { x: r.x + r.width * 0.35, y: r.y + r.height * 0.6 };
   });
   await page.mouse.click(box.x, box.y);
-  // The banner store writes to localStorage on a 600ms debounce; reading at
-  // 500 was reading the state before the shape landed.
+  // Read once the shape has been written (see storedBanner).
   await page.waitForTimeout(1100);
-  const withShape = (await storedBanner(page))?.banners?.[0]?.items ?? [];
+  const withShape = await storedItems(page, hasKind('shape'));
   check('the Shape tool places on the banner', withShape.some((i) => i.kind === 'shape'), JSON.stringify(withShape.map((i) => i.kind)));
 
   // Leaving and coming back.
@@ -514,14 +534,17 @@ console.log('\n— the Banner view\'s own controls —');
   await page.mouse.click(mid.x, mid.y);
   await page.waitForTimeout(400);
   check('clicking where it was placed picks it up', await page.evaluate(() => !document.getElementById('bn-item-block').hidden));
+  // The word is stored before it is deleted, so the deletion is what is judged.
+  const placedWord = (await storedItems(page, hasKind('text'))).some((i) => i.kind === 'text');
+  check('the placed word is stored', placedWord);
   await page.mouse.move(5, 5);
   await page.keyboard.press('Delete');
   await page.waitForTimeout(900);
-  const gone = ((await storedBanner(page))?.banners?.[0]?.items ?? []).some((i) => i.kind === 'text');
+  const gone = (await storedItems(page, (items) => !hasKind('text')(items))).some((i) => i.kind === 'text');
   check('Delete takes the selected word off the banner', !gone);
   await page.keyboard.press('Control+z');
   await page.waitForTimeout(900);
-  const back = ((await storedBanner(page))?.banners?.[0]?.items ?? []).some((i) => i.kind === 'text');
+  const back = (await storedItems(page, hasKind('text'))).some((i) => i.kind === 'text');
   check('Ctrl+Z in the Banner view undoes the BANNER', back);
   // Undo everything the banner has, and then some.
   for (let i = 0; i < 12; i++) await page.keyboard.press('Control+z');
@@ -622,6 +645,8 @@ console.log('\n— "Show in stadium" —');
   await page.waitForTimeout(400);
   await page.click('#bn-del');
   await page.waitForTimeout(900);
+  // Once the deletion has been written (see storedBanner).
+  await storedBanner(page, (d) => (d?.banners ?? []).length === 0);
   const gone = await page.evaluate(() => ({
     card: document.getElementById('bn-empty')?.hidden === false,
     stored: JSON.parse(localStorage.getItem('tifo_proj_' + sessionStorage.getItem('e2e_local') + '_banners') || '{"banners":[]}').banners.length,
@@ -707,6 +732,39 @@ console.log('\n— banners belong to their tifo —');
   await ctx.close();
 }
 
+// A banner is written with the draft, a moment after the change (performance
+// plan P2.11). Leaving the page writes whatever is still waiting, at once: a
+// stroke drawn, a banner added or one deleted the instant before the tab goes
+// is never lost.
+console.log('\n— banners are kept on the way out —');
+{
+  const { ctx, page, errs } = await openApp(1400, 880, 'en');
+  await openBanner(page);
+  await drawOn(page, [[0.2, 0.5], [0.4, 0.35], [0.6, 0.55]]);
+  // No wait: straight out of the page.
+  await page.goto(B + '/favicon.svg', { waitUntil: 'load' });
+  const drawn = await readBanner(page);
+  check('a stroke drawn just before leaving is kept', (drawn?.banners?.[0]?.items ?? []).some((i) => i.kind === 'stroke'), JSON.stringify((drawn?.banners?.[0]?.items ?? []).map((i) => i.kind)));
+  await backToApp(page);
+  await openBanner(page, { make: false });
+  await page.click('#bn-add-hanging');
+  await page.waitForTimeout(300);
+  await page.goto(B + '/favicon.svg', { waitUntil: 'load' });
+  const added = await readBanner(page);
+  check('a banner added just before leaving is kept', (added?.banners ?? []).length === 2, `${(added?.banners ?? []).length} banners`);
+  await backToApp(page);
+  await openBanner(page, { make: false });
+  await page.click('#bn-del');
+  await page.waitForTimeout(300);
+  await page.click('#bn-del');
+  await page.waitForTimeout(300);
+  await page.goto(B + '/favicon.svg', { waitUntil: 'load' });
+  const deleted = await readBanner(page);
+  check('banners deleted just before leaving stay deleted', !!deleted && (deleted.banners ?? []).length === 0, JSON.stringify(deleted && (deleted.banners ?? []).length));
+  check('no page errors keeping banners on the way out', errs.length === 0, errs.join(' | '));
+  await ctx.close();
+}
+
 // Match Day's own Banners section, where East used to mean North.
 console.log('\n— Match Day moves the banner where it is told —');
 {
@@ -723,11 +781,12 @@ console.log('\n— Match Day moves the banner where it is told —');
     if (!stand) return 'no stand picker';
     stand.value = '0';
     stand.dispatchEvent(new Event('change', { bubbles: true }));
-    await new Promise((r) => setTimeout(r, 900));
-    const m = JSON.parse(localStorage.getItem('tifo_proj_' + sessionStorage.getItem('e2e_local') + '_banners') || 'null');
-    return m?.banners?.[0]?.slot?.stand;
+    return true;
   });
-  check('choosing East puts it on the East stand', east === 0, String(east));
+  // What is stored, once the move has been written (see storedBanner).
+  const eastDoc = east === true ? await storedBanner(page, (d) => d?.banners?.[0]?.slot?.stand === 0) : null;
+  const eastStand = east === true ? eastDoc?.banners?.[0]?.slot?.stand : east;
+  check('choosing East puts it on the East stand', eastStand === 0, String(eastStand));
   check('no page errors in Match Day', errs.length === 0, errs.join(' | '));
   await ctx.close();
 }
@@ -871,24 +930,26 @@ console.log('\n— signs —');
   const before = await artboardHash(page);
   await page.fill('#bn-msg', 'EAT MORE CARROTS');
   await page.waitForTimeout(1500);
-  const msgOf = async () => {
-    const st = await storedBanner(page);
-    const b = st?.banners?.[0];
-    const m = b?.items?.find((i) => i.role === 'message');
-    return { b, m };
+  /** The sign and its message as stored, once `until` holds for them (see storedBanner). */
+  const msgOf = async (until = null) => {
+    const pick = (st) => {
+      const b = st?.banners?.[0];
+      return { b, m: b?.items?.find((i) => i.role === 'message') };
+    };
+    return pick(await storedBanner(page, until && ((st) => until(pick(st)))));
   };
-  const one = await msgOf();
+  const one = await msgOf((x) => x.m?.text === 'EAT MORE CARROTS');
   check('the message is painted on the sheet', (await artboardHash(page)) !== before && one.m?.text === 'EAT MORE CARROTS', one.m?.text);
   check('and fits it', !!one.m && one.m.w <= 0.941 && one.m.h <= one.b.aspect + 1e-6 && Math.abs(one.m.cy - one.b.aspect / 2) < 1e-6, JSON.stringify(one.m && { w: one.m.w, h: one.m.h, a: one.b.aspect }));
 
   await page.selectOption('#bn-length', '25');
   await page.waitForTimeout(1200);
-  const two = await msgOf();
+  const two = await msgOf((x) => x.b?.slot?.lengthM === 25);
   check('a longer sheet keeps its height, and the words refit', two.b?.slot?.lengthM === 25 && Math.abs(two.b.aspect * 25 - 1.2) < 1e-6 && two.m.h <= two.b.aspect + 1e-6,
     JSON.stringify({ L: two.b?.slot?.lengthM, a: two.b?.aspect, h: two.m?.h }));
   await page.selectOption('#bn-height', '1.6');
   await page.waitForTimeout(1200);
-  const three = await msgOf();
+  const three = await msgOf((x) => !!x.b && Math.abs(x.b.aspect * 25 - 1.6) < 1e-6);
   check('a taller one keeps its length', Math.abs(three.b.aspect * 25 - 1.6) < 1e-6, String(three.b.aspect));
   // One undo per burst of typing, not per letter.
   await page.click('#bn-msg');
@@ -896,9 +957,12 @@ console.log('\n— signs —');
   await page.keyboard.type('!!!', { delay: 40 });
   await page.waitForTimeout(1300);
   await page.evaluate(() => document.activeElement?.blur());
+  // The burst is stored before it is undone, so the undo is what is judged.
+  check('the burst of typing is stored', (await msgOf((x) => x.m?.text === 'EAT MORE CARROTS!!!')).m?.text === 'EAT MORE CARROTS!!!');
   await page.keyboard.press('Control+z');
   await page.waitForTimeout(1200);
-  check('undo takes back a burst of typing in one step', (await msgOf()).m?.text === 'EAT MORE CARROTS', (await msgOf()).m?.text);
+  const undone = await msgOf((x) => x.m?.text === 'EAT MORE CARROTS');
+  check('undo takes back a burst of typing in one step', undone.m?.text === 'EAT MORE CARROTS', undone.m?.text);
 
   await page.selectOption('#bn-row', '-1');
   await page.waitForTimeout(900);
@@ -907,7 +971,7 @@ console.log('\n— signs —');
   await page.selectOption('#bn-row', '6');
   await page.selectOption('#bn-at', '2');
   await page.waitForTimeout(1200);
-  const four = await msgOf();
+  const four = await msgOf((x) => x.b?.slot?.row === 6 && x.b?.slot?.at === 2);
   check('the row and the place are the sign\'s', four.b.slot.row === 6 && four.b.slot.at === 2, JSON.stringify(four.b.slot));
 
   // In the stadium, where it was put.
@@ -1039,7 +1103,7 @@ console.log('\n— banner text is redrawn in the display face when it lands —'
   await page.click('.tool-rail [data-tool="select"]');
   await page.mouse.move(5, 5);
   await page.waitForTimeout(600);
-  const placed = ((await storedBanner(page))?.banners?.[0]?.items ?? []).some((i) => i.kind === 'text');
+  const placed = (await storedItems(page, hasKind('text'))).some((i) => i.kind === 'text');
   // Come back on a slow connection: the faces are held until the banner is on screen.
   hold = true;
   gate = new Promise((r) => { release = r; });

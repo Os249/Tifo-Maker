@@ -3,7 +3,7 @@ import './seat.css';
 import { initLang, t } from './ui/i18n';
 import { generateSeatMapAsync, warmHeavyWorker } from './workers/client';
 import { TEMPLATES } from './core/template';
-import { templateById } from './core/stadiumCatalog';
+import { loadTemplate } from './core/stadiumLoad';
 import { hasBlocks } from './core/blocks';
 import { DesignStore } from './core/design';
 import { loadDesign, fetchDesignTemplate } from './net/api';
@@ -65,14 +65,15 @@ async function main(): Promise<void> {
   let map: SeatMap;
   let store: DesignStore;
   let title = 'the display';
-  let tpl: ReturnType<typeof templateById> = undefined;
+  let tpl: Awaited<ReturnType<typeof loadTemplate>> = undefined;
   try {
     // One request for the design (performance plan P1.8): the answer that
     // names its stadium is the one loadDesign reads its seats from, so the
     // match-day QR page no longer waits for the same design twice.
     warmHeavyWorker();
     const info = await fetchDesignTemplate(id);
-    tpl = templateById(info.templateId) ?? TEMPLATES[0];
+    // Its own league's grounds only, not the whole catalogue (performance plan P2.7).
+    tpl = (await loadTemplate(info.templateId)) ?? TEMPLATES[0];
     map = await generateSeatMapAsync(tpl);
     store = new DesignStore(map, ['#262a33', '#1c5fd9']);
     const loaded = await loadDesign(store, id);

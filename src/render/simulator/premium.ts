@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import type { SeatMap, SeatZoneKind, StadiumTemplate } from '../../core/types';
 import { curveSampler, seatZones, ZONE_CODE, ZONE_KINDS } from '../../core/venueDetails';
+import { withoutRandom } from './merge';
 
 /**
  * Premium seating, drawn as what it is rather than as coloured cards:
@@ -30,7 +31,27 @@ export interface PremiumBuild {
   disposables: Trash[];
   /** 1 where a seat has a chair (its card is hidden while the seat is empty). */
   chairMask: Uint8Array;
+  /**
+   * Pick the armchairs' detail for a camera, before each frame (performance
+   * plan P2.13): the full chair while the nearest one is big enough on screen
+   * to show its arms, the 22-triangle one when it is a few pixels tall and
+   * the two draw nearly the same pixels. `heightPx` is the drawing buffer's height.
+   */
+  lod(camera: THREE.PerspectiveCamera, heightPx: number): void;
 }
+
+/**
+ * How tall, in pixels, the nearest armchair is when the plain one takes over:
+ * at this size an arm is a fifth of a pixel wide and the step under the
+ * cushion a fraction of one. Set by before/after stills at a fixed camera:
+ * at 10 px, and still at 6, a premium tier seen from behind the goal on a
+ * small canvas changed pixel by pixel; at 4 that view is identical, and the
+ * plain chair is only drawn for views of the whole bowl (the drone, Aerial,
+ * Full view), where it changes the odd pixel inside the premium seats.
+ */
+const FAR_CHAIR_PX = 4;
+/** The armchair's height in metres (the top of its back). */
+const CHAIR_H = 1.04;
 
 const CHAIR_COLOURS: Record<SeatZoneKind, number[]> = {
   gold: [0xb8912e, 0xc49a33, 0xa9842a],
@@ -55,6 +76,63 @@ function chairGeometry(): THREE.BufferGeometry {
   const merged = mergeGeometries(parts)!;
   for (const g of parts) g.dispose();
   return merged;
+}
+
+/**
+ * The armchair as seen from a distance, in 22 triangles instead of 60: its
+ * side profile — the seat and the back as one L, 18 triangles — pushed out
+ * across the cushion's width, with no underside (it stands on the terrace),
+ * and the tops of its arms, which are what catches the light from above.
+ * Every face is turned the way the five boxes' faces are, so it is lit the
+ * same; what it leaves out — the sides and fronts of the arms, the step
+ * under the cushion — is under a pixel at the size it is used at
+ * (FAR_CHAIR_PX).
+ */
+export function farChairGeometry(): THREE.BufferGeometry {
+  // The profile (z forward, y up), from the boxes of chairGeometry: front of
+  // the cushion, its top, the front of the back, its top, its back.
+  const prof: [number, number][] = [[0.23, 0], [0.23, 0.505], [-0.14, 0.505], [-0.14, 1.04], [-0.24, 1.04], [-0.24, 0]];
+  const hw = 0.22;
+  const pos: number[] = [];
+  const nrm: number[] = [];
+  const tri = (a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3, n: THREE.Vector3): void => {
+    // Wound to face `n` (three's front faces are anticlockwise).
+    const ok = new THREE.Vector3().crossVectors(b.clone().sub(a), c.clone().sub(a)).dot(n) > 0;
+    for (const v of ok ? [a, b, c] : [a, c, b]) {
+      pos.push(v.x, v.y, v.z);
+      nrm.push(n.x, n.y, n.z);
+    }
+  };
+  const P = (k: number, x: number): THREE.Vector3 => new THREE.Vector3(x, prof[k][1], prof[k][0]);
+  // The two sides: the L as four triangles each.
+  for (const x of [hw, -hw]) {
+    const n = new THREE.Vector3(Math.sign(x), 0, 0);
+    for (const [a, b, c] of [[0, 1, 2], [0, 2, 5], [2, 3, 4], [2, 4, 5]]) tri(P(a, x), P(b, x), P(c, x), n);
+  }
+  // The faces round the profile, the underside (5 -> 0) left out.
+  for (let k = 0; k < 5; k++) {
+    const a = prof[k];
+    const b = prof[k + 1];
+    const dz = b[0] - a[0];
+    const dy = b[1] - a[1];
+    // Outward: the profile runs clockwise seen from +x, so out is (dy, -dz) in (z, y).
+    const n = new THREE.Vector3(0, -dz, dy).normalize();
+    const a0 = P(k, -hw), a1 = P(k, hw), b0 = P(k + 1, -hw), b1 = P(k + 1, hw);
+    tri(a0, a1, b1, n);
+    tri(a0, b1, b0, n);
+  }
+  // The arms' tops, the brightest part of an armchair seen from above.
+  const up = new THREE.Vector3(0, 1, 0);
+  for (const x of [0.235, -0.235]) {
+    const a0 = new THREE.Vector3(x - 0.025, 0.665, -0.2), a1 = new THREE.Vector3(x + 0.025, 0.665, -0.2);
+    const b0 = new THREE.Vector3(x - 0.025, 0.665, 0.2), b1 = new THREE.Vector3(x + 0.025, 0.665, 0.2);
+    tri(a0, a1, b1, up);
+    tri(a0, b1, b0, up);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('normal', new THREE.Float32BufferAttribute(nrm, 3));
+  return g;
 }
 
 /** A canvas-lettered band: name in Arabic and English on a coloured strip. */
@@ -182,7 +260,7 @@ export function buildPremium(template: StadiumTemplate, map: SeatMap, shadows: b
   const trash: Trash[] = [];
   const chairMask = new Uint8Array(map.count);
   const zones = template.details?.zones ?? [];
-  if (zones.length === 0) return { object: group, disposables: trash, chairMask };
+  if (zones.length === 0) return { object: group, disposables: trash, chairMask, lod: () => {} };
 
   const codes = seatZones(map, template);
   const at = curveSampler(template);
@@ -231,6 +309,39 @@ export function buildPremium(template: StadiumTemplate, map: SeatMap, shadows: b
   chairMesh.instanceMatrix.needsUpdate = true;
   if (chairMesh.instanceColor) chairMesh.instanceColor.needsUpdate = true;
   group.add(chairMesh);
+  // The same chairs in 22 triangles for the distance (performance plan
+  // P2.13): the same instance buffers — the same places and colours, sent
+  // to the GPU once — and the same material, so the same shader. Made
+  // without drawing from Math.random (see withoutRandom), so the random
+  // textures made after it — a neighbourhood's lit windows — come out as
+  // they always did.
+  const { farGeo, farMesh } = withoutRandom(() => {
+    const g = farChairGeometry();
+    return { farGeo: g, farMesh: new THREE.InstancedMesh(g, chairMat, Math.max(1, chairs)) };
+  });
+  farMesh.instanceMatrix = chairMesh.instanceMatrix;
+  if (chairMesh.instanceColor) farMesh.instanceColor = chairMesh.instanceColor;
+  farMesh.count = chairs;
+  farMesh.frustumCulled = false;
+  farMesh.castShadow = false;
+  farMesh.receiveShadow = shadows;
+  // Visible as built: whoever draws the chairs picks one of the two each
+  // frame (lod below), and the Stadium view's merge keeps only what it sees.
+  group.add(farMesh);
+  trash.push(farGeo, { dispose: () => farMesh.dispose() });
+  // Where the chairs are, to find the nearest one to a camera.
+  const chairBox = new THREE.Box3();
+  for (let i = 0; i < map.count; i++) {
+    if (codes[i]) chairBox.expandByPoint(new THREE.Vector3(map.pos3[i * 3], map.pos3[i * 3 + 1] + CHAIR_H / 2, map.pos3[i * 3 + 2]));
+  }
+  chairBox.expandByScalar(0.5);
+  const lod = (camera: THREE.PerspectiveCamera, heightPx: number): void => {
+    const d = Math.max(0.1, chairBox.distanceToPoint(camera.position));
+    const px = (CHAIR_H * heightPx) / (2 * d * Math.tan((camera.fov * Math.PI) / 360));
+    const far = chairs > 0 && px < FAR_CHAIR_PX;
+    chairMesh.visible = !far;
+    farMesh.visible = far;
+  };
 
   // ---- per-zone seat outlines: rows, and the extreme seat of each row -------
   interface ZoneShape {
@@ -428,6 +539,6 @@ export function buildPremium(template: StadiumTemplate, map: SeatMap, shadows: b
     }
   }
 
-  return { object: group, disposables: trash, chairMask };
+  return { object: group, disposables: trash, chairMask, lod };
 }
 

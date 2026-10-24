@@ -74,6 +74,11 @@ export function buildPitchDetail(shadows: boolean): THREE.Group {
 
   const frameMat = new THREE.MeshStandardMaterial({ color: 0xf4f7f4, roughness: 0.4, metalness: 0.1, envMapIntensity: 0.8 });
   const netMat = new THREE.MeshBasicMaterial({ map: netTexture(), transparent: true, opacity: 0.55, side: THREE.DoubleSide, depthWrite: false });
+  // Every net is a flat panel, so one pass draws what two did, and the eight
+  // can be one mesh (performance plan P2.13): one white, unlit, writing no
+  // depth, they come out the same blended in any order.
+  netMat.forceSinglePass = true;
+  netMat.userData.mergeTransparent = true;
   const postGeo = new THREE.CylinderGeometry(0.08, 0.08, GH, 8);
   const barGeo = new THREE.CylinderGeometry(0.08, 0.08, GW, 8);
 

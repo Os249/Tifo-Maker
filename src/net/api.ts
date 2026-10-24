@@ -4,7 +4,10 @@ import type { FactsVote, PhotoKnown } from '../core/photoFacts';
 import type { SeatMap, StadiumTemplate } from '../core/types';
 import type { TifoSpec } from '../core/tifoSpec';
 
-import { tErr } from '../ui/i18n';
+// The server-error strings are fetched the first time a call fails, not with
+// every page that talks to the API (performance plan P2.6); every use below
+// sits after an await already.
+import { tErrLater } from '../ui/i18n';
 /**
  * Browser client for the Tifo Maker API. Cells gzip client-side with
  * CompressionStream (a 60k design is ~300 B on the wire); thumbnails are
@@ -182,7 +185,7 @@ async function expectOk(res: Response): Promise<unknown> {
     const raw = res.headers.get('retry-after');
     const after = raw === null || raw.trim() === '' ? Number.NaN : Number(raw);
     throw new ApiError(
-      body?.error ? tErr(body.error) : `${res.status} ${res.statusText}`,
+      body?.error ? await tErrLater(body.error) : `${res.status} ${res.statusText}`,
       res.status,
       Number.isFinite(after) && after >= 0 ? after : null,
     );
@@ -450,7 +453,7 @@ export async function changeUsername(username: string, adminPassword?: string): 
   });
   if (res.status === 409) {
     const body = (await res.json().catch(() => null)) as { error?: string } | null;
-    throw Object.assign(new Error(tErr(body?.error ?? 'that name is taken')), { taken: true });
+    throw Object.assign(new Error(await tErrLater(body?.error ?? 'that name is taken')), { taken: true });
   }
   const data = (await expectOk(res)) as { username: string };
   // Until a handle is chosen the server refuses designs (428); anything asked
@@ -638,9 +641,18 @@ export interface AccountProject {
  * An <img> cannot send the Authorization header, so a private design's
  * thumbnail route answers it 404. The Projects page fetches its own pictures
  * instead. Null when there is none.
+ *
+ * A private design's picture is fetched with `cache: 'no-store'` (performance
+ * plan P2.4): it is the owner's alone, the server marks it private, no-store,
+ * and the browser must not keep a copy either, whatever an older server sent.
+ * Only a picture the caller knows is public keeps the normal cache, where the
+ * server's ETag turns a repeat visit into a 304. Unknown counts as private.
  */
-export async function fetchThumbnailObjectUrl(id: string): Promise<string | null> {
-  const res = await fetch(`${API}/designs/${id}/thumbnail.png`, { headers: authHeaders(false) });
+export async function fetchThumbnailObjectUrl(id: string, opts: { isPublic?: boolean } = {}): Promise<string | null> {
+  const res = await fetch(`${API}/designs/${id}/thumbnail.png`, {
+    headers: authHeaders(false),
+    cache: opts.isPublic === true ? 'default' : 'no-store',
+  });
   if (!res.ok) return null;
   // A data: URL, not a blob: one. The Content-Security-Policy allows images
   // from 'self' and data: only, so a blob: URL is refused and the card shows
@@ -1479,7 +1491,7 @@ export async function exportDistributionPdf(
   });
   if (!res.ok) {
     const err = (await res.json().catch(() => ({ error: res.statusText }))) as { error?: string };
-    throw new Error(err.error ? tErr(err.error) : `export failed (${res.status})`);
+    throw new Error(err.error ? await tErrLater(err.error) : `export failed (${res.status})`);
   }
   return res.blob();
 }
@@ -1538,7 +1550,7 @@ export async function remixDesign(id: string, title?: string): Promise<{ id: str
   });
   if (!res.ok) {
     const e = (await res.json().catch(() => ({ error: res.statusText }))) as { error?: string };
-    throw new Error(e.error ? tErr(e.error) : `remix failed (${res.status})`);
+    throw new Error(e.error ? await tErrLater(e.error) : `remix failed (${res.status})`);
   }
   return res.json() as Promise<{ id: string }>;
 }
@@ -1574,7 +1586,7 @@ export async function addComment(designId: string, body: string, parentId: strin
   });
   if (!res.ok) {
     const e = (await res.json().catch(() => ({ error: res.statusText }))) as { error?: string };
-    throw new Error(e.error ? tErr(e.error) : `comment failed (${res.status})`);
+    throw new Error(e.error ? await tErrLater(e.error) : `comment failed (${res.status})`);
   }
   return res.json() as Promise<CommentItem>;
 }
@@ -1587,6 +1599,28 @@ export async function listNotifications(): Promise<{ unread: number; items: Noti
   const res = await fetch(`${API}/notifications`, { headers: authHeaders(false) });
   if (!res.ok) return { unread: 0, items: [] };
   return res.json() as Promise<{ unread: number; items: NotificationItem[] }>;
+}
+/**
+ * The bell's unread count, for the 60 s poll (performance plan P2.16).
+ *
+ * GET /api/notifications/unread answers `{ unread }` alone, so a poll no longer
+ * downloads the whole list (two queries and about 15 KB) only to read one
+ * number; the list is fetched when the bell is opened. A server without the
+ * route yet answers 404: the full list is asked for instead, as before, and
+ * for the rest of this page so the poll does not knock twice every minute.
+ */
+let unreadRoute = true;
+export async function unreadNotifications(): Promise<number> {
+  if (unreadRoute) {
+    const res = await fetch(`${API}/notifications/unread`, { headers: authHeaders(false) });
+    if (res.ok) {
+      const body = (await res.json().catch(() => null)) as { unread?: unknown } | null;
+      return typeof body?.unread === 'number' && Number.isFinite(body.unread) && body.unread > 0 ? body.unread : 0;
+    }
+    if (res.status !== 404) return 0;
+    unreadRoute = false;
+  }
+  return (await listNotifications()).unread;
 }
 export async function markNotificationsRead(id?: string): Promise<void> {
   await fetch(`${API}/notifications/read`, {
@@ -1615,7 +1649,7 @@ export async function submitLead(lead: LeadInput): Promise<{ ok: boolean; id?: s
   });
   if (!res.ok) {
     const e = (await res.json().catch(() => ({ error: res.statusText }))) as { error?: string };
-    throw new Error(e.error ? tErr(e.error) : `submission failed (${res.status})`);
+    throw new Error(e.error ? await tErrLater(e.error) : `submission failed (${res.status})`);
   }
   return res.json() as Promise<{ ok: boolean; id?: string }>;
 }
@@ -1755,7 +1789,7 @@ export async function generateAiTifo(
     | ({ needsChoice?: boolean; reason?: string; retryAfterSec?: number; quota?: AiQuota; error?: string; locked?: boolean; cause?: unknown } & Partial<AiGenerateResult>)
     | null;
   if (!res.ok) {
-    const err = new Error(data?.error ? tErr(data.error) : `generation failed (${res.status})`) as AiError;
+    const err = new Error(data?.error ? await tErrLater(data.error) : `generation failed (${res.status})`) as AiError;
     err.status = res.status;
     err.quota = data?.quota;
     err.locked = data?.locked;
@@ -1791,7 +1825,7 @@ export async function critiqueAiTifo(spec: TifoSpec, image?: string, stadium?: s
   });
   const data = (await res.json().catch(() => null)) as (AiCritiqueResult & { error?: string }) | null;
   if (!res.ok) {
-    const err = new Error(data?.error ? tErr(data.error) : `critique failed (${res.status})`) as AiError;
+    const err = new Error(data?.error ? await tErrLater(data.error) : `critique failed (${res.status})`) as AiError;
     err.status = res.status;
     throw err;
   }
@@ -1804,7 +1838,7 @@ export async function fetchAiQuota(): Promise<AiQuota> {
   const res = await fetch(`${API}/ai/quota`, { headers: aiHeaders(false) });
   const data = (await res.json().catch(() => null)) as (AiQuota & { error?: string; locked?: boolean; reason?: AiError['reason'] }) | null;
   if (!res.ok) {
-    const err = new Error(data?.error ? tErr(data.error) : `request failed (${res.status})`) as AiError;
+    const err = new Error(data?.error ? await tErrLater(data.error) : `request failed (${res.status})`) as AiError;
     err.status = res.status;
     err.locked = data?.locked;
     err.reason = data?.reason;

@@ -131,7 +131,7 @@ export function mountToolbar(
    * knowing what a banner is: it hands the snapshot to the server and hands
    * whatever comes back to whoever does.
    */
-  sceneIO?: { snapshot(): unknown; restore(scene: unknown): void; onChange?(fn: () => void): void; bannerCount?(): number },
+  sceneIO?: { snapshot(): unknown; restore(scene: unknown): void; onChange?(fn: () => void): void; bannerCount?(): number; inGesture?(): boolean },
   /** Which project is open. See ProjectCtx. */
   projectCtx?: ProjectCtx,
   /** The layer stack (see core/composer.ts). */
@@ -1877,13 +1877,40 @@ export function mountToolbar(
    * The layer stack, beside the draft. It carries the fingerprint of the
    * seats it flattens to, so a stack that did not get written before the tab
    * closed is never put on top of a newer draft (see core/layerStore.ts).
+   *
+   * Written only when it changed since it was last written to this key
+   * (performance plan P2.11). It used to be rebuilt and put into IndexedDB
+   * with every draft, whatever had changed: on a Bernabeu with three pictures
+   * that was a 206 KB document, 20 times a minute of painting. What it holds
+   * changes with the layers, and with the seats and the palette while there
+   * are layers (its fingerprint and its Paint layer); with no layers it is
+   * removed, once.
    */
   let layersWriting: Promise<unknown> = Promise.resolve();
+  let layersVersion = 0;
+  let layersWritten: { key: string; version: number; empty: boolean } | null = null;
+  const layersChanged = (): void => {
+    layersVersion++;
+  };
+  store.onDirty(layersChanged);
+  store.onPaletteChange(layersChanged);
+  objects.onChange((why) => {
+    if (why !== 'select') layersChanged();
+  });
   const writeLayersSoon = (): void => {
     if (!ref || !composer) return;
     const key = keysFor(ref).doc;
-    const doc = composer.toDoc();
-    layersWriting = layersWriting.then(() => writeLayers(key, doc));
+    const empty = objects.list().length === 0;
+    const was = layersWritten;
+    if (was && was.key === key && (empty ? was.empty : !was.empty && was.version === layersVersion)) return;
+    const version = layersVersion;
+    const doc = empty ? null : composer.toDoc();
+    layersWriting = layersWriting
+      .then(() => writeLayers(key, doc))
+      .then((ok) => {
+        // A write that failed is tried again with the next draft.
+        if (ok) layersWritten = { key, version, empty: !doc };
+      });
   };
 
   const draftWriter = createDraftWriter(
@@ -1914,15 +1941,26 @@ export function mountToolbar(
       }
       renderDraftState();
       // The banners are kept beside the draft, in a key of their own, and
-      // written with it so the two always describe the same tifo.
+      // written with it so the two always describe the same tifo; each of
+      // them only when it changed (performance plan P2.11).
       if (r.ok) {
         document.dispatchEvent(new CustomEvent('tifo:draft-written'));
         writeLayersSoon();
       }
     },
-    1200,
+    // 1.5 s after the last change, at most 6 s after the first one it
+    // carries, and never in the middle of a stroke, a layer drag or a banner
+    // gesture (performance plan P2.11). The pagehide and visibility handlers
+    // below and Save still write at once.
+    1500,
     (env) => writeEnvelope(keysFor(ref!).doc, env),
+    {
+      maxWaitMs: 6000,
+      held: () => store.inStroke || objects.inGesture || !!sceneIO?.inGesture?.(),
+    },
   );
+  // The end of a stroke or a drag is when a write it held back goes.
+  store.onStrokeEnd(() => draftWriter.release());
 
   /**
    * Make the open canvas a project, if it is not one yet.
@@ -1963,6 +2001,7 @@ export function mountToolbar(
       return;
     }
     draftWriter.schedule();
+    draftWriter.release();
   };
 
   /**

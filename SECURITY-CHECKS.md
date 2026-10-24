@@ -185,6 +185,132 @@ each one in more detail.
 | `SECURITY_ALERT_TO` | the inbox that should hear about attacks | spike alerts |
 | `SOC_IP_KEY` | `openssl rand -hex 32` | address tags stay the same across restarts; never reuse another secret |
 | `TRUST_PROXY` | unset while Railway is alone; `cloudflare` once Cloudflare is in front | never a plain `2`: see `CLOUDFLARE.md` |
+| `ORIGIN_SECRET` | unset until Cloudflare's Transform Rule sends it; then `openssl rand -hex 32` | only requests that came through Cloudflare are answered; under 32 characters the server refuses to start. See `CLOUDFLARE.md`, "Lock the origin" |
+
+---
+
+## 7. What the server keeps, compresses and hands to workers
+
+Speed work (performance plan, stage 2) added things the server keeps between
+requests and work it does off the main thread. Each has a rule, and
+`npm run test:security` holds every one of them; a change to any of these must
+keep its rule or tighten it.
+
+**Compression, and why secrets say `no-transform`.** The server compresses
+nothing per request. The build writes `.br` and `.gz` copies of its files, and
+`@fastify/static` sends a copy when the browser takes it (`preCompressed`);
+the copies are never addressable on their own (a `.br` URL is a 404, and so is
+a copy with no original), and they carry their original's cache rule and rate
+bucket. Those files hold no secret.
+
+BREACH needs four things in one response: compression, a secret in the body,
+input the attacker chose reflected beside it, and a browser that sends the
+victim's credential on its own. Sessions here are a bearer token a page sends
+itself, never a cookie, so the fourth is missing for every `/api` answer. The
+only cookies are the sealed sign-in state (`tm_oauth`), the one-use Google
+handoff ticket (`tm_handoff`, `SameSite=Lax`, POST only, spent on first use)
+and the admin cookie (`tm_admin`, `SameSite=Strict`, which only decides whether
+the `/admin` page opens: no `/api` route accepts it); none of the answers they
+ride on reflects attacker input. The `/reset` page carries its
+token in the URL, never in the page. What is left is an edge compressing
+on our behalf, so every answer that carries a secret is sent
+`Cache-Control: no-store, no-transform`, which also tells Cloudflare not to
+compress or rewrite it:
+
+| Answer | Secret in it |
+|---|---|
+| `POST /api/auth/register`, `POST /api/auth/login` | a session token |
+| `POST /api/auth/handoff` | a session token, for a Google or X sign-in |
+| `POST /api/account/password` | the session it keeps |
+| `GET /api/auth/:provider`, `POST /api/account/link/:provider` | a sealed state cookie |
+| `GET /api/auth/:provider/callback` (every outcome) | the handoff ticket, or the cookie it clears |
+| `GET /api/auth/verify` | the link's own token, on its way to the page |
+| `GET /api/account/export` | everything the account holds |
+| `POST /api/ai/unlock` | the admin token and its cookie |
+
+**What is kept between requests.**
+- *Content hashes*: the SHA-256 (hex) of each stored picture and scene is
+  computed by the database itself, by a trigger on every insert and on every
+  update that names the bytes or the hash, so any writer of any release (the
+  previous one still serving during a deploy, or one rolled back to) keeps it
+  right. The triggers are security statements (checked in the catalogue at
+  every boot, and only one that fires in ordinary sessions counts: not
+  disabled, not replica-only); until they are in force and every older hash
+  has been recomputed from its bytes, the server hashes the bytes it reads
+  instead of believing the stored hash. A boot that has to put a trigger or
+  its function back recomputes again first, since rows written meanwhile may
+  be stale.
+- *Thumbnails*: the ETag is that hash. The visibility check runs first, then
+  `If-None-Match`; a public picture is `public, no-cache` with that ETag, a
+  private one is `private, no-store` with no ETag and never a 304. A design
+  that stops being public answers an old ETag with the 404 anyone else gets,
+  and a replaced picture never answers its old ETag with a 304.
+- *Scenes*: anyone but the owner gets the scene without its layers, kept by
+  design and the scene's hash (32 MB at most, counted as the memory each entry
+  really holds, one version per design). Only the output of the layer strip is
+  ever kept, so the cache can hold no layer; it is read only after the
+  visibility check, so a private, taken-down or trashed design is never served
+  from it; new bytes are a new hash, so the next view has the new banners.
+- *HTML shells*: `/app`, `/clubs`, `/legal` and `/tifo-spec` are built once
+  (per allowed address when `PUBLIC_URL` is unset, eight at most; with it, one)
+  and sent with an ETag and `no-cache`. They hold no user data and are the same
+  bytes for every caller and every forged `Host`. `/`, `/community`, `/t` and
+  `/d` are never kept: they name designs, which can stop being public.
+- *Page views* are written every 5 seconds in one statement. Only what the
+  address-free record holds is buffered (5,000 at most; drops are counted and
+  logged), and a shutdown writes what is left within 2 seconds.
+
+**Worker threads.** Reading a scene (the save check and the layer strip) and
+drawing a PDF run in worker threads (`server/src/workerPool.ts`). Each pool has
+its own bounded queue (scenes 16, PDFs 4), a time limit (5 s, 30 s) and memory
+limits. Anonymous views may take only 12 of the scene queue's places and an
+owner's save waits ahead of them, so a flood of views never refuses a save;
+and nothing waits for ever: a task not started within 5 s (PDFs 15 s) is
+refused. A full queue, a wait past that, a time-out or a crash is a 503 with
+`code: 'retry'`; a scene that
+could not be stripped is never sent as stored. The PDF's temporary file is
+removed whatever happens. The body caps, the scene's complexity caps and the
+rate limits (scene saves 30 a minute, PDFs 6) are checked before the work is
+queued.
+
+A worker thread is **not a sandbox**. It is the same process: code running in
+it can read `/proc/self/environ` (the server's environment, secrets included),
+the server's files and its memory. Workers start with an empty `process.env`
+only as defence in depth, against a careless line, not as isolation. What
+keeps them safe is that the code they run is our own, never something a
+request supplies, and that nothing secret is ever posted to one: only the scene
+or the seats being worked on, as an exact-size copy handed over (never a view
+into a shared buffer, which would carry other requests' bytes with it).
+
+**The schema at boot.** `schema.sql` runs statement by statement, each under a
+3-second lock wait, with a ledger of what has run (`schema_ledger`). The ones
+the access controls stand on (the unique names and addresses, session and email
+tokens, the username wall, visibility, ownership, takedown, the Trash and the
+content-hash triggers) each name what the catalogue must show when they are in
+force (a valid unique index, a column, a table, a function's body, a trigger
+that fires in ordinary sessions); that is checked on every boot whatever the
+ledger says, and again
+after the run, so one that ran cleanly but left nothing in force (an invalid
+index under the right name) counts too. If one is not in force, the boot log
+says `SECURITY` and the posture panel marks the schema **fix** until a boot
+applies it.
+
+**The origin lock.** With `ORIGIN_SECRET` set, every request but `GET /health`
+must carry it in `x-origin-secret` (Cloudflare adds it; see `CLOUDFLARE.md`).
+It is compared in constant time, removed from the request before any route sees
+it, and never logged. A request without it gets a 403 with the usual security
+headers and `no-store`, counted in the rate limit like any other. Cloudflare's
+headers arriving while `TRUST_PROXY` is not `cloudflare` make the posture row
+at least a **check**, never kinder than it was (a plain `TRUST_PROXY=2` stays
+**fix**, its own explanation first), and are said once a minute in the log: if Cloudflare is in front, every visitor
+would share Cloudflare's addresses until `TRUST_PROXY=cloudflare` is set; if it
+is not, anyone can send those headers, they are never believed, and there is
+nothing to do.
+
+**Request logs.** One line per request (`request completed`, or
+`request aborted` for a client that left), with method, the URL with any token
+or code replaced by `[redacted]`, address, status, time and request id; every
+error keeps its own line with the same request id. Nothing else is dropped.
 
 ---
 

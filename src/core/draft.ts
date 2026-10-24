@@ -184,10 +184,42 @@ export function describeAge(savedAt: number, now = Date.now()): string {
   return d === 1 ? 'yesterday' : `${d} days ago`;
 }
 
+export interface DraftWriterOptions {
+  /**
+   * The longest a change waits while edits keep coming, from the first change
+   * not yet written. Without it a steady run of strokes with short pauses
+   * between them would never be quiet long enough for the trailing wait.
+   */
+  maxWaitMs?: number;
+  /**
+   * True while a gesture is under way: a brush stroke, a layer being dragged,
+   * a banner being moved. Nothing is written until it ends (release()).
+   */
+  held?: () => boolean;
+}
+
 /**
- * Debounce a draft write. Editing fires continuously (every brush stroke), and
- * serialising 60,000 seats on each one would stutter the canvas, so writes are
- * coalesced. flush() exists for pagehide, where there is no time to wait.
+ * How long a gesture may hold a due write back. A gesture is seconds long; a
+ * hold longer than this means one that never said it ended, and the work is
+ * written anyway rather than waiting for the tab to close.
+ */
+const HOLD_CAP_MS = 30_000;
+/** How often a held write looks again, should a gesture's end go unreported. */
+const HOLD_POLL_MS = 500;
+
+/**
+ * Coalesce draft writes. Editing fires continuously (every brush stroke), and
+ * serialising 60,000 seats on each one would stutter the canvas.
+ *
+ * A write goes `delayMs` after the last change (a trailing wait), and no later
+ * than `maxWaitMs` after the first change it carries, so a long session still
+ * saves; never in the middle of a gesture (performance plan P2.11). It used to
+ * go 1.2 s after the first change whatever came after it: continuous painting
+ * wrote every 1.2 s, each time with the whole layer stack behind it, half of
+ * them mid-stroke.
+ *
+ * flush() exists for pagehide and Save, where there is no time to wait: it
+ * writes at once, gesture or not.
  */
 export function createDraftWriter(
   build: () => DraftEnvelope | null,
@@ -195,24 +227,70 @@ export function createDraftWriter(
   delayMs = 1200,
   /** Where it goes. Projects pass their own key (see core/projects). */
   write: (env: DraftEnvelope) => DraftWriteResult = writeDraft,
-): { schedule: () => void; flush: () => void; stop: () => void } {
+  opts: DraftWriterOptions = {},
+): { schedule: () => void; flush: () => void; stop: () => void; release: () => void; readonly pending: boolean } {
+  const maxWait = opts.maxWaitMs ?? Infinity;
+  const held = opts.held ?? (() => false);
+  const now = (): number => performance.now();
   let timer: ReturnType<typeof setTimeout> | null = null;
   let pending = false;
+  /** When the oldest change not yet written was made, and the latest. */
+  let firstAt = 0;
+  let lastAt = 0;
+  /** A write fell due during a gesture, and when it first did. */
+  let heldSince = 0;
 
-  const run = (force: boolean): void => {
+  const clear = (): void => {
+    if (timer) clearTimeout(timer);
     timer = null;
+  };
+  const arm = (): void => {
+    clear();
+    const due = Math.min(lastAt + delayMs, firstAt + maxWait);
+    timer = setTimeout(tick, Math.max(0, due - now()));
+  };
+  const run = (force: boolean): void => {
+    clear();
     if (!pending && !force) return;
     pending = false;
+    heldSince = 0;
     const env = build();
     if (!env) return;
     onResult(write(env));
   };
+  function tick(): void {
+    timer = null;
+    if (!pending) return;
+    if (held()) {
+      const t = now();
+      if (!heldSince) heldSince = t;
+      if (t - heldSince < HOLD_CAP_MS) {
+        timer = setTimeout(tick, HOLD_POLL_MS);
+        return;
+      }
+    }
+    run(false);
+  }
 
   return {
     schedule(): void {
-      pending = true;
-      if (timer) return;
-      timer = setTimeout(() => run(false), delayMs);
+      const t = now();
+      if (!pending) {
+        pending = true;
+        firstAt = t;
+      }
+      lastAt = t;
+      // While a held write is waiting the poll is already running; the end
+      // of the gesture (release) is what moves it.
+      if (heldSince) return;
+      arm();
+    },
+    /** A gesture ended: a write it held back goes now. */
+    release(): void {
+      if (pending && heldSince && !held()) {
+        clear();
+        timer = setTimeout(tick, 0);
+      }
     },
     /**
      * Write now, whether or not a change is pending. Pressing Save must produce
@@ -220,16 +298,15 @@ export function createDraftWriter(
      * would be the exact lie this module exists to prevent.
      */
     flush(): void {
-      if (timer) {
-        clearTimeout(timer);
-        timer = null;
-      }
       run(true);
     },
     stop(): void {
-      if (timer) clearTimeout(timer);
-      timer = null;
+      clear();
       pending = false;
+      heldSince = 0;
+    },
+    get pending(): boolean {
+      return pending;
     },
   };
 }
