@@ -32,7 +32,7 @@ import { isSignedIn, fetchMe, resendVerification } from '../net/api';
 import { openAuthModal } from './authModal';
 import { openAddEmailModal } from './openAddEmailModal';
 
-import { onLangChange, t, tErr, tv } from './i18n';
+import { getLang, onLangChange, t, tErr, tv } from './i18n';
 // Auto-resend the verification email at most once per session when AI is blocked.
 let verifyResent = false;
 
@@ -479,7 +479,7 @@ export function mountAiPanel(deps: AiPanelDeps): AiPanelHandle {
     refresh();
     editor.fitToView();
     if (summaryEl) {
-      const base = working.summary ?? working.title;
+      const base = localSummary(working.summary ?? working.title);
       summaryEl.textContent = critique?.issues.length ? `${base}  ·  ${critique.issues[0]}` : base;
     }
     lastSpec = working; // the live design — input for AI critique/polish
@@ -881,4 +881,44 @@ export function mountAiPanel(deps: AiPanelDeps): AiPanelHandle {
       }
     },
   };
+}
+
+/**
+ * The one-line description under an AI design, in the page's language.
+ *
+ * The quick designer (core/promptDesigner.ts) writes it in English, and the
+ * Arabic panel showed "Full-bowl: a symbol on the north, …" as it was. Its
+ * sentences are a fixed set, so each is said here in Arabic; a model's own
+ * line that has no Arabic in it gives way to a plain "ready" line.
+ */
+function localSummary(line: string): string {
+  if (getLang() !== 'ar' || /[\u0600-\u06FF]/.test(line)) return line;
+  const kind = (k: string): string => t(k === 'portrait' ? 'ai.sum.kPortrait' : k === 'symbol' ? 'ai.sum.kSymbol' : 'ai.sum.kText');
+  const fixed: [RegExp, (m: RegExpMatchArray) => string][] = [
+    [/^Derby:/, () => t('ai.sum.derby')],
+    [/^Farewell:/, () => t('ai.sum.farewell')],
+    [/^Anniversary: .* a giant (\S+) on the north/, (m) => tv('ai.sum.anniversary', { n: m[1]! })],
+    [/^Title:/, () => t('ai.sum.title')],
+    [/^Heritage:/, () => t('ai.sum.heritage')],
+    [/^Welcome:/, () => t('ai.sum.welcome')],
+    [/^Mosaic:/, () => t('ai.sum.mosaic')],
+    [/^Full-bowl: a (\w+) on the north/, (m) => tv('ai.sum.fullBowl', { hero: kind(m[1]!) })],
+    [/^(.+) across (the whole stadium|the (\w+) stand), (\d+)-colour palette\.$/, (m) => {
+      const what = m[1]!.split(' + ').map((b) => {
+        const quoted = b.match(/^[“"](.*)[”"]$/);
+        if (quoted) return `«${quoted[1]}»`;
+        if (/^a bold /i.test(b)) return t('ai.sum.bSymbol');
+        if (/^a split field$/i.test(b)) return t('ai.sum.bHalves');
+        if (/^stripes$/i.test(b)) return t('ai.sum.bStripes');
+        return t('ai.sum.bSolid');
+      }).join(' + ');
+      const where = m[3] ? t(`area.${m[3]}`) : t('area.all');
+      return tv('ai.sum.across', { what, where, n: m[4]! });
+    }],
+  ];
+  for (const [re, say] of fixed) {
+    const m = line.match(re);
+    if (m) return say(m);
+  }
+  return t('ai.sum.ready');
 }

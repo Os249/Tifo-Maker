@@ -119,9 +119,10 @@ console.log('\n— 1. the home page on a phone —');
 }
 {
   // The page is for every fan. The hero opens on a different club between
-  // visits; the closing band is the site's own blue until the visitor has
-  // started a tifo for a club, then it is that club's; the showcase leads with
-  // named designs, each with a way to start from it.
+  // visits; the closing band is the site's own, whoever visits (it once took
+  // the colours of the last club a visitor started, and read as that club's
+  // site); the showcase leads with named designs, each with a way to start
+  // from it.
   const clubs = new Set();
   for (let i = 0; i < 16; i++) clubs.add((await (await fetch(`${B}/`)).text()).match(/id="hero-3d" data-club="([a-z0-9-]+)"/)?.[1]);
   check('the hero opens on a different club between visits', clubs.size >= 3 && !clubs.has(undefined), [...clubs].join(', '));
@@ -140,7 +141,7 @@ console.log('\n— 1. the home page on a phone —');
     const band = document.getElementById('final-cta');
     return { club: band?.dataset.club ?? null, other: document.getElementById('final-other')?.hidden, go: document.getElementById('final-go')?.getAttribute('href') };
   });
-  check('a first visit gets the closing band in the site colour, for any club', plain.club === null && plain.other === true && plain.go === '/projects?new=1', JSON.stringify(plain));
+  check('a first visit gets the closing band in the site colour, starting any club', plain.club === null && plain.other === true && plain.go === '/projects?new=1', JSON.stringify(plain));
   await p.evaluate(() => document.getElementById('showcase')?.scrollIntoView());
   const cards = await until(p, () => document.querySelectorAll('#showcase-grid .showcase-card').length > 0, null, 20000);
   const shown = await p.evaluate(() => [...document.querySelectorAll('#showcase-grid .showcase-card')].map((c) => ({
@@ -153,16 +154,18 @@ console.log('\n— 1. the home page on a phone —');
   check('no "Untitled" design is on show', !shown.some((c) => /^(untitled|my tifo)/i.test(c.title)), shown.map((c) => c.title).join(' | '));
   await p.context().close();
 
-  const back = await open(WIDE, [['tifo_last_club_v1', 'hilal']]);
+  const back = await open(WIDE, [['tifo_last_club_v1', 'ittihad'], ['tifo_projects_v1', JSON.stringify([{ id: 'l0123456789abcde', title: 'Al Ittihad at the Jewel', updatedAt: Date.now() }])]]);
   await back.goto(`${B}/`, { waitUntil: 'load' });
   await back.evaluate(() => document.getElementById('final-cta')?.scrollIntoView());
-  const painted = await until(back, () => document.getElementById('final-cta')?.dataset.club === 'hilal', null, 15000);
+  await back.waitForTimeout(1200);
   const band = await back.evaluate(() => {
     const el = document.getElementById('final-cta');
     const cs = getComputedStyle(el);
-    return { bg: cs.backgroundColor, ink: cs.color, go: document.getElementById('final-go')?.getAttribute('href'), text: document.getElementById('final-go')?.textContent?.trim(), other: document.getElementById('final-other')?.hidden };
+    const solid = getComputedStyle(document.documentElement).getPropertyValue('--blue-solid').trim();
+    return { bg: cs.backgroundColor, solid, club: el.dataset.club ?? null, go: document.getElementById('final-go')?.getAttribute('href'), text: document.getElementById('final-go')?.textContent?.trim(), sub: document.getElementById('final-sub')?.textContent?.trim(), other: document.getElementById('final-other')?.hidden, otherHref: document.getElementById('final-other')?.getAttribute('href') };
   });
-  check('a returning fan gets the band in their club colours, starting their club', painted && band.go === '/projects?new=1&club=hilal' && /Al Hilal/.test(band.text ?? '') && band.other === false, JSON.stringify(band));
+  check('a returning fan gets the same band, in no club\'s colours', band.club === null && band.go === '/projects?new=1' && !/Ittihad|Hilal/.test(`${band.text} ${band.sub}`) && band.bg === 'rgb(28, 111, 224)', JSON.stringify(band));
+  check('with one neutral way back to their projects', band.other === false && band.otherHref === '/projects', JSON.stringify(band));
   await back.context().close();
 }
 {
@@ -220,11 +223,22 @@ for (const [label, opts] of [['desktop', WIDE], ['phone', PHONE]]) {
     return { pal: labels.join(' ').toLowerCase(), painted: seats / total, local: /[?&]local=/.test(location.search) };
   });
   check(`${label}: in the club's colours, kept as a project`, design.pal.includes('#0033a0') && design.painted > 0.5 && design.local, JSON.stringify(design).slice(0, 200));
-  const nudge = await until(p, () => !!document.querySelector('.pm-nudge'), null, 15000);
-  check(`${label}: the one-time "Post it?" card appears`, nudge);
-  check(`${label}: offering "Paint it" beside "Post it"`, await p.evaluate(() => document.querySelector('.pm-nudge .pm-b')?.textContent.trim() === 'Paint it'));
+  // The first project: the guided first tifo (src/ui/guide.ts), after the
+  // reveal, in place of the one-time "Post it?" card.
+  const guided = await until(p, () => !!document.querySelector('.gd'), null, 45000);
+  check(`${label}: the first tifo opens the four-step guide`, guided);
+  const g1 = await p.evaluate(() => ({ h: document.querySelector('.gd-h')?.textContent, steps: document.querySelectorAll('.gd-steps li').length, nudge: !!document.querySelector('.pm-nudge'), spot: !!document.querySelector('.gd-spot') }));
+  check(`${label}: step 1 is the club's colours, lit up, with no second card on top`, g1.h === 'Your club’s colours' && g1.steps === 4 && !g1.nudge, JSON.stringify(g1));
+  const step = async (n, title) => {
+    await p.evaluate(() => document.querySelector('.gd-next')?.click());
+    return until(p, (t) => document.querySelector('.gd-h')?.textContent === t, title, 15000);
+  };
+  const s2 = await step(2, 'Make it yours') && await until(p, () => document.getElementById('preview-host')?.hidden === true && !document.getElementById('canvas-host')?.hidden, null, 15000);
+  check(`${label}: Next puts them on the seats to make it theirs`, s2);
+  const s3 = await step(3, 'See it in the stadium') && await until(p, () => !document.getElementById('preview-host')?.hidden, null, 15000);
+  check(`${label}: then back in the stadium`, s3);
   if (label === 'phone') {
-    check('phone: Post it sits beside Match Day', await p.evaluate(() => { const b = document.querySelector('.m-md .m-post'); return !!b && b.getBoundingClientRect().width > 0; }));
+    check('phone: Post it sits beside Match Day', await until(p, () => { const b = document.querySelector('.m-md .m-post'); return !!b && b.getBoundingClientRect().width > 0; }, null, 10000));
     const clash = await p.evaluate(() => {
       const r = (el) => el && getComputedStyle(el).display !== 'none' ? el.getBoundingClientRect() : null;
       const a = r(document.querySelector('.m-md')); const z = r(document.querySelector('.zoom-pill'));
@@ -232,8 +246,10 @@ for (const [label, opts] of [['desktop', WIDE], ['phone', PHONE]]) {
     });
     check('phone: and nothing on the stadium view overlaps it', !clash);
   }
+  const s4 = await step(4, 'Show your group');
+  check(`${label}: the last step's button is Post it`, s4 && await p.evaluate(() => /Post it/.test(document.querySelector('.gd-next')?.textContent ?? '')));
   await p.evaluate(() => { window.__opened = []; window.open = (u) => { window.__opened.push(String(u)); return null; }; });
-  await p.evaluate(() => document.querySelector('.pm-nudge .pm-main')?.click());
+  await p.evaluate(() => document.querySelector('.gd-next')?.click());
   const pic = await until(p, () => { const i = document.querySelector('.pm-overlay img.pm-pic'); return !!i && i.complete && i.naturalWidth === 1080 && i.naturalHeight === 1350; }, null, 60000);
   check(`${label}: the picture is made, 1080×1350`, pic);
   const drawn = pic && await p.evaluate(() => {
@@ -259,16 +275,41 @@ for (const [label, opts] of [['desktop', WIDE], ['phone', PHONE]]) {
   }
   await p.keyboard.press('Escape');
   check(`${label}: Escape closes it`, await until(p, () => !document.querySelector('.pm-overlay'), null, 5000));
-  // Once per browser: back in 3D later, no second card.
+  check(`${label}: the guide is done and remembered`, await p.evaluate(() => !document.querySelector('.gd') && localStorage.getItem('tifo_guide_v1') === 'done' && !document.body.classList.contains('guided')));
+  // And the one-time card does not follow it: back in 3D later, nothing.
   await p.evaluate(async () => { document.getElementById('view-2d')?.click(); await new Promise((r) => setTimeout(r, 300)); document.getElementById('view-3d')?.click(); });
   await p.waitForTimeout(2600);
-  check(`${label}: the card is shown only once`, await p.evaluate(() => !document.querySelector('.pm-nudge')));
+  check(`${label}: and no "Post it?" card after it`, await p.evaluate(() => !document.querySelector('.pm-nudge')));
+  await p.context().close();
+}
+{
+  // Someone who has had the guide (or left it for Free mode) gets the one-time
+  // "Post it?" card on their next club tifo, as before, and only once.
+  const p = await open(WIDE, [['tifo_news_banners_v1', '1'], ['tifo_news_leagues_v2', '1'], ['tifo_guide_v1', 'free']]);
+  await p.goto(`${B}/projects?new=1&e2e`, { waitUntil: 'domcontentloaded' });
+  await until(p, () => document.querySelectorAll('.st-club').length >= 8, null, 90000);
+  await p.evaluate(() => document.querySelector('.st-club[data-club="nassr"]')?.click());
+  await until(p, () => document.querySelector('.st-opt.on')?.dataset.start === 'club', null, 10000);
+  await p.evaluate(() => document.getElementById('st-go')?.click());
+  const nudge = await until(p, () => !!document.querySelector('.pm-nudge'), null, 45000);
+  check('after the guide: the one-time "Post it?" card appears instead', nudge && await p.evaluate(() => !document.querySelector('.gd')));
+  check('offering "Paint it" beside "Post it"', await p.evaluate(() => document.querySelector('.pm-nudge .pm-b')?.textContent.trim() === 'Paint it'));
+  const blue = await p.evaluate(() => {
+    const solid = (el) => { if (!el) return false; const c = getComputedStyle(el).backgroundColor.match(/\d+/g)?.map(Number) ?? [0, 0, 0]; return c[2] > 180 && c[0] < 80; };
+    return { post: solid(document.getElementById('post-tifo')), save: solid(document.getElementById('save-top')), signup: solid(document.getElementById('signin')), next: document.documentElement.dataset.next };
+  });
+  check('the header has one blue button: Post it, once the work is kept', blue.post && !blue.save && !blue.signup && blue.next === 'post', JSON.stringify(blue));
+  await p.evaluate(() => document.querySelector('.pm-nudge .pm-x, .pm-nudge [aria-label="Close"]')?.click());
+  await p.evaluate(async () => { document.getElementById('view-2d')?.click(); await new Promise((r) => setTimeout(r, 300)); document.getElementById('view-3d')?.click(); });
+  await p.waitForTimeout(2600);
+  check('the card is shown only once', await p.evaluate(() => !document.querySelector('.pm-nudge')));
   await p.context().close();
 }
 {
   const funnel = await admin('/api/funnel?days=7');
   const n = (k) => (funnel.steps ?? []).find((s) => s.name === k)?.sessions ?? 0;
   check('the funnel counts "Opened Post it" and "Shared it"', n('post_opened') >= 2 && n('shared') >= 2, JSON.stringify({ post_opened: n('post_opened'), shared: n('shared') }));
+  check('and the guide: started and followed to Post it', n('guide_started') >= 2 && n('guide_done') >= 2, JSON.stringify({ guide_started: n('guide_started'), guide_done: n('guide_done') }));
 }
 
 // ---------------------------------------------------------------------------

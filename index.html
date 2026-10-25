@@ -34,6 +34,7 @@
           <button id="undo" class="hist-b" type="button" title="Undo (Ctrl+Z)" aria-label="Undo" data-i18n-attr="title:ed.undoT,aria-label:ed.undo"><i class="ti ti-arrow-back-up" aria-hidden="true"></i></button>
           <button id="redo" class="hist-b" type="button" title="Redo (Ctrl+Shift+Z)" aria-label="Redo" data-i18n-attr="title:ed.redoT,aria-label:ed.redo"><i class="ti ti-arrow-forward-up" aria-hidden="true"></i></button>
         </div>
+        <span class="save-state-top" id="save-state-top" role="status"></span>
         <!-- Save lives here because the panel's Save button sits ~580px below the
              fold: of 116 people who painted a tifo, 12 ever pressed it. The dot
              that used to sit here was decorative and always green, which said
@@ -41,7 +42,11 @@
         <button id="save-top" class="save-top" data-i18n-attr="title:ed.saveTitle" title="Save your tifo">
           <i class="ti ti-device-floppy"></i><span data-i18n="ed.save">Save</span>
         </button>
-        <span class="save-state-top" id="save-state-top" hidden></span>
+        <!-- Post it: the picture of the tifo in its stadium, ready to post. It
+             lived in the camera bar, which only shows in the Stadium view, so
+             most people never saw it (2.3% opened it). Here it is the header's
+             one blue button once the work is kept; Save is, while it is not. -->
+        <button id="post-tifo" type="button" class="post-top" title="Make a picture of your tifo in the stadium to post" data-i18n-attr="title:post.btnT"><i class="ti ti-share" aria-hidden="true"></i><span data-i18n="post.btn">Post it</span></button>
         <!-- The language, the community feed and the gallery live in the
              account menu now: twelve controls in a 56px bar was how "Sign up"
              ended up folded onto two lines at 1440 px. These two stay in the
@@ -258,7 +263,6 @@
             <select id="camera-preset"></select>
             <label><input type="checkbox" id="noshow" /> <span data-i18n="ed.noshow">No-shows 10%</span></label>
             <button id="match-day" type="button" title="Open the Match Day Simulator (high-fidelity view)" data-i18n-attr="title:ed.matchDayT"><i class="ti ti-building-stadium"></i> <span data-i18n="ed.matchDay">Match Day</span></button>
-            <button id="post-tifo" type="button" class="primary" title="Make a picture of your tifo in the stadium to post" data-i18n-attr="title:post.btnT"><i class="ti ti-share"></i> <span data-i18n="post.btn">Post it</span></button>
           </div>
 
           <!-- Jump to a stand: the whole stand fills the canvas. The phone shell
@@ -335,7 +339,7 @@
             <button class="chip" data-ex="Giant Cristiano Ronaldo tifo in the north stand using black, white and yellow" data-i18n="ai.ex.ronaldo">Ronaldo · north</button>
             <button class="chip" data-ex="Giant eagle covering the south stand in black and gold" data-i18n="ai.ex.eagle">Eagle · south</button>
           </div>
-          <div class="hint" style="font-size:11px;color:var(--text-3);margin:10px 0 4px;" data-i18n="ed.ai.yourClub">Your club, one tap</div>
+          <div class="hint" style="font-size:var(--fs-xs);color:var(--text-3);margin:10px 0 4px;" data-i18n="ed.ai.yourClub">Your club, one tap</div>
           <div class="chips" id="ai-clubs" style="flex-wrap:wrap;">
             <button class="chip" data-club="A giant Al Hilal tifo filling the whole stadium in the club's colours" data-i18n="club.hilal">Al Hilal</button>
             <button class="chip" data-club="A giant Al Nassr tifo filling the whole stadium in the club's colours" data-i18n="club.nassr">Al Nassr</button>
@@ -370,9 +374,9 @@
           <p id="ai-status" class="hint" hidden></p>
           <div id="ai-error" class="hint" hidden></div>
           <div id="ai-result" style="display:none;margin-top:10px;">
-            <p id="ai-summary" style="font-size:12px;color:var(--text-2);margin:0 0 8px;"></p>
+            <p id="ai-summary" style="font-size:var(--fs-xs);color:var(--text-2);margin:0 0 8px;"></p>
             <div class="group">
-              <button id="ai-regen" class="primary grow"><i class="ti ti-refresh"></i> <span data-i18n="ed.ai.regen">Regenerate</span></button>
+              <button id="ai-regen" class="grow"><i class="ti ti-refresh"></i> <span data-i18n="ed.ai.regen">Regenerate</span></button>
               <button id="ai-revert" title="Restore the canvas from before this design" data-i18n="ed.ai.revert" data-i18n-attr="title:ed.ai.revertT">Revert</button>
             </div>
             <button id="ai-polish" style="width:100%;margin-top:8px;" title="Render the design and ask the AI to fix legibility and balance" data-i18n-attr="title:ed.ai.polishT"><i class="ti ti-wand"></i> <span data-i18n="ed.ai.polish">Polish with AI critique</span></button>
@@ -569,11 +573,13 @@
               <label for="preset" style="white-space:nowrap;" data-i18n="ed.colors.presets">Presets</label>
               <select id="preset" class="grow0"></select>
             </div>
-            <div class="group" style="margin-top:8px;">
-              <button id="palette-import" class="grow" title="Load a .gpl / .hex / .json palette or an image" data-i18n="ed.colors.import" data-i18n-attr="title:ed.colors.importT">Import palette</button>
-              <button id="palette-save" class="grow" title="Save your current swatches as a reusable palette" data-i18n="ed.colors.save" data-i18n-attr="title:ed.colors.saveT">Save palette</button>
+            <select id="my-palettes" class="palette-mine" title="Your saved palettes" data-i18n-attr="title:ed.colors.mineT"></select>
+            <!-- Two filled pill buttons sat between the two lists and read as
+                 the card's main actions. They are the card's footnotes. -->
+            <div class="palette-links">
+              <button id="palette-import" class="link-btn" type="button" title="Load a .gpl / .hex / .json palette or an image" data-i18n="ed.colors.import" data-i18n-attr="title:ed.colors.importT">Import palette</button>
+              <button id="palette-save" class="link-btn" type="button" title="Save your current swatches as a reusable palette" data-i18n="ed.colors.save" data-i18n-attr="title:ed.colors.saveT">Save palette</button>
             </div>
-            <select id="my-palettes" style="margin-top:8px;width:100%;" title="Your saved palettes" data-i18n-attr="title:ed.colors.mineT"></select>
           </div>
         </div>
 
@@ -589,7 +595,7 @@
         <div class="panel-section ctx-hidden" id="ctx-objects" data-panel="select" style="display:none">
           <h4><span data-i18n="ed.obj">Object</span> <span id="obj-kind" style="color:var(--text-3);"></span></h4>
           <div id="region-actions" hidden>
-            <p class="hint" style="font-size:12px;color:var(--text-2);margin:0 0 10px;"><b id="region-count">0</b> <span data-i18n="ed.region.hint">seats selected. Recolor with the active swatch, or clear them.</span></p>
+            <p class="hint" style="font-size:var(--fs-xs);color:var(--text-2);margin:0 0 10px;"><b id="region-count">0</b> <span data-i18n="ed.region.hint">seats selected. Recolor with the active swatch, or clear them.</span></p>
             <div class="group">
               <button class="primary grow" id="region-lift" title="Turn these painted seats into a layer you can move" data-i18n-attr="title:ly.liftT"><i class="ti ti-arrows-move"></i> <span data-i18n="ly.lift">Make movable</span></button>
             </div>
@@ -608,7 +614,7 @@
               <select id="obj-font" class="grow0" aria-label="Font" data-i18n-attr="aria-label:ly.fontA"></select>
             </div>
             <div id="obj-color-row" style="margin-bottom:8px;" hidden>
-              <div class="hint" style="font-size:11px;color:var(--text-3);margin:0 0 4px;" data-i18n="ly.colour">Colour</div>
+              <div class="hint" style="font-size:var(--fs-xs);color:var(--text-3);margin:0 0 4px;" data-i18n="ly.colour">Colour</div>
               <div id="obj-colors" class="ly-swatches" role="radiogroup" aria-label="Colour" data-i18n-attr="aria-label:ly.colour"></div>
             </div>
             <div class="chips" id="obj-pic-row" style="margin-bottom:8px;" hidden>
@@ -669,7 +675,7 @@
               <button class="chip" id="obj-front" data-i18n="ed.obj.bringFront">Bring front</button>
               <button class="chip" id="obj-dup" title="Duplicate (Ctrl+D)" data-i18n="ly.duplicate" data-i18n-attr="title:ly.duplicateT">Duplicate</button>
             </div>
-            <p id="obj-touched" class="hint" hidden style="font-size:12px;margin:0 0 8px;">
+            <p id="obj-touched" class="hint" hidden style="font-size:var(--fs-xs);margin:0 0 8px;">
               <span data-i18n="ly.touched">Touched up by hand.</span>
               <button type="button" class="linklike" id="obj-clear-touch" data-i18n="ly.clearTouch">Clear touch-ups</button>
             </p>
@@ -727,7 +733,7 @@
 
         <div class="panel-section ctx-hidden" id="ctx-stadium-export" data-panel="__menu_only__" data-menu="animation" style="display:none">
           <h4><span data-i18n="ed.sx">Stadium animation</span> <span class="h4-tag" data-i18n="ed.sx.tag">video / GIF (3D)</span></h4>
-          <p class="hint" style="font-size:11px;color:var(--text-3);margin:0 0 10px;" data-i18n="ed.sx.hint">Renders the 3D bowl lighting up with your chosen reveal. Style &amp; length come from the Animation panel.</p>
+          <p class="hint" style="font-size:var(--fs-xs);color:var(--text-3);margin:0 0 10px;" data-i18n="ed.sx.hint">Renders the 3D bowl lighting up with your chosen reveal. Style &amp; length come from the Animation panel.</p>
           <div class="group">
             <label for="sx-format" style="white-space:nowrap;" data-i18n="ed.sx.format">Format</label>
             <select id="sx-format" class="grow0">
@@ -748,14 +754,14 @@
             <button id="sx-preview" class="grow"><i class="ti ti-eye"></i> <span data-i18n="ed.sx.preview">Preview</span></button>
             <button id="sx-export" class="primary grow"><i class="ti ti-download"></i> <span data-i18n="ed.sx.export">Export</span></button>
           </div>
-          <p id="sx-status" class="hint" style="font-size:11px;color:var(--text-3);margin:8px 0 0;min-height:14px;"></p>
+          <p id="sx-status" class="hint" style="font-size:var(--fs-xs);color:var(--text-3);margin:8px 0 0;min-height:14px;"></p>
         </div>
 
 
         <div class="panel-section ctx-hidden" id="ctx-save" data-panel="__menu_only__" data-menu="save" style="display:none">
           <h4><span data-i18n="ed.save">Save</span> <span data-i18n="ed.save.tag">&amp; share</span></h4>
           <div class="group">
-            <button id="save" class="primary grow" data-i18n="ed.save">Save</button>
+            <button id="save" class="grow" data-i18n="ed.save">Save</button>
             <button id="load" class="grow" title="Open a .tifo file" data-i18n="ed.openFile" data-i18n-attr="title:ed.loadT">Open file</button>
           </div>
           <p class="draft-state" id="draft-state" aria-live="polite"></p>
@@ -768,7 +774,7 @@
           <button id="share-design" style="width:100%;margin-top:8px;"><i class="ti ti-share"></i> <span data-i18n="ed.share">Share</span></button>
           <div id="photo-row" style="margin-top:12px;" hidden>
             <button id="add-photo" style="width:100%;"><i class="ti ti-camera"></i> <span data-i18n="ed.addPhoto">Add match-day photo</span></button>
-            <p class="hint" style="font-size:11px;color:var(--text-3);margin:6px 0 0;" data-i18n="ed.addPhoto.hint">Show the real stand beside your design: proof it came to life.</p>
+            <p class="hint" style="font-size:var(--fs-xs);color:var(--text-3);margin:6px 0 0;" data-i18n="ed.addPhoto.hint">Show the real stand beside your design: proof it came to life.</p>
           </div>
         </div>
 
@@ -781,7 +787,7 @@
           <button id="export-pdf" class="export-option"><i class="ti ti-file-text" aria-hidden="true"></i><span><b data-i18n="ed.prod.pdf">Distribution PDF</b><small data-i18n="ed.prod.pdfHelp">Print section sheets for your volunteers.</small></span></button>
           <button id="export-csv" class="export-option"><i class="ti ti-table" aria-hidden="true"></i><span><b data-i18n="ed.prod.csv">Seat manifest (CSV)</b><small data-i18n="ed.prod.csvHelp">Open every seat and card in a spreadsheet.</small></span></button>
           <button id="export-qr" class="export-option"><i class="ti ti-qrcode" aria-hidden="true"></i><span><b data-i18n="ed.prod.qr">Fan QR code</b><small data-i18n="ed.prod.qrHelp">For published tifos: fans find their card.</small></span></button>
-          <p id="export-note" class="hint" style="font-size:11px;color:var(--text-3);margin:8px 0 0;" data-i18n="ed.prod.note">Seat-by-seat instructions, material &amp; bag counts, and a QR fans scan to find their card.</p>
+          <p id="export-note" class="hint" style="font-size:var(--fs-xs);color:var(--text-3);margin:8px 0 0;" data-i18n="ed.prod.note">Seat-by-seat instructions, material &amp; bag counts, and a QR fans scan to find their card.</p>
         </div>
       </aside>
     </div>

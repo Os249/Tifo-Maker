@@ -54,7 +54,7 @@
   --blue-300: #7FB0FF;
   /* The wordmark's MAKER. A logotype, so WCAG's contrast rule does not bind
      it, but it is lifted on dark grounds anyway so it reads, not glows. */
-  --maker-on-light: #1C6FE0;
+  --maker-on-light: #1A6AD7;  /* 4.8:1 on day-50, 4.5:1 on day-100: the footer wordmark is 16-18px */
   --maker-on-dark: #4A92F2;
 
   /* Floodlight yellow: "new", a step number, a celebration. Never text on a
@@ -76,8 +76,9 @@
   --font-ui: 'Inter', 'Almarai', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   --font-display: 'Changa', 'Inter', 'Almarai', system-ui, sans-serif;
   --font-data: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
-  /* One scale for every page. Body text is 16 on public pages and 13 in the
-     editor's dense panels; everything else is a step on this ladder. */
+  /* One scale for every page. Body text is 16 on public pages and 14 in the
+     editor's panels (one step up for Arabic, floodlight.css); everything else
+     is a step on this ladder. */
   --fs-2xs: 11px;
   --fs-xs: 12px;
   --fs-sm: 13px;
@@ -88,6 +89,18 @@
   --fs-2xl: 28px;
   --fs-3xl: clamp(30px, 4vw, 40px);
   --fs-4xl: clamp(38px, 6.2vw, 64px);
+
+  /* ---- space ----
+     A 4px ladder. Before it there were 54 different px values for padding,
+     margin and gap; new and rebuilt layouts take their space from here. */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+  --sp-10: 40px;
 
   /* ---- shape ---- */
   --r-sm: 8px;

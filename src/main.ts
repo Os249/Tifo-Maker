@@ -2,6 +2,7 @@ import { cleanAddressBar } from './core/utm';
 import './vendor/tabler-subset.css';
 import { installTheme } from './ui/theme';
 import { initLang, applyDom, toggleLang, t, tl, tv, onLangChange } from './ui/i18n';
+import { guideActive, guideSeen, startGuide } from './ui/guide';
 import { installConsent } from './ui/consent';
 import { generateSeatMapAsync, warmHeavyWorker } from './workers/client';
 import { DEFAULT_PALETTE, DEFAULT_TEMPLATE, TEMPLATES } from './core/template';
@@ -684,12 +685,16 @@ async function main(): Promise<void> {
     // you can only see by opening another view is a sheet you design blind.
     preview.attachBanners(bannerStore, template);
     const sel = document.getElementById('camera-preset') as HTMLSelectElement;
-    CAMERA_PRESETS.forEach((p, i) => {
+    // The presets' names are their ids (preview3d.ts); what shows is the
+    // translation. It used to show the id, so the Arabic editor said "Full view".
+    const camOpts = CAMERA_PRESETS.map((p, i) => {
       const opt = document.createElement('option');
       opt.value = String(i);
-      opt.textContent = p.name;
+      opt.textContent = tl(p.name);
       sel.appendChild(opt);
+      return opt;
     });
+    onLangChange(() => camOpts.forEach((o, i) => { o.textContent = tl(CAMERA_PRESETS[i]!.name); }));
     // And one camera that is not a fixed place: wherever the banner is.
     // Only while there is a banner to be wherever: a tifo has none until
     // somebody makes one, and a camera that goes nowhere reads as broken.
@@ -780,8 +785,11 @@ async function main(): Promise<void> {
   store.onDirty(() => { madeSomething = true; });
   /** When a reveal that is playing ends: nothing else arrives on top of it. */
   let revealUntil = 0;
+  // The first project gets the guided first tifo (ui/guide.ts), whose last
+  // step is Post it: the one-time card would be the same offer twice.
+  const guideWanted = isNew && !!(intent?.start || intent?.prompt) && !guideSeen();
   const offerPostSoon = (): void => {
-    if (!madeSomething) return;
+    if (!madeSomething || guideWanted || guideActive()) return;
     const wait = (): void => {
       if (Date.now() < revealUntil) {
         window.setTimeout(wait, revealUntil - Date.now() + 600);
@@ -1239,6 +1247,22 @@ async function main(): Promise<void> {
       });
     }
   }
+  // The guided first tifo: after the tifo has gone up in its stadium (the
+  // reveal above), never on top of it.
+  if (guideWanted) {
+    void (async () => {
+      const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+      const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+      const t0 = Date.now();
+      if (clubStart || start?.kind === 'pattern') {
+        while (Date.now() - t0 < 20000 && !((currentView as ViewMode) === '3d' && (revealUntil > 0 || reduced))) await sleep(200);
+        while (Date.now() < revealUntil) await sleep(Math.min(500, revealUntil - Date.now() + 300));
+      }
+      await sleep(900);
+      startGuide({ setView: (v) => setView(v) });
+    })();
+  }
+
   // "Publish to the community" on the Projects page opens the project here,
   // where the publish dialog and its name, tags and remix choices live.
   if (bootParams.get('publish') === '1') {

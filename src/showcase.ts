@@ -18,6 +18,7 @@
 import { escapeHtml } from './core/escape';
 import type { GalleryItem } from './net/api';
 import { localPath } from './core/langPath';
+import { track } from './net/analytics';
 
 const GRID_ID = 'showcase-grid';
 const SECTION_ID = 'showcase';
@@ -111,6 +112,11 @@ export async function mountShowcase(): Promise<void> {
       })
       .join('');
     grid.setAttribute('aria-busy', 'false');
+    // Counted, so the next review can say whether the tinted button helps.
+    // A beacon, so it survives the page leaving for the editor.
+    grid.addEventListener('click', (e) => {
+      if ((e.target as Element).closest?.('.showcase-use')) track('template_cta');
+    });
     // Each strip drawn as the tifo in the bowl (ui/bowlPicture.ts): the old
     // 16:10 tile cropped a 10:1 strip to a magnified sliver of it.
     const { hydrateBowls } = await import('./ui/bowlPicture');

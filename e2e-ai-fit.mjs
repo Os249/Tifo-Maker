@@ -34,7 +34,7 @@ const check = (name, ok, extra = '') => {
 const LS = [
   { name: 'tifo_lang_v1', value: 'en' },
   { name: 'tifo_consent_v1', value: 'essential' },
-  { name: 'tifo_news_banners_v1', value: '1' }, { name: 'tifo_news_leagues_v2', value: '1' },
+  { name: 'tifo_news_banners_v1', value: '1' }, { name: 'tifo_news_leagues_v2', value: '1' }, { name: 'tifo_guide_v1', value: 'done' },
   { name: 'tifo_banner_tour_v1', value: '1' },
   { name: 'tifo_draw_hint_v1', value: '1' },
   { name: 'mds_seen_intro', value: '1' },

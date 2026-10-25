@@ -1787,10 +1787,19 @@ export function mountToolbar(
       draftState.className = cls;
       draftState.textContent = inPanel ? text : '';
       if (saveStateTop) {
+        // The note keeps its width whether or not it says anything: it used to
+        // appear and push the view switcher ~70px sideways mid-session.
         saveStateTop.className = cls.replace('draft-state', 'save-state-top');
         saveStateTop.textContent = inPanel ? '' : text;
-        saveStateTop.hidden = inPanel || !text;
+        saveStateTop.title = inPanel ? '' : text;
+        saveStateTop.hidden = false;
       }
+      // One blue button in the header: Save while there is something it would
+      // keep (account edits not uploaded, or a browser that would not hold
+      // the draft), and otherwise Post it, the next step for a tifo that is
+      // already kept. (floodlight.css, :root[data-next].)
+      document.documentElement.dataset.next = /\b(pending|warn)\b/.test(cls) ? 'save' : 'post';
+      document.documentElement.dataset.saved = /\bok\b/.test(cls) ? 'ok' : /\b(pending|warn)\b/.test(cls) ? 'not' : '';
     };
     if (!lastDraft) { show('draft-state', ''); return; }
     if (lastDraft.ok) {

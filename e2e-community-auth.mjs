@@ -147,7 +147,7 @@ for (const [theme, lang, w, h, phone] of [['dark', 'en', 1280, 900], ['light', '
 for (const lang of ['en', 'ar']) {
   console.log(`\n— the editor, ${lang} —`);
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 860 }, storageState: { cookies: [], origins: [{ origin: B, localStorage: [
-    { name: 'tifo_lang_v1', value: lang }, { name: 'tifo_consent_v1', value: 'essential' }, { name: 'tifo_onboarded_v1', value: '1' }] }] } });
+    { name: 'tifo_lang_v1', value: lang }, { name: 'tifo_consent_v1', value: 'essential' }, { name: 'tifo_onboarded_v1', value: '1' }, { name: 'tifo_guide_v1', value: 'done' }] }] } });
   const p = await ctx.newPage();
   await p.route('**/api/auth/providers', (r) => r.fulfill({ contentType: 'application/json', body: '{"providers":["google"]}' }));
   await p.goto(B + '/app?new=1', { waitUntil: 'networkidle', timeout: 120000 });

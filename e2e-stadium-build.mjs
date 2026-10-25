@@ -68,6 +68,7 @@ async function editor(template, { memory = 4, quality = 'low' } = {}) {
   });
   await p.addInitScript(([tpl, palette]) => {
     try {
+      localStorage.setItem('tifo_guide_v1', 'done'); // the first-tifo guide is e2e-growth's to test
       if (sessionStorage.getItem('e2e_started')) return;
       sessionStorage.setItem('e2e_started', '1');
       sessionStorage.setItem('tifo_new_project', JSON.stringify({ title: 'Build', templateId: tpl, start: { kind: 'blank', palette } }));

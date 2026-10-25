@@ -24,7 +24,12 @@ export type FunnelEvent =
   | 'published'
   | 'exported'
   | 'post_opened'      // opened "Post it" (the picture of their tifo, ready to post)
-  | 'shared';          // sent a tifo or its picture to a platform (any share button)
+  | 'shared'           // sent a tifo or its picture to a platform (any share button)
+  | 'guide_started'    // the guided first tifo opened (ui/guide.ts)
+  | 'guide_done'       // ...and was followed to its last step, Post it
+  | 'guide_free'       // ...or left for the whole editor ("Free mode")
+  | 'ai_cta'           // pressed "Generate with AI" outside the editor (Projects page)
+  | 'template_cta';    // pressed "Use as template" on the home page's showcase
 
 const SESSION_KEY = 'tifo_session_v1';
 const fired = new Set<FunnelEvent>();

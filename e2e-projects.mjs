@@ -49,7 +49,7 @@ const errs = [];
 const newPage = async (viewport = { width: 1366, height: 860 }) => {
   const ctx = await browser.newContext({ viewport });
   // The cookie banner is its own subject (e2e-consent); answer it up front.
-  await ctx.addInitScript(() => { try { localStorage.setItem('tifo_consent_v1', 'essential'); } catch {} });
+  await ctx.addInitScript(() => { try { localStorage.setItem('tifo_consent_v1', 'essential'); localStorage.setItem('tifo_guide_v1', 'done'); } catch {} });
   const p = await ctx.newPage();
   p.on('pageerror', (e) => errs.push(String(e.message).slice(0, 200)));
   return p;

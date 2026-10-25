@@ -651,6 +651,11 @@ var FUNNEL_STEP = {
   view_banner:    ['Opened the Banner view', ''],
   post_opened:    ['Opened Post it',         'the picture of their tifo, ready to post'],
   shared:         ['Shared it',              'a share button, the phone share sheet or copy link'],
+  guide_started:  ['Started the guide',      'the guided first tifo, on a first project'],
+  guide_done:     ['Followed it to Post it', 'all four steps'],
+  guide_free:     ['Left it for Free mode',  'the whole editor, part way through'],
+  ai_cta:         ['Pressed Generate with AI','on the Projects page'],
+  template_cta:   ['Pressed Use as template','on the home page'],
 };
 
 /* Only these are a sequence everyone passes through in order, so only these get

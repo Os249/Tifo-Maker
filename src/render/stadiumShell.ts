@@ -113,8 +113,11 @@ function buildPitch(template: StadiumTemplate, group: THREE.Group, extent: { ax:
   apron.name = 'apron';
   group.add(apron);
   if (ground) {
-    // …and the town beyond it, out to where the haze takes over.
-    const land = new THREE.Mesh(new THREE.CircleGeometry(3000, 48), new THREE.MeshStandardMaterial({ color: 0x5d6656, roughness: 1, metalness: 0 }));
+    // …and the town beyond it, out to where the haze takes over. A dark slate,
+    // not the olive it was: from the editor's Full view the land is the whole
+    // frame round the bowl, and olive beside the navy editor was the one colour
+    // on screen that belonged to neither.
+    const land = new THREE.Mesh(new THREE.CircleGeometry(3000, 48), new THREE.MeshStandardMaterial({ color: 0x3a4250, roughness: 1, metalness: 0 }));
     land.rotation.x = -Math.PI / 2;
     land.position.y = -0.14;
     land.name = 'apron';

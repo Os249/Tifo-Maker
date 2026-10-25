@@ -12,6 +12,7 @@
  */
 
 import { cleanAddressBar } from './core/utm';
+import { track } from './net/analytics';
 import './vendor/tabler-subset.css';
 import './community.css';
 import { hydrateBowls } from './ui/bowlPicture';
@@ -706,7 +707,10 @@ async function openCreate(ai = false, link: { club?: string | null; ground?: str
 
 $('pj-new').addEventListener('click', () => void openCreate());
 $('pj-empty-new').addEventListener('click', () => void openCreate());
-$('pj-empty-ai').addEventListener('click', () => void openCreate(true));
+$('pj-empty-ai').addEventListener('click', () => {
+  track('ai_cta');
+  void openCreate(true);
+});
 
 // Importing a file makes a new project on the file's own stadium. The editor
 // validates it against that stadium's seat map, which this page does not load.

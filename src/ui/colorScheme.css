@@ -57,6 +57,10 @@
   --invert: var(--ink-strong);
   --invert-ink: #FFFFFF;
   --bar: rgba(246, 248, 251, 0.86);
+  /* A tinted button: a real filled shape (not an outline) that is still
+     second to the one solid blue on the screen. */
+  --tint: rgba(28, 111, 224, 0.10);
+  --tint-hover: rgba(28, 111, 224, 0.16);
   /* A band that is deliberately dark even on the light page. In dark mode it
      lifts off the ground instead of inverting into a white slab. */
   --panel-dark: var(--night-900);
@@ -103,6 +107,8 @@
   --invert: var(--snow);
   --invert-ink: var(--night-900);
   --bar: rgba(11, 17, 32, 0.86);
+  --tint: rgba(127, 176, 255, 0.14);
+  --tint-hover: rgba(127, 176, 255, 0.22);
   --panel-dark: var(--night-800);
   --panel-dark-ink: var(--snow);
   --panel-dark-muted: var(--mist);

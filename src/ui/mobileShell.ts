@@ -350,9 +350,8 @@ export function mountMobileShell(): MobileShell | null {
     const b = el('button', cls) as HTMLButtonElement;
     b.type = 'button';
     b.dataset.post = '1';
-    // On the canvas it is a round icon beside Match Day: with its label the
-    // pair ran into the zoom control on a 390px screen. The More sheet and
-    // the first-time card both say "Post it" in words.
+    // Everywhere it is in words now: beside Match Day too, where it was a
+    // round icon until the zoom control stopped sharing that row.
     b.innerHTML = iconOnly
       ? '<i class="ti ti-share" aria-hidden="true"></i>'
       : `<i class="ti ti-share" aria-hidden="true"></i> <span>${t('post.btn')}</span>`;
@@ -514,7 +513,9 @@ export function mountMobileShell(): MobileShell | null {
   const mdPill = el('div', 'm-md');
   mdPill.hidden = true;
   mdPill.appendChild(matchDayBtn('m-md-b'));
-  mdPill.appendChild(postBtn('m-md-b m-post', true));
+  // Labelled now, and blue: the zoom pill it once ran into is hidden in the
+  // Stadium view, and an icon was not reaching people (2.3% opened Post it).
+  mdPill.appendChild(postBtn('m-md-b m-post'));
   type MView = '2d' | 'banner' | '3d';
   let mview: MView = '2d';
   const setView = (next: MView): void => {

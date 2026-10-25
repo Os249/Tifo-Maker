@@ -253,7 +253,7 @@ const ICONS = {
 const MDS_T: Record<string, { en: string; ar: string }> = {
   brand: { en: 'Match Day Simulator', ar: 'محاكي يوم المباراة' },
   showHide: { en: 'Show/hide controls', ar: 'إظهار/إخفاء الأدوات' },
-  shortcuts: { en: 'Shortcuts: 1-9 camera views · H hide panel · T hide tifo · F fullscreen · Space play show', ar: 'اختصارات: ١-٩ لقطات الكاميرا · H إخفاء اللوحة · T إخفاء التيفو · F ملء الشاشة · مسافة لتشغيل العرض' },
+  shortcuts: { en: 'Shortcuts: 1-9 camera views · H hide panel · T hide tifo · F fullscreen · Space play show', ar: 'اختصارات: 1-9 لقطات الكاميرا · H إخفاء اللوحة · T إخفاء التيفو · F ملء الشاشة · مسافة لتشغيل العرض' },
   quality: { en: 'Quality', ar: 'الجودة' },
   snapshot: { en: 'Snapshot', ar: 'لقطة' },
   fullscreen: { en: 'Fullscreen', ar: 'ملء الشاشة' },
@@ -506,7 +506,7 @@ const MDS_T: Record<string, { en: string; ar: string }> = {
   'tip.tryApplause': { en: 'Hands, not voices', ar: 'تصفيق، مو أصوات' },
   'tip.tryHorn': { en: 'The one every away end owns exactly one of', ar: 'البوق اللي ما يخلو منه مدرج ضيوف' },
   'tip.tryChant': { en: 'One call-and-response cycle, over the drum', ar: 'دورة هتاف وحدة، فوق الطبل' },
-  'tip.drum': { en: 'The terrace drum behind the crowd, about 96 beats a minute', ar: 'طبل المدرج خلف الجمهور، حوالي ٩٦ نبضة في الدقيقة' },
+  'tip.drum': { en: 'The terrace drum behind the crowd, about 96 beats a minute', ar: 'طبل المدرج خلف الجمهور، حوالي 96 نبضة في الدقيقة' },
   recordNotUniversal: {
     en: 'This browser could not record H.264, so the file may not open on every device.',
     ar: 'هذا المتصفح ما قدر يسجّل بصيغة H.264، فقد ما يفتح الملف على كل الأجهزة.',
@@ -627,7 +627,7 @@ const MDS_T: Record<string, { en: string; ar: string }> = {
   fireJets: { en: 'Fire jets', ar: 'نوافير النار' },
   accSafety: {
     en: 'For the picture only. Flares, smoke bombs and strobes are banned in most stadiums — they burn at over 1,600 °C.',
-    ar: 'للعرض فقط. الشماريخ وقنابل الدخان والستروب ممنوعة في أغلب الملاعب — حرارتها تتجاوز ١٦٠٠ درجة مئوية.',
+    ar: 'للعرض فقط. الشماريخ وقنابل الدخان والستروب ممنوعة في أغلب الملاعب — حرارتها تتجاوز 1600 درجة مئوية.',
   },
   'tip.acc.where': { en: 'Which stand the fans with them are standing in', ar: 'أي مدرج فيه الجماهير اللي معهم' },
   'tip.acc.flags': { en: 'Hand flags waving over the crowd, and big flags on long poles', ar: 'أعلام يد ترفرف فوق الجمهور، وأعلام كبيرة على عصي طويلة' },

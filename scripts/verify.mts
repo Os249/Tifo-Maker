@@ -3356,21 +3356,16 @@ await (async () => {
   if (fails.length) throw new Error(`performance plan P2.7: ${fails.slice(0, 10).join('; ')}`);
 })();
 
-// ---- the home page, Direction C (24 Oct 2026): band colours, a curated
-// showcase, and a different hero club on each visit ----
+// ---- the home page, Direction C (24 Oct 2026): a curated showcase, a
+// different hero club on each visit, and one closing band for everyone ----
 await (async () => {
   const fails: string[] = [];
-  const { bandColours, contrast } = await import('../src/core/clubBand');
-  const { CLUBS } = await import('../src/core/clubs');
-  // Every club the start flow knows gets a band whose ink reads on it.
-  for (const c of CLUBS) {
-    const b = bandColours(c.palette);
-    if (!b) { fails.push(`${c.aliases[0]}: no band colours`); continue; }
-    if (contrast(b.band, b.ink) < 4.5) fails.push(`${c.aliases[0]}: band ink ${b.ink} on ${b.band} reads at ${contrast(b.band, b.ink).toFixed(2)}:1`);
-  }
-  const hilal = bandColours(['#0033a0', '#ffffff']);
-  if (hilal?.band !== '#0033a0' || hilal.ink !== '#ffffff') fails.push(`Al Hilal's band should be its blue with white, got ${JSON.stringify(hilal)}`);
-  if (bandColours([]) !== null) fails.push('no colours should give no band');
+  // The closing band is the site's own, whoever visits: it once repainted
+  // itself in the last club's colours and read as that club's site.
+  const landingTs = roofRead('src/landing.ts', 'utf8');
+  const landingHtml = roofRead('landing.html', 'utf8');
+  if (/clubBand|final\.ctaClub|--band', /.test(landingTs) || /setProperty\('--band/.test(landingTs)) fails.push('the closing band must not take a club\'s colours');
+  if (!/id="final-go" href="\/projects\?new=1"/.test(landingHtml)) fails.push('the closing band starts a plain new project');
 
   const { curateShowcase } = await import('../src/showcase');
   const item = (id: string, title: string, owner: string, isTemplate = false, hasThumbnail = true) =>
@@ -3406,7 +3401,7 @@ await (async () => {
   if (heroPages('<html>no hero</html>', hero).size !== 0) fails.push('a page without the hero should get no versions');
   if (pickHeroPage(new Map(), 'as is') !== 'as is') fails.push('no versions should serve the page as it is');
   if (pickHeroPage(pages, '', () => 0.999) !== [...pages.values()].at(-1)) fails.push('pickHeroPage should cover the last club');
-  console.log(`home page: band colours for ${CLUBS.length} clubs at 4.5:1 or better, curated showcase, ${pages.size} hero clubs each with its picture`);
+  console.log(`home page: one closing band for everyone, curated showcase, ${pages.size} hero clubs each with its picture`);
   if (fails.length) throw new Error(`home page: ${fails.slice(0, 10).join('; ')}`);
 })();
 
@@ -3562,4 +3557,38 @@ await (async () => {
   }
   console.log(`P3.7 compressed autosave: a busy Bernabeu draft (${json.length.toLocaleString()} characters) packs into ${packed.bytes.toLocaleString()} bytes (${(json.length * 2 / packed.bytes).toFixed(0)}x smaller than localStorage held it) in ${packMs.toFixed(0)} ms, unpacks in ${unpackMs.toFixed(0)} ms | ${bad.length} damaged records and a ${(DRAFT_MAX_BYTES * 3 / 1e6).toFixed(1)} MB bomb read as no draft (the bomb stopped in ${bombMs.toFixed(0)} ms) | the writer goes in order, says "saved" only once written, and leaves synchronously`);
   if (fails.length) throw new Error(`performance plan P3.7: ${fails.join('; ')}`);
+})();
+
+// ---- the design system only gets tighter (25 Oct 2026) ----
+// The design-principles review found the type scale in ui/tokens.css used 0
+// times against 480 raw px font sizes, no spacing scale, and raw colours and
+// inline styles all over. These are the counts after the editor and the
+// touched public pages moved onto the scales: each may go down, never up. A
+// new size, colour or inline style belongs in tokens.css (or the page's own
+// token block), and lowering a ceiling here is how a clean-up is banked.
+await (async () => {
+  const { readdirSync, readFileSync: dsRead } = await import('node:fs');
+  const { join } = await import('node:path');
+  const walk = (dir: string): string[] => readdirSync(dir, { withFileTypes: true }).flatMap((d) =>
+    d.isDirectory() ? (d.name === 'vendor' ? [] : walk(join(dir, d.name))) : d.name.endsWith('.css') ? [join(dir, d.name)] : []);
+  const TOKEN_FILES = new Set([join('src', 'ui', 'tokens.css'), join('src', 'ui', 'colorScheme.css')]);
+  let rawSizes = 0, tokenSizes = 0, rawColours = 0;
+  for (const f of walk('src')) {
+    const s = dsRead(f, 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+    rawSizes += (s.match(/font-size:\s*\d+(?:\.\d+)?px/g) ?? []).length + (s.match(/font:\s*(?:\d00\s+)?\d+(?:\.\d+)?px/g) ?? []).length;
+    tokenSizes += (s.match(/font-size:\s*var\(--fs-/g) ?? []).length;
+    if (!TOKEN_FILES.has(f)) rawColours += (s.match(/#[0-9a-fA-F]{3,8}\b|rgba?\(/g) ?? []).length;
+  }
+  const inline = readdirSync('.').filter((f) => f.endsWith('.html')).reduce((n, f) => n + (dsRead(f, 'utf8').match(/\sstyle="/g) ?? []).length, 0);
+  const CEILING = { rawSizes: 175, rawColours: 373, inline: 97 };
+  const fails: string[] = [];
+  if (rawSizes > CEILING.rawSizes) fails.push(`${rawSizes} raw px font sizes in src/**/*.css (ceiling ${CEILING.rawSizes}): use var(--fs-*)`);
+  if (rawColours > CEILING.rawColours) fails.push(`${rawColours} raw colours outside the token files (ceiling ${CEILING.rawColours}): add a token`);
+  if (inline > CEILING.inline) fails.push(`${inline} inline style attributes in the pages (ceiling ${CEILING.inline}): use a class`);
+  if (tokenSizes < 300) fails.push(`only ${tokenSizes} font sizes use the scale (was 316): something moved off it`);
+  // The editor's Arabic step: reading text one size up (floodlight.css).
+  const fl = dsRead('src/ui/floodlight.css', 'utf8');
+  if (!/:root\[dir="rtl"\]\s*\{\s*--fs-2xs:12px;\s*--fs-xs:13px;/.test(fl)) fails.push('the editor lost its Arabic type step');
+  console.log(`design system: ${tokenSizes} font sizes on the scale, ${rawSizes} raw (ceiling ${CEILING.rawSizes}), ${rawColours} raw colours (ceiling ${CEILING.rawColours}), ${inline} inline styles (ceiling ${CEILING.inline})`);
+  if (fails.length) throw new Error(`design system: ${fails.join('; ')}`);
 })();

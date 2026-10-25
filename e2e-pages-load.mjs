@@ -49,7 +49,7 @@ async function open({ lang = 'en', token = null, w = 1440, h = 900, routes = [] 
   const ctx = await browser.newContext({
     viewport: { width: w, height: h },
     storageState: { cookies: [], origins: [{ origin: B, localStorage: [
-      { name: 'tifo_lang_v1', value: lang }, { name: 'tifo_consent_v1', value: 'essential' },
+      { name: 'tifo_lang_v1', value: lang }, { name: 'tifo_consent_v1', value: 'essential' }, { name: 'tifo_guide_v1', value: 'done' },
       ...(token ? [{ name: 'tifo_token_v1', value: token }] : [])] }] },
   });
   await ctx.addInitScript(() => {

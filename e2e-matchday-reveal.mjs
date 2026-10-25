@@ -113,6 +113,7 @@ async function editor(template, { w = 960, h = 600, quality = 'low' } = {}) {
   // A blank start (no reveal plays by itself), painted with three-colour hoops once the editor is up.
   await p.addInitScript((tpl) => {
     try {
+      localStorage.setItem('tifo_guide_v1', 'done'); // the first-tifo guide is e2e-growth's to test
       if (sessionStorage.getItem('e2e_started')) return;
       sessionStorage.setItem('e2e_started', '1');
       sessionStorage.setItem('tifo_new_project', JSON.stringify({ title: 'Reveal', templateId: tpl, start: { kind: 'blank', palette: ['#262a33', '#1c5fd9', '#f2f1ec', '#d81e3a'] } }));

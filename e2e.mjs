@@ -198,7 +198,7 @@ check('work still kept after dismissing', !!(await sig()));
 // ---------------------------------------------------------------------------
 // Shared by the two blocks below: a fresh editor with the test hooks, and
 // strokes made of real pointer events.
-const LS0 = { tifo_lang_v1: 'en', tifo_consent_v1: 'essential', tifo_onboarded_v1: '1', tifo_news_banners_v1: '1', tifo_news_leagues_v2: '1', tifo_banner_tour_v1: '1', tifo_draw_hint_v1: '1' };
+const LS0 = { tifo_lang_v1: 'en', tifo_consent_v1: 'essential', tifo_onboarded_v1: '1', tifo_news_banners_v1: '1', tifo_news_leagues_v2: '1', tifo_guide_v1: 'done', tifo_banner_tour_v1: '1', tifo_draw_hint_v1: '1' };
 async function freshEditor(url = '/app?new=1&e2e=1') {
   const ctx = await browser.newContext({ viewport: { width: 1400, height: 900 } });
   await ctx.addInitScript((ls) => {

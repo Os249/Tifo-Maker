@@ -21,6 +21,7 @@ try {
       localStorage.setItem('tifo_lang_v1', lang);
       localStorage.setItem('tifo_theme_v1', theme);
       localStorage.setItem('tifo_consent_v1', 'essential');
+      localStorage.setItem('tifo_guide_v1', 'done');
       // Exercise denial rather than assuming clipboard permission is granted.
       Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async () => { throw new Error('Denied'); } } });
     }, config);
