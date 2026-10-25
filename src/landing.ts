@@ -1,5 +1,5 @@
 import { cleanAddressBar } from './core/utm';
-import { initLang, applyDom, toggleLang, t, tv } from './ui/i18n';
+import { initLang, applyDom, localPath, toggleLang, t, tv, getLang } from './ui/i18n';
 import { initScheme, setSchemeLabels } from './ui/colorScheme';
 import { localizeHero, mountHeroStadium } from './heroStadium';
 import { mountShowcase } from './showcase';
@@ -56,7 +56,7 @@ function renderLeagues(): void {
   if (!strip) return;
   strip.innerHTML = LEAGUE_STRIP.map((l) => {
     const n = leagueCounts?.get(l.tag);
-    return `<a class="league" href="/projects?new=1&amp;league=${encodeURIComponent(l.tag)}">
+    return `<a class="league" href="${escapeHtml(localPath(`/projects?new=1&league=${encodeURIComponent(l.tag)}`))}">
       <img src="${l.pic}" alt="" width="480" height="300" loading="lazy" decoding="async" />
       <span class="league-name">${escapeHtml(t(l.key))}</span>
       ${n ? `<span class="league-count">${escapeHtml(tv('lgs.count', { n }))}</span>` : ''}
@@ -123,12 +123,12 @@ function mountGroundFinder(): void {
   const paint = (): void => {
     list.innerHTML = hits.length
       ? hits.map((h, i) => `<li role="option" id="gf-${i}" class="gf-hit${i === active ? ' on' : ''}" aria-selected="${i === active}">
-          <a href="${h.href}">
+          <a href="${escapeHtml(localPath(h.href))}">
             <span class="gf-scarf${h.colours ? '' : ' none'}"${h.colours ? ` style="--c1:${h.colours[0]};--c2:${h.colours[1]}"` : ''}></span>
             <span class="gf-text"><b>${escapeHtml(h.name)}</b><span>${escapeHtml(h.sub)}</span></span>
             <span class="gf-kind">${escapeHtml(t(h.kind === 'club' ? 'hero.searchClub' : 'hero.searchGround'))}</span>
           </a></li>`).join('')
-      : `<li class="gf-none" role="option" aria-disabled="true"><a href="/projects?new=1">${escapeHtml(t('hero.searchNone'))}</a></li>`;
+      : `<li class="gf-none" role="option" aria-disabled="true"><a href="${localPath('/projects?new=1')}">${escapeHtml(t('hero.searchNone'))}</a></li>`;
     list.hidden = false;
     input.setAttribute('aria-expanded', 'true');
     if (active >= 0) input.setAttribute('aria-activedescendant', `gf-${active}`);
@@ -159,16 +159,80 @@ function mountGroundFinder(): void {
       close();
     }
   });
-  form.addEventListener('submit', (e) => {
+  // Start: the highlighted club or ground, or the start flow when nothing is
+  // typed (or nothing matched). A search typed faster than the catalogue
+  // arrived is finished first, so Start never ignores what is in the box.
+  form.addEventListener('submit', async (e) => {
     e.preventDefault();
+    if (input.value.trim() && !hits.length) await search();
     const hit = hits[active >= 0 ? active : 0];
-    location.assign(hit ? hit.href : '/projects?new=1');
+    location.assign(localPath(hit ? hit.href : '/projects?new=1'));
   });
   document.addEventListener('click', (e) => {
     if (!form.contains(e.target as Node)) close();
   });
 }
 mountGroundFinder();
+
+// ------------------------------------------------------------ the closing band ---
+
+/**
+ * The last band is TifoMaker's own blue and a plain Start for everyone. Only a
+ * visitor who has already started a tifo for a club (the start flow remembers
+ * it) gets that club: its colours (core/clubs.ts, picked for contrast by
+ * core/clubBand.ts) and "Start the {club} tifo". Painted when the band is near
+ * the screen, so a visitor who never scrolls there loads none of it.
+ */
+const LAST_CLUB_KEY = 'tifo_last_club_v1';
+function rememberedClub(): string | null {
+  try {
+    const v = localStorage.getItem(LAST_CLUB_KEY);
+    return v && /^[a-z0-9-]+$/.test(v) ? v : null;
+  } catch {
+    return null;
+  }
+}
+let bandShown = false;
+
+async function paintBand(): Promise<void> {
+  const section = document.getElementById('final-cta');
+  const sub = document.getElementById('final-sub');
+  const go = document.getElementById('final-go') as HTMLAnchorElement | null;
+  const other = document.getElementById('final-other');
+  const id = rememberedClub();
+  if (!section || !sub || !go || !other || !id) return; // everyone else: the plain band
+  const [{ clubById }, { matchClub }, { bandColours }] = await Promise.all([
+    import('./core/clubGrounds'),
+    import('./core/clubs'),
+    import('./core/clubBand'),
+  ]);
+  const club = clubById(id);
+  const colours = club ? bandColours(matchClub(club.en.toLowerCase())?.palette ?? []) : null;
+  if (!club || !colours) return;
+  const name = getLang() === 'ar' ? club.ar : club.en;
+  section.style.setProperty('--band', colours.band);
+  section.style.setProperty('--band-ink', colours.ink);
+  section.dataset.club = club.id;
+  sub.removeAttribute('data-i18n');
+  sub.textContent = tv('final.subClub', { club: name });
+  go.removeAttribute('data-i18n');
+  go.textContent = tv('final.ctaClub', { club: name });
+  go.href = `/projects?new=1&club=${encodeURIComponent(club.id)}`;
+  other.hidden = false;
+}
+
+{
+  const band = document.getElementById('final-cta');
+  if (band && rememberedClub() && typeof IntersectionObserver !== 'undefined') {
+    const io = new IntersectionObserver((entries) => {
+      if (!entries.some((e) => e.isIntersecting)) return;
+      io.disconnect();
+      bandShown = true;
+      void paintBand();
+    }, { rootMargin: '400px 0px' });
+    io.observe(band);
+  }
+}
 
 // Keep the document <title> and toggle button label in sync.
 const toggle = document.getElementById('lang-toggle');
@@ -180,6 +244,7 @@ toggle?.addEventListener('click', () => {
   localizeDailyTifo();
   localizeHero();
   renderLeagues();
+  if (bandShown) void paintBand();
   if (toggle) toggle.textContent = t('common.language');
 });
 

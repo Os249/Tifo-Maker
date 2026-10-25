@@ -10,7 +10,7 @@ import {
 } from './net/api';
 import { paint2D } from './ui/viewer';
 import { openShareModal } from './ui/shareModal';
-import { initLang, applyDom, getLang, t, tl, tv, toggleLang, tTitle } from './ui/i18n';
+import { initLang, applyDom, getLang, localPath, t, tl, tv, toggleLang, tTitle } from './ui/i18n';
 import { escapeHtml } from './core/escape';
 import { hydrateBowls } from './ui/bowlPicture';
 
@@ -32,7 +32,7 @@ import { hydrateBowls } from './ui/bowlPicture';
  */
 
 function designIdFromLocation(): string | null {
-  const m = location.pathname.match(/^\/t\/([A-Za-z0-9-]+)\/?$/);
+  const m = location.pathname.match(/^(?:\/ar)?\/t\/([A-Za-z0-9-]+)\/?$/);
   if (m) return m[1];
   const q = new URLSearchParams(location.search);
   const id = q.get('id') || q.get('design');
@@ -42,12 +42,12 @@ function designIdFromLocation(): string | null {
 function unavailable(app: HTMLElement, msg: string): void {
   app.innerHTML = `
     <div class="s-unavailable">
-      <a class="wordmark s-brand" href="/" dir="ltr">TIFO<b>MAKER</b></a>
+      <a class="wordmark s-brand" href="${localPath('/')}" dir="ltr">TIFO<b>MAKER</b></a>
       <h1>${escapeHtml(t('sh.unavailable'))}</h1>
       <p>${escapeHtml(msg)}</p>
       <div class="s-unavailable-acts">
-        <a class="s-btn primary" href="/projects?new=1">${escapeHtml(t('sh.make'))}</a>
-        <a class="s-btn" href="/community">${escapeHtml(t('sh.browse'))}</a>
+        <a class="s-btn primary" href="${localPath('/projects?new=1')}">${escapeHtml(t('sh.make'))}</a>
+        <a class="s-btn" href="${localPath('/community')}">${escapeHtml(t('sh.browse'))}</a>
       </div>
     </div>`;
 }
@@ -107,16 +107,16 @@ async function main(): Promise<void> {
 
   const title = item ? tTitle(item) : meta.title;
   const ground = shortGround(template.id);
-  const startHere = `/projects?new=1&ground=${encodeURIComponent(template.id)}`;
+  const startHere = localPath(`/projects?new=1&ground=${encodeURIComponent(template.id)}`);
   const canRemix = item?.allowRemix !== false;
   let likes = item?.likeScore ?? 0;
   let mine = item?.myVote === 1;
 
   app.innerHTML = `
     <header class="s-top">
-      <a class="wordmark s-brand" href="/" dir="ltr">TIFO<b>MAKER</b></a>
+      <a class="wordmark s-brand" href="${localPath('/')}" dir="ltr">TIFO<b>MAKER</b></a>
       <nav class="s-nav">
-        <a class="s-navlink" href="/community">${escapeHtml(t('nav.community'))}</a>
+        <a class="s-navlink" href="${localPath('/community')}">${escapeHtml(t('nav.community'))}</a>
         <button class="s-navlink s-lang" id="s-lang" type="button">${escapeHtml(t('common.language'))}</button>
         <a class="s-btn primary s-make-top" href="${startHere}">${escapeHtml(t('sh.make'))}</a>
       </nav>
@@ -138,8 +138,8 @@ async function main(): Promise<void> {
             <span class="s-sr">${escapeHtml(t('sh.like'))}</span>
           </button>
           <button class="s-btn" id="s-share" type="button"><i class="ti ti-share" aria-hidden="true"></i> ${escapeHtml(t('v.share'))}</button>
-          ${canRemix ? `<a class="s-btn" id="s-fork" href="/d/${encodeURIComponent(id)}"><i class="ti ti-git-fork" aria-hidden="true"></i> ${escapeHtml(t('sh.remix'))}</a>` : ''}
-          <a class="s-btn" href="/d/${encodeURIComponent(id)}?sim=1"><i class="ti ti-building-stadium" aria-hidden="true"></i> ${escapeHtml(t('sh.matchday'))}</a>
+          ${canRemix ? `<a class="s-btn" id="s-fork" href="${localPath(`/d/${encodeURIComponent(id)}`)}"><i class="ti ti-git-fork" aria-hidden="true"></i> ${escapeHtml(t('sh.remix'))}</a>` : ''}
+          <a class="s-btn" href="${localPath(`/d/${encodeURIComponent(id)}?sim=1`)}"><i class="ti ti-building-stadium" aria-hidden="true"></i> ${escapeHtml(t('sh.matchday'))}</a>
         </div>
       </div>
       <aside class="s-make">
@@ -159,7 +159,7 @@ async function main(): Promise<void> {
     <section class="s-block" id="s-comments" hidden>
       <h2 class="s-h2">${escapeHtml(t('sh.comments'))}</h2>
       <ul class="s-cmts" id="s-cmts"></ul>
-      <a class="s-more-link" href="/community?t=${encodeURIComponent(id)}">${escapeHtml(t('sh.joinTalk'))} ${getLang() === 'ar' ? '←' : '→'}</a>
+      <a class="s-more-link" href="${localPath(`/community?t=${encodeURIComponent(id)}`)}">${escapeHtml(t('sh.joinTalk'))} ${getLang() === 'ar' ? '←' : '→'}</a>
     </section>
 
     <section class="s-block" id="s-more" hidden>
@@ -168,7 +168,7 @@ async function main(): Promise<void> {
     </section>
 
     <footer class="s-foot">
-      ${escapeHtml(t('sh.madeWith'))} <a href="/">TifoMaker</a>: ${escapeHtml(t('sh.madeWith2'))}
+      ${escapeHtml(t('sh.madeWith'))} <a href="${localPath('/')}">TifoMaker</a>: ${escapeHtml(t('sh.madeWith2'))}
     </footer>`;
 
   (document.getElementById('s-title') as HTMLElement).textContent = title;
@@ -277,7 +277,7 @@ async function main(): Promise<void> {
       document.getElementById('s-more-h')!.innerHTML = `${escapeHtml(before ?? '')}<bdi dir="ltr">@${escapeHtml(p.username)}</bdi>${escapeHtml(after ?? '')}`;
       const grid = document.getElementById('s-more-grid')!;
       grid.innerHTML = more.map((d) => `
-        <a class="s-more-card" href="/t/${encodeURIComponent(d.id)}">
+        <a class="s-more-card" href="${localPath(`/t/${encodeURIComponent(d.id)}`)}">
           <span class="s-more-pic is-bowl"><img data-bowl="${thumbnailUrl(d.id)}" alt="" /></span>
           <span class="s-more-title">${escapeHtml(tTitle(d))}</span>
         </a>`).join('');

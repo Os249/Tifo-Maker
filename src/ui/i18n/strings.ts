@@ -215,6 +215,32 @@ export const STRINGS: Record<string, { en: string; ar: string }> = {
   'hero.searchGround': { en: 'Ground', ar: 'ملعب' },
   'hero.makeThis': { en: 'Make this tifo', ar: 'سوّ هالتيفو' },
   'hero.clubsLabel': { en: 'Try a club', ar: 'جرّب نادي' },
+  // ---- home page, "find your ground" (Direction C, 24 Oct 2026) ----
+  'nav.start': { en: 'Start your tifo', ar: 'ابدأ تيفوك' },
+  'hero.go': { en: 'Start', ar: 'ابدأ' },
+  'how.title2': { en: 'From idea to the stands in three steps', ar: 'من الفكرة للمدرج في ثلاث خطوات' },
+  'how.step2.body2': {
+    en: 'Paint it stand by stand, add text and pictures, or describe your idea and let the AI draw it. Hang banners from the upper tier in the same design.',
+    ar: 'ارسمه مدرج مدرج، أضف نص وصور، أو وصّف فكرتك والذكاء الاصطناعي يرسمها لك. وعلّق لافتات من الطابق العلوي بنفس التصميم.',
+  },
+  'how.step3.title2': { en: 'See it, then get the team ready', ar: 'عاينه وجهّز الفريق' },
+  'how.step3.body2': {
+    en: 'Watch it rise on match day in 3D, with the floodlights, the crowd and the drum. Then download seat-by-seat sheets so every volunteer knows which card to hold.',
+    ar: 'شوفه يرتفع يوم المباراة ثلاثي الأبعاد، مع الكشافات والجمهور والطبل. وبعدها نزّل أوراق مقعد بمقعد عشان كل متطوع يعرف أي كرت يرفع.',
+  },
+  'how.tagText': { en: 'Text and pictures', ar: 'نص وصور' },
+  'showcase.title2': { en: 'From the stands', ar: 'من المدرجات' },
+  'showcase.sub3': {
+    en: 'Tifos designed by fans. Open one to see it in the stands, or make it yours.',
+    ar: 'تيفوهات صمّمها مشجعين. افتح أي واحد وشوفه في المدرجات، أو خلّه لك.',
+  },
+  'showcase.use': { en: 'Use as template', ar: 'استخدم القالب' },
+  'final.subClub': {
+    en: 'In {club}’s real ground, in its colours. Free, in your browser.',
+    ar: 'في ملعب {club} الحقيقي وبألوانه. ببلاش ومن متصفحك.',
+  },
+  'final.ctaClub': { en: 'Start the {club} tifo', ar: 'ابدأ تيفو {club}' },
+  'final.other': { en: 'Not your club? Pick yours', ar: 'مو ناديك؟ اختر ناديك' },
   'lgs.title': { en: 'Real grounds from eight leagues', ar: 'ملاعب حقيقية من ثمان دوريات' },
   'lgs.sub': {
     en: 'Every seat where it really is, block by block, so the seat you paint is the seat a fan holds the card in.',
@@ -2371,6 +2397,62 @@ export const STRINGS: Record<string, { en: string; ar: string }> = {
 
   // ---- A club start: the offline designer drawing the club's tifo ----
   'ob.clubMaking': { en: 'Designing your tifo…', ar: 'جاري تصميم تيفوك…' },
+
+  // ---- What a page says about itself: its title, its description and its
+  // link card (performance plan P3.3). The server writes these into the pages
+  // it renders, /ar/… in Arabic; the English is exactly what it wrote before.
+  'meta.site': { en: 'TifoMaker', ar: 'تيفو ميكر' },
+  'meta.card.alt': { en: 'A stadium bowl with a red and white tifo across the stands, designed in TifoMaker.', ar: 'مدرج ملعب عليه تيفو أحمر وأبيض، مصمّم في تيفو ميكر.' },
+  'meta.landing.title': { en: 'TifoMaker: design the display 60,000 fans will never forget', ar: 'تيفو ميكر: صمّم الاستعراض اللي ٦٠٬٠٠٠ مشجع ما راح ينسونه' },
+  'meta.landing.desc': {
+    en: 'Design a stadium tifo in your browser, watch it light up the stands in 3D, and export the seat-by-seat instructions that make it real on match day. Free, no account needed to start.',
+    ar: 'صمّم تيفو لملعبك من متصفحك، وشوفه ينوّر المدرجات بثلاثة أبعاد، وصدّر تعليمات كل مقعد اللي تخليه حقيقة يوم المباراة. ببلاش، وما تحتاج حساب عشان تبدأ.',
+  },
+  'meta.app.title': { en: 'The TifoMaker editor: paint 60,000 seats', ar: 'محرر تيفو ميكر: لوّن ٦٠٬٠٠٠ مقعد' },
+  'meta.app.desc': {
+    en: 'Paint a tifo seat by seat, drop in a crest or text, and watch the whole bowl update in 3D as you work. Free, in the browser, no download.',
+    ar: 'لوّن التيفو مقعد مقعد، وحط شعار أو نص، وشوف المدرج كله يتحدّث بثلاثة أبعاد وأنت تشتغل. ببلاش، من المتصفح، بدون تحميل.',
+  },
+  'meta.community.title': { en: 'The tifo community: displays from supporters worldwide', ar: 'مجتمع التيفو: استعراضات من جماهير حول العالم' },
+  'meta.community.desc': {
+    en: 'Browse tifos designed by supporters around the world. Like, comment, follow the people making them, and remix any display into your own.',
+    ar: 'تصفّح تيفوهات صمّمها مشجعين من كل مكان. اعجب وعلّق وتابع اللي يصممونها، وسوّ من أي استعراض نسختك الخاصة.',
+  },
+  'meta.clubs.title': { en: 'TifoMaker for clubs: run the whole stand like a production', ar: 'تيفو ميكر للأندية: سيّر المدرج كله كأنه إنتاج محترف' },
+  'meta.clubs.desc': {
+    en: 'Your actual venue modelled to seat-level accuracy, a branded editor for your design team, white-label fan pages and match-day exports.',
+    ar: 'ملعبك الحقيقي بدقة على مستوى المقعد، ومحرر بهوية ناديك لفريق التصميم، وصفحات للجماهير باسمك، وملفات جاهزة ليوم المباراة.',
+  },
+  'meta.legal.title': { en: 'Terms, privacy and acceptable use: TifoMaker', ar: 'الشروط والخصوصية والاستخدام المقبول: تيفو ميكر' },
+  'meta.legal.desc': {
+    en: 'How TifoMaker handles your designs and your data, what you can publish, and how to get in touch.',
+    ar: 'كيف يتعامل تيفو ميكر مع تصاميمك وبياناتك، وإيش تقدر تنشر، وكيف تتواصل معنا.',
+  },
+  'meta.seat.title': { en: 'Your card · TifoMaker', ar: 'كرتك · تيفو ميكر' },
+  'meta.reset.title': { en: 'Reset password · TifoMaker', ar: 'إعادة تعيين كلمة المرور · تيفو ميكر' },
+  'meta.account.title': { en: 'Account · TifoMaker', ar: 'الحساب · تيفو ميكر' },
+  // A design's own page, /t/:id (and /d/:id, which has always said "Tifo Maker").
+  'meta.tifo.title': { en: '{title}: TifoMaker', ar: '{title}: تيفو ميكر' },
+  'meta.tifo.none.title': { en: 'TifoMaker', ar: 'تيفو ميكر' },
+  'meta.tifo.none.desc': { en: 'A stadium tifo on TifoMaker, open it to view in full.', ar: 'تيفو ملعب على تيفو ميكر، افتحه وشوفه كامل.' },
+  'meta.tifo.alt': { en: '"{title}", a stadium tifo designed in TifoMaker.', ar: '«{title}»، تيفو ملعب مصمّم في تيفو ميكر.' },
+  'meta.tifo.altBy': { en: '"{title}", a stadium tifo designed in TifoMaker by @{owner}.', ar: '«{title}»، تيفو ملعب صمّمه @{owner} في تيفو ميكر.' },
+  'meta.design.site': { en: 'Tifo Maker', ar: 'تيفو ميكر' },
+  'meta.design.title': { en: '{title}: Tifo Maker', ar: '{title}: تيفو ميكر' },
+  'meta.design.none.desc': { en: 'Design a 60,000-seat stadium tifo and share it.', ar: 'صمّم تيفو لملعب فيه ٦٠٬٠٠٠ مقعد وشاركه.' },
+  // A design's description when its maker wrote none, put together from these.
+  'meta.describe.named': { en: '"{title}", a tifo', ar: '«{title}»، تيفو' },
+  'meta.describe.unnamed': { en: 'A tifo', ar: 'تيفو' },
+  'meta.describe.on': { en: 'on {ground}', ar: 'في {ground}' },
+  'meta.describe.somewhere': { en: 'a stadium', ar: 'ملعب' },
+  'meta.describe.seats': { en: 'across {seats} seats', ar: 'على {seats} مقعد' },
+  'meta.describe.by': { en: 'by @{owner}', ar: 'من تصميم @{owner}' },
+  'meta.describe.remixed': { en: 'Remixed from another supporter’s design.', ar: 'معدّل من تصميم مشجع ثاني.' },
+  'meta.describe.open': { en: 'Open it to view the full stand in 3D, or remix it into your own.', ar: 'افتحه وشوف المدرج كامل بثلاثة أبعاد، أو سوّ منه نسختك.' },
+  // Server-rendered lists: the Tifo of the Day card and /community's plain list of links.
+  'meta.someone': { en: 'a supporter', ar: 'مشجع' },
+  'meta.daily.alt': { en: '{title}, a stadium tifo by @{owner}', ar: '{title}، تيفو ملعب من تصميم @{owner}' },
+  'meta.feed.label': { en: 'Published tifos', ar: 'تيفوهات منشورة' },
 
   'common.language': { en: 'العربية', ar: 'English' }, // toggle shows the OTHER language
 };

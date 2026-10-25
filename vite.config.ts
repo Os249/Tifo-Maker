@@ -10,6 +10,7 @@ import { HERO_GROUND_KEYS } from './src/heroGrounds';
 import HERO_TIFOS from './src/data/heroTifos.json';
 import { precompress } from './scripts/vite/precompress';
 import { fontPreload } from './scripts/vite/fontPreload';
+import { arabicPages } from './scripts/vite/arabicPages';
 
 const INPUT = {
   landing: resolve(__dirname, 'landing.html'),
@@ -24,6 +25,14 @@ const INPUT = {
   account: resolve(__dirname, 'account.html'),
   projects: resolve(__dirname, 'projects.html'),
 };
+
+/**
+ * The pages built a second time in Arabic, served under /ar/ (performance
+ * plan P3.3; scripts/vite/arabicPages.ts). Every page whose words exist in
+ * Arabic. Not the .tifo spec: it is written in English only, and an "Arabic"
+ * page of English text would be read aloud in the wrong language.
+ */
+const ARABIC_TWINS = Object.keys(INPUT).filter((name) => name !== 'spec');
 
 /**
  * theme-boot.js under a content-hashed name (performance plan P1.29).
@@ -151,27 +160,30 @@ function checkHeroGrounds(): Plugin {
 // Two entry points: the marketing landing (served at /) and the editor app
 // (served at /app and for /d/:id share links). Both build into dist/.
 export default defineConfig({
-  plugins: [checkRealBlockIds(), checkHeroGrounds(), i18nTables(INPUT), hashThemeBoot(), fontPreload(INPUT), checkBuiltScripts(), precompress()],
+  plugins: [checkRealBlockIds(), checkHeroGrounds(), i18nTables(INPUT), hashThemeBoot(), arabicPages(INPUT, ARABIC_TWINS), fontPreload(INPUT), checkBuiltScripts(), precompress()],
   build: {
     target: 'es2022',
-    rollupOptions: {
+    // Vite 8 bundles with Rolldown (performance plan P3.8). Its options are
+    // rolldownOptions; rollupOptions and manualChunks are deprecated aliases.
+    rolldownOptions: {
       input: INPUT,
       output: {
-        /**
-         * three.js in a chunk of its own (performance plan P2.19).
-         *
-         * It used to share a chunk with preview3d.ts and the code around it, so
-         * any change to the 3D code (19 of the last 59 commits) gave the chunk a
-         * new hash and every returning visitor downloaded three again: about
-         * 139 KB gz for a library that had not changed. On its own, its file
-         * name changes only when three itself (or the set of its exports the
-         * app uses) does. It is still loaded exactly where it was: only by the
-         * 3D code that imports it, never at page load where it was not before
-         * (e2e-pages-load checks both).
-         */
-        manualChunks(id) {
-          if (/\/node_modules\/three\/build\//.test(id)) return 'three';
-          return undefined;
+        codeSplitting: {
+          groups: [
+            /**
+             * three.js in a chunk of its own (performance plan P2.19).
+             *
+             * It used to share a chunk with preview3d.ts and the code around it, so
+             * any change to the 3D code (19 of the last 59 commits) gave the chunk a
+             * new hash and every returning visitor downloaded three again: about
+             * 139 KB gz for a library that had not changed. On its own, its file
+             * name changes only when three itself (or the set of its exports the
+             * app uses) does. It is still loaded exactly where it was: only by the
+             * 3D code that imports it, never at page load where it was not before
+             * (e2e-pages-load checks both).
+             */
+            { name: 'three', test: /[\\/]node_modules[\\/]three[\\/]build[\\/]/ },
+          ],
         },
       },
     },

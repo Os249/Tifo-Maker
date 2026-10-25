@@ -157,9 +157,10 @@ const gallery = await (await fetch(B + '/api/gallery?templates=1&limit=30')).jso
 // banners whose cloth waves between any two frames.
 const DESIGN = (gallery.find((g) => !(g.tags ?? []).includes('banners')) ?? gallery[0]).id;
 
-async function openPage(path, { lang = 'en', w = 1440, h = 900, extra = [] } = {}) {
+async function openPage(path, { lang = 'en', w = 1440, h = 900, extra = [], dpr } = {}) {
   const ctx = await browser.newContext({
     viewport: { width: w, height: h },
+    ...(dpr ? { deviceScaleFactor: dpr } : {}),
     storageState: { cookies: [], origins: [{ origin: B, localStorage: LS(lang, extra) }] },
   });
   const p = await ctx.newPage();
@@ -354,7 +355,19 @@ console.log('\n— the editor, in Arabic —');
 // ---------------------------------------------------------------------------
 console.log('\n— Match Day —');
 {
-  const [ctx, p, errs] = await openPage('/app?sim=1&design=' + DESIGN, { w: 1100, h: 700 });
+  // The pixel ratio pinned at Match Day's floor (0.75). Under software GL its
+  // frames are slow enough that adaptPerf lowers the ratio, 1 -> 0.8 -> 0.75,
+  // once it has 1.2 s of moving frames to judge, and it never raises it again
+  // once the scene is still. Whether that happens while the stand settles,
+  // before "the design as it stands" is taken, or during the show depends on
+  // how quickly Match Day starts (measured on this machine after the switch to
+  // Low: s2-fix's first frame came 3.7 s after the one before, stage 3's 1.85 s,
+  // and its scene went still before adaptPerf had judged it). In the second
+  // case every frame after Play is the same design at a lower resolution: 4-5 %
+  // of the thumbnail's pixels differ from the reference, and the hold, settle
+  // and Stop checks failed on a design drawn back exactly. Pinned, it cannot
+  // move either way, and the frames compare the picture, not the resolution.
+  const [ctx, p, errs] = await openPage('/app?sim=1&design=' + DESIGN, { w: 1100, h: 700, dpr: 0.75 });
   await p.waitForSelector('.mds-overlay canvas', { timeout: 120000 });
   await p.waitForTimeout(5000);
   const openSec = async (k) => {

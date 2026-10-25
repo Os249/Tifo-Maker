@@ -76,3 +76,21 @@ export function detectViewTier(): ViewTier {
 export function viewTierSettings(tier: ViewTier = detectViewTier()): ViewTierSettings {
   return VIEW_TIERS[tier];
 }
+
+/**
+ * Should a renderer check its shaders for errors? In development, in the
+ * browser suites (all on this machine, watching the console for them) and with
+ * ?e2e. On the live site each check is a synchronous round trip to the GPU per
+ * program, at the first frame (performance plan P1.24); the Stadium view's
+ * first frame with its building in spent seconds there on a phone-class CPU
+ * (performance plan P3.6). Shared by Match Day and the Stadium view.
+ */
+export function shaderChecksWanted(): boolean {
+  try {
+    if ((import.meta as unknown as { env?: { DEV?: boolean } }).env?.DEV) return true;
+    if (/^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname)) return true;
+    return new URLSearchParams(location.search).has('e2e');
+  } catch {
+    return true;
+  }
+}

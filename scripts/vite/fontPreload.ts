@@ -16,18 +16,30 @@
  * the HTML at build time, the way theme-boot.js is renamed: no inline script,
  * same origin, nothing for the CSP to allow.
  *
- * The build FAILS unless every page has exactly that one preload, naming an
- * asset that exists and that the page's own CSS references; and unless the
- * language toggle's tiny font (src/vendor/almarai-toggle.css) still covers
- * every letter of the toggle's label.
+ * Not the Arabic pages (performance plan P3.3; scripts/vite/arabicPages.ts).
+ * Their text is nearly all Arabic, which Inter has no letters for, and on a
+ * slow link a font preload competes with the render-blocking stylesheet
+ * while font-display: swap paints the text anyway. Measured on a phone-class
+ * CPU at 1.6 Mbit/s and 250 ms a request, Arabic text first appeared at
+ * landing 1405 ms with Inter and Almarai Arabic 400 preloaded, 1125 ms with
+ * Inter alone and 1021 ms with neither (community 1197 / 963 / 909, clubs
+ * 1353 / 1097 / 988, /t 1102 / 897 / 769). So they preload no font.
+ *
+ * The build FAILS unless every English page has exactly that one preload,
+ * naming an asset that exists and that the page's own CSS references, and
+ * every Arabic page none; and unless the language toggle's tiny
+ * font (src/vendor/almarai-toggle.css) still covers every letter of the
+ * toggle's label.
  */
 import type { HtmlTagDescriptor, Plugin } from 'vite';
+import { pathKey } from './pathKey';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { STRINGS } from '../../src/ui/i18n/strings';
 
 /** The file every page draws its text with first. */
 const MAIN_FONT = /^assets\/inter-latin-wght-normal-[\w-]+\.woff2$/;
+
 
 export function fontPreload(pages: Record<string, string>): Plugin {
   let root = '';
@@ -70,31 +82,43 @@ export function fontPreload(pages: Record<string, string>): Plugin {
     },
     generateBundle(_options, bundle) {
       const problems: string[] = [];
+      // The Arabic pages (made just before this, by arabicPages) were copied
+      // from the English ones with its Inter preload; they keep none.
+      const twins = Object.values(bundle).filter((o) => o.type === 'asset' && /^ar\/[\w-]+\.html$/.test(o.fileName));
+      for (const out of twins) {
+        if (out.type !== 'asset') continue;
+        out.source = String(out.source).replace(/\n?\s*<link\b[^>]*\brel="preload"[^>]*\bas="font"[^>]*>/g, '');
+      }
+      const check = (name: string, html: string, want: RegExp[]): void => {
+        const preloads = [...html.matchAll(/<link\b[^>]*\brel="preload"[^>]*>/g)].map((m) => m[0]);
+        const fonts = preloads.filter((l) => /\bas="font"/.test(l));
+        if (fonts.length !== want.length) {
+          problems.push(`${name}: ${fonts.length} font preloads, expected ${want.length}`);
+          return;
+        }
+        const sheets = [...html.matchAll(/<link\b[^>]*\brel="stylesheet"[^>]*\bhref="\/([^"]+)"/g)].map((m) => m[1]!);
+        fonts.forEach((tag, i) => {
+          const href = /\bhref="\/([^"]+)"/.exec(tag)?.[1] ?? '';
+          if (!want[i]!.test(href) || !bundle[href]) problems.push(`${name}: preloads ${href || 'nothing'}, which is not the built ${want[i]!.source}`);
+          if (!/\bcrossorigin\b/.test(tag) || !/\btype="font\/woff2"/.test(tag)) problems.push(`${name}: the font preload lacks crossorigin or its type`);
+          // And the page's own CSS uses that very file, so the preload is the request the CSS would make.
+          const usedByCss = sheets.some((s) => {
+            const css = bundle[s];
+            return css && css.type === 'asset' && String(css.source).includes(href.replace(/^assets\//, ''));
+          });
+          if (!usedByCss) problems.push(`${name}: its CSS (${sheets.join(', ') || 'none'}) does not reference the preloaded ${href}`);
+        });
+      };
       for (const file of Object.values(pages)) {
-        const name = Object.keys(bundle).find((n) => n.endsWith('.html') && resolve(root, n) === file);
+        const name = Object.keys(bundle).find((n) => n.endsWith('.html') && pathKey(resolve(root, n)) === pathKey(file));
         const out = name ? bundle[name] : undefined;
         if (!out || out.type !== 'asset') {
           problems.push(`${file}: not in the bundle`);
           continue;
         }
-        const html = String(out.source);
-        const preloads = [...html.matchAll(/<link\b[^>]*\brel="preload"[^>]*>/g)].map((m) => m[0]);
-        const fonts = preloads.filter((l) => /\bas="font"/.test(l));
-        if (fonts.length !== 1) {
-          problems.push(`${name}: ${fonts.length} font preloads, expected 1`);
-          continue;
-        }
-        const href = /\bhref="\/([^"]+)"/.exec(fonts[0]!)?.[1] ?? '';
-        if (!MAIN_FONT.test(href) || !bundle[href]) problems.push(`${name}: preloads ${href || 'nothing'}, which is not the built Inter Latin file`);
-        if (!/\bcrossorigin\b/.test(fonts[0]!) || !/\btype="font\/woff2"/.test(fonts[0]!)) problems.push(`${name}: the font preload lacks crossorigin or its type`);
-        // And the page's own CSS uses that very file, so the preload is the request the CSS would make.
-        const sheets = [...html.matchAll(/<link\b[^>]*\brel="stylesheet"[^>]*\bhref="\/([^"]+)"/g)].map((m) => m[1]!);
-        const usedByCss = sheets.some((s) => {
-          const css = bundle[s];
-          return css && css.type === 'asset' && String(css.source).includes(href.replace(/^assets\//, ''));
-        });
-        if (!usedByCss) problems.push(`${name}: its CSS (${sheets.join(', ') || 'none'}) does not reference the preloaded ${href}`);
+        check(name!, String(out.source), [MAIN_FONT]);
       }
+      for (const out of twins) if (out.type === 'asset') check(out.fileName, String(out.source), []);
       if (problems.length) this.error(`font preload:\n  ${problems.join('\n  ')}`);
     },
   };

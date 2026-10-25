@@ -117,10 +117,10 @@ export function buildDraft(args: {
 }
 
 /** Write the draft. Never throws; the caller decides what to tell the user. */
-export function writeDraft(env: DraftEnvelope): DraftWriteResult {
+export function writeDraft(env: DraftEnvelope, serialised?: string): DraftWriteResult {
   let json: string;
   try {
-    json = JSON.stringify(env);
+    json = serialised ?? JSON.stringify(env);
   } catch {
     return { ok: false, reason: 'blocked' };
   }
@@ -196,7 +196,58 @@ export interface DraftWriterOptions {
    * a banner being moved. Nothing is written until it ends (release()).
    */
   held?: () => boolean;
+  /**
+   * The write for leaving the page (flushNow): synchronous, so it is done
+   * before a closing tab is gone. `write` may compress and store
+   * asynchronously (performance plan P3.7), which a closing tab may never
+   * finish. Defaults to `write` when that is synchronous.
+   */
+  writeNow?: (env: DraftEnvelope, json: string) => DraftWriteResult;
 }
+
+export interface DraftWriter {
+  /** A change was made: write it after the waits. */
+  schedule(): void;
+  /** A gesture ended: a write it held back goes now. */
+  release(): void;
+  /**
+   * Write now, whether or not a change is pending, gesture or not. Resolves
+   * with that write's own result once it is really written (null when there
+   * was nothing to build). Pressing Save must produce a real write and a
+   * real result: reporting "saved" off the back of a no-op would be the
+   * exact lie this module exists to prevent.
+   */
+  flush(): Promise<DraftWriteResult | null>;
+  /**
+   * Leaving the page (pagehide, a hidden tab): write now with `writeNow`,
+   * synchronously, unless nothing is waiting and the design as it is now is
+   * exactly what is already stored for sure. Null when there was nothing to
+   * write.
+   */
+  flushNow(): DraftWriteResult | null;
+  stop(): void;
+  /**
+   * The draft this browser holds for the open project, as it was read when
+   * the project opened. Leaving the page with the design still exactly that
+   * writes nothing (flushNow compares with it until a write of its own).
+   */
+  known(env: DraftEnvelope | null): void;
+  /** A change is waiting to be written. */
+  readonly pending: boolean;
+  /** A write has started and not finished. */
+  readonly writing: boolean;
+}
+
+/**
+ * What a draft holds, for telling two apart: its JSON without the times it
+ * was built (buildDraft writes savedAt second, and buildTifoV2 stamps the
+ * document's meta.createdAt, which comes before the seats, so the search
+ * stops a few hundred characters in). A key inside a string is escaped (\")
+ * and so never taken for one. One built some other way keeps its times and
+ * never matches, which only means it is written again.
+ */
+export const contentOf = (json: string): string =>
+  json.replace(/^\{"v":1,"savedAt":\d+,/, '{"v":1,').replace(/"createdAt":"[^"\\]*"/, '"createdAt":""');
 
 /**
  * How long a gesture may hold a due write back. A gesture is seconds long; a
@@ -218,19 +269,37 @@ const HOLD_POLL_MS = 500;
  * wrote every 1.2 s, each time with the whole layer stack behind it, half of
  * them mid-stroke.
  *
- * flush() exists for pagehide and Save, where there is no time to wait: it
- * writes at once, gesture or not.
+ * `write` may be asynchronous: the draft is compressed and stored in
+ * IndexedDB (performance plan P3.7). Writes go one at a time, in order; a
+ * write asked for while one is on its way follows it, built from the design
+ * as it is then, so an older draft can never land after a newer one. Its
+ * result reaches `onResult` only once it is really written.
+ *
+ * flush() is for Save and the moments the editor moves on, which must not
+ * wait for the timer; flushNow() for pagehide and a hidden tab, where there
+ * is no time for anything asynchronous. flushNow writes when a change is
+ * waiting (a banner or a title too: what rides on the draft's onResult is
+ * written with it), when a write is on its way that a closing tab may never
+ * finish, and when the design differs from what is stored for sure even with
+ * nothing scheduled: a palette edit, for one, schedules nothing, and leaving
+ * the page has always been what wrote it.
+ *
+ * The envelope is serialised here, once per write, and handed on (`json`).
  */
 export function createDraftWriter(
   build: () => DraftEnvelope | null,
   onResult: (r: DraftWriteResult) => void,
   delayMs = 1200,
   /** Where it goes. Projects pass their own key (see core/projects). */
-  write: (env: DraftEnvelope) => DraftWriteResult = writeDraft,
+  write: (env: DraftEnvelope, json: string) => DraftWriteResult | Promise<DraftWriteResult> = writeDraft,
   opts: DraftWriterOptions = {},
-): { schedule: () => void; flush: () => void; stop: () => void; release: () => void; readonly pending: boolean } {
+): DraftWriter {
   const maxWait = opts.maxWaitMs ?? Infinity;
   const held = opts.held ?? (() => false);
+  const writeNow = opts.writeNow ?? ((env: DraftEnvelope, json: string): DraftWriteResult => {
+    const r = write(env, json);
+    return r instanceof Promise ? { ok: false, reason: 'blocked' } : r;
+  });
   const now = (): number => performance.now();
   let timer: ReturnType<typeof setTimeout> | null = null;
   let pending = false;
@@ -239,6 +308,17 @@ export function createDraftWriter(
   let lastAt = 0;
   /** A write fell due during a gesture, and when it first did. */
   let heldSince = 0;
+  /** A write is on its way; another was asked for meanwhile. */
+  let writing = false;
+  let again = false;
+  /** flush() callers waiting for the next write to finish. */
+  let waiters: ((r: DraftWriteResult | null) => void)[] = [];
+  /** What the last write that certainly finished held (contentOf), by either path. */
+  let stored: string | null = null;
+  /** That was flushNow's own synchronous write (so a write since on its way carries nothing new). */
+  let storedNow = false;
+  /** What was read at opening, until a write replaces it (serialised only if needed). */
+  let opened: DraftEnvelope | null = null;
 
   const clear = (): void => {
     if (timer) clearTimeout(timer);
@@ -249,14 +329,55 @@ export function createDraftWriter(
     const due = Math.min(lastAt + delayMs, firstAt + maxWait);
     timer = setTimeout(tick, Math.max(0, due - now()));
   };
-  const run = (force: boolean): void => {
-    clear();
-    if (!pending && !force) return;
+  const start = (): void => {
     pending = false;
     heldSince = 0;
+    again = false;
+    const mine = waiters;
+    waiters = [];
     const env = build();
-    if (!env) return;
-    onResult(write(env));
+    if (!env) {
+      for (const w of mine) w(null);
+      return;
+    }
+    writing = true;
+    let out: DraftWriteResult | Promise<DraftWriteResult>;
+    let content: string | null = null;
+    try {
+      const json = JSON.stringify(env);
+      content = contentOf(json);
+      out = write(env, json);
+    } catch {
+      out = { ok: false, reason: 'blocked' };
+    }
+    const done = (r: DraftWriteResult): void => {
+      writing = false;
+      if (r.ok) {
+        stored = content;
+        storedNow = false;
+        opened = null;
+      }
+      onResult(r);
+      for (const w of mine) w(r);
+      if (again || waiters.length) start();
+    };
+    if (out instanceof Promise) {
+      out.then(done, () => done({ ok: false, reason: 'blocked' }));
+    } else {
+      done(out);
+    }
+  };
+  const run = (force: boolean): Promise<DraftWriteResult | null> => {
+    clear();
+    if (!pending && !force) return Promise.resolve(null);
+    return new Promise((resolve) => {
+      waiters.push(resolve);
+      if (writing) {
+        again = true;
+        return;
+      }
+      start();
+    });
   };
   function tick(): void {
     timer = null;
@@ -269,7 +390,7 @@ export function createDraftWriter(
         return;
       }
     }
-    run(false);
+    void run(false);
   }
 
   return {
@@ -285,20 +406,57 @@ export function createDraftWriter(
       if (heldSince) return;
       arm();
     },
-    /** A gesture ended: a write it held back goes now. */
     release(): void {
       if (pending && heldSince && !held()) {
         clear();
         timer = setTimeout(tick, 0);
       }
     },
-    /**
-     * Write now, whether or not a change is pending. Pressing Save must produce
-     * a real write and a real result: reporting "saved" off the back of a no-op
-     * would be the exact lie this module exists to prevent.
-     */
-    flush(): void {
-      run(true);
+    flush(): Promise<DraftWriteResult | null> {
+      return run(true);
+    },
+    flushNow(): DraftWriteResult | null {
+      const env = build();
+      if (!env) return null;
+      let json: string;
+      try {
+        json = JSON.stringify(env);
+      } catch {
+        return null;
+      }
+      const content = contentOf(json);
+      if (stored === null && opened) {
+        try {
+          stored = contentOf(JSON.stringify(opened));
+        } catch {
+          stored = null;
+        }
+        opened = null;
+      }
+      // Nothing waiting, and exactly what is stored for sure already. A
+      // write still on its way counts only when it was started after this
+      // very content was written here: otherwise it may carry a change (a
+      // banner rides on its result) that a closing tab never finishes.
+      if (!pending && content === stored && (!writing || storedNow)) return null;
+      clear();
+      pending = false;
+      heldSince = 0;
+      let r: DraftWriteResult;
+      try {
+        r = writeNow(env, json);
+      } catch {
+        r = { ok: false, reason: 'blocked' };
+      }
+      if (r.ok) {
+        stored = content;
+        storedNow = true;
+        opened = null;
+      }
+      onResult(r);
+      return r;
+    },
+    known(env: DraftEnvelope | null): void {
+      if (stored === null) opened = env;
     },
     stop(): void {
       clear();
@@ -307,6 +465,9 @@ export function createDraftWriter(
     },
     get pending(): boolean {
       return pending;
+    },
+    get writing(): boolean {
+      return writing;
     },
   };
 }

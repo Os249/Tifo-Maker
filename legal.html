@@ -79,21 +79,21 @@
 <a class="skip-link" href="#main" data-i18n="common.skip">Skip to main content</a>
   <header class="bar">
     <a class="brand" href="/">TIFO<b>MAKER</b></a>
-    <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Dark mode" title="Dark mode"><svg class="ic-moon" viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.2A8.2 8.2 0 0 1 9.8 4a8.4 8.4 0 1 0 10.2 10.2z"/></svg><svg class="ic-sun" viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M18.4 5.6L17 7M7 17l-1.4 1.4"/></svg></button>
-    <button class="home lang-toggle" id="lang-toggle" type="button">العربية</button>
+    <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Dark mode" title="Dark mode" data-i18n-initial="aria-label:theme.dark,title:theme.dark"><svg class="ic-moon" viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.2A8.2 8.2 0 0 1 9.8 4a8.4 8.4 0 1 0 10.2 10.2z"/></svg><svg class="ic-sun" viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M18.4 5.6L17 7M7 17l-1.4 1.4"/></svg></button>
+    <button class="home lang-toggle" id="lang-toggle" type="button" data-i18n="common.language">العربية</button>
     <a class="home" href="/" data-i18n="lg.home">&larr; Home</a>
   </header>
   <main id="main" tabindex="-1">
 
   <div class="wrap">
-    <nav class="toc" id="toc-en" aria-label="Legal documents">
+    <nav class="toc" id="toc-en" aria-label="Legal documents" data-lang-only="en">
       <a href="#about">About</a>
       <a href="#terms">Terms of Use</a>
       <a href="#privacy">Privacy</a>
       <a href="#acceptable-use">Acceptable Use</a>
       <a href="#cookies">Cookies</a>
     </nav>
-    <nav class="toc" id="toc-ar" aria-label="المستندات النظامية" hidden>
+    <nav class="toc" id="toc-ar" aria-label="المستندات النظامية" data-lang-only="ar" hidden>
       <a href="#about-ar">عن الموقع</a>
       <a href="#terms-ar">شروط الاستخدام</a>
       <a href="#privacy-ar">الخصوصية</a>
@@ -101,11 +101,11 @@
       <a href="#cookies-ar">الكوكيز</a>
     </nav>
 
-    <div id="legal-en">
+    <div id="legal-en" data-lang-only="en">
     <!-- ============ ABOUT ============ -->
     <section id="about">
       <h1>About TifoMaker</h1>
-      <p class="updated">Last updated: 9 September 2026</p>
+      <p class="updated">Last updated: 25 October 2026</p>
       <p>TifoMaker is an independent project made and run by one person: an individual developer, not a company. Throughout these pages "I", "me", and "my" mean that developer, and "you" means you, the person using the site.</p>
       <div class="callout">
         <h3>Built with the help of AI</h3>
@@ -212,7 +212,7 @@
       <p>I will comply with valid, lawful requests from competent authorities, and may disclose information where the law requires it or where it's needed to protect safety or rights. I won't hand over more than what's lawfully required.</p>
 
       <h3>Keeping it / your choices</h3>
-      <p>I keep personal data only as long as it's needed or required by law. You can delete your content or your account at any time. Subject to the law, you can also ask me to show you, correct, or delete your data, or to stop certain uses, just email <a href="mailto:osamah9070@gmail.com">email the developer</a>.</p>
+      <p>I keep personal data only as long as it's needed or required by law. Expired sign-in sessions, and email links and codes that have been used or have expired, are deleted automatically. Notifications you have read are deleted after 180 days, except notices that someone followed you or posted, which are kept so the same notice is never sent twice. Records of AI Designer requests and of share-button presses are kept for 400 days, then reduced to daily totals that identify no one; the only exception is how many times an account reached the AI limit, which is kept until that account is deleted. Page-view records are kept for 180 days. You can delete your content or your account at any time. Subject to the law, you can also ask me to show you, correct, or delete your data, or to stop certain uses, just email <a href="mailto:osamah9070@gmail.com">email the developer</a>.</p>
 
       <h3>Children</h3>
       <p>Accounts are for people 18 and older, and I don't knowingly collect personal data from anyone under 18. If you think a minor has given me personal data, email me and I'll delete it.</p>
@@ -263,11 +263,11 @@
 
     </div>
 
-    <div id="legal-ar" hidden>
+    <div id="legal-ar" data-lang-only="ar" hidden>
     <!-- ============ عن الموقع ============ -->
     <section id="about-ar">
       <h1>عن تيفو ميكر</h1>
-      <p class="updated">آخر تحديث: 9 سبتمبر 2026</p>
+      <p class="updated">آخر تحديث: 25 أكتوبر 2026</p>
       <p>تيفو ميكر مشروع مستقل يصنعه ويديره شخص واحد: مطوّر فردي، مو شركة. في كل هذي الصفحات، «أنا» و«لي» تعني هذا المطوّر، و«أنت» تعني الشخص اللي يستخدم الموقع.</p>
       <div class="callout">
         <h3>مبني بمساعدة الذكاء الاصطناعي</h3>
@@ -374,7 +374,7 @@
       <p>سألتزم بالطلبات النظامية الصحيحة من الجهات المختصة، وقد أفصح عن معلومات حيث يوجب النظام ذلك أو حيث يكون ضروريًا لحماية السلامة أو الحقوق. ولن أسلّم أكثر مما يوجبه النظام.</p>
 
       <h3>مدة الحفظ وخياراتك</h3>
-      <p>أحتفظ بالبيانات الشخصية فقط للمدة اللازمة أو المطلوبة نظامًا. وتقدر تحذف محتواك أو حسابك في أي وقت. ووفقًا للنظام، تقدر كمان تطلب مني الاطلاع على بياناتك أو تصحيحها أو حذفها أو إيقاف استخدامات معيّنة، بس راسلني على <a href="mailto:osamah9070@gmail.com">بريد المطوّر</a>.</p>
+      <p>أحتفظ بالبيانات الشخصية فقط للمدة اللازمة أو المطلوبة نظامًا. جلسات الدخول المنتهية، وروابط ورموز البريد اللي استُخدمت أو انتهت، تنحذف تلقائيًا. والإشعارات اللي قريتها تنحذف بعد 180 يوم، ما عدا إشعارات المتابعة ومنشورات اللي تتابعهم، نحتفظ فيها عشان ما يوصلك نفس الإشعار مرتين. وسجلات طلبات مصمّم الذكاء الاصطناعي وضغطات أزرار المشاركة تنحفظ 400 يوم، وبعدها تتحوّل لإجماليات يومية ما تحدد أي شخص؛ والاستثناء الوحيد عدد المرات اللي وصل فيها الحساب لحد الذكاء الاصطناعي، ويبقى لين ينحذف الحساب. وسجلات زيارات الصفحات تنحفظ 180 يوم. وتقدر تحذف محتواك أو حسابك في أي وقت. ووفقًا للنظام، تقدر كمان تطلب مني الاطلاع على بياناتك أو تصحيحها أو حذفها أو إيقاف استخدامات معيّنة، بس راسلني على <a href="mailto:osamah9070@gmail.com">بريد المطوّر</a>.</p>
 
       <h3>الأطفال</h3>
       <p>الحسابات مخصصة لمن عمرهم 18 سنة فأكثر، وأنا ما أجمع عن علم بيانات شخصية من أي شخص دون 18. وإذا تعتقد إن قاصر أعطاني بيانات شخصية، راسلني وبحذفها.</p>
@@ -426,7 +426,7 @@
   </main>
     <footer>
       <p>&copy; <span id="yr"></span> <span data-i18n="lg.footer">TifoMaker: an independent project by one developer, built with the help of AI. Not affiliated with any club, league, or stadium.</span></p>
-      <p><a href="/" data-i18n="lg.homeLink">Home</a> &middot; <a href="#terms" id="foot-terms" data-i18n="lg.terms">Terms</a> &middot; <a href="#privacy" id="foot-privacy" data-i18n="lg.privacy">Privacy</a> &middot; <a href="#acceptable-use" id="foot-au" data-i18n="lg.au">Acceptable Use</a> &middot; <a href="#cookies" id="foot-cookies" data-i18n="lg.cookies">Cookies</a></p>
+      <p><a href="/" data-i18n="lg.homeLink">Home</a> &middot; <a href="#terms" data-href-ar="#terms-ar" id="foot-terms" data-i18n="lg.terms">Terms</a> &middot; <a href="#privacy" data-href-ar="#privacy-ar" id="foot-privacy" data-i18n="lg.privacy">Privacy</a> &middot; <a href="#acceptable-use" data-href-ar="#acceptable-use-ar" id="foot-au" data-i18n="lg.au">Acceptable Use</a> &middot; <a href="#cookies" data-href-ar="#cookies-ar" id="foot-cookies" data-i18n="lg.cookies">Cookies</a></p>
     </footer>
   </div>
   <script type="module" src="/src/legal.ts"></script>

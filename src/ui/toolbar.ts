@@ -25,7 +25,7 @@ import { track, setAnalyticsSignedIn } from '../net/analytics';
 import { buildTifoV2 } from '../core/tifoFormat';
 import {
   buildDraft, createDraftWriter,
-  type DraftWriteResult,
+  type DraftEnvelope, type DraftWriteResult,
 } from '../core/draft';
 import { decodeImportBitmap, extractPhotoPalette, rasterize } from '../core/importImage';
 import { BANNER_HISTORY_EVENT, bannerActive, bannerHost } from './bannerHost';
@@ -34,7 +34,7 @@ import { openGallery } from './gallery';
 import { mountAiPanel } from './aiPanel';
 import {
   createLocal, getLocal, keysFor, openUrl, purgeLocal, stashNewProject,
-  newProjectUrl, thumbKey, updateLocal, writeEnvelope, writeRaw, type ProjectRef,
+  newProjectUrl, thumbKey, updateLocal, saveEnvelope, writeEnvelopeNow, writeRaw, type ProjectRef,
 } from '../core/projects';
 import { mountStadiumPanel } from './stadiumPanel';
 import { openShareModal } from './shareModal';
@@ -88,6 +88,11 @@ export interface ProjectCtx {
   pending?: boolean;
   /** Set when the copy in this browser holds changes the account has not got. */
   unsynced?: boolean;
+  /**
+   * The project's copy in this browser as it was read on opening, if any:
+   * leaving the page without a change then writes nothing (P3.7).
+   */
+  stored?: DraftEnvelope | null;
 }
 
 /** What main.ts may ask of the toolbar once it is up. */
@@ -485,7 +490,7 @@ export function mountToolbar(
       if (autoName && named && named !== 'AI tifo') docTitle.value = named.slice(0, 80);
       void (async () => {
         if (ref?.kind === 'account') await saveToAccount(false);
-        else draftWriter.flush();
+        else await draftWriter.flush();
       })();
     },
   });
@@ -1632,8 +1637,8 @@ export function mountToolbar(
     // Save would have nowhere to go. Back to the list, which now shows this
     // browser's projects.
     if (ref?.kind === 'account') {
-      draftWriter.flush();
-      location.assign('/projects');
+      // Written first; and should the page go before that, pagehide writes it.
+      void draftWriter.flush().then(() => location.assign('/projects'));
     }
   });
 
@@ -1711,7 +1716,7 @@ export function mountToolbar(
         } catch {
           /* ignore quota */
         }
-        draftWriter.flush();
+        await draftWriter.flush();
         const fileTitle = (parsed as { meta?: { title?: string } })?.meta?.title || file.name.replace(/\.tifo$/i, '');
         stashNewProject({ title: fileTitle.slice(0, 80) || i18nT('ed.docTitlePlaceholder'), templateId: stadiumId });
         message.textContent = i18nT('ed.msg.openingStadium');
@@ -1953,14 +1958,19 @@ export function mountToolbar(
     // gesture (performance plan P2.11). The pagehide and visibility handlers
     // below and Save still write at once.
     1500,
-    (env) => writeEnvelope(keysFor(ref!).doc, env),
+    // Compressed, into IndexedDB (performance plan P3.7): "saved" is
+    // reported once it is committed there.
+    (env, json) => saveEnvelope(keysFor(ref!).doc, env, json),
     {
       maxWaitMs: 6000,
       held: () => store.inStroke || objects.inGesture || !!sceneIO?.inGesture?.(),
+      // Leaving the page: synchronous, or a closing tab may never finish it.
+      writeNow: (env, json) => writeEnvelopeNow(keysFor(ref!).doc, env, json),
     },
   );
   // The end of a stroke or a drag is when a write it held back goes.
   store.onStrokeEnd(() => draftWriter.release());
+  draftWriter.known(projectCtx?.stored ?? null);
 
   /**
    * Make the open canvas a project, if it is not one yet.
@@ -2052,13 +2062,20 @@ export function mountToolbar(
   }
   docTitle.addEventListener('input', syncClubMark);
   syncClubMark();
-  // A closing tab gets no timer callback, so flush synchronously on the way out.
+  // A closing tab gets no timer callback, and no time for compression and
+  // IndexedDB either: whatever is not certainly written yet is written
+  // synchronously on the way out (the old JSON form in localStorage, which
+  // the next open brings forward into the compressed store; P3.7).
   window.addEventListener('pagehide', () => {
-    draftWriter.flush();
+    draftWriter.flushNow();
     thumbOnLeave();
   });
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'hidden') draftWriter.flush();
+    if (document.visibilityState !== 'hidden') return;
+    // A hidden tab may be frozen or discarded without another event: written
+    // at once, the same way. While it still runs, the compressed copy
+    // follows, and that removes the quick one again.
+    if (draftWriter.flushNow()) void draftWriter.flush();
   });
 
   // ================= save =================
@@ -2115,7 +2132,7 @@ export function mountToolbar(
       // Flush rather than schedule: the debounce would leave a ~1s window in
       // which the draft still says designId=null, and a tab closed inside it
       // would fork a duplicate on the next save.
-      draftWriter.flush();
+      await draftWriter.flush();
       if (announce) {
         message.textContent = sceneFailed
           ? tv('save.sceneFailed', { err: tErr(sceneFailed) })
@@ -2234,7 +2251,7 @@ export function mountToolbar(
     track('save_clicked');
     if (!isSignedIn()) {
       await ensureProject();
-      draftWriter.flush(); // forces a write, so lastDraft reflects reality
+      await draftWriter.flush(); // forces a real write, so lastDraft reflects reality
       track('save_local');
       if (!lastDraft || !lastDraft.ok) {
         // Never claim a save that did not happen: point at the download instead.
@@ -2342,7 +2359,7 @@ export function mountToolbar(
    * new project named after it (main.ts decides which, on `from`).
    */
   const doLoad = async (id: string): Promise<void> => {
-    draftWriter.flush();
+    await draftWriter.flush();
     location.assign(`/app?${new URLSearchParams({ new: '1', from: id }).toString()}`);
   };
   // Hidden input for opening .tifo files.
@@ -3300,7 +3317,8 @@ export function mountToolbar(
     const vis = clock >= 1 && !revealEndsHidden(player.revealId) ? null : (seat: number) => player.visibilityAt(seat);
     editor.applyReveal(vis);
     // Drive the 3D stadium too, so the reveal plays in whichever view is open.
-    getPreview?.()?.applyReveal(vis);
+    // It is handed the instant, not the function: it draws it on the GPU (P3.2).
+    getPreview?.()?.showReveal(vis && { id: player.revealId, delays: player.delays, clock, fade: player.fade, lengthSec: player.durationSec });
     scrub.value = String(Math.round(clock * 100));
     setPlayLabel(playing);
     showBeat();
@@ -3691,7 +3709,7 @@ export function mountToolbar(
           unsynced = false;
           bindProject({ kind: 'account', id: meta.id });
           refreshPhotoRow();
-          draftWriter.flush();
+          await draftWriter.flush();
           track('project_created');
           return ref;
         } catch {
@@ -3703,7 +3721,7 @@ export function mountToolbar(
       const lp = createLocal({ title, templateId: map.templateRef.id, templateVersion: map.templateRef.version, origin });
       unsynced = false;
       bindProject({ kind: 'local', id: lp.id });
-      draftWriter.flush();
+      await draftWriter.flush();
       // Its first card picture, encoded off the main thread (P1.6).
       void writeThumb();
       if (lastDraft && !lastDraft.ok) message.textContent = i18nT('pj.t.full');

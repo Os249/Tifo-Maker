@@ -314,6 +314,81 @@ error keeps its own line with the same request id. Nothing else is dropped.
 
 ---
 
+## 8. The community feed's cursor (performance plan, stage 3)
+
+`GET /api/gallery` pages with a cursor: the answer carries `x-next-cursor`
+when there are more, and the next request sends it back as `cursor` with the
+same sort and filters (`server/src/feedCursor.ts`).
+
+- **What it holds:** the sort, the last card's like score (for "most liked"),
+  its last edit to the microsecond and its id. All of it is on the card
+  already; nothing about the viewer is in it (the same page gives everyone the
+  same cursor).
+- **Only what the server issued:** `<payload>.<tag>`, the tag a 128-bit
+  HMAC-SHA256 of the payload and of the query it was issued for (the sort and
+  every filter). Another sort, another tab or filter, another server's key, any
+  edited character, a second spelling of the same bytes, a value out of range
+  (time past 2100 or not whole, a score outside int4, an id that is not a
+  lower-case uuid), more than 200 characters, a repeated `cursor`, or a cursor
+  together with `offset`: **400** `bad_cursor`, before the feed is read, never a
+  quiet first page.
+- **Never a way in:** bound as typed parameters (`::timestamptz`, `::uuid`,
+  `::int`) in a row comparison added to the feed's WHERE, which still starts
+  with `d.is_public` and keeps every filter. The SQL text is the same whatever
+  the cursor names.
+- **The key** is made once at random and kept in `server_keys`, so a cursor
+  survives a deploy and works on either instance. If it cannot be read, the
+  server uses a key of its own until the next boot (logged), and a client
+  holding an old cursor starts the feed again from the top.
+- **`offset`** still works for a page opened before the deploy, up to **1200**
+  (20 pages of 60); deeper is 400 `offset_too_deep`. Each row above an offset
+  is read again on every request, which is why it is capped.
+- **What a reader can rely on:** a design whose position does not change while
+  someone scrolls is on exactly one page. Newly published or edited designs go
+  to the top, above the place being read: they show on the next load and never
+  twice. Under "most liked", a design whose score changes mid-scroll can be on
+  two pages (its old and new place) or on none (it moved above the place being
+  read); `/community` shows each design once whatever the server sends.
+
+## 9. How long data is kept, and why
+
+Every table that only grew is now bounded (performance plan, stage 3,
+`server/src/retention.ts`). Each period is at least as long as the longest
+look-back of anything that reads it, and of every security control in
+particular; a change here must keep that. The sweeps run after the port opens
+and every six hours, on the maintenance pool, in batches of 5,000 rows, each its
+own transaction with a 10 s statement and 2 s lock limit, at most 30 s per table
+per run, one log line each (`[tifo] retention: …`). A rollup removes the raw rows
+and adds them to its aggregate in one statement, after locking the accounts or
+designs its aggregate rows point at: an account or design deletion at the same
+moment waits for the batch, or the batch for it. Without that order the two
+deadlocked and Postgres cancelled the deletion (found in testing), which would
+have turned a person's erasure into an error.
+
+| What | Kept | Why that long |
+|---|---|---|
+| Sessions (`auth_tokens`) | until they expire, 30 days after sign-in | A session is only accepted while `expires_at` is in the future; an expired row opens nothing and nothing reads it again. Sign-out, a password change and a reset still delete them at once. |
+| Links, codes and sign-in tickets (`email_tokens`) | until used or expired: verification link 24 h, code 10 min, reset link 1 h, Google/X ticket 2 min | Single use: consuming one needs `used_at` empty and `expires_at` in the future, so a used or expired row can never be used again. The code's five-tries counter and the resend cooldown live in memory, not here. |
+| Read notifications | 180 days | The bell shows the latest ones. **Unread** ones are kept, and so are `new_follower` and `follow_post` of any age: they are what makes "told once per follower, ever" and "once per design per follower" hold (audit round four), and those checks look back for ever. |
+| AI requests (`ai_events`) | **400 days** raw, then one row per UTC day, mode, outcome, reason and model (`ai_events_daily`: no account, no provider text) | The AI tab's windows reach back 365 days at most (the route clamps `days`), so no window ever reads a rollup. The all-time totals add it. Who ever hit the hourly cap is kept as a count and a date per account (`ai_quota_hits`), deleted with the account. No AI limit reads this table: the hourly quota is `ai_usage`, the daily budget is today's row of `ai_budget`, the per-account daily shares are in memory. |
+| AI daily budget (`ai_budget`) | 400 days | The budget reads today's row only. |
+| Shares (`design_shares`) | **400 days** raw, then one row per UTC day, design, platform and kind (`design_shares_daily`, deleted with the design) | The sharing panel's windows reach back 365 days at most; a design's own counts and the all-time total add the rollup. |
+| Funnel events (`events`) | 400 days (unchanged) | The funnel reads 365 days at most, the overview 30. |
+| Page views (`visits`) | visitor key 2 days, rows 180 days, daily visitor counts 180 days (unchanged) | See `legal.html`: the key exists only to count a day's returning visitors. |
+| Security log (`soc_*`) | 30 days (unchanged) | The Security tab's longest view is 30 days. Rate-limit counters are in the process's memory, never in the database, so no sweep touches them. |
+| Trash | 30 days (unchanged) | The Projects page promises 30. |
+| Revisions | the latest 200 per design (unchanged) | The history list shows 200. |
+
+Kept until their owner deletes them, on purpose: designs, comments, votes,
+follows, photos, moderation reports (the abuse history a takedown rests on),
+community stadium submissions. **Not bounded yet, for Osamh to decide:** the
+For Clubs leads (`leads`: name, email, organisation) and in-product feedback
+(`feedback`: may hold an email) are business records nothing deletes; a period
+(for example two years, or 90 days after a feedback item is handled) would
+need a line in `legal.html` too.
+
+---
+
 ## What the Security tab keeps
 
 Counts per minute of each kind of event, the admin audit trail and the alerts

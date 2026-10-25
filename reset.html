@@ -7,7 +7,7 @@
   <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
   <script src="/theme-boot.js"></script>
-  <title>Reset password · TifoMaker</title>
+  <title data-i18n="meta.reset.title">Reset password · TifoMaker</title>
   <meta name="robots" content="noindex" />
   <style>
     /* The site's palette (src/ui/colorScheme.css, imported by reset.ts). */
@@ -46,7 +46,7 @@
     <div class="err" id="err" role="alert" hidden></div>
     <form id="reset-form">
       <label><span data-i18n="rs.new">New password</span>
-        <input type="password" id="pw" autocomplete="new-password" placeholder="at least 12 characters" />
+        <input type="password" id="pw" autocomplete="new-password" placeholder="at least 12 characters" data-i18n-initial="placeholder:pw.ph" />
       </label>
       <label><span data-i18n="rs.confirm">Confirm new password</span>
         <input type="password" id="pw2" autocomplete="new-password" />

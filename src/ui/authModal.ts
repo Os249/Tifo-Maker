@@ -2,7 +2,7 @@ import { availableProviders, login, register, requestPasswordReset, startProvide
 import { PASSWORD_MIN } from '../core/password';
 import { deriveUsername } from '../core/handle';
 import { enhancePasswordField } from './passwordField';
-import { t, tv, getLang } from './i18n';
+import { localPath, t, tv, getLang } from './i18n';
 import { containDialog } from './dialogFocus';
 
 /**
@@ -112,9 +112,9 @@ export function openAuthModal(claimOnReturn = false, startOn: 'signin' | 'signup
           <div class="auth-error" role="alert" hidden></div>
           <button type="submit" class="auth-submit primary">${t('auth.signin')}</button>
           <p class="auth-terms" hidden>${t('auth.termsInline')}
-            <a href="/legal#terms" target="_blank" rel="noopener">${t('auth.termsLink')}</a>
+            <a href="${localPath('/legal#terms')}" target="_blank" rel="noopener">${t('auth.termsLink')}</a>
             ${t('auth.and')}
-            <a href="/legal#privacy" target="_blank" rel="noopener">${t('auth.privacyLink')}</a>.</p>
+            <a href="${localPath('/legal#privacy')}" target="_blank" rel="noopener">${t('auth.privacyLink')}</a>.</p>
         </form>
         <button type="button" class="auth-forgot-link">${t('auth.forgot')}</button>
         <form class="auth-forgot" hidden novalidate>

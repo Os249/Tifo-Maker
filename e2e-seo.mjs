@@ -54,6 +54,42 @@ const da=await desc(a.id), db=await desc(b.id);
 check('each design describes itself', da!==db && da.length>20, JSON.stringify(da.slice(0,80)));
 check('the description names the tifo and its maker', da.includes(NAME_A) && da.includes('@'+U));
 
+// --- the Arabic twins (performance plan P3.3): the same page in each language, each naming both ---
+const head = async (path) => (await (await page.request.get(B + path)).text()).split(/<\/head>/i)[0];
+const alts = (h) => Object.fromEntries([...h.matchAll(/<link rel="alternate" hreflang="([^"]+)" href="([^"]+)"/g)].map((m) => [m[1], new URL(m[2]).pathname]));
+const canon = (h) => { const m = /<link rel="canonical" href="([^"]+)"/.exec(h); return m ? new URL(m[1]).pathname : null; };
+for (const [en, ar, canonical] of [['/', '/ar/', true], ['/community', '/ar/community', true], ['/clubs', '/ar/clubs', true], ['/legal', '/ar/legal', true],
+                                   ['/app?design=' + a.id, '/ar/app?design=' + a.id, true], [`/t/${a.id}`, `/ar/t/${a.id}`, true], [`/s/${a.id}`, `/ar/s/${a.id}`, true],
+                                   ['/reset', '/ar/reset', false], ['/account', '/ar/account', false], ['/projects', '/ar/projects', false]]) {
+  const want = { en: en.split('?')[0], ar: ar.split('?')[0], 'x-default': en.split('?')[0] };
+  const he = await head(en), ha = await head(ar);
+  check(`${en} and ${ar} name each other (hreflang en, ar, x-default)`, JSON.stringify(alts(he)) === JSON.stringify(want) && JSON.stringify(alts(ha)) === JSON.stringify(want), JSON.stringify(alts(ha)));
+  if (canonical) check(`${ar}: its canonical is itself, ${en}: itself`, canon(he) === want.en && canon(ha) === want.ar, `${canon(he)} / ${canon(ha)}`);
+  else check(`${ar}: a noindex page carries no canonical`, canon(he) === null && canon(ha) === null);
+}
+{
+  const hd = await head(`/ar/d/${a.id}`);
+  check('/ar/d/:id points at /ar/t/:id', canon(hd) === `/ar/t/${a.id}` && alts(hd).ar === `/ar/t/${a.id}` && alts(hd).en === `/t/${a.id}`, `${canon(hd)}`);
+  const ht = await head(`/ar/t/${a.id}`);
+  check('the Arabic page describes the design in Arabic, naming it and its maker', /[؀-ۿ]/.test((ht.match(/<meta name="description" content="([^"]*)"/) || [])[1] || '') && ht.includes(NAME_A) && ht.includes('@' + U));
+  check('and says it is Arabic', /<html[^>]*lang="ar"[^>]*dir="rtl"/.test(ht) && ht.includes('og:locale" content="ar_AR"'));
+  const feedAr = await (await page.request.get(B + '/ar/community')).text();
+  const arBody = feedAr.split(/<body[^>]*>/i)[1] || '';
+  check('the Arabic feed links the Arabic design pages', arBody.includes(`href="/ar/t/${a.id}"`) && !/href="\/t\//.test(arBody));
+  check('and never a private design', !feedAr.includes(privId) && !feedAr.includes('Secret plan'));
+  check('the tifo-spec has no Arabic twin (it is English only)', (await page.request.get(B + '/ar/tifo-spec')).status() === 404 && alts(await head('/tifo-spec')).ar === undefined);
+  const sm = await (await page.request.get(B + '/sitemap.xml')).text();
+  check('the sitemap declares the xhtml namespace', sm.includes('xmlns:xhtml="http://www.w3.org/1999/xhtml"'));
+  const entry = (p) => sm.split('<url>').find((u) => u.includes(`<loc>${B}${p}</loc>`)) || '';
+  for (const p of ['/', '/ar/', '/community', '/ar/community', `/t/${a.id}`, `/ar/t/${a.id}`]) {
+    const e = entry(p);
+    const l = Object.fromEntries([...e.matchAll(/<xhtml:link rel="alternate" hreflang="([^"]+)" href="([^"]+)"\/>/g)].map((m) => [m[1], new URL(m[2]).pathname]));
+    const base = p.replace(/^\/ar(?=\/)/, '') || '/';
+    check(`sitemap: ${p} is listed with en, ar and x-default`, e && l.en === base && l.ar === (base === '/' ? '/ar/' : '/ar' + base) && l['x-default'] === base, JSON.stringify(l));
+  }
+  check('sitemap: never a private design', !sm.includes(privId));
+}
+
 // --- and a human does not see the list twice ---
 await page.goto(B+'/community',{waitUntil:'domcontentloaded'});
 await page.waitForFunction(()=>document.querySelectorAll('#gallery-grid .tifo-card').length>0,{timeout:30000}).catch(()=>{});

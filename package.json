@@ -16,6 +16,7 @@
     "test:templates": "node e2e-templates.mjs",
     "test:theme": "node e2e-theme.mjs",
     "test:ux": "node e2e-ux.mjs",
+    "test:csp": "node e2e-csp.mjs",
     "test:sound": "node e2e-sound.mjs",
     "test:drumcall": "node e2e-drumcall.mjs",
     "test:accessories": "node e2e-accessories.mjs",
@@ -98,7 +99,7 @@
     "playwright": "^1.63.0",
     "tsx": "^4.22.4",
     "typescript": "^5.6.3",
-    "vite": "^6.4.5"
+    "vite": "^8.3.5"
   },
   "engines": {
     "node": ">=22"

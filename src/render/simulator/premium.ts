@@ -3,6 +3,7 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import type { SeatMap, SeatZoneKind, StadiumTemplate } from '../../core/types';
 import { curveSampler, seatZones, ZONE_CODE, ZONE_KINDS } from '../../core/venueDetails';
 import { withoutRandom } from './merge';
+import { runSync, type Steps } from './steps';
 
 /**
  * Premium seating, drawn as what it is rather than as coloured cards:
@@ -255,6 +256,11 @@ function rail(points: THREE.Vector3[], r: number): THREE.BufferGeometry {
 }
 
 export function buildPremium(template: StadiumTemplate, map: SeatMap, shadows: boolean): PremiumBuild {
+  return runSync(buildPremiumSteps(template, map, shadows));
+}
+
+/** buildPremium in steps: the armchairs, then each zone's glass, rails, walls and bands (performance plan P3.6). */
+export function* buildPremiumSteps(template: StadiumTemplate, map: SeatMap, shadows: boolean): Steps<PremiumBuild> {
   const group = new THREE.Group();
   group.name = 'premium';
   const trash: Trash[] = [];
@@ -305,6 +311,7 @@ export function buildPremium(template: StadiumTemplate, map: SeatMap, shadows: b
     chairMesh.setColorAt(k, col);
     chairMask[i] = 1;
     k++;
+    if (k % 200 === 0) yield;
   }
   chairMesh.instanceMatrix.needsUpdate = true;
   if (chairMesh.instanceColor) chairMesh.instanceColor.needsUpdate = true;
@@ -343,6 +350,7 @@ export function buildPremium(template: StadiumTemplate, map: SeatMap, shadows: b
     farMesh.visible = far;
   };
 
+  yield;
   // ---- per-zone seat outlines: rows, and the extreme seat of each row -------
   interface ZoneShape {
     kind: SeatZoneKind;
@@ -375,6 +383,7 @@ export function buildPremium(template: StadiumTemplate, map: SeatMap, shadows: b
         return { row, left: seats[0], right: seats[seats.length - 1], seats };
       });
     if (rows.length) shapes.push({ kind, center: z.centerU, rows });
+    yield;
   }
 
   const glass = new THREE.MeshStandardMaterial({ color: 0xcfe3ee, roughness: 0.05, metalness: 0.3, transparent: true, opacity: 0.22, side: THREE.DoubleSide, depthWrite: false });
@@ -439,7 +448,9 @@ export function buildPremium(template: StadiumTemplate, map: SeatMap, shadows: b
       const base = frontLine(run, 0.55, -0.1);
       addMesh(ribbon(base, glassH), glass);
       addMesh(rail(base.map((p) => p.clone().add(new THREE.Vector3(0, glassH, 0))), 0.045), railMat);
+      yield;
       addMesh(rail(base.map((p) => p.clone().add(new THREE.Vector3(0, 0.05, 0))), 0.03), railMat);
+      yield;
     }
 
     // Partitions up the rake at the zone's ends. The gold platform closes both
@@ -459,6 +470,7 @@ export function buildPremium(template: StadiumTemplate, map: SeatMap, shadows: b
         addMesh(ribbon(line, 1.1, -0.2), glass);
         addMesh(rail(line.map((p) => p.clone().add(new THREE.Vector3(0, 0.9, 0))), 0.035), railMat);
       }
+      yield;
     }
 
     if (shape.kind === 'gold') {
@@ -472,6 +484,7 @@ export function buildPremium(template: StadiumTemplate, map: SeatMap, shadows: b
       const bandMat = new THREE.MeshBasicMaterial({ map: tex, toneMapped: false, side: THREE.DoubleSide });
       trash.push(tex, bandMat);
       addMesh(ribbon(base, Math.max(0.5, map.pos3[run[0] * 3 + 1] - 0.35), 0.15), bandMat);
+      yield;
     }
 
     if (isBox) {
@@ -486,6 +499,7 @@ export function buildPremium(template: StadiumTemplate, map: SeatMap, shadows: b
       lEdge.unshift(P(f.left).addScaledVector(inward(f.left), 0.6).addScaledVector(along(f.left), -0.28).add(new THREE.Vector3(0, 0.03, 0)));
       rEdge.unshift(P(f.right).addScaledVector(inward(f.right), 0.6).addScaledVector(along(f.right), 0.28).add(new THREE.Vector3(0, 0.03, 0)));
       addMesh(sheet(lEdge, rEdge), carpetMat).receiveShadow = shadows;
+      yield;
 
       // The panelled back wall behind the last row.
       const last = rows[rows.length - 1];
@@ -498,6 +512,7 @@ export function buildPremium(template: StadiumTemplate, map: SeatMap, shadows: b
       const panelMat = new THREE.MeshStandardMaterial({ map: panel, emissive: 0xffffff, emissiveMap: panel, emissiveIntensity: 0.35, roughness: 0.6, side: THREE.DoubleSide });
       trash.push(panel, panelMat);
       addMesh(ribbon(back, 3.4), panelMat);
+      yield;
 
       // The canopy over the back rows, following the rake, with downlights.
       const startIdx = Math.floor(rows.length * 0.45);
@@ -515,6 +530,7 @@ export function buildPremium(template: StadiumTemplate, map: SeatMap, shadows: b
       const canopyMat = new THREE.MeshStandardMaterial({ color: 0xf1e9d6, map: ceil, emissive: 0xffffff, emissiveMap: ceil, emissiveIntensity: 0.45, roughness: 0.6, side: THREE.DoubleSide });
       trash.push(ceil, canopyMat);
       addMesh(sheet(cl, cr), canopyMat);
+      yield;
 
       // Its gold fascia, named, along the leading edge.
       const lead = rows[startIdx].seats;
@@ -523,8 +539,11 @@ export function buildPremium(template: StadiumTemplate, map: SeatMap, shadows: b
       const nameMat = new THREE.MeshBasicMaterial({ map: nameTex, toneMapped: false, side: THREE.DoubleSide });
       trash.push(nameTex, nameMat);
       addMesh(ribbon(fascia, 1.1), nameMat);
+      yield;
       addMesh(rail(fascia.map((p) => p.clone().add(new THREE.Vector3(0, 1.12, 0))), 0.07), railMat);
+      yield;
       addMesh(rail(fascia, 0.07), railMat);
+      yield;
       // Gold columns at the canopy's front corners, down to the carpet.
       const colGeo = new THREE.CylinderGeometry(0.14, 0.16, 1, 12);
       trash.push(colGeo);

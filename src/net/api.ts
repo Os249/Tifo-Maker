@@ -1166,18 +1166,41 @@ export async function listGalleryFacets(
   return (await res.json()) as GalleryFacets;
 }
 
-export async function listGallery(
-  opts: {
-    sort?: GallerySort; search?: string; tags?: string[]; templatesOnly?: boolean;
-    /** Exclude the shipped template library — the other half of templatesOnly. */
-    peopleOnly?: boolean;
-    /** Colour families; a design matches if it carries ANY of them. */
-    colors?: string[];
-    clubId?: string;
-    /** Page size and cursor. The server caps limit at 120 and defaults to 60. */
-    limit?: number; offset?: number;
-  } = {},
-): Promise<GalleryItem[]> {
+type GalleryOptions = {
+  sort?: GallerySort; search?: string; tags?: string[]; templatesOnly?: boolean;
+  /** Exclude the shipped template library — the other half of templatesOnly. */
+  peopleOnly?: boolean;
+  /** Colour families; a design matches if it carries ANY of them. */
+  colors?: string[];
+  clubId?: string;
+  /** Page size. The server caps limit at 120 and defaults to 60. */
+  limit?: number;
+  /** Rows to skip; the server answers at most 1200. Paging uses `cursor`. */
+  offset?: number;
+  /**
+   * The page after the one that handed this out (listGalleryPage's `next`),
+   * with the same sort and filters. Opaque: sent back exactly as received.
+   */
+  cursor?: string;
+};
+
+export async function listGallery(opts: GalleryOptions = {}): Promise<GalleryItem[]> {
+  return (await expectOk(await fetch(galleryUrl(opts), { headers: authHeaders(false) }))) as GalleryItem[];
+}
+
+/**
+ * One page of the community feed, and the cursor for the next (performance
+ * plan P3.4): null on the last page. The server reads every page after the
+ * first from where the last one ended, so a page deep in the feed costs what
+ * the first does.
+ */
+export async function listGalleryPage(opts: GalleryOptions = {}): Promise<{ items: GalleryItem[]; next: string | null }> {
+  const res = await fetch(galleryUrl(opts), { headers: authHeaders(false) });
+  const items = (await expectOk(res)) as GalleryItem[];
+  return { items, next: res.headers.get('x-next-cursor') };
+}
+
+function galleryUrl(opts: GalleryOptions): string {
   const params = new URLSearchParams();
   if (opts.sort) params.set('sort', opts.sort);
   if (opts.search) params.set('search', opts.search);
@@ -1188,8 +1211,9 @@ export async function listGallery(
   if (opts.clubId) params.set('club', opts.clubId);
   if (opts.limit != null) params.set('limit', String(opts.limit));
   if (opts.offset) params.set('offset', String(opts.offset));
+  if (opts.cursor) params.set('cursor', opts.cursor);
   const qs = params.toString();
-  return (await expectOk(await fetch(`${API}/gallery${qs ? `?${qs}` : ''}`, { headers: authHeaders(false) }))) as GalleryItem[];
+  return `${API}/gallery${qs ? `?${qs}` : ''}`;
 }
 
 /**

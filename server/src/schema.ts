@@ -496,6 +496,61 @@ export interface SqlRunner {
   query(sql: string, params?: unknown[]): Promise<{ rows: Record<string, unknown>[] }>;
 }
 
+/** An index built CONCURRENTLY after listen: columns as written, and an optional partial predicate. */
+export interface ConcurrentIndex {
+  name: string;
+  table: string;
+  /** The column list, with directions: `updated_at DESC, id DESC`. */
+  columns: string;
+  /** A partial index's predicate, as SQL: `is_public`. */
+  where?: string;
+}
+
+/**
+ * The community feed's indexes (performance plan P3.4), one per sort the API
+ * offers, each matching that sort's ORDER BY exactly, tie-breaker included,
+ * and holding only public designs (the feed's WHERE always starts with
+ * `d.is_public`). The keyset cursor starts a page at its position in one of
+ * these; the old OFFSET paging read every row above it. They replace
+ * designs_public_idx and designs_like_score_idx (SUPERSEDED_INDEXES), which
+ * did not end with the id, so the planner sorted every public row it found.
+ */
+export const FEED_INDEXES: readonly ConcurrentIndex[] = [
+  { name: 'designs_feed_recent_idx', table: 'designs', columns: 'updated_at DESC, id DESC', where: 'is_public' },
+  { name: 'designs_feed_likes_idx', table: 'designs', columns: 'like_score DESC, updated_at DESC, id DESC', where: 'is_public' },
+];
+
+/**
+ * The retention sweeps' indexes (performance plan P3.5, retention.ts): each
+ * lets a sweep find what it removes without reading the whole table.
+ *  - events: the funnel purge read all 500k rows to delete one day's (240 ms).
+ *  - visits: stripping two-day-old visitor keys read every row older than two
+ *    days, 180 days of them, to find one day's keys (190 ms). Partial, so it
+ *    holds only the rows that still have a key: about three days' worth.
+ *  - notifications: read ones the sweep may remove, by age (180 days).
+ *  - design_shares: by age, for the rollup and the admin panel's window.
+ */
+export const RETENTION_INDEXES: readonly ConcurrentIndex[] = [
+  { name: 'events_created_idx', table: 'events', columns: 'created_at' },
+  { name: 'visits_keyed_idx', table: 'visits', columns: 'created_at', where: 'visitor_key IS NOT NULL' },
+  // Without the two kinds the sweep keeps for ever (retention.ts): kept in
+  // the index, they would sit in the swept range and be read on every run.
+  { name: 'notifications_sweep_idx', table: 'notifications', columns: 'created_at', where: "read_at IS NOT NULL AND kind <> ALL (ARRAY['new_follower', 'follow_post'])" },
+  { name: 'design_shares_created_idx', table: 'design_shares', columns: 'created_at, id' },
+];
+
+/**
+ * Indexes that newer ones replace: dropped (CONCURRENTLY) only once every one
+ * of `by` is built and valid. Every save rewrites updated_at, and each index
+ * holding it is one more write per save. The release before this one runs
+ * the feed's OFFSET queries on the new indexes as well (same ORDER BY), so a
+ * rollback is only slower, never wrong.
+ */
+export const SUPERSEDED_INDEXES: readonly { name: string; by: readonly string[] }[] = [
+  { name: 'designs_public_idx', by: ['designs_feed_recent_idx'] },
+  { name: 'designs_like_score_idx', by: ['designs_feed_likes_idx'] },
+];
+
 /**
  * Make sure every index above exists and is usable. Safe to run on every
  * boot, on a running site and from two instances at once:
@@ -517,8 +572,67 @@ export async function applyForeignKeyIndexes(
   pool: { connect(): Promise<SqlRunner & { release(destroy?: boolean): void }> },
   log: (msg: string) => void = (m) => console.error(m),
 ): Promise<{ built: string[]; failed: string[] }> {
-  const built: string[] = [];
-  const failed: string[] = [];
+  return buildIndexesConcurrently(pool, FOREIGN_KEY_INDEXES.map((ix) => ({ name: ix.name, table: ix.table, columns: ix.column })), log);
+}
+
+/**
+ * The feed's and the retention sweeps' indexes (P3.4, P3.5), by the same
+ * rules as the foreign-key ones, then the superseded ones dropped once their
+ * replacements are valid. After listen, on the maintenance pool.
+ */
+export async function applyMaintenanceIndexes(
+  pool: { connect(): Promise<SqlRunner & { release(destroy?: boolean): void }> },
+  log: (msg: string) => void = (m) => console.error(m),
+): Promise<{ built: string[]; failed: string[]; dropped: string[] }> {
+  const r = await buildIndexesConcurrently(pool, [...FEED_INDEXES, ...RETENTION_INDEXES], log);
+  const dropped: string[] = [];
+  await withSession(pool, log, async (client) => {
+    for (const old of SUPERSEDED_INDEXES) {
+      try {
+        const there = await validIndexes(client, [old.name, ...old.by]);
+        if (!there.has(old.name) && !(await indexExists(client, old.name))) continue;
+        // Only once every replacement is there and usable: until then the old
+        // one is what the feed runs on.
+        if (!old.by.every((n) => there.has(n))) continue;
+        await client.query(`DROP INDEX CONCURRENTLY IF EXISTS ${old.name}`);
+        dropped.push(old.name);
+      } catch (e) {
+        log(`[tifo] index ${old.name} not dropped (tried again at the next boot): ${(e as Error).message}`);
+      }
+    }
+  });
+  return { ...r, dropped };
+}
+
+async function validIndexes(client: SqlRunner, names: string[]): Promise<Set<string>> {
+  const r = await client.query(
+    `SELECT c.relname AS name FROM pg_class c
+       JOIN pg_index i ON i.indexrelid = c.oid
+       JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE c.relname = ANY($1) AND i.indisvalid AND n.nspname = current_schema()`,
+    [names],
+  );
+  return new Set(r.rows.map((x) => String(x.name)));
+}
+
+async function indexExists(client: SqlRunner, name: string): Promise<boolean> {
+  const r = await client.query(
+    `SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE c.relname = $1 AND c.relkind = 'i' AND n.nspname = current_schema()`,
+    [name],
+  );
+  return r.rows.length > 0;
+}
+
+/**
+ * One connection with a build's session limits: set for the work, put back
+ * before it returns to the pool, or the connection is not returned at all.
+ */
+async function withSession(
+  pool: { connect(): Promise<SqlRunner & { release(destroy?: boolean): void }> },
+  log: (msg: string) => void,
+  work: (client: SqlRunner) => Promise<void>,
+): Promise<void> {
   const client = await pool.connect();
   let broken = false;
   try {
@@ -528,7 +642,30 @@ export async function applyForeignKeyIndexes(
     // left for the next boot rather than queued behind.
     await client.query("SET statement_timeout = '15min'");
     await client.query("SET lock_timeout = '10s'");
-    for (const ix of FOREIGN_KEY_INDEXES) {
+    await work(client);
+  } catch (e) {
+    broken = true;
+    log(`[tifo] indexes skipped: ${(e as Error).message}`);
+  } finally {
+    try {
+      if (!broken) await client.query('RESET statement_timeout; RESET lock_timeout');
+    } catch {
+      broken = true;
+    }
+    // A connection whose settings could not be put back is not returned to the pool.
+    client.release(broken);
+  }
+}
+
+async function buildIndexesConcurrently(
+  pool: { connect(): Promise<SqlRunner & { release(destroy?: boolean): void }> },
+  indexes: readonly ConcurrentIndex[],
+  log: (msg: string) => void,
+): Promise<{ built: string[]; failed: string[] }> {
+  const built: string[] = [];
+  const failed: string[] = [];
+  await withSession(pool, log, async (client) => {
+    for (const ix of indexes) {
       try {
         const found = await client.query(
           `SELECT i.indisvalid AS valid FROM pg_class c
@@ -539,24 +676,13 @@ export async function applyForeignKeyIndexes(
         );
         if (found.rows[0]?.valid === true) continue;
         if (found.rows.length) await client.query(`DROP INDEX CONCURRENTLY IF EXISTS ${ix.name}`);
-        await client.query(`CREATE INDEX CONCURRENTLY IF NOT EXISTS ${ix.name} ON ${ix.table} (${ix.column})`);
+        await client.query(`CREATE INDEX CONCURRENTLY IF NOT EXISTS ${ix.name} ON ${ix.table} (${ix.columns})${ix.where ? ` WHERE ${ix.where}` : ''}`);
         built.push(ix.name);
       } catch (e) {
         failed.push(ix.name);
         log(`[tifo] index ${ix.name} not built (it will be tried again at the next boot): ${(e as Error).message}`);
       }
     }
-  } catch (e) {
-    broken = true;
-    log(`[tifo] foreign-key indexes skipped: ${(e as Error).message}`);
-  } finally {
-    try {
-      if (!broken) await client.query('RESET statement_timeout; RESET lock_timeout');
-    } catch {
-      broken = true;
-    }
-    // A connection whose settings could not be put back is not returned to the pool.
-    client.release(broken);
-  }
+  });
   return { built, failed };
 }

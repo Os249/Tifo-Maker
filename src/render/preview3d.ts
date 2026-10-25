@@ -10,11 +10,15 @@ import { spanFrameCache, type StandFrame } from './simulator/standFrame';
 import { bannerShot } from './simulator/bannerCamera';
 import { standIsRoofed } from './simulator/roof';
 import { emptySeatColours } from './seatColours';
-import { buildChairs, seatFacing, seatStateTexture, KEY_LIGHT_DIR, SEAT_TEX_W, type ChairBuild } from './seatChairs';
+import { buildChairsSteps, seatFacing, seatStateTexture, KEY_LIGHT_DIR, SEAT_TEX_W, type ChairBuild, type ChairState } from './seatChairs';
 import { SeatUploads, seatRuns } from './seatUploads';
-import { viewTierSettings, type ViewTier, type ViewTierSettings } from './viewTier';
+import { shaderChecksWanted, viewTierSettings, type ViewTier, type ViewTierSettings } from './viewTier';
 import type { ShellBuild } from './stadiumShell';
+import { BuildCancelled, runSliced, SliceClock, SLICE_MS, yieldToMain } from './simulator/steps';
 import { baseGroundId } from '../core/realBlocks';
+import { revealVisibilityAt, type RevealId } from '../core/reveal';
+import { drumCallPlanForLength, type DrumCallPlan } from '../core/drumCall';
+import { REVEAL_GLSL, drumReactions, revealDrum, revealFade, revealOff, revealUniforms } from './simulator/revealGpu';
 
 /**
  * The Stadium view: the design in the real stadium.
@@ -89,6 +93,32 @@ export interface Preview3DOptions {
   structure?: boolean;
   /** The landing hero's 3/4 view, turning or not (reduced motion). */
   hero?: boolean;
+  /**
+   * How much further back the hero's camera stands than the seats alone would
+   * put it (1 when absent). The view is sized from the seats, and a ground
+   * whose building is much bigger than its bowl (Kingdom Arena's hall, Anfield's
+   * main stand) otherwise runs off the frame. Set per hero tifo in
+   * data/heroTifos.json.
+   */
+  heroScale?: number;
+}
+
+/**
+ * One instant of one of the editor's reveals (core/reveal): what the reveal
+ * player, its scrub bar and the stadium export hand the view each frame. The
+ * delays are the player's own array, made once per reveal style; the view
+ * sends them to the GPU once and then only the clock (performance plan P3.2).
+ */
+export interface RevealFrame {
+  id: RevealId;
+  /** buildReveal's per-seat delays for this style (the same array frame after frame). */
+  delays: Float32Array;
+  /** 0..1 through the show. */
+  clock: number;
+  /** RevealPlayer.fade. */
+  fade: number;
+  /** The show's length in seconds (what the drum call's hold is made from). */
+  lengthSec: number;
 }
 
 function skyTexture(): THREE.Texture {
@@ -141,6 +171,14 @@ export class Preview3D {
   private readonly onPaletteCb: () => void;
   private chairs: ChairBuild | null = null;
   private shell: ShellBuild | null = null;
+  /** The building's module once loaded (its cache lives there), whether this ground may be kept, and whether the context was lost. */
+  private shellMod: typeof import('./stadiumShell') | null = null;
+  private shellShipped = false;
+  private contextLost = false;
+  /** How the building came: built in how many slices (the longest, the work in all), or taken as kept (performance plan P3.6). */
+  buildStats: { reused: boolean; slices: number; longestSliceMs: number; busyMs: number; phases: Record<string, number> } | null = null;
+  /** standAt's seats per side, sorted, worked out once per building. */
+  private readonly standPts = new Map<string, { r: number; y: number }[]>();
   private placeholder: THREE.Group | null = null;
   private readonly staticTrash: { dispose(): void }[] = [];
   private envTarget: THREE.WebGLRenderTarget | null = null;
@@ -162,6 +200,29 @@ export class Preview3D {
   private roofOpacity = 1;
   /** Frames drawn by the loop (the census reads it: an idle view draws none). */
   private framesDrawn = 0;
+  /**
+   * The reveal on the GPU (performance plan P3.2). The cards and the chairs
+   * read these same uniform objects; a frame of a reveal writes them and
+   * nothing else.
+   */
+  private readonly revealU = revealUniforms();
+  /**
+   * Every seat's reveal numbers, one RGBA float texel a seat: the style's
+   * delay, then the seat's reactions to the drum (up, down, in seconds).
+   * Made on the first reveal, and sent again only when the style changes.
+   */
+  private readonly revealKeysU: { value: THREE.DataTexture | null } = { value: null };
+  /** The delays the texture holds (the player's array for the style), and whether the drum reactions are in. */
+  private revealKeysFor: Float32Array | null = null;
+  private revealDrumJitter = -1;
+  /** The colour each card fades in from: the seat's own, linear (as applyReveal lerps from). */
+  private seatTint: THREE.InstancedBufferAttribute | null = null;
+  private seatTintFrom: Uint8Array | null | undefined = undefined;
+  private drumPlanMemo: { len: number; plan: DrumCallPlan } | null = null;
+  /** A reveal was written into the card arrays by the CPU (applyReveal with a function). */
+  private cpuRevealShown = false;
+  /** The last reveal instant shown (the suites redraw it on the CPU to compare). */
+  lastRevealFrame: RevealFrame | null = null;
   private readyResolve!: () => void;
   /** Resolves once the building and the chairs are in (or have failed to come). */
   readonly ready: Promise<void> = new Promise((r) => (this.readyResolve = r));
@@ -184,6 +245,11 @@ export class Preview3D {
     this.pixelRatio = Math.min(this.settings.maxPixelRatio, window.devicePixelRatio || 1);
     this.movingRatio = Math.min(this.pixelRatio, this.settings.movingPixelRatio);
     this.renderer.setPixelRatio(this.pixelRatio);
+    // As in Match Day: shader errors are checked where someone reads them (dev,
+    // the suites, ?e2e). On the live site each check is a synchronous wait on
+    // the GPU per program at the first frame with the building in — seconds on
+    // a phone-class CPU (performance plan P3.6).
+    this.renderer.debug.checkShaderErrors = shaderChecksWanted();
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.0;
     this.canvas = this.renderer.domElement;
@@ -347,22 +413,141 @@ export class Preview3D {
   }
 
   recolorAll(): void {
+    // The whole design, as painted: a reveal on show is over (as it always
+    // was when every card was recoloured; the next reveal frame brings it back).
+    revealOff(this.revealU);
+    this.cpuRevealShown = false;
     for (let i = 0; i < this.map.count; i++) this.recolor(i);
     this.flushCards();
   }
 
   /**
-   * Apply per-seat reveal visibility (0 = card down, 1 = up/full). A card on
-   * its way up fades in from the colour of the seat under it, so a reveal
-   * rises out of the stand rather than out of the dark. Pass null to restore
-   * the full design. Mirrors Editor.applyReveal so a reveal plays identically
-   * in 2D and 3D.
+   * One instant of a reveal, drawn by the GPU (performance plan P3.2): the
+   * reveal player, its scrub bar and the stadium export send one of these a
+   * frame. A card is up once it is more than 0.02 of the way, and on its way
+   * up it fades in from the colour of the seat under it — applyReveal's
+   * rules, worked out per card in the vertex shader from the seat's delay
+   * (sent once per style) and this clock (a few uniforms). Null: the full
+   * design.
+   *
+   * `cpu` draws the same instant the old way, through applyReveal, for the
+   * suites to compare the two.
+   */
+  showReveal(f: RevealFrame | null, opts: { cpu?: boolean } = {}): void {
+    if (!f) {
+      this.applyReveal(null);
+      return;
+    }
+    this.lastRevealFrame = f;
+    if (opts.cpu) {
+      this.applyReveal(revealVisibilityAt(f.id, f.delays, f.clock, f.fade, f.lengthSec));
+      return;
+    }
+    // The card arrays hold a CPU reveal: the full design back in them first,
+    // since the shader mixes from the design's own colours.
+    if (this.cpuRevealShown) this.recolorAll();
+    this.revealKeys(f);
+    this.revealTints();
+    if (f.id === 'drum-call') {
+      const plan = this.drumPlanFor(f.lengthSec);
+      revealDrum(this.revealU, plan, f.clock * plan.duration);
+    } else {
+      revealFade(this.revealU, f.clock, f.fade);
+    }
+    this.requestRender();
+  }
+
+  /** The drum call for a show of this length (the player keeps the same one for the same length). */
+  private drumPlanFor(lengthSec: number): DrumCallPlan {
+    if (!this.drumPlanMemo || this.drumPlanMemo.len !== lengthSec) this.drumPlanMemo = { len: lengthSec, plan: drumCallPlanForLength(lengthSec) };
+    return this.drumPlanMemo.plan;
+  }
+
+  /** Each seat's numbers for this reveal, in the texture the shaders read: sent once per style. */
+  private revealKeys(f: RevealFrame): void {
+    const n = this.map.count;
+    let tex = this.revealKeysU.value;
+    if (!tex) {
+      const h = Math.max(1, Math.ceil(n / SEAT_TEX_W));
+      tex = new THREE.DataTexture(new Float32Array(SEAT_TEX_W * h * 4), SEAT_TEX_W, h, THREE.RGBAFormat, THREE.FloatType);
+      // Read with texelFetch; a float texture must not ask for filtering.
+      tex.magFilter = THREE.NearestFilter;
+      tex.minFilter = THREE.NearestFilter;
+      tex.generateMipmaps = false;
+      this.revealKeysU.value = tex;
+      this.staticTrash.push(tex);
+    }
+    const data = tex.image.data as Float32Array;
+    let changed = false;
+    if (f.id === 'drum-call') {
+      const jitter = this.drumPlanFor(f.lengthSec).jitter;
+      if (this.revealDrumJitter !== jitter) {
+        const r = drumReactions(n, jitter);
+        for (let i = 0; i < n; i++) {
+          data[i * 4 + 1] = r[i * 2];
+          data[i * 4 + 2] = r[i * 2 + 1];
+        }
+        this.revealDrumJitter = jitter;
+        changed = true;
+      }
+    } else if (this.revealKeysFor !== f.delays) {
+      const d = f.delays;
+      for (let i = 0; i < n; i++) data[i * 4] = d[i];
+      this.revealKeysFor = f.delays;
+      changed = true;
+    }
+    if (changed) tex.needsUpdate = true;
+  }
+
+  /**
+   * The colour each card fades in from: its seat's (applyReveal's
+   * `seat.setRGB(..., SRGBColorSpace)`), or the dark stand-in before the
+   * ground's seat colours are known. Remade only when those arrive.
+   */
+  private revealTints(): void {
+    if (this.seatTintFrom === this.seatRGB) return;
+    const n = this.map.count;
+    let attr = this.seatTint;
+    if (!attr) {
+      attr = new THREE.InstancedBufferAttribute(new Float32Array(n * 3), 3);
+      this.seatTint = attr;
+      this.cards.geometry.setAttribute('aSeatTint', attr);
+    }
+    const out = attr.array as Float32Array;
+    const rgb = this.seatRGB;
+    const c = new THREE.Color();
+    if (!rgb) c.set(0x30343c);
+    for (let i = 0; i < n; i++) {
+      if (rgb) c.setRGB(rgb[i * 3] / 255, rgb[i * 3 + 1] / 255, rgb[i * 3 + 2] / 255, THREE.SRGBColorSpace);
+      out[i * 3] = c.r;
+      out[i * 3 + 1] = c.g;
+      out[i * 3 + 2] = c.b;
+    }
+    attr.needsUpdate = true;
+    this.seatTintFrom = rgb;
+  }
+
+  /**
+   * Apply per-seat reveal visibility (0 = card down, 1 = up/full), on the
+   * CPU: any function of the seat, for a caller that has one. A card on its
+   * way up fades in from the colour of the seat under it, so a reveal rises
+   * out of the stand rather than out of the dark. Pass null to restore the
+   * full design. Mirrors Editor.applyReveal so a reveal plays identically in
+   * 2D and 3D. The editor's own reveals go through showReveal, on the GPU.
    */
   applyReveal(visibility: ((seat: number) => number) | null): void {
     if (!visibility) {
-      this.recolorAll();
+      // A GPU reveal leaves the card arrays as the design is: switching it off
+      // is the whole job, and nothing is sent again.
+      if (this.cpuRevealShown) this.recolorAll();
+      else {
+        revealOff(this.revealU);
+        this.requestRender();
+      }
       return;
     }
+    revealOff(this.revealU);
+    this.cpuRevealShown = true;
     const tmp = new THREE.Color();
     const seat = new THREE.Color();
     const rgb = this.seatRGB;
@@ -393,6 +578,11 @@ export class Preview3D {
     this.flushCards();
   }
 
+  /** What this view's chairs read per seat: its cards' state and its reveal. */
+  private chairState(): ChairState {
+    return { cardUp: this.seatState, reveal: this.revealU, revealKeys: this.revealKeysU };
+  }
+
   setNoShows(enabled: boolean): void {
     this.noShowsEnabled = enabled;
     this.recolorAll();
@@ -405,13 +595,24 @@ export class Preview3D {
     geometry.setAttribute('aShow', this.cardShow);
     const material = new THREE.MeshBasicMaterial({ side: THREE.DoubleSide, toneMapped: false });
     // A card that is down is scaled to nothing in the vertex shader: painting
-    // a seat flips one float, not a 64-byte matrix.
+    // a seat flips one float, not a 64-byte matrix. A reveal playing is worked
+    // out here too, per card, from its seat's numbers (a texel per seat, by
+    // instance) and the reveal's uniforms (performance plan P3.2): up once it
+    // is more than 0.02 of the way, and until it is all the way, the colour of
+    // its seat mixed towards the design's (seat + (design - seat) * a, as
+    // THREE.Color.lerp did it on the CPU).
     material.onBeforeCompile = (shader) => {
+      Object.assign(shader.uniforms, this.revealU, { tifoRevealKeys: this.revealKeysU });
+      const at = `ivec2( gl_InstanceID % ${SEAT_TEX_W}, gl_InstanceID / ${SEAT_TEX_W} )`;
       shader.vertexShader = shader.vertexShader
-        .replace('#include <common>', '#include <common>\nattribute float aShow;')
-        .replace('#include <begin_vertex>', '#include <begin_vertex>\n  transformed *= aShow;');
+        .replace('#include <common>', `#include <common>\nattribute float aShow;\nattribute vec3 aSeatTint;\nuniform highp sampler2D tifoRevealKeys;\n${REVEAL_GLSL}`)
+        .replace(
+          '#include <color_vertex>',
+          `#include <color_vertex>\n  float tifoVis = tifoRevealMode == 0 ? 1.0 : tifoRevealVis( texelFetch( tifoRevealKeys, ${at}, 0 ).xyz );\n  if ( tifoVis < 1.0 ) vColor.rgb = aSeatTint + ( vColor.rgb - aSeatTint ) * tifoVis;`,
+        )
+        .replace('#include <begin_vertex>', '#include <begin_vertex>\n  transformed *= aShow * ( tifoVis > 0.02 ? 1.0 : 0.0 );');
     };
-    material.customProgramCacheKey = () => 'tifo-cards';
+    material.customProgramCacheKey = () => 'tifo-cards-reveal';
     const mesh = new THREE.InstancedMesh(geometry, material, this.map.count);
     const m = new THREE.Matrix4();
     const P = this.map.pos3;
@@ -434,6 +635,13 @@ export class Preview3D {
     mesh.instanceMatrix.needsUpdate = true;
     mesh.computeBoundingSphere();
     mesh.matrixAutoUpdate = false;
+    // Drawn before everything else that is solid, as it always was: three
+    // draws solid meshes in the order their materials were made, and the
+    // cards' was the view's first. A building kept from an earlier view
+    // (stadiumShell.takeShell) has materials older than these cards, and
+    // would otherwise be drawn first, changing which of two surfaces at the
+    // same depth shows (performance plan P3.6).
+    mesh.renderOrder = -1;
     this.staticTrash.push(geometry, material);
     return mesh;
   }
@@ -456,6 +664,14 @@ export class Preview3D {
   }
 
   private async loadStadium(): Promise<void> {
+    // The building comes in slices of a few milliseconds, the main thread
+    // given back between them, so the page answers and draws while it builds
+    // (performance plan P3.6); or at once, from the last view of this ground.
+    const cancelled = (): boolean => this.disposed;
+    // When each part of it ended, from the start (ms, wall clock): for the census.
+    const phases: Record<string, number> = {};
+    const t00 = performance.now();
+    const mark = (k: string): void => void (phases[k] = Math.round(performance.now() - t00));
     try {
       if (!this.template) {
         const { templateById } = await import('../core/stadiumCatalog');
@@ -465,34 +681,107 @@ export class Preview3D {
       const tpl = this.template;
       this.holdCutPlane();
       this.noTifo = tpl ? noTifoMask(this.map, tpl) : null;
+      await yieldToMain();
+      if (this.disposed) return;
       this.seatRGB = emptySeatColours(tpl, this.map);
+      await yieldToMain();
+      if (this.disposed) return;
       if (this.noTifo) this.recolorAll();
+      mark('masks');
       // Let the first picture (cards on a pitch) reach the screen before the
       // heavy part: a stadium's worth of geometry.
       await new Promise<void>((r) => requestAnimationFrame(() => setTimeout(r, 0)));
       if (this.disposed) return;
-      let chairMask: Uint8Array | null = null;
+      const ground = !this.options.transparent;
+      let reused = false;
+      const clock = new SliceClock();
       if (tpl) {
-        const { buildStadiumShell } = await import('./stadiumShell');
+        const [shellMod, shipped] = await Promise.all([
+          import('./stadiumShell'),
+          import('../core/stadiumLoad').then((m) => m.isShipped(tpl)).catch(() => false),
+        ]);
+        this.shellMod = shellMod;
+        this.shellShipped = shipped;
         if (this.disposed) return;
-        const shell = buildStadiumShell(tpl, this.map, { tier: this.settings.tier, palette: this.store.palette, ground: !this.options.transparent });
-        chairMask = shell.chairMask;
-        this.shell = shell;
+        const kept = shipped ? shellMod.takeShell(tpl, this.map, this.settings.tier, ground) : null;
+        if (kept) {
+          // The last view of this ground built it: this view's own palette on
+          // its screens, its own card state and reveal under its chairs, and
+          // its roofs set again for this camera at the first frame.
+          kept.shell.paintScreens(this.store.palette);
+          kept.chairs.bind(this.chairState());
+          this.shell = kept.shell;
+          this.chairs = kept.chairs;
+          this.roofOpacity = -1;
+          reused = true;
+        } else {
+          this.shell = await runSliced(shellMod.buildStadiumShellSteps(tpl, this.map, { tier: this.settings.tier, palette: this.store.palette, ground, clock }), { cancelled, clock });
+        }
       }
-      const chairs = buildChairs(this.map, this.seatRGB, this.facing, { skip: chairMask, detail: this.settings.chairs, cardUp: this.seatState });
-      this.chairs = chairs;
-      // Compile the new shaders off the main thread where the browser can.
-      const staging = new THREE.Group();
-      if (this.shell) staging.add(this.shell.object);
-      staging.add(chairs.object);
+      mark('building');
+      if (!reused) {
+        this.chairs = await runSliced(buildChairsSteps(this.map, this.seatRGB, this.facing, { skip: this.shell?.chairMask ?? null, detail: this.settings.chairs, state: this.chairState() }), { cancelled, clock });
+      }
+      mark('chairs');
+      this.buildStats = { reused, slices: clock.slices, longestSliceMs: Math.round(clock.longest), busyMs: Math.round(clock.now()), phases };
+      const chairs = this.chairs!;
+      // Compile the new shaders off the main thread where the browser can, a
+      // piece at a time, so that preparing them is not one long task either.
+      const parts: THREE.Object3D[] = [...(this.shell ? this.shell.object.children : []), chairs.object];
       try {
-        await this.renderer.compileAsync(staging, this.camera, this.scene);
+        let t0 = performance.now();
+        const slice = async (): Promise<void> => {
+          if (performance.now() - t0 < SLICE_MS) return;
+          await yieldToMain();
+          t0 = performance.now();
+        };
+        // Every program asked for first, a piece at a time (the shader
+        // source made, the compile started); the browser compiles them all
+        // at once while this goes on. Then waited for, piece by piece: by
+        // then most are ready, so the waits do not add up.
+        for (const part of parts) {
+          if (this.disposed) break;
+          this.renderer.compile(part, this.camera, this.scene);
+          await slice();
+        }
+        mark('compile');
+        for (const part of parts) {
+          if (this.disposed) break;
+          await this.renderer.compileAsync(part, this.camera, this.scene);
+          await slice();
+          // Each program's uniforms and attributes asked for here, one
+          // program at a time: three asks for them at a program's first
+          // draw, every name a synchronous round trip to the GPU, and the
+          // first frame with the building in did all of them in one task.
+          for (const program of this.programsOf(part)) {
+            if (this.disposed) break;
+            program.getUniforms();
+            program.getAttributes();
+            await slice();
+          }
+        }
+        mark('programs');
+        // And the building's pictures (its screens, signs, facades) sent to
+        // the GPU here, one at a time, instead of all in the first frame.
+        const textures = new Set<THREE.Texture>();
+        for (const part of parts) {
+          part.traverse((o) => {
+            const m = (o as THREE.Mesh).material;
+            for (const mt of Array.isArray(m) ? m : m ? [m] : []) for (const v of Object.values(mt)) if ((v as THREE.Texture)?.isTexture) textures.add(v as THREE.Texture);
+          });
+        }
+        for (const t of textures) {
+          if (this.disposed) break;
+          this.renderer.initTexture(t);
+          await slice();
+        }
+        mark('textures');
       } catch {
-        /* compiled on first draw instead */
+        /* compiled (or sent) on first draw instead */
       }
       if (this.disposed) {
-        this.shell?.dispose();
-        chairs.dispose();
+        // Finished but never shown: kept for the next view of this ground if it may be.
+        this.releaseBuilding();
         return;
       }
       if (this.shell) this.scene.add(this.shell.object);
@@ -507,17 +796,68 @@ export class Preview3D {
         this.placeholder = null;
       }
       this.fitCache.clear();
+      this.standPts.clear();
       if (this.onPreset) {
         const p = CAMERA_PRESETS.find((c) => c.name === this.onPreset);
         if (p) this.applyPreset(p);
       } else if (this.options.autoRotate || this.options.hero) this.heroCamera();
+      mark('presets');
       this.requestRender();
     } catch (err) {
-      // Never take the view down with it: the cards and the pitch are the design.
-      console.error('[tifo] the stadium could not be built', err);
+      // A view closed while it built has nothing to report.
+      if (!(err instanceof BuildCancelled)) {
+        // Never take the view down with it: the cards and the pitch are the design.
+        console.error('[tifo] the stadium could not be built', err);
+      }
     } finally {
       this.readyResolve();
     }
+  }
+
+  /**
+   * The programs three made for a part's materials (renderer.properties:
+   * three's own record of them). Empty if three keeps them otherwise: asking
+   * early is only ever a head start.
+   */
+  private programsOf(part: THREE.Object3D): { getUniforms(): unknown; getAttributes(): unknown }[] {
+    const out = new Set<{ getUniforms(): unknown; getAttributes(): unknown }>();
+    try {
+      part.traverse((o) => {
+        const m = (o as THREE.Mesh).material;
+        for (const mt of Array.isArray(m) ? m : m ? [m] : []) {
+          const progs = (this.renderer.properties.get(mt) as { programs?: Map<string, { getUniforms?: () => unknown; getAttributes?: () => unknown }> }).programs;
+          progs?.forEach((pg) => {
+            if (typeof pg.getUniforms === 'function' && typeof pg.getAttributes === 'function') out.add(pg as { getUniforms(): unknown; getAttributes(): unknown });
+          });
+        }
+      });
+    } catch {
+      /* none, then: they are asked for at the first frame, as before */
+    }
+    return [...out];
+  }
+
+  /**
+   * The building and its chairs leave this view: kept for the next view of the
+   * same ground when they may be (a ground this site ships, the context never
+   * lost; see stadiumShell.keepShell), disposed otherwise.
+   */
+  private releaseBuilding(): void {
+    const shell = this.shell;
+    const chairs = this.chairs;
+    this.shell = null;
+    this.chairs = null;
+    if (!chairs) {
+      shell?.dispose();
+      return;
+    }
+    shell?.object.removeFromParent();
+    chairs.object.removeFromParent();
+    const tpl = this.template;
+    const keep = !!(shell && tpl && this.shellMod && !this.contextLost) && this.shellMod!.keepShell(tpl!, this.map, this.settings.tier, !this.options.transparent, { shell: shell!, chairs }, this.shellShipped);
+    if (keep) return;
+    shell?.dispose();
+    chairs.dispose();
   }
 
   /**
@@ -552,10 +892,13 @@ export class Preview3D {
         for (const m of shell.roofMaterials) {
           const base = (m.userData.baseOpacity ??= m.opacity) as number;
           const wasTransparent = (m.userData.baseTransparent ??= m.transparent) as boolean;
+          // Read before the first ghosting changes it: `!ghost && (… ??= m.depthWrite)`
+          // skipped the read while ghosting, then took the ghost's false as the roof's own.
+          const baseDepthWrite = (m.userData.baseDepthWrite ??= m.depthWrite) as boolean;
           const want = ghost || wasTransparent;
           if (m.transparent !== want) {
             m.transparent = want;
-            m.depthWrite = !ghost && (m.userData.baseDepthWrite ??= m.depthWrite);
+            m.depthWrite = !ghost && baseDepthWrite;
             m.needsUpdate = true;
           }
           m.opacity = base * opacity;
@@ -608,18 +951,25 @@ export class Preview3D {
    * that side has no stand.
    */
   private standAt(side: 'south' | 'north' | 'east', depth: number): { d: number; y: number } | null {
-    const P = this.map.pos3;
-    const pts: { r: number; y: number }[] = [];
-    const across = side === 'east';
-    for (let k = 0; k < this.map.count; k++) {
-      const x = P[k * 3];
-      const z = P[k * 3 + 2];
-      const r = side === 'south' ? -z : side === 'north' ? z : x;
-      const lateral = across ? z : x;
-      if (r > (across ? 52.5 : 34) && Math.abs(lateral) < 12) pts.push({ r, y: P[k * 3 + 1] });
+    // The seats in the middle of that side, sorted out from the pitch: the
+    // same list for every depth, so made once (fitting the TV gantry asks
+    // for a dozen depths; on the Jewel that was 175 ms; performance plan P3.6).
+    let pts = this.standPts.get(side);
+    if (!pts) {
+      const P = this.map.pos3;
+      pts = [];
+      const across = side === 'east';
+      for (let k = 0; k < this.map.count; k++) {
+        const x = P[k * 3];
+        const z = P[k * 3 + 2];
+        const r = side === 'south' ? -z : side === 'north' ? z : x;
+        const lateral = across ? z : x;
+        if (r > (across ? 52.5 : 34) && Math.abs(lateral) < 12) pts.push({ r, y: P[k * 3 + 1] });
+      }
+      pts.sort((a, b) => a.r - b.r);
+      this.standPts.set(side, pts);
     }
     if (pts.length < 20) return null;
-    pts.sort((a, b) => a.r - b.r);
     const at = pts[Math.min(pts.length - 1, Math.floor(depth * (pts.length - 1)))];
     // The highest seat within a metre of that row, so the camera clears it.
     let y = at.y;
@@ -853,7 +1203,8 @@ export class Preview3D {
     // the landing's 16:10 frame with room to turn, instead of being cut off
     // at the frame's edges.
     const { ax, bz } = this.extent();
-    const k = Math.max(ax, bz) / 133;
+    const scale = this.options.hero && this.options.heroScale && this.options.heroScale > 0 ? this.options.heroScale : 1;
+    const k = (Math.max(ax, bz) / 133) * scale;
     this.camera.position.set(132 * k, 158 * k, 204 * k);
     this.controls.target.set(0, -10 * k, 0);
     this.controls.update();
@@ -1031,6 +1382,10 @@ export class Preview3D {
   private readonly onCtxLost = (e: Event): void => {
     e.preventDefault();
     this.stop();
+    // The GPU took its memory back: nothing is kept for later views, this
+    // view's building included (performance plan P3.6).
+    this.contextLost = true;
+    this.shellMod?.dropShells();
     // A restored context holds none of the cards: their next upload is whole (P1.4).
     for (const u of this.uploads) u.all();
   };
@@ -1097,7 +1452,7 @@ export class Preview3D {
   }
 
   /** What the view is drawing, for tests and the perf harness. */
-  census(): { tier: ViewTier; structure: boolean; chairs: number; cardsUp: number; drawCalls: number; triangles: number; shell: ShellBuild['stats'] | null; pixelRatio: number; frames: number; roofOpacity: number; roofs: boolean; programs: number } {
+  census(): { tier: ViewTier; structure: boolean; chairs: number; cardsUp: number; drawCalls: number; triangles: number; shell: ShellBuild['stats'] | null; pixelRatio: number; frames: number; roofOpacity: number; roofs: boolean; programs: number; revealMode: number; build: Preview3D['buildStats'] } {
     const info = this.renderer.info;
     const auto = info.autoReset;
     info.autoReset = false;
@@ -1116,6 +1471,9 @@ export class Preview3D {
       roofOpacity: this.roofOpacity,
       roofs: !!this.shell?.roofSpan,
       programs: info.programs?.length ?? 0,
+      // The GPU reveal's mode (simulator/revealGpu.ts): 0 when the design shows as painted.
+      revealMode: this.revealU.tifoRevealMode.value,
+      build: this.buildStats,
     };
     info.autoReset = auto;
     return out;
@@ -1135,10 +1493,8 @@ export class Preview3D {
     this.controls.dispose();
     this.banners?.dispose();
     this.banners = null;
-    this.shell?.dispose();
-    this.shell = null;
-    this.chairs?.dispose();
-    this.chairs = null;
+    // Kept for the next view of this ground where it may be, else disposed.
+    this.releaseBuilding();
     for (const t of this.staticTrash) t.dispose();
     this.envTarget?.dispose();
     this.canvas.removeEventListener('webglcontextlost', this.onCtxLost);

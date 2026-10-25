@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { runSync, type Steps } from './steps';
 import type { StadiumTemplate } from '../../core/types';
 import { curveSampler, tierEdges } from '../../core/venueDetails';
 
@@ -99,6 +100,11 @@ export interface JewelBuild {
 }
 
 export function buildJewel(template: StadiumTemplate, shadows: boolean): JewelBuild {
+  return runSync(buildJewelSteps(template, shadows));
+}
+
+/** buildJewel in steps, one a part of the building: the crown, the steel, the skin, the run-off (performance plan P3.6). */
+export function* buildJewelSteps(template: StadiumTemplate, shadows: boolean): Steps<JewelBuild> {
   const group = new THREE.Group();
   group.name = 'jewel';
   const trash: Trash[] = [];
@@ -167,6 +173,7 @@ export function buildJewel(template: StadiumTemplate, shadows: boolean): JewelBu
   const steel = new THREE.MeshStandardMaterial({ color: 0xf4f2ec, roughness: 0.5, metalness: 0.1, emissive: 0xbdb5a3, emissiveIntensity: 0.45 });
   trash.push(membrane, deck, steel);
 
+  yield;
   // ---- the crown: pillowed bays over a flat deck -----------------------
   const RS = 14; // radial segments over the top
   const SS = 6; // segments round the shoulder
@@ -248,6 +255,7 @@ export function buildJewel(template: StadiumTemplate, shadows: boolean): JewelBu
   group.add(deckMesh);
   trash.push(crownGeo, deckGeo);
 
+  yield;
   // ---- steel: trusses, compression ring, arches and legs -----------------
   // One instanced mesh of unit boxes for every member — a few thousand pieces
   // of steel as a few thousand draw calls would cost more than the crowd.
@@ -331,6 +339,7 @@ export function buildJewel(template: StadiumTemplate, shadows: boolean): JewelBu
   group.add(steelMesh);
   trash.push({ dispose: () => steelMesh.dispose() }); // its instance buffer
 
+  yield;
   // ---- the skin -------------------------------------------------------------
   const lat = latticeTexture();
   const segs = 480;
@@ -401,6 +410,7 @@ export function buildJewel(template: StadiumTemplate, shadows: boolean): JewelBu
   group.add(new THREE.Mesh(glowGeo, glowMat));
   trash.push(glowGeo, glowMat);
 
+  yield;
   // ---- the run-off: grass to the front of the stands -----------------------
   const shape = new THREE.Shape();
   for (let i = 0; i <= 256; i++) {

@@ -36,6 +36,9 @@ import type {
   ThumbnailMeta,
 } from './repo';
 import { normalizeTags } from './memoryRepo';
+import { isoToUs, usToIso, type FeedPosition } from './feedCursor';
+import { inBatches } from './retention';
+import type { FeedPage } from './repo';
 import { costStats, LIMIT_REASONS, modeOutcomes, type AiGroup } from './aiStats';
 import { designFacets } from '../../src/core/facets';
 
@@ -221,8 +224,16 @@ export class PgAiEventsRepository implements AiEventsRepository {
     // 'model' counts DESIGNS: a successful Polish or photo reading lands in
     // `all` only, so the "premium generations" figures mean what they always did.
     const outcomeOf = `CASE WHEN outcome = 'model' AND mode NOT IN ('std', 'super') THEN 'other' ELSE outcome END`;
+    // The all-time figures (totals, since, who ever hit the cap, measured
+    // since) add what the retention sweep rolled up past 400 days (P3.5,
+    // retention.ts). The windowed ones read raw rows only: a window is at
+    // most 365 days (the route clamps it), and raw rows are kept for 400.
     const [tot, win, perDay, top, cap, modes, metered, first, fails, recent, groupRows, measuredFirst] = await Promise.all([
-      this.maintenance.query(`SELECT ${outcomeOf} AS outcome, count(*)::int AS n FROM ai_events GROUP BY 1`),
+      this.maintenance.query(
+        `SELECT outcome, sum(n)::int AS n FROM (
+           SELECT ${outcomeOf} AS outcome, count(*) AS n FROM ai_events GROUP BY 1
+           UNION ALL SELECT ${outcomeOf} AS outcome, sum(n) AS n FROM ai_events_daily GROUP BY 1) x GROUP BY 1`,
+      ),
       this.maintenance.query(
         `SELECT ${outcomeOf} AS outcome, count(*)::int AS n FROM ai_events WHERE at > now() - $1::interval GROUP BY 1`,
         [since],
@@ -246,19 +257,23 @@ export class PgAiEventsRepository implements AiEventsRepository {
          GROUP BY 1 ORDER BY model DESC, total DESC LIMIT 20`,
         [since],
       ),
-      // Not windowed: "has anyone ever hit the cap" is the question.
+      // Not windowed: "has anyone ever hit the cap" is the question. Ties are
+      // broken (latest first, then by name), so the twenty shown are the same
+      // twenty however the rows are stored.
       this.maintenance.query(
         `SELECT coalesce(u.username, 'admin / unlocked') AS username,
-                count(*)::int AS times, max(e.at) AS last
-         FROM ai_events e LEFT JOIN users u ON u.id = e.user_id
-         WHERE e.outcome = 'quota' GROUP BY 1 ORDER BY times DESC LIMIT 20`,
+                sum(x.times)::int AS times, max(x.last) AS last
+         FROM (SELECT user_id, count(*) AS times, max(at) AS last FROM ai_events WHERE outcome = 'quota' GROUP BY user_id
+               UNION ALL SELECT user_id, times, last_at FROM ai_quota_hits) x
+         LEFT JOIN users u ON u.id = x.user_id
+         GROUP BY 1 ORDER BY times DESC, last DESC, username LIMIT 20`,
       ),
       this.maintenance.query(
         `SELECT mode, count(*)::int AS n FROM ai_events WHERE at > now() - $1::interval GROUP BY mode`,
         [since],
       ),
       this.maintenance.query('SELECT count(*)::int AS n FROM ai_usage WHERE used > 0'),
-      this.maintenance.query('SELECT min(at) AS first FROM ai_events'),
+      this.maintenance.query('SELECT least((SELECT min(at) FROM ai_events), (SELECT min(first_at) FROM ai_events_daily)) AS first'),
       this.maintenance.query(
         `SELECT reason, count(*)::int AS n, max(at) AS last FROM ai_events
          WHERE reason IS NOT NULL AND at > now() - $1::interval
@@ -289,7 +304,10 @@ export class PgAiEventsRepository implements AiEventsRepository {
          FROM ai_events WHERE at > now() - $1::interval GROUP BY 1, 2, 3, 4`,
         [since, [...LIMIT_REASONS]],
       ),
-      this.maintenance.query('SELECT min(at) AS first FROM ai_events WHERE calls IS NOT NULL'),
+      this.maintenance.query(
+        `SELECT least((SELECT min(at) FROM ai_events WHERE calls IS NOT NULL),
+                      (SELECT min(first_measured_at) FROM ai_events_daily)) AS first`,
+      ),
     ]);
 
     const groups: AiGroup[] = groupRows.rows.map((r) => ({
@@ -649,12 +667,59 @@ export class PgDesignRepository implements DesignRepository {
   }
 
   async listPublic(query: GalleryQuery): Promise<GalleryItem[]> {
-    return this.queryPublic(query);
+    return (await this.queryPublicRows(query)).map(rowToGalleryItem);
+  }
+
+  async listPublicPage(query: GalleryQuery & { after?: FeedPosition | null }): Promise<FeedPage> {
+    // One row more than the page, so the last page says it is the last
+    // instead of handing out a cursor to an empty one.
+    const limit = Math.min(1000, Math.max(1, Math.floor(query.limit ?? 60)));
+    const rows = await this.queryPublicRows({ ...query, limit: limit + 1 });
+    const page = rows.slice(0, limit);
+    const last = page[page.length - 1];
+    const next: FeedPosition | null = rows.length > limit && last
+      ? {
+          sort: query.sort,
+          likeScore: query.sort === 'likes' ? Number(last.like_score ?? 0) : null,
+          updatedUs: isoToUs(String(last.feed_at)),
+          id: String(last.id),
+        }
+      : null;
+    return { items: page.map(rowToGalleryItem), next };
   }
 
   private async queryPublic(query: GalleryQuery & { ownerId?: string }): Promise<GalleryItem[]> {
+    return (await this.queryPublicRows(query)).map(rowToGalleryItem);
+  }
+
+  /**
+   * The feed's one query. `after` (P3.4) is added to the WHERE that
+   * publicWhere built, never in place of any of it, as a row comparison over
+   * exactly the ORDER BY's columns: the partial indexes designs_feed_recent_idx
+   * and designs_feed_likes_idx (schema.ts) have those columns in that order,
+   * so the page starts at the position in the index and reads only its own
+   * rows. Every value is a bound, typed parameter.
+   */
+  private async queryPublicRows(query: GalleryQuery & { ownerId?: string; after?: FeedPosition | null }): Promise<Record<string, unknown>[]> {
     const params: unknown[] = [];
-    const where = this.publicWhere(query, params);
+    let where = this.publicWhere(query, params);
+    const after = query.after;
+    if (after) {
+      // A position from the other sort cannot be compared with this one; the
+      // route never passes one (the cursor's tag names its sort), and nor may
+      // anything else.
+      if (after.sort !== query.sort) throw new Error('feed position from another sort');
+      params.push(usToIso(after.updatedUs));
+      const at = params.length;
+      params.push(after.id);
+      const id = params.length;
+      if (query.sort === 'likes') {
+        params.push(after.likeScore ?? 0);
+        where += ` AND (d.like_score, d.updated_at, d.id) < ($${params.length}::int, $${at}::timestamptz, $${id}::uuid)`;
+      } else {
+        where += ` AND (d.updated_at, d.id) < ($${at}::timestamptz, $${id}::uuid)`;
+      }
+    }
     let voteSelect = '0 AS my_vote';
     if (query.viewerId) {
       params.push(query.viewerId);
@@ -673,16 +738,20 @@ export class PgDesignRepository implements DesignRepository {
     // 5000 ceiling is a backstop, not a page size.
     params.push(Math.min(5000, query.limit ?? 5000));
     const limitP = params.length;
-    params.push(Math.max(0, query.offset ?? 0));
+    params.push(Math.max(0, Math.floor(query.offset ?? 0)));
     const offsetP = params.length;
+    // feed_at: the edit time to the microsecond, as text, so the next page's
+    // cursor names this row exactly (a JavaScript Date keeps milliseconds,
+    // and a row edited within the same millisecond would repeat or vanish).
     const res = await this.pool.query(
-      `SELECT ${GALLERY_COLS}, ${voteSelect}
+      `SELECT ${GALLERY_COLS}, ${voteSelect},
+              to_char(d.updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS feed_at
        ${GALLERY_JOINS}
        ${viewerJoin}
        WHERE ${where} ORDER BY ${order} LIMIT $${limitP} OFFSET $${offsetP}`,
       params,
     );
-    return res.rows.map(rowToGalleryItem);
+    return res.rows;
   }
 
   async countPublic(query: Omit<GalleryQuery, 'limit' | 'offset' | 'viewerId' | 'sort'>): Promise<number> {
@@ -1242,8 +1311,13 @@ export class PgDesignRepository implements DesignRepository {
   async shareStats(id: string): Promise<ShareStats> {
     const v = await this.pool.query('SELECT view_count FROM designs WHERE id = $1', [id]);
     const views = v.rows[0] ? Number(v.rows[0].view_count) : 0;
+    // Raw rows plus what the retention sweep rolled up past 400 days (P3.5):
+    // a design's counts are for all time.
     const rows = await this.pool.query(
-      'SELECT platform, kind, count(*)::int AS n FROM design_shares WHERE design_id = $1 GROUP BY platform, kind',
+      `SELECT platform, kind, sum(n)::int AS n FROM (
+         SELECT platform, kind, count(*) AS n FROM design_shares WHERE design_id = $1 GROUP BY 1, 2
+         UNION ALL SELECT platform, kind, sum(n) AS n FROM design_shares_daily WHERE design_id = $1 GROUP BY 1, 2) x
+       GROUP BY platform, kind`,
       [id],
     );
     let shares = 0;
@@ -1722,9 +1796,20 @@ export class PgEventsRepository implements EventsRepository {
     );
   }
 
+  /**
+   * In batches (performance plan P3.5), each found through events_created_idx
+   * (schema.ts): the single DELETE read all of the table to find one day's
+   * rows, 240 ms at 500k rows, and held them all in one transaction.
+   */
   async purge(before: Date): Promise<number> {
-    const res = await this.maintenance.query('DELETE FROM events WHERE created_at < $1', [before]);
-    return res.rowCount ?? 0;
+    const r = await inBatches(async (limit) => {
+      const res = await this.maintenance.query(
+        'DELETE FROM events WHERE id = ANY (ARRAY(SELECT id FROM events WHERE created_at < $1 LIMIT $2))',
+        [before, limit],
+      );
+      return res.rowCount ?? 0;
+    });
+    return r.removed;
   }
 
   async funnel(steps: string[], days: number): Promise<FunnelStep[]> {

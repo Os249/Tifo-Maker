@@ -432,6 +432,15 @@ export function openingQuads(template: StadiumTemplate): OpeningQuad[] {
   const curve = samplePlanCurve(template.plan.a, template.plan.b, template.plan.exponent);
   const compiled = compileBlocks(template, curve);
   const out: OpeningQuad[] = [];
+  // One offset curve per distance out, not four per opening: the openings of
+  // a band share their front and back rows, and each curve is a few thousand
+  // samples (performance plan P3.6). The same curve either way.
+  const offsets = new Map<number, ReturnType<typeof buildOffsetCurve>>();
+  const offsetAt = (r: number): ReturnType<typeof buildOffsetCurve> => {
+    let oc = offsets.get(r);
+    if (!oc) offsets.set(r, (oc = buildOffsetCurve(curve, r)));
+    return oc;
+  };
   template.tiers.forEach((tier, ti) => {
     const cb = compiled[ti];
     if (!cb) return;
@@ -464,7 +473,7 @@ export function openingQuads(template: StadiumTemplate): OpeningQuad[] {
       const rFront = tier.baseOffset + (o.r0 - 0.5) * tier.rowDepth;
       const rBack = tier.baseOffset + (o.r1 + 0.5) * tier.rowDepth;
       const at = (radial: number, side: -1 | 1): [number, number] => {
-        const oc = buildOffsetCurve(curve, radial);
+        const oc = offsetAt(radial);
         const idx = indexAtArc(oc, arcAtIndex(oc, o.idx) + side * o.halfW);
         const i = Math.floor(idx) % N;
         const j = (i + 1) % N;

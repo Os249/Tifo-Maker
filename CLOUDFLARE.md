@@ -62,17 +62,31 @@ Railway redeploys when you save a variable.
 
 | # | Name | When | Then |
 |---|---|---|---|
-| 1 | Bypass private and dynamic | URI path starts with `/api/`, `/og/`, `/admin`, `/auth`, `/reset`, `/account`, `/projects`, `/s/` or equals `/health` | **Bypass cache** |
+| 1 | Bypass private and dynamic | URI path starts with `/api/`, `/og/`, `/admin`, `/auth`, `/reset`, `/account`, `/projects`, `/s/`, `/ar/reset`, `/ar/account`, `/ar/projects` or `/ar/s/`, or equals `/health` | **Bypass cache** |
 | 2 | Bypass credentials | the request has an `Authorization` or a `Cookie` header **and** the path does not start with `/assets/` | **Bypass cache** |
 | 3 | Hashed build files | URI path starts with `/assets/` | **Eligible for cache**, Edge TTL: *Use cache-control header if present* (the server sends a year, immutable) |
 
 Everything else, every HTML page included, is **never cached**: do not add a rule for it, and never turn on "Cache Everything".
 
+**The Arabic pages.** Every page whose words exist in Arabic has a twin under `/ar/` (`/ar/`, `/ar/community`, `/ar/t/…`, `/ar/d/…`, `/ar/s/…`, `/ar/app`, `/ar/clubs`, `/ar/legal`, `/ar/reset`, `/ar/account`, `/ar/projects`). The server answers each exactly like its English page: the same headers, the same `Cache-Control`, the same checks, the same limits. So every rule here that names a path names its `/ar/` twin as well, and any rule you add later for a page must too: a rule for `/reset` alone would leave `/ar/reset` to the defaults. The language is in the path and nowhere else; no rule, Worker or Transform may pick it from a cookie or `Accept-Language`, and nothing at the edge may vary a page on either.
+
+As an expression, rule 1 is:
+
+```
+(starts_with(http.request.uri.path, "/api/") or starts_with(http.request.uri.path, "/og/")
+ or starts_with(http.request.uri.path, "/admin") or starts_with(http.request.uri.path, "/auth")
+ or starts_with(http.request.uri.path, "/reset") or starts_with(http.request.uri.path, "/account")
+ or starts_with(http.request.uri.path, "/projects") or starts_with(http.request.uri.path, "/s/")
+ or starts_with(http.request.uri.path, "/ar/reset") or starts_with(http.request.uri.path, "/ar/account")
+ or starts_with(http.request.uri.path, "/ar/projects") or starts_with(http.request.uri.path, "/ar/s/")
+ or http.request.uri.path eq "/health")
+```
+
 Why each matters:
 
 - **`/api/` answers differ by who asks.** A design's owner gets its pictures (the scene's layers) and its private fields; the gallery carries the caller's own votes; `/api/me`, notifications and the account export are one person's. Cloudflare keys its cache on the URL, not on who is asking, and does not honour `Vary: Authorization`. The server marks all of these `no-store` (or `private, no-store`), and rule 1 makes sure nothing at the edge ever second-guesses that.
 - **Pictures and cards (`/og/`, thumbnails) can be taken down.** A public design's picture says `public, no-cache` with an ETag: the browser revalidates it every time, which is cheap (a 304). At the edge it would need a purge on every unpublish and takedown, which does not exist, so it stays out.
-- **HTML lists and names designs.** `/`, `/community`, `/t/…` and `/d/…` read the database on every request, so a takedown or an unpublish is seen by the next visitor. Cloudflare's default edge TTL for a page is two hours.
+- **HTML lists and names designs.** `/`, `/community`, `/t/…` and `/d/…`, and their Arabic twins `/ar/`, `/ar/community`, `/ar/t/…` and `/ar/d/…`, read the database on every request, so a takedown or an unpublish is seen by the next visitor. Cloudflare's default edge TTL for a page is two hours.
 - **No Edge TTL override ("Ignore cache-control header") on any rule that can match `/api`.** An override makes Cloudflare strip `Set-Cookie` and cache the answer: the Google sign-in (`tm_oauth`, `tm_handoff`) and the admin unlock (`tm_admin`) would break, or worse, be shared.
 - **Answers that carry a secret say `no-store, no-transform`** (a session token, a sign-in ticket, the account export; see `SECURITY-CHECKS.md`): nothing between the server and the browser may store, rewrite or recompress them.
 
@@ -147,6 +161,8 @@ curl -sI https://tifomaker.org | grep -i "server\|cf-ray"          # server: clo
 curl -sI https://tifomaker.org/assets/<any-hashed-file>.js | grep -i "cf-cache-status\|content-encoding"   # HIT after the second request, br
 curl -sI https://tifomaker.org/api/me | grep -i "cf-cache-status\|cache-control"   # DYNAMIC or BYPASS, no-store
 curl -sI https://tifomaker.org/ | grep -i "cf-cache-status\|cache-control"         # DYNAMIC, no-cache
+curl -sI https://tifomaker.org/ar/ | grep -i "cf-cache-status\|cache-control"      # the same as /: DYNAMIC, no-cache
+curl -sI https://tifomaker.org/ar/reset | grep -i "cf-cache-status\|cache-control" # BYPASS, no-cache (rule 1)
 ```
 
 Then:

@@ -262,7 +262,8 @@ async function visit(path, { lang = 'en', token = null, w = 1440, h = 900, settl
 /** The keys every string table in these scripts carries (the old one-chunk table counts too). */
 const keysIn = (bodies) => {
   const keys = new Set();
-  for (const js of bodies.values()) for (const m of js.matchAll(/"([A-Za-z][\w-]*(?:\.[\w-]+)+)":(?:\["|\{en:)/g)) keys.add(m[1]);
+  // Vite 8's minifier (Oxc) writes the values as template literals, esbuild wrote "..." (performance plan P3.8).
+  for (const js of bodies.values()) for (const m of js.matchAll(/"([A-Za-z][\w-]*(?:\.[\w-]+)+)":(?:\[["`]|\{en:)/g)) keys.add(m[1]);
   return keys;
 };
 const fontFiles = (asked) => asked.map((r) => new URL(r.url).pathname).filter((u) => /\.woff2?$/.test(u)).map((u) => u.split('/').pop());
@@ -318,7 +319,7 @@ for (const [path, name] of [['/', 'landing'], ['/community', 'community'], [`/t/
   const v = await visit('/', {
     routes: [[(u) => /^\/assets\/landing-[\w-]+\.js$/.test(u.pathname), async (route) => {
       const r = await route.fetch();
-      await route.fulfill({ response: r, body: (await r.text()).replace(/"nav\.how":\["[^"]*","[^"]*"\],?/, '') });
+      await route.fulfill({ response: r, body: (await r.text()).replace(/"nav\.how":\[(["`])[^"`]*\1,(["`])[^"`]*\2\],?/, '') });
     }]],
     before: async (o) => o.ctx.addInitScript(() => {
       new MutationObserver(() => {

@@ -42,6 +42,37 @@ const errs=[]; page.on('pageerror',e=>errs.push(String(e.message).slice(0,200)))
 const ready=()=>page.waitForFunction(()=>{const s=document.getElementById('stat');return s&&/seats/.test(s.textContent||'');},null,{timeout:90000});
 let pass=0,fail=0; const check=(n,ok,x='')=>{(ok?pass++:fail++);console.log(`  ${ok?'PASS':'FAIL'}  ${n}${x?'  '+x:''}`)};
 const waitFor=(fn,arg=null,ms=60000)=>page.waitForFunction(fn,arg,{timeout:ms}).then(()=>true).catch(()=>false);
+/**
+ * Has the open project's draft been written? It is kept compressed in
+ * IndexedDB now (src/core/draftStore.ts, performance plan P3.7), or as JSON
+ * in localStorage in the old form; asked in the page, which it never changes.
+ */
+const DRAFT_SAVED = `(async () => {
+  const id = new URLSearchParams(location.search).get('local');
+  if (!id) return false;
+  const key = 'tifo_proj_' + id;
+  if (localStorage.getItem(key)) return true;
+  return await new Promise((res) => {
+    let rq;
+    try { rq = indexedDB.open('tifo-drafts', 1); } catch { return res(false); }
+    rq.onupgradeneeded = () => rq.transaction.abort();
+    rq.onerror = () => res(false);
+    rq.onsuccess = () => {
+      const db = rq.result;
+      if (!db.objectStoreNames.contains('drafts')) { db.close(); return res(false); }
+      const q = db.transaction('drafts').objectStore('drafts').count(key);
+      q.onsuccess = () => { db.close(); res(q.result > 0); };
+      q.onerror = () => { db.close(); res(false); };
+    };
+  });
+})()`;
+/** Wait (polling from here: the store answers asynchronously) until the open project's draft is written. */
+async function draftSaved(p, ms = 60000) {
+  for (const end = Date.now() + ms; Date.now() < end; await p.waitForTimeout(250)) {
+    if (await p.evaluate(DRAFT_SAVED).catch(() => false)) return true;
+  }
+  return false;
+}
 const paint=()=>page.evaluate(()=>{
   const c=document.querySelector('#canvas-host canvas'); const r=c.getBoundingClientRect();
   const ev=(t,x,y)=>c.dispatchEvent(new PointerEvent(t,{pointerId:1,isPrimary:true,bubbles:true,cancelable:true,composed:true,clientX:x,clientY:y,buttons:t==='pointerup'?0:1,pointerType:'mouse'}));
@@ -55,10 +86,8 @@ await page.goto(B+'/app?new=1',{waitUntil:'domcontentloaded'}); await ready(); a
 await waitFor(()=>/[?&]local=/.test(location.search));
 await paint();
 
-// Wait for the debounced autosave to actually hit localStorage.
-const localKey = () => 'tifo_proj_' + new URLSearchParams(location.search).get('local');
-await waitFor(()=>{const id=new URLSearchParams(location.search).get('local');return !!id&&!!localStorage.getItem('tifo_proj_'+id);});
-void localKey;
+// Wait for the debounced autosave to actually be written.
+await draftSaved(page);
 await page.evaluate(()=>document.getElementById('doc-title').value='Derby night');
 await page.evaluate(()=>document.getElementById('save').click());
 await page.waitForTimeout(800);
@@ -130,7 +159,7 @@ check('can sign back in with the email', login.status()===200, `status=${login.s
   await p3.goto(B + '/app?new=1', { waitUntil: 'domcontentloaded' });
   await p3.waitForFunction(() => /seats/.test(document.getElementById('stat')?.textContent || ''), null, { timeout: 90000 });
   await until(() => /[?&]local=/.test(location.search));
-  await until(() => { const id = new URLSearchParams(location.search).get('local'); return !!id && !!localStorage.getItem('tifo_proj_' + id); });
+  await draftSaved(p3);
   const localId = await p3.evaluate(() => new URLSearchParams(location.search).get('local'));
   // Leave the editor first (its own autosave writes this key), then give the
   // project a banner of its own, which exists nowhere but this browser.
@@ -179,7 +208,7 @@ async function localProjectSignedIn(tag, bannersRaw) {
   pg.on('pageerror', (e) => errs.push(String(e.message).slice(0, 200)));
   await pg.goto(B + '/app?new=1', { waitUntil: 'domcontentloaded' });
   await pg.waitForFunction(() => /seats/.test(document.getElementById('stat')?.textContent || ''), null, { timeout: 90000 });
-  await pg.waitForFunction(() => { const id = new URLSearchParams(location.search).get('local'); return !!id && !!localStorage.getItem('tifo_proj_' + id); }, null, { timeout: 60000 }).catch(() => {});
+  await draftSaved(pg);
   const id = await pg.evaluate(() => new URLSearchParams(location.search).get('local'));
   await pg.goto(B + '/legal', { waitUntil: 'domcontentloaded' });
   await pg.evaluate(([i, b]) => localStorage.setItem(`tifo_proj_${i}_banners`, b), [id, bannersRaw]);

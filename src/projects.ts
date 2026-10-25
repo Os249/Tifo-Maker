@@ -16,7 +16,7 @@ import './vendor/tabler-subset.css';
 import './community.css';
 import { hydrateBowls } from './ui/bowlPicture';
 import './projects.css';
-import { initLang, applyDom, onLangChange, toggleLang, t, tv, tl, getLang } from './ui/i18n';
+import { initLang, applyDom, localPath, onLangChange, toggleLang, t, tv, tl, getLang } from './ui/i18n';
 import { initScheme, setSchemeLabels } from './ui/colorScheme';
 import { installMobileNav } from './ui/mobileNav';
 import { installConsent } from './ui/consent';
@@ -24,8 +24,8 @@ import { ensureUsernameChosen } from './ui/chooseUsernameModal';
 import { escapeHtml } from './core/escape';
 import {
   TRASH_DAYS, docKey, accountDraftKey, duplicateLocal, listLocal, localThumb,
-  migrateLegacyDraft, nextDefaultName, openUrl, purgeLocal, readEnvelope, restoreLocal,
-  trashLocal, updateLocal, writeEnvelope, newProjectUrl, stashNewProject, type ProjectRef,
+  migrateLegacyDraft, nextDefaultName, openUrl, purgeLocal, loadEnvelope, restoreLocal,
+  trashLocal, updateLocal, saveEnvelope, newProjectUrl, stashNewProject, type ProjectRef,
 } from './core/projects';
 import {
   adoptProviderSession, deleteProject, duplicateProject, fetchDesignCells, fetchMe, isSignedIn,
@@ -431,10 +431,10 @@ async function rename(it: Item): Promise<void> {
   try {
     if (it.kind === 'account') {
       await setDesignTitle(it.id, name);
-      retitleCopy(accountDraftKey(it.id), name);
+      await retitleCopy(accountDraftKey(it.id), name);
     } else {
       updateLocal(it.id, { title: name });
-      retitleCopy(docKey(it.id), name);
+      await retitleCopy(docKey(it.id), name);
     }
     toast(t('pj.t.renamed'));
   } catch (e) {
@@ -443,10 +443,18 @@ async function rename(it: Item): Promise<void> {
   }
 }
 
-/** Keep the browser's copy in step, or the editor would reopen the old name. */
-function retitleCopy(key: string, title: string): void {
-  const env = readEnvelope(key);
-  if (env) writeEnvelope(key, { ...env, title, doc: { ...env.doc, meta: { ...env.doc.meta, title } } });
+/**
+ * Keep the browser's copy in step, or the editor would reopen the old name.
+ * Best-effort: the rename itself has happened (in the account, or in the
+ * list), so a store that cannot be read only leaves the copy's old name.
+ */
+async function retitleCopy(key: string, title: string): Promise<void> {
+  try {
+    const env = await loadEnvelope(key);
+    if (env) await saveEnvelope(key, { ...env, title, doc: { ...env.doc, meta: { ...env.doc.meta, title } } });
+  } catch {
+    /* DraftReadError: the copy is untouched */
+  }
 }
 
 async function duplicate(it: Item): Promise<void> {
@@ -460,7 +468,7 @@ async function duplicate(it: Item): Promise<void> {
         thumb: it.thumb ? `acct:${m.id}:${m.updatedAt}` : null,
       });
     } else {
-      const c = duplicateLocal(it.id, title);
+      const c = await duplicateLocal(it.id, title);
       if (!c) {
         toast(t('pj.t.full'));
         return;
@@ -485,7 +493,7 @@ async function download(it: Item): Promise<void> {
         templateVersion: d.templateVersion, palette: d.palette, cells: d.cells,
       });
     } else {
-      const env = readEnvelope(docKey(it.id));
+      const env = await loadEnvelope(docKey(it.id));
       if (!env) throw new Error('nothing saved yet');
       doc = { ...env.doc, meta: { ...env.doc.meta, title: it.title } };
     }
@@ -765,10 +773,13 @@ async function refreshAuth(): Promise<void> {
   if (named) {
     authBtn.removeAttribute('data-i18n');
     authBtn.textContent = `@${named.username}`;
-    authBtn.onclick = () => location.assign('/account');
+    // The account, not an action: the shared header draws it as an outline.
+    authBtn.classList.add('is-user');
+    authBtn.onclick = () => location.assign(localPath('/account'));
   } else {
     authBtn.setAttribute('data-i18n', 'ed.signup');
     authBtn.textContent = t('ed.signup');
+    authBtn.classList.remove('is-user');
     authBtn.onclick = () => void signIn();
   }
 }

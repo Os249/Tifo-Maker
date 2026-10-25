@@ -1,5 +1,7 @@
 import * as THREE from 'three';
 import type { SeatMap } from '../core/types';
+import { REVEAL_GLSL, revealUniforms, type RevealUniforms } from './simulator/revealGpu';
+import { runSync, type Steps } from './simulator/steps';
 
 /**
  * The seats themselves, for the Stadium view: one small chair on every seat,
@@ -29,6 +31,20 @@ export interface ChairBuild {
   dispose(): void;
   /** Triangles drawn when every chunk is in view. */
   triangles: number;
+  /**
+   * Point the chairs' shader at a view's own per-seat state: which cards are
+   * up, and the reveal playing (performance plan P3.2). Read when the shader
+   * is compiled, which a new view's renderer always does.
+   */
+  bind(state: ChairState): void;
+}
+
+/** What the chairs read per seat, owned by the view drawing them. */
+export interface ChairState {
+  cardUp: THREE.DataTexture | null;
+  reveal: RevealUniforms;
+  /** Every seat's reveal numbers (see Preview3D: one RGBA float texel a seat). */
+  revealKeys: { value: THREE.Texture | null };
 }
 
 /**
@@ -141,8 +157,21 @@ export function buildChairs(
   map: SeatMap,
   colours: Uint8Array,
   facing: Float32Array,
-  opts: { skip?: Uint8Array | null; detail?: 'full' | 'low'; cardUp?: THREE.DataTexture | null } = {},
+  opts: { skip?: Uint8Array | null; detail?: 'full' | 'low'; cardUp?: THREE.DataTexture | null; state?: ChairState } = {},
 ): ChairBuild {
+  return runSync(buildChairsSteps(map, colours, facing, opts));
+}
+
+/** How many chairs a step of buildChairsSteps makes. */
+const CHAIRS_A_STEP = 250;
+
+/** buildChairs in steps, a few hundred chairs each (performance plan P3.6). */
+export function* buildChairsSteps(
+  map: SeatMap,
+  colours: Uint8Array,
+  facing: Float32Array,
+  opts: { skip?: Uint8Array | null; detail?: 'full' | 'low'; cardUp?: THREE.DataTexture | null; state?: ChairState } = {},
+): Steps<ChairBuild> {
   const group = new THREE.Group();
   group.name = 'chairs';
   const detail = opts.detail ?? 'full';
@@ -173,18 +202,28 @@ export function buildChairs(
   const material = new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide, toneMapped: false });
   // The colours are stored as sRGB bytes — linear values in 8 bits band the
   // dark seats (navy, black) badly — and decoded per vertex here.
-  const cardUp = opts.cardUp ?? null;
+  let state: ChairState | null = opts.state ?? (opts.cardUp ? { cardUp: opts.cardUp, reveal: revealUniforms(), revealKeys: { value: null } } : null);
   material.onBeforeCompile = (shader) => {
     let decode = '#include <color_vertex>\n  vColor.rgb = pow( vColor.rgb, vec3( 2.2 ) );';
-    if (cardUp) {
-      shader.uniforms.uCardUp = { value: cardUp };
-      shader.vertexShader = shader.vertexShader.replace('#include <common>', `#include <common>\nattribute float aSeat;\nuniform sampler2D uCardUp;`);
-      // Under a raised card: the fan standing there, in dark clothes.
-      decode += `\n  float seatUp = texelFetch( uCardUp, ivec2( int( mod( aSeat, ${SEAT_TEX_W}.0 ) ), int( aSeat / ${SEAT_TEX_W}.0 ) ), 0 ).r;\n  vColor.rgb = mix( vColor.rgb, vec3( 0.016, 0.017, 0.02 ), seatUp );`;
+    const s = state;
+    if (s?.cardUp) {
+      shader.uniforms.uCardUp = { value: s.cardUp };
+      // The reveal's own uniforms, the very objects the view's cards read, so
+      // one write a frame moves both (performance plan P3.2).
+      Object.assign(shader.uniforms, s.reveal, { tifoRevealKeys: s.revealKeys });
+      shader.vertexShader = shader.vertexShader.replace('#include <common>', `#include <common>\nattribute float aSeat;\nuniform sampler2D uCardUp;\nuniform highp sampler2D tifoRevealKeys;\n${REVEAL_GLSL}`);
+      // Under a raised card: the fan standing there, in dark clothes. While a
+      // reveal plays, only once that seat's card is up (more than 0.02 of the
+      // way, as the cards themselves).
+      const at = `ivec2( int( mod( aSeat, ${SEAT_TEX_W}.0 ) ), int( aSeat / ${SEAT_TEX_W}.0 ) )`;
+      decode += `\n  float seatUp = texelFetch( uCardUp, ${at}, 0 ).r;\n  if ( tifoRevealMode != 0 ) seatUp *= tifoRevealVis( texelFetch( tifoRevealKeys, ${at}, 0 ).xyz ) > 0.02 ? 1.0 : 0.0;\n  vColor.rgb = mix( vColor.rgb, vec3( 0.016, 0.017, 0.02 ), seatUp );`;
     }
     shader.vertexShader = shader.vertexShader.replace('#include <color_vertex>', decode);
   };
-  material.customProgramCacheKey = () => (cardUp ? 'tifo-chairs-srgb-up' : 'tifo-chairs-srgb');
+  material.customProgramCacheKey = () => (state?.cardUp ? 'tifo-chairs-srgb-up' : 'tifo-chairs-srgb');
+  const cardUp = state?.cardUp ?? null;
+  /** The chunks carry each vertex's seat index (aSeat) only when built to read a card state. */
+  const seatOf0 = !!cardUp;
   const geos: THREE.BufferGeometry[] = [];
   let triangles = 0;
   const P = map.pos3;
@@ -217,7 +256,9 @@ export function buildChairs(
         idx[k++] = a + 2;
         idx[k++] = a + 3;
       };
+      let made = 0;
       for (const i of seats) {
+        if (++made % CHAIRS_A_STEP === 0) yield;
         cur = i;
         const px = P[i * 3];
         const py = P[i * 3 + 1];
@@ -299,6 +340,11 @@ export function buildChairs(
   return {
     object: group,
     triangles,
+    bind(next: ChairState): void {
+      if (!seatOf0 && next.cardUp) throw new Error('chairs built without seat indices cannot follow a card state');
+      state = next;
+      material.needsUpdate = true;
+    },
     dispose(): void {
       for (const g of geos) g.dispose();
       material.dispose();

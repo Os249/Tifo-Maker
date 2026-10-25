@@ -211,9 +211,26 @@ console.log('\n— canvas gestures —');
   });
 
   // One finger paints.
-  const painted = async () => p.evaluate(() => {
+  // The draft is kept compressed in IndexedDB (performance plan P3.7), or in
+  // localStorage in the old form.
+  const painted = async () => p.evaluate(async () => {
     const id = new URLSearchParams(location.search).get('local');
-    const raw = id && localStorage.getItem('tifo_proj_' + id);
+    if (!id) return 0;
+    const key = 'tifo_proj_' + id;
+    const rec = await new Promise((res) => {
+      const rq = indexedDB.open('tifo-drafts', 1);
+      rq.onupgradeneeded = () => rq.transaction.abort();
+      rq.onerror = () => res(null);
+      rq.onsuccess = () => {
+        const db = rq.result;
+        if (!db.objectStoreNames.contains('drafts')) { db.close(); return res(null); }
+        const q = db.transaction('drafts').objectStore('drafts').get(key);
+        q.onsuccess = () => { db.close(); res(q.result ?? null); };
+        q.onerror = () => { db.close(); res(null); };
+      };
+    });
+    let raw = localStorage.getItem(key);
+    if (rec?.gz) raw = await new Response(new Blob([rec.gz]).stream().pipeThrough(new DecompressionStream('gzip'))).text().catch(() => raw);
     if (!raw) return 0;
     try { return (JSON.parse(raw).doc?.layers?.[0]?.cellsRle ?? []).length; } catch { return 0; }
   });

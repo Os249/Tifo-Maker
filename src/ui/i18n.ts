@@ -26,6 +26,7 @@
  */
 
 import { PASSWORD_MAX, PASSWORD_MIN } from '../core/passwordLimits';
+import { inLang } from '../core/langPath';
 
 export type Lang = 'en' | 'ar';
 
@@ -150,6 +151,17 @@ export function preferredLang(langs: readonly string[] | undefined): Lang {
   return /^ar\b/i.test(first) ? 'ar' : 'en';
 }
 
+/**
+ * The language this page's HTML was built in, when the page has a twin in the
+ * other one (performance plan P3.3): <html data-lang-page="en|ar">, written
+ * by the build and the server, never by this script's caller. Null on the dev
+ * server, whose pages have no twins: there everything works as it always did.
+ */
+function pageLang(): Lang | null {
+  const v = document.documentElement.getAttribute('data-lang-page');
+  return v === 'en' || v === 'ar' ? v : null;
+}
+
 export function initLang(): Lang {
   let saved: Lang | null = null;
   try {
@@ -158,7 +170,11 @@ export function initLang(): Lang {
   } catch {
     /* ignore */
   }
-  if (saved) current = saved;
+  // An /ar/ page is Arabic, whatever was saved: its words are in its HTML,
+  // and its address says Arabic (performance plan P3.3). Every other page
+  // follows the saved choice, else the browser's first language, as before.
+  if (pageLang() === 'ar') current = 'ar';
+  else if (saved) current = saved;
   else {
     try {
       current = preferredLang(navigator.languages?.length ? navigator.languages : [navigator.language]);
@@ -167,7 +183,24 @@ export function initLang(): Lang {
     }
   }
   applyDir();
+  // An English address showing Arabic because Arabic was chosen with the
+  // toggle: the address becomes its Arabic twin, in place, so a reload, a
+  // bookmark and every link from here are the Arabic pages, which paint in
+  // Arabic from their first frame. Only for a choice someone made: a browser
+  // that merely prefers Arabic keeps the address it asked for. Never a
+  // navigation, so nothing is fetched twice and nothing runs twice.
+  if (pageLang() === 'en' && saved === 'ar') followLanguage('ar');
   return current;
+}
+
+/** The address follows the language on screen: the twin's, in place (performance plan P3.3). */
+function followLanguage(lang: Lang): void {
+  const here = location.pathname + location.search + location.hash;
+  const there = inLang(here, lang);
+  if (there && there !== here) {
+    history.replaceState(history.state, '', there);
+    document.documentElement.setAttribute('data-lang-page', lang);
+  }
 }
 
 export function getLang(): Lang {
@@ -182,10 +215,22 @@ export function setLang(lang: Lang): void {
   } catch {
     /* ignore */
   }
+  // The address goes to the twin (performance plan P3.3): the page in the
+  // other language is its own URL, so a reload, a bookmark or a link copied
+  // from here opens it in the language now on screen. In place, not a
+  // navigation, so whatever is open stays open (the editor, a dialog, a
+  // half-typed form); the page is translated right here as it always was.
+  if (pageLang()) followLanguage(lang);
   applyDir();
   applyDom(document);
   for (const fn of listeners) fn(lang);
 }
+
+/**
+ * A link to one of this site's pages, in the language on screen (performance
+ * plan P3.3; core/langPath.ts). Re-exported here for the pages' convenience.
+ */
+export { localPath } from '../core/langPath';
 
 export function toggleLang(): void {
   setLang(current === 'en' ? 'ar' : 'en');
@@ -339,4 +384,13 @@ export function applyDom(root: ParentNode): void {
       if (attr && key) el.setAttribute(attr, t(key));
     }
   });
+  // And the links to this site's pages follow the language (localPath()), so
+  // a page translated in place sends its reader to pages in the same language.
+  if (pageLang()) {
+    root.querySelectorAll<HTMLAnchorElement>('a[href^="/"]').forEach((a) => {
+      const href = a.getAttribute('href')!;
+      const to = inLang(href, current);
+      if (to && to !== href) a.setAttribute('href', to);
+    });
+  }
 }

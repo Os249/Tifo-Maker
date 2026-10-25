@@ -56,8 +56,9 @@ vectors.
 - The one unescaped interpolation (`r.label` in `seat.ts`) is generated server-side from
   a template + integers, not user input.
 - **A Content-Security-Policy is now enabled** (helmet) with a strict allow-list:
-  `script-src 'self' 'unsafe-eval'` (eval is required by PixiJS 8's shader compiler — no
-  inline scripts are allowed, and `script-src-attr 'none'` blocks inline on*= handlers),
+  `script-src 'self'` (October 2026, performance plan P3.1: PixiJS loads its eval-free code,
+  `pixi.js/unsafe-eval`, so `'unsafe-eval'` is gone; no inline scripts are allowed, and
+  `script-src-attr 'none'` blocks inline on*= handlers),
   `style-src 'self' 'unsafe-inline' + fonts/CDN`, `img-src 'self' data:`,
   `connect-src 'self'`, `object-src 'none'`, `frame-ancestors 'none'`,
   plus `upgrade-insecure-requests`. Verified to break no page or dynamic flow

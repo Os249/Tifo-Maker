@@ -18,7 +18,9 @@ import { seedShowcase, seedTemplates } from './seedTemplates';
 import { EVENTS_RETENTION_DAYS, type AuthRepository, type DesignRepository } from './repo';
 import { envNum } from './env';
 import { logConfigWarnings, logProviderSetup } from './preflight';
-import { applyForeignKeyIndexes, HASH_RECOMPUTE_TASK, hashTrustAfterBoot, SchemaLedger, schemaStatements, type SchemaReport } from './schema';
+import { applyForeignKeyIndexes, applyMaintenanceIndexes, HASH_RECOMPUTE_TASK, hashTrustAfterBoot, SchemaLedger, schemaStatements, type SchemaReport } from './schema';
+import { randomCursorKey, storedCursorKey } from './feedCursor';
+import { runRetention } from './retention';
 import { SocMonitor, socKeyFrom } from './soc';
 import { createPool } from './db';
 import { MemorySocRepository, PgSocRepository } from './socRepo';
@@ -185,8 +187,13 @@ async function main(): Promise<void> {
     // Funnel events are kept for EVENTS_RETENTION_DAYS (repo.ts), then deleted,
     // once at boot and daily, like the visits and the security log.
     const events = new PgEventsRepository(pool, maint);
-    const pruneEvents = (): Promise<unknown> =>
-      events.purge(new Date(Date.now() - EVENTS_RETENTION_DAYS * 24 * 60 * 60 * 1000)).catch((e) => console.error('[tifo] events purge failed:', e));
+    const pruneEvents = (): Promise<unknown> => {
+      const started = Date.now();
+      return events.purge(new Date(Date.now() - EVENTS_RETENTION_DAYS * 24 * 60 * 60 * 1000)).then(
+        (n) => console.log(`[tifo] retention: events (funnel, after ${EVENTS_RETENTION_DAYS} days): ${n} removed in ${Date.now() - started} ms`),
+        (e) => console.error('[tifo] events purge failed:', e),
+      );
+    };
     afterListen.push(pruneEvents);
     setInterval(() => void pruneEvents(), 24 * 60 * 60 * 1000).unref();
     const pgDesigns = new PgDesignRepository(pool, maint);
@@ -212,6 +219,17 @@ async function main(): Promise<void> {
     });
     const pgAuth = new PgAuthRepository(pool, maint);
     seedRepos = { designs: pgDesigns, auth: pgAuth };
+    // The feed cursor's key (P3.4), kept in the database so a cursor handed
+    // out before a deploy, or by the other instance, is still good. Without
+    // it, one for this process: a client mid-scroll at the next deploy is
+    // told to start again from the top.
+    let feedCursorKey: Buffer;
+    try {
+      feedCursorKey = await storedCursorKey(maint);
+    } catch (e) {
+      console.error(`[tifo] feed cursor key not read from the database (cursors last until the next boot): ${(e as Error).message}`);
+      feedCursorKey = randomCursorKey();
+    }
     app = await buildApp(pgDesigns, pgAuth, templates, {
       staticDir,
       rateLimit: true,
@@ -238,6 +256,7 @@ async function main(): Promise<void> {
       database: 'postgres',
       schemaStatus: () => ({ pendingSecurity: schemaReport.pendingSecurity, failed: schemaReport.failed.length }),
       storedHashesTrusted: () => hashesTrusted,
+      feedCursorKey,
     });
   } else {
     if (isProd) {
@@ -312,17 +331,42 @@ async function main(): Promise<void> {
     for (const task of afterListen) await task().catch((e) => console.error('[tifo] boot task failed:', (e as Error).message));
   })();
 
-  // The foreign-key indexes (schema.ts, performance plan P1.25): after listen,
-  // not awaited, on the maintenance pool. Built CONCURRENTLY, so the site
-  // keeps answering while one builds; a failure is logged and retried at the
-  // next boot, and is never a reason not to serve.
+  // The foreign-key indexes (schema.ts, performance plan P1.25), then the
+  // feed's and the retention sweeps' (P3.4, P3.5): after listen, not awaited,
+  // on the maintenance pool. Built CONCURRENTLY, so the site keeps answering
+  // while one builds; a failure is logged and retried at the next boot, and
+  // is never a reason not to serve.
+  //
+  // Then the retention sweeps (retention.ts, P3.5), and every six hours: on
+  // the maintenance pool, in batches, each with a time budget, one log line
+  // each. One run at a time.
   if (maintenancePool) {
     const maint = maintenancePool;
-    void applyForeignKeyIndexes(maint)
-      .then(({ built }) => {
-        if (built.length) console.log(`[tifo] foreign-key indexes built: ${built.join(', ')}`);
-      })
-      .catch((e) => console.error('[tifo] foreign-key indexes skipped:', (e as Error).message));
+    let sweeping = false;
+    const sweep = async (): Promise<void> => {
+      if (sweeping) return;
+      sweeping = true;
+      try {
+        await runRetention(maint);
+      } catch (e) {
+        console.error('[tifo] retention sweep failed:', (e as Error).message);
+      } finally {
+        sweeping = false;
+      }
+    };
+    void (async () => {
+      try {
+        const fk = await applyForeignKeyIndexes(maint);
+        if (fk.built.length) console.log(`[tifo] foreign-key indexes built: ${fk.built.join(', ')}`);
+        const more = await applyMaintenanceIndexes(maint);
+        if (more.built.length) console.log(`[tifo] feed and retention indexes built: ${more.built.join(', ')}`);
+        if (more.dropped.length) console.log(`[tifo] superseded indexes dropped: ${more.dropped.join(', ')}`);
+      } catch (e) {
+        console.error('[tifo] indexes skipped:', (e as Error).message);
+      }
+      await sweep();
+    })();
+    setInterval(() => void sweep(), 6 * 60 * 60 * 1000).unref();
   }
 
   // Empty the Trash of anything that has sat there for TRASH_DAYS. After

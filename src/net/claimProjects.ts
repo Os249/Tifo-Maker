@@ -11,7 +11,7 @@
 
 import { flattenLayers } from '../core/tifoFormat';
 import {
-  bannersKey, docKey, listLocal, purgeLocal, readEnvelope, readRaw, thumbKey,
+  bannersKey, docKey, listLocal, loadEnvelope, purgeLocal, readRaw, thumbKey,
   type LocalProject,
 } from '../core/projects';
 import { ApiError, createDesignFromCells, deleteProject, fetchDesignFacts, isSignedIn, saveScene, setProjectPinned } from './api';
@@ -74,7 +74,10 @@ async function takeBack(designId: string): Promise<boolean> {
 
 /** Upload one local project. Returns the new account id, or null if it stayed local. */
 export async function claimLocalProject(p: LocalProject): Promise<string | null> {
-  const env = readEnvelope(docKey(p.id));
+  // A store that cannot be read throws (DraftReadError): the project then
+  // stays here, untouched, to move next time. Only a draft that is really not
+  // there (or unreadable) counts as nothing to move.
+  const env = await loadEnvelope(docKey(p.id));
   if (!env) {
     // A project with no seats saved is nothing to move; do not keep its card.
     purgeLocal(p.id);

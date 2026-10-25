@@ -1117,6 +1117,48 @@ async function runSuite(name: string, repo: DesignRepository, auth: AuthReposito
     assert.ok(home.body.includes('Curva Nord'), "the featured design's name is in the HTML a crawler gets");
     assert.ok(home.body.includes('data-i18n="daily.badge"'), 'the fixed labels stay translatable');
     assert.ok(/\/api\/designs\/[0-9a-f-]+\/thumbnail\.png/.test(home.body), 'and its thumbnail is a real image tag');
+
+    // The hero is for every fan: each load opens on one of the hero clubs, and
+    // the whole hero says that same club (frame, picture, pressed chip, link).
+    const seen = new Set<string>();
+    for (let i = 0; i < 40; i++) {
+      const page = (await served.inject({ method: 'GET', url: '/' })).body;
+      const club = page.match(/id="hero-3d" data-club="([a-z0-9-]+)"/)?.[1];
+      assert.ok(club, 'the hero frame names its club');
+      seen.add(club!);
+      assert.ok(page.includes(`src="/hero/${club}.webp"`), `the still is ${club}'s`);
+      assert.ok(page.includes(`/hero/${club}-640.webp 640w, /hero/${club}.webp 960w`), `the small still is ${club}'s`);
+      assert.equal((page.match(/class="hero-club on"/g) ?? []).length, 1, 'one chip is pressed');
+      assert.ok(new RegExp(`class="hero-club on" data-club="${club}" aria-pressed="true"`).test(page), `the pressed chip is ${club}`);
+      assert.ok(page.includes(`/projects?new=1&amp;club=${club}"`), `"Make this tifo" starts ${club}'s`);
+      assert.ok(page.includes(`href="/t/${shown}"`), 'the tifo of the day is still injected');
+    }
+    assert.ok(seen.size >= 4, `the hero changes club between visits (saw ${[...seen].join(', ')})`);
+  }
+  // The Arabic home page (performance plan P3.3) changes club the same way,
+  // with its caption already in Arabic and its links under /ar/. It needs the
+  // built pages (dist/ar/), so it runs once the site has been built.
+  const builtDir = join(process.cwd(), 'dist');
+  if (existsSync(join(builtDir, 'ar', 'landing.html'))) {
+    const built = await buildApp(designs, auth, templates, { social, featured, staticDir: builtDir });
+    const seenAr = new Set<string>();
+    for (let i = 0; i < 40; i++) {
+      const page = (await built.inject({ method: 'GET', url: '/ar/' })).body;
+      const club = page.match(/id="hero-3d" data-club="([a-z0-9-]+)"/)?.[1];
+      assert.ok(club, 'the Arabic hero frame names its club');
+      seenAr.add(club!);
+      assert.ok(page.includes(`src="/hero/${club}.webp"`), `the Arabic still is ${club}'s`);
+      assert.ok(new RegExp(`class="hero-club on" data-club="${club}" aria-pressed="true"`).test(page), `the Arabic pressed chip is ${club}`);
+      assert.ok(page.includes(`/ar/projects?new=1&amp;club=${club}"`), `the Arabic "Make this tifo" starts ${club}'s, under /ar/`);
+      const cap = page.match(/<span class="hero-cap-text" id="hero-cap-text"[^>]*>([^<]*)<\/span>/)?.[1] ?? '';
+      assert.ok(/[؀-ۿ]/.test(cap) && !/[A-Za-z]{3}/.test(cap), `the Arabic caption is Arabic (${cap})`);
+      assert.ok(new RegExp(`data-i18n-vars="club:club\\.[A-Za-z]+,ground:stad\\.[A-Za-z]+"`).test(page), 'the caption keeps the keys its script re-says it from');
+    }
+    assert.ok(seenAr.size >= 4, `the Arabic hero changes club between visits (saw ${[...seenAr].join(', ')})`);
+    const en = (await built.inject({ method: 'GET', url: '/' })).body;
+    const enClub = en.match(/id="hero-3d" data-club="([a-z0-9-]+)"/)?.[1];
+    assert.ok(enClub && en.includes(`src="/hero/${enClub}.webp"`), 'the built English home page changes club too');
+    await built.close();
   }
 
   // Without the store the feature is simply absent — the endpoint still answers

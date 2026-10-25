@@ -40,6 +40,68 @@ function ramp(threshold: number, value: number): number {
 }
 
 /**
+ * The number of each seat a wipe compares with its threshold — the `value`
+ * revealVisibility ramps below — for the GPU to do the rest (performance plan
+ * P3.2). Made once per mode. Null for the drum call, which has none.
+ */
+export function revealKeys(map: SeatMap, mode: RevealMode): Float32Array | null {
+  if (mode === 'drum-call') return null;
+  const out = new Float32Array(map.count);
+  for (let i = 0; i < map.count; i++) {
+    const u = map.uv[i * 2];
+    const v = map.uv[i * 2 + 1];
+    switch (mode) {
+      case 'wipe-lr':
+        out[i] = u;
+        break;
+      case 'wipe-up':
+        out[i] = 1 - v;
+        break;
+      case 'center-out':
+        out[i] = 1 - Math.abs(u - 0.5) * 2;
+        break;
+      case 'sparkle':
+        out[i] = hash(i);
+        break;
+      default:
+        out[i] = 0;
+    }
+  }
+  return out;
+}
+
+/**
+ * revealVisibility's instant, for the GPU: what each mode compares a seat's
+ * key with at `progress`. `ramp` is ramp(threshold, key) (inverted: 1 minus
+ * it); `step` is key < progress; `drum` is the call at `t` seconds; `all` is
+ * one value for every seat (a mode this file does not know).
+ */
+export type RevealInstant =
+  | { kind: 'ramp'; threshold: number; edge: number; inverted: boolean }
+  | { kind: 'step'; progress: number }
+  | { kind: 'drum'; plan: DrumCallPlan; t: number }
+  | { kind: 'all'; value: number };
+
+export function revealInstant(mode: RevealMode, progress: number, drum?: DrumCallPlan): RevealInstant {
+  const p = Math.max(0, Math.min(1, progress));
+  if (mode === 'drum-call') {
+    const plan = drum ?? drumCallPlan();
+    return { kind: 'drum', plan, t: p * plan.duration };
+  }
+  switch (mode) {
+    case 'wipe-lr':
+    case 'wipe-up':
+      return { kind: 'ramp', threshold: p * (1 + EDGE), edge: EDGE, inverted: false };
+    case 'center-out':
+      return { kind: 'ramp', threshold: p * (1 + EDGE), edge: EDGE, inverted: true };
+    case 'sparkle':
+      return { kind: 'step', progress: p };
+    default:
+      return { kind: 'all', value: 1 };
+  }
+}
+
+/**
  * Build a visibility function for `mode` at `progress` (0..1).
  *
  * The drum call is a show, not a wipe: its progress is a position in time

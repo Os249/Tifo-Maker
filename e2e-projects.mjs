@@ -55,6 +55,39 @@ const newPage = async (viewport = { width: 1366, height: 860 }) => {
   return p;
 };
 const waitFor = (p, fn, arg = null, ms = 60000) => p.waitForFunction(fn, arg, { timeout: ms }).then(() => true).catch(() => false);
+/**
+ * A project's copy in this browser, as an envelope: compressed in IndexedDB
+ * (src/core/draftStore.ts, performance plan P3.7), or the old JSON form in
+ * localStorage. Read in the page; it never creates the database.
+ */
+const READ_DRAFT = async (key) => {
+  const rec = await new Promise((res) => {
+    let rq;
+    try { rq = indexedDB.open('tifo-drafts', 1); } catch { return res(null); }
+    rq.onupgradeneeded = () => rq.transaction.abort();
+    rq.onerror = () => res(null);
+    rq.onsuccess = () => {
+      const db = rq.result;
+      if (!db.objectStoreNames.contains('drafts')) { db.close(); return res(null); }
+      const q = db.transaction('drafts').objectStore('drafts').get(key);
+      q.onsuccess = () => { db.close(); res(q.result ?? null); };
+      q.onerror = () => { db.close(); res(null); };
+    };
+  });
+  let json = null;
+  if (rec?.gz) { try { json = await new Response(new Blob([rec.gz]).stream().pipeThrough(new DecompressionStream('gzip'))).text(); } catch { json = null; } }
+  json ??= localStorage.getItem(key);
+  try { return json ? JSON.parse(json) : null; } catch { return null; }
+};
+const draftOf = (p, key) => p.evaluate(`(${READ_DRAFT})(${JSON.stringify(key)})`).catch(() => null);
+/** Wait until a project's stored copy passes `test` (run here, on the envelope). */
+async function waitDraft(p, key, test, ms = 60000) {
+  for (const end = Date.now() + ms; Date.now() < end; await p.waitForTimeout(250)) {
+    const e = await draftOf(p, key);
+    if (e && test(e)) return true;
+  }
+  return false;
+}
 const editorReady = (p) => waitFor(p, () => /seats/.test(document.getElementById('stat')?.textContent || ''), null, 120000);
 const projectsReady = (p) => waitFor(p, () => {
   const s = document.getElementById('pj-status');
@@ -175,14 +208,12 @@ await g.waitForTimeout(400);
 // would race the autosave).
 const paintedAt = await g.evaluate(() => Date.now());
 await paint(g);
-check('painting autosaves into the project', await waitFor(g, ([id, t]) => {
-  const e = JSON.parse(localStorage.getItem('tifo_proj_' + id) || 'null'); return !!e && e.projectId === id && e.savedAt >= t;
-}, [derby.id, paintedAt]));
+check('painting autosaves into the project', await waitDraft(g, 'tifo_proj_' + derby.id, (e) => e.projectId === derby.id && e.savedAt >= paintedAt));
 check('and draws its card picture', await waitFor(g, (id) => (localStorage.getItem(`tifo_proj_${id}_thumb`) || '').startsWith('data:image/png'), derby.id, 20000));
 check('the old single-draft key is not used any more', await g.evaluate(() => localStorage.getItem('tifo_draft_v1') === null));
 // The strokes can land in more than one autosave; read the seats once they
 // have stopped changing, not off whichever save came first.
-const savedCells = () => g.evaluate((id) => JSON.stringify(JSON.parse(localStorage.getItem('tifo_proj_' + id)).doc.layers[0].cellsRle.slice(0, 40)), derby.id);
+const savedCells = async () => JSON.stringify((await draftOf(g, 'tifo_proj_' + derby.id))?.doc.layers[0].cellsRle.slice(0, 40));
 let cellsA = await savedCells();
 for (let i = 0; i < 10; i++) {
   await g.waitForTimeout(800);
@@ -223,7 +254,7 @@ await waitFor(g, () => { const i = JSON.parse(localStorage.getItem('tifo_project
 await g.goto(B + '/app?local=' + derby.id, { waitUntil: 'domcontentloaded' });
 await editorReady(g);
 const reopened = await g.evaluate(() => document.getElementById('doc-title').value);
-const cellsB = await g.evaluate((id) => JSON.stringify(JSON.parse(localStorage.getItem('tifo_proj_' + id)).doc.layers[0].cellsRle.slice(0, 40)), derby.id);
+const cellsB = await savedCells();
 check('opening a project brings back its name and its seats', reopened === 'Derby wall' && cellsA === cellsB, `${reopened} | ${cellsA} | ${cellsB}`);
 
 // Page actions.
@@ -238,13 +269,11 @@ await setInput(g, '.dlg-input', 'Final countdown');
 await g.evaluate(() => document.querySelector('.dlg-confirm').click());
 await waitFor(g, () => [...document.querySelectorAll('.pj-name')].some((n) => n.textContent.trim() === 'Final countdown'));
 const renamed = (await index(g)).find((p) => p.title === 'Final countdown');
-check('rename changes the card, the list and the saved copy', !!renamed && await g.evaluate((id) => JSON.parse(localStorage.getItem('tifo_proj_' + id)).title, renamed.id) === 'Final countdown');
+check('rename changes the card, the list and the saved copy', !!renamed && await waitDraft(g, 'tifo_proj_' + renamed.id, (e) => e.title === 'Final countdown', 10000));
 await menu(g, 'Final countdown', 'Duplicate');
 check('duplicate makes a copy', await waitFor(g, () => [...document.querySelectorAll('.pj-name')].some((n) => n.textContent.trim() === 'Final countdown (copy)')));
-check('…with its own seats', (await index(g)).length === 3 && await g.evaluate(() => {
-  const i = JSON.parse(localStorage.getItem('tifo_projects_v1')); const c = i.find((p) => p.title === 'Final countdown (copy)');
-  return !!localStorage.getItem('tifo_proj_' + c.id);
-}));
+const copyId = (await index(g)).find((p) => p.title === 'Final countdown (copy)')?.id;
+check('…with its own seats', (await index(g)).length === 3 && !!copyId && !!(await draftOf(g, 'tifo_proj_' + copyId))?.doc);
 await setInput(g, '#pj-search', 'countdown');
 check('search filters by name', (await cards(g)).length === 2);
 await setInput(g, '#pj-search', 'zzz');
@@ -277,7 +306,9 @@ await waitFor(g, () => !!document.querySelector('.dlg-confirm'));
 check('delete forever asks first', await g.evaluate(() => /forever/.test(document.querySelector('.dlg-title').textContent)));
 await g.evaluate(() => document.querySelector('.dlg-confirm').click());
 const goneId = await waitFor(g, () => !JSON.parse(localStorage.getItem('tifo_projects_v1')).some((p) => p.title === 'Final countdown (copy)'));
-check('…and then it is gone, seats and all', goneId && await g.evaluate(() => !Object.keys(localStorage).some((k) => k.startsWith('tifo_proj_') && !k.startsWith('tifo_proj_d_') && !JSON.parse(localStorage.getItem('tifo_projects_v1')).some((p) => k.startsWith('tifo_proj_' + p.id)))));
+await g.waitForTimeout(500); // its compressed copy is removed a moment after the card
+check('…and then it is gone, seats and all', goneId && await g.evaluate(() => !Object.keys(localStorage).some((k) => k.startsWith('tifo_proj_') && !k.startsWith('tifo_proj_d_') && !JSON.parse(localStorage.getItem('tifo_projects_v1')).some((p) => k.startsWith('tifo_proj_' + p.id))))
+  && (await draftOf(g, 'tifo_proj_' + copyId)) === null);
 await g.click('#pj-trash-btn'); // back
 
 // Download .tifo from the card.
@@ -378,7 +409,7 @@ await g.waitForTimeout(300);
 await paint(g, 0.2);
 check('an edit not yet saved is shown as such, not as "saved to your account"', await waitFor(g, () => /Unsaved changes/.test(document.getElementById('save-state-top')?.textContent || '')));
 await g.evaluate(() => { const t = document.getElementById('doc-title'); t.value = 'Derby wall v2'; t.dispatchEvent(new Event('input', { bubbles: true })); });
-await waitFor(g, (id) => JSON.parse(localStorage.getItem('tifo_proj_d_' + id) || '{}').title === 'Derby wall v2', derbyAcct.id);
+await waitDraft(g, 'tifo_proj_d_' + derbyAcct.id, (e) => e.title === 'Derby wall v2');
 await g.reload({ waitUntil: 'domcontentloaded' });
 await editorReady(g);
 check('after a reload the unsaved work comes back, and says so', await waitFor(g, () => /unsaved changes/.test(document.getElementById('message')?.textContent || '')) && await g.evaluate(() => document.getElementById('doc-title').value) === 'Derby wall v2');

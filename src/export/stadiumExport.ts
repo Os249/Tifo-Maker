@@ -1,8 +1,8 @@
 import type { SeatMap } from '../core/types';
 import type { DesignStore } from '../core/design';
-import { buildReveal, revealEndsHidden, revealVisibilityAt, type RevealId } from '../core/reveal';
+import { buildReveal, revealEndsHidden, type RevealId } from '../core/reveal';
 import { encodeGif } from '../core/gif';
-import type { Preview3D } from '../render/preview3d';
+import type { Preview3D, RevealFrame } from '../render/preview3d';
 import { describeRecording, pickRecordingFormat } from '../render/simulator/recordPlan';
 import { drumCallPlanForLength } from '../core/drumCall';
 import type { DrumTrack } from '../render/drumTrack';
@@ -20,8 +20,10 @@ import type { DrumTrack } from '../render/drumTrack';
  *              to a small palette (design colours + scene colours + white for the
  *              watermark), then feed the existing encodeGif().
  *
- * Both drive Preview3D.applyReveal() exactly like the live RevealPlayer, so the
- * exported animation matches what plays on screen. No-shows reuse
+ * Both drive Preview3D.showReveal() exactly like the live RevealPlayer, so the
+ * exported animation matches what plays on screen: the same instant, drawn by
+ * the GPU from the seats' delays (sent once) and the clock (performance plan
+ * P3.2), so a frame costs a draw and no recolouring. No-shows reuse
  * Preview3D.setNoShows() (the existing 10% mask).
  */
 
@@ -50,13 +52,13 @@ function drumHitsFor(opts: StadiumExportOpts): ReturnType<typeof drumCallPlanFor
 }
 
 /**
- * Per-seat visibility at a clock value — the same function RevealPlayer uses,
- * or null for "just draw the design". Only a reveal that ends on the finished
+ * The reveal at a clock value — the instant RevealPlayer hands the view — or
+ * null for "just draw the design". Only a reveal that ends on the finished
  * tifo may take that shortcut at the end; the drum call ends with it gone.
  */
-function visAt(opts: StadiumExportOpts, delays: Float32Array, clock: number): ((seat: number) => number) | null {
+function frameAt(opts: StadiumExportOpts, delays: Float32Array, clock: number): RevealFrame | null {
   if (clock >= 1 && !revealEndsHidden(opts.reveal)) return null;
-  return revealVisibilityAt(opts.reveal, delays, clock, FADE, opts.durationSec);
+  return { id: opts.reveal, delays, clock, fade: FADE, lengthSec: opts.durationSec };
 }
 
 function drawWatermark(ctx: CanvasRenderingContext2D, w: number, h: number, text: string): void {
@@ -136,7 +138,7 @@ function buildPlayback(
   preview.setNoShows(opts.noShows);
 
   const renderFrameAt = (clock: number): void => {
-    preview.applyReveal(visAt(opts, delays, clock));
+    preview.showReveal(frameAt(opts, delays, clock));
     preview.renderOnce();
     ctx.drawImage(src, 0, 0, W, H);
     drawWatermark(ctx, W, H, opts.watermark);
@@ -321,7 +323,7 @@ export async function exportStadiumGif(
   try {
     for (let f = 0; f < frameCount; f++) {
       const clock = frameCount === 1 ? 1 : f / (frameCount - 1);
-      preview.applyReveal(visAt(opts, delays, clock));
+      preview.showReveal(frameAt(opts, delays, clock));
       preview.renderOnce();
       ctx.drawImage(src, 0, 0, W, H);
       drawWatermark(ctx, W, H, opts.watermark);

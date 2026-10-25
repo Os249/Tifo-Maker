@@ -7,7 +7,7 @@
  * analytics.ts reads the same localStorage key directly (no import) to decide
  * whether to send, so tracking is off until the user explicitly accepts all.
  */
-import { t } from './i18n';
+import { localPath, t } from './i18n';
 
 const KEY = 'tifo_consent_v1';
 export type Consent = 'all' | 'essential';
@@ -68,7 +68,7 @@ export function installConsent(onChange?: (c: Consent) => void): void {
 
   const msg = document.createElement('span');
   msg.className = 'consent-msg';
-  msg.innerHTML = t('consent.msg') + ' <a href="/legal#cookies">' + t('consent.learn') + '</a>';
+  msg.innerHTML = t('consent.msg') + ' <a href="' + localPath('/legal#cookies') + '">' + t('consent.learn') + '</a>';
 
   const actions = document.createElement('span');
   actions.className = 'consent-actions';

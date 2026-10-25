@@ -13,12 +13,17 @@
  *
  * Local storage layout (all JSON):
  *   tifo_projects_v1            the index: LocalProject[]
- *   tifo_proj_<id>              the project's DraftEnvelope (seats, palette…)
+ *   tifo_proj_<id>              the project's DraftEnvelope (seats, palette…):
+ *                               kept compressed in IndexedDB under this key
+ *                               (core/draftStore.ts, performance plan P3.7);
+ *                               in localStorage only in a browser without
+ *                               IndexedDB, or for a moment after leaving a page
+ *                               (writeEnvelopeNow), until it is brought forward
  *   tifo_proj_<id>_banners      its banners (BannerStore JSON)
  *   tifo_proj_<id>_thumb        a small PNG data URL for its card
  *   tifo_proj_<id>_held         its banners were refused by the account (claimProjects)
  *   tifo_proj_<id>_orphan       an account copy still to take back (claimProjects)
- *   tifo_proj_d_<designId>      this browser's copy of an account project
+ *   tifo_proj_d_<designId>      this browser's copy of an account project (kept like tifo_proj_<id>)
  *   tifo_proj_d_<designId>_banners
  *
  * Honesty rules carried over from draft.ts: localStorage is not a backup, so a
@@ -29,6 +34,8 @@
 import type { DraftEnvelope, DraftWriteResult } from './draft';
 import type { SeatMap } from './types';
 import type { DesignStore } from './design';
+import { localPath } from './langPath';
+import { dropDraft, loadDraft, storeDraft } from './draftStore';
 
 export const TRASH_DAYS = 30;
 const DAY = 24 * 60 * 60 * 1000;
@@ -136,19 +143,103 @@ function write(key: string, value: string): DraftWriteResult {
   }
 }
 
-export function readEnvelope(key: string): DraftEnvelope | null {
+/** The old form: a draft as JSON in localStorage. */
+function readOldEnvelope(key: string): DraftEnvelope | null {
   const env = read<DraftEnvelope>(key);
   return env && env.v === 1 && env.doc ? env : null;
 }
 
-export function writeEnvelope(key: string, env: DraftEnvelope): DraftWriteResult {
+/**
+ * Write a draft in the old form, synchronously: JSON in localStorage.
+ *
+ * For leaving a page (pagehide, a hidden tab) with work not yet stored for
+ * sure: compression and IndexedDB finish later, and a closing tab may never
+ * get there, while this is written before the handler returns. The next
+ * read (loadEnvelope) brings it forward into the compressed store. Anywhere
+ * else, use saveEnvelope.
+ */
+export function writeEnvelopeNow(key: string, env: DraftEnvelope, serialised?: string): DraftWriteResult {
   let json: string;
   try {
-    json = JSON.stringify(env);
+    json = serialised ?? JSON.stringify(env);
   } catch {
     return { ok: false, reason: 'blocked' };
   }
   return write(key, json);
+}
+
+/** The store could not be read: not the same as "no draft", and never to be treated as one. */
+export class DraftReadError extends Error {
+  constructor() {
+    super('the copy kept in this browser could not be read');
+    this.name = 'DraftReadError';
+  }
+}
+
+/**
+ * Remove the old-form copy of a draft once a copy at least as new is in the
+ * compressed store. One written later (on the way out of a page while this
+ * write was on its way) is kept, and so is one that cannot be read.
+ */
+function dropOldCopy(key: string, upTo: number): void {
+  const raw = readRaw(key);
+  if (raw === null) return;
+  // buildDraft writes savedAt second, so it is read without parsing the seats.
+  const m = /^\{"v":1,"savedAt":(\d+)[,}]/.exec(raw);
+  let at: number | null = m ? Number(m[1]) : null;
+  if (at === null) {
+    try {
+      const e = JSON.parse(raw) as { savedAt?: unknown };
+      at = typeof e?.savedAt === 'number' ? e.savedAt : null;
+    } catch {
+      at = null;
+    }
+  }
+  if (at !== null && at <= upTo) remove(key);
+}
+
+/**
+ * A project's draft (performance plan P3.7): the compressed copy in
+ * IndexedDB, or the old JSON one in localStorage when that is the newer (a
+ * draft from before, or one written on the way out of a page), which is then
+ * brought forward: written in the new form, and the old key removed only once
+ * that write has succeeded. Null when there is none, or none that can be read.
+ *
+ * Throws DraftReadError when the store itself failed (not when the draft is
+ * absent or damaged): a caller must then neither drop the project nor write
+ * over its draft.
+ */
+export async function loadEnvelope(key: string): Promise<DraftEnvelope | null> {
+  const stored = await loadDraft(key);
+  if (stored.state === 'failed') throw new DraftReadError();
+  const old = readOldEnvelope(key);
+  // No IndexedDB in this browser: localStorage is the store, as it always was.
+  if (stored.state === 'unavailable') return old;
+  const fresh = stored.state === 'ok' ? stored.env : null;
+  if (!old) return fresh;
+  if (fresh && fresh.savedAt >= old.savedAt) {
+    dropOldCopy(key, fresh.savedAt);
+    return fresh;
+  }
+  const w = await storeDraft(key, old);
+  if (w.ok) dropOldCopy(key, old.savedAt);
+  return old;
+}
+
+/**
+ * Store a project's draft, compressed, in IndexedDB (performance plan P3.7).
+ * Resolves once it is committed, with the bytes stored. Where IndexedDB is
+ * missing or fails, it is written to localStorage instead, as before; the cap
+ * is the same either way. An old-form copy no newer than this one is removed.
+ */
+export async function saveEnvelope(key: string, env: DraftEnvelope, serialised?: string): Promise<DraftWriteResult> {
+  const r = await storeDraft(key, env, serialised);
+  if (r.ok) {
+    dropOldCopy(key, env.savedAt);
+    return r;
+  }
+  if (r.reason === 'too-big') return r;
+  return writeEnvelopeNow(key, env, serialised);
 }
 
 export function writeRaw(key: string, value: string): DraftWriteResult {
@@ -237,6 +328,7 @@ export function restoreLocal(id: string): LocalProject | null {
 
 function dropLocalData(id: string): void {
   remove(docKey(id));
+  void dropDraft(docKey(id));
   remove(bannersKey(id));
   remove(thumbKey(id));
   // Notes the move into an account keeps (see net/claimProjects.ts).
@@ -252,12 +344,12 @@ export function purgeLocal(id: string): void {
 }
 
 /** Copy a local project, seats, banners and card picture included. */
-export function duplicateLocal(id: string, title: string): LocalProject | null {
+export async function duplicateLocal(id: string, title: string): Promise<LocalProject | null> {
   const src = getLocal(id);
-  const env = readEnvelope(docKey(id));
+  const env = src ? await loadEnvelope(docKey(id)) : null;
   if (!src || !env) return null;
   const copy = createLocal({ title, templateId: src.templateId, templateVersion: src.templateVersion, origin: src.origin });
-  const w = writeEnvelope(docKey(copy.id), { ...env, title, savedAt: Date.now(), designId: null, projectId: copy.id });
+  const w = await saveEnvelope(docKey(copy.id), { ...env, title, savedAt: Date.now(), designId: null, projectId: copy.id });
   if (!w.ok) {
     purgeLocal(copy.id);
     return null;
@@ -288,13 +380,15 @@ export function localThumb(id: string): string | null {
  * unsaved so it is offered back rather than silently dropped.
  */
 export function migrateLegacyDraft(): LocalProject | null {
-  const env = readEnvelope(LEGACY_DRAFT_KEY);
+  // In the old form, as it was written then; loadEnvelope brings it forward
+  // into the compressed store when the project is first opened.
+  const env = readOldEnvelope(LEGACY_DRAFT_KEY);
   if (!env) return null;
   let made: LocalProject | null = null;
   if (env.designId) {
     const key = accountDraftKey(env.designId);
-    if (!readEnvelope(key)) {
-      writeEnvelope(key, { ...env, dirty: true });
+    if (!readOldEnvelope(key)) {
+      writeEnvelopeNow(key, { ...env, dirty: true });
       const b = readRaw(LEGACY_BANNERS_KEY);
       if (b) writeRaw(accountBannersKey(env.designId), b);
     }
@@ -305,7 +399,7 @@ export function migrateLegacyDraft(): LocalProject | null {
       templateVersion: env.templateVersion,
     });
     updateLocal(made.id, { updatedAt: env.savedAt || Date.now(), createdAt: env.savedAt || Date.now() });
-    const w = writeEnvelope(docKey(made.id), { ...env, projectId: made.id });
+    const w = writeEnvelopeNow(docKey(made.id), { ...env, projectId: made.id });
     if (!w.ok) {
       // Leave the old draft where it is rather than lose it.
       purgeLocal(made.id);
@@ -371,15 +465,18 @@ export function takeNewProject(): NewProjectIntent | null {
   }
 }
 
-/** The editor URL that creates a project on this stadium. */
+/**
+ * The editor URL that creates a project on this stadium. Both of these are in
+ * the page's language: /ar/app from an Arabic page (performance plan P3.3).
+ */
 export function newProjectUrl(templateId: string, extra: Record<string, string> = {}): string {
   const q = new URLSearchParams({ new: '1', template: templateId, ...extra });
-  return `/app?${q.toString()}`;
+  return localPath(`/app?${q.toString()}`);
 }
 
 export function openUrl(ref: ProjectRef, extra: Record<string, string> = {}): string {
   const q = new URLSearchParams({ [ref.kind === 'local' ? 'local' : 'project']: ref.id, ...extra });
-  return `/app?${q.toString()}`;
+  return localPath(`/app?${q.toString()}`);
 }
 
 // ------------------------------------------------------------- thumbnails ---

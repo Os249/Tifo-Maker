@@ -1,5 +1,6 @@
 
 @import './ui/colorScheme.css';
+@import './ui/siteHeader.css';
 @import './ui/authPublic.css';
 
 * { box-sizing: border-box; }
@@ -26,29 +27,7 @@ body {
 button { font-family: inherit; cursor: pointer; }
 a { color: inherit; text-decoration: none; }
 
-/* ---- nav (mirrors landing) ---- */
-.nav {
-  position: sticky; top: 0; z-index: 30;
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 16px 6vw; background: var(--bar);
-  backdrop-filter: saturate(140%) blur(12px); border-bottom: 1px solid var(--line);
-}
-.brand { font-weight: 800; font-size: 20px; letter-spacing: .02em; color: var(--ink); }
-.brand b { color: var(--maker); font-weight: 800; }
-.nav-links { display: flex; align-items: center; gap: 22px; }
-.nav-links > a { font-weight: 600; font-size: 15px; color: var(--ink); opacity: 0.8; }
-.nav-links > a:hover { opacity: 1; }
-.nav-links > a.active { color: var(--blue); opacity: 1; }
-.nav-cta {
-  background: var(--invert); color: var(--invert-ink); border: none; border-radius: var(--r-pill);
-  padding: 10px 20px; font-weight: 600; font-size: 15px; transition: transform 0.12s, box-shadow 0.12s;
-}
-.nav-cta:hover { transform: translateY(-1px); box-shadow: var(--shadow-md); }
-.lang-toggle {
-  background: transparent; border: 1px solid rgba(11, 20, 36, 0.18); color: var(--ink);
-  font-weight: 600; font-size: 14px; padding: 7px 14px; border-radius: var(--r-pill);
-}
-.lang-toggle:hover { background: rgba(11, 20, 36, 0.06); }
+/* ---- nav: the shared header (ui/siteHeader.css), plus the bell ---- */
 .icon-btn {
   position: relative; background: transparent; border: 1px solid var(--line);
   width: 40px; height: 40px; border-radius: var(--r-pill); display: grid; place-items: center;

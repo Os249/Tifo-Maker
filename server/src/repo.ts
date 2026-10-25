@@ -1,5 +1,6 @@
 /** Storage layer contracts. Routes own gzip/diff/auth logic; repos own rows. */
 import { createHash } from 'node:crypto';
+import type { FeedPosition } from './feedCursor';
 
 import type { AiFailReason } from './aiFailure';
 export type { AiFailReason } from './aiFailure';
@@ -85,6 +86,12 @@ export interface FacetBase {
 }
 
 export type GallerySort = 'recent' | 'likes';
+
+/** A page of the feed, and where the next one starts (null: this was the last). */
+export interface FeedPage {
+  items: GalleryItem[];
+  next: FeedPosition | null;
+}
 
 export interface GalleryQuery {
   sort: GallerySort;
@@ -200,6 +207,14 @@ export interface DesignRepository {
   /** Delete all of an owner's designs (used by account deletion). */
   deleteByOwner(ownerId: string): Promise<void>;
   listPublic(query: GalleryQuery): Promise<GalleryItem[]>;
+  /**
+   * One page of the community feed and the position the next one starts after
+   * (performance plan P3.4). The same rows, in the same order, as listPublic
+   * with the same query; `after` (a position from a previous page's `next`)
+   * only adds "after this row" to the WHERE, so every filter still applies.
+   * `next` is null on the last page.
+   */
+  listPublicPage(query: GalleryQuery & { after?: FeedPosition | null }): Promise<FeedPage>;
   /**
    * How many public designs a feed query would return, without fetching them:
    * the "N tifos" on the filter panel's confirm button. Same rules as

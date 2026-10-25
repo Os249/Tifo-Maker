@@ -1,6 +1,6 @@
 import { escapeHtml } from './core/escape';
 import './seat.css';
-import { initLang, t } from './ui/i18n';
+import { initLang, localPath, t } from './ui/i18n';
 import { generateSeatMapAsync, warmHeavyWorker } from './workers/client';
 import { TEMPLATES } from './core/template';
 import { loadTemplate } from './core/stadiumLoad';
@@ -23,7 +23,7 @@ initLang();
 
 /** Parse /s/:id (the QR target). */
 function designIdFromPath(): string | null {
-  const m = location.pathname.match(/^\/s\/([A-Za-z0-9-]+)\/?$/);
+  const m = location.pathname.match(/^(?:\/ar)?\/s\/([A-Za-z0-9-]+)\/?$/);
   if (m) return m[1];
   const q = new URLSearchParams(location.search).get('d');
   return q && /^[A-Za-z0-9-]+$/.test(q) ? q : null;
@@ -118,7 +118,7 @@ async function main(): Promise<void> {
         </label>
         <button class="seat-go" id="seat-go" disabled>${t('seat.showCard')}</button>
       </div>
-      <div class="seat-foot">${t('seat.madeWith')} · <a href="/">tifomaker.org</a></div>`;
+      <div class="seat-foot">${t('seat.madeWith')} · <a href="${localPath('/')}">tifomaker.org</a></div>`;
 
     const selSection = document.getElementById('sel-section') as HTMLSelectElement;
     const rowField = document.getElementById('row-field')!;
@@ -231,7 +231,7 @@ function errorScreen(title: string, body: string): string {
       <div class="seat-error-title">${escapeHtml(title)}</div>
       <p class="seat-intro">${escapeHtml(body)}</p>
       ${designIdFromPath() ? `<button type="button" class="seat-go" id="seat-retry">${t('common.retry')}</button>` : ''}
-      <a class="seat-go" style="display:inline-block;text-decoration:none;text-align:center;" href="/">${t('seat.goHome')}</a>
+      <a class="seat-go" style="display:inline-block;text-decoration:none;text-align:center;" href="${localPath('/')}">${t('seat.goHome')}</a>
     </div>`;
 }
 

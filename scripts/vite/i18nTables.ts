@@ -47,10 +47,11 @@
  * tErrLater()), and no page carries it at start. The build fails if a chunk
  * calls one directly without the module loaded before it.
  */
-import type { Plugin, Rollup } from 'vite';
+import { normalizePath, type Plugin, type Rollup } from 'vite';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { gzipSync } from 'node:zlib';
+import { pathKey } from './pathKey';
 import { STRINGS } from '../../src/ui/i18n/strings';
 import { EARLIER_LAYOUT_IDS, ERROR_KEYS, LABEL_KEYS } from '../../src/ui/i18n/maps';
 
@@ -66,8 +67,13 @@ const IMPORTS_I18N = /(?:\bfrom|\bimport\s*\()\s*['"](?:\.{1,2}\/)+(?:ui\/)?i18n
 const KEYS = Object.keys(STRINGS);
 const KEYSET = new Set(KEYS);
 
-/** Quoted strings shaped like a key; the closing quote is looked at, not eaten. */
-const QUOTED = /(['"`])([A-Za-z][\w.-]*)(?=\1)/g;
+/**
+ * Quoted strings shaped like a key; the closing quote is looked at, not eaten.
+ * The quotes may be escaped: Rolldown (Vite 8, performance plan P3.8) folds
+ * '<h3 data-i18n="a.b">' + '...' into one "...data-i18n=\"a.b\"..." literal,
+ * and a key between \" and \" is as much a key as one between " and ".
+ */
+const QUOTED = /(\\?['"`])([A-Za-z][\w.-]*)(?=\1)/g;
 /** Template-literal heads: `bn.rev.${ ... */
 const TEMPLATE_HEAD = /`([A-Za-z][\w.-]*)\$\{/g;
 /** data-i18n-attr="attr:key,attr:key" (quotes possibly escaped inside a JS string). */
@@ -108,6 +114,7 @@ export function scan(text: string, into: Named = named()): Named {
     else if (/[._-]$/.test(s)) prefix(s);
   }
   for (const m of text.matchAll(TEMPLATE_HEAD)) prefix(m[1]!);
+  for (const m of text.matchAll(DATA_I18N)) if (KEYSET.has(m[1]!)) into.keys.add(m[1]!);
   for (const m of text.matchAll(ATTR_SPEC)) {
     for (const pair of m[1]!.split(',')) {
       const k = pair.split(':')[1]?.trim();
@@ -179,15 +186,18 @@ type ChunkLike = Pick<Rollup.RenderedChunk, 'fileName' | 'imports' | 'dynamicImp
 type Ctx = Pick<Rollup.PluginContext, 'getModuleInfo'>;
 
 /**
- * @param pages page name -> its HTML file (the same map as rollupOptions.input)
+ * @param pages page name -> its HTML file (the same map as rolldownOptions.input)
  */
 export function i18nTables(pages: Record<string, string>): Plugin[] {
   let root = '';
   let serve = false;
+  /** ui/i18n.ts as Vite names it (the map modules import it by this). */
   let i18nId = '';
-  let stringsId = '';
-  let mapsId = '';
-  /** HTML file -> its source, for the pages with a script */
+  /** ui/i18n.ts, i18n/strings.ts and i18n/maps.ts as pathKey spells them, for comparing. */
+  let i18nKey = '';
+  let stringsKey = '';
+  let mapsKey = '';
+  /** HTML file (as pathKey spells it) -> its source, for the pages with a script */
   const html = new Map<string, string>();
   let serverKeys = new Set<string>();
   /** preliminary chunk file name -> what was injected into it */
@@ -195,9 +205,20 @@ export function i18nTables(pages: Record<string, string>): Plugin[] {
   /** preliminary chunk file name -> what its own modules name (render phase only) */
   const ownMemo = new Map<string, Named>();
 
-  const skip = (id: string): boolean =>
-    id.startsWith('\0') || id.includes('/node_modules/') || id === i18nId || id === stringsId || id === mapsId ||
-    /\.(css|woff2?|png|webp|svg|json)(\?|$)/.test(id);
+  // Every path is compared through pathKey (./pathKey.ts): on Windows a plain
+  // === between node:path's C:\a\b and Rolldown's C:/a/b matched nothing, and
+  // every page lost its entry chunk.
+  const skip = (rawId: string): boolean => {
+    const id = pathKey(rawId);
+    return (
+      id.startsWith('\0') || id.includes('/node_modules/') || id === i18nKey || id === stringsKey || id === mapsKey ||
+      /\.(css|woff2?|png|webp|svg|json)(\?|$)/.test(id)
+    );
+  };
+  const usesI18n = (info: Rollup.ModuleInfo | null): boolean =>
+    !!info && [...info.importedIds, ...info.dynamicallyImportedIds].some((x) => pathKey(x) === i18nKey);
+  const entryOf = (c: Pick<ChunkLike, 'isEntry' | 'facadeModuleId'>, file: string): boolean =>
+    c.isEntry && !!c.facadeModuleId && pathKey(c.facadeModuleId) === pathKey(file);
 
   /** What a chunk's own modules (and, for an entry, its page) name. */
   function ownOf(ctx: Ctx, chunk: ChunkLike): Named {
@@ -206,9 +227,9 @@ export function i18nTables(pages: Record<string, string>): Plugin[] {
       if (skip(mid) || !rm.code) continue;
       scan(rm.code, n);
       const info = ctx.getModuleInfo(mid);
-      if (info && (info.importedIds.includes(i18nId) || info.dynamicallyImportedIds.includes(i18nId))) scanUse(info.code ?? rm.code, n);
+      if (info && usesI18n(info)) scanUse(info.code ?? rm.code, n);
     }
-    const page = chunk.isEntry && chunk.facadeModuleId ? html.get(chunk.facadeModuleId) : undefined;
+    const page = chunk.isEntry && chunk.facadeModuleId ? html.get(pathKey(chunk.facadeModuleId)) : undefined;
     if (page !== undefined) {
       scan(page, n);
       for (const k of serverKeys) n.keys.add(k);
@@ -247,7 +268,7 @@ export function i18nTables(pages: Record<string, string>): Plugin[] {
     apply: 'serve',
     enforce: 'pre',
     transform(code, rawId) {
-      if (rawId.split('?')[0] !== resolve(root, 'src/ui/i18n.ts')) return null;
+      if (pathKey(rawId.split('?')[0]!) !== pathKey(resolve(root, 'src/ui/i18n.ts'))) return null;
       return (
         code +
         `\nimport { STRINGS as __tifoAll } from './i18n/strings';` +
@@ -261,11 +282,12 @@ export function i18nTables(pages: Record<string, string>): Plugin[] {
     name: 'tifo:i18n-tables',
     enforce: 'pre',
     configResolved(config) {
-      root = config.root;
+      root = normalizePath(config.root);
       serve = config.command === 'serve';
-      i18nId = resolve(root, 'src/ui/i18n.ts');
-      stringsId = resolve(root, 'src/ui/i18n/strings.ts');
-      mapsId = resolve(root, 'src/ui/i18n/maps.ts');
+      i18nId = normalizePath(resolve(root, 'src/ui/i18n.ts'));
+      i18nKey = pathKey(i18nId);
+      stringsKey = pathKey(resolve(root, 'src/ui/i18n/strings.ts'));
+      mapsKey = pathKey(resolve(root, 'src/ui/i18n/maps.ts'));
     },
 
     buildStart() {
@@ -279,7 +301,7 @@ export function i18nTables(pages: Record<string, string>): Plugin[] {
         const src = readFileSync(file, 'utf8');
         const unknown = unknownKeys(src);
         if (unknown.length) this.error(`i18n: ${file} names key(s) that do not exist: ${unknown.join(', ')}`);
-        if (/<script\s+type="module"/.test(src)) html.set(file, src);
+        if (/<script\s+type="module"/.test(src)) html.set(pathKey(file), src);
       }
       // Labels the server writes into the HTML it renders (the landing's Tifo
       // of the Day card, for one): every page's entry gets them, a handful.
@@ -358,9 +380,9 @@ export function i18nTables(pages: Record<string, string>): Plugin[] {
         for (const mid of Object.keys(c.modules)) {
           if (skip(mid)) continue;
           const info = this.getModuleInfo(mid);
-          if (!info?.code || !(info.importedIds.includes(i18nId) || info.dynamicallyImportedIds.includes(i18nId))) continue;
+          if (!info?.code || !usesI18n(info)) continue;
           const unknown = unknownKeys(info.code);
-          if (unknown.length) problems.push(`${mid.slice(root.length + 1)} names key(s) that do not exist: ${unknown.join(', ')}`);
+          if (unknown.length) problems.push(`${normalizePath(mid).slice(root.length + 1)} names key(s) that do not exist: ${unknown.join(', ')}`);
         }
         const table = tableOf(c);
         if (table && !c.code.includes(`${QUEUE}`)) problems.push(`${c.fileName}: its string table is missing from the final code`);
@@ -380,13 +402,24 @@ export function i18nTables(pages: Record<string, string>): Plugin[] {
         }
         const lacking = [...need.keys].filter((k) => !avail.has(k));
         if (lacking.length) problems.push(`${c.fileName}: names ${lacking.length} key(s) no table before it registers: ${lacking.slice(0, 15).join(', ')}`);
+        // And the code that ships, as the minifier left it, scanned on its own:
+        // the per-module code a plugin is shown is not always what runs (under
+        // Rolldown it is folded and re-quoted later), and a key this check
+        // cannot see is a key the page shows as nothing (performance plan P3.8).
+        // Discounted: what the modules this check never reads name (ui/i18n.ts
+        // itself, the map modules, which register their own strings, and
+        // node_modules), as their rendered code names it.
+        const unread = named();
+        for (const [mid, rm] of Object.entries(c.modules)) if (skip(mid) && rm.code) scan(rm.code, unread);
+        const shipped = [...scan(c.code).keys].filter((k) => !avail.has(k) && !unread.keys.has(k));
+        if (shipped.length) problems.push(`${c.fileName}: its final code names ${shipped.length} key(s) no table before it registers: ${shipped.slice(0, 15).join(', ')}`);
         if (need.labels && !labels) problems.push(`${c.fileName}: calls tl() but the label map is not loaded before it`);
         if (need.errors && !errors) problems.push(`${c.fileName}: calls tErr() but the error map is not loaded before it`);
         for (const [k, v] of Object.entries(table?.strings ?? {})) if (!v[0]?.trim() || !v[1]?.trim()) problems.push(`${c.fileName}: "${k}" lacks a language`);
       }
       // Every page with a script has its entry chunk, and so its HTML's keys.
       for (const file of html.keys()) {
-        if (!chunks.some((c) => c.isEntry && c.facadeModuleId === file)) problems.push(`${file}: no entry chunk`);
+        if (!chunks.some((c) => entryOf(c, file))) problems.push(`${file}: no entry chunk`);
       }
       if (problems.length) this.error(`i18n:\n  ${problems.join('\n  ')}`);
 
@@ -394,7 +427,7 @@ export function i18nTables(pages: Record<string, string>): Plugin[] {
       // imports statically) and in all (everything it may load later).
       const kb = (t: ChunkTable[]): string => (gzipSync(JSON.stringify(t)).length / 1024).toFixed(1);
       for (const [page, file] of Object.entries(pages)) {
-        const entry = chunks.find((c) => c.isEntry && c.facadeModuleId === file);
+        const entry = chunks.find((c) => entryOf(c, file));
         if (!entry) continue;
         const startNames = new Set([entry.fileName, ...ancestors(entry.fileName, Object.fromEntries(chunks.map((x) => [x.fileName, x])))]);
         const reach = new Set<string>();

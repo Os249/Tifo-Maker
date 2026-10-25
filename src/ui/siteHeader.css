@@ -1,0 +1,51 @@
+/*
+ * The one header of the public pages: home, community, projects and clubs.
+ *
+ * Each page used to carry its own copy: the home page had "How it works /
+ * Grounds / Community / For clubs" across the full width and a white pill;
+ * community and projects had "Community / My projects" inside 6vw and a black
+ * pill; clubs a third mix. Now every page shows the same links, in the same
+ * order, on the same bar, and its one action in the one action colour.
+ *
+ * The theme toggle, the 44px targets and the current-page underline live in
+ * colorScheme.css, which every public page already loads. Phones swap the links
+ * for the burger and its drawer (ui/mobileNav.ts).
+ */
+.nav {
+  position: sticky; top: 0; z-index: var(--z-sticky);
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  padding: 12px max(20px, calc((100vw - 1240px) / 2));
+  background: var(--bar); backdrop-filter: saturate(140%) blur(12px);
+  border-bottom: 1px solid var(--line);
+}
+.brand { font-weight: 800; font-size: 20px; letter-spacing: .02em; color: var(--ink); white-space: nowrap; }
+.brand b { color: var(--maker); font-weight: 800; }
+.nav-links { display: flex; align-items: center; }
+.nav-links > a:not(.nav-cta) {
+  display: inline-flex; align-items: center;
+  font-weight: 600; font-size: 15px; color: var(--ink); opacity: .78;
+  transition: opacity var(--t-fast), color var(--t-fast);
+}
+.nav-links > a:not(.nav-cta):hover { opacity: 1; color: var(--blue); }
+.nav-links > a.active, .nav-links > a[aria-current="page"] { color: var(--blue); opacity: 1; }
+.lang-toggle {
+  background: transparent; border: 1px solid var(--line-strong); color: var(--ink);
+  font: inherit; font-weight: 600; font-size: 14px; padding: 7px 14px; border-radius: var(--r-pill); cursor: pointer;
+}
+.lang-toggle:hover { border-color: var(--blue); color: var(--blue); }
+
+/* The page's one action: the same colour as every other main action on the
+   site. --blue-solid, not --blue: white text must not sit on a colour that
+   lightens with the theme. */
+.nav-cta {
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--blue-solid); color: #fff !important; border: 1px solid transparent;
+  padding: 9px 18px; border-radius: var(--r-pill); font: inherit; font-weight: 700; font-size: 15px;
+  cursor: pointer; white-space: nowrap;
+  transition: background var(--t-fast), box-shadow var(--t-fast);
+}
+.nav-cta:hover { background: var(--blue-solid-hover); box-shadow: var(--shadow-md); }
+/* Signed in, the button is the account, not an action: a quiet outline. */
+.nav-cta.is-user { background: transparent; color: var(--ink) !important; border-color: var(--line-strong); font-weight: 600; }
+.nav-cta.is-user:hover { background: transparent; border-color: var(--blue); color: var(--blue) !important; box-shadow: none; }
+.nav-cta.is-user { direction: ltr; unicode-bidi: isolate; }

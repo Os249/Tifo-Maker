@@ -4,6 +4,7 @@ import type { SeatMap, StadiumTemplate } from '../../core/types';
 import type { DesignStore } from '../../core/design';
 import { CAMERA_PRESETS, type CameraPreset } from '../preview3d';
 import { type QualityTier, type QualitySettings, settingsFor, probeQuality, frameCap } from './quality';
+import { shaderChecksWanted } from '../viewTier';
 import { applyNightIBL } from './env';
 import { buildStands } from './stands';
 import { buildTrack, type TrackBuild } from './track';
@@ -15,7 +16,8 @@ import { buildPitchside, type PitchsideController } from './pitchside';
 import { buildBanners, type BannerController } from './banners';
 import { buildEffects, type EffectsController } from './effects';
 import { bowlShots, seatShot, flyover, flyoverPeriodFor, FLY_DURATION, applyShot as applyCameraShot, type SimShot } from './cameras';
-import { revealVisibility, type RevealMode } from './choreo';
+import { revealInstant, revealKeys, revealVisibility, type RevealMode } from './choreo';
+import { REVEAL_GLSL, drumReactions, revealConst, revealDrum, revealOff, revealRamp, revealStep, revealUniforms } from './revealGpu';
 import { evalTimeline, type Timeline, type Cue, type EffectName } from './timeline';
 
 /**
@@ -214,6 +216,23 @@ export class MatchDaySimulator {
   private dirtyHi = -Infinity;
   /** 1 where a premium seat's card is currently shown (see setCardShown). */
   private cardState: Uint8Array | null = null;
+  /**
+   * The reveal on the GPU (performance plan P3.2): the seats' shader reads
+   * these uniforms, and a frame of a reveal, a drum call or the design
+   * settling back writes them and nothing else.
+   */
+  private readonly revealU = revealUniforms();
+  /**
+   * Each seat's reveal numbers: the mode's key (choreo.revealKeys), its
+   * reactions to the drum (seconds, up and down) and 1 for a premium seat
+   * (its card goes down below half). Made on the first reveal; the key is
+   * sent again only when the mode changes.
+   */
+  private revealAttr: THREE.InstancedBufferAttribute | null = null;
+  private revealKeyMode: RevealMode | null = null;
+  private revealDrumJitter = -1;
+  /** A reveal was written into the seat arrays by the CPU (applyReveal with a function). */
+  private cpuRevealShown = false;
   private screen: { mode: ScreenMode; nameEn: string; nameAr: string; image?: CanvasImageSource & { width: number; height: number } } = { mode: 'stadium', nameEn: '', nameAr: '' };
   private screenDirty = false;
   private lastScreenPaint = -1;
@@ -687,6 +706,10 @@ export class MatchDaySimulator {
     this.seatMatrixDirty = true;
   }
   recolorAll(): void {
+    // Every seat as designed: a reveal on show is over, as it always was when
+    // every seat was recoloured (the next reveal frame brings it back).
+    revealOff(this.revealU);
+    this.cpuRevealShown = false;
     for (let i = 0; i < this.map.count; i++) this.recolor(i);
     if (this.seats.instanceColor) this.seats.instanceColor.needsUpdate = true;
     this.flushSeatMatrix();
@@ -864,6 +887,22 @@ export class MatchDaySimulator {
   private buildSeats(): THREE.InstancedMesh {
     const geometry = new THREE.PlaneGeometry(0.45, 0.7);
     const material = new THREE.MeshBasicMaterial({ side: THREE.DoubleSide });
+    // A reveal playing is worked out per card here (performance plan P3.2),
+    // by applyReveal's rules: the design's colour mixed from the empty seat's
+    // until it is all the way up (EMPTY + (design - EMPTY) * a, as
+    // THREE.Color.lerp did it), and a premium seat's card put down below half.
+    // With no reveal on, tifoRevealVis is 1 and the card is as it always was.
+    material.onBeforeCompile = (shader) => {
+      Object.assign(shader.uniforms, this.revealU, { tifoEmpty: { value: EMPTY_COLOR } });
+      shader.vertexShader = shader.vertexShader
+        .replace('#include <common>', `#include <common>\nattribute vec4 aTifoReveal;\nuniform vec3 tifoEmpty;\n${REVEAL_GLSL}`)
+        .replace(
+          '#include <color_vertex>',
+          '#include <color_vertex>\n  float tifoVis = tifoRevealVis( aTifoReveal.xyz );\n  if ( tifoVis < 1.0 ) vColor.rgb = tifoEmpty + ( vColor.rgb - tifoEmpty ) * tifoVis;',
+        )
+        .replace('#include <begin_vertex>', '#include <begin_vertex>\n  if ( aTifoReveal.w > 0.5 && tifoVis < 0.5 ) transformed *= 0.0;');
+    };
+    material.customProgramCacheKey = () => 'tifo-md-seats-reveal';
     const mesh = new THREE.InstancedMesh(geometry, material, this.map.count);
     const dummy = new THREE.Object3D();
     for (let i = 0; i < this.map.count; i++) {
@@ -2338,7 +2377,7 @@ export class MatchDaySimulator {
     if (this.timeline) this.stopTimeline();
     if (this.restoreFade) {
       this.restoreFade = null;
-      this.recolorAll();
+      this.applyReveal(null);
       this.releaseDrumLoop();
     }
     this.reveal = { mode, start: this.elapsed, dur: Math.max(0.5, durationMs / 1000) };
@@ -2451,12 +2490,12 @@ export class MatchDaySimulator {
     if (p < 0) return; // still holding the empty stand
     if (p >= 1) {
       this.restoreFade = null;
-      this.recolorAll();
+      this.applyReveal(null);
       this.releaseDrumLoop();
       return;
     }
     const a = p * p * (3 - 2 * p);
-    this.applyReveal(() => a);
+    this.showRevealAll(a);
   }
 
   // ---- choreography timeline (Wave C) ----
@@ -2516,7 +2555,8 @@ export class MatchDaySimulator {
       // Stop pressed while an ended call's empty stand was still being held.
       const wasHolding = this.restoreFade !== null;
       this.restoreFade = null;
-      this.recolorAll();
+      // The design back: after a reveal on the GPU, only its uniforms off.
+      this.applyReveal(null);
       if (wasHolding && handBack) this.releaseDrumLoop();
     }
     for (const a of this.assetStore.list()) this.assetLayer.setOpacity(a.id, 1);
@@ -2661,9 +2701,7 @@ export class MatchDaySimulator {
         // stopping here would skip the drop, which is the whole ending.
         // The same frame can also have crossed the last cues; they still fire.
         const end = evalTimeline(this.timeline, this.timeline.duration, this.tlPrev);
-        if (this.timelineHasDrumCall && end.reveal) {
-          this.applyReveal(revealVisibility(this.map, end.reveal.mode, end.reveal.progress, end.reveal.drum));
-        }
+        if (this.timelineHasDrumCall && end.reveal) this.showRevealAt(end.reveal.mode, end.reveal.progress, end.reveal.drum);
         this.fireEffects(end.firedEffects);
         this.stopTimeline(true);
         return;
@@ -2673,10 +2711,10 @@ export class MatchDaySimulator {
     this.tlPrev = t;
     if (this.onDrumBeat) this.emitDrumBeat(t);
     if (st.reveal) {
-      this.applyReveal(revealVisibility(this.map, st.reveal.mode, st.reveal.progress, st.reveal.drum));
+      this.showRevealAt(st.reveal.mode, st.reveal.progress, st.reveal.drum);
       this.revealActiveLast = true;
     } else if (this.revealActiveLast) {
-      this.recolorAll();
+      this.applyReveal(null);
       this.revealActiveLast = false;
     }
     for (const a of this.assetStore.list()) {
@@ -2701,13 +2739,80 @@ export class MatchDaySimulator {
       this.reveal = null;
       return;
     }
-    this.applyReveal(revealVisibility(this.map, this.reveal.mode, Math.max(0, p)));
+    this.showRevealAt(this.reveal.mode, Math.max(0, p));
   }
-  private applyReveal(vis: ((seat: number) => number) | null): void {
-    if (!vis) {
-      this.recolorAll();
+  /**
+   * One instant of a reveal, drawn by the GPU (performance plan P3.2): the
+   * seats' numbers for the mode (sent once) and this instant's few uniforms,
+   * for what revealVisibility(map, mode, progress, drum) says per seat. The
+   * suites ask for `cpu`, the same instant recoloured seat by seat as before,
+   * to compare the two.
+   */
+  showRevealAt(mode: RevealMode, progress: number, drum?: DrumCallPlan, cpu = false): void {
+    if (cpu) {
+      this.applyReveal(revealVisibility(this.map, mode, progress, drum));
       return;
     }
+    const at = revealInstant(mode, progress, drum);
+    this.revealNumbers(mode, at.kind === 'drum' ? at.plan.jitter : -1);
+    if (at.kind === 'ramp') revealRamp(this.revealU, at.threshold, at.edge, at.inverted);
+    else if (at.kind === 'step') revealStep(this.revealU, at.progress);
+    else if (at.kind === 'drum') revealDrum(this.revealU, at.plan, at.t);
+    else revealConst(this.revealU, at.value);
+  }
+  /** One value for every seat (the design settling back after a drum call), on the GPU. */
+  private showRevealAll(a: number): void {
+    this.revealNumbers(null, -1);
+    revealConst(this.revealU, a);
+  }
+  /**
+   * The seats' reveal numbers for `mode`, made the first time and the key
+   * remade only when the mode changes; the drum's reactions once per jitter.
+   * Puts the design back in the seat arrays first if the CPU had a reveal in
+   * them, since the shader mixes from the design's own colours.
+   */
+  private revealNumbers(mode: RevealMode | null, jitter: number): void {
+    if (this.cpuRevealShown) this.recolorAll();
+    const n = this.map.count;
+    let attr = this.revealAttr;
+    if (!attr) {
+      attr = new THREE.InstancedBufferAttribute(new Float32Array(n * 4), 4);
+      const a = attr.array as Float32Array;
+      if (this.zoneCodes) for (let i = 0; i < n; i++) a[i * 4 + 3] = this.zoneCodes[i] ? 1 : 0;
+      this.revealAttr = attr;
+      this.seats.geometry.setAttribute('aTifoReveal', attr);
+      attr.needsUpdate = true;
+    }
+    const a = attr.array as Float32Array;
+    if (mode && mode !== 'drum-call' && mode !== this.revealKeyMode) {
+      const keys = revealKeys(this.map, mode);
+      if (keys) for (let i = 0; i < n; i++) a[i * 4] = keys[i];
+      this.revealKeyMode = mode;
+      attr.needsUpdate = true;
+    }
+    if (jitter >= 0 && jitter !== this.revealDrumJitter) {
+      const r = drumReactions(n, jitter);
+      for (let i = 0; i < n; i++) {
+        a[i * 4 + 1] = r[i * 2];
+        a[i * 4 + 2] = r[i * 2 + 1];
+      }
+      this.revealDrumJitter = jitter;
+      attr.needsUpdate = true;
+    }
+  }
+  /**
+   * Per-seat visibility on the CPU, every seat recoloured: the reference the
+   * GPU reveal is checked against (showRevealAt with `cpu`). Null: the design,
+   * which after a GPU reveal is only the uniforms switched off.
+   */
+  private applyReveal(vis: ((seat: number) => number) | null): void {
+    if (!vis) {
+      if (this.cpuRevealShown) this.recolorAll();
+      else revealOff(this.revealU);
+      return;
+    }
+    revealOff(this.revealU);
+    this.cpuRevealShown = true;
     const tmp = new THREE.Color();
     for (let i = 0; i < this.map.count; i++) {
       const full = this.colorFor(i);
@@ -3107,13 +3212,3 @@ export class MatchDaySimulator {
   }
 }
 
-/** Development, the browser suites (all on this machine), or ?e2e. */
-function shaderChecksWanted(): boolean {
-  try {
-    if ((import.meta as unknown as { env?: { DEV?: boolean } }).env?.DEV) return true;
-    if (/^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname)) return true;
-    return new URLSearchParams(location.search).has('e2e');
-  } catch {
-    return true;
-  }
-}

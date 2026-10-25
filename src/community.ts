@@ -12,7 +12,7 @@ import { escapeHtml } from './core/escape';
 import { containDialog } from './ui/dialogFocus';
 import './vendor/tabler-subset.css';
 import './community.css';
-import { initLang, applyDom, getLang, onLangChange, toggleLang, t, tv, tTag, tTitle } from './ui/i18n';
+import { initLang, applyDom, getLang, localPath, onLangChange, toggleLang, t, tv, tTag, tTitle } from './ui/i18n';
 import { initScheme, setSchemeLabels } from './ui/colorScheme';
 import { installMobileNav } from './ui/mobileNav';
 import { installConsent } from './ui/consent';
@@ -23,7 +23,8 @@ import type { ShareTarget } from './ui/shareModal';
 import {
   isSignedIn,
   fetchMe,
-  listGallery,
+  listGalleryPage,
+  ApiError,
   listGalleryFacets,
   type GalleryFacets,
   listPopularTags,
@@ -178,8 +179,10 @@ async function refreshAuthUI(): Promise<void> {
     // "@os99" back into "Sign in" the moment someone toggled to Arabic.
     authBtn.removeAttribute('data-i18n');
     authBtn.textContent = `@${me.username}`;
+    // The account, not an action: the shared header draws it as an outline.
+    authBtn.classList.add('is-user');
     authBtn.onclick = () => {
-      window.location.href = '/projects';
+      window.location.href = localPath('/projects');
     };
     notifBtn.hidden = false;
     void refreshNotifications();
@@ -187,6 +190,7 @@ async function refreshAuthUI(): Promise<void> {
   } else {
     authBtn.setAttribute('data-i18n', 'ed.signup');
     authBtn.textContent = t('ed.signup');
+    authBtn.classList.remove('is-user');
     authBtn.onclick = async () => {
       const tok = await openAuthModal();
       if (tok) {
@@ -229,7 +233,21 @@ let designQuery = '';
  * appended to a grid it does not belong to.
  */
 const PAGE = 60;
+/** Cards shown so far, for the "{n} shown" line. */
 let pageOffset = 0;
+/**
+ * Where the next page starts: the server's cursor from the last page
+ * (performance plan P3.4), null before the first. Opaque, sent back as is.
+ */
+let pageCursor: string | null = null;
+/**
+ * Every design already on the grid. Under "most liked" a design whose score
+ * drops while you scroll can come round again on a later page; it is shown
+ * once.
+ */
+const shownIds = new Set<string>();
+/** A refused cursor restarts the feed once; a second refusal is an error. */
+let cursorRestarted = false;
 let pageToken = 0;
 let exhausted = false;
 /**
@@ -251,6 +269,8 @@ let loadingToken = -1;
 
 async function loadGallery(): Promise<void> {
   pageOffset = 0;
+  pageCursor = null;
+  shownIds.clear();
   exhausted = false;
   pageToken++;
   const token = pageToken;
@@ -284,7 +304,7 @@ async function loadPage(token: number): Promise<boolean> {
   more.dataset.busy = '1';
   try {
     const sort: GallerySort = currentSort === 'likes' ? 'likes' : 'recent';
-    const items = await listGallery({
+    const { items: page, next } = await listGalleryPage({
       sort,
       search: designQuery || undefined,
       tags: activeTags,
@@ -293,19 +313,30 @@ async function loadPage(token: number): Promise<boolean> {
       colors: activeColours,
       clubId: activeClub || undefined,
       limit: PAGE,
-      offset: pageOffset,
+      cursor: pageCursor ?? undefined,
     });
     if (token !== pageToken) return true; // a newer tab/tag won the race
+    const items = page.filter((item) => !shownIds.has(item.id));
+    for (const item of items) shownIds.add(item.id);
     const grid = $('#gallery-grid');
     for (const item of items) grid.appendChild(renderCard(item));
     $('#grid-empty').hidden = grid.childElementCount > 0;
     pageOffset += items.length;
-    if (items.length < PAGE) exhausted = true;
+    pageCursor = next;
+    if (!next) exhausted = true;
     more.hidden = exhausted || grid.childElementCount === 0;
     $('#grid-more-count').textContent = exhausted ? '' : t('cm.shown').replace('{n}', String(pageOffset));
     void fillCommentCounts(items);
     return true;
-  } catch {
+  } catch (err) {
+    // The server no longer takes this cursor (it was handed out under a key
+    // this server does not have): start the feed again from the top, once.
+    if (token === pageToken && pageCursor && err instanceof ApiError && err.status === 400 && !cursorRestarted) {
+      cursorRestarted = true;
+      loadingToken = -1;
+      void loadGallery();
+      return true;
+    }
     if (token === pageToken) {
       $('#grid-error').hidden = false;
       // Retain the current page and allow an explicit retry. Do not let the
@@ -377,7 +408,7 @@ function renderCard(item: GalleryItem, onClick?: () => void): HTMLElement {
     ${thumb}</div>
     <div class="card-body">
       ${badges}
-      <a class="card-title card-open" href="/t/${encodeURIComponent(item.id)}">${escapeHtml(tTitle(item))}</a>
+      <a class="card-title card-open" href="${localPath(`/t/${encodeURIComponent(item.id)}`)}">${escapeHtml(tTitle(item))}</a>
       <div class="card-by">${escapeHtml(t('cm.by'))} <button class="at card-creator" type="button">@${escapeHtml(item.ownerName)}</button></div>
       ${remixed}
       <div class="card-stats">
@@ -804,7 +835,7 @@ function wirePreviewActions(item: GalleryItem): void {
       const created = await remixDesign(item.id);
       toast(t('cm.remixed'));
       setTimeout(() => {
-        window.location.href = `/app?design=${created.id}`;
+        window.location.href = localPath(`/app?design=${created.id}`);
       }, 700);
     } catch (e) {
       toast((e as Error).message);

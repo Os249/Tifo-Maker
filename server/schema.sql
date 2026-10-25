@@ -108,7 +108,11 @@ CREATE INDEX IF NOT EXISTS email_tokens_user_idx ON email_tokens (user_id, purpo
 ALTER TABLE designs ADD COLUMN IF NOT EXISTS owner_id  UUID REFERENCES users(id);
 ALTER TABLE designs ADD COLUMN IF NOT EXISTS is_public BOOLEAN NOT NULL DEFAULT false;
 ALTER TABLE designs ADD COLUMN IF NOT EXISTS thumbnail BYTEA;  -- client-rendered PNG
-CREATE INDEX IF NOT EXISTS designs_public_idx ON designs (is_public, updated_at DESC);
+-- The feed's indexes are designs_feed_recent_idx and designs_feed_likes_idx
+-- (performance plan P3.4), built CONCURRENTLY after listen (FEED_INDEXES in
+-- schema.ts), which then drops the two they replace: designs_public_idx
+-- (is_public, updated_at DESC), which stood here, and designs_like_score_idx
+-- below. Neither ended with the id the feed breaks ties on.
 
 -- Likes / dislikes. One row per (user, design); value is +1 (like) or -1
 -- (dislike). like_score on designs is the denormalized sum for cheap sorting.
@@ -121,7 +125,6 @@ CREATE TABLE IF NOT EXISTS design_votes (
 );
 
 ALTER TABLE designs ADD COLUMN IF NOT EXISTS like_score INT NOT NULL DEFAULT 0;
-CREATE INDEX IF NOT EXISTS designs_like_score_idx ON designs (is_public, like_score DESC, updated_at DESC);
 
 -- Templates: a published design flagged as a starting point others can clone.
 ALTER TABLE designs ADD COLUMN IF NOT EXISTS is_template BOOLEAN NOT NULL DEFAULT false;
@@ -324,6 +327,46 @@ ALTER TABLE ai_events ADD COLUMN IF NOT EXISTS cost_micros BIGINT;
 -- It lived in a variable, so every deploy or restart started the day at zero
 -- and a day of deploys multiplied the cap. The server keeps counting in memory
 -- and reads this back when it starts.
+-- ai_events past 400 days, rolled up (performance plan P3.5, retention.ts).
+-- The admin AI tab reads at most 365 days of raw rows; what it shows for all
+-- time (the totals, since when, when cost was first measured) adds these.
+-- One row per UTC day, mode, outcome, failure reason and model: no account,
+-- no provider text, nothing about who.
+CREATE TABLE IF NOT EXISTS ai_events_daily (
+  day               TEXT NOT NULL,             -- UTC 'YYYY-MM-DD'
+  mode              TEXT NOT NULL,
+  outcome           TEXT NOT NULL,
+  reason            TEXT NOT NULL DEFAULT '',  -- '' for none (a key column cannot be null)
+  model             TEXT NOT NULL DEFAULT '',  -- '' for none
+  n                 INT NOT NULL,
+  measured          INT NOT NULL DEFAULT 0,    -- rows that carried token counts
+  unpriced          INT NOT NULL DEFAULT 0,
+  cost_micros       BIGINT NOT NULL DEFAULT 0,
+  tokens_in         BIGINT NOT NULL DEFAULT 0,
+  tokens_out        BIGINT NOT NULL DEFAULT 0,
+  tokens_thought    BIGINT NOT NULL DEFAULT 0,
+  tokens_cached     BIGINT NOT NULL DEFAULT 0,
+  pictures          INT NOT NULL DEFAULT 0,
+  latency_sum       BIGINT NOT NULL DEFAULT 0,
+  latency_n         INT NOT NULL DEFAULT 0,
+  first_at          TIMESTAMPTZ NOT NULL,      -- the day's earliest request
+  first_measured_at TIMESTAMPTZ,               -- and its earliest measured one
+  PRIMARY KEY (day, mode, outcome, reason, model)
+);
+
+-- The one per-account fact the AI tab shows for all time: who has ever been
+-- turned away by the hourly cap, how often, and when last. Rolled up from
+-- ai_events past 400 days; deleted with the account. user_id NULL is the
+-- admin password and deleted accounts, as in ai_events, in one row.
+CREATE TABLE IF NOT EXISTS ai_quota_hits (
+  id      BIGSERIAL PRIMARY KEY,
+  user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  times   INT NOT NULL,
+  last_at TIMESTAMPTZ NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ai_quota_hits_user_key ON ai_quota_hits (user_id) WHERE user_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS ai_quota_hits_none_key ON ai_quota_hits ((user_id IS NULL)) WHERE user_id IS NULL;
+
 CREATE TABLE IF NOT EXISTS ai_budget (
   day        TEXT PRIMARY KEY,                -- 'YYYY-MM-DD', UTC
   calls      INT NOT NULL DEFAULT 0,          -- premium model requests (retries included)
@@ -347,6 +390,18 @@ CREATE TABLE IF NOT EXISTS design_shares (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS design_shares_design_idx ON design_shares (design_id, created_at);
+-- design_shares past 400 days, rolled up (performance plan P3.5): one row per
+-- UTC day, design, platform and kind. The sharing panel reads at most 365
+-- days of raw rows; a design's own counts and the all-time total add these.
+-- Goes with its design.
+CREATE TABLE IF NOT EXISTS design_shares_daily (
+  day       TEXT NOT NULL,                 -- UTC 'YYYY-MM-DD'
+  design_id UUID NOT NULL REFERENCES designs(id) ON DELETE CASCADE,
+  platform  TEXT NOT NULL,
+  kind      TEXT NOT NULL,
+  n         INT NOT NULL,
+  PRIMARY KEY (design_id, day, platform, kind)
+);
 
 -- ============ TRAFFIC SOURCES ============
 
@@ -476,3 +531,14 @@ CREATE INDEX IF NOT EXISTS designs_trash_idx ON designs (deleted_at) WHERE delet
 -- fact of the table. If an existing database already holds a pair, this one
 -- statement is skipped at boot (logged) and the repository check still holds.
 CREATE UNIQUE INDEX IF NOT EXISTS users_username_lower_idx ON users (lower(username));
+
+-- Keys the server keeps for itself, made once at random (performance plan
+-- P3.4): today only the community feed's cursor key (feedCursor.ts), so a
+-- cursor stays good across a deploy and between instances. It guards no
+-- secret (a cursor names a public row), only that the server parses nothing
+-- it did not issue.
+CREATE TABLE IF NOT EXISTS server_keys (
+  name       TEXT PRIMARY KEY,
+  secret     BYTEA NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);

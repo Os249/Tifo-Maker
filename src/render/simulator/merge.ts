@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { runSync, type Steps } from './steps';
 
 /**
  * Fewer draw calls for the same picture (performance plan P2.13).
@@ -275,6 +276,11 @@ export function mergeInPlace(root: THREE.Object3D, opts: { colourAgnostic: boole
  * three sorts it, by its own position, and a batch has one position.
  */
 export function batchLines(root: THREE.Object3D, opts: { transparent?: boolean } = {}): MergeResult {
+  return runSync(batchLinesSteps(root, opts));
+}
+
+/** batchLines in steps: a batch at a time, and a few dozen lines at a time inside a big one (performance plan P3.6). */
+export function* batchLinesSteps(root: THREE.Object3D, opts: { transparent?: boolean } = {}): Steps<MergeResult> {
   root.updateMatrixWorld(true);
   const toRoot = new THREE.Matrix4().copy(root.matrixWorld).invert();
   const groups = new Map<string, THREE.Line[]>();
@@ -303,7 +309,9 @@ export function batchLines(root: THREE.Object3D, opts: { transparent?: boolean }
     const withColour = lines.every((l) => !!l.geometry.attributes.color);
     const pos: number[] = [];
     const col: number[] = [];
+    let done = 0;
     for (const l of lines) {
+      if (++done % 8 === 0) yield;
       m4.multiplyMatrices(toRoot, l.matrixWorld);
       const p = l.geometry.attributes.position;
       const c = l.geometry.attributes.color;
@@ -347,6 +355,7 @@ export function batchLines(root: THREE.Object3D, opts: { transparent?: boolean }
     disposables.push(g);
     removed += lines.length;
     added++;
+    yield;
   }
   return { before, after: before - removed + added, disposables };
 }

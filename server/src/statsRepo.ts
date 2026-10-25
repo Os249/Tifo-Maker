@@ -216,7 +216,8 @@ export class PgAdminStatsRepository implements AdminStatsRepository {
           '(SELECT count(*) FROM follows) AS follows, ' +
           '(SELECT count(*) FROM design_votes) AS votes, ' +
           '(SELECT COALESCE(sum(view_count),0) FROM designs) AS total_views, ' +
-          "(SELECT count(*) FROM design_shares WHERE kind='share') AS shares, " +
+          // All time: raw presses plus the ones rolled up past 400 days (P3.5).
+          "((SELECT count(*) FROM design_shares WHERE kind='share') + (SELECT coalesce(sum(n), 0) FROM design_shares_daily WHERE kind='share')) AS shares, " +
           "(SELECT count(*) FROM moderation_reports WHERE status='open') AS open_reports, " +
           '(SELECT count(*) FROM design_photos WHERE NOT is_verified) AS unverified_photos, ' +
           "(SELECT count(*) FROM users WHERE created_at > now() - interval '7 days') AS signups7d, " +
@@ -299,7 +300,9 @@ export class PgAdminStatsRepository implements AdminStatsRepository {
   }
 
   /**
-   * Sharing over a window. Four independent queries rather than one join, each
+   * Sharing over a window. The window is at most 365 days (the route clamps
+   * it) and raw rows are kept for 400 (P3.5), so it reads raw rows only.
+   * Four independent queries rather than one join, each
    * defensive: a single failure yields an empty section instead of blanking the
    * whole panel, which is the same contract overview() keeps.
    */

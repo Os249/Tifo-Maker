@@ -41,7 +41,12 @@ import { DailyFeaturePicker, utcDay, type FeaturedTifo } from './featured';
 import type { AdminStatsRepository } from './statsRepo';
 import { buildVisit, isSocialReferrer, type TrafficRepository } from './trafficRepo';
 import { isFeedbackKind, type FeedbackContext, type FeedbackRepository } from './feedbackRepo';
+import { CURSOR_MAX_CHARS, feedScope, openCursor, randomCursorKey, sealCursor, type FeedPosition } from './feedCursor';
+import { ADMIN_WINDOW_MAX_DAYS } from './retention';
 import { adminHtml, ADMIN_JS, ADMIN_UNLOCK_JS } from './adminPage';
+import { heroPages, pickHeroPage } from './landingHero';
+import { HERO_GROUND_KEYS } from '../../src/heroGrounds';
+import HERO_TIFOS from '../../src/data/heroTifos.json';
 import { isValidTemplate } from '../../src/core/customStadiums';
 import { clubFilterOptions, COLOUR_FAMILIES } from '../../src/core/facets';
 import {
@@ -55,6 +60,8 @@ import {
 } from '../../src/core/password';
 import { deriveUsername } from '../../src/core/handle';
 import { escapeHtml } from '../../src/core/escape';
+import { pathIn } from '../../src/core/langPath';
+import { alternateLinks, checkPageText, formatCount, groundName, ogLocale, pageFile, pageText, routeIn, type PageLang } from './pageLang';
 import {
   describeProviderError,
   newChallenge,
@@ -338,6 +345,12 @@ export interface AppOptions {
    * instead. Unset: true (the memory store computes them in code).
    */
   storedHashesTrusted?: () => boolean;
+  /**
+   * The key that tags the community feed's paging cursors (P3.4, feedCursor.ts).
+   * Production keeps it in the database so a cursor outlives a deploy; unset,
+   * a random key for this process.
+   */
+  feedCursorKey?: Buffer;
 }
 
 type ScenePool = WorkerPool<SceneTask, SceneVerdict | Uint8Array | null>;
@@ -605,13 +618,17 @@ export async function buildApp(
       useDefaults: true,
       directives: {
         defaultSrc: ["'self'"],
-        // 'unsafe-eval' is required by PixiJS 8 (the editor's WebGL renderer compiles
-        // shaders/uniforms via eval). This weakens one defense-in-depth layer, but the
-        // primary XSS defenses remain intact: no inline <script> is allowed, injected
-        // <script src> from other origins is still blocked, and script-src-attr 'none'
-        // (set below by helmet) blocks inline on*= handlers. Combined with the fact that
-        // all user input is HTML-escaped before rendering, the residual risk is low.
-        scriptSrc: ["'self'", "'unsafe-eval'"],
+        // Exactly 'self': no string is ever evaluated as code, on any page or in
+        // any worker. 'unsafe-eval' was allowed here for PixiJS 8, which builds
+        // its shader, uniform and particle code with new Function. The editor
+        // now loads Pixi's eval-free code (`import 'pixi.js/unsafe-eval'` in
+        // render/editor.ts, the only module that starts Pixi) and draws its
+        // seats without particles (performance plan P3.1), so eval is refused
+        // everywhere. No WebAssembly is compiled either; if some ever is, it
+        // gets 'wasm-unsafe-eval', never 'unsafe-eval' back. Pinned in
+        // security.test.mts (P0.1 and the P3.1 block), which fails on anything
+        // looser.
+        scriptSrc: ["'self'"],
         styleSrc: ["'self'", "'unsafe-inline'"],
         fontSrc: ["'self'"],
         imgSrc: ["'self'", 'data:'],
@@ -1238,7 +1255,9 @@ export async function buildApp(
       if (!(await adminAccess(req))) return reply.code(403).send({ error: 'admin access required' });
       if (!options.aiEvents) return { days: 0, since: null, unavailable: true, pictures: picturesStatus(), text: textModelsStatus() };
       const q = req.query as { days?: string };
-      const days = Math.min(365, Math.max(1, Number(q.days) || 30));
+      // At most ADMIN_WINDOW_MAX_DAYS: raw ai_events are kept longer than
+      // that (retention.ts), so a window never reaches the rolled-up days.
+      const days = Math.min(ADMIN_WINDOW_MAX_DAYS, Math.max(1, Number(q.days) || 30));
       // Pictures are live state since the last restart, not history, so they
       // sit beside the stats rather than in ai_events.
       return { ...(await options.aiEvents.stats(days)), pictures: picturesStatus(), text: textModelsStatus() };
@@ -1247,7 +1266,8 @@ export async function buildApp(
     app.get('/api/admin/shares', async (req, reply) => {
       if (!(await adminAccess(req))) return reply.code(403).send({ error: 'admin access required' });
       const q = req.query as { days?: string };
-      const days = Math.min(365, Math.max(1, Number(q.days) || 30));
+      // Raw shares outlive this window (retention.ts); see the AI tab above.
+      const days = Math.min(ADMIN_WINDOW_MAX_DAYS, Math.max(1, Number(q.days) || 30));
       const summary = await stats.shares(days);
 
       // The return leg: where shared links actually land. Visits to /d/:id and
@@ -1267,10 +1287,11 @@ export async function buildApp(
       let opened: { key: string; visits: number; visitors: number }[] = [];
       if (options.traffic) {
         const t = await options.traffic.summary(days);
-        const shared = t.pages.filter((p) => /^\/(d|t)\//.test(p.key));
+        // Their Arabic twins (/ar/t/:id, /ar/d/:id) are the same links (performance plan P3.3).
+        const shared = t.pages.filter((p) => /^(?:\/ar)?\/(d|t)\//.test(p.key));
         inbound = {
           visits: shared.reduce((n, p) => n + p.visits, 0),
-          tifosOpened: shared.length,
+          tifosOpened: new Set(shared.map((p) => p.key.replace(/^\/ar(?=\/)/, ''))).size,
           pages: shared.slice(0, 10),
           // A floor, not a count: most messaging apps send no referrer at all,
           // so links passed round WhatsApp or Discord arrive looking direct.
@@ -2951,18 +2972,39 @@ export async function buildApp(
 
   /** Default gallery page size, shared by the API and the crawler feed. */
   const GALLERY_PAGE = 60;
+  /**
+   * The deepest `offset` still answered (P3.4). Clients page with the cursor
+   * now; `offset` stays for a page that was open across the deploy (its old
+   * script pages by offset), up to 20 pages of 60. Each row above the offset
+   * is read again on every request, so past this a request costs more than
+   * any page should: 400, not a slow answer.
+   */
+  const GALLERY_OFFSET_MAX = 1200;
+  const cursorKey = options.feedCursorKey ?? randomCursorKey();
+  const badCursor = (reply: FastifyReply) =>
+    reply.code(400).send({ error: 'that page of the feed is not available, start again from the top', code: 'bad_cursor' });
 
-  app.get('/api/gallery', async (req) => {
+  /**
+   * The community feed, a page at a time.
+   *
+   * The answer is the page's cards, as it always was. When there are more,
+   * `x-next-cursor` carries the cursor for the next page (feedCursor.ts):
+   * the client sends it back as `cursor` with the same sort and filters, and
+   * gets the rows after the last one it has, at the same cost at any depth.
+   * The cursor is checked before anything is read: one this server did not
+   * issue for this sort and these filters, or with anything out of shape,
+   * is a 400.
+   */
+  app.get('/api/gallery', async (req, reply) => {
     const q = req.query as Record<string, unknown>;
     const sort = oneParam(q.sort) === 'likes' ? 'likes' : 'recent';
-    const viewerId = await userOf(req); // annotate the caller's votes when signed in
     const rawTags = oneParam(q.tags);
     const tags = rawTags ? rawTags.split(',').map((t) => t.trim()).filter(Boolean).slice(0, 8) : undefined;
     const search = oneParam(q.search)?.slice(0, 80);
     // The library alone is ~600 designs. Paging keeps the first paint small and
     // stops a single request from shipping every card on the site.
-    const limit = Math.min(120, Math.max(1, Number(oneParam(q.limit)) || GALLERY_PAGE));
-    const offset = Math.max(0, Number(oneParam(q.offset)) || 0);
+    const limit = Math.min(120, Math.max(1, Math.floor(Number(oneParam(q.limit))) || GALLERY_PAGE));
+    const offset = Math.max(0, Math.floor(Number(oneParam(q.offset))) || 0);
     // Colour chips are OR'd (red + gold means either), tags are AND'd. That is
     // not an inconsistency: picking two tags narrows a search, picking two
     // colours widens one, and both match what the chips look like they do.
@@ -2971,13 +3013,28 @@ export async function buildApp(
       ? rawColors.split(',').map((c) => c.trim().toLowerCase()).filter((c) => (COLOUR_FAMILIES as readonly string[]).includes(c)).slice(0, 6)
       : undefined;
     const clubId = oneParam(q.club)?.slice(0, 60) || undefined;
-    return repo.listPublic({
-      sort, search, viewerId, tags, limit, offset, colors, clubId,
+    const filters = {
+      sort, search, tags, colors, clubId,
       templatesOnly: oneParam(q.templates) === '1',
       // `made=people` is the other half of the Templates tab: 619 seeded designs
       // otherwise bury every real one on the newest page.
       excludeTemplates: oneParam(q.made) === 'people',
-    });
+    } as const;
+    const scope = feedScope(filters);
+    let after: FeedPosition | null = null;
+    if (q.cursor !== undefined) {
+      // Exactly one, on its own: a repeated cursor, or a cursor and an offset
+      // together, is a question with two answers.
+      if (typeof q.cursor !== 'string' || q.cursor.length > CURSOR_MAX_CHARS || q.offset !== undefined) return badCursor(reply);
+      after = openCursor(cursorKey, scope, sort, q.cursor);
+      if (!after || after.sort !== sort) return badCursor(reply);
+    } else if (offset > GALLERY_OFFSET_MAX) {
+      return reply.code(400).send({ error: `offset is at most ${GALLERY_OFFSET_MAX}; page with the cursor instead`, code: 'offset_too_deep' });
+    }
+    const viewerId = await userOf(req); // annotate the caller's votes when signed in
+    const page = await repo.listPublicPage({ ...filters, viewerId, limit, offset: after ? 0 : offset, after });
+    if (page.next) void reply.header('x-next-cursor', sealCursor(cursorKey, scope, page.next));
+    return page.items;
   });
 
   /**
@@ -4460,6 +4517,28 @@ export async function buildApp(
     const staticDir = options.staticDir;
     const indexHtml = readFileSync(join(staticDir, 'index.html'), 'utf8');
     /**
+     * Each page in English and, where the build made one, in Arabic under /ar/
+     * (performance plan P3.3; pageLang.ts). Every page below is registered
+     * once per language by the same code, so the Arabic page runs exactly the
+     * English page's checks, sends exactly its headers and is cached, or not,
+     * exactly as it is: nothing about it is decided anywhere else. A page
+     * whose Arabic file this build lacks simply has no /ar/ address (a 404
+     * like any unknown path).
+     */
+    checkPageText();
+    /** The English paths (or path prefixes, '/t/') whose Arabic twin this build serves; the sitemap lists those. */
+    const servedInArabic = new Set<string>();
+    const pagesOf = (file: string, english: string, enPath?: string): [PageLang, string][] => {
+      let arabic: string | null = null;
+      try {
+        arabic = readFileSync(join(staticDir, pageFile(file, 'ar')), 'utf8');
+      } catch {
+        arabic = null;
+      }
+      if (arabic !== null && enPath) servedInArabic.add(enPath);
+      return arabic === null ? [['en', english]] : [['en', english], ['ar', arabic]];
+    };
+    /**
      * Absolute base for anything we put IN the page - og:url, og:image, canonical.
      * Same rule as email links: PUBLIC_URL wins, otherwise the Host has to be one
      * we know before it is echoed back, because a forged Host would otherwise
@@ -4494,24 +4573,30 @@ export async function buildApp(
      *    them the image is commonly missing on the FIRST share of a URL.
      */
     const CARD_PATH = '/og-card.png';
-    const CARD_ALT =
-      'A stadium bowl with a red and white tifo across the stands, designed in TifoMaker.';
 
-    const cardTags = (
-      req: FastifyRequest,
-      o: { title: string; description: string; path: string; image?: string; alt?: string },
-    ): string => {
+    /**
+     * `path` is the page's own address in its language, `enPath` its English
+     * page's (performance plan P3.3): with it, the page names both versions to
+     * search engines (hreflang en, ar and x-default, and og:locale:alternate),
+     * and its canonical is itself, so each language is indexed as its own page.
+     */
+    type Card = { title: string; description: string; path: string; image?: string; alt?: string; lang?: PageLang; enPath?: string };
+    const cardTags = (req: FastifyRequest, o: Card): string => {
       const base = origin(req);
+      const lang = o.lang ?? 'en';
       const url = `${base}${o.path}`;
       const img = o.image ?? `${base}${CARD_PATH}`;
-      const alt = o.alt ?? CARD_ALT;
+      const alt = o.alt ?? pageText('meta.card.alt', lang);
+      const twins = o.enPath !== undefined;
       return [
         `<title>${esc(o.title)}</title>`,
         `<link rel="canonical" href="${esc(url)}" />`,
+        ...(twins ? alternateLinks(base, o.enPath!, esc) : []),
         `<meta name="description" content="${esc(o.description)}" />`,
         `<meta property="og:type" content="website" />`,
-        `<meta property="og:site_name" content="TifoMaker" />`,
-        `<meta property="og:locale" content="en_US" />`,
+        `<meta property="og:site_name" content="${esc(pageText('meta.site', lang))}" />`,
+        `<meta property="og:locale" content="${ogLocale(lang)}" />`,
+        ...(twins ? [`<meta property="og:locale:alternate" content="${ogLocale(lang === 'ar' ? 'en' : 'ar')}" />`] : []),
         `<meta property="og:url" content="${esc(url)}" />`,
         `<meta property="og:title" content="${esc(o.title)}" />`,
         `<meta property="og:description" content="${esc(o.description)}" />`,
@@ -4534,16 +4619,30 @@ export async function buildApp(
      * the file is dropped first, so there is exactly one of each - duplicates are
      * resolved differently by each platform and produce cards nobody intended.
      */
-    const withCard = (
-      html: string,
-      req: FastifyRequest,
-      o: { title: string; description: string; path: string; image?: string; alt?: string },
-    ): string => {
+    const withCard = (html: string, req: FastifyRequest, o: Card): string => {
+      // The page's own description too: the card carries the one for this
+      // address, and two descriptions are as ambiguous as two titles (the
+      // landing, /clubs and /community each sent their file's own as well).
       const stripped = html
-        .replace(/<title>[\s\S]*?<\/title>/gi, '')
+        .replace(/<title\b[^>]*>[\s\S]*?<\/title>/gi, '')
         .replace(/<meta[^>]+(?:property|name)=["'](?:og:|twitter:)[^"']*["'][^>]*>\s*/gi, '')
-        .replace(/<link[^>]+rel=["']canonical["'][^>]*>\s*/gi, '');
+        .replace(/<meta[^>]+name=["']description["'][^>]*>\s*/gi, '')
+        .replace(/<link[^>]+rel=["'](?:canonical|alternate)["'][^>]*>\s*/gi, '');
       return injectOnce(stripped, /<head>/i, (m) => `${m}\n    ${cardTags(req, o)}`);
+    };
+    /**
+     * For the pages served as built, with no card (performance plan P3.3): the
+     * links naming both versions, and a canonical for a page meant to be found.
+     * Not on the noindex pages (/reset, /account, /projects), where a canonical
+     * contradicts the noindex; their hreflang links are harmless and kept.
+     */
+    const withTwins = (html: string, req: FastifyRequest, enPath: string, lang: PageLang, canonical: boolean): string => {
+      const base = origin(req);
+      const links = [
+        ...(canonical ? [`<link rel="canonical" href="${esc(base)}${esc(pathIn(enPath, lang))}" />`] : []),
+        ...alternateLinks(base, enPath, esc),
+      ];
+      return injectOnce(html, /<head>/i, (m) => `${m}\n    ${links.join('\n    ')}`);
     };
     /**
      * Insert a built block into a page WITHOUT letting its content be reinterpreted.
@@ -4587,28 +4686,31 @@ export async function buildApp(
      * the stadium, its size, and who made it - facts that genuinely differ from
      * one design to the next.
      */
+    // In the page's language (performance plan P3.3): the same facts, each
+    // phrase from the string table, the ground under its Arabic name on an
+    // Arabic page. The English is word for word what it always was.
     const describeDesign = (
       rec: { title: string; templateId: string; description?: string | null; remixedFrom?: string | null },
       ownerName: string | null,
+      lang: PageLang = 'en',
     ): string => {
       const own = (rec.description ?? '').trim().replace(/\s+/g, ' ');
       if (own.length >= 40) return own.slice(0, 300);
 
       const tpl = templates.find((t) => t.id === rec.templateId);
-      const where = tpl ? tpl.name : 'a stadium';
-      const seats = tpl?.seatCount ? `${tpl.seatCount.toLocaleString('en-US')} seats` : null;
+      const where = tpl ? groundName(tpl.id, tpl.name, lang) : pageText('meta.describe.somewhere', lang);
       const name = (rec.title ?? '').trim();
 
       const parts: string[] = [];
-      parts.push(name && !/^untitled/i.test(name) ? `"${name}", a tifo` : 'A tifo');
-      parts.push(`on ${where}`);
-      if (seats) parts.push(`across ${seats}`);
-      if (ownerName) parts.push(`by @${ownerName}`);
+      parts.push(name && !/^untitled/i.test(name) ? pageText('meta.describe.named', lang, { title: name }) : pageText('meta.describe.unnamed', lang));
+      parts.push(pageText('meta.describe.on', lang, { ground: where }));
+      if (tpl?.seatCount) parts.push(pageText('meta.describe.seats', lang, { seats: formatCount(tpl.seatCount, lang) }));
+      if (ownerName) parts.push(pageText('meta.describe.by', lang, { owner: ownerName }));
       let line = `${parts.join(' ')}.`;
-      if (rec.remixedFrom) line += ' Remixed from another supporter\u2019s design.';
+      if (rec.remixedFrom) line += ` ${pageText('meta.describe.remixed', lang)}`;
       // Short one, so give the searcher the next useful fact.
       if (own) line += ` ${own}`;
-      else line += ' Open it to view the full stand in 3D, or remix it into your own.';
+      else line += ` ${pageText('meta.describe.open', lang)}`;
       return line.slice(0, 300);
     };
 
@@ -4639,7 +4741,7 @@ export async function buildApp(
      */
     const SHELL_MAX = 8;
     const shellStats = { rendered: 0, cached: 0 };
-    const htmlShell = (path: string, html: string, card: { title: string; description: string }) => {
+    const htmlShell = (path: string, html: string, card: Omit<Card, 'path'>) => {
       const kept = new Map<string, { body: string; etag: string }>();
       return (req: FastifyRequest, reply: FastifyReply): FastifyReply => {
         const at = options.publicUrl ? '' : origin(req);
@@ -4664,47 +4766,66 @@ export async function buildApp(
     // link shows a rich preview (title, author, the stadium thumbnail) in
     // WhatsApp, Twitter/X, Discord, Slack, etc., before any JS runs. Humans
     // get the same HTML and the SPA boots and loads the design normally.
-    app.get('/d/:id', async (req, reply) => {
-      const { id } = req.params as { id: string };
-      const rec = await repo.get(id).catch(() => null);
-      const base = origin(req);
-      let title = 'Tifo Maker';
-      let description = 'Design a 60,000-seat stadium tifo and share it.';
-      let image = `${base}/og-default.png`;
-      // Only expose metadata for PUBLIC designs (private ones stay unlisted).
-      if (rec && rec.isPublic) {
-        const owner = rec.ownerId ? await auth.getUserById(rec.ownerId).catch(() => null) : null;
-        title = `${rec.title}: Tifo Maker`;
-        description = describeDesign(rec, owner?.username ?? null);
-        // Whether there is a picture, not the picture itself.
-        const thumb = await repo.getThumbnailMeta(rec.id).catch(() => null);
-        if (thumb?.hasThumbnail) image = `${base}/api/designs/${rec.id}/thumbnail.png`;
-      }
-      const meta = [
-        `<title>${esc(title)}</title>`,
-        `<meta name="description" content="${esc(description)}" />`,
-        `<meta property="og:type" content="website" />`,
-        `<meta property="og:site_name" content="Tifo Maker" />`,
-        `<meta property="og:title" content="${esc(title)}" />`,
-        `<meta property="og:description" content="${esc(description)}" />`,
-        `<meta property="og:image" content="${esc(image)}" />`,
-        `<meta property="og:url" content="${esc(base)}/d/${esc(id)}" />`,
-        `<meta name="twitter:card" content="summary_large_image" />`,
-        `<meta name="twitter:title" content="${esc(title)}" />`,
-        `<meta name="twitter:description" content="${esc(description)}" />`,
-        `<meta name="twitter:image" content="${esc(image)}" />`,
-        // /d/:id and /t/:id render the same design. Point both at /t/:id so search
-        // engines consolidate them instead of treating each as duplicate content.
-        `<link rel="canonical" href="${esc(base)}/t/${esc(id)}" />`,
-      ].join('\n    ');
-      // Inject after <head>, and drop the SPA's default <title> to avoid a dupe.
-      const html = injectOnce(
-        indexHtml.replace(/<title>.*?<\/title>/i, ''),
-        /<head>/i,
-        (m) => `${m}\n    ${meta}`,
-      );
-      return reply.header('cache-control', 'no-cache').type('text/html').send(html);
-    });
+    /**
+     * A design's title in a page's language: the starter library ships an
+     * Arabic name; anything a person saved is their own words, in the language
+     * they wrote it in, and is never translated (ui/i18n.ts tTitle()).
+     */
+    const titleIn = (rec: { title: string; titleAr?: string | null }, lang: PageLang): string =>
+      (lang === 'ar' && rec.titleAr?.trim()) || rec.title;
+    /**
+     * Every page says its encoding in the header (performance plan P3.3). The
+     * link card goes in first thing in <head>, so a page's own <meta charset>
+     * can end up past the first 1024 bytes, where a browser stops looking for
+     * it, and an Arabic card is all non-ASCII: without the header the browser
+     * would be guessing how to read it.
+     */
+    const PAGE_HTML = 'text/html; charset=utf-8';
+    for (const [lang, editorHtml] of pagesOf('index.html', indexHtml)) {
+      app.get(routeIn('/d/:id', lang), async (req, reply) => {
+        const { id } = req.params as { id: string };
+        const rec = await repo.get(id).catch(() => null);
+        const base = origin(req);
+        let title = pageText('meta.design.site', lang);
+        let description = pageText('meta.design.none.desc', lang);
+        let image = `${base}/og-default.png`;
+        // Only expose metadata for PUBLIC designs (private ones stay unlisted).
+        if (rec && rec.isPublic) {
+          const owner = rec.ownerId ? await auth.getUserById(rec.ownerId).catch(() => null) : null;
+          title = pageText('meta.design.title', lang, { title: titleIn(rec, lang) });
+          description = describeDesign({ ...rec, title: titleIn(rec, lang) }, owner?.username ?? null, lang);
+          // Whether there is a picture, not the picture itself.
+          const thumb = await repo.getThumbnailMeta(rec.id).catch(() => null);
+          if (thumb?.hasThumbnail) image = `${base}/api/designs/${rec.id}/thumbnail.png`;
+        }
+        const meta = [
+          `<title>${esc(title)}</title>`,
+          `<meta name="description" content="${esc(description)}" />`,
+          `<meta property="og:type" content="website" />`,
+          `<meta property="og:site_name" content="${esc(pageText('meta.design.site', lang))}" />`,
+          `<meta property="og:title" content="${esc(title)}" />`,
+          `<meta property="og:description" content="${esc(description)}" />`,
+          `<meta property="og:image" content="${esc(image)}" />`,
+          `<meta property="og:url" content="${esc(base)}${esc(pathIn(`/d/${id}`, lang))}" />`,
+          `<meta name="twitter:card" content="summary_large_image" />`,
+          `<meta name="twitter:title" content="${esc(title)}" />`,
+          `<meta name="twitter:description" content="${esc(description)}" />`,
+          `<meta name="twitter:image" content="${esc(image)}" />`,
+          // /d/:id and /t/:id render the same design. Point both at /t/:id so search
+          // engines consolidate them instead of treating each as duplicate content;
+          // in Arabic, at /ar/t/:id, and both versions named (performance plan P3.3).
+          `<link rel="canonical" href="${esc(base)}${esc(pathIn(`/t/${id}`, lang))}" />`,
+          ...alternateLinks(base, `/t/${id}`, esc),
+        ].join('\n    ');
+        // Inject after <head>, and drop the SPA's default <title> to avoid a dupe.
+        const html = injectOnce(
+          editorHtml.replace(/<title>.*?<\/title>/i, ''),
+          /<head>/i,
+          (m) => `${m}\n    ${meta}`,
+        );
+        return reply.header('cache-control', 'no-cache').type(PAGE_HTML).send(html);
+      });
+    }
 
     // Dedicated public VIEW page at /t/:id, the canonical share link. Serves the
     // standalone share page with a branded OG/Twitter card so it previews richly
@@ -4717,34 +4838,53 @@ export async function buildApp(
       shareHtmlRaw = null; // API-only build without the share page
     }
     if (shareHtmlRaw) {
-      const sharePage = shareHtmlRaw;
-      app.get('/t/:id', async (req, reply) => {
-        const { id } = req.params as { id: string };
-        const rec = await repo.get(id).catch(() => null);
-        const base = origin(req);
-        let title = 'TifoMaker';
-        let description = 'A stadium tifo on TifoMaker, open it to view in full.';
-        let image = `${base}${CARD_PATH}`;
-        let alt: string | undefined;
-        if (rec && rec.isPublic) {
-          const owner = rec.ownerId ? await auth.getUserById(rec.ownerId).catch(() => null) : null;
-          title = `${rec.title}: TifoMaker`;
-          description = describeDesign(rec, owner?.username ?? null);
-          image = `${base}/og/t/${rec.id}.png`;
-          // Alt text describes the picture, not the page: what a card reader hears.
-          alt = `"${rec.title}", a stadium tifo designed in TifoMaker${
-            owner?.username ? ` by @${owner.username}` : ''
-          }.`;
-        }
-        const html = withCard(sharePage, req, { title, description, path: `/t/${id}`, image, alt });
-        return reply.header('cache-control', 'no-cache').type('text/html').send(html);
-      });
+      for (const [lang, sharePage] of pagesOf('share.html', shareHtmlRaw, '/t/')) {
+        app.get(routeIn('/t/:id', lang), async (req, reply) => {
+          const { id } = req.params as { id: string };
+          const rec = await repo.get(id).catch(() => null);
+          const base = origin(req);
+          let title = pageText('meta.tifo.none.title', lang);
+          let description = pageText('meta.tifo.none.desc', lang);
+          let image = `${base}${CARD_PATH}`;
+          let alt: string | undefined;
+          if (rec && rec.isPublic) {
+            const owner = rec.ownerId ? await auth.getUserById(rec.ownerId).catch(() => null) : null;
+            const name = titleIn(rec, lang);
+            title = pageText('meta.tifo.title', lang, { title: name });
+            description = describeDesign({ ...rec, title: name }, owner?.username ?? null, lang);
+            image = `${base}/og/t/${rec.id}.png`;
+            // Alt text describes the picture, not the page: what a card reader hears.
+            alt = owner?.username
+              ? pageText('meta.tifo.altBy', lang, { title: name, owner: owner.username })
+              : pageText('meta.tifo.alt', lang, { title: name });
+          }
+          const html = withCard(sharePage, req, { title, description, path: pathIn(`/t/${id}`, lang), enPath: `/t/${id}`, image, alt, lang });
+          return reply.header('cache-control', 'no-cache').type(PAGE_HTML).send(html);
+        });
+      }
     }
 
     // Marketing landing at the root; the editor app lives at /app. Return users
     // bookmark /app; first-time visitors get the pitch. Share links (/d/:id)
     // and the SPA fallback both serve the editor.
     const landingHtml = readFileSync(join(staticDir, 'landing.html'), 'utf8');
+    // The hero opens on a different club each visit: one page per hero club
+    // and language, made once here (landingHero.ts). Without the hero (a test
+    // build), none. The Arabic page's caption is said in Arabic from the same
+    // keys its script re-says it from (performance plan P3.3).
+    const heroClubs = (HERO_TIFOS as { club: string; title: string; templateId: string }[]).map(({ club, title, templateId }) => ({
+      club,
+      title,
+      ground: HERO_GROUND_KEYS[templateId],
+    }));
+    const sayCaption = (lang: PageLang) =>
+      lang === 'en'
+        ? undefined
+        : (clubKey: string, groundKey: string): string =>
+            pageText('st.nameAt', lang, {
+              club: pageText(clubKey, lang),
+              ground: pageText(groundKey, lang).replace(/\s*[(（][^)）]*[)）]\s*$/, ''),
+            });
     // Held in memory so the og.png fallback never touches the disk per request.
     try {
       defaultCardPng = readFileSync(join(staticDir, 'og-card.png'));
@@ -4770,52 +4910,71 @@ export async function buildApp(
      * the static page; the design's own title ships in both languages because
      * only the browser knows which one is wanted.
      */
-    const featuredCard = (req: FastifyRequest, picked: FeaturedTifo): string => {
+    // In the page's language (performance plan P3.3): the labels in its words
+    // (still marked data-i18n, so the toggle translates them in place), the
+    // design's own title as it was given, and the link to its page in the
+    // same language.
+    const featuredCard = (req: FastifyRequest, picked: FeaturedTifo, lang: PageLang): string => {
       const base = origin(req);
       const d = picked.item;
-      const name = d.title?.trim() || 'Untitled tifo';
+      const name = d.title?.trim() || pageText('ed.docTitlePlaceholder', lang);
       const nameAr = d.titleAr?.trim() ?? '';
-      const by = d.ownerName || 'a supporter';
+      const shown = lang === 'ar' && nameAr ? nameAr : name;
+      const by = d.ownerName || pageText('meta.someone', lang);
       return (
         `<div class="fd-label"><span class="fd-star" aria-hidden="true">★</span>` +
-        `<span data-i18n="daily.badge">Tifo of the day</span></div>` +
-        `<a class="fd-card" href="/t/${esc(d.id)}">` +
+        `<span data-i18n="daily.badge">${esc(pageText('daily.badge', lang))}</span></div>` +
+        `<a class="fd-card" href="${esc(pathIn(`/t/${d.id}`, lang))}">` +
         `<span class="fd-shot-wrap">` +
         `<img class="fd-shot" src="${esc(base)}/api/designs/${esc(d.id)}/thumbnail.png"` +
-        ` alt="${esc(name)}, a stadium tifo by @${esc(by)}" width="800" height="84" loading="lazy" decoding="async" /></span>` +
+        ` alt="${esc(pageText('meta.daily.alt', lang, { title: shown, owner: by }))}" width="800" height="84" loading="lazy" decoding="async" /></span>` +
         `<span class="fd-body"><span class="fd-main">` +
-        `<span class="fd-title" data-title-en="${esc(name)}"${nameAr ? ` data-title-ar="${esc(nameAr)}"` : ''}>${esc(name)}</span>` +
+        `<span class="fd-title" data-title-en="${esc(name)}"${nameAr ? ` data-title-ar="${esc(nameAr)}"` : ''}>${esc(shown)}</span>` +
         `<span class="fd-by">@${esc(by)}</span></span>` +
-        `<span class="fd-cta" data-i18n="daily.view">See it in 3D →</span>` +
+        `<span class="fd-cta" data-i18n="daily.view">${esc(pageText('daily.view', lang))}</span>` +
         `</span></a>` +
-        `<p class="fd-note" data-i18n="daily.sub">Picked from what the community published. A different one every day.</p>`
+        `<p class="fd-note" data-i18n="daily.sub">${esc(pageText('daily.sub', lang))}</p>`
       );
     };
 
-    app.get('/', async (req, reply) => {
-      // Never let the feature section take the page down: today() already
-      // swallows its own failures and answers null, and a null simply leaves
-      // the empty container, which CSS hides.
-      const picked = daily ? await daily.today() : null;
-      const page = picked
-        ? injectOnce(
-            landingHtml,
-            /<div class="featured-daily" id="featured-tifo"[^>]*>/i,
-            (m) => `${m}${featuredCard(req, picked)}`,
-          )
-        : landingHtml;
-      return reply
-        .header('cache-control', 'no-cache')
-        .type('text/html')
-        .send(
-          withCard(page, req, {
-            title: 'TifoMaker: design the display 60,000 fans will never forget',
-            description:
-              'Design a stadium tifo in your browser, watch it light up the stands in 3D, and export the seat-by-seat instructions that make it real on match day. Free, no account needed to start.',
-            path: '/',
-          }),
-        );
-    });
+    for (const [lang, html] of pagesOf('landing.html', landingHtml, '/')) {
+      const landingByClub = heroPages(html, heroClubs, sayCaption(lang));
+      app.get(routeIn('/', lang), async (req, reply) => {
+        // Never let the feature section take the page down: today() already
+        // swallows its own failures and answers null, and a null simply leaves
+        // the empty container, which CSS hides.
+        const picked = daily ? await daily.today() : null;
+        // A club for this visit: the page is every fan's, not one club's.
+        const landing = pickHeroPage(landingByClub, html);
+        const page = picked
+          ? injectOnce(
+              landing,
+              /<div class="featured-daily" id="featured-tifo"[^>]*>/i,
+              (m) => `${m}${featuredCard(req, picked, lang)}`,
+            )
+          : landing;
+        return reply
+          .header('cache-control', 'no-cache')
+          .type(PAGE_HTML)
+          .send(
+            withCard(page, req, {
+              title: pageText('meta.landing.title', lang),
+              description: pageText('meta.landing.desc', lang),
+              path: routeIn('/', lang),
+              enPath: '/',
+              lang,
+            }),
+          );
+      });
+      // /ar is /ar/: one address for the Arabic landing, the query kept.
+      if (lang === 'ar') {
+        app.get('/ar', async (req, reply) => {
+          const raw = req.raw.url ?? req.url;
+          const at = raw.indexOf('?');
+          return reply.header('cache-control', 'no-cache').redirect(`/ar/${at === -1 ? '' : raw.slice(at)}`, 301);
+        });
+      }
+    }
     /**
      * Where a bare /app goes: the Projects page, decided here instead of in
      * the editor (performance plan P1.9).
@@ -4832,7 +4991,8 @@ export async function buildApp(
      * lands on. Not an open redirect: nothing in the request picks where it goes.
      */
     const UTM_KEY = /^utm_[a-z_]{1,32}$/;
-    const bareAppTarget = (rawUrl: string): string | null => {
+    // /ar/app goes to /ar/projects: the same fixed page, in the same language.
+    const bareAppTarget = (rawUrl: string, lang: PageLang): string | null => {
       const at = rawUrl.indexOf('?');
       const query = new URLSearchParams(at === -1 ? '' : rawUrl.slice(at + 1));
       const kept = new URLSearchParams({ start: '1' });
@@ -4840,19 +5000,22 @@ export async function buildApp(
         if (!UTM_KEY.test(k)) return null;
         kept.append(k, v);
       }
-      return `/projects?${kept.toString()}`;
+      return `${routeIn('/projects', lang)}?${kept.toString()}`;
     };
-    const editorShell = htmlShell('/app', indexHtml, {
-      title: 'The TifoMaker editor: paint 60,000 seats',
-      description:
-        'Paint a tifo seat by seat, drop in a crest or text, and watch the whole bowl update in 3D as you work. Free, in the browser, no download.',
-    });
-    app.get('/app', async (req, reply) => {
-      const bare = bareAppTarget(req.raw.url ?? req.url);
-      if (bare) return reply.header('cache-control', 'no-cache').redirect(bare, 302);
-      // The query is the editor's to read in the browser; the page is the same for every one.
-      return editorShell(req, reply);
-    });
+    for (const [lang, html] of pagesOf('index.html', indexHtml)) {
+      const editorShell = htmlShell(routeIn('/app', lang), html, {
+        title: pageText('meta.app.title', lang),
+        description: pageText('meta.app.desc', lang),
+        enPath: '/app',
+        lang,
+      });
+      app.get(routeIn('/app', lang), async (req, reply) => {
+        const bare = bareAppTarget(req.raw.url ?? req.url, lang);
+        if (bare) return reply.header('cache-control', 'no-cache').redirect(bare, 302);
+        // The query is the editor's to read in the browser; the page is the same for every one.
+        return editorShell(req, reply);
+      });
+    }
     // Public developer spec for the .tifo format.
     try {
       const specHtml = readFileSync(join(staticDir, 'tifo-spec.html'), 'utf8');
@@ -4877,41 +5040,45 @@ export async function buildApp(
     // nobody sees a flash of a second list.
     try {
       const communityHtml = readFileSync(join(staticDir, 'community.html'), 'utf8');
-      app.get('/community', async (req, reply) => {
-        let items: { id: string; title: string; ownerName: string; hasThumbnail: boolean }[] = [];
-        try {
-          items = await repo.listPublic({ sort: 'recent', limit: GALLERY_PAGE });
-        } catch {
-          items = []; // a failed query must never take the page down
-        }
-        const base = origin(req);
-        const list = items
-          .map((d) => {
-            const name = d.title?.trim() || 'Untitled tifo';
-            const thumb = d.hasThumbnail
-              ? `<img src="${esc(base)}/api/designs/${esc(d.id)}/thumbnail.png" alt="${esc(name)}" width="320" height="200" loading="lazy" />`
-              : '';
-            // /t/:id is the canonical URL for a design, so link that, not /d/:id.
-            return `<li><a href="/t/${esc(d.id)}">${thumb}<span>${esc(name)}</span></a>`
-              + `<small> by ${esc(d.ownerName || 'a supporter')}</small></li>`;
-          })
-          .join('');
-        const seo = items.length
-          ? `<nav id="seo-feed" class="seo-feed" aria-label="Published tifos"><ul>${list}</ul></nav>`
-          : '';
-        const withFeed = injectOnce(
-          communityHtml,
-          /<div class="grid-loading" id="grid-loading"[^>]*>/i,
-          (m) => `${seo}${m}`,
-        );
-        const html = withCard(withFeed, req, {
-          title: 'The tifo community: displays from supporters worldwide',
-          description:
-            'Browse tifos designed by supporters around the world. Like, comment, follow the people making them, and remix any display into your own.',
-          path: '/community',
+      for (const [lang, communityPage] of pagesOf('community.html', communityHtml, '/community')) {
+        app.get(routeIn('/community', lang), async (req, reply) => {
+          let items: { id: string; title: string; titleAr?: string | null; ownerName: string; hasThumbnail: boolean }[] = [];
+          try {
+            items = await repo.listPublic({ sort: 'recent', limit: GALLERY_PAGE });
+          } catch {
+            items = []; // a failed query must never take the page down
+          }
+          const base = origin(req);
+          const list = items
+            .map((d) => {
+              const name = (lang === 'ar' && d.titleAr?.trim()) || d.title?.trim() || pageText('ed.docTitlePlaceholder', lang);
+              const thumb = d.hasThumbnail
+                ? `<img src="${esc(base)}/api/designs/${esc(d.id)}/thumbnail.png" alt="${esc(name)}" width="320" height="200" loading="lazy" />`
+                : '';
+              // /t/:id is the canonical URL for a design, so link that, not /d/:id
+              // (and /ar/t/:id from the Arabic page).
+              return `<li><a href="${esc(pathIn(`/t/${d.id}`, lang))}">${thumb}<span>${esc(name)}</span></a>`
+                + `<small> ${esc(pageText('cm.by', lang))} ${esc(d.ownerName || pageText('meta.someone', lang))}</small></li>`;
+            })
+            .join('');
+          const seo = items.length
+            ? `<nav id="seo-feed" class="seo-feed" aria-label="${esc(pageText('meta.feed.label', lang))}"><ul>${list}</ul></nav>`
+            : '';
+          const withFeed = injectOnce(
+            communityPage,
+            /<div class="grid-loading" id="grid-loading"[^>]*>/i,
+            (m) => `${seo}${m}`,
+          );
+          const html = withCard(withFeed, req, {
+            title: pageText('meta.community.title', lang),
+            description: pageText('meta.community.desc', lang),
+            path: routeIn('/community', lang),
+            enPath: '/community',
+            lang,
+          });
+          return reply.header('cache-control', 'no-cache').type(PAGE_HTML).send(html);
         });
-        return reply.header('cache-control', 'no-cache').type('text/html').send(html);
-      });
+      }
     } catch {
       /* community page optional in API-only builds */
     }
@@ -4919,7 +5086,12 @@ export async function buildApp(
     // Match-day QR landing: fans scan one stadium-wide code → /s/:id → find seat.
     try {
       const seatHtml = readFileSync(join(staticDir, 'seat.html'), 'utf8');
-      app.get('/s/:id', async (_req, reply) => reply.header('cache-control', 'no-cache').type('text/html').send(seatHtml));
+      for (const [lang, seatPage] of pagesOf('seat.html', seatHtml)) {
+        app.get(routeIn('/s/:id', lang), async (req, reply) => {
+          const { id } = req.params as { id: string };
+          return reply.header('cache-control', 'no-cache').type(PAGE_HTML).send(withTwins(seatPage, req, `/s/${id}`, lang, true));
+        });
+      }
     } catch {
       /* seat page optional in API-only builds */
     }
@@ -4927,12 +5099,15 @@ export async function buildApp(
     // B2B "For Clubs" enterprise page with lead capture.
     try {
       const clubsHtml = readFileSync(join(staticDir, 'clubs.html'), 'utf8');
-      const clubsShell = htmlShell('/clubs', clubsHtml, {
-        title: 'TifoMaker for clubs: run the whole stand like a production',
-        description:
-          'Your actual venue modelled to seat-level accuracy, a branded editor for your design team, white-label fan pages and match-day exports.',
-      });
-      app.get('/clubs', async (req, reply) => clubsShell(req, reply));
+      for (const [lang, html] of pagesOf('clubs.html', clubsHtml, '/clubs')) {
+        const clubsShell = htmlShell(routeIn('/clubs', lang), html, {
+          title: pageText('meta.clubs.title', lang),
+          description: pageText('meta.clubs.desc', lang),
+          enPath: '/clubs',
+          lang,
+        });
+        app.get(routeIn('/clubs', lang), async (req, reply) => clubsShell(req, reply));
+      }
     } catch {
       /* clubs page optional in API-only builds */
     }
@@ -4940,12 +5115,15 @@ export async function buildApp(
     // Legal documents (Terms, Privacy, Acceptable Use, Cookies) at /legal.
     try {
       const legalHtml = readFileSync(join(staticDir, 'legal.html'), 'utf8');
-      const legalShell = htmlShell('/legal', legalHtml, {
-        title: 'Terms, privacy and acceptable use: TifoMaker',
-        description:
-          'How TifoMaker handles your designs and your data, what you can publish, and how to get in touch.',
-      });
-      app.get('/legal', async (req, reply) => legalShell(req, reply));
+      for (const [lang, html] of pagesOf('legal.html', legalHtml, '/legal')) {
+        const legalShell = htmlShell(routeIn('/legal', lang), html, {
+          title: pageText('meta.legal.title', lang),
+          description: pageText('meta.legal.desc', lang),
+          enPath: '/legal',
+          lang,
+        });
+        app.get(routeIn('/legal', lang), async (req, reply) => legalShell(req, reply));
+      }
     } catch {
       /* legal page optional in API-only builds */
     }
@@ -4953,7 +5131,10 @@ export async function buildApp(
     // Password-reset landing (opened from the reset email link).
     try {
       const resetHtml = readFileSync(join(staticDir, 'reset.html'), 'utf8');
-      app.get('/reset', async (_req, reply) => reply.header('cache-control', 'no-cache').type('text/html').send(resetHtml));
+      for (const [lang, page] of pagesOf('reset.html', resetHtml)) {
+        app.get(routeIn('/reset', lang), async (req, reply) =>
+          reply.header('cache-control', 'no-cache').type(PAGE_HTML).send(withTwins(page, req, '/reset', lang, false)));
+      }
     } catch {
       /* reset page optional in API-only builds */
     }
@@ -4961,7 +5142,10 @@ export async function buildApp(
     // Account settings. noindex in its own <head>; nothing here is public.
     try {
       const accountHtml = readFileSync(join(staticDir, 'account.html'), 'utf8');
-      app.get('/account', async (_req, reply) => reply.header('cache-control', 'no-cache').type('text/html').send(accountHtml));
+      for (const [lang, page] of pagesOf('account.html', accountHtml)) {
+        app.get(routeIn('/account', lang), async (req, reply) =>
+          reply.header('cache-control', 'no-cache').type(PAGE_HTML).send(withTwins(page, req, '/account', lang, false)));
+      }
     } catch {
       /* account page optional in API-only builds */
     }
@@ -4970,7 +5154,10 @@ export async function buildApp(
     // <head> and never in the sitemap. The list itself is fetched by the page.
     try {
       const projectsHtml = readFileSync(join(staticDir, 'projects.html'), 'utf8');
-      app.get('/projects', async (_req, reply) => reply.header('cache-control', 'no-cache').type('text/html').send(projectsHtml));
+      for (const [lang, page] of pagesOf('projects.html', projectsHtml)) {
+        app.get(routeIn('/projects', lang), async (req, reply) =>
+          reply.header('cache-control', 'no-cache').type(PAGE_HTML).send(withTwins(page, req, '/projects', lang, false)));
+      }
     } catch {
       /* projects page optional in API-only builds */
     }
@@ -4979,7 +5166,14 @@ export async function buildApp(
     // designs published after the last deploy still get discovered. robots.txt (a
     // static file in public/) points here. Public designs only: private ones must
     // never be enumerable, and /t/:id is the canonical URL for each one.
-    app.get('/sitemap.xml', async (req, reply) => {
+    // A limit of its own (performance plan P3.3): with every page and design
+    // listed in both languages, each with its hreflang links, one answer is
+    // about 69 ms of this one event loop and 5.2 MB at 5000 designs (it was
+    // 18.5 ms and 0.9 MB), so 300 a minute from one client would hold a third
+    // of the server. Crawlers read a sitemap a few times a day; ten a minute
+    // per client leaves them all the room they need.
+    const sitemapLimit = options.rateLimit ? { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } } : {};
+    app.get('/sitemap.xml', sitemapLimit, async (req, reply) => {
       const base = origin(req);
       const staticPages: [string, string, string][] = [
         // path, changefreq, priority
@@ -5000,26 +5194,40 @@ export async function buildApp(
         designs = []; // a gallery failure must not take the sitemap down
       }
       const urls: string[] = [];
+      const b = esc(base);
+      /**
+       * A page, and its Arabic twin when this build serves one (performance plan
+       * P3.3): each is listed, and each names both, en, ar and x-default (the
+       * English), the way the pages' own <head> does. The links go after the
+       * protocol's own elements, where its schema allows other namespaces.
+       */
+      const add = (enPath: string, twin: boolean, rest: string): void => {
+        if (!twin) {
+          urls.push(`  <url>\n    <loc>${b}${esc(enPath)}</loc>\n${rest}  </url>`);
+          return;
+        }
+        const en = `${b}${esc(pathIn(enPath, 'en'))}`;
+        const ar = `${b}${esc(pathIn(enPath, 'ar'))}`;
+        const links =
+          `    <xhtml:link rel="alternate" hreflang="en" href="${en}"/>\n` +
+          `    <xhtml:link rel="alternate" hreflang="ar" href="${ar}"/>\n` +
+          `    <xhtml:link rel="alternate" hreflang="x-default" href="${en}"/>\n`;
+        urls.push(`  <url>\n    <loc>${en}</loc>\n${rest}${links}  </url>`, `  <url>\n    <loc>${ar}</loc>\n${rest}${links}  </url>`);
+      };
       for (const [path, freq, pri] of staticPages) {
-        urls.push(
-          `  <url>\n    <loc>${esc(base + path)}</loc>\n` +
-            `    <changefreq>${freq}</changefreq>\n    <priority>${pri}</priority>\n  </url>`,
-        );
+        add(path, servedInArabic.has(path), `    <changefreq>${freq}</changefreq>\n    <priority>${pri}</priority>\n`);
       }
+      const designsInArabic = servedInArabic.has('/t/');
       for (const d of designs) {
         // lastmod is optional in the spec, and an unparseable date would throw and
         // 500 the whole sitemap, so omit the element rather than risk that.
         const t = Date.parse(d.updatedAt);
         const lastmod = Number.isFinite(t) ? `    <lastmod>${new Date(t).toISOString().slice(0, 10)}</lastmod>\n` : '';
-        urls.push(
-          `  <url>\n    <loc>${esc(base)}/t/${esc(d.id)}</loc>\n` +
-            lastmod +
-            `    <changefreq>monthly</changefreq>\n    <priority>0.7</priority>\n  </url>`,
-        );
+        add(`/t/${d.id}`, designsInArabic, `${lastmod}    <changefreq>monthly</changefreq>\n    <priority>0.7</priority>\n`);
       }
       const xml =
         `<?xml version="1.0" encoding="UTF-8"?>\n` +
-        `<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n` +
+        `<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">\n` +
         urls.join('\n') +
         `\n</urlset>\n`;
       return reply.header('cache-control', 'public, max-age=3600').type('application/xml').send(xml);

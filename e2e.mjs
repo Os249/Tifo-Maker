@@ -1,16 +1,74 @@
 import { chromium } from 'playwright';
+import { createGzip } from 'node:zlib';
+import { readFileSync, readdirSync } from 'node:fs';
 const B=process.env.BASE||'http://127.0.0.1:8911';
 const browser=await chromium.launch({executablePath:'/opt/pw-browsers/chromium',args:['--use-gl=swiftshader','--enable-unsafe-swiftshader']}).catch(()=>chromium.launch());
 const page=await (await browser.newContext({viewport:{width:1400,height:900}})).newPage();
 const errs=[]; page.on('pageerror',e=>errs.push(String(e.message).slice(0,200)));
 const ready=()=>page.waitForFunction(()=>{const s=document.getElementById('stat');return s&&/seats/.test(s.textContent||'');},{timeout:45000});
-// The open project's copy in this browser (see src/core/projects.ts).
-const sig=()=>page.evaluate(()=>{const id=new URLSearchParams(location.search).get('local');const r=id&&localStorage.getItem('tifo_proj_'+id);if(!r)return null;const d=JSON.parse(r);
+/**
+ * A project's copy in this browser (see src/core/projects.ts): compressed in
+ * IndexedDB (src/core/draftStore.ts, performance plan P3.7), or JSON in
+ * localStorage in the old form. Runs in the page; never creates the database.
+ */
+const READ_DRAFT = async (key) => {
+  const rec = await new Promise((res) => {
+    let rq;
+    try { rq = indexedDB.open('tifo-drafts', 1); } catch { return res(null); }
+    rq.onupgradeneeded = () => rq.transaction.abort(); // not there yet: leave it to the app to make
+    rq.onerror = () => res(null);
+    rq.onsuccess = () => {
+      const db = rq.result;
+      if (!db.objectStoreNames.contains('drafts')) { db.close(); return res(null); }
+      const g = db.transaction('drafts').objectStore('drafts').get(key);
+      g.onsuccess = () => { db.close(); res(g.result ?? null); };
+      g.onerror = () => { db.close(); res(null); };
+    };
+  });
+  if (rec && rec.gz) {
+    try {
+      const json = await new Response(new Blob([rec.gz]).stream().pipeThrough(new DecompressionStream('gzip'))).text();
+      return { json, form: 'idb', bytes: rec.gz.byteLength, old: localStorage.getItem(key) !== null };
+    } catch { return { json: null, form: 'idb', bytes: rec.gz.byteLength, old: localStorage.getItem(key) !== null }; }
+  }
+  const r = localStorage.getItem(key);
+  return r ? { json: r, form: 'ls', bytes: r.length * 2, old: true } : null;
+};
+const readDraft = (p, key) => p.evaluate(`(${READ_DRAFT})(${JSON.stringify(key)})`);
+const sig=async()=>{const id=await page.evaluate(()=>new URLSearchParams(location.search).get('local'));const r=id&&await readDraft(page,'tifo_proj_'+id);if(!r||!r.json)return null;const d=JSON.parse(r.json);
   const rle=d.doc?.layers?.[0]?.cellsRle??[];
-  return {runs:rle.length, head:JSON.stringify(rle.slice(0,3)), title:d.title, designId:d.designId, kb:Math.round(r.length*2/1024)};});
+  return {runs:rle.length, head:JSON.stringify(rle.slice(0,3)), title:d.title, designId:d.designId, kb:Math.round(r.bytes/1024), form:r.form, chars:r.json.length};};
 
 let pass=0, fail=0;
 const check=(name,ok,extra='')=>{ (ok?pass++:fail++); console.log(`  ${ok?'PASS':'FAIL'}  ${name}${extra?'  '+extra:''}`); };
+/**
+ * Resident memory of this run's own Chromium renderers, in MB (Linux /proc;
+ * 0 where it cannot be read): the processes under this one whose command
+ * line says --type=renderer, so other browsers on the machine do not count.
+ */
+const rendererMB = () => {
+  try {
+    const parent = new Map();
+    for (const d of readdirSync('/proc')) {
+      if (!/^\d+$/.test(d)) continue;
+      try { const st = readFileSync(`/proc/${d}/stat`, 'utf8'); parent.set(Number(d), Number(st.slice(st.lastIndexOf(')') + 2).split(' ')[1])); } catch { /* gone */ }
+    }
+    let kb = 0;
+    for (const pid of parent.keys()) {
+      let mine = false;
+      for (let q = parent.get(pid), k = 0; q && q > 1 && k < 32; q = parent.get(q), k++) if (q === process.pid) { mine = true; break; }
+      if (!mine) continue;
+      try {
+        if (!readFileSync(`/proc/${pid}/cmdline`, 'utf8').includes('--type=renderer')) continue;
+        const m = /VmRSS:\s+(\d+)/.exec(readFileSync(`/proc/${pid}/status`, 'utf8'));
+        if (m) kb += Number(m[1]);
+      } catch { /* gone */ }
+    }
+    return kb / 1024;
+  } catch {
+    return 0;
+  }
+};
 
 // A new project: the editor is always opened on one now (see e2e-projects.mjs),
 // and with the first-run dialog gone (the start flow on the Projects page asks
@@ -38,6 +96,7 @@ await page.evaluate(()=>{
 await page.waitForTimeout(3000);
 const a = await sig();
 check('painting writes a draft', !!a, a?`${a.runs} runs, ${a.kb}KB`:'');
+check('…compressed, in IndexedDB (P3.7)', a?.form === 'idb' && a.kb * 1024 < a.chars, a?`${a.form}: ${a.chars} characters stored in ${a.kb} KB`:'');
 
 // The result appears beside whichever Save was pressed, and NOWHERE else. It
 // used to be written to the header chip, the panel chip and the message line at
@@ -144,16 +203,23 @@ async function freshEditor(url = '/app?new=1&e2e=1') {
   const ctx = await browser.newContext({ viewport: { width: 1400, height: 900 } });
   await ctx.addInitScript((ls) => {
     try { for (const [k, v] of Object.entries(ls)) if (localStorage.getItem(k) === null) localStorage.setItem(k, v); } catch { /* */ }
-    // Every write to a project's draft key, and whether a stroke was open when it happened.
+    // Every write to a project's draft key, and whether a stroke was open when
+    // it happened: into the compressed store (P3.7) or, on the way out of a
+    // page, the old form in localStorage.
     window.__writes = [];
     const si = Storage.prototype.setItem;
     Storage.prototype.setItem = function (k, v) {
-      if (this === window.localStorage && /^tifo_proj_l/.test(k)) window.__writes.push({ k, at: performance.now(), inStroke: !!window.__tifo?.store?.inStroke, len: String(v).length });
+      if (this === window.localStorage && /^tifo_proj_l/.test(k)) window.__writes.push({ k, form: 'ls', at: performance.now(), inStroke: !!window.__tifo?.store?.inStroke, len: String(v).length });
       return si.call(this, k, v);
     };
+    // The layer stacks (tifo-layers' "docs" store) are counted apart from the drafts.
     window.__puts = 0;
     const put = IDBObjectStore.prototype.put;
-    IDBObjectStore.prototype.put = function (...a) { window.__puts++; return put.apply(this, a); };
+    IDBObjectStore.prototype.put = function (...a) {
+      if (this.name === 'docs') window.__puts++;
+      if (this.name === 'drafts' && /^tifo_proj_l/.test(String(a[1]))) window.__writes.push({ k: String(a[1]), form: 'idb', at: performance.now(), inStroke: !!window.__tifo?.store?.inStroke, len: a[0]?.gz?.byteLength ?? 0 });
+      return put.apply(this, a);
+    };
   }, LS0);
   const p = await ctx.newPage();
   const errs2 = [];
@@ -189,14 +255,15 @@ const bowl = (p) => p.evaluate(() => { const b = window.__tifo.map.bounds; retur
 const renders = (p) => p.evaluate(() => window.__tifo.editor.rendersDrawn);
 const canvasShot = async (p) => { const r = await p.evaluate(() => { const b = document.querySelector('#canvas-host').getBoundingClientRect(); return { x: b.x, y: b.y, width: b.width, height: b.height }; }); return p.screenshot({ clip: r }); };
 const projId = (p) => p.evaluate(() => new URLSearchParams(location.search).get('local'));
-/** The stored draft's seats, decoded, and a fingerprint of them (as core/layers.ts makes it). */
-const storedCells = (p) => p.evaluate(() => {
-  const id = new URLSearchParams(location.search).get('local');
-  const d = JSON.parse(localStorage.getItem('tifo_proj_' + id) || 'null');
+/** The stored draft's seats, decoded. */
+const storedCells = async (p) => {
+  const id = await p.evaluate(() => new URLSearchParams(location.search).get('local'));
+  const r = await readDraft(p, 'tifo_proj_' + id);
+  const d = r?.json ? JSON.parse(r.json) : null;
   const rle = d?.doc?.layers?.[0]?.cellsRle; if (!rle) return null;
   const out = []; for (const [v, n] of rle) for (let k = 0; k < n; k++) out.push(v);
   return out.join(',');
-});
+};
 const liveCells = (p) => p.evaluate(() => Array.from(window.__tifo.store.cells).join(','));
 
 // ---------------------------------------------------------------------------
@@ -375,14 +442,23 @@ console.log('\n— autosave: only what changed, never mid-gesture —');
   await p.waitForTimeout(2500);
   const back = await snap();
   check('a change still waiting is written on leaving the page', back.cells === live.cells && back.palette === live.palette);
-  // A tab sent to the background writes at once too.
-  await p.evaluate(() => { window.__writes.length = 0; });
+  // A tab sent to the background writes at once too: here a palette edit,
+  // which schedules no autosave of its own (leaving is what writes it).
   await stroke(p, [m.x - 100, m.y + 10], [m.x + 100, m.y + 10]);
+  await p.waitForTimeout(2600);
+  await p.evaluate(() => { window.__writes.length = 0; });
+  await p.evaluate(() => { const s = window.__tifo.store; s.setPalette([...s.palette.slice(0, 3), '#654321', ...s.palette.slice(4)]); });
   await p.evaluate(() => {
     Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true });
     document.dispatchEvent(new Event('visibilitychange'));
   });
-  check('a hidden tab writes at once', (await draftWrites()).length === 1);
+  const hid = await draftWrites();
+  check('a hidden tab writes at once (synchronously, the old form)', hid.length >= 1 && hid[0].form === 'ls', JSON.stringify(hid.map((w) => w.form)));
+  await p.waitForTimeout(1500);
+  check('…and the compressed copy follows and replaces it', (await draftWrites()).some((w) => w.form === 'idb') && !(await readDraft(p, docKey)).old);
+  await p.evaluate(() => { window.__writes.length = 0; document.dispatchEvent(new Event('visibilitychange')); });
+  await p.waitForTimeout(800);
+  check('…and hidden again with nothing new, it writes nothing', (await draftWrites()).length === 0);
   await p.evaluate(() => { delete document.visibilityState; });
   // Save means a real write, every time.
   await p.evaluate(() => { window.__writes.length = 0; });
@@ -390,6 +466,168 @@ console.log('\n— autosave: only what changed, never mid-gesture —');
   await p.waitForTimeout(800);
   check('Save writes for real, even with nothing new', (await draftWrites()).length >= 1);
   check('no page errors in the autosave checks', e2.length === 0, e2.join(' | '));
+  await ctx.close();
+}
+
+// ---------------------------------------------------------------------------
+// The draft compressed in IndexedDB (performance plan P3.7): old drafts come
+// forward, damaged ones are no draft and never a crash, and a browser without
+// IndexedDB keeps working as before.
+console.log('\n— autosave: compressed, in IndexedDB —');
+{
+  const { ctx, p, errs: e2 } = await freshEditor();
+  const m = await bowl(p);
+  const id = await projId(p);
+  const key = 'tifo_proj_' + id;
+  await p.evaluate(() => { window.__tifo.editor.colorIndex = 2; });
+  await stroke(p, [m.x - 600, m.y], [m.x + 600, m.y + 30]);
+  await p.waitForTimeout(2600);
+  const r0 = await readDraft(p, key);
+  check('the draft is stored compressed in IndexedDB, with no copy in localStorage', r0?.form === 'idb' && !r0.old, `${r0?.form}, ${r0?.json?.length} characters in ${r0?.bytes} bytes`);
+  const live = await liveCells(p);
+  check('…and holds exactly the seats on screen', (await storedCells(p)) === live);
+  /** Reopen this project and say what came back. */
+  const reopen = async () => {
+    await p.goto(B + `/app?local=${id}&e2e=1`, { waitUntil: 'domcontentloaded' });
+    await p.waitForFunction(() => !!window.__tifo && /seats/.test(document.getElementById('stat')?.textContent || ''), null, { timeout: 90000 });
+    await p.waitForTimeout(1500);
+    return liveCells(p);
+  };
+  check('a reload restores the seats exactly', (await reopen()) === live);
+
+  // An old-form draft (from before, or written on the way out of a page) that
+  // is newer than the compressed one is read, brought forward, and only then
+  // removed from localStorage.
+  const older = await p.evaluate(async (k) => {
+    const d = JSON.parse(await new Promise((res) => {
+      const rq = indexedDB.open('tifo-drafts', 1);
+      rq.onsuccess = () => { const g = rq.result.transaction('drafts').objectStore('drafts').get(k); g.onsuccess = async () => { const t = await new Response(new Blob([g.result.gz]).stream().pipeThrough(new DecompressionStream('gzip'))).text(); rq.result.close(); res(t); }; };
+    }));
+    // Every seat the third colour, saved a minute later than the compressed copy.
+    const n = d.doc.layers[0].cellsRle.reduce((a, [, c]) => a + c, 0);
+    d.doc.layers[0].cellsRle = [[3, n]];
+    d.savedAt += 60_000;
+    localStorage.setItem(k, JSON.stringify(d));
+    return n;
+  }, key);
+  const migrated = await reopen();
+  const r1 = await readDraft(p, key);
+  check('a newer old-form draft is the one that opens', migrated === Array(older).fill(3).join(','));
+  check('…and is brought forward: compressed in IndexedDB, the old key removed', r1?.form === 'idb' && !r1.old && JSON.parse(r1.json).doc.layers[0].cellsRle[0][0] === 3);
+  // An old-form copy OLDER than the compressed one is superseded, not read.
+  await p.evaluate((k) => { const r = localStorage; const d = { v: 1, savedAt: 1000, templateId: 'x', templateVersion: 1, title: 'stale', designId: null, doc: { layers: [] } }; r.setItem(k, JSON.stringify(d)); }, key);
+  const kept = await reopen();
+  check('an older old-form copy is not read, and is removed', kept === migrated && !(await readDraft(p, key)).old);
+  check('no page errors bringing drafts forward', e2.length === 0, e2.join(' | '));
+
+  // Damaged records: no draft, never a crash, and the project still opens.
+  const plant = (kind) => p.evaluate(async ([k, kind]) => {
+    const gz = async (bytes) => new Uint8Array(await new Response(new Blob([bytes]).stream().pipeThrough(new CompressionStream('gzip'))).arrayBuffer());
+    let rec;
+    if (kind === 'corrupt') rec = { v: 2, savedAt: Date.now(), chars: 1000, gz: crypto.getRandomValues(new Uint8Array(4096)) };
+    if (kind === 'truncated') {
+      const good = await gz(new TextEncoder().encode(JSON.stringify({ v: 1, savedAt: Date.now(), doc: { layers: [] }, pad: 'x'.repeat(200000) })));
+      rec = { v: 2, savedAt: Date.now(), chars: 200050, gz: good.slice(0, good.length >> 1) };
+    }
+    // A small record that unpacks to 8 MB: reading stops at the cap.
+    if (kind === 'oversized') rec = { v: 2, savedAt: Date.now(), chars: 1_000_000, gz: await gz(new Uint8Array(8_000_000).fill(32)) };
+    if (kind === 'not-ours') rec = { hello: 'world' };
+    await new Promise((res) => { const rq = indexedDB.open('tifo-drafts', 1); rq.onsuccess = () => { const tx = rq.result.transaction('drafts', 'readwrite'); tx.objectStore('drafts').put(rec, k); tx.oncomplete = () => { rq.result.close(); res(); }; }; });
+    localStorage.removeItem(k);
+    return rec.gz?.byteLength ?? 0;
+  }, [key, kind]);
+  for (const kind of ['corrupt', 'truncated', 'oversized', 'not-ours']) {
+    const size = await plant(kind);
+    e2.length = 0;
+    const t0 = Date.now();
+    let opened = true;
+    try { await reopen(); } catch { opened = false; }
+    check(`a ${kind} stored draft is ignored: the project opens without it, and nothing breaks`, opened && e2.length === 0 && (await p.evaluate(() => window.__tifo.map.count > 0)), `${size} bytes stored; opened in ${Date.now() - t0} ms${e2.length ? ' | ' + e2.join(' | ') : ''}`);
+  }
+  // A gzip bomb (stage 3 security review): 1 GB of zeros in about 1 MB of
+  // gzip, inside the size a record may have. Reading it back must stop at the
+  // cap without unpacking the rest: handed to the decompressor in one piece it
+  // was unpacked whole first (+1 GB of renderer memory, and a tab killed on
+  // every open of the project with a record a little larger still).
+  {
+    const bomb = await new Promise((res, rej) => {
+      const z = createGzip({ level: 9 });
+      const parts = [];
+      z.on('data', (d) => parts.push(d));
+      z.on('end', () => res(Buffer.concat(parts)));
+      z.on('error', rej);
+      const zero = Buffer.alloc(1 << 20);
+      let n = 0;
+      const pump = () => { while (n < 1024) { n++; if (!z.write(zero)) { z.once('drain', pump); return; } } z.end(); };
+      pump();
+    });
+    await p.evaluate(async ([k, b64]) => {
+      const gz = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+      const rec = { v: 2, savedAt: Date.now(), chars: 1_000_000, gz };
+      await new Promise((res) => { const rq = indexedDB.open('tifo-drafts', 1); rq.onsuccess = () => { const tx = rq.result.transaction('drafts', 'readwrite'); tx.objectStore('drafts').put(rec, k); tx.oncomplete = () => { rq.result.close(); res(); }; }; });
+      localStorage.removeItem(k);
+    }, [key, bomb.toString('base64')]);
+    e2.length = 0;
+    const before = rendererMB();
+    let peak = before;
+    const sampler = setInterval(() => { peak = Math.max(peak, rendererMB()); }, 20);
+    const t0 = Date.now();
+    let opened = true;
+    try { await reopen(); } catch { opened = false; }
+    clearInterval(sampler);
+    const grew = Math.round(peak - before);
+    check(`a gzip bomb (${(bomb.length / 1024).toFixed(0)} KB stored, 1 GB unpacked) is ignored, and the project opens`, opened && e2.length === 0 && (await p.evaluate(() => window.__tifo.map.count > 0)), `opened in ${Date.now() - t0} ms${e2.length ? ' | ' + e2.join(' | ') : ''}`);
+    if (before > 0) check('…without unpacking it: the page\'s memory grows by far less than the bomb', grew < 400, `renderer memory ${Math.round(before)} → ${Math.round(peak)} MB at its peak (+${grew} MB)`);
+    else console.log('  (renderer memory not readable here: /proc is missing)');
+  }
+  // …and the next save writes a sound one over it.
+  await stroke(p, [m.x - 300, m.y], [m.x + 300, m.y]);
+  await p.waitForTimeout(2600);
+  const r2 = await readDraft(p, key);
+  check('after a damaged draft, the next save stores a sound one', r2?.form === 'idb' && !!r2.json && JSON.parse(r2.json).v === 1);
+
+  // A store that fails (not "no draft"): the project is not opened over its draft.
+  await p.addInitScript(() => {
+    if (sessionStorage.getItem('__idbFails') !== '1') return;
+    IDBFactory.prototype.open = function () { const rq = {}; setTimeout(() => { rq.error = { name: 'UnknownError' }; rq.onerror?.(); }, 0); return rq; };
+  });
+  await p.evaluate(() => sessionStorage.setItem('__idbFails', '1'));
+  await p.goto(B + `/app?local=${id}&e2e=1`, { waitUntil: 'domcontentloaded' });
+  const backToList = await p.waitForFunction(() => location.pathname === '/projects' && /could not be opened/.test(document.querySelector('.pj-toast')?.textContent || ''), null, { timeout: 60000 }).then(() => true).catch(() => false);
+  check('a store that cannot be read sends the project back to the list (and says so), not into an empty editor', backToList, p.url());
+  await p.evaluate(() => sessionStorage.removeItem('__idbFails'));
+  await p.goto(B + '/legal', { waitUntil: 'load' });
+  check('…and its draft is untouched', (await readDraft(p, key))?.json === r2.json);
+  await ctx.close();
+}
+{
+  // No IndexedDB at all (some private modes, blocked storage): as before, in localStorage.
+  const ctx = await browser.newContext({ viewport: { width: 1400, height: 900 } });
+  await ctx.addInitScript((ls) => {
+    try { for (const [k, v] of Object.entries(ls)) if (localStorage.getItem(k) === null) localStorage.setItem(k, v); } catch { /* */ }
+    Object.defineProperty(window, 'indexedDB', { value: undefined, configurable: true });
+  }, LS0);
+  const p = await ctx.newPage();
+  const e3 = [];
+  p.on('pageerror', (e) => e3.push(String(e.message).slice(0, 200)));
+  await p.goto(B + '/app?new=1&e2e=1', { waitUntil: 'domcontentloaded' });
+  await p.waitForFunction(() => !!window.__tifo && /seats/.test(document.getElementById('stat')?.textContent || ''), null, { timeout: 90000 });
+  await p.waitForTimeout(2000);
+  const m = await bowl(p);
+  await p.evaluate(() => { window.__tifo.editor.colorIndex = 2; });
+  await stroke(p, [m.x - 500, m.y], [m.x + 500, m.y]);
+  await p.waitForTimeout(2600);
+  const id = await projId(p);
+  const stored = await p.evaluate((k) => localStorage.getItem(k), 'tifo_proj_' + id);
+  check('without IndexedDB, the draft is kept in localStorage as before', !!stored && JSON.parse(stored).v === 1);
+  check('…and the editor says it is saved in this browser', /this browser/i.test(await p.evaluate(() => document.getElementById('save-state-top')?.textContent || document.getElementById('draft-state')?.textContent || '')));
+  const live = await liveCells(p);
+  // (The project's own address has no e2e flag, so it is named.)
+  await p.goto(B + `/app?local=${id}&e2e=1`, { waitUntil: 'domcontentloaded' });
+  await p.waitForFunction(() => !!window.__tifo && /seats/.test(document.getElementById('stat')?.textContent || ''), null, { timeout: 90000 });
+  await p.waitForTimeout(1500);
+  check('…and a reload restores it exactly', (await liveCells(p)) === live);
+  check('no page errors without IndexedDB', e3.length === 0, e3.join(' | '));
   await ctx.close();
 }
 

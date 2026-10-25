@@ -1,8 +1,9 @@
 import * as THREE from 'three';
 import type { StadiumTemplate, SeatMap } from '../../core/types';
-import { curveSampler, laneCut, laneLines, tierEdges, type LaneLine } from '../../core/venueDetails';
+import { curveSampler, laneCut, laneLines, tierEdges } from '../../core/venueDetails';
 import { edgesOn, sideOfU, spanGeometry } from '../../core/standSpans';
 import { screenPlacements } from '../../core/screens';
+import { runSync, type Steps } from './steps';
 
 /**
  * A real ground's details, drawn from its template (VenueDetails in types.ts):
@@ -214,6 +215,11 @@ export function ambulance(trash: Trash[]): THREE.Group {
 }
 
 export function buildVenueDetails(template: StadiumTemplate, map: SeatMap, shadows: boolean): VenueBuild {
+  return runSync(buildVenueDetailsSteps(template, map, shadows));
+}
+
+/** buildVenueDetails in steps: one a lane, a concourse, a band of boxes, then the screens (performance plan P3.6). */
+export function* buildVenueDetailsSteps(template: StadiumTemplate, map: SeatMap, shadows: boolean): Steps<VenueBuild> {
   const group = new THREE.Group();
   group.name = 'venue-details';
   const trash: Trash[] = [];
@@ -259,7 +265,7 @@ export function buildVenueDetails(template: StadiumTemplate, map: SeatMap, shado
   if (chev) trash.push(chev);
   if (sign) trash.push(sign);
   if (hatch) trash.push(hatch);
-  lanes.forEach((l: LaneLine, k) => {
+  for (const [k, l] of lanes.entries()) {
     const e = tierEdges(template, l.lane.tier);
     const cut = laneCut(template, l.lane);
     const w = l.lane.widthM;
@@ -433,7 +439,8 @@ export function buildVenueDetails(template: StadiumTemplate, map: SeatMap, shado
       lane.add(amb);
     }
     group.add(lane);
-  });
+    yield;
+  }
 
   // ---- between the tiers: concourse floor, soffit and back wall -----------
   // Under an overhanging tier there is a concourse: a floor, the underside of
@@ -469,6 +476,7 @@ export function buildVenueDetails(template: StadiumTemplate, map: SeatMap, shado
         group.add(m);
       }
     }
+    yield;
   }
 
   // ---- hospitality boxes ---------------------------------------------------
@@ -527,6 +535,7 @@ export function buildVenueDetails(template: StadiumTemplate, map: SeatMap, shado
         posts.push({ x: pm.x, y: (y0 + y1) / 2, z: pm.z, sx: 0.06, sy: y1 - y0, sz: 0.06, ry });
       }
     }
+    yield;
   }
   if (posts.length) {
     const postMesh = new THREE.InstancedMesh(unit, fasciaWhite, posts.length);
@@ -544,6 +553,7 @@ export function buildVenueDetails(template: StadiumTemplate, map: SeatMap, shado
     group.add(postMesh);
   }
 
+  yield;
   // ---- big screens --------------------------------------------------------
   // Every screen shows the same picture (one canvas, one texture): the ones on
   // the stands, the ones hung from the roof, a centre-hung board and the

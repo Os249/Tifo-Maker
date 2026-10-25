@@ -4199,8 +4199,9 @@ async function makeDesign(app: FastifyInstance, token: string, isPublic = false)
   writeFileSync(`${dist}/favicon.svg`, '<svg xmlns="http://www.w3.org/2000/svg"/>\n');
   writeFileSync(`${dist}/favicon.ico`, Buffer.alloc(32, 1));
   for (const f of ['apple-touch-icon.png', 'icon-512.png', 'og-card.png', 'og-default.png']) writeFileSync(`${dist}/${f}`, PNG);
-  writeFileSync(`${dist}/hero-stadium.webp`, Buffer.from('RIFF\0\0\0\0WEBPVP8 '));
-  writeFileSync(`${dist}/hero-stadium-640.webp`, Buffer.from('RIFF\0\0\0\0WEBPVP8 '));
+  mkdirSync(`${dist}/hero`, { recursive: true });
+  writeFileSync(`${dist}/hero/hilal.webp`, Buffer.from('RIFF\0\0\0\0WEBPVP8 '));
+  writeFileSync(`${dist}/hero/hilal-640.webp`, Buffer.from('RIFF\0\0\0\0WEBPVP8 '));
   writeFileSync(`${dist}/news/leagues-saudi.webp`, Buffer.from('RIFF\0\0\0\0WEBPVP8 '));
   writeFileSync(`${dist}/robots.txt`, 'User-agent: *\nDisallow: /api/\n');
   // A script outside /assets whose name never changes (theme-boot.js today).
@@ -4213,6 +4214,12 @@ async function makeDesign(app: FastifyInstance, token: string, isPublic = false)
     override async listPublic(q: Parameters<MemoryDesignRepository['listPublic']>[0]): ReturnType<MemoryDesignRepository['listPublic']> {
       if (this.failGallery) throw new Error('connection terminated');
       return super.listPublic(q);
+    }
+    // The feed reads its pages through listPublicPage since P3.4: the same
+    // failure, so the 500 below still comes from /api/gallery.
+    override async listPublicPage(q: Parameters<MemoryDesignRepository['listPublicPage']>[0]): ReturnType<MemoryDesignRepository['listPublicPage']> {
+      if (this.failGallery) throw new Error('connection terminated');
+      return super.listPublicPage(q);
     }
   }
   let ipSeq = 0;
@@ -4234,7 +4241,10 @@ async function makeDesign(app: FastifyInstance, token: string, isPublic = false)
   // routes. A change to any of them fails here; a deliberate tightening
   // updates this table in the same commit, and nothing may ever loosen it.
   {
-    const CSP = "default-src 'self';script-src 'self' 'unsafe-eval';style-src 'self' 'unsafe-inline';font-src 'self';img-src 'self' data:;connect-src 'self';object-src 'none';frame-ancestors 'none';base-uri 'self';form-action 'self';script-src-attr 'none';upgrade-insecure-requests";
+    // script-src lost 'unsafe-eval' in stage 3 (performance plan P3.1): the
+    // editor runs Pixi's eval-free code. The block at the end of this file
+    // fails if it, or anything looser, ever comes back.
+    const CSP = "default-src 'self';script-src 'self';style-src 'self' 'unsafe-inline';font-src 'self';img-src 'self' data:;connect-src 'self';object-src 'none';frame-ancestors 'none';base-uri 'self';form-action 'self';script-src-attr 'none';upgrade-insecure-requests";
     const PINNED: Record<string, string> = {
       'content-security-policy': CSP,
       'cross-origin-opener-policy': 'same-origin',
@@ -4260,7 +4270,7 @@ async function makeDesign(app: FastifyInstance, token: string, isPublic = false)
       }
       for (const h of NEVER) assert.equal(r.headers[h], undefined, `${label}: no ${h}`);
       const d = directivesOf(String(r.headers['content-security-policy'] ?? ''));
-      assert.deepEqual(d.get('script-src'), ["'self'", "'unsafe-eval'"], `${label}: script-src is exactly 'self' 'unsafe-eval'`);
+      assert.deepEqual(d.get('script-src'), ["'self'"], `${label}: script-src is exactly 'self'`);
       check(!d.has('worker-src') || d.get('worker-src')!.join(' ') === "'self'", `${label}: workers only from this origin`);
       check((d.get('img-src') ?? []).every((s) => s === "'self'" || s === 'data:'), `${label}: img-src is 'self' and data: at most`);
       assert.deepEqual(d.get('connect-src'), ["'self'"], `${label}: connect-src 'self'`);
@@ -4351,7 +4361,7 @@ async function makeDesign(app: FastifyInstance, token: string, isPublic = false)
       { label: 'favicon ico', status: 200, url: '/favicon.ico' },
       { label: 'robots', status: 200, url: '/robots.txt' },
       { label: 'site card', status: 200, url: '/og-card.png' },
-      { label: 'hero picture', status: 200, url: '/hero-stadium.webp' },
+      { label: 'hero picture', status: 200, url: '/hero/hilal.webp' },
       { label: 'news picture', status: 200, url: '/news/leagues-saudi.webp' },
       // Pictures served by routes.
       { label: 'thumbnail', status: 200, url: `/api/designs/${pub}/thumbnail.png` },
@@ -5085,6 +5095,8 @@ async function makeDesign(app: FastifyInstance, token: string, isPublic = false)
       override async listByOwner(id: string) { this.boom('list'); return super.listByOwner(id); }
       override async deleteByOwner(id: string) { this.boom('erase'); return super.deleteByOwner(id); }
       override async listPublic(q: Parameters<MemoryDesignRepository['listPublic']>[0]) { this.boom('gallery'); return super.listPublic(q); }
+      // The feed reads its pages through listPublicPage since P3.4.
+      override async listPublicPage(q: Parameters<MemoryDesignRepository['listPublicPage']>[0]) { this.boom('gallery'); return super.listPublicPage(q); }
     }
     const auth = new MemoryAuthRepository();
     const designs = new Flaky((id) => auth.usernameOf(id));
@@ -5264,7 +5276,7 @@ async function makeDesign(app: FastifyInstance, token: string, isPublic = false)
     const HOUR = 'public, max-age=3600, stale-while-revalidate=86400';
     const expect: [string, string][] = [
       ['/favicon.svg', HOUR], ['/favicon.ico', HOUR], ['/apple-touch-icon.png', HOUR], ['/icon-512.png', HOUR],
-      ['/og-card.png', HOUR], ['/og-default.png', HOUR], ['/hero-stadium.webp', HOUR], ['/hero-stadium-640.webp', HOUR], ['/news/leagues-saudi.webp', HOUR], ['/robots.txt', HOUR],
+      ['/og-card.png', HOUR], ['/og-default.png', HOUR], ['/hero/hilal.webp', HOUR], ['/hero/hilal-640.webp', HOUR], ['/news/leagues-saudi.webp', HOUR], ['/robots.txt', HOUR],
       ['/assets/index-Ab12Cd34.js', 'public, max-age=31536000, immutable'], [WORKER, 'public, max-age=31536000, immutable'],
       // A page and an unhashed script are never kept.
       ['/boot-script.js', 'public, max-age=0'], ['/verify-site.html', 'public, max-age=0'], ['/landing.html', 'public, max-age=0'], ['/index.html', 'public, max-age=0'],
@@ -7440,4 +7452,1280 @@ async function makeDesign(app: FastifyInstance, token: string, isPublic = false)
     }
   }
   console.log('performance plan stage 2 (server), the review\'s second pass: all assertions passed');
+}
+
+// ---------- 2026-10: performance plan, stage 3 (pages): the Arabic pages under /ar/ (P3.3) ----------
+// Every page whose words exist in Arabic now has a twin at /ar/<its path>,
+// built from the same source (scripts/vite/arabicPages.ts) and registered by
+// the same code (routes.ts, pageLang.ts). A twin is its English page in a
+// second language and nothing else: the same checks, the same headers, the
+// same caching, the same limits, and never anything the English page refuses.
+// So the P0.1 pin and the P0.2 matrix are carried over to every /ar/ address
+// here: as parity with the English answer, which the P0.1 block pins byte for
+// byte (a deliberate change there, such as the CSP losing 'unsafe-eval', needs
+// no change here), and as the rules that hold whatever the exact header says.
+{
+  const { mkdtempSync, writeFileSync, mkdirSync, readFileSync, readdirSync: listDir, existsSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { renderPage } = await import('../../scripts/vite/arabicPages');
+  const { inLang, englishPath, hasTwin } = await import('../../src/core/langPath');
+  const { MemoryDailyFeatureRepository } = await import('../src/featureRepo');
+  const check = (cond: unknown, msg: string): void => assert.ok(cond, msg);
+  const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64');
+  const NO_SUCH = '7f000000-0000-4000-8000-0000000000ef';
+  const mailStub = { send: async () => {} } as never;
+  const S3PW = 'ember-quarry-violet8';
+  let ipSeq = 0;
+  const freshIp = (): string => `198.19.${(ipSeq >> 8) & 255}.${ipSeq++ & 255}`;
+  const reg3 = async (app: FastifyInstance, u: string, adminPassword?: string): Promise<{ token: string; id: string }> => {
+    const ip = freshIp();
+    const r = await app.inject({ method: 'POST', url: '/api/auth/register', remoteAddress: ip, payload: { username: u, password: S3PW, email: `${u}@example.test`, acceptedVersion: 'test', adminPassword } });
+    assert.equal(r.statusCode, 201, r.body);
+    const token = (r.json() as { token: string }).token;
+    return { token, id: ((await app.inject({ method: 'GET', url: '/api/me', remoteAddress: ip, headers: bearer(token) })).json() as { id: string }).id };
+  };
+  type Res = Awaited<ReturnType<FastifyInstance['inject']>>;
+
+  // A build output in both languages: the source pages, and their Arabic twins
+  // made from them by the build's own renderer, the English ones marked as the
+  // build marks them.
+  const TWINNED = ['landing', 'index', 'community', 'seat', 'clubs', 'share', 'legal', 'reset', 'account', 'projects'].map((n) => `${n}.html`);
+  const dist = mkdtempSync(`${tmpdir()}/tifo-perf-s3-`);
+  mkdirSync(`${dist}/ar`);
+  mkdirSync(`${dist}/assets`);
+  for (const f of listDir('.').filter((n) => n.endsWith('.html'))) {
+    const src = readFileSync(f, 'utf8');
+    writeFileSync(`${dist}/${f}`, TWINNED.includes(f) ? renderPage(src, 'en') : src);
+    if (TWINNED.includes(f)) writeFileSync(`${dist}/ar/${f}`, renderPage(src, 'ar'));
+  }
+  writeFileSync(`${dist}/assets/index-Ab12Cd34.js`, 'export {};\n');
+  for (const f of ['og-card.png', 'og-default.png']) writeFileSync(`${dist}/${f}`, PNG);
+  writeFileSync(`${dist}/robots.txt`, 'User-agent: *\nDisallow: /api/\n');
+
+  /** The headers P0.1 pins, and the ones that would each loosen something if they appeared. */
+  const PINNED = ['content-security-policy', 'cross-origin-opener-policy', 'cross-origin-resource-policy', 'origin-agent-cluster', 'referrer-policy', 'strict-transport-security', 'x-content-type-options', 'x-dns-prefetch-control', 'x-download-options', 'x-frame-options', 'x-permitted-cross-domain-policies', 'x-xss-protection'];
+  const NEVER = ['x-powered-by', 'content-security-policy-report-only', 'access-control-allow-origin', 'access-control-allow-credentials', 'cross-origin-embedder-policy', 'set-cookie'];
+  /** Everything about how an answer may be kept or read, which a twin must share. */
+  const SAME = [...PINNED, 'cache-control', 'content-type', 'vary', 'content-disposition'];
+  const scriptRules = (r: Res, label: string): void => {
+    const d = new Map(String(r.headers['content-security-policy'] ?? '').split(';').map((x) => x.trim()).filter(Boolean).map((x) => { const [k, ...v] = x.split(/\s+/); return [k!, v]; }));
+    for (const [k, v] of d) {
+      if (!k.startsWith('script') && k !== 'default-src' && k !== 'worker-src') continue;
+      check(v.every((s) => !/unsafe-inline|^blob:|^data:|^https?:|^'nonce-|^'sha(256|384|512)-|^\*$/.test(s)), `${label}: ${k} allows no inline, blob:, data:, remote host, nonce or hash`);
+    }
+    assert.deepEqual(d.get('script-src-attr'), ["'none'"], `${label}: no inline handlers`);
+  };
+  /** An /ar/ answer against its English twin's: the same in everything but the words. */
+  const twins = (en: Res, ar: Res, label: string): void => {
+    assert.equal(ar.statusCode, en.statusCode, `${label}: the Arabic twin answers ${ar.statusCode}, the English page ${en.statusCode}`);
+    for (const h of SAME) assert.equal(ar.headers[h], en.headers[h], `${label}: ${h} is the English page's (${String(ar.headers[h])} vs ${String(en.headers[h])})`);
+    for (const h of NEVER) assert.equal(ar.headers[h], undefined, `${label}: no ${h}`);
+    assert.equal(!!ar.headers.etag, !!en.headers.etag, `${label}: an ETag exactly where the English page has one`);
+    scriptRules(ar, label);
+    assert.equal(!!ar.headers.location, !!en.headers.location, `${label}: a redirect exactly where the English page redirects`);
+    if (en.headers.location) {
+      const want = inLang(String(en.headers.location), 'ar');
+      assert.equal(ar.headers.location, want, `${label}: and its redirect goes to the twin of the English one's target (${String(ar.headers.location)})`);
+    }
+  };
+  const inlineScript = (body: string): boolean => /<script(?![^>]*\bsrc=)[^>]*>\s*\S/i.test(body);
+  const offOrigin = (body: string): string[] => [...body.matchAll(/<script\b[^>]*\bsrc="([^"]*)"/gi)].map((m) => m[1]!).filter((s) => !s.startsWith('/') || s.startsWith('//'));
+
+  // ---- P0.1 for the twins: the same headers on every answer, 3xx, 304 and 429 included ----
+  {
+    const auth = new MemoryAuthRepository();
+    const designs = new MemoryDesignRepository((id) => auth.usernameOf(id));
+    const app = await buildApp(designs, auth, templates, {
+      staticDir: dist, rateLimit: true, social: new MemorySocialRepository(designs, auth), featured: new MemoryDailyFeatureRepository(),
+      leads: new MemoryLeadsRepository(), adminUsernames: ['mod_s3'], aiAdminPassword: 'stage three admin password', emailSender: mailStub,
+      oauth: { google: { id: 'client-id', secret: 'client-secret' } },
+    });
+    const owner = await reg3(app, 'owner_s3');
+    await auth.markEmailVerified(owner.id);
+    const mk = async (title: string, pub: boolean): Promise<string> => {
+      const r = await app.inject({ method: 'POST', url: '/api/designs', remoteAddress: freshIp(), headers: bearer(owner.token), payload: { title, templateId: DEFAULT_TEMPLATE.id, templateVersion: 1, palette: PALETTE, cellsGzB64, thumbnailPngB64: PNG.toString('base64') } });
+      assert.equal(r.statusCode, 201, r.body);
+      const id = (r.json() as { id: string }).id;
+      if (pub) assert.equal((await app.inject({ method: 'PATCH', url: `/api/designs/${id}`, remoteAddress: freshIp(), headers: bearer(owner.token), payload: { isPublic: true } })).statusCode, 200);
+      return id;
+    };
+    const pub = await mk('Twin headers public', true);
+    const priv = await mk('Twin headers private', false);
+    const pages = [
+      '/', '/community', '/clubs', '/legal', '/reset', '/reset?token=abc', '/account', '/projects',
+      '/app', '/app?utm_source=x&utm_medium=y', `/app?design=${pub}`, '/app?new=1', '/app?signedin=google',
+      `/t/${pub}`, `/t/${priv}`, `/t/${NO_SUCH}`, `/d/${pub}`, `/d/${priv}`, `/s/${pub}`, `/s/${NO_SUCH}`,
+    ];
+    let n = 0;
+    for (const url of pages) {
+      for (const method of ['GET', 'HEAD'] as const) {
+        const en = await app.inject({ method, url, remoteAddress: freshIp() });
+        const ar = await app.inject({ method, url: inLang(url, 'ar')!, remoteAddress: freshIp() });
+        check(en.statusCode < 400, `${method} ${url} answers (${en.statusCode})`);
+        twins(en, ar, `${method} ${inLang(url, 'ar')}`);
+        if (method === 'GET' && en.statusCode === 200) {
+          check(String(ar.headers['content-type']).includes('charset=utf-8'), `${url}: the Arabic page says its encoding`);
+          check(/<html[^>]*\blang="ar"[^>]*\bdir="rtl"/.test(ar.body), `${inLang(url, 'ar')}: lang="ar" dir="rtl" from the first byte`);
+          check(!inlineScript(ar.body) && offOrigin(ar.body).length === 0, `${inLang(url, 'ar')}: no inline script and none from another origin`);
+          if (ar.headers.etag) check(ar.headers.etag !== en.headers.etag, `${url}: the two languages are different bytes with different ETags`);
+        }
+        n++;
+      }
+    }
+    // The landing at /ar is /ar/, by a redirect that can only stay on this site.
+    for (const [url, want] of [['/ar', '/ar/'], ['/ar?utm_source=x', '/ar/?utm_source=x'], ['/ar?next=//evil.example/x', '/ar/?next=//evil.example/x']]) {
+      const r = await app.inject({ method: 'GET', url, remoteAddress: freshIp() });
+      assert.equal(r.statusCode, 301, `${url} is a redirect`);
+      assert.equal(r.headers.location, want, `${url} goes to ${want}, a path on this site`);
+      check(String(r.headers['cache-control']).includes('no-cache'), `${url}: revalidated like every page`);
+      for (const h of NEVER) assert.equal(r.headers[h], undefined, `${url}: no ${h}`);
+      n++;
+    }
+    // 304s: the kept shells, in Arabic, revalidate with their own ETag and the same headers.
+    for (const url of ['/clubs', '/legal', `/app?design=${pub}`]) {
+      const ip = freshIp();
+      const enFirst = await app.inject({ method: 'GET', url, remoteAddress: ip });
+      const enAgain = await app.inject({ method: 'GET', url, remoteAddress: ip, headers: { 'if-none-match': String(enFirst.headers.etag) } });
+      const arUrl = inLang(url, 'ar')!;
+      const arFirst = await app.inject({ method: 'GET', url: arUrl, remoteAddress: ip });
+      const arAgain = await app.inject({ method: 'GET', url: arUrl, remoteAddress: ip, headers: { 'if-none-match': String(arFirst.headers.etag) } });
+      assert.equal(arAgain.statusCode, 304, `${arUrl} revalidates`);
+      twins(enAgain, arAgain, `${arUrl} 304`);
+      const cross = await app.inject({ method: 'GET', url: arUrl, remoteAddress: ip, headers: { 'if-none-match': String(enFirst.headers.etag) } });
+      assert.equal(cross.statusCode, 200, `${arUrl}: the English page's ETag is not the Arabic page's`);
+      n++;
+    }
+    // 429: one client, one budget, whichever language it reads; and probes under /ar/ are counted too.
+    {
+      const ip = freshIp();
+      let last: Res | null = null;
+      for (let i = 0; i < 300; i++) last = await app.inject({ method: 'GET', url: i % 2 ? '/ar/clubs' : '/clubs', remoteAddress: ip });
+      assert.equal(last!.statusCode, 200, 'the 300th page in a minute is answered');
+      const arOver = await app.inject({ method: 'GET', url: '/ar/clubs', remoteAddress: ip });
+      const enOver = await app.inject({ method: 'GET', url: '/clubs', remoteAddress: ip });
+      assert.equal(arOver.statusCode, 429, 'the 301st, in Arabic, is refused: English and Arabic pages share the 300');
+      twins(enOver, arOver, '/ar/clubs 429');
+      const probe = await app.inject({ method: 'GET', url: '/ar/nope', remoteAddress: ip });
+      assert.equal(probe.statusCode, 429, 'and so is a probe under /ar/');
+      const ip2 = freshIp();
+      for (let i = 0; i < 300; i++) await app.inject({ method: 'GET', url: '/ar/', remoteAddress: ip2 });
+      assert.equal((await app.inject({ method: 'GET', url: '/api/templates', remoteAddress: ip2 })).statusCode, 429, 'Arabic pages count in the general 300, not the assets bucket');
+      // The sitemap lists both languages now, so it has a limit of its own.
+      const ip3 = freshIp();
+      for (let i = 0; i < 10; i++) assert.equal((await app.inject({ method: 'GET', url: '/sitemap.xml', remoteAddress: ip3 })).statusCode, 200, `sitemap ${i + 1} of 10 in a minute`);
+      const sm = await app.inject({ method: 'GET', url: '/sitemap.xml', remoteAddress: ip3 });
+      assert.equal(sm.statusCode, 429, 'the 11th sitemap in a minute from one client is refused');
+      for (const h of PINNED) check(sm.headers[h] === enOver.headers[h], `sitemap 429: ${h}`);
+      assert.equal((await app.inject({ method: 'GET', url: '/ar/clubs', remoteAddress: ip3 })).statusCode, 200, 'and the pages are still that client\'s to read');
+      assert.equal((await app.inject({ method: 'GET', url: '/sitemap.xml', remoteAddress: freshIp() })).statusCode, 200, 'and other clients still get the sitemap');
+      n += 5;
+    }
+    await app.close();
+    console.log(`  P3.3 header pin: ${n} Arabic answers carry exactly their English twins' headers (pages, HEAD, redirects, 304, 429)`);
+  }
+
+  // ---- P0.2 for the twins: who may cache what, for every kind of design and caller ----
+  {
+    const auth = new MemoryAuthRepository();
+    const designs = new MemoryDesignRepository((id) => auth.usernameOf(id));
+    const app = await buildApp(designs, auth, templates, {
+      staticDir: dist, social: new MemorySocialRepository(designs, auth), featured: new MemoryDailyFeatureRepository(),
+      adminUsernames: ['mod_m3'], aiAdminPassword: 'matrix three admin password', emailSender: mailStub,
+    });
+    const owner = await reg3(app, 'owner_m3');
+    const other = await reg3(app, 'other_m3');
+    const mod = await reg3(app, 'mod_m3', 'matrix three admin password');
+    await auth.markEmailVerified(owner.id);
+    type Kind = 'public' | 'private' | 'taken down' | 'trashed' | 'ownerless private' | 'ownerless public';
+    const ids = new Map<Kind, { id: string; title: string }>();
+    for (const kind of ['public', 'private', 'taken down', 'trashed', 'ownerless private', 'ownerless public'] as Kind[]) {
+      const title = `Twin ${kind} ${Math.random().toString(36).slice(2, 7)}`;
+      if (kind.startsWith('ownerless')) {
+        const m = await designs.create({ title, templateId: DEFAULT_TEMPLATE.id, templateVersion: 1, palette: PALETTE, cellsGz: gzipSync(new Uint8Array(map.count)), ownerId: null as unknown as string, thumbnailPng: PNG });
+        if (kind === 'ownerless public') await designs.patchMeta(m.id, { isPublic: true });
+        ids.set(kind, { id: m.id, title });
+        continue;
+      }
+      const ownH = bearer(owner.token);
+      const r = await app.inject({ method: 'POST', url: '/api/designs', headers: ownH, payload: { title, templateId: DEFAULT_TEMPLATE.id, templateVersion: 1, palette: PALETTE, cellsGzB64, thumbnailPngB64: PNG.toString('base64') } });
+      const id = (r.json() as { id: string }).id;
+      if (kind !== 'private') assert.equal((await app.inject({ method: 'PATCH', url: `/api/designs/${id}`, headers: ownH, payload: { isPublic: true } })).statusCode, 200);
+      if (kind === 'taken down') assert.equal((await app.inject({ method: 'POST', url: `/api/admin/designs/${id}/takedown`, headers: bearer(mod.token) })).statusCode, 200);
+      if (kind === 'trashed') assert.equal((await app.inject({ method: 'DELETE', url: `/api/designs/${id}`, headers: ownH })).statusCode, 200);
+      ids.set(kind, { id, title });
+    }
+    const isPublicKind = (k: Kind): boolean => k === 'public' || k === 'ownerless public';
+    const callers: [string, Record<string, string> | undefined][] = [['anon', undefined], ['other', bearer(other.token)], ['owner', bearer(owner.token)], ['moderator', bearer(mod.token)]];
+    let checked = 0;
+    for (const [kind, d] of ids) {
+      for (const url of [`/t/${d.id}`, `/d/${d.id}`, `/s/${d.id}`]) {
+        const arUrl = inLang(url, 'ar')!;
+        const anonAr = (await app.inject({ method: 'GET', url: arUrl })).rawPayload;
+        for (const [who, headers] of callers) {
+          const en = await app.inject({ method: 'GET', url, headers });
+          const ar = await app.inject({ method: 'GET', url: arUrl, headers });
+          const label = `${kind} design, ${who}: GET ${arUrl} (${ar.statusCode})`;
+          twins(en, ar, label);
+          const cc = String(ar.headers['cache-control'] ?? '');
+          check(cc, `${label} says how it may be cached`);
+          check(!/\bpublic\b/.test(cc), `${label}: a page is never public`);
+          check(Buffer.compare(ar.rawPayload, anonAr) === 0, `${label}: the same page for every caller`);
+          if (!isPublicKind(kind)) {
+            assert.equal(cc, 'no-cache', `${label}: a page about a design that is not public is generic and revalidated`);
+            check(!ar.body.includes(d.title), `${label}: and does not name it`);
+          } else if (url.startsWith('/t/')) {
+            check(ar.body.includes(d.title), `${label}: a public design's page names it`);
+          }
+          const again = await app.inject({ method: 'GET', url: arUrl, headers: { ...headers, 'if-none-match': String(ar.headers.etag ?? '"x"') } });
+          assert.notEqual(again.statusCode, 304, `${label}: never a 304 for a page that reads the database`);
+          checked += 2;
+        }
+      }
+    }
+    // The lists: never a design that is not public, in either language, whoever asks.
+    const hidden = [...ids].filter(([k]) => !isPublicKind(k)).map(([, d]) => d);
+    const shown = [...ids].filter(([k]) => isPublicKind(k)).map(([, d]) => d);
+    for (const url of ['/', '/community', '/ar/', '/ar/community', '/sitemap.xml']) {
+      for (const [who, headers] of callers) {
+        const r = await app.inject({ method: 'GET', url, headers });
+        assert.equal(r.statusCode, 200, `${url} as ${who}`);
+        check(r.headers['cache-control'], `${url} as ${who} says how it may be cached`);
+        for (const h of hidden) check(!r.body.includes(h.id) && !r.body.includes(h.title), `${url} as ${who} does not list a design that is not public`);
+        checked++;
+      }
+    }
+    const sitemap = (await app.inject({ method: 'GET', url: '/sitemap.xml' })).body;
+    for (const d of shown) {
+      check(sitemap.includes(`/t/${d.id}</loc>`) && sitemap.includes(`/ar/t/${d.id}</loc>`), 'the sitemap lists a public design in both languages');
+      check(sitemap.includes(`hreflang="ar" href="https://tifomaker.org/ar/t/${d.id}"`) || sitemap.includes(`/ar/t/${d.id}"/>`), 'with its hreflang links');
+    }
+    // A takedown is seen by the next Arabic visitor at once: nothing kept it.
+    const live = ids.get('public')!;
+    const before = await app.inject({ method: 'GET', url: `/ar/t/${live.id}` });
+    check(before.body.includes(live.title), 'the Arabic page names the public design');
+    assert.equal((await app.inject({ method: 'POST', url: `/api/admin/designs/${live.id}/takedown`, headers: bearer(mod.token) })).statusCode, 200);
+    for (const url of [`/ar/t/${live.id}`, `/ar/d/${live.id}`, '/ar/community', '/ar/']) {
+      check(!(await app.inject({ method: 'GET', url })).body.includes(live.title), `${url}: the next request after a takedown no longer names it`);
+    }
+    // Every refusal under /ar/ says how it may be cached, with the pinned headers,
+    // and nothing the English site refuses is reachable through /ar/.
+    const englishNope = await app.inject({ method: 'GET', url: '/nope' });
+    for (const url of ['/ar/nope', '/ar/admin', '/ar/admin.js', '/ar/admin-unlock.js', '/ar/api/me', '/ar/api/designs', `/ar/api/designs/${hidden[0]!.id}`, `/ar/og/t/${live.id}.png`,
+                       '/ar/health', '/ar/tifo-spec', '/ar//evil.example', '/ar/%2F%2Fevil.example', '/ar/t/x/y', '/ar/sitemap.xml', '/ar/robots.txt', '/ar/assets/index-Ab12Cd34.js', '/ar/ar/', '/ar/ar/community', '/AR/community']) {
+      for (const method of ['GET', 'HEAD', 'POST'] as const) {
+        const r = await app.inject({ method, url, payload: method === 'POST' ? {} : undefined });
+        assert.equal(r.statusCode, 404, `${method} ${url} is not a page (${r.statusCode})`);
+        check(/no-store|no-cache/.test(String(r.headers['cache-control'] ?? '')), `${method} ${url} 404 says how it may be cached`);
+        for (const h of PINNED) assert.equal(r.headers[h], englishNope.headers[h], `${method} ${url} 404: ${h}`);
+        check(!r.headers.location, `${method} ${url}: and sends nobody anywhere`);
+        checked++;
+      }
+    }
+    for (const url of ['/ar/', '/ar/community', '/ar/clubs']) {
+      for (const method of ['POST', 'PUT', 'DELETE'] as const) {
+        const r = await app.inject({ method, url, payload: {} });
+        check(r.statusCode === 404, `${method} ${url}: a page takes GET and HEAD only (${r.statusCode})`);
+        checked++;
+      }
+    }
+    await app.close();
+    console.log(`  P3.3 cache matrix: ${checked} answers checked (6 kinds of design x 4 callers x /ar/t, /ar/d, /ar/s against their English twins, the lists in both languages, a takedown, and every refusal under /ar/)`);
+  }
+
+  // ---- the language is the path, and only the path ----
+  {
+    const auth = new MemoryAuthRepository();
+    const designs = new MemoryDesignRepository((id) => auth.usernameOf(id));
+    const routes: { method: string | string[]; url: string; config?: unknown }[] = [];
+    const build = (publicUrl?: string) => buildApp(designs, auth, templates, {
+      staticDir: dist, social: new MemorySocialRepository(designs, auth), featured: new MemoryDailyFeatureRepository(), emailSender: mailStub,
+      ...(publicUrl ? { publicUrl } : { onRoute: (r: { method: string | string[]; url: string; config?: unknown }) => routes.push(r) }),
+    });
+    const app = await build();
+    const pinnedApp = await build('https://tifomaker.org');
+    const u = await reg3(app, 'path_s3');
+    const d = await app.inject({ method: 'POST', url: '/api/designs', headers: bearer(u.token), payload: { title: 'Path only', templateId: DEFAULT_TEMPLATE.id, templateVersion: 1, palette: PALETTE, cellsGzB64 } });
+    const id = (d.json() as { id: string }).id;
+    await app.inject({ method: 'PATCH', url: `/api/designs/${id}`, headers: bearer(u.token), payload: { isPublic: true } });
+    await pinnedApp.inject({ method: 'GET', url: '/' });
+    // The home page is one of a few fixed pages, one per hero club, picked at
+    // random on each visit (server/src/landingHero.ts); every other page is one
+    // fixed page. So "the page without it" is every page the address gives with
+    // no header at all, collected first, and an answer to a request with a
+    // header must be byte for byte one of them. The home page may be no more
+    // pages than it has hero clubs, and any other page must be exactly one.
+    const pagesWithout = async (a: FastifyInstance, path: string): Promise<Buffer[]> => {
+      const out: Buffer[] = [];
+      const home = englishPath(path.split('?')[0]!) === '/';
+      for (let i = 0; i < (home ? 150 : 3); i++) {
+        const r = await a.inject({ method: 'GET', url: path });
+        if (!out.some((b) => Buffer.compare(b, r.rawPayload) === 0)) out.push(r.rawPayload);
+      }
+      if (home) {
+        const clubs = (out[0]!.toString().match(/<button type="button" class="hero-club(?: on)?" data-club=/g) ?? []).length;
+        check(clubs >= 2 && out.length >= 2 && out.length <= clubs, `${path}: one page per hero club (${out.length} pages, ${clubs} clubs)`);
+      } else {
+        check(out.length === 1, `${path}: the page is the same on every visit (${out.length})`);
+      }
+      return out;
+    };
+    const oneOf = (r: Res, pages: Buffer[]): boolean => pages.some((p) => Buffer.compare(r.rawPayload, p) === 0);
+    let n = 0;
+    const variants: [string, Record<string, string>][] = [
+      ['a bearer token', bearer(u.token)],
+      ['a cookie naming a language', { cookie: 'tifo_lang_v1=ar; tifo_lang=ar; lang=ar' }],
+      ['Accept-Language: ar', { 'accept-language': 'ar-SA,ar;q=0.9' }],
+      ['Accept-Language: en', { 'accept-language': 'en-US,en;q=0.9' }],
+      ['X-Forwarded-Host', { 'x-forwarded-host': 'evil.example' }],
+    ];
+    for (const url of ['/', '/community', '/clubs', '/legal', '/reset', '/account', '/projects', `/app?design=${id}`, `/t/${id}`, `/d/${id}`, `/s/${id}`]) {
+      for (const lang of ['en', 'ar'] as const) {
+        const path = inLang(url, lang)!;
+        let pinnedPages: Buffer[] = [];
+        for (const a of [app, pinnedApp]) {
+          const plain = await a.inject({ method: 'GET', url: path });
+          check(!plain.headers.vary || !/cookie|accept-language|authorization/i.test(String(plain.headers.vary)), `${path}: the page does not vary on a cookie, a language header or a token`);
+          check(!plain.headers['set-cookie'], `${path}: and sets no cookie`);
+          const pages = await pagesWithout(a, path);
+          if (a === pinnedApp) pinnedPages = pages;
+          for (const [what, headers] of variants) {
+            const r = await a.inject({ method: 'GET', url: path, headers });
+            check(oneOf(r, pages), `${path} with ${what} is byte for byte the page without it`);
+            n++;
+          }
+        }
+        // A forged Host: never written into the page; with PUBLIC_URL, nothing about the page changes.
+        const forged = await app.inject({ method: 'GET', url: path, headers: { host: 'evil.example' } });
+        check(!forged.body.includes('evil.example'), `${path}: a forged Host is never written into the page`);
+        const pinnedPlain = await pinnedApp.inject({ method: 'GET', url: path });
+        const pinnedForged = await pinnedApp.inject({ method: 'GET', url: path, headers: { host: 'evil.example:8443' } });
+        check(oneOf(pinnedForged, pinnedPages), `${path}: with PUBLIC_URL set, a forged Host changes nothing`);
+        // Canonical, hreflang: absolute, on this site, naming both versions.
+        if (!['/reset', '/account', '/projects'].includes(url)) {
+          const canonical = /<link rel="canonical" href="([^"]+)"/.exec(pinnedPlain.body)?.[1] ?? '';
+          const want = `https://tifomaker.org${inLang(url.startsWith('/d/') ? url.replace('/d/', '/t/') : url.split('?')[0]!, lang)}`;
+          assert.equal(canonical, want, `${path}: canonical is ${want}`);
+        }
+        const alts = Object.fromEntries([...pinnedPlain.body.matchAll(/<link rel="alternate" hreflang="([^"]+)" href="([^"]+)"/g)].map((m) => [m[1], m[2]]));
+        const base = englishPath(path.split('?')[0]!).replace(/^\/d\//, '/t/');
+        assert.deepEqual(alts, { en: `https://tifomaker.org${base}`, ar: `https://tifomaker.org${inLang(base, 'ar')}`, 'x-default': `https://tifomaker.org${base}` }, `${path}: hreflang en, ar and x-default`);
+        n += 3;
+      }
+    }
+    // Every Arabic route is an English route's twin with the same options
+    // (its own limits included), and every English page with a twin has one.
+    const gets = routes.filter((r) => [r.method].flat().includes('GET')).map((r) => r.url);
+    const arabic = gets.filter((u) => u === '/ar' || u.startsWith('/ar/'));
+    for (const ar of arabic) {
+      if (ar === '/ar') continue;
+      const en = englishPath(ar);
+      check(gets.includes(en), `${ar} is the twin of a registered English page (${en})`);
+      const cfg = (url: string) => JSON.stringify(routes.find((r) => r.url === url && [r.method].flat().includes('GET'))?.config ?? null);
+      assert.equal(cfg(ar), cfg(en), `${ar}: the same route options as ${en}`);
+    }
+    for (const en of gets.filter((u) => !u.startsWith('/ar') && hasTwin(u.replace(/:id$/, 'x')))) {
+      check(arabic.includes(en === '/' ? '/ar/' : `/ar${en}`), `${en} has its Arabic twin registered`);
+    }
+    check(!arabic.includes('/ar/tifo-spec') && !arabic.some((u) => u.startsWith('/ar/admin') || u.startsWith('/ar/api')), 'no twin for the English-only spec, the admin or the API');
+    n++;
+    await app.close();
+    await pinnedApp.close();
+    console.log(`  P3.3 language from the path only: ${n} checks (byte-identical with a token, a cookie, Accept-Language or X-Forwarded-Host; no Vary on any of them; a forged Host never written; canonical and hreflang; route twins with the same options)`);
+  }
+
+  // ---- the twin addresses, and the script that goes to them before the first paint ----
+  {
+    const cases: [string, 'en' | 'ar', string | null][] = [
+      ['/', 'ar', '/ar/'], ['/ar/', 'en', '/'], ['/community', 'ar', '/ar/community'], ['/ar/community?t=1#c', 'en', '/community?t=1#c'],
+      ['/t/abc', 'ar', '/ar/t/abc'], ['/projects?new=1&club=hilal', 'ar', '/ar/projects?new=1&club=hilal'], ['/app?design=x', 'ar', '/ar/app?design=x'],
+      ['//evil.example', 'ar', null], ['/\\evil.example', 'ar', null], ['/ar//evil.example', 'en', null], ['/ar/\\evil.example', 'en', null],
+      ['https://evil.example/', 'ar', null], ['/api/me', 'ar', null], ['/assets/x.js', 'ar', null], ['/tifo-spec', 'ar', null], ['/admin', 'ar', null],
+      ['/t/a/b', 'ar', null], ['#terms', 'ar', null], ['/og-card.png', 'ar', null], ['/ar/tifo-spec', 'en', null],
+    ];
+    for (const [href, lang, want] of cases) assert.equal(inLang(href, lang), want, `inLang(${href}, ${lang})`);
+    // The script that runs before the first paint never navigates: a page is
+    // served, and painted, at the address that was asked for, so no stored
+    // choice can send anyone (a crawler least of all) from one version to the
+    // other; and it leaves an Arabic page exactly as it was built.
+    const boot = readFileSync('public/theme-boot.js', 'utf8');
+    check(!/location\s*\.\s*(replace|assign|href|reload)|location\s*=|window\.stop|document\.cookie|\.write\(/.test(boot), 'theme-boot.js never navigates, stops a page, writes into it or reads a cookie');
+    check(/getAttribute\('data-lang-page'\) === 'ar'\) return;/.test(boot), 'and leaves an Arabic page as it was built (lang="ar" dir="rtl")');
+    // The address follows a saved choice in place only (ui/i18n.ts), with the twin rule above.
+    const i18n = readFileSync('src/ui/i18n.ts', 'utf8');
+    check(/history\.replaceState\(history\.state, '', there\)/.test(i18n) && !/location\.(replace|assign)\(|location\.href\s*=/.test(i18n), 'ui/i18n.ts moves the address in place, never navigates');
+    check(/pageLang\(\) === 'en' && saved === 'ar'\) followLanguage\('ar'\)/.test(i18n), 'and only for a language chosen with the toggle, never the browser\'s');
+    // The built pages, when this checkout has a build: no inline script, none from another origin, Arabic and right-to-left.
+    if (existsSync('dist/ar')) {
+      const built = listDir('dist/ar').filter((f) => f.endsWith('.html'));
+      check(built.length === TWINNED.length, `the build made every twin (${built.length})`);
+      for (const f of built) {
+        const html = readFileSync(`dist/ar/${f}`, 'utf8');
+        check(!inlineScript(html) && offOrigin(html).length === 0, `dist/ar/${f}: no inline script and none from another origin`);
+        check(/<html[^>]*\blang="ar"[^>]*\bdir="rtl"[^>]*\bdata-lang-page="ar"/.test(html), `dist/ar/${f}: Arabic and right-to-left`);
+      }
+      check(!existsSync('dist/ar/tifo-spec.html'), 'and none for the English-only spec');
+      check(listDir('dist', { recursive: true } as never).every((f) => !String(f).endsWith('.map')), 'no source map anywhere in dist/');
+    }
+    console.log(`  P3.3 addresses: ${cases.length} twin addresses, never one on another site; nothing before the first paint navigates, and the address follows only a saved choice, in place`);
+  }
+
+  // ---- Postgres: the same twins over the real repositories ----
+  if (process.env.DATABASE_URL) {
+    const pg = (await import('pg')).default;
+    const { schemaStatements } = await import('../src/schema');
+    const { PgAuthRepository, PgDesignRepository } = await import('../src/pgRepo');
+    const { PgSocialRepository } = await import('../src/pgSocial');
+    const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
+    try {
+      for (const stmt of schemaStatements(readFileSync(new URL('../schema.sql', import.meta.url), 'utf8'))) await pool.query(stmt).catch(() => {});
+      const sfx = Math.random().toString(36).slice(2, 7);
+      const papp = await buildApp(new PgDesignRepository(pool), new PgAuthRepository(pool), templates, { staticDir: dist, social: new PgSocialRepository(pool), adminUsernames: [`pgmod3${sfx}`], aiAdminPassword: 'pg stage three admin', emailSender: mailStub });
+      const owner = await reg3(papp, `pgown3${sfx}`);
+      const mod = await reg3(papp, `pgmod3${sfx}`, 'pg stage three admin');
+      const mk = async (title: string, pub: boolean): Promise<string> => {
+        const r = await papp.inject({ method: 'POST', url: '/api/designs', headers: bearer(owner.token), payload: { title, templateId: DEFAULT_TEMPLATE.id, templateVersion: 1, palette: PALETTE, cellsGzB64 } });
+        assert.equal(r.statusCode, 201, r.body);
+        const id = (r.json() as { id: string }).id;
+        if (pub) assert.equal((await papp.inject({ method: 'PATCH', url: `/api/designs/${id}`, headers: bearer(owner.token), payload: { isPublic: true } })).statusCode, 200);
+        return id;
+      };
+      const pubT = `Pg twin public ${sfx}`, privT = `Pg twin private ${sfx}`, downT = `Pg twin down ${sfx}`;
+      const pubId = await mk(pubT, true);
+      const privId = await mk(privT, false);
+      const downId = await mk(downT, true);
+      assert.equal((await papp.inject({ method: 'POST', url: `/api/admin/designs/${downId}/takedown`, headers: bearer(mod.token) })).statusCode, 200);
+      for (const [id, title, shownOk] of [[pubId, pubT, true], [privId, privT, false], [downId, downT, false]] as const) {
+        for (const url of [`/t/${id}`, `/d/${id}`, `/s/${id}`]) {
+          for (const headers of [undefined, bearer(owner.token)]) {
+            const en = await papp.inject({ method: 'GET', url, headers });
+            const ar = await papp.inject({ method: 'GET', url: inLang(url, 'ar')!, headers });
+            twins(en, ar, `Postgres: ${inLang(url, 'ar')}`);
+            if (!shownOk) check(!ar.body.includes(title), `Postgres: ${inLang(url, 'ar')} does not name a design that is not public`);
+          }
+        }
+      }
+      for (const url of ['/ar/community', '/ar/', '/sitemap.xml']) {
+        const body = (await papp.inject({ method: 'GET', url })).body;
+        check(!body.includes(privId) && !body.includes(privT) && !body.includes(downId) && !body.includes(downT), `Postgres: ${url} lists no design that is not public`);
+      }
+      check((await papp.inject({ method: 'GET', url: '/ar/community' })).body.includes(pubT), 'Postgres: /ar/community lists the public one');
+      await papp.close();
+      console.log('  P3.3 Postgres: the twins of /t, /d and /s match their English pages, and the Arabic lists show only public designs');
+    } finally {
+      await pool.end();
+    }
+  }
+  console.log('performance plan stage 3 (pages), the Arabic pages: all assertions passed');
+}
+
+// ---------- 2026-10: performance plan, stage 3 (server): the feed cursor and retention ----------
+// P3.4: the community feed pages with an opaque cursor, parsed strictly and
+// bound as parameters, never in place of any filter; private, taken-down and
+// trashed designs are on no page. P3.5: what the retention sweeps keep and
+// remove, that every reader gives the same numbers before and after, and that
+// nothing a security control looks back on goes early.
+{
+  const { readFileSync } = await import('node:fs');
+  const { randomBytes } = await import('node:crypto');
+  const { sealCursor, openCursor, feedScope, randomCursorKey, CURSOR_MAX_CHARS, usToIso, isoToUs } = await import('../src/feedCursor');
+  const { RETENTION, ADMIN_WINDOW_MAX_DAYS, DEDUPE_NOTIFICATION_KINDS, SWEEPS, runSweep, runRetention, RETENTION_BATCH } = await import('../src/retention');
+  const { FEED_INDEXES, RETENTION_INDEXES, SUPERSEDED_INDEXES, applyMaintenanceIndexes, schemaStatements } = await import('../src/schema');
+  const { RETENTION_DAYS: SOC_DAYS } = await import('../src/socRepo');
+  const { TOKEN_TTL_MS } = await import('../src/auth');
+  const check = (cond: unknown, msg: string): void => assert.ok(cond, msg);
+  const UUIDV = '0edf551a-87bc-4e8d-8b10-08f71e20f2cf';
+
+  // ---- the cursor on its own: what it holds, and what it refuses ----
+  {
+    const key = randomCursorKey();
+    const scope = feedScope({ sort: 'recent' });
+    const pos = { sort: 'recent' as const, likeScore: null, updatedUs: 1_792_842_126_766_343, id: UUIDV };
+    const c = sealCursor(key, scope, pos);
+    assert.deepEqual(openCursor(key, scope, 'recent', c), pos, 'a cursor reads back as the position it was made from');
+    check(c.length <= 120 && /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]{22}$/.test(c), `a short, URL-safe text (${c.length} characters)`);
+    assert.equal(Buffer.from(c.split('.')[0], 'base64url').toString(), `1~r~${pos.updatedUs}~${UUIDV}`, 'it holds the sort, the edit time and the id, nothing else');
+    const lpos = { sort: 'likes' as const, likeScore: -7, updatedUs: 5, id: UUIDV };
+    const lscope = feedScope({ sort: 'likes' });
+    assert.deepEqual(openCursor(key, lscope, 'likes', sealCursor(key, lscope, lpos)), lpos, 'and the like score under "most liked"');
+    // Only this server, this sort, these filters.
+    assert.equal(openCursor(randomCursorKey(), scope, 'recent', c), null, 'another key (another server) is refused');
+    assert.equal(openCursor(key, scope, 'likes', c), null, 'another sort is refused');
+    assert.equal(openCursor(key, lscope, 'likes', c), null, 'even with that sort’s scope');
+    for (const other of [{ excludeTemplates: true }, { templatesOnly: true }, { colors: ['red'] }, { clubId: 'al-hilal' }, { search: 'derby' }, { tags: ['x'] }]) {
+      assert.equal(openCursor(key, feedScope({ sort: 'recent', ...other }), 'recent', c), null, `another filter is refused (${JSON.stringify(other)})`);
+    }
+    assert.equal(feedScope({ sort: 'recent', colors: ['red', 'gold'], tags: ['B', 'a'] }), feedScope({ sort: 'recent', colors: ['gold', 'red'], tags: ['a', 'b'] }), 'the same filters in another order are the same scope');
+    // Tampering: every one-character change anywhere is refused.
+    const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+    let tried = 0;
+    for (let i = 0; i < c.length; i++) {
+      if (c[i] === '.') continue;
+      for (const ch of [alphabet[(alphabet.indexOf(c[i]) + 1) % 64], alphabet[(alphabet.indexOf(c[i]) + 33) % 64]]) {
+        tried++;
+        assert.equal(openCursor(key, scope, 'recent', c.slice(0, i) + ch + c.slice(i + 1)), null, `a changed character at ${i} is refused`);
+      }
+    }
+    check(tried > 150, `(${tried} tampered cursors tried)`);
+    // Out of shape, even when correctly tagged: a key that ever leaked still
+    // could not send a value out of range.
+    const tagged = (p: Record<string, unknown>, sort: 'recent' | 'likes' = 'recent') => sealCursor(key, feedScope({ sort }), { ...pos, sort, ...p } as never);
+    const bad: [string, string, 'recent' | 'likes'][] = [
+      ['a negative time', tagged({ updatedUs: -1 }), 'recent'],
+      ['a fractional time', tagged({ updatedUs: 1.5 }), 'recent'],
+      ['a time past 2100', tagged({ updatedUs: 4_102_444_800_000_001 }), 'recent'],
+      ['a time past 2^53', tagged({ updatedUs: 2 ** 60 }), 'recent'],
+      ['an upper-case id', tagged({ id: UUIDV.toUpperCase() }), 'recent'],
+      ['an id that is not a uuid', tagged({ id: "0edf551a-87bc-4e8d-8b10-08f71e20' OR '1" }), 'recent'],
+      ['SQL in the id', tagged({ id: "'; DROP TABLE designs; --" }), 'recent'],
+      ['a long id', tagged({ id: `${UUIDV}0` }), 'recent'],
+      ['a score past int4', tagged({ likeScore: 2 ** 31 }, 'likes'), 'likes'],
+      ['a score below int4', tagged({ likeScore: -(2 ** 31) - 1 }, 'likes'), 'likes'],
+      ['a fractional score', tagged({ likeScore: 0.5 }, 'likes'), 'likes'],
+      ['NaN for a score', tagged({ likeScore: Number.NaN }, 'likes'), 'likes'],
+    ];
+    for (const [what, text, sort] of bad) assert.equal(openCursor(key, feedScope({ sort }), sort, text), null, `${what} is refused even with a valid tag`);
+    // Not a cursor at all.
+    const payload = Buffer.from(`1~r~5~${UUIDV}`).toString('base64url');
+    for (const [what, text] of [
+      ['empty', ''], ['no tag', payload], ['a short tag', `${payload}.abc`], ['two dots', `${payload}.${'A'.repeat(22)}.x`],
+      ['padding', `${payload}=.${'A'.repeat(22)}`], ['spaces', ` ${c}`], ['too long', `${'A'.repeat(CURSOR_MAX_CHARS)}.${'A'.repeat(22)}`],
+      ['a random tag', `${payload}.${randomBytes(16).toString('base64url')}`], ['an old version', `${Buffer.from(`0~r~5~${UUIDV}`).toString('base64url')}.${'A'.repeat(22)}`],
+    ] as const) {
+      assert.equal(openCursor(key, scope, 'recent', text), null, `${what} is refused`);
+    }
+    for (const v of [undefined, null, 5, ['a'], { a: 1 }]) assert.equal(openCursor(key, scope, 'recent', v), null, `a ${typeof v} is refused, never thrown on`);
+    // Non-canonical base64url (the last character's spare bits set) is not what the server wrote.
+    const body = c.split('.')[0];
+    const last = alphabet.indexOf(body[body.length - 1]);
+    const spare = (body.length * 6) % 8;
+    if (spare) {
+      const twin = body.slice(0, -1) + alphabet[last ^ 1];
+      if (Buffer.from(twin, 'base64url').equals(Buffer.from(body, 'base64url'))) {
+        assert.equal(openCursor(key, scope, 'recent', `${twin}.${c.split('.')[1]}`), null, 'a second spelling of the same bytes is refused');
+      }
+    }
+    // Microseconds, both ways, exactly.
+    for (const us of [0, 1, 999, 1_792_842_126_766_343, 4_102_444_799_999_999]) assert.equal(isoToUs(usToIso(us)), us, `${us} µs round-trips`);
+    assert.equal(usToIso(1_792_842_126_766_343), '2026-10-24T11:42:06.766343Z');
+    console.log('  s3 cursor: holds only the sort, the edit time to the µs and the id; any other key, sort, filter, edited character or out-of-range value is refused');
+  }
+
+  // ---- the feed through the route (memory): every public design exactly once, nothing else ----
+  {
+    const auth = new MemoryAuthRepository();
+    let pageReads = 0;
+    class Counting extends MemoryDesignRepository {
+      override async listPublicPage(q: Parameters<MemoryDesignRepository['listPublicPage']>[0]): ReturnType<MemoryDesignRepository['listPublicPage']> {
+        pageReads++;
+        return super.listPublicPage(q);
+      }
+    }
+    const designs = new Counting((id) => auth.usernameOf(id));
+    const key = randomCursorKey();
+    const app = await buildApp(designs, auth, templates, { feedCursorKey: key, social: new MemorySocialRepository(designs, auth), adminUsernames: ['mod_s3'] });
+    const owner = await reg(app, 'owner_s3');
+    const voters = [await reg(app, 'voter_s3a'), await reg(app, 'voter_s3b'), await reg(app, 'voter_s3c')];
+    const rows = (designs as unknown as { rows: Map<string, { updatedAt: string }> }).rows;
+    const RED = ['#262a33', '#d53434', '#ffffff'];
+    const make = async (n: number, opts: { pub?: boolean; red?: boolean } = {}) => {
+      const d = await designs.create({ title: `S3 tifo ${n}`, templateId: DEFAULT_TEMPLATE.id, templateVersion: 1, palette: opts.red ? RED : PALETTE, cellsGz: gzipSync(new Uint8Array(map.count)), ownerId: owner.id, thumbnailPng: null });
+      if (opts.pub !== false) await designs.patchMeta(d.id, { isPublic: true });
+      return d.id;
+    };
+    const pub: string[] = [];
+    for (let i = 0; i < 96; i++) pub.push(await make(i, { red: i % 3 === 0 }));
+    // Ties on purpose: a few edit times shared by many designs, as the
+    // template library's are (all written in one boot).
+    const stamps = ['2026-10-01T10:00:00.000Z', '2026-10-02T10:00:00.000Z', '2026-10-02T10:00:00.001Z', '2026-10-03T09:59:59.999Z'];
+    pub.forEach((id, i) => { rows.get(id)!.updatedAt = stamps[i % stamps.length]; });
+    for (const id of pub.slice(0, 20)) await designs.setTemplate(id, owner.id, true);
+    for (let i = 0; i < pub.length; i++) for (let v = 0; v < i % 4; v++) await designs.vote(pub[i], voters[v].id, i % 7 === 0 ? -1 : 1);
+    // Never on any page: private, taken down, trashed.
+    const priv = [await make(900, { pub: false }), await make(901, { pub: false })];
+    const down = [await make(910), await make(911)];
+    for (const id of down) await designs.takedownDesign(id);
+    const trashed = [await make(920), await make(921)];
+    for (const id of trashed) await designs.trash(id);
+    const hidden = [...priv, ...down, ...trashed];
+    for (const id of hidden) rows.get(id)!.updatedAt = stamps[1]; // right among the ties
+
+    const page = async (qs: string, headers: Record<string, string> = {}) => app.inject({ method: 'GET', url: `/api/gallery?${qs}`, headers });
+    const walk = async (qs: string, limit: number, headers: Record<string, string> = {}, between?: (n: number) => Promise<void>) => {
+      const ids: string[] = [];
+      let cursor: string | null = null;
+      for (let n = 0; ; n++) {
+        const r = await page(`${qs}&limit=${limit}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`, headers);
+        assert.equal(r.statusCode, 200, r.body);
+        assert.equal(r.headers['cache-control'], 'no-store', 'a page of the feed is never stored, with a cursor or without');
+        const items = r.json() as { id: string }[];
+        ids.push(...items.map((x) => x.id));
+        cursor = (r.headers['x-next-cursor'] as string | undefined) ?? null;
+        if (!cursor) break;
+        assert.equal(items.length, limit, 'only a full page hands out a cursor');
+        if (n > 500) throw new Error('runaway walk');
+        await between?.(n);
+      }
+      return ids;
+    };
+    const queries: [string, Parameters<MemoryDesignRepository['listPublic']>[0]][] = [
+      ['sort=recent', { sort: 'recent' }],
+      ['sort=likes', { sort: 'likes' }],
+      ['sort=recent&made=people', { sort: 'recent', excludeTemplates: true }],
+      ['sort=likes&made=people', { sort: 'likes', excludeTemplates: true }],
+      ['sort=recent&templates=1', { sort: 'recent', templatesOnly: true }],
+      ['sort=likes&colors=red', { sort: 'likes', colors: ['red'] }],
+      ['sort=recent&search=tifo%201', { sort: 'recent', search: 'tifo 1' }],
+    ];
+    for (const [qs, q] of queries) {
+      const want = (await designs.listPublic(q)).map((x) => x.id);
+      check(want.length > 0, `(${qs} has designs)`);
+      for (const limit of [1, 7, 60]) {
+        const got = await walk(qs, limit);
+        assert.deepEqual(got, want, `${qs}, pages of ${limit}: every design exactly once, in feed order`);
+      }
+      // Signed in as the owner of the private ones: still public only.
+      const mine = await walk(qs, 9, bearer(owner.token));
+      assert.deepEqual(mine, want, `${qs}: the owner's own private, taken-down and trashed designs are on no page`);
+    }
+    for (const id of hidden) check(!(await walk('sort=recent', 5)).includes(id), 'hidden designs never appear');
+    // Facets and counts: what the filter panel says is what the pages hold.
+    for (const [made, qs] of [['', 'sort=recent'], ['made=people', 'sort=recent&made=people'], ['templates=1', 'sort=recent&templates=1']] as const) {
+      const facets = (await app.inject({ method: 'GET', url: `/api/gallery/facets${made ? `?${made}` : ''}` })).json() as { total: number };
+      assert.equal(facets.total, (await walk(qs, 13)).length, `the facet total for "${made || 'all'}" is the number of designs the pages hold`);
+    }
+    const redCount = (await app.inject({ method: 'GET', url: '/api/gallery/facets?colors=red' })).json() as { matching: number };
+    assert.equal(redCount.matching, (await walk('sort=likes&colors=red', 8)).length, 'and the filtered count matches the filtered pages');
+
+    // A cursor at a hidden design's own place: the page after it is still public only.
+    for (const id of hidden) {
+      const at = sealCursor(key, feedScope({ sort: 'recent' }), { sort: 'recent', likeScore: null, updatedUs: Date.parse(stamps[1]) * 1000 + 1, id });
+      const after = (await page(`sort=recent&limit=120&cursor=${encodeURIComponent(at)}`)).json() as { id: string }[];
+      check(after.length > 0 && after.every((x) => !hidden.includes(x.id)), 'a cursor naming a hidden design’s position shows only public ones after it');
+    }
+    // What a cursor carries is on the card already: no viewer, nothing private.
+    const anonPage = await page('sort=likes&limit=5');
+    const signedPage = await page('sort=likes&limit=5', bearer(voters[0].token));
+    const lastCard = (anonPage.json() as { id: string; likeScore: number; updatedAt: string }[])[4];
+    assert.equal(anonPage.headers['x-next-cursor'], signedPage.headers['x-next-cursor'], 'the same page hands the same cursor to everyone: nothing about the viewer is in it');
+    assert.equal(Buffer.from(String(anonPage.headers['x-next-cursor']).split('.')[0], 'base64url').toString(), `1~l~${lastCard.likeScore}~${Date.parse(lastCard.updatedAt) * 1000}~${lastCard.id}`, 'and it holds the last card’s own score, time and id');
+
+    // Refused before anything is read: 400, the same body, nothing echoed.
+    const good = String((await page('sort=recent&limit=4')).headers['x-next-cursor']);
+    const people = String((await page('sort=recent&made=people&limit=4')).headers['x-next-cursor']);
+    const otherApp = await buildApp(designs, auth, templates, { feedCursorKey: randomCursorKey() });
+    const sameKeyApp = await buildApp(designs, auth, templates, { feedCursorKey: key });
+    const foreign = String((await otherApp.inject({ method: 'GET', url: '/api/gallery?sort=recent&limit=4' })).headers['x-next-cursor']);
+    const flip = good.slice(0, 10) + (good[10] === 'A' ? 'B' : 'A') + good.slice(11);
+    const refused: [string, string][] = [
+      ['an empty cursor', 'sort=recent&cursor='],
+      ['junk', 'sort=recent&cursor=abc'],
+      ['an edited cursor', `sort=recent&cursor=${encodeURIComponent(flip)}`],
+      ['a cursor from the other sort', `sort=likes&cursor=${encodeURIComponent(good)}`],
+      ['a cursor from another tab', `sort=recent&cursor=${encodeURIComponent(people)}`],
+      ['a cursor for another filter', `sort=recent&colors=red&cursor=${encodeURIComponent(good)}`],
+      ['a cursor from another server', `sort=recent&cursor=${encodeURIComponent(foreign)}`],
+      ['a cursor and an offset', `sort=recent&offset=0&cursor=${encodeURIComponent(good)}`],
+      ['two cursors', `sort=recent&cursor=${encodeURIComponent(good)}&cursor=${encodeURIComponent(good)}`],
+      ['an oversized cursor', `sort=recent&cursor=${'A'.repeat(CURSOR_MAX_CHARS + 1)}`],
+      ['SQL', `sort=recent&cursor=${encodeURIComponent("1' OR '1'='1")}`],
+    ];
+    for (const [what, qs] of refused) {
+      const before = pageReads;
+      const r = await page(qs);
+      assert.equal(r.statusCode, 400, `${what}: 400 (${r.statusCode})`);
+      assert.equal((r.json() as { code: string }).code, 'bad_cursor', `${what}: says so`);
+      check(!r.body.includes('OR') && !r.body.includes(good.slice(0, 12)), `${what}: nothing echoed back`);
+      assert.equal(r.headers['x-next-cursor'], undefined, `${what}: no cursor handed out`);
+      assert.equal(pageReads, before, `${what}: refused before the feed is read`);
+    }
+    assert.equal((await sameKeyApp.inject({ method: 'GET', url: `/api/gallery?sort=recent&limit=4&cursor=${encodeURIComponent(good)}` })).statusCode, 200, 'a second instance (or the next deploy) with the same key takes it');
+    await otherApp.close();
+    await sameKeyApp.close();
+    // The old offset still works, to its cap.
+    assert.equal((await page('sort=recent&offset=60')).statusCode, 200);
+    assert.equal((await page('sort=recent&offset=1200')).statusCode, 200, 'offset 1200 is answered');
+    const deep = await page('sort=recent&offset=1201');
+    assert.equal(deep.statusCode, 400, 'offset 1201 is not');
+    assert.equal((deep.json() as { code: string }).code, 'offset_too_deep');
+    assert.equal((await page('sort=recent&offset=1e9')).statusCode, 400);
+    assert.deepEqual((await page('sort=recent&offset=abc&limit=5')).json(), (await page('sort=recent&limit=5')).json(), 'an unreadable offset is the first page, as it always was');
+    assert.deepEqual(((await page('sort=recent&offset=7&limit=5')).json() as { id: string }[]).map((x) => x.id), (await designs.listPublic({ sort: 'recent' })).slice(7, 12).map((x) => x.id), 'and an offset is still an offset');
+
+    // New designs published while someone scrolls: no repeats, nothing older missed.
+    {
+      const before = (await designs.listPublic({ sort: 'recent' })).map((x) => x.id);
+      const added: string[] = [];
+      const got = await walk('sort=recent', 10, {}, async (n) => { if (n < 3) for (let i = 0; i < 4; i++) added.push(await make(500 + n * 10 + i)); });
+      assert.equal(new Set(got).size, got.length, 'no design twice');
+      assert.deepEqual(got.filter((id) => before.includes(id)), before, 'every design that was there is on exactly one page, in order');
+      check(added.every((id) => !got.includes(id)), 'the new ones are above the place being read: on the next load, not mixed in');
+    }
+    // Scores changing under "most liked": a design whose score does not change
+    // is on exactly one page; one whose score changes appears at most twice
+    // (once at each place) or not at all (it moved above the place being read).
+    {
+      const before = (await designs.listPublic({ sort: 'likes' })).map((x) => x.id);
+      const changed = new Set<string>();
+      const got = await walk('sort=likes', 10, {}, async (n) => {
+        if (n !== 2) return;
+        // One already shown loses its likes; one not yet shown gains them.
+        const seen = before[5];
+        const unseen = before[before.length - 3];
+        for (const v of voters) { await designs.vote(seen, v.id, -1); await designs.vote(unseen, v.id, 1); }
+        changed.add(seen).add(unseen);
+      });
+      for (const id of before) {
+        const times = got.filter((x) => x === id).length;
+        if (changed.has(id)) check(times <= 2, `a re-ranked design appears at most twice (${times})`);
+        else assert.equal(times, 1, 'a design whose score did not change appears exactly once');
+      }
+    }
+    await app.close();
+    console.log('  s3 feed (memory): every public design exactly once under each sort, tab and filter; hidden ones never; bad cursors 400 before any read; offset capped at 1200');
+  }
+
+  // ---- retention: the periods against what reads them ----
+  {
+    check(RETENTION.RAW_DAYS >= ADMIN_WINDOW_MAX_DAYS + 2, `raw AI events and shares outlive the longest admin window, a whole day to spare (${RETENTION.RAW_DAYS} > ${ADMIN_WINDOW_MAX_DAYS})`);
+    assert.equal(ADMIN_WINDOW_MAX_DAYS, 365);
+    const routesSrc = readFileSync('server/src/routes.ts', 'utf8');
+    const clamp = /Math\.min\(ADMIN_WINDOW_MAX_DAYS, Math\.max\(1, Number\(q\.days\) \|\| 30\)\)/g;
+    assert.equal((routesSrc.match(clamp) ?? []).length, 2, 'the AI and sharing windows are clamped to it');
+    check(RETENTION.READ_NOTIFICATIONS_DAYS >= 180, 'read notifications: 180 days');
+    // The de-duplication checks read exactly the kinds the sweep leaves alone.
+    const socialSrc = readFileSync('server/src/pgSocial.ts', 'utf8');
+    const deduped = [...socialSrc.matchAll(/NOT EXISTS \(SELECT 1 FROM notifications[^)]*?kind = '(\w+)'/g)].map((m) => m[1]).sort();
+    assert.deepEqual(deduped, [...DEDUPE_NOTIFICATION_KINDS].sort(), `every kind a de-duplication check reads is kept for ever (${deduped.join(', ')})`);
+    // The security log is kept as long as the Security tab looks back (30 days).
+    check(SOC_DAYS >= 30, 'the security log: 30 days');
+    check(TOKEN_TTL_MS === 30 * 24 * 3600 * 1000, 'sessions last 30 days and go when they expire');
+    // Each sweep in a transaction of its own, with its limits, a batch at a time.
+    const seen: string[] = [];
+    let fail = false;
+    const fake = {
+      connect: async () => ({
+        query: async (sql: string, params?: unknown[]) => {
+          seen.push(params ? `${sql.trim().split(/\s+/).slice(0, 2).join(' ')} [${params.join(',')}]` : sql);
+          if (fail && sql.startsWith('WITH')) throw new Error('canceling statement due to statement timeout');
+          return { rows: [{ n: 0 }], rowCount: 0 };
+        },
+        release: () => {},
+      }),
+    };
+    const r = await runSweep(fake, SWEEPS[0]);
+    assert.deepEqual(seen, ['BEGIN', "SET LOCAL statement_timeout = '10000ms'", "SET LOCAL lock_timeout = '2000ms'", `WITH gone [${RETENTION_BATCH}]`, 'COMMIT'], 'BEGIN, its time limits, one bounded batch, COMMIT');
+    assert.equal(r.removed, 0);
+    seen.length = 0;
+    fail = true;
+    const failed = await runSweep(fake, SWEEPS[0]);
+    check(seen.includes('ROLLBACK') && /statement timeout/.test(failed.error ?? ''), 'a batch that fails is rolled back and reported, never thrown');
+    for (const s of SWEEPS) {
+      check(/LIMIT \$1/.test(s.sql) && s.sql.trim().startsWith('WITH gone AS (\n            DELETE'), `${s.job}: one bounded DELETE per batch`);
+      // By primary key from the found batch: IN (SELECT …) was a hash join over the whole table per batch.
+      check(/= ANY \(ARRAY\(\s*SELECT/.test(s.sql) && !/\bIN \(\s*SELECT/.test(s.sql), `${s.job}: removes its batch by key (= ANY (ARRAY(SELECT …)))`);
+    }
+    for (const src of ['server/src/pgRepo.ts', 'server/src/trafficRepo.ts']) {
+      const text = readFileSync(src, 'utf8');
+      check(!/(DELETE FROM (events|visits)|UPDATE visits SET visitor_key = NULL) WHERE id IN \(/.test(text), `${src}: the funnel and visits batches remove by key too`);
+    }
+    // A rollup points at a parent (an account, a design): it locks those first.
+    for (const job of ['ai_events', 'design_shares']) {
+      const sw = SWEEPS.find((x) => x.job === job)!;
+      check(sw.lock && /FOR KEY SHARE/.test(sw.lock) && /ORDER BY \w\.id FOR KEY SHARE/.test(sw.lock) && /ANY \(\$2::uuid\[\]\)/.test(sw.sql), `${job}: the parents of the batch are locked first, in id order, and the batch keeps to them`);
+    }
+    check(SWEEPS.filter((x) => x.lock).length === 2, 'only the rollups need a lock statement (nothing else inserts rows that point at a parent)');
+    const sweepIx = RETENTION_INDEXES.find((ix) => ix.table === 'notifications')!;
+    check(DEDUPE_NOTIFICATION_KINDS.every((k) => sweepIx.where!.includes(`'${k}'`)) && sweepIx.where!.startsWith('read_at IS NOT NULL'), 'the notification sweep\u2019s index leaves out exactly the kinds it never removes');
+    const serverSrc = readFileSync('server/src/server.ts', 'utf8');
+    const listen = serverSrc.indexOf('await app.listen(');
+    check(serverSrc.indexOf('await runRetention(maint)') > listen && !serverSrc.slice(0, listen).includes('runRetention('), 'the sweeps run after the port is open');
+    check(/setInterval\(\(\) => void sweep\(\), 6 \* 60 \* 60 \* 1000\)\.unref\(\)/.test(serverSrc) && /if \(sweeping\) return;/.test(serverSrc), 'every six hours, one run at a time');
+    const doc = readFileSync('SECURITY-CHECKS.md', 'utf8');
+    check(doc.includes(`${RETENTION.RAW_DAYS} days`) && doc.includes(`${RETENTION.READ_NOTIFICATIONS_DAYS} days`) && /retention/i.test(doc), 'SECURITY-CHECKS.md states the periods');
+    check(FEED_INDEXES.length === 2 && FEED_INDEXES.every((ix) => ix.where === 'is_public' && /id DESC$/.test(ix.columns)), 'one public-only feed index per sort, ending with the tie-breaker');
+    check(RETENTION_INDEXES.some((ix) => ix.table === 'events') && RETENTION_INDEXES.some((ix) => ix.table === 'visits' && ix.where === 'visitor_key IS NOT NULL'), 'the events and visits purges have their indexes');
+    console.log('  s3 retention rules: every period outlives what reads it (admin windows, de-duplication, the security log); sweeps are bounded, time-limited transactions after listen');
+  }
+
+  if (process.env.DATABASE_URL) {
+    const pg = (await import('pg')).default;
+    const { PgDesignRepository, PgAuthRepository, PgAiEventsRepository, PgEventsRepository, PgAiBudgetRepository } = await import('../src/pgRepo');
+    const { PgSocialRepository } = await import('../src/pgSocial');
+    const { PgAdminStatsRepository } = await import('../src/statsRepo');
+    const { PgTrafficRepository } = await import('../src/trafficRepo');
+    const name = `s3_server_${randomBytes(4).toString('hex')}`;
+    const admin = new pg.Pool({ connectionString: process.env.DATABASE_URL, max: 2 });
+    await admin.query(`CREATE SCHEMA ${name}`);
+    const p = new pg.Pool({ connectionString: process.env.DATABASE_URL, max: 4, options: `-c search_path=${name} -c timezone=UTC` });
+    try {
+      for (const stmt of schemaStatements(readFileSync(new URL('../schema.sql', import.meta.url), 'utf8'))) await p.query(stmt);
+      await new PgTrafficRepository(p).init();
+      // The superseded indexes, as an older database has them.
+      await p.query('CREATE INDEX designs_public_idx ON designs (is_public, updated_at DESC)');
+      await p.query('CREATE INDEX designs_like_score_idx ON designs (is_public, like_score DESC, updated_at DESC)');
+
+      // ---- the feed on Postgres: microsecond ties, every row once, the index used ----
+      const uid = (await p.query("INSERT INTO users (username, password_hash) VALUES ('s3pg_owner', 'x') RETURNING id")).rows[0].id as string;
+      // 240 public designs on 6 edit times (ties), three of them a microsecond
+      // apart; scores with ties; templates; and the ones that must never show.
+      await p.query(
+        `INSERT INTO designs (title, template_id, template_version, palette, cells, owner_id, is_public, is_template, like_score, updated_at, colors)
+         SELECT 'S3 pg ' || g, 'x', 1, '[]'::jsonb, '\\x00', $1, true, g % 9 = 0, (g % 5) - 1,
+                timestamptz '2026-10-20 10:00:00.123456+00' + ((g % 6) * interval '1 microsecond') * (CASE WHEN g % 6 < 3 THEN 1 ELSE 1000000 END),
+                CASE WHEN g % 4 = 0 THEN '{red}'::text[] ELSE '{blue}'::text[] END
+           FROM generate_series(1, 240) g`,
+        [uid],
+      );
+      const hiddenPg = (await p.query(
+        `INSERT INTO designs (title, template_id, template_version, palette, cells, owner_id, is_public, deleted_at, taken_down_at, updated_at)
+         VALUES ('private', 'x', 1, '[]', '\\x00', $1, false, NULL, NULL, '2026-10-20 10:00:00.123457+00'),
+                ('trashed', 'x', 1, '[]', '\\x00', $1, false, now(), NULL, '2026-10-20 10:00:00.123457+00'),
+                ('taken down', 'x', 1, '[]', '\\x00', $1, false, NULL, now(), '2026-10-20 10:00:00.123457+00')
+         RETURNING id`,
+        [uid],
+      )).rows.map((x) => String(x.id));
+      await p.query('ANALYZE designs');
+      const built = await applyMaintenanceIndexes(p, () => {});
+      check(FEED_INDEXES.every((ix) => built.built.includes(ix.name)), `Postgres: the feed indexes are built (${built.built.join(', ')})`);
+      assert.deepEqual(built.dropped.sort(), SUPERSEDED_INDEXES.map((x) => x.name).sort(), 'Postgres: and the ones they replace are dropped once they are valid');
+      assert.deepEqual((await applyMaintenanceIndexes(p, () => {})), { built: [], failed: [], dropped: [] }, 'Postgres: a second boot does nothing');
+      const repo = new PgDesignRepository(p, p);
+      const pgQueries: import('../src/repo').GalleryQuery[] = [
+        { sort: 'recent' }, { sort: 'likes' }, { sort: 'recent', excludeTemplates: true }, { sort: 'likes', templatesOnly: true }, { sort: 'likes', colors: ['red'] },
+      ];
+      for (const q of pgQueries) {
+        const want = (await repo.listPublic(q)).map((x) => x.id);
+        for (const limit of [1, 7, 50]) {
+          const got: string[] = [];
+          let after: import('../src/feedCursor').FeedPosition | null = null;
+          for (let n = 0; n < 1000; n++) {
+            const pageRes = await repo.listPublicPage({ ...q, limit, after });
+            got.push(...pageRes.items.map((x) => x.id));
+            after = pageRes.next;
+            if (!after) break;
+          }
+          assert.deepEqual(got, want, `Postgres ${JSON.stringify(q)}, pages of ${limit}: every design exactly once, in order, across microsecond ties`);
+        }
+        check(want.every((id) => !hiddenPg.includes(id)), 'Postgres: private, trashed and taken-down designs are on no page');
+      }
+      // Through the route on Postgres: the cursor survives the trip at µs precision.
+      const pgKey = randomCursorKey();
+      const pgApp = await buildApp(repo, new PgAuthRepository(p, p), templates, { feedCursorKey: pgKey });
+      const routeWalk: string[] = [];
+      let cur: string | null = null;
+      for (let n = 0; n < 100; n++) {
+        const url: string = `/api/gallery?sort=likes&limit=11${cur ? `&cursor=${encodeURIComponent(cur)}` : ''}`;
+        const res = await pgApp.inject({ method: 'GET', url });
+        assert.equal(res.statusCode, 200);
+        routeWalk.push(...(res.json() as { id: string }[]).map((x) => x.id));
+        cur = (res.headers['x-next-cursor'] as string | undefined) ?? null;
+        if (!cur) break;
+      }
+      assert.deepEqual(routeWalk, (await repo.listPublic({ sort: 'likes' })).map((x) => x.id), 'Postgres: the route’s pages are the whole feed, once');
+      // The cursor is only ever a bound parameter: the SQL text is the same whatever it names.
+      const texts = new Set<string>();
+      const spy = { query: (sql: string, params?: unknown[]) => { texts.add(sql); return p.query(sql, params); } };
+      const spyRepo = new PgDesignRepository(spy as never, spy as never);
+      for (const id of [UUIDV, hiddenPg[0]]) await spyRepo.listPublicPage({ sort: 'recent', limit: 3, after: { sort: 'recent', likeScore: null, updatedUs: 1_792_000_000_000_000, id } });
+      assert.equal(texts.size, 1, 'Postgres: one SQL text for any cursor (it is bound, not spliced)');
+      check([...texts][0].includes('d.is_public') && /\(d\.updated_at, d\.id\) < \(\$\d+::timestamptz, \$\d+::uuid\)/.test([...texts][0]), 'Postgres: is_public kept, the position bound and typed');
+      // The page starts in the index, with no sort of the public set.
+      const planOf = async (q: import('../src/repo').GalleryQuery) => {
+        const c = await p.connect();
+        try {
+          await c.query('BEGIN');
+          await c.query('SET LOCAL enable_seqscan = off');
+          let sql = '';
+          let params: unknown[] = [];
+          const capture = new PgDesignRepository({ query: (s: string, v: unknown[]) => { sql = s; params = v; return c.query(s, v); } } as never, p);
+          const first = await capture.listPublicPage({ ...q, limit: 5 });
+          await capture.listPublicPage({ ...q, limit: 5, after: first.next });
+          const plan = (await c.query(`EXPLAIN ${sql}`, params)).rows.map((x) => x['QUERY PLAN']).join('\n');
+          await c.query('ROLLBACK');
+          return plan;
+        } finally {
+          c.release();
+        }
+      };
+      const recentPlan = await planOf({ sort: 'recent' });
+      const likesPlan = await planOf({ sort: 'likes' });
+      check(/Index Scan using designs_feed_recent_idx/.test(recentPlan) && /Index Cond: \(ROW\(updated_at, id\) < ROW\(/.test(recentPlan) && !/\n\s*->\s+Sort /.test(recentPlan.split('SubPlan')[0]), `Postgres: a "newest" page starts at its place in designs_feed_recent_idx\n${recentPlan.slice(0, 600)}`);
+      check(/Index Scan using designs_feed_likes_idx/.test(likesPlan) && /Index Cond: \(ROW\(like_score, updated_at, id\) < ROW\(/.test(likesPlan), `Postgres: a "most liked" page in designs_feed_likes_idx\n${likesPlan.slice(0, 600)}`);
+      await pgApp.close();
+      console.log('  s3 feed (Postgres): every row exactly once across microsecond ties, hidden ones never; the cursor is bound; each page starts in its partial index');
+
+      // ---- retention on Postgres: readers the same before and after; what goes and what stays ----
+      await p.query("DELETE FROM designs WHERE title LIKE 'S3 pg %'");
+      const mkUser = async (u: string) => (await p.query('INSERT INTO users (username, password_hash, email) VALUES ($1, $2, $3) RETURNING id', [u, 'x', `${u}@example.test`])).rows[0].id as string;
+      const [u1, u2, u3] = [await mkUser('s3r_one'), await mkUser('s3r_two'), await mkUser('s3r_three')];
+      const ds = (await p.query(
+        `INSERT INTO designs (title, template_id, template_version, palette, cells, owner_id, is_public) VALUES
+           ('R1', 'x', 1, '[]', '\\x00', $1, true), ('R2', 'x', 1, '[]', '\\x00', $1, true), ('R3', 'x', 1, '[]', '\\x00', $2, true) RETURNING id`,
+        [u1, u2],
+      )).rows.map((x) => String(x.id));
+      const ago = (days: number) => `now() - interval '${days} days'`;
+      // Sessions: three expired, two live.
+      await p.query(`INSERT INTO auth_tokens (token_hash, user_id, expires_at) VALUES
+        ('s3-exp-1', $1, ${ago(1)}), ('s3-exp-2', $1, ${ago(40)}), ('s3-exp-3', $2, now() - interval '1 second'),
+        ('s3-live-1', $1, now() + interval '29 days'), ('s3-live-2', $2, now() + interval '1 hour')`, [u1, u2]);
+      // Links and codes: used, expired, and one live reset link.
+      await p.query(`INSERT INTO email_tokens (token_hash, user_id, purpose, expires_at, used_at) VALUES
+        ('s3-used', $1, 'reset_password', now() + interval '30 minutes', now()), ('s3-expired', $2, 'verify_email', ${ago(2)}, NULL),
+        ('s3-code', $2, 'verify_code', now() - interval '1 minute', NULL), ('s3-ticket', $1, 'oauth_handoff', ${ago(1)}, NULL),
+        ('s3-live-reset', $1, 'reset_password', now() + interval '50 minutes', NULL)`, [u1, u2]);
+      // Notifications for u1.
+      await p.query(`INSERT INTO notifications (user_id, actor_id, kind, design_id, read_at, created_at) VALUES
+        ($1, $2, 'comment', $3, ${ago(299)}, ${ago(300)}),
+        ($1, $2, 'like', $3, ${ago(199)}, ${ago(200)}),
+        ($1, $2, 'comment', $3, NULL, ${ago(300)}),
+        ($1, $2, 'comment', $3, ${ago(9)}, ${ago(10)}),
+        ($1, $2, 'new_follower', NULL, ${ago(299)}, ${ago(300)}),
+        ($2, $1, 'follow_post', $4, ${ago(299)}, ${ago(300)})`, [u1, u2, ds[2], ds[0]]);
+      await p.query('INSERT INTO follows (follower_id, followee_id) VALUES ($1, $2)', [u2, u1]);
+      // AI requests over 600 days, kept clear of every window's edge (whole days + 12 h).
+      await p.query(
+        `INSERT INTO ai_events (user_id, at, mode, outcome, reason, detail, via, model, latency_ms, tokens_in, tokens_out, tokens_thought, tokens_cached, calls, pictures, cost_micros)
+         SELECT (ARRAY[$1::uuid, $2::uuid, $3::uuid, NULL::uuid])[1 + (g / 3) % 4], now() - ((g % 600) * interval '1 day') - interval '12 hours' - (g % 7) * interval '1 minute',
+                (ARRAY['std', 'super', 'polish', 'photo'])[1 + g % 4],
+                (ARRAY['model', 'model', 'cache', 'quick', 'quota', 'busy', 'blocked', 'invalid'])[1 + (g * 7) % 8],
+                CASE WHEN (g * 7) % 8 IN (5, 7) THEN (ARRAY['capacity', 'budget', 'timeout'])[1 + g % 3] END,
+                CASE WHEN (g * 7) % 8 IN (5, 7) THEN 'provider said: no' END, CASE WHEN g % 50 = 0 THEN 'password' END,
+                CASE WHEN (g * 7) % 8 < 2 THEN (ARRAY['claude-x', 'gemini-y'])[1 + g % 2] END,
+                100 + g, g % 4000, g % 3000, g % 50, g % 20,
+                CASE WHEN (g * 7) % 8 < 2 AND g % 3 > 0 THEN 1 END, g % 3, CASE WHEN (g * 7) % 8 < 2 AND g % 4 > 0 THEN 10 * g END
+           FROM generate_series(1, 1500) g`,
+        [u1, u2, u3],
+      );
+      await p.query(
+        `INSERT INTO design_shares (design_id, platform, kind, created_at)
+         SELECT ($1::uuid[])[1 + g % 3], (ARRAY['whatsapp', 'x', 'copy'])[1 + g % 3], CASE WHEN g % 2 = 0 THEN 'share' ELSE 'open' END,
+                now() - ((g % 600) * interval '1 day') - interval '12 hours'
+           FROM generate_series(1, 900) g`,
+        [ds],
+      );
+      await p.query(`INSERT INTO ai_budget (day, calls, pictures)
+        SELECT to_char((now() - g * interval '1 day') AT TIME ZONE 'utc', 'YYYY-MM-DD'), g, g % 7 FROM generate_series(0, 450) g`);
+      await p.query(`INSERT INTO events (session_id, name, signed_in, created_at)
+        SELECT 's' || (g % 40), (ARRAY['landed', 'paint_first', 'save_clicked'])[1 + g % 3], g % 2 = 0, now() - ((g % 450) * interval '1 day') - interval '12 hours'
+          FROM generate_series(1, 900) g`);
+      await p.query(`INSERT INTO visits (visitor_key, source, path, is_bot, created_at) VALUES
+        ('k-today', 'direct', '/', false, now() - interval '2 hours'), ('k-1d', 'direct', '/app', false, now() - interval '1 day 2 hours'),
+        ('k-3d', 'search', '/community', false, now() - interval '3 days 2 hours'),
+        (NULL, 'social', '/t/x', false, ${ago(100)}), (NULL, 'direct', '/', false, ${ago(181)})`);
+      await p.query(`INSERT INTO visits_daily (day, visitors) VALUES ((now() - interval '3 days 2 hours')::date, 1)`);
+      await p.query('ANALYZE');
+
+      const aiRepo = new PgAiEventsRepository(p, p);
+      const stats = new PgAdminStatsRepository(p);
+      const social = new PgSocialRepository(p);
+      const traffic = new PgTrafficRepository(p, p);
+      const events = new PgEventsRepository(p, p);
+      const budget = new PgAiBudgetRepository(p);
+      const auth = new PgAuthRepository(p, p);
+      const today = new Date().toISOString().slice(0, 10);
+      // Order among equal counts is not a number: lists are compared sorted.
+      const norm = (v: unknown): unknown => Array.isArray(v)
+        ? v.map(norm).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)))
+        : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v as Record<string, unknown>).map(([k, x]) => [k, norm(x)])) : v;
+      // Traffic: unique visitors per page or source only ever counted rows that
+      // still had a key (two days); stripping them is the anonymisation itself,
+      // unchanged here. The days and the totals keep their counts (visits_daily).
+      const trafficOf = (t: Awaited<ReturnType<typeof traffic.summary>>) => ({
+        totals: t.totals, daily: t.daily,
+        buckets: Object.fromEntries(Object.entries(t).filter(([, v]) => Array.isArray(v) && v.length && 'key' in (v[0] as object)).map(([k, v]) => [k, (v as { key: string; visits: number }[]).map((b) => [b.key, b.visits])])),
+      });
+      const readers = async () => {
+        const ov = await stats.overview();
+        return norm({
+          ai: await Promise.all([1, 7, 30, 90, 365].map((d) => aiRepo.stats(d))),
+          overview: { totals: ov.totals, recent7d: ov.recent7d, series: ov.series, topDesigns: ov.topDesigns },
+          shares: await Promise.all([7, 30, 90, 365].map((d) => stats.shares(d))),
+          designShares: await Promise.all(ds.map((id) => repo.shareStats(id))),
+          unread: await social.unreadCount(u1),
+          traffic: (await Promise.all([30, 180].map((d) => traffic.summary(d)))).map(trafficOf),
+          funnel: await Promise.all([30, 365].map((d) => events.funnel(['landed', 'paint_first', 'save_clicked'], d))),
+          budget: [await budget.load(today), await budget.load(new Date(Date.now() - 864e5).toISOString().slice(0, 10))],
+          sessions: [await auth.getSessionUser('s3-live-1').then((u) => u?.id), await auth.getSessionUser('s3-live-2').then((u) => u?.id), await auth.getSessionUser('s3-exp-3')],
+        }) as {
+          ai: Awaited<ReturnType<typeof aiRepo.stats>>[]; overview: { totals: { shares: number } }; shares: unknown[]; designShares: unknown[];
+          unread: number; traffic: unknown[]; funnel: unknown[]; budget: unknown[]; sessions: unknown[];
+        };
+      };
+      const before = await readers();
+      check(before.ai[4].totals.all === 1500 && before.ai[4].hitCap.length > 0 && before.overview.totals.shares > 0, '(the readers see the seeded history)');
+      const notesBefore = await social.listNotifications(u1, 100);
+      const count = async (sql: string) => Number((await p.query(sql)).rows[0].n);
+      const oldAi = await count(`SELECT count(*) AS n FROM ai_events WHERE at < ((date_trunc('day', now() AT TIME ZONE 'utc') - interval '400 days') AT TIME ZONE 'utc')`);
+      const oldShares = await count(`SELECT count(*) AS n FROM design_shares WHERE created_at < ((date_trunc('day', now() AT TIME ZONE 'utc') - interval '400 days') AT TIME ZONE 'utc')`);
+      check(oldAi > 100 && oldShares > 50, `(${oldAi} AI events and ${oldShares} shares are past 400 days)`);
+
+      // A partial run (a budget spent after one small batch) leaves every number the same.
+      const aiSweep = SWEEPS.find((s) => s.job === 'ai_events')!;
+      const partial = await runSweep(p, aiSweep, { batch: 37, budgetMs: 0 });
+      assert.equal(partial.removed, 37);
+      check(partial.more, 'a sweep out of time says there is more');
+      assert.deepEqual(await readers(), before, 'Postgres: after one batch of a rollup, every reader gives the same numbers');
+      // A batch with a 1 ms limit is cancelled (or, rarely, done whole): rows
+      // and aggregates move together or not at all.
+      await runSweep(p, aiSweep, { batch: 50, statementMs: 1 });
+      assert.deepEqual(await readers(), before, 'Postgres: and after a batch cut short by its time limit');
+
+      // The full run, then the funnel and visits purges, as the boot does.
+      const lines: string[] = [];
+      const results = await runRetention(p, { log: (l) => lines.push(l), batch: 100 });
+      check(lines.length === SWEEPS.length && lines.every((l) => /^\[tifo\] retention: \w+ \(.+\): \d+ removed/.test(l)), `one log line per sweep\n${lines.join('\n')}`);
+      check(results.every((x) => !x.error && !x.more), 'every sweep finished');
+      await events.purge(new Date(Date.now() - 400 * 864e5));
+      await traffic.purge();
+      const after = await readers();
+      assert.deepEqual(after.ai, before.ai, 'Postgres: the AI tab, every window and every all-time figure, is the same after the rollup');
+      assert.deepEqual(after.overview, before.overview, 'Postgres: the admin overview, its all-time share count included, is the same');
+      assert.deepEqual(after.shares, before.shares, 'Postgres: the sharing panel, every window, is the same');
+      assert.deepEqual(after.designShares, before.designShares, 'Postgres: each design’s own share counts are the same');
+      assert.equal(after.unread, before.unread, 'Postgres: the unread count is the same');
+      assert.deepEqual(after.traffic, before.traffic, 'Postgres: the traffic and growth figures are the same');
+      assert.deepEqual(after.funnel, before.funnel, 'Postgres: the funnel is the same');
+      assert.deepEqual(after.budget, before.budget, 'Postgres: today’s and yesterday’s AI budget are the same');
+      assert.deepEqual(after.sessions, before.sessions, 'Postgres: live sessions still open their accounts; an expired one still does not');
+      check(new Set(after.sessions).size === 3 && after.sessions.includes(u1) && after.sessions.includes(u2) && after.sessions.includes(null), '(two live, one expired)');
+      assert.equal(await count("SELECT count(*) AS n FROM visits WHERE visitor_key IS NOT NULL AND created_at < now() - interval '2 days'"), 0, 'Postgres: no visitor key outlives two days');
+      assert.equal(await count("SELECT count(*) AS n FROM visits WHERE created_at < now() - interval '180 days'"), 0, 'Postgres: no visit outlives 180 days');
+      // What went.
+      assert.equal(await count('SELECT count(*) AS n FROM auth_tokens WHERE expires_at < now()'), 0, 'Postgres: expired sessions are gone');
+      assert.equal(await count('SELECT count(*) AS n FROM auth_tokens'), 2, 'Postgres: live ones are kept');
+      assert.deepEqual((await p.query('SELECT token_hash FROM email_tokens')).rows.map((x) => x.token_hash), ['s3-live-reset'], 'Postgres: used and expired links, codes and sign-in tickets are gone; the live reset link is kept');
+      assert.equal(await auth.consumeEmailToken('s3-live-reset', 'reset_password'), u1, 'Postgres: and it still works, once');
+      assert.equal(await auth.consumeEmailToken('s3-live-reset', 'reset_password'), null, 'Postgres: exactly once');
+      const notesAfter = await social.listNotifications(u1, 100);
+      const goneNotes = notesBefore.filter((x) => !notesAfter.some((y) => y.id === x.id));
+      assert.deepEqual(goneNotes.map((x) => x.kind).sort(), ['comment', 'like'], 'Postgres: read notifications past 180 days are gone');
+      check(notesAfter.some((x) => x.kind === 'comment' && !x.readAt) && notesAfter.some((x) => x.kind === 'new_follower'), 'Postgres: unread ones, and the kinds a de-duplication check reads, are kept whatever their age');
+      assert.equal(await count(`SELECT count(*) AS n FROM notifications WHERE user_id = '${u2}' AND kind = 'follow_post'`), 1, 'Postgres: a 300-day-old read "new post" is kept too');
+      // Following again after the sweep still notifies once, ever (audit round four).
+      await social.unfollow(u2, u1);
+      await social.follow(u2, u1);
+      assert.equal(await count(`SELECT count(*) AS n FROM notifications WHERE user_id = '${u1}' AND actor_id = '${u2}' AND kind = 'new_follower'`), 1, 'Postgres: unfollow and follow again: still one "new follower", ever');
+      await social.notifyFollowersOfPost(u1, ds[0]);
+      assert.equal(await count(`SELECT count(*) AS n FROM notifications WHERE user_id = '${u2}' AND kind = 'follow_post' AND design_id = '${ds[0]}'`), 1, 'Postgres: publishing again does not tell a follower twice');
+      assert.equal(await count(`SELECT count(*) AS n FROM ai_events WHERE at < ((date_trunc('day', now() AT TIME ZONE 'utc') - interval '400 days') AT TIME ZONE 'utc')`), 0, 'Postgres: raw AI events past 400 days are gone');
+      assert.equal(await count('SELECT sum(n) AS n FROM ai_events_daily'), oldAi, 'Postgres: every one of them is in the daily rollup, once');
+      assert.equal(await count('SELECT sum(n) AS n FROM design_shares_daily'), oldShares, 'Postgres: and every old share in its rollup, once');
+      assert.equal(await count(`SELECT count(*) AS n FROM ai_budget WHERE day < to_char((now() AT TIME ZONE 'utc') - interval '400 days', 'YYYY-MM-DD')`), 0, 'Postgres: AI budget days past 400 are gone');
+      // The rollups hold no one.
+      const cols = async (t: string) => (await p.query('SELECT column_name AS c FROM information_schema.columns WHERE table_schema = $1 AND table_name = $2', [name, t])).rows.map((x) => String(x.c));
+      for (const t of ['ai_events_daily', 'design_shares_daily']) {
+        const c = await cols(t);
+        check(!c.some((x) => /user|detail|via|ip|email|prompt/.test(x)), `Postgres: ${t} names no account and keeps no text (${c.join(', ')})`);
+      }
+      assert.deepEqual((await cols('ai_quota_hits')).sort(), ['id', 'last_at', 'times', 'user_id'], 'Postgres: the one per-account rollup is a count and a date');
+      // A deleted account takes its rolled-up history with it.
+      check(await count(`SELECT count(*) AS n FROM ai_quota_hits WHERE user_id = '${u3}'`) === 1, '(u3 has a rolled-up cap count)');
+      await p.query('DELETE FROM users WHERE id = $1', [u3]);
+      assert.equal(await count(`SELECT count(*) AS n FROM ai_quota_hits WHERE user_id = '${u3}'`), 0, 'Postgres: account deletion erases its rolled-up cap count');
+      // A second run has nothing left to do, and changes nothing.
+      const again = await runRetention(p, { log: () => {} });
+      assert.deepEqual(again.filter((x) => x.removed).map((x) => [x.job, x.removed]), [['email_tokens', 1]], 'Postgres: a second run removes only the reset link used since, and nothing else');
+      // Each sweep finds its rows through an index.
+      await applyMaintenanceIndexes(p, () => {});
+      const idx = async (sql: string) => {
+        const c = await p.connect();
+        try {
+          await c.query('BEGIN');
+          await c.query('SET LOCAL enable_seqscan = off');
+          const plan = (await c.query(`EXPLAIN ${sql}`)).rows.map((x) => x['QUERY PLAN']).join('\n');
+          await c.query('ROLLBACK');
+          return plan;
+        } finally {
+          c.release();
+        }
+      };
+      check(/visits_keyed_idx/.test(await idx("SELECT id FROM visits WHERE visitor_key IS NOT NULL AND created_at < now() - interval '2 days' LIMIT 5000")), 'Postgres: the visitor-key strip uses visits_keyed_idx');
+      check(/events_created_idx/.test(await idx("SELECT id FROM events WHERE created_at < now() - interval '400 days' LIMIT 5000")), 'Postgres: the funnel purge uses events_created_idx');
+      check(/notifications_sweep_idx/.test(await idx("SELECT id FROM notifications WHERE read_at IS NOT NULL AND created_at < now() - interval '180 days' AND kind <> ALL (ARRAY['new_follower', 'follow_post']) LIMIT 5000")), 'Postgres: the notification sweep uses notifications_sweep_idx');
+      check(/design_shares_created_idx/.test(await idx("SELECT id FROM design_shares WHERE created_at < now() - interval '400 days' ORDER BY created_at, id LIMIT 5000")), 'Postgres: the share rollup uses design_shares_created_idx');
+      // A deletion during a rollup batch: it used to deadlock (the batch held
+      // the rows, the deletion the parent) and Postgres cancelled the deletion.
+      // Now the batch locks the parent first: whichever comes second waits.
+      {
+        const other = new pg.Client({ connectionString: process.env.DATABASE_URL, options: `-c search_path=${name} -c timezone=UTC` });
+        await other.connect();
+        try {
+          const cases = [
+            { job: 'design_shares', parent: async () => {
+              const d = (await p.query(`INSERT INTO designs (title, template_id, template_version, palette, cells, is_public) VALUES ('dl', 'x', 1, '[]', '\\x00', true) RETURNING id`)).rows[0].id as string;
+              await p.query(`INSERT INTO design_shares (design_id, platform, kind, created_at) VALUES ($1, 'x', 'share', '2020-01-01')`, [d]);
+              return { id: d, del: 'DELETE FROM designs WHERE id = $1', left: 'SELECT count(*)::int AS n FROM design_shares_daily WHERE design_id = $1' };
+            } },
+            { job: 'ai_events', parent: async () => {
+              const u = await mkUser(`dl_${randomBytes(3).toString('hex')}`);
+              await p.query(`INSERT INTO ai_events (user_id, at, mode, outcome) VALUES ($1, '2020-01-01', 'std', 'quota')`, [u]);
+              return { id: u, del: 'DELETE FROM users WHERE id = $1', left: 'SELECT count(*)::int AS n FROM ai_quota_hits WHERE user_id = $1' };
+            } },
+          ];
+          for (const c of cases) {
+            const sw = SWEEPS.find((x) => x.job === c.job)!;
+            // The batch first: it holds the parent when the deletion arrives.
+            {
+              const par = await c.parent();
+              let release!: () => void;
+              const gate = new Promise<void>((r) => (release = r));
+              let reached!: () => void;
+              const atGate = new Promise<void>((r) => (reached = r));
+              const gated = { connect: async () => {
+                const cl = await p.connect();
+                return { release: (x?: boolean) => cl.release(x), query: async (sql: string, v?: unknown[]) => { const r = await cl.query(sql, v); if (sql === sw.lock) { reached(); await gate; } return r; } };
+              } };
+              const running = runSweep(gated, sw);
+              await atGate;
+              const del = other.query('BEGIN').then(() => other.query(par.del, [par.id])).then(() => other.query('COMMIT')).then(() => 'committed', (e: Error) => `failed: ${e.message}`);
+              await new Promise((r) => setTimeout(r, 300));
+              release();
+              const res = await running;
+              check(!res.error && res.removed >= 1, `Postgres ${c.job}: the batch finishes (${res.error ?? res.removed})`);
+              assert.equal(await del, 'committed', `Postgres ${c.job}: and the deletion that waited for it goes through`);
+              assert.equal(Number((await p.query(par.left, [par.id])).rows[0].n), 0, `Postgres ${c.job}: taking its rolled-up row with it`);
+            }
+            // The deletion first: the batch waits for it.
+            {
+              const par = await c.parent();
+              await other.query('BEGIN');
+              await other.query(par.del, [par.id]);
+              const running = runSweep(p, sw);
+              await new Promise((r) => setTimeout(r, 300));
+              assert.equal(await other.query('COMMIT').then(() => 'committed', (e: Error) => `failed: ${e.message}`), 'committed', `Postgres ${c.job}: a deletion already under way goes through`);
+              const res = await running;
+              check(!res.error, `Postgres ${c.job}: and the batch, having waited, finishes (${res.error ?? 'ok'})`);
+              assert.equal(Number((await p.query(par.left, [par.id])).rows[0].n), 0, `Postgres ${c.job}: with nothing left for the deleted one`);
+            }
+          }
+        } finally {
+          await other.end();
+        }
+      }
+      console.log('  s3 retention (Postgres): every reader the same before and after (AI tab, overview, sharing, design stats, unread, traffic, funnel, budget, sessions); expired and read-and-old rows gone, de-duplication kept, rollups name no one');
+    } finally {
+      await p.end();
+      await admin.query(`DROP SCHEMA ${name} CASCADE`).catch(() => {});
+      await admin.end();
+    }
+  }
+  console.log('performance plan stage 3 (server), the feed cursor and retention: all assertions passed');
+}
+
+// ---------- 2026-10: performance plan, stage 3 (editor): script-src is exactly 'self' (P3.1) ----------
+// The 2D editor draws its seats as one mesh instead of Pixi's
+// particles, and loads Pixi's eval-free code (pixi.js/unsafe-eval), so the
+// policy no longer allows 'unsafe-eval': no page and no worker may evaluate a
+// string as code. This block fails if 'unsafe-eval', or anything looser,
+// ever comes back on any kind of answer, and if Pixi is ever imported
+// somewhere its eval-free code does not reach (it would then refuse to start
+// under this policy, or someone would be tempted to loosen it again).
+{
+  const { mkdtempSync, writeFileSync, mkdirSync, copyFileSync, readdirSync, readFileSync, statSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join, dirname, relative, resolve } = await import('node:path');
+  const { fileURLToPath } = await import('node:url');
+  const check = (cond: unknown, msg: string): void => assert.ok(cond, msg);
+
+  // ---- the header, on every kind of answer ----
+  {
+    const dist = mkdtempSync(`${tmpdir()}/tifo-perf-s3-csp-`);
+    for (const f of readdirSync('.').filter((n) => n.endsWith('.html'))) copyFileSync(f, `${dist}/${f}`);
+    mkdirSync(`${dist}/assets`);
+    writeFileSync(`${dist}/assets/heavy.worker-Ab12Cd34.js`, 'self.onmessage = () => {};\n');
+    writeFileSync(`${dist}/assets/editor-Ab12Cd34.js`, 'export {};\n');
+    writeFileSync(`${dist}/assets/index-Ab12Cd34.css`, 'body{margin:0}\n');
+    const auth = new MemoryAuthRepository();
+    const designs = new MemoryDesignRepository((id) => auth.usernameOf(id));
+    const app = await buildApp(designs, auth, templates, { staticDir: dist, rateLimit: true, social: new MemorySocialRepository(designs, auth), leads: new MemoryLeadsRepository() });
+    const owner = await reg(app, 'csp_s3_owner');
+    const pub = await makeDesign(app, owner.token, true);
+    type Ask = { method: 'GET' | 'POST'; url: string; headers?: Record<string, string>; payload?: string };
+    const answers: [string, Ask][] = [
+      ['landing', { method: 'GET', url: '/' }],
+      ['editor page', { method: 'GET', url: '/app?new=1' }],
+      ['projects page', { method: 'GET', url: '/projects' }],
+      ['community page', { method: 'GET', url: '/community' }],
+      ['share page', { method: 'GET', url: `/t/${pub}` }],
+      ['design page', { method: 'GET', url: `/d/${pub}` }],
+      ['seat page', { method: 'GET', url: `/s/${pub}` }],
+      ['clubs', { method: 'GET', url: '/clubs' }],
+      ['legal', { method: 'GET', url: '/legal' }],
+      ['spec', { method: 'GET', url: '/tifo-spec' }],
+      ['account', { method: 'GET', url: '/account' }],
+      ['reset', { method: 'GET', url: '/reset' }],
+      ['admin page', { method: 'GET', url: '/admin' }],
+      ['editor script', { method: 'GET', url: '/assets/editor-Ab12Cd34.js' }],
+      ['module worker', { method: 'GET', url: '/assets/heavy.worker-Ab12Cd34.js' }],
+      ['stylesheet', { method: 'GET', url: '/assets/index-Ab12Cd34.css' }],
+      ['JSON', { method: 'GET', url: '/api/gallery' }],
+      ['a design', { method: 'GET', url: `/api/designs/${pub}` }],
+      ['401', { method: 'GET', url: '/api/me' }],
+      ['404 page', { method: 'GET', url: '/no-such-page' }],
+      ['404 asset', { method: 'GET', url: '/assets/nope-Ab12Cd34.js' }],
+      ['400', { method: 'POST', url: '/api/auth/login', headers: { 'content-type': 'application/json' }, payload: '{"nope"' }],
+    ];
+    /** Anything a script directive must never hold: eval of any kind, inline code, hashes, nonces, schemes, hosts. */
+    const LOOSE = /unsafe-eval|wasm-unsafe-eval|unsafe-inline|unsafe-hashes|strict-dynamic|unsafe-allow-redirects|^'nonce-|^'sha(256|384|512)-|^[a-z][a-z0-9+.-]*:|^\*|\.|^'report-sample'$/i;
+    // The check itself: every looser source is caught, and 'self' is not.
+    for (const s of ["'unsafe-eval'", "'wasm-unsafe-eval'", "'unsafe-inline'", "'unsafe-hashes'", "'strict-dynamic'", "'nonce-abc'", "'sha256-abc='", 'blob:', 'data:', 'https:', 'https://cdn.example.com', 'cdn.example.com', '*', '*.example.com']) check(LOOSE.test(s), `the looseness check catches ${s}`);
+    check(!LOOSE.test("'self'") && !LOOSE.test("'none'"), "the looseness check lets 'self' and 'none' through");
+    let n = 0;
+    for (const [label, req] of answers) {
+      const r = await app.inject({ ...req, remoteAddress: `198.18.200.${n++}` });
+      const raw = String(r.headers['content-security-policy'] ?? '');
+      check(raw.length > 0, `${label} (${r.statusCode}): has a policy`);
+      check(!/unsafe-eval/i.test(raw), `${label} (${r.statusCode}): no 'unsafe-eval' or 'wasm-unsafe-eval' anywhere in the policy`);
+      const d = new Map(raw.split(';').map((x) => x.trim()).filter(Boolean).map((x) => { const [k, ...v] = x.split(/\s+/); return [k, v] as const; }));
+      assert.deepEqual(d.get('script-src'), ["'self'"], `${label} (${r.statusCode}): script-src is exactly 'self'`);
+      assert.deepEqual(d.get('default-src'), ["'self'"], `${label} (${r.statusCode}): default-src is exactly 'self'`);
+      assert.deepEqual(d.get('script-src-attr'), ["'none'"], `${label} (${r.statusCode}): no inline handlers`);
+      for (const k of ['script-src-elem', 'worker-src', 'child-src']) {
+        check(!d.has(k) || (d.get(k)!.length === 1 && d.get(k)![0] === "'self'"), `${label} (${r.statusCode}): ${k} is absent or exactly 'self' (${d.get(k)?.join(' ')})`);
+      }
+      for (const [k, v] of d) {
+        if (!/^(script-src|script-src-elem|worker-src|child-src|default-src)$/.test(k)) continue;
+        check(v.every((s) => s === "'self'" || !LOOSE.test(s)), `${label}: ${k} holds nothing looser than 'self' (${v.join(' ')})`);
+      }
+      check(!('content-security-policy-report-only' in r.headers), `${label}: no report-only policy beside it`);
+    }
+    // The pinned options themselves: helmet is given exactly 'self'.
+    const routesSrc = readFileSync(new URL('../src/routes.ts', import.meta.url), 'utf8');
+    check(/scriptSrc:\s*\["'self'"\]\s*,/.test(routesSrc), "routes.ts gives helmet scriptSrc: [\"'self'\"] and nothing else");
+    await app.close();
+    console.log(`  P3.1: script-src is exactly 'self' on ${answers.length} kinds of answer (pages, scripts, the worker, JSON, errors); nothing looser anywhere`);
+  }
+
+  // ---- Pixi is only ever started with its eval-free code ----
+  {
+    const srcRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', 'src');
+    const files: string[] = [];
+    const walk = (dir: string): void => {
+      for (const name of readdirSync(dir)) {
+        const full = join(dir, name);
+        if (statSync(full).isDirectory()) { if (name !== 'node_modules') walk(full); }
+        else if (/\.(ts|mts|tsx)$/.test(name)) files.push(full);
+      }
+    };
+    walk(srcRoot);
+    const rel = (f: string): string => relative(srcRoot, f).split('\\').join('/');
+    const code = new Map(files.map((f) => [rel(f), readFileSync(f, 'utf8')]));
+    // Every module that imports Pixi itself (types aside).
+    const PIXI_VALUE = /^\s*import\s+(?!type\b)[^;]*?from\s+['"]pixi\.js(?:\/[^'"]*)?['"]|import\(\s*['"]pixi\.js/m;
+    const pixiUsers = [...code].filter(([, c]) => PIXI_VALUE.test(c)).map(([f]) => f).sort();
+    assert.deepEqual(pixiUsers, ['render/editor.ts', 'render/objectOverlay.ts', 'render/ownTexture.ts', 'render/seatMesh.ts'], `only the editor's modules use Pixi (now: ${pixiUsers.join(', ')}); a new one must be reached only through render/editor.ts, which loads pixi.js/unsafe-eval first`);
+    const editor = code.get('render/editor.ts')!;
+    const firstImport = /^\s*import\s[^;]*;/m.exec(editor.replace(/^\s*\/\/.*$/gm, ''))?.[0] ?? '';
+    check(/^\s*import\s+['"]pixi\.js\/unsafe-eval['"];$/.test(firstImport), `render/editor.ts imports 'pixi.js/unsafe-eval' before anything else (first import: ${firstImport.trim()})`);
+    // Its helpers are reached only through the editor (a type import does not load a module).
+    for (const helper of ['objectOverlay', 'ownTexture', 'seatMesh']) {
+      const importers = [...code].filter(([f, c]) => f !== `render/${helper}.ts` && new RegExp(`^\\s*import\\s+(?!type\\b)[^;]*?from\\s+['"][./]*(?:render/)?${helper}['"]|import\\(\\s*['"][./]*(?:render/)?${helper}['"]`, 'm').test(c)).map(([f]) => f);
+      assert.deepEqual(importers, ['render/editor.ts'], `render/${helper}.ts is loaded only by render/editor.ts (now: ${importers.join(', ')})`);
+    }
+    // Nothing compiles WebAssembly: that would need 'wasm-unsafe-eval', which is a decision to make on purpose.
+    const wasm = [...code].filter(([, c]) => /\bWebAssembly\s*\./.test(c)).map(([f]) => f);
+    assert.deepEqual(wasm, [], `no client module compiles WebAssembly (${wasm.join(', ')})`);
+    console.log("  P3.1: Pixi is used by the editor's own modules only, reached through render/editor.ts, which loads pixi.js/unsafe-eval first; no WebAssembly");
+  }
+  console.log("performance plan stage 3 (editor), script-src 'self': all assertions passed");
 }

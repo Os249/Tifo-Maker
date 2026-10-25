@@ -9,26 +9,31 @@
  * that club's own ground, framed whole, turning slowly. The chips under it
  * switch club, and "Make this tifo" starts the same thing in the editor.
  *
- * Everyone first gets a picture of the first one: the still
- * (public/hero-stadium.webp, and a 640 px copy for smaller screens), rendered
- * from this module by scripts/hero-still.mts and written straight into
- * landing.html, so it paints with the page. A tap or a click on it, or on one
- * of the club chips, starts the live renderer: 165 KB gz of Three.js, the
- * stadium catalogue and a seat map built off the main thread.
+ * The page is for every fan, not one club's: it opens on a different club on
+ * each visit. The server picks one per page load (server/src/landingHero.ts)
+ * and writes that club into the page: its still picture (public/hero/<club>.webp,
+ * and a 640 px copy for smaller screens, rendered from this module by
+ * scripts/hero-still.mts), its caption, its chip pressed and its "Make this
+ * tifo" link, so it paints with the page. This module starts from whichever
+ * club that is. A tap or a click on the picture, or on one of the club chips,
+ * starts the live renderer: 165 KB gz of Three.js, the stadium catalogue and a
+ * seat map built off the main thread.
  *
  * Desktops used to start the live one by themselves once the browser was idle,
  * which cost them 183 KB gz and about three seconds of blocked main thread
  * before anyone had asked for it; phones never did. Now neither does
  * (performance plan P1.14), and WebGL is not even probed until the tap.
- * ?hero3d still starts it at once, for the still-picture script and the tests.
+ * ?hero3d still starts it at once, for the still-picture script and the tests,
+ * and ?hero=<club> opens on that club.
  */
 import HERO_TIFOS from './data/heroTifos.json';
-import { t } from './ui/i18n';
+import { localPath, t } from './ui/i18n';
 import { HERO_GROUND_KEYS } from './heroGrounds';
 
 const HOST_ID = 'hero-3d';
 const PHONE_QUERY = '(max-width: 860px)';
-export const HERO_STILL = '/hero-stadium.webp';
+/** A hero club's still picture, at 960 px or (small) 640 px wide. */
+export const heroStill = (club: string, small = false): string => `/hero/${club}${small ? '-640' : ''}.webp`;
 
 interface HeroTifo {
   club: string;
@@ -37,6 +42,8 @@ interface HeroTifo {
   palette: string[];
   cellsGzB64: string;
   title: string;
+  /** See Preview3DOptions.heroScale: further back for a building bigger than its bowl. */
+  heroScale?: number;
 }
 const TIFOS = HERO_TIFOS as HeroTifo[];
 
@@ -86,12 +93,29 @@ async function caption(tifo: HeroTifo): Promise<void> {
     scarf.style.setProperty('--c2', colours[1]);
   }
   const make = document.getElementById('hero-make') as HTMLAnchorElement | null;
-  if (make) make.href = `/projects?new=1&club=${encodeURIComponent(club.id)}`;
+  if (make) make.href = localPath(`/projects?new=1&club=${encodeURIComponent(club.id)}`);
   document.querySelectorAll<HTMLElement>('.hero-club').forEach((b) => {
     const on = b.dataset.club === tifo.club;
     b.classList.toggle('on', on);
     b.setAttribute('aria-pressed', String(on));
   });
+  revealChip();
+}
+
+/**
+ * On a phone the club chips are one strip that scrolls sideways, and the club
+ * the page opened on can be at its far end, out of sight: bring the pressed
+ * chip into the strip (the strip only, never the page).
+ */
+function revealChip(): void {
+  const strip = document.querySelector<HTMLElement>('.hero-clubs');
+  const on = strip?.querySelector<HTMLElement>('.hero-club.on');
+  if (!strip || !on || strip.scrollWidth <= strip.clientWidth + 1) return;
+  const s = strip.getBoundingClientRect();
+  const c = on.getBoundingClientRect();
+  const pad = 18;
+  if (c.left < s.left + pad) strip.scrollBy({ left: c.left - s.left - pad });
+  else if (c.right > s.right - pad) strip.scrollBy({ left: c.right - s.right + pad });
 }
 
 /**
@@ -101,7 +125,7 @@ async function caption(tifo: HeroTifo): Promise<void> {
  * only if it is missing. It goes away when the live stadium is in (see show),
  * and stays if that cannot happen, rather than leaving an empty frame.
  */
-function mountStill(host: HTMLElement, live: () => Promise<boolean>): void {
+function mountStill(host: HTMLElement, club: string, live: () => Promise<boolean>): void {
   host.classList.add('still');
   let img = host.querySelector<HTMLImageElement>('img.hero-still');
   if (!img) {
@@ -110,8 +134,14 @@ function mountStill(host: HTMLElement, live: () => Promise<boolean>): void {
     img.alt = '';
     img.width = 960;
     img.height = 600;
-    img.src = HERO_STILL;
     host.appendChild(img);
+  }
+  // The page normally arrives with this club's picture already in it; only
+  // a page that names another (a ?hero= link, or `vite dev`, where no server
+  // picks) is put right here.
+  if (!img.getAttribute('src')?.endsWith(heroStill(club))) {
+    img.srcset = `${heroStill(club, true)} 640w, ${heroStill(club)} 960w`;
+    img.src = heroStill(club);
   }
   const still = img;
   const play = document.getElementById('hero-play') as HTMLButtonElement | null;
@@ -143,10 +173,26 @@ function mountStill(host: HTMLElement, live: () => Promise<boolean>): void {
   play?.addEventListener('click', tap);
 }
 
+/**
+ * Which hero tifo the page opened on: ?hero=<club>, else the club the server
+ * wrote into the page (data-club on the frame, and its chip pressed), else the
+ * first.
+ */
+function startIndex(host: HTMLElement): number {
+  const want =
+    new URLSearchParams(location.search).get('hero') ??
+    host.dataset.club ??
+    document.querySelector<HTMLElement>('.hero-club.on')?.dataset.club;
+  const i = TIFOS.findIndex((x) => x.club === want);
+  return i >= 0 ? i : 0;
+}
+
 export async function mountHeroStadium(): Promise<void> {
   const host = document.getElementById(HOST_ID);
   if (!host || !TIFOS.length) return;
-  void caption(TIFOS[0]!);
+  const first = startIndex(host);
+  revealChip();
+  void caption(TIFOS[first]!);
 
   const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
   const phone = window.matchMedia?.(PHONE_QUERY).matches ?? false;
@@ -184,7 +230,7 @@ export async function mountHeroStadium(): Promise<void> {
       preview?.stop();
       preview?.dispose();
       host.querySelector('canvas')?.remove();
-      preview = new Preview3D(host, map, store, { autoRotate: !reduceMotion, hero: true, transparent: true, template });
+      preview = new Preview3D(host, map, store, { autoRotate: !reduceMotion, hero: true, heroScale: tifo.heroScale, transparent: true, template });
       showing = i;
       // The live one is in: the picture that stood in for it goes.
       host.querySelector('img.hero-still')?.remove();
@@ -230,12 +276,12 @@ export async function mountHeroStadium(): Promise<void> {
         void show(i);
         return;
       }
-      location.assign(`/projects?new=1&club=${encodeURIComponent(TIFOS[i]!.club)}`);
+      location.assign(localPath(`/projects?new=1&club=${encodeURIComponent(TIFOS[i]!.club)}`));
     });
   });
 
-  mountStill(host, () => goLive(0));
-  if (forced) void goLive(0);
+  mountStill(host, TIFOS[first]!.club, () => goLive(first));
+  if (forced) void goLive(first);
 }
 
 /** Re-say the caption in the page's language (the landing's language toggle). */

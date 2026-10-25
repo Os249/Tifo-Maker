@@ -2,7 +2,7 @@
  * Admin analytics dashboard — served at /admin (+ /admin.js).
  *
  * Why a server-rendered string and not a Vite page: the site CSP is strict
- * (script-src 'self' 'unsafe-eval', connect-src 'self', no CDNs, no inline
+ * (script-src 'self' only since performance plan P3.1, connect-src 'self', no CDNs, no inline
  * <script>). So the shell carries NO inline script — it loads /admin.js as a
  * same-origin ES module — and every chart is hand-drawn SVG with zero external
  * libraries. Inline <style> is allowed (style-src includes 'unsafe-inline').

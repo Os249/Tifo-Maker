@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { StadiumTemplate } from '../../core/types';
 import { spanOn } from '../../core/standSpans';
 import { ambulance } from './venue';
+import { runSync, type Steps } from './steps';
 
 /**
  * Kingdom Arena, Riyadh — the building around the four stands.
@@ -247,6 +248,11 @@ function panel(w: number, h: number, mat: THREE.Material, x: number, y: number, 
 }
 
 export function buildKingdom(template: StadiumTemplate, shadows: boolean): { object: THREE.Object3D; disposables: Trash[] } {
+  return runSync(buildKingdomSteps(template, shadows));
+}
+
+/** buildKingdom in steps, one a part of the hall (performance plan P3.6). */
+export function* buildKingdomSteps(template: StadiumTemplate, shadows: boolean): Steps<{ object: THREE.Object3D; disposables: Trash[] }> {
   const group = new THREE.Group();
   group.name = 'kingdom-arena';
   const trash: Trash[] = [];
@@ -267,6 +273,7 @@ export function buildKingdom(template: StadiumTemplate, shadows: boolean): { obj
   const duct = new THREE.MeshStandardMaterial({ color: 0x3b3e44, roughness: 0.5, metalness: 0.7 });
   trash.push(wallIn, ceilIn, steel, steelLight, floorMat, starMat, duct);
 
+  yield;
   // ---- the hall: floor, walls, ceilings ---------------------------------------
   // Floor round the pitch (the pitch and its run-off are drawn over it).
   const floor = panel(2 * X, W, floorMat, 0, -0.03, zMid, 0, trash, -Math.PI / 2);
@@ -287,6 +294,7 @@ export function buildKingdom(template: StadiumTemplate, shadows: boolean): { obj
     group.add(panel(W, CEIL_HIGH - CEIL_LOW, wallIn, sx * HIGH_X, (CEIL_HIGH + CEIL_LOW) / 2, zMid, sx > 0 ? -Math.PI / 2 : Math.PI / 2, trash));
   }
 
+  yield;
   // ---- the ceiling's lights: a grid of small points over the high section ----
   const stars: Inst[] = [];
   const nx = Math.floor((2 * HIGH_X - 8) / 6);
@@ -305,6 +313,7 @@ export function buildKingdom(template: StadiumTemplate, shadows: boolean): { obj
   }
   group.add(instanced(stars, starMat, trash));
 
+  yield;
   // ---- roof steel ----------------------------------------------------------------
   const members: Inst[] = [];
   const V = (x: number, y: number, z: number): THREE.Vector3 => new THREE.Vector3(x, y, z);
@@ -370,6 +379,7 @@ export function buildKingdom(template: StadiumTemplate, shadows: boolean): { obj
     group.add(d);
   }
 
+  yield;
   // ---- the main stand: three floors of hospitality ---------------------------------
   const zFront = -(b + F.HOSP_FRONT); // the edge of the first terrace
   const zGlass = zFront - 2.2; // the glass line of the boxes
@@ -448,6 +458,7 @@ export function buildKingdom(template: StadiumTemplate, shadows: boolean): { obj
   group.add(instanced(rails, white, trash));
   group.add(instanced(chairs, leather, trash));
 
+  yield;
   // ---- the dugouts and the players' tunnel, in front of the main stand ---------------
   const zDug = -(34 + 4.2);
   const canopy = new THREE.MeshStandardMaterial({ color: 0xb8d4f2, roughness: 0.1, metalness: 0.2, transparent: true, opacity: 0.35, side: THREE.DoubleSide, depthWrite: false });
@@ -483,12 +494,14 @@ export function buildKingdom(template: StadiumTemplate, shadows: boolean): { obj
   mouth.position.set(0, 1.2, tz0 + 4.55);
   group.add(mouth);
 
+  yield;
   // ---- an ambulance on standby in a corner, by the main stand -----------------------
   const amb = ambulance(trash);
   amb.position.set(-(a + 6), 0.02, -(b + 4));
   amb.rotation.y = -Math.PI / 4; // nose towards the pitch
   group.add(amb);
 
+  yield;
   // ---- outside -----------------------------------------------------------------------
   const clad = claddingTexture();
   // Lit from below after dark, as the building is on a match night.

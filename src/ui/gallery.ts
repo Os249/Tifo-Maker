@@ -4,7 +4,7 @@ import {
   type GalleryItem, type GallerySort,
 } from '../net/api';
 
-import { t, tTag, tTitle } from './i18n';
+import { localPath, t, tTag, tTitle } from './i18n';
 import { hydrateBowls } from './bowlPicture';
 /**
  * Community feed: a full-screen overlay of published tifos. The heart of the
@@ -25,7 +25,7 @@ export async function openGallery(
     <div class="feed-panel" role="dialog" aria-modal="true" aria-label="${t('gal.title')}">
       <div class="feed-head">
         <div class="feed-title">${t('gal.title')}</div>
-        <div class="feed-sub">${t('gal.sub')} <a class="feed-full" href="/community" target="_blank" rel="noopener">${t('gal.openCommunity')} ↗</a></div>
+        <div class="feed-sub">${t('gal.sub')} <a class="feed-full" href="${localPath('/community')}" target="_blank" rel="noopener">${t('gal.openCommunity')} ↗</a></div>
         <button class="feed-close" aria-label="${t('common.close')}">&times;</button>
         <div class="feed-controls">
           <input type="search" class="feed-search" id="feed-search" placeholder="${t('gal.search')}" />

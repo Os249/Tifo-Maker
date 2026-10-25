@@ -38,7 +38,7 @@ import { newProjectUrl, nextDefaultName, stashNewProject, type NewProjectIntent 
 import { loadFavorites } from './stadiumFavorites';
 import { escapeHtml } from '../core/escape';
 import { fetchAiQuota, fetchMe, isSignedIn, type AiError } from '../net/api';
-import { getLang, t, tl, tv } from './i18n';
+import { getLang, localPath, t, tl, tv } from './i18n';
 
 const LAST_STADIUM_KEY = 'tifo_last_stadium_v1';
 const LAST_CLUB_KEY = 'tifo_last_club_v1';
@@ -683,7 +683,7 @@ export function openCreateProject(opts: CreateProjectOptions): void {
       if (start === 'ai') {
         if (!gate) disabled = true;
         else if (gate.kind === 'signin') label = t('st.aiSignup');
-        else if (gate.kind === 'verify') { label = t('np.verify'); href = '/account'; }
+        else if (gate.kind === 'verify') { label = t('np.verify'); href = localPath('/account'); }
         else if (gate.kind === 'empty') disabled = true;
       }
       const spark = start === 'ai' && (gate?.kind === 'ok' || !gate) ? '<span class="np-spark" aria-hidden="true">✦</span>' : '';

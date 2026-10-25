@@ -31,7 +31,7 @@ import {
   aiUnlockToken,
 } from './net/api';
 import type { Me } from './net/api';
-import { applyDom, getLang, initLang, toggleLang, t, tErr, tv } from './ui/i18n';
+import { applyDom, getLang, initLang, localPath, toggleLang, t, tErr, tv } from './ui/i18n';
 import { initScheme, setSchemeLabels } from './ui/colorScheme';
 import { enhancePasswordField } from './ui/passwordField';
 import { ensureUsernameChosen } from './ui/chooseUsernameModal';
@@ -473,7 +473,7 @@ $('ac-delete-go')?.addEventListener('click', async () => {
   say(msg, t('ac.saving'), 'info');
   try {
     await deleteAccount(password || undefined);
-    window.location.href = '/';
+    window.location.href = localPath('/');
   } catch (err) {
     const status = (err as { status?: number }).status;
     say(msg, status === 401 ? (err as Error).message : t('ac.danger.failed'), 'bad');
@@ -482,7 +482,7 @@ $('ac-delete-go')?.addEventListener('click', async () => {
 
 $('ac-signout')?.addEventListener('click', () => {
   signOut();
-  window.location.href = '/projects';
+  window.location.href = localPath('/projects');
 });
 
 // Every standalone page has to do this: `current` starts at 'en' and only

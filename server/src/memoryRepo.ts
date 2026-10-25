@@ -12,6 +12,7 @@ import type {
   FacetScope,
   GalleryItem,
   GalleryQuery,
+  FeedPage,
   Lead,
   LeadsRepository,
   NewDesign,
@@ -36,6 +37,7 @@ import type {
   ThumbnailMeta,
 } from './repo';
 import { aiPeriod, contentHash, REVISIONS_KEPT } from './repo';
+import type { FeedPosition } from './feedCursor';
 import { costStats, DESIGN_MODES, isLimitReason, modeOutcomes, type AiGroup } from './aiStats';
 import { designFacets, paletteColours } from '../../src/core/facets';
 
@@ -249,6 +251,19 @@ export class MemoryAiEventsRepository implements AiEventsRepository {
 }
 
 /** In-memory repositories: dev mode and route tests. Same contracts as Postgres. */
+/**
+ * Feed order over sort keys (P3.4): each value descending, the first that
+ * differs decides. Negative when `a` comes first. Numbers compare as numbers,
+ * ids as plain text (never localeCompare, which is not Postgres's order).
+ */
+function compareFeedKeys(a: (number | string)[], b: (number | string)[]): number {
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] === b[i]) continue;
+    return a[i] > b[i] ? -1 : 1;
+  }
+  return 0;
+}
+
 export class MemoryDesignRepository implements DesignRepository {
   private rows = new Map<string, Row>();
   /** design id -> gzipped scene JSON and its sha-256 (P2.5). Separate from the row, like the table. */
@@ -422,6 +437,38 @@ export class MemoryDesignRepository implements DesignRepository {
     return page.map((r) => this.galleryItem(r, query.viewerId));
   }
 
+  async listPublicPage(query: GalleryQuery & { after?: FeedPosition | null }): Promise<FeedPage> {
+    let rows = this.publicRows(query);
+    const after = query.after;
+    if (after) {
+      if (after.sort !== query.sort) throw new Error('feed position from another sort');
+      // Strictly after the named row in the feed's own order (feedOrder), so a
+      // row is on exactly one page whatever was added above it meanwhile.
+      const key = this.feedKey(query.sort, { likeScore: after.likeScore ?? 0, updatedUs: after.updatedUs, id: after.id });
+      rows = rows.filter((r) => compareFeedKeys(this.feedKey(query.sort, this.positionOf(r)), key) > 0);
+    }
+    const from = Math.max(0, Math.floor(query.offset ?? 0));
+    const limit = Math.min(1000, Math.max(1, Math.floor(query.limit ?? 60)));
+    const page = rows.slice(from, from + limit);
+    const last = page[page.length - 1];
+    return {
+      items: page.map((r) => this.galleryItem(r, query.viewerId)),
+      next: rows.length > from + limit && last
+        ? { sort: query.sort, likeScore: query.sort === 'likes' ? this.score(last) : null, updatedUs: this.positionOf(last).updatedUs, id: last.id }
+        : null,
+    };
+  }
+
+  /** A row's like score, last edit (µs, as Postgres keeps it) and id. */
+  private positionOf(r: Row): { likeScore: number; updatedUs: number; id: string } {
+    return { likeScore: this.score(r), updatedUs: Date.parse(r.updatedAt) * 1000, id: r.id };
+  }
+
+  /** The values the feed sorts by, most significant first, all descending. */
+  private feedKey(sort: GalleryQuery['sort'], p: { likeScore: number; updatedUs: number; id: string }): (number | string)[] {
+    return sort === 'likes' ? [p.likeScore, p.updatedUs, p.id] : [p.updatedUs, p.id];
+  }
+
   async countPublic(query: Omit<GalleryQuery, 'limit' | 'offset' | 'viewerId' | 'sort'>): Promise<number> {
     return this.publicRows({ sort: 'recent', ...query }).length;
   }
@@ -474,12 +521,12 @@ export class MemoryDesignRepository implements DesignRepository {
     }
     // The id breaks ties. Without it paging is undefined whenever timestamps
     // match, which is not a corner case: the whole template library is written
-    // in one boot and shares an updatedAt to the millisecond.
-    rows.sort((a, b) =>
-      (query.sort === 'likes'
-        ? this.score(b) - this.score(a) || b.updatedAt.localeCompare(a.updatedAt)
-        : b.updatedAt.localeCompare(a.updatedAt)) || a.id.localeCompare(b.id),
-    );
+    // in one boot and shares an updatedAt to the millisecond. Descending, with
+    // a plain comparison, exactly as Postgres orders `d.id DESC` (a uuid
+    // compares as its bytes, which is its lower-case hex compared as text):
+    // the keyset cursor (P3.4) relies on both stores agreeing.
+    const sort = query.sort;
+    rows.sort((a, b) => compareFeedKeys(this.feedKey(sort, this.positionOf(a)), this.feedKey(sort, this.positionOf(b))));
     return rows;
   }
 

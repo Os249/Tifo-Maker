@@ -45,6 +45,7 @@
 
 import { createHash, randomBytes } from 'node:crypto';
 import type pg from 'pg';
+import { inBatches } from './retention';
 
 /** How long a row keeps its (already irreversible) visitor_key before being stripped. */
 const ANONYMIZE_AFTER_DAYS = 2;
@@ -749,16 +750,38 @@ export class PgTrafficRepository implements VisitBatchStore {
     } catch {
       /* best-effort, like the rest of purge */
     }
+    // In batches (performance plan P3.5). Stripping the keys used to read
+    // every row older than two days, 180 days of them, to find one day's
+    // keys (190 ms at 300k rows); visits_keyed_idx (schema.ts) holds only
+    // the rows that still have one. One line in the log for the run.
+    const started = Date.now();
+    let stripped = 0;
+    let removed = 0;
+    let more = false;
     try {
-      await this.maintenance.query(
-        `UPDATE visits SET visitor_key = NULL
-          WHERE visitor_key IS NOT NULL AND created_at < now() - ($1::int * interval '1 day')`,
-        [ANONYMIZE_AFTER_DAYS],
-      );
-      await this.maintenance.query(`DELETE FROM visits WHERE created_at < now() - ($1::int * interval '1 day')`, [RETAIN_DAYS]);
+      const strip = await inBatches(async (limit) => {
+        const r = await this.maintenance.query(
+          `UPDATE visits SET visitor_key = NULL WHERE id = ANY (ARRAY(
+             SELECT id FROM visits WHERE visitor_key IS NOT NULL AND created_at < now() - ($1::int * interval '1 day') LIMIT $2))`,
+          [ANONYMIZE_AFTER_DAYS, limit],
+        );
+        return r.rowCount ?? 0;
+      });
+      stripped = strip.removed;
+      const drop = await inBatches(async (limit) => {
+        const r = await this.maintenance.query(
+          `DELETE FROM visits WHERE id = ANY (ARRAY(SELECT id FROM visits WHERE created_at < now() - ($1::int * interval '1 day') LIMIT $2))`,
+          [RETAIN_DAYS, limit],
+        );
+        return r.rowCount ?? 0;
+      });
+      removed = drop.removed;
+      more = strip.more || drop.more;
       await this.maintenance.query(`DELETE FROM visits_daily WHERE day < (now() - ($1::int * interval '1 day'))::date`, [RETAIN_DAYS]);
-    } catch {
+      console.log(`[tifo] retention: visits (keys after ${ANONYMIZE_AFTER_DAYS} days, rows after ${RETAIN_DAYS}): ${stripped} keys stripped, ${removed} removed in ${Date.now() - started} ms${more ? ', more next run' : ''}`);
+    } catch (e) {
       /* purge is best-effort; never block the app */
+      console.log(`[tifo] retention: visits: stopped after ${stripped} keys stripped, ${removed} removed, tried again next run: ${(e as Error).message}`);
     }
   }
 }

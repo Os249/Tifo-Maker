@@ -1,17 +1,23 @@
+// Pixi with no string evaluation (performance plan P3.1). Pixi 8 builds its
+// shader, uniform and particle code with `new Function` unless this module
+// swaps in its eval-free versions, which is what let the Content Security
+// Policy drop 'unsafe-eval' (script-src is exactly 'self'). It must run
+// before the first renderer is made; this is the only module that makes one,
+// and nothing else on any page imports Pixi. Without it, Pixi refuses to
+// start under that policy ("Current environment does not allow unsafe-eval").
+import 'pixi.js/unsafe-eval';
 import {
   Application,
   Container,
   Graphics,
-  Particle,
-  ParticleContainer,
   Sprite,
   Text,
-  Texture,
   Ticker,
 } from 'pixi.js';
 import type { SeatMap, ToolId } from '../core/types';
 import { ObjectOverlay, cursorFor } from './objectOverlay';
 import { ownTexture } from './ownTexture';
+import { SeatMesh } from './seatMesh';
 import type { ObjectLayer, TifoObject } from '../core/objects';
 import type { Composer } from '../core/composer';
 import type { DesignStore } from '../core/design';
@@ -23,10 +29,13 @@ import type { VenueMark } from '../core/venueDetails';
 /**
  * The 2D editor surface.
  *
- * Rendering: one ParticleContainer with `count` particles — a single instanced
- * draw call. Positions are static (uploaded once); only color is dynamic.
+ * Rendering: every seat is a quad of one mesh (render/seatMesh.ts,
+ * performance plan P3.1): a single draw call. Positions are static (uploaded
+ * once); a seat's state is four bytes (its palette index, how far its card
+ * is up in a reveal, selected, flashing) and the colours are a small table.
  * Painting writes palette indices into the DesignStore; the store's dirty
- * callback updates per-particle tints. React/DOM never touches any of this.
+ * callback writes those seats' bytes, and the next frame sends only them.
+ * React/DOM never touches any of this.
  *
  * It draws only when something changed (performance plan P2.10). Pixi's own
  * loop drew every frame whether or not anything had moved: idle on the
@@ -43,8 +52,7 @@ import type { VenueMark } from '../core/venueDetails';
 export class Editor {
   readonly app: Application;
   private readonly world = new Container();
-  private readonly seats: ParticleContainer;
-  private readonly particles: Particle[] = [];
+  private readonly seats: SeatMesh;
   private readonly gridOverlay = new Graphics();
   /** The ground's premium zones and vehicle lanes, outlined over the seats. */
   private readonly venueLayer = new Container();
@@ -134,29 +142,10 @@ export class Editor {
   ) {
     this.app = app;
     this.hash = new SpatialHash(map);
-    this.seats = new ParticleContainer({
-      dynamicProperties: { position: false, rotation: false, vertex: false, uvs: false, color: true },
-    });
+    this.seats = new SeatMesh(map, store.cells, store.palette, EMPTY_SEAT_COLOR);
     this.rebuildPalette();
 
-    const seatW = 3.2;
-    const seatH = 6.4;
-    for (let i = 0; i < map.count; i++) {
-      const p = new Particle({
-        texture: Texture.WHITE,
-        x: map.xy[i * 2],
-        y: map.xy[i * 2 + 1],
-        anchorX: 0.5,
-        anchorY: 0.5,
-        scaleX: seatW / Texture.WHITE.width,
-        scaleY: seatH / Texture.WHITE.height,
-        tint: this.tintFor(this.store.cells[i]),
-      });
-      this.particles.push(p);
-      this.seats.addParticle(p);
-    }
-
-    this.world.addChild(this.seats);
+    this.world.addChild(this.seats.view);
     this.world.addChild(this.gridOverlay);
     this.world.addChild(this.venueLayer);
     this.world.addChild(this.standLayer);
@@ -166,17 +155,17 @@ export class Editor {
     this.fitToView();
     this.bindPointer();
 
-    // Every change to the seats arrives here, undo and redo included.
+    // Every change to the seats arrives here, undo and redo included: only
+    // those seats' bytes change, and only they go up with the next frame.
     store.onDirty((indices) => {
-      if (indices === 'all') {
-        for (let i = 0; i < map.count; i++) this.particles[i].tint = this.tintFor(store.cells[i]);
-      } else {
-        for (const i of indices) this.particles[i].tint = this.tintFor(store.cells[i]);
-      }
+      this.seats.cellsChanged(store.cells, indices);
       this.requestRender();
     });
-    // A lost context comes back empty: draw it again.
-    app.canvas.addEventListener('webglcontextrestored', () => this.requestRender());
+    // A lost context comes back empty: everything goes up again, and is drawn.
+    app.canvas.addEventListener('webglcontextrestored', () => {
+      this.seats.contextRestored();
+      this.requestRender();
+    });
   }
 
   static async create(canvasHost: HTMLElement, map: SeatMap, store: DesignStore): Promise<Editor> {
@@ -189,6 +178,9 @@ export class Editor {
       resolution: Math.min(2, window.devicePixelRatio || 1),
       // No loop: the editor draws on demand (requestRender, performance plan P2.10).
       autoStart: false,
+      // The seats' shader is written for WebGL (render/seatMesh.ts). WebGL is
+      // Pixi's default too; this says so where it matters.
+      preference: 'webgl',
     });
     // Pixi's system ticker kept a frame loop of its own going for its event
     // ticker and its housekeeping, though nothing here is a Pixi-interactive
@@ -220,6 +212,8 @@ export class Editor {
     // Pixi's scheduled housekeeping, which its stopped system ticker would
     // have run: due tasks run now, on a frame that is drawn anyway.
     Ticker.system.update();
+    // The seats that changed since the last frame, and nothing else (P3.1).
+    this.seats.upload(this.app.renderer);
     this.app.render();
     this.rendersDrawn++;
   };
@@ -289,15 +283,28 @@ export class Editor {
     return cell === 0 ? EMPTY_SEAT_COLOR : this.paletteRGB[cell] ?? EMPTY_SEAT_COLOR;
   }
 
+  /**
+   * The palette changed: the colour table follows, one small upload and
+   * nothing per seat. Seats keep their palette index, so every seat painted
+   * with a swatch shows its new colour on the next frame.
+   */
   rebuildPalette(): void {
     this.paletteRGB = this.store.palette.map((hex) => parseInt(hex.slice(1), 16));
+    this.seats.setPalette(this.store.palette, EMPTY_SEAT_COLOR);
+    this.requestRender();
   }
 
+  /**
+   * Bring every seat in line with the store and the selection: after a panel
+   * that painted without a notification (an orientation, an AI design), a
+   * palette swap, or a selection change. Only seats that really differ are
+   * sent. A reveal in progress and a legibility flash stay as they are: each
+   * is ended by its own call (applyReveal(null), the flash's timer).
+   */
   repaintAll(): void {
-    for (let i = 0; i < this.map.count; i++) {
-      this.particles[i].tint = this.tintFor(this.store.cells[i]);
-    }
-    this.applySelectionHighlight();
+    this.seats.setPalette(this.store.palette, EMPTY_SEAT_COLOR);
+    this.seats.cellsChanged(this.store.cells, 'all');
+    this.seats.setSelected(this.selectedRegion);
     this.requestRender();
   }
 
@@ -339,18 +346,6 @@ export class Editor {
     this.onSelectionChange?.(0);
   }
 
-  /** Highlight selected seats by blending their tint toward white. */
-  private applySelectionHighlight(): void {
-    if (this.selectedRegion.size === 0) return;
-    for (const i of this.selectedRegion) {
-      const base = this.tintFor(this.store.cells[i]);
-      const r = (base >> 16) & 255, g = (base >> 8) & 255, b = base & 255;
-      // 45% toward white — a clear, theme-neutral selection sheen.
-      const mix = (c: number): number => Math.round(c + (255 - c) * 0.45);
-      this.particles[i].tint = (mix(r) << 16) | (mix(g) << 8) | mix(b);
-    }
-  }
-
   /** Recolour every selected seat with the active colour (undoable). */
   recolorSelection(value: number): void {
     if (this.selectedRegion.size === 0) return;
@@ -369,35 +364,20 @@ export class Editor {
   }
 
   /**
-   * Apply per-seat reveal visibility (0 = card down/dim, 1 = up/full). Lerps each
-   * seat's tint toward the empty-seat color. Pass null to restore the full design.
+   * Apply per-seat reveal visibility (0 = card down/dim, 1 = up/full). Each
+   * seat is drawn between the empty-seat colour and its own, as far as its
+   * card is up (one byte a seat; the shader does the blend). Pass null to
+   * restore the full design.
    */
   applyReveal(visibility: ((seat: number) => number) | null): void {
     if (!visibility) {
       this.revealActive = false;
+      this.seats.setShown(null);
       this.repaintAll();
       return;
     }
     this.revealActive = true;
-    const pit = EMPTY_SEAT_COLOR;
-    const pr = (pit >> 16) & 0xff;
-    const pg = (pit >> 8) & 0xff;
-    const pb = pit & 0xff;
-    for (let i = 0; i < this.map.count; i++) {
-      const full = this.tintFor(this.store.cells[i]);
-      const a = visibility(i);
-      if (a >= 1) {
-        this.particles[i].tint = full;
-        continue;
-      }
-      const fr = (full >> 16) & 0xff;
-      const fg = (full >> 8) & 0xff;
-      const fb = full & 0xff;
-      const r = Math.round(pr + (fr - pr) * a);
-      const g = Math.round(pg + (fg - pg) * a);
-      const b = Math.round(pb + (fb - pb) * a);
-      this.particles[i].tint = (r << 16) | (g << 8) | b;
-    }
+    this.seats.setShown(visibility);
     // A playing reveal calls this every frame, so it keeps asking for frames
     // while it plays and stops when it stops.
     this.requestRender();
@@ -473,14 +453,13 @@ export class Editor {
     if (this.flashTimer) {
       clearTimeout(this.flashTimer);
       this.flashTimer = null;
-      this.repaintAll();
     }
-    const warn = 0xff2d78;
-    for (const i of indices) this.particles[i].tint = warn;
+    // The warning colour (0xff2d78, in the seat shader) on exactly these seats.
+    this.seats.setFlashing(indices);
     this.requestRender();
     this.flashTimer = setTimeout(() => {
       this.flashTimer = null;
-      for (const i of indices) this.particles[i].tint = this.tintFor(this.store.cells[i]);
+      this.seats.setFlashing([]);
       this.requestRender();
     }, durationMs);
   }

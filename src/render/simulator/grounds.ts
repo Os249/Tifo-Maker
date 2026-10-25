@@ -3,6 +3,7 @@ import type { Crane, RoofRun, Skin, StadiumTemplate, StandBuilding, StandGap, St
 import { curveSampler } from '../../core/venueDetails';
 import { alongOf, gapHalfPlanes, SIDE_U, spanGeometry } from '../../core/standSpans';
 import { subtractGaps } from './stands';
+import { runSync, type Steps } from './steps';
 
 /**
  * The structures that make a real club ground that ground: its roofs, stand
@@ -276,8 +277,8 @@ function sheetTexture(): THREE.CanvasTexture {
   return t;
 }
 
-/** One roof run. */
-function buildRun(template: StadiumTemplate, run: RoofRun, at: Sampler, shadows: boolean, trash: Trash[]): THREE.Group {
+/** One roof run, in steps: its deck and frame, glazing, girder, columns, lamps (performance plan P3.6). */
+function* buildRun(template: StadiumTemplate, run: RoofRun, at: Sampler, shadows: boolean, trash: Trash[]): Steps<THREE.Group> {
   const grp = new THREE.Group();
   grp.name = `roof-${run.style}-${run.side ?? 'ring'}`;
   const bay = run.bay ?? (run.style === 'membrane' ? 7.5 : 8);
@@ -439,6 +440,7 @@ function buildRun(template: StadiumTemplate, run: RoofRun, at: Sampler, shadows:
     });
   }
 
+  yield;
   // Clear polycarbonate along the leading edge: a bright band seen from below,
   // and a paler one from above, over the opaque deck.
   if (run.glazing && run.glazing > 0 && run.style !== 'membrane') {
@@ -465,6 +467,7 @@ function buildRun(template: StadiumTemplate, run: RoofRun, at: Sampler, shadows:
     });
   }
 
+  yield;
   // A girder standing on the roof along its length.
   if (run.girder) {
     const gm = new THREE.MeshStandardMaterial({ color: run.girder.color ?? 0xd6d9dd, roughness: 0.5, metalness: 0.35 });
@@ -485,6 +488,7 @@ function buildRun(template: StadiumTemplate, run: RoofRun, at: Sampler, shadows:
     grp.add(members(gl, gm, trash, shadows));
   }
 
+  yield;
   // Columns at the back, from the ground to the roof.
   if (run.columns) {
     const colMat = new THREE.MeshStandardMaterial({ color: run.columns.color ?? 0xe8e6e0, roughness: 0.55, metalness: 0.2 });
@@ -526,6 +530,7 @@ function buildRun(template: StadiumTemplate, run: RoofRun, at: Sampler, shadows:
     grp.add(members(cols, colMat, trash, shadows));
   }
 
+  yield;
   // Lamps along the top of the leading edge.
   if (run.lights) {
     const lampMat = new THREE.MeshStandardMaterial({ color: 0xbfc4cc, roughness: 0.4, metalness: 0.6, emissive: 0x1d2026 });
@@ -935,15 +940,30 @@ function buildRibbons(template: StadiumTemplate, at: Sampler, trash: Trash[]): T
 
 /** Everything this file draws for one ground; an empty group for a ground without any of it. */
 export function buildGround(template: StadiumTemplate, shadows: boolean): GroundBuild {
+  return runSync(buildGroundSteps(template, shadows));
+}
+
+/** buildGround in steps: one a roof run, a building, a skin, a girder, a crane (performance plan P3.6). */
+export function* buildGroundSteps(template: StadiumTemplate, shadows: boolean): Steps<GroundBuild> {
   const group = new THREE.Group();
   group.name = 'ground';
   const trash: Trash[] = [];
   const at = curveSampler(template);
-  for (const run of template.roofs ?? []) group.add(buildRun(template, run, at, shadows, trash));
+  for (const run of template.roofs ?? []) {
+    group.add(yield* buildRun(template, run, at, shadows, trash));
+    yield;
+  }
   const masts = buildMasts(template, trash, shadows);
   if (masts) group.add(masts);
-  for (const b of template.details?.buildings ?? []) group.add(buildBuilding(template, b, at, trash, shadows));
-  for (const sk of template.details?.skins ?? []) group.add(buildSkin(template, sk, at, trash, shadows));
+  yield;
+  for (const b of template.details?.buildings ?? []) {
+    group.add(buildBuilding(template, b, at, trash, shadows));
+    yield;
+  }
+  for (const sk of template.details?.skins ?? []) {
+    group.add(buildSkin(template, sk, at, trash, shadows));
+    yield;
+  }
   for (const gd of template.details?.girders ?? []) {
     const mat = new THREE.MeshStandardMaterial({ color: gd.color ?? 0xe9ebec, roughness: 0.45, metalness: 0.3 });
     trash.push(mat);
@@ -966,8 +986,12 @@ export function buildGround(template: StadiumTemplate, shadows: boolean): Ground
     const m = members(list, mat, trash, shadows);
     m.name = 'girder';
     group.add(m);
+    yield;
   }
-  for (const cr of template.details?.cranes ?? []) group.add(buildCrane(cr, trash, shadows));
+  for (const cr of template.details?.cranes ?? []) {
+    group.add(buildCrane(cr, trash, shadows));
+    yield;
+  }
   const ribbons = buildRibbons(template, at, trash);
   if (ribbons) group.add(ribbons);
   return { object: group, disposables: trash };

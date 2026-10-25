@@ -22,9 +22,10 @@ import type { BannerView } from './ui/bannerView';
 import type { Preview3D } from './render/preview3d';
 import { track } from './net/analytics';
 import {
-  accountBannersKey, accountDraftKey, bannersKey, docKey, getLocal, migrateLegacyDraft, openUrl,
-  readEnvelope, readRaw, takeNewProject, writeRaw, type ProjectRef,
+  accountBannersKey, accountDraftKey, bannersKey, docKey, getLocal, loadEnvelope, migrateLegacyDraft, openUrl,
+  readRaw, takeNewProject, writeRaw, type ProjectRef,
 } from './core/projects';
+import type { DraftEnvelope } from './core/draft';
 // Narrow viewports (under EDITOR_MIN_WIDTH) get the read-only viewer for a
 // shared link and the desktop-only gate for /app; ?editor=1 opts out of both,
 // so a draft started on a phone is never permanently stranded.
@@ -43,7 +44,7 @@ import { isNarrowForEditor } from './ui/desktopOnly';
  * (an account project, from the Projects page). Returns the id, or null.
  */
 function sharedDesignId(): string | null {
-  const m = location.pathname.match(/^\/d\/([A-Za-z0-9-]+)\/?$/);
+  const m = location.pathname.match(/^(?:\/ar)?\/d\/([A-Za-z0-9-]+)\/?$/); // /ar/d/:id is the Arabic page (P3.3)
   if (m) return m[1];
   const params = new URLSearchParams(location.search);
   const q = params.get('project') ?? params.get('design');
@@ -139,7 +140,7 @@ async function main(): Promise<void> {
         back = null;
       }
     }
-    if (back && back.startsWith('/app?')) {
+    if (back && /^(?:\/ar)?\/app\?/.test(back)) { // or /ar/app? on the Arabic page (P3.3)
       location.replace(back);
       return;
     }
@@ -154,7 +155,11 @@ async function main(): Promise<void> {
     location.replace('/projects?missing=1');
     return;
   }
-  const localEnv = localProject ? readEnvelope(docKey(localProject.id)) : null;
+  // The project's draft: compressed in IndexedDB (performance plan P3.7), so
+  // read asynchronously. Asked for now, awaited once the editor's chunks are
+  // on their way.
+  const localEnvRead: Promise<DraftEnvelope | null> = localProject ? loadEnvelope(docKey(localProject.id)) : Promise.resolve(null);
+  localEnvRead.catch(() => {}); // handled where it is awaited; not every path gets there
 
   // The editor is desktop-only for now. Two phone bug reports were both people
   // hitting walls inside an editor that had let them in; this stops them at the
@@ -178,6 +183,17 @@ async function main(): Promise<void> {
   const editorChunks = wantsEditor
     ? Promise.all([import('./render/editor'), import('./ui/toolbar')])
     : null;
+  let localEnv: DraftEnvelope | null = null;
+  try {
+    localEnv = await localEnvRead;
+  } catch {
+    // This browser's store could not be read: not the same as no draft.
+    // Opening the project would show a stand-in, and its next autosave would
+    // write over the real draft. Back to the list instead, the draft untouched
+    // for the next try.
+    location.replace('/projects?missing=1');
+    return;
+  }
   // Confirmation toast after returning from an email-verification link.
   const verifiedFlag = new URLSearchParams(location.search).get('verified');
   if (verifiedFlag === '1' || verifiedFlag === '0') {
@@ -383,8 +399,11 @@ async function main(): Promise<void> {
   // back, rather than being quietly replaced by the older copy on the server.
   let draftAge: string | null = null;
   const { describeAge } = await import('./core/draft');
+  let accountEnv: DraftEnvelope | null = null;
   if (ownedProject && sharedId) {
-    const env = readEnvelope(accountDraftKey(sharedId));
+    // A store that cannot be read leaves the server's copy standing, as no copy here would.
+    const env = await loadEnvelope(accountDraftKey(sharedId)).catch(() => null);
+    accountEnv = env;
     if (env?.dirty && env.templateId === template.id && env.templateVersion === template.version) {
       try {
         const { validateTifo, flattenLayers } = await import('./core/tifoFormat');
@@ -581,6 +600,8 @@ async function main(): Promise<void> {
     ref: projectRef,
     pending: isNew,
     unsynced: restoredUnsaved,
+    // What this browser holds for it now: leaving without a change writes nothing (P3.7).
+    stored: localProject ? localEnv : accountEnv,
   }, composer);
 
   // A sign-in that did not finish says why, in the same place every other

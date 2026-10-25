@@ -61,6 +61,28 @@ builds; `tsx` and `esbuild` are build tools only and are not installed with
   once, after the port is open, and until that is done the server hashes the
   bytes it reads instead of believing the stored hash. The purges run after the
   port is open too.
+- **The feed's indexes and the retention sweeps (stage 3).** After the
+  foreign-key indexes, the first boot of this release builds six more, also
+  `CONCURRENTLY` after listen: one per community feed sort
+  (`designs_feed_recent_idx`, `designs_feed_likes_idx`) and four for the
+  sweeps (events, visits, notifications, shares). Once both feed indexes are
+  valid it drops the two they replace (`designs_public_idx`,
+  `designs_like_score_idx`), also `CONCURRENTLY`; the boot log names what was
+  built and dropped. On the production database this takes seconds. Then the
+  retention sweeps run (and every six hours after): expired sessions, used or
+  expired email links and codes, read notifications older than 180 days, AI
+  requests and shares older than 400 days rolled up per day. Each logs one
+  `[tifo] retention:` line; a big first backlog is worked off in batches, at
+  most 30 s per table per run, so the rest waits for the next run. Periods and
+  reasons: `SECURITY-CHECKS.md` §9. Rolling back is safe: the previous release
+  pages the feed by offset on the new indexes (same order), and its schema
+  file's two old index statements are already in the ledger, so they are not
+  rebuilt; it would only leave rolled-up rows out of its all-time share and AI
+  totals (none exist until a row is 400 days old).
+- **The feed cursor's key** is made once and kept in the `server_keys` table,
+  so cursors outlive a deploy and work on any instance. Nothing to set. If the
+  boot log says it could not be read, cursors last until the next boot and a
+  visitor mid-scroll at a deploy starts again from the top.
 - **Worker threads.** Scene checks and strips, and the distribution PDF, run in
   `server/build/sceneWorker.mjs` and `pdfWorker.mjs`, beside the server bundle
   (both built by `npm run build:server`, checked by `test:deploy`). Do not set

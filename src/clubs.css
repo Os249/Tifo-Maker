@@ -1,4 +1,5 @@
 @import './ui/colorScheme.css';
+@import './ui/siteHeader.css';
 
 :root { --grad: var(--grad-brand); }
 * { box-sizing: border-box; }
@@ -7,19 +8,7 @@ body { margin: 0; font-family: var(--font); color: var(--ink); background: var(-
 a { text-decoration: none; color: inherit; }
 button { font-family: inherit; cursor: pointer; }
 
-.nav {
-  position: sticky; top: 0; z-index: 30; display: flex; align-items: center; justify-content: space-between;
-  padding: 16px 6vw; background: var(--bar); backdrop-filter: saturate(140%) blur(12px); border-bottom: 1px solid var(--line);
-}
-.brand { font-weight: 800; font-size: 20px; letter-spacing: .02em; color: var(--ink); }
-.brand b { color: var(--maker); }
-.nav-links { display: flex; align-items: center; gap: 22px; }
-.nav-links > a { font-weight: 600; font-size: 15px; opacity: 0.82; }
-.nav-links > a:hover { opacity: 1; }
-.nav-cta { background: var(--invert); color: var(--invert-ink); border-radius: var(--r-pill); padding: 10px 20px; font-weight: 600; }
-.nav-cta:hover { box-shadow: var(--shadow-md); }
-.lang-toggle { background: transparent; border: 1px solid rgba(11, 20, 36, 0.18); color: var(--ink); font-weight: 600; font-size: 14px; padding: 7px 14px; border-radius: var(--r-pill); }
-.lang-toggle:hover { background: rgba(11, 20, 36, 0.06); }
+/* The header is the shared one (ui/siteHeader.css). */
 
 .btn { display: inline-block; border: none; border-radius: var(--r-pill); padding: 15px 28px; font-weight: 700; font-size: 16px; }
 .btn-primary { background: var(--blue-solid); color: #fff; box-shadow: var(--shadow-md); }

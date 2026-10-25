@@ -363,7 +363,7 @@ console.log('sweep-lr tracks u:', mono);
     const i = ov.indexOf(`'${m.labelKey}':`);
     if (i < 0 || !/\ben:[\s\S]*\bar:/.test(ov.slice(i, i + 300))) throw new Error(`Match Day reveal "${m.id}" needs en + ar`);
   }
-  const i18nDc = dcRead('src/ui/i18n.ts', 'utf8');
+  const i18nDc = (dcRead('src/ui/i18n/strings.ts', 'utf8') + dcRead('src/ui/i18n/maps.ts', 'utf8') + dcRead('src/ui/i18n.ts', 'utf8'));
   for (const k of ['rev.drum', 'ed.reveal.drum.hint', 'ed.reveal.drum.sound', 'ed.reveal.pause']) {
     const i = i18nDc.indexOf(`'${k}':`);
     if (i < 0 || !/\ben:[\s\S]*\bar:/.test(i18nDc.slice(i, i + 600))) throw new Error(`"${k}" needs en + ar`);
@@ -502,7 +502,7 @@ import { arcU, coverageMask, ROOF_DEFAULTS } from '../src/render/simulator/roof'
 import { readFileSync as siRead } from 'node:fs';
 import { buildStadium as siBuild } from '../src/core/stadiumFit';
 {
-  const i18n = siRead('src/ui/i18n.ts', 'utf8');
+  const i18n = (siRead('src/ui/i18n/strings.ts', 'utf8') + siRead('src/ui/i18n/maps.ts', 'utf8') + siRead('src/ui/i18n.ts', 'utf8'));
   const panel = siRead('src/ui/stadiumImport.ts', 'utf8');
 
   // Every si.* string carries both languages.
@@ -560,7 +560,7 @@ import { buildStadium as siBuild } from '../src/core/stadiumFit';
   const { STADIUM_CATALOG: NC } = await import('../src/core/stadiumCatalog');
   // A ground rebuilt in its real blocks takes the name of the ground it is a layout of (i18n tl).
   const { baseGroundId } = await import('../src/core/realBlocks');
-  const src = siRead('src/ui/i18n.ts', 'utf8');
+  const src = (siRead('src/ui/i18n/strings.ts', 'utf8') + siRead('src/ui/i18n/maps.ts', 'utf8') + siRead('src/ui/i18n.ts', 'utf8'));
   const esc = (x: string) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const unnamed = NC.filter((e) => {
     const key = src.match(new RegExp(`^\\s*'${esc(baseGroundId(e.id))}': '(stad\\.[a-zA-Z0-9]+)',`, 'm'))?.[1];
@@ -872,7 +872,7 @@ import { buildStadium as siBuild } from '../src/core/stadiumFit';
 
   // Every family a chip can show must have a label in both languages, or the
   // chip row comes out half in English.
-  const i18nSrc2 = roofRead('src/ui/i18n.ts', 'utf8');
+  const i18nSrc2 = (roofRead('src/ui/i18n/strings.ts', 'utf8') + roofRead('src/ui/i18n/maps.ts', 'utf8') + roofRead('src/ui/i18n.ts', 'utf8'));
   const missing = COLOUR_FAMILIES.filter((c) => !new RegExp(`'cm\\.colour\\.${c}':[^\\n]*\\bar:`).test(i18nSrc2));
   console.log(`facets: colour labels ${COLOUR_FAMILIES.length} | without Arabic ${missing.length}`);
   if (missing.length) throw new Error(`no Arabic for colour chip(s): ${missing.join(', ')}`);
@@ -976,7 +976,7 @@ import { buildStadium as siBuild } from '../src/core/stadiumFit';
   const importSrc = roofRead('src/core/importImage.ts', 'utf8');
   const toolbarSrc = roofRead('src/ui/toolbar.ts', 'utf8');
   const shellSrc = roofRead('src/ui/mobileShell.ts', 'utf8');
-  const i18nSrc3 = roofRead('src/ui/i18n.ts', 'utf8');
+  const i18nSrc3 = (roofRead('src/ui/i18n/strings.ts', 'utf8') + roofRead('src/ui/i18n/maps.ts', 'utf8') + roofRead('src/ui/i18n.ts', 'utf8'));
 
   // Texture.from() caches by resource identity, so anything that later calls
   // destroy({ textureSource: true }) must NOT use it. Texture.EMPTY is a shared
@@ -1047,7 +1047,7 @@ import { buildStadium as siBuild } from '../src/core/stadiumFit';
   const designSrc = roofRead('src/core/design.ts', 'utf8');
   const editorSrc2 = roofRead('src/render/editor.ts', 'utf8');
   const toolbarSrc2 = roofRead('src/ui/toolbar.ts', 'utf8');
-  const i18nSrc4 = roofRead('src/ui/i18n.ts', 'utf8');
+  const i18nSrc4 = (roofRead('src/ui/i18n/strings.ts', 'utf8') + roofRead('src/ui/i18n/maps.ts', 'utf8') + roofRead('src/ui/i18n.ts', 'utf8'));
 
   // 1. The Undo button. onDirty cannot answer "can I undo yet": a brush stroke
   // flushes on every pointer event and COMMITS on pointerup, so the button's
@@ -1642,7 +1642,7 @@ import { buildStadium as siBuild } from '../src/core/stadiumFit';
     // placeholder ("Banner {n}") closes a brace inside its own value, and the
     // obvious `\{([^}]*)\}` stops there and declares the Arabic missing.
     const { readFileSync: bnRead } = await import('node:fs');
-    const i18nBn = bnRead('src/ui/i18n.ts', 'utf8');
+    const i18nBn = (bnRead('src/ui/i18n/strings.ts', 'utf8') + bnRead('src/ui/i18n/maps.ts', 'utf8') + bnRead('src/ui/i18n.ts', 'utf8'));
     const keys = [...i18nBn.matchAll(/^\s*'((?:bn|ed\.view)\.[\w.]+)':/gm)];
     if (keys.length < 40) throw new Error(`only ${keys.length} banner strings found — the scan is not finding the table`);
     for (const m of keys) {
@@ -2081,7 +2081,7 @@ import { buildStadium as siBuild } from '../src/core/stadiumFit';
   if (vd.seatZones(map, DEFAULT_TEMPLATE).some((c) => c !== 0) || vd.laneLines(DEFAULT_TEMPLATE).length) throw new Error('venue: a ground without details got some');
 
   // Strings, in both languages.
-  const i18nSrc = vdRead('src/ui/i18n.ts', 'utf8');
+  const i18nSrc = (vdRead('src/ui/i18n/strings.ts', 'utf8') + vdRead('src/ui/i18n/maps.ts', 'utf8') + vdRead('src/ui/i18n.ts', 'utf8'));
   for (const k of ['venue.gold', 'venue.silver', 'venue.vip', 'venue.lane', 'sp.lanes', 'sp.vipSeats', 'sp.boxes', 'sp.screens', 'sp.superseded', 'sp.useNewer', 'stad.jewelJeddahOld']) {
     const i = i18nSrc.indexOf(`'${k}': {`);
     if (i < 0) throw new Error(`venue: no string for ${k}`);
@@ -2206,7 +2206,7 @@ import { buildStadium as siBuild } from '../src/core/stadiumFit';
   if (!/const here: Weather = this\.template\.indoor \? 'clear' : w;/.test(simSrc)) throw new Error('kingdom: it can rain indoors');
   if (!/this\.template\.indoor \? SKIES\.night/.test(simSrc)) throw new Error('kingdom: daylight inside the hall');
   // Strings, in both languages.
-  const ks = kRead('src/ui/i18n.ts', 'utf8');
+  const ks = (kRead('src/ui/i18n/strings.ts', 'utf8') + kRead('src/ui/i18n/maps.ts', 'utf8') + kRead('src/ui/i18n.ts', 'utf8'));
   if (!/'stad\.kingdomArenaOld': \{ en: '[^']+', ar: '[^']+' \}/.test(ks) || !/'kingdom-arena-26k': 'stad\.kingdomArena'/.test(ks)) throw new Error('kingdom: the names are missing');
   console.log(
     `kingdom: ${km.count} seats (22,300 in the photographs) | ends ${per['0:east']} + ${per['0:west']}, north ${per['0:north']} + ${per['1:north']} upper, main ${per['0:south']}` +
@@ -2414,8 +2414,15 @@ await (async () => {
   // Only the owner is sent a design's layers; a copy for anyone else is flat.
   const routesSrc = roofRead('server/src/routes.ts', 'utf8');
   // ownsDesign (audit round five) is the owner check, signed in only.
+  // Since P2.5 the owner's branch returns the scene as stored and everyone
+  // else gets the stripped copy (kept by its stored hash, or stripped in the
+  // scene worker); test:security checks the behaviour itself.
   ok('the scene route keeps the layers to the owner',
-    /ownsDesign\(v\.rec, v\.userId\) \? gz : withoutLayers\(gz\)/.test(routesSrc) &&
+    // Stage 2 (P2.5, P2.14): the owner is sent the scene as stored; anyone else
+    // the copy stripped in the scene worker.
+    /if \(ownsDesign\(v\.rec, v\.userId\)\) \{\s*const gz = await repo\.getScene\(id\);/.test(routesSrc) &&
+    /out = await strippedScene\(id, v\.rec\.hash\)/.test(routesSrc) &&
+    /stripLayers\(task\.gz\)/.test(roofRead('server/src/sceneWorker.ts', 'utf8')) &&
     /const ownsDesign = \(rec: \{ ownerId: string \| null \}, userId: string \| null\): boolean => !!userId && rec\.ownerId === userId;/.test(routesSrc));
   ok('a remix copies the scene without the layers', /copyScene\(id, created\.id, false\)/.test(routesSrc));
   if (fails) throw new Error(`${fails} layer rule(s) broken`);
@@ -2428,7 +2435,7 @@ const leagueGrounds = async (label: string, tag: string, GROUNDS: LeagueGround[]
   const spans = await import('../src/core/standSpans');
   const { curveSampler } = await import('../src/core/venueDetails');
   const { readFileSync: spRead } = await import('node:fs');
-  const i18nSrc = spRead('src/ui/i18n.ts', 'utf8');
+  const i18nSrc = (spRead('src/ui/i18n/strings.ts', 'utf8') + spRead('src/ui/i18n/maps.ts', 'utf8') + spRead('src/ui/i18n.ts', 'utf8'));
   const fails: string[] = [];
   const report: string[] = [];
   for (const g of GROUNDS) {
@@ -3347,4 +3354,212 @@ await (async () => {
   cat.registerCustomStadiums([]);
   console.log(`stadium index: ${idx.STADIUM_INDEX.length} grounds, ${built.ids} ids in ${Object.keys((await import('../src/core/stadiumGroups.data')).GROUND_GROUPS).length} modules, up to date | import builds ${lz.atImport} grounds, one ground ${lz.afterOne}, all ${lz.all} on first use | all ${shipped.length} load on their own as the catalogue's own template`);
   if (fails.length) throw new Error(`performance plan P2.7: ${fails.slice(0, 10).join('; ')}`);
+})();
+
+// ---- the home page, Direction C (24 Oct 2026): band colours, a curated
+// showcase, and a different hero club on each visit ----
+await (async () => {
+  const fails: string[] = [];
+  const { bandColours, contrast } = await import('../src/core/clubBand');
+  const { CLUBS } = await import('../src/core/clubs');
+  // Every club the start flow knows gets a band whose ink reads on it.
+  for (const c of CLUBS) {
+    const b = bandColours(c.palette);
+    if (!b) { fails.push(`${c.aliases[0]}: no band colours`); continue; }
+    if (contrast(b.band, b.ink) < 4.5) fails.push(`${c.aliases[0]}: band ink ${b.ink} on ${b.band} reads at ${contrast(b.band, b.ink).toFixed(2)}:1`);
+  }
+  const hilal = bandColours(['#0033a0', '#ffffff']);
+  if (hilal?.band !== '#0033a0' || hilal.ink !== '#ffffff') fails.push(`Al Hilal's band should be its blue with white, got ${JSON.stringify(hilal)}`);
+  if (bandColours([]) !== null) fails.push('no colours should give no band');
+
+  const { curateShowcase } = await import('../src/showcase');
+  const item = (id: string, title: string, owner: string, isTemplate = false, hasThumbnail = true) =>
+    ({ id, title, ownerId: owner, ownerName: owner, hasThumbnail, likeScore: 0, myVote: 0, updatedAt: '', isTemplate, tags: [], hasPhoto: false });
+  const picked = curateShowcase([
+    item('a', 'Untitled tifo', 'u1'), item('b', 'My tifo 2', 'u2'), item('c', 'Curva Nord', 'u3'),
+    item('d', 'Curva Nord again', 'u3'), item('e', 'Featured', 'u4'), item('f', 'No picture', 'u5', false, false),
+    item('t1', 'Starter one', 'lib', true), item('g', 'Saudi blue', 'u6'), item('t2', 'Starter two', 'lib', true),
+  ], 'e', 4).map((d) => d.id).join();
+  if (picked !== 'c,g,t1,t2') fails.push(`curated showcase: expected c,g,t1,t2, got ${picked}`);
+
+  const { heroPages, pickHeroPage } = await import('../server/src/landingHero');
+  const { readFileSync } = await import('node:fs');
+  const html = readFileSync('landing.html', 'utf8');
+  const { HERO_GROUND_KEYS } = await import('../src/heroGrounds');
+  // Each club with its ground's label key, as routes.ts passes them: the
+  // caption's script keys (data-i18n-vars) are rewritten per club (P3.3).
+  const hero = ((await import('../src/data/heroTifos.json')).default as { club: string; title: string; templateId: string }[])
+    .map((h) => ({ ...h, ground: HERO_GROUND_KEYS[h.templateId] }));
+  const pages = heroPages(html, hero);
+  if (pages.size !== hero.length) fails.push(`one home page per hero club: ${pages.size} of ${hero.length}`);
+  for (const { club, title } of hero) {
+    const p = pages.get(club) ?? '';
+    const ok = p.includes(`id="hero-3d" data-club="${club}"`) && p.includes(`src="/hero/${club}.webp"`) &&
+      p.includes(`srcset="/hero/${club}-640.webp 640w, /hero/${club}.webp 960w"`) && p.includes(`>${title.replace(/&/g, '&amp;')}</span>`) &&
+      p.includes(`class="hero-club on" data-club="${club}" aria-pressed="true"`) && (p.match(/class="hero-club on"/g)?.length ?? 0) === 1 &&
+      p.includes(`club=${club}"`) && p.includes(`ground:${HERO_GROUND_KEYS[hero.find((h) => h.club === club)!.templateId]}"`);
+    if (!ok) fails.push(`${club}: its home page does not name it everywhere`);
+    for (const f of [`public/hero/${club}.webp`, `public/hero/${club}-640.webp`]) {
+      try { if (readFileSync(f).subarray(8, 12).toString() !== 'WEBP') fails.push(`${f} is not a WebP`); } catch { fails.push(`${f} is missing (npx tsx scripts/hero-still.mts ${club})`); }
+    }
+  }
+  if (heroPages('<html>no hero</html>', hero).size !== 0) fails.push('a page without the hero should get no versions');
+  if (pickHeroPage(new Map(), 'as is') !== 'as is') fails.push('no versions should serve the page as it is');
+  if (pickHeroPage(pages, '', () => 0.999) !== [...pages.values()].at(-1)) fails.push('pickHeroPage should cover the last club');
+  console.log(`home page: band colours for ${CLUBS.length} clubs at 4.5:1 or better, curated showcase, ${pages.size} hero clubs each with its picture`);
+  if (fails.length) throw new Error(`home page: ${fails.slice(0, 10).join('; ')}`);
+})();
+
+// ---------------------------------------------------------------------------
+// Performance plan P3.7 (October 2026): the autosave compressed. A draft goes
+// into IndexedDB as gzip-compressed JSON; reading it back is bounded, and
+// anything damaged reads as no draft. The writer may now write
+// asynchronously: writes go one at a time and in order, "saved" only once a
+// write has finished, and leaving the page writes synchronously whatever is
+// not already stored for sure.
+await (async () => {
+  const fails: string[] = [];
+  const { packDraft, unpackDraft, DRAFT_MAX_BYTES } = await import('../src/core/draftStore');
+  const { buildDraft, createDraftWriter } = await import('../src/core/draft');
+  const { generateSeatMap: gen } = await import('../src/core/seatmap');
+  const cat = await import('../src/core/stadiumCatalog');
+  const ground = cat.templateById('bernabeu-83k')!;
+  const m = gen(ground);
+  // A busy design: stripes, a crest-like blob and noise, about what a finished tifo holds.
+  const cells = new Uint8Array(m.count);
+  let seed = 11;
+  const rnd = (n: number): number => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed % n; };
+  for (let i = 0; i < m.count; i++) cells[i] = ((m.tierOf[i] + Math.floor(m.uv[i * 2] * 48)) % 5) + 1;
+  for (let k = 0; k < 9000; k++) cells[rnd(m.count)] = rnd(6);
+  const env = buildDraft({ title: 'Verify busy', templateId: ground.id, templateVersion: ground.version, palette: ['#262a33', '#1c5fd9', '#f2f1ec', '#e8b73a', '#c0392b', '#111111'], cells, textObjects: [], designId: null, projectId: 'lverify0001' });
+  const json = JSON.stringify(env);
+  const t0 = performance.now();
+  const packed = await packDraft(env, json);
+  const packMs = performance.now() - t0;
+  if ('error' in packed) throw new Error(`P3.7: a busy draft could not be packed (${packed.error})`);
+  const t1 = performance.now();
+  const back = await unpackDraft(packed.record);
+  const unpackMs = performance.now() - t1;
+  if (!back || JSON.stringify(back) !== json) fails.push('a packed draft does not unpack to the very same JSON');
+  // Damaged records are no draft, never a throw.
+  const gz = packed.record.gz;
+  const bad: [string, unknown][] = [
+    ['truncated', { ...packed.record, gz: gz.slice(0, gz.length >> 1) }],
+    ['one byte off', { ...packed.record, gz: Uint8Array.from(gz, (b, i) => (i === (gz.length >> 1) ? b ^ 0xff : b)) }],
+    ['random bytes', { ...packed.record, gz: Uint8Array.from({ length: 4096 }, () => rnd(256)) }],
+    ['empty', { ...packed.record, gz: new Uint8Array(0) }],
+    ['the wrong version', { ...packed.record, v: 1 }],
+    ['no bytes at all', { v: 2, savedAt: 1, chars: 10 }],
+    ['not an object', 'tifo'],
+    ['null', null],
+    ['a length that does not match', { ...packed.record, chars: packed.record.chars + 1 }],
+  ];
+  for (const [what, rec] of bad) {
+    try {
+      if ((await unpackDraft(rec)) !== null) fails.push(`a ${what} record read as a draft`);
+    } catch (e) {
+      fails.push(`a ${what} record threw (${(e as Error).message})`);
+    }
+  }
+  // A record that unpacks past the cap: reading stops there.
+  const bombBytes = new Uint8Array(DRAFT_MAX_BYTES * 3).fill(32);
+  const bomb = new Uint8Array(await new Response(new Blob([bombBytes]).stream().pipeThrough(new CompressionStream('gzip'))).arrayBuffer());
+  const t2 = performance.now();
+  if ((await unpackDraft({ v: 2, savedAt: 1, chars: 1000, gz: bomb })) !== null) fails.push('a record that unpacks to three times the cap was read');
+  const bombMs = performance.now() - t2;
+  // Valid JSON that is not a draft.
+  const notDraft = new Uint8Array(await new Response(new Blob([new TextEncoder().encode('{"v":1}')]).stream().pipeThrough(new CompressionStream('gzip'))).arrayBuffer());
+  if ((await unpackDraft({ v: 2, savedAt: 1, chars: 7, gz: notDraft })) !== null) fails.push('JSON that is not a draft was read as one');
+  // The cap is the one localStorage had.
+  const huge = { ...env, doc: { ...env.doc, meta: { ...env.doc.meta, title: 'x'.repeat(DRAFT_MAX_BYTES / 2) } } };
+  const refused = await packDraft(huge as typeof env);
+  if (!('error' in refused) || refused.error !== 'too-big') fails.push('a draft over the cap was packed');
+
+  // -- the writer --
+  const tick = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  let n = 0;
+  // Built afresh each time, as the editor does: a new savedAt and a new document createdAt.
+  const mk = () => buildDraft({ title: `T${n}`, templateId: ground.id, templateVersion: ground.version, palette: env.doc.palette, cells, textObjects: [], designId: null, projectId: 'lverify0001' });
+  {
+    // Writes go one at a time, in order, and the later one carries the later state.
+    const landed: string[] = [];
+    const results: boolean[] = [];
+    let inFlight = 0, most = 0;
+    const w = createDraftWriter(mk, (r) => results.push(r.ok), 20, async (e, j) => {
+      inFlight++; most = Math.max(most, inFlight);
+      await tick(e.title === 'T1' ? 80 : 5);
+      landed.push(JSON.parse(j).title);
+      inFlight--;
+      return { ok: true, bytes: j.length };
+    });
+    n = 1; const a = w.flush();
+    n = 2; const b = w.flush();
+    n = 3; w.schedule();
+    const [ra, rb] = await Promise.all([a, b]);
+    await tick(120);
+    if (most !== 1) fails.push(`writer: ${most} writes were on their way at once`);
+    if (landed.join() !== 'T1,T3') fails.push(`writer: writes landed as ${landed.join()} (the second is built when it starts, from the latest state)`);
+    if (!ra?.ok || !rb?.ok) fails.push('writer: flush() did not resolve with its write\'s result');
+    if (results.length !== landed.length) fails.push('writer: a result was reported for a write that had not finished');
+  }
+  {
+    // Leaving the page: synchronous, and only when what would be written is not stored for sure.
+    const now: string[] = [];
+    let slow: (() => void) | null = null;
+    const w = createDraftWriter(mk, () => {}, 10_000, (_e, j) => new Promise((res) => { slow = () => res({ ok: true, bytes: j.length }); }), {
+      writeNow: (e) => { now.push(e.title); return { ok: true, bytes: 1 }; },
+    });
+    n = 5;
+    w.known({ ...mk() });
+    if (w.flushNow() !== null || now.length) fails.push('writer: leaving with the design exactly as it was opened wrote anyway');
+    n = 6;
+    if (!w.flushNow() || now.join() !== 'T6') fails.push('writer: leaving after a change that scheduled nothing did not write it');
+    if (w.flushNow() !== null || now.length !== 1) fails.push('writer: leaving twice with nothing new wrote twice');
+    // A change that is not in the envelope (a banner rides on the write's result) still writes on leaving.
+    w.schedule();
+    if (!w.flushNow() || now.length !== 2) fails.push('writer: leaving with a change scheduled wrote nothing, because the envelope looked the same');
+    now.length = 1;
+    n = 7;
+    const p = w.flush();
+    if (!w.writing) fails.push('writer: an asynchronous write is not reported as on its way');
+    if (!w.flushNow() || now.join() !== 'T6,T7') fails.push('writer: leaving while a write was still on its way did not write synchronously');
+    (slow as unknown as () => void)();
+    await p;
+    if (w.flushNow() !== null) fails.push('writer: leaving after the write landed wrote again');
+    // A write that failed is not trusted on leaving.
+    const w2 = createDraftWriter(mk, () => {}, 10_000, async () => ({ ok: false, reason: 'quota' }), { writeNow: (e) => { now.push(e.title); return { ok: true, bytes: 1 }; } });
+    n = 8;
+    await w2.flush();
+    if (!w2.flushNow()) fails.push('writer: leaving after a failed write did not write');
+  }
+  {
+    // Held during a gesture, and written when it ends.
+    let gesture = true;
+    const wrote: number[] = [];
+    const w = createDraftWriter(mk, () => {}, 10, async () => { wrote.push(Date.now()); return { ok: true, bytes: 1 }; }, { held: () => gesture });
+    w.schedule();
+    await tick(120);
+    if (wrote.length) fails.push('writer: wrote in the middle of a gesture');
+    gesture = false;
+    w.release();
+    await tick(60);
+    if (wrote.length !== 1) fails.push(`writer: the end of the gesture did not write (${wrote.length})`);
+  }
+  // Two drafts of the same design built apart are the same content; any real difference is not.
+  {
+    const { contentOf } = await import('../src/core/draft');
+    n = 20;
+    const a = JSON.stringify(mk());
+    await tick(5);
+    const b = JSON.stringify(mk());
+    n = 21;
+    const c = JSON.stringify(mk());
+    if (a === b) fails.push('(two drafts built apart were byte-identical: the check below proves nothing)');
+    if (contentOf(a) !== contentOf(b)) fails.push('the same design built twice reads as different content');
+    if (contentOf(a) === contentOf(c)) fails.push('a different title reads as the same content');
+    const tricky = JSON.stringify(buildDraft({ title: 'a "createdAt":"x" title', templateId: ground.id, templateVersion: ground.version, palette: env.doc.palette, cells, textObjects: [], designId: null }));
+    if (!contentOf(tricky).includes('\\"createdAt\\":\\"x\\"')) fails.push('a title that spells a createdAt key was taken for one');
+  }
+  console.log(`P3.7 compressed autosave: a busy Bernabeu draft (${json.length.toLocaleString()} characters) packs into ${packed.bytes.toLocaleString()} bytes (${(json.length * 2 / packed.bytes).toFixed(0)}x smaller than localStorage held it) in ${packMs.toFixed(0)} ms, unpacks in ${unpackMs.toFixed(0)} ms | ${bad.length} damaged records and a ${(DRAFT_MAX_BYTES * 3 / 1e6).toFixed(1)} MB bomb read as no draft (the bomb stopped in ${bombMs.toFixed(0)} ms) | the writer goes in order, says "saved" only once written, and leaves synchronously`);
+  if (fails.length) throw new Error(`performance plan P3.7: ${fails.join('; ')}`);
 })();

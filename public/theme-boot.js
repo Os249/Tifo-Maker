@@ -13,12 +13,18 @@
 })();
 
 /*
- * And the reading direction, for the same reason: an Arabic visitor used to see
- * the page laid out left-to-right for a moment and then flip. Same rule as
- * initLang() in src/ui/i18n.ts: a saved choice, else the browser's FIRST language.
+ * And the language (performance plan P3.3). Built pages come in two
+ * languages at two addresses (/community, and /ar/community with the Arabic
+ * already in its HTML) and say which they are on <html data-lang-page>. An
+ * Arabic page is Arabic and right to left already: nothing to do. Any other
+ * page takes the language chosen with the toggle (tifo_lang_v1), else the
+ * browser's FIRST language (initLang() in src/ui/i18n.ts), and its script
+ * translates it in place. Nothing here ever navigates: a page is always
+ * served, and painted, at the address that was asked for.
  */
 (function () {
   try {
+    if (document.documentElement.getAttribute('data-lang-page') === 'ar') return;
     var l = localStorage.getItem('tifo_lang_v1');
     if (l !== 'en' && l !== 'ar') {
       var first = (navigator.languages && navigator.languages[0]) || navigator.language || '';

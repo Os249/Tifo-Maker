@@ -6,6 +6,7 @@ import { curveSampler, inLane, laneCut, laneLines, type LaneLine } from '../../c
 import { gapCut, gapHalfPlanes, hasStands, spanGeometry, spanOn, SIDE_U, type SpanGeometry } from '../../core/standSpans';
 import type { StandGap } from '../../core/types';
 import { openingQuads } from '../../core/blocks';
+import { runSync, type Steps } from './steps';
 
 /**
  * Match Day Simulator — extruded stand architecture (Phase 1).
@@ -147,6 +148,11 @@ function clippedStrip(inner: Pt[], outer: Pt[], lanes: LaneLine[], keep?: boolea
 }
 
 export function buildStands(template: StadiumTemplate, shadows: boolean): THREE.Group {
+  return runSync(buildStandsSteps(template, shadows));
+}
+
+/** buildStands in steps: one a tier (one a stand block), then the openings, the facade and the roof (P3.6). */
+export function* buildStandsSteps(template: StadiumTemplate, shadows: boolean): Steps<THREE.Group> {
   const group = new THREE.Group();
   const { a, b, exponent: p } = template.plan;
 
@@ -203,14 +209,15 @@ export function buildStands(template: StadiumTemplate, shadows: boolean): THREE.
   }
   raw.side = concrete.side;
 
-  tiers.forEach((tier, idx) => {
+  for (const [idx, tier] of tiers.entries()) {
     if (spans && at && tier.stands) {
       for (const sg of spans[idx]) {
         const deck = tier.building ? raw : concrete;
         if (sg.straight) buildStraightBlock(template, idx, sg, deck, structure, add);
         else buildSpanBlock(template, idx, sg, at, deck, structure, add);
+        yield;
       }
-      return;
+      continue;
     }
     const rakeTan = Math.tan((tier.rakeDeg * Math.PI) / 180);
     const lastRow = Math.max(1, tier.rows - 1);
@@ -239,6 +246,7 @@ export function buildStands(template: StadiumTemplate, shadows: boolean): THREE.
         // Wound to face the pitch and the sky (a flat strip inner -> outer faces down).
         addT(strip(ring(a, b, p, r0, y1), ring(a, b, p, r0, y0), keep), raw, false, true);
         addT(strip(ring(a, b, p, r1, y1), ring(a, b, p, r0, y1), keep), raw, true, true);
+        yield;
       }
     } else if (laneHere.length) {
       // Cut exactly along the lane's side lines, so the concrete stops where
@@ -259,6 +267,7 @@ export function buildStands(template: StadiumTemplate, shadows: boolean): THREE.
     } else {
       addT(strip(ring(a, b, p, frontRadial, frontY), ring(a, b, p, backRadial, backY), keep), concrete, true, true);
     }
+    yield;
 
     // Vertical riser under the front of this tier, down to the previous tier's
     // top (tier 0 goes to ground). Closes the step between tiers.
@@ -268,6 +277,7 @@ export function buildStands(template: StadiumTemplate, shadows: boolean): THREE.
       const hi = ring(a, b, p, frontRadial, frontY);
       addT(laneHere.length ? clippedStrip(lo, hi, laneHere, keep) : strip(lo, hi, keep), structure, false, true);
     }
+    yield;
 
     if (gaps) {
       const prev = idx > 0 ? template.tiers[idx - 1] : null;
@@ -286,7 +296,8 @@ export function buildStands(template: StadiumTemplate, shadows: boolean): THREE.
     topBackRadial = backRadial;
     topBackY = backY;
     topTierDepth = backRadial - frontRadial;
-  });
+    yield;
+  }
 
   // A real tier's openings (TierBlocks.openings): the vomitories coming up
   // into the front of a band, the players' tunnel, the gates down to the
@@ -294,6 +305,7 @@ export function buildStands(template: StadiumTemplate, shadows: boolean): THREE.
   // a dark mouth on the deck and a parapet down each side and across the
   // back, so it reads as the hole it is rather than a bare patch of concrete.
   const openings = openingQuads(template);
+  yield;
   if (openings.length) {
     const mouth = new THREE.MeshStandardMaterial({ color: 0x14161a, roughness: 1, metalness: 0, envMapIntensity: 0.2, side: THREE.DoubleSide });
     const parapetMat = structure.side === THREE.DoubleSide ? structure : structure.clone();
@@ -323,6 +335,7 @@ export function buildStands(template: StadiumTemplate, shadows: boolean): THREE.
     }
   }
 
+  yield;
   // The outside of the bowl. A template that says nothing gets the flat grey
   // skirt this has always drawn, byte for byte — buildFacade's 'plain' is that
   // strip and that material. A template that names a style gets a real facade
@@ -334,6 +347,7 @@ export function buildStands(template: StadiumTemplate, shadows: boolean): THREE.
   } else {
     add(strip(ring(a, b, p, topBackRadial, 0), ring(a, b, p, topBackRadial, topBackY), keep), structure, false, true);
   }
+  yield;
 
   // Roof. Was a flat ring reaching a hard-coded 16 m in over the seats, which on
   // a shallow top tier covered the whole stand and some of the one below it —

@@ -77,8 +77,8 @@ console.log('\n— 1. the home page on a phone —');
   check('and the 3D engine was never downloaded', !asked.some((u) => /preview3d-.*\.js/.test(u)), asked.filter((u) => /preview3d/.test(u)).join(' '));
   check('the tags have left the address bar', await p.evaluate(() => !/utm_/.test(location.search)), await p.evaluate(() => location.href));
   check('the gallery is not fetched before anyone scrolls to it', !asked.some((u) => u.includes('/api/gallery')));
-  const cta = await p.evaluate(() => { const a = document.querySelector('.cta-row a.btn'); return a ? Math.round(a.getBoundingClientRect().bottom) : 9999; });
-  check('"Start designing" is on the first screen, above the cookie bar', cta < 844 * 0.62, `bottom at ${cta}px of 844`);
+  const cta = await p.evaluate(() => { const a = document.getElementById('ground-go'); return a ? Math.round(a.getBoundingClientRect().bottom) : 9999; });
+  check('"Start" is on the first screen, above the cookie bar', cta < 844 * 0.62, `bottom at ${cta}px of 844`);
   await p.evaluate(() => document.getElementById('showcase')?.scrollIntoView());
   const fetched = await until(p, () => performance.getEntriesByType('resource').some((e) => e.name.includes('/api/gallery')), null, 15000);
   check('scrolling there fetches it', fetched);
@@ -103,7 +103,7 @@ console.log('\n— 1. the home page on a phone —');
   await p.waitForTimeout(2500);
   check('a desktop gets the still picture, visible', shown);
   check('and no 3D engine until it is asked for', !asked.some((u) => /preview3d-.*\.js/.test(u)), asked.filter((u) => /preview3d/.test(u)).join(' '));
-  check('a 1x desktop takes the 640 px copy', await p.evaluate(() => /hero-stadium-640\.webp$/.test(document.querySelector('#hero-3d img.hero-still')?.currentSrc ?? '')));
+  check('a 1x desktop takes the 640 px copy', await p.evaluate(() => /\/hero\/[a-z0-9-]+-640\.webp$/.test(document.querySelector('#hero-3d img.hero-still')?.currentSrc ?? '')));
   await p.evaluate(() => document.querySelector('#hero-3d img.hero-still')?.click());
   const live = await until(p, () => !!document.querySelector('#hero-3d canvas') && !document.querySelector('#hero-3d img.hero-still'), null, 60000);
   check('a click on it starts the live 3D stadium', live && asked.some((u) => /preview3d-.*\.js/.test(u)));
@@ -118,9 +118,57 @@ console.log('\n— 1. the home page on a phone —');
   await p.context().close();
 }
 {
+  // The page is for every fan. The hero opens on a different club between
+  // visits; the closing band is the site's own blue until the visitor has
+  // started a tifo for a club, then it is that club's; the showcase leads with
+  // named designs, each with a way to start from it.
+  const clubs = new Set();
+  for (let i = 0; i < 16; i++) clubs.add((await (await fetch(`${B}/`)).text()).match(/id="hero-3d" data-club="([a-z0-9-]+)"/)?.[1]);
+  check('the hero opens on a different club between visits', clubs.size >= 3 && !clubs.has(undefined), [...clubs].join(', '));
+  const p = await open(WIDE);
+  await p.goto(`${B}/`, { waitUntil: 'load' });
+  const club = await p.evaluate(() => document.getElementById('hero-3d')?.dataset.club);
+  const said = await p.evaluate(() => ({
+    still: document.querySelector('#hero-3d img.hero-still')?.getAttribute('src'),
+    chip: document.querySelector('.hero-club.on')?.dataset.club,
+    make: document.getElementById('hero-make')?.getAttribute('href'),
+  }));
+  check('and the whole hero says that club', said.still === `/hero/${club}.webp` && said.chip === club && said.make === `/projects?new=1&club=${club}`, JSON.stringify(said));
+  await p.evaluate(() => document.getElementById('final-cta')?.scrollIntoView());
+  await p.waitForTimeout(800);
+  const plain = await p.evaluate(() => {
+    const band = document.getElementById('final-cta');
+    return { club: band?.dataset.club ?? null, other: document.getElementById('final-other')?.hidden, go: document.getElementById('final-go')?.getAttribute('href') };
+  });
+  check('a first visit gets the closing band in the site colour, for any club', plain.club === null && plain.other === true && plain.go === '/projects?new=1', JSON.stringify(plain));
+  await p.evaluate(() => document.getElementById('showcase')?.scrollIntoView());
+  const cards = await until(p, () => document.querySelectorAll('#showcase-grid .showcase-card').length > 0, null, 20000);
+  const shown = await p.evaluate(() => [...document.querySelectorAll('#showcase-grid .showcase-card')].map((c) => ({
+    open: c.querySelector('a.showcase-open')?.getAttribute('href') ?? '',
+    use: c.querySelector('a.showcase-use')?.getAttribute('href') ?? null,
+    title: c.querySelector('.showcase-title, h3')?.textContent?.trim() ?? '',
+  })));
+  check('the showcase shows at most four designs, each opening its page', cards && shown.length <= 4 && shown.every((c) => /^\/community\?t=/.test(c.open)), JSON.stringify(shown).slice(0, 200));
+  check('and a remixable one can be started from', shown.some((c) => c.use && /^\/d\//.test(c.use)), JSON.stringify(shown.map((c) => c.use)));
+  check('no "Untitled" design is on show', !shown.some((c) => /^(untitled|my tifo)/i.test(c.title)), shown.map((c) => c.title).join(' | '));
+  await p.context().close();
+
+  const back = await open(WIDE, [['tifo_last_club_v1', 'hilal']]);
+  await back.goto(`${B}/`, { waitUntil: 'load' });
+  await back.evaluate(() => document.getElementById('final-cta')?.scrollIntoView());
+  const painted = await until(back, () => document.getElementById('final-cta')?.dataset.club === 'hilal', null, 15000);
+  const band = await back.evaluate(() => {
+    const el = document.getElementById('final-cta');
+    const cs = getComputedStyle(el);
+    return { bg: cs.backgroundColor, ink: cs.color, go: document.getElementById('final-go')?.getAttribute('href'), text: document.getElementById('final-go')?.textContent?.trim(), other: document.getElementById('final-other')?.hidden };
+  });
+  check('a returning fan gets the band in their club colours, starting their club', painted && band.go === '/projects?new=1&club=hilal' && /Al Hilal/.test(band.text ?? '') && band.other === false, JSON.stringify(band));
+  await back.context().close();
+}
+{
   const ar = await open({ ...PHONE, locale: 'ar-SA' });
   await ar.goto(`${B}/`, { waitUntil: 'load' });
-  const a = await ar.evaluate(() => ({ dir: document.documentElement.dir, lang: document.documentElement.lang, cta: document.querySelector('.cta-row a.btn')?.textContent?.trim() }));
+  const a = await ar.evaluate(() => ({ dir: document.documentElement.dir, lang: document.documentElement.lang, cta: document.getElementById('ground-go')?.textContent?.trim() }));
   check('an Arabic browser gets Arabic, right to left', a.dir === 'rtl' && a.lang === 'ar' && /[؀-ۿ]/.test(a.cta ?? ''), JSON.stringify(a));
   await ar.context().close();
   const chose = await open({ ...PHONE, locale: 'ar-SA' }, [['tifo_lang_v1', 'en']]);

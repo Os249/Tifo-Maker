@@ -52,7 +52,7 @@ browser.newContext = async (...args) => {
  * hints and avatar initials, and the social handles.
  */
 const ALLOW = new Set([
-  'TIFO', 'MAKER', 'TIFOMAKER', 'tifomaker.org', 'English', 'العربية',
+  'TIFO', 'MAKER', 'TIFOMAKER', 'TifoMaker', 'tifomaker.org', 'English', 'العربية',
   'PNG', 'JPG', 'SVG', 'PDF', 'CSV', 'GIF', 'WebM', 'MP4', 'QR', 'AI', 'RTL',
   'CSV + PDF', 'PDF + CSV', '@OS99GameDev', '@OSNGameDev', 'Zaunfahne', 'tifomaker', '@tifomaker',
   'Ctrl', // a key's own label, which an Arabic keyboard prints too
@@ -317,6 +317,108 @@ console.log('\n— pages in English: every string there, no raw key, no empty la
     }, KEYS);
     if (bad.length) { fail++; console.log(`  FAIL  ${name} (en) — ${bad.slice(0, 8).join('; ')}`); }
     else { pass++; console.log(`  PASS  ${name} (en)`); }
+    await ctx.close();
+  }
+}
+
+// The Arabic pages under /ar/ (performance plan P3.3) carry their Arabic in
+// the HTML, so the first frame must already be Arabic and right to left. What
+// the first frame shows is what the HTML paints before any module script has
+// run, so the page is loaded here with every script but theme-boot.js refused,
+// in a fresh browser with no saved language (an English one: nothing but the
+// address may make the page Arabic). Then once more with its scripts, to see
+// the page stays where it is and stays Arabic.
+console.log('\n— the Arabic pages at their first paint (/ar/, no saved language, English browser) —');
+{
+  const g = await (await fetch(B + '/api/gallery?templates=1&limit=5')).json();
+  const id = g[0]?.id ?? 'nope';
+  for (const [path, name, w, h] of [['/ar/', 'landing', 1440, 960], ['/ar/', 'landing (phone)', 390, 844], ['/ar/community', 'community', 1440, 960],
+                                    ['/ar/community', 'community (phone)', 390, 844], ['/ar/clubs', 'clubs', 1440, 960], ['/ar/legal', 'legal', 1440, 960],
+                                    ['/ar/reset', 'reset', 1440, 960], ['/ar/projects', 'projects', 1440, 960], ['/ar/account', 'account', 1440, 960],
+                                    [`/ar/t/${id}`, 'share', 1440, 960], [`/ar/t/${id}`, 'share (phone)', 390, 844], [`/ar/s/${id}`, 'seat (phone)', 390, 844],
+                                    [`/ar/d/${id}`, 'editor', 1440, 960], ['/ar/app?new=1', 'new project', 1440, 960]]) {
+    const ctx = await browser.newContext({ viewport: { width: w, height: h }, locale: 'en-US' });
+    const p = await ctx.newPage();
+    p.on('pageerror', () => {});
+    await p.route(/\/assets\/(?!theme-boot-)[^/]+\.js(\?|$)/, (r) => r.abort());
+    await p.goto(B + path, { waitUntil: 'load', timeout: 60000 });
+    const root = await p.evaluate(() => ({ lang: document.documentElement.lang, dir: document.documentElement.dir, flow: getComputedStyle(document.body).direction, title: document.title, at: location.pathname,
+      toggle: document.getElementById('lang-toggle')?.textContent?.trim() ?? 'English' }));
+    // The toggle names the other language: English, on an Arabic page.
+    const rtl = root.lang === 'ar' && root.dir === 'rtl' && root.flow === 'rtl' && /[؀-ۿ]/.test(root.title) && root.at === path.split('?')[0] && root.toggle === 'English';
+    if (!rtl) { fail++; console.log(`  FAIL  ${name} first paint — ${JSON.stringify(root)}`); }
+    else report(`${name}, first paint (Arabic, right to left, before any page script)`, await p.evaluate(scrapePage));
+    await ctx.close();
+  }
+  for (const [path, name] of [['/ar/', 'landing'], ['/ar/community', 'community'], ['/ar/clubs', 'clubs'], [`/ar/t/${id}`, 'share']]) {
+    const ctx = await browser.newContext({ viewport: { width: 1440, height: 960 }, locale: 'en-US' });
+    const p = await ctx.newPage();
+    p.on('pageerror', () => {});
+    await p.goto(B + path, { waitUntil: 'networkidle', timeout: 60000 });
+    await p.waitForTimeout(1500);
+    const at = await p.evaluate(() => location.pathname);
+    if (at !== path) { fail++; console.log(`  FAIL  ${name}: a fresh English browser was moved from ${path} to ${at}`); }
+    else report(`${name}, once its scripts ran (still ${path})`, await p.evaluate(scrapePage));
+    await ctx.close();
+  }
+}
+
+// The toggle and the address (performance plan P3.3). An /ar/ address is
+// always the Arabic page; the toggle takes the address to the twin, in place,
+// and saves the choice; an English address showing Arabic because Arabic was
+// saved takes its Arabic twin's address, in place. Nothing ever navigates on
+// its own, so a page is fetched once, and a browser that chose nothing (a
+// crawler, say) is never moved from the address it asked for.
+console.log('\n— the toggle and the address —');
+{
+  const flow = (n, ok, x = '') => { ok ? pass++ : fail++; console.log(`  ${ok ? 'PASS' : 'FAIL'}  ${n}${x ? '  ' + x : ''}`); };
+  const at = (p) => { const u = new URL(p.url()); return u.pathname + u.search; };
+  const docs = (p) => { const list = []; p.on('request', (r) => { if (r.resourceType() === 'document') list.push(new URL(r.url()).pathname); }); return list; };
+  {
+    const ctx = await browser.newContext({ locale: 'en-US' });
+    const p = await ctx.newPage();
+    await p.goto(B + '/ar/community', { waitUntil: 'networkidle' });
+    flow('a fresh English browser stays on the Arabic page, in Arabic', at(p) === '/ar/community' && (await p.evaluate(() => document.documentElement.lang === 'ar' && document.documentElement.dir === 'rtl')), at(p));
+    await p.click('#lang-toggle');
+    await p.waitForTimeout(300);
+    flow('the toggle takes the address to the English twin, in English', at(p) === '/community' && (await p.evaluate(() => document.documentElement.lang === 'en')), at(p));
+    flow('saves the choice', (await p.evaluate(() => localStorage.getItem('tifo_lang_v1'))) === 'en');
+    flow('and the links on the page are the English pages', await p.evaluate(() => [...document.querySelectorAll('a[href^="/"]')].every((a) => !a.getAttribute('href').startsWith('/ar/'))));
+    const seen = docs(p);
+    await p.goto(B + '/ar/clubs', { waitUntil: 'networkidle' });
+    flow('with English saved, an Arabic address is still the Arabic page', at(p) === '/ar/clubs' && (await p.evaluate(() => document.documentElement.lang === 'ar')) && seen.length === 1, `${at(p)} ${seen.join(' -> ')}`);
+    await p.click('#lang-toggle');
+    await p.waitForTimeout(300);
+    flow('the toggle there goes to /clubs', at(p) === '/clubs', at(p));
+    await p.click('#lang-toggle');
+    await p.waitForTimeout(300);
+    flow('and back to /ar/clubs, its links Arabic', at(p) === '/ar/clubs' && (await p.evaluate(() => document.querySelector('a.brand')?.getAttribute('href') === '/ar/')), at(p));
+    const seen2 = docs(p);
+    await p.goto(B + '/legal#privacy', { waitUntil: 'networkidle' });
+    await p.waitForTimeout(500);
+    flow('with Arabic saved, an English address takes its Arabic twin\'s address, fetched once', at(p) === '/ar/legal' && seen2.length === 1 && (await p.evaluate(() => document.documentElement.lang === 'ar' && /-ar$/.test(location.hash))), `${at(p)}${await p.evaluate(() => location.hash)} ${seen2.join(' -> ')}`);
+    await p.goto(B + '/reset?token=abc', { waitUntil: 'networkidle' });
+    flow('a reset link keeps its token for the page to read, then drops it', at(p) === '/ar/reset' && (await p.evaluate(() => document.documentElement.lang === 'ar')), at(p));
+    await p.goto(B + '/tifo-spec', { waitUntil: 'networkidle' });
+    flow('the English-only spec keeps its address', at(p) === '/tifo-spec', at(p));
+    await ctx.close();
+  }
+  {
+    const ctx = await browser.newContext({ locale: 'ar-SA' });
+    const p = await ctx.newPage();
+    await p.goto(B + '/clubs', { waitUntil: 'networkidle' });
+    flow('a fresh Arabic browser keeps the English address, translated in place as before', at(p) === '/clubs' && (await p.evaluate(() => document.documentElement.lang === 'ar')), at(p));
+    flow('with links to the Arabic pages', await p.evaluate(() => document.querySelector('a.brand')?.getAttribute('href') === '/ar/'));
+    await ctx.close();
+  }
+  {
+    const ctx = await browser.newContext({ storageState: state() });
+    const p = await ctx.newPage();
+    const seen = docs(p);
+    await p.goto(B + '/app?new=1', { waitUntil: 'networkidle', timeout: 60000 });
+    await p.waitForFunction(() => /[?&]local=/.test(location.search), null, { timeout: 60000 }).catch(() => {});
+    const n = await p.evaluate(() => (JSON.parse(localStorage.getItem('tifo_projects_v1') || '[]')).length);
+    flow('a new project from an English address, Arabic saved: one project, at /ar/app', n === 1 && /^\/ar\/app\?local=/.test(at(p)) && seen.length === 1, `${n} project(s), ${at(p)}, ${seen.join(' -> ')}`);
     await ctx.close();
   }
 }

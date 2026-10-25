@@ -17,7 +17,7 @@ import { escapeHtml } from './core/escape';
 // getLang, not <html lang>: the language module is the source of truth, and the
 // landing bundle already carries it. The rest of i18n is pulled in lazily below,
 // on the path that actually needs to build a card.
-import { getLang } from './ui/i18n';
+import { getLang, localPath } from './ui/i18n';
 
 const ID = 'featured-tifo';
 
@@ -69,7 +69,7 @@ export async function mountDailyTifo(): Promise<void> {
     const by = item.ownerName || 'a supporter';
     box.innerHTML = `
       <div class="fd-label"><span class="fd-star" aria-hidden="true">★</span><span data-i18n="daily.badge">${escapeHtml(t('daily.badge'))}</span></div>
-      <a class="fd-card" href="/t/${encodeURIComponent(item.id)}">
+      <a class="fd-card" href="${localPath(`/t/${encodeURIComponent(item.id)}`)}">
         <span class="fd-shot-wrap">
           <img class="fd-shot" src="/api/designs/${encodeURIComponent(item.id)}/thumbnail.png"
                alt="${escapeHtml(name)}, a stadium tifo by @${escapeHtml(by)}" width="800" height="84" loading="lazy" decoding="async" />

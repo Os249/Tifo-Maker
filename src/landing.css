@@ -2,14 +2,17 @@
  * The home page.
  *
  * Built round the question a fan arrives with, "is my club's ground here?":
- * the hero answers it with a search box and a real club's tifo in its real
- * ground, and the next band shows the eight leagues those grounds come from.
+ * the hero answers it with a search box that is the page's main action, and a
+ * real club's tifo in its real ground beside it. Then one "how it works", the
+ * eight leagues, designs from the stands, the person who builds it, and a
+ * closing band in the visitor's club colours (Direction C, 24 Oct 2026).
  * Everything is on the shared design system (ui/tokens.css, colorScheme.css):
  * one action colour, night for every dark band, the display face for headings.
  * The three different purples this page used to have (steps, clubs, the solo
  * dev card) are night now, so the dark bands read as one place.
  */
 @import './ui/colorScheme.css';
+@import './ui/siteHeader.css';
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html { scroll-behavior: smooth; }
@@ -22,29 +25,6 @@ body {
 }
 a { color: inherit; text-decoration: none; }
 img { max-width: 100%; }
-
-/* ============ NAV ============ */
-.nav {
-  position: sticky; top: 0; z-index: var(--z-sticky);
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 14px 32px;
-  background: var(--bar); backdrop-filter: blur(10px);
-  border-bottom: 1px solid var(--line);
-}
-.brand { font-weight: 800; font-size: 20px; letter-spacing: .02em; color: var(--ink); }
-.brand b { color: var(--maker); }
-.nav-links { display: flex; align-items: center; gap: 26px; font-weight: 500; font-size: 15px; }
-.nav-links a:not(.nav-cta):hover { color: var(--blue); }
-.nav-cta {
-  background: var(--invert); color: var(--invert-ink) !important;
-  padding: 9px 18px; border-radius: var(--r-pill); font-weight: 600;
-}
-.nav-cta:hover { background: var(--blue-solid); color: #fff !important; }
-.lang-toggle {
-  background: transparent; border: 1px solid var(--line-strong); color: var(--ink);
-  font: inherit; font-weight: 600; font-size: 14px; padding: 7px 14px; border-radius: var(--r-pill); cursor: pointer;
-}
-.lang-toggle:hover { border-color: var(--blue); color: var(--blue); }
 
 /* ============ BUTTONS ============ */
 .btn {
@@ -60,13 +40,11 @@ img { max-width: 100%; }
 .btn-primary:hover { background: var(--blue-solid-hover); box-shadow: 0 10px 30px rgba(28, 111, 224, 0.4); }
 .btn-ghost { background: transparent; border: 1.5px solid var(--line-strong); color: var(--ink); font-weight: 600; }
 .btn-ghost:hover { border-color: var(--blue); color: var(--blue); }
-.btn-light { background: var(--flare); color: var(--on-flare); }
-.btn-light:hover { background: #c4d900; }
 .btn-lg { font-size: 18px; padding: 17px 34px; }
 
 /* ============ HERO ============ */
 .hero {
-  display: grid; grid-template-columns: 1fr 1.12fr; gap: 64px; align-items: center;
+  display: grid; grid-template-columns: minmax(0, 1.08fr) minmax(0, 1fr); gap: 56px; align-items: center;
   margin: 0 auto; padding: 76px max(32px, calc((100vw - 1240px) / 2)) 68px;
   background: radial-gradient(ellipse at 80% 20%, #192c48 0, transparent 55%), var(--night-900);
   color: var(--snow);
@@ -74,10 +52,9 @@ img { max-width: 100%; }
 .hero-copy { min-width: 0; }
 .hero .eyebrow { color: var(--mist); font-size: 11px; letter-spacing: .15em; }
 .hero .lead, .hero .trust-line { color: var(--mist); }
-.hero .btn-ghost { color: var(--snow); border-color: var(--night-500); }
-.hero .btn-ghost:hover { background: var(--night-750); border-color: var(--blue-300); }
 .hero .hero-h1-last { color: var(--blue-300); }
-.hero .ground-find-box { background: var(--night-800); border-color: var(--night-500); color: var(--mist); }
+.hero .ground-find-box { background: var(--night-800); border-color: var(--night-500); color: var(--mist); box-shadow: 0 12px 36px rgba(0, 0, 0, .28); }
+.hero .ground-find-box:focus-within { border-color: var(--blue-300); }
 .hero .ground-find-box input { color: var(--snow); }
 .hero .ground-find-box input::placeholder { color: var(--mist); }
 .hero .ground-list { color: var(--ink); }
@@ -90,15 +67,6 @@ img { max-width: 100%; }
 [dir="rtl"] .hero-play { transform: translate(50%, -50%); }
 .hero-play:hover { border-color: var(--blue-300); background: var(--night-750); }
 .hero-play:disabled { cursor: progress; }
-.workflow { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); max-width: 1240px; margin: 0 auto; padding: 0 32px; border-bottom: 1px solid var(--line); }
-.workflow a { display: flex; gap: 16px; align-items: center; padding: 28px 24px; min-width: 0; }
-.workflow a + a { border-inline-start: 1px solid var(--line); }
-.workflow-num { color: var(--blue); font: 500 13px var(--font-data); }
-.workflow b { display: block; font-size: 14px; }
-.workflow small { display: block; font-size: 12px; color: var(--muted); margin-top: 4px; }
-.workflow-arrow { color: var(--muted); margin-inline-start: auto; }
-[dir="rtl"] .workflow-arrow { transform: scaleX(-1); }
-.workflow a:hover { background: var(--raise-2); }
 .landing-page :is(a, button, input):focus-visible { outline: 3px solid var(--blue-300); outline-offset: 4px; }
 .landing-page :is(section[id], main[id]) { scroll-margin-top: 92px; }
 .eyebrow {
@@ -119,21 +87,28 @@ img { max-width: 100%; }
 .hero-h1 span { display: block; }
 .hero-h1-last { color: var(--blue); }
 .lead { font-size: clamp(17px, 1.6vw, 19px); color: var(--muted); max-width: 31em; margin-bottom: 28px; }
-.cta-row { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 26px; }
 .trust-line { font-size: 14px; color: var(--muted); }
 
 /* The ground finder: a search box that answers "is my club's ground here?". */
-.ground-find { position: relative; max-width: 470px; margin-bottom: 14px; }
-.ground-find-label { display: block; font-size: 14px; font-weight: 700; margin-bottom: 8px; }
+.ground-find { position: relative; max-width: 540px; margin-bottom: 18px; }
+.ground-find-label { display: block; font-size: 15px; font-weight: 700; margin-bottom: 10px; }
 .ground-find-box {
-  display: flex; align-items: center; gap: 10px; padding: 0 16px;
+  display: flex; align-items: center; gap: 10px; padding-block: 6px; padding-inline: 18px 6px;
   background: var(--card); border: 1.5px solid var(--line-strong); border-radius: var(--r-pill);
   color: var(--muted); transition: border-color var(--t-fast), box-shadow var(--t-fast);
 }
+/* The page's main action: Start, with or without a club typed. */
+.ground-find-go {
+  flex: none; min-height: 46px; padding: 0 24px; border: none; border-radius: var(--r-pill);
+  background: var(--blue-solid); color: #fff; font: inherit; font-size: 16px; font-weight: 700; cursor: pointer;
+  box-shadow: 0 6px 18px rgba(28, 111, 224, 0.35);
+  transition: background var(--t-fast), box-shadow var(--t-fast);
+}
+.ground-find-go:hover { background: var(--blue-solid-hover); box-shadow: 0 8px 24px rgba(28, 111, 224, 0.45); }
 .ground-find-box:focus-within { border-color: var(--blue); box-shadow: 0 0 0 4px rgba(28, 111, 224, 0.14); }
 .ground-find-box input {
   flex: 1; min-width: 0; border: none; background: transparent; color: var(--ink);
-  font: inherit; font-size: 16px; padding: 13px 0; outline: none;
+  font: inherit; font-size: 17px; padding: 10px 0; outline: none;
 }
 .ground-find-box input::placeholder { color: var(--muted); }
 .ground-list {
@@ -190,10 +165,11 @@ img { max-width: 100%; }
 }
 .hero-make:hover { background: var(--blue-solid-hover); }
 .hero-make:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
-.hero-clubs { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-start; }
+.hero-clubs { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; justify-content: flex-start; margin-bottom: 22px; }
+.hero-clubs-label { font-size: 13px; font-weight: 600; color: var(--mist); margin-inline-end: 4px; }
 .hero-club {
   border: 1px solid var(--night-500); background: transparent; color: var(--mist);
-  font: inherit; font-size: 14px; font-weight: 600; padding: 7px 14px; border-radius: var(--r-pill); cursor: pointer;
+  font: inherit; font-size: 13.5px; font-weight: 600; padding: 6px 12px; border-radius: var(--r-pill); cursor: pointer;
   transition: border-color var(--t-fast), background var(--t-fast), color var(--t-fast);
 }
 .hero-club:hover { border-color: var(--blue); color: var(--blue); }
@@ -206,8 +182,57 @@ img { max-width: 100%; }
   font-size: clamp(30px, 3.6vw, 44px); font-weight: 800; line-height: 1.1; letter-spacing: -0.01em;
   text-align: center;
 }
-.section-sub { font-size: 18px; color: var(--muted); max-width: 600px; margin: 12px auto 0; line-height: 1.5; text-align: center; }
+.section-sub { font-size: 18px; color: var(--muted); max-width: 600px; margin: 12px auto 0; line-height: 1.5; text-align: center; text-wrap: balance; }
 .sec-head { margin-bottom: 36px; }
+
+/* ============ HOW IT WORKS: once, with pictures ============ */
+.how { background: var(--raise-2); padding: 80px 32px 88px; }
+:root[data-theme="dark"] .how { background: var(--night-850); }
+.how-steps { list-style: none; max-width: 1176px; margin: 0 auto; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; }
+.how-step {
+  display: flex; flex-direction: column; overflow: hidden;
+  background: var(--card); border: 1px solid var(--line); border-radius: var(--r-xl); box-shadow: var(--shadow-sm);
+}
+.how-pic {
+  position: relative; aspect-ratio: 16 / 9; overflow: hidden;
+  background: var(--mosaic-dot) 0 0 / 12px 12px, radial-gradient(ellipse at 50% 30%, #1a2847, #070B14 80%);
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px;
+}
+.how-pic-photo img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+/* Step 1: the start flow's club cards, in miniature. */
+.mini-club {
+  --c1: #1C6FE0; --c2: #F1F4FB;
+  display: flex; flex-direction: column; width: 62%; overflow: hidden; border-radius: 10px;
+  background: rgba(255, 255, 255, .06); border: 1px solid rgba(255, 255, 255, .12); color: var(--snow);
+}
+.mini-club i { display: block; height: 7px; background: repeating-linear-gradient(90deg, var(--c1) 0 12px, var(--c2) 12px 18px); }
+.mini-club b { padding: 6px 12px 7px; font-size: 14px; font-weight: 700; text-align: start; }
+/* Clubs from different leagues, none picked out: the step is for any club. */
+.mini-club.c-hilal { --c1: #0033a0; --c2: #ffffff; }
+.mini-club.c-madrid { --c1: #febe10; --c2: #ffffff; }
+.mini-club.c-liverpool { --c1: #c8102e; --c2: #f6eb61; }
+/* Step 2: two tiers of seats, each seat a dot, painted in stripes of
+   TifoMaker's own blue and white, no club's. */
+.how-pic-strip { gap: 10px; }
+.mini-strip {
+  display: block; width: 86%; height: 28%;
+  background: repeating-linear-gradient(115deg, #4C8DF0 0 22px, #3a4256 22px 34px, #F1F4FB 34px 44px, #3a4256 44px 52px);
+  -webkit-mask: radial-gradient(circle, #000 52%, transparent 58%) 0 0 / 7px 7px;
+  mask: radial-gradient(circle, #000 52%, transparent 58%) 0 0 / 7px 7px;
+}
+.mini-strip.lower { width: 74%; height: 22%; background: repeating-linear-gradient(115deg, #3a4256 0 14px, #4C8DF0 14px 40px); }
+.how-body { display: flex; flex-direction: column; gap: 10px; padding: 22px 24px 26px; flex: 1; }
+.how-body h3 { display: flex; align-items: center; gap: 12px; font-size: 20px; font-weight: 800; line-height: 1.25; }
+.how-num {
+  flex: none; display: inline-grid; place-items: center; width: 32px; height: 32px; border-radius: 10px;
+  background: var(--blue-solid); color: #fff; font: 800 17px var(--font-display);
+}
+.how-body p { color: var(--muted); font-size: 15.5px; line-height: 1.6; }
+.how-tags { list-style: none; display: flex; flex-wrap: wrap; gap: 6px; margin-top: auto; padding-top: 6px; }
+.how-tags li {
+  font-size: 12.5px; font-weight: 700; color: var(--ink);
+  padding: 4px 10px; border-radius: var(--r-pill); border: 1px solid var(--line-strong); background: var(--raise);
+}
 
 /* ============ LEAGUES ============ */
 .leagues { max-width: 1240px; margin: 0 auto; padding: 40px 32px 72px; }
@@ -234,17 +259,26 @@ img { max-width: 100%; }
 .showcase-head { margin-bottom: 36px; }
 .showcase-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 18px; }
 .showcase-card {
-  display: block; border-radius: var(--r-lg); overflow: hidden; background: var(--card);
+  display: flex; flex-direction: column; border-radius: var(--r-lg); overflow: hidden; background: var(--card);
   border: 1px solid var(--line); box-shadow: var(--shadow-sm);
   transition: transform var(--t-fast) var(--ease), box-shadow var(--t-fast);
 }
 .showcase-card:hover { transform: translateY(-4px); box-shadow: var(--shadow-lg); }
-.showcase-card:focus-visible { outline: 2px solid var(--blue); outline-offset: 3px; }
+.showcase-open { display: block; }
+.showcase-open:focus-visible { outline: 2px solid var(--blue); outline-offset: -2px; }
+.showcase-open:hover .showcase-title { color: var(--blue); }
+.showcase-use {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px; margin: 0 14px 14px;
+  min-height: 40px; padding: 0 14px; border-radius: var(--r-pill); border: 1.5px solid var(--line-strong);
+  color: var(--ink); font-size: 14px; font-weight: 700; transition: border-color var(--t-fast), color var(--t-fast);
+}
+.showcase-use:hover { border-color: var(--blue); color: var(--blue); }
+.showcase-use svg { flex: none; }
 .showcase-thumb { aspect-ratio: 16 / 10; overflow: hidden; background: var(--mosaic-dot) 0 0 / 10px 10px, radial-gradient(ellipse at 50% 50%, #16213a, #070B14 70%); }
 .showcase-thumb img { display: block; width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity var(--t-med) var(--ease); }
 .showcase-thumb img[data-bowl-state="ready"], .showcase-thumb img[data-bowl-state="strip"] { opacity: 1; }
 .showcase-thumb.bowl-failed img { object-fit: contain; image-rendering: pixelated; }
-.showcase-meta { padding: 12px 14px; display: flex; flex-direction: column; gap: 2px; }
+.showcase-meta { padding: 12px 14px 10px; display: flex; flex-direction: column; gap: 2px; }
 .showcase-title { font-weight: 700; font-size: 15px; line-height: 1.25; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .showcase-by { font-size: 13px; color: var(--blue); font-weight: 600; }
 .showcase-cta { text-align: center; margin-top: 30px; }
@@ -286,56 +320,6 @@ img { max-width: 100%; }
 }
 .fd-card:hover .fd-cta { background: var(--blue-solid); color: #fff; }
 .fd-note { margin: 12px 0 0; text-align: center; font-size: 14px; color: var(--muted); }
-
-/* ============ FEATURES ============ */
-.features { max-width: 1240px; margin: 0 auto; padding: 32px 32px 88px; }
-.feature-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; }
-.feature {
-  position: relative; padding: 26px 22px 24px; border-radius: var(--r-lg); background: var(--card);
-  border: 1px solid var(--line); box-shadow: var(--shadow-sm); overflow: hidden;
-}
-/* A scarf along the top of each card. */
-.feature::before { content: ''; position: absolute; inset: 0 0 auto 0; height: 5px; background: var(--scarf); }
-.feature-ic {
-  display: inline-grid; place-items: center; width: 44px; height: 44px; border-radius: var(--r-md);
-  background: color-mix(in srgb, var(--blue-solid) 12%, transparent); color: var(--blue); margin-bottom: 16px;
-}
-.feature h3 { font-size: 19px; font-weight: 800; margin-bottom: 8px; }
-.feature p { font-size: 15px; color: var(--muted); }
-
-/* ============ HOW IT WORKS: a night band ============ */
-.how { background: var(--mosaic-dot) 0 0 / 14px 14px, var(--panel-dark); color: var(--panel-dark-ink); padding: 88px 32px; }
-.how .section-title { color: var(--panel-dark-ink); margin-bottom: 40px; }
-.steps { max-width: 880px; margin: 0 auto; display: flex; flex-direction: column; gap: 14px; }
-.step {
-  display: flex; gap: 24px; align-items: center; padding: 24px 28px;
-  background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: var(--r-lg);
-}
-.step-num {
-  flex: 0 0 auto; width: 52px; height: 52px; border-radius: var(--r-md);
-  display: flex; align-items: center; justify-content: center;
-  font-family: var(--font-display); font-size: 26px; font-weight: 800;
-}
-.n1 { background: var(--flare); color: var(--on-flare); }
-.n2, .n3 { background: var(--blue-solid); color: #fff; }
-.step-body h3 { font-size: 20px; font-weight: 700; margin-bottom: 4px; }
-.step-body p { color: var(--panel-dark-muted); font-size: 16px; }
-
-/* ============ CLUBS: the same night ============ */
-.clubs { padding: 88px 32px; }
-.clubs-inner {
-  max-width: 1120px; margin: 0 auto; position: relative; overflow: hidden;
-  display: grid; grid-template-columns: 1.2fr 0.8fr; gap: 56px; align-items: center;
-  background: var(--mosaic-dot) 0 0 / 14px 14px, var(--panel-dark); color: var(--panel-dark-ink);
-  border-radius: var(--r-xl); padding: 56px;
-}
-.clubs-inner::before { content: ''; position: absolute; inset: 0 0 auto 0; height: 6px; background: var(--scarf); }
-.clubs-copy h2 { font-family: var(--font-display); font-size: clamp(26px, 3.4vw, 38px); font-weight: 800; line-height: 1.15; margin-bottom: 16px; }
-.clubs-copy p { color: var(--panel-dark-muted); font-size: 16px; margin-bottom: 26px; max-width: 34em; }
-.clubs-stats { display: flex; flex-direction: column; gap: 22px; }
-.stat { display: flex; flex-direction: column; }
-.stat-num { font-family: var(--font-display); font-size: 34px; font-weight: 800; color: var(--flare); }
-.stat-label { font-size: 14px; color: var(--panel-dark-muted); }
 
 /* ============ THE CURVA, AND THE PERSON BEHIND IT ============ */
 .maker {
@@ -379,9 +363,24 @@ img { max-width: 100%; }
 .mk-x span { direction: ltr; unicode-bidi: isolate; }
 
 /* ============ FINAL CTA ============ */
-.final-cta { text-align: center; padding: 88px 32px 104px; border-top: 1px solid var(--line); }
-.final-cta h2 { font-family: var(--font-display); font-size: clamp(32px, 4.6vw, 52px); font-weight: 800; line-height: 1.1; margin-bottom: 14px; }
-.final-cta p { font-size: 18px; color: var(--muted); margin-bottom: 30px; }
+/* TifoMaker's blue for everyone. A visitor who has already started a tifo
+   for a club gets --band and --band-ink in that club's colours (landing.ts). */
+.final-cta {
+  --band: var(--blue-solid); --band-ink: #FFFFFF;
+  text-align: center; padding: 88px 32px 96px;
+  background: var(--band); color: var(--band-ink);
+  transition: background var(--t-med) var(--ease), color var(--t-med) var(--ease);
+}
+.final-cta h2 { font-family: var(--font-display); font-size: clamp(32px, 4.6vw, 54px); font-weight: 800; line-height: 1.1; margin-bottom: 14px; color: inherit; }
+.final-cta p { font-size: 18px; margin-bottom: 30px; opacity: .86; }
+.final-actions { display: flex; flex-direction: column; align-items: center; gap: 16px; }
+.final-go { background: var(--band-ink); color: var(--band); box-shadow: 0 10px 28px rgba(0, 0, 0, .22); }
+.final-go:hover { transform: translateY(-2px); box-shadow: 0 14px 34px rgba(0, 0, 0, .28); }
+.final-go:focus-visible { outline: 3px solid var(--band-ink); outline-offset: 4px; }
+.final-other { color: inherit; font-size: 15px; font-weight: 600; text-decoration: underline; text-underline-offset: 4px; opacity: .85; }
+.final-other:hover { opacity: 1; }
+.final-other[hidden] { display: none; }
+.final-cta :is(a, button):focus-visible { outline-color: var(--band-ink); }
 
 /* ============ FOOTER ============ */
 .foot {
@@ -412,68 +411,61 @@ img { max-width: 100%; }
 /* ============ RESPONSIVE ============ */
 @media (max-width: 1100px) {
   .hero { gap: 32px; }
-  .workflow a { padding-inline: 14px; gap: 10px; }
-  .workflow-arrow { display: none; }
-  .league-strip, .showcase-grid, .feature-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .league-strip, .showcase-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .how-steps { grid-template-columns: 1fr; max-width: 640px; }
+  .how-step { display: grid; grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr); }
+  .how-pic { aspect-ratio: auto; min-height: 200px; }
 }
 @media (max-width: 860px) {
-  .nav { padding: 10px 16px; padding-top: calc(10px + env(safe-area-inset-top)); }
-  .nav-links { gap: 12px; }
-  .nav-links a:not(.nav-cta) { display: none; }
-  .hero { grid-template-columns: 1fr; gap: 26px; padding: 30px 18px 48px; }
+  .hero { grid-template-columns: 1fr; gap: 22px; padding: 28px 18px 44px; }
   :root:not([dir="rtl"]) .hero-h1 { font-size: clamp(42px, 9vw, 64px); }
-  .workflow { padding: 0 18px; }
-  .workflow a { padding: 22px 12px; align-items: flex-start; }
-  .workflow-num { display: none; }
-  .workflow small { font-size: 11px; }
-  .workflow b { font-size: 12px; }
-  /* What it is, then the button, then the picture: "Start designing" must be
-     on the first screen of a 390px phone, above the cookie bar. */
+  /* What it is, then the search with its Start button, then the picture:
+     the main action must be on the first screen of a 390px phone, above the
+     cookie bar. */
   .hero-copy { display: contents; }
-  .eyebrow { order: -6; margin-bottom: -10px; }
-  .hero-h1 { order: -5; font-size: clamp(36px, 10.5vw, 48px); margin-bottom: -6px; }
-  .lead { order: -4; margin-bottom: -4px; font-size: 16.5px; }
-  .cta-row { order: -3; margin-bottom: 0; }
-  .cta-row .btn { flex: 1 1 auto; padding-inline: 16px; font-size: 14px; white-space: nowrap; }
+  .eyebrow { order: -6; margin-bottom: -8px; }
+  .hero-h1 { order: -5; font-size: clamp(36px, 10.5vw, 48px); margin-bottom: -4px; }
+  .lead { order: -4; margin-bottom: -2px; font-size: 16.5px; }
+  .ground-find { order: -3; max-width: none; margin: 0; }
+  .ground-find-label { font-size: 14px; margin-bottom: 8px; }
+  .ground-find-box { padding-inline: 14px 5px; }
+  .ground-find-box input { font-size: 16px; }
+  .ground-find-go { min-height: 44px; padding: 0 18px; font-size: 15px; }
   .hero-visual { order: -2; }
-  .ground-find { order: -1; max-width: none; margin: 0; }
+  .hero-clubs { order: -1; margin: 0; }
   .trust-line { order: 0; }
   .hero-cap { inset-inline: 8px; bottom: 8px; }
   .hero-cap-text { font-size: 13px; }
   .hero-make { padding: 7px 12px; font-size: 13px; }
   .hero-clubs { justify-content: flex-start; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; margin-inline: -18px; padding-inline: 18px; }
   .hero-clubs::-webkit-scrollbar { display: none; }
-  .hero-club { flex: none; }
-  .leagues, .showcase, .features { padding-inline: 18px; }
+  .hero-club, .hero-clubs-label { flex: none; }
+  .how { padding: 56px 18px 64px; }
+  .how-step { grid-template-columns: 1fr; }
+  .how-pic { aspect-ratio: 16 / 7; min-height: 0; }
+  .how-body { padding: 18px 18px 20px; }
+  .leagues, .showcase { padding-inline: 18px; }
   .league-strip { grid-auto-flow: column; grid-template-columns: none; grid-auto-columns: 68%; overflow-x: auto; scroll-snap-type: x mandatory; margin-inline: -18px; padding: 0 18px 6px; scrollbar-width: none; }
   .league-strip::-webkit-scrollbar { display: none; }
   .league { scroll-snap-align: start; }
   .fd-card { grid-template-columns: 1fr; }
   .fd-body { padding: 18px 18px 20px; gap: 14px; }
   .fd-cta { align-self: stretch; text-align: center; }
-  .feature-grid { grid-template-columns: 1fr; }
-  .how, .clubs { padding: 64px 18px; }
-  .step { padding: 18px; gap: 16px; }
-  .clubs-inner { grid-template-columns: 1fr; gap: 32px; padding: 40px 24px; }
   .maker { grid-template-columns: 1fr; gap: 28px; padding: 56px 18px 64px; }
   .maker-copy .section-title { text-align: center; }
   .supporters-lead { margin-inline: auto; text-align: center; }
   .maker-card { padding: 34px 22px 30px; }
   .maker-card::before { font-size: 140px; top: -32px; }
+  .final-cta { padding: 64px 18px 72px; }
 }
 @media (max-width: 480px) {
-  .workflow { grid-template-columns: 1fr; padding-block: 8px; }
-  .workflow a { padding: 12px 4px; align-items: center; }
-  .workflow a + a { border-inline-start: none; border-top: 1px solid var(--line); }
-  .workflow-num, .workflow-arrow { display: block; }
-  .workflow b { font-size: 14px; }
-  .workflow small { font-size: 12px; }
   .showcase-grid { gap: 12px; }
-  .showcase-meta { padding: 10px 12px; }
+  .showcase-meta { padding: 10px 12px 8px; }
+  .showcase-use { margin: 0 10px 10px; font-size: 13px; padding: 0 10px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
-  .league img, .league, .showcase-card, .fd-card, .mk-x { transition: none; }
-  .league:hover, .showcase-card:hover, .fd-card:hover, .mk-x:hover { transform: none; }
+  .league img, .league, .showcase-card, .fd-card, .mk-x, .final-cta, .final-go { transition: none; }
+  .league:hover, .showcase-card:hover, .fd-card:hover, .mk-x:hover, .final-go:hover { transform: none; }
 }
