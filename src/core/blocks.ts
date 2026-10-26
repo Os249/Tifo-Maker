@@ -368,6 +368,30 @@ export function rhythm(step: number, centred: boolean, upTo: number): number[] {
 }
 
 /**
+ * standSpans.sideAt, with a point on the diagonal itself given to the end
+ * (east or west) every time.
+ *
+ * The plan curve has a sample at t = pi/4 in every quadrant, and where a
+ * tier's front row is the curve itself that sample lies on the diagonal:
+ * |x|/a and |z|/b are equal but for the last bit of Math.cos and Math.sin,
+ * which JavaScript engines do not agree on. Node 24 (the server and CI) put
+ * Buraidah's north-east sample on the east side and its north-west one on
+ * the north, so its two corners turned one sample (0.1 m)
+ * apart and 2,590 seats changed section with the engine; Node 22 put both on
+ * the north. Seat order and positions never depended on it, so saved designs
+ * are untouched. With the tie settled here every ground is laid out the same
+ * on every engine: for 103 grounds what every engine already made, and for
+ * Buraidah the symmetric layout, as Node 22 made it (the frozen seat
+ * maps in scripts/verify.mts pin it, on any engine).
+ */
+function steadySideAt(plan: StadiumTemplate['plan'], radial: number, x: number, z: number): StandSide {
+  const nx = Math.abs(x) / (plan.a + radial);
+  const nz = Math.abs(z) / (plan.b + radial);
+  if (Math.abs(nz - nx) <= 1e-12 * Math.max(nx, nz)) return x >= 0 ? 'east' : 'west';
+  return sideAt(plan, radial, x, z);
+}
+
+/**
  * Where a tier's front row turns the corner from one side of the bowl to the
  * next: the station, on that side, of the diagonal through the corner (the
  * line standSpans.sideAt divides the sides by). A side's stairs run out to
@@ -384,7 +408,7 @@ export function cornerStation(template: StadiumTemplate, tier: TierSpec, side: S
     const i = (((i0 + (SIDE_SIGN[side] > 0 ? k : -k)) % N) + N) % N;
     const x = front.x[i];
     const z = front.z[i];
-    if (sideAt(template.plan, r, x, z) !== side) {
+    if (steadySideAt(template.plan, r, x, z) !== side) {
       let d = Math.abs(front.s[i] - s0);
       if (d > front.total / 2) d = front.total - d;
       return d;

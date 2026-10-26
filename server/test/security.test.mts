@@ -5327,6 +5327,23 @@ async function makeDesign(app: FastifyInstance, token: string, isPublic = false)
     const rows = good.shipped();
     const readMs = Date.now() - t0;
     check(readMs < 2000 && good.generatedIds().length === 0 && logs.length === 0, `a current table is used as it is (${readMs} ms, ${good.generatedIds().length} generated)`);
+    // The fingerprint does not see the last digits JavaScript engines disagree
+    // on (a table written on Node 22 read as stale on Node 24, and CI failed),
+    // and does see any real change to a ground.
+    {
+      const withFraction = shippedTemplates().find((t) => /\d\.\d{11,}/.test(JSON.stringify(t)))!;
+      check(withFraction, 'some ground has a worked-out station');
+      const nudge = (by: (v: number) => number): typeof withFraction => {
+        let done = false;
+        return JSON.parse(JSON.stringify(withFraction), (_k, v: unknown) => {
+          if (!done && typeof v === 'number' && !Number.isInteger(v) && String(v).replace(/^-?\d+\./, '').length >= 11) { done = true; return by(v); }
+          return v;
+        });
+      };
+      const base = templateFingerprint(withFraction);
+      check(templateFingerprint(nudge((v) => v * (1 + 2 ** -52))) === base, `${withFraction.id}: a last-bit difference keeps the fingerprint`);
+      check(templateFingerprint(nudge((v) => v + 0.001)) !== base, `${withFraction.id}: a millimetre's change is a new fingerprint`);
+    }
     assert.equal(rows.length, shippedTemplates().length);
     // A stale, missing or malformed row is generated, and said.
     const dir = mkdtempSync(`${tmpdir()}/tifo-seat-table-`);

@@ -47,8 +47,19 @@ export const SEAT_TABLE_FORMAT = 1;
 /** Next to the server's other data: server/data, from server/src under tsx and from server/build when bundled. */
 export const SEAT_TABLE_PATH = join(dirname(fileURLToPath(import.meta.url)), '../data/seat-table.json');
 
+/**
+ * A hash of a ground's definition, with every fractional number cut to 10
+ * significant figures first. A definition holds stations worked out with
+ * Math.cos, Math.pow and the like, and those are not exact to the last digit:
+ * Node 22, Node 24 and Chrome disagree in the 15th or 16th figure (Camp Nou's
+ * 106.83979883624355 is 106.83979883624353 on Node 24). Hashed raw, the table
+ * written on one Node read as stale on another, so CI (Node 24) failed on a
+ * table written on Node 22. Ten figures is a tenth of a micrometre on a
+ * hundred-metre stand: any real change to a ground still changes the hash.
+ */
 export function templateFingerprint(t: StadiumTemplate): string {
-  return createHash('sha256').update(JSON.stringify(t)).digest('base64url').slice(0, 22);
+  const steady = JSON.stringify(t, (_k, v: unknown) => (typeof v === 'number' && Number.isFinite(v) && !Number.isInteger(v) ? Number(v.toPrecision(10)) : v));
+  return createHash('sha256').update(steady).digest('base64url').slice(0, 22);
 }
 
 /** The runs of 1s in a mask, as [start, end). */

@@ -110,6 +110,9 @@ try {
     localStorage.setItem('tifo_consent_v1', 'essential');
     localStorage.setItem('tifo_banner_tour_v1', '1');
     localStorage.setItem('tifo_post_offered_v1', '1');
+    // A club start is a first tifo: without this the guide opens after the
+    // reveal and puts the view tabs away, whenever the timing lets it.
+    localStorage.setItem('tifo_guide_v1', 'done');
   });
   const p = await ctx.newPage();
   p.on('pageerror', (e) => errors.push(e.message));
