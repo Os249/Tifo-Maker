@@ -173,6 +173,11 @@ img { max-width: 100%; }
   transition: border-color var(--t-fast), background var(--t-fast), color var(--t-fast);
 }
 .hero-club:hover { border-color: var(--blue); color: var(--blue); }
+/* A finger gets 44px; a mouse keeps the compact chips. */
+@media (pointer: coarse) {
+  .hero-club { min-height: 44px; padding-inline: 14px; }
+  .hero-make { display: inline-flex; align-items: center; min-height: 44px; }
+}
 .hero-club.on { background: var(--snow); border-color: var(--snow); color: var(--night-900); }
 .hero-club:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
 
@@ -393,6 +398,9 @@ img { max-width: 100%; }
 .foot-brand b { color: var(--maker); }
 .foot-links { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px 22px; font-size: var(--fs-md); color: var(--muted); }
 .foot-links a:hover { color: var(--blue); }
+/* Every link and button down here is a 44px target (isreadyforlaunch flagged
+   them at 21px, below even WCAG 2.2's 24px minimum). */
+.foot-links a, .foot-links .fb-entry { display: inline-flex; align-items: center; min-height: 44px; padding-inline: 4px; }
 .foot-note { font-size: var(--fs-sm); color: var(--muted); }
 /* The feedback entry, styled on first paint (its modal loads lazily). */
 .fb-entry { display: inline-flex; align-items: center; gap: 6px; background: none; border: none;

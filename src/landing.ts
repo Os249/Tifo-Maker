@@ -57,8 +57,8 @@ function renderLeagues(): void {
   strip.innerHTML = LEAGUE_STRIP.map((l) => {
     const n = leagueCounts?.get(l.tag);
     return `<a class="league" href="${escapeHtml(localPath(`/projects?new=1&league=${encodeURIComponent(l.tag)}`))}">
-      <img src="${l.pic}" alt="" width="480" height="300" loading="lazy" decoding="async" />
-      <span class="league-name">${escapeHtml(t(l.key))}</span>
+      <img src="${l.pic}" alt="${escapeHtml(t(l.key))}" width="480" height="300" loading="lazy" decoding="async" />
+      <span class="league-name" aria-hidden="true">${escapeHtml(t(l.key))}</span>
       ${n ? `<span class="league-count">${escapeHtml(tv('lgs.count', { n }))}</span>` : ''}
     </a>`;
   }).join('');

@@ -1,0 +1,18 @@
+{
+  "id": "/",
+  "name": "TifoMaker",
+  "short_name": "TifoMaker",
+  "description": "Design your club's tifo seat by seat in its real ground, see it in 3D and give every fan their card.",
+  "start_url": "/projects",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0B1424",
+  "theme_color": "#0B1424",
+  "lang": "en",
+  "dir": "auto",
+  "categories": ["design", "sports"],
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
+  ]
+}

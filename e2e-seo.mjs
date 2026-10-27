@@ -129,6 +129,38 @@ if (dialogUp){
     JSON.stringify(await page.evaluate(()=>document.getElementById('doc-title')?.value)));
 }
 
+// --- launch checks (26 Oct 2026, from isreadyforlaunch.com's report on the home page) ---
+// A description that fits a search result, robots that allow big previews, a
+// web app manifest, schema.org data that parses, and pictures that say what
+// they show — in both languages.
+for (const [path, lang] of [['/', 'en'], ['/ar/', 'ar']]) {
+  const html = await (await page.request.get(B + path)).text();
+  const h = html.split(/<\/head>/i)[0];
+  const d = (h.match(/<meta name="description" content="([^"]*)"/i) || [])[1] || '';
+  check(`${path}: the description fits a search result (80-160 characters)`, d.length >= 80 && d.length <= 160, `${d.length}`);
+  check(`${path}: and is in the page's language`, lang === 'ar' ? /[؀-ۿ]/.test(d) : !/[؀-ۿ]/.test(d), d.slice(0, 60));
+  check(`${path}: robots allow indexing and large previews`, /<meta name="robots" content="index,follow,max-image-preview:large"/i.test(h));
+  check(`${path}: the web app manifest is linked`, /<link rel="manifest" href="\/manifest\.webmanifest"/i.test(h));
+  const ld = [...h.matchAll(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/gi)].map((m) => { try { return JSON.parse(m[1]); } catch { return null; } });
+  const types = ld.flatMap((x) => (x?.['@graph'] ?? [x]).map((g) => g?.['@type']));
+  check(`${path}: schema.org data parses and names the site, the organisation and the app`, ld.length >= 1 && ld.every(Boolean) && ['WebSite', 'Organization', 'WebApplication'].every((t) => types.includes(t)), JSON.stringify(types));
+  const hero = (html.match(/<img class="hero-still"[^>]*>/i) || [''])[0];
+  const alt = (hero.match(/\salt="([^"]*)"/) || [])[1] || '';
+  check(`${path}: the hero picture says what it shows`, alt.length > 10 && (lang === 'ar' ? /[؀-ۿ]/.test(alt) : /tifo/i.test(alt)), alt);
+  const noAlt = (html.match(/<img\b(?![^>]*\salt=)[^>]*>/gi) || []);
+  check(`${path}: every picture has an alt (empty only for decoration)`, noAlt.length === 0, noAlt.slice(0, 2).join(' '));
+}
+{
+  const r = await page.request.get(B + '/manifest.webmanifest');
+  let m = null;
+  try { m = JSON.parse(await r.text()); } catch { /* */ }
+  check('the manifest is served as a manifest', r.ok() && /application\/manifest\+json/.test(r.headers()['content-type'] || ''), r.headers()['content-type']);
+  const icons = m?.icons ?? [];
+  const okIcons = [];
+  for (const i of icons) { const ir = await page.request.get(B + i.src); if (ir.ok() && /image\/png/.test(ir.headers()['content-type'] || '')) okIcons.push(i.sizes); }
+  check('it names the app, opens on the projects, and its 192 and 512 icons are there', m?.name === 'TifoMaker' && m?.start_url === '/projects' && m?.display === 'standalone' && okIcons.includes('192x192') && okIcons.includes('512x512'), JSON.stringify({ name: m?.name, start: m?.start_url, okIcons }));
+}
+
 console.log(`\n  ${pass} passed, ${fail} failed`);
 console.log('  pageerrors:', errs.length?errs:'none');
 await browser.close(); process.exit(fail?1:0);

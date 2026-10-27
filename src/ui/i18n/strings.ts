@@ -1771,8 +1771,8 @@ export const STRINGS: Record<string, { en: string; ar: string }> = {
   },
   'gd.h2': { en: 'Make it yours', ar: 'خلّه حقك' },
   'gd.p2': {
-    en: 'Paint on the seats. Pick a stand to fill the screen with it, and Text adds your words.',
-    ar: 'ارسم على المقاعد. اختر مدرج عشان يملأ الشاشة، و«نص» يضيف كلامك.',
+    en: 'Paint on the seats under the stadium and watch it change. Pick a stand to fill the strip with it, and Text adds your words.',
+    ar: 'ارسم على المقاعد تحت الملعب وشوفه يتغيّر. اختر مدرج عشان يملأ الشريط، و«نص» يضيف كلامك.',
   },
   'gd.p2Phone': {
     en: 'Paint with your finger. Pick a stand below to fill the screen with it.',
@@ -1855,7 +1855,10 @@ export const STRINGS: Record<string, { en: string; ar: string }> = {
   'bn.list': { en: 'Banners', ar: 'اللافتات' },
   'bn.list.tag': { en: 'in this tifo', ar: 'في هذا التيفو' },
   'bn.none.title': { en: 'No banner in this tifo', ar: 'ما في لافتة في هذا التيفو' },
-  'bn.none.body': { en: 'Banners are optional. Make one when you want one: a stand banner is unrolled over the seats, a hanging banner is hauled up on ropes, and a sign is a message held up by the fans.', ar: 'اللافتات اختيارية. سوّ وحدة إذا تبغى: لافتة المدرج تنفرد على المقاعد، واللافتة المعلّقة تنسحب للأعلى بالحبال، واليافطة رسالة يرفعها الجمهور.' },
+  'bn.none.body': { en: 'Banners are optional. Pick a kind to make one.', ar: 'اللافتات اختيارية. اختر النوع عشان تسوي وحدة.' },
+  'bn.kind.standD': { en: 'Unrolled over the seats', ar: 'تنفرد على المقاعد' },
+  'bn.kind.hangingD': { en: 'Hauled up on ropes', ar: 'تنسحب للأعلى بالحبال' },
+  'bn.kind.signD': { en: 'A message the fans hold up', ar: 'رسالة يرفعها الجمهور' },
   'bn.none.short': { en: 'None yet — banners are optional.', ar: 'ما في ولا وحدة — اللافتات اختيارية.' },
   'bn.add.standT': { en: 'Make a banner that unrolls over the seats', ar: 'سوّ لافتة تنفرد على المقاعد' },
   'bn.add.hangingT': { en: 'Make a banner that is hauled up on ropes', ar: 'سوّ لافتة تنسحب للأعلى بالحبال' },
@@ -2235,6 +2238,28 @@ export const STRINGS: Record<string, { en: string; ar: string }> = {
   'ed.tab.paintT': { en: 'Paint: the tool in your hand, colours and layers', ar: 'الرسم: الأداة اللي بيدك والألوان والطبقات' },
   // The panel tab where the ground is picked. It was "Stadium" / "الملعب", the
   // same word as the 3D view beside it, so one word named two places.
+  // The AI prompt bar on the canvas (ui/aiBar.ts).
+  'ai.bar.label': { en: 'Ask the AI', ar: 'اسأل الذكاء' },
+  'ai.bar.inputT': { en: 'Describe a tifo', ar: 'وصف التيفو' },
+  'ai.bar.placeholder': { en: 'Describe a tifo, e.g. a giant eagle in black and gold…', ar: 'صف التيفو، مثلًا: نسر ضخم بالأسود والذهبي…' },
+  'ai.bar.whereT': { en: 'Where it goes', ar: 'وين يكون' },
+  'ai.bar.whole': { en: 'Whole stadium', ar: 'الملعب كامل' },
+  'ai.bar.on.north': { en: 'North stand', ar: 'المدرج الشمالي' },
+  'ai.bar.on.east': { en: 'East stand', ar: 'المدرج الشرقي' },
+  'ai.bar.on.south': { en: 'South stand', ar: 'المدرج الجنوبي' },
+  'ai.bar.on.west': { en: 'West stand', ar: 'المدرج الغربي' },
+  'ai.bar.in.north': { en: 'in the north stand', ar: 'في المدرج الشمالي' },
+  'ai.bar.in.east': { en: 'in the east stand', ar: 'في المدرج الشرقي' },
+  'ai.bar.in.south': { en: 'in the south stand', ar: 'في المدرج الجنوبي' },
+  'ai.bar.in.west': { en: 'in the west stand', ar: 'في المدرج الغربي' },
+  'ai.bar.go': { en: 'Go', ar: 'يلا' },
+  'ai.bar.busy': { en: 'Designing…', ar: 'جاري التصميم…' },
+  'ai.bar.done': { en: 'Done. Keep it, regenerate or revert in the AI tab.', ar: 'خلص. احتفظ فيه أو أعد التوليد أو تراجع من تبويب الذكاء.' },
+  'ai.bar.card': { en: 'The AI tab has a message for you.', ar: 'تبويب الذكاء فيه رسالة لك.' },
+  'ai.bar.open': { en: 'AI tab', ar: 'تبويب الذكاء' },
+  'ed.fold.close': { en: 'Fold this section', ar: 'اطوِ هذا القسم' },
+  'ed.fold.open': { en: 'Open this section', ar: 'افتح هذا القسم' },
+  'ed.dockT': { en: 'Resize the strip: drag, or use the arrow keys', ar: 'غيّر حجم الشريط: اسحب، أو استخدم الأسهم' },
   'ed.tab.stadium': { en: 'Ground', ar: 'المدرجات' },
   'ed.tab.reveal': { en: 'Reveal', ar: 'الكشف' },
   'ed.tab.ai': { en: 'AI', ar: 'ذكاء' },
@@ -2457,12 +2482,14 @@ export const STRINGS: Record<string, { en: string; ar: string }> = {
   // it renders, /ar/… in Arabic; the English is exactly what it wrote before.
   'meta.site': { en: 'TifoMaker', ar: 'تيفو ميكر' },
   'meta.card.alt': { en: 'A stadium bowl with a red and white tifo across the stands, designed in TifoMaker.', ar: 'مدرج ملعب عليه تيفو أحمر وأبيض، مصمّم في تيفو ميكر.' },
-  'meta.landing.title': { en: 'TifoMaker: design the display 60,000 fans will never forget', ar: 'تيفو ميكر: صمّم الاستعراض اللي ٦٠٬٠٠٠ مشجع ما راح ينسونه' },
+  'meta.landing.title': { en: 'TifoMaker: design the display 60,000 fans will never forget', ar: 'تيفو ميكر: صمّم الاستعراض اللي 60,000 مشجع ما راح ينسونه' },
+  // The home page's description, in its <meta> and its cards: at most 160
+  // characters, which is what search results show (isreadyforlaunch, Oct 2026).
   'meta.landing.desc': {
-    en: 'Design a stadium tifo in your browser, watch it light up the stands in 3D, and export the seat-by-seat instructions that make it real on match day. Free, no account needed to start.',
-    ar: 'صمّم تيفو لملعبك من متصفحك، وشوفه ينوّر المدرجات بثلاثة أبعاد، وصدّر تعليمات كل مقعد اللي تخليه حقيقة يوم المباراة. ببلاش، وما تحتاج حساب عشان تبدأ.',
+    en: 'Pick your club and design its tifo in its real ground, seat by seat. Watch it rise in 3D on match day and give every fan their card. Free, in your browser.',
+    ar: 'اختر ناديك وصمّم تيفو فريقك في ملعبه الحقيقي، مقعدًا مقعدًا. شوفه يرتفع بالثلاثي الأبعاد يوم المباراة، وأعطِ كل مشجع بطاقته. مجاني في متصفحك.',
   },
-  'meta.app.title': { en: 'The TifoMaker editor: paint 60,000 seats', ar: 'محرر تيفو ميكر: لوّن ٦٠٬٠٠٠ مقعد' },
+  'meta.app.title': { en: 'The TifoMaker editor: paint 60,000 seats', ar: 'محرر تيفو ميكر: لوّن 60,000 مقعد' },
   'meta.app.desc': {
     en: 'Paint a tifo seat by seat, drop in a crest or text, and watch the whole bowl update in 3D as you work. Free, in the browser, no download.',
     ar: 'لوّن التيفو مقعد مقعد، وحط شعار أو نص، وشوف المدرج كله يتحدّث بثلاثة أبعاد وأنت تشتغل. ببلاش، من المتصفح، بدون تحميل.',
@@ -2493,8 +2520,9 @@ export const STRINGS: Record<string, { en: string; ar: string }> = {
   'meta.tifo.altBy': { en: '"{title}", a stadium tifo designed in TifoMaker by @{owner}.', ar: '«{title}»، تيفو ملعب صمّمه @{owner} في تيفو ميكر.' },
   'meta.design.site': { en: 'Tifo Maker', ar: 'تيفو ميكر' },
   'meta.design.title': { en: '{title}: Tifo Maker', ar: '{title}: تيفو ميكر' },
-  'meta.design.none.desc': { en: 'Design a 60,000-seat stadium tifo and share it.', ar: 'صمّم تيفو لملعب فيه ٦٠٬٠٠٠ مقعد وشاركه.' },
+  'meta.design.none.desc': { en: 'Design a 60,000-seat stadium tifo and share it.', ar: 'صمّم تيفو لملعب فيه 60,000 مقعد وشاركه.' },
   // A design's description when its maker wrote none, put together from these.
+  'hero.stillAlt': { en: 'The tifo across the stands, seen in 3D', ar: 'التيفو على المدرجات، بالثلاثي الأبعاد' },
   'meta.describe.named': { en: '"{title}", a tifo', ar: '«{title}»، تيفو' },
   'meta.describe.unnamed': { en: 'A tifo', ar: 'تيفو' },
   'meta.describe.on': { en: 'on {ground}', ar: 'في {ground}' },

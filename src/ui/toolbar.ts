@@ -1,3 +1,4 @@
+import { mountStandThumbs } from './standThumbs';
 import { matchClub } from '../core/clubs';
 import { escapeHtml } from '../core/escape';
 import { containDialog } from './dialogFocus';
@@ -280,6 +281,8 @@ export function mountToolbar(
     if (tool === 'text') wantFaces();
     onEnterMode(tool);
     objectPanelHook();
+    // A folded panel section about this tool opens (ui/foldSections.ts).
+    document.dispatchEvent(new CustomEvent('tifo:tool', { detail: tool }));
   };
   const TOOL_OPTS = new Set<ToolId>(['brush', 'eraser', 'fill', 'text', 'shape']);
   for (const b of toolButtons)
@@ -3223,6 +3226,8 @@ export function mountToolbar(
       }
       standPieces.set(stand.toLowerCase(), pieces);
     }
+    // Each stand button: a picture of the stand as painted, and its seats.
+    mountStandThumbs(map, store, standPieces);
     const labelStands = (): void => {
       const marks: { x0: number; x1: number; text: string }[] = [];
       for (const [id, pieces] of standPieces) {

@@ -299,21 +299,61 @@ body:not(.bn-sign) .bn-for-sign, body.bn-sign .bn-for-banner { display:none !imp
   background:var(--ink-1); box-shadow:var(--shadow-card); z-index:2;
 }
 .bn-empty[hidden] { display:none; }
-.bn-empty .bn-empty-icon { font-size:30px; color:#9FC2F5; }
 .bn-empty h3 { margin:0; font-size:17px; color:var(--text-1); }
 .bn-empty p { margin:0; font-size:var(--fs-sm); line-height:1.5; color:var(--text-2); }
-.bn-empty .bn-empty-actions { display:flex; flex-wrap:wrap; justify-content:center; gap:8px; margin-top:6px; }
-.bn-empty .bn-empty-actions button { display:inline-flex; align-items:center; gap:6px; }
+.bn-empty .bn-empty-actions { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:var(--sp-2); margin-top:var(--sp-2); width:100%; }
+/* One card per kind: a drawing of it, its name, what it is. Neutral tiles:
+   the one blue button on the screen stays Save or Post it. */
+.bn-kind {
+  display:flex; flex-direction:column; align-items:center; gap:4px; min-width:0; padding:var(--sp-3) var(--sp-2);
+  border:1px solid var(--line-1); border-radius:var(--r-md); background:var(--ink-2); color:var(--text-1);
+  font:inherit; cursor:pointer;
+  transition:background-color var(--duration-quick) var(--ease-smooth-out), border-color var(--duration-quick) var(--ease-smooth-out);
+}
+.bn-kind:hover { background:var(--here-bg); border-color:var(--here-line); }
+.bn-kind:focus-visible { outline:2px solid var(--here-line); outline-offset:2px; }
+.bn-kind-art { width:72px; height:48px; }
+.bn-kind-art .bk-seat, .bn-kind-art .bk-rope { fill:none; stroke:var(--text-3); stroke-width:2; stroke-linecap:round; }
+.bn-kind-art .bk-sheet { fill:var(--here-bg); stroke:var(--here-line); stroke-width:2; stroke-linejoin:round; }
+.bn-kind-art .bk-fan { fill:var(--text-3); }
+.bn-kind-name { font-size:var(--fs-sm); font-weight:600; }
+.bn-kind-what { font-size:var(--fs-xs); color:var(--text-2); line-height:1.35; }
+@media (max-width: 520px) {
+  .bn-empty .bn-empty-actions { grid-template-columns:1fr; }
+  .bn-kind { display:grid; grid-template-columns:auto 1fr; column-gap:var(--sp-3); align-items:center; justify-items:start; text-align:start; }
+  .bn-kind-art { grid-row:span 2; }
+}
+/* No banner yet: the empty card's three kinds are the only add buttons. */
+body.bn-none #ctx-banner .bn-add-row { display:none; }
 /* Split: the stadium above, the seats below, both live.
    The design is a strip ten times wider than it is tall, so side by side gave
    it half the width and it shrank to 13% zoom; stacked, it keeps the full
    width. A banner is not a strip, so a banner beside the bowl stays side by
    side (.banner-split, below). */
 .canvas-wrap.split { display:flex; flex-direction:column; }
-.canvas-wrap.split #preview-host { order:0; position:relative; inset:auto; flex:1 1 58%; min-height:0; width:100%; }
-.canvas-wrap.split #canvas-host { order:1; position:relative; inset:auto; flex:1 1 42%; min-height:0; width:100%; border-top:2px solid var(--line-2); }
+.canvas-wrap.split #preview-host { order:0; position:relative; inset:auto; flex:1 1 0; min-height:0; width:100%; }
+/* The strip is a dock: its share of the height is --dock (percent), set by
+   the handle above it (ui/dock.ts) and kept by the browser. */
+.canvas-wrap.split #canvas-host { order:2; position:relative; inset:auto; flex:0 0 calc(var(--dock, 42) * 1%); min-height:0; width:100%; }
 .canvas-wrap.split.banner-split { flex-direction:row; }
 .canvas-wrap.split.banner-split #preview-host { flex:1 1 50%; height:100%; width:auto; min-width:0; }
+.canvas-wrap.split.banner-split #canvas-host { flex:1 1 50%; }
+.dock-handle { display:none; }
+.canvas-wrap.split:not(.banner-split) .dock-handle {
+  order:1; display:flex; align-items:center; justify-content:center; flex:0 0 10px; position:relative;
+  z-index:var(--z-raised); cursor:row-resize; touch-action:none; background:var(--ink-1);
+  border-block:1px solid var(--line-1);
+}
+/* A 10px line, a 26px target. */
+.dock-handle::before { content:""; position:absolute; inset:-8px 0; }
+.dock-grip {
+  width:44px; height:4px; border-radius:var(--r-pill); background:var(--line-2); transform:scaleX(1);
+  transition:background-color var(--duration-quick) var(--ease-smooth-out), transform var(--duration-fast) var(--ease-smooth-out);
+}
+.dock-handle:hover .dock-grip, .dock-handle:focus-visible .dock-grip, .canvas-wrap.docking .dock-grip { background:var(--text-3); transform:scaleX(1.45); }
+.dock-handle:focus-visible { outline:2px solid var(--here-line); outline-offset:-2px; }
+.canvas-wrap.docking { cursor:row-resize; user-select:none; }
+.canvas-wrap.docking canvas { pointer-events:none; }
 
 /* One-time "draw here" coaching hint, overlaid on the design pane in Split. */
 .draw-hint { position:absolute; inset:0; z-index:6; pointer-events:none; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:14px; animation:dhFade 4.2s ease forwards; }
@@ -441,6 +481,94 @@ body:not(.bn-sign) .bn-for-sign, body.bn-sign .bn-for-banner { display:none !imp
 .panel-section h4::before {
   content:''; width:3px; height:13px; border-radius:2px; background:var(--grad-accent); flex:0 0 auto;
 }
+/* ---- the AI prompt bar on the canvas (ui/aiBar.ts) ----
+   One line above the stand buttons; in Split, just above the dock's handle.
+   Not on phones, in the Banner view, in zen, or while the guide is up. */
+.ai-bar {
+  position:absolute; left:50%; bottom:64px; transform:translateX(-50%); z-index:var(--z-raised);
+  width:min(640px, calc(100% - 48px)); display:flex; align-items:center; gap:6px;
+  padding:5px 5px 5px 14px; background:var(--ink-1); border:1px solid var(--line-1); border-radius:var(--r-pill);
+  box-shadow:var(--shadow-card);
+  transition:border-color var(--duration-quick) var(--ease-smooth-out), box-shadow var(--duration-quick) var(--ease-smooth-out);
+}
+.ai-bar:focus-within { border-color:var(--here-line); }
+.canvas-wrap.split:not(.banner-split) .ai-bar { bottom:calc(var(--dock, 42) * 1% + 22px); }
+@media (max-width: 1180px) { .ai-bar { bottom:110px; } }
+body.banner-view .ai-bar, body.m-shell .ai-bar, body.guided .ai-bar, body.zen .ai-bar, .canvas-wrap.banner-split .ai-bar { display:none; }
+/* The one-time "Your tifo is in the stadium" card sits where the bar does: the bar waits until it is gone. */
+body:has(.pm-nudge) .ai-bar { display:none; }
+.ai-bar-icon { color:var(--here-ink); font-size:var(--fs-md); flex:none; }
+.ai-bar-input {
+  flex:1 1 auto; min-width:0; height:34px; border:0; background:transparent; color:var(--text-1);
+  font:inherit; font-size:var(--fs-sm); padding:0;
+}
+.ai-bar-input::placeholder { color:var(--text-3); }
+.ai-bar-input:focus { outline:none; }
+.ai-bar-target {
+  flex:none; max-width:150px; height:34px; padding:0 26px 0 10px; border-radius:var(--r-pill);
+  background-color:var(--ink-2); color:var(--text-2); border:1px solid var(--line-1); font-size:var(--fs-xs);
+}
+.ai-bar-go {
+  flex:none; height:34px; padding:0 16px; border-radius:var(--r-pill); font-size:var(--fs-sm);
+  background:var(--here-bg); color:var(--here-ink); border:1px solid var(--here-line);
+}
+.ai-bar-go:hover { background:var(--here-bg); border-color:var(--here-ink); }
+.ai-bar-go:disabled { opacity:.6; cursor:default; }
+.ai-bar-state { display:none; flex:1 1 auto; min-width:0; font-size:var(--fs-sm); color:var(--text-2); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; position:relative; }
+.ai-bar-open { flex:none; font-size:var(--fs-xs); }
+/* While it works, or once it has something to say, the line replaces the input. */
+.ai-bar[data-phase="busy"] .ai-bar-input, .ai-bar[data-phase="done"] .ai-bar-input, .ai-bar[data-phase="card"] .ai-bar-input { display:none; }
+.ai-bar[data-phase="busy"] .ai-bar-state, .ai-bar[data-phase="done"] .ai-bar-state, .ai-bar[data-phase="card"] .ai-bar-state { display:block; }
+.ai-bar[data-phase="done"] .ai-bar-state, .ai-bar[data-phase="card"] .ai-bar-state { cursor:pointer; }
+/* "Designing…" shimmers (transitions.dev's shimmer text): a band of light
+   swept across the same words, painted by a layer clipped to the glyphs. */
+.ai-bar[data-phase="busy"] .ai-bar-state::before {
+  content:attr(data-text); position:absolute; inset:0; pointer-events:none;
+  background-image:linear-gradient(90deg, transparent 0%, transparent 40%, var(--text-1) 50%, transparent 60%, transparent 100%);
+  background-size:400% 100%; background-repeat:no-repeat;
+  -webkit-background-clip:text; background-clip:text; color:transparent; -webkit-text-fill-color:transparent;
+  animation:aiBarShimmer 2000ms linear infinite;
+}
+@keyframes aiBarShimmer { from { background-position:100% 0; } to { background-position:0% 0; } }
+/* An empty Go: a short shake (transitions.dev's error state shake). */
+.ai-bar.ai-bar-shake { animation:aiBarShake calc(var(--duration-micro) * 4) var(--ease-smooth-out); }
+@keyframes aiBarShake {
+  0%, 100% { transform:translateX(-50%); }
+  25% { transform:translateX(calc(-50% - var(--distance-small))); }
+  50% { transform:translateX(calc(-50% + var(--distance-micro))); }
+  75% { transform:translateX(calc(-50% - 2px)); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ai-bar[data-phase="busy"] .ai-bar-state::before { animation:none; content:none; }
+  .ai-bar.ai-bar-shake { animation:none; }
+}
+
+/* ---- sections that fold (ui/foldSections.ts) ----
+   The title is a button; the body folds through grid-template-rows 1fr -> 0fr
+   (the accordion of transitions.dev), on the motion tokens in tokens.css. */
+.panel-section h4.fold-head { margin-bottom:var(--sp-2); }
+.fold-btn {
+  flex:1 1 auto; min-width:0; display:flex; align-items:center; gap:6px; min-height:28px; padding:2px 0;
+  border:0; background:transparent; color:inherit; font:inherit; text-transform:inherit; letter-spacing:inherit;
+  text-align:start; cursor:pointer; border-radius:var(--r-sm);
+}
+.fold-btn:hover { color:var(--text-1); background:transparent; }
+.fold-btn:hover .fold-chev { color:var(--text-1); }
+.fold-btn:focus-visible { outline:2px solid var(--here-line); outline-offset:2px; }
+.fold-chev {
+  display:inline-flex; margin-inline-start:auto; color:var(--text-3); transform:scaleY(1); transform-origin:center;
+  transition:transform var(--duration-fast) var(--ease-smooth-out);
+}
+.fold-chev path { vector-effect:non-scaling-stroke; }
+.h4-tag + .fold-chev { margin-inline-start:8px; }
+.panel-section.folded .fold-chev { transform:scaleY(-1); }
+.fold-body { display:grid; grid-template-columns:minmax(0, 1fr); grid-template-rows:1fr; transition:grid-template-rows var(--duration-fast) var(--ease-smooth-out); }
+.fold-inner { min-height:0; min-width:0; opacity:1; filter:blur(0); transition:opacity var(--duration-fast) var(--ease-smooth-out), filter var(--duration-fast) var(--ease-smooth-out); }
+.panel-section.folded .fold-body { grid-template-rows:0fr; }
+.panel-section.folded .fold-inner { opacity:0; filter:blur(var(--blur-small)); }
+.panel-section.folded .fold-inner, .panel-section.fold-anim .fold-inner { overflow:hidden; }
+.panel-section.folded h4.fold-head { margin-bottom:0; }
+
 /* contextual panel: snappy fade-in when a section becomes relevant to the tool */
 @keyframes ctxFadeIn {
   from { opacity:0; transform:translateY(4px); }
@@ -1369,7 +1497,8 @@ a.avatar-menu-item { text-decoration:none; }
 .tour-overlay { position:fixed; inset:0; z-index:90; pointer-events:none; }
 .tour-spotlight {
   position:absolute; border-radius:12px; pointer-events:none;
-  box-shadow:0 0 0 9999px rgba(7,10,18,.74); transition:all .22s cubic-bezier(.4,0,.2,1);
+  box-shadow:0 0 0 9999px rgba(7,10,18,.74);
+  transition:left var(--duration-fast) var(--ease-smooth-out), top var(--duration-fast) var(--ease-smooth-out), width var(--duration-fast) var(--ease-smooth-out), height var(--duration-fast) var(--ease-smooth-out);
   outline:2px solid var(--blue); outline-offset:0;
 }
 .tour-pop {
@@ -1724,6 +1853,8 @@ body.gate { display:block; overflow-y:auto; background:var(--ink-0); }
     color:var(--text-2); font:inherit; font-size:var(--fs-sm); font-weight:600;
   }
   .m-stand.on { background:var(--here-bg); border-color:rgba(127,176,255,.5); color:var(--here-ink); }
+  .m-stand.has-thumb { min-height:44px; padding:0 14px 0 6px; }
+  .m-stand .st-thumb { width:44px; height:18px; }
   .m-stand:focus-visible { outline:none; box-shadow:var(--ring-focus); }
 
   /* --- selected-object actions: the phone's answer to "now what?" ---
@@ -2230,8 +2361,18 @@ body.m-shell .hdr-hist { display:none; }
 .stand-chip.on { background:var(--ink-3); color:var(--text-1); box-shadow:inset 0 0 0 1px var(--line-2); }
 .stand-chip:focus-visible { outline:none; box-shadow:var(--ring-focus); }
 /* Only on the seats: the bowl has its cameras, a banner has nothing to jump to. */
-#canvas-host[hidden] ~ .stand-chips, .canvas-wrap.split .stand-chips, body.banner-view .stand-chips, body.m-shell .stand-chips { display:none; }
+#canvas-host[hidden] ~ .stand-chips, .canvas-wrap.banner-split .stand-chips, body.banner-view .stand-chips, body.m-shell .stand-chips { display:none; }
 @media (max-width: 1180px) { .stand-chips { max-width:calc(100% - 24px); bottom:56px; } }
+/* Each stand with a picture of it as painted and its seats (ui/standThumbs.ts). */
+.stand-chips { overflow-x:auto; scrollbar-width:none; }
+.stand-chips::-webkit-scrollbar { display:none; }
+.stand-chip.has-thumb, .m-stand.has-thumb { display:inline-flex; align-items:center; gap:8px; text-align:start; }
+.stand-chip.has-thumb { padding:4px 12px 4px 5px; min-height:36px; }
+.st-thumb { flex:none; width:48px; height:18px; border-radius:4px; background:var(--canvas-pit); box-shadow:inset 0 0 0 1px var(--line-1); }
+.st-text { display:flex; flex-direction:column; align-items:flex-start; line-height:1.15; min-width:0; }
+.st-name { font-weight:600; }
+.st-count { font-size:var(--fs-2xs); font-weight:500; color:var(--text-3); font-variant-numeric:tabular-nums; }
+.stand-chip.on .st-count, .m-stand.on .st-count { color:inherit; opacity:.8; }
 
 /* The status bar's shortcuts. */
 footer .kbd-hints { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }

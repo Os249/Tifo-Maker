@@ -75,7 +75,8 @@ a { color: inherit; text-decoration: none; }
 .tag-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; }
 .tag-chip {
   background: var(--card); border: 1px solid var(--line); border-radius: var(--r-pill); padding: 7px 14px;
-  font-size: var(--fs-sm); font-weight: 500; color: var(--ink); cursor: pointer; transition: all 0.14s;
+  font-size: var(--fs-sm); font-weight: 500; color: var(--ink); cursor: pointer;
+  transition: border-color var(--duration-quick) var(--ease-smooth-out), color var(--duration-quick) var(--ease-smooth-out), background-color var(--duration-quick) var(--ease-smooth-out);
 }
 .tag-chip:hover { border-color: var(--blue); color: var(--blue); }
 .tag-chip.active { background: rgba(28, 111, 224, 0.1); border-color: var(--blue); color: var(--blue); }

@@ -110,7 +110,7 @@ function checkBuiltScripts(): Plugin {
       for (const out of Object.values(bundle)) {
         if (out.type !== 'asset' || !out.fileName.endsWith('.html')) continue;
         const html = String(out.source);
-        if (/<script(?![^>]*\bsrc=)[^>]*>\s*\S/i.test(html)) this.error(`${out.fileName}: an inline <script>`);
+        if (/<script(?![^>]*\bsrc=)(?![^>]*\btype=[\"']?application\/ld\+json)[^>]*>\s*\S/i.test(html)) this.error(`${out.fileName}: an inline <script>`);
         for (const m of html.matchAll(/<script\b[^>]*\bsrc="([^"]*)"/gi)) {
           if (!m[1].startsWith('/') || m[1].startsWith('//')) this.error(`${out.fileName}: a script from outside this origin: ${m[1]}`);
         }

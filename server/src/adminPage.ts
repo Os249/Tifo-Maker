@@ -655,6 +655,7 @@ var FUNNEL_STEP = {
   guide_done:     ['Followed it to Post it', 'all four steps'],
   guide_free:     ['Left it for Free mode',  'the whole editor, part way through'],
   ai_cta:         ['Pressed Generate with AI','on the Projects page'],
+  ai_bar:         ['Asked the AI from the canvas bar','in the editor'],
   template_cta:   ['Pressed Use as template','on the home page'],
 };
 

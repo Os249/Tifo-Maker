@@ -119,8 +119,28 @@
   --z-toast: 200;     /* toasts, which must clear a dialog */
   --z-consent: 300;   /* the consent bar stays answerable over everything */
 
-  /* ---- motion ---- */
+  /* ---- motion ----
+     One scale for every transition, after the motion tokens of
+     transitions.dev (free for use in products; see docs/DESIGN.md, Motion).
+     Pick by what the motion does, not by the nearest number: closes are
+     quicker than opens, a swap barely moves, only an entrance may bounce.
+     --t-fast / --t-med are the older names, kept for the rules that use them. */
   --ease: cubic-bezier(.2, .7, .2, 1);
+  --ease-smooth-out: cubic-bezier(0.22, 1, 0.36, 1); /* open, close, slide, resize: the default */
+  --ease-in-out: ease-in-out;                         /* a swap in place: text, icon, skeleton */
+  --ease-bounce: cubic-bezier(0.34, 1.36, 0.64, 1);   /* entrances only: a badge, a number */
+  --duration-stagger: 40ms;   /* per item; keep the total under ~300ms */
+  --duration-micro: 80ms;     /* intent delay (tooltip), a shake segment */
+  --duration-quick: 150ms;    /* close, a text swap, a hover colour */
+  --duration-fast: 250ms;     /* open, tabs sliding, a fold (both ways) */
+  --duration-medium: 350ms;   /* a panel or toast closing */
+  --duration-slow: 400ms;     /* a panel opening, content arriving */
+  --duration-very-slow: 500ms;/* a one-off moment: a check, a reveal */
+  --distance-micro: 4px;      /* a swap in place */
+  --distance-small: 6px;      /* a shake */
+  --distance-base: 8px;       /* a slide */
+  --distance-medium: 12px;    /* text arriving */
+  --blur-small: 2px;          /* softens a swap or a slide, never a plain fade */
   --t-fast: .14s;
   --t-med: .24s;
 
@@ -140,5 +160,10 @@
 .wordmark b { font-weight: 800; color: var(--maker); }
 
 @media (prefers-reduced-motion: reduce) {
-  :root { --t-fast: 0s; --t-med: 0s; }
+  :root {
+    --t-fast: 0s; --t-med: 0s;
+    --duration-stagger: 0ms; --duration-micro: 0ms; --duration-quick: 0ms; --duration-fast: 0ms;
+    --duration-medium: 0ms; --duration-slow: 0ms; --duration-very-slow: 0ms;
+    --distance-micro: 0px; --distance-small: 0px; --distance-base: 0px; --distance-medium: 0px; --blur-small: 0px;
+  }
 }

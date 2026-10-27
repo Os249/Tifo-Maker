@@ -41,14 +41,14 @@ function mark(how: 'done' | 'free'): void {
 
 export interface GuideDeps {
   /** The editor's own view switch (main.ts), so the phone shell follows too. */
-  setView: (view: '2d' | '3d') => Promise<void>;
+  setView: (view: '2d' | '3d' | 'split') => Promise<void>;
 }
 
 interface Step {
   name: string;
   head: string;
   body: string;
-  view?: '2d' | '3d';
+  view?: '2d' | '3d' | 'split';
   enter?: () => void;
   spot: () => Element | null;
 }
@@ -81,7 +81,9 @@ export function startGuide(deps: GuideDeps): void {
       name: t('gd.s2'),
       head: t('gd.h2'),
       body: t(shell ? 'gd.p2Phone' : 'gd.p2'),
-      view: '2d',
+      // On a desktop the strip is drawn on in Split, under the stadium, with
+      // the stand buttons in its dock; a phone has its own Design view.
+      view: shell ? '2d' : 'split',
       enter: () => {
         if (!shell && !$('.tool[data-tool="brush"].active')) click('.tool[data-tool="brush"]');
       },

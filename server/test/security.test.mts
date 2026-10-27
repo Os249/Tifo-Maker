@@ -817,7 +817,7 @@ async function makeDesign(app: FastifyInstance, token: string, isPublic = false)
   // ---- INFO: inline scripts the CSP blocks on every load ----
   {
     const pages = readdirSync('.').filter((f) => f.endsWith('.html'));
-    const inline = pages.filter((f) => /<script(?![^>]*\bsrc=)[^>]*>\s*\S/i.test(readFileSync(f, 'utf8')));
+    const inline = pages.filter((f) => /<script(?![^>]*\bsrc=)(?![^>]*\btype=[\"']?application\/ld\+json)[^>]*>\s*\S/i.test(readFileSync(f, 'utf8')));
     assert.deepEqual(inline, [], 'no page relies on an inline script the policy refuses to run');
   }
 
@@ -6271,7 +6271,7 @@ async function makeDesign(app: FastifyInstance, token: string, isPublic = false)
 
   // ---- P2.9: the static HTML shells ----
   {
-    const inlineScript = /<script(?![^>]*\bsrc=)[^>]*>\s*\S/i;
+    const inlineScript = /<script(?![^>]*\bsrc=)(?![^>]*\btype=[\"']?application\/ld\+json)[^>]*>\s*\S/i;
     const SHELLS = ['/app?design=7f000000-0000-4000-8000-0000000000aa', '/clubs', '/legal', '/tifo-spec'];
     const auth = new MemoryAuthRepository();
     const designs = new MemoryDesignRepository((id) => auth.usernameOf(id));
@@ -7545,7 +7545,7 @@ async function makeDesign(app: FastifyInstance, token: string, isPublic = false)
       assert.equal(ar.headers.location, want, `${label}: and its redirect goes to the twin of the English one's target (${String(ar.headers.location)})`);
     }
   };
-  const inlineScript = (body: string): boolean => /<script(?![^>]*\bsrc=)[^>]*>\s*\S/i.test(body);
+  const inlineScript = (body: string): boolean => /<script(?![^>]*\bsrc=)(?![^>]*\btype=[\"']?application\/ld\+json)[^>]*>\s*\S/i.test(body);
   const offOrigin = (body: string): string[] => [...body.matchAll(/<script\b[^>]*\bsrc="([^"]*)"/gi)].map((m) => m[1]!).filter((s) => !s.startsWith('/') || s.startsWith('//'));
 
   // ---- P0.1 for the twins: the same headers on every answer, 3xx, 304 and 429 included ----

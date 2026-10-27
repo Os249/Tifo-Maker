@@ -97,7 +97,7 @@ console.log('\n— /community: what the first view loads —');
 {
   const html = await (await fetch(B + '/community')).text();
   check('crawlers and no-JS visitors still get the list of links', /<nav id="seo-feed"[^>]*>[\s\S]*href="\/t\//.test(html));
-  check('no inline script, no CSP change needed', !/<script(?![^>]*\bsrc=)[^>]*>\s*\S/i.test(html));
+  check('no inline script, no CSP change needed', !/<script(?![^>]*\bsrc=)(?![^>]*\btype=[\"']?application\/ld\+json)[^>]*>\s*\S/i.test(html));
 
   // The feed is held back a moment, so the first paint is taken with the
   // list in the page and no cards yet: the moment the old page jumped.

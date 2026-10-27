@@ -145,15 +145,26 @@ export function mountBannerView(deps: BannerViewDeps): BannerView {
   emptyCard.id = 'bn-empty';
   emptyCard.className = 'bn-empty';
   emptyCard.hidden = true;
+  // The three kinds, each with a small drawing of what it is. These are the
+  // only add buttons while there is no banner: the list's own row of them
+  // (#bn-add-*) waits until there is one to add to (body.bn-none).
+  const kindArt: Record<'stand' | 'hanging' | 'sign', string> = {
+    // A sheet unrolled down the tiers of a stand.
+    stand: '<path class="bk-seat" d="M6 40h60M10 33h52M14 26h44M18 19h36"/><path class="bk-sheet" d="M16 17h40l6 25H10z"/>',
+    // A banner hauled up under the roof on two ropes.
+    hanging: '<path class="bk-seat" d="M4 8h64"/><path class="bk-rope" d="M18 8v8M54 8v8"/><path class="bk-sheet" d="M14 16h44v20H14z"/>',
+    // A message held up by a row of fans.
+    sign: '<path class="bk-sheet" d="M8 10h56v16H8z"/><circle class="bk-fan" cx="14" cy="36" r="4"/><circle class="bk-fan" cx="27" cy="36" r="4"/><circle class="bk-fan" cx="40" cy="36" r="4"/><circle class="bk-fan" cx="53" cy="36" r="4"/><circle class="bk-fan" cx="64" cy="36" r="3.4"/>',
+  };
+  const kindCard = (kind: 'stand' | 'hanging' | 'sign'): string =>
+    `<button type="button" class="bn-kind" data-kind="${kind}">` +
+    `<svg class="bn-kind-art" viewBox="0 0 72 48" width="72" height="48" aria-hidden="true">${kindArt[kind]}</svg>` +
+    `<span class="bn-kind-name" data-i18n="bn.kind.${kind}"></span>` +
+    `<span class="bn-kind-what" data-i18n="bn.kind.${kind}D"></span></button>`;
   emptyCard.innerHTML =
-    '<i class="ti ti-flag bn-empty-icon" aria-hidden="true"></i>' +
     '<h3 data-i18n="bn.none.title"></h3>' +
     '<p data-i18n="bn.none.body"></p>' +
-    '<div class="bn-empty-actions">' +
-    '<button type="button" class="primary" data-kind="stand"><i class="ti ti-plus" aria-hidden="true"></i> <span data-i18n="bn.kind.stand"></span></button>' +
-    '<button type="button" data-kind="hanging"><i class="ti ti-plus" aria-hidden="true"></i> <span data-i18n="bn.kind.hanging"></span></button>' +
-    '<button type="button" data-kind="sign"><i class="ti ti-plus" aria-hidden="true"></i> <span data-i18n="bn.kind.sign"></span></button>' +
-    '</div>';
+    `<div class="bn-empty-actions">${kindCard('stand')}${kindCard('hanging')}${kindCard('sign')}</div>`;
   const paintEmpty = (): void => {
     for (const el of emptyCard.querySelectorAll<HTMLElement>('[data-i18n]')) el.textContent = t(el.dataset.i18n!);
   };

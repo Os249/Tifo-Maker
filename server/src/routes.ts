@@ -1163,6 +1163,7 @@ export async function buildApp(
     'guide_done',      // ...and was followed to its last step, Post it
     'guide_free',      // ...or left for the whole editor ("Free mode")
     'ai_cta',          // "Generate with AI" pressed outside the editor (Projects page)
+    'ai_bar',          // the AI asked from the prompt bar on the canvas
     'template_cta',    // "Use as template" pressed on the home page's showcase
   ];
   const FUNNEL_SET = new Set(FUNNEL_STEPS);

@@ -3,6 +3,9 @@ import './vendor/tabler-subset.css';
 import { installTheme } from './ui/theme';
 import { initLang, applyDom, toggleLang, t, tl, tv, onLangChange } from './ui/i18n';
 import { guideActive, guideSeen, startGuide } from './ui/guide';
+import { mountDock } from './ui/dock';
+import { mountFoldSections } from './ui/foldSections';
+import { mountAiBar } from './ui/aiBar';
 import { installConsent } from './ui/consent';
 import { generateSeatMapAsync, warmHeavyWorker } from './workers/client';
 import { DEFAULT_PALETTE, DEFAULT_TEMPLATE, TEMPLATES } from './core/template';
@@ -604,6 +607,10 @@ async function main(): Promise<void> {
     // What this browser holds for it now: leaving without a change writes nothing (P3.7).
     stored: localProject ? localEnv : accountEnv,
   }, composer);
+  // Panel sections fold to their titles, and remember it (ui/foldSections.ts).
+  mountFoldSections();
+  // The AI prompt bar on the canvas: the AI tab's own Generate (ui/aiBar.ts).
+  mountAiBar();
 
   // A sign-in that did not finish says why, in the same place every other
   // outcome is reported. Reasons are a fixed set from the callback; nothing the
@@ -622,6 +629,41 @@ async function main(): Promise<void> {
   const btn3d = document.getElementById('view-3d') as HTMLButtonElement;
   const btnSplit = document.getElementById('view-split') as HTMLButtonElement;
   const camBar = document.getElementById('cam-bar')!;
+  /**
+   * Frame the strip: the stand that is picked, or the whole bowl. In Split the
+   * strip is a dock under the stadium, and a stand picked there stays picked
+   * when the dock is resized or Split is opened again.
+   */
+  const frameStrip = (): void => {
+    const on = document.querySelector<HTMLElement>('#stand-chips .stand-chip.on')?.dataset.stand;
+    if (on && on !== 'all') document.dispatchEvent(new CustomEvent('tifo:stand', { detail: on }));
+    else editor.fitToView();
+  };
+  mountDock({
+    wrap: canvasWrap,
+    handle: document.getElementById('dock-handle')!,
+    onSettled: () => { if (currentView === 'split') frameStrip(); },
+    label: () => t('ed.dockT'),
+  });
+  /** Somebody chose a view themselves: nothing moves them to another on its own after that. */
+  let pickedView = false;
+  /**
+   * The view a new project opens in: Split, unless this browser's owner has
+   * since chosen Design, Stadium or Split themselves (tifo_view_v1). Banner is
+   * not kept: it is somewhere you go for a banner, not where a tifo starts.
+   */
+  const VIEW_KEY = 'tifo_view_v1';
+  const keptView = (): '2d' | '3d' | 'split' => {
+    try {
+      const v = localStorage.getItem(VIEW_KEY);
+      return v === '2d' || v === '3d' || v === 'split' ? v : 'split';
+    } catch {
+      return 'split';
+    }
+  };
+  const keepView = (v: string): void => {
+    try { localStorage.setItem(VIEW_KEY, v); } catch { /* storage off */ }
+  };
   let preview: Preview3D | null = null;
   let loading = false;
 
@@ -785,6 +827,9 @@ async function main(): Promise<void> {
   store.onDirty(() => { madeSomething = true; });
   /** When a reveal that is playing ends: nothing else arrives on top of it. */
   let revealUntil = 0;
+  /** A new project's opening is over: its reveal has played, or it had none. */
+  let revealOver: () => void = () => {};
+  const revealDone = new Promise<void>((r) => { revealOver = r; });
   // The first project gets the guided first tifo (ui/guide.ts), whose last
   // step is Post it: the one-time card would be the same offer twice.
   const guideWanted = isNew && !!(intent?.start || intent?.prompt) && !guideSeen();
@@ -865,7 +910,7 @@ async function main(): Promise<void> {
     if (show2d) {
       requestAnimationFrame(() => {
         editor.app.resize();
-        if (next !== 'split') editor.fitToView();
+        if (next === 'split') frameStrip();
         else editor.fitToView();
       });
     }
@@ -904,6 +949,12 @@ async function main(): Promise<void> {
     }
   };
 
+  for (const [b, v] of [[btn2d, '2d'], [btnBanner, ''], [btn3d, '3d'], [btnSplit, 'split']] as const) {
+    b?.addEventListener('click', () => {
+      pickedView = true;
+      if (v) keepView(v);
+    });
+  }
   btn2d.addEventListener('click', () => void setView('2d'));
   btnBanner?.addEventListener('click', () => void setView('banner'));
   btn3d.addEventListener('click', () => void setView('3d'));
@@ -1234,7 +1285,7 @@ async function main(): Promise<void> {
       // the building is in, so it is cards going up in a ground and not on an
       // empty pitch; never for someone who has asked for less motion.
       void setView('3d').then(async () => {
-        if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+        if (matchMedia('(prefers-reduced-motion: reduce)').matches) { revealOver(); return; }
         revealUntil = Date.now() + 12000; // held until the reveal says how long it takes
         let p = preview;
         for (let i = 0; !p && i < 60; i++) {
@@ -1244,6 +1295,25 @@ async function main(): Promise<void> {
         if (p) await Promise.race([p.ready, new Promise((r) => setTimeout(r, 6000))]);
         const seconds = currentView === '3d' ? tb.playReveal() : 0;
         revealUntil = Date.now() + seconds * 1000;
+        window.setTimeout(revealOver, seconds * 1000);
+      });
+    } else {
+      revealOver();
+    }
+    // A new project opens in Split on a desktop or tablet (the October 2026
+    // choice): the stadium above, the strip docked under it, the stand
+    // buttons in the dock. After the reveal, which plays in the full Stadium
+    // view; never once somebody has picked a view in this visit, and in the
+    // view they last picked if they have (keptView). Phones keep their own
+    // layout. A Match Day link (?sim=1) opens straight into Match Day and
+    // stays there: switching the view under it would pull the stadium out
+    // from under the simulator while it loads.
+    const simLink = new URLSearchParams(location.search).get('sim') === '1';
+    if (!document.body.classList.contains('m-shell') && !simLink) {
+      void revealDone.then(() => {
+        if (document.querySelector('.mds-overlay')) return;
+        const want = keptView();
+        if (!pickedView && currentView !== want && (currentView === '3d' || currentView === '2d')) return setView(want);
       });
     }
   }
@@ -1252,10 +1322,8 @@ async function main(): Promise<void> {
   if (guideWanted) {
     void (async () => {
       const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
-      const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
-      const t0 = Date.now();
       if (clubStart || start?.kind === 'pattern') {
-        while (Date.now() - t0 < 20000 && !((currentView as ViewMode) === '3d' && (revealUntil > 0 || reduced))) await sleep(200);
+        await Promise.race([revealDone, sleep(20000)]);
         while (Date.now() < revealUntil) await sleep(Math.min(500, revealUntil - Date.now() + 300));
       }
       await sleep(900);

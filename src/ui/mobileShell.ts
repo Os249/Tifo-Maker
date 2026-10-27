@@ -1,3 +1,4 @@
+import { refreshStandThumbs } from './standThumbs';
 import { t } from './i18n';
 
 /**
@@ -564,6 +565,7 @@ export function mountMobileShell(): MobileShell | null {
     const b = el('button', 'm-stand' + (id === 'all' ? ' on' : '')) as HTMLButtonElement;
     b.type = 'button';
     b.dataset.stand = id;
+    b.dataset.nameKey = key; // ui/standThumbs.ts gives it a picture and a seat count
     b.textContent = t(key);
     b.addEventListener('click', () => {
       onStand = id;
@@ -579,6 +581,7 @@ export function mountMobileShell(): MobileShell | null {
     standBtns.push(b);
   }
   stage.appendChild(stands);
+  refreshStandThumbs();
 
   // ---------- selected-object actions ----------
   // Placing a picture leaves it selected, and what you want next is to size it,

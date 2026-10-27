@@ -10,7 +10,13 @@
   <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
   <title>TifoMaker: your club, your ground, your tifo</title>
-  <meta name="description" content="Pick your club and design its tifo in its real ground, seat by seat. Watch it rise on match day in 3D and give every fan the card they hold. Free, in your browser." />
+  <meta name="description" content="Pick your club and design its tifo in its real ground, seat by seat. Watch it rise in 3D on match day and give every fan their card. Free, in your browser." data-i18n-attr="content:meta.landing.desc" />
+  <meta name="robots" content="index,follow,max-image-preview:large" />
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <!-- What search engines read about the site (schema.org). Data, never run:
+       the one kind of inline script element the build and the security tests
+       allow (type application/ld+json). -->
+  <script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"WebSite","@id":"https://tifomaker.org/#website","url":"https://tifomaker.org/","name":"TifoMaker","inLanguage":["en","ar"],"publisher":{"@id":"https://tifomaker.org/#org"}},{"@type":"Organization","@id":"https://tifomaker.org/#org","name":"TifoMaker","url":"https://tifomaker.org/","logo":"https://tifomaker.org/icon-512.png"},{"@type":"WebApplication","name":"TifoMaker","url":"https://tifomaker.org/","applicationCategory":"DesignApplication","operatingSystem":"Any, in a web browser","browserRequirements":"Requires JavaScript and WebGL","inLanguage":["en","ar"],"isAccessibleForFree":true,"offers":{"@type":"Offer","price":"0","priceCurrency":"SAR"},"description":"Design a stadium tifo seat by seat in your club's real ground, see it rise in 3D and give every fan the card they hold."}]}</script>
   <meta property="og:title" content="TifoMaker: The platform for stadium choreography" />
   <meta property="og:description" content="Design, simulate in 3D, and execute massive stadium tifos. Free to start." />
   <meta property="og:type" content="website" />
@@ -83,7 +89,7 @@
           <img class="hero-still" src="/hero/ittihad.webp"
                srcset="/hero/ittihad-640.webp 640w, /hero/ittihad.webp 960w"
                sizes="(max-width: 860px) calc(100vw - 36px), 574px"
-               width="960" height="600" fetchpriority="high" alt="" />
+               width="960" height="600" fetchpriority="high" alt="The tifo across the stands, seen in 3D" data-i18n-attr="alt:hero.stillAlt" />
           <button class="hero-play" id="hero-play" type="button"><span aria-hidden="true">▷</span><span data-i18n="hero.previewPlay" aria-live="polite">Explore in 3D</span></button>
         </div>
         <figcaption class="hero-cap">

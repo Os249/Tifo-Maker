@@ -665,7 +665,9 @@ export function mountAiPanel(deps: AiPanelDeps): AiPanelHandle {
           tone: 'warn',
           title: err.message || t('ai.card.quotaOut'),
           body: t('ai.card.quotaOutBody'),
-          actions: [useQuick],
+          // The way forward is the one blue button on the card (the design
+          // pass, October 2026). A buy button joins it when passes are on sale.
+          actions: [{ ...useQuick, primary: true }],
         });
       } else if (err.status === 401 || err.reason === 'signin') {
         showCard({ tone: 'info', title: t('ai.card.signIn'), body: t('ai.card.signInBody') });
@@ -674,7 +676,7 @@ export function mountAiPanel(deps: AiPanelDeps): AiPanelHandle {
         setError(err.message || 'AI is admin-only right now.');
         setLocked(true);
       } else if (!navigator.onLine) {
-        showCard({ tone: 'bad', title: t('ai.card.offline'), body: t('ai.card.offlineBody'), actions: [useQuick] });
+        showCard({ tone: 'bad', title: t('ai.card.offline'), body: t('ai.card.offlineBody'), actions: [{ ...useQuick, primary: true }] });
       } else {
         // Differentiated where we can be, honest where we cannot — but always
         // with a way forward rather than a dead end.

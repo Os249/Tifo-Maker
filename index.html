@@ -8,6 +8,7 @@
   <link rel="icon" href="/favicon.ico" sizes="32x32" />
   <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+  <link rel="manifest" href="/manifest.webmanifest" />
     <title>Tifo Maker</title>
   </head>
   <body>
@@ -257,6 +258,9 @@
           <div id="canvas-host"></div>
           <div id="banner-host" hidden></div>
           <div id="preview-host" hidden></div>
+          <!-- Split: the line between the stadium and the strip under it.
+               Drag it, or focus it and use the arrow keys (ui/dock.ts). -->
+          <div id="dock-handle" class="dock-handle" aria-label="Resize the strip" data-i18n-attr="aria-label:ed.dockT"><span class="dock-grip" aria-hidden="true"></span></div>
 
           <div id="cam-bar" class="tool-bar" hidden style="position:absolute;left:50%;transform:translateX(-50%);top:12px;border:1px solid var(--line-1);border-radius:var(--r-md);z-index:5;">
             <label for="camera-preset" data-i18n="ed.camera">Camera</label>
@@ -275,6 +279,17 @@
             <button type="button" class="stand-chip" data-stand="south" data-i18n="dir.south">South</button>
             <button type="button" class="stand-chip" data-stand="west" data-i18n="dir.west">West</button>
           </div>
+
+          <!-- Ask the AI from the canvas: the AI tab's own prompt and Generate,
+               one line away from the stands (ui/aiBar.ts). -->
+          <form id="ai-bar" class="ai-bar" aria-label="Ask the AI" data-i18n-attr="aria-label:ai.bar.label" autocomplete="off">
+            <i class="ti ti-sparkles ai-bar-icon" aria-hidden="true"></i>
+            <input id="ai-bar-input" class="ai-bar-input" type="text" name="brief" maxlength="400" enterkeyhint="go" spellcheck="true" aria-label="Describe a tifo" placeholder="Describe a tifo, e.g. a giant eagle in black and gold…" data-i18n-attr="aria-label:ai.bar.inputT,placeholder:ai.bar.placeholder" />
+            <span id="ai-bar-state" class="ai-bar-state" aria-live="polite"></span>
+            <button id="ai-bar-open" class="ai-bar-open link-btn" type="button" hidden data-i18n="ai.bar.open">AI tab</button>
+            <select id="ai-bar-target" class="ai-bar-target" aria-label="Where" data-i18n-attr="aria-label:ai.bar.whereT"></select>
+            <button id="ai-bar-go" class="ai-bar-go" type="submit"><span data-i18n="ai.bar.go">Go</span></button>
+          </form>
 
           <div class="zoom-pill">
             <button id="zoom-out" aria-label="Zoom out" data-i18n-attr="aria-label:ed.a11y.zoomOut"><i class="ti ti-minus"></i></button>

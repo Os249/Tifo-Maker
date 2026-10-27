@@ -98,7 +98,7 @@ for (const path of PAGES) {
   const css = html.indexOf('<link rel="stylesheet"');
   check(`${path} decides the scheme before the body`, boot > -1 && boot < body, `boot=${boot} body=${body}`);
   check(`${path} decides it before the stylesheet`, boot > -1 && (css === -1 || boot < css), `boot=${boot} css=${css}`);
-  check(`${path} has no inline script for the policy to block`, !/<script(?![^>]*\bsrc=)[^>]*>\s*\S/i.test(html));
+  check(`${path} has no inline script for the policy to block`, !/<script(?![^>]*\bsrc=)(?![^>]*\btype=[\"']?application\/ld\+json)[^>]*>\s*\S/i.test(html));
 }
 
 // ---------- the toggle ----------

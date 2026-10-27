@@ -69,6 +69,9 @@ const LS = (lang = 'en') => [
   { name: 'mds_seen_intro', value: '1' },
   { name: 'tifo_consent_v1', value: 'essential' },
   { name: 'tifo_post_nudge_v1', value: '1' },
+  // This suite is about the Stadium view: someone who works in it (since 26
+  // Oct 2026 a new project otherwise settles in Split once it has opened).
+  { name: 'tifo_view_v1', value: '3d' },
 ];
 
 async function open(path, { w = 1280, h = 800 } = {}) {

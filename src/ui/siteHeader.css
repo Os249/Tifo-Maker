@@ -22,7 +22,7 @@
 .brand b { color: var(--maker); font-weight: 800; }
 .nav-links { display: flex; align-items: center; }
 .nav-links > a:not(.nav-cta) {
-  display: inline-flex; align-items: center;
+  display: inline-flex; align-items: center; min-height: 44px;
   font-weight: 600; font-size: 15px; color: var(--ink); opacity: .78;
   transition: opacity var(--t-fast), color var(--t-fast);
 }

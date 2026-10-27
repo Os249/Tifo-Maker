@@ -233,9 +233,13 @@ for (const [label, opts] of [['desktop', WIDE], ['phone', PHONE]]) {
     await p.evaluate(() => document.querySelector('.gd-next')?.click());
     return until(p, (t) => document.querySelector('.gd-h')?.textContent === t, title, 15000);
   };
-  const s2 = await step(2, 'Make it yours') && await until(p, () => document.getElementById('preview-host')?.hidden === true && !document.getElementById('canvas-host')?.hidden, null, 15000);
+  // Step 2 is the seats: on a phone the Design view; on a desktop Split (26 Oct
+  // 2026), the seats docked under the stadium so the paint shows in both.
+  const s2 = await step(2, 'Make it yours') && await until(p, (phone) => !document.getElementById('canvas-host')?.hidden && (phone
+    ? document.getElementById('preview-host')?.hidden === true
+    : document.getElementById('view-split')?.classList.contains('active') && !document.getElementById('preview-host')?.hidden), label === 'phone', 15000);
   check(`${label}: Next puts them on the seats to make it theirs`, s2);
-  const s3 = await step(3, 'See it in the stadium') && await until(p, () => !document.getElementById('preview-host')?.hidden, null, 15000);
+  const s3 = await step(3, 'See it in the stadium') && await until(p, (phone) => !document.getElementById('preview-host')?.hidden && (phone || document.getElementById('view-3d')?.classList.contains('active')), label === 'phone', 15000);
   check(`${label}: then back in the stadium`, s3);
   if (label === 'phone') {
     check('phone: Post it sits beside Match Day', await until(p, () => { const b = document.querySelector('.m-md .m-post'); return !!b && b.getBoundingClientRect().width > 0; }, null, 10000));

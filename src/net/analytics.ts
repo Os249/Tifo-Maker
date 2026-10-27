@@ -29,6 +29,7 @@ export type FunnelEvent =
   | 'guide_done'       // ...and was followed to its last step, Post it
   | 'guide_free'       // ...or left for the whole editor ("Free mode")
   | 'ai_cta'           // pressed "Generate with AI" outside the editor (Projects page)
+  | 'ai_bar'           // asked the AI from the prompt bar on the canvas
   | 'template_cta';    // pressed "Use as template" on the home page's showcase
 
 const SESSION_KEY = 'tifo_session_v1';

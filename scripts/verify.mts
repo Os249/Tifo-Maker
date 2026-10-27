@@ -3582,15 +3582,21 @@ await (async () => {
   const walk = (dir: string): string[] => readdirSync(dir, { withFileTypes: true }).flatMap((d) =>
     d.isDirectory() ? (d.name === 'vendor' ? [] : walk(join(dir, d.name))) : d.name.endsWith('.css') ? [join(dir, d.name)] : []);
   const TOKEN_FILES = new Set([join('src', 'ui', 'tokens.css'), join('src', 'ui', 'colorScheme.css')]);
-  let rawSizes = 0, tokenSizes = 0, rawColours = 0;
+  let rawSizes = 0, tokenSizes = 0, rawColours = 0, motionTokens = 0;
+  const transitionAll: string[] = [];
   for (const f of walk('src')) {
     const s = dsRead(f, 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
     rawSizes += (s.match(/font-size:\s*\d+(?:\.\d+)?px/g) ?? []).length + (s.match(/font:\s*(?:\d00\s+)?\d+(?:\.\d+)?px/g) ?? []).length;
     tokenSizes += (s.match(/font-size:\s*var\(--fs-/g) ?? []).length;
     if (!TOKEN_FILES.has(f)) rawColours += (s.match(/#[0-9a-fA-F]{3,8}\b|rgba?\(/g) ?? []).length;
+    // Motion (docs/DESIGN.md): name what moves, never "all" — it animates
+    // layout and colour that were never meant to move, and costs frames.
+    const all = s.match(/transition(?:-property)?:\s*(?:[^;{}]*,\s*)?all\b/g) ?? [];
+    if (all.length) transitionAll.push(`${f} (${all.length})`);
+    motionTokens += (s.match(/var\(--(?:duration|ease)-/g) ?? []).length;
   }
   const inline = readdirSync('.').filter((f) => f.endsWith('.html')).reduce((n, f) => n + (dsRead(f, 'utf8').match(/\sstyle="/g) ?? []).length, 0);
-  const CEILING = { rawSizes: 175, rawColours: 373, inline: 97 };
+  const CEILING = { rawSizes: 174, rawColours: 372, inline: 97 };
   const fails: string[] = [];
   if (rawSizes > CEILING.rawSizes) fails.push(`${rawSizes} raw px font sizes in src/**/*.css (ceiling ${CEILING.rawSizes}): use var(--fs-*)`);
   if (rawColours > CEILING.rawColours) fails.push(`${rawColours} raw colours outside the token files (ceiling ${CEILING.rawColours}): add a token`);
@@ -3599,6 +3605,18 @@ await (async () => {
   // The editor's Arabic step: reading text one size up (floodlight.css).
   const fl = dsRead('src/ui/floodlight.css', 'utf8');
   if (!/:root\[dir="rtl"\]\s*\{\s*--fs-2xs:12px;\s*--fs-xs:13px;/.test(fl)) fails.push('the editor lost its Arabic type step');
-  console.log(`design system: ${tokenSizes} font sizes on the scale, ${rawSizes} raw (ceiling ${CEILING.rawSizes}), ${rawColours} raw colours (ceiling ${CEILING.rawColours}), ${inline} inline styles (ceiling ${CEILING.inline})`);
+  if (transitionAll.length) fails.push(`"transition: all" in ${transitionAll.join(', ')}: list the properties that move`);
+  // The motion scale exists and stops under reduced motion: every duration
+  // and distance is zeroed there, so anything built on it stops too.
+  const tk = dsRead('src/ui/tokens.css', 'utf8');
+  const MOTION = ['--duration-micro', '--duration-quick', '--duration-fast', '--duration-medium', '--duration-slow', '--duration-very-slow', '--duration-stagger', '--distance-micro', '--distance-small', '--distance-base', '--distance-medium', '--blur-small'];
+  const reduced = tk.match(/@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{[\s\S]*?\n\}/)?.[0] ?? '';
+  for (const v of MOTION) {
+    if (!new RegExp(`${v}:\\s*\\d`).test(tk)) fails.push(`the motion token ${v} is missing from tokens.css`);
+    else if (!new RegExp(`${v}:\\s*0(?:ms|px)?\\s*;`).test(reduced)) fails.push(`${v} keeps moving under reduced motion`);
+  }
+  if (!/--ease-smooth-out:\s*cubic-bezier/.test(tk)) fails.push('the default easing --ease-smooth-out is missing');
+  if (motionTokens < 10) fails.push(`only ${motionTokens} transitions use the motion tokens: something moved off them`);
+  console.log(`design system: ${tokenSizes} font sizes on the scale, ${rawSizes} raw (ceiling ${CEILING.rawSizes}), ${rawColours} raw colours (ceiling ${CEILING.rawColours}), ${inline} inline styles (ceiling ${CEILING.inline}) | motion: ${motionTokens} uses of the motion tokens, 0 "transition: all", all ${MOTION.length} durations and distances stop under reduced motion`);
   if (fails.length) throw new Error(`design system: ${fails.join('; ')}`);
 })();

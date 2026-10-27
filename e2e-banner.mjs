@@ -191,19 +191,25 @@ console.log('\n— desktop: the fourth view exists and draws —');
     bar: getComputedStyle(document.getElementById('banner-bar')).display === 'none',
     detail: document.getElementById('bn-detail')?.hidden === true,
     makers: document.querySelectorAll('#bn-empty button[data-kind]').length,
-    adders: document.querySelectorAll('#bn-add-stand, #bn-add-hanging, #bn-add-sign').length,
+    drawn: [...document.querySelectorAll('#bn-empty button[data-kind]')].filter((b) => !!b.querySelector('svg path, svg circle') && (b.querySelector('.bn-kind-what')?.textContent ?? '').trim().length > 10).length,
+    adders: [...document.querySelectorAll('#bn-add-stand, #bn-add-hanging, #bn-add-sign')].filter((b) => b.getClientRects().length > 0).length,
   }));
   check('a new tifo has no banner, and opening the Banner view does not make one', none.card && none.rows === 0 && none.stored === 0, JSON.stringify(none));
   check('with no banner there is no sheet to set up', none.bar && none.detail);
-  check('the empty state offers all three kinds, and so does the add row', none.makers === 3 && none.adders === 3, `${none.makers} + ${none.adders} buttons`);
+  // The 26 Oct 2026 pass: the empty screen offered the three kinds twice (its
+  // own buttons and the panel's add row). Now the kinds are three cards, each
+  // with a drawing and a line, and the add row waits until there is a banner.
+  check('the empty state offers all three kinds, each drawn and described, once', none.makers === 3 && none.drawn === 3 && none.adders === 0, `${none.makers} cards, ${none.drawn} drawn, ${none.adders} add buttons showing`);
   await page.click('#bn-empty button[data-kind="stand"]');
   await page.waitForTimeout(900);
   const made = await page.evaluate(() => ({
     rows: [...document.querySelectorAll('#bn-list .bn-li')].map((r) => r.textContent.trim().replace(/\s+/g, ' ')),
     card: document.getElementById('bn-empty')?.hidden === true,
     show: document.querySelectorAll('#bn-list .bn-li .bn-li-show').length,
+    adders: [...document.querySelectorAll('#bn-add-stand, #bn-add-hanging, #bn-add-sign')].filter((b) => b.getClientRects().length > 0).length,
   }));
   check('one click makes a banner, listed with its type and stand', made.rows.length === 1 && /Stand banner/.test(made.rows[0]) && made.card, JSON.stringify(made.rows));
+  check('and then the add row offers the three kinds', made.adders === 3, `${made.adders} add buttons`);
   check('each banner has its own "Show in stadium"', made.show === 1);
 
   const s = await page.evaluate(() => ({
