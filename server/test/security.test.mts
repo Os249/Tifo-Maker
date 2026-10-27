@@ -7189,7 +7189,10 @@ async function makeDesign(app: FastifyInstance, token: string, isPublic = false)
     const order = cf.slice(cf.indexOf('## The order to do things in'), cf.indexOf('## 1.'));
     check(/legal|privacy policy/i.test(order) && order.search(/privacy policy/i) < order.search(/orange cloud on/i), 'CLOUDFLARE.md: naming Cloudflare in the privacy policy is a step, before the orange cloud');
     check(cf.includes('Cloudflare sits in front of the site as a content delivery and security network') && cf.includes('تمرّ كل الطلبات إلى الموقع عبر Cloudflare'), 'with the exact sentences, in English and Arabic');
-    check(!readFileSync('legal.html', 'utf8').includes('Cloudflare sits in front'), 'and legal.html is not changed while Cloudflare is not in front');
+    // Step 3 of the order is done (27 October 2026): the privacy policy names
+    // Cloudflare in both of the page's languages, ahead of the orange cloud.
+    const legal = readFileSync('legal.html', 'utf8');
+    check(legal.includes('Cloudflare sits in front of the site as a content delivery and security network') && legal.includes('والموقع يمرّ عبر Cloudflare'), 'and legal.html names Cloudflare, in English and in Arabic');
     console.log('  review b/f/g: worker threads described as no sandbox; spoofable Cloudflare headers a check with both answers; the privacy-policy step with its sentences');
   }
 

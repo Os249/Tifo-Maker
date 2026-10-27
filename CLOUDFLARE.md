@@ -123,6 +123,8 @@ Optional, two minutes: **Security → WAF → Custom rules**, "Block common expl
    - **العربية:** "تمرّ كل الطلبات إلى الموقع عبر Cloudflare، وهي شبكة لتوصيل المحتوى وحمايته، بما في ذلك عنوان IP الخاص بك وعنوان الصفحة التي تطلبها، حتى تفتح الصفحات بسرعة وتُصدّ الهجمات. تعالج Cloudflare هذه البيانات نيابةً عني وفق سياسة الخصوصية الخاصة بها، ولا تحتفظ إلا بنسخ من ملفات الموقع العامة، ولا تحتفظ أبدًا بحسابك أو بتصاميمك الخاصة."
 
    Do this before step 2: from the moment the cloud is orange, every visitor's requests go through Cloudflare.
+
+   *Done on 27 October 2026.* `legal.html` has the English sentences as written above, and its Arabic half says the same in the page's own Saudi wording (والموقع يمرّ عبر Cloudflare…). The Cookies section in both languages also says Cloudflare may set a short-lived security cookie of its own when it needs to tell people apart from automated attacks (Bot Fight Mode or a challenge). Check both are live on `/legal` and `/ar/legal` before the cloud goes orange.
 2. **DNS → Records** → the `tifomaker.org` record → **orange (Proxied)**.
 
 If a certificate error appears right after: Railway may need to re-issue its certificate. Grey it, wait for Railway to show the domain as issued, orange again.
