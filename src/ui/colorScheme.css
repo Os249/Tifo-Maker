@@ -71,6 +71,12 @@
   --warn: var(--amber-600);
   --danger: var(--red-600);
 
+  /* Pro (ui/pro.css): the crown, its words, its tint. */
+  --pro-ink: var(--gold-700);
+  --pro-crown: var(--gold-500);
+  --pro-tint: var(--gold-tint-light);
+  --pro-line: var(--gold-line-light);
+
   /* Gradients are retired; the name resolves to the action colour so anything
      still painted with it is simply blue. */
   --grad-brand: linear-gradient(0deg, var(--blue-600), var(--blue-600));
@@ -116,6 +122,11 @@
   --ok: var(--green-400);
   --warn: var(--amber-400);
   --danger: var(--red-400);
+
+  --pro-ink: var(--gold-400);
+  --pro-crown: var(--gold-400);
+  --pro-tint: var(--gold-tint-dark);
+  --pro-line: var(--gold-line-dark);
 
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
   --shadow-md: 0 6px 20px rgba(0, 0, 0, 0.45);

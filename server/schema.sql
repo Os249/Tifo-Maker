@@ -287,7 +287,7 @@ CREATE TABLE IF NOT EXISTS ai_events (
   id      BIGSERIAL PRIMARY KEY,
   user_id UUID REFERENCES users(id) ON DELETE SET NULL,  -- null = admin/unlocked
   at      TIMESTAMPTZ NOT NULL DEFAULT now(),
-  mode    TEXT NOT NULL,     -- 'std' | 'super' | 'polish' | 'photo' (the last two: failures only until Oct 2026)
+  mode    TEXT NOT NULL,     -- 'std' | 'super' | 'polish' | 'photo' | 'cutout' (polish and photo: failures only until Oct 2026)
   outcome TEXT NOT NULL      -- model | cache | quick | quota | busy | blocked | invalid
 );
 CREATE INDEX IF NOT EXISTS ai_events_at_idx      ON ai_events (at DESC);
@@ -540,5 +540,55 @@ CREATE UNIQUE INDEX IF NOT EXISTS users_username_lower_idx ON users (lower(usern
 CREATE TABLE IF NOT EXISTS server_keys (
   name       TEXT PRIMARY KEY,
   secret     BYTEA NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Pro (October 2026; server/src/proPlan.ts has every number, pro.ts the rules).
+-- Nothing here is read while PRO_MODE is off.
+--
+-- pro_passes: what an account holds. plan is match | season | gift | group;
+-- source says how it came: an accepted gift, granted by an admin, or bought.
+-- A pass is never edited, only revoked (revoked_at), so the history stays.
+CREATE TABLE IF NOT EXISTS pro_passes (
+  id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id    UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  plan       TEXT NOT NULL CHECK (plan IN ('match', 'season', 'gift', 'group')),
+  starts_at  TIMESTAMPTZ NOT NULL,
+  ends_at    TIMESTAMPTZ NOT NULL,
+  source     TEXT NOT NULL CHECK (source IN ('gift', 'admin', 'payment')),
+  payment_id TEXT UNIQUE,
+  created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  revoked_at TIMESTAMPTZ,
+  CHECK (ends_at > starts_at)
+);
+CREATE INDEX IF NOT EXISTS pro_passes_user_idx ON pro_passes (user_id, ends_at DESC);
+
+-- The 7-day gift: one row per account, ever (the primary key is the account).
+-- Offered when the account qualifies, accepted once; accepting creates the pass.
+CREATE TABLE IF NOT EXISTS pro_gifts (
+  user_id     UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  offered_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  claim_by    TIMESTAMPTZ NOT NULL,
+  accepted_at TIMESTAMPTZ,
+  pass_id     UUID REFERENCES pro_passes(id) ON DELETE SET NULL
+);
+
+-- Allowance counters: one row per account, kind and period ('d:2026-10-28',
+-- 'w:2026-10-25', 'm:2026-10', Riyadh time). Rows untouched for 45 days are
+-- deleted daily.
+CREATE TABLE IF NOT EXISTS pro_allowance (
+  user_id    UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  kind       TEXT NOT NULL,
+  period     TEXT NOT NULL,
+  used       INT NOT NULL DEFAULT 0 CHECK (used >= 0),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (user_id, kind, period)
+);
+CREATE INDEX IF NOT EXISTS pro_allowance_updated_idx ON pro_allowance (updated_at);
+
+-- "Tell me when Pro opens": who asked, once each.
+CREATE TABLE IF NOT EXISTS pro_notify (
+  user_id    UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );

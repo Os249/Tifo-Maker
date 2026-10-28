@@ -26,6 +26,11 @@ import { picturesStatus } from './imageAssets';
 import { textModelsStatus } from './aiProvider';
 import { imageHealth } from './imageHealth';
 import { registerAiRoutes, safeEqual, verifyUnlock, warmUnlockKey } from './aiRoutes';
+import { ProService } from './pro';
+import type { ProRepository } from './proRepo';
+import { registerProRoutes } from './proRoutes';
+import { cutoutConfigured } from './cutout';
+import { liveFor, proMode } from './proPlan';
 import { stadiumPlan } from './stadiumPlan';
 import { emailHealth, type EmailSender } from './email';
 import { button, codeBox, layoutEmail, para, smallPrint, textFooter } from './emailLayout';
@@ -242,6 +247,10 @@ const NOT_FOUND_HTML = `<!doctype html>
 </body>
 </html>`;
 
+/** The site's 404 page, for a page that is switched off (Pro before PRO_MODE). */
+const notFoundPage = (reply: FastifyReply) =>
+  reply.code(404).header('cache-control', 'no-cache').type('text/html').send(NOT_FOUND_HTML);
+
 export interface TemplateInfo {
   id: string;
   version: number;
@@ -270,6 +279,11 @@ export interface AppOptions {
   leads?: LeadsRepository;
   /** AI Tifo Designer quota store. When present, the /api/ai/* routes are enabled. */
   aiUsage?: AiUsageRepository;
+  /**
+   * Pro (passes, the 7-day gift, allowances). When present, /api/pro and the
+   * admin Pro routes exist; whom the new rules cover is PRO_MODE's decision.
+   */
+  pro?: ProRepository;
   aiEvents?: AiEventsRepository;
   /** Where the daily AI budget survives a restart (memory only when absent). */
   aiBudget?: AiBudgetRepository;
@@ -1165,6 +1179,13 @@ export async function buildApp(
     'ai_cta',          // "Generate with AI" pressed outside the editor (Projects page)
     'ai_bar',          // the AI asked from the prompt bar on the canvas
     'template_cta',    // "Use as template" pressed on the home page's showcase
+    'pro_viewed',      // opened the Pro page
+    'pro_limit',       // met a Pro limit card (an allowance used up)
+    'pro_notify',      // asked to be told when Pro opens
+    'gift_accepted',   // accepted the 7-day Pro gift
+    'cutout_used',     // a smart cut-out came back
+    'export_sheet',    // the export sheet listed Pro items
+    'export_free',     // ...and they exported without them
   ];
   const FUNNEL_SET = new Set(FUNNEL_STEPS);
 
@@ -1431,6 +1452,40 @@ export async function buildApp(
 
   app.get('/api/templates', async () => templates);
 
+  // ---------- Pro (passes, the 7-day gift, allowances) ----------
+  // Built before the AI routes, which read its allowances. Everything about it
+  // is decided here on the server; see proPlan.ts for the numbers.
+  const proService = options.pro
+    ? new ProService(options.pro, { savedDesigns: (userId) => repo.listByOwner(userId).then((l) => l.length) })
+    : null;
+  if (proService) {
+    registerProRoutes(app, {
+      pro: proService,
+      userOf,
+      requireUser,
+      accountOf,
+      getUserByName: (name) => auth.getUserByName(name),
+      adminAccess,
+      cutoutConfigured,
+      routeConfig: options.rateLimit ? { config: { rateLimit: { max: 20, timeWindow: '1 minute' } } } : undefined,
+    });
+  }
+  /**
+   * Which of these accounts show the Supporter crown to this viewer. While
+   * Pro is in preview, only a previewing viewer sees crowns, so nobody else
+   * learns about it from a badge.
+   */
+  const supportersFor = async (req: FastifyRequest, ownerIds: (string | null | undefined)[]): Promise<Set<string>> => {
+    if (!proService || proMode() === 'off') return new Set();
+    if (proMode() === 'preview') {
+      const viewer = await userOf(req).catch(() => null);
+      const name = viewer ? (await accountOf(req, viewer).catch(() => null))?.username : null;
+      if (!liveFor(name)) return new Set();
+    }
+    const ids = [...new Set(ownerIds.filter((x): x is string => typeof x === 'string' && x.length > 0))];
+    return ids.length ? proService.supporters(ids).catch(() => new Set<string>()) : new Set();
+  };
+
   // ---------- AI Tifo Designer (offline designer + optional model) ----------
   // Auth-gated with a per-account free quota; the spec is validated server-side
   // with the same validator the client uses before a credit is spent.
@@ -1452,8 +1507,9 @@ export async function buildApp(
       freeForAll: (process.env.AI_FREE_FOR_ALL ?? 'true') !== 'false',
       userState: async (userId, req) => {
         const u = await (req ? accountOf(req, userId) : auth.getUserById(userId)).catch(() => null);
-        return u ? { emailVerified: !!u.emailVerifiedAt, isPro: u.isPro } : null;
+        return u ? { emailVerified: !!u.emailVerifiedAt, isPro: u.isPro, username: u.username } : null;
       },
+      pro: proService ?? undefined,
       routeConfig: options.rateLimit ? { config: { rateLimit: { max: 12, timeWindow: '1 minute' } } } : undefined,
       // The unlock endpoint is a password prompt, so it gets the login limit.
       authRouteConfig: options.rateLimit ? { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } } : undefined,
@@ -2907,8 +2963,16 @@ export async function buildApp(
     // complete (P1.26 fail-closed review).
     let user: Awaited<ReturnType<typeof auth.getUserById>>;
     let designs: Awaited<ReturnType<typeof repo.listByOwner>>;
+    // Pro passes and the gift are the account's too (none while Pro was never on).
+    let passes: Awaited<ReturnType<ProRepository['allPasses']>> = [];
+    let gift: Awaited<ReturnType<ProRepository['gift']>> = null;
     try {
-      [user, designs] = await Promise.all([accountOf(req, userId), repo.listByOwner(userId)]);
+      [user, designs, passes, gift] = await Promise.all([
+        accountOf(req, userId),
+        repo.listByOwner(userId),
+        proService ? proService.repo.allPasses(userId) : Promise.resolve([]),
+        proService ? proService.repo.gift(userId) : Promise.resolve(null),
+      ]);
     } catch {
       return reply.code(503).send({ error: 'something went wrong on our side, please try again', code: 'retry' });
     }
@@ -2918,6 +2982,10 @@ export async function buildApp(
         ? { id: user.id, username: user.username, email: user.email, emailVerified: !!user.emailVerifiedAt }
         : null,
       designs,
+      pro: {
+        passes: passes.map((p) => ({ plan: p.plan, source: p.source, startsAt: p.startsAt, endsAt: p.endsAt, revokedAt: p.revokedAt })),
+        gift: gift ? { offeredAt: gift.offeredAt, acceptedAt: gift.acceptedAt } : null,
+      },
     });
   });
 
@@ -3040,7 +3108,10 @@ export async function buildApp(
     const viewerId = await userOf(req); // annotate the caller's votes when signed in
     const page = await repo.listPublicPage({ ...filters, viewerId, limit, offset: after ? 0 : offset, after });
     if (page.next) void reply.header('x-next-cursor', sealCursor(cursorKey, scope, page.next));
-    return page.items;
+    // The Supporter crown beside a name: a fact about the account (a paid pass,
+    // now), never which plan or until when.
+    const crowns = await supportersFor(req, page.items.map((i) => i.ownerId));
+    return crowns.size ? page.items.map((i) => (i.ownerId && crowns.has(i.ownerId) ? { ...i, ownerSupporter: true } : i)) : page.items;
   });
 
   /**
@@ -3058,7 +3129,8 @@ export async function buildApp(
     // Private and missing are the same answer on purpose: "this id is not
     // public" must not become a way to learn that a private design exists.
     if (!item) return reply.code(404).send({ error: 'not found' });
-    return item;
+    const crowns = await supportersFor(req, [item.ownerId]);
+    return item.ownerId && crowns.has(item.ownerId) ? { ...item, ownerSupporter: true } : item;
   });
 
   // ---------- tifo of the day ----------
@@ -3594,14 +3666,16 @@ export async function buildApp(
     // every share page (performance plan P1.12). Never listByOwner: that is
     // the owner's own list, private designs included.
     const limit = Math.min(200, Math.max(1, Number(oneParam((req.query as Record<string, unknown>).limit)) || 200));
-    const [created, liked, socialProfile] = await Promise.all([
+    const [created, liked, socialProfile, crowns] = await Promise.all([
       repo.listPublicByOwner(id, { viewerId, limit }),
       repo.listLikedBy(id),
       options.social ? options.social.getProfile(id, viewerId) : Promise.resolve(null),
+      supportersFor(req, [user.id]),
     ]);
     return {
       id: user.id,
       username: user.username,
+      supporter: crowns.has(user.id),
       created,
       liked,
       // Social graph fields (present when the social layer is enabled).
@@ -4432,7 +4506,9 @@ export async function buildApp(
     if (!socialOn(reply)) return;
     const v = await getVisible(req, reply);
     if (!v) return;
-    return social!.listComments(v.rec.id);
+    const comments = await social!.listComments(v.rec.id);
+    const crowns = await supportersFor(req, comments.map((c) => c.authorId));
+    return crowns.size ? comments.map((c) => (crowns.has(c.authorId) ? { ...c, authorSupporter: true } : c)) : comments;
   });
   app.post('/api/designs/:id/comments', async (req, reply) => {
     if (!socialOn(reply)) return;
@@ -5166,6 +5242,23 @@ export async function buildApp(
       }
     } catch {
       /* projects page optional in API-only builds */
+    }
+
+    // Pro: what the passes add and what they cost. Only while PRO_MODE is
+    // preview or on: off, /pro is a 404 like any page that does not exist, so
+    // nothing about Pro shows before it is switched on. noindex in its own
+    // <head> and not in the sitemap until it opens. The page reads /api/pro,
+    // which in preview says nothing to anyone not on the list.
+    try {
+      const proHtml = readFileSync(join(staticDir, 'pro.html'), 'utf8');
+      for (const [lang, page] of pagesOf('pro.html', proHtml)) {
+        app.get(routeIn('/pro', lang), async (req, reply) => {
+          if (proMode() === 'off') return notFoundPage(reply);
+          return reply.header('cache-control', 'no-cache').type(PAGE_HTML).send(withTwins(page, req, '/pro', lang, false));
+        });
+      }
+    } catch {
+      /* pro page optional in API-only builds */
     }
 
     // sitemap.xml: generated per request rather than shipped as a static file, so

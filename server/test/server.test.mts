@@ -1971,7 +1971,7 @@ if (process.env.DATABASE_URL) {
     const pw = st.recentFailures.find((f) => f.mode === 'polish')!;
     assert.equal(pw.username, 'admin password (signed out)', 'a signed-out admin-password run says which door');
     assert.equal(pw.via, 'password');
-    assert.deepEqual(st.modes, { std: 2, super: 2, polish: 1, photo: 0 }, 'modes are counted exactly, polish apart');
+    assert.deepEqual(st.modes, { std: 2, super: 2, polish: 1, photo: 0, cutout: 0 }, 'modes are counted exactly, polish apart');
     assert.equal(st.window.busy, 3);
     console.log('postgres: ai failure reasons passed (columns, breakdown, recent table, cap, door, modes)');
   }

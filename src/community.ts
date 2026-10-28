@@ -17,6 +17,7 @@ import { initScheme, setSchemeLabels } from './ui/colorScheme';
 import { installMobileNav } from './ui/mobileNav';
 import { installConsent } from './ui/consent';
 import { ensureUsernameChosen } from './ui/chooseUsernameModal';
+import { mountProChip, supporterCrownHtml } from './ui/pro';
 import type { Preview3D } from './render/preview3d';
 import type { SeatMap } from './core/types';
 import type { ShareTarget } from './ui/shareModal';
@@ -411,7 +412,7 @@ function renderCard(item: GalleryItem, onClick?: () => void): HTMLElement {
     <div class="card-body">
       ${badges}
       <a class="card-title card-open" href="${localPath(`/t/${encodeURIComponent(item.id)}`)}">${escapeHtml(tTitle(item))}</a>
-      <div class="card-by">${escapeHtml(t('cm.by'))} <button class="at card-creator" type="button">@${escapeHtml(item.ownerName)}</button></div>
+      <div class="card-by">${escapeHtml(t('cm.by'))} <button class="at card-creator" type="button">@${escapeHtml(item.ownerName)}${item.ownerSupporter ? supporterCrownHtml() : ''}</button></div>
       ${remixed}
       <div class="card-stats">
         <span class="card-stat like ${liked ? 'on' : ''}"><i class="ti ti-heart${liked ? '-filled' : ''}"></i> ${item.likeScore}</span>
@@ -493,7 +494,7 @@ async function openProfile(userId: string): Promise<void> {
     <div class="profile-head">
       <div class="profile-avatar">${initials(profile.username)}</div>
       <div class="profile-id">
-        <h2 class="profile-name">@${escapeHtml(profile.username)}</h2>
+        <h2 class="profile-name">@${escapeHtml(profile.username)}${profile.supporter ? supporterCrownHtml() : ''}</h2>
         <div class="profile-counts">
           <span><b>${profile.designCount ?? profile.created.length}</b> tifo${(profile.designCount ?? profile.created.length) === 1 ? '' : 's'}</span>
           <span><b>${profile.followerCount ?? 0}</b> follower${(profile.followerCount ?? 0) === 1 ? '' : 's'}</span>
@@ -580,7 +581,7 @@ async function openPreview(item: GalleryItem, focusCommentId?: string | null): P
           <div class="side-author">
             <div class="side-avatar">${initials(item.ownerName)}</div>
             <div class="side-author-meta">
-              <div class="side-author-name">@${escapeHtml(item.ownerName)}</div>
+              <div class="side-author-name">@${escapeHtml(item.ownerName)}${item.ownerSupporter ? supporterCrownHtml() : ''}</div>
               <div class="side-author-handle" id="author-stats">creator</div>
             </div>
             <button class="follow-btn" id="follow-btn" ${!item.ownerId || (me && me.id === item.ownerId) ? 'hidden' : ''}>Follow</button>
@@ -996,7 +997,7 @@ function commentNode(c: CommentItem, item: GalleryItem, depth: number, replyingT
   node.innerHTML = `
     <div class="c-avatar">${initials(c.authorName)}</div>
     <div class="c-body">
-      <div class="c-meta"><span class="c-name">@${escapeHtml(c.authorName)}</span><span class="c-time">${timeAgo(c.createdAt)}</span></div>
+      <div class="c-meta"><span class="c-name">@${escapeHtml(c.authorName)}${c.authorSupporter ? supporterCrownHtml() : ''}</span><span class="c-time">${timeAgo(c.createdAt)}</span></div>
       ${answering}
       <div class="c-text">${escapeHtml(c.body)}</div>
       <div class="c-actions">
@@ -1649,6 +1650,8 @@ async function main(): Promise<void> {
   const why = providerFailure();
   if (why) toast(t(`auth.err.${why}`));
   await Promise.all([refreshAuthUI(), loadGallery(), loadFilters()]);
+  // "Pro · 5 days left" beside the account while a pass runs (hidden otherwise).
+  if (authBtn.parentElement) mountProChip(authBtn.parentElement, authBtn);
   renderApplied();
   void openDeepLink();
 }

@@ -7509,7 +7509,7 @@ async function makeDesign(app: FastifyInstance, token: string, isPublic = false)
   // A build output in both languages: the source pages, and their Arabic twins
   // made from them by the build's own renderer, the English ones marked as the
   // build marks them.
-  const TWINNED = ['landing', 'index', 'community', 'seat', 'clubs', 'share', 'legal', 'reset', 'account', 'projects'].map((n) => `${n}.html`);
+  const TWINNED = ['landing', 'index', 'community', 'seat', 'clubs', 'share', 'legal', 'reset', 'account', 'projects', 'pro'].map((n) => `${n}.html`);
   const dist = mkdtempSync(`${tmpdir()}/tifo-perf-s3-`);
   mkdirSync(`${dist}/ar`);
   mkdirSync(`${dist}/assets`);
@@ -7590,6 +7590,30 @@ async function makeDesign(app: FastifyInstance, token: string, isPublic = false)
           if (ar.headers.etag) check(ar.headers.etag !== en.headers.etag, `${url}: the two languages are different bytes with different ETags`);
         }
         n++;
+      }
+    }
+    // The Pro page exists only while PRO_MODE is preview or on: off, it is
+    // the same 404 as any page that does not exist, in both languages.
+    {
+      const before = process.env.PRO_MODE;
+      try {
+        delete process.env.PRO_MODE;
+        for (const url of ['/pro', '/ar/pro']) {
+          const r = await app.inject({ method: 'GET', url, remoteAddress: freshIp() });
+          assert.equal(r.statusCode, 404, `${url} is a 404 while Pro is off`);
+          check(!/SAR|ريال/.test(r.body), `${url}: says nothing about Pro while it is off`);
+        }
+        process.env.PRO_MODE = 'preview';
+        const en = await app.inject({ method: 'GET', url: '/pro', remoteAddress: freshIp() });
+        const ar = await app.inject({ method: 'GET', url: '/ar/pro', remoteAddress: freshIp() });
+        assert.equal(en.statusCode, 200, '/pro is served in preview');
+        twins(en, ar, 'GET /ar/pro');
+        check(/<meta name="robots" content="noindex"/.test(en.body) && /<meta name="robots" content="noindex"/.test(ar.body), '/pro is noindex in both languages');
+        check(!inlineScript(ar.body) && offOrigin(ar.body).length === 0, '/ar/pro: no inline script and none from another origin');
+        n += 2;
+      } finally {
+        if (before === undefined) delete process.env.PRO_MODE;
+        else process.env.PRO_MODE = before;
       }
     }
     // The landing at /ar is /ar/, by a redirect that can only stay on this site.

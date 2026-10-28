@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <!-- Colour scheme, before anything paints: an explicit choice wins, otherwise the device decides. -->
+  <script src="/theme-boot.js"></script>
+  <meta name="theme-color" content="#FBFAFF" />
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <link rel="icon" href="/favicon.ico" sizes="32x32" />
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <title data-i18n="meta.pro.title">Pro · TifoMaker</title>
+  <!-- Not for search engines until Pro opens to everyone. -->
+  <meta name="robots" content="noindex" />
+</head>
+<body>
+  <a class="skip-link" href="#main" data-i18n="common.skip">Skip to main content</a>
+  <header class="nav">
+    <a class="brand" href="/" dir="ltr">TIFO<b>MAKER</b></a>
+    <nav class="nav-links">
+      <a href="/community" data-i18n="nav.community">Community</a>
+      <a href="/clubs" data-i18n="nav.clubs">For clubs</a>
+      <a href="/projects" data-i18n="nav.projects">My projects</a>
+      <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Dark mode" title="Dark mode" data-i18n-initial="aria-label:theme.dark,title:theme.dark"><svg class="ic-moon" viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.2A8.2 8.2 0 0 1 9.8 4a8.4 8.4 0 1 0 10.2 10.2z"/></svg><svg class="ic-sun" viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M18.4 5.6L17 7M7 17l-1.4 1.4"/></svg></button>
+      <button class="lang-toggle" id="lang-toggle" data-i18n="common.language">العربية</button>
+      <button class="nav-cta" id="auth-btn" data-i18n="ed.signup">Sign in</button>
+    </nav>
+  </header>
+
+  <main class="pp" id="main" tabindex="-1">
+    <!-- Until /api/pro answers, nothing about Pro is shown: in preview, a
+         visitor not on the list sees only "not open yet". -->
+    <p class="pp-wait" id="pp-wait" role="status"></p>
+
+    <section class="pp-closed" id="pp-closed" hidden>
+      <h1 data-i18n="pp.notOpen">Pro is not open yet.</h1>
+      <a class="pp-home" href="/" data-i18n="pp.home">Back to TifoMaker</a>
+    </section>
+
+    <div id="pp-open" hidden>
+      <section class="pp-hero" aria-labelledby="pp-h">
+        <p class="pp-eyebrow"><span class="pp-crown" id="pp-crown" aria-hidden="true"></span><span data-i18n="pp.eyebrow">TifoMaker Pro</span></p>
+        <h1 id="pp-h" data-i18n="pp.title">More AI for the big matches</h1>
+        <p class="pp-lead" data-i18n="pp.lead">Everything free stays free. Pro adds more Super designs, smart cut-out and clean videos, for one match or the whole season.</p>
+        <p class="pp-you" id="pp-you" hidden></p>
+      </section>
+
+      <section class="pp-plans" id="pp-plans" aria-label="Plans" data-i18n-attr="aria-label:pp.plans"></section>
+
+      <section class="pp-act" id="pp-act">
+        <p class="pp-act-note" id="pp-act-note"></p>
+        <div class="pp-act-row" id="pp-act-row"></div>
+        <p class="pp-msg" id="pp-msg" role="status" aria-live="polite"></p>
+        <p class="pp-small" id="pp-small"></p>
+      </section>
+
+      <section class="pp-group" aria-labelledby="pp-group-h">
+        <div>
+          <h2 id="pp-group-h" data-i18n="pp.group.title">For a supporters' group</h2>
+          <p id="pp-group-body"></p>
+        </div>
+        <a class="pp-group-link" href="/clubs#contact" data-i18n="clubs.navCta">Talk to us</a>
+      </section>
+
+      <section class="pp-faq" aria-labelledby="pp-faq-h">
+        <h2 id="pp-faq-h" data-i18n="pp.faq.title">Questions</h2>
+        <details><summary data-i18n="pp.faq.q1">Does anything free become paid?</summary><p data-i18n="pp.faq.a1">No. The editor, 3D, Match Day, the PDF, CSV and QR, saving and publishing stay free. Pro adds more on top.</p></details>
+        <details><summary data-i18n="pp.faq.q2">Does a pass renew by itself?</summary><p data-i18n="pp.faq.a2">No. A pass ends on its own and nothing is charged again.</p></details>
+        <details><summary data-i18n="pp.faq.q3">What happens to my designs when Pro ends?</summary><p data-i18n="pp.faq.a3">They stay yours, as they are. Only new exports with Pro items need Pro again.</p></details>
+        <details><summary data-i18n="pp.faq.q4">Where does my picture go for a smart cut-out?</summary><p data-i18n="pp.faq.a4">To Cloudflare's AI, which cuts it out and sends it back. We do not keep it.</p></details>
+        <details><summary data-i18n="pp.faq.q5">How will I pay?</summary><p data-i18n="pp.faq.a5">With mada, Apple Pay or STC Pay, when passes go on sale.</p></details>
+      </section>
+    </div>
+  </main>
+
+  <footer class="site-foot">
+    <a href="/" data-i18n="clubs.footHome">Home</a>
+    <a href="/legal#terms" data-i18n="nav.terms">Terms</a>
+    <a href="/legal#privacy" data-i18n="nav.privacy">Privacy</a>
+    <button type="button" class="fb-entry" id="foot-feedback" data-i18n="fb.entry">Feedback</button>
+  </footer>
+
+  <script type="module" src="/src/proPage.ts"></script>
+</body>
+</html>

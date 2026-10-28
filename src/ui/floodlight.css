@@ -10,6 +10,8 @@
      the active tool and the active view are solid blue, not a gradient. */
   --blue:var(--blue-600); --purple:var(--blue-600); --emerald:var(--green-600); --neon:var(--flare);
   --flare:var(--blue-600); --flare-hover:var(--blue-500); --flare-press:var(--blue-700); --flare-ink:#FFFFFF;
+  /* Pro (ui/pro.css): the editor is always dark. */
+  --pro-ink:var(--gold-400); --pro-crown:var(--gold-400); --pro-tint:var(--gold-tint-dark); --pro-line:var(--gold-line-dark);
   /* Violet has one job in the editor: what is selected. */
   --violet:var(--violet-400); --violet-press:#5B4CCF; --violet-ink:#FFFFFF;
   --ok:#0FBF6B; --warn:var(--amber-400); --danger:#F0455A;

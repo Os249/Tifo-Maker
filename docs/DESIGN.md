@@ -167,6 +167,31 @@ them.
 ### Cards that carry news (the post nudge, the AI state card, the limit card)
 One title, one sentence, one blue action, at most one quiet alternative.
 
+### Pro (`ui/pro.ts`, `ui/pro.css`)
+- **One mark: the gold crown.** "Pro" beside it in English, "مميّز" in
+  Arabic, where there is room (`proChipHtml()`); the crown alone, with its
+  name spoken, on a small thumbnail. Gold is `--pro-*` (tokens `--gold-*`):
+  `--gold-700` for words on light grounds, `--gold-400` on dark. Gold is
+  never the blue: the one next step stays blue, a Pro action that is not the
+  step is a gold-tinted `.pro-btn`.
+- **A crown where the thing is picked, never first at export.** Pro tools
+  are free to try in the editor and the 3D; an export with Pro items opens
+  the export sheet: the gift (or Pro), and "Export without Pro items".
+  Saving and publishing are never blocked.
+- **A pass holder still sees what is Pro, quietly** (`.pro-chip.quiet`), and
+  never sees a limit card that sells: at a ceiling the card says when it
+  comes back and offers the free alternative.
+- **The limit card**: what ran out ("That's all 3 Super designs for this
+  week"), when it comes back ("on Sunday (in 2 days)"), one blue way on (the
+  gift when there is one, else "See what Pro adds") and one quiet
+  alternative (a standard design, the Quick Designer).
+- **The countdown chip** (`mountProChip`) sits before the header's account
+  control while a pass runs; on a phone, the crown alone.
+- **The Supporter crown** (`supporterCrownHtml()`) follows a paid pass's
+  name in the community: cards, the profile, comments.
+- **Everything shown comes from `/api/pro`.** The interface decides nothing;
+  with `PRO_MODE=off` none of it appears.
+
 ## 8. Words
 
 - **Active voice and the person's side of the screen**: "Post it makes a

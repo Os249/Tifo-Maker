@@ -24,6 +24,7 @@ const INPUT = {
   reset: resolve(__dirname, 'reset.html'),
   account: resolve(__dirname, 'account.html'),
   projects: resolve(__dirname, 'projects.html'),
+  pro: resolve(__dirname, 'pro.html'),
 };
 
 /**

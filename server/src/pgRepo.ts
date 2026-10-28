@@ -325,7 +325,7 @@ export class PgAiEventsRepository implements AiEventsRepository {
       }
       return out;
     };
-    const m = { std: 0, super: 0, polish: 0, photo: 0 };
+    const m = { std: 0, super: 0, polish: 0, photo: 0, cutout: 0 };
     for (const r of modes.rows) {
       const k = r.mode as AiMode;
       if (k in m) m[k] += Number(r.n);

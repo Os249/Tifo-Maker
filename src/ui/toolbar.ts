@@ -29,6 +29,8 @@ import {
   type DraftEnvelope, type DraftWriteResult,
 } from '../core/draft';
 import { decodeImportBitmap, extractPhotoPalette, rasterize } from '../core/importImage';
+import { fetchPro } from '../net/api';
+import { mountProChip, proChipHtml } from './pro';
 import { BANNER_HISTORY_EVENT, bannerActive, bannerHost } from './bannerHost';
 import { openAuthModal } from './authModal';
 import { openGallery } from './gallery';
@@ -1286,6 +1288,27 @@ export function mountToolbar(
     void stampImageAt(u * EDITOR_UNITS.width, tierY[importTier.value] ?? tierY.both);
   });
   $('#import-cancel').addEventListener('click', cancelImport);
+  // Smart cut-out (Pro, server-counted): swaps the armed picture for its
+  // cut-out and back. Shown only where /api/pro says Pro is on. Loaded with
+  // the first picture armed, so the editor's start carries none of it.
+  let cutout: Promise<unknown> | null = null;
+  document.addEventListener('tifo:import-armed', () => {
+    cutout ??= import('./smartCutout').then((m) => m.mountSmartCutout(cutoutHost).armed());
+  });
+  const cutoutHost = {
+    bar: $('#import-bar'),
+    current: () => pendingImport?.bitmap ?? null,
+    swap: (bitmap: ImageBitmap) => {
+      if (!pendingImport) return false;
+      pendingImport = { bitmap, name: pendingImport.name, src: encodePictureSrcAsync(bitmap) };
+      editor.setStampPreview(bitmap, false);
+      refreshImportUI();
+      return true;
+    },
+    say: (msg: string) => {
+      message.textContent = msg;
+    },
+  };
 
   // Shapes tool: vector primitives + symbols → 1-colour mask → seat stamp, placed
   // as a movable/resizable object (the exact pipeline the Text tool uses).
@@ -1772,6 +1795,9 @@ export function mountToolbar(
   // is the one almost everybody will use, because it is the only one on screen.
   const saveTopBtn = document.getElementById('save-top') as HTMLButtonElement | null;
   const saveStateTop = document.getElementById('save-state-top');
+  // "Pro · 5 days left" while a pass or the gift runs; nothing otherwise.
+  const topRight = saveStateTop?.parentElement;
+  if (topRight) mountProChip(topRight, saveStateTop);
 
   /**
    * Which Save the user last pressed, so the result appears at that control.
@@ -3464,12 +3490,49 @@ export function mountToolbar(
   sxFormat.addEventListener('change', syncFormatRows);
   syncFormatRows();
 
-  const buildExportOpts = (forGif: boolean): StadiumExportOpts => ({
+  // Pro: "Without the tifomaker.org mark". Anyone Pro is on for may tick it
+  // and see the preview without the mark (Pro tools are free to try); an
+  // export by a free account first shows the export sheet. The mark is drawn
+  // in this browser, so this is a courtesy, not a lock: what the server
+  // guards is what costs money (the AI and the cut-out).
+  const sxNoMarkLabel = document.createElement('label');
+  sxNoMarkLabel.className = 'chips pro-option';
+  sxNoMarkLabel.hidden = true;
+  sxNoMarkLabel.innerHTML =
+    `<input type="checkbox" id="sx-nomark" /> <span data-i18n="pro.mark.option">${escapeHtml(i18nT('pro.mark.option'))}</span> ${proChipHtml()}`;
+  sxNoshow.closest('label')?.after(sxNoMarkLabel);
+  const sxNoMark = sxNoMarkLabel.querySelector('input') as HTMLInputElement;
+  const syncNoMark = (): void => {
+    void fetchPro().then((st) => {
+      sxNoMarkLabel.hidden = !st.live;
+      // A pass holder still sees which option is Pro, quietly.
+      sxNoMarkLabel.querySelector('.pro-chip')?.classList.toggle('quiet', !!st.plan && st.plan !== 'free');
+      if (!st.live) sxNoMark.checked = false;
+    });
+  };
+  syncNoMark();
+  window.addEventListener('tifo:pro', syncNoMark);
+  window.addEventListener('tifo:auth', syncNoMark);
+  /**
+   * Whether this export may leave the mark off: ticked, and Pro running, or
+   * the free version chosen on the sheet. Null when the sheet was closed.
+   */
+  const exportClean = async (): Promise<boolean | null> => {
+    if (!sxNoMark.checked || sxNoMarkLabel.hidden) return false;
+    const st = await fetchPro(true).catch(() => null);
+    if (!st?.live) return false;
+    if (st.plan && st.plan !== 'free') return true;
+    const { openExportSheet } = await import('./proSheets');
+    const choice = await openExportSheet([i18nT('pro.mark.option')], st);
+    return choice === 'free' ? false : null;
+  };
+
+  const buildExportOpts = (forGif: boolean, clean = sxNoMark.checked && !sxNoMarkLabel.hidden): StadiumExportOpts => ({
     reveal: revealSel.value as RevealId,
     durationSec: player.durationSec,
     fps: forGif ? 15 : 30,
     noShows: sxNoshow.checked,
-    watermark: 'tifomaker.org',
+    watermark: clean ? '' : 'tifomaker.org',
     gifWidth: forGif ? Number(sxGifWidth.value) : undefined,
     drum: !forGif && drumOn() ? drum : null,
   });
@@ -3496,12 +3559,12 @@ export function mountToolbar(
     URL.revokeObjectURL(url);
   };
 
-  const runExport = async (preview: Preview3D, say: (t: string) => void): Promise<void> => {
+  const runExport = async (preview: Preview3D, say: (t: string) => void, clean: boolean): Promise<void> => {
     const forGif = sxFormat.value === 'gif';
     const name = `${docTitle.value.trim() || 'tifo'}-stadium`;
     if (forGif) {
       say('Encoding GIF…');
-      const blob = await exportStadiumGif(preview, map, store, buildExportOpts(true));
+      const blob = await exportStadiumGif(preview, map, store, buildExportOpts(true, clean));
       downloadBlob(blob, `${name}.gif`);
       say(`GIF exported (${(blob.size / 1024).toFixed(0)} KB)`);
     } else {
@@ -3510,7 +3573,7 @@ export function mountToolbar(
         return;
       }
       say('Recording video…');
-      const { blob, extension, universal } = await exportStadiumVideo(preview, map, buildExportOpts(false));
+      const { blob, extension, universal } = await exportStadiumVideo(preview, map, buildExportOpts(false, clean));
       downloadBlob(blob, `${name}.${extension}`);
       say(`Video exported (${(blob.size / 1024).toFixed(0)} KB)`
         + (universal ? '' : ' — this browser could not record H.264, so it may not open everywhere.'));
@@ -3560,9 +3623,11 @@ export function mountToolbar(
       dlBtn.addEventListener('click', async () => {
         dlBtn.disabled = true;
         try {
+          const clean = await exportClean();
+          if (clean === null) return;
           await runExport(preview, (t) => {
             modalMsg.textContent = t;
-          });
+          }, clean);
         } catch (err) {
           modalMsg.textContent = i18nT('ed.sx.failed');
         } finally {
@@ -3580,12 +3645,14 @@ export function mountToolbar(
   sxExportBtn.addEventListener('click', async () => {
     sxExportBtn.disabled = true;
     try {
+      const clean = await exportClean();
+      if (clean === null) return;
       const preview = await ensureStadiumPreview();
       if (!preview) {
         sxSay('Could not start the 3D stadium preview.');
         return;
       }
-      await runExport(preview, sxSay);
+      await runExport(preview, sxSay, clean);
     } catch (err) {
       sxSay(`Export failed: ${(err as Error).message}`);
     } finally {

@@ -315,10 +315,14 @@ console.log('\n--- the two rules with no data behind them ----------------------
   const line = /'si\.note\.lighting':.*$/m.exec(i18nSrc)?.[0] ?? '';
   const AR = '٠١٢٣٤٥٦٧٨٩';
   const enNum = /right on (\d+) of our (\d+)/.exec(line);
-  // Arabic-Indic digits, read as whole runs: ٨ and ١٣ are one digit and two, and
-  // filtering character by character turns "13" into a 1 and a 3.
-  const arNums = (line.match(new RegExp(`[${AR}]+`, 'g')) ?? [])
-    .map((run) => Number([...run].map((c) => AR.indexOf(c)).join('')));
+  // The numbers in the Arabic text, read as whole runs: ٨ and ١٣ are one digit
+  // and two, and filtering character by character turns "13" into a 1 and a 3.
+  // Western digits count too: the design pass (October 2026) moved Arabic copy
+  // to them, and the hedge must still quote the measured rate in either.
+  const arabicNumbers = (l: string): number[] =>
+    ((/\bar:\s*'([^']*)'/.exec(l)?.[1] ?? '').match(new RegExp(`[0-9${AR}]+`, 'g')) ?? [])
+      .map((run) => Number([...run].map((c) => (AR.includes(c) ? AR.indexOf(c) : c)).join('')));
+  const arNums = arabicNumbers(line);
   check(!!enNum && Number(enNum[1]) === hits && Number(enNum[2]) === all.length,
     'the English hedge in the panel quotes the measured rate', line ? `says ${enNum?.[1]}/${enNum?.[2]}` : 'no string');
   check(arNums.length === 2 && arNums[0] === hits && arNums[1] === all.length,
@@ -337,8 +341,7 @@ console.log('\n--- the two rules with no data behind them ----------------------
   const tierEn = /right on (\d+) of our (\d+)/.exec(tierLine);
   check(!!tierEn && Number(tierEn[1]) === tierHits && Number(tierEn[2]) === all.length,
     'the tier hedge in the panel quotes the measured rate', tierEn ? `says ${tierEn[1]}/${tierEn[2]}` : 'no string');
-  const tierAr = (tierLine.match(new RegExp(`[${AR}]+`, 'g')) ?? [])
-    .map((run) => Number([...run].map((c) => AR.indexOf(c)).join('')));
+  const tierAr = arabicNumbers(tierLine);
   check(tierAr.length >= 2 && tierAr[0] === tierHits && tierAr[1] === all.length,
     'and so does its Arabic', tierAr.join('/'));
 

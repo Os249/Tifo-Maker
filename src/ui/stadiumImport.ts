@@ -16,7 +16,8 @@
 import { buildStadium, type FitResult } from '../core/stadiumFit';
 import { addCustomTemplate, isValidTemplate } from '../core/customStadiums';
 import { findStadiums, withGeometry, OsmError, OSM_ATTRIBUTION, type OsmStadium } from '../net/osm';
-import { readGroundPhoto } from '../net/api';
+import { fetchPro, readGroundPhoto } from '../net/api';
+import { limitBack, limitTitle } from './pro';
 import type { FactsVote } from '../core/photoFacts';
 import { t, tv } from './i18n';
 import type { FacadeStyle, LightingStyle, RoofCoverage } from '../core/types';
@@ -217,7 +218,17 @@ export function buildStadiumImport(deps: StadiumImportDeps): HTMLElement {
         parts.length ? parts.join(' · ') : t('si.photo.nothing'),
         unsure.length ? `${t('si.photo.unsure')} ${unsure.join(', ')}` : '',
       ].filter(Boolean).join(' — ');
-    } catch {
+    } catch (e) {
+      // Pro (server-counted): the week's stadium photos used. Say which, and
+      // when they come back, rather than "could not read".
+      if ((e as { status?: number }).status === 429) {
+        const st = await fetchPro(true).catch(() => null);
+        const al = st?.live ? st.allowances?.photo : undefined;
+        if (al && al.remaining <= 0) {
+          photoNote.textContent = `${limitTitle(al)}. ${limitBack(al)}`;
+          return;
+        }
+      }
       photoNote.textContent = t('si.photo.failed');
     } finally {
       photoBtn.disabled = false;

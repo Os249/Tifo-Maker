@@ -202,6 +202,7 @@ export class MemoryAiEventsRepository implements AiEventsRepository {
         super: win.filter((r) => r.mode === 'super').length,
         polish: win.filter((r) => r.mode === 'polish').length,
         photo: win.filter((r) => r.mode === 'photo').length,
+        cutout: win.filter((r) => r.mode === 'cutout').length,
       },
       meteredAccounts: 0,
       failures: [...failed.entries()]

@@ -1127,6 +1127,8 @@ export interface GalleryItem {
   titleAr?: string | null;
   ownerId: string | null;
   ownerName: string;
+  /** The owner holds a paid Pro pass (the Supporter crown). Shown only, never trusted. */
+  ownerSupporter?: boolean;
   hasThumbnail: boolean;
   likeScore: number;
   myVote: number;
@@ -1392,6 +1394,8 @@ export async function voteDesign(id: string, value: 1 | -1 | 0): Promise<{ likeS
 export interface ProfileData {
   id: string;
   username: string;
+  /** A paid Pro pass: the Supporter crown beside the name. */
+  supporter?: boolean;
   created: GalleryItem[];
   liked: GalleryItem[];
   handle?: string | null;
@@ -1545,6 +1549,8 @@ export interface CommentItem {
   designId: string;
   authorId: string;
   authorName: string;
+  /** The author holds a paid Pro pass (the Supporter crown). */
+  authorSupporter?: boolean;
   parentId: string | null;
   body: string;
   createdAt: string;
@@ -1740,6 +1746,15 @@ export interface AiQuota {
   unlimited?: boolean;
   /** Seconds until the hourly quota resets (for the "resets in …" UI). */
   resetInSec?: number;
+  /** Pro's allowances are on for this account (server/src/proPlan.ts). */
+  live?: boolean;
+  /** With live: which allowance these numbers are, its window and when it comes back. */
+  kind?: AllowanceKind;
+  period?: 'day' | 'week' | 'month';
+  resetAt?: string;
+  plan?: ProPlan;
+  /** From GET /api/ai/quota, with live: every allowance at once. */
+  allowances?: Record<AllowanceKind, Allowance>;
 }
 
 export interface AiGenerateResult {
@@ -1786,6 +1801,9 @@ export interface AiChoice {
   quota: AiQuota;
   /** Present when reason is 'busy'. */
   cause?: AiCause;
+  /** With Pro on: which allowance ran out, and on which plan. */
+  kind?: AllowanceKind;
+  plan?: ProPlan;
 }
 
 /** Error thrown by the AI calls; `status` 403 with `locked` = admin-only. */
@@ -1829,12 +1847,15 @@ export async function generateAiTifo(
     throw err;
   }
   if (data?.needsChoice) {
+    const extra = data as { kind?: unknown; plan?: unknown };
     return {
       needsChoice: true,
       reason: (data.reason ?? 'busy') as AiChoice['reason'],
       retryAfterSec: data.retryAfterSec ?? 90,
       quota: data.quota as AiQuota,
       ...(asCause(data.cause) ? { cause: asCause(data.cause) } : {}),
+      ...(isKind(extra.kind) ? { kind: extra.kind } : {}),
+      ...(isPlan(extra.plan) ? { plan: extra.plan } : {}),
     };
   }
   return data as AiGenerateResult;
@@ -1846,6 +1867,10 @@ export interface AiCritiqueResult {
   notes?: string[];
   /** Set when the critic could not run; the design came back unchanged. */
   cause?: AiCause;
+  /** 'quota' when Pro is on and the Polish allowance is used up. */
+  reason?: 'quota';
+  /** With Pro on: the Polish allowance as it now stands. */
+  quota?: AiQuota;
 }
 
 /** Phase 4b: send the current design + a low-res render to the vision critic; get an improved spec back. */
@@ -1877,4 +1902,140 @@ export async function fetchAiQuota(): Promise<AiQuota> {
     throw err;
   }
   return data as AiQuota;
+}
+
+
+// ---------------------------------------------------------------- Pro ---
+// Everything here only DISPLAYS what the server decided (server/src/pro.ts).
+// Nothing a page sends can change a plan, a limit or the gift.
+
+export type AllowanceKind = 'std' | 'super' | 'polish' | 'photo' | 'cutout';
+export type ProPlan = 'free' | 'match' | 'season' | 'gift' | 'group';
+const KINDS: readonly AllowanceKind[] = ['std', 'super', 'polish', 'photo', 'cutout'];
+const PLANS: readonly ProPlan[] = ['free', 'match', 'season', 'gift', 'group'];
+const isKind = (v: unknown): v is AllowanceKind => (KINDS as readonly unknown[]).includes(v);
+const isPlan = (v: unknown): v is ProPlan => (PLANS as readonly unknown[]).includes(v);
+
+export interface Allowance {
+  kind: AllowanceKind;
+  used: number;
+  limit: number;
+  remaining: number;
+  period: 'day' | 'week' | 'month';
+  resetAt: string;
+}
+
+export type GiftState =
+  | { state: 'none' }
+  | { state: 'offered'; claimBy: string; days: number }
+  | { state: 'active'; endsAt: string; days: number }
+  | { state: 'used'; endedAt: string | null }
+  | { state: 'expired' };
+
+export type PlanLimits = Record<AllowanceKind, { period: 'day' | 'week' | 'month'; limit: number }[]>;
+
+export interface ProOffer {
+  /** What each plan allows, from the server's settings (for the Pro page's table). */
+  limits?: { free: PlanLimits; match: PlanLimits; season: PlanLimits };
+  currency: string;
+  match: { price: number; hours: number };
+  season: { price: number; endsAt: string };
+  matchCreditDays: number;
+  gift: { days: number };
+  giftEndOffer: { price: number; hours: number };
+  group: { from: number };
+  paymentsOpen: boolean;
+}
+
+export interface ProState {
+  /** Pro is on for this visitor. False: show nothing about Pro at all. */
+  live: boolean;
+  signedIn: boolean;
+  emailVerified?: boolean;
+  plan?: ProPlan;
+  pass?: { plan: ProPlan; startsAt: string; endsAt: string } | null;
+  supporter?: boolean;
+  allowances?: Record<AllowanceKind, Allowance>;
+  gift?: GiftState;
+  notified?: boolean;
+  offer?: ProOffer;
+  now?: string;
+}
+
+const PRO_MEMO_MS = 20_000;
+let proMemo: { gen: number; at: number; p: Promise<ProState> } | null = null;
+
+/**
+ * Pro as the server sees this visitor. Kept for a few seconds per session, so
+ * the header chip, the gift card and the panel on one page ask once.
+ */
+export function fetchPro(fresh = false): Promise<ProState> {
+  if (!fresh && proMemo && proMemo.gen === tokenGen && Date.now() - proMemo.at < PRO_MEMO_MS) return proMemo.p;
+  const p = fetch(`${API}/pro`, { headers: authHeaders(false) })
+    .then(async (r) => (r.ok ? ((await r.json()) as ProState) : { live: false, signedIn: isSignedIn() }))
+    .catch(() => ({ live: false, signedIn: isSignedIn() }) as ProState);
+  proMemo = { gen: tokenGen, at: Date.now(), p };
+  return p;
+}
+
+/** Something about this account's Pro changed (the gift was accepted, say). */
+export function forgetPro(): void {
+  proMemo = null;
+  if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('tifo:pro'));
+}
+
+export async function acceptProGift(): Promise<{ ok: true; endsAt: string } | { ok: false; reason: string; status: number }> {
+  try {
+    const res = await fetch(`${API}/pro/gift/accept`, { method: 'POST', headers: authHeaders(true), body: '{}' });
+    const data = (await res.json().catch(() => null)) as { endsAt?: string; reason?: string } | null;
+    forgetPro();
+    if (res.ok && data?.endsAt) return { ok: true, endsAt: data.endsAt };
+    return { ok: false, reason: data?.reason ?? 'failed', status: res.status };
+  } catch {
+    return { ok: false, reason: 'offline', status: 0 };
+  }
+}
+
+/** "Tell me when Pro opens". True when it is recorded (now or before). */
+export async function notifyPro(): Promise<boolean> {
+  try {
+    const res = await fetch(`${API}/pro/notify`, { method: 'POST', headers: authHeaders(true), body: '{}' });
+    if (res.ok) forgetPro();
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+export interface CutoutError extends Error {
+  status: number;
+  reason: 'quota' | 'refused' | 'busy' | 'unavailable' | 'signin' | 'verify' | 'failed';
+  quota?: AiQuota;
+}
+
+/**
+ * Smart cut-out: send a picture (PNG or JPEG data URL, at most 1,536 px), get
+ * a transparent PNG back. The server checks and counts everything; this only
+ * carries the answer.
+ */
+export async function smartCutout(image: string, signal?: AbortSignal): Promise<{ image: string; quota: AiQuota | null }> {
+  const res = await fetch(`${API}/ai/cutout`, { method: 'POST', headers: aiHeaders(true), body: JSON.stringify({ image }), signal });
+  const data = (await res.json().catch(() => null)) as { image?: string; quota?: AiQuota | null; reason?: string; error?: string } | null;
+  if (res.ok && data?.image && /^data:image\/png;base64,/.test(data.image)) {
+    forgetPro();
+    return { image: data.image, quota: data.quota ?? null };
+  }
+  const err = new Error(data?.error ?? `cut-out failed (${res.status})`) as CutoutError;
+  err.status = res.status;
+  const r = data?.reason;
+  err.reason =
+    r === 'quota' ? 'quota'
+      : r === 'refused' ? 'refused'
+        : r === 'unavailable' ? 'unavailable'
+          : r === 'signin' || res.status === 401 ? 'signin'
+            : r === 'verify' ? 'verify'
+              : r === 'busy' ? 'busy'
+                : 'failed';
+  if (data?.quota) err.quota = data.quota;
+  throw err;
 }

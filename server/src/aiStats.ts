@@ -8,10 +8,10 @@
  */
 import type { AiCostStats, AiMode, AiModeOutcomes, AiOutcome } from './repo';
 
-export const AI_MODES: AiMode[] = ['std', 'super', 'polish', 'photo'];
+export const AI_MODES: AiMode[] = ['std', 'super', 'polish', 'photo', 'cutout'];
 export const AI_OUTCOMES: AiOutcome[] = ['model', 'cache', 'quick', 'quota', 'busy', 'blocked', 'invalid'];
 
-/** Modes whose 'model' outcome is a DESIGN (polish and photo are not). */
+/** Modes whose 'model' outcome is a DESIGN (polish, photo and cutout are not). */
 export const DESIGN_MODES: AiMode[] = ['std', 'super'];
 
 export const zeroCounts = (): AiModeOutcomes => ({ model: 0, cache: 0, quick: 0, quota: 0, busy: 0, blocked: 0, invalid: 0, all: 0, limited: 0 });
@@ -50,7 +50,7 @@ export interface AiGroup {
 }
 
 export function modeOutcomes(groups: AiGroup[]): Record<AiMode, AiModeOutcomes> {
-  const out = { std: zeroCounts(), super: zeroCounts(), polish: zeroCounts(), photo: zeroCounts() } as Record<AiMode, AiModeOutcomes>;
+  const out = { std: zeroCounts(), super: zeroCounts(), polish: zeroCounts(), photo: zeroCounts(), cutout: zeroCounts() } as Record<AiMode, AiModeOutcomes>;
   for (const g of groups) {
     const c = out[g.mode];
     if (!c || !(AI_OUTCOMES as string[]).includes(g.outcome)) continue;

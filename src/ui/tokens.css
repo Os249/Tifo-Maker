@@ -62,6 +62,22 @@
   --flare: #D9F000;
   --on-flare: #0B1424;
 
+  /* Pro: the gold crown on everything Pro (docs/DESIGN.md, Pro). Its own
+     colour, so it is never mistaken for the blue (the one next step) or the
+     floodlight yellow ("new"). Words in gold are --gold-400 on dark grounds
+     (9.4:1 on night-800) and --gold-700 on light ones (6:1 on day-50); the
+     crown beside them is decoration (the word says it), so it may be lighter. */
+  --gold-400: #F5B43C;
+  --gold-500: #D9961F;
+  --gold-700: #8A5300;
+  --gold-tint-dark: rgba(245, 180, 60, 0.14);
+  --gold-line-dark: rgba(245, 180, 60, 0.42);
+  --gold-tint-light: rgba(245, 180, 60, 0.18);
+  --gold-line-light: rgba(138, 83, 0, 0.32);
+  /* Words printed on the blue (4.8:1), and the dim layer behind a sheet. */
+  --on-blue: #FFFFFF;
+  --scrim: rgba(7, 11, 20, 0.62);
+
   /* Semantic. -600 for text on light, -400 for text on dark. */
   --green-600: #0E7C46;
   --green-400: #3FC77F;

@@ -34,6 +34,8 @@ import {
   fetchThumbnailObjectUrl, takeClaimIntent, type AccountProject,
 } from './net/api';
 import { claimAllLocal } from './net/claimProjects';
+import { mountProChip } from './ui/pro';
+import { mountGiftCard } from './ui/proCards';
 
 // ---------------------------------------------------------------- types ---
 
@@ -843,6 +845,10 @@ void (async () => {
   history.replaceState(null, '', `${location.pathname}${rest ? `?${rest}` : ''}`);
 
   await refreshAuth();
+  // Pro: the countdown beside the account, and the gift card under the
+  // heading. Both stay hidden unless /api/pro has something to say.
+  if (authBtn.parentElement) mountProChip(authBtn.parentElement, authBtn);
+  mountGiftCard(where.parentElement ?? document.body, controls);
   await load();
 
   if (verified === '1') toast(t('verify.ok'));

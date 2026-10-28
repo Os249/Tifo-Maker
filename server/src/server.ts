@@ -5,6 +5,7 @@ import pg from 'pg';
 import { shippedTemplateInfo } from './templates';
 import { MemoryAiBudgetRepository, MemoryAiEventsRepository, MemoryAiUsageRepository, MemoryAuthRepository, MemoryDesignRepository, MemoryEventsRepository, MemoryLeadsRepository } from './memoryRepo';
 import { PgAiBudgetRepository, PgAiEventsRepository, PgAiUsageRepository, PgAuthRepository, PgDesignRepository, PgEventsRepository, PgLeadsRepository } from './pgRepo';
+import { MemoryProRepository, PgProRepository } from './proRepo';
 import { PgSocialRepository } from './pgSocial';
 import { MemorySocialRepository } from './memorySocial';
 import { MemoryStadiumRepository, PgStadiumRepository } from './stadiumRepo';
@@ -196,6 +197,16 @@ async function main(): Promise<void> {
     };
     afterListen.push(pruneEvents);
     setInterval(() => void pruneEvents(), 24 * 60 * 60 * 1000).unref();
+    // Pro's allowance counters: a row is a week's or a month's count, so one
+    // untouched for 45 days is history nobody reads.
+    const proRepo = new PgProRepository(pool);
+    const pruneAllowances = (): Promise<unknown> =>
+      proRepo.purgeAllowances(new Date(Date.now() - 45 * 24 * 60 * 60 * 1000)).then(
+        (n) => { if (n) console.log(`[tifo] retention: Pro allowance counters: ${n} removed`); },
+        (e) => console.error('[tifo] Pro allowance purge failed:', e),
+      );
+    afterListen.push(pruneAllowances);
+    setInterval(() => void pruneAllowances(), 24 * 60 * 60 * 1000).unref();
     const pgDesigns = new PgDesignRepository(pool, maint);
     // The stored content hashes decide the thumbnail 304 and the anonymous
     // scene's kept strip (P2.4, P2.5). They are trusted only while the
@@ -242,6 +253,7 @@ async function main(): Promise<void> {
       aiEvents: new PgAiEventsRepository(pool, maint),
       aiBudget: new PgAiBudgetRepository(pool),
       aiFreeLimit: envNum('AI_FREE_LIMIT', 10, 0), // premium designs per hour
+      pro: proRepo,
       stadiums,
       stats: new PgAdminStatsRepository(maint), // the dashboard's aggregates, admin only
       traffic,
@@ -281,6 +293,7 @@ async function main(): Promise<void> {
       aiEvents: new MemoryAiEventsRepository((id) => auth.usernameOf(id)),
       aiBudget: new MemoryAiBudgetRepository(),
       aiFreeLimit: envNum('AI_FREE_LIMIT', 10, 0), // premium designs per hour
+      pro: new MemoryProRepository(),
       stadiums: new MemoryStadiumRepository(),
       stats: new MemoryAdminStatsRepository(designs),
       traffic: (visitBuffer = new BatchedTrafficRepository(new MemoryTrafficRepository()).start()),

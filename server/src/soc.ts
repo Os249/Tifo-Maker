@@ -656,6 +656,16 @@ const ADMIN_ACTIONS: Record<string, (req: FastifyRequest) => { action: string; t
     detail: { to: maskEmail((req.body as { to?: unknown } | null)?.to) },
   }),
   'POST /api/admin/soc/test-alert': () => ({ action: 'sent a test security alert', target: null, detail: null }),
+  'POST /api/admin/pro/grant': (req) => {
+    const b = (req.body as { plan?: unknown; days?: unknown } | null) ?? {};
+    const plan = typeof b.plan === 'string' ? b.plan.slice(0, 12) : '?';
+    const days = typeof b.days === 'number' || typeof b.days === 'string' ? ` for ${String(b.days).slice(0, 4)} days` : '';
+    return { action: `granted a Pro ${plan} pass${days}`, target: bodyName(req), detail: null };
+  },
+  'POST /api/admin/pro/revoke': (req) => {
+    const id = (req.body as { passId?: unknown } | null)?.passId;
+    return { action: 'revoked a Pro pass', target: typeof id === 'string' ? id.slice(0, 36) : null, detail: null };
+  },
 };
 
 function bodyName(req: FastifyRequest): string | null {

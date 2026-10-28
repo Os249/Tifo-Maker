@@ -28,7 +28,11 @@ import { critiqueDesign, repairSpec } from '../core/critique';
 import { designShuffle } from '../core/promptDesigner';
 import { describeActiveArea } from '../core/activeArea';
 import { generateAiTifo, critiqueAiTifo, fetchAiQuota, unlockAi, aiUnlockToken, type AiError, type AiQuota, type AiChoice, type AiCause } from '../net/api';
-import { isSignedIn, fetchMe, resendVerification } from '../net/api';
+import { isSignedIn, fetchMe, resendVerification, fetchPro, type Allowance, type AllowanceKind, type ProPlan, type ProState } from '../net/api';
+import { track } from '../net/analytics';
+import { allowanceLine, limitBack, limitTitle, proChipHtml } from './pro';
+/** The sheets load the first time one opens (ui/proSheets.ts). */
+const sheets = () => import('./proSheets');
 import { openAuthModal } from './authModal';
 import { openAddEmailModal } from './openAddEmailModal';
 
@@ -264,12 +268,64 @@ export function mountAiPanel(deps: AiPanelDeps): AiPanelHandle {
     else clearCard();
   };
   const resetMins = (q: AiQuota): number => Math.max(1, Math.ceil((q.resetInSec ?? 0) / 60));
-  const quotaText = (q: AiQuota): string =>
-    q.unlimited || q.admin
-      ? 'AI Designer: unlimited'
-      : q.remaining > 0
-        ? `${q.remaining} of ${q.limit} premium designs left this hour`
-        : `Hourly limit reached: resets in ${resetMins(q)} min`;
+
+  // ---- Pro (server/src/proPlan.ts): allowances instead of the hourly meter --
+  // Only ever SHOWS what the server said. With Pro off for this account the
+  // quota has no `live` and every line below is the one it always was.
+  let proLive = false;
+  let proPlan: ProPlan | undefined;
+  const allowances: Partial<Record<AllowanceKind, Allowance>> = {};
+  /** The account's Pro (the gift, the offer), fetched once Pro is known to be on. */
+  let proState: ProState | null = null;
+  const loadPro = async (): Promise<ProState | null> => {
+    proState = await fetchPro().catch(() => null);
+    return proState;
+  };
+  const allowanceOf = (q: AiQuota): Allowance | null =>
+    q.kind && q.period && q.resetAt
+      ? { kind: q.kind, used: q.used, limit: q.limit, remaining: q.remaining, period: q.period, resetAt: q.resetAt }
+      : null;
+  /** The allowance the Generate button would spend right now. */
+  const genKind = (): AllowanceKind => (wholeChk?.checked ? 'super' : 'std');
+  const learn = (q: AiQuota | null | undefined): void => {
+    if (!q?.live) return;
+    proLive = true;
+    proPlan = q.plan ?? proPlan;
+    if (q.allowances) Object.assign(allowances, q.allowances);
+    const one = allowanceOf(q);
+    if (one) allowances[one.kind] = one;
+  };
+  const quotaText = (q: AiQuota): string => {
+    if (q.unlimited || q.admin) return t('pro.q.unlimited');
+    const al = proLive ? allowances[genKind()] : undefined;
+    if (al) return allowanceLine(al, proPlan);
+    return q.remaining > 0 ? tv('ai.q.left', { n: q.remaining, limit: q.limit }) : tv('ai.q.reset', { mins: resetMins(q) });
+  };
+  /** "2 left" beside Whole stadium; the crown once a free account's Super designs are used. */
+  const wholeLeft = document.createElement('span');
+  wholeLeft.className = 'ai-whole-left';
+  wholeLeft.hidden = true;
+  wholeChk?.closest('label')?.appendChild(wholeLeft);
+  const paintPro = (): void => {
+    const sup = allowances.super;
+    if (!proLive || !sup) {
+      wholeLeft.hidden = true;
+    } else {
+      wholeLeft.hidden = false;
+      const out = sup.remaining <= 0 && (!proPlan || proPlan === 'free');
+      wholeLeft.innerHTML = out ? proChipHtml() : '';
+      if (!out) wholeLeft.textContent = tv('pro.left', { n: sup.remaining });
+      wholeLeft.title = allowanceLine(sup, proPlan);
+    }
+    const pol = allowances.polish;
+    if (polishBtn) {
+      polishBtn.querySelector('.pro-chip')?.remove();
+      if (proLive && pol) {
+        polishBtn.title = allowanceLine(pol, proPlan);
+        if (pol.remaining <= 0 && (!proPlan || proPlan === 'free')) polishBtn.insertAdjacentHTML('beforeend', ' ' + proChipHtml());
+      }
+    }
+  };
   /** Signed out, the main button says what pressing it does. */
   function syncGenLabel(): void {
     if (!genLabel) return;
@@ -277,14 +333,86 @@ export function mountAiPanel(deps: AiPanelDeps): AiPanelHandle {
     genLabel.textContent = t(out ? 'ed.ai.signupToUse' : 'ed.ai.generate');
     genBtn!.classList.toggle('ai-signup', out);
   }
+  let lastQuota: AiQuota | null = null;
   const setQuota = (q: AiQuota | null): void => {
     syncGenLabel();
+    learn(q);
+    if (q) lastQuota = q;
+    paintPro();
     if (!quotaEl) return;
     quotaEl.textContent = q ? quotaText(q) : isSignedIn() ? '' : t('err.aiSignIn');
-    // Warn before the wall rather than at it.
-    const level = !q || q.unlimited || q.admin ? '' : q.remaining <= 0 ? 'none' : q.remaining <= 2 ? 'low' : '';
+    // Warn before the wall rather than at it: the last one of a weekly three
+    // is as much a warning as two of an hourly ten.
+    const al = proLive ? allowances[genKind()] : undefined;
+    const left = al ? al.remaining : q?.remaining ?? 0;
+    const low = al ? left === 1 || (al.limit >= 10 && left <= 2) : left <= 2;
+    const level = !q || q.unlimited || q.admin ? '' : left <= 0 ? 'none' : low ? 'low' : '';
     if (level) quotaEl.dataset.level = level;
     else delete quotaEl.dataset.level;
+  };
+  // Ticking Whole stadium changes which allowance Generate spends.
+  wholeChk?.addEventListener('change', () => { if (lastQuota) setQuota(lastQuota); });
+  // Pro changed elsewhere on the page (the gift started from the header, a
+  // cut-out spent): the counts are the server's again.
+  window.addEventListener('tifo:pro', () => {
+    if (!proLive) return;
+    fetchAiQuota().then(setQuota).catch(() => {});
+    void loadPro();
+  });
+
+  /**
+   * An allowance is used up. For a free account: when it comes back, and the
+   * one way on (the gift when there is one, otherwise what Pro adds), with the
+   * free alternative beside it. For a pass at its ceiling: when it comes back
+   * and the free alternative, and no selling.
+   */
+  const showLimit = (kind: AllowanceKind, q: AiQuota, alternatives: CardAction[]): void => {
+    learn(q);
+    paintPro();
+    const al = allowanceOf(q) ?? allowances[kind];
+    if (!al) return;
+    const free = !q.plan || q.plan === 'free';
+    track('pro_limit');
+    const title = limitTitle(al);
+    const back = limitBack(al);
+    if (!free) {
+      showCard({
+        tone: 'warn',
+        title,
+        body: `${back} ${t('pro.limit.ceiling')}`,
+        actions: alternatives.map((a, i) => ({ ...a, primary: i === 0 })),
+      });
+      stateEl?.scrollIntoView({ block: 'nearest' });
+      return;
+    }
+    const render = (st: ProState | null): void => {
+      const gift = st?.gift?.state === 'offered' ? st.gift : null;
+      const way: CardAction = gift
+        ? {
+            label: t('pro.act.useGift'),
+            primary: true,
+            run: () => {
+              void sheets().then((m) => m.openGiftSheet(st)).then((ok) => {
+                if (!ok) return;
+                clearCard();
+                // The gift's allowances, straight away.
+                fetchAiQuota().then(setQuota).catch(() => {});
+                void loadPro();
+              });
+            },
+          }
+        : { label: t('pro.limit.seePro'), primary: true, run: () => { if (st) void sheets().then((m) => m.openProSheet(st)); } };
+      showCard({
+        tone: 'warn',
+        title,
+        body: `${back} ${gift ? tv('pro.limit.gift', { n: gift.days }) : t('pro.limit.withPro')}`,
+        actions: [way, ...alternatives.map((a) => ({ ...a, primary: false }))],
+      });
+    };
+    render(proState);
+    // On a phone the card lands under the fold of the AI sheet: bring it up.
+    stateEl?.scrollIntoView({ block: 'nearest' });
+    if (!proState) void loadPro().then((st) => { if (st) render(st); });
   };
 
   // ---- admin lock (Phase 1 of the AI rebuild): gate the panel behind unlock ----
@@ -332,6 +460,26 @@ export function mountAiPanel(deps: AiPanelDeps): AiPanelHandle {
       run: () => { clearCard(); void run(prompt, { super: useSuper }); },
     };
     const cap = choice.reason === 'quota';
+    if (cap && choice.kind && choice.quota?.live) {
+      // One quiet alternative (docs/DESIGN.md, cards that carry news): Super
+      // used up with standard designs left, the nearest thing is a standard
+      // design; otherwise the Quick Designer, which is free and unlimited.
+      const std = allowances.std;
+      const alts: CardAction[] =
+        choice.kind === 'super' && std && std.remaining > 0
+          ? [{
+              label: t('pro.act.useStd'),
+              run: () => {
+                clearCard();
+                if (wholeChk) wholeChk.checked = false;
+                if (lastQuota) setQuota(lastQuota);
+                void run(prompt, { super: false });
+              },
+            }]
+          : [quick];
+      showLimit(choice.kind, choice.quota, alts);
+      return;
+    }
     const mins = Math.max(1, Math.ceil((choice.retryAfterSec ?? 0) / 60));
     showCard(
       cap
@@ -749,6 +897,13 @@ export function mountAiPanel(deps: AiPanelDeps): AiPanelHandle {
       const res = await critiqueAiTifo(spec, captureRender(), lastStadium);
       const bar = document.getElementById('message');
       stopProgress();
+      if (res.quota) setQuota(res.quota);
+      if (res.reason === 'quota' && res.quota) {
+        // The design is untouched; Polish comes back when its week does.
+        showLimit('polish', res.quota, [{ label: t('ai.card.keep'), run: clearCard }]);
+        if (bar) bar.textContent = '';
+        return;
+      }
       if (res.cause) {
         // The critic could not run. The design is exactly as it was, so there
         // is nothing to apply — say why, in words, and leave it.
@@ -850,7 +1005,11 @@ export function mountAiPanel(deps: AiPanelDeps): AiPanelHandle {
   // else gets the lock. The server is the real gate — this is UX only.
   setQuota(null);
   fetchAiQuota()
-    .then((q) => { setLocked(false); setQuota(q); })
+    .then((q) => {
+      setLocked(false);
+      setQuota(q);
+      if (q.live) void loadPro();
+    })
     .catch((e) => {
       const err = e as AiError;
       // Don't show the admin-unlock box for ordinary "sign in / verify" denials.

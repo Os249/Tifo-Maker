@@ -1,0 +1,241 @@
+/*
+ * Pro: the crown, the sheets, the gift card and the countdown chip.
+ *
+ * The same pieces appear in the editor (dark, floodlight.css roles) and on the
+ * public pages (light or dark, colorScheme.css roles), so every colour here is
+ * the editor's role first and the public page's second: whichever the page
+ * defines is used. The gold itself is --pro-* in both (tokens.css).
+ *
+ * The rules (docs/DESIGN.md, Pro):
+ *  - one mark: a gold crown, with "Pro" / "مميّز" beside it where there is room;
+ *  - gold is never the blue: the one next step on a screen stays blue;
+ *  - a crown is shown where the thing is picked, never first at export.
+ */
+
+:root {
+  --pro-surface: var(--ink-1, var(--card));
+  --pro-surface-2: var(--ink-2, var(--raise-2));
+  --pro-text: var(--text-1, var(--ink));
+  --pro-muted: var(--text-2, var(--muted));
+  --pro-hairline: var(--line-1, var(--line));
+}
+
+/* ---- the crown ---- */
+.pro-crown { width: 1em; height: 1em; flex: 0 0 auto; fill: currentColor; vertical-align: -0.125em; }
+
+/* ---- the chip: crown + word, or the crown alone on a small thumbnail ---- */
+.pro-chip {
+  display: inline-flex; align-items: center; gap: var(--sp-1);
+  padding: 1px 7px 1px 6px; border-radius: var(--r-pill);
+  font-size: var(--fs-2xs); font-weight: 700; line-height: 1.5; letter-spacing: 0.01em; white-space: nowrap;
+  color: var(--pro-ink); background: var(--pro-tint); border: 1px solid var(--pro-line);
+  vertical-align: middle;
+}
+.pro-chip .pro-crown { color: var(--pro-crown); font-size: 1.15em; }
+.pro-chip.icon { padding: 2px 5px; }
+/* Pro holders still see what is Pro, quietly: the chip without its tint. */
+.pro-chip.quiet { background: transparent; border-color: transparent; opacity: 0.85; }
+[dir="rtl"] .pro-chip { letter-spacing: 0; }
+
+/* ---- a gold-tinted button: a Pro action that is not the screen's one step ---- */
+.pro-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: var(--sp-2);
+  min-height: 40px; padding: var(--sp-2) var(--sp-4); border-radius: var(--r-pill);
+  font: inherit; font-size: var(--fs-md); font-weight: 700; cursor: pointer;
+  color: var(--pro-ink); background: var(--pro-tint); border: 1px solid var(--pro-line);
+  transition: background-color var(--duration-quick) var(--ease-smooth-out), transform var(--duration-quick) var(--ease-smooth-out);
+}
+.pro-btn:hover { background: var(--pro-line); }
+.pro-btn:active { transform: translateY(1px); }
+.pro-btn .pro-crown { color: var(--pro-crown); font-size: 1.1em; }
+.pro-btn:focus-visible, .pro-primary:focus-visible, .pro-text-btn:focus-visible, .pro-head-chip:focus-visible {
+  outline: 2px solid var(--blue-500); outline-offset: 2px;
+}
+@media (pointer: coarse) { .pro-btn, .pro-primary, .pro-text-btn { min-height: 44px; } }
+
+/* The free way on inside a Pro sheet ("Export without Pro items"): not Pro, so not gold. */
+.pro-alt {
+  display: inline-flex; align-items: center; justify-content: center; gap: var(--sp-2);
+  min-height: 40px; padding: var(--sp-2) var(--sp-4); border-radius: var(--r-pill);
+  font: inherit; font-size: var(--fs-md); font-weight: 700; cursor: pointer;
+  color: var(--pro-text); background: transparent; border: 1px solid var(--pro-hairline);
+  transition: background-color var(--duration-quick) var(--ease-smooth-out);
+}
+.pro-alt:hover { background: var(--pro-surface-2); }
+.pro-alt:focus-visible { outline: 2px solid var(--blue-500); outline-offset: 2px; }
+@media (pointer: coarse) { .pro-alt { min-height: 44px; } }
+
+/* The one next step inside a Pro sheet: blue, like every other next step. */
+.pro-primary {
+  display: inline-flex; align-items: center; justify-content: center; gap: var(--sp-2);
+  min-height: 40px; padding: var(--sp-2) var(--sp-5); border: none; border-radius: var(--r-pill);
+  font: inherit; font-size: var(--fs-md); font-weight: 700; cursor: pointer;
+  color: var(--on-blue); background: var(--blue-600);
+  transition: background-color var(--duration-quick) var(--ease-smooth-out);
+}
+.pro-primary:hover { background: var(--blue-700); }
+.pro-primary:disabled { opacity: 0.6; cursor: default; }
+.pro-text-btn {
+  display: inline-flex; align-items: center; min-height: 32px; padding: var(--sp-1) var(--sp-2);
+  border: none; background: none; font: inherit; font-size: var(--fs-sm); font-weight: 600; cursor: pointer;
+  color: var(--pro-muted); text-decoration: underline; text-underline-offset: 3px;
+}
+.pro-text-btn:hover { color: var(--pro-text); }
+
+/* ---- the strip: "Free to try here. Export needs Pro or a gift." ---- */
+.pro-strip {
+  display: flex; align-items: flex-start; gap: var(--sp-2);
+  margin: var(--sp-2) 0 0; padding: var(--sp-2) var(--sp-3); border-radius: var(--r-sm);
+  font-size: var(--fs-xs); line-height: 1.45; color: var(--pro-text);
+  background: var(--pro-tint); border: 1px solid var(--pro-line);
+}
+.pro-strip .pro-crown { color: var(--pro-crown); margin-top: 2px; }
+.pro-strip b { color: var(--pro-ink); }
+
+/* ---- the sheet: the gift, the export choice, what Pro adds ---- */
+.pro-sheet-backdrop {
+  position: fixed; inset: 0; z-index: var(--z-overlay);
+  display: grid; place-items: center; padding: var(--sp-6);
+  padding-bottom: calc(var(--sp-6) + var(--consent-h, 0px));
+  background: var(--scrim); backdrop-filter: blur(4px);
+  animation: pro-fade var(--duration-fast) var(--ease-smooth-out) both;
+}
+.pro-sheet {
+  position: relative; width: min(440px, 100%); max-height: calc(100dvh - 48px); overflow-y: auto;
+  padding: var(--sp-6); border-radius: var(--r-lg);
+  color: var(--pro-text); background: var(--pro-surface); border: 1px solid var(--pro-hairline);
+  box-shadow: var(--shadow-pop, var(--shadow-lg));
+  animation: pro-rise var(--duration-slow) var(--ease-smooth-out) both;
+}
+.pro-sheet-backdrop.closing { animation: pro-fade-out var(--duration-quick) var(--ease-smooth-out) both; }
+.pro-sheet-backdrop.closing .pro-sheet { animation: pro-sink var(--duration-quick) var(--ease-smooth-out) both; }
+@keyframes pro-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes pro-fade-out { from { opacity: 1; } to { opacity: 0; } }
+@keyframes pro-rise { from { opacity: 0; transform: translateY(var(--distance-medium)); } to { opacity: 1; transform: none; } }
+@keyframes pro-sink { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateY(var(--distance-base)); } }
+.pro-sheet-close {
+  position: absolute; top: var(--sp-3); inset-inline-end: var(--sp-3);
+  width: 36px; height: 36px; display: grid; place-items: center; padding: 0;
+  border: none; border-radius: var(--r-pill); background: transparent; color: var(--pro-muted);
+  font-size: var(--fs-xl); line-height: 1; cursor: pointer;
+}
+.pro-sheet-close:hover { background: var(--pro-surface-2); color: var(--pro-text); }
+.pro-sheet-close:focus-visible { outline: 2px solid var(--blue-500); outline-offset: 2px; }
+@media (pointer: coarse) { .pro-sheet-close { width: 44px; height: 44px; } }
+.pro-sheet-mark {
+  display: inline-grid; place-items: center; width: 44px; height: 44px; margin-bottom: var(--sp-3);
+  border-radius: var(--r-md); background: var(--pro-tint); border: 1px solid var(--pro-line); color: var(--pro-crown);
+  font-size: var(--fs-xl);
+}
+.pro-sheet h2 {
+  margin: 0 0 var(--sp-2); padding-inline-end: var(--sp-8);
+  font-family: var(--font-display); font-size: var(--fs-xl); font-weight: 700; line-height: 1.25; text-wrap: balance;
+}
+.pro-sheet p { margin: 0 0 var(--sp-3); font-size: var(--fs-md); line-height: 1.55; color: var(--pro-muted); }
+.pro-sheet .pro-when { color: var(--pro-text); font-weight: 600; font-variant-numeric: tabular-nums; }
+.pro-perks { list-style: none; margin: 0 0 var(--sp-4); padding: 0; display: grid; gap: var(--sp-2); }
+.pro-perks li { display: flex; align-items: flex-start; gap: var(--sp-2); font-size: var(--fs-md); line-height: 1.45; color: var(--pro-text); }
+.pro-perks .pro-crown { color: var(--pro-crown); margin-top: 3px; }
+.pro-items { list-style: none; margin: 0 0 var(--sp-4); padding: var(--sp-3); display: grid; gap: var(--sp-2); border-radius: var(--r-md); background: var(--pro-surface-2); }
+.pro-items li { display: flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-sm); color: var(--pro-text); }
+.pro-items .pro-crown { color: var(--pro-crown); }
+.pro-actions { display: flex; flex-direction: column; align-items: stretch; gap: var(--sp-2); margin-top: var(--sp-4); }
+.pro-actions .pro-text-btn { align-self: center; }
+.pro-note { margin: var(--sp-3) 0 0 !important; font-size: var(--fs-xs) !important; text-align: center; color: var(--pro-muted); }
+@media (max-width: 600px) {
+  .pro-sheet-backdrop { place-items: end stretch; padding: 0; padding-bottom: var(--consent-h, 0px); }
+  .pro-sheet { width: 100%; border-radius: var(--r-lg) var(--r-lg) 0 0; padding: var(--sp-6) var(--sp-5) calc(var(--sp-6) + env(safe-area-inset-bottom, 0px)); }
+}
+
+/* ---- the header chip: "Pro · 5 days left" ---- */
+.pro-head-chip {
+  display: inline-flex; align-items: center; gap: var(--sp-1);
+  min-height: 32px; padding: 2px var(--sp-3) 2px var(--sp-2); border-radius: var(--r-pill);
+  font-size: var(--fs-xs); font-weight: 700; white-space: nowrap; text-decoration: none; font-variant-numeric: tabular-nums;
+  color: var(--pro-ink); background: var(--pro-tint); border: 1px solid var(--pro-line);
+}
+.pro-head-chip .pro-crown { color: var(--pro-crown); font-size: 1.15em; }
+.pro-head-chip:hover { background: var(--pro-line); }
+/* [hidden] wins over the header's own "a { display: inline-flex }". */
+.pro-head-chip[hidden] { display: none !important; }
+/* In the public pages' header the links' type and fade must not reach it. */
+.nav-links > a.pro-head-chip { min-height: 36px; font-size: var(--fs-xs); font-weight: 700; opacity: 1; color: var(--pro-ink); margin-inline: var(--sp-2); }
+.nav-links > a.pro-head-chip:hover { color: var(--pro-ink); }
+[dir="rtl"] .pro-head-chip { padding: 2px var(--sp-2) 2px var(--sp-3); }
+
+/* ---- the gift card (projects): the news, one gold action, one quiet one ---- */
+.pro-card {
+  display: grid; grid-template-columns: auto 1fr; gap: var(--sp-3) var(--sp-4); align-items: start;
+  margin: var(--sp-5) 0 0; padding: var(--sp-5); border-radius: var(--r-lg);
+  background: var(--pro-tint); border: 1px solid var(--pro-line); color: var(--pro-text);
+}
+.pro-card[hidden] { display: none; }
+.pro-card .pro-sheet-mark { margin: 0; background: var(--pro-surface); }
+.pro-card h2 { margin: 0 0 var(--sp-1); font-family: var(--font-display); font-size: var(--fs-lg); font-weight: 700; line-height: 1.3; }
+.pro-card p { margin: 0; font-size: var(--fs-md); line-height: 1.55; color: var(--pro-muted); max-width: 62ch; }
+.pro-card-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3); margin-top: var(--sp-3); }
+.pro-card .pro-btn { background: var(--pro-surface); }
+.pro-card .pro-btn:hover { background: var(--pro-surface-2); }
+@media (max-width: 600px) { .pro-card { grid-template-columns: 1fr; padding: var(--sp-4); } }
+
+/* ---- the Supporter crown beside a name ---- */
+.supporter-crown {
+  display: inline-flex; align-items: center; margin-inline-start: var(--sp-1);
+  color: var(--pro-crown); font-size: 0.95em; vertical-align: -0.1em;
+}
+.supporter-crown .pro-crown { width: 1.05em; height: 1.05em; }
+
+.pro-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+/* ---- the AI panel: what is left beside "Whole stadium" ---- */
+.ai-whole-left {
+  margin-inline-start: auto; align-self: center; flex: none; padding-inline-start: var(--sp-2);
+  font-size: var(--fs-2xs); font-weight: 600; white-space: nowrap; font-variant-numeric: tabular-nums;
+  color: var(--pro-muted);
+}
+.ai-whole-left[hidden] { display: none; }
+#ai-polish .pro-chip { margin-inline-start: var(--sp-1); }
+
+/* ---- smart cut-out in the picture-import bar ---- */
+.cut-field[hidden] { display: none; }
+.pro-btn.cut-btn { min-height: 32px; padding: var(--sp-1) var(--sp-3); font-size: var(--fs-sm); white-space: nowrap; }
+.pro-btn.cut-btn:disabled { opacity: 0.75; cursor: progress; }
+/* "Use the original": undoing is not a Pro action, so it drops the gold. */
+.pro-btn.cut-btn.undo { color: var(--pro-text); background: transparent; border-color: var(--pro-hairline); }
+.pro-btn.cut-btn.undo:hover { background: var(--pro-surface-2); }
+.cut-spin {
+  width: 0.95em; height: 0.95em; border-radius: 50%; flex: none;
+  border: 2px solid var(--pro-line); border-top-color: var(--pro-crown);
+  animation: cut-spin var(--duration-very-slow) linear infinite;
+}
+@keyframes cut-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .cut-spin { animation: none; } }
+@media (pointer: coarse) { .pro-btn.cut-btn { min-height: 44px; } }
+
+/* ---- a Pro option in a list of options (the stadium video's mark) ---- */
+.pro-option { display: flex !important; flex-wrap: nowrap; align-items: center; gap: var(--sp-2); margin-top: var(--sp-2); cursor: pointer; }
+.pro-option[hidden] { display: none !important; }
+.pro-option > input { flex: none; margin: 0; }
+.pro-option > span:not(.pro-chip) { flex: 0 1 auto; min-width: 0; }
+.pro-option .pro-chip { flex: none; }
+
+/* ---- the header chip on a phone: the crown alone, the words still spoken ---- */
+@media (max-width: 899px) {
+  body.m-shell .pro-head-chip { min-width: 40px; min-height: 40px; justify-content: center; padding: 0; }
+  body.m-shell .pro-head-chip span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  body.m-shell .pro-head-chip .pro-crown { font-size: var(--fs-lg); }
+}
+
+/* ---- "Your plan" on the account page ---- */
+.pro-ac .ac-row .pro-chip { font-size: var(--fs-2xs); }
+.pro-ac .pro-strip { margin: 0 0 var(--sp-3); font-size: var(--fs-sm); }
+.pro-ac-btn { margin-bottom: var(--sp-4); }
+.pro-ac-h { margin: var(--sp-2) 0 var(--sp-2); font-size: var(--fs-sm); font-weight: 700; color: var(--pro-muted); }
+.pro-meters { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sp-3); }
+.pro-meter { display: grid; gap: var(--sp-1); }
+.pro-meter-text { font-size: var(--fs-sm); color: var(--pro-text); font-variant-numeric: tabular-nums; }
+.pro-meter-bar { position: relative; display: block; height: 6px; border-radius: var(--r-pill); background: var(--pro-surface-2); overflow: hidden; }
+.pro-meter-bar > span { position: absolute; inset-block: 0; inset-inline-start: 0; border-radius: inherit; background: var(--pro-crown); }
+.pro-meter[data-left='low'] .pro-meter-text { color: var(--pro-ink); font-weight: 600; }
+.pro-meter[data-left='none'] .pro-meter-bar { background: var(--pro-tint); }
+.pro-ac-foot { margin: var(--sp-4) 0 0 !important; }

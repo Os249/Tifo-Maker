@@ -764,7 +764,7 @@ export type AiOutcome = 'model' | 'cache' | 'quick' | 'quota' | 'busy' | 'blocke
  *  ground photo) are the two other premium calls. Until October 2026 polish and
  *  photo were recorded only when they FAILED; their successes are recorded now
  *  too (outcome 'model'), and the design counts below leave them out. */
-export type AiMode = 'std' | 'super' | 'polish' | 'photo';
+export type AiMode = 'std' | 'super' | 'polish' | 'photo' | 'cutout';
 
 /** What a request cost, measured from the provider's own usage numbers. */
 export interface AiEventUsage {
@@ -877,7 +877,7 @@ export interface AiStats {
   topUsers: { username: string; model: number; quick: number; quota: number; total: number; last: string }[];
   /** Everyone who has ever been turned away by the hourly cap. */
   hitCap: { username: string; times: number; last: string }[];
-  modes: { std: number; super: number; polish: number; photo: number };
+  modes: { std: number; super: number; polish: number; photo: number; cutout: number };
   /** Accounts that have ever had a row in ai_usage (the meter), for contrast. */
   meteredAccounts: number;
   /** Failures in the window by reason, most frequent first. */

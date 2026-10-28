@@ -30,7 +30,14 @@ export type FunnelEvent =
   | 'guide_free'       // ...or left for the whole editor ("Free mode")
   | 'ai_cta'           // pressed "Generate with AI" outside the editor (Projects page)
   | 'ai_bar'           // asked the AI from the prompt bar on the canvas
-  | 'template_cta';    // pressed "Use as template" on the home page's showcase
+  | 'template_cta'     // pressed "Use as template" on the home page's showcase
+  | 'pro_viewed'       // opened the Pro page
+  | 'pro_limit'        // met a Pro limit card
+  | 'pro_notify'       // asked to be told when Pro opens
+  | 'gift_accepted'    // accepted the 7-day Pro gift
+  | 'cutout_used'      // a smart cut-out came back
+  | 'export_sheet'     // the export sheet listed Pro items
+  | 'export_free';     // ...and they exported without them
 
 const SESSION_KEY = 'tifo_session_v1';
 const fired = new Set<FunnelEvent>();

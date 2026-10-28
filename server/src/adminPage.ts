@@ -449,10 +449,12 @@ async function loadAll(){
     api('/api/admin/ai?days=' + currentDays),
     api('/api/admin/email'),
     api('/api/admin/soc'),
-    api('/api/admin/queue')
+    api('/api/admin/queue'),
+    api('/api/admin/pro')
   ]);
   var ov = results[0], tr = results[1], fn = results[2], sh = results[3], fb = results[4], ai = results[5], em = results[6], sc = results[7];
   QUEUE = results[8].ok && results[8].data ? results[8].data : { error: results[8].status };
+  PRO = results[9].ok && results[9].data ? results[9].data : { error: results[9].status };
   if (!ov.ok){
     if (ov.status === 403){ clearUnlock(); showLogin('Wrong or expired password. Sign in again.'); return; }
     setStatus('Failed to load (' + ov.status + ').');
@@ -657,6 +659,13 @@ var FUNNEL_STEP = {
   ai_cta:         ['Pressed Generate with AI','on the Projects page'],
   ai_bar:         ['Asked the AI from the canvas bar','in the editor'],
   template_cta:   ['Pressed Use as template','on the home page'],
+  pro_viewed:     ['Opened the Pro page','while Pro is on for them'],
+  pro_limit:      ['Met a Pro limit card','an allowance used up'],
+  pro_notify:     ['Asked to hear when Pro opens','one per account'],
+  gift_accepted:  ['Accepted the 7-day gift','Pro for 7 days'],
+  cutout_used:    ['Got a smart cut-out','a picture lifted out'],
+  export_sheet:   ['Saw the export sheet','their tifo had Pro items'],
+  export_free:    ['Exported without Pro items','the free version'],
 };
 
 /* Only these are a sequence everyone passes through in order, so only these get
@@ -1106,6 +1115,7 @@ var TABS = [
   { id:'traffic',  label:'Where from' },
   { id:'funnel',   label:'What they do' },
   { id:'ai',       label:'AI' },
+  { id:'pro',      label:'Pro' },
   { id:'library',  label:'Library' },
   { id:'feedback', label:'Feedback' },
   { id:'email',    label:'Email' },
@@ -1500,7 +1510,7 @@ function aiTab(){
     [function(d){ return d.username; }, function(d){ return d.model; }, function(d){ return d.quick; },
      function(d){ return d.quota; }, function(d){ return new Date(d.last).toLocaleDateString(); }]);
 
-  var modes = a.modes || { std:0, super:0, polish:0, photo:0 };
+  var modes = a.modes || { std:0, super:0, polish:0, photo:0, cutout:0 };
   html += '<h2 class="sec">Reference</h2><div class="grid">';
   html += kpi('Whole-bowl (Super)', modes.super, 'director prompt', true);
   html += kpi('Single design', modes.std, 'standard mode', true);
@@ -1551,7 +1561,7 @@ function aiReliabilitySection(a){
   if (!mo) return '';
   var lat = c.latencyMs || {}, by = c.byMode || {};
   var rows = [];
-  var order = ['super', 'std', 'polish', 'photo'];
+  var order = ['super', 'std', 'polish', 'photo', 'cutout'];
   for (var i = 0; i < order.length; i++){
     var m = order[i], o = mo[m] || {};
     var limited = o.limited || 0;
@@ -1645,7 +1655,7 @@ var REASON_INFO = {
   upstream_error:  ['Provider error', 'The provider answered with a server error (5xx).'],
   unknown:         ['Unclassified', 'Read the detail; if it recurs, it deserves its own category in aiFailure.ts.']
 };
-var MODE_LABEL = { std:'Premium', 'super':'Super AI', polish:'Polish', photo:'Photo reading' };
+var MODE_LABEL = { std:'Premium', 'super':'Super AI', polish:'Polish', photo:'Photo reading', cutout:'Smart cut-out' };
 function reasonLabel(r){ return (REASON_INFO[r] || [labelize(r)])[0]; }
 
 function aiFailuresSection(a){
@@ -1756,6 +1766,7 @@ function paintSection(){
   else if (currentTab === 'traffic') html = trafficTab();
   else if (currentTab === 'funnel') html = funnelTab();
   else if (currentTab === 'ai') html = aiTab();
+  else if (currentTab === 'pro') html = proTab();
   else if (currentTab === 'library') html = libraryTab();
   else if (currentTab === 'feedback') html = feedbackTab();
   else if (currentTab === 'email') html = emailTab();
@@ -1765,6 +1776,107 @@ function paintSection(){
   if (currentTab === 'security') wireSecurity();
   if (currentTab === 'library') wireLibrary();
   if (currentTab === 'traffic') wireLinkBuilder();
+  if (currentTab === 'pro') wirePro();
+}
+
+/* ---- pro: who Pro is on for, what is held, and passes by hand ----
+   Everything here reads and writes on the server (server/src/proRoutes.ts);
+   a grant or revoke is written to the Security tab's audit trail. */
+var PRO = null;
+var PRO_LOOKUP = null;
+var PRO_PLAN_LABEL = { match:'Match Pass', season:'Season Pass', gift:'7-day gift', group:'Group plan' };
+var PRO_MODE_TEXT = {
+  off: 'Off: nobody sees Pro; everyone keeps the old AI limits.',
+  preview: 'Preview: only the accounts in PRO_PREVIEW_USERS see Pro and its limits.',
+  on: 'On: everyone has the new free limits, the gift and the Pro page.'
+};
+function proTab(){
+  var html = '<h2 class="sec">Pro</h2>';
+  if (!PRO || PRO.error){
+    return html + '<div class="callout bad"><b>Could not load Pro.</b> HTTP ' + esc(String((PRO && PRO.error) || '?')) + '</div>';
+  }
+  var st = PRO.stats || { gifts:{}, passes:{} };
+  html += '<p class="lede">' + esc(PRO_MODE_TEXT[PRO.mode] || PRO.mode) + (PRO.mode === 'preview' ? ' (' + fmt(PRO.previewUsers) + ' account' + (PRO.previewUsers === 1 ? '' : 's') + ')' : '') + '</p>';
+  if (PRO.mode === 'preview' && !PRO.previewUsers) html += '<div class="callout warn"><b>Preview with nobody in it.</b> Set PRO_PREVIEW_USERS to your username (comma-separated for more) and redeploy.</div>';
+  if (!PRO.throwawayList || !PRO.throwawayList.loaded) html += '<div class="callout bad"><b>The throwaway email list did not load</b>, so no gifts are offered. ' + esc((PRO.throwawayList && PRO.throwawayList.error) || '') + '</div>';
+  if (!PRO.cutoutConfigured) html += '<div class="callout warn"><b>Smart cut-out has no provider.</b> It uses AI_CLOUDFLARE_ACCOUNT_ID and AI_CLOUDFLARE_API_TOKEN (the picture backup\\'s). Until both are set, the cut-out button says it is not available.</div>';
+  if (!PRO.paymentsOpen) html += '<div class="callout"><b>Payments are not open.</b> Buy buttons ask to be told when Pro opens; the count is below.</div>';
+  html += '<div class="grid">';
+  html += kpi('Gifts offered', st.gifts.offered || 0, fmt(st.gifts.accepted || 0) + ' accepted, ' + fmt(st.gifts.active || 0) + ' running now', true);
+  html += kpi('Match Passes now', (st.passes && st.passes.match) || 0);
+  html += kpi('Season Passes now', (st.passes && st.passes.season) || 0);
+  html += kpi('Group plans now', (st.passes && st.passes.group) || 0);
+  html += kpi('Asked to hear when Pro opens', st.notify || 0, 'one per account', true);
+  html += '</div>';
+
+  html += '<h2 class="sec">An account</h2>';
+  html += '<p class="note"><label>Username <input id="pro-user" type="text" autocomplete="off" spellcheck="false" maxlength="32" value="' + esc(PRO_LOOKUP || '') + '"></label> '
+        + '<button id="pro-find" type="button">Look up</button></p>';
+  var a = PRO.account;
+  if (a){
+    html += '<table class="tbl"><tbody>'
+      + '<tr><th>Account</th><td>@' + esc(a.username) + (a.emailVerified ? '' : ' <b class="warn">(email not verified)</b>') + '</td></tr>'
+      + '<tr><th>Pro on for them</th><td>' + (a.live ? 'yes' : 'no (PRO_MODE)') + '</td></tr>'
+      + '<tr><th>Plan now</th><td>' + esc(a.plan === 'free' ? 'Free' : (PRO_PLAN_LABEL[a.plan] || a.plan)) + '</td></tr>'
+      + '<tr><th>Gift</th><td>' + (a.gift ? (a.gift.acceptedAt ? 'accepted ' + esc(a.gift.acceptedAt.slice(0, 16).replace('T', ' ')) + ' UTC' : 'offered, not accepted') : 'none') + '</td></tr>'
+      + '</tbody></table>';
+    if (a.passes && a.passes.length){
+      html += '<table class="tbl"><thead><tr><th>Pass</th><th>How</th><th>From</th><th>Until (UTC)</th><th></th></tr></thead><tbody>';
+      for (var i = 0; i < a.passes.length; i++){
+        var p = a.passes[i];
+        var over = p.revokedAt || Date.parse(p.endsAt) <= Date.now();
+        html += '<tr><td>' + esc(PRO_PLAN_LABEL[p.plan] || p.plan) + '</td><td>' + esc(p.source) + '</td><td>' + esc(p.startsAt.slice(0, 16).replace('T', ' ')) + '</td><td>' + esc(p.endsAt.slice(0, 16).replace('T', ' ')) + '</td><td>'
+          + (p.revokedAt ? 'revoked' : over ? 'ended' : '<button type="button" class="pro-revoke" data-pass="' + esc(p.id) + '">Revoke</button>') + '</td></tr>';
+      }
+      html += '</tbody></table>';
+    }
+  } else if (PRO_LOOKUP){
+    html += '<p class="note">No account called @' + esc(PRO_LOOKUP) + '.</p>';
+  }
+
+  html += '<h2 class="sec">Give a pass</h2>';
+  html += '<p class="note">For a prize, a supporters\\' group or trying Pro on yourself. Written to the audit trail.</p>';
+  html += '<p class="note"><label>Username <input id="pro-g-user" type="text" autocomplete="off" spellcheck="false" maxlength="32" value="' + esc(PRO_LOOKUP || '') + '"></label> '
+        + '<label>Plan <select id="pro-g-plan"><option value="match">Match Pass (72 hours)</option><option value="season">Season Pass (to 31 May)</option><option value="group">Group plan (to 31 May)</option></select></label> '
+        + '<label>Days <input id="pro-g-days" type="number" min="1" max="400" step="1" placeholder="plan default" style="width:110px"></label> '
+        + '<button id="pro-grant" type="button">Give</button></p>';
+  html += '<p id="pro-out" class="note" role="status" aria-live="polite"></p>';
+  return html;
+}
+async function proReload(){
+  var r = await api('/api/admin/pro' + (PRO_LOOKUP ? '?username=' + encodeURIComponent(PRO_LOOKUP) : ''));
+  PRO = r.ok && r.data ? r.data : { error: r.status };
+  paintSection();
+}
+function wirePro(){
+  var find = el('pro-find');
+  if (find) find.addEventListener('click', function(){ PRO_LOOKUP = (el('pro-user').value || '').trim().replace(/^@/, ''); proReload(); });
+  var grant = el('pro-grant');
+  if (grant) grant.addEventListener('click', async function(){
+    var out = el('pro-out');
+    var user = (el('pro-g-user').value || '').trim().replace(/^@/, '');
+    var plan = el('pro-g-plan').value;
+    var days = (el('pro-g-days').value || '').trim();
+    if (!user){ out.textContent = 'Type a username first.'; return; }
+    grant.disabled = true;
+    out.textContent = 'Giving...';
+    var body = { username: user, plan: plan };
+    if (days) body.days = Number(days);
+    var r = await post('/api/admin/pro/grant', body);
+    grant.disabled = false;
+    if (r.ok && r.data && r.data.ok){ PRO_LOOKUP = user; out.textContent = 'Given until ' + r.data.pass.endsAt.slice(0, 16).replace('T', ' ') + ' UTC.'; proReload(); }
+    else out.innerHTML = '<b class="warn">Refused.</b> ' + esc((r.data && r.data.error) || ('HTTP ' + r.status));
+  });
+  var btns = document.querySelectorAll('.pro-revoke');
+  for (var i = 0; i < btns.length; i++){
+    btns[i].addEventListener('click', async function(e){
+      var b = e.currentTarget;
+      b.disabled = true;
+      var r = await post('/api/admin/pro/revoke', { passId: b.getAttribute('data-pass') });
+      if (!r.ok){ b.disabled = false; el('pro-out').innerHTML = '<b class="warn">Refused.</b> ' + esc((r.data && r.data.error) || ('HTTP ' + r.status)); return; }
+      proReload();
+    });
+  }
 }
 
 /* ---- security: is anyone attacking the site, and is it set up to cope ----

@@ -36,6 +36,7 @@ import { initScheme, setSchemeLabels } from './ui/colorScheme';
 import { enhancePasswordField } from './ui/passwordField';
 import { ensureUsernameChosen } from './ui/chooseUsernameModal';
 import { POLICY_VERSION } from './ui/authModal';
+import { mountProAccount } from './ui/proAccount';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string): T | null => document.getElementById(id) as T | null;
 
@@ -132,6 +133,8 @@ async function load(): Promise<void> {
   }
   if (gate) gate.hidden = true;
   if (sections) sections.hidden = false;
+  // "Your plan", first, where Pro is on for this account (and nowhere else).
+  if (sections) mountProAccount(sections);
   renderEmail();
   renderName();
   renderPasswordSection();
