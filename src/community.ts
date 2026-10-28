@@ -21,6 +21,7 @@ import type { Preview3D } from './render/preview3d';
 import type { SeatMap } from './core/types';
 import type { ShareTarget } from './ui/shareModal';
 import {
+  adoptProviderSession,
   isSignedIn,
   fetchMe,
   listGalleryPage,
@@ -45,6 +46,7 @@ import {
   markNotificationsRead,
   unreadNotifications,
   fetchProfile,
+  providerFailure,
   type GalleryItem,
   type GallerySort,
   type CommentItem,
@@ -1638,6 +1640,14 @@ async function main(): Promise<void> {
   // ensureAuth, the choose-a-name dialog still opens as soon as /api/me says
   // it is needed, and the server answers 428 to any write until it is done.
   initPaging();
+  // Back from Google: trade the one-time cookie for the session before anything
+  // asks who is signed in. This page never did, so "Continue with Google" here
+  // came back signed out, with the cookie expiring unread two minutes later
+  // (found checking the sign-up bug of 27 Oct 2026). Nothing happens without
+  // ?signedin= or ?signin=failed in the address.
+  await adoptProviderSession();
+  const why = providerFailure();
+  if (why) toast(t(`auth.err.${why}`));
   await Promise.all([refreshAuthUI(), loadGallery(), loadFilters()]);
   renderApplied();
   void openDeepLink();

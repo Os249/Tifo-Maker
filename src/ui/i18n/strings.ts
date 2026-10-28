@@ -442,6 +442,26 @@ export const STRINGS: Record<string, { en: string; ar: string }> = {
     en: 'Pick a username to finish setting up your account.',
     ar: 'اختر اسم مستخدم عشان تكمّل إعداد حسابك.',
   },
+  // ---- the verify step, straight after an email sign-up (ui/authModal.ts) ----
+  'auth.v.title': { en: 'Verify your email', ar: 'وثّق بريدك' },
+  'auth.v.sentTo': { en: 'We sent a 6-digit code to', ar: 'أرسلنا رمز من 6 أرقام إلى' },
+  'auth.v.typeIt': {
+    en: 'Type it here within 10 minutes, or press the button in the email.',
+    ar: 'اكتبه هنا خلال 10 دقائق، أو اضغط الزر اللي في الرسالة.',
+  },
+  'auth.v.notSent': {
+    en: 'Your account is ready, but the email did not go out. Press "Send a new code" in a moment.',
+    ar: 'حسابك جاهز، لكن الرسالة ما انرسلت. اضغط «أرسل رمزًا جديدًا» بعد شوي.',
+  },
+  'auth.v.why': {
+    en: 'Verifying unlocks the AI Designer, likes and match-day photos.',
+    ar: 'التوثيق يفتح لك مصمّم الذكاء الاصطناعي والإعجابات وصور يوم المباراة.',
+  },
+  'auth.v.later': { en: 'Later', ar: 'لاحقًا' },
+  'auth.v.help': {
+    en: 'Not in your inbox? Look in spam or junk. You can also verify later on your account page.',
+    ar: 'ما لقيتها؟ شوف مجلد الرسائل غير المرغوبة. وتقدر توثّق بعدين من صفحة حسابك.',
+  },
   // ---- signing in with a provider (src/core/../server/src/oauth.ts) ----
   'auth.google': { en: 'Continue with Google', ar: 'المتابعة بحساب Google' },
   'auth.or': { en: 'or', ar: 'أو' },

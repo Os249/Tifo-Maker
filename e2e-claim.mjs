@@ -120,8 +120,12 @@ await page.evaluate((email)=>{
 }, EMAIL);
 await page.evaluate(()=>document.querySelector('.auth-form .auth-submit').click());
 
+// The dialog turns into the verify step; the draft is claimed once it closes.
+const verifyStep = await waitFor(()=>{const s=document.querySelector('.auth-verify');return !!s&&!s.hidden;});
+check('account created, and the verify step shows', verifyStep);
+await page.evaluate(()=>document.querySelector('.auth-later')?.click());
 const modalGone = await waitFor(()=>!document.querySelector('.auth-backdrop'));
-check('account created and modal closed', modalGone);
+check('Later closes the dialog', modalGone);
 
 // The interim "Moving your tifo into your account..." also contains "account",
 // so assert the FINAL wording, not merely a mention of one.

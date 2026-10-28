@@ -47,6 +47,7 @@
     "test:growth-server": "tsx server/test/growth.test.mts",
     "security:check": "npm run test:security && npm run test:soc && npm run test:deploy && node scripts/secret-scan.mjs && npm audit --omit=dev --audit-level=high",
     "test:verify": "npm run build && node e2e-verify.mjs",
+    "test:signup-verify": "node e2e-signup-verify.mjs",
     "build:prod": "tsc --noEmit && vite build",
     "build:server": "tsx scripts/seat-table.mts && node scripts/bundle-server.mjs",
     "start": "NODE_ENV=production node server/build/server.mjs",

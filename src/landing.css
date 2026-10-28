@@ -396,10 +396,11 @@ img { max-width: 100%; }
 .foot::before { content: ''; width: 120px; height: 6px; border-radius: 2px; background: var(--scarf); margin-bottom: 6px; }
 .foot-brand { font-weight: 800; font-size: var(--fs-lg); letter-spacing: .02em; color: var(--ink); }
 .foot-brand b { color: var(--maker); }
-.foot-links { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px 22px; font-size: var(--fs-md); color: var(--muted); }
+.foot-links { display: flex; flex-wrap: wrap; justify-content: center; gap: 0 18px; font-size: var(--fs-md); color: var(--muted); }
 .foot-links a:hover { color: var(--blue); }
 /* Every link and button down here is a 44px target (isreadyforlaunch flagged
-   them at 21px, below even WCAG 2.2's 24px minimum). */
+   them at 21px, below even WCAG 2.2's 24px minimum). The rows need no gap of
+   their own: each target already carries its space. */
 .foot-links a, .foot-links .fb-entry { display: inline-flex; align-items: center; min-height: 44px; padding-inline: 4px; }
 .foot-note { font-size: var(--fs-sm); color: var(--muted); }
 /* The feedback entry, styled on first paint (its modal loads lazily). */

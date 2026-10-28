@@ -152,6 +152,7 @@ export function mountAiPanel(deps: AiPanelDeps): AiPanelHandle {
   const clearCard = (): void => {
     if (cardTimer !== null) { clearInterval(cardTimer); cardTimer = null; }
     if (stateEl) { stateEl.hidden = true; }
+    genBtn?.classList.remove('yields');
   };
   const fmtWait = (sec: number): string =>
     sec >= 60 ? `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}` : `${sec}s`;
@@ -196,6 +197,9 @@ export function mountAiPanel(deps: AiPanelDeps): AiPanelHandle {
       }
     }
     stateEl.hidden = false;
+    // One blue button: while a card offers the way forward (the Quick
+    // Designer at the limit or offline, Try again), Generate steps back to a tint.
+    genBtn?.classList.toggle('yields', (card.actions ?? []).some((a) => a.primary));
   };
   // Kept so the rest of the panel's call sites keep working; both now render
   // into the single card rather than two competing lines of text.

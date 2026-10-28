@@ -608,10 +608,17 @@ export class Editor {
     }
   }
 
+  /**
+   * Pixels at the bottom of the canvas that controls sit over (the stand
+   * buttons, zoom and map in the short Split dock): fitting and framing a
+   * stand keep the seats above them. 0 where the canvas is tall enough.
+   */
+  fitInsetBottom = 0;
+
   fitToView(): void {
     const { minX, minY, maxX, maxY } = this.map.bounds;
     const w = this.app.screen.width;
-    const h = this.app.screen.height;
+    const h = Math.max(40, this.app.screen.height - this.fitInsetBottom);
     const scale = Math.min(w / (maxX - minX + 80), h / (maxY - minY + 80));
     this.world.scale.set(scale);
     this.world.position.set(
@@ -648,7 +655,7 @@ export class Editor {
       if (y > maxY) maxY = y;
     }
     const w = this.app.screen.width;
-    const h = this.app.screen.height;
+    const h = Math.max(40, this.app.screen.height - this.fitInsetBottom);
     const pad = 60;
     const scale = Math.min(8, Math.max(0.1, Math.min((w - pad) / (maxX - minX + 1), (h - pad) / (maxY - minY + 1))));
     this.world.scale.set(scale);

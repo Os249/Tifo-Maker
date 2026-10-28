@@ -137,19 +137,29 @@ async function main(): Promise<void> {
     // Back from a provider's sign-in: return to the project that was open in
     // this tab, where the half of the save flow the redirect interrupted waits.
     let back: string | null = null;
-    if (returningFromProvider) {
+    if (returningFromProvider || signinFailed) {
       try {
         back = (JSON.parse(sessionStorage.getItem('tifo_open_project') ?? 'null') as { url?: string } | null)?.url ?? null;
       } catch {
         back = null;
       }
     }
+    // A sign-in that did not finish has to say why wherever this lands. The
+    // reason was read (and taken out of the address) above, so it used to be
+    // lost on the way to /projects: refused because an unverified account
+    // already has the address, the person was shown their projects and nothing
+    // else (found checking the sign-up bug of 27 Oct 2026).
+    const failed = signinFailed ? new URLSearchParams({ signin: 'failed', reason: signinFailed }).toString() : '';
     if (back && /^(?:\/ar)?\/app\?/.test(back)) { // or /ar/app? on the Arabic page (P3.3)
-      location.replace(back);
+      location.replace(failed ? `${back}&${failed}` : back);
       return;
     }
     const q = new URLSearchParams(location.search);
     q.set('start', '1');
+    if (signinFailed) {
+      q.set('signin', 'failed');
+      q.set('reason', signinFailed);
+    }
     location.replace(`/projects?${q.toString()}`);
     return;
   }
@@ -635,6 +645,21 @@ async function main(): Promise<void> {
    * when the dock is resized or Split is opened again.
    */
   const frameStrip = (): void => {
+    // In the short dock the stand buttons, zoom and map sit over the bottom
+    // of the strip: frame the seats above them.
+    const host = document.getElementById('canvas-host');
+    const wrapEl = host?.parentElement;
+    let inset = 0;
+    if (host && wrapEl) {
+      const bottom = host.getBoundingClientRect().bottom;
+      let top = bottom;
+      for (const el of wrapEl.querySelectorAll<HTMLElement>(':scope > #stand-chips, :scope > .zoom-pill, :scope > #minimap')) {
+        const r = el.getBoundingClientRect();
+        if (r.height > 0 && r.bottom > bottom - 120 && r.top < top) top = r.top;
+      }
+      inset = Math.max(0, Math.round(bottom - top + 6));
+    }
+    editor.fitInsetBottom = inset;
     const on = document.querySelector<HTMLElement>('#stand-chips .stand-chip.on')?.dataset.stand;
     if (on && on !== 'all') document.dispatchEvent(new CustomEvent('tifo:stand', { detail: on }));
     else editor.fitToView();
@@ -911,7 +936,10 @@ async function main(): Promise<void> {
       requestAnimationFrame(() => {
         editor.app.resize();
         if (next === 'split') frameStrip();
-        else editor.fitToView();
+        else {
+          editor.fitInsetBottom = 0;
+          editor.fitToView();
+        }
       });
     }
     // In split, the 3D canvas shares the row — its ResizeObserver re-fits it

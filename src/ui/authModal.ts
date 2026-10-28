@@ -1,8 +1,8 @@
-import { availableProviders, login, register, requestPasswordReset, startProviderSignIn } from '../net/api';
+import { availableProviders, login, register, registrationEmailWasSent, requestPasswordReset, resendVerification, startProviderSignIn, verifyEmailCode } from '../net/api';
 import { PASSWORD_MIN } from '../core/password';
 import { deriveUsername } from '../core/handle';
 import { enhancePasswordField } from './passwordField';
-import { localPath, t, tv, getLang } from './i18n';
+import { localPath, t, tErr, tv, getLang } from './i18n';
 import { containDialog } from './dialogFocus';
 
 /**
@@ -12,6 +12,16 @@ import { containDialog } from './dialogFocus';
  * Floodlight tokens injected by theme.ts.
  *
  * Resolves with the signed-in username, or null if the user dismisses.
+ *
+ * An email sign-up does not end at "account created". The same dialog turns
+ * into the verify step (October 2026): the email that just went out carries a
+ * 6-digit code and says "type it on the site", and the only place that took
+ * it was /account, which nothing pointed to. The step takes the code where the
+ * person already is, with Send a new code and Later. They are signed in from
+ * the moment the account exists, so every way out of the step (Later, the
+ * close button, Escape) resolves with their name, never null. Verifying here
+ * goes through the same session-bound endpoints, limits and tries as the
+ * account page; nothing about what an unverified account may do changes.
  */
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -25,6 +35,13 @@ const GOOGLE_MARK =
   '<path fill="#34A853" d="M9 18c2.43 0 4.47-.8 5.96-2.18l-2.92-2.26c-.8.54-1.84.86-3.04.86-2.34 0-4.32-1.58-5.03-3.7H.96v2.33A9 9 0 0 0 9 18Z"/>' +
   '<path fill="#FBBC05" d="M3.97 10.72a5.4 5.4 0 0 1 0-3.44V4.95H.96a9 9 0 0 0 0 8.1l3.01-2.33Z"/>' +
   '<path fill="#EA4335" d="M9 3.58c1.32 0 2.5.45 3.44 1.35l2.58-2.58C13.46.9 11.43 0 9 0A9 9 0 0 0 .96 4.95l3.01 2.33C4.68 5.16 6.66 3.58 9 3.58Z"/>' +
+  '</svg>';
+
+/** An envelope with a tick: the verify step's one picture, drawn in the page's own colours. */
+const MAIL_MARK =
+  '<svg viewBox="0 0 48 48" width="44" height="44" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">' +
+  '<rect x="6" y="11" width="36" height="26" rx="4"/><path d="M7 14l17 12 17-12"/>' +
+  '<circle cx="37" cy="35" r="8" fill="var(--auth-verify-dot, #1C6FE0)" stroke="none"/><path d="M33.5 35.2l2.4 2.4 4.6-4.8" stroke="#fff"/>' +
   '</svg>';
 
 /**
@@ -67,6 +84,9 @@ async function registerWithDerivedName(email: string, password: string): Promise
   throw lastErr instanceof Error ? lastErr : new Error('could not create an account');
 }
 
+/** The dialog on screen now, if there is one. */
+let openNow: Promise<string | null> | null = null;
+
 /**
  * The sign-in dialog.
  *
@@ -76,6 +96,19 @@ async function registerWithDerivedName(email: string, password: string): Promise
  * again on the way back in. See `takeClaimIntent` in net/api.
  */
 export function openAuthModal(claimOnReturn = false, startOn: 'signin' | 'signup' = 'signin', forgotOnOpen = false): Promise<string | null> {
+  // One dialog at a time: a second call while it is up gets the same answer.
+  // A double tap on Like stacked a second dialog under the first, still asking
+  // them to sign up after they had (and, now, verified) in the one on top.
+  if (openNow) return openNow;
+  const shown = showAuthModal(claimOnReturn, startOn, forgotOnOpen);
+  openNow = shown;
+  void shown.finally(() => {
+    if (openNow === shown) openNow = null;
+  });
+  return shown;
+}
+
+function showAuthModal(claimOnReturn: boolean, startOn: 'signin' | 'signup', forgotOnOpen: boolean): Promise<string | null> {
   return new Promise((resolve) => {
     const backdrop = document.createElement('div');
     backdrop.className = 'auth-backdrop';
@@ -127,6 +160,26 @@ export function openAuthModal(claimOnReturn = false, startOn: 'signin' | 'signup
           <button type="submit" class="auth-submit primary">${t('auth.sendReset')}</button>
           <button type="button" class="auth-back">${t('auth.backToSignin')}</button>
         </form>
+        <section class="auth-verify" hidden aria-labelledby="auth-verify-h">
+          <div class="auth-verify-mark" aria-hidden="true">${MAIL_MARK}</div>
+          <h2 class="auth-verify-h" id="auth-verify-h">${t('auth.v.title')}</h2>
+          <p class="auth-verify-to"><span>${t('auth.v.sentTo')}</span> <bdi class="auth-verify-email"></bdi>. <span>${t('auth.v.typeIt')}</span></p>
+          <form class="auth-verify-form" novalidate>
+            <label class="auth-field">
+              <span>${t('ac.verify.codeLabel')}</span>
+              <input type="text" name="vcode" class="auth-code" inputmode="numeric" autocomplete="one-time-code"
+                     maxlength="6" spellcheck="false" dir="ltr" placeholder="000000" />
+            </label>
+            <div class="auth-verify-msg" role="status" aria-live="polite" hidden></div>
+            <button type="submit" class="auth-submit primary">${t('ac.verify.submit')}</button>
+          </form>
+          <p class="auth-verify-why">${t('auth.v.why')}</p>
+          <div class="auth-verify-more">
+            <button type="button" class="auth-resend">${t('ac.verify.resend')}</button>
+            <button type="button" class="auth-later">${t('auth.v.later')}</button>
+          </div>
+          <p class="auth-verify-help">${t('auth.v.help')}</p>
+        </section>
         <p class="auth-note">${t('auth.note')}</p>
       </div>
     `;
@@ -165,7 +218,8 @@ export function openAuthModal(claimOnReturn = false, startOn: 'signin' | 'signup
       providersOn = true;
       // Not over the reset-link form: "Continue with Google" there reads as a
       // second way to reset a password, which it is not.
-      providersRow.hidden = !forgotForm.hidden;
+      // Nor over the verify step, if sign-up finished before this answer came.
+      providersRow.hidden = !forgotForm.hidden || !backdrop.querySelector('.auth-verify')?.hasAttribute('hidden');
       if (inAppBrowser()) {
         inAppNote.hidden = false;
         (providersRow.querySelector('.auth-provider') as HTMLButtonElement).disabled = true;
@@ -190,7 +244,10 @@ export function openAuthModal(claimOnReturn = false, startOn: 'signin' | 'signup
     });
     passwordField.setActive(false);
 
+    /** Set once an email sign-up has made the account: from then on they are signed in. */
+    let signedUpAs: string | null = null;
     const close = (result: string | null): void => {
+      result = result ?? signedUpAs;
       release();
       backdrop.remove();
       // Return focus to whatever opened the dialog. Without this a keyboard user
@@ -322,6 +379,9 @@ export function openAuthModal(claimOnReturn = false, startOn: 'signin' | 'signup
           // The API still needs a username; nobody should have to invent one to
           // keep a drawing. Derive it, and step aside if that handle is taken.
           name = await registerWithDerivedName(identity, password);
+          signedUpAs = name;
+          showVerify(identity, registrationEmailWasSent());
+          return;
         }
         close(name);
       } catch (err) {
@@ -338,6 +398,104 @@ export function openAuthModal(claimOnReturn = false, startOn: 'signin' | 'signup
         submit.textContent = mode === 'signin' ? t('auth.signin') : t('auth.signup');
       }
     });
+
+    // ---- the verify step (after an email sign-up) ----
+    const verifySec = backdrop.querySelector('.auth-verify') as HTMLElement;
+    const verifyForm = backdrop.querySelector('.auth-verify-form') as HTMLFormElement;
+    const codeInput = verifyForm.vcode as HTMLInputElement;
+    const verifyMsg = backdrop.querySelector('.auth-verify-msg') as HTMLElement;
+    const verifySubmit = verifyForm.querySelector('.auth-submit') as HTMLButtonElement;
+    const resendBtn = backdrop.querySelector('.auth-resend') as HTMLButtonElement;
+    const laterBtn = backdrop.querySelector('.auth-later') as HTMLButtonElement;
+    const sentLine = backdrop.querySelector('.auth-verify-to') as HTMLElement;
+    let verifying = false;
+    const say = (text: string, tone: 'info' | 'ok' | 'bad'): void => {
+      verifyMsg.textContent = text;
+      verifyMsg.dataset.tone = tone;
+      verifyMsg.hidden = false;
+    };
+    function showVerify(email: string, sent: boolean): void {
+      // The address is what they typed: text, never markup.
+      (backdrop.querySelector('.auth-verify-email') as HTMLElement).textContent = email;
+      for (const el of [tabsRow, providersRow, form, forgotLink, forgotForm, note]) el.hidden = true;
+      verifySec.hidden = false;
+      modal.setAttribute('aria-label', t('auth.v.title'));
+      sentLine.hidden = !sent;
+      if (!sent) say(t('auth.v.notSent'), 'bad');
+      passwordField.setActive(false);
+      setTimeout(() => { if (backdrop.isConnected) codeInput.focus(); }, 0);
+    }
+    const verifyNow = async (): Promise<void> => {
+      if (verifying) return;
+      const code = codeInput.value.replace(/\D/g, '');
+      if (code.length !== 6) { say(t('ac.verify.sixDigits'), 'bad'); codeInput.focus(); return; }
+      verifying = true;
+      verifySubmit.disabled = true;
+      say(t('ac.verify.checking'), 'info');
+      try {
+        const res = await verifyEmailCode(code);
+        if (res.ok) {
+          say(t('ac.verify.done'), 'ok');
+          codeInput.disabled = true;
+          resendBtn.disabled = true;
+          // A moment to read it, then on with whatever they came to do.
+          setTimeout(() => { if (backdrop.isConnected) close(signedUpAs); }, 1400);
+          return;
+        }
+        codeInput.select();
+        say(
+          res.triesLeft === undefined
+            ? /too many attempts/i.test(res.error ?? '') ? t('ac.verify.exhausted') : t('ac.verify.wrong')
+            : res.triesLeft > 0
+              ? tv('ac.verify.wrongLeft', { n: res.triesLeft })
+              : t('ac.verify.exhausted'),
+          'bad',
+        );
+      } catch {
+        say(t('ac.verify.wrong'), 'bad');
+      } finally {
+        verifying = false;
+        verifySubmit.disabled = codeInput.disabled;
+      }
+    };
+    verifyForm.addEventListener('submit', (e) => { e.preventDefault(); void verifyNow(); });
+    // Digits only, and it checks itself once six are in: the code is pasted far
+    // more often than it is typed (the same as the account page).
+    codeInput.addEventListener('input', () => {
+      const clean = codeInput.value.replace(/\D/g, '').slice(0, 6);
+      if (clean !== codeInput.value) codeInput.value = clean;
+      if (clean.length === 6) void verifyNow();
+    });
+    resendBtn.addEventListener('click', async () => {
+      resendBtn.disabled = true;
+      say(t('auth.sending'), 'info');
+      try {
+        const res = await resendVerification();
+        if (res.ok && res.alreadyVerified) {
+          say(t('ac.verify.done'), 'ok');
+          codeInput.disabled = true;
+          verifySubmit.disabled = true;
+          setTimeout(() => { if (backdrop.isConnected) close(signedUpAs); }, 1400);
+          return;
+        }
+        if (res.ok) {
+          sentLine.hidden = false;
+          say(tv('ac.verify.resent', { email: (backdrop.querySelector('.auth-verify-email') as HTMLElement).textContent ?? '' }), 'ok');
+        } else if (res.status === 429 && res.error === 'too many verification emails today') {
+          say(tErr(res.error), 'info');
+        } else if (res.status === 429 && res.retryInSeconds) {
+          // The first message is still on its way; a new one would stop its code working.
+          say(tv('ac.verify.cooldown', { n: res.retryInSeconds }), 'info');
+        } else {
+          say(res.status === 502 ? t('ac.verify.sendRefused') : t('ac.verify.resendFailed'), 'bad');
+        }
+      } catch {
+        say(t('ac.verify.resendFailed'), 'bad');
+      } finally {
+        resendBtn.disabled = codeInput.disabled; // stays off once verified
+      }
+    });
+    laterBtn.addEventListener('click', () => close(signedUpAs));
 
     // Focus the first field once mounted.
     if (forgotOnOpen) forgotLink.click();

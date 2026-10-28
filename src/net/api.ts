@@ -413,7 +413,12 @@ export async function resendVerification(): Promise<ResendResult> {
   const data = (await res.json().catch(() => null)) as
     | { error?: string; retryInSeconds?: number; alreadyVerified?: boolean }
     | null;
-  if (res.ok) return { ok: true, status: res.status, alreadyVerified: data?.alreadyVerified === true };
+  if (res.ok) {
+    // A message did go out after all, so "the email was not sent" is no longer
+    // the news once the sign-up step closes.
+    lastRegisterEmailSent = true;
+    return { ok: true, status: res.status, alreadyVerified: data?.alreadyVerified === true };
+  }
   return { ok: false, status: res.status, retryInSeconds: data?.retryInSeconds, error: data?.error };
 }
 
@@ -433,7 +438,10 @@ export async function verifyEmailCode(code: string): Promise<{ ok: boolean; trie
   const data = (await res.json().catch(() => null)) as
     | { ok?: boolean; triesLeft?: number; error?: string; exhausted?: boolean }
     | null;
-  if (res.ok) return { ok: true };
+  if (res.ok) {
+    lastRegisterEmailSent = true; // verified: nothing left to say about the email
+    return { ok: true };
+  }
   return { ok: false, triesLeft: data?.triesLeft, error: data?.error ?? 'could not verify' };
 }
 

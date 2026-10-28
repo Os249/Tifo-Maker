@@ -16,7 +16,8 @@ import { chromium } from 'playwright';
 
 const PORT = 8913;
 const B = `http://127.0.0.1:${PORT}`;
-const COOLDOWN_MS = 2500;
+// Long enough to cover the verify step, Later and the walk to /account.
+const COOLDOWN_MS = 15000;
 
 let pass = 0, fail = 0;
 const check = (n, ok, x = '') => { (ok ? pass++ : fail++); console.log(`  ${ok ? 'PASS' : 'FAIL'}  ${n}${x ? '  ' + x : ''}`); };
@@ -92,7 +93,12 @@ try {
   await setVal('.auth-form input[name=password]', 'harbor-kite-moss-31');
   await setVal('.auth-form input[name=confirm]', 'harbor-kite-moss-31');
   await page.evaluate(() => document.querySelector('.auth-form .auth-submit').click());
-  check('the account is created', await waitFor(() => !document.querySelector('.auth-backdrop')));
+  // The dialog turns into the verify step (e2e-signup-verify.mjs has the rest
+  // of it); here it says the message did not go out, and Later leaves it.
+  check('the account is created, and the verify step says the email did not go out',
+    await waitFor(() => { const s = document.querySelector('.auth-verify'); return !!s && !s.hidden && /did not go out/.test(document.querySelector('.auth-verify-msg')?.textContent || ''); }, null, 20000));
+  await page.evaluate(() => document.querySelector('.auth-later').click());
+  check('Later closes it, signed in', await waitFor(() => !document.querySelector('.auth-backdrop')) && !!(await page.evaluate(() => localStorage.getItem('tifo_token_v1'))));
   const msg = await waitFor(() => /could not send the verification email/i.test(document.getElementById('message')?.textContent || ''), null, 15000);
   check('a registration whose email was refused says so, instead of "signed in as"', msg, JSON.stringify(await text('#message')));
   await page.unroute('**/api/auth/register');
@@ -171,6 +177,9 @@ try {
   await set2('.auth-form input[name=password]', 'harbor-kite-moss-31');
   await set2('.auth-form input[name=confirm]', 'harbor-kite-moss-31');
   await p2.evaluate(() => document.querySelector('.auth-form .auth-submit').click());
+  // Past the verify step without verifying: "Later" (لاحقًا).
+  await wait2(() => { const s = document.querySelector('.auth-verify'); return !!s && !s.hidden; }, null, 20000);
+  await p2.evaluate(() => document.querySelector('.auth-later').click());
   await wait2(() => !document.querySelector('.auth-backdrop'));
   await set2('#ai-prompt', 'Giant eagle covering the south stand in black and gold');
   await p2.evaluate(() => document.getElementById('ai-generate')?.click());

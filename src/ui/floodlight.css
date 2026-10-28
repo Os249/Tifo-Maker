@@ -659,6 +659,9 @@ button.primary {
 }
 button.primary:hover { background:var(--flare-hover); box-shadow:var(--glow-flare); }
 button.primary:active { background:var(--flare-press); }
+/* The AI tab's Generate, while its card offers the way forward (ui/aiPanel.ts). */
+#ai-generate.primary.yields { background:var(--here-bg); color:var(--here-ink); box-shadow:inset 0 0 0 1px var(--here-line); }
+#ai-generate.primary.yields:hover { background:var(--here-bg); box-shadow:inset 0 0 0 1px var(--here-ink); }
 button.danger { background:rgba(240,69,90,.12); border-color:rgba(240,69,90,.5); color:#F58A96; }
 button.danger:hover { background:rgba(240,69,90,.2); }
 button:focus-visible { outline:none; box-shadow:var(--ring-focus); }
@@ -1019,6 +1022,27 @@ body.viewer { display:block; overflow-y:auto; background:var(--ink-0); }
 }
 .auth-submit { width:100%; padding:11px 0; font-size:var(--fs-md); margin-top:2px; }
 .auth-note { color:var(--text-3); font-size:var(--fs-2xs); line-height:1.5; margin:16px 0 0; text-align:center; }
+/* The verify step after an email sign-up (ui/authModal.ts): one blue button,
+   Verify; Send a new code and Later are text. The code reads left to right in
+   both languages, in Western digits. */
+.auth-verify { display:flex; flex-direction:column; gap:12px; text-align:center; --auth-verify-dot:var(--blue); }
+.auth-verify-mark { display:grid; place-items:center; color:var(--text-2); margin-top:2px; }
+.auth-verify-h { margin:0; font-size:var(--fs-lg); font-weight:700; color:var(--text-1); }
+.auth-verify-to { margin:0; font-size:var(--fs-sm); line-height:1.55; color:var(--text-2); }
+.auth-verify-email { color:var(--text-1); font-weight:600; overflow-wrap:anywhere; }
+.auth-verify-form { display:flex; flex-direction:column; gap:12px; text-align:start; }
+.auth-modal .auth-code { font-size:var(--fs-xl); font-weight:600; letter-spacing:.4em; text-indent:.4em; text-align:center; font-variant-numeric:tabular-nums; min-height:52px; }
+.auth-verify-msg { font-size:var(--fs-xs); line-height:1.5; color:var(--text-2); background:var(--ink-3); border:1px solid var(--line-2); border-radius:var(--r-sm); padding:8px 10px; text-align:start; }
+.auth-verify-msg[data-tone="ok"] { color:var(--ok); border-color:color-mix(in srgb, var(--ok) 55%, transparent); background:color-mix(in srgb, var(--ok) 12%, transparent); }
+.auth-verify-msg[data-tone="bad"] { color:var(--text-1); border-color:var(--danger); background:color-mix(in srgb, var(--danger) 14%, transparent); }
+.auth-verify-why { margin:0; font-size:var(--fs-xs); line-height:1.5; color:var(--text-3); }
+.auth-verify-more { display:flex; justify-content:center; flex-wrap:wrap; gap:4px 20px; }
+.auth-resend, .auth-later { background:none; border:none; font:inherit; font-size:var(--fs-sm); font-weight:600; cursor:pointer; min-height:36px; padding:6px 4px; color:var(--flare); }
+.auth-later { color:var(--text-2); }
+.auth-resend:hover, .auth-later:hover { background:none; text-decoration:underline; text-underline-offset:3px; }
+.auth-resend:disabled { opacity:.5; cursor:default; }
+@media (pointer: coarse) { .auth-resend, .auth-later { min-height:44px; } }
+.auth-verify-help { margin:0; font-size:var(--fs-2xs); line-height:1.55; color:var(--text-3); }
 
 /* ---- community feed ---- */
 .feed-backdrop {

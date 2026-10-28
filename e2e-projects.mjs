@@ -377,6 +377,9 @@ await g.evaluate((email) => {
   set('.auth-form input[name=identity]', email); set('.auth-form input[name=password]', 'harbor-kite-moss-31'); set('.auth-form input[name=confirm]', 'harbor-kite-moss-31');
 }, EMAIL);
 await g.evaluate(() => document.querySelector('.auth-form .auth-submit').click());
+// The verify step, left with Later; the projects move once the dialog closes.
+await waitFor(g, () => { const s = document.querySelector('.auth-verify'); return !!s && !s.hidden; });
+await g.evaluate(() => document.querySelector('.auth-later')?.click());
 check('signing up from the Projects page', await waitFor(g, () => !document.querySelector('.auth-backdrop')));
 check('every project in this browser moves into the account', await waitFor(g, () => JSON.parse(localStorage.getItem('tifo_projects_v1') || '[]').length === 0 && /Saved in your account/.test(document.getElementById('pj-where').textContent) && document.querySelectorAll('.pj-card').length > 0));
 const token = await g.evaluate(() => localStorage.getItem('tifo_token_v1'));

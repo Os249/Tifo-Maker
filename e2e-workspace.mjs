@@ -317,6 +317,8 @@ console.log('\n— 6. the AI bar runs the AI tab —');
   }));
   check('at the limit the bar says the AI tab has a message, and opens it', card && c.tab && /message/.test(c.bar), JSON.stringify(c));
   check('the card has one blue button: the Quick Designer', c.primary.length === 1 && c.primary[0] === 'Use the Quick Designer', JSON.stringify(c.all));
+  const gen = await p.evaluate(() => { const g = document.getElementById('ai-generate'); return { yields: g.classList.contains('yields'), bg: getComputedStyle(g).backgroundColor }; });
+  check('and Generate steps back to a tint while the card offers the way forward', gen.yields && !/rgb\(\s*2[0-9],\s*1[01][0-9],\s*2[0-4][0-9]\)/.test(gen.bg), JSON.stringify(gen));
   await p.unroute('**/api/ai/generate');
   const idle = await until(p, () => document.getElementById('ai-bar').dataset.phase === 'idle', null, 12000);
   check('and the bar goes back to its input by itself', idle);

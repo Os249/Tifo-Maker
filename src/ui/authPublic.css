@@ -108,6 +108,35 @@
   font-size: 12px; line-height: 1.55; color: var(--muted); text-align: center;
 }
 .auth-hint { font-size: 13px; color: var(--muted); text-align: center; }
+
+/* The verify step after an email sign-up (ui/authModal.ts): one blue button,
+   Verify; Send a new code and Later are text. The code reads left to right in
+   both languages, in Western digits. */
+.auth-verify { display: flex; flex-direction: column; gap: 12px; text-align: center; --auth-verify-dot: var(--blue-solid); }
+.auth-verify-mark { display: grid; place-items: center; color: var(--muted); margin-top: 2px; }
+.auth-verify-h { margin: 0; font-size: var(--fs-lg); font-weight: 700; color: var(--ink); }
+.auth-verify-to { margin: 0; font-size: var(--fs-sm); line-height: 1.55; color: var(--muted); }
+.auth-verify-email { color: var(--ink); font-weight: 600; overflow-wrap: anywhere; }
+.auth-verify-form { display: flex; flex-direction: column; gap: 12px; text-align: start; }
+.auth-modal .auth-code { font-size: var(--fs-xl); font-weight: 600; letter-spacing: .4em; text-indent: .4em; text-align: center; font-variant-numeric: tabular-nums; min-height: 52px; }
+.auth-verify-msg {
+  font-size: var(--fs-sm); line-height: 1.5; color: var(--ink); text-align: start;
+  background: var(--raise-2); border: 1px solid var(--line); border-radius: var(--r-md); padding: 10px 12px;
+}
+.auth-verify-msg[data-tone="ok"] { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 50%, transparent); background: color-mix(in srgb, var(--ok) 10%, transparent); }
+.auth-verify-msg[data-tone="bad"] { border-color: color-mix(in srgb, var(--danger) 55%, transparent); background: color-mix(in srgb, var(--danger) 9%, transparent); }
+.auth-verify-why { margin: 0; font-size: var(--fs-xs); line-height: 1.5; color: var(--muted); }
+.auth-verify-more { display: flex; justify-content: center; flex-wrap: wrap; gap: 4px 20px; }
+.auth-resend, .auth-later {
+  border: none; background: none; font: inherit; font-size: var(--fs-md); font-weight: 600;
+  min-height: 36px; padding: 6px 4px; color: var(--blue); cursor: pointer;
+}
+.auth-later { color: var(--muted); }
+.auth-resend:hover, .auth-later:hover { text-decoration: underline; text-underline-offset: 3px; }
+.auth-resend:focus-visible, .auth-later:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; border-radius: 6px; }
+.auth-resend:disabled { opacity: .5; cursor: default; }
+@media (pointer: coarse) { .auth-resend, .auth-later { min-height: 44px; } }
+.auth-verify-help { margin: 0; font-size: var(--fs-xs); line-height: 1.55; color: var(--muted); }
 @media (max-width: 420px) {
   .auth-modal { padding: 24px 18px 18px; }
 }
