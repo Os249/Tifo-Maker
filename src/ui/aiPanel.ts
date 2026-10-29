@@ -96,7 +96,6 @@ export function mountAiPanel(deps: AiPanelDeps): AiPanelHandle {
 
   const promptEl = $<HTMLTextAreaElement>('#ai-prompt');
   const genBtn = $<HTMLButtonElement>('#ai-generate');
-  const wholeChk = $<HTMLInputElement>('#ai-whole');
   const genLabel = $<HTMLElement>('#ai-generate-label');
   const statusEl = $('#ai-status');
   const progressEl = $('#ai-progress');
@@ -120,9 +119,8 @@ export function mountAiPanel(deps: AiPanelDeps): AiPanelHandle {
   /** The layers the canvas had before the first generation, for Revert. */
   let baselineObjects: TifoObject[] | null = null;
   let busy = false;
-  let lastSuper = false; // so Regenerate repeats the same mode
   let lastSpec: TifoSpec | null = null; // the applied design (for AI critique/polish)
-  let lastStadium: string | undefined; // stadium context used (Super AI)
+  let lastStadium: string | undefined; // stadium context the design was planned for
   let shuffleN = 0; // increments per free offline "shuffle"
 
   // ---- one state card -------------------------------------------------------
@@ -219,15 +217,12 @@ export function mountAiPanel(deps: AiPanelDeps): AiPanelHandle {
   // stage the run has reached (timed to the actual pipeline) and an elapsed
   // counter, so a 45-second Super run never looks like a hung app.
   type Stage = { at: number; text: string };
-  const SUPER_STAGES: Stage[] = [
+  // Every design plans the whole bowl: the words first, then the stands.
+  const STAGES: Stage[] = [
     { at: 0, text: 'Choosing the words…' },
     { at: 7, text: 'Designing the whole bowl…' },
     { at: 22, text: 'Still designing — the whole stadium takes a moment…' },
     { at: 40, text: 'Nearly there…' },
-  ];
-  const PLAIN_STAGES: Stage[] = [
-    { at: 0, text: 'Designing your tifo…' },
-    { at: 12, text: 'Still working…' },
   ];
   const POLISH_STAGES: Stage[] = [
     { at: 0, text: 'Looking at the render…' },
@@ -285,8 +280,12 @@ export function mountAiPanel(deps: AiPanelDeps): AiPanelHandle {
     q.kind && q.period && q.resetAt
       ? { kind: q.kind, used: q.used, limit: q.limit, remaining: q.remaining, period: q.period, resetAt: q.resetAt }
       : null;
-  /** The allowance the Generate button would spend right now. */
-  const genKind = (): AllowanceKind => (wholeChk?.checked ? 'super' : 'std');
+  /**
+   * The allowance the Generate button spends. Every design is the whole-bowl
+   * director's now, and it is metered as a standard design; the "super"
+   * allowance was what the Whole stadium box used to switch on.
+   */
+  const genKind = (): AllowanceKind => 'std';
   const learn = (q: AiQuota | null | undefined): void => {
     if (!q?.live) return;
     proLive = true;
@@ -301,22 +300,7 @@ export function mountAiPanel(deps: AiPanelDeps): AiPanelHandle {
     if (al) return allowanceLine(al, proPlan);
     return q.remaining > 0 ? tv('ai.q.left', { n: q.remaining, limit: q.limit }) : tv('ai.q.reset', { mins: resetMins(q) });
   };
-  /** "2 left" beside Whole stadium; the crown once a free account's Super designs are used. */
-  const wholeLeft = document.createElement('span');
-  wholeLeft.className = 'ai-whole-left';
-  wholeLeft.hidden = true;
-  wholeChk?.closest('label')?.appendChild(wholeLeft);
   const paintPro = (): void => {
-    const sup = allowances.super;
-    if (!proLive || !sup) {
-      wholeLeft.hidden = true;
-    } else {
-      wholeLeft.hidden = false;
-      const out = sup.remaining <= 0 && (!proPlan || proPlan === 'free');
-      wholeLeft.innerHTML = out ? proChipHtml() : '';
-      if (!out) wholeLeft.textContent = tv('pro.left', { n: sup.remaining });
-      wholeLeft.title = allowanceLine(sup, proPlan);
-    }
     const pol = allowances.polish;
     if (polishBtn) {
       polishBtn.querySelector('.pro-chip')?.remove();
@@ -333,11 +317,9 @@ export function mountAiPanel(deps: AiPanelDeps): AiPanelHandle {
     genLabel.textContent = t(out ? 'ed.ai.signupToUse' : 'ed.ai.generate');
     genBtn!.classList.toggle('ai-signup', out);
   }
-  let lastQuota: AiQuota | null = null;
   const setQuota = (q: AiQuota | null): void => {
     syncGenLabel();
     learn(q);
-    if (q) lastQuota = q;
     paintPro();
     if (!quotaEl) return;
     quotaEl.textContent = q ? quotaText(q) : isSignedIn() ? '' : t('err.aiSignIn');
@@ -350,8 +332,6 @@ export function mountAiPanel(deps: AiPanelDeps): AiPanelHandle {
     if (level) quotaEl.dataset.level = level;
     else delete quotaEl.dataset.level;
   };
-  // Ticking Whole stadium changes which allowance Generate spends.
-  wholeChk?.addEventListener('change', () => { if (lastQuota) setQuota(lastQuota); });
   // Pro changed elsewhere on the page (the gift started from the header, a
   // cut-out spent): the counts are the server's again.
   window.addEventListener('tifo:pro', () => {
@@ -447,37 +427,23 @@ export function mountAiPanel(deps: AiPanelDeps): AiPanelHandle {
     aiUnlockToken()
       ? [{ label: t('ai.card.adminWhy'), run: () => { window.open('/admin#ai', '_blank', 'noopener'); } }]
       : [];
-  const showChoice = (choice: AiChoice, prompt: string, useSuper: boolean): void => {
+  const showChoice = (choice: AiChoice, prompt: string): void => {
     const quick: CardAction = {
       label: t('ai.card.useQuick'),
       primary: true,
-      run: () => { clearCard(); void run(prompt, { super: useSuper, engine: 'offline' }); },
+      run: () => { clearCard(); void run(prompt, { engine: 'offline' }); },
     };
     const retry: CardAction = {
       label: t('ai.card.retryPremium'),
       waitSec: Math.max(0, Math.round(choice.retryAfterSec)),
       waitLabel: (left) => tv('ai.card.premiumFreeIn', { left }),
-      run: () => { clearCard(); void run(prompt, { super: useSuper }); },
+      run: () => { clearCard(); void run(prompt); },
     };
     const cap = choice.reason === 'quota';
     if (cap && choice.kind && choice.quota?.live) {
-      // One quiet alternative (docs/DESIGN.md, cards that carry news): Super
-      // used up with standard designs left, the nearest thing is a standard
-      // design; otherwise the Quick Designer, which is free and unlimited.
-      const std = allowances.std;
-      const alts: CardAction[] =
-        choice.kind === 'super' && std && std.remaining > 0
-          ? [{
-              label: t('pro.act.useStd'),
-              run: () => {
-                clearCard();
-                if (wholeChk) wholeChk.checked = false;
-                if (lastQuota) setQuota(lastQuota);
-                void run(prompt, { super: false });
-              },
-            }]
-          : [quick];
-      showLimit(choice.kind, choice.quota, alts);
+      // One quiet alternative (docs/DESIGN.md, cards that carry news): the
+      // Quick Designer, which is free and unlimited.
+      showLimit(choice.kind, choice.quota, [quick]);
       return;
     }
     const mins = Math.max(1, Math.ceil((choice.retryAfterSec ?? 0) / 60));
@@ -504,7 +470,7 @@ export function mountAiPanel(deps: AiPanelDeps): AiPanelHandle {
     inflight = null;
   });
 
-  const lockToggle = ([promptEl, genBtn, wholeChk?.closest('label') ?? null, shuffleBtn, examplesEl, quotaEl] as (HTMLElement | null)[]).filter(
+  const lockToggle = ([promptEl, genBtn, shuffleBtn, examplesEl, quotaEl] as (HTMLElement | null)[]).filter(
     (e): e is HTMLElement => !!e,
   );
   const setLocked = (locked: boolean): void => {
@@ -662,7 +628,7 @@ export function mountAiPanel(deps: AiPanelDeps): AiPanelHandle {
     setStatus('Reverted to your previous canvas.');
   };
 
-  const run = async (prompt: string, opts: { super?: boolean; engine?: 'offline' } = {}): Promise<void> => {
+  const run = async (prompt: string, opts: { engine?: 'offline' } = {}): Promise<void> => {
     if (busy) return;
     const text = prompt.trim();
     if (!text) { setError(t('ai.card.describeFirst')); return; }
@@ -673,21 +639,18 @@ export function mountAiPanel(deps: AiPanelDeps): AiPanelHandle {
       if (await openAuthModal(false, 'signup')) syncGenLabel();
       return;
     }
-    const useSuper = !!opts.super;
-    lastSuper = useSuper;
-    const label = t(useSuper ? 'ai.label.super' : 'ai.label.plain');
+    const label = t('ai.label.plain');
     busy = true;
     setError(null);
     hideChoice();
     genBtn.disabled = true;
-    if (wholeChk) wholeChk.disabled = true;
     if (regenBtn) regenBtn.disabled = true;
     if (polishBtn) polishBtn.disabled = true;
     setStatus('');
-    startProgress(useSuper ? SUPER_STAGES : PLAIN_STAGES);
+    startProgress(STAGES);
     try {
-      // The bowl geometry goes with every request: Super plans per stand from it,
-      // and both need to know how many rows each stand really has.
+      // The bowl geometry goes with every request: the director plans each
+      // stand from it, and needs to know how many rows each one really has.
       const stadium = describeStadiumContext(buildStadiumContext(map));
       lastStadium = stadium;
       // Section 3: focus the design on the chosen active area, if any.
@@ -695,14 +658,14 @@ export function mountAiPanel(deps: AiPanelDeps): AiPanelHandle {
       const brief = focus ? `${text}: focus the design on ${focus}` : text;
       inflight = new AbortController();
       const res = await generateAiTifo(brief, {
-        ...(useSuper ? { mode: 'super', stadium } : {}),
+        stadium,
         ...(opts.engine ? { engine: opts.engine } : {}),
         signal: inflight.signal,
       });
       if ('needsChoice' in res) {
         stopProgress();
         setQuota(res.quota);
-        showChoice(res, text, useSuper);
+        showChoice(res, text);
         // The status line gives the gist, translated, and leaves the reason to
         // the card — never the provider's reply.
         if (res.reason === 'busy') {
@@ -728,7 +691,7 @@ export function mountAiPanel(deps: AiPanelDeps): AiPanelHandle {
           body:
             (outcome.charged ? t('ai.card.degradedPaid') : t('ai.card.degradedFree')) + ' ' + t('ai.card.degradedWhy'),
           actions: [
-            { label: t('ai.card.tryAgain'), primary: true, run: () => { clearCard(); void run(text, { super: useSuper }); } },
+            { label: t('ai.card.tryAgain'), primary: true, run: () => { clearCard(); void run(text); } },
             { label: t('ai.card.keep'), run: clearCard },
             ...adminWhy(),
           ],
@@ -739,10 +702,7 @@ export function mountAiPanel(deps: AiPanelDeps): AiPanelHandle {
         // reader's language and nothing more.
         showCard({
           tone: 'good',
-          title:
-            res.source === 'model'
-              ? t(useSuper ? 'ai.card.doneSuper' : 'ai.card.donePremium')
-              : t('ai.card.doneQuick'),
+          title: res.source === 'model' ? t('ai.card.donePremium') : t('ai.card.doneQuick'),
         });
         if (bar) bar.textContent = res.source === 'model' ? tv('ai.bar.designed', { label }) : '';
       }
@@ -768,18 +728,18 @@ export function mountAiPanel(deps: AiPanelDeps): AiPanelHandle {
           tone: 'info',
           title: t('ai.card.stopped'),
           body: t('ai.card.stoppedBody'),
-          actions: [{ label: t('ai.card.startAgain'), primary: true, run: () => { clearCard(); void run(text, { super: useSuper }); } }],
+          actions: [{ label: t('ai.card.startAgain'), primary: true, run: () => { clearCard(); void run(text); } }],
         });
         return;
       }
       const tryAgain: CardAction = {
         label: t('ai.card.tryAgain'),
         primary: true,
-        run: () => { clearCard(); void run(text, { super: useSuper }); },
+        run: () => { clearCard(); void run(text); },
       };
       const useQuick: CardAction = {
         label: t('ai.card.useQuick'),
-        run: () => { clearCard(); void run(text, { super: useSuper, engine: 'offline' }); },
+        run: () => { clearCard(); void run(text, { engine: 'offline' }); },
       };
       if (err.reason === 'verify') {
         // Signed in but the email isn't usable yet. No email on the account →
@@ -848,7 +808,6 @@ export function mountAiPanel(deps: AiPanelDeps): AiPanelHandle {
       inflight = null;
       busy = false;
       genBtn.disabled = false;
-      if (wholeChk) wholeChk.disabled = false;
       if (regenBtn) regenBtn.disabled = false;
       if (polishBtn) polishBtn.disabled = false;
     }
@@ -888,7 +847,6 @@ export function mountAiPanel(deps: AiPanelDeps): AiPanelHandle {
     busy = true;
     setError(null);
     genBtn.disabled = true;
-    if (wholeChk) wholeChk.disabled = true;
     if (regenBtn) regenBtn.disabled = true;
     if (polishBtn) polishBtn.disabled = true;
     setStatus('');
@@ -936,7 +894,6 @@ export function mountAiPanel(deps: AiPanelDeps): AiPanelHandle {
       stopProgress();
       busy = false;
       genBtn.disabled = false;
-      if (wholeChk) wholeChk.disabled = false;
       if (regenBtn) regenBtn.disabled = false;
       if (polishBtn) polishBtn.disabled = false;
     }
@@ -968,9 +925,9 @@ export function mountAiPanel(deps: AiPanelDeps): AiPanelHandle {
       void openAuthModal(false, 'signup').then((ok) => { if (ok) syncGenLabel(); });
       return;
     }
-    void run(promptEl.value, { super: !!wholeChk?.checked });
+    void run(promptEl.value);
   });
-  regenBtn?.addEventListener('click', () => void run(promptEl.value, { super: lastSuper }));
+  regenBtn?.addEventListener('click', () => void run(promptEl.value));
   polishBtn?.addEventListener('click', () => void polish());
   shuffleBtn?.addEventListener('click', () => void shuffle());
   revertBtn?.addEventListener('click', revert);
@@ -978,7 +935,7 @@ export function mountAiPanel(deps: AiPanelDeps): AiPanelHandle {
   promptEl.addEventListener('keydown', (e) => {
     if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
       e.preventDefault();
-      void run(promptEl.value, { super: !!wholeChk?.checked });
+      void run(promptEl.value);
     }
   });
   // Example chips fill the prompt.

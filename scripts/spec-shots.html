@@ -1,0 +1,316 @@
+<!doctype html>
+<!-- Dev-only harness for scripts/spec-shots.mts. Not a Vite build input. -->
+<html lang="en"><head><meta charset="UTF-8" /><title>spec shots</title></head>
+<body><div id="out">loading…</div>
+<script type="module">
+  import { compileSpec } from '/src/core/specCompiler.ts';
+  import { DesignStore } from '/src/core/design.ts';
+  import { generateSeatMap } from '/src/core/seatmap.ts';
+  import { templateById } from '/src/core/stadiumCatalog.ts';
+  import { validateSpec } from '/src/core/tifoSpec.ts';
+  import { refineSpec } from '/src/core/specRefine.ts';
+  import { loadTifoFonts } from '/src/core/tifoFonts.ts';
+  import { findFragileSeats } from '/src/core/analysis.ts';
+  import { critiqueDesign, repairSpec } from '/src/core/critique.ts';
+  import { designFromPrompt, composeSuperOffline } from '/src/core/promptDesigner.ts';
+  import { SUPER_AI_EXEMPLARS } from '/src/core/exemplars.ts';
+  import { fitSpecToStadium } from '/src/core/specFit.ts';
+  import { renderTextCanvas, TIFO_FONTS } from '/src/core/text.ts';
+  import { paint2D } from '/src/ui/viewer.ts';
+  import { regionRect } from '/src/core/specCompiler.ts';
+  import { regionPredicate } from '/src/core/specCompiler.ts';
+  import { narrowToSingleStand, normalizeRegion } from '/src/core/tifoSpec.ts';
+  import { rasterize, quantizePixels, cutoutBackground, enhanceForBake, applyGridToSeats } from '/src/core/importImage.ts';
+  import { EDITOR_UNITS } from '/src/core/seatmap.ts';
+
+  // ---- pictures on the seats: today's bake, and the bake the plan proposes ----
+  const decode = async (src) => { const img = new Image(); img.src = src; await img.decode(); return createImageBitmap(img); };
+
+  // Luminance-rank posterisation: 1-D k-means on luminance, k = the tones the
+  // design gives the picture, cluster i (darkest first) → tone i. Hue is ignored,
+  // so a picture generated in any colours lands on the club's palette cleanly.
+  const posterize = (pixels, cols, rows, tones, alphaThreshold = 128) => {
+    const L = new Float32Array(cols * rows);
+    const live = [];
+    for (let p = 0; p < cols * rows; p++) {
+      if (pixels[p * 4 + 3] < alphaThreshold) { L[p] = -1; continue; }
+      L[p] = 0.299 * pixels[p * 4] + 0.587 * pixels[p * 4 + 1] + 0.114 * pixels[p * 4 + 2];
+      live.push(L[p]);
+    }
+    const k = tones.length;
+    const sorted = [...live].sort((a, b) => a - b);
+    let centres = Array.from({ length: k }, (_, i) => sorted[Math.floor(((i + 0.5) / k) * (sorted.length - 1))] ?? 0);
+    for (let it = 0; it < 25; it++) {
+      const sum = new Array(k).fill(0), n = new Array(k).fill(0);
+      for (const l of live) { let b = 0; for (let i = 1; i < k; i++) if (Math.abs(l - centres[i]) < Math.abs(l - centres[b])) b = i; sum[b] += l; n[b]++; }
+      const next = centres.map((c, i) => (n[i] ? sum[i] / n[i] : c));
+      if (next.every((c, i) => Math.abs(c - centres[i]) < 0.05)) break;
+      centres = next;
+    }
+    const order = centres.map((c, i) => [c, i]).sort((a, b) => a[0] - b[0]).map(([, i]) => i);
+    const toneOf = new Array(k); order.forEach((ci, rank) => { toneOf[ci] = tones[rank]; });
+    const out = new Int16Array(cols * rows).fill(-1);
+    for (let p = 0; p < cols * rows; p++) {
+      if (L[p] < 0) continue;
+      let b = 0; for (let i = 1; i < k; i++) if (Math.abs(L[p] - centres[i]) < Math.abs(L[p] - centres[b])) b = i;
+      out[p] = toneOf[b];
+    }
+    return out;
+  };
+
+  // Stencil clean-up: every tone region loses specks and threads under the
+  // 3-seat legibility threshold (a majority filter over the 3x3 neighbourhood,
+  // run twice), so no card stands alone.
+  const cleanup = (grid, cols, rows, passes = 2) => {
+    let g = grid;
+    for (let pass = 0; pass < passes; pass++) {
+      const next = new Int16Array(g);
+      for (let y = 0; y < rows; y++) for (let x = 0; x < cols; x++) {
+        const p = y * cols + x;
+        if (g[p] < 0) continue;
+        const votes = new Map();
+        for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+          const xx = x + dx, yy = y + dy;
+          if (xx < 0 || yy < 0 || xx >= cols || yy >= rows) continue;
+          const v = g[yy * cols + xx]; if (v < 0) continue;
+          votes.set(v, (votes.get(v) ?? 0) + 1);
+        }
+        let best = g[p], bn = -1;
+        for (const [v, n] of votes) if (n > bn || (n === bn && v === g[p])) { best = v; bn = n; }
+        next[p] = best;
+      }
+      g = next;
+    }
+    return g;
+  };
+
+  // Cut-out for the plan: grow the backdrop in from the frame by CONTINUITY
+  // (a neighbour joins when it is close to the pixel it was reached from),
+  // so a vignetted or gently graded backdrop comes away and the subject's
+  // edge, which is a jump, stops the flood. Production would use the Bria
+  // model already wired in server/src/cutout.ts; this is the free version.
+  const cutoutSmooth = (pixels, cols, rows, step = 140, far = 6000) => {
+    const d2 = (p, q) => (pixels[p] - pixels[q]) ** 2 * 0.299 + (pixels[p + 1] - pixels[q + 1]) ** 2 * 0.587 + (pixels[p + 2] - pixels[q + 2]) ** 2 * 0.114;
+    const border = [];
+    for (let x = 0; x < cols; x++) border.push(x, (rows - 1) * cols + x);
+    for (let y = 1; y < rows - 1; y++) border.push(y * cols, y * cols + cols - 1);
+    let r = 0, g = 0, b = 0; for (const c of border) { r += pixels[c * 4]; g += pixels[c * 4 + 1]; b += pixels[c * 4 + 2]; }
+    r /= border.length; g /= border.length; b /= border.length;
+    const farFromBorder = (c) => (pixels[c * 4] - r) ** 2 * 0.299 + (pixels[c * 4 + 1] - g) ** 2 * 0.587 + (pixels[c * 4 + 2] - b) ** 2 * 0.114 > far;
+    const seen = new Uint8Array(cols * rows);
+    const queue = [];
+    for (const c of border) if (!seen[c] && !farFromBorder(c)) { seen[c] = 1; queue.push(c); }
+    for (let head = 0; head < queue.length; head++) {
+      const c = queue[head]; const x = c % cols; const y = (c / cols) | 0;
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const xx = x + dx, yy = y + dy;
+        if (xx < 0 || yy < 0 || xx >= cols || yy >= rows) continue;
+        const n = yy * cols + xx;
+        if (seen[n] || d2(c * 4, n * 4) > step || farFromBorder(n)) continue;
+        seen[n] = 1; queue.push(n);
+      }
+    }
+    const frac = queue.length / (cols * rows);
+    if (frac < 0.02 || frac > 0.92) return false;
+    for (const c of queue) pixels[c * 4 + 3] = 0;
+    return true;
+  };
+
+  // Bake one picture into `store` over `region`, the way the editor does
+  // (objects.ensureGrid + the panel's cover fit), with the quantiser chosen by `mode`.
+  const bakePicture = async (store, map, spec, pic) => {
+    const bmp = await decode(pic.src);
+    const region = narrowToSingleStand(normalizeRegion(pic.region));
+    const rect = regionRect(region, map);
+    const sx = rect.width / bmp.width, sy = rect.height / bmp.height;
+    const contain = Math.min(sx, sy);
+    const s = Math.min(Math.max(sx, sy), contain * 1.3) * (pic.scaleFrac ?? 1);
+    const w = bmp.width * s, h = bmp.height * s;
+    const cols = Math.max(2, Math.min(2400, Math.round(w / 3)));
+    const rows = Math.max(2, Math.min(400, Math.round(h / 8)));
+    const pixels = rasterize(bmp, cols, rows);
+    let grid;
+    if (pic.mode === 'today') {
+      // objects.ensureGrid: flood cut-out, contrast boost, nearest colour; at
+      // under 40 rows halftone and dither are off.
+      cutoutBackground(pixels, cols, rows);
+      grid = quantizePixels(enhanceForBake(pixels, cols, rows), cols, rows, spec.palette, { dither: false, halftone: false, alphaThreshold: 128 });
+    } else {
+      cutoutSmooth(pixels, cols, rows);
+      grid = cleanup(posterize(pixels, cols, rows, pic.tones), cols, rows);
+    }
+    const accept = regionPredicate(region, map);
+    const target = { x: rect.cx - w / 2, y: rect.cy - h / 2, width: w, height: h };
+    store.beginStroke();
+    const n = applyGridToSeats(store, map, grid, cols, rows, target, EDITOR_UNITS.width, accept).length;
+    store.commitStroke();
+    return n;
+  };
+  import { Preview3D, CAMERA_PRESETS } from '/src/render/preview3d.ts';
+
+  const measure = (text, fontId, arc, outline) => {
+    const rt = renderTextCanvas(text, (TIFO_FONTS.find((f) => f.id === fontId) ?? TIFO_FONTS[0]).css, arc, outline);
+    return rt ? { width: rt.canvas.width / rt.glyphHeight, height: rt.canvas.height / rt.glyphHeight } : null;
+  };
+  const maps = new Map();
+  const mapFor = (id) => { if (!maps.has(id)) maps.set(id, generateSeatMap(templateById(id))); return maps.get(id); };
+
+  const specFor = (input) => {
+    if (input.spec) { const v = validateSpec(input.spec); if (!v.valid) throw new Error('spec: ' + JSON.stringify(v.errors)); return v.spec; }
+    if (input.mode === 'quick') return designFromPrompt(input.prompt);
+    if (input.mode === 'super') return composeSuperOffline(input.prompt);
+    if (input.mode?.startsWith('ex')) return validateSpec(SUPER_AI_EXEMPLARS[Number(input.mode.slice(2))].spec).spec;
+    throw new Error('input');
+  };
+
+  // Exactly the client's path (aiPanel.applySpec): refine → fit → compile → critique → one repair.
+  const pipeline = (spec, map, store) => {
+    let working = refineSpec(spec);
+    const f = fitSpecToStadium(working, map, measure);
+    working = f.spec;
+    const changes = f.changes;
+    const res = compileSpec(working, map, store);
+    let critique = critiqueDesign(store.cells, map, working);
+    if (critique.paintedSeats > 0 && critique.fragileSeats > critique.paintedSeats * 0.2) {
+      const rep = repairSpec(working, critique);
+      if (rep.changed) { working = rep.spec; compileSpec(working, map, store); critique = critiqueDesign(store.cells, map, working); }
+    }
+    return { working, critique, changes, warnings: res.warnings };
+  };
+
+  const textReport = (working, map) => {
+    const out = [];
+    working.layers.forEach((l, idx) => {
+      if (l.kind !== 'text' && l.kind !== 'symbol') return;
+      const pal = ['#262a33', '#ffffff'];
+      const solo = { ...working, palette: pal, background: undefined, layers: [{ ...l, colorIndex: 1 }] };
+      const store = new DesignStore(map, pal);
+      compileSpec(solo, map, store);
+      const rows = new Set(); let seats = 0;
+      for (let i = 0; i < map.count; i++) if (store.cells[i] === 1) { seats++; rows.add(map.rowOf[i]); }
+      const fragile = findFragileSeats(store.cells, map).length;
+      out.push({ idx, kind: l.kind, text: l.text ?? l.symbol, region: l.region, rows: rows.size, seats, fragile: seats ? fragile / seats : 0 });
+    });
+    return out;
+  };
+
+  // Where each layer's paint actually lands: seats per stand and per tier, with
+  // the layer compiled on its own over an unpainted bowl.
+  const layerReport = (working, map) => {
+    const standOf = (i) => ['east', 'north', 'west', 'south'][Math.floor(((map.uv[i * 2] + 0.125) % 1) * 4)];
+    return working.layers.map((l, idx) => {
+      const solo = { ...working, background: undefined, layers: [l] };
+      const store = new DesignStore(map, working.palette.slice());
+      compileSpec(solo, map, store);
+      const by = {};
+      let vMin = 1, vMax = 0;
+      for (let i = 0; i < map.count; i++) {
+        if (store.cells[i] === 0) continue;
+        const k = `${standOf(i)}/t${map.tierOf[i]}`;
+        by[k] = (by[k] ?? 0) + 1;
+        const v = map.uv[i * 2 + 1]; if (v < vMin) vMin = v; if (v > vMax) vMax = v;
+      }
+      return { idx, kind: l.kind, what: l.text ?? l.symbol ?? l.pattern ?? l.orientation ?? '', by, v: [vMin, vMax] };
+    });
+  };
+
+  // The seats as fans hold them, one block per seat, wrapped into two strips.
+  const strips = (map, store, px = 3) => {
+    const per = new Map(); let rows = 0;
+    for (let i = 0; i < map.count; i++) { const r = map.rowOf[i]; per.set(r, (per.get(r) ?? 0) + 1); rows = Math.max(rows, r + 1); }
+    let cols = 0; for (const n of per.values()) cols = Math.max(cols, n);
+    const half = Math.ceil(cols / 2) + 1;
+    const stripH = rows * px + 10;
+    const c = document.createElement('canvas'); c.width = half * px + 4; c.height = stripH * 2 + 4;
+    const g = c.getContext('2d'); g.fillStyle = '#0b0b0d'; g.fillRect(0, 0, c.width, c.height);
+    for (let i = 0; i < map.count; i++) {
+      const u = (map.uv[i * 2] + 0.125) % 1;
+      let x = Math.floor(u * cols); const strip = x >= half ? 1 : 0; if (strip) x -= half;
+      const y = strip * stripH + (rows - 1 - map.rowOf[i]) * px;
+      g.fillStyle = store.palette[store.cells[i]] ?? '#f0f';
+      g.fillRect(2 + x * px, 2 + y, px - 1, px - 1);
+    }
+    return c.toDataURL('image/png');
+  };
+
+  // One stand close up: its seats at `px` a seat, stand-local columns, front row at the bottom.
+  const standStrip = (map, store, stand, px = 6) => {
+    const centre = { east: 0, north: 0.25, west: 0.5, south: 0.75 }[stand];
+    const sel = [];
+    let lo = 1, hi = -1, r0 = 1e9, r1 = -1;
+    for (let i = 0; i < map.count; i++) {
+      if (['east', 'north', 'west', 'south'][Math.floor(((map.uv[i * 2] + 0.125) % 1) * 4)] !== stand) continue;
+      let d = map.uv[i * 2] - centre; d -= Math.round(d);
+      sel.push([i, d]); lo = Math.min(lo, d); hi = Math.max(hi, d);
+      r0 = Math.min(r0, map.rowOf[i]); r1 = Math.max(r1, map.rowOf[i]);
+    }
+    if (!sel.length) return null;
+    const per = new Map(); for (const [i] of sel) per.set(map.rowOf[i], (per.get(map.rowOf[i]) ?? 0) + 1);
+    let cols = 0; for (const n of per.values()) cols = Math.max(cols, n);
+    const c = document.createElement('canvas'); c.width = cols * px + 4; c.height = (r1 - r0 + 1) * px + 4;
+    const g = c.getContext('2d'); g.fillStyle = '#0b0b0d'; g.fillRect(0, 0, c.width, c.height);
+    for (const [i, d] of sel) {
+      const x = Math.floor(((d - lo) / (hi - lo + 1e-9)) * (cols - 1));
+      g.fillStyle = store.palette[store.cells[i]] ?? '#f0f';
+      g.fillRect(2 + x * px, 2 + (r1 - map.rowOf[i]) * px, px - 1, px - 1);
+    }
+    return c.toDataURL('image/png');
+  };
+  const histogram = (map, store) => {
+    const by = {};
+    for (let i = 0; i < map.count; i++) {
+      const k = `${['east', 'north', 'west', 'south'][Math.floor(((map.uv[i * 2] + 0.125) % 1) * 4)]}/t${map.tierOf[i]}`;
+      by[k] = by[k] ?? {};
+      by[k][store.cells[i]] = (by[k][store.cells[i]] ?? 0) + 1;
+    }
+    return by;
+  };
+
+  const W = 1280, H = 800;
+  let preview = null, previewStore = null, previewMapId = null, host = null;
+
+  window.__run = async (stadiumId, input, cams) => {
+    const map = mapFor(stadiumId);
+    const spec = specFor(input);
+    if (!host) {
+      host = document.createElement('div');
+      host.style.cssText = `position:fixed;left:0;top:0;width:${W}px;height:${H}px;`;
+      document.body.appendChild(host);
+    }
+    if (previewMapId !== stadiumId) {
+      if (preview) { preview.dispose?.(); host.textContent = ''; }
+      previewStore = new DesignStore(map, spec.palette.slice());
+      preview = new Preview3D(host, map, previewStore);
+      previewMapId = stadiumId;
+    }
+    previewStore.setPalette(spec.palette.slice());
+    const { working, critique, changes, warnings } = pipeline(spec, map, previewStore);
+    previewStore.setPalette(working.palette.slice());
+    const baked = [];
+    for (const pic of input.pictures ?? []) baked.push(await bakePicture(previewStore, map, working, pic));
+    preview.recolorAll();
+    const shots = {};
+    for (const name of cams) {
+      const p = CAMERA_PRESETS.find((c) => c.name === name);
+      preview.applyPreset(p);
+      preview.recolorAll();
+      preview.renderOnce?.();
+      await new Promise((res) => requestAnimationFrame(() => requestAnimationFrame(res)));
+      const c = host.querySelector('canvas');
+      shots[name] = c ? c.toDataURL('image/png') : null;
+    }
+    const flat = document.createElement('canvas'); flat.width = 1400; paint2D(flat, map, previewStore);
+    return {
+      ok: true, shots, flat: flat.toDataURL('image/png'), strips: strips(map, previewStore),
+      spec: working, changes, warnings, critique: { score: critique.score, issues: critique.issues, fragile: critique.fragileSeats, painted: critique.paintedSeats, perStandFill: critique.perStandFill },
+      texts: textReport(working, map), layers: layerReport(working, map), seats: map.count,
+      stands: Object.fromEntries(['east', 'north', 'west', 'south'].map((s) => [s, standStrip(map, previewStore, s)])),
+      histogram: histogram(map, previewStore), baked,
+    };
+  };
+
+  await loadTifoFonts();
+  document.getElementById('out').textContent = 'ready';
+  window.__ready = true;
+</script>
+</body></html>

@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="780" viewBox="0 0 1200 780">
+  <!-- Emulates what an image model returns for "the AFC Champions League trophy,
+       poster art, on a plain blue backdrop": a shaded subject with gradients,
+       a highlight, a soft vignette on the backdrop. -->
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="45%" r="70%">
+      <stop offset="0" stop-color="#1a4ab8"/>
+      <stop offset="1" stop-color="#021a5a"/>
+    </radialGradient>
+    <linearGradient id="cup" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#5a3d05"/>
+      <stop offset="0.22" stop-color="#a97b12"/>
+      <stop offset="0.45" stop-color="#f1d675"/>
+      <stop offset="0.6" stop-color="#d9b23a"/>
+      <stop offset="0.85" stop-color="#8f6710"/>
+      <stop offset="1" stop-color="#4a3204"/>
+    </linearGradient>
+    <linearGradient id="stem" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#4a3204"/>
+      <stop offset="0.5" stop-color="#e2c25a"/>
+      <stop offset="1" stop-color="#5a3d05"/>
+    </linearGradient>
+    <linearGradient id="base" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3b3b45"/>
+      <stop offset="0.5" stop-color="#15151c"/>
+      <stop offset="1" stop-color="#050508"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="780" fill="url(#bg)"/>
+  <!-- base -->
+  <rect x="440" y="650" width="320" height="90" rx="14" fill="url(#base)"/>
+  <rect x="470" y="600" width="260" height="60" rx="10" fill="#2a2a33"/>
+  <!-- stem -->
+  <path d="M560 600 L640 600 L630 470 L570 470 Z" fill="url(#stem)"/>
+  <ellipse cx="600" cy="470" rx="70" ry="22" fill="#b8902a"/>
+  <!-- cup body -->
+  <path d="M300 120 L900 120 C900 330 790 450 600 470 C410 450 300 330 300 120 Z" fill="url(#cup)"/>
+  <!-- rim -->
+  <rect x="280" y="92" width="640" height="46" rx="20" fill="#f4e4a0"/>
+  <rect x="280" y="112" width="640" height="26" rx="12" fill="#c9a33a"/>
+  <!-- handles -->
+  <path d="M300 170 C150 170 130 360 300 380 L300 330 C230 320 220 215 300 215 Z" fill="#9c7416"/>
+  <path d="M900 170 C1050 170 1070 360 900 380 L900 330 C970 320 980 215 900 215 Z" fill="#d6b44a"/>
+  <!-- highlight -->
+  <path d="M400 160 C420 300 470 380 540 430 C470 420 380 330 370 170 Z" fill="#fff5c9" opacity="0.85"/>
+  <!-- ball on top -->
+  <circle cx="600" cy="70" r="46" fill="#e6c860"/>
+  <circle cx="586" cy="56" r="14" fill="#fff8d6"/>
+</svg>

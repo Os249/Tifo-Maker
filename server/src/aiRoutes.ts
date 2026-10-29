@@ -28,7 +28,7 @@ import { secondsToNextPeriod } from './repo';
 import { addCostMicros, addUsage, pictureCostMicros, zeroUsage, type TokenUsage } from './aiPricing';
 import { validateSpec, validateModelSpec, narrowToSingleStand, regionAspectHint, regionRowsHint, type TifoSpec } from '../../src/core/tifoSpec';
 import { refineSpec } from '../../src/core/specRefine';
-import { designFromPrompt, composeSuperOffline } from '../../src/core/promptDesigner';
+import { composeSuperOffline } from '../../src/core/promptDesigner';
 import { ensureHeroImage } from '../../src/core/heroImage';
 import { matchClub } from '../../src/core/clubs';
 import { generateSpecViaProvider, buildDirectorPrompt, critiqueSpecViaProvider, activeProvider, clubHintLine, writeCopy, copyLine, meterRetries, providerModel, type ProviderResult } from './aiProvider';
@@ -493,7 +493,7 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
       .catch(() => {});
   };
   /** The model id a tier resolves to on the main provider, for the operator's failure detail. */
-  const modelOf = (isSuper: boolean): string => providerModel(activeProvider(), isSuper ? 'premium' : 'fast');
+  const modelOf = (): string => providerModel(activeProvider(), 'premium');
   /** Name the model in the operator's detail when the provider's text did not. */
   const withModel = (err: string, model: string): string =>
     model === 'default' || err.includes(model) ? err : `${err} (model ${model})`;
@@ -520,9 +520,8 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
   /** May the caller use the premium model at all? freeForAll is the kill-switch. */
   const premiumAllowed = (a: Access): boolean =>
     a.kind === 'admin' || (a.kind === 'user' && (a.pro || deps.freeForAll));
-  /** Free, instant offline ("Quick Designer") spec — never consumes a credit. */
-  const quickDesign = (prompt: string, isSuper: boolean): ReturnType<typeof validateSpec> =>
-    validateSpec(isSuper ? composeSuperOffline(prompt) : designFromPrompt(prompt));
+  /** Free, instant offline ("Quick Designer") spec — never consumes a credit. The whole bowl, like every design. */
+  const quickDesign = (prompt: string): ReturnType<typeof validateSpec> => validateSpec(composeSuperOffline(prompt));
 
   // Exchange the admin password for a signed, time-limited unlock token.
   // This single shared password gates the AI designer AND every /api/admin/*
@@ -602,10 +601,10 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
       return reply.code(400).send({ error: safe.message, reason: 'blocked' });
     }
 
-    // The client's stadium context: Super AI plans the whole bowl from it, and
-    // the standard designer needs it too — on a 13-row ground "hero in the top
-    // 60%, support below" is two words nobody can read.
-    const isSuper = body.mode === 'super';
+    // The client's stadium context: every design plans the whole bowl from it.
+    // On a 13-row ground "hero in the top 60%, support below" is two words
+    // nobody can read. `mode` no longer picks a pipeline — there is one, the
+    // director's — it only says which allowance the design is metered on.
     const stadium = typeof body.stadium === 'string' ? body.stadium.slice(0, 2000) : undefined;
     const engine = body.engine === 'offline' ? 'offline' : 'auto';
     const userId = access.kind === 'user' ? access.userId : null;
@@ -623,7 +622,7 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
     // Quick Designer: free, instant offline engine — the user's explicit choice, or
     // used automatically when premium is switched off. Never consumes a credit.
     if (engine === 'offline' || !premiumAllowed(access)) {
-      const q = quickDesign(prompt, isSuper);
+      const q = quickDesign(prompt);
       if (!q.valid || !q.spec) {
         note(access, mode0, 'invalid', {
           reason: 'invalid_design',
@@ -636,7 +635,7 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
     }
 
     // Result cache: an identical brief returns the prior premium design instantly (free).
-    const key = cacheKey('gen', isSuper ? 'super' : 'std', prompt, stadium, activeProvider());
+    const key = cacheKey('gen', mode0, prompt, stadium, activeProvider());
     const hit = genCache.get(key);
     if (hit) {
       note(access, mode0, 'cache');
@@ -685,20 +684,20 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
       // ai_events carries the total, which is what the request cost.
       let spent: TokenUsage = zeroUsage();
 
-      // Stage 1 (Super only): the copywriter picks the WORDS before anything is
-      // laid out. A hero phrase is what decides whether a stand can be filled at
-      // all, and a model choosing words while already reasoning about regions
-      // reliably picks the club's legal name or the brief verbatim. Best-effort:
-      // a failure or a disabled stage just means the director designs from the raw
-      // brief, exactly as before. Costs a fraction of a cent on the fast tier.
-      const wantsCopy = isSuper && process.env.AI_COPYWRITER !== '0';
+      // Stage 1: the copywriter picks the WORDS before anything is laid out. A
+      // hero phrase is what decides whether a stand can be filled at all, and a
+      // model choosing words while already reasoning about regions reliably
+      // picks the club's legal name or the brief verbatim. Best-effort: a
+      // failure or a disabled stage just means the director designs from the
+      // raw brief. Costs a fraction of a cent on the fast tier.
+      const wantsCopy = process.env.AI_COPYWRITER !== '0';
       const copy = wantsCopy ? await writeCopy(prompt, hint, (u) => { spent = addUsage(spent, u); }).catch(() => null) : null;
       const brief = copy ? `${prompt}\n\n${copyLine(copy)}` : prompt;
 
-      const modelResult = await generateSpecViaProvider(
-        brief,
-        isSuper ? { system: buildDirectorPrompt(), context: stadium, tier: 'premium', hint } : { context: stadium, tier: 'fast', hint },
-      );
+      // Stage 2: the director plans the whole bowl, on the premium tier. There
+      // used to be a cheaper single-stand designer for requests without
+      // mode: "super"; a tifo is the whole stadium, so every design is this one.
+      const modelResult = await generateSpecViaProvider(brief, { system: buildDirectorPrompt(), context: stadium, tier: 'premium', hint });
       spent = addUsage(spent, modelResult.usage);
       if (modelResult.fellBackFrom) {
         app.log.info({ mode: mode0, from: modelResult.fellBackFrom, to: modelResult.model }, 'ai generate: answered by the fallback model');
@@ -719,15 +718,15 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
         const fail: AiFailure = modelResult.spec
           ? {
               reason: 'invalid_design',
-              detail: sanitizeDetail(`${modelResult.model ?? modelOf(isSuper)}: spec failed validation: ${(r.errors ?? []).slice(0, 3).map((e) => `${e.path} ${e.message}`).join('; ')}`),
+              detail: sanitizeDetail(`${modelResult.model ?? modelOf()}: spec failed validation: ${(r.errors ?? []).slice(0, 3).map((e) => `${e.path} ${e.message}`).join('; ')}`),
             }
-          : failureOf(modelResult, 'the model did not answer', modelOf(isSuper));
+          : failureOf(modelResult, 'the model did not answer', modelOf());
         app.log.warn(
           {
             reason: fail.reason,
             detail: fail.detail,
             mode: mode0,
-            model: modelResult.model ?? modelOf(isSuper),
+            model: modelResult.model ?? modelOf(),
             provider: modelResult.provider ?? activeProvider(),
           },
           'ai generate: premium could not deliver',
@@ -744,11 +743,11 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
 
       // Phase 4: deterministic art-director pass — fix legibility/contrast/field.
       let spec = refineSpec(r.spec);
-      // Super AI's whole promise is a picture on the bowl. The director is told
-      // to make one the hero and usually does, but a Super design that came back
-      // with only symbols and fills is a Quick Designer result charged as premium.
-      // So the guarantee is structural, not a request in a prompt.
-      if (isSuper) {
+      // A premium design's whole promise is a picture on the bowl. The director
+      // is told to make one the hero and usually does, but a design that came
+      // back with only symbols and fills is a Quick Designer result charged as
+      // premium. So the guarantee is structural, not a request in a prompt.
+      {
         const club = matchClub(prompt.toLowerCase());
         const hero = ensureHeroImage(spec, { brief: prompt, crest: club?.crest });
         spec = hero.spec;
@@ -949,7 +948,7 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
       } else {
         failed = res.spec
           ? { reason: 'invalid_design', detail: sanitizeDetail(`critique spec failed validation: ${(improved?.errors ?? []).slice(0, 3).map((e) => `${e.path} ${e.message}`).join('; ')}`) }
-          : failureOf(res, 'invalid response', modelOf(true));
+          : failureOf(res, 'invalid response', modelOf());
       }
     }
     if (failed) {

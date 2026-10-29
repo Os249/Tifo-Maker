@@ -1466,7 +1466,9 @@ async function makeDesign(app: FastifyInstance, token: string, isPublic = false)
       // its own (resetInSec was once exactly 503 and failed this check).
       assert.ok(!/gemini|HTTP|high demand|spikes in demand|AIza/i.test(r.body) && !/UNAVAILABLE|"code":\s*503/.test(r.body), `nothing of the provider's reply reaches the editor: ${r.body}`);
     }
-    assert.equal(providerCalls, 4, 'each generation tried the model and retried the 503 once');
+    // Every design is the whole-bowl director's: the copywriter is asked
+    // first, then the director, and each 503 is retried once.
+    assert.equal(providerCalls, 8, 'each generation asked the copywriter and the director, and retried each 503 once');
 
     // A refused picture used to put the provider's error in the notes too.
     const src = (await import('node:fs')).readFileSync('server/src/aiRoutes.ts', 'utf8');
@@ -2065,11 +2067,16 @@ async function makeDesign(app: FastifyInstance, token: string, isPublic = false)
 
   // ---- through the routes, against a stubbed Gemini ----
   const realFetch = globalThis.fetch;
-  const saved = { key: process.env.GEMINI_API_KEY, prov: process.env.AI_PROVIDER, t: process.env.AI_TIMEOUT_MS, tp: process.env.AI_TIMEOUT_PREMIUM_MS };
+  const saved = { key: process.env.GEMINI_API_KEY, prov: process.env.AI_PROVIDER, t: process.env.AI_TIMEOUT_MS, tp: process.env.AI_TIMEOUT_PREMIUM_MS, cw: process.env.AI_COPYWRITER, img: process.env.AI_IMAGE_PROVIDER };
   process.env.GEMINI_API_KEY = 'AIzaSyTESTKEY0000000000';
   process.env.AI_PROVIDER = 'gemini';
   process.env.AI_TIMEOUT_MS = '1200';
   process.env.AI_TIMEOUT_PREMIUM_MS = '1200';
+  // The replies below are scripted one design call at a time. Every design
+  // now runs the copywriter first and asks for a hero picture after (which,
+  // with only a Gemini key, would go to the same stubbed host): both off.
+  process.env.AI_COPYWRITER = '0';
+  process.env.AI_IMAGE_PROVIDER = 'none';
   const reply = (spec: unknown) => new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: JSON.stringify(spec) }] }, finishReason: 'STOP' }] }), { status: 200, headers: { 'content-type': 'application/json' } });
   let plan: Array<'hang' | unknown> = [];
   let calls = 0;
@@ -2142,7 +2149,7 @@ async function makeDesign(app: FastifyInstance, token: string, isPublic = false)
     await app.close();
   } finally {
     globalThis.fetch = realFetch;
-    for (const [k, v] of [['GEMINI_API_KEY', saved.key], ['AI_PROVIDER', saved.prov], ['AI_TIMEOUT_MS', saved.t], ['AI_TIMEOUT_PREMIUM_MS', saved.tp]] as const) {
+    for (const [k, v] of [['GEMINI_API_KEY', saved.key], ['AI_PROVIDER', saved.prov], ['AI_TIMEOUT_MS', saved.t], ['AI_TIMEOUT_PREMIUM_MS', saved.tp], ['AI_COPYWRITER', saved.cw], ['AI_IMAGE_PROVIDER', saved.img]] as const) {
       if (v === undefined) delete process.env[k]; else process.env[k] = v;
     }
   }
@@ -2835,8 +2842,9 @@ async function makeDesign(app: FastifyInstance, token: string, isPublic = false)
     assert.equal(st1.modeOutcomes.super.model, 1);
     assert.equal(picturesToday(), 1, 'the picture is counted in the day\'s picture budget');
 
-    // A Standard design the fast model could not make, made by the fallback.
-    respond = (u) => (modelIn(u) === 'gemini-3.1-flash-lite' ? refuse(503, 'high demand') : specReply(GOOD));
+    // A standard design (every design runs on the premium tier now) that the
+    // premium model could not make, made by the fallback.
+    respond = (u) => (modelIn(u) === 'gemini-3.5-flash-lite' ? specReply(GOOD) : refuse(503, 'high demand'));
     const s2 = (await app.inject({ method: 'POST', url: '/api/ai/generate', headers: bearer(fan.token), payload: { prompt: 'Ittihad tigers gold' } })).json();
     assert.equal(s2.source, 'model', `the fallback made the design instead of "busy": ${JSON.stringify(s2).slice(0, 200)}`);
     const st2 = await events.stats(30);
@@ -2860,11 +2868,11 @@ async function makeDesign(app: FastifyInstance, token: string, isPublic = false)
     const st4 = await events.stats(30);
     assert.equal(st4.modeOutcomes.std.busy, 1);
     assert.equal(st4.cost.byMode.std.measured, 2, 'the failed request is measured');
-    assert.ok(st4.recentFailures[0].detail.includes('gemini-3.5-flash-lite') && st4.recentFailures[0].detail.includes('gemini-3.1-flash-lite'), st4.recentFailures[0].detail);
+    assert.ok(st4.recentFailures[0].detail.includes('gemini-3.5-flash-lite') && st4.recentFailures[0].detail.includes('gemini-3.6-flash'), st4.recentFailures[0].detail);
 
     // Both models refuse for DIFFERENT reasons: the first model's is the
     // reason. A busy premium model is "try again", not "resting till tomorrow".
-    respond = (u) => (modelIn(u) === 'gemini-3.1-flash-lite' ? refuse(503, 'This model is currently experiencing high demand.') : refuse(429, 'You exceeded your current quota.'));
+    respond = (u) => (modelIn(u) === 'gemini-3.5-flash-lite' ? refuse(429, 'You exceeded your current quota.') : refuse(503, 'This model is currently experiencing high demand.'));
     const s5 = (await app.inject({ method: 'POST', url: '/api/ai/generate', headers: bearer(fan.token), payload: { prompt: 'Shabab green wave' } })).json();
     assert.equal(s5.needsChoice, true);
     assert.equal(s5.cause, 'busy', `the first model's reason reaches the user: ${s5.cause}`);
@@ -2876,7 +2884,10 @@ async function makeDesign(app: FastifyInstance, token: string, isPublic = false)
     const today = new Date().toISOString().slice(0, 10);
     const stored = await budget.load(today);
     assert.equal(stored.calls, premiumCallsToday(), `stored ${stored.calls}, counted ${premiumCallsToday()}`);
-    assert.equal(stored.pictures, 1);
+    // Two pictures: the Super design's, and the one every design is now
+    // guaranteed (s2, the standard design the fallback made, had no image
+    // layer of its own, so one was added and drawn).
+    assert.equal(stored.pictures, 2);
 
     // ---- the daily budget survives a restart ----
     forgetBudgetMemoryForTests(); // what a deploy does to the memory count
@@ -3242,12 +3253,13 @@ async function makeDesign(app: FastifyInstance, token: string, isPublic = false)
     const st = await events.stats(30);
     assert.deepEqual(st.cost.models.map((m) => m.model), ['claude-sonnet-5-5'], 'Claude is on file as the model that answered');
     assert.ok(st.cost.usd > 0, 'and priced');
-    // A Standard design Claude cannot make, made by Gemini, is a success.
+    // A standard design Claude cannot make, made by Gemini, is a success. Every
+    // design runs on the premium tier, so Gemini's premium model answers.
     onClaude = () => err(529, OVERLOADED);
     onGemini = () => geminiReply(GOOD);
     const s2 = (await app.inject({ method: 'POST', url: '/api/ai/generate', headers: bearer(fan.token), payload: { prompt: 'Ittihad tigers' } })).json();
     assert.equal(s2.source, 'model');
-    assert.ok((await events.stats(30)).cost.models.some((m) => m.model === 'gemini-3.1-flash-lite'), 'and Gemini is named as the model that answered');
+    assert.ok((await events.stats(30)).cost.models.some((m) => m.model === 'gemini-3.6-flash'), 'and Gemini is named as the model that answered');
     // Everything refuses: the user is told "busy", the operator gets Claude's reason.
     onGemini = () => err(503, '{"error":{"code":503,"message":"high demand"}}');
     const s3 = (await app.inject({ method: 'POST', url: '/api/ai/generate', headers: bearer(fan.token), payload: { prompt: 'Nassr yellow' } })).json();
@@ -3255,7 +3267,8 @@ async function makeDesign(app: FastifyInstance, token: string, isPublic = false)
     assert.equal(s3.cause, 'busy');
     const f = (await events.stats(30)).recentFailures[0];
     assert.equal(f.reason, 'overloaded');
-    assert.ok(/claude-haiku-5-5/.test(f.detail) && /gemini/.test(f.detail), f.detail);
+    // The director's model: every design runs on the premium tier now.
+    assert.ok(/claude-sonnet-5-5/.test(f.detail) && /gemini/.test(f.detail), f.detail);
     assert.ok(!/sk-ant-api03-TESTKEY/.test(JSON.stringify(await events.stats(30))), 'no key on file');
     await app.close();
   } finally {

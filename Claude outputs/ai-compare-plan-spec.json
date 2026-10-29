@@ -1,0 +1,80 @@
+{
+ "title": "زعيم آسيا",
+ "summary": "Draft 3: as draft 2, with the Arabic headline at the full tier height so the fit pass no longer has to thicken it.",
+ "palette": [
+  "#262a33",
+  "#0033a0",
+  "#ffffff",
+  "#001d5c",
+  "#d4af37"
+ ],
+ "background": 1,
+ "layers": [
+  {
+   "kind": "symbol",
+   "region": "east",
+   "symbol": "crescent",
+   "colorIndex": 2,
+   "scaleFrac": 1.0,
+   "align": "center",
+   "wide": 1.7
+  },
+  {
+   "kind": "text",
+   "region": {
+    "stand": "north",
+    "tier": 0
+   },
+   "text": "زعيم آسيا",
+   "colorIndex": 2,
+   "fontId": "poster",
+   "arcDeg": 0,
+   "heightFrac": 0.98,
+   "align": "center",
+   "stretch": 1.0
+  },
+  {
+   "kind": "fill",
+   "region": {
+    "stand": "north",
+    "tier": 1
+   },
+   "colorIndex": 2
+  },
+  {
+   "kind": "text",
+   "region": {
+    "stand": "north",
+    "tier": 1
+   },
+   "text": "AL HILAL",
+   "colorIndex": 1,
+   "fontId": "sign",
+   "arcDeg": 0,
+   "heightFrac": 0.9,
+   "align": "center",
+   "stretch": 1.5
+  },
+  {
+   "kind": "text",
+   "region": "west",
+   "text": "الزعيم",
+   "colorIndex": 2,
+   "fontId": "poster",
+   "arcDeg": 0,
+   "heightFrac": 0.9,
+   "align": "center",
+   "stretch": 1.2
+  },
+  {
+   "kind": "stripes",
+   "region": "south",
+   "colors": [
+    1,
+    2
+   ],
+   "orientation": "vertical",
+   "bands": 10
+  }
+ ]
+}
