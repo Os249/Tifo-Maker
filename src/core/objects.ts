@@ -4,7 +4,8 @@ import {
   type Grid, type GridJSON, cloneGrid, gridFromJSON, gridToJSON,
 } from './layers';
 import { cutoutBackground, enhanceForBake, halftoneCellFor, maskFromAlpha, quantizePixels, rasterize } from './importImage';
-import { renderTextCanvas, type TifoFont } from './text';
+import { fontCssOf, renderTextCanvas, type TifoFont } from './text';
+import { isPortraitStyle, stylePortrait, type PortraitStyle } from './portraitStyles';
 import { drawSymbol } from './symbols';
 
 /**
@@ -86,6 +87,13 @@ export interface ImageObject extends BaseObject {
   /** Flood the flat backdrop away so the design underneath shows through. */
   cutout?: boolean;
   alphaThreshold: number;
+  /**
+   * A portrait style (Pro to pick, core/portraitStyles.ts): stencil, halftone,
+   * pop art, or a 2- or 3-colour poster in the design's colours. Absent: the
+   * picture as it is. It is the design's data, so it is drawn whether or not
+   * Pro is on; only the picker is Pro.
+   */
+  style?: PortraitStyle;
 }
 
 export interface ShapeObject extends BaseObject {
@@ -401,7 +409,9 @@ export function gridKeyFor(o: TifoObject): string {
     case 'shape':
       return `s|${o.shape}|${o.colorIndex}|${cols}x${rows}`;
     case 'image':
-      return `i|${cols}x${rows}|${o.dither ? 1 : 0}${o.halftone ? 1 : 0}${o.cutout ? 1 : 0}|${o.alphaThreshold}`;
+      // A style is added only when there is one, so a picture without one keeps
+      // the key it was saved with and is not re-drawn on load.
+      return `i|${cols}x${rows}|${o.dither ? 1 : 0}${o.halftone ? 1 : 0}${o.cutout ? 1 : 0}|${o.alphaThreshold}${isPortraitStyle(o.style) ? `|${o.style}` : ''}`;
     case 'cells':
       return 'c';
   }
@@ -478,12 +488,23 @@ export function ensureGrid(o: TifoObject, palette: string[]): boolean {
     // colour the generator produced. enhanceForBake preserves alpha, and the
     // quantizer skips transparent cells, so the layers beneath keep their cards.
     if (o.cutout) cutoutBackground(pixels, cols, rows);
-    data = quantizePixels(enhanceForBake(pixels, cols, rows), cols, rows, palette, {
-      dither: o.dither && affordable > 1,
-      halftone: !!o.halftone && cell > 1,
-      halftoneCell: cell,
-      alphaThreshold: o.alphaThreshold,
-    });
+    if (isPortraitStyle(o.style)) {
+      // A portrait style draws its own tones (and takes the place of dither and
+      // halftone), from the picture as it is: it lifts the face's landmarks
+      // itself, and the contrast boost above would only flatten them first.
+      // The cell's shape keeps its blurs round and its dots circles.
+      data = stylePortrait(o.style, pixels, cols, rows, palette, {
+        alphaThreshold: o.alphaThreshold,
+        aspect: o.width / cols / (o.height / rows),
+      });
+    } else {
+      data = quantizePixels(enhanceForBake(pixels, cols, rows), cols, rows, palette, {
+        dither: o.dither && affordable > 1,
+        halftone: !!o.halftone && cell > 1,
+        halftoneCell: cell,
+        alphaThreshold: o.alphaThreshold,
+      });
+    }
   } else {
     data = maskFromAlpha(pixels, cols, rows, o.colorIndex); // text + shape: 1-colour mask
   }
@@ -492,8 +513,9 @@ export function ensureGrid(o: TifoObject, palette: string[]): boolean {
   return true;
 }
 
+/** A saved layer's font CSS; a Pro voice renders for anyone who opens the design (core/proVoices). */
 export function fontForObject(fonts: TifoFont[], id: string): string {
-  return fonts.find((f) => f.id === id)?.css ?? fonts[0].css;
+  return fontCssOf(id, fonts);
 }
 
 /**
@@ -609,6 +631,7 @@ export interface ObjectJSON {
   halftone?: boolean;
   cutout?: boolean;
   alphaThreshold?: number;
+  style?: PortraitStyle;
   // shape
   shape?: string;
 }
@@ -647,8 +670,10 @@ export function objectToJSON(o: TifoObject): ObjectJSON {
     if (o.gridKey) out.gridKey = o.gridKey;
   }
   if (o.kind === 'text') Object.assign(out, { text: o.text, fontId: o.fontId, arcDeg: o.arcDeg, heightSeats: o.heightSeats });
-  else if (o.kind === 'image') Object.assign(out, { name: o.name, src: o.src, dither: o.dither, halftone: o.halftone, cutout: o.cutout, alphaThreshold: o.alphaThreshold });
-  else if (o.kind === 'shape') out.shape = o.shape;
+  else if (o.kind === 'image') {
+    Object.assign(out, { name: o.name, src: o.src, dither: o.dither, halftone: o.halftone, cutout: o.cutout, alphaThreshold: o.alphaThreshold });
+    if (isPortraitStyle(o.style)) out.style = o.style;
+  } else if (o.kind === 'shape') out.shape = o.shape;
   return out;
 }
 
@@ -693,11 +718,14 @@ export function objectFromJSON(j: unknown, fonts: TifoFont[], paletteLen: number
   if (kind === 'image') {
     const src = typeof r.src === 'string' && PICTURE_SRC.test(r.src) ? r.src : undefined;
     if (!src && !grid) return null;
-    return {
+    const pic: ImageObject = {
       ...base, kind, bitmap: null, name: typeof r.name === 'string' ? r.name.slice(0, 120) : 'picture', src,
       dither: r.dither === true, halftone: r.halftone === true, cutout: r.cutout === true,
       alphaThreshold: num(r.alphaThreshold ?? 128, 1, 254) ?? 128,
     };
+    // Only a style this version knows: anything else is dropped, never trusted.
+    if (isPortraitStyle(r.style)) pic.style = r.style;
+    return pic;
   }
   if (kind === 'shape') {
     if (typeof r.shape !== 'string') return null;

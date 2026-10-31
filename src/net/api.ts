@@ -1909,10 +1909,12 @@ export async function fetchAiQuota(): Promise<AiQuota> {
 // Everything here only DISPLAYS what the server decided (server/src/pro.ts).
 // Nothing a page sends can change a plan, a limit or the gift.
 
-export type AllowanceKind = 'std' | 'super' | 'polish' | 'photo' | 'cutout';
-export type ProPlan = 'free' | 'match' | 'season' | 'gift' | 'group';
-const KINDS: readonly AllowanceKind[] = ['std', 'super', 'polish', 'photo', 'cutout'];
-const PLANS: readonly ProPlan[] = ['free', 'match', 'season', 'gift', 'group'];
+/** 'std' is an AI design: every design is the one whole-stadium pipeline, so there is no Super allowance. */
+export type AllowanceKind = 'std' | 'polish' | 'photo' | 'cutout';
+/** One paid plan, a month of Pro; and the 7-day gift. */
+export type ProPlan = 'free' | 'monthly' | 'gift';
+const KINDS: readonly AllowanceKind[] = ['std', 'polish', 'photo', 'cutout'];
+const PLANS: readonly ProPlan[] = ['free', 'monthly', 'gift'];
 const isKind = (v: unknown): v is AllowanceKind => (KINDS as readonly unknown[]).includes(v);
 const isPlan = (v: unknown): v is ProPlan => (PLANS as readonly unknown[]).includes(v);
 
@@ -1925,25 +1927,22 @@ export interface Allowance {
   resetAt: string;
 }
 
+/** The gift never expires unclaimed: an offer waits until it is started. */
 export type GiftState =
   | { state: 'none' }
-  | { state: 'offered'; claimBy: string; days: number }
+  | { state: 'offered'; days: number }
   | { state: 'active'; endsAt: string; days: number }
-  | { state: 'used'; endedAt: string | null }
-  | { state: 'expired' };
+  | { state: 'used'; endedAt: string | null };
 
 export type PlanLimits = Record<AllowanceKind, { period: 'day' | 'week' | 'month'; limit: number }[]>;
 
 export interface ProOffer {
-  /** What each plan allows, from the server's settings (for the Pro page's table). */
-  limits?: { free: PlanLimits; match: PlanLimits; season: PlanLimits };
+  /** What Free and Pro allow, from the server's settings (for the Pro page's table). */
+  limits?: { free: PlanLimits; pro: PlanLimits };
   currency: string;
-  match: { price: number; hours: number };
-  season: { price: number; endsAt: string };
-  matchCreditDays: number;
+  /** The one plan: a month of Pro. */
+  monthly: { price: number; days: number };
   gift: { days: number };
-  giftEndOffer: { price: number; hours: number };
-  group: { from: number };
   paymentsOpen: boolean;
 }
 

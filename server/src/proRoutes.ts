@@ -8,7 +8,7 @@
  * and which plan.
  */
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import { ALLOWANCE_KINDS, FREE_WINDOWS, OFFER, PASS_PLANS, PLAN_WINDOWS, SEASON_END, proMode, previewUsers, type AllowanceKind, type PassPlan, type Window } from './proPlan';
+import { ALLOWANCE_KINDS, FREE_WINDOWS, OFFER, PLAN_WINDOWS, proMode, previewUsers, type AllowanceKind, type Window } from './proPlan';
 import { disposableListStatus, type ProAccount, type ProService } from './pro';
 import type { UserRow } from './repo';
 
@@ -26,24 +26,20 @@ export interface ProRouteDeps {
 
 const acctOf = (u: UserRow): ProAccount => ({ id: u.id, username: u.username, email: u.email, emailVerified: !!u.emailVerifiedAt });
 
-/** Each plan's allowances, as the Pro page's table shows them. */
-function limitsOf(w: Record<AllowanceKind, Window[]>): Record<AllowanceKind, { period: string; limit: number }[]> {
-  const out = {} as Record<AllowanceKind, { period: string; limit: number }[]>;
-  for (const k of ALLOWANCE_KINDS) out[k] = w[k].map((x) => ({ period: x.period, limit: x.limit }));
+/** Each plan's allowances, as the Pro page's table shows them (a pass's own month is "a month"). */
+function limitsOf(w: Record<AllowanceKind, Window[]>): Record<AllowanceKind, { period: 'day' | 'week' | 'month'; limit: number }[]> {
+  const out = {} as Record<AllowanceKind, { period: 'day' | 'week' | 'month'; limit: number }[]>;
+  for (const k of ALLOWANCE_KINDS) out[k] = w[k].map((x) => ({ period: x.period === 'cycle' ? 'month' : x.period, limit: x.limit }));
   return out;
 }
 
-/** The parts of the offer the Pro page shows. */
+/** The parts of the offer the Pro page shows: Free against Pro, one price. */
 function publicOffer() {
   return {
-    limits: { free: limitsOf(FREE_WINDOWS), match: limitsOf(PLAN_WINDOWS.match), season: limitsOf(PLAN_WINDOWS.season) },
+    limits: { free: limitsOf(FREE_WINDOWS), pro: limitsOf(PLAN_WINDOWS.monthly) },
     currency: OFFER.currency,
-    match: { price: OFFER.match.price, hours: OFFER.match.hours },
-    season: { price: OFFER.season.price, endsAt: OFFER.season.endsAt },
-    matchCreditDays: OFFER.matchCreditDays,
+    monthly: { price: OFFER.monthly.price, days: OFFER.monthly.days },
     gift: { days: OFFER.gift.days },
-    giftEndOffer: { price: OFFER.giftEndOffer.price, hours: OFFER.giftEndOffer.hours },
-    group: { from: OFFER.group.from },
     paymentsOpen: OFFER.paymentsOpen,
   };
 }
@@ -70,12 +66,13 @@ export function registerProRoutes(app: FastifyInstance, deps: ProRouteDeps): voi
     const user = await deps.accountOf(req, userId).catch(() => null);
     if (!user || !pro.live(user.username)) return { live: false, signedIn: true };
     const acct = acctOf(user);
-    const [{ plan, pass }, gift, notified] = await Promise.all([
+    const [holding, gift, notified] = await Promise.all([
       pro.plan(user.id),
       pro.giftFor(acct),
       pro.repo.notified(user.id),
     ]);
-    const allowances = await pro.allowances(user.id, plan);
+    const { plan, pass } = holding;
+    const allowances = await pro.allowances(user.id, holding);
     return {
       live: true,
       signedIn: true,
@@ -147,9 +144,9 @@ export function registerProRoutes(app: FastifyInstance, deps: ProRouteDeps): voi
   });
 
   /**
-   * Give an account a pass by hand: a prize, a supporter group's members, a
-   * refund made good, or the owner trying Pro on himself. Days from now; the
-   * season plan without days runs to the season's end.
+   * Give an account Pro by hand: a prize, a supporter group's members, a
+   * refund made good, or the owner trying Pro on himself. Days from now; 30
+   * (one month of Pro) when none are given. The only plan is "monthly".
    */
   app.post('/api/admin/pro/grant', cfg, async (req, reply) => {
     if (!(await deps.adminAccess(req))) return reply.code(403).send({ error: 'admin access required' });
@@ -157,23 +154,19 @@ export function registerProRoutes(app: FastifyInstance, deps: ProRouteDeps): voi
     const username = typeof b.username === 'string' ? b.username.trim() : '';
     const plan = typeof b.plan === 'string' ? b.plan : '';
     if (!USERNAME.test(username)) return reply.code(400).send({ error: 'a username is required' });
-    if (!(PASS_PLANS as string[]).includes(plan) || plan === 'gift') {
-      return reply.code(400).send({ error: 'plan must be match, season or group' });
-    }
+    // "monthly" is the one plan; an empty plan means it too. The gift is never granted by hand.
+    if (plan !== '' && plan !== 'monthly') return reply.code(400).send({ error: 'plan must be monthly' });
     const u = await deps.getUserByName(username).catch(() => null);
     if (!u) return reply.code(404).send({ error: 'no such account' });
     const now = pro.now();
-    let ends: Date;
-    if (b.days === undefined || b.days === null || b.days === '') {
-      ends = plan === 'match' ? new Date(now.getTime() + OFFER.match.hours * 3600_000) : new Date(SEASON_END);
-    } else {
-      const days = Number(b.days);
+    let days: number = OFFER.monthly.days;
+    if (!(b.days === undefined || b.days === null || b.days === '')) {
+      days = Number(b.days);
       if (!Number.isInteger(days) || days < 1 || days > 400) return reply.code(400).send({ error: 'days must be a whole number from 1 to 400' });
-      ends = new Date(now.getTime() + days * 24 * 3600_000);
     }
-    if (ends.getTime() <= now.getTime()) return reply.code(400).send({ error: 'that pass would already be over' });
+    const ends = new Date(now.getTime() + days * 24 * 3600_000);
     const actor = await deps.userOf(req).catch(() => null);
-    const pass = await pro.repo.grantPass({ userId: u.id, plan: plan as PassPlan, startsAt: now, endsAt: ends, source: 'admin', createdBy: actor });
+    const pass = await pro.repo.grantPass({ userId: u.id, plan: 'monthly', startsAt: now, endsAt: ends, source: 'admin', createdBy: actor });
     return { ok: true, pass: { id: pass.id, plan: pass.plan, endsAt: pass.endsAt } };
   });
 

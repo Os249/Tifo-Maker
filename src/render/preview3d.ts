@@ -8,6 +8,7 @@ import { noTifoMask } from '../core/venueDetails';
 import { buildBannerRigs, type BannerRigLayer } from './simulator/bannerRig';
 import { spanFrameCache, type StandFrame } from './simulator/standFrame';
 import { bannerShot } from './simulator/bannerCamera';
+import { tifoFootprint, tifoShots } from './simulator/cameras';
 import { standIsRoofed } from './simulator/roof';
 import { emptySeatColours } from './seatColours';
 import { buildChairsSteps, seatFacing, seatStateTexture, KEY_LIGHT_DIR, SEAT_TEX_W, type ChairBuild, type ChairState } from './seatChairs';
@@ -76,6 +77,16 @@ const CARD_UP = 1.22;
 const CARD_FORWARD = 0.06;
 const CARD_TILT = 0.22;
 const FOV = 50;
+/** The longest a closed view waits for a shader compile in flight before it frees the GPU anyway. */
+const COMPILE_WAIT_MS = 4000;
+/**
+ * An export narrower than the screen (vertical 9:16 from a wide window)
+ * keeps this much of the screen's width in view, by widening the lens no
+ * further than EXPORT_MAX_FOV (vertical degrees): past that the stands at
+ * the top and bottom of the frame stretch.
+ */
+const EXPORT_KEEP_WIDTH = 0.9;
+const EXPORT_MAX_FOV = 80;
 /**
  * Where an indoor hall's cut sits when it is not cut: far above anything, so
  * the one clipping plane it keeps clips nothing (performance plan P1.24).
@@ -160,6 +171,14 @@ export class Preview3D {
   private readonly settings: ViewTierSettings;
   private running = false;
   private disposed = false;
+  /**
+   * A compileAsync in flight while the building loads. three polls the
+   * programs it waits for on a timer, and a renderer disposed under it makes
+   * that timer throw (an uncaught "reading 'isReady'"): a view closed while
+   * its building compiled, a hero chip changed, the community viewer shut.
+   * dispose() frees the GPU once it has settled (the simulator does the same).
+   */
+  private compiling: Promise<void> | null = null;
   private raf = 0;
   private banners: BannerRigLayer | null = null;
   /** The same frames the panel and Match Day measure, one per stand window. */
@@ -191,6 +210,10 @@ export class Preview3D {
   private fastFrames = 0;
   /** The preset the camera is on, until somebody moves it by hand. */
   private onPreset: string | null = null;
+  /** Drawing at an export's own size (drawAt): the window's size waits until it ends. */
+  private drawingAt = false;
+  /** Sizes this device was asked to draw at, and whether it could (canDraw). */
+  private readonly drawable = new Map<string, boolean>();
   private readonly fitCache = new Map<string, CameraPreset>();
   private extentCache: { ax: number; bz: number; ty: number } | null = null;
   /** Roofs: shown unless asked otherwise; an indoor hall is cut open when seen from above. */
@@ -747,7 +770,10 @@ export class Preview3D {
         mark('compile');
         for (const part of parts) {
           if (this.disposed) break;
-          await this.renderer.compileAsync(part, this.camera, this.scene);
+          const compiled = this.renderer.compileAsync(part, this.camera, this.scene).then(() => undefined, () => undefined);
+          this.compiling = compiled;
+          await compiled;
+          if (this.compiling === compiled) this.compiling = null;
           await slice();
           // Each program's uniforms and attributes asked for here, one
           // program at a time: three asks for them at a program's first
@@ -1265,6 +1291,55 @@ export class Preview3D {
   }
 
   /**
+   * There is a tifo one camera can look at: something painted, and not round
+   * the whole bowl (simulator/cameras.ts). The camera menu offers "Your tifo"
+   * only then.
+   */
+  hasTifoShot(): boolean {
+    return this.tifoFp() !== null;
+  }
+  private tifoFp(): ReturnType<typeof tifoFootprint> {
+    const no = this.noTifo;
+    return tifoFootprint(this.map, (i) => this.store.cells[i] !== 0 && !(no !== null && no[i] === 1));
+  }
+  /**
+   * Straight at the tifo, from across the pitch.
+   *
+   * Reported on 30 Oct 2026: a tifo behind one goal had no camera here that
+   * faced it. The same framing Match Day opens on ("Your tifo"), at this
+   * view's own lens: back along the line from the tifo to the far side's
+   * gantry, as far as holds the whole of it. False with no tifo to look at.
+   */
+  focusTifo(): boolean {
+    const fp = this.tifoFp();
+    if (!fp) return false;
+    const w = this.host.clientWidth;
+    const h = this.host.clientHeight;
+    const aspect = w > 0 && h > 0 ? w / h : this.camera.aspect;
+    let ax = 1;
+    let bz = 1;
+    let ty = 1;
+    for (let k = 0; k < this.map.count; k++) {
+      ax = Math.max(ax, Math.abs(this.map.pos3[k * 3]));
+      ty = Math.max(ty, this.map.pos3[k * 3 + 1]);
+      bz = Math.max(bz, Math.abs(this.map.pos3[k * 3 + 2]));
+    }
+    const [wide] = tifoShots(fp, { ax, bz, ty }, aspect);
+    const [px, py, pz] = wide.position;
+    const [tx, ty0, tz] = wide.target;
+    const far = Math.hypot(px - tx, py - ty0, pz - tz) || 1;
+    // The same picture at this lens: as much further back as the lens is wider.
+    const scale = Math.tan((wide.fov * Math.PI) / 360) / Math.tan((this.camera.fov * Math.PI) / 360);
+    const d = far * scale;
+    this.camera.position.set(tx + ((px - tx) / far) * d, ty0 + ((py - ty0) / far) * d, tz + ((pz - tz) / far) * d);
+    this.controls.target.set(tx, ty0, tz);
+    this.controls.update();
+    this.onPreset = null;
+    this.requestRender();
+    return true;
+  }
+
+  /**
    * Add extra scene furniture. Kept deliberately narrow: the preview owns its
    * scene and its lifecycle, so callers hand over an object and dispose of it
    * themselves rather than reaching into the scene graph.
@@ -1277,6 +1352,8 @@ export class Preview3D {
   // ------------------------------------------------------------- rendering
 
   private resize(): void {
+    // An export drawing at its own size: the window's size comes back with end().
+    if (this.drawingAt) return;
     const w = this.host.clientWidth;
     const h = this.host.clientHeight;
     if (w === 0 || h === 0) return;
@@ -1436,6 +1513,120 @@ export class Preview3D {
   }
 
   /**
+   * The longest side, in pixels, this device's WebGL can draw a picture at:
+   * the smallest of its largest renderbuffer, viewport and texture.
+   */
+  maxDrawSize(): number {
+    const gl = this.renderer.getContext();
+    const rb = Number(gl.getParameter(gl.MAX_RENDERBUFFER_SIZE)) || 0;
+    const vp = gl.getParameter(gl.MAX_VIEWPORT_DIMS) as ArrayLike<number> | null;
+    const tex = this.renderer.capabilities.maxTextureSize || rb;
+    return Math.min(rb, vp?.[0] ?? 0, vp?.[1] ?? 0, tex);
+  }
+
+  /**
+   * Whether this device can draw a `width` × `height` picture: within
+   * maxDrawSize(), and given a drawing buffer that big when asked (a browser
+   * short of memory hands back a smaller one without saying). Tried once a
+   * size, and the view is put back straight after.
+   */
+  canDraw(width: number, height: number): boolean {
+    if (Math.max(width, height) > this.maxDrawSize()) return false;
+    const key = `${width}x${height}`;
+    const known = this.drawable.get(key);
+    if (known !== undefined) return known;
+    // Busy drawing at a size already, or without a context: within the
+    // limits is the best answer there is, and it is not kept.
+    if (this.drawingAt || this.contextLost || this.disposed) return true;
+    const at = this.drawAt(width, height);
+    at?.end();
+    this.drawable.set(key, !!at);
+    return !!at;
+  }
+
+  /**
+   * Draw at an exact size, whatever the window (an export's Full HD or
+   * vertical 9:16 video, the 4K poster). The drawing buffer takes that size
+   * and the canvas keeps its place on the page: while it lasts the view shows
+   * the frames scaled to fit (`data-export-size`), and the window's own size
+   * waits. The camera stays where it is. A picture narrower than the screen
+   * keeps most of the screen's width in view by widening the lens (up to
+   * EXPORT_MAX_FOV), so a tifo across a stand is not cut in half in a
+   * phone-shaped frame; the whole-bowl views are fitted again to the new
+   * shape. `end()` puts the size, the camera and the view back as they were.
+   *
+   * Null when this device cannot draw that size: the caller falls back to
+   * the screen's size and says so.
+   */
+  drawAt(width: number, height: number): { end(): void } | null {
+    if (this.drawingAt || this.disposed || this.contextLost) return null;
+    if (Math.max(width, height) > this.maxDrawSize()) return null;
+    const ratio = this.renderer.getPixelRatio();
+    const was = new THREE.Vector2();
+    this.renderer.getSize(was);
+    const pos = this.camera.position.clone();
+    const target = this.controls.target.clone();
+    const fov = this.camera.fov;
+    const aspect = this.camera.aspect;
+    const near = this.camera.near;
+    this.drawingAt = true;
+    let ended = false;
+    const end = (): void => {
+      if (ended) return;
+      ended = true;
+      this.renderer.setPixelRatio(ratio);
+      this.renderer.setSize(was.x, was.y, false);
+      this.camera.position.copy(pos);
+      this.controls.target.copy(target);
+      this.camera.fov = fov;
+      this.camera.aspect = aspect;
+      this.camera.near = near;
+      this.camera.updateProjectionMatrix();
+      this.controls.update();
+      delete this.canvas.dataset.exportSize;
+      this.drawingAt = false;
+      // The window may have changed while it drew: take its size now.
+      this.resize();
+      if (!this.contextLost) {
+        this.updateRoofs();
+        this.draw();
+      }
+    };
+    this.renderer.setPixelRatio(1);
+    // false: the canvas keeps its CSS size, so nothing on the page moves.
+    this.renderer.setSize(width, height, false);
+    const gl = this.renderer.getContext();
+    if (gl.drawingBufferWidth !== width || gl.drawingBufferHeight !== height) {
+      end();
+      return null;
+    }
+    this.canvas.dataset.exportSize = `${width}x${height}`;
+    const from = was.x > 0 && was.y > 0 ? was.x / was.y : aspect;
+    const to = width / height;
+    this.camera.aspect = to;
+    if (this.onPreset === 'Full view' || this.onPreset === 'Aerial') {
+      const p = this.fitted(this.onPreset);
+      if (p) {
+        this.camera.position.set(...p.position);
+        this.controls.target.set(...p.target);
+        this.camera.lookAt(this.controls.target);
+        // A whole-bowl camera fitted to a tall frame stands much further
+        // back: the near plane follows it there, or the depth buffer runs out
+        // of steps and the roof and the pitch flicker through each other.
+        // Nothing is within a five-hundredth of that distance of it.
+        this.camera.near = Math.max(near, Math.hypot(...p.position) / 500);
+      }
+    } else if (to < from) {
+      // Keep most of the screen's width: tan(h) = tan(v) * aspect.
+      const keep = Math.tan((fov * Math.PI) / 360) * from * EXPORT_KEEP_WIDTH;
+      const want = (Math.atan(keep / to) * 360) / Math.PI;
+      this.camera.fov = Math.min(EXPORT_MAX_FOV, Math.max(fov, want));
+    }
+    this.camera.updateProjectionMatrix();
+    return { end };
+  }
+
+  /**
    * Draw the scene once. The premium armchairs pick their detail for this
    * camera and this buffer's size first (performance plan P2.13).
    */
@@ -1491,19 +1682,26 @@ export class Preview3D {
     this.store.offDirty?.(this.onDirtyCb);
     this.store.offPaletteChange?.(this.onPaletteCb);
     this.controls.dispose();
-    this.banners?.dispose();
-    this.banners = null;
-    // Kept for the next view of this ground where it may be, else disposed.
-    this.releaseBuilding();
-    for (const t of this.staticTrash) t.dispose();
-    this.envTarget?.dispose();
     this.canvas.removeEventListener('webglcontextlost', this.onCtxLost);
-    this.renderer.dispose();
-    // Give the context back now rather than whenever the canvas is collected:
-    // the community modal and the hero chips make a view per open, and Chrome
-    // keeps sixteen live contexts before it kills the oldest (performance plan
-    // P1.19).
-    if (!this.renderer.getContext().isContextLost()) this.renderer.forceContextLoss();
     this.canvas.remove();
+    // The GPU side: now, or once a compile in flight has settled (a moment at
+    // most; it is never left waiting longer than COMPILE_WAIT_MS).
+    const release = (): void => {
+      this.banners?.dispose();
+      this.banners = null;
+      // Kept for the next view of this ground where it may be, else disposed.
+      this.releaseBuilding();
+      for (const t of this.staticTrash) t.dispose();
+      this.envTarget?.dispose();
+      this.renderer.dispose();
+      // Give the context back now rather than whenever the canvas is collected:
+      // the community modal and the hero chips make a view per open, and Chrome
+      // keeps sixteen live contexts before it kills the oldest (performance plan
+      // P1.19).
+      if (!this.renderer.getContext().isContextLost()) this.renderer.forceContextLoss();
+    };
+    const pending = this.compiling;
+    if (pending) void Promise.race([pending, new Promise<void>((r) => setTimeout(r, COMPILE_WAIT_MS))]).then(release);
+    else release();
   }
 }

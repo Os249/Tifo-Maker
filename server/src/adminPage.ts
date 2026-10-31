@@ -1784,7 +1784,7 @@ function paintSection(){
    a grant or revoke is written to the Security tab's audit trail. */
 var PRO = null;
 var PRO_LOOKUP = null;
-var PRO_PLAN_LABEL = { match:'Match Pass', season:'Season Pass', gift:'7-day gift', group:'Group plan' };
+var PRO_PLAN_LABEL = { monthly:'Pro monthly', gift:'7-day gift' };
 var PRO_MODE_TEXT = {
   off: 'Off: nobody sees Pro; everyone keeps the old AI limits.',
   preview: 'Preview: only the accounts in PRO_PREVIEW_USERS see Pro and its limits.',
@@ -1803,9 +1803,7 @@ function proTab(){
   if (!PRO.paymentsOpen) html += '<div class="callout"><b>Payments are not open.</b> Buy buttons ask to be told when Pro opens; the count is below.</div>';
   html += '<div class="grid">';
   html += kpi('Gifts offered', st.gifts.offered || 0, fmt(st.gifts.accepted || 0) + ' accepted, ' + fmt(st.gifts.active || 0) + ' running now', true);
-  html += kpi('Match Passes now', (st.passes && st.passes.match) || 0);
-  html += kpi('Season Passes now', (st.passes && st.passes.season) || 0);
-  html += kpi('Group plans now', (st.passes && st.passes.group) || 0);
+  html += kpi('Pro monthly now', (st.passes && st.passes.monthly) || 0, 'bought or given by hand', true);
   html += kpi('Asked to hear when Pro opens', st.notify || 0, 'one per account', true);
   html += '</div>';
 
@@ -1834,11 +1832,11 @@ function proTab(){
     html += '<p class="note">No account called @' + esc(PRO_LOOKUP) + '.</p>';
   }
 
-  html += '<h2 class="sec">Give a pass</h2>';
-  html += '<p class="note">For a prize, a supporters\\' group or trying Pro on yourself. Written to the audit trail.</p>';
+  html += '<h2 class="sec">Give Pro</h2>';
+  html += '<p class="note">For a prize, a supporters\\' group or trying Pro on yourself. One plan, Pro monthly: 30 days unless you type other days; its month of allowances is counted from today. Written to the audit trail.</p>';
   html += '<p class="note"><label>Username <input id="pro-g-user" type="text" autocomplete="off" spellcheck="false" maxlength="32" value="' + esc(PRO_LOOKUP || '') + '"></label> '
-        + '<label>Plan <select id="pro-g-plan"><option value="match">Match Pass (72 hours)</option><option value="season">Season Pass (to 31 May)</option><option value="group">Group plan (to 31 May)</option></select></label> '
-        + '<label>Days <input id="pro-g-days" type="number" min="1" max="400" step="1" placeholder="plan default" style="width:110px"></label> '
+        + '<label>Plan <select id="pro-g-plan"><option value="monthly">Pro monthly</option></select></label> '
+        + '<label>Days <input id="pro-g-days" type="number" min="1" max="400" step="1" placeholder="30" style="width:110px"></label> '
         + '<button id="pro-grant" type="button">Give</button></p>';
   html += '<p id="pro-out" class="note" role="status" aria-live="polite"></p>';
   return html;

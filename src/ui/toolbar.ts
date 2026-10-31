@@ -10,10 +10,12 @@ import { PALETTE_PRESETS } from '../core/template';
 import { PATTERN_PRESETS } from '../core/patterns';
 import { takeClaimIntent } from '../net/api';
 import { MiniMapPixels, canvasOf, dataUrlOf, stripPixels } from '../render/seatPixels';
-import { renderTextCanvas, TIFO_FONTS, type RenderedText } from '../core/text';
-import { loadTifoFonts } from '../core/tifoFonts';
+import { findFontCss, fontCssOf, renderTextCanvas, TIFO_FONTS, type RenderedText } from '../core/text';
+import { loadProFonts, loadTifoFonts } from '../core/tifoFonts';
+import { PRO_FONTS, isProVoice, proVoicesIn } from '../core/proVoices';
 import { MAX_PICTURES, encodePictureSrcAsync, rememberPicture, type ObjectLayer } from '../core/objects';
 import type { Composer } from '../core/composer';
+import { isPortraitStyle } from '../core/portraitStyles';
 import { writeLayers } from '../core/layerStore';
 import { mountLayersPanel, layerName } from './layersPanel';
 import { MIN_LEGIBLE_RUN, findFragileSeats } from '../core/analysis';
@@ -31,6 +33,8 @@ import {
 import { decodeImportBitmap, extractPhotoPalette, rasterize } from '../core/importImage';
 import { fetchPro } from '../net/api';
 import { mountProChip, proChipHtml } from './pro';
+import type { ProToolsContext } from './proTools';
+import { designProItems, exportGate, withoutDesignProItems, type GateAnswer } from './proGate';
 import { BANNER_HISTORY_EVENT, bannerActive, bannerHost } from './bannerHost';
 import { openAuthModal } from './authModal';
 import { openGallery } from './gallery';
@@ -850,8 +854,9 @@ export function mountToolbar(
   const textArc = $('#text-arc') as unknown as HTMLInputElement;
   const textArcOut = $('#text-arc-out');
 
-  const currentFontCss = (): string =>
-    TIFO_FONTS.find((f) => f.id === textFont.value)?.css ?? TIFO_FONTS[0].css;
+  // fontCssOf knows the Pro voices too (core/proVoices): the picker lists them
+  // only for an account Pro is on for (ui/proFonts.ts).
+  const currentFontCss = (): string => fontCssOf(textFont.value);
 
   // Live ghost preview: rebuilt on text/font/arc edits, rescaled on size edits,
   // retinted on color changes. The editor positions it under the cursor.
@@ -897,12 +902,20 @@ export function mountToolbar(
   };
   const textLayerShown = (): void => {
     if (!facesAsked && objects.list().some((o) => o.kind === 'text')) wantFaces();
+    // A Pro voice in the design: its faces are assets, not the gate, so they
+    // load for whoever opened it (core/proVoices). Each voice is asked for once.
+    const pro = proVoicesIn(objects.list());
+    if (pro.length) void loadProFonts(pro);
   };
   objects.onChange(textLayerShown);
   textLayerShown();
   if (editor.tool === 'text') wantFaces();
   textInput.addEventListener('input', rebuildTextPreviewT);
-  textFont.addEventListener('change', rebuildTextPreview);
+  textFont.addEventListener('change', () => {
+    rebuildTextPreview();
+    // A Pro voice's faces may still be on their way: draw it again once they land.
+    if (isProVoice(textFont.value)) void loadProFonts([textFont.value]).then(rebuildTextPreview);
+  });
   textArc.addEventListener('input', () => {
     textArcOut.textContent = textArc.value;
     rebuildTextPreviewT();
@@ -915,7 +928,7 @@ export function mountToolbar(
   const placeTextAt = async (x: number, y: number): Promise<void> => {
     // Measuring a glyph before its face has arrived silently falls back to a
     // system font, and that mistake would be baked into the seats for good.
-    await loadTifoFonts();
+    await Promise.all([loadTifoFonts(), loadProFonts([textFont.value])]);
     if (bannerActive()) {
       // On a banner the text stays a live object with real colour, and it is
       // sized to the cap height that reads across the pitch rather than to a
@@ -1204,6 +1217,8 @@ export function mountToolbar(
       dither: ditherChk.checked,
       cutout: cutoutChk?.checked === true,
       alphaThreshold: Number(importAlpha.value),
+      // A portrait style picked in this bar (ui/proStyles.ts, Pro): only one this version knows.
+      style: isPortraitStyle(importBar.dataset.proStyle) ? importBar.dataset.proStyle : undefined,
     };
     const src = await (imp.src ?? encodePictureSrcAsync(imp.bitmap));
     rememberPicture(src, imp.bitmap);
@@ -1220,6 +1235,7 @@ export function mountToolbar(
       dither: placeAs.dither,
       cutout: placeAs.cutout,
       alphaThreshold: placeAs.alphaThreshold,
+      ...(placeAs.style ? { style: placeAs.style } : {}),
     });
     // Keep the bitmap alive (the object now owns a reference); just exit import mode.
     setTool('select');
@@ -2851,7 +2867,8 @@ export function mountToolbar(
       if (![...objFont.options].some((o) => o.value === sel.fontId)) {
         const opt = document.createElement('option');
         opt.value = sel.fontId;
-        opt.textContent = sel.fontId;
+        // A Pro voice by its name: the layer shows what it is set in, Pro or not.
+        opt.textContent = PRO_FONTS.find((f) => f.id === sel.fontId)?.name ?? sel.fontId;
         objFont.appendChild(opt);
       }
       objFont.value = sel.fontId;
@@ -2914,8 +2931,8 @@ export function mountToolbar(
   objFont.addEventListener('change', async () => {
     const sel = objects.selected;
     if (!sel || sel.kind !== 'text') return;
-    await loadTifoFonts();
-    const fontCss = TIFO_FONTS.find((f) => f.id === objFont.value)?.css ?? sel.fontCss;
+    await Promise.all([loadTifoFonts(), loadProFonts([objFont.value])]);
+    const fontCss = findFontCss(objFont.value) ?? sel.fontCss;
     const r = renderTextCanvas(sel.text, fontCss, sel.arcDeg);
     const patch: Record<string, unknown> = { fontId: objFont.value, fontCss };
     if (r) patch.width = sel.height * (r.canvas.width / r.canvas.height);
@@ -3128,12 +3145,18 @@ export function mountToolbar(
     actionBar.hidden = false;
     const bw = actionBar.offsetWidth;
     const bh = actionBar.offsetHeight;
+    // Inside the seat canvas, not the whole canvas area: in Split the strip
+    // is under the stadium, and "above the layer" used to put the bar on the
+    // stadium, on top of the AI bar (the 30 Oct 2026 report's picture).
+    const strip = document.getElementById('canvas-host')?.getBoundingClientRect();
+    const top = strip && strip.height > 0 ? Math.max(0, strip.top - wrap.top) : 0;
+    const bottom = strip && strip.height > 0 ? Math.min(wrap.height, strip.bottom - wrap.top) : wrap.height;
     let x = (lx + rx) / 2 - wrap.left - bw / 2;
     let y = ty - wrap.top - bh - 12;
     const [, by] = editor.worldToClient(bounds.minX, bounds.maxY);
-    if (y < 8) y = by - wrap.top + 12; // no room above: under it
+    if (y < top + 8) y = by - wrap.top + 12; // no room above: under it
     x = Math.max(8, Math.min(wrap.width - bw - 8, x));
-    y = Math.max(8, Math.min(wrap.height - bh - 8, y));
+    y = Math.max(top + 8, Math.min(bottom - bh - 8, y));
     actionBar.style.transform = `translate(${Math.round(x)}px, ${Math.round(y)}px)`;
   };
   overlay.onGesture = (active) => {
@@ -3445,6 +3468,10 @@ export function mountToolbar(
 
   const gifBtn = $('#reveal-gif') as unknown as HTMLButtonElement;
   gifBtn.addEventListener('click', async () => {
+    // The flat GIF carries no mark; what Pro can be in it is the design's own
+    // (a portrait style, a Pro font), asked about once (proGate.ts).
+    const how = await exportGate(designProItems(objects));
+    if (how === null) return;
     gifBtn.disabled = true;
     gifBtn.textContent = 'Encoding…';
     try {
@@ -3452,12 +3479,13 @@ export function mountToolbar(
       // The drum call is on a real beat, so its GIF plays in real time; the
       // others have always played at double speed, and still do.
       const isDrum = player.revealId === 'drum-call';
-      const blob = await exportRevealGifAsync(map, store, {
+      const make = (): Promise<Blob> => exportRevealGifAsync(map, store, {
         reveal: revealSel.value as RevealId,
         frames: Math.round(player.durationSec * (isDrum ? 12 : 9)),
         fps: isDrum ? 12 : 18,
         lengthSec: player.durationSec,
       });
+      const blob = how === 'free' ? await withoutDesignProItems(objects, make) : await make();
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -3514,20 +3542,26 @@ export function mountToolbar(
   window.addEventListener('tifo:pro', syncNoMark);
   window.addEventListener('tifo:auth', syncNoMark);
   /**
-   * Whether this export may leave the mark off: ticked, and Pro running, or
-   * the free version chosen on the sheet. Null when the sheet was closed.
+   * What this export would be as chosen: without the mark (ticked), at a Pro
+   * size (ui/proExport.ts, video only), and the names of every Pro item it
+   * carries, the design's own included, for the one question (proGate.ts).
    */
-  const exportClean = async (): Promise<boolean | null> => {
-    if (!sxNoMark.checked || sxNoMarkLabel.hidden) return false;
-    const st = await fetchPro(true).catch(() => null);
-    if (!st?.live) return false;
-    if (st.plan && st.plan !== 'free') return true;
-    const { openExportSheet } = await import('./proSheets');
-    const choice = await openExportSheet([i18nT('pro.mark.option')], st);
-    return choice === 'free' ? false : null;
+  const sxChosen = (): { clean: boolean; size: { width: number; height: number } | null; items: string[] } => {
+    const clean = sxNoMark.checked && !sxNoMarkLabel.hidden;
+    const size = sxFormat.value === 'gif' ? null : proCtx.stadium?.size() ?? null;
+    const items = [
+      ...(clean ? [i18nT('pro.mark.option')] : []),
+      ...(size ? proCtx.stadium?.items() ?? [] : []),
+      ...designProItems(objects),
+    ];
+    return { clean, size, items };
   };
 
-  const buildExportOpts = (forGif: boolean, clean = sxNoMark.checked && !sxNoMarkLabel.hidden): StadiumExportOpts => ({
+  const buildExportOpts = (
+    forGif: boolean,
+    clean = sxNoMark.checked && !sxNoMarkLabel.hidden,
+    size: StadiumExportOpts['size'] = forGif ? null : proCtx.stadium?.size() ?? null,
+  ): StadiumExportOpts => ({
     reveal: revealSel.value as RevealId,
     durationSec: player.durationSec,
     fps: forGif ? 15 : 30,
@@ -3535,6 +3569,7 @@ export function mountToolbar(
     watermark: clean ? '' : 'tifomaker.org',
     gifWidth: forGif ? Number(sxGifWidth.value) : undefined,
     drum: !forGif && drumOn() ? drum : null,
+    size: forGif ? null : size,
   });
 
   // The 3D bowl only renders inside a visible, sized host, so switch to the
@@ -3550,6 +3585,35 @@ export function mountToolbar(
     return p;
   };
 
+  // Pro's tools (ui/proTools.ts): the stadium video's sizes and the 4K
+  // poster, portrait styles, Pro fonts and the club kit. Loaded only once
+  // /api/pro says Pro is on for this account, so the editor's start carries
+  // none of their code or words.
+  const proCtx: ProToolsContext = {
+    root,
+    editor,
+    store,
+    map,
+    objects,
+    getPreview: () => getPreview?.() ?? null,
+    say: (msg) => {
+      message.textContent = msg;
+    },
+    title: () => docTitle.value.trim() || 'tifo',
+    ensurePreview: ensureStadiumPreview,
+    paletteChanged: () => {
+      editor.rebuildPalette();
+      renderPalette();
+    },
+  };
+  const mountPro = (): void => {
+    void fetchPro().then((st) => {
+      if (st.live) void import('./proTools').then((m) => m.mountProTools(proCtx));
+    });
+  };
+  mountPro();
+  window.addEventListener('tifo:auth', mountPro);
+
   const downloadBlob = (blob: Blob, filename: string): void => {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -3559,7 +3623,7 @@ export function mountToolbar(
     URL.revokeObjectURL(url);
   };
 
-  const runExport = async (preview: Preview3D, say: (t: string) => void, clean: boolean): Promise<void> => {
+  const runExport = async (preview: Preview3D, say: (t: string) => void, clean: boolean, size: StadiumExportOpts['size'] = null): Promise<void> => {
     const forGif = sxFormat.value === 'gif';
     const name = `${docTitle.value.trim() || 'tifo'}-stadium`;
     if (forGif) {
@@ -3573,11 +3637,32 @@ export function mountToolbar(
         return;
       }
       say('Recording video…');
-      const { blob, extension, universal } = await exportStadiumVideo(preview, map, buildExportOpts(false, clean));
+      const { blob, extension, universal } = await exportStadiumVideo(preview, map, buildExportOpts(false, clean, size));
       downloadBlob(blob, `${name}.${extension}`);
       say(`Video exported (${(blob.size / 1024).toFixed(0)} KB)`
         + (universal ? '' : ' — this browser could not record H.264, so it may not open everywhere.'));
     }
+  };
+  /**
+   * One question per export (proGate.ts), then the export: 'pro' as chosen;
+   * 'free' today's free export (the mark, the screen's size) with the
+   * design's Pro items lifted while it runs; null (the sheet closed) nothing.
+   */
+  const askAndExport = async (preview: Preview3D, say: (t: string) => void): Promise<GateAnswer> => {
+    const want = sxChosen();
+    const how = await exportGate(want.items);
+    if (how === 'pro') await runExport(preview, say, want.clean, want.size);
+    else if (how === 'free') {
+      await withoutDesignProItems(objects, async () => {
+        // Two frames, for the seats to follow the lifted layers (no more: a hidden tab has none).
+        await Promise.race([
+          new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))),
+          new Promise<void>((r) => setTimeout(r, 250)),
+        ]);
+        await runExport(preview, say, false, null);
+      });
+    }
+    return how;
   };
 
   sxPreviewBtn.addEventListener('click', async () => {
@@ -3623,11 +3708,9 @@ export function mountToolbar(
       dlBtn.addEventListener('click', async () => {
         dlBtn.disabled = true;
         try {
-          const clean = await exportClean();
-          if (clean === null) return;
-          await runExport(preview, (t) => {
+          await askAndExport(preview, (t) => {
             modalMsg.textContent = t;
-          }, clean);
+          });
         } catch (err) {
           modalMsg.textContent = i18nT('ed.sx.failed');
         } finally {
@@ -3645,14 +3728,13 @@ export function mountToolbar(
   sxExportBtn.addEventListener('click', async () => {
     sxExportBtn.disabled = true;
     try {
-      const clean = await exportClean();
-      if (clean === null) return;
+      // The stadium first: a Pro size is checked against what it can draw.
       const preview = await ensureStadiumPreview();
       if (!preview) {
         sxSay('Could not start the 3D stadium preview.');
         return;
       }
-      await runExport(preview, sxSay, clean);
+      await askAndExport(preview, sxSay);
     } catch (err) {
       sxSay(`Export failed: ${(err as Error).message}`);
     } finally {

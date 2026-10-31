@@ -18,11 +18,13 @@ import { DesignStore } from './core/design';
 import { AssetStore, type SceneModel } from './core/sceneAssets';
 import { BannerStore, type BannerSceneModel } from './core/banner';
 import { ObjectLayer, decodePictures } from './core/objects';
+import { designProItems, withoutDesignProItems } from './ui/proGate';
 import { Composer } from './core/composer';
 import { readLayers } from './core/layerStore';
 import { TIFO_FONTS } from './core/text';
 import { EDITOR_UNITS } from './core/seatmap';
 import type { BannerView } from './ui/bannerView';
+import { bannerScene } from './ui/bannerHost';
 import type { Preview3D } from './render/preview3d';
 import { track } from './net/analytics';
 import {
@@ -537,6 +539,7 @@ async function main(): Promise<void> {
   // toolbar, because saving a design has to be able to reach them: a banner
   // that only exists in this browser is not a banner anyone can be shown.
   const bannerStore = new BannerStore();
+  bannerScene.store = bannerStore;
   // What the stands allow a banner — which tiers a flown one can use, and the
   // shape a gap between two tiers imposes — needs the stand geometry, which
   // the seat editor never loads. It arrives on the side, after the first
@@ -639,6 +642,50 @@ async function main(): Promise<void> {
   const btn3d = document.getElementById('view-3d') as HTMLButtonElement;
   const btnSplit = document.getElementById('view-split') as HTMLButtonElement;
   const camBar = document.getElementById('cam-bar')!;
+  /**
+   * The eye on the camera bar: the stadium with nothing over it.
+   *
+   * Reported on 30 Oct 2026: the camera bar sat over the top of the stadium,
+   * which is where the far stand is, and a tifo on it could not be seen. The
+   * bar now sits in the corner, and the eye clears it and the AI bar off the
+   * stadium until it is pressed again (the browser keeps the choice). H does
+   * the same, as H hides the panel in Match Day.
+   */
+  const STAGE_CLEAN_KEY = 'tifo_stage_clean_v1';
+  let stageClean = ((): boolean => {
+    try {
+      return localStorage.getItem(STAGE_CLEAN_KEY) === '1';
+    } catch {
+      return false;
+    }
+  })();
+  const camHide = document.getElementById('cam-hide') as HTMLButtonElement;
+  const paintStageClean = (): void => {
+    canvasWrap.classList.toggle('stage-clean', stageClean && !camBar.hidden);
+    const [label, tip] = stageClean ? ['ed.camShow', 'ed.camShowT'] : ['ed.camHide', 'ed.camHideT'];
+    // Through data-i18n-attr as well, so a language switch keeps the right one.
+    camHide.dataset.i18nAttr = `aria-label:${label},title:${tip}`;
+    camHide.setAttribute('aria-label', t(label));
+    camHide.title = t(tip);
+    camHide.innerHTML = `<i class="ti ${stageClean ? 'ti-eye' : 'ti-eye-off'}" aria-hidden="true"></i>`;
+  };
+  const setStageClean = (on: boolean): void => {
+    stageClean = on;
+    try {
+      if (on) localStorage.setItem(STAGE_CLEAN_KEY, '1');
+      else localStorage.removeItem(STAGE_CLEAN_KEY);
+    } catch { /* storage off: this visit keeps it */ }
+    paintStageClean();
+  };
+  camHide.addEventListener('click', () => setStageClean(!stageClean));
+  window.addEventListener('keydown', (e) => {
+    if (e.key.toLowerCase() !== 'h' || e.ctrlKey || e.metaKey || e.altKey || e.repeat) return;
+    const tag = (e.target as HTMLElement | null)?.tagName;
+    if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA' || (e.target as HTMLElement | null)?.isContentEditable) return;
+    // Only with the stadium on screen, and not under Match Day, whose own H hides its panel.
+    if (camBar.hidden || document.querySelector('.mds-overlay')) return;
+    setStageClean(!stageClean);
+  });
   /**
    * Frame the strip: the stand that is picked, or the whole bowl. In Split the
    * strip is a dock under the stadium, and a stand picked there stays picked
@@ -762,6 +809,21 @@ async function main(): Promise<void> {
       return opt;
     });
     onLangChange(() => camOpts.forEach((o, i) => { o.textContent = tl(CAMERA_PRESETS[i]!.name); }));
+    // A camera on the tifo itself, from across the pitch (30 Oct 2026: a tifo
+    // behind one goal had no camera here that faced it). Offered while there
+    // is one place to see the tifo from: something painted, not the whole bowl.
+    const tifoCam = document.createElement('option');
+    tifoCam.value = 'tifo';
+    tifoCam.textContent = t('ed.camera.tifo');
+    sel.appendChild(tifoCam);
+    const offerTifoCam = (): void => {
+      tifoCam.disabled = !preview?.hasTifoShot();
+    };
+    offerTifoCam();
+    // Asked as the menu is opened, so it is right without a check on every stroke.
+    sel.addEventListener('pointerdown', offerTifoCam);
+    sel.addEventListener('focus', offerTifoCam);
+    onLangChange(() => { tifoCam.textContent = t('ed.camera.tifo'); });
     // And one camera that is not a fixed place: wherever the banner is.
     // Only while there is a banner to be wherever: a tifo has none until
     // somebody makes one, and a camera that goes nowhere reads as broken.
@@ -783,7 +845,14 @@ async function main(): Promise<void> {
     bannerStore.onChange(offerBannerCam);
     sel.addEventListener('change', () => {
       if (sel.value === 'banner') preview!.focusBanner();
-      else preview!.applyPreset(CAMERA_PRESETS[Number(sel.value)]);
+      else if (sel.value === 'tifo') {
+        // Nothing to look at after all (the last of it was just erased): the whole bowl.
+        if (!preview!.focusTifo()) {
+          const full = CAMERA_PRESETS.findIndex((p) => p.name === 'Full view');
+          sel.value = String(Math.max(0, full));
+          preview!.applyPreset(CAMERA_PRESETS[Math.max(0, full)]);
+        }
+      } else preview!.applyPreset(CAMERA_PRESETS[Number(sel.value)]);
     });
     // Default to the whole-bowl "Full view" so the entire tifo reads at a glance.
     const fullIdx = CAMERA_PRESETS.findIndex((p) => p.name === 'Full view');
@@ -886,6 +955,7 @@ async function main(): Promise<void> {
     host.hidden = !show2d;
     previewHost.hidden = !show3dView;
     camBar.hidden = !show3dView;
+    paintStageClean();
     canvasWrap.classList.toggle('split', next === 'split');
     canvasWrap.classList.toggle('banner-split', bannerSplit);
     btn2d.classList.toggle('active', next === '2d');
@@ -1193,6 +1263,7 @@ async function main(): Promise<void> {
       openMatchDaySimulator(map, store, template, assetStore, {
         bannerStore,
         focusBanner,
+        pro: { designItems: () => designProItems(objects), withoutDesignItems: (run) => withoutDesignProItems(objects, run) },
         onClose: () => {
           simOpen = false;
           if (resumePreview) preview?.start();

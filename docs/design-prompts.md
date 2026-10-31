@@ -39,24 +39,22 @@ Fastify). Follow docs/DESIGN.md. In particular:
 
 ---
 
-## Passes and pricing (the paid plan)
+## Pricing (the paid plan)
 
 ```text
-Build the passes section for the AI limits and paid plan (see the project doc
-"AI limits and the paid plan"; use the plan names, prices and limits that are
-DECIDED there at the time, not the proposal's, and ask me if they are not).
-- Three cards: the free plan, the Match Pass and the Season Pass, side by side
-  on desktop, stacked on a phone with the Season Pass first.
-- Each card: the name, the price in SAR as a large tabular number with "for 72
-  hours" / "until 31 May" beside it, what it includes as a short list with
-  check icons, and one button.
-- Only the recommended pass has the blue button; the others are tinted. The
-  free plan's button says what it does ("Keep designing free").
+Build the pricing section for the paid plan (see the project doc "Tifo Maker
+Pro: monthly plan brief"; use the plan, price and limits that are DECIDED
+there at the time, and ask me if they are not).
+- Two cards: Free and Pro (one plan, SAR 19 a month), side by side on
+  desktop, stacked on a phone.
+- Each card: the name, the price in SAR as a large tabular number with "a
+  month" beside it, what it includes as a short list with check icons, and
+  one button.
+- Only Pro has the blue button. The free plan's button says what it does
+  ("Keep designing free").
 - A line under the cards: paying with mada, Apple Pay or STC Pay (text, no
-  logos unless we have the right to use them), and "The Match Pass comes off
-  a Season Pass bought within 7 days."
-- The group plan is a separate quiet band: "For a supporters' group" and a
-  contact link, not a fourth card.
+  logos unless we have the right to use them), and that a month of Pro
+  never renews by itself (version 1 of payments).
 - Do not invent testimonials, user counts or "most popular" claims.
 - Tracking: a funnel event per button (add it to FUNNEL_STEPS, analytics.ts
   and the admin labels).
@@ -68,7 +66,7 @@ DECIDED there at the time, not the proposal's, and ask me if they are not).
 Update the AI limit card in src/ui/aiPanel.ts (the quota branch of showCard)
 for when passes are on sale:
 - Title and one sentence as today, in both languages.
-- The blue button becomes the pass that fits ("Get a Match Pass, SAR 9");
+- The blue button becomes Pro ("Get Pro for SAR 19 a month");
   "Use the Quick Designer" moves to the tinted secondary; "Not now" is a text
   button.
 - Show when the free allowance comes back ("Back on Sunday") from the quota

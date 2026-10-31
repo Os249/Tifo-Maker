@@ -282,8 +282,8 @@ export function mountAiPanel(deps: AiPanelDeps): AiPanelHandle {
       : null;
   /**
    * The allowance the Generate button spends. Every design is the whole-bowl
-   * director's now, and it is metered as a standard design; the "super"
-   * allowance was what the Whole stadium box used to switch on.
+   * director's now, and every one is metered as an AI design: there is no
+   * Super allowance any more (server/src/proPlan.ts).
    */
   const genKind = (): AllowanceKind => 'std';
   const learn = (q: AiQuota | null | undefined): void => {

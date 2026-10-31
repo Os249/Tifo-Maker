@@ -8,6 +8,7 @@
  * `arcLayout` is pure (per-character positions/rotations along a circular arc)
  * and unit-tested in Node; `renderTextCanvas` is the browser-only painter.
  */
+import { PRO_FONTS } from './proVoices';
 
 export interface TifoFont {
   id: string;
@@ -31,6 +32,20 @@ export const TIFO_FONTS: TifoFont[] = [
   { id: 'georgia', name: 'Georgia', css: 'Georgia, "Times New Roman", serif' },
   { id: 'courier', name: 'Courier', css: '"Courier New", Courier, monospace' },
 ];
+
+/**
+ * A font id's CSS: a free voice, a legacy stack or an uploaded face (`fonts`,
+ * TIFO_FONTS by default), else a Pro voice (core/proVoices), which is not in
+ * the pickers for everybody but renders for anybody. Undefined when unknown.
+ */
+export function findFontCss(id: string, fonts: readonly TifoFont[] = TIFO_FONTS): string | undefined {
+  return (fonts.find((f) => f.id === id) ?? PRO_FONTS.find((f) => f.id === id))?.css;
+}
+
+/** A font id's CSS, falling back to the first of `fonts` for an id nobody knows. */
+export function fontCssOf(id: string, fonts: readonly TifoFont[] = TIFO_FONTS): string {
+  return findFontCss(id, fonts) ?? fonts[0].css;
+}
 
 export interface ArcGlyph {
   /** Glyph center in canvas coordinates. */

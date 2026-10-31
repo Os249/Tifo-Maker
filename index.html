@@ -262,11 +262,19 @@
                Drag it, or focus it and use the arrow keys (ui/dock.ts). -->
           <div id="dock-handle" class="dock-handle" aria-label="Resize the strip" data-i18n-attr="aria-label:ed.dockT"><span class="dock-grip" aria-hidden="true"></span></div>
 
-          <div id="cam-bar" class="tool-bar" hidden style="position:absolute;left:50%;transform:translateX(-50%);top:12px;border:1px solid var(--line-1);border-radius:var(--r-md);z-index:5;">
-            <label for="camera-preset" data-i18n="ed.camera">Camera</label>
-            <select id="camera-preset"></select>
-            <label><input type="checkbox" id="noshow" /> <span data-i18n="ed.noshow">No-shows 10%</span></label>
-            <button id="match-day" type="button" title="Open the Match Day Simulator (high-fidelity view)" data-i18n-attr="title:ed.matchDayT"><i class="ti ti-building-stadium"></i> <span data-i18n="ed.matchDay">Match Day</span></button>
+          <!-- The stadium's camera controls, in its top corner rather than over
+               the middle of the picture, where the far stand and the tifo on it
+               are. The eye (or H) hides them and the AI bar until it is pressed
+               again; the browser keeps that (tifo_stage_clean_v1). -->
+          <div id="cam-bar" class="tool-bar" hidden>
+            <div class="cam-tools">
+              <i class="ti ti-camera cam-ico" aria-hidden="true"></i>
+              <label for="camera-preset" class="cam-label" data-i18n="ed.camera">Camera</label>
+              <select id="camera-preset"></select>
+              <label class="cam-noshow"><input type="checkbox" id="noshow" /> <span data-i18n="ed.noshow">No-shows 10%</span></label>
+              <button id="match-day" type="button" title="Open the Match Day Simulator (high-fidelity view)" data-i18n-attr="title:ed.matchDayT"><i class="ti ti-building-stadium"></i> <span data-i18n="ed.matchDay">Match Day</span></button>
+            </div>
+            <button id="cam-hide" class="cam-hide" type="button" aria-label="Hide the controls on the stadium" title="Hide the controls on the stadium (H)" data-i18n-attr="aria-label:ed.camHide,title:ed.camHideT"><i class="ti ti-eye-off" aria-hidden="true"></i></button>
           </div>
 
           <!-- Jump to a stand: the whole stand fills the canvas. The phone shell

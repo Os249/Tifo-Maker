@@ -1,0 +1,43 @@
+/*
+ * The stadium export's Pro options (ui/proExport.ts): the size beside Format,
+ * its note, the 4K poster, and the mark option in the Post it sheet. Loaded
+ * with that module, so the editor's start carries none of it.
+ *
+ * Built on the editor's own select and group and on pro.css (the chip, the
+ * gold .pro-btn, .pro-option): no colours of its own.
+ */
+
+/* The size, one row like Format's: label, picker, and the crown while a Pro size is picked. */
+/* One line, like Format's: the picker gives up width (the name ends in an ellipsis), the label and crown do not. */
+.panel-section .group.pexp-size-row { flex-wrap: nowrap; }
+.pexp-size-row[hidden] { display: none; }
+.pexp-size-row > label { white-space: nowrap; flex: none; }
+.pexp-size-row > select { text-overflow: ellipsis; }
+.pexp-crown { display: inline-flex; flex: none; }
+.pexp-crown:empty { display: none; }
+
+.pexp-note { margin: var(--sp-2) 0 0; font-size: var(--fs-xs); line-height: 1.45; color: var(--text-3); }
+.pexp-note[hidden] { display: none; }
+
+/* The poster: a Pro action that is not the panel's one step, so gold, never blue. */
+.pro-btn.pexp-poster { display: flex; width: 100%; margin-top: var(--sp-2); font-size: var(--fs-sm); }
+.pro-btn.pexp-poster[hidden] { display: none; }
+.pro-btn.pexp-poster:disabled { opacity: 0.7; cursor: progress; }
+/* A pass holder still sees what is Pro, quietly: the button without its tint. */
+.pro-btn.pexp-poster.quiet { background: transparent; border-color: var(--pro-hairline); }
+.pro-btn.pexp-poster.quiet:hover { background: var(--pro-surface-2); }
+
+/* An export drawing at its own size (Preview3D.drawAt): the view shows its frames scaled to fit, never stretched. */
+canvas[data-export-size] { object-fit: contain; }
+
+/* The export preview: the frame's own shape (a vertical one stands up), never stretched to 16:10. */
+.sx-modal .sx-canvas { width: auto; height: auto; max-width: 100%; max-height: 62vh; aspect-ratio: auto; margin-inline: auto; object-fit: contain; }
+
+/* Post it: the mark option under the picture. */
+.pm-card .pexp-post-mark { margin-top: var(--sp-3); font-size: var(--fs-sm); line-height: 1.4; }
+.pm-card .pexp-post-mark > input:focus-visible { outline: 2px solid var(--blue-500); outline-offset: 2px; }
+
+@media (pointer: coarse) {
+  .pexp-size-row > select { min-height: 44px; }
+  .pm-card .pexp-post-mark { min-height: 44px; }
+}

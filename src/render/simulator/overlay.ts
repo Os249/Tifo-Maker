@@ -1,6 +1,6 @@
 import type { SeatMap, StadiumTemplate } from '../../core/types';
 import type { DesignStore } from '../../core/design';
-import { MatchDaySimulator, type RecordCamera, type TimeOfDay } from './index';
+import { MatchDaySimulator, type RecordCamera, type ShowCamera, type TimeOfDay } from './index';
 import { probeQuality, type QualityTier } from './quality';
 import { DEFAULT_LEVELS, type SoundBus, type SoundLevels } from './atmosphere';
 import { REVEAL_MODES, type RevealMode } from './choreo';
@@ -17,6 +17,10 @@ import { getLang, t } from '../../ui/i18n';
 import { containDialog } from '../../ui/dialogFocus';
 import { copyText } from '../../ui/clipboard';
 import { OSM_ATTRIBUTION } from '../../net/osm';
+import { fetchPro, type ProState } from '../../net/api';
+import { proChipHtml } from '../../ui/pro';
+import { exportGate } from '../../ui/proGate';
+import { BOARD_MESSAGES, BOARD_TEXT_MAX, boardColour, cleanBoardText } from './pitchside';
 import {
   ACCESSORY_KINDS,
   ACCESSORY_PRESETS,
@@ -60,6 +64,9 @@ export interface SimulatorHandle {
  * an image hangs" dead end again, one screen further in.
  */
 const MOBILE_MAX = 899;
+
+/** The narrowest desktop width whose top bar has room for the mark option (Pro). */
+const MARK_IN_BAR_MIN = 1000;
 
 const TIER_LABELS: [QualityTier, string][] = [
   // 'low' is offered, not just probed into. A three-year-old Android is most
@@ -228,6 +235,29 @@ input[type=checkbox].mds-check:checked::after{transform:rotate(45deg) scale(1);}
 .mds-flash.go{animation:mds-flash .5s ease;}
 .mds-overlay :focus-visible{outline:none;box-shadow:var(--focus);border-color:var(--accent);}
 @media (prefers-reduced-motion: reduce){.mds-overlay,.mds-overlay *,.mds-overlay *::after{transition-duration:.01ms!important;animation-duration:.01ms!important;}}
+/* Pro in Match Day: the LED boards and the mark option. Tokens only; the
+   chip itself is ui/pro.css. Nothing here shows until /api/pro says so. */
+.mds-section[hidden],.mds-markopt[hidden],.mds-hint[hidden]{display:none;}
+.mds-shead .pro-chip{flex:none;}
+.mds-ledlist{display:flex;flex-direction:column;gap:var(--sp-2);}
+/* The editor's own input[type=text] rule is 200px wide; these fill the panel. */
+.mds-ledlist .mds-input{width:100%;min-width:0;}
+.mds-swatches{display:flex;flex-wrap:wrap;gap:var(--sp-2);}
+.mds-swatch{position:relative;flex:none;width:var(--sp-6);height:var(--sp-6);padding:0;border:1px solid var(--border-strong);border-radius:var(--r-pill);background:var(--mds-swatch);cursor:pointer;transition:transform var(--duration-quick) var(--ease-smooth-out);}
+.mds-swatch:hover{transform:scale(1.1);}
+.mds-swatch[aria-checked="true"]{outline:2px solid var(--text);outline-offset:2px;}
+.mds-markopt{flex:none;gap:var(--sp-2);white-space:nowrap;}
+.mds-markopt .pro-chip,.mds-markopt .pro-chip span{flex:none;}
+.mds-markopt .mds-long{display:none;}
+.mds-panel-acts .mds-markopt{flex:1 1 100%;min-height:44px;white-space:normal;}
+.mds-panel-acts .mds-markopt .mds-long,.mds-sbody .mds-markopt .mds-long{display:inline;}
+.mds-panel-acts .mds-markopt .mds-short,.mds-sbody .mds-markopt .mds-short{display:none;}
+.mds-sbody .mds-markopt{white-space:normal;}
+.mds-led-clear{align-self:flex-start;}
+@media (pointer: coarse){.mds-swatch{width:44px;height:44px;}}
+/* A Pro sheet opened from here (the export choice, the gift) sits over the
+   simulator, which is itself above every layer the tokens name. */
+.mds-overlay ~ .pro-sheet-backdrop{z-index:10001;}
 `;
 
 /** Inline line-icons (stroke = currentColor), sized via CSS. Replaces emoji. */
@@ -242,6 +272,8 @@ const ICONS = {
   help: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9.2"/><path d="M9.3 9.2a2.7 2.7 0 1 1 3.9 2.5c-.8.4-1.2.9-1.2 1.8"/><path d="M12 17h.01"/></svg>',
   sound: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9v6h3.5L12 19V5L7.5 9H4Z"/><path d="M16 9.2a4 4 0 0 1 0 5.6"/><path d="M18.6 6.6a7.6 7.6 0 0 1 0 10.8"/></svg>',
   record: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="13" height="12" rx="2"/><path d="M15 10.5l6-3.5v10l-6-3.5Z"/><circle cx="8.5" cy="12" r="2.4" fill="currentColor" stroke="none"/></svg>',
+  // A touchline LED board: the panel and a line of its words.
+  led: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="10" rx="1.5"/><path d="M6 12h4M13 12h5"/></svg>',
   // A flare held up: the stick, and the flame off the top of it.
   flare: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22v-9"/><path d="M12 13c-2.6 0-4-1.8-4-4 0-2.6 2.2-3.6 2.4-6.6C12.6 3.6 16 6 16 9c0 2.2-1.4 4-4 4Z"/><path d="M12 13c-1 0-1.6-.8-1.6-1.7 0-1 .8-1.5 1.1-2.6.9.6 2.1 1.4 2.1 2.6 0 .9-.6 1.7-1.6 1.7Z"/></svg>',
 } as const;
@@ -295,6 +327,8 @@ const MDS_T: Record<string, { en: string; ar: string }> = {
   sunIntensity: { en: 'Sun intensity', ar: 'شدة الشمس' },
   floodlights: { en: 'Floodlights', ar: 'الكشافات' },
   secStadium: { en: 'Stadium screens', ar: 'شاشات الملعب' },
+  'shot.Your Tifo': { en: 'Your tifo', ar: 'تيفوك' },
+  'shot.Tifo Pitch Level': { en: 'Your tifo from the pitch', ar: 'تيفوك من أرض الملعب' },
   'shot.TV Broadcast': { en: 'TV Broadcast', ar: 'البث التلفزيوني' },
   'shot.Main Camera': { en: 'Main Camera', ar: 'الكاميرا الرئيسية' },
   'shot.Behind Goal': { en: 'Behind Goal', ar: 'خلف المرمى' },
@@ -365,6 +399,14 @@ const MDS_T: Record<string, { en: string; ar: string }> = {
   'stand.2': { en: 'West', ar: 'الغربي' },
   choreo: { en: 'Choreography', ar: 'الكوريغرافيا' },
   autoChoreo: { en: 'Auto choreo', ar: 'كوريغرافيا تلقائية' },
+  showCam: { en: 'Camera during the show', ar: 'الكاميرا وقت العرض' },
+  'showCam.cuts': { en: 'Cut between shots', ar: 'تتنقل بين اللقطات' },
+  'showCam.hold': { en: 'Stay where I put it', ar: 'تثبت مكان ما حطيتها' },
+  'tip.showCam': {
+    en: 'Cut between shots films your tifo from across the pitch, then from the pitch, then from the drone. Stay where I put it never moves the camera, for filming your screen from one angle. Moving the camera during a show also stops the cuts until it ends.',
+    ar: '«تتنقل بين اللقطات» تصوّر تيفوك من الجهة المقابلة، وبعدين من أرض الملعب، وبعدين من الدرون. «تثبت مكان ما حطيتها» ما تحرك الكاميرا أبد، عشان تصوّر شاشتك من زاوية وحدة. ولو حركت الكاميرا وقت العرض يوقف التنقل لين يخلص.',
+  },
+  camTaken: { en: 'The camera is yours: no more cuts until the show ends', ar: 'الكاميرا صارت بيدك: ما فيه تنقّل لين يخلص العرض' },
   stop: { en: 'Stop', ar: 'إيقاف' },
   revealStyle: { en: 'Reveal style', ar: 'نمط الكشف' },
   'rm.wipe-lr': { en: 'Wipe across', ar: 'مسح بالعرض' },
@@ -411,6 +453,7 @@ const MDS_T: Record<string, { en: string; ar: string }> = {
   hPinch: { en: 'Pinch', ar: 'قرص' },
   hShortcuts: { en: 'Shortcuts', ar: 'اختصارات' },
   hCamViews: { en: 'Camera views', ar: 'لقطات الكاميرا' },
+  hTo: { en: 'to', ar: 'إلى' },
   hPlayReveal: { en: 'Play the reveal', ar: 'تشغيل الكشف' },
   hFull: { en: 'Fullscreen', ar: 'ملء الشاشة' },
   hHide: { en: 'Hide panel', ar: 'إخفاء اللوحة' },
@@ -522,10 +565,11 @@ const MDS_T: Record<string, { en: string; ar: string }> = {
   previewing: { en: 'Previewing the reveal…', ar: 'معاينة الكشف…' },
   recCamera: { en: 'Camera', ar: 'الكاميرا' },
   recCamShow: { en: 'Show cameras', ar: 'كاميرات العرض' },
+  recCamHold: { en: 'Where I put it', ar: 'مكان ما حطيتها' },
   recCamFly: { en: 'Cinematic flyover', ar: 'تحليق سينمائي' },
   'tip.recCamera': {
-    en: 'Show cameras cut between the TV gantry, the ultras\' end and the drone. Cinematic flyover films the whole clip in one move: it starts wide and high and sweeps in on the stands.',
-    ar: 'كاميرات العرض تنتقل بين منصة التلفزيون ومدرج الألتراس والدرون. التحليق السينمائي يصوّر المقطع كله بحركة وحدة: يبدأ بعيد وعالي ويقرّب على المدرجات.',
+    en: 'Show cameras film your tifo from across the pitch, then from the pitch, then from the drone. Where I put it keeps the camera exactly where it is now. Cinematic flyover films the whole clip in one move: it starts wide and high and sweeps in on the stands.',
+    ar: 'كاميرات العرض تصوّر تيفوك من الجهة المقابلة، وبعدين من أرض الملعب، وبعدين من الدرون. «مكان ما حطيتها» تخلي الكاميرا مثل ما هي الحين. التحليق السينمائي يصوّر المقطع كله بحركة وحدة: يبدأ بعيد وعالي ويقرّب على المدرجات.',
   },
   previewingFly: { en: 'Previewing the flyover clip…', ar: 'معاينة مقطع التحليق…' },
   recordSavedFly: { en: 'Flyover video saved', ar: 'تم حفظ فيديو التحليق' },
@@ -648,6 +692,32 @@ const MDS_T: Record<string, { en: string; ar: string }> = {
   'cue.flags-on': { en: 'Flags up', ar: 'رفع الأعلام' },
   'cue.accessories-off': { en: 'Accessories off', ar: 'إطفاء الإكسسوارات' },
   hAccessories: { en: 'Flags, flares, smoke', ar: 'الأعلام والشماريخ والدخان' },
+
+  // ---- Pro: the LED boards, and exports without the mark ----
+  ledTitle: { en: 'LED boards', ar: 'اللوحات الإعلانية' },
+  ledHint: {
+    en: 'Your words on the boards round the pitch: the club\u2019s name, a chant, a sponsor-style board. Up to 40 letters each.',
+    ar: 'كلامك على اللوحات اللي حول الملعب: اسم النادي، هتاف، أو لوحة على شكل إعلان. لين 40 حرف لكل وحدة.',
+  },
+  ledMessages: { en: 'Messages', ar: 'الرسائل' },
+  ledMsgN: { en: 'Message {n}', ar: 'الرسالة {n}' },
+  ledPh1: { en: 'Club name…', ar: 'اسم النادي…' },
+  ledPh2: { en: 'A chant…', ar: 'هتاف…' },
+  ledPh3: { en: 'A sponsor-style board…', ar: 'لوحة على شكل إعلان…' },
+  ledColour: { en: 'Board colour', ar: 'لون اللوحات' },
+  ledColourN: { en: 'Colour {n} of your tifo', ar: 'اللون {n} من تيفوك' },
+  ledClear: { en: 'Clear the boards', ar: 'امسح اللوحات' },
+  ledTry: {
+    en: 'Free to try here. A snapshot or video with your boards on asks about Pro first.',
+    ar: 'جرّبها هنا ببلاش. اللقطة أو الفيديو مع لوحاتك يسألك عن المميّز أول.',
+  },
+  ledItem: { en: 'LED board text', ar: 'نص اللوحات الإعلانية' },
+  noMark: { en: 'Without the tifomaker.org mark', ar: 'بدون علامة tifomaker.org' },
+  noMarkShort: { en: 'No mark', ar: 'بدون العلامة' },
+  'tip.noMark': {
+    en: 'Snapshot and Record without the tifomaker.org mark in the corner',
+    ar: 'اللقطة والتسجيل بدون علامة tifomaker.org في الزاوية',
+  },
 };
 /** A camera shot's name in the panel's language; unknown names pass through. */
 const shotLabel = (name: string): string => (MDS_T['shot.' + name] ? L('shot.' + name) : name);
@@ -670,6 +740,8 @@ interface SimState {
   /** The tifo taken off the seats, to look at the ground's own seat colours. Not remembered. */
   tifoHidden: boolean;
   fly: boolean;
+  /** How a show films: its cuts, or the camera left where it is. Remembered (SHOW_CAM_KEY). */
+  showCam: ShowCamera;
   reveal: RevealMode;
   /** The drum call: seconds held up, and how many times round. */
   drumHold: number;
@@ -697,6 +769,15 @@ interface SimState {
   screen: ScreenMode;
   /** The user's picture for the screens. Held in memory only, never uploaded. */
   screenImage: ImageBitmap | HTMLImageElement | null;
+  /**
+   * Pro is on for this account (/api/pro). False until the server says so,
+   * and with it false nothing Pro shows and the boards stay plain.
+   */
+  proLive: boolean;
+  /** The LED boards' messages, one per slot ('' for an empty one). */
+  ledText: string[];
+  /** The boards' colour, #rrggbb from the design's palette; '' until one is picked. */
+  ledColour: string;
 }
 
 /**
@@ -726,6 +807,19 @@ interface SoundPrefs {
  * were the old loud defaults, saved the first time someone touched anything.
  */
 const SOUND_KEY = 'mds_sound_v2';
+/**
+ * "Camera during the show", remembered: someone filming their screen from one
+ * angle wants it that way every time they come back, not to find the show
+ * cutting away again.
+ */
+const SHOW_CAM_KEY = 'mds_showcam_v1';
+function readShowCam(): ShowCamera {
+  try {
+    return localStorage.getItem(SHOW_CAM_KEY) === 'hold' ? 'hold' : 'cuts';
+  } catch {
+    return 'cuts';
+  }
+}
 
 function readSoundPrefs(): SoundPrefs {
   const base: SoundPrefs = {
@@ -771,12 +865,45 @@ function readSoundPrefs(): SoundPrefs {
   }
 }
 
+/**
+ * What the LED boards remember: the messages and the colour, so the club's
+ * name is there the next time. Parsed defensively, like the sound; a private
+ * window simply starts with empty boards.
+ */
+const LED_KEY = 'mds_led_v1';
+
+function readLedPrefs(): { messages: string[]; colour: string } {
+  const empty = { messages: Array.from({ length: BOARD_MESSAGES }, () => ''), colour: '' };
+  try {
+    const raw = localStorage.getItem(LED_KEY);
+    if (!raw) return empty;
+    const p = JSON.parse(raw) as { messages?: unknown; colour?: unknown } | null;
+    const list: unknown[] = p && Array.isArray(p.messages) ? p.messages : [];
+    return {
+      messages: empty.messages.map((_, i) => cleanBoardText(list[i])),
+      colour: boardColour(p?.colour) ?? '',
+    };
+  } catch {
+    return empty;
+  }
+}
+
 export function openMatchDaySimulator(
   map: SeatMap,
   store: DesignStore,
   template: StadiumTemplate,
   assetStore: AssetStore,
-  opts: { onClose?: () => void; bannerStore?: BannerStore; focusBanner?: string | null } = {},
+  opts: {
+    onClose?: () => void;
+    bannerStore?: BannerStore;
+    focusBanner?: string | null;
+    /**
+     * The design's own Pro items (a portrait style, a Pro font), which live
+     * in the editor's layers: their names for the export sheet, and a way to
+     * run an export with them lifted (ui/proGate.ts). Passed by main.ts.
+     */
+    pro?: { designItems(): string[]; withoutDesignItems<T>(run: () => Promise<T>): Promise<T> };
+  } = {},
 ): SimulatorHandle {
   const state: SimState = {
     camIdx: 0,
@@ -796,6 +923,7 @@ export function openMatchDaySimulator(
     floodLevel: 1,
     tifoHidden: false,
     fly: false,
+    showCam: readShowCam(),
     reveal: 'wipe-lr',
     drumHold: DRUM_CALL.hold,
     drumTimes: DRUM_CALL.times,
@@ -810,12 +938,18 @@ export function openMatchDaySimulator(
     // nothing persists these.
     acc: noAccessories(),
     // The stand the default camera faces, so the first thing you turn on is
-    // in the picture.
+    // in the picture: the gantry's (north), or the tifo's own once Match Day
+    // has opened on it (see mount).
     accWhere: 'north',
     flareColour: 'red',
     smokeColour: 'club',
     screen: 'stadium',
     screenImage: null,
+    proLive: false,
+    ...(() => {
+      const p = readLedPrefs();
+      return { ledText: p.messages, ledColour: p.colour };
+    })(),
     // On by default (Osamah's call, September 2026): a tifo show is half
     // sound, and a switch nobody finds is a show nobody hears. Remembered if
     // someone turns it off. The browser still wants a gesture before audio
@@ -886,6 +1020,23 @@ export function openMatchDaySimulator(
   tifoBtn.setAttribute('aria-pressed', 'false');
   const snapBtn = btn(L('snapshot'));
   const recBtn = btn(L('record'));
+  // Pro: one option for both exports, beside them. Hidden until /api/pro
+  // says Pro is on for this account; "No mark" in the top bar, the whole
+  // name where the actions move into the panel on a phone.
+  const noMarkChk = chk(false);
+  noMarkChk.dataset.k = 'no-mark';
+  const noMarkLbl = document.createElement('label');
+  noMarkLbl.className = 'mds-checkrow mds-markopt mds-pro';
+  noMarkLbl.hidden = true;
+  noMarkLbl.title = L('tip.noMark');
+  const noMarkLong = document.createElement('span');
+  noMarkLong.className = 'mds-long';
+  noMarkLong.textContent = L('noMark');
+  const noMarkShort = document.createElement('span');
+  noMarkShort.className = 'mds-short';
+  noMarkShort.textContent = L('noMarkShort');
+  noMarkLbl.append(noMarkChk, noMarkLong, noMarkShort);
+  noMarkLbl.insertAdjacentHTML('beforeend', proChipHtml());
   const fullBtn = btn(L('fullscreen'));
   const linkBtn = btn(L('copyLink'));
   const helpBtn = btn('', 'mds-icon');
@@ -897,7 +1048,7 @@ export function openMatchDaySimulator(
   // panel on mobile (keeps the top bar from overflowing on small screens).
   const barActions = document.createElement('div');
   barActions.className = 'mds-baracts';
-  barActions.append(barField(L('quality'), qSel), tifoBtn, snapBtn, recBtn, fullBtn, linkBtn);
+  barActions.append(barField(L('quality'), qSel), tifoBtn, snapBtn, recBtn, noMarkLbl, fullBtn, linkBtn);
   bar.append(panelToggle, brand, spacer, status, barActions, helpBtn, closeBtn);
 
   let toastT = 0;
@@ -1081,6 +1232,56 @@ export function openMatchDaySimulator(
   };
   syncScreenUi();
 
+  // LED boards (Pro). The fan's own words on the touchline ring: the club's
+  // name, a chant, a sponsor-style board. Free to try here for anyone Pro is
+  // on for; what Pro decides is whether a Snapshot or a Record takes them
+  // along (exportGate, at the export). The section stays hidden, and the
+  // ring plain, until /api/pro says Pro is on for this account.
+  const ledInputs: HTMLInputElement[] = [];
+  for (let i = 0; i < BOARD_MESSAGES; i++) {
+    const inp = document.createElement('input');
+    inp.type = 'text';
+    inp.className = 'mds-input';
+    inp.maxLength = BOARD_TEXT_MAX;
+    inp.autocomplete = 'off';
+    inp.spellcheck = false;
+    inp.placeholder = L('ledPh' + (i + 1));
+    inp.value = state.ledText[i] ?? '';
+    inp.setAttribute('aria-label', L('ledMsgN').replace('{n}', String(i + 1)));
+    inp.dataset.k = 'led-text-' + (i + 1);
+    ledInputs.push(inp);
+  }
+  /** The page's direction while empty (for the placeholder), the words' own once typed. */
+  const syncLedDir = (inp: HTMLInputElement): void => {
+    inp.dir = inp.value.trim() ? 'auto' : overlay.dir;
+  };
+  ledInputs.forEach(syncLedDir);
+  const ledList = document.createElement('div');
+  ledList.className = 'mds-ledlist';
+  ledList.append(...ledInputs);
+  const ledSwatches = document.createElement('div');
+  ledSwatches.className = 'mds-swatches';
+  ledSwatches.setAttribute('role', 'radiogroup');
+  ledSwatches.setAttribute('aria-label', L('ledColour'));
+  ledSwatches.dataset.k = 'led-colour';
+  const ledClear = btn(L('ledClear'), 'mds-led-clear');
+  ledClear.dataset.k = 'led-clear';
+  const ledHint = document.createElement('div');
+  ledHint.className = 'mds-hint';
+  ledHint.textContent = L('ledHint');
+  // Said once, quietly, to someone Pro is not running for. The crown is in
+  // the section's head, where the thing is picked.
+  const ledTry = document.createElement('div');
+  ledTry.className = 'mds-hint';
+  ledTry.dataset.k = 'led-try';
+  ledTry.hidden = true;
+  ledTry.textContent = L('ledTry');
+  const secLed = section(ICONS.led, L('ledTitle'), false);
+  secLed.root.hidden = true;
+  secLed.root.classList.add('mds-pro');
+  secLed.root.querySelector('.mds-shead .chev')?.insertAdjacentHTML('beforebegin', proChipHtml());
+  secLed.body.append(ledHint, field(L('ledMessages'), ledList), field(L('ledColour'), ledSwatches), ledClear, ledTry);
+
   // Tifo Assets
   const standSel = sel();
   for (const v of ['1', '3', '0', '2']) opt(standSel, v, L('stand.' + v), false);
@@ -1185,6 +1386,9 @@ export function openMatchDaySimulator(
   // Choreography
   const autoBtn = btn(L('autoChoreo'), 'primary');
   const stopBtn = btn(L('stop'));
+  const showCamSel = sel();
+  showCamSel.dataset.k = 'show-camera';
+  for (const m of ['cuts', 'hold'] as ShowCamera[]) opt(showCamSel, m, L('showCam.' + m), m === state.showCam);
   const revealSel = sel();
   for (const m of REVEAL_MODES) opt(revealSel, m.id, L(m.labelKey), false);
   const revealBtn = btn(L('playReveal'));
@@ -1227,6 +1431,7 @@ export function openMatchDaySimulator(
   const secChoreo = section(ICONS.choreo, L('choreo'), false);
   secChoreo.body.append(
     row(autoBtn, stopBtn),
+    field(L('showCam'), showCamSel),
     divider(),
     field(L('revealStyle'), revealSel),
     drumBox,
@@ -1254,8 +1459,11 @@ export function openMatchDaySimulator(
   // watching, and it can be set here on its own for a clip.
   const recCam = sel();
   recCam.dataset.k = 'rec-camera';
-  opt(recCam, 'show', L('recCamShow'), !state.fly);
-  opt(recCam, 'flyover', L('recCamFly'), state.fly);
+  /** What a clip films unless it is changed here: what the live view is doing. */
+  const liveRecCam = (): RecordCamera => (state.fly ? 'flyover' : state.showCam === 'hold' ? 'hold' : 'show');
+  opt(recCam, 'show', L('recCamShow'), liveRecCam() === 'show');
+  opt(recCam, 'hold', L('recCamHold'), liveRecCam() === 'hold');
+  opt(recCam, 'flyover', L('recCamFly'), liveRecCam() === 'flyover');
   const previewBtn = btn(L('recPreview'));
   const recordBtn2 = btn(L('recordVideo'), 'primary');
   recordBtn2.dataset.k = 'record-video';
@@ -1275,10 +1483,10 @@ export function openMatchDaySimulator(
   // without matching its heading — which is translated, and which is exactly
   // the kind of coupling that makes an Arabic run fail for no real reason.
   for (const [key, sec] of [
-    ['camera', secCam], ['crowd', secCrowd], ['accessories', secAcc], ['atmosphere', secAtmo], ['screens', secScreens], ['sound', secSound],
+    ['camera', secCam], ['crowd', secCrowd], ['accessories', secAcc], ['atmosphere', secAtmo], ['screens', secScreens], ['led', secLed], ['sound', secSound],
     ['assets', secAssets], ['banners', secBanners], ['choreo', secChoreo], ['record', secRecord],
   ] as [string, { root: HTMLElement }][]) sec.root.dataset.sec = key;
-  panel.append(actionsHost, secCam.root, secCrowd.root, secAcc.root, secAtmo.root, secScreens.root, secSound.root, secAssets.root, secBanners.root, secChoreo.root, secRecord.root);
+  panel.append(actionsHost, secCam.root, secCrowd.root, secAcc.root, secAtmo.root, secScreens.root, secLed.root, secSound.root, secAssets.root, secBanners.root, secChoreo.root, secRecord.root);
   overlay.append(bar, panel, host);
   document.body.appendChild(overlay);
   const prevOverflow = document.body.style.overflow;
@@ -1307,7 +1515,7 @@ export function openMatchDaySimulator(
     kv(L('hPan'), TOUCH ? L('hTwoFinger') : L('hRightDrag')) + '</div>' +
     (KEYS
       ? '<div class="mds-help-grp"><h3>' + L('hShortcuts') + '</h3>' +
-        kv(L('hCamViews'), key('1') + ' to ' + key('9')) +
+        kv(L('hCamViews'), key('1') + ' ' + L('hTo') + ' ' + key('9')) +
         kv(L('hPlayReveal'), key('Space')) +
         kv(L('hFull'), key('F')) +
         kv(L('hTifo'), key('T')) +
@@ -1403,6 +1611,7 @@ export function openMatchDaySimulator(
     [linkBtn, 'tip.link'],
     [flyBtn, 'tip.fly'],
     [recCam, 'tip.recCamera'],
+    [showCamSel, 'tip.showCam'],
     [density, 'tip.density'],
     [todSel, 'tip.tod'],
     [weatherSel, 'tip.weather'],
@@ -1584,6 +1793,8 @@ export function openMatchDaySimulator(
     }
   }
 
+  /** "The camera is yours" has been said this visit (applyState). */
+  let toldCamTaken = false;
   function applyState(): void {
     const shots = sim.shots();
     if (camSel.options.length !== shots.length) {
@@ -1630,9 +1841,20 @@ export function openMatchDaySimulator(
     };
     syncAccessories();
     sim.setAutoReveal(state.reveal);
+    sim.setShowCamera(state.showCam);
+    // Moving the camera mid-show stops its cuts; say so, so the camera staying
+    // put reads as the point and not as the show breaking. Once a visit: a
+    // message on screen lands in a screen recording, and the second time it
+    // is no longer news.
+    sim.onCameraTaken = () => {
+      if (toldCamTaken) return;
+      toldCamTaken = true;
+      toast(L('camTaken'));
+    };
     sim.setDrumCall({ hold: state.drumHold, times: state.drumTimes });
     sim.onDrumBeat = renderBeat;
     applyScreen();
+    applyBoards();
     if (!state.fly) sim.applyShot(shots[state.camIdx] ?? shots[0]);
     // Changing the quality tier disposes the simulator and builds a new one,
     // and the new one's atmosphere starts silent and at its defaults. Without
@@ -1645,6 +1867,15 @@ export function openMatchDaySimulator(
         else armSoundStart();
       });
     }
+  }
+  /**
+   * The LED boards, from state: the fan's messages while Pro is on for this
+   * account, the plain ring otherwise. A declaration, like applySound, and
+   * re-run on every rebuild (a quality change builds a new ring).
+   */
+  function applyBoards(): void {
+    if (!built) return;
+    sim.setBoardText(state.proLive ? state.ledText : [], state.ledColour);
   }
   /** Screens: the section only shows on a ground that has them. */
   function applyScreen(): void {
@@ -1704,6 +1935,8 @@ export function openMatchDaySimulator(
    * it.
    */
   let built = false;
+  /** Somebody picked where the accessories go: Match Day stops choosing for them. */
+  let accWhereChosen = false;
   /**
    * The browser suites and the shot scripts reach the live simulator here
    * (with ?e2e, like the editor's own window.__tifo): Match Day draws on
@@ -1750,6 +1983,15 @@ export function openMatchDaySimulator(
         ? L('snapped').replace('{what}', keys.map((k) => L('snap.' + k)).join(' + '))
         : L('dragHint');
     };
+    // Opening on the tifo (the first camera, when there is one): the flares
+    // and smoke go where the picture is, in the tifo's own stand.
+    if (!accWhereChosen) {
+      const fp = sim.tifoFootprint();
+      if (fp && fp.standShare >= 0.7) {
+        state.accWhere = (['east', 'north', 'west', 'south'] as const)[fp.stand];
+        accWhere.value = state.accWhere;
+      }
+    }
     applyState();
     refreshAssets();
     refreshBanners();
@@ -1830,16 +2072,30 @@ export function openMatchDaySimulator(
   // Responsive: move the secondary actions into the panel on phones, back to the
   // top bar on desktop, so the bar never overflows.
   const mqMobile = window.matchMedia(`(max-width: ${MOBILE_MAX}px)`);
+  // The mark option (Pro) sits beside Snapshot and Record. Between the phone
+  // layout and 1000px the bar has no room left for it (the title and the
+  // quality picker were squeezed to nothing at 900), so there it heads the
+  // Recording section instead.
+  const mqBarRoom = window.matchMedia(`(min-width: ${MARK_IN_BAR_MIN}px)`);
+  const placeMark = (): void => {
+    if (mqMobile.matches || mqBarRoom.matches) {
+      if (noMarkLbl.parentElement !== barActions) barActions.insertBefore(noMarkLbl, fullBtn);
+    } else if (noMarkLbl.parentElement !== secRecord.body) {
+      secRecord.body.prepend(noMarkLbl);
+    }
+  };
   const placeActions = (): void => {
     if (mqMobile.matches) {
       if (barActions.parentElement !== actionsHost) actionsHost.appendChild(barActions);
     } else if (barActions.parentElement !== bar) {
       bar.insertBefore(barActions, helpBtn);
     }
+    placeMark();
     fitPanel();
   };
   placeActions();
   mqMobile.addEventListener('change', placeActions);
+  mqBarRoom.addEventListener('change', placeActions);
   if (mqMobile.matches) panel.classList.add('collapsed'); // start clear on phones
   dbg('panel @mount client=' + panel.clientHeight + ' scroll=' + panel.scrollHeight + ' (open Tifo Assets, then scroll)');
 
@@ -1870,7 +2126,7 @@ export function openMatchDaySimulator(
     flyBtn.setAttribute('aria-pressed', String(state.fly));
     sim.setFlyover(state.fly);
     // A clip films what is on screen.
-    recCam.value = state.fly ? 'flyover' : 'show';
+    recCam.value = liveRecCam();
   });
   crowdSel.addEventListener('change', () => {
     state.crowd = crowdSel.value as CrowdPreset;
@@ -2030,6 +2286,7 @@ export function openMatchDaySimulator(
   }
   for (const [p, b] of presetBtns) b.addEventListener('click', () => sim.setAccessories({ ...ACCESSORY_PRESETS[p] }));
   accWhere.addEventListener('change', () => {
+    accWhereChosen = true;
     state.accWhere = accWhere.value as AccessoryWhere;
     sim.setAccessoryWhere(state.accWhere);
   });
@@ -2278,6 +2535,14 @@ export function openMatchDaySimulator(
     sim.playAutoChoreo();
   });
   stopBtn.addEventListener('click', () => sim.stopTimeline());
+  showCamSel.addEventListener('change', () => {
+    state.showCam = showCamSel.value === 'hold' ? 'hold' : 'cuts';
+    sim.setShowCamera(state.showCam);
+    try {
+      localStorage.setItem(SHOW_CAM_KEY, state.showCam);
+    } catch { /* private mode: this visit keeps it */ }
+    if (!sim.isRecording()) recCam.value = liveRecCam();
+  });
   addCueBtn.addEventListener('click', () => {
     const t = Number(cueTime.value) || 0;
     const k = cueKind.value;
@@ -2307,8 +2572,162 @@ export function openMatchDaySimulator(
     updateCueCount();
   });
 
-  snapBtn.addEventListener('click', () => {
-    const shot = sim.snapshot();
+  // ---------- Pro: the LED boards ----------
+  let ledTimer = 0;
+  const saveLed = (): void => {
+    try {
+      localStorage.setItem(LED_KEY, JSON.stringify({ messages: state.ledText, colour: state.ledColour }));
+    } catch { /* private mode: the boards last this visit */ }
+  };
+  /** The boards follow the typing, a beat behind it: one strip drawn per pause, not per key. */
+  const readLedInputs = (now: boolean): void => {
+    ledInputs.forEach(syncLedDir);
+    state.ledText = ledInputs.map((inp) => cleanBoardText(inp.value));
+    saveLed();
+    window.clearTimeout(ledTimer);
+    if (now) applyBoards();
+    else ledTimer = window.setTimeout(applyBoards, 150);
+  };
+  for (const inp of ledInputs) {
+    inp.addEventListener('input', () => readLedInputs(false));
+    inp.addEventListener('change', () => readLedInputs(true));
+  }
+  ledClear.addEventListener('click', () => {
+    for (const inp of ledInputs) inp.value = '';
+    readLedInputs(true);
+    ledInputs[0]?.focus();
+  });
+  /** The board colours on offer: the design's own (index 0 is the empty seat). */
+  const ledPalette = (): string[] => {
+    const out: string[] = [];
+    for (const c of store.palette.slice(1)) {
+      const hex = boardColour(c);
+      if (hex && !out.includes(hex)) out.push(hex);
+    }
+    return out.length ? out.slice(0, 8) : ['#0b1d4d', '#f2f1ec'];
+  };
+  /** The design's boldest colour: a club's main colour, more often than not. */
+  const boldest = (list: string[]): string => {
+    let best = list[0];
+    let most = -1;
+    for (const hex of list) {
+      const n = parseInt(hex.slice(1), 16);
+      const r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+      const chroma = Math.max(r, g, b) - Math.min(r, g, b);
+      if (chroma > most) { most = chroma; best = hex; }
+    }
+    return best;
+  };
+  /** `chosen`: picked by the fan (remembered), not set while drawing the swatches. */
+  const pickLedColour = (hex: string, chosen = true, focus = false): void => {
+    state.ledColour = hex;
+    for (const sw of ledSwatches.querySelectorAll<HTMLButtonElement>('.mds-swatch')) {
+      const on = sw.dataset.colour === hex;
+      sw.setAttribute('aria-checked', String(on));
+      sw.tabIndex = on ? 0 : -1;
+      if (on && focus) sw.focus();
+    }
+    if (chosen) saveLed();
+    applyBoards();
+  };
+  /** One round button per colour, a radio group: arrows move along it. */
+  const renderSwatches = (): void => {
+    const list = ledPalette();
+    if (!list.includes(state.ledColour)) state.ledColour = boldest(list);
+    ledSwatches.replaceChildren();
+    list.forEach((hex, i) => {
+      const sw = document.createElement('button');
+      sw.type = 'button';
+      sw.className = 'mds-swatch';
+      sw.setAttribute('role', 'radio');
+      sw.setAttribute('aria-label', L('ledColourN').replace('{n}', String(i + 1)));
+      sw.dataset.colour = hex;
+      sw.style.setProperty('--mds-swatch', hex);
+      sw.addEventListener('click', () => pickLedColour(hex));
+      sw.addEventListener('keydown', (e) => {
+        const rtl = overlay.dir === 'rtl';
+        const step = e.key === 'ArrowDown' || e.key === (rtl ? 'ArrowLeft' : 'ArrowRight') ? 1
+          : e.key === 'ArrowUp' || e.key === (rtl ? 'ArrowRight' : 'ArrowLeft') ? -1 : 0;
+        if (step) {
+          e.preventDefault();
+          pickLedColour(list[(i + step + list.length) % list.length], true, true);
+        }
+        // Space and Enter pick it here; they are not the show's shortcut.
+        if (step || e.key === ' ' || e.key === 'Enter') e.stopPropagation();
+      });
+      ledSwatches.append(sw);
+    });
+    pickLedColour(state.ledColour, false);
+  };
+  renderSwatches();
+  // A palette changed in the editor while Match Day is open: new colours.
+  const onLedPalette = (): void => renderSwatches();
+  store.onPaletteChange(onLedPalette);
+
+  // ---------- Pro: what /api/pro says ----------
+  let proState: ProState | null = null;
+  const proRunning = (): boolean => !!proState?.live && !!proState.plan && proState.plan !== 'free';
+  /**
+   * Show the Pro controls, or not, from /api/pro. Until it answers (and for
+   * anyone Pro is not on for) Match Day is exactly what it was: no section,
+   * no option, plain boards, the mark on every export.
+   */
+  const syncPro = async (fresh = false): Promise<void> => {
+    const st = await fetchPro(fresh).catch(() => null);
+    if (closed) return;
+    proState = st;
+    const live = !!st?.live;
+    state.proLive = live;
+    secLed.root.hidden = !live;
+    noMarkLbl.hidden = !live;
+    if (!live) noMarkChk.checked = false;
+    // A pass holder still sees what is Pro, quietly.
+    for (const chip of overlay.querySelectorAll('.mds-pro .pro-chip')) chip.classList.toggle('quiet', proRunning());
+    ledTry.hidden = !live || proRunning();
+    applyBoards();
+  };
+  const onProChange = (): void => void syncPro(true);
+
+  // ---------- Pro: the export ----------
+  /** The Pro items this export would carry, by name, for the export sheet. */
+  const proItems = (): string[] => {
+    if (!state.proLive) return [];
+    const items: string[] = [];
+    if (noMarkChk.checked) items.push(L('noMark'));
+    if (state.ledText.some(Boolean)) items.push(L('ledItem'));
+    try {
+      items.push(...(opts.pro?.designItems() ?? []));
+    } catch {
+      /* a design that cannot say adds nothing */
+    }
+    return items;
+  };
+  /** Two frames, for the seats to follow the design (a lifted Pro item), and no more. */
+  const settle = (): Promise<void> =>
+    Promise.race([
+      new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))),
+      new Promise<void>((r) => setTimeout(r, 250)),
+    ]);
+  /**
+   * An export as its free version ("Export without Pro items"): the boards
+   * plain and the design's Pro items lifted for as long as `run` takes (a
+   * whole recording), then all put back as they were. The mark is the
+   * caller's: a free export always carries it.
+   */
+  const asFree = async <T>(run: () => Promise<T>): Promise<T> => {
+    sim.setBoardTextShown(false);
+    try {
+      const lifted = async (): Promise<T> => {
+        await settle();
+        return run();
+      };
+      return await (opts.pro ? opts.pro.withoutDesignItems(lifted) : run());
+    } finally {
+      if (built) sim.setBoardTextShown(true);
+    }
+  };
+
+  const saveSnapshot = (shot: string): void => {
     const a = document.createElement('a');
     a.href = shot;
     a.download = 'tifo-matchday.png';
@@ -2325,19 +2744,51 @@ export function openMatchDaySimulator(
         offerFileShare(new File([dataUrlToBlob(shot)], 'tifo-matchday.png', { type: 'image/png' }), t('post.sharePic'));
       })
       .catch(() => {});
+  };
+  let snapping = false;
+  snapBtn.addEventListener('click', () => {
+    const items = proItems();
+    // Nothing Pro in it: the snapshot it always was, there and then.
+    if (!items.length) {
+      saveSnapshot(sim.snapshot());
+      return;
+    }
+    if (snapping) return;
+    snapping = true;
+    void (async () => {
+      try {
+        // Asked once: as chosen with Pro running, the free version, or nothing.
+        const how = await exportGate(items);
+        if (how === null || !built) return;
+        saveSnapshot(how === 'pro' ? sim.snapshot({ mark: !noMarkChk.checked }) : await asFree(async () => sim.snapshot()));
+      } finally {
+        snapping = false;
+      }
+    })();
   });
   // Record the choreography reveal as a shareable WebM (the growth artifact).
   const recOpts = (): { seconds: number; fps: number; height?: number; camera: RecordCamera } => ({
     seconds: Number(recDur.value),
     fps: Number(recFps.value),
     height: recRes.value === 'source' ? undefined : Number(recRes.value),
-    camera: recCam.value === 'flyover' ? 'flyover' : 'show',
+    camera: recCam.value === 'flyover' ? 'flyover' : recCam.value === 'hold' ? 'hold' : 'show',
   });
   const doRecord = async (): Promise<void> => {
     if (sim.isRecording()) return;
     recBtn.disabled = true;
     recordBtn2.disabled = true;
-    const clip = await sim.recordReveal(recOpts(), (s) => toast(L('recording') + ' ' + s));
+    // Pro items in the clip are asked about once, before it starts; the free
+    // version keeps the boards plain and the design's Pro items lifted for
+    // the whole recording.
+    const items = proItems();
+    const how = items.length ? await exportGate(items) : 'pro';
+    if (how === null || !built || sim.isRecording()) {
+      recBtn.disabled = false;
+      recordBtn2.disabled = false;
+      return;
+    }
+    const record = () => sim.recordReveal({ ...recOpts(), mark: how === 'pro' ? !noMarkChk.checked : true }, (s) => toast(L('recording') + ' ' + s));
+    const clip = how === 'free' ? await asFree(record) : await record();
     recBtn.disabled = false;
     recordBtn2.disabled = false;
     if (!clip) {
@@ -2377,7 +2828,7 @@ export function openMatchDaySimulator(
       const secs = state.reveal === 'drum-call' ? Math.max(o.seconds, Math.ceil(sim.autoChoreoSeconds())) : o.seconds;
       sim.startClipFlyover(secs);
     } else sim.setFlyover(false);
-    sim.playAutoChoreo();
+    sim.playAutoChoreo(o.camera === 'hold' ? 'hold' : o.camera === 'show' ? 'cuts' : undefined);
     toast(L(o.camera === 'flyover' ? 'previewingFly' : 'previewing'));
   });
   recordBtn2.addEventListener('click', () => void doRecord());
@@ -2440,9 +2891,14 @@ export function openMatchDaySimulator(
     window.removeEventListener('resize', fitPanel);
     window.removeEventListener('popstate', onPop);
     mqMobile.removeEventListener('change', placeActions);
+    mqBarRoom.removeEventListener('change', placeActions);
     // The banner store outlives this overlay — it belongs to the editor — so
     // the subscription has to come off with the panel that owned it.
     unsubBanners?.();
+    store.offPaletteChange(onLedPalette);
+    window.removeEventListener('tifo:pro', onProChange);
+    window.removeEventListener('tifo:auth', onProChange);
+    window.clearTimeout(ledTimer);
     if (document.fullscreenElement) void document.exitFullscreen();
     disposeSim();
     // The screens' picture was the user's own file; let the browser have it back.
@@ -2512,6 +2968,12 @@ export function openMatchDaySimulator(
       localStorage.setItem('mds_seen_intro', '1');
     }
   } catch { /* storage blocked — skip the intro */ }
+
+  // Pro, last: whatever /api/pro says arrives after the simulator is up, and
+  // changes nothing for an account Pro is not on for.
+  void syncPro();
+  window.addEventListener('tifo:pro', onProChange);
+  window.addEventListener('tifo:auth', onProChange);
 
   return { close };
 }

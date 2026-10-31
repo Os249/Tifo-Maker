@@ -31,6 +31,7 @@ import { copyText } from './clipboard';
 import { tagShareUrl, type ShareSource } from '../core/utm';
 import { track } from '../net/analytics';
 import { recordShare } from '../net/api';
+import { exportGate } from './proGate';
 
 export interface PostDeps {
   /** Show the Stadium view and hand back its canvas, freshly rendered. */
@@ -44,6 +45,32 @@ export interface PostDeps {
    * step is as likely to be "change the words" as "show the group".
    */
   paint?(): void;
+}
+
+/**
+ * Pro's part in the picture, for an account Pro is on for (ui/proExport.ts
+ * sets it once it has mounted): the crowned "Without the tifomaker.org mark"
+ * option under the picture, and the Pro items the picture carries. Its words
+ * are its own, so this sheet adds none. Unset, the sheet is what it always was.
+ */
+export interface PostPro {
+  /** The option, or null while Pro is not on for this account. `changed` runs when it is ticked or unticked. */
+  option(changed: () => void): HTMLElement | null;
+  /** Whether the picture should go without the mark (the option is ticked). */
+  clean(): boolean;
+  /** Untick the option (the free version was chosen), without calling `changed`. */
+  untick(): void;
+  /** The names of the Pro items the picture carries (the option, the design's), for the export sheet. */
+  items(): string[];
+  /** Run `make` with the design's Pro items lifted, for the free version. */
+  withoutDesignItems<T>(make: () => Promise<T>): Promise<T>;
+}
+
+let postPro: PostPro | null = null;
+
+/** Called by ui/proExport.ts (null puts the sheet back to what it always was). */
+export function setPostPro(pro: PostPro | null): void {
+  postPro = pro;
 }
 
 export const CARD_W = 1080;
@@ -73,7 +100,13 @@ export function fitText(ctx: CanvasRenderingContext2D, text: string, max: number
   return `${s.trimEnd()}…`;
 }
 
-export function renderPostCardCanvas(src: HTMLCanvasElement, opts: { title: string; lang: 'en' | 'ar' }): HTMLCanvasElement {
+/**
+ * The picture. `mark: false` (Pro, "Without the tifomaker.org mark") leaves
+ * out the corner mark and the "Designed on tifomaker.org" line, and sets the
+ * title in the middle of the band instead.
+ */
+export function renderPostCardCanvas(src: HTMLCanvasElement, opts: { title: string; lang: 'en' | 'ar'; mark?: boolean }): HTMLCanvasElement {
+  const marked = opts.mark !== false;
   const c = document.createElement('canvas');
   c.width = CARD_W;
   c.height = CARD_H;
@@ -90,14 +123,16 @@ export function renderPostCardCanvas(src: HTMLCanvasElement, opts: { title: stri
   ctx.fillRect(0, PHOTO_H - 140, CARD_W, 140);
 
   // The corner mark: survives someone cropping the band off.
-  ctx.font = '600 26px Inter, system-ui, -apple-system, sans-serif';
-  const mark = 'tifomaker.org';
-  const mw = ctx.measureText(mark).width;
-  ctx.fillStyle = 'rgba(0,0,0,0.42)';
-  ctx.fillRect(CARD_W - mw - 52, 28, mw + 28, 44);
-  ctx.fillStyle = 'rgba(255,255,255,0.92)';
-  ctx.textBaseline = 'middle';
-  ctx.fillText(mark, CARD_W - mw - 38, 50);
+  if (marked) {
+    ctx.font = '600 26px Inter, system-ui, -apple-system, sans-serif';
+    const mark = 'tifomaker.org';
+    const mw = ctx.measureText(mark).width;
+    ctx.fillStyle = 'rgba(0,0,0,0.42)';
+    ctx.fillRect(CARD_W - mw - 52, 28, mw + 28, 44);
+    ctx.fillStyle = 'rgba(255,255,255,0.92)';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(mark, CARD_W - mw - 38, 50);
+  }
 
   // The band: the tifo's name, then where it was made.
   const rtl = opts.lang === 'ar';
@@ -108,7 +143,9 @@ export function renderPostCardCanvas(src: HTMLCanvasElement, opts: { title: stri
   ctx.fillStyle = '#f2f1ec';
   ctx.font = '800 58px Inter, system-ui, -apple-system, "Segoe UI", Tahoma, sans-serif';
   const title = (opts.title || '').trim() || (rtl ? 'تيفو' : 'My tifo');
-  ctx.fillText(fitText(ctx, title, CARD_W - 128), x, PHOTO_H + 112);
+  // Without the mark the band holds the title alone, in its middle.
+  ctx.fillText(fitText(ctx, title, CARD_W - 128), x, marked ? PHOTO_H + 112 : PHOTO_H + 156);
+  if (!marked) return c;
   ctx.font = '500 36px Inter, system-ui, -apple-system, "Segoe UI", Tahoma, sans-serif';
   ctx.fillStyle = '#9aa3b2';
   const lead = `${t('post.designedOn')} `;
@@ -183,6 +220,7 @@ function counted(deps: PostDeps, platform: ShareSource): void {
 const CSS = `
 .pm-overlay{position:fixed;inset:0;z-index:9990;display:flex;align-items:center;justify-content:center;
   background:rgba(4,6,10,.7);backdrop-filter:blur(4px);padding:14px;}
+.pm-overlay ~ .pro-sheet-backdrop{z-index:9991;}
 .pm-card:focus{outline:none;}
 .pm-card{width:min(420px,100%);max-height:94dvh;overflow:auto;background:#11141b;color:#f2f1ec;border:1px solid #232a36;
   border-radius:16px;box-shadow:0 24px 64px rgba(0,0,0,.5);padding:16px;font-family:Inter,system-ui,Arial,sans-serif;}
@@ -263,33 +301,79 @@ export async function openPostSheet(deps: PostDeps): Promise<void> {
   const msg = overlay.querySelector('.pm-msg') as HTMLElement;
   const say = (text: string): void => { msg.textContent = text; };
 
-  let blob: Blob | null = null;
-  let preview = '';
+  // Pro, for an account it is on for: the mark can go (PostPro, above).
+  const pro = postPro;
+  /** The picture from a capture of the stadium, with the mark or without. */
+  const picture = async (shot: HTMLCanvasElement, mark: boolean): Promise<{ blob: Blob; preview: string } | null> => {
+    const card = renderPostCardCanvas(shot, { title: deps.title(), lang: rtl ? 'ar' : 'en', mark });
+    const out = await toBlob(card);
+    // Shown from a data: URL, not the blob: one: the site's CSP allows
+    // data: images and not blob: ones. JPEG, because it is only a preview.
+    return out ? { blob: out, preview: card.toDataURL('image/jpeg', 0.86) } : null;
+  };
+  let src: HTMLCanvasElement | null = null;
+  let made: { blob: Blob; preview: string } | null = null;
   try {
-    const src = await deps.capture();
-    if (src) {
-      const card = renderPostCardCanvas(src, { title: deps.title(), lang: rtl ? 'ar' : 'en' });
-      blob = await toBlob(card);
-      // Shown from a data: URL, not the blob: one: the site's CSP allows
-      // data: images and not blob: ones. JPEG, because it is only a preview.
-      preview = card.toDataURL('image/jpeg', 0.86);
-    }
+    src = await deps.capture();
+    if (src) made = await picture(src, !pro?.clean());
   } catch {
-    blob = null;
+    made = null;
   }
   if (!overlay.isConnected) return; // closed while the picture was being made
   const wait = overlay.querySelector('.pm-wait') as HTMLElement;
-  if (!blob) {
+  if (!made || !src) {
     wait.textContent = t('post.fail');
     return;
   }
+  let blob: Blob = made.blob;
   const title = deps.title() || 'tifo';
-  const file = new File([blob], fileName(title), { type: 'image/png' });
+  let file = new File([blob], fileName(title), { type: 'image/png' });
   const img = document.createElement('img');
   img.className = 'pm-pic';
-  img.src = preview;
+  img.src = made.preview;
   img.alt = title;
   wait.replaceWith(img);
+  const show = (next: { blob: Blob; preview: string }): void => {
+    blob = next.blob;
+    file = new File([blob], fileName(title), { type: 'image/png' });
+    img.src = next.preview;
+  };
+
+  /**
+   * What the export sheet said about the picture as shown: asked once, the
+   * first time it leaves (shared, copied or saved), and again only after the
+   * option changes. 'free' has already swapped in the free version.
+   */
+  let answer: 'pro' | 'free' | null = null;
+  const option = pro?.option(() => {
+    answer = null;
+    // Free to try: the picture follows the tick at once; the sheet asks when it leaves.
+    void picture(src!, !pro.clean()).then((next) => { if (next && overlay.isConnected) show(next); });
+  }) ?? null;
+  if (option) img.after(option);
+  /** The picture to hand over, once the export sheet (if it has a say) has answered; null: nothing. */
+  const handOver = async (): Promise<Blob | null> => {
+    const items = pro?.items() ?? [];
+    if (!pro || !items.length || answer) return blob;
+    const how = await exportGate(items);
+    if (how === null || !overlay.isConnected) return null;
+    answer = how;
+    if (how === 'free') {
+      // The free version: the mark on, and the design's Pro items lifted for a fresh capture.
+      const shot = await pro.withoutDesignItems(async () => {
+        // Two frames, for the seats to follow the lifted layers.
+        await Promise.race([
+          new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))),
+          new Promise<void>((r) => setTimeout(r, 250)),
+        ]);
+        return deps.capture();
+      }).catch(() => null);
+      const next = await picture(shot ?? src!, true);
+      if (next) show(next);
+      pro.untick();
+    }
+    return blob;
+  };
 
   const acts = overlay.querySelector('.pm-actions') as HTMLElement;
   const button = (cls: string, icon: string, label: string, onClick: () => void | Promise<void>): HTMLButtonElement => {
@@ -308,6 +392,7 @@ export async function openPostSheet(deps: PostDeps): Promise<void> {
   // when both are given, and the picture is the point.
   if (canShareFiles(file)) {
     acts.appendChild(button('pm-main', 'ti-share', t('post.share'), async () => {
+      if (!await handOver()) return;
       try {
         await navigator.share({ files: [file], text: `${text} ${linkFor(deps, 'webshare')}` });
         counted(deps, 'webshare');
@@ -320,8 +405,10 @@ export async function openPostSheet(deps: PostDeps): Promise<void> {
   row.className = 'pm-row';
   if (canCopyImage()) {
     row.appendChild(button('pm-b', 'ti-copy', t('post.copyImg'), async () => {
+      const out = await handOver();
+      if (!out) return;
       try {
-        await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob! })]);
+        await navigator.clipboard.write([new ClipboardItem({ 'image/png': out })]);
         counted(deps, 'copy');
         say(t('post.copiedImg'));
       } catch {
@@ -329,8 +416,10 @@ export async function openPostSheet(deps: PostDeps): Promise<void> {
       }
     }));
   }
-  row.appendChild(button('pm-b', 'ti-download', t('post.download'), () => {
-    download(blob!, file.name);
+  row.appendChild(button('pm-b', 'ti-download', t('post.download'), async () => {
+    const out = await handOver();
+    if (!out) return;
+    download(out, file.name);
     counted(deps, 'link');
     say(t('post.saved'));
   }));

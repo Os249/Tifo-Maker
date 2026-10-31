@@ -54,7 +54,9 @@ function secsText(s: number): string {
 }
 import { BannerCanvas } from '../render/bannerCanvas';
 import { invalidateBannerText } from '../render/bannerRender';
-import { renderTextCanvas, TIFO_FONTS } from '../core/text';
+import { fontCssOf, renderTextCanvas, TIFO_FONTS } from '../core/text';
+import { isProVoice } from '../core/proVoices';
+import { loadProFonts } from '../core/tifoFonts';
 import { SHAPE_ASPECT } from '../core/symbols';
 import { BANNER_HISTORY_EVENT, bannerHost, type BannerHost } from './bannerHost';
 import { t, tv, onLangChange } from './i18n';
@@ -378,7 +380,13 @@ export function mountBannerView(deps: BannerViewDeps): BannerView {
     const m = messageOf(doc);
     if (msgIn && document.activeElement !== msgIn) msgIn.value = m?.text ?? '';
     if (msgFont) {
-      if (!msgFont.options.length) for (const ft of TIFO_FONTS) opt(msgFont, ft.id, ft.name);
+      if (!msgFont.querySelector(':scope > option')) {
+        // The free voices go first, ahead of the Pro group if ui/proFonts.ts
+        // added it before this panel was first drawn.
+        const pro = msgFont.firstElementChild;
+        for (const ft of TIFO_FONTS) opt(msgFont, ft.id, ft.name);
+        if (pro) msgFont.append(pro);
+      }
       msgFont.value = m?.fontId ?? 'condensed';
     }
     if (msgColor && m) msgColor.value = m.color;
@@ -757,8 +765,7 @@ export function mountBannerView(deps: BannerViewDeps): BannerView {
 
   /** Where a line of words sits on a sheet of this shape: as big as it fits. */
   const boxFor = (text: string, fontId: string, aspect: number): { cx: number; cy: number; w: number; h: number } | null => {
-    const css = TIFO_FONTS.find((f) => f.id === fontId)?.css ?? TIFO_FONTS[0].css;
-    const r = renderTextCanvas(text, css, 0);
+    const r = renderTextCanvas(text, fontCssOf(fontId), 0);
     if (!r) return null;
     return fitMessage(aspect, r.canvas.width / Math.max(1, r.canvas.height));
   };
@@ -816,12 +823,16 @@ export function mountBannerView(deps: BannerViewDeps): BannerView {
       msgIn.blur();
     }
   });
-  msgFont?.addEventListener('change', () => {
+  msgFont?.addEventListener('change', async () => {
+    const fontId = msgFont.value;
+    // A Pro voice (ui/proFonts.ts) is fitted in its own face, never in the
+    // fallback a face still on its way would be measured in.
+    if (isProVoice(fontId)) await loadProFonts([fontId]);
     const doc = bannerStore.active;
     const m = doc ? messageOf(doc) : null;
     if (!m) return;
     edit(() => {
-      bannerStore.patchItem(m.id, { fontId: msgFont.value } as Partial<BannerItem>);
+      bannerStore.patchItem(m.id, { fontId } as Partial<BannerItem>);
       refitMessage();
     });
   });
@@ -1197,8 +1208,7 @@ export function mountBannerView(deps: BannerViewDeps): BannerView {
     placeText(o) {
       const doc = bannerStore.active;
       if (!doc) return false;
-      const css = TIFO_FONTS.find((f) => f.id === o.fontId)?.css ?? TIFO_FONTS[0].css;
-      const r = renderTextCanvas(o.text, css, o.arcDeg);
+      const r = renderTextCanvas(o.text, fontCssOf(o.fontId), o.arcDeg);
       if (!r) return false;
       const aspect = aspectOf(doc);
       // A headline lands at the size that reads: the cap-height band the

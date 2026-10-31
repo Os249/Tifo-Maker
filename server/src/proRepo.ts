@@ -14,7 +14,7 @@
 import { randomUUID } from 'node:crypto';
 import type pg from 'pg';
 import type { AllowanceKind, PassPlan } from './proPlan';
-import { PAID_PLANS, PASS_PLANS } from './proPlan';
+import { LEGACY_PAID_PLANS, PAID_PLANS, PASS_PLANS, normalizePlan } from './proPlan';
 
 export interface ProPass {
   id: string;
@@ -28,11 +28,10 @@ export interface ProPass {
   revokedAt: string | null;
 }
 
+/** The 7-day gift. It has no claim-by date: an offer waits until it is started. */
 export interface ProGift {
   userId: string;
   offeredAt: string;
-  /** Accept before this, or the gift lapses. */
-  claimBy: string;
   acceptedAt: string | null;
   passId: string | null;
 }
@@ -68,12 +67,12 @@ export interface ProRepository {
 
   gift(userId: string): Promise<ProGift | null>;
   /** Create the offer if there is none; return whatever is there. */
-  offerGift(userId: string, claimBy: Date, now: Date): Promise<ProGift>;
+  offerGift(userId: string, now: Date): Promise<ProGift>;
   /**
    * Turn an offered gift into a pass of `days` days starting now. Refused when
-   * there is no offer, it was already accepted, or its claim date has passed.
+   * there is no offer or it was already accepted.
    */
-  acceptGift(userId: string, now: Date, days: number): Promise<{ ok: true; pass: ProPass } | { ok: false; reason: 'none' | 'used' | 'expired' }>;
+  acceptGift(userId: string, now: Date, days: number): Promise<{ ok: true; pass: ProPass } | { ok: false; reason: 'none' | 'used' }>;
 
   /** Record "tell me when Pro opens". Returns false when already recorded. */
   notify(userId: string): Promise<boolean>;
@@ -173,19 +172,18 @@ export class MemoryProRepository implements ProRepository {
     return g ? { ...g } : null;
   }
 
-  async offerGift(userId: string, claimBy: Date, now: Date): Promise<ProGift> {
+  async offerGift(userId: string, now: Date): Promise<ProGift> {
     const have = this.gifts.get(userId);
     if (have) return { ...have };
-    const g: ProGift = { userId, offeredAt: now.toISOString(), claimBy: claimBy.toISOString(), acceptedAt: null, passId: null };
+    const g: ProGift = { userId, offeredAt: now.toISOString(), acceptedAt: null, passId: null };
     this.gifts.set(userId, g);
     return { ...g };
   }
 
-  async acceptGift(userId: string, now: Date, days: number): Promise<{ ok: true; pass: ProPass } | { ok: false; reason: 'none' | 'used' | 'expired' }> {
+  async acceptGift(userId: string, now: Date, days: number): Promise<{ ok: true; pass: ProPass } | { ok: false; reason: 'none' | 'used' }> {
     const g = this.gifts.get(userId);
     if (!g) return { ok: false, reason: 'none' };
     if (g.acceptedAt) return { ok: false, reason: 'used' };
-    if (Date.parse(g.claimBy) <= now.getTime()) return { ok: false, reason: 'expired' };
     // Marked before the pass exists, so a second call in the same tick is refused.
     g.acceptedAt = now.toISOString();
     const pass = await this.grantPass({
@@ -239,7 +237,8 @@ function rowToPass(r: Record<string, unknown>): ProPass {
   return {
     id: String(r.id),
     userId: String(r.user_id),
-    plan: String(r.plan) as PassPlan,
+    // A pass granted before Pro became one plan reads as a month of Pro.
+    plan: normalizePlan(String(r.plan)),
     startsAt: iso(r.starts_at as string)!,
     endsAt: iso(r.ends_at as string)!,
     source: String(r.source) as ProPass['source'],
@@ -252,7 +251,6 @@ function rowToGift(r: Record<string, unknown>): ProGift {
   return {
     userId: String(r.user_id),
     offeredAt: iso(r.offered_at as string)!,
-    claimBy: iso(r.claim_by as string)!,
     acceptedAt: iso(r.accepted_at as string | null),
     passId: r.pass_id ? String(r.pass_id) : null,
   };
@@ -352,30 +350,31 @@ export class PgProRepository implements ProRepository {
       `SELECT DISTINCT user_id FROM pro_passes
        WHERE user_id = ANY($1::uuid[]) AND plan = ANY($2::text[])
          AND revoked_at IS NULL AND starts_at <= $3 AND ends_at > $3`,
-      [ids, PAID_PLANS, now],
+      [ids, [...PAID_PLANS, ...LEGACY_PAID_PLANS], now],
     );
     return new Set(r.rows.map((x) => String(x.user_id)));
   }
 
   async gift(userId: string): Promise<ProGift | null> {
-    const r = await this.pool.query('SELECT user_id, offered_at, claim_by, accepted_at, pass_id FROM pro_gifts WHERE user_id = $1', [userId]);
+    const r = await this.pool.query('SELECT user_id, offered_at, accepted_at, pass_id FROM pro_gifts WHERE user_id = $1', [userId]);
     return r.rows[0] ? rowToGift(r.rows[0]) : null;
   }
 
-  async offerGift(userId: string, claimBy: Date, now: Date): Promise<ProGift> {
+  async offerGift(userId: string, now: Date): Promise<ProGift> {
+    // claim_by stays empty: the gift never expires (schema.sql, "Pro becomes one monthly plan").
     await this.pool.query(
-      'INSERT INTO pro_gifts (user_id, offered_at, claim_by) VALUES ($1, $2, $3) ON CONFLICT (user_id) DO NOTHING',
-      [userId, now, claimBy],
+      'INSERT INTO pro_gifts (user_id, offered_at) VALUES ($1, $2) ON CONFLICT (user_id) DO NOTHING',
+      [userId, now],
     );
     return (await this.gift(userId))!;
   }
 
-  async acceptGift(userId: string, now: Date, days: number): Promise<{ ok: true; pass: ProPass } | { ok: false; reason: 'none' | 'used' | 'expired' }> {
+  async acceptGift(userId: string, now: Date, days: number): Promise<{ ok: true; pass: ProPass } | { ok: false; reason: 'none' | 'used' }> {
     const client = await this.pool.connect();
     try {
       await client.query('BEGIN');
       // The row lock makes a second Accept wait for the first, then see it accepted.
-      const g = await client.query('SELECT accepted_at, claim_by FROM pro_gifts WHERE user_id = $1 FOR UPDATE', [userId]);
+      const g = await client.query('SELECT accepted_at FROM pro_gifts WHERE user_id = $1 FOR UPDATE', [userId]);
       const row = g.rows[0];
       if (!row) {
         await client.query('ROLLBACK');
@@ -384,10 +383,6 @@ export class PgProRepository implements ProRepository {
       if (row.accepted_at) {
         await client.query('ROLLBACK');
         return { ok: false, reason: 'used' };
-      }
-      if (new Date(row.claim_by).getTime() <= now.getTime()) {
-        await client.query('ROLLBACK');
-        return { ok: false, reason: 'expired' };
       }
       const ends = new Date(now.getTime() + days * 24 * 60 * 60 * 1000);
       const p = await client.query(
@@ -427,7 +422,7 @@ export class PgProRepository implements ProRepository {
       this.pool.query('SELECT count(*)::int AS n FROM pro_notify'),
     ]);
     const passes = Object.fromEntries(PASS_PLANS.map((pl) => [pl, 0])) as Record<PassPlan, number>;
-    for (const r of p.rows) if ((PASS_PLANS as string[]).includes(String(r.plan))) passes[r.plan as PassPlan] = Number(r.n);
+    for (const r of p.rows) passes[normalizePlan(String(r.plan))] += Number(r.n);
     return {
       gifts: { offered: Number(g.rows[0]?.offered ?? 0), accepted: Number(g.rows[0]?.accepted ?? 0), active: passes.gift },
       passes,

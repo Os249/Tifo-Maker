@@ -120,8 +120,9 @@ console.log('\n— an account Pro is not on for —');
   await e.p.waitForTimeout(800);
   const ed = await e.p.evaluate(() => ({
     cut: !!document.querySelector('.cut-field:not([hidden])'),
-    mark: !document.querySelector('#sx-nomark')?.closest('label')?.hidden,
-    left: !document.querySelector('.ai-whole-left')?.hidden,
+    mark: !!document.querySelector('#sx-nomark')?.closest('label') && !document.querySelector('#sx-nomark').closest('label').hidden,
+    // The count beside "Whole stadium" went with the box (29 Oct 2026): none shown.
+    left: !!document.querySelector('.ai-whole-left:not([hidden])'),
     // Visible ones: the markup may be in the page, unshown, like any closed panel's.
     crown: [...document.querySelectorAll('.pro-crown')].filter((c) => c.getClientRects().length > 0).length,
   }));
@@ -137,7 +138,8 @@ console.log('\n— an account on the preview list —');
   const { ctx, p } = await page(fan.token);
   await p.goto(`${B}/projects`, { waitUntil: 'networkidle' });
   check('My projects shows the gift card', await waitFor(p, () => /A gift for you: 7 days of Pro/.test(document.querySelector('.pro-card:not([hidden]) h2')?.textContent || '')));
-  check('…saying when it waits until, with the year', /2027/.test(await p.locator('.pro-card p').first().textContent()));
+  const cardBody = await p.locator('.pro-card p').first().textContent();
+  check('…saying it waits for them, with no date to claim it by', /waits for you/.test(cardBody) && !/20\d\d/.test(cardBody), cardBody);
   await p.click('.pro-card [data-act="quiet"]');
   check('"Later" puts it away', await waitFor(p, () => !!document.querySelector('.pro-card[hidden]')));
   await p.reload({ waitUntil: 'networkidle' });
@@ -150,23 +152,27 @@ console.log('\n— an account on the preview list —');
   const { ctx, p } = await editor(fan.token, fan.design);
   await p.click('#rail-ai');
   check('AI panel: the day\'s designs, counted', await waitFor(p, () => /^10 of 10 designs left today$/.test(document.getElementById('ai-quota')?.textContent || '')));
-  check('…and the week\'s Super designs beside Whole stadium', await p.evaluate(() => document.querySelector('.ai-whole-left')?.textContent === '3 left'));
-  await p.check('#ai-whole');
-  check('ticking Whole stadium counts Super instead', await waitFor(p, () => /^3 of 3 Super designs left this week$/.test(document.getElementById('ai-quota')?.textContent || '')));
-  // The server's answer when the week's three are used, as it sends it.
+  // Whole stadium is the only AI path since 29 Oct 2026 (2e3d8f9): its box,
+  // and the week's Super count and crown beside it, are gone, and the panel's
+  // designs are metered as AI designs (one allowance since 31 Oct).
+  check('…and no Whole stadium box any more, nor a Super count beside it', await p.evaluate(() => !document.getElementById('ai-whole') && !document.querySelector('.ai-whole-left:not([hidden])') && !/Super/.test(document.getElementById('ai-quota')?.textContent || '')));
+  // The server's answer when the month's 40 are used, as it sends it.
   const resetAt = new Date(Date.now() + 2 * 86400e3).toISOString();
   await p.route('**/api/ai/generate', (r) => r.fulfill({
     status: 200, contentType: 'application/json',
-    body: JSON.stringify({ needsChoice: true, reason: 'quota', kind: 'super', plan: 'free', retryAfterSec: 172800, quota: { admin: false, used: 3, limit: 3, remaining: 0, resetInSec: 172800, live: true, kind: 'super', period: 'week', resetAt, plan: 'free' } }),
+    body: JSON.stringify({ needsChoice: true, reason: 'quota', kind: 'std', plan: 'free', retryAfterSec: 172800, quota: { admin: false, used: 40, limit: 40, remaining: 0, resetInSec: 172800, live: true, kind: 'std', period: 'month', resetAt, plan: 'free' } }),
   }));
   await p.fill('#ai-prompt', 'Giant eagle over the south stand');
   await p.click('#ai-generate');
-  check('the limit card says what ran out', await waitFor(p, () => /That's all 3 Super designs for this week/.test(document.querySelector('#ai-state .ai-state-title')?.textContent || '')));
+  check('the limit card says what ran out', await waitFor(p, () => /That's all 40 designs for this month/.test(document.querySelector('#ai-state .ai-state-title')?.textContent || '')));
   const acts = await p.evaluate(() => [...document.querySelectorAll('#ai-state .ai-state-actions button')].map((b) => [b.textContent, b.classList.contains('primary')]));
-  check('…one blue way on (the gift) and one quiet alternative', acts.length === 2 && acts[0][0] === 'Use my Pro gift' && acts[0][1] && acts[1][0] === 'Use a standard design' && !acts[1][1], JSON.stringify(acts));
-  check('…and the crown beside Whole stadium, now that the free ones are used', await p.evaluate(() => !!document.querySelector('.ai-whole-left .pro-chip')));
+  // The quiet alternative is the free Quick Designer since 29 Oct 2026: a
+  // standard design is the same whole-bowl path now (2e3d8f9).
+  check('…one blue way on (the gift) and one quiet alternative', acts.length === 2 && acts[0][0] === 'Use my Pro gift' && acts[0][1] && acts[1][0] === 'Use the Quick Designer' && !acts[1][1], JSON.stringify(acts));
   await p.locator('#ai-state .ai-state-actions button').first().click();
   check('the gift sheet opens from the card, and says when it would end', await waitFor(p, () => /Your 7-day Pro gift/.test(document.querySelector('.pro-sheet h2')?.textContent || '') && !!document.querySelector('.pro-sheet .pro-when')));
+  const perks = await p.evaluate(() => [...document.querySelectorAll('.pro-sheet .pro-perks li')].map((l) => l.textContent));
+  check('…listing all of Pro: more AI, clean exports, the video sizes, styles and fonts, the club kit', perks.length === 8 && /More AI designs/.test(perks[0]) && perks.some((x) => /any export/.test(x)) && perks.some((x) => /9:16/.test(x)) && perks.some((x) => /Pro fonts/.test(x)) && perks.some((x) => /Club kit/.test(x)) && !perks.some((x) => /Super/.test(x)), JSON.stringify(perks));
   await p.keyboard.press('Escape');
   check('Escape closes it without starting anything', await waitFor(p, () => !document.querySelector('.pro-sheet-backdrop')) && (await api('/api/pro', fan.token)).json.gift.state === 'offered');
   await p.unroute('**/api/ai/generate');
@@ -220,18 +226,37 @@ console.log('\n— an account on the preview list —');
   const again = await p.evaluate(() => fetch('/api/pro/gift/accept', { method: 'POST', headers: { authorization: `Bearer ${localStorage.getItem('tifo_token_v1')}`, 'content-type': 'application/json' }, body: '{}' }).then((r) => r.status));
   check('a second accept from the page is refused', again === 409, String(again));
   await p.goto(`${B}/account`, { waitUntil: 'networkidle' });
-  check('Account: the plan, when it ends, and five allowances', await waitFor(p, () => {
+  check('Account: the plan, when it ends, and four allowances', await waitFor(p, () => {
     const s = document.getElementById('pro');
-    return !!s && !s.hidden && /Pro gift/.test(s.textContent) && /Ends/.test(s.textContent) && s.querySelectorAll('.pro-meter').length === 5;
+    return !!s && !s.hidden && /Pro gift/.test(s.textContent) && /Ends/.test(s.textContent) && s.querySelectorAll('.pro-meter').length === 4 && !/Super/.test(s.textContent);
   }));
+  check('…with Pro\'s day for designs: 15', await p.evaluate(() => /15 of 15 designs left today/.test(document.getElementById('pro')?.textContent || '')));
   await p.goto(`${B}/pro`, { waitUntil: 'networkidle' });
-  check('/pro: three plans, and "you have" instead of a button', await waitFor(p, () => document.querySelectorAll('.pp-plan').length === 3 && !document.getElementById('pp-you').hidden && document.getElementById('pp-act').hidden));
+  check('/pro: two plans, and "you have" instead of a button', await waitFor(p, () => document.querySelectorAll('.pp-plan').length === 2 && !document.getElementById('pp-you').hidden && document.getElementById('pp-act').hidden));
+  const pp = await p.evaluate(() => ({
+    pro: document.querySelector('#pp-plan-pro')?.closest('.pp-plan')?.textContent || '',
+    free: document.querySelector('#pp-plan-free')?.closest('.pp-plan')?.textContent || '',
+    group: !!document.querySelector('.pp-group'),
+    over: document.documentElement.scrollWidth - innerWidth,
+  }));
+  check('…Pro at SAR 19 a month, with every new perk in its column', /SAR 19 a month/.test(pp.pro) && /30 days of Pro/.test(pp.pro) && ['any export', '9:16', '4K poster', 'Portrait styles', 'Pro fonts', 'LED boards', 'Club kit', 'Supporter crown'].every((w) => pp.pro.includes(w)), pp.pro.slice(0, 400));
+  check('…Free at 10 a day and 40 a month, none of Pro\'s perks', /10 a day/.test(pp.free) && /40 a month/.test(pp.free) && /SAR 0/.test(pp.free), pp.free.slice(0, 300));
+  check('…Pro\'s designs: 15 a day, 70 a month', /15 a day/.test(pp.pro) && /70 a month/.test(pp.pro));
+  check('…no Match Pass, Season Pass or group band', !/Match Pass|Season Pass/.test(pp.pro + pp.free) && !pp.group);
+  await p.setViewportSize({ width: 390, height: 844 });
+  await p.waitForTimeout(300);
+  check('…and on a phone the two plans stack, nothing scrolling sideways', await p.evaluate(() => {
+    const [a, b] = [...document.querySelectorAll('.pp-plan')].map((x) => x.getBoundingClientRect());
+    return b.top >= a.bottom - 1 && document.documentElement.scrollWidth <= innerWidth;
+  }));
   await ctx.close();
 }
 {
   const { ctx, p } = await page(fan.token, { lang: 'ar' });
   await p.goto(`${B}/ar/account`, { waitUntil: 'networkidle' });
   check('in Arabic: "باقتك" and the gift\'s name', await waitFor(p, () => { const s = document.getElementById('pro'); return !!s && !s.hidden && /باقتك/.test(s.textContent) && /الهدية المميّزة/.test(s.textContent); }));
+  await p.goto(`${B}/ar/pro`, { waitUntil: 'networkidle' });
+  check('/ar/pro: المميّزة بـ19 ريال بالشهر', await waitFor(p, () => /19 ريال بالشهر/.test(document.querySelector('#pp-plan-pro')?.closest('.pp-plan')?.textContent || '') && document.documentElement.dir === 'rtl'));
   await p.goto(`${B}/ar/projects`, { waitUntil: 'networkidle' });
   check('…and the chip says مميّز', await waitFor(p, () => /^مميّز · باقي 7 أيام$/.test(document.querySelector('.pro-head-chip:not([hidden])')?.textContent || '')));
   const over = await p.evaluate(() => document.documentElement.scrollWidth - innerWidth);

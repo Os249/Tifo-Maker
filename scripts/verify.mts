@@ -3596,7 +3596,7 @@ await (async () => {
     motionTokens += (s.match(/var\(--(?:duration|ease)-/g) ?? []).length;
   }
   const inline = readdirSync('.').filter((f) => f.endsWith('.html')).reduce((n, f) => n + (dsRead(f, 'utf8').match(/\sstyle="/g) ?? []).length, 0);
-  const CEILING = { rawSizes: 174, rawColours: 372, inline: 97 };
+  const CEILING = { rawSizes: 174, rawColours: 372, inline: 96 };
   const fails: string[] = [];
   if (rawSizes > CEILING.rawSizes) fails.push(`${rawSizes} raw px font sizes in src/**/*.css (ceiling ${CEILING.rawSizes}): use var(--fs-*)`);
   if (rawColours > CEILING.rawColours) fails.push(`${rawColours} raw colours outside the token files (ceiling ${CEILING.rawColours}): add a token`);

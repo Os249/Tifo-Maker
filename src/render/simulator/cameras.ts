@@ -146,3 +146,193 @@ export function flyover(elapsed: number, bounds?: BowlBounds, period = FLY_DURAT
     fov: 46,
   };
 }
+
+/**
+ * Where the tifo is: the seats that hold a card, as the cameras need them.
+ *
+ * Reported on 30 Oct 2026: a tifo behind one goal, and every show opened on
+ * the TV gantry, which looks across at the other side of the ground. The
+ * tifo's middle sat just off the edge of the picture for the whole reveal,
+ * and every cut after that was to a fixed place too. The cameras below are
+ * worked out from this instead.
+ */
+export interface TifoFootprint {
+  /** The middle of the painted seats, metres. */
+  centre: [number, number, number];
+  /** From the middle of the pitch out towards the tifo, along the ground (unit x, z). */
+  dir: [number, number];
+  /** Across: the painted seats' spread along the stand, metres. */
+  width: number;
+  /** Lowest and highest painted seat, metres. */
+  y0: number;
+  y1: number;
+  /** Nearest to and furthest from the pitch, along `dir`, metres. */
+  near: number;
+  far: number;
+  /** How much of the way round the bowl it reaches, degrees. */
+  arcDeg: number;
+  /** The stand most of it is in: 0 east, 1 north, 2 west, 3 south (standOfU). */
+  stand: 0 | 1 | 2 | 3;
+  /** That stand's share of the painted seats. */
+  standShare: number;
+  seats: number;
+}
+
+/**
+ * The painted seats' footprint, or null when there is no tifo to look at, or
+ * when it goes round so much of the bowl that no one place sees it better
+ * than the gantry does (a whole-stadium design).
+ */
+export function tifoFootprint(map: SeatMap, painted: (i: number) => boolean): TifoFootprint | null {
+  const bins = new Uint8Array(360);
+  /** Where the ground has seats at all: a ground with two stands is "whole" at two. */
+  const groundBins = new Uint8Array(360);
+  const perStand = [0, 0, 0, 0];
+  let n = 0;
+  let sx = 0;
+  let sy = 0;
+  let sz = 0;
+  let rSum = 0;
+  for (let i = 0; i < map.count; i++) {
+    const x = map.pos3[i * 3];
+    const z = map.pos3[i * 3 + 2];
+    const deg = Math.floor(((Math.atan2(z, x) * 180) / Math.PI + 360) % 360);
+    groundBins[Math.min(359, deg)] = 1;
+    if (!painted(i)) continue;
+    const y = map.pos3[i * 3 + 1];
+    sx += x;
+    sy += y;
+    sz += z;
+    rSum += Math.hypot(x, z);
+    n++;
+    bins[Math.min(359, deg)] = 1;
+    perStand[Math.floor(((map.uv[i * 2] + 0.125) % 1) * 4) & 3]++;
+  }
+  // A handful of seats is a mark, not a tifo to frame.
+  if (n < 24) return null;
+  // How far round it reaches: the whole circle less its widest empty gap.
+  const arcOf = (on: Uint8Array): number => {
+    let gap = 0;
+    let run = 0;
+    for (let k = 0; k < 720; k++) {
+      if (on[k % 360]) run = 0;
+      else gap = Math.max(gap, ++run);
+    }
+    return 360 - Math.min(360, gap);
+  };
+  const arcDeg = arcOf(bins);
+  const cx = sx / n;
+  const cz = sz / n;
+  const len = Math.hypot(cx, cz);
+  // Round most of the bowl, or so evenly spread that its middle is the middle
+  // of the pitch: the gantry is the camera for that. "The bowl" is the
+  // ground's own seats: on a ground with stands on two sides, a design on
+  // all of them (most of its seats, or most of the way round them) is a
+  // whole-stadium design, and its own cameras are the ones made for it.
+  if (arcDeg > 200 || arcDeg > arcOf(groundBins) * 0.8 || n > map.count * 0.85 || len < (rSum / n) * 0.35) return null;
+  const dx = cx / len;
+  const dz = cz / len;
+  let y0 = Infinity;
+  let y1 = -Infinity;
+  let a0 = Infinity;
+  let a1 = -Infinity;
+  let near = Infinity;
+  let far = -Infinity;
+  for (let i = 0; i < map.count; i++) {
+    if (!painted(i)) continue;
+    const x = map.pos3[i * 3];
+    const y = map.pos3[i * 3 + 1];
+    const z = map.pos3[i * 3 + 2];
+    y0 = Math.min(y0, y);
+    y1 = Math.max(y1, y);
+    const across = x * -dz + z * dx;
+    a0 = Math.min(a0, across);
+    a1 = Math.max(a1, across);
+    const out = x * dx + z * dz;
+    near = Math.min(near, out);
+    far = Math.max(far, out);
+  }
+  let stand = 0;
+  for (let s = 1; s < 4; s++) if (perStand[s] > perStand[stand]) stand = s;
+  return {
+    centre: [cx, sy / n, cz],
+    dir: [dx, dz],
+    width: Math.max(4, a1 - a0),
+    y0,
+    y1,
+    near,
+    far,
+    arcDeg,
+    stand: stand as 0 | 1 | 2 | 3,
+    standShare: perStand[stand] / n,
+    seats: n,
+  };
+}
+
+/**
+ * The vertical field of view that holds `w` metres across and `h` metres up at
+ * `d` metres, with room round them. The room across is generous on purpose:
+ * Match Day's panel covers about a fifth of one side of the picture, and the
+ * tifo is framed in the middle of the whole of it, so it is held to the middle
+ * three-fifths, clear of the panel with it open.
+ */
+function fovToHold(w: number, h: number, d: number, aspect: number): number {
+  const a = aspect > 0 ? aspect : 16 / 9;
+  const half = Math.max(Math.atan((h * 1.4) / 2 / d), Math.atan((w * 1.6) / 2 / d / a));
+  return (half * 360) / Math.PI;
+}
+
+/**
+ * Two cameras on the tifo, from where people really film one.
+ *
+ * "Your Tifo": the far side's gantry, straight across the pitch from it, high
+ * enough to see over the front rows and zoomed (by field of view, not by
+ * moving into the air) so the whole tifo fills the picture. "Tifo Pitch
+ * Level": on the grass in front of it, looking up, a step to one side — the
+ * angle the tifo is made for. `bounds` is the bowl's extent; `aspect` the
+ * picture's, so a phone held upright still gets the tifo's full width.
+ */
+export function tifoShots(
+  fp: TifoFootprint,
+  bounds: BowlBounds,
+  aspect: number,
+  /** How far back and how high a camera can go: inside the building, and in a hall below the roof. */
+  room?: { back: number; y: number },
+): SimShot[] {
+  const [dx, dz] = fp.dir;
+  const [cx, cy0, cz] = fp.centre;
+  // The far side, measured along the same line: an end stand faces an end,
+  // a side faces a side, and an oval's corner faces the opposite corner. The
+  // bowl's radius that way, as an ellipse: |dx|·ax + |dz|·bz is the same on
+  // the axes but reaches past the stands on a diagonal, and a tifo off to one
+  // side had its camera outside the ground.
+  const reach = 1 / Math.hypot(dx / Math.max(1, bounds.ax), dz / Math.max(1, bounds.bz));
+  const back = Math.min(room?.back ?? Infinity, Math.max(30, reach * 0.95));
+  const camY = Math.min(room?.y ?? Infinity, bounds.ty * 1.02 + 2);
+  const pos: [number, number, number] = [-dx * back, camY, -dz * back];
+  const midY = (fp.y0 + fp.y1) / 2;
+  const target: [number, number, number] = [cx, Math.max(1.5, midY), cz];
+  const dist = Math.hypot(target[0] - pos[0], target[1] - pos[1], target[2] - pos[2]);
+  // Seen from across, a raked stand shows its rise and part of its depth.
+  const tall = fp.y1 - fp.y0 + (fp.far - fp.near) * 0.35;
+  const fov = Math.max(16, Math.min(58, fovToHold(fp.width, tall, dist, aspect)));
+  const wide: SimShot = { name: 'Your Tifo', position: pos, target, fov };
+
+  // On the grass: far enough out to hold the tifo at a wide lens, but close
+  // enough to look UP at it (from much further than 55 m a stand is a thin
+  // band at eye level, across a running track), never inside the front row,
+  // and never far past the middle of the pitch.
+  const lens = 62;
+  const a = aspect > 0 ? aspect : 16 / 9;
+  const hHalf = Math.atan(Math.tan((lens * Math.PI) / 360) * a);
+  const hold = (fp.width * 0.62) / Math.tan(hHalf);
+  const out = Math.max(fp.near - Math.max(18, Math.min(hold, 55)), -reach * 0.15);
+  const side = fp.width * 0.12;
+  const low: SimShot = {
+    name: 'Tifo Pitch Level',
+    position: [dx * out - dz * side, 2.2, dz * out + dx * side],
+    target: [cx, Math.max(4, cy0 + (fp.y1 - cy0) * 0.35), cz],
+    fov: lens,
+  };
+  return [wide, low];
+}

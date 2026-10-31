@@ -1,4 +1,5 @@
 import type { ToolId } from '../core/types';
+import type { BannerStore } from '../core/banner';
 
 /**
  * The one seam between the Banner view and the rest of the editor.
@@ -64,3 +65,11 @@ export const bannerHost: { current: BannerHost | null } = { current: null };
 export function bannerActive(): boolean {
   return bannerHost.current?.active === true;
 }
+
+/**
+ * The design's banners, for the few things outside the Banner view that must
+ * read or change them whether or not the view was ever opened: a Pro font on a
+ * banner, lifted for an export without Pro items (ui/proFonts.ts). Set by
+ * main.ts when the store is made; null on pages without an editor.
+ */
+export const bannerScene: { store: BannerStore | null } = { store: null };

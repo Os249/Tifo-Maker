@@ -153,6 +153,15 @@ The scale is in `tokens.css`, after the motion tokens of transitions.dev.
   strip with that stand.
 - **The AI bar** (`#ai-bar`) is the AI tab's own prompt and Generate, one line
   on the canvas. It never adds a second AI path.
+- **The stadium's camera controls** (`#cam-bar`) sit in its top corner, never
+  over the middle of the picture, where the far stand and the tifo on it are.
+  The eye on them (or H) clears them and the AI bar off the stadium until it
+  is pressed again (`tifo_stage_clean_v1`). Anything else floating over the
+  canvas, like the layer bar, stays inside the part it belongs to.
+- **Cameras look at the tifo.** "Your tifo" in the stadium's menu, and Match
+  Day opens on it and films the show on it (`simulator/cameras.ts`,
+  `tifoShots`). A hand on the camera wins: it ends the show's cuts, and "Stay
+  where I put it" never cuts (`mds_showcam_v1`).
 - **Panel sections fold** (`ui/foldSections.ts`); the browser remembers
   (`tifo_folds_v1`); picking a tool opens its section.
 - **The first-tifo guide** (`ui/guide.ts`) runs once (`tifo_guide_v1`) and
@@ -178,17 +187,25 @@ One title, one sentence, one blue action, at most one quiet alternative.
   are free to try in the editor and the 3D; an export with Pro items opens
   the export sheet: the gift (or Pro), and "Export without Pro items".
   Saving and publishing are never blocked.
-- **A pass holder still sees what is Pro, quietly** (`.pro-chip.quiet`), and
+- **A Pro member (a month of Pro, or the gift running) still sees what is
+  Pro, quietly** (`.pro-chip.quiet`), and
   never sees a limit card that sells: at a ceiling the card says when it
   comes back and offers the free alternative.
-- **The limit card**: what ran out ("That's all 3 Super designs for this
-  week"), when it comes back ("on Sunday (in 2 days)"), one blue way on (the
-  gift when there is one, else "See what Pro adds") and one quiet
-  alternative (a standard design, the Quick Designer).
+- **The limit card**: what ran out ("That's all 10 designs for today"),
+  when it comes back ("on Sunday (in 2 days)"), one blue way on (the gift
+  when there is one, else "See what Pro adds") and one quiet alternative
+  (the Quick Designer).
 - **The countdown chip** (`mountProChip`) sits before the header's account
-  control while a pass runs; on a phone, the crown alone.
-- **The Supporter crown** (`supporterCrownHtml()`) follows a paid pass's
-  name in the community: cards, the profile, comments.
+  control while Pro runs; on a phone, and in the editor's top bar on a
+  laptop (900 to 1599 px, where the header is full), the crown alone with
+  its words in the title.
+- **The Supporter crown** (`supporterCrownHtml()`) follows a paid month of
+  Pro's name in the community: cards, the profile, comments.
+- **One plan** (31 Oct 2026): Free against Pro, SAR 19 for 30 days, and a
+  7-day gift that waits until it is started. Every new Pro item gets the
+  crown where it is picked, is free to try, meets the export sheet at
+  export, has English and Saudi Arabic words that load only with it, and has
+  checks in a browser suite (`e2e-pro*.mjs`).
 - **Everything shown comes from `/api/pro`.** The interface decides nothing;
   with `PRO_MODE=off` none of it appears.
 
@@ -308,4 +325,15 @@ are in `docs/design-prompts.md`.
   prompts `docs/design-prompts.md` has. Its prompts target Tailwind and are not
   copied; ours are written for this stack.
 - **isreadyforlaunch.com**: the checks in section 10, from Osamh's scan.
+- **The Pro display fonts** (`core/proVoices.ts`, `core/proFontFaces.ts`), all
+  under the SIL Open Font License 1.1 and installed from their @fontsource
+  packages, each of which ships its LICENSE. Block: Lalezar (The Lalezar
+  Project Authors, github.com/BornaIz/Lalezar) with Bowlby One (Vernon Adams).
+  Stencil: Reem Kufi (The Reem Kufi Project Authors, github.com/aliftype/
+  reem-kufi) with Black Ops One (github.com/SorkinType/Black-Ops). Rounded:
+  Lemonada (The Lemonada Project Authors, github.com/Gue3bara/Lemonada).
+  Classic: Rakkas (The Rakkas Project Authors, github.com/zeynepakay/Rakkas).
+  Marker: Marhey (The Marhey Project Authors, github.com/namelatype/Marhey).
+  The licence allows using, embedding and redistributing them in the product;
+  the fonts are never sold on their own.
 - **opendesign.dev**: retired by Ceros on 1 October 2023; nothing to adopt.

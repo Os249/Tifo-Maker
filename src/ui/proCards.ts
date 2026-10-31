@@ -15,7 +15,7 @@
 import { fetchPro, isSignedIn, notifyPro, type ProState } from '../net/api';
 import { track } from '../net/analytics';
 import { escapeHtml } from '../core/escape';
-import { CROWN_SVG, whenDate, whenDay } from './pro';
+import { CROWN_SVG, whenDate } from './pro';
 import { onLangChange, t, tv } from './i18n';
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -38,7 +38,7 @@ const write = (k: string, v: string): void => {
 };
 
 type View =
-  | { kind: 'offer'; days: number; claimBy: string }
+  | { kind: 'offer'; days: number }
   | { kind: 'remind'; stage: string; last: boolean; endsAt: string }
   | { kind: 'ended'; stage: string };
 
@@ -48,7 +48,7 @@ function viewOf(st: ProState | null, now = Date.now()): View | null {
   if (g.state === 'offered') {
     const later = Number(read(LATER_KEY) ?? 0);
     if (later && now - later < 3 * DAY) return null;
-    return { kind: 'offer', days: g.days, claimBy: g.claimBy };
+    return { kind: 'offer', days: g.days };
   }
   if (g.state === 'active') {
     const left = Date.parse(g.endsAt) - now;
@@ -87,7 +87,7 @@ export function mountGiftCard(host: HTMLElement, before: Element | null): void {
     let quiet: string;
     if (v.kind === 'offer') {
       title = tv('gift.cardTitle', { n: v.days });
-      body = `${t('gift.cardBody')} ${tv('gift.claimBy', { date: whenDay(v.claimBy) })}`;
+      body = t('gift.cardBody');
       main = t('gift.accept');
       quiet = t('gift.later');
     } else if (v.kind === 'remind') {

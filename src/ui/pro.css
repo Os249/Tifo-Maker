@@ -51,7 +51,7 @@
 .pro-btn:focus-visible, .pro-primary:focus-visible, .pro-text-btn:focus-visible, .pro-head-chip:focus-visible {
   outline: 2px solid var(--blue-500); outline-offset: 2px;
 }
-@media (pointer: coarse) { .pro-btn, .pro-primary, .pro-text-btn { min-height: 44px; } }
+@media (pointer: coarse) { .pro-btn { min-height: 44px; } }
 
 /* The free way on inside a Pro sheet ("Export without Pro items"): not Pro, so not gold. */
 .pro-alt {
@@ -81,6 +81,8 @@
   color: var(--pro-muted); text-decoration: underline; text-underline-offset: 3px;
 }
 .pro-text-btn:hover { color: var(--pro-text); }
+/* After both base rules, or their 40px and 32px win on a touch screen. */
+@media (pointer: coarse) { .pro-primary, .pro-text-btn { min-height: 44px; } }
 
 /* ---- the strip: "Free to try here. Export needs Pro or a gift." ---- */
 .pro-strip {
@@ -224,6 +226,20 @@
   body.m-shell .pro-head-chip { min-width: 40px; min-height: 40px; justify-content: center; padding: 0; }
   body.m-shell .pro-head-chip span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   body.m-shell .pro-head-chip .pro-crown { font-size: var(--fs-lg); }
+}
+
+/* ---- the header chip in the editor's top bar on a laptop: the crown alone ----
+   The editor's header is already full at laptop widths (floodlight.css,
+   "Laptop widths"), and "Pro · 5 days left" pushed the account menu off the
+   page: 23 px at 1440 in English, 64 px in Arabic. The words stay in its
+   title and are still spoken; the account page has them in full. */
+@media (min-width: 900px) and (max-width: 1599px) {
+  .topbar-right .pro-head-chip { min-width: 32px; justify-content: center; padding: 0 var(--sp-2); }
+  .topbar-right .pro-head-chip span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+}
+/* Just above the phone layout, Arabic still needs 40 px more: the title gives it up. */
+@media (min-width: 900px) and (max-width: 999px) {
+  header:has(.topbar-right .pro-head-chip:not([hidden])) .doc-title { max-width: 84px; }
 }
 
 /* ---- "Your plan" on the account page ---- */

@@ -38,7 +38,7 @@ import { envNum } from './env';
 import { TtlCache, cacheKey } from './aiCache';
 import { screenPrompt } from './promptSafety';
 import { sniffImage } from './imageMeta';
-import type { Allowance, ProService, Ticket } from './pro';
+import type { Allowance, Holding, ProService, Ticket } from './pro';
 import type { PlanKind } from './proPlan';
 import { cutoutConfigured, cutoutPicture, CUTOUT_MODEL, CUTOUT_PRICE_USD, MAX_CUTOUT_BYTES } from './cutout';
 
@@ -416,9 +416,9 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
    * paid flag (users.is_pro), which stays unlimited as before. Null: the old
    * hourly meter and daily shares rule, exactly as before Pro.
    */
-  const proFor = async (a: Access): Promise<{ plan: PlanKind } | null> => {
+  const proFor = async (a: Access): Promise<Holding | null> => {
     if (!deps.pro || a.kind !== 'user' || !a.live || a.pro) return null;
-    return { plan: (await deps.pro.plan(a.userId)).plan };
+    return deps.pro.plan(a.userId);
   };
   const secsUntil = (iso: string): number => Math.max(0, Math.round((Date.parse(iso) - Date.now()) / 1000));
   /** An allowance in the shape the editor's quota line reads, old fields included. */
@@ -571,7 +571,7 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
     }
     const pf = await proFor(access);
     if (pf && deps.pro) {
-      const allowances = await deps.pro.allowances(access.userId, pf.plan);
+      const allowances = await deps.pro.allowances(access.userId, pf);
       return { unlimited: false, ...quotaFrom(allowances.std, pf.plan), allowances, provider: activeProvider() };
     }
     const usage = await deps.aiUsage.get(access.userId, deps.freeLimit);
@@ -609,9 +609,11 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
     const engine = body.engine === 'offline' ? 'offline' : 'auto';
     const userId = access.kind === 'user' ? access.userId : null;
     const unlimited = isUnlimited(access);
-    // Pro's allowances, when they apply; otherwise the hourly meter.
+    // Pro's allowances, when they apply; otherwise the hourly meter. Every
+    // design is the one whole-stadium pipeline, so every design is metered as
+    // an AI design ('std'), whatever `mode` says (Super is no allowance of its own).
     const pf = await proFor(access);
-    let allowance: Allowance | null = pf && userId && deps.pro ? await deps.pro.allowance(userId, mode0, pf.plan) : null;
+    let allowance: Allowance | null = pf && userId && deps.pro ? await deps.pro.allowance(userId, 'std', pf) : null;
     const usage = userId && !unlimited && !pf ? await deps.aiUsage.get(userId, deps.freeLimit) : null;
     const quotaInfo = allowance && pf
       ? quotaFrom(allowance, pf.plan)
@@ -654,12 +656,12 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
     let ticket: Ticket | null = null;
     let keepTicket = false;
     if (pf && userId && deps.pro) {
-      const t = await deps.pro.take(userId, mode0, pf.plan);
+      const t = await deps.pro.take(userId, 'std', pf);
       allowance = t.allowance;
       if (!t.ok) {
         note(access, mode0, 'quota');
         return reply.code(200).send({
-          needsChoice: true, reason: 'quota', kind: mode0, plan: pf.plan,
+          needsChoice: true, reason: 'quota', kind: 'std', plan: pf.plan,
           retryAfterSec: secsUntil(t.allowance.resetAt), quota: quotaFrom(t.allowance, pf.plan),
         });
       }
@@ -903,7 +905,7 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
     let polishLeft: Allowance | null = null;
     await budgetReady();
     if (pf && access.kind === 'user' && deps.pro && activeProvider() !== 'none' && !premiumExhausted()) {
-      const t = await deps.pro.take(access.userId, 'polish', pf.plan);
+      const t = await deps.pro.take(access.userId, 'polish', pf);
       if (!t.ok) {
         note(access, 'polish', 'quota');
         return reply.code(200).send({ spec, source, notes, reason: 'quota', kind: 'polish', plan: pf.plan, quota: quotaFrom(t.allowance, pf.plan) });
@@ -1004,7 +1006,7 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
     // Pro: one photo import from the allowance (however many readings it takes).
     let ticket: Ticket | null = null;
     if (pf && access.kind === 'user' && deps.pro) {
-      const t = await deps.pro.take(access.userId, 'photo', pf.plan);
+      const t = await deps.pro.take(access.userId, 'photo', pf);
       if (!t.ok) {
         note(access, 'photo', 'quota');
         return reply.code(429).send({ error: 'photo imports used up for now', reason: 'quota', kind: 'photo', plan: pf.plan, quota: quotaFrom(t.allowance, pf.plan) });
@@ -1077,7 +1079,7 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
     let ticket: Ticket | null = null;
     let allowance: Allowance | null = null;
     if (pf && access.kind === 'user' && deps.pro) {
-      const t = await deps.pro.take(access.userId, 'cutout', pf.plan);
+      const t = await deps.pro.take(access.userId, 'cutout', pf);
       if (!t.ok) {
         note(access, 'cutout', 'quota');
         return reply.code(429).send({ error: 'smart cut-outs used up for now', reason: 'quota', kind: 'cutout', plan: pf.plan, quota: quotaFrom(t.allowance, pf.plan) });

@@ -1,7 +1,8 @@
 import type { BannerDoc, BannerItem, ImageItem, PatchItem, ShapeItem, StrokeItem, TextItem } from '../core/banner';
 import { aspectOf, isPlaced } from '../core/banner';
-import { TIFO_FONTS, renderTextCanvas } from '../core/text';
-import { loadTifoFonts } from '../core/tifoFonts';
+import { fontCssOf, renderTextCanvas } from '../core/text';
+import { loadProFonts, loadTifoFonts } from '../core/tifoFonts';
+import { isProVoice } from '../core/proVoices';
 import { drawSymbol } from '../core/symbols';
 
 /**
@@ -105,14 +106,41 @@ function askForFaces(): void {
   void loadTifoFonts().then(landed, landed);
 }
 
+/**
+ * A Pro voice (core/proVoices) is the same story, one voice at a time: its
+ * faces live in a chunk of their own, fetched the first time a banner shows
+ * text in it, for whoever opens the design, Pro or not. Until they land, that
+ * text is drawn provisionally, and then everything is drawn again.
+ */
+const proReady = new Set<string>();
+const proAsked = new Set<string>();
+
+function askForProFaces(fontId: string): void {
+  if (proAsked.has(fontId)) return;
+  proAsked.add(fontId);
+  const landed = (): void => {
+    proReady.add(fontId);
+    provisional.clear();
+    textCache.clear();
+    for (const fn of readyListeners) fn();
+  };
+  if (typeof document === 'undefined' || !document.fonts) {
+    landed();
+    return;
+  }
+  void loadProFonts([fontId]).then(landed, landed);
+}
+
 function fontCss(fontId: string): string {
-  return TIFO_FONTS.find((f) => f.id === fontId)?.css ?? TIFO_FONTS[0].css;
+  return fontCssOf(fontId);
 }
 
 function textCanvas(it: TextItem): HTMLCanvasElement | null {
   const key = `${it.text}|${it.fontId}|${it.arcDeg}|${it.color}|${it.outline ?? 0}|${it.outlineColor ?? ''}`;
   if (!facesReady) askForFaces();
-  const cache = facesReady ? textCache : provisional;
+  const pro = isProVoice(it.fontId);
+  if (pro && !proReady.has(it.fontId)) askForProFaces(it.fontId);
+  const cache = facesReady && (!pro || proReady.has(it.fontId)) ? textCache : provisional;
   const hit = cache.get(key);
   if (hit) return hit;
   const r = renderTextCanvas(it.text, fontCss(it.fontId), it.arcDeg, 0);

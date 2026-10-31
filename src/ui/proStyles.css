@@ -1,0 +1,25 @@
+/*
+ * Portrait styles (Pro, ui/proStyles.ts): the Style picker in the picture
+ * import bar and in a picture layer's properties. Loaded with that module, so
+ * the editor's start carries none of it.
+ *
+ * Built on the editor's own select and the Pro chip (pro.css): no colours of
+ * its own. The crown sits beside the select because an <option> cannot hold it.
+ */
+
+/* In the import bar a field is display:contents on a desktop (floodlight.css),
+   which would set the crown a whole bar-gap away from the select it marks.
+   Kept as one group here; the phone sheet's own rule still lays it out. */
+.tool-bar .tb-field.pstyle-field { display: inline-flex; align-items: center; gap: var(--sp-2); white-space: nowrap; }
+.tool-bar .tb-field.pstyle-field[hidden] { display: none; }
+
+/* In a picture layer's properties: one full-width row under the two checkboxes. */
+.pstyle-row { display: flex; align-items: center; gap: var(--sp-2); flex: 1 1 100%; min-width: 0; }
+.pstyle-row[hidden] { display: none; }
+.pstyle-row > label { flex: none; font-size: var(--fs-xs); color: var(--text-2); }
+.pstyle-row > select { flex: 1 1 auto; min-width: 0; }
+.pstyle-row .pro-chip, .pstyle-field .pro-chip { flex: none; }
+
+@media (pointer: coarse) {
+  .pstyle-field select, .pstyle-row select { min-height: 44px; }
+}

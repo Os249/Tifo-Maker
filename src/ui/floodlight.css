@@ -141,10 +141,33 @@ header {
   font-size:var(--fs-xs); color:var(--text-2);
 }
 .tool-bar .hint { color:var(--text-3); font-size:var(--fs-xs); }
-/* The camera bar is centred with left:50%, which gave it only half the canvas
-   to lay out in, so the fourth control (Post it) wrapped onto a second row.
-   Sized to its content instead, and still never wider than the canvas. */
-#cam-bar { width:max-content; max-width:calc(100% - 24px); }
+/* The stadium's camera controls (30 Oct 2026). They sat centred over the top
+   of the stadium, which is exactly where the far stand is, so a tifo on it was
+   behind the bar. Now in the top corner, one compact line, and the eye hides
+   them altogether. Sized to their content, never wider than the stadium. */
+#cam-bar {
+  position:absolute; top:var(--sp-3); inset-inline-start:var(--sp-3); z-index:var(--z-raised);
+  width:max-content; max-width:calc(100% - 24px); flex-wrap:nowrap; gap:var(--sp-2);
+  padding:var(--sp-1); padding-inline-start:var(--sp-3);
+  background:var(--ink-1); border:1px solid var(--line-1); border-radius:var(--r-md); box-shadow:var(--shadow-card);
+}
+#cam-bar .cam-tools { display:flex; align-items:center; gap:var(--sp-3); min-width:0; }
+#cam-bar .cam-ico { color:var(--text-2); font-size:var(--fs-md); }
+/* The word "Camera" is said by the icon; the label stays for screen readers. */
+#cam-bar .cam-label { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
+#cam-bar .cam-noshow { display:inline-flex; align-items:center; gap:var(--sp-1); white-space:nowrap; }
+.cam-hide {
+  flex:none; width:32px; height:32px; display:grid; place-items:center; padding:0;
+  background:transparent; border:none; border-radius:var(--r-sm); color:var(--text-2); font-size:var(--fs-md); cursor:pointer;
+  transition:background-color var(--duration-quick) var(--ease-smooth-out), color var(--duration-quick) var(--ease-smooth-out);
+}
+.cam-hide:hover { background:var(--ink-3); color:var(--text-1); }
+.cam-hide:focus-visible { outline:none; box-shadow:var(--ring-focus); }
+/* Hidden: the eye alone, in the corner, and nothing else on the stadium. */
+.canvas-wrap.stage-clean #cam-bar { padding:var(--sp-1); border-radius:var(--r-pill); }
+.canvas-wrap.stage-clean #cam-bar .cam-tools { display:none; }
+.canvas-wrap.stage-clean #cam-bar .cam-hide { border-radius:var(--r-pill); }
+.canvas-wrap.stage-clean .ai-bar { display:none; }
 /* A label and the control it labels, kept together when the bar wraps. On a
    desktop this is invisible: display:contents leaves the flex row exactly as
    it was before the wrappers existed. */

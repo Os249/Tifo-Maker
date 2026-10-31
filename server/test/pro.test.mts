@@ -1,6 +1,7 @@
 /**
- * Pro: the plan's periods, the allowances, the 7-day gift, the admin's passes,
- * the AI routes on the new limits and the smart cut-out.
+ * Pro: the plan's periods (a pass's own month among them), the allowances,
+ * the 7-day gift (which never expires), the admin's months of Pro, the AI
+ * routes on the new limits and the smart cut-out.
  *
  * Mostly adversarial, like security.test.mts: it tries to take more than the
  * allowance (one at a time and all at once), to accept the gift twice, to
@@ -20,7 +21,7 @@ import { MemorySocialRepository } from '../src/memorySocial';
 import { buildApp, type TemplateInfo } from '../src/routes';
 import { MemoryProRepository, PgProRepository, type ProRepository } from '../src/proRepo';
 import { ProService, isThrowawayEmail } from '../src/pro';
-import { FREE_WINDOWS, OFFER, PLAN_WINDOWS, liveFor, periodEnd, periodKey, periodStart, proMode } from '../src/proPlan';
+import { CYCLE_DAYS, FREE_WINDOWS, OFFER, PLAN_WINDOWS, cycleOf, liveFor, normalizePlan, periodEnd, periodKey, periodStart, proMode } from '../src/proPlan';
 import { cutoutPicture, fetchResult, hostAllowed, isPrivateAddress, useLookupForTests } from '../src/cutout';
 
 const map = generateSeatMap(DEFAULT_TEMPLATE);
@@ -100,14 +101,48 @@ async function makeDesign(app: FastifyInstance, token: string, isPublic = false)
   assert.equal(periodKey('month', new Date('2026-10-31T21:00:00Z')), 'm:2026-11', 'and a month too');
   assert.equal(periodEnd('month', new Date('2026-12-15T00:00:00Z')).toISOString(), '2026-12-31T21:00:00.000Z');
   // The numbers the plan promises, read from the one settings file.
-  assert.deepEqual(FREE_WINDOWS.super, [{ period: 'week', limit: 3 }]);
-  assert.deepEqual(FREE_WINDOWS.std, [{ period: 'day', limit: 10 }]);
+  assert.deepEqual(FREE_WINDOWS.std, [{ period: 'day', limit: 10 }, { period: 'month', limit: 40 }], 'free: 10 designs a day, 40 a month');
+  assert.deepEqual(FREE_WINDOWS.polish, [{ period: 'week', limit: 3 }]);
+  assert.deepEqual(FREE_WINDOWS.photo, [{ period: 'week', limit: 2 }]);
   assert.equal(FREE_WINDOWS.cutout[0].limit, 1);
-  assert.deepEqual(PLAN_WINDOWS.season.super, [{ period: 'day', limit: 10 }, { period: 'month', limit: 150 }]);
-  assert.equal(OFFER.match.price, 9);
-  assert.equal(OFFER.season.price, 99);
+  assert.equal('super' in FREE_WINDOWS, false, 'no Super allowance: every design is the one pipeline');
+  assert.deepEqual(PLAN_WINDOWS.monthly.std, [{ period: 'day', limit: 15 }, { period: 'cycle', limit: 70 }]);
+  assert.deepEqual(PLAN_WINDOWS.monthly.polish, [{ period: 'day', limit: 10 }, { period: 'cycle', limit: 20 }]);
+  assert.deepEqual(PLAN_WINDOWS.monthly.photo, [{ period: 'day', limit: 3 }, { period: 'cycle', limit: 10 }]);
+  assert.deepEqual(PLAN_WINDOWS.monthly.cutout, [{ period: 'day', limit: 5 }, { period: 'cycle', limit: 15 }]);
+  assert.equal(PLAN_WINDOWS.gift, PLAN_WINDOWS.monthly, 'the gift is all of Pro');
+  for (const k of ['std', 'polish', 'photo', 'cutout'] as const) {
+    assert.ok(PLAN_WINDOWS.monthly[k].some((w) => w.period === 'cycle'), `${k}: Pro has a month's ceiling`);
+  }
+  // A member who uses every last one stays near the ~$2.50 a month the plan allows for.
+  const cost = { std: 0.022, polish: 0.013, photo: 0.04, cutout: 0.018 };
+  const month = (k: keyof typeof cost) => PLAN_WINDOWS.monthly[k].find((w) => w.period === 'cycle')!.limit * cost[k];
+  assert.ok(month('std') + month('polish') + month('photo') + month('cutout') <= 2.5, 'the most one month of Pro can cost');
+  // Pro always gives more than Free, by the day and by the month.
+  assert.ok(PLAN_WINDOWS.monthly.std[0].limit > FREE_WINDOWS.std[0].limit && PLAN_WINDOWS.monthly.std[1].limit > FREE_WINDOWS.std[1].limit);
+  assert.equal(OFFER.monthly.price, 19);
+  assert.equal(OFFER.monthly.days, 30);
   assert.equal(OFFER.gift.days, 7);
+  assert.equal('claimBy' in OFFER.gift, false, 'the gift has no claim-by date');
   assert.equal(OFFER.paymentsOpen, false, 'no buy button goes anywhere until there is a payment provider');
+  // The legacy plan names read as a month of Pro.
+  assert.equal(normalizePlan('season'), 'monthly');
+  assert.equal(normalizePlan('match'), 'monthly');
+  assert.equal(normalizePlan('gift'), 'gift');
+  // A pass's month is its own 30 days, not the calendar's.
+  const day = 86_400_000;
+  const start = Date.parse('2026-10-20T10:00:00Z');
+  const month30 = { id: 'p1', startsAt: new Date(start).toISOString(), endsAt: new Date(start + 30 * day).toISOString() };
+  assert.equal(CYCLE_DAYS, 30);
+  const c0 = cycleOf(month30, new Date(start + 12 * day));
+  assert.equal(c0.key, 'c:p1:0', 'the 1st of November is still the month that began on 20 October');
+  assert.equal(c0.end.toISOString(), month30.endsAt);
+  const long = { id: 'p2', startsAt: month30.startsAt, endsAt: new Date(start + 90 * day).toISOString() };
+  const c1 = cycleOf(long, new Date(start + 31 * day));
+  assert.equal(c1.key, 'c:p2:1', 'a 90-day grant has three months of allowance');
+  assert.equal(c1.end.toISOString(), new Date(start + 60 * day).toISOString());
+  const gift = { id: 'g1', startsAt: month30.startsAt, endsAt: new Date(start + 7 * day).toISOString() };
+  assert.equal(cycleOf(gift, new Date(start + day)).end.toISOString(), gift.endsAt, "the gift's month is the gift");
 }
 
 // --------------------------------------------------------------- 2. mode ---
@@ -135,14 +170,14 @@ async function makeDesign(app: FastifyInstance, token: string, isPublic = false)
 // ------------------------------------------------ 4. the store's promises ---
 async function storePromises(label: string, repo: ProRepository, userA: string, userB: string): Promise<void> {
   const svc = new ProService(repo, { savedDesigns: async () => 1, env: { PRO_MODE: 'on' } as NodeJS.ProcessEnv });
-  // One at a time: 3 Super a week, then no.
+  // One at a time: 3 Polishes a week, then no.
   for (let i = 1; i <= 3; i++) {
-    const t = await svc.take(userA, 'super', 'free');
-    assert.equal(t.ok, true, `${label}: Super ${i} of 3`);
+    const t = await svc.take(userA, 'polish', 'free');
+    assert.equal(t.ok, true, `${label}: Polish ${i} of 3`);
     assert.equal(t.allowance.remaining, 3 - i);
   }
-  const fourth = await svc.take(userA, 'super', 'free');
-  assert.equal(fourth.ok, false, `${label}: a 4th Super in the week is refused`);
+  const fourth = await svc.take(userA, 'polish', 'free');
+  assert.equal(fourth.ok, false, `${label}: a 4th Polish in the week is refused`);
   assert.equal(fourth.ticket.n, 0, `${label}: a refusal takes nothing`);
   // A refund gives exactly one back.
   const again = await svc.take(userA, 'std', 'free');
@@ -151,42 +186,58 @@ async function storePromises(label: string, repo: ProRepository, userA: string, 
   await svc.giveBack(userA, again.ticket);
   assert.equal((await svc.allowance(userA, 'std', 'free')).used, 0, `${label}: a refund never goes below 0`);
   // All at once: 12 racing for 3 get exactly 3.
-  const racing = await Promise.all(Array.from({ length: 12 }, () => svc.take(userB, 'super', 'free')));
+  const racing = await Promise.all(Array.from({ length: 12 }, () => svc.take(userB, 'polish', 'free')));
   assert.equal(racing.filter((r) => r.ok).length, 3, `${label}: twelve at once still get exactly 3`);
-  // Two windows are all-or-nothing: the day has room, the month is full.
+  // Free's month: 40 designs used, the day still has room, and nothing more.
   const monthKey = periodKey('month', new Date());
-  await repo.take(userB, 'cutout', [{ key: monthKey, limit: 60 }], 60);
-  const both = await svc.take(userB, 'cutout', 'season');
-  assert.equal(both.ok, false, `${label}: a full month refuses even with the day free`);
-  assert.equal((await svc.allowance(userB, 'cutout', 'season')).remaining, 0, `${label}: the binding window is the month`);
   const dayKey = periodKey('day', new Date());
-  assert.deepEqual(await repo.used(userB, 'cutout', [dayKey]), [0], `${label}: and the day was not touched`);
-  // The gift: offered once, accepted once.
+  await repo.take(userB, 'std', [{ key: monthKey, limit: 40 }], 40);
+  const freeMonth = await svc.take(userB, 'std', 'free');
+  assert.equal(freeMonth.ok, false, `${label}: a free month of 40 designs refuses the 41st, even with the day free`);
+  assert.equal(freeMonth.allowance.period, 'month', `${label}: and says it is the month`);
+  assert.equal(freeMonth.allowance.resetAt, periodEnd('month', new Date()).toISOString(), `${label}: back on the 1st, Riyadh time`);
+  assert.deepEqual(await repo.used(userB, 'std', [dayKey]), [0], `${label}: the day was not touched`);
+  // The gift: offered once, accepted once, and never lapsing.
   assert.equal(await repo.gift(userA), null);
-  const offered = await repo.offerGift(userA, new Date(Date.now() + 86_400_000), new Date());
-  const offeredAgain = await repo.offerGift(userA, new Date(Date.now() + 9 * 86_400_000), new Date());
-  assert.equal(offeredAgain.claimBy, offered.claimBy, `${label}: a second offer changes nothing`);
+  const offered = await repo.offerGift(userA, new Date());
+  const offeredAgain = await repo.offerGift(userA, new Date(Date.now() + 9 * 86_400_000));
+  assert.equal(offeredAgain.offeredAt, offered.offeredAt, `${label}: a second offer changes nothing`);
+  assert.equal('claimBy' in offered, false, `${label}: an offer has no claim-by date`);
   const accepts = await Promise.all(Array.from({ length: 6 }, () => repo.acceptGift(userA, new Date(), 7)));
   assert.equal(accepts.filter((a) => a.ok).length, 1, `${label}: six Accepts at once make one pass`);
   assert.equal((await repo.activePasses(userA, new Date())).filter((p) => p.plan === 'gift').length, 1, `${label}: one gift pass`);
   assert.deepEqual(await repo.acceptGift(userA, new Date(), 7), { ok: false, reason: 'used' });
-  await repo.offerGift(userB, new Date(Date.now() - 1000), new Date(Date.now() - 2000));
-  assert.deepEqual(await repo.acceptGift(userB, new Date(), 7), { ok: false, reason: 'expired' }, `${label}: a lapsed gift cannot be taken`);
+  // Offered two years ago and only started now: still the whole 7 days.
+  await repo.offerGift(userB, new Date(Date.now() - 730 * 86_400_000));
+  const late = await repo.acceptGift(userB, new Date(), 7);
+  assert.equal(late.ok, true, `${label}: a gift waits for its holder, however long`);
   // Supporters are paid passes only.
   const sup0 = await repo.supporters([userA, userB], new Date());
   assert.equal(sup0.size, 0, `${label}: a gift is not the Supporter crown`);
-  const season = await repo.grantPass({ userId: userB, plan: 'season', startsAt: new Date(Date.now() - 1000), endsAt: new Date(Date.now() + 86_400_000), source: 'admin', createdBy: null });
-  assert.deepEqual([...(await repo.supporters([userA, userB], new Date()))], [userB], `${label}: a season pass is`);
-  assert.equal((await svc.plan(userB)).plan, 'season');
-  assert.equal(await repo.revokePass(season.id, new Date()), true);
-  assert.equal(await repo.revokePass(season.id, new Date()), false, `${label}: a pass is revoked once`);
-  assert.equal((await svc.plan(userB)).plan, 'free', `${label}: a revoked pass gives nothing`);
+  const month = await repo.grantPass({ userId: userB, plan: 'monthly', startsAt: new Date(Date.now() - 1000), endsAt: new Date(Date.now() + 30 * 86_400_000), source: 'admin', createdBy: null });
+  assert.deepEqual([...(await repo.supporters([userA, userB], new Date()))], [userB], `${label}: a month of Pro is`);
+  const held = await svc.plan(userB);
+  assert.equal(held.plan, 'monthly', `${label}: the paid month wins over the gift`);
+  assert.equal(held.pass?.id, month.id);
+  // Pro's month is the pass's own: all-or-nothing with the day, and keyed by the pass.
+  const cycle = cycleOf(month, new Date());
+  await repo.take(userB, 'cutout', [{ key: cycle.key, limit: 15 }], 15);
+  const both = await svc.take(userB, 'cutout', held);
+  assert.equal(both.ok, false, `${label}: a full month of Pro refuses even with the day free`);
+  assert.equal(both.allowance.period, 'month', `${label}: the binding window is the month`);
+  assert.equal(both.allowance.resetAt, cycle.end.toISOString(), `${label}: back when the pass's 30 days are up`);
+  assert.deepEqual(await repo.used(userB, 'cutout', [dayKey]), [0], `${label}: and the day was not touched`);
+  const giftHeld = { plan: 'gift' as const, pass: (await repo.activePasses(userB, new Date())).find((p) => p.plan === 'gift')! };
+  assert.equal((await svc.take(userB, 'cutout', giftHeld)).ok, true, `${label}: another pass is another month`);
+  assert.equal(await repo.revokePass(month.id, new Date()), true);
+  assert.equal(await repo.revokePass(month.id, new Date()), false, `${label}: a pass is revoked once`);
+  assert.equal((await svc.plan(userB)).plan, 'gift', `${label}: a revoked month gives nothing; the gift is left`);
   // "Tell me": once each.
   assert.equal(await repo.notify(userA), true);
   assert.equal(await repo.notify(userA), false);
   const st = await repo.stats(new Date());
   assert.equal(st.notify, 1);
-  assert.equal(st.gifts.accepted, 1);
+  assert.equal(st.gifts.accepted, 2);
 }
 
 await storePromises('memory', new MemoryProRepository(), 'mem-user-a', 'mem-user-b');
@@ -233,14 +284,19 @@ const restoreBase = setEnv({ PRO_MODE: undefined, PRO_PREVIEW_USERS: undefined, 
   const mine = (await get(fan.token)).json() as Record<string, any>;
   assert.equal(mine.live, true);
   assert.equal(mine.plan, 'free');
-  assert.equal(mine.allowances.super.limit, 3);
+  assert.equal(mine.allowances.super, undefined, 'no Super allowance');
   assert.equal(mine.allowances.std.limit, 10);
+  assert.equal(mine.allowances.std.period, 'day');
   assert.equal(mine.gift.state, 'offered', 'a verified account with a saved design is offered the gift');
+  assert.equal(mine.gift.claimBy, undefined, 'and it has no date to claim it by');
   assert.equal(mine.offer.paymentsOpen, false);
+  assert.deepEqual(mine.offer.monthly, { price: 19, days: 30 });
+  assert.equal(mine.offer.season, undefined, 'one plan: no Season Pass');
+  assert.equal(mine.offer.match, undefined, 'and no Match Pass');
   // The Pro page's table comes from the same settings the server enforces.
-  assert.deepEqual(mine.offer.limits.free.super, FREE_WINDOWS.super, 'the page shows the free plan the server applies');
-  assert.deepEqual(mine.offer.limits.season.super, PLAN_WINDOWS.season.super);
-  assert.deepEqual(mine.offer.limits.match.cutout, PLAN_WINDOWS.match.cutout);
+  assert.deepEqual(mine.offer.limits.free.std, FREE_WINDOWS.std, 'the page shows the free plan the server applies');
+  assert.deepEqual(mine.offer.limits.pro.std, [{ period: 'day', limit: 15 }, { period: 'month', limit: 70 }], "a pass's own month reads as a month");
+  assert.deepEqual(Object.keys(mine.offer.limits), ['free', 'pro'], 'two columns: Free against Pro');
   assert.equal((await get(unverified.token)).json().gift.state, 'none', 'an unverified email gets no gift');
   assert.equal((await get(throwaway.token)).json().gift.state, 'none', 'a throwaway address gets no gift');
   assert.equal((await get(noDesign.token)).json().gift.state, 'none', 'no saved design yet, no gift yet');
@@ -250,14 +306,15 @@ const restoreBase = setEnv({ PRO_MODE: undefined, PRO_PREVIEW_USERS: undefined, 
   assert.equal((await app.inject({ method: 'POST', url: '/api/pro/gift/accept' })).statusCode, 401, 'signed out cannot accept');
 
   // Nothing the browser sends changes a plan or a limit.
-  const forged = await app.inject({ method: 'POST', url: '/api/pro/gift/accept', headers: bearer(fan.token), payload: { days: 365, plan: 'season', endsAt: '2099-01-01' } });
+  const forged = await app.inject({ method: 'POST', url: '/api/pro/gift/accept', headers: bearer(fan.token), payload: { days: 365, plan: 'monthly', endsAt: '2099-01-01' } });
   assert.equal(forged.statusCode, 200);
   const endsAt = Date.parse((forged.json() as { endsAt: string }).endsAt);
   assert.ok(Math.abs(endsAt - (Date.now() + 7 * 86_400_000)) < 60_000, 'the gift is 7 days from now, whatever was asked for');
   const after = (await get(fan.token)).json() as Record<string, any>;
   assert.equal(after.plan, 'gift');
   assert.equal(after.gift.state, 'active');
-  assert.equal(after.allowances.super.limit, 10, 'the gift has the gift ceilings');
+  assert.equal(after.allowances.std.limit, 15, "the gift has Pro's ceilings");
+  assert.equal(after.allowances.cutout.limit, 5);
   assert.equal(after.supporter, false, 'a gift does not carry the Supporter crown');
   const twice = await app.inject({ method: 'POST', url: '/api/pro/gift/accept', headers: bearer(fan.token) });
   assert.equal(twice.statusCode, 409, 'the gift is accepted once');
@@ -272,24 +329,27 @@ const restoreBase = setEnv({ PRO_MODE: undefined, PRO_PREVIEW_USERS: undefined, 
   // Admin: closed to everyone else, validated, audited.
   for (const headers of [undefined, bearer(fan.token)]) {
     assert.equal((await app.inject({ method: 'GET', url: '/api/admin/pro', ...(headers ? { headers } : {}) })).statusCode, 403);
-    assert.equal((await app.inject({ method: 'POST', url: '/api/admin/pro/grant', ...(headers ? { headers } : {}), payload: { username: 'fan_pro', plan: 'season' } })).statusCode, 403, 'nobody grants themselves a pass');
+    assert.equal((await app.inject({ method: 'POST', url: '/api/admin/pro/grant', ...(headers ? { headers } : {}), payload: { username: 'fan_pro', plan: 'monthly' } })).statusCode, 403, 'nobody grants themselves Pro');
     assert.equal((await app.inject({ method: 'POST', url: '/api/admin/pro/revoke', ...(headers ? { headers } : {}), payload: { passId: '00000000-0000-0000-0000-000000000000' } })).statusCode, 403);
   }
   const asBoss = { 'x-ai-unlock': unlock };
   const bad = async (payload: unknown) => (await app.inject({ method: 'POST', url: '/api/admin/pro/grant', headers: asBoss, payload: payload as object })).statusCode;
   assert.equal(await bad({ username: 'fan_pro', plan: 'gift' }), 400, 'a gift is accepted, never granted');
   assert.equal(await bad({ username: 'fan_pro', plan: 'platinum' }), 400);
-  assert.equal(await bad({ username: 'fan_pro', plan: 'season', days: 0 }), 400);
-  assert.equal(await bad({ username: 'fan_pro', plan: 'season', days: 9999 }), 400);
-  assert.equal(await bad({ username: 'fan_pro', plan: 'season', days: 2.5 }), 400);
-  assert.equal(await bad({ username: "'; drop table--", plan: 'season' }), 400);
-  assert.equal(await bad({ username: 'nobody_here', plan: 'season' }), 404);
-  const granted = await app.inject({ method: 'POST', url: '/api/admin/pro/grant', headers: asBoss, payload: { username: 'fan_pro', plan: 'season' } });
+  for (const old of ['season', 'match', 'group']) assert.equal(await bad({ username: 'fan_pro', plan: old }), 400, `the old ${old} plan is gone`);
+  assert.equal(await bad({ username: 'fan_pro', plan: 'monthly', days: 0 }), 400);
+  assert.equal(await bad({ username: 'fan_pro', plan: 'monthly', days: 9999 }), 400);
+  assert.equal(await bad({ username: 'fan_pro', plan: 'monthly', days: 2.5 }), 400);
+  assert.equal(await bad({ username: "'; drop table--", plan: 'monthly' }), 400);
+  assert.equal(await bad({ username: 'nobody_here', plan: 'monthly' }), 404);
+  const granted = await app.inject({ method: 'POST', url: '/api/admin/pro/grant', headers: asBoss, payload: { username: 'fan_pro', plan: 'monthly' } });
   assert.equal(granted.statusCode, 200);
-  assert.equal((granted.json() as { pass: { endsAt: string } }).pass.endsAt, OFFER.season.endsAt, 'a season pass without days runs to the season end');
+  const grantedEnds = Date.parse((granted.json() as { pass: { endsAt: string } }).pass.endsAt);
+  assert.ok(Math.abs(grantedEnds - (Date.now() + 30 * 86_400_000)) < 60_000, 'a month of Pro without days is 30 days');
   const fanNow = (await get(fan.token)).json() as Record<string, any>;
-  assert.equal(fanNow.plan, 'season', 'the most generous pass wins');
+  assert.equal(fanNow.plan, 'monthly', 'the paid month wins over the gift');
   assert.equal(fanNow.supporter, true);
+  assert.equal(fanNow.allowances.std.limit, 15);
   const look = (await app.inject({ method: 'GET', url: '/api/admin/pro?username=fan_pro', headers: asBoss })).json() as Record<string, any>;
   assert.equal(look.mode, 'preview');
   assert.equal(look.account.passes.length, 2);
@@ -310,7 +370,7 @@ const restoreBase = setEnv({ PRO_MODE: undefined, PRO_PREVIEW_USERS: undefined, 
   assert.ok(exp.pro.gift?.acceptedAt);
 
   // Revoke.
-  const seasonId = look.account.passes.find((p: { plan: string }) => p.plan === 'season').id as string;
+  const seasonId = look.account.passes.find((p: { plan: string }) => p.plan === 'monthly').id as string;
   assert.equal((await app.inject({ method: 'POST', url: '/api/admin/pro/revoke', headers: asBoss, payload: { passId: 'not-a-uuid' } })).statusCode, 400);
   assert.equal((await app.inject({ method: 'POST', url: '/api/admin/pro/revoke', headers: asBoss, payload: { passId: seasonId } })).statusCode, 200);
   assert.equal((await app.inject({ method: 'POST', url: '/api/admin/pro/revoke', headers: asBoss, payload: { passId: seasonId } })).statusCode, 404);
@@ -323,7 +383,7 @@ const restoreBase = setEnv({ PRO_MODE: undefined, PRO_PREVIEW_USERS: undefined, 
   assert.equal(anon.live, true);
   assert.equal(anon.signedIn, false);
   assert.equal(anon.allowances, undefined);
-  assert.equal(anon.offer.season.price, 99);
+  assert.equal(anon.offer.monthly.price, 19);
   assert.equal(((await get(other.token)).json() as Record<string, unknown>).live, true);
   assert.equal(fanCard(await gallery())?.ownerSupporter, undefined, 'the crown follows the pass: none now');
   restore();
@@ -357,29 +417,33 @@ const restoreBase = setEnv({ PRO_MODE: undefined, PRO_PREVIEW_USERS: undefined, 
     // The quota route speaks the new allowances.
     const q = (await app.inject({ method: 'GET', url: '/api/ai/quota', headers: bearer(fan.token) })).json() as Record<string, any>;
     assert.equal(q.live, true);
-    assert.equal(q.allowances.super.limit, 3);
-    assert.equal(q.allowances.super.period, 'week');
+    assert.equal(q.allowances.std.limit, 10);
+    assert.equal(q.allowances.std.period, 'day');
+    assert.equal(q.allowances.super, undefined, 'no Super allowance');
 
     // A busy model gives the use back.
     const busy = await gen('super');
     assert.equal(busy.json().reason, 'busy');
     assert.ok(providerCalls > 0, 'the model was asked');
-    assert.equal((await proRepo.used(fan.id, 'super', [periodKey('week', new Date())]))[0], 0, 'a Super that did not come is not counted');
+    assert.equal((await proRepo.used(fan.id, 'std', [periodKey('day', new Date())]))[0], 0, 'a design that did not come is not counted');
+    assert.equal((await proRepo.used(fan.id, 'super' as never, [periodKey('week', new Date())]))[0], 0, 'and mode: "super" spends no allowance of its own');
 
     // Used up: refused before any model is asked, with what the card needs.
-    await proRepo.take(fan.id, 'super', [{ key: periodKey('week', new Date()), limit: 3 }], 3);
+    await proRepo.take(fan.id, 'std', [{ key: periodKey('day', new Date()), limit: 10 }], 10);
     const before = providerCalls;
-    const out = (await gen('super')).json() as Record<string, any>;
+    const out = (await gen('std')).json() as Record<string, any>;
     assert.equal(out.needsChoice, true);
     assert.equal(out.reason, 'quota');
-    assert.equal(out.kind, 'super');
+    assert.equal(out.kind, 'std');
     assert.equal(out.quota.remaining, 0);
-    assert.equal(out.quota.period, 'week');
+    assert.equal(out.quota.period, 'day');
     assert.ok(Date.parse(out.quota.resetAt) > Date.now(), 'and when it comes back');
     assert.equal(providerCalls, before, 'no model call for a used-up allowance');
-    // Standard is its own allowance.
-    const std = (await gen('std')).json() as Record<string, any>;
-    assert.notEqual(std.reason, 'quota', 'Super used up does not stop Standard');
+    // Asking for "super" is no way round it: it is the same allowance.
+    const sup = (await gen('super')).json() as Record<string, any>;
+    assert.equal(sup.reason, 'quota', 'mode: "super" is metered as a design like any other');
+    assert.equal(sup.kind, 'std');
+    assert.equal(providerCalls, before);
 
     // Polish: one that fails (the model is busy) is handed back, and the
     // editor is told the count as it stands.

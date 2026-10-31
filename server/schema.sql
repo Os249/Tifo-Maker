@@ -546,13 +546,15 @@ CREATE TABLE IF NOT EXISTS server_keys (
 -- Pro (October 2026; server/src/proPlan.ts has every number, pro.ts the rules).
 -- Nothing here is read while PRO_MODE is off.
 --
--- pro_passes: what an account holds. plan is match | season | gift | group;
--- source says how it came: an accepted gift, granted by an admin, or bought.
+-- pro_passes: what an account holds. plan is monthly | gift (until 31 Oct
+-- 2026 also match | season | group; see "Pro becomes one monthly plan"
+-- below); source says how it came: an accepted gift, granted by an admin, or
+-- bought.
 -- A pass is never edited, only revoked (revoked_at), so the history stays.
 CREATE TABLE IF NOT EXISTS pro_passes (
   id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id    UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  plan       TEXT NOT NULL CHECK (plan IN ('match', 'season', 'gift', 'group')),
+  plan       TEXT NOT NULL CHECK (plan IN ('monthly', 'gift')),
   starts_at  TIMESTAMPTZ NOT NULL,
   ends_at    TIMESTAMPTZ NOT NULL,
   source     TEXT NOT NULL CHECK (source IN ('gift', 'admin', 'payment')),
@@ -566,10 +568,11 @@ CREATE INDEX IF NOT EXISTS pro_passes_user_idx ON pro_passes (user_id, ends_at D
 
 -- The 7-day gift: one row per account, ever (the primary key is the account).
 -- Offered when the account qualifies, accepted once; accepting creates the pass.
+-- claim_by is no longer read or written: the gift never expires.
 CREATE TABLE IF NOT EXISTS pro_gifts (
   user_id     UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
   offered_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-  claim_by    TIMESTAMPTZ NOT NULL,
+  claim_by    TIMESTAMPTZ,
   accepted_at TIMESTAMPTZ,
   pass_id     UUID REFERENCES pro_passes(id) ON DELETE SET NULL
 );
@@ -592,3 +595,17 @@ CREATE TABLE IF NOT EXISTS pro_notify (
   user_id    UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Pro becomes one monthly plan (31 Oct 2026): the Match Pass, the Season Pass
+-- and the group plan are replaced by "monthly" (SAR 19 for 30 days). Passes
+-- granted under the old names (by hand, during preview) become months of Pro;
+-- the code reads the old names that way too, until this has run. Each
+-- statement is safe to run again.
+ALTER TABLE pro_passes DROP CONSTRAINT IF EXISTS pro_passes_plan_check;
+UPDATE pro_passes SET plan = 'monthly' WHERE plan IN ('match', 'season', 'group');
+ALTER TABLE pro_passes ADD CONSTRAINT pro_passes_plan_check CHECK (plan IN ('monthly', 'gift'));
+
+-- The gift never expires (31 Oct 2026): an offer waits until it is started,
+-- so the claim-by date is no longer required, or kept.
+ALTER TABLE pro_gifts ALTER COLUMN claim_by DROP NOT NULL;
+UPDATE pro_gifts SET claim_by = NULL WHERE claim_by IS NOT NULL;

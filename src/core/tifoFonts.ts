@@ -22,6 +22,7 @@
  */
 
 import { TIFO_VOICES } from './tifoVoices';
+import { PRO_VOICES, isProVoice } from './proVoices';
 
 import cairoAr from '@fontsource/cairo/files/cairo-arabic-900-normal.woff2';
 import passionLat from '@fontsource/passion-one/files/passion-one-latin-900-normal.woff2';
@@ -37,7 +38,7 @@ import tajawalAr from '@fontsource/tajawal/files/tajawal-arabic-900-normal.woff2
 import archivoBlackLat from '@fontsource/archivo-black/files/archivo-black-latin-400-normal.woff2';
 
 /** Codepoints routed to the Arabic half of a voice. */
-const ARABIC_RANGE =
+export const ARABIC_RANGE =
   'U+0600-06FF, U+0750-077F, U+0870-088E, U+08A0-08FF, U+FB50-FDFF, U+FE70-FEFF, U+200C-200F';
 
 /** Voice id → the two files that make up its family. */
@@ -56,8 +57,16 @@ let loading: Promise<void> | null = null;
  * Register and load every voice. Idempotent and safe to await repeatedly — the
  * first call does the work and the rest share its promise. Never rejects: a face
  * that fails to load just falls back, which is worse-looking but not broken.
+ *
+ * It also waits for any Pro faces already asked for (`loadProFonts`), so the
+ * code that awaits this before measuring text stays right for a Pro voice.
  */
 export function loadTifoFonts(): Promise<void> {
+  const base = loadVoices();
+  return proAsked.size ? Promise.all([base, proLoads]).then(() => undefined) : base;
+}
+
+function loadVoices(): Promise<void> {
   if (loading) return loading;
   if (typeof document === 'undefined' || !document.fonts) return (loading = Promise.resolve());
 
@@ -80,4 +89,30 @@ export function loadTifoFonts(): Promise<void> {
     );
   })();
   return loading;
+}
+
+// ---------------------------------------------------------------------------
+// The Pro voices (core/proVoices)
+
+let proLoads: Promise<void> = Promise.resolve();
+const proAsked = new Set<string>();
+
+/**
+ * Load these Pro voices' faces (all of them when none are named), from their
+ * own chunk (core/proFontFaces). Called when something needs them: the font
+ * pickers show them (ui/proFonts), or a text layer or a banner in the design
+ * uses one. The faces are assets, not the gate: whoever opens the design gets
+ * them. Ids that are not Pro voices are ignored. Resolves once every Pro face
+ * asked for so far has loaded or failed; never rejects. Once asked for,
+ * `loadTifoFonts` waits for them too.
+ */
+export function loadProFonts(ids?: readonly string[]): Promise<void> {
+  if (typeof document === 'undefined' || !document.fonts) return Promise.resolve();
+  const want = (ids ?? PRO_VOICES.map((v) => v.id)).filter((id) => isProVoice(id) && !proAsked.has(id));
+  if (want.length) {
+    for (const id of want) proAsked.add(id);
+    const p = import('./proFontFaces').then((m) => m.loadProFaces(want), () => undefined);
+    proLoads = Promise.all([proLoads, p]).then(() => undefined);
+  }
+  return proLoads;
 }

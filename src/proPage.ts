@@ -1,6 +1,6 @@
 /**
  * /pro: what Pro adds and what it costs, and the one next step that exists
- * right now.
+ * right now. Two columns, Free against Pro: one plan, a month of Pro.
  *
  * Every number on the page is the server's (/api/pro → offer.limits, prices
  * and dates from server/src/proPlan.ts), so an offer changes in one file. Until
@@ -22,7 +22,7 @@ import { installConsent } from './ui/consent';
 import { ensureUsernameChosen } from './ui/chooseUsernameModal';
 import { escapeHtml } from './core/escape';
 import { adoptProviderSession, fetchMe, fetchPro, notifyPro, type AllowanceKind, type PlanLimits, type ProState } from './net/api';
-import { CROWN_SVG, endsText, mountProChip, proChipHtml, whenDay } from './ui/pro';
+import { CROWN_SVG, endsText, mountProChip } from './ui/pro';
 import { openGiftSheet } from './ui/proSheets';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string): T => document.getElementById(id) as T;
@@ -38,19 +38,21 @@ function limitHtml(l: PlanLimits[AllowanceKind] | undefined): string {
   return l.map((w) => `<span>${escapeHtml(tv(`pp.per.${w.period}`, { n: w.limit }))}</span>`).join('');
 }
 
-const ROWS: AllowanceKind[] = ['super', 'std', 'polish', 'cutout', 'photo'];
+const ROWS: AllowanceKind[] = ['std', 'polish', 'cutout', 'photo'];
 
-function planCard(o: { id: string; name: string; price: string; sub: string; best?: boolean; limits: PlanLimits | undefined; pro: boolean }): string {
+/** What only Pro has, in the order the Pro column lists it. */
+const PERK_ROWS = ['pp.row.mark', 'pp.row.video', 'pp.row.poster', 'pp.row.styles', 'pp.row.fonts', 'pp.row.led', 'pp.row.kit', 'pp.row.badge'];
+
+function planCard(o: { id: string; name: string; price: string; sub: string; limits: PlanLimits | undefined; pro: boolean }): string {
   const rows = ROWS.map((k) => `<li><span>${escapeHtml(t(`pp.row.${k}`))}</span><b class="pp-lim">${limitHtml(o.limits?.[k])}</b></li>`);
   const yes = `<b class="pp-yes">${CROWN_SVG}<span>${escapeHtml(t('pp.included'))}</span></b>`;
   const no = `<b class="pp-no">${escapeHtml(t('pp.notIncluded'))}</b>`;
-  rows.push(`<li><span>${escapeHtml(t('pp.row.mark'))}</span>${o.pro ? yes : no}</li>`);
-  rows.push(`<li><span>${escapeHtml(t('pp.row.badge'))}</span>${o.pro ? yes : no}</li>`);
+  for (const k of PERK_ROWS) rows.push(`<li><span>${escapeHtml(t(k))}</span>${o.pro ? yes : no}</li>`);
   rows.push(`<li><span>${escapeHtml(t('pp.row.free'))}</span><b>${escapeHtml(t('pp.unlimited'))}</b></li>`);
   return (
-    `<article class="pp-plan${o.best ? ' best' : ''}${o.pro ? ' pro' : ''}" aria-labelledby="pp-plan-${o.id}">` +
-    (o.best ? `<p class="pp-best">${escapeHtml(t('pp.season.best'))}</p>` : '') +
-    `<h2 id="pp-plan-${o.id}">${escapeHtml(o.name)}${o.pro ? ` ${proChipHtml()}` : ''}</h2>` +
+    `<article class="pp-plan${o.pro ? ' pro' : ''}" aria-labelledby="pp-plan-${o.id}">` +
+    // The crown alone: the card's own name already says Pro.
+    `<h2 id="pp-plan-${o.id}">${escapeHtml(o.name)}${o.pro ? ` <span class="pro-chip icon" aria-hidden="true">${CROWN_SVG}</span>` : ''}</h2>` +
     `<p class="pp-price">${escapeHtml(o.price)}</p>` +
     `<p class="pp-sub">${escapeHtml(o.sub)}</p>` +
     `<ul class="pp-rows">${rows.join('')}</ul></article>`
@@ -76,13 +78,11 @@ function paint(): void {
   const lim = o.limits;
   $('pp-plans').innerHTML =
     planCard({ id: 'free', name: t('pp.free.name'), price: tv('pp.price', { n: 0 }), sub: t('pp.free.sub'), limits: lim?.free, pro: false }) +
-    planCard({ id: 'match', name: t('ac.pro.plan.match'), price: tv('pp.price', { n: o.match.price }), sub: tv('pp.match.sub', { hours: o.match.hours }), limits: lim?.match, pro: true }) +
     planCard({
-      id: 'season', name: t('pp.season.name'), price: tv('pp.price', { n: o.season.price }),
-      sub: tv('pp.season.sub', { date: whenDay(o.season.endsAt) }), best: true, limits: lim?.season, pro: true,
+      id: 'pro', name: t('pp.pro.name'), price: tv('pp.price.month', { n: o.monthly.price }),
+      sub: tv('pp.pro.sub', { days: o.monthly.days }), limits: lim?.pro, pro: true,
     });
-  $('pp-group-body').textContent = tv('pp.group.body', { price: o.group.from });
-  $('pp-small').textContent = `${tv('pp.credit', { days: o.matchCreditDays })} ${t('pp.noRenew')}`;
+  $('pp-small').textContent = t('pp.noRenew');
 
   // Who is looking: a pass running, a gift waiting, or neither.
   const you = $('pp-you');

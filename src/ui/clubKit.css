@@ -1,0 +1,148 @@
+/*
+ * Club kit (Pro, ui/clubKit.ts): the crowned entry in the Colours panel, the
+ * kit sheet, and the kit's logos in the picture import bar. Loaded with that
+ * module, so the editor's start carries none of it.
+ *
+ * Built on the Pro sheet (pro.css) and the editor's roles (floodlight.css):
+ * no colours of its own. A colour chip takes its colour from the kit through
+ * --kit-c, set from a checked #rrggbb in script. One blue at most (saving the
+ * first kit); Use is tinted, the way "Use as template" is; gold is the crown.
+ */
+
+/* ---- the entry, beside Import palette and Save palette ---- */
+.kit-entry { display: inline-flex; align-items: center; gap: var(--sp-1); }
+.kit-entry[hidden] { display: none; }
+
+/* ---- the sheet ---- */
+.pro-sheet.kit-sheet { width: min(480px, 100%); }
+.kit-sheet h2.kit-h { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2); }
+.kit-sheet h2:focus { outline: none; }
+.kit-sheet .kit-hint { margin: 0 0 var(--sp-2); font-size: var(--fs-xs); line-height: 1.5; color: var(--text-3); }
+.kit-sheet .kit-center { text-align: center; margin-top: var(--sp-2); }
+.kit-sheet .kit-empty { padding: var(--sp-4); border: 1px dashed var(--line-2); border-radius: var(--r-md); text-align: center; }
+.kit-sheet .kit-free { margin: 0 0 var(--sp-4); }
+
+.kit-cards { list-style: none; margin: var(--sp-2) 0 0; padding: 0; display: grid; gap: var(--sp-3); }
+.kit-card {
+  display: grid; gap: var(--sp-3); min-width: 0;
+  padding: var(--sp-3) var(--sp-4) var(--sp-4); border-radius: var(--r-md);
+  background: var(--pro-surface-2); border: 1px solid var(--pro-hairline);
+}
+.kit-card-head { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; }
+.kit-sheet .kit-name {
+  flex: 1 1 auto; min-width: 0; margin: 0;
+  font-size: var(--fs-md); font-weight: 700; color: var(--text-1);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.kit-quiet { display: flex; flex: none; gap: var(--sp-1); margin-inline-end: calc(-1 * var(--sp-2)); }
+/* Rename and Delete: words, no fill, no border (the panel's .link-btn, quieter). */
+.kit-sheet .kit-link {
+  min-height: 32px; padding: var(--sp-1) var(--sp-2); border: none; border-radius: var(--r-sm);
+  background: transparent; box-shadow: none; color: var(--text-2);
+  font-size: var(--fs-xs); font-weight: 600;
+}
+.kit-sheet .kit-link:hover { background: var(--ink-3); color: var(--text-1); }
+
+/* The colours, as one strip, in the kit's order. */
+.kit-strip {
+  display: flex; height: 22px; border-radius: var(--r-sm); overflow: hidden;
+  border: 1px solid var(--line-2);
+}
+.kit-strip > span { flex: 1 1 0; min-width: 0; background: var(--kit-c, transparent); }
+
+.kit-row { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2) var(--sp-3); min-width: 0; }
+.kit-logos { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.kit-logo { width: 48px; height: 48px; border-radius: var(--r-sm); background: var(--ink-0); border: 1px solid var(--line-1); }
+.kit-none, .kit-font { font-size: var(--fs-xs); color: var(--text-3); }
+.kit-font { margin-inline-start: auto; color: var(--text-2); }
+
+/* Each card's one step: tinted, not blue (docs/DESIGN.md, Buttons). */
+.kit-sheet .kit-use {
+  min-height: 40px; padding: var(--sp-2) var(--sp-4); border-radius: var(--r-pill);
+  background: var(--here-bg); color: var(--here-ink); border: 1px solid var(--here-line); box-shadow: none;
+  font-size: var(--fs-md); font-weight: 700;
+  transition: background-color var(--duration-quick) var(--ease-smooth-out), transform var(--duration-quick) var(--ease-smooth-out);
+}
+.kit-sheet .kit-use:hover { background: var(--ink-3); border-color: var(--here-ink); }
+
+/* ---- save this design as a kit ---- */
+.kit-field { display: grid; gap: var(--sp-1); margin: 0 0 var(--sp-4); }
+.kit-field > label { font-size: var(--fs-xs); font-weight: 600; color: var(--text-2); }
+.kit-field > input[type="text"], .kit-field > select { width: 100%; min-width: 0; }
+.kit-set { margin: 0 0 var(--sp-4); padding: 0; border: none; min-width: 0; }
+.kit-set > legend { padding: 0; margin: 0 0 var(--sp-1); font-size: var(--fs-xs); font-weight: 600; color: var(--text-2); }
+
+.kit-colours { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.kit-sheet .kit-colour {
+  position: relative; width: 36px; height: 36px; padding: 0; border-radius: var(--r-sm);
+  background: var(--kit-c, transparent); border: 2px solid var(--line-2); box-shadow: none;
+  transition: opacity var(--duration-quick) var(--ease-smooth-out), transform var(--duration-quick) var(--ease-smooth-out);
+}
+.kit-sheet .kit-colour:hover { background: var(--kit-c, transparent); transform: scale(1.06); }
+.kit-sheet .kit-colour[aria-pressed="true"] { border-color: var(--text-1); }
+/* Left out: faded and struck through, still there to tap back in. */
+.kit-sheet .kit-colour[aria-pressed="false"] { opacity: 0.35; border-style: dashed; }
+.kit-sheet .kit-colour[aria-pressed="false"]::after {
+  content: ""; position: absolute; inset-inline-start: 50%; top: -4px; bottom: -4px; width: 2px;
+  background: var(--text-1); transform: rotate(45deg);
+}
+
+.kit-pics { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.kit-sheet .kit-pic {
+  position: relative; width: 64px; height: 64px; padding: var(--sp-1); border-radius: var(--r-md);
+  background: var(--ink-0); border: 2px solid var(--line-2); box-shadow: none;
+}
+.kit-pic canvas { display: block; width: 100%; height: 100%; }
+.kit-sheet .kit-pic[aria-pressed="false"] canvas { opacity: 0.45; }
+.kit-sheet .kit-pic[aria-pressed="true"] { border-color: var(--here-line); background: var(--here-bg); }
+.kit-tick {
+  position: absolute; top: -6px; inset-inline-end: -6px; width: 20px; height: 20px; padding: 2px;
+  border-radius: var(--r-pill); background: var(--here-line); color: var(--ink-0);
+  fill: none; stroke: currentColor; stroke-width: 3.2; stroke-linecap: round; stroke-linejoin: round;
+}
+.kit-pic[aria-pressed="false"] .kit-tick { display: none; }
+.kit-sheet .kit-add {
+  display: inline-flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--sp-1);
+  width: 64px; height: 64px; padding: var(--sp-1); border-radius: var(--r-md);
+  background: transparent; border: 1px dashed var(--line-2); box-shadow: none; color: var(--text-2);
+  font-size: var(--fs-2xs); font-weight: 600; line-height: 1.15; text-align: center;
+}
+.kit-sheet .kit-add .ti { font-size: var(--fs-lg); }
+.kit-sheet .kit-add:hover { color: var(--text-1); border-color: var(--text-2); background: var(--ink-3); }
+
+.kit-sheet .kit-colour:focus-visible, .kit-sheet .kit-pic:focus-visible, .kit-sheet .kit-add:focus-visible,
+.kit-sheet .kit-use:focus-visible, .kit-sheet .kit-link:focus-visible {
+  outline: 2px solid var(--here-line); outline-offset: 2px; box-shadow: none;
+}
+
+/* ---- the kit's logos in the picture import bar ---- */
+/* A field is display:contents on a desktop (floodlight.css): kept as one group here. */
+.tool-bar .tb-field.kit-logos-field { display: inline-flex; align-items: center; gap: var(--sp-2); }
+.tool-bar .tb-field.kit-logos-field[hidden] { display: none; }
+.kit-logos-label { font-size: var(--fs-xs); color: var(--text-2); white-space: nowrap; }
+.kit-logos-row { display: inline-flex; flex-wrap: wrap; gap: var(--sp-1); }
+.tool-bar .kit-logo-btn {
+  position: relative; width: 36px; height: 36px; padding: 2px; border-radius: var(--r-sm);
+  background: var(--ink-0); border: 2px solid var(--line-2); box-shadow: none;
+}
+.kit-logo-btn canvas { display: block; width: 100%; height: 100%; }
+.tool-bar .kit-logo-btn[aria-pressed="true"] { border-color: var(--here-line); background: var(--here-bg); }
+.tool-bar .kit-logo-btn.placed canvas { opacity: 0.5; }
+.kit-logo-btn .kit-tick { width: 16px; height: 16px; top: -5px; inset-inline-end: -5px; }
+.tool-bar .kit-logo-btn:focus-visible { outline: 2px solid var(--here-line); outline-offset: 2px; box-shadow: none; }
+
+/* ---- touch: 44px targets ---- */
+@media (pointer: coarse) {
+  .kit-entry { min-height: 44px; }
+  .kit-sheet .kit-link, .kit-sheet .kit-use { min-height: 44px; }
+  /* pro.css sets the sheet's buttons to 44px before their 40px base rule, so the base wins there. */
+  .kit-sheet .pro-primary, .kit-sheet .pro-alt, .kit-sheet .pro-text-btn { min-height: 44px; }
+  .kit-sheet .kit-colour { width: 44px; height: 44px; }
+  .kit-sheet .kit-pic, .kit-sheet .kit-add { width: 72px; height: 72px; }
+  .kit-field > input[type="text"], .kit-field > select { min-height: 44px; }
+  .tool-bar .kit-logo-btn { width: 44px; height: 44px; }
+}
+/* A phone's sheet: Use spans the card. */
+@media (max-width: 600px) {
+  .kit-sheet .kit-use { width: 100%; }
+}

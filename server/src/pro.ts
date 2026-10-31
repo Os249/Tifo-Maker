@@ -10,8 +10,8 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  ALLOWANCE_KINDS, FREE_WINDOWS, OFFER, PAID_PLANS, PLAN_RANK, PLAN_WINDOWS, liveFor, periodEnd, periodKey,
-  type AllowanceKind, type PassPlan, type Period, type PlanKind, type Window,
+  ALLOWANCE_KINDS, FREE_WINDOWS, OFFER, PAID_PLANS, PLAN_RANK, PLAN_WINDOWS, cycleOf, liveFor, periodEnd, periodKey,
+  type AllowanceKind, type PassPlan, type PlanKind, type Window,
 } from './proPlan';
 import type { ProGift, ProPass, ProRepository } from './proRepo';
 
@@ -76,10 +76,16 @@ export interface Allowance {
   used: number;
   limit: number;
   remaining: number;
-  /** The window that binds: the one with the least left. */
-  period: Period;
-  /** When that window starts again. */
+  /** The window that binds: the one with the least left. A pass's own month is 'month' here. */
+  period: 'day' | 'week' | 'month';
+  /** When that window starts again (a pass's month: 30 days on, or the pass's end). */
   resetAt: string;
+}
+
+/** The plan an account holds now, and the pass that gives it (its month is counted from it). */
+export interface Holding {
+  plan: PlanKind;
+  pass: ProPass | null;
 }
 
 /** What take() hands back, so a refund touches exactly the counters it bumped. */
@@ -89,12 +95,12 @@ export interface Ticket {
   n: number;
 }
 
+/** The gift never expires unclaimed: offered stays offered until its holder starts it. */
 export type GiftState =
   | { state: 'none' }
-  | { state: 'offered'; claimBy: string; days: number }
+  | { state: 'offered'; days: number }
   | { state: 'active'; endsAt: string; days: number }
-  | { state: 'used'; endedAt: string | null }
-  | { state: 'expired' };
+  | { state: 'used'; endedAt: string | null };
 
 export interface ProServiceOptions {
   env?: NodeJS.ProcessEnv;
@@ -122,7 +128,7 @@ export class ProService {
   }
 
   /** The plan an account holds now, and the pass that gives it. */
-  async plan(userId: string): Promise<{ plan: PlanKind; pass: ProPass | null }> {
+  async plan(userId: string): Promise<Holding> {
     const passes = await this.repo.activePasses(userId, this.now());
     if (!passes.length) return { plan: 'free', pass: null };
     const best = [...passes].sort((a, b) => PLAN_RANK[b.plan] - PLAN_RANK[a.plan] || Date.parse(b.endsAt) - Date.parse(a.endsAt))[0];
@@ -133,14 +139,36 @@ export class ProService {
     return plan === 'free' ? FREE_WINDOWS[kind] : PLAN_WINDOWS[plan][kind];
   }
 
+  /**
+   * Where each window's count is kept and when it starts again. A pass's own
+   * month ('cycle') is keyed by the pass; without one (a plan named with no
+   * pass, which only a test does) it falls back to the calendar month.
+   */
+  private slots(wins: Window[], h: Holding, now: Date): { key: string; limit: number; end: Date; period: Allowance['period'] }[] {
+    return wins.map((w) => {
+      if (w.period === 'cycle') {
+        if (h.pass) {
+          const c = cycleOf(h.pass, now);
+          return { key: c.key, limit: w.limit, end: c.end, period: 'month' };
+        }
+        return { key: periodKey('month', now), limit: w.limit, end: periodEnd('month', now), period: 'month' };
+      }
+      return { key: periodKey(w.period, now), limit: w.limit, end: periodEnd(w.period, now), period: w.period };
+    });
+  }
+
+  private holding(h: Holding | PlanKind): Holding {
+    return typeof h === 'string' ? { plan: h, pass: null } : h;
+  }
+
   /** Spend `n` of an allowance, all windows or none. */
-  async take(userId: string, kind: AllowanceKind, plan: PlanKind, n = 1): Promise<{ ok: boolean; ticket: Ticket; allowance: Allowance }> {
+  async take(userId: string, kind: AllowanceKind, holding: Holding | PlanKind, n = 1): Promise<{ ok: boolean; ticket: Ticket; allowance: Allowance }> {
     const now = this.now();
-    const wins = this.windows(kind, plan);
-    const slots = wins.map((w) => ({ key: periodKey(w.period, now), limit: w.limit }));
-    const r = await this.repo.take(userId, kind, slots, n);
+    const h = this.holding(holding);
+    const slots = this.slots(this.windows(kind, h.plan), h, now);
+    const r = await this.repo.take(userId, kind, slots.map((s) => ({ key: s.key, limit: s.limit })), n);
     const ticket: Ticket = { kind, keys: r.ok ? slots.map((s) => s.key) : [], n: r.ok ? n : 0 };
-    return { ok: r.ok, ticket, allowance: this.binding(kind, wins, r.used, now) };
+    return { ok: r.ok, ticket, allowance: this.binding(kind, slots, r.used) };
   }
 
   /** Undo a take(): the result never reached the person. */
@@ -149,26 +177,33 @@ export class ProService {
     await this.repo.give(userId, ticket.kind, ticket.keys, ticket.n);
   }
 
-  async allowance(userId: string, kind: AllowanceKind, plan: PlanKind): Promise<Allowance> {
+  async allowance(userId: string, kind: AllowanceKind, holding: Holding | PlanKind): Promise<Allowance> {
     const now = this.now();
-    const wins = this.windows(kind, plan);
-    const used = await this.repo.used(userId, kind, wins.map((w) => periodKey(w.period, now)));
-    return this.binding(kind, wins, used, now);
+    const h = this.holding(holding);
+    const slots = this.slots(this.windows(kind, h.plan), h, now);
+    const used = await this.repo.used(userId, kind, slots.map((s) => s.key));
+    return this.binding(kind, slots, used);
   }
 
-  async allowances(userId: string, plan: PlanKind): Promise<Record<AllowanceKind, Allowance>> {
-    const all = await Promise.all(ALLOWANCE_KINDS.map((k) => this.allowance(userId, k, plan)));
+  async allowances(userId: string, holding: Holding | PlanKind): Promise<Record<AllowanceKind, Allowance>> {
+    const all = await Promise.all(ALLOWANCE_KINDS.map((k) => this.allowance(userId, k, holding)));
     return Object.fromEntries(all.map((a) => [a.kind, a])) as Record<AllowanceKind, Allowance>;
   }
 
-  private binding(kind: AllowanceKind, wins: Window[], used: number[], now: Date): Allowance {
+  /**
+   * The window that binds: the one with the least left; of two with as little
+   * left, the one that starts again last (the day's ceiling and the month's
+   * both at 0 is "back when the month is").
+   */
+  private binding(kind: AllowanceKind, slots: { limit: number; end: Date; period: Allowance['period'] }[], used: number[]): Allowance {
+    const left = (i: number): number => slots[i].limit - (used[i] ?? 0);
     let best = 0;
-    for (let i = 1; i < wins.length; i++) {
-      if (wins[i].limit - (used[i] ?? 0) < wins[best].limit - (used[best] ?? 0)) best = i;
+    for (let i = 1; i < slots.length; i++) {
+      if (left(i) < left(best) || (left(i) === left(best) && left(i) <= 0 && slots[i].end > slots[best].end)) best = i;
     }
-    const w = wins[best];
+    const w = slots[best];
     const u = Math.min(used[best] ?? 0, w.limit);
-    return { kind, used: u, limit: w.limit, remaining: Math.max(0, w.limit - u), period: w.period, resetAt: periodEnd(w.period, now).toISOString() };
+    return { kind, used: u, limit: w.limit, remaining: Math.max(0, w.limit - u), period: w.period, resetAt: w.end.toISOString() };
   }
 
   // ------------------------------------------------------------------ gift ---
@@ -190,21 +225,18 @@ export class ProService {
 
   /**
    * The gift as this account sees it, offering it first when they qualify.
-   * Only for accounts the new rules apply to.
+   * Only for accounts the new rules apply to. An offer never lapses: it waits
+   * until its holder starts it, however long that is.
    */
   async giftFor(acct: ProAccount): Promise<GiftState> {
     if (!this.live(acct.username)) return { state: 'none' };
     const now = this.now();
     let g: ProGift | null = await this.repo.gift(acct.id);
     if (!g) {
-      if (Date.parse(OFFER.gift.claimBy) <= now.getTime()) return { state: 'none' };
       if (!(await this.giftEligible(acct))) return { state: 'none' };
-      g = await this.repo.offerGift(acct.id, new Date(OFFER.gift.claimBy), now);
+      g = await this.repo.offerGift(acct.id, now);
     }
-    if (!g.acceptedAt) {
-      if (Date.parse(g.claimBy) <= now.getTime()) return { state: 'expired' };
-      return { state: 'offered', claimBy: g.claimBy, days: OFFER.gift.days };
-    }
+    if (!g.acceptedAt) return { state: 'offered', days: OFFER.gift.days };
     const pass = g.passId ? (await this.repo.allPasses(acct.id)).find((p) => p.id === g!.passId) ?? null : null;
     if (pass && !pass.revokedAt && Date.parse(pass.endsAt) > now.getTime()) {
       return { state: 'active', endsAt: pass.endsAt, days: OFFER.gift.days };
@@ -213,16 +245,15 @@ export class ProService {
   }
 
   /** Accept the gift. Every rule is checked again here; the browser decides nothing. */
-  async acceptGift(acct: ProAccount): Promise<{ ok: true; endsAt: string } | { ok: false; reason: 'off' | 'not_eligible' | 'used' | 'expired' }> {
+  async acceptGift(acct: ProAccount): Promise<{ ok: true; endsAt: string } | { ok: false; reason: 'off' | 'not_eligible' | 'used' }> {
     if (!this.live(acct.username)) return { ok: false, reason: 'off' };
     const state = await this.giftFor(acct);
     if (state.state === 'none') return { ok: false, reason: 'not_eligible' };
-    if (state.state === 'expired') return { ok: false, reason: 'expired' };
     if (state.state !== 'offered') return { ok: false, reason: 'used' };
     // Eligibility can change after the offer (a pass bought, the email changed).
     if (!(await this.giftEligible(acct))) return { ok: false, reason: 'not_eligible' };
     const r = await this.repo.acceptGift(acct.id, this.now(), OFFER.gift.days);
-    if (!r.ok) return { ok: false, reason: r.reason === 'expired' ? 'expired' : r.reason === 'none' ? 'not_eligible' : 'used' };
+    if (!r.ok) return { ok: false, reason: r.reason === 'none' ? 'not_eligible' : 'used' };
     return { ok: true, endsAt: r.pass.endsAt };
   }
 

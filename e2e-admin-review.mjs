@@ -122,7 +122,7 @@ const readCard = (p) => p.evaluate(() => ({
   await p.goto(`${B}/app?new=1`, { waitUntil: 'networkidle' });
   await p.click('#rail-ai');
   await p.fill('#ai-prompt', 'نسر ذهبي على المدرج الجنوبي');
-  await p.check('#ai-whole');
+  // (Whole stadium is the only AI path since 29 Oct 2026; its box is gone.)
   await p.click('#ai-generate');
   await p.waitForSelector('#ai-state:not([hidden])', { timeout: 60000 });
   const c = await readCard(p);

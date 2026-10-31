@@ -89,17 +89,17 @@ export function backWhen(a: Pick<Allowance, 'period' | 'resetAt'>, now = Date.no
   return tv('pro.when.onDay', { day, in: inTime(a.resetAt, now) });
 }
 
-/** "Super designs" / "تصاميم بالذكاء الخارق", by kind. */
+/** "designs" / "تصاميم", "smart cut-outs" / "قص ذكي", by kind. */
 export function kindName(kind: Allowance['kind']): string {
   return t(`pro.kind.${kind}`);
 }
 
-/** One of them: "Super design" / "تصميم بالذكاء الخارق". */
+/** One of them: "design" / "تصميم". */
 export function kindOne(kind: Allowance['kind']): string {
   return t(`pro.kind1.${kind}`);
 }
 
-/** "That's all 3 Super designs for this week" / "You've used this week's smart cut-out". */
+/** "That's all 15 designs for today" / "You've used this week's smart cut-out". */
 export function limitTitle(a: Pick<Allowance, 'kind' | 'period' | 'limit'>): string {
   return a.limit === 1
     ? tv(`pro.limit1.${a.period}`, { what: kindOne(a.kind) })

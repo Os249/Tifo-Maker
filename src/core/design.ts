@@ -35,9 +35,12 @@ export interface ObjectsChange {
   after: unknown;
 }
 
-/** One undo step. A paint stroke can also have touched objects; a group is several steps as one. */
+/**
+ * One undo step. A paint stroke can also have touched objects, and a palette
+ * swap that asked for it carries the palette too; a group is several steps as one.
+ */
 type HistoryEntry =
-  | { t: 'paint'; diff: SparseDiff; objs: ObjectsChange | null }
+  | { t: 'paint'; diff: SparseDiff; objs: ObjectsChange | null; palette?: { before: string[]; after: string[] } }
   | { t: 'objs'; change: ObjectsChange }
   | { t: 'group'; list: HistoryEntry[] };
 
@@ -232,10 +235,16 @@ export class DesignStore {
    * nearest color in the new palette. This is the "remap design onto this
    * palette" choice — an explicit, undoable recolor. The Paint layer and every
    * object on it are remapped together, as one step.
+   *
+   * `undoPalette`: the palette itself is part of that step, so one undo puts
+   * the old colours back with the old seats, even on an empty design (the
+   * club kit, ui/clubKit.ts). Without it the palette is not in the history,
+   * as it always was for the preset menu.
    */
-  remapToPalette(newPalette: string[]): void {
+  remapToPalette(newPalette: string[], opts: { undoPalette?: boolean } = {}): void {
     const next = newPalette.slice(0, DesignStore.MAX_COLORS);
     if (next.length === 0) return;
+    const prev = this.palette;
     // Build old-index → new-index by nearest color.
     const remap = this.palette.map((oldHex) => nearestColorIndex(oldHex, next));
     const old = new Map<number, number>();
@@ -250,7 +259,8 @@ export class DesignStore {
     }
     this.palette = next;
     const objs = this.layers ? this.layers.remap(remap) : null;
-    if (old.size > 0 || objs) {
+    const palette = opts.undoPalette ? { before: prev, after: next } : undefined;
+    if (old.size > 0 || objs || palette) {
       const entries = [...old.entries()];
       this.push({
         t: 'paint',
@@ -260,6 +270,7 @@ export class DesignStore {
           after: new Uint8Array(entries.map(([i]) => this.base[i])),
         },
         objs,
+        ...(palette ? { palette } : {}),
       });
     }
     for (const fn of this.paletteListeners) fn();
@@ -556,10 +567,17 @@ export class DesignStore {
       this.layers?.restore(entry.change[side]);
       return;
     }
-    const { diff, objs } = entry;
+    const { diff, objs, palette } = entry;
+    // The colours first, so every view that redraws the seats below draws them in these.
+    if (palette) {
+      this.palette = palette[side];
+      for (const fn of this.paletteListeners) fn();
+    }
     this.applyValues(diff.indices, side === 'before' ? diff.before : diff.after);
     // The objects the stroke touched come back after the paint under them.
     if (objs) this.layers?.restore(objs[side]);
+    // Every seat may show another colour now, moved or not: tell everyone (and the autosave).
+    if (palette) this.notify('all');
   }
 
   private applyValues(indices: Uint32Array, values: Uint8Array): void {

@@ -38,6 +38,13 @@ export interface StadiumExportOpts {
   /** GIF only: cap output width (height derives from the canvas aspect). */
   gifWidth?: number;
   /**
+   * Video and its preview only: draw every frame at this size (Full HD,
+   * vertical 9:16) instead of the screen's (Preview3D.drawAt). A device that
+   * cannot draw it gets the screen's size; ui/proExport.ts asks first and
+   * says so.
+   */
+  size?: { width: number; height: number } | null;
+  /**
    * The drum call's drum. When set and the reveal is the drum call, the
    * preview plays it and the video carries it — a drum call you cannot hear
    * is only half of one. Ignored by the GIF, which has no sound.
@@ -61,7 +68,8 @@ function frameAt(opts: StadiumExportOpts, delays: Float32Array, clock: number): 
   return { id: opts.reveal, delays, clock, fade: FADE, lengthSec: opts.durationSec };
 }
 
-function drawWatermark(ctx: CanvasRenderingContext2D, w: number, h: number, text: string): void {
+/** "tifomaker.org" in the bottom corner, on a soft dark backing (also the 4K poster's, ui/proExport.ts). */
+export function drawWatermark(ctx: CanvasRenderingContext2D, w: number, h: number, text: string): void {
   if (!text) return;
   const fontSize = Math.max(11, Math.round(h * 0.03));
   const pad = Math.round(fontSize * 0.7);
@@ -125,6 +133,10 @@ function buildPlayback(
   scale = 1,
 ): PlayHandle {
   const src = preview.canvas;
+  // Pause the preview's internal RAF so our reveal stepping isn't fighting it.
+  preview.stop();
+  // At the export's own size when it asks for one (and the device can).
+  const sized = opts.size ? preview.drawAt(opts.size.width, opts.size.height) : null;
   const W = Math.max(2, Math.round(src.width * scale));
   const H = Math.max(2, Math.round(src.height * scale));
   const canvas = document.createElement('canvas');
@@ -132,9 +144,6 @@ function buildPlayback(
   canvas.height = H;
   const ctx = canvas.getContext('2d', { willReadFrequently: scale < 1 })!;
   const delays = buildReveal(map, opts.reveal);
-
-  // Pause the preview's internal RAF so our reveal stepping isn't fighting it.
-  preview.stop();
   preview.setNoShows(opts.noShows);
 
   const renderFrameAt = (clock: number): void => {
@@ -163,6 +172,7 @@ function buildPlayback(
 
   const finish = (): void => {
     preview.applyReveal(null);
+    sized?.end();
     preview.start();
   };
 
@@ -307,7 +317,8 @@ export async function exportStadiumGif(
 ): Promise<Blob> {
   const targetW = Math.min(opts.gifWidth ?? 480, preview.canvas.width);
   const scale = targetW / preview.canvas.width;
-  const play = buildPlayback(preview, map, opts, scale);
+  // A GIF keeps its own width (gifWidth): the video's sizes are not for it.
+  const play = buildPlayback(preview, map, { ...opts, size: null }, scale);
   const { canvas } = play;
   const W = canvas.width;
   const H = canvas.height;

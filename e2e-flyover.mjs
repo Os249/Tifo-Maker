@@ -86,8 +86,10 @@ console.log('\n— the choice —');
   await openSec(p, 'camera');
   await openSec(p, 'record');
   const opts = await p.$eval(K('rec-camera'), (s) => [...s.options].map((o) => [o.value, o.textContent]));
-  check('Recording has a Camera choice: show cameras or the cinematic flyover',
-    JSON.stringify(opts) === JSON.stringify([['show', 'Show cameras'], ['flyover', 'Cinematic flyover']]), JSON.stringify(opts));
+  // "Where I put it" (30 Oct 2026): the camera left exactly where it is, for
+  // filming a tifo from the angle somebody chose (e2e-stage-camera.mjs).
+  check('Recording has a Camera choice: show cameras, where I put it, or the cinematic flyover',
+    JSON.stringify(opts) === JSON.stringify([['show', 'Show cameras'], ['hold', 'Where I put it'], ['flyover', 'Cinematic flyover']]), JSON.stringify(opts));
   check('it starts on the show cameras while the flyover is off', (await p.$eval(K('rec-camera'), (s) => s.value)) === 'show');
   await click(p, 'flyover');
   check('turning the flyover on sets the clip to it', await flying(p) && (await p.$eval(K('rec-camera'), (s) => s.value)) === 'flyover');

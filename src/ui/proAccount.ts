@@ -10,7 +10,7 @@ import { escapeHtml } from '../core/escape';
 import { CROWN_SVG, backWhen, endsText, kindName, proChipHtml, whenDay } from './pro';
 import { onLangChange, t, tv } from './i18n';
 
-const ORDER: AllowanceKind[] = ['super', 'std', 'polish', 'cutout', 'photo'];
+const ORDER: AllowanceKind[] = ['std', 'polish', 'cutout', 'photo'];
 
 function meter(a: Allowance): string {
   const per = t(`pro.per.${a.period}`);

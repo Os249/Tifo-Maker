@@ -13,7 +13,7 @@ import { acceptProGift, notifyPro, type ProOffer, type ProState } from '../net/a
 import { track } from '../net/analytics';
 import { containDialog } from './dialogFocus';
 import { localPath, t, tv } from './i18n';
-import { CROWN_SVG, whenDate, whenDay } from './pro';
+import { CROWN_SVG, whenDate } from './pro';
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -65,7 +65,10 @@ const mark = (): string => `<div class="pro-sheet-mark" aria-hidden="true">${CRO
 function perksHtml(keys: string[]): string {
   return `<ul class="pro-perks">${keys.map((k) => `<li>${CROWN_SVG}<span>${escapeHtml(t(k))}</span></li>`).join('')}</ul>`;
 }
-const GIFT_PERKS = ['pro.perk.super', 'pro.perk.cutout', 'pro.perk.polish', 'pro.perk.mark', 'pro.perk.noLimits'];
+/** What Pro adds, in the order the sheets list it (the 7-day gift is all of Pro). */
+const GIFT_PERKS = [
+  'pro.perk.ai', 'pro.perk.cutout', 'pro.perk.polish', 'pro.perk.mark', 'pro.perk.video', 'pro.perk.styles', 'pro.perk.kit', 'pro.perk.noLimits',
+];
 
 /**
  * Accept the 7-day gift. Shows when it would end if started now, and starts
@@ -97,7 +100,7 @@ export function openGiftSheet(state?: ProState | null): Promise<boolean> {
       const r = await acceptProGift();
       if (!r.ok) {
         go.disabled = false;
-        note.textContent = t(r.reason === 'used' ? 'gift.used' : r.reason === 'expired' ? 'gift.expired' : r.status === 403 ? 'gift.verify' : 'gift.failed');
+        note.textContent = t(r.reason === 'used' ? 'gift.used' : r.status === 403 ? 'gift.verify' : 'gift.failed');
         return;
       }
       started = true;
@@ -114,14 +117,9 @@ export function openGiftSheet(state?: ProState | null): Promise<boolean> {
   });
 }
 
-/** The two passes in one line, from the server's offer. */
-export function passesLine(offer: ProOffer): string {
-  return tv('pro.passesLine', {
-    match: offer.match.price,
-    hours: offer.match.hours,
-    season: offer.season.price,
-    until: whenDay(offer.season.endsAt),
-  });
+/** The one plan's price in one line, from the server's offer. */
+export function priceLine(offer: ProOffer): string {
+  return tv('pro.priceLine', { price: offer.monthly.price });
 }
 
 /**
@@ -138,12 +136,12 @@ export function openProSheet(state: ProState, opts: { title?: string; lead?: str
     `<h2>${escapeHtml(opts.title ?? t('pro.sheet.whatTitle'))}</h2>` +
     `<p>${escapeHtml(opts.lead ?? t('pro.sheet.whatLead'))}</p>` +
     perksHtml([...GIFT_PERKS, 'pro.perk.badge']) +
-    (offer ? `<p>${escapeHtml(passesLine(offer))}</p>` : '') +
+    (offer ? `<p>${escapeHtml(priceLine(offer))}</p>` : '') +
     `<div class="pro-actions">` +
     (gift
       ? `<button type="button" class="pro-primary" data-act="gift">${escapeHtml(t('pro.act.useGift'))}</button>`
       : offer?.paymentsOpen
-        ? `<a class="pro-primary" href="${escapeHtml(localPath('/pro'))}">${escapeHtml(tv('pro.act.getPro', { price: offer.match.price }))}</a>`
+        ? `<a class="pro-primary" href="${escapeHtml(localPath('/pro'))}">${escapeHtml(tv('pro.act.getPro', { price: offer.monthly.price }))}</a>`
         : `<button type="button" class="pro-primary" data-act="notify" ${notified ? 'disabled' : ''}>${escapeHtml(t(notified ? 'pro.act.notified' : 'pro.act.notify'))}</button>`) +
     `<a class="pro-text-btn" href="${escapeHtml(localPath('/pro'))}">${escapeHtml(t('pro.act.seePage'))}</a>` +
     `</div><p class="pro-note" role="status" aria-live="polite"></p>`,
@@ -210,7 +208,7 @@ export function openExportSheet(items: string[], state: ProState): Promise<'free
     (gift
       ? `<button type="button" class="pro-primary" data-act="gift">${escapeHtml(t('pro.act.useGift'))}</button>`
       : offer?.paymentsOpen
-        ? `<a class="pro-primary" href="${escapeHtml(localPath('/pro'))}">${escapeHtml(tv('pro.act.getPro', { price: offer.match.price }))}</a>`
+        ? `<a class="pro-primary" href="${escapeHtml(localPath('/pro'))}">${escapeHtml(tv('pro.act.getPro', { price: offer.monthly.price }))}</a>`
         : `<button type="button" class="pro-primary" data-act="notify" ${notified ? 'disabled' : ''}>${escapeHtml(t(notified ? 'pro.act.notified' : 'pro.act.notify'))}</button>`) +
     `<button type="button" class="pro-alt" data-act="free">${escapeHtml(t('pro.export.free'))}</button>` +
     `</div><p class="pro-note" role="status" aria-live="polite">${escapeHtml(t('pro.export.never'))}</p>`,

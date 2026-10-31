@@ -15,7 +15,7 @@ import { buildCrowd, type CrowdController, type CrowdPreset } from './crowd';
 import { buildPitchside, type PitchsideController } from './pitchside';
 import { buildBanners, type BannerController } from './banners';
 import { buildEffects, type EffectsController } from './effects';
-import { bowlShots, seatShot, flyover, flyoverPeriodFor, FLY_DURATION, applyShot as applyCameraShot, type SimShot } from './cameras';
+import { bowlShots, seatShot, flyover, flyoverPeriodFor, FLY_DURATION, applyShot as applyCameraShot, tifoFootprint, tifoShots, type SimShot, type TifoFootprint } from './cameras';
 import { revealInstant, revealKeys, revealVisibility, type RevealMode } from './choreo';
 import { REVEAL_GLSL, drumReactions, revealConst, revealDrum, revealOff, revealRamp, revealStep, revealUniforms } from './revealGpu';
 import { evalTimeline, type Timeline, type Cue, type EffectName } from './timeline';
@@ -115,6 +115,22 @@ const WALKER_STEP = 0.1;
  */
 const FRAME_SLACK_MS = 6;
 
+/**
+ * "tifomaker.org" in the bottom corner of an export, on a soft dark pill: the
+ * same mark and size on a snapshot and on every frame of a clip.
+ */
+function drawSiteMark(ctx: CanvasRenderingContext2D, w: number, h: number): void {
+  const fs = Math.max(14, Math.round(h * 0.026));
+  const txt = 'tifomaker.org';
+  ctx.font = `600 ${fs}px system-ui, -apple-system, sans-serif`;
+  const tw = ctx.measureText(txt).width;
+  const pad = Math.round(fs * 0.5);
+  ctx.fillStyle = 'rgba(0,0,0,0.4)';
+  ctx.fillRect(w - tw - pad * 3, h - fs - pad * 2, tw + pad * 2, fs + pad);
+  ctx.fillStyle = 'rgba(255,255,255,0.92)';
+  ctx.fillText(txt, w - tw - pad * 2, h - Math.round(pad * 1.5));
+}
+
 export type TimeOfDay = 'day' | 'dusk' | 'night' | 'sunset';
 
 interface SkyPreset {
@@ -165,7 +181,10 @@ export interface RecordedClip extends RecordingFormat {
  * starting wide and high and sweeping in on the stands; the show's camera cuts
  * are skipped so nothing cuts away from the move.
  */
-export type RecordCamera = 'show' | 'flyover';
+/** A clip's camera: the show's cuts, the camera left where it is, or the flyover. */
+export type RecordCamera = 'show' | 'hold' | 'flyover';
+/** How a show films: its own cuts, or the camera left where the person put it. */
+export type ShowCamera = 'cuts' | 'hold';
 
 export class MatchDaySimulator {
   readonly canvas: HTMLCanvasElement;
@@ -327,6 +346,22 @@ export class MatchDaySimulator {
   private tlPrev = 0;
   private tlLoop = false;
   private lastCamName: string | null = null;
+  /**
+   * How a show films: its cuts (on the tifo, when there is one), or the camera
+   * left exactly where the person put it — for filming the screen from one
+   * angle. From the panel, and remembered there.
+   */
+  private showCamera: ShowCamera = 'cuts';
+  /**
+   * The person took the camera while a show was playing: no more cuts until it
+   * ends. It used to cut straight back on the next cue (30 Oct 2026 report:
+   * "even when I move it, it goes back to the front").
+   */
+  private handOnCamera = false;
+  /** This show's own camera, over the panel's choice: a clip, or its preview. */
+  private tlCamera: ShowCamera | null = null;
+  /** Told once a show, when the person takes the camera, so the panel can say the cuts have stopped. */
+  onCameraTaken: (() => void) | null = null;
   private revealActiveLast = false;
   /** The drum call's settings, from the panel. */
   private drumCallOpts: DrumCallOpts = {};
@@ -427,6 +462,9 @@ export class MatchDaySimulator {
     // are asked for by the loop while the camera is still moving.
     this.controls.addEventListener('start', this.onControls);
     this.controls.addEventListener('change', this.onControls);
+    // 'start' comes only from a hand: a drag, a pinch, the wheel. The show's
+    // own cuts move the camera without it.
+    this.controls.addEventListener('start', this.onHandOnCamera);
     this.applyPreset(CAMERA_PRESETS[0]);
 
     this.buildLights();
@@ -449,7 +487,10 @@ export class MatchDaySimulator {
     // Subsystems (Phases 2-7). Each is independently toggleable from the overlay.
     this.crowd = buildCrowd(this.map, this.store, this.noTifo);
     this.scene.add(this.crowd.object);
-    this.pitchside = buildPitchside(this.settings.shadows, { benches: baseGroundId(this.template.id) !== KINGDOM_ID });
+    this.pitchside = buildPitchside(this.settings.shadows, {
+      benches: baseGroundId(this.template.id) !== KINGDOM_ID,
+      redraw: () => this.requestRender(),
+    });
     this.scene.add(this.pitchside.object);
     this.banners = buildBanners(this.map, this.store, this.template);
     this.scene.add(this.banners.object);
@@ -1051,7 +1092,98 @@ export class MatchDaySimulator {
     this.facadeDistCache.set(deg, d);
     return d;
   }
+  /**
+   * Every camera, with the two on the tifo first when there is a tifo to look
+   * at (cameras.ts, tifoShots): Match Day opens on the first one, and the
+   * show cuts between them. A design that goes round the whole bowl has
+   * none, and opens on the gantry as it always did.
+   */
   shots(): SimShot[] {
+    return [...this.tifoShotList(), ...this.groundShots()];
+  }
+  /**
+   * Where the tifo is: the seats holding a card. Not "shown right now": the
+   * tifo hidden for a look at the ground is still where it is, and the list
+   * of cameras must not change under the menu that shows it.
+   */
+  tifoFootprint(): TifoFootprint | null {
+    const no = this.noTifo;
+    return tifoFootprint(this.map, (i) => this.store.cells[i] !== 0 && !(no !== null && no[i] === 1));
+  }
+  /** The tifo's cameras, for the design and picture shape they were made for (a cut asks for every camera). */
+  private tifoShotCache: { key: string; shots: SimShot[] } | null = null;
+  private tifoShotList(): SimShot[] {
+    const cells = this.store.cells;
+    let h = 0;
+    for (let i = 0; i < cells.length; i++) if (cells[i]) h = (Math.imul(h, 31) + i * 7 + cells[i]) | 0;
+    const key = `${h}|${(this.camera.aspect || 0).toFixed(3)}`;
+    if (this.tifoShotCache?.key === key) return this.tifoShotCache.shots;
+    const shots = this.makeTifoShots();
+    this.tifoShotCache = { key, shots };
+    return shots;
+  }
+  private makeTifoShots(): SimShot[] {
+    const fp = this.tifoFootprint();
+    if (!fp) return [];
+    // The Kingdom Arena is a hall: its own cameras stand 80 m out at the ends
+    // and just behind the side rows, under 24 m; further or higher is inside
+    // its walls or its roof, and the picture is black.
+    // Anywhere else: inside the building. Outside it the fans walking in are
+    // in the picture, and they keep a still Match Day drawing ten times a
+    // second (walkersInView); a ground with no stand across from the tifo put
+    // the camera out there.
+    const { a, b } = this.template.plan;
+    const out = this.outerReach();
+    const room = baseGroundId(this.template.id) === KINGDOM_ID
+      ? { back: Math.abs(fp.dir[0]) * 80 + Math.abs(fp.dir[1]) * (b + 9), y: 20 + Math.abs(fp.dir[1]) * 3.5 }
+      : { back: 0.9 / Math.hypot(fp.dir[0] / (a + out), fp.dir[1] / (b + out)), y: Infinity };
+    return tifoShots(fp, this.seatBounds(), this.camera.aspect || 16 / 9, room).map((sh) =>
+      this.clearOfSeats(sh.name === 'Your Tifo' ? this.clearLineToTifo(this.clearOfStructure(sh)) : this.clearOfStructure(sh)));
+  }
+  /**
+   * Lower the camera across the pitch until nothing the ground built hangs
+   * between it and the tifo. The Kingdom Arena's centre screen sits on the
+   * line from one end to the other, and the picture was the back of it.
+   * The last stretch before the tifo does not count: a screen or a fascia on
+   * the tifo's own stand is part of what it looks like.
+   */
+  private clearLineToTifo(sh: SimShot): SimShot {
+    const objs = this.structureObjects.filter((o) => o !== this.standsGroup);
+    if (!objs.length) return sh;
+    for (const o of objs) o.updateMatrixWorld(true);
+    const solid = (h: THREE.Intersection): boolean => {
+      const m = h.object as THREE.Mesh;
+      if (!m.isMesh || !m.visible) return false;
+      const mat = (Array.isArray(m.material) ? m.material[0] : m.material) as THREE.Material;
+      return mat.blending !== THREE.AdditiveBlending;
+    };
+    const tgt = new THREE.Vector3(...sh.target);
+    const pos = new THREE.Vector3(...sh.position);
+    for (let k = 0; k < 12; k++) {
+      const dir = tgt.clone().sub(pos);
+      const len = dir.length();
+      dir.normalize();
+      const ray = new THREE.Raycaster(pos.clone(), dir, 3, len * 0.85);
+      if (!ray.intersectObjects(objs, true).some(solid)) return { ...sh, position: [pos.x, pos.y, pos.z] };
+      if (pos.y <= 6) break;
+      pos.y = Math.max(6, pos.y - 2.5);
+    }
+    return sh;
+  }
+  /** The show's two cameras by name: on the tifo when there is one, the gantry and the ultras' end when not. */
+  private showShotNames(): { wide: string; close: string } {
+    return this.tifoFootprint() ? { wide: 'Your Tifo', close: 'Tifo Pitch Level' } : { wide: 'TV Broadcast', close: 'Ultra View' };
+  }
+  /** Film the next show with its cuts, or leave the camera where it is. */
+  setShowCamera(mode: ShowCamera): void {
+    this.showCamera = mode;
+  }
+  private readonly onHandOnCamera = (): void => {
+    if (!this.timeline || this.flyActive || this.handOnCamera || (this.tlCamera ?? this.showCamera) === 'hold') return;
+    this.handOnCamera = true;
+    this.onCameraTaken?.();
+  };
+  private groundShots(): SimShot[] {
     if (baseGroundId(this.template.id) === KINGDOM_ID) {
       // Under the roof: every camera stays inside the hall, below the trusses.
       const { b } = this.template.plan;
@@ -1300,6 +1432,25 @@ export class MatchDaySimulator {
     this.requestRender();
   }
 
+  /**
+   * The fan's own words on the touchline LED ring (Pro, free to try here):
+   * up to three messages in one board colour. None: the plain boards, as
+   * they always were. The overlay owns what is set; this only draws it.
+   */
+  setBoardText(messages: readonly string[], colour: string): void {
+    if (this.pitchside.setBoardText(messages, colour)) this.requestRender();
+  }
+
+  /** Hide the board messages for a free export, and show them again after. */
+  setBoardTextShown(on: boolean): void {
+    if (this.pitchside.setBoardTextShown(on)) this.requestRender();
+  }
+
+  /** What the LED boards carry (null: the plain ring). Read-only, for the panel and the tests. */
+  boardText(): { messages: string[]; colour: string; shown: boolean } | null {
+    return this.pitchside.boardText();
+  }
+
   // ---- banners (Phase 4) ----
   setBannersVisible(b: boolean): void {
     this.banners.setVisible(b);
@@ -1545,9 +1696,10 @@ export class MatchDaySimulator {
    *
    * Marked "tifomaker.org" in the corner, the same mark and size every
    * recording carries. The snapshot was the one export that went out bare,
-   * and it is the one most likely to be posted as it is.
+   * and it is the one most likely to be posted as it is. `mark: false`
+   * leaves it off (Pro: the overlay asks proGate before it passes that).
    */
-  snapshot(): string {
+  snapshot(opts: { mark?: boolean } = {}): string {
     this.premiumLod?.(this.camera, this.canvas.height);
     this.effects.render(this.renderer, this.scene, this.camera);
     const src = this.renderer.domElement;
@@ -1559,15 +1711,7 @@ export class MatchDaySimulator {
     const ctx = comp.getContext('2d');
     if (!ctx || !w || !h) return src.toDataURL('image/png');
     ctx.drawImage(src, 0, 0);
-    const fs = Math.max(14, Math.round(h * 0.026));
-    const txt = 'tifomaker.org';
-    ctx.font = `600 ${fs}px system-ui, -apple-system, sans-serif`;
-    const tw = ctx.measureText(txt).width;
-    const pad = Math.round(fs * 0.5);
-    ctx.fillStyle = 'rgba(0,0,0,0.4)';
-    ctx.fillRect(w - tw - pad * 3, h - fs - pad * 2, tw + pad * 2, fs + pad);
-    ctx.fillStyle = 'rgba(255,255,255,0.92)';
-    ctx.fillText(txt, w - tw - pad * 2, h - Math.round(pad * 1.5));
+    if (opts.mark !== false) drawSiteMark(ctx, w, h);
     return comp.toDataURL('image/png');
   }
 
@@ -1579,7 +1723,8 @@ export class MatchDaySimulator {
   /**
    * Record the auto-choreography reveal off the live canvas as a shareable WebM,
    * with the tifomaker.org watermark burned into every frame (so the clip is an
-   * ad for the site wherever it's posted). Returns null if the browser can't
+   * ad for the site wherever it's posted; `mark: false` leaves it off, which
+   * the overlay passes only after proGate). Returns null if the browser can't
    * record. `onTick` reports remaining whole seconds for a countdown UI.
    *
    * The clip is sized to a BYTE BUDGET, not to a bitrate someone once picked.
@@ -1592,7 +1737,7 @@ export class MatchDaySimulator {
    * Resolution is never what gives way. See the fps note below for what does.
    */
   async recordReveal(
-    opts: { seconds?: number; fps?: number; height?: number; maxBytes?: number; camera?: RecordCamera } = {},
+    opts: { seconds?: number; fps?: number; height?: number; maxBytes?: number; camera?: RecordCamera; mark?: boolean } = {},
     onTick?: (remaining: number) => void,
   ): Promise<RecordedClip | null> {
     if (this.recording) return null;
@@ -1619,18 +1764,11 @@ export class MatchDaySimulator {
     comp.width = w;
     comp.height = h;
     const ctx = comp.getContext('2d')!;
-    const fs = Math.max(14, Math.round(h * 0.026));
+    const marked = opts.mark !== false;
     let raf = 0;
     const drawFrame = (): void => {
       ctx.drawImage(this.canvas, 0, 0, w, h);
-      const txt = 'tifomaker.org';
-      ctx.font = `600 ${fs}px system-ui, -apple-system, sans-serif`;
-      const tw = ctx.measureText(txt).width;
-      const pad = Math.round(fs * 0.5);
-      ctx.fillStyle = 'rgba(0,0,0,0.4)';
-      ctx.fillRect(w - tw - pad * 3, h - fs - pad * 2, tw + pad * 2, fs + pad);
-      ctx.fillStyle = 'rgba(255,255,255,0.92)';
-      ctx.fillText(txt, w - tw - pad * 2, h - Math.round(pad * 1.5));
+      if (marked) drawSiteMark(ctx, w, h);
       raf = requestAnimationFrame(drawFrame);
     };
     drawFrame();
@@ -1684,9 +1822,10 @@ export class MatchDaySimulator {
     const flyingBefore = this.flyActive;
     const periodBefore = this.flyPeriod;
     if (opts.camera === 'flyover') this.startClipFlyover(seconds);
-    else if (opts.camera === 'show') this.setFly(false);
+    // 'hold' films from exactly where the camera is: no flyover, no cuts.
+    else if (opts.camera === 'show' || opts.camera === 'hold') this.setFly(false);
     recorder.start();
-    this.playAutoChoreo();
+    this.playAutoChoreo(opts.camera === 'hold' ? 'hold' : opts.camera === 'show' ? 'cuts' : undefined);
     for (let s = seconds; s > 0; s--) {
       onTick?.(s);
       await new Promise((r) => setTimeout(r, 1000));
@@ -2403,18 +2542,19 @@ export class MatchDaySimulator {
    */
   drumCallCues(start: number, cameras: boolean): Cue[] {
     const plan = this.drumCallPlan();
+    const cam = cameras ? this.showShotNames() : null;
     const cues: Cue[] = [{ kind: 'reveal', start, dur: plan.duration, mode: 'drum-call', drum: plan }];
     for (const h of plan.hits) cues.push({ kind: 'effect', start: start + h.t, effect: h.count === 3 ? 'drum-hit-3' : 'drum-hit' });
     plan.ups.forEach((up, k) => {
       cues.push({ kind: 'effect', start: start + up, effect: 'ooh' });
       cues.push({ kind: 'effect', start: start + plan.downs[k], effect: 'ooh-drop' });
-      if (cameras) {
+      if (cam) {
         const countIn = plan.hits.find((h) => h.cycle === k && h.phase === 'up')?.t ?? up;
-        cues.push({ kind: 'camera', start: start + Math.max(0, countIn - 0.3), shot: 'TV Broadcast' });
+        cues.push({ kind: 'camera', start: start + Math.max(0, countIn - 0.3), shot: cam.wide });
         // Only cut in if there is time to look before cutting back out for the drop.
         if (plan.hold >= 2.2) {
-          cues.push({ kind: 'camera', start: start + up + 1.1, shot: 'Ultra View' });
-          cues.push({ kind: 'camera', start: start + up + plan.hold - 0.3, shot: 'TV Broadcast' });
+          cues.push({ kind: 'camera', start: start + up + 1.1, shot: cam.close });
+          cues.push({ kind: 'camera', start: start + up + plan.hold - 0.3, shot: cam.wide });
         }
       }
     });
@@ -2528,6 +2668,9 @@ export class MatchDaySimulator {
     // so the auto show's opening whistle and drum never sounded, and any cue
     // added at the builder's default time of 0 did nothing at all.
     this.tlPrev = -1e-6;
+    // A new show: the cuts are back, whoever had the camera in the last one.
+    this.handOnCamera = false;
+    this.tlCamera = null;
     this.tlLoop = loop;
     this.lastCamName = null;
     this.bookDrumHits();
@@ -2565,11 +2708,16 @@ export class MatchDaySimulator {
     for (const b of this.bannerStore?.list() ?? []) this.bannerRigs?.setProgress(b.id, 1);
     this.requestRender();
   }
-  /** A ready-made show: broadcast view -> tifo wipes in -> smoke -> ultra view -> pyro -> confetti -> drone. */
+  /**
+   * A ready-made show: across at the tifo -> it wipes in -> smoke -> from the
+   * pitch -> pyro -> confetti -> drone. With no one place to see the tifo from
+   * (none painted, or the whole bowl), the gantry and the ultras' end.
+   */
   buildAutoChoreo(): Timeline {
     if (this.autoReveal === 'drum-call') return this.buildDrumCallChoreo();
+    const cam = this.showShotNames();
     const cues: Cue[] = [
-      { kind: 'camera', start: 0, shot: 'TV Broadcast' },
+      { kind: 'camera', start: 0, shot: cam.wide },
       // The referee's whistle opens it. Before this the show started on a drum
       // with no reason for the drum to have started.
       { kind: 'effect', start: 0, effect: 'whistle-long' },
@@ -2584,7 +2732,7 @@ export class MatchDaySimulator {
       // nothing.
       { kind: 'effect', start: 4.2, effect: 'roar' },
       { kind: 'effect', start: 5, effect: 'smoke-on' },
-      { kind: 'camera', start: 5.5, shot: 'Ultra View' },
+      { kind: 'camera', start: 5.5, shot: cam.close },
       { kind: 'effect', start: 7.2, effect: 'airhorn' },
       { kind: 'effect', start: 7.5, effect: 'pyro' },
       { kind: 'effect', start: 8.5, effect: 'confetti' },
@@ -2641,7 +2789,8 @@ export class MatchDaySimulator {
   isFlying(): boolean {
     return this.flyActive;
   }
-  playAutoChoreo(): void {
+  /** `camera` films this one show its own way, whatever the panel's choice is (a clip, or its preview). */
+  playAutoChoreo(camera?: ShowCamera): void {
     for (const a of this.assetStore.list()) if (a.type === 'surface') this.assetLayer.unfurl(a.id, 3000);
     // Take every banner back to nothing before the clock starts, or a show
     // replayed twice opens with the tifo already up.
@@ -2649,6 +2798,7 @@ export class MatchDaySimulator {
     const tl = this.buildAutoChoreo();
     if (this.autoReveal === 'drum-call' && this.timeline) this.stopTimeline(false, false);
     this.playTimeline(tl, false);
+    this.tlCamera = camera ?? null;
   }
   private fireEffects(list: EffectName[]): void {
     for (const e of list) {
@@ -2725,7 +2875,7 @@ export class MatchDaySimulator {
       this.bannerRigs?.setProgress(id, st.bannerProgress[id]);
     }
     this.fireEffects(st.firedEffects);
-    if (st.camera && st.camera !== this.lastCamName && !this.flyActive) {
+    if (st.camera && st.camera !== this.lastCamName && !this.flyActive && !this.handOnCamera && (this.tlCamera ?? this.showCamera) !== 'hold') {
       const shot = this.shots().find((s) => s.name === st.camera);
       if (shot) applyCameraShot(this.camera, this.controls, shot);
       this.lastCamName = st.camera;
@@ -3154,6 +3304,7 @@ export class MatchDaySimulator {
     this.listeners.abort();
     this.controls.removeEventListener('start', this.onControls);
     this.controls.removeEventListener('change', this.onControls);
+    this.controls.removeEventListener('start', this.onHandOnCamera);
     // The asset and banner stores belong to the editor and outlive this.
     for (const u of this.unsubs.splice(0)) u();
     this.resizeObserver.disconnect();

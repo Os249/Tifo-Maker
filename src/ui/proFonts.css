@@ -1,0 +1,23 @@
+/*
+ * Pro fonts (ui/proFonts.ts): the crown beside a font picker while a Pro
+ * voice is chosen. CSS decides when it shows, so it follows every way a
+ * picker's value changes (a click, a layer selected, an undo, a banner made
+ * active) without anything having to tell it.
+ */
+.pfont-chip { display: none; flex: none; align-items: center; }
+/* Only once the free voices are in it too: a sign's picker is filled when the Banner view first draws. */
+select:has(> option):has(> .pfont-group option:checked) + .pfont-chip { display: inline-flex; }
+/* On a phone the Text sheet's first row is the words, the picker and the
+   crown: the words give up the room, so the crown stays beside its picker. */
+body.m-shell .m-sheet #text-bar #text-input { flex: 1 1 150px; min-width: 0; }
+
+/*
+ * The Text tool's list shows each voice in its own face, like the free ones.
+ * The families are core/proVoices' (PRO_VOICES); a face still loading shows
+ * the fallback until it lands.
+ */
+#text-font .pfont-group option[value="block"] { font-family: "TifoProBlock", sans-serif; }
+#text-font .pfont-group option[value="stencil"] { font-family: "TifoProStencil", sans-serif; }
+#text-font .pfont-group option[value="rounded"] { font-family: "TifoProRounded", sans-serif; }
+#text-font .pfont-group option[value="classic"] { font-family: "TifoProClassic", sans-serif; }
+#text-font .pfont-group option[value="marker"] { font-family: "TifoProMarker", sans-serif; }
