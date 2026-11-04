@@ -5,10 +5,11 @@
  * Shown only where /api/pro says Pro is on for this account; with Pro off the
  * page is exactly what it was. Every number here is the server's.
  */
-import { fetchPro, type Allowance, type AllowanceKind, type ProState } from '../net/api';
+import { fetchMeOnce, fetchPro, type Allowance, type AllowanceKind, type ProState } from '../net/api';
 import { escapeHtml } from '../core/escape';
 import { CROWN_SVG, backWhen, endsText, kindName, proChipHtml, whenDay } from './pro';
 import { onLangChange, t, tv } from './i18n';
+import { supporterBadgeHtml } from './supporterBadge';
 
 const ORDER: AllowanceKind[] = ['std', 'polish', 'cutout', 'photo'];
 
@@ -59,8 +60,10 @@ export function mountProAccount(sections: HTMLElement): void {
     const meters = al
       ? `<h3 class="pro-ac-h">${escapeHtml(t('ac.pro.left'))}</h3><ul class="pro-meters">${ORDER.filter((k) => al[k]).map((k) => meter(al[k])).join('')}</ul>`
       : '';
+    // A supporter sees their name as the community shows it, badge and all.
     const foot = st.supporter
-      ? `<p class="ac-note pro-ac-foot">${escapeHtml(t('ac.pro.supporter'))}</p>`
+      ? `<p class="ac-note pro-ac-foot">${escapeHtml(t('qk.badgeYou'))}</p>` +
+        `<p class="pro-ac-name"><bdi dir="ltr">@${escapeHtml(username)}</bdi>${supporterBadgeHtml()}</p>`
       : !paid && g?.state !== 'offered'
         ? `<button type="button" class="ac-btn" data-act="what">${escapeHtml(t('pro.sheet.whatTitle'))}</button>`
         : '';
@@ -76,8 +79,11 @@ export function mountProAccount(sections: HTMLElement): void {
     sec.hidden = false;
   };
 
+  let username = '';
   const load = async (fresh = false): Promise<void> => {
-    state = await fetchPro(fresh).catch(() => null);
+    const [st, me] = await Promise.all([fetchPro(fresh).catch(() => null), fetchMeOnce().catch(() => null)]);
+    state = st;
+    username = me?.username ?? '';
     paint();
     // Arrived from the header chip (/account#pro): bring the section into view.
     if (!sec.hidden && location.hash === '#pro') sec.scrollIntoView({ block: 'start' });

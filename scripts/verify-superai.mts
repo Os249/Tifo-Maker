@@ -19,7 +19,7 @@ import { aiPeriod, secondsToNextPeriod } from '../server/src/repo';
 import { buildDirectorPrompt, buildSystemPrompt, buildCriticPrompt, clubHintLine, userMessage, criticUserMessage, buildCopywriterPrompt, copyLine, geminiText, whyNoJson, maxOutputTokens } from '../server/src/aiProvider';
 import { TIFO_FONTS } from '../src/core/text';
 import { envNum } from '../server/src/env';
-import { mosaicStyle, colourName, pollinationsSize, geminiAspect } from '../server/src/imageAssets';
+import { mosaicStyle, picturePrompt, pictureStyleFor, PROMPT_WORDS, pollinationsSize, geminiAspect } from '../server/src/imageAssets';
 import { regionRowsHint } from '../src/core/tifoSpec';
 import { ensureHeroImage, heroPrompt } from '../src/core/heroImage';
 import { TIFO_VOICES } from '../src/core/tifoVoices';
@@ -494,18 +494,27 @@ check('two stands are wider than one',
   regionAspectHint({ stand: 'all', tier: 'all', stands: ['north', 'west'] }) >= regionAspectHint({ stand: 'north', tier: 'all' }));
 check('a thin row band never asks for a sliver', regionAspectHint({ stand: 'north', tier: 'all', rows: [0.4, 0.42] }) <= 4);
 
-check('colour names are human', colourName('#c8102e').includes('red') && colourName('#ffffff') === 'white' && colourName('#000000') === 'black');
-check('gold reads as gold, not yellow', colourName('#d4af37').includes('gold'));
-check('a near-grey is not given a hue', colourName('#7a7d80') === 'grey');
-check('a bad hex degrades quietly', colourName('nonsense') === 'grey');
-
+// The picture prompt (images, 1 Nov 2026): the subject first and sixty words in all.
 const style = mosaicStyle({ aspect: 2.4, palette: ['#262a33', '#c8102e', '#ffffff', '#111111'] });
-check('style names the palette', style.includes('red') && style.includes('white'));
 check('style states the shape', /wide/i.test(style));
-check('style forbids text in the picture', /No text, letters, numbers/.test(style));
-check('style asks for flat tones, not gradients', /FLAT hard-edged tones/.test(style) && /No gradients/.test(style));
-check('style survives an empty request', mosaicStyle().length > 100 && !mosaicStyle().includes('undefined'));
+check('style forbids text in the picture', /No text/.test(style));
+check('style asks for flat tones, not gradients', /flat tones/.test(style) && /no gradients/.test(style));
+check('style survives an empty request', mosaicStyle().length > 60 && !mosaicStyle().includes('undefined'));
 check('a square brief still reads square', /square/i.test(mosaicStyle({ aspect: 1 })));
+const words = (s: string): number => s.split(/\s+/).filter(Boolean).length;
+const pp = picturePrompt('a heraldic eagle with spread wings, head in profile', { aspect: 2.4, palette: ['#262a33', '#c8102e', '#ffffff'] });
+check('the picture prompt starts with the subject', pp.startsWith('a heraldic eagle with spread wings, head in profile.'));
+check(`the picture prompt is at most ${PROMPT_WORDS} words`, words(pp) <= PROMPT_WORDS, String(words(pp)));
+const long = picturePrompt(Array.from({ length: 200 }, (_, i) => `word${i}`).join(' '), { aspect: 1 });
+check('a long subject is cut so the constraints survive', words(long) <= PROMPT_WORDS && long.startsWith('word0 word1') && /No text\.$/.test(long), String(words(long)));
+check('one enormous word is cut too', picturePrompt('x'.repeat(5000)).length < 1000);
+// The real stand's shape, from the stadium context the editor sends.
+const ctxText = '- north: 26,118 seats (30%), ~31 rows x ~266 cols, aspect 8.6 (wide), tier 0. Holds: x.\n- south: 9,000 seats (10%), ~43 rows x ~196 cols, aspect 4.6 (wide), tiers 0 and 1. Holds: y.';
+const nominal = { aspect: 1.9, rows: 52 };
+check('the real rows of the stand from the context', pictureStyleFor({ stand: 'north', tier: 'all' }, [], ctxText, nominal).rows === 31);
+check('…one tier of a two-tier stand gets its share', pictureStyleFor({ stand: 'south', tier: 1 }, [], ctxText, nominal).rows === 22);
+check('…the shape the editor fits it to (1,000 units across, 8 a row), kept to 4:1 at most', pictureStyleFor({ stand: 'north', tier: 'all' }, [], ctxText, nominal).aspect === 4);
+check('…and the nominal bowl without a context', JSON.stringify(pictureStyleFor({ stand: 'north', tier: 'all' }, ['#fff'], undefined, nominal)) === JSON.stringify({ aspect: 1.9, palette: ['#fff'], rows: 52 }));
 
 for (const a of [0.5, 1, 1.78, 2.4, 4]) {
   const { width, height } = pollinationsSize(a);
@@ -675,13 +684,15 @@ check('one tier is about half of that', regionRowsHint({ stand: 'north', tier: 0
 check('a row band is smaller still', regionRowsHint({ stand: 'north', tier: 'all', rows: [0.2, 0.5] }) < 25);
 check('rows never reach zero', regionRowsHint({ stand: 'north', tier: 'all', rows: [0.5, 0.5] }) >= 4);
 
-// ---- 32. the image prompt designs for that budget ----
+// ---- 32. the image prompt asks for a picture that survives the rows ----
 const st = mosaicStyle({ aspect: 2.4, palette: ['#262a33', '#ffd400', '#ffffff', '#0a0a0a'], rows: 52 });
-check('the image prompt states the row budget', st.includes('52 ROWS'));
-check('the image prompt demands a tight crop', /CROP IN CLOSE/.test(st) && /head-and-shoulders/.test(st));
-check('the image prompt rules out a full-length figure', /Never a full-length/.test(st));
-check('the image prompt still bans text and gradients', /No text/.test(st) && /No gradients/.test(st));
-check('the row budget has a sane default', mosaicStyle({}).includes('ROWS'));
+check('the image prompt asks for one subject as a bold silhouette', /One subject, a bold silhouette filling the frame/.test(st));
+check('the image prompt asks for strong light and dark and a plain backdrop', /strong light-dark separation/.test(st) && /Plain backdrop/.test(st));
+check('a 52-row stand is asked for 3 tones (the palette caps it)', /\b3 flat tones/.test(st));
+check('a 12-row stand is asked for 2 tones', /\b2 flat tones/.test(mosaicStyle({ aspect: 4, palette: ['#262a33', '#ffd400', '#ffffff', '#0a0a0a', '#c8102e'], rows: 12 })));
+check('a 24-row stand is asked for 3 tones', /\b3 flat tones/.test(mosaicStyle({ aspect: 4, palette: ['#262a33', '#ffd400', '#ffffff', '#0a0a0a', '#c8102e'], rows: 24 })));
+check('the image prompt asks for big simple shapes, not detail', /big simple shapes/i.test(st) && /no gradients or fine detail/.test(st));
+check('the image prompt still bans text and gradients', /No text/.test(st) && /no gradients/.test(st));
 
 // ---- 33. cutting the backdrop away ----
 // A generated picture is a rectangle: subject on a flat field. Baked whole it
@@ -741,8 +752,7 @@ for (const [name, p] of PROMPTS.slice(0, 2)) {
   check(`${name} prompt explains the backdrop is cut away`, /cut away/.test(p) && p.includes('"cutout"'));
 }
 const bgStyle = mosaicStyle({ aspect: 2.4, palette: ['#262a33', '#ffd400', '#0a0a0a'], rows: 52 });
-check('the image prompt demands a separable backdrop',
-  /ONE FLAT COLOUR/.test(bgStyle) && /CLEARLY DIFFERENT IN BRIGHTNESS/.test(bgStyle));
+check('the image prompt demands a separable backdrop', /Plain backdrop, much lighter or darker than the subject/.test(bgStyle));
 
 // ---- 34. an accidental letterbox is undone ----
 // "Fill a stand with 0, re-fill rows [0.07,0.93]" is a real device on ONE stand.
@@ -827,7 +837,7 @@ check('every failure branch offers a way forward',
 // as premium: a vector symbol is one flat colour and cannot shade, so the
 // picture is the whole reason the mode exists. The director is told this and
 // usually obeys — "usually" is not a guarantee, so this one is structural.
-const mkHero = (layers: unknown[], opts: Parameters<typeof ensureHeroImage>[1] = { brief: 'a big night' }) =>
+const mkHero = (layers: unknown[], opts: Parameters<typeof ensureHeroImage>[1] = {}) =>
   ensureHeroImage(validateSpec({ palette: ['#262a33', '#006c35', '#ffffff', '#d4af37'], layers }).spec!, opts);
 const imgOf = (r: ReturnType<typeof ensureHeroImage>) =>
   r.spec.layers.find((l) => l.kind === 'image') as Extract<SpecLayer, { kind: 'image' }> | undefined;
@@ -864,14 +874,14 @@ const added = mkHero(
     { kind: 'fill', region: 'all', colorIndex: 1 },
     { kind: 'text', region: 'north', text: 'CHAMPIONS', colorIndex: 2, fontId: 'poster', arcDeg: 0, heightFrac: 0.8, align: 'center' },
   ],
-  { brief: 'Al Hilal champions', crest: 'crescent' },
+  { crest: 'crescent' },
 );
 check('with no symbol, a picture is added anyway', added.via === 'added');
 check('the added picture avoids the stand carrying the words', imgOf(added)?.region.stand !== 'north');
 check('the added picture uses the club crest as its subject', /crescent moon/.test(imgOf(added)?.prompt ?? ''));
 
 // A symbol spanning the bowl is not a host — a picture needs one continuous stand.
-const bowlSym = mkHero([{ kind: 'symbol', region: 'all', symbol: 'shield', colorIndex: 2, scaleFrac: 0.9, align: 'center' }], { brief: 'x', crest: 'shield' });
+const bowlSym = mkHero([{ kind: 'symbol', region: 'all', symbol: 'shield', colorIndex: 2, scaleFrac: 0.9, align: 'center' }], { crest: 'shield' });
 check('a whole-bowl symbol is not promoted', bowlSym.via === 'added');
 check('the whole-bowl symbol is left in place', bowlSym.spec.layers.some((l) => l.kind === 'symbol'));
 
@@ -882,8 +892,8 @@ for (const [name, r] of [['promoted', promoted], ['added', added], ['bowl', bowl
   check(`a guaranteed hero survives refineSpec (${name})`, !!refineSpec(v.spec!));
   check(`exactly one picture (${name})`, r.spec.layers.filter((l) => l.kind === 'image').length === 1);
 }
-check('a prompt is produced even with nothing to go on', heroPrompt(undefined, { brief: '' }).length > 10);
-check('the brief is carried into the subject', /nihai|final/i.test(heroPrompt('eagle', { brief: 'the final' })));
+check('a prompt is produced even with nothing to go on', heroPrompt(undefined, {}).length > 10);
+check('the subject alone: no brief is pasted into the picture prompt', heroPrompt('eagle', {}) === 'a heraldic eagle with spread wings, head in profile' && !heroPrompt('eagle', {}).includes('for:'));
 
 console.log(`\n${failures === 0 ? 'ALL PASS' : failures + ' FAILED'}`);
 

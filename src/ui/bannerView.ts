@@ -381,11 +381,11 @@ export function mountBannerView(deps: BannerViewDeps): BannerView {
     if (msgIn && document.activeElement !== msgIn) msgIn.value = m?.text ?? '';
     if (msgFont) {
       if (!msgFont.querySelector(':scope > option')) {
-        // The free voices go first, ahead of the Pro group if ui/proFonts.ts
-        // added it before this panel was first drawn.
-        const pro = msgFont.firstElementChild;
+        // The free voices go first, ahead of the Pro groups if ui/proFonts.ts
+        // added them before this panel was first drawn.
+        const pro = [...msgFont.children];
         for (const ft of TIFO_FONTS) opt(msgFont, ft.id, ft.name);
-        if (pro) msgFont.append(pro);
+        msgFont.append(...pro);
       }
       msgFont.value = m?.fontId ?? 'condensed';
     }

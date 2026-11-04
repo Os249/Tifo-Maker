@@ -16,12 +16,15 @@
  * reason goes back to the caller, which drops the image layer so the rest of the
  * tifo still renders.
  *
- * The picture is quantized to the DESIGN'S palette client-side, which is why
- * every request now carries an ImageStyle: a generator told nothing returns a
- * square in colours of its own choosing, and the quantizer then has to force
- * that into the club's two colours — the single biggest source of mush in an AI
- * tifo. Given the region's shape and the palette up front, the same quantizer is
- * nearly lossless.
+ * What the picture is FOR travels with every request (ImageStyle): the shape
+ * of the stand it fills, from the real stand when the editor sent the
+ * stadium's context (pictureStyleFor), so a hero meant for a 13:1 stand is not
+ * drawn square and cropped to a band of cheek. The prompt is the subject first
+ * and sixty words in all (picturePrompt). The picture's colours no longer
+ * matter: the editor posterises it by brightness rank into the design's own
+ * tones (core/portraitStyles.ts posterizeByRank), so a generator that ignores
+ * the club's colours costs nothing, where nearest-colour quantizing used to
+ * turn it to mush.
  */
 
 import { envNum } from './env';
@@ -81,134 +84,88 @@ function cloudflareModel(): string {
 
 // ---- describing the target to a diffusion model ----
 
-function hexToRgb(hex: string): [number, number, number] | null {
-  const h = hex.trim().replace('#', '');
-  const full = h.length === 3 ? h.split('').map((c) => c + c).join('') : h;
-  if (!/^[0-9a-fA-F]{6}$/.test(full)) return null;
-  return [parseInt(full.slice(0, 2), 16), parseInt(full.slice(2, 4), 16), parseInt(full.slice(4, 6), 16)];
-}
-
-const HUES: Array<[number, string]> = [
-  [15, 'red'], [35, 'orange'], [50, 'gold'], [68, 'yellow'], [95, 'lime'],
-  [152, 'green'], [178, 'teal'], [198, 'cyan'], [212, 'azure'], [255, 'blue'],
-  [275, 'indigo'], [292, 'violet'], [320, 'magenta'], [342, 'pink'], [360, 'red'],
-];
-
-/**
- * A plain-English name for a hex colour.
- *
- * Image models follow "deep crimson" far more reliably than "#8B0000", and the
- * whole point is that the picture arrives already close to the palette it is
- * about to be quantized into — a portrait generated in the club's own two
- * colours survives quantization almost losslessly; one generated in arbitrary
- * skin tones does not.
- */
-export function colourName(hex: string): string {
-  const rgb = hexToRgb(hex);
-  if (!rgb) return 'grey';
-  const [r, g, b] = rgb.map((v) => v / 255);
-  const max = Math.max(r, g, b);
-  const min = Math.min(r, g, b);
-  const l = (max + min) / 2;
-  const d = max - min;
-  const sat = d === 0 ? 0 : d / (1 - Math.abs(2 * l - 1));
-  // A colour this dark or this light has no hue an image model can act on:
-  // #101820 is a navy on paper and black on a seat, and calling it "sky blue"
-  // sends the generator somewhere the design never goes.
-  if (l < 0.1) return 'black';
-  if (l > 0.93) return 'white';
-  if (sat < 0.12) {
-    if (l < 0.35) return 'charcoal';
-    if (l < 0.62) return 'grey';
-    if (l < 0.88) return 'light grey';
-    return 'white';
-  }
-  let h = 0;
-  if (max === r) h = ((g - b) / d) % 6;
-  else if (max === g) h = (b - r) / d + 2;
-  else h = (r - g) / d + 4;
-  h = (h * 60 + 360) % 360;
-  const base = HUES.find(([bound]) => h <= bound)?.[1] ?? 'red';
-  const shade = l < 0.22 ? 'very dark ' : l < 0.42 ? 'deep ' : l > 0.82 ? 'pale ' : l > 0.66 ? 'light ' : '';
-  // One modifier, never two — "near-black muted sky blue" is not a colour anyone
-  // can picture, and a prompt full of qualifiers reads as noise.
-  const muted = !shade && sat < 0.35 ? 'muted ' : '';
-  return `${shade}${muted}${base}`.trim();
-}
-
-/** Up to `max` colour names spread evenly across the paint palette (index 0 is empty). */
-function paletteNames(palette: string[], max: number): string[] {
-  const paint = palette.slice(1).filter((c) => typeof c === 'string' && c.trim());
-  if (paint.length === 0) return [];
-  const step = paint.length <= max ? 1 : paint.length / max;
-  const out: string[] = [];
-  for (let i = 0; i < paint.length && out.length < max; i += step) {
-    const n = colourName(paint[Math.floor(i)]);
-    if (!out.includes(n)) out.push(n);
-  }
-  return out;
-}
-
 function shapeWord(aspect: number): string {
-  if (aspect >= 2.6) return 'an extremely wide banner, far wider than it is tall';
-  if (aspect >= 1.7) return 'a wide landscape banner';
-  if (aspect >= 1.15) return 'a landscape panel';
-  if (aspect > 0.85) return 'a square panel';
-  return 'a tall upright panel';
+  if (aspect >= 2.6) return `Very wide ${aspect.toFixed(1)}:1 banner composition`;
+  if (aspect >= 1.7) return 'Wide landscape banner composition';
+  if (aspect >= 1.15) return 'Landscape composition';
+  if (aspect > 0.85) return 'Square composition';
+  return 'Tall upright composition';
 }
 
 /**
- * The style suffix appended to the designer's prompt.
- *
- * Every clause here is doing a job the old one-line constant was not:
- * - the SHAPE, so a stand-shaped hero is composed for a stand, not cropped from
- *   a square;
- * - the PALETTE by name, so quantization is nearly lossless instead of
- *   destructive;
- * - a tone COUNT and what to spend it on, because the design can now carry up to
- *   24 colours and flat-poster shading is what reads at seat scale;
- * - the negatives (gradients, blur, photographic detail, text) — each one is a
- *   thing that survives quantization badly or duplicates lettering the renderer
- *   draws far more sharply itself.
+ * The most words a picture prompt carries. FLUX schnell reads at most 256 T5
+ * tokens and weights the front: the old suffix alone was about 300 tokens, so
+ * its last clauses (no text, no gradients) were the part most likely to be
+ * dropped (docs/AI-QUALITY-REVIEW.md, F4). Sixty words, subject first.
+ */
+export const PROMPT_WORDS = 60;
+
+/** The first `n` words of a text, spaces tidied. */
+function firstWords(text: string, n: number): string {
+  return text.replace(/\s+/g, ' ').trim().split(' ').filter(Boolean).slice(0, n).join(' ');
+}
+
+/**
+ * The constraints that follow the subject, and only those that survive a
+ * generator: the crop, flat tones, a plain backdrop that can be cut away, the
+ * stand's shape, no text. No palette: the picture is posterised by brightness
+ * rank into the design's colours (core/portraitStyles.ts posterizeByRank), so
+ * its hues decide nothing and the words are better spent on the shapes. No
+ * row count either: a generator cannot act on it, and "big simple shapes" is
+ * what the row count meant.
  */
 export function mosaicStyle(style: ImageStyle = {}): string {
   const aspect = Math.max(0.5, Math.min(4, style.aspect ?? 1));
-  const palette = style.palette ?? [];
-  const names = paletteNames(palette, 8);
-  const tones = Math.max(3, Math.min(12, Math.max(palette.length - 1, 4)));
-  const colour = names.length
-    ? `Use this exact colour palette and nothing else: ${names.join(', ')}.`
-    : 'Use a small set of bold, saturated flat colours.';
-  // The number that governs everything. A hero on one stand is redrawn with
-  // about 52 ROWS of cards — a person per card — so the composition, not the
-  // rendering, decides whether it reads. A full-length figure spends 40 of
-  // those rows on a body and leaves a dozen for the face.
-  const rows = Math.max(8, Math.round(style.rows ?? 52));
+  // As many tones as the stand can carry: the browser cuts the picture into
+  // two below 16 rows, three below 30, four above (rankTonesFor in
+  // src/core/portraitStyles.ts), and the palette caps it.
+  const rows = style.rows ?? 52;
+  const byRows = rows < 16 ? 2 : rows < 30 ? 3 : 4;
+  const tones = Math.max(2, Math.min(byRows, (style.palette?.length ?? 5) - 1));
+  // What posterises well on cards: one subject as a bold silhouette, big
+  // simple shapes, strong light and dark, a plain backdrop.
   return [
-    '. Screen-printed poster art for a giant stadium card mosaic, where every',
-    'pixel becomes one coloured card held up by one person. The finished picture',
-    `is redrawn with only about ${rows} ROWS of cards from top to bottom, so it`,
-    'must survive being reduced to that: build it from a few big, flat, clearly',
-    'separated shapes and nothing that depends on fine detail.',
-    `Shape: ${shapeWord(aspect)}.`,
-    'CROP IN CLOSE. One subject, filling the frame from top edge to bottom edge',
-    'with almost no margin. For a person, that means a TIGHT head-and-shoulders',
-    'crop — the head alone spanning nearly the full height, cropped at the',
-    'shoulders. Never a full-length or waist-up figure: at this size the face',
-    'would be a handful of rows and read as a smudge.',
-    'Unmistakable silhouette. The background is ONE FLAT COLOUR, completely plain,',
-    'and CLEARLY DIFFERENT IN BRIGHTNESS from every edge of the subject — it gets',
-    'flood-filled away so the stadium design shows through, and a subject whose',
-    'outline matches its backdrop loses that edge with it. Dark subject on a light',
-    'field, or light subject on a dark one. No scenery, no floor, no shadow on the',
-    'background, nothing touching the subject.',
-    colour,
-    `Build the form from about ${tones} FLAT hard-edged tones — deep shadow,`,
-    'midtone, light, bright highlight — like a screen print with posterised',
-    'banding, each tone a big connected area rather than speckles. No gradients,',
-    'no soft focus, no blur, no photographic texture, no drop shadows, no fine',
-    'lines. No text, letters, numbers, logos, signatures or watermarks anywhere.',
-  ].join(' ');
+    'One subject, a bold silhouette filling the frame',
+    `Big simple shapes, strong light-dark separation, ${tones} flat tones, hard edges, no gradients or fine detail`,
+    'Plain backdrop, much lighter or darker than the subject',
+    shapeWord(aspect),
+    'No text',
+  ].join('. ') + '.';
+}
+
+/**
+ * The whole prompt a generator is sent: the subject first (cut to what the
+ * budget leaves), then the constraints, at most PROMPT_WORDS words.
+ */
+export function picturePrompt(subject: string, style: ImageStyle = {}): string {
+  const tail = mosaicStyle(style);
+  const room = Math.max(8, PROMPT_WORDS - tail.split(' ').length);
+  // A subject with no spaces (or one enormous word) is still cut: by characters.
+  const head = firstWords(subject, room).replace(/[.,;:\s]+$/, '').slice(0, 400);
+  return `${head}. ${tail}`;
+}
+
+/**
+ * What the picture has to fit, from the stand it goes on: the real stand's
+ * rows and seats when the editor sent the stadium's context (its
+ * describeStadiumContext lines, "- north: ... ~31 rows x ~266 cols"), the
+ * nominal bowl's otherwise. The aspect is the stand's as the editor fits the
+ * picture to it (1,000 units a stand across, 8 a row), so a cover fit keeps
+ * the subject rather than cropping its head off.
+ */
+export function pictureStyleFor(region: { stand: string; tier: number | 'all'; rows?: [number, number]; stands?: string[] }, palette: string[], stadium: string | undefined, nominal: { aspect: number; rows: number }): ImageStyle {
+  const stands = region.stands?.length ? region.stands : [region.stand];
+  const m = stadium && stands.length === 1 && region.stand !== 'all'
+    ? new RegExp(`^- ${region.stand}: [^\\n]*?~(\\d+) rows x ~(\\d+) cols[^\\n]*?(tiers? [^.]*)\\.`, 'm').exec(stadium)
+    : null;
+  if (!m) return { aspect: nominal.aspect, palette, rows: nominal.rows };
+  let rows = Number(m[1]);
+  const tiers = (m[3].match(/\d+/g) ?? []).length || 1;
+  // One tier of a stand of several: its share of the rows, about.
+  if (region.tier !== 'all' && tiers > 1) rows = Math.round(rows / tiers);
+  if (region.rows) rows = Math.round(rows * Math.max(0.05, Math.abs(region.rows[1] - region.rows[0])));
+  rows = Math.max(4, rows);
+  return { aspect: Math.max(0.5, Math.min(4, 1000 / (rows * 8))), palette, rows };
 }
 
 /** Pixel dimensions for the requested shape, at roughly 1.2MP. */
@@ -355,7 +312,7 @@ async function callPollinations(prompt: string, timeoutMs: number, style: ImageS
   const model = pictureModel('pollinations');
   // Was hard-coded 768x768 for every request, whatever shape it had to fill.
   const { width, height } = pollinationsSize(style.aspect ?? 1);
-  const url = `${base}${encodeURIComponent(prompt + mosaicStyle(style))}?width=${width}&height=${height}&model=${encodeURIComponent(model)}&nologo=true`;
+  const url = `${base}${encodeURIComponent(picturePrompt(prompt, style))}?width=${width}&height=${height}&model=${encodeURIComponent(model)}&nologo=true`;
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
@@ -393,7 +350,7 @@ async function callGemini(prompt: string, timeoutMs: number, style: ImageStyle, 
         method: 'POST',
         headers: { 'content-type': 'application/json', 'x-goog-api-key': key },
         body: JSON.stringify({
-          contents: [{ role: 'user', parts: [{ text: prompt + mosaicStyle(style) }] }],
+          contents: [{ role: 'user', parts: [{ text: picturePrompt(prompt, style) }] }],
           generationConfig,
         }),
         signal: ctrl.signal,
@@ -432,14 +389,14 @@ async function callGemini(prompt: string, timeoutMs: number, style: ImageStyle, 
  *
  * The model takes no width or height: it always draws a square. The prompt
  * still carries the region's shape (mosaicStyle), and the client fits the
- * picture to the stand. The prompt is capped at 2,048 characters; the
- * subject is kept whole and the style suffix is what gets shortened.
+ * picture to the stand. The prompt is the same sixty words as everywhere
+ * (picturePrompt), well inside the model's 2,048-character limit.
  */
 async function callCloudflare(prompt: string, timeoutMs: number, style: ImageStyle): Promise<Attempt> {
   const creds = cloudflareCreds();
   if (!creds) return { url: null, error: 'cloudflare needs AI_CLOUDFLARE_ACCOUNT_ID and AI_CLOUDFLARE_API_TOKEN' };
   const model = cloudflareModel();
-  const text = (prompt.slice(0, 600) + mosaicStyle(style)).slice(0, 2048);
+  const text = picturePrompt(prompt, style).slice(0, 2048);
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {

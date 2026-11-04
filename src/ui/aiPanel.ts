@@ -27,6 +27,7 @@ import { buildStadiumContext, describeStadiumContext } from '../core/stadiumCont
 import { critiqueDesign, repairSpec } from '../core/critique';
 import { designShuffle } from '../core/promptDesigner';
 import { describeActiveArea } from '../core/activeArea';
+import { kitForAi } from './kitActive';
 import { generateAiTifo, critiqueAiTifo, fetchAiQuota, unlockAi, aiUnlockToken, type AiError, type AiQuota, type AiChoice, type AiCause } from '../net/api';
 import { isSignedIn, fetchMe, resendVerification, fetchPro, type Allowance, type AllowanceKind, type ProPlan, type ProState } from '../net/api';
 import { track } from '../net/analytics';
@@ -300,13 +301,21 @@ export function mountAiPanel(deps: AiPanelDeps): AiPanelHandle {
     if (al) return allowanceLine(al, proPlan);
     return q.remaining > 0 ? tv('ai.q.left', { n: q.remaining, limit: q.limit }) : tv('ai.q.reset', { mins: resetMins(q) });
   };
+  /**
+   * Whether Pro gives more of an allowance than Free (server/src/proPlan
+   * AI_ON_PRO): only then does running out sell Pro. Unknown counts as no.
+   */
+  const proGivesMore = (kind: AllowanceKind): boolean => {
+    const lim = proState?.offer?.limits;
+    return !!lim && JSON.stringify(lim.pro[kind]) !== JSON.stringify(lim.free[kind]);
+  };
   const paintPro = (): void => {
     const pol = allowances.polish;
     if (polishBtn) {
       polishBtn.querySelector('.pro-chip')?.remove();
       if (proLive && pol) {
         polishBtn.title = allowanceLine(pol, proPlan);
-        if (pol.remaining <= 0 && (!proPlan || proPlan === 'free')) polishBtn.insertAdjacentHTML('beforeend', ' ' + proChipHtml());
+        if (pol.remaining <= 0 && (!proPlan || proPlan === 'free') && proGivesMore('polish')) polishBtn.insertAdjacentHTML('beforeend', ' ' + proChipHtml());
       }
     }
   };
@@ -351,7 +360,10 @@ export function mountAiPanel(deps: AiPanelDeps): AiPanelHandle {
     paintPro();
     const al = allowanceOf(q) ?? allowances[kind];
     if (!al) return;
-    const free = !q.plan || q.plan === 'free';
+    // A pass at its ceiling, or an allowance Pro gives no more of: when it
+    // comes back and the free alternative, and no selling.
+    const onFree = !q.plan || q.plan === 'free';
+    const free = onFree && proGivesMore(kind);
     track('pro_limit');
     const title = limitTitle(al);
     const back = limitBack(al);
@@ -359,7 +371,7 @@ export function mountAiPanel(deps: AiPanelDeps): AiPanelHandle {
       showCard({
         tone: 'warn',
         title,
-        body: `${back} ${t('pro.limit.ceiling')}`,
+        body: `${back} ${t(onFree ? 'qx.limit.same' : 'pro.limit.ceiling')}`,
         actions: alternatives.map((a, i) => ({ ...a, primary: i === 0 })),
       });
       stateEl?.scrollIntoView({ block: 'nearest' });
@@ -589,6 +601,8 @@ export function mountAiPanel(deps: AiPanelDeps): AiPanelHandle {
           halftone: layer.halftone,
           cutout: layer.cutout !== false,
           alphaThreshold: 128,
+          // [images] Posterised by brightness rank into the design's tones, cleaned at seat scale (core/portraitStyles.ts).
+          tones: 'rank',
         });
       }
       objects.select(null);
@@ -660,6 +674,8 @@ export function mountAiPanel(deps: AiPanelDeps): AiPanelHandle {
       const res = await generateAiTifo(brief, {
         stadium,
         ...(opts.engine ? { engine: opts.engine } : {}),
+        // Club kit (Pro): the kit in use in this project goes with the brief (ui/kitActive.ts).
+        ...kitForAi(),
         signal: inflight.signal,
       });
       if ('needsChoice' in res) {

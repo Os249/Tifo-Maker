@@ -1,0 +1,19 @@
+/*
+ * The supporter badge (ui/supporterBadge.ts): the Pro chip's gold, a step
+ * larger, beside a name. Roles only (--pro-* from tokens through
+ * colorScheme.css and floodlight.css), so it reads on light and dark pages.
+ */
+.supporter-badge {
+  display: inline-flex; align-items: center; gap: var(--sp-1);
+  margin-inline-start: var(--sp-2); padding: 1px var(--sp-2) 1px 6px; border-radius: var(--r-pill);
+  font-size: var(--fs-2xs); font-weight: 700; line-height: 1.55; letter-spacing: 0.01em; white-space: nowrap;
+  color: var(--pro-ink); background: var(--pro-tint); border: 1px solid var(--pro-line);
+  vertical-align: 0.15em; font-family: inherit;
+}
+[dir="rtl"] .supporter-badge { letter-spacing: 0; padding: 1px 6px 1px var(--sp-2); }
+/* The crown's own rules (pro.css) are not on every page that shows the badge: its fill is set here. */
+.supporter-badge .pro-crown { flex: none; width: 1.2em; height: 1.2em; color: var(--pro-crown); fill: currentColor; }
+/* In a heading the badge stays badge-sized, whatever the heading's size. */
+h1 .supporter-badge, h2 .supporter-badge { font-size: var(--fs-xs); letter-spacing: 0; vertical-align: 0.3em; }
+.supporter-badge.compact { padding: 2px; margin-inline-start: var(--sp-1); background: transparent; border-color: transparent; vertical-align: -0.1em; }
+.supporter-badge.compact .pro-crown { width: 1.05em; height: 1.05em; }

@@ -1,0 +1,341 @@
+<!doctype html>
+<!-- Dev-only harness for scripts/portrait-shots.mts. Runs the REAL portrait
+     pipeline (ui/portraitPrep.ts: the face, the subject, the crop) and the
+     REAL drawing (core/objects.ts ensureGrid, core/layers.ts stampObject) on a
+     real stand's seat map, and draws the seats one card each, as the far side
+     of the ground sees them. Nothing here decides anything: it only shows. -->
+<html lang="en"><head><meta charset="UTF-8"/><title>portrait shots</title></head>
+<body style="margin:0;background:#05070c;color:#ccc;font:12px sans-serif"><div id="out">loading…</div>
+<script type="module">
+  import { generateSeatMap, EDITOR_UNITS } from '/src/core/seatmap.ts';
+  import { templateById } from '/src/core/stadiumCatalog.ts';
+  import { regionRect, regionPredicate } from '/src/core/specCompiler.ts';
+  import { seatShapeAt, cropKindFor } from '/src/core/portraitPipeline.ts';
+  import { preparePortrait } from '/src/ui/portraitPrep.ts';
+  import { ensureGrid, gridSize } from '/src/core/objects.ts';
+  import { rasterize } from '/src/core/importImage.ts';
+  import { alphaBounds, alphaOf, decontaminate, refineMatte } from '/src/core/matte.ts';
+  import { stampObject } from '/src/core/layers.ts';
+  import { findFragileSeats } from '/src/core/analysis.ts';
+  import { cleanStampAtSeats } from '/src/core/seatClean.ts';
+  import { DesignStore } from '/src/core/design.ts';
+  import { MatchDaySimulator } from '/src/render/simulator/index.ts';
+  import { AssetStore } from '/src/core/sceneAssets.ts';
+  import { BannerStore } from '/src/core/banner.ts';
+  import { installSlotRules } from '/src/render/bannerShape.ts';
+  import { bestFaceBanner, faceBannerDoc, faceShareOf, printPortrait } from '/src/ui/faceBanner.ts';
+  import { tvShot } from '/src/render/simulator/tvShot.ts';
+  import { spanFrameCache } from '/src/render/simulator/standFrame.ts';
+  import { STAND_ORDER } from '/src/core/tifoSpec.ts';
+
+  const maps = new Map();
+  const stands = new Map();
+  const preps = new Map();
+  const bitmaps = new Map();
+
+  function mapOf(ground) {
+    if (!maps.has(ground)) maps.set(ground, generateSeatMap(templateById(ground)));
+    return maps.get(ground);
+  }
+
+  /** A stand: its seat map, its region's seats, its box and its seats' shape. */
+  function standOf(s) {
+    const key = `${s.ground}|${s.stand}|${s.tier}`;
+    if (stands.has(key)) return stands.get(key);
+    const map = mapOf(s.ground);
+    const region = { stand: s.stand, tier: s.tier };
+    const accept = regionPredicate(region, map);
+    const rect = regionRect(region, map);
+    const shape = seatShapeAt(map, rect, accept, EDITOR_UNITS.width);
+    const st = { map, accept, rect, shape };
+    stands.set(key, st);
+    return st;
+  }
+
+  async function bitmap(url) {
+    if (!bitmaps.has(url)) {
+      const r = await fetch(url);
+      bitmaps.set(url, await createImageBitmap(await r.blob()));
+    }
+    return bitmaps.get(url);
+  }
+
+  const hex = (h) => { const v = parseInt(h.slice(1), 16); return [(v >> 16) & 255, (v >> 8) & 255, v & 255]; };
+
+  /** The stand's seats under and around an object, one card each, as a PNG. */
+  function drawSeats(st, palette, cells, o, cw) {
+    const { map, accept, shape } = st;
+    const margin = Math.max(o.width * 0.12, shape.pitch * 6);
+    const x0 = o.cx - o.width / 2 - margin;
+    const x1 = o.cx + o.width / 2 + margin;
+    const rowsY = new Map();
+    const seats = [];
+    for (let i = 0; i < map.count; i++) {
+      if (!accept(i)) continue;
+      const x = map.xy[i * 2];
+      if (x < x0 || x >= x1) continue;
+      const k = map.tierOf[i] * 4096 + map.rowOf[i];
+      rowsY.set(k, map.xy[i * 2 + 1]);
+      seats.push(i);
+    }
+    const order = [...rowsY.entries()].sort((a, b) => a[1] - b[1]).map((e) => e[0]);
+    const rowIdx = new Map(order.map((k, j) => [k, j]));
+    const ch = Math.max(2, Math.round(cw / shape.cell));
+    const W = Math.ceil(((x1 - x0) / shape.pitch) * cw) + cw;
+    const H = order.length * ch;
+    const c = document.createElement('canvas');
+    c.width = W; c.height = H;
+    const ctx = c.getContext('2d');
+    ctx.fillStyle = '#0b0d12';
+    ctx.fillRect(0, 0, W, H);
+    const rgb = palette.map((p) => `rgb(${hex(p).join(',')})`);
+    const gap = cw >= 4 ? 1 : 0;
+    for (const i of seats) {
+      const r = rowIdx.get(map.tierOf[i] * 4096 + map.rowOf[i]);
+      const x = Math.round(((map.xy[i * 2] - x0) / shape.pitch) * cw);
+      ctx.fillStyle = rgb[cells[i]] ?? '#000';
+      ctx.fillRect(x, r * ch, cw - gap, ch - gap);
+    }
+    return c.toDataURL('image/png');
+  }
+
+  /**
+   * One photo on one stand in every style asked for (and '' = the free
+   * Original, the photo placed at the stand's height as the import bar would).
+   */
+  window.__render = async (job) => {
+    const st = standOf(job.stand);
+    const { map, accept, rect, shape } = st;
+    const palette = job.palette;
+    const src = await bitmap(job.photo);
+    const prepKey = `${job.photo}|${job.cut || ''}|${job.stand.ground}|${job.stand.stand}|${job.stand.tier}`;
+    let prep = preps.get(prepKey);
+    if (!prep && job.styles.some((s) => s)) {
+      const t0 = performance.now();
+      prep = await preparePortrait(job.cut ? await bitmap(job.cut) : src, shape);
+      prep.ms = Math.round(performance.now() - t0);
+      preps.set(prepKey, prep);
+    }
+    const base = new Uint8Array(map.count);
+    for (let i = 0; i < map.count; i++) if (accept(i)) base[i] = job.base;
+    const tiles = [];
+    for (const style of job.styles) {
+      let o;
+      if (!style) {
+        // The free path: the whole photo at the stand's height, nearest colour, as placed today.
+        const h = Math.min(rect.height, shape.rows * 8);
+        const w = Math.min(rect.width, (h * src.width) / src.height);
+        o = { id: 'i1', kind: 'image', cx: rect.cx, cy: rect.cy, width: w, height: h, rotation: 0, colorIndex: 0, tier: null, bitmap: src, name: 'p', dither: false, alphaThreshold: 128 };
+      } else {
+        o = {
+          id: 'i1', kind: 'image', cx: rect.cx, cy: rect.cy, width: prep.width, height: prep.height, rotation: 0, colorIndex: 0, tier: null,
+          bitmap: prep.bitmap, name: 'p', dither: false, alphaThreshold: 128, style, face: prep.face ?? undefined,
+        };
+        const sh = seatShapeAt(map, { cx: o.cx, cy: o.cy, width: o.width, height: o.height }, accept, EDITOR_UNITS.width);
+        // As the composer measures it: the stand's field is the card beneath.
+        o.seat = { pitch: Math.round(sh.pitch * 100) / 100, cell: Math.round(sh.cell * 100) / 100, under: job.base };
+      }
+      ensureGrid(o, palette);
+      const raw = stampObject(map, o, o.grid, null, EDITOR_UNITS.width, accept, null);
+      // As the composer stamps it: a styled picture keeps the seat rule on the seats.
+      const stamp = style ? cleanStampAtSeats(map, raw.seats, raw.vals) : raw;
+      const cells = base.slice();
+      for (let j = 0; j < stamp.seats.length; j++) cells[stamp.seats[j]] = stamp.vals[j];
+      const fragile = new Set(findFragileSeats(cells, map));
+      let frag = 0;
+      for (const s of stamp.seats) if (fragile.has(s)) frag++;
+      tiles.push({ style, png: drawSeats(st, palette, cells, o, job.cw ?? 4), seats: stamp.seats.length, fragile: frag, grid: `${o.grid.cols}x${o.grid.rows}` });
+    }
+    // The exact pixels a style is drawn from (ensureGrid's rasterize), for the Node-side tuning loop.
+    let grid = null;
+    if (prep) {
+      const o = { kind: 'image', width: prep.width, height: prep.height, style: 'stencil' };
+      const sh = seatShapeAt(map, { cx: rect.cx, cy: rect.cy, width: prep.width, height: prep.height }, accept, EDITOR_UNITS.width);
+      o.seat = { pitch: Math.round(sh.pitch * 100) / 100, cell: Math.round(sh.cell * 100) / 100 };
+      const { cols, rows } = gridSize(o);
+      const px = rasterize(prep.bitmap, cols, rows);
+      let bin = '';
+      for (let i = 0; i < px.length; i += 8192) bin += String.fromCharCode(...px.subarray(i, i + 8192));
+      grid = { cols, rows, cell: o.seat.cell, face: prep.face, px: btoa(bin), under: job.base };
+    }
+    let prepPng = null;
+    if (prep && job.withPrep) {
+      const c = document.createElement('canvas');
+      c.width = prep.bitmap.width; c.height = prep.bitmap.height;
+      const x = c.getContext('2d');
+      x.fillStyle = '#7a7f8a'; x.fillRect(0, 0, c.width, c.height);
+      x.drawImage(prep.bitmap, 0, 0);
+      prepPng = c.toDataURL('image/png');
+    }
+    return {
+      shape, kind: cropKindFor(shape.rows), tiles, prepPng, grid,
+      prep: prep ? { kind: prep.kind, subject: prep.subject, face: !!prep.face, seats: prep.seats, rows: prep.rows, ms: prep.ms } : null,
+    };
+  };
+
+  /** A picture on a checkerboard (to see its matte), at most `edge` tall. */
+  function onChecker(src, edge, bg) {
+    const k = edge / src.height;
+    const c = document.createElement('canvas');
+    c.width = Math.max(1, Math.round(src.width * k)); c.height = edge;
+    const g = c.getContext('2d');
+    if (bg) { g.fillStyle = bg; g.fillRect(0, 0, c.width, c.height); }
+    else for (let y = 0; y < c.height; y += 8) for (let x = 0; x < c.width; x += 8) { g.fillStyle = ((x + y) / 8) % 2 ? '#c9ccd2' : '#f2f3f5'; g.fillRect(x, y, 8, 8); }
+    g.imageSmoothingQuality = 'high';
+    g.drawImage(src, 0, 0, c.width, c.height);
+    return c.toDataURL('image/png');
+  }
+
+  /** The smart cut-out's clean-up, exactly as ui/smartCutout.ts cleanCutout does it. */
+  async function cleaned(bmp) {
+    const c = document.createElement('canvas');
+    c.width = bmp.width; c.height = bmp.height;
+    const ctx = c.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(bmp, 0, 0);
+    const data = ctx.getImageData(0, 0, c.width, c.height);
+    const a = alphaOf(data.data, c.width, c.height);
+    const rep = refineMatte(a, c.width, c.height);
+    decontaminate(data.data, a, c.width, c.height);
+    ctx.putImageData(data, 0, 0);
+    const b = alphaBounds(a, c.width, c.height);
+    if (!b) return { bmp: await createImageBitmap(c), rep };
+    const m = Math.round(Math.max(b.x1 - b.x0, b.y1 - b.y0) * 0.02);
+    const x0 = Math.max(0, b.x0 - m), y0 = Math.max(0, b.y0 - m);
+    return { bmp: await createImageBitmap(c, x0, y0, Math.min(c.width, b.x1 + m) - x0, Math.min(c.height, b.y1 + m) - y0), rep };
+  }
+
+  /** A picture layer on a stand, as placed, drawn seat by seat. `o` overrides the defaults. */
+  function onStand(st, palette, base, bmp, extra, cw) {
+    const { map, accept, rect, shape } = st;
+    const h = Math.min(rect.height, shape.rows * 8);
+    const o = { id: 'i1', kind: 'image', cx: rect.cx, cy: rect.cy, width: Math.min(rect.width, (h * bmp.width) / bmp.height), height: h, rotation: 0, colorIndex: 0, tier: null, bitmap: bmp, name: 'p', dither: false, alphaThreshold: 128, ...extra };
+    if (o.tones === 'rank' || o.style) {
+      const sh = seatShapeAt(map, { cx: o.cx, cy: o.cy, width: o.width, height: o.height }, accept, EDITOR_UNITS.width);
+      o.seat = { pitch: Math.round(sh.pitch * 100) / 100, cell: Math.round(sh.cell * 100) / 100, under: base };
+    }
+    ensureGrid(o, palette);
+    const raw = stampObject(map, o, o.grid, null, EDITOR_UNITS.width, accept, null);
+    const stamp = o.seat ? cleanStampAtSeats(map, raw.seats, raw.vals) : raw;
+    const cells = new Uint8Array(map.count);
+    for (let i = 0; i < map.count; i++) if (accept(i)) cells[i] = base;
+    for (let j = 0; j < stamp.seats.length; j++) cells[stamp.seats[j]] = stamp.vals[j];
+    const fragile = new Set(findFragileSeats(cells, map));
+    let frag = 0;
+    for (const s of stamp.seats) if (fragile.has(s)) frag++;
+    return { png: drawSeats(st, palette, cells, o, cw), fragile: frag, seats: stamp.seats.length };
+  }
+
+  /** Smart cut-out: the model's answer as it came, and cleaned; on a checkerboard, on a banner, on a stand. */
+  window.__cutout = async (job) => {
+    const st = standOf(job.stand);
+    const photo = await bitmap(job.photo);
+    const rawCut = await bitmap(job.cut);
+    const { bmp: clean, rep } = await cleaned(rawCut);
+    return {
+      photo: onChecker(photo, 160, '#222'),
+      raw: onChecker(rawCut, 160),
+      clean: onChecker(clean, 160),
+      banner: onChecker(clean, 160, job.banner),
+      standRaw: onStand(st, job.palette, job.base, rawCut, {}, 3),
+      standClean: onStand(st, job.palette, job.base, clean, {}, 3),
+      rep,
+    };
+  };
+
+  /**
+   * An AI picture before and after: as AI designs drew it until now (the flood
+   * fill and nearest colour), and now (rank posterised, cleaned at seat
+   * scale; with the server's real cut-out for Pro).
+   */
+  window.__ai = async (job) => {
+    const st = standOf(job.stand);
+    const pic = await bitmap(job.photo);
+    const before = onStand(st, job.palette, job.base, pic, { cutout: true }, 3);
+    const after = onStand(st, job.palette, job.base, pic, { cutout: true, tones: 'rank' }, 3);
+    let pro = null;
+    // Pro: the server's cut-out, as aiRoutes hands it to the editor (no clean-up of its own: the seats do it).
+    if (job.cut) pro = onStand(st, job.palette, job.base, await bitmap(job.cut), { cutout: true, tones: 'rank' }, 3);
+    return { pic: onChecker(pic, 120, '#222'), before, after, pro };
+  };
+
+  /**
+   * The same stand in the 3D Match Day view, seen from across the pitch: the
+   * styles as the far side of the ground would see them on the day.
+   */
+  window.__three = async (job) => {
+    const st = standOf(job.stand);
+    const { map, accept, rect, shape } = st;
+    const src = await bitmap(job.photo);
+    // job.banner: the face on a printed banner over the stand (the import
+    // bar's "Put the face on a banner"); the cards keep the club colour.
+    let bannerStore;
+    let plan = null;
+    const standIdx = STAND_ORDER.indexOf(job.stand.stand);
+    if (job.banner) {
+      bannerStore = new BannerStore();
+      installSlotRules(bannerStore, map);
+      const srcB = job.cut ? await bitmap(job.cut) : src;
+      const B = { rows: 64, seats: 4096, pitch: EDITOR_UNITS.colPx, cell: 1 };
+      const ps = await preparePortrait(srcB, B);
+      const pf = await preparePortrait(srcB, { ...B, rows: 22 });
+      const prints = {
+        shoulders: { canvas: printPortrait(ps, job.style, job.palette, job.base), face: faceShareOf(ps.face) },
+        face: { canvas: printPortrait(pf, job.style, job.palette, job.base), face: faceShareOf(pf.face) },
+      };
+      const bo = { name: 'Face', stand: standIdx, tier: job.stand.tier === 'all' ? -1 : job.stand.tier, bg: job.palette[job.base] };
+      if (job.banner === 'best') {
+        const lum = (h) => { const v = parseInt(h.slice(1), 16); return 0.2126 * (v >> 16) + 0.7152 * ((v >> 8) & 255) + 0.0722 * (v & 255); };
+        const wordsColor = job.palette.slice(1).sort((a, b) => Math.abs(lum(b) - lum(bo.bg)) - Math.abs(lum(a) - lum(bo.bg)))[0];
+        const pl = await bestFaceBanner(prints, map, { ...bo, words: job.words || undefined, wordsColor });
+        plan = { kind: pl.layout.kind, words: pl.layout.words, blocks: pl.layout.blockSpan, aspect: pl.layout.aspect, crop: pl.crop, share: Math.round(pl.share * 1000) / 1000, w: Math.round(pl.widthM), h: Math.round(pl.heightM) };
+        bannerStore.add(pl.doc);
+      } else {
+        bannerStore.add(faceBannerDoc(prints.shoulders.canvas, { ...bo, kind: job.banner === 'hanging' ? 'hanging' : 'stand', tier: job.banner === 'hanging' ? -1 : bo.tier }));
+      }
+    }
+    const prep = await preparePortrait(job.cut ? await bitmap(job.cut) : src, shape);
+    const o = { id: 'i1', kind: 'image', cx: rect.cx, cy: rect.cy, width: prep.width, height: prep.height, rotation: 0, colorIndex: 0, tier: null, bitmap: prep.bitmap, name: 'p', dither: false, alphaThreshold: 128, style: job.style, face: prep.face ?? undefined };
+    const sh = seatShapeAt(map, { cx: o.cx, cy: o.cy, width: o.width, height: o.height }, accept, EDITOR_UNITS.width);
+    o.seat = { pitch: Math.round(sh.pitch * 100) / 100, cell: Math.round(sh.cell * 100) / 100, under: job.base };
+    ensureGrid(o, job.palette);
+    const raw = stampObject(map, o, o.grid, null, EDITOR_UNITS.width, accept, null);
+    const stamp = cleanStampAtSeats(map, raw.seats, raw.vals);
+    const cells = new Uint8Array(map.count);
+    for (let i = 0; i < map.count; i++) cells[i] = accept(i) ? job.base : (i % 2) + 1;
+    if (!job.banner) for (let j = 0; j < stamp.seats.length; j++) cells[stamp.seats[j]] = stamp.vals[j];
+    const HOST = document.createElement('div');
+    HOST.style.cssText = 'position:fixed;left:0;top:0;width:1280px;height:720px;';
+    document.body.appendChild(HOST);
+    const template = templateById(job.stand.ground);
+    const store = new DesignStore(map, job.palette);
+    store.transform((i) => cells[i]);
+    const sim = new MatchDaySimulator(HOST, map, store, template, new AssetStore(), { quality: 'high', bannerStore });
+    sim.setTimeOfDay('day');
+    sim.setFloodlights(false);
+    let x = 0, y = 0, z = 0, n = 0;
+    for (let i = 0; i < map.count; i++) {
+      if (!accept(i)) continue;
+      x += map.pos3[i * 3]; y += map.pos3[i * 3 + 1]; z += map.pos3[i * 3 + 2]; n++;
+    }
+    x /= n; y /= n; z /= n;
+    const d = Math.hypot(x, z) || 1;
+    const tvs = job.tv ? tvShot(spanFrameCache(map), standIdx) : null;
+    // applyPreset keeps the lens, so the lens is set here too (no tween: a slow first frame left it half way).
+    if (tvs) {
+      sim.applyPreset({ name: 'tv', position: tvs.position, target: tvs.target, fov: tvs.fov });
+      sim.camera.fov = tvs.fov;
+      sim.camera.updateProjectionMatrix();
+    }
+    else sim.applyPreset({ name: 'shot', position: [(-x / d) * d * 0.55, y * 0.6 + 6, (-z / d) * d * 0.55], target: [x, y, z], fov: job.fov ?? 26 });
+    sim.start();
+    await new Promise((r) => setTimeout(r, 1500));
+    sim.stop();
+    const png = sim.snapshot();
+    sim.dispose();
+    HOST.remove();
+    return { png, plan, fov: tvs?.fov ?? null };
+  };
+  window.__ready = true;
+  document.getElementById('out').textContent = 'ready';
+</script>
+</body></html>

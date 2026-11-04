@@ -32,6 +32,7 @@ import { tagShareUrl, type ShareSource } from '../core/utm';
 import { track } from '../net/analytics';
 import { recordShare } from '../net/api';
 import { exportGate } from './proGate';
+import { currentCredit, drawCreditLine, type Credit } from './creditLine';
 
 export interface PostDeps {
   /** Show the Stadium view and hand back its canvas, freshly rendered. */
@@ -73,6 +74,33 @@ export function setPostPro(pro: PostPro | null): void {
   postPro = pro;
 }
 
+/**
+ * The club kit in use in this project, as the picture wears it (ui/clubKit.ts
+ * sets it): its colours along the band, its first logo at the band's end, and
+ * its font for the title when that font may go out (a Pro voice only while
+ * Pro runs). Unset, the band is the site's.
+ */
+export interface PostKit {
+  name: string;
+  colours: string[];
+  /** CSS font family for the title, or '' for the band's own. */
+  fontCss: string;
+  logo: ImageBitmap | null;
+}
+let postKit: (() => PostKit | null) | null = null;
+export function setPostKit(kit: (() => PostKit | null) | null): void {
+  postKit = kit;
+}
+
+/** The credit line's field for the sheet (ui/proCredit.ts sets it); the credit itself is ui/creditLine.ts's currentCredit(). */
+export interface PostCredit {
+  field(changed: () => void): HTMLElement | null;
+}
+let postCredit: PostCredit | null = null;
+export function setPostCredit(c: PostCredit | null): void {
+  postCredit = c;
+}
+
 export const CARD_W = 1080;
 export const CARD_H = 1350;
 const PHOTO_H = 1080;
@@ -105,8 +133,12 @@ export function fitText(ctx: CanvasRenderingContext2D, text: string, max: number
  * out the corner mark and the "Designed on tifomaker.org" line, and sets the
  * title in the middle of the band instead.
  */
-export function renderPostCardCanvas(src: HTMLCanvasElement, opts: { title: string; lang: 'en' | 'ar'; mark?: boolean }): HTMLCanvasElement {
+export function renderPostCardCanvas(
+  src: HTMLCanvasElement,
+  opts: { title: string; lang: 'en' | 'ar'; mark?: boolean; kit?: PostKit | null; credit?: Credit },
+): HTMLCanvasElement {
   const marked = opts.mark !== false;
+  const kit = opts.kit && opts.kit.colours.length ? opts.kit : null;
   const c = document.createElement('canvas');
   c.width = CARD_W;
   c.height = CARD_H;
@@ -134,17 +166,24 @@ export function renderPostCardCanvas(src: HTMLCanvasElement, opts: { title: stri
     ctx.fillText(mark, CARD_W - mw - 38, 50);
   }
 
+  // The fan's credit line (Pro), in the picture's bottom corner, above the band.
+  if (opts.credit?.text) drawCreditLine(ctx, CARD_W, PHOTO_H, opts.credit.text, { accent: opts.credit.accent, bottom: 28 });
+
   // The band: the tifo's name, then where it was made.
   const rtl = opts.lang === 'ar';
+  // A club kit: its colours as a scarf along the top of the band, its crest at the band's end.
+  const logoBox = kit?.logo ? 168 : 0;
+  if (kit) drawKitBand(ctx, kit, rtl);
   ctx.direction = rtl ? 'rtl' : 'ltr';
   ctx.textAlign = rtl ? 'right' : 'left';
   const x = rtl ? CARD_W - 64 : 64;
   ctx.textBaseline = 'alphabetic';
   ctx.fillStyle = '#f2f1ec';
-  ctx.font = '800 58px Inter, system-ui, -apple-system, "Segoe UI", Tahoma, sans-serif';
+  const face = kit?.fontCss ? `${kit.fontCss}, Inter, system-ui, sans-serif` : 'Inter, system-ui, -apple-system, "Segoe UI", Tahoma, sans-serif';
+  ctx.font = `800 58px ${face}`;
   const title = (opts.title || '').trim() || (rtl ? 'تيفو' : 'My tifo');
   // Without the mark the band holds the title alone, in its middle.
-  ctx.fillText(fitText(ctx, title, CARD_W - 128), x, marked ? PHOTO_H + 112 : PHOTO_H + 156);
+  ctx.fillText(fitText(ctx, title, CARD_W - 128 - logoBox), x, marked ? PHOTO_H + 112 : PHOTO_H + 156);
   if (!marked) return c;
   ctx.font = '500 36px Inter, system-ui, -apple-system, "Segoe UI", Tahoma, sans-serif';
   ctx.fillStyle = '#9aa3b2';
@@ -155,6 +194,37 @@ export function renderPostCardCanvas(src: HTMLCanvasElement, opts: { title: stri
   ctx.font = '700 36px Inter, system-ui, -apple-system, "Segoe UI", Tahoma, sans-serif';
   ctx.fillText('tifomaker.org', rtl ? x - lw : x + lw, PHOTO_H + 186);
   return c;
+}
+
+/**
+ * A kit on the band: its colours in a scarf stripe across the band's top
+ * edge (each colour as wide as its share, the first the widest, as a club's
+ * main colour is), and its first logo, contained, at the band's far end.
+ */
+function drawKitBand(ctx: CanvasRenderingContext2D, kit: PostKit, rtl: boolean): void {
+  const cols = kit.colours.slice(0, 6);
+  const stripe = 14;
+  // The first colour is the club's: twice the share of the others.
+  const shares = cols.map((_, i) => (i === 0 ? 2 : 1));
+  const total = shares.reduce((a, b) => a + b, 0);
+  let at = 0;
+  cols.forEach((hex, i) => {
+    const w = (CARD_W * shares[i]) / total;
+    ctx.fillStyle = hex;
+    ctx.fillRect(rtl ? CARD_W - at - w : at, PHOTO_H, Math.ceil(w), stripe);
+    at += w;
+  });
+  if (!kit.logo || !kit.logo.width || !kit.logo.height) return;
+  const box = 150;
+  const s = Math.min(box / kit.logo.width, box / kit.logo.height);
+  const w = kit.logo.width * s;
+  const h = kit.logo.height * s;
+  const cx = rtl ? 64 + box / 2 : CARD_W - 64 - box / 2;
+  const cy = PHOTO_H + stripe + (CARD_H - PHOTO_H - stripe) / 2;
+  ctx.save();
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(kit.logo, cx - w / 2, cy - h / 2, w, h);
+  ctx.restore();
 }
 
 function toBlob(c: HTMLCanvasElement, type = 'image/png'): Promise<Blob | null> {
@@ -304,8 +374,9 @@ export async function openPostSheet(deps: PostDeps): Promise<void> {
   // Pro, for an account it is on for: the mark can go (PostPro, above).
   const pro = postPro;
   /** The picture from a capture of the stadium, with the mark or without. */
-  const picture = async (shot: HTMLCanvasElement, mark: boolean): Promise<{ blob: Blob; preview: string } | null> => {
-    const card = renderPostCardCanvas(shot, { title: deps.title(), lang: rtl ? 'ar' : 'en', mark });
+  const picture = async (shot: HTMLCanvasElement, mark: boolean, free = false): Promise<{ blob: Blob; preview: string } | null> => {
+    // The credit line is Pro: the free version goes without it. The kit is the project's own, either way.
+    const card = renderPostCardCanvas(shot, { title: deps.title(), lang: rtl ? 'ar' : 'en', mark, kit: postKit?.() ?? null, credit: free ? undefined : currentCredit() });
     const out = await toBlob(card);
     // Shown from a data: URL, not the blob: one: the site's CSP allows
     // data: images and not blob: ones. JPEG, because it is only a preview.
@@ -351,9 +422,18 @@ export async function openPostSheet(deps: PostDeps): Promise<void> {
     void picture(src!, !pro.clean()).then((next) => { if (next && overlay.isConnected) show(next); });
   }) ?? null;
   if (option) img.after(option);
+  // The credit line's field (Pro): the picture follows it as it is typed.
+  let redraw = 0;
+  const creditBox = postCredit?.field(() => {
+    answer = null;
+    cancelAnimationFrame(redraw);
+    redraw = requestAnimationFrame(() => void picture(src!, !pro?.clean()).then((next) => { if (next && overlay.isConnected) show(next); }));
+  }) ?? null;
+  if (creditBox) (option ?? img).after(creditBox);
   /** The picture to hand over, once the export sheet (if it has a say) has answered; null: nothing. */
   const handOver = async (): Promise<Blob | null> => {
-    const items = pro?.items() ?? [];
+    const credit = currentCredit();
+    const items = [...(pro?.items() ?? []), ...(credit.text && credit.label ? [credit.label] : [])];
     if (!pro || !items.length || answer) return blob;
     const how = await exportGate(items);
     if (how === null || !overlay.isConnected) return null;
@@ -368,7 +448,7 @@ export async function openPostSheet(deps: PostDeps): Promise<void> {
         ]);
         return deps.capture();
       }).catch(() => null);
-      const next = await picture(shot ?? src!, true);
+      const next = await picture(shot ?? src!, true, true);
       if (next) show(next);
       pro.untick();
     }

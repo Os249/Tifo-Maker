@@ -17,6 +17,8 @@ import {
   buildStadium,
   outerBowlFromFootprint,
   planFromOuter,
+  PLAN_EXPONENT_BOX,
+  PLAN_EXPONENT_STANDS,
   solveRows,
   fitRing,
   RING_FIT_MAX_EXPONENT,
@@ -34,10 +36,12 @@ import {
   aggregateFacts,
   factsToKnown,
   parsePhotoFacts,
+  OPEN_CORNER_CUT,
   PHOTO_FACTS_PROMPT,
   type PhotoFacts,
 } from '../src/core/photoFacts';
 import type { RoofCoverage, StadiumTemplate } from '../src/core/types';
+import { isValidTemplate } from '../src/core/templateValidate';
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -177,8 +181,10 @@ console.log('\n--- tier split --------------------------------------------------
   // 47 of 87 with the ultras' grounds of France, Turkey, Morocco, Algeria and
   // Thailand, October 2026: their track ovals put two shallow tiers where the
   // rule expects one, and Tizi Ouzou's narrow middle tier makes three of two.
-  // 48 once PAT Stadium was rebuilt from the satellite picture as one tier.)
-  check(right === 48, 'tier-count rule scores 48 of 87', `misses: ${misses.join('; ')}`);
+  // 48 once PAT Stadium was rebuilt from the satellite picture as one tier;
+  // still 48 of 88 with Al-Zawraa, November 2026: its narrow main-stand
+  // gallery makes two tiers where the rule, at 28 rows, expects one.)
+  check(right === 48, 'tier-count rule scores 48 of 88', `misses: ${misses.join('; ')}`);
 
   const st = stackTiers(50, 2);
   const stacked = st[1].baseOffset > st[0].baseOffset + st[0].rows * st[0].rowDepth
@@ -410,6 +416,43 @@ console.log('\n--- reading a photo ---------------------------------------------
   check(built.template.lighting?.style === 'corner-masts' && built.template.facade?.style === 'berm', 'so do the lights and the facade');
   check(built.provenance['lighting.style'].confidence === 'given', 'and they are recorded as told to us, not guessed');
   check(!built.confirm.includes('facade.style'), 'and no longer asked about');
+
+  // The second prompt (Nov 2026): every answer comes with how sure it is, and
+  // the photo says first what it shows. Measured on 35 real photos of grounds
+  // the site models (scripts/photo-eval.mts); these pin the rules it found.
+  check(/"view"/.test(PHOTO_FACTS_PROMPT) && /"sure"/.test(PHOTO_FACTS_PROMPT), 'the prompt asks what the photo shows, and how sure each answer is');
+  const pub = parsePhotoFacts({ view: 'none', tiers: { value: 2, sure: 'high' }, facade: { value: 'brick', sure: 'high' } });
+  check(pub.tiers === undefined && pub.facade === undefined, 'a reading that sees no ground says nothing else');
+  const noGround = factsToKnown(aggregateFacts([{ view: 'none' }, { view: 'none' }, { view: 'bowl', tiers: 2 }]));
+  check(noGround.noGround && Object.keys(noGround.known).length === 0, 'two of three "no ground" readings and nothing is used, not even the third one\'s answer');
+  const sure = parsePhotoFacts({ view: 'bowl', tiers: { value: 3, sure: 'low' }, roof: { value: 'one', sure: 'medium' } });
+  check(sure.tiers === undefined && sure.roof === 'west', 'a "low" answer does not vote; a "medium" one does');
+  check(parsePhotoFacts({ view: 'bowl', facade: { value: 'brick', sure: 'high' } }).facade === undefined, 'nobody sees the facade from the stands');
+  check(parsePhotoFacts({ view: 'bowl', sides: { value: 'straight', sure: 'high' } }).shape === 'square', 'straight sides read as a square bowl');
+  check(parsePhotoFacts({ corners: { value: 'open', sure: 'high' } }).openCorners === true, 'open corners come through');
+  const seats = aggregateFacts([{ seatColours: ['#c8102e'] }, { seatColours: ['#d6202a'] }, { seatColours: ['#2a4fa8'] }]);
+  check(seats.seatColours?.value[0] !== '#2a4fa8' && Math.abs((seats.seatColours?.agreement ?? 0) - 2 / 3) < 1e-9,
+    'two reds a few shades apart agree on the seats, and outvote a blue');
+
+  // And they reach the stadium: a box, its seats' colour, its open corners.
+  const se2 = (a: number, b: number, p: number): Pt[] => Array.from({ length: 96 }, (_, i) => {
+    const [x, y] = se(a, b, p, (i / 96) * Math.PI * 2);
+    return [x / (111_320 * Math.cos((45 * Math.PI) / 180)), 45 + y / 111_132] as Pt;
+  });
+  const outline = se2(120, 90, 2.4);
+  const square = buildStadium({ footprint: outline, capacity: 40000, known: { shape: 'square', seatColours: ['#c8102e'] } });
+  check(square.template.plan.exponent === PLAN_EXPONENT_BOX, 'straight sides draw a box, not the rounded bowl the outline fits', `p=${square.template.plan.exponent}`);
+  const look = square.template.seatLook?.colors[0];
+  check(typeof look === 'object' && look.c === '#c8102e', 'the seats are the photo\'s colour, not charcoal');
+  check(isValidTemplate(square.template), 'and the store keeps it');
+  const stands = buildStadium({ footprint: outline, capacity: 40000, known: { cornerCut: OPEN_CORNER_CUT } });
+  check(stands.template.plan.exponent === PLAN_EXPONENT_STANDS && stands.template.cornerCut === OPEN_CORNER_CUT, 'open corners draw four separate straight stands');
+  const oval = buildStadium({ footprint: outline, capacity: 40000, known: { shape: 'square', hasTrack: true } });
+  check(oval.template.plan.exponent < 3, 'a track keeps the bowl round, whatever the stands look like');
+  const noTrack = buildStadium({ footprint: outline, capacity: 40000, known: { hasTrack: false } });
+  check(noTrack.template.plan.exponent === PLAN_EXPONENT_BOX, 'told there is no track, the bowl is drawn as the box most such grounds are');
+  const nobody = buildStadium({ footprint: outline, capacity: 40000 });
+  check(nobody.template.plan.exponent <= 3, 'told nothing, it stays the rounded bowl it always was');
 }
 
 // ---- a bowl from a building outline, on real grounds ----------------------

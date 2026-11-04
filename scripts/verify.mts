@@ -1945,6 +1945,9 @@ import { buildStadium as siBuild } from '../src/core/stadiumFit';
     'chang-arena-33k': '32203:479909ea29900d69',
     'pat-stadium-12k': '12028:c3d2955d1f538961',
     'thunderdome-15k': '14786:5d12ca4d2ab406fb',
+    // Al-Zawraa's ground (November 2026). Frozen at first release: re-take
+    // this only before that push.
+    'al-zawraa-15k': '15452:190dbd5298215d7d',
   };
   for (const [id, want] of Object.entries(FROZEN)) {
     const tpl = cat.templateById(id);
@@ -3000,6 +3003,9 @@ await leagueGrounds('thai league', 'thai-league', [
   { id: 'pat-stadium-12k', clubs: 'Port FC', seats: 12308, tol: 0.025 },
   { id: 'thunderdome-15k', clubs: 'Muangthong United', seats: 15000, tol: 0.025 },
 ], undefined, 3);
+await leagueGrounds('iraq stars league', 'iraq-stars-league', [
+  { id: 'al-zawraa-15k', clubs: 'Al-Zawraa SC', seats: 15443, tol: 0.025 },
+], undefined, 3);
 
 // --- The real grounds' neighbourhoods (OpenStreetMap, October 2026) ----------
 // Each Saudi ground with a site has its file, built for it, credited to
@@ -3619,4 +3625,21 @@ await (async () => {
   if (motionTokens < 10) fails.push(`only ${motionTokens} transitions use the motion tokens: something moved off them`);
   console.log(`design system: ${tokenSizes} font sizes on the scale, ${rawSizes} raw (ceiling ${CEILING.rawSizes}), ${rawColours} raw colours (ceiling ${CEILING.rawColours}), ${inline} inline styles (ceiling ${CEILING.inline}) | motion: ${motionTokens} uses of the motion tokens, 0 "transition: all", all ${MOTION.length} durations and distances stop under reduced motion`);
   if (fails.length) throw new Error(`design system: ${fails.join('; ')}`);
+})();
+
+// Pro film (ui/proFilm.ts, simulator/tifoSplit.ts): a tifo across the gap
+// between Kingdom Arena's north tiers, where the boxes are, is told before
+// filming that no camera can show that band; one on a stand without a gap is not.
+await (async () => {
+  const { tifoSplit, SPLIT_TELLS } = await import('../src/render/simulator/tifoSplit');
+  const { templateById } = await import('../src/core/stadiumCatalog');
+  const share = (id: string, inside: (x: number, z: number) => boolean): number => {
+    const m = generateSeatMap(templateById(id)!);
+    return tifoSplit(m.uv, m.count, (i) => inside(m.pos3[i * 3], m.pos3[i * 3 + 2]));
+  };
+  const kingdom = share('kingdom-arena-26k', (x, z) => z > 35 && Math.abs(x) < 30);
+  const jewel = share('jewel-jeddah-60k', (x, z) => x > 54 && Math.abs(z) < 25);
+  const anfield = share('anfield-61k', (x, z) => x < -54 && Math.abs(z) < 25);
+  console.log(`tifo split by a gap between tiers: Kingdom north ${(kingdom * 100).toFixed(0)}% of its height (told), Jewel end ${(jewel * 100).toFixed(0)}%, Anfield Kop ${(anfield * 100).toFixed(0)}% (not told)`);
+  if (kingdom < SPLIT_TELLS || jewel >= SPLIT_TELLS || anfield >= SPLIT_TELLS) throw new Error('the Pro film must tell a tifo that crosses a gap between tiers, and only that');
 })();

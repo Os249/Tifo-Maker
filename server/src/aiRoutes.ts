@@ -33,14 +33,28 @@ import { ensureHeroImage } from '../../src/core/heroImage';
 import { matchClub } from '../../src/core/clubs';
 import { generateSpecViaProvider, buildDirectorPrompt, critiqueSpecViaProvider, activeProvider, clubHintLine, writeCopy, copyLine, meterRetries, providerModel, type ProviderResult } from './aiProvider';
 import { readGroundPhoto, PHOTO_SAMPLE_DEFAULT, PHOTO_SAMPLE_MAX } from './photoRead';
-import { generateImage, type ImageResult } from './imageAssets';
+import { cleanColours, cleanName } from '../../src/core/kitRules';
+
+/**
+ * One line for the designer from the club kit a request carries: the club's
+ * name and at most 8 of its colours, or '' when there is none worth sending.
+ */
+export function kitContext(raw: unknown): string {
+  if (!raw || typeof raw !== 'object') return '';
+  const k = raw as { name?: unknown; colours?: unknown };
+  const name = cleanName(k.name).replace(/["\n\r]/g, '').slice(0, 40);
+  const colours = cleanColours(k.colours).filter((c) => /^#[0-9a-f]{6}$/i.test(c)).slice(0, 8);
+  if (!colours.length) return '';
+  return `The fan's club kit${name ? ` "${name}"` : ''}: its colours are ${colours.join(', ')}. Build the palette from these colours${name ? ` and use the club's name where the design needs one` : ''}.`;
+}
+import { generateImage, pictureStyleFor, type ImageResult } from './imageAssets';
 import { envNum } from './env';
 import { TtlCache, cacheKey } from './aiCache';
 import { screenPrompt } from './promptSafety';
 import { sniffImage } from './imageMeta';
 import type { Allowance, Holding, ProService, Ticket } from './pro';
 import type { PlanKind } from './proPlan';
-import { cutoutConfigured, cutoutPicture, CUTOUT_MODEL, CUTOUT_PRICE_USD, MAX_CUTOUT_BYTES } from './cutout';
+import { cutoutConfigured, cutoutForDesign, cutoutPicture, CUTOUT_MODEL, CUTOUT_PRICE_USD, MAX_CUTOUT_BYTES } from './cutout';
 
 const MAX_PROMPT = 400;
 
@@ -605,7 +619,12 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
     // On a 13-row ground "hero in the top 60%, support below" is two words
     // nobody can read. `mode` no longer picks a pipeline — there is one, the
     // director's — it only says which allowance the design is metered on.
-    const stadium = typeof body.stadium === 'string' ? body.stadium.slice(0, 2000) : undefined;
+    // The fan's club kit (Pro, ui/kitActive.ts): its name and colours go to the
+    // designer with the ground, so the design is in the kit's colours. Cleaned
+    // by the kit's own rules; anything else in it is ignored.
+    const kitLine = kitContext((body as { kit?: unknown }).kit);
+    const stadium0 = typeof body.stadium === 'string' ? body.stadium.slice(0, 2000) : undefined;
+    const stadium = kitLine ? `${stadium0 ? `${stadium0}\n` : ''}${kitLine}` : stadium0;
     const engine = body.engine === 'offline' ? 'offline' : 'auto';
     const userId = access.kind === 'user' ? access.userId : null;
     const unlimited = isUnlimited(access);
@@ -751,7 +770,7 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
       // premium. So the guarantee is structural, not a request in a prompt.
       {
         const club = matchClub(prompt.toLowerCase());
-        const hero = ensureHeroImage(spec, { brief: prompt, crest: club?.crest });
+        const hero = ensureHeroImage(spec, { crest: club?.crest });
         spec = hero.spec;
         if (hero.via !== 'present') {
           app.log.info({ via: hero.via, mode: mode0 }, 'ai generate: hero picture guaranteed');
@@ -781,11 +800,8 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
           // Without both it returns a square in arbitrary colours, and the client
           // then destroys it snapping to the design's palette.
           const region = narrowToSingleStand(layer.region);
-          const style = {
-            aspect: regionAspectHint(region),
-            palette: spec.palette,
-            rows: regionRowsHint(region),
-          };
+          // [images] The real stand's shape when the editor sent the stadium (imageAssets.ts pictureStyleFor).
+          const style = pictureStyleFor(region, spec.palette, stadium, { aspect: regionAspectHint(region), rows: regionRowsHint(region) });
           // Each request to the image provider is one of the account's daily
           // pictures, and one of the site's (AI_DAILY_PICTURE_BUDGET). A spent
           // share is reported like a rate limit, so the bare-subject second
@@ -815,6 +831,16 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
               const second = await draw(bare);
               if (second.url) { url = second.url; error = undefined; }
             }
+          }
+          // [images] Pro: the real cut-out on the picture, server side, so it lands as a
+          // subject and never as a rectangle. Its cost is the design's (cutout.ts
+          // cutoutForDesign), not one of the member's cut-outs; a failure keeps the picture.
+          if (url && pf && pf.plan !== 'free' && cutoutConfigured()) {
+            const cut = await cutoutForDesign(url).catch((e) => ({ url: null, error: String(e) }));
+            if (cut.url) {
+              url = cut.url;
+              spent = addCostMicros(spent, Math.round(CUTOUT_PRICE_USD * 1_000_000));
+            } else app.log.warn({ detail: sanitizeDetail(cut.error ?? '') }, 'ai generate: the picture\'s cut-out failed; used as generated');
           }
           if (url) layer.assetRef = url;
           else {
@@ -1030,6 +1056,11 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
       // The provider's text used to ride back in `error` and `errors`.
       return reply.code(502).send({ error: 'the model did not answer', reason: 'busy', cause: publicCause(fail.reason) });
     }
+    // pq-photo: a photo the readings agree shows no ground (a dressing room, a
+    // pub, a crowd close up) delivers nothing, so it is not counted (the panel
+    // tells the fan so, ui/stadiumPhoto). The readings were still paid for and
+    // still count against the day's premium budget above.
+    if (out.noGround) await giveBack();
     // Recorded from October 2026, so photo reading has a success rate and a cost.
     note(access, 'photo', 'model', undefined, spent);
     // Readings that failed while others succeeded are the operator's business,
@@ -1102,7 +1133,12 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
       const reason: AiFailure['reason'] =
         r.kind === 'config' ? 'auth' : r.kind === 'credit' ? 'rate_limited' : r.kind === 'refused' ? 'safety' : r.kind === 'timeout' ? 'timeout' : 'upstream_error';
       note(access, 'cutout', 'busy', { reason, detail: sanitizeDetail(r.error) }, { usage: { ...zeroUsage(), calls: 1, costMicros: 0 }, model: CUTOUT_MODEL, startedAt });
-      return reply.code(502).send({ error: 'the cut-out did not come', reason: r.kind === 'refused' ? 'refused' : 'busy', cause: publicCause(reason) });
+      // [images] Never 502 or 504: Cloudflare, in front of the site, swaps an
+      // origin's 502/504 for its own "Bad gateway" page, and the editor then
+      // cannot read why. A refused picture is the picture's fault (422); the
+      // provider out of credit is busy (503); anything else failed (503).
+      const why = r.kind === 'refused' ? 'refused' : r.kind === 'credit' ? 'busy' : 'failed';
+      return reply.code(why === 'refused' ? 422 : 503).send({ error: 'the cut-out did not come', reason: why, cause: publicCause(reason) });
     }
     note(access, 'cutout', 'model', undefined, {
       usage: { ...zeroUsage(), calls: 1, costMicros: Math.round(CUTOUT_PRICE_USD * 1e6) },

@@ -12,13 +12,23 @@
  *                     again; an export names "Portrait style" on the export
  *                     sheet and can go without it (the seats come back after);
  *                     the words in Arabic;
+ *                     picking a style prepares the picture for its stand and
+ *                     shows every style on that stand (six tiles, the picked
+ *                     one checked) with a line of advice in rows; on a banner
+ *                     the style is drawn at full size;
  *   PRO_MODE off      no picker, and a picture that already has a style is
  *                     still drawn with it (it is the design's, not Pro's).
+ *
+ * Two optional checks need what is not in the repo: E2E_FACE_PHOTO=<a portrait
+ * photo> (the face is found in the browser, under the site's CSP), and
+ * E2E_CUTOUT_LOCAL=1 (scripts/cutout-local.py with rembg installed: "Cut out
+ * and style" in one tap, against the local stand-in for Cloudflare).
  *
  * Self-contained: it boots its own servers (ports 8943 and 8944) on memory
  * repos. Needs a build:  npm run build && node e2e-pro-styles.mjs
  */
 import { spawn } from 'node:child_process';
+import { readFileSync, mkdirSync } from 'node:fs';
 import { deflateSync, gunzipSync, gzipSync } from 'node:zlib';
 import { chromium } from 'playwright';
 
@@ -36,9 +46,14 @@ const boot = (port, env) => {
   s.stderr.on('data', (d) => out.push(String(d)));
   return s;
 };
-const server = boot(PORT, { PRO_MODE: 'preview', PRO_PREVIEW_USERS: 'pstyle_fan' });
+// The local stand-in for the cut-out model (test-only; see server/src/cutout.ts).
+const CUT_PORT = 8971;
+const cutLocal = process.env.E2E_CUTOUT_LOCAL === '1'
+  ? spawn('python3', ['scripts/cutout-local.py', String(CUT_PORT)], { stdio: ['ignore', 'pipe', 'pipe'] })
+  : null;
+const server = boot(PORT, { PRO_MODE: 'preview', PRO_PREVIEW_USERS: 'pstyle_fan,pstyle_cut,pstyle_small', ...(cutLocal ? { AI_CUTOUT_LOCAL_URL: `http://127.0.0.1:${CUT_PORT}/` } : {}) });
 const serverOff = boot(PORT_OFF, { PRO_MODE: 'off' });
-const stop = () => { for (const s of [server, serverOff]) { try { s.kill(); } catch { /* gone */ } } };
+const stop = () => { for (const s of [server, serverOff, cutLocal]) { try { s?.kill(); } catch { /* gone */ } } };
 process.on('exit', stop);
 const up = async (base) => {
   for (let i = 0; i < 120; i++) {
@@ -64,8 +79,9 @@ const codeFor = async (email) => {
   return null;
 };
 /** A verified account with one saved design. */
-const account = async (username, base = B) => {
-  const [tpl] = (await api('/api/templates', null, {}, base)).json;
+const account = async (username, base = B, templateId = '') => {
+  const all = (await api('/api/templates', null, {}, base)).json;
+  const tpl = all.find((t) => t.id === templateId) ?? all[0];
   const cellsGzB64 = gzipSync(new Uint8Array(tpl.seatCount)).toString('base64');
   const email = `${username}@tifomaker-e2e.org`;
   const r = await api('/api/auth/register', null, { method: 'POST', body: JSON.stringify({ username, password: 'harbor-kite-moss-31', email, acceptedVersion: 'test' }) }, base);
@@ -116,6 +132,7 @@ const FACE = facePng();
 const fan = await account('pstyle_fan');
 const other = await account('pstyle_other');
 
+mkdirSync('/home/claude/evidence/images', { recursive: true });
 const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium', args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader'] }).catch(() => chromium.launch());
 const errs = [];
 const editor = async (token, design, { lang = 'en', base = B, w = 1440, h = 900 } = {}) => {
@@ -195,7 +212,7 @@ let styledSeats = '';
       afterDither: !!document.getElementById('dither')?.closest('.tb-field')?.nextElementSibling?.classList.contains('pstyle-field'),
     };
   });
-  check('…labelled "Style", with Original and the five styles', bar.label === 'Style' && JSON.stringify(bar.options) === JSON.stringify([['', 'Original'], ['stencil', 'Stencil'], ['halftone', 'Halftone'], ['pop', 'Pop art'], ['poster2', 'Posterize 2 colours'], ['poster3', 'Posterize 3 colours']]), JSON.stringify(bar.options));
+  check('…labelled "Style", with Original and four styles that differ in look (no halftone, no Poster 2, no Painted on seats)', bar.label === 'Style' && JSON.stringify(bar.options) === JSON.stringify([['', 'Original'], ['stencil', 'Stencil'], ['poster3', 'Posterize 3 colours'], ['duotone', 'Club duotone'], ['pop', 'Pop art']]), JSON.stringify(bar.options));
   check('…crowned beside it (gold "Pro", not quiet: Pro is not running), and no blue of its own', bar.chip === 'Pro' && bar.crown && !bar.quiet && bar.blue === 0, JSON.stringify(bar));
   check('…sitting beside Real colours and Dither', bar.afterDither);
 
@@ -207,6 +224,8 @@ let styledSeats = '';
   const paletteBefore = await p.evaluate(() => window.__tifo.store.palette.length);
 
   await arm(p);
+  // On the north stand, so the picture lands on seats (the middle of the view can be between tiers).
+  await p.selectOption('#import-place', '0.25');
   await p.selectOption('#import-pstyle', 'stencil');
   const greyed = await p.evaluate(() => {
     const r = document.getElementById('real-colors');
@@ -214,12 +233,47 @@ let styledSeats = '';
     return { real: [r.checked, r.disabled], dither: [d.checked, d.disabled], data: document.getElementById('import-bar').dataset.proStyle };
   });
   check('picking Stencil greys out Real colours and Dither (a style draws in the design\'s colours)', !greyed.real[0] && greyed.real[1] && !greyed.dither[0] && greyed.dither[1] && greyed.data === 'stencil', JSON.stringify(greyed));
+  // The picture is prepared for its stand, and every style is shown on that stand.
+  check('the picture is prepared for its stand (sized to its rows)', await waitFor(p, () => !!window.__tifoProStyles.prepared(), null, 60000), JSON.stringify(await p.evaluate(() => window.__tifoProStyles.prepared())));
+  const strip = await p.evaluate(() => ({
+    tiles: [...document.querySelectorAll('.qi-strip .qi-tile')].map((t) => [t.dataset.style, t.getAttribute('aria-checked'), t.querySelector('canvas')?.width ?? 0]),
+    note: document.querySelector('.qi-note')?.textContent ?? '',
+    role: document.querySelector('.qi-strip')?.getAttribute('role'),
+    blue: [...document.querySelectorAll('.qi-panel button.primary')].length,
+  }));
+  check('…five tiles on the stand, Original first, Stencil checked, each drawn', strip.tiles.length === 5 && strip.tiles[0][0] === '' && strip.tiles.find((t) => t[0] === 'stencil')?.[1] === 'true' && strip.tiles.every((t) => t[2] > 8) && strip.role === 'radiogroup' && strip.blue === 0, JSON.stringify(strip.tiles));
+  check('…and a line of advice about the stand', strip.note.length > 10, strip.note);
+  await p.screenshot({ path: '/home/claude/evidence/images/ui-import-bar.png', clip: { x: 0, y: 0, width: 1440, height: 380 } }).catch(() => {});
+  // A tile picks the style; the bar says so.
+  await p.click('.qi-strip .qi-tile[data-style="poster3"]');
+  check('clicking a tile picks that style', await waitFor(p, () => document.getElementById('import-pstyle').value === 'poster3' && document.querySelector('.qi-tile[data-style="poster3"]').getAttribute('aria-checked') === 'true'));
+  await p.selectOption('#import-pstyle', 'stencil');
+  await waitFor(p, () => document.querySelector('.qi-tile[data-style="stencil"]')?.getAttribute('aria-checked') === 'true');
   const stencil = await place(p);
   check('placing with Stencil gives the layer that style', stencil?.style === 'stencil', JSON.stringify(stencil));
   styledSeats = await seats(p);
   check('…and other seats than Original', styledSeats !== originalSeats, `${originalSeats} / ${styledSeats}`);
   const used = await p.evaluate((id) => { const g = window.__tifo.objects.get(id).grid.data; return [...new Set(g)].filter((v) => v >= 0).sort(); }, stencil.id);
   check('…in two of the design\'s cards, and the palette did not grow', used.length === 2 && (await p.evaluate(() => window.__tifo.store.palette.length)) === paletteBefore, JSON.stringify(used));
+  const drawn = await p.evaluate((id) => { const o = window.__tifo.objects.get(id); return { seat: o.seat ?? null, cols: o.grid.cols, rows: o.grid.rows, w: o.width }; }, stencil.id);
+  check('…drawn one cell per seat of the stand it landed on', !!drawn.seat && Math.abs(drawn.cols - drawn.w / drawn.seat.pitch) <= 1, JSON.stringify(drawn));
+  const fragile = await p.evaluate((id) => {
+    const { objects, store, map } = window.__tifo;
+    if (!map) return -1;
+    const st = new Set();
+    const o = objects.get(id);
+    // Seats this picture shows, in a run under three of their own card along the row or up the rake.
+    const runs = (i, a, b) => { let n = 1; for (const s of [a, b]) { let j = map.neighbors[i * 4 + s]; while (n < 3 && j >= 0 && store.cells[j] === store.cells[i]) { n++; j = map.neighbors[j * 4 + s]; } } return n; };
+    let thin = 0, seen = 0;
+    for (let i = 0; i < map.count; i++) {
+      const dx = map.xy[i * 2] - o.cx, dy = map.xy[i * 2 + 1] - o.cy;
+      if (Math.abs(dx) > o.width / 2 || Math.abs(dy) > o.height / 2 || st.has(i)) continue;
+      seen++;
+      if (runs(i, 0, 1) < 3 || runs(i, 2, 3) < 3) thin++;
+    }
+    return seen ? thin / seen : 0;
+  }, stencil.id);
+  check('…and on the seats, almost nothing in a run under three (the empty-seat rule)', fragile >= 0 && fragile < 0.03, `${(fragile * 100).toFixed(2)}%`);
   // The next picture: back to Original in the bar.
   await arm(p);
   await p.selectOption('#import-pstyle', '');
@@ -283,10 +337,10 @@ let styledSeats = '';
   // Arabic, and a phone.
   const { ctx, p } = await editor(fan.token, fan.design, { lang: 'ar' });
   await arm(p);
-  check('in Arabic: "الستايل", "ستنسل" and "بوستر بلونين", and the chip says مميّز', await waitFor(p, () => {
+  check('in Arabic: "الستايل", "ستنسل" and "بوستر بثلاث ألوان", and the chip says مميّز', await waitFor(p, () => {
     const s = document.getElementById('import-pstyle');
     return !!s && document.querySelector('label[for="import-pstyle"]')?.textContent === 'الستايل' &&
-      s.options[1].textContent === 'ستنسل' && s.options[4].textContent === 'بوستر بلونين' &&
+      s.options[1].textContent === 'ستنسل' && s.options[2].textContent === 'بوستر بثلاث ألوان' && s.options[3].textContent === 'دوتون النادي' &&
       /مميّز/.test(s.closest('.pstyle-field')?.querySelector('.pro-chip')?.textContent || '');
   }));
   const label = await p.evaluate(() => window.__tifoProStyles.items());
@@ -302,6 +356,97 @@ let styledSeats = '';
   }));
   const over = await p.evaluate(() => document.documentElement.scrollWidth - innerWidth);
   check('…with nothing scrolling sideways', over <= 0, String(over));
+  await ctx.close();
+}
+{
+  // A banner prints the portrait: the style is drawn at full size, not in seats.
+  const { ctx, p } = await editor(fan.token, fan.design);
+  await p.click('#view-banner');
+  await p.waitForTimeout(900);
+  const make = await p.$('#bn-empty:not([hidden]) button[data-kind="stand"]');
+  if (make) { await make.click(); await p.waitForTimeout(700); }
+  await arm(p);
+  check('on a banner, the Style picker is there too', await waitFor(p, () => { const s = document.getElementById('import-pstyle'); return !!s && s.getClientRects().length > 0; }));
+  await p.selectOption('#import-pstyle', 'poster3');
+  check('…and the style is drawn for print, at full size', await waitFor(p, () => { const b = window.__tifoProStyles.printed(); return !!b && b.h >= 900; }, null, 60000), JSON.stringify(await p.evaluate(() => window.__tifoProStyles.printed())));
+  check('…saying so', /full size/.test(await p.evaluate(() => document.querySelector('.qi-note')?.textContent ?? '')));
+  check('…and a banner offers Painted, which seats do not', await p.evaluate(() => [...document.getElementById('import-pstyle').options].map((o) => o.value).join() === ',stencil,poster3,duotone,pop,painted'));
+  await ctx.close();
+}
+{
+  // A stand too small for a face (Kingdom Arena's south stand, 12 rows): the
+  // obvious path is the face on a printed banner, and one tap makes it.
+  const small = await account('pstyle_small', B, 'kingdom-arena-26k-rb');
+  await api('/api/pro/gift/accept', small.token, { method: 'POST', body: '{}' });
+  const { ctx, p } = await editor(small.token, small.design);
+  await arm(p);
+  await p.selectOption('#import-place', '0.75');
+  await p.selectOption('#import-pstyle', 'stencil');
+  check('a 12-row stand: the advice says a face needs more rows and offers the banner', await waitFor(p, () => {
+    const b = document.querySelector('.qi-tobanner');
+    return !!b && !b.hidden && b.getClientRects().length > 0 && /12 rows/.test(document.querySelector('.qi-note')?.textContent ?? '');
+  }, null, 90000), await p.evaluate(() => document.querySelector('.qi-note')?.textContent ?? ''));
+  const offer = await p.evaluate(() => {
+    const b = document.querySelector('.qi-tobanner');
+    const r = b.getBoundingClientRect();
+    return { text: b.textContent.trim(), lead: b.classList.contains('qi-tobanner-lead'), h: r.height, blue: [...document.querySelectorAll('#import-bar button.primary, #import-bar .pro-primary')].filter((x) => x.getClientRects().length).length };
+  });
+  check('…"Put the face on a banner", the lead offer, one blue button on the bar at most', offer.text === 'Put the face on a banner' && offer.lead && offer.blue <= 1, JSON.stringify(offer));
+  await p.screenshot({ path: '/home/claude/evidence/images/ui-small-stand.png', clip: { x: 0, y: 0, width: 1440, height: 380 } }).catch(() => {});
+  const before = await seats(p);
+  await p.click('.qi-tobanner');
+  check('one tap: a banner on the south stand with the styled face printed full size', await waitFor(p, () => { const b = window.__tifoProStyles.banner(); return !!b && b.image && b.image.png && b.image.px[1] >= 900; }, null, 90000), JSON.stringify(await p.evaluate(() => window.__tifoProStyles.banner())));
+  const made = await p.evaluate(() => window.__tifoProStyles.banner());
+  check('…over the south stand, on a sheet of the stand\'s colour, the picture as large as the sheet takes it', made && made.stand === 3 && /^#/.test(made.bg) && (Math.abs(made.image.w - 1) < 1e-6 || Math.abs(made.image.h - made.aspect) < 1e-6), JSON.stringify(made));
+  check('…sized for the TV gantry: the face about a fifth of the picture\'s height (Kingdom Arena\'s roof allows about that)', !!made.plan && made.plan.share >= 0.15, JSON.stringify(made.plan));
+  check('…and the seats are left to the cards (nothing stamped, the import put away)', (await seats(p)) === before && await waitFor(p, () => document.getElementById('import-bar').hidden), '');
+  check('…saying where it went', await waitFor(p, () => /banner over/.test(document.getElementById('message')?.textContent ?? '')), await p.textContent('#message'));
+  // 42 rows (the west stand): a person on the cards, not a likeness. One line, and the banner offered, not pushed.
+  await arm(p);
+  await p.selectOption('#import-place', '0.5');
+  await p.selectOption('#import-pstyle', 'stencil');
+  check('42 rows: one line says a person, not a likeness, and the banner is offered quietly', await waitFor(p, () => {
+    const b = document.querySelector('.qi-tobanner');
+    return /a person, not a likeness/.test(document.querySelector('.qi-note')?.textContent ?? '') && !!b && !b.hidden && !b.classList.contains('qi-tobanner-lead');
+  }, null, 90000), await p.evaluate(() => document.querySelector('.qi-note')?.textContent ?? ''));
+  await ctx.close();
+}
+if (process.env.E2E_FACE_PHOTO) {
+  // A real portrait (never in the repo): the face is found in the browser, under the site's CSP.
+  const photo = readFileSync(process.env.E2E_FACE_PHOTO);
+  const { ctx, p } = await editor(fan.token, fan.design);
+  const csp = [];
+  p.on('console', (m) => { if (/Content Security Policy|Refused to|wasm/i.test(m.text())) csp.push(m.text().slice(0, 160)); });
+  await p.setInputFiles('#import-file', { name: 'player.jpg', mimeType: 'image/jpeg', buffer: photo });
+  await waitFor(p, () => !document.getElementById('import-apply').disabled);
+  await p.selectOption('#import-place', '0.25');
+  await p.selectOption('#import-pstyle', 'stencil');
+  check('a real portrait: the face is found and the picture cropped for the stand', await waitFor(p, () => window.__tifoProStyles.prepared()?.face === true, null, 90000), JSON.stringify(await p.evaluate(() => window.__tifoProStyles.prepared())));
+  check('…on 48 rows a likeness survives: no banner offered', await p.evaluate(() => document.querySelector('.qi-tobanner')?.hidden !== false));
+  check('…with no CSP refusal (no WebAssembly, no eval)', csp.length === 0, csp.join(' | '));
+  const placed = await place(p);
+  const face = await p.evaluate((id) => window.__tifo.objects.get(id)?.face?.pts?.length ?? 0, placed?.id);
+  check('…and the layer keeps the face it was drawn from', placed?.style === 'stencil' && face === 136, `${JSON.stringify(placed)} ${face}`);
+  await p.screenshot({ path: '/home/claude/evidence/images/ui-real-photo.png' }).catch(() => {});
+  await ctx.close();
+}
+if (cutLocal) {
+  // "Cut out and style": one tap, the server's cut-out (here the local stand-in) and the style.
+  const cutter = await account('pstyle_cut');
+  await api('/api/pro/gift/accept', cutter.token, { method: 'POST', body: '{}' });
+  for (let i = 0; i < 120; i++) { if (await fetch(`http://127.0.0.1:${CUT_PORT}/`).then((r) => r.ok).catch(() => false)) break; await new Promise((r) => setTimeout(r, 1000)); }
+  const { ctx, p } = await editor(cutter.token, cutter.design);
+  const buffer = process.env.E2E_FACE_PHOTO ? readFileSync(process.env.E2E_FACE_PHOTO) : FACE;
+  await p.setInputFiles('#import-file', { name: 'player.jpg', mimeType: process.env.E2E_FACE_PHOTO ? 'image/jpeg' : 'image/png', buffer });
+  check('"Cut out and style" is in the bar, gold and crowned, not blue', await waitFor(p, () => { const b = document.querySelector('.qi-cutstyle'); return !!b && !b.hidden && b.classList.contains('pro-btn') && !b.classList.contains('primary') && !!b.querySelector('.pro-crown'); }, null, 20000));
+  await p.click('.qi-cutstyle');
+  // The first cut-out asks first (what happens to the picture).
+  if (await waitFor(p, () => !!document.querySelector('.pro-sheet [data-act="go"]'), null, 8000)) await p.click('.pro-sheet [data-act="go"]');
+  check('…one tap: cut out on the server, then styled for the stand', await waitFor(p, () => window.__tifoProStyles.prepared()?.subject === 'cut-out', null, 120000), JSON.stringify(await p.evaluate(() => window.__tifoProStyles.prepared())));
+  check('…Stencil picked for it', (await p.evaluate(() => document.getElementById('import-pstyle').value)) === 'stencil');
+  const placed = await place(p);
+  check('…and placed styled', placed?.style === 'stencil', JSON.stringify(placed));
+  await p.screenshot({ path: '/home/claude/evidence/images/ui-cut-and-style.png' }).catch(() => {});
   await ctx.close();
 }
 {

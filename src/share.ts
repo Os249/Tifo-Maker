@@ -13,6 +13,7 @@ import { openShareModal } from './ui/shareModal';
 import { initLang, applyDom, getLang, localPath, t, tl, tv, toggleLang, tTitle } from './ui/i18n';
 import { escapeHtml } from './core/escape';
 import { hydrateBowls } from './ui/bowlPicture';
+import { supporterBadgeHtml } from './ui/supporterBadge';
 
 /**
  * The public tifo page, at /t/:id: where every shared link lands.
@@ -175,7 +176,7 @@ async function main(): Promise<void> {
   const sub = document.getElementById('s-sub') as HTMLElement;
   const viewsWord = (n: number): string => t(n === 1 ? 'sh.view' : 'sh.views');
   const parts = [
-    meta.ownerName ? `${escapeHtml(t('v.by'))} <bdi class="at" dir="ltr">@${escapeHtml(meta.ownerName)}</bdi>` : '',
+    meta.ownerName ? `${escapeHtml(t('v.by'))} <bdi class="at" dir="ltr">@${escapeHtml(meta.ownerName)}</bdi>${item?.ownerSupporter ? supporterBadgeHtml() : ''}` : '',
     escapeHtml(tl(template.id)),
     fmtDate(meta.createdAt),
     `<span id="s-views">${meta.viewCount.toLocaleString()}</span> <span id="s-views-w">${escapeHtml(viewsWord(meta.viewCount))}</span>`,
@@ -262,7 +263,7 @@ async function main(): Promise<void> {
     const box = document.getElementById('s-comments')!;
     const list = document.getElementById('s-cmts')!;
     list.innerHTML = top.length
-      ? top.map((c) => `<li class="s-cmt"><b><bdi dir="ltr">@${escapeHtml(c.authorName)}</bdi></b> <span class="s-cmt-when">${escapeHtml(fmtDate(c.createdAt))}</span><p>${escapeHtml(c.body)}</p></li>`).join('')
+      ? top.map((c) => `<li class="s-cmt"><b><bdi dir="ltr">@${escapeHtml(c.authorName)}</bdi>${c.authorSupporter ? supporterBadgeHtml({ compact: true }) : ''}</b> <span class="s-cmt-when">${escapeHtml(fmtDate(c.createdAt))}</span><p>${escapeHtml(c.body)}</p></li>`).join('')
       : `<li class="s-cmt s-cmt-none">${escapeHtml(t('sh.noComments'))}</li>`;
     box.hidden = false;
   }).catch(() => {});

@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { loadTifoFonts } from '../../core/tifoFonts';
+import { DEFAULT_STYLE, LedShow, PAGE_H, PAGE_W, drawAtlas, pageUv, pagesFor, type LedPage, type LedPicture, type LedStyle } from './ledBoards';
 
 /**
  * Match Day Simulator — pitch-side realism (Phase 3).
@@ -10,9 +11,11 @@ import { loadTifoFonts } from '../../core/tifoFonts';
  * boxes/planes; the LED boards use an emissive material so they read at dusk.
  *
  * The boards can carry a fan's own words (Pro, Match Day): up to three
- * messages, drawn once into one small canvas strip that all four boards tile.
- * With no messages there is nothing extra in the scene at all, so the plain
- * ring looks exactly as it always did.
+ * messages, in a style (render/simulator/ledBoards.ts), drawn once into one
+ * atlas that the four boards show through textures of their own, so that
+ * scrolling, sequencing and flashing them costs uniforms, not redraws. With
+ * no messages there is nothing extra in the scene at all, so the plain ring
+ * looks exactly as it always did.
  */
 
 export interface PitchsideController {
@@ -29,6 +32,18 @@ export interface PitchsideController {
   setBoardTextShown(on: boolean): boolean;
   /** What the boards carry, or null for the plain ring. Read-only. */
   boardText(): { messages: string[]; colour: string; shown: boolean } | null;
+  /** The boards' style (template, crest, score). True when the boards changed. */
+  setBoardStyle(style: LedStyle): boolean;
+  /**
+   * Move the boards on by `dt` seconds, on a frame Match Day draws anyway:
+   * `moving` (something else moves), `revealing` (a reveal plays). True only
+   * while a change the boards started is under way and needs its next frame.
+   */
+  animate(dt: number, moving: boolean, revealing: boolean): boolean;
+  /** What each face shows now (pages, scroll, brightness) and how many pages there are; null with no words. Read-only. */
+  boardFrame(): { pages: number[]; scroll: number; glow: number; count: number; kinds: string[] } | null;
+  /** The page on show, for the big screens (null: no words, or hidden); `seq` changes when it does. */
+  boardPicture(): { page: LedPage; colour: string; crest: LedPicture | null; seq: number } | null;
   dispose(): void;
 }
 
@@ -63,88 +78,6 @@ export function boardColour(raw: unknown): string | null {
   if (/^#[0-9a-f]{6}$/.test(s)) return s;
   if (/^#[0-9a-f]{3}$/.test(s)) return '#' + [...s.slice(1)].map((c) => c + c).join('');
   return null;
-}
-
-/** Right to left when the first strong letter is (what dir="auto" does). */
-function rtlFirst(s: string): boolean {
-  for (const ch of s) {
-    if (/[֐-ࣿיִ-﷿ﹰ-ﻼ]/.test(ch)) return true;
-    if (/[A-Za-zÀ-ɏͰ-ϿЀ-ӿ]/.test(ch)) return false;
-  }
-  return false;
-}
-
-function luminance(hex: string): number {
-  const n = parseInt(hex.slice(1), 16);
-  const lin = (c: number): number => {
-    const v = c / 255;
-    return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
-  };
-  return 0.2126 * lin((n >> 16) & 255) + 0.7152 * lin((n >> 8) & 255) + 0.0722 * lin(n & 255);
-}
-
-/**
- * Anton and Noto Kufi Arabic (the "Condensed" voice): narrow, heavy, and
- * made for both scripts, which is what a perimeter board is. Canvas shapes
- * the Arabic; the fallbacks cover a moment before the faces have loaded.
- */
-const BOARD_FONT = '"TifoCondensed", "Noto Kufi Arabic", Impact, "Arial Black", sans-serif';
-/** The strip's height in pixels: one board face, top to bottom. */
-const STRIP_H = 128;
-/** Widest strip uploaded (every WebGL device takes 4096). */
-const STRIP_MAX_W = 4096;
-
-/**
- * The messages side by side, each on its own panel of the board colour with
- * a seam between, as wide as its words need. The four boards tile this one
- * strip, so the whole ring costs one texture of at most 4096 x 128.
- */
-function drawStrip(messages: readonly string[], colour: string): HTMLCanvasElement {
-  const c = document.createElement('canvas');
-  const g = c.getContext('2d');
-  const px = Math.round(STRIP_H * 0.6);
-  const font = `${px}px ${BOARD_FONT}`;
-  const pad = STRIP_H * 0.9;
-  const minW = STRIP_H * 4;
-  let widths: number[] = [];
-  if (g) {
-    g.font = font;
-    widths = messages.map((m) => Math.max(minW, Math.ceil(g.measureText(m).width + pad * 2)));
-  } else {
-    widths = messages.map(() => minW);
-  }
-  const total = widths.reduce((a, b) => a + b, 0);
-  // Long messages are drawn a little smaller rather than cut.
-  const k = Math.min(1, STRIP_MAX_W / total);
-  c.width = Math.max(1, Math.round(total * k));
-  c.height = Math.max(1, Math.round(STRIP_H * k));
-  if (!g) return c;
-  g.scale(k, k);
-  const ink = luminance(colour) > 0.4 ? '#0b0f18' : '#ffffff';
-  let x = 0;
-  messages.forEach((m, i) => {
-    const w = widths[i];
-    g.fillStyle = colour;
-    g.fillRect(x, 0, w, STRIP_H);
-    // A soft top-to-bottom shade, the way a panel catches the floodlights.
-    const shade = g.createLinearGradient(0, 0, 0, STRIP_H);
-    shade.addColorStop(0, 'rgba(255,255,255,0.10)');
-    shade.addColorStop(0.5, 'rgba(255,255,255,0)');
-    shade.addColorStop(1, 'rgba(0,0,0,0.16)');
-    g.fillStyle = shade;
-    g.fillRect(x, 0, w, STRIP_H);
-    g.font = font;
-    g.fillStyle = ink;
-    g.textAlign = 'center';
-    g.textBaseline = 'middle';
-    g.direction = rtlFirst(m) ? 'rtl' : 'ltr';
-    g.fillText(m, x + w / 2, STRIP_H * 0.54, w - pad);
-    // The seam between two panels.
-    g.fillStyle = 'rgba(0,0,0,0.6)';
-    g.fillRect(x + w - 3, 0, 3, STRIP_H);
-    x += w;
-  });
-  return c;
 }
 
 /** The fonts are in once; until then a strip is drawn again when they arrive. */
@@ -210,47 +143,66 @@ export function buildPitchside(shadows: boolean, opts: { benches?: boolean; redr
   led.name = 'led-boards';
   group.add(led);
   let ledText: { messages: string[]; colour: string } | null = null;
-  let ledTex: THREE.CanvasTexture | null = null;
-  let ledMat: THREE.MeshBasicMaterial | null = null;
+  let style: LedStyle = DEFAULT_STYLE;
+  let pages: LedPage[] = [];
+  let atlas: HTMLCanvasElement | null = null;
+  const show = new LedShow();
+  /** One texture (sharing the atlas) and one material a face, so each face shows its own page. */
+  const faces: { tex: THREE.CanvasTexture; mat: THREE.MeshBasicMaterial; page: number }[] = [];
   const ledGeos: THREE.BufferGeometry[] = [];
+  let lastScroll = 0;
+  let lastGlow = 1;
   const clearLed = (): void => {
     for (const child of [...led.children]) led.remove(child);
     for (const geo of ledGeos.splice(0)) geo.dispose();
-    ledMat?.dispose();
-    ledMat = null;
-    ledTex?.dispose();
-    ledTex = null;
+    for (const f of faces.splice(0)) {
+      f.mat.dispose();
+      f.tex.dispose();
+    }
+    atlas = null;
+  };
+  /** Show page `p` on face `f` (a uniform: the texture's offset). */
+  const showPage = (f: (typeof faces)[number], p: number): void => {
+    if (f.page === p) return;
+    f.page = p;
+    const uv = pageUv(p, pages.length);
+    f.tex.repeat.y = uv.repeat;
+    f.tex.offset.y = uv.offset;
   };
   const buildLed = (): void => {
     clearLed();
     if (!ledText) return;
-    const strip = drawStrip(ledText.messages, ledText.colour);
-    const tex = new THREE.CanvasTexture(strip);
-    tex.colorSpace = THREE.SRGBColorSpace;
-    tex.wrapS = THREE.RepeatWrapping;
-    // The boards are seen nearly edge-on from most seats.
-    tex.anisotropy = 8;
-    ledTex = tex;
-    // Unlit and not tone-mapped: an LED panel is its own light, the same
-    // colour at noon and at night.
-    ledMat = new THREE.MeshBasicMaterial({ map: tex, toneMapped: false });
+    pages = pagesFor(ledText.messages, style);
+    if (!pages.length) return;
+    show.setPages(pages);
+    atlas = drawAtlas(pages, ledText.colour, style.crest);
     const faceH = boardH * 0.86;
-    // One strip in metres, at the face's height.
-    const stripLen = (strip.width / strip.height) * faceH;
-    const face = (len: number, x: number, z: number, ry: number): void => {
+    // One page in metres, at the face's height.
+    const pageLen = (PAGE_W / PAGE_H) * faceH;
+    const still = show.step(0, false, false);
+    const face = (len: number, x: number, z: number, ry: number, k: number): void => {
       const w = len - 0.3;
-      // Whole strips only, so no message is cut at a corner flag: the count
+      // Whole pages only, so no message is cut at a corner flag: the count
       // that stretches or squeezes the letters least.
-      const r = w / stripLen;
+      const r = w / pageLen;
       const lo = Math.max(1, Math.floor(r));
       const hi = Math.max(1, Math.ceil(r));
       const reps = Math.abs(Math.log(r / lo)) <= Math.abs(Math.log(r / hi)) ? lo : hi;
       const geo = new THREE.PlaneGeometry(w, faceH);
-      const uv = geo.attributes.uv as THREE.BufferAttribute;
-      for (let i = 0; i < uv.count; i++) uv.setX(i, uv.getX(i) * reps);
-      uv.needsUpdate = true;
       ledGeos.push(geo);
-      const mesh = new THREE.Mesh(geo, ledMat!);
+      const tex = new THREE.CanvasTexture(atlas!);
+      tex.colorSpace = THREE.SRGBColorSpace;
+      tex.wrapS = THREE.RepeatWrapping;
+      tex.repeat.x = reps;
+      // The boards are seen nearly edge-on from most seats.
+      tex.anisotropy = 8;
+      // Unlit and not tone-mapped: an LED panel is its own light, the same
+      // colour at noon and at night.
+      const mat = new THREE.MeshBasicMaterial({ map: tex, toneMapped: false });
+      const f = { tex, mat, page: -1 };
+      faces.push(f);
+      showPage(f, still.pages[k]);
+      const mesh = new THREE.Mesh(geo, mat);
       mesh.position.set(x, boardH / 2, z);
       mesh.rotation.y = ry;
       mesh.userData.keep = true;
@@ -258,10 +210,12 @@ export function buildPitchside(shadows: boolean, opts: { benches?: boolean; redr
     };
     // Each face looks at the pitch: its words read left to right from there.
     const front = 0.1 + 0.012;
-    face(2 * HALF_X + 6, 0, HALF_Z + m - front, Math.PI);
-    face(2 * HALF_X + 6, 0, -(HALF_Z + m - front), 0);
-    face(2 * HALF_Z + 6, HALF_X + m - front, 0, -Math.PI / 2);
-    face(2 * HALF_Z + 6, -(HALF_X + m - front), 0, Math.PI / 2);
+    face(2 * HALF_X + 6, 0, HALF_Z + m - front, Math.PI, 0);
+    face(2 * HALF_X + 6, 0, -(HALF_Z + m - front), 0, 1);
+    face(2 * HALF_Z + 6, HALF_X + m - front, 0, -Math.PI / 2, 2);
+    face(2 * HALF_Z + 6, -(HALF_X + m - front), 0, Math.PI / 2, 3);
+    lastScroll = 0;
+    lastGlow = 1;
     if (!boardFontsIn) {
       const drawn = ledText;
       void loadTifoFonts().then(() => {
@@ -327,6 +281,36 @@ export function buildPitchside(shadows: boolean, opts: { benches?: boolean; redr
     },
     boardText() {
       return ledText ? { messages: [...ledText.messages], colour: ledText.colour, shown: led.visible } : null;
+    },
+    setBoardStyle(next) {
+      const same = next.template === style.template && next.crest === style.crest && next.home === style.home &&
+        next.away === style.away && next.homeGoals === style.homeGoals && next.awayGoals === style.awayGoals;
+      if (same) return false;
+      style = { ...next };
+      buildLed();
+      return !!ledText;
+    },
+    animate(dt, moving, revealing) {
+      if (!faces.length || !led.visible) return false;
+      const fr = show.step(dt, moving, revealing);
+      faces.forEach((f, k) => showPage(f, fr.pages[k]));
+      if (fr.scroll !== lastScroll) {
+        lastScroll = fr.scroll;
+        for (const f of faces) f.tex.offset.x = fr.scroll;
+      }
+      if (fr.glow !== lastGlow) {
+        lastGlow = fr.glow;
+        for (const f of faces) f.mat.color.setScalar(fr.glow);
+      }
+      return fr.busy;
+    },
+    boardFrame() {
+      if (!faces.length) return null;
+      return { pages: faces.map((f) => f.page), scroll: lastScroll, glow: lastGlow, count: pages.length, kinds: pages.map((p) => p.kind) };
+    },
+    boardPicture() {
+      if (!atlas || !ledText || !led.visible || !pages.length) return null;
+      return { page: pages[show.current()] ?? pages[0], colour: ledText.colour, crest: style.crest, seq: show.seq };
     },
     dispose() {
       disposed = true;

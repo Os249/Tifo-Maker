@@ -442,7 +442,12 @@ function crowdOoh(ctx: BaseAudioContext, out: AudioNode, echo: AudioNode, pink: 
   return started;
 }
 
-export function buildAtmosphere(): Atmosphere {
+/**
+ * `offline`: render into this context instead of the speakers (a Pro film's
+ * soundtrack, simulator/filmSound.ts). Nothing waits for a gesture, and the
+ * caller owns the context: it is started and finished by its renderer.
+ */
+export function buildAtmosphere(opts: { offline?: OfflineAudioContext } = {}): Atmosphere {
   let ctx: AudioContext | null = null;
   let master: GainNode | null = null;
   let limiter: DynamicsCompressorNode | null = null;
@@ -496,9 +501,14 @@ export function buildAtmosphere(): Atmosphere {
   let weather: WeatherSound = 'clear';
   let weatherStrength = 1;
 
-  const AudioCtor = typeof window !== 'undefined'
-    ? (window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext)
-    : undefined;
+  // An offline film's context (filmSound.ts) stands in for the speakers':
+  // "new" on a function that returns an object gives that object.
+  const offline = opts.offline;
+  const AudioCtor = offline
+    ? (function () { return offline; } as unknown as typeof AudioContext)
+    : typeof window !== 'undefined'
+      ? (window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext)
+      : undefined;
 
   /** Master, after mute. Kept in one place so mute and level cannot disagree. */
   const masterTarget = (): number => (muted ? 0 : levels.master);
@@ -555,6 +565,7 @@ export function buildAtmosphere(): Atmosphere {
       crackle = crackleBuffer(ctx);
       sizzle = sizzleBuffer(ctx);
     }
+    if (opts.offline) return true;
     // resume() only settles once the browser lets the context run. Without a
     // user gesture yet (sound is on by default now, so this can run on open)
     // it can sit pending indefinitely — so it is given a moment, not forever,
@@ -1274,7 +1285,7 @@ export function buildAtmosphere(): Atmosphere {
       stopWeather();
       stopPyro();
       window.clearInterval(drumTimer);
-      void ctx?.close().catch(() => undefined);
+      if (!opts.offline) void ctx?.close().catch(() => undefined);
       ctx = null;
       master = null;
       limiter = null;

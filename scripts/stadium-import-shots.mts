@@ -31,6 +31,20 @@ const OVERPASS_REPLY = JSON.stringify({
   }],
 });
 
+// A photo read as the server would answer it (server/src/photoRead): a red
+// box of two tiers, roofed all round, its facade not agreed on.
+const v3 = (value: unknown) => ({ value, agreement: 1, answered: 3, samples: 3 });
+const PHOTO_REPLY = JSON.stringify({
+  vote: { view: v3('bowl'), tiers: v3(2), roof: v3('ring'), track: v3(false), lighting: v3('roof-rim'), shape: v3('square'), seatColours: v3(['#c8102e']), samples: 3 },
+  known: { tiers: 2, roof: 'ring', hasTrack: false, lighting: 'roof-rim', shape: 'square', seatColours: ['#c8102e'] },
+  used: ['tiers', 'roof', 'track', 'lighting', 'shape', 'seatColours'],
+  dropped: [{ field: 'facade', agreement: 0.34, answered: 3 }],
+  noGround: false,
+  errors: [],
+});
+// A 1x1 PNG: the reply above is what matters, not the picture.
+const PHOTO_FILE = { name: 'ground.png', mimeType: 'image/png', buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64') };
+
 const vite: ViteDevServer = await createServer({ root: ROOT, server: { port: 5229 }, logLevel: 'error' });
 await vite.listen(5229);
 const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' }).catch(() => chromium.launch());
@@ -57,6 +71,8 @@ for (const [device, width, height] of CASES) {
       route.fulfill({ status: 200, contentType: 'application/json', body: OVERPASS_REPLY }));
     await page.route('**/api/interpreter', (route) =>
       route.fulfill({ status: 200, contentType: 'application/json', body: OVERPASS_REPLY }));
+    await page.route('**/api/stadium/photo', (route) =>
+      route.fulfill({ status: 200, contentType: 'application/json', body: PHOTO_REPLY }));
 
     await page.goto('http://127.0.0.1:5229/', { waitUntil: 'networkidle', timeout: 120000 });
 
@@ -141,6 +157,23 @@ for (const [device, width, height] of CASES) {
     });
     console.log(`${device}/${lang}: ${ran}`);
     if (ran !== 'ok') bad++;
+
+    // Stadium from a photo: the read fills the selects, the line under the
+    // button says what it found (the seats as a swatch), and the next build
+    // carries what no select holds: the seats' colour and the straight sides.
+    const photoIn = page.locator('[data-tm="osm-photo-file"]').first();
+    if (await photoIn.count()) await photoIn.setInputFiles(PHOTO_FILE);
+    await page.waitForFunction(() => !!document.querySelector('[data-tm="osm-photo-seat"]'), null, { timeout: 15000 }).catch(() => {});
+    const photo = await page.evaluate(() => {
+      const note = document.querySelector<HTMLElement>('[data-tm="osm-photo-note"]')?.textContent ?? '';
+      if (!document.querySelector('[data-tm="osm-photo-seat"]')) return `no seat swatch in the photo line: "${note}"`;
+      if (document.documentElement.dir === 'rtl' && /Seats|Straight|From your photo/.test(note)) return `English in the Arabic photo line: "${note}"`;
+      return 'ok';
+    });
+    console.log(`${device}/${lang} photo: ${photo}`);
+    if (photo !== 'ok') bad++;
+    await page.evaluate(() => document.querySelector<HTMLButtonElement>('[data-tm="osm-build"]')?.click());
+    await page.waitForTimeout(600);
 
     // Frame the block, not the top of the panel. By its hook, not its text: on
     // the phone the panel is lent into a bottom sheet and a text search matches

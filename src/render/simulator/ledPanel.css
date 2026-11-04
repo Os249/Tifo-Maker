@@ -1,0 +1,8 @@
+/* The LED boards' style (render/simulator/ledPanel.ts): the score's two sides and goals on one row. */
+.mds-ledscore { display: grid; grid-template-columns: minmax(0, 1fr) 56px 56px minmax(0, 1fr); gap: var(--sp-2); }
+.mds-ledscore .mds-input[type="number"] { width: 100%; text-align: center; }
+.mds-section [data-k="led-score"][hidden],
+.mds-section [data-k="led-kit-hint"][hidden] { display: none; }
+@media (pointer: coarse) {
+  .mds-ledscore .mds-input { min-height: 44px; }
+}

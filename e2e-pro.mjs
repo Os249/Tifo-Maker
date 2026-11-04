@@ -166,15 +166,10 @@ console.log('\n— an account on the preview list —');
   await p.click('#ai-generate');
   check('the limit card says what ran out', await waitFor(p, () => /That's all 40 designs for this month/.test(document.querySelector('#ai-state .ai-state-title')?.textContent || '')));
   const acts = await p.evaluate(() => [...document.querySelectorAll('#ai-state .ai-state-actions button')].map((b) => [b.textContent, b.classList.contains('primary')]));
-  // The quiet alternative is the free Quick Designer since 29 Oct 2026: a
-  // standard design is the same whole-bowl path now (2e3d8f9).
-  check('…one blue way on (the gift) and one quiet alternative', acts.length === 2 && acts[0][0] === 'Use my Pro gift' && acts[0][1] && acts[1][0] === 'Use the Quick Designer' && !acts[1][1], JSON.stringify(acts));
-  await p.locator('#ai-state .ai-state-actions button').first().click();
-  check('the gift sheet opens from the card, and says when it would end', await waitFor(p, () => /Your 7-day Pro gift/.test(document.querySelector('.pro-sheet h2')?.textContent || '') && !!document.querySelector('.pro-sheet .pro-when')));
-  const perks = await p.evaluate(() => [...document.querySelectorAll('.pro-sheet .pro-perks li')].map((l) => l.textContent));
-  check('…listing all of Pro: more AI, clean exports, the video sizes, styles and fonts, the club kit', perks.length === 8 && /More AI designs/.test(perks[0]) && perks.some((x) => /any export/.test(x)) && perks.some((x) => /9:16/.test(x)) && perks.some((x) => /Pro fonts/.test(x)) && perks.some((x) => /Club kit/.test(x)) && !perks.some((x) => /Super/.test(x)), JSON.stringify(perks));
-  await p.keyboard.press('Escape');
-  check('Escape closes it without starting anything', await waitFor(p, () => !document.querySelector('.pro-sheet-backdrop')) && (await api('/api/pro', fan.token)).json.gift.state === 'offered');
+  // More AI designs are off the Pro list (server/src/proPlan AI_ON_PRO, 1 Nov
+  // 2026): Pro gives no more of them, so running out sells nothing and the
+  // free Quick Designer is the one way on.
+  check('…no Pro and no gift for designs Pro gives no more of: the Quick Designer, alone', acts.length === 1 && acts[0][0] === 'Use the Quick Designer' && acts[0][1] && !/Pro|gift/.test(await p.evaluate(() => document.querySelector('#ai-state')?.textContent || '')), JSON.stringify(acts));
   await p.unroute('**/api/ai/generate');
 
   // The stadium video's mark.
@@ -217,6 +212,9 @@ console.log('\n— an account on the preview list —');
   await waitFor(p, () => !!document.querySelector('.pro-card:not([hidden])'));
   await p.click('.pro-card [data-act="main"]');
   await waitFor(p, () => !!document.querySelector('.pro-sheet [data-act="start"]'));
+  check('the gift sheet says when it would end', !!(await p.$('.pro-sheet .pro-when')));
+  const perks = await p.evaluate(() => [...document.querySelectorAll('.pro-sheet .pro-perks li')].map((l) => l.textContent));
+  check('…listing only what Pro adds: the cut-out, clean exports, the video sizes, styles and fonts, the club kit, and no more AI designs or Polishes', perks.length === 5 && perks.some((x) => /cut-out/.test(x)) && perks.some((x) => /any export/.test(x)) && perks.some((x) => /9:16/.test(x)) && perks.some((x) => /Pro fonts/.test(x)) && perks.some((x) => /Club kit/.test(x)) && !perks.some((x) => /AI designs|Polish|limit cards|Super/.test(x)), JSON.stringify(perks));
   await p.click('.pro-sheet [data-act="start"]');
   check('Start runs the gift', await waitFor(p, () => /Your Pro gift is on/.test(document.querySelector('.pro-sheet h2')?.textContent || '')));
   const st = (await api('/api/pro', fan.token)).json;
@@ -230,7 +228,7 @@ console.log('\n— an account on the preview list —');
     const s = document.getElementById('pro');
     return !!s && !s.hidden && /Pro gift/.test(s.textContent) && /Ends/.test(s.textContent) && s.querySelectorAll('.pro-meter').length === 4 && !/Super/.test(s.textContent);
   }));
-  check('…with Pro\'s day for designs: 15', await p.evaluate(() => /15 of 15 designs left today/.test(document.getElementById('pro')?.textContent || '')));
+  check('…designs at the free day, since Pro gives no more of them (AI_ON_PRO)', await p.evaluate(() => /10 of 10 designs left today/.test(document.getElementById('pro')?.textContent || '')));
   await p.goto(`${B}/pro`, { waitUntil: 'networkidle' });
   check('/pro: two plans, and "you have" instead of a button', await waitFor(p, () => document.querySelectorAll('.pp-plan').length === 2 && !document.getElementById('pp-you').hidden && document.getElementById('pp-act').hidden));
   const pp = await p.evaluate(() => ({
@@ -240,8 +238,8 @@ console.log('\n— an account on the preview list —');
     over: document.documentElement.scrollWidth - innerWidth,
   }));
   check('…Pro at SAR 19 a month, with every new perk in its column', /SAR 19 a month/.test(pp.pro) && /30 days of Pro/.test(pp.pro) && ['any export', '9:16', '4K poster', 'Portrait styles', 'Pro fonts', 'LED boards', 'Club kit', 'Supporter crown'].every((w) => pp.pro.includes(w)), pp.pro.slice(0, 400));
-  check('…Free at 10 a day and 40 a month, none of Pro\'s perks', /10 a day/.test(pp.free) && /40 a month/.test(pp.free) && /SAR 0/.test(pp.free), pp.free.slice(0, 300));
-  check('…Pro\'s designs: 15 a day, 70 a month', /15 a day/.test(pp.pro) && /70 a month/.test(pp.pro));
+  check('…Free at SAR 0, a cut-out a week, none of Pro\'s perks', /1 a week/.test(pp.free) && /SAR 0/.test(pp.free), pp.free.slice(0, 300));
+  check('…no AI designs or Polish rows: Pro adds none (AI_ON_PRO), but the smart cut-out is there', !/AI designs|Polish/.test(pp.pro + pp.free) && /Smart cut-out/.test(pp.pro));
   check('…no Match Pass, Season Pass or group band', !/Match Pass|Season Pass/.test(pp.pro + pp.free) && !pp.group);
   await p.setViewportSize({ width: 390, height: 844 });
   await p.waitForTimeout(300);

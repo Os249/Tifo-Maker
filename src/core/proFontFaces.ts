@@ -24,6 +24,14 @@ import rakkasAr from '@fontsource/rakkas/files/rakkas-arabic-400-normal.woff2';
 import rakkasLat from '@fontsource/rakkas/files/rakkas-latin-400-normal.woff2';
 import marheyAr from '@fontsource/marhey/files/marhey-arabic-700-normal.woff2';
 import marheyLat from '@fontsource/marhey/files/marhey-latin-700-normal.woff2';
+import handjetAr from '@fontsource/handjet/files/handjet-arabic-900-normal.woff2';
+import handjetLat from '@fontsource/handjet/files/handjet-latin-900-normal.woff2';
+import blakaAr from '@fontsource/blaka/files/blaka-arabic-400-normal.woff2';
+import blakaLat from '@fontsource/blaka/files/blaka-latin-400-normal.woff2';
+import messiriAr from '@fontsource/el-messiri/files/el-messiri-arabic-700-normal.woff2';
+import messiriLat from '@fontsource/el-messiri/files/el-messiri-latin-700-normal.woff2';
+import ruqaaAr from '@fontsource/aref-ruqaa/files/aref-ruqaa-arabic-700-normal.woff2';
+import ruqaaLat from '@fontsource/aref-ruqaa/files/aref-ruqaa-latin-700-normal.woff2';
 
 /** Voice id → the two files that make up its family. */
 const FILES: Record<string, { arabic: string; latin: string }> = {
@@ -32,6 +40,10 @@ const FILES: Record<string, { arabic: string; latin: string }> = {
   rounded: { arabic: lemonadaAr, latin: lemonadaLat },
   classic: { arabic: rakkasAr, latin: rakkasLat },
   marker: { arabic: marheyAr, latin: marheyLat },
+  pixel: { arabic: handjetAr, latin: handjetLat },
+  gothic: { arabic: blakaAr, latin: blakaLat },
+  heritage: { arabic: messiriAr, latin: messiriLat },
+  ruqaa: { arabic: ruqaaAr, latin: ruqaaLat },
 };
 
 const loads = new Map<string, Promise<void>>();

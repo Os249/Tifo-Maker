@@ -1,0 +1,62 @@
+/*
+ * Pro's poster sheet (ui/proPoster.ts): the live preview beside its fields
+ * on a desktop, above them on a phone. Built on pro.css's sheet and the
+ * editor's tokens: no colours of its own.
+ */
+.mds-overlay ~ .qv-poster-backdrop { z-index: 10002; }
+
+.pro-sheet.qv-poster { width: min(1120px, 100%); padding: var(--sp-5); }
+.qv-poster-head { display: flex; align-items: flex-start; gap: var(--sp-3); margin-bottom: var(--sp-4); }
+.qv-poster-head .pro-sheet-mark { margin: 0; flex: none; }
+.qv-poster-head h2 { margin-bottom: var(--sp-1); }
+.qv-poster-head .qv-lead { margin: 0; font-size: var(--fs-sm); font-variant-numeric: tabular-nums; }
+
+.qv-poster-body { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(280px, 1fr); gap: var(--sp-5); align-items: start; }
+
+/* The preview: the poster's own shape, never stretched; a portrait one stands up beside the fields. */
+.qv-preview { position: relative; display: grid; place-items: center; min-height: 240px; border-radius: var(--r-md); background: var(--pro-surface-2); overflow: hidden; }
+.qv-preview canvas { display: block; width: 100%; height: auto; max-height: 68dvh; object-fit: contain; }
+.qv-preview canvas[data-shape="portrait"] { width: auto; height: 68dvh; max-width: 100%; }
+.qv-preview canvas:not([data-ready]) { visibility: hidden; }
+.qv-preview .qv-wait { position: absolute; inset: auto var(--sp-4) var(--sp-4); margin: 0; text-align: center; font-size: var(--fs-sm); color: var(--pro-muted); }
+.qv-preview .qv-wait:empty { display: none; }
+.qv-p-split { margin: 0; font-size: var(--fs-2xs); line-height: 1.4; color: var(--pro-muted); }
+
+.qv-form { display: grid; gap: var(--sp-3); }
+.qv-row { display: grid; gap: var(--sp-1); }
+.qv-label, .qv-field > span { font-size: var(--fs-xs); font-weight: 600; color: var(--pro-muted); }
+
+/* A choice of two or three, side by side: the picked one is a tint, never the blue. */
+.qv-seg { display: flex; gap: var(--sp-1); padding: 3px; border-radius: var(--r-md); background: var(--pro-surface-2); }
+.qv-seg-item { position: relative; flex: 1 1 0; display: grid; }
+.qv-seg-item input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
+.qv-seg-item span {
+  display: grid; place-items: center; min-height: 32px; padding: var(--sp-1) var(--sp-2); border-radius: var(--r-sm);
+  font-size: var(--fs-sm); font-weight: 600; text-align: center; color: var(--pro-muted);
+  transition: background-color var(--duration-fast) var(--ease-smooth-out), color var(--duration-fast) var(--ease-smooth-out);
+}
+.qv-seg-item input:checked + span { background: var(--pro-tint); color: var(--pro-ink); box-shadow: inset 0 0 0 1px var(--pro-line); }
+.qv-seg-item input:focus-visible + span { outline: 2px solid var(--blue-500); outline-offset: 1px; }
+
+.qv-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-2) var(--sp-3); }
+.qv-field { display: grid; gap: var(--sp-1); min-width: 0; }
+.qv-field[hidden] { display: none; }
+.qv-field input, .qv-field select {
+  width: 100%; min-height: 36px; padding: var(--sp-1) var(--sp-2); border-radius: var(--r-sm);
+  font: inherit; font-size: var(--fs-sm); color: var(--pro-text); background: var(--pro-surface-2); border: 1px solid var(--pro-hairline);
+}
+.qv-field input:focus-visible, .qv-field select:focus-visible { outline: 2px solid var(--blue-500); outline-offset: 1px; }
+.qv-field[data-f="venue"], .qv-field[data-f="headline"] { grid-column: 1 / -1; }
+
+.qv-poster .pro-actions { margin-top: var(--sp-1); }
+.qv-poster .qv-download { min-height: 44px; font-size: var(--fs-md); }
+.qv-poster .qv-download:disabled { opacity: 0.7; cursor: progress; }
+.qv-poster .qv-status { margin: 0; min-height: 1.4em; font-size: var(--fs-sm); color: var(--pro-text); font-variant-numeric: tabular-nums; }
+
+@media (max-width: 760px) {
+  .qv-poster-body { grid-template-columns: 1fr; }
+  .qv-preview canvas[data-shape="portrait"] { height: 52dvh; }
+}
+@media (pointer: coarse) {
+  .qv-seg-item span, .qv-field input, .qv-field select { min-height: 44px; }
+}

@@ -36,6 +36,7 @@ import type { DraftEnvelope } from './core/draft';
 // shared link and the desktop-only gate for /app; ?editor=1 opts out of both,
 // so a draft started on a phone is never permanently stranded.
 import { isNarrowForEditor } from './ui/desktopOnly';
+import { setMatchDayDeps } from './ui/matchDayDeps';
 
 // The display faces (~256 KB) are not loaded here any more: the toolbar asks
 // for them the first time the Text tool, the AI panel or a text layer needs
@@ -1275,6 +1276,15 @@ async function main(): Promise<void> {
       if (resumePreview) preview?.start();
       document.dispatchEvent(new CustomEvent('tifo:sim-failed'));
     }
+  });
+
+  // Pro's film and poster draw Match Day off screen, from the export panel (ui/matchDayDeps.ts).
+  setMatchDayDeps({
+    map, store, template, assetStore, bannerStore,
+    pausePreview: () => preview?.stop(),
+    resumePreview: () => {
+      if (!previewHost.hidden) preview?.start();
+    },
   });
 
   // Shareable Match Day link: ?sim=1 opens the simulator straight onto the loaded design.

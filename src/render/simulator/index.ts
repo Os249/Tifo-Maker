@@ -9,6 +9,7 @@ import { applyNightIBL } from './env';
 import { buildStands } from './stands';
 import { buildTrack, type TrackBuild } from './track';
 import { describeRecording, pickRecordingFormat, recordingPlan, type RecordingFormat } from './recordPlan';
+import { drawCreditLine, type Credit } from '../../ui/creditLine';
 
 export { RECORD_MAX_BYTES } from './recordPlan';
 import { buildCrowd, type CrowdController, type CrowdPreset } from './crowd';
@@ -17,7 +18,8 @@ import { buildBanners, type BannerController } from './banners';
 import { buildEffects, type EffectsController } from './effects';
 import { bowlShots, seatShot, flyover, flyoverPeriodFor, FLY_DURATION, applyShot as applyCameraShot, tifoFootprint, tifoShots, type SimShot, type TifoFootprint } from './cameras';
 import { revealInstant, revealKeys, revealVisibility, type RevealMode } from './choreo';
-import { REVEAL_GLSL, drumReactions, revealConst, revealDrum, revealOff, revealRamp, revealStep, revealUniforms } from './revealGpu';
+import { REVEAL_GLSL, drumReactions, revealConst, revealDrum, revealFade, revealOff, revealRamp, revealStep, revealUniforms } from './revealGpu';
+import type { FilmHost } from './film';
 import { evalTimeline, type Timeline, type Cue, type EffectName } from './timeline';
 
 /**
@@ -51,6 +53,7 @@ import { seatLookMap, type SeatLookMap } from './seatLook';
 import { buildVenueDetails, type VenueBuild } from './venue';
 import { buildPremium } from './premium';
 import { paintScreen, type ScreenMode } from './screenPicture';
+import type { LedStyle } from './ledBoards';
 import { curveSampler, laneLines, noTifoMask, seatZones } from '../../core/venueDetails';
 
 /** A card that is not there: premium seats show their chair instead. */
@@ -254,6 +257,8 @@ export class MatchDaySimulator {
   private cpuRevealShown = false;
   private screen: { mode: ScreenMode; nameEn: string; nameAr: string; image?: CanvasImageSource & { width: number; height: number } } = { mode: 'stadium', nameEn: '', nameAr: '' };
   private screenDirty = false;
+  /** The LED page the big screens last showed ('boards' mode). */
+  private boardSeqPainted = -1;
   private lastScreenPaint = -1;
   private readonly manassaColor = new THREE.Color(0xc69a3a);
   private readonly jewelSeatColors = [new THREE.Color(0x8f2d2d), new THREE.Color(0xb14a2a), new THREE.Color(0xc98a4b), new THREE.Color(0x6f2222), new THREE.Color(0xd8b98a), new THREE.Color(0xa33b2b)];
@@ -1442,8 +1447,23 @@ export class MatchDaySimulator {
   }
 
   /** Hide the board messages for a free export, and show them again after. */
+  /** What the LED boards show this frame (the browser suites read it). */
+  boardFrame(): ReturnType<PitchsideController['boardFrame']> {
+    return this.pitchside.boardFrame();
+  }
+  /** The LED boards' style: template, crest, score (Pro; ledBoards.ts). */
+  setBoardStyle(style: LedStyle): void {
+    if (this.pitchside.setBoardStyle(style)) {
+      if (this.screen.mode === 'boards') this.paintScreens();
+      this.requestRender();
+    }
+  }
   setBoardTextShown(on: boolean): void {
-    if (this.pitchside.setBoardTextShown(on)) this.requestRender();
+    if (this.pitchside.setBoardTextShown(on)) {
+      // The big screens show the boards' page too: hidden with them.
+      if (this.screen.mode === 'boards') this.paintScreens();
+      this.requestRender();
+    }
   }
 
   /** What the LED boards carry (null: the plain ring). Read-only, for the panel and the tests. */
@@ -1486,8 +1506,11 @@ export class MatchDaySimulator {
   private paintScreens(): void {
     if (!this.venue?.screen) return;
     this.screenDirty = false;
+    const boards = this.screen.mode === 'boards' ? this.pitchside.boardPicture() : null;
+    this.boardSeqPainted = boards?.seq ?? -1;
     const src = {
       mode: this.screen.mode,
+      boards,
       nameEn: this.screen.nameEn || this.template.name,
       nameAr: this.screen.nameAr || this.screen.nameEn || this.template.name,
       palette: this.store.palette,
@@ -1699,7 +1722,7 @@ export class MatchDaySimulator {
    * and it is the one most likely to be posted as it is. `mark: false`
    * leaves it off (Pro: the overlay asks proGate before it passes that).
    */
-  snapshot(opts: { mark?: boolean } = {}): string {
+  snapshot(opts: { mark?: boolean; credit?: Credit } = {}): string {
     this.premiumLod?.(this.camera, this.canvas.height);
     this.effects.render(this.renderer, this.scene, this.camera);
     const src = this.renderer.domElement;
@@ -1712,12 +1735,137 @@ export class MatchDaySimulator {
     if (!ctx || !w || !h) return src.toDataURL('image/png');
     ctx.drawImage(src, 0, 0);
     if (opts.mark !== false) drawSiteMark(ctx, w, h);
+    // The fan's credit line (Pro, ui/creditLine.ts), in the corner the mark is not in.
+    if (opts.credit?.text) drawCreditLine(ctx, w, h, opts.credit.text, { avoid: opts.mark !== false ? 'right' : null, accent: opts.credit.accent });
     return comp.toDataURL('image/png');
   }
 
   private recording = false;
   isRecording(): boolean {
-    return this.recording;
+    return this.recording || this.filming !== null;
+  }
+
+  // ---- the Pro film (./film.ts) ----
+  /** A Pro film is being drawn: its size, the step its frames advance by, and what to put back. */
+  private filming: {
+    w: number;
+    h: number;
+    dt: number;
+    ratio: number;
+    wasRunning: boolean;
+    camera: { position: THREE.Vector3; target: THREE.Vector3; fov: number };
+  } | null = null;
+  /**
+   * The handle a Pro film drives this simulator through (film.ts). While it
+   * films, the live loop is stopped, the picture is the film's size whatever
+   * the window is, and each frame moves the scene on by the film's own fixed
+   * step rather than by the wall clock: frame n is the same picture on a
+   * phone that takes a second to draw it as on a desktop that takes 30 ms.
+   * The reveal is the film's, through the seats' GPU reveal (key.x and the
+   * fade mode), so the show's own reveal state is left alone.
+   */
+  filmHost(): FilmHost {
+    return {
+      canvas: this.canvas,
+      template: this.template,
+      alive: () => !this.disposed && !this.renderer.getContext().isContextLost(),
+      footprint: () => this.tifoFootprint(),
+      bounds: () => this.seatBounds(),
+      outerReach: () => this.outerReach(),
+      shots: () => this.shots(),
+      painted: (i) => this.store.cells[i] !== 0 && !(this.noTifo !== null && this.noTifo[i] === 1),
+      map: this.map,
+      overRoof: (at) => {
+        // Something the ground built under the lens (a roof, a stand's deck):
+        // the camera is over a building, which fills the bottom of the picture,
+        // not over the bowl.
+        const ray = new THREE.Raycaster(new THREE.Vector3(...at), new THREE.Vector3(0, -1, 0), 0, 30);
+        return ray.intersectObjects(this.structureObjects, true).some((h) => (h.object as THREE.Mesh).isMesh && h.object.visible);
+      },
+      sees: (from, to) => {
+        // Anything the ground built (a roof's front edge, a tier above) between
+        // the camera and a card, short of the card's own few metres of stand.
+        const a = new THREE.Vector3(...from);
+        const d = new THREE.Vector3(...to).sub(a);
+        const far = d.length() - 3;
+        if (far <= 0) return true;
+        const ray = new THREE.Raycaster(a, d.normalize(), 0, far);
+        return !ray.intersectObjects(this.structureObjects, true).some((h) => {
+          const m = h.object as THREE.Mesh;
+          const mat = (Array.isArray(m.material) ? m.material[0] : m.material) as THREE.Material | undefined;
+          return m.isMesh && m.visible && !!mat && mat.blending !== THREE.AdditiveBlending;
+        });
+      },
+      begin: async (w, h, fps) => {
+        if (this.filming) throw new Error('already filming');
+        const wasRunning = this.running;
+        this.stop();
+        // Not judged as a live frame rate: the governor would take pixels off the film.
+        this.continuous = false;
+        this.stopTimeline(false);
+        this.reveal = null;
+        this.restoreFade = null;
+        this.setFly(false);
+        this.camTween = null;
+        this.controls.enabled = false;
+        this.showTifoForShow();
+        this.filming = {
+          w, h, dt: 1 / fps, ratio: this.renderer.getPixelRatio(), wasRunning,
+          camera: { position: this.camera.position.clone(), target: this.controls.target.clone(), fov: this.camera.fov },
+        };
+        // Exactly the film's pixels: the CSS size is left as it is, so Match
+        // Day's own picture only looks squeezed under the progress card.
+        this.renderer.setPixelRatio(1);
+        this.renderer.setSize(w, h, false);
+        this.effects.setSize(this.renderer, w, h);
+        this.camera.aspect = w / h;
+        this.camera.updateProjectionMatrix();
+        this.shadowsChanged();
+        if (!this.compiled) this.compiled = this.precompile(this.scene).then(() => { this.compileDone = true; });
+        await this.compiled;
+        await this.surroundings.ready.catch(() => {});
+      },
+      frame: (shot) => {
+        if (!this.filming || this.disposed) return;
+        applyCameraShot(this.camera, this.controls, shot);
+        this.inFrame = true;
+        try {
+          this.frame();
+        } finally {
+          this.inFrame = false;
+        }
+      },
+      revealKeys: (keys) => {
+        // Through the seats' own attribute: the next reveal of the show's own
+        // sends its keys again (revealKeyMode cleared).
+        this.revealNumbers(null, -1);
+        const a = this.revealAttr!.array as Float32Array;
+        for (let i = 0; i < this.map.count; i++) a[i * 4] = keys[i];
+        this.revealAttr!.needsUpdate = true;
+        this.revealKeyMode = null;
+      },
+      revealAt: (clock, fade) => revealFade(this.revealU, clock, fade),
+      haze: (k) => this.effects.setHaze(k),
+      screens: (show) => this.venue?.object.traverse((o) => {
+        if (o.name === 'big-screen' || o.name === 'centre-screen') o.visible = show;
+      }),
+      end: () => {
+        const f = this.filming;
+        if (!f) return;
+        this.filming = null;
+        this.applyReveal(null);
+        this.effects.setHaze(1);
+        this.renderer.setPixelRatio(f.ratio);
+        this.camera.position.copy(f.camera.position);
+        this.controls.target.copy(f.camera.target);
+        this.camera.fov = f.camera.fov;
+        this.camera.updateProjectionMatrix();
+        this.controls.enabled = true;
+        this.controls.update();
+        this.resize();
+        if (f.wasRunning && !this.disposed) this.start();
+      },
+    };
   }
 
   /**
@@ -1737,7 +1885,7 @@ export class MatchDaySimulator {
    * Resolution is never what gives way. See the fps note below for what does.
    */
   async recordReveal(
-    opts: { seconds?: number; fps?: number; height?: number; maxBytes?: number; camera?: RecordCamera; mark?: boolean } = {},
+    opts: { seconds?: number; fps?: number; height?: number; maxBytes?: number; camera?: RecordCamera; mark?: boolean; credit?: Credit } = {},
     onTick?: (remaining: number) => void,
   ): Promise<RecordedClip | null> {
     if (this.recording) return null;
@@ -1765,10 +1913,12 @@ export class MatchDaySimulator {
     comp.height = h;
     const ctx = comp.getContext('2d')!;
     const marked = opts.mark !== false;
+    const credit = opts.credit?.text ?? '';
     let raf = 0;
     const drawFrame = (): void => {
       ctx.drawImage(this.canvas, 0, 0, w, h);
       if (marked) drawSiteMark(ctx, w, h);
+      if (credit) drawCreditLine(ctx, w, h, credit, { avoid: marked ? 'right' : null, accent: opts.credit?.accent });
       raf = requestAnimationFrame(drawFrame);
     };
     drawFrame();
@@ -2981,6 +3131,8 @@ export class MatchDaySimulator {
   }
 
   private resize(): void {
+    // A film keeps its own size whatever the window does meanwhile.
+    if (this.filming) return;
     const w = this.host.clientWidth;
     const h = this.host.clientHeight;
     if (w === 0 || h === 0) return;
@@ -3127,7 +3279,8 @@ export class MatchDaySimulator {
    * The order is the loop's as it always was.
    */
   private frame(): boolean {
-    const dt = this.clock.getDelta();
+    // A film's frame is its own fixed step, never the time it took to draw.
+    const dt = this.filming ? this.filming.dt : this.clock.getDelta();
     this.elapsed += dt;
     this.dirty = false;
     let moving = false;
@@ -3166,7 +3319,7 @@ export class MatchDaySimulator {
       this.surroundings.update(this.walkerDt);
       this.walkerDt = 0;
     }
-    if (this.accessories.update(dt, { fov: this.camera.fov, height: this.host.clientHeight })) moving = true;
+    if (this.accessories.update(dt, { fov: this.camera.fov, height: this.filming?.h ?? this.host.clientHeight })) moving = true;
     if (this.weather.update(dt)) moving = true;
     if (this.reveal) {
       this.stepReveal();
@@ -3192,6 +3345,9 @@ export class MatchDaySimulator {
     }
     // True while the camera still moves: a drag, and the glide after it.
     if (this.controls.update()) moving = true;
+    // The LED boards move on frames drawn anyway (ledBoards.ts), and finish a change they started.
+    if (this.pitchside.animate(dt, moving || this.recording, !!this.reveal || this.revealActiveLast)) moving = true;
+    if (this.screen.mode === 'boards' && (this.pitchside.boardPicture()?.seq ?? -1) !== this.boardSeqPainted) this.screenDirty = true;
     if (this.continuous) this.adaptPerf(dt);
     this.premiumLod?.(this.camera, this.canvas.height);
     this.effects.render(this.renderer, this.scene, this.camera);
@@ -3199,7 +3355,8 @@ export class MatchDaySimulator {
   }
 
   start(): void {
-    if (this.running || this.disposed) return;
+    // A film draws its own frames; the tab coming back must not start the loop under it.
+    if (this.running || this.disposed || this.filming) return;
     if (!this.visBound) {
       document.addEventListener('visibilitychange', this.onVisibility, { signal: this.listeners.signal });
       this.visBound = true;

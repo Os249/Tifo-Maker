@@ -21,3 +21,10 @@ body.m-shell .m-sheet #text-bar #text-input { flex: 1 1 150px; min-width: 0; }
 #text-font .pfont-group option[value="rounded"] { font-family: "TifoProRounded", sans-serif; }
 #text-font .pfont-group option[value="classic"] { font-family: "TifoProClassic", sans-serif; }
 #text-font .pfont-group option[value="marker"] { font-family: "TifoProMarker", sans-serif; }
+#text-font .pfont-group option[value="pixel"] { font-family: "TifoProPixel", sans-serif; }
+#text-font .pfont-group option[value="gothic"] { font-family: "TifoProGothic", sans-serif; }
+#text-font .pfont-group option[value="heritage"] { font-family: "TifoProHeritage", sans-serif; }
+#text-font .pfont-group option[value="ruqaa"] { font-family: "TifoProRuqaa", sans-serif; }
+
+/* The banners-only voices: offered where words land on a banner (ui/proFonts keepBannerFontsOffSeats). */
+body:not(.banner-view) #text-font > .pfont-banners { display: none; }

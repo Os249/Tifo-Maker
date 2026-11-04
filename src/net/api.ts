@@ -158,7 +158,7 @@ export function signOut(): void {
  * The server now tolerates it, and server/test/email.test.mts fails if a call
  * here goes back to sending the header without a body.
  */
-function authHeaders(json: boolean): Record<string, string> {
+export function authHeaders(json: boolean): Record<string, string> {
   const h: Record<string, string> = {};
   if (json) h['content-type'] = 'application/json';
   if (token) h.authorization = `Bearer ${token}`;
@@ -1361,6 +1361,8 @@ export interface PhotoReadReply {
   known: PhotoKnown;
   used: string[];
   dropped: Array<{ field: string; agreement: number; answered: number }>;
+  /** Most readings said the photo shows no ground: nothing was used, and it was not counted. */
+  noGround?: boolean;
   errors: string[];
 }
 
@@ -1822,7 +1824,7 @@ export interface AiError extends Error {
  */
 export async function generateAiTifo(
   prompt: string,
-  opts: { mode?: 'super'; stadium?: string; engine?: 'offline'; signal?: AbortSignal } = {},
+  opts: { mode?: 'super'; stadium?: string; engine?: 'offline'; signal?: AbortSignal; kit?: { name: string; colours: string[]; font?: string } } = {},
 ): Promise<AiGenerateResult | AiChoice> {
   const res = await fetch(`${API}/ai/generate`, {
     method: 'POST',
@@ -1833,6 +1835,8 @@ export async function generateAiTifo(
       ...(opts.mode ? { mode: opts.mode } : {}),
       ...(opts.stadium ? { stadium: opts.stadium } : {}),
       ...(opts.engine ? { engine: opts.engine } : {}),
+      // The club kit in use in this project (ui/kitActive.ts): its colours and font for the designer.
+      ...(opts.kit ? { kit: opts.kit } : {}),
     }),
   });
   const data = (await res.json().catch(() => null)) as

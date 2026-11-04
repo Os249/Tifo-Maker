@@ -87,10 +87,42 @@ export const FREE_WINDOWS: Record<AllowanceKind, Window[]> = {
  *
  * The 7-day gift has the same ceilings; its month is the gift itself.
  */
+/**
+ * pq-photo: whether "Stadium from a photo" is sold as part of Pro.
+ *
+ * Measured on 1 Nov 2026 on 35 real photos of 18 grounds the site models
+ * (docs/pro-quality/photo.md), the stadium it builds rates 6 of 10: the seats'
+ * colour, box or bowl, tiers, roof and track now come out right most of the
+ * time, but every stand is drawn the same, and the photo only works after the
+ * ground has been found on the map. Osamh's rule is that a perk under 8 comes
+ * off the list, so it is off: Pro holders get the free allowance for it, and
+ * /pro and the Pro sheets do not offer it as something Pro adds. The feature
+ * itself stays, free, for everyone. true puts it back on sale.
+ */
+export const PHOTO_ON_PRO = false;
+
+/**
+ * Whether more AI designs and more Polish are sold as part of Pro.
+ *
+ * Measured on 1 Nov 2026 with an eval of 20 designs (10 briefs, mostly Saudi
+ * clubs, half in Arabic, on Kingdom Arena and the Jewel), each rendered at
+ * seat resolution and from the TV camera and graded by Claude Opus 5.5
+ * against a written rubric (legibility from the TV camera, club identity,
+ * composition, hero, use of the bowl, phrase, Arabic, "would a curva hold
+ * this up"): today's designs average 3 to 6 of 10, and a dearer pipeline
+ * (a stronger director plus a critique round at seat resolution) moved them
+ * by under a point. More of a design that rates 4 is not worth paying for,
+ * so, under the same rule as the photo, they are off the list: Pro holders
+ * get the free allowances, /pro and the Pro sheets do not offer them, and
+ * the AI panel does not sell Pro when one runs out. The AI itself stays,
+ * free, for everyone. true puts them back on sale at the ceilings below.
+ */
+export const AI_ON_PRO = false;
+
 const PRO_WINDOWS: Record<AllowanceKind, Window[]> = {
-  std: [{ period: 'day', limit: 15 }, { period: 'cycle', limit: 70 }],
-  polish: [{ period: 'day', limit: 10 }, { period: 'cycle', limit: 20 }],
-  photo: [{ period: 'day', limit: 3 }, { period: 'cycle', limit: 10 }],
+  std: AI_ON_PRO ? [{ period: 'day', limit: 15 }, { period: 'cycle', limit: 70 }] : FREE_WINDOWS.std,
+  polish: AI_ON_PRO ? [{ period: 'day', limit: 10 }, { period: 'cycle', limit: 20 }] : FREE_WINDOWS.polish,
+  photo: PHOTO_ON_PRO ? [{ period: 'day', limit: 3 }, { period: 'cycle', limit: 10 }] : FREE_WINDOWS.photo,
   cutout: [{ period: 'day', limit: 5 }, { period: 'cycle', limit: 15 }],
 };
 

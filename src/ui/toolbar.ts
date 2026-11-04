@@ -16,6 +16,7 @@ import { PRO_FONTS, isProVoice, proVoicesIn } from '../core/proVoices';
 import { MAX_PICTURES, encodePictureSrcAsync, rememberPicture, type ObjectLayer } from '../core/objects';
 import type { Composer } from '../core/composer';
 import { isPortraitStyle } from '../core/portraitStyles';
+import type { FaceInfo } from '../core/portraitPipeline';
 import { writeLayers } from '../core/layerStore';
 import { mountLayersPanel, layerName } from './layersPanel';
 import { MIN_LEGIBLE_RUN, findFragileSeats } from '../core/analysis';
@@ -35,6 +36,7 @@ import { fetchPro } from '../net/api';
 import { mountProChip, proChipHtml } from './pro';
 import type { ProToolsContext } from './proTools';
 import { designProItems, exportGate, withoutDesignProItems, type GateAnswer } from './proGate';
+import { currentCredit } from './creditLine';
 import { BANNER_HISTORY_EVENT, bannerActive, bannerHost } from './bannerHost';
 import { openAuthModal } from './authModal';
 import { openGallery } from './gallery';
@@ -166,7 +168,7 @@ export function mountToolbar(
    * main thread from the moment the picture is chosen (performance plan
    * P1.7), so by the time it is placed the encode is usually done.
    */
-  let pendingImport: { bitmap: ImageBitmap; name: string; src?: Promise<string | undefined> } | null = null;
+  let pendingImport: { bitmap: ImageBitmap; name: string; src?: Promise<string | undefined>; face?: FaceInfo } | null = null;
   let onEnterMode: (tool: ToolId) => void = () => {};
   // The twelve display faces, the first time anything needs them (see wantFaces below).
   let wantFaces: () => void = () => {};
@@ -1235,7 +1237,8 @@ export function mountToolbar(
       dither: placeAs.dither,
       cutout: placeAs.cutout,
       alphaThreshold: placeAs.alphaThreshold,
-      ...(placeAs.style ? { style: placeAs.style } : {}),
+      // The face a portrait style found in the picture (ui/proStyles.ts), drawn from when styled.
+      ...(placeAs.style ? { style: placeAs.style, ...(imp.face ? { face: imp.face } : {}) } : {}),
     });
     // Keep the bitmap alive (the object now owns a reference); just exit import mode.
     setTool('select');
@@ -1314,9 +1317,9 @@ export function mountToolbar(
   const cutoutHost = {
     bar: $('#import-bar'),
     current: () => pendingImport?.bitmap ?? null,
-    swap: (bitmap: ImageBitmap) => {
+    swap: (bitmap: ImageBitmap, face?: FaceInfo) => {
       if (!pendingImport) return false;
-      pendingImport = { bitmap, name: pendingImport.name, src: encodePictureSrcAsync(bitmap) };
+      pendingImport = { bitmap, name: pendingImport.name, src: encodePictureSrcAsync(bitmap), ...(face ? { face } : {}) };
       editor.setStampPreview(bitmap, false);
       refreshImportUI();
       return true;
@@ -3549,9 +3552,12 @@ export function mountToolbar(
   const sxChosen = (): { clean: boolean; size: { width: number; height: number } | null; items: string[] } => {
     const clean = sxNoMark.checked && !sxNoMarkLabel.hidden;
     const size = sxFormat.value === 'gif' ? null : proCtx.stadium?.size() ?? null;
+    const credit = currentCredit();
     const items = [
       ...(clean ? [i18nT('pro.mark.option')] : []),
       ...(size ? proCtx.stadium?.items() ?? [] : []),
+      // The fan's credit line (Pro, ui/proCredit.ts).
+      ...(credit.text && credit.label ? [credit.label] : []),
       ...designProItems(objects),
     ];
     return { clean, size, items };
@@ -3561,7 +3567,9 @@ export function mountToolbar(
     forGif: boolean,
     clean = sxNoMark.checked && !sxNoMarkLabel.hidden,
     size: StadiumExportOpts['size'] = forGif ? null : proCtx.stadium?.size() ?? null,
+    credit: StadiumExportOpts['credit'] = currentCredit(),
   ): StadiumExportOpts => ({
+    credit,
     reveal: revealSel.value as RevealId,
     durationSec: player.durationSec,
     fps: forGif ? 15 : 30,
@@ -3605,6 +3613,8 @@ export function mountToolbar(
       editor.rebuildPalette();
       renderPalette();
     },
+    // Portrait styles prepare the armed picture for its stand (ui/proStyles.ts).
+    importPicture: cutoutHost,
   };
   const mountPro = (): void => {
     void fetchPro().then((st) => {
@@ -3623,21 +3633,26 @@ export function mountToolbar(
     URL.revokeObjectURL(url);
   };
 
-  const runExport = async (preview: Preview3D, say: (t: string) => void, clean: boolean, size: StadiumExportOpts['size'] = null): Promise<void> => {
+  const runExport = async (preview: Preview3D, say: (t: string) => void, clean: boolean, size: StadiumExportOpts['size'] = null, pro = false): Promise<void> => {
     const forGif = sxFormat.value === 'gif';
     const name = `${docTitle.value.trim() || 'tifo'}-stadium`;
+    // The credit line is Pro: the free version goes without it.
+    const credit = pro ? currentCredit() : { text: '' };
     if (forGif) {
       say('Encoding GIF…');
-      const blob = await exportStadiumGif(preview, map, store, buildExportOpts(true, clean));
+      const blob = await exportStadiumGif(preview, map, store, buildExportOpts(true, clean, null, credit));
       downloadBlob(blob, `${name}.gif`);
       say(`GIF exported (${(blob.size / 1024).toFixed(0)} KB)`);
+    } else if (size && proCtx.stadium?.film) {
+      // Pro: Match Day's film of the tifo at that size (ui/proFilm.ts).
+      say(await proCtx.stadium.film(size, { clean, reveal: revealSel.value }));
     } else {
       if (!videoExportSupported()) {
         say('Video capture is not supported in this browser, switch Format to GIF.');
         return;
       }
       say('Recording video…');
-      const { blob, extension, universal } = await exportStadiumVideo(preview, map, buildExportOpts(false, clean, size));
+      const { blob, extension, universal } = await exportStadiumVideo(preview, map, buildExportOpts(false, clean, size, credit));
       downloadBlob(blob, `${name}.${extension}`);
       say(`Video exported (${(blob.size / 1024).toFixed(0)} KB)`
         + (universal ? '' : ' — this browser could not record H.264, so it may not open everywhere.'));
@@ -3651,7 +3666,7 @@ export function mountToolbar(
   const askAndExport = async (preview: Preview3D, say: (t: string) => void): Promise<GateAnswer> => {
     const want = sxChosen();
     const how = await exportGate(want.items);
-    if (how === 'pro') await runExport(preview, say, want.clean, want.size);
+    if (how === 'pro') await runExport(preview, say, want.clean, want.size, true);
     else if (how === 'free') {
       await withoutDesignProItems(objects, async () => {
         // Two frames, for the seats to follow the lifted layers (no more: a hidden tab has none).
@@ -3699,10 +3714,14 @@ export function mountToolbar(
       const cv = backdrop.querySelector('.sx-canvas') as HTMLCanvasElement;
       const ctx = cv.getContext('2d')!;
       const modalMsg = backdrop.querySelector('#sx-modal-msg') as HTMLElement;
-      await previewStadium(preview, map, opts, ctx);
+      // A Pro size previews Match Day's film, the thing it exports (ui/proFilm.ts).
+      const play = (o: StadiumExportOpts): Promise<void> => (o.size && proCtx.stadium?.previewFilm
+        ? proCtx.stadium.previewFilm(o.size, cv, { clean: !o.watermark, reveal: revealSel.value })
+        : previewStadium(preview, map, o, ctx));
+      await play(opts);
       if (!backdrop.isConnected) return;
       backdrop.querySelector('#sx-modal-replay')!.addEventListener('click', () => {
-        void previewStadium(preview, map, buildExportOpts(sxFormat.value === 'gif'), ctx);
+        void play(buildExportOpts(sxFormat.value === 'gif'));
       });
       const dlBtn = backdrop.querySelector('#sx-modal-download') as HTMLButtonElement;
       dlBtn.addEventListener('click', async () => {

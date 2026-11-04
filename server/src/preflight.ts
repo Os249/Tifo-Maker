@@ -203,6 +203,16 @@ export function configWarnings(env: NodeJS.ProcessEnv): ConfigWarning[] {
     });
   }
 
+  // The smart cut-out's local test model (cutout.ts) is for test machines
+  // only; production ignores it, and says so, so nobody thinks it is in use.
+  if (prod && env.AI_CUTOUT_LOCAL_URL?.trim()) {
+    out.push({
+      key: 'AI_CUTOUT_LOCAL_URL',
+      effect: 'is set, but it is for test machines only and production ignores it: smart cut-out uses Cloudflare (AI_CLOUDFLARE_ACCOUNT_ID and AI_CLOUDFLARE_API_TOKEN) or is off. Remove the variable.',
+      state: 'wrong',
+    });
+  }
+
   // A model id Google has retired. The server already asks for the current
   // model instead (currentModelId in aiProvider), but the variable should say
   // what is really answering, or the next person to read it is misled.

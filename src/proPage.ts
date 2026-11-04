@@ -43,8 +43,18 @@ const ROWS: AllowanceKind[] = ['std', 'polish', 'cutout', 'photo'];
 /** What only Pro has, in the order the Pro column lists it. */
 const PERK_ROWS = ['pp.row.mark', 'pp.row.video', 'pp.row.poster', 'pp.row.styles', 'pp.row.fonts', 'pp.row.led', 'pp.row.kit', 'pp.row.badge'];
 
-function planCard(o: { id: string; name: string; price: string; sub: string; limits: PlanLimits | undefined; pro: boolean }): string {
-  const rows = ROWS.map((k) => `<li><span>${escapeHtml(t(`pp.row.${k}`))}</span><b class="pp-lim">${limitHtml(o.limits?.[k])}</b></li>`);
+/**
+ * The allowances worth a row: those where Pro gives more than Free. A kind
+ * Pro gives no more of (Stadium from a photo, while it is off the Pro list:
+ * server/src/proPlan PHOTO_ON_PRO) is not something Pro adds, so neither card
+ * lists it.
+ */
+function rowsFor(lim: { free: PlanLimits; pro: PlanLimits } | undefined): AllowanceKind[] {
+  return ROWS.filter((k) => JSON.stringify(lim?.pro[k] ?? null) !== JSON.stringify(lim?.free[k] ?? null));
+}
+
+function planCard(o: { id: string; name: string; price: string; sub: string; limits: PlanLimits | undefined; pro: boolean; rows: AllowanceKind[] }): string {
+  const rows = o.rows.map((k) => `<li><span>${escapeHtml(t(`pp.row.${k}`))}</span><b class="pp-lim">${limitHtml(o.limits?.[k])}</b></li>`);
   const yes = `<b class="pp-yes">${CROWN_SVG}<span>${escapeHtml(t('pp.included'))}</span></b>`;
   const no = `<b class="pp-no">${escapeHtml(t('pp.notIncluded'))}</b>`;
   for (const k of PERK_ROWS) rows.push(`<li><span>${escapeHtml(t(k))}</span>${o.pro ? yes : no}</li>`);
@@ -77,10 +87,10 @@ function paint(): void {
   $('pp-crown').innerHTML = CROWN_SVG;
   const lim = o.limits;
   $('pp-plans').innerHTML =
-    planCard({ id: 'free', name: t('pp.free.name'), price: tv('pp.price', { n: 0 }), sub: t('pp.free.sub'), limits: lim?.free, pro: false }) +
+    planCard({ id: 'free', name: t('pp.free.name'), price: tv('pp.price', { n: 0 }), sub: t('pp.free.sub'), limits: lim?.free, pro: false, rows: rowsFor(lim) }) +
     planCard({
       id: 'pro', name: t('pp.pro.name'), price: tv('pp.price.month', { n: o.monthly.price }),
-      sub: tv('pp.pro.sub', { days: o.monthly.days }), limits: lim?.pro, pro: true,
+      sub: tv('pp.pro.sub', { days: o.monthly.days }), limits: lim?.pro, pro: true, rows: rowsFor(lim),
     });
   $('pp-small').textContent = t('pp.noRenew');
 

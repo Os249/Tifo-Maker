@@ -6,6 +6,7 @@ import { shippedTemplateInfo } from './templates';
 import { MemoryAiBudgetRepository, MemoryAiEventsRepository, MemoryAiUsageRepository, MemoryAuthRepository, MemoryDesignRepository, MemoryEventsRepository, MemoryLeadsRepository } from './memoryRepo';
 import { PgAiBudgetRepository, PgAiEventsRepository, PgAiUsageRepository, PgAuthRepository, PgDesignRepository, PgEventsRepository, PgLeadsRepository } from './pgRepo';
 import { MemoryProRepository, PgProRepository } from './proRepo';
+import { MemoryKitRepository, PgKitRepository } from './kitRepo';
 import { PgSocialRepository } from './pgSocial';
 import { MemorySocialRepository } from './memorySocial';
 import { MemoryStadiumRepository, PgStadiumRepository } from './stadiumRepo';
@@ -254,6 +255,7 @@ async function main(): Promise<void> {
       aiBudget: new PgAiBudgetRepository(pool),
       aiFreeLimit: envNum('AI_FREE_LIMIT', 10, 0), // premium designs per hour
       pro: proRepo,
+      kits: new PgKitRepository(pool),
       stadiums,
       stats: new PgAdminStatsRepository(maint), // the dashboard's aggregates, admin only
       traffic,
@@ -294,6 +296,7 @@ async function main(): Promise<void> {
       aiBudget: new MemoryAiBudgetRepository(),
       aiFreeLimit: envNum('AI_FREE_LIMIT', 10, 0), // premium designs per hour
       pro: new MemoryProRepository(),
+      kits: new MemoryKitRepository(),
       stadiums: new MemoryStadiumRepository(),
       stats: new MemoryAdminStatsRepository(designs),
       traffic: (visitBuffer = new BatchedTrafficRepository(new MemoryTrafficRepository()).start()),

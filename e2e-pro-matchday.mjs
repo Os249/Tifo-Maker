@@ -16,7 +16,9 @@
  *                     "LED board text" and "Export without Pro items"
  *                     downloads the free version (plain boards, the mark on)
  *                     and puts the boards back; closing the sheet exports
- *                     nothing; Record's free version keeps the boards plain
+ *                     nothing; Record (Match Day's film by default, a Pro
+ *                     item of its own) asks first, and its free version is
+ *                     the recording, the boards plain
  *                     for the whole clip;
  *   the gift          after the 7-day gift: no sheet, the mark left off as
  *                     ticked, the boards in the picture, the crowns quiet;
@@ -31,6 +33,7 @@ import { spawn } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
 import { gzipSync } from 'node:zlib';
 import { chromium } from 'playwright';
+import { tsImport } from 'tsx/esm/api';
 import { PNG } from 'pngjs';
 
 const PORT = 8941;
@@ -106,7 +109,7 @@ const browser = await chromium
 const errs = [];
 const LED_REMEMBERED = JSON.stringify({ messages: ['REMEMBERED', '', ''], colour: '#1c5fd9' });
 /** Match Day, opened straight onto the account's saved design. */
-const matchDay = async (token, design, { base = B, lang = 'en', w = 1440, h = 900, phone = false, ls = {} } = {}) => {
+const matchDay = async (token, design, { base = B, lang = 'en', w = 1440, h = 900, phone = false, ls = {}, init = null } = {}) => {
   const ctx = await browser.newContext({
     viewport: { width: w, height: h },
     acceptDownloads: true,
@@ -123,6 +126,7 @@ const matchDay = async (token, design, { base = B, lang = 'en', w = 1440, h = 90
       if (tok) localStorage.setItem('tifo_token_v1', tok);
     } catch { /* */ }
   }, [token, lang, ls]);
+  if (init) await ctx.addInitScript(init);
   const p = await ctx.newPage();
   p.on('pageerror', (e) => errs.push(`${p.url()}: ${String(e.message).slice(0, 200)}`));
   await p.goto(`${base}${lang === 'ar' ? '/ar' : ''}/app?project=${design}&sim=1&e2e=1`, { waitUntil: 'domcontentloaded', timeout: 120000 });
@@ -249,7 +253,7 @@ console.log('\n— an account on the preview list —');
   await p.waitForTimeout(300);
   const sec = await p.evaluate(() => {
     const s = document.querySelector('.mds-section[data-sec="led"]');
-    const inputs = [...s.querySelectorAll('input[type=text]')];
+    const inputs = [...s.querySelectorAll('input[type=text][data-k^="led-text-"]')];
     const sw = [...s.querySelectorAll('.mds-swatch')];
     return {
       head: s.querySelector('.mds-shead').textContent,
@@ -337,7 +341,8 @@ console.log('\n— an account on the preview list —');
     s.dispatchEvent(new Event('change', { bubbles: true }));
   });
   await p.click('.mds-bar .mds-btn:has-text("Record")');
-  check('Record with Pro items asks first', await waitFor(p, () => document.querySelectorAll('.pro-items li').length === 2, null, 10000));
+  // Record makes Match Day's film for an account Pro is on for (ui/proFilm.ts): a Pro item of its own.
+  check('Record with Pro items asks first, the film among them', await waitFor(p, () => [...document.querySelectorAll('.pro-items li')].map((l) => l.textContent).join() === 'Without the tifomaker.org mark,LED board text,Full HD video', null, 10000), JSON.stringify(await p.evaluate(() => [...document.querySelectorAll('.pro-items li')].map((l) => l.textContent))));
   {
     const [dl] = await Promise.all([p.waitForEvent('download', { timeout: 120000 }), p.click('.pro-sheet [data-act="free"]')]);
     const r = await p.evaluate(() => ({ rec: window.__spy.recs.at(-1), during: window.__spy.shownDuringRec }));
@@ -349,6 +354,141 @@ console.log('\n— an account on the preview list —');
     check('…with the mark, and the boards plain the whole way through', r.rec?.mark === true && r.rec?.boards?.shown === false && r.during.length >= 3 && r.during.every((v) => v === false), JSON.stringify(r));
     check('…and back afterwards', await waitFor(p, () => window.__tifoMatchDay.boardText()?.shown === true, null, 10000));
   }
+  await ctx.close();
+}
+
+// =====================================================================
+console.log('\n— the LED boards\' clock, in Node (render/simulator/ledBoards.ts) —');
+{
+  const { LedShow, pagesFor, DEFAULT_STYLE } = await tsImport('./src/render/simulator/ledBoards.ts', import.meta.url);
+  const MSGS = ['FOREVER TOGETHER', 'يا هلال يا ذهب', 'GOLD'];
+  /** Run a show at 60 frames a second; `when(t)` says [moving, revealing]. */
+  const run = (style, secs, when) => {
+    const show = new LedShow();
+    show.setPages(pagesFor(MSGS, { ...DEFAULT_STYLE, ...style }));
+    const out = [];
+    for (let i = 0; i < secs * 60; i++) {
+      const [moving, revealing] = when(i / 60);
+      out.push({ t: i / 60, ...show.step(1 / 60, moving, revealing) });
+    }
+    return out;
+  };
+  const still = run({}, 5, () => [false, false]);
+  check('still: the three messages side by side, nothing moving, nothing asked for', still.every((f) => f.pages.slice(0, 3).join() === '0,1,2' && f.scroll === 0 && f.glow === 1 && !f.busy));
+  const moving = run({}, 12, (t) => [t < 10, false]);
+  const shown = [...new Set(moving.filter((f) => f.t < 10).map((f) => f.pages[0]))];
+  check('while the scene moves they take turns, scrolling between them', shown.length === 3 && moving.some((f) => f.scroll !== 0), JSON.stringify(shown));
+  const after = moving.filter((f) => f.t >= 10);
+  const busyAfter = after.filter((f) => f.busy).length / 60;
+  check('when it stops they finish the change they were in (under a second) and rest', busyAfter <= 0.75 && after.at(-1).pages.slice(0, 3).join() === '0,1,2' && !after.at(-1).busy, `${busyAfter.toFixed(2)} s`);
+  const reveal = run({}, 5, (t) => [true, t < 4.5]);
+  check('in the reveal they flash, three times, then hold steady', reveal.filter((f) => f.t < 1.5).some((f) => f.glow > 1) && reveal.filter((f) => f.t < 1.5).some((f) => f.glow < 1) && reveal.filter((f) => f.t > 1.6).every((f) => f.glow === 1));
+  const cd = run({ template: 'countdown' }, 4, () => [true, true]);
+  const order = cd.map((f) => f.pages[0]).filter((x, i, a) => i === 0 || x !== a[i - 1]);
+  check('Countdown: 3, 2, 1 a beat apart as the reveal starts, then the first message', order.slice(0, 4).join() === '0,1,2,3' && cd.find((f) => f.pages[0] === 3).t > 2.3 && cd.find((f) => f.pages[0] === 3).t < 2.5, JSON.stringify(order));
+  const tick = run({ template: 'chant' }, 6, (t) => [t < 3, false]);
+  check('Chant: the ticker runs while the scene moves and stops where it is when it stops', tick[170].scroll > tick[10].scroll && tick[250].scroll === tick[359].scroll);
+  check('Score: the score line first, then the messages', pagesFor(MSGS, { ...DEFAULT_STYLE, template: 'score', home: 'Hilal', away: 'Nassr', homeGoals: 2 }).map((p) => p.kind).join() === 'score,text,text,text');
+}
+
+// =====================================================================
+console.log('\n— the LED boards move, styled: templates, the crest, the big screens —');
+{
+  /** Frames Match Day draws (a draw into its canvas), counted at the WebGL calls, as e2e-matchday-perf.mjs does. */
+  const COUNT = () => {
+    window.__mdFrames = 0;
+    let drew = false;
+    const P = WebGL2RenderingContext.prototype;
+    for (const n of ['drawElements', 'drawArrays', 'drawElementsInstanced', 'drawArraysInstanced']) {
+      const f = P[n];
+      P[n] = function (...a) { if (this.canvas?.closest?.('.mds-overlay')) drew = true; return f.apply(this, a); };
+    }
+    const raf = window.requestAnimationFrame.bind(window);
+    window.requestAnimationFrame = (cb) => raf((t) => { drew = false; cb(t); if (drew) window.__mdFrames++; });
+  };
+  // Small, so the software renderer draws the reveal at a frame rate the boards can be timed by.
+  const { ctx, p } = await matchDay(fan.token, fan.design, { init: COUNT, w: 720, h: 450, ls: { mds_led_v1: JSON.stringify({ messages: ['FOREVER TOGETHER', 'يا هلال يا ذهب', 'GOLD'], colour: '#1c5fd9' }) } });
+  await openSec(p, 'led');
+  const frames = () => p.evaluate(() => window.__mdFrames);
+  const still = async (quiet = 3000, limit = 120000) => {
+    const t0 = Date.now(); let last = await frames(); let since = Date.now();
+    while (Date.now() - t0 < limit) { await p.waitForTimeout(400); const f = await frames(); if (f !== last) { last = f; since = Date.now(); } else if (Date.now() - since >= quiet) return true; }
+    return false;
+  };
+  const board = () => p.evaluate(() => window.__tifoMatchDay.boardFrame());
+  check('the words remembered are on the boards', await waitFor(p, () => window.__tifoMatchDay.boardFrame()?.count === 3, null, 30000), JSON.stringify(await board()));
+  const ui = await p.evaluate(() => ({
+    styles: [...document.querySelectorAll('[data-k="led-style"] option')].map((o) => o.value),
+    kit: document.querySelector('[data-k="led-kit"]')?.disabled,
+    kitHint: document.querySelector('[data-k="led-kit-hint"]')?.textContent,
+    screen: !!document.querySelector('[data-k="screen-mode"] option[value="boards"]'),
+  }));
+  check('five styles: messages, sponsor, chant, score, countdown', ui.styles.join() === 'boards,sponsor,chant,score,countdown', JSON.stringify(ui));
+  check('no club kit in this browser: the crest list says where to make one', ui.kit === true && /club kit/.test(ui.kitHint || ''), JSON.stringify(ui));
+  // Read once the boards have laid out (under load the first frame can still
+  // show one page on every board).
+  await waitFor(p, () => { const b = window.__tifoMatchDay.boardFrame(); return !!b && b.pages.slice(0, 3).join() === '0,1,2'; }, null, 30000);
+  const rest = await board();
+  check('still, the ring shows the three messages side by side', rest.pages.slice(0, 3).join() === '0,1,2' && rest.glow === 1, JSON.stringify(rest));
+  check('a still Match Day with words on the boards draws nothing', await still(3000) && (await (async () => { const a = await frames(); await p.waitForTimeout(4000); return (await frames()) - a; })()) === 0);
+  // The reveal: the boards move with it.
+  const seen = await p.evaluate(async () => {
+    const sim = window.__tifoMatchDay;
+    const out = new Set();
+    let glows = 0;
+    sim.playReveal('wave', 4500);
+    const t0 = performance.now();
+    while (performance.now() - t0 < 7000) {
+      await new Promise((r) => requestAnimationFrame(r));
+      const b = sim.boardFrame();
+      if (b) { out.add(b.pages.join('') + '|' + b.scroll.toFixed(2)); if (b.glow !== 1) glows++; }
+    }
+    return { states: out.size, glows };
+  });
+  check('during the reveal the boards move with it (they take turns and flash)', seen.states >= 2 && seen.glows >= 1, JSON.stringify(seen));
+  check('…and when it is over, Match Day stops drawing again (the boards finish their change and rest)', await still(3000, 60000));
+  check('…at rest: the messages side by side again', (await board()).pages.slice(0, 3).join() === '0,1,2', JSON.stringify(await board()));
+  await shot(p, 'led-after-reveal');
+  // Score style.
+  await p.selectOption('[data-k="led-style"]', 'score');
+  await p.fill('[data-k="led-home"]', 'Hilal');
+  await p.fill('[data-k="led-away"]', 'Nassr');
+  await p.fill('[data-k="led-home-goals"]', '2');
+  check('Score: CLUB 2–0 RIVAL first, then the messages', await waitFor(p, () => window.__tifoMatchDay.boardFrame()?.kinds.join() === 'score,text,text,text', null, 20000), JSON.stringify(await board()));
+  const saved = await p.evaluate(() => JSON.parse(localStorage.getItem('mds_led_style_v1') || 'null'));
+  check('…remembered in this browser', saved?.template === 'score' && saved.home === 'Hilal' && saved.away === 'Nassr' && saved.homeGoals === 2, JSON.stringify(saved));
+  await shot(p, 'led-score');
+  // Countdown: 3, 2, 1 in the reveal, then the words.
+  await p.selectOption('[data-k="led-style"]', 'countdown');
+  await waitFor(p, () => window.__tifoMatchDay.boardFrame()?.kinds[0] === 'count', null, 20000);
+  const count = await p.evaluate(async () => {
+    const sim = window.__tifoMatchDay;
+    const order = [];
+    sim.playReveal('wave', 4500);
+    const t0 = performance.now();
+    while (performance.now() - t0 < 9000) {
+      await new Promise((r) => requestAnimationFrame(r));
+      const pg = sim.boardFrame()?.pages[0];
+      if (order[order.length - 1] !== pg) order.push(pg);
+    }
+    return order;
+  });
+  // The software renderer draws about a frame a second here, so only the order is checked (the timing is, in Node, above).
+  check('Countdown: the digits as the reveal starts, then the words', count.some((x) => x <= 2) && count[count.length - 1] >= 3 && count.every((x, i) => i === 0 || x >= count[i - 1]), JSON.stringify(count));
+  await still(3000, 60000);
+  // Chant ticker.
+  await p.selectOption('[data-k="led-style"]', 'chant');
+  check('Chant: one ticker of every message', await waitFor(p, () => window.__tifoMatchDay.boardFrame()?.kinds.join() === 'ticker', null, 20000));
+  // The big screens, on a ground that has them.
+  const screens = await p.evaluate(() => window.__tifoMatchDay.hasScreens());
+  if (screens) {
+    await openSec(p, 'screens');
+    await p.selectOption('[data-k="screen-mode"]', 'boards');
+    check('the big screens can show the boards', await waitFor(p, () => window.__tifoMatchDay.screenMode() === 'boards', null, 20000));
+  } else {
+    check('(this ground has no big screens: the option waits for one that does)', ui.screen);
+  }
+  await p.selectOption('[data-k="led-style"]', 'boards');
   await ctx.close();
 }
 

@@ -34,7 +34,11 @@ const PORT_OFF = 8946;
 const B = `http://127.0.0.1:${PORT}`;
 const OFF = `http://127.0.0.1:${PORT_OFF}`;
 const SHOTS = process.env.SHOTS || '';
-const PRO_IDS = ['block', 'stencil', 'rounded', 'classic', 'marker'];
+const PRO_IDS = ['block', 'stencil', 'rounded', 'pixel', 'gothic', 'heritage', 'marker', 'classic', 'ruqaa'];
+/** The voices for seats, and the two for banners only (core/proVoices `seats: false`). */
+const SEAT_IDS = PRO_IDS.slice(0, 7);
+const BANNER_IDS = ['classic', 'ruqaa'];
+const PRO_FILES = /proFont|lalezar|bowlby|reem-kufi|black-ops|lemonada|rakkas|marhey|handjet|blaka|el-messiri|aref-ruqaa/;
 const PICKERS = ['text-font', 'obj-font', 'bn-msg-font'];
 const out = [];
 const boot = (port, env) => {
@@ -117,12 +121,14 @@ const shot = async (p, name) => { if (SHOTS) await p.screenshot({ path: `${SHOTS
 /** What each font picker holds, and the crown beside it. */
 const pickers = (p) => p.evaluate(([ids, pro]) => Object.fromEntries(ids.map((id) => {
   const s = document.getElementById(id);
-  const g = s?.querySelector(':scope > optgroup.pfont-group');
+  const g = s?.querySelector(':scope > optgroup.pfont-group:not(.pfont-banners)');
+  const gb = s?.querySelector(':scope > optgroup.pfont-banners');
   const next = s?.nextElementSibling;
   const chip = next?.classList.contains('pfont-chip') ? next : null;
   return [id, {
     value: s?.value ?? null,
     group: g ? { label: g.label, ids: [...g.querySelectorAll('option')].map((o) => o.value), last: s.lastElementChild === g } : null,
+    banners: gb ? { label: gb.label, ids: [...gb.querySelectorAll('option')].map((o) => o.value), last: s.lastElementChild === gb, shown: getComputedStyle(gb).display !== 'none' } : null,
     pro: [...(s?.options ?? [])].filter((o) => pro.includes(o.value)).length,
     free: [...(s?.children ?? [])].filter((o) => o.tagName === 'OPTION').map((o) => o.value),
     chip: chip ? { shown: getComputedStyle(chip).display !== 'none', quiet: !!chip.querySelector('.pro-chip.quiet'), crown: !!chip.querySelector('.pro-crown'), text: chip.textContent, spoken: chip.querySelector('[role="img"]')?.getAttribute('aria-label') ?? null } : null,
@@ -132,7 +138,8 @@ const pickers = (p) => p.evaluate(([ids, pro]) => Object.fromEntries(ids.map((id
 /** How many faces of a family have loaded. */
 const facesOf = (p, family) => p.evaluate((f) => [...document.fonts].filter((x) => x.family.replace(/"/g, '') === f && x.status === 'loaded').length, family);
 const bowlMid = (p) => p.evaluate(() => { const b = window.__tifo.map.bounds; return { x: (b.minX + b.maxX) / 2, y: (b.minY + b.maxY) / 2 }; });
-const toPage = (p, x, y) => p.evaluate(([x, y]) => window.__tifo.editor.worldToClient(x, y), [x, y]);
+/** A world point on the page, with the view centred on it first (the Text tool's seat preview makes the canvas shorter). */
+const toPage = (p, x, y) => p.evaluate(([x, y]) => { window.__tifo.editor.centerOnWorld(x, y); return window.__tifo.editor.worldToClient(x, y); }, [x, y]);
 /**
  * A text layer's shape against the shape its words come out at in a face:
  * renderTextCanvas pads 6 px around the measured run at 128 px bold, and the
@@ -161,11 +168,37 @@ console.log('\n— in Node: the Pro voices stay away from the AI —');
   const { TIFO_FONTS, fontCssOf, findFontCss } = await tsImport('./src/core/text.ts', import.meta.url);
   const { SPEC_FONT_IDS } = await tsImport('./src/core/tifoSpec.ts', import.meta.url);
   const ids = PRO_VOICES.map((v) => v.id);
-  check('five Pro voices, each one family with its Arabic and Latin pair', ids.join() === PRO_IDS.join() && PRO_VOICES.every((v) => /^TifoPro/.test(v.family) && v.pair && v.note), ids.join());
+  check('nine Pro voices, each one family with its Arabic and Latin pair', ids.join() === PRO_IDS.join() && PRO_VOICES.every((v) => /^TifoPro/.test(v.family) && v.pair && v.note), ids.join());
+  check('Classic and Ruqaa are for banners only, each with a seat voice to stand in for it', PRO_VOICES.filter((v) => v.seats === false).map((v) => v.id).join() === BANNER_IDS.join() && PRO_VOICES.filter((v) => v.seats === false).every((v) => SEAT_IDS.includes(v.instead)));
   check('none of them in TIFO_VOICES, TIFO_FONTS or the spec\'s font ids (what the AI may use)',
     !ids.some((id) => TIFO_VOICES.some((v) => v.id === id) || TIFO_FONTS.some((f) => f.id === id) || SPEC_FONT_IDS.includes(id)));
   check('a Pro id resolves to its own family for anybody; an unknown one to the first voice',
     PRO_FONTS.every((f) => fontCssOf(f.id).includes(PRO_VOICES.find((v) => v.id === f.id).family)) && fontCssOf('nope') === TIFO_FONTS[0].css && findFontCss('nope') === undefined);
+  // Seat-aware lettering (core/seatText): thin strokes thickened, thick ones left, openings kept.
+  const { thickenThin, keepOpenings, seatVerdict, seatFloor, SEAT_FLOORS } = await tsImport('./src/core/seatText.ts', import.meta.url);
+  {
+    const w = 40, h = 30;
+    const ink = new Uint8Array(w * h);
+    for (let x = 2; x < 24; x++) ink[15 * w + x] = 1; // a hairline, 1 px, into the stem
+    for (let y = 2; y < 28; y++) for (let x = 24; x < 38; x++) ink[y * w + x] = 1; // a stem, 14 px
+    const fat = thickenThin(ink, w, h, 12, 4.5);
+    const col = (x) => { let n = 0; for (let y = 0; y < h; y++) n += fat[y * w + x]; return n; };
+    const changed = (x0, x1, y0, y1) => { let n = 0; for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) n += fat[y * w + x] !== ink[y * w + x] ? 1 : 0; return n; };
+    check('a hairline is drawn again thicker, up to its cap; a thick stem, corners and all, is left as it was',
+      col(10) >= 9 && col(10) <= 11 && changed(20, 40, 0, 8) === 0 && changed(20, 40, 22, 30) === 0, `hairline ${col(10)} px, stem changed ${changed(20, 40, 0, 8)} + ${changed(20, 40, 22, 30)} px`);
+    // A counter one cell wide between two letters: the thickened strokes must not close it.
+    const base = [255, 0, 255, 255, 0, 0, 0, 0, 255];
+    const thick = [255, 255, 255, 255, 255, 255, 255, 255, 255];
+    const kept = keepOpenings(base, thick, 9, 1, 2, 1);
+    check('the gaps a face had stay open (a narrow one whole, a wide one at least 2 seats)', kept[1] === 0 && kept.slice(4, 8).filter((v) => !v).length >= 2 && kept[0] === 1, Array.from(kept).join(''));
+  }
+  check('every seat voice has a measured floor in both scripts; the banners-only ones are told so',
+    PRO_VOICES.every((v) => SEAT_FLOORS[v.id]?.ar?.min && SEAT_FLOORS[v.id]?.lat?.min) && seatVerdict('classic', 'ULTRAS', 30, 0, undefined, false)?.state === 'banner');
+  check('the verdict: reads, thickened, too small (with the height it needs and a face that reads smaller), too shallow',
+    seatVerdict('block', 'الزعيم', 16)?.state === 'reads' && seatVerdict('heritage', 'ULTRAS', 14)?.state === 'thickened' &&
+    seatVerdict('block', 'الزعيم', 8)?.state === 'small' && seatVerdict('block', 'الزعيم', 8).needRows === seatFloor('block', 'الزعيم').min && seatVerdict('block', 'الزعيم', 8).tryFont === 'pixel' &&
+    seatVerdict('gothic', 'الزعيم', 8, 12)?.state === 'shallow');
+  check('mixed words take the stricter script\'s floor', seatFloor('block', 'HILAL الهلال').min === Math.max(SEAT_FLOORS.block.ar.min, SEAT_FLOORS.block.lat.min));
   check('the cheap check finds the Pro voices a design uses, once each',
     proVoicesIn([{ kind: 'text', fontId: 'block' }, { kind: 'text', fontId: 'poster' }, { kind: 'image' }, { kind: 'text', fontId: 'block' }, { kind: 'text', fontId: 'classic' }]).join() === 'block,classic' && !isProVoice('grotesk'));
 }
@@ -178,7 +211,7 @@ console.log('\n— an account Pro is not on for —');
   const pk = await pickers(e.p);
   check('no Pro group, no Pro voice, no crown in any picker', PICKERS.every((id) => !pk[id].group && pk[id].pro === 0 && !pk[id].chip) && pk['text-font'].chips === 0, JSON.stringify(pk));
   check('the Text tool lists the free voices, as before', pk['text-font'].free.join() === FREE_IDS.join(), pk['text-font'].free.join());
-  check('no Pro fonts code and no Pro font file fetched', !e.asked.some((u) => /proFont|lalezar|bowlby|reem-kufi|black-ops|lemonada|rakkas|marhey/.test(u)), e.asked.filter((u) => /proFont/.test(u)).join(' '));
+  check('no Pro fonts code and no Pro font file fetched', !e.asked.some((u) => PRO_FILES.test(u) || /seatPreview/.test(u)), e.asked.filter((u) => /proFont/.test(u)).join(' '));
   await e.ctx.close();
 }
 {
@@ -199,9 +232,14 @@ const TEXT = 'الهلال HILAL';
   const { p } = e;
   check('the Pro voices arrive in all three pickers', await waitFor(p, (ids) => ids.every((id) => !!document.querySelector(`#${id} > optgroup.pfont-group`)), PICKERS));
   let pk = await pickers(p);
-  check('…after the free ones, in a "♛ Pro fonts" group of five',
-    PICKERS.every((id) => pk[id].group?.label === '♛ Pro fonts' && pk[id].group.ids.join() === PRO_IDS.join() && pk[id].group.last) && pk['text-font'].free.join() === FREE_IDS.join(),
+  check('…after the free ones, in a "♛ Pro fonts" group of the seven seat voices',
+    PICKERS.every((id) => pk[id].group?.label === '♛ Pro fonts' && pk[id].group.ids.join() === SEAT_IDS.join()) && pk['text-font'].free.join() === FREE_IDS.join(),
     JSON.stringify(PICKERS.map((id) => pk[id].group)));
+  check('…then the banners-only two, last, where words can land on a banner (the Text tool, a sign)',
+    ['text-font', 'bn-msg-font'].every((id) => pk[id].banners?.label === '♛ Pro fonts · banners only' && pk[id].banners.ids.join() === BANNER_IDS.join() && pk[id].banners.last),
+    JSON.stringify(PICKERS.map((id) => pk[id].banners)));
+  check('…never in a text layer\'s picker (a layer is on seats), and hidden in the Text tool off a banner',
+    !pk['obj-font'].banners && pk['obj-font'].group.last && !pk['text-font'].banners.shown);
   check('no crown while a free voice is chosen', PICKERS.every((id) => pk[id].chip && !pk[id].chip.shown), JSON.stringify(PICKERS.map((id) => pk[id].chip)));
   check('the faces wait until a picker needs them', (await facesOf(p, 'TifoProBlock')) === 0 && !e.asked.some((u) => /proFontFaces|lalezar/.test(u)));
 
@@ -253,7 +291,8 @@ const TEXT = 'الهلال HILAL';
   await p.fill('#bn-msg', 'ULTRAS الهلال');
   await p.waitForTimeout(900);
   pk = await pickers(p);
-  check('the sign\'s picker: the free voices first, then the Pro group', pk['bn-msg-font'].free.join() === FREE_IDS.join() && pk['bn-msg-font'].group?.last && !pk['bn-msg-font'].chip.shown, JSON.stringify(pk['bn-msg-font']));
+  check('the sign\'s picker: the free voices first, then the Pro groups', pk['bn-msg-font'].free.join() === FREE_IDS.join() && pk['bn-msg-font'].banners?.last && !pk['bn-msg-font'].chip.shown, JSON.stringify(pk['bn-msg-font']));
+  check('…the banners-only ones offered in the Banner view', pk['text-font'].banners?.shown === true);
   await p.selectOption('#bn-msg-font', 'block');
   check('the sign takes the Pro voice', await waitFor(p, () => window.__tifoProFonts?.banners().some((b) => b.fontId === 'block')));
   pk = await pickers(p);
@@ -309,10 +348,10 @@ console.log('\n— opened by an account Pro is not on for —');
   const e = await editor(other.token, `/app?design=${fan.design}&e2e=1`);
   const { p } = e;
   check('the seats are the design\'s', await waitFor(p, (c) => Array.from(window.__tifo.store.cells).join(',') === c, savedCells, 20000));
-  check('in the Design view, nothing Pro is fetched yet (no banner is drawn there)', !e.asked.some((u) => /proFont|lalezar/.test(u)));
+  check('in the Design view, nothing Pro is fetched yet (no banner is drawn there)', !e.asked.some((u) => /proFont|lalezar|seatPreview/.test(u)));
   await p.click('#view-3d');
   check('the sign\'s Pro face loads for them too, to draw it', await waitFor(p, () => [...document.fonts].filter((x) => x.family.replace(/"/g, '') === 'TifoProBlock' && x.status === 'loaded').length === 2, null, 45000));
-  check('…that voice\'s two files and no other Pro voice\'s', e.asked.some((u) => /lalezar-arabic/.test(u)) && e.asked.some((u) => /bowlby-one-latin/.test(u)) && !e.asked.some((u) => /reem-kufi|black-ops|lemonada|rakkas|marhey/.test(u)),
+  check('…that voice\'s two files and no other Pro voice\'s', e.asked.some((u) => /lalezar-arabic/.test(u)) && e.asked.some((u) => /bowlby-one-latin/.test(u)) && !e.asked.some((u) => /reem-kufi|black-ops|lemonada|rakkas|marhey|handjet|blaka|el-messiri|aref-ruqaa/.test(u)),
     e.asked.filter((u) => /woff2/.test(u)).map((u) => u.split('/').pop()).join(' '));
   const pk = await pickers(p);
   check('…while their pickers stay free', PICKERS.every((id) => !pk[id].group && pk[id].pro === 0) && pk['text-font'].chips === 0);
@@ -350,6 +389,55 @@ console.log('\n— opened by an account Pro is not on for —');
 }
 
 // =====================================================================
+console.log('\n— the words on the seats: seat-aware letters and the seat preview —');
+{
+  const e = await editor(fan.token, `/app?project=${fan.design}&e2e=1`);
+  const { p } = e;
+  await waitFor(p, () => !!document.querySelector('#text-font > optgroup.pfont-group'));
+  await p.click('.tool-rail [data-tool="text"]');
+  await p.fill('#text-input', 'الزعيم');
+  await p.selectOption('#text-font', 'block');
+  await p.evaluate(() => { const s = document.getElementById('text-size'); s.value = '8'; s.dispatchEvent(new Event('input')); });
+  const state = (sel) => p.evaluate((q) => document.querySelector(q)?.dataset.state ?? null, sel);
+  const bar = '#text-bar .qf-seat';
+  check('under the Text tool, the words on this stand\'s seats', await waitFor(p, (q) => { const r = document.querySelector(q); const c = r?.querySelector('canvas.qf-view'); return !!r && r.offsetParent !== null && c.width > 40 && !!r.dataset.state; }, bar, 30000));
+  check('8 rows of Arabic in Block: too small, with the fix (the height it needs, and the face that reads smallest)',
+    (await state(bar)) === 'small' && await waitFor(p, (q) => { const f = [...document.querySelectorAll(q + ' .qf-fix')].map((b) => b.textContent); return f.length === 2 && /15 rows/.test(f[0]) && /Pixel/.test(f[1]); }, bar),
+    await p.evaluate((q) => document.querySelector(q + ' .qf-verdict')?.textContent, bar));
+  const tiles = await p.evaluate((q) => [...document.querySelectorAll(q + ' .qf-tile')].map((b) => ({ id: b.dataset.font, pressed: b.getAttribute('aria-pressed'), no: b.classList.contains('no'), drawn: b.querySelector('canvas').width > 10 })), bar);
+  check('every seat voice drawn small on the same spot, Block pressed', tiles.map((x) => x.id).join() === SEAT_IDS.join() && tiles.every((x) => x.drawn) && tiles.find((x) => x.id === 'block').pressed === 'true', JSON.stringify(tiles));
+  check('…the ones that will not read at 8 rows marked, Pixel and the Latin-only floors aside', tiles.filter((x) => x.no).length >= 5, JSON.stringify(tiles.filter((x) => x.no).map((x) => x.id)));
+  await shot(p, 'qf-text-small');
+  await p.click(bar + ' .qf-fix');
+  check('"Make it 15 rows" makes the letters 15 rows tall', await waitFor(p, () => document.getElementById('text-size').value === '15'));
+  check('…and then it reads', await waitFor(p, (q) => document.querySelector(q)?.dataset.state === 'reads', bar));
+  await shot(p, 'qf-text-reads');
+  await p.click(bar + ' .qf-tile[data-font="heritage"]');
+  check('a tile picks its face', await waitFor(p, () => document.getElementById('text-font').value === 'heritage'));
+  // A banners-only voice on seats: the Text tool takes the voice that stands in for it.
+  await p.selectOption('#text-font', 'classic');
+  check('Classic chosen off a banner: the seats get Heritage, and it says so', await waitFor(p, () => document.getElementById('text-font').value === 'heritage' && /Classic is for banners only/.test(document.getElementById('message')?.textContent || '')));
+  // Seat-aware letters on the seats.
+  await p.fill('#text-input', 'ULTRAS');
+  await p.evaluate(() => { const s = document.getElementById('text-size'); s.value = '14'; s.dispatchEvent(new Event('input')); });
+  const m = await bowlMid(p);
+  const [cx, cy] = await toPage(p, m.x, m.y + 60);
+  await p.mouse.click(cx, cy);
+  check('placed in Heritage', await waitFor(p, () => window.__tifo.objects.list().some((o) => o.kind === 'text' && o.fontId === 'heritage')));
+  const counts = await p.evaluate(() => window.__tifoProFonts.seatCounts(window.__tifo.objects.list().find((o) => o.fontId === 'heritage').id));
+  check('drawn seat-aware: its thin strokes thicker than the face alone would draw them on seats', counts && counts.key.startsWith('ts|') && counts.seatAware > counts.plain * 1.1, JSON.stringify(counts));
+  const lay = '#obj-controls .qf-seat';
+  check('selected, the layer panel shows it on its seats, with its verdict', await waitFor(p, (q) => { const r = document.querySelector(q); return !!r && r.offsetParent !== null && !!r.dataset.state && r.querySelector('canvas.qf-view').width > 40; }, lay, 30000), await state(lay));
+  check('Heritage, Latin at 14 rows: reads, drawn seat-aware', (await state(lay)) === 'thickened', await p.evaluate((q) => document.querySelector(q + ' .qf-verdict')?.textContent, lay));
+  const layerTiles = await p.evaluate((q) => document.querySelectorAll(q + ' .qf-tile').length, lay);
+  check('…and the same strip of faces, to switch with one tap', layerTiles === SEAT_IDS.length);
+  await p.click(lay + ' .qf-tile[data-font="pixel"]');
+  check('a tile there changes the layer\'s face (through its picker, so undo follows)', await waitFor(p, () => window.__tifo.objects.selected?.fontId === 'pixel'));
+  await shot(p, 'qf-layer');
+  await e.ctx.close();
+}
+
+// =====================================================================
 console.log('\n— in Arabic, and with Pro running —');
 {
   const e = await editor(fan.token, `/ar/app?project=${fan.design}&e2e=1`, { lang: 'ar' });
@@ -359,6 +447,7 @@ console.log('\n— in Arabic, and with Pro running —');
   const pk = await pickers(e.p);
   check('…the crown says مميّز', pk['obj-font'].chip?.shown && pk['obj-font'].chip.text === 'مميّز', JSON.stringify(pk['obj-font'].chip));
   check('…and the export sheet would say "الخطوط المميّزة"', JSON.stringify(await e.p.evaluate(() => window.__tifoProFonts.items())) === '["الخطوط المميّزة"]');
+  check('the seat preview, in Arabic', await waitFor(e.p, () => document.querySelector('#obj-controls .qf-title')?.textContent === 'على المقاعد' && /صف/.test(document.querySelector('#obj-controls .qf-where')?.textContent || '')));
   await shot(e.p, 'pf-arabic');
   await e.ctx.close();
 }

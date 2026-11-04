@@ -71,6 +71,23 @@ const GIFT_PERKS = [
 ];
 
 /**
+ * Only what Pro really adds. An allowance Pro gives no more of than Free
+ * (server/src/proPlan AI_ON_PRO and PHOTO_ON_PRO) is not a perk: more AI
+ * designs and "no limit cards" go while designs are off the list, and the
+ * Polish line says "and stadium photos" only while Pro gives more photos.
+ */
+function perksOf(keys: string[], st?: ProState | null): string[] {
+  const lim = st?.offer?.limits;
+  const more = (k: 'std' | 'polish' | 'photo'): boolean => !lim || JSON.stringify(lim.pro[k]) !== JSON.stringify(lim.free[k]);
+  return keys.flatMap((k) => {
+    if (k === 'pro.perk.ai' || k === 'pro.perk.noLimits') return more('std') ? [k] : [];
+    if (k !== 'pro.perk.polish') return [k];
+    if (!more('polish')) return [];
+    return more('photo') ? [k] : ['qp.perk.polish'];
+  });
+}
+
+/**
  * Accept the 7-day gift. Shows when it would end if started now, and starts
  * it only on the button. Resolves true when the gift is running.
  */
@@ -81,7 +98,7 @@ export function openGiftSheet(state?: ProState | null): Promise<boolean> {
     mark() +
     `<h2>${escapeHtml(tv('gift.sheetTitle', { n: days }))}</h2>` +
     `<p>${escapeHtml(t('gift.sheetLead'))}</p>` +
-    perksHtml(GIFT_PERKS) +
+    perksHtml(perksOf(GIFT_PERKS, state)) +
     `<p>${escapeHtml(t('gift.endsIfNow'))} <span class="pro-when">${escapeHtml(whenDate(endsIfNow))}</span>.</p>` +
     `<div class="pro-actions">` +
     `<button type="button" class="pro-primary" data-act="start">${escapeHtml(tv('gift.start', { n: days }))}</button>` +
@@ -135,7 +152,7 @@ export function openProSheet(state: ProState, opts: { title?: string; lead?: str
     mark() +
     `<h2>${escapeHtml(opts.title ?? t('pro.sheet.whatTitle'))}</h2>` +
     `<p>${escapeHtml(opts.lead ?? t('pro.sheet.whatLead'))}</p>` +
-    perksHtml([...GIFT_PERKS, 'pro.perk.badge']) +
+    perksHtml(perksOf([...GIFT_PERKS, 'pro.perk.badge'], state)) +
     (offer ? `<p>${escapeHtml(priceLine(offer))}</p>` : '') +
     `<div class="pro-actions">` +
     (gift

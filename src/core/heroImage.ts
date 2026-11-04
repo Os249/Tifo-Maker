@@ -45,8 +45,6 @@ function singleStand(region: Region): Stand | null {
 }
 
 export interface HeroOptions {
-  /** The user's brief, so the subject is about THEIR club, not a generic bird. */
-  brief: string;
   /** The club's crest symbol, when the brief named a club we know. */
   crest?: SymbolName;
 }
@@ -57,16 +55,16 @@ export interface HeroResult {
   via: 'present' | 'promoted' | 'added';
 }
 
-/** The picture's subject, in words an image model can draw. */
+/**
+ * The picture's subject, in words an image model can draw, and nothing else.
+ * The brief used to be pasted after it ("a crescent moon, for: Al Hilal
+ * champions of Asia tifo whole stadium"), which asks a diffusion model for a
+ * stadium scene with a moon in it; the club and the occasion are the design's
+ * business, the picture's is one subject drawn well (docs/AI-QUALITY-REVIEW.md
+ * F4). imageAssets.ts picturePrompt adds the few constraints that matter.
+ */
 export function heroPrompt(symbol: SymbolName | undefined, opts: HeroOptions): string {
-  const subject =
-    (symbol && SUBJECT[symbol]) ||
-    (opts.crest && SUBJECT[opts.crest]) ||
-    'the club crest as a single bold emblem';
-  // The brief carries the club, the occasion and the mood. Keep it short: the
-  // style suffix that follows is long, and a diffusion model weights the front.
-  const brief = opts.brief.replace(/\s+/g, ' ').trim().slice(0, 110);
-  return brief ? `${subject}, for: ${brief}` : subject;
+  return (symbol && SUBJECT[symbol]) || (opts.crest && SUBJECT[opts.crest]) || 'the club crest as a single bold emblem';
 }
 
 /**

@@ -51,6 +51,12 @@ export interface EffectsController {
    */
   setFloodlightLevel(level: number): void;
   /**
+   * How much of the beams' haze the camera sees, 0..1 (1 live). A Pro film's
+   * close shot of the tifo takes less: seen down a beam, its haze is a pale
+   * wedge across the cards (simulator/film.ts).
+   */
+  setHaze(k: number): void;
+  /**
    * The soft glow round the brightest things in the picture: white cards,
    * the floodlights. Off by default (Osamah's call, October 2026): it read as
    * the seats glowing. Only HIGH and ULTRA have the post pass it runs in.
@@ -202,6 +208,8 @@ export function buildEffects(
   const beams: { mat: THREE.MeshBasicMaterial; base: number }[] = [];
   let floodOn = false;
   let floodLevel = 1;
+  /** The share of the beams' haze shown (setHaze). */
+  let haze = 1;
   const spots: THREE.SpotLight[] = [];
   /** Per-spot "on" intensity, so a near light is not brighter than a far one. */
   const spotPower: number[] = [];
@@ -346,7 +354,11 @@ export function buildEffects(
       lampMat.emissiveIntensity = LAMP_GLOW * Math.max(0.35, floodLevel);
       // Haze is light scattered by the air, so it tracks the output — a touch
       // less than linearly, or a 150% rig turns the bowl into fog.
-      for (const b of beams) b.mat.opacity = b.base * Math.pow(floodLevel, 0.8);
+      for (const b of beams) b.mat.opacity = b.base * Math.pow(floodLevel, 0.8) * haze;
+    },
+    setHaze(k) {
+      haze = Math.max(0, Math.min(1, k));
+      for (const b of beams) b.mat.opacity = b.base * Math.pow(floodLevel, 0.8) * haze;
     },
     setGlow(on) {
       if (glowPass) glowPass.enabled = on;

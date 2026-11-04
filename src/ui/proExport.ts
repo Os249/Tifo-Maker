@@ -5,12 +5,14 @@
  *
  *  - Size, beside Format: the screen's size (free, what it always was), Full
  *    HD 1920 × 1080, or vertical 9:16 1080 × 1920 for TikTok, Reels,
- *    Snapchat and WhatsApp Status. The video is drawn at that size whatever
- *    the window (Preview3D.drawAt); a device that cannot draw it gets the
- *    screen's size, and the note under the picker says so.
- *  - "Poster picture (4K)": a 3840 × 2160 PNG of the tifo in its stadium
- *    from where the camera is now (2160 × 3840 with the vertical size), with
- *    the mark unless "Without the tifomaker.org mark" is ticked.
+ *    Snapchat and WhatsApp Status. A Pro size is not the editor's model on
+ *    its plate: it is Match Day's film of the tifo (ui/proFilm.ts), drawn
+ *    off screen frame by frame and encoded to H.264, and the Preview plays
+ *    that film. A device that cannot draw the size gets the screen's size,
+ *    and the note under the picker says so.
+ *  - "Match-day poster (4K)": the poster sheet (ui/proPoster.ts), a
+ *    designed poster over Match Day's picture of the tifo, landscape
+ *    3840 × 2160 or portrait 2160 × 3840, with a live preview.
  *  - The Post it sheet's own "Without the tifomaker.org mark" (PostPro in
  *    ui/postMoment.ts): the stadium video and GIF already have theirs.
  *
@@ -25,11 +27,15 @@
 import './proExport.css';
 import { fetchPro, type ProState } from '../net/api';
 import { drawWatermark } from '../export/stadiumExport';
+import { currentCredit, drawCreditLine, type Credit } from './creditLine';
+import type { RevealId } from '../core/reveal';
 import type { Preview3D } from '../render/preview3d';
 import { onLangChange, t, tv } from './i18n';
 import { CROWN_SVG, proChipHtml } from './pro';
-import { designProItems, exportGate, withoutDesignProItems } from './proGate';
+import { designProItems, withoutDesignProItems } from './proGate';
 import type { ProToolsContext } from './proTools';
+import { matchDayDeps } from './matchDayDeps';
+import { SPLIT_TELLS, tifoSplit } from '../render/simulator/tifoSplit';
 
 type Size = { width: number; height: number };
 
@@ -71,7 +77,7 @@ function pngOf(c: HTMLCanvasElement): Promise<Blob | null> {
  * A device that cannot draw `size` gets the largest of its shape it can, and
  * failing that the screen's size: `asked` says which it was.
  */
-export function stadiumStill(preview: Preview3D, size: Size | null, mark: boolean): { canvas: HTMLCanvasElement; asked: boolean; max: number } {
+export function stadiumStill(preview: Preview3D, size: Size | null, mark: boolean, credit?: Credit): { canvas: HTMLCanvasElement; asked: boolean; max: number } {
   const max = preview.maxDrawSize();
   let at = null as ReturnType<Preview3D['drawAt']>;
   let asked = false;
@@ -94,6 +100,7 @@ export function stadiumStill(preview: Preview3D, size: Size | null, mark: boolea
     const g = out.getContext('2d')!;
     g.drawImage(src, 0, 0);
     if (mark) drawWatermark(g, out.width, out.height, MARK);
+    if (credit?.text) drawCreditLine(g, out.width, out.height, credit.text, { avoid: mark ? 'right' : null, accent: credit.accent });
     return { canvas: out, asked, max };
   } finally {
     at?.end();
@@ -149,17 +156,15 @@ export function mountProExport(ctx: ProToolsContext): void {
   /** The poster's size: portrait when the vertical size is chosen for the video. */
   const posterSize = (): Size =>
     select.value === 'vertical' && format.value !== 'gif' ? { width: POSTER.height, height: POSTER.width } : { ...POSTER };
-  const noMark = (): boolean => {
-    const box = document.getElementById('sx-nomark') as HTMLInputElement | null;
-    return live && !!box?.checked && !box.closest('label')?.hidden;
-  };
-
   const paintNote = (): void => {
     const size = proSize();
     let text = '';
     if (size && refused) text = tv('pexp.tooBig', { max: refused });
     else if (select.value === 'hd') text = t('pexp.hdNote');
     else if (select.value === 'vertical') text = t('pexp.verticalNote');
+    // Before filming: part of the tifo is where its stand has no seats (simulator/tifoSplit.ts).
+    const deps = size && !refused ? matchDayDeps() : null;
+    if (deps && tifoSplit(deps.map.uv, deps.map.count, (i) => deps.store.cells[i] !== 0) >= SPLIT_TELLS) text = `${text} ${t('qv.split')}`.trim();
     note.textContent = text;
     note.hidden = !text || row.hidden;
   };
@@ -235,42 +240,62 @@ export function mountProExport(ctx: ProToolsContext): void {
       const s = size();
       return s ? [t(s.height > s.width ? 'pexp.item.vertical' : 'pexp.item.hd')] : [];
     },
+    // A Pro size is Match Day's film of the tifo, not the editor's model on its plate.
+    film: async (s, how) => {
+      const { filmFromEditor } = await import('./proFilm');
+      const outcome = await filmFromEditor({
+        shape: s.height > s.width ? 'vertical' : 'landscape',
+        reveal: { kind: 'order', id: how.reveal as RevealId },
+        mark: !how.clean,
+        creditLine: currentCredit().text || undefined,
+        name: `${ctx.title()}-matchday`,
+      });
+      return outcome.message;
+    },
+    // Free to try: the Preview plays that film, drawn at half its size.
+    previewFilm: async (s, canvas, how) => {
+      const { previewFilm } = await import('./proFilm');
+      await previewFilm(canvas, {
+        shape: s.height > s.width ? 'vertical' : 'landscape',
+        reveal: { kind: 'order', id: how.reveal as RevealId },
+        mark: !how.clean,
+        name: '',
+      });
+    },
   };
 
-  // ---- the poster ----
+  // ---- the poster: its own sheet, with a live preview (ui/proPoster.ts) ----
+  /** Today's free picture: the stadium view at the screen's size, with the mark, the design's Pro items lifted. */
+  const freePicture = async (): Promise<string> => {
+    const preview = await ctx.ensurePreview();
+    if (!preview) return t('pexp.posterFailed');
+    await Promise.race([preview.ready, new Promise((r) => setTimeout(r, 8000))]);
+    const shot = await withoutDesignProItems(ctx.objects, async () => {
+      await settle();
+      return stadiumStill(preview, null, true);
+    });
+    const blob = await pngOf(shot.canvas);
+    if (!blob) return t('pexp.posterFailed');
+    download(blob, `${ctx.title()}-stadium.png`);
+    return tv('pexp.pictureSaved', { w: shot.canvas.width, h: shot.canvas.height });
+  };
   poster.addEventListener('click', async () => {
     if (poster.disabled) return;
     poster.disabled = true;
     try {
-      const preview = await ctx.ensurePreview();
-      if (!preview) {
-        status(t('pexp.posterFailed'));
-        return;
-      }
-      // A poster of the stadium, not of cards on a pitch: the building first (briefly).
-      await Promise.race([preview.ready, new Promise((r) => setTimeout(r, 8000))]);
-      const clean = noMark();
-      const items = [t('pexp.item.poster'), ...(clean ? [t('pro.mark.option')] : []), ...designProItems(ctx.objects)];
-      const how = await exportGate(items);
-      if (how === null) return;
-      status(t('pexp.posterMaking'));
-      await settle();
-      // 'pro': 4K, without the mark if ticked. 'free': the screen's size, with
-      // the mark, and the design's Pro items lifted while it draws.
-      const shot = how === 'pro'
-        ? stadiumStill(preview, posterSize(), !clean)
-        : await withoutDesignProItems(ctx.objects, async () => {
-          await settle();
-          return stadiumStill(preview, null, true);
-        });
-      const blob = await pngOf(shot.canvas);
-      if (!blob) throw new Error('no picture');
-      const { width: w, height: h } = shot.canvas;
-      download(blob, `${ctx.title()}-${how === 'pro' ? 'poster' : 'stadium'}.png`);
-      const mb = (blob.size / (1024 * 1024)).toFixed(1);
-      if (how === 'pro' && !shot.asked) status(tv('pexp.posterSmaller', { max: shot.max, w, h }));
-      else if (how === 'pro') status(tv('pexp.posterSaved', { w, h, mb }));
-      else status(tv('pexp.pictureSaved', { w, h }));
+      const { openPosterSheet, designTextOf } = await import('./proPoster');
+      await openPosterSheet({
+        title: () => ctx.title(),
+        designText: () => designTextOf(ctx.objects.list()),
+        designItems: () => {
+          const credit = currentCredit();
+          return [...(credit.text && credit.label ? [credit.label] : []), ...designProItems(ctx.objects)];
+        },
+        creditLine: currentCredit().text || undefined,
+        shape: posterSize().height > posterSize().width ? 'portrait' : 'landscape',
+        free: freePicture,
+        say: status,
+      });
     } catch {
       status(t('pexp.posterFailed'));
     } finally {

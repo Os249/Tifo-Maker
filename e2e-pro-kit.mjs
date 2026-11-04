@@ -19,8 +19,8 @@
  *                     crown is quiet;
  *   bad data          what is planted in IndexedDB is checked: bad colours,
  *                     logos, fonts, names and records are left out (and the
- *                     store tidied), at most 3 kits are shown, and a name is
- *                     only ever text;
+ *                     store tidied), the rest move up to the account cleaned,
+ *                     at most 3 kits are shown, and a name is only ever text;
  *   Arabic, a phone   the words in Arabic; at 390px every target is 44px,
  *                     the sheet sits at the bottom, nothing scrolls sideways,
  *                     and an added logo comes up in the import sheet;
@@ -396,7 +396,7 @@ let kitPalette = null;
   await p.evaluate(async () => {
     const big = await (() => { const c = new OffscreenCanvas(600, 600); c.getContext('2d').fillRect(0, 0, 600, 600); return c.convertToBlob({ type: 'image/png' }); })();
     const tiny = await (() => { const c = new OffscreenCanvas(40, 40); c.getContext('2d').fillRect(0, 0, 40, 40); return c.convertToBlob({ type: 'image/png' }); })();
-    const db = await new Promise((res, rej) => { const r = indexedDB.open('tifo_club_kits', 1); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
+    const db = await new Promise((res, rej) => { const r = indexedDB.open('tifo_club_kits'); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
     await new Promise((res, rej) => {
       const tx = db.transaction('kits', 'readwrite');
       const s = tx.objectStore('kits');
@@ -432,16 +432,18 @@ let kitPalette = null;
   check('…a logo larger than 512px is left out', big.logos === 0 && big.font === 'kufi', JSON.stringify(big));
   check('…the sheet says part of a kit was left out, and that 3 is the most', /couldn’t be read/.test(bad.note || '') && bad.full && bad.saveDisabled, JSON.stringify({ note: bad.note, full: bad.full }));
   const stored = await p.evaluate(async () => {
-    const db = await new Promise((res) => { const r = indexedDB.open('tifo_club_kits', 1); r.onsuccess = () => res(r.result); });
+    const db = await new Promise((res) => { const r = indexedDB.open('tifo_club_kits'); r.onsuccess = () => res(r.result); });
     const read = (q) => new Promise((res) => { const r = q; r.onsuccess = () => res(r.result); });
     const tx = db.transaction('kits');
     const keys = await read(tx.objectStore('kits').getAllKeys());
-    const evil = await read(tx.objectStore('kits').get('kevil00001'));
     db.close();
-    return { keys: keys.sort(), evil: { colors: evil.colors, logos: evil.logos.length, font: evil.font, name: evil.name } };
+    return { keys: keys.sort() };
   });
-  const keep = stored.keys.filter((k) => !/^k[a-z0-9]{10}$/.test(k) || ['kevil00001', 'kbiglogo01', 'kfourth001'].includes(k));
-  check('…and the store is tidied: bad records gone, the kept one cleaned, the 4th left for later', JSON.stringify(keep) === JSON.stringify(['kbiglogo01', 'kevil00001', 'kfourth001']) && stored.keys.length === 4 && JSON.stringify(stored.evil.colors) === JSON.stringify(['#00ff00']) && stored.evil.logos === 1 && stored.evil.font === '' && !/‮/.test(stored.evil.name), JSON.stringify(stored));
+  // Signed in, the browser's kits move up to the account (cleaned on the way), and the account holds three.
+  check('…and the store is tidied: bad records gone, the two that fitted moved up to the account, the 4th left here', JSON.stringify(stored.keys) === JSON.stringify(['kfourth001']), JSON.stringify(stored));
+  const onAccount = (await api('/api/pro/kits', fan.token)).json?.kits ?? [];
+  check('…on the account cleaned, as the browser cleaned them', onAccount.length === 3 && JSON.stringify(onAccount[0].colours) === JSON.stringify(['#00ff00']) && onAccount[0].logos.length === 1 && onAccount[0].font === '' && !/‮/.test(onAccount[0].name), JSON.stringify(onAccount.map((k) => [k.name, k.colours, k.logos.length, k.font])));
+  check('…and the sheet says the one left did not fit', /didn’t fit: your account has 3 already/.test(await p.textContent('.kit-sheet')));
   await shot(p, '1440-en-bad-data');
   // Delete: asks first, and the 4th kit comes back next time.
   await p.click('.kit-card [data-act="delete"]');
@@ -497,7 +499,8 @@ await api('/api/pro/gift/accept', ar.token, { method: 'POST', body: '{}' });
   await shot(p, '390-en-form');
   await p.fill('#kit-name', 'Phone kit');
   await p.tap('.kit-sheet [data-act="save"]');
-  await waitFor(p, () => document.querySelectorAll('.kit-card').length === 1);
+  // The kit saved in Arabic on the laptop is on the account, so the phone has it too.
+  check('…the phone has the kit saved on the laptop, and its own', await waitFor(p, () => JSON.stringify([...document.querySelectorAll('.kit-card .kit-name')].map((n) => n.textContent)) === JSON.stringify(['الموج الأزرق', 'Phone kit'])));
   const list = await p.evaluate(() => ({
     small: [...document.querySelectorAll('.kit-sheet button')].filter((b) => b.getClientRects().length > 0).map((b) => [b.className, Math.round(b.getBoundingClientRect().height)]).filter(([, h]) => h < 44),
     over: document.documentElement.scrollWidth - innerWidth,
@@ -505,7 +508,8 @@ await api('/api/pro/gift/accept', ar.token, { method: 'POST', body: '{}' });
   }));
   check('…the card\'s buttons are 44px, Use spans the card, nothing scrolls sideways', list.small.length === 0 && list.over <= 0 && list.useWidth > 300, JSON.stringify(list));
   await shot(p, '390-en-list');
-  await p.tap('.kit-card [data-act="use"]');
+  // The phone's own kit, the one with a logo (the laptop's has none).
+  await p.tap('.kit-card:nth-child(2) [data-act="use"]');
   check('Use on a phone brings the import sheet up with the kit\'s logos', await waitFor(p, () => { const b = document.querySelector('.m-sheet .kit-logos-field:not([hidden]) .kit-logo-btn'); return !!b && b.getBoundingClientRect().height >= 44; }));
   const over = await p.evaluate(() => document.documentElement.scrollWidth - innerWidth);
   check('…with nothing scrolling sideways', over <= 0, String(over));
@@ -526,7 +530,14 @@ await api('/api/pro/gift/accept', ar.token, { method: 'POST', body: '{}' });
   await open(p, ar.design, 'kit_ar wall');
   await entryShown(p);
   await openSheet(p);
-  check('no storage: the sheet says kits last until the tab is closed', /isn’t keeping kits/.test(await p.textContent('.kit-sheet')));
+  check('no storage, signed in: the kits are the account\'s, and the sheet says so', /On your account/.test(await p.textContent('.kit-sheet')) && (await p.evaluate(() => document.querySelectorAll('.kit-card').length)) === 2);
+  await closeSheet(p);
+  // And with no kits on the account either (the server says none): kits last until the tab is closed.
+  await p.route('**/api/pro/kits**', (r) => r.fulfill({ status: 404, contentType: 'application/json', body: '{"error":"not found"}' }));
+  await open(p, ar.design, 'kit_ar wall');
+  await entryShown(p);
+  await openSheet(p);
+  check('no storage, no account kits: the sheet says kits last until the tab is closed', /isn’t keeping kits/.test(await p.textContent('.kit-sheet')));
   await p.click('.kit-sheet [data-act="new"]');
   await waitFor(p, () => !!document.getElementById('kit-name'));
   await p.click('.kit-sheet [data-act="save"]');
@@ -550,7 +561,7 @@ if (SHOTS) {
   await p.waitForTimeout(400);
   await shot(p, '390-ar-form');
   await p.tap('.kit-sheet [data-act="save"]');
-  await waitFor(p, () => document.querySelectorAll('.kit-card').length === 1);
+  await waitFor(p, () => /انحفظت/.test(document.querySelector('.kit-note')?.textContent || ''));
   await p.waitForTimeout(400);
   await shot(p, '390-ar-list');
   await ctx.close();

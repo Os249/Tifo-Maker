@@ -30,7 +30,7 @@ import type { StadiumTemplate } from './types';
 import { BUILTINS_LIVE, COMMUNITY_LIVE, LEGACY_STADIUMS } from './coreGrounds';
 import { PREMIER_LEAGUE } from './premierLeague';
 import { LA_LIGA } from './laLiga';
-import { LIGUE_1, SUPER_LIG, BOTOLA, ALGERIA_LIGUE_1, THAI_LEAGUE } from './worldLeagues';
+import { LIGUE_1, SUPER_LIG, BOTOLA, ALGERIA_LIGUE_1, THAI_LEAGUE, IRAQ_STARS_LEAGUE } from './worldLeagues';
 import { hasBlocks } from './blocks';
 import { generateSeatMap } from './seatmap';
 import { realBlocksFor } from './realBlocks';
@@ -112,9 +112,9 @@ function asShipped(list: StadiumEntry[]): StadiumEntry[] {
 }
 const PREMIER_LEAGUE_LIVE = asShipped(PREMIER_LEAGUE);
 const LA_LIGA_LIVE = asShipped(LA_LIGA);
-// The ultras' grounds of five more countries (October 2026), each laid out in
-// its real blocks from the start, so none has an earlier layout.
-const WORLD_LIVE = asShipped([...LIGUE_1, ...SUPER_LIG, ...BOTOLA, ...ALGERIA_LIGUE_1, ...THAI_LEAGUE]);
+// The ultras' grounds of six more countries (October-November 2026), each
+// laid out in its real blocks from the start, so none has an earlier layout.
+const WORLD_LIVE = asShipped([...LIGUE_1, ...SUPER_LIG, ...BOTOLA, ...ALGERIA_LIGUE_1, ...THAI_LEAGUE, ...IRAQ_STARS_LEAGUE]);
 
 /** The full catalog. Order: built-ins first, then community, then custom. */
 export const STADIUM_CATALOG: StadiumEntry[] = [...BUILTINS_LIVE, ...COMMUNITY_LIVE, ...PREMIER_LEAGUE_LIVE, ...LA_LIGA_LIVE, ...WORLD_LIVE];

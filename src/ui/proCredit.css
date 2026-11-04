@@ -1,0 +1,25 @@
+/*
+ * The credit line's field (Pro, ui/proCredit.ts): the same wherever an export
+ * is made (the stadium's export panel, the Post it sheet, Match Day's Record
+ * section). Editor roles only (floodlight.css); gold is the crown's.
+ */
+.qk-credit { display: grid; gap: var(--sp-1); margin: var(--sp-3) 0 0; min-width: 0; }
+.qk-credit[hidden] { display: none; }
+.qk-credit-label {
+  display: inline-flex; align-items: center; gap: var(--sp-2);
+  font-size: var(--fs-xs); font-weight: 600; color: var(--text-2);
+}
+.qk-credit-input {
+  width: 100%; min-width: 0; min-height: 34px; box-sizing: border-box;
+  padding: var(--sp-1) var(--sp-3); border-radius: var(--r-sm);
+  background: var(--ink-2); color: var(--text-1); border: 1px solid var(--line-2);
+  font: inherit; font-size: var(--fs-sm);
+}
+.qk-credit-input::placeholder { color: var(--text-3); }
+.qk-credit-input:focus-visible { outline: 2px solid var(--here-line); outline-offset: 1px; }
+.qk-credit-hint { margin: 0; font-size: var(--fs-2xs); line-height: 1.45; color: var(--text-3); }
+.qk-credit-note { margin: 0; min-height: 1em; font-size: var(--fs-2xs); color: var(--text-2); }
+.qk-credit-note:empty { min-height: 0; }
+@media (pointer: coarse) {
+  .qk-credit-input { min-height: 44px; font-size: var(--fs-base); }
+}

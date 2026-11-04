@@ -19,7 +19,7 @@
  */
 import { generateSeatMap } from './seatmap';
 import { LIMITS, MAX_TOTAL_ROWS, clamp, clampTemplate, outOfRange } from './templateLimits';
-import type { FacadeStyle, LightingStyle, RoofCoverage, StadiumTemplate, TierSpec } from './types';
+import type { FacadeStyle, LightingStyle, RoofCoverage, SeatLook, StadiumTemplate, TierSpec } from './types';
 
 // ---- geometry --------------------------------------------------------------
 
@@ -429,6 +429,21 @@ const PLAN_EXPONENT_FOOTBALL = { min: 2.35, max: 3.0 };
 const PLAN_EXPONENT_TRACK = { min: 2.0, max: 2.6 };
 
 /**
+ * A ground whose photo shows straight stands squared up to the touchlines.
+ *
+ * The ranges above were read off the first thirteen templates, which were
+ * rounded bowls. The site now draws 77 real grounds, and 60 of the 66 without
+ * a track are boxes, drawn at p 6 or more: the English and Spanish grounds,
+ * and the new Saudi ones. A building outline cannot tell a box from a bowl (it
+ * fits at 1.6 to 2.95 either way), but one photo from the stands can, so when
+ * the photo says the sides are straight the bowl is drawn at the median of the
+ * real ones: 8 where the seating carries on round the corners (48 grounds),
+ * 14 where the corners are open between four separate stands (18 grounds).
+ */
+export const PLAN_EXPONENT_BOX = 8;
+export const PLAN_EXPONENT_STANDS = 14;
+
+/**
  * Area of a superellipse with half-extents a, b and exponent p, as a multiple of
  * a*b. p=2 gives pi (an ellipse); p→infinity gives 4 (a rectangle).
  *
@@ -440,6 +455,8 @@ function superellipseAreaCoeff(p: number): number {
   const TABLE: [number, number][] = [
     [1.5, 2.585], [1.75, 2.927], [2.0, 3.142], [2.25, 3.290],
     [2.5, 3.397], [2.75, 3.478], [3.0, 3.541], [3.5, 3.632], [4.0, 3.695],
+    // Square bowls (PLAN_EXPONENT_BOX), from the closed form.
+    [6.0, 3.855], [8.0, 3.914], [10.0, 3.943], [16.0, 3.977],
   ];
   if (p <= TABLE[0][0]) return TABLE[0][1];
   const last = TABLE[TABLE.length - 1];
@@ -484,11 +501,19 @@ export function outerBowlFromFootprint(
   footArea: number,
   f: { a: number; b: number; exponent: number },
   hasTrack?: boolean,
+  shape?: 'square' | 'round',
+  openCorners?: boolean,
 ): OuterBowl {
   const rawAspect = f.b > 0 ? f.a / f.b : 1.25;
   const aspect = clamp(rawAspect, PLAN_ASPECT);
-  const exponent = clamp(f.exponent, hasTrack ? PLAN_EXPONENT_TRACK : PLAN_EXPONENT_FOOTBALL);
-  const clampedShape = Math.abs(aspect - rawAspect) > 0.02 || Math.abs(exponent - f.exponent) > 0.02;
+  // A track bends the bowl round it whatever a photo of the stands suggests.
+  // Four separate stands are straight ones, whatever else the photo said.
+  const square = (shape === 'square' || !!openCorners) && !hasTrack;
+  const exponent = square
+    ? (openCorners ? PLAN_EXPONENT_STANDS : PLAN_EXPONENT_BOX)
+    : clamp(f.exponent, hasTrack ? PLAN_EXPONENT_TRACK : PLAN_EXPONENT_FOOTBALL);
+  // Told the shape, the outline's own corner shape is not being overruled.
+  const clampedShape = Math.abs(aspect - rawAspect) > 0.02 || (!square && Math.abs(exponent - f.exponent) > 0.02);
 
   // area = coeff * a * b, with b = a / aspect
   const a = Math.sqrt((footArea * aspect) / superellipseAreaCoeff(exponent));
@@ -590,6 +615,22 @@ export interface FitWarning {
 }
 
 /**
+ * Seats of one colour, as a real ground's are: the colour itself, with a
+ * share a shade darker and a few a shade lighter, the way sun and wear leave
+ * them (the hand-built grounds are drawn the same way, e.g. Al-Awwal's gold).
+ * Only the main colour: a second one read off a photo is a stripe, a crest or
+ * lettering, and mixing it seat by seat would speckle the whole bowl.
+ */
+export function seatLookOf(main: string): SeatLook {
+  const n = parseInt(main.slice(1), 16);
+  const shade = (k: number): string => {
+    const ch = (v: number): string => Math.round(Math.max(0, Math.min(255, v * k))).toString(16).padStart(2, '0');
+    return `#${ch((n >> 16) & 255)}${ch((n >> 8) & 255)}${ch(n & 255)}`;
+  };
+  return { colors: [{ c: main, w: 6 }, { c: shade(0.9), w: 3 }, { c: shade(1.1), w: 1 }] };
+}
+
+/**
  * A guess at how a ground is lit, from the only structural signal there is.
  *
  * Lights ride the roof when there is a roof to ride: a ring or two covered sides
@@ -597,7 +638,7 @@ export interface FitWarning {
  * pylons. That is genuinely how it works, and it is still only a guess, because
  * the real predictor is the decade the ground was built in and nothing public
  * tells us that. Measured against the shipped catalogue, this rule
- * agrees with the hand-set answer 65 times out of 87.
+ * agrees with the hand-set answer 66 times out of 88.
  * scripts/verify-stadiumfit.mts reads that sentence back out of this comment and
  * fails if it has drifted from what the rule actually scores, because a stale
  * accuracy figure is worse than none: it is the number the panel hedges by. The
@@ -655,6 +696,10 @@ export interface FitInput {
     /** What the outside is made of. */
     facade?: FacadeStyle;
     cornerCut?: number;
+    /** Straight stands squared up to the touchlines, or a rounded bowl: what a photo from the stands shows. */
+    shape?: 'square' | 'round';
+    /** The empty seats' colour as #rrggbb, main first. Without it a user's ground gets charcoal seats. */
+    seatColours?: string[];
   };
 }
 
@@ -706,7 +751,12 @@ export function buildStadium(input: FitInput): FitResult {
     prov['plan.a'] = p; prov['plan.b'] = p; prov['plan.exponent'] = p;
   } else if (input.footprint && input.footprint.length >= 6) {
     const f = fitSuperellipse(input.footprint);
-    const outer = outerBowlFromFootprint(ringAreaM2(input.footprint), f, k.hasTrack);
+    // Told there is no track (by a photo, or in the panel), the bowl is drawn as
+    // the box most such grounds are, 60 of the 66 the site draws, unless the
+    // photo saw curved sides. Nobody saying either way keeps the old rounded
+    // bowl, and the shape stays in `confirm` as a guess.
+    const shape = k.shape ?? (k.hasTrack === false ? 'square' : undefined);
+    const outer = outerBowlFromFootprint(ringAreaM2(input.footprint), f, k.hasTrack, shape, (k.cornerCut ?? 0) > 0);
     // Placed below, once the row count is known: the bowl's inner edge is the
     // OUTER edge minus the seating band, and the band is not known until the
     // rows have been solved against the capacity. Seeded with a plausible band
@@ -722,7 +772,8 @@ export function buildStadium(input: FitInput): FitResult {
       noteKey: 'si.note.area',
       noteVars: { a: outer.a.toFixed(0), b: outer.b.toFixed(0), m2: Math.round(outer.footArea).toLocaleString() },
     };
-    prov['plan.a'] = p; prov['plan.b'] = p; prov['plan.exponent'] = p;
+    prov['plan.a'] = p; prov['plan.b'] = p;
+    prov['plan.exponent'] = (k.shape === 'square' || (k.cornerCut ?? 0) > 0) && !k.hasTrack ? { source: 'user', confidence: 'given' } : p;
     confirm.push('plan.a', 'plan.b');
     warnings.push({ key: 'si.warn.noRing', text: 'No seating ring measured: the bowl is derived from the building footprint and the capacity. Sample the imagery for a measured one.' });
     if (outer.clampedShape) {
@@ -791,6 +842,7 @@ export function buildStadium(input: FitInput): FitResult {
     ...(k.cornerCut !== undefined ? { cornerCut: k.cornerCut } : {}),
     ...(k.roof ? { roof: { coverage: k.roof } } : {}),
     ...(k.hasTrack ? { track: {} } : {}),
+    ...(k.seatColours?.length ? { seatLook: seatLookOf(k.seatColours[0]) } : {}),
   });
 
   let base = mkBase(plan, totalRows, tierCount);

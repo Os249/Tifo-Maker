@@ -24,23 +24,42 @@
  *
  * Every face is SIL Open Font License 1.1, from its @fontsource package (each
  * ships its LICENSE); docs/DESIGN.md "Sources and licences" credits them.
- * Picked for the seat grid: heavy strokes and open counters that still read at
- * 20 to 40 rows of seats.
+ * Each was measured on real stands of 12 to 62 rows (scripts/pro-font-seats.mts):
+ * core/seatText holds what it needs there, and the two whose thin strokes
+ * break up at every size a stand has (Classic, Ruqaa) are for banners only.
  */
 import type { TifoFont } from './text';
 import type { TifoVoice } from './tifoVoices';
 
-export const PRO_VOICES: readonly TifoVoice[] = [
+/**
+ * A Pro voice. `seats: false`: it is offered for banners only (its strokes
+ * break up on seats), and `instead` is the seat voice nearest it in spirit.
+ */
+export interface ProVoice extends TifoVoice {
+  seats?: false;
+  instead?: string;
+}
+
+export const PRO_VOICES: readonly ProVoice[] = [
   { id: 'block', family: 'TifoProBlock', name: 'Block', pair: 'Lalezar · Bowlby One',
     note: 'The fattest strokes there are: a club name that reads from the far stand.' },
   { id: 'stencil', family: 'TifoProStencil', name: 'Stencil', pair: 'Reem Kufi 700 · Black Ops One',
     note: 'Square Kufi and sprayed stencil letters: terrace attitude.' },
   { id: 'rounded', family: 'TifoProRounded', name: 'Rounded', pair: 'Lemonada 700 (both scripts)',
     note: 'Soft, round and wide, drawn by one hand for both scripts.' },
-  { id: 'classic', family: 'TifoProClassic', name: 'Classic', pair: 'Rakkas (both scripts)',
-    note: 'Heavy, high-contrast display letters by one hand for both scripts: the old match-programme look. Best from 24 rows up.' },
+  { id: 'pixel', family: 'TifoProPixel', name: 'Pixel', pair: 'Handjet 900 (both scripts)',
+    note: 'Letters built from blocks, like the seats themselves: the one that reads on the smallest stands.' },
+  { id: 'gothic', family: 'TifoProGothic', name: 'Gothic', pair: 'Blaka (both scripts)',
+    note: 'Blackletter and its Arabic twin: the old ultras banner.' },
+  { id: 'heritage', family: 'TifoProHeritage', name: 'Heritage', pair: 'El Messiri 700 (both scripts)',
+    note: 'Elegant, high-waisted Arabic and classical capitals: anniversaries and founding years.' },
   { id: 'marker', family: 'TifoProMarker', name: 'Marker', pair: 'Marhey 700 (both scripts)',
     note: 'Hand-cut and playful, like a banner painted the night before.' },
+  // Banners only: their thin strokes break up on seats at every size a stand has.
+  { id: 'classic', family: 'TifoProClassic', name: 'Classic', pair: 'Rakkas (both scripts)', seats: false, instead: 'heritage',
+    note: 'Heavy, high-contrast display letters by one hand for both scripts: the old match-programme look. Banners only.' },
+  { id: 'ruqaa', family: 'TifoProRuqaa', name: 'Ruqaa', pair: 'Aref Ruqaa 700 (both scripts)', seats: false, instead: 'marker',
+    note: 'The hand-painted Ruqaa of a street banner. Banners only.' },
 ];
 
 /** The Pro voices as fonts: what a picker lists and what a layer's CSS is. */
@@ -51,6 +70,11 @@ export const PRO_FONTS: readonly TifoFont[] = PRO_VOICES.map((v) => ({
 }));
 
 const IDS: ReadonlySet<string> = new Set(PRO_VOICES.map((v) => v.id));
+
+/** Can this voice go on seats? Every font that is not a banners-only Pro voice can. */
+export function seatsVoice(id: string | null | undefined): boolean {
+  return !(typeof id === 'string' && PRO_VOICES.some((v) => v.id === id && v.seats === false));
+}
 
 /** Is this font id one of the Pro voices? */
 export function isProVoice(id: string | null | undefined): boolean {

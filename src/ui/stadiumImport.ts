@@ -16,9 +16,9 @@
 import { buildStadium, type FitResult } from '../core/stadiumFit';
 import { addCustomTemplate, isValidTemplate } from '../core/customStadiums';
 import { findStadiums, withGeometry, OsmError, OSM_ATTRIBUTION, type OsmStadium } from '../net/osm';
-import { fetchPro, readGroundPhoto } from '../net/api';
+import { fetchPro } from '../net/api';
 import { limitBack, limitTitle } from './pro';
-import type { FactsVote } from '../core/photoFacts';
+import type { PhotoExtra } from './stadiumPhoto';
 import { t, tv } from './i18n';
 import type { FacadeStyle, LightingStyle, RoofCoverage } from '../core/types';
 
@@ -171,6 +171,7 @@ export function buildStadiumImport(deps: StadiumImportDeps): HTMLElement {
   const photoIn = document.createElement('input');
   photoIn.type = 'file';
   photoIn.accept = 'image/*';
+  photoIn.dataset.tm = 'osm-photo-file';
   photoIn.style.display = 'none';
   const photoBtn = document.createElement('button');
   photoBtn.dataset.tm = 'osm-photo';
@@ -183,41 +184,26 @@ export function buildStadiumImport(deps: StadiumImportDeps): HTMLElement {
   photoNote.style.cssText = 'font-size:10px;color:var(--text-3);margin:4px 0 0;';
   photoRow.append(photoIn, photoBtn, photoNote);
 
-  // The photo reader names its fields after the questions it asks; the template
-  // names them after the fields they fill. One table, so the two never drift.
-  const PHOTO_FIELD: Record<string, string> = {
-    tiers: 'tiers.length', roof: 'roof.coverage', track: 'track',
-    lighting: 'lighting.style', facade: 'facade.style', openCorners: 'cornerCut',
-  };
-  const agreeLine = (field: string, v?: { agreement: number; answered: number; samples: number }): string => {
-    if (!v) return '';
-    const n = Math.round(v.agreement * v.answered);
-    return `${fieldLabel(PHOTO_FIELD[field] ?? field)} ${tv('si.photo.agree', { n, of: v.samples })}`;
-  };
+  // What the last photo settled that no select can hold (the seats' colour,
+  // straight sides or curved, open corners), for build(). A new search clears
+  // it: it was a photo of the last ground.
+  let photoExtra: PhotoExtra = {};
 
   async function readPhoto(file: File): Promise<void> {
     photoBtn.disabled = true;
     photoNote.textContent = t('si.photo.reading');
     try {
-      const r = await readGroundPhoto(file);
-      const v = r.vote as FactsVote;
-      if (r.known.tiers) tierSel.value = String(r.known.tiers);
-      if (r.known.roof) roofSel.value = r.known.roof;
-      if (r.known.hasTrack !== undefined) trackSel.value = r.known.hasTrack ? 'yes' : 'no';
-      if (r.known.lighting) lightSel.value = r.known.lighting;
-      if (r.known.facade) faceSel.value = r.known.facade;
-      const parts = [
-        r.known.tiers ? agreeLine('tiers', v.tiers) : '',
-        r.known.roof ? agreeLine('roof', v.roof) : '',
-        r.known.hasTrack !== undefined ? agreeLine('track', v.track) : '',
-        r.known.lighting ? agreeLine('lighting', v.lighting) : '',
-        r.known.facade ? agreeLine('facade', v.facade) : '',
-      ].filter(Boolean);
-      const unsure = r.dropped.map((d) => fieldLabel(PHOTO_FIELD[d.field] ?? d.field));
-      photoNote.textContent = [
-        parts.length ? parts.join(' · ') : t('si.photo.nothing'),
-        unsure.length ? `${t('si.photo.unsure')} ${unsure.join(', ')}` : '',
-      ].filter(Boolean).join(' — ');
+      // Loaded on the first photo (ui/stadiumPhoto says why).
+      const { readStadiumPhoto } = await import('./stadiumPhoto');
+      const r = await readStadiumPhoto(file);
+      const k = r.known;
+      if (k.tiers) tierSel.value = String(k.tiers);
+      if (k.roof) roofSel.value = k.roof;
+      if (k.hasTrack !== undefined) trackSel.value = k.hasTrack ? 'yes' : 'no';
+      if (k.lighting) lightSel.value = k.lighting;
+      if (k.facade) faceSel.value = k.facade;
+      photoExtra = r.extra;
+      photoNote.replaceChildren(r.note);
     } catch (e) {
       // Pro (server-counted): the week's stadium photos used. Say which, and
       // when they come back, rather than "could not read".
@@ -276,6 +262,8 @@ export function buildStadiumImport(deps: StadiumImportDeps): HTMLElement {
     resultSel.style.display = 'none';
     knobs.style.display = 'none';
     report.style.display = 'none';
+    photoExtra = {};
+    photoNote.textContent = '';
     try {
       found = await findStadiums(q, inflight.signal);
       // "Nothing by that name" is not "the service is down", and the advice for
@@ -435,6 +423,7 @@ export function buildStadiumImport(deps: StadiumImportDeps): HTMLElement {
           ...(hasTrack !== undefined ? { hasTrack } : {}),
           ...(lighting ? { lighting } : {}),
           ...(facade ? { facade } : {}),
+          ...photoExtra,
         },
       });
       renderReport(fit, s);

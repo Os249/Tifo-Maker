@@ -5,8 +5,11 @@ import {
 } from './layers';
 import { cutoutBackground, enhanceForBake, halftoneCellFor, maskFromAlpha, quantizePixels, rasterize } from './importImage';
 import { fontCssOf, renderTextCanvas, type TifoFont } from './text';
-import { isPortraitStyle, stylePortrait, type PortraitStyle } from './portraitStyles';
+import { isPortraitStyle, portraitStyleOf, posterizeByRank, stylePortrait, type PortraitStyle } from './portraitStyles';
+import { isFaceInfo, type FaceInfo } from './portraitPipeline';
 import { drawSymbol } from './symbols';
+import { isProVoice } from './proVoices';
+import { seatTextAlpha } from './seatText';
 
 /**
  * The layer stack's objects.
@@ -94,6 +97,40 @@ export interface ImageObject extends BaseObject {
    * Pro is on; only the picker is Pro.
    */
   style?: PortraitStyle;
+  /**
+   * The face in the picture (0..1 of its width and height), found when a
+   * portrait style was picked (ui/portraitVision.ts). The style draws the
+   * face's features from it; without it, a style works on tone alone.
+   */
+  face?: FaceInfo;
+  /**
+   * 'rank': posterised by brightness rank into the palette's tones in order
+   * of lightness (core/portraitStyles.ts posterizeByRank), the way every AI
+   * picture is drawn since 1 Nov 2026. Absent: nearest colour, as before.
+   */
+  tones?: 'rank';
+  /**
+   * The seats under the picture (composer.ts keeps it up to date for a styled
+   * or ranked picture): editor units per seat across, and a card's real
+   * width over its height. A styled picture is drawn one cell per seat, so its
+   * seat-scale clean-up is the seats' own.
+   */
+  seat?: SeatGrid;
+}
+
+/** What a styled picture knows of the seats under it. */
+export interface SeatGrid {
+  /** Editor units per seat, across. */
+  pitch: number;
+  /** A seat card's width over its height, as the stand shows it. */
+  cell: number;
+  /** The card most of the seats beneath show (-1: no one card), which the picture's tones avoid. */
+  under?: number;
+}
+
+/** A picture drawn one cell per seat: a styled or ranked one, once the composer has measured its seats. */
+export function seatDrawn(o: TifoObject): o is ImageObject & { seat: SeatGrid } {
+  return o.kind === 'image' && !!o.seat && (isPortraitStyle(o.style) || o.tones === 'rank');
 }
 
 export interface ShapeObject extends BaseObject {
@@ -392,10 +429,16 @@ export class ObjectLayer {
 // ---------------------------------------------------------------------------
 // Rasterising (browser only)
 
-/** The grid size an object is drawn at: about one cell per 3 × 8 editor units, like the old bake. */
-export function gridSize(o: Pick<BaseObject, 'width' | 'height'>): { cols: number; rows: number } {
+/**
+ * The grid size an object is drawn at: about one cell per 3 × 8 editor units,
+ * like the old bake, or one cell per seat for a styled or ranked picture
+ * whose seats are known (its clean-up is at the seats' scale, and a stand's
+ * seats are 2.9 to 6.3 editor units apart).
+ */
+export function gridSize(o: TifoObject | Pick<BaseObject, 'width' | 'height'>): { cols: number; rows: number } {
+  const perSeat = 'kind' in o && seatDrawn(o) ? o.seat.pitch : 0;
   return {
-    cols: Math.max(2, Math.min(2400, Math.round(o.width / 3))),
+    cols: Math.max(2, Math.min(2400, Math.round(o.width / (perSeat || 3)))),
     rows: Math.max(2, Math.min(400, Math.round(o.height / 8))),
   };
 }
@@ -405,13 +448,19 @@ export function gridKeyFor(o: TifoObject): string {
   const { cols, rows } = gridSize(o);
   switch (o.kind) {
     case 'text':
-      return `t|${o.text}|${o.fontId}|${o.arcDeg}|${o.colorIndex}|${cols}x${rows}`;
+      // A Pro voice's raster is drawn seat-aware: a key of its own, so one
+      // saved before that is drawn again rather than kept.
+      return `${isProVoice(o.fontId) ? 'ts' : 't'}|${o.text}|${o.fontId}|${o.arcDeg}|${o.colorIndex}|${cols}x${rows}`;
     case 'shape':
       return `s|${o.shape}|${o.colorIndex}|${cols}x${rows}`;
     case 'image':
       // A style is added only when there is one, so a picture without one keeps
       // the key it was saved with and is not re-drawn on load.
-      return `i|${cols}x${rows}|${o.dither ? 1 : 0}${o.halftone ? 1 : 0}${o.cutout ? 1 : 0}|${o.alphaThreshold}${isPortraitStyle(o.style) ? `|${o.style}` : ''}`;
+      // A style, a face, a rank or the seats' shape is added only when there
+      // is one, so a picture without them keeps the key it was saved with
+      // and is not re-drawn on load.
+      return `i|${cols}x${rows}|${o.dither ? 1 : 0}${o.halftone ? 1 : 0}${o.cutout ? 1 : 0}|${o.alphaThreshold}${isPortraitStyle(o.style) ? `|${o.style}` : ''}`
+        + `${o.tones === 'rank' ? '|r' : ''}${o.face && isPortraitStyle(o.style) ? '|f' : ''}${seatDrawn(o) ? `|c${o.seat.cell.toFixed(2)}${o.seat.under !== undefined && o.seat.under >= 0 ? `u${o.seat.under}` : ''}` : ''}`;
     case 'cells':
       return 'c';
   }
@@ -488,15 +537,18 @@ export function ensureGrid(o: TifoObject, palette: string[]): boolean {
     // colour the generator produced. enhanceForBake preserves alpha, and the
     // quantizer skips transparent cells, so the layers beneath keep their cards.
     if (o.cutout) cutoutBackground(pixels, cols, rows);
+    // The cell's shape as the stand shows it when the seats are known, else
+    // the editor's: it keeps a style's blurs round and its clean-up fair.
+    const aspect = seatDrawn(o) ? o.seat.cell : o.width / cols / (o.height / rows);
     if (isPortraitStyle(o.style)) {
       // A portrait style draws its own tones (and takes the place of dither and
       // halftone), from the picture as it is: it lifts the face's landmarks
       // itself, and the contrast boost above would only flatten them first.
-      // The cell's shape keeps its blurs round and its dots circles.
-      data = stylePortrait(o.style, pixels, cols, rows, palette, {
-        alphaThreshold: o.alphaThreshold,
-        aspect: o.width / cols / (o.height / rows),
-      });
+      const under = seatDrawn(o) ? o.seat.under : undefined;
+      data = stylePortrait(o.style, pixels, cols, rows, palette, { alphaThreshold: o.alphaThreshold, aspect, face: o.face ?? null, under });
+    } else if (o.tones === 'rank') {
+      // An AI picture: tone levels by brightness rank, cleaned at seat scale.
+      data = posterizeByRank(pixels, cols, rows, palette, { alphaThreshold: o.alphaThreshold, aspect, under: seatDrawn(o) ? o.seat.under : undefined });
     } else {
       data = quantizePixels(enhanceForBake(pixels, cols, rows), cols, rows, palette, {
         dither: o.dither && affordable > 1,
@@ -505,6 +557,12 @@ export function ensureGrid(o: TifoObject, palette: string[]): boolean {
         alphaThreshold: o.alphaThreshold,
       });
     }
+  } else if (o.kind === 'text' && isProVoice(o.fontId)) {
+    // A Pro voice is drawn seat-aware (core/seatText): its thin strokes made
+    // thick enough for the seats, its counters and gaps kept open.
+    const seats = seatTextAlpha(o.text, o.fontCss, o.arcDeg, cols, rows);
+    data = new Int16Array(cols * rows).fill(-1);
+    if (seats) for (let i = 0; i < seats.length; i++) if (seats[i]) data[i] = o.colorIndex;
   } else {
     data = maskFromAlpha(pixels, cols, rows, o.colorIndex); // text + shape: 1-colour mask
   }
@@ -632,6 +690,9 @@ export interface ObjectJSON {
   cutout?: boolean;
   alphaThreshold?: number;
   style?: PortraitStyle;
+  face?: FaceInfo;
+  tones?: 'rank';
+  seat?: SeatGrid;
   // shape
   shape?: string;
 }
@@ -673,6 +734,9 @@ export function objectToJSON(o: TifoObject): ObjectJSON {
   else if (o.kind === 'image') {
     Object.assign(out, { name: o.name, src: o.src, dither: o.dither, halftone: o.halftone, cutout: o.cutout, alphaThreshold: o.alphaThreshold });
     if (isPortraitStyle(o.style)) out.style = o.style;
+    if (o.face) out.face = { box: o.face.box.slice() as FaceInfo['box'], pts: o.face.pts.slice() };
+    if (o.tones === 'rank') out.tones = 'rank';
+    if (o.seat) out.seat = { pitch: o.seat.pitch, cell: o.seat.cell, ...(o.seat.under !== undefined ? { under: o.seat.under } : {}) };
   } else if (o.kind === 'shape') out.shape = o.shape;
   return out;
 }
@@ -723,8 +787,18 @@ export function objectFromJSON(j: unknown, fonts: TifoFont[], paletteLen: number
       dither: r.dither === true, halftone: r.halftone === true, cutout: r.cutout === true,
       alphaThreshold: num(r.alphaThreshold ?? 128, 1, 254) ?? 128,
     };
-    // Only a style this version knows: anything else is dropped, never trusted.
-    if (isPortraitStyle(r.style)) pic.style = r.style;
+    // Only a style this version knows (a retired one is read as its
+    // successor): anything else is dropped, never trusted. The same for the
+    // face, the rank and the seats.
+    const style = portraitStyleOf(r.style);
+    if (style) pic.style = style;
+    if (isFaceInfo(r.face)) pic.face = { box: r.face.box.slice() as FaceInfo['box'], pts: r.face.pts.slice() };
+    if (r.tones === 'rank') pic.tones = 'rank';
+    const sg = r.seat as Partial<SeatGrid> | undefined;
+    const pitch = num(sg?.pitch, 0.5, 100);
+    const cell = num(sg?.cell, 0.1, 4);
+    const under = num(sg?.under, -1, Math.max(0, paletteLen - 1));
+    if (pitch !== null && cell !== null) pic.seat = { pitch, cell, ...(under !== null ? { under } : {}) };
     return pic;
   }
   if (kind === 'shape') {

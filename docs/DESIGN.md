@@ -199,8 +199,19 @@ One title, one sentence, one blue action, at most one quiet alternative.
   control while Pro runs; on a phone, and in the editor's top bar on a
   laptop (900 to 1599 px, where the header is full), the crown alone with
   its words in the title.
-- **The Supporter crown** (`supporterCrownHtml()`) follows a paid month of
-  Pro's name in the community: cards, the profile, comments.
+- **The supporter badge** (`supporterBadgeHtml()`, `ui/supporterBadge.ts`)
+  follows a paid month of Pro's name: the crown and "Pro supporter" /
+  "داعم مميّز" on their tifo cards, their public tifo page, their profile
+  header and their account page; the crown alone, its words spoken, in a
+  tight row (a comment). It shows what the server says (`ownerSupporter`,
+  `supporter`), never a plan or a date, and never for the gift.
+- **A club kit dresses what it touches** (`ui/kitEverywhere.ts`): the AI
+  panel says "Using kit: …" in a tint, a banner gets one gold-tinted "Dress
+  this banner in …", Post it wears the kit's colours and crest. The kit's
+  colours appear only on the fan's own work, never on site chrome.
+- **The credit line** (`ui/creditLine.ts`) is the fan's own handle, small,
+  in a bottom corner of every export, on a dark pill with a hairline; the
+  site's mark keeps the bottom right, an Arabic credit reads right to left.
 - **One plan** (31 Oct 2026): Free against Pro, SAR 19 for 30 days, and a
   7-day gift that waits until it is started. Every new Pro item gets the
   crown where it is picked, is free to try, meets the export sheet at
@@ -334,6 +345,13 @@ are in `docs/design-prompts.md`.
   Lemonada (The Lemonada Project Authors, github.com/Gue3bara/Lemonada).
   Classic: Rakkas (The Rakkas Project Authors, github.com/zeynepakay/Rakkas).
   Marker: Marhey (The Marhey Project Authors, github.com/namelatype/Marhey).
+  Pixel: Handjet (The Handjet Project Authors, github.com/rosettatype/Handjet).
+  Gothic: Blaka (The Blaka Project Authors, github.com/Gue3bara/Blaka).
+  Heritage: El Messiri (The El Messiri Project Authors, github.com/Gue3bara/
+  El-Messiri). Ruqaa: Aref Ruqaa (The Aref Ruqaa Project Authors, github.com/
+  alif-type/aref-ruqaa; Reserved Font Name EURM10, which we never use).
+  Classic and Ruqaa are offered for banners only: on seats their thin strokes
+  break up (docs/pro-quality/fonts.md).
   The licence allows using, embedding and redistributing them in the product;
   the fonts are never sold on their own.
 - **opendesign.dev**: retired by Ceros on 1 October 2023; nothing to adopt.

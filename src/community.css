@@ -228,8 +228,9 @@ a { color: inherit; text-decoration: none; }
 .cam-btn.cam-banner:hover { background: rgba(28, 95, 217, 0.6); }
 .card-body { padding: 16px 18px; display: flex; flex-direction: column; gap: 10px; flex: 1; }
 .card-title { font-weight: 700; font-size: 17px; letter-spacing: -0.01em; line-height: 1.25; }
-.card-by { font-size: var(--fs-sm); color: var(--muted); display: flex; align-items: center; gap: 6px; }
+.card-by { font-size: var(--fs-sm); color: var(--muted); display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
 .card-by .at { color: var(--blue); font-weight: 600; }
+.card-by .supporter-badge { margin-inline-start: 0; }
 .card-remixed { font-size: var(--fs-xs); color: var(--muted); }
 .card-remixed .at { color: var(--blue); font-weight: 600; }
 .card-stats { display: flex; align-items: center; gap: 16px; margin-top: auto; padding-top: 8px; border-top: 1px solid var(--line); color: var(--muted); font-size: var(--fs-sm); font-weight: 600; }

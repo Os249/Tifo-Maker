@@ -20,7 +20,7 @@ import { GROUND_GROUPS } from './stadiumGroups.data';
  * community one, or one added since it was made, is looked up in the full
  * catalogue instead: slower, never wrong.
  */
-export type GroundGroup = 'core' | 'premier' | 'laliga' | 'ligue1' | 'superLig' | 'botola' | 'algeria' | 'thai';
+export type GroundGroup = 'core' | 'premier' | 'laliga' | 'ligue1' | 'superLig' | 'botola' | 'algeria' | 'thai' | 'iraq';
 
 const LOAD: Record<GroundGroup, () => Promise<readonly StadiumEntry[]>> = {
   core: () => import('./coreGrounds').then((m) => [...m.BUILTINS_LIVE, ...m.COMMUNITY_LIVE, ...m.LEGACY_STADIUMS]),
@@ -32,6 +32,7 @@ const LOAD: Record<GroundGroup, () => Promise<readonly StadiumEntry[]>> = {
   botola: () => import('./worldLeagues').then((m) => m.BOTOLA),
   algeria: () => import('./worldLeagues').then((m) => m.ALGERIA_LIGUE_1),
   thai: () => import('./worldLeagues').then((m) => m.THAI_LEAGUE),
+  iraq: () => import('./worldLeagues').then((m) => m.IRAQ_STARS_LEAGUE),
 };
 
 let groupOf: Map<string, GroundGroup> | null = null;

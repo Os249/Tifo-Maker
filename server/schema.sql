@@ -609,3 +609,41 @@ ALTER TABLE pro_passes ADD CONSTRAINT pro_passes_plan_check CHECK (plan IN ('mon
 -- so the claim-by date is no longer required, or kept.
 ALTER TABLE pro_gifts ALTER COLUMN claim_by DROP NOT NULL;
 UPDATE pro_gifts SET claim_by = NULL WHERE claim_by IS NOT NULL;
+
+-- Club kits on the account (Pro, 1 Nov 2026; server/src/kitRepo.ts). A fan's
+-- kits used to live in one browser only; now they are on the account, on every
+-- device. At most 3 kits per account (kitRepo.put decides under a lock); a kit
+-- names its logos by SHA-256, and a logo no kit names is deleted with the
+-- write that dropped it. Logos are PNG only, at most 512 px and 400 KB, with
+-- their metadata stripped (kitRoutes.ts). made_at is the fan's own clock, in
+-- ms, so kits keep the order they were made in. Each statement is safe to run
+-- again.
+CREATE TABLE IF NOT EXISTS pro_club_kits (
+  user_id    UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  kit_id     TEXT NOT NULL CHECK (kit_id SIMILAR TO 'k[0-9a-z]{8,32}'),
+  name       TEXT NOT NULL CHECK (char_length(name) <= 40),
+  colours    TEXT[] NOT NULL CHECK (cardinality(colours) BETWEEN 1 AND 255),
+  font       TEXT NOT NULL DEFAULT '' CHECK (char_length(font) <= 32),
+  made_at    BIGINT NOT NULL DEFAULT 0,
+  logos      TEXT[] NOT NULL DEFAULT '{}' CHECK (cardinality(logos) <= 4),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (user_id, kit_id)
+);
+CREATE TABLE IF NOT EXISTS pro_kit_logos (
+  user_id    UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  hash       TEXT NOT NULL CHECK (hash SIMILAR TO '[0-9a-f]{64}'),
+  png        BYTEA NOT NULL CHECK (octet_length(png) <= 400000),
+  width      INT NOT NULL CHECK (width BETWEEN 1 AND 512),
+  height     INT NOT NULL CHECK (height BETWEEN 1 AND 512),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (user_id, hash)
+);
+
+-- A fan's own credit line (Pro): their handle or group name, drawn small in a
+-- corner of their exports (src/ui/creditLine.ts). One per account, at most 32
+-- characters, cleaned by core/kitRules.cleanCredit before it is kept.
+CREATE TABLE IF NOT EXISTS pro_credit_lines (
+  user_id    UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  text       TEXT NOT NULL CHECK (char_length(text) BETWEEN 1 AND 32),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);

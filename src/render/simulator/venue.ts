@@ -605,6 +605,7 @@ export function* buildVenueDetailsSteps(template: StadiumTemplate, map: SeatMap,
       }
       trash.push(faceGeo);
       const holder = new THREE.Group();
+      holder.name = 'big-screen';
       holder.position.set(pl.x, pl.y, pl.z);
       holder.rotation.y = pl.ry;
       if (sc.hang) {
@@ -634,7 +635,12 @@ export function* buildVenueDetailsSteps(template: StadiumTemplate, map: SeatMap,
       // (Neither: on the back of the top tier, just over the last row's heads, under the roof.)
       const back = box(sc.widthM + 0.8, sc.heightM + 0.8, 0.9, frame, trash);
       back.position.z = -0.5;
-      holder.add(back, new THREE.Mesh(faceGeo, face));
+      const faceMesh = new THREE.Mesh(faceGeo, face);
+      // Left out of the merge, the board and its face, so a Pro poster can
+      // leave the screen out of its picture (simulator/film.ts filmStill).
+      back.userData.keep = true;
+      faceMesh.userData.keep = true;
+      holder.add(back, faceMesh);
       group.add(holder);
       screenCount++;
     }
@@ -661,6 +667,8 @@ export function* buildVenueDetailsSteps(template: StadiumTemplate, map: SeatMap,
         m.rotation.y = ry;
         board.add(m);
       }
+      // Its box and faces (not the cables) out of the merge too, for a poster to leave out.
+      board.traverse((o) => { if ((o as THREE.Mesh).isMesh) o.userData.keep = true; });
       const hx = centre.widthM / 2 - 0.5;
       const hz = centre.depthM / 2 - 0.5;
       const top = centre.y + centre.heightM / 2 + 0.3;

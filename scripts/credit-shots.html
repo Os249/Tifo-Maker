@@ -1,0 +1,48 @@
+<!doctype html>
+<!-- Dev-only harness for scripts/credit-shots.mts. Not a Vite build input. -->
+<html lang="en"><head><meta charset="UTF-8" /><title>credit shots</title>
+<style>body{margin:0;background:#111;color:#ddd;font:13px system-ui} .row{display:flex;flex-wrap:wrap;gap:10px;padding:10px} figure{margin:0} figcaption{padding:4px 2px}</style></head>
+<body><div class="row" id="out"></div>
+<script type="module">
+  import { drawCreditLine } from '/src/ui/creditLine.ts';
+  import { drawWatermark } from '/src/export/stadiumExport.ts';
+
+  // Backgrounds a credit has to read on: a night sky, a floodlit white stand, a busy crowd, a gold tifo.
+  const grounds = {
+    night: (g, w, h) => { const gr = g.createLinearGradient(0, 0, 0, h); gr.addColorStop(0, '#02040a'); gr.addColorStop(1, '#0c1830'); g.fillStyle = gr; g.fillRect(0, 0, w, h); },
+    white: (g, w, h) => { g.fillStyle = '#f4f4f0'; g.fillRect(0, 0, w, h); for (let y = 0; y < h; y += 6) { g.fillStyle = y % 12 ? '#e8e8e2' : '#ffffff'; g.fillRect(0, y, w, 3); } },
+    crowd: (g, w, h) => { for (let y = 0; y < h; y += 4) for (let x = 0; x < w; x += 4) { const v = (Math.sin(x * 12.9898 + y * 78.233) * 43758.5453) % 1; const c = Math.abs(v); g.fillStyle = c > 0.66 ? '#e8e8e8' : c > 0.33 ? '#c0392b' : '#1b2a4a'; g.fillRect(x, y, 4, 4); } },
+    gold: (g, w, h) => { g.fillStyle = '#d4a017'; g.fillRect(0, 0, w, h); g.fillStyle = '#0f7a3a'; g.fillRect(0, h * 0.55, w, h * 0.45); },
+  };
+  const cases = [
+    ['night', 1920, 1080, '@green_eagles', { avoid: 'right' }, true],
+    ['white', 1920, 1080, '@green_eagles', { avoid: 'right' }, true],
+    ['crowd', 1920, 1080, 'Ultras Green Eagles 1999', { avoid: 'right', accent: '#0f7a3a' }, true],
+    ['gold', 1920, 1080, 'ألتراس النسور', { avoid: null, accent: '#0f7a3a' }, false],
+    ['white', 1080, 1920, '@green_eagles', { avoid: 'right', accent: '#d01f2f' }, true],
+    ['night', 480, 270, '@green_eagles', { avoid: 'right' }, true],
+    ['crowd', 480, 270, 'ألتراس النسور الخضر', { avoid: 'right' }, true],
+    ['white', 3840, 2160, 'رابطة الموج الأزرق @blue_wave', { avoid: null, accent: '#1c5fd9' }, false],
+  ];
+  const out = document.getElementById('out');
+  for (const [bg, w, h, text, opts, mark] of cases) {
+    const c = document.createElement('canvas');
+    c.width = w; c.height = h;
+    const g = c.getContext('2d');
+    grounds[bg](g, w, h);
+    if (mark) drawWatermark(g, w, h, 'tifomaker.org');
+    drawCreditLine(g, w, h, text, opts);
+    // Show the bottom strip at a size a reviewer reads: the bottom 30% of the picture, 480px wide.
+    const crop = document.createElement('canvas');
+    const ch = Math.round(h * 0.3);
+    crop.width = 640; crop.height = Math.round((640 / w) * ch);
+    crop.getContext('2d').drawImage(c, 0, h - ch, w, ch, 0, 0, crop.width, crop.height);
+    const f = document.createElement('figure');
+    f.appendChild(crop);
+    const cap = document.createElement('figcaption');
+    cap.textContent = `${bg} ${w}×${h}${mark ? ' + mark' : ''}: ${text}`;
+    f.appendChild(cap);
+    out.appendChild(f);
+  }
+  window.__ready = true;
+</script></body></html>

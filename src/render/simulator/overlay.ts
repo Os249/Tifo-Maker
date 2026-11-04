@@ -20,7 +20,10 @@ import { OSM_ATTRIBUTION } from '../../net/osm';
 import { fetchPro, type ProState } from '../../net/api';
 import { proChipHtml } from '../../ui/pro';
 import { exportGate } from '../../ui/proGate';
+import { currentCredit } from '../../ui/creditLine';
+import type { MatchDayFilmChoice } from '../../ui/proFilm';
 import { BOARD_MESSAGES, BOARD_TEXT_MAX, boardColour, cleanBoardText } from './pitchside';
+import { mountLedStyle } from './ledPanel';
 import {
   ACCESSORY_KINDS,
   ACCESSORY_PRESETS,
@@ -1281,6 +1284,8 @@ export function openMatchDaySimulator(
   secLed.root.classList.add('mds-pro');
   secLed.root.querySelector('.mds-shead .chev')?.insertAdjacentHTML('beforebegin', proChipHtml());
   secLed.body.append(ledHint, field(L('ledMessages'), ledList), field(L('ledColour'), ledSwatches), ledClear, ledTry);
+  // Their style: a template, the club kit's crest, the score; and the big screens (ledPanel.ts).
+  const ledStyle = mountLedStyle({ body: secLed.body, section: secLed.root, screenSel, before: ledClear }, (s) => sim.setBoardStyle(s));
 
   // Tifo Assets
   const standSel = sel();
@@ -1469,11 +1474,15 @@ export function openMatchDaySimulator(
   recordBtn2.dataset.k = 'record-video';
   previewBtn.dataset.k = 'rec-preview';
   const secRecord = section(ICONS.record, L('recTitle'), false);
+  // Pro: the fan's credit line, the same field as the editor's (ui/proCredit.ts), filled in once Pro is known to be on.
+  const creditSlot = document.createElement('div');
+  creditSlot.dataset.k = 'credit';
   secRecord.body.append(
     field(L('recLength'), recDur),
     field(L('frameRate'), recFps),
     field(L('resolution'), recRes),
     field(L('recCamera'), recCam),
+    creditSlot,
     row(previewBtn, recordBtn2),
   );
 
@@ -1875,6 +1884,7 @@ export function openMatchDaySimulator(
    */
   function applyBoards(): void {
     if (!built) return;
+    ledStyle.apply();
     sim.setBoardText(state.proLive ? state.ledText : [], state.ledColour);
   }
   /** Screens: the section only shows on a ground that has them. */
@@ -2667,6 +2677,8 @@ export function openMatchDaySimulator(
   // ---------- Pro: what /api/pro says ----------
   let proState: ProState | null = null;
   const proRunning = (): boolean => !!proState?.live && !!proState.plan && proState.plan !== 'free';
+  /** What Record makes, for an account Pro is on for (ui/proFilm.ts); null until /api/pro says so. */
+  let filmChoice: MatchDayFilmChoice | null = null;
   /**
    * Show the Pro controls, or not, from /api/pro. Until it answers (and for
    * anyone Pro is not on for) Match Day is exactly what it was: no section,
@@ -2681,10 +2693,18 @@ export function openMatchDaySimulator(
     secLed.root.hidden = !live;
     noMarkLbl.hidden = !live;
     if (!live) noMarkChk.checked = false;
+    if (live && !creditSlot.firstChild) void import('../../ui/proCredit').then((m) => { if (!creditSlot.firstChild) creditSlot.append(m.creditField()); }).catch(() => {});
     // A pass holder still sees what is Pro, quietly.
     for (const chip of overlay.querySelectorAll('.mds-pro .pro-chip')) chip.classList.toggle('quiet', proRunning());
     ledTry.hidden = !live || proRunning();
     applyBoards();
+    // Pro: what Record makes, Match Day's film or the recording (ui/proFilm.ts).
+    if (live && !filmChoice) {
+      const fields = [recDur, recFps, recRes, recCam].map((el) => el.closest<HTMLElement>('.mds-field')).filter((el): el is HTMLElement => !!el);
+      filmChoice = await import('../../ui/proFilm').then((m) => m.mountMatchDayFilmChoice(secRecord.body, fields, { map, store }), () => null);
+      if (closed) return;
+    }
+    filmChoice?.setLive(live, proRunning());
   };
   const onProChange = (): void => void syncPro(true);
 
@@ -2694,6 +2714,9 @@ export function openMatchDaySimulator(
     if (!state.proLive) return [];
     const items: string[] = [];
     if (noMarkChk.checked) items.push(L('noMark'));
+    // The fan's credit line (Pro, ui/proCredit.ts).
+    const credit = currentCredit();
+    if (credit.text && credit.label) items.push(credit.label);
     if (state.ledText.some(Boolean)) items.push(L('ledItem'));
     try {
       items.push(...(opts.pro?.designItems() ?? []));
@@ -2760,7 +2783,7 @@ export function openMatchDaySimulator(
         // Asked once: as chosen with Pro running, the free version, or nothing.
         const how = await exportGate(items);
         if (how === null || !built) return;
-        saveSnapshot(how === 'pro' ? sim.snapshot({ mark: !noMarkChk.checked }) : await asFree(async () => sim.snapshot()));
+        saveSnapshot(how === 'pro' ? sim.snapshot({ mark: !noMarkChk.checked, credit: currentCredit() }) : await asFree(async () => sim.snapshot()));
       } finally {
         snapping = false;
       }
@@ -2780,14 +2803,24 @@ export function openMatchDaySimulator(
     // Pro items in the clip are asked about once, before it starts; the free
     // version keeps the boards plain and the design's Pro items lifted for
     // the whole recording.
-    const items = proItems();
+    const film = state.proLive ? filmChoice?.shape() ?? null : null;
+    const items = [...proItems(), ...(film ? [filmChoice!.item()] : [])];
     const how = items.length ? await exportGate(items) : 'pro';
     if (how === null || !built || sim.isRecording()) {
       recBtn.disabled = false;
       recordBtn2.disabled = false;
       return;
     }
-    const record = () => sim.recordReveal({ ...recOpts(), mark: how === 'pro' ? !noMarkChk.checked : true }, (s) => toast(L('recording') + ' ' + s));
+    if (how === 'pro' && film) {
+      // Pro: Match Day's film of the tifo, drawn frame by frame (ui/proFilm.ts).
+      const { filmFromMatchDay } = await import('../../ui/proFilm');
+      const outcome = await filmFromMatchDay(sim, { shape: film, reveal: { kind: 'mode', mode: state.reveal }, mark: !noMarkChk.checked, creditLine: currentCredit().text || undefined, name: 'tifo-matchday-film' });
+      recBtn.disabled = false;
+      recordBtn2.disabled = false;
+      toast(outcome.message);
+      return;
+    }
+    const record = () => sim.recordReveal({ ...recOpts(), mark: how === 'pro' ? !noMarkChk.checked : true, credit: how === 'pro' ? currentCredit() : undefined }, (s) => toast(L('recording') + ' ' + s));
     const clip = how === 'free' ? await asFree(record) : await record();
     recBtn.disabled = false;
     recordBtn2.disabled = false;

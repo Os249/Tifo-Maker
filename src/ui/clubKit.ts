@@ -22,9 +22,11 @@
  *    MAX_PICTURES holds. Real colours is off while a kit logo waits, so a logo
  *    is drawn in the kit's colours rather than growing the palette.
  *
- * Kept in this browser only (ui/clubKitStore.ts, IndexedDB): it costs nothing
- * to run and nothing goes to the server. A browser that keeps nothing still
- * has its kits for the session, and the sheet says they are not kept.
+ * Kept on the account (ui/clubKitStore.ts; server/src/kitRoutes.ts), so a kit
+ * made on a laptop is there on the phone, with a copy in this browser for
+ * when the network is not; the kits this browser made before move up the
+ * first time. The sheet says where they are. Beyond the seats, the kit in use
+ * dresses the AI designer's brief, banners and Post it (ui/kitEverywhere.ts).
  *
  * Free to try once: an account without Pro running can open it, save kits and
  * use one in a project FREE_KIT_USES times (remembered in this browser; a
@@ -44,9 +46,11 @@ import { onLangChange, t, tv } from './i18n';
 import { CROWN_SVG, proChipHtml } from './pro';
 import type { ProToolsContext } from './proTools';
 import {
-  KIT_NAME_MAX, MAX_KITS, MAX_KIT_LOGOS, cleanName, forgetKit, loadKits, logoFromFile, logoFromImage, newKitId, storeKit,
-  type ClubKit, type KitLogo,
+  KIT_NAME_MAX, MAX_KITS, MAX_KIT_LOGOS, cleanName, forgetKit, lastSaved, loadKits, logoFromFile, logoFromImage, newKitId, storeKit,
+  type ClubKit, type KitLoad, type KitLogo,
 } from './clubKitStore';
+import { mountKitEverywhere } from './kitEverywhere';
+import { bannerScene } from './bannerHost';
 
 /** How many times an account without Pro running may use a kit in a project. */
 export const FREE_KIT_USES = 1;
@@ -58,6 +62,9 @@ const esc = escapeHtml;
 /** A kit's name inside a sentence, isolated, so a Latin name keeps its quotes in place in an Arabic one. */
 const iso = (s: string): string => `\u2068${s}\u2069`;
 const CHECK_SVG = '<svg class="kit-tick" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
+/** Where the kits are: a cloud with a tick (on the account), a cloud struck through (offline). */
+const CLOUD_SVG = '<svg class="kit-cloud" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M7 18h10.5a4 4 0 0 0 .4-7.98A6 6 0 0 0 6.3 9.1 4.5 4.5 0 0 0 7 18z"/><path d="M9.5 13.2l2 2 3.6-3.8"/></svg>';
+const CLOUD_OFF_SVG = '<svg class="kit-cloud" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M7 18h10.5a4 4 0 0 0 .4-7.98A6 6 0 0 0 6.3 9.1 4.5 4.5 0 0 0 7 18z"/><path d="M4 4l16 16"/></svg>';
 
 // -------------------------------------------------------------- free try ---
 
@@ -146,21 +153,44 @@ export function mountClubKit(ctx: ProToolsContext): void {
   let kept = true;
   let dropped = 0;
   let loaded = false;
+  /** Where the kits are, as the last load found them (the sheet says so). */
+  let where: Pick<KitLoad, 'where' | 'offline' | 'moved' | 'left'> = {};
   let loading: Promise<void> | null = null;
+  /** Read again each time the sheet opens: a kit saved on another device is there. */
   const load = (): Promise<void> =>
     (loading ??= loadKits(knownFont).then(
       (r) => {
         kits = r.kits;
         kept = r.kept;
-        dropped = r.dropped;
+        dropped += r.dropped;
+        // "Moved up" is news until the sheet has said it, whichever load did the moving.
+        where = { where: r.where, offline: r.offline, moved: (where.moved ?? 0) + (r.moved ?? 0), left: r.left };
         loaded = true;
+        everywhere.setKits(kits);
       },
       () => {
         kept = false;
         loaded = true;
       },
-    ));
+    ).finally(() => {
+      loading = null;
+    }));
+  const onAccount = (): boolean => where.where === 'account';
   const kitName = (k: ClubKit): string => k.name || t('kit.defaultName');
+  const everywhere = mountKitEverywhere({
+    kitName,
+    say: (msg) => ctx.say(msg),
+    mayUse: async (kit) => {
+      if (running || everywhere.active?.id === kit.id) return true;
+      if (freeUsed() < FREE_KIT_USES) {
+        spendFree();
+        everywhere.setActive(kit);
+        return true;
+      }
+      await offerPro();
+      return false;
+    },
+  });
 
   // ---- the entry: beside Import palette and Save palette ----
   const entry = document.createElement('button');
@@ -259,13 +289,17 @@ export function mountClubKit(ctx: ProToolsContext): void {
     sheet.body.innerHTML =
       `<h2 class="kit-h" tabindex="-1"><span>${esc(t('kit.entry'))}</span>${proChipHtml({ quiet: running })}</h2>` +
       `<p>${esc(t('kit.lead'))}</p>` +
+      (onAccount()
+        ? `<p class="kit-where${where.offline ? ' off' : ''}">${where.offline ? CLOUD_OFF_SVG : CLOUD_SVG}<span>${esc(t(where.offline ? 'qk.offline' : 'qk.onAccount'))}</span></p>`
+        : '') +
       (!running ? `<div class="pro-strip kit-free">${CROWN_SVG}<span>${esc(t(left > 0 ? 'kit.freeOnce' : 'kit.freeUsed'))}</span></div>` : '') +
       (kits.length ? `<ul class="kit-cards">${kits.map(cardHtml).join('')}</ul>` : `<p class="kit-empty">${esc(t('kit.empty'))}</p>`) +
       `<div class="pro-actions">` +
       `<button type="button" class="${kits.length ? 'pro-alt' : 'pro-primary'}" data-act="new"${full ? ' disabled' : ''}>${esc(t('kit.save'))}</button>` +
       `</div>` +
       (full ? `<p class="kit-hint kit-center">${esc(tv('kit.full', { n: MAX_KITS }))}</p>` : '') +
-      (!kept ? `<p class="kit-hint kit-center">${esc(t('kit.notKept'))}</p>` : '') +
+      (!onAccount() && !kept ? `<p class="kit-hint kit-center">${esc(t('kit.notKept'))}</p>` : '') +
+      (where.left ? `<p class="kit-hint kit-center">${esc(t('qk.left'))}</p>` : '') +
       `<p class="pro-note kit-note" role="status" aria-live="polite"></p>`;
     paintColours(sheet.body);
     for (const cv of sheet.body.querySelectorAll<HTMLCanvasElement>('canvas[data-logo]')) {
@@ -273,8 +307,9 @@ export function mountClubKit(ctx: ProToolsContext): void {
       drawFit(cv, kit?.logos[Number(cv.dataset.logo)]?.bitmap);
     }
     // The status line is filled after it is in the page, so it is spoken.
-    const say = msg || (dropped ? t('kit.dropped') : '');
+    const say = msg || (dropped ? t('kit.dropped') : where.moved ? t('qk.moved') : '');
     dropped = 0;
+    where.moved = 0;
     if (say) requestAnimationFrame(() => note(say));
   };
 
@@ -407,9 +442,11 @@ export function mountClubKit(ctx: ProToolsContext): void {
     const name = cleanName(f.name) || t('kit.defaultName');
     const kit: ClubKit = { id: newKitId(), name, colors, logos, font: knownFont(f.font) ? f.font : '', at: Date.now() };
     kits.push(kit);
-    const ok = kept && (await storeKit(kit));
+    everywhere.setKits(kits);
+    const ok = (kept || onAccount()) && (await storeKit(kit));
     if (!sheet) return;
-    renderList(ok ? tv('kit.saved', { name: iso(name) }) : t('kit.notKept'));
+    const went = lastSaved();
+    renderList(!ok ? t('kit.notKept') : tv(went === 'account' ? 'qk.saved' : went === 'later' ? 'qk.savedLater' : 'kit.saved', { name: iso(name) }));
     focusIn(`.kit-card[data-id="${kit.id}"] .kit-use`);
   };
 
@@ -425,7 +462,8 @@ export function mountClubKit(ctx: ProToolsContext): void {
     const name = cleanName(v);
     if (!name || !sheet) return;
     kit.name = name;
-    const ok = kept && (await storeKit(kit));
+    everywhere.setKits(kits);
+    const ok = (kept || onAccount()) && (await storeKit(kit));
     if (!sheet) return;
     renderList(ok ? tv('kit.renamed', { name: iso(name) }) : t('kit.notKept'));
     focusIn(`.kit-card[data-id="${kit.id}"] [data-act="rename"]`);
@@ -436,14 +474,15 @@ export function mountClubKit(ctx: ProToolsContext): void {
     const name = kitName(kit);
     const yes = await confirmModal({
       title: tv('kit.deleteQ', { name: iso(name) }),
-      message: t('kit.deleteMsg'),
+      message: t(onAccount() ? 'qk.deleteMsg' : 'kit.deleteMsg'),
       confirmLabel: t('kit.delete'),
       cancelLabel: t('kit.keep'),
       danger: true,
     });
     if (!yes) return;
     kits = kits.filter((k) => k !== kit);
-    const ok = kept && (await forgetKit(kit.id));
+    everywhere.setKits(kits);
+    const ok = (kept || onAccount()) && (await forgetKit(kit.id));
     if (!sheet) return;
     renderList(ok || !kept ? tv('kit.deleted', { name: iso(name) }) : t('kit.notKept'));
     focusIn('h2');
@@ -542,7 +581,19 @@ export function mountClubKit(ctx: ProToolsContext): void {
       tf.dispatchEvent(new Event('change'));
     }
     ctx.say(tv(font ? 'kit.used' : 'kit.usedColours', { name: iso(kitName(kit)) }));
+    // In the project now: the AI designer, banners and Post it wear it too.
+    everywhere.setActive(kit);
     if (kit.logos.length) offer(kit);
+  };
+
+  /** The free try is spent: the gift when one waits, else what Pro adds. */
+  const offerPro = async (): Promise<void> => {
+    sheet?.close();
+    const st = pro;
+    const m = await import('./proSheets');
+    if (!st) return;
+    if (st.gift?.state === 'offered') await m.openGiftSheet(st);
+    else await m.openProSheet(st, { lead: t('kit.sheetLead') });
   };
 
   const useKit = async (kit: ClubKit): Promise<void> => {
@@ -550,11 +601,7 @@ export function mountClubKit(ctx: ProToolsContext): void {
     show(st);
     if (!live) return;
     if (!running && freeUsed() >= FREE_KIT_USES) {
-      sheet?.close();
-      const m = await import('./proSheets');
-      if (!st) return;
-      if (st.gift?.state === 'offered') await m.openGiftSheet(st);
-      else await m.openProSheet(st, { lead: t('kit.sheetLead') });
+      await offerPro();
       return;
     }
     sheet?.close();
@@ -707,6 +754,9 @@ export function mountClubKit(ctx: ProToolsContext): void {
       queue = false;
       realBack();
     }
+    everywhere.setPro(live, running);
+    // The kits once at the start, so the kit this project used is back in use (the AI, banners, Post it).
+    if (live && !loaded) void load();
     paintEntry();
     paintStrip();
     if (sheet && view === 'list' && loaded) renderList();
@@ -732,6 +782,13 @@ export function mountClubKit(ctx: ProToolsContext): void {
       kept: () => kept,
       freeUsed,
       offered: () => (offered ? { name: offered.kit.name, placed: offered.placed.slice(), armed: armedLogo } : null),
+      where: () => ({ ...where }),
+      active: () => everywhere.active?.id ?? null,
+      reload: () => load(),
+      banner: () => {
+        const d = bannerScene.store?.active;
+        return d ? { kind: d.kind, bg: d.bg, items: d.items.map((i) => ({ kind: i.kind, ...('fontId' in i ? { fontId: i.fontId } : {}), ...('color' in i ? { color: i.color } : {}), ...('name' in i ? { name: i.name } : {}), ...('cx' in i ? { cx: i.cx, w: i.w } : {}) })) } : null;
+      },
     };
   }
 }

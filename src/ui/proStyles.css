@@ -23,3 +23,38 @@
 @media (pointer: coarse) {
   .pstyle-field select, .pstyle-row select { min-height: 44px; }
 }
+
+/* ---- the styles on the fan's own stand (the import bar's previews) ----
+   A row of its own under the bar's controls: the advice first (what the stand
+   can carry), then one tile per style, each the stand's seats as the far side
+   of the ground sees them. A tile is a radio; the picked one is tinted, not
+   blue (docs/DESIGN.md: blue is the one next step, and that is Place). */
+.tool-bar .qi-panel { flex: 1 1 100%; display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; }
+.tool-bar .qi-panel[hidden] { display: none; }
+.qi-note { margin: 0; font-size: var(--fs-xs); color: var(--text-2); line-height: 1.4; max-width: 72ch; }
+.qi-strip { display: flex; flex-wrap: wrap; gap: var(--sp-2); min-width: 0; }
+.tool-bar .qi-tile {
+  display: inline-flex; flex-direction: column; align-items: center; justify-content: space-between; gap: var(--sp-1);
+  padding: var(--sp-1); border-radius: var(--r-sm); background: var(--ink-2);
+  border: 1px solid var(--line-1); box-shadow: none; color: var(--text-2);
+  font-size: var(--fs-2xs); font-weight: 600; line-height: 1.2; cursor: pointer;
+  transition: border-color var(--duration-quick) var(--ease-smooth-out), background-color var(--duration-quick) var(--ease-smooth-out);
+}
+.qi-tile canvas { display: block; border-radius: 2px; image-rendering: pixelated; }
+.tool-bar .qi-tile:hover { border-color: var(--line-2); color: var(--text-1); }
+.tool-bar .qi-tile[aria-checked="true"] { border-color: var(--here-line); background: var(--here-bg); color: var(--here-ink); }
+.tool-bar .qi-tile:focus-visible { outline: none; box-shadow: var(--ring-focus); }
+.tool-bar .qi-cutstyle { white-space: nowrap; }
+.tool-bar .qi-cutstyle[hidden] { display: none; }
+/* The face banner: under the advice, before the previews. The lead offer
+   (a stand too small for a face) takes the Pro line's colour as its fill. */
+.tool-bar .qi-tobanner { align-self: flex-start; white-space: nowrap; }
+.tool-bar .qi-tobanner[hidden] { display: none; }
+.tool-bar .qi-tobanner-lead { background: var(--pro-line); }
+
+@media (pointer: coarse) {
+  .tool-bar .qi-tile, .tool-bar .qi-cutstyle, .tool-bar .qi-tobanner { min-height: 44px; }
+}
+/* A phone's sheet: the tiles scroll sideways rather than stacking six deep. */
+body.m-shell .m-sheet .qi-strip { flex-wrap: nowrap; overflow-x: auto; padding-bottom: var(--sp-1); }
+body.m-shell .m-sheet .qi-tile { flex: none; }

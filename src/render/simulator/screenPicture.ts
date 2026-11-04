@@ -1,4 +1,5 @@
 import type { SeatMap } from '../../core/types';
+import { drawScreenPage, type LedPage, type LedPicture } from './ledBoards';
 
 /**
  * What the big screens show.
@@ -11,8 +12,11 @@ import type { SeatMap } from '../../core/types';
  *     browser and never uploaded. We don't ship club crests: they are
  *     registered trademarks, and a fan choosing to put their own club's badge
  *     on their own render is a different thing from us distributing it.
+ *   - 'boards' (Pro): what the LED boards show, page for page (the club's
+ *     crest and words, a score, the countdown); the name when they show
+ *     nothing (no words, or a free export).
  */
-export type ScreenMode = 'stadium' | 'tifo' | 'image';
+export type ScreenMode = 'stadium' | 'tifo' | 'image' | 'boards';
 
 export interface ScreenSource {
   mode: ScreenMode;
@@ -22,6 +26,8 @@ export interface ScreenSource {
   map?: SeatMap;
   cells?: Uint8Array;
   image?: CanvasImageSource & { width: number; height: number };
+  /** 'boards': the LED page on show, the boards' colour and the crest. */
+  boards?: { page: LedPage; colour: string; crest: LedPicture | null } | null;
 }
 
 /** Palette colours that are actual colours (index 0 is "empty seat"). */
@@ -82,7 +88,9 @@ export function paintScreen(canvas: HTMLCanvasElement, src: ScreenSource): void 
   g.fillStyle = '#05070b';
   g.fillRect(0, 0, w, h);
 
-  if (src.mode === 'image' && src.image && src.image.width > 0) {
+  if (src.mode === 'boards' && src.boards) {
+    drawScreenPage(g, w, h, src.boards.page, src.boards.colour, src.boards.crest);
+  } else if (src.mode === 'image' && src.image && src.image.width > 0) {
     g.fillStyle = bg;
     g.fillRect(0, 0, w, h);
     const s = Math.min((w * 0.9) / src.image.width, (h * 0.9) / src.image.height);

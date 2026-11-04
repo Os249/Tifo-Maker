@@ -15,8 +15,11 @@
  *                    it without the mark asks first, and its free picture
  *                    still has the mark;
  *   the gift on      the crowns go quiet; a Full HD video is 1920 × 1080 and
- *                    a vertical one 1080 × 1920 (read by a <video> element);
- *                    the poster is 3840 × 2160 (2160 × 3840 vertical), decoded;
+ *                    a vertical one 1080 × 1920 (read by a <video> element:
+ *                    Match Day's film, its first frames only, as
+ *                    e2e-pro-video.mjs tests it); the poster sheet opens on
+ *                    the vertical size's shape and saves 3840 × 2160 or
+ *                    2160 × 3840 (e2e-pro-poster.mjs tests the sheet);
  *                    Post it without the mark asks nothing and has no mark;
  *                    a device that cannot draw a size says so and falls back;
  *   in Arabic        on a 390px phone: the words, 44px targets, nothing
@@ -111,6 +114,8 @@ const editor = async (token, design, { lang = 'en', base = B, w = 1440, h = 900,
     } catch { /* */ }
     // Every "tifomaker.org" a canvas draws: the mark burned into an export.
     window.__marks = 0;
+    // A Pro size's film, its first frames only (a whole one takes most of an hour in software GL).
+    window.__tifoFilmFrames = 6;
     const fill = CanvasRenderingContext2D.prototype.fillText;
     CanvasRenderingContext2D.prototype.fillText = function (text, ...rest) {
       if (text === 'tifomaker.org') window.__marks++;
@@ -258,7 +263,7 @@ let freePost = null;
   });
   check('…"Size": your screen, then ♛ Pro sizes Full HD and vertical 9:16', ui.label === 'Size' && JSON.stringify(ui.options) === JSON.stringify([['screen', 'Your screen'], ['hd', 'Full HD'], ['vertical', 'Vertical 9:16']]) && ui.group === '♛ Pro sizes', JSON.stringify(ui));
   check('…no crown while the screen\'s size is picked', !ui.crown);
-  check('the poster: a gold button with the crown', ui.poster === 'Poster picture (4K)', String(ui.poster));
+  check('the poster: a gold button with the crown', ui.poster === 'Match-day poster (4K)', String(ui.poster));
   check('the stadium\'s mark option, crowned', ui.mark);
   await p.selectOption('#sx-size', 'hd');
   check('picking Full HD crowns it, and says what it is for and how big', await waitFor(p, () => !!document.querySelector('#sx-size-row .pro-chip:not(.quiet)') && /big screen.*\(1920\s×\s1080\)/.test(document.getElementById('sx-size-note')?.textContent || '')));
@@ -299,8 +304,10 @@ let freePost = null;
   check('closing the sheet exports nothing', await waitFor(p, () => !document.querySelector('.pro-sheet-backdrop')));
   await p.uncheck('#sx-nomark');
 
-  // The poster, free: the sheet, then a screen-size PNG with the mark.
+  // The poster, free: its sheet, then the export sheet, then a screen-size PNG with the mark.
   await p.click('#sx-poster');
+  await waitFor(p, () => document.querySelector('.qv-preview canvas')?.dataset.ready === '1', null, 240000);
+  await p.click('.qv-download');
   await openSheet(p);
   const pItems = await sheetItems(p);
   check('the poster asks first, naming "4K poster picture"', JSON.stringify(pItems) === JSON.stringify(['4K poster picture']), JSON.stringify(pItems));
@@ -366,19 +373,27 @@ console.log('\n— the gift accepted: Pro running —');
 
   // The poster: 2160 × 3840 with the vertical size, 3840 × 2160 otherwise.
   check('the poster follows the vertical size', /2160\s×\s3840/.test(await p.getAttribute('#sx-poster', 'title')));
-  const pv = await downloadFrom(p, () => p.click('#sx-poster'));
+  await p.click('#sx-poster');
+  check('…and its sheet opens portrait', await waitFor(p, () => document.querySelector('.qv-preview canvas')?.dataset.ready === '1' && document.querySelector('input[name="qv-shape"]:checked')?.value === 'portrait', null, 240000));
+  const pv = await downloadFrom(p, () => p.click('.qv-download'));
   const pvi = await pngInfo(pv.buf);
   check('…and is a 2160 × 3840 PNG', pvi.w === 2160 && pvi.h === 3840, JSON.stringify(pvi));
   savePng(pv.buf, 'pexp-poster-vertical');
+  await p.keyboard.press('Escape');
+  await waitFor(p, () => !document.querySelector('.qv-poster'), null, 60000);
   await p.selectOption('#sx-size', 'hd');
   await p.check('#sx-nomark');
   await p.evaluate(() => { window.__marks = 0; });
-  const ph = await downloadFrom(p, () => p.click('#sx-poster'));
+  await p.click('#sx-poster');
+  await waitFor(p, () => document.querySelector('.qv-preview canvas')?.dataset.ready === '1', null, 240000);
+  const ph = await downloadFrom(p, () => p.click('.qv-download'));
   const phi = await pngInfo(ph.buf);
   check('the 4K poster is 3840 × 2160, with no sheet', phi.w === 3840 && phi.h === 2160, JSON.stringify(phi));
   check('…and without the mark when it is ticked', await p.evaluate(() => window.__marks === 0));
   check('…and says what it saved', /Poster saved: 3840\s×\s2160/.test(await p.textContent('#sx-status')));
   savePng(ph.buf, 'pexp-poster-4k');
+  await p.keyboard.press('Escape');
+  await waitFor(p, () => !document.querySelector('.qv-poster'), null, 60000);
   await p.uncheck('#sx-nomark');
 
   // A device that cannot draw it: said, and the screen's size instead.
@@ -428,7 +443,7 @@ console.log('\n— in Arabic, on a 390px phone —');
       over: document.documentElement.scrollWidth - innerWidth,
     };
   });
-  check('…in Arabic', ar.label === 'المقاس' && ar.opts[0] === 'مقاس شاشتك' && ar.group === '♛ مقاسات مميّزة' && /تيك توك/.test(ar.note) && /صورة بوستر/.test(ar.poster) && ar.chip === 'مميّز', JSON.stringify(ar));
+  check('…in Arabic', ar.label === 'المقاس' && ar.opts[0] === 'مقاس شاشتك' && ar.group === '♛ مقاسات مميّزة' && /تيك توك/.test(ar.note) && /بوستر يوم المباراة/.test(ar.poster) && ar.chip === 'مميّز', JSON.stringify(ar));
   check('…with 44px targets', ar.select >= 44 && ar.posterH >= 44, JSON.stringify({ select: ar.select, poster: ar.posterH }));
   check('…and nothing scrolling sideways', ar.over <= 0, String(ar.over));
   await shot(p, 'pexp-panel-390-ar');

@@ -35,6 +35,7 @@ export const LEAGUES: { tag: string; key: string }[] = [
   { tag: 'botola', key: 'sp.league.botola' },
   { tag: 'algeria-ligue-1', key: 'sp.league.algeria' },
   { tag: 'thai-league', key: 'sp.league.thai' },
+  { tag: 'iraq-stars-league', key: 'sp.league.iraq' },
 ];
 
 /**

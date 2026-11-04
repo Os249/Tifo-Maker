@@ -6,9 +6,12 @@ import {
   fingerprint, flatten, localUV, objectValueAt, stampObject,
 } from './layers';
 import {
-  ObjectLayer, ensureGrid, objectFromJSON, objectToJSON,
+  ObjectLayer, ensureGrid, objectFromJSON, objectToJSON, seatDrawn,
   type CellsObject, type ObjectJSON, type TifoObject,
 } from './objects';
+import { cleanStampAtSeats } from './seatClean';
+import { isPortraitStyle } from './portraitStyles';
+import { seatShapeAt, underAt } from './portraitPipeline';
 import type { TifoFont } from './text';
 import { EDITOR_UNITS } from './seatmap';
 
@@ -51,6 +54,8 @@ export class Composer {
   private gridIds = new WeakMap<object, number>();
   private gridSeq = 0;
   private clipCache = new Map<string, ((i: number) => boolean) | null>();
+  /** Where each styled picture's seats were last measured (seatOf). */
+  private seatKeys = new Map<string, string>();
   private strokeBefore: TifoObject[] | null = null;
   private strokeTouched = new Set<TifoObject>();
   /**
@@ -112,8 +117,31 @@ export class Composer {
     return fn;
   }
 
+  /**
+   * A styled or ranked picture is drawn one cell per seat (objects.ts
+   * gridSize), so it needs the seats under it: measured here, where the seat
+   * map is, whenever it lands somewhere new or changes size. Derived data,
+   * like the raster: written straight onto the object, no undo step.
+   */
+  private seatOf(o: TifoObject): void {
+    if (o.kind !== 'image' || (!isPortraitStyle(o.style) && o.tones !== 'rank')) return;
+    const key = `${o.cx}|${o.cy}|${o.width}|${o.height}|${o.tier}|${o.keep ? JSON.stringify(o.keep) : ''}`;
+    if (this.seatKeys.get(o.id) === key && o.seat) return;
+    this.seatKeys.set(o.id, key);
+    const shape = seatShapeAt(this.map, { cx: o.cx, cy: o.cy, width: o.width, height: o.height }, this.clipOf(o) ?? undefined, this.opts.wrapWidth);
+    if (!shape) return;
+    const pitch = Math.round(shape.pitch * 100) / 100;
+    const cell = Math.round(shape.cell * 100) / 100;
+    // The paint beneath, measured where it lands (not as it is painted later: the picture keeps its colours).
+    const under = underAt(this.map, this.store.base, { cx: o.cx, cy: o.cy, width: o.width, height: o.height }, this.clipOf(o) ?? undefined, this.opts.wrapWidth);
+    if (o.seat?.pitch !== pitch || o.seat?.cell !== cell || o.seat?.under !== under) o.seat = { pitch, cell, under };
+  }
+
   private stampOf(o: TifoObject): Stamp {
-    return stampObject(this.map, o, o.grid ?? null, o.touch ?? null, this.opts.wrapWidth, this.clipOf(o), this.store.lockedMask());
+    const st = stampObject(this.map, o, o.grid ?? null, o.touch ?? null, this.opts.wrapWidth, this.clipOf(o), this.store.lockedMask());
+    // A styled or ranked picture keeps the seat-scale rule on the seats themselves,
+    // not only on its grid (seatClean.ts). Touch-ups are the owner's, left as painted.
+    return seatDrawn(o) && !o.touch ? cleanStampAtSeats(this.map, st.seats, st.vals) : st;
   }
 
   /** The stamp an object has now (cached by position, size, raster and touch-ups). */
@@ -139,6 +167,7 @@ export class Composer {
       const liveId = this.layer.live ? this.layer.selected?.id : undefined;
       for (const o of all) {
         if (o.hidden || o.id === liveId) continue;
+        this.seatOf(o);
         ensureGrid(o, this.store.palette);
       }
       const next = all.filter((o) => !o.hidden);
@@ -306,6 +335,7 @@ export class Composer {
   merge(id: string): number {
     const o = this.layer.get(id);
     if (!o) return 0;
+    this.seatOf(o);
     ensureGrid(o, this.store.palette);
     const stamp = o.hidden ? EMPTY_STAMP : this.stampFor(o);
     this.store.group(() => {
@@ -457,7 +487,10 @@ export class Composer {
   toDoc(): LayerDoc | null {
     const list = this.layer.list();
     if (list.length === 0) return null;
-    for (const o of list) ensureGrid(o, this.store.palette);
+    for (const o of list) {
+      this.seatOf(o);
+      ensureGrid(o, this.store.palette);
+    }
     return {
       v: 1,
       hash: fingerprint(this.store.cells),

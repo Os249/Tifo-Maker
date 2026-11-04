@@ -365,12 +365,17 @@ try {
     const mail = mails.find((m) => /Pollinations is out of credit/.test(m.subject));
     assert.ok(mail && /Cloudflare instead/.test(mail.text ?? ''), 'the email says Cloudflare is covering');
   });
-  await check('a very long subject is cut to fit; the style is what gets shortened', async () => {
+  await check('a very long subject is cut to fit; the constraints after it survive', async () => {
     fresh();
     script.pollinations = [NO_CREDIT];
     await generateImage('x'.repeat(5000), { aspect: 1 });
-    assert.ok(cfSeen[0].body.prompt!.length <= 2048);
-    assert.ok(cfSeen[0].body.prompt!.startsWith('x'.repeat(600)));
+    const sent = cfSeen[0].body.prompt!;
+    assert.ok(sent.length <= 2048);
+    assert.ok(sent.startsWith('x'.repeat(400)) && /No text\.$/.test(sent), 'the subject first, cut, and the constraints whole');
+    fresh();
+    script.pollinations = [NO_CREDIT];
+    await generateImage(Array.from({ length: 120 }, (_, i) => `w${i}`).join(' '), { aspect: 2.4 });
+    assert.ok(cfSeen[0].body.prompt!.split(/\s+/).length <= 60, 'sixty words at most');
   });
   await check('Cloudflare\'s daily allowance spent: "out of credit", paused, and the email says it comes back at 00:00 UTC', async () => {
     fresh();

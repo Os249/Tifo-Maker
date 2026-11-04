@@ -29,6 +29,8 @@ import { registerAiRoutes, safeEqual, verifyUnlock, warmUnlockKey } from './aiRo
 import { ProService } from './pro';
 import type { ProRepository } from './proRepo';
 import { registerProRoutes } from './proRoutes';
+import type { KitRepository } from './kitRepo';
+import { registerKitRoutes } from './kitRoutes';
 import { cutoutConfigured } from './cutout';
 import { liveFor, proMode } from './proPlan';
 import { stadiumPlan } from './stadiumPlan';
@@ -284,6 +286,8 @@ export interface AppOptions {
    * admin Pro routes exist; whom the new rules cover is PRO_MODE's decision.
    */
   pro?: ProRepository;
+  /** Club kits and credit lines on the account (Pro). With `pro`, /api/pro/kits and /api/pro/credit exist. */
+  kits?: KitRepository;
   aiEvents?: AiEventsRepository;
   /** Where the daily AI budget survives a restart (memory only when absent). */
   aiBudget?: AiBudgetRepository;
@@ -1469,6 +1473,16 @@ export async function buildApp(
       cutoutConfigured,
       routeConfig: options.rateLimit ? { config: { rateLimit: { max: 20, timeWindow: '1 minute' } } } : undefined,
     });
+    if (options.kits) {
+      registerKitRoutes(app, {
+        kits: options.kits,
+        pro: proService,
+        requireUser,
+        accountOf,
+        readConfig: options.rateLimit ? { config: { rateLimit: { max: 120, timeWindow: '1 minute' } } } : undefined,
+        writeConfig: options.rateLimit ? { config: { rateLimit: { max: 30, timeWindow: '1 minute' } } } : undefined,
+      });
+    }
   }
   /**
    * Which of these accounts show the Supporter crown to this viewer. While
@@ -2966,6 +2980,9 @@ export async function buildApp(
     // Pro passes and the gift are the account's too (none while Pro was never on).
     let passes: Awaited<ReturnType<ProRepository['allPasses']>> = [];
     let gift: Awaited<ReturnType<ProRepository['gift']>> = null;
+    // Club kits, their logos and the credit line are the person's own uploads.
+    let kits: { id: string; name: string; colours: string[]; font: string; logos: string[] }[] = [];
+    let credit = '';
     try {
       [user, designs, passes, gift] = await Promise.all([
         accountOf(req, userId),
@@ -2973,6 +2990,17 @@ export async function buildApp(
         proService ? proService.repo.allPasses(userId) : Promise.resolve([]),
         proService ? proService.repo.gift(userId) : Promise.resolve(null),
       ]);
+      if (options.kits) {
+        const store = options.kits;
+        credit = await store.credit(userId);
+        kits = await Promise.all((await store.list(userId)).map(async (k) => ({
+          id: k.id, name: k.name, colours: k.colours, font: k.font,
+          logos: await Promise.all(k.logos.map(async (l) => {
+            const png = await store.logo(userId, l.hash);
+            return png ? `data:image/png;base64,${png.toString('base64')}` : '';
+          })),
+        })));
+      }
     } catch {
       return reply.code(503).send({ error: 'something went wrong on our side, please try again', code: 'retry' });
     }
@@ -2985,6 +3013,8 @@ export async function buildApp(
       pro: {
         passes: passes.map((p) => ({ plan: p.plan, source: p.source, startsAt: p.startsAt, endsAt: p.endsAt, revokedAt: p.revokedAt })),
         gift: gift ? { offeredAt: gift.offeredAt, acceptedAt: gift.acceptedAt } : null,
+        kits,
+        credit,
       },
     });
   });

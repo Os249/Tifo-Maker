@@ -34,6 +34,8 @@ export interface PhotoReadResult {
   used: string[];
   /** Fields the readings could not agree on, and by how much they failed. */
   dropped: Array<{ field: string; agreement: number; answered: number }>;
+  /** Most readings said the photo shows no ground (a room, a crowd, a street): nothing was used. */
+  noGround: boolean;
   /** One line per failed call, so a half-working key is visible rather than silent. */
   errors: string[];
   /** Tokens and estimated cost of every reading, for /admin. Never sent to the client. */
@@ -47,11 +49,20 @@ export interface PhotoReadResult {
   failure?: { error: string; status?: number };
 }
 
-export async function readGroundPhoto(image: string, samples = PHOTO_SAMPLE_DEFAULT): Promise<PhotoReadResult> {
+export interface PhotoReadOptions {
+  /**
+   * Every reading's reply as the model gave it, before parsing. For the eval
+   * (scripts/photo-eval.mts), which keeps the replies so a change to the
+   * parsing or the vote can be re-scored without paying for the readings again.
+   */
+  onReply?: (raw: unknown) => void;
+}
+
+export async function readGroundPhoto(image: string, samples = PHOTO_SAMPLE_DEFAULT, opts: PhotoReadOptions = {}): Promise<PhotoReadResult> {
   const n = Math.max(1, Math.min(PHOTO_SAMPLE_MAX, Math.round(samples)));
   if (activeProvider() === 'none') {
     const vote = aggregateFacts([]);
-    return { vote, known: {}, used: [], dropped: [], errors: ['no AI provider configured'], usage: zeroUsage() };
+    return { vote, known: {}, used: [], dropped: [], noGround: false, errors: ['no AI provider configured'], usage: zeroUsage() };
   }
   const results = await Promise.all(
     Array.from({ length: n }, () =>
@@ -71,13 +82,13 @@ export async function readGroundPhoto(image: string, samples = PHOTO_SAMPLE_DEFA
   for (const r of results) {
     usage = addUsage(usage, r.usage);
     asked = r.model ?? asked;
-    if (r.spec) { facts.push(parsePhotoFacts(r.spec)); model = model ?? r.model; }
+    if (r.spec) { opts.onReply?.(r.spec); facts.push(parsePhotoFacts(r.spec)); model = model ?? r.model; }
     else if (r.error) {
       errors.push(r.error);
       failure = failure ?? r.firstFailure ?? { error: r.error, ...(r.status ? { status: r.status } : {}) };
     }
   }
   const vote = aggregateFacts(facts);
-  const { known, used, dropped } = factsToKnown(vote);
-  return { vote, known, used, dropped, errors, usage, model: model ?? asked, ...(failure ? { failure } : {}) };
+  const { known, used, dropped, noGround } = factsToKnown(vote);
+  return { vote, known, used, dropped, noGround, errors, usage, model: model ?? asked, ...(failure ? { failure } : {}) };
 }

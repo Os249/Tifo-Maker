@@ -17,7 +17,15 @@
  * What is sent: the picture the person chose, with its metadata (GPS, device,
  * owner) removed first, and the moderation flags on so the provider refuses
  * abusive pictures. Nothing is stored by us: the result goes straight back to
- * the editor, which keeps it in the person's project like any picture.
+ * the editor, which keeps it in the person's project like any picture. The
+ * editor then cleans the matte (core/matte.ts: islands, pinholes, a halo-free
+ * edge, the old background's colour out of the edge) and crops to the subject.
+ *
+ * AI_CUTOUT_LOCAL_URL, for tests only: the same request sent to a model
+ * running on this machine (scripts/cutout-local.py, the same family of model
+ * as Bria's) instead of Cloudflare, which a test machine cannot reach. Only a
+ * loopback http URL is taken, never in production (NODE_ENV=production
+ * ignores it, and the boot report says so: preflight.ts), and it needs no account.
  */
 import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
@@ -46,8 +54,26 @@ function creds(): { id: string; token: string } | null {
   return { id, token };
 }
 
+/**
+ * The test-only local model's address (see the header): a loopback http URL,
+ * outside production, or null.
+ */
+export function localCutoutUrl(env: NodeJS.ProcessEnv = process.env): string | null {
+  if (env.NODE_ENV === 'production') return null;
+  const raw = (env.AI_CUTOUT_LOCAL_URL ?? '').trim();
+  if (!raw) return null;
+  try {
+    const u = new URL(raw);
+    const host = u.hostname.replace(/^\[|\]$/g, '');
+    return u.protocol === 'http:' && (host === '127.0.0.1' || host === 'localhost' || host === '::1') && !u.username && !u.password ? u.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
 export function cutoutConfigured(): boolean {
-  return creds() !== null && (process.env.AI_CUTOUT ?? '').trim().toLowerCase() !== 'off';
+  if ((process.env.AI_CUTOUT ?? '').trim().toLowerCase() === 'off') return false;
+  return creds() !== null || localCutoutUrl() !== null;
 }
 
 export function resultHosts(): string[] {
@@ -158,54 +184,78 @@ function resultOf(j: unknown): string | null {
 }
 
 /**
+ * What a failed answer said, for /admin → AI: its status, and either the
+ * provider's own message or, when an error page came back instead of JSON
+ * (a gateway's "502: Bad gateway"), that page's title and Cloudflare's ray id.
+ */
+function saidBy(res: Response, text: string): string {
+  const ray = res.headers.get('cf-ray');
+  const title = /<title>([^<]{1,160})<\/title>/i.exec(text)?.[1];
+  const said = title ? `an HTML page "${title.replace(/\s+/g, ' ').trim()}"` : text.replace(/\s+/g, ' ').slice(0, 300);
+  return `HTTP ${res.status}: ${said}${ray ? ` (cf-ray ${ray})` : ''}`;
+}
+
+/**
  * Cut the subject out of `picture` (JPEG or PNG bytes). Never throws; a
  * failure says which kind it was, for the admin AI tab and the editor's card.
+ *
+ * The request is Cloudflare's documented one for bria/remove-background:
+ * POST /client/v4/accounts/{id}/ai/run with {"model", "input": {"image",
+ * ...}}, the image as a data: URI, the optional fields each one the schema
+ * names (preserve_alpha and the two moderation flags). If the provider
+ * answers with a server error, it is asked once more with the image alone:
+ * the optional fields are the one part of the request that is ours to
+ * choose, and a partner model behind a gateway is where a field it does not
+ * take turns into a bare 502. Both answers go in the failure's detail.
  */
 export async function cutoutPicture(picture: Buffer, fetchImpl: typeof fetch = fetch, resolve: Resolve = resolver): Promise<CutoutResult> {
   const c = creds();
-  if (!c || !cutoutConfigured()) return fail('config', 'AI_CLOUDFLARE_ACCOUNT_ID / AI_CLOUDFLARE_API_TOKEN are not set (or AI_CUTOUT=off)');
+  const local = localCutoutUrl();
+  if ((!c && !local) || !cutoutConfigured()) return fail('config', 'AI_CLOUDFLARE_ACCOUNT_ID / AI_CLOUDFLARE_API_TOKEN are not set (or AI_CUTOUT=off)');
   const kind = sniffImage(picture);
   if (kind !== 'jpeg' && kind !== 'png') return fail('refused', 'only JPEG and PNG are accepted');
   const clean = stripImageMetadata(picture);
   if (!clean) return fail('refused', 'the picture did not parse');
   const timeoutMs = envNum('AI_CUTOUT_TIMEOUT_MS', 45_000, 5_000, 90_000);
-  let res: Response;
-  try {
-    res = await fetchImpl(`https://api.cloudflare.com/client/v4/accounts/${c.id}/ai/run`, {
-      method: 'POST',
-      headers: { authorization: `Bearer ${c.token}`, 'content-type': 'application/json' },
-      body: JSON.stringify({
-        model: CUTOUT_MODEL,
-        input: {
-          image: `data:image/${kind};base64,${clean.toString('base64')}`,
-          preserve_alpha: true,
-          visual_input_content_moderation: true,
-          visual_output_content_moderation: true,
-        },
-      }),
-      redirect: 'error',
-      signal: AbortSignal.timeout(timeoutMs),
-    });
-  } catch (e) {
-    const timeout = (e as Error)?.name === 'TimeoutError';
-    return fail(timeout ? 'timeout' : 'provider', `${CUTOUT_MODEL}: ${(e as Error).message}`);
+  const image = `data:image/${kind};base64,${clean.toString('base64')}`;
+  const ask = async (input: Record<string, unknown>): Promise<{ res: Response; text: string } | Fail> => {
+    try {
+      // Cloudflare's account wins; the local model is for a test machine with none.
+      const res = await fetchImpl(c ? `https://api.cloudflare.com/client/v4/accounts/${c.id}/ai/run` : local!, {
+        method: 'POST',
+        headers: { ...(c ? { authorization: `Bearer ${c.token}` } : {}), 'content-type': 'application/json' },
+        body: JSON.stringify({ model: CUTOUT_MODEL, input }),
+        redirect: 'error',
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+      return { res, text: await res.text().catch(() => '') };
+    } catch (e) {
+      const name = (e as Error)?.name;
+      const msg = String((e as Error)?.message ?? e);
+      return fail(name === 'TimeoutError' ? 'timeout' : 'provider', `${CUTOUT_MODEL}: ${/redirect/i.test(msg) ? 'the API answered with a redirect, which is not followed' : msg}`);
+    }
+  };
+  let answer = await ask({ image, preserve_alpha: true, visual_input_content_moderation: true, visual_output_content_moderation: true });
+  let first = '';
+  if (!('ok' in answer) && answer.res.status >= 500) {
+    first = `${saidBy(answer.res, answer.text)}; asked again with the image alone: `;
+    answer = await ask({ image });
   }
-  const text = await res.text().catch(() => '');
+  if ('ok' in answer) return { ...answer, error: `${first}${answer.error}`.slice(0, 400) };
+  const { res, text } = answer;
   if (!res.ok) {
     const s = res.status;
-    const said = text.replace(/\s+/g, ' ').slice(0, 300);
-    if (s === 401 || s === 403) return fail('config', `${CUTOUT_MODEL}: HTTP ${s} (the token or the plan does not allow this model): ${said}`, s);
-    if (s === 402 || s === 429) return fail('credit', `${CUTOUT_MODEL}: HTTP ${s}: ${said}`, s);
-    if (s === 400 || s === 422) {
-      return fail(/moderat|nsfw|inappropriate|policy/i.test(said) ? 'refused' : 'provider', `${CUTOUT_MODEL}: HTTP ${s}: ${said}`, s);
-    }
-    return fail('provider', `${CUTOUT_MODEL}: HTTP ${s}: ${said}`, s);
+    const said = `${first}${CUTOUT_MODEL}: ${saidBy(res, text)}`;
+    if (s === 401 || s === 403) return fail('config', `${said} (the token or the plan does not allow this model)`, s);
+    if (s === 402 || s === 429) return fail('credit', said, s);
+    if (s === 400 || s === 422) return fail(/moderat|nsfw|inappropriate|policy/i.test(text) ? 'refused' : 'provider', said, s);
+    return fail('provider', said, s);
   }
   let j: unknown = null;
   try {
     j = JSON.parse(text);
   } catch {
-    return fail('provider', `${CUTOUT_MODEL}: the answer was not JSON`);
+    return fail('provider', `${first}${CUTOUT_MODEL}: the answer was not JSON (${saidBy(res, text)})`);
   }
   const out = resultOf(j);
   if (!out) {
@@ -219,4 +269,22 @@ export async function cutoutPicture(picture: Buffer, fetchImpl: typeof fetch = f
     return stripped ? { ok: true, png: stripped } : fail('result', 'the result PNG did not parse');
   }
   return fetchResult(out, fetchImpl, resolve);
+}
+
+/**
+ * A Pro AI design's picture, cut out on the server right after it is
+ * generated: the same model as the smart cut-out, so the hero lands on the
+ * stand as a subject and never as a rectangle when the generator's backdrop
+ * is not flat enough for the editor's flood fill (docs/AI-QUALITY-REVIEW.md
+ * F4). Its cost is the design's, not one of the member's cut-outs: a design
+ * is one use, whatever it takes to make it. `dataUrl` is the generator's
+ * picture; a failure hands back null and the picture is used as it came.
+ */
+export async function cutoutForDesign(dataUrl: string, fetchImpl: typeof fetch = fetch, resolve: Resolve = resolver): Promise<{ url: string; error?: undefined } | { url: null; error: string }> {
+  const m = /^data:image\/(?:jpeg|png|webp);base64,/.exec(dataUrl);
+  if (!m) return { url: null, error: 'the picture is not a data URL' };
+  const bytes = Buffer.from(dataUrl.slice(m[0].length), 'base64');
+  if (bytes.length > MAX_CUTOUT_BYTES * 2) return { url: null, error: 'the picture is larger than the cut-out takes' };
+  const r = await cutoutPicture(bytes, fetchImpl, resolve);
+  return r.ok ? { url: `data:image/png;base64,${r.png.toString('base64')}` } : { url: null, error: `${r.kind}: ${r.error}` };
 }

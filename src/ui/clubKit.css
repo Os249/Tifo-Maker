@@ -146,3 +146,44 @@
 @media (max-width: 600px) {
   .kit-sheet .kit-use { width: 100%; }
 }
+
+/* ---- where the kits are: on the account, or offline (ui/clubKitStore.ts) ---- */
+.kit-sheet .kit-where {
+  display: flex; align-items: center; gap: var(--sp-2); margin: calc(-1 * var(--sp-1)) 0 var(--sp-4);
+  font-size: var(--fs-xs); line-height: 1.45; color: var(--text-2);
+}
+.kit-cloud {
+  flex: none; width: 20px; height: 20px; color: var(--here-ink);
+  fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round;
+}
+.kit-sheet .kit-where.off .kit-cloud { color: var(--text-3); }
+
+/* ---- the AI panel: "Using kit: Blue Wave" (ui/kitEverywhere.ts) ---- */
+.qk-ai-kit {
+  display: flex; align-items: center; gap: var(--sp-2); margin: var(--sp-2) 0 0; min-width: 0;
+  padding: var(--sp-1) var(--sp-1) var(--sp-1) var(--sp-3); border-radius: var(--r-pill);
+  background: var(--here-bg); border: 1px solid var(--here-line); color: var(--here-ink);
+  font-size: var(--fs-xs); font-weight: 600;
+}
+.qk-ai-kit[hidden] { display: none; }
+.qk-ai-strip { display: inline-flex; flex: none; height: 12px; border-radius: var(--r-sm); overflow: hidden; border: 1px solid var(--line-2); }
+.qk-ai-strip > i { width: 8px; background: var(--kit-c, transparent); }
+.qk-ai-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.qk-ai-kit .qk-ai-stop {
+  flex: none; display: inline-flex; align-items: center; justify-content: center;
+  width: 24px; height: 24px; min-height: 0; padding: 0; border: none; border-radius: var(--r-pill);
+  background: transparent; box-shadow: none; color: var(--here-ink); font-size: var(--fs-md); line-height: 1;
+}
+.qk-ai-kit .qk-ai-stop:hover { background: var(--ink-3); }
+.qk-ai-kit .qk-ai-stop:focus-visible { outline: 2px solid var(--here-line); outline-offset: 1px; }
+
+/* ---- the banner's panel: dress this banner in the kit ---- */
+#ctx-banner .qk-bn-kit h4 { display: flex; align-items: center; gap: var(--sp-2); }
+#ctx-banner .qk-bn-kit .pro-btn { width: 100%; margin-top: var(--sp-2); font-size: var(--fs-sm); line-height: 1.3; }
+/* A long kit name wraps to a second line rather than losing its end. */
+#ctx-banner .qk-bn-kit .pro-btn span { min-width: 0; text-align: center; overflow-wrap: anywhere; }
+
+@media (pointer: coarse) {
+  .qk-ai-kit .qk-ai-stop { width: 44px; height: 44px; }
+  #ctx-banner .qk-bn-kit .pro-btn { min-height: 44px; }
+}

@@ -1402,8 +1402,8 @@ export const STRINGS: Record<string, { en: string; ar: string }> = {
   'si.note.capacity': { en: '{built} built against {stated} stated — {pct}% out', ar: '{built} مقعد مبني مقابل {stated} معلنة — فرق {pct}%' },
   'si.note.aisles': { en: 'a stadium-sized default; the imagery could count the real ones', ar: 'رقم افتراضي لملعب بهذا الحجم؛ الصور الجوية تقدر تعدّ الحقيقية' },
   'si.note.pitch': { en: '~0.5 m is the regulated working figure', ar: '~0.5 م هو الرقم المعتمد نظاماً' },
-  'si.note.tiers': { en: 'right on 48 of our 87 stadiums; a photo settles it', ar: 'صح في 48 من 87 ملعب عندنا؛ صورة وحدة تحسمها' },
-  'si.note.lighting': { en: 'guessed from the roof shape; right on 65 of our 87 stadiums, and a photo settles it', ar: 'مخمّن من شكل السقف؛ صح في 65 من 87 ملعب عندنا، وصورة وحدة تحسمها' },
+  'si.note.tiers': { en: 'right on 48 of our 88 stadiums; a photo settles it', ar: 'صح في 48 من 88 ملعب عندنا؛ صورة وحدة تحسمها' },
+  'si.note.lighting': { en: 'guessed from the roof shape; right on 66 of our 88 stadiums, and a photo settles it', ar: 'مخمّن من شكل السقف؛ صح في 66 من 88 ملعب عندنا، وصورة وحدة تحسمها' },
   'si.note.facade': { en: 'nothing public records what a stadium is clad in — one photo settles this', ar: 'ما فيه مصدر عام يسجّل مواد واجهة الملعب — صورة وحدة تحسمها' },
   'si.warn.noRing': { en: 'No seating ring measured, so the plan curve is the building outline pulled in by a guess. Measuring the imagery replaces that guess.', ar: 'ما انقاس شريط المدرجات، فخط الخطة هو حدود المبنى مسحوبة بتخمين. قياس الصور الجوية يشيل هذا التخمين.' },
   'si.warn.capOff': { en: 'Capacity is {pct}% out after solving — either the plan curve or the stated capacity is wrong.', ar: 'السعة طالعة بفرق {pct}% بعد الحل — يا خط الخطة غلط يا السعة المعلنة.' },
@@ -1775,6 +1775,7 @@ export const STRINGS: Record<string, { en: string; ar: string }> = {
   'stad.changArena': { en: 'Chang Arena (Buriram)', ar: 'تشانغ أرينا (بوريرام)' },
   'stad.patStadium': { en: 'PAT Stadium (Bangkok)', ar: 'ملعب هيئة موانئ تايلاند (بانكوك)' },
   'stad.thunderdome': { en: 'Thunderdome Stadium (Nonthaburi)', ar: 'ملعب ثندردوم (نونثابوري)' },
+  'stad.alZawraa': { en: 'Al-Zawraa Stadium (Baghdad)', ar: 'ملعب الزوراء (بغداد)' },
   // The guided first tifo (ui/guide.ts).
   'gd.label': { en: 'Your first tifo', ar: 'تيفوك الأول' },
   'gd.free': { en: 'Free mode', ar: 'وضع حر' },
@@ -1943,6 +1944,7 @@ export const STRINGS: Record<string, { en: string; ar: string }> = {
   'sp.league.botola': { en: 'Botola Pro', ar: 'البطولة الاحترافية المغربية' },
   'sp.league.algeria': { en: 'Ligue 1 Mobilis (Algeria)', ar: 'الرابطة المحترفة الأولى الجزائرية' },
   'sp.league.thai': { en: 'Thai League', ar: 'الدوري التايلاندي' },
+  'sp.league.iraq': { en: 'Iraq Stars League', ar: 'دوري نجوم العراق' },
   'bn.stand.none': { en: '{name} (no stand here)', ar: '{name} (ما في مدرج هنا)' },
   'bn.type': { en: 'Type', ar: 'النوع' },
   'bn.size': { en: 'Size', ar: 'المقاس' },
@@ -2376,7 +2378,6 @@ export const STRINGS: Record<string, { en: string; ar: string }> = {
   },
   'pstyle.original': { en: 'Original', ar: 'الأصلية' },
   'pstyle.stencil': { en: 'Stencil', ar: 'ستنسل' },
-  'pstyle.halftone': { en: 'Halftone', ar: 'هافتون' },
   'pstyle.pop': { en: 'Pop art', ar: 'بوب آرت' },
   'pstyle.poster2': { en: 'Posterize 2 colours', ar: 'بوستر بلونين' },
   'pstyle.poster3': { en: 'Posterize 3 colours', ar: 'بوستر بثلاث ألوان' },
@@ -2618,10 +2619,10 @@ export const STRINGS: Record<string, { en: string; ar: string }> = {
   'pexp.item.vertical': { en: 'Vertical 9:16 video', ar: 'فيديو طولي 9:16' },
   'pexp.item.poster': { en: '4K poster picture', ar: 'صورة بوستر 4K' },
   // The poster, under Preview and Export.
-  'pexp.poster': { en: 'Poster picture (4K)', ar: 'صورة بوستر (4K)' },
+  'pexp.poster': { en: 'Match-day poster (4K)', ar: 'بوستر يوم المباراة (4K)' },
   'pexp.posterT': {
-    en: 'A {w}\u00a0×\u00a0{h} picture of your tifo in the stadium, from where the camera is now',
-    ar: 'صورة {w}\u00a0×\u00a0{h} لتيفوك في الملعب، من مكان الكاميرا الحين',
+    en: 'A {w}\u00a0×\u00a0{h} match-day poster of your tifo in its floodlit ground',
+    ar: 'بوستر {w}\u00a0×\u00a0{h} لتيفوك في ملعبه تحت الأضواء',
   },
   'pexp.posterMaking': { en: 'Drawing the poster…', ar: 'نرسم البوستر…' },
   'pexp.posterSaved': { en: 'Poster saved: {w}\u00a0×\u00a0{h}, {mb}\u00a0MB.', ar: 'انحفظ البوستر: {w}\u00a0×\u00a0{h}، {mb} ميقابايت.' },
@@ -2702,7 +2703,6 @@ export const STRINGS: Record<string, { en: string; ar: string }> = {
   // "مميّز". Super AI is "الذكاء الخارق", the Quick Designer "المصمّم السريع".
   // Digits stay Western in both languages.
   'pro.chip': { en: 'Pro', ar: 'مميّز' },
-  'pro.supporter': { en: 'Supporter', ar: 'داعم' },
   'pro.when.now': { en: 'in a moment', ar: 'بعد لحظات' },
   'pro.when.minutes': { en: 'in {n} min', ar: 'بعد {n} دقيقة' },
   'pro.when.hour1': { en: 'in an hour', ar: 'بعد ساعة' },
@@ -2813,8 +2813,8 @@ export const STRINGS: Record<string, { en: string; ar: string }> = {
   'gift.startedGo': { en: 'Back to designing', ar: 'ارجع للتصميم' },
   'gift.cardTitle': { en: 'A gift for you: {n} days of Pro', ar: 'هدية لك: {n} أيام مميّزة' },
   'gift.cardBody': {
-    en: 'More AI designs every day, smart cut-out, exports without our mark and more. It starts only when you press Start and waits for you, so keep it for a big match week.',
-    ar: 'تصاميم ذكاء أكثر كل يوم، وقص ذكي، وتصدير بدون علامتنا، وأكثر. ما تبدأ إلا إذا ضغطت ابدأ وتنتظرك، فخلّها لأسبوع مباراة كبيرة.',
+    en: 'Match Day films in Full HD and 9:16, a 4K poster, exports without our mark, portrait styles, smart cut-out and more. It starts only when you press Start and waits for you, so keep it for a big match week.',
+    ar: 'أفلام يوم المباراة بدقة Full HD و9:16، وبوستر 4K، وتصدير بدون علامتنا، وستايلات للصور، وقص ذكي، وأكثر. ما تبدأ إلا إذا ضغطت ابدأ وتنتظرك، فخلّها لأسبوع مباراة كبيرة.',
   },
   'gift.accept': { en: 'Start my gift…', ar: 'ابدأ هديتي…' },
   'gift.later': { en: 'Later', ar: 'بعدين' },
@@ -2860,7 +2860,6 @@ export const STRINGS: Record<string, { en: string; ar: string }> = {
   'ac.pro.ends': { en: 'Ends {date}', ar: 'تنتهي {date}' },
   'ac.pro.left': { en: "What's left", ar: 'المتبقي لك' },
   'ac.pro.back': { en: 'back {when}', ar: 'ترجع {when}' },
-  'ac.pro.supporter': { en: 'Your name shows the Supporter crown in the community.', ar: 'اسمك يطلع معه تاج الداعم في المجتمع.' },
   'ac.pro.giftWaiting': {
     en: 'A {n}-day Pro gift is waiting for you. It starts only when you press Start.',
     ar: 'عندك هدية مميّزة لمدة {n} أيام تنتظرك، وما تبدأ إلا إذا ضغطت ابدأ.',
@@ -2872,8 +2871,8 @@ export const STRINGS: Record<string, { en: string; ar: string }> = {
   'pp.eyebrow': { en: 'TifoMaker Pro', ar: 'تيفو ميكر المميّزة' },
   'pp.title': { en: 'Everything for the big match', ar: 'كل اللي تحتاجه للمباراة الكبيرة' },
   'pp.lead': {
-    en: 'Everything free stays free. Pro adds more AI, smart cut-out, exports without the mark in Full HD, portrait styles, Pro fonts and more.',
-    ar: 'كل شي مجاني يبقى مجاني. المميّزة تضيف ذكاء أكثر، وقص ذكي، وتصدير بدون العلامة بدقة Full HD، وستايلات للصور، وخطوط مميّزة، وأكثر.',
+    en: 'Everything free stays free. Pro adds Match Day films in Full HD and 9:16, a 4K poster, exports without the mark, portrait styles, Pro fonts, your club kit and more.',
+    ar: 'كل شي مجاني يبقى مجاني. المميّزة تضيف أفلام يوم المباراة بدقة Full HD و9:16، وبوستر 4K، وتصدير بدون العلامة، وستايلات للصور، وخطوط مميّزة، وهوية ناديك، وأكثر.',
   },
   'pp.notOpen': { en: 'Pro is not open yet.', ar: 'المميّزة ما فتحت للحين.' },
   'pp.home': { en: 'Back to TifoMaker', ar: 'ارجع لتيفو ميكر' },
@@ -2938,6 +2937,254 @@ export const STRINGS: Record<string, { en: string; ar: string }> = {
   'pp.faq.a6': {
     en: 'No. It waits until you press Start, and the 7 days begin then. One gift per account.',
     ar: 'لا. تنتظرك لين تضغط ابدأ، وتبدأ الـ7 أيام وقتها. هدية وحدة لكل حساب.',
+  },
+
+  // Club kits on the account, the kit everywhere, the credit line and the
+  // supporter badge (the "kit" engineer, 1 Nov 2026). Lazily loaded modules
+  // only: ui/clubKit.ts, ui/proCredit.ts, ui/supporterBadge.ts.
+  'qk.onAccount': { en: 'On your account: here on every device you sign in on.', ar: 'محفوظة في حسابك: تلقاها بأي جهاز تسجّل دخولك فيه.' },
+  'qk.offline': {
+    en: 'You’re offline, so these are your kits as this device last saw them. Changes go up when you’re back.',
+    ar: 'ما فيه نت، فهذي هوياتك مثل ما شافها هالجهاز آخر مرة. وأي تغيير يوصل حسابك أول ما يرجع النت.',
+  },
+  'qk.moved': { en: 'The kits from this browser are on your account now.', ar: 'الهويات اللي كانت بهالمتصفح صارت في حسابك.' },
+  'qk.left': {
+    en: 'A kit made in this browser didn’t fit: your account has 3 already. Delete one and it comes over.',
+    ar: 'فيه هوية بهالمتصفح ما لقت مكان: حسابك فيه 3. احذف وحدة وتنتقل له.',
+  },
+  'qk.deleteMsg': {
+    en: 'It goes from your account, on every device. Projects that used it keep their colours and pictures.',
+    ar: 'تنشال من حسابك بكل الأجهزة، والمشاريع اللي استخدمتها تبقى بألوانها وصورها.',
+  },
+  'qk.saved': { en: 'Saved “{name}” on your account: it’s in every project, on every device.', ar: 'انحفظت «{name}» في حسابك: تلقاها بكل مشروع وبأي جهاز.' },
+  'qk.savedLater': {
+    en: 'Saved “{name}” on this device. It goes up to your account when you’re back online.',
+    ar: 'انحفظت «{name}» بهالجهاز، وتوصل حسابك أول ما يرجع النت.',
+  },
+  'qk.aiUsing': { en: 'Using kit: {name}', ar: 'نصمّم بهوية: {name}' },
+  'qk.aiUsingT': { en: 'The AI designs in this kit’s colours and font.', ar: 'الذكاء الاصطناعي يصمّم بألوان هالهوية وخطها.' },
+  'qk.aiStop': { en: 'Stop using “{name}” for the AI', ar: 'وقّف هوية «{name}» عن الذكاء الاصطناعي' },
+  'qk.bnDress': { en: 'Dress this banner in “{name}”', ar: 'طبّق هوية «{name}» على البنر' },
+  'qk.bnDressT': { en: 'Its colours for the cloth and the letters, its font, and its first logo', ar: 'ألوانها للقماش والحروف، وخطها، وأول شعار فيها' },
+  'qk.bnPick': { en: 'Kit', ar: 'الهوية' },
+  'qk.bnDone': { en: '“{name}” is on the banner: its colours, font and logo. Undo takes it back.', ar: 'صارت هوية «{name}» على البنر: ألوانها وخطها وشعارها. والتراجع يرجّعه.' },
+  'qk.bnDoneNoLogo': { en: '“{name}” is on the banner: its colours and font. Undo takes it back.', ar: 'صارت هوية «{name}» على البنر: ألوانها وخطها. والتراجع يرجّعه.' },
+  'qk.credit': { en: 'Your credit line', ar: 'توقيعك' },
+  'qk.creditPh': { en: '@yourname or your group', ar: '@اسمك أو اسم رابطتك' },
+  'qk.creditHint': {
+    en: 'Small, in a corner of your videos, posters and pictures. Up to 32 characters.',
+    ar: 'صغير، في زاوية فيديوهاتك وبوستراتك وصورك. لين 32 حرف.',
+  },
+  'qk.creditSaved': { en: 'Saved on your account.', ar: 'انحفظ في حسابك.' },
+  'qk.creditLater': { en: 'Saved on this device. It goes up to your account when you’re back online.', ar: 'انحفظ بهالجهاز، ويوصل حسابك أول ما يرجع النت.' },
+  'qk.creditCleared': { en: 'No credit line now.', ar: 'شلنا توقيعك.' },
+  'qk.badge': { en: 'Pro supporter', ar: 'داعم مميّز' },
+  'qk.badgeT': { en: 'Supports TifoMaker with Pro', ar: 'يدعم تيفو ميكر بالباقة المميّزة' },
+  'qk.badgeYou': { en: 'Your name shows this badge in the community:', ar: 'اسمك يطلع معه هالشارة في المجتمع:' },
+
+  // ---- Pro fonts on seats (ui/seatPreview.ts, ui/proFonts.ts) and the LED boards (render/simulator/ledPanel.ts) ----
+  // The banners-only group in the Text tool's and a sign's font pickers.
+  'qf.group.banners': { en: '♛ Pro fonts · banners only', ar: '♛ خطوط مميّزة · للبنرات بس' },
+  // Said when the seats get a seat font in place of a banners-only one.
+  'qf.swapped': {
+    en: '{font} is for banners only: on seats your words are in {other}.',
+    ar: '{font} للبنرات بس: على المقاعد كلامك بخط {other}.',
+  },
+  'qf.seat.title': { en: 'On the seats', ar: 'على المقاعد' },
+  'qf.seat.aria': { en: 'Your words on this stand, one card a seat', ar: 'كلامك على هالمدرج، كرت لكل مقعد' },
+  'qf.seat.where': { en: 'This stand: {rows} rows. Your letters: {h} rows.', ar: 'هالمدرج: {rows} صف. حروفك: {h} صف.' },
+  'qf.v.reads': { en: 'Reads from across the pitch.', ar: 'تنقرا من الطرف الثاني للملعب.' },
+  'qf.v.thickened': {
+    en: 'Reads: its thin strokes are drawn thicker for the seats, and every gap kept open.',
+    ar: 'تنقرا: خطوطها الرفيعة انرسمت أعرض عشان المقاعد، والفراغات بقت مفتوحة.',
+  },
+  'qf.v.small': { en: 'Too small to read in {font}: it needs letters {n} rows tall.', ar: 'صغيرة وما تنقرا بخط {font}: يبي لها حروف طولها {n} صف.' },
+  'qf.v.shallow': { en: 'This stand has {rows} rows, and {font} needs {n}. Try another font or a deeper stand.', ar: 'هالمدرج فيه {rows} صف، وخط {font} يبي {n}. جرّب خط ثاني أو مدرج أعمق.' },
+  'qf.v.banner': { en: '{font} is for banners: on seats its thin strokes break up.', ar: 'خط {font} للبنرات: على المقاعد خطوطه الرفيعة تتقطّع.' },
+  'qf.fix.taller': { en: 'Make it {n} rows', ar: 'خلّها {n} صف' },
+  'qf.fix.use': { en: 'Use {font}', ar: 'استخدم {font}' },
+  'qf.all': { en: 'Every Pro font, here', ar: 'كل الخطوط المميّزة، هنا' },
+  'qf.tile.no': { en: '{font}: will not read here', ar: '{font}: ما ينقرا هنا' },
+  'qf.tile.ok': { en: '{font}: reads here', ar: '{font}: ينقرا هنا' },
+  'qf.led.style': { en: 'Style', ar: 'الستايل' },
+  'qf.led.t.boards': { en: 'Your messages', ar: 'رسائلك' },
+  'qf.led.t.sponsor': { en: 'Sponsor board: crest and words', ar: 'لوحة راعي: الشعار والكلام' },
+  'qf.led.t.chant': { en: 'Chant ticker', ar: 'شريط الهتاف' },
+  'qf.led.t.score': { en: 'Score: CLUB 2–0 RIVAL', ar: 'النتيجة: النادي 2–0 الخصم' },
+  'qf.led.t.countdown': { en: 'Countdown to the reveal', ar: 'عدّ تنازلي للكشف' },
+  'qf.led.h.boards': {
+    en: 'Still, the ring shows your messages side by side. When Match Day moves (the reveal, the camera, a show) they take turns, scrolling.',
+    ar: 'وهو ثابت، الحلقة تعرض رسائلك جنب بعض. ولما يتحرك يوم المباراة (الكشف، الكاميرا، العرض) تتناوب وهي تمشي.',
+  },
+  'qf.led.h.sponsor': { en: 'Your club kit\u2019s crest beside each message, like a sponsor\u2019s board.', ar: 'شعار هوية ناديك جنب كل رسالة، مثل لوحة الراعي.' },
+  'qf.led.h.chant': { en: 'Your messages run round the ring as one chant, faster during the reveal.', ar: 'رسائلك تمشي حول الملعب كهتاف واحد، وتسرع وقت الكشف.' },
+  'qf.led.h.score': { en: 'The score first, then your messages.', ar: 'النتيجة أول، بعدها رسائلك.' },
+  'qf.led.h.countdown': { en: '3, 2, 1 as the reveal starts, then your first message flashes as the cards go up.', ar: '3، 2، 1 مع بداية الكشف، بعدها رسالتك الأولى تومض والكروت ترتفع.' },
+  'qf.led.crest': { en: 'Crest', ar: 'الشعار' },
+  'qf.led.crestNone': { en: 'No crest', ar: 'بدون شعار' },
+  'qf.led.kitN': { en: 'Club kit {n}', ar: 'هوية النادي {n}' },
+  'qf.led.noKit': { en: 'Make a club kit in the editor (Club kit) and its crest can go on the boards.', ar: 'سوّ هوية ناديك في المحرر (هوية النادي) وتقدر تحط شعاره على اللوحات.' },
+  'qf.led.kitNoLogo': { en: 'This club kit has no logo yet: add one in the editor.', ar: 'هالهوية ما فيها شعار للحين: ضيف واحد في المحرر.' },
+  'qf.led.score': { en: 'Score', ar: 'النتيجة' },
+  'qf.led.home': { en: 'Home', ar: 'المستضيف' },
+  'qf.led.away': { en: 'Away', ar: 'الضيف' },
+  'qf.led.homeGoals': { en: 'Home goals', ar: 'أهداف المستضيف' },
+  'qf.led.awayGoals': { en: 'Away goals', ar: 'أهداف الضيف' },
+  'qf.screen.boards': { en: '♛ Your LED boards', ar: '♛ لوحاتك الإعلانية' },
+
+  // ---- Pro: Match Day's film and the match-day poster (prefix qv.; ui/proFilm.ts, ui/proPoster.ts) ----
+  // The card while a film is made.
+  'qv.making': { en: 'Making your Match Day video', ar: 'نسوّي فيديو يوم المباراة حقك' },
+  'qv.sub.landscape': { en: 'Full HD {w} × {h} · {s} seconds', ar: 'Full HD {w} × {h} · {s} ثانية' },
+  'qv.sub.vertical': { en: 'Vertical {w} × {h} · {s} seconds', ar: 'طولي {w} × {h} · {s} ثانية' },
+  'qv.preparing': { en: 'Building Match Day…', ar: 'نجهّز يوم المباراة…' },
+  'qv.frame': { en: 'Frame {n} of {total}', ar: 'اللقطة {n} من {total}' },
+  'qv.steady': {
+    en: 'Every frame is drawn on its own, so the video plays smoothly however long this takes. Keep this tab open.',
+    ar: 'كل لقطة تنرسم لحالها، عشان كذا الفيديو يطلع سلس مهما طوّلت. خلّ هالتبويب مفتوح.',
+  },
+  'qv.realtime': {
+    en: 'This browser can’t draw a video frame by frame, so it films in real time: on a slow device the video may stutter.',
+    ar: 'هالمتصفح ما يقدر يرسم الفيديو لقطة لقطة، فبيصوّر على الهواء: على جهاز بطيء ممكن يتقطّع الفيديو.',
+  },
+  'qv.cancel': { en: 'Cancel', ar: 'إلغاء' },
+  'qv.silent': {
+    en: 'This browser can’t add the crowd’s sound, so the video is silent.',
+    ar: 'هالمتصفح ما يقدر يضيف صوت الجمهور، فالفيديو بيطلع بدون صوت.',
+  },
+  'qv.p.split': {
+    en: 'Part of your tifo falls in the gap between this stand’s tiers, where the boxes are and there are no seats, so the poster shows it split there, as the stand does.',
+    ar: 'جزء من التيفو حقك يجي في الفراغ اللي بين أدوار هالمدرج، مكان البوكسات وما فيه كراسي، فالبوستر بيطلّعه مقسوم هناك مثل ما هو في المدرج.',
+  },
+  // Before filming, when the tifo runs across the gap between two tiers (simulator/tifoSplit.ts).
+  'qv.split': {
+    en: 'Part of your tifo falls in the gap between this stand’s tiers, where the boxes are and there are no seats. No camera can show that band, so the video shows your tifo split there, as the stand does.',
+    ar: 'جزء من التيفو حقك يجي في الفراغ اللي بين أدوار هالمدرج، مكان البوكسات وما فيه كراسي. ما فيه كاميرا تقدر تطلّع هالجزء، فالفيديو بيطلّع التيفو مقسوم هناك مثل ما هو في المدرج.',
+  },
+  // Time left, beside the frames: rounded to what a person waiting cares about.
+  'qv.left.s': { en: 'about {n} seconds left', ar: 'باقي تقريبًا {n} ثانية' },
+  'qv.left.m1': { en: 'about a minute left', ar: 'باقي تقريبًا دقيقة' },
+  'qv.left.m': { en: 'about {n} minutes left', ar: 'باقي تقريبًا {n} دقايق' },
+  'qv.cancelled': { en: 'Video cancelled.', ar: 'ألغيت الفيديو.' },
+  'qv.saved': { en: 'Video saved: {w} × {h}, {s} seconds, {mb} MB.', ar: 'انحفظ الفيديو: {w} × {h}، {s} ثانية، {mb} ميقابايت.' },
+  'qv.savedRealtime': {
+    en: 'Video saved: {w} × {h}, {mb} MB, filmed in real time (this browser can’t draw it frame by frame).',
+    ar: 'انحفظ الفيديو: {w} × {h}، {mb} ميقابايت، متصوّر على الهواء (هالمتصفح ما يرسمه لقطة لقطة).',
+  },
+  'qv.failed': {
+    en: 'The video did not finish. Close other tabs and try again.',
+    ar: 'ما خلص الفيديو. سكّر التبويبات الثانية وجرّب مرة ثانية.',
+  },
+  // Match Day's Recording section: what Record makes.
+  'qv.md.video': { en: 'Video', ar: 'الفيديو' },
+  'qv.md.landscape': { en: 'Match Day film, Full HD 1920 × 1080', ar: 'فيلم يوم المباراة، Full HD 1920 × 1080' },
+  'qv.md.vertical': { en: 'Match Day film, vertical 1080 × 1920', ar: 'فيلم يوم المباراة، طولي 1080 × 1920' },
+  'qv.md.screen': { en: 'Recording of the view, as set below', ar: 'تسجيل للعرض، بالإعدادات تحت' },
+  'qv.md.note': {
+    en: 'A 13-second film: the ground, a push-in on your tifo, the reveal and the hold, drawn frame by frame.',
+    ar: 'فيلم 13 ثانية: الملعب، ثم الكاميرا تقرّب على تيفوك، والكشف، والوقفة عليه، مرسوم لقطة لقطة.',
+  },
+  // The poster sheet.
+  'qv.p.title': { en: 'Match-day poster', ar: 'بوستر يوم المباراة' },
+  'qv.p.lead': {
+    en: 'Your tifo in its floodlit ground, with your match on it: a {w} × {h} picture (PNG).',
+    ar: 'تيفوك في ملعبه تحت الأضواء، وعليه مباراتك: صورة {w} × {h} (PNG).',
+  },
+  'qv.p.preview': { en: 'The poster as it will be saved', ar: 'البوستر مثل ما بينحفظ' },
+  'qv.p.layout': { en: 'Layout', ar: 'التصميم' },
+  'qv.p.l.matchday': { en: 'Match day', ar: 'يوم المباراة' },
+  'qv.p.l.chant': { en: 'Chant', ar: 'هتاف' },
+  'qv.p.l.minimal': { en: 'Minimal', ar: 'بسيط' },
+  'qv.p.shape': { en: 'Shape', ar: 'الشكل' },
+  'qv.p.s.landscape': { en: 'Landscape', ar: 'عرضي' },
+  'qv.p.s.portrait': { en: 'Portrait', ar: 'طولي' },
+  'qv.p.club': { en: 'Club', ar: 'النادي' },
+  'qv.p.opponent': { en: 'Opponent', ar: 'الخصم' },
+  'qv.p.date': { en: 'Date', ar: 'التاريخ' },
+  'qv.p.time': { en: 'Kick-off', ar: 'وقت المباراة' },
+  'qv.p.venue': { en: 'Ground', ar: 'الملعب' },
+  'qv.p.headline': { en: 'Chant or headline', ar: 'الهتاف أو العنوان' },
+  'qv.p.headlinePh': { en: 'One heart. One voice.', ar: 'قلب واحد، صوت واحد' },
+  'qv.p.colours': { en: 'Colours', ar: 'الألوان' },
+  'qv.p.kit': { en: 'Club kit: {name}', ar: 'هوية النادي: {name}' },
+  'qv.p.designColours': { en: 'Your design’s colours', ar: 'ألوان تصميمك' },
+  'qv.p.font': { en: 'Lettering', ar: 'الخط' },
+  'qv.p.kitFont': { en: 'The kit’s lettering', ar: 'خط هوية النادي' },
+  'qv.p.designFont': { en: 'Your design’s lettering', ar: 'خط تصميمك' },
+  'qv.p.download': { en: 'Download poster', ar: 'نزّل البوستر' },
+  'qv.p.drawingPreview': { en: 'Drawing your tifo in its ground…', ar: 'نرسم تيفوك في ملعبه…' },
+  'qv.p.making': { en: 'Drawing the {w} × {h} poster…', ar: 'نرسم البوستر {w} × {h}…' },
+  // On the poster itself, in the site's language.
+  'qv.p.matchday': { en: 'Matchday', ar: 'يوم المباراة' },
+  'qv.p.vs': { en: 'vs', ar: 'ضد' },
+
+  // ---- qi: portrait styles, smart cut-out and AI pictures (Pro quality, images) ----
+  'qi.duotone': { en: 'Club duotone', ar: 'دوتون النادي' },
+  'qi.cutStyle': { en: 'Cut out and style', ar: 'قص وستايل' },
+  'qi.cutStyleT': {
+    en: 'Lift the person out with AI, then draw them in this style on your stand',
+    ar: 'نفصل الشخص بالذكاء الاصطناعي ونرسمه بهالستايل على مدرّجك',
+  },
+  'qi.strip': { en: 'Styles on your stand', ar: 'الستايلات على مدرّجك' },
+  'qi.tileT': { en: '{style} on {stand}', ar: '{style} على {stand}' },
+  'qi.finding': { en: 'Finding the face…', ar: 'ندوّر الوجه…' },
+  'qi.noFace': {
+    en: 'No face found, so the style draws the whole picture.',
+    ar: 'ما لقينا وجه، فالستايل يرسم الصورة كلها.',
+  },
+  'qi.full': {
+    en: 'Head and shoulders, {rows} rows tall and {seats} seats wide on {stand}.',
+    ar: 'الرأس والكتفين، بطول {rows} صف وعرض {seats} مقعد على {stand}.',
+  },
+  'qi.tight': {
+    en: '{stand} has {rows} rows: cropped to the face, which reads as a person, not a likeness. A banner shows the face.',
+    ar: '{stand} فيه {rows} صف: قصّينا على الوجه، ويبان شخص مو ملامح. البنر يطلّع الوجه.',
+  },
+  'qi.small': {
+    en: '{stand} has {rows} rows: on the cards a face is only a silhouette. A banner shows the face.',
+    ar: '{stand} فيه {rows} صف: على الكروت الوجه ظل بس. البنر يطلّع الوجه.',
+  },
+  'qi.person': {
+    en: 'Head and shoulders, {rows} rows on {stand}: a person, not a likeness. A banner shows the face.',
+    ar: 'الرأس والكتفين، {rows} صف على {stand}: يبان شخص مو ملامح. البنر يطلّع الوجه.',
+  },
+  'qi.toBanner': { en: 'Put the face on a banner', ar: 'حط الوجه على بنر' },
+  'qi.toBannerT': {
+    en: 'Prints the styled face at full size on a banner over this stand. The cards around it keep the club colours.',
+    ar: 'يطبع الوجه بالستايل بحجمه الكامل على بنر فوق هالمدرّج، والكروت حوله تبقى بألوان النادي.',
+  },
+  'qi.onBanner': {
+    en: 'The face is on a banner over {stand}, printed at full size. Add your words on the cards around it, and move or resize it in Banners.',
+    ar: 'الوجه صار على بنر فوق {stand} بحجمه الكامل. اكتب كلامك على الكروت حوله، وحرّكه أو غيّر مقاسه من البنرات.',
+  },
+  'qi.bannerName': { en: 'Face on {stand}', ar: 'وجه على {stand}' },
+  'qi.painted': { en: 'Painted (banners)', ar: 'مرسوم (للبنرات)' },
+  'qi.thisStand': { en: 'this stand', ar: 'هالمدرّج' },
+  'qi.failed': { en: 'We could not read this picture, so it is placed as it is.', ar: 'ما قدرنا نقرا الصورة، فبتنحط مثل ما هي.' },
+  'qi.banner': {
+    en: 'On a banner the style is printed at full size.',
+    ar: 'على البنر يطلع الستايل بالحجم الكامل.',
+  },
+  'qi.cutFit': {
+    en: 'Cut out and sized to fill {stand}: {rows} rows.',
+    ar: 'انقصّت ومقاسها يعبّي {stand}: {rows} صف.',
+  },
+
+  // ---- Stadium from a photo (ui/stadiumPhoto.ts, loaded on the first photo) --
+  'qp.fromPhoto': { en: 'From your photo:', ar: 'من صورتك:' },
+  'qp.perk.polish': { en: 'More Polishes', ar: 'تحسينات أكثر' },
+  'qp.seats': { en: 'Seats', ar: 'الكراسي' },
+  'qp.sides.square': { en: 'Straight stands', ar: 'مدرجات مستقيمة' },
+  'qp.sides.round': { en: 'Rounded bowl', ar: 'مدرج دائري' },
+  'qp.noGround': {
+    en: "That photo doesn't show the ground, so nothing was taken from it and it didn't count. A wide shot from the stands works best.",
+    ar: 'الصورة ما فيها الملعب، فما أخذنا منها شي وما انحسبت عليك. أفضل شي لقطة واسعة من المدرجات.',
+  },
+  // Pro's list as measured on 1 Nov 2026 (server/src/proPlan AI_ON_PRO): when
+  // an allowance runs out that Pro gives no more of, nothing is sold.
+  'qx.limit.same': {
+    en: 'Everyone gets the same number, so the AI stays fast for everyone.',
+    ar: 'العدد نفسه للكل، عشان يبقى الذكاء سريع للجميع.',
   },
 
   'common.language': { en: 'العربية', ar: 'English' }, // toggle shows the OTHER language

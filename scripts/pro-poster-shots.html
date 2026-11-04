@@ -1,0 +1,89 @@
+<!doctype html>
+<!-- Dev-only harness for scripts/pro-poster-shots.mts. The REAL simulator's
+     film still (film.ts filmStill) under the REAL poster drawing
+     (ui/posterLayout.ts), at the poster's full size. -->
+<html lang="en"><head><meta charset="UTF-8"/><title>pro poster shots</title></head>
+<body style="margin:0;background:#05070c"><div id="out">loading…</div>
+<script type="module">
+  import { generateSeatMap } from '/src/core/seatmap.ts';
+  import { DesignStore } from '/src/core/design.ts';
+  import { templateById } from '/src/core/stadiumCatalog.ts';
+  import { MatchDaySimulator } from '/src/render/simulator/index.ts';
+  import { filmStill, posterHold } from '/src/render/simulator/film.ts';
+  import { AssetStore } from '/src/core/sceneAssets.ts';
+  import { paintTifo } from '/scripts/pro-shots-tifo.js';
+  import { drawPoster, POSTER_SIZES } from '/src/ui/posterLayout.ts';
+  import { loadTifoFonts, loadProFonts } from '/src/core/tifoFonts.ts';
+  import { fontCssOf } from '/src/core/text.ts';
+  import { PRO_FONTS } from '/src/core/proVoices.ts';
+
+  const HOST = document.createElement('div');
+  HOST.style.cssText = 'position:fixed;left:0;top:0;width:640px;height:360px;';
+  document.body.appendChild(HOST);
+
+  /** A shield with the club's initials: a stand-in for a kit's logo. */
+  const shield = (cols, initials) => {
+    const c = document.createElement('canvas');
+    c.width = 400; c.height = 480;
+    const g = c.getContext('2d');
+    g.beginPath();
+    g.moveTo(20, 20); g.lineTo(380, 20); g.lineTo(380, 260); g.quadraticCurveTo(380, 400, 200, 470); g.quadraticCurveTo(20, 400, 20, 260); g.closePath();
+    g.fillStyle = cols[0]; g.fill();
+    g.lineWidth = 22; g.strokeStyle = cols[1]; g.stroke();
+    g.fillStyle = cols[1]; g.font = '900 150px "TifoGrotesk", sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.fillText(initials, 200, 230);
+    return c;
+  };
+
+  let sim = null;
+  let stills = {};
+  window.__boot = async (id, stand, palette) => {
+    sim?.dispose();
+    HOST.replaceChildren();
+    stills = {};
+    const template = templateById(id);
+    const map = generateSeatMap(template);
+    const store = new DesignStore(map, palette);
+    store.loadCells(paintTifo(map, stand, 'medium'));
+    sim = new MatchDaySimulator(HOST, map, store, template, new AssetStore(), { quality: 'high' });
+    sim.setTimeOfDay('dusk');
+    sim.setFloodlights(true);
+    sim.setWetPitch(true);
+    await sim.whenSurroundingsReady().catch(() => {});
+    await Promise.all([loadTifoFonts(), loadProFonts()]);
+    return { name: template.meta?.name ?? id };
+  };
+
+  window.__still = async (shape, rtl = false) => {
+    const { width, height } = POSTER_SIZES[shape];
+    const t0 = performance.now();
+    stills[shape] = await filmStill(sim.filmHost(), width, height, posterHold(shape, rtl));
+    return { ms: Math.round(performance.now() - t0), w: stills[shape].width, h: stills[shape].height };
+  };
+
+  /** One poster, full size; a downscaled JPEG and the full PNG's size. */
+  window.__poster = async (shape, spec, club) => {
+    const { width, height } = POSTER_SIZES[shape];
+    const c = document.createElement('canvas');
+    c.width = width; c.height = height;
+    const logo = shield(club.colours, club.initials);
+    drawPoster(c.getContext('2d'), width, height, stills[shape], {
+      ...spec,
+      colours: club.colours,
+      logo,
+      display: fontCssOf(club.font, PRO_FONTS),
+      text: fontCssOf('condensed'),
+    });
+    const png = await new Promise((r) => c.toBlob(r, 'image/png'));
+    const small = document.createElement('canvas');
+    small.width = Math.round(width / 3); small.height = Math.round(height / 3);
+    const sg = small.getContext('2d');
+    sg.imageSmoothingQuality = 'high';
+    sg.drawImage(c, 0, 0, small.width, small.height);
+    return { jpg: small.toDataURL('image/jpeg', 0.88), pngBytes: png.size, w: c.width, h: c.height };
+  };
+
+  window.__teardown = () => { sim?.dispose(); sim = null; };
+  document.getElementById('out').textContent = 'ready';
+  window.__ready = true;
+</script></body></html>

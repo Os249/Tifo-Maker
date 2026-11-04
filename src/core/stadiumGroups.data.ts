@@ -12,4 +12,5 @@ export const GROUND_GROUPS: Readonly<Record<GroundGroup, readonly string[]>> = {
   botola: ["mohammed-v-45k","moulay-abdellah-69k","grand-stade-tanger-75k","fes-stadium-35k"],
   algeria: ["stade-5-juillet-64k","hocine-ait-ahmed-51k","miloud-hadefi-40k","nelson-mandela-41k","ali-la-pointe-40k"],
   thai: ["chang-arena-33k","pat-stadium-12k","thunderdome-15k"],
+  iraq: ["al-zawraa-15k"],
 };

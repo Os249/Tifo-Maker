@@ -180,13 +180,6 @@
 .pro-card .pro-btn:hover { background: var(--pro-surface-2); }
 @media (max-width: 600px) { .pro-card { grid-template-columns: 1fr; padding: var(--sp-4); } }
 
-/* ---- the Supporter crown beside a name ---- */
-.supporter-crown {
-  display: inline-flex; align-items: center; margin-inline-start: var(--sp-1);
-  color: var(--pro-crown); font-size: 0.95em; vertical-align: -0.1em;
-}
-.supporter-crown .pro-crown { width: 1.05em; height: 1.05em; }
-
 .pro-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 
 /* ---- the AI panel: what is left beside "Whole stadium" ---- */
@@ -255,3 +248,4 @@
 .pro-meter[data-left='low'] .pro-meter-text { color: var(--pro-ink); font-weight: 600; }
 .pro-meter[data-left='none'] .pro-meter-bar { background: var(--pro-tint); }
 .pro-ac-foot { margin: var(--sp-4) 0 0 !important; }
+.pro-ac-name { margin: var(--sp-2) 0 0; font-size: var(--fs-base); font-weight: 700; color: var(--pro-text); }

@@ -3,6 +3,13 @@
  * armed picture for the same picture with its background lifted away, and a
  * second press that puts the original back.
  *
+ * What comes back from the model is cleaned before it is used (core/matte.ts):
+ * specks of background dropped, pinholes filled, the edge smoothed without a
+ * halo and the old background's colour taken out of it; then the picture is
+ * cropped to the subject, so it fills what it is placed on. proStyles.ts
+ * hears about it ('tifo:cutout-done') and sizes it to the stand, or draws it
+ * in the style picked ("Cut out and style" asks for a cut with 'tifo:cutout-run').
+ *
  * The bar is the same element on a desktop and inside the phone's sheet
  * (mobileShell.ts borrows #import-bar), so one button serves both.
  *
@@ -17,14 +24,19 @@ import { track } from '../net/analytics';
 import { CROWN_SVG, limitBack, limitTitle } from './pro';
 import { t, tv } from './i18n';
 import { escapeHtml } from '../core/escape';
+import { alphaBounds, alphaOf, decontaminate, refineMatte } from '../core/matte';
+import type { FaceInfo } from '../core/portraitPipeline';
 
 export interface CutoutHost {
   /** The import bar the button lives in. */
   bar: HTMLElement;
   /** The picture armed for placing, if any. */
   current: () => ImageBitmap | null;
-  /** Put this bitmap in place of the armed one (the caller keeps the old one alive). */
-  swap: (bitmap: ImageBitmap) => boolean;
+  /**
+   * Put this bitmap in place of the armed one (the caller keeps the old one
+   * alive), with the face in it when a portrait style found one.
+   */
+  swap: (bitmap: ImageBitmap, face?: FaceInfo) => boolean;
   /** One line in the editor's message bar. */
   say: (msg: string) => void;
 }
@@ -54,11 +66,33 @@ function encodeForSend(bmp: ImageBitmap): string | null {
   return null;
 }
 
-async function decodePng(dataUrl: string): Promise<ImageBitmap> {
+/**
+ * The model's PNG, cleaned and cropped: the matte refined (islands, holes, a
+ * halo-free edge), the background's colour taken out of the edge, and the
+ * picture cut down to the subject with a small margin.
+ */
+async function cleanCutout(dataUrl: string): Promise<ImageBitmap> {
   const img = new Image();
   img.src = dataUrl;
   await img.decode();
-  return createImageBitmap(img);
+  const w = img.naturalWidth;
+  const h = img.naturalHeight;
+  const c = document.createElement('canvas');
+  c.width = w;
+  c.height = h;
+  const ctx = c.getContext('2d', { willReadFrequently: true })!;
+  ctx.drawImage(img, 0, 0);
+  const data = ctx.getImageData(0, 0, w, h);
+  const alpha = alphaOf(data.data, w, h);
+  refineMatte(alpha, w, h);
+  decontaminate(data.data, alpha, w, h);
+  ctx.putImageData(data, 0, 0);
+  const b = alphaBounds(alpha, w, h);
+  if (!b) return createImageBitmap(c);
+  const m = Math.round(Math.max(b.x1 - b.x0, b.y1 - b.y0) * 0.02);
+  const x0 = Math.max(0, b.x0 - m);
+  const y0 = Math.max(0, b.y0 - m);
+  return createImageBitmap(c, x0, y0, Math.min(w, b.x1 + m) - x0, Math.min(h, b.y1 + m) - y0);
 }
 
 const seen = (): boolean => {
@@ -182,20 +216,21 @@ export function mountSmartCutout(host: CutoutHost): { armed: () => void } {
 
   btn.addEventListener('click', async () => {
     if (busy) return;
-    // Second press: the original back, the cut-out let go.
+    // Second press: the original back, the cut-out let go. Whatever is in
+    // the bar now (the cut-out, or a portrait style's picture made from it).
     if (cut && original) {
-      if (host.current() === cut && host.swap(original)) {
-        try {
-          cut.close();
-        } catch {
-          /* fine */
-        }
+      const back = original;
+      if (host.swap(back)) {
         cut = null;
         original = null;
         paint();
+        document.dispatchEvent(new CustomEvent('tifo:cutout-undone', { detail: { bitmap: back } }));
       }
       return;
     }
+    // A portrait style may have put its prepared picture in the bar: it puts
+    // the picture it was made from back first, which is what gets cut out.
+    document.dispatchEvent(new CustomEvent('tifo:cutout-before'));
     const bmp = host.current();
     if (!bmp) return;
     const st = await fetchPro(true).catch(() => null);
@@ -238,7 +273,7 @@ export function mountSmartCutout(host: CutoutHost): { armed: () => void } {
     const mine = ctl;
     try {
       const res = await smartCutout(image, mine.signal);
-      const out = await decodePng(res.image);
+      const out = await cleanCutout(res.image);
       // Placed, cancelled or replaced while it ran: the result is not wanted.
       if (mine.signal.aborted || host.current() !== bmp) {
         out.close();
@@ -252,6 +287,7 @@ export function mountSmartCutout(host: CutoutHost): { armed: () => void } {
       cut = out;
       track('cutout_used');
       host.say(t('cut.done'));
+      document.dispatchEvent(new CustomEvent('tifo:cutout-done', { detail: { bitmap: out } }));
     } catch (e) {
       if ((e as Error)?.name === 'AbortError') return;
       fail(e as CutoutError, st);
@@ -260,6 +296,10 @@ export function mountSmartCutout(host: CutoutHost): { armed: () => void } {
       busy = false;
       paint();
     }
+  });
+  // "Cut out and style" (proStyles.ts): the same press, asked for by the other button.
+  document.addEventListener('tifo:cutout-run', () => {
+    if (!field.hidden && !busy && !(cut && original)) btn.click();
   });
   return { armed };
 }

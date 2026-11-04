@@ -11,12 +11,10 @@ import './pro.css';
 import { escapeHtml } from '../core/escape';
 import { fetchPro, isSignedIn, type Allowance, type ProPlan, type ProState } from '../net/api';
 import { getLang, localPath, onLangChange, t, tv } from './i18n';
+import { CROWN_SVG } from './crown';
 
-/** The crown: the one mark for everything Pro. */
-export const CROWN_SVG =
-  '<svg class="pro-crown" viewBox="0 0 24 24" aria-hidden="true" focusable="false">' +
-  '<path d="M3.2 7.6l4.6 3.6 3.4-5.7a.95.95 0 0 1 1.6 0l3.4 5.7 4.6-3.6a.6.6 0 0 1 .96.58L19.9 17H4.1L2.24 8.18a.6.6 0 0 1 .96-.58z"/>' +
-  '<path d="M4.4 18.6h15.2V20a1 1 0 0 1-1 1H5.4a1 1 0 0 1-1-1z"/></svg>';
+/** The crown: the one mark for everything Pro (its own module, so a page can show it without the rest of Pro). */
+export { CROWN_SVG };
 
 /** "♛ Pro" / "♛ مميّز"; the crown alone (with a spoken name) on a small thumbnail. */
 export function proChipHtml(opts: { icon?: boolean; quiet?: boolean } = {}): string {
@@ -26,11 +24,6 @@ export function proChipHtml(opts: { icon?: boolean; quiet?: boolean } = {}): str
     : `<span class="${cls}">${CROWN_SVG}<span>${escapeHtml(t('pro.chip'))}</span></span>`;
 }
 
-/** The Supporter crown beside a name (a paid pass), with its name spoken and on hover. */
-export function supporterCrownHtml(): string {
-  const name = escapeHtml(t('pro.supporter'));
-  return `<span class="supporter-crown" role="img" aria-label="${name}" title="${name}">${CROWN_SVG}</span>`;
-}
 
 export function proChip(opts: { icon?: boolean; quiet?: boolean } = {}): HTMLElement {
   const box = document.createElement('span');

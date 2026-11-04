@@ -1,0 +1,173 @@
+<!doctype html>
+<!-- Dev-only harness for scripts/pro-film-shots.mts. Boots the REAL
+     MatchDaySimulator and makes the REAL Pro film through film.ts, so the
+     frames it saves are the frames a fan's file is made of. -->
+<html lang="en"><head><meta charset="UTF-8"/><title>pro film shots</title></head>
+<body style="margin:0;background:#05070c"><div id="out">loading…</div>
+<script type="module">
+  import { generateSeatMap } from '/src/core/seatmap.ts';
+  import { DesignStore } from '/src/core/design.ts';
+  import { templateById } from '/src/core/stadiumCatalog.ts';
+  import { MatchDaySimulator } from '/src/render/simulator/index.ts';
+  import { makeFilm, filmStill } from '/src/render/simulator/film.ts';
+  import { AssetStore } from '/src/core/sceneAssets.ts';
+  import { paintTifo } from '/scripts/pro-shots-tifo.js';
+
+  const HOST = document.createElement('div');
+  HOST.style.cssText = 'position:fixed;left:0;top:0;width:640px;height:360px;';
+  document.body.appendChild(HOST);
+
+  let sim = null;
+  window.__boot = async (id, stand, size, tier) => {
+    sim?.dispose();
+    HOST.replaceChildren();
+    const template = templateById(id);
+    const map = generateSeatMap(template);
+    const store = new DesignStore(map, ['#1a1d24', '#0b3d91', '#f2f1ec', '#e8b73a', '#c8102e']);
+    store.loadCells(paintTifo(map, stand, size));
+    sim = new MatchDaySimulator(HOST, map, store, template, new AssetStore(), { quality: tier || 'high' });
+    sim.setTimeOfDay('dusk');
+    sim.setFloodlights(true);
+    sim.setWetPitch(true);
+    await sim.whenSurroundingsReady().catch(() => {});
+    const fp = sim.tifoFootprint();
+    return { seats: map.count, painted: fp?.seats ?? 0, width: fp?.width ?? 0, stand: fp?.stand ?? -1, indoor: !!template.indoor };
+  };
+
+  /** Where the film's camera is at `times` (for working on the shot). */
+  window.__plan = async (aspect, times) => {
+    const { filmPlanFor } = await import('/src/render/simulator/film.ts');
+    const host = sim.filmHost();
+    const plan = filmPlanFor(host, aspect);
+    const fp = host.footprint();
+    const m = host.map;
+    const ext = (s) => {
+      const P = s.position, T = s.target;
+      const f = [T[0] - P[0], T[1] - P[1], T[2] - P[2]]; const fl = Math.hypot(...f); f.forEach((v, i) => (f[i] = v / fl));
+      const r = [-f[2], 0, f[0]]; const rl = Math.hypot(...r); r.forEach((v, i) => (r[i] = v / rl));
+      const u = [r[1] * f[2] - r[2] * f[1], r[2] * f[0] - r[0] * f[2], r[0] * f[1] - r[1] * f[0]];
+      const tv = Math.tan((s.fov * Math.PI) / 360), th = tv * aspect;
+      let x0 = 9, x1 = -9, y0 = 9, y1 = -9;
+      for (let i = 0; i < m.count; i++) {
+        if (!host.painted(i)) continue;
+        const d = [m.pos3[i * 3] - P[0], m.pos3[i * 3 + 1] + 0.9 - P[1], m.pos3[i * 3 + 2] - P[2]];
+        const z = d[0] * f[0] + d[1] * f[1] + d[2] * f[2]; if (z < 1) continue;
+        const x = (d[0] * r[0] + d[1] * r[1] + d[2] * r[2]) / z / th; const y = (d[0] * u[0] + d[1] * u[1] + d[2] * u[2]) / z / tv;
+        x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y);
+      }
+      return `x[${x0.toFixed(2)},${x1.toFixed(2)}] y[${y0.toFixed(2)},${y1.toFixed(2)}]`;
+    };
+    return { centre: fp?.centre?.map((v) => +v.toFixed(1)), mid: fp ? +((fp.y0 + fp.y1) / 2).toFixed(1) : 0, shots: times.map((t) => { const s = plan.shotAt(t); return { t, pos: s.position.map((v) => +v.toFixed(1)), target: s.target.map((v) => +v.toFixed(1)), fov: +s.fov.toFixed(1), ndc: ext(s) }; }) };
+  };
+
+  /**
+   * What hides the tifo's cards from `pos`: the share of a sample of cards
+   * behind something the ground built (short of the card's last `margin`
+   * metres), and the names of what is in the way.
+   */
+  window.__hidden = async (positions, margin) => {
+    const THREE = await import('three');
+    const host = sim.filmHost();
+    const m = host.map;
+    const objs = sim.structureObjects;
+    for (const o of objs) o.updateMatrixWorld(true);
+    const cards = [];
+    for (let i = 0, k = 0; i < m.count; i++) if (host.painted(i) && k++ % 25 === 0) cards.push(new THREE.Vector3(m.pos3[i * 3], m.pos3[i * 3 + 1] + 0.9, m.pos3[i * 3 + 2]));
+    return positions.map((p) => {
+      const a = new THREE.Vector3(...p);
+      let hid = 0;
+      const what = {};
+      for (const c of cards) {
+        const d = c.clone().sub(a);
+        const far = d.length() - margin;
+        const hits = new THREE.Raycaster(a, d.normalize(), 0, far).intersectObjects(objs, true).filter((h) => h.object.isMesh && h.object.visible && (Array.isArray(h.object.material) ? h.object.material[0] : h.object.material)?.blending !== THREE.AdditiveBlending);
+        if (hits.length) {
+          hid++;
+          let o = hits[0].object; let n = o.name;
+          while (!n && o.parent) { o = o.parent; n = o.name; }
+          what[n || '?'] = (what[n || '?'] || 0) + 1;
+        }
+      }
+      return { p, hidden: +(hid / cards.length).toFixed(3), what };
+    });
+  };
+
+  /** The film's frames `only` as JPEG data URLs, and how long each took. */
+  window.__frames = async (w, h, only) => {
+    const out = [];
+    const t0 = performance.now();
+    await makeFilm(sim.filmHost(), {
+      width: w, height: h, reveal: { kind: 'order', id: 'sweep-rl' }, mark: false, encode: false, only,
+      onFrame: (n, t, c) => { out.push({ n, t, at: Math.round(performance.now() - t0), jpg: c.toDataURL('image/jpeg', 0.86) }); },
+    });
+    return { frames: out, ms: Math.round(performance.now() - t0) };
+  };
+
+  /** The whole film, encoded, as base64, with what it is. */
+  window.__encode = async (w, h, reveal) => {
+    const t0 = performance.now();
+    const r = await makeFilm(sim.filmHost(), { width: w, height: h, reveal: reveal ?? { kind: 'order', id: 'sweep-rl' }, mark: false });
+    const buf = new Uint8Array(await r.blob.arrayBuffer());
+    let bin = '';
+    for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode(...buf.subarray(i, i + 0x8000));
+    return { b64: btoa(bin), frames: r.frames, fps: r.fps, realtime: r.realtime, ms: Math.round(performance.now() - t0), w: r.width, h: r.height };
+  };
+
+  /** The soundtrack alone, 13 s, in an MP4 of its own: for ffprobe and a waveform. */
+  window.__sound = async () => {
+    const { renderFilmSound, filmSoundCodec, encodeFilmSound, FILM_SOUND_RATE } = await import('/src/render/simulator/filmSound.ts');
+    const { Muxer, ArrayBufferTarget } = await import('mp4-muxer');
+    const codec = await filmSoundCodec();
+    if (!codec) return { codec: null };
+    const t0 = performance.now();
+    const buf = await renderFilmSound(13);
+    const tRender = performance.now() - t0;
+    const mx = new Muxer({ target: new ArrayBufferTarget(), audio: { codec: codec.codec, sampleRate: FILM_SOUND_RATE, numberOfChannels: 2 }, fastStart: 'in-memory' });
+    await encodeFilmSound(buf, codec, (c, m) => mx.addAudioChunk(c, m));
+    mx.finalize();
+    const tAll = performance.now() - t0;
+    const bytes = new Uint8Array(mx.target.buffer);
+    let bin = '';
+    for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+    return { codec: codec.codec, b64: btoa(bin), seconds: buf.duration, renderMs: Math.round(tRender), encodeMs: Math.round(tAll - tRender) };
+  };
+  // The encoder's share of a frame, without the GPU: a changing 2D picture at
+  // the film's size through the film's own path (a composite canvas, a
+  // VideoFrame, H.264 at 7 Mbps, the same back-pressure), n frames.
+  window.__encodeBench = async (w, h, n) => {
+    const c = document.createElement('canvas');
+    c.width = w; c.height = h;
+    const g = c.getContext('2d');
+    const src = document.createElement('canvas');
+    src.width = w; src.height = h;
+    const sg = src.getContext('2d');
+    const chunks = [];
+    const enc = new VideoEncoder({ output: (ch) => chunks.push(ch.byteLength), error: (e) => { throw e; } });
+    enc.configure({ codec: 'avc1.640028', width: w, height: h, bitrate: 7e6, framerate: 30, avc: { format: 'avc' } });
+    const t0 = performance.now();
+    for (let i = 0; i < n; i++) {
+      const gr = sg.createLinearGradient(0, 0, w, h);
+      gr.addColorStop(0, `hsl(${i * 3} 60% 40%)`); gr.addColorStop(1, `hsl(${i * 3 + 120} 60% 30%)`);
+      sg.fillStyle = gr; sg.fillRect(0, 0, w, h);
+      for (let k = 0; k < 400; k++) { sg.fillStyle = `hsl(${(k * 37 + i) % 360} 70% 50%)`; sg.fillRect((k * 97 + i * 5) % w, (k * 61) % h, 24, 16); }
+      g.drawImage(src, 0, 0);
+      const f = new VideoFrame(c, { timestamp: Math.round((i * 1e6) / 30), duration: Math.round(1e6 / 30) });
+      enc.encode(f, { keyFrame: i % 60 === 0 });
+      f.close();
+      while (enc.encodeQueueSize > 4) await new Promise((r) => setTimeout(r, 1));
+    }
+    await enc.flush();
+    enc.close();
+    return { msPerFrame: (performance.now() - t0) / n, bytes: chunks.reduce((a, b) => a + b, 0) };
+  };
+
+  window.__still = async (w, h) => {
+    const t0 = performance.now();
+    const c = await filmStill(sim.filmHost(), w, h);
+    return { jpg: c.toDataURL('image/jpeg', 0.9), ms: Math.round(performance.now() - t0) };
+  };
+
+  window.__teardown = () => { sim?.dispose(); sim = null; };
+  document.getElementById('out').textContent = 'ready';
+  window.__ready = true;
+</script></body></html>

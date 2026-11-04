@@ -2,6 +2,7 @@ import { escapeHtml } from '../core/escape';
 import { fetchProfile, thumbnailUrl, type GalleryItem } from '../net/api';
 
 import { t, tTitle } from './i18n';
+import { supporterBadgeHtml } from './supporterBadge';
 /**
  * Profile overlay. Shows a user's name, the tifos they've published (created),
  * and the public tifos they've liked. Clicking any opens it via onPick (load to
@@ -77,7 +78,10 @@ export async function openProfile(userId: string, onPick: (id: string) => void):
 
   try {
     const profile = await fetchProfile(userId);
-    (backdrop.querySelector('#pf-name') as HTMLElement).textContent = profile.username;
+    const nameEl = backdrop.querySelector('#pf-name') as HTMLElement;
+    nameEl.textContent = profile.username;
+    // A Pro supporter's badge, as the community shows it (ui/supporterBadge.ts).
+    if (profile.supporter) nameEl.insertAdjacentHTML('beforeend', supporterBadgeHtml());
     (backdrop.querySelector('#pf-sub') as HTMLElement).textContent =
       `${profile.created.length} created · ${profile.liked.length} liked`;
     let tab: 'created' | 'liked' = 'created';

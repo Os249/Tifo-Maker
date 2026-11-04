@@ -108,16 +108,36 @@ export function cutoutBackground(
   }
   let top: { r: number; g: number; b: number; n: number } | null = null;
   for (const e of buckets.values()) if (!top || e.n > top.n) top = e;
-  if (!top || top.n < border.length * 0.4) return false; // no single clean backdrop
+  if (!top) return false;
   const bg: [number, number, number] = [top.r / top.n, top.g / top.n, top.b / top.n];
-
-  // 2) Flood inward from every border cell that matches it.
-  const near = (p: number): boolean => {
+  const step = tolerance / 4;
+  const reach = tolerance * 9;
+  // One backdrop, if a shaded one: most of the frame within reach of its commonest colour.
+  let alike = 0;
+  for (const p of border) {
     const dr = pixels[p] - bg[0];
     const dg = pixels[p + 1] - bg[1];
     const db = pixels[p + 2] - bg[2];
-    return dr * dr * 0.299 + dg * dg * 0.587 + db * db * 0.114 <= tolerance;
+    if (dr * dr * 0.299 + dg * dg * 0.587 + db * db * 0.114 <= reach) alike++;
+  }
+  if (top.n < border.length * 0.4 && alike < border.length * 0.6) return false; // no single clean backdrop
+
+  // 2) Flood inward from every border cell that matches it. A generator's
+  //    "flat" backdrop is rarely flat: a vignette darkens its corners, a sky
+  //    shades from top to bottom. So a cell joins when it is close to the
+  //    neighbour that reached it (a smooth change, step by step) and still
+  //    within a wider reach of the backdrop's colour; a real edge is a jump
+  //    between neighbours, which stops the flood whatever the reach.
+  const dist = (p: number, q: [number, number, number] | number): number => {
+    const r = typeof q === 'number' ? pixels[q] : q[0];
+    const g = typeof q === 'number' ? pixels[q + 1] : q[1];
+    const b = typeof q === 'number' ? pixels[q + 2] : q[2];
+    const dr = pixels[p] - r;
+    const dg = pixels[p + 1] - g;
+    const db = pixels[p + 2] - b;
+    return dr * dr * 0.299 + dg * dg * 0.587 + db * db * 0.114;
   };
+  const near = (p: number): boolean => dist(p, bg) <= tolerance;
   const seen = new Uint8Array(cols * rows);
   const queue: number[] = [];
   for (const p of border) {
@@ -132,7 +152,8 @@ export function cutoutBackground(
     const push = (nx: number, ny: number): void => {
       if (nx < 0 || ny < 0 || nx >= cols || ny >= rows) return;
       const nc = ny * cols + nx;
-      if (seen[nc] || !near(nc * 4)) return;
+      if (seen[nc]) return;
+      if (!near(nc * 4) && (dist(nc * 4, cell * 4) > step || dist(nc * 4, bg) > reach)) return;
       seen[nc] = 1;
       queue.push(nc);
       removed++;

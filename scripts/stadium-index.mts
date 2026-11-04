@@ -44,6 +44,7 @@ export async function buildIndexFiles(): Promise<{ index: string; groups: string
     ['botola', (await import('../src/core/botola')).BOTOLA],
     ['algeria', (await import('../src/core/algeriaLigue1')).ALGERIA_LIGUE_1],
     ['thai', (await import('../src/core/thaiLeague')).THAI_LEAGUE],
+    ['iraq', (await import('../src/core/iraqStarsLeague')).IRAQ_STARS_LEAGUE],
   ];
   // Every shipped ground is in exactly one module, and every module's grounds are shipped.
   const shipped = new Set([...cat.STADIUM_CATALOG, ...cat.LEGACY_STADIUMS].map((e) => e.id));

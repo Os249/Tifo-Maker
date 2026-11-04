@@ -6,12 +6,13 @@
  * says Pro is live, and each perk below mounts its own controls, with its own
  * words, into the panels that are already there.
  *
- *   proExport   the stadium video's size (Full HD, vertical 9:16) and the 4K
- *               poster picture;
+ *   proExport   the stadium video's Pro sizes (Match Day's film of the tifo,
+ *               Full HD or vertical 9:16) and the 4K match-day poster;
  *   proStyles   portrait styles for a face or a player photo;
  *   proFonts    the Pro display fonts, for text and banners;
- *   clubKit     a club's colours, logos and font, saved once and dropped
- *               into any project in one tap.
+ *   clubKit     a club's colours, logos and font, saved once on the account
+ *               and dropped into any project in one tap;
+ *   proCredit   the fan's own credit line, in a corner of every export.
  *
  * Every one is free to try in the editor and the 3D view; what Pro decides is
  * what leaves the site, and that question is asked in one place (proGate.ts).
@@ -22,6 +23,7 @@ import type { ObjectLayer } from '../core/objects';
 import type { SeatMap } from '../core/types';
 import type { Editor } from '../render/editor';
 import type { Preview3D } from '../render/preview3d';
+import type { CutoutHost } from './smartCutout';
 
 /** What the editor lends its Pro tools. Filled by toolbar.ts. */
 export interface ProToolsContext {
@@ -39,6 +41,8 @@ export interface ProToolsContext {
   ensurePreview(): Promise<Preview3D | null>;
   /** Redraw the palette strip after the palette changed. */
   paletteChanged(): void;
+  /** The picture armed in the import bar, and a way to put another in its place (portrait styles). */
+  importPicture?: CutoutHost;
   /**
    * The stadium export's Pro choices, set by proExport once it has mounted.
    * toolbar.ts reads them when Preview or Export is pressed.
@@ -48,6 +52,14 @@ export interface ProToolsContext {
     size(): { width: number; height: number } | null;
     /** The names of the Pro items the chosen options add, for the export sheet. */
     items(): string[];
+    /**
+     * Make the video at a Pro size: Match Day's film of the tifo
+     * (ui/proFilm.ts), without the mark when `clean`, its cards going up in
+     * the reveal picked in the Animation panel. Resolves with the status line.
+     */
+    film?(size: { width: number; height: number }, how: { clean: boolean; reveal: string }): Promise<string>;
+    /** Play that film into the Preview's canvas, as it is drawn; it stops when the canvas leaves the page. */
+    previewFilm?(size: { width: number; height: number }, canvas: HTMLCanvasElement, how: { clean: boolean; reveal: string }): Promise<void>;
   };
 }
 
@@ -61,6 +73,7 @@ export async function mountProTools(ctx: ProToolsContext): Promise<void> {
     import('./proStyles').then((m) => m.mountProStyles(ctx)),
     import('./proFonts').then((m) => m.mountProFonts(ctx)),
     import('./clubKit').then((m) => m.mountClubKit(ctx)),
+    import('./proCredit').then((m) => m.mountProCredit()),
   ];
   const results = await Promise.allSettled(perks);
   for (const r of results) {

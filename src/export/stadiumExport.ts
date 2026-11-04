@@ -6,6 +6,7 @@ import type { Preview3D, RevealFrame } from '../render/preview3d';
 import { describeRecording, pickRecordingFormat } from '../render/simulator/recordPlan';
 import { drumCallPlanForLength } from '../core/drumCall';
 import type { DrumTrack } from '../render/drumTrack';
+import { drawCreditLine, type Credit } from '../ui/creditLine';
 
 /**
  * Stadium animation export (Phase: video/GIF of the 3D bowl).
@@ -50,6 +51,11 @@ export interface StadiumExportOpts {
    * is only half of one. Ignored by the GIF, which has no sound.
    */
   drum?: DrumTrack | null;
+  /**
+   * The fan's credit line (Pro, ui/proCredit.ts), in the corner the mark is
+   * not in; '' or absent for none (the free version never carries one).
+   */
+  credit?: Credit;
 }
 
 /** The hits to play for this export, or none. */
@@ -151,6 +157,7 @@ function buildPlayback(
     preview.renderOnce();
     ctx.drawImage(src, 0, 0, W, H);
     drawWatermark(ctx, W, H, opts.watermark);
+    if (opts.credit?.text) drawCreditLine(ctx, W, H, opts.credit.text, { avoid: opts.watermark ? 'right' : null, accent: opts.credit.accent });
   };
 
   const run = (): Promise<void> =>
@@ -338,6 +345,7 @@ export async function exportStadiumGif(
       preview.renderOnce();
       ctx.drawImage(src, 0, 0, W, H);
       drawWatermark(ctx, W, H, opts.watermark);
+      if (opts.credit?.text) drawCreditLine(ctx, W, H, opts.credit.text, { avoid: opts.watermark ? 'right' : null, accent: opts.credit.accent });
       const img = ctx.getImageData(0, 0, W, H).data;
       const buf = new Uint8Array(W * H);
       for (let p = 0; p < W * H; p++) {

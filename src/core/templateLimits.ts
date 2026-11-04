@@ -24,8 +24,12 @@ export const LIMITS = {
   /** Bowl half-length and half-width, metres, measured to row 0. */
   planA: { min: 20, max: 200 } as Range,
   planB: { min: 20, max: 200 } as Range,
-  /** Superellipse exponent: 2 is an ellipse, 4 is nearly a rounded rectangle. */
-  exponent: { min: 1.5, max: 4 } as Range,
+  /**
+   * Superellipse exponent: 2 is an ellipse, 4 a rounded rectangle, 10 a box
+   * with tight corners (stadiumFit.PLAN_EXPONENT_BOX, the median of the real
+   * grounds the site draws). 16 is the squarest a shipped ground is drawn at.
+   */
+  exponent: { min: 1.5, max: 16 } as Range,
   /** Rows in one tier. */
   rows: { min: 1, max: 80 } as Range,
   rowDepth: { min: 0.4, max: 2 } as Range,

@@ -1,0 +1,52 @@
+<!doctype html>
+<!-- Dev-only harness for scripts/photo-eval-render.mts. Boots the REAL
+     MatchDaySimulator on a template object (a stadium built from a photo) or a
+     catalogue id (the site's own model of that ground), with the stands empty
+     so the seats show their own colour, and shoots the same views of each. -->
+<html lang="en"><head><meta charset="UTF-8"/><title>photo eval</title></head>
+<body style="margin:0;background:#05070c"><div id="out">loading…</div>
+<script type="module">
+  import { generateSeatMap } from '/src/core/seatmap.ts';
+  import { DesignStore } from '/src/core/design.ts';
+  import { templateById } from '/src/core/stadiumCatalog.ts';
+  import { MatchDaySimulator } from '/src/render/simulator/index.ts';
+  import { AssetStore } from '/src/core/sceneAssets.ts';
+
+  const W = 960, H = 540;
+  const HOST = document.createElement('div');
+  HOST.style.cssText = `position:fixed;left:0;top:0;width:${W}px;height:${H}px;`;
+  document.body.appendChild(HOST);
+
+  let sim = null, map = null;
+  window.__open = async (tplOrId) => {
+    if (sim) { sim.dispose(); sim = null; }
+    HOST.replaceChildren();
+    const template = typeof tplOrId === 'string' ? templateById(tplOrId) : tplOrId;
+    map = generateSeatMap(template);
+    const store = new DesignStore(map, ['#262a33', '#ffffff']);
+    sim = new MatchDaySimulator(HOST, map, store, template, new AssetStore(), { quality: 'medium' });
+    sim.setTimeOfDay('day');
+    sim.setFloodlights(false);
+    sim.setCrowdPreset('empty');
+    sim.setBannersVisible(false);
+    if (sim.whenSurroundingsReady) await sim.whenSurroundingsReady();
+    let ax = 1, bz = 1, ty = 1;
+    for (let k = 0; k < map.count; k++) {
+      ax = Math.max(ax, Math.abs(map.pos3[k * 3]));
+      ty = Math.max(ty, map.pos3[k * 3 + 1]);
+      bz = Math.max(bz, Math.abs(map.pos3[k * 3 + 2]));
+    }
+    return { seats: map.count, ax, bz, ty, a: template.plan.a, b: template.plan.b };
+  };
+  window.__shoot = async (view) => {
+    sim.camera.fov = view.fov ?? 55;
+    sim.camera.updateProjectionMatrix();
+    sim.applyPreset({ name: view.name, position: view.position, target: view.target });
+    sim.start();
+    await new Promise((r) => setTimeout(r, 900));
+    sim.stop();
+    return sim.canvas.toDataURL('image/jpeg', 0.85);
+  };
+  document.getElementById('out').textContent = 'ready';
+  window.__ready = true;
+</script></body></html>
