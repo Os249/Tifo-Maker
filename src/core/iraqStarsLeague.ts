@@ -103,20 +103,31 @@ export const IRAQ_STARS_LEAGUE: StadiumEntry[] = [
         ],
       },
       details: {
-        // The white shell round the bowl — the four corner blocks and the
-        // outer wall of the complex; the main stand's side is the complex's
-        // own building, below.
-        skins: [{ offset: 25.5, y0: 0, y1: 18.6, color: 0xeceae5, pattern: 'panels', tile: [6, 4], omit: [{ side: 'south', from: -52, to: 52 }] }],
+        // The white shell round the bowl, and the four corner blocks that
+        // hold the stands together: the inner ring fills each corner with a
+        // flat white face flush with the stands (the photographs show the
+        // roofs dying onto them, their top edge a little proud of the lower
+        // roofs' fascia); the outer ring is the complex's wall, whose main-
+        // stand side is the complex's own building, below.
+        skins: [
+          { offset: 1.3, y0: 0, y1: 17.8, color: 0xf0eee9, pattern: 'panels', tile: [5, 4.5], omit: [
+            { side: 'south', from: -50.5, to: 50.5 },
+            { side: 'north', from: -50.5, to: 50.5 },
+            { side: 'east', from: -33.5, to: 33.5 },
+            { side: 'west', from: -33.5, to: 33.5 },
+          ] },
+          { offset: 25.5, y0: 0, y1: 18.6, color: 0xeceae5, pattern: 'panels', tile: [6, 4], omit: [{ side: 'south', from: -52, to: 52 }] },
+        ],
         buildings: [
           // The sports complex block behind the main stand (hotel, offices),
           // its glazed floors over the gallery.
           { side: 'south', straight: true, halfLength: 54, front: 24.5, depth: 14, y0: 0, y1: 17.8, glassFloors: 2, color: 0xe8e5de, fascia: 0xf2f0ea },
         ],
         // The video screens on two of the corner blocks (real north-west and
-        // south-east corners), turned to the centre spot.
+        // south-east corners), on the blocks' faces, turned to the centre spot.
         screens: [
-          { centerU: 0.892, widthM: 9, heightM: 5.5, at: [56, -47], post: { y: 12.5 } },
-          { centerU: 0.392, widthM: 9, heightM: 5.5, at: [-56, 47], post: { y: 12.5 } },
+          { centerU: 0.896, widthM: 7, heightM: 5, at: [54.8, -38.6], post: { y: 11.5 } },
+          { centerU: 0.396, widthM: 7, heightM: 5, at: [-54.8, 38.6], post: { y: 11.5 } },
         ],
       },
       site: { key: 'al-zawraa', horizon: 'city', ground: 0xa89a7e, forecourt: 0xc0b6a2, palms: 0.35 },
