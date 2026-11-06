@@ -1945,9 +1945,10 @@ import { buildStadium as siBuild } from '../src/core/stadiumFit';
     'chang-arena-33k': '32203:479909ea29900d69',
     'pat-stadium-12k': '12028:c3d2955d1f538961',
     'thunderdome-15k': '14786:5d12ca4d2ab406fb',
-    // Al-Zawraa's ground (November 2026). Frozen at first release: re-take
-    // this only before that push.
-    'al-zawraa-15k': '15452:190dbd5298215d7d',
+    // Al-Zawraa's ground (November 2026), re-laid on 6 November from the
+    // ultras' photographs (low side stands, vomitories, corner blocks) before
+    // its first push. Frozen at first release: re-take this only before that push.
+    'al-zawraa-15k': '15432:d494b31fa0ab8ecc',
   };
   for (const [id, want] of Object.entries(FROZEN)) {
     const tpl = cat.templateById(id);

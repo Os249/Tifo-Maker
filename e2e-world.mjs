@@ -43,7 +43,7 @@ const GROUNDS = [
   ['chang-arena-33k', 32203, 'Chang Arena (Buriram)', 'تشانغ أرينا (بوريرام)'],
   ['pat-stadium-12k', 12028, 'PAT Stadium (Bangkok)', 'ملعب هيئة موانئ تايلاند (بانكوك)'],
   ['thunderdome-15k', 14786, 'Thunderdome Stadium (Nonthaburi)', 'ملعب ثندردوم (نونثابوري)'],
-  ['al-zawraa-15k', 15452, 'Al-Zawraa Stadium (Baghdad)', 'ملعب الزوراء (بغداد)'],
+  ['al-zawraa-15k', 15432, 'Al-Zawraa Stadium (Baghdad)', 'ملعب الزوراء (بغداد)'],
 ];
 const only = process.argv[2] ?? '';
 
