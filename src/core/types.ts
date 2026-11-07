@@ -362,6 +362,15 @@ export interface ScreenSpec {
    * two legs to the ground, or on one column in the middle with `pole`.
    */
   post?: { offset?: number; y: number; pole?: boolean };
+  /**
+   * Bolted to a wall instead — the face of a corner block or of a building
+   * behind the seats (Al-Zawraa's screens on its corner blocks): the centre
+   * of the picture `offset` metres out from the plan curve at `centerU` and
+   * `y` up, facing the way the wall faces (the curve's normal, not the centre
+   * spot), on short brackets back into the wall. No legs, no cables; `at` is
+   * not used.
+   */
+  wall?: { offset?: number; y: number };
 }
 
 /** A four-sided screen hung over the centre spot — an arena's centre-hung board. */

@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import type { StadiumTemplate, SeatMap } from '../../core/types';
 import { curveSampler, laneCut, laneLines, tierEdges } from '../../core/venueDetails';
 import { edgesOn, sideOfU, spanGeometry } from '../../core/standSpans';
-import { screenPlacements } from '../../core/screens';
+import { SCREEN_BRACKET, screenPlacements } from '../../core/screens';
 import { runSync, type Steps } from './steps';
 
 /**
@@ -630,6 +630,16 @@ export function* buildVenueDetailsSteps(template: StadiumTemplate, map: SeatMap,
           const brace = box(sc.widthM * 0.64, 0.3, 0.3, steel, trash);
           brace.position.set(0, -sc.heightM / 2 - legH * 0.45, -0.6);
           holder.add(brace);
+        }
+      } else if (sc.wall) {
+        // Bolted to a wall (a corner block's face): four short brackets from
+        // the back of the frame into the wall, nothing to the ground.
+        for (const sx of [-1, 1]) {
+          for (const sy of [-1, 1]) {
+            const arm = box(0.22, 0.22, SCREEN_BRACKET, steel, trash);
+            arm.position.set(sx * sc.widthM * 0.3, sy * sc.heightM * 0.3, -0.95 - SCREEN_BRACKET / 2);
+            holder.add(arm);
+          }
         }
       }
       // (Neither: on the back of the top tier, just over the last row's heads, under the roof.)

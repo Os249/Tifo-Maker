@@ -10,12 +10,14 @@ import { sideOfU, spanOn } from './standSpans';
  *   - `hang`: hung from the roof, `offset` out from the plan curve, facing the pitch
  *   - `post`: on its own frame on legs to the ground (an open corner, behind a
  *     stand), `offset` out from the plan curve, turned to the centre spot
+ *   - `wall`: bolted to a wall (a corner block's face), `offset` out from the
+ *     plan curve at centerU, facing the way the wall faces, on short brackets
  *   - neither: on the back of the top stand on that side, just over the last
  *     row's heads, facing the pitch
  */
 export interface ScreenPlacement {
   spec: ScreenSpec;
-  kind: 'hang' | 'post' | 'back';
+  kind: 'hang' | 'post' | 'wall' | 'back';
   u: number;
   /** Centre of the picture, metres. */
   x: number;
@@ -31,6 +33,8 @@ export interface ScreenPlacement {
 export const SCREEN_FRAME = 0.4;
 /** How far the frame and the legs reach behind the picture. */
 export const SCREEN_DEPTH = 1.0;
+/** How far a wall screen's brackets reach back from the frame into the wall. */
+export const SCREEN_BRACKET = 0.7;
 
 export function screenPlacements(template: StadiumTemplate): ScreenPlacement[] {
   const screens = template.details?.screens ?? [];
@@ -60,6 +64,11 @@ export function screenPlacements(template: StadiumTemplate): ScreenPlacement[] {
       if (fixed) return { ...base, kind: 'post', ...fixed, y: sc.post.y };
       const p = at(sc.centerU, sc.post.offset ?? 0);
       return { ...base, kind: 'post', x: p.x, y: sc.post.y, z: p.z, ry: Math.atan2(-p.x, -p.z) };
+    }
+    if (sc.wall) {
+      // On a wall: flat to it, so it faces the plan curve's normal there.
+      const p = at(sc.centerU, sc.wall.offset ?? 0);
+      return { ...base, kind: 'wall', x: p.x, y: sc.wall.y, z: p.z, ry: Math.atan2(-p.nx, -p.nz) };
     }
     const te = backOf(sc.centerU);
     const p = at(sc.centerU, te.back + 0.2);

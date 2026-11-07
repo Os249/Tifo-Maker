@@ -156,11 +156,12 @@ export const IRAQ_STARS_LEAGUE: StadiumEntry[] = [
           // its glazed floors over the gallery.
           { side: 'south', straight: true, halfLength: 54, front: 24.5, depth: 14, y0: 0, y1: 17.8, glassFloors: 2, color: 0xe8e5de, fascia: 0xf2f0ea },
         ],
-        // The video screens at the top of two of the corner blocks (real
-        // north-west and south-east corners), turned to the centre spot.
+        // The video screens, bolted to the faces of two of the corner blocks
+        // (real north-west and south-east corners) between the ledge and the
+        // railing, flat to the block: no legs, no cables.
         screens: [
-          { centerU: 0.896, widthM: 6, heightM: 5, at: [54.8, -38.6], post: { y: 11 } },
-          { centerU: 0.396, widthM: 6, heightM: 5, at: [-54.8, 38.6], post: { y: 11 } },
+          { centerU: 0.8985, widthM: 5.5, heightM: 3.5, wall: { offset: -0.45, y: 14 } },
+          { centerU: 0.3985, widthM: 5.5, heightM: 3.5, wall: { offset: -0.45, y: 14 } },
         ],
       },
       site: { key: 'al-zawraa', horizon: 'city', ground: 0xa89a7e, forecourt: 0xc0b6a2, palms: 0.35 },
