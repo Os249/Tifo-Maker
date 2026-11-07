@@ -510,6 +510,10 @@ export interface StandBuilding {
   color?: number;
   /** A strip of colour along the top (a fascia), hex. */
   fascia?: number;
+  /** A railing along the top of the pitch-side face: posts and a handrail, this high (m). */
+  railing?: { height?: number; color?: number };
+  /** Vertical panel joints on the pitch-side face, this far apart (m): the lines of a precast tower. */
+  joints?: number;
 }
 
 /**

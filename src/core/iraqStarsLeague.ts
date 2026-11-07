@@ -87,16 +87,20 @@ export const IRAQ_STARS_LEAGUE: StadiumEntry[] = [
     // line (plan offset 1.3) back to the shell (25.3), two ring buildings
     // meeting a little past the 45° point so there is no seam. Their doorways
     // at the foot of each face, dark.
-    const BLOCK = { front: 1.3, depth: 24, y0: 0, y1: 16.2, color: 0xdcdbd6, fascia: 0xe9e8e3 } as const;
+    // Precast panels with their joints every 3 m, a dark railing along the
+    // top, a ledge across the face at the stands' top-walkway level (the
+    // photographs show the band where the walkway meets the block).
+    const BLOCK = { front: 1.3, depth: 24, y0: 0, y1: 16.2, color: 0xdcdbd6, fascia: 0xe9e8e3, joints: 3, railing: { height: 1.1, color: 0x26282c } } as const;
     const corner = (side: Side, from: number, to: number): StandBuilding => ({ side, center: (from + to) / 2, halfLength: Math.abs(to - from) / 2, ...BLOCK });
+    const ledge = (side: Side, from: number, to: number): StandBuilding => ({ side, center: (from + to) / 2, halfLength: Math.abs(to - from) / 2, front: 1.05, depth: 0.25, y0: 10.5, y1: 10.9, color: 0xc9c7c1, fascia: 0xe9e8e3 });
     const door = (side: Side, at: number): StandBuilding => ({ side, center: at, halfLength: 2, front: 1.1, depth: 0.3, y0: 0, y1: 3.4, color: 0x15171a, fascia: 0x15171a });
     const corners: StandBuilding[] = [
       // South-east corner (real north-west): the south stand's end at x 52 to
       // past the 45° point (x ≈ 55); the east stand's end at z -34.5 to past it (z ≈ -39.1).
-      corner('south', 52, 55.8), corner('east', -39.6, -34.5), door('south', 54.6),
-      corner('south', -55.8, -52), corner('west', -39.6, -34.5), door('south', -54.6),
-      corner('north', 52, 55.8), corner('east', 34.5, 39.6), door('north', 54.6),
-      corner('north', -55.8, -52), corner('west', 34.5, 39.6), door('north', -54.6),
+      corner('south', 52, 55.8), corner('east', -39.6, -34.5), ledge('south', 52, 55.8), ledge('east', -39.6, -34.5), door('south', 54.6),
+      corner('south', -55.8, -52), corner('west', -39.6, -34.5), ledge('south', -55.8, -52), ledge('west', -39.6, -34.5), door('south', -54.6),
+      corner('north', 52, 55.8), corner('east', 34.5, 39.6), ledge('north', 52, 55.8), ledge('east', 34.5, 39.6), door('north', 54.6),
+      corner('north', -55.8, -52), corner('west', 34.5, 39.6), ledge('north', -55.8, -52), ledge('west', 34.5, 39.6), door('north', -54.6),
     ];
     return {
       id: 'al-zawraa-15k',
@@ -113,11 +117,12 @@ export const IRAQ_STARS_LEAGUE: StadiumEntry[] = [
       sectionsPerTier: 28,
       roof: { coverage: 'none' },
       roofs: [
-        // Four flat truss roofs, one per stand, the main stand's the taller.
+        // Four flat truss roofs, one per stand, the main stand's the taller;
+        // the ends' run on over the corner blocks, as the photographs show.
         { style: 'sheet', side: 'south', straight: true, from: -53.5, to: 53.5, back: 26.5, front: 3, backY: 18.6, frontY: 17.2, depth: 1.6, bay: 8, color: 0xdfe1e3, underColor: 0x4a5058, columns: { every: 10.4, offset: 25.8, color: 0xd6d8da }, lights: { every: 4.5, y: 17.5 } },
         { style: 'sheet', side: 'north', straight: true, from: -53.5, to: 53.5, back: 23.5, front: 2.5, backY: 17.4, frontY: 16, depth: 1.6, bay: 8, color: 0xdfe1e3, underColor: 0x4a5058, columns: { every: 10.4, offset: 22.8, color: 0xd6d8da }, lights: { every: 4.5, y: 16.3 } },
-        { style: 'sheet', side: 'east', straight: true, from: -36, to: 36, back: 23.5, front: 2.5, backY: 17.4, frontY: 16, depth: 1.6, bay: 8, color: 0xdfe1e3, underColor: 0x4a5058, columns: { every: 10, offset: 22.8, color: 0xd6d8da }, lights: { every: 4.5, y: 16.3 } },
-        { style: 'sheet', side: 'west', straight: true, from: -36, to: 36, back: 23.5, front: 2.5, backY: 17.4, frontY: 16, depth: 1.6, bay: 8, color: 0xdfe1e3, underColor: 0x4a5058, columns: { every: 10, offset: 22.8, color: 0xd6d8da }, lights: { every: 4.5, y: 16.3 } },
+        { style: 'sheet', side: 'east', straight: true, from: -40.5, to: 40.5, back: 23.5, front: 2.5, backY: 17.4, frontY: 16, depth: 1.6, bay: 8, color: 0xdfe1e3, underColor: 0x4a5058, columns: { every: 10, offset: 22.8, color: 0xd6d8da }, lights: { every: 4.5, y: 16.3 } },
+        { style: 'sheet', side: 'west', straight: true, from: -40.5, to: 40.5, back: 23.5, front: 2.5, backY: 17.4, frontY: 16, depth: 1.6, bay: 8, color: 0xdfe1e3, underColor: 0x4a5058, columns: { every: 10, offset: 22.8, color: 0xd6d8da }, lights: { every: 4.5, y: 16.3 } },
       ],
       lighting: { style: 'roof-rim', kelvin: 5600 },
       finish: { concrete: 0xa8a6a1, walls: 0xd8d6d0 },

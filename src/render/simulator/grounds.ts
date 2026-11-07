@@ -719,6 +719,41 @@ function buildBuilding(template: StadiumTemplate, b: StandBuilding, at: Sampler,
     }
     grp.add(members(list, mull, trash, false));
   }
+  // Panel joints down the pitch-side face: thin dark lines a little proud of it.
+  if (b.joints && b.joints > 0.5 && lengthM > b.joints) {
+    const joint = new THREE.MeshStandardMaterial({ color: 0x9a9893, roughness: 0.9 });
+    trash.push(joint);
+    const list: { p: V3; q: V3; w: number; h?: number }[] = [];
+    const count = Math.floor(lengthM / b.joints);
+    const pad = (lengthM - count * b.joints) / 2 + b.joints / 2;
+    for (let i = 0; i < count; i++) {
+      const u = u0 + ((u1 - u0) * (pad + i * b.joints)) / lengthM;
+      const q = at(u, b.front - 0.02);
+      list.push({ p: [q.x, b.y0, q.z], q: [q.x, b.y1, q.z], w: 0.07 });
+    }
+    grp.add(members(list, joint, trash, false));
+  }
+  // A railing along the top of the pitch-side face: posts every ~1.5 m and a handrail.
+  if (b.railing) {
+    const h = b.railing.height ?? 1.1;
+    const rail = new THREE.MeshStandardMaterial({ color: b.railing.color ?? 0x2a2c30, roughness: 0.5, metalness: 0.5 });
+    trash.push(rail);
+    const list: { p: V3; q: V3; w: number; h?: number }[] = [];
+    const count = Math.max(2, Math.round(lengthM / 1.5));
+    const pts: V3[] = [];
+    for (let i = 0; i <= count; i++) {
+      const q = at(u0 + ((u1 - u0) * i) / count, b.front + 0.12);
+      pts.push([q.x, b.y1, q.z]);
+      list.push({ p: [q.x, b.y1, q.z], q: [q.x, b.y1 + h, q.z], w: 0.06 });
+    }
+    for (let i = 1; i < pts.length; i++) {
+      const p = pts[i - 1];
+      const q = pts[i];
+      list.push({ p: [p[0], b.y1 + h, p[2]], q: [q[0], b.y1 + h, q[2]], w: 0.06 });
+      list.push({ p: [p[0], b.y1 + h * 0.55, p[2]], q: [q[0], b.y1 + h * 0.55, q[2]], w: 0.04 });
+    }
+    grp.add(members(list, rail, trash, false));
+  }
   grp.traverse((o) => {
     const m = o as THREE.Mesh;
     if (m.isMesh) {
