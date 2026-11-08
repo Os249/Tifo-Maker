@@ -295,7 +295,7 @@ async function main(): Promise<void> {
       aiEvents: new MemoryAiEventsRepository((id) => auth.usernameOf(id)),
       aiBudget: new MemoryAiBudgetRepository(),
       aiFreeLimit: envNum('AI_FREE_LIMIT', 10, 0), // premium designs per hour
-      pro: new MemoryProRepository(),
+      pro: new MemoryProRepository((id) => auth.usernameOf(id)),
       kits: new MemoryKitRepository(),
       stadiums: new MemoryStadiumRepository(),
       stats: new MemoryAdminStatsRepository(designs),

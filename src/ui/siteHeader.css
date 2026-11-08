@@ -28,6 +28,11 @@
 }
 .nav-links > a:not(.nav-cta):hover { opacity: 1; color: var(--blue); }
 .nav-links > a.active, .nav-links > a[aria-current="page"] { color: var(--blue); opacity: 1; }
+/* Pro, coming soon (8 Nov 2026): the gold crown before the words, never the blue. */
+.nav-links > a.nav-pro { gap: var(--sp-1); white-space: nowrap; }
+.nav-pro .pro-crown { width: 1.05em; height: 1.05em; flex: none; fill: currentColor; color: var(--pro-crown); }
+/* In the phone drawer, where every row is full width: the crown, a space, the words. */
+.mnav-drawer a.nav-pro { display: flex; align-items: center; gap: var(--sp-3); }
 .lang-toggle {
   background: transparent; border: 1px solid var(--line-strong); color: var(--ink);
   font: inherit; font-weight: 600; font-size: var(--fs-md); padding: 7px 14px; border-radius: var(--r-pill); cursor: pointer;

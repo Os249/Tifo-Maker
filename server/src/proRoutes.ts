@@ -1,6 +1,7 @@
 /**
  * The Pro routes: what an account's Pro looks like (/api/pro), accepting the
- * 7-day gift, "tell me when Pro opens", and the admin's grant and revoke.
+ * 7-day gift, "tell me when Pro opens", the price question (/api/pro/price,
+ * proPrice.ts), and the admin's grant, revoke and the price answers.
  *
  * Every answer is computed here from the server's own records. Nothing a
  * browser sends can raise a limit, choose a plan or start a pass: the only
@@ -10,6 +11,8 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { ALLOWANCE_KINDS, FREE_WINDOWS, OFFER, PLAN_WINDOWS, proMode, previewUsers, type AllowanceKind, type Window } from './proPlan';
 import { disposableListStatus, type ProAccount, type ProService } from './pro';
+import { GuestPace, PRICE_ANSWERS_MAX, PRICE_BANDS, accountVoter, deviceKey, deviceVoter, readPriceInput, summarize } from './proPrice';
+import type { PriceAnswer } from './proRepo';
 import type { UserRow } from './repo';
 
 export interface ProRouteDeps {
@@ -22,6 +25,8 @@ export interface ProRouteDeps {
   /** Whether the smart cut-out has a provider to call (for the admin panel). */
   cutoutConfigured: () => boolean;
   routeConfig?: object;
+  /** The price question's own pace (POST /api/pro/price), tighter than the other routes'. */
+  priceConfig?: object;
 }
 
 const acctOf = (u: UserRow): ProAccount => ({ id: u.id, username: u.username, email: u.email, emailVerified: !!u.emailVerifiedAt });
@@ -32,6 +37,26 @@ function limitsOf(w: Record<AllowanceKind, Window[]>): Record<AllowanceKind, { p
   for (const k of ALLOWANCE_KINDS) out[k] = w[k].map((x) => ({ period: x.period === 'cycle' ? 'month' : x.period, limit: x.limit }));
   return out;
 }
+
+/**
+ * What /pro shows to everyone while Pro is not on for them: the two plans'
+ * allowances and the gift, and no price (the page asks what a month is worth
+ * instead). The same for every visitor, so it says nothing about who is in a
+ * preview.
+ */
+function soonOffer() {
+  return {
+    limits: { free: limitsOf(FREE_WINDOWS), pro: limitsOf(PLAN_WINDOWS.monthly) },
+    monthly: { days: OFFER.monthly.days },
+    gift: { days: OFFER.gift.days },
+  };
+}
+
+/** An answer as its own voter sees it again. */
+const ownAnswer = (a: PriceAnswer | null) => (a ? { amount: a.amount, currency: a.currency, comment: a.comment } : null);
+
+/** The newest answers /admin lists in full (the summary counts them all; the CSV has every one). */
+const ADMIN_PRICE_ROWS = 300;
 
 /** The parts of the offer the Pro page shows: Free against Pro, one price. */
 function publicOffer() {
@@ -51,20 +76,22 @@ export function registerProRoutes(app: FastifyInstance, deps: ProRouteDeps): voi
   const cfg = deps.routeConfig ?? {};
 
   /**
-   * Pro as the caller sees it. Signed out, only whether Pro is open to
-   * everyone and the prices (the Pro page shows them with a sign-in button).
-   * Signed in but not covered by PRO_MODE: { live: false } and nothing else,
-   * so nobody learns about a preview by reading the API.
+   * Pro as the caller sees it. Signed out, whether Pro is open to everyone
+   * and the prices once it is. Not covered by PRO_MODE (signed in or out):
+   * { live: false } with the coming-soon plans, which are the same for
+   * everyone, so nobody learns about a preview by reading the API; signed
+   * in, also whether they asked to hear when Pro opens.
    */
   app.get('/api/pro', async (req, reply) => {
     void reply.header('cache-control', 'no-store');
     const userId = await deps.userOf(req).catch(() => null);
     if (!userId) {
       const open = proMode() === 'on';
-      return open ? { live: true, signedIn: false, offer: publicOffer() } : { live: false, signedIn: false };
+      return open ? { live: true, signedIn: false, offer: publicOffer(), soon: soonOffer() } : { live: false, signedIn: false, soon: soonOffer() };
     }
     const user = await deps.accountOf(req, userId).catch(() => null);
-    if (!user || !pro.live(user.username)) return { live: false, signedIn: true };
+    if (!user) return { live: false, signedIn: true, soon: soonOffer() };
+    if (!pro.live(user.username)) return { live: false, signedIn: true, soon: soonOffer(), notified: await pro.repo.notified(user.id) };
     const acct = acctOf(user);
     const [holding, gift, notified] = await Promise.all([
       pro.plan(user.id),
@@ -84,6 +111,7 @@ export function registerProRoutes(app: FastifyInstance, deps: ProRouteDeps): voi
       gift,
       notified,
       offer: publicOffer(),
+      soon: soonOffer(),
       now: pro.now().toISOString(),
     };
   });
@@ -103,13 +131,52 @@ export function registerProRoutes(app: FastifyInstance, deps: ProRouteDeps): voi
     return { ok: true, endsAt: r.endsAt };
   });
 
+  // "Tell me when Pro opens": any account, now that /pro is open to everyone
+  // as a coming-soon page (8 Nov 2026). One row per account.
   app.post('/api/pro/notify', cfg, async (req, reply) => {
     const userId = await deps.requireUser(req, reply);
     if (!userId) return;
     const user = await deps.accountOf(req, userId).catch(() => null);
-    if (!user || !pro.live(user.username)) return reply.code(404).send({ error: 'not found' });
+    if (!user) return reply.code(401).send({ error: 'authentication required' });
     const added = await pro.repo.notify(user.id);
     return { ok: true, already: !added };
+  });
+
+  // ------------------------------------------------------ price question ---
+
+  /**
+   * The caller's own answer, to show it again: the account's when signed
+   * in, otherwise (or when the account has none yet) the browser's, named by
+   * the key in x-price-device.
+   */
+  app.get('/api/pro/price', async (req, reply) => {
+    void reply.header('cache-control', 'no-store');
+    const userId = await deps.userOf(req).catch(() => null);
+    const device = deviceKey(req.headers['x-price-device']);
+    let a = userId ? await pro.repo.priceAnswer(accountVoter(userId)) : null;
+    if (!a && device) a = await pro.repo.priceAnswer(deviceVoter(device));
+    return { answer: ownAnswer(a) };
+  });
+
+  const guests = new GuestPace();
+  app.post('/api/pro/price', deps.priceConfig ?? {}, async (req, reply) => {
+    const read = readPriceInput(req.body);
+    if (!read.ok) return reply.code(400).send({ error: read.error });
+    const { amount, currency, lang, comment, device } = read.input;
+    const userId = await deps.userOf(req).catch(() => null);
+    if (!userId && !device) return reply.code(400).send({ error: 'a browser key is required when signed out' });
+    const voter = userId ? accountVoter(userId) : deviceVoter(device!);
+    if (!userId && !(await pro.repo.priceAnswer(voter)) && !guests.take(req.ip, pro.now())) {
+      return reply.code(429).send({ error: 'too many answers from here today', reason: 'pace' });
+    }
+    const r = await pro.repo.putPriceAnswer({
+      voter, userId, amount, currency, lang, comment,
+      // Answered signed out in this browser, now signed in: one answer, the account's.
+      absorb: userId && device ? deviceVoter(device) : null,
+      max: PRICE_ANSWERS_MAX,
+    });
+    if (r === 'full') return reply.code(409).send({ error: 'the question has all the answers it needs', reason: 'full' });
+    return { ok: true, answer: { amount, currency, comment } };
   });
 
   // ---------------------------------------------------------------- admin ---
@@ -140,6 +207,23 @@ export function registerProRoutes(app: FastifyInstance, deps: ProRouteDeps): voi
       cutoutConfigured: deps.cutoutConfigured(),
       paymentsOpen: OFFER.paymentsOpen,
       account,
+    };
+  });
+
+  /** Every answer to the price question, summed up per currency, and the newest in full. */
+  app.get('/api/admin/pro/prices', async (req, reply) => {
+    if (!(await deps.adminAccess(req))) return reply.code(403).send({ error: 'admin access required' });
+    void reply.header('cache-control', 'no-store');
+    // ?all=1: every answer in full, for the CSV.
+    const everything = (req.query as { all?: string }).all === '1';
+    const { all, newest } = await pro.repo.priceAnswers(everything ? PRICE_ANSWERS_MAX : ADMIN_PRICE_ROWS);
+    return {
+      total: all.length,
+      max: PRICE_ANSWERS_MAX,
+      summary: summarize(all),
+      bands: PRICE_BANDS,
+      rows: newest.map((a) => ({ at: a.updatedAt, amount: a.amount, currency: a.currency, lang: a.lang, username: a.username, comment: a.comment })),
+      shown: newest.length,
     };
   });
 

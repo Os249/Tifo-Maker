@@ -28,6 +28,7 @@ import { imageHealth } from './imageHealth';
 import { registerAiRoutes, safeEqual, verifyUnlock, warmUnlockKey } from './aiRoutes';
 import { ProService } from './pro';
 import type { ProRepository } from './proRepo';
+import { accountVoter } from './proPrice';
 import { registerProRoutes } from './proRoutes';
 import type { KitRepository } from './kitRepo';
 import { registerKitRoutes } from './kitRoutes';
@@ -248,10 +249,6 @@ const NOT_FOUND_HTML = `<!doctype html>
   </main>
 </body>
 </html>`;
-
-/** The site's 404 page, for a page that is switched off (Pro before PRO_MODE). */
-const notFoundPage = (reply: FastifyReply) =>
-  reply.code(404).header('cache-control', 'no-cache').type('text/html').send(NOT_FOUND_HTML);
 
 export interface TemplateInfo {
   id: string;
@@ -1186,6 +1183,7 @@ export async function buildApp(
     'pro_viewed',      // opened the Pro page
     'pro_limit',       // met a Pro limit card (an allowance used up)
     'pro_notify',      // asked to be told when Pro opens
+    'pro_price',       // said what a month of Pro is worth (the coming-soon page)
     'gift_accepted',   // accepted the 7-day Pro gift
     'cutout_used',     // a smart cut-out came back
     'export_sheet',    // the export sheet listed Pro items
@@ -1472,6 +1470,9 @@ export async function buildApp(
       adminAccess,
       cutoutConfigured,
       routeConfig: options.rateLimit ? { config: { rateLimit: { max: 20, timeWindow: '1 minute' } } } : undefined,
+      // Anyone can answer the price question, signed in or not: ten a quarter
+      // of an hour from one address is plenty for changing one's mind.
+      priceConfig: options.rateLimit ? { config: { rateLimit: { max: 10, timeWindow: '15 minutes' } } } : undefined,
     });
     if (options.kits) {
       registerKitRoutes(app, {
@@ -2983,12 +2984,15 @@ export async function buildApp(
     // Club kits, their logos and the credit line are the person's own uploads.
     let kits: { id: string; name: string; colours: string[]; font: string; logos: string[] }[] = [];
     let credit = '';
+    // Their answer to "what would you pay for Pro?", given while signed in.
+    let price: Awaited<ReturnType<ProRepository['priceAnswer']>> = null;
     try {
-      [user, designs, passes, gift] = await Promise.all([
+      [user, designs, passes, gift, price] = await Promise.all([
         accountOf(req, userId),
         repo.listByOwner(userId),
         proService ? proService.repo.allPasses(userId) : Promise.resolve([]),
         proService ? proService.repo.gift(userId) : Promise.resolve(null),
+        proService ? proService.repo.priceAnswer(accountVoter(userId)) : Promise.resolve(null),
       ]);
       if (options.kits) {
         const store = options.kits;
@@ -3015,6 +3019,7 @@ export async function buildApp(
         gift: gift ? { offeredAt: gift.offeredAt, acceptedAt: gift.acceptedAt } : null,
         kits,
         credit,
+        priceAnswer: price ? { amount: price.amount, currency: price.currency, comment: price.comment, at: price.updatedAt } : null,
       },
     });
   });
@@ -5274,18 +5279,17 @@ export async function buildApp(
       /* projects page optional in API-only builds */
     }
 
-    // Pro: what the passes add and what they cost. Only while PRO_MODE is
-    // preview or on: off, /pro is a 404 like any page that does not exist, so
-    // nothing about Pro shows before it is switched on. noindex in its own
-    // <head> and not in the sitemap until it opens. The page reads /api/pro,
-    // which in preview says nothing to anyone not on the list.
+    // Pro: what it adds, coming soon. Served in every PRO_MODE since 8 Nov
+    // 2026: every public header links to it, and until Pro is on for a
+    // visitor it shows the two plans with no price, asking what a month is
+    // worth instead (proPrice.ts). noindex in its own <head> and not in the
+    // sitemap until Pro opens. The page reads /api/pro, which in preview says
+    // nothing about who is on the list.
     try {
       const proHtml = readFileSync(join(staticDir, 'pro.html'), 'utf8');
       for (const [lang, page] of pagesOf('pro.html', proHtml)) {
-        app.get(routeIn('/pro', lang), async (req, reply) => {
-          if (proMode() === 'off') return notFoundPage(reply);
-          return reply.header('cache-control', 'no-cache').type(PAGE_HTML).send(withTwins(page, req, '/pro', lang, false));
-        });
+        app.get(routeIn('/pro', lang), async (req, reply) =>
+          reply.header('cache-control', 'no-cache').type(PAGE_HTML).send(withTwins(page, req, '/pro', lang, false)));
       }
     } catch {
       /* pro page optional in API-only builds */

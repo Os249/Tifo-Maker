@@ -257,6 +257,7 @@ let kitPalette = null;
   await p.fill('#kit-name', 'Blue Wave');
   await p.click('.kit-sheet [data-act="save"]');
   check('Save kit: the kit is a card', await waitFor(p, () => document.querySelector('.kit-card .kit-name')?.textContent === 'Blue Wave'));
+  await waitFor(p, () => /Saved/.test(document.querySelector('.kit-note')?.textContent || ''), null, 15000);
   const card = await p.evaluate(() => {
     const c = document.querySelector('.kit-card');
     return {
@@ -414,6 +415,8 @@ let kitPalette = null;
   await open(p, third, 'kit_fan third');
   await entryShown(p);
   await openSheet(p);
+  // The sheet writes its status line a frame after it paints: wait for it, then read.
+  await waitFor(p, () => /couldn’t be read/.test(document.querySelector('.kit-note')?.textContent || ''), null, 15000);
   const bad = await p.evaluate(() => ({
     names: [...document.querySelectorAll('.kit-card .kit-name')].map((n) => n.textContent),
     imgs: document.querySelectorAll('.kit-sheet img').length,

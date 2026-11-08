@@ -1950,8 +1950,18 @@ export interface ProOffer {
   paymentsOpen: boolean;
 }
 
+/**
+ * The coming-soon plans /pro shows to everyone (server/src/proRoutes
+ * soonOffer): the allowances and the gift, and no price.
+ */
+export interface ProSoon {
+  limits: { free: PlanLimits; pro: PlanLimits };
+  monthly: { days: number };
+  gift: { days: number };
+}
+
 export interface ProState {
-  /** Pro is on for this visitor. False: show nothing about Pro at all. */
+  /** Pro is on for this visitor. False: show nothing about Pro but the /pro page's coming-soon plans. */
   live: boolean;
   signedIn: boolean;
   emailVerified?: boolean;
@@ -1962,6 +1972,7 @@ export interface ProState {
   gift?: GiftState;
   notified?: boolean;
   offer?: ProOffer;
+  soon?: ProSoon;
   now?: string;
 }
 
@@ -2007,6 +2018,78 @@ export async function notifyPro(): Promise<boolean> {
     return res.ok;
   } catch {
     return false;
+  }
+}
+
+// ------------------------------------------------- the price question ---
+
+export type PriceCurrency = 'SAR' | 'USD';
+export interface PriceAnswer {
+  amount: number;
+  currency: PriceCurrency;
+  comment: string | null;
+}
+
+const PRICE_KEY = 'tifo_price_key_v1';
+let priceKeyHere: string | null = null;
+
+/**
+ * This browser's own key for the price question, made the first time a
+ * signed-out visitor answers: random, kept in localStorage, so they answer
+ * once and can change their answer. The server keeps only its hash. Without
+ * storage (a private window) it lasts as long as the page.
+ */
+function priceKey(): string {
+  if (priceKeyHere) return priceKeyHere;
+  try {
+    const kept = localStorage.getItem(PRICE_KEY);
+    if (kept && /^[A-Za-z0-9_-]{22,64}$/.test(kept)) return (priceKeyHere = kept);
+  } catch { /* no storage: a key for this page only */ }
+  const bytes = crypto.getRandomValues(new Uint8Array(24));
+  priceKeyHere = btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  try { localStorage.setItem(PRICE_KEY, priceKeyHere); } catch { /* kept for this page only */ }
+  return priceKeyHere;
+}
+
+/** The key, only when this browser has one already (reading never makes one). */
+function priceKeyKept(): string | null {
+  if (priceKeyHere) return priceKeyHere;
+  try {
+    const kept = localStorage.getItem(PRICE_KEY);
+    return kept && /^[A-Za-z0-9_-]{22,64}$/.test(kept) ? kept : null;
+  } catch {
+    return null;
+  }
+}
+
+/** This visitor's answer so far (their account's, or this browser's), or null. */
+export async function fetchPriceAnswer(): Promise<PriceAnswer | null> {
+  const key = priceKeyKept();
+  try {
+    const res = await fetch(`${API}/pro/price`, { headers: { ...authHeaders(false), ...(key ? { 'x-price-device': key } : {}) } });
+    if (!res.ok) return null;
+    return ((await res.json()) as { answer: PriceAnswer | null }).answer;
+  } catch {
+    return null;
+  }
+}
+
+/** Send (or change) the answer. 'pace': too many from this address today; 'full': no more are taken. */
+export async function sendPriceAnswer(a: PriceAnswer & { lang: 'en' | 'ar' }): Promise<{ ok: true; answer: PriceAnswer } | { ok: false; reason: 'pace' | 'full' | 'failed' }> {
+  try {
+    const res = await fetch(`${API}/pro/price`, {
+      method: 'POST',
+      headers: authHeaders(true),
+      // Signed in, the account is who answers; a key this browser already has
+      // goes along so an answer it gave signed out becomes the account's.
+      body: JSON.stringify({ amount: a.amount, currency: a.currency, comment: a.comment, lang: a.lang, device: token ? priceKeyKept() : priceKey() }),
+    });
+    const data = (await res.json().catch(() => null)) as { answer?: PriceAnswer; reason?: string } | null;
+    if (res.ok && data?.answer) return { ok: true, answer: data.answer };
+    const reason = res.status === 429 ? 'pace' : data?.reason === 'full' ? 'full' : 'failed';
+    return { ok: false, reason };
+  } catch {
+    return { ok: false, reason: 'failed' };
   }
 }
 

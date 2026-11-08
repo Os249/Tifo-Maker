@@ -23,6 +23,8 @@ export const STRINGS: Record<string, { en: string; ar: string }> = {
   'nav.clubs': { en: 'For clubs', ar: 'للأندية' },
   'nav.openEditor': { en: 'Open the editor', ar: 'افتح المحرر' },
   'nav.community': { en: 'Community', ar: 'المجتمع' },
+  // Every public header's link to /pro while it is a coming-soon page (8 Nov 2026).
+  'nav.proSoon': { en: 'Pro · soon', ar: 'المميّزة · قريباً' },
   'nav.terms': { en: 'Terms', ar: 'الشروط' },
   'nav.privacy': { en: 'Privacy', ar: 'الخصوصية' },
   'nav.legal': { en: 'Legal', ar: 'الشروط والخصوصية' },
@@ -2868,14 +2870,6 @@ export const STRINGS: Record<string, { en: string; ar: string }> = {
 
   // The Pro page (/pro).
   'meta.pro.title': { en: 'Pro · TifoMaker', ar: 'المميّزة · تيفو ميكر' },
-  'pp.eyebrow': { en: 'TifoMaker Pro', ar: 'تيفو ميكر المميّزة' },
-  'pp.title': { en: 'Everything for the big match', ar: 'كل اللي تحتاجه للمباراة الكبيرة' },
-  'pp.lead': {
-    en: 'Everything free stays free. Pro adds Match Day films in Full HD and 9:16, a 4K poster, exports without the mark, portrait styles, Pro fonts, your club kit and more.',
-    ar: 'كل شي مجاني يبقى مجاني. المميّزة تضيف أفلام يوم المباراة بدقة Full HD و9:16، وبوستر 4K، وتصدير بدون العلامة، وستايلات للصور، وخطوط مميّزة، وهوية ناديك، وأكثر.',
-  },
-  'pp.notOpen': { en: 'Pro is not open yet.', ar: 'المميّزة ما فتحت للحين.' },
-  'pp.home': { en: 'Back to TifoMaker', ar: 'ارجع لتيفو ميكر' },
   'pp.closed': {
     en: "Pro is not on sale yet. Tap the button and we'll email you the day it is.",
     ar: 'المميّزة ما نزلت للبيع للحين. اضغط الزر وبنرسل لك إيميل يوم تنزل.',
@@ -2886,9 +2880,6 @@ export const STRINGS: Record<string, { en: string; ar: string }> = {
   'pp.free.sub': { en: 'For every account with a verified email', ar: 'لكل حساب بريده موثّق' },
   'pp.pro.name': { en: 'Pro', ar: 'المميّزة' },
   'pp.pro.sub': { en: '{days} days of Pro at a time. It ends by itself.', ar: 'المميّزة لمدة {days} يوم، وتنتهي لحالها.' },
-  'pp.price': { en: 'SAR {n}', ar: '{n} ريال' },
-  'pp.price.month': { en: 'SAR {n} a month', ar: '{n} ريال بالشهر' },
-  'pp.noRenew': { en: 'Pro never renews by itself: a month ends on its own.', ar: 'المميّزة ما تتجدد لحالها أبد: الشهر ينتهي لحاله.' },
   'pp.row.std': { en: 'AI designs (whole stadium)', ar: 'تصاميم الذكاء (الملعب كامل)' },
   'pp.row.polish': { en: 'Polish with AI critique', ar: 'التحسين بمراجعة الذكاء' },
   'pp.row.photo': { en: 'Stadium from a photo', ar: 'ملعب من صورة' },
@@ -2938,6 +2929,35 @@ export const STRINGS: Record<string, { en: string; ar: string }> = {
     en: 'No. It waits until you press Start, and the 7 days begin then. One gift per account.',
     ar: 'لا. تنتظرك لين تضغط ابدأ، وتبدأ الـ7 أيام وقتها. هدية وحدة لكل حساب.',
   },
+
+  // /pro as a coming-soon page (8 Nov 2026): the two plans with no price on
+  // Pro, which asks every visitor what a month is worth (server/src/proPrice).
+  'ps.eyebrow': { en: 'TifoMaker Pro · Coming soon', ar: 'تيفو ميكر المميّزة · قريباً' },
+  'ps.title': { en: 'Pro is coming soon', ar: 'المميّزة جاية قريب' },
+  'ps.lead': {
+    en: "Everything free stays free. Pro will add more AI designs, Match Day films in Full HD and 9:16, a 4K poster, exports without the mark, portrait styles, Pro fonts, your club kit and more. We haven't set its price yet, so tell us what a month is worth to you.",
+    ar: 'كل شي مجاني يبقى مجاني. المميّزة بتضيف تصاميم ذكاء أكثر، وأفلام يوم المباراة بدقة Full HD و9:16، وبوستر 4K، وتصدير بدون العلامة، وستايلات للصور، وخطوط مميّزة، وهوية ناديك، وأكثر. للحين ما حددنا سعرها، فقول لنا كم يسوى الشهر عندك.',
+  },
+  'ps.free.price': { en: 'Always free', ar: 'مجانية دايماً' },
+  'ps.ask': { en: 'What would you pay for a month of Pro?', ar: 'كم تدفع على شهر المميّزة؟' },
+  'ps.ask.sub': { en: "We haven't set a price yet. Your answer helps us set a fair one.", ar: 'للحين ما حددنا السعر، وجوابك يساعدنا نحط سعر عادل.' },
+  'ps.amount': { en: 'Your price for a month', ar: 'سعرك للشهر' },
+  'ps.currency': { en: 'Currency', ar: 'العملة' },
+  'ps.cur.SAR': { en: 'SAR', ar: 'ريال' },
+  'ps.cur.USD': { en: 'USD', ar: 'دولار' },
+  'ps.comment': { en: 'Anything to add? (optional)', ar: 'عندك شي تضيفه؟ (اختياري)' },
+  'ps.comment.ph': { en: 'What would make Pro worth it for you?', ar: 'وش اللي يخلي المميّزة تستاهل عندك؟' },
+  'ps.send': { en: 'Send my price', ar: 'أرسل سعري' },
+  'ps.sending': { en: 'Sending…', ar: 'جاري الإرسال…' },
+  'ps.price.SAR': { en: 'SAR {n}', ar: '{n} ريال' },
+  'ps.price.USD': { en: 'USD {n}', ar: '{n} دولار' },
+  'ps.thanks': { en: 'Thanks! You said {price} a month.', ar: 'شكراً! قلت {price} بالشهر.' },
+  'ps.change': { en: 'Change my answer', ar: 'غيّر جوابي' },
+  'ps.private': { en: 'Only we see the answers. Signed in, yours is kept with your account.', ar: 'الأجوبة نشوفها إحنا بس. وإذا كنت مسجّل دخول ينحفظ جوابك مع حسابك.' },
+  'ps.err.amount': { en: 'Type an amount from 0 to 999.', ar: 'اكتب مبلغ من 0 إلى 999.' },
+  'ps.err.failed': { en: "That didn't send. Try again.", ar: 'ما انرسل. جرّب مرة ثانية.' },
+  'ps.err.pace': { en: 'Too many answers from this connection today. Try again tomorrow.', ar: 'وصلتنا أجوبة كثير من هذا الاتصال اليوم. جرّب بكرة.' },
+  'ps.err.full': { en: 'We have all the answers we need. Thank you!', ar: 'وصلتنا كل الأجوبة اللي نحتاجها. شكراً لك!' },
 
   // Club kits on the account, the kit everywhere, the credit line and the
   // supporter badge (the "kit" engineer, 1 Nov 2026). Lazily loaded modules

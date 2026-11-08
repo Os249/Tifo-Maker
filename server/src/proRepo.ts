@@ -15,6 +15,7 @@ import { randomUUID } from 'node:crypto';
 import type pg from 'pg';
 import type { AllowanceKind, PassPlan } from './proPlan';
 import { LEGACY_PAID_PLANS, PAID_PLANS, PASS_PLANS, normalizePlan } from './proPlan';
+import type { PriceCurrency } from './proPrice';
 
 export interface ProPass {
   id: string;
@@ -48,6 +49,36 @@ export interface ProStats {
   notify: number;
 }
 
+/** One answer to "what would you pay for a month of Pro?" (proPrice.ts). */
+export interface PriceAnswer {
+  amount: number;
+  currency: PriceCurrency;
+  lang: 'en' | 'ar';
+  comment: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** An answer as /admin lists it: whose it was, if anyone's. */
+export interface PriceAnswerRow extends PriceAnswer {
+  /** The account that answered; null for a visitor who was signed out (or an account since renamed away). */
+  username: string | null;
+}
+
+export interface PriceAnswerPut {
+  /** proPrice accountVoter() or deviceVoter(). */
+  voter: string;
+  userId: string | null;
+  amount: number;
+  currency: PriceCurrency;
+  lang: 'en' | 'ar';
+  comment: string | null;
+  /** A browser's voter whose answer this one replaces too: answered signed out, then signed in. */
+  absorb: string | null;
+  /** Answers kept at most: a new voter past it is turned away ('full'). */
+  max: number;
+}
+
 export interface ProRepository {
   /**
    * Add `n` to every slot, or to none. ok=false when any slot would pass its
@@ -78,6 +109,16 @@ export interface ProRepository {
   notify(userId: string): Promise<boolean>;
   notified(userId: string): Promise<boolean>;
 
+  /**
+   * Keep a voter's answer to the price question, replacing any earlier one
+   * of theirs (and the absorbed browser's). 'full' when `max` answers are
+   * kept already and this voter has none: nobody's answer is pushed out.
+   */
+  putPriceAnswer(a: PriceAnswerPut): Promise<'saved' | 'full'>;
+  priceAnswer(voter: string): Promise<PriceAnswer | null>;
+  /** Every answer's amount (for the summary) and the newest `limit` in full, newest first. */
+  priceAnswers(limit: number): Promise<{ all: { amount: number; currency: PriceCurrency; account: boolean }[]; newest: PriceAnswerRow[] }>;
+
   stats(now: Date): Promise<ProStats>;
   /** Drop allowance counters nobody has touched for this long. */
   purgeAllowances(before: Date): Promise<number>;
@@ -92,6 +133,11 @@ export class MemoryProRepository implements ProRepository {
   private passes: ProPass[] = [];
   private gifts = new Map<string, ProGift>();
   private notifies = new Set<string>();
+  private prices = new Map<string, PriceAnswer & { userId: string | null; seq: number }>();
+  private priceSeq = 0;
+
+  /** `nameOf` names an account for /admin's list (the memory auth store's usernameOf). */
+  constructor(private readonly nameOf: (userId: string) => string | null = () => null) {}
 
   private ck(userId: string, kind: AllowanceKind, key: string): string {
     return `${userId}|${kind}|${key}`;
@@ -203,6 +249,35 @@ export class MemoryProRepository implements ProRepository {
     return this.notifies.has(userId);
   }
 
+  async putPriceAnswer(a: PriceAnswerPut): Promise<'saved' | 'full'> {
+    const had = this.prices.get(a.voter);
+    const absorbed = a.absorb && a.absorb !== a.voter ? this.prices.get(a.absorb) : undefined;
+    if (!had && !absorbed && this.prices.size >= a.max) return 'full';
+    if (absorbed) this.prices.delete(a.absorb!);
+    const now = new Date().toISOString();
+    this.prices.set(a.voter, {
+      amount: a.amount, currency: a.currency, lang: a.lang, comment: a.comment, userId: a.userId,
+      createdAt: had?.createdAt ?? absorbed?.createdAt ?? now, updatedAt: now, seq: ++this.priceSeq,
+    });
+    return 'saved';
+  }
+
+  async priceAnswer(voter: string): Promise<PriceAnswer | null> {
+    const p = this.prices.get(voter);
+    return p ? { amount: p.amount, currency: p.currency, lang: p.lang, comment: p.comment, createdAt: p.createdAt, updatedAt: p.updatedAt } : null;
+  }
+
+  async priceAnswers(limit: number): Promise<{ all: { amount: number; currency: PriceCurrency; account: boolean }[]; newest: PriceAnswerRow[] }> {
+    const rows = [...this.prices.values()].sort((x, y) => y.seq - x.seq);
+    return {
+      all: rows.map((p) => ({ amount: p.amount, currency: p.currency, account: !!p.userId })),
+      newest: rows.slice(0, limit).map((p) => ({
+        amount: p.amount, currency: p.currency, lang: p.lang, comment: p.comment, createdAt: p.createdAt, updatedAt: p.updatedAt,
+        username: p.userId ? this.nameOf(p.userId) : null,
+      })),
+    };
+  }
+
   async stats(now: Date): Promise<ProStats> {
     const t = now.getTime();
     const live = this.passes.filter((p) => !p.revokedAt && Date.parse(p.startsAt) <= t && Date.parse(p.endsAt) > t);
@@ -257,6 +332,18 @@ function rowToGift(r: Record<string, unknown>): ProGift {
 }
 
 const PASS_COLS = 'id, user_id, plan, starts_at, ends_at, source, created_at, revoked_at';
+
+function rowToPrice(r: Record<string, unknown>): PriceAnswer {
+  return {
+    // NUMERIC arrives as a string ("15.50"): a number again here.
+    amount: Number(r.amount),
+    currency: String(r.currency) as PriceCurrency,
+    lang: r.lang === 'ar' ? 'ar' : 'en',
+    comment: r.comment == null ? null : String(r.comment),
+    createdAt: iso(r.created_at as string)!,
+    updatedAt: iso(r.updated_at as string)!,
+  };
+}
 
 export class PgProRepository implements ProRepository {
   constructor(private readonly pool: pg.Pool) {}
@@ -409,6 +496,64 @@ export class PgProRepository implements ProRepository {
   async notified(userId: string): Promise<boolean> {
     const r = await this.pool.query('SELECT 1 FROM pro_notify WHERE user_id = $1', [userId]);
     return r.rows.length > 0;
+  }
+
+  async putPriceAnswer(a: PriceAnswerPut): Promise<'saved' | 'full'> {
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+      // The browser's answer goes first, so taking it over never meets the ceiling.
+      const absorbed = a.absorb && a.absorb !== a.voter
+        ? await client.query('DELETE FROM pro_price_answers WHERE voter = $1 RETURNING created_at', [a.absorb])
+        : null;
+      const since = absorbed?.rows[0]?.created_at ?? null;
+      // Insert only under the ceiling, or over one's own answer. The count is
+      // not locked: two racing new voters can pass it by one, which is fine
+      // for a ceiling that only exists to stop the table growing for ever.
+      const r = await client.query(
+        `INSERT INTO pro_price_answers (voter, user_id, amount, currency, lang, comment, created_at)
+         SELECT $1, $2, $3, $4, $5, $6, COALESCE($8::timestamptz, now())
+         WHERE (SELECT count(*) FROM pro_price_answers) < $7
+            OR EXISTS (SELECT 1 FROM pro_price_answers WHERE voter = $1)
+         ON CONFLICT (voter) DO UPDATE
+           SET amount = EXCLUDED.amount, currency = EXCLUDED.currency, lang = EXCLUDED.lang,
+               comment = EXCLUDED.comment, user_id = EXCLUDED.user_id, updated_at = now()`,
+        [a.voter, a.userId, a.amount, a.currency, a.lang, a.comment, a.max, since],
+      );
+      if (!r.rowCount) {
+        await client.query('ROLLBACK');
+        return 'full';
+      }
+      await client.query('COMMIT');
+      return 'saved';
+    } catch (e) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw e;
+    } finally {
+      client.release();
+    }
+  }
+
+  async priceAnswer(voter: string): Promise<PriceAnswer | null> {
+    const r = await this.pool.query('SELECT amount, currency, lang, comment, created_at, updated_at FROM pro_price_answers WHERE voter = $1', [voter]);
+    const x = r.rows[0];
+    return x ? rowToPrice(x) : null;
+  }
+
+  async priceAnswers(limit: number): Promise<{ all: { amount: number; currency: PriceCurrency; account: boolean }[]; newest: PriceAnswerRow[] }> {
+    const [all, newest] = await Promise.all([
+      this.pool.query('SELECT amount, currency, user_id IS NOT NULL AS account FROM pro_price_answers'),
+      this.pool.query(
+        `SELECT p.amount, p.currency, p.lang, p.comment, p.created_at, p.updated_at, u.username
+         FROM pro_price_answers p LEFT JOIN users u ON u.id = p.user_id
+         ORDER BY p.updated_at DESC, p.id DESC LIMIT $1`,
+        [limit],
+      ),
+    ]);
+    return {
+      all: all.rows.map((x) => ({ amount: Number(x.amount), currency: x.currency as PriceCurrency, account: !!x.account })),
+      newest: newest.rows.map((x) => ({ ...rowToPrice(x), username: x.username ? String(x.username) : null })),
+    };
   }
 
   async stats(now: Date): Promise<ProStats> {

@@ -2,8 +2,14 @@
  * Pro in the interface: what a person sees and can do, in a real browser
  * against a real server with PRO_MODE=preview.
  *
- *   not on the list  nothing about Pro anywhere: no gift card, no chip, no
- *                    counts, no cut-out button, no mark option, /pro "not open";
+ *   not on the list  nothing about Pro but /pro, a coming-soon page: no gift
+ *                    card, no chip, no counts, no cut-out button, no mark
+ *                    option; /pro shows the plans with no price, asks what
+ *                    a month is worth, and offers "tell me when it opens";
+ *   the price question  signed out (English, desktop) and in Arabic on a
+ *                    phone: the currency by language, Arabic digits, the
+ *                    answer kept and changed, the header link on every
+ *                    public page; the answers on /admin;
  *   on the list      the gift card on My projects ("Later" puts it away); the
  *                    AI panel's counts and the limit card (one blue way on, one
  *                    quiet alternative); the export sheet for the mark; smart
@@ -11,7 +17,8 @@
  *                    back, and costs nothing when it fails); accepting the gift
  *                    (the header chip, the account's plan, the Pro page);
  *   in Arabic        the account's plan and the chip's word;
- *   PRO_MODE off     /pro is a 404 and /api/pro says nothing.
+ *   PRO_MODE off     /pro is still the coming-soon page, and /api/pro says
+ *                    nothing but the plans.
  *
  * Self-contained: it boots its own servers on memory repos. Needs a build:
  *   npm run build && node e2e-pro.mjs
@@ -34,7 +41,10 @@ const boot = (port, env) => {
   s.stderr.on('data', (d) => out.push(String(d)));
   return s;
 };
-const server = boot(PORT, { PRO_MODE: 'preview', PRO_PREVIEW_USERS: 'pro_fan' });
+const ADMIN_PW = 'e2e pro admin password';
+const server = boot(PORT, { PRO_MODE: 'preview', PRO_PREVIEW_USERS: 'pro_fan', AI_ADMIN_PASSWORD: ADMIN_PW });
+/** Whether Pro sells more AI designs and Polishes (server/src/proPlan.ts), as the build the suite runs has it. */
+const AI_ON_PRO = /export const AI_ON_PRO = true;/.test(readFileSync('server/src/proPlan.ts', 'utf8'));
 const serverOff = boot(PORT_OFF, { PRO_MODE: 'off' });
 const stop = () => { for (const s of [server, serverOff]) { try { s.kill(); } catch { /* gone */ } } };
 process.on('exit', stop);
@@ -105,14 +115,21 @@ const PNG = readFileSync('public/apple-touch-icon.png');
 console.log('\n— an account Pro is not on for —');
 {
   const st = await api('/api/pro', other.token);
-  check('/api/pro says only that it is not on', st.status === 200 && JSON.stringify(st.json) === JSON.stringify({ live: false, signedIn: true }), JSON.stringify(st.json));
+  check('/api/pro says it is not on, with only the coming-soon plans', st.status === 200 && st.json.live === false && !!st.json.soon?.limits && !st.json.offer && !/price|SAR/.test(JSON.stringify(st.json)), JSON.stringify(st.json).slice(0, 200));
   const { ctx, p } = await page(other.token);
   await p.goto(`${B}/projects`, { waitUntil: 'networkidle' });
   await p.waitForTimeout(800);
   const pj = await p.evaluate(() => ({ card: !!document.querySelector('.pro-card:not([hidden])'), chip: !!document.querySelector('.pro-head-chip:not([hidden])') }));
   check('My projects: no gift card, no countdown chip', !pj.card && !pj.chip, JSON.stringify(pj));
   await p.goto(`${B}/pro`, { waitUntil: 'networkidle' });
-  check('/pro says Pro is not open, and shows no price', await waitFor(p, () => !document.getElementById('pp-closed').hidden && document.getElementById('pp-open').hidden && !/SAR/.test(document.body.innerText)));
+  check('/pro: coming soon, the two plans, and no price on either', await waitFor(p, () => document.querySelectorAll('.pp-plan').length === 2 && /coming soon/i.test(document.getElementById('pp-h')?.textContent || '') && !/SAR \d|\$\d|USD \d/.test(document.body.innerText)));
+  check('…Free says it is free, Pro asks what it is worth', await p.evaluate(() => /Always free/.test(document.querySelector('#pp-plan-free')?.closest('.pp-plan')?.textContent || '') && !!document.querySelector('#pp-plan-pro')?.closest('.pp-plan')?.querySelector('form#ps-ask #ps-amount')));
+  const notify = p.locator('#pp-act [data-act="notify"]');
+  check('…and an account off the list can ask to be told when it opens, quietly', (await notify.count()) === 1 && await notify.evaluate((b) => b.classList.contains('quiet')));
+  await notify.click();
+  check('…which it can', await waitFor(p, () => /We'll tell you/.test(document.querySelector('#pp-act [data-act="notify"]')?.textContent || '') && /email you/.test(document.getElementById('pp-msg')?.textContent || '')));
+  check('…and the server keeps it', (await api('/api/pro', other.token)).json.notified === true);
+  check('one blue button on the page: Send my price', await p.evaluate(() => [...document.querySelectorAll('main .pp-btn:not(.quiet)')].map((b) => b.textContent).join('|') === 'Send my price'));
   await ctx.close();
   const e = await editor(other.token, other.design);
   await e.p.setInputFiles('#import-file', { name: 'captain.png', mimeType: 'image/png', buffer: PNG });
@@ -166,10 +183,18 @@ console.log('\n— an account on the preview list —');
   await p.click('#ai-generate');
   check('the limit card says what ran out', await waitFor(p, () => /That's all 40 designs for this month/.test(document.querySelector('#ai-state .ai-state-title')?.textContent || '')));
   const acts = await p.evaluate(() => [...document.querySelectorAll('#ai-state .ai-state-actions button')].map((b) => [b.textContent, b.classList.contains('primary')]));
-  // More AI designs are off the Pro list (server/src/proPlan AI_ON_PRO, 1 Nov
-  // 2026): Pro gives no more of them, so running out sells nothing and the
-  // free Quick Designer is the one way on.
-  check('…no Pro and no gift for designs Pro gives no more of: the Quick Designer, alone', acts.length === 1 && acts[0][0] === 'Use the Quick Designer' && acts[0][1] && !/Pro|gift/.test(await p.evaluate(() => document.querySelector('#ai-state')?.textContent || '')), JSON.stringify(acts));
+  if (AI_ON_PRO) {
+    // More AI designs are on the Pro list (server/src/proPlan AI_ON_PRO, back
+    // on 8 Nov 2026): one blue way on (the gift), one quiet alternative.
+    check('…one blue way on (the gift) and one quiet alternative', acts.length === 2 && acts[0][0] === 'Use my Pro gift' && acts[0][1] && acts[1][0] === 'Use the Quick Designer' && !acts[1][1], JSON.stringify(acts));
+    await p.locator('#ai-state .ai-state-actions button').first().click();
+    check('the gift sheet opens from the card, and says when it would end', await waitFor(p, () => /Your 7-day Pro gift/.test(document.querySelector('.pro-sheet h2')?.textContent || '') && !!document.querySelector('.pro-sheet .pro-when')));
+    await p.keyboard.press('Escape');
+    check('Escape closes it without starting anything', await waitFor(p, () => !document.querySelector('.pro-sheet-backdrop')) && (await api('/api/pro', fan.token)).json.gift.state === 'offered');
+  } else {
+    // Off the list, Pro gives no more of them: running out sells nothing.
+    check('…no Pro and no gift for designs Pro gives no more of: the Quick Designer, alone', acts.length === 1 && acts[0][0] === 'Use the Quick Designer' && acts[0][1] && !/Pro|gift/.test(await p.evaluate(() => document.querySelector('#ai-state')?.textContent || '')), JSON.stringify(acts));
+  }
   await p.unroute('**/api/ai/generate');
 
   // The stadium video's mark.
@@ -214,7 +239,9 @@ console.log('\n— an account on the preview list —');
   await waitFor(p, () => !!document.querySelector('.pro-sheet [data-act="start"]'));
   check('the gift sheet says when it would end', !!(await p.$('.pro-sheet .pro-when')));
   const perks = await p.evaluate(() => [...document.querySelectorAll('.pro-sheet .pro-perks li')].map((l) => l.textContent));
-  check('…listing only what Pro adds: the cut-out, clean exports, the video sizes, styles and fonts, the club kit, and no more AI designs or Polishes', perks.length === 5 && perks.some((x) => /cut-out/.test(x)) && perks.some((x) => /any export/.test(x)) && perks.some((x) => /9:16/.test(x)) && perks.some((x) => /Pro fonts/.test(x)) && perks.some((x) => /Club kit/.test(x)) && !perks.some((x) => /AI designs|Polish|limit cards|Super/.test(x)), JSON.stringify(perks));
+  const listed = perks.some((x) => /cut-out/.test(x)) && perks.some((x) => /any export/.test(x)) && perks.some((x) => /9:16/.test(x)) && perks.some((x) => /Pro fonts/.test(x)) && perks.some((x) => /Club kit/.test(x)) && !perks.some((x) => /Super/.test(x));
+  if (AI_ON_PRO) check('…listing all of Pro: more AI and Polishes, the cut-out, clean exports, the video sizes, styles and fonts, the club kit', listed && perks.length === 8 && /More AI designs/.test(perks[0]) && perks.some((x) => /Polish/.test(x)), JSON.stringify(perks));
+  else check('…listing only what Pro adds: the cut-out, clean exports, the video sizes, styles and fonts, the club kit, and no more AI designs or Polishes', listed && perks.length === 5 && !perks.some((x) => /AI designs|Polish|limit cards/.test(x)), JSON.stringify(perks));
   await p.click('.pro-sheet [data-act="start"]');
   check('Start runs the gift', await waitFor(p, () => /Your Pro gift is on/.test(document.querySelector('.pro-sheet h2')?.textContent || '')));
   const st = (await api('/api/pro', fan.token)).json;
@@ -228,24 +255,27 @@ console.log('\n— an account on the preview list —');
     const s = document.getElementById('pro');
     return !!s && !s.hidden && /Pro gift/.test(s.textContent) && /Ends/.test(s.textContent) && s.querySelectorAll('.pro-meter').length === 4 && !/Super/.test(s.textContent);
   }));
-  check('…designs at the free day, since Pro gives no more of them (AI_ON_PRO)', await p.evaluate(() => /10 of 10 designs left today/.test(document.getElementById('pro')?.textContent || '')));
+  const day = AI_ON_PRO ? 15 : 10;
+  check(`…designs at ${AI_ON_PRO ? "Pro's" : 'the free'} day (AI_ON_PRO)`, await p.evaluate((n) => new RegExp(`${n} of ${n} designs left today`).test(document.getElementById('pro')?.textContent || ''), day));
   await p.goto(`${B}/pro`, { waitUntil: 'networkidle' });
-  check('/pro: two plans, and "you have" instead of a button', await waitFor(p, () => document.querySelectorAll('.pp-plan').length === 2 && !document.getElementById('pp-you').hidden && document.getElementById('pp-act').hidden));
+  check('/pro: two plans, and "you have" instead of the notify button', await waitFor(p, () => document.querySelectorAll('.pp-plan').length === 2 && !document.getElementById('pp-you').hidden && document.getElementById('pp-act').hidden));
   const pp = await p.evaluate(() => ({
     pro: document.querySelector('#pp-plan-pro')?.closest('.pp-plan')?.textContent || '',
     free: document.querySelector('#pp-plan-free')?.closest('.pp-plan')?.textContent || '',
     group: !!document.querySelector('.pp-group'),
     over: document.documentElement.scrollWidth - innerWidth,
   }));
-  check('…Pro at SAR 19 a month, with every new perk in its column', /SAR 19 a month/.test(pp.pro) && /30 days of Pro/.test(pp.pro) && ['any export', '9:16', '4K poster', 'Portrait styles', 'Pro fonts', 'LED boards', 'Club kit', 'Supporter crown'].every((w) => pp.pro.includes(w)), pp.pro.slice(0, 400));
-  check('…Free at SAR 0, a cut-out a week, none of Pro\'s perks', /1 a week/.test(pp.free) && /SAR 0/.test(pp.free), pp.free.slice(0, 300));
-  check('…no AI designs or Polish rows: Pro adds none (AI_ON_PRO), but the smart cut-out is there', !/AI designs|Polish/.test(pp.pro + pp.free) && /Smart cut-out/.test(pp.pro));
+  check('…Pro with no price but the question, and every new perk in its column', !/SAR \d|USD \d/.test(pp.pro) && /What would you pay for a month of Pro\?/.test(pp.pro) && /30 days of Pro/.test(pp.pro) && ['any export', '9:16', '4K poster', 'Portrait styles', 'Pro fonts', 'LED boards', 'Club kit', 'Supporter crown'].every((w) => pp.pro.includes(w)), pp.pro.slice(0, 400));
+  check('…Free: always free, a cut-out a week, none of Pro\'s perks', /1 a week/.test(pp.free) && /Always free/.test(pp.free), pp.free.slice(0, 300));
+  if (AI_ON_PRO) check('…AI designs and Polish rows: Free 10 a day and 40 a month, Pro 15 and 70; and the smart cut-out', /10 a day/.test(pp.free) && /40 a month/.test(pp.free) && /15 a day/.test(pp.pro) && /70 a month/.test(pp.pro) && /Polish/.test(pp.pro) && /Smart cut-out/.test(pp.pro));
+  else check('…no AI designs or Polish rows: Pro adds none (AI_ON_PRO), but the smart cut-out is there', !/AI designs|Polish/.test(pp.pro + pp.free) && /Smart cut-out/.test(pp.pro));
   check('…no Match Pass, Season Pass or group band', !/Match Pass|Season Pass/.test(pp.pro + pp.free) && !pp.group);
   await p.setViewportSize({ width: 390, height: 844 });
   await p.waitForTimeout(300);
-  check('…and on a phone the two plans stack, nothing scrolling sideways', await p.evaluate(() => {
-    const [a, b] = [...document.querySelectorAll('.pp-plan')].map((x) => x.getBoundingClientRect());
-    return b.top >= a.bottom - 1 && document.documentElement.scrollWidth <= innerWidth;
+  check('…and on a phone the two plans stack, Pro (with the question) first, nothing scrolling sideways', await p.evaluate(() => {
+    const free = document.querySelector('.pp-plan:not(.pro)').getBoundingClientRect();
+    const pro = document.querySelector('.pp-plan.pro').getBoundingClientRect();
+    return free.top >= pro.bottom - 1 && document.documentElement.scrollWidth <= innerWidth;
   }));
   await ctx.close();
 }
@@ -254,7 +284,7 @@ console.log('\n— an account on the preview list —');
   await p.goto(`${B}/ar/account`, { waitUntil: 'networkidle' });
   check('in Arabic: "باقتك" and the gift\'s name', await waitFor(p, () => { const s = document.getElementById('pro'); return !!s && !s.hidden && /باقتك/.test(s.textContent) && /الهدية المميّزة/.test(s.textContent); }));
   await p.goto(`${B}/ar/pro`, { waitUntil: 'networkidle' });
-  check('/ar/pro: المميّزة بـ19 ريال بالشهر', await waitFor(p, () => /19 ريال بالشهر/.test(document.querySelector('#pp-plan-pro')?.closest('.pp-plan')?.textContent || '') && document.documentElement.dir === 'rtl'));
+  check('/ar/pro: المميّزة قريب، بدون سعر، وتسأل كم تدفع', await waitFor(p, () => /كم تدفع على شهر المميّزة/.test(document.querySelector('#pp-plan-pro')?.closest('.pp-plan')?.textContent || '') && !/\d+ ريال/.test(document.querySelector('#pp-plan-pro')?.closest('.pp-plan')?.textContent || '') && document.documentElement.dir === 'rtl'));
   await p.goto(`${B}/ar/projects`, { waitUntil: 'networkidle' });
   check('…and the chip says مميّز', await waitFor(p, () => /^مميّز · باقي 7 أيام$/.test(document.querySelector('.pro-head-chip:not([hidden])')?.textContent || '')));
   const over = await p.evaluate(() => document.documentElement.scrollWidth - innerWidth);
@@ -263,16 +293,95 @@ console.log('\n— an account on the preview list —');
 }
 
 // =====================================================================
+console.log('\n— the price question —');
+{
+  // Signed out, in English, on a laptop.
+  const { ctx, p } = await page(null);
+  await p.goto(`${B}/pro`, { waitUntil: 'networkidle' });
+  await waitFor(p, () => !!document.getElementById('ps-amount'));
+  check('signed out: the question is there, in dollars for an English page', await p.evaluate(() => document.querySelector('input[name="ps-cur"]:checked')?.value === 'USD'));
+  check('…and "tell me" asks to sign in, quietly', await p.evaluate(() => { const b = document.querySelector('#pp-act [data-act="signin"]'); return !!b && b.classList.contains('quiet') && /Sign in to be told/.test(b.textContent); }));
+  await p.click('#ps-send');
+  check('an empty answer is caught on the page, and said why', await waitFor(p, () => /from 0 to 999/.test(document.getElementById('ps-msg')?.textContent || '') && document.getElementById('ps-amount').getAttribute('aria-invalid') === 'true'));
+  await p.fill('#ps-amount', '12.5');
+  await p.fill('#ps-comment', 'Worth it for the 4K poster');
+  await p.click('#ps-send');
+  check('sent: thanks, with the answer as given', await waitFor(p, () => /^Thanks! You said USD 12\.50 a month\.$/.test(document.querySelector('.ps-thanks')?.textContent || '')));
+  check('…focus on "Change my answer"', await p.evaluate(() => document.activeElement?.classList.contains('ps-change')));
+  check('…this browser keeps its own key for it', await p.evaluate(() => /^[A-Za-z0-9_-]{22,64}$/.test(localStorage.getItem('tifo_price_key_v1') || '')));
+  await p.reload({ waitUntil: 'networkidle' });
+  check('after a reload the answer is still there', await waitFor(p, () => /USD 12\.50/.test(document.querySelector('.ps-thanks')?.textContent || '')));
+  await p.click('.ps-change');
+  check('"Change my answer" brings the form back, filled in', await waitFor(p, () => document.getElementById('ps-amount')?.value === '12.5' && document.getElementById('ps-comment')?.value === 'Worth it for the 4K poster'));
+  await p.click('.ps-cur label:has(input[value="SAR"])');
+  await p.fill('#ps-amount', '15');
+  await p.click('#ps-send');
+  check('…and riyals can be chosen on an English page', await waitFor(p, () => /You said SAR 15 a month/.test(document.querySelector('.ps-thanks')?.textContent || '')));
+  check('no blue button left once answered: thanks and a quiet way to change it', await p.evaluate(() => document.querySelectorAll('main .pp-btn:not(.quiet)').length === 0));
+  check('…nothing scrolling sideways', await p.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+  // The header link, on every public page.
+  for (const path of ['/', '/community', '/clubs', '/projects', '/account', '/pro']) {
+    await p.goto(`${B}${path}`, { waitUntil: 'domcontentloaded' });
+    const link = await p.evaluate(() => { const a = document.querySelector('a[href="/pro"]'); return a ? { text: a.textContent.trim(), crown: !!a.querySelector('.pro-crown'), shown: a.getClientRects().length > 0 } : null; });
+    check(`${path}: "Pro · soon" with its crown in the header`, !!link && link.text === 'Pro · soon' && link.crown && link.shown, JSON.stringify(link));
+  }
+  await ctx.close();
+}
+{
+  // In Arabic, on a phone: riyals first, Arabic digits, the question before the free plan.
+  const { ctx, p } = await page(null, { lang: 'ar', w: 390, h: 844 });
+  await p.goto(`${B}/ar/pro`, { waitUntil: 'networkidle' });
+  await waitFor(p, () => !!document.getElementById('ps-amount'));
+  check('/ar/pro: riyals for an Arabic page', await p.evaluate(() => document.querySelector('input[name="ps-cur"]:checked')?.value === 'SAR'));
+  check('…the Pro card, with the question, comes first on a phone', await p.evaluate(() => document.querySelector('.pp-plan.pro').getBoundingClientRect().top < document.querySelector('.pp-plan:not(.pro)').getBoundingClientRect().top));
+  check('…the free plan says مجانية دايماً', await p.evaluate(() => /مجانية دايماً/.test(document.querySelector('.pp-plan:not(.pro)')?.textContent || '')));
+  await p.fill('#ps-amount', '١٥٫٥');
+  await p.click('#ps-send');
+  check('Arabic digits and the Arabic decimal mark are read: شكراً! قلت 15.50 ريال بالشهر', await waitFor(p, () => /^شكراً! قلت 15\.50 ريال بالشهر\.$/.test(document.querySelector('.ps-thanks')?.textContent || '')));
+  check('…nothing scrolling sideways', await p.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+  await p.goto(`${B}/ar/`, { waitUntil: 'domcontentloaded' });
+  check('the Arabic header says المميّزة · قريباً', await waitFor(p, () => [...document.querySelectorAll('a')].some((a) => /\/pro$/.test(a.getAttribute('href') || '') && a.textContent.trim() === 'المميّزة · قريباً')));
+  await ctx.close();
+}
+{
+  // What a visitor types reaches /admin as text, and the CSV cannot run it.
+  const key = 'e2eXss' + 'x'.repeat(26);
+  await api('/api/pro/price', null, { method: 'POST', body: JSON.stringify({ amount: 7, currency: 'USD', lang: 'en', device: key, comment: '<img src=x onerror="window.__pwned=1">' }) });
+  await api('/api/pro/price', null, { method: 'POST', body: JSON.stringify({ amount: 9, currency: 'SAR', lang: 'ar', device: key.replace('x', 'y'), comment: '=HYPERLINK("http://x","y")' }) });
+  const { ctx, p } = await page(null, { w: 1360, h: 1000 });
+  await p.goto(`${B}/admin`, { waitUntil: 'networkidle' });
+  await p.fill('#p', ADMIN_PW);
+  await p.click('#login-form button');
+  await p.waitForSelector('#tabs .tab', { timeout: 30000 });
+  await p.click('.tab[data-tab="pro"]');
+  // textContent: the section titles are upper-cased by CSS, which innerText would show.
+  check('/admin → Pro: "What would you pay for Pro?" with every answer', await waitFor(p, () => /What would you pay for Pro\?/.test(document.body.textContent) && /4 answers so far/.test(document.body.textContent)));
+  const adm = await p.evaluate(() => ({
+    sar: [...document.querySelectorAll('table tr')].find((tr) => tr.firstElementChild?.textContent === 'SAR')?.textContent || '',
+    pwned: window.__pwned === 1 || !!document.querySelector('img[src="x"]'),
+    typed: document.body.innerText.includes('<img src=x onerror="window.__pwned=1">'),
+    who: document.body.innerText.includes('signed out'),
+  }));
+  check('…a median per currency (SAR: 15, 15.5, 9 → SAR 15)', /SAR 15\b/.test(adm.sar), adm.sar);
+  check('…a comment shows as the text that was typed, never as markup', !adm.pwned && adm.typed, JSON.stringify(adm));
+  check('…a signed-out answer says so', adm.who);
+  const [dl] = await Promise.all([p.waitForEvent('download', { timeout: 20000 }), p.click('#price-csv')]);
+  const csv = readFileSync(await dl.path(), 'utf8');
+  check('the CSV: every answer, Excel-readable Arabic, formulas disarmed', csv.charCodeAt(0) === 0xfeff && csv.split('\r\n').filter(Boolean).length === 5 && csv.includes('"\'=HYPERLINK(""http://x"",""y"")"') && /when_utc,amount,currency,page_language,account,comment/.test(csv), csv.slice(0, 300));
+  await ctx.close();
+}
+
+// =====================================================================
 console.log('\n— PRO_MODE off —');
 {
   const OFF = `http://127.0.0.1:${PORT_OFF}`;
   const r = await fetch(`${OFF}/pro`);
-  check('/pro is a 404', r.status === 404, String(r.status));
+  check('/pro is the coming-soon page, linked from every header', r.status === 200, String(r.status));
   const ar = await fetch(`${OFF}/ar/pro`);
-  check('…in Arabic too', ar.status === 404, String(ar.status));
+  check('…in Arabic too', ar.status === 200, String(ar.status));
   const u = await account('pro_fan', OFF);
   const st = await api('/api/pro', u.token, {}, OFF);
-  check('/api/pro says nothing, even to a name that would be on the list', JSON.stringify(st.json) === JSON.stringify({ live: false, signedIn: true }), JSON.stringify(st.json));
+  check('/api/pro says nothing but the plans, even to a name that would be on the list', st.json.live === false && !!st.json.soon && Object.keys(st.json).sort().join() === 'live,notified,signedIn,soon', JSON.stringify(st.json).slice(0, 200));
   const q = await api('/api/ai/quota', u.token, {}, OFF);
   check('the AI quota is the old hourly one', q.status === 200 && !q.json.live && !q.json.allowances, JSON.stringify(q.json));
 }

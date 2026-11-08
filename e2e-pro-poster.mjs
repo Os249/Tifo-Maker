@@ -99,11 +99,13 @@ const open = async (token, design, { lang = 'en', w = 1440, h = 900, phone = fal
   }, [token, lang, LS]);
   const p = await ctx.newPage();
   p.on('pageerror', (e) => errs.push(`${p.url()}: ${String(e.message).slice(0, 200)}`));
-  await p.goto(`${B}${lang === 'ar' ? '/ar' : ''}/app?project=${design}&e2e=1`, { waitUntil: 'domcontentloaded', timeout: 120000 });
-  await waitFor(p, () => !!window.__tifo, null, 120000);
-  await waitFor(p, () => /wall$/.test(document.getElementById('doc-title')?.value || ''), null, 30000);
   if (kit) {
-    // A club kit, kept as the club kit keeps one (ui/clubKitStore.ts).
+    // A club kit, kept as the club kit keeps one (ui/clubKitStore.ts), put in
+    // this browser BEFORE the editor opens: the editor reads the store, and
+    // moves its kits to the account, once at load, so a kit planted after
+    // that is never seen (and, at the store's old version, crashed the open).
+    // /legal is a page of the same origin that does not open the store.
+    await p.goto(`${B}/legal`, { waitUntil: 'domcontentloaded' });
     await p.evaluate(async () => {
       const c = new OffscreenCanvas(240, 280);
       const g = c.getContext('2d');
@@ -111,8 +113,12 @@ const open = async (token, design, { lang = 'en', w = 1440, h = 900, phone = fal
       g.fillStyle = '#ffffff'; g.fillRect(40, 40, 160, 200);
       const logo = await c.convertToBlob({ type: 'image/png' });
       await new Promise((res, rej) => {
-        const req = indexedDB.open('tifo_club_kits', 1);
-        req.onupgradeneeded = () => { if (!req.result.objectStoreNames.contains('kits')) req.result.createObjectStore('kits'); };
+        // At the store's own version (2 since the kits went on the account), so
+        // this never asks for a lower one than the page has already opened.
+        const req = indexedDB.open('tifo_club_kits', 2);
+        req.onupgradeneeded = () => {
+          for (const store of ['kits', 'acct']) if (!req.result.objectStoreNames.contains(store)) req.result.createObjectStore(store);
+        };
         req.onsuccess = () => {
           const tx = req.result.transaction('kits', 'readwrite');
           tx.objectStore('kits').put({ v: 1, name: 'Al Hilal', colors: ['#0b4ea2', '#ffffff'], logos: [logo], font: 'stencil', at: Date.now() }, 'kqvposter01');
@@ -123,6 +129,9 @@ const open = async (token, design, { lang = 'en', w = 1440, h = 900, phone = fal
       });
     });
   }
+  await p.goto(`${B}${lang === 'ar' ? '/ar' : ''}/app?project=${design}&e2e=1`, { waitUntil: 'domcontentloaded', timeout: 120000 });
+  await waitFor(p, () => !!window.__tifo, null, 120000);
+  await waitFor(p, () => /wall$/.test(document.getElementById('doc-title')?.value || ''), null, 30000);
   await p.waitForTimeout(600);
   return { ctx, p };
 };

@@ -76,6 +76,20 @@ jobs:
       - name: Deployment checks (Node support window, image, CI)
         run: npm run test:deploy
 
+      # Pro: allowances, the gift, the price question, the admin's grants;
+      # the store-level checks run on the Postgres service above.
+      - name: Pro tests (Postgres)
+        run: npm run test:pro
+
+      - name: Club kit tests (Postgres)
+        run: npx tsx server/test/kits.test.mts
+
+      - name: Image tests
+        run: npm run test:images
+
+      - name: Growth server tests
+        run: npm run test:growth-server
+
   security-scan:
     runs-on: ubuntu-latest
     steps:

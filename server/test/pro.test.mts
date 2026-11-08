@@ -25,6 +25,7 @@ import { AI_ON_PRO, CYCLE_DAYS, FREE_WINDOWS, OFFER, PHOTO_ON_PRO, PLAN_WINDOWS,
 import { cutoutConfigured, cutoutForDesign, cutoutPicture, fetchResult, hostAllowed, isPrivateAddress, localCutoutUrl, useLookupForTests } from '../src/cutout';
 import { configWarnings } from '../src/preflight';
 import { kitContext } from '../src/aiRoutes';
+import { GUEST_NEW_PER_DAY, GuestPace, accountVoter, cleanComment, deviceVoter, readPriceInput, summarize } from '../src/proPrice';
 
 const map = generateSeatMap(DEFAULT_TEMPLATE);
 const templates: TemplateInfo[] = [{ id: DEFAULT_TEMPLATE.id, version: DEFAULT_TEMPLATE.version, name: DEFAULT_TEMPLATE.name, seatCount: map.count }];
@@ -254,9 +255,81 @@ async function storePromises(label: string, repo: ProRepository, userA: string, 
   const st = await repo.stats(new Date());
   assert.equal(st.notify, 1);
   assert.equal(st.gifts.accepted, 2);
+
+  // The price question: one answer per voter, replaced when they answer again;
+  // a browser's answer becomes the account's; past the ceiling, nobody new.
+  const key = (c: string) => `${c}${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`.padEnd(30, c).slice(0, 30);
+  const browser = deviceVoter(key('b'));
+  const other = deviceVoter(key('c'));
+  const mine = accountVoter(userA);
+  const put = (voter: string, userId: string | null, amount: number, max = 100_000, absorb: string | null = null) =>
+    repo.putPriceAnswer({ voter, userId, amount, currency: userId ? 'USD' : 'SAR', lang: userId ? 'en' : 'ar', comment: userId ? null : 'store-test', absorb, max });
+  assert.equal(await put(browser, null, 12.5), 'saved');
+  const first = await repo.priceAnswer(browser);
+  assert.deepEqual(first && { amount: first.amount, currency: first.currency, lang: first.lang, comment: first.comment }, { amount: 12.5, currency: 'SAR', lang: 'ar', comment: 'store-test' }, `${label}: kept as given`);
+  assert.equal(await put(browser, null, 15), 'saved');
+  assert.equal((await repo.priceAnswer(browser))?.amount, 15, `${label}: a second answer replaces the first`);
+  assert.equal(await put(mine, userA, 20, 100_000, browser), 'saved');
+  assert.equal(await repo.priceAnswer(browser), null, `${label}: the browser's answer is taken over by the account`);
+  const taken = await repo.priceAnswer(mine);
+  assert.equal(taken?.amount, 20);
+  assert.equal(taken?.createdAt, first?.createdAt, `${label}: and keeps when it was first given`);
+  const total = (await repo.priceAnswers(1)).all.length;
+  assert.equal(await put(other, null, 9, total), 'full', `${label}: at the ceiling a new voter is turned away`);
+  assert.equal(await repo.priceAnswer(other), null);
+  assert.equal(await put(mine, userA, 25, total), 'saved', `${label}: but anyone already in may change their answer`);
+  const listed = await repo.priceAnswers(5);
+  assert.equal(listed.newest[0].amount, 25, `${label}: newest first`);
+  assert.ok(listed.all.some((a) => a.amount === 25 && a.currency === 'USD' && a.account), `${label}: every answer is counted, with whether an account gave it`);
 }
 
 await storePromises('memory', new MemoryProRepository(), 'mem-user-a', 'mem-user-b');
+
+// ---------------------------------------------- 4b. the price question's rules ---
+{
+  const ok = (b: unknown) => readPriceInput(b);
+  const base = { amount: 15, currency: 'SAR', lang: 'ar', device: 'k'.repeat(24) };
+  assert.equal(ok(base).ok, true);
+  assert.equal(ok({ ...base, device: undefined }).ok, true, 'the key is the route\'s business: signed in needs none');
+  for (const bad of [
+    null, 'x', {}, { ...base, amount: -0.01 }, { ...base, amount: 999.01 }, { ...base, amount: '15' }, { ...base, amount: Infinity },
+    { ...base, currency: 'EUR' }, { ...base, currency: 'sar' }, { ...base, lang: 'fr' }, { ...base, lang: undefined },
+    { ...base, comment: 7 }, { ...base, comment: 'x'.repeat(201) }, { ...base, device: 'short' }, { ...base, device: '../../etc/passwd/../..' }, { ...base, device: 12 },
+  ]) assert.equal(ok(bad).ok, false, `refused: ${JSON.stringify(bad)?.slice(0, 80)}`);
+  const r = ok({ ...base, amount: 14.999 });
+  assert.equal(r.ok && r.input.amount, 15, 'rounded to two places');
+  assert.equal(ok({ ...base, amount: 0 }).ok, true, '"nothing" is an answer');
+  assert.equal(ok({ ...base, amount: 999 }).ok, true);
+  // The comment: one clean line, no hidden direction marks, 200 characters at most (counted as characters, not UTF-16 units).
+  assert.deepEqual(cleanComment('  غالي\u202e شوي \n\t\u0000 جداً '), { ok: true, comment: 'غالي شوي جداً' });
+  assert.deepEqual(cleanComment('   '), { ok: true, comment: null }, 'blank is no comment');
+  assert.deepEqual(cleanComment('⚽'.repeat(200)), { ok: true, comment: '⚽'.repeat(200) }, '200 emoji fit, though each is two UTF-16 units');
+  assert.equal(cleanComment('⚽'.repeat(201)).ok, false);
+  // Voters: an account by its id, a browser only by its key's hash.
+  assert.equal(accountVoter('abc'), 'u:abc');
+  assert.match(deviceVoter('k'.repeat(24)), /^d:[0-9a-f]{64}$/);
+  assert.ok(!deviceVoter('k'.repeat(24)).includes('kkkk'), 'the key itself is never kept');
+  // The summary: the median and quartiles as Postgres's percentile_cont, bands per currency.
+  const sum = summarize([
+    { amount: 0, currency: 'SAR', account: false }, { amount: 10, currency: 'SAR', account: true }, { amount: 15, currency: 'SAR', account: true },
+    { amount: 20, currency: 'SAR', account: false }, { amount: 999, currency: 'SAR', account: false }, { amount: 4, currency: 'USD', account: false },
+  ]);
+  assert.deepEqual([sum.SAR.n, sum.SAR.accounts, sum.SAR.median, sum.SAR.p25, sum.SAR.p75, sum.SAR.min, sum.SAR.max, sum.SAR.accountsMedian], [5, 2, 15, 10, 20, 0, 999, 12.5]);
+  assert.equal(sum.SAR.mean, 208.8);
+  // Bands for SAR: 0 | under 5 | 5-10 | 10-15 | 15-20 | 20-30 | 30-50 | 50+
+  assert.deepEqual(sum.SAR.bands, [1, 0, 0, 1, 1, 1, 0, 1]);
+  assert.deepEqual([sum.USD.n, sum.USD.median, sum.USD.accountsMedian], [1, 4, null]);
+  // USD: 0 | under 1 | 1-2 | 2-3 | 3-5 | 5-10 | 10-20 | 20+
+  assert.deepEqual(sum.USD.bands, [0, 0, 0, 0, 1, 0, 0, 0]);
+  // The signed-out pace: per address, per Riyadh day.
+  const pace = new GuestPace(2);
+  const day = new Date('2026-11-08T10:00:00Z');
+  assert.equal(pace.take('1.1.1.1', day), true);
+  assert.equal(pace.take('1.1.1.1', day), true);
+  assert.equal(pace.take('1.1.1.1', day), false, 'the third new answer from one address in a day is refused');
+  assert.equal(pace.take('2.2.2.2', day), true, 'another address is its own');
+  assert.equal(pace.take('1.1.1.1', new Date('2026-11-08T21:00:00Z')), true, 'a new day in Riyadh starts at 21:00 UTC');
+}
 
 // ------------------------------------------------ 5. the routes, end to end ---
 const restoreBase = setEnv({ PRO_MODE: undefined, PRO_PREVIEW_USERS: undefined, AI_CLOUDFLARE_ACCOUNT_ID: undefined, AI_CLOUDFLARE_API_TOKEN: undefined, AI_CUTOUT: undefined });
@@ -264,7 +337,7 @@ const restoreBase = setEnv({ PRO_MODE: undefined, PRO_PREVIEW_USERS: undefined, 
   const auth = new MemoryAuthRepository();
   const designs = new MemoryDesignRepository((id) => auth.usernameOf(id));
   const social = new MemorySocialRepository(designs, auth);
-  const proRepo = new MemoryProRepository();
+  const proRepo = new MemoryProRepository((id) => auth.usernameOf(id));
   const app = await buildApp(designs, auth, templates, {
     social, leads: new MemoryLeadsRepository(), aiUsage: new MemoryAiUsageRepository(),
     aiEvents: new MemoryAiEventsRepository((id) => auth.usernameOf(id)),
@@ -287,16 +360,23 @@ const restoreBase = setEnv({ PRO_MODE: undefined, PRO_PREVIEW_USERS: undefined, 
 
   const get = (token?: string) => app.inject({ method: 'GET', url: '/api/pro', ...(token ? { headers: bearer(token) } : {}) });
 
-  // Off: nothing at all, signed in or out.
-  assert.deepEqual((await get()).json(), { live: false, signedIn: false });
-  assert.deepEqual((await get(fan.token)).json(), { live: false, signedIn: true }, 'off: not even a hint of Pro');
+  // Off: Pro is not on for anyone, so everyone sees the coming-soon plans:
+  // the allowances, and no price.
+  const soonOut = (await get()).json() as Record<string, any>;
+  assert.deepEqual(Object.keys(soonOut).sort(), ['live', 'signedIn', 'soon']);
+  assert.equal(soonOut.live, false);
+  assert.deepEqual(soonOut.soon.limits.free.std, FREE_WINDOWS.std, 'the free plan the server applies');
+  assert.deepEqual(soonOut.soon.limits.pro.cutout, [{ period: 'day', limit: 5 }, { period: 'month', limit: 15 }]);
+  assert.deepEqual(soonOut.soon.gift, { days: 7 });
+  assert.ok(!/price|SAR|paymentsOpen/.test(JSON.stringify(soonOut)), 'no price anywhere');
+  assert.deepEqual((await get(fan.token)).json(), { live: false, signedIn: true, soon: soonOut.soon, notified: false }, 'off: the same plans, and whether they asked to be told');
   assert.equal((await app.inject({ method: 'POST', url: '/api/pro/gift/accept', headers: bearer(fan.token) })).statusCode, 404, 'off: the gift route is not there');
   assert.equal((await app.inject({ method: 'POST', url: '/api/ai/cutout', headers: bearer(fan.token), payload: { image: pngUrl() } })).statusCode, 404, 'off: the cut-out is not there');
 
   // Preview: only the named account.
   let restore = setEnv({ PRO_MODE: 'preview', PRO_PREVIEW_USERS: 'fan_pro,unverified_pro,throwaway_pro,nodesign_pro' });
-  assert.deepEqual((await get()).json(), { live: false, signedIn: false }, 'preview: signed out sees nothing');
-  assert.deepEqual((await get(other.token)).json(), { live: false, signedIn: true }, 'preview: an account not on the list sees nothing');
+  assert.deepEqual((await get()).json(), { live: false, signedIn: false, soon: soonOut.soon }, 'preview: signed out sees the coming-soon plans');
+  assert.deepEqual((await get(other.token)).json(), { live: false, signedIn: true, soon: soonOut.soon, notified: false }, 'preview: an account not on the list sees the same, nothing about the preview');
   const mine = (await get(fan.token)).json() as Record<string, any>;
   assert.equal(mine.live, true);
   assert.equal(mine.plan, 'free');
@@ -314,6 +394,7 @@ const restoreBase = setEnv({ PRO_MODE: undefined, PRO_PREVIEW_USERS: undefined, 
   assert.deepEqual(mine.offer.limits.pro.cutout, [{ period: 'day', limit: 5 }, { period: 'month', limit: 15 }], "a pass's own month reads as a month");
   assert.deepEqual(mine.offer.limits.pro.std, AI_ON_PRO ? [{ period: 'day', limit: 15 }, { period: 'month', limit: 70 }] : FREE_WINDOWS.std, 'designs: what the plan gives');
   assert.deepEqual(Object.keys(mine.offer.limits), ['free', 'pro'], 'two columns: Free against Pro');
+  assert.deepEqual(mine.soon, soonOut.soon, 'the coming-soon plans are the same for an account in the preview');
   assert.equal((await get(unverified.token)).json().gift.state, 'none', 'an unverified email gets no gift');
   assert.equal((await get(throwaway.token)).json().gift.state, 'none', 'a throwaway address gets no gift');
   assert.equal((await get(noDesign.token)).json().gift.state, 'none', 'no saved design yet, no gift yet');
@@ -337,11 +418,65 @@ const restoreBase = setEnv({ PRO_MODE: undefined, PRO_PREVIEW_USERS: undefined, 
   assert.equal(twice.statusCode, 409, 'the gift is accepted once');
   assert.equal((twice.json() as { reason: string }).reason, 'used');
 
-  // Notify: once each, signed in only.
+  // Notify: once each, signed in only, any account (the coming-soon page offers it to everyone).
   assert.equal((await app.inject({ method: 'POST', url: '/api/pro/notify' })).statusCode, 401);
   assert.deepEqual((await app.inject({ method: 'POST', url: '/api/pro/notify', headers: bearer(fan.token) })).json(), { ok: true, already: false });
   assert.deepEqual((await app.inject({ method: 'POST', url: '/api/pro/notify', headers: bearer(fan.token) })).json(), { ok: true, already: true });
-  assert.equal((await app.inject({ method: 'POST', url: '/api/pro/notify', headers: bearer(other.token) })).statusCode, 404, 'outside the preview, nothing to ask about');
+  assert.deepEqual((await app.inject({ method: 'POST', url: '/api/pro/notify', headers: bearer(other.token) })).json(), { ok: true, already: false }, 'outside the preview too');
+  assert.equal((await get(other.token)).json().notified, true, '…and /api/pro says so');
+
+  // The price question: anyone, signed in or out, one answer each.
+  const price = (payload: unknown, headers: Record<string, string> = {}, ip = '10.9.0.1') =>
+    app.inject({ method: 'POST', url: '/api/pro/price', headers, payload: payload as object, remoteAddress: ip });
+  const priceOf = (headers: Record<string, string>) => app.inject({ method: 'GET', url: '/api/pro/price', headers }).then((r) => r.json());
+  const prices = () => app.inject({ method: 'GET', url: '/api/admin/pro/prices', headers: { 'x-ai-unlock': unlock } }).then((r) => r.json() as Record<string, any>);
+  const key1 = 'a'.repeat(32);
+  assert.equal((await price({ amount: 15, currency: 'SAR', lang: 'ar' })).statusCode, 400, 'signed out, a browser key is needed');
+  assert.equal((await price({ amount: 15, currency: 'EUR', lang: 'ar', device: key1 })).statusCode, 400, 'only riyals and dollars');
+  assert.equal((await price({ amount: 1e6, currency: 'SAR', lang: 'ar', device: key1 })).statusCode, 400);
+  assert.equal((await price('15', { 'content-type': 'text/plain' })).statusCode, 400, 'a form post from another site carries no JSON');
+  const g1 = await price({ amount: 14.999, currency: 'SAR', lang: 'ar', comment: '  غالي\u202e شوي \n ', device: key1 });
+  assert.equal(g1.statusCode, 200, g1.body);
+  assert.deepEqual(g1.json().answer, { amount: 15, currency: 'SAR', comment: 'غالي شوي' }, 'rounded to halalas, the comment one clean line');
+  const again = await app.inject({ method: 'GET', url: '/api/pro/price', headers: { 'x-price-device': key1 } });
+  assert.deepEqual(again.json(), { answer: { amount: 15, currency: 'SAR', comment: 'غالي شوي' } }, 'the browser sees its answer again');
+  assert.equal(again.headers['cache-control'], 'no-store');
+  assert.deepEqual(await priceOf({}), { answer: null }, 'no key, no answer');
+  assert.deepEqual(await priceOf({ 'x-price-device': 'b'.repeat(32) }), { answer: null }, "another browser sees nothing of this one's");
+  await price({ amount: 10, currency: 'USD', lang: 'en', device: key1 });
+  let seen = await prices();
+  assert.equal(seen.total, 1, 'answering again replaces the first');
+  assert.deepEqual({ ...seen.rows[0], at: undefined }, { at: undefined, amount: 10, currency: 'USD', lang: 'en', username: null, comment: null });
+  // Signing in: the account answers, and this browser's answer becomes the account's.
+  const acct = await price({ amount: 19, currency: 'SAR', lang: 'ar', device: key1 }, bearer(other.token));
+  assert.equal(acct.statusCode, 200);
+  seen = await prices();
+  assert.equal(seen.total, 1, 'one answer, not two');
+  assert.equal(seen.rows[0].username, 'other_pro', 'named by its account');
+  assert.equal(seen.rows[0].amount, 19);
+  assert.deepEqual(await priceOf(bearer(other.token)), { answer: { amount: 19, currency: 'SAR', comment: null } });
+  // Another account, no browser key; "nothing" and a formula-shaped comment are just answers.
+  assert.equal((await price({ amount: 0, currency: 'USD', lang: 'en', comment: '=HYPERLINK("http://x")' }, bearer(fan.token))).statusCode, 200);
+  seen = await prices();
+  assert.equal(seen.total, 2);
+  assert.deepEqual([seen.summary.SAR.n, seen.summary.SAR.accounts, seen.summary.SAR.median, seen.summary.USD.n, seen.summary.USD.median], [1, 1, 19, 1, 0]);
+  assert.equal(seen.rows[0].comment, '=HYPERLINK("http://x")', 'kept as typed: /admin escapes it and the CSV disarms it');
+  assert.deepEqual(seen.bands, { SAR: [5, 10, 15, 20, 30, 50], USD: [1, 2, 3, 5, 10, 20] });
+  // Only the admin reads them.
+  for (const headers of [undefined, bearer(fan.token)]) {
+    assert.equal((await app.inject({ method: 'GET', url: '/api/admin/pro/prices', ...(headers ? { headers } : {}) })).statusCode, 403);
+  }
+  // Signed out, new answers from one address are paced by the day; changing one's own is not.
+  const keyN = (i: number) => `p${String(i).padStart(31, '0')}`;
+  for (let i = 0; i < GUEST_NEW_PER_DAY; i++) assert.equal((await price({ amount: 5, currency: 'SAR', lang: 'ar', device: keyN(i) }, {}, '10.9.0.77')).statusCode, 200, `new answer ${i + 1}`);
+  const paced = await price({ amount: 5, currency: 'SAR', lang: 'ar', device: keyN(99) }, {}, '10.9.0.77');
+  assert.equal(paced.statusCode, 429, 'one more new browser from the same address today is refused');
+  assert.equal(paced.json().reason, 'pace');
+  assert.equal((await price({ amount: 6, currency: 'SAR', lang: 'ar', device: keyN(0) }, {}, '10.9.0.77')).statusCode, 200, 'changing an answer already given still works');
+  assert.equal((await price({ amount: 6, currency: 'SAR', lang: 'ar', device: keyN(99) }, {}, '10.9.0.78')).statusCode, 200, 'another address is its own');
+  // The account's own copy of its data has its answer.
+  const exported = (await app.inject({ method: 'GET', url: '/api/account/export', headers: bearer(other.token) })).json() as Record<string, any>;
+  assert.deepEqual({ ...exported.pro.priceAnswer, at: undefined }, { amount: 19, currency: 'SAR', comment: null, at: undefined });
 
   // Admin: closed to everyone else, validated, audited.
   for (const headers of [undefined, bearer(fan.token)]) {
@@ -730,14 +865,25 @@ if (process.env.DATABASE_URL) {
       )).rows[0].id);
     const a = await mk(`pro_pg_a_${Date.now()}`);
     const b = await mk(`pro_pg_b_${Date.now()}`);
-    await storePromises('postgres', new PgProRepository(pool), a, b);
+    const pgRepo = new PgProRepository(pool);
+    await storePromises('postgres', pgRepo, a, b);
+    // The admin's list names the account from the users table.
+    const named = (await pgRepo.priceAnswers(10)).newest.find((r) => r.amount === 25 && r.currency === 'USD');
+    assert.match(named?.username ?? '', /^pro_pg_a_/, 'an answer is named by its account');
+    // The table refuses what the routes never send.
+    await assert.rejects(pool.query(`INSERT INTO pro_price_answers (voter, amount, currency, lang) VALUES ('x', 1, 'SAR', 'en')`), 'a voter that is neither an account nor a hash');
+    await assert.rejects(pool.query(`INSERT INTO pro_price_answers (voter, amount, currency, lang) VALUES ($1, 1000, 'SAR', 'en')`, [`d:${'0'.repeat(64)}`]), 'an amount past 999');
+    await assert.rejects(pool.query(`INSERT INTO pro_price_answers (voter, amount, currency, lang) VALUES ($1, 1, 'EUR', 'en')`, [`d:${'0'.repeat(64)}`]), 'another currency');
+    await assert.rejects(pool.query(`INSERT INTO pro_price_answers (voter, amount, currency, lang, comment) VALUES ($1, 1, 'SAR', 'en', $2)`, [`d:${'0'.repeat(64)}`, 'x'.repeat(201)]), 'a comment past 200');
+    await pool.query(`DELETE FROM pro_price_answers WHERE user_id IS NULL AND comment = 'store-test'`);
     // Deleting an account takes its Pro rows with it.
     await pool.query('DELETE FROM users WHERE id = ANY($1::uuid[])', [[a, b]]);
     const left = await pool.query(
       `SELECT (SELECT count(*) FROM pro_passes WHERE user_id = ANY($1::uuid[]))
             + (SELECT count(*) FROM pro_gifts WHERE user_id = ANY($1::uuid[]))
             + (SELECT count(*) FROM pro_allowance WHERE user_id = ANY($1::uuid[]))
-            + (SELECT count(*) FROM pro_notify WHERE user_id = ANY($1::uuid[])) AS n`,
+            + (SELECT count(*) FROM pro_notify WHERE user_id = ANY($1::uuid[]))
+            + (SELECT count(*) FROM pro_price_answers WHERE user_id = ANY($1::uuid[])) AS n`,
       [[a, b]],
     );
     assert.equal(Number(left.rows[0].n), 0, 'an erased account leaves no Pro rows');

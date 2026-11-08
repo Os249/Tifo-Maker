@@ -450,11 +450,13 @@ async function loadAll(){
     api('/api/admin/email'),
     api('/api/admin/soc'),
     api('/api/admin/queue'),
-    api('/api/admin/pro')
+    api('/api/admin/pro'),
+    api('/api/admin/pro/prices')
   ]);
   var ov = results[0], tr = results[1], fn = results[2], sh = results[3], fb = results[4], ai = results[5], em = results[6], sc = results[7];
   QUEUE = results[8].ok && results[8].data ? results[8].data : { error: results[8].status };
   PRO = results[9].ok && results[9].data ? results[9].data : { error: results[9].status };
+  PRICES = results[10].ok && results[10].data ? results[10].data : { error: results[10].status };
   if (!ov.ok){
     if (ov.status === 403){ clearUnlock(); showLogin('Wrong or expired password. Sign in again.'); return; }
     setStatus('Failed to load (' + ov.status + ').');
@@ -659,9 +661,10 @@ var FUNNEL_STEP = {
   ai_cta:         ['Pressed Generate with AI','on the Projects page'],
   ai_bar:         ['Asked the AI from the canvas bar','in the editor'],
   template_cta:   ['Pressed Use as template','on the home page'],
-  pro_viewed:     ['Opened the Pro page','while Pro is on for them'],
+  pro_viewed:     ['Opened the Pro page','coming soon, with the price question'],
   pro_limit:      ['Met a Pro limit card','an allowance used up'],
   pro_notify:     ['Asked to hear when Pro opens','one per account'],
+  pro_price:      ['Said what Pro is worth','answered the price question'],
   gift_accepted:  ['Accepted the 7-day gift','Pro for 7 days'],
   cutout_used:    ['Got a smart cut-out','a picture lifted out'],
   export_sheet:   ['Saw the export sheet','their tifo had Pro items'],
@@ -1800,12 +1803,14 @@ function proTab(){
   if (PRO.mode === 'preview' && !PRO.previewUsers) html += '<div class="callout warn"><b>Preview with nobody in it.</b> Set PRO_PREVIEW_USERS to your username (comma-separated for more) and redeploy.</div>';
   if (!PRO.throwawayList || !PRO.throwawayList.loaded) html += '<div class="callout bad"><b>The throwaway email list did not load</b>, so no gifts are offered. ' + esc((PRO.throwawayList && PRO.throwawayList.error) || '') + '</div>';
   if (!PRO.cutoutConfigured) html += '<div class="callout warn"><b>Smart cut-out has no provider.</b> It uses AI_CLOUDFLARE_ACCOUNT_ID and AI_CLOUDFLARE_API_TOKEN (the picture backup\\'s). Until both are set, the cut-out button says it is not available.</div>';
-  if (!PRO.paymentsOpen) html += '<div class="callout"><b>Payments are not open.</b> Buy buttons ask to be told when Pro opens; the count is below.</div>';
+  if (!PRO.paymentsOpen) html += '<div class="callout"><b>Payments are not open.</b> /pro is a coming-soon page: it shows no price, asks what a month is worth, and offers "Tell me when Pro opens". The answers and the count are below.</div>';
   html += '<div class="grid">';
   html += kpi('Gifts offered', st.gifts.offered || 0, fmt(st.gifts.accepted || 0) + ' accepted, ' + fmt(st.gifts.active || 0) + ' running now', true);
   html += kpi('Pro monthly now', (st.passes && st.passes.monthly) || 0, 'bought or given by hand', true);
   html += kpi('Asked to hear when Pro opens', st.notify || 0, 'one per account', true);
+  html += kpi('Said what Pro is worth', (PRICES && PRICES.total) || 0, 'on the coming-soon page', true);
   html += '</div>';
+  html += pricesHtml();
 
   html += '<h2 class="sec">An account</h2>';
   html += '<p class="note"><label>Username <input id="pro-user" type="text" autocomplete="off" spellcheck="false" maxlength="32" value="' + esc(PRO_LOOKUP || '') + '"></label> '
@@ -1842,11 +1847,112 @@ function proTab(){
   return html;
 }
 async function proReload(){
-  var r = await api('/api/admin/pro' + (PRO_LOOKUP ? '?username=' + encodeURIComponent(PRO_LOOKUP) : ''));
-  PRO = r.ok && r.data ? r.data : { error: r.status };
+  var both = await Promise.all([
+    api('/api/admin/pro' + (PRO_LOOKUP ? '?username=' + encodeURIComponent(PRO_LOOKUP) : '')),
+    api('/api/admin/pro/prices')
+  ]);
+  PRO = both[0].ok && both[0].data ? both[0].data : { error: both[0].status };
+  PRICES = both[1].ok && both[1].data ? both[1].data : { error: both[1].status };
   paintSection();
 }
+
+/* ---- "What would you pay for Pro?": the answers from the coming-soon /pro ----
+   Every value here was typed by a visitor: all of it goes through esc(), and
+   the CSV guards cells a spreadsheet would run as a formula. */
+var PRICES = null;
+var PRICE_CUR = ['SAR', 'USD'];
+function priceText(n, cur){
+  n = Number(n) || 0;
+  return cur + ' ' + (n % 1 ? n.toFixed(2) : String(n));
+}
+/* The bands' names, from the edges the server counted by: 0, under the first edge, then up to each, then the last and above. */
+function bandNames(edges){
+  var out = ['nothing (0)', 'under ' + edges[0]];
+  for (var i = 1; i < edges.length; i++) out.push(edges[i - 1] + ' to under ' + edges[i]);
+  out.push(edges[edges.length - 1] + ' and over');
+  return out;
+}
+function pricesHtml(){
+  var html = '<h2 class="sec">What would you pay for Pro?</h2>';
+  if (!PRICES || PRICES.error){
+    return html + '<div class="callout bad"><b>Could not load the answers.</b> HTTP ' + esc(String((PRICES && PRICES.error) || '?')) + '</div>';
+  }
+  html += '<p class="note">Asked on /pro while Pro is not on sale, in riyals or US dollars (the page starts in riyals in Arabic, dollars in English). One answer per account, or per browser for a visitor who is signed out; answering again replaces the first. '
+        + fmt(PRICES.total) + ' answer' + (PRICES.total === 1 ? '' : 's') + ' so far (at most ' + fmt(PRICES.max) + ' are kept).</p>';
+  if (!PRICES.total) return html + '<p class="empty">No answers yet.</p>';
+  html += '<table class="tbl"><thead><tr><th>Currency</th><th>Answers</th><th>From accounts</th><th>Median</th><th>Middle half</th><th>Average</th><th>Lowest</th><th>Highest</th><th>Median, accounts only</th></tr></thead><tbody>';
+  for (var c = 0; c < PRICE_CUR.length; c++){
+    var cur = PRICE_CUR[c], s = PRICES.summary && PRICES.summary[cur];
+    if (!s) continue;
+    if (!s.n){ html += '<tr><td>' + cur + '</td><td>0</td><td colspan="7" class="dim">no answers in ' + cur + '</td></tr>'; continue; }
+    html += '<tr><td>' + cur + '</td><td>' + fmt(s.n) + '</td><td>' + fmt(s.accounts) + '</td><td><b>' + esc(priceText(s.median, cur)) + '</b></td><td>'
+      + esc(priceText(s.p25, cur)) + ' to ' + esc(priceText(s.p75, cur)) + '</td><td>' + esc(priceText(s.mean, cur)) + '</td><td>' + esc(priceText(s.min, cur)) + '</td><td>'
+      + esc(priceText(s.max, cur)) + '</td><td>' + (s.accountsMedian == null ? '<span class="dim">none yet</span>' : esc(priceText(s.accountsMedian, cur))) + '</td></tr>';
+  }
+  html += '</tbody></table>';
+  html += '<p class="note">The median is the middle answer, and the middle half is where the central 50% of answers fall: both shrug off a joke answer of 999 that would pull the average. Answers from accounts are harder to repeat than signed-out ones.</p>';
+
+  html += '<div class="grid two">';
+  for (c = 0; c < PRICE_CUR.length; c++){
+    cur = PRICE_CUR[c]; s = PRICES.summary && PRICES.summary[cur];
+    if (!s || !s.n || !PRICES.bands || !PRICES.bands[cur]) continue;
+    var names = bandNames(PRICES.bands[cur]), top = 1;
+    for (var b = 0; b < s.bands.length; b++) if (s.bands[b] > top) top = s.bands[b];
+    html += '<div class="card"><p class="lt">Where the ' + cur + ' answers fall</p><p class="lc">' + fmt(s.n) + ' answers, in ' + cur + ' a month</p>';
+    for (b = 0; b < s.bands.length; b++){
+      html += '<div class="frow"><div class="flab">' + esc(names[b]) + '</div><div class="fbar"><div class="ffill" style="width:' + (s.bands[b] / top * 100).toFixed(1) + '%"></div></div><div class="fnum">' + fmt(s.bands[b]) + '</div></div>';
+    }
+    html += '</div>';
+  }
+  html += '</div>';
+
+  var rows = PRICES.rows || [];
+  html += '<h2 class="sec">Every answer, newest first <button id="price-csv" type="button">Download all as CSV</button></h2>';
+  html += '<p id="price-csv-out" class="note" role="status" aria-live="polite"></p>';
+  html += '<table class="tbl"><thead><tr><th>When (UTC)</th><th>Price a month</th><th>Who</th><th>Page</th><th>Comment</th></tr></thead><tbody>';
+  for (var i = 0; i < rows.length; i++){
+    var r = rows[i];
+    html += '<tr><td>' + esc(String(r.at || '').slice(0, 16).replace('T', ' ')) + '</td><td><b>' + esc(priceText(r.amount, r.currency)) + '</b></td><td>'
+      + (r.username ? '@' + esc(r.username) : '<span class="dim">signed out</span>') + '</td><td>' + (r.lang === 'ar' ? 'Arabic' : 'English') + '</td><td>'
+      + (r.comment ? '<bdi>' + esc(r.comment) + '</bdi>' : '<span class="dim">none</span>') + '</td></tr>';
+  }
+  html += '</tbody></table>';
+  if (PRICES.total > rows.length) html += '<p class="note">The newest ' + fmt(rows.length) + ' are listed here; the CSV has all ' + fmt(PRICES.total) + '.</p>';
+  return html;
+}
+/* One CSV cell: quoted, and a leading = + - @ (or a tab or return) disarmed so a spreadsheet shows it as text. */
+function csvCell(v){
+  var s = String(v == null ? '' : v);
+  var c0 = s.charAt(0);
+  if (c0 === '=' || c0 === '+' || c0 === '-' || c0 === '@' || s.charCodeAt(0) === 9 || s.charCodeAt(0) === 13) s = "'" + s;
+  return '"' + s.replace(/"/g, '""') + '"';
+}
+async function downloadPricesCsv(){
+  var out = el('price-csv-out');
+  out.textContent = 'Fetching every answer...';
+  var r = await api('/api/admin/pro/prices?all=1');
+  if (!r.ok || !r.data){ out.textContent = 'Could not fetch them (HTTP ' + r.status + ').'; return; }
+  var NL = String.fromCharCode(13, 10);
+  var lines = ['when_utc,amount,currency,page_language,account,comment'];
+  var rows = r.data.rows || [];
+  for (var i = 0; i < rows.length; i++){
+    var x = rows[i];
+    lines.push([csvCell(x.at), csvCell(x.amount), csvCell(x.currency), csvCell(x.lang), csvCell(x.username ? '@' + x.username : ''), csvCell(x.comment || '')].join(','));
+  }
+  /* The byte-order mark makes Excel read the Arabic comments as UTF-8. */
+  var blob = new Blob([String.fromCharCode(65279) + lines.join(NL) + NL], { type: 'text/csv;charset=utf-8' });
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'tifomaker-pro-price-answers-' + new Date().toISOString().slice(0, 10) + '.csv';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(function(){ URL.revokeObjectURL(a.href); }, 10000);
+  out.textContent = 'Downloaded ' + fmt(rows.length) + ' answer' + (rows.length === 1 ? '' : 's') + '.';
+}
 function wirePro(){
+  var csv = el('price-csv');
+  if (csv) csv.addEventListener('click', function(){ void downloadPricesCsv(); });
   var find = el('pro-find');
   if (find) find.addEventListener('click', function(){ PRO_LOOKUP = (el('pro-user').value || '').trim().replace(/^@/, ''); proReload(); });
   var grant = el('pro-grant');

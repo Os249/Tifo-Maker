@@ -116,8 +116,12 @@ export const PHOTO_ON_PRO = false;
  * get the free allowances, /pro and the Pro sheets do not offer them, and
  * the AI panel does not sell Pro when one runs out. The AI itself stays,
  * free, for everyone. true puts them back on sale at the ceilings below.
+ *
+ * Back on the list on 8 Nov 2026, Osamh's decision: Pro holders get more
+ * designs and Polishes (the ceilings below), /pro and the Pro sheets list
+ * them again, and running out offers Pro or the gift.
  */
-export const AI_ON_PRO = false;
+export const AI_ON_PRO = true;
 
 const PRO_WINDOWS: Record<AllowanceKind, Window[]> = {
   std: AI_ON_PRO ? [{ period: 'day', limit: 15 }, { period: 'cycle', limit: 70 }] : FREE_WINDOWS.std,

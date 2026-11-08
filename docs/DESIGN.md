@@ -218,7 +218,14 @@ One title, one sentence, one blue action, at most one quiet alternative.
   export, has English and Saudi Arabic words that load only with it, and has
   checks in a browser suite (`e2e-pro*.mjs`).
 - **Everything shown comes from `/api/pro`.** The interface decides nothing;
-  with `PRO_MODE=off` none of it appears.
+  with `PRO_MODE=off` none of it appears, except /pro itself.
+- **Coming soon** (8 Nov 2026, until payments open): /pro shows Free ("Always
+  free") against Pro with no price; Pro's card asks "What would you pay for a
+  month of Pro?" (riyals or dollars, the page's language choosing first; an
+  optional comment), and "Send my price" is the page's one blue button.
+  "Tell me when Pro opens" sits below it, quiet. Every public header carries
+  "♛ Pro · soon" / "♛ المميّزة · قريباً" (`.nav-pro`: the gold crown, the
+  link's ink). The answers are on /admin → Pro.
 
 ## 8. Words
 

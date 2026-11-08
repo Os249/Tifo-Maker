@@ -647,3 +647,23 @@ CREATE TABLE IF NOT EXISTS pro_credit_lines (
   text       TEXT NOT NULL CHECK (char_length(text) BETWEEN 1 AND 32),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- "What would you pay for a month of Pro?" (8 Nov 2026; server/src/proPrice.ts).
+-- While Pro is not on sale, /pro asks every visitor instead of showing a
+-- price. One answer per voter, replaced when they answer again: an account
+-- ('u:' and its id) or a signed-out browser ('d:' and the SHA-256 of the
+-- random key the page keeps in localStorage; the key itself is never kept).
+-- An account's answer goes with the account. Each statement is safe to run
+-- again.
+CREATE TABLE IF NOT EXISTS pro_price_answers (
+  id         BIGSERIAL PRIMARY KEY,
+  voter      TEXT NOT NULL UNIQUE CHECK (voter ~ '^(u:[0-9a-f-]{36}|d:[0-9a-f]{64})$'),
+  user_id    UUID REFERENCES users(id) ON DELETE CASCADE,
+  amount     NUMERIC(8,2) NOT NULL CHECK (amount >= 0 AND amount <= 999),
+  currency   TEXT NOT NULL CHECK (currency IN ('SAR', 'USD')),
+  lang       TEXT NOT NULL CHECK (lang IN ('en', 'ar')),
+  comment    TEXT CHECK (comment IS NULL OR char_length(comment) BETWEEN 1 AND 200),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS pro_price_answers_updated ON pro_price_answers (updated_at DESC);

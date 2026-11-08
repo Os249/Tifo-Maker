@@ -155,7 +155,9 @@ console.log('\n— Match Day on the Jewel: the screens —');
   check('there is a Stadium screens section', !!shown);
   const heading = sec ? await sec.$eval('.mds-shead', (h) => h.textContent.trim()) : '';
   check('called "Stadium screens"', heading === 'Stadium screens', heading);
-  const opts = await p.$$eval('[data-k="screen-mode"] option', (o) => o.map((x) => x.value).join(','));
+  // What is offered: the options a fan can pick. "Your LED boards" (Pro, 2 Nov
+  // 2026) is in the list too, hidden and disabled unless Pro is on for them.
+  const opts = await p.$$eval('[data-k="screen-mode"] option', (o) => o.filter((x) => !x.hidden && !x.disabled).map((x) => x.value).join(','));
   check('it offers the name, the live tifo and your own image', opts === 'stadium,tifo,image', opts);
   const shots = await p.$$eval('.mds-bar select option, .mds-panel select option', (o) => o.map((x) => x.textContent));
   check('the camera offers the royal box and a vehicle ramp', shots.includes('Royal Box') && shots.includes('Vehicle Ramp'));

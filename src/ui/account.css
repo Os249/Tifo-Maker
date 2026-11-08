@@ -53,6 +53,18 @@ body {
 .ac-brand b { color: var(--maker); }
 .ac-back { color: var(--ac-blue); text-decoration: none; font-size: 14px; }
 .ac-back:hover { text-decoration: underline; }
+/* Skip link: invisible until focused, like every public page's. The account
+   page never had the rule, so its link sat in plain sight above the header. */
+.skip-link {
+  position: absolute; inset-inline-start: 0; top: 0; z-index: var(--z-toast);
+  width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap;
+  background: var(--invert); color: var(--invert-ink); border-end-end-radius: var(--r-sm);
+  padding: var(--sp-2) var(--sp-4); font-weight: 600; text-decoration: none;
+}
+.skip-link:focus { width: auto; height: auto; overflow: visible; clip-path: none; outline: 2px solid var(--blue); outline-offset: 2px; }
+/* Pro, coming soon: the gold crown before the words, as in every public header. */
+.ac-pro { gap: var(--sp-1); white-space: nowrap; }
+.ac-pro .pro-crown { width: 1.05em; height: 1.05em; flex: none; fill: currentColor; color: var(--pro-crown); }
 
 .ac-wrap { max-width: 640px; margin: 0 auto; padding: 28px 20px 64px; }
 h1 { font-size: 26px; margin: 0 0 4px; }

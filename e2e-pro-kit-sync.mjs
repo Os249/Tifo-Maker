@@ -298,6 +298,8 @@ const desk = await device(fan.token);
   await p.unroute('**/api/pro/kits**');
   await open(p, fan.design, 'sync_fan wall');
   await openSheet(p);
+  // The sheet writes its status line a frame after it paints: wait for it, then read.
+  await waitFor(p, () => document.querySelectorAll('.kit-card').length === 2 && /are on your account now/.test(document.querySelector('.kit-note')?.textContent || ''), null, 15000);
   const moved = await p.evaluate(() => ({ names: [...document.querySelectorAll('.kit-card .kit-name')].map((n) => n.textContent), note: document.querySelector('.kit-note')?.textContent }));
   check('at the next load it moves up: both kits, and the sheet says so', JSON.stringify(moved.names) === JSON.stringify(['Green Eagles', 'Old browser kit']) && /are on your account now/.test(moved.note || ''), JSON.stringify(moved));
   check('…the account has it', JSON.stringify((await accountKits(fan.token)).map((k) => k.name)) === JSON.stringify(['Green Eagles', 'Old browser kit']));
@@ -322,6 +324,7 @@ console.log('\n— offline —');
   await entryShown(p);
   await p.tap('.kit-entry');
   await waitFor(p, () => !!document.querySelector('.kit-card .kit-name'), null, 30000);
+  await waitFor(p, () => /You’re offline/.test(document.querySelector('.kit-where')?.textContent || ''), null, 15000);
   const off = await p.evaluate(() => ({ names: [...document.querySelectorAll('.kit-card .kit-name')].map((n) => n.textContent), where: document.querySelector('.kit-where')?.textContent, offClass: !!document.querySelector('.kit-where.off') }));
   check('offline: the kits as this device last had them, and the sheet says so', JSON.stringify(off.names) === JSON.stringify(['Green Eagles']) && off.offClass && /You’re offline/.test(off.where || ''), JSON.stringify(off));
   await shot(p, 'sync-390-offline');
