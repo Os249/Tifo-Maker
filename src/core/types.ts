@@ -111,6 +111,14 @@ export interface StadiumTemplate {
    * palms (render/simulator/site.ts). Omitted: the generic night-time city.
    */
   site?: SiteSpec;
+  /**
+   * The generic pitchside furniture: the dugouts near halfway on the +z
+   * touchline (`dugouts: 'south'` puts them on the -z one, in front of the
+   * main stand) and the players' tunnel mouth behind them (`tunnel: false`
+   * leaves it out, for a ground whose real tunnel is modelled where it is —
+   * Al-Zawraa's comes out under the Z).
+   */
+  pitchside?: { dugouts?: 'north' | 'south'; tunnel?: boolean };
 }
 
 /**
@@ -193,8 +201,19 @@ export interface SeatText {
   font?: string;
   /** Write it the other way round (for a stand you read from the far side). */
   mirror?: boolean;
-  /** A shape instead of letters (`text` is then just its name). */
-  shape?: 'heart';
+  /**
+   * A shape instead of letters (`text` is then just its name): a heart, or
+   * `zed` — a Z built of three straight bars of equal thickness filling the
+   * block edge to edge, the way Al-Zawraa's is laid in its seats.
+   */
+  shape?: 'heart' | 'zed';
+  /**
+   * Fill the block: the letters' cap height is the block's full depth of rows
+   * and they are stretched (or squeezed) to its full width — a single letter
+   * laid out seat by seat to the block's edges, like Al-Zawraa's Z. Without
+   * it the letters are drawn at 80% of the height and only ever squeezed.
+   */
+  fill?: boolean;
 }
 
 export interface SeatLook {

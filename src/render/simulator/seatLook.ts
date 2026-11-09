@@ -139,11 +139,13 @@ export function seatLookMap(template: StadiumTemplate, map: SeatMap): SeatLookMa
       g.fillStyle = '#fff';
       g.textAlign = 'center';
       g.textBaseline = 'middle';
-      const size = cv.height * 0.8;
+      // `fill`: capitals as tall as the block (a sans capital is ~0.72 of the
+      // font size) and stretched to its width; otherwise 80% tall, squeezed
+      // only if too long.
+      const size = tx.fill ? cv.height * 1.3 : cv.height * 0.8;
       g.font = tx.font ? tx.font.replace('{px}', String(Math.round(size))) : `900 ${Math.round(size)}px Arial, sans-serif`;
-      // Squeeze it to fit the width if it is too long.
       const w = g.measureText(tx.text).width;
-      const sx = Math.min(1, (cv.width * 0.94) / Math.max(1, w));
+      const sx = tx.fill ? (cv.width * 0.97) / Math.max(1, w) : Math.min(1, (cv.width * 0.94) / Math.max(1, w));
       if (tx.shape === 'heart') {
         // Two lobes and a point, filling the block's height.
         const H = cv.height * 0.92;
@@ -156,6 +158,33 @@ export function seatLookMap(template: StadiumTemplate, map: SeatMap): SeatLookMa
         g.bezierCurveTo(x0 + Wd * 0.42, y0 + H * 0.06, x0 + Wd / 2, y0 + H * 0.2, x0 + Wd / 2, y0 + H * 0.24);
         g.bezierCurveTo(x0 + Wd / 2, y0 + H * 0.2, x0 + Wd * 0.58, y0 + H * 0.06, x0 + Wd * 0.73, y0 + H * 0.02);
         g.bezierCurveTo(x0 + Wd * 0.98, y0 - H * 0.05, x0 + Wd * 1.05, y0 + H * 0.55, x0 + Wd / 2, y0 + H);
+        g.fill();
+      } else if (tx.shape === 'zed') {
+        // Three straight bars of one thickness: the top and bottom bars the
+        // block's full width, the diagonal joining the top bar's right end
+        // to the bottom bar's left end, measured square to its own run.
+        const H = cv.height * 0.98;
+        const W = cv.width * 0.9; // a seat or two of field either side, as Al-Zawraa's is laid
+        const x0 = (cv.width - W) / 2;
+        const y0 = (cv.height - H) / 2;
+        const t = Math.max(3 * PX * rowH * 0.8, H * 0.22);
+        g.fillRect(x0, y0, W, t);
+        g.fillRect(x0, y0 + H - t, W, t);
+        // The diagonal's horizontal width dw so that its thickness square to the run is t.
+        let dw = t;
+        for (let k = 0; k < 20; k++) {
+          const run = H - 2 * t;
+          const across = W - dw;
+          const thick = (dw * run) / Math.hypot(across, run);
+          dw *= t / Math.max(1e-6, thick);
+        }
+        dw = Math.min(dw, W * 0.6);
+        g.beginPath();
+        g.moveTo(x0 + W - dw, y0 + t);
+        g.lineTo(x0 + W, y0 + t);
+        g.lineTo(x0 + dw, y0 + H - t);
+        g.lineTo(x0, y0 + H - t);
+        g.closePath();
         g.fill();
       } else {
         g.save();

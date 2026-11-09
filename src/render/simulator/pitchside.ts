@@ -100,10 +100,12 @@ function stripeTexture(): THREE.Texture {
 /**
  * `benches: false` leaves out the generic dugouts and tunnel, for a ground
  * whose own builder puts its real ones where they are (Kingdom Arena's are in
- * front of the main stand, on the other touchline). `redraw` is asked for a
+ * front of the main stand, on the other touchline); `dugouts: 'south'` puts
+ * them on the -z touchline and `tunnel: false` leaves out only the tunnel
+ * mouth (a template's `pitchside`). `redraw` is asked for a
  * frame when the boards change on their own (their font arriving).
  */
-export function buildPitchside(shadows: boolean, opts: { benches?: boolean; redraw?: () => void } = {}): PitchsideController {
+export function buildPitchside(shadows: boolean, opts: { benches?: boolean; dugouts?: 'north' | 'south'; tunnel?: boolean; redraw?: () => void } = {}): PitchsideController {
   const group = new THREE.Group();
   const trash: { dispose(): void }[] = [];
 
@@ -230,12 +232,13 @@ export function buildPitchside(shadows: boolean, opts: { benches?: boolean; redr
   };
   let disposed = false;
 
-  // Dugouts near halfway (+z touchline).
+  // Dugouts near halfway (+z touchline, or -z for a template that says so).
+  const dz = opts.dugouts === 'south' ? -1 : 1;
   const dugMat = new THREE.MeshStandardMaterial({ color: 0x14171d, roughness: 0.85 });
   const dugout = (x: number): void => {
     const g = new THREE.BoxGeometry(7, 1.6, 2);
     const d = new THREE.Mesh(g, dugMat);
-    d.position.set(x, 0.8, HALF_Z + m + 2.4);
+    d.position.set(x, 0.8, dz * (HALF_Z + m + 2.4));
     d.castShadow = shadows;
     group.add(d);
     trash.push(g);
@@ -244,12 +247,14 @@ export function buildPitchside(shadows: boolean, opts: { benches?: boolean; redr
   if (opts.benches !== false) {
     dugout(-9);
     dugout(9);
-
-    // Players' tunnel mouth behind the dugouts.
+  }
+  // Players' tunnel mouth behind the dugouts (`tunnel: false` for a ground
+  // whose real tunnel is modelled where it is).
+  if (opts.benches !== false && opts.tunnel !== false) {
     const tunMat = new THREE.MeshStandardMaterial({ color: 0x0a0d14, emissive: 0x1a1408, emissiveIntensity: 0.5, roughness: 1 });
     const tunGeo = new THREE.BoxGeometry(4, 3, 3);
     const tunnel = new THREE.Mesh(tunGeo, tunMat);
-    tunnel.position.set(0, 1.5, HALF_Z + m + 5.5);
+    tunnel.position.set(0, 1.5, dz * (HALF_Z + m + 5.5));
     group.add(tunnel);
     trash.push(tunGeo, tunMat);
   }

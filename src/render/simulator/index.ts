@@ -494,6 +494,8 @@ export class MatchDaySimulator {
     this.scene.add(this.crowd.object);
     this.pitchside = buildPitchside(this.settings.shadows, {
       benches: baseGroundId(this.template.id) !== KINGDOM_ID,
+      dugouts: this.template.pitchside?.dugouts,
+      tunnel: this.template.pitchside?.tunnel !== false,
       redraw: () => this.requestRender(),
     });
     this.scene.add(this.pitchside.object);
@@ -931,7 +933,11 @@ export class MatchDaySimulator {
   }
 
   private buildSeats(): THREE.InstancedMesh {
-    const geometry = new THREE.PlaneGeometry(0.45, 0.7);
+    // A seat card is 0.45 m wide, or a little under the seat pitch where a
+    // ground's seats sit closer than that (Al-Zawraa's, at 0.36 m), so the
+    // cards never overlap and fight for depth.
+    const pitch = Math.min(...this.template.tiers.map((t) => t.seatPitch));
+    const geometry = new THREE.PlaneGeometry(Math.min(0.45, pitch - 0.02), 0.7);
     const material = new THREE.MeshBasicMaterial({ side: THREE.DoubleSide });
     // A reveal playing is worked out per card here (performance plan P3.2),
     // by applyReveal's rules: the design's colour mixed from the empty seat's

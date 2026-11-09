@@ -1945,10 +1945,13 @@ import { buildStadium as siBuild } from '../src/core/stadiumFit';
     'chang-arena-33k': '32203:479909ea29900d69',
     'pat-stadium-12k': '12028:c3d2955d1f538961',
     'thunderdome-15k': '14786:5d12ca4d2ab406fb',
-    // Al-Zawraa's ground (November 2026), re-laid on 6 November from the
-    // ultras' photographs (low side stands, vomitories, corner blocks) before
-    // its first push. Frozen at first release: re-take this only before that push.
-    'al-zawraa-15k': '15432:d494b31fa0ab8ecc',
+    // Al-Zawraa's ground (November 2026), re-laid on 6, 8 and 9 November
+    // from the ultras' photographs (low side stands, gates, corner blocks;
+    // stairs only at the gates, the tunnel under the Z; then the blocks
+    // counted seat by seat: 43 across, 18 and 14 rows, a 0.36 m pitch)
+    // before its first push. Frozen at first release: re-take this only
+    // before that push.
+    'al-zawraa-15k': '14078:2cd464225a60d376',
   };
   for (const [id, want] of Object.entries(FROZEN)) {
     const tpl = cat.templateById(id);
@@ -2855,7 +2858,9 @@ await (async () => {
   // long sides, whose painted block names put nine blocks in 144 m.
   // Measured: Buraidah's 1983 front band, SHG's painted blocks, Al-Hazem's
   // terraces (a stair every 18 m) and EGO's main stand (webook's 36-seat rows).
-  const WIDE_OK: Record<string, number> = { 'buraidah-stadium-25k-rb': 33, 'shg-arena-14k-rb': 38, 'alhazem-stadium-8k-rb': 41, 'ego-stadium-13k-rb': 36 };
+  // Al-Zawraa's stands are cut only at the gates and every block is 43
+  // seats across (counted on the ultras' photographs, November 2026).
+  const WIDE_OK: Record<string, number> = { 'buraidah-stadium-25k-rb': 33, 'shg-arena-14k-rb': 38, 'alhazem-stadium-8k-rb': 41, 'ego-stadium-13k-rb': 36, 'al-zawraa-15k': 44 };
   for (const e of cat.STADIUM_CATALOG) {
     const t = e.template;
     if (!bl.hasBlocks(t)) continue;
@@ -3005,7 +3010,11 @@ await leagueGrounds('thai league', 'thai-league', [
   { id: 'thunderdome-15k', clubs: 'Muangthong United', seats: 15000, tol: 0.025 },
 ], undefined, 3);
 await leagueGrounds('iraq stars league', 'iraq-stars-league', [
-  { id: 'al-zawraa-15k', clubs: 'Al-Zawraa SC', seats: 15443, tol: 0.025 },
+  // Published 15,443; the stands as the ultras photographed them hold about
+  // 14,000 — 43 seats to a block, seven blocks a side and five an end, 18
+  // rows on the sides and 14 on the ends, plus the main stand's gallery —
+  // and the ground is laid to the photographs, not to the figure.
+  { id: 'al-zawraa-15k', clubs: 'Al-Zawraa SC', seats: 14000, tol: 0.025 },
 ], undefined, 3);
 
 // --- The real grounds' neighbourhoods (OpenStreetMap, October 2026) ----------
