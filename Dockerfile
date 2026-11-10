@@ -15,7 +15,7 @@
 # server/src/nodeSupport.ts, and Dependabot opens a PR for each new 24.x patch.
 
 # ---- build: everything needed to compile the frontend ----
-FROM node:24.22.1-slim AS build
+FROM node:24.22.2-slim AS build
 WORKDIR /app
 
 # Install exactly what package-lock.json says, or stop. This used to be
@@ -46,7 +46,7 @@ RUN npm audit --omit=dev --json > audit-snapshot.json 2>/dev/null || true
 RUN npm prune --omit=dev --no-audit --no-fund
 
 # ---- runtime: the built site, the server source and production packages ----
-FROM node:24.22.1-slim
+FROM node:24.22.2-slim
 WORKDIR /app
 ENV NODE_ENV=production
 
