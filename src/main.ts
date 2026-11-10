@@ -1466,7 +1466,18 @@ async function main(): Promise<void> {
   } catch {
     /* storage blocked: the news modules treat that as seen too */
   }
-  if (!isNew && !firstVisit) void import('./ui/leaguesNews').then(({ leaguesNewsSeen, offerLeaguesNews }) => {
+  // Before any news: a signed-in fan who has not yet said what Pro is worth
+  // is asked once, in a card (priceAsk.ts), and no other card comes this
+  // visit. Not while a project is being started; on a first visit too,
+  // since a fan signed in on a new device is not new.
+  const priceAsk = isNew
+    ? Promise.resolve(false)
+    : import('./net/api').then(({ isSignedIn }) => isSignedIn()
+      ? import('./ui/priceAsk').then(({ offerPriceAsk }) => offerPriceAsk({ busy: guideActive })).catch(() => false)
+      : false);
+  if (!isNew && !firstVisit) void priceAsk.then((asking) => asking ? undefined : import('./ui/leaguesNews')).then((news) => {
+    if (!news) return;
+    const { leaguesNewsSeen, offerLeaguesNews } = news;
     if (!leaguesNewsSeen()) {
       offerLeaguesNews({
         openStadiums: (league) => {

@@ -1,8 +1,15 @@
 /**
- * /pro: Pro, coming soon. Two columns, Free against Pro, with no price on
+ * /pro: "Help us price Pro". Two columns, Free against Pro, with no price on
  * Pro: until it goes on sale, the Pro column asks every visitor what a month
  * of it is worth to them, in riyals or US dollars (server/src/proPrice.ts),
  * and Osamh reads the answers on /admin.
+ *
+ * Asking a price for something nobody can buy yet is new to most fans, and
+ * looks like a checkout to someone skimming. So the page says three things
+ * before anything else (pro.html, .ps-steps): Pro is not on sale; tell us
+ * what a month is worth, nothing is charged; we set the price from the
+ * answers and you hear first. Answering is one tap: a quick amount, or
+ * "Not for me", with typing your own a box away (10 Nov 2026).
  *
  * Every allowance on the page is the server's (/api/pro → soon.limits, from
  * server/src/proPlan.ts), so an offer changes in one file. The page is the
@@ -28,6 +35,7 @@ import {
   type AllowanceKind, type PlanLimits, type PriceAnswer, type PriceCurrency, type ProState,
 } from './net/api';
 import { CROWN_SVG, endsText, mountProChip } from './ui/pro';
+import { QUICK_PICKS, defaultCurrency, priceText, readAmount, thanksText } from './ui/priceQuestion';
 import { openGiftSheet } from './ui/proSheets';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string): T => document.getElementById(id) as T;
@@ -43,6 +51,13 @@ let answer: PriceAnswer | null = null;
 let changing = false;
 /** The currency the visitor chose; until they choose, the page's language decides. */
 let pickedCurrency: PriceCurrency | null = null;
+/** How many answers there are ("N fans have answered", from 5 up). */
+let answered = 0;
+/** Whether the last answer put a signed-in fan on the "hear first" list. */
+let told = false;
+
+/** Below this, a count reads as "hardly anyone": the line stays hidden. */
+const SHOW_COUNT_FROM = 5;
 
 /** "3 a week"; "10 a day" over "150 a month", one window to a line. */
 function limitHtml(l: PlanLimits[AllowanceKind] | undefined): string {
@@ -82,33 +97,17 @@ function planCard(o: { id: string; name: string; head: string; limits: PlanLimit
 
 // ----------------------------------------------------- the price question ---
 
-const priceText = (a: { amount: number; currency: PriceCurrency }): string =>
-  tv(`ps.price.${a.currency}`, { n: Number.isInteger(a.amount) ? String(a.amount) : a.amount.toFixed(2) });
-
-const currencyNow = (): PriceCurrency => pickedCurrency ?? answer?.currency ?? (getLang() === 'ar' ? 'SAR' : 'USD');
-
-/**
- * What was typed, as a number: Arabic-Indic digits and the Arabic decimal
- * mark count (a phone in Arabic types them), as do a comma and spaces.
- * Null unless it is 0 to 999 with at most two decimals.
- */
-function readAmount(raw: string): number | null {
-  const s = raw
-    .replace(/[٠-٩]/g, (d) => String(d.charCodeAt(0) - 0x0660))
-    .replace(/[۰-۹]/g, (d) => String(d.charCodeAt(0) - 0x06f0))
-    .replace(/[٫,]/g, '.')
-    .replace(/[\s٬]/g, '');
-  if (!/^\d{1,3}(\.\d{1,2})?$/.test(s)) return null;
-  const n = Number(s);
-  return n >= 0 && n <= 999 ? n : null;
-}
+const currencyNow = (): PriceCurrency => pickedCurrency ?? answer?.currency ?? defaultCurrency();
 
 /** The Pro card's head: the question, or the answer given and a way to change it. */
 function askHtml(): string {
   if (answer && !changing) {
+    // Told first: signed in, answering put them on the list. Signed out, the
+    // "Sign in to be told" button below says how.
+    const after = state?.signedIn && (told || state.notified) ? `<p class="ps-after">${escapeHtml(t('ps.told'))}</p>` : '';
     return (
       `<div class="ps-ask ps-done" id="ps-ask">` +
-      `<p class="ps-thanks" role="status">${escapeHtml(tv('ps.thanks', { price: priceText(answer) }))}</p>` +
+      `<p class="ps-thanks" role="status">${escapeHtml(thanksText(answer))}</p>${after}` +
       `<button type="button" class="ps-change" data-act="change">${escapeHtml(t('ps.change'))}</button>` +
       `</div>`
     );
@@ -116,22 +115,33 @@ function askHtml(): string {
   const cur = currencyNow();
   const radio = (c: PriceCurrency) =>
     `<label><input type="radio" name="ps-cur" value="${c}"${c === cur ? ' checked' : ''}><span>${escapeHtml(t(`ps.cur.${c}`))}</span></label>`;
+  const picks = QUICK_PICKS[cur]
+    .map((n) => `<button type="button" class="ps-pick" data-pick="${n}" aria-pressed="false">${escapeHtml(priceText(n, cur))}</button>`)
+    .join('');
   return (
     `<form class="ps-ask" id="ps-ask" novalidate>` +
     `<p class="ps-q" id="ps-q">${escapeHtml(t('ps.ask'))}</p>` +
     `<p class="ps-sub">${escapeHtml(t('ps.ask.sub'))}</p>` +
-    `<div class="ps-row">` +
-    `<label class="ps-field"><span class="ps-label">${escapeHtml(t('ps.amount'))}</span>` +
-    `<input id="ps-amount" name="amount" type="text" inputmode="decimal" autocomplete="off" maxlength="7" dir="ltr" aria-describedby="ps-msg"></label>` +
     `<fieldset class="ps-cur"><legend class="ps-label">${escapeHtml(t('ps.currency'))}</legend>${radio('SAR')}${radio('USD')}</fieldset>` +
-    `</div>` +
+    `<div class="ps-picks" role="group" aria-labelledby="ps-q">${picks}</div>` +
+    `<label class="ps-field"><span class="ps-label">${escapeHtml(t('ps.amount.own'))}</span>` +
+    `<input id="ps-amount" name="amount" type="text" inputmode="decimal" autocomplete="off" maxlength="7" dir="ltr" aria-describedby="ps-msg"></label>` +
     `<label class="ps-field"><span class="ps-label">${escapeHtml(t('ps.comment'))}</span>` +
     `<textarea id="ps-comment" name="comment" rows="2" maxlength="200" placeholder="${escapeHtml(t('ps.comment.ph'))}"></textarea></label>` +
+    `<div class="ps-sends">` +
     `<button type="submit" class="pp-btn" id="ps-send">${escapeHtml(t('ps.send'))}</button>` +
+    `<button type="button" class="ps-wont" id="ps-wont">${escapeHtml(t('ps.wont'))}</button>` +
+    `</div>` +
     `<p class="ps-msg" id="ps-msg" role="status" aria-live="polite"></p>` +
-    `<p class="ps-private">${escapeHtml(t('ps.private'))}</p>` +
+    `<p class="ps-private">${escapeHtml(t('ps.nocharge'))}</p>` +
     `</form>`
   );
+}
+
+/** The quick amount matching what is in the box is the one shown chosen. */
+function markPick(box: HTMLElement, value: string): void {
+  const n = readAmount(value);
+  box.querySelectorAll<HTMLButtonElement>('.ps-pick').forEach((b) => b.setAttribute('aria-pressed', String(n !== null && Number(b.dataset.pick) === n)));
 }
 
 function wireAsk(kept: { amount: string; comment: string } | null): void {
@@ -141,8 +151,9 @@ function wireAsk(kept: { amount: string; comment: string } | null): void {
     changing = true;
     paintPlans(null);
     const amount = $<HTMLInputElement>('ps-amount');
-    amount.value = answer ? String(answer.amount) : '';
+    amount.value = answer && !answer.wontPay ? String(answer.amount) : '';
     $<HTMLTextAreaElement>('ps-comment').value = answer?.comment ?? '';
+    markPick($('ps-ask'), amount.value);
     amount.focus();
   });
   if (!(box instanceof HTMLFormElement)) return;
@@ -150,42 +161,68 @@ function wireAsk(kept: { amount: string; comment: string } | null): void {
   const comment = $<HTMLTextAreaElement>('ps-comment');
   const msg = $('ps-msg');
   const send = $<HTMLButtonElement>('ps-send');
+  const wont = $<HTMLButtonElement>('ps-wont');
   if (kept) {
     amount.value = kept.amount;
     comment.value = kept.comment;
+    markPick(box, amount.value);
   }
   box.querySelectorAll<HTMLInputElement>('input[name="ps-cur"]').forEach((r) =>
-    r.addEventListener('change', () => { if (r.checked) pickedCurrency = r.value as PriceCurrency; }));
+    r.addEventListener('change', () => {
+      if (!r.checked) return;
+      pickedCurrency = r.value as PriceCurrency;
+      // The quick amounts are the currency's own: paint them again, keeping what was typed.
+      paintPlans({ amount: amount.value, comment: comment.value });
+      (document.querySelector(`input[name="ps-cur"][value="${pickedCurrency}"]`) as HTMLInputElement | null)?.focus();
+    }));
+  box.querySelectorAll<HTMLButtonElement>('.ps-pick').forEach((b) =>
+    b.addEventListener('click', () => {
+      amount.value = b.dataset.pick ?? '';
+      amount.removeAttribute('aria-invalid');
+      msg.textContent = '';
+      markPick(box, amount.value);
+    }));
   amount.addEventListener('input', () => {
     amount.removeAttribute('aria-invalid');
     msg.textContent = '';
+    markPick(box, amount.value);
   });
-  box.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const n = readAmount(amount.value);
+
+  const submit = async (wontPay: boolean): Promise<void> => {
+    const n = wontPay ? 0 : readAmount(amount.value);
     if (n === null) {
       amount.setAttribute('aria-invalid', 'true');
       msg.textContent = t('ps.err.amount');
       amount.focus();
       return;
     }
-    send.disabled = true;
-    send.textContent = t('ps.sending');
+    const busy = wontPay ? wont : send;
+    const label = busy.textContent ?? '';
+    send.disabled = wont.disabled = true;
+    busy.textContent = t('ps.sending');
     msg.textContent = '';
-    const r = await sendPriceAnswer({ amount: n, currency: currencyNow(), comment: comment.value.trim() || null, lang: getLang() });
+    const r = await sendPriceAnswer({ amount: n, currency: currencyNow(), comment: comment.value.trim() || null, wontPay, lang: getLang(), source: 'page' });
     if (!r.ok) {
-      send.disabled = false;
-      send.textContent = t('ps.send');
+      send.disabled = wont.disabled = false;
+      busy.textContent = label;
       msg.textContent = t(r.reason === 'pace' ? 'ps.err.pace' : r.reason === 'full' ? 'ps.err.full' : 'ps.err.failed');
       return;
     }
     track('pro_price');
+    if (!answer) answered++;
     answer = r.answer;
+    told = r.told;
+    if (told && state) state.notified = true;
     changing = false;
-    paintPlans(null);
+    paint();
     // Focus follows the form it replaced, onto the change button beside the thanks.
     ($('ps-ask')?.querySelector('[data-act="change"]') as HTMLElement | null)?.focus();
+  };
+  box.addEventListener('submit', (e) => {
+    e.preventDefault();
+    void submit(false);
   });
+  wont.addEventListener('click', () => void submit(true));
 }
 
 // --------------------------------------------------------------- painting ---
@@ -216,6 +253,9 @@ function paint(): void {
   const commentNow = document.getElementById('ps-comment') as HTMLTextAreaElement | null;
   paintPlans(amountNow && commentNow ? { amount: amountNow.value, comment: commentNow.value } : null);
   $('pp-crown').innerHTML = CROWN_SVG;
+  const count = $('ps-count');
+  count.hidden = answered < SHOW_COUNT_FROM;
+  count.textContent = count.hidden ? '' : tv('ps.count', { n: answered });
 
   // Someone in the preview: a pass running, a gift waiting, or neither.
   const you = $('pp-you');
@@ -273,7 +313,8 @@ async function load(fresh = false): Promise<void> {
   const [st, mine] = await Promise.all([fetchPro(fresh).catch(() => null), fetchPriceAnswer()]);
   state = st;
   // A fresh load (after signing in) shows the account's answer, or this browser's.
-  answer = mine;
+  answer = mine?.answer ?? null;
+  answered = mine?.answered ?? 0;
   changing = false;
   loaded = true;
   $('pp-plans').removeAttribute('aria-busy');

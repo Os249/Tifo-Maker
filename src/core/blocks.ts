@@ -58,6 +58,7 @@ export interface BlockLine {
   r0: number;
   r1: number;
   kind?: string;
+  mouth?: number;
 }
 
 /** A walkway row, optionally only between two sample indices (wrap-aware). */
@@ -96,6 +97,7 @@ export interface StraightLine {
   r0: number;
   r1: number;
   kind?: string;
+  mouth?: number;
 }
 
 /** A straight tier's blocks, compiled. Every position is metres along a side (x for north and south, z for the ends). */
@@ -178,6 +180,7 @@ export function validBlocks(b: unknown, tierRows: number): b is TierBlocks {
     if (!Array.isArray(o.openings) || o.openings.length > BLOCK_LIMITS.linesPerTier) return false;
     for (const p of o.openings as Record<string, unknown>[]) {
       if (!p || !side(p.side) || !stations(p.at) || !rows(p.rows) || !width(p.width, 0.3)) return false;
+      if (p.mouth !== undefined && !(fin(p.mouth) && p.mouth >= 0.3 && p.mouth <= (p.width as number))) return false;
       lines += (p.at as number[]).length * (p.mirror ? 2 : 1);
     }
   }
@@ -239,7 +242,7 @@ export function compileTierBlocks(curve: Curve, tier: TierSpec, defaultWidth: nu
   const openings: BlockLine[] = [];
   for (const o of b.openings ?? []) {
     for (const s of expand(o.at, o.mirror)) {
-      openings.push({ id: openings.length, idx: stationIndex(front, o.side, s), halfW: o.width / 2, r0: o.rows[0], r1: o.rows[1], kind: o.kind });
+      openings.push({ id: openings.length, idx: stationIndex(front, o.side, s), halfW: o.width / 2, r0: o.rows[0], r1: o.rows[1], kind: o.kind, mouth: o.mouth });
     }
   }
   // The players' tunnel and a gate run the full depth of their band, so the
@@ -287,7 +290,7 @@ export function compileStraightBlocks(tier: TierSpec, defaultWidth: number): Com
   }
   const openings: StraightLine[] = [];
   for (const o of b.openings ?? []) {
-    for (const s of expand(o.at, o.mirror)) openings.push({ id: openings.length, side: o.side, along: s, halfW: o.width / 2, r0: o.rows[0], r1: o.rows[1], kind: o.kind });
+    for (const s of expand(o.at, o.mirror)) openings.push({ id: openings.length, side: o.side, along: s, halfW: o.width / 2, r0: o.rows[0], r1: o.rows[1], kind: o.kind, mouth: o.mouth });
   }
   for (const o of openings) if (o.kind === 'tunnel' || o.kind === 'gate') raw.push({ side: o.side, along: o.along, halfW: o.halfW, r0: o.r0, r1: o.r1, kind: o.kind });
   const order: Record<StandSide, number> = { east: 0, north: 1, west: 2, south: 3 };
@@ -449,6 +452,8 @@ export interface OpeningQuad {
   backY: number;
   /** Outward normal at the opening's centre line. */
   normal: [number, number];
+  /** The mouth's share of the width, 0-1 (SeatOpening.mouth); absent = all of it. */
+  mouth?: number;
 }
 
 export function openingQuads(template: StadiumTemplate): OpeningQuad[] {
@@ -489,6 +494,7 @@ export function openingQuads(template: StadiumTemplate): OpeningQuad[] {
           frontY: y0 + (o.r0 - 0.5) * tier.rowDepth * rake,
           backY: y0 + (r1 + 0.5) * tier.rowDepth * rake,
           normal: out1[o.side],
+          ...(o.mouth !== undefined ? { mouth: Math.min(1, o.mouth / (2 * o.halfW)) } : {}),
         });
       }
       return;
@@ -512,6 +518,7 @@ export function openingQuads(template: StadiumTemplate): OpeningQuad[] {
         frontY: tier.baseElevation + (o.r0 - 0.5) * tier.rowDepth * rake,
         backY: tier.baseElevation + (o.r1 + 0.5) * tier.rowDepth * rake,
         normal: [curve.nx[i], curve.ny[i]],
+        ...(o.mouth !== undefined ? { mouth: Math.min(1, o.mouth / (2 * o.halfW)) } : {}),
       });
     }
   });

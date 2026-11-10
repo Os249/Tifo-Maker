@@ -139,7 +139,7 @@ const editor = async (token, design, { lang = 'en', base = B, w = 1440, h = 900 
   const ctx = await browser.newContext({ viewport: { width: w, height: h } });
   await ctx.addInitScript(([tok, lang]) => {
     try {
-      for (const [k, v] of Object.entries({ tifo_consent_v1: 'essential', tifo_guide_v1: 'done', tifo_onboarded_v1: '1', tifo_news_banners_v1: '1', tifo_news_leagues_v2: '1', tifo_banner_tour_v1: '1', tifo_view_v1: '2d', tifo_lang_v1: lang })) {
+      for (const [k, v] of Object.entries({ tifo_consent_v1: 'essential', tifo_guide_v1: 'done', tifo_onboarded_v1: '1', tifo_news_banners_v1: '1', tifo_news_leagues_v2: '1', tifo_price_ask_v1: '{"n":2,"until":0}', tifo_banner_tour_v1: '1', tifo_view_v1: '2d', tifo_lang_v1: lang })) {
         if (localStorage.getItem(k) === null) localStorage.setItem(k, v);
       }
       if (tok) localStorage.setItem('tifo_token_v1', tok);

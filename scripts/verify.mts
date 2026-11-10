@@ -1951,7 +1951,7 @@ import { buildStadium as siBuild } from '../src/core/stadiumFit';
     // counted seat by seat: 43 across, 18 and 14 rows, a 0.36 m pitch)
     // before its first push. Frozen at first release: re-take this only
     // before that push.
-    'al-zawraa-15k': '14078:2cd464225a60d376',
+    'al-zawraa-15k': '19598:4e7bdb5b3e26b869',
   };
   for (const [id, want] of Object.entries(FROZEN)) {
     const tpl = cat.templateById(id);
@@ -3011,10 +3011,12 @@ await leagueGrounds('thai league', 'thai-league', [
 ], undefined, 3);
 await leagueGrounds('iraq stars league', 'iraq-stars-league', [
   // Published 15,443; the stands as the ultras photographed them hold about
-  // 14,000 — 43 seats to a block, seven blocks a side and five an end, 18
-  // rows on the sides and 14 on the ends, plus the main stand's gallery —
-  // and the ground is laid to the photographs, not to the figure.
-  { id: 'al-zawraa-15k', clubs: 'Al-Zawraa SC', seats: 14000, tol: 0.025 },
+  // 19,600 - 43 seats to a block, seven blocks a side and five an end, 27
+  // rows on the sides (counted on the Z stand) and 15 on the ends, plus the
+  // main stand's gallery - and the ground is laid to the photographs, not to
+  // the figure. The main stand and the ends are the least photographed; if
+  // they turn out smaller, this comes down with them.
+  { id: 'al-zawraa-15k', clubs: 'Al-Zawraa SC', seats: 19600, tol: 0.025 },
 ], undefined, 3);
 
 // --- The real grounds' neighbourhoods (OpenStreetMap, October 2026) ----------

@@ -202,7 +202,7 @@ console.log('\n— 2. what the visit log makes of tagged links —');
 // ---------------------------------------------------------------------------
 console.log('\n— 3. first run: start from your club, then post it —');
 for (const [label, opts] of [['desktop', WIDE], ['phone', PHONE]]) {
-  const p = await open(opts, [['tifo_news_banners_v1', '1'], ['tifo_news_leagues_v2', '1']]);
+  const p = await open(opts, [['tifo_news_banners_v1', '1'], ['tifo_news_leagues_v2', '1'], ['tifo_price_ask_v1', '{"n":2,"until":0}']]);
   await p.goto(`${B}/projects?new=1&e2e`, { waitUntil: 'domcontentloaded' });
   const dialog = await until(p, () => document.querySelectorAll('.st-club').length >= 8, null, 90000);
   check(`${label}: the start flow asks "Who do you support?"`, dialog && await p.evaluate(() => document.getElementById('np-h')?.textContent === 'Who do you support?'));
@@ -289,7 +289,7 @@ for (const [label, opts] of [['desktop', WIDE], ['phone', PHONE]]) {
 {
   // Someone who has had the guide (or left it for Free mode) gets the one-time
   // "Post it?" card on their next club tifo, as before, and only once.
-  const p = await open(WIDE, [['tifo_news_banners_v1', '1'], ['tifo_news_leagues_v2', '1'], ['tifo_guide_v1', 'free']]);
+  const p = await open(WIDE, [['tifo_news_banners_v1', '1'], ['tifo_news_leagues_v2', '1'], ['tifo_price_ask_v1', '{"n":2,"until":0}'], ['tifo_guide_v1', 'free']]);
   await p.goto(`${B}/projects?new=1&e2e`, { waitUntil: 'domcontentloaded' });
   await until(p, () => document.querySelectorAll('.st-club').length >= 8, null, 90000);
   await p.evaluate(() => document.querySelector('.st-club[data-club="nassr"]')?.click());
@@ -321,7 +321,7 @@ console.log('\n— 4. publishing opens the share window, with tagged links —')
 {
   const stamp = Date.now().toString(36).slice(-5);
   const reg = await api('/api/auth/register', null, { username: `pub${stamp}`, password: 'harbor-kite-moss-31', email: `pub${stamp}@example.test`, acceptedVersion: 'test' });
-  const p = await open(WIDE, [['tifo_token_v1', reg.token], ['tifo_onboarded_v1', '1'], ['tifo_news_banners_v1', '1'], ['tifo_news_leagues_v2', '1'], ['tifo_post_nudge_v1', '1']]);
+  const p = await open(WIDE, [['tifo_token_v1', reg.token], ['tifo_onboarded_v1', '1'], ['tifo_news_banners_v1', '1'], ['tifo_news_leagues_v2', '1'], ['tifo_price_ask_v1', '{"n":2,"until":0}'], ['tifo_post_nudge_v1', '1']]);
   await p.goto(`${B}/app?new=1`, { waitUntil: 'domcontentloaded' });
   await until(p, () => /[?&]project=/.test(location.search), null, 90000);
   await p.evaluate(() => document.getElementById('publish-design')?.click());

@@ -14,6 +14,12 @@
  * one address counts against that address's day (GUEST_NEW_PER_DAY), on top
  * of the route's rate limit.
  *
+ * "Not for me" (10 Nov 2026) is an answer too: kept with amount 0 and
+ * wontPay, counted apart from the prices, so the median is of what the
+ * people who would pay would pay. A typed 0 means the same and is kept the
+ * same way. Each answer says where it was given: the /pro page or the card
+ * the editor shows a signed-in fan once (src/ui/priceAsk.ts).
+ *
  * Everything here is plain checking and counting; storage is the Pro
  * repository's (proRepo.ts), the routes are in proRoutes.ts.
  */
@@ -60,21 +66,31 @@ export function cleanComment(v: unknown): { ok: true; comment: string | null } |
   return { ok: true, comment: s || null };
 }
 
+/** Where an answer was given. */
+export type PriceSource = 'page' | 'editor';
+
 export interface PriceInput {
   amount: number;
   currency: PriceCurrency;
   lang: 'en' | 'ar';
   comment: string | null;
   device: string | null;
+  /** "Not for me": would not pay for Pro at all (amount is then 0). */
+  wontPay: boolean;
+  source: PriceSource;
 }
 
 /** The body of POST /api/pro/price, checked. Nothing in it is trusted beyond its shape. */
 export function readPriceInput(body: unknown): { ok: true; input: PriceInput } | { ok: false; error: string } {
   const b = (body && typeof body === 'object' ? body : {}) as Record<string, unknown>;
-  const amount = b.amount;
+  if (b.wontPay !== undefined && typeof b.wontPay !== 'boolean') return { ok: false, error: 'wontPay must be true or false' };
+  // "Not for me" needs no amount; any other answer does.
+  const amount = b.wontPay === true && b.amount === undefined ? 0 : b.amount;
   if (typeof amount !== 'number' || !Number.isFinite(amount) || amount < 0 || amount > PRICE_MAX) {
     return { ok: false, error: `amount must be a number from 0 to ${PRICE_MAX}` };
   }
+  const source = b.source === undefined ? 'page' : b.source === 'page' || b.source === 'editor' ? b.source : null;
+  if (!source) return { ok: false, error: 'source must be page or editor' };
   if (!PRICE_CURRENCIES.includes(b.currency as PriceCurrency)) return { ok: false, error: 'currency must be SAR or USD' };
   const lang = b.lang === 'ar' ? 'ar' : b.lang === 'en' ? 'en' : null;
   if (!lang) return { ok: false, error: 'lang must be en or ar' };
@@ -85,9 +101,12 @@ export function readPriceInput(body: unknown): { ok: true; input: PriceInput } |
     device = deviceKey(b.device);
     if (!device) return { ok: false, error: 'the browser key is not valid' };
   }
+  const rounded = Math.round(amount * 100) / 100;
+  // Nothing at all is "not for me", however it was said.
+  const wontPay = b.wontPay === true || rounded === 0;
   return {
     ok: true,
-    input: { amount: Math.round(amount * 100) / 100, currency: b.currency as PriceCurrency, lang, comment: c.comment, device },
+    input: { amount: wontPay ? 0 : rounded, currency: b.currency as PriceCurrency, lang, comment: c.comment, device, wontPay, source },
   };
 }
 
@@ -104,9 +123,10 @@ function percentile(sorted: number[], p: number): number {
 const r2 = (x: number): number => Math.round(x * 100) / 100;
 
 /**
- * Where the answers fall, in steps that suit each currency: the first band
- * is exactly 0 ("nothing"), then up to each edge, then the last edge and
- * above. SAR 19 was the planned price; USD 5 is about the same.
+ * Where the prices fall, in steps that suit each currency: under the first
+ * edge, then up to each edge, then the last edge and above ("nothing" is
+ * "not for me", counted apart). SAR 19 was the planned price; USD 5 is
+ * about the same.
  */
 export const PRICE_BANDS: Record<PriceCurrency, number[]> = {
   SAR: [5, 10, 15, 20, 30, 50],
@@ -125,25 +145,31 @@ export interface PriceSummary {
   max: number;
   /** The median of the signed-in answers alone (null when there are none). */
   accountsMedian: number | null;
-  /** How many answers fall in each band: [0], then (0, e1), [e1, e2), ..., [last, max]. */
+  /** How many prices fall in each band: (0, e1), [e1, e2), ..., [last, max]. */
   bands: number[];
 }
 
-export function summarize(all: { amount: number; currency: PriceCurrency; account: boolean }[]): Record<PriceCurrency, PriceSummary> {
+/** One answer as the summary counts it. */
+export interface PriceCounted {
+  amount: number;
+  currency: PriceCurrency;
+  account: boolean;
+  wontPay: boolean;
+  source: PriceSource;
+}
+
+/** The prices, per currency: "not for me" answers are counted by summarizeAll, not here. */
+export function summarize(all: PriceCounted[]): Record<PriceCurrency, PriceSummary> {
   const out = {} as Record<PriceCurrency, PriceSummary>;
   for (const cur of PRICE_CURRENCIES) {
-    const mine = all.filter((a) => a.currency === cur);
+    const mine = all.filter((a) => a.currency === cur && !a.wontPay);
     const xs = mine.map((a) => a.amount).sort((a, b) => a - b);
     const acc = mine.filter((a) => a.account).map((a) => a.amount).sort((a, b) => a - b);
     const edges = PRICE_BANDS[cur];
-    const bands = new Array<number>(edges.length + 2).fill(0);
+    const bands = new Array<number>(edges.length + 1).fill(0);
     for (const x of xs) {
-      if (x === 0) bands[0]++;
-      else {
-        let i = edges.findIndex((e) => x < e);
-        if (i < 0) i = edges.length;
-        bands[i + 1]++;
-      }
+      const i = edges.findIndex((e) => x < e);
+      bands[i < 0 ? edges.length : i]++;
     }
     out[cur] = {
       n: xs.length,
@@ -159,6 +185,16 @@ export function summarize(all: { amount: number; currency: PriceCurrency; accoun
     };
   }
   return out;
+}
+
+/** Everything /admin shows above the list: the prices, who would not pay, and where answers came from. */
+export function summarizeAll(all: PriceCounted[]) {
+  const wont = all.filter((a) => a.wontPay);
+  return {
+    summary: summarize(all),
+    wontPay: { n: wont.length, accounts: wont.filter((a) => a.account).length },
+    sources: { page: all.filter((a) => a.source === 'page').length, editor: all.filter((a) => a.source === 'editor').length },
+  };
 }
 
 // ------------------------------------------------------ signed-out pace ---

@@ -34,7 +34,8 @@ export type FunnelEvent =
   | 'pro_viewed'       // opened the Pro page
   | 'pro_limit'        // met a Pro limit card
   | 'pro_notify'       // asked to be told when Pro opens
-  | 'pro_price'        // said what a month of Pro is worth (the coming-soon page)
+  | 'pro_ask_seen'     // the editor's founding-fans card asked them (priceAsk.ts)
+  | 'pro_price'        // said what a month of Pro is worth (/pro or the editor's card)
   | 'gift_accepted'    // accepted the 7-day Pro gift
   | 'cutout_used'      // a smart cut-out came back
   | 'export_sheet'     // the export sheet listed Pro items

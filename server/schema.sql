@@ -667,3 +667,9 @@ CREATE TABLE IF NOT EXISTS pro_price_answers (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS pro_price_answers_updated ON pro_price_answers (updated_at DESC);
+
+-- "Not for me" and where an answer was given (10 Nov 2026): a fan can say
+-- they would not pay for Pro at all (kept as amount 0), and the editor asks
+-- signed-in fans once in a card (src/ui/priceAsk.ts) as well as /pro.
+ALTER TABLE pro_price_answers ADD COLUMN IF NOT EXISTS wont_pay BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE pro_price_answers ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'page' CHECK (source IN ('page', 'editor'));

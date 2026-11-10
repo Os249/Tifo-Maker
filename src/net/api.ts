@@ -2028,6 +2028,8 @@ export interface PriceAnswer {
   amount: number;
   currency: PriceCurrency;
   comment: string | null;
+  /** "Not for me": would not pay for Pro at all. */
+  wontPay: boolean;
 }
 
 const PRICE_KEY = 'tifo_price_key_v1';
@@ -2062,30 +2064,40 @@ function priceKeyKept(): string | null {
   }
 }
 
-/** This visitor's answer so far (their account's, or this browser's), or null. */
-export async function fetchPriceAnswer(): Promise<PriceAnswer | null> {
+/**
+ * This visitor's answer so far (their account's, or this browser's), or
+ * null; and how many answers there are altogether. Null when the server
+ * cannot be asked, so a caller can tell "not answered" from "don't know".
+ */
+export async function fetchPriceAnswer(): Promise<{ answer: PriceAnswer | null; answered: number } | null> {
   const key = priceKeyKept();
   try {
     const res = await fetch(`${API}/pro/price`, { headers: { ...authHeaders(false), ...(key ? { 'x-price-device': key } : {}) } });
     if (!res.ok) return null;
-    return ((await res.json()) as { answer: PriceAnswer | null }).answer;
+    const d = (await res.json()) as { answer: PriceAnswer | null; answered?: number };
+    return { answer: d.answer, answered: typeof d.answered === 'number' ? d.answered : 0 };
   } catch {
     return null;
   }
 }
 
 /** Send (or change) the answer. 'pace': too many from this address today; 'full': no more are taken. */
-export async function sendPriceAnswer(a: PriceAnswer & { lang: 'en' | 'ar' }): Promise<{ ok: true; answer: PriceAnswer } | { ok: false; reason: 'pace' | 'full' | 'failed' }> {
+export async function sendPriceAnswer(
+  a: PriceAnswer & { lang: 'en' | 'ar'; source: 'page' | 'editor' },
+): Promise<{ ok: true; answer: PriceAnswer; told: boolean } | { ok: false; reason: 'pace' | 'full' | 'failed' }> {
   try {
     const res = await fetch(`${API}/pro/price`, {
       method: 'POST',
       headers: authHeaders(true),
       // Signed in, the account is who answers; a key this browser already has
       // goes along so an answer it gave signed out becomes the account's.
-      body: JSON.stringify({ amount: a.amount, currency: a.currency, comment: a.comment, lang: a.lang, device: token ? priceKeyKept() : priceKey() }),
+      body: JSON.stringify({
+        amount: a.amount, currency: a.currency, comment: a.comment, wontPay: a.wontPay, lang: a.lang, source: a.source,
+        device: token ? priceKeyKept() : priceKey(),
+      }),
     });
-    const data = (await res.json().catch(() => null)) as { answer?: PriceAnswer; reason?: string } | null;
-    if (res.ok && data?.answer) return { ok: true, answer: data.answer };
+    const data = (await res.json().catch(() => null)) as { answer?: PriceAnswer; told?: boolean; reason?: string } | null;
+    if (res.ok && data?.answer) return { ok: true, answer: data.answer, told: data.told === true };
     const reason = res.status === 429 ? 'pace' : data?.reason === 'full' ? 'full' : 'failed';
     return { ok: false, reason };
   } catch {

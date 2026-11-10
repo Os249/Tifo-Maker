@@ -45,7 +45,7 @@ const check = (n, ok, x = '') => { (ok ? pass++ : fail++); console.log(`  ${ok ?
 const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium', args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader'] }).catch(() => chromium.launch({ args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader'] }));
 const errs = [];
 const BASE_LS = [
-  ['tifo_consent_v1', 'essential'], ['tifo_news_banners_v1', '1'], ['tifo_news_leagues_v2', '1'], ['tifo_guide_v1', 'done'],
+  ['tifo_consent_v1', 'essential'], ['tifo_news_banners_v1', '1'], ['tifo_news_leagues_v2', '1'], ['tifo_price_ask_v1', '{"n":2,"until":0}'], ['tifo_guide_v1', 'done'],
   ['tifo_banner_tour_v1', '1'], ['tifo_draw_hint_v1', '1'], ['tifo_post_nudge_v1', '1'], ['mds_seen_intro', '1'], ['mds_help_seen_v1', '1'],
   ['mds_sound_v2', JSON.stringify({ on: false })], ['tifo_view_v1', 'split'],
 ];

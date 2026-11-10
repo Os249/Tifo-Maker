@@ -118,7 +118,7 @@ const matchDay = async (token, design, { base = B, lang = 'en', w = 1440, h = 90
   await ctx.addInitScript(([tok, lang, ls]) => {
     try {
       for (const [k, v] of Object.entries({
-        tifo_consent_v1: 'essential', tifo_guide_v1: 'done', tifo_onboarded_v1: '1', tifo_news_banners_v1: '1', tifo_news_leagues_v2: '1',
+        tifo_consent_v1: 'essential', tifo_guide_v1: 'done', tifo_onboarded_v1: '1', tifo_news_banners_v1: '1', tifo_news_leagues_v2: '1', tifo_price_ask_v1: '{"n":2,"until":0}',
         tifo_banner_tour_v1: '1', tifo_lang_v1: lang, mds_seen_intro: '1', mds_sound_v2: JSON.stringify({ on: false }), ...ls,
       })) {
         if (localStorage.getItem(k) === null) localStorage.setItem(k, v);

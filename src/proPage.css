@@ -69,6 +69,24 @@
 .pp-btn.quiet { color: var(--ink); background: transparent; border: 1px solid var(--line); box-shadow: none; }
 .pp-msg { margin: var(--sp-3) 0 0; min-height: 1.4em; font-size: var(--fs-sm); color: var(--muted); }
 
+/* ---- how it works: three steps under the lead (10 Nov 2026) ---- */
+.ps-steps {
+  list-style: none; counter-reset: ps; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-3);
+  max-width: 920px; margin: var(--sp-6) auto 0; padding: 0; text-align: start;
+}
+.ps-steps li {
+  counter-increment: ps; display: grid; grid-template-columns: auto 1fr; column-gap: var(--sp-3); row-gap: var(--sp-1);
+  padding: var(--sp-4); border-radius: var(--r-md); background: var(--raise-2); border: 1px solid var(--line);
+}
+.ps-steps li::before {
+  content: counter(ps); grid-row: span 2; display: grid; place-items: center; width: 32px; height: 32px; border-radius: 50%;
+  background: var(--tint); color: var(--blue); font-weight: 800;
+}
+.ps-steps b { font-size: var(--fs-base); line-height: 1.3; }
+.ps-steps span { font-size: var(--fs-sm); line-height: 1.5; color: var(--muted); }
+.ps-count { margin: var(--sp-4) 0 0; font-size: var(--fs-sm); font-weight: 700; color: var(--muted); }
+.ps-count[hidden] { display: none; }
+
 /* ---- the price question, in the Pro card where the price will be ---- */
 .ps-ask {
   display: grid; gap: var(--sp-3); margin: 0 0 var(--sp-5); padding: var(--sp-5);
@@ -76,35 +94,53 @@
 }
 .ps-q { margin: 0; font-size: var(--fs-lg); font-weight: 800; line-height: 1.3; text-wrap: balance; }
 .ps-sub { margin: calc(-1 * var(--sp-2)) 0 0; font-size: var(--fs-sm); line-height: 1.5; color: var(--muted); }
-.ps-row { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--sp-3); }
 .ps-field { display: grid; gap: var(--sp-1); min-width: 0; }
-.ps-row .ps-field { flex: 1 1 140px; }
 .ps-label { font-size: var(--fs-sm); font-weight: 700; color: var(--ink); }
 .ps-field input, .ps-field textarea {
   width: 100%; min-height: 48px; padding: var(--sp-2) var(--sp-3); border-radius: var(--r-sm);
   font: inherit; font-size: var(--fs-base); color: var(--ink); background: var(--card); border: 1px solid var(--line-strong);
 }
-.ps-field input { font-size: var(--fs-xl); font-weight: 800; font-variant-numeric: tabular-nums; }
+.ps-field input { max-width: 220px; font-size: var(--fs-xl); font-weight: 800; font-variant-numeric: tabular-nums; }
 /* The amount is digits, read left to right on the Arabic page too. */
 [dir="rtl"] .ps-field input { text-align: right; }
 .ps-field textarea { resize: vertical; line-height: 1.45; }
 .ps-field input:focus-visible, .ps-field textarea:focus-visible { outline: 2px solid var(--blue); outline-offset: 1px; border-color: var(--blue); }
 .ps-field input[aria-invalid="true"] { border-color: var(--danger); }
-.ps-cur { display: flex; flex-wrap: wrap; gap: var(--sp-1); margin: 0; padding: 0; border: 0; min-width: 0; }
-.ps-cur legend { float: left; width: 100%; padding: 0; margin: 0 0 var(--sp-1); }
+.ps-cur { display: flex; flex-wrap: wrap; align-items: center; gap: 0; margin: 0; padding: 0; border: 0; min-width: 0; }
+.ps-cur legend { float: left; padding: 0; margin: 0 var(--sp-3) 0 0; }
+[dir="rtl"] .ps-cur legend { float: right; margin: 0 0 0 var(--sp-3); }
+/* The currency is a small switch, not more amounts: two halves of one pill. */
 .ps-cur label { position: relative; display: inline-flex; }
-/* The radio stays in the page for keyboards and screen readers; the pill is what is seen. */
+/* The radio stays in the page for keyboards and screen readers; the half-pill is what is seen. */
 .ps-cur input { position: absolute; inset: 0; margin: 0; opacity: 0; cursor: pointer; }
 .ps-cur span {
-  display: inline-flex; align-items: center; justify-content: center; min-height: 48px; min-width: 72px; padding: 0 var(--sp-4);
-  border-radius: var(--r-pill); border: 1px solid var(--line-strong); background: var(--card);
-  font-weight: 700; color: var(--ink);
+  display: inline-flex; align-items: center; justify-content: center; min-height: 32px; min-width: 52px; padding: 0 var(--sp-3);
+  border: 1px solid var(--line-strong); background: var(--card); font-size: var(--fs-sm); font-weight: 700; color: var(--muted);
+  transition: background-color var(--duration-quick) var(--ease-smooth-out), color var(--duration-quick) var(--ease-smooth-out);
+}
+.ps-cur label:first-of-type span { border-start-start-radius: var(--r-pill); border-end-start-radius: var(--r-pill); }
+.ps-cur label:last-of-type span { border-start-end-radius: var(--r-pill); border-end-end-radius: var(--r-pill); margin-inline-start: -1px; }
+.ps-cur input:checked + span { background: var(--ink); border-color: var(--ink); color: var(--card); }
+.ps-cur input:focus-visible + span { outline: 2px solid var(--blue); outline-offset: 2px; }
+@media (pointer: coarse) { .ps-cur span { min-height: 44px; } }
+/* Quick amounts: tap one and it is in the box below. Chosen is a tint. */
+.ps-picks { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.ps-pick {
+  min-height: 44px; min-width: 72px; padding: 0 var(--sp-4); border-radius: var(--r-pill); cursor: pointer;
+  border: 1px solid var(--line-strong); background: var(--card); color: var(--ink);
+  font: inherit; font-weight: 700; font-variant-numeric: tabular-nums;
   transition: background-color var(--duration-quick) var(--ease-smooth-out), border-color var(--duration-quick) var(--ease-smooth-out);
 }
-/* Chosen: a tint, never a second blue button. */
-.ps-cur input:checked + span { background: var(--tint); border-color: var(--blue); color: var(--blue); }
-.ps-cur input:focus-visible + span { outline: 2px solid var(--blue); outline-offset: 2px; }
-.ps-ask .pp-btn { justify-self: start; }
+.ps-pick[aria-pressed="true"] { background: var(--tint); border-color: var(--blue); color: var(--blue); }
+.ps-pick:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+.ps-sends { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3) var(--sp-4); }
+.ps-wont {
+  min-height: 44px; padding: 0; border: 0; background: none; cursor: pointer;
+  font: inherit; font-weight: 700; color: var(--muted); text-decoration: underline; text-underline-offset: 3px;
+}
+.ps-wont:hover { color: var(--ink); }
+.ps-wont:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; border-radius: var(--r-sm); }
+.ps-after { margin: 0; font-size: var(--fs-sm); color: var(--muted); }
 .ps-msg { margin: 0; min-height: 1.4em; font-size: var(--fs-sm); color: var(--danger); }
 .ps-msg:empty { min-height: 0; }
 .ps-private { margin: 0; font-size: var(--fs-xs); color: var(--muted); }
@@ -131,6 +167,7 @@
 .pp-faq details p { margin: 0 0 var(--sp-4); color: var(--muted); line-height: 1.6; }
 
 @media (max-width: 900px) {
+  .ps-steps { grid-template-columns: 1fr; gap: var(--sp-2); }
   /* A phone meets the question first: the Pro card leads the two stacked plans. */
   .pp-plans { grid-template-columns: 1fr; gap: var(--sp-6); }
   .pp-plan.pro { order: -1; }
@@ -143,4 +180,5 @@
   .ps-ask { padding: var(--sp-4); }
   .pp-act { padding: var(--sp-5) var(--sp-4); }
   .pp-btn, .ps-ask .pp-btn { width: 100%; justify-self: stretch; }
+  .ps-sends { flex-direction: column; align-items: stretch; }
 }

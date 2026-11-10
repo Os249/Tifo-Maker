@@ -25,7 +25,7 @@ import { AI_ON_PRO, CYCLE_DAYS, FREE_WINDOWS, OFFER, PHOTO_ON_PRO, PLAN_WINDOWS,
 import { cutoutConfigured, cutoutForDesign, cutoutPicture, fetchResult, hostAllowed, isPrivateAddress, localCutoutUrl, useLookupForTests } from '../src/cutout';
 import { configWarnings } from '../src/preflight';
 import { kitContext } from '../src/aiRoutes';
-import { GUEST_NEW_PER_DAY, GuestPace, accountVoter, cleanComment, deviceVoter, readPriceInput, summarize } from '../src/proPrice';
+import { GUEST_NEW_PER_DAY, GuestPace, accountVoter, cleanComment, deviceVoter, readPriceInput, summarizeAll, type PriceCounted } from '../src/proPrice';
 
 const map = generateSeatMap(DEFAULT_TEMPLATE);
 const templates: TemplateInfo[] = [{ id: DEFAULT_TEMPLATE.id, version: DEFAULT_TEMPLATE.version, name: DEFAULT_TEMPLATE.name, seatCount: map.count }];
@@ -263,7 +263,7 @@ async function storePromises(label: string, repo: ProRepository, userA: string, 
   const other = deviceVoter(key('c'));
   const mine = accountVoter(userA);
   const put = (voter: string, userId: string | null, amount: number, max = 100_000, absorb: string | null = null) =>
-    repo.putPriceAnswer({ voter, userId, amount, currency: userId ? 'USD' : 'SAR', lang: userId ? 'en' : 'ar', comment: userId ? null : 'store-test', absorb, max });
+    repo.putPriceAnswer({ voter, userId, amount, currency: userId ? 'USD' : 'SAR', lang: userId ? 'en' : 'ar', comment: userId ? null : 'store-test', wontPay: false, source: userId ? 'editor' : 'page', absorb, max });
   assert.equal(await put(browser, null, 12.5), 'saved');
   const first = await repo.priceAnswer(browser);
   assert.deepEqual(first && { amount: first.amount, currency: first.currency, lang: first.lang, comment: first.comment }, { amount: 12.5, currency: 'SAR', lang: 'ar', comment: 'store-test' }, `${label}: kept as given`);
@@ -278,9 +278,16 @@ async function storePromises(label: string, repo: ProRepository, userA: string, 
   assert.equal(await put(other, null, 9, total), 'full', `${label}: at the ceiling a new voter is turned away`);
   assert.equal(await repo.priceAnswer(other), null);
   assert.equal(await put(mine, userA, 25, total), 'saved', `${label}: but anyone already in may change their answer`);
+  assert.equal((await repo.priceAnswer(mine))?.source, 'editor', `${label}: where it was given is kept`);
+  // "Not for me": kept as such, and counted.
+  assert.equal(await repo.putPriceAnswer({ voter: mine, userId: userA, amount: 0, currency: 'USD', lang: 'en', comment: null, wontPay: true, source: 'page', absorb: null, max: total }), 'saved');
+  const wont = await repo.priceAnswer(mine);
+  assert.deepEqual([wont?.amount, wont?.wontPay, wont?.source], [0, true, 'page'], `${label}: "not for me" is kept as given`);
+  assert.ok((await repo.priceCount()) >= 1, `${label}: counted`);
+  await repo.putPriceAnswer({ voter: mine, userId: userA, amount: 25, currency: 'USD', lang: 'en', comment: null, wontPay: false, source: 'editor', absorb: null, max: total });
   const listed = await repo.priceAnswers(5);
   assert.equal(listed.newest[0].amount, 25, `${label}: newest first`);
-  assert.ok(listed.all.some((a) => a.amount === 25 && a.currency === 'USD' && a.account), `${label}: every answer is counted, with whether an account gave it`);
+  assert.ok(listed.all.some((a) => a.amount === 25 && a.currency === 'USD' && a.account && !a.wontPay && a.source === 'editor'), `${label}: every answer is counted, with whether an account gave it and where`);
 }
 
 await storePromises('memory', new MemoryProRepository(), 'mem-user-a', 'mem-user-b');
@@ -298,7 +305,15 @@ await storePromises('memory', new MemoryProRepository(), 'mem-user-a', 'mem-user
   ]) assert.equal(ok(bad).ok, false, `refused: ${JSON.stringify(bad)?.slice(0, 80)}`);
   const r = ok({ ...base, amount: 14.999 });
   assert.equal(r.ok && r.input.amount, 15, 'rounded to two places');
-  assert.equal(ok({ ...base, amount: 0 }).ok, true, '"nothing" is an answer');
+  const zero = ok({ ...base, amount: 0 });
+  assert.ok(zero.ok && zero.input.wontPay && zero.input.amount === 0, '"nothing" is "not for me"');
+  const wontOnly = ok({ currency: 'SAR', lang: 'ar', wontPay: true });
+  assert.ok(wontOnly.ok && wontOnly.input.wontPay && wontOnly.input.amount === 0, '"not for me" needs no amount');
+  const wontOver = ok({ ...base, wontPay: true });
+  assert.ok(wontOver.ok && wontOver.input.amount === 0, '"not for me" drops any amount sent with it');
+  assert.equal(ok(base).ok && (ok(base) as { input: { source: string } }).input.source, 'page', 'the page by default');
+  assert.equal(ok({ ...base, source: 'editor' }).ok, true);
+  for (const bad of [{ ...base, wontPay: 'yes' }, { ...base, source: 'email' }]) assert.equal(ok(bad).ok, false, JSON.stringify(bad));
   assert.equal(ok({ ...base, amount: 999 }).ok, true);
   // The comment: one clean line, no hidden direction marks, 200 characters at most (counted as characters, not UTF-16 units).
   assert.deepEqual(cleanComment('  غالي\u202e شوي \n\t\u0000 جداً '), { ok: true, comment: 'غالي شوي جداً' });
@@ -309,18 +324,22 @@ await storePromises('memory', new MemoryProRepository(), 'mem-user-a', 'mem-user
   assert.equal(accountVoter('abc'), 'u:abc');
   assert.match(deviceVoter('k'.repeat(24)), /^d:[0-9a-f]{64}$/);
   assert.ok(!deviceVoter('k'.repeat(24)).includes('kkkk'), 'the key itself is never kept');
-  // The summary: the median and quartiles as Postgres's percentile_cont, bands per currency.
-  const sum = summarize([
-    { amount: 0, currency: 'SAR', account: false }, { amount: 10, currency: 'SAR', account: true }, { amount: 15, currency: 'SAR', account: true },
-    { amount: 20, currency: 'SAR', account: false }, { amount: 999, currency: 'SAR', account: false }, { amount: 4, currency: 'USD', account: false },
+  // The summary: the median and quartiles as Postgres's percentile_cont, bands per currency;
+  // "not for me" counted apart, never as a price of 0.
+  const a = (amount: number, currency: 'SAR' | 'USD', account: boolean, wontPay = false, source: 'page' | 'editor' = 'page'): PriceCounted => ({ amount, currency, account, wontPay, source });
+  const all = summarizeAll([
+    a(0, 'SAR', true, true, 'editor'), a(10, 'SAR', true, false, 'editor'), a(15, 'SAR', true), a(20, 'SAR', false), a(999, 'SAR', false), a(4, 'USD', false),
   ]);
-  assert.deepEqual([sum.SAR.n, sum.SAR.accounts, sum.SAR.median, sum.SAR.p25, sum.SAR.p75, sum.SAR.min, sum.SAR.max, sum.SAR.accountsMedian], [5, 2, 15, 10, 20, 0, 999, 12.5]);
-  assert.equal(sum.SAR.mean, 208.8);
-  // Bands for SAR: 0 | under 5 | 5-10 | 10-15 | 15-20 | 20-30 | 30-50 | 50+
-  assert.deepEqual(sum.SAR.bands, [1, 0, 0, 1, 1, 1, 0, 1]);
+  const sum = all.summary;
+  assert.deepEqual([sum.SAR.n, sum.SAR.accounts, sum.SAR.median, sum.SAR.p25, sum.SAR.p75, sum.SAR.min, sum.SAR.max, sum.SAR.accountsMedian], [4, 2, 17.5, 13.75, 264.75, 10, 999, 12.5]);
+  assert.equal(sum.SAR.mean, 261);
+  // Bands for SAR: under 5 | 5-10 | 10-15 | 15-20 | 20-30 | 30-50 | 50+
+  assert.deepEqual(sum.SAR.bands, [0, 0, 1, 1, 1, 0, 1]);
   assert.deepEqual([sum.USD.n, sum.USD.median, sum.USD.accountsMedian], [1, 4, null]);
-  // USD: 0 | under 1 | 1-2 | 2-3 | 3-5 | 5-10 | 10-20 | 20+
-  assert.deepEqual(sum.USD.bands, [0, 0, 0, 0, 1, 0, 0, 0]);
+  // USD: under 1 | 1-2 | 2-3 | 3-5 | 5-10 | 10-20 | 20+
+  assert.deepEqual(sum.USD.bands, [0, 0, 0, 1, 0, 0, 0]);
+  assert.deepEqual(all.wontPay, { n: 1, accounts: 1 });
+  assert.deepEqual(all.sources, { page: 4, editor: 2 });
   // The signed-out pace: per address, per Riyadh day.
   const pace = new GuestPace(2);
   const day = new Date('2026-11-08T10:00:00Z');
@@ -437,29 +456,34 @@ const restoreBase = setEnv({ PRO_MODE: undefined, PRO_PREVIEW_USERS: undefined, 
   assert.equal((await price('15', { 'content-type': 'text/plain' })).statusCode, 400, 'a form post from another site carries no JSON');
   const g1 = await price({ amount: 14.999, currency: 'SAR', lang: 'ar', comment: '  غالي\u202e شوي \n ', device: key1 });
   assert.equal(g1.statusCode, 200, g1.body);
-  assert.deepEqual(g1.json().answer, { amount: 15, currency: 'SAR', comment: 'غالي شوي' }, 'rounded to halalas, the comment one clean line');
+  assert.deepEqual(g1.json().answer, { amount: 15, currency: 'SAR', comment: 'غالي شوي', wontPay: false }, 'rounded to halalas, the comment one clean line');
+  assert.equal(g1.json().told, false, 'signed out, nobody to tell');
   const again = await app.inject({ method: 'GET', url: '/api/pro/price', headers: { 'x-price-device': key1 } });
-  assert.deepEqual(again.json(), { answer: { amount: 15, currency: 'SAR', comment: 'غالي شوي' } }, 'the browser sees its answer again');
+  assert.deepEqual(again.json(), { answer: { amount: 15, currency: 'SAR', comment: 'غالي شوي', wontPay: false }, answered: 1 }, 'the browser sees its answer again, and how many have answered');
   assert.equal(again.headers['cache-control'], 'no-store');
-  assert.deepEqual(await priceOf({}), { answer: null }, 'no key, no answer');
-  assert.deepEqual(await priceOf({ 'x-price-device': 'b'.repeat(32) }), { answer: null }, "another browser sees nothing of this one's");
+  assert.equal((await priceOf({})).answer, null, 'no key, no answer');
+  assert.equal((await priceOf({ 'x-price-device': 'b'.repeat(32) })).answer, null, "another browser sees nothing of this one's");
   await price({ amount: 10, currency: 'USD', lang: 'en', device: key1 });
   let seen = await prices();
   assert.equal(seen.total, 1, 'answering again replaces the first');
-  assert.deepEqual({ ...seen.rows[0], at: undefined }, { at: undefined, amount: 10, currency: 'USD', lang: 'en', username: null, comment: null });
+  assert.deepEqual({ ...seen.rows[0], at: undefined }, { at: undefined, amount: 10, currency: 'USD', wontPay: false, source: 'page', lang: 'en', username: null, comment: null });
   // Signing in: the account answers, and this browser's answer becomes the account's.
-  const acct = await price({ amount: 19, currency: 'SAR', lang: 'ar', device: key1 }, bearer(other.token));
+  const acct = await price({ amount: 19, currency: 'SAR', lang: 'ar', device: key1, source: 'editor' }, bearer(other.token));
   assert.equal(acct.statusCode, 200);
+  assert.equal(acct.json().told, true, 'a signed-in answer is told first: the thank-you the question promises');
   seen = await prices();
   assert.equal(seen.total, 1, 'one answer, not two');
   assert.equal(seen.rows[0].username, 'other_pro', 'named by its account');
   assert.equal(seen.rows[0].amount, 19);
-  assert.deepEqual(await priceOf(bearer(other.token)), { answer: { amount: 19, currency: 'SAR', comment: null } });
-  // Another account, no browser key; "nothing" and a formula-shaped comment are just answers.
-  assert.equal((await price({ amount: 0, currency: 'USD', lang: 'en', comment: '=HYPERLINK("http://x")' }, bearer(fan.token))).statusCode, 200);
+  assert.equal(seen.rows[0].source, 'editor');
+  assert.deepEqual((await priceOf(bearer(other.token))).answer, { amount: 19, currency: 'SAR', comment: null, wontPay: false });
+  // Another account, no browser key; "not for me" and a formula-shaped comment are just answers.
+  assert.equal((await price({ currency: 'USD', lang: 'en', wontPay: true, comment: '=HYPERLINK("http://x")' }, bearer(fan.token))).statusCode, 200);
   seen = await prices();
   assert.equal(seen.total, 2);
-  assert.deepEqual([seen.summary.SAR.n, seen.summary.SAR.accounts, seen.summary.SAR.median, seen.summary.USD.n, seen.summary.USD.median], [1, 1, 19, 1, 0]);
+  assert.deepEqual([seen.summary.SAR.n, seen.summary.SAR.accounts, seen.summary.SAR.median, seen.summary.USD.n], [1, 1, 19, 0]);
+  assert.deepEqual([seen.wontPay, seen.sources], [{ n: 1, accounts: 1 }, { page: 1, editor: 1 }]);
+  assert.equal(seen.rows[0].wontPay, true);
   assert.equal(seen.rows[0].comment, '=HYPERLINK("http://x")', 'kept as typed: /admin escapes it and the CSV disarms it');
   assert.deepEqual(seen.bands, { SAR: [5, 10, 15, 20, 30, 50], USD: [1, 2, 3, 5, 10, 20] });
   // Only the admin reads them.
@@ -476,7 +500,7 @@ const restoreBase = setEnv({ PRO_MODE: undefined, PRO_PREVIEW_USERS: undefined, 
   assert.equal((await price({ amount: 6, currency: 'SAR', lang: 'ar', device: keyN(99) }, {}, '10.9.0.78')).statusCode, 200, 'another address is its own');
   // The account's own copy of its data has its answer.
   const exported = (await app.inject({ method: 'GET', url: '/api/account/export', headers: bearer(other.token) })).json() as Record<string, any>;
-  assert.deepEqual({ ...exported.pro.priceAnswer, at: undefined }, { amount: 19, currency: 'SAR', comment: null, at: undefined });
+  assert.deepEqual({ ...exported.pro.priceAnswer, at: undefined }, { amount: 19, currency: 'SAR', comment: null, wontPay: false, at: undefined });
 
   // Admin: closed to everyone else, validated, audited.
   for (const headers of [undefined, bearer(fan.token)]) {

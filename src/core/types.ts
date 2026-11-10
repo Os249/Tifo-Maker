@@ -823,6 +823,12 @@ export interface SeatOpening {
   /** The rows it takes, [first, last], 0 = the tier's front row. */
   rows: [number, number];
   kind?: 'vomitory' | 'tunnel' | 'gate';
+  /**
+   * How much of `width` is the mouth itself, metres, centred: the rest is
+   * open landing either side of it (seat-free deck, no dark mouth, no
+   * parapet). Omitted: the mouth is the whole width.
+   */
+  mouth?: number;
 }
 
 /** A stretch of one side of a ring tier with no seats (TierSpec.omit). */

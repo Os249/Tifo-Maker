@@ -140,7 +140,7 @@ const device = async (token, { lang = 'en', w = 1440, h = 900, phone = false, th
   const ctx = await browser.newContext({ viewport: { width: w, height: h }, acceptDownloads: true, ...(phone ? { deviceScaleFactor: 2, isMobile: true, hasTouch: true } : {}) });
   await ctx.addInitScript(([tok, lang, theme]) => {
     try {
-      for (const [k, v] of Object.entries({ tifo_consent_v1: 'essential', tifo_guide_v1: 'done', tifo_onboarded_v1: '1', tifo_news_banners_v1: '1', tifo_news_leagues_v2: '1', tifo_banner_tour_v1: '1', tifo_post_nudge_v1: '1', tifo_view_v1: '2d', tifo_lang_v1: lang, mds_seen_intro: '1', mds_sound_v2: JSON.stringify({ on: false }) })) {
+      for (const [k, v] of Object.entries({ tifo_consent_v1: 'essential', tifo_guide_v1: 'done', tifo_onboarded_v1: '1', tifo_news_banners_v1: '1', tifo_news_leagues_v2: '1', tifo_price_ask_v1: '{"n":2,"until":0}', tifo_banner_tour_v1: '1', tifo_post_nudge_v1: '1', tifo_view_v1: '2d', tifo_lang_v1: lang, mds_seen_intro: '1', mds_sound_v2: JSON.stringify({ on: false }) })) {
         if (localStorage.getItem(k) === null) localStorage.setItem(k, v);
       }
       if (theme) localStorage.setItem('tifo_theme_v1', theme);

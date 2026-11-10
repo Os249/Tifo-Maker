@@ -43,7 +43,7 @@ const GROUNDS = [
   ['chang-arena-33k', 32203, 'Chang Arena (Buriram)', 'تشانغ أرينا (بوريرام)'],
   ['pat-stadium-12k', 12028, 'PAT Stadium (Bangkok)', 'ملعب هيئة موانئ تايلاند (بانكوك)'],
   ['thunderdome-15k', 14786, 'Thunderdome Stadium (Nonthaburi)', 'ملعب ثندردوم (نونثابوري)'],
-  ['al-zawraa-15k', 14078, 'Al-Zawraa Stadium (Baghdad)', 'ملعب الزوراء (بغداد)'],
+  ['al-zawraa-15k', 19598, 'Al-Zawraa Stadium (Baghdad)', 'ملعب الزوراء (بغداد)'],
 ];
 const only = process.argv[2] ?? '';
 
@@ -61,7 +61,7 @@ const check = (name, ok, extra = '') => {
 const LS = (lang = 'en') => [
   { name: 'tifo_lang_v1', value: lang },
   { name: 'tifo_onboarded_v1', value: '1' },
-  { name: 'tifo_news_banners_v1', value: '1' }, { name: 'tifo_news_leagues_v2', value: '1' }, { name: 'tifo_guide_v1', value: 'done' },
+  { name: 'tifo_news_banners_v1', value: '1' }, { name: 'tifo_news_leagues_v2', value: '1' }, { name: 'tifo_price_ask_v1', value: '{"n":2,"until":0}' }, { name: 'tifo_guide_v1', value: 'done' },
   { name: 'tifo_banner_tour_v1', value: '1' },
   { name: 'mds_seen_intro', value: '1' },
   { name: 'mds_sound_v2', value: JSON.stringify({ on: false }) },

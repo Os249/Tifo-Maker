@@ -1183,7 +1183,8 @@ export async function buildApp(
     'pro_viewed',      // opened the Pro page
     'pro_limit',       // met a Pro limit card (an allowance used up)
     'pro_notify',      // asked to be told when Pro opens
-    'pro_price',       // said what a month of Pro is worth (the coming-soon page)
+    'pro_ask_seen',    // the editor's founding-fans card asked them (priceAsk.ts)
+    'pro_price',       // said what a month of Pro is worth (/pro or the editor's card)
     'gift_accepted',   // accepted the 7-day Pro gift
     'cutout_used',     // a smart cut-out came back
     'export_sheet',    // the export sheet listed Pro items
@@ -3019,7 +3020,7 @@ export async function buildApp(
         gift: gift ? { offeredAt: gift.offeredAt, acceptedAt: gift.acceptedAt } : null,
         kits,
         credit,
-        priceAnswer: price ? { amount: price.amount, currency: price.currency, comment: price.comment, at: price.updatedAt } : null,
+        priceAnswer: price ? { amount: price.amount, currency: price.currency, comment: price.comment, wontPay: price.wontPay, at: price.updatedAt } : null,
       },
     });
   });

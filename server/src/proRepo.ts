@@ -15,7 +15,7 @@ import { randomUUID } from 'node:crypto';
 import type pg from 'pg';
 import type { AllowanceKind, PassPlan } from './proPlan';
 import { LEGACY_PAID_PLANS, PAID_PLANS, PASS_PLANS, normalizePlan } from './proPlan';
-import type { PriceCurrency } from './proPrice';
+import type { PriceCounted, PriceCurrency, PriceSource } from './proPrice';
 
 export interface ProPass {
   id: string;
@@ -55,6 +55,10 @@ export interface PriceAnswer {
   currency: PriceCurrency;
   lang: 'en' | 'ar';
   comment: string | null;
+  /** "Not for me" (amount 0). */
+  wontPay: boolean;
+  /** Where it was given: the /pro page or the editor's card. */
+  source: PriceSource;
   createdAt: string;
   updatedAt: string;
 }
@@ -73,6 +77,8 @@ export interface PriceAnswerPut {
   currency: PriceCurrency;
   lang: 'en' | 'ar';
   comment: string | null;
+  wontPay: boolean;
+  source: PriceSource;
   /** A browser's voter whose answer this one replaces too: answered signed out, then signed in. */
   absorb: string | null;
   /** Answers kept at most: a new voter past it is turned away ('full'). */
@@ -117,7 +123,9 @@ export interface ProRepository {
   putPriceAnswer(a: PriceAnswerPut): Promise<'saved' | 'full'>;
   priceAnswer(voter: string): Promise<PriceAnswer | null>;
   /** Every answer's amount (for the summary) and the newest `limit` in full, newest first. */
-  priceAnswers(limit: number): Promise<{ all: { amount: number; currency: PriceCurrency; account: boolean }[]; newest: PriceAnswerRow[] }>;
+  priceAnswers(limit: number): Promise<{ all: PriceCounted[]; newest: PriceAnswerRow[] }>;
+  /** How many answers there are (the page's "N fans have answered"). */
+  priceCount(): Promise<number>;
 
   stats(now: Date): Promise<ProStats>;
   /** Drop allowance counters nobody has touched for this long. */
@@ -256,7 +264,7 @@ export class MemoryProRepository implements ProRepository {
     if (absorbed) this.prices.delete(a.absorb!);
     const now = new Date().toISOString();
     this.prices.set(a.voter, {
-      amount: a.amount, currency: a.currency, lang: a.lang, comment: a.comment, userId: a.userId,
+      amount: a.amount, currency: a.currency, lang: a.lang, comment: a.comment, wontPay: a.wontPay, source: a.source, userId: a.userId,
       createdAt: had?.createdAt ?? absorbed?.createdAt ?? now, updatedAt: now, seq: ++this.priceSeq,
     });
     return 'saved';
@@ -264,15 +272,19 @@ export class MemoryProRepository implements ProRepository {
 
   async priceAnswer(voter: string): Promise<PriceAnswer | null> {
     const p = this.prices.get(voter);
-    return p ? { amount: p.amount, currency: p.currency, lang: p.lang, comment: p.comment, createdAt: p.createdAt, updatedAt: p.updatedAt } : null;
+    return p ? { amount: p.amount, currency: p.currency, lang: p.lang, comment: p.comment, wontPay: p.wontPay, source: p.source, createdAt: p.createdAt, updatedAt: p.updatedAt } : null;
   }
 
-  async priceAnswers(limit: number): Promise<{ all: { amount: number; currency: PriceCurrency; account: boolean }[]; newest: PriceAnswerRow[] }> {
+  async priceCount(): Promise<number> {
+    return this.prices.size;
+  }
+
+  async priceAnswers(limit: number): Promise<{ all: PriceCounted[]; newest: PriceAnswerRow[] }> {
     const rows = [...this.prices.values()].sort((x, y) => y.seq - x.seq);
     return {
-      all: rows.map((p) => ({ amount: p.amount, currency: p.currency, account: !!p.userId })),
+      all: rows.map((p) => ({ amount: p.amount, currency: p.currency, account: !!p.userId, wontPay: p.wontPay, source: p.source })),
       newest: rows.slice(0, limit).map((p) => ({
-        amount: p.amount, currency: p.currency, lang: p.lang, comment: p.comment, createdAt: p.createdAt, updatedAt: p.updatedAt,
+        amount: p.amount, currency: p.currency, lang: p.lang, comment: p.comment, wontPay: p.wontPay, source: p.source, createdAt: p.createdAt, updatedAt: p.updatedAt,
         username: p.userId ? this.nameOf(p.userId) : null,
       })),
     };
@@ -340,6 +352,8 @@ function rowToPrice(r: Record<string, unknown>): PriceAnswer {
     currency: String(r.currency) as PriceCurrency,
     lang: r.lang === 'ar' ? 'ar' : 'en',
     comment: r.comment == null ? null : String(r.comment),
+    wontPay: r.wont_pay === true,
+    source: r.source === 'editor' ? 'editor' : 'page',
     createdAt: iso(r.created_at as string)!,
     updatedAt: iso(r.updated_at as string)!,
   };
@@ -511,14 +525,15 @@ export class PgProRepository implements ProRepository {
       // not locked: two racing new voters can pass it by one, which is fine
       // for a ceiling that only exists to stop the table growing for ever.
       const r = await client.query(
-        `INSERT INTO pro_price_answers (voter, user_id, amount, currency, lang, comment, created_at)
-         SELECT $1, $2, $3, $4, $5, $6, COALESCE($8::timestamptz, now())
+        `INSERT INTO pro_price_answers (voter, user_id, amount, currency, lang, comment, wont_pay, source, created_at)
+         SELECT $1, $2, $3, $4, $5, $6, $9, $10, COALESCE($8::timestamptz, now())
          WHERE (SELECT count(*) FROM pro_price_answers) < $7
             OR EXISTS (SELECT 1 FROM pro_price_answers WHERE voter = $1)
          ON CONFLICT (voter) DO UPDATE
            SET amount = EXCLUDED.amount, currency = EXCLUDED.currency, lang = EXCLUDED.lang,
-               comment = EXCLUDED.comment, user_id = EXCLUDED.user_id, updated_at = now()`,
-        [a.voter, a.userId, a.amount, a.currency, a.lang, a.comment, a.max, since],
+               comment = EXCLUDED.comment, user_id = EXCLUDED.user_id, wont_pay = EXCLUDED.wont_pay,
+               source = EXCLUDED.source, updated_at = now()`,
+        [a.voter, a.userId, a.amount, a.currency, a.lang, a.comment, a.max, since, a.wontPay, a.source],
       );
       if (!r.rowCount) {
         await client.query('ROLLBACK');
@@ -535,23 +550,31 @@ export class PgProRepository implements ProRepository {
   }
 
   async priceAnswer(voter: string): Promise<PriceAnswer | null> {
-    const r = await this.pool.query('SELECT amount, currency, lang, comment, created_at, updated_at FROM pro_price_answers WHERE voter = $1', [voter]);
+    const r = await this.pool.query('SELECT amount, currency, lang, comment, wont_pay, source, created_at, updated_at FROM pro_price_answers WHERE voter = $1', [voter]);
     const x = r.rows[0];
     return x ? rowToPrice(x) : null;
   }
 
-  async priceAnswers(limit: number): Promise<{ all: { amount: number; currency: PriceCurrency; account: boolean }[]; newest: PriceAnswerRow[] }> {
+  async priceCount(): Promise<number> {
+    const r = await this.pool.query('SELECT count(*)::int AS n FROM pro_price_answers');
+    return Number(r.rows[0]?.n ?? 0);
+  }
+
+  async priceAnswers(limit: number): Promise<{ all: PriceCounted[]; newest: PriceAnswerRow[] }> {
     const [all, newest] = await Promise.all([
-      this.pool.query('SELECT amount, currency, user_id IS NOT NULL AS account FROM pro_price_answers'),
+      this.pool.query('SELECT amount, currency, user_id IS NOT NULL AS account, wont_pay, source FROM pro_price_answers'),
       this.pool.query(
-        `SELECT p.amount, p.currency, p.lang, p.comment, p.created_at, p.updated_at, u.username
+        `SELECT p.amount, p.currency, p.lang, p.comment, p.wont_pay, p.source, p.created_at, p.updated_at, u.username
          FROM pro_price_answers p LEFT JOIN users u ON u.id = p.user_id
          ORDER BY p.updated_at DESC, p.id DESC LIMIT $1`,
         [limit],
       ),
     ]);
     return {
-      all: all.rows.map((x) => ({ amount: Number(x.amount), currency: x.currency as PriceCurrency, account: !!x.account })),
+      all: all.rows.map((x) => ({
+        amount: Number(x.amount), currency: x.currency as PriceCurrency, account: !!x.account,
+        wontPay: x.wont_pay === true, source: x.source === 'editor' ? 'editor' as const : 'page' as const,
+      })),
       newest: newest.rows.map((x) => ({ ...rowToPrice(x), username: x.username ? String(x.username) : null })),
     };
   }

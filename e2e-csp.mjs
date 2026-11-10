@@ -36,7 +36,7 @@ const PW = 'harbor-kite-moss-31-csp';
 const LS = (lang, token) => [
   { name: 'tifo_lang_v1', value: lang }, { name: 'tifo_consent_v1', value: 'essential' },
   { name: 'tifo_onboarded_v1', value: '1' }, { name: 'tifo_news_banners_v1', value: '1' },
-  { name: 'tifo_news_leagues_v1', value: '1' }, { name: 'tifo_news_leagues_v2', value: '1' },
+  { name: 'tifo_news_leagues_v1', value: '1' }, { name: 'tifo_news_leagues_v2', value: '1' }, { name: 'tifo_price_ask_v1', value: '{"n":2,"until":0}' },
   { name: 'tifo_banner_tour_v1', value: '1' }, { name: 'tifo_draw_hint_v1', value: '1' },
   { name: 'tifo_tour_v1', value: '1' }, { name: 'tifo_post_nudge_v1', value: '1' }, { name: 'tifo_post_offered_v1', value: '1' },
   { name: 'mds_seen_intro', value: '1' }, { name: 'mds_sound_v2', value: JSON.stringify({ on: false }) },

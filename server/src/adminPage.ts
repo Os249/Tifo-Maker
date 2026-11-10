@@ -664,7 +664,8 @@ var FUNNEL_STEP = {
   pro_viewed:     ['Opened the Pro page','coming soon, with the price question'],
   pro_limit:      ['Met a Pro limit card','an allowance used up'],
   pro_notify:     ['Asked to hear when Pro opens','one per account'],
-  pro_price:      ['Said what Pro is worth','answered the price question'],
+  pro_ask_seen:   ['Asked in the editor','the founding-fans card, once'],
+  pro_price:      ['Said what Pro is worth','on /pro or in the editor card'],
   gift_accepted:  ['Accepted the 7-day gift','Pro for 7 days'],
   cutout_used:    ['Got a smart cut-out','a picture lifted out'],
   export_sheet:   ['Saw the export sheet','their tifo had Pro items'],
@@ -1865,9 +1866,9 @@ function priceText(n, cur){
   n = Number(n) || 0;
   return cur + ' ' + (n % 1 ? n.toFixed(2) : String(n));
 }
-/* The bands' names, from the edges the server counted by: 0, under the first edge, then up to each, then the last and above. */
+/* The bands' names, from the edges the server counted by: under the first edge, then up to each, then the last and above. */
 function bandNames(edges){
-  var out = ['nothing (0)', 'under ' + edges[0]];
+  var out = ['under ' + edges[0]];
   for (var i = 1; i < edges.length; i++) out.push(edges[i - 1] + ' to under ' + edges[i]);
   out.push(edges[edges.length - 1] + ' and over');
   return out;
@@ -1880,6 +1881,13 @@ function pricesHtml(){
   html += '<p class="note">Asked on /pro while Pro is not on sale, in riyals or US dollars (the page starts in riyals in Arabic, dollars in English). One answer per account, or per browser for a visitor who is signed out; answering again replaces the first. '
         + fmt(PRICES.total) + ' answer' + (PRICES.total === 1 ? '' : 's') + ' so far (at most ' + fmt(PRICES.max) + ' are kept).</p>';
   if (!PRICES.total) return html + '<p class="empty">No answers yet.</p>';
+  var wont = PRICES.wontPay || { n: 0, accounts: 0 }, src = PRICES.sources || { page: 0, editor: 0 };
+  html += '<div class="grid">';
+  html += kpi('Would pay something', PRICES.total - wont.n, Math.round((PRICES.total - wont.n) / PRICES.total * 100) + '% of answers', true);
+  html += kpi('Not for me', wont.n, Math.round(wont.n / PRICES.total * 100) + '% of answers, ' + fmt(wont.accounts) + ' from accounts', true);
+  html += kpi('From the editor card', src.editor, 'signed-in fans, asked once', true);
+  html += kpi('From the /pro page', src.page, 'anyone', true);
+  html += '</div>';
   html += '<table class="tbl"><thead><tr><th>Currency</th><th>Answers</th><th>From accounts</th><th>Median</th><th>Middle half</th><th>Average</th><th>Lowest</th><th>Highest</th><th>Median, accounts only</th></tr></thead><tbody>';
   for (var c = 0; c < PRICE_CUR.length; c++){
     var cur = PRICE_CUR[c], s = PRICES.summary && PRICES.summary[cur];
@@ -1890,7 +1898,7 @@ function pricesHtml(){
       + esc(priceText(s.max, cur)) + '</td><td>' + (s.accountsMedian == null ? '<span class="dim">none yet</span>' : esc(priceText(s.accountsMedian, cur))) + '</td></tr>';
   }
   html += '</tbody></table>';
-  html += '<p class="note">The median is the middle answer, and the middle half is where the central 50% of answers fall: both shrug off a joke answer of 999 that would pull the average. Answers from accounts are harder to repeat than signed-out ones.</p>';
+  html += '<p class="note">The prices leave out "Not for me" (counted above). The median is the middle answer, and the middle half is where the central 50% of answers fall: both shrug off a joke answer of 999 that would pull the average. Answers from accounts are harder to repeat than signed-out ones.</p>';
 
   html += '<div class="grid two">';
   for (c = 0; c < PRICE_CUR.length; c++){
@@ -1909,11 +1917,11 @@ function pricesHtml(){
   var rows = PRICES.rows || [];
   html += '<h2 class="sec">Every answer, newest first <button id="price-csv" type="button">Download all as CSV</button></h2>';
   html += '<p id="price-csv-out" class="note" role="status" aria-live="polite"></p>';
-  html += '<table class="tbl"><thead><tr><th>When (UTC)</th><th>Price a month</th><th>Who</th><th>Page</th><th>Comment</th></tr></thead><tbody>';
+  html += '<table class="tbl"><thead><tr><th>When (UTC)</th><th>Price a month</th><th>Who</th><th>Where</th><th>Language</th><th>Comment</th></tr></thead><tbody>';
   for (var i = 0; i < rows.length; i++){
     var r = rows[i];
-    html += '<tr><td>' + esc(String(r.at || '').slice(0, 16).replace('T', ' ')) + '</td><td><b>' + esc(priceText(r.amount, r.currency)) + '</b></td><td>'
-      + (r.username ? '@' + esc(r.username) : '<span class="dim">signed out</span>') + '</td><td>' + (r.lang === 'ar' ? 'Arabic' : 'English') + '</td><td>'
+    html += '<tr><td>' + esc(String(r.at || '').slice(0, 16).replace('T', ' ')) + '</td><td>' + (r.wontPay ? '<span class="dim">Not for me</span>' : '<b>' + esc(priceText(r.amount, r.currency)) + '</b>') + '</td><td>'
+      + (r.username ? '@' + esc(r.username) : '<span class="dim">signed out</span>') + '</td><td>' + (r.source === 'editor' ? 'editor card' : '/pro') + '</td><td>' + (r.lang === 'ar' ? 'Arabic' : 'English') + '</td><td>'
       + (r.comment ? '<bdi>' + esc(r.comment) + '</bdi>' : '<span class="dim">none</span>') + '</td></tr>';
   }
   html += '</tbody></table>';
@@ -1933,11 +1941,11 @@ async function downloadPricesCsv(){
   var r = await api('/api/admin/pro/prices?all=1');
   if (!r.ok || !r.data){ out.textContent = 'Could not fetch them (HTTP ' + r.status + ').'; return; }
   var NL = String.fromCharCode(13, 10);
-  var lines = ['when_utc,amount,currency,page_language,account,comment'];
+  var lines = ['when_utc,amount,currency,not_for_me,where,page_language,account,comment'];
   var rows = r.data.rows || [];
   for (var i = 0; i < rows.length; i++){
     var x = rows[i];
-    lines.push([csvCell(x.at), csvCell(x.amount), csvCell(x.currency), csvCell(x.lang), csvCell(x.username ? '@' + x.username : ''), csvCell(x.comment || '')].join(','));
+    lines.push([csvCell(x.at), csvCell(x.wontPay ? '' : x.amount), csvCell(x.currency), csvCell(x.wontPay ? 'yes' : 'no'), csvCell(x.source === 'editor' ? 'editor card' : '/pro'), csvCell(x.lang), csvCell(x.username ? '@' + x.username : ''), csvCell(x.comment || '')].join(','));
   }
   /* The byte-order mark makes Excel read the Arabic comments as UTF-8. */
   var blob = new Blob([String.fromCharCode(65279) + lines.join(NL) + NL], { type: 'text/csv;charset=utf-8' });

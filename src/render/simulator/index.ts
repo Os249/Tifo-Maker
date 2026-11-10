@@ -936,8 +936,11 @@ export class MatchDaySimulator {
     // A seat card is 0.45 m wide, or a little under the seat pitch where a
     // ground's seats sit closer than that (Al-Zawraa's, at 0.36 m), so the
     // cards never overlap and fight for depth.
+    // And 0.7 m tall, or nine tenths of the row where the rows are closer
+    // than a card (Al-Zawraa's again, 0.52 m), so each row reads as a row.
     const pitch = Math.min(...this.template.tiers.map((t) => t.seatPitch));
-    const geometry = new THREE.PlaneGeometry(Math.min(0.45, pitch - 0.02), 0.7);
+    const row = Math.min(...this.template.tiers.map((t) => t.rowDepth));
+    const geometry = new THREE.PlaneGeometry(Math.min(0.45, pitch - 0.02), Math.min(0.7, row * 0.9));
     const material = new THREE.MeshBasicMaterial({ side: THREE.DoubleSide });
     // A reveal playing is worked out per card here (performance plan P3.2),
     // by applyReveal's rules: the design's colour mixed from the empty seat's

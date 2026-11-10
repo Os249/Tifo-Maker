@@ -92,7 +92,7 @@ const page = async (token, { lang = 'en', w = 1440, h = 900, ls = {} } = {}) => 
   const ctx = await browser.newContext({ viewport: { width: w, height: h } });
   await ctx.addInitScript(([tok, lang, ls]) => {
     try {
-      for (const [k, v] of Object.entries({ tifo_consent_v1: 'essential', tifo_guide_v1: 'done', tifo_onboarded_v1: '1', tifo_news_banners_v1: '1', tifo_news_leagues_v2: '1', tifo_banner_tour_v1: '1', tifo_lang_v1: lang, ...ls })) {
+      for (const [k, v] of Object.entries({ tifo_consent_v1: 'essential', tifo_guide_v1: 'done', tifo_onboarded_v1: '1', tifo_news_banners_v1: '1', tifo_news_leagues_v2: '1', tifo_price_ask_v1: '{"n":2,"until":0}', tifo_banner_tour_v1: '1', tifo_lang_v1: lang, ...ls })) {
         if (localStorage.getItem(k) === null) localStorage.setItem(k, v);
       }
       if (tok) localStorage.setItem('tifo_token_v1', tok);
@@ -122,7 +122,7 @@ console.log('\n— an account Pro is not on for —');
   const pj = await p.evaluate(() => ({ card: !!document.querySelector('.pro-card:not([hidden])'), chip: !!document.querySelector('.pro-head-chip:not([hidden])') }));
   check('My projects: no gift card, no countdown chip', !pj.card && !pj.chip, JSON.stringify(pj));
   await p.goto(`${B}/pro`, { waitUntil: 'networkidle' });
-  check('/pro: coming soon, the two plans, and no price on either', await waitFor(p, () => document.querySelectorAll('.pp-plan').length === 2 && /coming soon/i.test(document.getElementById('pp-h')?.textContent || '') && !/SAR \d|\$\d|USD \d/.test(document.body.innerText)));
+  check('/pro: help us price it, the two plans, and no price on either', await waitFor(p, () => document.querySelectorAll('.pp-plan').length === 2 && /Help us price Pro/.test(document.getElementById('pp-h')?.textContent || '') && !/\$\d/.test(document.body.innerText) && !/SAR 19|USD 5 a month/.test(document.body.innerText)));
   check('…Free says it is free, Pro asks what it is worth', await p.evaluate(() => /Always free/.test(document.querySelector('#pp-plan-free')?.closest('.pp-plan')?.textContent || '') && !!document.querySelector('#pp-plan-pro')?.closest('.pp-plan')?.querySelector('form#ps-ask #ps-amount')));
   const notify = p.locator('#pp-act [data-act="notify"]');
   check('…and an account off the list can ask to be told when it opens, quietly', (await notify.count()) === 1 && await notify.evaluate((b) => b.classList.contains('quiet')));
@@ -265,7 +265,7 @@ console.log('\n— an account on the preview list —');
     group: !!document.querySelector('.pp-group'),
     over: document.documentElement.scrollWidth - innerWidth,
   }));
-  check('…Pro with no price but the question, and every new perk in its column', !/SAR \d|USD \d/.test(pp.pro) && /What would you pay for a month of Pro\?/.test(pp.pro) && /30 days of Pro/.test(pp.pro) && ['any export', '9:16', '4K poster', 'Portrait styles', 'Pro fonts', 'LED boards', 'Club kit', 'Supporter crown'].every((w) => pp.pro.includes(w)), pp.pro.slice(0, 400));
+  check('…Pro with no price but the question, and every new perk in its column', !/SAR 19|USD 5 a month/.test(pp.pro) && /What would you pay for a month of Pro\?/.test(pp.pro) && /30 days of Pro/.test(pp.pro) && ['any export', '9:16', '4K poster', 'Portrait styles', 'Pro fonts', 'LED boards', 'Club kit', 'Supporter crown'].every((w) => pp.pro.includes(w)), pp.pro.slice(0, 400));
   check('…Free: always free, a cut-out a week, none of Pro\'s perks', /1 a week/.test(pp.free) && /Always free/.test(pp.free), pp.free.slice(0, 300));
   if (AI_ON_PRO) check('…AI designs and Polish rows: Free 10 a day and 40 a month, Pro 15 and 70; and the smart cut-out', /10 a day/.test(pp.free) && /40 a month/.test(pp.free) && /15 a day/.test(pp.pro) && /70 a month/.test(pp.pro) && /Polish/.test(pp.pro) && /Smart cut-out/.test(pp.pro));
   else check('…no AI designs or Polish rows: Pro adds none (AI_ON_PRO), but the smart cut-out is there', !/AI designs|Polish/.test(pp.pro + pp.free) && /Smart cut-out/.test(pp.pro));
@@ -284,7 +284,7 @@ console.log('\n— an account on the preview list —');
   await p.goto(`${B}/ar/account`, { waitUntil: 'networkidle' });
   check('in Arabic: "باقتك" and the gift\'s name', await waitFor(p, () => { const s = document.getElementById('pro'); return !!s && !s.hidden && /باقتك/.test(s.textContent) && /الهدية المميّزة/.test(s.textContent); }));
   await p.goto(`${B}/ar/pro`, { waitUntil: 'networkidle' });
-  check('/ar/pro: المميّزة قريب، بدون سعر، وتسأل كم تدفع', await waitFor(p, () => /كم تدفع على شهر المميّزة/.test(document.querySelector('#pp-plan-pro')?.closest('.pp-plan')?.textContent || '') && !/\d+ ريال/.test(document.querySelector('#pp-plan-pro')?.closest('.pp-plan')?.textContent || '') && document.documentElement.dir === 'rtl'));
+  check('/ar/pro: المميّزة قريب، بدون سعر، وتسأل كم تدفع', await waitFor(p, () => /كم تدفع على شهر المميّزة/.test(document.querySelector('#pp-plan-pro')?.closest('.pp-plan')?.textContent || '') && !/19 ريال/.test(document.querySelector('#pp-plan-pro')?.closest('.pp-plan')?.textContent || '') && document.documentElement.dir === 'rtl'));
   await p.goto(`${B}/ar/projects`, { waitUntil: 'networkidle' });
   check('…and the chip says مميّز', await waitFor(p, () => /^مميّز · باقي 7 أيام$/.test(document.querySelector('.pro-head-chip:not([hidden])')?.textContent || '')));
   const over = await p.evaluate(() => document.documentElement.scrollWidth - innerWidth);
@@ -299,11 +299,24 @@ console.log('\n— the price question —');
   const { ctx, p } = await page(null);
   await p.goto(`${B}/pro`, { waitUntil: 'networkidle' });
   await waitFor(p, () => !!document.getElementById('ps-amount'));
+  const top = await p.evaluate(() => ({
+    h1: document.getElementById('pp-h')?.textContent,
+    steps: [...document.querySelectorAll('.ps-steps li b')].map((b) => b.textContent),
+    nocharge: /Nothing is charged/.test(document.querySelector('.ps-steps')?.textContent || ''),
+    count: document.getElementById('ps-count')?.hidden,
+  }));
+  check('it says what this is: "Help us price Pro", then three steps', top.h1 === 'Help us price Pro' && top.steps.length === 3 && /isn't on sale/.test(top.steps[0]) && /worth to you/.test(top.steps[1]) && /from your answers/.test(top.steps[2]), JSON.stringify(top));
+  check('…"nothing is charged" is said before the question', top.nocharge);
+  check('…and under five answers, no count ("2 fans have answered" would read as nobody)', top.count === true);
   check('signed out: the question is there, in dollars for an English page', await p.evaluate(() => document.querySelector('input[name="ps-cur"]:checked')?.value === 'USD'));
+  check('…with quick amounts in dollars', await p.evaluate(() => [...document.querySelectorAll('.ps-pick')].map((b) => b.textContent).join('|') === 'USD 1|USD 2|USD 3|USD 5|USD 8'));
   check('…and "tell me" asks to sign in, quietly', await p.evaluate(() => { const b = document.querySelector('#pp-act [data-act="signin"]'); return !!b && b.classList.contains('quiet') && /Sign in to be told/.test(b.textContent); }));
   await p.click('#ps-send');
-  check('an empty answer is caught on the page, and said why', await waitFor(p, () => /from 0 to 999/.test(document.getElementById('ps-msg')?.textContent || '') && document.getElementById('ps-amount').getAttribute('aria-invalid') === 'true'));
+  check('an empty answer is caught on the page, and said why', await waitFor(p, () => /up to 999/.test(document.getElementById('ps-msg')?.textContent || '') && document.getElementById('ps-amount').getAttribute('aria-invalid') === 'true'));
+  await p.click('.ps-pick[data-pick="3"]');
+  check('a quick amount fills the box and shows chosen', await p.evaluate(() => document.getElementById('ps-amount').value === '3' && document.querySelector('.ps-pick[data-pick="3"]').getAttribute('aria-pressed') === 'true'));
   await p.fill('#ps-amount', '12.5');
+  check('…typing another amount unchooses it', await p.evaluate(() => !document.querySelector('.ps-pick[aria-pressed="true"]')));
   await p.fill('#ps-comment', 'Worth it for the 4K poster');
   await p.click('#ps-send');
   check('sent: thanks, with the answer as given', await waitFor(p, () => /^Thanks! You said USD 12\.50 a month\.$/.test(document.querySelector('.ps-thanks')?.textContent || '')));
@@ -314,9 +327,14 @@ console.log('\n— the price question —');
   await p.click('.ps-change');
   check('"Change my answer" brings the form back, filled in', await waitFor(p, () => document.getElementById('ps-amount')?.value === '12.5' && document.getElementById('ps-comment')?.value === 'Worth it for the 4K poster'));
   await p.click('.ps-cur label:has(input[value="SAR"])');
-  await p.fill('#ps-amount', '15');
+  check('choosing riyals turns the quick amounts into riyals, keeping what was typed', await waitFor(p, () => [...document.querySelectorAll('.ps-pick')].map((b) => b.textContent).join('|') === 'SAR 5|SAR 10|SAR 15|SAR 20|SAR 30' && document.getElementById('ps-amount').value === '12.5'));
+  await p.click('.ps-pick[data-pick="15"]');
   await p.click('#ps-send');
   check('…and riyals can be chosen on an English page', await waitFor(p, () => /You said SAR 15 a month/.test(document.querySelector('.ps-thanks')?.textContent || '')));
+  await p.click('.ps-change');
+  await waitFor(p, () => !!document.getElementById('ps-wont'));
+  await p.click('#ps-wont');
+  check('"Not for me" is an answer: thanks for being honest', await waitFor(p, () => /Thanks for being honest! You said Pro isn't for you\./.test(document.querySelector('.ps-thanks')?.textContent || '')));
   check('no blue button left once answered: thanks and a quiet way to change it', await p.evaluate(() => document.querySelectorAll('main .pp-btn:not(.quiet)').length === 0));
   check('…nothing scrolling sideways', await p.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
   // The header link, on every public page.
@@ -332,7 +350,7 @@ console.log('\n— the price question —');
   const { ctx, p } = await page(null, { lang: 'ar', w: 390, h: 844 });
   await p.goto(`${B}/ar/pro`, { waitUntil: 'networkidle' });
   await waitFor(p, () => !!document.getElementById('ps-amount'));
-  check('/ar/pro: riyals for an Arabic page', await p.evaluate(() => document.querySelector('input[name="ps-cur"]:checked')?.value === 'SAR'));
+  check('/ar/pro: ساعدنا نحدد سعر المميّزة, riyals for an Arabic page', await p.evaluate(() => document.getElementById('pp-h')?.textContent === 'ساعدنا نحدد سعر المميّزة' && document.querySelector('input[name="ps-cur"]:checked')?.value === 'SAR'));
   check('…the Pro card, with the question, comes first on a phone', await p.evaluate(() => document.querySelector('.pp-plan.pro').getBoundingClientRect().top < document.querySelector('.pp-plan:not(.pro)').getBoundingClientRect().top));
   check('…the free plan says مجانية دايماً', await p.evaluate(() => /مجانية دايماً/.test(document.querySelector('.pp-plan:not(.pro)')?.textContent || '')));
   await p.fill('#ps-amount', '١٥٫٥');
@@ -343,31 +361,103 @@ console.log('\n— the price question —');
   check('the Arabic header says المميّزة · قريباً', await waitFor(p, () => [...document.querySelectorAll('a')].some((a) => /\/pro$/.test(a.getAttribute('href') || '') && a.textContent.trim() === 'المميّزة · قريباً')));
   await ctx.close();
 }
+
+// =====================================================================
+console.log('\n— the founding-fans card in the editor —');
 {
-  // What a visitor types reaches /admin as text, and the CSV cannot run it.
+  const fresh = { tifo_price_ask_v1: 'null' };
+  const card = await account('pro_card');
+  {
+    const { ctx, p } = await editor(card.token, card.design, { ls: fresh });
+    check('a signed-in fan who has not answered is asked once, in a card', await waitFor(p, () => !!document.getElementById('pa-card'), null, 20000));
+    const c = await p.evaluate(() => {
+      const el = document.getElementById('pa-card');
+      const r = el.getBoundingClientRect();
+      return {
+        title: el.querySelector('.pa-title')?.textContent, picks: [...el.querySelectorAll('.pa-pick:not(.pa-other)')].map((b) => b.textContent).join('|'),
+        modal: el.getAttribute('aria-modal'), inView: r.right <= innerWidth && r.bottom <= innerHeight && r.left >= 0,
+        nocharge: /Nothing is charged/.test(el.textContent), more: el.querySelector('.pa-more')?.getAttribute('href'),
+        blue: [...el.querySelectorAll('button')].some((b) => getComputedStyle(b).backgroundColor === getComputedStyle(document.documentElement).getPropertyValue('--blue').trim()),
+      };
+    });
+    check('…"You\'re one of TifoMaker\'s founding fans", quick amounts in dollars, nothing charged, a link to /pro', c.title === "You're one of TifoMaker's founding fans" && c.picks === 'USD 1|USD 2|USD 3|USD 5|USD 8' && c.nocharge && c.more === '/pro', JSON.stringify(c));
+    check('…a card beside the work, not a dialog in front of it, on screen', c.modal === 'false' && c.inView, JSON.stringify(c));
+    await p.click('.pa-later');
+    check('"Not now" puts it away', await waitFor(p, () => !document.getElementById('pa-card')));
+    check('…for two weeks', await p.evaluate(() => { const v = JSON.parse(localStorage.getItem('tifo_price_ask_v1')); return v.n === 1 && v.until > Date.now() + 13 * 864e5; }));
+    await p.reload({ waitUntil: 'domcontentloaded' });
+    await waitFor(p, () => !!window.__tifo, null, 90000);
+    await p.waitForTimeout(4000);
+    check('…so a reload does not ask again', await p.evaluate(() => !document.getElementById('pa-card')));
+    await p.evaluate(() => localStorage.setItem('tifo_price_ask_v1', JSON.stringify({ n: 1, until: 0 })));
+    await p.reload({ waitUntil: 'domcontentloaded' });
+    check('after the two weeks it asks once more', await waitFor(p, () => !!document.getElementById('pa-card'), null, 20000));
+    await p.click('.pa-pick[data-pick="5"]');
+    check('one tap answers: thanks, and "you\'ll hear first"', await waitFor(p, () => /Thanks! You said USD 5 a month\./.test(document.querySelector('.pa-thanks')?.textContent || '') && /hear first/.test(document.getElementById('pa-card')?.textContent || '')));
+    const mine = await api('/api/pro/price', card.token);
+    check('…kept on the account, from the editor', mine.json?.answer?.amount === 5 && mine.json?.answer?.currency === 'USD');
+    check('…and the account is on the "hear first" list', (await api('/api/pro', card.token)).json.notified === true);
+    await p.evaluate(() => localStorage.setItem('tifo_price_ask_v1', 'null'));
+    await p.reload({ waitUntil: 'domcontentloaded' });
+    await waitFor(p, () => !!window.__tifo, null, 90000);
+    await p.waitForTimeout(4500);
+    check('answered: never asked again, even with this browser forgetting', await p.evaluate(() => !document.getElementById('pa-card')));
+    await ctx.close();
+  }
+  {
+    // In Arabic on a phone: a sheet above the bottom ribbon; "Not for me" in one tap.
+    const card2 = await account('pro_card_ar');
+    const { ctx, p } = await editor(card2.token, card2.design, { lang: 'ar', w: 390, h: 844, ls: fresh });
+    check('/ar on a phone: the card, in riyals', await waitFor(p, () => /ريال/.test(document.querySelector('#pa-card .pa-pick')?.textContent || ''), null, 20000));
+    const box = await p.evaluate(() => { const r = document.getElementById('pa-card').getBoundingClientRect(); return { l: r.left, r: r.right, b: r.bottom, t: r.top, w: innerWidth, h: innerHeight }; });
+    check('…the width of the screen, above the bottom ribbon, all on screen', box.l >= 0 && box.r <= box.w && box.t >= 0 && box.b < box.h - 40, JSON.stringify(box));
+    await p.click('.pa-wont');
+    check('…"مو لي، ما راح أدفع" is an answer', await waitFor(p, () => /شكراً على صراحتك/.test(document.querySelector('.pa-thanks')?.textContent || '')));
+    check('…kept as "not for me"', (await api('/api/pro/price', card2.token)).json?.answer?.wontPay === true);
+    check('…nothing scrolling sideways', await p.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+    await ctx.close();
+  }
+  {
+    // Signed out: never asked in the editor (an account's answer is one answer).
+    const { ctx, p } = await page(null, { ls: fresh });
+    await p.goto(`${B}/app?e2e=1`, { waitUntil: 'domcontentloaded' });
+    await waitFor(p, () => !!window.__tifo, null, 90000);
+    await p.waitForTimeout(4500);
+    check('signed out: no card in the editor', await p.evaluate(() => !document.getElementById('pa-card')));
+    await ctx.close();
+  }
+}
+{
+  // Five answers make the count show; and what a visitor types reaches /admin as text, and the CSV cannot run it.
   const key = 'e2eXss' + 'x'.repeat(26);
   await api('/api/pro/price', null, { method: 'POST', body: JSON.stringify({ amount: 7, currency: 'USD', lang: 'en', device: key, comment: '<img src=x onerror="window.__pwned=1">' }) });
   await api('/api/pro/price', null, { method: 'POST', body: JSON.stringify({ amount: 9, currency: 'SAR', lang: 'ar', device: key.replace('x', 'y'), comment: '=HYPERLINK("http://x","y")' }) });
+  const data = (await api('/api/admin/pro/prices', null, { headers: { 'x-ai-unlock': (await api('/api/ai/unlock', null, { method: 'POST', body: JSON.stringify({ password: ADMIN_PW }) })).json?.token || '' } })).json;
   const { ctx, p } = await page(null, { w: 1360, h: 1000 });
+  await p.goto(`${B}/pro`, { waitUntil: 'networkidle' });
+  check('/pro: with five answers or more, the count shows', await waitFor(p, () => /^\d+ fans have answered so far$/.test(document.getElementById('ps-count')?.textContent || '') && !document.getElementById('ps-count').hidden));
   await p.goto(`${B}/admin`, { waitUntil: 'networkidle' });
   await p.fill('#p', ADMIN_PW);
   await p.click('#login-form button');
   await p.waitForSelector('#tabs .tab', { timeout: 30000 });
   await p.click('.tab[data-tab="pro"]');
   // textContent: the section titles are upper-cased by CSS, which innerText would show.
-  check('/admin → Pro: "What would you pay for Pro?" with every answer', await waitFor(p, () => /What would you pay for Pro\?/.test(document.body.textContent) && /4 answers so far/.test(document.body.textContent)));
+  check('/admin → Pro: "What would you pay for Pro?" with every answer', await waitFor(p, () => /What would you pay for Pro\?/.test(document.body.textContent) && /\d+ answers so far/.test(document.body.textContent)));
   const adm = await p.evaluate(() => ({
     sar: [...document.querySelectorAll('table tr')].find((tr) => tr.firstElementChild?.textContent === 'SAR')?.textContent || '',
     pwned: window.__pwned === 1 || !!document.querySelector('img[src="x"]'),
     typed: document.body.innerText.includes('<img src=x onerror="window.__pwned=1">'),
     who: document.body.innerText.includes('signed out'),
+    text: document.body.textContent,
   }));
-  check('…a median per currency (SAR: 15, 15.5, 9 → SAR 15)', /SAR 15\b/.test(adm.sar), adm.sar);
-  check('…a comment shows as the text that was typed, never as markup', !adm.pwned && adm.typed, JSON.stringify(adm));
+  const sarMedian = data?.summary?.SAR?.median;
+  check('…a median per currency, as the server counts it', typeof sarMedian === 'number' && adm.sar.includes(`SAR ${sarMedian % 1 ? sarMedian.toFixed(2) : sarMedian}`), `${adm.sar} vs ${sarMedian}`);
+  check('…"Not for me" and where answers came from, apart from the prices', /Not for me/.test(adm.text) && /From the editor card/.test(adm.text) && /editor card/.test(adm.text));
+  check('…a comment shows as the text that was typed, never as markup', !adm.pwned && adm.typed, JSON.stringify({ ...adm, text: undefined }));
   check('…a signed-out answer says so', adm.who);
   const [dl] = await Promise.all([p.waitForEvent('download', { timeout: 20000 }), p.click('#price-csv')]);
   const csv = readFileSync(await dl.path(), 'utf8');
-  check('the CSV: every answer, Excel-readable Arabic, formulas disarmed', csv.charCodeAt(0) === 0xfeff && csv.split('\r\n').filter(Boolean).length === 5 && csv.includes('"\'=HYPERLINK(""http://x"",""y"")"') && /when_utc,amount,currency,page_language,account,comment/.test(csv), csv.slice(0, 300));
+  check('the CSV: every answer, Excel-readable Arabic, formulas disarmed', csv.charCodeAt(0) === 0xfeff && csv.split('\r\n').filter(Boolean).length === (data?.total ?? -1) + 1 && csv.includes('"\'=HYPERLINK(""http://x"",""y"")"') && /when_utc,amount,currency,not_for_me,where,page_language,account,comment/.test(csv), csv.slice(0, 300));
   await ctx.close();
 }
 

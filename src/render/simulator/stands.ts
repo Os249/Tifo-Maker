@@ -316,7 +316,14 @@ export function* buildStandsSteps(template: StadiumTemplate, shadows: boolean): 
       for (const k of [0, 1, 2, 0, 2, 3]) out.push(q[k][0], q[k][1], q[k][2]);
     };
     for (const o of openings) {
-      const [fl, fr, br, bl] = o.corners;
+      // A mouth narrower than the opening (SeatOpening.mouth): the landing
+      // either side of it is bare deck.
+      const m = o.mouth ?? 1;
+      const mix = (p: [number, number], q: [number, number], f: number): [number, number] => [p[0] + (q[0] - p[0]) * f, p[1] + (q[1] - p[1]) * f];
+      const fl = mix(o.corners[0], o.corners[1], (1 - m) / 2);
+      const fr = mix(o.corners[0], o.corners[1], (1 + m) / 2);
+      const br = mix(o.corners[3], o.corners[2], (1 + m) / 2);
+      const bl = mix(o.corners[3], o.corners[2], (1 - m) / 2);
       const lift = 0.04;
       const P = (c: [number, number], y: number): Pt => [c[0], y, c[1]];
       // The mouth, just above the deck so it is never z-fought away.

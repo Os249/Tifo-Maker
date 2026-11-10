@@ -167,7 +167,7 @@ export function seatLookMap(template: StadiumTemplate, map: SeatMap): SeatLookMa
         const W = cv.width * 0.9; // a seat or two of field either side, as Al-Zawraa's is laid
         const x0 = (cv.width - W) / 2;
         const y0 = (cv.height - H) / 2;
-        const t = Math.max(3 * PX * rowH * 0.8, H * 0.22);
+        const t = Math.max(3 * PX * rowH * 0.8, H * 0.18);
         g.fillRect(x0, y0, W, t);
         g.fillRect(x0, y0 + H - t, W, t);
         // The diagonal's horizontal width dw so that its thickness square to the run is t.

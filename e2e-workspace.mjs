@@ -53,7 +53,7 @@ const IPHONE = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebK
 const WIDE = { viewport: { width: 1440, height: 900 }, userAgent: DESKTOP };
 const PHONE = { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2, userAgent: IPHONE };
 const BASE_LS = [
-  ['tifo_consent_v1', 'all'], ['tifo_news_banners_v1', '1'], ['tifo_news_leagues_v2', '1'], ['tifo_guide_v1', 'done'],
+  ['tifo_consent_v1', 'all'], ['tifo_news_banners_v1', '1'], ['tifo_news_leagues_v2', '1'], ['tifo_price_ask_v1', '{"n":2,"until":0}'], ['tifo_guide_v1', 'done'],
   ['tifo_banner_tour_v1', '1'], ['tifo_draw_hint_v1', '1'], ['mds_seen_intro', '1'], ['mds_sound_v2', JSON.stringify({ on: false })],
 ];
 

@@ -11,7 +11,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { ALLOWANCE_KINDS, FREE_WINDOWS, OFFER, PLAN_WINDOWS, proMode, previewUsers, type AllowanceKind, type Window } from './proPlan';
 import { disposableListStatus, type ProAccount, type ProService } from './pro';
-import { GuestPace, PRICE_ANSWERS_MAX, PRICE_BANDS, accountVoter, deviceKey, deviceVoter, readPriceInput, summarize } from './proPrice';
+import { GuestPace, PRICE_ANSWERS_MAX, PRICE_BANDS, accountVoter, deviceKey, deviceVoter, readPriceInput, summarizeAll } from './proPrice';
 import type { PriceAnswer } from './proRepo';
 import type { UserRow } from './repo';
 
@@ -53,7 +53,10 @@ function soonOffer() {
 }
 
 /** An answer as its own voter sees it again. */
-const ownAnswer = (a: PriceAnswer | null) => (a ? { amount: a.amount, currency: a.currency, comment: a.comment } : null);
+const ownAnswer = (a: PriceAnswer | null) => (a ? { amount: a.amount, currency: a.currency, comment: a.comment, wontPay: a.wontPay } : null);
+
+/** How many answers there are, for "N fans have answered": counted at most once a minute. */
+const COUNT_FOR_MS = 60_000;
 
 /** The newest answers /admin lists in full (the summary counts them all; the CSV has every one). */
 const ADMIN_PRICE_ROWS = 300;
@@ -149,20 +152,27 @@ export function registerProRoutes(app: FastifyInstance, deps: ProRouteDeps): voi
    * in, otherwise (or when the account has none yet) the browser's, named by
    * the key in x-price-device.
    */
+  let counted = { n: 0, at: -Infinity };
+  const answeredCount = async (): Promise<number> => {
+    const now = Date.now();
+    if (now - counted.at > COUNT_FOR_MS) counted = { n: await pro.repo.priceCount().catch(() => counted.n), at: now };
+    return counted.n;
+  };
+
   app.get('/api/pro/price', async (req, reply) => {
     void reply.header('cache-control', 'no-store');
     const userId = await deps.userOf(req).catch(() => null);
     const device = deviceKey(req.headers['x-price-device']);
     let a = userId ? await pro.repo.priceAnswer(accountVoter(userId)) : null;
     if (!a && device) a = await pro.repo.priceAnswer(deviceVoter(device));
-    return { answer: ownAnswer(a) };
+    return { answer: ownAnswer(a), answered: await answeredCount() };
   });
 
   const guests = new GuestPace();
   app.post('/api/pro/price', deps.priceConfig ?? {}, async (req, reply) => {
     const read = readPriceInput(req.body);
     if (!read.ok) return reply.code(400).send({ error: read.error });
-    const { amount, currency, lang, comment, device } = read.input;
+    const { amount, currency, lang, comment, device, wontPay, source } = read.input;
     const userId = await deps.userOf(req).catch(() => null);
     if (!userId && !device) return reply.code(400).send({ error: 'a browser key is required when signed out' });
     const voter = userId ? accountVoter(userId) : deviceVoter(device!);
@@ -170,13 +180,16 @@ export function registerProRoutes(app: FastifyInstance, deps: ProRouteDeps): voi
       return reply.code(429).send({ error: 'too many answers from here today', reason: 'pace' });
     }
     const r = await pro.repo.putPriceAnswer({
-      voter, userId, amount, currency, lang, comment,
+      voter, userId, amount, currency, lang, comment, wontPay, source,
       // Answered signed out in this browser, now signed in: one answer, the account's.
       absorb: userId && device ? deviceVoter(device) : null,
       max: PRICE_ANSWERS_MAX,
     });
     if (r === 'full') return reply.code(409).send({ error: 'the question has all the answers it needs', reason: 'full' });
-    return { ok: true, answer: { amount, currency, comment } };
+    // The thank-you the question promises: a signed-in fan who answers hears
+    // first when Pro opens (the same list as "Tell me when Pro opens").
+    const told = userId ? (await pro.repo.notify(userId).catch(() => false), true) : false;
+    return { ok: true, answer: { amount, currency, comment, wontPay }, told };
   });
 
   // ---------------------------------------------------------------- admin ---
@@ -220,9 +233,12 @@ export function registerProRoutes(app: FastifyInstance, deps: ProRouteDeps): voi
     return {
       total: all.length,
       max: PRICE_ANSWERS_MAX,
-      summary: summarize(all),
+      ...summarizeAll(all),
       bands: PRICE_BANDS,
-      rows: newest.map((a) => ({ at: a.updatedAt, amount: a.amount, currency: a.currency, lang: a.lang, username: a.username, comment: a.comment })),
+      rows: newest.map((a) => ({
+        at: a.updatedAt, amount: a.amount, currency: a.currency, wontPay: a.wontPay, source: a.source,
+        lang: a.lang, username: a.username, comment: a.comment,
+      })),
       shown: newest.length,
     };
   });
