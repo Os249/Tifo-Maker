@@ -158,7 +158,7 @@ export function buildTrack(template: StadiumTemplate, shadows: boolean, opts: { 
     // White for a red track; World Athletics notes that a BLUE track uses red
     // markings instead, so follow the surface rather than assuming white.
     const blueish = ((spec.surface ?? TRACK_DEFAULTS.surface) & 0xff) > (((spec.surface ?? TRACK_DEFAULTS.surface) >> 16) & 0xff);
-    const lineMat = new THREE.MeshBasicMaterial({ color: blueish ? 0xc4372c : 0xf2f2ee });
+    const lineMat = new THREE.MeshBasicMaterial({ color: spec.lines ?? (blueish ? 0xc4372c : 0xf2f2ee) });
     trash.push(lineMat);
 
     // The kerb and the lane boundaries. These are 90% of what makes a track
@@ -179,6 +179,56 @@ export function buildTrack(template: StadiumTemplate, shadows: boolean, opts: { 
     fMesh.position.set(0, lineY + 0.001, KERB_R + (lanes * LANE_W) / 2);
     group.add(fMesh);
     trash.push(fin);
+  }
+
+  const words = (spec.lettering?.lines ?? []).filter((l) => l.trim());
+  if (words.length && typeof document !== 'undefined') {
+    // The name in both D-areas: one canvas, laid flat twice, each copy turned
+    // so its top is toward its own end stand.
+    const W = 38; // metres along the goal line
+    const H = 11; // metres from the bend toward the goal line
+    const cv = document.createElement('canvas');
+    cv.width = 1024;
+    cv.height = Math.round((1024 * H) / W);
+    const ctx = cv.getContext('2d');
+    if (ctx) {
+      ctx.fillStyle = '#' + (spec.lettering?.color ?? 0xffffff).toString(16).padStart(6, '0');
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      // The first line takes the top 60%, the rest share what is left.
+      const big = cv.height * (words.length > 1 ? 0.56 : 0.8);
+      const small = words.length > 1 ? (cv.height * 0.34) / (words.length - 1) : 0;
+      let y = 0;
+      words.forEach((line, i) => {
+        const h = i === 0 ? big : small;
+        ctx.font = `800 ${Math.round(h * 0.86)}px "Arial Black", Arial, Helvetica, sans-serif`;
+        const w = ctx.measureText(line).width;
+        const fit = Math.min(1, (cv.width * 0.96) / w);
+        ctx.save();
+        ctx.translate(cv.width / 2, y + h / 2 + cv.height * 0.04);
+        ctx.scale(fit, 1);
+        ctx.fillText(line, 0, 0);
+        ctx.restore();
+        y += h + cv.height * 0.04;
+      });
+      const tex = new THREE.CanvasTexture(cv);
+      tex.colorSpace = THREE.SRGBColorSpace;
+      tex.anisotropy = 8;
+      const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false });
+      trash.push(tex, mat);
+      // Midway between the goal line (52.5) and the inside of the bend.
+      const cx = (52.5 + BEND_CX + KERB_R) / 2 + 0.5;
+      for (const s of [1, -1]) {
+        const g = new THREE.PlaneGeometry(W, H);
+        g.rotateX(-Math.PI / 2);
+        g.rotateY((-s * Math.PI) / 2);
+        const m = new THREE.Mesh(g, mat);
+        m.position.set(s * cx, lineY + 0.002, 0);
+        m.renderOrder = 2;
+        group.add(m);
+        trash.push(g);
+      }
+    }
   }
 
   return {

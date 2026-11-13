@@ -129,6 +129,7 @@ export const LABEL_KEYS: Record<string, string> = {
   'pat-stadium-12k': 'stad.patStadium',
   'thunderdome-15k': 'stad.thunderdome',
   'al-zawraa-15k': 'stad.alZawraa',
+  'al-shaab-36k': 'stad.alShaab',
   'Grand National Bowl': 'stad.grandNational',
   'Steep Cauldron': 'stad.steepCauldron',
   'Compact Wall': 'stad.compactWall',
@@ -214,6 +215,7 @@ export const LABEL_KEYS: Record<string, string> = {
   'PAT Stadium (Bangkok)': 'stad.patStadium',
   'Thunderdome Stadium (Nonthaburi)': 'stad.thunderdome',
   'Al-Zawraa Stadium (Baghdad)': 'stad.alZawraa',
+  'Al-Shaab International Stadium (Baghdad)': 'stad.alShaab',
   // camera presets (render/preview3d.ts names)
   'TV gantry': 'cam.tv',
   'Behind goal': 'cam.goal',

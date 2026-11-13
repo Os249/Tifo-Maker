@@ -1,6 +1,6 @@
 import type { SeatMap, StadiumTemplate } from './types';
 import { inLane, laneLines } from './venueDetails';
-import { inGap, inStands, sideAt } from './standSpans';
+import { inGap, inStands, insideRim, sideAt } from './standSpans';
 import { CURVE_SAMPLES, buildOffsetCurve, offsetLength, pointAt, pointOnOffset, samplePlanCurve, straightPoint as planStraightPoint, type Curve } from './planCurve';
 import { arcAtIndex, compileBlocks, hasBlocks, inStraightArea, indexAtArc, straightWalkCovers, walkCovers, widestAisle, type AreaLine, type BlockLine, type StraightLine, type WalkLine } from './blocks';
 
@@ -380,6 +380,8 @@ export function generateSeatMap(full: StadiumTemplate): SeatMap {
         if (tier.stands && !inStands(tier, template.plan, r, radial, wx, wy)) continue;
         // A ring tier with gaps (TierSpec.omit) has no seats in them.
         if (tier.omit && inGap(tier, template.plan, r, radial, wx, wy)) continue;
+        // A ring tier with its own back edge (TierSpec.rim) has no seats beyond it.
+        if (tier.rim && !insideRim(tier, template.plan, wx, wy)) continue;
         // A vehicle lane is a real gap: the ramp is where these seats would be.
         if (lanes.length > 0 && inLane(lanes, tierIdx, wx, wy, r)) continue;
         xs.push(u * EDITOR_WIDTH);

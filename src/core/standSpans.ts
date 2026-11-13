@@ -59,6 +59,14 @@ export function inGap(tier: TierSpec, plan: Plan, row: number, radial: number, x
   return false;
 }
 
+/** Is a point of this tier inside its back edge (TierSpec.rim)? Always true for a tier without one. */
+export function insideRim(tier: TierSpec, plan: Plan, x: number, z: number): boolean {
+  const r = tier.rim;
+  if (!r) return true;
+  const p = r.exponent ?? plan.exponent;
+  return Math.abs(x / r.a) ** p + Math.abs((z - (r.z ?? 0)) / r.b) ** p <= 1;
+}
+
 /**
  * A gap as a convex region of the ground plane: the half-planes
  * nx*x + nz*z + d >= 0 that are all true inside it. The side's sector is the

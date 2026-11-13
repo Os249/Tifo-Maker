@@ -1404,8 +1404,8 @@ export const STRINGS: Record<string, { en: string; ar: string }> = {
   'si.note.capacity': { en: '{built} built against {stated} stated — {pct}% out', ar: '{built} مقعد مبني مقابل {stated} معلنة — فرق {pct}%' },
   'si.note.aisles': { en: 'a stadium-sized default; the imagery could count the real ones', ar: 'رقم افتراضي لملعب بهذا الحجم؛ الصور الجوية تقدر تعدّ الحقيقية' },
   'si.note.pitch': { en: '~0.5 m is the regulated working figure', ar: '~0.5 م هو الرقم المعتمد نظاماً' },
-  'si.note.tiers': { en: 'right on 48 of our 88 stadiums; a photo settles it', ar: 'صح في 48 من 88 ملعب عندنا؛ صورة وحدة تحسمها' },
-  'si.note.lighting': { en: 'guessed from the roof shape; right on 66 of our 88 stadiums, and a photo settles it', ar: 'مخمّن من شكل السقف؛ صح في 66 من 88 ملعب عندنا، وصورة وحدة تحسمها' },
+  'si.note.tiers': { en: 'right on 48 of our 89 stadiums; a photo settles it', ar: 'صح في 48 من 89 ملعب عندنا؛ صورة وحدة تحسمها' },
+  'si.note.lighting': { en: 'guessed from the roof shape; right on 67 of our 89 stadiums, and a photo settles it', ar: 'مخمّن من شكل السقف؛ صح في 67 من 89 ملعب عندنا، وصورة وحدة تحسمها' },
   'si.note.facade': { en: 'nothing public records what a stadium is clad in — one photo settles this', ar: 'ما فيه مصدر عام يسجّل مواد واجهة الملعب — صورة وحدة تحسمها' },
   'si.warn.noRing': { en: 'No seating ring measured, so the plan curve is the building outline pulled in by a guess. Measuring the imagery replaces that guess.', ar: 'ما انقاس شريط المدرجات، فخط الخطة هو حدود المبنى مسحوبة بتخمين. قياس الصور الجوية يشيل هذا التخمين.' },
   'si.warn.capOff': { en: 'Capacity is {pct}% out after solving — either the plan curve or the stated capacity is wrong.', ar: 'السعة طالعة بفرق {pct}% بعد الحل — يا خط الخطة غلط يا السعة المعلنة.' },
@@ -1778,6 +1778,7 @@ export const STRINGS: Record<string, { en: string; ar: string }> = {
   'stad.patStadium': { en: 'PAT Stadium (Bangkok)', ar: 'ملعب هيئة موانئ تايلاند (بانكوك)' },
   'stad.thunderdome': { en: 'Thunderdome Stadium (Nonthaburi)', ar: 'ملعب ثندردوم (نونثابوري)' },
   'stad.alZawraa': { en: 'Al-Zawraa Stadium (Baghdad)', ar: 'ملعب الزوراء (بغداد)' },
+  'stad.alShaab': { en: 'Al-Shaab International Stadium (Baghdad)', ar: 'ملعب الشعب الدولي (بغداد)' },
   // The guided first tifo (ui/guide.ts).
   'gd.label': { en: 'Your first tifo', ar: 'تيفوك الأول' },
   'gd.free': { en: 'Free mode', ar: 'وضع حر' },

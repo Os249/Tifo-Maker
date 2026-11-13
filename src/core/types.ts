@@ -99,7 +99,11 @@ export interface StadiumTemplate {
    * a covered-over track, sand. A superellipse (default p = 8) of this colour
    * under the pitch. Omitted: the dark apron every ground has had.
    */
-  runoff?: { color: number; a: number; b: number; exponent?: number };
+  runoff?: {
+    color: number; a: number; b: number; exponent?: number;
+    /** A dry moat round its edge, `width` metres out toward the front row: a dark band (a horseshoe behind a ditch, as at Al-Shaab). */
+    moat?: { width: number; color?: number };
+  };
   /**
    * How many tiers a fan would say the ground has, where that is not the
    * number of entries in `tiers`: a separate main stand or the back rows of a
@@ -118,7 +122,17 @@ export interface StadiumTemplate {
    * leaves it out, for a ground whose real tunnel is modelled where it is —
    * Al-Zawraa's comes out under the Z).
    */
-  pitchside?: { dugouts?: 'north' | 'south'; tunnel?: boolean };
+  pitchside?: {
+    dugouts?: 'north' | 'south';
+    tunnel?: boolean;
+    /**
+     * Barrel-vault shelters instead of the box dugouts: two long ones for the
+     * teams and a short one between them, their backs to the stand, `offset`
+     * metres out from the touchline (on the far lanes of a track, as at
+     * Al-Shaab). Default colour: a translucent blue.
+     */
+    shelters?: { color?: number; offset?: number };
+  };
 }
 
 /**
@@ -488,6 +502,29 @@ export interface VenueDetails {
   buildings?: StandBuilding[];
   /** Walls and skins round the bowl: a perforated metal skin, the panels behind the top row. */
   skins?: Skin[];
+  /** Flag poles standing on the ground: a row beside the track, say. */
+  flagpoles?: Flagpoles;
+}
+
+/**
+ * A set of flag poles, each at [x, z] on the plan. Every flag is three
+ * horizontal bands, top to bottom, with an optional line of script across
+ * the middle one (Iraq's green takbir - without it red, white and black is
+ * Yemen's flag). `flags` gives each pole its own, in turn; the default is
+ * Iraq's.
+ */
+export interface Flagpoles {
+  at: [number, number][];
+  /** Metres. Default 9. */
+  height?: number;
+  flags?: FlagDesign[];
+}
+
+export interface FlagDesign {
+  bands: [number, number, number];
+  /** Words across the middle band, and their colour. */
+  text?: string;
+  textColor?: number;
 }
 
 /** A wall round the outside of the bowl (or along one side), at a plan offset. */
@@ -623,6 +660,14 @@ export interface TrackSpec {
   surface?: number;
   /** Lane lines and the finish line. Default true. */
   markings?: boolean;
+  /** Colour of the lane lines. Default: white, or red on a blue surface. */
+  lines?: number;
+  /**
+   * Words painted in both D-areas, between the goal line and the bend, the
+   * way a national stadium writes its name: the lines run parallel to the
+   * goal line, their tops toward the end stand, the first line the biggest.
+   */
+  lettering?: { lines: string[]; color?: number };
 }
 
 /** Which stands a roof covers. Matches the tifo stand names; 'ring' is all four. */
@@ -696,6 +741,21 @@ export interface TierSpec {
    * of the bowl. Omitted: the ring is unbroken, as every bowl has always been.
    */
   omit?: StandGap[];
+  /**
+   * A RING tier whose back edge is its own curve rather than a fixed number
+   * of rows all round: the superellipse |x/a|^p + |z/b|^p = 1 (p defaults to
+   * the plan's exponent). Rows run out where they meet it, so an old oval
+   * that is deep along its sides and shallow round its ends (Al-Shaab: 42
+   * rows opposite the main stand, 33 behind the goals) tapers smoothly, and
+   * its concrete stops on the same line. `rows` is then the most any part
+   * of the tier has. Moves seats, like `omit`.
+   *
+   * `z` moves the curve's centre across the pitch (default 0, the centre
+   * spot): shifted toward the far side, the rim closes in on the front row
+   * as the stand comes round to the main stand, so a horseshoe is a crescent
+   * that narrows block by block to a few rows at each tail.
+   */
+  rim?: { a: number; b: number; exponent?: number; z?: number };
   /**
    * A tier still being built: its concrete is there and is drawn, but it has
    * no seats yet and nobody sits in it (Camp Nou's third tier in 2026-27).

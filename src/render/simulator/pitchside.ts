@@ -105,7 +105,7 @@ function stripeTexture(): THREE.Texture {
  * mouth (a template's `pitchside`). `redraw` is asked for a
  * frame when the boards change on their own (their font arriving).
  */
-export function buildPitchside(shadows: boolean, opts: { benches?: boolean; dugouts?: 'north' | 'south'; tunnel?: boolean; redraw?: () => void } = {}): PitchsideController {
+export function buildPitchside(shadows: boolean, opts: { benches?: boolean; dugouts?: 'north' | 'south'; tunnel?: boolean; shelters?: { color?: number; offset?: number }; redraw?: () => void } = {}): PitchsideController {
   const group = new THREE.Group();
   const trash: { dispose(): void }[] = [];
 
@@ -244,7 +244,58 @@ export function buildPitchside(shadows: boolean, opts: { benches?: boolean; dugo
     trash.push(g);
   };
   trash.push(dugMat);
-  if (opts.benches !== false) {
+  // Barrel-vault shelters instead (pitchside.shelters): a quarter-and-a-bit of
+  // a cylinder lying along the touchline, its back to the stand, open to the pitch.
+  const shelter = (x: number, len: number, mat: THREE.Material, rib: THREE.Material): void => {
+    const r = 1.5;
+    const zc = dz * (HALF_Z + m + (opts.shelters?.offset ?? 2.4));
+    const N = 14;
+    const pos: number[] = [];
+    const idx: number[] = [];
+    for (let i = 0; i <= N; i++) {
+      const a = (i / N) * Math.PI * 0.68; // from the ground behind, over the top
+      const y = Math.sin(a) * r * 1.25;
+      const z = zc + dz * Math.cos(a) * r;
+      pos.push(x - len / 2, y, z, x + len / 2, y, z);
+      if (i > 0) {
+        const k = (i - 1) * 2;
+        idx.push(k, k + 1, k + 2, k + 1, k + 3, k + 2);
+      }
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    g.setIndex(idx);
+    g.computeVertexNormals();
+    const s = new THREE.Mesh(g, mat);
+    s.castShadow = shadows;
+    group.add(s);
+    trash.push(g);
+    // The frame: a hoop at each end and every few metres between.
+    const hoops = Math.max(2, Math.round(len / 2.5) + 1);
+    for (let h = 0; h < hoops; h++) {
+      const hx = x - len / 2 + (len * h) / (hoops - 1);
+      for (let i = 0; i < N; i++) {
+        const a0 = (i / N) * Math.PI * 0.68;
+        const a1 = ((i + 1) / N) * Math.PI * 0.68;
+        const p0 = new THREE.Vector3(hx, Math.sin(a0) * r * 1.25, zc + dz * Math.cos(a0) * r);
+        const p1 = new THREE.Vector3(hx, Math.sin(a1) * r * 1.25, zc + dz * Math.cos(a1) * r);
+        const bg = new THREE.BoxGeometry(0.08, 0.08, p0.distanceTo(p1));
+        const b = new THREE.Mesh(bg, rib);
+        b.position.copy(p0).add(p1).multiplyScalar(0.5);
+        b.lookAt(p1);
+        group.add(b);
+        trash.push(bg);
+      }
+    }
+  };
+  if (opts.benches !== false && opts.shelters) {
+    const skin = new THREE.MeshStandardMaterial({ color: opts.shelters.color ?? 0x2a53b8, roughness: 0.35, metalness: 0.1, transparent: true, opacity: 0.86, side: THREE.DoubleSide });
+    const rib = new THREE.MeshStandardMaterial({ color: 0xe8ebef, roughness: 0.5, metalness: 0.4 });
+    trash.push(skin, rib);
+    shelter(-15, 11, skin, rib);
+    shelter(15, 11, skin, rib);
+    shelter(0, 4.5, skin, rib);
+  } else if (opts.benches !== false) {
     dugout(-9);
     dugout(9);
   }

@@ -3,7 +3,7 @@ import type { StadiumTemplate } from '../../core/types';
 import { buildRoof } from './roof';
 import { buildFacade } from './facade';
 import { curveSampler, inLane, laneCut, laneLines, type LaneLine } from '../../core/venueDetails';
-import { gapCut, gapHalfPlanes, hasStands, spanGeometry, spanOn, SIDE_U, type SpanGeometry } from '../../core/standSpans';
+import { gapCut, gapHalfPlanes, hasStands, insideRim, spanGeometry, spanOn, SIDE_U, type SpanGeometry } from '../../core/standSpans';
 import type { StandGap } from '../../core/types';
 import { openingQuads } from '../../core/blocks';
 import { runSync, type Steps } from './steps';
@@ -36,10 +36,16 @@ function se(a: number, b: number, p: number, t: number): [number, number] {
   return [a * Math.sign(c) * Math.abs(c) ** e, b * Math.sign(s) * Math.abs(s) ** e];
 }
 
-/** A closed ring of 3D points on the plan curve, offset outward by `off`, at height `y`. */
-function ring(a: number, b: number, p: number, off: number, y: number): Pt[] {
+/**
+ * A closed ring of 3D points on the plan curve, offset outward by `off`, at
+ * height `y`. Either may be given per sample, for a tier whose back edge is
+ * not a fixed distance out (TierSpec.rim).
+ */
+function ring(a: number, b: number, p: number, off: number | number[], y: number | number[]): Pt[] {
   const pts: Pt[] = [];
   const dt = (Math.PI * 2) / SAMPLES;
+  const offAt = typeof off === 'number' ? (): number => off : (i: number): number => off[i];
+  const yAt = typeof y === 'number' ? (): number => y : (i: number): number => y[i];
   for (let i = 0; i < SAMPLES; i++) {
     const t = (i / SAMPLES) * Math.PI * 2;
     const [x, z] = se(a, b, p, t);
@@ -54,9 +60,35 @@ function ring(a: number, b: number, p: number, off: number, y: number): Pt[] {
       nx = -nx;
       nz = -nz;
     }
-    pts.push([x + nx * off, y, z + nz * off]);
+    pts.push([x + nx * offAt(i), yAt(i), z + nz * offAt(i)]);
   }
   return pts;
+}
+
+/**
+ * How far out a tier with its own back edge (TierSpec.rim) runs at each ring
+ * sample: the furthest point along the sample's normal, between `front` and
+ * `back`, that is still inside the rim.
+ */
+function rimOffsets(template: StadiumTemplate, tier: StadiumTemplate['tiers'][number], front: number, back: number): number[] {
+  const { a, b, exponent: p } = template.plan;
+  const inner = ring(a, b, p, 0, 0);
+  const outer = ring(a, b, p, 1, 0);
+  return inner.map((q, i) => {
+    const nx = outer[i][0] - q[0];
+    const nz = outer[i][2] - q[2];
+    const inside = (r: number): boolean => insideRim(tier, template.plan, q[0] + nx * r, q[2] + nz * r);
+    if (inside(back)) return back;
+    if (!inside(front)) return front;
+    let lo = front;
+    let hi = back;
+    for (let k = 0; k < 30; k++) {
+      const m = (lo + hi) / 2;
+      if (inside(m)) lo = m;
+      else hi = m;
+    }
+    return lo;
+  });
 }
 
 /**
@@ -234,6 +266,11 @@ export function* buildStandsSteps(template: StadiumTemplate, shadows: boolean): 
     const frontY = tier.baseElevation - tier.rowDepth * rakeTan * 0.5;
     const backY = tier.baseElevation + lastRow * tier.rowDepth * rakeTan + tier.rowDepth * rakeTan * 0.5;
 
+    // A tier with its own back edge (TierSpec.rim): the deck runs out to it,
+    // sample by sample, and is that much lower where it is shallower.
+    const rimR = tier.rim ? rimOffsets(template, tier, frontRadial + tier.rowDepth, backRadial) : null;
+    const rimY = rimR ? rimR.map((r) => frontY + (r - frontRadial) * rakeTan) : null;
+
     const laneHere = lanes.filter((l) => l.lane.tier === idx);
     if (tier.building && !laneHere.length) {
       // No seats yet: the bare steps, a tread and a riser for every row, so it
@@ -265,7 +302,7 @@ export function* buildStandsSteps(template: StadiumTemplate, shadows: boolean): 
       }
       if (backRadial > r0 + 1e-6) addT(strip(ring(a, b, p, r0, yAt(r0)), ring(a, b, p, backRadial, backY), keep), concrete, true, true);
     } else {
-      addT(strip(ring(a, b, p, frontRadial, frontY), ring(a, b, p, backRadial, backY), keep), concrete, true, true);
+      addT(strip(ring(a, b, p, frontRadial, frontY), ring(a, b, p, rimR ?? backRadial, rimY ?? backY), keep), concrete, true, true);
     }
     yield;
 
@@ -289,8 +326,11 @@ export function* buildStandsSteps(template: StadiumTemplate, shadows: boolean): 
         return prevEdges.frontY + (rr - prevEdges.front) * Math.tan((prev!.rakeDeg * Math.PI) / 180);
       };
       // The back wall, cut to the same gaps (a ring tier with gaps has no skirt).
-      addT(strip(ring(a, b, p, backRadial, floorAt(backRadial)), ring(a, b, p, backRadial, backY + 1.1)), structure, false, true);
+      addT(strip(ring(a, b, p, rimR ?? backRadial, rimR ? rimR.map(floorAt) : floorAt(backRadial)), ring(a, b, p, rimR ?? backRadial, rimY ? rimY.map((y) => y + 1.1) : backY + 1.1)), structure, false, true);
       for (const g of gapEndWalls(template, tier, gaps, frontRadial, backRadial, (r) => frontY + (r - frontRadial) * rakeTan, floorAt, midR)) add(g, structure, false, true);
+    } else if (rimR && rimY) {
+      // No gaps, so no cut walls: just the back wall along the rim.
+      add(strip(ring(a, b, p, rimR, 0), ring(a, b, p, rimR, rimY.map((y) => y + 1.1)), keep), structure, false, true);
     }
     rowsBefore += tier.rows;
     topBackRadial = backRadial;
@@ -633,7 +673,8 @@ function gapEndWalls(
 ): THREE.BufferGeometry[] {
   const at = curveSampler(template);
   const out: THREE.BufferGeometry[] = [];
-  const N = 20;
+  // Finer where the tier has its own back edge, so the wall stops close to it.
+  const N = tier.rim ? 80 : 20;
   const regions = gaps.map((g) => gapHalfPlanes(g, template.plan, midR, gapCut(tier, g)));
   const inside = (reg: HalfPlane[], x: number, z: number, skip: number, tol: number): boolean =>
     reg.every((h, i) => i === skip || h[0] * x + h[1] * z + h[2] >= -tol);
@@ -707,6 +748,8 @@ function gapEndWalls(
           pf = fu;
         }
         if (!found) continue;
+        // Beyond the tier's own back edge (TierSpec.rim) there is no deck to close.
+        if (!insideRim(tier, template.plan, found.x, found.z)) continue;
         // Seats on the far side of the line: a point just across it is in no gap.
         const ox = found.x + h[0] * -0.6;
         const oz = found.z + h[1] * -0.6;

@@ -133,20 +133,30 @@ function buildPitch(template: StadiumTemplate, group: THREE.Group, extent: { ax:
   if (template.runoff) {
     const r = template.runoff;
     const e = 2 / (r.exponent ?? 8);
-    const shape = new THREE.Shape();
-    for (let k = 0; k <= 128; k++) {
-      const t = (k / 128) * Math.PI * 2;
-      const c = Math.cos(t);
-      const s = Math.sin(t);
-      const x = r.a * Math.sign(c) * Math.abs(c) ** e;
-      const z = r.b * Math.sign(s) * Math.abs(s) ** e;
-      if (k === 0) shape.moveTo(x, z);
-      else shape.lineTo(x, z);
+    const outline = <T extends THREE.Path>(path: T, a: number, b: number): T => {
+      for (let k = 0; k <= 128; k++) {
+        const t = (k / 128) * Math.PI * 2;
+        const c = Math.cos(t);
+        const s = Math.sin(t);
+        const x = a * Math.sign(c) * Math.abs(c) ** e;
+        const z = b * Math.sign(s) * Math.abs(s) ** e;
+        if (k === 0) path.moveTo(x, z);
+        else path.lineTo(x, z);
+      }
+      return path;
+    };
+    const lay = (shape: THREE.Shape, color: number): void => {
+      const m = new THREE.Mesh(new THREE.ShapeGeometry(shape, 1), new THREE.MeshStandardMaterial({ color, roughness: 0.85, metalness: 0 }));
+      m.rotation.x = -Math.PI / 2;
+      m.position.y = -0.03;
+      group.add(m);
+    };
+    lay(outline(new THREE.Shape(), r.a, r.b), r.color);
+    if (r.moat) {
+      const ring = outline(new THREE.Shape(), r.a + r.moat.width, r.b + r.moat.width);
+      ring.holes.push(outline(new THREE.Path(), r.a, r.b));
+      lay(ring, r.moat.color ?? 0x25282d);
     }
-    const m = new THREE.Mesh(new THREE.ShapeGeometry(shape, 1), new THREE.MeshStandardMaterial({ color: r.color, roughness: 0.85, metalness: 0 }));
-    m.rotation.x = -Math.PI / 2;
-    m.position.y = -0.03;
-    group.add(m);
   } else if (!template.indoor && baseGroundId(template.id) !== JEWEL_ID) {
     // Grass from the pitch to the front of the stands, as almost every ground
     // has: the plan curve itself, which is where the front row starts.

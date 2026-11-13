@@ -638,7 +638,7 @@ export function seatLookOf(main: string): SeatLook {
  * pylons. That is genuinely how it works, and it is still only a guess, because
  * the real predictor is the decade the ground was built in and nothing public
  * tells us that. Measured against the shipped catalogue, this rule
- * agrees with the hand-set answer 66 times out of 88.
+ * agrees with the hand-set answer 67 times out of 89.
  * scripts/verify-stadiumfit.mts reads that sentence back out of this comment and
  * fails if it has drifted from what the rule actually scores, because a stale
  * accuracy figure is worse than none: it is the number the panel hedges by. The

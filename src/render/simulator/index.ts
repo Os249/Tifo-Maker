@@ -496,6 +496,7 @@ export class MatchDaySimulator {
       benches: baseGroundId(this.template.id) !== KINGDOM_ID,
       dugouts: this.template.pitchside?.dugouts,
       tunnel: this.template.pitchside?.tunnel !== false,
+      shelters: this.template.pitchside?.shelters,
       redraw: () => this.requestRender(),
     });
     this.scene.add(this.pitchside.object);
@@ -844,24 +845,36 @@ export class MatchDaySimulator {
       // Grass (or whatever it is) from the pitch to the front row.
       const ro = this.template.runoff;
       const e = 2 / (ro.exponent ?? 8);
-      const shape = new THREE.Shape();
-      for (let k = 0; k <= 128; k++) {
-        const t = (k / 128) * Math.PI * 2;
-        const c = Math.cos(t);
-        const sn = Math.sin(t);
-        const x = ro.a * Math.sign(c) * Math.abs(c) ** e;
-        const z = ro.b * Math.sign(sn) * Math.abs(sn) ** e;
-        if (k === 0) shape.moveTo(x, z);
-        else shape.lineTo(x, z);
+      const outline = <T extends THREE.Path>(path: T, a: number, b: number): T => {
+        for (let k = 0; k <= 128; k++) {
+          const t = (k / 128) * Math.PI * 2;
+          const c = Math.cos(t);
+          const sn = Math.sin(t);
+          const x = a * Math.sign(c) * Math.abs(c) ** e;
+          const z = b * Math.sign(sn) * Math.abs(sn) ** e;
+          if (k === 0) path.moveTo(x, z);
+          else path.lineTo(x, z);
+        }
+        return path;
+      };
+      const lay = (shape: THREE.Shape, color: number): void => {
+        const roGeo = new THREE.ShapeGeometry(shape, 1);
+        const roMat = new THREE.MeshStandardMaterial({ color, roughness: 0.85, metalness: 0, envMapIntensity: 0.8 });
+        const mesh = new THREE.Mesh(roGeo, roMat);
+        mesh.rotation.x = -Math.PI / 2; // symmetric, so the mirror in z does not matter
+        mesh.position.y = -0.02;
+        mesh.receiveShadow = this.settings.shadows;
+        this.scene.add(mesh);
+        this.disposables.push(roGeo, roMat);
+      };
+      lay(outline(new THREE.Shape(), ro.a, ro.b), ro.color);
+      if (ro.moat) {
+        // A dry moat round it (runoff.moat): a dark band outside its edge, a
+        // ring of its own so the two never overlap.
+        const ring = outline(new THREE.Shape(), ro.a + ro.moat.width, ro.b + ro.moat.width);
+        ring.holes.push(outline(new THREE.Path(), ro.a, ro.b));
+        lay(ring, ro.moat.color ?? 0x25282d);
       }
-      const roGeo = new THREE.ShapeGeometry(shape, 1);
-      const roMat = new THREE.MeshStandardMaterial({ color: ro.color, roughness: 0.85, metalness: 0, envMapIntensity: 0.8 });
-      const mesh = new THREE.Mesh(roGeo, roMat);
-      mesh.rotation.x = -Math.PI / 2; // symmetric, so the mirror in z does not matter
-      mesh.position.y = -0.02;
-      mesh.receiveShadow = this.settings.shadows;
-      this.scene.add(mesh);
-      this.disposables.push(roGeo, roMat);
     }
 
     // Pitch (lit grass).

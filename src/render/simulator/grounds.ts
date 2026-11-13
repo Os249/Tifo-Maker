@@ -1027,6 +1027,68 @@ export function* buildGroundSteps(template: StadiumTemplate, shadows: boolean): 
     group.add(buildCrane(cr, trash, shadows));
     yield;
   }
+  const fp = template.details?.flagpoles;
+  if (fp?.at.length) {
+    // Flag poles: a white pole and a flag of three bands flying from its top.
+    const poleMat = new THREE.MeshStandardMaterial({ color: 0xf1f2f3, roughness: 0.4, metalness: 0.5 });
+    trash.push(poleMat);
+    const H = fp.height ?? 9;
+    const IRAQ = { bands: [0xce1126, 0xffffff, 0x111111] as [number, number, number], text: '\u0627\u0644\u0644\u0647 \u0623\u0643\u0628\u0631', textColor: 0x007a3d };
+    const hex = (c: number): string => '#' + c.toString(16).padStart(6, '0');
+    // One painted cloth per design: the three bands, and the script across the middle one.
+    const cloths = new Map<string, THREE.Material>();
+    const cloth = (d: { bands: [number, number, number]; text?: string; textColor?: number }): THREE.Material => {
+      const key = JSON.stringify(d);
+      let mt = cloths.get(key);
+      if (mt) return mt;
+      if (typeof document === 'undefined') {
+        mt = new THREE.MeshStandardMaterial({ color: d.bands[1], roughness: 0.8, side: THREE.DoubleSide });
+      } else {
+        const cv = document.createElement('canvas');
+        cv.width = 384;
+        cv.height = 256;
+        const ctx = cv.getContext('2d')!;
+        d.bands.forEach((c, k) => {
+          ctx.fillStyle = hex(c);
+          ctx.fillRect(0, Math.round((k * cv.height) / 3), cv.width, Math.ceil(cv.height / 3));
+        });
+        if (d.text) {
+          ctx.fillStyle = hex(d.textColor ?? 0x007a3d);
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.direction = 'rtl';
+          ctx.font = '700 58px "Noto Kufi Arabic", "Segoe UI", Tahoma, Arial, sans-serif';
+          ctx.fillText(d.text, cv.width / 2, cv.height / 2 + 2);
+        }
+        const tex = new THREE.CanvasTexture(cv);
+        tex.colorSpace = THREE.SRGBColorSpace;
+        tex.anisotropy = 4;
+        trash.push(tex);
+        mt = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.8, side: THREE.DoubleSide });
+      }
+      cloths.set(key, mt);
+      trash.push(mt);
+      return mt;
+    };
+    const poles = new THREE.Group();
+    poles.name = 'flagpoles';
+    const poleGeo = new THREE.CylinderGeometry(0.06, 0.08, H, 8);
+    const flagGeo = new THREE.PlaneGeometry(2.4, 1.6);
+    trash.push(poleGeo, flagGeo);
+    fp.at.forEach(([x, z], i) => {
+      const pole = new THREE.Mesh(poleGeo, poleMat);
+      pole.position.set(x, H / 2, z);
+      pole.castShadow = shadows;
+      poles.add(pole);
+      // Every flag flies the same way, a little off the row's line, as in a steady breeze.
+      const f = new THREE.Mesh(flagGeo, cloth(fp.flags?.[i % fp.flags.length] ?? IRAQ));
+      f.rotation.y = 0.5;
+      f.position.set(x + Math.cos(0.5) * 1.26, H - 0.85, z - Math.sin(0.5) * 1.26);
+      poles.add(f);
+    });
+    group.add(poles);
+    yield;
+  }
   const ribbons = buildRibbons(template, at, trash);
   if (ribbons) group.add(ribbons);
   return { object: group, disposables: trash };

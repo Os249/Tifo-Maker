@@ -183,8 +183,10 @@ console.log('\n--- tier split --------------------------------------------------
   // rule expects one, and Tizi Ouzou's narrow middle tier makes three of two.
   // 48 once PAT Stadium was rebuilt from the satellite picture as one tier;
   // still 48 of 88 with Al-Zawraa, November 2026: its narrow main-stand
-  // gallery makes two tiers where the rule, at 28 rows, expects one.)
-  check(right === 48, 'tier-count rule scores 48 of 88', `misses: ${misses.join('; ')}`);
+  // gallery makes two tiers where the rule, at 28 rows, expects one; and 48
+  // of 89 with Al-Shaab, whose horseshoe and separate main stand are one
+  // tier to the eye and two entries to the rule.)
+  check(right === 48, 'tier-count rule scores 48 of 89', `misses: ${misses.join('; ')}`);
 
   const st = stackTiers(50, 2);
   const stacked = st[1].baseOffset > st[0].baseOffset + st[0].rows * st[0].rowDepth

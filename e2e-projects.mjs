@@ -166,7 +166,7 @@ await setInput(g, '#st-search', '');
 // No club: straight to the grounds, every built one offered.
 await g.click('#st-no-club');
 await waitFor(g, () => document.querySelector('.st-modal')?.dataset.step === 'ground');
-check('"No club" goes to the grounds, every built one offered', await g.evaluate(() => document.querySelectorAll('.st-ground').length) === 88);
+check('"No club" goes to the grounds, every built one offered', await g.evaluate(() => document.querySelectorAll('.st-ground').length) === 89);
 await setInput(g, '#st-search', 'jewel');
 check('ground search narrows the list', await g.evaluate(() => document.querySelectorAll('.st-ground').length) === 1);
 await g.click('.st-ground[data-id="jewel-jeddah-60k-rb"]');
