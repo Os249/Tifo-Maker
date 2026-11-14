@@ -190,11 +190,13 @@ const pause = (ms: number) => new Promise<void>((r) => window.setTimeout(r, ms))
  * order's id leaves the address bar at once, so a reload or a shared link
  * does not ask again.
  */
-async function watchOrder(id: string): Promise<void> {
+async function watchOrder(id: string, back: boolean): Promise<void> {
   paidMsg = { key: 'pb.checking', tone: 'wait' };
   paintPaid();
   const started = Date.now();
-  for (let i = 0; Date.now() - started < 60_000; i++) {
+  // "Back" on Moyasar's page: one look is enough (it may have been paid in another tab).
+  const limit = back ? 0 : 60_000;
+  for (let i = 0; i === 0 || Date.now() - started < limit; i++) {
     const o = await fetchOrder(id);
     if (o?.status === 'paid') {
       track('pro_paid');
@@ -209,9 +211,10 @@ async function watchOrder(id: string): Promise<void> {
       paintPaid();
       return;
     }
+    if (back) break;
     await pause(i < 6 ? 1500 : 4000);
   }
-  paidMsg = { key: 'pb.slow', tone: 'wait' };
+  paidMsg = back ? { key: 'pb.left', tone: 'wait' } : { key: 'pb.slow', tone: 'wait' };
   paintPaid();
 }
 
@@ -537,15 +540,17 @@ document.getElementById('foot-feedback')?.addEventListener('click', async () => 
   openFeedbackModal('other');
 });
 
-/** Back from Moyasar's page: the order to ask after, taken out of the address bar straight away. */
-const returnedOrder = ((): string | null => {
+/** Back from Moyasar's page (paid, or "Back" pressed there): the order to ask after, taken out of the address bar straight away. */
+const returned = ((): { id: string; back: boolean } | null => {
   try {
     const u = new URL(location.href);
     const id = u.searchParams.get('order');
     if (!id) return null;
+    const back = u.searchParams.get('back') === '1';
     u.searchParams.delete('order');
+    u.searchParams.delete('back');
     history.replaceState(history.state, '', u.pathname + u.search + u.hash);
-    return /^[0-9a-f-]{36}$/i.test(id) ? id : null;
+    return /^[0-9a-f-]{36}$/i.test(id) ? { id, back } : null;
   } catch {
     return null;
   }
@@ -556,5 +561,5 @@ void (async () => {
   await refreshAuth();
   if (authBtn.parentElement) mountProChip(authBtn.parentElement, authBtn);
   await load();
-  if (returnedOrder) void watchOrder(returnedOrder);
+  if (returned) void watchOrder(returned.id, returned.back);
 })();

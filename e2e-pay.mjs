@@ -180,7 +180,12 @@ let orderId = null;
   check('…an invoice for the price, in riyals, on test keys', inv && inv.currency === 'SAR' && inv.amount >= 100 && /^http:\/\/127\.0\.0\.1:8941\/pro\?order=/.test(inv.success_url), JSON.stringify(inv ?? {}).slice(0, 200));
   orderId = new URL(inv.success_url).searchParams.get('order');
 
-  // Back without paying: nothing charged.
+  // "Back" on Moyasar's page without paying: said at once, nothing charged.
+  check('"Back" on Moyasar\'s page names the order', /^http:\/\/127\.0\.0\.1:8941\/pro\?order=[0-9a-f-]{36}&back=1$/.test(inv.back_url || ''), inv.back_url);
+  await p.goto(inv.back_url, { waitUntil: 'domcontentloaded' });
+  check('"Back": "You left the payment page before paying, so nothing was charged"', await waitFor(p, () => /left the payment page before paying, so nothing was charged/.test(document.getElementById('pp-paid')?.textContent || ''), null, 8000));
+  check('…and both left the address bar', await p.evaluate(() => !location.search.includes('order=') && !location.search.includes('back=')));
+  // Back without paying, after the page closed: nothing charged.
   invoices.get(inv.id).status = 'expired';
   await p.goto(inv.success_url, { waitUntil: 'domcontentloaded' });
   check('back unpaid: "nothing was charged"', await waitFor(p, () => /nothing was charged/.test(document.getElementById('pp-paid')?.textContent || '')));

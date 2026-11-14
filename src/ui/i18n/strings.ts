@@ -3007,6 +3007,10 @@ export const STRINGS: Record<string, { en: string; ar: string }> = {
     en: 'Payment received! Pro is on until {date}. Your receipt is on its way to your email.',
     ar: 'وصلت دفعتك! المميّزة شغّالة لين {date}. والإيصال في طريقه لإيميلك.',
   },
+  'pb.left': {
+    en: "You left the payment page before paying, so nothing was charged. Press Get Pro whenever you're ready.",
+    ar: 'طلعت من صفحة الدفع قبل ما تدفع، فما انخصم منك شي. اضغط اشترك متى ما كنت جاهز.',
+  },
   'pb.failed': { en: "The payment didn't go through, and nothing was charged. You can try again.", ar: 'الدفع ما تم، وما انخصم منك شي. تقدر تحاول مرة ثانية.' },
   'pb.slow': {
     en: "Moyasar hasn't confirmed it yet. If you paid, Pro turns on by itself within a few minutes and your receipt comes by email.",

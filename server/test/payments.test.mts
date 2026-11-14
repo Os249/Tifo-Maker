@@ -267,6 +267,7 @@ const restore = setEnv(ALL_OFF);
   assert.equal(made.currency, 'SAR');
   assert.equal(made.successUrl, `https://tifomaker.test/ar/pro?order=${orderId}`, 'back to the Arabic page, naming the order');
   assert.equal(made.callbackUrl, 'https://tifomaker.test/api/pro/pay/invoice');
+  assert.equal(made.backUrl, `https://tifomaker.test/ar/pro?order=${orderId}&back=1`, '"Back" on Moyasar\'s page names the order too');
   assert.equal(made.metadata.order_id, orderId);
   assert.ok(made.expiresAt.getTime() - Date.now() <= 61 * 60_000, 'the page takes payment for an hour at most');
   const again = await checkout(owner.token);
@@ -389,6 +390,26 @@ const restore = setEnv(ALL_OFF);
   await webhook({ secret_token: HOOK, type: 'payment_refunded', data: { id: pay3, invoice_id: inv3 } });
   assert.equal((await payRepo.get(o3))!.status, 'refunded');
   assert.equal((await proOf(owner.token)).plan, 'free');
+
+  // --- a card refused, and Moyasar closes the invoice: Get Pro again makes a fresh one, not the dead page
+  {
+    const a = await checkout(owner.token);
+    const invA = (await payRepo.get(a.json().order))!.invoiceId!;
+    moyasar.invoices.get(invA)!.status = 'failed';
+    const b = await checkout(owner.token);
+    assert.equal(b.statusCode, 200, b.body);
+    assert.notEqual(b.json().order, a.json().order, 'a closed invoice is not sent back to');
+    assert.equal((await payRepo.get(a.json().order))!.status, 'failed', 'and its order is settled');
+    // Paid in another tab without coming back: pressing Get Pro gives that Pro rather than a second invoice.
+    const invB = (await payRepo.get(b.json().order))!.invoiceId!;
+    moyasar.pay(invB);
+    const c = await checkout(owner.token);
+    assert.equal(c.statusCode, 409, c.body);
+    assert.equal(c.json().reason, 'held', 'the paid order is found, and the month it bought is held');
+    assert.equal((await payRepo.get(b.json().order))!.status, 'paid');
+    const passId = (await payRepo.get(b.json().order))!.passId!;
+    await proRepo.revokePass(passId, new Date());
+  }
 
   // --- Moyasar down when buying: said plainly, nothing half-made
   moyasar.failCreate = true;

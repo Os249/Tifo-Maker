@@ -190,10 +190,20 @@ export class PaymentService {
     // The receipt goes to the email, and a verified one is the account's proof of being a person.
     if (!b.emailVerified || !b.email) return { ok: false, reason: 'verify' };
     const now = this.pro.now();
+    const since = new Date(now.getTime() - DAY_MS);
+    let recent = await this.repo.recentFor(b.id, since);
+    // This account's open orders first, as Moyasar has them now: one paid without
+    // its fan coming back gives its Pro here (and "held" below then says so), and
+    // one Moyasar has closed (a failed card, a lapsed page) is not sent back to.
+    const unsettled = recent.filter((o) => o.status === 'pending' && o.invoiceId).slice(0, 3);
+    if (unsettled.length) {
+      for (const o of unsettled) await this.reconcile(o);
+      recent = await this.repo.recentFor(b.id, since);
+    }
     const when = await this.startFor(b.id, now);
     if ('held' in when) return { ok: false, reason: 'held', endsAt: when.held };
     const amount = priceHalalas();
-    const recent = await this.repo.recentFor(b.id, new Date(now.getTime() - DAY_MS));
+    // Still pending after that: Moyasar's page still takes payment, so the fan goes back to it.
     const open = recent.find(
       (o) => o.status === 'pending' && o.invoiceUrl && o.amount === amount && o.testMode === this.testMode() &&
         now.getTime() - Date.parse(o.createdAt) < REUSE_MINUTES * 60_000,
@@ -210,7 +220,8 @@ export class PaymentService {
         description: lang === 'ar' ? `تيفو ميكر برو: ${OFFER.monthly.days} يوم` : `TifoMaker Pro: ${OFFER.monthly.days} days`,
         callbackUrl: `${base}/api/pro/pay/invoice`,
         successUrl: `${base}${page}?order=${order.id}`,
-        backUrl: `${base}${page}`,
+        // "Back" on Moyasar's page: /pro says nothing was charged (or that it was paid after all).
+        backUrl: `${base}${page}?order=${order.id}&back=1`,
         expiresAt: new Date(now.getTime() + INVOICE_MINUTES * 60_000),
         metadata: { order_id: order.id },
       });
