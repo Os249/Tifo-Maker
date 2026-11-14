@@ -59,6 +59,9 @@ export interface BlockLine {
   r1: number;
   kind?: string;
   mouth?: number;
+  box?: number;
+  /** A stairway's name (AisleRun.ids): flights that share one bound the same block. */
+  key?: string;
 }
 
 /** A walkway row, optionally only between two sample indices (wrap-aware). */
@@ -98,6 +101,7 @@ export interface StraightLine {
   r1: number;
   kind?: string;
   mouth?: number;
+  box?: number;
 }
 
 /** A straight tier's blocks, compiled. Every position is metres along a side (x for north and south, z for the ends). */
@@ -230,7 +234,8 @@ export function compileTierBlocks(curve: Curve, tier: TierSpec, defaultWidth: nu
   const raw: Omit<BlockLine, 'id'>[] = [];
   for (const a of b.aisles) {
     const [r0, r1] = a.rows ?? [0, last];
-    for (const s of expand(a.at, a.mirror)) raw.push({ idx: stationIndex(front, a.side, s), halfW: (a.width ?? w0) / 2, r0, r1 });
+    const named = !a.mirror && Array.isArray(a.ids) ? a.ids : null;
+    expand(a.at, a.mirror).forEach((s, i) => raw.push({ idx: stationIndex(front, a.side, s), halfW: (a.width ?? w0) / 2, r0, r1, ...(named && typeof named[i] === 'string' ? { key: named[i] } : {}) }));
   }
   raw.sort((p, q) => p.idx - q.idx || p.r0 - q.r0);
   const aisles: BlockLine[] = [];
@@ -242,7 +247,7 @@ export function compileTierBlocks(curve: Curve, tier: TierSpec, defaultWidth: nu
   const openings: BlockLine[] = [];
   for (const o of b.openings ?? []) {
     for (const s of expand(o.at, o.mirror)) {
-      openings.push({ id: openings.length, idx: stationIndex(front, o.side, s), halfW: o.width / 2, r0: o.rows[0], r1: o.rows[1], kind: o.kind, mouth: o.mouth });
+      openings.push({ id: openings.length, idx: stationIndex(front, o.side, s), halfW: o.width / 2, r0: o.rows[0], r1: o.rows[1], kind: o.kind, mouth: o.mouth, box: o.box });
     }
   }
   // The players' tunnel and a gate run the full depth of their band, so the
@@ -290,7 +295,7 @@ export function compileStraightBlocks(tier: TierSpec, defaultWidth: number): Com
   }
   const openings: StraightLine[] = [];
   for (const o of b.openings ?? []) {
-    for (const s of expand(o.at, o.mirror)) openings.push({ id: openings.length, side: o.side, along: s, halfW: o.width / 2, r0: o.rows[0], r1: o.rows[1], kind: o.kind, mouth: o.mouth });
+    for (const s of expand(o.at, o.mirror)) openings.push({ id: openings.length, side: o.side, along: s, halfW: o.width / 2, r0: o.rows[0], r1: o.rows[1], kind: o.kind, mouth: o.mouth, box: o.box });
   }
   for (const o of openings) if (o.kind === 'tunnel' || o.kind === 'gate') raw.push({ side: o.side, along: o.along, halfW: o.halfW, r0: o.r0, r1: o.r1, kind: o.kind });
   const order: Record<StandSide, number> = { east: 0, north: 1, west: 2, south: 3 };
@@ -454,6 +459,8 @@ export interface OpeningQuad {
   normal: [number, number];
   /** The mouth's share of the width, 0-1 (SeatOpening.mouth); absent = all of it. */
   mouth?: number;
+  /** A concrete box round it, its walls this high above the front row (SeatOpening.box). */
+  box?: number;
 }
 
 export function openingQuads(template: StadiumTemplate): OpeningQuad[] {
@@ -495,6 +502,7 @@ export function openingQuads(template: StadiumTemplate): OpeningQuad[] {
           backY: y0 + (r1 + 0.5) * tier.rowDepth * rake,
           normal: out1[o.side],
           ...(o.mouth !== undefined ? { mouth: Math.min(1, o.mouth / (2 * o.halfW)) } : {}),
+          ...(o.box ? { box: o.box } : {}),
         });
       }
       return;
@@ -519,6 +527,7 @@ export function openingQuads(template: StadiumTemplate): OpeningQuad[] {
         backY: tier.baseElevation + (o.r1 + 0.5) * tier.rowDepth * rake,
         normal: [curve.nx[i], curve.ny[i]],
         ...(o.mouth !== undefined ? { mouth: Math.min(1, o.mouth / (2 * o.halfW)) } : {}),
+        ...(o.box ? { box: o.box } : {}),
       });
     }
   });

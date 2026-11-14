@@ -352,10 +352,30 @@ export function* buildStandsSteps(template: StadiumTemplate, shadows: boolean): 
     parapetMat.side = THREE.DoubleSide;
     const pos: number[] = [];
     const wall: number[] = [];
+    const floor: number[] = [];
     const quad = (out: number[], q: Pt[]): void => {
       for (const k of [0, 1, 2, 0, 2, 3]) out.push(q[k][0], q[k][1], q[k][2]);
     };
     for (const o of openings) {
+      if (o.box) {
+        // A concrete box (SeatOpening.box): walls level along their tops on
+        // both sides and behind, a pale floor at the front, and behind it
+        // the dark way down into the stand.
+        const Pb = (c: [number, number], y: number): Pt => [c[0], y, c[1]];
+        const mixb = (p: [number, number], q: [number, number], f: number): [number, number] => [p[0] + (q[0] - p[0]) * f, p[1] + (q[1] - p[1]) * f];
+        const [f0, f1, b1, b0] = o.corners;
+        const top = Math.max(o.frontY + o.box, o.backY + 0.4);
+        const split = 0.38;
+        const m0 = mixb(f0, b0, split);
+        const m1 = mixb(f1, b1, split);
+        const yM = o.frontY + (o.backY - o.frontY) * split;
+        quad(floor, [Pb(f0, o.frontY + 0.05), Pb(f1, o.frontY + 0.05), Pb(m1, yM + 0.05), Pb(m0, yM + 0.05)]);
+        quad(pos, [Pb(m0, yM + 0.06), Pb(m1, yM + 0.06), Pb(b1, o.backY + 0.06), Pb(b0, o.backY + 0.06)]);
+        quad(wall, [Pb(f0, o.frontY), Pb(b0, o.backY), Pb(b0, top), Pb(f0, top)]);
+        quad(wall, [Pb(f1, o.frontY), Pb(b1, o.backY), Pb(b1, top), Pb(f1, top)]);
+        quad(wall, [Pb(b0, o.backY), Pb(b1, o.backY), Pb(b1, top), Pb(b0, top)]);
+        continue;
+      }
       // A mouth narrower than the opening (SeatOpening.mouth): the landing
       // either side of it is bare deck.
       const m = o.mouth ?? 1;
@@ -374,7 +394,8 @@ export function* buildStandsSteps(template: StadiumTemplate, shadows: boolean): 
       quad(wall, [P(fr, o.frontY), P(br, o.backY), P(br, o.backY + h), P(fr, o.frontY + h)]);
       quad(wall, [P(bl, o.backY), P(br, o.backY), P(br, o.backY + h), P(bl, o.backY + h)]);
     }
-    for (const [arr, mat, cast] of [[pos, mouth, false], [wall, parapetMat, true]] as const) {
+    for (const [arr, mat, cast] of [[pos, mouth, false], [wall, parapetMat, true], [floor, concrete, false]] as const) {
+      if (!arr.length) continue;
       const g = new THREE.BufferGeometry();
       g.setAttribute('position', new THREE.Float32BufferAttribute(arr, 3));
       g.computeVertexNormals();

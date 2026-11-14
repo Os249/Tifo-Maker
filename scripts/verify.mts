@@ -1952,7 +1952,7 @@ import { buildStadium as siBuild } from '../src/core/stadiumFit';
     // before its first push. Frozen at first release: re-take this only
     // before that push.
     'al-zawraa-15k': '19598:4e7bdb5b3e26b869',
-    'al-shaab-36k': '33722:221bb2a5cb04b91b',
+    'al-shaab-36k': '36059:dbcbac0a291d60e8',
   };
   for (const [id, want] of Object.entries(FROZEN)) {
     const tpl = cat.templateById(id);
@@ -2861,10 +2861,11 @@ await (async () => {
   // terraces (a stair every 18 m) and EGO's main stand (webook's 36-seat rows).
   // Al-Zawraa's stands are cut only at the gates and every block is 43
   // seats across (counted on the ultras' photographs, November 2026).
-  // Al-Shaab's horseshoe has one stairway per vomitory and nothing between:
-  // 13 vomitories 25.2 m apart (56 seats), and beyond the last one a tail
-  // 32 m long with no stairway the photographs show (70 seats at the front).
-  const WIDE_OK: Record<string, number> = { 'buraidah-stadium-25k-rb': 33, 'shg-arena-14k-rb': 38, 'alhazem-stadium-8k-rb': 41, 'ego-stadium-13k-rb': 36, 'al-zawraa-15k': 44, 'al-shaab-36k': 70 };
+  // Al-Shaab's horseshoe has one stairway per gate and nothing between: 13
+  // gates 25.2 m apart (58 seats between stairways at 0.4 m), each stairway
+  // stepping round its box, and past the last gate a tail of up to 37 m with
+  // no stairway of its own.
+  const WIDE_OK: Record<string, number> = { 'buraidah-stadium-25k-rb': 33, 'shg-arena-14k-rb': 38, 'alhazem-stadium-8k-rb': 41, 'ego-stadium-13k-rb': 36, 'al-zawraa-15k': 44, 'al-shaab-36k': 96 };
   for (const e of cat.STADIUM_CATALOG) {
     const t = e.template;
     if (!bl.hasBlocks(t)) continue;
@@ -3022,17 +3023,15 @@ await leagueGrounds('iraq stars league', 'iraq-stars-league', [
   // they turn out smaller, this comes down with them.
   { id: 'al-zawraa-15k', clubs: 'Al-Zawraa SC', seats: 19600, tol: 0.025 },
   // Published 35,700 (the 2010 all-seater's 34,200 plus the 1,500 added in
-  // 2023). Counted on the photographs: 13 vomitories round the horseshoe, a
-  // crescent 42 rows deep opposite the main stand that narrows block by block
-  // to a long thin tail of four or five rows (TierSpec.rim, fitted to the
-  // photographs), and a 21-row main stand. The seat width cannot be
-  // counted at the photographs' resolution; 0.45 m is the narrowest a 2023
-  // seat is likely to be, and with each vomitory's bare landing and stairway
-  // it gives 33,722, 5.5% under the figure. The ground is laid to the
-  // photographs, not to the figure: the suspects are the seat width, the
-  // landings' width and the main stand's rows, and a close-up of one block
-  // would settle the first two.
-  { id: 'al-shaab-36k', clubs: 'Iraq national team, Baghdad derbies', seats: 33722, tol: 0.025 },
+  // 2023). 13 gates round the horseshoe, a crescent 42 rows (28 m) deep
+  // opposite the main stand, 30 rows (20 m) behind the goals as the 3D model
+  // and the mapped outline both have it, narrowing to a thin tail
+  // (TierSpec.rim), and a 21-row main stand. The seat width cannot be
+  // counted at the photographs' resolution, so with the stand's size now
+  // fixed by the model and the map it is solved from the figure: 0.40 m in
+  // the horseshoe gives 36,059, 1.0% over (0.45 m gave 32,600; Al-Zawraa's
+  // seats, counted, are 0.36 m). A close-up of one block would confirm it.
+  { id: 'al-shaab-36k', clubs: 'Iraq national team, Baghdad derbies', seats: 35700, tol: 0.025 },
 ], undefined, 3);
 
 // --- The real grounds' neighbourhoods (OpenStreetMap, October 2026) ----------

@@ -257,9 +257,8 @@ export const IRAQ_STARS_LEAGUE: StadiumEntry[] = [
     //     centre spot; the stand is a crescent, 28 m deep along the side,
     //     about 25 m behind the goals and narrowing to a few rows at the tip
     //     of each tail, just inside the main stand's front line;
-    //   - 13 vomitories, one on the centre line opposite the main stand and
-    //     six each way, evenly spaced, each with one stairway; their mouths
-    //     on rows 15 to 19;
+    //   - 13 gates, one opposite the middle of the main stand and six each
+    //     way, evenly spaced, each a box with its stairway stepping round it;
     //   - about 42 rows along the side (three pixel counts on the aerial:
     //     40+, 43, 44), fewer block by block toward the tails;
     //   - the seats white at the front, blue at the top, a scattered mosaic;
@@ -267,46 +266,74 @@ export const IRAQ_STARS_LEAGUE: StadiumEntry[] = [
     //     track behind a fence, a cross-walk with four vomitories, navy rows
     //     behind it under a flat roof with the floodlights along its edge,
     //     and the VIP block in the middle.
-    // The seat width is not countable in the photographs: 0.45 m is used,
-    // which with the counted rows and the vomitories' landings gives 33,722
-    // seats against the published 35,700 (see verify.mts).
+    // The seat width is not countable in the photographs. With the stand's
+    // size fixed by the model and the map it is solved from the published
+    // 35,700: 0.40 m in the horseshoe gives 36,059 (see verify.mts).
     // Fitted to where the 13 vomitories lie in the top-down photograph
     // (taken from about 100 m up, so what stands higher is pushed outward):
     // the plan, its exponent, the spacing and the vomitories' rows together.
     const A = 93;
     const B = 66;
     const P = 2.6;
-    // 13 vomitories 25.2 m apart along the front row, and beyond the last
-    // one a tail block about as long as the others.
+    // 13 gates 25.2 m apart along the front row, and beyond the last one a
+    // tail with no stairway of its own.
     const STEP = 25.2;
-    const voms = [0, 1, 2, 3, 4, 5, 6].map((k) => k * STEP);
-    const VOM_ROWS: [number, number] = [14, 18];
+    // Each gate, as the 3D model of the ground has it and the top-down
+    // photograph confirms: a concrete box 6.9 m wide and six rows deep, its
+    // floor a quarter of the way up the stand, and a stairway 1.8 m wide that
+    // is NOT a cross through it. It comes down from the rim along one edge of
+    // the box, turns across the front of the box as a landing, and goes on
+    // down to the front wall from the box's other edge. The two halves of the
+    // horseshoe mirror each other: the upper flight is always on the edge
+    // nearer the middle of the side opposite the main stand.
+    const BOX_W = 6.9;
+    const STAIR_W = 1.8;
+    const JOG = BOX_W / 2 + STAIR_W / 2;
+    const gateK = [-6, -5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5, 6];
+    const boxes = gateK.map((k) => k * STEP);
+    const upperAt = gateK.map((k) => k * STEP + (k <= 0 ? JOG : -JOG));
+    const lowerAt = gateK.map((k) => k * STEP + (k <= 0 ? -JOG : JOG));
+    const VOM_ROWS: [number, number] = [12, 17];
+    const LANDING: [number, number] = [VOM_ROWS[0] - 2, VOM_ROWS[0] - 1];
     const TAIL = 47;
     const bowl: TierSpec = {
-      rows: 42, rowDepth: 0.67, rakeDeg: 21, baseElevation: 2.0, baseOffset: 0, seatPitch: 0.45,
+      rows: 42, rowDepth: 0.67, rakeDeg: 19, baseElevation: 2.0, baseOffset: 0, seatPitch: 0.4,
       // A crescent: its back edge is its own curve, centred 15 m toward the
-      // far side, so the stand is 42 rows deep opposite the main stand, about
-      // 38 behind the goals, 24 at the last vomitory, and beyond it a long
-      // thin tail down to four or five rows at its tip - smaller block by
-      // block the further round it comes. Fitted to the stand's depth at
-      // eight places on the photographs (within 1.2 m). The tips end on
-      // z = -TAIL, a few metres short of the main stand's corner.
-      rim: { a: 116, b: B + (42 - 0.1) * 0.67 - 15, exponent: 2.4, z: 15 },
+      // far side. The stand is 42 rows (28 m) deep opposite the main stand,
+      // 30 rows (20 m) behind the goals - the 3D model and the mapped outline
+      // agree on that - about 20 rows at the last gate, and beyond it a thin
+      // tail of some seven rows: smaller block by block the further round it
+      // comes. Fitted to the model's depth at eleven places (within 1 m).
+      // The tips end on z = -TAIL, a few metres short of the main stand.
+      rim: { a: 113, b: B + (42 - 0.1) * 0.67 - 15, exponent: 2.6, z: 15 },
       omit: [{ side: 'south', from: -400, to: 400 }, { side: 'east', from: -400, to: -TAIL }, { side: 'west', from: -400, to: -TAIL }],
-      // Each vomitory is a white concrete box: a dark mouth in a bare landing
-      // seven metres wide, two more bare rows in front of it, and the one
-      // stairway, two seats wide, running through it from the wall to the rim.
       blocks: {
-        width: 1.7,
-        aisles: [{ side: 'north', at: voms, mirror: true }],
-        openings: [{ side: 'north', at: voms, mirror: true, width: 7, mouth: 3, rows: VOM_ROWS, kind: 'vomitory' }],
-        areas: voms.flatMap((s) => (s === 0 ? [0] : [s, -s])).map((s) => ({ side: 'north' as const, from: s - 3.5, to: s + 3.5, rows: [VOM_ROWS[0] - 2, VOM_ROWS[0] - 1] as [number, number], kind: 'platform' as const })),
+        width: STAIR_W,
+        aisles: [
+          // The upper flight, from the landing to the rim; the lower one, from the front wall to the landing.
+          // (The two flights of a gate share a name, so the seats between two
+          // gates are one block whose edge steps round the box, as the model's are.)
+          { side: 'north', at: upperAt, rows: [LANDING[0], 41], ids: gateK.map((k) => `g${k}`) },
+          { side: 'north', at: lowerAt, rows: [0, LANDING[1]], ids: gateK.map((k) => `g${k}`) },
+        ],
+        openings: [{ side: 'north', at: boxes, width: BOX_W, box: 2.3, rows: VOM_ROWS, kind: 'vomitory' }],
+        // The landing: two bare rows across the front of the box, joining the two flights.
+        areas: boxes.map((c) => ({ side: 'north' as const, from: c - JOG - STAIR_W / 2, to: c + JOG + STAIR_W / 2, rows: LANDING, kind: 'platform' as const })),
       },
     };
     // The main stand: 21 rows, a cross-walk on the thirteenth with the four
     // vomitories coming up behind it, 25 and 50 m either side of the centre
-    // line; the middle 30 m is the VIP block, stepped up from the sixth row.
-    // The roof covers only the rows behind the cross-walk.
+    // line. The roof covers only the rows behind the cross-walk.
+    //
+    // The VIP block, as the 3D model has it: 34.5 m of light-blue seats, set
+    // 5.75 m toward the screen end (x from -23 to 11.5), seated from the front
+    // row to the back with a strip of green seats behind and no cross-walk.
+    // In its middle a gate box on rows 7 to 10; one stairway up to a landing
+    // in front of the box, then a flight either side of it to two doors at
+    // the top; and over the back row a blue glazed band, wider than the
+    // block itself.
+    const VIP: [number, number] = [-23, 11.5];
+    const VIP_C = -5.75;
     const MAIN_HL = 67;
     const MAIN_OFF = 51 - B; // its front row 51 m from the centre line
     const main: TierSpec = {
@@ -314,10 +341,22 @@ export const IRAQ_STARS_LEAGUE: StadiumEntry[] = [
       stands: [{ side: 'south', halfLength: MAIN_HL }],
       blocks: {
         width: 1.0,
-        aisles: [{ side: 'south', at: [0, 7.5, 15, 25, 37.5, 50, 60], mirror: true }],
-        walkways: [{ row: 12 }],
-        openings: [{ side: 'south', at: [25, 50], mirror: true, width: 3.5, rows: [13, 15], kind: 'vomitory' }],
-        areas: [{ side: 'south', from: -15, to: 15, rows: [6, 20], kind: 'press' }],
+        aisles: [
+          { side: 'south', at: [-60, -50, -37.5, VIP[0], VIP[1], 25, 37.5, 50, 60] },
+          // The VIP block's stairway: up the middle to the landing, then round both sides of the box.
+          { side: 'south', at: [VIP_C], rows: [0, 5], width: 1.5 },
+          { side: 'south', at: [VIP_C - 3, VIP_C + 3], rows: [5, 20], width: 1.5 },
+        ],
+        walkways: [{ row: 12, side: 'south', from: -MAIN_HL - 1, to: VIP[0] }, { row: 12, side: 'south', from: VIP[1], to: MAIN_HL + 1 }],
+        openings: [
+          { side: 'south', at: [25, 50], mirror: true, width: 3.5, rows: [13, 15], kind: 'vomitory' },
+          { side: 'south', at: [VIP_C], width: 4.5, rows: [6, 9], box: 1.9, kind: 'vomitory' },
+        ],
+        areas: [
+          // The landing in front of the box, and the back row under the doors and the glazed band.
+          { side: 'south', from: VIP_C - 3.75, to: VIP_C + 3.75, rows: [5, 5], kind: 'platform' },
+          { side: 'south', from: VIP[0], to: VIP[1], rows: [20, 20], kind: 'platform' },
+        ],
       },
     };
     const MAIN_RISE = 0.8 * Math.tan((25 * Math.PI) / 180);
@@ -367,6 +406,9 @@ export const IRAQ_STARS_LEAGUE: StadiumEntry[] = [
           { tiers: [1], rows: [15, 18], colors: [{ c: WHITE, w: 0.5 }, { c: BLUE, w: 0.5 }] },
           { tiers: [1], rows: [19, 23], colors: [{ c: WHITE, w: 0.25 }, { c: BLUE, w: 0.75 }] },
           { tiers: [1], rows: [24, 41], colors: [{ c: BLUE, w: 0.92 }, { c: WHITE, w: 0.08 }] },
+          // The VIP block: light blue, a strip of green behind (the model's colours).
+          { tiers: [0], side: 'south', from: VIP[0], to: VIP[1], rows: [0, 16], colors: ['#9ccdf8'] },
+          { tiers: [0], side: 'south', from: VIP[0], to: VIP[1], rows: [17, 20], colors: ['#69bd87'] },
           // The main stand: sky blue in front of the cross-walk, navy behind it under the roof.
           { tiers: [0], rows: [0, 11], colors: [{ c: SKY, w: 0.94 }, { c: NAVY, w: 0.06 }] },
           { tiers: [0], colors: [{ c: NAVY, w: 0.95 }, { c: SKY, w: 0.05 }] },
@@ -380,10 +422,12 @@ export const IRAQ_STARS_LEAGUE: StadiumEntry[] = [
         // Iraq's flag (the default design, with its green script), and a plain white one every fourth pole.
         flagpoles: { at: FLAGS, height: 9, flags: [IRAQ_FLAG, IRAQ_FLAG, { bands: [0xffffff, 0xffffff, 0xffffff] }, IRAQ_FLAG] },
         buildings: [
-          // The VIP block in the middle of the main stand, in two steps: a
-          // glazed terrace from the sixth row, the boxes behind the cross-walk.
-          { side: 'south', straight: true, center: 0, halfLength: 15, front: MAIN_OFF + 5.6 * 0.8, depth: 6 * 0.8, y0: 0, y1: 1.0 + 6 * MAIN_RISE + 3.0, glassFloors: 1, color: 0xd3d8de, fascia: 0xeef0f2 },
-          { side: 'south', straight: true, center: 0, halfLength: 15, front: MAIN_OFF + 11.6 * 0.8, depth: 8, y0: 0, y1: 11.6, glassFloors: 1, color: 0xdfe1e4, fascia: 0xf3f4f5 },
+          // Over the VIP block's back row: the blue glazed band (53.6 m, from
+          // x = -35.9 to 17.7 in the model), and under it the two doors at
+          // the top of the flights.
+          { side: 'south', straight: true, center: -9.1, halfLength: 26.8, front: MAIN_OFF + 16.5, depth: 0.5, y0: 1.0 + 20 * MAIN_RISE + 1.6, y1: 1.0 + 20 * MAIN_RISE + 3.7, color: 0x67aabc, fascia: 0x67aabc },
+          { side: 'south', straight: true, center: VIP_C - 3, halfLength: 0.95, front: MAIN_OFF + 16.3, depth: 0.3, y0: 1.0 + 19 * MAIN_RISE, y1: 1.0 + 19 * MAIN_RISE + 2.1, color: 0x15171a, fascia: 0x15171a },
+          { side: 'south', straight: true, center: VIP_C + 3, halfLength: 0.95, front: MAIN_OFF + 16.3, depth: 0.3, y0: 1.0 + 19 * MAIN_RISE, y1: 1.0 + 19 * MAIN_RISE + 2.1, color: 0x15171a, fascia: 0x15171a },
           // The stand's own building behind it: offices and the press floor.
           { side: 'south', straight: true, halfLength: MAIN_HL, front: MAIN_OFF + 17.2, depth: 5, y0: 0, y1: 12.2, glassFloors: 1, color: 0xe3e4e6, fascia: 0xf0f1f2 },
         ],

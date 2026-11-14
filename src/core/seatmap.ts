@@ -352,7 +352,7 @@ export function generateSeatMap(full: StadiumTemplate): SeatMap {
           if (areasHere.some((a) => walkCovers({ row: r, i0: a.i0, i1: a.i1 }, idx))) continue;
           const band = walksBehind.filter((w) => mine(w) && (w.i0 === undefined || walkCovers(w, idx))).length;
           const left = A > 0 ? stairs[(lo - 1 + A) % A] : null;
-          blockKey = `${tierIdx}:${band}:${left ? left.id : -1}${stand ? ':' + stand : ''}`;
+          blockKey = `${tierIdx}:${band}:${left ? (left.key ?? left.id) : -1}${stand ? ':' + stand : ''}`;
         } else {
           // Skip seats inside any radial aisle band.
           let inAisle = false;

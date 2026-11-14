@@ -159,3 +159,53 @@ Third review: "the tail even goes smaller than this and longer at the end", and 
 | tails | end on z = -47 (was -43), about 9 m from the main stand's corner, as the aerial from the screen end shows; the top-down photo hides the tips under trees |
 | depth, target / built | centre 28.1 / 28.1; 25 m round 28.0 / 28.0; 50 m 27.5 / 28.0; 101 m 24.5 / 26.8; 126 m 24.0 / 22.8; last vomitory 18.3 / 16.2; z = -43 5.5 / 5.1; tip 2.5 / 3.4 m |
 | flags | each cloth is painted: three bands and, on Iraq's, the green takbir across the white (`FlagDesign.text`); every fourth pole flies plain white |
+
+## Round 6 (14 November 2026): the gates, the ends and the height, from the 3D model
+
+A fan's review, with screenshots of the SketchUp model: the gates are not a cross; the stands look too tall; use the model.
+
+Measured in the model's geometry (GLB, metres; its plan agrees with OpenStreetMap to a metre at the ends):
+
+| item | model | built |
+|---|---|---|
+| depth opposite the main stand | 31 m (60.2 to 91.3 from the centre line) | 28.1 m (the photographs and the map; unchanged) |
+| depth behind the goals | 20 m (94.7 to 115.8), as OpenStreetMap | 20.1 m (was 25.8) |
+| depth 15 degrees further round / at 105 / at 115 degrees | 18 / 14 / 8 m | 18.2 / 13.7 / 7.8 m |
+| rake | 22 degrees from a front row at ground level, top 12.5 m | 19 degrees from a front row 2 m up, top 11.5 m (was 21 degrees, 12.5 m) |
+| gate box | 6.9 m wide, 3.9 m deep, floor 27% of the way up | 6.9 m, six rows (4.0 m), rows 13-18 |
+| stairway | 1.8 m; down from the rim along one edge of the box, across its front as a landing, on down to the front wall from the other edge | the same; the two halves mirror each other, the upper flight on the edge nearer the middle of the far side (the top-down photograph shows this at both ends and along the far side) |
+
+| item | now |
+|---|---|
+| fingerprint / seats | `31876:2670dd53db2e9858`, 31,876 seats (10.7% under 35,700) |
+| rim | `a` 113, `b` 79.1, exponent 2.6, centred 15 m toward the far side |
+| gates | boxes at k x 25.2 m (rows 13-18), landing on rows 11-12, flights 4.35 m either side of the box centre |
+
+Row count: the 42 rows opposite the main stand are kept (three pixel counts of 43, 44 and 40+ on the aerial). The model has no countable rows.
+
+## Round 7 (14 November 2026): blocks, gate boxes, seat width
+
+| item | now |
+|---|---|
+| fingerprint / seats | `35327:3448229767056596`, 35,327 seats (1.0% under 35,700) |
+| blocks | the two flights of a gate share a name (`AisleRun.ids`, new and optional), so the seats between two gates are ONE block whose edge steps round the box, as in the model: 38 sections, not 52 |
+| gate box | `SeatOpening.box` (new and optional): walls 2.3 m above the front row, level along their tops, on both sides and behind; pale floor at the front, the dark way down behind it |
+| seat width | 0.40 m in the horseshoe, solved from the capacity now that the model and the map fix the stand's size (0.45 m gave 31,876). Not counted: a close-up of one block would confirm it |
+| rows opposite the main stand | kept at 42: the model has no countable rows, and the top-down photograph is a repainted mosaic that gives no count |
+| main stand | unchanged: the model's main stand is the pre-renovation one (20.6 m deep, barrel roof, VIP block 34.5 m wide and off-centre), so the photographs govern |
+
+## Round 8 (14 November 2026): the VIP block, as the 3D model has it
+
+Measured in the model's geometry (app x = minus the model's x along the pitch; its scoreboard confirms the screen end is the app's -x):
+
+| part | model | built |
+|---|---|---|
+| VIP seats | light blue `#9ccdf8`, x -22.9 to 11.6 (34.5 m, centred 5.65 m toward the screen end), from the front row back 16.5 of the stand's 20.6 m | x -23 to 11.5, rows 1-17 |
+| strip behind | green `#69bd87`, 2.4 m | rows 18-20 (row 21 left bare under the doors) |
+| gate box | 4.6 m wide, 6.3 to 9.8 m from the front, in the middle of the block | 4.5 m, rows 7-10, at x -5.75 |
+| stairway | one flight up the middle to a landing in front of the box, then a flight either side of the box to the top, each about 1.7 m | the same, 1.5 m, landing on row 6 |
+| doors | two, at the top of the flights | two dark doorways |
+| glazed band | blue `#67aabc`, 2.1 m high, 1.8 m above the back row, x -35.9 to 17.7 | the same |
+| cross-walk | none in the block | row 13's cross-walk stops at the block's edges |
+
+Replaces the stepped concrete VIP block of the earlier rounds (which was a guess from two oblique aerials). Fingerprint `36059:dbcbac0a291d60e8`, 36,059 seats (1.0% over 35,700).

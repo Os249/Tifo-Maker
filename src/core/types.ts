@@ -854,6 +854,14 @@ export interface AisleRun {
   rows?: [number, number];
   /** Width, metres. Default: TierBlocks.width. */
   width?: number;
+  /**
+   * A name for each stairway, one per station (not with `mirror`). Two runs
+   * that give a stairway the same name are the flights of ONE stepped
+   * stairway - down from the rim on one side of a gate, across its front and
+   * on down from its other side - and the seats between two such stairways
+   * are one block, its edge following the step, not a block per flight.
+   */
+  ids?: string[];
 }
 
 /** A row of a tier with no seats in it: a lateral gangway (TierBlocks.walkways). */
@@ -889,6 +897,13 @@ export interface SeatOpening {
    * parapet). Omitted: the mouth is the whole width.
    */
   mouth?: number;
+  /**
+   * A concrete box round the opening instead of low parapets: walls this
+   * many metres high above its front row, level along their tops, on both
+   * sides and behind, a pale floor at the front and the dark way down into
+   * the stand behind it (Al-Shaab's gates). `mouth` is not used.
+   */
+  box?: number;
 }
 
 /** A stretch of one side of a ring tier with no seats (TierSpec.omit). */
