@@ -174,8 +174,34 @@
   .pp-hero { padding: 36px 0 24px; }
   .pp-hero h1 { font-size: var(--fs-3xl); }
 }
+/* ---- on sale (payments v1): the price and "Get Pro", where the question was ---- */
+.pb-buy {
+  display: grid; gap: var(--sp-3); margin: 0 0 var(--sp-5); padding: var(--sp-5);
+  border-radius: var(--r-md); background: var(--raise-2); border: 1px solid var(--pro-line);
+}
+.pp-plan h2 + .pb-buy { margin-top: var(--sp-4); }
+.pb-price { display: flex; align-items: baseline; flex-wrap: wrap; gap: var(--sp-2); margin: 0; }
+.pb-price b { font-size: var(--fs-3xl); font-weight: 800; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+[dir="rtl"] .pb-price b { letter-spacing: 0; }
+.pb-price span { font-size: var(--fs-md); font-weight: 700; color: var(--muted); }
+.pb-once { margin: calc(-1 * var(--sp-2)) 0 0; font-size: var(--fs-sm); color: var(--muted); }
+.pb-buy .pp-btn { justify-self: start; }
+.pb-note { margin: 0; font-size: var(--fs-sm); line-height: 1.5; color: var(--ink); }
+.pb-msg { margin: 0; font-size: var(--fs-sm); line-height: 1.5; color: var(--ink); font-weight: 700; }
+.pb-msg:empty { display: none; }
+/* Back from Moyasar's page: is it paid yet. */
+.pp-paid {
+  margin: var(--sp-4) 0 0; max-width: 60ch; padding: var(--sp-3) var(--sp-4); border-radius: var(--r-md);
+  font-weight: 700; line-height: 1.5; background: var(--raise-2); border: 1px solid var(--line); color: var(--ink);
+}
+.pp-paid[hidden] { display: none; }
+.pp-paid[data-tone="ok"] { color: var(--pro-ink); background: var(--pro-tint); border-color: var(--pro-line); }
+.pp-paid[data-tone="bad"] { border-color: var(--danger, #c0392b); }
+
 @media (max-width: 480px) {
   .pp { padding: 0 16px 56px; }
+  .pb-buy { padding: var(--sp-4); }
+  .pb-buy .pp-btn { width: 100%; justify-self: stretch; }
   .pp-plan { padding: var(--sp-5) var(--sp-4) var(--sp-4); }
   .ps-ask { padding: var(--sp-4); }
   .pp-act { padding: var(--sp-5) var(--sp-4); }

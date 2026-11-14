@@ -143,7 +143,14 @@
       <p>The site's own software and branding belong to me. Please don't copy or misuse them. I respect intellectual property and expect the same from you: if you believe something on the site infringes your rights, email <a href="mailto:osamah9070@gmail.com">report it by email</a> and I'll review it and remove anything that shouldn't be there.</p>
 
       <h3>8. Payments</h3>
-      <p>Right now the site is free. If paid features are added later, the price and terms will be shown clearly before you pay, and payments would be handled by a trusted third‑party provider, I would not store your card details.</p>
+      <p data-pay="soon">Right now the site is free. If paid features are added later, the price and terms will be shown clearly before you pay, and payments would be handled by a trusted third‑party provider, I would not store your card details.</p>
+      <!-- Shown instead once Pro is on sale to everyone (server/src/payments.ts paymentsPublic; routes.ts payLegal). -->
+      <template data-pay="sale">
+      <p>Everything free on the site stays free. <b>Pro</b> is a paid plan: extra features for 30 days, for one payment, with its price in Saudi riyals shown before you pay. It does not renew: nothing is charged again unless you buy another month yourself.</p>
+      <p>Payments are taken by <b>Moyasar</b>, a payment company under the supervision of the Saudi Central Bank, on its own secure page. Your card or wallet details go to Moyasar, never to me, and I don't store them. You get a receipt by email.</p>
+      <p><b>Refunds.</b> If you haven't used Pro, you can have all of your money back within 7 days of paying: reply to your receipt email or write to <a href="mailto:osamah9070@gmail.com">osamah9070@gmail.com</a>. It goes back the way you paid, and Pro ends. After 7 days, or once Pro has been used, a month isn't refunded, unless the law says otherwise or a fault on my side kept Pro from working, in which case I'll refund or extend it.</p>
+      <p>During a month you've paid for, you keep at least the Pro features that were shown when you bought it. Pro is sold by Osamh Alsharekh, a freelancer registered on Saudi Arabia's freelance platform (document FL-216888773).</p>
+      </template>
 
       <h3>9. No warranty</h3>
       <p>The site is provided "as is" and "as available", without warranties of any kind. I can't promise it will always work, be error‑free, or be uninterrupted.</p>
@@ -183,6 +190,7 @@
           comment if you write one, the page's language and where you answered (the Pro page or the editor). Signed in, it's kept with your account and goes when you delete it. Signed out, your browser
           keeps a random key so you can change your answer, and I keep only a one‑way code made from that key: nothing that
           names you. I read the answers only to set Pro's price. Answering while signed in also means you'll hear first when Pro opens.</li>
+        <template data-pay="sale"><li><b>If you buy Pro:</b> the order: its amount, when it was paid, how (for example Apple Pay or mada; never a card number) and Moyasar's reference for it. Moyasar handles the payment itself under its own privacy policy. A record of a sale has to be kept, so when you delete your account the order stays, no longer linked to you.</li></template>
         <li><b>Audience measurement (no cookie, no consent needed):</b> for each page view I store a small set of
           non‑identifying facts: which site or search engine linked you here (the <em>website name only</em>, never the
           full address or anything you searched for), any campaign tag in the link, the page you opened, whether you're on a
@@ -317,7 +325,13 @@
       <p>برمجيات الموقع وهويته البصرية ملك لي. الرجاء عدم نسخها أو إساءة استخدامها. وأنا أحترم الملكية الفكرية وأتوقع منك نفس الشي: إذا تعتقد إن شي في الموقع ينتهك حقوقك، راسلني على <a href="mailto:osamah9070@gmail.com">البريد للتبليغ</a> وبراجعه وبشيل أي شي ما المفروض يكون موجود.</p>
 
       <h3>8. المدفوعات</h3>
-      <p>الموقع حاليًا مجاني. وإذا أُضيفت مزايا مدفوعة لاحقًا، فالسعر والشروط بتُعرض بوضوح قبل الدفع، والمدفوعات بتتم عبر مزوّد خارجي موثوق، وما بخزّن بيانات بطاقتك.</p>
+      <p data-pay="soon">الموقع حاليًا مجاني. وإذا أُضيفت مزايا مدفوعة لاحقًا، فالسعر والشروط بتُعرض بوضوح قبل الدفع، والمدفوعات بتتم عبر مزوّد خارجي موثوق، وما بخزّن بيانات بطاقتك.</p>
+      <template data-pay="sale">
+      <p>كل شي مجاني في الموقع يبقى مجاني. <b>المميّزة</b> باقة مدفوعة: مزايا إضافية لمدة 30 يوم بدفعة وحدة، وسعرها بالريال السعودي ينعرض قبل الدفع. وما تتجدد: ما ينخصم منك شي مرة ثانية إلا إذا اشتريت شهر ثاني بنفسك.</p>
+      <p>الدفع يتم عن طريق <b>ميسّر</b>، شركة مدفوعات تحت إشراف البنك المركزي السعودي، في صفحتها الآمنة. بيانات بطاقتك أو محفظتك تروح لميسّر، وما توصل لي أبد ولا أخزّنها. ويوصلك إيصال على الإيميل.</p>
+      <p><b>الاسترداد.</b> إذا ما استخدمت المميّزة، تقدر تسترجع فلوسك كاملة خلال 7 أيام من الدفع: رد على إيميل الإيصال أو راسلني على <a href="mailto:osamah9070@gmail.com">osamah9070@gmail.com</a>. وترجع لك على نفس طريقة الدفع، وتنتهي المميّزة. وبعد 7 أيام، أو إذا استُخدمت المميّزة، الشهر ما يُسترد، إلا إذا النظام قال غير كذا أو خلل من جهتي منع المميّزة تشتغل، وقتها أرجّع المبلغ أو أمدّد لك.</p>
+      <p>خلال الشهر اللي دفعته، تحتفظ على الأقل بمزايا المميّزة اللي كانت معروضة لما اشتريت. والبائع هو أسامة الشارخ، مستقل مسجّل في منصة العمل الحر السعودية (وثيقة رقم FL-216888773).</p>
+      </template>
 
       <h3>9. بلا ضمانات</h3>
       <p>الموقع مقدَّم «كما هو» و«حسب توفره»، بدون أي ضمانات من أي نوع. وما أقدر أوعدك إنه بيشتغل دائمًا أو بيكون خالي من الأخطاء أو بدون انقطاع.</p>
@@ -357,6 +371,7 @@
           إذا كنت مسجّل دخول ينحفظ مع حسابك ويروح إذا حذفته. وإذا ما سجّلت دخول، متصفحك يحتفظ بمفتاح عشوائي
           عشان تقدر تغيّر جوابك، وأنا أحتفظ بس برمز أحادي الاتجاه من هذا المفتاح، بدون شي يدل عليك.
           أقرأ الأجوبة بس عشان أحدد سعر المميّزة. وإذا جاوبت وأنت مسجّل دخول، بتكون أول من يدري إذا فتحت المميّزة.</li>
+        <template data-pay="sale"><li><b>إذا اشتريت المميّزة:</b> الطلب: مبلغه، ووقت دفعه، وطريقة الدفع (مثل Apple Pay أو مدى، وأبدًا مو رقم بطاقة)، ورقم المرجع حقه عند ميسّر. وميسّر يعالج الدفع نفسه وفق سياسة الخصوصية الخاصة فيه. وسجل البيع لازم ينحفظ، فإذا حذفت حسابك يبقى الطلب، بدون ما يرتبط فيك.</li></template>
         <li><b>قياس الزيارات (بدون كوكيز وبدون موافقة):</b> لكل زيارة صفحة أخزّن مجموعة صغيرة من
           المعلومات غير المعرّفة: أي موقع أو محرك بحث وصّلك هنا (<em>اسم الموقع فقط</em>، وأبدًا مو
           العنوان الكامل ولا اللي بحثت عنه)، وأي وسم حملة في الرابط، والصفحة اللي فتحتها، وهل أنت على

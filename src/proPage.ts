@@ -18,6 +18,15 @@
  *
  * The one blue button is "Send my price". "Tell me when Pro opens" (signed
  * in) stays beside it, quiet.
+ *
+ * On sale (payments v1, 12 Nov 2026): when the server says this visitor can
+ * buy Pro (/api/pro offer.paymentsOpen, server/src/payments.ts, off by
+ * default), the same page says so instead. The hero's words become "pay once,
+ * it turns on, it ends by itself" (setSaleCopy), the Pro column shows the
+ * price and "Get Pro", which goes to Moyasar's own payment page, and the
+ * price question and "Tell me when Pro opens" step aside. Coming back from
+ * Moyasar (/pro?order=...), the page asks the server until the order is paid
+ * (watchOrder). No card is ever typed on this site.
  */
 import { cleanAddressBar } from './core/utm';
 import { track } from './net/analytics';
@@ -31,10 +40,10 @@ import { installConsent } from './ui/consent';
 import { ensureUsernameChosen } from './ui/chooseUsernameModal';
 import { escapeHtml } from './core/escape';
 import {
-  adoptProviderSession, fetchMe, fetchPriceAnswer, fetchPro, notifyPro, sendPriceAnswer,
-  type AllowanceKind, type PlanLimits, type PriceAnswer, type PriceCurrency, type ProState,
+  adoptProviderSession, fetchMe, fetchOrder, fetchPriceAnswer, fetchPro, forgetPro, notifyPro, sendPriceAnswer, startCheckout,
+  type AllowanceKind, type CheckoutRefusal, type PlanLimits, type PriceAnswer, type PriceCurrency, type ProState,
 } from './net/api';
-import { CROWN_SVG, endsText, mountProChip } from './ui/pro';
+import { CROWN_SVG, endsText, mountProChip, whenDay } from './ui/pro';
 import { QUICK_PICKS, defaultCurrency, priceText, readAmount, thanksText } from './ui/priceQuestion';
 import { openGiftSheet } from './ui/proSheets';
 
@@ -58,6 +67,153 @@ let told = false;
 
 /** Below this, a count reads as "hardly anyone": the line stays hidden. */
 const SHOW_COUNT_FROM = 5;
+
+// ---------------------------------------------------------------- on sale ---
+
+/** This visitor can buy Pro (or, signed out, could once signed in): the server's word. */
+const onSale = (): boolean => !!state?.offer?.paymentsOpen;
+
+/** Within this long of a month's end, another can be added (server/src/payments RENEW_WITHIN_DAYS). */
+const RENEW_MS = 7 * 24 * 3600_000;
+
+/** What "Get Pro" last said, kept across repaints as a key and its values. */
+let buyMsg: { key: string; vars?: Record<string, string> } | null = null;
+/** The return from Moyasar's page, kept the same way. */
+let paidMsg: { key: string; vars?: Record<string, string>; tone: 'wait' | 'ok' | 'bad' } | null = null;
+
+/**
+ * The words that change when Pro is on sale: each element with its
+ * coming-soon key and its on-sale key. Found once, by the coming-soon key in
+ * pro.html, before anything swaps them.
+ */
+const SALE_COPY: [HTMLElement, string, string][] = (
+  [
+    ['ps.eyebrow', 'pb.eyebrow'], ['ps.title', 'pb.title'], ['ps.lead', 'pb.lead'],
+    ['ps.step1.t', 'pb.step1.t'], ['ps.step1.b', 'pb.step1.b'],
+    ['ps.step2.t', 'pb.step2.t'], ['ps.step2.b', 'pb.step2.b'],
+    ['ps.step3.t', 'pb.step3.t'], ['ps.step3.b', 'pb.step3.b'],
+    ['pp.faq.a5', 'pb.faq.a5'],
+  ] as const
+).flatMap(([soon, sale]) => {
+  const el = document.querySelector<HTMLElement>(`[data-i18n="${soon}"]`);
+  return el ? [[el, soon, sale] as [HTMLElement, string, string]] : [];
+});
+let saleCopy = false;
+
+function setSaleCopy(on: boolean): void {
+  if (on === saleCopy) return;
+  saleCopy = on;
+  for (const [el, soon, sale] of SALE_COPY) el.setAttribute('data-i18n', on ? sale : soon);
+  const refund = document.getElementById('pp-faq-refund');
+  if (refund) refund.hidden = !on;
+  applyDom(document);
+}
+
+/** The month this account holds, when it is a month (paid or given) rather than the gift. */
+function monthHeld(): { endsAt: string } | null {
+  const p = state?.live ? state.pass : null;
+  return p && p.plan === 'monthly' && Date.parse(p.endsAt) > Date.now() ? { endsAt: p.endsAt } : null;
+}
+
+/** The Pro column's head when Pro is on sale: the price, and the one way to buy it. */
+function buyHtml(): string {
+  const o = state!.offer!;
+  const price = String(o.monthly.price);
+  const held = monthHeld();
+  const renew = !!held && Date.parse(held.endsAt) - Date.now() <= RENEW_MS;
+  let act = '';
+  if (!state?.signedIn) act = `<button type="button" class="pp-btn" data-act="buy-signin">${escapeHtml(t('pb.signin'))}</button>`;
+  else if (held && !renew) act = `<p class="pb-note">${escapeHtml(tv('pb.err.held', { date: whenDay(held.endsAt) }))}</p>`;
+  else {
+    act = `<button type="button" class="pp-btn" data-act="buy">${escapeHtml(tv(renew ? 'pb.renew' : 'pb.buy', { price }))}</button>` +
+      (renew ? `<p class="pb-note">${escapeHtml(t('pb.renewNote'))}</p>` : '');
+  }
+  const msg = buyMsg ? escapeHtml(tv(buyMsg.key, buyMsg.vars ?? {})) : '';
+  return (
+    `<div class="pb-buy" id="pb-buy">` +
+    `<p class="pb-price"><b>${escapeHtml(tv('pb.price', { price }))}</b> <span>${escapeHtml(tv('pb.per', { days: o.monthly.days }))}</span></p>` +
+    `<p class="pb-once">${escapeHtml(t('pb.once'))}</p>` +
+    act +
+    `<p class="pb-msg" id="pb-msg" role="status" aria-live="polite">${msg}</p>` +
+    `<p class="ps-private">${escapeHtml(t('pb.methods'))}</p>` +
+    `</div>`
+  );
+}
+
+const REFUSED: Record<CheckoutRefusal, string> = {
+  off: 'pb.err.off', verify: 'pb.err.verify', held: 'pb.err.held', busy: 'pb.err.busy',
+  unavailable: 'pb.err.unavailable', signin: 'pb.signin', offline: 'pb.err.offline',
+};
+
+function wireBuy(): void {
+  const box = document.getElementById('pb-buy');
+  if (!box) return;
+  box.querySelector('[data-act="buy-signin"]')?.addEventListener('click', () => void signIn());
+  const btn = box.querySelector<HTMLButtonElement>('[data-act="buy"]');
+  btn?.addEventListener('click', async () => {
+    btn.disabled = true;
+    const label = btn.textContent ?? '';
+    btn.textContent = t('pb.going');
+    const r = await startCheckout(getLang());
+    if (r.ok) {
+      track('pro_checkout');
+      // Moyasar's own page: the card, Apple Pay or mada is handled there, never here.
+      location.assign(r.url);
+      return;
+    }
+    if (r.reason === 'signin') {
+      await signIn();
+      return;
+    }
+    btn.disabled = false;
+    btn.textContent = label;
+    buyMsg = { key: REFUSED[r.reason], vars: r.endsAt ? { date: whenDay(r.endsAt) } : undefined };
+    const msg = document.getElementById('pb-msg');
+    if (msg) msg.textContent = tv(buyMsg.key, buyMsg.vars ?? {});
+  });
+}
+
+function paintPaid(): void {
+  const box = document.getElementById('pp-paid');
+  if (!box) return;
+  box.hidden = !paidMsg;
+  if (!paidMsg) return;
+  box.dataset.tone = paidMsg.tone;
+  box.textContent = tv(paidMsg.key, paidMsg.vars ?? {});
+}
+
+const pause = (ms: number) => new Promise<void>((r) => window.setTimeout(r, ms));
+
+/**
+ * Back from Moyasar's page with /pro?order=...: ask until the order is paid
+ * (the server asks Moyasar each time), failed, or a minute has gone by. The
+ * order's id leaves the address bar at once, so a reload or a shared link
+ * does not ask again.
+ */
+async function watchOrder(id: string): Promise<void> {
+  paidMsg = { key: 'pb.checking', tone: 'wait' };
+  paintPaid();
+  const started = Date.now();
+  for (let i = 0; Date.now() - started < 60_000; i++) {
+    const o = await fetchOrder(id);
+    if (o?.status === 'paid') {
+      track('pro_paid');
+      forgetPro();
+      paidMsg = { key: 'pb.paid', vars: { date: o.endsAt ? whenDay(o.endsAt) : '' }, tone: 'ok' };
+      await load(true);
+      paintPaid();
+      return;
+    }
+    if (o && (o.status === 'failed' || o.status === 'expired')) {
+      paidMsg = { key: 'pb.failed', tone: 'bad' };
+      paintPaid();
+      return;
+    }
+    await pause(i < 6 ? 1500 : 4000);
+  }
+  paidMsg = { key: 'pb.slow', tone: 'wait' };
+  paintPaid();
+}
 
 /** "3 a week"; "10 a day" over "150 a month", one window to a line. */
 function limitHtml(l: PlanLimits[AllowanceKind] | undefined): string {
@@ -233,6 +389,8 @@ function paintPlans(kept: { amount: string; comment: string } | null): void {
   const lim = st?.soon?.limits ?? st?.offer?.limits;
   const days = st?.soon?.monthly.days ?? st?.offer?.monthly.days ?? 30;
   const rows = rowsFor(lim);
+  const sale = onSale();
+  setSaleCopy(sale);
   $('pp-plans').innerHTML =
     planCard({
       id: 'free', name: t('pp.free.name'), limits: lim?.free, pro: false, rows,
@@ -240,9 +398,11 @@ function paintPlans(kept: { amount: string; comment: string } | null): void {
     }) +
     planCard({
       id: 'pro', name: t('pp.pro.name'), limits: lim?.pro, pro: true, rows,
-      head: `<p class="pp-sub">${escapeHtml(tv('pp.pro.sub', { days }))}</p>${askHtml()}`,
+      // On sale, the price box says the days and that it ends by itself: the line above it would say it twice.
+      head: sale ? buyHtml() : `<p class="pp-sub">${escapeHtml(tv('pp.pro.sub', { days }))}</p>${askHtml()}`,
     });
-  wireAsk(kept);
+  if (sale) wireBuy();
+  else wireAsk(kept);
 }
 
 function paint(): void {
@@ -253,8 +413,10 @@ function paint(): void {
   const commentNow = document.getElementById('ps-comment') as HTMLTextAreaElement | null;
   paintPlans(amountNow && commentNow ? { amount: amountNow.value, comment: commentNow.value } : null);
   $('pp-crown').innerHTML = CROWN_SVG;
+  paintPaid();
   const count = $('ps-count');
-  count.hidden = answered < SHOW_COUNT_FROM;
+  // The count is about the price question, which steps aside once Pro is on sale.
+  count.hidden = answered < SHOW_COUNT_FROM || onSale();
   count.textContent = count.hidden ? '' : tv('ps.count', { n: answered });
 
   // Someone in the preview: a pass running, a gift waiting, or neither.
@@ -277,6 +439,11 @@ function paint(): void {
   const row = $('pp-act-row');
   const msg = $('pp-msg');
   msg.textContent = '';
+  // On sale, buying is in the Pro column: this row only keeps a gift waiting to be started.
+  if (onSale()) {
+    act.hidden = !(st?.live && st.gift?.state === 'offered');
+    if (act.hidden) return;
+  }
   if (!st?.signedIn) {
     note.textContent = t('pp.closed');
     row.innerHTML = `<button type="button" class="pp-btn quiet" data-act="signin">${escapeHtml(t('pp.signInToNotify'))}</button>`;
@@ -370,9 +537,24 @@ document.getElementById('foot-feedback')?.addEventListener('click', async () => 
   openFeedbackModal('other');
 });
 
+/** Back from Moyasar's page: the order to ask after, taken out of the address bar straight away. */
+const returnedOrder = ((): string | null => {
+  try {
+    const u = new URL(location.href);
+    const id = u.searchParams.get('order');
+    if (!id) return null;
+    u.searchParams.delete('order');
+    history.replaceState(history.state, '', u.pathname + u.search + u.hash);
+    return /^[0-9a-f-]{36}$/i.test(id) ? id : null;
+  } catch {
+    return null;
+  }
+})();
+
 void (async () => {
   await adoptProviderSession();
   await refreshAuth();
   if (authBtn.parentElement) mountProChip(authBtn.parentElement, authBtn);
   await load();
+  if (returnedOrder) void watchOrder(returnedOrder);
 })();

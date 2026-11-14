@@ -451,12 +451,14 @@ async function loadAll(){
     api('/api/admin/soc'),
     api('/api/admin/queue'),
     api('/api/admin/pro'),
-    api('/api/admin/pro/prices')
+    api('/api/admin/pro/prices'),
+    api('/api/admin/pro/orders')
   ]);
   var ov = results[0], tr = results[1], fn = results[2], sh = results[3], fb = results[4], ai = results[5], em = results[6], sc = results[7];
   QUEUE = results[8].ok && results[8].data ? results[8].data : { error: results[8].status };
   PRO = results[9].ok && results[9].data ? results[9].data : { error: results[9].status };
   PRICES = results[10].ok && results[10].data ? results[10].data : { error: results[10].status };
+  ORDERS = results[11].ok && results[11].data ? results[11].data : { error: results[11].status };
   if (!ov.ok){
     if (ov.status === 403){ clearUnlock(); showLogin('Wrong or expired password. Sign in again.'); return; }
     setStatus('Failed to load (' + ov.status + ').');
@@ -666,6 +668,8 @@ var FUNNEL_STEP = {
   pro_notify:     ['Asked to hear when Pro opens','one per account'],
   pro_ask_seen:   ['Asked in the editor','the founding-fans card, once'],
   pro_price:      ['Said what Pro is worth','on /pro or in the editor card'],
+  pro_checkout:   ['Pressed Get Pro','sent to Moyasar to pay'],
+  pro_paid:       ['Came back with Pro on','paid'],
   gift_accepted:  ['Accepted the 7-day gift','Pro for 7 days'],
   cutout_used:    ['Got a smart cut-out','a picture lifted out'],
   export_sheet:   ['Saw the export sheet','their tifo had Pro items'],
@@ -1804,13 +1808,14 @@ function proTab(){
   if (PRO.mode === 'preview' && !PRO.previewUsers) html += '<div class="callout warn"><b>Preview with nobody in it.</b> Set PRO_PREVIEW_USERS to your username (comma-separated for more) and redeploy.</div>';
   if (!PRO.throwawayList || !PRO.throwawayList.loaded) html += '<div class="callout bad"><b>The throwaway email list did not load</b>, so no gifts are offered. ' + esc((PRO.throwawayList && PRO.throwawayList.error) || '') + '</div>';
   if (!PRO.cutoutConfigured) html += '<div class="callout warn"><b>Smart cut-out has no provider.</b> It uses AI_CLOUDFLARE_ACCOUNT_ID and AI_CLOUDFLARE_API_TOKEN (the picture backup\\'s). Until both are set, the cut-out button says it is not available.</div>';
-  if (!PRO.paymentsOpen) html += '<div class="callout"><b>Payments are not open.</b> /pro is a coming-soon page: it shows no price, asks what a month is worth, and offers "Tell me when Pro opens". The answers and the count are below.</div>';
+  if (!PRO.paymentsOpen && !(ORDERS && ORDERS.status && ORDERS.status.on)) html += '<div class="callout"><b>Payments are not open.</b> /pro is a coming-soon page: it shows no price, asks what a month is worth, and offers "Tell me when Pro opens". The answers and the count are below.</div>';
   html += '<div class="grid">';
   html += kpi('Gifts offered', st.gifts.offered || 0, fmt(st.gifts.accepted || 0) + ' accepted, ' + fmt(st.gifts.active || 0) + ' running now', true);
   html += kpi('Pro monthly now', (st.passes && st.passes.monthly) || 0, 'bought or given by hand', true);
   html += kpi('Asked to hear when Pro opens', st.notify || 0, 'one per account', true);
   html += kpi('Said what Pro is worth', (PRICES && PRICES.total) || 0, 'on the coming-soon page', true);
   html += '</div>';
+  html += ordersHtml();
   html += pricesHtml();
 
   html += '<h2 class="sec">An account</h2>';
@@ -1850,11 +1855,96 @@ function proTab(){
 async function proReload(){
   var both = await Promise.all([
     api('/api/admin/pro' + (PRO_LOOKUP ? '?username=' + encodeURIComponent(PRO_LOOKUP) : '')),
-    api('/api/admin/pro/prices')
+    api('/api/admin/pro/prices'),
+    api('/api/admin/pro/orders')
   ]);
   PRO = both[0].ok && both[0].data ? both[0].data : { error: both[0].status };
   PRICES = both[1].ok && both[1].data ? both[1].data : { error: both[1].status };
+  ORDERS = both[2].ok && both[2].data ? both[2].data : { error: both[2].status };
   paintSection();
+}
+
+/* ---- buying Pro (payments v1): the switches, the orders, refunds ----
+   server/src/payments.ts and payRoutes.ts. A refund goes back to the way the
+   fan paid, through Moyasar, and ends the pass bought with it. */
+var ORDERS = null;
+/* What the last refund said, kept across the repaint that follows it. */
+var ORDER_MSG = '';
+var ORDER_STATUS = {
+  pending: ['Not paid yet', 'dim'], paid: ['Paid', ''], refunded: ['Refunded', 'dim'],
+  failed: ['Did not go through', 'dim'], expired: ['Page closed unpaid', 'dim'], review: ['Needs a look', 'warn']
+};
+var ORDER_METHOD = { applepay: 'Apple Pay', creditcard: 'Card / mada', stcpay: 'STC Pay', samsungpay: 'Samsung Pay', googlepay: 'Google Pay' };
+function ordersHtml(){
+  var html = '<h2 class="sec">Payments</h2>';
+  if (!ORDERS || ORDERS.error){
+    if (ORDERS && ORDERS.error === 404) return html + '<p class="note">This server has no order store.</p>';
+    return html + '<div class="callout bad"><b>Could not load the orders.</b> HTTP ' + esc(String((ORDERS && ORDERS.error) || '?')) + '</div>';
+  }
+  var st = ORDERS.status || {}, n = ORDERS.stats || {};
+  if (!st.on){
+    html += '<div class="callout"><b>Payments are off.</b> Nobody sees a price or a buy button. They turn on with PRO_PAYMENTS=on and MOYASAR_SECRET_KEY (from Moyasar\\'s dashboard) in Railway\\'s variables.'
+      + (st.switch && !st.keySet ? ' PRO_PAYMENTS is on, but there is no key.' : '')
+      + (st.keySet && !st.key ? ' The key set is not a secret key (it should start sk_test_ or sk_live_).' : '')
+      + '</div>';
+  } else {
+    html += '<p class="lede">' + (st.key === 'test'
+      ? 'On, with TEST keys: only the accounts in PRO_PREVIEW_USERS can buy, with Moyasar\\'s test cards. No real money moves.'
+      : st.public ? 'On, with LIVE keys, for everyone: real money.' : 'On, with LIVE keys, for the accounts Pro is on for (PRO_MODE): real money.') + '</p>';
+    if (!st.webhook) html += '<div class="callout warn"><b>No webhook secret.</b> Payments still arrive through the fan\\'s return and the invoice\\'s callback, but a refund made in Moyasar\\'s dashboard is only noticed when someone opens that order. Set MOYASAR_WEBHOOK_SECRET to the secret you type in Moyasar\\'s webhook settings, pointing at /api/pro/pay/webhook.</div>';
+  }
+  if (n.review) html += '<div class="callout bad"><b>' + fmt(n.review) + ' order' + (n.review === 1 ? '' : 's') + ' need' + (n.review === 1 ? 's' : '') + ' a look.</b> Paid at an amount that does not match: nobody got Pro for ' + (n.review === 1 ? 'it' : 'them') + '. Check in Moyasar\\'s dashboard, then refund or give Pro by hand.</div>';
+  html += '<div class="grid">';
+  html += kpi('Sold', n.paid || 0, 'months of Pro, real money', true);
+  html += kpi('Taken', 'SAR ' + fmt((n.revenue || 0) / 100), 'before Moyasar\\'s fees', true);
+  html += kpi('Refunded', n.refunded || 0, 'within ' + fmt(ORDERS.refundDays || 7) + ' days, unused', true);
+  html += kpi('Test orders', n.test || 0, 'test keys, no money', true);
+  html += '</div>';
+  var rows = ORDERS.orders || [];
+  if (!rows.length) return html + '<p class="empty">No orders yet.</p>';
+  html += '<table class="tbl"><thead><tr><th>When (UTC)</th><th>Who</th><th>Amount</th><th>Status</th><th>How</th><th>Pro used</th><th></th></tr></thead><tbody>';
+  for (var i = 0; i < rows.length; i++){
+    var o = rows[i], lab = ORDER_STATUS[o.status] || [o.status, ''];
+    var act = '';
+    if (o.status === 'paid'){
+      act = '<button type="button" class="order-refund" data-order="' + esc(o.id) + '" data-late="' + (o.refundable ? '0' : '1') + '" data-amount="' + esc(String(o.amount)) + '">'
+        + (o.refundable ? 'Refund' : 'Refund anyway') + '</button>';
+    }
+    html += '<tr><td>' + esc(String(o.createdAt || '').slice(0, 16).replace('T', ' ')) + (o.test ? ' <b class="dim">TEST</b>' : '') + '</td><td>'
+      + (o.username ? '@' + esc(o.username) : '<span class="dim">account deleted</span>') + '</td><td>SAR ' + esc(String(o.amount))
+      + (o.refunded ? ' <span class="dim">(' + esc(String(o.refunded)) + ' back)</span>' : '') + '</td><td>'
+      + (lab[1] ? '<span class="' + lab[1] + '">' + esc(lab[0]) + '</span>' : esc(lab[0]))
+      + (o.note ? '<br><span class="dim">' + esc(o.note) + '</span>' : '') + '</td><td>' + esc(ORDER_METHOD[o.method] || o.method || '') + '</td><td>'
+      + (o.used == null ? '<span class="dim">no pass</span>' : o.used ? '<b>' + fmt(o.used) + ' uses</b>' : 'not yet') + '</td><td>' + act + '</td></tr>';
+  }
+  html += '</tbody></table>';
+  html += '<p class="note">"Pro used" counts the AI designs, Polishes and cut-outs taken on the pass bought. Exports with Pro items are not counted, so ask if unsure. A refund within ' + fmt(ORDERS.refundDays || 7) + ' days of paying is the promise on /legal; "Refund anyway" is for later ones you choose to make.</p>';
+  html += '<p id="order-out" class="note" role="status" aria-live="polite">' + esc(ORDER_MSG) + '</p>';
+  return html;
+}
+function wireOrders(){
+  var btns = document.querySelectorAll('.order-refund');
+  for (var i = 0; i < btns.length; i++){
+    btns[i].addEventListener('click', async function(e){
+      var b = e.currentTarget;
+      /* Two presses: the first asks, the second refunds. */
+      if (b.getAttribute('data-sure') !== '1'){
+        b.setAttribute('data-sure', '1');
+        b.textContent = 'Sure? Refund SAR ' + b.getAttribute('data-amount');
+        return;
+      }
+      b.disabled = true;
+      b.textContent = 'Refunding...';
+      var r = await post('/api/admin/pro/refund', { orderId: b.getAttribute('data-order'), late: b.getAttribute('data-late') === '1' });
+      if (r.ok){ ORDER_MSG = 'Refunded. The money goes back the way it was paid, and the pass has ended.'; proReload(); return; }
+      ORDER_MSG = '';
+      b.disabled = false;
+      b.removeAttribute('data-sure');
+      b.textContent = 'Refund';
+      el('order-out').innerHTML = '<b class="warn">Not refunded.</b> ' + esc((r.data && (r.data.reason || r.data.error)) || ('HTTP ' + r.status))
+        + (r.data && r.data.reason === 'failed' ? ': Moyasar refused it. Try once more, or refund from Moyasar\\'s dashboard (this page notices it).' : '');
+    });
+  }
 }
 
 /* ---- "What would you pay for Pro?": the answers from the coming-soon /pro ----
@@ -1959,6 +2049,7 @@ async function downloadPricesCsv(){
   out.textContent = 'Downloaded ' + fmt(rows.length) + ' answer' + (rows.length === 1 ? '' : 's') + '.';
 }
 function wirePro(){
+  wireOrders();
   var csv = el('price-csv');
   if (csv) csv.addEventListener('click', function(){ void downloadPricesCsv(); });
   var find = el('pro-find');

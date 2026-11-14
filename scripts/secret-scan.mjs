@@ -30,6 +30,9 @@ const RULES = [
   ['AWS access key id', /\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/],
   ['npm token', /\bnpm_[A-Za-z0-9]{36}\b/],
   ['Stripe live key', /\b[sr]k_live_[0-9a-zA-Z]{20,}\b/],
+  // Moyasar's secret keys share Stripe's sk_live_ shape (caught above); a test
+  // key moves no money, but it still opens the account's sandbox to anyone.
+  ['Moyasar test key', /\bsk_test_[0-9a-zA-Z]{20,}\b/],
   ['Slack token', /\bxox[abprs]-[A-Za-z0-9-]{10,}\b/],
   ['Private key', /-----BEGIN (?:RSA |EC |DSA |OPENSSH |PGP |ENCRYPTED )?PRIVATE KEY(?: BLOCK)?-----/],
 ];

@@ -42,6 +42,7 @@
         </ol>
         <p class="ps-count" id="ps-count" role="status" hidden></p>
         <p class="pp-you" id="pp-you" hidden></p>
+        <p class="pp-paid" id="pp-paid" role="status" aria-live="polite" hidden></p>
       </section>
 
       <!-- Painted when /api/pro answers: the allowances are the server's. -->
@@ -61,6 +62,8 @@
         <details><summary data-i18n="pp.faq.q4">Where does my picture go for a smart cut-out?</summary><p data-i18n="pp.faq.a4">To Cloudflare's AI, which cuts it out and sends it back. We do not keep it.</p></details>
         <details><summary data-i18n="pp.faq.q5">How will I pay?</summary><p data-i18n="pp.faq.a5">With mada, Apple Pay or STC Pay, when Pro goes on sale.</p></details>
         <details><summary data-i18n="pp.faq.q6">Does the 7-day gift run out if I wait?</summary><p data-i18n="pp.faq.a6">No. It waits until you press Start, and the 7 days begin then. One gift per account.</p></details>
+        <!-- Shown only when this visitor can buy Pro (payments v1): proPage.ts setSaleCopy. -->
+        <details id="pp-faq-refund" hidden><summary data-i18n="pb.faq.q7">Can I get my money back?</summary><p data-i18n="pb.faq.a7">Yes. Within 7 days of paying, if you haven't used Pro, reply to your receipt email and you get all of it back, to the way you paid.</p></details>
       </section>
     </div>
   </main>

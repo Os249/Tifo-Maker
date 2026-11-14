@@ -145,13 +145,12 @@ export const OFFER = {
   monthly: { price: 19, days: CYCLE_DAYS },
   /** Once per account, started whenever its holder likes: it never expires unclaimed. */
   gift: { days: 7 },
-  /**
-   * There is no payment provider yet (Moyasar needs the freelance document
-   * first). Until there is, every buy button asks to be told when Pro opens
-   * instead. This is a constant on purpose: turning it on without the
-   * payment code behind it would put buttons on the page that go nowhere.
+  /*
+   * Whether the month can be bought is no longer a constant here (it was
+   * `paymentsOpen: false` until 12 Nov 2026): it is payments.ts's switches,
+   * PRO_PAYMENTS and the Moyasar key, all off by default. monthly.price above
+   * is what Moyasar charges once they are on.
    */
-  paymentsOpen: false,
 } as const;
 
 // --------------------------------------------------------------- periods ---

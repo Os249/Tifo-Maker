@@ -673,3 +673,34 @@ CREATE INDEX IF NOT EXISTS pro_price_answers_updated ON pro_price_answers (updat
 -- signed-in fans once in a card (src/ui/priceAsk.ts) as well as /pro.
 ALTER TABLE pro_price_answers ADD COLUMN IF NOT EXISTS wont_pay BOOLEAN NOT NULL DEFAULT false;
 ALTER TABLE pro_price_answers ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'page' CHECK (source IN ('page', 'editor'));
+
+-- Pro orders (payments v1, 12 Nov 2026; server/src/payRepo.ts, payments.ts).
+-- One row per "Get Pro" press: the Moyasar invoice it made, and the pass it
+-- paid for. The fan pays on Moyasar's own page; nothing about a card is kept
+-- here, only the amount, Moyasar's references and how it was paid
+-- ('applepay', 'creditcard', ...). A row is only read or written while
+-- PRO_PAYMENTS is on. An order outlives its account (user_id is emptied, the
+-- pass goes): it is the record of a sale. amount and refunded are halalas.
+-- Each statement is safe to run again.
+CREATE TABLE IF NOT EXISTS pro_orders (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id     UUID REFERENCES users(id) ON DELETE SET NULL,
+  amount      INT NOT NULL CHECK (amount >= 100),
+  currency    TEXT NOT NULL DEFAULT 'SAR' CHECK (currency = 'SAR'),
+  days        INT NOT NULL CHECK (days BETWEEN 1 AND 400),
+  lang        TEXT NOT NULL CHECK (lang IN ('en', 'ar')),
+  test_mode   BOOLEAN NOT NULL,
+  status      TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'paid', 'refunded', 'failed', 'expired', 'review')),
+  invoice_id  TEXT UNIQUE CHECK (invoice_id IS NULL OR invoice_id ~ '^[0-9a-fA-F-]{36}$'),
+  invoice_url TEXT CHECK (invoice_url IS NULL OR invoice_url LIKE 'https://%'),
+  payment_id  TEXT,
+  method      TEXT CHECK (method IS NULL OR char_length(method) <= 32),
+  pass_id     UUID REFERENCES pro_passes(id) ON DELETE SET NULL,
+  note        TEXT CHECK (note IS NULL OR char_length(note) <= 300),
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  paid_at     TIMESTAMPTZ,
+  refunded_at TIMESTAMPTZ,
+  refunded    INT NOT NULL DEFAULT 0 CHECK (refunded >= 0 AND refunded <= amount)
+);
+CREATE INDEX IF NOT EXISTS pro_orders_user_idx ON pro_orders (user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS pro_orders_created_idx ON pro_orders (created_at DESC);

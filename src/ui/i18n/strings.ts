@@ -2967,6 +2967,61 @@ export const STRINGS: Record<string, { en: string; ar: string }> = {
   'ps.thanks': { en: 'Thanks! You said {price} a month.', ar: 'شكراً! قلت {price} بالشهر.' },
   'ps.change': { en: 'Change my answer', ar: 'غيّر جوابي' },
 
+  // /pro on sale (payments v1, 12 Nov 2026; server/src/payments.ts): shown
+  // only to a visitor who can buy, so nothing reads this while payments are off.
+  'pb.eyebrow': { en: 'TifoMaker Pro', ar: 'تيفو ميكر المميّزة' },
+  'pb.title': { en: 'Go Pro for a month', ar: 'خذ المميّزة لمدة شهر' },
+  'pb.lead': {
+    en: 'Everything free stays free. Pro adds the extras in its column below, for one payment, with nothing to cancel.',
+    ar: 'كل شي مجاني يبقى مجاني. المميّزة تضيف الإضافات اللي في عمودها تحت، بدفعة وحدة، وبدون شي تلغيه.',
+  },
+  'pb.step1.t': { en: "Pay once on Moyasar's secure page", ar: 'ادفع مرة وحدة في صفحة ميسّر الآمنة' },
+  'pb.step1.b': { en: 'Apple Pay, mada, Visa, Mastercard or STC Pay. Your card never reaches us.', ar: 'تدفع بـApple Pay أو STC Pay أو مدى أو فيزا أو ماستركارد، وبطاقتك ما توصل لنا أبد.' },
+  'pb.step2.t': { en: 'Pro turns on straight away', ar: 'المميّزة تشتغل على طول' },
+  'pb.step2.b': { en: 'Back on TifoMaker, everything in the Pro column is yours, and the receipt comes by email.', ar: 'ترجع لتيفو ميكر وكل شي في عمود المميّزة صار لك، والإيصال يوصلك على الإيميل.' },
+  'pb.step3.t': { en: 'It ends by itself', ar: 'تنتهي لحالها' },
+  'pb.step3.b': {
+    en: "Nothing renews and nothing is charged again. Haven't used it? Get all your money back within 7 days.",
+    ar: 'ما تتجدد وما ينخصم منك شي مرة ثانية. وإذا ما استخدمتها، ترجع لك فلوسك كاملة خلال 7 أيام.',
+  },
+  'pb.price': { en: 'SAR {price}', ar: '{price} ريال' },
+  'pb.per': { en: 'for {days} days', ar: 'لمدة {days} يوم' },
+  'pb.once': { en: 'One payment. It never renews by itself.', ar: 'دفعة وحدة، وما تتجدد لحالها أبد.' },
+  'pb.buy': { en: 'Get Pro for SAR {price}', ar: 'اشترك بـ{price} ريال' },
+  'pb.renew': { en: 'Add a month for SAR {price}', ar: 'أضف شهر بـ{price} ريال' },
+  'pb.renewNote': { en: 'The new month starts when this one ends, so no day is lost.', ar: 'الشهر الجديد يبدأ لما يخلص الحالي، فما يضيع عليك ولا يوم.' },
+  'pb.going': { en: 'Taking you to the payment page…', ar: 'جاري تحويلك لصفحة الدفع…' },
+  'pb.methods': { en: "You pay on Moyasar's secure page: Apple Pay, mada, cards or STC Pay.", ar: 'تدفع في صفحة ميسّر الآمنة بـApple Pay أو STC Pay أو مدى أو البطاقة.' },
+  'pb.signin': { en: 'Sign in to get Pro', ar: 'سجّل دخولك عشان تشترك' },
+  'pb.err.verify': { en: 'Verify your email first: the receipt goes there.', ar: 'وثّق بريدك أول، لأن الإيصال يوصلك عليه.' },
+  'pb.err.held': { en: 'You have Pro until {date}. You can add a month in its last week.', ar: 'عندك المميّزة لين {date}. تقدر تضيف شهر في آخر أسبوع منها.' },
+  'pb.err.busy': { en: 'Too many tries today. Try again tomorrow.', ar: 'محاولات كثيرة اليوم. جرّب بكرة.' },
+  'pb.err.unavailable': {
+    en: "Payments can't be reached right now, and nothing was charged. Try again in a few minutes.",
+    ar: 'الدفع مو متاح الحين، وما انخصم منك شي. جرّب بعد كم دقيقة.',
+  },
+  'pb.err.off': { en: "Pro can't be bought right now.", ar: 'المميّزة ما تنشرى الحين.' },
+  'pb.err.offline': { en: "You're offline, and nothing was charged.", ar: 'أنت غير متصل، وما انخصم منك شي.' },
+  'pb.checking': { en: 'Checking your payment with Moyasar…', ar: 'جاري التأكد من دفعتك مع ميسّر…' },
+  'pb.paid': {
+    en: 'Payment received! Pro is on until {date}. Your receipt is on its way to your email.',
+    ar: 'وصلت دفعتك! المميّزة شغّالة لين {date}. والإيصال في طريقه لإيميلك.',
+  },
+  'pb.failed': { en: "The payment didn't go through, and nothing was charged. You can try again.", ar: 'الدفع ما تم، وما انخصم منك شي. تقدر تحاول مرة ثانية.' },
+  'pb.slow': {
+    en: "Moyasar hasn't confirmed it yet. If you paid, Pro turns on by itself within a few minutes and your receipt comes by email.",
+    ar: 'ميسّر ما أكد الدفع للحين. إذا دفعت، المميّزة بتشتغل لحالها خلال دقايق والإيصال بيوصلك على الإيميل.',
+  },
+  'pb.faq.a5': {
+    en: "On Moyasar's secure payment page, with Apple Pay, mada, Visa, Mastercard or STC Pay. Your card details go to Moyasar, never to us.",
+    ar: 'في صفحة الدفع الآمنة حقت ميسّر، بـApple Pay أو STC Pay أو مدى أو فيزا أو ماستركارد. وبيانات بطاقتك تروح لميسّر، وما توصل لنا أبد.',
+  },
+  'pb.faq.q7': { en: 'Can I get my money back?', ar: 'أقدر أسترجع فلوسي؟' },
+  'pb.faq.a7': {
+    en: "Yes. Within 7 days of paying, if you haven't used Pro, reply to your receipt email and you get all of it back, to the way you paid.",
+    ar: 'إيه. خلال 7 أيام من الدفع، إذا ما استخدمت المميّزة، رد على إيميل الإيصال وترجع لك فلوسك كاملة على نفس طريقة الدفع.',
+  },
+
   // The editor's card (src/ui/priceAsk.ts): shown once to a signed-in fan.
   'pa.tag': { en: 'Founding fans', ar: 'الجمهور المؤسس' },
   'pa.title': { en: "You're one of TifoMaker's founding fans", ar: 'أنت من أوائل جمهور تيفو ميكر' },

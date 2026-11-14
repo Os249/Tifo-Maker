@@ -22,7 +22,7 @@
  */
 import './priceAsk.css';
 import { track } from '../net/analytics';
-import { fetchMeOnce, fetchPriceAnswer, isSignedIn, sendPriceAnswer, type PriceCurrency } from '../net/api';
+import { fetchMeOnce, fetchPriceAnswer, fetchPro, isSignedIn, sendPriceAnswer, type PriceCurrency } from '../net/api';
 import { escapeHtml } from '../core/escape';
 import { getLang, localPath, t } from './i18n';
 import { CROWN_SVG } from './crown';
@@ -82,6 +82,8 @@ export async function offerPriceAsk(opts: PriceAskOptions = {}): Promise<boolean
   if (!isSignedIn() || !due()) return false;
   const me = await fetchMeOnce().catch(() => null);
   if (!me) return false;
+  // Pro on sale to this fan (payments v1): the price is set, so there is nothing to ask.
+  if ((await fetchPro().catch(() => null))?.offer?.paymentsOpen) return false;
   const mine = await fetchPriceAnswer();
   // Answered already, here or on /pro; or the server could not say: not now.
   if (!mine || mine.answer) {

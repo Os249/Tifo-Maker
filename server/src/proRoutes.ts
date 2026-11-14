@@ -27,6 +27,13 @@ export interface ProRouteDeps {
   routeConfig?: object;
   /** The price question's own pace (POST /api/pro/price), tighter than the other routes'. */
   priceConfig?: object;
+  /**
+   * Whether this account can buy Pro now (payments.ts paymentsOpenFor, and a
+   * payment service to take the order). Absent: nobody can, as before.
+   */
+  paymentsOpenFor?: (username: string | null) => boolean;
+  /** Whether Pro is on sale to everyone for real (payments.ts paymentsPublic): the signed-out page shows the price. */
+  paymentsPublic?: () => boolean;
 }
 
 const acctOf = (u: UserRow): ProAccount => ({ id: u.id, username: u.username, email: u.email, emailVerified: !!u.emailVerifiedAt });
@@ -61,14 +68,14 @@ const COUNT_FOR_MS = 60_000;
 /** The newest answers /admin lists in full (the summary counts them all; the CSV has every one). */
 const ADMIN_PRICE_ROWS = 300;
 
-/** The parts of the offer the Pro page shows: Free against Pro, one price. */
-function publicOffer() {
+/** The parts of the offer the Pro page shows: Free against Pro, one price, and whether this visitor can buy it. */
+function publicOffer(paymentsOpen: boolean) {
   return {
     limits: { free: limitsOf(FREE_WINDOWS), pro: limitsOf(PLAN_WINDOWS.monthly) },
     currency: OFFER.currency,
     monthly: { price: OFFER.monthly.price, days: OFFER.monthly.days },
     gift: { days: OFFER.gift.days },
-    paymentsOpen: OFFER.paymentsOpen,
+    paymentsOpen,
   };
 }
 
@@ -77,6 +84,7 @@ const USERNAME = /^[A-Za-z0-9_.-]{1,32}$/;
 export function registerProRoutes(app: FastifyInstance, deps: ProRouteDeps): void {
   const { pro } = deps;
   const cfg = deps.routeConfig ?? {};
+  const canBuy = (username: string | null): boolean => deps.paymentsOpenFor?.(username) ?? false;
 
   /**
    * Pro as the caller sees it. Signed out, whether Pro is open to everyone
@@ -90,7 +98,7 @@ export function registerProRoutes(app: FastifyInstance, deps: ProRouteDeps): voi
     const userId = await deps.userOf(req).catch(() => null);
     if (!userId) {
       const open = proMode() === 'on';
-      return open ? { live: true, signedIn: false, offer: publicOffer(), soon: soonOffer() } : { live: false, signedIn: false, soon: soonOffer() };
+      return open ? { live: true, signedIn: false, offer: publicOffer(deps.paymentsPublic?.() ?? false), soon: soonOffer() } : { live: false, signedIn: false, soon: soonOffer() };
     }
     const user = await deps.accountOf(req, userId).catch(() => null);
     if (!user) return { live: false, signedIn: true, soon: soonOffer() };
@@ -113,7 +121,7 @@ export function registerProRoutes(app: FastifyInstance, deps: ProRouteDeps): voi
       allowances,
       gift,
       notified,
-      offer: publicOffer(),
+      offer: publicOffer(canBuy(user.username)),
       soon: soonOffer(),
       now: pro.now().toISOString(),
     };
@@ -218,7 +226,7 @@ export function registerProRoutes(app: FastifyInstance, deps: ProRouteDeps): voi
       stats: await pro.repo.stats(pro.now()),
       throwawayList: disposableListStatus(),
       cutoutConfigured: deps.cutoutConfigured(),
-      paymentsOpen: OFFER.paymentsOpen,
+      paymentsOpen: deps.paymentsPublic?.() ?? false,
       account,
     };
   });

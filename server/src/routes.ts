@@ -30,6 +30,11 @@ import { ProService } from './pro';
 import type { ProRepository } from './proRepo';
 import { accountVoter } from './proPrice';
 import { registerProRoutes } from './proRoutes';
+import { MoyasarClient, type MoyasarApi } from './moyasar';
+import { PaymentService, moyasarKeyKind, payLegal, paymentsPublic } from './payments';
+import type { PaymentRepository } from './payRepo';
+import { receiptEmail } from './payReceipt';
+import { registerPayRoutes } from './payRoutes';
 import type { KitRepository } from './kitRepo';
 import { registerKitRoutes } from './kitRoutes';
 import { cutoutConfigured } from './cutout';
@@ -285,6 +290,13 @@ export interface AppOptions {
   pro?: ProRepository;
   /** Club kits and credit lines on the account (Pro). With `pro`, /api/pro/kits and /api/pro/credit exist. */
   kits?: KitRepository;
+  /**
+   * Pro's orders (payments v1). With `pro`, the buying routes exist; whether
+   * they do anything is PRO_PAYMENTS's decision (payments.ts), off by default.
+   */
+  payments?: PaymentRepository;
+  /** Moyasar, for the tests. Otherwise made from MOYASAR_SECRET_KEY when it is a secret key. */
+  moyasar?: MoyasarApi;
   aiEvents?: AiEventsRepository;
   /** Where the daily AI budget survives a restart (memory only when absent). */
   aiBudget?: AiBudgetRepository;
@@ -1185,6 +1197,8 @@ export async function buildApp(
     'pro_notify',      // asked to be told when Pro opens
     'pro_ask_seen',    // the editor's founding-fans card asked them (priceAsk.ts)
     'pro_price',       // said what a month of Pro is worth (/pro or the editor's card)
+    'pro_checkout',    // pressed Get Pro and was sent to Moyasar's page (payments v1)
+    'pro_paid',        // came back from Moyasar with Pro on
     'gift_accepted',   // accepted the 7-day Pro gift
     'cutout_used',     // a smart cut-out came back
     'export_sheet',    // the export sheet listed Pro items
@@ -1461,8 +1475,32 @@ export async function buildApp(
   const proService = options.pro
     ? new ProService(options.pro, { savedDesigns: (userId) => repo.listByOwner(userId).then((l) => l.length) })
     : null;
+  // Buying Pro (payments.ts): built whenever there is somewhere to keep
+  // orders; it sells nothing until PRO_PAYMENTS=on and a Moyasar key are set.
+  const moyasarKey = (process.env.MOYASAR_SECRET_KEY ?? '').trim();
+  const payService = proService && options.payments
+    ? new PaymentService(
+      options.payments,
+      proService,
+      options.moyasar ?? (moyasarKeyKind() ? new MoyasarClient(moyasarKey, {
+        // A stand-in Moyasar for the browser tests (e2e-pay.mjs); never in production.
+        base: process.env.NODE_ENV !== 'production' ? process.env.MOYASAR_API_BASE || undefined : undefined,
+      }) : null),
+      {
+        onPaid: async (order, endsAt) => {
+          if (!options.emailSender || !order.userId) return;
+          const u = await auth.getUserById(order.userId);
+          if (!u?.email) return;
+          const base = (options.publicUrl ?? CANONICAL_ORIGIN).replace(/\/+$/, '');
+          await options.emailSender.send(receiptEmail({ order, to: u.email, endsAt, base, contact: 'osamah9070@gmail.com' }));
+        },
+      },
+    )
+    : null;
   if (proService) {
     registerProRoutes(app, {
+      paymentsOpenFor: (username) => payService?.openFor(username) ?? false,
+      paymentsPublic: () => !!payService?.on() && paymentsPublic(),
       pro: proService,
       userOf,
       requireUser,
@@ -1475,6 +1513,17 @@ export async function buildApp(
       // of an hour from one address is plenty for changing one's mind.
       priceConfig: options.rateLimit ? { config: { rateLimit: { max: 10, timeWindow: '15 minutes' } } } : undefined,
     });
+    if (payService) {
+      registerPayRoutes(app, {
+        pay: payService,
+        requireUser,
+        accountOf,
+        adminAccess,
+        baseOf: (req) => emailBase(req),
+        checkoutConfig: options.rateLimit ? { config: { rateLimit: { max: 6, timeWindow: '1 minute' } } } : undefined,
+        hookConfig: options.rateLimit ? { config: { rateLimit: { max: 60, timeWindow: '1 minute' } } } : undefined,
+      });
+    }
     if (options.kits) {
       registerKitRoutes(app, {
         kits: options.kits,
@@ -2987,7 +3036,10 @@ export async function buildApp(
     let credit = '';
     // Their answer to "what would you pay for Pro?", given while signed in.
     let price: Awaited<ReturnType<ProRepository['priceAnswer']>> = null;
+    // What they bought (payments v1): none while payments were never on.
+    let orders: Awaited<ReturnType<PaymentRepository['recentFor']>> = [];
     try {
+      orders = payService ? await payService.repo.recentFor(userId, new Date(0)) : [];
       [user, designs, passes, gift, price] = await Promise.all([
         accountOf(req, userId),
         repo.listByOwner(userId),
@@ -3021,6 +3073,10 @@ export async function buildApp(
         kits,
         credit,
         priceAnswer: price ? { amount: price.amount, currency: price.currency, comment: price.comment, wontPay: price.wontPay, at: price.updatedAt } : null,
+        orders: orders.map((o) => ({
+          reference: o.invoiceId ?? o.id, amount: o.amount / 100, currency: o.currency, status: o.status === 'review' ? 'pending' : o.status,
+          method: o.method, createdAt: o.createdAt, paidAt: o.paidAt, refundedAt: o.refundedAt, test: o.testMode,
+        })),
       },
     });
   });
@@ -5232,8 +5288,11 @@ export async function buildApp(
 
     // Legal documents (Terms, Privacy, Acceptable Use, Cookies) at /legal.
     try {
-      const legalHtml = readFileSync(join(staticDir, 'legal.html'), 'utf8');
-      for (const [lang, html] of pagesOf('legal.html', legalHtml, '/legal')) {
+      // The payment terms appear once Pro is on sale to everyone (payments.ts payLegal); read at boot like the page.
+      const onSale = !!payService?.on() && paymentsPublic();
+      const legalHtml = payLegal(readFileSync(join(staticDir, 'legal.html'), 'utf8'), onSale);
+      for (const [lang, raw] of pagesOf('legal.html', legalHtml, '/legal')) {
+        const html = lang === 'en' ? raw : payLegal(raw, onSale);
         const legalShell = htmlShell(routeIn('/legal', lang), html, {
           title: pageText('meta.legal.title', lang),
           description: pageText('meta.legal.desc', lang),

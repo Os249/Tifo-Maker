@@ -128,6 +128,8 @@ export interface ProRepository {
   priceCount(): Promise<number>;
 
   stats(now: Date): Promise<ProStats>;
+  /** How much of any allowance one pass's months have used (a refund asks: was Pro used?). */
+  passUse(userId: string, passId: string): Promise<number>;
   /** Drop allowance counters nobody has touched for this long. */
   purgeAllowances(before: Date): Promise<number>;
 }
@@ -306,6 +308,15 @@ export class MemoryProRepository implements ProRepository {
     };
   }
 
+  async passUse(userId: string, passId: string): Promise<number> {
+    let n = 0;
+    for (const [k, v] of this.counters) {
+      const [u, , key] = k.split('|');
+      if (u === userId && key?.startsWith(`c:${passId}:`)) n += v.used;
+    }
+    return n;
+  }
+
   async purgeAllowances(before: Date): Promise<number> {
     let n = 0;
     for (const [k, v] of this.counters) {
@@ -320,7 +331,7 @@ export class MemoryProRepository implements ProRepository {
 
 // -------------------------------------------------------------- postgres ---
 
-function rowToPass(r: Record<string, unknown>): ProPass {
+export function rowToPass(r: Record<string, unknown>): ProPass {
   return {
     id: String(r.id),
     userId: String(r.user_id),
@@ -343,7 +354,7 @@ function rowToGift(r: Record<string, unknown>): ProGift {
   };
 }
 
-const PASS_COLS = 'id, user_id, plan, starts_at, ends_at, source, created_at, revoked_at';
+export const PASS_COLS = 'id, user_id, plan, starts_at, ends_at, source, created_at, revoked_at';
 
 function rowToPrice(r: Record<string, unknown>): PriceAnswer {
   return {
@@ -596,6 +607,15 @@ export class PgProRepository implements ProRepository {
       passes,
       notify: Number(n.rows[0]?.n ?? 0),
     };
+  }
+
+  async passUse(userId: string, passId: string): Promise<number> {
+    // A pass's own months are keyed 'c:<pass id>:<n>' (proPlan cycleOf). The id is a UUID, so no LIKE wildcard can be in it.
+    const r = await this.pool.query(
+      `SELECT COALESCE(sum(used), 0)::int AS n FROM pro_allowance WHERE user_id = $1 AND period LIKE $2`,
+      [userId, `c:${passId}:%`],
+    );
+    return Number(r.rows[0]?.n ?? 0);
   }
 
   async purgeAllowances(before: Date): Promise<number> {

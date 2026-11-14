@@ -6,6 +6,7 @@ import { shippedTemplateInfo } from './templates';
 import { MemoryAiBudgetRepository, MemoryAiEventsRepository, MemoryAiUsageRepository, MemoryAuthRepository, MemoryDesignRepository, MemoryEventsRepository, MemoryLeadsRepository } from './memoryRepo';
 import { PgAiBudgetRepository, PgAiEventsRepository, PgAiUsageRepository, PgAuthRepository, PgDesignRepository, PgEventsRepository, PgLeadsRepository } from './pgRepo';
 import { MemoryProRepository, PgProRepository } from './proRepo';
+import { MemoryPaymentRepository, PgPaymentRepository } from './payRepo';
 import { MemoryKitRepository, PgKitRepository } from './kitRepo';
 import { PgSocialRepository } from './pgSocial';
 import { MemorySocialRepository } from './memorySocial';
@@ -255,6 +256,7 @@ async function main(): Promise<void> {
       aiBudget: new PgAiBudgetRepository(pool),
       aiFreeLimit: envNum('AI_FREE_LIMIT', 10, 0), // premium designs per hour
       pro: proRepo,
+      payments: new PgPaymentRepository(pool),
       kits: new PgKitRepository(pool),
       stadiums,
       stats: new PgAdminStatsRepository(maint), // the dashboard's aggregates, admin only
@@ -283,6 +285,7 @@ async function main(): Promise<void> {
     const auth = new MemoryAuthRepository();
     const designs = new MemoryDesignRepository((id) => auth.usernameOf(id));
     seedRepos = { designs, auth };
+    const memoryPro = new MemoryProRepository((id) => auth.usernameOf(id));
     app = await buildApp(designs, auth, templates, {
       staticDir,
       rateLimit: false,
@@ -295,7 +298,8 @@ async function main(): Promise<void> {
       aiEvents: new MemoryAiEventsRepository((id) => auth.usernameOf(id)),
       aiBudget: new MemoryAiBudgetRepository(),
       aiFreeLimit: envNum('AI_FREE_LIMIT', 10, 0), // premium designs per hour
-      pro: new MemoryProRepository((id) => auth.usernameOf(id)),
+      pro: memoryPro,
+      payments: new MemoryPaymentRepository(memoryPro, (id) => auth.usernameOf(id)),
       kits: new MemoryKitRepository(),
       stadiums: new MemoryStadiumRepository(),
       stats: new MemoryAdminStatsRepository(designs),

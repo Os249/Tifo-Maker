@@ -2010,6 +2010,42 @@ export async function acceptProGift(): Promise<{ ok: true; endsAt: string } | { 
   }
 }
 
+// ------------------------------------------------------- buying Pro ---
+// Payments v1 (server/src/payments.ts): a month of Pro paid on Moyasar's own
+// page. Nothing here sees a card: "Get Pro" asks the server for the page's
+// address and the browser goes there; coming back, the page asks whether the
+// order is paid, and the server asks Moyasar.
+
+export type CheckoutRefusal = 'off' | 'verify' | 'held' | 'busy' | 'unavailable' | 'signin' | 'offline';
+
+export async function startCheckout(lang: 'en' | 'ar'): Promise<{ ok: true; url: string; order: string } | { ok: false; reason: CheckoutRefusal; endsAt?: string }> {
+  try {
+    const res = await fetch(`${API}/pro/pay/checkout`, { method: 'POST', headers: authHeaders(true), body: JSON.stringify({ lang }) });
+    const data = (await res.json().catch(() => null)) as { url?: string; order?: string; reason?: CheckoutRefusal; endsAt?: string } | null;
+    // The address is Moyasar's page as our server got it from Moyasar's API; never anything but https.
+    if (res.ok && data?.url && data.order && /^https:\/\//i.test(data.url)) return { ok: true, url: data.url, order: data.order };
+    if (res.status === 401) return { ok: false, reason: 'signin' };
+    return { ok: false, reason: data?.reason ?? (res.status === 404 ? 'off' : 'unavailable'), endsAt: data?.endsAt };
+  } catch {
+    return { ok: false, reason: 'offline' };
+  }
+}
+
+export type OrderStatus = 'pending' | 'paid' | 'refunded' | 'failed' | 'expired';
+
+/** Whether an order of this account's is paid yet (the server reads it from Moyasar). Null: not ours, or no answer. */
+export async function fetchOrder(id: string): Promise<{ status: OrderStatus; endsAt: string | null } | null> {
+  if (!/^[0-9a-f-]{36}$/i.test(id)) return null;
+  try {
+    const res = await fetch(`${API}/pro/pay/order/${id}`, { headers: authHeaders(false) });
+    if (!res.ok) return null;
+    const data = (await res.json()) as { status?: OrderStatus; endsAt?: string | null };
+    return data.status ? { status: data.status, endsAt: data.endsAt ?? null } : null;
+  } catch {
+    return null;
+  }
+}
+
 /** "Tell me when Pro opens". True when it is recorded (now or before). */
 export async function notifyPro(): Promise<boolean> {
   try {

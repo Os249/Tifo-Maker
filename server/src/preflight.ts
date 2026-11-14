@@ -59,6 +59,23 @@ export function configWarnings(env: NodeJS.ProcessEnv): ConfigWarning[] {
       state: 'wrong',
     });
   }
+  // Buying Pro (payments.ts): a switch with no key behind it, or a key that
+  // is not a secret key, is a buy button that never appears and no word why.
+  const payKey = env.MOYASAR_SECRET_KEY?.trim();
+  if ((env.PRO_PAYMENTS ?? '').trim().toLowerCase() === 'on') {
+    if (!payKey) {
+      out.push({ key: 'MOYASAR_SECRET_KEY', effect: 'is not set while PRO_PAYMENTS=on, so Pro cannot be bought and /pro stays the coming-soon page. Copy the secret key (sk_test_... or sk_live_...) from Moyasar\'s dashboard.', state: 'wrong' });
+    } else if (!/^sk_(test|live)_[A-Za-z0-9]{8,}$/.test(payKey)) {
+      out.push({ key: 'MOYASAR_SECRET_KEY', effect: 'is not a Moyasar secret key (it starts sk_test_ or sk_live_; a pk_ key is the publishable one), so Pro cannot be bought.', state: 'wrong' });
+    }
+    if (prod && !env.PUBLIC_URL) {
+      out.push({ key: 'PUBLIC_URL', effect: 'is not set while payments are on: Moyasar is told to send fans back to an address built from the request. Set PUBLIC_URL=https://tifomaker.org.' });
+    }
+    const hook = env.MOYASAR_WEBHOOK_SECRET?.trim();
+    if (hook && hook.length < 16) {
+      out.push({ key: 'MOYASAR_WEBHOOK_SECRET', effect: 'is shorter than 16 characters, so it is not used and the webhook route stays closed. Use a long random secret, the same in Moyasar\'s webhook settings.', state: 'wrong' });
+    }
+  }
   if (prod && !env.PUBLIC_URL) {
     out.push({
       key: 'PUBLIC_URL',

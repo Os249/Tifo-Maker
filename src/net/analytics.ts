@@ -36,6 +36,8 @@ export type FunnelEvent =
   | 'pro_notify'       // asked to be told when Pro opens
   | 'pro_ask_seen'     // the editor's founding-fans card asked them (priceAsk.ts)
   | 'pro_price'        // said what a month of Pro is worth (/pro or the editor's card)
+  | 'pro_checkout'     // pressed Get Pro and was sent to Moyasar's page (payments v1)
+  | 'pro_paid'         // came back from Moyasar with Pro on
   | 'gift_accepted'    // accepted the 7-day Pro gift
   | 'cutout_used'      // a smart cut-out came back
   | 'export_sheet'     // the export sheet listed Pro items

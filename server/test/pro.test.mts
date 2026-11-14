@@ -130,7 +130,7 @@ async function makeDesign(app: FastifyInstance, token: string, isPublic = false)
   assert.equal(OFFER.monthly.days, 30);
   assert.equal(OFFER.gift.days, 7);
   assert.equal('claimBy' in OFFER.gift, false, 'the gift has no claim-by date');
-  assert.equal(OFFER.paymentsOpen, false, 'no buy button goes anywhere until there is a payment provider');
+  assert.equal('paymentsOpen' in OFFER, false, 'whether Pro can be bought is the payment switches\' (payments.test.mts), not a constant');
   // The legacy plan names read as a month of Pro.
   assert.equal(normalizePlan('season'), 'monthly');
   assert.equal(normalizePlan('match'), 'monthly');
