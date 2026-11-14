@@ -149,6 +149,8 @@ const ALL_OFF = { PRO_MODE: undefined, PRO_PREVIEW_USERS: undefined, PRO_PAYMENT
   assert.ok(!/data-pay=/.test(on), 'on sale: the coming-soon line is gone and the terms are unwrapped');
   assert.ok(on.includes('within 7 days of paying') && on.includes('خلال 7 أيام من الدفع'), 'the refund promise, in both languages');
   assert.ok(on.includes('If you buy Pro:') && on.includes('إذا اشتريت المميّزة:'), 'and what is kept about a purchase');
+  assert.ok(on.includes('immediately after the payment goes through') && on.includes('within 3 working days'), 'delivery time and complaint response time, as Moyasar\'s terms ask');
+  assert.ok(on.includes('فورًا بعد ما يتم الدفع') && on.includes('خلال 3 أيام عمل'), 'and in Arabic');
   assert.equal(on.includes(`within ${REFUND_DAYS} days`), true, 'the page and the code promise the same window');
 
   assert.equal(priceHalalas(), Math.round(OFFER.monthly.price * 100));
