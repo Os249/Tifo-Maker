@@ -1891,6 +1891,7 @@ function ordersHtml(){
     html += '<p class="lede">' + (st.key === 'test'
       ? 'On, with TEST keys: only the accounts in PRO_PREVIEW_USERS can buy, with Moyasar\\'s test cards. No real money moves.'
       : st.public ? 'On, with LIVE keys, for everyone: real money.' : 'On, with LIVE keys, for the accounts Pro is on for (PRO_MODE): real money.') + '</p>';
+    if (ORDERS.verification) html += '<div class="callout"><b>Moyasar\\'s webhook code: ' + esc(ORDERS.verification.code) + '</b>. Type it in Moyasar\\'s dashboard (Settings, Webhooks, Verify Webhook) within 30 minutes of ' + esc(String(ORDERS.verification.at).slice(11, 16)) + ' UTC.</div>';
     if (!st.webhook) html += '<div class="callout warn"><b>No webhook secret.</b> Payments still arrive through the fan\\'s return and the invoice\\'s callback, but a refund made in Moyasar\\'s dashboard is only noticed when someone opens that order. Set MOYASAR_WEBHOOK_SECRET to the secret you type in Moyasar\\'s webhook settings, pointing at /api/pro/pay/webhook.</div>';
   }
   if (n.review) html += '<div class="callout bad"><b>' + fmt(n.review) + ' order' + (n.review === 1 ? '' : 's') + ' need' + (n.review === 1 ? 's' : '') + ' a look.</b> Paid at an amount that does not match: nobody got Pro for ' + (n.review === 1 ? 'it' : 'them') + '. Check in Moyasar\\'s dashboard, then refund or give Pro by hand.</div>';

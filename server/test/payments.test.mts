@@ -287,6 +287,15 @@ const restore = setEnv(ALL_OFF);
   assert.equal((await webhook({ secret_token: 'wrong-secret-of-some-length!!', type: 'payment_paid', data: { invoice_id: inv } })).statusCode, 401);
   assert.equal((await webhook({ type: 'payment_paid', data: { invoice_id: inv } })).statusCode, 401, 'no secret at all');
 
+  // Adding the webhook in Moyasar's dashboard: its code shows on /admin.
+  assert.equal((await webhook({ type: 'webhook_verification', secret_token: 'wrong-secret-of-some-length!!', data: { verification_code: '111111' } })).statusCode, 401, 'a wrong secret is refused even here');
+  assert.equal((await webhook({ type: 'webhook_verification', data: { verification_code: '<b>x</b>' } })).statusCode, 200);
+  assert.equal((await webhook({ type: 'webhook_verification', secret_token: HOOK, data: { verification_code: 482913 } })).statusCode, 200);
+  {
+    const v = (await app.inject({ method: 'GET', url: '/api/admin/pro/orders', headers: asBoss })).json().verification;
+    assert.deepEqual(v?.code, '482913', 'the code is shown to the admin, and only a code');
+  }
+
   // Paid: the return, the callback and the webhook all at once give one pass.
   moyasar.pay(inv);
   const raced = await Promise.all([

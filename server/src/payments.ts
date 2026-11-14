@@ -80,6 +80,13 @@ export function paymentsPublic(env: NodeJS.ProcessEnv = process.env): boolean {
   return paymentsOn(env) && moyasarKeyKind(env) === 'live' && proMode(env) === 'on';
 }
 
+/** Two secrets compared in constant time. */
+function sameSecret(given: string, secret: string): boolean {
+  const x = Buffer.from(given);
+  const y = Buffer.from(secret);
+  return x.length === y.length && timingSafeEqual(x, y);
+}
+
 /** The webhook's shared secret, when one is set (at least 16 characters, or it is not used). */
 function webhookSecret(env: NodeJS.ProcessEnv): string | null {
   const s = (env.MOYASAR_WEBHOOK_SECRET ?? '').trim();
@@ -300,10 +307,28 @@ export class PaymentService {
    * that names one of our invoices reconciles that order: a payment, a
    * failure, a refund made in Moyasar's dashboard.
    */
+  /**
+   * The code Moyasar sends when a webhook is added (Settings -> Webhooks):
+   * it has to be typed back into Moyasar's dashboard within 30 minutes
+   * before the webhook works. Shown on /admin and in the server's log. It
+   * opens nothing here: a wrong one only means Moyasar asks again.
+   */
+  verification: { code: string; at: string } | null = null;
+
   async webhook(body: unknown): Promise<'done' | 'ignored' | 'refused' | 'closed'> {
     const secret = webhookSecret(this.env);
     if (!this.on() || !secret) return 'closed';
     const b = (body && typeof body === 'object' ? body : {}) as Record<string, unknown>;
+    if (b.type === 'webhook_verification') {
+      // Moyasar may send it before the secret is in use: a secret that is there must still match.
+      if (typeof b.secret_token === 'string' && !sameSecret(b.secret_token, secret)) return 'refused';
+      const code = (b.data && typeof b.data === 'object' ? (b.data as Record<string, unknown>).verification_code : null);
+      const text = typeof code === 'number' ? String(code) : code;
+      if (typeof text !== 'string' || !/^\d{4,8}$/.test(text)) return 'ignored';
+      this.verification = { code: text, at: this.pro.now().toISOString() };
+      console.log(`[tifo] payments: Moyasar's webhook verification code is ${text} (type it in Moyasar's dashboard, Settings -> Webhooks -> Verify)`);
+      return 'done';
+    }
     const given = typeof b.secret_token === 'string' ? b.secret_token : '';
     const x = Buffer.from(given);
     const y = Buffer.from(secret);

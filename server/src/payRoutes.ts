@@ -116,7 +116,9 @@ export function registerPayRoutes(app: FastifyInstance, deps: PayRouteDeps): voi
         refundable: o.status === 'paid' && !!o.paidAt && now - Date.parse(o.paidAt) <= REFUND_DAYS * 24 * 3600_000,
       })),
     );
-    return { status: paymentsStatus(), stats: await pay.repo.stats(), refundDays: REFUND_DAYS, orders };
+    // The webhook's verification code, while Moyasar still takes it (30 minutes).
+    const v = pay.verification && now - Date.parse(pay.verification.at) < 30 * 60_000 ? pay.verification : null;
+    return { status: paymentsStatus(), stats: await pay.repo.stats(), refundDays: REFUND_DAYS, verification: v, orders };
   });
 
   app.post('/api/admin/pro/refund', async (req, reply) => {
