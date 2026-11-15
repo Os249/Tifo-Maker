@@ -2141,6 +2141,30 @@ export async function sendPriceAnswer(
   }
 }
 
+export interface CameraReadError extends Error {
+  status: number;
+  reason: 'pro' | 'quota' | 'busy' | 'signin' | 'verify' | 'failed';
+}
+
+/**
+ * "Can the camera read it?": send one small picture of the tifo (PNG or JPEG
+ * data URL, at most 600 KB), get back the words the cards spell ('' for none),
+ * whether every letter was clear, and how many checks are left today. The
+ * server checks and counts everything; this only carries the answer.
+ */
+export async function cameraRead(image: string, signal?: AbortSignal): Promise<{ text: string; sure: boolean; left: number | null }> {
+  const res = await fetch(`${API}/ai/read`, { method: 'POST', headers: aiHeaders(true), body: JSON.stringify({ image }), signal });
+  const data = (await res.json().catch(() => null)) as { text?: unknown; sure?: unknown; left?: unknown; reason?: string; error?: string } | null;
+  if (res.ok && data && typeof data.text === 'string') {
+    return { text: data.text.slice(0, 80), sure: data.sure === true, left: typeof data.left === 'number' ? data.left : null };
+  }
+  const err = new Error(data?.error ?? `camera check failed (${res.status})`) as CameraReadError;
+  err.status = res.status;
+  const r = data?.reason;
+  err.reason = r === 'pro' || res.status === 404 ? 'pro' : r === 'quota' ? 'quota' : r === 'signin' || res.status === 401 ? 'signin' : r === 'verify' ? 'verify' : r === 'busy' ? 'busy' : 'failed';
+  throw err;
+}
+
 export interface CutoutError extends Error {
   status: number;
   reason: 'quota' | 'refused' | 'busy' | 'unavailable' | 'signin' | 'verify' | 'failed';
@@ -2172,4 +2196,110 @@ export async function smartCutout(image: string, signal?: AbortSignal): Promise<
                 : 'failed';
   if (data?.quota) err.quota = data.quota;
   throw err;
+}
+
+// ---------------------------------------------------------- tifo events ---
+// Themed contests (server/src/eventRoutes.ts). With no event made, every call
+// here answers "none".
+
+export type EventStage = 'announced' | 'open' | 'voting' | 'closed' | 'result';
+
+export interface TifoEventInfo {
+  slug: string;
+  titleEn: string;
+  titleAr: string;
+  lineEn: string;
+  lineAr: string;
+  announceAt: string;
+  openAt: string;
+  voteAt: string;
+  closeAt: string;
+  prizeDays: number;
+  stage: EventStage;
+  /** When the stage it is in ends; null when nothing more is timed. */
+  stageEnds: string | null;
+}
+
+export interface EventCard {
+  designId: string;
+  title: string;
+  titleAr: string | null;
+  ownerId: string | null;
+  ownerName: string;
+  hasThumbnail: boolean;
+  remixedFromName: string | null;
+  /** Only once the result is confirmed. */
+  votes?: number;
+  place?: number;
+  /** Only on an entry the organisers took out. */
+  reason?: string;
+}
+
+export interface EventPage {
+  event: TifoEventInfo;
+  entries: EventCard[];
+  out: EventCard[];
+  podium: EventCard[];
+  me: { signedIn: boolean; emailVerified: boolean; entry: string | null; votes: string[] };
+}
+
+/** The event the home and community pages speak of, or null (also when the request fails). */
+export async function fetchCurrentEvent(): Promise<(TifoEventInfo & { winner: EventCard | null }) | null> {
+  try {
+    const res = await fetch(`${API}/events/current`);
+    if (!res.ok) return null;
+    return ((await res.json()) as { event: (TifoEventInfo & { winner: EventCard | null }) | null }).event;
+  } catch {
+    return null;
+  }
+}
+
+export async function listEvents(): Promise<TifoEventInfo[]> {
+  try {
+    const res = await fetch(`${API}/events`);
+    if (!res.ok) return [];
+    return ((await res.json()) as { events: TifoEventInfo[] }).events;
+  } catch {
+    return [];
+  }
+}
+
+/** One event as the caller sees it; null when there is no such event. */
+export async function fetchEventPage(slug: string): Promise<EventPage | null> {
+  const res = await fetch(`${API}/events/${encodeURIComponent(slug)}`, { headers: authHeaders(false) });
+  if (res.status === 404) {
+    // Read to the end, so the connection is not left holding an unread answer.
+    await res.text().catch(() => '');
+    return null;
+  }
+  return (await expectOk(res)) as EventPage;
+}
+
+/** The caller's tifos that can be entered, and how many published ones are too old. */
+export async function fetchEventMine(slug: string): Promise<{ designs: { id: string; title: string }[]; older: number }> {
+  return (await expectOk(await fetch(`${API}/events/${encodeURIComponent(slug)}/mine`, { headers: authHeaders(false) }))) as {
+    designs: { id: string; title: string }[];
+    older: number;
+  };
+}
+
+/** What an event action came back with: done, or the server's short reason (`code`). */
+export type EventAnswer = { ok: true } | { ok: false; code: string };
+
+async function eventAnswer(res: Response): Promise<EventAnswer> {
+  if (res.ok) return { ok: true };
+  const body = (await res.json().catch(() => null)) as { code?: string } | null;
+  return { ok: false, code: body?.code ?? (res.status === 401 ? 'signin' : 'fail') };
+}
+
+export async function enterEvent(slug: string, designId: string): Promise<EventAnswer> {
+  return eventAnswer(await fetch(`${API}/events/${encodeURIComponent(slug)}/enter`, { method: 'POST', headers: authHeaders(true), body: JSON.stringify({ designId }) }));
+}
+
+export async function leaveEvent(slug: string): Promise<EventAnswer> {
+  return eventAnswer(await fetch(`${API}/events/${encodeURIComponent(slug)}/enter`, { method: 'DELETE', headers: authHeaders(false) }));
+}
+
+export async function voteEvent(slug: string, designId: string, on: boolean): Promise<EventAnswer> {
+  return eventAnswer(await fetch(`${API}/events/${encodeURIComponent(slug)}/vote`, { method: 'POST', headers: authHeaders(true), body: JSON.stringify({ designId, on }) }));
 }

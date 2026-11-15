@@ -8,6 +8,7 @@ import { PgAiBudgetRepository, PgAiEventsRepository, PgAiUsageRepository, PgAuth
 import { MemoryProRepository, PgProRepository } from './proRepo';
 import { MemoryPaymentRepository, PgPaymentRepository } from './payRepo';
 import { MemoryKitRepository, PgKitRepository } from './kitRepo';
+import { MemoryEventRepository, PgEventRepository } from './eventRepo';
 import { PgSocialRepository } from './pgSocial';
 import { MemorySocialRepository } from './memorySocial';
 import { MemoryStadiumRepository, PgStadiumRepository } from './stadiumRepo';
@@ -258,6 +259,7 @@ async function main(): Promise<void> {
       pro: proRepo,
       payments: new PgPaymentRepository(pool),
       kits: new PgKitRepository(pool),
+      tifoEvents: new PgEventRepository(pool),
       stadiums,
       stats: new PgAdminStatsRepository(maint), // the dashboard's aggregates, admin only
       traffic,
@@ -301,6 +303,7 @@ async function main(): Promise<void> {
       pro: memoryPro,
       payments: new MemoryPaymentRepository(memoryPro, (id) => auth.usernameOf(id)),
       kits: new MemoryKitRepository(),
+      tifoEvents: new MemoryEventRepository(),
       stadiums: new MemoryStadiumRepository(),
       stats: new MemoryAdminStatsRepository(designs),
       traffic: (visitBuffer = new BatchedTrafficRepository(new MemoryTrafficRepository()).start()),

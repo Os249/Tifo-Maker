@@ -662,11 +662,30 @@ const ADMIN_ACTIONS: Record<string, (req: FastifyRequest) => { action: string; t
     const days = typeof b.days === 'number' || typeof b.days === 'string' ? ` for ${String(b.days).slice(0, 4)} days` : '';
     return { action: `granted a Pro ${plan} pass${days}`, target: bodyName(req), detail: null };
   },
+  'POST /api/admin/events': (req) => ({ action: 'made a tifo event', target: eventTitle(req), detail: null }),
+  'POST /api/admin/events/:id': (req) => ({ action: 'changed a tifo event', target: param(req, 'id'), detail: null }),
+  'POST /api/admin/events/:id/cancel': (req) => ({
+    action: (req.body as { cancelled?: unknown } | null)?.cancelled === false ? 'brought back a tifo event' : 'cancelled a tifo event',
+    target: param(req, 'id'),
+    detail: null,
+  }),
+  'POST /api/admin/events/:id/delete': (req) => ({ action: 'deleted a tifo event', target: param(req, 'id'), detail: null }),
+  'POST /api/admin/events/:id/disqualify': (req) => {
+    const b = (req.body as { designId?: unknown; reason?: unknown } | null) ?? {};
+    const back = typeof b.reason !== 'string' || !b.reason.trim();
+    return { action: back ? 'put a tifo event entry back' : 'took a tifo event entry out', target: typeof b.designId === 'string' ? b.designId.slice(0, 36) : null, detail: null };
+  },
+  'POST /api/admin/events/:id/confirm': (req) => ({ action: 'confirmed a tifo event result', target: param(req, 'id'), detail: null }),
   'POST /api/admin/pro/revoke': (req) => {
     const id = (req.body as { passId?: unknown } | null)?.passId;
     return { action: 'revoked a Pro pass', target: typeof id === 'string' ? id.slice(0, 36) : null, detail: null };
   },
 };
+
+function eventTitle(req: FastifyRequest): string | null {
+  const v = (req.body as { titleEn?: unknown } | null)?.titleEn;
+  return typeof v === 'string' ? v.slice(0, 60) : null;
+}
 
 function bodyName(req: FastifyRequest): string | null {
   const v = (req.body as { username?: unknown } | null)?.username;

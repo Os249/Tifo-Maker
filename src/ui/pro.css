@@ -141,6 +141,30 @@
 .pro-items { list-style: none; margin: 0 0 var(--sp-4); padding: var(--sp-3); display: grid; gap: var(--sp-2); border-radius: var(--r-md); background: var(--pro-surface-2); }
 .pro-items li { display: flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-sm); color: var(--pro-text); }
 .pro-items .pro-crown { color: var(--pro-crown); }
+/* "Can the camera read it?" on the Post it sheet (ui/proRead.ts). */
+.pro-read { display: grid; gap: var(--sp-2); margin-top: var(--sp-3); }
+.pro-read-go { justify-self: start; min-height: 36px; font-size: var(--fs-sm); }
+.pro-read-go:disabled { opacity: 0.7; cursor: progress; }
+.pro-read-out { margin: 0; font-size: var(--fs-sm); line-height: 1.5; color: var(--pro-text); }
+.pro-read-out:empty { display: none; }
+.pro-read-note { margin: 0; font-size: var(--fs-2xs); line-height: 1.4; color: var(--pro-muted); }
+@media (pointer: coarse) { .pro-read-go { min-height: 44px; } }
+
+/* The export sheet: the fan's own tifo, free and with Pro, side by side. */
+.pro-both { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-3); margin: 0 0 var(--sp-4); }
+.pro-both-way { margin: 0; min-width: 0; display: grid; gap: var(--sp-2); }
+.pro-both-way:only-child { grid-column: 1 / -1; }
+.pro-both-pic {
+  height: clamp(148px, 24dvh, 208px); overflow: hidden;
+  border-radius: var(--r-md); background: var(--pro-surface-2); border: 1px solid var(--pro-hairline);
+}
+.pro-both-way[data-way="pro"] .pro-both-pic { border-color: var(--pro-crown); }
+.pro-both-pic canvas { display: block; width: 100%; height: 100%; object-fit: contain; animation: pro-fade var(--duration-fast) var(--ease-smooth-out) both; }
+.pro-both-way figcaption {
+  display: flex; align-items: center; justify-content: center; gap: var(--sp-1);
+  font-size: var(--fs-sm); font-weight: 700; color: var(--pro-text);
+}
+.pro-both-way figcaption .pro-crown { color: var(--pro-crown); }
 .pro-actions { display: flex; flex-direction: column; align-items: stretch; gap: var(--sp-2); margin-top: var(--sp-4); }
 .pro-actions .pro-text-btn { align-self: center; }
 .pro-note { margin: var(--sp-3) 0 0 !important; font-size: var(--fs-xs) !important; text-align: center; color: var(--pro-muted); }

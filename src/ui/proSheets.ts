@@ -14,6 +14,7 @@ import { track } from '../net/analytics';
 import { containDialog } from './dialogFocus';
 import { localPath, t, tv } from './i18n';
 import { CROWN_SVG, whenDate } from './pro';
+import type { BothWays } from './proGate';
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -208,17 +209,37 @@ export function openConfirmSheet(o: { title: string; lines: string[]; go: string
   });
 }
 
+/** A picture at the sheet's size: no more pixels kept than the two small frames show. */
+function thumbOf(src: HTMLCanvasElement): HTMLCanvasElement {
+  const k = Math.min(1, 640 / Math.max(src.width, src.height, 1));
+  const out = document.createElement('canvas');
+  out.width = Math.max(1, Math.round(src.width * k));
+  out.height = Math.max(1, Math.round(src.height * k));
+  const g = out.getContext('2d')!;
+  g.imageSmoothingQuality = 'high';
+  g.drawImage(src, 0, 0, out.width, out.height);
+  out.setAttribute('role', 'img');
+  return out;
+}
+
 /**
  * A Pro item stands between someone and an export. Three ways on, never a
- * dead end: the gift (when there is one), Pro, or the free version.
+ * dead end: the gift (when there is one), Pro, or the free version. With
+ * `both`, the sheet shows the fan's own tifo as each: the free export and
+ * the Pro one.
  */
-export function openExportSheet(items: string[], state: ProState): Promise<'free' | null> {
+export function openExportSheet(items: string[], state: ProState, both?: BothWays): Promise<'free' | null> {
   const gift = state.gift?.state === 'offered';
   const offer = state.offer;
   const notified = !!state.notified;
+  // The fan's own tifo, both ways (proGate.ts BothWays): pictures, where the words alone were.
+  const way = (id: 'free' | 'pro'): string =>
+    `<figure class="pro-both-way" data-way="${id}"><div class="pro-both-pic" aria-busy="true"></div>` +
+    `<figcaption>${id === 'pro' ? CROWN_SVG : ''}<span>${escapeHtml(t(id === 'pro' ? 'pro.both.pro' : 'pro.both.free'))}</span></figcaption></figure>`;
   const sheet = openSheet(
     mark() +
     `<h2>${escapeHtml(items.length === 1 ? t('pro.export.title1') : tv('pro.export.titleN', { n: items.length }))}</h2>` +
+    (both ? `<div class="pro-both" role="group" aria-label="${escapeHtml(t('pro.both.label'))}">${way('free')}${way('pro')}</div>` : '') +
     `<ul class="pro-items">${items.map((i) => `<li>${CROWN_SVG}<span>${escapeHtml(i)}</span></li>`).join('')}</ul>` +
     `<p>${escapeHtml(t('pro.export.lead'))}</p>` +
     `<div class="pro-actions">` +
@@ -231,9 +252,36 @@ export function openExportSheet(items: string[], state: ProState): Promise<'free
     `</div><p class="pro-note" role="status" aria-live="polite">${escapeHtml(t('pro.export.never'))}</p>`,
   );
   track('export_sheet');
+  // Free first, then Pro, one at a time (they share the device's one 3D view).
+  // A side with no picture is left out; with neither, the block goes.
+  const stop = new AbortController();
+  const drawing = (async (): Promise<void> => {
+    if (!both) return;
+    const box = sheet.body.querySelector('.pro-both') as HTMLElement;
+    let shown = 0;
+    for (const id of ['free', 'pro'] as const) {
+      const fig = box.querySelector(`[data-way="${id}"]`) as HTMLElement;
+      const pic = stop.signal.aborted ? null : await both[id](stop.signal).catch(() => null);
+      if (stop.signal.aborted) return;
+      if (!pic) {
+        fig.remove();
+        continue;
+      }
+      const slot = fig.querySelector('.pro-both-pic') as HTMLElement;
+      slot.removeAttribute('aria-busy');
+      slot.appendChild(thumbOf(pic));
+      shown++;
+    }
+    if (!shown) box.remove();
+  })();
   return new Promise((resolve) => {
     let choice: 'free' | null = null;
-    void sheet.closed.then(() => resolve(choice));
+    // The answer waits for the picture in hand: an export never starts under one still drawing.
+    void sheet.closed.then(async () => {
+      stop.abort();
+      await drawing.catch(() => {});
+      resolve(choice);
+    });
     const note = sheet.body.querySelector('.pro-note') as HTMLElement;
     sheet.body.querySelector('[data-act="free"]')!.addEventListener('click', () => {
       choice = 'free';

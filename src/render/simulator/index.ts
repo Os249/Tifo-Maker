@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { PHASE_DESIGN, PHASE_EDGE } from './phases';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import type { SeatMap, StadiumTemplate } from '../../core/types';
 import type { DesignStore } from '../../core/design';
@@ -16,7 +17,7 @@ import { buildCrowd, type CrowdController, type CrowdPreset } from './crowd';
 import { buildPitchside, type PitchsideController } from './pitchside';
 import { buildBanners, type BannerController } from './banners';
 import { buildEffects, type EffectsController } from './effects';
-import { bowlShots, seatShot, flyover, flyoverPeriodFor, FLY_DURATION, applyShot as applyCameraShot, tifoFootprint, tifoShots, type SimShot, type TifoFootprint } from './cameras';
+import { bowlShots, seatShot, flyover, flyoverPeriodFor, FLY_DURATION, applyShot as applyCameraShot, tifoFootprint, tifoShots, boardShot, type SimShot, type TifoFootprint } from './cameras';
 import { revealInstant, revealKeys, revealVisibility, type RevealMode } from './choreo';
 import { REVEAL_GLSL, drumReactions, revealConst, revealDrum, revealFade, revealOff, revealRamp, revealStep, revealUniforms } from './revealGpu';
 import type { FilmHost } from './film';
@@ -685,9 +686,14 @@ export class MatchDaySimulator {
   private rebuildPalette(): void {
     this.paletteColors = this.store.palette.map((hex) => new THREE.Color(hex));
   }
+  /** A film's two phases (phases.ts): what each card shows instead of the design, or null. */
+  private phaseCells: Uint8Array | null = null;
+  private readonly cardEdgeColor = new THREE.Color(0x14171f);
   private colorFor(i: number): THREE.Color {
     if (this.manassaMask && this.manassaMask[i] === 1) return this.manassaColor;
-    const cell = this.tifoHidden ? 0 : this.store.cells[i];
+    const over = this.phaseCells && this.store.cells[i] !== 0 ? this.phaseCells[i] : PHASE_DESIGN;
+    if (over === PHASE_EDGE && !this.tifoHidden) return this.cardEdgeColor;
+    const cell = this.tifoHidden ? 0 : this.store.cells[i] === 0 || over === PHASE_DESIGN ? this.store.cells[i] : over;
     const zone = this.zoneCodes ? this.zoneCodes[i] : 0;
     if (zone && (cell === 0 || (this.noTifo && this.noTifo[i] === 1))) {
       // Premium seats read as what they are: gold, silver, cream leather.
@@ -1126,7 +1132,9 @@ export class MatchDaySimulator {
    * none, and opens on the gantry as it always did.
    */
   shots(): SimShot[] {
-    return [...this.tifoShotList(), ...this.groundShots()];
+    // The LED boards' own camera is last, so no camera before it changes its
+    // number (a kept view, a link's camera).
+    return [...this.tifoShotList(), ...this.groundShots(), boardShot(this.tifoFootprint(), this.camera.aspect || 16 / 9)];
   }
   /**
    * Where the tifo is: the seats holding a card. Not "shown right now": the
@@ -1795,8 +1803,13 @@ export class MatchDaySimulator {
       bounds: () => this.seatBounds(),
       outerReach: () => this.outerReach(),
       shots: () => this.shots(),
+      boards: () => {
+        const b = this.boardText();
+        return b && b.shown && b.messages.some((m) => m.trim()) ? boardShot(this.tifoFootprint(), this.camera.aspect || 16 / 9) : null;
+      },
       painted: (i) => this.store.cells[i] !== 0 && !(this.noTifo !== null && this.noTifo[i] === 1),
       map: this.map,
+      cells: () => ({ cells: this.store.cells, paletteSize: this.store.palette.length }),
       overRoof: (at) => {
         // Something the ground built under the lens (a roof, a stand's deck):
         // the camera is over a building, which fills the bottom of the picture,
@@ -1867,6 +1880,13 @@ export class MatchDaySimulator {
         this.revealKeyMode = null;
       },
       revealAt: (clock, fade) => revealFade(this.revealU, clock, fade),
+      phase: (cells, changed) => {
+        this.phaseCells = cells;
+        // Only the colours: a reveal on show stays as it is (recolorAll would end it).
+        if (changed) for (const i of changed) this.seats.setColorAt(i, this.colorFor(i));
+        else for (let i = 0; i < this.map.count; i++) if (this.store.cells[i] !== 0) this.seats.setColorAt(i, this.colorFor(i));
+        if (this.seats.instanceColor) this.seats.instanceColor.needsUpdate = true;
+      },
       haze: (k) => this.effects.setHaze(k),
       screens: (show) => this.venue?.object.traverse((o) => {
         if (o.name === 'big-screen' || o.name === 'centre-screen') o.visible = show;
@@ -1875,6 +1895,11 @@ export class MatchDaySimulator {
         const f = this.filming;
         if (!f) return;
         this.filming = null;
+        if (this.phaseCells) {
+          this.phaseCells = null;
+          for (let i = 0; i < this.map.count; i++) if (this.store.cells[i] !== 0) this.seats.setColorAt(i, this.colorFor(i));
+          if (this.seats.instanceColor) this.seats.instanceColor.needsUpdate = true;
+        }
         this.applyReveal(null);
         this.effects.setHaze(1);
         this.renderer.setPixelRatio(f.ratio);

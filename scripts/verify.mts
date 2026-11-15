@@ -3670,3 +3670,82 @@ await (async () => {
   console.log(`tifo split by a gap between tiers: Kingdom north ${(kingdom * 100).toFixed(0)}% of its height (told), Jewel end ${(jewel * 100).toFixed(0)}%, Anfield Kop ${(anfield * 100).toFixed(0)}% (not told)`);
   if (kingdom < SPLIT_TELLS || jewel >= SPLIT_TELLS || anfield >= SPLIT_TELLS) throw new Error('the Pro film must tell a tifo that crosses a gap between tiers, and only that');
 })();
+
+// Pro exports, the parts that are plain arithmetic (15 Nov 2026): the ZIP the
+// designer pack saves, the one-page PDF of the proposal sheet, the Reel's
+// clock, the two phases, and the LED board file's sizes.
+await (async () => {
+  const { zipStore, crc32 } = await import('../src/core/zipStore');
+  const { pdfFromJpeg } = await import('../src/core/pdfImage');
+  const { reelDirector, REEL } = await import('../src/render/simulator/reel');
+  const { phaseOneCells, flipKeys, phaseAt, PHASES, PHASE_DESIGN, PHASE_EDGE } = await import('../src/render/simulator/phases');
+  const { cleanFileSize, LED_FILE } = await import('../src/render/simulator/ledFile');
+  const { FILM_TIMES } = await import('../src/render/simulator/filmPlan');
+  const fails: string[] = [];
+  const need = (ok: boolean, what: string): void => { if (!ok) fails.push(what); };
+
+  // ZIP: the well-known CRC, and a file read back by walking its own directory.
+  need(crc32(new TextEncoder().encode('123456789')) === 0xcbf43926, 'crc32("123456789") is not 0xCBF43926');
+  const files = [{ name: 'تيفو-square-2160x2160.png', data: new Uint8Array([1, 2, 3, 4, 5]) }, { name: 'a/b.txt', data: new TextEncoder().encode('hello') }];
+  const zip = zipStore(files, new Date(2026, 10, 15, 12, 0, 0));
+  const zv = new DataView(zip.buffer);
+  const eocd = zip.length - 22;
+  need(zv.getUint32(eocd, true) === 0x06054b50 && zv.getUint16(eocd + 10, true) === 2, 'the ZIP has no end record for its two files');
+  let dir = zv.getUint32(eocd + 16, true);
+  for (const f of files) {
+    need(zv.getUint32(dir, true) === 0x02014b50, 'a directory entry is missing');
+    const nameLen = zv.getUint16(dir + 28, true);
+    const at = zv.getUint32(dir + 42, true);
+    const name = new TextDecoder().decode(zip.subarray(dir + 46, dir + 46 + nameLen));
+    const dataAt = at + 30 + zv.getUint16(at + 26, true);
+    const data = zip.subarray(dataAt, dataAt + zv.getUint32(at + 18, true));
+    need(name === f.name && (zv.getUint16(dir + 8, true) & 0x0800) !== 0, `the ZIP lost the name ${f.name}`);
+    need(data.length === f.data.length && data.every((b, i) => b === f.data[i]) && zv.getUint32(dir + 16, true) === crc32(f.data), `the ZIP lost the bytes of ${f.name}`);
+    dir += 46 + nameLen;
+  }
+
+  // PDF: every object where the cross-reference table says it is.
+  const jpeg = new Uint8Array([0xff, 0xd8, 0xff, 0xd9]);
+  const pdf = pdfFromJpeg(jpeg, 2480, 3508, 595.28, 841.89);
+  const text = Buffer.from(pdf).toString('latin1');
+  const xrefAt = Number(text.match(/startxref\n(\d+)\n%%EOF\n$/)?.[1] ?? -1);
+  need(text.startsWith('%PDF-1.4') && text.slice(xrefAt, xrefAt + 4) === 'xref', 'the PDF does not end on its cross-reference table');
+  const offs = [...text.slice(xrefAt).matchAll(/(\d{10}) 00000 n /g)].map((m) => Number(m[1]));
+  need(offs.length === 5 && offs.every((o, i) => text.slice(o, o + 7) === `${i + 1} 0 obj`), 'a PDF object is not where the table says');
+  need(text.includes('/MediaBox [0 0 595.28 841.89]') && text.includes('/Width 2480 /Height 3508') && text.includes('/Filter /DCTDecode /Length 4'), 'the PDF page is not A4 with the picture on it');
+
+  // The Reel: the film's own clock up to the pull-back's end, never into its fade, and a last frame.
+  for (const seconds of [15, 30] as const) {
+    const d = reelDirector({ seconds, hook: 'x', end: { title: 'T' } }, []);
+    let top = 0;
+    for (let r = 0; r <= seconds; r += 1 / 30) top = Math.max(top, d.at(r).t);
+    need(d.at(3).t === 3 && d.at(REEL.act).t === REEL.act, `a ${seconds} s Reel does not follow the film's clock`);
+    need(top <= REEL.holdUntil + 1e-9 && REEL.holdUntil < FILM_TIMES.fadeFrom, `a ${seconds} s Reel runs into the film's fade to black`);
+    need(d.at(0).hook === 0 && d.at(2).hook === 1 && d.at(FILM_TIMES.revealAt).hook === 0, 'the opening line is not gone before the first card');
+    need(d.at(seconds).end === 1 && d.at(d.endAt - 0.01).end === 0 && d.endAt > REEL.act, 'the closing frame is not the last thing in the Reel');
+  }
+  const cut = { name: 'c', position: [0, 2, 0] as [number, number, number], target: [0, 10, 40] as [number, number, number], fov: 60 };
+  const d30 = reelDirector({ seconds: 30 }, [{ from: cut, to: { ...cut, position: [8, 2, 0] } }]);
+  need(d30.at(REEL.act + 1).shot?.name === 'c' && d30.at(REEL.act + 7).shot === null && reelDirector({ seconds: 15 }, [{ from: cut, to: cut }]).at(12).shot === null, 'the cuts round the tifo are for 30 seconds only, and never longer than six seconds each');
+
+  // Two phases: the design's own colours on the same seats, and each card turned exactly once.
+  const map = { count: 8, xy: new Float32Array([0, 0, 10, 0, 20, 0, 30, 0, 0, 10, 10, 10, 20, 10, 30, 10]) };
+  const cells = [1, 1, 2, 3, 1, 0, 2, 1];
+  const bands = phaseOneCells(map, cells, 4, 'bands');
+  const one = phaseOneCells(map, cells, 4, 'one');
+  need([...bands].join() === '1,1,1,1,2,0,2,2' && [...one].join() === '1,1,1,1,1,0,1,1', `the first phase is not the design's two most-used colours on its own seats (${[...bands].join()})`);
+  need([...phaseOneCells(map, [0, 0, 0, 0, 0, 0, 0, 0], 4, 'stripes')].every((c) => c === 0), 'an empty design has a first phase');
+  const keys = new Float32Array([5.6, 6, 6.5, 7, 7.5, -1e6, 8, 8.2]);
+  const turn = flipKeys(keys, (i) => cells[i] !== 0);
+  need(turn[5] === Infinity && Math.abs(turn[0] - PHASES.flipAt) < 1e-6 && Math.abs(turn[7] - (PHASES.flipAt + PHASES.flipSpread)) < 1e-6, 'the turn does not cross the tifo in the order the cards went up');
+  need(phaseAt(8, turn[0], 1) === 1 && phaseAt(turn[0], turn[0], 1) === PHASE_EDGE && phaseAt(turn[0] + 1, turn[0], 1) === PHASE_DESIGN && phaseAt(0, Infinity, 0) === PHASE_DESIGN, 'a card does not go colour, edge, design');
+  need(PHASES.flipAt + PHASES.flipSpread + 2 < FILM_TIMES.fadeFrom, 'the design is on show for under two seconds before the film fades');
+
+  // The LED board file: a typed size is kept inside what a canvas can hold.
+  const big = cleanFileSize('99999', '5');
+  const none = cleanFileSize('', 'abc');
+  need(big.width === LED_FILE.maxW && big.height === LED_FILE.minH && none.width === LED_FILE.defaultW && none.height === LED_FILE.defaultH, 'the LED board file takes a size a canvas cannot hold');
+
+  console.log(`pro exports: a ZIP of ${files.length} read back by its directory | a ${pdf.length}-byte A4 PDF with every object where its table says | the Reel keeps the film's clock to ${REEL.act} s and ends on its last frame | two phases: colours, edge, design, turned by ${PHASES.flipAt + PHASES.flipSpread} s | LED board file sizes kept to ${LED_FILE.maxW} × ${LED_FILE.maxH}`);
+  if (fails.length) throw new Error(`pro exports: ${fails.join('; ')}`);
+})();

@@ -195,6 +195,11 @@ const ADMIN_HTML_HEAD = `<!doctype html>
   .lb-r:last-child{ border-bottom:none; }
   .lb-rn{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   @media (max-width:560px){ .lb-grid{ grid-template-columns:1fr; } }
+  /* Events tab. */
+  .ev-card{ margin:12px 0 0; }
+  .ev-card .tbl{ margin-top:10px; }
+  .ev-reason{ padding:6px 9px; border-radius:8px; border:1px solid var(--line); background:var(--bg); color:var(--tx); font:inherit; font-size:12.5px; width:190px; max-width:100%; }
+  .lb-grid input:disabled{ opacity:.55; }
   .callout.bad{ border-left-color:var(--red); }
   .callout.bad b{ color:var(--red); }
   .st{ display:inline-block; min-width:52px; text-align:center; font-size:10.5px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; padding:2px 7px; border-radius:999px; border:1px solid var(--line); color:var(--mut); white-space:nowrap; }
@@ -440,6 +445,7 @@ async function doLogout(){
 
 async function loadAll(){
   setStatus('Loading...');
+  EVENTS = null; /* the Events tab fetches its own, when it is next shown */
   var results = await Promise.all([
     api('/api/admin/overview'),
     api('/api/admin/traffic?days=' + currentDays),
@@ -664,6 +670,9 @@ var FUNNEL_STEP = {
   ai_bar:         ['Asked the AI from the canvas bar','in the editor'],
   template_cta:   ['Pressed Use as template','on the home page'],
   pro_viewed:     ['Opened the Pro page','coming soon, with the price question'],
+  event_view:     ['Opened a tifo event','its page'],
+  event_enter:    ['Entered a tifo event','one tifo per account'],
+  event_vote:     ['Voted in a tifo event','for an entry'],
   pro_limit:      ['Met a Pro limit card','an allowance used up'],
   pro_notify:     ['Asked to hear when Pro opens','one per account'],
   pro_ask_seen:   ['Asked in the editor','the founding-fans card, once'],
@@ -1124,6 +1133,7 @@ var TABS = [
   { id:'funnel',   label:'What they do' },
   { id:'ai',       label:'AI' },
   { id:'pro',      label:'Pro' },
+  { id:'events',   label:'Events' },
   { id:'library',  label:'Library' },
   { id:'feedback', label:'Feedback' },
   { id:'email',    label:'Email' },
@@ -1775,6 +1785,7 @@ function paintSection(){
   else if (currentTab === 'funnel') html = funnelTab();
   else if (currentTab === 'ai') html = aiTab();
   else if (currentTab === 'pro') html = proTab();
+  else if (currentTab === 'events') html = eventsTab();
   else if (currentTab === 'library') html = libraryTab();
   else if (currentTab === 'feedback') html = feedbackTab();
   else if (currentTab === 'email') html = emailTab();
@@ -1785,6 +1796,7 @@ function paintSection(){
   if (currentTab === 'library') wireLibrary();
   if (currentTab === 'traffic') wireLinkBuilder();
   if (currentTab === 'pro') wirePro();
+  if (currentTab === 'events') wireEvents();
 }
 
 /* ---- pro: who Pro is on for, what is held, and passes by hand ----
@@ -2081,6 +2093,229 @@ function wirePro(){
       proReload();
     });
   }
+}
+
+/* ---- tifo events: themed contests, made and run from here ----
+   Everything is on the server (server/src/eventRoutes.ts, tifoEvents.ts): the
+   stage comes from the four times and the clock, votes are hidden from fans
+   until the result is confirmed here, and every action below is written to
+   the Security tab's audit trail. Times are typed and shown in this
+   browser's own time zone. */
+var EVENTS = null;
+var EV_EDIT = null;
+var EV_MSG = '';
+var EV_STAGE = {
+  draft: ['Draft', 'only you see it until its announcement time'],
+  announced: ['Announced', 'the theme, dates and prize are public'],
+  open: ['Open for entries', 'fans are entering'],
+  voting: ['Voting', 'entries are frozen; fans vote and see no counts'],
+  closed: ['Waiting for you', 'voting is over: confirm the result'],
+  result: ['Result confirmed', 'the podium and the counts are public'],
+  cancelled: ['Cancelled', 'on no public page']
+};
+function evLocal(iso){
+  if (!iso) return '';
+  var d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  function p(n){ return (n < 10 ? '0' : '') + n; }
+  return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + 'T' + p(d.getHours()) + ':' + p(d.getMinutes());
+}
+function evShow(iso){ return iso ? esc(evLocal(iso).replace('T', ' ')) : ''; }
+function evById(id){
+  var list = (EVENTS && EVENTS.events) || [];
+  for (var i = 0; i < list.length; i++) if (list[i].id === id) return list[i];
+  return null;
+}
+async function evReload(){
+  var r = await api('/api/admin/events');
+  EVENTS = r.ok && r.data ? r.data : { error: r.status };
+  if (currentTab === 'events') paintSection();
+}
+function evField(id, label, value, attrs, wide){
+  return '<label' + (wide ? ' class="lb-wide"' : '') + '>' + label + ' <input id="' + id + '" ' + attrs + ' value="' + esc(value == null ? '' : value) + '"></label>';
+}
+function evForm(){
+  var e = EV_EDIT ? evById(EV_EDIT) : null;
+  var html = '<h2 class="sec">' + (e ? 'Change "' + esc(e.titleEn) + '"' : 'Make an event') + '</h2>';
+  html += '<p class="note">A theme, four times and a prize. Nothing is public before the announcement time, so an event can be made days ahead. Times are in this browser&#39;s time zone.</p>';
+  html += '<div class="lb-grid" id="ev-form">'
+    + evField('ev-title-en', 'Title (English)', e ? e.titleEn : '', 'type="text" maxlength="60" autocomplete="off"')
+    + evField('ev-title-ar', 'Title (Arabic)', e ? e.titleAr : '', 'type="text" maxlength="60" autocomplete="off" dir="rtl"')
+    + evField('ev-line-en', 'One line about the theme (English)', e ? e.lineEn : '', 'type="text" maxlength="200" autocomplete="off"', true)
+    + evField('ev-line-ar', 'One line about the theme (Arabic)', e ? e.lineAr : '', 'type="text" maxlength="200" autocomplete="off" dir="rtl"', true)
+    + evField('ev-announce', 'Announced (public from)', evLocal(e ? e.announceAt : ''), 'type="datetime-local"')
+    + evField('ev-open', 'Entries open', evLocal(e ? e.openAt : ''), 'type="datetime-local"')
+    + evField('ev-vote', 'Voting starts (entries freeze)', evLocal(e ? e.voteAt : ''), 'type="datetime-local"')
+    + evField('ev-close', 'Voting ends', evLocal(e ? e.closeAt : ''), 'type="datetime-local"')
+    + evField('ev-prize', 'Prize: days of Pro for the winner (0 for none)', e ? e.prizeDays : 30, 'type="number" min="0" max="90" step="1" inputmode="numeric"')
+    + evField('ev-slug', 'Address: /events/... (empty: from the English title)', e ? e.slug : '', 'type="text" maxlength="41" autocomplete="off" spellcheck="false"' + (e && e.stage !== 'draft' ? ' disabled' : ''))
+    + '</div>';
+  html += '<p class="note"><button id="ev-fill" type="button">Fill the usual dates</button> announced now, entries open in 2 days for 5 days, then 2 days of voting.</p>';
+  html += '<p class="note"><button id="ev-save" type="button">' + (e ? 'Save changes' : 'Make the event') + '</button>'
+    + (e ? ' <button id="ev-stop" type="button">Stop changing</button>' : '') + '</p>';
+  html += '<p id="ev-out" class="note" role="status" aria-live="polite">' + EV_MSG + '</p>';
+  return html;
+}
+function evCard(e){
+  var st = EV_STAGE[e.stage] || [e.stage, ''];
+  var kind = e.stage === 'closed' ? ' warn' : (e.stage === 'open' || e.stage === 'voting' || e.stage === 'result') ? ' good' : '';
+  var entries = e.entries || [];
+  var isPublic = e.stage !== 'draft' && e.stage !== 'cancelled';
+  var html = '<div class="card ev-card" data-ev="' + esc(e.id) + '">';
+  html += '<p class="lt"><bdi>' + esc(e.titleEn) + '</bdi> &middot; <bdi>' + esc(e.titleAr) + '</bdi> <span class="badge' + kind + '">' + esc(st[0]) + '</span></p>';
+  html += '<p class="lc">' + esc(st[1]) + (isPublic ? ' &middot; <a href="/events/' + esc(e.slug) + '" target="_blank" rel="noopener">/events/' + esc(e.slug) + '</a>' : ' &middot; /events/' + esc(e.slug)) + '</p>';
+  if (e.lineEn || e.lineAr) html += '<p class="note"><bdi>' + esc(e.lineEn) + '</bdi>' + (e.lineAr ? '<br><bdi>' + esc(e.lineAr) + '</bdi>' : '') + '</p>';
+  html += '<table class="tbl"><tbody>'
+    + '<tr><th>Announced</th><td>' + evShow(e.announceAt) + '</td><th>Entries open</th><td>' + evShow(e.openAt) + '</td></tr>'
+    + '<tr><th>Voting starts</th><td>' + evShow(e.voteAt) + '</td><th>Voting ends</th><td>' + evShow(e.closeAt) + '</td></tr>'
+    + '<tr><th>Prize</th><td>' + (e.prizeDays ? fmt(e.prizeDays) + ' days of Pro' : 'the title only') + '</td><th>Entries</th><td>' + fmt(entries.length) + '</td></tr>'
+    + '</tbody></table>';
+  if (e.stage === 'result'){
+    var w = null;
+    for (var k = 0; k < entries.length; k++) if (entries[k].designId === e.winnerDesign) w = entries[k];
+    html += '<div class="callout ok"><b>Confirmed ' + evShow(e.confirmedAt) + '.</b> '
+      + (e.winnerUser ? 'Winner: ' + (w ? '<bdi>' + esc(w.title || 'a tifo') + '</bdi> by @' + esc(w.owner || '?') : 'a tifo that is no longer public') + '. ' + (e.prizePass ? 'The prize pass was given.' : 'No prize pass was given.') : 'No entry had a counted vote, so there is no winner.')
+      + '</div>';
+  }
+  if (e.stage === 'closed'){
+    html += '<div class="callout"><b>Voting is over.</b> ' + (e.proposed && e.proposed.length ? 'The result would name the entries marked 1, 2 and 3 below. Take out any that broke the theme first, then confirm.' : 'No entry has a counted vote: confirming records no winner.') + '</div>';
+  }
+  if (entries.length){
+    html += '<table class="tbl"><thead><tr><th>#</th><th>Tifo</th><th>By</th><th>Entered</th><th>Votes that count</th><th>All votes</th><th></th></tr></thead><tbody>';
+    for (var i = 0; i < entries.length; i++){
+      var x = entries[i];
+      var place = e.stage === 'result'
+        ? (x.designId === e.winnerDesign ? 1 : x.designId === e.secondDesign ? 2 : x.designId === e.thirdDesign ? 3 : 0)
+        : (e.proposed ? e.proposed.indexOf(x.designId) + 1 : 0);
+      html += '<tr><td>' + (place ? '<b>' + place + '</b>' : '') + '</td><td>'
+        + (x.isPublic ? '<a href="/t/' + esc(x.designId) + '" target="_blank" rel="noopener"><bdi>' + esc(x.title || 'Untitled') + '</bdi></a>' : '<span class="dim">unpublished or deleted: out of the result</span>')
+        + (x.reason ? '<br><b class="warn">Taken out:</b> <bdi>' + esc(x.reason) + '</bdi>' : '') + '</td><td>'
+        + (x.owner ? '@' + esc(x.owner) : '') + '</td><td>' + evShow(x.enteredAt) + '</td><td>' + fmt(x.votes) + '</td><td>' + fmt(x.allVotes) + '</td><td>';
+      if (e.stage !== 'result'){
+        html += x.reason
+          ? '<button class="ev-back" type="button" data-design="' + esc(x.designId) + '">Put back</button>'
+          : '<input class="ev-reason" type="text" maxlength="120" placeholder="Reason, shown to fans" aria-label="Reason for taking this entry out" data-design="' + esc(x.designId) + '"> <button class="ev-out" type="button" data-design="' + esc(x.designId) + '">Take out</button>';
+      }
+      html += '</td></tr>';
+    }
+    html += '</tbody></table>';
+    html += '<p class="note">A vote counts when the voter&#39;s email was verified before voting started. Fans never see either number until the result is confirmed, and then only the votes that count.</p>';
+  }
+  html += '<p class="note">';
+  if (e.stage !== 'result') html += '<button class="ev-edit" type="button">Change</button> ';
+  if (e.stage === 'closed') html += '<button class="ev-confirm" type="button">Confirm the result</button> ';
+  if (e.stage === 'cancelled') html += '<button class="ev-uncancel" type="button">Bring back</button> ';
+  else if (e.stage !== 'result') html += '<button class="ev-cancel" type="button">Cancel the event</button> ';
+  if (!entries.length && e.stage !== 'result') html += '<button class="ev-delete" type="button">Delete</button>';
+  html += '</p></div>';
+  return html;
+}
+function eventsTab(){
+  var html = '<h2 class="sec">Tifo events</h2>';
+  if (EVENTS === null){ void evReload(); return html + '<p class="note">Loading...</p>'; }
+  if (EVENTS.error){
+    return html + '<div class="callout bad"><b>Could not load the events.</b> HTTP ' + esc(String(EVENTS.error)) + (EVENTS.error === 404 ? ' (this server has no events store)' : '') + '</div>';
+  }
+  html += '<p class="lede">A themed contest, when you want one: announce it, fans enter one tifo each, then vote. You confirm the winner here. While there is no event, nothing about events shows anywhere on the site.</p>';
+  if (!EVENTS.canGrant) html += '<div class="callout warn"><b>This server has no Pro store</b>, so a winner gets the title and no pass.</div>';
+  else if (EVENTS.proMode !== 'on') html += '<div class="callout warn"><b>Pro is ' + esc(EVENTS.proMode) + '.</b> The winner still gets the pass, but only accounts Pro is on for see the crown and the Pro tools. Set the prize to 0 days for a contest with the title alone.</div>';
+  html += evForm();
+  var list = EVENTS.events || [];
+  html += '<h2 class="sec">Events <span class="hint">newest first</span></h2>';
+  if (!list.length) html += '<p class="note">None yet.</p>';
+  for (var i = 0; i < list.length; i++) html += evCard(list[i]);
+  return html;
+}
+function evSay(html){ EV_MSG = html; var o = el('ev-out'); if (o) o.innerHTML = html; }
+function evRefused(r){ return '<b class="warn">Refused.</b> ' + esc((r.data && r.data.error) || ('HTTP ' + r.status)); }
+function evIso(id){
+  var v = el(id).value;
+  if (!v) return '';
+  var d = new Date(v);
+  return isNaN(d.getTime()) ? '' : d.toISOString();
+}
+function evBody(){
+  return {
+    titleEn: el('ev-title-en').value, titleAr: el('ev-title-ar').value, lineEn: el('ev-line-en').value, lineAr: el('ev-line-ar').value,
+    announceAt: evIso('ev-announce'), openAt: evIso('ev-open'), voteAt: evIso('ev-vote'), closeAt: evIso('ev-close'),
+    prizeDays: el('ev-prize').value === '' ? 30 : Number(el('ev-prize').value), slug: (el('ev-slug').value || '').trim().toLowerCase()
+  };
+}
+async function evAct(id, path, body, done){
+  var r = await post('/api/admin/events/' + id + path, body || {});
+  if (r.ok && r.data && r.data.ok) evSay(done(r.data));
+  else evSay(evRefused(r));
+  await evReload();
+  var out = el('ev-out');
+  if (out && out.scrollIntoView) out.scrollIntoView({ block: 'center' });
+}
+function wireEvents(){
+  var save = el('ev-save');
+  if (!save) return;
+  el('ev-fill').addEventListener('click', function(){
+    var day = 24 * 3600 * 1000, t = Date.now();
+    el('ev-announce').value = evLocal(new Date(t).toISOString());
+    el('ev-open').value = evLocal(new Date(t + 2 * day).toISOString());
+    el('ev-vote').value = evLocal(new Date(t + 7 * day).toISOString());
+    el('ev-close').value = evLocal(new Date(t + 9 * day).toISOString());
+  });
+  save.addEventListener('click', async function(){
+    var body = evBody();
+    if (!body.titleEn.trim() || !body.titleAr.trim()){ evSay('Type the title in English and in Arabic first.'); return; }
+    if (!body.announceAt || !body.openAt || !body.voteAt || !body.closeAt){ evSay('Fill all four times first.'); return; }
+    save.disabled = true;
+    evSay('Saving...');
+    var r = await post('/api/admin/events' + (EV_EDIT ? '/' + EV_EDIT : ''), body);
+    save.disabled = false;
+    if (r.ok && r.data && r.data.ok){
+      evSay((EV_EDIT ? 'Saved' : 'Made') + ': <b>' + esc(r.data.event.titleEn) + '</b>, at /events/' + esc(r.data.event.slug) + '.');
+      EV_EDIT = null;
+      await evReload();
+    } else evSay(evRefused(r));
+  });
+  var stop = el('ev-stop');
+  if (stop) stop.addEventListener('click', function(){ EV_EDIT = null; EV_MSG = ''; paintSection(); });
+  function idOf(node){ var c = node.closest('.ev-card'); return c ? c.getAttribute('data-ev') : ''; }
+  function each(sel, fn){
+    var nodes = document.querySelectorAll(sel);
+    for (var i = 0; i < nodes.length; i++) nodes[i].addEventListener('click', function(ev){ var b = ev.currentTarget; void fn(b, idOf(b)); });
+  }
+  each('.ev-edit', function(b, id){ EV_EDIT = id; EV_MSG = ''; paintSection(); var f = el('ev-form'); if (f && f.scrollIntoView) f.scrollIntoView({ block: 'center' }); });
+  each('.ev-cancel', function(b, id){
+    if (!window.confirm('Cancel this event? It leaves every public page. Entries and votes are kept, and you can bring it back.')) return;
+    return evAct(id, '/cancel', { cancelled: true }, function(){ return 'Cancelled.'; });
+  });
+  each('.ev-uncancel', function(b, id){ return evAct(id, '/cancel', { cancelled: false }, function(){ return 'Brought back.'; }); });
+  each('.ev-delete', function(b, id){
+    if (!window.confirm('Delete this event for good?')) return;
+    if (EV_EDIT === id) EV_EDIT = null;
+    return evAct(id, '/delete', {}, function(){ return 'Deleted.'; });
+  });
+  each('.ev-out', function(b, id){
+    var design = b.getAttribute('data-design');
+    var input = b.parentNode.querySelector('.ev-reason');
+    var reason = input ? (input.value || '').trim() : '';
+    if (!reason){ evSay('Type the reason first: fans see it on the event page.'); if (input) input.focus(); return; }
+    return evAct(id, '/disqualify', { designId: design, reason: reason }, function(){ return 'Taken out.'; });
+  });
+  each('.ev-back', function(b, id){ return evAct(id, '/disqualify', { designId: b.getAttribute('data-design'), reason: '' }, function(){ return 'Put back.'; }); });
+  each('.ev-confirm', function(b, id){
+    var e = evById(id);
+    var top = e && e.proposed && e.proposed.length ? e.proposed[0] : null;
+    var w = null;
+    for (var i = 0; top && i < e.entries.length; i++) if (e.entries[i].designId === top) w = e.entries[i];
+    var what = w ? 'The winner will be "' + (w.title || 'Untitled') + '" by @' + (w.owner || '?') + ' with ' + w.votes + ' counted vote' + (w.votes === 1 ? '' : 's') + (e.prizeDays ? ', who gets ' + e.prizeDays + ' days of Pro' : '') + '.' : 'No entry has a counted vote, so there will be no winner.';
+    if (!window.confirm('Confirm the result? ' + what + ' This makes the podium and the counts public and cannot be undone here.')) return;
+    b.disabled = true;
+    return evAct(id, '/confirm', {}, function(d){
+      var prize = d.prize === 'given' ? 'The prize pass was given.'
+        : d.prize === 'too_soon' ? 'No pass: this winner had an event prize in the last 90 days, so they take the title only.'
+        : d.prize === 'failed' ? 'The pass could not be given: give it by hand on the Pro tab.'
+        : d.prize === 'no_winner' ? 'No entry had a counted vote: no winner.'
+        : 'The title only.';
+      return '<b>Result confirmed.</b> ' + (d.winner ? 'Winner: @' + esc(d.winner.owner || '?') + '. ' : '') + prize;
+    });
+  });
 }
 
 /* ---- security: is anyone attacking the site, and is it set up to cope ----

@@ -1664,3 +1664,9 @@ document.getElementById('foot-feedback')?.addEventListener('click', async () => 
   const { openFeedbackModal } = await import('./ui/feedbackModal');
   openFeedbackModal('other');
 });
+
+// A tifo event's band, while one is on (ui/eventBand.ts): nothing otherwise.
+{
+  const main = document.getElementById('main');
+  if (main) void import('./ui/eventBand').then((m) => m.mountEventBand(main));
+}

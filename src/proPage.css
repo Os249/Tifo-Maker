@@ -27,6 +27,29 @@
 .pp-you a { margin-inline-start: var(--sp-2); color: var(--pro-ink); text-decoration: underline; text-underline-offset: 3px; white-space: nowrap; }
 .pp-act[hidden] { display: none; }
 
+/* ---- what Pro makes: real exports, the free one beside the Pro one ---- */
+.pp-show { margin: var(--sp-8) 0 0; }
+.pp-show h2 { margin: 0; font-size: var(--fs-2xl); font-weight: 800; letter-spacing: -0.02em; }
+[dir="rtl"] .pp-show h2 { letter-spacing: 0; }
+.pp-show-lead { margin: var(--sp-2) 0 var(--sp-5); max-width: 60ch; font-size: var(--fs-md); line-height: 1.55; color: var(--muted); }
+.pp-pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-4); align-items: start; }
+.pp-shots { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--sp-4); margin-top: var(--sp-4); align-items: start; }
+.pp-shot { margin: 0; min-width: 0; border-radius: var(--r-lg); overflow: hidden; background: var(--card); border: 1px solid var(--line); }
+.pp-shot.pro, .pp-shots .pp-shot { border-color: var(--pro-line); }
+.pp-shot.wide { grid-column: span 2; }
+.pp-shot img { display: block; width: 100%; height: auto; background: var(--raise-2); }
+/* The free picture is the screen's shape; shown at the film's, so the pair lines up. */
+.pp-pair .pp-shot img { aspect-ratio: 16 / 9; object-fit: cover; }
+.pp-shot figcaption { display: grid; gap: 2px; padding: var(--sp-3) var(--sp-4) var(--sp-4); }
+.pp-shot figcaption b { font-size: var(--fs-md); font-weight: 700; }
+.pp-shot figcaption span { font-size: var(--fs-sm); line-height: 1.5; color: var(--muted); }
+@media (max-width: 860px) {
+  .pp-shots { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 560px) {
+  .pp-pair { grid-template-columns: 1fr; }
+}
+
 /* ---- the two plans: Free against Pro ---- */
 /* Each card as tall as its own rows: the question makes Pro's much taller. */
 .pp-plans { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-4); align-items: start; }
@@ -196,7 +219,7 @@
 }
 .pp-paid[hidden] { display: none; }
 .pp-paid[data-tone="ok"] { color: var(--pro-ink); background: var(--pro-tint); border-color: var(--pro-line); }
-.pp-paid[data-tone="bad"] { border-color: var(--danger, #c0392b); }
+.pp-paid[data-tone="bad"] { border-color: var(--danger); }
 
 @media (max-width: 480px) {
   .pp { padding: 0 16px 56px; }

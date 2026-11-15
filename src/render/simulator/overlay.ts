@@ -20,10 +20,12 @@ import { OSM_ATTRIBUTION } from '../../net/osm';
 import { fetchPro, type ProState } from '../../net/api';
 import { proChipHtml } from '../../ui/pro';
 import { exportGate } from '../../ui/proGate';
+import { cleanByDefault, rememberClean } from '../../ui/proMark';
 import { currentCredit } from '../../ui/creditLine';
 import type { MatchDayFilmChoice } from '../../ui/proFilm';
 import { BOARD_MESSAGES, BOARD_TEXT_MAX, boardColour, cleanBoardText } from './pitchside';
 import { mountLedStyle } from './ledPanel';
+import { LED_FILE, cleanFileSize, drawLedFile } from './ledFile';
 import {
   ACCESSORY_KINDS,
   ACCESSORY_PRESETS,
@@ -245,6 +247,9 @@ input[type=checkbox].mds-check:checked::after{transform:rotate(45deg) scale(1);}
 .mds-ledlist{display:flex;flex-direction:column;gap:var(--sp-2);}
 /* The editor's own input[type=text] rule is 200px wide; these fill the panel. */
 .mds-ledlist .mds-input{width:100%;min-width:0;}
+.mds-ledfile{display:flex;flex-direction:column;gap:var(--sp-2);}
+.mds-ledfile-size{display:flex;align-items:center;gap:var(--sp-2);}
+.mds-ledfile-size .mds-sel{flex:1 1 0;width:100%;min-width:0;}
 .mds-swatches{display:flex;flex-wrap:wrap;gap:var(--sp-2);}
 .mds-swatch{position:relative;flex:none;width:var(--sp-6);height:var(--sp-6);padding:0;border:1px solid var(--border-strong);border-radius:var(--r-pill);background:var(--mds-swatch);cursor:pointer;transition:transform var(--duration-quick) var(--ease-smooth-out);}
 .mds-swatch:hover{transform:scale(1.1);}
@@ -332,6 +337,7 @@ const MDS_T: Record<string, { en: string; ar: string }> = {
   secStadium: { en: 'Stadium screens', ar: 'شاشات الملعب' },
   'shot.Your Tifo': { en: 'Your tifo', ar: 'تيفوك' },
   'shot.Tifo Pitch Level': { en: 'Your tifo from the pitch', ar: 'تيفوك من أرض الملعب' },
+  'shot.LED Boards': { en: 'The LED boards, up close', ar: 'لوحات الملعب من قريب' },
   'shot.TV Broadcast': { en: 'TV Broadcast', ar: 'البث التلفزيوني' },
   'shot.Main Camera': { en: 'Main Camera', ar: 'الكاميرا الرئيسية' },
   'shot.Behind Goal': { en: 'Behind Goal', ar: 'خلف المرمى' },
@@ -710,11 +716,24 @@ const MDS_T: Record<string, { en: string; ar: string }> = {
   ledColour: { en: 'Board colour', ar: 'لون اللوحات' },
   ledColourN: { en: 'Colour {n} of your tifo', ar: 'اللون {n} من تيفوك' },
   ledClear: { en: 'Clear the boards', ar: 'امسح اللوحات' },
+  ledLook: { en: 'See them up close', ar: 'شوفها من قريب' },
   ledTry: {
     en: 'Free to try here. A snapshot or video with your boards on asks about Pro first.',
     ar: 'جرّبها هنا ببلاش. اللقطة أو الفيديو مع لوحاتك يسألك عن المميّز أول.',
   },
   ledItem: { en: 'LED board text', ar: 'نص اللوحات الإعلانية' },
+  ledFile: { en: 'Board file for the venue', ar: 'ملف اللوحة للملعب' },
+  ledFileHint: {
+    en: 'Each message as a flat strip, at the size the stadium drives its LED ribbon. Ask the venue for theirs; 10880 × 90 is one stadium\u2019s.',
+    ar: 'كل رسالة كشريط مسطح بالمقاس اللي يشغّل فيه الملعب شريط الـLED. اسأل الملعب عن مقاسه، و\u206610880 × 90\u2069 مقاس ملعب واحد.',
+  },
+  ledFileW: { en: 'Width in pixels', ar: 'العرض بالبكسل' },
+  ledFileH: { en: 'Height in pixels', ar: 'الارتفاع بالبكسل' },
+  ledFileSave: { en: 'Save the board file', ar: 'احفظ ملف اللوحة' },
+  ledFileSaved: { en: 'Board file saved:', ar: 'انحفظ ملف اللوحة:' },
+  ledFileNone: { en: 'Write a message on the boards first.', ar: 'اكتب رسالة على اللوحات أول.' },
+  ledFileFree: { en: 'The board file is part of Pro. Your snapshot and video are free as before, with plain boards.', ar: 'ملف اللوحة من المميّزة. لقطتك وفيديوك مجانيين مثل أول، واللوحات فيها عادية.' },
+  ledFileItem: { en: 'LED board file', ar: 'ملف اللوحة الإعلانية' },
   noMark: { en: 'Without the tifomaker.org mark', ar: 'بدون علامة tifomaker.org' },
   noMarkShort: { en: 'No mark', ar: 'بدون العلامة' },
   'tip.noMark': {
@@ -1269,6 +1288,81 @@ export function openMatchDaySimulator(
   ledSwatches.dataset.k = 'led-colour';
   const ledClear = btn(L('ledClear'), 'mds-led-clear');
   ledClear.dataset.k = 'led-clear';
+  // The boards are a thin strip from across the pitch: one tap to the camera
+  // that stands in front of them (cameras.ts, boardShot), where the words read.
+  const ledLook = btn(L('ledLook'), 'mds-led-look');
+  ledLook.dataset.k = 'led-look';
+  ledLook.addEventListener('click', () => {
+    const i = sim.shots().findIndex((s) => s.name === 'LED Boards');
+    if (i < 0) return;
+    camSel.value = String(i);
+    camSel.dispatchEvent(new Event('change'));
+  });
+  // The boards as a file for the venue's screen controller (ledFile.ts): the size is typed, never assumed.
+  const ledFileBox = document.createElement('div');
+  ledFileBox.className = 'mds-ledfile';
+  const ledFileNum = (k: string, label: string, value: number): HTMLInputElement => {
+    const i = document.createElement('input');
+    i.type = 'number';
+    i.inputMode = 'numeric';
+    i.className = 'mds-sel';
+    i.dataset.k = k;
+    i.value = String(value);
+    i.setAttribute('aria-label', label);
+    i.title = label;
+    return i;
+  };
+  const ledFileW = ledFileNum('led-file-w', L('ledFileW'), LED_FILE.defaultW);
+  const ledFileH = ledFileNum('led-file-h', L('ledFileH'), LED_FILE.defaultH);
+  const ledFileX = document.createElement('span');
+  ledFileX.textContent = '×';
+  ledFileX.setAttribute('aria-hidden', 'true');
+  const ledFileSave = btn(L('ledFileSave'), 'mds-led-file');
+  ledFileSave.dataset.k = 'led-file-save';
+  const ledFileSizes = document.createElement('div');
+  ledFileSizes.className = 'mds-ledfile-size';
+  ledFileSizes.dir = 'ltr';
+  ledFileSizes.append(ledFileW, ledFileX, ledFileH);
+  const ledFileHint = document.createElement('div');
+  ledFileHint.className = 'mds-hint';
+  ledFileHint.textContent = L('ledFileHint');
+  ledFileBox.append(ledFileSizes, ledFileSave, ledFileHint);
+  ledFileSave.addEventListener('click', () => {
+    void (async () => {
+      const board = built ? sim.boardText() : null;
+      const lines = (board?.messages ?? []).map((m) => m.trim()).filter(Boolean);
+      if (!board || !lines.length) {
+        toast(L('ledFileNone'));
+        return;
+      }
+      // A Pro item, asked about once like every export; there is no free version of this file.
+      const how = await exportGate([L('ledFileItem')]);
+      if (how === 'free') toast(L('ledFileFree'));
+      if (how !== 'pro') return;
+      const { width, height } = cleanFileSize(ledFileW.value, ledFileH.value);
+      ledFileW.value = String(width);
+      ledFileH.value = String(height);
+      const pngs: { name: string; data: Uint8Array }[] = [];
+      for (let i = 0; i < lines.length; i++) {
+        const blob = await new Promise<Blob | null>((r) => drawLedFile(lines[i], board.colour, width, height).toBlob(r, 'image/png'));
+        if (blob) pngs.push({ name: `led-board-${i + 1}-${width}x${height}.png`, data: new Uint8Array(await blob.arrayBuffer()) });
+      }
+      if (!pngs.length) return;
+      // One message is a PNG; several go in one ZIP (a browser asks before saving three files in a row).
+      const file = pngs.length === 1
+        ? new Blob([pngs[0].data.buffer as ArrayBuffer], { type: 'image/png' })
+        : new Blob([(await import('../../core/zipStore')).zipStore(pngs).buffer as ArrayBuffer], { type: 'application/zip' });
+      const a = document.createElement('a');
+      const url = URL.createObjectURL(file);
+      a.href = url;
+      a.download = pngs.length === 1 ? pngs[0].name : `led-boards-${width}x${height}.zip`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 4000);
+      toast(`${L('ledFileSaved')} \u2066${width} × ${height}\u2069`);
+    })();
+  });
   const ledHint = document.createElement('div');
   ledHint.className = 'mds-hint';
   ledHint.textContent = L('ledHint');
@@ -1283,7 +1377,7 @@ export function openMatchDaySimulator(
   secLed.root.hidden = true;
   secLed.root.classList.add('mds-pro');
   secLed.root.querySelector('.mds-shead .chev')?.insertAdjacentHTML('beforebegin', proChipHtml());
-  secLed.body.append(ledHint, field(L('ledMessages'), ledList), field(L('ledColour'), ledSwatches), ledClear, ledTry);
+  secLed.body.append(ledHint, field(L('ledMessages'), ledList), ledLook, field(L('ledColour'), ledSwatches), ledClear, field(L('ledFile'), ledFileBox), ledTry);
   // Their style: a template, the club kit's crest, the score; and the big screens (ledPanel.ts).
   const ledStyle = mountLedStyle({ body: secLed.body, section: secLed.root, screenSel, before: ledClear }, (s) => sim.setBoardStyle(s));
 
@@ -2677,6 +2771,12 @@ export function openMatchDaySimulator(
   // ---------- Pro: what /api/pro says ----------
   let proState: ProState | null = null;
   const proRunning = (): boolean => !!proState?.live && !!proState.plan && proState.plan !== 'free';
+  let markWasRunning = false;
+  let markByHand = false;
+  noMarkChk.addEventListener('change', () => {
+    markByHand = true;
+    rememberClean(proRunning(), noMarkChk.checked);
+  });
   /** What Record makes, for an account Pro is on for (ui/proFilm.ts); null until /api/pro says so. */
   let filmChoice: MatchDayFilmChoice | null = null;
   /**
@@ -2692,7 +2792,14 @@ export function openMatchDaySimulator(
     state.proLive = live;
     secLed.root.hidden = !live;
     noMarkLbl.hidden = !live;
+    // A member's snapshot and recording go without the mark unless they asked
+    // for it back (ui/proMark.ts); a tick made by hand in this visit stays.
+    const running = proRunning();
     if (!live) noMarkChk.checked = false;
+    else if (running && (!markWasRunning || !markByHand)) noMarkChk.checked = cleanByDefault(true);
+    else if (markWasRunning && !running && !markByHand) noMarkChk.checked = false;
+    if (markWasRunning !== running) markByHand = false;
+    markWasRunning = running;
     if (live && !creditSlot.firstChild) void import('../../ui/proCredit').then((m) => { if (!creditSlot.firstChild) creditSlot.append(m.creditField()); }).catch(() => {});
     // A pass holder still sees what is Pro, quietly.
     for (const chip of overlay.querySelectorAll('.mds-pro .pro-chip')) chip.classList.toggle('quiet', proRunning());
@@ -2768,6 +2875,41 @@ export function openMatchDaySimulator(
       })
       .catch(() => {});
   };
+  /** A snapshot (a data: URL) as a canvas, for the export sheet's two pictures. */
+  const shotCanvas = (url: string): Promise<HTMLCanvasElement | null> =>
+    new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        const c = document.createElement('canvas');
+        c.width = img.naturalWidth;
+        c.height = img.naturalHeight;
+        c.getContext('2d')!.drawImage(img, 0, 0);
+        resolve(c);
+      };
+      img.onerror = () => resolve(null);
+      img.src = url;
+    });
+  /** This picture as it leaves free (the mark, plain boards, the design's Pro items lifted) and as chosen. */
+  const bothWays = (film: 'landscape' | 'vertical' | null): { free: () => Promise<HTMLCanvasElement | null>; pro: (signal: AbortSignal) => Promise<HTMLCanvasElement | null> } => ({
+    free: async () => (built ? shotCanvas(await asFree(async () => sim.snapshot())) : null),
+    pro: async (signal) => {
+      if (!built || signal.aborted) return null;
+      const credit = currentCredit();
+      if (!film) return shotCanvas(sim.snapshot({ mark: !noMarkChk.checked, credit }));
+      // The Pro film: its hold, at half the film's size.
+      const [{ filmStill }, { FILM_SIZES }, { drawWatermark }, { drawCreditLine }] = await Promise.all([
+        import('./film'), import('../../ui/proFilm'), import('../../export/stadiumExport'), import('../../ui/creditLine'),
+      ]);
+      if (!built || signal.aborted || sim.isRecording()) return null;
+      const s = FILM_SIZES[film];
+      const c = await filmStill(sim.filmHost(), Math.round(s.width / 2), Math.round(s.height / 2));
+      const g = c.getContext('2d')!;
+      const marked = !noMarkChk.checked;
+      if (marked) drawWatermark(g, c.width, c.height, 'tifomaker.org');
+      if (credit.text) drawCreditLine(g, c.width, c.height, credit.text, { avoid: marked ? 'right' : null, accent: credit.accent });
+      return c;
+    },
+  });
   let snapping = false;
   snapBtn.addEventListener('click', () => {
     const items = proItems();
@@ -2781,7 +2923,7 @@ export function openMatchDaySimulator(
     void (async () => {
       try {
         // Asked once: as chosen with Pro running, the free version, or nothing.
-        const how = await exportGate(items);
+        const how = await exportGate(items, bothWays(null));
         if (how === null || !built) return;
         saveSnapshot(how === 'pro' ? sim.snapshot({ mark: !noMarkChk.checked, credit: currentCredit() }) : await asFree(async () => sim.snapshot()));
       } finally {
@@ -2805,7 +2947,7 @@ export function openMatchDaySimulator(
     // the whole recording.
     const film = state.proLive ? filmChoice?.shape() ?? null : null;
     const items = [...proItems(), ...(film ? [filmChoice!.item()] : [])];
-    const how = items.length ? await exportGate(items) : 'pro';
+    const how = items.length ? await exportGate(items, bothWays(film)) : 'pro';
     if (how === null || !built || sim.isRecording()) {
       recBtn.disabled = false;
       recordBtn2.disabled = false;
@@ -2814,7 +2956,8 @@ export function openMatchDaySimulator(
     if (how === 'pro' && film) {
       // Pro: Match Day's film of the tifo, drawn frame by frame (ui/proFilm.ts).
       const { filmFromMatchDay } = await import('../../ui/proFilm');
-      const outcome = await filmFromMatchDay(sim, { shape: film, reveal: { kind: 'mode', mode: state.reveal }, mark: !noMarkChk.checked, creditLine: currentCredit().text || undefined, name: 'tifo-matchday-film' });
+      const { phaseChoice } = await import('../../ui/proPhases');
+      const outcome = await filmFromMatchDay(sim, { shape: film, reveal: { kind: 'mode', mode: state.reveal }, mark: !noMarkChk.checked, creditLine: currentCredit().text || undefined, name: 'tifo-matchday-film', phases: phaseChoice() ?? undefined });
       recBtn.disabled = false;
       recordBtn2.disabled = false;
       toast(outcome.message);

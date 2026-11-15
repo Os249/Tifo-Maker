@@ -20,6 +20,7 @@
     <a class="brand" href="/" dir="ltr">TIFO<b>MAKER</b></a>
     <nav class="nav-links">
       <a href="/community" data-i18n="nav.community">Community</a>
+      <a href="/events" data-i18n="nav.events">Events</a>
       <a href="/clubs" data-i18n="nav.clubs">For clubs</a>
       <a href="/projects" data-i18n="nav.projects">My projects</a>
       <a class="nav-pro" href="/pro" aria-current="page"><svg class="pro-crown" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3.2 7.6l4.6 3.6 3.4-5.7a.95.95 0 0 1 1.6 0l3.4 5.7 4.6-3.6a.6.6 0 0 1 .96.58L19.9 17H4.1L2.24 8.18a.6.6 0 0 1 .96-.58z"/><path d="M4.4 18.6h15.2V20a1 1 0 0 1-1 1H5.4a1 1 0 0 1-1-1z"/></svg><span data-i18n="nav.proSoon">Pro · soon</span></a>
@@ -47,6 +48,49 @@
 
       <!-- Painted when /api/pro answers: the allowances are the server's. -->
       <section class="pp-plans" id="pp-plans" aria-busy="true" aria-label="Plans" data-i18n-attr="aria-label:pp.plans"></section>
+
+      <!-- What Pro makes, shown, not listed: every picture is a real export of one
+           design (the files are in public/pro; scripts and sources in docs/DESIGN.md, "Pro"). -->
+      <section class="pp-show" aria-labelledby="pp-show-h">
+        <h2 id="pp-show-h" data-i18n="pp.show.title">What Pro makes</h2>
+        <p class="pp-show-lead" data-i18n="pp.show.lead">One fan-made tifo. Every picture here came out of the tools as you see it.</p>
+        <div class="pp-pair">
+          <figure class="pp-shot free">
+            <img src="/pro/free-video.webp" width="800" height="615" loading="lazy" decoding="async" alt="A frame of the free stadium video: the tifo on a plain model of the ground." data-i18n-attr="alt:pp.show.free.alt" />
+            <figcaption><b data-i18n="pp.show.free.t">Free: the stadium video</b><span data-i18n="pp.show.free.d">The size of your screen, with the tifomaker.org mark. Free, and it stays free.</span></figcaption>
+          </figure>
+          <figure class="pp-shot pro">
+            <img src="/pro/film.webp" width="800" height="450" loading="lazy" decoding="async" alt="A frame of the Pro film: the same tifo in the floodlit ground, full of fans." data-i18n-attr="alt:pp.show.film.alt" />
+            <figcaption><b data-i18n="pp.show.film.t">Pro: the match-day film</b><span data-i18n="pp.show.film.d">Full HD or vertical, floodlit, a full house and the crowd’s sound, without the mark.</span></figcaption>
+          </figure>
+        </div>
+        <div class="pp-shots">
+          <figure class="pp-shot wide">
+            <img src="/pro/poster.webp" width="960" height="540" loading="lazy" decoding="async" alt="A match-day poster with the tifo and the fixture set beside it." data-i18n-attr="alt:pp.show.poster.alt" />
+            <figcaption><b data-i18n="pp.show.poster.t">Match-day poster, 4K</b><span data-i18n="pp.show.poster.d">Your tifo with the match, the date and your club’s colours. 3840 × 2160, or tall.</span></figcaption>
+          </figure>
+          <figure class="pp-shot wide">
+            <img src="/pro/boards.webp" width="800" height="450" loading="lazy" decoding="async" alt="The pitch-side LED boards up close, carrying a fan’s message." data-i18n-attr="alt:pp.show.boards.alt" />
+            <figcaption><b data-i18n="pp.show.boards.t">Your words on the LED boards</b><span data-i18n="pp.show.boards.d">They get their own shot in the film, and a file at the size your venue asks for.</span></figcaption>
+          </figure>
+          <figure class="pp-shot tall">
+            <img src="/pro/reel-start.webp" width="480" height="853" loading="lazy" decoding="async" alt="The start of a Reel: a line of text over the ground from above." data-i18n-attr="alt:pp.show.reel1.alt" />
+            <figcaption><b data-i18n="pp.show.reel1.t">Reel: your line</b><span data-i18n="pp.show.reel1.d">A 9:16 video for TikTok and Reels that opens on your own words.</span></figcaption>
+          </figure>
+          <figure class="pp-shot tall">
+            <img src="/pro/reel-cut.webp" width="480" height="853" loading="lazy" decoding="async" alt="A Reel shot from the grass, looking up at the tifo." data-i18n-attr="alt:pp.show.reel2.alt" />
+            <figcaption><b data-i18n="pp.show.reel2.t">Reel: round the tifo</b><span data-i18n="pp.show.reel2.d">At 30 seconds the camera cuts to the grass, the side and across the ground.</span></figcaption>
+          </figure>
+          <figure class="pp-shot tall">
+            <img src="/pro/reel-end.webp" width="480" height="853" loading="lazy" decoding="async" alt="The last frame of a Reel: a title and a date over the tifo." data-i18n-attr="alt:pp.show.reel3.alt" />
+            <figcaption><b data-i18n="pp.show.reel3.t">Reel: the closing frame</b><span data-i18n="pp.show.reel3.d">Your club and the date, clear of the apps’ buttons.</span></figcaption>
+          </figure>
+          <figure class="pp-shot tall">
+            <img src="/pro/pack.webp" width="640" height="853" loading="lazy" decoding="async" alt="The tifo framed as a 4:5 picture for the feed." data-i18n-attr="alt:pp.show.pack.alt" />
+            <figcaption><b data-i18n="pp.show.pack.t">Designer pack</b><span data-i18n="pp.show.pack.d">4:5, 3:4, 1:1, 16:9 and 9:16, each framed by hand, and the art on a clear background.</span></figcaption>
+          </figure>
+        </div>
+      </section>
 
       <section class="pp-act" id="pp-act" hidden>
         <p class="pp-act-note" id="pp-act-note"></p>

@@ -1,0 +1,50 @@
+/*
+ * The designer pack sheet (ui/proPack.ts): the picture, dragged to frame it,
+ * beside the sizes. Built on the poster sheet's parts (proPoster.css) and
+ * pro.css: no colours of its own.
+ */
+.pro-sheet.qv-pack { width: min(1040px, 100%); }
+.qv-pack .qv-poster-body { grid-template-columns: minmax(0, 1.35fr) minmax(300px, 1fr); }
+
+.qv-pack-stage { display: grid; gap: var(--sp-2); min-width: 0; }
+.qv-pack .qv-preview { min-height: 280px; }
+.qv-pack .qv-preview canvas { cursor: grab; touch-action: none; max-height: 62dvh; }
+.qv-pack .qv-preview canvas[data-shape="portrait"] { height: 62dvh; }
+.qv-pack .qv-preview canvas.dragging { cursor: grabbing; }
+.qv-pack .qv-preview canvas:focus-visible { outline: 2px solid var(--blue-500); outline-offset: -2px; }
+.qv-pack-hint { margin: 0; text-align: center; font-size: var(--fs-xs); color: var(--pro-muted); }
+
+/* The sizes: each with its own shape drawn small, so 4:5 and 3:4 are told apart at a glance. */
+.qv-pack-sizes { display: grid; grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: var(--sp-2); }
+.qv-pack-size { position: relative; display: grid; }
+.qv-pack-size input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
+.qv-pack-size span {
+  display: grid; grid-template-columns: auto 1fr; grid-template-rows: auto auto; column-gap: var(--sp-2); align-items: center;
+  min-height: 48px; padding: var(--sp-2) var(--sp-3); border-radius: var(--r-md);
+  background: var(--pro-surface-2); border: 1px solid var(--pro-hairline); color: var(--pro-muted);
+  transition: background-color var(--duration-fast) var(--ease-smooth-out), border-color var(--duration-fast) var(--ease-smooth-out);
+}
+.qv-pack-size b { font-size: var(--fs-sm); font-weight: 700; color: var(--pro-text); }
+.qv-pack-size small { grid-column: 2; font-size: var(--fs-2xs); font-variant-numeric: tabular-nums; }
+.qv-pack-size input:checked + span { background: var(--pro-tint); border-color: var(--pro-line); }
+.qv-pack-size input:focus-visible + span { outline: 2px solid var(--blue-500); outline-offset: 1px; }
+.qv-pack-shape { grid-row: 1 / span 2; display: block; width: 18px; height: 22px; border-radius: 3px; border: 2px solid currentColor; }
+.qv-pack-shape[data-k="feed45"] { width: 18px; height: 22px; }
+.qv-pack-shape[data-k="feed34"] { width: 17px; height: 23px; }
+.qv-pack-shape[data-k="square"] { width: 20px; height: 20px; }
+.qv-pack-shape[data-k="wide"] { width: 26px; height: 15px; }
+.qv-pack-shape[data-k="story"] { width: 14px; height: 25px; }
+
+.qv-pack-zoom input[type="range"] { padding: 0; min-height: 28px; border: none; background: transparent; accent-color: var(--pro-crown); }
+.qv-pack-reset { justify-self: start; }
+.qv-pack .pro-actions .pro-alt { font-size: var(--fs-sm); }
+.qv-pack [data-get]:disabled { opacity: 0.7; cursor: progress; }
+
+@media (max-width: 760px) {
+  .qv-pack .qv-poster-body { grid-template-columns: 1fr; }
+  .qv-pack .qv-preview { min-height: 200px; }
+  .qv-pack .qv-preview canvas, .qv-pack .qv-preview canvas[data-shape="portrait"] { max-height: 44dvh; height: auto; width: auto; max-width: 100%; }
+}
+@media (pointer: coarse) {
+  .qv-pack-zoom input[type="range"] { min-height: 44px; }
+}

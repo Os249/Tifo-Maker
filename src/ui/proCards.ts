@@ -65,6 +65,64 @@ function viewOf(st: ProState | null, now = Date.now()): View | null {
   return null;
 }
 
+const REEXPORT_KEY = 'tifo_pro_reexport_v1';
+/** How long after a pass starts the page offers the earlier tifos again. */
+const REEXPORT_DAYS = 7;
+
+/** The start of the pass this offer is about, or null: no pass running, it started over a week ago, or the card was put away. */
+function reexportOf(st: ProState | null, now = Date.now()): string | null {
+  const p = st?.live && st.plan && st.plan !== 'free' ? st.pass : null;
+  if (!p) return null;
+  const age = now - Date.parse(p.startsAt);
+  if (!(age >= 0) || age > REEXPORT_DAYS * DAY || Date.parse(p.endsAt) <= now) return null;
+  return read(REEXPORT_KEY) === p.startsAt ? null : p.startsAt;
+}
+
+/**
+ * The first week of a pass, on My projects: what a fan already made is the
+ * first thing Pro gives back. One card saying so, and `onChange(true)` so the
+ * page puts "Export clean" on each project (it opens the project with its
+ * export panel up, where a member's video, poster and Reel save without the
+ * mark). "OK" puts it away for this pass; the links go with it.
+ */
+export function mountReexportCard(host: HTMLElement, before: Element | null, onChange: (on: boolean) => void): void {
+  const card = document.createElement('section');
+  card.className = 'pro-card pro-card-re';
+  card.hidden = true;
+  card.setAttribute('aria-labelledby', 'pro-re-h');
+  host.insertBefore(card, before);
+  let state: ProState | null = null;
+  let on = false;
+  const paint = (): void => {
+    const pass = reexportOf(state);
+    if (!!pass !== on) {
+      on = !!pass;
+      onChange(on);
+    }
+    card.hidden = !pass;
+    if (!pass) {
+      card.innerHTML = '';
+      return;
+    }
+    card.innerHTML =
+      `<div class="pro-sheet-mark" aria-hidden="true">${CROWN_SVG}</div>` +
+      `<div><h2 id="pro-re-h">${escapeHtml(t('pro.re.title'))}</h2><p>${escapeHtml(t('pro.re.body'))}</p>` +
+      `<div class="pro-card-actions"><button type="button" class="pro-text-btn" data-act="ok">${escapeHtml(t('gift.ok'))}</button></div></div>`;
+    card.querySelector('[data-act="ok"]')!.addEventListener('click', () => {
+      write(REEXPORT_KEY, pass);
+      paint();
+    });
+  };
+  const load = async (fresh = false): Promise<void> => {
+    state = isSignedIn() ? await fetchPro(fresh).catch(() => null) : null;
+    paint();
+  };
+  void load();
+  window.addEventListener('tifo:auth', () => void load(true));
+  window.addEventListener('tifo:pro', () => void load(true));
+  onLangChange(paint);
+}
+
 /** Keep the gift card in `host`, before `before`. Hidden unless there is news. */
 export function mountGiftCard(host: HTMLElement, before: Element | null): void {
   const card = document.createElement('section');

@@ -416,7 +416,10 @@ function chant(g: CanvasRenderingContext2D, W: number, H: number, spec: PosterSp
     scrim(g, W, H, 0.2, 0, 0.6);
   } else sideScrim(g, W, H, spec.rtl, TYPE_COLUMN + 0.16, 0.9);
   // The club, small, with its crest, at the foot.
-  const foot = [spec.club.trim() && caps(spec.club.trim()), spec.date.trim()].filter(Boolean).join('   ·   ');
+  // With no chant typed the club's name IS the headline: the foot does not say
+  // it a second time under itself (seen on the Arabic posters, 14 Nov 2026).
+  const clubIsHeadline = !spec.headline.trim();
+  const foot = [!clubIsHeadline && spec.club.trim() && caps(spec.club.trim()), spec.date.trim()].filter(Boolean).join('   ·   ');
   let y = H - m;
   if (foot || spec.logo) {
     const fs = fit(g, foot || ' ', { family: spec.text, colour: '#fff', tracking: 0.06 }, portrait ? W * 0.7 : colW, u * (portrait ? 4.4 : 3.6), u * 2.2);

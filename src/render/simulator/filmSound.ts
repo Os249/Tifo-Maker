@@ -43,7 +43,7 @@ export async function filmSoundCodec(): Promise<FilmSoundCodec | null> {
 }
 
 /** `seconds` of the film's sound, stereo at 48 kHz. Null where there is no OfflineAudioContext. */
-export async function renderFilmSound(seconds: number): Promise<AudioBuffer | null> {
+export async function renderFilmSound(seconds: number, length: number = FILM_TIMES.seconds, flipAt?: number): Promise<AudioBuffer | null> {
   if (typeof OfflineAudioContext === 'undefined' || seconds <= 0) return null;
   const T = FILM_TIMES;
   const ctx = new OfflineAudioContext(2, Math.ceil(FILM_SOUND_RATE * seconds), FILM_SOUND_RATE);
@@ -60,6 +60,8 @@ export async function renderFilmSound(seconds: number): Promise<AudioBuffer | nu
     // Booked on the film's clock (`from` 0): the count, and the "Oooh" as the cards go up.
     for (let k = 3; k >= 1; k--) if (T.revealAt - k * DRUM_CALL.beat < seconds) atmo.drumHit(k === 1, T.revealAt - k * DRUM_CALL.beat, 0);
     if (T.revealAt < seconds) atmo.ooh(T.revealAt, false, 0);
+    // Two phases: the stand's "Oooh" again as every card turns.
+    if (flipAt !== undefined && flipAt < seconds) atmo.ooh(flipAt, false, 0);
     // The rest start "now": the render is paused at their moment to start them.
     const done = T.revealAt + T.revealSpread;
     const cues: [number, () => void][] = [
@@ -70,6 +72,8 @@ export async function renderFilmSound(seconds: number): Promise<AudioBuffer | nu
       [done + 1, () => atmo.applause(0.9)],
       [done + 1.7, () => atmo.chant()],
     ];
+    // A Reel runs on past the film: the stand keeps singing, and claps once more half way.
+    for (let at = done + 7.5, k = 0; at < length - 2; at += 5.5, k++) cues.push([at, k === 1 ? () => atmo.applause(0.7) : () => atmo.chant()]);
     for (const [at, cue] of cues) {
       if (at >= seconds) continue;
       void ctx.suspend(at).then(() => {
@@ -78,7 +82,7 @@ export async function renderFilmSound(seconds: number): Promise<AudioBuffer | nu
       });
     }
     const buf = await ctx.startRendering();
-    shape(buf);
+    shape(buf, length);
     return buf;
   } finally {
     atmo.dispose();
@@ -90,7 +94,7 @@ export async function renderFilmSound(seconds: number): Promise<AudioBuffer | nu
  * than 12 dB), in over a quarter of a second (no click), and out with the
  * picture's fade to black.
  */
-function shape(buf: AudioBuffer): void {
+function shape(buf: AudioBuffer, length: number): void {
   const T = FILM_TIMES;
   const rate = buf.sampleRate;
   let peak = 0;
@@ -100,8 +104,9 @@ function shape(buf: AudioBuffer): void {
   }
   const gain = peak > 0 ? Math.min(4, 0.89 / peak) : 1;
   const inEnd = Math.floor(0.25 * rate);
-  const outFrom = Math.floor(T.fadeFrom * rate);
-  const outLen = Math.max(1, Math.floor(T.seconds * rate) - outFrom);
+  // The film goes out with its fade to black; a Reel over its last second and a bit.
+  const outFrom = Math.floor((length === T.seconds ? T.fadeFrom : length - 1.2) * rate);
+  const outLen = Math.max(1, Math.floor(length * rate) - outFrom);
   for (let ch = 0; ch < buf.numberOfChannels; ch++) {
     const d = buf.getChannelData(ch);
     for (let i = 0; i < d.length; i++) d[i] *= gain;

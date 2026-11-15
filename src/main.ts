@@ -845,6 +845,9 @@ async function main(): Promise<void> {
     offerBannerCam();
     bannerStore.onChange(offerBannerCam);
     sel.addEventListener('change', () => {
+      // A hand picked a camera: the stadium export films from it as it is
+      // (ui/toolbar.ts frames an unchosen whole-bowl view on the tifo).
+      sel.dataset.sxPicked = '1';
       if (sel.value === 'banner') preview!.focusBanner();
       else if (sel.value === 'tifo') {
         // Nothing to look at after all (the last of it was just erased): the whole bowl.
@@ -1438,6 +1441,22 @@ async function main(): Promise<void> {
       await sleep(900);
       startGuide({ setView: (v) => setView(v) });
     })();
+  }
+
+  // "Export clean" on the Projects page (the first week of a pass) opens the
+  // project with its export panel up: the stadium video, the poster, the Reel.
+  if (bootParams.get('export') === '1') {
+    const u = new URL(location.href);
+    u.searchParams.delete('export');
+    history.replaceState(null, '', u.pathname + u.search);
+    window.setTimeout(() => {
+      const more = document.querySelector<HTMLElement>('.m-tab[data-tab="more"]');
+      if (more && more.getClientRects().length) {
+        // A phone: the export is behind More, then the film tile.
+        more.click();
+        window.setTimeout(() => document.querySelector<HTMLElement>('.m-tool:has(.ti-movie)')?.click(), 60);
+      } else document.getElementById('rail-anim')?.click();
+    }, 400);
   }
 
   // "Publish to the community" on the Projects page opens the project here,

@@ -1298,6 +1298,44 @@ export class Preview3D {
   hasTifoShot(): boolean {
     return this.tifoFp() !== null;
   }
+  /**
+   * Still on the whole-bowl "Full view", untouched: no hand has turned the
+   * camera since that preset was applied. The stadium export asks, so that a
+   * video nobody framed is framed on the tifo (ui/toolbar.ts).
+   */
+  onFullView(): boolean {
+    return this.onPreset === 'Full view';
+  }
+  /**
+   * One picture straight at the tifo, w × h, without moving the fan's camera:
+   * the view is put on the tifo (focusTifo), drawn once at that size, and put
+   * back where it was. Null with no tifo, or when the size cannot be drawn.
+   * The camera check reads this one (ui/proRead.ts): a whole-bowl view from
+   * far off would fail a tifo that reads perfectly well from the gantry.
+   */
+  tifoStill(width: number, height: number): HTMLCanvasElement | null {
+    if (!this.hasTifoShot()) return null;
+    const pos = this.camera.position.clone();
+    const tgt = this.controls.target.clone();
+    const preset = this.onPreset;
+    const at = this.drawAt(width, height);
+    try {
+      if (!at || !this.focusTifo()) return null;
+      this.renderOnce();
+      const out = document.createElement('canvas');
+      out.width = this.canvas.width;
+      out.height = this.canvas.height;
+      out.getContext('2d')!.drawImage(this.canvas, 0, 0);
+      return out;
+    } finally {
+      at?.end();
+      this.camera.position.copy(pos);
+      this.controls.target.copy(tgt);
+      this.controls.update();
+      this.onPreset = preset;
+      this.requestRender();
+    }
+  }
   private tifoFp(): ReturnType<typeof tifoFootprint> {
     const no = this.noTifo;
     return tifoFootprint(this.map, (i) => this.store.cells[i] !== 0 && !(no !== null && no[i] === 1));

@@ -704,3 +704,57 @@ CREATE TABLE IF NOT EXISTS pro_orders (
 );
 CREATE INDEX IF NOT EXISTS pro_orders_user_idx ON pro_orders (user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS pro_orders_created_idx ON pro_orders (created_at DESC);
+
+-- Tifo events (15 Nov 2026; server/src/eventRepo.ts, tifoEvents.ts,
+-- eventRoutes.ts). A themed contest the admin makes on /admin: announced, open
+-- for entries, in voting, then closed and confirmed by hand. The stage is
+-- worked out from the four times, never stored. One entry per account per
+-- event, and a design is entered once; one vote per account per entry, with
+-- "counted" saying whether it goes in the result (an email verified before
+-- voting opened). Entries and votes go with their event, design and account;
+-- a result keeps the winner's account apart from the design, so "one prize
+-- per 90 days" outlives a deleted tifo. Nothing here is read until an event
+-- is made. Each statement is safe to run again.
+CREATE TABLE IF NOT EXISTS tifo_events (
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  slug          TEXT NOT NULL UNIQUE CHECK (slug ~ '^[a-z0-9][a-z0-9-]{1,40}$'),
+  title_en      TEXT NOT NULL CHECK (char_length(title_en) BETWEEN 1 AND 60),
+  title_ar      TEXT NOT NULL CHECK (char_length(title_ar) BETWEEN 1 AND 60),
+  line_en       TEXT NOT NULL CHECK (char_length(line_en) <= 200),
+  line_ar       TEXT NOT NULL CHECK (char_length(line_ar) <= 200),
+  announce_at   TIMESTAMPTZ NOT NULL,
+  open_at       TIMESTAMPTZ NOT NULL,
+  vote_at       TIMESTAMPTZ NOT NULL,
+  close_at      TIMESTAMPTZ NOT NULL,
+  prize_days    INT NOT NULL DEFAULT 30 CHECK (prize_days BETWEEN 0 AND 90),
+  cancelled_at  TIMESTAMPTZ,
+  confirmed_at  TIMESTAMPTZ,
+  winner_design UUID REFERENCES designs(id) ON DELETE SET NULL,
+  second_design UUID REFERENCES designs(id) ON DELETE SET NULL,
+  third_design  UUID REFERENCES designs(id) ON DELETE SET NULL,
+  winner_user   UUID REFERENCES users(id) ON DELETE SET NULL,
+  prize_pass    UUID REFERENCES pro_passes(id) ON DELETE SET NULL,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CHECK (announce_at <= open_at AND open_at < vote_at AND vote_at < close_at)
+);
+CREATE TABLE IF NOT EXISTS tifo_event_entries (
+  event_id            UUID NOT NULL REFERENCES tifo_events(id) ON DELETE CASCADE,
+  design_id           UUID NOT NULL REFERENCES designs(id) ON DELETE CASCADE,
+  user_id             UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  entered_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+  disqualified_reason TEXT CHECK (disqualified_reason IS NULL OR char_length(disqualified_reason) BETWEEN 1 AND 120),
+  PRIMARY KEY (event_id, user_id),
+  UNIQUE (event_id, design_id)
+);
+CREATE INDEX IF NOT EXISTS tifo_event_entries_design_idx ON tifo_event_entries (design_id);
+CREATE INDEX IF NOT EXISTS tifo_event_entries_user_idx ON tifo_event_entries (user_id);
+CREATE TABLE IF NOT EXISTS tifo_event_votes (
+  event_id  UUID NOT NULL REFERENCES tifo_events(id) ON DELETE CASCADE,
+  design_id UUID NOT NULL REFERENCES designs(id) ON DELETE CASCADE,
+  user_id   UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  counted   BOOLEAN NOT NULL DEFAULT TRUE,
+  voted_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (event_id, design_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS tifo_event_votes_design_idx ON tifo_event_votes (design_id);
+CREATE INDEX IF NOT EXISTS tifo_event_votes_user_idx ON tifo_event_votes (user_id);

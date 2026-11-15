@@ -285,6 +285,10 @@ let freePost = null;
   check('exporting at Full HD opens the export sheet', await openSheet(p));
   const items = await sheetItems(p);
   check('…naming "Full HD video"', JSON.stringify(items) === JSON.stringify(['Full HD video']), JSON.stringify(items));
+  // The fan's own tifo, both ways: today's free export, then the film's hold at the chosen size.
+  check('…and showing this tifo both ways, free and with Pro', await waitFor(p, () => document.querySelectorAll('.pro-sheet .pro-both canvas').length === 2, null, 240000));
+  const ways = await p.evaluate(() => [...document.querySelectorAll('.pro-sheet .pro-both-way')].map((f) => { const c = f.querySelector('canvas'); return { way: f.dataset.way, wide: c.width > c.height, text: f.querySelector('figcaption').textContent }; }));
+  check('…the free one first, the Pro one a 16:9 film frame', ways[0]?.way === 'free' && ways[0].text === 'Free' && ways[1]?.way === 'pro' && ways[1].wide && ways[1].text === 'With Pro', JSON.stringify(ways));
   await shot(p, 'pexp-sheet-1440-en');
   await p.evaluate(() => { window.__marks = 0; });
   const v = await downloadFrom(p, () => p.click('.pro-sheet [data-act="free"]'));
@@ -311,6 +315,8 @@ let freePost = null;
   await openSheet(p);
   const pItems = await sheetItems(p);
   check('the poster asks first, naming "4K poster picture"', JSON.stringify(pItems) === JSON.stringify(['4K poster picture']), JSON.stringify(pItems));
+  // Both ways here too: the free stadium picture beside the poster as it stands (drawn before the count below starts).
+  check('…and shows the free picture beside the poster', await waitFor(p, () => document.querySelectorAll('.pro-sheet .pro-both canvas').length === 2, null, 120000));
   await p.evaluate(() => { window.__marks = 0; });
   const fp = await downloadFrom(p, () => p.click('.pro-sheet [data-act="free"]'));
   const fpi = await pngInfo(fp.buf);
@@ -352,6 +358,8 @@ console.log('\n— the gift accepted: Pro running —');
   await stadiumReady(p);
   await p.selectOption('#sx-size', 'hd');
   check('the crowns go quiet', await waitFor(p, () => !!document.querySelector('#sx-size-row .pro-chip.quiet') && document.getElementById('sx-poster').classList.contains('quiet')));
+  // A member's exports go without the mark unless they ask for it back (ui/proMark.ts).
+  check('a member\'s "Without the mark" starts ticked', await waitFor(p, () => document.getElementById('sx-nomark')?.checked === true, null, 10000));
 
   const hd = await downloadFrom(p, () => p.click('#sx-export'));
   const hs = await videoSize(hd.buf);
@@ -406,6 +414,8 @@ console.log('\n— the gift accepted: Pro running —');
   // Post it without the mark, Pro running: no sheet, and no mark.
   await p.click('#post-tifo');
   await waitFor(p, () => !!document.querySelector('.pm-card .pexp-post-mark .pro-chip.quiet'), null, 60000);
+  // The stadium's tick was unticked above: the member asked for the mark back, and Post it follows.
+  check('a member who unticked it once: Post it starts unticked too', !(await p.isChecked('.pexp-post-mark input')));
   await p.check('.pexp-post-mark input');
   await p.waitForTimeout(600);
   const clean = await downloadFrom(p, () => p.click('.pm-row .pm-b:has(.ti-download)'));
@@ -415,6 +425,77 @@ console.log('\n— the gift accepted: Pro running —');
   check('Post it without the mark asks nothing', !sheetShown);
   check('…and its picture has no mark: not in the band, not in the corner', ci.w === 1080 && ci.blue === 0 && ci.title > 200 && fi && Math.abs(ci.corner - fi.corner) > 6, JSON.stringify({ ci, fi }));
   savePng(clean.buf, 'pexp-post-clean');
+  await ctx.close();
+}
+
+// =====================================================================
+console.log('\n— Pro running: two phases, the Reel, the designer pack, the proposal sheet, the camera check —');
+{
+  const { ctx, p } = await editor(fan.token, fan.design);
+  await animPanel(p);
+  await waitFor(p, () => !document.getElementById('sx-size-row')?.hidden);
+  await stadiumReady(p);
+
+  // Two phases (ui/proPhases.ts): a choice under the reveal, named on the export sheet with a Pro size.
+  check('the two-phase choice is under the reveal', await waitFor(p, () => !!document.getElementById('sx-phase') && !document.getElementById('sx-phases').hidden));
+  await p.selectOption('#sx-phase', 'bands');
+  await p.selectOption('#sx-size', 'hd');
+  const phased = await p.evaluate(() => window.__tifoProExport.items());
+  check('…and a Pro film with it names the flip', JSON.stringify(phased) === JSON.stringify(['Full HD video', 'Two-phase card flip']), JSON.stringify(phased));
+  check('…kept in this browser, not in the design', await p.evaluate(() => localStorage.getItem('tifo_pro_phases_v1')) === 'bands');
+  await p.selectOption('#sx-phase', 'off');
+  await p.selectOption('#sx-size', 'screen');
+
+  // The Reel (ui/proReel.ts): its sheet plays the Reel, and the file is the film card's.
+  await p.click('#sx-reel');
+  check('the Reel sheet draws the Reel', await waitFor(p, () => document.querySelector('.qv-reel canvas')?.dataset.ready === '1', null, 240000));
+  const reelSize = await p.evaluate(() => { const c = document.querySelector('.qv-reel canvas'); return [c.width, c.height]; });
+  check('…at half of 1080 × 1920', reelSize[0] === 540 && reelSize[1] === 960, JSON.stringify(reelSize));
+  check('…15 seconds to start with', /15 seconds/.test(await p.textContent('.qv-reel .qv-lead')));
+  await p.check('input[name="reel-seconds"][value="30"]', { force: true });
+  check('…and 30 says it cuts round the tifo', await waitFor(p, () => /30 seconds/.test(document.querySelector('.qv-reel .qv-lead').textContent) && !document.querySelector('.qv-reel [data-note="length"]').hidden));
+  await p.fill('input[name="reel-hook"]', 'Wait for it');
+  await shot(p, 'pexp-reel-1440-en');
+  const reel = await downloadFrom(p, () => p.click('.qv-reel .qv-download'));
+  check('the Reel downloads as an MP4 named for it', /-reel\.(mp4|webm)$/.test(reel.name) && reel.buf.length > 1000, reel.name);
+  check('…and its sheet has closed', await waitFor(p, () => !document.querySelector('.qv-reel')));
+
+  // The designer pack (ui/proPack.ts): five sizes, each drawn by the camera at its own shape.
+  await p.click('#sx-pack');
+  check('the pack sheet draws the first size', await waitFor(p, () => document.querySelector('.qv-pack canvas')?.dataset.ready === '1', null, 240000));
+  check('…and offers five sizes', (await p.$$('.qv-pack input[name="pack-format"]')).length === 5);
+  await p.check('input[name="pack-format"][value="square"]', { force: true });
+  check('…the square is square', await waitFor(p, () => { const c = document.querySelector('.qv-pack canvas'); return c.dataset.ready === '1' && c.width === c.height; }, null, 240000));
+  // Moved in the frame: the picture follows at once, and the framing is kept for the size.
+  await p.focus('.qv-pack canvas');
+  await p.keyboard.press('ArrowRight');
+  await p.keyboard.press('+');
+  check('…zooming moves the slider', await p.inputValue('input[name="pack-zoom"]') === '106');
+  const sq = await downloadFrom(p, () => p.click('.qv-pack [data-get="one"]'));
+  const sqi = await pngInfo(sq.buf);
+  check('"Download this size" is a square PNG, 2160 or the largest this device draws', /-square-\d+x\d+\.png$/.test(sq.name) && sqi.w === sqi.h && [2160, 1080, 720].includes(sqi.w), JSON.stringify({ name: sq.name, w: sqi.w, h: sqi.h }));
+  await shot(p, 'pexp-pack-1440-en');
+  await p.keyboard.press('Escape');
+  check('…and the sheet closes', await waitFor(p, () => !document.querySelector('.qv-pack')));
+
+  // The proposal sheet (ui/proProposal.ts): with the production files, one A4 page as a PDF.
+  check('the proposal sheet is offered with the production files', await p.evaluate(() => { const b = document.getElementById('export-proposal'); return !!b && !b.hidden && b.previousElementSibling?.id === 'export-csv'; }));
+  await p.evaluate(() => document.getElementById('export-proposal').click());
+  check('…and draws its page', await waitFor(p, () => document.querySelector('.qv-prop canvas')?.dataset.ready === '1', null, 240000));
+  await waitFor(p, () => document.querySelector('.qv-prop .qv-wait')?.textContent === '', null, 240000);
+  const pdf = await downloadFrom(p, () => p.click('.qv-prop [data-get="pdf"]'));
+  check('…saved as a one-page PDF', /-proposal\.pdf$/.test(pdf.name) && pdf.buf.subarray(0, 8).toString('latin1').startsWith('%PDF-1.4') && pdf.buf.toString('latin1').includes('/DCTDecode') && pdf.buf.toString('latin1').trimEnd().endsWith('%%EOF'), pdf.name);
+  await shot(p, 'pexp-proposal-1440-en');
+  await p.keyboard.press('Escape');
+  await waitFor(p, () => !document.querySelector('.qv-prop'));
+
+  // The camera check (ui/proRead.ts): offered on the Post it sheet; nothing is sent until it is pressed.
+  const reads = [];
+  p.on('request', (r) => { if (r.url().includes('/api/ai/read')) reads.push(r.url()); });
+  await p.click('#post-tifo');
+  check('Post it offers "Can the camera read it?"', await waitFor(p, () => document.querySelector('.pm-card .pro-read-go span')?.textContent === 'Can the camera read it?', null, 60000));
+  check('…says where the picture goes', /sent to our AI provider/.test(await p.textContent('.pm-card .pro-read-note')));
+  check('…and has sent nothing yet', reads.length === 0);
   await ctx.close();
 }
 

@@ -387,6 +387,19 @@ function usageFields(s: Spent): AiEventUsage {
   };
 }
 
+/**
+ * What the camera check asks. The picture is a render of a card display in a
+ * stadium; only what the cards spell counts, not the boards, a watermark or
+ * a scoreboard. JSON, because the provider layer parses the first object.
+ */
+const CAMERA_READ_PROMPT = [
+  'You are shown one picture of a football stadium. Fans in one stand hold coloured cards that together form a large display (a tifo).',
+  'Read only the large letters or words formed by the coloured cards in the stands, in any language (often Arabic or English), exactly as a TV viewer would read them at a glance.',
+  'Ignore advertising boards round the pitch, screens, watermarks, captions and any other small text.',
+  'If the cards form a picture or pattern with no readable word, or you cannot read it with confidence, the text is empty.',
+  'Reply with JSON only: {"text": "<the words as read, or empty>", "sure": <true if every letter was clear, else false>}',
+].join(' ');
+
 export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void {
   const adminPassword = deps.adminPassword;
   budgetStore = deps.aiBudget ?? null;
@@ -1066,6 +1079,65 @@ export function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps): void 
     // Readings that failed while others succeeded are the operator's business,
     // and so are the tokens: neither goes back to the browser.
     return reply.code(200).send({ ...out, errors: [] });
+  });
+
+  // ---- "Can the camera read it?" (Pro) ----
+  // One small picture of the tifo as a camera sees it, one question: which
+  // words do the cards spell? Asked of the fast model (Claude Haiku, then
+  // Gemini when Claude cannot answer: generateSpecViaProvider's own chain), a
+  // few hundred tokens in and a line out, about USD 0.0002 a check.
+  //
+  // Pro only: 404 to anyone Pro is not running for, like the cut-out. It
+  // counts against AI_DAILY_BUDGET like every model call, and each account
+  // gets READS_PER_DAY a day (in memory: a restart forgets, which costs cents
+  // at worst). It is not written to ai_events: at this price a log line is
+  // enough, and a sixth mode would touch every stats table for it.
+  //
+  // The picture is validated as the cut-out's is (type, size, real bytes),
+  // never stored, and the model's answer is cut to a short plain string
+  // before it goes back: it is a model reading a picture a user sent.
+  const READS_PER_DAY = 20;
+  const READ_BYTES = 600 * 1024;
+  const readUse = new Map<string, number>();
+  app.post('/api/ai/read', { ...(deps.routeConfig ?? {}), bodyLimit: Math.ceil((READ_BYTES * 4) / 3) + 4096 }, async (req, reply) => {
+    const access = await baseAccess(req);
+    if (access.kind === 'deny') {
+      return reply.code(access.status).send({ error: access.error, reason: access.reason, locked: true });
+    }
+    const pf = await proFor(access);
+    if (access.kind !== 'admin' && !pf) return reply.code(404).send({ error: 'not found' });
+    // A running pass (a paid month or the gift): the free plan has no camera checks.
+    if (access.kind !== 'admin' && pf && pf.plan === 'free') return reply.code(403).send({ error: 'the camera check is part of Pro', reason: 'pro' });
+    const image = typeof (req.body as { image?: unknown } | null)?.image === 'string' ? (req.body as { image: string }).image : '';
+    const m = /^data:image\/(png|jpeg);base64,([A-Za-z0-9+/=]+)$/.exec(image);
+    if (!m) return reply.code(400).send({ error: 'image must be a png or jpeg data URL' });
+    const bytes = Buffer.from(m[2], 'base64');
+    if (bytes.length > READ_BYTES) return reply.code(413).send({ error: 'picture too large' });
+    if (sniffImage(bytes) !== m[1]) return reply.code(400).send({ error: 'that is not the picture it says it is' });
+    if (activeProvider() === 'none') return reply.code(503).send({ error: 'no AI provider configured', reason: 'busy' });
+    await budgetReady();
+    if (premiumExhausted()) return reply.code(503).send({ error: 'resting for today, try again tomorrow', reason: 'busy', retryAfterSec: busyRetrySec() });
+    const day = new Date().toISOString().slice(0, 10);
+    const key = `${day}|${access.kind === 'user' ? access.userId : 'admin'}`;
+    const used = readUse.get(key) ?? 0;
+    if (access.kind === 'user' && used >= READS_PER_DAY) {
+      return reply.code(429).send({ error: 'camera checks used up for today', reason: 'quota', limit: READS_PER_DAY });
+    }
+    if (readUse.size > 20_000) for (const k of readUse.keys()) if (!k.startsWith(day)) readUse.delete(k);
+    readUse.set(key, used + 1);
+    notePremiumCall(1);
+    const r = await generateSpecViaProvider('Read the tifo.', { system: CAMERA_READ_PROMPT, image, raw: true, tier: 'fast' }).catch(() => null);
+    const out = r && !r.error && r.spec && typeof r.spec === 'object' ? (r.spec as { text?: unknown; sure?: unknown }) : null;
+    if (!out) {
+      // Not the fan's doing: the check is given back.
+      readUse.set(key, used);
+      req.log.warn({ status: r?.status, model: r?.model }, 'camera read: the model did not answer');
+      return reply.code(503).send({ error: 'the camera check did not answer', reason: 'busy' });
+    }
+    // Letters, digits, spaces and plain punctuation only, 80 at most.
+    const text = (typeof out.text === 'string' ? out.text : '').replace(/[^\p{L}\p{N} .,!?'\-]/gu, ' ').replace(/\s+/g, ' ').trim().slice(0, 80);
+    req.log.info({ model: r?.model, provider: r?.provider, chars: text.length }, 'camera read');
+    return reply.code(200).send({ text, sure: out.sure === true, left: access.kind === 'user' ? READS_PER_DAY - used - 1 : null });
   });
 
   // Smart cut-out (Pro, cutout.ts): the subject of a photo lifted out as a

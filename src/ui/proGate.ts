@@ -125,19 +125,32 @@ export async function withoutDesignProItems<T>(layer: ObjectLayer | null | undef
 export type GateAnswer = 'pro' | 'free' | null;
 
 /**
+ * The fan's own tifo, both ways, for the export sheet: today's free export
+ * and the same tifo with the Pro items it is being asked about. The sheet
+ * draws the free one first, then the Pro one; either may resolve null (no
+ * picture: that side is left out). `signal` aborts when the sheet closes, and
+ * the sheet waits for the picture in hand before it answers, so an export
+ * never starts while one of these is still drawing.
+ */
+export interface BothWays {
+  free(signal: AbortSignal): Promise<HTMLCanvasElement | null>;
+  pro(signal: AbortSignal): Promise<HTMLCanvasElement | null>;
+}
+
+/**
  * Ask about the Pro items in an export, once. With none, or with Pro running
  * (a paid month or the gift), or with Pro not on for this visitor at all,
  * the answer is 'pro' and nothing is shown. Otherwise the export sheet opens:
  * the gift or Pro, or "Export without Pro items".
  */
-export async function exportGate(items: string[]): Promise<GateAnswer> {
+export async function exportGate(items: string[], both?: BothWays): Promise<GateAnswer> {
   const list = [...new Set(items.filter(Boolean))];
   if (!list.length) return 'pro';
   const st = await fetchPro(true).catch(() => null);
   if (!st?.live) return 'pro';
   if (st.plan && st.plan !== 'free') return 'pro';
   const { openExportSheet } = await import('./proSheets');
-  const choice = await openExportSheet(list, st);
+  const choice = await openExportSheet(list, st, both);
   return choice === 'free' ? 'free' : null;
 }
 

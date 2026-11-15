@@ -33,6 +33,7 @@ import {
 } from '../core/draft';
 import { decodeImportBitmap, extractPhotoPalette, rasterize } from '../core/importImage';
 import { fetchPro } from '../net/api';
+import { cleanByDefault, proIsRunning, rememberClean } from './proMark';
 import { mountProChip, proChipHtml } from './pro';
 import type { ProToolsContext } from './proTools';
 import { designProItems, exportGate, withoutDesignProItems, type GateAnswer } from './proGate';
@@ -3533,12 +3534,26 @@ export function mountToolbar(
     `<input type="checkbox" id="sx-nomark" /> <span data-i18n="pro.mark.option">${escapeHtml(i18nT('pro.mark.option'))}</span> ${proChipHtml()}`;
   sxNoshow.closest('label')?.after(sxNoMarkLabel);
   const sxNoMark = sxNoMarkLabel.querySelector('input') as HTMLInputElement;
+  // A member's exports go without the mark unless they asked for it back
+  // (ui/proMark.ts); a tick made by hand in this visit is left alone.
+  let sxMarkRunning = false;
+  let sxMarkByHand = false;
+  sxNoMark.addEventListener('change', () => {
+    sxMarkByHand = true;
+    rememberClean(sxMarkRunning, sxNoMark.checked);
+  });
   const syncNoMark = (): void => {
     void fetchPro().then((st) => {
       sxNoMarkLabel.hidden = !st.live;
+      const was = sxMarkRunning;
+      sxMarkRunning = proIsRunning(st);
       // A pass holder still sees which option is Pro, quietly.
-      sxNoMarkLabel.querySelector('.pro-chip')?.classList.toggle('quiet', !!st.plan && st.plan !== 'free');
+      sxNoMarkLabel.querySelector('.pro-chip')?.classList.toggle('quiet', sxMarkRunning);
       if (!st.live) sxNoMark.checked = false;
+      else if (sxMarkRunning && (!was || !sxMarkByHand)) sxNoMark.checked = cleanByDefault(true);
+      // Pro ended while the page was open: the tick it made goes with it.
+      else if (was && !sxMarkRunning && !sxMarkByHand) sxNoMark.checked = false;
+      if (was !== sxMarkRunning) sxMarkByHand = false;
     });
   };
   syncNoMark();
@@ -3589,7 +3604,25 @@ export function mountToolbar(
       await new Promise((r) => setTimeout(r, 50));
       p = getPreview?.() ?? null;
     }
-    if (p) await new Promise((r) => setTimeout(r, 80)); // let it size + paint once
+    if (p) {
+      // A video of a tifo nobody can see is no video. Seen on 14 Nov 2026: a
+      // tifo on one stand of a roofed ground (the Jewel) was under the roof
+      // for the whole of the whole-bowl view the stadium opens on, so the
+      // free video showed a roof. While the view is still that untouched
+      // default (nobody picked a camera, nobody turned it) and the tifo has
+      // one place to be seen from, the preview and the export look at the
+      // tifo, as Match Day does. A camera somebody chose is left alone
+      // (main.ts marks the menu when a hand picks from it).
+      const sel = document.getElementById('camera-preset') as HTMLSelectElement | null;
+      if (!sel?.dataset.sxPicked && p.onFullView() && p.hasTifoShot() && p.focusTifo() && sel) {
+        const opt = [...sel.options].find((o) => o.value === 'tifo');
+        if (opt) {
+          opt.disabled = false;
+          sel.value = 'tifo';
+        }
+      }
+      await new Promise((r) => setTimeout(r, 80)); // let it size + paint once
+    }
     return p;
   };
 
@@ -3665,7 +3698,7 @@ export function mountToolbar(
    */
   const askAndExport = async (preview: Preview3D, say: (t: string) => void): Promise<GateAnswer> => {
     const want = sxChosen();
-    const how = await exportGate(want.items);
+    const how = await exportGate(want.items, proCtx.stadium?.bothWays?.(want.clean));
     if (how === 'pro') await runExport(preview, say, want.clean, want.size, true);
     else if (how === 'free') {
       await withoutDesignProItems(objects, async () => {
@@ -3679,6 +3712,23 @@ export function mountToolbar(
     }
     return how;
   };
+
+  // What a Pro sheet's "Export without Pro items" runs (the Reel's, ui/proReel.ts).
+  proCtx.freeVideo = async () => {
+    const preview = await ensureStadiumPreview();
+    if (!preview) {
+      sxSay('Could not start the 3D stadium preview.');
+      return;
+    }
+    await withoutDesignProItems(objects, async () => {
+      await Promise.race([
+        new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))),
+        new Promise<void>((r) => setTimeout(r, 250)),
+      ]);
+      await runExport(preview, sxSay, false, null);
+    });
+  };
+  proCtx.revealId = () => revealSel.value;
 
   sxPreviewBtn.addEventListener('click', async () => {
     sxPreviewBtn.disabled = true;

@@ -1,0 +1,22 @@
+/*
+ * The proposal sheet (ui/proProposal.ts): the A4 page beside its fields.
+ * Built on the poster sheet's parts (proPoster.css) and pro.css: no colours
+ * of its own.
+ */
+.pro-sheet.qv-prop { width: min(980px, 100%); }
+.qv-prop .qv-poster-body { grid-template-columns: auto minmax(280px, 1fr); }
+.qv-prop .qv-preview { min-height: 0; aspect-ratio: 2480 / 3508; height: min(68dvh, 720px); }
+.qv-prop .qv-preview canvas[data-shape="portrait"] { width: 100%; height: 100%; max-height: none; }
+.qv-prop-wide { grid-column: 1 / -1; }
+.qv-prop .qv-field textarea {
+  width: 100%; padding: var(--sp-2); border-radius: var(--r-sm); resize: vertical;
+  font: inherit; font-size: var(--fs-sm); line-height: 1.5; color: var(--pro-text); background: var(--pro-surface-2); border: 1px solid var(--pro-hairline);
+}
+.qv-prop .qv-field textarea:focus-visible { outline: 2px solid var(--blue-500); outline-offset: 1px; }
+.qv-prop .pro-actions .pro-alt { font-size: var(--fs-sm); }
+.qv-prop [data-get]:disabled { opacity: 0.7; cursor: progress; }
+
+@media (max-width: 760px) {
+  .qv-prop .qv-poster-body { grid-template-columns: 1fr; }
+  .qv-prop .qv-preview { height: 52dvh; justify-self: center; }
+}

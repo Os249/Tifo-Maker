@@ -84,6 +84,10 @@ jobs:
       - name: Club kit tests (Postgres)
         run: npx tsx server/test/kits.test.mts
 
+      # Tifo events: one event from draft to result, and the store on Postgres.
+      - name: Tifo event tests (Postgres)
+        run: npm run test:events
+
       - name: Image tests
         run: npm run test:images
 

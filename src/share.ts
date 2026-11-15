@@ -118,6 +118,7 @@ async function main(): Promise<void> {
       <a class="wordmark s-brand" href="${localPath('/')}" dir="ltr">TIFO<b>MAKER</b></a>
       <nav class="s-nav">
         <a class="s-navlink" href="${localPath('/community')}">${escapeHtml(t('nav.community'))}</a>
+        <a class="s-navlink" href="${localPath('/events')}">${escapeHtml(t('nav.events'))}</a>
         <button class="s-navlink s-lang" id="s-lang" type="button">${escapeHtml(t('common.language'))}</button>
         <a class="s-btn primary s-make-top" href="${startHere}">${escapeHtml(t('sh.make'))}</a>
       </nav>

@@ -25,6 +25,7 @@
  * this shows and asks; it decides nothing that costs money.
  */
 import './proExport.css';
+import { escapeHtml } from '../core/escape';
 import { fetchPro, type ProState } from '../net/api';
 import { drawWatermark } from '../export/stadiumExport';
 import { currentCredit, drawCreditLine, type Credit } from './creditLine';
@@ -33,6 +34,9 @@ import type { Preview3D } from '../render/preview3d';
 import { onLangChange, t, tv } from './i18n';
 import { CROWN_SVG, proChipHtml } from './pro';
 import { designProItems, withoutDesignProItems } from './proGate';
+import { cleanByDefault, rememberClean } from './proMark';
+import { cameraCheck } from './proRead';
+import { mountPhaseControl, phaseChoice } from './proPhases';
 import type { ProToolsContext } from './proTools';
 import { matchDayDeps } from './matchDayDeps';
 import { SPLIT_TELLS, tifoSplit } from '../render/simulator/tifoSplit';
@@ -48,6 +52,7 @@ export const VIDEO_SIZES: Record<'hd' | 'vertical', Size> = {
 export const POSTER: Size = { width: 3840, height: 2160 };
 
 const MARK = 'tifomaker.org';
+
 
 /** Two frames, for the seats to follow lifted layers or a status line to paint (no more: a hidden tab has none). */
 const settle = (): Promise<void> =>
@@ -139,7 +144,19 @@ export function mountProExport(ctx: ProToolsContext): void {
   poster.id = 'sx-poster';
   poster.className = 'pro-btn pexp-poster';
   poster.innerHTML = `${CROWN_SVG}<span></span>`;
-  exportRow.after(poster);
+  // ---- the Reel, under the poster ----
+  const reelBtn = document.createElement('button');
+  reelBtn.type = 'button';
+  reelBtn.id = 'sx-reel';
+  reelBtn.className = 'pro-btn pexp-poster pexp-reel';
+  reelBtn.innerHTML = `${CROWN_SVG}<span></span>`;
+  // ---- the designer pack, under the Reel ----
+  const packBtn = document.createElement('button');
+  packBtn.type = 'button';
+  packBtn.id = 'sx-pack';
+  packBtn.className = 'pro-btn pexp-poster pexp-pack';
+  packBtn.innerHTML = `${CROWN_SVG}<span></span>`;
+  exportRow.after(poster, reelBtn, packBtn);
 
   const status = (msg: string): void => {
     const el = document.getElementById('sx-status');
@@ -148,6 +165,8 @@ export function mountProExport(ctx: ProToolsContext): void {
 
   let live = false;
   let running = false;
+  /** Painted again whenever /api/pro's answer changes: the proposal sheet's button, further down. */
+  let afterShow: () => void = () => {};
   /** The longest side this device could draw when a Pro size was refused, or 0. */
   let refused = 0;
   let told = false;
@@ -183,6 +202,12 @@ export function mountProExport(ctx: ProToolsContext): void {
     (poster.querySelector('span') as HTMLElement).textContent = t('pexp.poster');
     poster.title = tv('pexp.posterT', { w: ps.width, h: ps.height });
     poster.classList.toggle('quiet', running);
+    (reelBtn.querySelector('span') as HTMLElement).textContent = t('pexp.reel');
+    reelBtn.title = t('pexp.reelT');
+    reelBtn.classList.toggle('quiet', running);
+    (packBtn.querySelector('span') as HTMLElement).textContent = t('pexp.pack');
+    packBtn.title = t('pexp.packT');
+    packBtn.classList.toggle('quiet', running);
     paintNote();
   };
   /** Only while /api/pro says Pro is on for this account: a sign-out takes them away. */
@@ -191,11 +216,15 @@ export function mountProExport(ctx: ProToolsContext): void {
     running = live && !!st?.plan && st.plan !== 'free';
     row.hidden = !live || format.value === 'gif';
     poster.hidden = !live;
+    phases?.paint();
+    reelBtn.hidden = !live;
+    packBtn.hidden = !live;
     if (!live) {
       select.value = 'screen';
       refused = 0;
     }
     paint();
+    afterShow();
   };
   select.addEventListener('change', () => {
     refused = 0;
@@ -210,6 +239,8 @@ export function mountProExport(ctx: ProToolsContext): void {
     row.hidden = !live || format.value === 'gif';
     paint();
   });
+  const revealRow = document.getElementById('reveal-preset')?.closest('.group');
+  const phases = revealRow ? mountPhaseControl(revealRow, () => ({ live, running }), () => paint()) : null;
   show(null);
   void fetchPro().then(show, () => show(null));
   const refresh = (): void => void fetchPro(true).then(show, () => show(null));
@@ -238,7 +269,7 @@ export function mountProExport(ctx: ProToolsContext): void {
     size,
     items: () => {
       const s = size();
-      return s ? [t(s.height > s.width ? 'pexp.item.vertical' : 'pexp.item.hd')] : [];
+      return s ? [t(s.height > s.width ? 'pexp.item.vertical' : 'pexp.item.hd'), ...(phaseChoice() ? [t('phase.item')] : [])] : [];
     },
     // A Pro size is Match Day's film of the tifo, not the editor's model on its plate.
     film: async (s, how) => {
@@ -248,10 +279,43 @@ export function mountProExport(ctx: ProToolsContext): void {
         reveal: { kind: 'order', id: how.reveal as RevealId },
         mark: !how.clean,
         creditLine: currentCredit().text || undefined,
+        phases: phaseChoice() ?? undefined,
         name: `${ctx.title()}-matchday`,
       });
       return outcome.message;
     },
+    // The export sheet's two pictures: the stadium view as it leaves today (the
+    // screen's size, the mark, the design's Pro items lifted), and the same
+    // tifo as chosen: the film's hold at a Pro size, or the view without the mark.
+    bothWays: (clean) => ({
+      free: async () => {
+        const p = ctx.getPreview();
+        if (!p) return null;
+        return withoutDesignProItems(ctx.objects, async () => {
+          await settle();
+          return stadiumStill(p, null, true).canvas;
+        });
+      },
+      pro: async (signal) => {
+        const s = size();
+        const credit = currentCredit();
+        if (!s) {
+          const p = ctx.getPreview();
+          return p ? stadiumStill(p, null, !clean, credit).canvas : null;
+        }
+        const [{ offscreenMatchDay }, { filmStill }] = await Promise.all([import('./proFilm'), import('../render/simulator/film')]);
+        if (signal.aborted) return null;
+        return offscreenMatchDay(async (sim) => {
+          if (signal.aborted) return null;
+          // Half the film's size (the Preview's own): drawn larger than the sheet's frame, so the crowd is not grain.
+          const c = await filmStill(sim.filmHost(), Math.round(s.width / 2), Math.round(s.height / 2));
+          const g = c.getContext('2d')!;
+          if (!clean) drawWatermark(g, c.width, c.height, MARK);
+          if (credit.text) drawCreditLine(g, c.width, c.height, credit.text, { avoid: clean ? null : 'right', accent: credit.accent });
+          return c;
+        });
+      },
+    }),
     // Free to try: the Preview plays that film, drawn at half its size.
     previewFilm: async (s, canvas, how) => {
       const { previewFilm } = await import('./proFilm');
@@ -259,6 +323,7 @@ export function mountProExport(ctx: ProToolsContext): void {
         shape: s.height > s.width ? 'vertical' : 'landscape',
         reveal: { kind: 'order', id: how.reveal as RevealId },
         mark: !how.clean,
+        phases: phaseChoice() ?? undefined,
         name: '',
       });
     },
@@ -294,6 +359,14 @@ export function mountProExport(ctx: ProToolsContext): void {
         creditLine: currentCredit().text || undefined,
         shape: posterSize().height > posterSize().width ? 'portrait' : 'landscape',
         free: freePicture,
+        freeStill: async () => {
+          const p = ctx.getPreview();
+          if (!p) return null;
+          return withoutDesignProItems(ctx.objects, async () => {
+            await settle();
+            return stadiumStill(p, null, true).canvas;
+          });
+        },
         say: status,
       });
     } catch {
@@ -303,10 +376,117 @@ export function mountProExport(ctx: ProToolsContext): void {
     }
   });
 
+  // ---- the designer pack: every size, framed by hand (ui/proPack.ts) ----
+  packBtn.addEventListener('click', async () => {
+    if (packBtn.disabled) return;
+    packBtn.disabled = true;
+    try {
+      const { openPackSheet } = await import('./proPack');
+      await openPackSheet({
+        title: () => ctx.title(),
+        clean: () => cleanByDefault(running),
+        creditLine: currentCredit().text || undefined,
+        designItems: () => {
+          const credit = currentCredit();
+          return [...(credit.text && credit.label ? [credit.label] : []), ...designProItems(ctx.objects)];
+        },
+        free: freePicture,
+        freeStill: async () => {
+          const p = ctx.getPreview();
+          if (!p) return null;
+          return withoutDesignProItems(ctx.objects, async () => {
+            await settle();
+            return stadiumStill(p, null, true).canvas;
+          });
+        },
+        say: status,
+      });
+    } catch {
+      status(t('pack.failed'));
+    } finally {
+      packBtn.disabled = false;
+    }
+  });
+
+  // ---- the Reel: its own sheet, with the Reel playing in it (ui/proReel.ts) ----
+  reelBtn.addEventListener('click', async () => {
+    if (reelBtn.disabled) return;
+    reelBtn.disabled = true;
+    try {
+      const { openReelSheet } = await import('./proReel');
+      await openReelSheet({
+        title: () => ctx.title(),
+        reveal: () => ({ kind: 'order', id: (ctx.revealId?.() ?? 'sweep') as RevealId }),
+        clean: () => cleanByDefault(running),
+        creditLine: currentCredit().text || undefined,
+        phases: () => phaseChoice(),
+        designItems: () => {
+          const credit = currentCredit();
+          return [...(phaseChoice() ? [t('phase.item')] : []), ...(credit.text && credit.label ? [credit.label] : []), ...designProItems(ctx.objects)];
+        },
+        free: async () => {
+          await ctx.freeVideo?.();
+        },
+        freeStill: async () => {
+          const p = ctx.getPreview();
+          if (!p) return null;
+          return withoutDesignProItems(ctx.objects, async () => {
+            await settle();
+            return stadiumStill(p, null, true).canvas;
+          });
+        },
+        say: status,
+      });
+    } catch {
+      status(t('qv.failed'));
+    } finally {
+      reelBtn.disabled = false;
+    }
+  });
+
+  // ---- the proposal sheet, with the production files (ui/proProposal.ts) ----
+  const csv = document.getElementById('export-csv');
+  if (csv && !document.getElementById('export-proposal')) {
+    const prop = document.createElement('button');
+    prop.type = 'button';
+    prop.id = 'export-proposal';
+    prop.className = csv.className;
+    prop.innerHTML = `<i class="ti ti-file-text" aria-hidden="true"></i><span><b></b><small></small></span>`;
+    csv.after(prop);
+    const paintProp = (): void => {
+      (prop.querySelector('b') as HTMLElement).innerHTML = `${escapeHtml(t('prop.btn'))} ${proChipHtml({ quiet: running, icon: true })}`;
+      (prop.querySelector('small') as HTMLElement).textContent = t('prop.btnHelp');
+      prop.hidden = !live;
+    };
+    paintProp();
+    afterShow = paintProp;
+    onLangChange(paintProp);
+    prop.addEventListener('click', async () => {
+      if (prop.disabled) return;
+      prop.disabled = true;
+      try {
+        const { openProposalSheet } = await import('./proProposal');
+        await openProposalSheet({
+          title: () => ctx.title(),
+          clean: () => cleanByDefault(running),
+          designItems: () => designProItems(ctx.objects),
+          say: (msg) => ctx.say(msg),
+        });
+      } catch {
+        ctx.say(t('pack.failed'));
+      } finally {
+        prop.disabled = false;
+      }
+    });
+  }
+
   // ---- the Post it sheet's mark (ui/postMoment.ts) ----
   // Remembered for the visit, like the stadium's: whoever wants it off once
   // wants it off the next time too.
-  let postClean = false;
+  // A member's picture goes without the mark unless they asked for it back
+  // (ui/proMark.ts): null until they tick or untick it in this visit.
+  let postChoice: boolean | null = null;
+  const postCleanNow = (): boolean => postChoice ?? cleanByDefault(running);
   let postBox: HTMLInputElement | null = null;
   void import('./postMoment').then(({ setPostPro }) =>
     setPostPro({
@@ -317,21 +497,24 @@ export function mountProExport(ctx: ProToolsContext): void {
         label.innerHTML = `<input type="checkbox" /> <span></span> ${proChipHtml({ quiet: running })}`;
         (label.querySelector('span') as HTMLElement).textContent = t('pro.mark.option');
         const box = label.querySelector('input') as HTMLInputElement;
-        box.checked = postClean;
+        box.checked = postCleanNow();
         box.addEventListener('change', () => {
-          postClean = box.checked;
+          postChoice = box.checked;
+          rememberClean(running, box.checked);
           changed();
         });
         postBox = box;
         return label;
       },
-      clean: () => live && postClean,
+      clean: () => live && postCleanNow(),
       untick: () => {
-        postClean = false;
+        postChoice = false;
         if (postBox) postBox.checked = false;
       },
-      items: () => (live ? [...(postClean ? [t('pro.mark.option')] : []), ...designProItems(ctx.objects)] : []),
+      items: () => (live ? [...(postCleanNow() ? [t('pro.mark.option')] : []), ...designProItems(ctx.objects)] : []),
       withoutDesignItems: (make) => withoutDesignProItems(ctx.objects, make),
+      // Read from straight across the tifo, not from wherever the view happens to be.
+      read: (shot) => (live ? cameraCheck(() => ctx.getPreview()?.tifoStill(1024, 576) ?? shot, () => ctx.objects.list().filter((o) => o.kind === 'text' && !o.hidden).map((o) => (o as { text?: string }).text ?? ''), running) : null),
     }),
   ).catch(() => {});
 

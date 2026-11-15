@@ -1,0 +1,26 @@
+/*
+ * The Reel sheet (ui/proReel.ts): the tall preview beside its fields on a
+ * desktop, above them on a phone. Built on the poster sheet's parts
+ * (proPoster.css) and pro.css: no colours of its own.
+ */
+.pro-sheet.qv-reel { width: min(800px, 100%); }
+.qv-reel .qv-poster-body { grid-template-columns: auto minmax(280px, 1fr); }
+
+.qv-reel-stage { display: grid; gap: var(--sp-2); justify-items: center; min-width: 0; }
+.qv-reel .qv-preview { min-height: 0; aspect-ratio: 9 / 16; height: min(62dvh, 640px); }
+.qv-reel .qv-preview canvas[data-shape="portrait"] { width: 100%; height: 100%; max-height: none; }
+
+.qv-reel-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--sp-2); width: 100%; }
+.qv-reel-bar .pro-alt { min-height: 36px; padding: var(--sp-1) var(--sp-3); font-size: var(--fs-sm); }
+.qv-reel-bar .pro-alt:disabled { opacity: 0.7; cursor: default; }
+.qv-reel-guide { display: inline-flex; align-items: center; gap: var(--sp-2); min-height: 32px; font-size: var(--fs-sm); color: var(--pro-muted); cursor: pointer; }
+.qv-reel-note { margin: 0; font-size: var(--fs-2xs); line-height: 1.4; color: var(--pro-muted); }
+.qv-reel-wide { grid-column: 1 / -1; }
+
+@media (max-width: 760px) {
+  .qv-reel .qv-poster-body { grid-template-columns: 1fr; }
+  .qv-reel .qv-preview { height: 46dvh; }
+}
+@media (pointer: coarse) {
+  .qv-reel-bar .pro-alt, .qv-reel-guide { min-height: 44px; }
+}

@@ -1,0 +1,13 @@
+/*
+ * The band the home and community pages show while a tifo event is on
+ * (ui/eventBand.ts). A tint, not a button: the page keeps its one blue button.
+ */
+.ev-band {
+  display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: var(--sp-2) var(--sp-4);
+  padding: var(--sp-3) 6vw; background: var(--tint); border-bottom: 1px solid var(--line); color: var(--ink); line-height: 1.45; text-align: center;
+}
+.ev-band-label { font-size: var(--fs-xs); font-weight: 800; letter-spacing: .1em; text-transform: uppercase; color: var(--blue); }
+[dir="rtl"] .ev-band-label { letter-spacing: 0; }
+.ev-band-title { font-weight: 800; }
+.ev-band-when { color: var(--muted); }
+.ev-band a { display: inline-flex; align-items: center; min-height: 44px; padding: 0 var(--sp-2); color: var(--blue); font-weight: 700; text-underline-offset: 3px; }

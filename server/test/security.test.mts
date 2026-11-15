@@ -7896,6 +7896,7 @@ async function makeDesign(app: FastifyInstance, token: string, isPublic = false)
       ['/t/abc', 'ar', '/ar/t/abc'], ['/projects?new=1&club=hilal', 'ar', '/ar/projects?new=1&club=hilal'], ['/app?design=x', 'ar', '/ar/app?design=x'],
       ['//evil.example', 'ar', null], ['/\\evil.example', 'ar', null], ['/ar//evil.example', 'en', null], ['/ar/\\evil.example', 'en', null],
       ['https://evil.example/', 'ar', null], ['/api/me', 'ar', null], ['/assets/x.js', 'ar', null], ['/tifo-spec', 'ar', null], ['/admin', 'ar', null],
+      ['/events', 'ar', '/ar/events'], ['/events/the-derby', 'ar', '/ar/events/the-derby'], ['/ar/events/the-derby', 'en', '/events/the-derby'], ['/events/The Derby', 'ar', null], ['/events/a/b', 'ar', null],
       ['/t/a/b', 'ar', null], ['#terms', 'ar', null], ['/og-card.png', 'ar', null], ['/ar/tifo-spec', 'en', null],
     ];
     for (const [href, lang, want] of cases) assert.equal(inLang(href, lang), want, `inLang(${href}, ${lang})`);

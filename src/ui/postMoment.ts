@@ -65,6 +65,8 @@ export interface PostPro {
   items(): string[];
   /** Run `make` with the design's Pro items lifted, for the free version. */
   withoutDesignItems<T>(make: () => Promise<T>): Promise<T>;
+  /** "Can the camera read it?" for this stadium picture (ui/proRead.ts), or null while Pro is not on for this account. */
+  read?(shot: HTMLCanvasElement): HTMLElement | null;
 }
 
 let postPro: PostPro | null = null;
@@ -430,12 +432,18 @@ export async function openPostSheet(deps: PostDeps): Promise<void> {
     redraw = requestAnimationFrame(() => void picture(src!, !pro?.clean()).then((next) => { if (next && overlay.isConnected) show(next); }));
   }) ?? null;
   if (creditBox) (option ?? img).after(creditBox);
+  // A second opinion before it goes out: which words a camera reads in it (Pro).
+  const readBox = src ? pro?.read?.(src) ?? null : null;
+  if (readBox) (creditBox ?? option ?? img).after(readBox);
   /** The picture to hand over, once the export sheet (if it has a say) has answered; null: nothing. */
   const handOver = async (): Promise<Blob | null> => {
     const credit = currentCredit();
     const items = [...(pro?.items() ?? []), ...(credit.text && credit.label ? [credit.label] : [])];
     if (!pro || !items.length || answer) return blob;
-    const how = await exportGate(items);
+    // The sheet shows the card both ways: with the mark and no credit line, and as it stands.
+    const card = (free: boolean): HTMLCanvasElement | null =>
+      src ? renderPostCardCanvas(src, { title: deps.title(), lang: rtl ? 'ar' : 'en', mark: free || !pro.clean(), kit: postKit?.() ?? null, credit: free ? undefined : currentCredit() }) : null;
+    const how = await exportGate(items, { free: async () => card(true), pro: async () => card(false) });
     if (how === null || !overlay.isConnected) return null;
     answer = how;
     if (how === 'free') {

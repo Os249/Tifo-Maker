@@ -41,6 +41,8 @@ export interface PosterSheetDeps {
   designItems(): string[];
   /** "Export without Pro items": the free picture, after the sheet has closed. Resolves with the status line. */
   free(): Promise<string>;
+  /** That free picture, not saved: the export sheet shows it beside the poster. */
+  freeStill?(): Promise<HTMLCanvasElement | null>;
   /** Put a line in the export panel's status. */
   say(msg: string): void;
   creditLine?: string;
@@ -292,7 +294,10 @@ export async function openPosterSheet(deps: PosterSheetDeps): Promise<void> {
     download.disabled = true;
     status.textContent = '';
     try {
-      const how = await exportGate([t('pexp.item.poster'), ...deps.designItems()]);
+      const how = await exportGate([t('pexp.item.poster'), ...deps.designItems()], {
+        free: async () => (deps.freeStill ? deps.freeStill() : null),
+        pro: async () => (canvas.dataset.ready ? canvas : null),
+      });
       if (how === null) return;
       if (how === 'free') {
         close();

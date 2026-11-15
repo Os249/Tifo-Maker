@@ -32,6 +32,9 @@ export type FunnelEvent =
   | 'ai_bar'           // asked the AI from the prompt bar on the canvas
   | 'template_cta'     // pressed "Use as template" on the home page's showcase
   | 'pro_viewed'       // opened the Pro page
+  | 'event_view'       // opened a tifo event's page
+  | 'event_enter'      // entered a tifo in an event
+  | 'event_vote'       // voted for an entry in an event
   | 'pro_limit'        // met a Pro limit card
   | 'pro_notify'       // asked to be told when Pro opens
   | 'pro_ask_seen'     // the editor's founding-fans card asked them (priceAsk.ts)

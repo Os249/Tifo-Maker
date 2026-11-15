@@ -25,6 +25,7 @@ const INPUT = {
   account: resolve(__dirname, 'account.html'),
   projects: resolve(__dirname, 'projects.html'),
   pro: resolve(__dirname, 'pro.html'),
+  events: resolve(__dirname, 'events.html'),
 };
 
 /**

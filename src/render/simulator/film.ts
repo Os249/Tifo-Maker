@@ -27,6 +27,8 @@ import { FILM_TIMES, planFilm, type FilmPlan, type FilmPlanInput } from './filmP
 import { describeRecording, pickRecordingFormat } from './recordPlan';
 import { drawCreditLine } from '../../ui/creditLine';
 import { FILM_SOUND_RATE, encodeFilmSound, filmSoundCodec, renderFilmSound } from './filmSound';
+import { PHASES, PHASE_DESIGN, flipKeys, phaseAt, phaseOneCells, type PhaseLook } from './phases';
+import { drawReelEnd, drawReelHook, reelCuts, reelDirector, reelShot, type ReelCut, type ReelDirector } from './reel';
 
 /** What a film needs of the simulator (MatchDaySimulator.filmHost). */
 export interface FilmHost {
@@ -42,8 +44,12 @@ export interface FilmHost {
   outerReach(): number;
   /** Every camera, worked out for the picture's current shape (after `begin`, the film's). */
   shots(): SimShot[];
+  /** The close-up on the LED boards (cameras.ts boardShot), when words are written on them and showing; else null. */
+  boards?(): SimShot | null;
   /** Whether a seat holds a card of the tifo. */
   painted(seat: number): boolean;
+  /** The design as painted: each seat's palette index (0: no card) and how many colours the palette has. */
+  cells?(): { cells: ArrayLike<number>; paletteSize: number };
   /** The ground's own structure (a roof, a stand) is under `at`: a camera there looks across a building. */
   overRoof(at: [number, number, number]): boolean;
   /** Nothing the ground built stands between `from` and the card at `to`. */
@@ -56,6 +62,12 @@ export interface FilmHost {
   revealKeys(keys: Float32Array): void;
   /** The cards at `clock` seconds: a seat is up `fade` seconds after its key. */
   revealAt(clock: number, fade: number): void;
+  /**
+   * Two phases (phases.ts): what each card shows instead of the design (a
+   * palette index, PHASE_EDGE or PHASE_DESIGN), or null for the design. With
+   * `changed`, only those seats are painted again.
+   */
+  phase?(cells: Uint8Array | null, changed?: readonly number[]): void;
   /** How much of the floodlight beams' haze shows, 0..1. */
   haze(k: number): void;
   /** Back to the live picture: its size, its camera, its loop. */
@@ -226,6 +238,10 @@ export interface FilmOptions {
   encode?: boolean;
   /** Match Day's crowd and drum in the file (filmSound.ts), where the browser can encode it. Default on. */
   sound?: boolean;
+  /** Two phases (phases.ts): the cards go up in the design's own colours as this look, then turn to the design. */
+  phases?: PhaseLook;
+  /** Cut as a Reel (reel.ts): 15 or 30 seconds, the fan's line over the build-up, a last frame. */
+  reel?: ReelCut;
   /** Only these frame numbers (the shot scripts' stills). The camera and the cards are exactly the film's; a flag's wave is not caught up in between. */
   only?: readonly number[];
 }
@@ -286,6 +302,113 @@ function drawMark(g: CanvasRenderingContext2D, w: number, h: number): void {
 }
 
 /**
+ * The LED boards' cut: when a fan has written on the boards, the film goes
+ * from the establishing shot to the grass beside them, tracking `track`
+ * metres along the words, and only then to the stage camera, in time for the
+ * count before the first card (FILM_TIMES.revealAt). With plain boards the
+ * film is exactly what it was.
+ */
+export const BOARDS_CUT = { from: FILM_TIMES.cut, to: 4.9, track: 5 } as const;
+
+/**
+ * The boards' camera at `t`: sliding along the boards, level, the way a
+ * touchline camera does. Aimed lower and on a tighter lens than the live
+ * close-up (which looks up at the tifo behind): before the cards go up the
+ * stand is dark, and the words are what this cut is for.
+ */
+function boardsAt(shot: SimShot, t: number): SimShot {
+  const u = (t - BOARDS_CUT.from) / (BOARDS_CUT.to - BOARDS_CUT.from) - 0.5;
+  const dx = shot.target[0] - shot.position[0];
+  const dz = shot.target[2] - shot.position[2];
+  const l = Math.hypot(dx, dz) || 1;
+  // Across the camera's line: along the boards it faces.
+  const ax = (-dz / l) * BOARDS_CUT.track * u;
+  const az = (dx / l) * BOARDS_CUT.track * u;
+  return { name: shot.name, position: [shot.position[0] + ax, shot.position[1], shot.position[2] + az], target: [shot.target[0] + ax, Math.min(shot.target[1], 3.4), shot.target[2] + az], fov: shot.fov * 0.8 };
+}
+
+/**
+ * The clock the two phases run on. The film's own, except in a Reel's last
+ * stretch: there the film's clock is eased (it creeps from the end of the
+ * pull-back to just short of the fade), and a turn must not be slowed with
+ * it, so past the pull-back the phases follow the Reel's seconds.
+ */
+function r2(_dir: ReelDirector, reelSeconds: number, clock: number): number {
+  return reelSeconds <= PHASES.flipAt ? clock : Math.max(clock, Math.min(reelSeconds, FILM_TIMES.seconds));
+}
+
+/** The film's length: its own 13 seconds, or the Reel's. */
+export function filmSeconds(opts: Pick<FilmOptions, 'reel'>): number {
+  return opts.reel ? opts.reel.seconds : FILM_TIMES.seconds;
+}
+
+/**
+ * Draw the frame at `t` seconds into `g`: the cards, the haze and the camera
+ * where the plan (or the Reel's director) has them, the calm end, then what
+ * is written over the picture.
+ */
+function drawFilmFrame(host: FilmHost, g: CanvasRenderingContext2D, opts: FilmOptions, plan: FilmPlan, fade: number, dir: ReelDirector | null, boards: SimShot | null, phase: { at(clock: number): void } | null, t: number): void {
+  const { width: w, height: h } = opts;
+  const m = dir ? dir.at(t) : null;
+  const clock = m ? m.t : t;
+  host.revealAt(clock, fade);
+  // A Reel's cuts round the tifo come after the turn: the design, all of it.
+  phase?.at(m?.shot ? FILM_TIMES.seconds : dir ? r2(dir, t, clock) : clock);
+  host.haze(plan.hazeAt(clock));
+  const onBoards = boards && !m?.shot && clock >= BOARDS_CUT.from && clock < BOARDS_CUT.to;
+  host.frame(onBoards ? boardsAt(boards, clock) : m ? reelShot(plan, m) : plan.shotAt(t));
+  g.drawImage(host.canvas, 0, 0, w, h);
+  // A Reel ends on its last frame, not on black.
+  const dark = m ? 0 : plan.fadeAt(t);
+  if (dark > 0) {
+    g.fillStyle = `rgba(0,0,0,${dark.toFixed(4)})`;
+    g.fillRect(0, 0, w, h);
+  }
+  if (m && opts.reel) {
+    if (opts.reel.hook) drawReelHook(g, w, h, opts.reel.hook, m.hook, opts.reel.font);
+    if (opts.reel.end) drawReelEnd(g, w, h, opts.reel.end, m.end, opts.reel.font);
+  }
+  if (opts.creditLine) drawCreditLine(g, w, h, opts.creditLine, { avoid: opts.mark ? 'right' : null });
+  if (opts.mark) drawMark(g, w, h);
+}
+
+/**
+ * The two phases, for one film: `at(clock)` puts every card on the side it
+ * shows at that moment (only the cards that changed since the last frame
+ * are painted). Null when the film has one phase, the simulator cannot show
+ * two, or nothing is painted.
+ */
+function phaser(host: FilmHost, opts: FilmOptions, keys: Float32Array): { at(clock: number): void } | null {
+  if (!opts.phases || !host.phase || !host.cells) return null;
+  const n = host.map.count;
+  const design = host.cells();
+  const first = phaseOneCells(host.map, design.cells, design.paletteSize, opts.phases);
+  const turn = flipKeys(keys, (i) => host.painted(i));
+  const now = new Uint8Array(n).fill(PHASE_DESIGN);
+  let begun = false;
+  return {
+    at(clock) {
+      const changed: number[] = [];
+      for (let i = 0; i < n; i++) {
+        if (turn[i] === Infinity) continue;
+        const want = phaseAt(clock, turn[i], first[i]);
+        if (now[i] !== want) {
+          now[i] = want;
+          changed.push(i);
+        }
+      }
+      if (!begun || changed.length) host.phase!(now, begun ? changed : undefined);
+      begun = true;
+    },
+  };
+}
+
+/** The Reel's director for this ground and tifo, once the film's shape is set (after `begin`). */
+function directorFor(host: FilmHost, opts: FilmOptions): ReelDirector | null {
+  return opts.reel ? reelDirector(opts.reel, opts.reel.seconds === 30 ? reelCuts(host.footprint(), host.shots(), host) : []) : null;
+}
+
+/**
  * Make the film. Resolves with the file (null with `encode: false`), rejects
  * with an AbortError when `signal` aborts, and always gives the simulator
  * back its live picture.
@@ -305,9 +428,10 @@ export async function makeFilm(host: FilmHost, opts: FilmOptions): Promise<FilmR
   let muxer: Muxer<ArrayBufferTarget> | null = null;
   let failed: unknown = null;
   // The sound first: it is a second or two of work, and the muxer has to know it has a track.
-  const total = Math.min(Math.round(FILM_TIMES.seconds * fps), opts.frameLimit ?? Infinity);
+  const length = filmSeconds(opts);
+  const total = Math.min(Math.round(length * fps), opts.frameLimit ?? Infinity);
   const soundCodec = codec && opts.sound !== false ? await filmSoundCodec() : null;
-  const sound = soundCodec ? await renderFilmSound(total / fps).catch(() => null) : null;
+  const sound = soundCodec ? await renderFilmSound(total / fps, length, opts.phases ? PHASES.flipAt : undefined).catch(() => null) : null;
   if (codec) {
     muxer = new Muxer({
       target: new ArrayBufferTarget(),
@@ -334,7 +458,10 @@ export async function makeFilm(host: FilmHost, opts: FilmOptions): Promise<FilmR
     begun = true;
     const { keys, fade } = filmRevealKeys(host.map, (i) => host.painted(i), opts.reveal);
     const plan = filmPlanFor(host, w / h, undefined, keys);
-    host.revealKeys(keys);
+    const dir = directorFor(host, opts);
+    const boards = host.boards?.() ?? null;
+    const phase = phaser(host, opts, keys);
+    host.revealKeys(keys); 
     if (sound && soundCodec && muxer) {
       const mx = muxer;
       await encodeFilmSound(sound, soundCodec, (chunk, meta) => mx.addAudioChunk(chunk, meta));
@@ -347,17 +474,7 @@ export async function makeFilm(host: FilmHost, opts: FilmOptions): Promise<FilmR
       if (failed) throw failed;
       const n = list ? list[k] : k;
       const t = n / fps;
-      host.revealAt(t, fade);
-      host.haze(plan.hazeAt(t));
-      host.frame(plan.shotAt(t));
-      g.drawImage(host.canvas, 0, 0, w, h);
-      const dark = plan.fadeAt(t);
-      if (dark > 0) {
-        g.fillStyle = `rgba(0,0,0,${dark.toFixed(4)})`;
-        g.fillRect(0, 0, w, h);
-      }
-      if (opts.creditLine) drawCreditLine(g, w, h, opts.creditLine, { avoid: opts.mark ? 'right' : null });
-      if (opts.mark) drawMark(g, w, h);
+      drawFilmFrame(host, g, opts, plan, fade, dir, boards, phase, t);
       await opts.onFrame?.(n, t, comp);
       if (encoder) {
         const frame = new VideoFrame(comp, { timestamp: Math.round((n * 1e6) / fps), duration: Math.round(1e6 / fps) });
@@ -418,8 +535,11 @@ async function filmRealtime(host: FilmHost, opts: FilmOptions, fps: number): Pro
     begun = true;
     const { keys, fade } = filmRevealKeys(host.map, (i) => host.painted(i), opts.reveal);
     const plan = filmPlanFor(host, w / h, undefined, keys);
-    host.revealKeys(keys);
-    const seconds = Math.min(plan.seconds, (opts.frameLimit ?? Infinity) / fps);
+    const dir = directorFor(host, opts);
+    const boards = host.boards?.() ?? null;
+    const phase = phaser(host, opts, keys);
+    host.revealKeys(keys); 
+    const seconds = Math.min(filmSeconds(opts), (opts.frameLimit ?? Infinity) / fps);
     recorder.start();
     const t0 = performance.now();
     for (;;) {
@@ -427,17 +547,7 @@ async function filmRealtime(host: FilmHost, opts: FilmOptions, fps: number): Pro
       if (!host.alive()) throw new Error('Match Day closed');
       const t = (performance.now() - t0) / 1000;
       if (t > seconds) break;
-      host.revealAt(t, fade);
-      host.haze(plan.hazeAt(t));
-      host.frame(plan.shotAt(t));
-      g.drawImage(host.canvas, 0, 0, w, h);
-      const dark = plan.fadeAt(t);
-      if (dark > 0) {
-        g.fillStyle = `rgba(0,0,0,${dark.toFixed(4)})`;
-        g.fillRect(0, 0, w, h);
-      }
-      if (opts.creditLine) drawCreditLine(g, w, h, opts.creditLine, { avoid: opts.mark ? 'right' : null });
-      if (opts.mark) drawMark(g, w, h);
+      drawFilmFrame(host, g, opts, plan, fade, dir, boards, phase, t);
       frames++;
       opts.onProgress?.(Math.min(1, t / seconds));
       await new Promise((r) => requestAnimationFrame(() => r(undefined)));
@@ -452,6 +562,33 @@ async function filmRealtime(host: FilmHost, opts: FilmOptions, fps: number): Pro
   } finally {
     if (recorder.state !== 'inactive') recorder.stop();
     if (begun) host.end();
+  }
+}
+
+/**
+ * One picture from the simulator's camera called `name` ("Tifo Pitch Level",
+ * say) at w × h, in the film's light with every card up. Null when this
+ * ground and tifo have no such camera. The big screens are left out, as in
+ * filmStill.
+ */
+export async function shotStill(host: FilmHost, w: number, h: number, name: string): Promise<HTMLCanvasElement | null> {
+  await host.begin(w, h, 30);
+  try {
+    const shot = host.shots().find((s) => s.name === name);
+    if (!shot) return null;
+    host.screens?.(false);
+    host.revealKeys(new Float32Array(host.map.count).fill(ALWAYS));
+    host.revealAt(FILM_TIMES.seconds, 1);
+    host.haze(0.35);
+    host.frame(shot);
+    const out = document.createElement('canvas');
+    out.width = w;
+    out.height = h;
+    out.getContext('2d')!.drawImage(host.canvas, 0, 0, w, h);
+    return out;
+  } finally {
+    host.screens?.(true);
+    host.end();
   }
 }
 

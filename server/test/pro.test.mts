@@ -689,6 +689,82 @@ const restoreBase = setEnv({ PRO_MODE: undefined, PRO_PREVIEW_USERS: undefined, 
   }
 }
 
+// ------------------------------------------- 6c. the camera check (Pro) ---
+{
+  // POST /api/ai/read: one picture, the words the cards spell. A running pass
+  // only; the picture must be what it says; the answer goes back as a short
+  // plain string; a model that does not answer costs the fan nothing.
+  const realFetch = globalThis.fetch;
+  const restore = setEnv({ PRO_MODE: 'on', GEMINI_API_KEY: 'AIzaSyTESTKEY0000000000', AI_PROVIDER: 'gemini', ANTHROPIC_API_KEY: undefined });
+  let reply: Record<string, unknown> | null = { text: 'FORZA', sure: true };
+  let asked = 0;
+  let sawImage = false;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input instanceof Request ? input.url : input);
+    if (url.includes('generativelanguage.googleapis.com')) {
+      asked++;
+      sawImage = String(init?.body ?? '').includes('inlineData');
+      if (!reply) return new Response('{"error":{"message":"overloaded"}}', { status: 503 });
+      return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: JSON.stringify(reply) }] } }] }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    return realFetch(input as RequestInfo, init);
+  }) as typeof fetch;
+  try {
+    const auth = new MemoryAuthRepository();
+    const designs = new MemoryDesignRepository((id) => auth.usernameOf(id));
+    const proRepo = new MemoryProRepository();
+    const app = await buildApp(designs, auth, templates, {
+      social: new MemorySocialRepository(designs, auth), leads: new MemoryLeadsRepository(), aiUsage: new MemoryAiUsageRepository(),
+      aiEvents: new MemoryAiEventsRepository((id) => auth.usernameOf(id)), pro: proRepo,
+    });
+    const free = await reg(app, 'fan_read_free');
+    await auth.markEmailVerified(free.id);
+    const member = await reg(app, 'fan_read_pro');
+    await auth.markEmailVerified(member.id);
+    await proRepo.grantPass({ userId: member.id, plan: 'monthly', startsAt: new Date(Date.now() - 1000), endsAt: new Date(Date.now() + 30 * 86_400_000), source: 'admin', createdBy: null });
+    const read = (token: string, image: string) => app.inject({ method: 'POST', url: '/api/ai/read', headers: bearer(token), payload: { image } });
+
+    assert.equal((await app.inject({ method: 'POST', url: '/api/ai/read', payload: { image: pngUrl() } })).statusCode, 401, 'signed out: no');
+    const refused = await read(free.token, pngUrl());
+    assert.equal(refused.statusCode, 403, refused.body);
+    assert.equal((refused.json() as { reason?: string }).reason, 'pro', 'the free plan is told it is part of Pro');
+    assert.equal(asked, 0, 'and no model was asked');
+
+    assert.equal((await read(member.token, 'data:image/png;base64,' + Buffer.from('<html>').toString('base64'))).statusCode, 400, 'bytes that are not a picture are refused');
+    assert.equal((await read(member.token, 'data:image/jpeg;base64,' + PNG.toString('base64'))).statusCode, 400, 'a PNG called a JPEG is refused');
+    assert.equal((await read(member.token, 'data:image/svg+xml;base64,AAAA')).statusCode, 400, 'only PNG and JPEG');
+    assert.equal(asked, 0);
+
+    const ok = await read(member.token, pngUrl());
+    assert.equal(ok.statusCode, 200, ok.body);
+    assert.deepEqual(ok.json(), { text: 'FORZA', sure: true, left: 19 });
+    assert.equal(sawImage, true, 'the picture went to the model');
+
+    reply = { text: '<b>الزعيم</b>\n\n' + 'x'.repeat(200), sure: 'yes' };
+    const odd = (await read(member.token, pngUrl())).json() as { text: string; sure: boolean; left: number };
+    assert.equal(odd.text.startsWith('b الزعيم b'), true, 'markup is taken out of what the model said: ' + odd.text);
+    assert.equal(odd.text.length <= 80, true, 'and it is cut to 80');
+    assert.equal(odd.sure, false, 'only a real true counts as sure');
+    assert.equal(odd.left, 18);
+
+    reply = null;
+    const down = await read(member.token, pngUrl());
+    assert.equal(down.statusCode, 503, 'a model that does not answer is "busy", never a gateway error');
+    reply = { text: '', sure: false };
+    const blank = (await read(member.token, pngUrl())).json() as { text: string; left: number };
+    assert.equal(blank.text, '', 'no word read is an answer too');
+    assert.equal(blank.left, 17, 'and the failed check was not counted');
+
+    for (let i = 0; i < 17; i++) assert.equal((await read(member.token, pngUrl())).statusCode, 200);
+    const over = await read(member.token, pngUrl());
+    assert.equal(over.statusCode, 429, 'twenty a day');
+    assert.equal((over.json() as { reason?: string }).reason, 'quota');
+  } finally {
+    globalThis.fetch = realFetch;
+    restore();
+  }
+}
+
 // -------------------------------------------------------- 7. the cut-out ---
 {
   // The download rules, directly.

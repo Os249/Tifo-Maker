@@ -39,6 +39,10 @@ export interface ProToolsContext {
   title(): string;
   /** Switch to the Stadium view and wait for the 3D preview. */
   ensurePreview(): Promise<Preview3D | null>;
+  /** Today's free stadium video (the screen's size, the mark, the design's Pro items lifted). Set by toolbar.ts. */
+  freeVideo?(): Promise<void>;
+  /** The reveal picked in the Animation panel. Set by toolbar.ts. */
+  revealId?(): string;
   /** Redraw the palette strip after the palette changed. */
   paletteChanged(): void;
   /** The picture armed in the import bar, and a way to put another in its place (portrait styles). */
@@ -58,6 +62,8 @@ export interface ProToolsContext {
      * the reveal picked in the Animation panel. Resolves with the status line.
      */
     film?(size: { width: number; height: number }, how: { clean: boolean; reveal: string }): Promise<string>;
+    /** This tifo as today's free export and as the chosen Pro one, for the export sheet (proGate.ts BothWays). */
+    bothWays?(clean: boolean): import('./proGate').BothWays;
     /** Play that film into the Preview's canvas, as it is drawn; it stops when the canvas leaves the page. */
     previewFilm?(size: { width: number; height: number }, canvas: HTMLCanvasElement, how: { clean: boolean; reveal: string }): Promise<void>;
   };

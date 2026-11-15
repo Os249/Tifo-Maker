@@ -20,6 +20,11 @@
 .pexp-note[hidden] { display: none; }
 
 /* The poster: a Pro action that is not the panel's one step, so gold, never blue. */
+.pexp-phases { margin-top: var(--sp-2); }
+.pexp-phases[hidden] { display: none; }
+.pexp-phases .pexp-note { margin-top: var(--sp-1); }
+/* The look's name is a sentence: the picker takes the row's width. */
+.pexp-phases select { flex: 1 1 auto; min-width: 0; }
 .pro-btn.pexp-poster { display: flex; width: 100%; margin-top: var(--sp-2); font-size: var(--fs-sm); }
 .pro-btn.pexp-poster[hidden] { display: none; }
 .pro-btn.pexp-poster:disabled { opacity: 0.7; cursor: progress; }

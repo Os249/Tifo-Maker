@@ -1,0 +1,116 @@
+/*
+ * /events and /events/<address>: a tifo event's page. Built on the public
+ * pages' roles (ui/colorScheme.css, via community.css) and its cards
+ * (.gallery-grid, .tifo-card), so it follows light and dark like every public
+ * page. One blue button: the next step of the stage the event is in. A vote
+ * is a tint, not a second blue button.
+ */
+.evp { max-width: 1120px; margin: 0 auto; padding: 0 6vw 72px; min-height: 60vh; }
+.evp:focus { outline: none; }
+.evp [hidden] { display: none; }
+.evp-loading { padding: 72px 0; color: var(--muted); }
+
+.evp-hero, .evp-index { padding: 56px 0 var(--sp-6); max-width: 760px; }
+.evp-eyebrow {
+  display: inline-flex; align-items: center; flex-wrap: wrap; gap: var(--sp-3); margin: 0 0 var(--sp-3);
+  font-size: var(--fs-xs); font-weight: 800; letter-spacing: .12em; text-transform: uppercase; color: var(--muted);
+}
+[dir="rtl"] .evp-eyebrow { letter-spacing: 0; }
+.evp-stage {
+  padding: var(--sp-1) var(--sp-3); border-radius: var(--r-pill); letter-spacing: 0; text-transform: none;
+  font-size: var(--fs-sm); font-weight: 700; color: var(--blue); background: var(--tint);
+}
+.evp-stage:empty { display: none; }
+.evp h1 { margin: 0; font-size: var(--fs-4xl); font-weight: 800; letter-spacing: -0.03em; line-height: 1.08; text-wrap: balance; }
+[dir="rtl"] .evp h1 { letter-spacing: 0; line-height: 1.3; }
+.evp h2 { margin: 0 0 var(--sp-4); font-size: var(--fs-2xl); font-weight: 800; letter-spacing: -0.02em; }
+[dir="rtl"] .evp h2 { letter-spacing: 0; }
+.evp-lead { margin: var(--sp-4) 0 0; max-width: 60ch; font-size: var(--fs-lg); line-height: 1.55; color: var(--muted); }
+.evp-lead:empty { display: none; }
+.evp-when { margin: var(--sp-5) 0 0; font-size: var(--fs-md); font-weight: 700; }
+.evp-prize { margin: var(--sp-2) 0 0; color: var(--muted); line-height: 1.55; }
+.evp-note { margin: var(--sp-3) 0 var(--sp-4); max-width: 64ch; color: var(--muted); line-height: 1.55; }
+.evp-msg { margin: var(--sp-3) 0 0; min-height: 1.5em; color: var(--muted); line-height: 1.5; }
+
+.evp-acts { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3); margin: var(--sp-5) 0 0; }
+.evp-acts:empty { display: none; }
+.evp-acts .evp-in { flex-basis: 100%; margin: 0; color: var(--muted); }
+.evp-btn {
+  display: inline-flex; align-items: center; justify-content: center; min-height: 48px; padding: var(--sp-3) var(--sp-6);
+  border: none; border-radius: var(--r-pill); font: inherit; font-size: var(--fs-md); font-weight: 700; cursor: pointer; text-decoration: none;
+  color: var(--on-blue); background: var(--blue-solid); box-shadow: var(--shadow-md);
+  transition: background-color var(--duration-quick) var(--ease-smooth-out);
+}
+.evp-btn:hover { background: var(--blue-solid-hover); }
+.evp-btn.quiet { color: var(--ink); background: var(--raise); border: 1px solid var(--line-strong); box-shadow: none; }
+.evp-btn.quiet:hover { background: var(--raise-2); }
+.evp-btn:disabled { opacity: .6; cursor: default; }
+.evp-btn:focus-visible, .evp-vote:focus-visible, .evp-pick-item:focus-visible, .evp-list a:focus-visible { outline: 2px solid var(--blue); outline-offset: 3px; }
+
+/* ---- the dates ---- */
+.evp-steps ol { list-style: none; margin: var(--sp-4) 0 0; padding: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--sp-3); }
+.evp-steps li { padding: var(--sp-4); border-radius: var(--r-lg); background: var(--card); border: 1px solid var(--line); min-width: 0; }
+.evp-steps li b { display: block; font-size: var(--fs-sm); }
+.evp-steps li span { display: block; margin-top: var(--sp-1); color: var(--muted); font-size: var(--fs-sm); line-height: 1.45; }
+.evp-steps li.now { border-color: var(--blue); background: var(--tint); }
+.evp-steps li.done b, .evp-steps li.done span { color: var(--muted); }
+
+/* ---- entries ---- */
+.evp-entries, .evp-podium, .evp-out, .evp-rules { margin: var(--sp-8) 0 0; }
+.evp-count { color: var(--muted); font-weight: 600; font-size: var(--fs-lg); }
+.evp .tifo-card { cursor: default; }
+.evp .tifo-card:hover { transform: none; box-shadow: var(--shadow-sm); }
+.evp .tifo-card.mine { border-color: var(--blue); }
+.evp-card-foot { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); margin-top: auto; padding-top: var(--sp-2); border-top: 1px solid var(--line); min-height: 52px; }
+.evp-tag { padding: var(--sp-1) var(--sp-3); border-radius: var(--r-pill); font-size: var(--fs-xs); font-weight: 700; color: var(--blue); background: var(--tint); }
+.evp-votes { color: var(--muted); font-size: var(--fs-sm); font-weight: 600; }
+.evp-vote {
+  display: inline-flex; align-items: center; justify-content: center; gap: var(--sp-2); min-height: 44px; min-width: 96px; padding: var(--sp-2) var(--sp-4);
+  border-radius: var(--r-pill); border: 1px solid var(--line-strong); background: var(--raise); color: var(--ink);
+  font: inherit; font-size: var(--fs-sm); font-weight: 700; cursor: pointer; margin-inline-start: auto;
+  transition: background-color var(--duration-quick) var(--ease-smooth-out), border-color var(--duration-quick) var(--ease-smooth-out);
+}
+.evp-vote:hover { border-color: var(--blue); }
+.evp-vote[aria-pressed="true"] { color: var(--blue); background: var(--tint); border-color: var(--blue); }
+.evp-vote:disabled { opacity: .6; cursor: default; }
+
+/* ---- the podium ---- */
+.evp-podium-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-5); align-items: start; }
+.evp-podium .tifo-card.first { border-color: var(--pro-line); box-shadow: var(--shadow-md); }
+.evp-place { font-size: var(--fs-xs); font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+[dir="rtl"] .evp-place { letter-spacing: 0; }
+.evp-podium .first .evp-place { color: var(--pro-ink); }
+
+/* ---- taken out, rules, list ---- */
+.evp-out ul, .evp-rules ul { margin: 0; padding-inline-start: 1.2em; color: var(--muted); line-height: 1.7; max-width: 70ch; }
+.evp-out li b { color: var(--ink); }
+.evp-back { color: var(--blue); font-weight: 600; text-underline-offset: 3px; }
+.evp-list { list-style: none; margin: var(--sp-6) 0 0; padding: 0; display: grid; gap: var(--sp-3); }
+.evp-list a {
+  display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--sp-2) var(--sp-4); min-height: 56px; padding: var(--sp-4) var(--sp-5);
+  border-radius: var(--r-lg); background: var(--card); border: 1px solid var(--line); color: inherit; text-decoration: none;
+}
+.evp-list a:hover { border-color: var(--blue); }
+.evp-list b { font-size: var(--fs-lg); }
+.evp-list span { color: var(--muted); font-size: var(--fs-sm); }
+
+/* ---- "Pick the tifo to enter" ---- */
+.evp-pick { width: min(560px, calc(100vw - 32px)); max-height: min(80vh, 720px); padding: var(--sp-6); border-radius: var(--r-lg); border: 1px solid var(--line); background: var(--card); color: var(--ink); }
+.evp-pick::backdrop { background: var(--scrim); }
+.evp-pick h2 { font-size: var(--fs-xl); }
+.evp-pick-list { display: grid; gap: var(--sp-2); }
+.evp-pick-item {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); min-height: 52px; padding: var(--sp-3) var(--sp-4); text-align: start;
+  border-radius: var(--r-md); border: 1px solid var(--line-strong); background: var(--raise); color: var(--ink); font: inherit; font-weight: 600; cursor: pointer;
+}
+.evp-pick-item:hover { border-color: var(--blue); }
+.evp-pick-item[aria-current="true"] { border-color: var(--blue); background: var(--tint); }
+.evp-pick-item small { color: var(--blue); font-weight: 700; white-space: nowrap; }
+.evp-pick-acts { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--sp-3); margin-top: var(--sp-5); }
+
+@media (max-width: 760px) {
+  .evp-hero, .evp-index { padding-top: var(--sp-8); }
+  .evp-steps ol { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .evp-podium-grid { grid-template-columns: minmax(0, 1fr); }
+  .evp-acts .evp-btn { flex: 1 1 100%; }
+}

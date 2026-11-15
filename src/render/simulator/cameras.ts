@@ -336,3 +336,46 @@ export function tifoShots(
   };
   return [wide, low];
 }
+
+/** The LED ring's place round the pitch (pitchside.ts): half the pitch plus the boards' margin. */
+const BOARD_X = 52.5 + 2.4;
+const BOARD_Z = 34 + 2.4;
+
+/**
+ * A camera on the grass, close to the LED boards in front of the tifo.
+ *
+ * Measured on 14 Nov 2026: from "Your Tifo" and every other camera the boards
+ * are a strip five pixels tall, so a fan who typed their words on them (a Pro
+ * perk) could not read them in any picture Match Day made. Television shows
+ * boards from the touchline, close and low, with the stand rising behind;
+ * this is that camera. It stands on the pitch far enough from the boards that
+ * a whole message (12.4 m of board) fits across the picture, at a
+ * photographer's height, looking up: the boards across the lower part of
+ * the frame, the tifo rising above them. With no tifo it faces
+ * the far touchline. `aspect` is the picture's: an upright phone stands
+ * further back so the message still fits.
+ */
+export function boardShot(fp: TifoFootprint | null, aspect: number): SimShot {
+  const [dx, dz] = fp ? fp.dir : [0, 1];
+  const [cx, , cz] = fp ? fp.centre : [0, 0, 0];
+  const a = aspect > 0 ? aspect : 16 / 9;
+  const fov = 50;
+  const hHalf = Math.atan(Math.tan((fov * Math.PI) / 360) * a);
+  // 18 m of board across the picture: one message whole and the next begun.
+  const back = Math.max(10, Math.min(34, 9 / Math.tan(hHalf)));
+  // A step to one side of the tifo's middle, turned a little back towards it:
+  // the dugouts and the cameras' boxes stand on the halfway line, and a board
+  // seen square-on from in front of them is a picture of a box.
+  const off = 16;
+  const turn = 2.5;
+  const up = 1.7 + back * 0.27;
+  const side = Math.abs(dz) >= Math.abs(dx);
+  if (side) {
+    const z = Math.sign(dz || 1) * BOARD_Z;
+    const x = Math.max(-BOARD_X + 14, Math.min(BOARD_X - 14, cx + (cx > 0 ? -off : off)));
+    return { name: 'LED Boards', position: [x, 1.7, z - Math.sign(z) * back], target: [x + (cx > x ? turn : -turn), up, z], fov };
+  }
+  const x = Math.sign(dx || 1) * BOARD_X;
+  const z = Math.max(-BOARD_Z + 14, Math.min(BOARD_Z - 14, cz + (cz > 0 ? -off : off)));
+  return { name: 'LED Boards', position: [x - Math.sign(x) * back, 1.7, z], target: [x, up, z + (cz > z ? turn : -turn)], fov };
+}

@@ -35,7 +35,8 @@ import {
 } from './net/api';
 import { claimAllLocal } from './net/claimProjects';
 import { mountProChip } from './ui/pro';
-import { mountGiftCard } from './ui/proCards';
+import { mountGiftCard, mountReexportCard } from './ui/proCards';
+import { CROWN_SVG } from './ui/crown';
 
 // ---------------------------------------------------------------- types ---
 
@@ -179,6 +180,9 @@ function visible(): Item[] {
   return matched.sort(cmp);
 }
 
+/** The first week of a pass: each project offers its clean export (ui/proCards.ts mountReexportCard). */
+let offerClean = false;
+
 function cardHtml(it: Item): string {
   const inTrash = it.deletedAt !== null;
   const href = inTrash ? null : openUrl(refOf(it));
@@ -222,6 +226,7 @@ function cardHtml(it: Item): string {
       </div>
       <div class="pj-meta"><span>${escapeHtml(tl(it.templateId))}</span><span aria-hidden="true">·</span><span>${escapeHtml(meta)}</span></div>
       ${inTrash ? '' : `<div class="pj-badges">${badges}</div>`}
+      ${!inTrash && offerClean ? `<a class="pj-clean" href="${escapeHtml(openUrl(refOf(it), { export: '1' }))}">${CROWN_SVG}<span>${escapeHtml(t('pj.clean'))}</span></a>` : ''}
     </div>
   </article>`;
 }
@@ -849,6 +854,10 @@ void (async () => {
   // heading. Both stay hidden unless /api/pro has something to say.
   if (authBtn.parentElement) mountProChip(authBtn.parentElement, authBtn);
   mountGiftCard(where.parentElement ?? document.body, controls);
+  mountReexportCard(where.parentElement ?? document.body, controls, (on) => {
+    offerClean = on;
+    render();
+  });
   await load();
 
   if (verified === '1') toast(t('verify.ok'));

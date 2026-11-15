@@ -191,6 +191,61 @@ One title, one sentence, one blue action, at most one quiet alternative.
   Pro, quietly** (`.pro-chip.quiet`), and
   never sees a limit card that sells: at a ceiling the card says when it
   comes back and offers the free alternative.
+- **A member exports without the mark unless they ask for it back** (14 Nov
+  2026, `ui/proMark.ts`): while Pro runs, every "Without the tifomaker.org
+  mark" tick (the stadium export, Post it, Match Day) starts ticked; unticking
+  one is kept in the browser (`tifo_pro_nomark_v1`) and holds for all three.
+  An account without Pro still starts unticked and meets the export sheet.
+- **The LED boards have their own camera** (`simulator/cameras.ts`
+  `boardShot`, last in Match Day's list): from across the pitch the boards
+  are a strip a few pixels tall, so "See them up close" under the messages
+  goes to a camera on the grass in front of them, where the words read.
+- **A stadium video nobody framed looks at the tifo**: while the Stadium view
+  is still on the untouched whole-bowl camera, Preview and Export use "Your
+  tifo" (`ui/toolbar.ts`); a camera picked or turned by hand is left alone.
+- **The export sheet shows the fan's own tifo both ways** (15 Nov 2026,
+  `ui/proGate.ts` `BothWays`, `ui/proSheets.ts`): beside the words, two small
+  pictures, "Free" and "With Pro", drawn from the design in hand (today's
+  free export, then the Pro one). Free first, one at a time; a side with no
+  picture is left out. It stays one calm sheet: no timer, no second pop-up,
+  and "Export without Pro items" is as easy as it was.
+- **The Reel** (`simulator/reel.ts`, `ui/proReel.ts`): the vertical film cut
+  for TikTok, Reels and Shorts. 15 or 30 seconds, a line of the fan's own
+  over the build-up (gone before the first card goes up), a closing frame
+  with a title and a line. At 30 seconds it cuts round the tifo; every cut is
+  checked against the ground and one that cannot see the tifo is left out.
+  Words stay inside `REEL.safe` (what the apps cover); the sheet can shade
+  those parts over the preview, never in the file. No music: copyright.
+- **The designer pack** (`ui/proPack.ts`): 4:5, 3:4, 1:1, 16:9 and 9:16, each
+  drawn again by Match Day's camera at its own shape and full size (never a
+  crop of one picture), framed by dragging or the arrow keys, and the tifo's
+  art alone on a clear background. One size, or all in a ZIP
+  (`core/zipStore.ts`).
+- **The LED boards in the film** (`simulator/film.ts` `BOARDS_CUT`): with
+  words on the boards, Match Day's film goes from the establishing shot to
+  the grass beside them, then to the stage camera. Plain boards: the film is
+  what it was. **The board file** (`simulator/ledFile.ts`): each message as
+  a flat strip at a size the fan types (venues differ; 10880 × 90 is one).
+- **Two phases** (`simulator/phases.ts`, `ui/proPhases.ts`): colours first,
+  then every card turns. The first phase is worked out from the design's own
+  colours, so nothing is added to a saved design; the choice is an export
+  setting in the browser (`tifo_pro_phases_v1`). Shown in the Pro film and
+  the Reel, not in the live views.
+- **The proposal sheet** (`ui/proProposal.ts`, with the production files):
+  one A4 page for a club or a group, as a PDF (`core/pdfImage.ts`) or a PNG.
+  The distribution PDF and the CSV beside it stay free.
+- **"Can the camera read it?"** (`ui/proRead.ts`, `POST /api/ai/read`): on
+  the Post it sheet, a view straight at the tifo is sent to the fast model,
+  which answers with the words the cards spell. Worded as an opinion ("the
+  camera read"), it says when it was unsure, and the line under the button
+  says where the picture goes. Twenty a day; a running pass only.
+- **The first week of a pass** (`ui/proCards.ts` `mountReexportCard`): My
+  projects says the earlier tifos can go out clean and puts "Export clean" on
+  each card (`?export=1` opens the project with its export panel up). "OK"
+  puts it away (`tifo_pro_reexport_v1`).
+- **/pro shows pictures** (`pro.html` "What Pro makes", files in
+  `public/pro`): every one a real export of one design, the free video
+  beside the Pro film. When a tool's output changes, make them again.
 - **The limit card**: what ran out ("That's all 10 designs for today"),
   when it comes back ("on Sunday (in 2 days)"), one blue way on (the gift
   when there is one, else "See what Pro adds") and one quiet alternative
@@ -226,6 +281,31 @@ One title, one sentence, one blue action, at most one quiet alternative.
   "Tell me when Pro opens" sits below it, quiet. Every public header carries
   "♛ Pro · soon" / "♛ المميّزة · قريباً" (`.nav-pro`: the gold crown, the
   link's ink). The answers are on /admin → Pro.
+
+### Tifo events (`src/events.ts`, `ui/eventBand.ts`)
+
+A themed contest the admin makes on /admin → Events: announced, open for
+entries, voting, then confirmed by hand. The nav's "Events" link (after
+Community, on every public page) goes to the list at /events, which says so
+when there is none. With no event, nothing else about events is on the site.
+
+- **The page** (/events/<address>, and the list at /events) uses the public
+  pages' roles and the community's cards. Its one blue button is the next
+  step of the stage: "Start a tifo" (announced), "Enter one of my tifos" or
+  "Sign in to enter" (open), "Sign in to vote" (voting, signed out). Once a
+  fan has entered there is none: "Change my entry" and "Take my entry out"
+  are quiet.
+- **A vote is a tint**, never a second blue button: `.evp-vote`, pressed
+  state `--tint` with the word "Voted". 44px tall on every screen.
+- **Votes are not shown until the result**, because the server does not send
+  them; entries come in a different order for each visitor while votes are
+  taken. The podium's winner takes Pro's gold line, the only gold on the page.
+- **The band** (`.ev-band`) on the home and community pages is a tint with
+  a link, added only while an event is on, after the page is idle.
+- **Times** are shown in the reader's own time zone with Western digits
+  (`ui/eventText.ts`); the admin types them in the browser's time zone.
+- Entering and voting are free for every account. Pro is the prize, never
+  the ticket.
 
 ## 8. Words
 

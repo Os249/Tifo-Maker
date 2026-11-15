@@ -13,6 +13,8 @@
  */
 import './proFilm.css';
 import type { FilmHost, FilmResult, FilmRevealSource } from '../render/simulator/film';
+import type { ReelCut } from '../render/simulator/reel';
+import type { PhaseLook } from '../render/simulator/phases';
 import type { MatchDaySimulator } from '../render/simulator/index';
 import { FILM_TIMES } from '../render/simulator/filmPlan';
 import { SPLIT_TELLS, tifoSplit } from '../render/simulator/tifoSplit';
@@ -37,6 +39,10 @@ export interface FilmJob {
   creditLine?: string;
   /** The file's name, without its extension. */
   name: string;
+  /** Cut as a Reel (simulator/reel.ts): vertical only. */
+  reel?: ReelCut;
+  /** Two phases (simulator/phases.ts): the first phase's look. */
+  phases?: PhaseLook;
 }
 
 /** What became of a film: saved (with what it is), cancelled, or failed. */
@@ -60,7 +66,7 @@ interface ProgressCard {
   close(): void;
 }
 
-function progressCard(shape: FilmShape): ProgressCard {
+function progressCard(shape: FilmShape, seconds: number = FILM_TIMES.seconds): ProgressCard {
   const size = FILM_SIZES[shape];
   const abort = new AbortController();
   const root = document.createElement('div');
@@ -76,7 +82,7 @@ function progressCard(shape: FilmShape): ProgressCard {
     `<div class="pro-actions"><button type="button" class="pro-alt qv-cancel"></button></div></div>`;
   const $ = <T extends HTMLElement>(s: string): T => root.querySelector(s) as T;
   $('#qv-title').textContent = t('qv.making');
-  $('.qv-sub').textContent = tv(shape === 'vertical' ? 'qv.sub.vertical' : 'qv.sub.landscape', { w: size.width, h: size.height, s: FILM_TIMES.seconds });
+  $('.qv-sub').textContent = tv(shape === 'vertical' ? 'qv.sub.vertical' : 'qv.sub.landscape', { w: size.width, h: size.height, s: seconds });
   const bar = $<HTMLProgressElement>('.qv-bar');
   bar.setAttribute('aria-label', t('qv.making'));
   const count = $('.qv-count');
@@ -178,6 +184,8 @@ async function film(host: () => Promise<FilmHost>, job: FilmJob, card: ProgressC
       reveal: job.reveal,
       mark: job.mark,
       creditLine: job.creditLine,
+      reel: job.reel,
+      phases: job.phases,
       signal: card.signal,
       frameLimit: testFrameLimit(),
       onProgress: (done, frame, total) => card.set(done, frame, total),
@@ -215,7 +223,7 @@ function testFrameLimit(): number | undefined {
 
 /** The film, from Match Day's own Record: the live simulator, as the fan has set it up. */
 export function filmFromMatchDay(sim: MatchDaySimulator, job: FilmJob): Promise<FilmOutcome> {
-  return film(async () => sim.filmHost(), job, progressCard(job.shape));
+  return film(async () => sim.filmHost(), job, progressCard(job.shape, job.reel?.seconds));
 }
 
 // -------------------------------------------------------------- from the editor ---
@@ -264,7 +272,7 @@ export async function offscreenMatchDay<T>(run: (sim: MatchDaySimulator) => Prom
 
 /** The film, from the editor's export panel. */
 export async function filmFromEditor(job: FilmJob): Promise<FilmOutcome> {
-  const card = progressCard(job.shape);
+  const card = progressCard(job.shape, job.reel?.seconds);
   try {
     return await offscreenMatchDay((sim) => film(async () => sim.filmHost(), job, card));
   } catch (e) {
@@ -299,6 +307,7 @@ export async function previewFilm(canvas: HTMLCanvasElement, job: Omit<FilmJob, 
       height: size.height / 2,
       reveal: job.reveal,
       mark: job.mark,
+      phases: job.phases,
       encode: false,
       signal: abort.signal,
       frameLimit: testFrameLimit(),

@@ -502,6 +502,18 @@ console.log('\n— after the 7-day gift —');
   check('words remembered in this browser are on the boards straight away', ui.boards?.messages?.join() === 'FOREVER TOGETHER' && ui.boards?.colour === '#e8b73a', JSON.stringify(ui.boards));
   check('the crowns are quiet now, and "free to try" is gone', ui.quiet.length >= 2 && ui.quiet.every(Boolean) && (await p.evaluate(() => document.querySelector('[data-k="led-try"]').hidden)), JSON.stringify(ui));
   await spy(p);
+  // A member's snapshot goes without the mark unless they ask for it back (ui/proMark.ts).
+  check('a member\'s "No mark" starts ticked', await waitFor(p, () => document.querySelector('[data-k="no-mark"]')?.checked === true, null, 10000));
+  // The boards up close: one tap from the messages to the camera that reads them (cameras.ts, boardShot).
+  {
+    const before = await p.evaluate(() => document.querySelector('[data-k="camera"]').value);
+    await p.evaluate(() => document.querySelector('[data-k="led-look"]').click());
+    const cam = await p.evaluate(() => { const s = document.querySelector('[data-k="camera"]'); return { name: s.selectedOptions[0]?.textContent, last: s.selectedIndex === s.options.length - 1 }; });
+    check('"See them up close" goes to the LED boards\' camera, the last in the list', cam.name === 'The LED boards, up close' && cam.last, JSON.stringify(cam));
+    const shot = await p.evaluate(() => { const sh = window.__tifoMatchDay.shots().at(-1); return { name: sh.name, y: sh.position[1], d: Math.hypot(sh.position[0] - sh.target[0], sh.position[2] - sh.target[2]) }; });
+    check('…standing on the grass, 10 to 34 m from the boards', shot.name === 'LED Boards' && shot.y < 3 && shot.d >= 9.9 && shot.d <= 34.1, JSON.stringify(shot));
+    await p.evaluate((v) => { const s = document.querySelector('[data-k="camera"]'); s.value = v; s.dispatchEvent(new Event('change')); }, before);
+  }
   await p.check('[data-k="no-mark"]');
   const [dl] = await snapDownload(p);
   const s = await p.evaluate(() => window.__spy.snaps.at(-1));

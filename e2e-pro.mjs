@@ -247,7 +247,13 @@ console.log('\n— an account on the preview list —');
   const st = (await api('/api/pro', fan.token)).json;
   check('…the server says so: the gift plan, 7 days from now', st.plan === 'gift' && Math.abs(Date.parse(st.pass.endsAt) - Date.now() - 7 * 86400e3) < 120e3, JSON.stringify({ plan: st.plan, ends: st.pass?.endsAt }));
   await p.click('.pro-sheet [data-act="done"]');
-  check('the gift card goes, and the header counts down', await waitFor(p, () => !document.querySelector('.pro-card:not([hidden])') && /Pro · 7 days left/.test(document.querySelector('.pro-head-chip:not([hidden])')?.textContent || '')));
+  check('the gift card goes, and the header counts down', await waitFor(p, () => !document.querySelector('.pro-card:not(.pro-card-re):not([hidden])') && /Pro · 7 days left/.test(document.querySelector('.pro-head-chip:not([hidden])')?.textContent || '')));
+  // The first week of a pass: the earlier tifos are offered again, clean (ui/proCards.ts mountReexportCard).
+  check('…and My projects says the tifos can go out without the mark', await waitFor(p, () => /without the mark/.test(document.querySelector('.pro-card-re:not([hidden]) h2')?.textContent || '')));
+  const cleanLinks = await p.evaluate(() => ({ cards: document.querySelectorAll('.pj-card:not(.trashed)').length, links: [...document.querySelectorAll('.pj-clean')].map((a) => a.getAttribute('href')) }));
+  check('…with "Export clean" on every project, opening its export', cleanLinks.links.length === cleanLinks.cards && cleanLinks.links.every((h) => /[?&]export=1/.test(h)), JSON.stringify(cleanLinks));
+  await p.click('.pro-card-re [data-act="ok"]');
+  check('…put away with OK, and the links with it', await waitFor(p, () => !document.querySelector('.pro-card-re:not([hidden])') && !document.querySelector('.pj-clean')));
   const again = await p.evaluate(() => fetch('/api/pro/gift/accept', { method: 'POST', headers: { authorization: `Bearer ${localStorage.getItem('tifo_token_v1')}`, 'content-type': 'application/json' }, body: '{}' }).then((r) => r.status));
   check('a second accept from the page is refused', again === 409, String(again));
   await p.goto(`${B}/account`, { waitUntil: 'networkidle' });

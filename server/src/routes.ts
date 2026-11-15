@@ -37,6 +37,8 @@ import { receiptEmail } from './payReceipt';
 import { registerPayRoutes } from './payRoutes';
 import type { KitRepository } from './kitRepo';
 import { registerKitRoutes } from './kitRoutes';
+import type { EventRepository } from './eventRepo';
+import { registerEventRoutes } from './eventRoutes';
 import { cutoutConfigured } from './cutout';
 import { liveFor, proMode } from './proPlan';
 import { stadiumPlan } from './stadiumPlan';
@@ -290,6 +292,14 @@ export interface AppOptions {
   pro?: ProRepository;
   /** Club kits and credit lines on the account (Pro). With `pro`, /api/pro/kits and /api/pro/credit exist. */
   kits?: KitRepository;
+  /**
+   * Tifo events (eventRoutes.ts): themed contests the admin makes on /admin.
+   * When present, /api/events and the admin's event routes exist; with no
+   * event made they answer "none" and nothing on the site changes.
+   */
+  tifoEvents?: EventRepository;
+  /** The events' clock, for the tests. */
+  tifoEventsNow?: () => Date;
   /**
    * Pro's orders (payments v1). With `pro`, the buying routes exist; whether
    * they do anything is PRO_PAYMENTS's decision (payments.ts), off by default.
@@ -1193,6 +1203,9 @@ export async function buildApp(
     'ai_bar',          // the AI asked from the prompt bar on the canvas
     'template_cta',    // "Use as template" pressed on the home page's showcase
     'pro_viewed',      // opened the Pro page
+    'event_view',      // opened a tifo event's page
+    'event_enter',     // entered a tifo in an event
+    'event_vote',      // voted for an entry in an event
     'pro_limit',       // met a Pro limit card (an allowance used up)
     'pro_notify',      // asked to be told when Pro opens
     'pro_ask_seen',    // the editor's founding-fans card asked them (priceAsk.ts)
@@ -1534,6 +1547,34 @@ export async function buildApp(
         writeConfig: options.rateLimit ? { config: { rateLimit: { max: 30, timeWindow: '1 minute' } } } : undefined,
       });
     }
+  }
+  // ---------- Tifo events (themed contests; the prize is Pro, never the ticket) ----------
+  if (options.tifoEvents) {
+    registerEventRoutes(app, {
+      events: options.tifoEvents,
+      designs: repo,
+      userOf,
+      requireUser,
+      accountOf,
+      adminAccess,
+      // The winner's days start when the Pro they hold ends, as a bought month does, so a prize is never lost under a pass.
+      grantPrize: proService
+        ? async (userId, days, actorId) => {
+            const at = proService.now();
+            const held = (await proService.repo.activePasses(userId, at)).filter((p) => p.plan === 'monthly');
+            const start = held.length ? new Date(Math.max(at.getTime(), ...held.map((p) => Date.parse(p.endsAt)))) : at;
+            const pass = await proService.repo.grantPass({
+              userId, plan: 'monthly', startsAt: start, endsAt: new Date(start.getTime() + days * 24 * 3600_000), source: 'admin', createdBy: actorId,
+            });
+            return pass.id;
+          }
+        : undefined,
+      proMode: () => proMode(),
+      now: options.tifoEventsNow,
+      readConfig: options.rateLimit ? { config: { rateLimit: { max: 120, timeWindow: '1 minute' } } } : undefined,
+      writeConfig: options.rateLimit ? { config: { rateLimit: { max: 30, timeWindow: '1 minute' } } } : undefined,
+      adminConfig: options.rateLimit ? { config: { rateLimit: { max: 30, timeWindow: '1 minute' } } } : undefined,
+    });
   }
   /**
    * Which of these accounts show the Supporter crown to this viewer. While
@@ -5353,6 +5394,25 @@ export async function buildApp(
       }
     } catch {
       /* pro page optional in API-only builds */
+    }
+
+    // Tifo events: the list (/events) and one event (/events/<address>), the
+    // same page for both; it reads /api/events, which says "none" until the
+    // admin makes an event. Not in the sitemap: an event is found from the
+    // band on the home and community pages while it is on.
+    try {
+      const eventsHtml = readFileSync(join(staticDir, 'events.html'), 'utf8');
+      for (const [lang, page] of pagesOf('events.html', eventsHtml)) {
+        app.get(routeIn('/events', lang), async (req, reply) =>
+          reply.header('cache-control', 'no-cache').type(PAGE_HTML).send(withTwins(page, req, '/events', lang, false)));
+        app.get(`${routeIn('/events', lang)}/:slug`, async (req, reply) => {
+          const slug = (req.params as { slug: string }).slug;
+          const path = /^[a-z0-9][a-z0-9-]{1,40}$/.test(slug) ? `/events/${slug}` : '/events';
+          return reply.header('cache-control', 'no-cache').type(PAGE_HTML).send(withTwins(page, req, path, lang, false));
+        });
+      }
+    } catch {
+      /* events page optional in API-only builds */
     }
 
     // sitemap.xml: generated per request rather than shipped as a static file, so

@@ -19,12 +19,13 @@ export type PathLang = 'en' | 'ar';
 
 /**
  * The English paths with an Arabic twin: the landing, the editor and every
- * page whose words exist in Arabic. Not /tifo-spec (the developer spec is
+ * page whose words exist in Arabic, the tifo events list and each event's
+ * page among them. Not /tifo-spec (the developer spec is
  * written in English only, and a page that says lang="ar" over English text
  * is read aloud wrongly), not /admin, nothing under /api, /og or /assets, and
  * no file.
  */
-const TWINNED = /^\/(?:(?:app|community|clubs|legal|reset|account|projects)|(?:t|d|s)\/[^/?#\\]+)?$/;
+const TWINNED = /^\/(?:(?:app|community|clubs|legal|reset|account|projects|events)|(?:t|d|s)\/[^/?#\\]+|events\/[a-z0-9][a-z0-9-]{1,40})?$/;
 
 /** The language a path is in: Arabic under /ar/, English everywhere else. */
 export function langOfPath(pathname: string): PathLang {
