@@ -1,0 +1,21 @@
+{
+  "name": "tifomaker-marketing-video",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "studio": "remotion studio src/index.ts",
+    "render": "remotion render src/index.ts"
+  },
+  "dependencies": {
+    "@remotion/bundler": "^4.0.543",
+    "@remotion/cli": "^4.0.543",
+    "@remotion/fonts": "4.0.543",
+    "@remotion/media": "4.0.543",
+    "@remotion/renderer": "^4.0.543",
+    "@types/react": "^19.3.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "remotion": "^4.0.543",
+    "typescript": "^7.0.2"
+  }
+}

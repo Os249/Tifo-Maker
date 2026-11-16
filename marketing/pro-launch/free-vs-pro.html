@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<title>Free vs Pro</title>
+<!--
+  The Free vs Pro image for the Pro announcement tweet.
+  Rendered to PNG by marketing/pro-launch/render.mjs (4:5 and 16:9).
+  Colours and type are the site's (src/ui/tokens.css, docs/DESIGN.md).
+  The Pro rows must match server/src/proPlan.ts and PERK_ROWS in src/proPage.ts.
+-->
+<style>
+  @font-face { font-family: Changa; font-weight: 600; src: url('../../node_modules/@fontsource/changa/files/changa-arabic-600-normal.woff2') format('woff2'); }
+  @font-face { font-family: Changa; font-weight: 700; src: url('../../node_modules/@fontsource/changa/files/changa-arabic-700-normal.woff2') format('woff2'); }
+  @font-face { font-family: Changa; font-weight: 800; src: url('../../node_modules/@fontsource/changa/files/changa-arabic-800-normal.woff2') format('woff2'); }
+  @font-face { font-family: Almarai; font-weight: 400; src: url('../../node_modules/@fontsource/almarai/files/almarai-arabic-400-normal.woff2') format('woff2'); }
+  @font-face { font-family: Almarai; font-weight: 700; src: url('../../node_modules/@fontsource/almarai/files/almarai-arabic-700-normal.woff2') format('woff2'); }
+  @font-face { font-family: Almarai; font-weight: 800; src: url('../../node_modules/@fontsource/almarai/files/almarai-arabic-800-normal.woff2') format('woff2'); }
+  @font-face { font-family: Inter; font-weight: 400 800; src: url('../../node_modules/@fontsource/inter/files/inter-latin-700-normal.woff2') format('woff2'); }
+  @font-face { font-family: Inter; font-weight: 800; src: url('../../node_modules/@fontsource/inter/files/inter-latin-800-normal.woff2') format('woff2'); }
+
+  :root {
+    --night-950: #070B14; --night-900: #0B1120; --night-800: #131B2D; --night-700: #1E2942; --night-500: #33415C;
+    --snow: #F1F4FB; --mist: #A6B0C8;
+    --blue-600: #1C6FE0; --blue-300: #7FB0FF; --maker: #4A92F2;
+    --gold-400: #F5B43C; --gold-tint: rgba(245, 180, 60, 0.10); --gold-line: rgba(245, 180, 60, 0.55);
+    --green-400: #3FC77F;
+    --scarf: repeating-linear-gradient(90deg, var(--blue-600) 0 22px, var(--snow) 22px 30px, var(--night-900) 30px 52px, var(--snow) 52px 60px);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 100%; height: 100%; }
+  body {
+    font-family: Inter, Almarai, sans-serif; color: var(--snow);
+    background:
+      radial-gradient(circle at 50% 50%, rgba(255,255,255,.05) 0 1.4px, transparent 1.6px) 0 0 / 18px 18px,
+      radial-gradient(120% 70% at 50% 0%, #16264a 0%, var(--night-900) 55%, var(--night-950) 100%);
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  .scarf { height: 12px; background: var(--scarf); flex: none; }
+  .wrap { flex: 1; display: flex; flex-direction: column; padding: 44px 52px 40px; gap: 30px; min-height: 0; }
+
+  .top { display: flex; align-items: center; justify-content: space-between; }
+  .wordmark { font-family: Inter; font-weight: 800; letter-spacing: .02em; font-size: 30px; direction: ltr; }
+  .wordmark b { color: var(--maker); }
+  .soon { display: inline-flex; align-items: center; gap: 10px; font-weight: 700; font-size: 24px; color: var(--gold-400);
+    border: 1.5px solid var(--gold-line); background: var(--gold-tint); border-radius: 999px; padding: 8px 20px; }
+  svg.crown { width: 1.15em; height: 1.15em; fill: var(--gold-400); flex: none; }
+
+  h1 { font-family: Changa, sans-serif; font-weight: 800; font-size: 76px; line-height: 1.12; text-wrap: balance; }
+  h1 em { font-style: normal; color: var(--green-400); }
+  .lead { font-size: 34px; color: var(--mist); font-weight: 700; margin-top: 10px; }
+  .lead b { color: var(--gold-400); }
+
+  .plans { flex: 1; display: grid; grid-template-columns: 1fr 1.18fr; gap: 24px; min-height: 0; }
+  .plan { border-radius: 22px; border: 1.5px solid var(--night-500); background: rgba(19, 27, 45, .88); padding: 30px 28px; display: flex; flex-direction: column; gap: 22px; }
+  .plan.pro { border-color: var(--gold-line); background: linear-gradient(180deg, rgba(245,180,60,.13), rgba(19,27,45,.9) 38%); }
+  .plan h2 { font-family: Changa, sans-serif; font-weight: 800; font-size: 46px; line-height: 1; display: flex; align-items: center; gap: 12px; }
+  .plan.pro h2 { color: var(--gold-400); }
+  .tag { align-self: flex-start; font-weight: 800; font-size: 25px; border-radius: 999px; padding: 7px 18px; }
+  .free .tag { background: rgba(63,199,127,.14); color: var(--green-400); border: 1.5px solid rgba(63,199,127,.5); }
+  .pro .tag { background: var(--gold-tint); color: var(--gold-400); border: 1.5px solid var(--gold-line); }
+  ul { list-style: none; display: flex; flex-direction: column; gap: 17px; flex: 1; justify-content: space-evenly; }
+  li { display: flex; gap: 13px; align-items: flex-start; font-size: 29px; font-weight: 700; line-height: 1.35; }
+  li small { display: block; font-size: 23px; font-weight: 400; color: var(--mist); }
+  li .ltr { direction: ltr; unicode-bidi: isolate; }
+  .tick { flex: none; width: 34px; height: 34px; margin-top: 3px; border-radius: 50%; display: grid; place-items: center; }
+  .free .tick { background: rgba(63,199,127,.16); }
+  .free .tick svg { width: 20px; height: 20px; stroke: var(--green-400); fill: none; stroke-width: 3.2; stroke-linecap: round; stroke-linejoin: round; }
+  .pro .tick { background: var(--gold-tint); }
+  .pro .tick svg { width: 21px; height: 21px; fill: var(--gold-400); }
+
+  .foot { display: flex; align-items: center; justify-content: space-between; gap: 20px; font-size: 27px; font-weight: 700; color: var(--mist); }
+  .foot .url { direction: ltr; color: var(--snow); font-family: Inter; font-weight: 800; }
+  .foot b { color: var(--snow); }
+
+  /* 16:9: tighter, the heading beside nothing, rows in the same two cards. */
+  body.wide .wrap { padding: 26px 44px 24px; gap: 16px; }
+  body.wide h1 { font-size: 54px; }
+  body.wide .lead { font-size: 27px; margin-top: 4px; }
+  body.wide .head { display: flex; align-items: baseline; gap: 24px; flex-wrap: wrap; }
+  body.wide .plan { padding: 20px 24px; gap: 12px; }
+  body.wide .plan h2 { font-size: 38px; }
+  body.wide .planhead { display: flex; align-items: center; justify-content: space-between; }
+  body.wide .tag { font-size: 21px; }
+  body.wide li { font-size: 27px; }
+  body.wide li small { font-size: 21px; }
+  body.wide ul { gap: 8px; }
+  body.wide .pro ul { display: grid; grid-template-columns: 1fr 1fr; column-gap: 20px; align-content: space-evenly; }
+  body.wide .plans { grid-template-columns: 1fr 1.7fr; }
+  body.wide .foot { font-size: 23px; }
+  body.wide .wordmark { font-size: 26px; } body.wide .soon { font-size: 21px; }
+</style>
+</head>
+<body>
+<div class="scarf"></div>
+<div class="wrap">
+  <div class="top">
+    <span class="soon"><svg class="crown" viewBox="0 0 24 24"><use href="#crown"/></svg>برو · قريب</span>
+    <span class="wordmark">TIFO<b>MAKER</b></span>
+  </div>
+
+  <div class="head">
+    <h1>تصميم التيفو <em>مجاني</em>، وبيظل مجاني</h1>
+    <p class="lead"><b>برو</b> إضافات للي يبي أكثر</p>
+  </div>
+
+  <div class="plans">
+    <article class="plan free">
+      <div class="planhead"><h2>المجانية</h2></div>
+      <span class="tag">مجانية دايم</span>
+      <ul>
+        <li><span class="tick"><svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span><span>المحرر كامل</span></li>
+        <li><span class="tick"><svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span><span>الملعب <span class="ltr">3D</span></span></li>
+        <li><span class="tick"><svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span><span>يوم المباراة</span></li>
+        <li><span class="tick"><svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span><span>الحفظ والنشر</span></li>
+        <li><span class="tick"><svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span><span>تصدير الصور والفيديو</span></li>
+      </ul>
+    </article>
+
+    <article class="plan pro">
+      <div class="planhead"><h2>برو <svg class="crown" viewBox="0 0 24 24"><use href="#crown"/></svg></h2></div>
+      <span class="tag">كل اللي في المجانية، وفوقها</span>
+      <ul>
+        <li><span class="tick"><svg viewBox="0 0 24 24"><use href="#crown"/></svg></span><span>فيلم يوم المباراة <span class="ltr">Full HD</span><small>وبنسخة طولية <span class="ltr">9:16</span></small></span></li>
+        <li><span class="tick"><svg viewBox="0 0 24 24"><use href="#crown"/></svg></span><span>بوستر <span class="ltr">4K</span><small>بالعربي والإنجليزي</small></span></li>
+        <li><span class="tick"><svg viewBox="0 0 24 24"><use href="#crown"/></svg></span><span>بدون علامة الموقع<small>واسمك أو اسم رابطتك على التصدير</small></span></li>
+        <li><span class="tick"><svg viewBox="0 0 24 24"><use href="#crown"/></svg></span><span>هوية ناديك محفوظة بحسابك</span></li>
+        <li><span class="tick"><svg viewBox="0 0 24 24"><use href="#crown"/></svg></span><span>خطوط مميّزة عربية وإنجليزية</span></li>
+        <li><span class="tick"><svg viewBox="0 0 24 24"><use href="#crown"/></svg></span><span>كلامك على شاشات الملعب</span></li>
+        <li><span class="tick"><svg viewBox="0 0 24 24"><use href="#crown"/></svg></span><span>تاج الداعم جنب اسمك</span></li>
+      </ul>
+    </article>
+  </div>
+
+  <div class="foot">
+    <span>السعر؟ <b>أنتم اللي تحددونه</b></span>
+    <span class="url">tifomaker.org/pro</span>
+  </div>
+</div>
+
+<svg width="0" height="0" style="position:absolute">
+  <symbol id="crown" viewBox="0 0 24 24">
+    <path d="M3.2 7.6l4.6 3.6 3.4-5.7a.95.95 0 0 1 1.6 0l3.4 5.7 4.6-3.6a.6.6 0 0 1 .96.58L19.9 17H4.1L2.24 8.18a.6.6 0 0 1 .96-.58z"/>
+    <path d="M4.4 18.6h15.2V20a1 1 0 0 1-1 1H5.4a1 1 0 0 1-1-1z"/>
+  </symbol>
+</svg>
+</body>
+</html>

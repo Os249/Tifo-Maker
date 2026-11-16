@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<title>Pro perk card</title>
+<!--
+  One picture per Pro perk (1080x1350), rendered by render.mjs: perk.html?n=1..7.
+  The pictures inside are the product's own output (see ../../video-src/README.md);
+  the supporter badge card is a drawing of the badge, since nobody holds one yet.
+  Colours and type are the site's (src/ui/tokens.css).
+-->
+<style>
+  @font-face { font-family: Changa; font-weight: 800; src: url('../../../node_modules/@fontsource/changa/files/changa-arabic-800-normal.woff2') format('woff2'); }
+  @font-face { font-family: Almarai; font-weight: 700; src: url('../../../node_modules/@fontsource/almarai/files/almarai-arabic-700-normal.woff2') format('woff2'); }
+  @font-face { font-family: Almarai; font-weight: 800; src: url('../../../node_modules/@fontsource/almarai/files/almarai-arabic-800-normal.woff2') format('woff2'); }
+  @font-face { font-family: Inter; font-weight: 700; src: url('../../../node_modules/@fontsource/inter/files/inter-latin-700-normal.woff2') format('woff2'); }
+  @font-face { font-family: Inter; font-weight: 800; src: url('../../../node_modules/@fontsource/inter/files/inter-latin-800-normal.woff2') format('woff2'); }
+  :root { --night-950: #070B14; --night-900: #0B1120; --night-800: #131B2D; --night-500: #33415C; --snow: #F1F4FB; --mist: #A6B0C8; --maker: #4A92F2; --gold: #F5B43C; --gold-tint: rgba(245,180,60,.12); --gold-line: rgba(245,180,60,.55); --green: #3FC77F;
+    --scarf: repeating-linear-gradient(90deg, #1C6FE0 0 22px, #F1F4FB 22px 30px, #0B1120 30px 52px, #F1F4FB 52px 60px); }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 1080px; height: 1350px; }
+  body { font-family: Inter, Almarai, sans-serif; color: var(--snow); background: var(--night-950); position: relative; overflow: hidden; }
+  .shot { position: absolute; inset: 0 0 auto 0; height: 800px; overflow: hidden; background: var(--night-900); }
+  .shot img { position: absolute; width: 100%; height: 100%; object-fit: cover; }
+  .shot::after { content: ''; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(7,11,20,.55) 0%, rgba(7,11,20,0) 20%, rgba(7,11,20,0) 68%, rgba(7,11,20,1) 100%); }
+  .scarf { position: absolute; top: 0; left: 0; right: 0; height: 12px; background: var(--scarf); z-index: 3; }
+  .top { position: absolute; top: 44px; left: 56px; right: 56px; display: flex; justify-content: space-between; align-items: center; z-index: 3; }
+  .wordmark { font-family: Inter; font-weight: 800; font-size: 34px; letter-spacing: .02em; direction: ltr; text-shadow: 0 2px 14px rgba(0,0,0,.7); }
+  .wordmark b { color: var(--maker); }
+  .chip { display: inline-flex; align-items: center; gap: 10px; font-weight: 800; font-size: 30px; color: var(--gold); border: 1.5px solid var(--gold-line); background: rgba(7,11,20,.8); border-radius: 999px; padding: 8px 22px; }
+  svg.crown { width: 1.1em; height: 1.1em; fill: var(--gold); flex: none; }
+  .words { position: absolute; left: 64px; right: 64px; top: 792px; }
+  .count { font-family: Inter; font-weight: 800; font-size: 30px; color: var(--mist); direction: ltr; unicode-bidi: isolate; }
+  h1 { font-family: Changa, Inter, sans-serif; font-weight: 800; font-size: 104px; line-height: 1.12; margin-top: 18px; text-wrap: balance; }
+  h1.long { font-size: 84px; }
+  .sub { font-weight: 700; font-size: 44px; line-height: 1.45; color: var(--mist); margin-top: 16px; text-wrap: balance; }
+  .ltr { direction: ltr; unicode-bidi: isolate; white-space: nowrap; }
+  .foot { position: absolute; left: 64px; right: 64px; bottom: 50px; display: flex; justify-content: space-between; align-items: center; border-top: 1.5px solid var(--night-500); padding-top: 24px; font-weight: 700; font-size: 31px; color: var(--mist); }
+  .foot .free { color: var(--green); font-weight: 800; }
+  .foot .url { font-family: Inter; font-weight: 800; color: var(--snow); direction: ltr; }
+  /* Layout variants of the picture area */
+  .tag { position: absolute; top: 20px; z-index: 2; font-weight: 800; font-size: 28px; padding: 8px 20px; border-radius: 999px; background: rgba(7,11,20,.85); border: 1.5px solid var(--night-500); display: inline-flex; gap: 8px; align-items: center; }
+  .tag.pro { color: var(--gold); border-color: var(--gold-line); }
+  .half { position: absolute; top: 110px; height: 600px; width: 506px; border-radius: 18px; overflow: hidden; border: 1.5px solid var(--night-500); z-index: 1; }
+  .half img { position: absolute; height: 210%; width: auto; max-width: none; right: 0; bottom: 0; }
+  .posters { position: absolute; inset: 110px 0 60px 0; display: flex; justify-content: center; align-items: center; gap: 22px; z-index: 1; }
+  .posters img { position: static; height: 100%; width: auto; border-radius: 12px; box-shadow: 0 12px 40px rgba(0,0,0,.6); }
+  .badge-card { position: absolute; left: 90px; right: 90px; top: 150px; z-index: 1; background: var(--night-800); border: 1.5px solid var(--night-500); border-radius: 22px; overflow: hidden; box-shadow: 0 20px 60px rgba(0,0,0,.5); }
+  .badge-card img { position: static; display: block; width: 100%; height: 420px; object-fit: cover; }
+  .byline { display: flex; align-items: center; gap: 16px; padding: 24px 28px; font-size: 34px; font-weight: 700; }
+  .byline .handle { direction: ltr; font-family: Inter; font-weight: 800; }
+  .supporter { display: inline-flex; align-items: center; gap: 8px; color: var(--gold); background: var(--gold-tint); border: 1.5px solid var(--gold-line); border-radius: 999px; padding: 6px 18px; font-weight: 800; font-size: 30px; }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute"><symbol id="crown" viewBox="0 0 24 24"><path d="M3.2 7.6l4.6 3.6 3.4-5.7a.95.95 0 0 1 1.6 0l3.4 5.7 4.6-3.6a.6.6 0 0 1 .96.58L19.9 17H4.1L2.24 8.18a.6.6 0 0 1 .96-.58z"/><path d="M4.4 18.6h15.2V20a1 1 0 0 1-1 1H5.4a1 1 0 0 1-1-1z"/></symbol></svg>
+<div class="scarf"></div>
+<div class="shot" id="shot"></div>
+<div class="top">
+  <span class="chip"><svg class="crown" viewBox="0 0 24 24"><use href="#crown"/></svg>برو · قريب</span>
+  <span class="wordmark">TIFO<b>MAKER</b></span>
+</div>
+<div class="words">
+  <span class="count" id="count"></span>
+  <h1 id="title"></h1>
+  <p class="sub" id="sub"></p>
+</div>
+<div class="foot"><span><span class="free">تصميم التيفو مجاني دايم.</span> برو إضافات.</span><span class="url">tifomaker.org/pro</span></div>
+<script>
+  const crown = '<svg class="crown" viewBox="0 0 24 24"><use href="#crown"/></svg>';
+  const PERKS = [
+    { title: 'فيلم يوم المباراة', sub: '13 ثانية من داخل الملعب بجودة <span class="ltr">Full HD</span>، وبنسخة طولية <span class="ltr">9:16</span> للستوري',
+      shot: '<img src="src/film.jpg" style="object-position: 50% 30%; transform: scale(1.12);">' },
+    { title: 'بوستر <span class="ltr">4K</span>', sub: 'عرضي أو طولي، بالعربي أو الإنجليزي، وبألوان ناديك',
+      shot: '<img src="src/poster-land-ar.jpg" style="filter: blur(18px) brightness(.45); transform: scale(1.15);"><div class="posters"><img src="src/poster-port-ar.jpg"><img src="src/poster-port-en.jpg"></div>' },
+    { title: 'بدون علامة الموقع', sub: 'واسمك أو اسم رابطتك على كل تصدير',
+      shot: '<div class="half" style="right: 28px;"><img src="src/credit-free.jpg"><span class="tag" style="right: 16px;">المجانية</span></div><div class="half" style="left: 28px;"><img src="src/credit-pro.jpg"><span class="tag pro" style="right: 16px;">' + crown + 'برو</span></div>' },
+    { title: 'هوية ناديك', sub: 'ألوانه وشعاره محفوظة بحسابك، وتلبس البنرات والبوستر والشاشات',
+      shot: '<img src="src/led-big.jpg" style="object-position: 30% 30%; transform: scale(1.22) translate(50px, 26px);">' },
+    { title: 'خطوط مميّزة', sub: 'عربية وإنجليزية، مختارة عشان تنقري من آخر الملعب',
+      shot: '<img src="src/font-block.jpg" style="object-position: 50% 35%; transform: scale(1.1) translateY(30px);">' },
+    { title: 'كلامك على شاشات الملعب', long: true, sub: 'هتاف، نتيجة، عدّ تنازلي… تتحرك حول الملعب',
+      shot: '<img src="src/led-panel.jpg" style="object-position: 20% 100%; transform: scale(1.25) translate(40px, -60px);">' },
+    { title: 'تاج الداعم', sub: 'جنب اسمك وعلى تيفواتك، لكل من يشترك في برو',
+      shot: '<div class="badge-card"><img src="src/font-stencil.jpg" style="object-position: 50% 40%;"><div class="byline"><span class="handle">@your_handle</span><span class="supporter">' + crown + 'داعم مميّز</span></div></div>' },
+  ];
+  const n = Math.max(1, Math.min(PERKS.length, Number(new URLSearchParams(location.search).get('n')) || 1));
+  const p = PERKS[n - 1];
+  document.getElementById('shot').innerHTML = p.shot;
+  document.getElementById('count').textContent = n + ' / ' + PERKS.length;
+  const h = document.getElementById('title');
+  h.innerHTML = p.title;
+  if (p.long) h.classList.add('long');
+  document.getElementById('sub').innerHTML = p.sub;
+</script>
+</body>
+</html>

@@ -1,0 +1,7 @@
+# Bundles and web-sized copies made for sharing in chat: the full files beside them are the source.
+*.zip
+brag-output*/work/*.mp4
+# The first /brag cut, superseded by brag-output-2026-11-15-224500/ (kept on disk, not in git).
+brag-output/
+# Hyperframes' own check reports and caches.
+.hyperframes/
