@@ -7522,7 +7522,7 @@ async function makeDesign(app: FastifyInstance, token: string, isPublic = false)
   // A build output in both languages: the source pages, and their Arabic twins
   // made from them by the build's own renderer, the English ones marked as the
   // build marks them.
-  const TWINNED = ['landing', 'index', 'community', 'seat', 'clubs', 'share', 'legal', 'reset', 'account', 'projects', 'pro'].map((n) => `${n}.html`);
+  const TWINNED = ['landing', 'index', 'community', 'seat', 'clubs', 'share', 'legal', 'reset', 'account', 'projects', 'pro', 'events'].map((n) => `${n}.html`);
   const dist = mkdtempSync(`${tmpdir()}/tifo-perf-s3-`);
   mkdirSync(`${dist}/ar`);
   mkdirSync(`${dist}/assets`);
